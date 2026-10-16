@@ -6,12 +6,16 @@ import { DEFAULT_NOTICE_FROM, isProductionSite, noticeConfig } from './config';
 const db = (value: string | null, error: unknown = null) => ({ rpc: () => ({ abortSignal: async () => ({ data: value, error }) }) });
 beforeEach(() => resetPlatformSecretCacheForTests());
 
-it('only the production project is unrestricted', () => {
-  const vercel = { VERCEL: '1', VERCEL_ENV: 'production' };
-  expect(isProductionSite({ ...vercel, VERCEL_PROJECT_PRODUCTION_URL: 'app.graylum.com' })).toBe(true);
-  expect(isProductionSite({ ...vercel, VERCEL_PROJECT_PRODUCTION_URL: 'auth-staging.graylum.com' })).toBe(false);
-  expect(isProductionSite({ ...vercel })).toBe(false);
-  expect(isProductionSite({ VERCEL: '1', VERCEL_ENV: 'preview', VERCEL_PROJECT_PRODUCTION_URL: 'app.graylum.com' })).toBe(false);
+it('only the approved production project is unrestricted; anything unknown fails closed', () => {
+  const prod = { VERCEL: '1', VERCEL_ENV: 'production', VERCEL_GIT_COMMIT_REF: 'main', VERCEL_PROJECT_PRODUCTION_URL: 'www.graylum.com' };
+  expect(isProductionSite(prod)).toBe(true);
+  expect(isProductionSite({ ...prod, VERCEL_PROJECT_PRODUCTION_URL: 'app.graylum.com' })).toBe(true);
+  expect(isProductionSite({ ...prod, VERCEL_PROJECT_PRODUCTION_URL: 'auth-staging.graylum.com' })).toBe(false);
+  expect(isProductionSite({ ...prod, VERCEL_PROJECT_PRODUCTION_URL: 'new-staging.graylum.com' })).toBe(false);
+  expect(isProductionSite({ ...prod, VERCEL_PROJECT_PRODUCTION_URL: undefined })).toBe(false);
+  expect(isProductionSite({ ...prod, VERCEL_GIT_COMMIT_REF: 'staging' })).toBe(false);
+  expect(isProductionSite({ ...prod, VERCEL_ENV: 'preview' })).toBe(false);
+  expect(isProductionSite({ ...prod, VERCEL: undefined })).toBe(false);
   expect(isProductionSite({})).toBe(false);
 });
 
@@ -34,6 +38,6 @@ it('outside production only the test list may receive mail, and an empty list se
 
 it('production mails any user', async () => {
   const result = await noticeConfig(db('re_fake_key_1234') as never, { VERCEL: '1', VERCEL_ENV: 'production',
-    VERCEL_PROJECT_PRODUCTION_URL: 'app.graylum.com', PAYMENT_NOTICE_FROM: 'Graylum <notice@graylum.com>' });
+    VERCEL_GIT_COMMIT_REF: 'main', VERCEL_PROJECT_PRODUCTION_URL: 'www.graylum.com', PAYMENT_NOTICE_FROM: 'Graylum <notice@graylum.com>' });
   expect(result).toMatchObject({ ok: true, config: { allowedRecipients: null, from: 'Graylum <notice@graylum.com>', replyTo: null } });
 });

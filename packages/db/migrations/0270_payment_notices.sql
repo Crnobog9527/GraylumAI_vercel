@@ -56,6 +56,10 @@ LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE r payment_notices;
 BEGIN
  -- A closing account gets no new rows: account erasure would otherwise have to chase late scans.
+ -- account_erasure_confirm locks the profile FOR UPDATE before recording the request; FOR SHARE here
+ -- serializes with it, so either the request is visible now or confirmation waits for this insert
+ -- (which erasure then prunes).
+ PERFORM 1 FROM profiles WHERE id=p_user_id FOR SHARE;
  IF EXISTS(SELECT 1 FROM account_erasure_requests WHERE profile_id=p_user_id) THEN
   RETURN jsonb_build_object('id',NULL,'state','skipped','created',false);
  END IF;

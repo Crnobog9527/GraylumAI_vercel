@@ -6,7 +6,6 @@ type Env = Record<string, string | undefined>;
 
 /** N5 (Owner 2026-10-13): sender name and address, to be reconfirmed before launch. */
 export const DEFAULT_NOTICE_FROM = 'Graylum AI <no-reply@graylum.com>';
-const STAGING_PRODUCTION_URL = 'auth-staging.graylum.com';
 const MAILBOX = /^[^\s@<>,;]{1,64}@[A-Za-z0-9.-]{1,190}\.[A-Za-z]{2,24}$/;
 
 export interface NoticeConfig {
@@ -22,12 +21,14 @@ export type NoticeConfigResult =
   | { ok: false; code: 'PAYMENT_NOTICE_NOT_CONFIGURED' | 'PAYMENT_NOTICE_TEST_RECIPIENTS_MISSING' };
 
 /**
- * Only the production site may mail any user. Staging, previews and local runs fail closed to the
- * test list in PAYMENT_NOTICE_TEST_RECIPIENTS (PAY-NOTIFY §7 privacy).
+ * Only the approved production project may mail any user: a production deployment of `main` whose
+ * production domain is one of ours. Anything else (staging, previews, local runs, a rebound or unknown
+ * project) fails closed to the test list in PAYMENT_NOTICE_TEST_RECIPIENTS (PAY-NOTIFY §7 privacy).
  */
+const PRODUCTION_URLS: ReadonlySet<string> = new Set(['www.graylum.com', 'app.graylum.com']);
 export function isProductionSite(env: Env) {
-  return env.VERCEL === '1' && env.VERCEL_ENV === 'production'
-    && !!env.VERCEL_PROJECT_PRODUCTION_URL && env.VERCEL_PROJECT_PRODUCTION_URL !== STAGING_PRODUCTION_URL;
+  return env.VERCEL === '1' && env.VERCEL_ENV === 'production' && env.VERCEL_GIT_COMMIT_REF === 'main'
+    && PRODUCTION_URLS.has(env.VERCEL_PROJECT_PRODUCTION_URL ?? '');
 }
 
 export function normalizeMailbox(value: string | null | undefined) {
