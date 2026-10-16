@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { LandingFeature } from './landing-flags';
+import { J_SAMPLES } from './landing-copy-j-samples';
 import { SAMPLE_CHAPTERS } from './sample-reports';
 
 /**
@@ -54,8 +55,26 @@ export const L_OPS = {
   ] as readonly { stage: number; label: string; line: string; needs: readonly LandingFeature[] }[],
 } as const;
 
+/**
+ * 4: every group's sample report (Owner 2026-10-17: "尽量把我们能覆盖的人群的案例都放上去"): sample J's four, then the
+ * eight generated on 2026-10-17 (the groups the Owner chose; tab names as delivered).
+ */
+export const L_REPORTS: readonly { slug: string; who: string; platform: string; truth: boolean }[] = [
+  ...J_SAMPLES.reports,
+  { slug: 'mom', who: '全职宝妈', platform: '小红书', truth: false },
+  { slug: 'cross-border', who: '跨境电商卖家', platform: 'TikTok Shop（美国）', truth: true },
+  { slug: 'designer', who: '自由职业设计师（台湾）', platform: 'Instagram + Threads', truth: false },
+  { slug: 'creator', who: '有粉丝不会变现的博主（加拿大）', platform: 'YouTube', truth: true },
+  { slug: 'trainer', who: '健身私教 · 本地获客（美国）', platform: '小红书 + Instagram', truth: false },
+  { slug: 'restaurant', who: '餐饮老板 · 本地获客', platform: '抖音同城', truth: true },
+  { slug: 'solo-founder', who: '一人公司创业者（新加坡）', platform: 'X', truth: true },
+  { slug: 'course-creator', who: '知识付费博主', platform: '小红书 + 视频号', truth: true },
+];
+
 /** 4: the sample reports as a moving row of cards. */
 export const L_SAMPLES = {
+  /** NEW: sample J's title, with the number of groups shown. */
+  title: (count: number) => `先看成果：${count} 种人拿到的完整报告`,
   bridge: '找一个和你情况像的，点开看',
   pause: '移到卡片上会停下',
   open: '看这份报告',

@@ -9,7 +9,9 @@ import { J_PRICE } from '@/lib/landing/landing-copy-j';
 import { J_PRICE_TOTAL } from '@/lib/landing/landing-copy-j-price';
 import { J_SAMPLES } from '@/lib/landing/landing-copy-j-samples';
 import { J_WEEK } from '@/lib/landing/landing-copy-j-week';
-import { L_CARE, L_COMPARE_NEXT, L_COMPARE_TITLE, L_HERO_FLOW, L_NOTE_REGIONS, L_OPS } from '@/lib/landing/landing-copy-l';
+import { L_CARE, L_COMPARE_NEXT, L_COMPARE_TITLE, L_HERO_FLOW, L_NOTE_REGIONS, L_OPS, L_REPORTS } from '@/lib/landing/landing-copy-l';
+import { loadSampleReport, SAMPLE_CHAPTERS } from '@/lib/landing/sample-reports';
+import { splitReport } from '@/lib/landing/sample-reports/report-markdown';
 import { VOICE_WALL } from '@/lib/landing/landing-copy';
 import { LANDING_FEATURES, type LandingFlags } from '@/lib/landing/landing-flags';
 import { buildLandingPageData } from '@/lib/landing/landing-page-data';
@@ -69,9 +71,10 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
       L_OPS.steps.filter(step => !step.needs.includes('publish')).length + J_SAMPLES.reports.length * 0);
   });
 
-  it('moves the sample reports as cards that open in a dialog (off unless the preview or the flag shows them)', () => {
+  it('moves every group\'s sample report as a card that opens in a dialog (off unless the preview or the flag shows them)', () => {
     const html = render();
-    for (const report of J_SAMPLES.reports) expect(html).toContain(`<b>${report.who}</b>${report.platform}`);
+    expect(L_REPORTS.length).toBe(12);
+    for (const report of L_REPORTS) expect(html).toContain(`<b>${escape(report.who)}</b>${escape(report.platform)}`);
     expect(html).toContain('<dialog');
     expect(render(ALL_ON, false)).not.toContain('id="samples-title"');
   });
@@ -114,6 +117,17 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     for (const html of [j, k]) {
       for (const mark of ['data-plain', 'data-wide', `${L_NOTE_REGIONS.p1} · `]) expect(html).not.toContain(mark);
       expect(html).toContain(J_PRICE.checked);
+    }
+  });
+
+  it('ships the new reports whole and sanitized: 14 chapters each, no links, handles or data vendor names', async () => {
+    for (const report of L_REPORTS) {
+      const data = SAMPLE_CHAPTERS[report.slug];
+      expect(data.chapters).toHaveLength(14);
+      expect(Boolean(data.summary.truth)).toBe(report.truth);
+      const markdown = await loadSampleReport(report.slug);
+      expect(splitReport(markdown).chapters).toHaveLength(14);
+      for (const text of [markdown, JSON.stringify(data)]) expect(text).not.toMatch(/https?:|www\.|@[A-Za-z0-9_]|monid/i);
     }
   });
 });
