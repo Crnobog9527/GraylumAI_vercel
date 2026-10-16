@@ -1,9 +1,14 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { CHAT_ACTION, type ChatNotice } from '@/components/chat/ChatInlineNotice';
 import { PROVIDER_REJECTED_NOTICE, gateAdmissionNotice, gateResultNotice } from '@/lib/runtime-gate-notice';
-import { inFlight } from '@/app/runtime/runtime-notices';
+import { USER_STOP_NOTICE, inFlight, stopRecovery, stoppedByUser, type StopSignals } from '@/app/runtime/runtime-notices';
 import { definiteRefusal, definiteRefusalNotice } from '@/app/runtime/gate-notices';
 import { hostNotice, isOrganizerPendingError, isPaygWaiting } from '@/lib/payg-wait';
+
+/** This tab's sessionStorage, where the page remembers the stops its user asked for (display only). */
+export function tabSession() {
+  try { return typeof window === 'undefined' ? null : window.sessionStorage; } catch { return null; }
+}
 
 /** Fixed wording for a failed topic operation; the pending operation itself is kept by the caller. */
 export function topicFailureMessage(cause: unknown) {
@@ -68,12 +73,20 @@ export function topicTurnShows(last: { state: string; unavailableReason?: string
  * turn only its fixed notice, like any other finished turn. `finished` is the execution
  * whose execute call already returned a final state (finishedExecution): until the view catches
  * up it still reads as running, never as 回复尚未完成. A BILL-PAYG pause has its own notice (payg-wait.ts).
+ * A turn the user stopped (`userStopped` is this tab's record; stoppedByUser also reads the view) says
+ * 已停止 from the click on, whether it ends cancelled or completed, and is never 回复尚未完成.
  */
-export function topicOpenTurnNotice(e: { executionId: string; state: string; unavailableReason?: string | null }, ctx: {
-  busy: boolean; finished: string | null; stopping: boolean; onRetry: () => void; onStop: () => void;
+export function topicOpenTurnNotice(e: { executionId: string; state: string; unavailableReason?: string | null } & StopSignals, ctx: {
+  busy: boolean; finished: string | null; stopping: boolean; userStopped?: boolean; onRetry: () => void; onStop: () => void;
 }): ChatNotice | null {
   if (topicRejectedTurn(e)) return { id: e.executionId, tone: 'warning', text: PROVIDER_REJECTED_NOTICE };
-  if (e.state === 'completed' || e.state === 'cancelled' || isPaygWaiting(e.state)) return null;
+  const stopped = stoppedByUser(e, ctx.userStopped);
+  const userStop: ChatNotice = { id: e.executionId, tone: 'status', text: USER_STOP_NOTICE };
+  if (e.state === 'completed' || e.state === 'cancelled') return stopped ? userStop : null;
+  if (isPaygWaiting(e.state)) return null;
+  // Still being saved: no 重试 or 停止; a server-confirmed `interrupted` save offers 重试 (stopRecovery).
+  if (stopped && e.state !== 'cost_pending')
+    return stopRecovery(e) && !ctx.busy ? { ...userStop, actions: [{ label: CHAT_ACTION.retry, onClick: ctx.onRetry }] } : userStop;
   // A finished call matters only while the view still shows the turn in flight (inFlight).
   const settling = ctx.finished === e.executionId && inFlight(e.state);
   const running = (ctx.busy || settling) && e.state !== 'cost_pending';

@@ -27,7 +27,9 @@ import { trpc } from '@/trpc/client';
 import { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics } from '@repo/api/src/shared/opcRequests';
 import { consentedTopicIds } from './adoption-consent';
 import { useTopicOpening } from './use-topic-opening';
-import { topicFailureMessage, topicTurnOutcome, topicOpenTurnNotice, topicRejectedTurn, topicTurnRefused, topicTurnShows } from './topic-notices';
+import { tabSession, topicFailureMessage, topicTurnOutcome, topicOpenTurnNotice, topicRejectedTurn, topicTurnRefused, topicTurnShows } from './topic-notices';
+import { userStopIds } from '@/app/runtime/gate-notices';
+import { stopWithRecord, type StopSignals } from '@/app/runtime/runtime-notices';
 import { finishedExecution } from '@/lib/finished-execution';
 import { isOrganizerPendingError, isPaygWaiting, type PaygViewFields } from '@/lib/payg-wait';
 import { usePaygResume } from '@/lib/use-payg-resume';
@@ -248,7 +250,7 @@ export default function TopicWorkspacePage() {
         state: string;
         input: string | null; body: string | null; primaryBody: string | null;
         contentAvailable: boolean; unavailableReason?: string | null;
-      } & PaygViewFields>
+      } & PaygViewFields & StopSignals>
     | undefined;
 
   const scrollSignature=transcriptSignature(executions?.map(item=>[item.executionId,item.state,item.body,item.primaryBody].join(':')).join('|'),outgoing);
@@ -367,13 +369,9 @@ export default function TopicWorkspacePage() {
     ready: Boolean(sessionId && view.data && !busy && !pending && workspace.data?.sourceAllowed), send: request => void perform({ kind: 'chat', request }) });
 
   async function stop(executionId: string) {
-    setError('');
-    try {
-      await cancel.mutateAsync({ executionId });
-      await view.refetch();
-    } catch {
+    setError(''); // 已停止 from the click on, and after a reload; a failed stop keeps it until a re-read proves otherwise
+    if (await stopWithRecord({ storage: tabSession(), sessionId, executionId }, () => cancel.mutateAsync({ executionId }), () => view.refetch()))
       setError('取消状态待核实，请读取原任务。');
-    }
   }
 
   async function recover(executionId: string) {
@@ -493,7 +491,8 @@ export default function TopicWorkspacePage() {
     ...(error && !topicTurnShows(executions?.at(-1), error) ? [{ id: 'error', tone: 'error' as const, text: error }] : []),
     ...payg.blockedNotices(executions, busy), ...(free.error ? [{ id: 'free', tone: 'error' as const, text: free.error }] : []),
   ];
-  const openTurnNotice = (e: { executionId: string; state: string }) => topicOpenTurnNotice(e, { busy, finished: finishedExecution(execute, view),
+  const openTurnNotice = (e: NonNullable<typeof executions>[number]) => topicOpenTurnNotice(e, { busy, finished: finishedExecution(execute, view),
+    userStopped: userStopIds(tabSession(), sessionId, [e]).length > 0,
     stopping: cancel.isPending, onRetry: () => void recover(e.executionId), onStop: () => void stop(e.executionId) });
   const adoptedTopics = [...new Map([...plans.flatMap(plan => plan.body ?? []), ...(candidate?.body ?? [])].filter(item => adoptedItemIds.has(item.id)).map(item => [item.id, item])).values()];
 

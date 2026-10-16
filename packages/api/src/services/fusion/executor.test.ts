@@ -76,6 +76,8 @@ describe('Fusion executor', () => {
   it('leaves unreadable or unconfirmed responses to recovery, with no saved body and no verdict', async () => {
     for (const [dispatch, reason] of [
       [{ dispatched: true, observation: observation(sse('x'), false) }, 'response_unreadable'],
+      [{ dispatched: true, providerRejected: true, providerRejectionPending: true,
+        observation: {...observation('{}'), httpStatus: 403} }, 'receipt_pending'],
       [{ dispatched: false, transportNotStarted: true }, 'not_started'],
       [{ dispatched: false }, 'not_dispatched'],
       [{ dispatched: true, contentDeleted: true }, 'closed'],
@@ -84,6 +86,8 @@ describe('Fusion executor', () => {
       expect(await h.executor.run(run, { runId: 'run-1', id: 'call-1', state: 'prepared', fresh: true }, () => 'usable'))
         .toEqual({ state: 'pending', reason });
       expect(h.admin.rpc).not.toHaveBeenCalled();
+      expect(h.billing.finalizeRun).not.toHaveBeenCalled();
+      expect(h.billing.requestCancel).not.toHaveBeenCalled();
     }
   });
   it('stop cancels and settles each run', async () => {

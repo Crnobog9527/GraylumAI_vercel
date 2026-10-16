@@ -3,7 +3,8 @@
 /**
  * Copy of the report paywall (design v25 scene 1, docs/launch/design/paywall/). Kept in one place
  * so the Owner's copy rules can be checked at a glance: no predicted credit cost, no model names,
- * no unlaunched features, no 7-day refund promise on the card, no fake original price or countdown.
+ * no unlaunched features, no 7-day refund promise on the card, no fake original price or countdown,
+ * no predicted tax amount (only "税另计" / "不另收税" from methodCheckout.ts).
  */
 export const REPORT_PAYWALL_COPY = {
   eyebrow: '运营策略报告 · 草稿',
@@ -20,6 +21,7 @@ export const REPORT_PAYWALL_COPY = {
   cta: '生成我的完整报告',
   ctaSub: '付款后会员立即生效，回到这一页就能生成报告',
   catalogFailed: '暂时读不到会员方案，请稍后再试。你已确认的信息都保留着。',
+  notReady: '这个方案暂不可购买，请稍后再试或换一个方案。',
   trust: ['随时取消', '积分永不过期', '已确认的信息免费保留'],
   later: '先不开通',
   laterNote: '已确认的信息可以用页面上的“导出已确认资料”免费下载。',

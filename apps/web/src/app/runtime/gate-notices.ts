@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { OUTPUT_TRUNCATED_NOTICE, PLATFORM_FAILURE_NOTICE, PROVIDER_HISTORY_NOTICE, gateAdmissionNotice, gateResultNotice,
   isRuntimeGateReason } from '@/lib/runtime-gate-notice';
-import { hostNotice, isPaygWaiting } from '@/lib/payg-wait';
+import { hostNotice } from '@/lib/payg-wait';
 import { RUNTIME_INPUT_TOO_LONG_MESSAGE } from '../../../../../packages/api/src/shared/runtimeInputMessages';
 import { RUNTIME_PAYG_PROFILE_REQUIRED_MESSAGE } from '../../../../../packages/api/src/shared/runtimeAdmissionMessages';
 import { isPositioningRequired, POSITIONING_REQUIRED_REASON } from '../../../../../packages/api/src/shared/positioningGate';
@@ -80,11 +80,20 @@ export function gateStopNotices(storage: GateStopStorage | null, sessionId: stri
 const userStopKey = (sessionId: string, executionId: string) => 'opc-runtime-user-stop:' + sessionId + ':' + executionId;
 
 /**
- * The server keeps no "the user asked" flag in the view, so this browser remembers the stops its user
- * requested; only those cancelled rounds say 已停止. Call it before the cancel request.
+ * A plain cancel leaves no "the user asked" flag in the view (only a stop that keeps the shown text
+ * records pausedReason user_stop), so this browser remembers the stops its user requested; a cancelled
+ * round says 已停止 only then. Call it before the cancel request.
  */
 export function rememberUserStop(storage: GateStopStorage | null, sessionId: string, executionId: string) {
   try { storage?.setItem(userStopKey(sessionId, executionId), '1'); } catch { /* The round then shows the neutral ended notice. */ }
+}
+
+/**
+ * A stop request that failed: the round goes back to its open notice and 重试, unless the view shows the
+ * server recorded the stop after all (stoppedByUser reads that too).
+ */
+export function forgetUserStop(storage: Pick<Storage, 'removeItem'> | null, sessionId: string, executionId: string) {
+  try { storage?.removeItem(userStopKey(sessionId, executionId)); } catch { /* Nothing stored to remove. */ }
 }
 
 /** Execution ids of rounds whose stop this browser's user requested. */
@@ -97,10 +106,11 @@ export function userStopIds(storage: GateStopStorage | null, sessionId: string, 
 
 /**
  * A cancelled round with no saved body is finished: there is nothing left to verify or show.
- * A paused round without a saved body shows only its pause notice.
+ * A paused round without a saved body shows only its pause notice. A round still in progress shows its streamed
+ * text (or nothing yet) with its own "正在回复…" notice, never a "verifying" placeholder (CHAT-NATIVE-OUTPUT).
  */
 export function showsReply(execution: { state: string; body: string | null; primaryBody: string | null }) {
-  return !((execution.state === 'cancelled' || isPaygWaiting(execution.state)) && !(execution.body ?? execution.primaryBody));
+  return execution.state === 'completed' || Boolean(execution.body ?? execution.primaryBody);
 }
 
 /**
