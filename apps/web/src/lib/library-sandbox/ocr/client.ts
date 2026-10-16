@@ -47,25 +47,27 @@ export async function recognizeImagesInBrowser(images: Blob[], options: OcrOptio
     workerSource: source, input: packOcrInput({ ...parts, images: bytes }), allowWasm: true, signal: options.signal,
     timeoutMs: OCR_LIMITS.initTimeoutMs + bytes.length * OCR_LIMITS.imageTimeoutMs,
   }), bytes.length).pages;
+  const timedOut = (error: unknown) => error instanceof SandboxError && error.code === 'SANDBOX_TIMEOUT' && !options.signal?.aborted;
+  // One image on its own deadline: running out of time is that image's result, not a failure of the whole call.
+  const single = (image: Uint8Array) => run([image]).then(([page]) => page!, (error: unknown): OcrPage => {
+    if (timedOut(error)) return { ok: false, code: 'SANDBOX_TIMEOUT' };
+    throw error;
+  });
   const results: OcrPage[] = [];
   for (let start = 0; start < images.length; start += OCR_LIMITS.maxImages) {
     const batch = images.slice(start, start + OCR_LIMITS.maxImages);
     const bytes = await Promise.all(batch.map(async (image) => new Uint8Array(await image.arrayBuffer())));
     let pages: OcrPage[];
-    try {
-      pages = await run(bytes);
-    } catch (error) {
-      // A batch that ran out of time is retried one image at a time, each with its own deadline, so one slow or
-      // stuck image cannot use up the others' time; that image alone is reported as timed out.
-      if (!(error instanceof SandboxError) || error.code !== 'SANDBOX_TIMEOUT' || options.signal?.aborted || bytes.length === 1) throw error;
-      pages = [];
-      for (const image of bytes) {
-        pages.push(await run([image]).then(([page]) => page!, (single: unknown) => {
-          if (single instanceof SandboxError && single.code === 'SANDBOX_TIMEOUT' && !options.signal?.aborted) {
-            return { ok: false as const, code: 'SANDBOX_TIMEOUT' as const };
-          }
-          throw single;
-        }));
+    if (bytes.length === 1) pages = [await single(bytes[0]!)];
+    else {
+      try {
+        pages = await run(bytes);
+      } catch (error) {
+        // A batch that ran out of time is retried one image at a time, each with its own deadline, so one slow or
+        // stuck image cannot use up the others' time; that image alone is reported as timed out.
+        if (!timedOut(error)) throw error;
+        pages = [];
+        for (const image of bytes) pages.push(await single(image));
       }
     }
     pages.forEach((page, i) => {
