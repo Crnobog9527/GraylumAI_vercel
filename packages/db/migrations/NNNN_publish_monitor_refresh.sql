@@ -356,9 +356,82 @@ BEGIN
  RETURN n;
 END $$;
 
+-- Manual import (plan §4.3, used by PR-3b): rows the user has already confirmed line by line (links with numbers typed
+-- in, a table export after column mapping, or screenshot recognition after review). They attach to the brand account's
+-- existing connection whatever its source, or to a new manual connection when the account has none, and are stored as
+-- source 'manual' so they never merge with automatically read numbers. One manual snapshot per post per day.
+-- p_rows: [{postKey,url,postedAt,titleExcerpt,metrics}]; postKey is the platform post ID, or the post link when the
+-- platform ID is not known.
+CREATE OR REPLACE FUNCTION public.publish_monitor_manual_import(a uuid,p_account_project_id uuid,p_origin text,p_rows jsonb)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE acct opc_accounts; c social_connections; item jsonb; pid uuid; is_new boolean;
+ today date:=(clock_timestamp() AT TIME ZONE 'UTC')::date; inserted integer:=0; updated integer:=0; k text; val jsonb;
+BEGIN
+ IF p_account_project_id IS NULL OR p_origin IS NULL OR p_origin NOT IN ('link','table','screenshot')
+  OR jsonb_typeof(p_rows) IS DISTINCT FROM 'array' OR jsonb_array_length(p_rows) NOT BETWEEN 1 AND 200 THEN
+  RAISE EXCEPTION 'PUBLISH_MONITOR_INPUT_INVALID' USING ERRCODE='22023'; END IF;
+ PERFORM publish_monitor_actor(a);
+ SELECT * INTO acct FROM opc_accounts WHERE project_id=p_account_project_id AND actor_id=a AND business_id IS NOT NULL;
+ IF acct.project_id IS NULL THEN RAISE EXCEPTION 'PUBLISH_MONITOR_ACCOUNT_NOT_FOUND' USING ERRCODE='P0002'; END IF;
+ SELECT * INTO c FROM social_connections WHERE account_project_id=acct.project_id AND actor_id=a AND role='own'
+  AND status IN ('connected','reauth_required','quarantined') FOR UPDATE;
+ IF c.id IS NULL THEN
+  INSERT INTO social_connections(actor_id,business_id,account_project_id,role,source,platform,status,consent_read)
+  VALUES(a,acct.business_id,acct.project_id,'own','manual',acct.platform,'connected',true) RETURNING * INTO c;
+ END IF;
+ FOR item IN SELECT * FROM jsonb_array_elements(p_rows) LOOP
+  IF jsonb_typeof(item->'metrics') IS DISTINCT FROM 'object' OR (SELECT count(*) FROM jsonb_object_keys(item->'metrics'))>50
+   OR char_length(item->>'postKey') NOT BETWEEN 1 AND 256 THEN
+   RAISE EXCEPTION 'PUBLISH_MONITOR_INPUT_INVALID' USING ERRCODE='22023'; END IF;
+  -- Only non-negative finite numbers under plain keys; a blank field is simply absent, never zero.
+  FOR k,val IN SELECT * FROM jsonb_each(item->'metrics') LOOP
+   IF k !~ '^[A-Za-z0-9_.]{1,96}$' OR jsonb_typeof(val)<>'number' OR (val::text)::numeric<0 THEN
+    RAISE EXCEPTION 'PUBLISH_MONITOR_INPUT_INVALID' USING ERRCODE='22023'; END IF;
+  END LOOP;
+  INSERT INTO social_posts AS p(actor_id,connection_id,source,platform_post_id,post_url,posted_at,posted_at_source,
+   title_excerpt,snapshot_day)
+  VALUES(a,c.id,'manual',item->>'postKey',item->>'url',(item->>'postedAt')::timestamptz,
+   CASE WHEN item->>'postedAt' IS NULL THEN NULL ELSE 'user' END,left(item->>'titleExcerpt',120),today)
+  ON CONFLICT(connection_id,source,platform_post_id) DO UPDATE SET post_url=COALESCE(EXCLUDED.post_url,p.post_url),
+   posted_at=COALESCE(EXCLUDED.posted_at,p.posted_at),
+   posted_at_source=CASE WHEN EXCLUDED.posted_at IS NULL THEN p.posted_at_source ELSE 'user' END,
+   title_excerpt=COALESCE(EXCLUDED.title_excerpt,p.title_excerpt),snapshot_day=today,updated_at=clock_timestamp()
+  RETURNING p.id,(xmax=0) INTO pid,is_new;
+  IF is_new THEN inserted:=inserted+1; ELSE updated:=updated+1; END IF;
+  INSERT INTO social_metric_snapshots AS s(actor_id,connection_id,post_id,captured_on,source,metrics,evidence_ref)
+  VALUES(a,c.id,pid,today,'manual',item->'metrics','manual:'||p_origin)
+  ON CONFLICT(post_id,captured_on) WHERE post_id IS NOT NULL DO UPDATE SET captured_at=clock_timestamp(),
+   metrics=EXCLUDED.metrics,evidence_ref=EXCLUDED.evidence_ref;
+ END LOOP;
+ RETURN jsonb_build_object('connectionId',c.id,'inserted',inserted,'updated',updated);
+END $$;
+
+-- Connecting Post for Me later to a brand account that so far only has manually imported data upgrades that manual
+-- connection in place (its manual posts stay, still marked manual), instead of refusing the account as already
+-- connected. Extends 0246's confirm in place: unique anchors fail closed, the marker keeps reapplication stable.
+DO $confirm$
+DECLARE source text; refuse text:=E'  IF target.id IS NOT NULL THEN RAISE EXCEPTION ''PUBLISH_MONITOR_TARGET_ALREADY_CONNECTED'' USING ERRCODE=''PT409''; END IF;\n';
+ inserted text:=E'   true,p_auto_track,publish,publish)\n  RETURNING id INTO conn;\n';
+BEGIN
+ source:=pg_get_functiondef('public.publish_monitor_connect_confirm(uuid,uuid,text,boolean,jsonb)'::regprocedure);
+ IF position('-- PUBLISH-MONITOR manual upgrade' IN source)=0 THEN
+  IF length(source)-length(replace(source,refuse,''))<>length(refuse)
+   OR length(source)-length(replace(source,inserted,''))<>length(inserted) THEN
+   RAISE EXCEPTION 'PUBLISH_MONITOR_CONFIRM_SOURCE_MISMATCH'; END IF;
+  source:=replace(source,refuse,E'  -- PUBLISH-MONITOR manual upgrade\n'
+   ||E'  IF target.id IS NOT NULL AND target.source=''manual'' THEN\n'
+   ||E'   UPDATE social_connections SET source=''postforme'',provider_account_id=p_provider_account_id,status=''connected'',\n'
+   ||E'    consent_read=true,consent_auto_track=p_auto_track,consent_publish=publish,provider_can_publish=publish,\n'
+   ||E'    updated_at=clock_timestamp() WHERE id=target.id RETURNING id INTO conn;\n'
+   ||E'  ELSE\n'||refuse);
+  source:=replace(source,inserted,inserted||E'  END IF;\n');
+  EXECUTE source;
+ END IF;
+END $confirm$;
+
 DO $$ DECLARE f regprocedure; BEGIN
  FOR f IN SELECT p.oid::regprocedure FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
-  WHERE n.nspname='public' AND p.proname IN ('publish_monitor_actor_open','publish_monitor_refresh_item',
+  WHERE n.nspname='public' AND p.proname IN ('publish_monitor_manual_import','publish_monitor_actor_open','publish_monitor_refresh_item',
    'publish_monitor_refresh_claim','publish_monitor_refresh_request','publish_monitor_refresh_current',
    'publish_monitor_refresh_page','publish_monitor_refresh_due','publish_monitor_refresh_finish','publish_monitor_data',
    'publish_monitor_post_history','publish_monitor_link_post','publish_monitor_snapshot_prune') LOOP

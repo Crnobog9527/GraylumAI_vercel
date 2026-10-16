@@ -13,7 +13,7 @@ const rpcs = ['publish_monitor_refresh_claim(integer,integer)', 'publish_monitor
   'publish_monitor_refresh_due(uuid,uuid,uuid,integer,integer)',
   'publish_monitor_refresh_finish(uuid,uuid,uuid,text,text)', 'publish_monitor_data(uuid,integer,uuid)',
   'publish_monitor_post_history(uuid,uuid,integer)', 'publish_monitor_link_post(uuid,uuid,uuid)',
-  'publish_monitor_snapshot_prune(integer)'];
+  'publish_monitor_snapshot_prune(integer)', 'publish_monitor_manual_import(uuid,uuid,text,jsonb)'];
 const internal = ['publish_monitor_actor_open(uuid)', 'publish_monitor_refresh_item(social_connections)',
   'publish_monitor_refresh_current(uuid,uuid,uuid)'];
 const db = await localDb(), c = db.client;
@@ -70,7 +70,7 @@ try {
     assert.match(await v('SELECT array_to_string(proconfig,\',\') v FROM pg_proc WHERE oid=$1::regprocedure', [f]),
       /search_path=public, ?pg_temp/);
   }
-  report.checks.push('nine RPCs for service_role only, three internal helpers; fixed search_path; clients have no access');
+  report.checks.push('ten RPCs for service_role only, three internal helpers; fixed search_path; clients have no access');
 
   // Claim: only connected own connections with read and automatic-tracking consent; once per UTC day; leased once.
   const u = await member(), w = await member(), q = await member();
@@ -249,6 +249,45 @@ try {
   assert.equal(await v('SELECT count(*)::int v FROM social_metric_snapshots WHERE connection_id=$1', [cw]), 0);
   assert.ok(await v('SELECT count(*)::int v FROM social_metric_snapshots WHERE connection_id=$1', [cu]) > 0);
   report.checks.push('snapshots older than 100 days are pruned (plan §7)');
+
+  // Manual import (plan §4.3): confirmed rows attach to the account's connection as source 'manual'; numbers are
+  // validated, blanks stay absent, one manual snapshot per post per day; never another user's account.
+  const im = await member('xiaohongshu');
+  const rows = [{ postKey: 'https://example.com/p/1', url: 'https://example.com/p/1', postedAt: ago(2), titleExcerpt: 'm1',
+    metrics: { likes: 12, views: 300 } }, { postKey: 'note-2', url: null, postedAt: null, titleExcerpt: 'm2', metrics: { likes: 3 } }];
+  const imported = await svc('SELECT publish_monitor_manual_import($1,$2,$3,$4) v', [im.a, im.account, 'table', j(rows)]);
+  assert.deepEqual([imported.inserted, imported.updated], [2, 0]);
+  const again = await svc('SELECT publish_monitor_manual_import($1,$2,$3,$4) v', [im.a, im.account, 'screenshot', j(rows)]);
+  assert.deepEqual([again.connectionId, again.inserted, again.updated], [imported.connectionId, 0, 2]);
+  assert.equal(await v('SELECT count(*)::int v FROM social_metric_snapshots WHERE connection_id=$1', [imported.connectionId]), 2);
+  const manual = await svc('SELECT publish_monitor_data($1,30,NULL) v', [im.a]);
+  assert.deepEqual(manual.posts.map(x => [x.source, x.postedAtSource]).sort(), [['manual', null], ['manual', 'user']]);
+  assert.deepEqual(manual.posts.find(x => x.titleExcerpt === 'm2').latest.metrics, { likes: 3 });
+  await code(svc('SELECT publish_monitor_manual_import($1,$2,$3,$4) v', [im.a, im.account, 'table',
+    j([{ ...rows[0], metrics: { likes: -1 } }])]), '22023');
+  await code(svc('SELECT publish_monitor_manual_import($1,$2,$3,$4) v', [im.a, im.account, 'table',
+    j([{ ...rows[0], metrics: { likes: '12' } }])]), '22023');
+  await code(svc('SELECT publish_monitor_manual_import($1,$2,$3,$4) v', [u.a, im.account, 'table', j(rows)]), 'P0002');
+  // Manual rows on an account already read automatically stay separate posts (never merged into one number).
+  const auto = await svc('SELECT publish_monitor_manual_import($1,$2,$3,$4) v', [wm.a, wm.account, 'link',
+    j([{ postKey: 'w5', url: null, postedAt: null, titleExcerpt: null, metrics: { likes: 1 } }])]);
+  assert.equal(auto.connectionId, cw);
+  assert.equal(await v("SELECT count(*)::int v FROM social_posts WHERE connection_id=$1 AND platform_post_id='w5'", [cw]), 2);
+  report.checks.push('manual import: validated, separate from automatic data, one snapshot a day, own accounts only');
+
+  // Connecting Post for Me later upgrades the manual connection in place; its manual posts stay.
+  const up = await member('youtube');
+  const upm = await svc('SELECT publish_monitor_manual_import($1,$2,$3,$4) v', [up.a, up.account, 'link', j([rows[1]])]);
+  const st = await svc('SELECT publish_monitor_connect_start($1,$2,$3) v', [up.a, up.account, ['feeds']]);
+  await svc('SELECT publish_monitor_connect_callback($1,$2,$3) v', [up.a, st.requestId,
+    j([{ providerAccountId: 'spc_up', platform: 'youtube', externalId: st.externalId }])]);
+  const conf = await svc('SELECT publish_monitor_connect_confirm($1,$2,$3,$4,$5) v', [up.a, st.requestId, 'spc_up', true,
+    j({ providerAccountId: 'spc_up', platform: 'youtube', externalId: st.externalId, status: 'connected' })]);
+  assert.equal(conf.connectionId, upm.connectionId);
+  const upr = await row(upm.connectionId);
+  assert.deepEqual([upr.source, upr.provider_account_id, upr.consent_auto_track], ['postforme', 'spc_up', true]);
+  assert.equal(await v("SELECT count(*)::int v FROM social_posts WHERE connection_id=$1 AND source='manual'", [upm.connectionId]), 1);
+  report.checks.push('connecting Post for Me upgrades a manual-only connection in place and keeps its manual posts');
 
   // Erasure: a closed account is never claimed, its data calls are refused, and erasure still finishes.
   const em = await member(), ce = await connection(em);
