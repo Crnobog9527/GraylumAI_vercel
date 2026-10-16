@@ -120,7 +120,7 @@ BEGIN
   -- no more posts than were analyzed (suppliedWholeHistory in research/benchmark/metrics.ts).
   IF ok AND (m->'wholeHistory')::boolean THEN
     item:=research_benchmark_item(f.actor_id,f.session_id,research_benchmark_operation_id(f.id,f.attempt,'account_profile')::text||'#1');
-    ok:=jsonb_typeof(item->'postsCount')='number' AND (m->>'postsAnalyzed')::numeric>=(item->>'postsCount')::numeric;
+    ok:=coalesce(jsonb_typeof(item->'postsCount')='number' AND (m->>'postsAnalyzed')::numeric>=(item->>'postsCount')::numeric,false);
   END IF;
   -- Single-item numbers equal the item field they name.
   IF ok AND m->'followers'->'value'<>'null'::jsonb THEN
@@ -189,6 +189,8 @@ BEGIN
         AND ((m->>'postsAnalyzed')::integer>=20 OR (m->'wholeHistory')::boolean)
       ELSE NOT coalesce((c->'qualified')::boolean,false) END;
   END IF;
+  -- Any check that could not be evaluated (a missing item) counts as failed, never as unknown.
+  ok:=coalesce(ok,false);
   INSERT INTO research_benchmarks AS b(fetch_id,actor_id,session_id,execution_id,platform,account,followers,median_views,
     engagement_rate,posts_per_week,last_published_at,earliest_published_at,posts_analyzed,whole_history,category,qualified,
     excluded,refs,operation_ids,missing,fetched_at)

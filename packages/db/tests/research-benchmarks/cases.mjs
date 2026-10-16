@@ -115,6 +115,11 @@ export async function runCases({db,Client,connectionString,report}) {
     assert.deepEqual([(await get(full)).qualified,(await get(full)).posts_analyzed],[true,20]);
     assert.deepEqual([(await get(forged)).excluded,(await get(forged)).qualified],['EVIDENCE_UNVERIFIED',false]);
     assert.deepEqual([(await get(claimed)).excluded,(await get(claimed)).qualified],['EVIDENCE_UNVERIFIED',false]);
+    // A whole-history claim whose profile item is missing altogether is a failed check, not an error on the paid fetch.
+    // (No number cites anything, so only the whole-history check can fail: the profile operation does not exist.)
+    const orphan = await fetchAccount(f,e,'orphan',{followers:null,posts:[],complete:true,profileOp:randomUUID()});
+    assert.equal(orphan.evidence.metrics.wholeHistory,true);
+    assert.deepEqual([(await get(orphan)).excluded,(await get(orphan)).whole_history],['EVIDENCE_UNVERIFIED',false]);
     assert.equal(await qualified(db,f),2);
     await assert.rejects(db.query(`UPDATE research_benchmarks SET whole_history=false WHERE fetch_id=$1`,[whole.fetchId]),/check constraint/);
   });
