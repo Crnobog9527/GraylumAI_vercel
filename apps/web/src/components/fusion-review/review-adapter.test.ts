@@ -45,11 +45,16 @@ describe('review page data', () => {
     expect(toJuryDetail(raw)).toMatchObject({ outcome: 'revised', adoption: null, awaitingChoice: true, seats: [{ seat: 'A' }] });
     expect(toReaderSource(raw).chapters).toEqual([{ title: '定位', number: '', name: '定位', body: '正文。' }]);
     expect(toReaderSource({ ...raw, preamble: '# 定位报告' }).chapters.map(item => item.title)).toEqual(['报告开头', '定位']);
+    // A declined choice and a refused one stay what they were after a reload; a refusal is not "everything kept".
+    expect(toJuryDetail({ ...raw, adoption: { state: 'recorded', decision: 'decline', adopted: [], kept: ['定位'] } } as unknown as RawDetail)
+      .adoption).toMatchObject({ declined: true });
+    expect(toJuryDetail({ ...raw, adoption: { state: 'recorded', decision: 'refused', refusal: 'REPORT_REVISION_STALE', adopted: [],
+      kept: ['定位'] } } as unknown as RawDetail).adoption).toMatchObject({ refused: 'REPORT_REVISION_STALE', versionId: null });
   });
 
   it('says how a review ended in plain words, and why a start was refused', () => {
     expect(endedNotice('completed', 'revised')).toBeNull();
-    expect(endedNotice('completed', 'no_change')).toContain('不需要修改');
+    expect(endedNotice('completed', 'no_change')).toBeNull(); // the result page says it
     expect(endedNotice('incomplete', 'input_too_large')).toContain('没有扣费');
     expect(endedNotice('stopped', '')).toContain('已经结束');
     expect(startErrorText('FUSION_REVIEW_ACTIVE')).toContain('正在进行');

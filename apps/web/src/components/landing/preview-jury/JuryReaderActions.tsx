@@ -5,6 +5,7 @@ import { useEffect, useRef } from 'react';
 import { CheckCircle2, Clock3 } from 'lucide-react';
 import type { AdoptProposed, AdoptRecorded } from './jury-events';
 import type { Adoption } from './use-adoption';
+import { adoptErrorLabel } from './jury-adopt';
 import styles from './jury-reader.module.css';
 
 /** The bar that stays at the bottom while choosing: how many chapters are chosen, later, and confirm. */
@@ -28,7 +29,9 @@ export function Done({ result }: { result: AdoptRecorded }) {
   return (
     <div className={styles.done} role="status">
       <CheckCircle2 size={20} aria-hidden="true" />
-      {result.versionId
+      {result.refused
+        ? <p>这次修改没有采用成功：{adoptErrorLabel(result.refused)}</p>
+        : result.versionId
         ? <p>新版本已生成：{result.adopted.length} 章采用修订版{result.kept.length ? `，${result.kept.length} 章保留原文` : ''}。之后的选题和写作会用新版本。</p>
         : result.declined || result.adopted.length > 0
           ? <p>你放弃了这次修改，报告和定位都没有变化；这次的选择已经记下。</p>

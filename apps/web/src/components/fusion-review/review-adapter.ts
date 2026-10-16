@@ -61,10 +61,13 @@ const KNOWN = new Set<JuryEvent['type']>(['review_started', 'reviewer_started', 
 
 /** The stored choice once recorded (a reservation is still in progress); a decline stays a decline after a reload. */
 function recordedChoice(value: unknown): JuryDetail['adoption'] {
-  const stored = value as { state?: string; decision?: string; versionId?: string | null; adopted?: string[]; kept?: string[] } | null;
+  const stored = value as { state?: string; decision?: string; refusal?: string; versionId?: string | null; adopted?: string[];
+    kept?: string[] } | null;
   if (stored?.state !== 'recorded') return null;
   return { state: 'recorded', versionId: stored.versionId ?? null, adopted: stored.adopted ?? [], kept: stored.kept ?? [],
-    ...(stored.decision === 'decline' ? { declined: true } : {}) };
+    ...(stored.decision === 'decline' ? { declined: true } : {}),
+    // R14 refused for good (the report changed meanwhile): nothing was adopted, and the page says why.
+    ...(stored.decision === 'refused' ? { refused: stored.refusal || 'REPORT_REVISION_STALE' } : {}) };
 }
 
 /** Events the page can play: known types whose seats are seats the page draws. Anything else is skipped, not guessed. */
@@ -95,7 +98,7 @@ export const toPanel = (panel: Outputs['panel'] | undefined): JuryPanel | undefi
 /** One line about how a review that cannot be chosen from ended, or null when the result page says it all. */
 export function endedNotice(state: string, outcome: string): string | null {
   if (state === 'completed' && outcome === 'revised') return null;
-  if (state === 'completed') return '评审团看完了，认为这份报告不需要修改。';
+  if (state === 'completed') return null; // the result page says the panel kept the report as it is
   if (state === 'revision_failed') return null; // the result page explains it and shows the opinions
   if (state === 'stopped' || state === 'interrupted') return '这次评审已经结束，没有生成修订稿；下面是结束前已经收到的意见。';
   if (outcome === 'input_too_large') return '报告和资料太长，评审没有开始，也没有扣费。';

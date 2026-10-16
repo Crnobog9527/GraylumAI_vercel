@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils';
 import type { JuryDetail, JurySeatNames } from './jury-events';
 import { keyPoints } from './jury-adopt';
 import {
-  flaggedChapters, MOCK_READER_SOURCE, readerChapters, readingMinutes, sectionOrder, summaryLines, type ReaderChapter, type ReaderSource,
+  flaggedChapters, keptAsIs, MOCK_READER_SOURCE, readerChapters, readingMinutes, sectionOrder, summaryLines, type ReaderChapter, type ReaderSource,
 } from './jury-reader';
 import { MOCK_ADOPT_ACTIONS, useAdoption, type Adoption, type AdoptActions, type Stale } from './use-adoption';
 import { useReadingProgress } from './use-reading-progress';
@@ -89,7 +89,8 @@ function Glance({ detail, chapters, source, adoption, failed, onJump }: {
   const lines = summaryLines(detail, source);
   return (
     <section className={styles.glance} aria-labelledby="jury-glance-title">
-      <h2 id="jury-glance-title">{failed ? '修订稿没有生成成功，原文没有任何改动' : '30 秒看懂'}</h2>
+      <h2 id="jury-glance-title">{!failed ? '30 秒看懂' : keptAsIs(detail) ? '评审团认为这份报告不需要修改'
+        : '修订稿没有生成成功，原文没有任何改动'}</h2>
       {lines.length > 0 ? <dl className={styles.onePage}>
         {lines.map(line => (
           <div key={line.label}>
@@ -113,7 +114,8 @@ function Glance({ detail, chapters, source, adoption, failed, onJump }: {
       </div> : null}
       <p className={styles.next}>
         <span>
-          {failed ? `下面标亮的 ${flagged} 章有评审意见，你可以照着自己修改，或者重新发起一次评审。`
+          {failed && keptAsIs(detail) ? (flagged ? `下面标亮的 ${flagged} 章有评审的小意见，供你参考；报告保持原样。` : '报告保持原样。')
+            : failed ? `下面标亮的 ${flagged} 章有评审意见，你可以照着自己修改，或者重新发起一次评审。`
             : adoption ? `看完标亮的 ${flagged} 章，逐章选择采用或保留，选完点「确认」。`
               : '评审团认为这份报告不需要修改，下面是他们对各章的意见。'}
         </span>

@@ -30,6 +30,9 @@ export const MOCK_READER_SOURCE: ReaderSource = { chapters: REPORT_CHAPTERS, dig
 /** Chapter titles in report order, then the whole-document entry: the order issues and points are listed in. */
 export const sectionOrder = (source: ReaderSource) => [...source.chapters.map(chapter => chapter.title), WHOLE_DOCUMENT];
 
+/** The panel kept the report as it is (no summary was needed): a normal ending, not a failed revision. */
+export const keptAsIs = (detail: JuryDetail) => detail.summary.status !== 'usable' && ['no_change', 'no_opinions'].includes(detail.outcome);
+
 /** Reading pace for the time estimate: Chinese prose, read carefully. */
 const CHARS_PER_MINUTE = 400;
 

@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
 import { DEFAULT_SEAT_NAMES, type JuryDetail, type RulingFields } from './jury-events';
+import { Done } from './JuryReaderActions';
 import { readerChapters, summaryLines, type ReaderSource } from './jury-reader';
 import { JuryReader } from './JuryReader';
 
@@ -53,5 +54,27 @@ describe('result page on a real report', () => {
       names: DEFAULT_SEAT_NAMES, source }));
     expect(html).toContain('跳到下一处改动');
     expect(html).toContain('已选 0/1');
+  });
+});
+
+describe('endings that are not a revision', () => {
+  it('shows a review that kept the report as it is as a normal ending, never as a failed revision', () => {
+    const kept: JuryDetail = { ...detail([]), outcome: 'no_change', summary: { status: 'none', sections: [] },
+      seats: [{ seat: 'A', rounds: [{ round: 1, status: 'usable', decisions: [], issues: [{ location: '定位', perspective: '受众',
+        problem: '可以再具体一点。', suggestion: '写出年龄段', severity: 'minor' }] }] }] };
+    const html = renderToStaticMarkup(createElement(JuryReader, { detail: kept, names: DEFAULT_SEAT_NAMES, source }));
+    expect(html).toContain('评审团认为这份报告不需要修改');
+    expect(html).not.toContain('没有生成成功');
+    expect(html).toContain('供你参考；报告保持原样');
+    const failed = renderToStaticMarkup(createElement(JuryReader, { detail: { ...kept, outcome: 'revision_failed' },
+      names: DEFAULT_SEAT_NAMES, source }));
+    expect(failed).toContain('修订稿没有生成成功');
+  });
+
+  it('says a refused adoption was not applied, not that everything was kept', () => {
+    const html = renderToStaticMarkup(createElement(Done, { result: { state: 'recorded', versionId: null, adopted: [], kept: ['定位'],
+      refused: 'REPORT_REVISION_STALE' } }));
+    expect(html).toContain('这次修改没有采用成功');
+    expect(html).not.toContain('全部保留原文');
   });
 });

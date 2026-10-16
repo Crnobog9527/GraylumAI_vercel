@@ -32,9 +32,10 @@ export function useLiveReview(reviewId: string): LiveReview {
   const ended = Boolean(detail.data && ENDED.has(detail.data.state));
   const events = trpc.fusionReview.events.useQuery({ reviewId }, {
     retry: 1, refetchOnWindowFocus: false,
-    // After review_ended nothing more plays; the chapter choice is read from the detail, so the events can stop.
-    refetchInterval: query => (query.state.data?.ended || query.state.data?.events.some(event => event.type === 'review_ended')
-      ? false : EVENTS_MS),
+    // Only the server's own `ended` stops reading: after a stop, calls already sent may still settle and add opinions,
+    // and a revised review waits for the chapter choice. Once the review itself has ended, read less often.
+    refetchInterval: query => (query.state.data?.ended ? false
+      : query.state.data?.events.some(event => event.type === 'review_ended') ? DETAIL_MS : EVENTS_MS),
   });
   const panel = trpc.fusionReview.panel.useQuery(undefined, { staleTime: Infinity, retry: 1 });
   const nudge = trpc.fusionReview.continue.useMutation();

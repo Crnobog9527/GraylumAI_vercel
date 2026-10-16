@@ -74,7 +74,9 @@ export type AdoptChoice = { section: string; use: 'revised' | 'original'; confir
 /** fusionReview.confirmAdoption's answer, or adopt's when every chapter keeps the original: the choice is recorded. */
 export type AdoptRecorded = { state: 'recorded'; versionId: string | null; adopted: string[]; kept: string[];
   /** The user looked at the field changes and gave up the revision (confirmAdoption decline): nothing changed. */
-  declined?: boolean };
+  declined?: boolean;
+  /** The adoption was refused for good (e.g. the report changed after the review): the refusal code; nothing changed. */
+  refused?: string };
 type FieldState = { value: string; status: string };
 /** R14's field diff: what the adopted chapters change, and the later steps confirmed together with them. */
 export type RevisionDiff = {
