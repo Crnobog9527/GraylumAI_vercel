@@ -10,8 +10,8 @@
     "package": "post-and-article",
     "path": "SKILL.md",
     "mediaType": "text/markdown",
-    "bytes": 9047,
-    "sha256": "ecce518c4cf8b1576681ec39928b5eb034181ad4717623b492ed8e48afb9c23b"
+    "bytes": 9270,
+    "sha256": "ac2a52d4066e02dcceb4430df73539e06b825a9a44a7e0c5f925e701688f2bcb"
   },
   {
     "package": "post-and-article",
@@ -31,8 +31,8 @@
     "package": "short-video-script",
     "path": "SKILL.md",
     "mediaType": "text/markdown",
-    "bytes": 11585,
-    "sha256": "98b48b1b78c8c463c9acd7c384b31df15078b1435a55d355c0318fc4562d2795"
+    "bytes": 11862,
+    "sha256": "34d34140f0a25cb757e3d2c960c8ef77c6d71c4f304ca68b08148bc31264711e"
   },
   {
     "package": "short-video-script",
@@ -52,8 +52,8 @@
     "package": "video-editing-guide",
     "path": "SKILL.md",
     "mediaType": "text/markdown",
-    "bytes": 7198,
-    "sha256": "c11869c1ee10253356b5136e36e20cc1e941161fc9903779fb90fcce67e3f660"
+    "bytes": 7456,
+    "sha256": "24fe1c6b042cb4559b41e2ef7a43571798b4636c4c528dd097ea4ad68814add5"
   },
   {
     "package": "video-editing-guide",
@@ -73,8 +73,8 @@
     "package": "video-storyboard",
     "path": "SKILL.md",
     "mediaType": "text/markdown",
-    "bytes": 7789,
-    "sha256": "37345aa5ebeef2a6722917e9f66c819d22bea65d09edb4c0d1406a363defd89b"
+    "bytes": 7933,
+    "sha256": "5d1aa41004710021a3ce3a7daa508a4210b9cd4ee0c8c868a242660941917893"
   },
   {
     "package": "video-storyboard",
