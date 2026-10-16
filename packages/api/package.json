@@ -54,6 +54,7 @@
     "./src/services/runtime/staleChargedRounds": "./src/services/runtime/staleChargedRounds.ts",
     "./src/services/fusion/background": "./src/services/fusion/background.ts",
     "./src/services/fusion/recovery": "./src/services/fusion/recovery.ts",
+    "./src/services/bill2/stuckCalls": "./src/services/bill2/stuckCalls.ts",
     "./src/services/accountErasure/executor": "./src/services/accountErasure/executor.ts",
     "./src/services/accountErasure/content": "./src/services/accountErasure/content.ts",
     "./src/services/library/cleanup": "./src/services/library/cleanup.ts",

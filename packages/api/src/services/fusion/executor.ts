@@ -74,6 +74,7 @@ export function fusionExecutor(deps: { billing: Billing; admin: SupabaseClient; 
         try { await billing.recordReceipt(dispatch.pendingReceipt.runId, dispatch.pendingReceipt.callId, dispatch.pendingReceipt.evidence); }
         catch { return { state: 'pending', reason: 'receipt_pending' }; }
       }
+      if (dispatch.providerRejectionPending) return { state: 'pending', reason: 'receipt_pending' };
       if (dispatch.providerRejected) {
         await rpc('fusion_call_verdict', { p_call_id: claimed.id, p_verdict: 'no_delivery' });
         await settle(run.runId);

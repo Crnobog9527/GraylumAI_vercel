@@ -1,71 +1,50 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { trpc } from '@/trpc/client';
-import { getSafeErrorMessage } from '@/lib/safe-error-message';
-import {
-  getMembershipPlanButtonState, getPlanEligibilityKey, type MembershipPlanEligibilityEntry,
-} from '@/components/profile/subscriptionPlanButtonState';
-import { pickPaywallPlans, type PaywallBilling, type PaywallPlan } from './paywallPlans';
+import { GOLD_FIRST_MONTH_USD, GOLD_FOUNDER_YEAR_USD, founderSeatsLeft, type MethodPurchase } from './methodCheckout';
+import { useMethodCheckout } from './useMethodCheckout';
+import { pickPaywallPlans, type PaywallBilling, type PaywallPlan, type PaywallQuoteOptions } from './paywallPlans';
 
 /**
- * Plans and the purchase action for a paywall. Purchase goes through the existing
- * `payments.createCheckoutSession` path and the server's eligibility answer; the paywall never
- * decides who may buy. An upgrade of an existing subscription is not started from here.
+ * Plans and the card purchase for a paywall (`payments.methodCheckout`). The server answers who
+ * may buy and at which offer; the paywall only shows the Gold first month when the server says the
+ * account is eligible, and drops it for the standard price after the server refuses it. The founder Gold
+ * yearly price shows while the server reports seats left; a sold-out answer at checkout drops to standard.
  */
 export function usePaywallCheckout() {
   const plansQuery = trpc.settings.getMembershipPlans.useQuery(undefined, { staleTime: 60_000 });
+  const method = useMethodCheckout();
+  // #937: an older subscription whose payment failed blocks any new purchase; say so and point to a ticket.
   const eligibility = trpc.payments.getMembershipEligibilityMatrix.useQuery(undefined, { staleTime: 0, retry: false });
-  const createCheckout = trpc.payments.createCheckoutSession.useMutation();
-  const [error, setError] = useState<string | null>(null);
-  const inFlight = useRef(false);
+  const unpaidSubscription = (eligibility.data?.entries ?? []).some(entry => entry.action === 'resolvePaymentIssue');
+  const [firstMonthDeclined, setFirstMonthDeclined] = useState(false);
+  // Set when checkout answered "founder seats sold out": the standard yearly price applies from then on.
+  const [founderSoldOut, setFounderSoldOut] = useState(false);
+  // Set when the server said this account cannot take the founder price (an earlier founder order).
+  const [founderDeclined, setFounderDeclined] = useState(false);
 
   const plans: PaywallPlan[] = useMemo(() => pickPaywallPlans(plansQuery.data), [plansQuery.data]);
-  const entries = useMemo(() => {
-    const map = new Map<string, MembershipPlanEligibilityEntry>();
-    for (const entry of eligibility.data?.entries ?? []) {
-      if (entry.billingCycle === 'monthly' || entry.billingCycle === 'yearly') {
-        map.set(getPlanEligibilityKey(entry.planId, entry.billingCycle), entry as MembershipPlanEligibilityEntry);
-      }
-    }
-    return map;
-  }, [eligibility.data]);
-
-  function buttonState(plan: PaywallPlan, billing: PaywallBilling) {
-    const state = getMembershipPlanButtonState({
-      eligibility: entries.get(getPlanEligibilityKey(plan.id, billing)),
-      eligibilityLoading: eligibility.isLoading,
-      checkoutReady: plan.checkoutReady?.[billing] === true,
-      pending: createCheckout.isPending,
-    });
-    if (eligibility.isError) return { ...state, disabled: true, canCreateCheckout: false, message: '暂时无法确认购买资格，请稍后再试。' };
-    // Upgrading a live subscription needs its own quote and confirmation (个人中心), not this button.
-    if (state.canChangeSubscriptionPlan) return { ...state, disabled: true, canCreateCheckout: false,
-      message: '你已有订阅，请到个人中心的会员页升级。' };
-    if (!state.canCreateCheckout && !state.message) return { ...state, disabled: true, message: '暂不可购买，请稍后再试。' };
-    return { ...state, disabled: state.disabled || !state.canCreateCheckout };
-  }
-
   // A failed catalog refetch keeps the old data; never sell from a price the server no longer confirms.
   const catalogFailed = plansQuery.isError || (!plansQuery.isLoading && plans.length === 0);
+  const goldFirstMonth = method.entry?.goldFirstMonthEligible === true && !firstMonthDeclined;
+  const founderSeats = founderSoldOut || founderDeclined ? 0 : founderSeatsLeft(method.entry);
+  const quoteOptions: PaywallQuoteOptions = { goldFirstMonthUsd: goldFirstMonth ? GOLD_FIRST_MONTH_USD : null,
+    founderUsd: founderSeats > 0 ? GOLD_FOUNDER_YEAR_USD : null };
 
-  async function startCheckout(plan: PaywallPlan, billing: PaywallBilling) {
-    if (inFlight.current || catalogFailed || !buttonState(plan, billing).canCreateCheckout) return;
-    inFlight.current = true;
-    setError(null);
-    try {
-      const result = await createCheckout.mutateAsync({ kind: 'membership_plan', planId: plan.id, billingCycle: billing });
-      window.location.assign(result.checkoutUrl);
-    } catch (cause) {
-      setError(getSafeErrorMessage(cause, '创建支付页面失败，请稍后重试。'));
-    } finally {
-      inFlight.current = false;
-    }
+  function purchaseFor(plan: PaywallPlan, billing: PaywallBilling): MethodPurchase | null {
+    if (catalogFailed || plan.checkoutReady?.[billing] !== true) return null;
+    const gold = plan.level === 'gold';
+    const offer = goldFirstMonth && gold && billing === 'monthly' ? 'gold_first30'
+      : founderSeats > 0 && gold && billing === 'yearly' ? 'founder' : 'standard';
+    return { itemType: 'membership_plan', itemId: plan.id, billingCycle: billing, offer };
   }
 
   return {
-    plans, loading: plansQuery.isLoading, catalogFailed,
-    pending: createCheckout.isPending, error, buttonState, startCheckout,
+    plans, loading: plansQuery.isLoading, catalogFailed, method, unpaidSubscription, quoteOptions, purchaseFor, founderSeats, founderSoldOut,
+    declineFirstMonth: () => setFirstMonthDeclined(true),
+    markFounderSoldOut: () => setFounderSoldOut(true),
+    declineFounder: () => setFounderDeclined(true),
   };
 }

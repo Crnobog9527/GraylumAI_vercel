@@ -89,10 +89,12 @@ function PaidPlanCard({ plan, billing, membershipHref }: { plan: PaywallPlan; bi
       <PointList points={[`每月 ${monthlyCredits(plan).toLocaleString('en-US')} 积分`, '可以生成完整运营策略报告', '可以购买积分包，享会员折扣']} />
       {quote ? <p data-testid={`pricing-renewal-${plan.level}`} className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
         {quote.renewal}</p> : null}
+      {quote ? <p data-testid={`pricing-tax-${plan.level}`} className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+        {COPY.planTaxNote}</p> : null}
       {ready ? (
         <Link className="mt-1 rounded-lg px-4 py-2 text-center text-sm font-semibold"
           style={{ background: 'var(--text-primary)', color: 'var(--bg-primary)' }}
-          href={membershipHref}>{COPY.memberCta}</Link>
+          href={buyHref(membershipHref, plan.level, billing)}>{COPY.memberCta}</Link>
       ) : (
         <Link className="mt-1 rounded-lg border px-4 py-2 text-center text-sm font-medium"
           style={{ borderColor: 'var(--border-primary)', color: 'var(--text-primary)' }} href="/contact">{COPY.contactCta}</Link>
@@ -100,6 +102,11 @@ function PaidPlanCard({ plan, billing, membershipHref }: { plan: PaywallPlan; bi
       {ready ? <small className="text-center text-xs" style={{ color: 'var(--text-tertiary)' }}>{COPY.memberCtaNote}</small> : null}
     </section>
   );
+}
+
+/** Opens this plan's checkout dialog on the membership page (SubscriptionCard ?buy=&cycle=), offers included. */
+export function buyHref(membershipHref: string, level: string, billing: PaywallBilling) {
+  return `${membershipHref}${membershipHref.includes('?') ? '&' : '?'}buy=${level}&cycle=${billing}`;
 }
 
 function PointList({ points }: { points: readonly string[] }) {
