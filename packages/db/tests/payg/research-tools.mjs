@@ -27,7 +27,7 @@ async function fixture(createFixture,options={}) {
   const multiplier = options.multiplier??'6';
   const policy = toolPolicy(options.route??newRoute(),multiplier,options.policy);
   const f = await createFixture(options.db,{credits:options.credits??100,q:'100',multiplier,threshold:1,
-    extraPolicies:[policy],empirical:options.empirical});
+    extraPolicies:[policy],empirical:options.empirical,actor:options.actor});
   return {...f,policy};
 }
 // A run bound to a runtime execution claims with its epoch, exactly as fixture.mjs claim() does.
@@ -404,3 +404,6 @@ export async function researchToolCases({db,Client,connectionString,report,creat
   }
   report.checks.push('RT-2 grants: tool helpers private; reconcile callable by service_role only');
 }
+
+// Shared with research-runtime.mjs (RT-3b storage, 0263).
+export {fixture as toolFixture,claimTool,result as toolResult,call as toolCallRow};
