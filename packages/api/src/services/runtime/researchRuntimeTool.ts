@@ -5,7 +5,7 @@ import type { RuntimeTool } from './runner';
 import { admitSubcalls, POSITIONING_RESEARCH_TOOLS, RESEARCH_TOOL_DESCRIPTIONS, researchToolArgs, subcallNeed,
   type ResearchToolName } from '../research/tools/schemas';
 import { statusForOutcome, toolEnvelope } from '../research/tools/envelope';
-import { selectRoute } from '../research/vendors/config';
+import { selectRoute, type ResearchToolsConfig } from '../research/vendors/config';
 import { parallelModeFor } from '../research/vendors/parallel';
 import { benchmarkFetch } from '../research/runtime/benchmarkFetch';
 import { discover, moreCandidates } from '../research/runtime/discovery';
@@ -25,15 +25,22 @@ const discoveryParameters = z.object({ keywordConfirmationId: z.string().uuid().
 const ONE_CALL = 'At most one research tool call per reply; then answer from its result.';
 /** The description the model sees for one research tool. */
 export const researchToolDescription = (name: ResearchToolName): string => `${RESEARCH_TOOL_DESCRIPTIONS[name]} ${ONE_CALL}`;
+/** web_search without a frozen advanced route offers only the fast mode, so the one research call cannot miss (#1029 P2). */
+const fastSearchParameters = researchToolArgs.web_search.extend({ mode: z.enum(['fast']).default('fast') }).strict();
 /** The parameters the model sees for one research tool (admission sizes the request with them). */
-export const researchToolParameters = (name: ResearchToolName): z.ZodObject<z.ZodRawShape> =>
-  name === 'benchmark_discover' ? discoveryParameters : researchToolArgs[name] as z.ZodObject<z.ZodRawShape>;
+export const researchToolParameters = (name: ResearchToolName, fastSearchOnly = false): z.ZodObject<z.ZodRawShape> =>
+  name === 'benchmark_discover' ? discoveryParameters
+    : name === 'web_search' && fastSearchOnly ? fastSearchParameters as unknown as z.ZodObject<z.ZodRawShape>
+      : researchToolArgs[name] as z.ZodObject<z.ZodRawShape>;
+/** Whether a turn's frozen routes lack the advanced web search. */
+export const fastSearchOnly = (config: Pick<ResearchToolsConfig, 'routes'>) =>
+  !config.routes.some(route => route.platform === 'web' && route.kind === 'web_search_pro');
 
 /** `names`: the tools this turn froze (RT-3b PR-3); the PR-1 default offers the whole positioning set. */
 export function researchRuntimeTools(ctx: ResearchToolContext, names: readonly ResearchToolName[] = POSITIONING_RESEARCH_TOOLS): RuntimeTool[] {
   let remaining = ctx.config.limits.maxSubcallsPerRound;
   const make = (name: ResearchToolName): RuntimeTool => ({
-    name, description: researchToolDescription(name), parameters: researchToolParameters(name),
+    name, description: researchToolDescription(name), parameters: researchToolParameters(name, fastSearchOnly(ctx.config)),
     async execute(raw, callId) {
       const parsed = researchToolArgs[name].safeParse(raw);
       if (!parsed.success) return toolEnvelope({ status: 'not_confirmed', reason: 'INVALID_ARGUMENTS' });

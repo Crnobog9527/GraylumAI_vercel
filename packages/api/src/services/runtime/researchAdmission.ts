@@ -14,16 +14,16 @@ import { POSITIONING_RESEARCH_TOOLS, type ResearchToolName } from '../research/t
 import { RESEARCH_VENDORS, type SocialPlatform } from '../research/vendors/types';
 import type { FrozenPaygRun } from '../bill2/service';
 import { freezePaygMessageBudget } from './paygMessageBudget';
-import { researchToolDescription, researchToolParameters } from './researchRuntimeTool';
+import { fastSearchOnly, researchToolDescription, researchToolParameters } from './researchRuntimeTool';
 import type { StagingPolicy } from './stagingPolicy';
 import { frozenResearchTurn, LOCAL_RESEARCH_ACCOUNT, RESEARCH_PHASE, RESEARCH_RESULT_RESERVE_BYTES, RESEARCH_TURN_VERSION,
   type FrozenResearchTurn } from './researchTurn';
 
 /** Serialized tool definitions as the SDK sends them; the full request is checked again before dispatch. */
-export function researchToolBytes(names: readonly ResearchToolName[]): number {
+export function researchToolBytes(names: readonly ResearchToolName[], fastOnly = false): number {
   return Buffer.byteLength(JSON.stringify(names.map(name => ({ type: 'function', function: { name,
     description: researchToolDescription(name), strict: true,
-    parameters: z.toJSONSchema(researchToolParameters(name)) } }))));
+    parameters: z.toJSONSchema(researchToolParameters(name, fastOnly)) } }))));
 }
 
 const canonical = (value: unknown): string => JSON.stringify(value, (_key, item) => item && typeof item === 'object' && !Array.isArray(item)
@@ -107,7 +107,8 @@ export async function admitResearchTurn(input: ResearchAdmissionInput): Promise<
   const tools = POSITIONING_RESEARCH_TOOLS.filter(name => offered.has(name));
   // All or nothing: a partial benchmark tool set could not finish its flow.
   if (!tools.length || tools.length > room) return null;
-  if (!input.fits(researchToolBytes(tools) + RESEARCH_RESULT_RESERVE_BYTES)) return null;
+  const fastOnly = fastSearchOnly({ routes: [...priced.values()].map(({ entry }) => entry) });
+  if (!input.fits(researchToolBytes(tools, fastOnly) + RESEARCH_RESULT_RESERVE_BYTES)) return null;
   const used = [...priced.values()].filter(({ entry }) => entry.platform === 'web'
     ? (entry.kind === 'web_fetch' ? offered.has('web_fetch') : offered.has('web_search'))
     : fetchable.includes(entry.platform) && (BENCHMARK_ROUTE_KINDS[entry.platform]!.kinds.includes(entry.kind as never)

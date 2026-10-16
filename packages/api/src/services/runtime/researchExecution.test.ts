@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 import { researchExecution, responseAfterResearch } from './researchExecution';
 import { frozenResearchTurn, RESEARCH_PHASE, RESEARCH_RESULT_RESERVE_BYTES, RESEARCH_TURN_VERSION } from './researchTurn';
 import { terminalReplyGuard } from './executorRpc';
@@ -149,5 +150,38 @@ describe('research events on the turn stream', () => {
     for await (const event of { [Symbol.asyncIterator]: () => stream }) seen.push(event);
     expect(seen.map(event => event.type === 'research_call' ? `call:${event.state}` : event.type)).toEqual(
       ['call:running', 'call:succeeded', 'research_card', 'text', 'call:running', 'result']);
+  });
+});
+
+describe('#1029 review fixes', () => {
+  it('a backpressured stream still delivers finished research events before the answer written after them', async () => {
+    let emit: (event: RuntimeProgress) => void = () => {};
+    let finish: () => void = () => {};
+    const stream = streamOriginalExecution(onProgress => { emit = onProgress; return new Promise(resolve => {
+      finish = () => resolve({ state: 'completed', body: '' }); }); }, undefined, 'opc.mentorTurnStream');
+    const first = stream.next();
+    const call = { type: 'research_call', callId: callId(1), toolName: 'web_search', args: {}, query: 'q', platform: 'web',
+      dataKind: 'web_search' } as const;
+    emit({ ...call, state: 'running' });
+    // The consumer has not pulled again while the subcall finishes and the model writes its answer.
+    emit({ ...call, state: 'succeeded' });
+    emit({ type: 'text', text: 'answer' });
+    finish();
+    const seen = [(await first).value];
+    for await (const event of { [Symbol.asyncIterator]: () => stream }) seen.push(event);
+    expect(seen.map(event => event.type === 'research_call' ? `call:${event.state}` : event.type))
+      .toEqual(['call:running', 'call:succeeded', 'text', 'result']);
+  });
+
+  it('web_search offers only the fast mode when no advanced route was frozen', async () => {
+    const { built } = build(true, database([]));
+    const schema = JSON.stringify(z.toJSONSchema(built.tools[0]!.parameters!));
+    expect(schema).toContain('"fast"');
+    expect(schema).not.toContain('"pro"');
+    const withPro = researchExecution({ research: { ...research, routes: [...research.routes,
+      { platform: 'web', kind: 'web_search_pro', vendor: 'parallel', route: 'parallel:search:advanced', backup: null, maxUnitsPerCall: '1' }] },
+    tools: ['web_search'], execution: execution(true), executionId, actorId: actor, database: database([]), emit: () => {}, canSend: () => true })!;
+    expect(JSON.stringify(z.toJSONSchema(withPro.tools[0]!.parameters!))).toContain('"pro"');
+    expect(withPro.definitionBytes).toBeGreaterThan(built.definitionBytes);
   });
 });

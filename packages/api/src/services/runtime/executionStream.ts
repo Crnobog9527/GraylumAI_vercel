@@ -193,16 +193,17 @@ export async function* streamOriginalExecution(run:(onProgress:(event:RuntimePro
  });
  try{
   while(!done||textEvent||researchEvents.length||cardEvent||phaseEvent||resultEvent){
-   if(textEvent){
+   // Queued research events (and text written before them) precede any later text: the turn's order (#1029 P2).
+   if(researchEvents.length){
+    const event=researchEvents.shift()!;
+    if((event.type==='text'||event.type==='textDelta')&&event.text){timing?.mark('firstPublicText');lastText=now();}
+    await visible?.();yield event;
+   }
+   else if(textEvent){
     const wait=(done&&!nativePending)||lastText===undefined?0:lastText+TEXT_EVENT_INTERVAL_MS-now();
     if(wait>0){await idle(wait);continue;}
     const event=nativePending?transport.flush()!:textEvent;nativePending=false;textEvent=undefined;lastText=now();
     if((event.type==='text'||event.type==='textDelta')&&event.text)timing?.mark('firstPublicText');
-    await visible?.();yield event;
-   }
-   else if(researchEvents.length){
-    const event=researchEvents.shift()!;
-    if((event.type==='text'||event.type==='textDelta')&&event.text){timing?.mark('firstPublicText');lastText=now();}
     await visible?.();yield event;
    }
    else if(cardEvent){const event=cardEvent;cardEvent=undefined;await visible?.();yield event;}

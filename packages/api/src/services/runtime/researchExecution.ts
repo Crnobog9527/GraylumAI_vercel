@@ -14,7 +14,7 @@ import type { ResearchToolContext } from '../research/runtime/toolContext';
 import { POSITIONING_RESEARCH_TOOLS, type ResearchToolName } from '../research/tools/schemas';
 import type { RuntimeExecution } from './paygResume';
 import { researchToolBytes } from './researchAdmission';
-import { researchRuntimeTools } from './researchRuntimeTool';
+import { fastSearchOnly, researchRuntimeTools } from './researchRuntimeTool';
 import { frozenResearchConfig, type FrozenResearchTurn } from './researchTurn';
 import type { RuntimeTool } from './runner';
 import type { SessionRpc } from './session';
@@ -71,7 +71,7 @@ export function researchExecution(input: {
   };
   return {
     tools: researchRuntimeTools(ctx, names),
-    definitionBytes: researchToolBytes(names), reserve: research.reserve,
+    definitionBytes: researchToolBytes(names, fastSearchOnly(ctx.config)), reserve: research.reserve,
     async isSubcall(sequence) {
       const call = (await readCalls()).find(item => item.sequence === sequence);
       return Boolean(call && call.providerId === call.id);

@@ -100,7 +100,7 @@ describe('admitResearchTurn (RT-3b PR-3)', () => {
     let asked = 0;
     await admitResearchTurn(input(full(), { fits: (bytes: number) => { asked = bytes; return true; } }));
     expect(asked).toBe(researchToolBytes(['propose_keywords', 'benchmark_discover', 'propose_more_candidates',
-      'benchmark_fetch', 'web_search', 'web_fetch']) + 24576);
+      'benchmark_fetch', 'web_search', 'web_fetch'], true) + 24576);
   });
 
   it('on staging uses only tool prices the test window approved exactly', async () => {
