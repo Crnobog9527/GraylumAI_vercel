@@ -39,3 +39,32 @@ describe('publish-monitor automatic review switch', () => {
       .rejects.toMatchObject({ code: 'NOT_FOUND', message: 'PUBLISH_MONITOR_CONNECTION_NOT_FOUND' });
   });
 });
+
+describe('publish-monitor one-click publishing', () => {
+  const biz = '00000000-0000-4000-8000-0000000f0003';
+  const conn = '00000000-0000-4000-8000-0000000f0004';
+  const submit = { idempotencyKey: 'key-00000001', businessId: biz, workItemId: null, connectionIds: [conn], caption: 'Hi',
+    media: [] };
+  it('refuses publishing without the entitlement before any database or provider work, and while paused', async () => {
+    mocks.entitlements.mockResolvedValue({ allowPublish: false });
+    const rpc = vi.fn();
+    await expect(caller(rpc, true).publish.submit(submit))
+      .rejects.toMatchObject({ code: 'FORBIDDEN', message: 'PUBLISH_MONITOR_ENTITLEMENT_REQUIRED' });
+    await expect(caller(rpc, true).publish.uploadUrl({ disclosureAccepted: true }))
+      .rejects.toMatchObject({ code: 'FORBIDDEN', message: 'PUBLISH_MONITOR_ENTITLEMENT_REQUIRED' });
+    mocks.entitlements.mockResolvedValue({ allowPublish: true });
+    await expect(caller(rpc, false).publish.submit(submit))
+      .rejects.toMatchObject({ code: 'FORBIDDEN', message: 'PUBLISH_MONITOR_DISABLED' });
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('an upload slot needs the confirmed disclosure; a job is readable only through the owner-scoped lookup', async () => {
+    await expect(caller(vi.fn(), true).publish.uploadUrl({ disclosureAccepted: false } as never))
+      .rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    const job = '00000000-0000-4000-8000-0000000f0005';
+    const rpc = vi.fn().mockResolvedValue({ data: null, error: { message: 'PUBLISH_MONITOR_JOB_NOT_FOUND' } });
+    await expect(caller(rpc, false).publish.job({ jobId: job }))
+      .rejects.toMatchObject({ code: 'NOT_FOUND', message: 'PUBLISH_MONITOR_JOB_NOT_FOUND' });
+    expect(rpc).toHaveBeenCalledWith('publish_monitor_publish_job', { a: actor, p_job: job });
+  });
+});

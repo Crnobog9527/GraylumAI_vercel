@@ -6,6 +6,7 @@ import {
   autoReviewInput, disconnectConnection, disconnectInput, listConnections, readPublishMonitorSettings, setAutoReview,
 } from '../services/publishMonitor/foundation';
 import { publishMonitorConnectRouter } from './publishMonitorConnect';
+import { publishMonitorPublishRouter } from './publishMonitorPublish';
 import { guarded as safe } from './publishMonitorGuard';
 
 /** PUBLISH-MONITOR: a user reads and changes only their own monitoring state; off until enabled by admin. */
@@ -30,4 +31,5 @@ export const publishMonitorRouter = router({
   disconnect: protectedProcedure.input(disconnectInput).mutation(({ ctx, input }) =>
     safe(ctx, () => disconnectConnection(ctx.supabaseAdmin, ctx.profileId, input), false)),
   connect: publishMonitorConnectRouter,
+  publish: publishMonitorPublishRouter,
 });
