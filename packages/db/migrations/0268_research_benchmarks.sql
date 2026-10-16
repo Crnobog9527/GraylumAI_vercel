@@ -19,7 +19,7 @@
 -- (and without benchmark rows): only the qualified-count gate applies to those. New code on an old database treats the
 -- missing research_benchmark_rows as an empty table. Repeatable: IF NOT EXISTS, CREATE OR REPLACE,
 -- DROP TRIGGER IF EXISTS, marker-skipped patches. Recovery: drop the trigger, functions and table, and restore
--- report_admission_check, bill2_payg_claim, research_account_fetch_finish, content_erasure_confirm and account_erasure_scrub_content
+-- report_admission_check, bill2_payg_claim, bill2_dispatch, research_account_fetch_finish, content_erasure_confirm and account_erasure_scrub_content
 -- from their previous definitions;
 -- the rows are re-derivable from research_account_fetches.
 BEGIN;
@@ -172,12 +172,12 @@ BEGIN
       AND round((m->'postsPerWeek'->>'value')::numeric*30/7,6) BETWEEN actual AND expected
       AND round((m->'postsPerWeek'->>'value')::numeric*30/7,6)=trunc(round((m->'postsPerWeek'->>'value')::numeric*30/7,6));
   END IF;
-  -- Otherwise the analyzed count is at least the distinct posts any number cites (the profile ref is not a post).
+  -- The analyzed count is exactly accountMetrics' newest 30 of this attempt's own account_posts operation.
   IF ok THEN
-    ok:=(m->>'postsAnalyzed')::integer>=(SELECT count(DISTINCT r) FROM jsonb_each(m) k
-      CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN k.key IN ('medianViews','engagementRate','postsPerWeek',
-        'lastPublishedAt','earliestPublishedAt') AND jsonb_typeof(k.value->'refs')='array' THEN k.value->'refs' ELSE '[]' END) r
-      WHERE r IS DISTINCT FROM m->'followers'->'refs'->>0);
+    ok:=coalesce((m->>'postsAnalyzed')::integer=(SELECT least(30,jsonb_array_length(o.result->'items'))
+      FROM research_operations o JOIN research_plans p ON p.id=o.plan_id
+      WHERE o.id=research_benchmark_operation_id(f.id,f.attempt,'account_posts') AND p.actor_id=f.actor_id
+        AND p.session_id=f.session_id AND o.state='succeeded' AND o.erased_at IS NULL AND jsonb_typeof(o.result->'items')='array'),false);
   END IF;
   -- The category must agree with the thresholds the numbers support.
   IF ok THEN
@@ -323,6 +323,26 @@ DO $$ DECLARE definition text; t text; BEGIN
     EXECUTE replace(definition,t,t||$x$
   -- 0268 benchmark claim
   PERFORM research_benchmark_report_current(a,r.session_ref,r.payload#>'{input,reportGeneration}');$x$);
+  END IF;
+END $$;
+
+-- The final checkpoint before the HTTP grant: a report model call is dispatched only while its frozen benchmark rows are
+-- still current (deleted or refreshed after the claim: not dispatched, like every other refusal here; the next claim
+-- then reports REPORT_SOURCE_CONFLICT). After the profile share lock, the same order as deletion.
+DO $$ DECLARE definition text; t text; BEGIN
+  definition:=pg_get_functiondef('public.bill2_dispatch(uuid,uuid,uuid,uuid,boolean,jsonb)'::regprocedure);
+  IF position('-- 0268 benchmark dispatch' IN definition)=0 THEN
+    t:=$x$ UPDATE bill2_calls SET state='dispatched',dispatched_at=clock_timestamp() WHERE id=c.id;$x$;
+    IF array_length(string_to_array(definition,t),1)<>2 THEN
+      RAISE EXCEPTION 'RESEARCH_BENCHMARK_SOURCE_MISMATCH: bill2_dispatch';END IF;
+    EXECUTE replace(definition,t,$x$ -- 0268 benchmark dispatch
+ IF r.payload#>'{input,reportGeneration}' IS NOT NULL THEN
+  BEGIN
+   PERFORM research_benchmark_report_current(p_actor_id,r.session_ref,r.payload#>'{input,reportGeneration}');
+  EXCEPTION WHEN raise_exception THEN RETURN jsonb_build_object('dispatch',false);
+  END;
+ END IF;
+$x$||t);
   END IF;
 END $$;
 

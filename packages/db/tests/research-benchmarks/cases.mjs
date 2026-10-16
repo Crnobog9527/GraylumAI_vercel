@@ -138,6 +138,8 @@ export async function runCases({db,Client,connectionString,report}) {
       postsPerWeek: x => {x.metrics.postsPerWeek.value=7;return x;},
       postsAnalyzed: x => {x.metrics.postsAnalyzed=30;return x;},
       postsAnalyzedLow: x => {x.metrics.postsAnalyzed=1;x.metrics.postsPerWeek={value:null,refs:[]};return x;},
+      // No frequency to cross-check: the count must still equal this attempt's own posts operation.
+      postsAnalyzedHigh: x => {x.metrics.postsAnalyzed=20;x.metrics.postsPerWeek={value:null,refs:[]};return x;},
       cappedFrequency: x => {x.metrics.wholeHistory=false;return x;},
       category: x => {x.classification={category:'imitable',qualified:true,excluded:null};x.metrics.followers.value=5000;return x;},
     };
@@ -179,7 +181,7 @@ export async function runCases({db,Client,connectionString,report}) {
     await db.query('BEGIN');
     try {
       await db.query('SET LOCAL ROLE service_role');
-      assert.equal((await db.query('SELECT research_benchmark_rows($1,$2) v',[f.actor,f.session])).rows[0].v.rows.length,15);
+      assert.equal((await db.query('SELECT research_benchmark_rows($1,$2) v',[f.actor,f.session])).rows[0].v.rows.length,16);
     } finally {await db.query('ROLLBACK');}
     await assert.rejects(db.query(`UPDATE research_benchmarks SET qualified=true,category='imitable',excluded=NULL,followers=5000,
       last_published_at=now(),posts_analyzed=1 WHERE fetch_id=$1`,[got.fetchId]),/check constraint/);
@@ -229,11 +231,18 @@ export async function runCases({db,Client,connectionString,report}) {
     const branch = claimDefinition.slice(claimDefinition.indexOf("IF r.payload#>'{input,reportGeneration}' IS NOT NULL THEN"));
     assert.match(branch.slice(0,branch.indexOf(' END IF;\n')+1200),
       /research_benchmark_report_current\(a,r\.session_ref,r\.payload#>'\{input,reportGeneration\}'\)/);
+    // ...and so does the final dispatch checkpoint: a stale hash there is "not dispatched", never an HTTP grant.
+    const dispatchDefinition = (await db.query(
+      "SELECT pg_get_functiondef('public.bill2_dispatch(uuid,uuid,uuid,uuid,boolean,jsonb)'::regprocedure) d")).rows[0].d;
+    const grant = dispatchDefinition.indexOf(" UPDATE bill2_calls SET state='dispatched'");
+    const guard = dispatchDefinition.indexOf("research_benchmark_report_current(p_actor_id,r.session_ref,r.payload#>'{input,reportGeneration}')");
+    assert.ok(guard>0 && guard<grant && dispatchDefinition.indexOf("profiles WHERE id=p_actor_id")<guard,'dispatch re-check before the grant');
+    assert.match(dispatchDefinition.slice(guard,grant),/EXCEPTION WHEN raise_exception THEN RETURN jsonb_build_object\('dispatch',false\)/);
     const current = async frozen => db.query('SELECT research_benchmark_report_current($1,$2,$3)',[f.actor,f.session,frozen]);
     const now = (await rpc(db,'research_benchmark_rows',f.actor,f.session)).hash;
     await current({benchmarkHash:now});
     await current({});
-    await assert.rejects(current({benchmarkHash:frozen}),/REPORT_SOURCE_CONFLICT/);
+    await assert.rejects(current({benchmarkHash:frozen}),error=>error.code==='P0001'&&/REPORT_SOURCE_CONFLICT/.test(error.message));
     // Deleting the answer that produced one qualified row drops it below 3: refused again.
     await erase(db,f,'answer',e2);
     assert.equal((await rows(db,'execution_id=$1',[e2])).length,0);
