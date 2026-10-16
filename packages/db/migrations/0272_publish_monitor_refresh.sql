@@ -235,7 +235,8 @@ BEGIN
  IF p_outcome='release' THEN
   UPDATE social_connections SET lease_owner=NULL,lease_expires_at=NULL,updated_at=clock_timestamp() WHERE id=c.id;
  ELSIF p_outcome IN ('done','partial') THEN
-  UPDATE social_connections SET refresh_day=today,refresh_state=p_outcome,refresh_error=NULL,last_success_at=clock_timestamp(),
+  UPDATE social_connections SET refresh_day=today,refresh_state=CASE p_outcome WHEN 'done' THEN 'ok' ELSE 'partial' END,
+   refresh_error=NULL,last_success_at=clock_timestamp(),
    refresh_attempts=0,empty_streak=0,empty_day=NULL,
    refresh_id=CASE WHEN p_outcome='done' THEN NULL ELSE refresh_id END,
    refresh_cursor=CASE WHEN p_outcome='done' THEN NULL ELSE refresh_cursor END,
