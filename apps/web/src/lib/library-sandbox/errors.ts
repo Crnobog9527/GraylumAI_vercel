@@ -38,6 +38,7 @@ export const SANDBOX_ERROR_CODES = [
   'PDF_STREAM_TOO_LARGE',
   'PDF_OBJECT_COUNT',
   'PDF_UNSUPPORTED',
+  'IMAGE_INVALID',
 ] as const;
 
 export type SandboxErrorCode = (typeof SANDBOX_ERROR_CODES)[number];
