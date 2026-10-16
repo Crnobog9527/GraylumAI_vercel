@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {describe, expect, it} from 'vitest';
-import {withPrimaryAddenda} from './primaryInstructions';
+import {REPLY_LANGUAGE_INSTRUCTIONS,withPrimaryAddenda} from './primaryInstructions';
 import {sourceToolBytes} from './sourceRuntimeTool';
 
 describe('workspace context instructions', () => {
@@ -25,7 +25,27 @@ describe('workspace context instructions', () => {
     expect(text).not.toContain('intended positioning or account is ambiguous');
   });
 
-  it('adds nothing for conversations without workspace context', () => {
-    expect(withPrimaryAddenda('base',{})).toBe('base');
+  it('adds only the reply-language rule for conversations without workspace context', () => {
+    expect(withPrimaryAddenda('base',{})).toBe('base'+REPLY_LANGUAGE_INSTRUCTIONS);
+  });
+});
+
+describe('reply language (SKILL-I18N-HOOK)', () => {
+  it('answers in the user language even though the Skill is written in Chinese', () => {
+    const text=withPrimaryAddenda('完整的中文 Skill 正文',{});
+    // Appended after the Skill, so cached Skill prefixes are unchanged.
+    expect(text.startsWith('完整的中文 Skill 正文\nReply language (host rule)')).toBe(true);
+    expect(text).toContain("in the user's language");
+    expect(text).toContain('question-card option and report text');
+    expect(text).toContain('Traditional Chinese with Taiwan usage');
+    expect(text).toContain('explicit request from the user for a particular language takes precedence');
+    expect(text).toContain('Simplified Chinese if that is unclear');
+    // Report headings are checked verbatim (report/contract.ts), so they must stay as written.
+    expect(text).toContain('required report headings, ids and JSON keys) unchanged');
+  });
+
+  it('applies with every other addendum, exactly once', () => {
+    const text=withPrimaryAddenda('base',{workspaceContext:true,network:'require_latest',positioningGate:'fallback-v1'});
+    expect(text.split('Reply language (host rule)')).toHaveLength(2);
   });
 });

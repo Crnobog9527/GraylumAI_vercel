@@ -25,7 +25,7 @@ import {StagingAccessError,stagingRpcFailure} from './stagingErrors';
 import {frozenCallPolicy, type FrozenPaygRun, type FrozenRun} from '../bill2/service';
 import { selectRuntimeHistory, fixtureInputCapacity, runtimeScopeInput } from './context';
 import { activateRuntimeCandidate, discoverRuntimeCandidates, fittingCandidates, matchingInput, MATCH_INSTRUCTIONS } from './matching';
-import { withPrimaryAddenda } from './primaryInstructions';
+import { REPLY_LANGUAGE_INSTRUCTIONS, withPrimaryAddenda } from './primaryInstructions';
 import { sourceToolBytes } from './sourceRuntimeTool';
 import { type ReasoningPolicy } from './reasoningPolicy';
 import { admitReasoning } from './reasoningAdmission';
@@ -243,8 +243,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    // Decisions judges every other gated message, including a non-social Skill turning to social media; an admitted
    // gated turn always keeps the fallback rule, since Decisions does not see earlier turns ("好的，那帮我写三条").
    const positioningFallback=gated&&await judgePositioning(policy.positioningGate!,{text:input.input,apiKey},capped);
-   // The executor appends this rule (withPrimaryAddenda); admission sizes it too, so a fitting turn never fails later.
-   const positioningRule=positioningFallback?POSITIONING_FALLBACK_INSTRUCTIONS:'';
+   // The executor appends these rules (withPrimaryAddenda); admission sizes them too, so a fitting turn never fails later.
+   const positioningRule=REPLY_LANGUAGE_INSTRUCTIONS+(positioningFallback?POSITIONING_FALLBACK_INSTRUCTIONS:'');
    if(input.selection.kind==='organizer')modelConfiguration(()=>assertSeparateSummaryModel(session.dialogueModel,row.data.model_id));
    let attachedOrganizer:{
     modelId:string;model:string;maxOutputTokens:number;inputBytes?:number;historyItems?:number;reasoning?:ReasoningPolicy;instructions?:string;input?:string

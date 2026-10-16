@@ -17,9 +17,19 @@ const WORKSPACE_CONTEXT_INSTRUCTIONS=
 const REQUIRE_LATEST_INSTRUCTIONS=
   '\nThe user requires current information. Use the permitted search tool before answering; tool availability alone is not '+
   'evidence that a search occurred. Do not claim verified current information without retrieved evidence.';
+// SKILL-I18N-HOOK (Owner 2026-10-12): Skills stay in Simplified Chinese; the AI answers in the user's language.
+// The model judges the language itself (docs/ENGINEERING.md section 6: no keyword or regex intent rules).
+export const REPLY_LANGUAGE_INSTRUCTIONS=
+  "\nReply language (host rule): the Skill and host instructions are written in Chinese, which is not the reply language. "+
+  "Write every user-facing reply, question, question-card option and report text in the user's language: the language "+
+  "of the user's latest message, or of their earlier messages when the latest one does not show it (for example only a "+
+  "number, link or name). When the user writes Traditional Chinese, use Traditional Chinese with Taiwan usage. An "+
+  "explicit request from the user for a particular language takes precedence. When this turn has no message written by "+
+  "the user, use the language of the user's own words in the supplied material, and Simplified Chinese if that is unclear. "+
+  'Keep exact strings the instructions require (such as required report headings, ids and JSON keys) unchanged.';
 export function withPrimaryAddenda(instructions:string,
   context:{workspaceContext?:boolean;network?:string;positioningGate?:string}):string {
-  return instructions+(context.workspaceContext?WORKSPACE_CONTEXT_INSTRUCTIONS:'')+
+  return instructions+REPLY_LANGUAGE_INSTRUCTIONS+(context.workspaceContext?WORKSPACE_CONTEXT_INSTRUCTIONS:'')+
     (context.network==='require_latest'?REQUIRE_LATEST_INSTRUCTIONS:'')+
     // POSITIONING-GATE: frozen at admission only when Decisions was unavailable for this turn.
     (context.positioningGate===POSITIONING_FALLBACK?POSITIONING_FALLBACK_INSTRUCTIONS:'');
