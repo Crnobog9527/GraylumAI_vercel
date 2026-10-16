@@ -6,7 +6,10 @@ const gt = Object.fromEntries(manifest.map((m) => [m.id, fs.readFileSync(`set/${
 fs.writeFileSync('data/ground-truth-2.json', JSON.stringify(gt, null, 1));
 fs.writeFileSync('data/manifest-2.json', JSON.stringify(manifest, null, 1));
 const outputs = {};
-for (const f of fs.readdirSync('results').filter((x) => x.endsWith('.json')).sort()) {
+// Only the step-2 tagged runs (TAG=set1 / TAG=set2 in the README); untagged or stale step-1 files never enter
+// outputs-2.json, so they cannot shadow the committed step-1 runs in rescore.mjs.
+const STEP2 = /^set[12]-[a-z0-9+-]+\.json$/;
+for (const f of fs.readdirSync('results').filter((x) => STEP2.test(x)).sort()) {
   const j = read(`results/${f}`);
   outputs[f.replace(/\.json$/, '')] = {
     initMs: j.initMs, rssPeakDelta: j.rssPeak - j.rssBaseline, leaks: j.leaks.length,
