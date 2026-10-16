@@ -4,6 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { logger } from '../../lib/logger';
 import { getAccount, type ClientDeps, type Outcome } from './postForMe/client';
+import { publicHttpsUrl } from './postForMe/http';
 import { createPost, createUploadUrl, findPostByExternalId, listPostResults, type UploadSlot } from './postForMe/posts';
 
 /**
@@ -18,7 +19,7 @@ const providerId = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/);
 export const MAX_CAPTION = 5000;
 const media = z.object({
   // The public URL Post for Me returned with the upload slot; a retry must upload again (plan §2.1).
-  mediaUrl: z.string().url().max(2048),
+  mediaUrl: z.string().max(2048).refine(url => publicHttpsUrl(url) !== null, 'MEDIA_URL_NOT_PUBLIC_HTTPS'),
   // Identifies the file for the idempotency fingerprint, so a re-upload of the same file is the same request. The browser
   // hashes the size plus the first and last 4 MB (bounded memory for large videos); identity only, not integrity.
   sha256: z.string().regex(/^[0-9a-f]{64}$/),
@@ -127,8 +128,14 @@ export async function submitPublish(db: Rpc, deps: ClientDeps, profileId: string
   const ready = await rpc(db, 'publish_monitor_publish_dispatch', { a: profileId, p_job: job.id, p_observed: observed },
     dispatched);
   if (!ready.dispatch || !ready.providerAccountIds) return ready;
-  const created = await createPost(deps, { externalId: job.id, caption: input.caption,
-    socialAccountIds: ready.providerAccountIds, mediaUrls: input.media.map(item => item.mediaUrl) });
+  let created: Awaited<ReturnType<typeof createPost>>;
+  try {
+    created = await createPost(deps, { externalId: job.id, caption: input.caption,
+      socialAccountIds: ready.providerAccountIds, mediaUrls: input.media.map(item => item.mediaUrl) });
+  } catch {
+    // createPost only throws while checking its input, before any request: provably not sent, so release now.
+    return rpc(db, 'publish_monitor_publish_release', { p_job: job.id, p_code: 'PUBLISH_MONITOR_REQUEST_INVALID' }, jobView);
+  }
   if (created.kind === 'rejected') {
     return rpc(db, 'publish_monitor_publish_release', { p_job: job.id,
       p_code: `PUBLISH_MONITOR_PROVIDER_REJECTED_${created.status}` }, jobView);

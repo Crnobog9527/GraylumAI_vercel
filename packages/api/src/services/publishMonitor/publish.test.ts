@@ -140,6 +140,23 @@ describe('submit publish (simulated provider)', () => {
     }
   });
 
+  it('refuses non-public media links before claiming; a create input error after dispatch releases (nothing was sent)',
+    async () => {
+      for (const url of ['http://example.com/a.jpg', 'ftp://example.com/a.jpg', 'https://localhost/a.jpg',
+        'https://10.0.0.1/a.jpg']) {
+        const d = database(fresh());
+        await expect(submitPublish(d.db, provider([]).deps, USER, { ...input, media: [{ ...input.media[0]!, mediaUrl: url }] }))
+          .rejects.toThrow();
+        expect(d.calls).toEqual([]);
+      }
+      const d = database({ ...fresh(), publish_monitor_publish_dispatch: [{ ...view('dispatching'), dispatch: true,
+        providerAccountIds: Array.from({ length: 10 }, (_, i) => `spc_${i}`) }] });
+      const p = provider([account('spc_x'), account('spc_y')]);
+      expect((await submitPublish(d.db, p.deps, USER, input)).state).toBe('failed');
+      expect(d.calls.at(-1)).toEqual(['publish_monitor_publish_release', { p_job: JOB, p_code: 'PUBLISH_MONITOR_REQUEST_INVALID' }]);
+      expect(p.calls.map(c => c.line)).not.toContain('POST /social-posts');
+    });
+
   it('maps database refusals to stable codes', async () => {
     for (const code of ['PUBLISH_MONITOR_IDEMPOTENCY_MISMATCH', 'PUBLISH_MONITOR_QUOTA_EXHAUSTED',
       'PUBLISH_MONITOR_INSUFFICIENT_CREDITS', 'PUBLISH_MONITOR_TARGET_INVALID']) {
