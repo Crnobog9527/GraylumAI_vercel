@@ -10,6 +10,7 @@ vi.mock('../services/runtime/admission', async original => {const actual=await o
 import { opcRouter } from './opc';
 import { runtimeRouter } from './runtime';
 import { router } from '../trpc';
+import { testPrimaryModel } from '../services/__tests__/fixtures/runtimeGates';
 // The window/configuration consistency of BILL-UNIT is covered in billingUnitAdmission.test.ts.
 vi.mock('../services/runtime/billingUnitAdmission', async (original) => ({
   ...(await original<typeof import('../services/runtime/billingUnitAdmission')>()),
@@ -17,6 +18,7 @@ vi.mock('../services/runtime/billingUnitAdmission', async (original) => ({
 }));
 const app = router({ opc: opcRouter, runtime: runtimeRouter });
 const actor = '00000000-0000-4000-8000-000000000001';
+testPrimaryModel.id = actor;
 const windowId = '00000000-0000-4000-8000-000000000002';
 const remote = {
   V3_RUNTIME_STAGING_ENABLED: 'true', VERCEL: '1', VERCEL_PROJECT_PRODUCTION_URL: 'auth-staging.graylum.com',
