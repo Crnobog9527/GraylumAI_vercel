@@ -19,7 +19,7 @@ import styles from './h.module.css';
 export function PriceH({ data, membershipHref }: { data: LandingData; membershipHref: string }) {
   const { pricing, compareRows: rows } = data;
   return (
-    <section id="pricing" aria-labelledby="pricing-title" className={cn(styles.section, styles.deferred)}>
+    <section id="pricing" aria-labelledby="pricing-title" className={cn(styles.section, styles.deferred)} data-region="价格">
       <div className={styles.sectionHead}>
         <Heading id="pricing-title" text={PRICE_COMPARE.title} />
         {pricing.founderOpen ? (
@@ -32,7 +32,7 @@ export function PriceH({ data, membershipHref }: { data: LandingData; membership
 
       <div className={styles.priceGrid}>
         {rows.length > 0 ? (
-          <div className={cn(styles.compare, styles.glass, depthClass.reveal)} data-reveal="">
+          <div className={cn(styles.compare, styles.glass, depthClass.reveal)} data-reveal="" data-region="费用对比">
             <p className={styles.compareLede}>{PRICE_COMPARE.lede}</p>
             <ul>
               {rows.map((row, index) => (
@@ -52,7 +52,7 @@ export function PriceH({ data, membershipHref }: { data: LandingData; membership
             会员方案暂时读不到，请稍后刷新，或先看<Link href="/landing/pricing">价格页</Link>。
           </p>
         )}
-        <div className={cn(styles.risk, styles.glass, depthClass.reveal)} data-reveal="" style={{ '--d': 1 } as CSSProperties}>
+        <div className={cn(styles.risk, styles.glass, depthClass.reveal)} data-reveal="" data-region="放心承诺" style={{ '--d': 1 } as CSSProperties}>
           <p className={styles.riskTitle}>{RISK_REVERSAL.title}</p>
           <ul>{data.risk.map(point => <li key={point.text}><Check size={15} aria-hidden="true" />{point.text}</li>)}</ul>
         </div>

@@ -29,7 +29,7 @@ export function SamplesJ() {
   const report = J_SAMPLES.reports[active];
   const data = SAMPLE_CHAPTERS[report.slug];
   return (
-    <div className={styles.samples}>
+    <div className={styles.samples} data-region="样例报告">
       <div className={styles.head}>
         <h2 className={page.display}>{J_SAMPLES.title}</h2>
         <p>{J_SAMPLES.lede}</p>

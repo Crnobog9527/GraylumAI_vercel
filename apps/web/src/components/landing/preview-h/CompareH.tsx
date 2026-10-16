@@ -34,7 +34,7 @@ export function CompareH() {
       </div>
       <ol className={styles.rows}>
         {H_COMPARE.rows.map((row, index) => (
-          <li key={row.coach} className={styles.row}>
+          <li key={row.coach} className={styles.row} data-region="对比行">
             <div className={styles.mess}>
               <p><span className={styles.who}>{H_COMPARE.generic}</span>{row.generic}</p>
               <div className={styles.scene} aria-hidden="true">{scenes[index]}</div>

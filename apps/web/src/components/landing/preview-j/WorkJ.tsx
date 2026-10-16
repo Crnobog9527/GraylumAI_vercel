@@ -78,7 +78,7 @@ export function WorkJ({ flags }: { flags: LandingFlags }) {
   };
 
   return (
-    <section aria-labelledby="work-title" className={page.section} data-zone="work" data-band="tint">
+    <section aria-labelledby="work-title" className={page.section} data-zone="work" data-band="tint" data-region="省心事项">
       <div className={page.wrap}>
         <div className={page.sectionHead}>
           <h2 id="work-title" className={page.display}>
@@ -88,7 +88,7 @@ export function WorkJ({ flags }: { flags: LandingFlags }) {
         </div>
         <p className={styles.hint}><MousePointerClick size={17} aria-hidden="true" />{J_WORK.hint}</p>
         <div ref={ref} className={styles.player} data-pulse={pulse || undefined}>
-          <nav className={styles.list} aria-label={J_WORK.groups.join('；')}>
+          <nav className={styles.list} data-region="场景列表" aria-label={J_WORK.groups.join('；')}>
             {[0, 1].map(group => (
               <div key={group} className={styles.group}>
                 <p className={styles.groupTitle}>{J_WORK.groups[group]}</p>
@@ -123,7 +123,7 @@ export function WorkJ({ flags }: { flags: LandingFlags }) {
             const at = index === current ? open : item.steps.length - 1;
             const shown = item.steps[at];
             return (
-              <div key={item.id} hidden={index !== current} className={styles.panel}>
+              <div key={item.id} hidden={index !== current} className={styles.panel} data-region="演示窗口">
                 <div className={styles.window} inert aria-hidden="true">
                   <div className={styles.bar}>
                     <span className={styles.dots}><i /><i /><i /></span><span className={styles.badge}>{DEMO_LABEL}</span>

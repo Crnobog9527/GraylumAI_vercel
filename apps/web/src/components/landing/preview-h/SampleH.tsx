@@ -63,7 +63,7 @@ export function SampleH({ data, siteName, membershipHref }: { data: LandingData;
         <FinalH showStack={data.showStack} founderSeats={data.founderSeats} note={data.heroNote} />
       </main>
 
-      <footer className={styles.footer}>
+      <footer className={styles.footer} data-region="页脚">
         <nav aria-label="页脚">
           {CHROME.nav.map(link => <Link key={link.href} href={link.href}>{link.label}</Link>)}
           <Link href={LOGIN_HREF}>{CHROME.login}</Link>

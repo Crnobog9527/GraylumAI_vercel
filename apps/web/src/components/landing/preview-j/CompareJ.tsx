@@ -34,7 +34,7 @@ export function pairTiming(generic: string, coach: string, coachFirst = false) {
  */
 export function CompareJ() {
   return (
-    <section aria-labelledby="compare-title" className={page.section} data-zone="compare" data-band="ink">
+    <section aria-labelledby="compare-title" className={page.section} data-zone="compare" data-band="ink" data-region="对比区">
       <div className={page.wrap}>
         <h2 id="compare-title" className={styles.title}>
           {H_COMPARE.title.split(/(?<=，)|(?=带你)/).map(part => <span key={part} className={styles.phrase}>{part}</span>)}
@@ -50,7 +50,7 @@ export function CompareJ() {
               const first = 'coachFirst' in pair && pair.coachFirst;
               const timing = pairTiming(generic, pair.coach, first);
               return (
-                <li key={pair.question} data-row="" className={styles.pair} style={{
+                <li key={pair.question} data-row="" className={styles.pair} data-region="对比卡片" style={{
                   '--generic-at': `${timing.genericStart}ms`, '--coach-at': `${timing.coachStart}ms`,
                 } as CSSProperties}>
                   <div className={styles.cell} data-side="generic">

@@ -63,12 +63,12 @@ export function PriceJ({ proMonthly, rows }: { proMonthly: number | null; rows: 
   const allRows = J_PRICE_TOTAL.rows.every(id => rows.some(row => row.sourceId === id));
   const counting = phase !== 'rest' && phase !== 'wait';
   return (
-    <section id="pricing" aria-labelledby="pricing-title" className={page.section} data-zone="price">
+    <section id="pricing" aria-labelledby="pricing-title" className={page.section} data-zone="price" data-region="价格">
       <div className={page.wrap}>
         <h2 id="pricing-title" className={`${page.display} ${styles.title}`}>{J_PRICE.title}</h2>
         <div className={styles.compareCost}>
           <h3>{J_PRICE.compareTitle}</h3>
-          <div ref={tableRef}>
+          <div ref={tableRef} data-region="费用对比表">
             <ul data-play={tableSeen || undefined}>
               {rows.map((row, index) => (
                 <li key={row.sourceId} style={{ '--i': index } as CSSProperties}>
@@ -79,7 +79,7 @@ export function PriceJ({ proMonthly, rows }: { proMonthly: number | null; rows: 
               ))}
             </ul>
           </div>
-          <div ref={versusRef} className={styles.versus} data-phase={phase}>
+          <div ref={versusRef} className={styles.versus} data-phase={phase} data-region="Graylum 价格">
             {allRows ? (
               <p className={styles.total}>
                 <span>{J_PRICE_TOTAL.label}</span>

@@ -16,12 +16,12 @@ export function rewordFaq(text: string) {
 export function FaqJ({ groups }: { groups: readonly LandingFaqGroup[] }) {
   if (groups.length === 0) return null;
   return (
-    <section id="faq" aria-labelledby="faq-title" className={page.section} data-zone="faq" data-band="tint">
+    <section id="faq" aria-labelledby="faq-title" className={page.section} data-zone="faq" data-band="tint" data-region="常见问题">
       <div className={page.wrap}>
         <h2 id="faq-title" className={page.display}>{LANDING_FAQ_TITLE}</h2>
         <div className={styles.faqGroups}>
           {groups.map(group => (
-            <div key={group.title} className={styles.faqGroup}>
+            <div key={group.title} className={styles.faqGroup} data-region="问题分组">
               <h3>{group.title}</h3>
               {group.items.map(item => (
                 <details key={item.id} id={item.id} className={styles.faqItem}>
@@ -44,7 +44,7 @@ export function FaqJ({ groups }: { groups: readonly LandingFaqGroup[] }) {
 /** The close. "先免费试" is a free-trial promise: it shows only while the sign-up grant that pays for the trial is on. */
 export function FinalJ({ freeTrial }: { freeTrial: boolean }) {
   return (
-    <section aria-labelledby="final-title" className={page.section} data-zone="final">
+    <section aria-labelledby="final-title" className={page.section} data-zone="final" data-region="结尾行动">
       <div className={page.wrap}>
         <div className={styles.final}>
           <h2 id="final-title" className={page.display}>{J_FINAL.title}</h2>

@@ -16,9 +16,9 @@ import { WeekJ } from './WeekJ';
  */
 export function HeroJ({ note }: { note: string }) {
   return (
-    <section aria-labelledby="hero-title" className={hero.hero} data-zone="hero">
+    <section aria-labelledby="hero-title" className={hero.hero} data-zone="hero" data-region="首屏">
       <div className={cn(styles.wrap, hero.grid)}>
-        <div className={hero.text}>
+        <div className={hero.text} data-region="标题和按钮">
           <h1 id="hero-title" className={hero.title}>
             <span>{HERO.title.slice(0, HERO.title.lastIndexOf(' '))}</span>
             <span>{HERO.title.slice(HERO.title.lastIndexOf(' ') + 1)}</span>

@@ -12,7 +12,7 @@ import page from './j.module.css';
  */
 export function SiteFooterJ() {
   return (
-    <footer className={styles.footer}>
+    <footer className={styles.footer} data-region="页脚">
       <div className={page.wrap}>
         <nav className={styles.columns} aria-label={J_FOOTER.label}>
           {J_FOOTER.columns.map(column => (

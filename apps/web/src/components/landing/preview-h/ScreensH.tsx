@@ -20,7 +20,7 @@ export function audienceParts(text: string) {
  */
 export function AudienceH() {
   return (
-    <section aria-labelledby="audience-title" className={cn(styles.section, hero.audience)}>
+    <section aria-labelledby="audience-title" className={cn(styles.section, hero.audience)} data-region="适合谁">
       <h2 id="audience-title" className="sr-only">{HERO_H.audience}</h2>
       <ul className={hero.people} aria-hidden="true">
         {audienceParts(HERO_H.audience).map((part, index) => {
@@ -43,7 +43,7 @@ export function AudienceH() {
  */
 export function WhyH() {
   return (
-    <section aria-labelledby="why-title" className={cn(styles.section, hero.why)}>
+    <section aria-labelledby="why-title" className={cn(styles.section, hero.why)} data-region="为什么不用通用 AI">
       <h2 id="why-title" className={hero.whyTitle}>{HERO_H.difference}</h2>
       <CompareH />
     </section>

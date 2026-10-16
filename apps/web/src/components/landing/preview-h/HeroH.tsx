@@ -19,8 +19,8 @@ import hero from './hero-h.module.css';
  */
 export function HeroH({ note }: { note: string }) {
   return (
-    <section aria-labelledby="hero-title" className={hero.hero}>
-      <div className={hero.center}>
+    <section aria-labelledby="hero-title" className={hero.hero} data-region="首屏">
+      <div className={hero.center} data-region="标题和按钮">
         <h1 id="hero-title" className={hero.title}><SplitText text={HERO.title} mode="load" /></h1>
         <p className={hero.promise}>{HERO.promise}</p>
         <div className={hero.actions}>
@@ -30,7 +30,7 @@ export function HeroH({ note }: { note: string }) {
           <p className={hero.note}>{note}</p>
         </div>
       </div>
-      <div className={cn(hero.product, depthClass.parallax)} style={{ '--speed': 0.3 } as CSSProperties}>
+      <div className={cn(hero.product, depthClass.parallax)} style={{ '--speed': 0.3 } as CSSProperties} data-region="产品画面">
         <div className={styles.demoFrame}><LazyDemo start="summary" /></div>
       </div>
     </section>

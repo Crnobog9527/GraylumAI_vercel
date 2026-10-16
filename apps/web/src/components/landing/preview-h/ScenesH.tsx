@@ -94,7 +94,7 @@ export function ScenesH({ steps }: { steps: readonly FlowStep[] }) {
   }
 
   return (
-    <div ref={rootRef} className={styles.scenes}>
+    <div ref={rootRef} className={styles.scenes} data-region="九步对话">
       <div ref={tabsRef} role="tablist" aria-label="九个场景" aria-orientation="vertical" className={styles.toc}>
         {steps.map((step, index) => (
           <button key={step.id} id={`h-${step.id}-tab`} type="button" role="tab" aria-selected={index === current}

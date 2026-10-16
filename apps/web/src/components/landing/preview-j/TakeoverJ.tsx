@@ -76,12 +76,12 @@ export function TakeoverJ({ intro }: { intro?: ReactNode }) {
 
   if (!locked) {
     return (
-      <section id="how-it-works" aria-labelledby="takeover-title" className={cn(page.section, styles.static)} data-zone="takeover">
+      <section id="how-it-works" aria-labelledby="takeover-title" className={cn(page.section, styles.static)} data-zone="takeover" data-region="接手演示">
         <div className={page.wrap}>
           <h2 id="takeover-title" className={page.display}>{HOW_IT_WORKS.title}</h2>
           {intro}
           {J_TAKEOVER_MOMENTS.map((moment, index) => (
-            <article key={moment.id} className={styles.staticStep}>
+            <article key={moment.id} className={styles.staticStep} data-region="接手步骤">
               <div className={styles.caption}><h3>{moment.caption}</h3><p>{moment.note}</p></div>
               <div className={styles.picture}><PositioningClipJ moment={index} local={1} /></div>
             </article>
@@ -94,9 +94,9 @@ export function TakeoverJ({ intro }: { intro?: ReactNode }) {
   const { index, local } = chapterAt(progress);
   const moment = J_TAKEOVER_MOMENTS[index];
   return (
-    <div className={styles.outer} data-zone="takeover">
+    <div className={styles.outer} data-zone="takeover" data-region="接手演示">
       {intro ? <div className={cn(page.wrap, styles.intro)}>{intro}</div> : null}
-      <section ref={ref} id="how-it-works" aria-labelledby="takeover-title" className={styles.takeover}>
+      <section ref={ref} id="how-it-works" aria-labelledby="takeover-title" className={styles.takeover} data-region="接手动画">
         <div className={styles.stage}>
           <div className={cn(page.wrap, styles.frame)}>
             <div className={styles.head}>

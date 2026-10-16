@@ -92,7 +92,7 @@ export function WeekJ() {
   const stage = shown[shown.length - 1]?.stage ?? 0;
   const firstOfStage = shown.findIndex(line => line.stage === stage);
   return (
-    <figure ref={ref} className={styles.stage} aria-label={J_WEEK.label} data-stage={stage}>
+    <figure ref={ref} className={styles.stage} aria-label={J_WEEK.label} data-stage={stage} data-region="一周演示">
       <ol className={styles.stages} aria-label={J_WEEK.pickLabel}>
         {J_WEEK.stages.map((name, index) => {
           const Icon = STAGE_ICONS[index];

@@ -21,14 +21,14 @@ export function VoiceWallJ({ notes }: { notes: readonly VoiceNote[] }) {
   if (notes.length === 0) return null;
   const ordered = [...notes.filter(note => note.id === FIRST), ...notes.filter(note => note.id !== FIRST)];
   return (
-    <section aria-labelledby="voice-title" className={styles.section} data-zone="voice" data-band="tint">
+    <section aria-labelledby="voice-title" className={styles.section} data-zone="voice" data-band="tint" data-region="用户心声">
       <div className={styles.wrap}>
         <div className={styles.sectionHead}>
           <h2 id="voice-title" className={styles.display}>{J_VOICE.title}</h2>
         </div>
         <ol id="j-voice-wall" className={styles.voiceRows}>
           {ordered.map((note, index) => (
-            <li key={note.id} data-row="" className={styles.voiceRow}>
+            <li key={note.id} data-row="" className={styles.voiceRow} data-region="心声卡片">
               <figure className={styles.note} style={{ '--tilt': TILTS[index % TILTS.length] } as CSSProperties}>
                 <blockquote>「{note.quote}」</blockquote>
                 <figcaption>{noteSource(note.id, note.source)}{note.translated ? ` · ${VOICE_WALL.translatedLabel}` : ''}</figcaption>
