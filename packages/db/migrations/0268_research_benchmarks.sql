@@ -128,6 +128,26 @@ BEGIN
     expected:=(m->'engagementRate'->>'value')::double precision;
     ok:=coalesce(ok,false) AND abs(actual-expected)<=1e-9*greatest(1,abs(expected));
   END IF;
+  -- Weekly frequency (accountMetrics: posts in the 30 days before the fetch × 7 ÷ 30, known only when every analyzed
+  -- post is dated) is recounted from its refs, which are then exactly the analyzed posts. The metrics time precedes
+  -- fetchedAt by moments, so a post on the window edge may count either way (5 minutes, as for qualification).
+  IF ok AND m->'postsPerWeek'->'value'<>'null'::jsonb THEN
+    SELECT bool_and(jsonb_typeof(x->'publishedAt')='string' AND pg_input_is_valid(x->>'publishedAt','timestamp with time zone')),
+      count(*) FILTER (WHERE (x->>'publishedAt')::timestamptz>=(e->>'fetchedAt')::timestamptz-interval '30 days'),
+      count(*) FILTER (WHERE (x->>'publishedAt')::timestamptz>=(e->>'fetchedAt')::timestamptz-interval '30 days 5 minutes')
+      INTO ok,actual,expected FROM (SELECT research_benchmark_item(f.actor_id,f.session_id,r) x
+        FROM jsonb_array_elements_text(m->'postsPerWeek'->'refs') r) z;
+    ok:=coalesce(ok,false) AND jsonb_array_length(m->'postsPerWeek'->'refs')=(m->>'postsAnalyzed')::integer
+      AND round((m->'postsPerWeek'->>'value')::numeric*30/7,6) BETWEEN actual AND expected
+      AND round((m->'postsPerWeek'->>'value')::numeric*30/7,6)=trunc(round((m->'postsPerWeek'->>'value')::numeric*30/7,6));
+  END IF;
+  -- Otherwise the analyzed count is at least the distinct posts any number cites (the profile ref is not a post).
+  IF ok THEN
+    ok:=(m->>'postsAnalyzed')::integer>=(SELECT count(DISTINCT r) FROM jsonb_each(m) k
+      CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN k.key IN ('medianViews','engagementRate','postsPerWeek',
+        'lastPublishedAt','earliestPublishedAt') AND jsonb_typeof(k.value->'refs')='array' THEN k.value->'refs' ELSE '[]' END) r
+      WHERE r IS DISTINCT FROM m->'followers'->'refs'->>0);
+  END IF;
   -- The category must agree with the thresholds the numbers support.
   IF ok THEN
     ok:=CASE
@@ -145,7 +165,7 @@ BEGIN
     CASE WHEN ok THEN (m->'engagementRate'->>'value')::numeric END,CASE WHEN ok THEN (m->'postsPerWeek'->>'value')::numeric END,
     CASE WHEN ok THEN (m->'lastPublishedAt'->>'value')::timestamptz END,
     CASE WHEN ok THEN (m->'earliestPublishedAt'->>'value')::timestamptz END,
-    (m->>'postsAnalyzed')::integer,
+    CASE WHEN ok THEN (m->>'postsAnalyzed')::integer ELSE 0 END,
     CASE WHEN ok THEN c->>'category' END,ok AND (c->'qualified')::boolean,
     CASE WHEN ok THEN c->>'excluded' ELSE 'EVIDENCE_UNVERIFIED' END,
     refs,ARRAY(SELECT DISTINCT x FROM unnest(ops) x ORDER BY x),
@@ -189,11 +209,12 @@ $$;
 
 -- The host-computed table for report facts: this session's live rows, no supplier cost or raw evidence, and the hash
 -- report admission re-checks (the rows a report is admitted with are exactly the rows still present).
-CREATE OR REPLACE FUNCTION public.research_benchmark_rows(a uuid, s uuid) RETURNS jsonb
-LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+-- research_benchmark_table takes no locks (report admission already holds the session); research_benchmark_rows is the
+-- service entry with the usual ownership check.
+CREATE OR REPLACE FUNCTION public.research_benchmark_table(a uuid, s uuid) RETURNS jsonb
+LANGUAGE plpgsql STABLE SET search_path=public,pg_temp AS $$
 DECLARE output jsonb;
 BEGIN
-  PERFORM research_session_owned(a,s,NULL);
   SELECT coalesce(jsonb_agg(jsonb_build_object('platform',b.platform,'account',b.account,'followers',b.followers,
     'medianViews',b.median_views,'engagementRate',b.engagement_rate,'postsPerWeek',b.posts_per_week,
     'lastPublishedAt',b.last_published_at,'postsAnalyzed',b.posts_analyzed,'category',b.category,'qualified',b.qualified,
@@ -204,6 +225,12 @@ BEGIN
     WHERE b.actor_id=a AND b.session_id=s AND x.content_deleted_at IS NULL AND x.erased_at IS NULL
     ORDER BY b.qualified DESC,b.followers DESC NULLS LAST,b.platform,b.account LIMIT 30) b;
   RETURN jsonb_build_object('rows',output,'hash',encode(sha256(convert_to(output::text,'utf8')),'hex'));
+END $$;
+CREATE OR REPLACE FUNCTION public.research_benchmark_rows(a uuid, s uuid) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+BEGIN
+  PERFORM research_session_owned(a,s,NULL);
+  RETURN research_benchmark_table(a,s);
 END $$;
 
 -- Report gate, after every existing report refusal so those keep their codes.
@@ -218,8 +245,11 @@ DO $$ DECLARE definition text; t text; BEGIN
  IF research_benchmark_qualified(a,sid)<research_benchmark_required((SELECT scope FROM runtime_sessions WHERE id=sid),spec) THEN
   RAISE EXCEPTION 'REPORT_BENCHMARKS_REQUIRED';END IF;
  -- The benchmark rows frozen into the report instructions must still be the current ones (deleted or refreshed since:
- -- conflict), checked under the same locks as deletion, like snapshotHash above.
- IF (research_benchmark_rows(a,sid)->>'hash') IS DISTINCT FROM context#>>'{reportGeneration,benchmarkHash}' THEN
+ -- conflict). runtime_admit holds the session FOR UPDATE, so no new fetch can be claimed; share-locking this session's
+ -- fetch rows first makes a finish (and its benchmark trigger) either commit before the hash is read or wait for this
+ -- admission. Same order as deletion: session, then fetch rows.
+ PERFORM 1 FROM research_account_fetches WHERE session_id=sid FOR SHARE;
+ IF (research_benchmark_table(a,sid)->>'hash') IS DISTINCT FROM context#>>'{reportGeneration,benchmarkHash}' THEN
   RAISE EXCEPTION 'REPORT_SOURCE_CONFLICT';END IF;$x$);
   END IF;
 END $$;
@@ -253,7 +283,8 @@ $x$||r);
 END $$;
 
 REVOKE ALL ON FUNCTION public.research_benchmark_item(uuid,uuid,text),public.research_benchmark_project(research_account_fetches),
-  public.research_benchmark_sync(),public.research_benchmark_qualified(uuid,uuid),public.research_benchmark_required(jsonb,jsonb)
+  public.research_benchmark_sync(),public.research_benchmark_qualified(uuid,uuid),public.research_benchmark_required(jsonb,jsonb),
+  public.research_benchmark_table(uuid,uuid)
   FROM PUBLIC,anon,authenticated,service_role;
 REVOKE ALL ON FUNCTION public.research_benchmark_rows(uuid,uuid) FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON FUNCTION public.research_benchmark_rows(uuid,uuid) TO service_role;

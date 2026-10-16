@@ -36,10 +36,10 @@ async function operation(db,f,e,items) {
 }
 const post = (days,views,extra={}) => ({publishedAt:new Date(Date.now()-days*DAY).toISOString(),views,likes:10,comments:5,shares:1,...extra});
 
-export async function runCases({db,report}) {
+export async function runCases({db,Client,connectionString,report}) {
   const {accountMetrics,classifyAccount} = await benchmarkCode();
   /** Supplier evidence → benchmark_fetch's own computation → the fetch cache, exactly as the tool does it. */
-  async function fetchAccount(f,e,account,{followers,posts,tamper,refresh,profileOp}) {
+  async function fetchAccount(f,e,account,{followers,posts,tamper,refresh,profileOp,deferFinish}) {
     const profile = profileOp ?? await operation(db,f,e,[followers===null?{}:{followers}]);
     const postOp = await operation(db,f,e,posts);
     const now = new Date();
@@ -50,8 +50,9 @@ export async function runCases({db,report}) {
     const claim = await rpc(db,'research_account_fetch_claim',f.actor,f.session,e,'tiktok',account,refresh??null);
     assert.equal(claim.claimed,true);
     assert.equal(await rpc(db,'research_account_fetch_dispatch',f.actor,claim.fetchId,claim.attempt),true);
-    await rpc(db,'research_account_fetch_finish',f.actor,claim.fetchId,claim.attempt,'succeeded',evidence);
-    return {fetchId:claim.fetchId,evidence,postOp,profile};
+    const finish = (client=db) => rpc(client,'research_account_fetch_finish',f.actor,claim.fetchId,claim.attempt,'succeeded',evidence);
+    if (!deferFinish) await finish();
+    return {fetchId:claim.fetchId,evidence,postOp,profile,finish};
   }
   const imitable = {followers:50000,posts:[post(2,9000),post(5,11000),post(9,10000)]};
   const failures = [];
@@ -97,6 +98,9 @@ export async function runCases({db,report}) {
       unknownRef: x => {x.metrics.followers.refs=[randomUUID()+'#1'];return x;},
       itemOutOfRange: x => {x.metrics.medianViews.refs=[x.metrics.medianViews.refs[0].replace(/#\d+$/,'#9')];return x;},
       textRef: x => {x.metrics.followers.refs=['model-said-so'];return x;},
+      postsPerWeek: x => {x.metrics.postsPerWeek.value=7;return x;},
+      postsAnalyzed: x => {x.metrics.postsAnalyzed=30;return x;},
+      postsAnalyzedLow: x => {x.metrics.postsAnalyzed=1;x.metrics.postsPerWeek={value:null,refs:[]};return x;},
       category: x => {x.classification={category:'imitable',qualified:true,excluded:null};x.metrics.followers.value=5000;return x;},
     };
     for (const [name,tamper] of Object.entries(forged)) {
@@ -128,21 +132,22 @@ export async function runCases({db,report}) {
     await db.query('BEGIN');
     try {
       await db.query('SET LOCAL ROLE service_role');
-      assert.equal((await db.query('SELECT research_benchmark_rows($1,$2) v',[f.actor,f.session])).rows[0].v.rows.length,9);
+      assert.equal((await db.query('SELECT research_benchmark_rows($1,$2) v',[f.actor,f.session])).rows[0].v.rows.length,12);
     } finally {await db.query('ROLLBACK');}
     await assert.rejects(db.query(`UPDATE research_benchmarks SET qualified=true,category='imitable',excluded=NULL,followers=5000,
       last_published_at=now(),posts_analyzed=1 WHERE fetch_id=$1`,[got.fetchId]),/check constraint/);
   });
 
   // Report gate: same admission checkpoint as every other report refusal (report_admission_check).
-  const gate = async (f,benchmarkHash) => {
+  const gate = (f,benchmarkHash) => gateOn(db,f,benchmarkHash);
+  async function gateOn(client,f,benchmarkHash) {
     const source = await rpc(db,'report_source',f.actor,f.session,f.project,f.round);
     if (benchmarkHash===undefined) benchmarkHash = (await rpc(db,'research_benchmark_rows',f.actor,f.session)).hash;
     const context = {reportGeneration:{snapshotHash:source.snapshotHash,projectId:f.project,roundId:f.round,
       sections:['One','Two'],maxCharacters:12000,...(benchmarkHash?{benchmarkHash}:{})},role:'skill',maxTurns:1,historyItems:0,network:'deny',tools:[],sources:[],
       purposeBudget:{purpose:'report'},revisionId:f.revision,moduleId:f.module};
-    return db.query('SELECT report_admission_check($1,$2,$3,$4)',[f.actor,f.session,context,{contractVersion:'bill2.v2'}]);
-  };
+    return client.query('SELECT report_admission_check($1,$2,$3,$4)',[f.actor,f.session,context,{contractVersion:'bill2.v2'}]);
+  }
   await db.query(`INSERT INTO system_settings(key,value) VALUES('runtime_report_generation','{"enabled":true}')
     ON CONFLICT (key) DO UPDATE SET value=excluded.value`);
   await check('RT-4b positioning report refused below 3 qualified of this session (must-test 6)', async () => {
@@ -227,6 +232,39 @@ export async function runCases({db,report}) {
     const facts = (await rpc(db,'research_benchmark_rows',f.actor,f.session)).rows;
     assert.deepEqual(facts.map(x=>[x.account,x.qualified]),[['again',true]]);
     assert.ok(!JSON.stringify(facts).includes('cost'));
+  });
+  await check('RT-4b a fetch finishing during report admission is serialized with it (no stale report)', async () => {
+    const f = await seed(db), e = await answer(db,f);
+    for (const account of ['c1','c2','c3']) await fetchAccount(f,e,account,imitable);
+    const late = await fetchAccount(f,e,'late',{...imitable,deferFinish:true});
+    const admit = new Client({connectionString}), finisher = new Client({connectionString});
+    await admit.connect();await finisher.connect();
+    const blocked = async promise => Promise.race([promise.then(()=>false,()=>false),new Promise(r=>setTimeout(()=>r(true),700))]);
+    try {
+      // Admission first: the finish waits until the admitted report (built on the rows it saw) commits.
+      const before = (await rpc(db,'research_benchmark_rows',f.actor,f.session)).hash;
+      await admit.query('BEGIN');
+      await admit.query('SELECT 1 FROM runtime_sessions WHERE id=$1 FOR UPDATE',[f.session]);
+      await gateOn(admit,f,before);
+      const finishing = late.finish(finisher);
+      assert.equal(await blocked(finishing),true,'finish waits for the admission');
+      await admit.query('COMMIT');
+      await finishing;
+      assert.equal((await rows(db,'fetch_id=$1',[late.fetchId])).length,1);
+      // Finish first (uncommitted): admission waits for it, then sees the new rows and refuses the stale hash.
+      const grant = await rpc(db,'research_refresh_create',f.actor,f.session,'tiktok','late');
+      const stale = (await rpc(db,'research_benchmark_rows',f.actor,f.session)).hash;
+      const again = await fetchAccount(f,await answer(db,f),'late',{followers:70000,posts:[post(1,8000)],refresh:grant,deferFinish:true});
+      await finisher.query('BEGIN');
+      await again.finish(finisher);
+      await admit.query('BEGIN');
+      await admit.query('SELECT 1 FROM runtime_sessions WHERE id=$1 FOR UPDATE',[f.session]);
+      const admitting = gateOn(admit,f,stale);
+      assert.equal(await blocked(admitting),true,'admission waits for the finish');
+      await finisher.query('COMMIT');
+      await assert.rejects(admitting,/REPORT_SOURCE_CONFLICT/);
+      await admit.query('ROLLBACK');
+    } finally {await admit.end();await finisher.end();}
   });
   assert.deepEqual(failures,[],failures.join('\n'));
 }
