@@ -15,8 +15,10 @@ export type UnassignedDraft = {
  * conversation). After that the draft stays read-only with its confirmed content (Owner 2026-10-14)
  * and the menu offers deleting the whole draft through the existing work deletion.
  */
-export function DraftRow({ draft, menuOpen, menuPosition, onOpenMenu, onCloseMenu, onDeleteConversation, onDeleteDraft }: {
+export function DraftRow({ draft, review, menuOpen, menuPosition, onOpenMenu, onCloseMenu, onDeleteConversation, onDeleteDraft }: {
   draft: UnassignedDraft;
+  /** The newest jury review's mark while it runs or waits for the chapter choices (fusionReview.mine). */
+  review?: string | null;
   menuOpen: boolean;
   menuPosition: CSSProperties;
   onOpenMenu: (event: { currentTarget: HTMLElement }) => void;
@@ -25,7 +27,8 @@ export function DraftRow({ draft, menuOpen, menuPosition, onOpenMenu, onCloseMen
   onDeleteDraft: (projectId: string, name: string) => void;
 }) {
   const name = (draft.businessName ?? '新账号') + ' · 定位分析';
-  const status = draft.conversationDeleted ? '对话已删除 · 只读' : draft.state === 'published' ? '已确认' : '进行中';
+  const status = (draft.conversationDeleted ? '对话已删除 · 只读' : draft.state === 'published' ? '已确认' : '进行中')
+    + (review ? ' · ' + review : '');
   const canDelete = draft.conversationDeleted ? Boolean(draft.projectId) : Boolean(draft.sessionId);
   return <div className={styles.threadRow}>
     <Link className={styles.thread} href={'/positioning/' + draft.draftId}><span>{name}</span><small>{status}</small></Link>
