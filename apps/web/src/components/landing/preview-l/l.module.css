@@ -1,0 +1,113 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * Style sample L: sample K's second round. Sections, headings and buttons are sample K's (k.module.css); this file
+ * holds the first screen's three-step picture, the daily-operations carousel, the moving row of report cards and the
+ * list of things you no longer worry about.
+ */
+
+/* First screen: the text column wide enough for the promise on one line; the picture beside it. */
+@media (min-width: 1024px) {
+  .heroGrid.heroGrid { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); }
+  .heroGrid .heroText { max-width: none; }
+}
+.heroText .promise { max-width: none; }
+/* The promise breaks only at its comma, and never on a computer. */
+.promise span { display: inline-block; }
+@media (min-width: 1024px) { .heroText .promise { white-space: nowrap; font-size: clamp(17px, 1.45vw, 22px); } }
+
+.flow { display: grid; gap: 10px; justify-items: stretch; width: 100%; max-width: 440px; margin: 0 0 0 auto; }
+@media (max-width: 1023px) { .flow { margin: 0; } }
+.flowStep { display: grid; gap: 10px; padding: 18px 20px; border: 1px solid var(--j-line); border-radius: 18px; background: #fff; }
+.flowResult { border-color: var(--j-gold); background: #fffaf0; }
+.flowTitle { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--j-gold-text); font-size: 14px; font-weight: 600; }
+.flowTitle img { width: 18px; height: 18px; border-radius: 4px; }
+.bubble { justify-self: end; margin: 0; padding: 10px 14px; border-radius: 16px 16px 4px 16px; background: #f3f3f1; font-size: 16px; line-height: 1.6; }
+.does { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.does li { display: flex; align-items: center; gap: 8px; font-size: 16px; line-height: 1.5; }
+.does svg { flex: none; color: #1a7f45; }
+.result { margin: 0; font-size: 18px; font-weight: 600; line-height: 1.5; }
+.flowArrow { justify-self: center; color: var(--k-secondary); }
+/* Once: you speak, the coach works line by line, the result lands. */
+@media (prefers-reduced-motion: no-preference) {
+  .flowStep, .flowArrow { animation: flowIn .6s var(--j-ease) both; animation-delay: calc(var(--n) * 450ms + 300ms); }
+  .does li { animation: flowIn .5s var(--j-ease) both; animation-delay: calc(1200ms + var(--i) * 260ms); }
+}
+@keyframes flowIn { from { opacity: 0; translate: 0 10px; } to { opacity: 1; translate: 0 0; } }
+
+/* Region 3: daily operations */
+.opsLede { margin: 14px 0 0; max-width: 40em; color: var(--j-body); font-size: clamp(17px, 1.5vw, 20px); line-height: 1.7; }
+.opsBar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-top: 28px; }
+.opsSteps { display: flex; flex-wrap: wrap; gap: 8px; }
+.opsSteps button {
+  position: relative; display: inline-flex; align-items: center; gap: 10px; min-height: 46px; padding: 0 16px 0 7px; overflow: hidden;
+  border: 1px solid var(--j-line); border-radius: 999px; background: #fff; color: var(--j-body); font: inherit; font-size: 15.5px;
+  font-weight: 500; cursor: pointer; transition: background-color .2s, color .2s, border-color .2s;
+}
+.opsNumber { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: #f0efeb; color: var(--j-ink); font-size: 13px; font-weight: 600; }
+.opsSteps button[aria-selected='true'] { border-color: var(--j-ink); background: var(--j-ink); color: #fff; }
+.opsSteps button[aria-selected='true'] .opsNumber { background: var(--j-gold); }
+/* The current step's progress: a thin gold line along the button's foot. */
+.opsProgress { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: var(--j-gold); transform-origin: 0 50%; scale: 0 1; }
+.opsSteps button[aria-selected='true'] .opsProgress { scale: 1 1; }
+@media (prefers-reduced-motion: no-preference) {
+  .opsSteps button[aria-selected='true'] .opsProgress[data-run] { animation: fill var(--ms) linear both; }
+}
+@keyframes fill { from { scale: 0 1; } to { scale: 1 1; } }
+.opsPause {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 14px; border: 1px solid var(--j-line); border-radius: 999px;
+  background: transparent; color: var(--j-body); font: inherit; font-size: 14px; cursor: pointer;
+}
+.opsPanel { display: grid; gap: 16px; margin-top: 22px; }
+.opsLine { margin: 0; max-width: 46em; color: var(--j-ink); font-size: 17px; line-height: 1.7; }
+@media (max-width: 480px) {
+  .opsSteps button { min-height: 42px; gap: 8px; padding: 0 12px 0 6px; font-size: 14px; }
+  .opsNumber { width: 26px; height: 26px; font-size: 12px; }
+}
+
+/* Region 4: the moving row of report cards */
+.marqueeHint { margin: 0; color: var(--k-secondary); font-size: 14px; }
+.marquee { overflow: hidden; padding: 8px 0 20px; mask-image: linear-gradient(90deg, transparent, #000 4%, #000 96%, transparent); }
+.marqueeTrack { display: flex; width: max-content; }
+.marqueeList { display: flex; gap: 16px; margin: 0; padding: 0 8px; list-style: none; }
+@media (prefers-reduced-motion: no-preference) {
+  .marqueeTrack { animation: marquee calc(var(--count) * 6s) linear infinite; }
+  .marquee:hover .marqueeTrack, .marquee:focus-within .marqueeTrack { animation-play-state: paused; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .marquee { overflow-x: auto; mask-image: none; }
+  .marqueeList[aria-hidden] { display: none; }
+}
+@keyframes marquee { from { translate: 0 0; } to { translate: -50% 0; } }
+.reportCard {
+  display: grid; align-content: start; gap: 8px; width: 300px; min-height: 220px; padding: 18px 20px; border: 1px solid var(--j-line);
+  border-radius: 18px; background: #fff; color: var(--j-ink); font: inherit; text-align: left; cursor: pointer;
+  box-shadow: var(--j-shadow); transition: border-color .2s, translate .3s var(--j-ease);
+}
+.reportCard:hover { border-color: var(--j-ink); translate: 0 -3px; }
+.cardHead { display: flex; align-items: center; gap: 8px; color: var(--k-secondary); font-size: 14px; }
+.cardHead svg { color: var(--j-gold-text); }
+.cardHead b { color: var(--j-ink); font-size: 18px; }
+.reportCard em { justify-self: start; padding: 0 8px; border-radius: 999px; background: #fff4d6; color: #8a5a00; font-size: 12px; font-style: normal; line-height: 22px; }
+.cardWho { color: var(--j-body); font-size: 14.5px; line-height: 1.6; }
+.cardWhat { color: var(--j-ink); font-size: 15px; font-weight: 500; line-height: 1.6; }
+.cardOpen { align-self: end; color: var(--j-gold-text); font-size: 14px; font-weight: 600; }
+
+.reportDialog {
+  inset: 0; margin: auto; width: min(880px, calc(100vw - 32px)); max-height: calc(100vh - 48px); padding: 0; border: 0; border-radius: 20px; background: #fff;
+  color: var(--j-ink); box-shadow: 0 40px 90px -40px rgba(20, 19, 18, .55);
+}
+.reportDialog::backdrop { background: rgba(20, 19, 18, .45); }
+.dialogBody { position: relative; display: grid; gap: 16px; padding: clamp(20px, 3vw, 32px); }
+.dialogClose {
+  position: absolute; top: 14px; right: 14px; display: grid; place-items: center; width: 38px; height: 38px; border: 1px solid var(--j-line);
+  border-radius: 50%; background: #fff; color: var(--j-ink); cursor: pointer;
+}
+
+/* Region 5: worries and what the coach does behind each */
+.care { display: grid; margin: 28px 0 0; padding: 0; list-style: none; border-top: 1px solid var(--j-line); }
+.care li { display: grid; gap: 6px; padding: 18px 0; border-bottom: 1px solid var(--j-line); }
+@media (min-width: 900px) { .care li { grid-template-columns: minmax(0, 4fr) 28px minmax(0, 7fr); align-items: baseline; gap: 16px; } }
+.care b { font-size: 18px; font-weight: 600; line-height: 1.5; }
+.care svg { color: var(--j-gold-text); }
+@media (max-width: 899px) { .care svg { display: none; } }
+.care span { color: var(--j-body); font-size: 16px; line-height: 1.7; }

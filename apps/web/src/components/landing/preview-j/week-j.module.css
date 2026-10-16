@@ -133,3 +133,9 @@
 [data-calm] .badge { font-size: 12px; }
 [data-calm] .chromeTitle, [data-calm] .coach > span { color: #6b6b6b; }
 [data-calm] .coach > span { font-size: 12px; }
+
+/* Sample L (data-wide): the window alone, as wide as its container; a little more room for the conversation. */
+.stage[data-wide] { width: 100%; max-width: none; margin: 0; padding: 0; }
+.stage[data-wide]::before { display: none; }
+.stage[data-wide] .body { height: 460px; }
+.stage[data-wide] :is(.user, .coach) { font-size: 15px; }

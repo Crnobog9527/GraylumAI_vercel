@@ -76,3 +76,7 @@ h2.title { margin-bottom: clamp(32px, 4vw, 56px); }
   [data-calm] .versus .own { transition: opacity .6s var(--j-ease), scale .8s var(--j-ease); }
   [data-motion='on'] [data-calm] .own { animation: none; }
 }
+
+/* Sample L (data-plain): the usual ways' total stays whole and stands out; no strike. */
+.versus[data-plain] .total b { color: var(--j-ink); font-size: clamp(28px, 3.2vw, 42px); }
+.versus[data-plain] .total b::after { display: none; }

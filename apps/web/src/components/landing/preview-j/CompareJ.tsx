@@ -31,13 +31,18 @@ export function pairTiming(generic: string, coach: string, coachFirst = false) {
  * both. As a row scrolls in, the question lands in both windows, the general AI types its
  * usual two lines, then the coach types its answer, its own words from a real sample conversation (named under it).
  * The windows are pictures (inert); the text carries the meaning. Server HTML and reduced motion show everything.
+ * Sample L (Owner 2026-10-17): `title` replaces the heading, `picks` keeps only those pairs (by index), and `next` adds
+ * a closing line to a pair's coach reply (by index): what the person does next.
  */
-export function CompareJ() {
+export function CompareJ({ title, picks, next }: {
+  title?: string; picks?: readonly number[]; next?: Readonly<Record<number, string>>;
+} = {}) {
+  const shown = (picks ?? J_COMPARE.pairs.map((_, index) => index)).map(index => ({ pair: J_COMPARE.pairs[index], index }));
   return (
     <section aria-labelledby="compare-title" className={page.section} data-zone="compare" data-band="ink" data-region="对比区">
       <div className={page.wrap}>
         <h2 id="compare-title" className={styles.title}>
-          {H_COMPARE.title.split(/(?<=，)|(?=带你)/).map(part => <span key={part} className={styles.phrase}>{part}</span>)}
+          {(title ?? H_COMPARE.title).split(/(?<=，)|(?=带你)/).map(part => <span key={part} className={styles.phrase}>{part}</span>)}
         </h2>
         <div className={styles.board}>
           <div className={styles.heads} aria-hidden="true">
@@ -45,10 +50,11 @@ export function CompareJ() {
             <WindowBar name={J_COMPARE.coachName} />
           </div>
           <ol className={styles.pairs}>
-            {J_COMPARE.pairs.map(pair => {
+            {shown.map(({ pair, index }) => {
               const generic = pair.generic.join('\n');
+              const coach = next?.[index] ? `${pair.coach}\n\n${next[index]}` : pair.coach;
               const first = 'coachFirst' in pair && pair.coachFirst;
-              const timing = pairTiming(generic, pair.coach, first);
+              const timing = pairTiming(generic, coach, first);
               return (
                 <li key={pair.question} data-row="" className={styles.pair} data-region="对比卡片" style={{
                   '--generic-at': `${timing.genericStart}ms`, '--coach-at': `${timing.coachStart}ms`,
@@ -66,7 +72,7 @@ export function CompareJ() {
                       {first ? null : <p className={styles.question}><span>你</span>{pair.question}</p>}
                       <div className={styles.coachReply}>
                         <span className={result.agentIdentity}><img src="/graylum-logo.png" alt="" />AI 自媒体陪跑教练</span>
-                        <p><Typed text={pair.coach} start={timing.coachStart} /></p>
+                        <p><Typed text={coach} start={timing.coachStart} /></p>
                       </div>
                     </div>
                     <div className={styles.foot}>

@@ -45,9 +45,11 @@ function useSeen(threshold: number) {
  * server catalog. The server HTML and reduced motion show the finished comparison.
  * Sample K (Owner 2026-10-17): `after` sits under the button; `calm` drops the panel's shadow, the springy rise and the
  * gold edge's endless travel (the total and its strike stay as they are).
+ * Sample L (Owner 2026-10-17): `plainTotal` shows the usual ways' total in full, not struck out; `checked: false` drops
+ * the check-date line.
  */
-export function PriceJ({ proMonthly, rows, after, calm = false }: {
-  proMonthly: number | null; rows: readonly CompareRow[]; after?: ReactNode; calm?: boolean;
+export function PriceJ({ proMonthly, rows, after, calm = false, plainTotal = false, checked = true }: {
+  proMonthly: number | null; rows: readonly CompareRow[]; after?: ReactNode; calm?: boolean; plainTotal?: boolean; checked?: boolean;
 }) {
   const [tableRef, tableSeen] = useSeen(0.2);
   const [versusRef, versusSeen] = useSeen(0.5);
@@ -83,7 +85,7 @@ export function PriceJ({ proMonthly, rows, after, calm = false }: {
               ))}
             </ul>
           </div>
-          <div ref={versusRef} className={styles.versus} data-phase={phase} data-region="Graylum 价格">
+          <div ref={versusRef} className={styles.versus} data-phase={phase} data-plain={plainTotal || undefined} data-region="Graylum 价格">
             {allRows ? (
               <p className={styles.total}>
                 <span>{J_PRICE_TOTAL.label}</span>
@@ -98,7 +100,7 @@ export function PriceJ({ proMonthly, rows, after, calm = false }: {
               </div>
             ) : null}
           </div>
-          <p className={styles.checked}>{J_PRICE.checked}</p>
+          {checked ? <p className={styles.checked}>{J_PRICE.checked}</p> : null}
         </div>
       </div>
     </section>

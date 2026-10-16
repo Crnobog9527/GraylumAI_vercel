@@ -79,3 +79,8 @@
 }
 @keyframes land { from { opacity: 0; translate: 0 6px; } to { opacity: 1; translate: 0 0; } }
 @keyframes show { to { opacity: 1; } }
+
+/* Samples K and L (data-calm, distill plan items 15–16): the windows' small print at least 12px and 4.5:1. */
+[data-calm] :is(.badge, .question span, .note b, .source) { font-size: 12px; }
+[data-calm] :is(.question span, .coachReply > span) { color: #6b6b6b; }
+[data-calm] .bar span, [data-calm] .note[data-side='generic'] b { color: #55544f; }

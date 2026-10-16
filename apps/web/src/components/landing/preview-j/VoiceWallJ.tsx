@@ -18,7 +18,13 @@ const FIRST = 'p7';
  * arrow, and the coach's answer under a heading of its own that names the fix. Forum quotes carry the platform,
  * the user's full ID and the date (no links); report quotes keep the outlet, the interviewee and the date.
  */
-export function VoiceWallJ({ notes, four = false }: { notes: readonly VoiceNote[]; four?: boolean }) {
+/**
+ * Sample L (Owner 2026-10-17): `open` shows every row on every screen, no fold; `regions` adds where each note is from
+ * (by note id) to its caption.
+ */
+export function VoiceWallJ({ notes, four = false, open = false, regions }: {
+  notes: readonly VoiceNote[]; four?: boolean; open?: boolean; regions?: Readonly<Record<string, string>>;
+}) {
   if (notes.length === 0) return null;
   const ordered = [...notes.filter(note => note.id === FIRST), ...notes.filter(note => note.id !== FIRST)];
   return (
@@ -32,7 +38,10 @@ export function VoiceWallJ({ notes, four = false }: { notes: readonly VoiceNote[
             <li key={note.id} data-row="" className={styles.voiceRow} data-region="心声卡片">
               <figure className={styles.note} style={{ '--tilt': TILTS[index % TILTS.length] } as CSSProperties}>
                 <blockquote>「{note.quote}」</blockquote>
-                <figcaption>{noteSource(note.id, note.source)}{note.translated ? ` · ${VOICE_WALL.translatedLabel}` : ''}</figcaption>
+                <figcaption>
+                  {regions?.[note.id] ? `${regions[note.id]} · ` : ''}{noteSource(note.id, note.source)}
+                  {note.translated ? ` · ${VOICE_WALL.translatedLabel}` : ''}
+                </figcaption>
               </figure>
               <MoveRight className={styles.arrow} size={28} aria-hidden="true" />
               <div className={styles.answer}>
@@ -42,7 +51,7 @@ export function VoiceWallJ({ notes, four = false }: { notes: readonly VoiceNote[
             </li>
           ))}
         </ol>
-        {ordered.length > (four ? WALL_FOUR : WALL_FIRST)
+        {!open && ordered.length > (four ? WALL_FOUR : WALL_FIRST)
           ? <WallMoreJ listId="j-voice-wall" hiddenCount={ordered.length - (four ? WALL_FOUR : WALL_FIRST)} always={four} /> : null}
       </div>
     </section>
