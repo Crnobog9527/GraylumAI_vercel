@@ -22,14 +22,15 @@ export function providerPlatform(brandPlatform: string): PostForMePlatform | nul
 export type ConnectErrorCode = 'PUBLISH_MONITOR_ACCOUNT_NOT_FOUND' | 'PUBLISH_MONITOR_PLATFORM_UNSUPPORTED'
   | 'PUBLISH_MONITOR_REQUEST_INVALID' | 'PUBLISH_MONITOR_ACCOUNT_OWNED_ELSEWHERE' | 'PUBLISH_MONITOR_ACCOUNT_BOUND_ELSEWHERE'
   | 'PUBLISH_MONITOR_TARGET_ALREADY_CONNECTED' | 'PUBLISH_MONITOR_ACCOUNT_CLOSED' | 'PUBLISH_MONITOR_PROVIDER_BUSY'
-  | 'PUBLISH_MONITOR_AUTHORIZATION_CHANGED'
+  | 'PUBLISH_MONITOR_AUTHORIZATION_CHANGED' | 'PUBLISH_MONITOR_CALLBACK_STALE'
   | 'PUBLISH_MONITOR_PROVIDER_UNAVAILABLE' | 'PUBLISH_MONITOR_UNAVAILABLE';
 export class ConnectError extends Error {
   constructor(readonly code: ConnectErrorCode, readonly retryAfterSeconds?: number) { super(code); }
 }
 const KNOWN: ConnectErrorCode[] = ['PUBLISH_MONITOR_ACCOUNT_NOT_FOUND', 'PUBLISH_MONITOR_REQUEST_INVALID',
   'PUBLISH_MONITOR_ACCOUNT_OWNED_ELSEWHERE', 'PUBLISH_MONITOR_ACCOUNT_BOUND_ELSEWHERE',
-  'PUBLISH_MONITOR_TARGET_ALREADY_CONNECTED', 'PUBLISH_MONITOR_ACCOUNT_CLOSED', 'PUBLISH_MONITOR_AUTHORIZATION_CHANGED'];
+  'PUBLISH_MONITOR_TARGET_ALREADY_CONNECTED', 'PUBLISH_MONITOR_ACCOUNT_CLOSED', 'PUBLISH_MONITOR_AUTHORIZATION_CHANGED',
+  'PUBLISH_MONITOR_CALLBACK_STALE'];
 function dbFailure(error: { message?: string } | null | undefined): ConnectError {
   return new ConnectError(KNOWN.find(code => error?.message?.includes(code)) ?? 'PUBLISH_MONITOR_UNAVAILABLE');
 }
@@ -100,6 +101,9 @@ export async function recordCallback(db: Rpc, client: ClientDeps, profileId: str
     candidates.push({ providerAccountId: account.value.id, platform: account.value.platform,
       externalId: account.value.externalId });
   }
+  // Hints were supplied but none of them exists or is connected any more: not this attempt's callback (a late one of
+  // an older attempt). Refuse without consuming the attempt; the older attempt's own cleanup settles its accounts.
+  if (ids.length > 0 && candidates.length === 0) throw new ConnectError('PUBLISH_MONITOR_CALLBACK_STALE');
   const result = await db.rpc('publish_monitor_connect_callback', { a: uuid.parse(profileId),
     p_request_id: uuid.parse(requestId), p_candidates: candidates });
   if (result.error) throw dbFailure(result.error);
