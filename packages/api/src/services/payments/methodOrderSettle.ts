@@ -33,8 +33,8 @@ async function close(db: SupabaseClient, fn: string, args: Record<string, unknow
 
 /** #961: an order that can no longer be paid would block the buyer's other purchases (PAY_WAFFO_PURCHASE_PENDING)
  * when its session expired without the webhook, or it failed after admission and before its claim. Stripe is
- * read first, every time; then the order is closed through the function its own path uses (session expired:
- * the webhook's recovery; claimed but never created: pay_waffo_close_uncreated; never claimed:
+ * read first, every time; then the order is closed through the function its own path uses (session expired, or an
+ * async payment Stripe reports failed: the webhook's recovery; claimed but never created: pay_waffo_close_uncreated; never claimed:
  * pay_waffo_abort_before_dispatch). A paid session is delivered by the same recovery, never closed. Local time
  * only delays a close (grace periods), it never decides one: each close function re-checks the order itself. */
 export async function settleMethodOrder(db: SupabaseClient, stripe: Stripe, scope: StripeScope, order: OpenOrder,
@@ -68,7 +68,31 @@ export async function settleMethodOrder(db: SupabaseClient, stripe: Stripe, scop
   // Retrieves the session at Stripe, binds it if unmapped, closes it expired-unpaid or delivers it paid.
   const seen = await recoverMethodCheckout(db, stripe, sessionId);
   if (seen?.paymentStatus === 'paid') return 'paid';
-  return seen?.checkoutStatus === 'expired' && seen.paymentStatus === 'unpaid' ? 'closed' : 'open';
+  if (seen?.checkoutStatus === 'expired' && seen.paymentStatus === 'unpaid') return 'closed';
+  if (seen?.checkoutStatus !== 'complete' || seen.paymentStatus !== 'unpaid') return 'open';
+  // Complete but unpaid: an async payment still processing, or one that failed with its webhook lost. Only Stripe's own
+  // failure event settles it; the webhook's recovery then re-reads the session and closes only a complete, unpaid one.
+  const since = seconds(order.method_dispatched_at ?? order.created_at)! - 300;
+  if (!await asyncPaymentFailed(stripe, sessionId, since)) return 'open';
+  const failed = await recoverMethodCheckout(db, stripe, sessionId, 'checkout.session.async_payment_failed');
+  return failed?.paymentStatus === 'paid' ? 'paid' : 'closed';
+}
+
+async function asyncPaymentFailed(stripe: Stripe, sessionId: string, since: number) {
+  let cursor: string | undefined;
+  for (let page = 0; page < 10; page++) {
+    const events = await stripe.events.list({ types: ['checkout.session.async_payment_failed'], created: { gte: since },
+      limit: 100, ...(cursor ? { starting_after: cursor } : {}) });
+    if (!Array.isArray(events.data) || typeof events.has_more !== 'boolean') {
+      throw new Error('PAY_COMMON_CHECKOUT_RECONCILIATION_REQUIRED');
+    }
+    if (events.data.some(event => (event.data.object as { id?: string }).id === sessionId)) return true;
+    if (!events.has_more) return false;
+    const next = events.data.at(-1)?.id;
+    if (!next || next === cursor) break;
+    cursor = next;
+  }
+  throw new Error('PAY_COMMON_CHECKOUT_RECONCILIATION_REQUIRED');
 }
 
 /** The buyer's own open orders, settled when admission refuses another plan. True if any was closed or delivered,

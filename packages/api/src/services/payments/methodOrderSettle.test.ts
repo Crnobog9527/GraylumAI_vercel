@@ -17,7 +17,7 @@ const order = (patch: Partial<Row> = {}): Row => ({ id: ORDER, user_id: USER, cr
   method_dispatched_at: iso(NOW - 7200), method_checkout_expires_at: iso(NOW - 7200 + 1860), ...patch });
 
 function fixture(state: { bound?: string | null; sessions?: Array<{ id: string; metadata: Record<string, string> }>;
-  rows?: Row[]; closeError?: string; listHasMore?: boolean } = {}) {
+  rows?: Row[]; closeError?: string; listHasMore?: boolean; failedEvents?: string[] } = {}) {
   const filters: Array<[string, string, unknown]> = [];
   const rpc = vi.fn(async () => state.closeError ? { data: null, error: { message: state.closeError } } : { data: null, error: null });
   const db = { rpc, from: vi.fn((table: string) => {
@@ -33,8 +33,12 @@ function fixture(state: { bound?: string | null; sessions?: Array<{ id: string; 
     return chain;
   }) };
   const list = vi.fn(async () => ({ data: state.sessions ?? [], has_more: state.listHasMore ?? false }));
-  const stripe = { checkout: { sessions: { list, retrieve: vi.fn(async (sessionId: string) => ({ id: sessionId })) } } };
-  return { db: db as unknown as SupabaseClient, stripe: stripe as unknown as Stripe, rpc, list, filters };
+  // Stripe's own async-payment-failed events, read back through the API (the webhook may have been lost).
+  const events = vi.fn(async () => ({ has_more: false, data: (state.failedEvents ?? []).map((session, i) => ({ id: `evt_${i}`,
+    type: 'checkout.session.async_payment_failed', data: { object: { object: 'checkout.session', id: session } } })) }));
+  const stripe = { checkout: { sessions: { list, retrieve: vi.fn(async (sessionId: string) => ({ id: sessionId })) } },
+    events: { list: events } };
+  return { db: db as unknown as SupabaseClient, stripe: stripe as unknown as Stripe, rpc, list, events, filters };
 }
 
 describe('#961 closing new-method orders that can no longer be paid', () => {
@@ -59,6 +63,24 @@ describe('#961 closing new-method orders that can no longer be paid', () => {
     mocks.recover.mockResolvedValue({ orderId: ORDER, checkoutStatus: 'open', paymentStatus: 'unpaid' });
     await expect(settleMethodOrder(f.db, f.stripe, scope, order(), NOW)).resolves.toBe('open');
     expect(f.rpc).not.toHaveBeenCalled();
+  });
+
+  it('closes a completed session whose async payment failed and whose failure webhook was lost, from Stripe\'s event', async () => {
+    const f = fixture({ bound: 'cs_async', failedEvents: ['cs_other', 'cs_async'] });
+    mocks.recover.mockResolvedValue({ orderId: ORDER, checkoutStatus: 'complete', paymentStatus: 'unpaid' });
+    await expect(settleMethodOrder(f.db, f.stripe, scope, order(), NOW)).resolves.toBe('closed');
+    expect(f.events).toHaveBeenCalledWith(expect.objectContaining({ types: ['checkout.session.async_payment_failed'],
+      created: { gte: NOW - 7200 - 300 } }));
+    // The same recovery the webhook runs: it re-reads the session and closes only a complete, unpaid one.
+    expect(mocks.recover).toHaveBeenLastCalledWith(f.db, f.stripe, 'cs_async', 'checkout.session.async_payment_failed');
+    // Paid in the meantime: delivered, never closed. No failure event at Stripe: still pending, left alone.
+    mocks.recover.mockResolvedValueOnce({ orderId: ORDER, checkoutStatus: 'complete', paymentStatus: 'unpaid' })
+      .mockResolvedValueOnce({ orderId: ORDER, checkoutStatus: 'complete', paymentStatus: 'paid' });
+    await expect(settleMethodOrder(f.db, f.stripe, scope, order(), NOW)).resolves.toBe('paid');
+    const pending = fixture({ bound: 'cs_async', failedEvents: ['cs_other'] });
+    mocks.recover.mockReset().mockResolvedValue({ orderId: ORDER, checkoutStatus: 'complete', paymentStatus: 'unpaid' });
+    await expect(settleMethodOrder(pending.db, pending.stripe, scope, order(), NOW)).resolves.toBe('open');
+    expect(mocks.recover).toHaveBeenCalledTimes(1);
   });
 
   it('a session found at Stripe without its local mapping goes through the same recovery, never a blind close', async () => {
