@@ -1,7 +1,5 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
-import { appRouter } from '@repo/api/src/root';
-import { createTRPCContext } from '@repo/api/src/trpc';
 import { isEmailVerified, sanitizeRedirectTarget } from '@/lib/auth';
 import {
   buildVerifyEmailPath,
@@ -95,25 +93,6 @@ export async function GET(request: NextRequest) {
 
   if (!isEmailVerified(user)) {
     return NextResponse.redirect(new URL(buildVerifyEmailPath(next), authOrigin));
-  }
-
-  const pendingInviteCode =
-    user.user_metadata && typeof user.user_metadata.invite_code === 'string'
-      ? user.user_metadata.invite_code.trim()
-      : '';
-
-  if (pendingInviteCode) {
-    try {
-      const ctx = await createTRPCContext({
-        headers: request.headers,
-        user,
-        supabaseAuth: supabase,
-      });
-      const caller = appRouter.createCaller(ctx);
-      await caller.invitation.claimInvitationCode({ code: pendingInviteCode });
-    } catch {
-      logServerError('auth', 'auth_callback_invitation_claim_failed');
-    }
   }
 
   return response;

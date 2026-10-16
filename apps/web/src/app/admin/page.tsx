@@ -296,7 +296,7 @@ export default function AdminDashboardPage() {
       </div>
 
       {/* Quick Actions & Overview Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
         {/* Quick Actions */}
         <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
           <CardHeader>
@@ -363,52 +363,6 @@ export default function AdminDashboardPage() {
               <div className="pt-3 mt-3 flex justify-between items-center font-bold" style={{ borderTop: '1px solid var(--border-primary)' }}>
                 <span style={{ color: 'var(--text-primary)' }}>总计</span>
                 <span style={{ color: 'var(--text-primary)' }}>{stats?.tickets.total ?? 0}</span>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Invitation Overview */}
-        <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
-          <CardHeader>
-            <CardTitle className="flex items-center justify-between" style={{ color: 'var(--text-primary)' }}>
-              <div className="flex items-center gap-2">
-                <TrendingUp className="h-5 w-5 text-[var(--color-primary)]" />
-                邀请码概览
-              </div>
-              <Link href="/admin/invitations">
-                <Button variant="ghost" size="sm" className="text-xs text-[var(--text-tertiary)] hover:text-[var(--text-primary)]">
-                  查看全部 <ArrowRight className="h-3 w-3 ml-1" />
-                </Button>
-              </Link>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              <div className="flex justify-between items-center">
-                <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-emerald-400" />
-                  <span style={{ color: 'var(--text-secondary)' }}>有效</span>
-                </div>
-                <span className="font-semibold text-emerald-400">{stats?.invitations.active ?? 0}</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-blue-400" />
-                  <span style={{ color: 'var(--text-secondary)' }}>已使用</span>
-                </div>
-                <span className="font-semibold text-blue-400">{stats?.invitations.used ?? 0}</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-slate-400" />
-                  <span style={{ color: 'var(--text-secondary)' }}>已过期</span>
-                </div>
-                <span className="font-semibold" style={{ color: 'var(--text-disabled)' }}>{stats?.invitations.expired ?? 0}</span>
-              </div>
-              <div className="pt-3 mt-3 flex justify-between items-center font-bold" style={{ borderTop: '1px solid var(--border-primary)' }}>
-                <span style={{ color: 'var(--text-primary)' }}>总计</span>
-                <span style={{ color: 'var(--text-primary)' }}>{stats?.invitations.total ?? 0}</span>
               </div>
             </div>
           </CardContent>
