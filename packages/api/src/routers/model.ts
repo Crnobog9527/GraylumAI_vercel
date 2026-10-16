@@ -7,8 +7,8 @@ import { createSafeInternalError } from '../lib/publicError';
 import { logger } from '../lib/logger';
 import {
   getOpenAICompatibleHeaders,
+  isOpenRouterEndpoint,
   normalizeOpenAICompatibleEndpoint,
-  usesOpenAICompatibleApi as usesOpenAICompatibleProvider,
 } from '../services/providerUtils';
 import { mergeConnectionState, withStoredManagedKeys } from '../services/models/modelConfig';
 import { openRouterKeyConfigured, readOpenRouterKey } from '../services/models/openRouterKey';
@@ -121,96 +121,67 @@ async function verifyAndPersistConnection(
   supabase: any,
   model: PersistedModel,
 ): Promise<ConnectionCheckResult> {
+  const persisted = async (result: ConnectionCheckResult) => {
+    await persistConnectionState(supabase, model, result);
+    return result;
+  };
+  // The platform OpenRouter key (OR-1) is only ever sent to OpenRouter: any other endpoint is refused before the
+  // key is read, so a custom endpoint can never receive it. A blank endpoint means OpenRouter.
+  const endpoint = normalizeOpenAICompatibleEndpoint(model.api_endpoint) || 'https://openrouter.ai/api/v1/chat/completions';
+  if (!isOpenRouterEndpoint(endpoint)) {
+    return persisted({
+      success: false,
+      status: 'error',
+      error: '平台 OpenRouter 密钥只用于 OpenRouter 接口，请把接口地址留空或改为 OpenRouter',
+      internalError: 'non_openrouter_endpoint',
+    });
+  }
   let apiKey: string | undefined;
   try {
     apiKey = await readOpenRouterKey(supabase);
   } catch {
-    const result: ConnectionCheckResult = {
+    return persisted({
       success: false,
       status: 'error',
       error: '暂时无法读取第三方密钥，请稍后重试',
       internalError: 'platform_secret_unavailable',
-    };
-    await persistConnectionState(supabase, model, result);
-    return result;
+    });
   }
   if (!apiKey) {
-    const result: ConnectionCheckResult = {
+    return persisted({
       success: false,
       status: 'no_key',
       error: 'OpenRouter 密钥未填写，请到后台“第三方密钥”页填写',
-    };
-    await persistConnectionState(supabase, model, result);
-    return result;
+    });
   }
 
   try {
-    const openAICompatibleEndpoint = usesOpenAICompatibleProvider({
-      endpoint: model.api_endpoint,
-      apiKey,
-    })
-      ? (normalizeOpenAICompatibleEndpoint(model.api_endpoint) || 'https://openrouter.ai/api/v1/chat/completions')
-      : null;
-
-    if (openAICompatibleEndpoint) {
-      const response = await fetch(openAICompatibleEndpoint, {
-        method: 'POST',
-        headers: getOpenAICompatibleHeaders(apiKey),
-        body: JSON.stringify({
-          model: model.model_id,
-          max_tokens: 1,
-          stream: true,
-          messages: [{ role: 'user', content: 'Hi' }],
-        }),
-      });
-
-      if (response.ok) {
-        const result: ConnectionCheckResult = {
-          success: true,
-          status: 'connected',
-          message: 'OpenRouter / OpenAI 兼容接口连接正常',
-        };
-        await persistConnectionState(supabase, model, result);
-        return result;
-      }
-
-      const result: ConnectionCheckResult = {
-        success: false,
-        status: 'error',
-        error: GENERIC_CONNECTION_ERROR,
-        internalError: GENERIC_CONNECTION_ERROR_DETAIL,
-      };
-      await persistConnectionState(supabase, model, result);
-      return result;
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: getOpenAICompatibleHeaders(apiKey),
+      body: JSON.stringify({
+        model: model.model_id,
+        max_tokens: 1,
+        stream: true,
+        messages: [{ role: 'user', content: 'Hi' }],
+      }),
+    });
+    if (response.ok) {
+      return persisted({ success: true, status: 'connected', message: 'OpenRouter 接口连接正常' });
     }
-
-    if (model.provider !== 'anthropic' && model.provider) {
-      const result: ConnectionCheckResult = {
-        success: true,
-        status: 'configured',
-        message: '请配置 OpenAI / OpenRouter 兼容 endpoint 后再测试连接',
-      };
-      await persistConnectionState(supabase, model, result);
-      return result;
-    }
-
-    const result: ConnectionCheckResult = {
-      success: false,
-      status: 'error',
-      error: 'Anthropic 官方 API 已退役，请改用 OpenRouter endpoint 与 sk-or- 密钥',
-      internalError: 'anthropic_official_api_retired',
-    };
-    await persistConnectionState(supabase, model, result);
-    return result;
-  } catch (error) {
-    const result: ConnectionCheckResult = {
+    return persisted({
       success: false,
       status: 'error',
       error: GENERIC_CONNECTION_ERROR,
       internalError: GENERIC_CONNECTION_ERROR_DETAIL,
-    };
-    await persistConnectionState(supabase, model, result);
-    return result;
+    });
+  } catch {
+    return persisted({
+      success: false,
+      status: 'error',
+      error: GENERIC_CONNECTION_ERROR,
+      internalError: GENERIC_CONNECTION_ERROR_DETAIL,
+    });
   }
 }
 

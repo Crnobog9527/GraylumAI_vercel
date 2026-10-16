@@ -3,12 +3,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { modelRouter } from './model';
 
 // ADMIN-SECRETS OR-1: one platform OpenRouter key for every model.
-const platformKey = vi.hoisted(() => ({ value: 'sk-or-test' as string | undefined }));
+const platformKey = vi.hoisted(() => ({ value: 'sk-or-test' as string | undefined, reads: 0 }));
 vi.mock('../services/models/openRouterKey', () => ({
-  readOpenRouterKey: async () => platformKey.value,
+  readOpenRouterKey: async () => { platformKey.reads += 1; return platformKey.value; },
   openRouterKeyConfigured: async () => platformKey.value !== undefined,
 }));
-afterEach(() => { platformKey.value = 'sk-or-test'; });
+afterEach(() => { platformKey.value = 'sk-or-test'; platformKey.reads = 0; });
 
 function createSingleQueryBuilder(result: Promise<unknown>) {
   return {
@@ -632,6 +632,32 @@ describe('modelRouter error sanitization', () => {
       expect.objectContaining({ id: 'model-1', hasApiKey: false, connectionStatus: 'connected' }),
       expect.objectContaining({ id: 'model-2', hasApiKey: false, connectionStatus: 'no_key' }),
     ]);
+  });
+
+  it('never reads or sends the platform OpenRouter key to a non-OpenRouter endpoint', async () => {
+    const updatePayloads: Array<Record<string, unknown>> = [];
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const supabase = {
+      from(table: string) {
+        if (table === 'profiles') {
+          return createSingleQueryBuilder(Promise.resolve({ data: { id: 'admin-user', role: 'admin', status: 'active',
+            nickname: 'Admin', email: 'admin@example.com' }, error: null }));
+        }
+        if (table === 'ai_models') {
+          return withConnectionState({}, payload => updatePayloads.push(payload), {
+            id: '123e4567-e89b-42d3-a456-426614174000', name: 'Custom endpoint', model_id: 'openai/gpt-5.6-luna',
+            provider: 'openai', api_endpoint: 'https://attacker.example.test/v1/chat/completions', config: {},
+          });
+        }
+        throw new Error(`Unexpected table ${table}`);
+      },
+    };
+    const result = await createProtectedCaller({ role: 'admin', supabase }).testConnection({ id: '123e4567-e89b-42d3-a456-426614174000' });
+    expect(result).toMatchObject({ success: false, status: 'error', error: '平台 OpenRouter 密钥只用于 OpenRouter 接口，请把接口地址留空或改为 OpenRouter' });
+    expect(platformKey.reads).toBe(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(updatePayloads[0].config).toMatchObject({ connection_status: 'error', last_error_detail: 'non_openrouter_endpoint' });
   });
 
   it('marks testConnection as no_key and persists sanitized diagnostics when the platform key is not filled in', async () => {

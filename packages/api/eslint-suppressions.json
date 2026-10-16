@@ -83,9 +83,6 @@
   "src/routers/model.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 2
-    },
-    "@typescript-eslint/no-unused-vars": {
-      "count": 1
     }
   },
   "src/routers/modelCredentials.test.ts": {
