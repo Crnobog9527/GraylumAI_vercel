@@ -29,25 +29,41 @@ async function readView(database: SupabaseClient, actorId: string, sessionId: st
 type ViewedExecution = { executionId?: unknown; state?: unknown; unavailableReason?: unknown;
   body?: unknown; primaryBody?: unknown; summary?: unknown };
 /**
- * LIB-4b: a paused or cost-pending round may already show a saved body (a PAYG primary checkpoint). Reading it applies
- * the 0262 entry check, which marks a round whose referenced document was deleted (the view is then read once more);
- * a round whose document changed version, or whose state cannot be read, keeps its row but shows no body (fail closed).
- * Only these states are read: unlike a running round, their read has no side effect besides that mark.
+ * LIB-4b: an unfinished round may already show a saved body (a PAYG or organizer primary checkpoint). A paused or
+ * cost-pending round is read through runtime_execution, whose 0262 entry check marks a deleted source (the view is then
+ * read once more). A running round is never read that way (its read may pause it); a read-only probe tells whether it
+ * froze references. Any round whose referenced document is deleted or changed, or whose state cannot be confirmed,
+ * keeps its row but shows no body (fail closed).
  */
 async function recheckSources(database: SupabaseClient, actorId: string, executions: ViewedExecution[]) {
   const hidden = new Set<unknown>();let reread = false;
-  const shown = executions.filter(e => ['waiting_credits', 'waiting_resume', 'cost_pending'].includes(String(e.state))
+  const shown = executions.filter(e => ['running', 'waiting_credits', 'waiting_resume', 'cost_pending'].includes(String(e.state))
     && !e.unavailableReason && (e.body != null || e.primaryBody != null || e.summary != null));
-  for (const { executionId } of shown) {
-    const read = await database.rpc('runtime_execution', { p_actor_id: actorId, p_execution_id: executionId, p_action: 'read' });
-    throwIfContentErased(read.error);
-    const data = read.data as { unavailableReason?: unknown; context?: { libraryReferences?: unknown } } | null;
-    if (read.error || !data) { hidden.add(executionId); continue; }
-    if (data.unavailableReason === 'source_deleted') { reread = true; continue; }
-    if (!Array.isArray(data.context?.libraryReferences) || !data.context.libraryReferences.length) continue;
-    const live = await database.rpc('runtime_library_visible',
-      { p_actor_id: actorId, p_execution_id: executionId, p_result: { kind: 'library_index' } });
-    if (live.error || live.data !== true) hidden.add(executionId);
+  for (const { executionId, state } of shown) {
+    const referenced = state === 'running' ? await probeReferences(database, actorId, executionId)
+      : await readReferences(database, actorId, executionId);
+    if (referenced === 'deleted') reread = true;
+    else if (referenced === 'unknown') hidden.add(executionId);
+    else if (referenced) {
+      const live = await database.rpc('runtime_library_visible',
+        { p_actor_id: actorId, p_execution_id: executionId, p_result: { kind: 'library_index' } });
+      if (live.error || live.data !== true) hidden.add(executionId);
+    }
   }
   return { reread, hidden };
+}
+async function readReferences(database: SupabaseClient, actorId: string, executionId: unknown) {
+  const read = await database.rpc('runtime_execution', { p_actor_id: actorId, p_execution_id: executionId, p_action: 'read' });
+  throwIfContentErased(read.error);
+  const data = read.data as { unavailableReason?: unknown; context?: { libraryReferences?: unknown } } | null;
+  if (read.error || !data) return 'unknown' as const;
+  if (data.unavailableReason === 'source_deleted') return 'deleted' as const;
+  return Array.isArray(data.context?.libraryReferences) && data.context.libraryReferences.length > 0;
+}
+/** runtime_library_read (0262) only reads: for a running round with frozen references the out-of-range "doc-0" answers
+ * {kind:'unavailable'} without touching any document; without references it refuses with LIB_REFERENCE_READ_DENIED. */
+async function probeReferences(database: SupabaseClient, actorId: string, executionId: unknown) {
+  const probe = await database.rpc('runtime_library_read', { p_actor_id: actorId, p_execution_id: executionId, p_query: 'doc-0' });
+  if (probe.error?.message === 'LIB_REFERENCE_READ_DENIED') return false;
+  return probe.error || (probe.data as { kind?: unknown } | null)?.kind !== 'unavailable' ? 'unknown' as const : true;
 }

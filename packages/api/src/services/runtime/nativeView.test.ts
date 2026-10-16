@@ -108,4 +108,21 @@ describe('LIB-4b: a paused round shows no body once its referenced source is gon
     const live = source({ a: { data: { unavailableReason: null, context: refs } }, b: plain, c: plain }, true);
     expect(JSON.stringify(await readNativeRuntimeView(live.db, actor, session))).toContain('PRIVATE_A');
   });
+  it('a running round is probed read-only, never read through runtime_execution', async () => {
+    const view = (executions: unknown[]) => ({ data: { sessionId: session, executions }, error: null });
+    for (const [probe, visible, shown] of [
+      [{ error: { message: 'LIB_REFERENCE_READ_DENIED' } }, false, true],
+      [{ data: { kind: 'unavailable', reason: 'unknown_query' } }, true, true],
+      [{ data: { kind: 'unavailable', reason: 'unknown_query' } }, false, false],
+      [{ error: { message: 'timeout' } }, true, false],
+    ] as const) {
+      const rpc = vi.fn(async (name: string) => name === 'runtime_view'
+        ? view([{ executionId: 'r', state: 'running', contentAvailable: true, primaryBody: 'RUNNING_BODY' }])
+        : name === 'runtime_library_read' ? { data: null, error: null, ...probe } : { data: visible, error: null });
+      const text = JSON.stringify(await readNativeRuntimeView({ rpc } as unknown as SupabaseClient, actor, session));
+      expect(text.includes('RUNNING_BODY')).toBe(shown);
+      expect(rpc.mock.calls.map(([name]) => name)).not.toContain('runtime_execution');
+      expect(rpc).toHaveBeenCalledWith('runtime_library_read', { p_actor_id: actor, p_execution_id: 'r', p_query: 'doc-0' });
+    }
+  });
 });
