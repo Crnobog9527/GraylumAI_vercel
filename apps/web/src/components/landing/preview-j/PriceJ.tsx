@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
 
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
 import { formatUsd } from '@/components/paywall/paywallPlans';
@@ -43,8 +43,12 @@ function useSeen(threshold: number) {
  * adds up to its sum, holds a moment, and a line strikes it out; only then does "Graylum AI：$29/月起" rise beside it,
  * with its moving gold edge and one highlight, and the way to the full pricing page. The Pro price comes from the
  * server catalog. The server HTML and reduced motion show the finished comparison.
+ * Sample K (Owner 2026-10-17): `after` sits under the button; `calm` drops the panel's shadow, the springy rise and the
+ * gold edge's endless travel (the total and its strike stay as they are).
  */
-export function PriceJ({ proMonthly, rows }: { proMonthly: number | null; rows: readonly CompareRow[] }) {
+export function PriceJ({ proMonthly, rows, after, calm = false }: {
+  proMonthly: number | null; rows: readonly CompareRow[]; after?: ReactNode; calm?: boolean;
+}) {
   const [tableRef, tableSeen] = useSeen(0.2);
   const [versusRef, versusSeen] = useSeen(0.5);
   const [phase, setPhase] = useState<Phase>('rest');
@@ -63,7 +67,7 @@ export function PriceJ({ proMonthly, rows }: { proMonthly: number | null; rows: 
   const allRows = J_PRICE_TOTAL.rows.every(id => rows.some(row => row.sourceId === id));
   const counting = phase !== 'rest' && phase !== 'wait';
   return (
-    <section id="pricing" aria-labelledby="pricing-title" className={page.section} data-zone="price" data-region="价格">
+    <section id="pricing" aria-labelledby="pricing-title" className={page.section} data-zone="price" data-region="价格" data-calm={calm || undefined}>
       <div className={page.wrap}>
         <h2 id="pricing-title" className={`${page.display} ${styles.title}`}>{J_PRICE.title}</h2>
         <div className={styles.compareCost}>
@@ -90,6 +94,7 @@ export function PriceJ({ proMonthly, rows }: { proMonthly: number | null; rows: 
               <div className={styles.own}>
                 <p><b className={styles.price}>{J_PRICE.ownPrice(formatUsd(proMonthly))}</b></p>
                 <Link href={PRICING_PAGE} className={`${page.pill} ${styles.cta}`}>{J_PRICE.more}<ArrowRight size={18} aria-hidden="true" /></Link>
+                {after}
               </div>
             ) : null}
           </div>

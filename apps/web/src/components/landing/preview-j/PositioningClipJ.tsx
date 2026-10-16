@@ -42,16 +42,20 @@ function readThrough(local: number, count: number) {
  * 了解你 / 诊断与平台对标 / 定位与执行方案, the conversation with the product's message heads "AI 自媒体陪跑教练 · 步骤"
  * and "本步小结", the step's confirm area, the footer with 导出已确认资料 and 生成完整报告); the 定位清单 on the right,
  * filled as the messages name their fields. After the three steps, the long report; from the report, the jury.
+ * `pick` (sample K, Owner 2026-10-17): a still picture of one step, showing only these messages of it (by index), as
+ * they stand once the step is done; the checklist is filled as far as the last of them.
  */
-export function PositioningClipJ({ moment, local }: { moment: number; local: number }) {
+export function PositioningClipJ({ moment, local, pick }: { moment: number; local: number; pick?: readonly number[] }) {
   const current = J_TAKEOVER_MOMENTS[moment] ?? J_TAKEOVER_MOMENTS[0];
   const step = current.step;
   const chat = step === 3 ? J_TAKEOVER_MOMENTS[2] : current;
-  const lines = step === 3 ? chat.lines : current.lines.slice(0, arrivedAt(local, current.lines.length));
+  const lines = pick ? pick.map(index => current.lines[index]).filter(Boolean)
+    : step === 3 ? chat.lines : current.lines.slice(0, arrivedAt(local, current.lines.length));
   // The chat follows the newest message: it arrives with its top in view, then, as the scroll goes on before the next
   // one, the rest of it (its card, the confirm area) rolls into view. Never past the end.
   const log = useRef<HTMLDivElement>(null);
-  const reading = step === 3 ? 1 : readThrough(local, current.lines.length);
+  // A still picture opens on the top of its last message (the question, the table), not on its end.
+  const reading = pick ? 0 : step === 3 ? 1 : readThrough(local, current.lines.length);
   useLayoutEffect(() => {
     const node = log.current;
     const last = node?.querySelector<HTMLElement>('[data-line]:last-of-type');
@@ -62,10 +66,10 @@ export function PositioningClipJ({ moment, local }: { moment: number; local: num
   const shownStep = Math.min(step, 2);
   const done = step === 3 || local >= 0.97;
   const confirmed = step === 3 ? 3 : step + (done ? 1 : 0);
-  const filled = filledUpTo(moment, lines);
+  const filled = filledUpTo(moment, pick ? current.lines.slice(0, Math.max(...pick) + 1) : lines);
   const information = personaInformation(filled, confirmed);
   const valid = Object.fromEntries(J_STEPS.map((item, index) => [item.id, index < confirmed]));
-  const fetchLocal = step === 3 ? 1 : Math.max(0, local * 3 - 1.4);
+  const fetchLocal = step === 3 || pick ? 1 : Math.max(0, local * 3 - 1.4);
   const stepTitle = J_STEPS[shownStep].title;
   return (
     <div className={styles.app}>

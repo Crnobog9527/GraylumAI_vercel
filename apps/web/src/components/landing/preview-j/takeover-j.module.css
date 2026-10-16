@@ -126,3 +126,14 @@
   scrollbar-width: thin;
 }
 @media (prefers-reduced-motion: no-preference) { .result { animation: copyIn .5s var(--j-ease) both; } }
+
+/* Sample K (data-calm, distill plan items 15–16): in the still pictures, the product's small grey print is set darker
+   (at least 4.5:1) and at least 12px. Sample J and the product itself are unchanged. */
+[data-calm] .app small, [data-calm] .rail div > span, [data-calm] .app > .checklist header p, [data-calm] .checklist label + span {
+  color: #6b6b6b; font-size: 12px;
+}
+[data-calm] .center > header :is(p, span) { color: #6b6b6b; font-size: 12px; }
+[data-calm] .center > nav button { color: #6b6b6b !important; font-size: 12px; }
+[data-calm] .center > nav button[aria-current='step'] { color: #333 !important; }
+[data-calm] .checklist [data-field-state] label + span, [data-calm] .log [data-message-role] > span, [data-calm] .cardSlot :is(p, span) { color: #6b6b6b; }
+[data-calm] .cardSlot span { font-size: 12px; }

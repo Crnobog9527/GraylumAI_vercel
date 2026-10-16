@@ -68,7 +68,7 @@ export function SamplesJ() {
 }
 
 /** "10 秒看懂": who, what for whom, how it earns, this week's first step; the coach's warning first where there is one. */
-function Glance({ data }: { data: SampleData }) {
+export function Glance({ data }: { data: SampleData }) {
   const { glance } = J_SAMPLES;
   const rows: [string, string, boolean][] = [
     [glance.who, data.summary.who, false],
@@ -156,7 +156,7 @@ function Overview({ data, start }: { data: SampleData; start: boolean }) {
 }
 
 /** The whole report, opened in place: a chapter list that jumps within it, the text scrolling on its own. */
-function FullReport({ slug }: { slug: string }) {
+export function FullReport({ slug }: { slug: string }) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState<string | null>(null);
   const panelId = useId();

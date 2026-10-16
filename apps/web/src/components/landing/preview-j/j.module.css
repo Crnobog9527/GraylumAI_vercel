@@ -124,8 +124,10 @@
   border: 1px solid var(--j-line); border-radius: 999px; background: #fff; color: var(--j-ink); font: inherit; font-size: 15px;
   font-weight: 500; cursor: pointer;
 }
-@media (min-width: 960px) { .wallMore { display: none; } }
-@media (max-width: 959px) { .voiceRows[data-folded] > li:nth-child(n + 4) { display: none; } }
+@media (min-width: 960px) { .wallMore:not([data-always]) { display: none; } }
+@media (max-width: 959px) { .voiceRows[data-folded]:not([data-four]) > li:nth-child(n + 4) { display: none; } }
+/* Sample K: four rows on every screen, the rest behind the button. */
+.voiceRows[data-folded][data-four] > li:nth-child(n + 5) { display: none; }
 /* Each row plays left to right: the note drops onto the wall, then the arrow, then the answer slides in after it.
    Rows that arrive together follow one another (--stagger, set by MotionJ). */
 @media (prefers-reduced-motion: no-preference) {
@@ -139,6 +141,14 @@
   .page[data-motion='on'] .voiceRow .arrow { transition: opacity .5s var(--j-ease) calc(var(--stagger, 0ms) + 450ms); }
   .page[data-motion='on'] .voiceRow .answer {
     transition: opacity .6s var(--j-ease) calc(var(--stagger, 0ms) + 600ms), translate .6s var(--j-ease) calc(var(--stagger, 0ms) + 600ms);
+  }
+}
+
+/* Sample K (data-calm): the note lands with a smooth ease-out, no overshoot. */
+@media (prefers-reduced-motion: no-preference) {
+  .page[data-motion='on'] [data-calm] .voiceRow .note {
+    transition: opacity .5s var(--j-ease) var(--stagger, 0ms), translate .8s var(--j-ease) var(--stagger, 0ms),
+      scale .8s var(--j-ease) var(--stagger, 0ms);
   }
 }
 

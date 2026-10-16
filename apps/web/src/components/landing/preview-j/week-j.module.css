@@ -128,3 +128,8 @@
   .window { max-height: 420px; mask-image: linear-gradient(#000 82%, transparent); }
   .body { height: 420px; }
 }
+
+/* Sample K (data-calm, distill plan items 15–16): the still window's small print at least 12px and 4.5:1. */
+[data-calm] .badge { font-size: 12px; }
+[data-calm] .chromeTitle, [data-calm] .coach > span { color: #6b6b6b; }
+[data-calm] .coach > span { font-size: 12px; }

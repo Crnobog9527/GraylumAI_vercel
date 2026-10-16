@@ -77,3 +77,6 @@
 .fullBody h5 { margin: 0 0 6px; color: var(--j-ink); font-size: 16px; font-weight: 600; }
 .fullBody table { font-size: 13px; }
 .loading { margin: 0; color: var(--j-muted); font-size: 14px; }
+
+/* Sample K (data-calm): the tags at least 12px. */
+[data-calm] .tabs button em, [data-calm] .coverLabel em { font-size: 12px; }

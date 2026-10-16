@@ -36,8 +36,9 @@ const reducedMotion = () => Boolean(window.matchMedia?.('(prefers-reduced-motion
  * message by message, the coach driving each stage — it asks, proposes, waits for a yes, then moves on. The five stage
  * labels light with the stage of the newest message, and each is a button: it plays that module from its start (Owner
  * 2026-10-15, round six). It loops while on screen. The server HTML and reduced motion show the review stage, finished.
+ * `still` (sample K, Owner 2026-10-17): one stage's messages as a still picture, no stage buttons, nothing playing.
  */
-export function WeekJ() {
+export function WeekJ({ still }: { still?: number } = {}) {
   // -1: at rest. 0 and up: how many messages have arrived (the newest is count - 1).
   const [count, setCount] = useState(-1);
   const [playing, setPlaying] = useState(false);
@@ -49,13 +50,13 @@ export function WeekJ() {
 
   useEffect(() => {
     const node = ref.current;
-    if (!node || reducedMotion() || typeof IntersectionObserver === 'undefined') return;
+    if (still !== undefined || !node || reducedMotion() || typeof IntersectionObserver === 'undefined') return;
     const observer = new IntersectionObserver(entries => setPlaying(entries.some(entry => entry.isIntersecting)));
     observer.observe(node);
     // Open with the first two exchanges already there, so the window never starts out empty; play on from the next.
     setCount(OPENING);
     return () => observer.disconnect();
-  }, []);
+  }, [still]);
 
   useEffect(() => {
     if (!playing || editing || count < 0) return;
@@ -88,12 +89,12 @@ export function WeekJ() {
     return () => window.removeEventListener('resize', fit);
   }, [count]);
 
-  const shown = count < 0 ? LINES.slice(REST) : LINES.slice(0, count);
+  const shown = still !== undefined ? LINES.filter(line => line.stage === still) : count < 0 ? LINES.slice(REST) : LINES.slice(0, count);
   const stage = shown[shown.length - 1]?.stage ?? 0;
   const firstOfStage = shown.findIndex(line => line.stage === stage);
   return (
     <figure ref={ref} className={styles.stage} aria-label={J_WEEK.label} data-stage={stage} data-region="一周演示">
-      <ol className={styles.stages} aria-label={J_WEEK.pickLabel}>
+      {still !== undefined ? null : <ol className={styles.stages} aria-label={J_WEEK.pickLabel}>
         {J_WEEK.stages.map((name, index) => {
           const Icon = STAGE_ICONS[index];
           return (
@@ -104,7 +105,7 @@ export function WeekJ() {
             </li>
           );
         })}
-      </ol>
+      </ol>}
       <div className={styles.window} inert aria-hidden="true">
         <div className={styles.chrome}>
           <span className={styles.dots}><i /><i /><i /></span>

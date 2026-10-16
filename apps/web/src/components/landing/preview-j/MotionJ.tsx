@@ -58,8 +58,11 @@ export function MotionJ({ className, children }: { className?: string; children:
   );
 }
 
-/** The voice wall's "看另外 N 条" on a phone: folds the list once mounted, one press unfolds it for good. */
-export function WallMoreJ({ listId, hiddenCount }: { listId: string; hiddenCount: number }) {
+/**
+ * The voice wall's "看另外 N 条" on a phone (on every screen with `always`): folds the list once mounted, one press
+ * unfolds it for good.
+ */
+export function WallMoreJ({ listId, hiddenCount, always = false }: { listId: string; hiddenCount: number; always?: boolean }) {
   const [folded, setFolded] = useState(false);
   useEffect(() => {
     const list = document.getElementById(listId);
@@ -74,7 +77,7 @@ export function WallMoreJ({ listId, hiddenCount }: { listId: string; hiddenCount
     setFolded(false);
   };
   return (
-    <button type="button" className={styles.wallMore} aria-controls={listId} aria-expanded="false" onClick={unfold}>
+    <button type="button" className={styles.wallMore} data-always={always || undefined} aria-controls={listId} aria-expanded="false" onClick={unfold}>
       看另外 {hiddenCount} 条<ChevronDown size={16} aria-hidden="true" />
     </button>
   );

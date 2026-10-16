@@ -32,8 +32,8 @@ export const APP_SEGMENTS = new Set(['about', 'acceptable-use', 'access-denied',
   'requests', 'reset-password', 'runtime', 'runtime-recovery', 'search', 'settings', 'shequn-jingying', 'shequn-xingxiao',
   'skills', 'start', 'stream', 'stripe', 'terms', 'tickets', 'topics', 'transactions', 'trpc', 'tutorials', 'upload', 'users',
   'verify-email', 'waffo', 'webhook', 'workbench', 'zh-tw', 'zimeiti-jingying', 'zimeiti-kecheng',
-  // Style samples D, E, G, H, I and J (PUBLIC-SITE, /landing/preview/d … /j), removed with the samples.
-  'd', 'e', 'g', 'h', 'i', 'j',
+  // Style samples D, E, G, H, I, J and K (PUBLIC-SITE, /landing/preview/d … /k), removed with the samples.
+  'd', 'e', 'g', 'h', 'i', 'j', 'k',
   // FUSION-REVIEW animation prototype (/landing/preview/jury), removed with the prototype.
   'jury',
   // The landing samples' local edit mode (/api/dev/owner-edits; answers 404 outside a local dev server).

@@ -22,3 +22,6 @@
 .finalLine { margin: 0; max-width: 34em; color: var(--j-body); font-size: clamp(17px, 1.6vw, 21px); line-height: 1.7; text-wrap: pretty; }
 .finalNote { margin: -8px 0 0; color: var(--j-muted); font-size: 14px; }
 @media (prefers-reduced-motion: reduce) { .faqItem summary svg { transition: none; } }
+
+/* Sample K (data-calm): the close in plain type on the canvas, no lifted glass panel. */
+[data-calm] .final { border-color: transparent; background: none; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; }

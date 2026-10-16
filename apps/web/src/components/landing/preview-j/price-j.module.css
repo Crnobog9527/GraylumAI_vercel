@@ -69,3 +69,10 @@ h2.title { margin-bottom: clamp(32px, 4vw, 56px); }
 }
 @keyframes edge { to { --edge: 360deg; } }
 @keyframes glint { from { background-position: 100% 0; } to { background-position: 0 0; } }
+
+/* Sample K (data-calm): flat panel, a smooth rise, the gold edge still. */
+[data-calm] .compareCost { box-shadow: none; }
+@media (prefers-reduced-motion: no-preference) {
+  [data-calm] .versus .own { transition: opacity .6s var(--j-ease), scale .8s var(--j-ease); }
+  [data-motion='on'] [data-calm] .own { animation: none; }
+}

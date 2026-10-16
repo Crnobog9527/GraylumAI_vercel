@@ -1,0 +1,98 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * Style sample K: sample J (j.module.css underneath) slimmed down (Owner 2026-10-17). One clear order of headings:
+ * the two leads (三个关键时刻, the sample reports) largest; the voice wall, the week, the comparison, price and the FAQ
+ * one size down. Only regions 3 and 4 carry product windows; everything else is plain type on the canvas.
+ */
+.page { --k-secondary: var(--gl-text-secondary-aa, #6b6b6b); }
+
+.section { padding: 88px 0; scroll-margin-top: 72px; }
+@media (max-width: 767px) { .section { padding: 64px 0; } }
+.wrap { width: 100%; max-width: 1240px; margin: 0 auto; padding: 0 var(--j-gutter); }
+
+/* Headings: two sizes for the sections */
+.lead {
+  margin: 0; font-size: clamp(34px, 4.6vw, 64px); font-weight: 600; line-height: 1.08; letter-spacing: -.04em;
+  text-wrap: balance; word-break: keep-all;
+}
+.minor, .page :is([id='voice-title'], [id='pricing-title'], [id='faq-title']) {
+  margin: 0; font-size: clamp(26px, 2.8vw, 38px); font-weight: 600; line-height: 1.15; letter-spacing: -.03em;
+  text-wrap: balance; word-break: keep-all;
+}
+.minorLede { margin: 12px 0 0; max-width: 40em; color: var(--j-body); font-size: 17px; line-height: 1.7; }
+
+/* Region 3: three key moments */
+.steps { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 32px; }
+.steps button {
+  display: inline-flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 18px 0 8px; border: 1px solid var(--j-line);
+  border-radius: 999px; background: #fff; color: var(--j-body); font: inherit; font-size: 16px; font-weight: 500; cursor: pointer;
+  transition: background-color .2s, border-color .2s, color .2s;
+}
+.steps button span {
+  display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: #f0efeb; color: var(--j-ink);
+  font-size: 14px; font-weight: 600;
+}
+@media (max-width: 480px) {
+  .steps { gap: 6px; } .steps button { min-height: 42px; gap: 8px; padding: 0 12px 0 6px; font-size: 14.5px; }
+  .steps button span { width: 28px; height: 28px; font-size: 13px; }
+}
+.steps button[aria-selected='true'] { border-color: var(--j-ink); background: var(--j-ink); color: #fff; }
+.steps button[aria-selected='true'] span { background: var(--j-gold); color: var(--j-ink); }
+.pickHint { margin: 10px 0 0; color: var(--k-secondary); font-size: 14px; }
+.moment { display: grid; gap: 24px; margin-top: 28px; }
+/* The words above, the product window below at full width (beside them it was too narrow to read). */
+.momentText { display: grid; gap: 12px; align-content: start; }
+@media (min-width: 1024px) { .momentText { grid-template-columns: minmax(0, 6fr) minmax(0, 5fr); gap: 8px 48px; align-items: start; } .momentText { grid-template-rows: auto 1fr; } .momentText .why { grid-row: 1 / span 2; grid-column: 2; } }
+.momentText h3 { margin: 0; font-size: clamp(22px, 2vw, 28px); font-weight: 600; letter-spacing: -.02em; }
+.momentText p { margin: 0; color: var(--j-body); font-size: 17px; line-height: 1.75; }
+.momentText .why { padding: 14px 16px; border-left: 3px solid var(--j-gold); background: #fff; color: var(--j-ink); font-size: 16px; }
+.why b { display: block; margin-bottom: 4px; color: var(--j-gold-text); font-size: 14px; font-weight: 600; }
+.momentPicture {
+  min-width: 0; height: 560px; overflow: hidden; border: 1px solid var(--j-line); border-radius: 18px; background: #fff;
+  box-shadow: var(--j-shadow-lift);
+}
+@media (max-width: 767px) { .momentPicture { height: 480px; } }
+.momentPicture:has(.planCard) { height: auto; }
+.planCard { display: grid; gap: 16px; padding: clamp(18px, 2.4vw, 28px); }
+.planTitle { margin: 0; font-size: clamp(20px, 2vw, 26px); font-weight: 600; letter-spacing: -.02em; }
+
+/* Region 4: the sample reports, 10-second cards only */
+.samplesHead { display: grid; gap: 8px; margin-bottom: 24px; }
+.bridge { margin: 0; color: var(--j-gold-text); font-size: 18px; font-weight: 600; }
+.sampleCard {
+  display: grid; gap: 16px; margin-top: 16px; padding: clamp(18px, 2.4vw, 28px); border: 1px solid var(--j-line); border-radius: 18px;
+  background: #fff; box-shadow: var(--j-shadow-lift);
+}
+.coverTitle { margin: 0; font-size: clamp(20px, 2vw, 26px); font-weight: 600; letter-spacing: -.02em; }
+.cta { display: flex; margin: 32px 0 0; }
+
+/* Region 5: one still row of the week */
+.rhythm {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0; margin: 32px 0 0; padding: 0; list-style: none;
+  border-top: 1px solid var(--j-line);
+}
+.rhythm li {
+  display: grid; gap: 10px; align-content: start; padding: 20px 20px 4px 0; color: var(--j-ink); font-size: 17px; font-weight: 500;
+  line-height: 1.5;
+}
+.rhythm li svg { color: var(--j-gold-text); }
+
+/* Region 6: the comparison in plain type */
+.pairs { display: grid; gap: 40px; margin: 32px 0 0; padding: 0; list-style: none; }
+.asked { display: flex; gap: 12px; margin: 0 0 16px; font-size: 19px; font-weight: 600; line-height: 1.5; }
+.asked span { flex: none; color: var(--k-secondary); font-weight: 500; }
+.answers { display: grid; gap: 20px; }
+@media (min-width: 900px) { .answers { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 40px; } }
+.answers > div { display: grid; gap: 8px; align-content: start; padding-left: 16px; border-left: 2px solid var(--j-line); }
+.answers > [data-side='coach'] { border-left-color: var(--j-gold); }
+.answers p { margin: 0; color: var(--j-body); font-size: 16px; line-height: 1.75; }
+.answers > [data-side='coach'] p { color: var(--j-ink); }
+.answers .who { color: var(--k-secondary); font-size: 14px; font-weight: 600; }
+.answers .verdict { display: flex; flex-wrap: wrap; gap: 4px 10px; font-weight: 500; }
+.verdict b { color: var(--k-secondary); font-size: 14px; font-weight: 600; }
+.answers .source { color: var(--k-secondary); font-size: 13px; }
+
+/* Price: the terms and the jury's one line under the button */
+.terms { margin: 0; color: var(--k-secondary); font-size: 14px; }
+.terms a { color: inherit; text-underline-offset: 3px; }
+.gold { margin: 0; color: var(--j-gold-text); font-size: 14px; font-weight: 500; }
