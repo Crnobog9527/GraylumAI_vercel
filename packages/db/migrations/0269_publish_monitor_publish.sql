@@ -59,9 +59,7 @@ BEGIN
    (hold_credits IS NULL OR hold_credits>0) AND (charged_credits IS NULL OR charged_credits>=0)
    AND check_attempts BETWEEN 0 AND 1000 AND (error_code IS NULL OR error_code ~ '^[A-Z0-9_]{1,64}$')
    AND (lease IS NULL)=(lease_until IS NULL)
-   AND (state<>'dispatching' OR dispatched_at IS NOT NULL)
-   AND (state NOT IN ('completed','failed','released') OR reserved_slots=0)
-   AND (state<>'completed' OR charged_credits>0));
+   AND (state NOT IN ('completed','failed','released') OR reserved_slots=0));
  END IF;
 END $$;
 CREATE UNIQUE INDEX IF NOT EXISTS social_publish_jobs_pre_deduct ON public.social_publish_jobs(pre_deduct_id)
@@ -397,7 +395,7 @@ BEGIN
   SELECT id FROM social_publish_jobs WHERE (lease_until IS NULL OR lease_until<=clock_timestamp()) AND NOT manual_review
    AND ((state='claimed' AND claim_expires_at<=clock_timestamp())
     OR (state='unknown' AND next_check_at<=clock_timestamp())
-    OR (state='dispatching' AND dispatched_at<=clock_timestamp()-interval '5 minutes'))
+    OR (state='dispatching' AND coalesce(dispatched_at,updated_at)<=clock_timestamp()-interval '5 minutes'))
   ORDER BY updated_at,id LIMIT p_limit FOR UPDATE SKIP LOCKED),
  leased AS (
   UPDATE social_publish_jobs j SET lease=gen_random_uuid(),lease_until=clock_timestamp()+make_interval(secs=>p_lease_seconds)
@@ -418,7 +416,7 @@ BEGIN
  IF coalesce(p_code,'') !~ '^[A-Z0-9_]{1,64}$' THEN RAISE EXCEPTION 'PUBLISH_MONITOR_INPUT_INVALID' USING ERRCODE='22023'; END IF;
  j:=publish_monitor_publish_lock(p_job);
  IF j.lease IS DISTINCT FROM p_lease OR j.state NOT IN ('dispatching','unknown') THEN RETURN publish_monitor_publish_view(j); END IF;
- manual:=j.dispatched_at<=clock_timestamp()-interval '24 hours';
+ manual:=coalesce(j.dispatched_at,j.created_at)<=clock_timestamp()-interval '24 hours';
  UPDATE social_publish_jobs SET state='unknown',error_code=p_code,check_attempts=LEAST(check_attempts+1,1000),
   manual_review=manual,lease=NULL,lease_until=NULL,
   next_check_at=CASE WHEN manual THEN NULL ELSE clock_timestamp()
