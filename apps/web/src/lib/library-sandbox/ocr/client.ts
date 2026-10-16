@@ -43,15 +43,32 @@ export async function recognizeImagesInBrowser(images: Blob[], options: OcrOptio
   if (images.some((image) => image.size > OCR_LIMITS.maxImageBytes)) throw new SandboxError('INPUT_TOO_LARGE');
   const loading = Promise.all([loadWorkerBundle(OCR_WORKER_PATH), loadModels()]);
   const [source, parts] = await withinDeadline(loading, Date.now() + OCR_LIMITS.initTimeoutMs, options.signal);
+  const run = async (bytes: Uint8Array[]) => validateOcrBatch(await runSandboxedWorker({
+    workerSource: source, input: packOcrInput({ ...parts, images: bytes }), allowWasm: true, signal: options.signal,
+    timeoutMs: OCR_LIMITS.initTimeoutMs + bytes.length * OCR_LIMITS.imageTimeoutMs,
+  }), bytes.length).pages;
   const results: OcrPage[] = [];
   for (let start = 0; start < images.length; start += OCR_LIMITS.maxImages) {
     const batch = images.slice(start, start + OCR_LIMITS.maxImages);
     const bytes = await Promise.all(batch.map(async (image) => new Uint8Array(await image.arrayBuffer())));
-    const value = await runSandboxedWorker({
-      workerSource: source, input: packOcrInput({ ...parts, images: bytes }), allowWasm: true, signal: options.signal,
-      timeoutMs: OCR_LIMITS.initTimeoutMs + batch.length * OCR_LIMITS.imageTimeoutMs,
-    });
-    validateOcrBatch(value, batch.length).pages.forEach((page, i) => {
+    let pages: OcrPage[];
+    try {
+      pages = await run(bytes);
+    } catch (error) {
+      // A batch that ran out of time is retried one image at a time, each with its own deadline, so one slow or
+      // stuck image cannot use up the others' time; that image alone is reported as timed out.
+      if (!(error instanceof SandboxError) || error.code !== 'SANDBOX_TIMEOUT' || options.signal?.aborted || bytes.length === 1) throw error;
+      pages = [];
+      for (const image of bytes) {
+        pages.push(await run([image]).then(([page]) => page!, (single: unknown) => {
+          if (single instanceof SandboxError && single.code === 'SANDBOX_TIMEOUT' && !options.signal?.aborted) {
+            return { ok: false as const, code: 'SANDBOX_TIMEOUT' as const };
+          }
+          throw single;
+        }));
+      }
+    }
+    pages.forEach((page, i) => {
       results.push(page);
       options.onPage?.(start + i, page);
     });

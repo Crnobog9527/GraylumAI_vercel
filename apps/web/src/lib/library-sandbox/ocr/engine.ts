@@ -4,6 +4,7 @@ import * as ort from 'onnxruntime-web/wasm';
 import { SandboxError } from '../errors';
 import { OCR_LIMITS } from '../limits';
 import { deskew, rotate180 } from './deskew';
+import { imageDimensions } from './image-header';
 import { detectionBoxes, detectionSize, detectionTensor, type Box } from './detect';
 import type { OcrModelParts } from './pack';
 import { readingOrder, type Item } from './reading-order';
@@ -95,6 +96,10 @@ export async function createOcrEngine(parts: OcrModelParts) {
   return {
     async recognize(image: Uint8Array): Promise<OcrPage> {
       const started = performance.now();
+      // Refuse huge images from their header, before the browser expands any pixels.
+      const header = imageDimensions(image);
+      if (!(header.width > 0 && header.height > 0) || Math.max(header.width, header.height) > OCR_LIMITS.maxImageEdge
+        || header.width * header.height > OCR_LIMITS.maxImagePixels) throw new SandboxError('INPUT_TOO_LARGE');
       let bitmap: ImageBitmap;
       try {
         bitmap = await createImageBitmap(new Blob([copy(image)]));
