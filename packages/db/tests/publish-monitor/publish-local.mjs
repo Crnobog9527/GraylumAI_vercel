@@ -256,6 +256,32 @@ try {
   assert.ok((await quota()).alerted_at, 'the 80% alert is raised once');
   report.checks.push('two concurrent jobs with one slot left: exactly one is claimed; the 80% alert is raised');
 
+  // Same user, same key, submitted at the same moment: the profile lock taken first serializes them, so the second
+  // sees the first's row and gets the same job back (no unique-constraint error). A claim racing a settlement of the
+  // same user takes profile then quota on both sides, so neither deadlocks.
+  await c.query(`UPDATE system_settings SET value=jsonb_set(value,'{limit}','100000') WHERE key='publish_monitor_publish_quota'`);
+  const same = await member(1000);
+  const settling = await claim(same, 'key-settle-01', fp('8'), [same.connections[0].id]);
+  await dispatch(same, settling.id);
+  const pair = await Promise.all([0, 1, 2].map(async () => {
+    const x = new Client({ host: c.host, port: c.port, user: c.user, database: c.database });
+    await x.connect();
+    return x;
+  }));
+  const twins = await Promise.allSettled([
+    claim(same, 'key-twin-0001', fp('9'), same.connections.map(x => x.id), pair[0]),
+    claim(same, 'key-twin-0001', fp('9'), same.connections.map(x => x.id), pair[1]),
+    svc('SELECT publish_monitor_publish_record($1,$2,$3) v', [settling.id, 'sp_settle',
+      j({ [same.connections[0].id]: { status: 'published' } })], pair[2])]);
+  await Promise.all(pair.map(x => x.end()));
+  assert.deepEqual(twins.map(x => x.status), ['fulfilled', 'fulfilled', 'fulfilled'], String(twins.map(x => x.reason)));
+  assert.equal(twins[0].value.id, twins[1].value.id);
+  assert.deepEqual([twins[0].value.replayed, twins[1].value.replayed].sort(), [false, true]);
+  assert.equal(await v('SELECT count(*)::int v FROM social_publish_jobs WHERE actor_id=$1', [same.a]), 2);
+  assert.equal(await credits(same.a), 1000 - 6 - 12, 'one settled job and one held job');
+  report.checks.push('concurrent first submissions with the same key get the same job; a claim racing a settlement of the '
+    + 'same user completes without deadlock');
+
   // Five definite refusals within an hour pause new submissions for that user.
   const r = await member(1000, ['x']);
   for (let i = 0; i < 5; i++) {
