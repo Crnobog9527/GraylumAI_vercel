@@ -112,9 +112,13 @@ export function databaseRuntimeResearchStore(deps: {
           p_payload: { budgetUnits: Math.max(1, quoteUnits), maxOperations: 1,
             operations: [{ operationId: id, identityHash, maxQuoteUnits: quoteUnits }] } });
         const reserved = await transition<{ claimed: boolean; token?: string }>('reserve', id, { identityHash, quoteUnits });
-        if (!reserved.claimed || !reserved.token) return null;
-        const dispatched = await transition<{ dispatch: boolean }>('dispatch', id, { token: reserved.token });
-        return dispatched.dispatch ? { token: reserved.token } : null;
+        return reserved.claimed && reserved.token ? { token: reserved.token } : null;
+      },
+      async dispatch(id, token) {
+        return (await transition<{ dispatch: boolean }>('dispatch', id, { token })).dispatch === true;
+      },
+      async cancel(id) {
+        await transition('cancel', id);
       },
       async finish(id, token, state, result) {
         // quoteUnits are micro-USD; result.cost.actual stays USD (research_transition multiplies by 1e6).
@@ -128,6 +132,12 @@ export function databaseRuntimeResearchStore(deps: {
   }
   async function readOperation(id: string): Promise<RuntimeOperation | null> {
     const operation = await read<RuntimeOperation | null>('operation', id);
+    // Dispatched without a result or BILL2 link: provably never sent (#1005 P2). The database closes it as
+    // cancelled, so a stable discovery cursor moves on to its successor instead of staying stuck.
+    if (operation?.state === 'dispatched' && !operation.result
+      && await rpc<boolean>('research_runtime_close_unsent', { a, s, p_operation: id }) === true) {
+      return { ...operation, state: 'cancelled' };
+    }
     if (!operation?.result) return operation;
     const terminal = ['succeeded', 'failed', 'unknown'].includes(operation.state);
     if (!Object.hasOwn(operation.result, 'billing')) {
@@ -203,6 +213,13 @@ export function databaseRuntimeResearchStore(deps: {
     refreshCreate: (platform: SocialPlatform, account: string) => rpc<string>('research_refresh_create', {
       a, s, p_platform: platform, p_account: account,
     }),
+    /** Unrounded user credits of a settled tool call of this answer (0267); null while unsettled. */
+    async callCharge(callId: string): Promise<string | null> {
+      const charge = z.object({ credits: z.string().regex(/^\d+(\.\d+)?$/).nullable() }).nullable()
+        .safeParse(await rpc('research_runtime_call_charge', { a, s, e, p_call: callId }));
+      if (!charge.success) throw new Error('RESEARCH_STATE_UNAVAILABLE');
+      return charge.data?.credits ?? null;
+    },
   };
 }
 export type RuntimeResearchStore = ReturnType<typeof databaseRuntimeResearchStore>;

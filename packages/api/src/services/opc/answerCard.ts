@@ -12,6 +12,8 @@ export const opcGenerate = z
     input: z.string().trim().min(1).max(8000),
     answerSource: questionAnswerSourceSchema.optional(),
     questionId: z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/).optional(),
+    // RT-3b PR-2: a one-time refresh grant from research.createRefresh; checked by the host, never trusted as given.
+    researchRefreshId: uuid.optional(),
   })
   .strict();
 

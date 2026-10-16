@@ -3,6 +3,7 @@ import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { RESEARCH_TOOL_NAMES, researchToolArgs } from '../tools/schemas';
 import { publicHttpUrl } from '../vendors/http';
+import { SOCIAL_KINDS, SOCIAL_PLATFORMS } from '../vendors/types';
 
 interface Db {
   rpc(name: string, args: Record<string, unknown>): PromiseLike<{ data: unknown; error: unknown }>;
@@ -74,22 +75,32 @@ function metadata(value: unknown) {
   return { toolName: row.toolName, args: args.success && original
     ? Object.fromEntries(Object.entries(args.data).filter(([key]) => Object.hasOwn(original, key))) : null };
 }
+// RT-3b PR-2 (0267): what this one subcall asked for. Rows saved before 0267, or with values outside the
+// known lists, return null rather than a guess.
+const callDisplay = {
+  query: z.unknown().optional().transform(value => typeof value === 'string' && value.length <= 2048 ? value : null),
+  platform: z.unknown().optional().transform(value =>
+    typeof value === 'string' && ([...SOCIAL_PLATFORMS, 'web'] as string[]).includes(value) ? value : null),
+  dataKind: z.unknown().optional().transform(value =>
+    typeof value === 'string' && ([...SOCIAL_KINDS, 'web_search', 'web_fetch'] as string[]).includes(value) ? value : null),
+};
 const charge = z.object({
   callId: id, toolName: z.enum(RESEARCH_TOOL_NAMES).nullable(), args: z.unknown(),
   source: z.enum(['tool_usage', 'tool_no_usage', 'tool_failed', 'tool_failed_charged', 'tool_unknown']).nullable(),
-  credits: z.string().regex(/^\d+(\.\d+)?$/).nullable(),
+  credits: z.string().regex(/^\d+(\.\d+)?$/).nullable(), ...callDisplay,
 });
 export async function researchToolCharges(db: Db | null, actor: string, transactionId: string) {
   const rows = parse(z.array(charge), await rpc(db, 'research_user_tool_charges', {
     a: actor, p_transaction: id.parse(transactionId),
   }));
-  return { items: rows.map(row => ({ callId: row.callId, ...metadata(row), source: row.source, credits: row.credits })) };
+  return { items: rows.map(row => ({ callId: row.callId, ...metadata(row), query: row.query, platform: row.platform,
+    dataKind: row.dataKind, source: row.source, credits: row.credits })) };
 }
 const evidence = z.object({
   operationId: id, toolName: z.enum(RESEARCH_TOOL_NAMES).nullable(), args: z.unknown(),
   state: z.enum(['succeeded', 'failed', 'unknown']), fetchedAt: z.string().nullable(),
   itemCount: z.number().int().min(0).nullable(), truncated: z.boolean().nullable(),
-  sources: z.array(z.string()), sessionId: id, sessionTitle: z.string().nullable(), createdAt: z.string(),
+  sources: z.array(z.string()), sessionId: id, sessionTitle: z.string().nullable(), createdAt: z.string(), ...callDisplay,
 });
 export async function researchEvidence(db: Db | null, actor: string, input: z.infer<typeof evidenceInput>) {
   const value = evidenceInput.parse(input);

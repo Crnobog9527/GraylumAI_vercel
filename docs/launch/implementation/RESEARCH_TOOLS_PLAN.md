@@ -453,3 +453,19 @@ RT-1 不碰任何在途文件，可以先开工；RT-2b 只在 RT-1 之后、和
 登录接口 `research.cards` / `confirmCard` / `createRefresh` / `toolCharges` / `evidence` 使用 0263 的受限函数；
 前端字段与 #1007 对齐。刷新只创建授权，不立即发起付费调用。费用只返回用户结算来源和取整前积分，
 证据只返回本人未删除内容的公开来源；存量缺失的工具参数等字段保持 null。没有供应商成本或密钥对外输出。
+
+### RT-3b PR-2 边界（2026-10-16，迁移 0267）
+
+- 消息入口 `opc.mentorTurnStream` / `prepareStep` 接受可选 `researchRefreshId`：宿主按登录用户、草稿会话读 0263 刷新授权
+  （别人的、别的会话的、来源回答已删除的、已用过的一律拒绝，错误码 `OPC_RESEARCH_REFRESH_INVALID`；研究工具总开关关闭时
+  `OPC_RESEARCH_REFRESH_UNAVAILABLE`），通过后作为 `hostTurnContext.researchRefresh` 冻结进该轮上下文交给模型；
+  不进 `runtime_admission_replay` 的请求身份。`benchmark_fetch` 以 `{kind:"refresh",refreshId}` 再次核验并一次性消耗。
+- PAYG 每次调用最多 9 个工具定义（SQL 报价校验、`PAYG_MAX_TOOLS`、host profile 2–9、`MAX_AGENT_TOOLS`）；
+  已冻结的 run 仍按自己的 maxTools。9 个工具定义合计约 7.4 KB，`maxSchemaBytes` 16384 不变。
+- `research_call` 结束事件带 `credits`（本次子调用的用户积分，取整前十进制；读不到为 null）；
+  `research.toolCharges` / `research.evidence` 每行返回子调用自己的 `query` / `platform` / `dataKind`，0267 之前的行为 null。
+- 证据派发顺序改为：建计划并预留 → 关联 BILL2 调用 → BILL2 派发 → 研究侧派发 → 供应商。未发送时取消该操作；
+  "已派发、无结果、无 BILL2 关联"的操作由 `research_runtime_close_unsent` 收口为已取消，发现流程换稳定后继编号（#1005 P2）。
+- **仍未接入真实定位回合**：冻结供应商价格进 run（`frozenCallPolicy` 增加 `research-tool-v1`）、准入里按开关给定位导师回合
+  加研究工具和子调用次数、`execute.ts` 组装工具、`AGENT_TOOL_NAMES` / `providerRequest` 白名单、流事件队列。另开 PR 做，
+  前端挂载在它之后。

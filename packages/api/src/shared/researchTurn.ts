@@ -12,4 +12,6 @@ export type ResearchTurnEvent =
   | { type: 'research_card'; card: ResearchSelectionCard }
   | { type: 'research_call'; callId: string; toolName: string; args: Record<string, unknown>;
       query: string; platform: SocialPlatform | 'web'; dataKind: SocialKind | 'web_search' | 'web_fetch';
-      state: 'running' | 'succeeded' | 'failed' | 'unknown'; evidenceId?: string };
+      state: 'running' | 'succeeded' | 'failed' | 'unknown'; evidenceId?: string;
+      /** The user's unrounded settled credits for this subcall (finished, sent calls only); null when not readable yet. */
+      credits?: string | null };

@@ -32,6 +32,8 @@ function fixture() {
     open: vi.fn<EvidencePort['open']>().mockResolvedValue({ token: 'evidence-token' }),
     finish: vi.fn<EvidencePort['finish']>().mockResolvedValue(undefined),
     link: vi.fn<EvidencePort['link']>().mockResolvedValue(undefined),
+    dispatch: vi.fn<EvidencePort['dispatch']>().mockResolvedValue(true),
+    cancel: vi.fn<EvidencePort['cancel']>().mockResolvedValue(undefined),
   };
   const vendors = {
     parallel: vi.fn<VendorCalls['parallel']>().mockResolvedValue(result),
@@ -61,7 +63,10 @@ describe('research subcall safety and accounting', () => {
     expect(f.evidence.link).toHaveBeenCalledWith('operation-1', 'call-1');
     expect(f.evidence.open.mock.invocationCallOrder[0]).toBeLessThan(f.evidence.link.mock.invocationCallOrder[0]!);
     expect(f.evidence.link.mock.invocationCallOrder[0]).toBeLessThan(f.billing.dispatch.mock.invocationCallOrder[0]!);
-    expect(f.billing.dispatch.mock.invocationCallOrder[0]).toBeLessThan(f.vendors.parallel.mock.invocationCallOrder[0]!);
+    expect(f.billing.dispatch.mock.invocationCallOrder[0]).toBeLessThan(f.evidence.dispatch.mock.invocationCallOrder[0]!);
+    expect(f.evidence.dispatch).toHaveBeenCalledWith('operation-1', 'evidence-token');
+    expect(f.evidence.dispatch.mock.invocationCallOrder[0]).toBeLessThan(f.vendors.parallel.mock.invocationCallOrder[0]!);
+    expect(f.evidence.cancel).not.toHaveBeenCalled();
     expect(f.vendors.tikhub).not.toHaveBeenCalled();
     expect(f.vendors.firecrawl).not.toHaveBeenCalled();
   });
@@ -94,8 +99,10 @@ describe('research subcall safety and accounting', () => {
     await expect(runSubcall(f.context, request)).rejects.toThrow('link unavailable');
     expect(f.billing.dispatch).not.toHaveBeenCalled();
     expect(f.billing.record).toHaveBeenCalledWith('call-1', expect.objectContaining({ toolOutcome: 'failed_free', cost: '0' }));
-    expect(f.evidence.finish).toHaveBeenCalledWith('operation-1', 'evidence-token', 'failed',
-      expect.objectContaining({ outcome: 'not_sent', reason: 'LOCAL_PRE_SEND_FAILED', cost: { actual: 0 } }));
+    // The operation was never dispatched on the research side: it is cancelled, not finished.
+    expect(f.evidence.dispatch).not.toHaveBeenCalled();
+    expect(f.evidence.finish).not.toHaveBeenCalled();
+    expect(f.evidence.cancel).toHaveBeenCalledWith('operation-1');
     expect(f.vendors.parallel).not.toHaveBeenCalled();
   });
 
@@ -104,8 +111,9 @@ describe('research subcall safety and accounting', () => {
     f.billing.dispatch.mockRejectedValue(new Error('dispatch response lost'));
     await expect(runSubcall(f.context, request)).rejects.toThrow('dispatch response lost');
     expect(f.vendors.parallel).not.toHaveBeenCalled();
-    expect(f.evidence.finish).toHaveBeenCalledWith('operation-1', 'evidence-token', 'failed',
-      expect.objectContaining({ outcome: 'not_sent', cost: { actual: 0 }, billing: expect.objectContaining({ runId: f.billing.runId }) }));
+    expect(f.evidence.dispatch).not.toHaveBeenCalled();
+    expect(f.evidence.finish).not.toHaveBeenCalled();
+    expect(f.evidence.cancel).toHaveBeenCalledWith('operation-1');
     expect(f.billing.record).toHaveBeenCalledWith('call-1', expect.objectContaining({ toolOutcome: 'failed_free', cost: '0' }));
   });
 
@@ -145,8 +153,9 @@ describe('research subcall safety and accounting', () => {
     if (failure === 'dispatch-error') expect(f.billing.record).toHaveBeenCalledWith('call-1',
       expect.objectContaining({ toolOutcome: 'failed_free', cost: '0' }));
     else expect(f.billing.record).not.toHaveBeenCalled();
-    if (failure === 'dispatch-false') expect(f.evidence.finish).toHaveBeenCalledWith(
-      'operation-1', 'evidence-token', 'failed', { reason: 'NOT_DISPATCHED', cost: { actual: 0 } });
+    if (failure === 'dispatch-false') expect(f.evidence.cancel).toHaveBeenCalledWith('operation-1');
+    expect(f.evidence.dispatch).not.toHaveBeenCalled();
+    expect(f.evidence.finish).not.toHaveBeenCalled();
   });
 
   it('records a thrown supplier call as unknown and never retries or changes supplier', async () => {
@@ -245,8 +254,9 @@ describe('supplier dispatch boundary hooks', () => {
     f.context.beforeSend = vi.fn(async () => { order.push('before-send'); return true; });
     f.context.onSupplierDispatch = vi.fn(() => { order.push('supplier-dispatch'); });
     f.vendors.parallel.mockImplementation(async () => { order.push('vendor'); return result; });
+    f.evidence.dispatch.mockImplementation(async () => { order.push('evidence-dispatch'); return true; });
     await runSubcall(f.context, request);
-    expect(order).toEqual(['bill2-dispatch', 'before-send', 'supplier-dispatch', 'vendor']);
+    expect(order).toEqual(['bill2-dispatch', 'evidence-dispatch', 'before-send', 'supplier-dispatch', 'vendor']);
     expect(f.context.onSupplierDispatch).toHaveBeenCalledTimes(1);
   });
 
@@ -263,5 +273,49 @@ describe('supplier dispatch boundary hooks', () => {
     expect(f.context.onSupplierDispatch).not.toHaveBeenCalled();
     expect(f.vendors.parallel).not.toHaveBeenCalled();
     expect(f.billing.record).not.toHaveBeenCalled();
+  });
+});
+
+describe('#1005 P2: research-side dispatch sits right before the supplier send', () => {
+  it('opening evidence only reserves; nothing is dispatched on the research side before BILL2 dispatch', async () => {
+    const f = fixture();
+    f.billing.dispatch.mockResolvedValue(false);
+    expect(await runSubcall(f.context, request)).toMatchObject({ sent: false, stop: 'NOT_DISPATCHED' });
+    expect(f.evidence.dispatch).not.toHaveBeenCalled();
+    expect(f.evidence.cancel).toHaveBeenCalledWith('operation-1');
+    expect(f.vendors.parallel).not.toHaveBeenCalled();
+  });
+
+  it('a research dispatch refused after BILL2 dispatch records a free failure and cancels the operation', async () => {
+    const f = fixture();
+    f.evidence.dispatch.mockResolvedValue(false);
+    expect(await runSubcall(f.context, request)).toMatchObject({ sent: false, stop: 'NOT_DISPATCHED' });
+    expect(f.vendors.parallel).not.toHaveBeenCalled();
+    expect(f.evidence.finish).not.toHaveBeenCalled();
+    expect(f.evidence.cancel).toHaveBeenCalledWith('operation-1');
+    expect(f.billing.record).toHaveBeenCalledWith('call-1', expect.objectContaining({ toolOutcome: 'failed_free', cost: '0' }));
+  });
+
+  it('a committed research dispatch whose response is lost finishes as not sent, never as unknown', async () => {
+    const f = fixture();
+    const lost = new Error('dispatch response lost');
+    f.evidence.dispatch.mockRejectedValue(lost);
+    await expect(runSubcall(f.context, request)).rejects.toBe(lost);
+    expect(f.vendors.parallel).not.toHaveBeenCalled();
+    expect(f.evidence.finish).toHaveBeenCalledWith('operation-1', 'evidence-token', 'failed',
+      expect.objectContaining({ outcome: 'not_sent', reason: 'LOCAL_PRE_SEND_FAILED', cost: { actual: 0 } }));
+    expect(f.evidence.cancel).not.toHaveBeenCalled();
+    expect(f.billing.record).toHaveBeenCalledWith('call-1', expect.objectContaining({ toolOutcome: 'failed_free', cost: '0' }));
+  });
+
+  it('an uncommitted research dispatch (finish refused) is cancelled so the stable operation can be replaced', async () => {
+    const f = fixture();
+    const lost = new Error('dispatch response lost');
+    f.evidence.dispatch.mockRejectedValue(lost);
+    f.evidence.finish.mockRejectedValue(new Error('invalid finish'));
+    await expect(runSubcall(f.context, request)).rejects.toBe(lost);
+    expect(f.evidence.cancel).toHaveBeenCalledWith('operation-1');
+    expect(f.vendors.parallel).not.toHaveBeenCalled();
+    expect(f.billing.record).toHaveBeenCalledWith('call-1', expect.objectContaining({ toolOutcome: 'failed_free', cost: '0' }));
   });
 });

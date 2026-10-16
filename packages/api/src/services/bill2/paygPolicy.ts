@@ -8,8 +8,9 @@ const identity = {
   pricingHash: z.string().regex(/^[0-9a-f]{64}$/), endpointTag: reference,
   nominalPricing, templateTokens: tokens, marginTokens: tokens,
 };
-/** Tool definitions one PAYG call may carry (card, Skill file, history read); the SQL quote check (0250) enforces the same ceiling. */
-export const PAYG_MAX_TOOLS = 3;
+/** Tool definitions one PAYG call may carry (card, Skill file, history read and the six research tools);
+ * the SQL quote check (0267) enforces the same ceiling. */
+export const PAYG_MAX_TOOLS = 9;
 export const paygStablePolicy = z.object({
   ...identity, version: reference, admissionPath: z.enum(['fixture', 'empirical', 'tokenizer']),
   maxBytes: z.number().int().min(1).max(196_608),

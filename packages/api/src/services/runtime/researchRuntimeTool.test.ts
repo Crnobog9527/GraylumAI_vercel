@@ -48,7 +48,8 @@ function fixture(limit = 12) {
   const plans = new Map<string, RuntimePlan>();
   const discoveries = new Map<string, DiscoveryRecord>();
   const fetches = new Map<string, FetchClaim>();
-  const evidence = { open: vi.fn().mockResolvedValue({ token: id }), finish: vi.fn(), link: vi.fn() };
+  const evidence = { open: vi.fn().mockResolvedValue({ token: id }), dispatch: vi.fn().mockResolvedValue(true),
+    finish: vi.fn(), link: vi.fn(), cancel: vi.fn() };
   const store = {
     authorization: {
       keywordConfirmation: vi.fn<RuntimeResearchStore['authorization']['keywordConfirmation']>()
@@ -91,6 +92,7 @@ function fixture(limit = 12) {
       fetches.set('account', { claimed: false, fetchId, state, evidence: saved });
     }),
     refreshCreate: vi.fn<RuntimeResearchStore['refreshCreate']>().mockResolvedValue(refreshId),
+    callCharge: vi.fn<RuntimeResearchStore['callCharge']>().mockResolvedValue('1.25'),
   } satisfies RuntimeResearchStore;
   const dummySubcall: SubcallContext = {
     policies: [], billing: { runId: id, claim: vi.fn(), dispatch: vi.fn(), record: vi.fn() }, evidence,
@@ -185,7 +187,7 @@ describe('positioning research tool factory', () => {
     for (const state of ['dispatched', 'unknown', 'failed', 'cancelled'] as const) {
       f.operations.set(operationId, { ...prior, state, result: null });
       expect(await f.makeExecute()('web_search', { query: 'topic' }, 'paid-call'))
-        .toMatchObject({ status: 'unavailable', reason: 'PROVIDER_RESULT_UNKNOWN' });
+        .toMatchObject({ status: 'unavailable', reason: state === 'cancelled' ? 'NOT_DISPATCHED' : 'PROVIDER_RESULT_UNKNOWN' });
     }
     f.operations.set(operationId, prior);
     expect(await f.makeExecute()('web_search', { query: 'different topic' }, 'paid-call'))
@@ -202,6 +204,46 @@ describe('positioning research tool factory', () => {
     const resumed = await f.makeExecute()('benchmark_discover', { discoveryId });
     expect(resumed).toMatchObject({ status: 'unavailable', reason: 'OPERATION_IDENTITY_MISMATCH', continue: false, items: [] });
     expect(f.supplierCalls).toHaveBeenCalledTimes(sent);
+  });
+
+  it('#1005 P2: a discovery step closed as unsent moves to its successor and is fetched once', async () => {
+    const f = fixture();
+    const stuck = stableResearchId(discoveryId, '0');
+    // What the store returns after research_runtime_close_unsent closed a dispatched, unlinked operation.
+    f.operations.set(stuck, { state: 'cancelled', identityHash: 'irrelevant', result: null });
+    f.plans.set(stuck, { executionId: id, discoveryId, budgetUnits: 1, cancelled: true, operations: [] });
+    await f.execute('benchmark_discover', discoveryArgs);
+    const successor = stableResearchId(stuck, 'unsent-successor');
+    expect(f.operations.get(successor)).toMatchObject({ state: 'succeeded' });
+    const keywordCalls = f.supplierCalls.mock.calls.filter(([r]) => r.vendor === 'tikhub' && r.call.kind === 'keyword_posts');
+    expect(keywordCalls).toHaveLength(3);
+  });
+
+  it('RT-3b PR-2: each subcall saves and emits its own query, platform and dataKind plus the credits charged', async () => {
+    const f = fixture();
+    f.store.authorization.candidateConfirmation.mockResolvedValue([account, { platform: 'tiktok', account: 'bob' }]);
+    await f.execute('benchmark_fetch', { accounts: [account, { platform: 'tiktok', account: 'bob' }],
+      source: { kind: 'candidate', confirmationId: id } });
+    const metadata = subcall.mock.calls.map(([context]) => context.metadata);
+    expect(metadata[0]).toEqual({ toolName: 'benchmark_fetch', args: expect.any(Object),
+      call: { query: 'alice', platform: 'tiktok', dataKind: 'account_profile' } });
+    expect(metadata[1]?.call).toEqual({ query: 'alice', platform: 'tiktok', dataKind: 'account_posts' });
+    const finals = vi.mocked(f.ctx.emit).mock.calls.map(([event]) => event)
+      .filter(event => event.type === 'research_call' && event.state !== 'running');
+    expect(finals[0]).toMatchObject({ query: 'alice', dataKind: 'account_profile', state: 'succeeded', credits: '1.25' });
+    expect(f.store.callCharge).toHaveBeenCalledWith(id);
+    const running = vi.mocked(f.ctx.emit).mock.calls.map(([event]) => event)
+      .filter(event => event.type === 'research_call' && event.state === 'running');
+    expect(running.every(event => !('credits' in event))).toBe(true);
+  });
+
+  it('RT-3b PR-2: a credits read failure never fails the paid tool result', async () => {
+    const f = fixture();
+    f.store.callCharge.mockRejectedValue(new Error('read unavailable'));
+    expect(await f.execute('web_search', { query: 'topic' }, 'credits-down')).toMatchObject({ status: 'ok' });
+    const final = vi.mocked(f.ctx.emit).mock.calls.map(([event]) => event)
+      .find(event => event.type === 'research_call' && event.state === 'succeeded');
+    expect(final).toMatchObject({ query: 'topic', platform: 'web', dataKind: 'web_search', credits: null });
   });
 
   it('requires real keyword and account authorization, not model-supplied identifiers', async () => {
