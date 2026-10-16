@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import {allowTestCalls} from '../__tests__/fixtures/runtimeGates';
+import {allowTestCalls,testPrimaryModel} from '../__tests__/fixtures/runtimeGates';
 import { pricingConfig } from '../__tests__/fixtures/runtimePricing';
 import { configuredReasoning } from '../__tests__/fixtures/runtimeReasoning';
 import { beforeAll, afterAll, it, expect, vi } from 'vitest';
@@ -622,6 +622,8 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each([10000,1050000])('RU
  const call={multiplier:'1',modelId:model,provider:'openrouter',account:'synthetic-account',model:'test/admission',protocol:'openrouter-chat-v1',upperUsd,inputLimit:8000,outputLimit,automaticRetry:false,hiddenTools:false,lookupSupported:true,providerLimits:{providerSlug:'synthetic',contextTokens,promptUsdPerMillion:contextTokens===1050000?'0.4':'2',completionUsdPerMillion:contextTokens===1050000?'1.8':'0',requestUsd:'0'}};
  await db.query("insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,0.9,1,now()+interval '2 hours')",[windowId,[actor],JSON.stringify([call])]);
  const env={V3_RUNTIME_STAGING_ENABLED:'true',VERCEL:'1',VERCEL_PROJECT_PRODUCTION_URL:'auth-staging.graylum.com',VERCEL_GIT_COMMIT_REF:'staging',VERCEL_GIT_REPO_OWNER:'Crnobog9527',VERCEL_GIT_REPO_SLUG:'GraylumAI_vercel',V3_RUNTIME_STAGING_PROJECT_ID:'synthetic-project',VERCEL_PROJECT_ID:'synthetic-project',NEXT_PUBLIC_SUPABASE_URL:'https://synthetic.supabase.co',V3_RUNTIME_STAGING_DATABASE_HOST:'synthetic.supabase.co',V3_RUNTIME_STAGING_WINDOW_ID:windowId};
+ // UI-MODEL: real free chat runs on the administrator's primary model (admission settings are mocked below).
+ testPrimaryModel.id=model;
  const real=await loadStagingPolicy(admin,actor,env);
  const admission=runtimeAdmissionService(user,admin,{real,account:'unused-local',costPerCall:'999',creditsPerUsd:'999',multiplier:'999',maxCalls:1,maxOutputTokens:outputLimit,inputBytes:8000,historyItems:0,searchEnabled:false});
  const s=await admission.start(randomUUID(),{kind:'positioning_draft'});
@@ -645,6 +647,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each([10000,1050000])('RU
   expect((await db.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(1000);
  }finally{for(const [key,value] of Object.entries(previous)){if(value===undefined)delete process.env[key];else process.env[key]=value;}}
  await user.auth.signOut();await expect(admission.prepare(request)).rejects.toThrow('AUTH_REQUIRED');
+ testPrimaryModel.id=undefined;
 },30000);
 it('RUNTIME: atomic draft/session/start replay, admission and SDK append identities',async()=>{
  const f=await fixture();expect(await rpc('runtime_start',{p_actor_id:f.actorId,p_request_id:f.requestId,p_payload:f.start})).toEqual(f.s);
