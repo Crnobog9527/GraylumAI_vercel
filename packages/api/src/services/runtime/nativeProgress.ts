@@ -12,8 +12,10 @@ export type NativeTextUpdate = {
   delta: string;
   /** Discard pending deltas and replace the visible source. */
   replace: boolean;
+  /** BILL2 call sequence of the primary round this text came from; a stop names it (CHAT-NATIVE-OUTPUT). */
+  call?: number;
 };
-export type NativeTextDelta = {type: 'textDelta'; offset: number; text: string; rev: number; source?: NativeTextSource};
+export type NativeTextDelta = {type: 'textDelta'; offset: number; text: string; rev: number; source?: NativeTextSource; call?: number};
 
 type ToolFrame = {choices?: Array<{delta?: {tool_calls?: Array<{
   index?: number; function?: {name?: string; arguments?: string};
@@ -101,9 +103,11 @@ export class NativeTextTransport {
   private offset = 0;
   private rev = 0;
   private source: NativeTextSource | undefined;
+  private call: number | undefined;
 
   push(update: NativeTextUpdate): void {
     if (update.source !== undefined) this.source = update.source;
+    if (update.call !== undefined) this.call = update.call;
     if (update.replace) {
       // No delta queued before a source switch may follow the replacement snapshot.
       this.pending = [update.text];
@@ -119,7 +123,7 @@ export class NativeTextTransport {
     if (replace && this.sent) this.rev++;
     if (replace) this.offset = 0;
     const event: NativeTextDelta = {type: 'textDelta', offset: this.offset, text, rev: this.rev,
-      ...(replace && this.source ? {source: this.source} : {})};
+      ...(replace && this.source ? {source: this.source} : {}), ...(this.call !== undefined ? {call: this.call} : {})};
     this.offset += Array.from(text).length;
     this.sent = true;
     this.snapshot = false;

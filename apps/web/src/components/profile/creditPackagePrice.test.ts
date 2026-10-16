@@ -6,13 +6,14 @@ const plans = [{ level: 'pro', discount: 0.1 }, { level: 'gold', discount: 0.2 }
 describe('credit pack price', () => {
   it('charges a member their level discount, as checkout does', () => {
     expect(getCreditPackagePrice(1, 'pro', plans)).toEqual({ payableUsd: 0.9, listUsd: 1, discounted: true });
-    expect(getCreditPackagePrice(9.9, 'gold', plans)).toEqual({ payableUsd: 7.92, listUsd: 9.9, discounted: true });
+    expect(getCreditPackagePrice(9.9, 'gold', plans)).toEqual({ payableUsd: 7.9, listUsd: 9.9, discounted: true });
   });
 
-  it('rounds half cents up like Postgres round(numeric)', () => {
-    // 1.05 * 90% = 0.945 -> 0.95; 0.99 * 90% = 0.891 -> 0.89.
-    expect(getCreditPackagePrice(1.05, 'pro', plans).payableUsd).toBe(0.95);
-    expect(getCreditPackagePrice(0.99, 'pro', plans).payableUsd).toBe(0.89);
+  it('rounds down to the dime exactly as card checkout charges (0222)', () => {
+    // The live packs: Pro 9.5 折, Gold 9 折 of $9.90 / $29.90 / $99.90.
+    const live = [{ level: 'pro', discount: 0.05 }, { level: 'gold', discount: 0.1 }];
+    expect([9.9, 29.9, 99.9].map(price => getCreditPackagePrice(price, 'pro', live).payableUsd)).toEqual([9.4, 28.4, 94.9]);
+    expect([9.9, 29.9, 99.9].map(price => getCreditPackagePrice(price, 'gold', live).payableUsd)).toEqual([8.9, 26.9, 89.9]);
   });
 
   it('keeps the list price for free users and when the discount cannot be read unambiguously', () => {

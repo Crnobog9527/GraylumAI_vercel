@@ -50,10 +50,17 @@ export async function cleanupLibrary(client: SupabaseClient, options: {
       })) released++;
     } catch { failed++; }
   }
+  // LIB-4 (0262): remove deleted documents' copies from finished executions that read them. Amounts stay.
+  let references = { processed: 0, waiting: 0 };
+  try {
+    references = await libraryRpc<typeof references>(client, 'runtime_library_propagate', {
+      p_actor_id: options.actorId ?? null, p_limit: 20,
+    });
+  } catch { failed++; }
   const backlog = await libraryRpc<{ pending: number; overdue: number; oldestDeletedAt: string | null }>(
     client, 'library_cleanup_backlog', { a: options.actorId ?? null },
   );
-  return { checked, released, failed, ...backlog, budgetExhausted: checked < rows.length };
+  return { checked, released, failed, references, ...backlog, budgetExhausted: checked < rows.length };
 }
 
 /** Batch ownership lookup means retained/claimed objects never consume one network round trip each.
