@@ -8,6 +8,7 @@ import { majorToCents } from './purchaseFacts';
 import { resolveStripeScope } from './stripeCheckoutPersistence';
 import { buildStripeCheckoutRequest, dispatchStripeCheckoutIntent, type StripeCardCheckout } from './stripeCheckoutIntent';
 import { observeUpgradePrior } from './cardUpgrade';
+import { settleBuyerOrders } from './methodOrderSettle';
 
 type Input = {
   db: SupabaseClient; stripe: Stripe; userId: string; appUrl: string; termsVersion: string;
@@ -50,11 +51,28 @@ export async function createStripeMethodCheckout(input: Input) {
   const { db, stripe, userId, purchase } = input;
   const scope = await resolveStripeScope(stripe);
   if (scope.mode !== 'test') throw new Error('PAY_WAFFO_LIVE_DISABLED');
-  const order = await prepareMethodPurchase({ admin: db, userId, purchase,
-    merchantNamespace: scope.merchant, paymentMode: scope.mode, termsVersion: input.termsVersion }) as Order;
+  const prepare = () => prepareMethodPurchase({ admin: db, userId, purchase,
+    merchantNamespace: scope.merchant, paymentMode: scope.mode, termsVersion: input.termsVersion }) as Promise<Order>;
+  const order = await prepare().catch(async (error: unknown) => {
+    // #961: another plan's order that can no longer be paid (session expired without its webhook, or failed before
+    // its claim) is closed once Stripe confirms it; admission then runs once more. Anything else keeps the refusal.
+    if (!(error instanceof Error) || error.message !== 'PAY_WAFFO_PURCHASE_PENDING') throw error;
+    if (!await settleBuyerOrders(db, stripe, scope, userId).catch(() => false)) throw error;
+    return prepare();
+  });
+  // Never claimed, so nothing reached Stripe: release the reservation instead of blocking every other purchase.
+  // A dispatched order recovered by a retry is never released here; its session may exist.
+  const releaseUnclaimed = async (error: unknown): Promise<never> => {
+    if (!order.method_dispatched_at) {
+      const released = await db.rpc('pay_waffo_abort_before_dispatch', { p_user: userId, p_order: order.id,
+        p_merchant: scope.merchant, p_expected: null });
+      if (released.error) throw new Error('PAY_WAFFO_CHECKOUT_UNAVAILABLE', { cause: released.error });
+    }
+    throw error;
+  };
   const price = await db.from('payment_provider_refs').select('external_id').eq('id', order.price_ref_id)
     .eq('channel', 'stripe').eq('merchant_namespace', scope.merchant).eq('mode', 'test').eq('object_type', 'price').maybeSingle();
-  if (price.error || !price.data) throw new Error('PAY_WAFFO_PRICE_UNAVAILABLE');
+  if (price.error || !price.data) return releaseUnclaimed(new Error('PAY_WAFFO_PRICE_UNAVAILABLE'));
   const isCard = purchase.method === 'card' || purchase.method === 'card_cn';
   const walletMethod = isCard ? undefined : purchase.method as 'wechat_pay' | 'alipay';
   // An already dispatched order is recovered from its frozen request, never from the current catalog: the
@@ -63,13 +81,7 @@ export async function createStripeMethodCheckout(input: Input) {
   const snapshot = isCard && !dispatched ? freezePurchaseSnapshot(order.purchase_snapshot) : null;
   // Only a card subscription can be discounted (0222 first month); the request builder refuses anything else.
   const couponId = snapshot?.item_type === 'membership_plan' && majorToCents(snapshot.discount) !== 0
-    ? await currentFirstMonthCoupon(db, scope.merchant, order).catch(async (error: unknown) => {
-      // Never claimed, so nothing reached Stripe: release the reservation instead of blocking every retry.
-      const released = await db.rpc('pay_waffo_abort_before_dispatch', { p_user: userId, p_order: order.id,
-        p_merchant: scope.merchant, p_expected: null });
-      if (released.error) throw new Error('PAY_WAFFO_CHECKOUT_UNAVAILABLE', { cause: released.error });
-      throw error;
-    }) : undefined;
+    ? await currentFirstMonthCoupon(db, scope.merchant, order).catch(releaseUnclaimed) : undefined;
   const cardFor = (coupon: string | undefined): StripeCardCheckout | undefined => isCard
     ? { managedPayments: purchase.method === 'card', ...(coupon ? { couponId: coupon } : {}) } : undefined;
   // Stripe requires 30 minutes after creation: reserve one minute for dispatch.

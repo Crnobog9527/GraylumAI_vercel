@@ -2,9 +2,10 @@
 import fs from 'node:fs';
 import { score } from './metrics.mjs';
 const read = (f) => JSON.parse(fs.readFileSync(new URL(f, import.meta.url), 'utf8'));
-const gt = read('./data/ground-truth.json');
-const outputs = read('./data/outputs.json');
-const cats = Object.fromEntries(read('./data/manifest.json').map((m) => [m.id, m.cat]));
+// Step 2 (gen2.mjs, pack2.mjs) adds q01–q36 and its own runs; step-1 numbers are unchanged.
+const gt = { ...read('./data/ground-truth.json'), ...read('./data/ground-truth-2.json') };
+const outputs = { ...read('./data/outputs.json'), ...read('./data/outputs-2.json') };
+const cats = Object.fromEntries([...read('./data/manifest.json'), ...read('./data/manifest-2.json')].map((m) => [m.id, m.cat]));
 fs.mkdirSync('results-rescored', { recursive: true });
 const files = [];
 for (const [cfg, run] of Object.entries(outputs)) {
