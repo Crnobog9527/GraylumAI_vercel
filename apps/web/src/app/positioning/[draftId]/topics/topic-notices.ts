@@ -53,6 +53,11 @@ export function topicExecutionNotice(result: unknown): string | null {
   return hostNotice(result) ?? topicGateNotice(result);
 }
 
+/** True while the page still shows the notice this turn's execute result gave (topicTurnOutcome). Display only. */
+export function topicExplained(explained: { id: string; text: string } | null, executionId: string, error: string) {
+  return Boolean(explained && explained.id === executionId && explained.text === error);
+}
+
 /** A finished topic turn: its notice, and whether the typed input stays (only after a gate stop; a notice is display only). */
 export function topicTurnOutcome(result: unknown) {
   return { notice: topicExecutionNotice(result), keepInput: Boolean(topicGateNotice(result)) };
@@ -78,13 +83,15 @@ export function topicTurnShows(last: { state: string; unavailableReason?: string
  * Any other cancelled turn the server ended says so (ENDED_NOTICE), like free conversation, unless only its organizer was skipped.
  */
 export function topicOpenTurnNotice(e: { executionId: string; state: string; unavailableReason?: string | null } & StopSignals & PaygViewFields, ctx: {
-  busy: boolean; finished: string | null; stopping: boolean; userStopped?: boolean; onRetry: () => void; onStop: () => void;
+  busy: boolean; finished: string | null; stopping: boolean; userStopped?: boolean; explained?: boolean; onRetry: () => void; onStop: () => void;
 }): ChatNotice | null {
   if (topicRejectedTurn(e)) return { id: e.executionId, tone: 'warning', text: PROVIDER_REJECTED_NOTICE };
   const stopped = stoppedByUser(e, ctx.userStopped);
   const userStop: ChatNotice = { id: e.executionId, tone: 'status', text: USER_STOP_NOTICE };
-  // A saved reply whose organizer was skipped keeps only its own notice (payg-wait.ts), like runtimeTurnNotices.
-  if (e.state === 'cancelled') return stopped ? userStop : organizerSkipped(e) ? null : { id: e.executionId, tone: 'warning', text: ENDED_NOTICE };
+  // A saved reply whose organizer was skipped keeps only its own notice (payg-wait.ts), like runtimeTurnNotices;
+  // a reason this tab already shows (`explained`, topicExplained) is not repeated as 已结束.
+  if (e.state === 'cancelled')
+    return stopped ? userStop : organizerSkipped(e) || ctx.explained ? null : { id: e.executionId, tone: 'warning', text: ENDED_NOTICE };
   if (e.state === 'completed') return stopped ? userStop : null;
   if (isPaygWaiting(e.state)) return null;
   // Still being saved: no 重试 or 停止; a server-confirmed `interrupted` save offers 重试 (stopRecovery).

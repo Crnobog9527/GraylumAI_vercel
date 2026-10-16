@@ -27,14 +27,14 @@ import { trpc } from '@/trpc/client';
 import { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics } from '@repo/api/src/shared/opcRequests';
 import { consentedTopicIds } from './adoption-consent';
 import { useTopicOpening } from './use-topic-opening';
-import { tabSession, topicFailureMessage, topicReplyText, topicTurnOutcome, topicOpenTurnNotice, topicTurnRefused, topicTurnShows } from './topic-notices';
+import { tabSession, topicExplained, topicFailureMessage, topicReplyText, topicTurnOutcome, topicOpenTurnNotice, topicTurnRefused,
+  topicTurnShows } from './topic-notices';
 import { userStopIds } from '@/app/runtime/gate-notices';
 import { stopWithRecord, type StopSignals } from '@/app/runtime/runtime-notices';
 import { finishedExecution } from '@/lib/finished-execution';
 import { isOrganizerPendingError, type PaygViewFields } from '@/lib/payg-wait';
 import { usePaygResume } from '@/lib/use-payg-resume';
 import { useTopicInput } from './topic-input';
-
 type PlanItem = {
   id: string;
   platform: string;
@@ -122,7 +122,7 @@ export default function TopicWorkspacePage() {
   const free=useFreeConversation();
   const inputKey=draftId?'opc-topic-input:'+draftId:'';
   const { input, updateInput, clearForSend, putBack, stored } = useTopicInput(inputKey);
-  const [error, setError] = useState('');
+  const [error, setError] = useState(''); const [explained, setExplained] = useState<{ id: string; text: string } | null>(null); // topicExplained
   const [notice, setNotice] = useState('');
   // The user's message, shown at once until the server records its turn.
   const [outgoing, setOutgoing] = useState<{ text: string; executionId?: string } | null>(null);
@@ -309,7 +309,7 @@ export default function TopicWorkspacePage() {
             reached = true; setOutgoing(old => old && { ...old, executionId: admitted.executionId });
             if (op.candidateAtSend) localStorage.setItem('opc-topic-adoption-context:'+sessionId+':'+admitted.executionId,JSON.stringify(op.candidateAtSend));
             const outcome = topicTurnOutcome(await execute.mutateAsync({ executionId: admitted.executionId }));
-            if (outcome.notice) setError(outcome.notice);
+            if (outcome.notice) { setError(outcome.notice); setExplained({ id: admitted.executionId, text: outcome.notice }); }
             if (outcome.keepInput) back(); else stored(op.request.requestId, op.request.input);
           } else if (op.kind === 'save') {
             const result = await savePlan.mutateAsync(op.request);
@@ -486,8 +486,8 @@ export default function TopicWorkspacePage() {
     ...payg.blockedNotices(executions, busy), ...(free.error ? [{ id: 'free', tone: 'error' as const, text: free.error }] : []),
   ];
   const openTurnNotice = (e: NonNullable<typeof executions>[number]) => topicOpenTurnNotice(e, { busy, finished: finishedExecution(execute, view),
-    userStopped: userStopIds(tabSession(), sessionId, [e]).length > 0,
-    stopping: cancel.isPending, onRetry: () => void recover(e.executionId), onStop: () => void stop(e.executionId) });
+    userStopped: userStopIds(tabSession(), sessionId, [e]).length > 0, stopping: cancel.isPending, explained: topicExplained(explained, e.executionId, error),
+    onRetry: () => void recover(e.executionId), onStop: () => void stop(e.executionId) });
   const adoptedTopics = [...new Map([...plans.flatMap(plan => plan.body ?? []), ...(candidate?.body ?? [])].filter(item => adoptedItemIds.has(item.id)).map(item => [item.id, item])).values()];
 
   return (

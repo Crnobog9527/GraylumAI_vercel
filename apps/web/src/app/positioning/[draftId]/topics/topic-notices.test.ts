@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { expect, it, vi } from 'vitest';
 import { runtimeGateMessages } from '../../../../../../../packages/api/src/shared/runtimeGateMessages';
-import { topicExecutionNotice, topicFailureMessage, topicReplyText, topicTurnOutcome, topicOpenTurnNotice, topicRejectedTurn, topicTurnRefused, topicTurnShows } from './topic-notices';
+import { topicExecutionNotice, topicExplained, topicFailureMessage, topicReplyText, topicTurnOutcome, topicOpenTurnNotice, topicRejectedTurn, topicTurnRefused, topicTurnShows } from './topic-notices';
 import { PROVIDER_REJECTED_NOTICE } from '@/lib/runtime-gate-notice';
 import { DEFINITE_REFUSAL_NOTICE } from '@/app/runtime/gate-notices';
 import { ENDED_NOTICE, USER_STOP_NOTICE } from '@/app/runtime/runtime-notices';
@@ -184,4 +184,16 @@ it('does not say 已结束 under a saved reply whose organizer was skipped', () 
   expect(topicOpenTurnNotice(skipped, { busy: false, finished: null, stopping: false, onRetry: vi.fn(), onStop: vi.fn() })).toBeNull();
   expect(topicOpenTurnNotice({ ...skipped, remainingCalls: 1 }, { busy: false, finished: null, stopping: false, onRetry: vi.fn(), onStop: vi.fn() })?.text)
     .toBe(ENDED_NOTICE);
+});
+
+// #1035 review: while this tab shows the execute result's own reason (gate, host notice), the turn adds no 已结束.
+it('does not pair 已结束 with the live cancellation reason this tab already shows', () => {
+  const ctx = (explained?: boolean) => ({ busy: false, finished: null, stopping: false, explained, onRetry: vi.fn(), onStop: vi.fn() });
+  expect(topicOpenTurnNotice({ executionId: 'e', state: 'cancelled' }, ctx(true))).toBeNull();
+  expect(topicOpenTurnNotice({ executionId: 'e', state: 'cancelled' }, ctx(false))?.text).toBe(ENDED_NOTICE);
+  expect(topicOpenTurnNotice({ executionId: 'e', state: 'cancelled' }, { ...ctx(true), userStopped: true })?.text).toBe(USER_STOP_NOTICE);
+  expect(topicExplained({ id: 'e', text: '暂停' }, 'e', '暂停')).toBe(true);
+  expect(topicExplained({ id: 'e', text: '暂停' }, 'e', '')).toBe(false);
+  expect(topicExplained({ id: 'e', text: '暂停' }, 'other', '暂停')).toBe(false);
+  expect(topicExplained(null, 'e', '暂停')).toBe(false);
 });
