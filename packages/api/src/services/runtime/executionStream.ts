@@ -106,6 +106,7 @@ export async function executeOriginalExecution(host:OriginalExecutionHost,execut
     const disabled={dispatch:async()=>{throw new Error('RUNTIME_DISPATCH_DISABLED');},
      lookup:async()=>{throw new Error('RUNTIME_DISPATCH_DISABLED');}};
     const waiting=await runtimeExecutor({...base,adapter:disabled,callGate:denyNewCalls}).execute(executionId);
+    await visible();// a waiting round may carry its saved primary body
     return ['waiting_credits','waiting_resume'].includes(waiting.state)
      ?{...waiting,unavailable:'RUNTIME_PRICE_CONFIGURATION_PENDING'}:waiting;
    }

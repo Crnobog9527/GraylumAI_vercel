@@ -18,8 +18,11 @@ export async function beginPaygExecution(input: {
   read: (action: string, value?: unknown) => Promise<RuntimeExecution>;
   actor: () => Promise<string>; callGate: RuntimeCallGate;
   resumePricing?: (policies: FrozenRun['callPolicy']) => Promise<void>;
+  /** LIB-4b: sees the execution as first read, before any wait (or its saved primary body) can be returned. */
+  observe?: (execution: RuntimeExecution) => void;
 }): Promise<{ execution: RuntimeExecution; resumedGate: boolean; wait?: PaygWait }> {
   const execution = await input.read(input.resume ? 'read' : 'begin');
+  input.observe?.(execution);
   const wait = (unavailable?: PaygWait['unavailable']): PaygWait => ({
     state: execution.state as PaygWait['state'],
     code: unavailable === 'paused' ? 'RUNTIME_NEW_CALLS_STOPPED' : unavailable === 'usage_configuration_required' ? 'RUNTIME_USAGE_CONFIGURATION_REQUIRED'

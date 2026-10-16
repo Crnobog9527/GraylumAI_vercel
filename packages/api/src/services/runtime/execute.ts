@@ -63,9 +63,9 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   budget.timing?.enter('execute');
   const started=await beginPaygExecution({executionId,resume,actor:options.actor,callGate:options.callGate,
    resumePricing:options.resumePricing,read:(action,value)=>rpc<RuntimeExecution>('runtime_execution',
-    {...args,p_action:action,...(value?{p_result:value}:{})})});
+    {...args,p_action:action,...(value?{p_result:value}:{})}),observe:read=>observeContext(options,read)});
   if(started.wait)return started.wait;
-  const {execution,resumedGate}=started;observeContext(options,execution);
+  const {execution,resumedGate}=started;
   const stopped=await finishStop(executionId,onProgress,execution);if(stopped)return stopped;
   const isPayg=execution.billing?.contractVersion==='bill2.v2';
   const ownerDatabase=isPayg?paygOwnerDatabase(options.database,{executionId,epoch:execution.epoch!}):options.database;
