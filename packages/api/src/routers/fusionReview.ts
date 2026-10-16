@@ -162,6 +162,9 @@ export const fusionReviewRouter = router({
     .mutation(({ ctx, input }) => ctx.flow.confirmAdoption(input)),
   /** The owner's full record (Owner 2026-10-14): every seat's complete reasoning and the rulings by section; seats only. */
   detail: reader.input(review).query(({ ctx, input }) => ctx.flow.detail(input.reviewId)),
+  /** Whether the review is switched on, so the positioning page shows no entry (and no error) when it is off.
+   * Membership and balance are still checked by start; a failed settings read reads as off. */
+  available: reader.query(async ({ ctx }) => ({ enabled: await readFusionSettings(ctx.admin).then(s => s.review.enabled === true, () => false) })),
   /** Display names of the seats (Owner 2026-10-14): set by administrators, independent of the models; no model names. */
   panel: reader.query(async ({ ctx }) => {
     const names = (await readFusionSettings(ctx.admin)).review.displayNames;
