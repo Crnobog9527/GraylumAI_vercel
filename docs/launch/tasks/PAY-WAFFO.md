@@ -1,6 +1,6 @@
 # PAY-WAFFO 实施方案
 
-状态：2026-10-10 第二版，**high，仅方案**。银行卡订阅走 Waffo，微信和支付宝单笔付款走 Stripe。
+状态：2026-10-10 第二版，**high，仅方案**。银行卡订阅走 Waffo，微信和支付宝单笔付款走 Stripe。**（2026-10-12 起银行卡订阅改走 Stripe Managed Payments，本文冻结，见下方现状。）**
 本次只修订本文件及 MASTER_PLAN，不实现、不建产品、不调用支付业务接口、不读取凭据、不合并。
 交付到复审和修正完成后，停下等主窗口审计；不代表商户能力、收款或上线已经验收。
 
@@ -10,6 +10,18 @@
   和 [Owner 2026-10-10 决定][owner-1010]：Gold 首 30 天 49 美元、创始续费固定 496、
   只为本站发起的付款开通会员（站外付款一律退款，[补充决定][owner-1010b]）；D6 改用“新购 Gold + 取消原 Pro 续费”；Waffo 退款每笔付款只发一次；
   拒付每日查询。§3 待确认项全部结案。
+
+> **2026-10-12 起的现状（PAY-STRIPE-MP PR-6 同步；以本段为准，本文下面凡与它冲突的"银行卡走 Waffo""Waffo 为银行卡主力"等表述都是 2026-10-10 的历史方案）**
+>
+> - **Owner 决定**（2026-10-12，总控转述，原话和范围见 [MASTER_PLAN 第 2.1 节](../MASTER_PLAN.md)、[#848](https://github.com/Crnobog9527/GraylumAI_vercel/pull/848)；迁移方案 [MIGRATION-PLAN.md](../evidence/stripe-managed-payments-20261012/MIGRATION-PLAN.md)，[#847](https://github.com/Crnobog9527/GraylumAI_vercel/pull/847)）：银行卡订阅全部改走 Stripe Managed Payments（MP，卖家是 Stripe，税结账时另加）；中国大陆用户自选微信/支付宝单笔，或普通 Stripe 银行卡订阅（不开 MP，Graylum 当卖家）；Gold 首期统一为"首月 49 美元"（自然月），会员可以用国际银行卡（MP）买积分包。
+> - **PAY-WAFFO 已冻结**：Waffo 只停用新购买，代码、数据表、回调入口、每日对账、旧 Waffo 订单的续费/停止续费/退款全部保留，不删。旧订单沿原渠道（D17 "旧订单原渠道"保持）。`PAY_WAFFO_LIVE_DISABLED`（只允许测试模式）这道闸保留，Waffo 不再排期。
+> - **已合并的代码里真实存在的行为**（都在 staging；正式环境没有打开，见下）：
+>   - [#856](https://github.com/Crnobog9527/GraylumAI_vercel/pull/856)（迁移 0221）：付款方式增加 `card_cn`；`card` 会员订阅和会员买积分包都改走 Stripe（MP），`card_cn` 只能买会员订阅、不开 MP；`payment_orders.stripe_managed_payments` 在下单时冻结；`pay_waffo_admit_purchase` 按方法路由，首月/创始/升级资格整段沿用；Gold 首期 `gold_first30` 对所有付款方式（含微信/支付宝）都改按自然月，不再是 30 天；迁移把给 Waffo 打开的 `card` 开关关掉。
+>   - [#894](https://github.com/Crnobog9527/GraylumAI_vercel/pull/894)（迁移 0222）：`card` 请求带 `managed_payments.enabled=true`、不传 `payment_method_types`；`card_cn` 为 `payment_method_types=['card']` 并必须填账单地址；Gold 首月按"标准月付价 69 减一次性优惠券 20"下单，应付 49，续费自动 69；金额核对统一为"税前"（价格减折扣），MP 加的税单独记；MP 用的产品必须带税务编码 `txcd_10105001`；没发出去的银行卡结账可以关单释放预留和创始名额。[#903](https://github.com/Crnobog9527/GraylumAI_vercel/pull/903) 同步沙盒积分包目录。
+>   - [#909](https://github.com/Crnobog9527/GraylumAI_vercel/pull/909)（0237）首次付款、[#922](https://github.com/Crnobog9527/GraylumAI_vercel/pull/922)（0238）续费/扣款失败/订阅状态同步、[#941](https://github.com/Crnobog9527/GraylumAI_vercel/pull/941)（0247）全额外部退款识别与拒付事件确认收到、[#943](https://github.com/Crnobog9527/GraylumAI_vercel/pull/943) 每日去 Stripe 对账：首次付款走与钱包相同的 `pay_waffo_fulfill_payment`（所以首月资格、创始名额、发放窗口沿用本文的规则）；续费只认 `subscription_cycle` 发票并按冻结标价（首月折扣不带入、创始 496 锁价）；24 小时会员宽限（0214）和创始 7 天资格宽限扩展到 Stripe 的 `card` / `card_cn`；全额外部退款自动收回该期未用完的积分并结束这一期，部分退款和积分包退款只记账转人工，退款后不自动停续费。
+>   - [#949](https://github.com/Crnobog9527/GraylumAI_vercel/pull/949)（0251）：期末停止入口（客户门户）对银行卡订阅可用；Pro→Gold 升级是"新开 Gold 结账，Gold 开通后在 Stripe 把 Pro 设为期末停止"，不用 Stripe 原地升级。[#951](https://github.com/Crnobog9527/GraylumAI_vercel/pull/951)（0252）、[#953](https://github.com/Crnobog9527/GraylumAI_vercel/pull/953)（0253）：人工审批的积分包退款和订阅首购退款支持银行卡订单，国际卡退款 = 税前 −（法律允许时 6% 手续费，按税前算）+ 已记录的税全额；订阅首购退款成功后立即取消 Stripe 订阅。[#961](https://github.com/Crnobog9527/GraylumAI_vercel/pull/961)：付款方式选择、税务文案、条款勾选前端。
+>   - [#948](https://github.com/Crnobog9527/GraylumAI_vercel/pull/948)：银行卡下单的代码闸门 `STRIPE_CARD_CHECKOUT_READY=true`，但**只在 staging 部署生效**；staging 另由后台开关 `payment_method_routes.card.enabled` / `card_cn.enabled` 控制，默认关闭。**正式环境在代码里仍关闭**，打开需要 Owner 批准另开 PR；钱包下单闸门 [#948](https://github.com/Crnobog9527/GraylumAI_vercel/pull/948) 没有改动。
+> - **没有做的**：每日对账的"大陆通道账单国家不是 CN"清单（方案里的可选项）；拒付冻结和证据（归 PAY-DISPUTE-GUARD / PAY-EVIDENCE）；正式环境的 Stripe 设置（开通 MP、建正式产品价格、重试设置、回调事件、账单描述、Stripe Tax 门槛监控、`STRIPE_CARD_RECONCILIATION_MODE=live`）都需要 Owner 逐项批准，见 MIGRATION-PLAN 第五节和 REL-1。
 
 ## 1. 主要结论与渠道分工
 

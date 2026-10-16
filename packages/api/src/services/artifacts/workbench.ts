@@ -16,6 +16,7 @@ import {
   reportMarkdown,
 } from "./public";
 import { researchIdentity } from '../research/agentKey';
+import { isPositioningWorkflow } from '../opc/positioningWorkflow';
 import { tavilyCapabilities, tavilyParameters } from '../research/tavilyContract';
 const uuid = z.string().uuid();
 export const webCommandSchema = z.discriminatedUnion("action", [
@@ -174,6 +175,10 @@ export function workbenchService(
           ? prior
           : (await catalog(moduleId)).find((r) => r.id === v.registration);
       if (!entry) throw new Error("ARTIFACT_UNAVAILABLE");
+      // Owner 2026-10-13 (CONTENT-CONVERSATION-DRIVEN G): only a positioning Skill opens a guided step workspace.
+      // Any other Skill is used in free chat, where its steps are a work guide; a new round (first, next or upgrade)
+      // of such a workflow is refused here, the one remaining entry that could start one.
+      if (!isPositioningWorkflow(entry.workflow)) throw new Error("ARTIFACT_INVALID_WORKFLOW");
       if (
         prior &&
         (entry.moduleId !== prior.moduleId || entry.skillId !== prior.skillId)
