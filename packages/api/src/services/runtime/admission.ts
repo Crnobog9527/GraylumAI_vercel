@@ -311,7 +311,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    // R4: the user's earlier messages share that same optional read; dropping it never blocks the turn.
    let historyRead=false;
    if(skillFile&&hostTurnContext&&!stepSummary){
-    try{requireCapacity(instructions,true,currentInput,true);historyRead=true;}
+    try{requireCapacity(instructions+positioningRule,true,currentInput,true);historyRead=true;}
     catch(error){if(!(error instanceof Error)||error.message!=='RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY')throw error;}
    }
    if(hostTurnContext)promptCache=freezeHostPromptCache({real:Boolean(policy.real),role:input.selection.kind,

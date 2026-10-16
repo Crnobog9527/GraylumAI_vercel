@@ -211,6 +211,22 @@ it('R4: drops only the history read when its larger reserve does not fit, keepin
  expect(context.instructions).not.toContain('read_history');expect(context.maxTurns).toBe(2);
 });
 
+it('R4: the history-read probe counts the same execution-time rules as the final check (SKILL-I18N-HOOK)',async()=>{
+ // Smallest input budget that keeps the optional history read...
+ const admit=async(inputBytes:number)=>{
+  const f=fixture();skill.instructions='S'.repeat(13000);
+  try{return runtimeContext.parse((await runtimeAdmissionService(f.user,f.admin,{...f.policy,inputBytes,
+   hostTurnContext:{stepId:'first',opening:false,checklist:[]}}).prepare(f.input)).context);}
+  catch(error){expect(error).toMatchObject({message:'RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY'});return null;}
+ };
+ let low=32000,high=90000;
+ while(low<high){const mid=Math.floor((low+high)/2);if((await admit(mid))?.historyRead)high=mid;else low=mid+1;}
+ expect((await admit(low))?.historyRead).toBeDefined();
+ // ...and one byte less (inside the reply-language rule's size) drops only that read instead of refusing the turn.
+ const below=await admit(low-1);
+ expect(below).not.toBeNull();expect(below!.historyRead).toBeUndefined();expect(below!.tools).toEqual(['ask_question','read_skill_file']);
+});
+
 const hash='a'.repeat(64);
 const paygPolicy={modelId:model,model:'fixture',provider:'fixture',account:'local',protocol:'fixture-cost-v1' as const,
  multiplier:'1',upperUsd:'0.1',inputLimit:64000,outputLimit:1000,automaticRetry:false as const,hiddenTools:false as const,
