@@ -17,6 +17,9 @@ export const PRICING_COPY = {
   memberCta: '开通会员',
   contactCta: '联系我们',
   memberCtaNote: '登录后在个人中心的会员页开通',
+  // PAY-STRIPE-MP: rule only, never an amount (#847 MIGRATION-PLAN §3).
+  planTaxNote: '国际银行卡付款税另计，结账时按所在地计算；中国大陆银行卡订阅不另收税。',
+  packsTaxNote: '积分包用国际银行卡付款，税另计，结账时按所在地计算。',
   packsTitle: '积分包',
   packsLede: '积分包只对付费会员开放，会员购买有折扣。积分永不过期。',
   packsMemberDiscount: '会员折扣',
