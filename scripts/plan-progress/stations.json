@@ -343,10 +343,6 @@
           "plain": "知道访客从哪来（含 AI 推荐）、多少人注册和付费；Cookie 弹窗用 Termly。开账号、给编号和后台设置需要你来做。"
         },
         {
-          "name": "ADMIN-SECRETS",
-          "plain": "第三方服务的密钥在管理后台填写，不用去 Vercel 改环境变量；后台只显示是否配好。"
-        },
-        {
           "name": "SKILL-I18N-HOOK",
           "plain": "为英文用户准备：Skill 界面文字可配英文，AI 按用户语言回答。"
         },
@@ -399,7 +395,7 @@
         },
         {
           "task": "REL-1",
-          "text": "等你：上线前升级 Vercel Pro、准备客服邮箱、生成隐私条款和服务条款，在 OpenRouter 账号和各 workspace 关闭“允许用于训练”，批准开启 Stripe Tax 门槛监控，最后批准上线。"
+          "text": "等你：上线前升级 Vercel Pro、准备客服邮箱、生成隐私条款和服务条款，在 OpenRouter 账号和各 workspace 关闭“允许用于训练”，批准开启 Stripe Tax 门槛监控，在正式环境后台填好 6 把业务密钥，过渡期结束后在 Vercel 删掉对应的 6 个环境变量，最后批准上线。"
         }
       ]
     },
