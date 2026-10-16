@@ -276,11 +276,16 @@ export async function runCases({db,Client,connectionString,report}) {
     // An artifact whose evidence row names the research operation: the derived numbers go with it.
     const g = await seed(db), ge = await answer(db,g);
     const linked = await fetchAccount(g,ge,'linked',imitable), kept = await fetchAccount(g,ge,'kept',imitable);
+    // No number cites this account's posts request (no dates, no views), yet it gave the analyzed count.
+    const uncited = await fetchAccount(g,ge,'uncited',{followers:50000,posts:[{likes:1}]});
+    assert.equal((await rows(db,'fetch_id=$1',[uncited.fetchId]))[0].excluded,'NO_PUBLISH_TIME');
     const project = randomUUID();
     await db.query('INSERT INTO artifact_projects(id,actor_id,module_id,skill_id,account) VALUES($1,$2,$3,$4,$5)',
       [project,g.actor,g.module,g.skill,'rt4b-'+project]);
     await db.query(`INSERT INTO artifact_evidence(id,project_id,kind,operation_id,payload,content_hash)
       VALUES(gen_random_uuid(),$1,'supplier',$2,'{}',repeat('a',64))`,[project,linked.postOp]);
+    await db.query(`INSERT INTO artifact_evidence(id,project_id,kind,operation_id,payload,content_hash)
+      VALUES(gen_random_uuid(),$1,'supplier',$2,'{}',repeat('a',64))`,[project,uncited.postOp]);
     await erase(db,g,'artifact',project);
     assert.deepEqual((await rows(db,'session_id=$1',[g.session])).map(r=>r.fetch_id),[kept.fetchId]);
     // Running 0268 again (its backfill re-projects every cache) never brings back the row of erased evidence.

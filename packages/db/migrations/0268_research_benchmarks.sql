@@ -241,7 +241,11 @@ BEGIN
     ok AND (m->'wholeHistory')::boolean,
     CASE WHEN ok THEN c->>'category' END,ok AND (c->'qualified')::boolean,
     CASE WHEN ok THEN c->>'excluded' ELSE 'EVIDENCE_UNVERIFIED' END,
-    refs,ARRAY(SELECT DISTINCT x FROM unnest(ops) x ORDER BY x),
+    -- Every operation the row was derived or checked from, cited or not (an uncited posts request still gives the
+    -- analyzed count), so erasing any of them deletes the row.
+    refs,ARRAY(SELECT DISTINCT x FROM unnest(ops||ARRAY(SELECT o.id FROM research_operations o
+      WHERE o.id IN (SELECT research_benchmark_operation_id(f.id,f.attempt,k)
+        FROM unnest(ARRAY['account_profile','account_posts','account_relation','post_detail']) k))) x ORDER BY x),
     ARRAY(SELECT jsonb_array_elements_text(m->'missing')),(e->>'fetchedAt')::timestamptz)
   ON CONFLICT (fetch_id) DO UPDATE SET execution_id=excluded.execution_id,account=excluded.account,
     followers=excluded.followers,median_views=excluded.median_views,engagement_rate=excluded.engagement_rate,
