@@ -15,7 +15,7 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { isStripeCheckoutConfigured } from '../services/stripe';
-import { loadConfiguredStripePrices } from '../services/payments/stripeCatalog';
+import { loadConfiguredStripePrices, loadMemberPackReadiness } from '../services/payments/stripeCatalog';
 import {
   LAUNCH_BASELINE_SETTING_KEY,
   parseLaunchBaselineAt,
@@ -383,6 +383,13 @@ export const settingsRouter = router({
         kind: 'credit_package', ids: packages.map(pkg => pkg.id) }).catch(error => {
           throw createSafeServiceUnavailableError(error, CATALOG_UNAVAILABLE_MESSAGE);
         }) : new Map<string, string>();
+    // Card checkout (PAY-STRIPE-MP) charges the buyer's own Pro/Gold pack price, independent of the legacy channel
+    // and generic price above. A read failure only closes buying; the public catalog stays visible.
+    const memberReady = isStripeCheckoutConfigured() && ctx.hasSupabaseAdminPrivileges && ctx.supabaseAdmin
+      ? await loadMemberPackReadiness({ db: ctx.supabaseAdmin, ids: packages.map(pkg => pkg.id) }).catch(() => {
+        logger.warn('billing', 'settings_member_pack_prices_unavailable', {});
+        return new Map<string, boolean>();
+      }) : new Map<string, boolean>();
     // 映射字段名以兼容前端
     return packages.map(pkg => ({
       id: pkg.id,
@@ -393,6 +400,10 @@ export const settingsRouter = router({
       is_popular: pkg.is_popular === 'true',
       paymentChannel: selectedChannel?.channel ?? null,
       checkout_ready: stripeReady && pkg.price > 0 && hasConfiguredStripePriceId(priceRefs.get(`${pkg.id}:one_time`) ?? null),
+      member_checkout_ready: {
+        pro: pkg.price > 0 && memberReady.get(`${pkg.id}:pro`) === true,
+        gold: pkg.price > 0 && memberReady.get(`${pkg.id}:gold`) === true,
+      },
     }));
   }),
 

@@ -95,6 +95,30 @@ export async function loadConfiguredStripePrices(input: Omit<Parameters<typeof l
   }
 }
 
+/**
+ * Pro/Gold pack prices (0211 tiers) that card checkout charges: 0222 admission picks exactly one current
+ * `package` price of the buyer's tier in the connected test account. Key `${packageId}:${tier}` → chargeable.
+ * Two current prices for one tier make admission refuse, so they count as not chargeable. Test mode only,
+ * like method checkout; display only, the admission still decides.
+ */
+export async function loadMemberPackReadiness(input: { db: Pick<SupabaseClient, 'from'>; ids: string[] }) {
+  const ready = new Map<string, boolean>();
+  if (!input.ids.length) return ready;
+  const scope = await resolveStripeScope(getStripeClient());
+  if (scope.mode !== 'test') return ready;
+  const result = await input.db.from('payment_provider_refs').select('external_id, credit_package_id, package_tier')
+    .eq('channel', 'stripe').eq('merchant_namespace', scope.merchant).eq('mode', scope.mode)
+    .eq('object_type', 'price').eq('offer_kind', 'standard').eq('is_current', true)
+    .eq('price_usage', 'package').eq('billing_cycle', 'one_time')
+    .in('package_tier', ['pro', 'gold']).in('credit_package_id', input.ids);
+  if (result.error || !Array.isArray(result.data)) throw new Error('PAY_COMMON_MAPPING_READ_FAILED', { cause: result.error });
+  for (const ref of result.data) {
+    const key = `${ref.credit_package_id}:${ref.package_tier}`;
+    ready.set(key, !ready.has(key) && typeof ref.external_id === 'string' && ref.external_id.trim() !== '');
+  }
+  return ready;
+}
+
 // Admin forms keep their existing field names; historical derived columns are not an authority.
 export async function hydrateStripeCatalogPrices<T extends { id: string }>(input: {
   db: Pick<SupabaseClient, 'from'>;
