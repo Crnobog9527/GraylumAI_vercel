@@ -4,7 +4,7 @@ import { runSocialMonitorJob } from './socialMonitorJob';
 import type { ClientDeps } from './postForMe/client';
 
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status });
-function db(switchValue: unknown, failing: string[] = [], featureOn = false) {
+function db(switchValue: unknown, failing: string[] = [], featureOn: boolean | 'unreadable' = false) {
   const calls: string[] = [];
   return { calls, db: {
     rpc: async (name: string) => {
@@ -18,7 +18,9 @@ function db(switchValue: unknown, failing: string[] = [], featureOn = false) {
       let key = '';
       return { select() { return this; }, eq(_: string, value: string) { key = value; return this; },
         maybeSingle: async () => {
-          if (key === 'publish_monitor_enabled') return { data: { value: featureOn }, error: null };
+          if (key === 'publish_monitor_enabled') {
+            return featureOn === 'unreadable' ? { data: null, error: { message: 'x' } } : { data: { value: featureOn }, error: null };
+          }
           if (key !== 'publish_monitor_orphan_sweep_delete') return { data: null, error: null };
           return { data: switchValue === undefined ? null : { value: switchValue }, error: null };
         } };
@@ -45,6 +47,11 @@ describe('publish-monitor daily job', () => {
     expect(on.calls).toEqual(['publish_monitor_snapshot_prune', 'publish_monitor_provider_work_claim',
       'publish_monitor_cleanup_claim', 'publish_monitor_refresh_claim', 'publish_monitor_orphan_classify']);
     expect(report.refresh).toEqual({ claimed: 0, outcomes: {} });
+  });
+
+  it('an unreadable feature switch is a reported refresh failure, not a silent skip', async () => {
+    const broken = db(undefined, [], 'unreadable');
+    expect((await runSocialMonitorJob(broken.db, deps(), Date.now() + 60_000, windowFor)).failures).toEqual(['refresh']);
   });
 
   it('a failing step is reported and the following steps still run', async () => {

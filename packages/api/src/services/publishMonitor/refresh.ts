@@ -185,6 +185,11 @@ export async function refreshConnection(db: Rpc, client: ClientDeps, claim: Refr
       if (!await write(run, [], null, false)) return stale(run);
       return settle(run, 'empty');
     }
+    // Every entry unreadable (a provider schema change): counted, but never a success that resets the failure state.
+    if (page.posts.length === 0 && page.rejected > 0) {
+      if (!await write(run, [], null, false)) return stale(run);
+      return settle(run, 'failed', 'PROVIDER_RESPONSE_SHAPE');
+    }
     first = false;
     const { kept, pastWindow } = scope(page.posts);
     const more = page.hasMore && !pastWindow;
@@ -272,7 +277,14 @@ export async function runRefresh(db: Db, client: ClientDeps, windowFor: WindowLo
   return report;
 }
 
-/** Retention (plan §7): removes snapshots older than 100 days, a bounded number per run. */
-export function pruneSnapshots(db: Rpc): Promise<number> {
-  return call(db, 'publish_monitor_snapshot_prune', { p_limit: 20_000 }, z.number().int().min(0));
+const PRUNE_BATCH = 20_000;
+
+/** Retention (plan §7): removes snapshots older than 100 days in bounded batches until none are left or time runs out. */
+export async function pruneSnapshots(db: Rpc, until: number, now: Clock = Date.now): Promise<number> {
+  let total = 0;
+  for (;;) {
+    const removed = await call(db, 'publish_monitor_snapshot_prune', { p_limit: PRUNE_BATCH }, z.number().int().min(0));
+    total += removed;
+    if (removed < PRUNE_BATCH || now() >= until) return total;
+  }
 }
