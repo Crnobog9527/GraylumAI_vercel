@@ -5,6 +5,7 @@ import { Zap, TrendingDown, Package, RefreshCw, Crown, CheckCircle2, Settings, L
 import { trpc } from '@/trpc/client';
 import { CREDITS_SUMMARY_QUERY_OPTIONS } from './creditsSummaryQuery';
 import { SummaryStatValue } from './SummaryRetry';
+import { TransactionSearchCharges } from '@/components/research/transaction-search-charges';
 import { formatCreditsBalance } from '@/components/credits/balancePresentation';
 import {
   countsAsCreditSpend,
@@ -320,6 +321,7 @@ export const CreditRecordsCard = memo(function CreditRecordsCard({ user }: { use
                     <div className="text-xs max-w-md truncate" style={{ color: 'var(--text-tertiary)' }}>
                       {tx.description || '-'}
                     </div>
+                    {ledgerType === 'spend' && <TransactionSearchCharges transactionId={tx.id} />}
                   </div>
                 </div>
 
