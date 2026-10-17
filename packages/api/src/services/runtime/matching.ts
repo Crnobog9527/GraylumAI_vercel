@@ -2,7 +2,7 @@
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { databaseSkillSource, userVisibleModules } from '../skills/databaseSource';
-import { activateFreeChatSkill } from '../skills/stepGuide';
+import { activateFreeChatSkill, type ContentSourceKind } from '../skills/stepGuide';
 import { activateSkill, discoverSkills, SkillLoadError } from '../skills/loader';
 import { fixtureInputCapacity, selectRuntimeHistory } from './context';
 import { withBrandIdentity } from '../modelIdentity/brandIdentity';
@@ -11,6 +11,8 @@ export const matchCandidate=z.object({
  key:z.string().regex(/^candidate-[0-9]+$/),name:z.string().min(1),description:z.string(),
  moduleId:z.string().uuid(),skillId:z.string().uuid(),packageId:z.string().min(1),revisionId:z.string().uuid(),packageHash:z.string().regex(/^[a-f0-9]{64}$/),
  modelId:z.string().uuid(),model:z.string().min(1),inputLimit:z.number().int().positive(),outputLimit:z.number().int().positive(),requiresTask:z.boolean(),
+ // A2: frozen at admission from the immutable package (workflow.yaml contentSource); absent on older plans.
+ contentSource:z.enum(['script','storyboard']).optional(),
 }).strict();
 export type MatchCandidate=z.infer<typeof matchCandidate>;
 export const matchingPlan=z.object({candidates:z.array(matchCandidate).min(1).max(16)}).strict();
@@ -59,6 +61,11 @@ export async function discoverRuntimeCandidates(user:SupabaseClient,admin:Supaba
  return candidates;
 }
 export async function activateRuntimeCandidate(user:SupabaseClient,admin:SupabaseClient,candidate:MatchCandidate,brandIdentity=false){
+ return (await activateCandidateWithSource(user,admin,candidate,brandIdentity)).instructions;
+}
+/** The activation and, for a derived-content Skill, the saved content it reads (A2). */
+export async function activateCandidateWithSource(user:SupabaseClient,admin:SupabaseClient,candidate:MatchCandidate,
+ brandIdentity=false):Promise<Activated>{
  const c=matchCandidate.parse(candidate);
  if(c.requiresTask)throw new Error('RUNTIME_SKILL_TASK_REQUIRED');
  const source=databaseSkillSource({userClient:user,privateClient:admin,moduleId:c.moduleId,skillId:c.skillId,revisionId:c.revisionId});
@@ -66,15 +73,17 @@ export async function activateRuntimeCandidate(user:SupabaseClient,admin:Supabas
  const descriptor=(await source.list()).find(d=>d.revisionId===c.revisionId&&d.packageHash===c.packageHash&&d.packageId===c.packageId);
  // MODEL-IDENTITY-GUARD layer 1: a matched Skill speaks with the brand identity frozen at admission.
  // An unknown identity keeps the loader's own refusal.
- if(!descriptor)return withBrandIdentity((await activateSkill(source,identity,{maxContextBytes:c.inputLimit})).forModel(),brandIdentity);
+ if(!descriptor)return {instructions:withBrandIdentity((await activateSkill(source,identity,{maxContextBytes:c.inputLimit})).forModel(),brandIdentity)};
  // A matched Skill gets SKILL.md and the step guide, not the steps' files: candidate sizing (fittingCandidates)
  // runs this same activation before the paid match, so what is sized is exactly what runs (R8b).
- return withBrandIdentity((await activateFreeChatSkill(source,descriptor,{maxContextBytes:c.inputLimit,withResources:false})).instructions,
-  brandIdentity);
+ const activated=await activateFreeChatSkill(source,descriptor,{maxContextBytes:c.inputLimit,withResources:false});
+ return {instructions:withBrandIdentity(activated.instructions,brandIdentity),
+  ...(activated.contentSource?{contentSource:activated.contentSource}:{})};
 }
+type Activated={instructions:string;contentSource?:ContentSourceKind};
 /** A selected Skill runs with its own model capacity: never pay for a match whose selection cannot run.
  * The input alone is a lower bound, so a candidate that cannot hold it is dropped without loading its Skill. */
-export async function fittingCandidates(candidates:MatchCandidate[],activate:(candidate:MatchCandidate)=>Promise<string>,
+export async function fittingCandidates(candidates:MatchCandidate[],activate:(candidate:MatchCandidate)=>Promise<string|Activated>,
  sizing:{input:string;inputBytes:number;toolBytes:number;instructions:(skill:string)=>string}){
  const fits=(candidate:MatchCandidate,instructions:string)=>{
   try{selectRuntimeHistory([],[{role:'user',content:sizing.input}],
@@ -86,11 +95,12 @@ export async function fittingCandidates(candidates:MatchCandidate[],activate:(ca
   if(!fits(candidate,sizing.instructions('')))continue;
   // A task-requiring Skill is refused at activation either way; its handling is unchanged here.
   if(candidate.requiresTask){kept.push(candidate);continue;}
-  let skill:string;
+  let activated:string|Activated;
   // A Skill too large for its own model can never run: drop it, keep the other candidates and the ordinary fallback.
-  try{skill=await activate(candidate);}
+  try{activated=await activate(candidate);}
   catch(error){if(error instanceof SkillLoadError&&error.code==='CAPACITY_EXCEEDED')continue;throw error;}
-  if(fits(candidate,sizing.instructions(skill)))kept.push(candidate);
+  const {instructions:skill,contentSource}=typeof activated==='string'?{instructions:activated,contentSource:undefined}:activated;
+  if(fits(candidate,sizing.instructions(skill)))kept.push(contentSource?{...candidate,contentSource}:candidate);
  }
  return kept;
 }

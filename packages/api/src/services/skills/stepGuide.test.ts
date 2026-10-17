@@ -112,3 +112,19 @@ it('keeps a task package behind its task: no workflow resources, and a missing t
   await expect(activateFreeChatSkill(f.source, f.descriptor, {maxContextBytes: 100000})).rejects.toThrow('INVALID_IDENTITY');
   expect(f.reads).not.toContain('workflow.yaml');
 });
+it('A2: returns the declared content source of a derived-content Skill, read from the same workflow.yaml', async () => {
+  const f = fixture(script + 'contentSource: script\n');
+  const activated = await activateFreeChatSkill(f.source, f.descriptor, {maxContextBytes: 100000});
+  expect(activated.contentSource).toBe('script');
+  expect(f.reads.filter(path => path === 'workflow.yaml')).toHaveLength(1);
+  // Still declared when the guide or the steps' files do not fit.
+  const small = fixture(script + 'contentSource: storyboard\n', 'x'.repeat(5000));
+  expect((await activateFreeChatSkill(small.source, small.descriptor, {maxContextBytes: 3000})).contentSource).toBe('storyboard');
+});
+it('A2: no content source without a declaration, for positioning, or for a legacy task package', async () => {
+  expect((await activateFreeChatSkill(fixture(script).source, fixture(script).descriptor, {maxContextBytes: 100000})).contentSource)
+    .toBeUndefined();
+  const guided = fixture(positioning + 'contentSource: script\n');
+  expect((await activateFreeChatSkill(guided.source, guided.descriptor, {maxContextBytes: 100000})).contentSource).toBeUndefined();
+  expect(() => parseWorkflowManifest(script + 'contentSource: editing\n')).toThrow();
+});
