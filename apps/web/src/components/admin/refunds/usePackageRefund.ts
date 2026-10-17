@@ -76,7 +76,7 @@ export function usePackageRefund() {
     loadStatus: () => run('status', async () => {
       const result = await utils.admin.getPackageRefundStatus.fetch({ orderId: request().orderId });
       setIntent((result ?? null) as PackageRefundIntent | null);
-      if (!result) setError('这个订单还没有积分包退款记录');
+      if (!result) setError('这个订单还没有退款记录');
     }),
     reject: () => run('reject', async () => {
       if (!rejectReason) return;
