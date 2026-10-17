@@ -146,7 +146,11 @@ type MentorContext = Parameters<typeof freezePaygMessageBudget>[0] & { tools: st
  * ceiling (the organize cap); every other turn keeps its interactive budget. Billing still follows the bytes actually sent.
  */
 export const RESEARCH_TURN_INPUT_BYTES = 112000;
-const bytes = (value: unknown) => Buffer.byteLength(JSON.stringify(value));
+/**
+ * The host context's bytes as sent: hostTurnInput serializes it into the message content, and the request serializes that
+ * string again (every quote and backslash escaped). The block's cost is the difference of this measure (#1070 review).
+ */
+export const sentHostBytes = (value: unknown) => Buffer.byteLength(JSON.stringify(JSON.stringify(value)));
 
 /**
  * Adds the admitted research tools to a positioning mentor turn's frozen context and v2 run: one more model call
@@ -165,7 +169,7 @@ export async function attachResearchTurn(input: Omit<ResearchAdmissionInput, 'mo
   const raised = budget?.purpose === 'interactive' && budget.inputBytes < RESEARCH_TURN_INPUT_BYTES ? RESEARCH_TURN_INPUT_BYTES : undefined;
   const host = context.hostTurnContext && input.settings && input.actor && input.sessionId
     ? await researchHost(context.hostTurnContext, input.admin, input.actor, input.sessionId, input.settings) : context.hostTurnContext;
-  const hostBytes = host && host !== context.hostTurnContext ? bytes(host) - bytes(context.hostTurnContext) : 0;
+  const hostBytes = host && host !== context.hostTurnContext ? sentHostBytes(host) - sentHostBytes(context.hostTurnContext) : 0;
   const admitted = await admitResearchTurn({ ...input, fits: extra => input.fits(extra + hostBytes, raised),
     modelCalls: billing.limits.maxCalls, offeredTools: context.tools.length,
     maxTools: primary.payg.maxTools, defaultMultiplier: billing.rules.billingUnit.defaultMultiplier,

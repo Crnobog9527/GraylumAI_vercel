@@ -8,7 +8,8 @@ import {runtimeContext} from './runtimeContext';
 import {openRouterBound} from '../bill2/openRouterPolicy';
 import type {FrozenPaygRun} from '../bill2/service';
 import {RESEARCH_PHASE} from './researchTurn';
-import {RESEARCH_TURN_INPUT_BYTES} from './researchAdmission';
+import {RESEARCH_TURN_INPUT_BYTES,sentHostBytes} from './researchAdmission';
+import {hostTurnInput} from './hostTurn';
 import {DISABLED_RESEARCH_TOOLS,researchToolsConfigSchema} from '../research/vendors/config';
 import {tikhubRouteId} from '../research/vendors/tikhub';
 import {FIRECRAWL_ROUTE} from '../research/vendors/firecrawl';
@@ -127,4 +128,13 @@ it('with the switch on, the cards and benchmark table join the turn only togethe
   expect(plain.hostTurnContext?.research).toBeUndefined();
   expect(plain.purposeBudget?.inputBytes).toBe(90000);
  }finally{switchRead.on=false;}
+});
+
+it('the host block is measured as sent: serialized into the message, then escaped again by the request',async()=>{
+ const before={stepId:'s',opening:false,checklist:[]};
+ const after={...before,note:'含 "引号" 和 \\ 反斜杠'.repeat(40)};
+ const request=(host:object)=>Buffer.byteLength(JSON.stringify([{role:'user',content:hostTurnInput('帮我找对标',undefined,host as never)}]));
+ expect(sentHostBytes(after)-sentHostBytes(before)).toBe(request(after)-request(before));
+ // A single serialization would undercount the escaped quotes and backslashes.
+ expect(Buffer.byteLength(JSON.stringify(after))-Buffer.byteLength(JSON.stringify(before))).toBeLessThan(request(after)-request(before));
 });
