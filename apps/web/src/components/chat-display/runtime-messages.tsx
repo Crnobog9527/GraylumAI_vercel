@@ -13,8 +13,10 @@ import workStyles from '@/app/runtime/runtime-work.module.css';
  */
 
 /** Title row. With `meta` it shows the topic's platform, account and work info; otherwise `action`. */
-export function RuntimeHeader({ title, subtitle, meta, action }: {
+export function RuntimeHeader({ title, subtitle, meta, action, headingLevel: Heading = 'h1' }: {
   title: string;
+  /** The product page's title is its H1; a page that shows this header as an example under its own H1 passes 'h2'. */
+  headingLevel?: 'h1' | 'h2';
   /** Small line under the title (only shown without a topic). */
   subtitle?: string;
   meta?: { platform: string; account: string; infoHref: string; showExpand?: boolean; onExpand?: () => void };
@@ -22,7 +24,7 @@ export function RuntimeHeader({ title, subtitle, meta, action }: {
 }) {
   return (
     <header className={workStyles.workHead}>
-      <div className={workStyles.workTitle}><h1>{title}</h1>{subtitle&&<small>{subtitle}</small>}</div>
+      <div className={workStyles.workTitle}><Heading>{title}</Heading>{subtitle&&<small>{subtitle}</small>}</div>
       {meta?<div className={workStyles.workMeta}><span>{meta.platform} · {meta.account}</span><Link href={meta.infoHref}>工作信息</Link>
         {meta.showExpand&&<button type="button" onClick={meta.onExpand}>展开成果</button>}</div>:action??null}
     </header>

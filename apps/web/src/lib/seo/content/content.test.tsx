@@ -6,6 +6,8 @@ import { SIMPLIFIED_HOME_HREF, SITE_CHROME } from '@/components/public-site/site
 import type { ArticleContent } from '../article';
 import { PUBLIC_PAGES } from '../public-pages';
 import { ABOUT_ZH_HANS, ABOUT_ZH_TW } from './about';
+import { BLOG_POSTS } from './blog';
+import { FEATURES, FEATURES_HUB } from './features';
 import { SIGNUP_CTA_HREF } from './shared';
 import { ZH_TW_GLOSSARY } from './zh-tw/glossary';
 import { ZH_TW_HUB } from './zh-tw/hub';
@@ -29,6 +31,9 @@ const ARTICLES: ArticleContent[] = [
   ZH_TW_SHEQUN_JINGYING,
   ZH_TW_IG_JINGYING,
   ZH_TW_ZIMEITI_KECHENG,
+  FEATURES_HUB,
+  ...FEATURES.map(entry => entry.content),
+  ...BLOG_POSTS,
 ];
 
 // Login entry pages are not in the sitemap but are real pages every visitor can open.
