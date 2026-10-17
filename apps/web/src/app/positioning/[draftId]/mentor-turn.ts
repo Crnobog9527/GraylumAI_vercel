@@ -17,6 +17,8 @@ export type MentorRequest = {
   questionId?: string;
   answerSource?: QuestionAnswerSource;
   organizeAfter?: boolean;
+  /** RT-5: a one-time refresh grant from `research.createRefresh`; the host checks it, never trusts it as given. */
+  researchRefreshId?: string;
 };
 
 /**

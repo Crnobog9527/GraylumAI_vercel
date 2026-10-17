@@ -4,6 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { runtimeAdmissionService } from './admission';
 import { OPENING_INPUT } from '../../shared/opcQuestions';
 import type { GateVerdict } from './positioningGate';
+import { REPLY_LANGUAGE_INSTRUCTIONS } from './primaryInstructions';
 
 // POSITIONING-GATE PR2: admission-side checks. A refusal happens before runtime_admit, so nothing is reserved or charged.
 const mock = vi.hoisted(() => ({ redis: vi.fn(), recovery: vi.fn() }));
@@ -122,7 +123,8 @@ it('judges each concurrent duplicate on its own and admits nothing when blocked'
 });
 
 it('sizes the frozen fallback rule at admission, so a turn that fits never fails later in the executor', async () => {
-  const policyFor = (f: ReturnType<typeof fixture>) => ({ ...f.policy, inputBytes: 6000 });
+  // Every non-mentor turn also carries the reply-language rule (SKILL-I18N-HOOK), sized the same way.
+  const policyFor = (f: ReturnType<typeof fixture>) => ({ ...f.policy, inputBytes: 6000 + REPLY_LANGUAGE_INSTRUCTIONS.length });
   const admits = async (positioned: boolean, length: number) => {
     const f = fixture({ positioned });
     try { await prepare(f, policyFor(f), { ...f.input, input: 'x'.repeat(length) }); return true; }

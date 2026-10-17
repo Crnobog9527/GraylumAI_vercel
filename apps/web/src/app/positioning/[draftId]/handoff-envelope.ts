@@ -64,3 +64,18 @@ export function handoffIntent(value: { draftId: string; planId: string; accounts
       .sort(),
   ]);
 }
+
+/**
+ * Provably definite rollbacks of the `opc_handoff` SQL function. Every code
+ * below is raised before that function's single durable write, so an exception
+ * rolls the whole transaction back and a request carrying it can never commit:
+ * releasing the retained request and forming a new explicit one is safe.
+ * Timeouts, lost replies and every other error keep it for idempotent replay.
+ */
+export const definiteHandoffRejections = new Set([
+  "OPC_ACCOUNT_CONFLICT",
+  "OPC_ACCOUNTS_INVALID",
+  "OPC_VERSION_CONFLICT",
+  "OPC_REQUEST_CONFLICT",
+  "OPC_DENIED",
+]);
