@@ -45,7 +45,7 @@ export const ERASURE_CONTENT_TABLES: ReadonlySet<string> = new Set([
   'opc_topic_workspaces', 'opc_topic_draft_versions', 'opc_library_requests', 'opc_content_versions',
   'opc_accounts', 'opc_businesses', 'opc_work_ui_deleted', 'opc_account_ui_deleted', 'opc_publication_ui_deleted',
   'agent_confirmed_preferences_deleted', 'agent_preference_requests_deleted', 'artifact_accounts_deleted',
-  'opc_data_events', 'runtime_session_names_deleted', 'fusion_call_outputs', 'fusion_reviews',
+  'opc_data_events', 'runtime_session_names_deleted', 'fusion_call_outputs', 'fusion_reviews', 'fusion_compares',
   'research_selection_cards_deleted', 'research_account_fetches_deleted', 'research_refresh_grants_deleted',
   'research_discoveries_deleted', 'research_benchmarks_deleted',
 ]);

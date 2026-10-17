@@ -25,6 +25,7 @@ import {windowConcurrencyCases} from './window-concurrency.mjs';
 import {fusionGroupCases} from './fusion-group.mjs';
 import {fusionSessionlessCases} from './fusion-sessionless.mjs';
 import {fusionAdmitCases} from './fusion-admit.mjs';
+import {fusionCompareCases} from './fusion-compare.mjs';
 import {researchToolCases} from './research-tools.mjs';
 import {researchRuntimeRegressionCases} from './research-runtime-regressions.mjs';
 import {researchRuntimeCases} from './research-runtime.mjs';
@@ -136,6 +137,7 @@ try {
   await fusionGroupCases({db,Client,connectionString,report,createFixture,claim});
   await fusionSessionlessCases({db,Client,connectionString,report,createFixture});
   await fusionAdmitCases({db,Client,connectionString,report,createFixture});
+  await fusionCompareCases({db,Client,connectionString,report,createFixture});
   await researchToolCases({db,Client,connectionString,report,createFixture,claim,receipt});
   await researchRuntimeRegressionCases({db,report,createFixture});
   await researchRuntimeCases({db,Client,connectionString,report,createFixture});
