@@ -95,7 +95,8 @@ Owner 选的选项（原文）："Agent 在自由对话里自己决定检索资�
 - @ 引用照 #1022 不变：用户点名的文档整篇可读、优先；@ 引用开关（`library_agent_read_enabled`）关着时，自动检索也不挂（读文档的底层是同一套）。
 - 自动检索命中的文档在**搜索那一刻冻结**（`documentId + content_version`）进本次执行的可读清单，和 @ 引用共用 `runtime_library_read` 的读取次数和字节上限
   （每次执行 8 次 / 65536 B），不另开额度。模型只能读"@ 引用 + 本回合搜索命中"的文档，自己编的编号读不到（返回 `LIB_REFERENCE_READ_DENIED`，同 0262）。
-- 存哪：沿用 `runtime_library_references`，加一列 `origin`（`reference` / `retrieved`），把 `ordinal` 上限从 5 放到 5 + 本回合检索命中上限（24）；
+- 存哪：沿用 `runtime_library_references`，加一列 `origin`（`reference` / `retrieved`），把 `ordinal` 上限从 5 放到 5 + 本回合检索命中上限（24），同时替换 `runtime_library_read` 里写死的编号解析（0262 第 102 行 `doc-([1-5])`）为 1–29，
+  补边界测试（`doc-6`、`doc-29` 能读，`doc-30` 返回 `unknown_query`）；
   不建新表。需要一个新迁移（编号向总控要）。
 - 检索命中不出现在输入框的引用条里；对话里的工作状态显示"在资料库里找到 3 篇相关内容"，点开列出文件名（第 4 节）。
 
@@ -150,6 +151,9 @@ Owner 选的选项（原文）："Agent 在自由对话里自己决定检索资�
   第 5 轮工具结果回来后，第 6 次模型请求**不带任何工具**（`tools` 为空、`tool_choice: none`），模型只能写回答。
   测试：3 次研究调用分在 3 轮里、再加 2 轮免费工具，第 6 次请求里没有工具、写出最终回答并正确结算；模型在第 6 次仍想调工具时请求本身不提供工具，不会出现第 7 次调用。
 - 子调用总数沿用后台 `maxSubcallsPerRound`（默认 12），按最坏情况折算后先检查（`social_account` = 3、`social_search` = 关键词数、`web_*` = 1），
+  **同一轮并行的多个研究工具调用要原子预留额度**：现有 `researchRuntimeTool.ts` 里各调用共享的剩余额度要等异步请求结束才扣减，
+  并行时会一起看到"剩 12"而超出上限。PR C 改为在第一次 `await` 之前同步预留折算后的子调用数（不够就整次拒绝），结束时把没用掉的额度退回；
+  补测试：同一轮 3 个各 5 个关键词的 `social_search` 并行，只有放得下的通过，实际发出的子调用不超过 12。
   放不下返回 `budget_exhausted`、不发请求、不部分扣费；运行单总调用 = 6 次模型调用 + 12 次子调用 = 18，在数据库上限 32 以内，不改 32。
 - **扣费**：按 RESEARCH-TOOLS 第 3 节的增量结算：每次子调用按自己的美元上界冻结，结算时把实际美元成本累加到这条回答的运行单上，
   应收积分按累计值 `ceil(q × Σ(U_i × m_i))` 算，每次只扣"新累计应收 − 已扣"的差额，**整单只进位一次，不对每次子调用单独取整**
@@ -213,12 +217,12 @@ Owner 选的选项（原文）："Agent 在自由对话里自己决定检索资�
 
 | PR | 内容 | 风险 | 依赖 | 能否在 10-25 前做完 |
 | --- | --- | --- | --- | --- |
-| A1 | 迁移：`pg_trgm` 索引、`library_runtime_search` 函数、`runtime_library_references.origin` 和 ordinal 上限、propagate 清检索摘录；开关 `chat_library_retrieval_enabled` 默认关 | high（迁移、权限、删除） | #1022（0279）合并；迁移编号向总控要 | 能（#1022 本周合并的前提下） |
+| A1 | 迁移：`pg_trgm` 索引、`library_runtime_search` 函数、`runtime_library_references.origin` 和 ordinal 上限、`runtime_library_read` 编号解析扩到 1–29、propagate 清检索摘录；开关 `chat_library_retrieval_enabled` 默认关 | high（迁移、权限、删除） | #1022（0279）合并；迁移编号向总控要 | 能（#1022 本周合并的前提下） |
 | A2 | 自由对话挂 `library_search`、执行时读检索命中文档、`agent_tool` 流事件、自由对话主指令补一段 | high（Runtime 准入） | A1 | 能 |
 | W | 前端：`agent-work-status.tsx` 纯展示组件 + 样例 + /runtime 挂载；落地页区域 6 改用它 | ordinary（只改前端） | A2 的事件格式（可先按约定的类型做） | 能 |
 | B1 | `my_benchmarks`（读 0268 对标表，按用户已确认定位找会话） | high（Runtime、权限） | A2 | 能 |
 | B2 | `my_posts`（复用 #1032 读取函数） | high（Runtime、权益） | #1032 合并；PR-6 分工已确认 | 看 #1032 何时合并，偏紧 |
-| C | 研究工具放开到自由对话：`social_search`、`social_account` 执行路径、`runtimeContext`、准入、每回答 3 次、第 6 次请求不带工具、账号来源校验、容量 | high（计费、Runtime） | #1062 合并；RT-6 #1070 合并（容量） | **有风险**：动 admission/execute（RT 系列也在改），要先拆文件，排在 RT-6、#1062 之后 |
+| C | 研究工具放开到自由对话：`social_search`、`social_account` 执行路径、`runtimeContext`、准入、每回答 3 次、并行调用原子预留子调用额度、第 6 次请求不带工具、账号来源校验、容量 | high（计费、Runtime） | #1062 合并；RT-6 #1070 合并（容量） | **有风险**：动 admission/execute（RT 系列也在改），要先拆文件，排在 RT-6、#1062 之后 |
 
 同一时间只开一个写 Runtime 准入的 PR（A2 → B1 → B2 → C 排队），W 可以和 A2 并行。
 
