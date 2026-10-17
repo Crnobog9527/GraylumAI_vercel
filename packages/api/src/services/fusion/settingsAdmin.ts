@@ -53,7 +53,8 @@ export const fusionSettingsView = (db: SupabaseClient) => readFusionSettings(db)
 async function adminWindow(db: SupabaseClient, actorId: string, env: Record<string, string | undefined>) {
   // RUNTIME-PROD: production has no window; the admin route already requires an administrator.
   if (realRuntimeEnvironment(env) === 'production')
-    return loadProductionPolicy(db, actorId, env).catch(() => { throw new Error('FUSION_SETTINGS_UNAVAILABLE'); });
+    // Offline: settings reads never renew a price snapshot over the network.
+    return loadProductionPolicy(db, actorId, env, {}, { offline: true }).catch(() => { throw new Error('FUSION_SETTINGS_UNAVAILABLE'); });
   const windowId = stagingRuntimeWindow(env);
   const result = await db.rpc('report_model_window', { p_actor_id: actorId, p_window_id: windowId });
   if (result.error) throw new Error('FUSION_SETTINGS_UNAVAILABLE');
