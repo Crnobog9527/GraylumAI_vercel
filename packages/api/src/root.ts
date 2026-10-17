@@ -32,6 +32,7 @@ import { skillsRouter } from './routers/skills';
 import { accountRouter } from './routers/account';
 import { dataUseRouter } from './routers/dataUse';
 import { founderRouter } from './routers/founder';
+import { expertConsultRouter } from './routers/expertConsult';
 import { publishMonitorRouter } from './routers/publishMonitor';
 import { adminStaleRoundsRouter } from './routers/adminStaleRounds';
 import { fusionSettingsRouter } from './routers/fusionSettings';
@@ -78,6 +79,7 @@ export const appRouter = router({
   account: accountRouter,
   dataUse: dataUseRouter,
   founder: founderRouter,
+  expertConsult: expertConsultRouter,
   publishMonitor: publishMonitorRouter,
   library: libraryRouter,
 });
