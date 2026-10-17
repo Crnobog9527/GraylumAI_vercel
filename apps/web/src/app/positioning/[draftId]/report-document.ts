@@ -4,6 +4,8 @@
  * R5 report editing and 定稿 (#783 backend), without React so the rules are testable. The server owns
  * versions, completeness and the publish checks; the page keeps the user's text and explains answers.
  */
+import { joinReportBody, splitReportBody } from "@repo/api/src/shared/reportData";
+
 export const REPORT_MAX_CHARACTERS = 12000;
 
 export const REPORT_DOC_TEXT = {
@@ -67,8 +69,16 @@ export function reportDocumentError(cause: unknown) {
 /** Unicode characters, as the server counts them. */
 export const reportLength = (text: string) => [...text].length;
 
+/**
+ * The editor holds the report text only: the strategy data block (REPORT-VISUAL §6.2) is neither shown nor
+ * counted, and goes back after the edited text unchanged. A report without a block is edited as before.
+ */
+export const editorText = (body: string) => splitReportBody(body).text;
+export const bodyFromEditor = (doc: Pick<ReportDocument, "body">, text: string) => joinReportBody(text, splitReportBody(doc.body).block);
+
+/** `text` is the editor's text; the limit counts it alone (Owner's choice B). */
 export function canSave(doc: Pick<ReportDocument, "body" | "finalized">, text: string) {
-  return !doc.finalized && text.trim().length > 0 && reportLength(text) <= REPORT_MAX_CHARACTERS && text !== doc.body;
+  return !doc.finalized && text.trim().length > 0 && reportLength(text) <= REPORT_MAX_CHARACTERS && bodyFromEditor(doc, text) !== doc.body;
 }
 
 export function canFinalize(doc: Pick<ReportDocument, "candidate" | "finalized">, editing: boolean) {

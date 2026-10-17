@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from "vitest";
-import { askedVersion, canFinalize, savedAs, canSave, finalizedNotice, REPORT_DOC_UNAVAILABLE, reportDocumentError, reportLength, requestFor } from "./report-document";
+import { askedVersion, bodyFromEditor, canFinalize, editorText, savedAs, canSave, finalizedNotice, REPORT_DOC_UNAVAILABLE, reportDocumentError, reportLength, requestFor } from "./report-document";
 
 const doc = { body: "## 定位\n原文", finalized: false, candidate: true };
 
@@ -67,5 +67,15 @@ describe("report document (R5)", () => {
   it("names the official version after 定稿", () => {
     expect(finalizedNotice(3)).toBe("报告已定稿，成为正式定位第 3 版。");
     expect(finalizedNotice(null)).toBe("报告已定稿，成为正式定位版本。");
+  });
+
+  it("edits the report text only: the strategy data block is hidden, not counted, and put back unchanged", () => {
+    const block = '```graylum-report-data\n{"v":1,"field":"summary","value":"先做小红书"}\n```';
+    const doc = { body: `## 一句话结论\n\n先做小红书。\n\n${block}`, finalized: false };
+    expect(editorText(doc.body)).toBe("## 一句话结论\n\n先做小红书。");
+    expect(canSave(doc, editorText(doc.body))).toBe(false);
+    expect(bodyFromEditor(doc, "## 一句话结论\n\n改成抖音。")).toBe(`## 一句话结论\n\n改成抖音。\n\n${block}`);
+    expect(canSave(doc, "字".repeat(12000))).toBe(true);
+    expect(bodyFromEditor({ body: "## 旧报告" }, "## 改过")).toBe("## 改过");
   });
 });
