@@ -279,7 +279,27 @@ it('RUNTIME: a round interrupted for content beyond capacity is marked atomicall
   expect(before).toMatchObject({ credits: 97, compensations: 0, closed: false });
 }, 60000);
 
+const markerSince = async (iso: string) => db.query(
+  "update system_settings set value=to_jsonb($1::text) where key='runtime_capacity_marker_since'", [iso]);
+
+it('RUNTIME: the recovery job leaves rounds created before the marker was reliable to the operator', async () => {
+  // 0282 wrote the time it first ran: the older fixtures below predate it.
+  const migrated = (await db.query("select value from system_settings where key='runtime_capacity_marker_since'")).rows[0];
+  expect(migrated).toBeTruthy();
+  expect(typeof (await rpc('runtime_capacity_marker_since', {}))).toBe('string');
+  expect((await anon.rpc('runtime_capacity_marker_since', {})).error).toBeTruthy();
+  const old = await chargedOpenRound(2 * STALE_ROUND_AGE_MS);
+  const before = await ledger(old);
+  const result = await autoCompensateStaleRounds(service);
+  expect(result.manualReview).toBeGreaterThanOrEqual(1);
+  expect(result.compensated).toBe(0);
+  expect(await ledger(old)).toEqual(before);
+  // The operator path is unchanged and still refunds it.
+  expect(await compensateStaleRound(service, old.runId)).toMatchObject({ state: 'compensated', compensatedCredits: 3 });
+}, 60000);
+
 it('RUNTIME: the recovery job closes a stale round by the same rule once and settles it correctly', async () => {
+  await markerSince('2000-01-01T00:00:00Z'); // markers reliable for all fixtures here
   const stale = await chargedOpenRound(2 * STALE_ROUND_AGE_MS), recent = await chargedOpenRound(0);
   const capacity = await chargedOpenRound(2 * STALE_ROUND_AGE_MS);
   await markCapacity(capacity);

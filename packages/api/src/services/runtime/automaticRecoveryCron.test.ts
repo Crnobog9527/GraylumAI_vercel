@@ -5,7 +5,7 @@ import { runAutomaticFinancialRecovery } from './automaticRecovery';
 const mocks = vi.hoisted(() => ({ close: vi.fn() }));
 vi.mock('./staleChargedRounds', async original => ({ ...await original<typeof import('./staleChargedRounds')>(),
   autoCompensateStaleRounds: mocks.close }));
-const closed = { found: 1, compensated: 1, alreadyCompensated: 0, skipped: 0, failed: 0, credits: 3, deferred: 0 };
+const closed = { found: 1, compensated: 1, alreadyCompensated: 0, skipped: 0, failed: 0, credits: 3, manualReview: 0, deferred: 0 };
 const order: string[] = [];
 function admin() {
   const rpc = vi.fn((name: string) => {

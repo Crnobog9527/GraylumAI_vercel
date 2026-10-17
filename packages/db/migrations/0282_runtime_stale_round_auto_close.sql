@@ -9,7 +9,10 @@
 --    for availability) and interrupts its PAYG execution in one transaction (write-once marker).
 --  * runtime_stale_charged_rounds / runtime_stale_round_compensate: unchanged from 0220/0239 except
 --    that a round marked with a capacity code is neither reported nor compensated.
--- Repeatable (CREATE OR REPLACE only). No remote database use.
+--  * runtime_capacity_marker_since: when markers became reliable (the time this migration first ran).
+--    Rounds created earlier may be capacity failures without a trace, so only an operator refunds those;
+--    the automatic close handles rounds created at or after it. Without the value it refunds nothing.
+-- Repeatable (the setting is written once; the rest is CREATE OR REPLACE). No remote database use.
 BEGIN;
 
 CREATE OR REPLACE FUNCTION public.runtime_interrupt_capacity(p_actor_id uuid,p_execution_id uuid,p_epoch bigint,p_code text)
@@ -35,6 +38,13 @@ BEGIN
  -- runs in this transaction, so an interrupted round without its marker cannot exist.
  RETURN runtime_execution(p_actor_id,p_execution_id,'interrupt',jsonb_build_object('epoch',p_epoch,'value',NULL));
 END $$;
+INSERT INTO public.system_settings(key,value) VALUES('runtime_capacity_marker_since',to_jsonb(to_char(clock_timestamp() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"')))
+ ON CONFLICT (key) DO NOTHING;
+CREATE OR REPLACE FUNCTION public.runtime_capacity_marker_since() RETURNS timestamptz
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
+ SELECT (value #>> '{}')::timestamptz FROM system_settings WHERE key='runtime_capacity_marker_since' $$;
+REVOKE ALL ON FUNCTION public.runtime_capacity_marker_since() FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.runtime_capacity_marker_since() TO service_role;
 REVOKE ALL ON FUNCTION public.runtime_interrupt_capacity(uuid,uuid,bigint,text) FROM PUBLIC,anon,authenticated,service_role;
 GRANT EXECUTE ON FUNCTION public.runtime_interrupt_capacity(uuid,uuid,bigint,text) TO service_role;
 

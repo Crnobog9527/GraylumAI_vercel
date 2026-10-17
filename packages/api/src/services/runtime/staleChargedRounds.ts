@@ -16,6 +16,7 @@ import { logger } from '../../lib/logger';
  * Once the runtime-recovery job runs on a schedule, it applies the same rule and the same function
  * without a person (Owner 2026-10-12 supplement), so the two paths together refund a round once.
  * Content beyond capacity is user-side: the executor marks it (0282) and neither path refunds it.
+ * Rounds created before markers were reliable stay with the operator (the automatic close skips them).
  */
 export const STALE_ROUND_AGE_MS = 24 * 3600 * 1000;
 export const STALE_ROUND_REPORT_LIMIT = 100;
@@ -29,14 +30,14 @@ const report = z.object({
       unavailableReason: z.string().nullable(), calls: z.number().int().nonnegative(),
       outputTokens: z.number().int().nonnegative(), savedReplyChars: z.number().int().nonnegative(),
       lastActivityAt: z.string().nullable(), lastFinishReason: z.string().max(64).nullable() }).strict(),
-  }).strict()).max(STALE_ROUND_REPORT_LIMIT),
+  }).strict()).max(500),
 }).strict();
 export type StaleChargedRound = z.infer<typeof report>['rounds'][number] & { kind: 'stale_charged_round' };
 export type StaleChargedRoundReport = { success: boolean; findings: StaleChargedRound[]; total: number; truncated: boolean };
 const cutoff = (now: number) => new Date(now - STALE_ROUND_AGE_MS).toISOString();
 
-export async function findStaleChargedRounds(supabase: BillingRpc, now = Date.now()): Promise<StaleChargedRoundReport> {
-  const response = await supabase.rpc('runtime_stale_charged_rounds', { p_cutoff: cutoff(now), p_limit: STALE_ROUND_REPORT_LIMIT });
+export async function findStaleChargedRounds(supabase: BillingRpc, now = Date.now(), limit = STALE_ROUND_REPORT_LIMIT): Promise<StaleChargedRoundReport> {
+  const response = await supabase.rpc('runtime_stale_charged_rounds', { p_cutoff: cutoff(now), p_limit: limit });
   if (response.error) throw new Error('STALE_ROUND_SCAN_FAILED');
   const parsed = report.safeParse(response.data);
   if (!parsed.success) throw new Error('STALE_ROUND_SCAN_FAILED');
@@ -68,6 +69,8 @@ export async function compensateStaleRound(supabase: BillingRpc, runId: string, 
 
 export type StaleRoundAutoClose = {
   found: number; compensated: number; alreadyCompensated: number; skipped: number; failed: number; credits: number;
+  /** Rounds created before capacity markers were reliable (0282): ambiguous, left to an operator. */
+  manualReview: number;
   /** Reported rounds not attempted because the time budget ran out (including those past the report page). */
   deferred: number;
 };
@@ -75,16 +78,25 @@ export type StaleRoundAutoClose = {
 /** runtime-recovery: closes and refunds each reported round through the operator function. A round an
  * operator refunded meanwhile, or one a retry revived, is not a failure; an unknown result is, and is
  * retried on the next run (the function is idempotent). Rounds past the time budget wait for the next run and are
- * counted as `deferred`, which fails the job. */
+ * counted as `deferred`, which fails the job. Rounds created before the capacity marker was reliable are left to
+ * the operator (`manualReview`; the daily reconciliation keeps listing them). */
 export async function autoCompensateStaleRounds(supabase: BillingRpc,
   options: { now?: number; canStart?: () => boolean } = {}): Promise<StaleRoundAutoClose> {
   const now = options.now ?? Date.now();
-  const summary: StaleRoundAutoClose = { found: 0, compensated: 0, alreadyCompensated: 0, skipped: 0, failed: 0, credits: 0, deferred: 0 };
-  let report: StaleChargedRoundReport;
-  try { report = await findStaleChargedRounds(supabase, now); } catch { summary.failed++; return summary; }
+  const summary: StaleRoundAutoClose = { found: 0, compensated: 0, alreadyCompensated: 0, skipped: 0, failed: 0, credits: 0, manualReview: 0, deferred: 0 };
+  let report: StaleChargedRoundReport, markerSince: number | null;
+  try {
+    report = await findStaleChargedRounds(supabase, now, 500);
+    const marker = await supabase.rpc('runtime_capacity_marker_since', {});
+    if (marker.error) throw new Error('STALE_ROUND_MARKER_UNREADABLE');
+    markerSince = typeof marker.data === 'string' && Number.isFinite(Date.parse(marker.data)) ? Date.parse(marker.data) : null;
+  } catch { summary.failed++; return summary; }
   summary.found = report.total;
+  // A round from before markers existed may be a capacity failure with no trace: never refund it unseen.
+  const eligible = report.findings.filter(round => markerSince !== null && Date.parse(round.since) >= markerSince);
+  summary.manualReview = report.findings.length - eligible.length;
   let attempted = 0;
-  for (const round of report.findings) {
+  for (const round of eligible) {
     if (options.canStart && !options.canStart()) break;
     attempted++;
     try {
@@ -100,6 +112,6 @@ export async function autoCompensateStaleRounds(supabase: BillingRpc,
     }
   }
   // Known refunds left undone must not look like success: the job alerts until a run finishes them.
-  summary.deferred = Math.max(0, report.total - attempted);
+  summary.deferred = Math.max(0, report.total - summary.manualReview - attempted);
   return summary;
 }
