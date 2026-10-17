@@ -1,6 +1,6 @@
 # REL-1 上线手册和上线前清单（目标 2026-10-31）
 
-> 2026-10-17 整理，依据 staging `9f1bd6f7` 和当天 GitHub 上的 PR 状态。
+> 2026-10-17 整理，依据 staging `9f1bd6f7` 和当天 GitHub 上的 PR 状态；同日按 Owner 三项决定（第 6 节）改写。
 > **这份文件不授权任何操作。** 合并到 `main`、读写正式库、改正式平台设置、新增或更换密钥、真钱操作，
 > 都要按 [AGENTS.md](../../../AGENTS.md) 第 1 节在动手前由 Owner 在当前对话里明确同意；同意只对当时说清楚的那一个版本有效。
 
@@ -51,11 +51,11 @@ V3-M3 → REL-1 的依赖是"以上全部"（Master Plan 第 7.1 节第 2375 行
   staging 的 `apps/web/src/app/` 下目前还没有 `/app` 前缀的目录，归 PUBLIC-SITE，**还没开 PR**。
 - **vercel.json 定时任务改频率**：见清单 A2，**还没开 PR**。
 
-### 1.2 staging 迁移队列 0271–0283（必须在冻结前按编号顺序合并并应用）
+### 1.2 staging 迁移队列 0271–0288（Owner 2026-10-17 已一次批准，冻结前按编号顺序合并并应用）
 
 | 编号 | PR | 任务 |
 | --- | --- | --- |
-| 0271 | #1030 | LEGACY-CLOSE PR-C 删除 3 张旧对话表 |
+| 0271 | #1030（已合并） | LEGACY-CLOSE PR-C 删除 3 张旧对话表 |
 | 0272 | #1032 | PUBLISH-MONITOR PR-3a 每日刷新和快照 |
 | 0273 | #1027 | SKILL-I18N-HOOK |
 | 0274 | #1033 | PUBLISH-MONITOR PR-5 一键发布 |
@@ -68,18 +68,45 @@ V3-M3 → REL-1 的依赖是"以上全部"（Master Plan 第 7.1 节第 2375 行
 | 0281 | #1060 | EXPERT-CONSULT |
 | 0282 | #1061 | RUNTIME-FAILURE-RECONCILE |
 | 0283 | #1062 | RESEARCH-TOOLS 研究子调用余额不足暂停 |
+| 0284–0288 | 2026-10-17 还没开 PR | 已分配给在做的窗口，对应关系以总控账本为准（ADMIN-SECRETS 的 OR-2 见清单 B4） |
 
 编号以总控的账本为准；账本要求连续，前一个没合，后面的不能先应用。
-0283 之后还会有新迁移（至少 ADMIN-SECRETS 的 OR-2，见清单 B4），编号由总控再分配。
+Owner 2026-10-17 一次批准了 0271–0288 在 staging 的应用（总控转达），不再逐个请批；0288 之后的新迁移仍由总控分配编号。
+正式库不逐个应用这些迁移，而是在新项目里从空库一次建库（清单 B1）。
 
-### 1.3 范围和日期的冲突（已报总控转 Owner）
+### 1.3 范围和日期（Owner 2026-10-17 已定）
 
 剩 14 天，VOICE、UI-C 还没开工，FUSION-COMPARE 只有方案，PUBLISH-MONITOR 还有多个 PR。
-Master Plan 第 588 行写明"缩小上线范围须 Owner 另行决定"，AI 不能自己砍范围。选项见第 6 节第 1 项。
+Owner 2026-10-17 选 A（原话见第 6 节）：**日期不变，10-25 冻结**；冻结时还没验收的功能关掉开关，
+落地页和价格页隐藏对应说法；**10-24 由总控把缺口清单交 Owner 一次批**。哪些功能不上，以那份清单的批复为准，本文不预先认定。
 
 ## 2. 上线前清单
 
-每一项的"出处"都是仓库里的文件和行号（以 staging `9f1bd6f7` 为准）。
+每一项的"出处"都是仓库里的文件和行号，**行号以 staging `9f1bd6f7` 为准**（本 PR 在 Master Plan 第 2.1 节开头加了一条决定，合并后 Master Plan 的行号会往后移；
+查原文请看 `https://github.com/Crnobog9527/GraylumAI_vercel/blob/9f1bd6f7/docs/launch/MASTER_PLAN.md`）。只写"第 N 行"的指 Master Plan。
+
+### 2.0 新建正式 Supabase 项目要配置的全部项目（Owner 2026-10-17 选新建）
+
+新项目建好后，下面每一项都要配一遍。"Owner 操作"的项涉及付费、密钥或外部账号，AI 不经手；
+"总控（需批准）"的项由总控在 Owner 当次批准后执行，执行后读回核对。密钥一律不进仓库、PR 和聊天。
+
+| # | 配什么 | 谁做 | 怎么验证 | 出处 |
+| --- | --- | --- | --- | --- |
+| N1 | 新建 Supabase 项目：所在组织和套餐（备份窗口见 A7）、区域、**PostgreSQL 17**；数据库密码由 Owner 设置，放 `~/.graylum/secrets/`，不发在聊天里 | Owner 操作（付费）。区域选哪里：**待核实**（staging 的区域仓库里没写，建议和 staging 一致） | 项目设置页读回 PG 版本 17 | STAGING_REPRODUCIBILITY 第 228–229 行 |
+| N2 | 项目设置 `rls_auto_enable` / `ensure_rls` 事件触发器的取值和 staging 一致 | 总控（需批准）核对；需要改时 Owner 在后台点 | 读回设置 | STAGING_REPRODUCIBILITY 第 233–235 行 |
+| N3 | 扩展：确认平台自带 `supabase_vault`；确认项目允许迁移 0010 建 `pg_cron`、0148 再删掉 | 总控（需批准只读） | 扩展列表读回；不允许时停下请 Owner 定，不跳过迁移 | ADMIN-SECRETS 第 38 行；STAGING_REPRODUCIBILITY 第 243–246 行 |
+| N4 | 从空库建库（B1）并导入配置（B2）。存储桶（资料库私有桶、工单附件等）由 `0000` 基线和迁移建出来，不手动建 | 总控（需批准） | 指纹比对通过；B6 存储桶核对 | 第 2337 行（基线补存储桶）；STAGING_REPRODUCIBILITY 第 223–255 行 |
+| N5 | Auth 基本设置：Site URL `https://www.graylum.com`；允许的回跳地址（登录回调、`verify-email`、找回密码页，都在 www 下）；邮箱确认开启 | 总控（需批准）按 staging 的设置列出清单，Owner 在后台点或批准总控点 | 新邮箱注册、确认、找回密码都回到 www | 第 934 行；PRODUCTION_RELEASE 第二节 |
+| N6 | Google 登录：在 Google Cloud 的 OAuth 客户端里加上新项目的回调地址（`https://<新项目编号>.supabase.co/auth/v1/callback`），把客户端编号和密钥填进新项目 | Owner 操作（凭证） | 用 Google 账号真实登录一次，只发一次注册赠送 | **待核实**：OAuth 客户端设置仓库里没有记录；Google 登录相关的产品规则见第 1294 行 |
+| N7 | 邮件 SMTP：新项目里配 Resend SMTP（发件人 `no-reply@graylum.com`），SMTP 密码是 Resend 的密钥 | Owner 操作（凭证） | 注册确认邮件真实送达 | [v10.1](../Graylum_Master_Plan_v10.1.md) 第 305 行；第 604 行（N5 发件地址） |
+| N8 | 人机验证：新项目开启 hCaptcha（填 hCaptcha 的密钥）；Vercel 正式环境的 `NEXT_PUBLIC_HCAPTCHA_SITEKEY` 用同一个站点 | Owner 操作（凭证） | 登录、注册、注销弹窗都出现验证 | `.env.example`；DATA_ERASURE_RETENTION_CHECKLISTS 第 52 行 |
+| N9 | 邮件模板、密码强度等其余 Auth 设置和 staging 对齐 | 总控（需批准）列出差异，Owner 在后台点 | 逐项读回 | **待核实**：staging 现在的 Auth 设置仓库里没有完整记录 |
+| N10 | 把新项目的 `NEXT_PUBLIC_SUPABASE_URL`、`NEXT_PUBLIC_SUPABASE_ANON_KEY`、`SUPABASE_SERVICE_ROLE_KEY`、`DATABASE_URL` 填进 Vercel 正式项目 `graylum-ai-vercel-v1`；`EXPECTED_SUPABASE_PROJECT_REF` 改成新项目编号，`EXPECTED_APP_HOST` 改成 `www.graylum.com` | Owner 操作（新凭证） | 变量名存在（不读值）；部署后应用连的是新项目 | `.env.example` |
+| N11 | Vercel 正式环境其余变量：`NEXT_PUBLIC_APP_URL`、`NEXT_PUBLIC_AUTH_APP_URL`、`NEXT_PUBLIC_SITE_NAME`、`NEXT_PUBLIC_APP_NAME`、`NEXT_PUBLIC_SUPPORT_EMAIL`、`APP_ENV` / `NEXT_PUBLIC_APP_ENV`、`CRON_SECRET`、`OPENING_GRANT_HMAC_KEYS`、`API_SIGNATURE_SECRET` / `REQUIRE_API_SIGNATURE`、Sentry 几个变量、Upstash 两个（A5）、Stripe 三个和 `STRIPE_CARD_RECONCILIATION_MODE`（D7）、`SITE_INDEXING`（E3）、功能开关（F 组）。**不设**：`V3_RUNTIME_STAGING_ENABLED`、`WAFFO_TEST_*`、`LANDING_PREVIEW_FEATURES`、`E2E_*` | 新密钥类由 Owner 操作；非密钥的值由总控（需批准）设置 | 变量名清单读回，和本行对照 | `.env.example`；`apps/web/src/lib/landing/landing-flags.ts` 第 12–13 行；RELEASE_PREP_CHECKLIST 第 55 行 |
+| N12 | Vault：确认装好并应用了 0259（B3）；6 把业务密钥和 Resend 由 Owner 在新站后台填（C1、C3） | Owner 操作；总控只读核对 | 后台槽位都显示"后台已填写" | ADMIN-SECRETS 第 8 节 |
+| N13 | 各平台回调地址改到新环境：Stripe 回调（D4）、Post for Me Webhook（C8）都指向 `https://www.graylum.com/api/...` | Owner 操作 | 平台后台投递成功 | MIGRATION-PLAN 第五节第 4 项；ADMIN-SECRETS 第 8 节第 2 项 |
+| N14 | 管理员账号：在新项目里注册 Owner 的管理员账号并授予管理员角色（staging 的测试账号不复制） | Owner 注册；授权由总控（需批准）执行 | 管理员能进后台，普通账号被拒 | 第 9.3 节第 2677 行（不复制测试账号） |
+| N15 | 备份：确认每日备份和 PITR 的保留期（A7），必要时开 PITR | Owner 操作（付费） | 后台读回 | DATA_ERASURE_BACKUP_RESTORE_REPLAY 第 34–36 行 |
 
 ### A. 平台和基础设施
 
@@ -92,16 +119,16 @@ Master Plan 第 588 行写明"缩小上线范围须 Owner 另行决定"，AI 不
 | A4 | 处理 `main` 的 Next 安全漏洞 | `main` 停在 2026-08 的依赖，必需检查 Dependency Audit 失败；正式站公开可达 | 总控（需批准合并 `main`） | 冻结版本 | staging → `main` 的合并 PR 上 Dependency Audit 和全部必需检查通过，不新增豁免 | 第 2628 行；RUNTIME_PROD_PLAN 第 7.3 节第 1 步 |
 | A5 | 正式环境 Upstash Redis（`UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`） | 限流是 fail-closed：没配好，所有新消息都会被拒；删除清单也存在这里 | Owner 操作（新增凭证） | — | Vercel 正式环境变量名存在（不读值）；限流冒烟通过；命令额度够用 | 第 1249–1251 行、第 7.6 节第 2490 行；[RATE_LIMIT_WIRING_PLAN](../RATE_LIMIT_WIRING_PLAN.md) 第 276–282 行；[DATA_ERASURE_BACKUP_RESTORE_REPLAY](../../runbooks/DATA_ERASURE_BACKUP_RESTORE_REPLAY.md) 第 12–14 行 |
 | A6 | 限流初始值和一键暂停：消息 10/分钟、200/天，调用 30/分钟、600/天；`stopNewCalls` 先设为开（停止新调用） | 第 30 项已定；上线当天先关住新调用，冒烟后再开 | 总控（需批准） | A5、B1 | 读回 `system_settings.runtime_rate_limits` | 第 1251 行；RUNTIME_PROD_PLAN 第 5.1 节、第 8 节"限流与开关"行 |
-| A7 | 核对正式 Supabase 的套餐、每日备份和 PITR 保留期 | 删除清单在 Redis 里保留 35 天；备份保留期超过 30 天时要先把 35 天调大，否则恢复备份会让已删内容复活 | 总控（需批准只读） | B1 | 套餐和备份窗口记录在 PR 交接里 | DATA_ERASURE_BACKUP_RESTORE_REPLAY 第 34–36 行 |
-| A8 | 用虚构账号演练一次"恢复备份 → 重放删除 → 开放" | 这套流程还没真实演练过 | 执行窗口 + 总控（在哪个环境演练待定，见第 6 节第 5 项） | A7 | 演练记录：重放后已删内容不再出现 | DATA_ERASURE_BACKUP_RESTORE_REPLAY 第 3–4 行 |
+| A7 | 核对新正式 Supabase 项目的套餐、每日备份和 PITR 保留期 | 删除清单在 Redis 里保留 35 天；备份保留期超过 30 天时要先把 35 天调大，否则恢复备份会让已删内容复活 | 总控（需批准只读） | B1 | 套餐和备份窗口记录在 PR 交接里 | DATA_ERASURE_BACKUP_RESTORE_REPLAY 第 34–36 行 |
+| A8 | 用虚构账号演练一次"恢复备份 → 重放删除 → 开放" | 这套流程还没真实演练过 | 执行窗口 + 总控（建议在新正式项目上线前用虚构账号演练，见第 6 节第 4 项） | A7 | 演练记录：重放后已删内容不再出现 | DATA_ERASURE_BACKUP_RESTORE_REPLAY 第 3–4 行 |
 | A9 | Sentry 正式项目、告警通知渠道；diagnostics 定时任务 | 上线后要能第一时间看到错误和余额告警 | 总控（需批准） | — | 发一次合成告警能收到；告警里没有用户内容 | RUNTIME_PROD_PLAN 第 8 节"监控告警"行；RELEASE_PREP_CHECKLIST 第 53、136 行 |
 
 ### B. 正式数据库
 
 | # | 做什么 | 为什么 | 谁做 | 依赖 | 怎么验证 | 出处 |
 | --- | --- | --- | --- | --- | --- | --- |
-| B0 | 确认正式库没有真实用户数据 | 整个发布按"新建环境"做；一旦发现真实用户数据，这个前提失效，停下请 Owner 重新决定 | 总控（需批准只读） | — | 只读查 `auth.users` 和 `profiles` 行数 | 第 9.3 节第 2676 行；第 1156 行 |
-| B1 | 正式库从空库建库：平台前置 → `packages/db/baseline` → 全部迁移（同名 bridge 紧挨在迁移前）；用 PostgreSQL 17；**每个文件整段交给服务端执行，不用 `psql -f`**；先确认目标项目允许 0010 建 `pg_cron`、0148 再删掉 | DB-BASELINE 方案 B（Owner 2026-09-29）：结构只由迁移文件决定 | 总控（需批准；建在哪个项目见第 6 节第 2 项） | 0271–0283 及之后所有迁移已合并；DB-BASELINE 剩余部分（**待核实**是否还有未完成项） | 建完后只读抓指纹，用 `--local-only --staging <快照>` 和 `built-fingerprint`、`expected-differences.json` 比对，没有解释不了的差异 | [STAGING_REPRODUCIBILITY](../../runbooks/STAGING_REPRODUCIBILITY.md) 第 223–255 行；第 9.3 节第 2677 行；第 1185 行 |
+| B0 | 旧正式项目 `fhmshnqjjnnlvplojktv` 不动：不清空、不删除、不迁数据；上线稳定后是否暂停或删除，另请 Owner 决定 | Owner 2026-10-17 选新建项目；正式环境没有真实用户，旧库里没有要迁移的数据 | — | — | 新正式环境的 Vercel 变量里不再出现旧项目的地址和项目编号 | 第 6 节第 2 项；第 9.3 节第 2676 行；第 1156 行 |
+| B1 | 正式库从空库建库：平台前置 → `packages/db/baseline` → 全部迁移（同名 bridge 紧挨在迁移前）；用 PostgreSQL 17；**每个文件整段交给服务端执行，不用 `psql -f`**；先确认目标项目允许 0010 建 `pg_cron`、0148 再删掉 | DB-BASELINE 方案 B（Owner 2026-09-29）：结构只由迁移文件决定 | 总控（需批准），建在第 2.0 节的新正式项目里 | 0271–0283 及之后所有迁移已合并；DB-BASELINE 剩余部分（**待核实**是否还有未完成项） | 建完后只读抓指纹，用 `--local-only --staging <快照>` 和 `built-fingerprint`、`expected-differences.json` 比对，没有解释不了的差异 | [STAGING_REPRODUCIBILITY](../../runbooks/STAGING_REPRODUCIBILITY.md) 第 223–255 行；第 9.3 节第 2677 行；第 1185 行 |
 | B1a | 确认 Supabase 项目设置 `rls_auto_enable` / `ensure_rls` 事件触发器的取值 | 这两项属于项目设置，不在仓库迁移里，不能从本机重放成功推断 | 总控（需批准只读） | B1 | 读回项目设置 | STAGING_REPRODUCIBILITY 第 233–235 行 |
 | B2 | 导入配置类数据：套餐（Pro $29 / 3,480、Gold $69 / 8,970，年付 $279 / $621，免费套餐每月 0、每年 0）、积分包和会员折扣、q=100、m=6、模型和线路、`runtime_purpose_budgets`、已发布的 Skill 和模块配置；不复制 staging 的测试账号、对话、订单、流水、沙盒编号和测试窗口 | 正式库只要结构和配置；价格写入要另批 | 总控（需批准每一组数值） | B1 | 逐项读回；模型行导入后在后台点"读取价格"，不从 staging 复制价格 | 第 9.3 节第 2677 行；第 289、1450、2720 行；[MODEL_PRICING_SYNC_PLAN](../MODEL_PRICING_SYNC_PLAN.md) 第 394 行；[AGENT_CORE_R15](../implementation/AGENT_CORE_R15.md) 第 24–27 行 |
 | B3 | 只读核对正式库已装 Supabase Vault，且已应用 0259 | 后台第三方密钥存在 Vault；没装时函数直接报错，不会退成明文 | 总控（需批准只读） | B1 | `supabase_vault` 扩展存在；0259 在账本里 | [ADMIN-SECRETS](ADMIN-SECRETS.md) 第 8 节第 1 项；第 2375 行 |
@@ -116,7 +143,7 @@ Master Plan 第 588 行写明"缩小上线范围须 Owner 另行决定"，AI 不
 | C1 | 在正式站后台"第三方密钥"页填 6 个槽位：OpenRouter、Post for Me API 密钥、Post for Me Webhook 共享密钥、TikHub、Parallel、Firecrawl | 业务密钥只放后台，AI 不经手 | Owner 操作 | B3；ADMIN-SECRETS 的 PFM、RT、OR-1 接线都已合并（#1041 在途） | 6 个槽位都显示"后台已填写"（只看状态和末 4 位）；Owner 对照 Post for Me 那边的 Webhook 共享密钥末 4 位一致 | ADMIN-SECRETS 第 8 节第 2 项；第 182、2375 行 |
 | C2 | 结束过渡期：Vercel 正式环境里删除 6 个旧环境变量（5 个后备变量和残留的 `OPENROUTER_API_KEY`） | 只留一个来源，避免读错 | Owner 操作 | T-END PR 合并；C1 | 删除后发布、Webhook、三家搜索和模型调用都正常 | ADMIN-SECRETS 第 8 节第 4 项、第 10 节 T-END |
 | C3 | Resend：正式发信域名的 DNS（SPF/DKIM）、生成密钥填进后台 `resend` 槽位、确认发件人 `Graylum AI <no-reply@graylum.com>` | 续费提醒、到期提醒等付款邮件要能发出去 | Owner 操作（新增凭证） | PAY-NOTIFY PR-N1（#1031，已合并） | 后台槽位显示已填写；正式冒烟发一封到测试邮箱 | [PAY-NOTIFY](PAY-NOTIFY.md) 第 47–55 行；第 604 行（N5 上线前确认地址） |
-| C3a | 正式 Supabase 的 Auth 邮件 SMTP、Google 登录、hCaptcha、Site URL 和回调地址 | 新建项目时这些都要重新配；不新建也要改到 `www.graylum.com/app` | Owner 操作（凭证）/ 总控核对 | B1、E1 | 用新邮箱真实走一次注册、确认邮件、Google 登录、找回密码 | 第 934 行；PRODUCTION_RELEASE 第二节；SMTP 用 Resend 的历史记录见 [v10.1](../Graylum_Master_Plan_v10.1.md) 第 305 行 |
+| C3a | 新正式项目的 Auth 设置（逐项见第 2.0 节 N5–N9） | 新项目里这些都是空的，要重新配 | Owner 操作（凭证）/ 总控核对 | N1、E1 | 用新邮箱真实走一次注册、确认邮件、Google 登录、找回密码 | 第 934 行；PRODUCTION_RELEASE 第二节；SMTP 用 Resend 的历史记录见 [v10.1](../Graylum_Master_Plan_v10.1.md) 第 305 行 |
 | C4 | OpenRouter 账号和各 workspace 的隐私设置里关闭"允许用于训练" | Owner 2026-10-12 选 A：账号层面关，代码不强制 | Owner 操作；总控上线前核对 | — | Owner 截图或口头确认，记在上线 PR | 第 719、2375 行 |
 | C5 | OpenRouter 正式运行凭据：专用一把、每日美元上限、不自动充值、首版禁用 BYOK | 平台没有固定的亏损上限，靠供应商侧硬上限兜底 | Owner 操作（金额由 Owner 定） | C1 | 凭据设置页读回；核对 BYOK 关闭 | RUNTIME_PROD_PLAN 第 5.1 节第 234–239 行、第 8 节 OpenRouter 行 |
 | C6 | Owner 向 Parallel 取得"Search API 零保留、不训练"的书面确认 | 第 2.1 节 RESEARCH-TOOLS 9.1 选 A；确认前隐私条款按"可能用于训练"写 | Owner 操作（对外发信） | — | 书面回复存档；隐私条款相应措辞 | 第 497、2375 行 |
@@ -176,7 +203,7 @@ Master Plan 第 588 行写明"缩小上线范围须 Owner 另行决定"，AI 不
 | --- | --- | --- | --- | --- | --- | --- |
 | G1 | 核对 DATA-ERASURE 上线前补齐的四项都已合并并在正式环境生效：日志表定期清理（#867，0226）、Upstash 限流统计清理（#866）、库外删除清单（#869，0227）、Sentry 上报前脱敏（#865、#888） | Owner 2026-10-12 同意上线前补 | 总控核对 | B1、A5 | 各 PR 已合并；正式冒烟后 Sentry 事件里没有正文 | 第 675 行；[DATA_ERASURE_RETENTION_CHECKLISTS](../../runbooks/DATA_ERASURE_RETENTION_CHECKLISTS.md) 第 72–78 行 |
 | G2 | 注销时 `user_activity_logs` 改为保留并去掉可识别内容 | 和账务记录同样处理 | 执行窗口（**待核实**是否已做） | — | 注销测试 | 第 682 行 |
-| G3 | MODERATION 正式实现时间 | 公开上线前请 Owner 决定 | Owner 决定 | — | 决定写进 Master Plan 第 2.1 节 | 第 1190、2414、2716 行 |
+| G3 | MODERATION 正式实现时间：**已定**，上线时继续暂缓，只保留默认放行的检查点，上线后再定 | Owner 2026-10-17 选 A | — | — | 已写进 Master Plan 第 2.1 节 | 第 6 节第 3 项；第 1190、2414、2716 行 |
 | G4 | 隐私条款写明：Parallel 训练措辞（C6 确认前）、Post for Me 公开链接短暂留存、统计工具和收集的数据、第三方保留例外 | 产品行为要和条款一致 | Owner 操作（条款文字不在 AI 范围） | C6、C10 | Owner 确认 | 第 497、670 行；PUBLISH-MONITOR 第 11 节第 9 项；ANALYTICS 第 8 节第 6 项 |
 
 ### H. 验收和冒烟
@@ -196,14 +223,15 @@ Master Plan 第 588 行写明"缩小上线范围须 Owner 另行决定"，AI 不
 
 | 日期 | 要完成的事 | 谁 |
 | --- | --- | --- |
-| **10-17（今天）起立刻开始** | 外部有等待时间的事：D1 Stripe MP 开通、D2–D6 Stripe 后台设置、A1 Vercel Pro、A5 正式 Upstash、C3 Resend 域名、C6 Parallel 书面确认、C8/C9 Post for Me 订阅和询问、C10 统计账号、D8 钱包税务核实、D10 条款正文、D11 客服邮箱；Owner 决定第 6 节第 1–3 项 | Owner |
-| 10-17 → 10-22 | 按编号合并 0271–0283（第 1.2 节），每个合并后应用 staging、重建指纹；同时推进 1.1 节剩余任务；开 A2（定时任务）和 OR-2、T-END 的 PR | 执行窗口；总控应用迁移 |
+| **10-17（今天）起立刻开始** | 外部有等待时间的事：D1 Stripe MP 开通、D2–D6 Stripe 后台设置、A1 Vercel Pro、A5 正式 Upstash、C3 Resend 域名、C6 Parallel 书面确认、C8/C9 Post for Me 订阅和询问、C10 统计账号、D8 钱包税务核实、D10 条款正文、D11 客服邮箱；**N1 新建正式 Supabase 项目**（越早越好，N2–N15 的配置都依赖它） | Owner |
+| 10-17 → 10-22 | 按编号合并 0271–0288（第 1.2 节，Owner 已一次批准），每个合并后应用 staging、重建指纹；同时推进 1.1 节剩余任务；开 A2（定时任务）和 OR-2、T-END 的 PR | 执行窗口；总控应用迁移 |
+| 10-20 → 10-24 | 新正式项目的不依赖冻结版本的设置：N2、N3 核对，N5–N9 Auth 设置，N15 备份；总控整理 staging 的 Auth 设置清单（N9）给 Owner 对照 | Owner 操作；总控（需批准） |
 | 10-22 → 10-24 | E1 `/app` 单主机搬迁的代码（冻结窗口最后做；正式环境切换时按 E2 → E1 的顺序：先撤 307、实测，再放 308）；F8 落地页开关 PR；10-24 总控把"冻结时还没验收的功能"缺口清单交 Owner 一次批 | 执行窗口；总控；Owner |
 | **10-25 冻结** | staging 冻结一个版本：之后只修上线阻塞问题（登录、对话、付款、回调、监控），不加功能 | 总控 |
 | 10-25 → 10-27 | H2 staging 全量回归：自动化全部跑一遍；Codex 浏览器验收按清单一次一个；修复只走阻塞问题 | 执行窗口；Codex |
 | 10-27 | 准备批准包（RUNTIME_PROD_PLAN 第 7.3 节第 2 步）：正式项目、版本、迁移、配置值、各家上限金额、冒烟预算 | 总控 |
-| 10-28 | 正式只读核验（第 4 节第 3 步）：B0、A7、站点暂停状态、Vault、平台设置 | 总控（需批准只读） |
-| 10-29 | 维护态准备（第 4 节第 4 步）：B1 建库、B2 配置、A6 停止新调用、C1 填密钥、C3a Auth 设置、A2 定时任务；A4 staging → `main` 合并并部署（站点仍暂停） | 总控（需批准）；Owner 操作 |
+| 10-28 | 正式只读核验（第 4 节第 3 步）：新项目的 N1–N3、A7、Vault；旧 Vercel 项目的暂停状态和绑定 | 总控（需批准只读） |
+| 10-29 | 维护态准备（第 4 节第 4 步）：在新项目里 B1 建库、B2 配置、A6 停止新调用；N10–N11 把 Vercel 正式变量换成新项目（**必须在合并 `main` 之前**，否则部署出来连的是旧库）；N14 管理员账号；之后 A4 staging → `main` 合并并部署（站点仍暂停），再由 Owner 在新站后台填密钥（C1、C3、N12） | 总控（需批准）；Owner 操作 |
 | 10-30 | 恢复站点但新调用仍关（第 5 步）；H4 正式小额冒烟和 D9 真钱付款退款；同日对账 | 总控（需批准）；Owner |
 | **10-31** | 对账无误后公开开放（第 7 步）：关掉 `stopNewCalls`、打开银行卡下单（D7）、E3 `SITE_INDEXING=public`；上线后观察成本、错误和未结算项 | 总控（需批准）；Owner |
 
@@ -242,14 +270,19 @@ Master Plan 第 588 行写明"缩小上线范围须 Owner 另行决定"，AI 不
 - 我来注册 Resend、给 graylum.com 加发信 DNS 记录，并把正式密钥填进后台的 Resend 槽位。
 - 我来给 TikHub、Parallel、Firecrawl 各自设好硬上限：TikHub `<金额>`、Parallel `<金额>`、Firecrawl `<金额>`。
 - 我来准备服务条款、隐私政策、退款政策和可接受使用政策的正文，以及客服邮箱。
+- 我来新建 Supabase 正式项目（PostgreSQL 17，区域 `<区域>`），数据库密码存进 `~/.graylum/secrets/`。
+- 我来在新正式项目里配好 Google 登录（Google Cloud 加新回调地址）、Resend SMTP 和 hCaptcha。
+- 我来把新正式项目的 Supabase 地址和密钥填进 Vercel 正式项目，并把 `EXPECTED_SUPABASE_PROJECT_REF` 改成新项目编号。
 
 **上线前要批准的事**
 - 同意 REL-1 冻结版本 `<版本>`，从 10-25 起只修上线阻塞问题。
-- 同意总控只读核验正式环境：Vercel 项目 `graylum-ai-vercel-v1` 的暂停状态和绑定、Supabase 正式项目 `<项目>` 的结构、扩展和备份设置，以及用户表行数；不读用户内容、不输出密钥。
-- 同意总控在正式项目 `<项目>` 按迁移文件从空库建库，并导入已核对的配置（套餐、积分包、q=100、m=6、模型和线路、免费套餐每月 0 积分）。
+- 同意总控只读核验正式环境：Vercel 项目 `graylum-ai-vercel-v1` 的暂停状态和绑定、新 Supabase 正式项目 `<项目编号>` 的版本、扩展、项目设置和备份设置；不输出密钥。
+- 同意总控按 staging 的设置清单，在新正式项目里设置 Site URL 和回跳地址（`https://www.graylum.com`）以及其余 Auth 设置。
+- 同意总控在新正式项目 `<项目编号>` 按迁移文件从空库建库，并导入已核对的配置（套餐、积分包、q=100、m=6、模型和线路、免费套餐每月 0 积分）。
 - 同意正式环境打开资料库 @ 引用（`NEXT_PUBLIC_COMPOSER_REFERENCES`、`library_agent_read_enabled`）和资料库上传。
 - 同意正式环境的 OpenRouter 每日上限设为 `<金额>` 美元、禁用 BYOK、不自动充值。
 - 同意正式环境限流初始值：新消息每分钟 10 次、每天 200 次，模型调用每分钟 30 次、每天 600 次，上线时先停止新调用。
+- 同意总控设置 Vercel 正式环境的非密钥变量（`<变量清单>`），并在新正式项目里给 `<管理员邮箱>` 授予管理员角色。
 - 同意把 staging `<版本>` 合并到 `main` 并部署正式环境，部署时站点保持暂停、新调用保持关闭。
 
 **上线当天要批准的事**
@@ -261,15 +294,17 @@ Master Plan 第 588 行写明"缩小上线范围须 Owner 另行决定"，AI 不
 - 我来在正式站后台填好 6 把第三方密钥，并对照 Post for Me Webhook 共享密钥的末 4 位。
 - 我来删除 Vercel 正式环境里 6 个过渡期旧变量和不再需要的 E2E 测试凭证。
 
-## 6. 需要 Owner 决定的问题（2026-10-17 已发总控）
+## 6. Owner 决定（1–3 项 2026-10-17 已定）
 
 | # | 问题 | 选项 | 推荐 | 可复制 |
 | --- | --- | --- | --- | --- |
-| 1 | 10-31 和上线范围冲突（第 1.3 节） | A：日期不变，10-25 冻结，没验收的功能关开关、对外说法隐藏，10-24 总控把缺口清单交 Owner 一次批；B：范围不变，日期按完成情况往后推 | A | 同意 REL-1 选 A：10-31 按时上线，10-25 冻结，没验收的功能关开关、对外说法隐藏，10-24 由总控把缺口清单给我一次批。 |
-| 2 | 正式库建在哪 | A：新建一个 Supabase 正式项目从空库建库，Auth 设置和 Supabase 密钥重新配；B：清空现有正式项目后重建（对正式库做破坏性操作，旧对象要逐项清理） | A | 同意正式库选 A：新建 Supabase 正式项目，从空库按迁移建库。 |
-| 3 | MODERATION 正式实现时间 | A：上线时继续暂缓，只保留默认放行的检查点；B：上线前接 OpenAI Moderation（新增密钥和开发量） | A | 同意 MODERATION 上线时继续暂缓，上线后再定。 |
-| 4 | Firecrawl 零保留是否开通（C12） | 由 Owner 看 Firecrawl 套餐后定 | — | — |
-| 5 | 备份恢复演练在哪做（A8）：staging 没有每日备份和 PITR | A：在新建的正式项目上线前用虚构账号演练；B：上线后再演练 | A（上线前正式库里只有虚构数据） | 同意上线前在正式项目用虚构账号演练一次备份恢复和删除重放。 |
+| 1 | 10-31 和上线范围冲突（第 1.3 节） | A：日期不变，10-25 冻结；B：范围不变，日期往后推 | **已定 A** | Owner 原话（2026-10-17，总控-8 对话）：「同意 REL-1 选 A：10-31 按时上线，10-25 冻结，没验收的功能关开关、对外说法隐藏，10-24 由总控把缺口清单给我一次批。」 |
+| 2 | 正式库建在哪 | A：新建 Supabase 正式项目；B：清空现有正式项目后重建 | **已定 A** | Owner 原话（同上）：「同意正式库选 A：新建 Supabase 正式项目，从空库按迁移建库。」 |
+| 3 | MODERATION 正式实现时间 | A：上线时继续暂缓；B：上线前接 OpenAI Moderation | **已定 A** | Owner 原话（同上）：「同意 MODERATION 上线时继续暂缓，上线后再定。」 |
+| 4 | 备份恢复演练在哪做（A8）：staging 没有每日备份和 PITR | A：在新正式项目上线前用虚构账号演练；B：上线后再演练 | A（上线前新项目里只有虚构数据） | 同意上线前在新正式项目用虚构账号演练一次备份恢复和删除重放。 |
+| 5 | Firecrawl 零保留是否开通（C12） | 由 Owner 看 Firecrawl 套餐后定 | — | — |
+
+1–3 项已写进 Master Plan 第 2.1 节（2026-10-17 条目），同日 Owner 还一次批准了 staging 迁移 0271–0288（总控转达）。
 
 ## 7. 待核实汇总
 
@@ -282,8 +317,13 @@ Master Plan 第 588 行写明"缩小上线范围须 Owner 另行决定"，AI 不
 - F3：`library_recognition_enabled` 是否也要打开。
 - G2：`user_activity_logs` 注销保留改造是否已完成。
 - 第 1.1 节"实施中、没有在途 PR"的 24 个任务，哪些其实已完成。
+- N1：新正式项目选哪个区域（staging 的区域仓库里没写）。
+- N6：Google 登录 OAuth 客户端的现有设置仓库里没有记录。
+- N9：staging 现在的 Auth 设置没有完整记录，需要总控只读整理一份。
+- 0284–0288 各对应哪个 PR（2026-10-17 还没开）。
 
 ## 交接
 
 - 做完了：本文初稿（只写文档，没有执行任何正式环境操作）。
-- 下一步：Owner 回复第 6 节第 1–3 项后，按选择更新第 3 节时间表；冻结前由总控补齐第 7 节待核实项。
+- 2026-10-17 已按 Owner 三项决定改写：范围按冻结日处理、正式库改为新建项目（第 2.0 节）、MODERATION 暂缓；迁移队列改为 0271–0288。
+- 下一步：10-24 总控出缺口清单；冻结前由总控补齐第 7 节待核实项。
