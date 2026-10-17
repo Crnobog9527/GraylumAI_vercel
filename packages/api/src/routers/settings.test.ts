@@ -105,11 +105,22 @@ function createPublicCatalogCaller(table: string, result: Promise<unknown>, sele
       if (actualTable === 'system_settings') return { select() { return this; }, eq() { return this; },
         maybeSingle: async () => ({ data: selection === null ? null : { value: selection }, error: null }) };
       expect(actualTable).toBe('payment_provider_refs');
-      return createQueryBuilder(result.then(value => ({ data: ((value as { data?: Array<Record<string, unknown>> }).data ?? []).flatMap(row =>
-        table === 'credit_packages'
+      // The member-tier pack read (card checkout) filters on package_tier with in(); the legacy read with eq().
+      let memberTiers = false;
+      const rows = () => result.then(value => ({ data: ((value as { data?: Array<Record<string, unknown>> }).data ?? []).flatMap(row =>
+        table === 'credit_packages' && memberTiers
+          ? Object.entries((row.member_prices ?? {}) as Record<string, unknown>).flatMap(([tier, ids]) => (Array.isArray(ids) ? ids : [ids])
+            .map(id => ({ credit_package_id: row.id, package_tier: tier, external_id: id })))
+          : table === 'credit_packages'
           ? (row.stripe_price_id ? [{ credit_package_id: row.id, billing_cycle: 'one_time', external_id: row.stripe_price_id }] : [])
           : ['monthly', 'yearly'].flatMap(cycle => row[`stripe_${cycle}_price_id`]
-            ? [{ membership_plan_id: row.id, billing_cycle: cycle, external_id: row[`stripe_${cycle}_price_id`] }] : [])), error: null })));
+            ? [{ membership_plan_id: row.id, billing_cycle: cycle, external_id: row[`stripe_${cycle}_price_id`] }] : [])), error: null }));
+      const builder = {
+        select: () => builder, eq: () => builder,
+        in: (column: string) => { if (column === 'package_tier') memberTiers = true; return builder; },
+        then: (resolve: (value: unknown) => unknown, reject?: (error: unknown) => unknown) => rows().then(resolve, reject),
+      };
+      return builder;
     } },
     hasSupabaseAdminPrivileges: privileged !== false,
   } as any);
@@ -512,7 +523,30 @@ describe('public catalog availability', () => {
       is_popular: true,
       paymentChannel: 'stripe',
       checkout_ready: true,
+      member_checkout_ready: { pro: false, gold: false },
     }]);
+  });
+
+  it('reports the Pro/Gold pack prices card checkout charges, apart from the legacy channel and generic price', async () => {
+    // Staging after 0211: only tier prices exist, and the legacy channel selection does not matter to card checkout.
+    const pack = { ...validCreditPackage, price: 990, credits_amount: 990, bonus_credits: 0, stripe_price_id: null,
+      member_prices: { pro: 'price_pro', gold: 'price_gold' } };
+    const packages = await createPublicCatalogCaller('credit_packages', Promise.resolve({ data: [pack], error: null }),
+      { channel: 'waffo', version: 2 }).getCreditPackages();
+    expect(packages[0]).toMatchObject({ checkout_ready: false, member_checkout_ready: { pro: true, gold: true } });
+    // A missing tier, or two current prices for one tier (0222 refuses those), is not chargeable.
+    const partial = await createPublicCatalogCaller('credit_packages', Promise.resolve({ data: [{ ...pack,
+      member_prices: { gold: ['price_a', 'price_b'] } }], error: null })).getCreditPackages();
+    expect(partial[0]).toMatchObject({ member_checkout_ready: { pro: false, gold: false } });
+    const free = await createPublicCatalogCaller('credit_packages', Promise.resolve({ data: [{ ...pack, price: 0 }],
+      error: null })).getCreditPackages();
+    expect(free[0]).toMatchObject({ member_checkout_ready: { pro: false, gold: false } });
+    // 0222 sells only its three catalog tuples (PAY_WAFFO_CATALOG_NOT_READY otherwise): an edited pack is not for sale.
+    for (const edited of [{ credits_amount: 1000 }, { bonus_credits: 10 }, { price: 1990, credits_amount: 1990 }]) {
+      const rows = await createPublicCatalogCaller('credit_packages', Promise.resolve({ data: [{ ...pack, ...edited }],
+        error: null })).getCreditPackages();
+      expect(rows[0]).toMatchObject({ member_checkout_ready: { pro: false, gold: false } });
+    }
   });
 
   it('returns [] only for a successful empty active credit package catalog', async () => {

@@ -19,6 +19,7 @@
  * report it to the controller first.
  */
 import { z } from "zod";
+import type { ResearchTurnEvent } from "./researchTurn";
 
 // ---------------------------------------------------------------------------
 // Question card
@@ -171,6 +172,8 @@ export type AgentTurnEvent =
   | { type: "text"; text: string }
   | { type: "textDelta"; text: string; offset: number; rev: number; source?: "assistant" | "message" | "final"; call?: number }
   | { type: "card"; card: QuestionCard }
+  // RT-3b PR-3: each research call (running, then its end state) and each selection card, in order (RT-5 renders them).
+  | ResearchTurnEvent
   | { type: "result"; result: AgentTurnOutcome };
 
 // ---------------------------------------------------------------------------

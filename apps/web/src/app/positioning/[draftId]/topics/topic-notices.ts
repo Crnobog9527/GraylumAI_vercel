@@ -1,9 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { CHAT_ACTION, type ChatNotice } from '@/components/chat/ChatInlineNotice';
 import { PROVIDER_REJECTED_NOTICE, gateAdmissionNotice, gateResultNotice } from '@/lib/runtime-gate-notice';
-import { USER_STOP_NOTICE, inFlight, stopRecovery, stoppedByUser, type StopSignals } from '@/app/runtime/runtime-notices';
-import { definiteRefusal, definiteRefusalNotice } from '@/app/runtime/gate-notices';
-import { hostNotice, isOrganizerPendingError, isPaygWaiting } from '@/lib/payg-wait';
+import { ENDED_NOTICE, USER_STOP_NOTICE, inFlight, stopRecovery, stoppedByUser, type StopSignals } from '@/app/runtime/runtime-notices';
+import { definiteRefusal, definiteRefusalNotice, showsReply } from '@/app/runtime/gate-notices';
+import { hostNotice, isOrganizerPendingError, isPaygWaiting, organizerSkipped, type PaygViewFields } from '@/lib/payg-wait';
 
 /** This tab's sessionStorage, where the page remembers the stops its user asked for (display only). */
 export function tabSession() {
@@ -53,6 +53,11 @@ export function topicExecutionNotice(result: unknown): string | null {
   return hostNotice(result) ?? topicGateNotice(result);
 }
 
+/** True while the page still shows the notice this turn's execute result gave (topicTurnOutcome). Display only. */
+export function topicExplained(explained: { id: string; text: string } | null, executionId: string, error: string) {
+  return Boolean(explained && explained.id === executionId && explained.text === error);
+}
+
 /** A finished topic turn: its notice, and whether the typed input stays (only after a gate stop; a notice is display only). */
 export function topicTurnOutcome(result: unknown) {
   return { notice: topicExecutionNotice(result), keepInput: Boolean(topicGateNotice(result)) };
@@ -75,14 +80,19 @@ export function topicTurnShows(last: { state: string; unavailableReason?: string
  * up it still reads as running, never as 回复尚未完成. A BILL-PAYG pause has its own notice (payg-wait.ts).
  * A turn the user stopped (`userStopped` is this tab's record; stoppedByUser also reads the view) says
  * 已停止 from the click on, whether it ends cancelled or completed, and is never 回复尚未完成.
+ * Any other cancelled turn the server ended says so (ENDED_NOTICE), like free conversation, unless only its organizer was skipped.
  */
-export function topicOpenTurnNotice(e: { executionId: string; state: string; unavailableReason?: string | null } & StopSignals, ctx: {
-  busy: boolean; finished: string | null; stopping: boolean; userStopped?: boolean; onRetry: () => void; onStop: () => void;
+export function topicOpenTurnNotice(e: { executionId: string; state: string; unavailableReason?: string | null } & StopSignals & PaygViewFields, ctx: {
+  busy: boolean; finished: string | null; stopping: boolean; userStopped?: boolean; explained?: boolean; onRetry: () => void; onStop: () => void;
 }): ChatNotice | null {
   if (topicRejectedTurn(e)) return { id: e.executionId, tone: 'warning', text: PROVIDER_REJECTED_NOTICE };
   const stopped = stoppedByUser(e, ctx.userStopped);
   const userStop: ChatNotice = { id: e.executionId, tone: 'status', text: USER_STOP_NOTICE };
-  if (e.state === 'completed' || e.state === 'cancelled') return stopped ? userStop : null;
+  // A saved reply whose organizer was skipped keeps only its own notice (payg-wait.ts), like runtimeTurnNotices;
+  // a reason this tab already shows (`explained`, topicExplained) is not repeated as 已结束.
+  if (e.state === 'cancelled')
+    return stopped ? userStop : organizerSkipped(e) || ctx.explained ? null : { id: e.executionId, tone: 'warning', text: ENDED_NOTICE };
+  if (e.state === 'completed') return stopped ? userStop : null;
   if (isPaygWaiting(e.state)) return null;
   // Still being saved: no 重试 or 停止; a server-confirmed `interrupted` save offers 重试 (stopRecovery).
   if (stopped && e.state !== 'cost_pending')
@@ -95,4 +105,20 @@ export function topicOpenTurnNotice(e: { executionId: string; state: string; una
       : running ? '正在回复…' : '回复尚未完成，原请求已保留。',
     actions: [{ label: CHAT_ACTION.retry, disabled: ctx.busy || settling, onClick: ctx.onRetry },
       { label: CHAT_ACTION.stop, disabled: ctx.stopping, onClick: ctx.onStop }] };
+}
+
+/** The user-facing text of a reply without the machine-readable plan or adoption block. */
+export function replyProse(text: string | null | undefined) {
+  if (!text) return '';
+  return text.replace(/```(?:json)?\s*(?:\[[\s\S]*?\]|\{[\s\S]*?\})\s*```/g, '').trim() || text.trim();
+}
+
+/**
+ * The reply text under a topic turn, or null when there is none to show. A finished turn without a
+ * saved reply (stopped before its first word, refused, ended) shows only its notice; a turn still in
+ * progress or paused shows its own notice, never a "verifying" placeholder (showsReply, CHAT-NATIVE-OUTPUT).
+ */
+export function topicReplyText(e: { state: string; body: string | null; primaryBody: string | null; contentAvailable: boolean }) {
+  if (!showsReply(e)) return null;
+  return e.contentAvailable ? replyProse(e.body ?? e.primaryBody) : '来源已不可用，暂不展示此内容。';
 }

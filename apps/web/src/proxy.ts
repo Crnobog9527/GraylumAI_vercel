@@ -6,6 +6,7 @@ import { isEmailVerified, sanitizeRedirectTarget } from '@/lib/auth';
 import { buildVerifyEmailPath, routeCallbackError } from '@/lib/authFlow';
 import { logServerError } from '@/lib/server-log';
 import { isPublicPathname } from '@/lib/public-paths';
+import { BUY_INTENT_PATH, buyIntentPath, parseBuyIntent } from '@/lib/buyIntent';
 import { isPublicSiteHost, resolveAuthAppUrl, resolveSupabaseCookieOptions } from '@/lib/site-config';
 
 const SENTRY_TUNNEL_PATH = '/monitoring';
@@ -27,10 +28,13 @@ const PUBLIC_SITE_PATHS = [
 ];
 
 // Public site pages added by PUBLIC-SITE. Unlike the prefix list above, these match whole path segments
-// only: /zh-tw and /zh-tw/... are public on the public host, /zh-twx is not.
+// only: /zh-tw and /zh-tw/... are public on the public host, /zh-twx is not. /refund is the public refund
+// policy (Owner 2026-10-17), matched by segment so /refunds and /refund-x stay on the app host.
 const PUBLIC_SITE_PAGE_PATHS = [
   '/about',
+  '/features', // Product feature pages (/features and /features/<name>) linked from the public header and footer.
   '/zh-tw',
+  '/refund',
 ];
 
 const PUBLIC_PRICING_ENTRY_PATHS = [
@@ -100,6 +104,18 @@ function isSentryTunnelPath(pathname: string): boolean {
 function createPublicPricingRedirect(request: NextRequest): NextResponse {
   // The public pricing page (PAYWALL); query parameters such as ?domain=www are kept.
   return NextResponse.redirect(new URL(`/landing/pricing${request.nextUrl.search}`, request.url));
+}
+
+// A logged-out visitor goes to login and comes back to the page afterwards. A landing-page buy link opens
+// sign-up instead (the visitor can switch to login there) and returns to that plan's checkout dialog; the return
+// path is rebuilt from the allowed plan values only (Owner 2026-10-17, lib/buyIntent).
+function createLoginRedirect(request: NextRequest): NextResponse {
+  const { pathname, search, searchParams } = request.nextUrl;
+  const loginUrl = new URL('/login', request.url);
+  const intent = pathname === BUY_INTENT_PATH ? parseBuyIntent(searchParams) : null;
+  if (intent) loginUrl.searchParams.set('action', 'signup');
+  loginUrl.searchParams.set('redirect', intent ? buyIntentPath(intent) : `${pathname}${search}`);
+  return NextResponse.redirect(loginUrl);
 }
 
 // 判断是否需要速率限制
@@ -383,10 +399,7 @@ export async function proxy(request: NextRequest) {
 
     // 非公开路径需要登录
     if (!user) {
-      const loginUrl = new URL('/login', request.url);
-      const redirectTarget = `${pathname}${request.nextUrl.search}`;
-      loginUrl.searchParams.set('redirect', redirectTarget);
-      return NextResponse.redirect(loginUrl);
+      return createLoginRedirect(request);
     }
 
     if (!userIsVerified) {
@@ -428,10 +441,7 @@ export async function proxy(request: NextRequest) {
     }
 
     if (!isPublicPath(pathname) && !user) {
-      const loginUrl = new URL('/login', request.url);
-      const redirectTarget = `${pathname}${request.nextUrl.search}`;
-      loginUrl.searchParams.set('redirect', redirectTarget);
-      return NextResponse.redirect(loginUrl);
+      return createLoginRedirect(request);
     }
 
     if (!isPublicPath(pathname) && user && !userIsVerified) {

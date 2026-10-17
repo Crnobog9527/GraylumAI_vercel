@@ -17,6 +17,21 @@ export function isPaidMember(entitlement: PackEntitlement) {
   return entitlement.status === 'ready' && (entitlement.level === 'pro' || entitlement.level === 'gold');
 }
 
+/** Pro/Gold pack prices (0211 tiers) per pack, from `settings.getCreditPackages`. */
+export type MemberPackReadiness = { pro?: boolean | null; gold?: boolean | null } | null | undefined;
+
+/**
+ * Whether card checkout (0222) can charge this pack: it uses the buyer's own tier price, never the
+ * legacy generic price behind `checkout_ready`. A member needs their tier's price; anyone else is
+ * judged on any tier, so a free user gets the members-only answer instead of "not for sale".
+ */
+export function memberPackReady(ready: MemberPackReadiness, entitlement: PackEntitlement) {
+  if (entitlement.status === 'ready' && (entitlement.level === 'pro' || entitlement.level === 'gold')) {
+    return ready?.[entitlement.level] === true;
+  }
+  return ready?.pro === true || ready?.gold === true;
+}
+
 export function creditPackBuyState(input: {
   price: number; checkoutReady: boolean | undefined; pending: boolean; entitlement: PackEntitlement;
   /** The current paid membership is in its 24-hour renewal grace (`methodMembership` inGrace). */

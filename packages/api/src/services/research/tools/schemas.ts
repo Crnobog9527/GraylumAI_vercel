@@ -6,19 +6,8 @@ import { publicHttpUrl } from '../vendors/http';
 import { SOCIAL_PLATFORMS } from '../vendors/types';
 import type { ResearchToolsConfig } from '../vendors/config';
 
-export const RESEARCH_TOOL_NAMES = [
-  'propose_keywords', 'benchmark_discover', 'social_search', 'propose_more_candidates',
-  'benchmark_fetch', 'social_account', 'web_search', 'web_fetch',
-] as const;
-export type ResearchToolName = typeof RESEARCH_TOOL_NAMES[number];
-
-/** Per-Skill exposure (plan §2.1): the positioning Skill runs the benchmark flow, everything else the general lookups. */
-export const POSITIONING_RESEARCH_TOOLS: readonly ResearchToolName[] = Object.freeze([
-  'propose_keywords', 'benchmark_discover', 'propose_more_candidates', 'benchmark_fetch', 'web_search', 'web_fetch',
-]);
-export const GENERAL_RESEARCH_TOOLS: readonly ResearchToolName[] = Object.freeze([
-  'social_search', 'social_account', 'web_search', 'web_fetch',
-]);
+import type { ResearchToolName } from './names';
+export { GENERAL_RESEARCH_TOOLS, POSITIONING_RESEARCH_TOOLS, RESEARCH_TOOL_NAMES, type ResearchToolName } from './names';
 
 const chars = (value: string) => [...value].length;
 const noControl = (value: string) => !/\p{Cc}/u.test(value);
@@ -49,7 +38,8 @@ export const researchToolArgs = {
     accounts: z.array(z.object({ platform, account }).strict()).min(1).max(5),
     source: z.discriminatedUnion('kind', [
       z.object({ kind: z.literal('candidate'), confirmationId: id }).strict(),
-      z.object({ kind: z.literal('user_message'), messageId: id }).strict(),
+      // messageId omitted: the user's message this reply answers (the model never sees message ids).
+      z.object({ kind: z.literal('user_message'), messageId: id.optional() }).strict(),
       z.object({ kind: z.literal('refresh'), refreshId: id }).strict(),
     ]),
   }).strict(),
@@ -68,10 +58,13 @@ export type ResearchToolArgs<T extends ResearchToolName> = z.infer<typeof resear
 const PRIVACY = 'Send only keywords, public links or public account names; never personal details or conversation text.';
 export const RESEARCH_TOOL_DESCRIPTIONS: Record<ResearchToolName, string> = {
   propose_keywords: 'Show the user a keyword selection card (3-5 keywords) before any benchmark search. Free.',
-  benchmark_discover: `Find benchmark candidates for confirmed keywords; continue with discoveryId when told to. ${PRIVACY}`,
+  benchmark_discover: 'Find benchmark candidates for a keyword card the user confirmed (keywordConfirmationId from ' +
+    `hostTurnContext.research.cards). To continue, call again with the same confirmation and platforms. ${PRIVACY}`,
   social_search: `Search recent public posts on one platform by keyword. ${PRIVACY}`,
-  propose_more_candidates: 'Show another candidate card from an earlier discovery, excluding accounts already chosen. Free.',
-  benchmark_fetch: `Fetch profile and recent posts for confirmed benchmark accounts; source is required. ${PRIVACY}`,
+  propose_more_candidates: 'Show another candidate card from an earlier discovery (discoveryId from hostTurnContext.research.cards), ' +
+    'excluding accounts already chosen. Free.',
+  benchmark_fetch: 'Fetch profile and recent posts for benchmark accounts. source: {kind:"candidate",confirmationId} from ' +
+    'hostTurnContext.research.cards, or {kind:"user_message"} for profile links in the message you are answering. ' + PRIVACY,
   social_account: `Look up one public account and its recent posts (not saved as a benchmark). ${PRIVACY}`,
   web_search: `Search the web. ${PRIVACY}`,
   web_fetch: 'Read the main text of one public web page. Pass only a public http(s) link.',

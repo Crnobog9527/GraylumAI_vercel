@@ -8,6 +8,8 @@ import { Button } from '@/components/ui/button';
 import {
   Sheet,
   SheetContent,
+  SheetDescription,
+  SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet';
 import { AppHeader } from '@/components/layout/AppHeader';
@@ -27,6 +29,7 @@ import { UsageHistoryCard } from '@/components/profile/UsageHistoryCard';
 import { SecuritySettingsCard } from '@/components/profile/SecuritySettingsCard';
 import { AccountErasureCard } from '@/components/profile/AccountErasureCard';
 import { DataUseConsentCard } from '@/components/profile/DataUseConsentCard';
+import { CookieSettingsCard } from '@/components/analytics/CookieSettingsCard';
 import { DATA_USE_CONSENT_VISIBLE } from '@/components/profile/dataUseConsentVisibility';
 import TicketsPanel from '@/components/profile/TicketsPanel';
 import { trpc } from '@/trpc/client';
@@ -204,6 +207,8 @@ function ProfilePageContent() {
                 className="w-[88vw] max-w-80 p-0 pt-6"
                 style={{ background: 'var(--bg-secondary)', borderColor: 'var(--border-primary)' }}
               >
+                <SheetTitle className="sr-only">个人中心菜单</SheetTitle>
+                <SheetDescription className="sr-only">选择要查看的个人中心栏目</SheetDescription>
                 <ProfileSidebar
                   mobile
                   activeTab={activeTab}
@@ -260,6 +265,7 @@ function ProfilePageContent() {
 
             {userProfile && activeTab === 'security' && <SecuritySettingsCard user={effectiveUser} />}
             {userProfile && activeTab === 'security' && DATA_USE_CONSENT_VISIBLE && <DataUseConsentCard />}
+            {userProfile && activeTab === 'security' && <CookieSettingsCard />}
             {userProfile && activeTab === 'security' && <AccountErasureCard user={effectiveUser} />}
 
             {userProfile && activeTab === 'tickets' && (

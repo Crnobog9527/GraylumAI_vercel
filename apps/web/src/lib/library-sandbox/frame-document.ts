@@ -42,11 +42,19 @@ export const RELAY_SCRIPT = `(function () {
   parent.postMessage({ type: '${MESSAGE.ready}', token: token }, '*', [channel.port2]);
 })();`;
 
+export type SandboxCspOptions = {
+  /**
+   * LIB-2d recognition only (Owner 2026-10-17): lets the Worker compile WebAssembly. It does not allow eval,
+   * other scripts or any network; the Word and PDF sandboxes never set it.
+   */
+  wasm?: boolean;
+};
+
 /** `meta` CSP for the relay frame; the Worker started from a blob inherits it. */
-export function sandboxCsp(scriptHash: string): string {
+export function sandboxCsp(scriptHash: string, options: SandboxCspOptions = {}): string {
   return [
     "default-src 'none'",
-    `script-src '${scriptHash}'`,
+    `script-src '${scriptHash}'${options.wasm ? " 'wasm-unsafe-eval'" : ''}`,
     'worker-src blob:',
     "connect-src 'none'",
     "img-src 'none'",
@@ -64,9 +72,10 @@ export function sandboxCsp(scriptHash: string): string {
 
 const escapeAttribute = (value: string) => value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 
-export function buildSandboxSrcdoc(token: string, scriptHash: string, script = RELAY_SCRIPT): string {
+export function buildSandboxSrcdoc(token: string, scriptHash: string, script = RELAY_SCRIPT,
+  options: SandboxCspOptions = {}): string {
   return '<!doctype html><html><head><meta charset="utf-8">'
-    + `<meta http-equiv="Content-Security-Policy" content="${escapeAttribute(sandboxCsp(scriptHash))}">`
+    + `<meta http-equiv="Content-Security-Policy" content="${escapeAttribute(sandboxCsp(scriptHash, options))}">`
     + '<meta name="referrer" content="no-referrer">'
     + `<meta name="graylum-sandbox-token" content="${escapeAttribute(token)}">`
     + `<script>${script}</script></head><body></body></html>`;

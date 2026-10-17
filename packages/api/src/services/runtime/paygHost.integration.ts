@@ -7,6 +7,7 @@ import type {SupabaseClient} from '@supabase/supabase-js';
 import type {createTRPCContext} from '../../trpc';
 import type {makeWorkflow} from '../__tests__/fixtures/artifacts';
 import {pricingConfig} from '../__tests__/fixtures/runtimePricing';
+import {testPrimaryModel} from '../__tests__/fixtures/runtimeGates';
 import {runtimeRouter} from '../../routers/runtime';
 import {opcRouter} from '../../routers/opc';
 import {opcService} from '../opc/service';
@@ -94,6 +95,9 @@ export function registerPaygHostTests(db:pg.Client,fixture:()=>Promise<Fixture>)
    V3_RUNTIME_STAGING_PROJECT_ID:'synthetic',V3_RUNTIME_STAGING_DATABASE_HOST:'synthetic.supabase.co',
    NEXT_PUBLIC_SUPABASE_URL:'https://synthetic.supabase.co',V3_RUNTIME_STAGING_WINDOW_ID:windowId,V3_RUNTIME_STAGING_ENABLED:'true'};
   const old=Object.fromEntries(Object.keys(env).map(k=>[k,process.env[k]]));
+  // UI-MODEL: real free chat runs on the administrator's primary model. The host suite mocks the admission
+  // settings read (runtimeGates), so the primary model is set there, not in system_settings.
+  testPrimaryModel.id=f.mentorModel;
   try{
    for(const [key,value] of Object.entries(values))await db.query(
     'insert into system_settings(key,value) values($1,$2) on conflict(key) do update set value=excluded.value',[key,JSON.stringify(value)]);
@@ -157,6 +161,7 @@ export function registerPaygHostTests(db:pg.Client,fixture:()=>Promise<Fixture>)
    expect((await db.query('select count(*)::int n from bill2_calls where run_id=$1',[e.runId])).rows[0].n).toBe(1);
    expect((await db.query('select credits from profiles where id=$1',[f.actor])).rows[0].credits).toBeGreaterThanOrEqual(0);
   }finally{
+   testPrimaryModel.id=undefined;
    for(const [k,v] of Object.entries(old)){if(v===undefined)delete process.env[k];else process.env[k]=v;}
    await db.query('delete from system_settings where key=any($1)',[Object.keys(values)]);
    for(const row of saved)await db.query('insert into system_settings(key,value) values($1,$2)',[row.key,JSON.stringify(row.value)]);

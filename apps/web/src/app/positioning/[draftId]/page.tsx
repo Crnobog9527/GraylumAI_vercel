@@ -1,5 +1,5 @@
 "use client";
-import { readAgentTurnBody, type AgentTurnEvent } from "@repo/api/src/shared/agentTurn";
+import { type AgentTurnEvent } from "@repo/api/src/shared/agentTurn";
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { use, useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
@@ -8,7 +8,7 @@ import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { WorkspaceFrame } from "@/components/opc/workspace-frame";
-import { PanelRightOpen, X } from "lucide-react";
+import { X } from "lucide-react";
 import resultStyles from "@/components/opc/positioning-result.module.css";
 import { WorkComposer, useFreeConversation } from '@/components/opc/work-composer';
 import { createInformationAutosave, informationBaseKey, keepConflictingEdits, tabStorage, savedRead, stepView,
@@ -24,11 +24,14 @@ import { focusChecklistField, StepConfirmCard } from "@/components/opc/step-conf
 import { cardStatus, editedValue, fieldMeta, focusField, type StepInformation } from "@/components/opc/capture-state";
 import { reviewedStep, useStepConfirmation } from "@/hooks/use-step-confirmation";
 import { useCaptureResolve } from "@/hooks/use-capture-resolve";
-import { MentorMarkdown } from "./MentorMarkdown";
-import { ChatInlineNotice, ChatNoticeList, ChatPendingStatus } from "@/components/chat/ChatInlineNotice";
+import { ChatInlineNotice, ChatNoticeList } from "@/components/chat/ChatInlineNotice";
+import { PositioningHeader, PositioningResultPanel, PositioningStepStrip } from "@/components/chat-display/positioning-chrome";
+import { MentorChatHeading, MentorChatLog, MentorLiveReply, MentorPendingMessage, MentorReply, MentorTurnGroup, MentorUserMessage,
+  MentorWelcome } from "@/components/chat-display/mentor-messages";
 import { useMentorLogScroll } from "./use-mentor-log-scroll";
 import { mentorTailNotices, mentorTurnNotice, RETRY_PENDING_NOTICE, turnNeedsRetry } from "./mentor-notices";
 import { useAutoStepRecovery, useHistoryPolling } from "./use-step-recovery";
+import { executionSettled } from "./step-recovery";
 import { useLiveReply } from "./use-live-reply";
 import { PublishFootnote, PublishNext, ReportEntry, reportPublishes } from "./report-panel";
 import { ReadonlyDraftView } from './readonly-draft-view';
@@ -40,30 +43,14 @@ import { sameRequest, releaseRejectedAnswer, openingRequest, parseStepEnvelope, 
   retainExecution, settleEnvelope, TEXT_PROTOCOL, turnResultNotice, type MentorTurn, type MentorExecution } from "./mentor-turn";
 import { openOrganizer, usePaygResume } from "@/lib/use-payg-resume";
 import { checklistUpdatedInput, isOpeningInput, openingEntryKey } from "@repo/api/src/shared/opcQuestions";
-import { clearSavedFields, isHostAction, noteSavedFields, nudgeNotice, refusedTurn, savedFields, shownInput } from "./checklist-nudge";
+import { clearSavedFields, freeAnswerSource, isHostAction, noteSavedFields, nudgeNotice, refusedTurn, savedFields, shownInput } from "./checklist-nudge";
 type Step = { id: string; title: string; dependsOn?: string[] };
 import { type Information, type Item, type StepEnvelope } from "./confirm-envelope";
-import { handoffIntent, readRetainedHandoff } from "./handoff-envelope";
-/**
- * Provably definite rollbacks of the `opc_handoff` SQL function. Every code
- * below is raised before that function's single durable write, so an exception
- * rolls the whole transaction back and a request carrying it can never commit:
- * releasing the retained request and forming a new explicit one is safe.
- * Timeouts, lost replies and every other error keep it for idempotent replay.
- */
-const definiteHandoffRejections = new Set([
-  "OPC_ACCOUNT_CONFLICT",
-  "OPC_ACCOUNTS_INVALID",
-  "OPC_VERSION_CONFLICT",
-  "OPC_REQUEST_CONFLICT",
-  "OPC_DENIED",
-]);
+import { definiteHandoffRejections, handoffIntent, readRetainedHandoff } from "./handoff-envelope";
+import { ResearchCallList } from "@/components/research/research-call-list";
+import { ResearchSessionPanel, useResearchCalls } from "@/components/research/research-session";
 /** The retained mentor request is either wrapped in `request` or legacy top-level. */
-export default function PositioningDraft({
-  params,
-}: {
-  params: Promise<{ draftId: string }>;
-}) {
+export default function PositioningDraft({ params }: { params: Promise<{ draftId: string }> }) {
   const { draftId } = use(params);
   return <PositioningDraftContent key={draftId} draftId={draftId}/>;
 }
@@ -135,7 +122,8 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const history = trpc.runtime.view.useQuery({ sessionId: read.data?.sessionId ?? "" },
     { enabled: Boolean(read.data?.sessionId) && !read.data?.conversationDeleted,
       refetchInterval: useHistoryPolling(draftId, read.data?.snapshot?.workflow.steps ?? []) });
-  const live = useLiveReply(draftId, history.data), liveReply = live.reply, stopLocal = live.stopLocal;
+  const research = useResearchCalls(read.data?.sessionId);
+  const live = useLiveReply(draftId, history.data, research.observe), liveReply = live.reply, stopLocal = live.stopLocal;
   const payg = usePaygResume(() => Promise.all([read.refetch(), history.refetch(), utils.credits.getBalance.invalidate()]));
   const [activeStep, setActiveStep] = useState<string | null>(null);
   // State, not a ref: on a client-side return cached history exists before the log mounts.
@@ -474,7 +462,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
         // entry identity is deterministic, so a later retry reuses the same
         // turn instead of producing a second one or a second charge.
         sessionStorage.removeItem(key);
-        setNotice("导师引导这次没有加载成功。你可以直接填写右侧表单，或刷新后重试；不会重复生成或重复扣费。");
+        setNotice("AI 教练引导这次没有加载成功。你可以直接填写右侧表单，或刷新后重试；不会重复生成或重复扣费。");
       } finally {
         openingInFlight.current.delete(step.id);
         setOpeningSteps([...openingInFlight.current]);
@@ -655,25 +643,24 @@ function PositioningDraftContent({draftId}:{draftId:string}){
    * One user turn on a step. The focus is only the request identity: the server
    * re-derives it, and an answered card keeps the card's own turn.
    */
-  async function ask(step: Step, inputOverride?: string, answerSource?: MentorRequest["answerSource"]) {
+  async function ask(step: Step, inputOverride?: string, answerSource?: MentorRequest["answerSource"], researchRefreshId?: string) {
     if(mentorSendInFlight.current)return;
     const key = "opc-step:" + draftId + ":" + step.id;
     if (sessionStorage.getItem(key)) {
       // A retained envelope still owns this step. Never create a second
       // identity; the explicit recovery control resumes the original request.
-      setError("上一条发给导师的内容仍在核对。请先点“重试”恢复，不会重复发送。");
+      setError("上一条发给 AI 教练的内容仍在核对。请先点“重试”恢复，不会重复发送。");
       return;
     }
     if(running||openingInFlight.current.size||history.data?.activeExecution)return;
     const input=(inputOverride??mentorInput).trim();if(!input)return;
     const latest = mentorExecutions.at(-1), sourceTurn = latest && mentorTurns.get(latest.executionId);
     const summary = inputOverride === STEP_SUMMARY_INPUT; // R16: only the button, never typed text; no card, no field.
-    // Typing instead of choosing still answers the newest card of this step and round.
-    if (!answerSource && !isHostAction(input) && latest?.state === "completed" && sourceTurn && sourceTurn.roundId === d.roundId &&
-      sourceTurn.stepId === step.id && readAgentTurnBody(latest.body).card)
-      answerSource = { executionId: latest.executionId };
+    // Typing instead of choosing still answers the newest card of this step and round (a refresh answers none).
+    answerSource = freeAnswerSource({ answerSource, input, researchRefreshId, latest, sourceTurn, roundId: d.roundId, stepId: step.id });
     const questionId = focusField(d.information[step.id]);
     const fixed:StepEnvelope={request:summary?stepSummaryRequest(draftId,step.id,crypto.randomUUID()):{...(answerSource ? {answerSource} : {}),
+      ...(researchRefreshId ? {researchRefreshId} : {}),
       draftId,stepId:step.id,purpose:'mentor',requestId:crypto.randomUUID(),input,questionId,organizeAfter:true}};
     sessionStorage.setItem(key,JSON.stringify(fixed));
     mentorSendInFlight.current=true;
@@ -1053,6 +1040,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
         .map((execution) => [execution.executionId, execution]),
     ).values(),
   );
+  const settledTurns = mentorExecutions.filter(execution => executionSettled(history.data, execution.executionId)).length;
   const hasPendingConfirmation = steps.some(step => confirmation.envelopeState(step.id).kind === "valid");
   /** A streaming reply whose execution is not in history yet. */
   const liveOnly = liveReply && !mentorExecutions.some(e => e.executionId === liveReply.executionId) ? liveReply : null;
@@ -1132,40 +1120,24 @@ function PositioningDraftContent({draftId}:{draftId:string}){
       loading={review.loading} loadError={review.loadError} onConfirm={() => confirmation.submit(info)} onClose={confirmation.close}/>;
   }
   return (
-    <WorkspaceFrame area="chat" notice={d?.runtimeMode==='staging_test'?'Staging 真实模型测试 · 未开放联网研究':'本地模拟 · 回复、保存与交接均为演示'} revealRight={reveal} rightOpen={resultOpen} onToggleRight={()=>setResultOpen(value=>!value)} right={<div className={resultStyles.panel}><header><h2>定位清单</h2><p>{snap.state==='draft'?'跟着对话自动记录；每一步核对后确认一次':'已确认的定位'}</p></header>
-      <div className={resultStyles.body} ref={setResultBodyNode}><CaptureChecklist {...checklistProps()}/></div></div>}>
+    <WorkspaceFrame area="chat" notice={d?.runtimeMode==='staging_test'?'Staging 真实模型测试 · 未开放联网研究':'本地模拟 · 回复、保存与交接均为演示'} revealRight={reveal} rightOpen={resultOpen} onToggleRight={()=>setResultOpen(value=>!value)} right={<PositioningResultPanel
+      subtitle={snap.state==='draft'?'跟着对话自动记录；每一步核对后确认一次':'已确认的定位'} bodyRef={setResultBodyNode}><CaptureChecklist {...checklistProps()}/></PositioningResultPanel>}>
     <main className={`${resultStyles.workspaceMain} ${!planView ? resultStyles.conversationPage : ""} h-full w-full overflow-y-auto text-[var(--text-primary)]`}><div className={resultStyles.workspaceContent}>
-      <header className={resultStyles.positionTop}>
-        <h1>{planView ? "第一周计划" : discussionAccount ? (discussionAccount.displayName??discussionAccount.account)+" · 定位策略" : existingEntry ? "核对已有定位" : "我的定位分析"}</h1>
-        <div className={resultStyles.positionActions}>
-          <span>{(discussionAccount?discussionAccount.platform:'整体规划')+(snap.state==='published'?' · 已确认':' · 进行中')}</span>
-          <button type="button" onClick={()=>setWorkInfoOpen(true)}>工作信息</button>
-          {!resultOpen&&<button type="button" aria-label="展开右边栏" onClick={()=>setResultOpen(true)}><PanelRightOpen size={18}/></button>}
-        </div>
-      </header>
+      <PositioningHeader
+        title={planView ? "第一周计划" : discussionAccount ? (discussionAccount.displayName??discussionAccount.account)+" · 定位策略"
+          : existingEntry ? "核对已有定位" : "我的定位分析"}
+        status={(discussionAccount?discussionAccount.platform:'整体规划')+(snap.state==='published'?' · 已确认':' · 进行中')}
+        onWorkInfo={()=>setWorkInfoOpen(true)} showExpand={!resultOpen} onExpand={()=>setResultOpen(true)}/>
       {workInfoOpen&&<div className={resultStyles.infoBackdrop} onMouseDown={event=>{if(event.target===event.currentTarget)setWorkInfoOpen(false);}}><section role="dialog" aria-modal="true" aria-label="工作信息" className={resultStyles.infoDialog}><header><h2>工作信息</h2><button type="button" aria-label="关闭工作信息" onClick={()=>setWorkInfoOpen(false)}>×</button></header><p>当前工作：{existingEntry?'已有定位核对':'定位分析'}</p><p>状态：{snap.state==='published'?'定位已确认':'定位进行中'}</p><p>定位讨论、待确认修改与历史版本留在原工作；查看不会确认或保存。</p><footer><button type="button" onClick={()=>{void read.refetch();setWorkInfoOpen(false);}}>重新读取状态</button><Link href="/positioning">新任务与账号</Link></footer></section></div>}
       {!planView && <>
       {d.accountRevision?.methodConflict&&<ChatInlineNotice tone="warning" alert>此修改草稿使用的方法与原正式版本不同，未自动合并或覆盖任何答案。请对照原正式内容核对当前草稿。
           <details><summary>查看原正式版本完整内容</summary>{Object.entries(d.accountRevision.sourceInformation as Record<string,{title:string;schema:Array<{id:string;title:string}>;values:Record<string,Information>}>).map(([id,part])=><section key={id}><h4>{part.title}</h4>{part.schema.map(field=><p key={field.id}>{field.title}：{part.values?.[field.id]?.value}</p>)}</section>)}</details>
       </ChatInlineNotice>}
-      <nav aria-label="定位步骤" className={resultStyles.phaseStrip} style={{gridTemplateColumns:`repeat(${steps.length},minmax(0,1fr))`}}>
-        {steps.map((step, index) => (
-          <Button
-            key={step.id}
-            variant={selectedStep.id === step.id ? "default" : "outline"}
-            aria-current={selectedStep.id === step.id ? "step" : undefined}
-            disabled={
-              busy || hasPendingConfirmation || hasPendingStepRequest ||
-              (!d.accountRevision && firstPending >= 0 &&
-                index > firstPending &&
-                !snap.steps[step.id].valid)
-            }
-            onClick={() => setActiveStep(step.id)}
-          >
-            {snap.steps[step.id].valid ? "✓ " : `${index + 1} `}{step.title}
-          </Button>
-        ))}
-      </nav>
+      <PositioningStepStrip selectedId={selectedStep.id} onSelect={setActiveStep} steps={steps.map((step, index) => ({
+        id: step.id, title: step.title, valid: Boolean(snap.steps[step.id].valid),
+        disabled: busy || hasPendingConfirmation || hasPendingStepRequest ||
+          (!d.accountRevision && firstPending >= 0 && index > firstPending && !snap.steps[step.id].valid),
+      }))}/>
       <section aria-label="当前定位步骤" className="space-y-4">
         {snap.workflow.steps.map((step: Step, index: number) => {
           if (step.id !== selectedStep.id) return null;
@@ -1178,19 +1150,12 @@ function PositioningDraftContent({draftId}:{draftId:string}){
             <article key="positioning-workspace" className={`${resultStyles.stepArticle} space-y-3`}>
               <h2 className="text-lg">{index + 1}. {step.title} {s.valid ? "· 已确认" : "· 待确认"}</h2>
               <div className={resultStyles.stepColumns}>
-                <aside aria-label="全程导师聊天" className={`${resultStyles.mentorChat} space-y-3`}>
-                  <div>
-                    <p className="text-xs text-[var(--text-secondary)]">全程同一对话</p>
-                    <h3 className="font-semibold">和导师一起聊，每一步核对确认一次</h3>
-                  </div>
-                  <div ref={attachChatScroll} onScroll={onChatScroll} role="log" aria-label="完整导师消息" aria-live="polite"
-                    className="max-h-[55vh] min-h-56 space-y-3 overflow-y-auto overscroll-contain pr-2">
-                    {mentorExecutions.length===0&&<div className="mr-4 rounded-xl border border-[var(--border-primary)] p-3">
-                      <span className={resultStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/>Graylum · AI 自媒体陪跑教练</span>
-                      <p className={`mt-1 whitespace-pre-wrap break-words ${resultStyles.messageBody}`}>
-                        {existingEntry ? EXISTING_WELCOME : d.accountRevision ? "已保留原正式定位的全部步骤。请选择需要修改的部分；未变化且已确认的内容无需重新填写。修改保存为草稿，核对后可更新正式版本。" : "我会在同一个对话里陪你完成全部步骤。你聊到的信息会自动记到右侧清单的对应栏目，每一步齐了以后由你核对并确认一次。"}
-                      </p>
-                    </div>}
+                <aside aria-label="全程 AI 教练聊天" className={`${resultStyles.mentorChat} space-y-3`}>
+                  <MentorChatHeading/>
+                  <MentorChatLog logRef={attachChatScroll} onScroll={onChatScroll}>
+                    {mentorExecutions.length===0&&<MentorWelcome text={existingEntry ? EXISTING_WELCOME : d.accountRevision
+                      ? "已保留原正式定位的全部步骤。请选择需要修改的部分；未变化且已确认的内容无需重新填写。修改保存为草稿，核对后可更新正式版本。"
+                      : "我会在同一个对话里陪你完成全部步骤。你聊到的信息会自动记到右侧清单的对应栏目，每一步齐了以后由你核对并确认一次。"}/>}
                     {mentorExecutions.map((execution, executionIndex) => {
                       const turn = mentorTurns.get(execution.executionId);
                       const turnStep = steps.find(candidate => candidate.id === turn?.stepId);
@@ -1214,45 +1179,37 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                           onOther={focusReply} onDismiss={() => setFoldedCard(execution.executionId)}/>;
                       }
                       return (
-                        <div key={execution.executionId} data-execution-id={execution.executionId} className="space-y-2">
+                        <MentorTurnGroup key={execution.executionId} executionId={execution.executionId}>
                           {/* The host opens the step itself: no fabricated user message. */}
-                          {!openingTurn && (
-                            <div data-message-role="user" className="ml-8 rounded-xl bg-[var(--bg-tertiary)] p-3">
-                              <span className="text-xs text-[var(--text-secondary)]">你{turnLabel}</span>
-                              <p className={`mt-1 whitespace-pre-wrap break-words ${resultStyles.messageBody}`}>
-                                {shownInput(execution.input) ?? "内容暂不可用"}</p>
-                            </div>
-                          )}
-                          {reply.text && <div data-message-role="assistant" data-step-summary={summaryTurn || undefined}
-                            aria-label={summaryTurn ? "本步小结卡" : undefined}
-                            className="mr-4 rounded-xl border border-[var(--border-primary)] p-3">
-                            <span className={resultStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/>
-                              {summaryTurn ? "本步小结" : openingTurn ? "AI 自媒体陪跑教练 · 主动引导" : "AI 自媒体陪跑教练"}{turnLabel}</span>
-                            <MentorMarkdown className={`mt-1 ${resultStyles.messageBody}`} text={reply.text} live={Boolean(live)} result={execution}/>
-                            {summaryTurn && !next && !s.valid && turn?.stepId === step.id && summaryShown(execution) &&
-                              <p className="mt-2 text-xs text-[var(--text-secondary)]">小结不会自动确认这一步；请在下方确认卡核对后再点确认。</p>}
-                          </div>}
+                          {!openingTurn && <MentorUserMessage stepLabel={turnLabel} text={shownInput(execution.input) ?? "内容暂不可用"}/>}
+                          <ResearchCallList calls={research.of(execution.executionId)}/>
+                          {reply.text && <MentorReply kind={summaryTurn ? "summary" : openingTurn ? "opening" : "reply"} stepLabel={turnLabel}
+                            text={reply.text} live={Boolean(live)} result={execution}
+                            summaryHint={Boolean(summaryTurn && !next && !s.valid && turn?.stepId === step.id && summaryShown(execution))}/>}
                           {/* Answered: gone. Open: docked. Folded: one line. */reply.card && !status.answered && foldedCard === execution.executionId
                             && <OpenQuestionRecord card={reply.card} onShow={() => setFoldedCard("")}/>}
                           {/* Polling follows a running turn; the retry is for one that stopped advancing. */}
                           <ChatNoticeList notices={[...payg.turnNotices(execution, busy), mentorTurnNotice(execution.executionId, reply.notice,
                             !busy && execution.executionId === history.data?.activeExecution && turnNeedsRetry(execution)
                             ? { onClick: () => void run(() => execute.mutateAsync({ executionId: execution.executionId })) } : null)]}/>
-                        </div>
+                        </MentorTurnGroup>
                       );
                     })}
-                    {pendingBubble&&!mentorExecutions.some(e=>e.request?.requestId===pendingBubble.requestId)&&<div data-message-role="user" data-request-id={pendingBubble.requestId} className="ml-8 rounded-xl bg-[var(--bg-tertiary)] p-3">
-                      <span>你 · {steps.find(candidate => candidate.id === pendingBubble.stepId)?.title}</span>
-                      <p className={`whitespace-pre-wrap ${resultStyles.messageBody}`}>
-                        {shownInput(pendingBubble.input)}</p><ChatPendingStatus sending={running}/></div>}
-                  {liveOnly&&(liveOnly.text||!liveOnly.card)&&<div data-message-role="assistant" aria-label="AI 自媒体陪跑教练正在回复" className="mr-4 rounded-xl border border-[var(--border-primary)] p-3"><span className={resultStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/>AI 自媒体陪跑教练</span>{liveOnly.text?<MentorMarkdown className={`mt-1 ${resultStyles.messageBody}`} text={liveOnly.text} live/>:<p className={`mt-1 ${resultStyles.messageBody}`}>正在思考…</p>}</div>}
+                    {pendingBubble&&!mentorExecutions.some(e=>e.request?.requestId===pendingBubble.requestId)&&<MentorPendingMessage
+                      requestId={pendingBubble.requestId} stepTitle={steps.find(candidate => candidate.id === pendingBubble.stepId)?.title}
+                      text={shownInput(pendingBubble.input)} sending={running}/>}
+                  {liveOnly && <ResearchCallList calls={research.of(liveOnly.executionId)}/>}
+                  {liveOnly&&(liveOnly.text||!liveOnly.card)&&<MentorLiveReply text={liveOnly.text}/>}
+                  {read.data?.sessionId && <ResearchSessionPanel sessionId={read.data.sessionId} settledTurns={settledTurns}
+                    disabled={sendLocked || snap.state !== "draft" || mentorTurns.get(mentorExecutions.at(-1)?.executionId ?? "")?.stepId !== step.id}
+                    onSend={(text, refreshId) => ask(step, text, undefined, refreshId)}/>}
                   <ChatNoticeList notices={[...payg.blockedNotices(mentorExecutions, busy),
                     nudgeNotice(nudged, () => void ask(step, checklistUpdatedInput(nudged)), sendLocked, hasPendingStepRequest),
                     ...mentorTailNotices({ livePhase: live.phase, stop: live.stopAction,
                     saving: hasUnsavedInformation, error, notice, freeError: free.error, replying: awaitingReply, lastTurnOpen: lastTurnNotice, lastTurnText,
                     recovery: recoveryNeedsUser[0] && !busy
                       ? { readable: recoveryNeedsUser[0].readable, onClick: () => void recoverPendingStep(recoveryNeedsUser[0]!.step) } : null })]}/>
-                  </div>
+                  </MentorChatLog>
                   {snap.state === "draft" && !s.valid && <StepConfirmCard stays={!!d.accountRevision || index === steps.length - 1}
                     title={step.title} info={d.information[step.id]} edits={infoEdits[step.id]} resuming={confirmation.envelopeState(step.id).kind === "valid"}
                     stepId={step.id} canConfirm={confirmableStep(step)} disabled={busy || hasPendingStepRequest} signal={d.stepConfirmation?.[step.id]}
@@ -1263,9 +1220,9 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                     return turn?.stepId === step.id && (!Object.hasOwn(turn, "roundId") || turn.roundId === d.roundId);
                   })) && <div className="flex flex-wrap items-center gap-2">
                     <Button variant="outline" size="sm" disabled={sendLocked} onClick={() => void ask(step, STEP_SUMMARY_INPUT)}>{STEP_SUMMARY_LABEL}</Button>
-                    <span className="text-xs text-[var(--text-secondary)]">让导师先整理这一步的小结，还缺什么会如实列出；确认仍由你来点。</span>
+                    <span className="text-xs text-[var(--text-secondary)]">让 AI 教练先整理这一步的小结，还缺什么会如实列出；确认仍由你来点。</span>
                   </div>}
-                  <WorkComposer value={mentorInput} onChange={setMentorInput} label="给导师的回复" placeholder={OTHER_PLACEHOLDER} attachment={dock} maxLength={8000} disabled={snap.state!=="draft"} sendDisabled={sendLocked} onSend={skill=>{if(skill)void free.send(mentorInput,skill);else void ask(step);}}/>
+                  <WorkComposer references={false} value={mentorInput} onChange={setMentorInput} label="给 AI 教练的回复" placeholder={OTHER_PLACEHOLDER} attachment={dock} maxLength={8000} disabled={snap.state!=="draft"} sendDisabled={sendLocked} onSend={skill=>{if(skill)void free.send(mentorInput,skill);else void ask(step);}}/>
                   <p className="text-xs text-[var(--text-secondary)]">
                     同一账号的步骤共用这条对话，未确认内容保留在草稿中。{d?.runtimeMode==='staging_test'?'当前使用真实模型，仅处理你提供的资料。':'当前为隔离模拟，不调用真实模型。'}
                   </p>
@@ -1367,8 +1324,8 @@ function PositioningDraftContent({draftId}:{draftId:string}){
           继续生成第一周选题
         </Button>
       )}
-      {!planView && read.data?.sessionId && <ReportEntry draftId={draftId} sessionId={read.data.sessionId}
-        projectId={d.projectId} roundId={d.roundId} busy={busy || hasUnsavedInformation || hasPendingStepRequest}
+      {!planView && read.data?.sessionId && <ReportEntry draftId={draftId} sessionId={read.data.sessionId} published={snap.state === "published"}
+        projectId={d.projectId} roundId={d.roundId} report={d.report} busy={busy || hasUnsavedInformation || hasPendingStepRequest}
         onTopics={() => void run(async () => { if ((await read.refetch()).isError) throw new Error("OPC_UNAVAILABLE"); })
           .then(failure => { if (!failure) setConsentOpen(true); })} // Only with the finalized version read back.
         confirmed={!hasUnconfirmedRequired && !hasPendingConfirmation && !(d.accountRevision ? nextReviewStep : steps.some(x => !snap.steps[x.id].valid))} />}
@@ -1413,7 +1370,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
           </div>
         </div>
       )}
-      {planView && <Link className="block underline" href={`/positioning/${draftId}`}>返回定位与导师对话</Link>}
+      {planView && <Link className="block underline" href={`/positioning/${draftId}`}>返回定位与 AI 教练对话</Link>}
       {planView && !d.report?.available && <p role="status">请先确认正式定位，再制定第一周计划。原定位和对话仍保留。</p>}
           {planView && retainedPlan && (
             <div className="space-y-3 rounded-xl border border-[var(--border-primary)] p-4">
@@ -1516,7 +1473,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
             <div className="space-y-3 rounded border border-[var(--border-primary)] p-4">
               <h3>AI 计划候选 · 尚未替换你的编辑</h3>
               <p className="text-xs text-[var(--text-secondary)]">
-                以下选题、日期、标题和简报由导师生成。其中的账号名称是待创建的建议，不代表已注册或已验证。
+                以下选题、日期、标题和简报由 AI 教练生成。其中的账号名称是待创建的建议，不代表已注册或已验证。
               </p>
               {shownPlanCandidate.map((i) => (
                 <p key={i.id}>
@@ -1588,7 +1545,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
           <div className="space-y-3 rounded border border-[var(--border-primary)] p-4">
             <h3>生成前只需要你的事实与选择</h3>
             <p className="text-sm text-[var(--text-secondary)]">
-              定位已确认。下面这些是你自己的选择（可以留空由导师按已确认定位建议）；选题、日期、标题和简报由导师生成，不需要你先手动添加选题行。
+              定位已确认。下面这些是你自己的选择（可以留空由 AI 教练按已确认定位建议）；选题、日期、标题和简报由 AI 教练生成，不需要你先手动添加选题行。
             </p>
             <div className="flex flex-wrap gap-3">
               <label className="text-sm">
@@ -1610,7 +1567,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                   disabled={busy}
                   value={planAccount}
                   onChange={(e) => setPlanAccount(e.target.value)}
-                  placeholder="留空则由导师建议名称"
+                  placeholder="留空则由 AI 教练建议名称"
                 />
               </label>
               <label className="text-sm">
@@ -1640,7 +1597,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
             </div>
             {planAccount.trim() === "" && (
               <p className="text-xs text-[var(--text-secondary)]">
-                没有账号也可以生成。导师建议的账号名称只是待创建的建议，并不代表已经注册或验证过。
+                没有账号也可以生成。AI 教练建议的账号名称只是待创建的建议，并不代表已经注册或验证过。
               </p>
             )}
           </div>
@@ -1698,7 +1655,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
           </div>
           {planNeedsCandidate && (
             <p className="text-xs text-[var(--text-secondary)]">
-              第一周计划默认由导师先给出候选，你只需要核对和修改。采用候选后，或者已经有保存过的计划版本时，也可以自己增删选题。
+              第一周计划默认由 AI 教练先给出候选，你只需要核对和修改。采用候选后，或者已经有保存过的计划版本时，也可以自己增删选题。
             </p>
           )}
           {latest && !dirtyPlan && (

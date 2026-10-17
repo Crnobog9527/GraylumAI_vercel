@@ -10,7 +10,8 @@ import {pricingConfig} from '../__tests__/fixtures/runtimePricing';
 import {agentTurnInstructions,AGENT_TURN_STABLE_PREFIX,AGENT_TURN_STABLE_PREFIX_CHARS} from '../opc/agentTurnPrompt';
 import {PROMPT_CACHE_OVERHEAD_BYTES} from './promptCache';
 import {BRAND_IDENTITY_INSTRUCTIONS} from '../modelIdentity/brandIdentity';
-import {testIdentityGuard} from '../__tests__/fixtures/runtimeGates';
+import {testIdentityGuard,testPrimaryModel} from '../__tests__/fixtures/runtimeGates';
+import {REPLY_LANGUAGE_INSTRUCTIONS} from './primaryInstructions';
 const skill='Pinned skill 正文';
 // MODEL-IDENTITY-GUARD: the switch defaults on, so the brand identity leads the frozen system text.
 const brand=BRAND_IDENTITY_INSTRUCTIONS+'\n';
@@ -20,6 +21,7 @@ vi.mock('./billingUnitAdmission',async original=>({
  ...(await original<typeof import('./billingUnitAdmission')>()),freezeWindowBillingUnit:async()=>undefined,
 }));
 const actor='10000000-0000-4000-8000-000000000001',modelId='10000000-0000-4000-8000-000000000002';
+testPrimaryModel.id=modelId;
 const revisionId='10000000-0000-4000-8000-000000000003',moduleId='10000000-0000-4000-8000-000000000004';
 const requestId='10000000-0000-4000-8000-000000000005';
 const host=()=>agentTurnInstructions();
@@ -30,7 +32,8 @@ function fixture(model='anthropic/test',write:string|undefined='2.5',real=true,i
   upperUsd:openRouterBound(providerLimits,100).upperUsd,inputLimit:32000,outputLimit:100,
   automaticRetry:false as const,hiddenTools:false as const,lookupSupported:true};
  const row={id:modelId,model_id:model,is_active:'true',provider:real?'openrouter':'fixture',max_tokens:1000,input_limit:32000,
-  config:pricingConfig(model,'synthetic/fp8','2','0')};
+  // A real chosen Skill freezes the administrator's interactive reasoning, like free chat.
+  config:{...pricingConfig(model,'synthetic/fp8','2','0'),reasoning:configuredReasoning(model).reasoning}};
  const configReads=vi.fn();let saved:unknown=null;
  const rpc=vi.fn(async(name:string,args:Record<string,unknown>)=>{
   if(name==='runtime_session_context')return {data:{scope:{kind:'positioning_draft',draftId:actor}},error:null};
@@ -90,7 +93,9 @@ it('ordinary role is never marked even on Anthropic with a write price',async()=
 });
 it('reserves marker bytes during admission at the input capacity boundary',async()=>{
  const instructions=brand+skill+'\n'+host();
- const oldLimit=Buffer.byteLength(JSON.stringify({instructions,messages:[{role:'user',content:'user facts'}]}))+1024;
+ // The executor appends the reply-language rule (SKILL-I18N-HOOK); admission sizes it as well.
+ const oldLimit=Buffer.byteLength(JSON.stringify({instructions:instructions+REPLY_LANGUAGE_INSTRUCTIONS,
+  messages:[{role:'user',content:'user facts'}]}))+1024;
  const f=fixture('anthropic/test','2.5',true,oldLimit);
  await expect(f.service.prepare(f.input)).rejects.toThrow('RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY');
  expect(f.rpc.mock.calls.some(([name])=>name==='runtime_admit')).toBe(false);

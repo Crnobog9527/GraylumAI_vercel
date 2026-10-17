@@ -5,6 +5,7 @@ import * as Dialog from '@radix-ui/react-dialog';
 import { trpc } from '@/trpc/client';
 import { VersionCompare } from './version-compare';
 import { ContentErasureDialog } from './content-erasure-dialog';
+import { ContentDraftView } from './content-draft-view';
 import styles from './content-editor.module.css';
 
 export type ContentVersion={id:string;kind:string;version:number;status:string;title?:string|null;body:string|null;contentAvailable?:boolean;sourceContentId:string|null;executionId:string|null;requestId:string};
@@ -125,27 +126,17 @@ export const ContentEditor=forwardRef<ContentEditorHandle,{item:EditableItem;onS
  }
  useImperativeHandle(ref,()=>({finalize:()=>{void save('final');}}));
  if(!draft)return <p className={styles.loading}>正在读取当前成果…</p>;
- return <div className={styles.editor}>
-  <header><p className={styles.label}>正文稿件</p><p className={styles.meta}>{item.platform} · {item.account} · {contentLabel}</p></header>
-  <div className={styles.body}>
-   {!item.sourceAvailable||latest&&latest.contentAvailable===false?<p role="alert">来源已不可用，不能编辑或保存这条工作。</p>:<>
-    <label>稿件标题<input aria-label="稿件标题" value={draft.title} onChange={event=>change({title:event.target.value})} maxLength={160}/></label>
-    <label>{contentLabel+'正文'}<textarea aria-label={contentLabel+'正文'} value={draft.body} onChange={event=>change({body:event.target.value})} maxLength={20000} placeholder="先写下草稿，保存后会形成可找回的版本。"/></label>
-    <p className={styles.version}>{latest?'账号已保存 v'+latest.version+' · '+(latest.status==='final'?'已定稿':'草稿'):'草稿会在停止输入后自动同步到账号'}</p>
-    {saved&&<p role="status" className={styles.success}>{saved}</p>}
-    {error&&<p role="alert" className={styles.error}>{error}</p>}
-    {latest&&draft.baseVersion<latest.version&&!pending&&<button className={styles.rebase} onClick={()=>{change({baseVersion:latest.version,sourceContentId:latest.id});setError('');}}>已比较历史，基于服务端 v{latest.version} 保留我的编辑</button>}
-    <div className={styles.actions}>
-     {pending&&<button onClick={()=>save('draft')} disabled={saveMutation.isPending}>恢复草稿同步</button>}
-     <button ref={expandedTrigger} onClick={openExpanded}>展开编辑</button>
-     <button ref={historyTrigger} onClick={()=>setHistory(true)}>历史版本</button>
-     {latest&&<button onClick={()=>setErasing({id:latest.id,name:(latest.title||item.title)+' · 全部版本',
-      ids:versions.map(v=>v.id)})}>永久删除稿件</button>}
-    </div>
-    {children}
-   </>}
-  </div>
-  <footer><button className={styles.primary} onClick={()=>save('final')} disabled={pending||saveMutation.isPending||!item.sourceAvailable}>确认定稿{contentLabel}</button><p>修改会自动同步为草稿；定稿会另存正式版本，不等于发布。</p></footer>
+ const unavailable=!item.sourceAvailable||Boolean(latest&&latest.contentAvailable===false);
+ return <ContentDraftView platform={item.platform} account={item.account} contentLabel={contentLabel} unavailable={unavailable}
+  title={draft.title} body={draft.body} onTitle={title=>change({title})} onBody={body=>change({body})}
+  versionLine={latest?'账号已保存 v'+latest.version+' · '+(latest.status==='final'?'已定稿':'草稿'):'草稿会在停止输入后自动同步到账号'}
+  saved={saved} error={error} rebaseVersion={latest&&draft.baseVersion<latest.version&&!pending?latest.version:null}
+  onRebase={()=>{if(!latest)return;change({baseVersion:latest.version,sourceContentId:latest.id});setError('');}}
+  pending={pending} recoverDisabled={saveMutation.isPending} onRecover={()=>save('draft')}
+  expandRef={expandedTrigger} onExpand={openExpanded} historyRef={historyTrigger} onHistory={()=>setHistory(true)}
+  onErase={latest?()=>setErasing({id:latest.id,name:(latest.title||item.title)+' · 全部版本',ids:versions.map(v=>v.id)}):undefined}
+  finalizeDisabled={pending||saveMutation.isPending||!item.sourceAvailable} onFinalize={()=>save('final')}
+  overlay={<>
   {expanded&&expandedDraft&&<Dialog.Root open onOpenChange={setExpanded}><Dialog.Overlay className={styles.backdrop}><Dialog.Content aria-label="编辑标题与正文" aria-describedby={undefined} className={styles.modal} onCloseAutoFocus={event=>{event.preventDefault();expandedTrigger.current?.focus();}}><header><Dialog.Title asChild><h2>编辑标题与正文</h2></Dialog.Title><button aria-label="关闭编辑" onClick={()=>setExpanded(false)}>×</button></header><div className={styles.modalFields}><label>稿件标题<input aria-label="展开编辑标题" value={expandedDraft.title} maxLength={160} onChange={event=>setExpandedDraft({...expandedDraft,title:event.target.value})}/></label><label>{contentLabel+'正文'}<textarea aria-label="展开编辑正文" value={expandedDraft.body} maxLength={20000} onChange={event=>setExpandedDraft({...expandedDraft,body:event.target.value})}/></label></div><footer><p>确认修改后会自动同步为草稿。</p><div><button onClick={()=>setExpanded(false)}>取消</button><button className={styles.primary} onClick={()=>{change(expandedDraft);setExpanded(false);}}>确认修改</button></div></footer></Dialog.Content></Dialog.Overlay></Dialog.Root>}
   {erasing&&<ContentErasureDialog target={{kind:'content',id:erasing.id}} name={erasing.name}
    relatedIds={erasing.ids}
@@ -154,5 +145,5 @@ export const ContentEditor=forwardRef<ContentEditorHandle,{item:EditableItem;onS
     try{localStorage.removeItem(key);localStorage.removeItem(pendingKey);}catch{/* Storage may be unavailable. */}
     setDraft({baseVersion:0,sourceContentId:null,title:item.title,body:''});setSaved('');setError('');}}/>}
   {history&&<VersionCompare returnFocusRef={historyTrigger} versions={versions} onClose={()=>setHistory(false)}/>}
- </div>;
+  </>}>{children}</ContentDraftView>;
 });

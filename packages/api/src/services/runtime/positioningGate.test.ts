@@ -6,7 +6,7 @@ import { DECISIONS_MODEL, DECISIONS_URL, decide, decisionsClassifier, readPositi
   windowBoundKey }
   from './positioningGate';
 import { isPositioningRefusal, POSITIONING_MARKER, POSITIONING_FALLBACK_INSTRUCTIONS } from './positioningFallback';
-import { withPrimaryAddenda } from './primaryInstructions';
+import { REPLY_LANGUAGE, REPLY_LANGUAGE_INSTRUCTIONS, withPrimaryAddenda } from './primaryInstructions';
 import { stagingProcedureError, StagingAccessError } from './stagingErrors';
 import { isPositioningRequired, POSITIONING_REQUIRED } from '../../shared/positioningGate';
 
@@ -116,6 +116,8 @@ it('maps the refusal to a stable code the front end can recognize', () => {
 it('adds the fallback rule only to a turn frozen with it', () => {
   expect(withPrimaryAddenda('base', {})).toBe('base');
   expect(withPrimaryAddenda('base', { positioningGate: 'fallback-v1' })).toBe('base' + POSITIONING_FALLBACK_INSTRUCTIONS);
+  expect(withPrimaryAddenda('base', { positioningGate: 'fallback-v1', replyLanguage: REPLY_LANGUAGE }))
+    .toBe('base' + REPLY_LANGUAGE_INSTRUCTIONS + POSITIONING_FALLBACK_INSTRUCTIONS);
   expect(POSITIONING_FALLBACK_INSTRUCTIONS).toContain(POSITIONING_MARKER);
   expect(withPrimaryAddenda('base', { workspaceContext: true })).toContain('first read the confirmed entry whose kind is positioning');
 });

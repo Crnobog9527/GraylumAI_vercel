@@ -4,7 +4,7 @@ BEGIN;
 SET LOCAL session_replication_role = replica;
 CREATE TEMP TABLE b1p_ids(k text PRIMARY KEY, v uuid);
 INSERT INTO b1p_ids SELECT k,gen_random_uuid() FROM unnest(ARRAY[
-  'closed','open','erased_conv','busy_conv','open_conv','request','token',
+  'closed','open','erased_conv','open_conv',
   'closed_success_pre','closed_abort_pre','open_abort_pre','move_message','move_snapshot']) k;
 CREATE FUNCTION pg_temp.b1p_id(k text) RETURNS uuid LANGUAGE sql AS $$
   SELECT v FROM b1p_ids WHERE b1p_ids.k=$1
@@ -19,10 +19,9 @@ INSERT INTO account_erasure_requests(profile_id,request_id)
 VALUES(pg_temp.b1p_id('closed'),gen_random_uuid());
 INSERT INTO conversations(id,user_id,title)
 SELECT pg_temp.b1p_id(c),pg_temp.b1p_id(a),'parent guard fixture'
-FROM (VALUES ('erased_conv','closed'),('busy_conv','closed'),('open_conv','open')) x(c,a);
-INSERT INTO ordinary_chat_requests(request_id,user_id,conversation_id,writer_token,input,state)
-VALUES(pg_temp.b1p_id('request'),pg_temp.b1p_id('closed'),pg_temp.b1p_id('busy_conv'),
-  pg_temp.b1p_id('token'),'{"message":"in-flight question"}','running');
+FROM (VALUES ('erased_conv','closed'),('open_conv','open')) x(c,a);
+-- LEGACY-CLOSE 0271 dropped ordinary_chat_requests and ordinary_chat_transition: the former in-flight ordinary
+-- request case (P4) no longer exists.
 -- A real legacy finalizer will attempt a nonzero balance restoration before inserting messages.
 INSERT INTO billing_history(id,user_id,operation_type,amount,metadata)
 SELECT pg_temp.b1p_id(k),pg_temp.b1p_id(a),'pre_deduct',-3,'{}'::jsonb
@@ -51,23 +50,18 @@ CREATE FUNCTION pg_temp.b1p_snapshot() RETURNS jsonb LANGUAGE sql AS $$
   SELECT jsonb_build_object(
     'profiles',(SELECT jsonb_agg(to_jsonb(p) ORDER BY id) FROM profiles p WHERE id=pg_temp.b1p_id('closed')),
     'messages',(SELECT jsonb_agg(to_jsonb(m) ORDER BY id) FROM messages m
-      WHERE conversation_id IN (pg_temp.b1p_id('erased_conv'),pg_temp.b1p_id('busy_conv'))),
+      WHERE conversation_id=pg_temp.b1p_id('erased_conv')),
     'billing',(SELECT jsonb_agg(to_jsonb(b) ORDER BY id) FROM billing_history b WHERE user_id=pg_temp.b1p_id('closed')),
     'credits',(SELECT jsonb_agg(to_jsonb(c) ORDER BY id) FROM credit_transactions c WHERE user_id=pg_temp.b1p_id('closed')),
     'tokens',(SELECT jsonb_agg(to_jsonb(t) ORDER BY id) FROM token_stats t WHERE user_id=pg_temp.b1p_id('closed')),
-    'usage',(SELECT jsonb_agg(to_jsonb(u) ORDER BY id) FROM ai_usage_logs u WHERE user_id=pg_temp.b1p_id('closed')),
-    'requests',(SELECT jsonb_agg(to_jsonb(r) ORDER BY request_id) FROM ordinary_chat_requests r
-      WHERE user_id=pg_temp.b1p_id('closed')))
+    'usage',(SELECT jsonb_agg(to_jsonb(u) ORDER BY id) FROM ai_usage_logs u WHERE user_id=pg_temp.b1p_id('closed')))
 $$;
 SET LOCAL ROLE service_role;
 SELECT account_erasure_scrub_runtime(pg_temp.b1p_id('closed'));
 RESET ROLE;
 DO $$ BEGIN
-  IF (SELECT erased_at IS NULL FROM conversations WHERE id=pg_temp.b1p_id('erased_conv'))
-    OR (SELECT erased_at IS NOT NULL FROM conversations WHERE id=pg_temp.b1p_id('busy_conv'))
-    OR (SELECT writer_token IS DISTINCT FROM pg_temp.b1p_id('token') FROM ordinary_chat_requests
-      WHERE request_id=pg_temp.b1p_id('request')) THEN
-    RAISE EXCEPTION 'B1b parent first scrub failed erased/in-flight boundary';
+  IF (SELECT erased_at IS NULL FROM conversations WHERE id=pg_temp.b1p_id('erased_conv')) THEN
+    RAISE EXCEPTION 'B1b parent first scrub failed erased boundary';
   END IF;
 END $$;
 CREATE TEMP TABLE b1p_before AS SELECT pg_temp.b1p_snapshot() contents;
@@ -156,33 +150,4 @@ DO $$ BEGIN
 END $$;
 SELECT 'PASS B1b parent P3 real service-role success/abort still finish for live conversation';
 
--- The closed actor's already-dispatched request was skipped, so its existing token may finish.
--- This is an existing zero-cost request; service_role never calls the revoked claim entrance.
-SET LOCAL ROLE service_role;
-SELECT ordinary_chat_transition(pg_temp.b1p_id('closed'),pg_temp.b1p_id('request'),pg_temp.b1p_id('token'),
-  'respond',jsonb_build_object('p_user_id',pg_temp.b1p_id('closed'),
-    'p_conversation_id',pg_temp.b1p_id('busy_conv'),'p_request_id',pg_temp.b1p_id('request'),
-    'p_user_message','in-flight question','p_assistant_message','finished after closure',
-    'p_model_used','fixture','p_total_cost_usd',0,'p_total_credits',0));
-SELECT ordinary_chat_transition(pg_temp.b1p_id('closed'),pg_temp.b1p_id('request'),pg_temp.b1p_id('token'),'success');
-RESET ROLE;
-DO $$ BEGIN
-  IF (SELECT state FROM ordinary_chat_requests WHERE request_id=pg_temp.b1p_id('request'))<>'succeeded'
-    OR (SELECT count(*) FROM messages WHERE conversation_id=pg_temp.b1p_id('busy_conv') AND erased_at IS NULL)<>2 THEN
-    RAISE EXCEPTION 'B1b parent skipped existing request could not finish';
-  END IF;
-END $$;
-SET LOCAL ROLE service_role;
-SELECT account_erasure_scrub_runtime(pg_temp.b1p_id('closed'));
-RESET ROLE;
-DO $$ BEGIN
-  IF (SELECT erased_at IS NULL FROM conversations WHERE id=pg_temp.b1p_id('busy_conv'))
-    OR EXISTS(SELECT 1 FROM messages WHERE conversation_id=pg_temp.b1p_id('busy_conv')
-      AND (erased_at IS NULL OR content IS NOT NULL))
-    OR EXISTS(SELECT 1 FROM ordinary_chat_requests WHERE request_id=pg_temp.b1p_id('request')
-      AND (erased_at IS NULL OR writer_token IS NOT NULL OR input IS NOT NULL OR response_params IS NOT NULL)) THEN
-    RAISE EXCEPTION 'B1b parent terminal retry left content or dispatch token';
-  END IF;
-END $$;
-SELECT 'PASS B1b parent P4 closed in-flight request completes before scrub; terminal retry clears children and token';
 ROLLBACK;

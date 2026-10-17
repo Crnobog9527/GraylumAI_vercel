@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// RT-3b/RT-5 transport contract. PR-2 attaches these events to the existing Agent turn stream.
+// RT-3b/RT-5 transport contract: research events of a positioning mentor turn on its Agent turn stream (PR-3).
 import type { SocialKind, SocialPlatform } from '../services/research/vendors/types';
 export interface ResearchCandidateOption {
   id: string; platform: SocialPlatform; account: string; evidenceRef: string; label?: string; selectable: boolean;

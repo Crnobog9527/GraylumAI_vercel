@@ -14,6 +14,33 @@ export const SANDBOX_LIMITS = {
   pdfTimeoutMs: 60_000,
 } as const;
 
+/** Browser recognition of scanned pages and Word images (LIB-2d, LIB_DOCS_PLAN §4.4–4.5). */
+export const OCR_LIMITS = {
+  /** Images per sandbox run: models load once per batch, and a closed tab loses at most one batch. */
+  maxImages: 8,
+  maxImageBytes: 10_000_000,
+  maxImageEdge: 4096,
+  maxImagePixels: 16_777_216,
+  /** Loading the runtime and models in the Worker. */
+  initTimeoutMs: 30_000,
+  /** Per image; the M1 Max evaluation needed at most 7.4 s (an upside-down page read twice). */
+  imageTimeoutMs: 60_000,
+  maxPageChars: 100_000,
+} as const;
+
+/** Scanned PDF pages rendered to images for recognition (LIB-2d, LIB_DOCS_PLAN §4.4 initial values). */
+export const PDF_RENDER_LIMITS = {
+  maxPages: 8,
+  longEdgePixels: 1600,
+  maxJpegBytes: 600_000,
+  jpegQualities: [0.85, 0.75, 0.6, 0.45],
+  /** One decoded embedded image (pdf.js `maxImageSize`); larger images are left out of the render. */
+  maxImagePixels: 40_000_000,
+  /** Any canvas pdf.js asks for (pattern, mask, group), not only the page. */
+  maxCanvasPixels: 40_000_000,
+  pageTimeoutMs: 30_000,
+} as const;
+
 /** PDF text extraction (LIB-2c, LIB_DOCS_PLAN §4.2 initial values). */
 export const PDF_LIMITS = {
   maxPages: 500,
