@@ -11,6 +11,7 @@ import { ResearchCallList } from '@/components/research/research-call-list';
 import type { ResearchCall } from '@/components/research/research-model';
 import { J_COMPARE } from '@/lib/landing/landing-copy-j-compare';
 import type { WorkflowTurn } from '@/lib/landing/landing-copy-l-workflows';
+import { cn } from '@/lib/utils';
 import styles from './scenarios-l.module.css';
 
 type Task = { question: string; generic: readonly string[]; genericNote: string; coachNote: string; verdict: string };
@@ -60,7 +61,7 @@ export function WorkflowCompareL({ task, turns, beat, badge, onHold }: {
             <div inert aria-hidden="true">
               <p className={compare.mobileName}><Bot size={13} />{J_COMPARE.genericName}</p>
               <p className={compare.question}><span>你</span>{task.question}</p>
-              <div className={compare.genericReply}>{task.generic.join('\n')}</div>
+              <div className={cn(compare.genericReply, styles.genericReply)}>{task.generic.join('\n')}</div>
             </div>
             <p className={compare.note} data-side="generic"><b>{J_COMPARE.genericNoteLabel}</b>{task.genericNote}</p>
           </div>

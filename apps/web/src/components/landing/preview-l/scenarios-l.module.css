@@ -32,3 +32,21 @@
 /* The coach's chat takes what the screen leaves it. */
 .held .log { max-height: max(200px, calc(100svh - 540px)); }
 @media (max-width: 899px) { .held .log { max-height: max(130px, calc(100svh - 700px)); } }
+/* Round six, returned (390): on a phone the coach's chat gets at least half the held screen. The tabs and the controls
+   share one row (the tabs scroll sideways, the controls show their icons), the general AI's answer keeps about three
+   lines and scrolls inside its box, and the coach's chat takes the height the rest leaves. */
+@media (max-width: 767px) {
+  .held .stage { padding: 66px 0 72px; }
+  .held .heldTitle { margin-bottom: 6px; font-size: 17px; }
+  .held .bar { flex-wrap: nowrap; gap: 6px; margin-bottom: 6px; }
+  .held .tabs { flex: 1 1 auto; flex-wrap: nowrap; gap: 6px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+  .held .tabs button { flex: none; min-height: 34px; padding: 0 10px; font-size: 13px; white-space: nowrap; }
+  .held .controls { flex: none; flex-wrap: nowrap; gap: 6px; }
+  .held .pause { justify-content: center; min-width: 34px; min-height: 34px; padding: 0; }
+  .held .label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .held .panel { gap: 4px; }
+  .held .title { font-size: 16px; }
+  .held .genericReply { max-height: 4.65em; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+  .held .log { height: max(180px, calc(100svh - 524px)); max-height: none; }
+  .held [data-centred] { margin-top: 6px; font-size: 14px; }
+}

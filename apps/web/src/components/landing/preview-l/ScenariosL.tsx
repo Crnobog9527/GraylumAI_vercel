@@ -61,6 +61,7 @@ export function ScenariosL({ flags, after }: { flags: LandingFlags; after?: Reac
   const [seen, setSeen] = useState(false);
   const [staticActive, setStaticActive] = useState(0);
   const ref = useRef<HTMLElement>(null);
+  const tabs = useRef<HTMLDivElement>(null);
   const lastScroll = useRef(0);
   const lastProgress = useRef(0);
   const base = useId();
@@ -102,9 +103,17 @@ export function ScenariosL({ flags, after }: { flags: LandingFlags; after?: Reac
   // All of them seen: remembered, so a later visit may skip.
   useEffect(() => { if (held && position >= total - HOLD_BEATS) writeSeen(); }, [held, position, total]);
 
-  if (!items.length) return null;
   const at = scenarioAt(items, position);
   const active = held ? at.index : staticActive;
+  // On a phone the tabs share a row with the controls and scroll sideways: the current one is kept in view.
+  useEffect(() => {
+    const row = tabs.current;
+    const tab = row?.children[active] as HTMLElement | undefined;
+    if (!row || !tab || row.scrollWidth <= row.clientWidth) return;
+    row.scrollLeft = Math.max(0, Math.min(tab.offsetLeft - row.offsetLeft - 16, row.scrollWidth - row.clientWidth));
+  }, [active]);
+
+  if (!items.length) return null;
   const current = items[active];
   const startOf = (index: number) => items.slice(0, index).reduce((sum, item) => sum + spanOf(item), 0);
   const pick = (index: number) => (held ? setPosition(startOf(index)) : setStaticActive(index));
@@ -120,7 +129,7 @@ export function ScenariosL({ flags, after }: { flags: LandingFlags; after?: Reac
       </h2>
       {items.length > 1 ? (
         <div className={styles.bar}>
-          <div role="tablist" aria-label={L_SCENARIOS.label} className={styles.tabs}>
+          <div ref={tabs} role="tablist" aria-label={L_SCENARIOS.label} className={styles.tabs}>
             {items.map((item, index) => (
               <button key={item.copy.tab} type="button" role="tab" id={`${base}-tab-${index}`} aria-controls={`${base}-panel`}
                 aria-selected={index === active} tabIndex={index === active ? 0 : -1} onClick={() => pick(index)}>{item.copy.tab}</button>
@@ -128,9 +137,15 @@ export function ScenariosL({ flags, after }: { flags: LandingFlags; after?: Reac
           </div>
           {held ? (
             <div className={styles.controls}>
-              {seen ? <button type="button" className={styles.pause} onClick={skip}><ChevronsDown size={14} aria-hidden="true" />{L_STEPS.skip}</button> : null}
-              <button type="button" className={styles.pause} onClick={() => setStopped(value => !value)}>
-                {stopped ? <Play size={14} aria-hidden="true" /> : <Pause size={14} aria-hidden="true" />}{stopped ? L_SCENARIOS.play : L_SCENARIOS.pause}
+              {seen ? (
+                <button type="button" className={styles.pause} onClick={skip} aria-label={L_STEPS.skip}>
+                  <ChevronsDown size={14} aria-hidden="true" /><span className={styles.label}>{L_STEPS.skip}</span>
+                </button>
+              ) : null}
+              <button type="button" className={styles.pause} onClick={() => setStopped(value => !value)}
+                aria-label={stopped ? L_SCENARIOS.play : L_SCENARIOS.pause}>
+                {stopped ? <Play size={14} aria-hidden="true" /> : <Pause size={14} aria-hidden="true" />}
+                <span className={styles.label}>{stopped ? L_SCENARIOS.play : L_SCENARIOS.pause}</span>
               </button>
             </div>
           ) : null}
