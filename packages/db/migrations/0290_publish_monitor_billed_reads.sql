@@ -82,7 +82,7 @@ END $$;
 
 -- One row per supplier request attempt of a refresh. request_key is the request identity (sha256 of vendor, route and
 -- exact body); a refresh may hold several attempts of one key only when an earlier attempt ended without a usable
--- answer (state 'abandoned': its BILL2 call was settled at zero for the user). Rows go with their connection.
+-- answer (state 'abandoned': its BILL2 call was settled at zero for the user).
 CREATE TABLE IF NOT EXISTS public.social_billed_reads(
  id uuid PRIMARY KEY,
  actor_id uuid NOT NULL,
@@ -97,10 +97,21 @@ CREATE TABLE IF NOT EXISTS public.social_billed_reads(
  token uuid NOT NULL,
  result jsonb CHECK(result IS NULL OR (jsonb_typeof(result)='object' AND pg_column_size(result)<=262144)),
  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
- updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
- FOREIGN KEY(connection_id,actor_id) REFERENCES public.social_connections(id,actor_id) ON DELETE CASCADE,
- CHECK(state<>'answered' OR result IS NOT NULL)
+ updated_at timestamptz NOT NULL DEFAULT clock_timestamp()
 );
+-- Deliberately no foreign key to the connection: a user who disconnects (or erases the account) while a billed call is
+-- still unsettled must not delete the only record that lets the call be settled and its hold released. The stored
+-- supplier answer (public profile data) is wiped the moment the connection goes; ids and states stay until the billed
+-- run is settled and a week has passed.
+CREATE OR REPLACE FUNCTION public.publish_monitor_billed_wipe_results() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+BEGIN
+ UPDATE social_billed_reads SET result=NULL WHERE connection_id=OLD.id AND result IS NOT NULL;
+ RETURN OLD;
+END $$;
+DROP TRIGGER IF EXISTS social_connections_wipe_billed_results ON public.social_connections;
+CREATE TRIGGER social_connections_wipe_billed_results BEFORE DELETE ON public.social_connections
+ FOR EACH ROW EXECUTE FUNCTION public.publish_monitor_billed_wipe_results();
 -- At most one live attempt per key and refresh.
 CREATE UNIQUE INDEX IF NOT EXISTS social_billed_reads_live
  ON public.social_billed_reads(connection_id,refresh_id,request_key) WHERE state IN ('opened','dispatched','answered');
@@ -254,10 +265,14 @@ CREATE OR REPLACE FUNCTION public.publish_monitor_billed_prune(p_limit integer) 
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE n integer;
 BEGIN
- DELETE FROM social_billed_reads WHERE id IN (SELECT id FROM social_billed_reads
-  WHERE created_at<clock_timestamp()-interval '7 days' ORDER BY created_at LIMIT LEAST(GREATEST(p_limit,1),50000));
+ -- Only evidence of runs that are closed: an open run's evidence is what lets recovery settle its calls.
+ DELETE FROM social_billed_reads WHERE id IN (SELECT r.id FROM social_billed_reads r
+  WHERE r.created_at<clock_timestamp()-interval '7 days'
+   AND NOT EXISTS(SELECT 1 FROM social_billed_runs b WHERE b.run_id=r.run_id AND b.closed_at IS NULL)
+  ORDER BY r.created_at LIMIT LEAST(GREATEST(p_limit,1),50000));
  GET DIAGNOSTICS n=ROW_COUNT;
- DELETE FROM social_billed_runs WHERE closed_at<clock_timestamp()-interval '7 days';
+ DELETE FROM social_billed_runs WHERE closed_at<clock_timestamp()-interval '7 days'
+  AND NOT EXISTS(SELECT 1 FROM social_billed_reads r WHERE r.run_id=social_billed_runs.run_id);
  RETURN n;
 END $$;
 
@@ -265,10 +280,10 @@ DO $$ DECLARE f regprocedure; BEGIN
  FOR f IN SELECT p.oid::regprocedure FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
   WHERE n.nspname='public' AND p.proname IN ('publish_monitor_billed_run','publish_monitor_billed_lookup',
    'publish_monitor_billed_step','publish_monitor_billed_closed','publish_monitor_billed_orphans',
-   'publish_monitor_billed_recovery','publish_monitor_billed_abandon',
+   'publish_monitor_billed_recovery','publish_monitor_billed_abandon','publish_monitor_billed_wipe_results',
    'publish_monitor_billed_prune','publish_monitor_refresh_insufficient','publish_monitor_tool_only_run') LOOP
   EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC,anon,authenticated,service_role',f);
-  IF split_part(f::text,'(',1)<>'publish_monitor_tool_only_run' THEN
+  IF split_part(f::text,'(',1) NOT IN ('publish_monitor_tool_only_run','publish_monitor_billed_wipe_results') THEN
    EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO service_role',f); END IF;
  END LOOP;
 END $$;

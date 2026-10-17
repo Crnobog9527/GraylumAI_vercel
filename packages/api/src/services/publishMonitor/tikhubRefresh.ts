@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { readMembershipEntitlements } from '../membershipEntitlements';
 import type { SocialPlatform } from '../research/vendors/types';
 import { billedTikhubRead, settleLeftOpenRun, type BilledReadDeps } from './billedRead';
-import { applyTikhubRead, tikhubClaimSchema, type TikhubClaim } from './tikhub';
+import { applyTikhubPartial, applyTikhubRead, tikhubClaimSchema, type TikhubClaim } from './tikhub';
 
 /**
  * PUBLISH-MONITOR PR-4b (plan §4.2, §6, §8): the daily TikHub step of `/api/cron/social-monitor`. Own Xiaohongshu/Douyin
@@ -71,6 +71,8 @@ export async function runTikhubRefresh(db: Db, deps: Omit<BilledReadDeps, 'admin
       const read = await billedTikhubRead({ ...deps, admin: db }, keys, claim.platform as SocialPlatform, claim.account);
       if (read.kind === 'stale') { count('stale'); continue; }
       if (read.kind === 'insufficient_credits') {
+        // What was already read (and charged) in this refresh is kept; only the rest waits for the balance.
+        await applyTikhubPartial(db, claim, read.results.account_profile ?? null, `tikhub:${claim.refreshId}`);
         const done = await db.rpc('publish_monitor_refresh_insufficient', { p_connection_id: claim.connectionId, p_lease: claim.lease,
           p_refresh_id: claim.refreshId });
         if (done.error) throw new Error('PUBLISH_MONITOR_TIKHUB_UNAVAILABLE');

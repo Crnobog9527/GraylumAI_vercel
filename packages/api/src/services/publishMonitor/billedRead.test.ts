@@ -117,7 +117,7 @@ describe('publish-monitor billed TikHub read', () => {
 
   it('a balance too low for the next call stops with nothing sent, and the run is still closed', async () => {
     const a = admin({ claimState: 'waiting_credits' }), seen: string[] = [];
-    expect(await billedTikhubRead(deps(a.db, seen), keys, 'xiaohongshu', XHS)).toEqual({ kind: 'insufficient_credits' });
+    expect(await billedTikhubRead(deps(a.db, seen), keys, 'xiaohongshu', XHS)).toEqual({ kind: 'insufficient_credits', results: {} });
     expect(seen).toEqual([]);
     expect(a.calls.find(c => c[0] === 'bill2_close')![1].p_outcome).toBe('cancelled');
   });

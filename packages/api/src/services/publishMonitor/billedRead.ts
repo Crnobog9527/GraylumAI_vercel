@@ -198,7 +198,8 @@ const storedResult = z.object({ vendor: z.literal('tikhub'), route: z.string(), 
 
 export type ReadOutcome =
   | { kind: 'read'; results: Partial<Record<SocialKind, ResearchCallResult>>; delivered: boolean }
-  | { kind: 'insufficient_credits' }
+  /** `results` holds what was already read and charged before the balance ran out (kept, not discarded). */
+  | { kind: 'insufficient_credits'; results: Partial<Record<SocialKind, ResearchCallResult>> }
   | { kind: 'unavailable'; reason: string }
   | { kind: 'stale' };
 
@@ -244,7 +245,7 @@ export async function billedTikhubRead(deps: BilledReadDeps, keys: ClaimKeys, pl
         ...(deps.vendors ? { vendors: deps.vendors } : {}), ...(deps.now ? { now: deps.now } : {}) };
       const outcome = await runSubcall(context, item.request);
       if (!outcome.sent) {
-        if (outcome.stop === 'BALANCE_LOW') return { kind: 'insufficient_credits' };
+        if (outcome.stop === 'BALANCE_LOW') return { kind: 'insufficient_credits', results };
         return { kind: 'unavailable', reason: outcome.stop.slice(0, 64) };
       }
       results[item.kind] = outcome.result;

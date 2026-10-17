@@ -1,8 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from 'vitest';
-const mocks = vi.hoisted(() => ({ read: vi.fn(), settleOpen: vi.fn(), apply: vi.fn() }));
+const mocks = vi.hoisted(() => ({ read: vi.fn(), settleOpen: vi.fn(), apply: vi.fn(), partial: vi.fn() }));
 vi.mock('./billedRead', () => ({ billedTikhubRead: mocks.read, settleLeftOpenRun: mocks.settleOpen }));
-vi.mock('./tikhub', async original => ({ ...(await original<object>()), applyTikhubRead: mocks.apply }));
+vi.mock('./tikhub', async original => ({ ...(await original<object>()), applyTikhubRead: mocks.apply, applyTikhubPartial: mocks.partial }));
 import { runTikhubRefresh } from './tikhubRefresh';
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -33,13 +33,23 @@ describe('publish-monitor daily TikHub step', () => {
 
   it('a low balance settles as insufficient credits; an unavailable TikHub releases and stops the step', async () => {
     mocks.read.mockReset();
-    mocks.read.mockResolvedValueOnce({ kind: 'insufficient_credits' }).mockResolvedValueOnce({ kind: 'unavailable', reason: 'X' });
+    mocks.read.mockResolvedValueOnce({ kind: 'insufficient_credits', results: {} }).mockResolvedValueOnce({ kind: 'unavailable', reason: 'X' });
     const d = db([[claim(1, 'own'), claim(2, 'own'), claim(3, 'own')], [claim(4, 'own')]]);
     const report = await runTikhubRefresh(d.db, { env: {} }, async () => ({ windowDays: 30, benchmark: true }), Date.now() + 60_000);
     expect(report.outcomes).toEqual({ insufficient_credits: 1, release: 2 });
     expect(d.calls.some(c => c[0] === 'publish_monitor_refresh_insufficient')).toBe(true);
     expect(d.calls.filter(c => c[0] === 'publish_monitor_tikhub_claim').length).toBe(1);
     expect(mocks.read).toHaveBeenCalledTimes(2);
+  });
+
+  it('a balance that runs out after the first charged request keeps what was read (the profile) before settling', async () => {
+    mocks.read.mockReset(); mocks.partial.mockReset();
+    mocks.read.mockResolvedValueOnce({ kind: 'insufficient_credits', results: { account_profile: { outcome: 'ok' } } });
+    const d = db([[claim(1, 'own')], []]);
+    await runTikhubRefresh(d.db, { env: {} }, async () => ({ windowDays: 30, benchmark: true }), Date.now() + 60_000);
+    expect(mocks.partial).toHaveBeenCalledTimes(1);
+    expect(mocks.partial.mock.calls[0]![2]).toEqual({ outcome: 'ok' });
+    expect(d.calls.some(c => c[0] === 'publish_monitor_refresh_insufficient')).toBe(true);
   });
 
   it('an unreadable entitlement reads nothing and stops; a read without a post list is a failed read', async () => {

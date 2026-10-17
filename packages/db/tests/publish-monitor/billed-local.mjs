@@ -160,10 +160,39 @@ try {
   }
   report.checks.push('insufficient credits settles the connection for today as "余额不足，未更新"');
 
-  // Disconnecting removes the ledger rows with the connection.
-  await svc('SELECT publish_monitor_disconnect($1,$2) v', [m.a, m.conn]);
-  assert.equal(await v('SELECT count(*)::int v FROM social_billed_reads WHERE connection_id=$1', [m.conn]), 0);
-  report.checks.push('ledger rows go with their connection');
+  // Disconnecting while a billed call is unsettled must keep the recovery rows (ids and states) and wipe the saved answer.
+  const dm = await member();
+  const dkeys = await (async () => {
+    const claimed = (await svc('SELECT publish_monitor_tikhub_claim(10,120) v')).find(x => x.connectionId === dm.conn);
+    return [dm.conn, claimed.lease, claimed.refreshId];
+  })();
+  const drun = await rpc(c, 'bill2_prepare', dm.a, randomUUID(), await payload(dm.a));
+  await svc('SELECT publish_monitor_billed_run($1,$2,$3,$4,$5) v', [...dkeys, drun.id, JSON.stringify([toolPolicy])]);
+  const dop = randomUUID(), dstep = (name, extra = {}) => svc('SELECT publish_monitor_billed_step($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) v',
+    [...dkeys, extra.op ?? dop, name, 'a'.repeat(64), ROUTE, token, extra.call ?? null, extra.state ?? null,
+      extra.result ? JSON.stringify(extra.result) : null]);
+  const dcall = await rpc(c, 'bill2_claim', dm.a, drun.id, 1, { provider: 'tikhub', account: 'tikhub-main', model: ROUTE,
+    protocol: 'research-tool-v1', phase: 'publish_monitor', requestHash: 'a'.repeat(64), automaticRetry: false, hiddenTools: false,
+    lookupSupported: false, upperUsd: '0.01', billingUnit: { modelId: toolPolicy.modelId, multiplier: '6' }, toolPricing: pricing });
+  assert.equal((await rpc(c, 'bill2_dispatch', dm.a, drun.id, dcall.id, dcall.dispatchToken)).dispatch, true);
+  await dstep('open'); await dstep('link', { call: dcall.id }); await dstep('dispatch');
+  await dstep('finish', { state: 'succeeded', result: { items: [{ id: 'secret-post' }], billing: { receipt: { toolOutcome: 'delivered' } } } });
+  await svc('SELECT publish_monitor_disconnect($1,$2) v', [dm.a, dm.conn]);
+  const kept = (await c.query('SELECT state,result,call_id FROM social_billed_reads WHERE run_id=$1', [drun.id])).rows;
+  assert.deepEqual([kept.length, kept[0].result, kept[0].call_id], [1, null, dcall.id], 'recovery row survives, answer wiped');
+  const rec = await svc('SELECT publish_monitor_billed_recovery($1) v', [drun.id]);
+  assert.deepEqual([rec[0].callPending, rec[0].receipt], [true, null], 'the unsettled call is still found after the disconnect');
+  report.checks.push('disconnecting keeps the recovery row of an unsettled call (answer wiped) so its hold can still be released');
+
+  // Pruning leaves evidence of open runs alone, whatever its age.
+  await c.query("UPDATE social_billed_reads SET created_at=now()-interval '9 days' WHERE run_id=$1", [drun.id]);
+  assert.equal(await svc('SELECT publish_monitor_billed_prune(1000) v'), 0, 'open run: nothing pruned');
+  await svc('SELECT publish_monitor_billed_closed($1) v', [drun.id]);
+  await c.query("UPDATE social_billed_runs SET closed_at=now()-interval '9 days' WHERE run_id=$1", [drun.id]);
+  assert.ok(await svc('SELECT publish_monitor_billed_prune(1000) v') >= 1);
+  assert.equal(await v('SELECT count(*)::int v FROM social_billed_runs WHERE run_id=$1', [drun.id]), 0);
+  report.checks.push('pruning waits for the billed run to be closed and a week to pass');
+
   assert.equal(db.sql(read('packages/db/tests/account-open-policy-audit.sql')), '');
   report.checks.push('account-open policy audit returns zero rows');
 } catch (error) { report.failed = String(error.stack ?? error); process.exitCode = 1; }
