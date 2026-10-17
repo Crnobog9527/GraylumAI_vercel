@@ -441,7 +441,7 @@ DO $$ DECLARE src text; a text; BEGIN
   src:=pg_get_functiondef('public.fusion_review_start(uuid,uuid,uuid,uuid,jsonb)'::regprocedure);
   IF position('fusion_compare_active' IN src)=0 THEN
     a:=$x$  IF EXISTS(SELECT 1 FROM fusion_reviews WHERE actor_id=p_actor_id AND state IN ('running','paused'))$x$;
-    IF array_length(string_to_array(src,a),1)<>2 THEN RAISE EXCEPTION 'FUSION_SOURCE_MISMATCH: fusion_review_start 0284'; END IF;
+    IF array_length(string_to_array(src,a),1)<>2 THEN RAISE EXCEPTION 'FUSION_SOURCE_MISMATCH: fusion_review_start 0290'; END IF;
     EXECUTE replace(src,a,$x$  IF fusion_compare_active(p_actor_id) OR EXISTS(SELECT 1 FROM fusion_reviews WHERE actor_id=p_actor_id AND state IN ('running','paused'))$x$);
   END IF;
 END $$;
@@ -453,10 +453,10 @@ END $$;
 -- answers whose read_source copied the source, 0218). Account erasure removes and counts the records.
 DO $$ DECLARE src text; a text; BEGIN
   src:=pg_get_functiondef('public.content_erasure_confirm(uuid,text,uuid,text)'::regprocedure);
-  IF position('-- 0284 fusion compares' IN src)=0 THEN
+  IF position('-- 0290 fusion compares' IN src)=0 THEN
     a:=$x$ -- 0236 fusion reviews$x$;
-    IF array_length(string_to_array(src,a),1)<>2 THEN RAISE EXCEPTION 'FUSION_SOURCE_MISMATCH: content_erasure_confirm 0284'; END IF;
-    EXECUTE replace(src,a,$x$ -- 0284 fusion compares
+    IF array_length(string_to_array(src,a),1)<>2 THEN RAISE EXCEPTION 'FUSION_SOURCE_MISMATCH: content_erasure_confirm 0290'; END IF;
+    EXECUTE replace(src,a,$x$ -- 0290 fusion compares
  PERFORM fc.id FROM fusion_compares fc WHERE fc.actor_id=a AND (fc.session_id=ANY(sessions)
   OR fc.session_id IN (SELECT d.session_id FROM opc_drafts d WHERE d.actor_id=a AND d.project_id=ANY(projects))
   OR content_erasure_references(fc.workspace_dependencies,refs)) ORDER BY fc.id FOR UPDATE NOWAIT;
@@ -489,7 +489,7 @@ DO $$ DECLARE src text; a text; BEGIN
   src:=pg_get_functiondef('public.content_erasure_mark_session(uuid,uuid)'::regprocedure);
   IF position('fusion_compares' IN src)=0 THEN
     a:=$x$  AND NOT EXISTS(SELECT 1 FROM fusion_billing_groups fg WHERE fg.source_session_id=target)$x$;
-    IF array_length(string_to_array(src,a),1)<>2 THEN RAISE EXCEPTION 'FUSION_SOURCE_MISMATCH: content_erasure_mark_session 0284'; END IF;
+    IF array_length(string_to_array(src,a),1)<>2 THEN RAISE EXCEPTION 'FUSION_SOURCE_MISMATCH: content_erasure_mark_session 0290'; END IF;
     EXECUTE replace(src,a,a||$x$
   AND NOT EXISTS(SELECT 1 FROM fusion_compares fcmp WHERE fcmp.session_id=target)$x$);
   END IF;
@@ -499,7 +499,7 @@ DO $$ DECLARE src text; a text; BEGIN
   src:=pg_get_functiondef('public.account_erasure_scrub_content(uuid)'::regprocedure);
   IF position('fusion_compares' IN src)=0 THEN
     a:=$x$  RETURN counts;$x$;
-    IF array_length(string_to_array(src,a),1)<>2 THEN RAISE EXCEPTION 'FUSION_SOURCE_MISMATCH: account_erasure_scrub_content 0284'; END IF;
+    IF array_length(string_to_array(src,a),1)<>2 THEN RAISE EXCEPTION 'FUSION_SOURCE_MISMATCH: account_erasure_scrub_content 0290'; END IF;
     EXECUTE replace(src,a,$x$  DELETE FROM fusion_compares WHERE actor_id=p_profile_id;
   GET DIAGNOSTICS n=ROW_COUNT;
   counts := counts || jsonb_build_object('fusion_compares', n);
@@ -508,7 +508,7 @@ $x$||a);
   src:=pg_get_functiondef('public.account_erasure_body_remaining(uuid)'::regprocedure);
   IF position('fusion_compares' IN src)=0 THEN
     a:=$x$+(SELECT count(*) FROM fusion_reviews WHERE actor_id=p_profile_id)$x$;
-    IF array_length(string_to_array(src,a),1)<>2 THEN RAISE EXCEPTION 'FUSION_SOURCE_MISMATCH: account_erasure_body_remaining 0284'; END IF;
+    IF array_length(string_to_array(src,a),1)<>2 THEN RAISE EXCEPTION 'FUSION_SOURCE_MISMATCH: account_erasure_body_remaining 0290'; END IF;
     EXECUTE replace(src,a,a||$x$+(SELECT count(*) FROM fusion_compares WHERE actor_id=p_profile_id)$x$);
   END IF;
 END $$;

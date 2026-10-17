@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// FUSION-COMPARE PR-1 (0284): compare record, begin (recorded before the paid positioning judgement),
+// FUSION-COMPARE PR-1 (0290): compare record, begin (recorded before the paid positioning judgement),
 // compare branch of the group admission, claim, read, stop, adoption write-back and account erasure.
 import assert from 'node:assert/strict';
 import {randomUUID,createHash} from 'node:crypto';

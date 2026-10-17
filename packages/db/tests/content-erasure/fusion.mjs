@@ -32,7 +32,7 @@ export async function runFusion(db,report){
  report.checks.push('deleting a whole positioning draft deletes the Fusion outputs started from its conversation and closes the group runs');
 }
 
-// FUSION-COMPARE PR-1 (0284): a compare record is removed with its source conversation's draft, and a compare
+// FUSION-COMPARE PR-1 (0290): a compare record is removed with its source conversation's draft, and a compare
 // that froze a workspace source is removed (record, outputs, scrubbed runs) when that source is deleted, even
 // when the compare lives in another conversation.
 export async function runFusionCompare(db,report){
