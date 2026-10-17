@@ -77,5 +77,7 @@ describe("report document (R5)", () => {
     expect(bodyFromEditor(doc, "## 一句话结论\n\n改成抖音。")).toBe(`## 一句话结论\n\n改成抖音。\n\n${block}`);
     expect(canSave(doc, "字".repeat(12000))).toBe(true);
     expect(bodyFromEditor({ body: "## 旧报告" }, "## 改过")).toBe("## 改过");
+    // A stored body that ends with a newline after the block: opening the editor is not a change.
+    expect(canSave({ ...doc, body: doc.body + "\n" }, editorText(doc.body + "\n"))).toBe(false);
   });
 });

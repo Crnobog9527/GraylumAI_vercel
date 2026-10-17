@@ -47,7 +47,8 @@ export function ReportView({ body, streaming = false, data, editedFields, classN
   const values = checked?.data ?? {};
   const fallback = checked?.fallback ?? {};
   const present = [...new Set([...presentFields(values), ...(Object.keys(fallback) as ReportDataField[])])]
-    .filter(field => field !== "summary");
+    // A valid summary is in the quick look; an invalid one is listed as text in its chapter like any other field.
+    .filter(field => field !== "summary" || values.summary === undefined);
   const { byChapter, unplaced } = placeFields(values, chapters.map(chapter => chapter.title), present);
   const field = (name: ReportDataField) => <ReportField key={name} name={name} data={values} fallback={fallback[name]} />;
   const edited = new Set(editedFields);
