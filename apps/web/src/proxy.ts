@@ -32,6 +32,7 @@ const PUBLIC_SITE_PATHS = [
 // policy (Owner 2026-10-17), matched by segment so /refunds and /refund-x stay on the app host.
 const PUBLIC_SITE_PAGE_PATHS = [
   '/about',
+  '/features', // Product feature pages (/features and /features/<name>) linked from the public header and footer.
   '/zh-tw',
   '/refund',
 ];
