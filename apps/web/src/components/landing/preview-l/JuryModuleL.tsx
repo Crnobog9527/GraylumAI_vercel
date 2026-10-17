@@ -11,7 +11,11 @@ import styles from './steps-l.module.css';
  * Gold tag, one line of what it does, how it works in three beats, and a link to the jury's own page where its demo
  * now lives. Laid out like the product's own entry card (JuryEntry). Shown with the fusion flag only.
  */
-export function JuryModuleL({ flags }: { flags: LandingFlags }) {
+export function JuryModuleL({ flags, href = L_JURY.href }: {
+  flags: LandingFlags;
+  /** Where "看评审团怎么工作" leads; null on the public home page until a public jury page exists (the demo is a preview page). */
+  href?: string | null;
+}) {
   if (!allOn(flags, L_JURY.needs)) return null;
   return (
     <section aria-labelledby="jury-title" className={k.section} data-region="评审团">
@@ -24,7 +28,7 @@ export function JuryModuleL({ flags }: { flags: LandingFlags }) {
               <li key={beat}>{index > 0 ? <ArrowRight size={16} aria-hidden="true" /> : null}{beat}</li>
             ))}
           </ol>
-          <Link href={L_JURY.href} className={styles.juryLink}>{L_JURY.link}<ArrowRight size={16} aria-hidden="true" /></Link>
+          {href ? <Link href={href} className={styles.juryLink}>{L_JURY.link}<ArrowRight size={16} aria-hidden="true" /></Link> : null}
         </div>
       </div>
     </section>
