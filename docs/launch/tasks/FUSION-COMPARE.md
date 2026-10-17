@@ -186,11 +186,15 @@
       这条采用的一问一答和普通历史一样被隐藏；
     - 运行单不发任何调用、不冻结、收费 0，建好执行后按现有"派发前取消"的路径关闭结算（`bill2_cancel` + `bill2_finalize`，金额为 0）；
     - 按普通执行的顺序建：先 `bill2_prepare`、再建执行、在运行单还是 `prepared` 时由现有绑定路径写 `session_ref`（`runtime_binding_guard` 允许的正是这种情况），
-      不改绑定触发器；执行状态 `completed`，`payload` 里放问题和工作区 `dependencies`，`result.body` 放回答，历史条目挂在它上面，`runtime_sessions.revision` +2；
+      不改绑定触发器；`payload` 里放问题、工作区 `dependencies` 和标记 `fusionAdoption: {compareId, column}`，`result.body` 放回答，历史条目挂在它上面，`runtime_sessions.revision` +2；
+    - **执行状态记为 `cancelled`，不是 `completed`**：账号注销的绑定检查（`0187_erasure_runtime_binding.sql` 的 `runtime_binding_guard`）要求执行状态和运行单结局对应——
+      运行单 `settled` 且 `outcome='delivered'` 时执行必须是 `completed`，否则必须是 `cancelled`；零金额采用运行单没有调用、结局不是 delivered，
+      记成 `completed` 会让之后的账号注销被拒。`runtime_view` 照样返回它的 `body`（只看可用性，不看状态），历史可用性也不看状态；
+      前端按 `payload.fusionAdoption` 把它当普通回答显示，不显示"已停止"。
     - 对比各列的运行单照旧（顶层不带 Skill 身份，因为各列模型不同；它们只用于计费和保存正文，不进主对话历史）。
     - PR-1 必测：采用后 `runtime_view` 显示这一问一答、下一轮普通对话读得到；在 Skill 会话里采用一个不是 Skill 原配置模型的列也照样显示；
       之后撤销这个 Skill 的权限，这条采用的回答和同会话的普通 Skill 回答一样被隐藏；采用运行单收费 0、没有调用记录；删对话、注销按普通执行清理；
-      被采用列的运行单不会被重复结算或重新冻结。
+      被采用列的运行单不会被重复结算或重新冻结；**采用之后整账号注销能完成**（绑定检查通过、不报 `RUNTIME_ERASURE_BINDING_DENIED`）。
   - 主对话已有新内容（`revision ≠ R`）或正在跑执行：返回 `FUSION_COMPARE_STALE` 和引用文本，前端把选中的回答作为引用预填进输入框（FUSION.md 必测项 4）。
     这一步**不改** `adoption`，引用不算终态：用户刷新、关页面、清空输入框，或带引用的消息后来在执行或保存时失败，都可以再点"采用"重新拿到引用文本；
     引用只是把文字预填进输入框，发出后就是一条普通消息，照普通对话收费，不和对比记录绑定。`adoption` 只在第 2 步直接写回成功时记一次。
