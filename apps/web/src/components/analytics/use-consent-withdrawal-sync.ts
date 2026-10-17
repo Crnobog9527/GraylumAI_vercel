@@ -11,9 +11,9 @@ const SENT_KEY = 'graylum.analytics.withdrawal-sent';
 
 /**
  * ANALYTICS §7 PR-3: when Termly says statistics are not allowed, drop the stored first touch and, for a logged-in
- * account, tell the server once per
- * account per browser session, so GA ids kept for its unpaid orders are dropped and older ones are never reported. A lost
- * request is sent again on the next page load (the marker is only set after success) and in every new session.
+ * account, tell the server once per account per browser session, so GA ids kept for its unpaid orders are dropped
+ * and older ones are never reported. A lost request is sent again on the next page load (the marker is only set
+ * after success) and in every new session.
  * Uses the plain client so a stale login never raises the app-wide re-login notice.
  */
 export function useConsentWithdrawalSync(consent: ConsentSnapshot, enabled: boolean) {
