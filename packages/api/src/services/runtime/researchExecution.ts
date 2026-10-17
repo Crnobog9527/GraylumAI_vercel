@@ -10,7 +10,7 @@ import { toolSubcallBilling } from '../bill2/toolSubcall';
 import { checkVendorRateLimit } from '../redisRateLimiter';
 import { databaseRuntimeResearchStore } from '../research/runtime/store';
 import { platformSecretReader } from '../research/runtime/secrets';
-import { ResearchWaitingCredits } from '../research/runtime/subcall';
+import { ResearchPause } from '../research/runtime/subcall';
 import type { ResearchToolContext } from '../research/runtime/toolContext';
 import { POSITIONING_RESEARCH_TOOLS, type ResearchToolName } from '../research/tools/schemas';
 import type { RuntimeExecution } from './paygResume';
@@ -40,8 +40,8 @@ export function researchExecution(input: {
   emit: (event: ResearchTurnEvent) => void;
   /** BILL2 confirmed account or content erasure while recording a subcall: nothing more may reach the client. */
   onClosed: () => void;
-  /** The balance cannot start a subcall: the host saves this slot as the turn's pause point (payg_wait, BILL-PAYG). */
-  onWaitingCredits: (point: ResearchWaitingCredits['point']) => void;
+  /** A subcall cannot start now: the host saves this slot as the turn's pause point (payg_wait, BILL-PAYG). */
+  onPause: (point: ResearchPause['point'], state: ResearchPause['state']) => void;
   /** false = the round's time budget cannot cover another supplier request; nothing is sent. */
   canSend: () => boolean;
   now?: () => Date;
@@ -83,12 +83,12 @@ export function researchExecution(input: {
   };
   return {
     // After a confirmed erasure the tool call ends the turn instead of handing a result to the model.
-    // A balance pause ends the turn at the subcall's slot; the resumed turn runs this tool call again.
+    // A pause ends the turn at the subcall's slot; the resumed turn runs this tool call again.
     tools: researchRuntimeTools(ctx, names).map(tool => ({ ...tool, async execute(args, callId) {
       let result;
       try { result = await tool.execute(args, callId); }
       catch (error) {
-        if (error instanceof ResearchWaitingCredits && !closed) input.onWaitingCredits(error.point);
+        if (error instanceof ResearchPause && !closed) input.onPause(error.point, error.state);
         throw error;
       }
       if (closed) throw new Error('RUNTIME_ACCOUNT_CLOSED');

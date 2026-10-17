@@ -109,7 +109,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   let gateRejection:GateRejection|undefined;
   const research=researchExecution({research:context.research,tools:context.tools,execution,executionId,actorId:await options.actor(),
    database:options.database,emit:event=>progress(event),onClosed:()=>{accountClosed=true;},
-   onWaitingCredits:point=>{if(isPayg)waitPoint={epoch:execution.epoch!,...point,state:'waiting_credits'};},
+   onPause:(point,state)=>{if(isPayg)waitPoint={epoch:execution.epoch!,...point,state};},
    canSend:()=>{try{budget.assertCanStart(5000);return true;}catch{return false;}}});
   const checkAgentReply=terminalReplyGuard(agentTurn,context.tools.includes(ASK_QUESTION_TOOL),()=>{terminalReplyFailure=true;},
    Boolean(context.skillFile),Boolean(context.historyRead),research?.tools.map(tool=>tool.name));

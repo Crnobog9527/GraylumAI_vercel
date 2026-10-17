@@ -6,7 +6,7 @@ import { toolEnvelope } from '../tools/envelope';
 import type { ResearchToolArgs } from '../tools/schemas';
 import { BENCHMARK_ROUTE_KINDS } from '../vendors/config';
 import type { ResearchItem, SocialKind } from '../vendors/types';
-import { ResearchWaitingCredits, type SubcallOutcome } from './subcall';
+import { ResearchPause, type SubcallOutcome } from './subcall';
 import { executeResearchCall, socialRequest, stableResearchId, type ResearchToolContext, type ToolAllowance } from './toolContext';
 
 /** A subcall this attempt already finished before a balance pause: its saved result, never a second claim or request. */
@@ -117,7 +117,7 @@ export async function benchmarkFetch(ctx: ResearchToolContext, args: ResearchToo
       // A failure after dispatch can conceal a supplier response. Never make this attempt retryable.
       // Keep an unsent prepared attempt recoverable (including its original refresh grant). A balance pause keeps the
       // attempt in progress: the resumed answer continues it, reusing what it already paid for (BILL-PAYG).
-      if (dispatchedHere && !(error instanceof ResearchWaitingCredits)) {
+      if (dispatchedHere && !(error instanceof ResearchPause)) {
         await ctx.store.fetchFinish(claim.fetchId, claim.attempt, supplierStarted ? 'unknown' : 'failed', null);
       }
       throw error;

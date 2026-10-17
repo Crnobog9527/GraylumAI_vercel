@@ -62,7 +62,7 @@ export interface SubcallContext {
 }
 
 /** Why nothing (or nothing usable) came back, as the tool envelope reports it. */
-export type SubcallStop = 'KEY_MISSING' | 'KEY_UNAVAILABLE' | 'ROUTE_NOT_FROZEN' | 'VENDOR_RATE_LIMITED' | 'CALL_REPLAYED'
+export type SubcallStop = 'KEY_MISSING' | 'ROUTE_NOT_FROZEN' | 'VENDOR_RATE_LIMITED' | 'CALL_REPLAYED'
   | 'NOT_DISPATCHED' | 'ACCOUNT_CLOSED' | 'CONTENT_DELETED' | `CLAIM_${string}`;
 
 export type SubcallOutcome =
@@ -70,11 +70,16 @@ export type SubcallOutcome =
   | { sent: false; stop: SubcallStop; budget: boolean };
 
 /**
- * The balance cannot start this subcall (BILL-PAYG, plan §2.1 2026-10-01): nothing was held or sent. The turn pauses at
- * this slot (payg_wait) and the same request claims it again after a top-up; it is never skipped or reported as a failure.
+ * The turn pauses at this subcall's slot (BILL-PAYG, plan §2.1 2026-10-01); nothing was held or sent. waiting_credits:
+ * the balance cannot start it. waiting_resume: the key store or the supplier rate limit is unavailable right now, so a
+ * resumed turn stays resumable at its saved slot (#1062 review). After the top-up or "continue", the same request claims
+ * the slot again; it is never skipped or reported to the model as a failure.
  */
-export class ResearchWaitingCredits extends Error {
-  constructor(readonly point: { sequence: number; requestHash: string; phase: string }) { super('RUNTIME_WAITING_CREDITS'); }
+export class ResearchPause extends Error {
+  constructor(readonly point: { sequence: number; requestHash: string; phase: string },
+    readonly state: 'waiting_credits' | 'waiting_resume') {
+    super(state === 'waiting_credits' ? 'RUNTIME_WAITING_CREDITS' : 'RUNTIME_WAITING_RESUME');
+  }
 }
 
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
@@ -110,15 +115,19 @@ function unknownResult(request: SupplierRequest, vendor: ResearchVendor, now?: (
 export async function runSubcall(context: SubcallContext, request: SupplierRequest): Promise<SubcallOutcome> {
   const policy = context.policies.find(item => item.provider === request.vendor && item.model === `${request.vendor}:${request.route}`);
   if (!policy) return { sent: false, stop: 'ROUTE_NOT_FROZEN', budget: false };
+  const identity = requestIdentity(request);
+  const pause = async (state: ResearchPause['state']): Promise<never> => {
+    throw new ResearchPause({ sequence: await context.nextSequence(), requestHash: identity, phase: context.phase }, state);
+  };
   // Before any claim: a missing or unreadable key sends nothing and charges nothing (ADMIN-SECRETS §10 RT).
-  let apiKey: string | null;
+  // A missing key is configuration (the model is told); an unreadable one or a full rate limit is temporary (pause).
+  let apiKey: string | null = null;
   try { apiKey = await context.secrets(request.vendor); }
-  catch { return { sent: false, stop: 'KEY_UNAVAILABLE', budget: false }; }
+  catch { await pause('waiting_resume'); }
   if (!apiKey) return { sent: false, stop: 'KEY_MISSING', budget: false };
   const limited = await admitVendorCall(request.vendor, request.route, context.rateCounter);
-  if (!limited.ok) return { sent: false, stop: 'VENDOR_RATE_LIMITED', budget: true };
+  if (!limited.ok) await pause('waiting_resume');
 
-  const identity = requestIdentity(request);
   let claim;
   const sequence = await context.nextSequence();
   try {
@@ -129,7 +138,7 @@ export async function runSubcall(context: SubcallContext, request: SupplierReque
     if (error instanceof BillingClaimRejection) return { sent: false, stop: `CLAIM_${error.reason}`, budget: false };
     throw error;
   }
-  if (claim.state === 'waiting_credits') throw new ResearchWaitingCredits({ sequence, requestHash: identity, phase: context.phase });
+  if (claim.state === 'waiting_credits') throw new ResearchPause({ sequence, requestHash: identity, phase: context.phase }, 'waiting_credits');
   if (claim.state === 'replayed') return { sent: false, stop: 'CALL_REPLAYED', budget: false };
 
   const operationId = context.newId();

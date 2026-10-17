@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { researchRuntimeTools } from './researchRuntimeTool';
-import { requestIdentity, ResearchWaitingCredits, runSubcall, type SubcallContext } from '../research/runtime/subcall';
+import { requestIdentity, ResearchPause, runSubcall, type SubcallContext } from '../research/runtime/subcall';
 import { socialRequest, stableResearchId, type ResearchToolContext } from '../research/runtime/toolContext';
 import type { DiscoveryRecord, FetchClaim, RuntimeOperation, RuntimePlan, RuntimeResearchStore } from '../research/runtime/store';
 import type { ToolEnvelope } from '../research/tools/envelope';
@@ -14,7 +14,7 @@ vi.mock('../research/runtime/subcall', async importOriginal => ({
   ...await importOriginal<typeof import('../research/runtime/subcall')>(), runSubcall: vi.fn(),
 }));
 const subcall = vi.mocked(runSubcall);
-const waiting = () => new ResearchWaitingCredits({ sequence: 2, requestHash: 'a'.repeat(64), phase: 'question' });
+const waiting = () => new ResearchPause({ sequence: 2, requestHash: 'a'.repeat(64), phase: 'question' }, 'waiting_credits');
 const id = '11111111-1111-4111-8111-111111111111';
 const discoveryId = '22222222-2222-4222-8222-222222222222';
 const refreshId = '33333333-3333-4333-8333-333333333333';
@@ -369,7 +369,7 @@ describe('benchmark fetch cache and refresh', () => {
     f.store.authorization.refreshGrant.mockResolvedValue({ ...account, used: false });
     subcall.mockRejectedValueOnce(waiting());
     const args = { accounts: [account], source: { kind: 'refresh', refreshId } };
-    await expect(f.execute('benchmark_fetch', args)).rejects.toBeInstanceOf(ResearchWaitingCredits);
+    await expect(f.execute('benchmark_fetch', args)).rejects.toBeInstanceOf(ResearchPause);
     expect(f.store.fetchDispatch).not.toHaveBeenCalled();
     expect(f.store.fetchFinish).not.toHaveBeenCalled();
     expect(f.supplierCalls).not.toHaveBeenCalled();
@@ -381,7 +381,7 @@ describe('benchmark fetch cache and refresh', () => {
     const f = fixture();
     const successful = subcall.getMockImplementation()!;
     subcall.mockImplementationOnce(successful).mockRejectedValueOnce(waiting());
-    await expect(f.execute('benchmark_fetch', fetchArgs)).rejects.toBeInstanceOf(ResearchWaitingCredits);
+    await expect(f.execute('benchmark_fetch', fetchArgs)).rejects.toBeInstanceOf(ResearchPause);
     expect(f.store.fetchDispatch).toHaveBeenCalledTimes(1);
     // Neither failed nor charged-and-closed: the paid profile stays usable by this attempt.
     expect(f.store.fetchFinish).not.toHaveBeenCalled();
@@ -465,7 +465,7 @@ describe('durable benchmark discovery and free follow-up', () => {
       if (context.newId() === paused) { subcall.mockImplementation(successful); throw waiting(); }
       return successful(context, request);
     });
-    await expect(f.execute('benchmark_discover', discoveryArgs)).rejects.toBeInstanceOf(ResearchWaitingCredits);
+    await expect(f.execute('benchmark_discover', discoveryArgs)).rejects.toBeInstanceOf(ResearchPause);
     expect(f.supplierCalls).toHaveBeenCalledTimes(4);
     expect(f.store.discoverySave).not.toHaveBeenCalled();
     expect(f.store.createCard).not.toHaveBeenCalled();

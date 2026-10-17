@@ -46,17 +46,17 @@ const execution = (live: boolean) => ({ sessionId, runId, epoch: 4, live,
   billing: { callPolicy: [{ modelId: actor, model: 'vendor/model', protocol: 'openrouter-chat-v1' }, policy] } } as never);
 function build(live: boolean, db: ReturnType<typeof database>, canSend = () => true) {
   const events: ResearchTurnEvent[] = [];
-  const onWaitingCredits = vi.fn();
+  const onPause = vi.fn();
   const built = researchExecution({ research, tools: ['ask_question', 'web_search'], execution: execution(live), executionId,
-    actorId: actor, database: db, emit: event => events.push(event), onClosed: () => {}, onWaitingCredits, canSend, now: () => now })!;
-  return { built, events, onWaitingCredits };
+    actorId: actor, database: db, emit: event => events.push(event), onClosed: () => {}, onPause, canSend, now: () => now })!;
+  return { built, events, onPause };
 }
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); resetPlatformSecretCacheForTests(); });
 
 describe('researchExecution (RT-3b PR-3)', () => {
   it('offers nothing without frozen research, and only the frozen tools with it', () => {
     expect(researchExecution({ research: undefined, tools: ['ask_question'], execution: execution(true), executionId, actorId: actor,
-      database: database([]), emit: () => {}, onClosed: () => {}, onWaitingCredits: () => {}, canSend: () => true })).toBeNull();
+      database: database([]), emit: () => {}, onClosed: () => {}, onPause: () => {}, canSend: () => true })).toBeNull();
     const { built } = build(true, database([]));
     expect(built.tools.map(tool => tool.name)).toEqual(['web_search']);
     expect(built.reserve).toBe(RESEARCH_RESULT_RESERVE_BYTES);
@@ -68,7 +68,7 @@ describe('researchExecution (RT-3b PR-3)', () => {
     const fetch = vi.fn();
     vi.stubGlobal('fetch', fetch);
     const db = database([{ id: callId(1), sequence: 1, providerId: 'gen-1' }, { id: callId(2), sequence: 2, providerId: callId(2) }]);
-    const { built, events, onWaitingCredits } = build(true, db);
+    const { built, events, onPause } = build(true, db);
     // Waiting for credits: nothing held or sent; the turn pauses at this slot instead of telling the model to go on without it.
     await expect(built.tools[0]!.execute({ query: 'coffee shops', mode: 'fast' }, 'call-1')).rejects.toThrow('RUNTIME_WAITING_CREDITS');
     const claim = db.rpc.mock.calls.find(([name]) => name === 'bill2_claim')!;
@@ -77,8 +77,8 @@ describe('researchExecution (RT-3b PR-3)', () => {
     expect(typeof (claim[1].p_payload as { runtimeEpoch: unknown }).runtimeEpoch).toBe('number');
     expect(fetch).not.toHaveBeenCalled();
     // The host saves this exact slot as the pause point (payg_wait); the resumed turn claims it with the same request.
-    expect(onWaitingCredits).toHaveBeenCalledExactlyOnceWith({ sequence: 3,
-      requestHash: (claim[1].p_payload as { requestHash: string }).requestHash, phase: RESEARCH_PHASE });
+    expect(onPause).toHaveBeenCalledExactlyOnceWith({ sequence: 3,
+      requestHash: (claim[1].p_payload as { requestHash: string }).requestHash, phase: RESEARCH_PHASE }, 'waiting_credits');
     expect((claim[1].p_payload as { requestHash: string }).requestHash).toMatch(/^[a-f0-9]{64}$/);
     // Started, never reported as failed: it runs again after the top-up.
     expect(events.map(event => event.type === 'research_call' && event.state)).toEqual(['running']);
@@ -193,7 +193,7 @@ describe('#1029 review fixes', () => {
     const withPro = researchExecution({ research: { ...research, routes: [...research.routes,
       { platform: 'web', kind: 'web_search_pro', vendor: 'parallel', route: 'parallel:search:advanced', backup: null, maxUnitsPerCall: '1' }] },
     tools: ['web_search'], execution: execution(true), executionId, actorId: actor, database: database([]), emit: () => {}, onClosed: () => {},
-    onWaitingCredits: () => {}, canSend: () => true })!;
+    onPause: () => {}, canSend: () => true })!;
     expect(JSON.stringify(z.toJSONSchema(withPro.tools[0]!.parameters!))).toContain('"pro"');
     expect(withPro.definitionBytes).toBeGreaterThan(built.definitionBytes);
   });
