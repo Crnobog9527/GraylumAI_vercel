@@ -50,7 +50,8 @@ export function splitReasons(body: string): { main: string; reasons: string | nu
 }
 
 /** Writing hints the Skill puts at the end of a chapter title for the model, never for the reader: "（约 800 字，…）". */
-const WRITING_HINT = /\s*[（(]\s*约[^（）()]*[）)]\s*$/;
+// Only "约 N 字…" hints: a title like "见效时间（约 3 个月）" keeps its business information.
+const WRITING_HINT = /\s*[（(]\s*约\s*\d[^（）()]*字[^（）()]*[）)]\s*$/;
 /** A chapter title as the reader sees it: without the writing hint. */
 export const reportDisplayTitle = (title: string) => title.replace(WRITING_HINT, "").trim() || title;
 

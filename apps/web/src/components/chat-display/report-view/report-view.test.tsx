@@ -27,6 +27,8 @@ describe('report sections', () => {
     expect(reportDisplayTitle('五、对标账号分析（约 800 字，3–10 个合格账号）')).toBe('五、对标账号分析');
     expect(reportDisplayTitle('一句话结论（约 200 字）')).toBe('一句话结论');
     expect(reportDisplayTitle('变现路径（漏斗）')).toBe('变现路径（漏斗）');
+    expect(reportDisplayTitle('见效时间（约 3 个月）')).toBe('见效时间（约 3 个月）');
+    expect(reportDisplayTitle('预算（约 500 元）')).toBe('预算（约 500 元）');
     expect(withDisplayHeadings('## 一句话结论（约 200 字）\n正文（约 3 条）\n```\n## 代码（约 1 字）\n```'))
       .toBe('## 一句话结论\n正文（约 3 条）\n```\n## 代码（约 1 字）\n```');
     const { byChapter } = placeFields(SAMPLE_REPORT_DATA, ['一句话结论（约 200 字）', '十一、变现路径：销售漏斗（约 2000 字）']);
