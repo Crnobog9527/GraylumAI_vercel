@@ -163,7 +163,9 @@ try {
   assert.equal(await v("SELECT count(*)::int v FROM credit_source_entries WHERE pre_deduct_id=$1 AND source_kind='unattributed' AND NOT applied", [p2]), 1,
     'the 10 beyond the unattributed balance are recorded as not attributable');
   await refund(u6, p2);
-  assert.equal(await packUsed(ext.source), 0);
+  assert.deepEqual([await packUsed(ext.source), await unattributed(u6)], [0, 20],
+    'refund reverses the 30 attributed and the 10 unattributable credits separately');
+  assert.equal(await v("SELECT coalesce(sum(amount),0)::int v FROM credit_source_entries WHERE pre_deduct_id=$1 AND NOT applied", [p2]), 0);
   report.checks.push('pack refund clawback reverses the source, failed-refund restoration re-grants it, unrelated keys are ignored;'
     + ' an externally refunded pack (no clawback) is held back and never consumed');
 

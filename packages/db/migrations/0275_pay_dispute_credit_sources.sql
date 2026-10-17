@@ -154,12 +154,14 @@ BEGIN
  PERFORM 1 FROM subscription_credit_grants g WHERE g.user_id=p_user ORDER BY g.id FOR UPDATE;
  PERFORM 1 FROM credit_package_sources s WHERE s.user_id=p_user ORDER BY s.id FOR UPDATE;
  need:=-p_n;
- FOR src IN SELECT e.source_kind,e.source_id,sum(e.amount)::integer AS net FROM credit_source_entries e
+ -- Applied and unapplied portions are reversed separately, so the source ledger stays exact.
+ FOR src IN SELECT e.source_kind,e.source_id,e.applied,sum(e.amount)::integer AS net FROM credit_source_entries e
   WHERE p_pre IS NOT NULL AND e.pre_deduct_id=p_pre AND e.user_id=p_user
-  GROUP BY e.source_kind,e.source_id HAVING sum(e.amount)>0 ORDER BY max(e.id) DESC LOOP
+  GROUP BY e.source_kind,e.source_id,e.applied HAVING sum(e.amount)>0 ORDER BY max(e.id) DESC LOOP
   EXIT WHEN need=0;
-  x:=least(need,src.net);ok:=true;
-  IF src.source_kind='subscription_grant' THEN
+  x:=least(need,src.net);ok:=src.applied;
+  IF NOT src.applied THEN NULL;
+  ELSIF src.source_kind='subscription_grant' THEN
    -- Restore only to a grant that is still usable; otherwise the credits stay unattributed.
    UPDATE subscription_credit_grants g SET consumed_amount=consumed_amount-x,updated_at=now()
    WHERE g.id=src.source_id AND g.status='granted' AND g.accounting_state='trusted' AND g.consumed_amount>=x
