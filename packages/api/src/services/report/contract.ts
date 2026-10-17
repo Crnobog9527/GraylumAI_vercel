@@ -2,6 +2,7 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import type { ArtifactSnapshot } from '../artifacts/public';
+import { reportBodyText } from '../../shared/reportData';
 
 // 未完成、默认关闭。Only the server-side setting enables NEW report admission.
 export const REPORT_SETTING = 'runtime_report_generation';
@@ -63,8 +64,12 @@ export function benchmarkReportFacts(table: unknown): { serialized: string | nul
   return { serialized: parsed.data.rows.length ? JSON.stringify(parsed.data.rows) : null, hash: parsed.data.hash };
 }
 
-/** Structure validation only; never guesses user intent or supplies missing sections. */
-export function completeReportCandidate(body: string, completeness: unknown, manifest: FrozenReport) {
+/**
+ * Structure validation only; never guesses user intent or supplies missing sections. The strategy data block is
+ * left out first: the limit counts the report text only (Owner's choice B, REPORT-VISUAL; same as SQL 0300).
+ */
+export function completeReportCandidate(raw: string, completeness: unknown, manifest: FrozenReport) {
+  const body = reportBodyText(raw);
   if (completeness !== 'complete' || [...body].length > manifest.maxCharacters) return false;
   const headings = body.split(/\r?\n/).filter(line => /^##\s+/.test(line)).map(line => line.replace(/^##\s+/, '').trim());
   return headings.length === manifest.sections.length && headings.every((title, index) => title === manifest.sections[index])

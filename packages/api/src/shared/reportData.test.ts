@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   REPORT_DATA_FENCE, brokenReportDataLimit, fitReportData, joinReportBody, jsonBytes, parseReportBody, parseReportDataBlock,
-  reportBodyText, reportDataCharacters, reportDataGroup, splitReportBody, type ReportData,
+  reportBodyText, reportDataCharacters, reportDataGroup, splitReportBody, type BenchmarkAccount, type ReportData,
 } from './reportData';
 import { REPORT_DATA_CHAPTER, REPORT_DATA_FIELDS, REPORT_DATA_FIELD_NAMES, REPORT_DATA_GROUPS, REPORT_DATA_LIMITS } from './reportDataSpec';
 import { SAMPLE_REPORT_DATA, sampleReportDataBlock } from './reportDataSample';
@@ -95,14 +95,22 @@ describe('parseReportDataBlock', () => {
     expect(parsed.dropped).toEqual(['summary#duplicate']);
   });
 
-  it('drops a benchmark account that is not in the host table', () => {
+  it('drops a benchmark account that is not in the host table, and takes numbers only from it', () => {
     const accounts = [
       { platform: '小红书', account: '甜点A', category: '同城', takeaway: '学开头' },
       { platform: '抖音', account: '编的号', category: '同城', takeaway: '学结尾' },
     ];
-    const parsed = parseReportDataBlock(block(row('benchmarks', { accounts })), { benchmarkAccounts: [{ platform: '小红书', account: ' 甜点a ' }] });
-    expect(parsed.data.benchmarks!.accounts.map(account => account.account)).toEqual(['甜点A']);
+    const table = { platform: 'xiaohongshu', account: ' 甜点a ', followers: 12000, medianViews: null, engagementRate: 0.04,
+      postsPerWeek: 3, fetchedAt: '2026-10-10T00:00:00Z' };
+    const parsed = parseReportDataBlock(block(row('benchmarks', { accounts })), { benchmarks: { rows: [table], current: true } });
+    expect(parsed.data.benchmarks!.accounts).toEqual([{ ...accounts[0], metrics: { followers: 12000, medianViews: null,
+      engagementRate: 0.04, weeklyPosts: 3, capturedAt: '2026-10-10T00:00:00Z' } }]);
     expect(parsed.dropped).toEqual(['benchmarks.accounts[1]']);
+    const refreshed = parseReportDataBlock(block(row('benchmarks', { accounts })), { benchmarks: { rows: [table], current: false } });
+    expect((refreshed.data.benchmarks!.accounts as BenchmarkAccount[]).map(account => account.metrics)).toEqual([null, null]);
+    const none = parseReportDataBlock(block(row('benchmarks', { accounts, todo: { searchTerms: ['同城'], next: '再找' } })),
+      { benchmarks: { rows: [], current: true } });
+    expect(none.data.benchmarks).toEqual({ accounts: [], todo: { searchTerms: ['同城'], next: '再找' } });
   });
 });
 

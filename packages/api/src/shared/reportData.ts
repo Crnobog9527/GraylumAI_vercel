@@ -144,12 +144,22 @@ export function checkReportDataField(field: ReportDataField, raw: unknown, dropp
   return result.ok ? result.value : undefined;
 }
 
-export type ReportDataOptions = {
-  /** The host's benchmark table (`platform` + `account`); an account not in it is dropped. Omit: not checked. */
-  benchmarkAccounts?: ReadonlyArray<{ platform: string; account: string }>;
+/** One row of the host's benchmark table (research_benchmark_rows, 0268): the only source of benchmark numbers. */
+export type BenchmarkRow = {
+  platform: string; account: string; followers: number | null; medianViews: number | null;
+  engagementRate: number | null; postsPerWeek: number | null; fetchedAt: string | null;
 };
 
-const benchmarkKey = (platform: string, account: string) => `${platform.trim().toLowerCase()}\u0000${account.trim().toLowerCase()}`;
+export type ReportDataOptions = {
+  /**
+   * The host's benchmark table. `current`: it is the table the report was written from (same hash), so an account
+   * not in it is dropped and the others get its numbers. Not current (refreshed since): names stay, numbers are null.
+   * Omitted (the page before the server has checked): accounts are kept without numbers.
+   */
+  benchmarks?: { rows: readonly BenchmarkRow[]; current: boolean };
+};
+
+const accountKey = (value: string) => value.trim().toLowerCase();
 
 /** Validate a data block (as `splitReportBody` returns it). */
 export function parseReportDataBlock(block: string, options: ReportDataOptions = {}): SanitizedReportData {
@@ -178,13 +188,18 @@ export function parseReportDataBlock(block: string, options: ReportDataOptions =
 }
 
 function dropUnknownBenchmarks(data: ReportData, options: ReportDataOptions, dropped: string[]) {
-  if (!data.benchmarks || !options.benchmarkAccounts) return;
-  const known = new Set(options.benchmarkAccounts.map(row => benchmarkKey(row.platform, row.account)));
-  data.benchmarks.accounts = data.benchmarks.accounts.filter((account, index) => {
-    const keep = known.has(benchmarkKey(account.platform, account.account));
-    if (!keep) dropped.push(`benchmarks.accounts[${index}]`);
-    return keep;
+  const table = options.benchmarks;
+  if (!data.benchmarks || !table) return;
+  const accounts: BenchmarkAccount[] = [];
+  data.benchmarks.accounts.forEach((account, index) => {
+    if (!table.current) return void accounts.push({ ...account, metrics: null });
+    const same = table.rows.filter(row => accountKey(row.account) === accountKey(account.account));
+    const row = same.find(item => accountKey(item.platform) === accountKey(account.platform)) ?? same[0];
+    if (!row) return void dropped.push(`benchmarks.accounts[${index}]`);
+    accounts.push({ ...account, metrics: { followers: row.followers, medianViews: row.medianViews,
+      engagementRate: row.engagementRate, weeklyPosts: row.postsPerWeek, capturedAt: row.fetchedAt } });
   });
+  data.benchmarks.accounts = accounts;
 }
 
 /** Parse a whole report body; `data` is null when there is no complete block. */

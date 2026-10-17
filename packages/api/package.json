@@ -48,6 +48,7 @@
     "./src/shared/reportData": "./src/shared/reportData.ts",
     "./src/shared/reportDataSpec": "./src/shared/reportDataSpec.ts",
     "./src/shared/reportDataSample": "./src/shared/reportDataSample.ts",
+    "./src/shared/reportDataText": "./src/shared/reportDataText.ts",
     "./src/services/providerUsage": "./src/services/providerUsage.ts",
     "./src/services/modelCapabilities": "./src/services/modelCapabilities.ts",
     "./services/bill2": "./src/services/bill2/service.ts",
