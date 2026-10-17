@@ -66,6 +66,14 @@ REVOKE ALL ON FUNCTION public.runtime_production_database() FROM PUBLIC,anon,aut
 REVOKE ALL ON FUNCTION public.runtime_production_allowed(uuid,jsonb,boolean) FROM PUBLIC,anon,authenticated,service_role;
 
 -- Host check for new work and maintenance reads on production (service role only).
+-- Whether new production work is allowed right now: the database is production and the production profile is switched on.
+CREATE OR REPLACE FUNCTION public.runtime_production_enabled() RETURNS boolean
+LANGUAGE sql STABLE SET search_path=public,pg_temp AS $$
+ SELECT runtime_production_database() AND coalesce((SELECT CASE WHEN jsonb_typeof(value)='string' THEN (value#>>'{}')::jsonb ELSE value END
+  FROM system_settings WHERE key='runtime_payg_production')->'enabled'='true'::jsonb,false)
+$$;
+REVOKE ALL ON FUNCTION public.runtime_production_enabled() FROM PUBLIC,anon,authenticated,service_role;
+
 CREATE OR REPLACE FUNCTION public.runtime_production_access(p_actor_id uuid) RETURNS boolean
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 BEGIN
@@ -114,6 +122,12 @@ $o$,
  END IF;
  IF runtime_production_database() THEN RAISE EXCEPTION 'RUNTIME_TEST_WINDOW_DENIED' USING ERRCODE='42501';END IF;
 $n$),
+  -- Financial recovery may finish an unfinished execution once it is no longer allowed. A staging run is closed by its
+  -- window; a production run has none, so it is closed when production is switched off.
+  ('public.runtime_financial_recovery(uuid,uuid,boolean)',
+   $o$ AND NOT EXISTS(SELECT 1 FROM runtime_test_windows w WHERE w.id=b.test_window_id$o$,
+   $n$ AND NOT (b.payload->>'mode'='production' AND NOT runtime_production_enabled())
+ AND NOT EXISTS(SELECT 1 FROM runtime_test_windows w WHERE w.id=b.test_window_id$n$),
   -- Run creation: the prepare-only production checks (version, q/m, price snapshot).
   ('public.runtime_test_budget_guard()',
    $o$ IF NEW.payload->>'mode' IS DISTINCT FROM 'staging_test' THEN

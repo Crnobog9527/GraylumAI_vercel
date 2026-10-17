@@ -157,6 +157,17 @@ export async function productionCases({db,Client,connectionString,report,claim})
     await rejects(prepare(db,f,staging),/RUNTIME_TEST_WINDOW_DENIED/);
     report.checks.push('an enabled test window turns production off; a staging run is refused on the production database');
 
+    // Financial recovery: while production is on, an unfinished execution is still allowed (not finishable); once the
+    // production switch is off, recovery closes it and the hold is released (a production run has no window to expire).
+    const stuck=await productionFixture(db,profiles);
+    await threshold(stuck.model);await config();
+    stuck.run=(await prepare(db,stuck)).id;
+    const stuckExecution=(await db.query('SELECT b2a_test.bind($1) v',[stuck])).rows[0].v;
+    await rejects(rpc(db,'runtime_financial_recovery',stuck.actor,stuckExecution,true),/RUNTIME_EXECUTION_STILL_ALLOWED/);
+    await setting(db,'runtime_payg_production',{enabled:false});
+    assert.equal((await rpc(db,'runtime_financial_recovery',stuck.actor,stuckExecution,true)).state,'cancelled');
+    await config();
+    report.checks.push('production financial recovery: refused while production is on, closes an unfinished execution once the switch is off');
     const bound=await productionFixture(db,profiles);
     await threshold(bound.model);await config();
     bound.run=(await prepare(db,bound)).id;

@@ -5,7 +5,8 @@ import pg from 'pg';
 import { createClient } from '@supabase/supabase-js';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { runtimeExecutor } from './execute';
-import { compensateStaleRound, findStaleChargedRounds, STALE_ROUND_AGE_MS } from './staleChargedRounds';
+import { autoCompensateStaleRounds, compensateStaleRound, findStaleChargedRounds, STALE_ROUND_AGE_MS } from './staleChargedRounds';
+import { runAutomaticFinancialRecovery } from './automaticRecovery';
 import { overlap } from '../__tests__/fixtures/planBConcurrency';
 
 // The daily reconciliation runs as service_role through PostgREST; this test uses exactly that
@@ -234,5 +235,105 @@ it('RUNTIME: a round whose account was later banned can still be compensated', a
   await db.query("update profiles set status='banned' where id=$1", [round.actor]);
   expect(ids(await reported())).toContain(round.runId);
   expect(await compensateStaleRound(service, round.runId)).toMatchObject({ state: 'compensated', compensatedCredits: 3 });
+  expect(await ledger(round)).toMatchObject({ credits: 100, ledger: 100, compensations: 1, run_state: 'refunded' });
+}, 60000);
+
+const epochOf = async (runId: string) =>
+  Number((await db.query('select runtime_epoch from bill2_runs where id=$1', [runId])).rows[0].runtime_epoch);
+const markCapacity = async (round: { actor: string; executionId: string; runId: string },
+  code = 'RUNTIME_COMPLETE_REQUEST_EXCEEDS_CAPACITY', epoch?: number) => rpc('runtime_interrupt_capacity',
+  { p_actor_id: round.actor, p_execution_id: round.executionId, p_epoch: epoch ?? await epochOf(round.runId), p_code: code });
+
+it('RUNTIME: a round interrupted for content beyond capacity is marked atomically, once, and never reported or compensated', async () => {
+  const round = await chargedOpenRound(2 * STALE_ROUND_AGE_MS), other = await chargedOpenRound(2 * STALE_ROUND_AGE_MS);
+  expect(ids(await reported())).toContain(round.runId);
+  // Only the service host can write the marker, only for the execution's own account and only a capacity code.
+  expect((await anon.rpc('runtime_interrupt_capacity', { p_actor_id: round.actor, p_execution_id: round.executionId,
+    p_epoch: await epochOf(round.runId), p_code: 'RUNTIME_COMPLETE_REQUEST_EXCEEDS_CAPACITY' })).error).toBeTruthy();
+  await expect(markCapacity({ ...round, actor: other.actor })).rejects.toThrow('RUNTIME_EXECUTION_DENIED');
+  await expect(markCapacity(round, 'RUNTIME_DATABASE_UNAVAILABLE')).rejects.toThrow('RUNTIME_FAILURE_CODE_INVALID');
+  // An older invocation still unwinding after a resume advanced the epoch cannot mark the resumed round.
+  await expect(markCapacity(round, undefined, await epochOf(round.runId) - 1)).rejects.toThrow('RUNTIME_RESUME_CONFLICT');
+  expect((await db.query('select failure_code from runtime_executions where id=$1', [round.executionId])).rows[0])
+    .toEqual({ failure_code: null });
+  // A running round: the marker and the interruption land together, or (refused) neither does.
+  const live = await chargedOpenRound(2 * STALE_ROUND_AGE_MS);
+  await db.query("update runtime_executions set state='running' where id=$1", [live.executionId]);
+  const state = async () => (await db.query('select state,failure_code from runtime_executions where id=$1', [live.executionId])).rows[0];
+  await expect(markCapacity(live, undefined, await epochOf(live.runId) + 1)).rejects.toThrow('RUNTIME_RESUME_CONFLICT');
+  expect(await state()).toEqual({ state: 'running', failure_code: null });
+  await markCapacity(live, 'RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY');
+  expect(await state()).toEqual({ state: 'interrupted', failure_code: 'RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY' });
+  expect(ids(await reported())).not.toContain(live.runId);
+  // The marker and the interruption commit together through the existing owner interrupt.
+  expect(await markCapacity(round)).toMatchObject({ state: 'interrupted' });
+  // Write-once: the first code stays.
+  await markCapacity(round, 'RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY');
+  expect((await db.query('select failure_code from runtime_executions where id=$1', [round.executionId])).rows[0])
+    .toEqual({ failure_code: 'RUNTIME_COMPLETE_REQUEST_EXCEEDS_CAPACITY' });
+  expect(ids(await reported())).not.toContain(round.runId);
+  const before = await ledger(round);
+  await expect(compensateStaleRound(service, round.runId)).rejects.toThrow('STALE_ROUND_NOT_ELIGIBLE');
+  await autoCompensateStaleRounds(service);
+  expect(await ledger(round)).toEqual(before);
+  expect(before).toMatchObject({ credits: 97, compensations: 0, closed: false });
+}, 60000);
+
+const markerSince = async (iso: string) => db.query(
+  `insert into system_settings(key,value) values('runtime_capacity_marker_since',to_jsonb($1::text))
+   on conflict(key) do update set value=excluded.value`, [iso]);
+
+it('RUNTIME: the recovery job arms the marker clock itself and leaves older rounds to the operator', async () => {
+  // The migration does not start the clock: a migration-first rollout would count old-version rounds as marked.
+  await db.query("delete from system_settings where key='runtime_capacity_marker_since'");
+  expect(await rpc('runtime_capacity_marker_since', {})).toBeNull();
+  expect((await anon.rpc('runtime_capacity_marker_arm', {})).error).toBeTruthy();
+  const old = await chargedOpenRound(2 * STALE_ROUND_AGE_MS);
+  const before = await ledger(old);
+  const first = await autoCompensateStaleRounds(service);
+  expect(first.compensated).toBe(0);
+  expect(first.manualReview).toBeGreaterThanOrEqual(1);
+  const armed = Date.parse(await rpc('runtime_capacity_marker_since', {}) as string);
+  // Armed in the future (margin for requests of the previous version), once: another run keeps the value.
+  expect(armed).toBeGreaterThan(Date.now());
+  await autoCompensateStaleRounds(service);
+  expect(Date.parse(await rpc('runtime_capacity_marker_since', {}) as string)).toBe(armed);
+  // Selected in SQL before the page limit: the old round is not in a page filtered by the marker time.
+  const filtered = await rpc('runtime_stale_charged_rounds', { p_cutoff: new Date(Date.now() - STALE_ROUND_AGE_MS).toISOString(),
+    p_limit: 500, p_created_since: new Date(armed).toISOString() }) as { total: number; rounds: Array<{ runId: string }> };
+  expect(filtered.rounds.map(round => round.runId)).not.toContain(old.runId);
+  expect(ids(await reported(500))).toContain(old.runId);
+  expect(await ledger(old)).toEqual(before);
+  // The operator path is unchanged and still refunds it.
+  expect(await compensateStaleRound(service, old.runId)).toMatchObject({ state: 'compensated', compensatedCredits: 3 });
+}, 60000);
+
+it('RUNTIME: the recovery job closes a stale round by the same rule once and settles it correctly', async () => {
+  await markerSince('2000-01-01T00:00:00Z'); // markers reliable for all fixtures here
+  const stale = await chargedOpenRound(2 * STALE_ROUND_AGE_MS), recent = await chargedOpenRound(0);
+  const capacity = await chargedOpenRound(2 * STALE_ROUND_AGE_MS);
+  await markCapacity(capacity);
+  const untouched = [await ledger(recent), await ledger(capacity)];
+  // The real scheduled entry (financial recovery first, then the automatic close) through PostgREST as service_role.
+  const first = await runAutomaticFinancialRecovery(service);
+  expect(first.staleRounds).toMatchObject({ failed: 0 });
+  expect(first.staleRounds!.compensated).toBeGreaterThanOrEqual(1);
+  const after = await ledger(stale);
+  expect(after).toEqual({ credits: 100, ledger: 100, compensations: 1, run_state: 'refunded', closed: true,
+    outcome: 'confirmed_failure', compensation_credits: 3, execution_state: 'cancelled',
+    unavailable_reason: 'platform_review', active_execution: null });
+  expect([await ledger(recent), await ledger(capacity)]).toEqual(untouched);
+  // Next minute: nothing left for it; an operator click afterwards and the user's retry refund nothing more.
+  expect((await runAutomaticFinancialRecovery(service)).staleRounds).toMatchObject({ compensated: 0, failed: 0 });
+  expect(await compensateStaleRound(service, stale.runId)).toMatchObject({ state: 'already_compensated', compensatedCredits: 3 });
+  expect(await stale.host.execute(stale.executionId)).toEqual({ state: 'cancelled', unavailable: 'platform_review' });
+  expect(await ledger(stale)).toEqual(after);
+}, 60000);
+
+it('RUNTIME: the recovery job and an operator refunding the same round at once refund it once', async () => {
+  const round = await chargedOpenRound(2 * STALE_ROUND_AGE_MS);
+  const [automatic, operator] = await Promise.all([autoCompensateStaleRounds(service), compensateStaleRound(service, round.runId)]);
+  expect(automatic.failed).toBe(0);
+  expect(['compensated', 'already_compensated']).toContain(operator.state);
   expect(await ledger(round)).toMatchObject({ credits: 100, ledger: 100, compensations: 1, run_state: 'refunded' });
 }, 60000);

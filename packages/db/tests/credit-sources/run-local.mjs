@@ -8,6 +8,10 @@ import { localDb, read } from '../runtime-view-perf/local-db.mjs';
 
 const migrationPath = 'packages/db/migrations/0275_pay_dispute_credit_sources.sql';
 const MARK = ' -- PR-D0 credit sources';
+// Later migrations that replace or hook 0275's functions (0285 refund hold): reapplied after 0275 so the
+// end state is the full chain again.
+const LATER = ['packages/db/migrations/0285_pay_refunded_pack_hold.sql'];
+const reapply = async () => { for (const path of [migrationPath, ...LATER]) await c.query(read(path)); };
 const HOOKED = ['atomic_pre_deduct(uuid,integer,text,uuid)', 'bill2_legacy_settle(uuid,uuid,integer,jsonb,jsonb)',
   'bill2_legacy_refund(uuid,uuid,text)', 'bill2_legacy_abort_settle(uuid,uuid,integer,jsonb,text,text)',
   'bill2_payg_compensate(bill2_runs,bill2_calls)'];
@@ -89,7 +93,7 @@ const unhook = async () => {
 try {
   // Full chain applied 0275 once; a second run is a structural and data no-op.
   const after = await catalog();
-  await c.query(read(migrationPath));
+  await reapply();
   assert.deepEqual(await catalog(), after);
   for (const fn of HOOKED) assert.equal(await v("SELECT (length(d)-length(replace(d,'PR-D0 credit sources','')))/20 v FROM pg_get_functiondef($1::regprocedure) d", ['public.' + fn]), 1, fn);
   report.checks.push('0275 reapplication after the full chain preserves the catalog; each of 5 functions hooked exactly once');
@@ -157,11 +161,13 @@ try {
   const ext = await pack(u6, 100);
   p = await reserve(u6, 20);
   await c.query("UPDATE payment_orders SET status='refunded',payment_status='refunded' WHERE id=$1", [ext.order]);
-  const p2 = await reserve(u6, 40);
-  assert.deepEqual([await balance(u6), await packUsed(ext.source), await unattributed(u6)], [90, 0, 50],
+  // 0285: the held pack is out of the spendable balance, so only the 30 unattributed credits can be reserved.
+  await assert.rejects(() => reserve(u6, 40), /PRE_DEDUCT_TERMINATED_GRANT_REMAINDER_QUARANTINED/);
+  const p2 = await reserve(u6, 30);
+  assert.deepEqual([await balance(u6), await packUsed(ext.source), await unattributed(u6)], [100, 0, 50],
     'after the external refund only the 30 unattributed credits are used; the pack stays held');
-  assert.equal(await v("SELECT count(*)::int v FROM credit_source_entries WHERE pre_deduct_id=$1 AND source_kind='unattributed' AND NOT applied", [p2]), 1,
-    'the 10 beyond the unattributed balance are recorded as not attributable');
+  assert.equal(await v("SELECT count(*)::int v FROM credit_source_entries WHERE pre_deduct_id=$1 AND NOT applied", [p2]), 0,
+    'nothing beyond the unattributed balance is taken');
   await refund(u6, p2);
   assert.deepEqual([await packUsed(ext.source), await unattributed(u6)], [0, 20],
     'refund reverses the 30 attributed and the 10 unattributable credits separately');
@@ -244,7 +250,7 @@ try {
   const before = await scenario();
   assert.deepEqual(hooked, before, 'balances, billing history amounts and refund eligibility unchanged');
   // Recovery is the predecessor definitions; re-applying 0275 hooks them again without re-running the backfill.
-  await c.query(read(migrationPath));
+  await reapply();
   assert.deepEqual(await catalog(), after);
   report.checks.push('same balances, per-step charges and pack/monthly refund eligibility (fresh: allowed; after use: refused) with and without the hooks; recovery = predecessor definitions, reapply restores the exact catalog');
 
@@ -252,6 +258,11 @@ try {
   await unhook();
   await c.query('DROP TABLE credit_source_entries, credit_source_reviews, credit_package_sources');
   await c.query('DROP TRIGGER credit_package_source_track ON credit_transactions');
+  // Before 0275 the 0285 refund-hold lines do not exist either.
+  for (const fn of ['atomic_pre_deduct(uuid,integer,text,uuid)', 'bill2_payg_claim(uuid,uuid,integer,jsonb)']) {
+    const src = await v('SELECT pg_get_functiondef($1::regprocedure) v', ['public.' + fn]);
+    await c.query(src.split('\n').filter(line => !line.endsWith('-- PAY-REFUND-HOLD')).join('\n'));
+  }
   const clean = await profile(0), clean2 = await profile(0), spent = await profile(0);
   const cleanPack = (await pack(clean, 100)).order;
   const cleanGrant = await period(clean2, 300, -60 * 24 * hour, -30 * 24 * hour, 100);
@@ -260,7 +271,7 @@ try {
   const adjusted = await profile(0);
   const adjustedPack = (await pack(adjusted, 100)).order;
   await c.query("SELECT * FROM atomic_apply_credit_ledger_entry($1::uuid,-5,'deduction','Synthetic admin deduction',$2)", [adjusted, 'test-admin:' + adjusted]);
-  await c.query(read(migrationPath));
+  await reapply();
   const reviewed = async (kind, id) => v('SELECT count(*)::int v FROM credit_source_reviews WHERE source_kind=$1 AND source_id=$2', [kind, id]);
   const sourceOf = order => v('SELECT id v FROM credit_package_sources WHERE order_id=$1', [order]);
   assert.equal(await reviewed('credit_package', await sourceOf(cleanPack)), 0);
