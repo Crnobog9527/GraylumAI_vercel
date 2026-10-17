@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { assertCheckoutRateLimit, getStripeAppUrl, getStripeClient } from '../services/stripe';
+import { assertCheckoutRateLimit, getStripeAppUrl, getStripeClient, isStripeCheckoutConfigured } from '../services/stripe';
 import { methodPurchaseInputSchema } from '../services/payments/methodPurchase';
 import { createWalletCheckout } from '../services/payments/walletCheckout';
 import { createStripeCardCheckout } from '../services/payments/stripeMethodCheckout';
@@ -77,7 +77,8 @@ export const methodPaymentProcedures = {
       new Error('PAY_WAFFO_PERSISTENCE_UNAVAILABLE'), '会员状态暂不可用，请稍后重试',
     );
     try {
-      const { mode } = await resolveStripeScope(getStripeClient());
+      // Without Stripe checkout configured nothing can be bought: keep the local read in test mode, never call Stripe.
+      const mode = isStripeCheckoutConfigured() ? (await resolveStripeScope(getStripeClient())).mode : 'test';
       return await readMethodMembership(ctx.supabaseAdmin, ctx.profileId, Date.now(), process.env, mode);
     }
     catch (error) { throw createSafeServiceUnavailableError(error, '会员状态暂不可用，请稍后重试'); }
