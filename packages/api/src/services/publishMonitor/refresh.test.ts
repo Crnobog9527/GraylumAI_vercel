@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
 import type { ClientDeps } from './postForMe/client';
-import { pruneSnapshots, refreshConnection, runRefresh, type RefreshClaim } from './refresh';
+import { BREAKDOWNS_TRUNCATED, pruneSnapshots, refreshConnection, runRefresh, toRow, type RefreshClaim } from './refresh';
 
 const OWNER = 'a'.repeat(32);
 const NOW = Date.parse('2026-10-17T12:00:00Z');
@@ -224,6 +224,23 @@ describe('publish-monitor refresh of one connection', () => {
     const left = [20_000, 20_000, 7];
     const rpc = async () => ({ data: left.shift() ?? 0, error: null });
     expect(await pruneSnapshots({ rpc } as never, NOW + 60_000, () => NOW)).toBe(40_007);
+  });
+
+  it('oversized breakdowns are dropped and listed as missing instead of failing the page', () => {
+    const rows = Array.from({ length: 100 }, (_, i) => ({ label: 'x'.repeat(190), value: i }));
+    const big = { a: rows, b: rows, c: rows };
+    const small = { audience: [{ label: 'a', value: 1 }] };
+    const base = { platformPostId: 'p', postedAt: null, postedAtSource: null, url: null, titleExcerpt: null, metrics: { views: 1 },
+      missingFields: ['likes'] };
+    expect(toRow({ ...base, breakdowns: big } as never)).toMatchObject({ breakdowns: {}, missingFields: [BREAKDOWNS_TRUNCATED, 'likes'] });
+    expect(toRow({ ...base, breakdowns: small } as never)).toMatchObject({ breakdowns: small, missingFields: ['likes'] });
+  });
+
+  it('with under a second of the deadline left, no provider call starts', async () => {
+    const late = database();
+    const p = provider([{ posts: [post('a', 1)] }]);
+    expect((await refreshConnection(late.db, p.deps, claim(), 30, 10, NOW + 500, () => NOW)).outcome).toBe('release');
+    expect(p.urls).toEqual([]);
   });
 
   it('a missing owner reference never reads', async () => {

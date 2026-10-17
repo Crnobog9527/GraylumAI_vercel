@@ -250,7 +250,7 @@ BEGIN
   -- Counted once per UTC day, however often the user refreshes. A connection that has shown posts before and now
   -- reads empty two days running most likely lost its authorization; one that never showed posts gets a gentle
   -- prompt after seven days. Neither ever means "no posts this week".
-  had_posts:=c.last_success_at IS NOT NULL AND EXISTS(SELECT 1 FROM social_posts WHERE connection_id=c.id);
+  had_posts:=EXISTS(SELECT 1 FROM social_posts WHERE connection_id=c.id AND source='postforme');
   streak:=CASE WHEN c.empty_day=today THEN c.empty_streak WHEN c.empty_day=today-1 THEN c.empty_streak+1 ELSE 1 END;
   UPDATE social_connections SET empty_streak=LEAST(streak,1000),empty_day=today,refresh_day=today,refresh_error=NULL,
    refresh_attempts=0,fail_day=NULL,
