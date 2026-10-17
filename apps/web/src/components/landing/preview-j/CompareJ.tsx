@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
 
-import type { CSSProperties } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import { Bot } from 'lucide-react';
 import { DEMO_LABEL } from '@/components/landing/demo/demo-script';
 import result from '@/components/opc/positioning-result.module.css';
@@ -33,10 +33,13 @@ export function pairTiming(generic: string, coach: string, coachFirst = false) {
  * The windows are pictures (inert); the text carries the meaning. Server HTML and reduced motion show everything.
  * Sample L (Owner 2026-10-17): `title` replaces the heading, `picks` keeps only those pairs (by index), and `next` adds
  * a closing line to a pair's coach reply (by index): what the person does next. Samples M–O (Owner 2026-10-17, no dark
- * blocks): `band="tint"` sets it on the light band.
+ * blocks): `band="tint"` sets it on the light band. Sample L (Owner 2026-10-17, demos as the real product): `steps` gives a
+ * pair's coach head its step, as the positioning workspace writes it ("AI 自媒体陪跑教练 · 诊断与平台对标"); `after` sits under
+ * the board.
  */
-export function CompareJ({ title, picks, next, band = 'ink' }: {
+export function CompareJ({ title, picks, next, band = 'ink', steps, after }: {
   title?: string; picks?: readonly number[]; next?: Readonly<Record<number, string>>; band?: 'ink' | 'tint';
+  steps?: Readonly<Record<number, string>>; after?: ReactNode;
 } = {}) {
   const shown = (picks ?? J_COMPARE.pairs.map((_, index) => index)).map(index => ({ pair: J_COMPARE.pairs[index], index }));
   return (
@@ -72,7 +75,9 @@ export function CompareJ({ title, picks, next, band = 'ink' }: {
                     <div inert aria-hidden="true">
                       {first ? null : <p className={styles.question}><span>你</span>{pair.question}</p>}
                       <div className={styles.coachReply}>
-                        <span className={result.agentIdentity}><img src="/graylum-logo.png" alt="" />AI 自媒体陪跑教练</span>
+                        <span className={result.agentIdentity}>
+                          <img src="/graylum-logo.png" alt="" />AI 自媒体陪跑教练{steps?.[index] ? ` · ${steps[index]}` : ''}
+                        </span>
                         <p><Typed text={coach} start={timing.coachStart} /></p>
                       </div>
                     </div>
@@ -86,6 +91,7 @@ export function CompareJ({ title, picks, next, band = 'ink' }: {
             })}
           </ol>
         </div>
+        {after}
       </div>
     </section>
   );

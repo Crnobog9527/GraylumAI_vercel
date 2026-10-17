@@ -96,3 +96,7 @@
 .terms { margin: 0; color: var(--k-secondary); font-size: 14px; }
 .terms a { color: inherit; text-underline-offset: 3px; }
 .gold { margin: 0; color: var(--j-gold-text); font-size: 14px; font-weight: 500; }
+
+/* The button on sample L's dark comparison band: white, so it reads against the band. */
+[data-band='ink'] .cta > a { background: #fff; color: #141312; }
+[data-band='ink'] .cta > a:hover { background: #ecebe7; }

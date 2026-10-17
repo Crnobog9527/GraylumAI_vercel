@@ -153,3 +153,18 @@
 }
 
 /* Footer */
+
+/* Sample L (data-compact): on a phone the rows sit tighter, the arrow goes, and each answer folds to its heading. */
+@media (max-width: 767px) {
+  .voiceRows[data-compact] { gap: 18px; }
+  .voiceRows[data-compact] .voiceRow { gap: 8px; }
+  .voiceRows[data-compact] .arrow { display: none; }
+  .voiceRows[data-compact] .note { padding: 16px 18px; }
+  .voiceRows[data-compact] .note blockquote { font-size: 16px; line-height: 1.65; }
+  .voiceRows[data-compact] .answer { padding: 14px 18px; }
+  .voiceRows[data-compact] .answerHead { margin-bottom: 0; font-size: 17px; }
+}
+.foldButton {
+  display: inline-flex; align-items: center; gap: 4px; margin-top: 8px; padding: 0; border: 0; background: none; color: var(--j-gold-text);
+  font: inherit; font-size: 14px; font-weight: 500; cursor: pointer;
+}

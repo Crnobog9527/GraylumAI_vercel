@@ -1,8 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import type { CSSProperties } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import { MoveRight } from 'lucide-react';
 import { VOICE_WALL, type VoiceNote } from '@/lib/landing/landing-copy';
 import { J_NOTE_ANSWERS, J_NOTE_HEADS, J_VOICE, noteSource } from '@/lib/landing/landing-copy-j';
+import { FoldOnPhoneJ } from './FoldOnPhoneJ';
 import { WallMoreJ } from './MotionJ';
 import styles from './j.module.css';
 
@@ -20,10 +21,12 @@ const FIRST = 'p7';
  */
 /**
  * Sample L (Owner 2026-10-17): `open` shows every row on every screen, no fold; `regions` adds where each note is from
- * (by note id) to its caption.
+ * (by note id) to its caption; `compact` (Owner 2026-10-17) sets the rows tighter on a phone, each answer folded to its
+ * heading behind `compact`'s button label; `after` sits under the wall.
  */
-export function VoiceWallJ({ notes, four = false, open = false, regions }: {
+export function VoiceWallJ({ notes, four = false, open = false, regions, compact, after }: {
   notes: readonly VoiceNote[]; four?: boolean; open?: boolean; regions?: Readonly<Record<string, string>>;
+  compact?: string; after?: ReactNode;
 }) {
   if (notes.length === 0) return null;
   const ordered = [...notes.filter(note => note.id === FIRST), ...notes.filter(note => note.id !== FIRST)];
@@ -33,7 +36,7 @@ export function VoiceWallJ({ notes, four = false, open = false, regions }: {
         <div className={styles.sectionHead}>
           <h2 id="voice-title" className={styles.display}>{J_VOICE.title}</h2>
         </div>
-        <ol id="j-voice-wall" className={styles.voiceRows} data-four={four || undefined}>
+        <ol id="j-voice-wall" className={styles.voiceRows} data-four={four || undefined} data-compact={compact ? '' : undefined}>
           {ordered.map((note, index) => (
             <li key={note.id} data-row="" className={styles.voiceRow} data-region="心声卡片">
               <figure className={styles.note} style={{ '--tilt': TILTS[index % TILTS.length] } as CSSProperties}>
@@ -46,13 +49,16 @@ export function VoiceWallJ({ notes, four = false, open = false, regions }: {
               <MoveRight className={styles.arrow} size={28} aria-hidden="true" />
               <div className={styles.answer}>
                 <p className={styles.answerHead}><i aria-hidden="true" />{J_NOTE_HEADS[note.id] ?? '教练怎么做'}</p>
-                <p>{J_NOTE_ANSWERS[note.id] ?? note.answer}</p>
+                {compact
+                  ? <FoldOnPhoneJ label={compact}><p>{J_NOTE_ANSWERS[note.id] ?? note.answer}</p></FoldOnPhoneJ>
+                  : <p>{J_NOTE_ANSWERS[note.id] ?? note.answer}</p>}
               </div>
             </li>
           ))}
         </ol>
         {!open && ordered.length > (four ? WALL_FOUR : WALL_FIRST)
           ? <WallMoreJ listId="j-voice-wall" hiddenCount={ordered.length - (four ? WALL_FOUR : WALL_FIRST)} always={four} /> : null}
+        {after}
       </div>
     </section>
   );

@@ -58,3 +58,18 @@
 .riskTitle { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; font-size: 17px; font-weight: 600; }
 .riskTitle svg { color: #1f6b4a; }
 .risk ul { display: grid; gap: 4px; margin: 0; padding: 0 0 0 18px; color: var(--j-body, #3d3c3a); font-size: 15px; line-height: 1.7; }
+
+/* Sample L (data-phone-bottom): on a phone the bar sits at the foot, in the thumb's reach, the button alone. */
+@media (max-width: 767px) {
+  .stickyCta[data-phone-bottom] {
+    top: auto !important; bottom: 0; border-top: 1px solid var(--j-line, #e7e6e2); border-bottom: 0; translate: 0 8px;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .stickyCta[data-phone-bottom][data-shown] { translate: 0 0; }
+  .stickyCta[data-phone-bottom] .stickyInner p { display: none; }
+  .stickyCta[data-phone-bottom] .stickyButton { flex: 1; justify-content: center; min-height: 46px; font-size: 16px; }
+}
+
+/* Sample L: the one-line 先聊后买 right under the recommended plan's button. */
+.riskLine { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; color: #1f6b4a; font-size: 14px; }
+.riskLine b { font-weight: 600; }

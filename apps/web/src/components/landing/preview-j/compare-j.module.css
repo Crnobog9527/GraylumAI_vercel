@@ -81,6 +81,9 @@
 @keyframes show { to { opacity: 1; } }
 
 /* Samples K and L (data-calm, distill plan items 15–16): the windows' small print at least 12px and 4.5:1. */
-[data-calm] :is(.badge, .question span, .note b, .source) { font-size: 12px; }
-[data-calm] :is(.question span, .coachReply > span) { color: #6b6b6b; }
-[data-calm] .bar span, [data-calm] .note[data-side='generic'] b { color: #55544f; }
+[data-calm] :is(.note b, .source) { font-size: 12px; }
+[data-calm] .note[data-side='generic'] b { color: #55544f; }
+/* Inside the windows (samples K, M–O only; L keeps the product's own values, Owner 2026-10-17). */
+[data-calm-windows] :is(.badge, .question span) { font-size: 12px; }
+[data-calm-windows] :is(.question span, .coachReply > span) { color: #6b6b6b; }
+[data-calm-windows] .bar span { color: #55544f; }

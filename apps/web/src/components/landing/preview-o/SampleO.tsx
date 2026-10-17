@@ -61,7 +61,7 @@ export function SampleO({ data, siteName, extras, membershipHref }: {
       <SiteHeaderJ siteName={siteName} />
       <StickyCtaMNO line={L_OPS.lede} />
 
-      <main data-calm="">
+      <main data-calm="" data-calm-windows="">
         <RouteO>
           <HeroO note={data.heroNote} flags={extras.flags} />
           <VoiceO notes={data.notes} station={String(stops.voice)} />

@@ -16,7 +16,7 @@ import page from './j.module.css';
  * close it), then 教程, 价格, 常见问题, 关于我们; on the right the language switch, 登录 and 免费试用. Below 1100px
  * everything but the logo and the button folds into a menu.
  */
-export function SiteHeaderJ({ siteName }: { siteName: string }) {
+export function SiteHeaderJ({ siteName, cta = J_NAV.cta }: { siteName: string; cta?: string }) {
   const [open, setOpen] = useState<'product' | null>(null);
   const [drawer, setDrawer] = useState(false);
   const ref = useRef<HTMLElement>(null);
@@ -43,7 +43,7 @@ export function SiteHeaderJ({ siteName }: { siteName: string }) {
         <div className={styles.end}>
           <LanguageMenuJ className={styles.desktopOnly} />
           <Link href={J_NAV.login.href} className={cn(page.pillSmallLight, styles.desktopOnly)}>{J_NAV.login.label}</Link>
-          <Link href={SIGNUP_CTA_HREF} className={page.pillSmall}>{J_NAV.cta}</Link>
+          <Link href={SIGNUP_CTA_HREF} className={page.pillSmall} data-header-cta="">{cta}</Link>
           <button type="button" className={styles.burger} aria-expanded={drawer} aria-controls={drawerId}
             aria-label={drawer ? J_NAV.close : J_NAV.menu} onClick={() => setDrawer(value => !value)}>
             {drawer ? <X size={20} aria-hidden="true" /> : <Menu size={20} aria-hidden="true" />}

@@ -57,7 +57,7 @@ export function SampleM({ data, siteName, extras, membershipHref }: {
       <SiteHeaderJ siteName={siteName} />
       <StickyCtaMNO line={L_OPS.lede} />
 
-      <main data-calm="">
+      <main data-calm="" data-calm-windows="">
         <div className={styles.lane} data-scene="ask"><HeroM note={data.heroNote} flags={extras.flags} /></div>
         <div className={styles.lane} data-scene="ask"><VoiceWallJ notes={data.notes} open regions={L_NOTE_REGIONS} /></div>
         <div className={styles.lane} data-scene="ops"><OpsM steps={visibleItems(extras.flags, L_OPS.steps)} flags={extras.flags} /></div>

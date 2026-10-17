@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
 
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { ShieldCheck } from 'lucide-react';
 import type { PaywallBilling } from '@/components/paywall/paywallPlans';
@@ -13,18 +13,22 @@ import styles from './mno.module.css';
  * Samples M, N and O's plan cards (the shared conversion rule, Owner 2026-10-17: the recommended plan, Gold, stands out
  * most, and "先聊后买" sits right under the cards and their buttons). Every name, price and line comes from the server
  * catalog (landing-pricing.ts) and the landing copy, as on /landing; nothing is written here. A variant restyles the
- * cards through its own root class (the elements carry data-plan and data-recommended).
+ * cards through its own root class (the elements carry data-plan and data-recommended). Sample L (Owner 2026-10-17):
+ * `recommendedFirst` puts the recommended plan first on every screen, and `riskLine` sits right under its button.
  */
-export function PlanCardsMNO({ cards, yearlyBadge, showResult, membershipHref, risk }: {
+export function PlanCardsMNO({ cards, yearlyBadge, showResult, membershipHref, risk, recommendedFirst = false, riskLine }: {
   cards: readonly LandingCard[];
   yearlyBadge: string | null;
   showResult: Record<string, boolean>;
   membershipHref: string;
   risk: readonly GatedText[];
+  recommendedFirst?: boolean;
+  riskLine?: ReactNode;
 }) {
   const [billing, setBilling] = useState<PaywallBilling>('monthly');
   const hasYearly = cards.some(card => card.quotes.yearly);
   if (cards.length === 0) return null;
+  const ordered = recommendedFirst ? [...cards.filter(card => card.recommended), ...cards.filter(card => !card.recommended)] : cards;
   return (
     <div className={styles.plans} data-region="会员方案">
       <div role="radiogroup" aria-label="计费周期" className={styles.billing}>
@@ -41,7 +45,7 @@ export function PlanCardsMNO({ cards, yearlyBadge, showResult, membershipHref, r
         })}
       </div>
       <div className={styles.cards}>
-        {cards.map(card => {
+        {ordered.map(card => {
           const quote = card.quotes[billing];
           const ready = card.checkoutReady[billing];
           return (
@@ -65,6 +69,7 @@ export function PlanCardsMNO({ cards, yearlyBadge, showResult, membershipHref, r
               {quote ? (
                 <div className={styles.planAction}>
                   <Link href={ready ? membershipHref : '/contact'} className={styles.planButton}>{ready ? card.cta : '联系我们'}</Link>
+                  {card.recommended && riskLine ? <div className={styles.riskLine}>{riskLine}</div> : null}
                   <p data-testid={`landing-renewal-${card.key}`}>{quote.renewal}</p>
                 </div>
               ) : null}

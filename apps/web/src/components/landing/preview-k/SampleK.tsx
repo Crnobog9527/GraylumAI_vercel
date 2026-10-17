@@ -49,7 +49,7 @@ export function SampleK({ data, siteName, extras }: { data: LandingData; siteNam
       </nav>
       <SiteHeaderJ siteName={siteName} />
 
-      <main data-calm="">
+      <main data-calm="" data-calm-windows="">
         <HeroJ note={data.heroNote} still={HERO_STILL} />
         <VoiceWallJ notes={data.notes} four />
         <MomentsK moments={visibleItems(extras.flags, K_MOMENTS)} />

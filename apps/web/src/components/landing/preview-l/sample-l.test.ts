@@ -25,7 +25,7 @@ const plan = (level: string, monthly: number, yearly: number) => ({
 });
 const data = buildLandingPageData(ALL_ON, [plan('pro', 29, 279), plan('gold', 69, 621)]);
 const render = (flags: LandingFlags = ALL_ON, showSamples = true) =>
-  renderToStaticMarkup(createElement(SampleL, { data, siteName: 'Graylum', extras: { flags, showSamples } }));
+  renderToStaticMarkup(createElement(SampleL, { data, siteName: 'Graylum', extras: { flags, showSamples }, membershipHref: '/profile' }));
 
 describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
   it('is never indexed, never listed in the sitemap, and its segment is known to the Sentry scrubber', () => {
@@ -140,4 +140,40 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
       for (const text of [markdown, JSON.stringify(data)]) expect(text).not.toMatch(/https?:|www\.|@[A-Za-z0-9_]|monid/i);
     }
   });
+
+  it('shows the demos as the real product: the work chat\'s own head, the coach heads with their step, no invented names', () => {
+    const html = render();
+    const ops = html.slice(html.indexOf('id="ops-title"'), html.indexOf('id="samples-title"'));
+    expect(ops).toContain('Graylum · AI 自媒体陪跑教练');
+    expect(ops).toContain('工作对话');
+    for (const invented of ['这一周', '帮你挖掘定位', '第一周']) expect(ops).not.toContain(invented);
+    const compare = html.slice(html.indexOf('id="compare-title"'), html.indexOf('id="pricing-title"'));
+    expect(compare).toContain('AI 自媒体陪跑教练 · 诊断与平台对标');
+  });
+
+  it('puts the plan cards under the price, Gold first with 先聊后买 right under its button, our price quiet', () => {
+    const html = render();
+    const price = html.slice(html.indexOf('id="pricing-title"'), html.indexOf('id="faq-title"'));
+    expect(price.indexOf('data-plan="gold"')).toBeGreaterThan(0);
+    expect(price.indexOf('data-plan="gold"')).toBeLessThan(price.indexOf('data-plan="pro"'));
+    const gold = price.slice(price.indexOf('data-plan="gold"'), price.indexOf('data-plan="pro"'));
+    expect(gold).toContain('先聊后买');
+    expect(price).toContain('data-quiet="true"');
+  });
+
+  it('keeps one button wording and a button at least every two regions', () => {
+    const html = render();
+    const header = html.slice(html.indexOf('<header'), html.indexOf('</header>'));
+    expect(header).toContain('免费和教练聊聊');
+    expect(header).not.toContain('>免费试用<');
+    const between = (from: string, to: string) => html.slice(html.indexOf(from), html.indexOf(to)).includes('免费和教练聊聊');
+    expect(between('id="voice-title"', 'id="ops-title"')).toBe(true);
+    expect(between('id="ops-title"', 'id="samples-title"')).toBe(true);
+    expect(between('id="compare-title"', 'id="pricing-title"')).toBe(true);
+  });
+
+  it('keeps "14 种人" in one piece in the samples\' title', () => {
+    expect(render()).toMatch(/<span[^>]*>14 种人<\/span>/);
+  });
 });
+

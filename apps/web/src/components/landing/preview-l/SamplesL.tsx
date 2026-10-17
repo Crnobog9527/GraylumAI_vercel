@@ -20,7 +20,8 @@ const MIN_CARDS = 8;
  * Region 4 (Owner 2026-10-17): every group's sample report as a card in one row that keeps moving from right to left;
  * the pointer or keyboard focus on it holds it. A card opens its report in a dialog: the cover, the 10-second card and
  * the whole report behind "看完整报告". The row is the list twice over, the second copy hidden from screen readers and
- * the keyboard, so the loop is seamless. Reduced motion: the row stands still and scrolls sideways by hand. New
+ * the keyboard, so the loop is seamless. Reduced motion and touch screens: the row stands still and is swiped by hand
+ * (fix plan item 12). New
  * reports join by adding them to L_REPORTS and sample-reports/.
  */
 export function SamplesL() {
@@ -35,8 +36,10 @@ export function SamplesL() {
       <div className={k.wrap}>
         <div className={k.samplesHead}>
           <p className={k.bridge}>{L_SAMPLES.bridge}</p>
-          <h2 id="samples-title" className={k.lead}>{L_SAMPLES.title(reports.length)}</h2>
-          <p className={styles.marqueeHint}>{L_SAMPLES.pause}</p>
+          <h2 id="samples-title" className={k.lead}>
+            {L_SAMPLES.titleParts(reports.length).map(part => <span key={part} className={styles.keep}>{part}</span>)}
+          </h2>
+          <p className={styles.marqueeHint}><span data-pointer="fine">{L_SAMPLES.pause}</span><span data-pointer="touch">{L_SAMPLES.swipe}</span></p>
         </div>
       </div>
       <div className={styles.marquee} data-region="报告卡片">

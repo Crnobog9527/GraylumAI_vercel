@@ -46,10 +46,12 @@ function useSeen(threshold: number) {
  * Sample K (Owner 2026-10-17): `after` sits under the button; `calm` drops the panel's shadow, the springy rise and the
  * gold edge's endless travel (the total and its strike stay as they are).
  * Sample L (Owner 2026-10-17): `plainTotal` shows the usual ways' total in full, not struck out; `checked: false` drops
- * the check-date line.
+ * the check-date line; `quiet` sets our price in plain ink (no gold sheen) and the full-pricing link as a text link, so
+ * it does not compete with the plan cards' buttons.
  */
-export function PriceJ({ proMonthly, rows, after, calm = false, plainTotal = false, checked = true }: {
+export function PriceJ({ proMonthly, rows, after, calm = false, plainTotal = false, checked = true, quiet = false }: {
   proMonthly: number | null; rows: readonly CompareRow[]; after?: ReactNode; calm?: boolean; plainTotal?: boolean; checked?: boolean;
+  quiet?: boolean;
 }) {
   const [tableRef, tableSeen] = useSeen(0.2);
   const [versusRef, versusSeen] = useSeen(0.5);
@@ -85,7 +87,8 @@ export function PriceJ({ proMonthly, rows, after, calm = false, plainTotal = fal
               ))}
             </ul>
           </div>
-          <div ref={versusRef} className={styles.versus} data-phase={phase} data-plain={plainTotal || undefined} data-region="Graylum 价格">
+          <div ref={versusRef} className={styles.versus} data-phase={phase} data-plain={plainTotal || undefined} data-quiet={quiet || undefined}
+            data-region="Graylum 价格">
             {allRows ? (
               <p className={styles.total}>
                 <span>{J_PRICE_TOTAL.label}</span>
@@ -95,7 +98,9 @@ export function PriceJ({ proMonthly, rows, after, calm = false, plainTotal = fal
             {proMonthly !== null ? (
               <div className={styles.own}>
                 <p><b className={styles.price}>{J_PRICE.ownPrice(formatUsd(proMonthly))}</b></p>
-                <Link href={PRICING_PAGE} className={`${page.pill} ${styles.cta}`}>{J_PRICE.more}<ArrowRight size={18} aria-hidden="true" /></Link>
+                <Link href={PRICING_PAGE} className={quiet ? styles.moreLink : `${page.pill} ${styles.cta}`}>
+                  {J_PRICE.more}<ArrowRight size={quiet ? 15 : 18} aria-hidden="true" />
+                </Link>
                 {after}
               </div>
             ) : null}

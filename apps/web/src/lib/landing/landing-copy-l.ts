@@ -151,8 +151,11 @@ export const L_REPORTS: readonly { slug: string; who: string; platform: string; 
 
 /** 4: the sample reports as a moving row of cards. */
 export const L_SAMPLES = {
-  /** NEW: sample J's title, with the number of groups shown. */
+  /** NEW: sample J's title, with the number of groups shown; the count and its measure word never part. */
   title: (count: number) => `先看成果：${count} 种人拿到的完整报告`,
+  titleParts: (count: number) => ['先看成果：', `${count} 种人`, '拿到的完整报告'] as const,
+  /** NEW (fix plan item 12): on a touch screen the row is swiped, not hovered. */
+  swipe: '左右滑动看更多',
   bridge: '找一个和你情况像的，点开看',
   pause: '移到卡片上会停下',
   open: '看这份报告',
@@ -184,3 +187,12 @@ export const L_COMPARE_NEXT: Readonly<Record<number, string>> = {
   1: `接下来你做：${SAMPLE_CHAPTERS.student.summary.first}`,
   3: `接下来你做：${SAMPLE_CHAPTERS.shop.summary.first}`,
 };
+
+/**
+ * Fixes of 2026-10-17 (Owner: keep L's look, fix what the comparison audit found). NEW wording unless marked.
+ * The voice wall's fold button on a phone; the comparison pairs' step in the coach's head, as in the sample conversations
+ * (both quotes come from the 诊断与平台对标 step); the one line under the recommended plan's button (RISK_REVERSAL's title
+ * with the close's own note).
+ */
+export const L_VOICE_FOLD = '看完整做法';
+export const L_COMPARE_STEPS: Readonly<Record<number, string>> = { 1: '诊断与平台对标', 3: '诊断与平台对标' };

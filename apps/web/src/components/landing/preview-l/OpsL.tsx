@@ -8,7 +8,9 @@ import page from '@/components/landing/preview-j/j.module.css';
 import { HOW_IT_WORKS } from '@/lib/landing/landing-copy';
 import type { LandingFlags } from '@/lib/landing/landing-flags';
 import { L_OPS } from '@/lib/landing/landing-copy-l';
-import { OpsChatL } from './OpsChatL';
+import { CtaK } from '@/components/landing/preview-k/CtaK';
+import { DEMO_LABEL } from '@/components/landing/demo/demo-script';
+import { WorkChatL } from './WorkChatL';
 import styles from './l.module.css';
 
 type Step = (typeof L_OPS.steps)[number];
@@ -83,10 +85,11 @@ export function OpsL({ steps, flags }: { steps: readonly Step[]; flags: LandingF
           )}
         </div>
         <div role="tabpanel" id={`${base}-panel`} aria-labelledby={`${base}-tab-${active}`} className={styles.opsPanel}>
-          <p className={styles.opsLine}>{current.line}</p>
-          <OpsChatL key={current.label} step={current} stepName={current.label} flags={flags} />
+          <p className={styles.opsLine}><span className={styles.demoTag}>{DEMO_LABEL}</span>{current.line}</p>
+          <WorkChatL key={current.label} step={current} flags={flags} />
         </div>
         <p className={styles.opsClose}>{L_OPS.close}</p>
+        <CtaK />
       </div>
     </section>
   );

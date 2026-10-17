@@ -68,7 +68,7 @@ export function SampleN({ data, siteName, extras, membershipHref }: {
       <SiteHeaderJ siteName={siteName} />
       <StickyCtaMNO line={L_OPS.lede} />
 
-      <main data-calm="">
+      <main data-calm="" data-calm-windows="">
         <HeroN note={data.heroNote} flags={extras.flags} facts={heroFacts(data, Boolean(extras.showSamples))} />
         <VoiceN notes={data.notes} regions={L_NOTE_REGIONS} />
         <OpsN steps={visibleItems(extras.flags, L_OPS.steps)} flags={extras.flags} />

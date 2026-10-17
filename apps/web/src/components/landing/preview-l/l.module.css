@@ -130,3 +130,52 @@
 .opsWinner svg { flex: none; color: var(--j-gold-text); }
 .opsSeries ol { display: grid; gap: 4px; margin: 0; padding: 0 0 0 20px; font-size: 14px; }
 .opsClose { margin: 24px 0 0; color: var(--j-ink); font-size: clamp(18px, 1.6vw, 22px); font-weight: 600; }
+
+/* Region 3's window: the product's work chat (runtime-work.module.css inside); only the frame is the page's. */
+.workWindow {
+  --chat-gutter: 24px; overflow: hidden; border: 1px solid var(--j-line); border-radius: 18px; background: #fff; color: #262626;
+  box-shadow: 0 1px 2px rgba(20, 19, 18, .05), 0 40px 80px -48px rgba(20, 19, 18, .45);
+}
+@media (max-width: 640px) { .workWindow { --chat-gutter: 14px; } }
+.workTitleText { margin: 0; overflow: hidden; font-size: 14px; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+.workTurn { margin-bottom: 20px; }
+@media (prefers-reduced-motion: no-preference) {
+  .workTurn { animation: flowIn .5s var(--j-ease) both; animation-delay: calc(var(--m) * 900ms + 150ms); }
+}
+.demoTag {
+  display: inline-block; margin-right: 10px; padding: 0 8px; border-radius: 999px; background: var(--gl-accent-tag); color: var(--gl-accent-tag-text);
+  font-size: 12px; font-weight: 500; line-height: 22px; vertical-align: 2px;
+}
+
+/* "14 种人" and the other parts of the samples' title break only between them, never inside one. */
+.keep { display: inline-block; }
+/* The hint names the gesture of the device: hover with a mouse, swipe on a touch screen. */
+.marqueeHint [data-pointer='touch'] { display: none; }
+@media (hover: none) and (pointer: coarse) {
+  .marqueeHint [data-pointer='fine'] { display: none; }
+  .marqueeHint [data-pointer='touch'] { display: inline; }
+  .marquee { overflow-x: auto; mask-image: none; scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch; }
+  .marqueeTrack { animation: none !important; }
+  .marqueeList[aria-hidden] { display: none; }
+  .marqueeList li { scroll-snap-align: start; }
+}
+
+/* The plan cards under the price comparison (Owner 2026-10-17 "保留方案卡"): Gold first, 先聊后买 under its button. */
+.plans { margin-top: -56px; padding-bottom: 88px; }
+@media (max-width: 767px) { .plans { margin-top: -32px; padding-bottom: 64px; } }
+
+/* Fix plan item 11: on a phone the whole three-step picture, "你得到" included, fits the first screen. The order stays;
+   the coach's work becomes a row of chips and the spacing tightens. */
+@media (max-width: 767px) {
+  .heroGrid { gap: 18px; }
+  .flow { gap: 4px; }
+  .flowStep { gap: 6px; padding: 10px 14px; border-radius: 14px; }
+  .flowTitle { font-size: 13px; }
+  .bubble { padding: 7px 12px; font-size: 14.5px; }
+  .does { display: flex; flex-wrap: wrap; gap: 4px 6px; }
+  .does li { gap: 4px; padding: 2px 9px 2px 6px; border-radius: 999px; background: #f4f4f2; font-size: 13.5px; line-height: 1.6; }
+  .does svg { width: 13px; height: 13px; }
+  .result { font-size: 15.5px; line-height: 1.45; }
+  .flowArrow { width: 16px; height: 16px; }
+}
+@media (max-width: 767px) { .heroGrid .heroText { gap: 16px; } }
