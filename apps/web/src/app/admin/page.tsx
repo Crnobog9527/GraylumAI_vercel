@@ -13,6 +13,7 @@ import {
   CreditCard, Gift, Zap, Crown
 } from 'lucide-react';
 import StatsCard from '@/components/admin/StatsCard';
+import { SignupSourcesCard } from '@/components/admin/SignupSourcesCard';
 import Link from 'next/link';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -137,6 +138,7 @@ export default function AdminDashboardPage() {
       </div>
 
       {/* Time Comparison Row */}
+      <SignupSourcesCard />
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
         {/* Today */}
         <Card style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
@@ -229,11 +231,7 @@ export default function AdminDashboardPage() {
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={stats?.trends ?? []}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border-primary)" />
-                  <XAxis
-                    dataKey="day"
-                    stroke="var(--text-tertiary)"
-                    fontSize={12}
-                  />
+                  <XAxis dataKey="day" stroke="var(--text-tertiary)" fontSize={12} />
                   <YAxis stroke="var(--text-tertiary)" fontSize={12} />
                   <Tooltip
                     contentStyle={{

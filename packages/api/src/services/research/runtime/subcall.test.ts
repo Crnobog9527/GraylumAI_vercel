@@ -4,7 +4,7 @@ import { BillingClaimRejection } from '../../bill2/claimFailure';
 import type { ToolCallPolicy } from '../../bill2/toolBilling';
 import type { ToolSubcallBilling } from '../../bill2/toolSubcall';
 import type { ResearchCallResult } from '../vendors/types';
-import { requestIdentity, runSubcall, type EvidencePort, type SubcallContext, type SupplierRequest, type VendorCalls } from './subcall';
+import { requestIdentity, ResearchPause, runSubcall, type EvidencePort, type SubcallContext, type SupplierRequest, type VendorCalls } from './subcall';
 
 const request: SupplierRequest = { vendor: 'parallel', route: 'parallel:search:fast', query: 'research', mode: 'fast' };
 const policy: ToolCallPolicy = {
@@ -71,17 +71,32 @@ describe('research subcall safety and accounting', () => {
     expect(f.vendors.firecrawl).not.toHaveBeenCalled();
   });
 
-  it.each(['ROUTE_NOT_FROZEN', 'KEY_MISSING', 'KEY_UNAVAILABLE', 'VENDOR_RATE_LIMITED'] as const)('does not claim or send after %s', async stop => {
+  it.each(['ROUTE_NOT_FROZEN', 'KEY_MISSING'] as const)('does not claim or send after %s', async stop => {
     const f = fixture();
     if (stop === 'ROUTE_NOT_FROZEN') f.context.policies = [];
     if (stop === 'KEY_MISSING') f.context.secrets = vi.fn().mockResolvedValue(null);
-    if (stop === 'KEY_UNAVAILABLE') f.context.secrets = vi.fn().mockRejectedValue(new Error('RESEARCH_KEY_UNAVAILABLE'));
-    if (stop === 'VENDOR_RATE_LIMITED') f.context.rateCounter = vi.fn().mockResolvedValue(false);
-    expect(await runSubcall(f.context, request)).toEqual({ sent: false, stop, budget: stop === 'VENDOR_RATE_LIMITED' });
+    expect(await runSubcall(f.context, request)).toEqual({ sent: false, stop, budget: false });
     expect(f.billing.claim).not.toHaveBeenCalled();
     expect(f.evidence.open).not.toHaveBeenCalled();
     expect(f.vendors.parallel).not.toHaveBeenCalled();
   });
+
+  // A resumed turn must reach its saved slot again; a temporary outage before the claim keeps it resumable (#1062 review).
+  it.each(['key store unavailable', 'rate limit full', 'rate counter unavailable'] as const)(
+    'pauses (waiting_resume) at the slot without claiming or sending when the %s', async cause => {
+      const f = fixture();
+      if (cause === 'key store unavailable') f.context.secrets = vi.fn().mockRejectedValue(new Error('RESEARCH_KEY_UNAVAILABLE'));
+      if (cause === 'rate limit full') f.context.rateCounter = vi.fn().mockResolvedValue(false);
+      if (cause === 'rate counter unavailable') f.context.rateCounter = vi.fn().mockRejectedValue(new Error('counter unavailable'));
+      const paused = await runSubcall(f.context, request).catch(error => error);
+      expect(paused).toBeInstanceOf(ResearchPause);
+      expect(paused.state).toBe('waiting_resume');
+      expect(paused.message).toBe('RUNTIME_WAITING_RESUME');
+      expect(paused.point).toEqual({ sequence: 1, requestHash: requestIdentity(request), phase: 'question' });
+      expect(f.billing.claim).not.toHaveBeenCalled();
+      expect(f.evidence.open).not.toHaveBeenCalled();
+      expect(f.vendors.parallel).not.toHaveBeenCalled();
+    });
 
   it('persists the exact billing receipt before a record outage so replay can reconcile without repricing', async () => {
     const f = fixture();
@@ -118,19 +133,27 @@ describe('research subcall safety and accounting', () => {
     expect(f.billing.record).toHaveBeenCalledWith('call-1', expect.objectContaining({ toolOutcome: 'failed_free', cost: '0' }));
   });
 
-  it('fails closed if the rate counter is unavailable', async () => {
+
+  it('never resends a replayed claim', async () => {
     const f = fixture();
-    f.context.rateCounter = vi.fn().mockRejectedValue(new Error('counter unavailable'));
-    expect(await runSubcall(f.context, request)).toMatchObject({ stop: 'VENDOR_RATE_LIMITED', budget: true });
-    expect(f.billing.claim).not.toHaveBeenCalled();
+    f.billing.claim.mockResolvedValue({ state: 'replayed', callId: 'call-1' });
+    expect(await runSubcall(f.context, request)).toEqual({ sent: false, stop: 'CALL_REPLAYED', budget: false });
+    expect(f.evidence.open).not.toHaveBeenCalled();
+    expect(f.billing.dispatch).not.toHaveBeenCalled();
+    expect(f.vendors.parallel).not.toHaveBeenCalled();
   });
 
-  it.each(['waiting_credits', 'replayed'] as const)('never resends a %s claim', async state => {
+  it('pauses at the slot when the balance cannot start the subcall, instead of reporting a stop (BILL-PAYG)', async () => {
     const f = fixture();
-    f.billing.claim.mockResolvedValue(state === 'replayed' ? { state, callId: 'call-1' } : { state });
-    expect(await runSubcall(f.context, request)).toEqual({ sent: false,
-      stop: state === 'replayed' ? 'CALL_REPLAYED' : 'BALANCE_LOW', budget: state === 'waiting_credits' });
+    f.billing.claim.mockResolvedValue({ state: 'waiting_credits' });
+    const paused = await runSubcall(f.context, request).catch(error => error);
+    expect(paused).toBeInstanceOf(ResearchPause);
+    expect(paused.state).toBe('waiting_credits');
+    // The exact slot, request and phase the run resumes with (payg_wait → bill2_claim checkpoint check).
+    expect(paused.point).toEqual({ sequence: 1, requestHash: requestIdentity(request), phase: 'question' });
+    expect(f.billing.claim).toHaveBeenCalledWith(1, expect.objectContaining({ requestHash: requestIdentity(request), phase: 'question' }));
     expect(f.evidence.open).not.toHaveBeenCalled();
+    expect(f.billing.record).not.toHaveBeenCalled();
     expect(f.billing.dispatch).not.toHaveBeenCalled();
     expect(f.vendors.parallel).not.toHaveBeenCalled();
   });
@@ -268,7 +291,7 @@ describe('supplier dispatch boundary hooks', () => {
     if (stage === 'claim') f.billing.claim.mockRejectedValue(new Error('claim unavailable'));
     if (stage === 'rate-limit') f.context.rateCounter = vi.fn().mockRejectedValue(new Error('counter unavailable'));
     if (stage === 'evidence-open') f.evidence.open.mockRejectedValue(new Error('evidence unavailable'));
-    if (stage === 'rate-limit') expect(await runSubcall(f.context, request)).toMatchObject({ stop: 'VENDOR_RATE_LIMITED' });
+    if (stage === 'rate-limit') await expect(runSubcall(f.context, request)).rejects.toBeInstanceOf(ResearchPause);
     else await expect(runSubcall(f.context, request)).rejects.toThrow('unavailable');
     expect(f.context.beforeSend).not.toHaveBeenCalled();
     expect(f.context.onSupplierDispatch).not.toHaveBeenCalled();
