@@ -36,7 +36,9 @@ export async function admitFusionModel(db: SupabaseClient, window: StagingPolicy
   // The stored transport must be able to dispatch (key, OpenRouter endpoint, id, limits, reasoning config),
   // and the key must be the one the window's quote is bound to, as stagingTransport checks at dispatch:
   // otherwise credits would be held for calls that can never be sent (#954 review).
-  const key = await readOpenRouterKey(db).catch(() => undefined);
+  // Admission creates the runs and credit holds that dispatch (a fresh read) will check: read fresh here too, so a
+  // cleared or replaced key is refused now instead of after holds were created.
+  const key = await readOpenRouterKey(db, { fresh: true }).catch(() => undefined);
   if (!runtimeModelOption(row, 'organizer', key !== undefined).available) throw new Error('FUSION_MODEL_UNAVAILABLE');
   const quote = window.callPolicies.find(policy => policy.modelId === row.id);
   if (quote && quote.account !== openRouterAccount(key ?? '')) {

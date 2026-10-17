@@ -33,6 +33,14 @@ describe('Fusion model admission refuses models that could never be dispatched',
     stored = 'ANOTHER_SYNTHETIC_KEY';
     await expect(admit({})).rejects.toThrow('FUSION_MODEL_ADMISSION_REQUIRED');
   });
+  it('reads the key fresh, so a key cleared elsewhere is refused at admission, not after holds exist', async () => {
+    const { getPlatformSecret } = await import('../platformSecrets/reader');
+    await getPlatformSecret(db, 'openrouter'); // this instance now has the key cached
+    stored = null; // another instance's admin cleared the slot
+    await expect(admit({})).rejects.toThrow('FUSION_MODEL_UNAVAILABLE');
+    stored = 'ANOTHER_SYNTHETIC_KEY'; // replaced: the cached key would still match the window quote
+    await expect(admit({})).rejects.toThrow('FUSION_MODEL_ADMISSION_REQUIRED');
+  });
   it('refuses built-in search models', async () => {
     await expect(admit({ model_id: 'perplexity/sonar' })).rejects.toThrow('FUSION_MODEL_SEARCH_DENIED');
   });
