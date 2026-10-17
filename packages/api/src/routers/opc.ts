@@ -9,6 +9,7 @@ import {executeOriginalExecution,runtimeLocalEndpoint,streamOriginalExecution} f
 import {StagingAccessError,stagingProcedureError,stagingRpcFailure} from '../services/runtime/stagingErrors';
 import {briefAdoption, contentReaction, topicAdoptionWithSource} from "../services/opc/dataFoundation";
 import { dedupeHandoffResults } from "../services/opc/handoff-view";
+import { realHostMode } from "../services/runtime/productionEnvironment";
 import { conversationRename, renameConversation } from "../services/opc/conversationName";
 import {
   opcService,
@@ -266,7 +267,8 @@ export const opcRouter = router({
     .mutation(({ ctx, input }) => ctx.opc.videoMaterialPrepare(input)),
   read: readProcedure
     .input(z.object({ draftId: z.string().uuid() }).strict())
-    .query(async({ ctx, input }) => dedupeHandoffResults({...await ctx.opc.read(input.draftId),runtimeMode:ctx.stagingRead?"staging_test":"isolated"})),
+    .query(async({ ctx, input }) => dedupeHandoffResults({...await ctx.opc.read(input.draftId),
+      runtimeMode:ctx.stagingRead?realHostMode(process.env):"isolated"})),
   start: procedure
     .input(opcStart)
     .mutation(({ ctx, input }) => ctx.opc.start(input)),

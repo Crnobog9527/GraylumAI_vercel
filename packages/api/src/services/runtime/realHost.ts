@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { readPaygHostPolicies } from './paygHostPolicy';
 import { readPaygProductionPolicies } from './productionPolicy';
+import { StagingAccessError } from './stagingErrors';
 import type { StagingPolicy } from './stagingPolicy';
 
 /** RUNTIME-PROD: the contract fields that tell the three hosts apart. Production carries no test window. */
@@ -19,3 +20,9 @@ export const runtimeGateEnvironment = (real: StagingPolicy | undefined) =>
 
 /** New admissions read the PAYG profiles of their own host: the window's setting or the production setting. */
 export const readPaygPolicies = (real: StagingPolicy) => isProductionPolicy(real) ? readPaygProductionPolicies : readPaygHostPolicies;
+
+/** Features whose production path is not built yet (Fusion review, see docs/launch/tasks/RUNTIME-PROD.md section 6)
+ * refuse a production policy before anything is priced or frozen, instead of failing later on a window field. */
+export function refuseOnProduction(policy: StagingPolicy) {
+  if (isProductionPolicy(policy)) throw new StagingAccessError('RUNTIME_PRODUCTION_FEATURE_UNAVAILABLE');
+}

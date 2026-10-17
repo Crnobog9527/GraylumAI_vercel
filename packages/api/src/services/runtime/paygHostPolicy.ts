@@ -105,6 +105,15 @@ export const paygHostSettings = z.object({
   version: z.literal(1), enabled: z.boolean(), windowId: z.string().uuid(),
   profiles: z.array(paygHostProfile).max(16),
 }).strict();
+/** RUNTIME-PROD production profiles (productionPolicy.ts): no window binding, a version every new run freezes. */
+export const PAYG_PRODUCTION_SETTING = 'runtime_payg_production';
+export const paygProductionSettings = z.object({
+  version: z.literal(1), enabled: z.boolean(), policyVersion: reference,
+  profiles: z.array(paygProductionProfile).min(1).max(16),
+}).strict();
+export const paygProductionSettingWrite = z.union([z.object({ enabled: z.literal(false) }).strict(), paygProductionSettings]);
+/** Production database marker (SQL runtime_production_database). Written only by the approved release SQL. */
+export const RUNTIME_ENVIRONMENT_SETTING = 'runtime_environment';
 // A minimal object can always disable new admissions, regardless of stale evidence.
 export const paygHostSettingWrite = z.union([z.object({enabled:z.literal(false)}).strict(), paygHostSettings]);
 export type PaygHostProfile = z.infer<typeof paygHostProfile>;

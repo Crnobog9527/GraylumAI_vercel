@@ -349,7 +349,8 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  return <WorkspaceFrame area="chat" activeWorkItemId={workItem?.workItemId} notice={choices.data?.mode==='staging_test'?'Staging 真实对话测试 · 消耗测试预算':choices.data?.mode==='isolated'?'本地隔离 · 模型回复为模拟，保存写入本地测试服务':undefined} rightOpen={panelOpen} onToggleRight={()=>setPanelOpen(value=>!value)} right={workItem?(contentType==='unknown'?<RuntimeTypePendingPanel/>:<ContentEditor key={workItem.workItemId+':'+contentType} item={workItem} onSaved={()=>library.refetch()}><RuntimeResultsSection isVideo={isVideo} versions={versions}
   currentScriptId={currentScript?.id} saved={saved.data} libraryHref={'/library?item='+workItem.workItemId+'&return='+sessionId}/></ContentEditor>):undefined}><main className={`${workStyles.conversation} flex h-full min-h-0 flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]`}>
   <RuntimeHeader title={workItem?.title??'工作对话'}
-   subtitle={workItem?undefined:(choices.data?.mode??view.data?.mode)==='staging_test'?'Staging 真实对话测试':'本地模拟体验'}
+   subtitle={workItem?undefined:(choices.data?.mode??view.data?.mode)==='staging_test'?'Staging 真实对话测试'
+    :(choices.data?.mode??view.data?.mode)==='production'?undefined:'本地模拟体验'}
    meta={workItem?{platform:workItem.platform,account:workItem.account,infoHref:'/library?item='+workItem.workItemId+'&return='+sessionId,
     showExpand:!panelOpen,onExpand:()=>setPanelOpen(true)}:undefined}
    action={!sessionId&&requestedModule?<Button variant="outline" disabled={busy||!choices.data||Boolean(input.trim())||Boolean(requestedModule&&!chosenModule)}

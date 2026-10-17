@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { StagingAccessError } from './stagingErrors';
+import { stagingRuntimeWindow } from './stagingEnvironment';
 /** RUNTIME-PROD: exact production domains of the production Vercel project (app today, www after the
  * PUBLIC-SITE domain merge). Exact match only, like the staging binding: a new domain needs a code change. */
 const PRODUCTION_URLS: ReadonlySet<string> = new Set(['app.graylum.com', 'www.graylum.com']);
@@ -31,4 +32,21 @@ export function productionRuntimeTarget(env: Record<string, string | undefined>,
     || url.pathname !== '/' || url.search || url.hash)
     throw new StagingAccessError('RUNTIME_PRODUCTION_TARGET_DENIED');
   if (!maintenance && env.V3_RUNTIME_PRODUCTION_ENABLED !== 'true') throw new StagingAccessError('RUNTIME_PRODUCTION_DISABLED');
+}
+
+/** The host's own enable switch (production or staging), read only to decide whether an original execution is closed. */
+export function realRuntimeEnabled(env: Record<string, string | undefined>): boolean {
+  return realRuntimeEnvironment(env) === 'production'
+    ? env.V3_RUNTIME_PRODUCTION_ENABLED === 'true' : env.V3_RUNTIME_STAGING_ENABLED === 'true';
+}
+
+/** Maintenance target check of either host: original-call receipts only, never new work. */
+export function assertRealRuntimeTarget(env: Record<string, string | undefined>): void {
+  if (realRuntimeEnvironment(env) === 'production') productionRuntimeTarget(env, true);
+  else stagingRuntimeWindow(env, true);
+}
+
+/** Contract mode shown to the client for a real (non-local) host; the UI hides its test-only notices in production. */
+export function realHostMode(env: Record<string, string | undefined>): 'production' | 'staging_test' {
+  return realRuntimeEnvironment(env) === 'production' ? 'production' : 'staging_test';
 }

@@ -9,7 +9,9 @@ import { openRouterBound, type OpenRouterLimits } from '../bill2/openRouterPolic
 import type { FrozenRun } from '../bill2/service';
 import { BillingUnitConfigError, readBillingUnitSettings, readMultiplierSnapshot } from '../billingUnit';
 import { isOpenRouterEndpoint, resolveOpenAICompatibleEndpoint } from '../providerUtils';
-import { matchedProfile, paygProductionProfile, paygTemplate, PAYG_PROFILE_MAX_BYTES, type Requirement } from './paygHostPolicy';
+import { matchedProfile, paygProductionSettings, paygTemplate, PAYG_PRODUCTION_SETTING, PAYG_PROFILE_MAX_BYTES,
+  type Requirement } from './paygHostPolicy';
+export { PAYG_PRODUCTION_SETTING } from './paygHostPolicy';
 import { pricingEndpoint, readPricingStates, type PricingDeps } from './pricingAdmission';
 import { productionRuntimeTarget } from './productionEnvironment';
 import { StagingAccessError, stagingRpcFailure } from './stagingErrors';
@@ -21,14 +23,6 @@ import type { StagingPolicy } from './stagingPolicy';
  * configured q/m (Master Plan 2.1 item 40: prices are automatic, a rise needs no approval). The result has
  * the window's shape, so transport, admission and SQL checks reuse their one implementation.
  */
-export const PAYG_PRODUCTION_SETTING = 'runtime_payg_production';
-const reference = z.string().trim().min(1).max(128);
-export const paygProductionSettings = z.object({
-  version: z.literal(1), enabled: z.boolean(), policyVersion: reference,
-  profiles: z.array(paygProductionProfile).min(1).max(16),
-}).strict();
-// A minimal object can always switch production calls off, regardless of stale evidence.
-export const paygProductionSettingWrite = z.union([z.object({ enabled: z.literal(false) }).strict(), paygProductionSettings]);
 type Settings = z.infer<typeof paygProductionSettings>;
 /** The loaded policy is valid for the request that loaded it; the run's own deadline bounds it further. */
 const POLICY_HORIZON_MS = 3_600_000;
