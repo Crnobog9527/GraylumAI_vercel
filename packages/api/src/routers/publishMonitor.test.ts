@@ -1,7 +1,10 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from 'vitest';
-const mocks = vi.hoisted(() => ({ entitlements: vi.fn() }));
+const mocks = vi.hoisted(() => ({ entitlements: vi.fn(), uploads: vi.fn(), limit: vi.fn() }));
 vi.mock('../services/membershipEntitlements', () => ({ readMembershipEntitlements: mocks.entitlements }));
+vi.mock('../services/publishMonitor/postForMe/config', async importOriginal => ({
+  ...(await importOriginal<object>()), takeUploadSlots: mocks.uploads }));
+vi.mock('../services/redisRateLimiter', () => ({ checkRateLimitOrThrow: mocks.limit }));
 import { publishMonitorRouter } from './publishMonitor';
 
 const actor = '00000000-0000-4000-8000-0000000f0001';
@@ -37,6 +40,47 @@ describe('publish-monitor automatic review switch', () => {
     const foreign = vi.fn().mockResolvedValue({ data: null, error: { message: 'PUBLISH_MONITOR_CONNECTION_NOT_FOUND' } });
     await expect(caller(foreign, true).disconnect({ connectionId: id }))
       .rejects.toMatchObject({ code: 'NOT_FOUND', message: 'PUBLISH_MONITOR_CONNECTION_NOT_FOUND' });
+  });
+});
+
+describe('publish-monitor one-click publishing', () => {
+  const biz = '00000000-0000-4000-8000-0000000f0003';
+  const conn = '00000000-0000-4000-8000-0000000f0004';
+  const submit = { idempotencyKey: 'key-00000001', businessId: biz, workItemId: null, connectionIds: [conn], caption: 'Hi',
+    media: [] };
+  it('refuses publishing without the entitlement before any database or provider work, and while paused', async () => {
+    mocks.entitlements.mockResolvedValue({ allowPublish: false });
+    const rpc = vi.fn();
+    await expect(caller(rpc, true).publish.submit(submit))
+      .rejects.toMatchObject({ code: 'FORBIDDEN', message: 'PUBLISH_MONITOR_ENTITLEMENT_REQUIRED' });
+    await expect(caller(rpc, true).publish.uploadUrl({ disclosureAccepted: true, count: 1 }))
+      .rejects.toMatchObject({ code: 'FORBIDDEN', message: 'PUBLISH_MONITOR_ENTITLEMENT_REQUIRED' });
+    mocks.entitlements.mockResolvedValue({ allowPublish: true });
+    await expect(caller(rpc, false).publish.submit(submit))
+      .rejects.toMatchObject({ code: 'FORBIDDEN', message: 'PUBLISH_MONITOR_DISABLED' });
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('upload slots are counted one by one against the per-user allowance before any provider call', async () => {
+    mocks.entitlements.mockResolvedValue({ allowPublish: true });
+    mocks.limit.mockResolvedValue({ success: true });
+    mocks.uploads.mockResolvedValue({ ok: false, retryAfterSeconds: 120 });
+    const rpc = vi.fn();
+    await expect(caller(rpc, true).publish.uploadUrl({ disclosureAccepted: true, count: 7 }))
+      .rejects.toMatchObject({ code: 'TOO_MANY_REQUESTS' });
+    expect(mocks.uploads).toHaveBeenCalledWith(actor, 7);
+  });
+
+  it('an upload slot needs the confirmed disclosure; a job is readable only through the owner-scoped lookup', async () => {
+    await expect(caller(vi.fn(), true).publish.uploadUrl({ disclosureAccepted: false, count: 1 } as never))
+      .rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(caller(vi.fn(), true).publish.uploadUrl({ disclosureAccepted: true, count: 11 }))
+      .rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    const job = '00000000-0000-4000-8000-0000000f0005';
+    const rpc = vi.fn().mockResolvedValue({ data: null, error: { message: 'PUBLISH_MONITOR_JOB_NOT_FOUND' } });
+    await expect(caller(rpc, false).publish.job({ jobId: job }))
+      .rejects.toMatchObject({ code: 'NOT_FOUND', message: 'PUBLISH_MONITOR_JOB_NOT_FOUND' });
+    expect(rpc).toHaveBeenCalledWith('publish_monitor_publish_job', { a: actor, p_job: job });
   });
 });
 

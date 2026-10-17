@@ -3,12 +3,13 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { logger } from '../../lib/logger';
+import { publicHttpsUrl } from './postForMe/http';
 
 /**
  * Post for Me webhook (plan §4.1). The provider authenticates with a shared secret in a header (not a signature),
  * waits about one second and retries up to 8 times, and sends no event id. So handling is fast and idempotent:
- * only a provider-side disconnect changes anything here; everything else is settled by the daily job, which reads
- * the provider directly (the webhook only speeds things up).
+ * a provider-side disconnect and a per-platform publish result change something here; everything else is settled by
+ * the daily job, which reads the provider directly (the webhook only speeds things up).
  */
 export const WEBHOOK_SECRET_HEADER = 'post-for-me-webhook-secret';
 const MAX_BODY_BYTES = 64 * 1024;
@@ -24,6 +25,9 @@ export function secretMatches(given: string | null, expected: string): boolean {
 
 const event = z.object({ event_type: z.string().max(64), data: z.unknown() }).passthrough();
 const accountData = z.object({ id: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/), status: z.string().max(32) }).passthrough();
+const postResult = z.object({ post_id: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/),
+  social_account_id: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/), success: z.boolean(),
+  platform_data: z.object({ url: z.unknown().optional() }).passthrough().nullable().optional() }).passthrough();
 
 export type WebhookResult = { status: number; body: { ok: boolean; error?: string } };
 
@@ -53,6 +57,17 @@ export async function handlePostForMeWebhook(request: Request, secret: string | 
       // A failed or slow write is retried by the provider (the update is idempotent); answer within its deadline.
       if (result.error) return { status: 503, body: { ok: false, error: 'UNAVAILABLE' } };
     }
+    return { status: 200, body: { ok: true } };
+  }
+  if (parsed.event_type === 'social.post.result.created') {
+    // A shortcut only (plan §4.1): results are idempotent per target, and polling by external_id stays authoritative.
+    const row = postResult.safeParse(parsed.data);
+    if (!row.success) return { status: 400, body: { ok: false, error: 'INVALID' } };
+    const url = typeof row.data.platform_data?.url === 'string' ? publicHttpsUrl(row.data.platform_data.url) : null;
+    const result = await db().rpc('publish_monitor_publish_webhook_result', { p_provider_post_id: row.data.post_id,
+      p_provider_account_id: row.data.social_account_id, p_success: row.data.success, p_url: url })
+      .abortSignal(AbortSignal.timeout(WRITE_TIMEOUT_MS)).then(r => r, () => ({ error: { message: 'TIMEOUT' } }));
+    if (result.error) return { status: 503, body: { ok: false, error: 'UNAVAILABLE' } };
     return { status: 200, body: { ok: true } };
   }
   // social.account.created and others: nothing to do synchronously; the daily cleanup and sweep settle them.
