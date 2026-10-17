@@ -47,7 +47,7 @@ export function WorkflowCompareL({ task, turns, beat, badge, onHold }: {
     return { turn, start };
   }).filter(({ start }) => beat >= start);
   return (
-    <div className={compare.board}>
+    <div className={cn(compare.board, styles.board)}>
       <div className={compare.heads} aria-hidden="true">
         <p className={compare.bar} data-generic="">
           <span className={compare.dots}><i /><i /><i /></span><Bot size={14} /><span>{J_COMPARE.genericName}</span>
@@ -55,8 +55,8 @@ export function WorkflowCompareL({ task, turns, beat, badge, onHold }: {
         <p className={compare.bar}><span className={compare.dots}><i /><i /><i /></span><img src="/graylum-logo.png" alt="" />
           <span>{J_COMPARE.coachName}</span><i className={compare.badge}>{badge}</i></p>
       </div>
-      <ol className={compare.pairs}>
-        <li className={compare.pair} data-in="">
+      <ol className={cn(compare.pairs, styles.pairs)}>
+        <li className={cn(compare.pair, styles.pair)} data-in="">
           <div className={compare.cell} data-side="generic">
             <div inert aria-hidden="true">
               <p className={compare.mobileName}><Bot size={13} />{J_COMPARE.genericName}</p>
@@ -65,10 +65,10 @@ export function WorkflowCompareL({ task, turns, beat, badge, onHold }: {
             </div>
             <p className={compare.note} data-side="generic"><b>{J_COMPARE.genericNoteLabel}</b>{task.genericNote}</p>
           </div>
-          <div className={compare.cell} data-side="coach">
+          <div className={cn(compare.cell, styles.coach)} data-side="coach">
             <p className={compare.mobileName} aria-hidden="true"><img src="/graylum-logo.png" alt="" />{J_COMPARE.coachName}
               <i className={compare.badge}>{badge}</i></p>
-            <div className={work.conversation}>
+            <div className={cn(work.conversation, styles.conversation)}>
               {/* The scroll is the visitor's to use (round six, S14); what it holds is a picture (inert). */}
               <div ref={log} className={styles.log} onWheel={takeOver} onTouchMove={takeOver} onPointerDown={takeOver}
                 onPointerEnter={() => onHold?.(true)} onPointerLeave={() => onHold?.(false)}>

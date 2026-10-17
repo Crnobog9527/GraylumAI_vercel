@@ -123,7 +123,7 @@ export function ScenariosL({ flags, after }: { flags: LandingFlags; after?: Reac
   };
 
   const stage = (
-    <div className={page.wrap}>
+    <div className={cn(page.wrap, held && styles.fill)}>
       <h2 id="compare-title" className={cn(compare.title, held && styles.heldTitle)}>
         {L_TASKS_TITLE.split(/(?<=，)/).map(part => <span key={part} className={compare.phrase}>{part}</span>)}
       </h2>

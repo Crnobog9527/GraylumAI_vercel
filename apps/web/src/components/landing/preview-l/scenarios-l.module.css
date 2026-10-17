@@ -32,26 +32,38 @@
 /* The coach's chat takes what the screen leaves it. */
 .held .log { max-height: max(200px, calc(100svh - 540px)); }
 @media (max-width: 899px) { .held .log { max-height: max(130px, calc(100svh - 700px)); } }
-/* Round six, returned (390): on a phone the coach's chat gets at least half the held screen. The tabs and the controls
-   share one row (the tabs scroll sideways, the controls show their icons), the general AI's answer keeps about three
-   lines and scrolls inside its box, and the coach's chat takes the height the rest leaves. */
+/* Round six, returned (phones): while held, the block is the screen less the top bar and the fixed button below
+   (with room above it). From the top: the title, the tabs and the controls on one row (the tabs scroll sideways, the
+   controls show their icons), the scenario's question, the general AI's box (about three lines of answer, scrolling
+   inside), the coach's chat taking all the height that is left (scrolling inside), and the closing line always whole. */
 @media (max-width: 767px) {
   .held .stage { padding: 66px 0 72px; }
-  .held .heldTitle { margin-bottom: 6px; font-size: 17px; }
-  .held .bar { flex-wrap: nowrap; gap: 6px; margin-bottom: 6px; }
+  .held .fill { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+  .held .heldTitle { flex: none; margin-bottom: 6px; font-size: 17px; }
+  .held .bar { flex: none; flex-wrap: nowrap; gap: 6px; margin-bottom: 6px; }
   .held .tabs { flex: 1 1 auto; flex-wrap: nowrap; gap: 6px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
   .held .tabs button { flex: none; min-height: 34px; padding: 0 10px; font-size: 13px; white-space: nowrap; }
   .held .controls { flex: none; flex-wrap: nowrap; gap: 6px; }
   .held .pause { justify-content: center; min-width: 34px; min-height: 34px; padding: 0; }
   .held .label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  .held .panel { gap: 4px; }
-  .held .title { font-size: 16px; }
+  .held .panel { display: flex; flex: 1; flex-direction: column; gap: 4px; min-height: 0; }
+  .held .title { flex: none; font-size: 16px; }
+  .held :is(.board, .pairs, .pair, .coach, .conversation) { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+  .held .pair { gap: 8px; }
+  .held .coach { gap: 5px; }
+  .held .pair > * { flex: none; }
+  .held .pair > .coach, .held .coach > .conversation { flex: 1 1 0; }
   .held .genericReply { max-height: 4.65em; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
-  .held .log { height: max(180px, calc(100svh - 524px)); max-height: none; }
-  .held [data-centred] { margin-top: 6px; font-size: 14px; }
+  .held .log { flex: 1 1 0; height: auto; min-height: 0; max-height: none; }
+  .held [data-centred] { margin-top: 2px; font-size: 14px; }
 }
-/* Narrow Android phones (360): the closing line stays on one line, and the chat leaves a little room above the button. */
-@media (max-width: 380px) {
-  .held [data-centred] { font-size: 13px; }
-  .held .log { height: max(180px, calc(100svh - 534px)); }
+/* Narrow phones (360): the closing line stays on one line. */
+@media (max-width: 380px) { .held [data-centred] { font-size: 13px; } }
+/* Short phones: the general AI's box keeps its question, one line of answer (scrolling inside) and its result tag, and the
+   spacing above tightens, so the coach's chat keeps at least 160px. */
+@media (max-width: 767px) and (max-height: 700px) {
+  .held .genericReply { max-height: 1.55em; }
+  .held .heldTitle { margin-bottom: 4px; font-size: 16px; line-height: 1.2; }
+  .held .bar { margin-bottom: 4px; }
+  .held .pair { gap: 6px; }
 }
