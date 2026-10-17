@@ -62,7 +62,7 @@ describe('GA in the browser', () => {
       { send_page_view: false, allow_google_signals: false, allow_ad_personalization_signals: false }]);
     expect(all.find(call => call[0] === 'consent' && call[1] === 'default')?.[2]).toMatchObject({ analytics_storage: 'denied' });
     expect(events('page_view')).toHaveLength(1);
-    expect(appended).toEqual([{ async: true, src: `https://www.googletagmanager.com/gtag/js?id=${ID}` }]);
+    expect(appended).toHaveLength(0);
     expect(JSON.stringify(all)).not.toContain('draft-9');
     expect(JSON.stringify(all)).not.toContain('a@b.c');
     expect(JSON.stringify(all)).not.toContain('private-thread');
@@ -84,7 +84,7 @@ describe('GA in the browser', () => {
     expect(win[`ga-disable-${ID}`]).toBe(false);
     expect(events('page_view')).toHaveLength(2);
     expect(sendGaEvent(ID, 'positioning_complete')).toBe(true);
-    expect(appended).toHaveLength(1);
+    expect(appended).toHaveLength(0);
   });
 
   it('pauses GA entirely on pages with one-time keys and resumes after leaving', () => {

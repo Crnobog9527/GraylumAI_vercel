@@ -7,7 +7,7 @@ import { useEffect, useRef, useSyncExternalStore } from 'react';
 import { Analytics } from '@vercel/analytics/react';
 import { SpeedInsights } from '@vercel/speed-insights/react';
 import { isEmailVerified } from '@/lib/auth';
-import { ANALYTICS_CONFIG, termlyScriptUrl } from '@/lib/analytics/config';
+import { ANALYTICS_CONFIG, gtagScriptUrl, termlyScriptUrl } from '@/lib/analytics/config';
 import { attachTermly, consentSnapshot, serverConsentSnapshot, subscribeConsent } from '@/lib/analytics/consent';
 import { reportSignUpIfNew } from '@/lib/analytics/events';
 import { enterPage, syncGa } from '@/lib/analytics/ga';
@@ -56,6 +56,8 @@ export function SiteAnalytics({ onVercel }: { onVercel: boolean }) {
   return (
     <>
       <Script id="termly-consent" src={termlyScriptUrl(termlyWebsiteUuid)} strategy="afterInteractive" onLoad={attachTermly} />
+      {/* Termly manual classification (plan O1 option A): inert until Termly releases it for analytics consent. */}
+      {gaMeasurementId ? <script type="text/plain" data-categories="analytics" defer src={gtagScriptUrl(gaMeasurementId)} /> : null}
       {vercelOn ? (
         <>
           <Analytics beforeSend={event => cleanVercelEvent(event, vercelCategory)} />

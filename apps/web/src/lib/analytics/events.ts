@@ -6,7 +6,7 @@ import { sendGaEvent } from './ga';
 /**
  * The browser key events (ANALYTICS plan §3.1). Parameters are limited to the ones listed in the plan: never
  * an email, a name, a user or order ID. Each call is a no-op unless GA is configured, Termly reports statistics
- * consent right now and the current page is reportable. Purchase success is reported by the server instead.
+ * consent right now and the current page is reportable. Checkout and purchase events come with the server PR.
  */
 const SIGNUP_KEY = 'graylum.analytics.signup';
 const SIGNUP_WINDOW_MS = 30 * 60 * 1000;
@@ -42,14 +42,4 @@ export function reportSignUpIfNew(user: SignUpUser | null | undefined, verified:
 /** The user confirmed the last positioning step, completing a new positioning. */
 export function reportPositioningComplete(): boolean {
   return sendGaEvent(ANALYTICS_CONFIG.gaMeasurementId, 'positioning_complete');
-}
-
-export type CheckoutItem = { itemType: string; itemId: string; billingCycle: string; offer: string };
-
-/** A Stripe checkout session was created and the user is about to be sent to it. The catalog item ID only. */
-export function reportBeginCheckout(item: CheckoutItem): boolean {
-  return sendGaEvent(ANALYTICS_CONFIG.gaMeasurementId, 'begin_checkout', {
-    currency: 'USD',
-    items: [{ item_id: item.itemId, item_category: item.itemType, item_variant: `${item.billingCycle}/${item.offer}` }],
-  });
 }
