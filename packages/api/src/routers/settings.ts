@@ -1,5 +1,6 @@
 import { PAYMENT_METHOD_ROUTES_KEY, paymentMethodRoutesSchema, readPaymentMethodRoutes } from '../services/payments/methodRouting';
 import { FUSION_SETTINGS_KEY } from '../services/fusion/settings';
+import { validateCompareLimit } from '../services/fusion/compareLimit';
 import { PAYMENT_CHANNEL_KEY, paymentChannelSettingSchema, readPaymentChannel } from '../services/payments/channelSettings';
 import { validatePaygAdminSetting } from '../services/adminSettings';
 import {
@@ -318,6 +319,7 @@ export const settingsRouter = router({
       await assertSettingsWriter(ctx.supabase,ctx.profileId);
       validateReportPrice([input]);
       await validateRoutingSelections(ctx.supabase, [input]);
+      await validateCompareLimit(ctx.supabase, [input]);
       await validateSummarySelection(ctx.supabase,Array.isArray(input)?input:[input]);
       const { data, error } = await ctx.supabase
         .from('system_settings')
@@ -336,6 +338,7 @@ export const settingsRouter = router({
       await assertSettingsWriter(ctx.supabase,ctx.profileId);
       validateReportPrice(input);
       await validateRoutingSelections(ctx.supabase, input);
+      await validateCompareLimit(ctx.supabase, input);
       await validateSummarySelection(ctx.supabase,Array.isArray(input)?input:[input]);
       const { data, error } = await ctx.supabase
         .from('system_settings')

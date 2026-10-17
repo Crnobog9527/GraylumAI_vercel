@@ -10,7 +10,7 @@ let browser: Browser;
 let code: string;
 const entry = fileURLToPath(new URL('./__fusion_review_settings_fixture__.js', import.meta.url));
 const M = (n: number) => `40000000-0000-4000-8000-00000000000${n}`;
-const SAVED = { version: 1, compare: { enabled: false }, review: {
+const SAVED = { version: 1, compare: { enabled: false, allowedModelIds: [], defaultModelIds: [], minModels: 2, answerOutputTokens: 8192, maxBudgetUsd: null, dispatchMinutes: 10, breaker: { platformUsd: '2', noDeliveryCalls: 10 } }, review: {
   enabled: true, reviewerModelIds: [M(1), M(2), M(3)], summaryModelId: M(4), skillId: M(5), maxRounds: 2, opinionOutputTokens: 4096,
   summaryOutputTokens: 32768, maxBudgetUsd: '0.5', fixedPriceCredits: 1500, dispatchMinutes: 10, breaker: { platformUsd: '2', noDeliveryCalls: 10 },
   displayNames: { reviewers: ['目标用户', '操盘手', '挑刺审核人'], summary: '主笔' } } };
