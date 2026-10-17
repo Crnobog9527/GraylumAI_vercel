@@ -2,6 +2,7 @@ import { researchRouter } from './routers/research';
 import { libraryRouter } from './routers/library';
 import { reportModelRouter } from './routers/reportModel';
 import { socialMediaFlagRouter } from './routers/socialMediaFlag';
+import { skillTranslationsRouter } from './routers/skillTranslations';
 import { opcRouter } from './routers/opc';
 import { runtimeRouter } from './routers/runtime';
 import { workbenchRouter } from './routers/workbench';
@@ -56,6 +57,7 @@ export const appRouter = router({
   fusionSettings: fusionSettingsRouter,
   fusionReview: fusionReviewRouter,
   socialMediaFlag: socialMediaFlagRouter,
+  skillTranslations: skillTranslationsRouter,
   runtimeRateLimits: runtimeRateLimitsRouter,
   modelIdentity: modelIdentityRouter,
   platformSecrets: platformSecretsRouter,

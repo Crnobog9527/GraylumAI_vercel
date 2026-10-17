@@ -10,6 +10,8 @@ import { executeResearchCall, socialRequest, stableResearchId, type ResearchTool
 
 export async function benchmarkFetch(ctx: ResearchToolContext, args: ResearchToolArgs<'benchmark_fetch'>,
   budget: ToolAllowance): Promise<string> {
+  // A user_message source without an id names the message this reply answers (this execution's own input).
+  if (args.source.kind === 'user_message' && !args.source.messageId) args = { ...args, source: { ...args.source, messageId: ctx.executionId } };
   const authorization = await authorizeBenchmarkFetch(ctx.scope, args, ctx.store.authorization);
   if (!authorization.ok) return toolEnvelope({ status: 'not_confirmed', reason: authorization.reason });
   const rows: ResearchItem[] = [];

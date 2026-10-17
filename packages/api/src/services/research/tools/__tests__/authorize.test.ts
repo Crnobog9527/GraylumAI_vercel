@@ -155,3 +155,13 @@ describe('benchmark_discover authorization', () => {
       .toEqual({ ok: false, reason: 'NOT_CONFIRMED' });
   });
 });
+
+describe('RT-6 user_message without an id', () => {
+  it('is never authorised by the checker itself (the host fills in the current message first)', async () => {
+    const s = store();
+    const result = await authorizeBenchmarkFetch(scope, fetchArgs([{ platform: 'tiktok', account: 'homeideas' }],
+      { kind: 'user_message' }), s);
+    expect(result).toEqual({ ok: false, reason: 'NOT_CONFIRMED' });
+    expect(s.userMessage).not.toHaveBeenCalled();
+  });
+});

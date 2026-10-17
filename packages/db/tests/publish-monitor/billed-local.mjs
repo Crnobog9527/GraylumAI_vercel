@@ -110,20 +110,34 @@ try {
   assert.deepEqual(await step('link', { call: randomUUID() }), { ok: true });
   assert.deepEqual(await step('dispatch', { token: randomUUID() }), { ok: false }, 'the token must match');
   assert.deepEqual(await step('dispatch'), { ok: true });
-  // A second key, sent but never answered (a killed process): listed for a zero receipt, then abandoned.
-  const op2 = randomUUID(), key2 = 'e'.repeat(64), call2 = randomUUID();
+  // A second key, really claimed and sent on the run but never answered (a killed process).
+  const op2 = randomUUID(), key2 = 'e'.repeat(64);
+  const real = await rpc(c, 'bill2_claim', m.a, run2.id, 1, { provider: 'tikhub', account: 'tikhub-main', model: ROUTE,
+    protocol: 'research-tool-v1', phase: 'publish_monitor', requestHash: 'e'.repeat(64), automaticRetry: false, hiddenTools: false,
+    lookupSupported: false, upperUsd: '0.01', billingUnit: { modelId: toolPolicy.modelId, multiplier: '6' }, toolPricing: pricing });
+  assert.equal((await rpc(c, 'bill2_dispatch', m.a, run2.id, real.id, real.dispatchToken)).dispatch, true);
   const step2 = (name, extra = {}) => svc('SELECT publish_monitor_billed_step($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) v', [...keys,
     op2, name, key2, ROUTE, token, extra.call ?? null, null, null]);
-  await step2('open'); await step2('link', { call: call2 }); await step2('dispatch');
-  // Both sent requests are unanswered at this point (the first one gets its answer below).
-  const pending = (await svc('SELECT publish_monitor_billed_unanswered($1) v', [run2.id])).map(x => [x.callId, x.model, x.state]);
-  assert.equal(pending.length, 2);
-  assert.ok(pending.some(([id, model, state]) => id === call2 && model === ROUTE && state === 'dispatched'));
-  assert.deepEqual(await step2('abandon'), { ok: true });
-  assert.equal((await svc('SELECT publish_monitor_billed_lookup($1,$2,$3,$4) v', [...keys, key2])).found, false, 'the key is free again');
+  await step2('open'); await step2('link', { call: real.id }); await step2('dispatch');
+  // An opened attempt that was never linked to a call (killed between open and link).
+  const op3 = randomUUID();
+  await svc('SELECT publish_monitor_billed_step($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) v', [...keys, op3, 'open', 'd'.repeat(64),
+    ROUTE, token, null, null, null]);
+  const recovery = await svc('SELECT publish_monitor_billed_recovery($1) v', [run2.id]);
+  const byOp = Object.fromEntries(recovery.map(x => [x.operationId, x]));
+  assert.deepEqual([byOp[op2].callPending, byOp[op2].live, byOp[op2].receipt], [true, true, null], 'sent, no receipt');
+  assert.deepEqual([byOp[op3].callId, byOp[op3].callPending, byOp[op3].live], [null, false, true], 'opened, never linked');
+  assert.equal(byOp[op].callPending, false, 'a fake call id is not a pending BILL2 call');
+  // Abandoning is bound to the run, needs no live claim, and frees the key.
+  assert.equal(await svc('SELECT publish_monitor_billed_abandon($1,$2) v', [randomUUID(), op3]), false, 'another run cannot touch it');
+  assert.equal(await svc('SELECT publish_monitor_billed_abandon($1,$2) v', [run2.id, op3]), true);
+  assert.equal(await svc('SELECT publish_monitor_billed_abandon($1,$2) v', [run2.id, op3]), false, 'idempotent');
+  assert.equal((await svc('SELECT publish_monitor_billed_lookup($1,$2,$3,$4) v', [...keys, 'd'.repeat(64)])).found, false);
+  report.checks.push('recovery lists sent-without-receipt calls and opened-but-unlinked attempts; abandon is run-bound and frees the key');
   assert.deepEqual(await step('finish', { state: 'succeeded', result: { items: [{ id: 'n1' }] } }), { ok: true });
   const found = await svc('SELECT publish_monitor_billed_lookup($1,$2,$3,$4) v', [...keys, key]);
   assert.deepEqual([found.found, found.state, found.result], [true, 'answered', { items: [{ id: 'n1' }] }]);
+  // The stored answer carries its receipt; recovery offers it for replay when the BILL2 call is still pending.
   report.checks.push('ledger: one live attempt per key, link before dispatch, token-bound, answers kept for re-runs');
 
   // A stale claim cannot open new attempts; a run left open is found for closing once the refresh moved on.

@@ -134,31 +134,37 @@ export async function closeRun(admin: Pick<SupabaseClient, 'rpc'>, actorId: stri
 }
 
 /**
- * A run left open by a killed process: every call it sent without a stored answer is recorded as unknown (the user pays
- * nothing; the supplier cost is reconciled like any unknown tool result), its ledger attempt is freed, and the run is
- * closed and finalized.
+ * A run left open by a killed process, settled without a live claim (the connection, lease or account may be gone):
+ * every call it sent without a receipt gets one — the saved receipt when the answer had been stored (the user pays
+ * exactly what that answer cost, once; bill2_record ignores an identical replay), otherwise an unknown result (the user
+ * pays nothing; the supplier cost is reconciled like any unknown tool result); every still-live attempt is freed; then
+ * the run is closed and finalized.
  */
-export async function settleLeftOpenRun(admin: Admin, keys: Pick<ClaimKeys, 'actorId'> & Partial<ClaimKeys>, runId: string,
-  rawPolicies: unknown[]) {
+export async function settleLeftOpenRun(admin: Admin, keys: Pick<ClaimKeys, 'actorId'>, runId: string, rawPolicies: unknown[]) {
   const policies = z.array(frozenToolPolicy).parse(rawPolicies) as ToolCallPolicy[];
-  const unanswered = await rpc(admin, 'publish_monitor_billed_unanswered', { p_run_id: runId },
-    z.array(z.object({ operationId: uuid, callId: uuid, state: z.string(), model: z.string() }).strict()));
+  const rows = await rpc(admin, 'publish_monitor_billed_recovery', { p_run_id: runId },
+    z.array(z.object({ operationId: uuid, callId: uuid.nullable(), model: z.string(), callPending: z.boolean(), live: z.boolean(),
+      receipt: z.record(z.string(), z.unknown()).nullable() }).strict()));
   const billing = toolSubcallBilling({ admin: admin as unknown as BillingRpc, actorId: keys.actorId, runId });
-  for (const row of unanswered) {
-    if (row.state === 'dispatched') {
-      const policy = policies.find(candidate => candidate.model === row.model);
-      if (!policy) throw new BilledReadError('PUBLISH_MONITOR_BILLING_UNAVAILABLE');
-      const unknown: ResearchCallResult = { vendor: 'tikhub', route: policy.model.slice('tikhub:'.length), outcome: 'unknown',
-        reason: 'PROCESS_INTERRUPTED', httpStatus: null, supplierMayCharge: true, usage: { unit: 'call', units: null }, items: [],
-        truncated: false, fetchedAt: new Date().toISOString() };
-      await billing.record(row.callId, toolResultEvidence(row.callId, policy, unknown, createHash('sha256').update(row.callId).digest('hex')));
+  let delivered = false;
+  for (const row of rows) {
+    if (row.callPending && row.callId) {
+      if (row.receipt) {
+        await billing.record(row.callId, row.receipt as ReturnType<typeof toolResultEvidence>);
+        delivered ||= row.receipt.toolOutcome === 'delivered';
+      } else {
+        const policy = policies.find(candidate => candidate.model === row.model);
+        if (!policy) throw new BilledReadError('PUBLISH_MONITOR_BILLING_UNAVAILABLE');
+        const unknown: ResearchCallResult = { vendor: 'tikhub', route: policy.model.slice('tikhub:'.length), outcome: 'unknown',
+          reason: 'PROCESS_INTERRUPTED', httpStatus: null, supplierMayCharge: true, usage: { unit: 'call', units: null }, items: [],
+          truncated: false, fetchedAt: new Date().toISOString() };
+        await billing.record(row.callId, toolResultEvidence(row.callId, policy, unknown,
+          createHash('sha256').update(row.callId).digest('hex')));
+      }
     }
-    await rpc(admin, 'publish_monitor_billed_step', { p_connection_id: keys.connectionId ?? null, p_lease: keys.lease ?? null,
-      p_refresh_id: keys.refreshId ?? null, p_operation_id: row.operationId, p_step: 'abandon', p_request_key: null, p_model: null,
-      p_token: null,
-      p_call_id: null, p_state: null, p_result: null }, z.unknown());
+    if (row.live) await rpc(admin, 'publish_monitor_billed_abandon', { p_run_id: runId, p_operation_id: row.operationId }, z.boolean());
   }
-  await closeRun(admin, keys.actorId, runId, false);
+  await closeRun(admin, keys.actorId, runId, delivered);
 }
 
 /** The billed-read ledger as the RESEARCH-TOOLS evidence port, bound to the current claim and one request key. */

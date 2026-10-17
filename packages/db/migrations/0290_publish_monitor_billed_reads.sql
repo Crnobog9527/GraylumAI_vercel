@@ -129,15 +129,35 @@ BEGIN
   ELSE jsonb_build_object('runId',b.run_id,'policies',b.policies) END;
 END $$;
 
--- Calls of a run that were sent but never got a stored answer (a killed process): they are settled at zero for the
--- user before the run closes. Their ledger attempts are marked abandoned by the same step.
-CREATE OR REPLACE FUNCTION public.publish_monitor_billed_unanswered(p_run_id uuid) RETURNS jsonb
+-- Everything a left-open run (a killed process) still needs before it closes, per ledger attempt:
+--  callPending  its BILL2 call was sent and has no receipt yet: record the saved receipt when the answer was stored
+--               (receipt), otherwise an unknown result (the user pays nothing);
+--  live         the attempt is still opened or dispatched (linked or not): abandon it so the key is free again.
+-- Rows that need neither are not listed.
+CREATE OR REPLACE FUNCTION public.publish_monitor_billed_recovery(p_run_id uuid) RETURNS jsonb
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
- SELECT COALESCE(jsonb_agg(jsonb_build_object('operationId',r.id,'callId',r.call_id,'state',r.state,'model',r.model)
-  ORDER BY r.created_at),
-  '[]'::jsonb)
- FROM social_billed_reads r WHERE r.run_id=p_run_id AND r.state IN ('opened','dispatched') AND r.call_id IS NOT NULL
+ SELECT COALESCE(jsonb_agg(jsonb_build_object('operationId',x.id,'callId',x.call_id,'model',x.model,
+   'callPending',x.pending,'live',x.state IN ('opened','dispatched'),'receipt',x.receipt) ORDER BY x.created_at),'[]'::jsonb)
+ FROM (SELECT r.id,r.call_id,r.model,r.state,r.created_at,
+   CASE WHEN r.state='answered' THEN r.result->'billing'->'receipt' END AS receipt,
+   EXISTS(SELECT 1 FROM bill2_calls bc WHERE bc.id=r.call_id AND bc.run_id=r.run_id AND bc.state='dispatched'
+    AND bc.settled_at IS NULL) AS pending
+  FROM social_billed_reads r WHERE r.run_id=p_run_id) x
+ WHERE x.pending OR x.state IN ('opened','dispatched')
 $$;
+
+-- Frees one attempt of a left-open run, bound to that run rather than to a live claim (the connection, lease or
+-- account may be gone by now). Idempotent.
+CREATE OR REPLACE FUNCTION public.publish_monitor_billed_abandon(p_run_id uuid,p_operation_id uuid) RETURNS boolean
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE n integer;
+BEGIN
+ IF p_run_id IS NULL OR p_operation_id IS NULL THEN RAISE EXCEPTION 'PUBLISH_MONITOR_INPUT_INVALID' USING ERRCODE='22023'; END IF;
+ UPDATE social_billed_reads SET state='abandoned',updated_at=clock_timestamp()
+ WHERE id=p_operation_id AND run_id=p_run_id AND state IN ('opened','dispatched');
+ GET DIAGNOSTICS n=ROW_COUNT;
+ RETURN n=1;
+END $$;
 
 -- What a re-run finds for one request of this refresh: the live attempt, if any (its state, call and stored answer).
 CREATE OR REPLACE FUNCTION public.publish_monitor_billed_lookup(p_connection_id uuid,p_lease uuid,p_refresh_id uuid,
@@ -160,11 +180,11 @@ CREATE OR REPLACE FUNCTION public.publish_monitor_billed_step(p_connection_id uu
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE c social_connections; r social_billed_reads; n integer;
 BEGIN
- IF p_operation_id IS NULL OR p_step NOT IN ('open','link','dispatch','finish','cancel','abandon') THEN
+ IF p_operation_id IS NULL OR p_step NOT IN ('open','link','dispatch','finish','cancel') THEN
   RAISE EXCEPTION 'PUBLISH_MONITOR_INPUT_INVALID' USING ERRCODE='22023'; END IF;
  c:=publish_monitor_refresh_current(p_connection_id,p_lease,p_refresh_id);
  -- A stale claim may still finish what it already sent (the answer is kept for the next run), nothing else.
- IF c.id IS NULL AND p_step NOT IN ('finish','abandon') THEN RETURN jsonb_build_object('ok',false); END IF;
+ IF c.id IS NULL AND p_step<>'finish' THEN RETURN jsonb_build_object('ok',false); END IF;
  IF p_step='open' THEN
   IF p_token IS NULL OR p_request_key IS NULL OR NOT EXISTS(SELECT 1 FROM social_billed_runs
     WHERE connection_id=c.id AND refresh_id=p_refresh_id AND closed_at IS NULL) THEN
@@ -190,13 +210,9 @@ BEGIN
   -- Only a usable answer is kept for re-use; a failed or unknown one leaves nothing to re-apply.
   UPDATE social_billed_reads SET state=CASE WHEN p_state='succeeded' AND p_result IS NOT NULL THEN 'answered' ELSE 'abandoned' END,
    result=CASE WHEN p_state='succeeded' THEN p_result END,updated_at=clock_timestamp() WHERE id=r.id;
- ELSIF p_step='cancel' THEN
+ ELSE
   IF r.state<>'opened' THEN RETURN jsonb_build_object('ok',false); END IF;
   UPDATE social_billed_reads SET state='cancelled',updated_at=clock_timestamp() WHERE id=r.id;
- ELSE
-  -- A re-run settled this attempt's BILL2 call at zero for the user (no stored answer): free the key for a new attempt.
-  IF r.state NOT IN ('opened','dispatched') THEN RETURN jsonb_build_object('ok',false); END IF;
-  UPDATE social_billed_reads SET state='abandoned',updated_at=clock_timestamp() WHERE id=r.id;
  END IF;
  RETURN jsonb_build_object('ok',true);
 END $$;
@@ -249,7 +265,7 @@ DO $$ DECLARE f regprocedure; BEGIN
  FOR f IN SELECT p.oid::regprocedure FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
   WHERE n.nspname='public' AND p.proname IN ('publish_monitor_billed_run','publish_monitor_billed_lookup',
    'publish_monitor_billed_step','publish_monitor_billed_closed','publish_monitor_billed_orphans',
-   'publish_monitor_billed_unanswered',
+   'publish_monitor_billed_recovery','publish_monitor_billed_abandon',
    'publish_monitor_billed_prune','publish_monitor_refresh_insufficient','publish_monitor_tool_only_run') LOOP
   EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC,anon,authenticated,service_role',f);
   IF split_part(f::text,'(',1)<>'publish_monitor_tool_only_run' THEN

@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import { finishScheduledJobRun, startScheduledJobRun } from '@repo/api/src/services/scheduledJobRuns';
 import { loadPostForMeDeps } from '@repo/api/src/services/publishMonitor/secrets';
 import {
-  entitlementWindow, runSocialMonitorJob, runSocialMonitorRetention, tikhubEntitlements,
+  entitlementWindow, runSocialMonitorJob, tikhubEntitlements,
 } from '@repo/api/src/services/publishMonitor/socialMonitorJob';
 import { validateCronRequest } from '@/lib/cron-auth';
 
@@ -39,14 +39,8 @@ export async function GET(request: Request) {
       ? 'POSTFORME_KEY_INVALID' : 'PLATFORM_SECRET_UNAVAILABLE').catch(() => undefined);
     return NextResponse.json({ error: 'Social monitor job failed' }, { status: 500 });
   }
-  // No Post for Me key in this environment: nothing to clean at the provider yet.
+  // Without a Post for Me key the Post for Me steps are skipped; retention, held credits and TikHub reads still run.
   try {
-    if (!deps) {
-      // Stored snapshots still expire without a provider key (plan §7: at most 100 days).
-      const retention = await runSocialMonitorRetention(client, Date.now() + 240_000);
-      await finish('success', { skipped: 'POSTFORME_NOT_CONFIGURED', ...retention });
-      return NextResponse.json({ success: true, skipped: 'POSTFORME_NOT_CONFIGURED', ...retention });
-    }
     const report = await runSocialMonitorJob(client, deps, Date.now() + 240_000, entitlementWindow(client), Date.now,
       { env: process.env, entitlement: tikhubEntitlements(client) });
     const success = report.failures.length === 0;

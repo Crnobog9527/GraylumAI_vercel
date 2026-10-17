@@ -3,6 +3,9 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { publicHttpsUrl } from './postForMe/http';
 
+/** The server's link rule, shared with the browser-side row builder so a bad link is reported per row. */
+export { publicHttpsUrl };
+
 /**
  * PUBLISH-MONITOR PR-3b (plan §4.3): manual import of rows the user has already confirmed line by line, from a table
  * export (CSV/XLSX, parsed and column-mapped in the browser) or typed in next to a post link. The server re-validates
@@ -16,9 +19,10 @@ export const MANUAL_METRICS = ['views', 'impressions', 'reach', 'likes', 'commen
   'followers_gained', 'profile_visits', 'completion_rate'] as const;
 export type ManualMetric = (typeof MANUAL_METRICS)[number];
 export const MAX_ROWS_PER_CALL = 200;
-const MAX_COUNT = 1e12;
+/** Largest metric value accepted (an accidental extra digit beyond this is refused). */
+export const MAX_METRIC_VALUE = 1e12;
 
-const metricValue = z.number().finite().nonnegative().max(MAX_COUNT);
+const metricValue = z.number().finite().nonnegative().max(MAX_METRIC_VALUE);
 const metrics = z.partialRecord(z.enum(MANUAL_METRICS), metricValue)
   .refine(value => Object.keys(value).length > 0, 'METRICS_EMPTY')
   .refine(value => value.completion_rate === undefined || value.completion_rate <= 100, 'COMPLETION_RATE');

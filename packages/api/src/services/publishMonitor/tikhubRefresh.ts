@@ -16,7 +16,7 @@ import { applyTikhubRead, tikhubClaimSchema, type TikhubClaim } from './tikhub';
 type Db = SupabaseClient;
 export type TikhubEntitlement = { windowDays: number; benchmark: boolean };
 export type TikhubEntitlementLookup = (actorId: string) => Promise<TikhubEntitlement>;
-export type TikhubReport = { claimed: number; outcomes: Record<string, number>; orphansClosed: number };
+export type TikhubReport = { claimed: number; outcomes: Record<string, number> };
 
 /** Server-side entitlement for the daily step; an account that is no longer usable has none. */
 export function tikhubEntitlements(client: SupabaseClient): TikhubEntitlementLookup {
@@ -49,7 +49,8 @@ export async function closeOrphanRuns(db: Db): Promise<number> {
 
 export async function runTikhubRefresh(db: Db, deps: Omit<BilledReadDeps, 'admin'>, entitlementFor: TikhubEntitlementLookup,
   until: number, now: () => number = Date.now): Promise<TikhubReport> {
-  const report: TikhubReport = { claimed: 0, outcomes: {}, orphansClosed: await closeOrphanRuns(db) };
+  // Runs left open by a killed process are closed by the daily job before this step, whatever the feature switch.
+  const report: TikhubReport = { claimed: 0, outcomes: {} };
   const count = (key: string) => { report.outcomes[key] = (report.outcomes[key] ?? 0) + 1; };
   const rights = new Map<string, TikhubEntitlement | null>();
   let stop = false;

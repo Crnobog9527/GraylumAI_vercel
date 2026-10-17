@@ -32,7 +32,7 @@ const answer = (route: string): ResearchCallResult => ({ vendor: 'tikhub', route
   truncated: false, fetchedAt: '2026-10-17T00:00:00.000Z' });
 
 function admin(opts: { stored?: Record<string, ResearchCallResult>; open?: { runId: string; policies: unknown[] };
-  unanswered?: Array<{ operationId: string; callId: string; state: string; model: string }>; claimState?: string } = {}) {
+  recovery?: Array<Record<string, unknown>>; claimState?: string } = {}) {
   const calls: Array<[string, Record<string, unknown>]> = [];
   let claims = 0;
   const rpc = vi.fn(async (name: string, args: Record<string, unknown>) => {
@@ -47,7 +47,8 @@ function admin(opts: { stored?: Record<string, ResearchCallResult>; open?: { run
         const found = hit && Object.entries(hit).find(([route]) => calls.filter(c => c[0] === name).length === 1 ? route === PROFILE : route === POSTS);
         return ok(found ? { stale: false, found: true, state: 'answered', result: found[1] } : { stale: false, found: false });
       }
-      case 'publish_monitor_billed_unanswered': return ok(opts.unanswered ?? []);
+      case 'publish_monitor_billed_recovery': return ok(opts.recovery ?? []);
+      case 'publish_monitor_billed_abandon': return ok(true);
       case 'publish_monitor_billed_step': return ok({ ok: true });
       case 'publish_monitor_billed_closed': return ok(null);
       case 'bill2_create_draft': return ok('00000000-0000-4000-8000-0000000000f1');
@@ -95,14 +96,22 @@ describe('publish-monitor billed TikHub read', () => {
     expect(names(a.calls).some(n => n.startsWith('bill2_'))).toBe(false);
   });
 
-  it('settles a run left open by a killed process at zero for the user before reading again', async () => {
-    const a = admin({ open: { runId: RUN, policies: [policy(POSTS)] },
-      unanswered: [{ operationId: '00000000-0000-4000-8000-000000000301', callId: '00000000-0000-4000-8000-000000000302',
-        state: 'dispatched', model: `tikhub:${POSTS}` }] });
+  it('settles a run left open by a killed process before reading again: saved receipts replayed, the rest at zero', async () => {
+    const saved = { toolOutcome: 'delivered', cost: '0.01' };
+    const a = admin({ open: { runId: RUN, policies: [policy(POSTS)] }, recovery: [
+      { operationId: '00000000-0000-4000-8000-000000000301', callId: '00000000-0000-4000-8000-000000000302',
+        model: `tikhub:${POSTS}`, callPending: true, live: true, receipt: null },
+      { operationId: '00000000-0000-4000-8000-000000000303', callId: '00000000-0000-4000-8000-000000000304',
+        model: `tikhub:${POSTS}`, callPending: true, live: false, receipt: saved },
+      { operationId: '00000000-0000-4000-8000-000000000305', callId: null, model: `tikhub:${POSTS}`, callPending: false,
+        live: true, receipt: null }] });
     await billedTikhubRead(deps(a.db), keys, 'xiaohongshu', XHS);
-    const record = a.calls.find(c => c[0] === 'bill2_record')![1].p_evidence as { toolOutcome: string };
-    expect(record.toolOutcome).toBe('unknown');
+    const records = a.calls.filter(c => c[0] === 'bill2_record').slice(0, 2).map(c => (c[1].p_evidence as { toolOutcome: string }).toolOutcome);
+    expect(records).toEqual(['unknown', 'delivered']);
+    expect(a.calls.filter(c => c[0] === 'publish_monitor_billed_abandon').map(c => c[1].p_operation_id))
+      .toEqual(['00000000-0000-4000-8000-000000000301', '00000000-0000-4000-8000-000000000305']);
     const order = names(a.calls);
+    expect(a.calls.find(c => c[0] === 'bill2_close')![1].p_outcome).toBe('delivered');
     expect(order.indexOf('bill2_finalize')).toBeLessThan(order.indexOf('bill2_prepare'));
   });
 
