@@ -32,7 +32,7 @@ export function Done({ result }: { result: AdoptRecorded }) {
       {result.refused
         ? <p>这次修改没有采用成功：{adoptErrorLabel(result.refused)}</p>
         : result.versionId
-        ? <p>新版本已生成：{result.adopted.length} 章采用修订版{result.kept.length ? `，${result.kept.length} 章保留原文` : ''}。之后的选题和写作会用新版本。</p>
+        ? <p>新版本已生成：{result.adopted.length} 章采用修订版{result.kept.length ? `，其余 ${result.kept.length} 章没有修改` : ''}。之后的选题和写作会用新版本。</p>
         : result.declined || result.adopted.length > 0
           ? <p>你放弃了这次修改，报告和定位都没有变化；这次的选择已经记下。</p>
           : <p>你选择全部保留原文，报告没有变化；这次的选择已经记下。</p>}

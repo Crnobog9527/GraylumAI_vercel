@@ -18,10 +18,33 @@ const admittedRoutes: Readonly<Record<string,string>> = {
   'anthropic/claude-sonnet-5.5':'anthropic',
   'google/gemini-3.8-flash':'google-ai-studio',
   'openai/gpt-6-luna':'openai',
+  // FUSION-REVIEW panel (Owner 2026-10-17): Sol as a reviewer, Opus as the summary. A route here only allows
+  // a profile; admission still needs a profile entry with evidence for the purpose, format and reasoning.
+  'openai/gpt-6.1-sol':'openai',
+  'anthropic/claude-opus-5.5':'anthropic',
 };
 // fusion_review / fusion_summary: FUSION-REVIEW per-model calls, claimed only as a billing group (0234).
 const phase = z.enum(['ordinary', 'skill', 'organizer', 'skill_matching', 'attached_organizer', 'report',
   'fusion_review', 'fusion_summary']);
+const sharedEvidence = {
+  maxPromptToBytes: z.number().positive().max(0.7), maxPromptToUpper: z.number().positive().max(0.7),
+  outputLimit: z.number().int().positive().max(PURPOSE_OUTPUT_CAP),
+  testedOutputLimit: z.number().int().positive().max(PURPOSE_OUTPUT_CAP),
+  outputSemantics: z.literal('max-tokens-includes-reasoning'),
+  includesReasoning: z.literal(true), cacheCovered: z.literal(true), costBoundPassed: z.literal(true),
+};
+const FUSION_PURPOSES: ReadonlySet<string> = new Set(['fusion_review', 'fusion_summary']);
+/** FUSION-PROFILE (Owner 2026-10-17, plan B): evidence taken on the real Fusion wire (fusionRequestBody: system + user,
+ * Chinese report and JSON material, strict JSON-schema output, no tools, two messages) in two size bands, the larger
+ * one near the per-call byte cap. Accepted only for a profile whose every purpose is a Fusion purpose and whose only
+ * request format is fusion-json-v1-stream; every other purpose keeps requiring the full #665 matrix. The byte, cost
+ * and output-semantics checks are the same as the matrix's. */
+const fusionShapeEvidence = z.object({
+  scope: z.literal('fusion-request-shape'), reference, manifestHash: z.string().regex(/^[a-f0-9]{64}$/),
+  distinctSamples: z.number().int().min(4), sizeBands: z.literal(2),
+  maxVerifiedBytes: z.number().int().min(180000).max(PAYG_PROFILE_MAX_BYTES),
+  ...sharedEvidence,
+}).strict();
 /** Trusted admin configuration, never a browser admission field. Evidence references
  * must identify independently checked real samples; fixture results are not evidence. */
 // Small-cap probes establish truncation semantics; outputLimit is the separately authorized profile cap.
@@ -47,17 +70,15 @@ export const paygHostProfile = z.object({
   }).strict()).min(1).max(16),
   outputLimit: z.number().int().min(1).max(PURPOSE_OUTPUT_CAP),
   expiresAt: z.string().datetime(),
-  evidence: z.object({
+  evidence: z.union([z.object({
     reference, manifestHash: z.string().regex(/^[a-f0-9]{64}$/),
     distinctSamples: z.literal(60), messageStressSamples: z.literal(12), maxVerifiedMessages: z.literal(128),
     completeCells: z.literal(15), variantsPerCell: z.literal(4),
-    maxPromptToBytes: z.number().positive().max(0.7), maxPromptToUpper: z.number().positive().max(0.7),
-    outputLimit: z.number().int().positive().max(PURPOSE_OUTPUT_CAP),
-    testedOutputLimit: z.number().int().positive().max(PURPOSE_OUTPUT_CAP),
-    outputSemantics: z.literal('max-tokens-includes-reasoning'),
-    includesReasoning: z.literal(true), cacheCovered: z.literal(true), costBoundPassed: z.literal(true),
-  }).strict(),
-}).strict().refine(p => p.outputLimit <= p.evidence.outputLimit
+    ...sharedEvidence,
+  }).strict(), fusionShapeEvidence]),
+}).strict().refine(p => !('scope' in p.evidence) || (p.purposes.every(purpose => FUSION_PURPOSES.has(purpose))
+  && p.requestFormats.length === 1 && p.requestFormats[0] === 'fusion-json-v1-stream'),
+{ message: 'PAYG_FUSION_EVIDENCE_SCOPE' }).refine(p => p.outputLimit <= p.evidence.outputLimit
   && p.reasoningVariants.every(v => v.outputLimit <= p.evidence.outputLimit
     && v.testedOutputLimit === p.evidence.testedOutputLimit),
 { message: 'PAYG_OUTPUT_EVIDENCE_REQUIRED' }).refine(p => p.reasoningVariants.every(v => {
