@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 
-import { parseSignupAttribution, registeredUtm, type SignupAttribution } from '@repo/api/src/shared/analyticsAttribution';
+import { parseSignupAttribution, UTM_KEYS, type SignupAttribution } from '@repo/api/src/shared/analyticsAttribution';
 import { analyticsAllowed } from './consent';
 import { routeTemplate } from './routes';
 
@@ -25,7 +25,8 @@ export function captureFirstTouch(href: string, referrer: string, now = Date.now
     let referrerHost: string | undefined;
     try { const ref = new URL(referrer); if (ref.origin !== url.origin) referrerHost = ref.hostname; } catch { /* none */ }
     const record = parseSignupAttribution({
-      ...Object.fromEntries(registeredUtm(url.search)),
+      // Raw values go in only to be classified: the parser keeps registered ones and turns the rest into "other".
+      ...Object.fromEntries(UTM_KEYS.flatMap(key => url.searchParams.get(key) ? [[key, url.searchParams.get(key)]] : [])),
       referrer_host: referrerHost,
       landing_path: routeTemplate(url.pathname) ?? undefined,
       first_seen_at: new Date(now).toISOString(),

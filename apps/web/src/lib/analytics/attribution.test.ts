@@ -20,7 +20,8 @@ describe('first touch', () => {
     captureFirstTouch(`${ORIGIN}/positioning/draft-1?utm_source=YouTube&utm_campaign=Alice.Smith&email=a@b.c`,
       'https://chatgpt.com/c/private-thread', NOW);
     captureFirstTouch(`${ORIGIN}/faq?utm_source=reddit`, 'https://reddit.com/r/x', NOW);
-    expect(firstTouchForSignup(NOW)).toEqual({ utm_source: 'youtube', referrer_host: 'chatgpt.com',
+    // An unregistered campaign value is grouped as "other" (plan O9), never stored as typed.
+    expect(firstTouchForSignup(NOW)).toEqual({ utm_source: 'youtube', utm_campaign: 'other', referrer_host: 'chatgpt.com',
       landing_path: '/positioning/[draftId]', first_seen_at: '2026-10-17T10:00:00.000Z' });
     expect(JSON.stringify(store)).not.toMatch(/draft-1|Alice|a@b\.c|private-thread/);
   });

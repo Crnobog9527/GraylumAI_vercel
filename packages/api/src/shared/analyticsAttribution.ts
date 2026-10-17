@@ -8,6 +8,8 @@
  */
 export const UTM_KEYS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term'] as const;
 export type UtmKey = (typeof UTM_KEYS)[number];
+/** What an unregistered UTM value is stored as: the value itself can carry a name or an email address. */
+export const OTHER_UTM = 'other';
 
 export const UTM_REGISTRY: Record<UtmKey, readonly string[]> = {
   utm_source: [
@@ -60,7 +62,8 @@ export function parseSignupAttribution(raw: unknown, now = Date.now()): SignupAt
   const result: SignupAttribution = { first_seen_at: new Date(seen).toISOString() };
   for (const key of UTM_KEYS) {
     const value = typeof input[key] === 'string' ? (input[key] as string).trim().toLowerCase() : '';
-    if (value && UTM_REGISTRY[key].includes(value)) result[key] = value;
+    // A visit that carried a UTM value we do not recognise is grouped as "other" (plan O9), never as direct.
+    if (value) result[key] = UTM_REGISTRY[key].includes(value) ? value : OTHER_UTM;
   }
   const host = typeof input.referrer_host === 'string' ? input.referrer_host.trim().toLowerCase() : '';
   if (HOST.test(host)) result.referrer_host = host;

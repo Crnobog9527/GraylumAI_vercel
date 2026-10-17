@@ -15,7 +15,7 @@ describe('recordSignupAttribution', () => {
     expect(await recordSignupAttribution(d.client, 'user', { utm_source: 'youtube', utm_campaign: 'Alice.Smith',
       email: 'a@b.c', first_seen_at: seen })).toBe(true);
     expect(d.rpc).toHaveBeenCalledWith('analytics_record_signup_attribution', { p_user: 'user',
-      p_attribution: { utm_source: 'youtube', first_seen_at: seen } });
+      p_attribution: { utm_source: 'youtube', utm_campaign: 'other', first_seen_at: seen } });
   });
   it('sends nothing for an unusable record and never throws', async () => {
     const d = db(true);

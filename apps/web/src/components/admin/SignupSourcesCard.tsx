@@ -6,7 +6,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { trpc } from '@/trpc/client';
 
 const RANGES = [7, 30, 90] as const;
-const LABELS: Record<string, string> = { unknown: '未知（未同意统计或注册早于记录）', direct: '直接访问' };
+const LABELS: Record<string, string> = {
+  unknown: '未知（未同意统计或注册早于记录）', direct: '直接访问', other: '其他（未登记的推广参数）',
+};
 
 /**
  * Sign-ups and paying accounts per first source (ANALYTICS plan §3.2). Aggregates from the database only; the source

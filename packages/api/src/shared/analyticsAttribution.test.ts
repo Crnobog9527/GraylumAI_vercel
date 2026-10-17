@@ -17,7 +17,7 @@ describe('parseSignupAttribution', () => {
   it('drops unregistered values, personal data, full URLs, record IDs and unknown keys', () => {
     expect(parseSignupAttribution({ utm_source: 'someone@example.com', utm_campaign: 'Alice.Smith',
       referrer_host: 'https://chatgpt.com/c/123', landing_path: '/positioning/3f2a9c1e-0000-4000-8000-000000000001',
-      email: 'a@b.c', ip: '1.2.3.4', first_seen_at: seen }, NOW)).toEqual({ first_seen_at: seen });
+      email: 'a@b.c', ip: '1.2.3.4', first_seen_at: seen }, NOW)).toEqual({ utm_source: 'other', utm_campaign: 'other', first_seen_at: seen });
     for (const path of ['/verify-email?email=a@b.c', '/x/1234567', 'positioning', '/a b', `/${'a'.repeat(130)}`]) {
       expect(parseSignupAttribution({ landing_path: path, first_seen_at: seen }, NOW)).toEqual({ first_seen_at: seen });
     }
