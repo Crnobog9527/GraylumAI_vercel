@@ -282,13 +282,14 @@ it('refuses a sixth document with a notice, and Enter sends again', () => open(t
   await page.keyboard.press('Enter');
   await ui(page.getByRole('alert')).toHaveText('每条消息最多引用 5 篇文档。');
   await ui(box(page).locator('.library-reference')).toHaveCount(5);
-  // The same document again is not a sixth one.
+  // The same document again is not a sixth one: it replaces its earlier tag.
   await page.keyboard.press('Backspace');
   await page.keyboard.press('Backspace');
   await page.keyboard.type('@资料甲');
   await ui(page.getByRole('option')).toHaveCount(1);
   await page.keyboard.press('Enter');
-  await ui(box(page).locator('.library-reference')).toHaveCount(6);
+  await ui(box(page).locator('.library-reference')).toHaveCount(5);
+  await ui(box(page).locator('[data-library-reference="k0"]')).toHaveCount(1);
   await page.keyboard.press('Enter');
   expect((await read<string[][]>(page, 'sentReferences'))[0]).toHaveLength(5);
 }));
@@ -379,4 +380,19 @@ it('six files chosen together add five references and say so for the sixth', () 
   await ui(page.getByRole('alert')).toHaveText(/已存入资料库，但每条消息最多引用 5 篇文档。/);
   await ui(box(page).locator('.library-reference')).toHaveCount(5);
   await ui(page.getByRole('button', { name: '发送' })).toBeEnabled();
+}));
+
+it('choosing a document that is already in the message replaces its older tag with the new version', () => open(true, async page => {
+  await page.evaluate(() => (window as unknown as { setDraft: (t: string, r: unknown[]) => void }).setDraft('看 @月报.pdf 然后',
+    [{ documentId: 'd4', version: 1, label: '月报.pdf' }]));
+  await ui(box(page).locator('[data-library-reference="d4"]')).toHaveCount(1);
+  await box(page).click();
+  await page.keyboard.press('End');
+  await page.keyboard.type(' @月');
+  await ui(page.getByRole('option')).toHaveCount(1);
+  await page.keyboard.press('Enter');
+  await ui(box(page).locator('[data-library-reference="d4"]')).toHaveCount(1);
+  expect((await read<Array<Array<{ documentId: string; version: number }>>>(page, 'reported')).at(-1)).toMatchObject([{ documentId: 'd4', version: 4 }]);
+  await page.keyboard.press('Enter');
+  expect(await read<string[][]>(page, 'sentReferences')).toEqual([['d4@4']]);
 }));

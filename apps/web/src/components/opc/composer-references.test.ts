@@ -93,4 +93,8 @@ it("sends only id and version, compares versions too, and merges failed-send ref
   expect(sameReferences([a], [{ ...a, version: 2 }])).toBe(false);
   expect(sameReferences([a, b], [b, a])).toBe(false);
   expect(mergeReferences([b], [a, { ...b, version: 9 }])).toEqual([b, a]);
+  // Two valid sets never add up past the server's limit of five.
+  const many = (prefix: string, count: number) => Array.from({ length: count }, (_, n) => ({ documentId: prefix + n, version: 1, label: prefix + n }));
+  expect(mergeReferences(many("p", 5), many("q", 3)).map(item => item.documentId)).toEqual(["p0", "p1", "p2", "p3", "p4"]);
+  expect(mergeReferences(many("p", 3), many("q", 4)).map(item => item.documentId)).toEqual(["p0", "p1", "p2", "q0", "q1"]);
 });

@@ -35,9 +35,12 @@ export function parseReferences(value: unknown): LibraryReference[] {
     && Number.isInteger(item.version) && item.version > 0 && typeof item.label === 'string');
 }
 
-/** `a` first, then whatever of `b` is not in it (a failed send's references come back before newer ones). */
+/**
+ * `a` first, then whatever of `b` is not in it (a failed send's references come back before newer ones), at most five:
+ * two valid sets must not add up to a message the server refuses. A reference left out stays in the text as `@名称`.
+ */
 export function mergeReferences(a: readonly LibraryReference[], b: readonly LibraryReference[]) {
-  return [...a, ...b.filter(item => !a.some(other => other.documentId === item.documentId))];
+  return [...a, ...b.filter(item => !a.some(other => other.documentId === item.documentId))].slice(0, REFERENCE_LIMIT);
 }
 
 /** The text typed after `@`, and the range it covers (including the `@`). */
