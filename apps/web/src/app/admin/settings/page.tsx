@@ -39,7 +39,10 @@ const defaultSettings: Record<string, { value: string; type: 'string' | 'number'
 
   // Credits & Billing
   new_user_credits: { value: '500', type: 'number', label: '新用户赠送积分', description: '新用户注册时赠送的积分数量' },
-  report_fixed_price_credits: { value: '500', type: 'number', label: '生成完整报告的价格（积分）', description: '用户点"生成完整报告"时冻结、生成出完整报告才扣；没生成出完整报告全额退回；重新生成照收（整数 1–999999）' },
+  report_fixed_price_credits: {
+    value: '500', type: 'number', label: '生成完整报告的价格（积分）',
+    description: '用户点"生成完整报告"时冻结、生成出完整报告才扣；没生成出完整报告全额退回；重新生成照收（整数 1–999999）',
+  },
   billing_credits_per_usd: { value: '', type: 'number', label: '每美元积分数', description: '留空 = 未配置（按缺省值 1000 计算）；只影响新操作' },
   billing_token_price_multiplier: { value: '', type: 'number', label: '全站默认加价倍数', description: '留空 = 未配置（缺省 1.5）；1–20，最多两位小数' },
   first_purchase_bonus_percent: { value: '20', type: 'number', label: '首充赠送%', description: '历史兼容字段，当前运行时未消费该配置' },

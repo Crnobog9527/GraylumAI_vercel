@@ -92,7 +92,8 @@ function project(row: Row) {
   const boundEquivalent = equivalent(bound, row);
   const fallback = row.nominal_source === 'actual_fallback';
   const pieces = [row.platform_margin_cache_read_usd, row.platform_margin_cache_write_usd, row.platform_margin_other_usd];
-  const split = !fallback && row.nominal_source !== 'tool_usage' && row.nominal_source !== 'fixed_fee' && pieces.every(v => v !== null && v !== undefined) ? pieces.map(amount) : null;
+  const noSplit = fallback || row.nominal_source === 'tool_usage' || row.nominal_source === 'fixed_fee';
+  const split = !noSplit && pieces.every(v => v !== null && v !== undefined) ? pieces.map(amount) : null;
   // The write-premium column is signed: a cost increase is a negative margin component.
   if (split && split.reduce((sum, v) => sum + v, 0n) !== n - c) throw new Error('Margin conservation failed');
   return { callId: row.call_id, provider: row.provider, model: row.model, purpose: row.purpose ?? 'unknown',
