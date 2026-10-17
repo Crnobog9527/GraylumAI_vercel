@@ -39,7 +39,7 @@ export async function handleCardRefund(db: SupabaseClient, stripe: RefundStripe,
   const chargeId = input.chargeId ?? id(refunds[0]!.charge);
   const paymentIntentId = id(refunds[0]!.payment_intent);
   if (refunds.some(refund => id(refund.charge) !== chargeId)) throw new Error(PAYMENT_EVIDENCE_CONFLICT);
-  const match = await findCardOrderForPayment(db, stripe, scope, { chargeId, paymentIntentId });
+  const match = await findCardOrderForPayment(db, stripe, scope, { chargeId, paymentIntentId }, { includeWalletMembership: true });
   let oursHandled = 0;
   for (const refund of match ? ours : []) {
     if (refund.metadata?.orderId !== match!.order.id) throw new Error(PAYMENT_EVIDENCE_CONFLICT);

@@ -109,6 +109,24 @@ export async function stripeMpWalletRefundCases({admin,service}) {
   await assert.rejects(()=>quote(k),/CONSUMPTION_OR_UNKNOWN/);
   assert.equal((await one(`SELECT pay_common_package_refund_reject($1,$2,$3,'ineligible') q`,[actor,k.o.id,k.ticket])).q.status,'rejected');
 
+  // A refund made outside our flow (Stripe Dashboard): a partial one is only recorded for review; the full one reverses
+  // the grants, takes back what they still hold, ends the subscription and the membership.
+  const ext=await buyer('a5'.repeat(32));
+  const external=(amount,id)=>one(`SELECT pay_stripe_mp_record_external_refund($1,'fixture',$2,$3,$4,'usd',now()) v`,
+    [ext.o.id,ext.cash.paymentIntentId,id,amount]);
+  const partial=(await external(1000,'re_dash_part')).v;
+  assert.deepEqual([partial.state,partial.duplicate],['partial_review',false]);
+  assert.equal((await facts(ext.user)).mapping_state,'internal_paid','a partial external refund leaves the membership for review');
+  const full=(await external(ext.o.amount_total-1000,'re_dash_rest')).v;
+  assert.equal(full.state,'refunded',JSON.stringify(full));
+  assert.equal(full.creditsTakenBack,ext.granted);
+  assert.deepEqual(await profile(ext.user),{credits:0,membership_level:'free'});
+  assert.deepEqual(await grants(ext.o),['reversed']);
+  assert.deepEqual((await admin.query('SELECT status,credit_release_terminated_reason r FROM user_subscriptions WHERE id=$1',[ext.sub])).rows[0],
+    {status:'canceled',r:'external_wallet_refund'});
+  assert.equal((await external(ext.o.amount_total-1000,'re_dash_rest')).v.duplicate,true,'a replay records nothing twice');
+  assert.deepEqual((await admin.query("SELECT mode FROM payment_provider_refs WHERE external_id='re_dash_rest'")).rows,[{mode:'live'}]);
+
   // An auto-renewing card membership keeps its own refund path (subscription refund), never this one.
   const card=(await admin.query(`SELECT id,user_id FROM payment_orders WHERE item_type='membership_plan' AND payment_method='card'
     AND auto_renew AND fulfilled_at IS NOT NULL LIMIT 1`)).rows[0];
@@ -121,5 +139,5 @@ export async function stripeMpWalletRefundCases({admin,service}) {
     [{...current,card:{enabled:false},card_cn:{enabled:false},version:version+1}]);
   return ['wallet-refund-live-cash-mode','wallet-refund-takes-granted-credits','wallet-refund-pauses-release',
     'wallet-refund-ends-membership','wallet-refund-no-fee-full','wallet-refund-failure-restores','wallet-refund-consumption',
-    'wallet-refund-reject','card-subscription-not-this-path'];
+    'wallet-refund-reject','wallet-external-refund-partial-then-full','card-subscription-not-this-path'];
 }

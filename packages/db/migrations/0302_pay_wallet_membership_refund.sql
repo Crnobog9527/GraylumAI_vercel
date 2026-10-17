@@ -12,6 +12,10 @@
 --  * A successful refund ends the membership: the order's grants are reversed, the subscription is canceled with credit
 --    release terminated, and the cached level follows pay_common_membership_facts. A failed refund restores the
 --    credits (as for packs) and releases resume.
+--  * A refund made outside our approval flow (Stripe Dashboard, Link support) of a wallet one-time membership is recorded
+--    by pay_stripe_mp_record_external_refund like a card subscription period: a full refund reverses the order's grants,
+--    takes back what they still hold, cancels the subscription and settles the cached level; a partial one is only
+--    recorded for review. Wallet payments carry no recorded tax (the charge is the order amount).
 -- Mode follows the order (0296/0297). Anchored on the latest bodies; a missing anchor stops the migration. Repeatable.
 -- No table or data change. Depends on 0297. Rollback: forward-fix (re-apply the previous bodies).
 BEGIN;
@@ -56,6 +60,23 @@ BEGIN
    E'   OR o.status IS DISTINCT FROM \'completed\' OR o.fulfilled_at IS NULL\n'
    ||E'   -- R7 B3 (0302): nothing is released while our refund of this order is claimed or in flight.\n'
    ||E'   OR coalesce(o.refund_approval->>\'status\',\'\') IN (\'dispatching\',\'pending\',\'review_required\',\'succeeded\')\n',1),
+  (8,'pay_stripe_mp_record_external_refund',
+   E'o.payment_method NOT IN (\'card\',\'card_cn\')',
+   E'NOT (o.payment_method IN (\'card\',\'card_cn\') OR o.item_type=\'membership_plan\''
+   ||E' AND o.payment_method IN (\'wechat_pay\',\'alipay\'))',1),
+  (9,'pay_stripe_mp_record_external_refund',
+   E' IF NOT EXISTS(SELECT 1 FROM jsonb_array_elements(coalesce(o.payment_amount_facts,\'[]\'::jsonb)) f\n  WHERE f->>\'kind\'=\'tax\'',
+   E' IF o.payment_method IN (\'card\',\'card_cn\') AND NOT EXISTS(SELECT 1 FROM jsonb_array_elements(coalesce(o.payment_amount_facts,\'[]\'::jsonb)) f\n  WHERE f->>\'kind\'=\'tax\'',1),
+  (10,'pay_stripe_mp_record_external_refund',
+   E' taken:=least(greatest(owner.credits,0),credits_back)::integer;\n',
+   E' taken:=least(greatest(owner.credits,0),credits_back)::integer;\n'
+   ||E' -- A wallet membership has no Stripe subscription to cancel: end ours so nothing is released again.\n'
+   ||E' IF o.payment_method IN (\'wechat_pay\',\'alipay\') THEN\n'
+   ||E'  UPDATE user_subscriptions SET status=\'canceled\',cancel_at_period_end=\'true\',\n'
+   ||E'   credit_release_terminated_at=coalesce(credit_release_terminated_at,clock_timestamp()),\n'
+   ||E'   credit_release_terminated_reason=coalesce(credit_release_terminated_reason,\'external_wallet_refund\')\n'
+   ||E'   WHERE id=o.subscription_id AND user_id=o.user_id;\n'
+   ||E' END IF;\n',1),
   (7,'pay_common_package_refund_result',
    E'   updated_at=clock_timestamp() WHERE id=o.id;\n RETURN i;\n',
    E'   updated_at=clock_timestamp() WHERE id=o.id;\n'
