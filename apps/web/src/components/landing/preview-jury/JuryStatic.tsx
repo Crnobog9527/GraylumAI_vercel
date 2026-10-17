@@ -7,6 +7,7 @@ import { JuryDocument } from './JuryDocument';
 import { DOSSIER_SEATS, DossierBody, type Arrived } from './JuryDossier';
 import { JuryReader } from './JuryReader';
 import styles from './jury.module.css';
+import { DisplayHeading } from '@/components/chat-display/display-heading';
 
 /**
  * Reduced motion: no movement and no playback. The report with every note of the review on it at once (issues with
@@ -30,11 +31,11 @@ export function JuryStatic({ scenes, detail, names, skipped, onOpenRecord }: {
         <JuryDocument view={view} names={names} still {...hover} />
       </div>
       <section aria-labelledby="static-records" className={styles.staticRecords}>
-        <h2 id="static-records">每个人的记录</h2>
+        <DisplayHeading as="h2" id="static-records">每个人的记录</DisplayHeading>
         <div className={styles.staticColumns}>
           {DOSSIER_SEATS.map(seat => (
             <article key={seat} id={`record-${seat}`} className={styles.staticRecord} aria-label={`${names[seat]}的记录`}>
-              <h3><SeatMark seat={seat} names={names} />{names[seat]}</h3>
+              <DisplayHeading as="h3"><SeatMark seat={seat} names={names} />{names[seat]}</DisplayHeading>
               <DossierBody detail={detail} names={names} seat={seat} arrived={arrived} live={false} />
             </article>
           ))}

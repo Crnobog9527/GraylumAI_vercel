@@ -42,3 +42,40 @@ it('accepts 128-message per-call evidence and rejects 129 without weakening T',(
  expect(paygCallQuote.safeParse({...quote,messages:129}).success).toBe(false);
  expect(paygCallQuote.safeParse({...quote,messages:128,promptTokensUpper:100}).success).toBe(false);
 });
+
+it('LIB-2d: an image quote counts text bytes plus the image token ceiling, never the base64 length', () => {
+  const image = { dataUrlBytes: 800_000, width: 1600, height: 1131, tokensUpper: 2 * 115 * 81 + 2048 };
+  const withImage = { ...quote, bytes: 100 + image.dataUrlBytes, promptTokensUpper: 100 + image.tokensUpper + 8192, image };
+  expect(paygCallQuote.safeParse(withImage).success).toBe(true);
+  expect(paygCallQuote.safeParse({ ...withImage, promptTokensUpper: withImage.bytes + 8192 }).success).toBe(false);
+  expect(paygCallQuote.safeParse({ ...withImage, image: { ...image, tokensUpper: image.tokensUpper - 1 } }).success).toBe(false);
+  expect(paygCallQuote.safeParse({ ...withImage, bytes: image.dataUrlBytes, promptTokensUpper: image.tokensUpper + 8192 })
+    .success).toBe(false); // no text part
+  expect(paygCallQuote.safeParse({ ...withImage, bytes: 196_609 + image.dataUrlBytes,
+    promptTokensUpper: 196_609 + image.tokensUpper + 8192 }).success).toBe(false); // text above the PAYG cap
+  expect(paygCallQuote.safeParse({ ...quote, bytes: 196_609, promptTokensUpper: 196_609 + 8192 }).success).toBe(false);
+  expect(paygCallQuote.safeParse({ ...withImage, image: { ...image, extra: 1 } }).success).toBe(false);
+  const stable = { ...identity, version: 'v1', admissionPath: 'fixture', maxBytes: 196608, maxMessages: 32, maxTools: 2,
+    maxSchemaBytes: 16384, purposes: ['library_ocr'], expiresAt: '2026-10-04T00:00:00Z' };
+  expect(paygStablePolicy.safeParse({ ...stable, imageInput: { maxDataUrlBytes: 819_223, maxEdge: 1600 } }).success).toBe(true);
+  expect(paygStablePolicy.safeParse({ ...stable, imageInput: { maxDataUrlBytes: 819_224, maxEdge: 1600 } }).success).toBe(false);
+  expect(paygStablePolicy.safeParse({ ...stable, imageInput: { maxDataUrlBytes: 1, maxEdge: 2049 } }).success).toBe(false);
+});
+it('LIB-2d: the image price is bounded once per image token and caps max_price.image only when declared', () => {
+  const limits = { providerSlug: 'provider/exact', contextTokens: 100000,
+    promptUsdPerMillion: '3', completionUsdPerMillion: '15', requestUsd: '0', imageUsd: '0.000001' };
+  const tokens = 2 * 115 * 81 + 2048, t = 100 + tokens + 8192;
+  // (3·T + 15·4096)/1e6 rounded up at 12 places, plus 0.000001 × image tokens.
+  const text = (3n * BigInt(t) * 1_000_000_000_000n + 15n * 4096n * 1_000_000_000_000n + 999_999n) / 1_000_000n;
+  const total = text + 1_000_000n * BigInt(tokens);
+  expect(openRouterCallBound(limits, 4096, t, tokens).upperUsd)
+    .toBe(`${total / 1_000_000_000_000n}.${String(total % 1_000_000_000_000n).padStart(12, '0')}`);
+  expect(openRouterCallBound(limits, 4096, t, tokens).routing.max_price).toEqual({ prompt: 3, completion: 15, request: 0, image: 0.000001 });
+  const textOnly: Partial<typeof limits> & Omit<typeof limits, 'imageUsd'> = { ...limits };
+  delete textOnly.imageUsd;
+  expect(openRouterCallBound(textOnly, 4096, t).routing.max_price).toEqual({ prompt: 3, completion: 15, request: 0 });
+  expect(() => openRouterCallBound(textOnly, 4096, t, tokens)).toThrow('BILL2_IMAGE_PRICE_REQUIRED');
+  expect(() => openRouterCallBound(limits, 4096, 10, tokens)).toThrow('BILL2_IMAGE_PRICE_REQUIRED');
+  expect(openRouterCallBound({ ...limits, imageUsd: '0' }, 4096, t, tokens).upperUsd)
+    .toBe(openRouterCallBound(textOnly, 4096, t).upperUsd);
+});

@@ -19,11 +19,11 @@
 .panel:focus-visible { outline: 2px solid var(--j-ink); outline-offset: -2px; }
 .lead { margin: 0; color: var(--j-muted); font-size: 13.5px; }
 .round { display: grid; gap: 10px; }
-.round h3 {
+.round :is(h3,:where([data-demo-heading="h3"])) {
   display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0; padding-top: 10px; border-top: 1px dashed var(--j-rule);
   font-size: 15px; font-weight: 600;
 }
-.round h4 { margin: 4px 0 0; color: var(--j-muted); font-size: 13px; font-weight: 700; }
+.round :is(h4,:where([data-demo-heading="h4"])) { margin: 4px 0 0; color: var(--j-muted); font-size: 13px; font-weight: 700; }
 .list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
 .entry { display: grid; gap: 6px; padding: 12px 13px; border-radius: 8px; background: var(--j-canvas); }
 .entryTop { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 8px; font-size: 14px; }
