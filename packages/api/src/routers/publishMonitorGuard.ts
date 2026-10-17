@@ -3,6 +3,7 @@ import { TRPCError } from '@trpc/server';
 import { RateLimitError } from '../lib/rateLimitError';
 import { ConnectError } from '../services/publishMonitor/connect';
 import { DataError } from '../services/publishMonitor/data';
+import { ManualImportError } from '../services/publishMonitor/manualImport';
 import { RefreshError } from '../services/publishMonitor/refresh';
 import { assertPublishMonitorEnabled, PublishMonitorError } from '../services/publishMonitor/foundation';
 import { PostForMeNotConfigured } from '../services/publishMonitor/postForMe/config';
@@ -42,12 +43,13 @@ function toTrpc(cause: unknown): TRPCError {
     return new RateLimitError('rate_limited', 3600);
   }
   const code = cause instanceof PublishMonitorError || cause instanceof ConnectError || cause instanceof DataError
-    || cause instanceof RefreshError ? cause.code
+    || cause instanceof RefreshError || cause instanceof ManualImportError ? cause.code
     : cause instanceof PostForMeNotConfigured ? 'PUBLISH_MONITOR_PROVIDER_UNAVAILABLE' : 'PUBLISH_MONITOR_UNAVAILABLE';
   if (code === 'PUBLISH_MONITOR_ACCOUNT_NOT_FOUND' || code === 'PUBLISH_MONITOR_CONNECTION_NOT_FOUND'
     || code === 'PUBLISH_MONITOR_POST_NOT_FOUND') {
     return new TRPCError({ code: 'NOT_FOUND', message: code, cause });
   }
+  if (code === 'PUBLISH_MONITOR_IMPORT_INVALID') return new TRPCError({ code: 'BAD_REQUEST', message: code, cause });
   if (code === 'PUBLISH_MONITOR_PLATFORM_UNSUPPORTED') return new TRPCError({ code: 'BAD_REQUEST', message: code, cause });
   if (FORBIDDEN.has(code)) return new TRPCError({ code: 'FORBIDDEN', message: code, cause });
   if (CONFLICT.has(code)) return new TRPCError({ code: 'CONFLICT', message: code, cause });

@@ -8,7 +8,9 @@ import {
 import {
   dataInput, historyInput, linkInput, linkPost, manualRefresh, readData, readPostHistory, refreshInput,
 } from '../services/publishMonitor/data';
+import { importManualRows, manualImportInput } from '../services/publishMonitor/manualImport';
 import { requirePostForMeDeps } from '../services/publishMonitor/secrets';
+import { checkRateLimitOrThrow } from '../services/redisRateLimiter';
 import { publishMonitorConnectRouter } from './publishMonitorConnect';
 import { publishMonitorPublishRouter } from './publishMonitorPublish';
 import { guarded as safe } from './publishMonitorGuard';
@@ -55,6 +57,12 @@ export const publishMonitorRouter = router({
   refresh: protectedProcedure.input(refreshInput).mutation(({ ctx, input }) => safe(ctx, async () => {
     const days = await dataWindow(ctx);
     return manualRefresh(ctx.supabaseAdmin, await requirePostForMeDeps(ctx.supabaseAdmin), ctx.profileId, days, input);
+  })),
+  // PR-3b: rows the user confirmed from a table export or typed next to a post link (Pro/Gold, plan §11 item 5).
+  manualImport: protectedProcedure.input(manualImportInput).mutation(({ ctx, input }) => safe(ctx, async () => {
+    await dataWindow(ctx);
+    await checkRateLimitOrThrow(`publish-monitor-import:${ctx.profileId}`, 'api');
+    return importManualRows(ctx.supabaseAdmin, ctx.profileId, input);
   })),
   connect: publishMonitorConnectRouter,
   publish: publishMonitorPublishRouter,
