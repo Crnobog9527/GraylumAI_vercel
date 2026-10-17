@@ -30,3 +30,13 @@ it('renders the right column frame around its content', () => {
   expect(html).toContain('跟着对话自动记录');
   expect(html).toContain('<p>清单内容</p>');
 });
+
+it('keeps the title an h1 by default and renders it at the level a page asks for, styled the same', async () => {
+  expect(renderToStaticMarkup(<PositioningHeader title="我的定位分析" status="s"/>)).toContain('<h1>我的定位分析</h1>');
+  const nested = renderToStaticMarkup(<PositioningHeader title="我的定位分析" status="s" headingLevel="h2"/>);
+  expect(nested).toContain('<h2>我的定位分析</h2>');
+  expect(nested).not.toContain('<h1');
+  const { readFileSync } = await import('node:fs');
+  const css = readFileSync(new URL('../opc/positioning-result.module.css', import.meta.url), 'utf8');
+  expect(css).toContain('.positionTop :is(h1,h2){');
+});
