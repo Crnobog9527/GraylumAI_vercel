@@ -3,11 +3,11 @@
  * LIB-2d: the only image a PAYG call may carry (LIB_DOCS_PLAN 4.4, BILL2 prerequisites 1–2).
  * Exactly one inline JPEG data URL, no remote URL, bounded bytes and edge, and only for
  * IMAGE_PURPOSES. The server reads the JPEG frame header for its size and never decodes pixels.
- * SQL bill2_payg_validate_quote (0285) repeats every rule here; keep the two in step.
+ * SQL bill2_payg_validate_quote (0286) repeats every rule here; keep the two in step.
  */
 import { z } from 'zod';
 
-/** Purposes that may send an image. PUBLISH-MONITOR PR-3c adds its own purpose here and in 0285's SQL list. */
+/** Purposes that may send an image. PUBLISH-MONITOR PR-3c adds its own purpose here and in 0286's SQL list. */
 export const IMAGE_PURPOSES: ReadonlySet<string> = new Set(['library_ocr']);
 export const JPEG_DATA_URL_PREFIX = 'data:image/jpeg;base64,';
 /** Hard ceilings; a stable policy may only lower them. 819_223 bytes = prefix + base64 of a 614,400-byte JPEG. */

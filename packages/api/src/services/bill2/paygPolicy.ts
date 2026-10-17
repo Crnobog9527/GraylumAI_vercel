@@ -20,7 +20,7 @@ export const paygStablePolicy = z.object({
   maxMessages: z.number().int().min(1).max(128), maxTools: z.number().int().min(0).max(PAYG_MAX_TOOLS),
   maxSchemaBytes: z.number().int().min(0).max(16_384),
   purposes: z.array(reference).min(1).max(16), expiresAt: z.string().datetime(),
-  // LIB-2d (0285): present only on a route admitted for one inline image per call.
+  // LIB-2d (0286): present only on a route admitted for one inline image per call.
   imageInput: imageInputPolicy.optional(),
 }).strict().refine(value => value.pricingHash === value.nominalPricing.pricingHash
   && value.endpointTag === value.nominalPricing.endpointTag, { message: 'BILL2_NOMINAL_IDENTITY_CONFLICT' });

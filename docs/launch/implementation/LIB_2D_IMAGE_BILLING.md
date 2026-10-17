@@ -1,4 +1,4 @@
-# LIB-2d：BILL2 单图调用的计费前提（迁移 0285）
+# LIB-2d：BILL2 单图调用的计费前提（迁移 0286）
 
 风险 high（计费）。对应 [LIB_DOCS_PLAN.md](../LIB_DOCS_PLAN.md) 第 4.4 节「AI 识别的计费」第 2–4 点。
 只补 BILL2 核心：没有调用方、没有用户入口、没有后台设置；照用 BILL2 / 边用边扣，不新增收费口径。
@@ -25,15 +25,15 @@
 
 TS 和 SQL 两边各算一遍，规则一致：`packages/api/src/services/bill2/imageInput.ts`（常量和 JPEG 头解析）、
 `paygPolicy.ts`、`openRouterPolicy.ts`、`openRouterAdapter.ts`（发送前再量一遍，和冻结的报价逐项相等）、
-`runtime/paygRuntime.ts`（报价）；SQL `bill2_payg_image`、`bill2_payg_validate_quote`（0285 补丁）、`bill2_scope_allowed`。
+`runtime/paygRuntime.ts`（报价）；SQL `bill2_payg_image`、`bill2_payg_validate_quote`（0286 补丁）、`bill2_scope_allowed`。
 
 ## 给下游的接口约定（PUBLISH-MONITOR PR-3c 截图导入）
 
 PR-3c 复用这套单图计费，按下面做，不另建计费：
 
 1. **加用途**：在 `imageInput.ts` 的 `IMAGE_PURPOSES` 和 SQL `bill2_payg_image` 的用途列表里同时加自己的用途名
-   （例如 `publish_screenshot`），需要一个新迁移按 0285 的方式替换函数体（用 `-- 0285 image` 之后的标记判断是否已打过补丁）。
-2. **加计费范围**：截图属于发布记录而不是资料库文档，按 0285 的写法给 `bill2_scope_allowed` 再包一层自己的范围，
+   （例如 `publish_screenshot`），需要一个新迁移按 0286 的方式替换函数体（用 `-- 0286 image` 之后的标记判断是否已打过补丁）。
+2. **加计费范围**：截图属于发布记录而不是资料库文档，按 0286 的写法给 `bill2_scope_allowed` 再包一层自己的范围，
    不要借用 `library_document`。
 3. **报价**：路线的稳定报价带 `imageInput` 和 `providerLimits.imageUsd`（快照里没有 `image` 价时写 `"0"`），
    用 `runtimePaygCall(request, purpose, policy, rules, epoch)` 生成调用报价，它会自动识别那一张图并算 T 和 U；
@@ -55,11 +55,11 @@ PR-3c 复用这套单图计费，按下面做，不另建计费：
 - 单元测试：`imageInput.test.ts`（文件头解析、各家算法都在上限内、拒绝外部地址/PNG/两张图/超尺寸/伪装 SVG）、
   `paygPolicy.test.ts`、`paygRuntime.test.ts`、`openRouterAdapter.test.ts`。
 - SQL：`packages/db/tests/payg/image.mjs`（`run-local.mjs` 一并运行）：接受、各种拒绝且不冻结、纯文字调用不变、
-  范围允许/拒绝、删除后新调用被拒、注销投影。去掉 0285 时同一组用例失败（先红后绿）。
-- 0285 在历史位置连续执行两次结构不变；`built-fingerprint.json` 已更新。
+  范围允许/拒绝、删除后新调用被拒、注销投影。去掉 0286 时同一组用例失败（先红后绿）。
+- 0286 在历史位置连续执行两次结构不变；`built-fingerprint.json` 已更新。
 
 ## 回退
 
-0285 只给已有函数加检查分支、加一个新函数，不写数据。没有调用方，回退代码不影响现有对话计费。
+0286 只给已有函数加检查分支、加一个新函数，不写数据。没有调用方，回退代码不影响现有对话计费。
 需要撤回时，用 `pg_get_functiondef` 取 0267 之后的函数原文重建 `bill2_payg_validate_quote`、
 把 `bill2_scope_allowed_before_library` 改回原名，并恢复两个注销投影函数。

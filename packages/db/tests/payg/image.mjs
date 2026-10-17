@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// LIB-2d (0285): one inline image per PAYG call, image price in U, library_document scope, erasure fields.
+// LIB-2d (0286): one inline image per PAYG call, image price in U, library_document scope, erasure fields.
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {rpc} from '../erasure-b2a/cases.mjs';
@@ -28,13 +28,13 @@ export async function imageCases({db,report,createFixture,claim,receipt}) {
   await receipt(db,ok,c,'0.002',{inputTokens:1800,outputTokens:200});
   const settled=(await db.query('SELECT budget_conflict,metering_exit,metering_missing FROM bill2_calls WHERE id=$1',[c.id])).rows[0];
   assert.deepEqual(settled,{budget_conflict:false,metering_exit:false,metering_missing:false});
-  report.checks.push('0285: one image quote is admitted; U adds image price per image token; real page usage settles without metering flags');
+  report.checks.push('0286: one image quote is admitted; U adds image price per image token; real page usage settles without metering flags');
 
   const textOnly=await createFixture(db,{phase:'library_ocr',image:{...page}});
   const p=structuredClone(textOnly.claimPayload);
   delete p.payg.image;p.payg.bytes=100;p.payg.promptTokensUpper=100+8192;p.upperUsd=((100+8192)/1e6).toFixed(12);
   await rpc(db,'bill2_claim',textOnly.actor,textOnly.run,1,p);
-  report.checks.push('0285: a text call on an image route keeps the 0162 quote and U');
+  report.checks.push('0286: a text call on an image route keeps the 0162 quote and U');
 
   const refusals=[
     ['image token ceiling not the formula',{image:{...page,tokensUpper:tokens(1600,1131)-1}}],
@@ -64,7 +64,7 @@ export async function imageCases({db,report,createFixture,claim,receipt}) {
   await mutate('an extra key in the image',p2=>{p2.payg.image.detail=1;});
   await mutate('image bytes equal to the whole request',p2=>{p2.payg.image.dataUrlBytes=p2.payg.bytes;});
   await mutate('a non-integer image width',p2=>{p2.payg.image.width='1600';});
-  report.checks.push('0285: image quotes are refused for wrong T/U, shapes, purposes, missing price or allowance, with no hold');
+  report.checks.push('0286: image quotes are refused for wrong T/U, shapes, purposes, missing price or allowance, with no hold');
 
   // library_document scope
   const owner=randomUUID();
@@ -93,7 +93,7 @@ export async function imageCases({db,report,createFixture,claim,receipt}) {
   await assert.rejects(rpc(db,'bill2_claim',owner,scoped.run,2,scoped.claimPayload),/BILL2_(RUN|SCOPE)_DENIED/);
   await assert.rejects(createFixture(db,{actor:owner,phase:'library_ocr',image:{...page},operation:'work',
     scope:{kind:'library_document',documentId:doc}}),/BILL2_SCOPE_DENIED/);
-  report.checks.push('0285: library_document scope admits only the actor\'s own processing/ready PDF or Word; deletion stops new calls');
+  report.checks.push('0286: library_document scope admits only the actor\'s own processing/ready PDF or Word; deletion stops new calls');
 
   // Erasure keeps the image's financial fields, never content.
   const call=(await db.query('SELECT bill2_erasure_call_payload($1) v',[ok.claimPayload])).rows[0].v;
@@ -102,5 +102,5 @@ export async function imageCases({db,report,createFixture,claim,receipt}) {
   const run=(await db.query('SELECT bill2_erasure_run_payload($1) v',[ok.payload])).rows[0].v;
   assert.deepEqual(run.callPolicy[0].payg.imageInput,{maxDataUrlBytes:819223,maxEdge:1600});
   assert.equal(run.callPolicy[0].providerLimits.imageUsd,'0.000001');
-  report.checks.push('0285: erasure projections retain image sizes, token ceiling and image price');
+  report.checks.push('0286: erasure projections retain image sizes, token ceiling and image price');
 }

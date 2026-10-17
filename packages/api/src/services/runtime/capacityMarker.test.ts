@@ -39,7 +39,7 @@ it.each(['RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY','RUNTIME_COMPLETE_REQUEST_E
  expect(r.calls.find(c=>c.name==='runtime_interrupt_capacity')?.args).toEqual({p_actor_id:id,p_execution_id:id,p_epoch:3,p_code:code});
 });
 
-it('falls back to the plain interruption when the combined call fails (before 0283, or an outage)',async()=>{
+it('falls back to the plain interruption when the combined call fails (before 0284, or an outage)',async()=>{
  const r=round('RUNTIME_COMPLETE_REQUEST_EXCEEDS_CAPACITY','error');
  expect(await r.execute()).toEqual({state:'pending',unavailable:'capacity'});
  expect(sequence(r.calls)).toEqual(['begin','fail_before_dispatch','runtime_interrupt_capacity','interrupt']);

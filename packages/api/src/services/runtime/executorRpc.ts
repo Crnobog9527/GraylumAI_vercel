@@ -83,9 +83,9 @@ export async function failBeforeDispatch(rpc:<T>(name:string,args:Record<string,
   .catch(()=>null);
 }
 export const CAPACITY_FAILURE_CODES=['RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY','RUNTIME_COMPLETE_REQUEST_EXCEEDS_CAPACITY'];
-/** Content beyond capacity after a charged call is user-side and never refunded: the marker (0283) and the
+/** Content beyond capacity after a charged call is user-side and never refunded: the marker (0284) and the
  * interruption commit in one epoch-fenced transaction, so neither the 24-hour refund nor an operator applies.
- * Returns false when that did not happen; the caller then interrupts as before (pre-0283 or a database fault). */
+ * Returns false when that did not happen; the caller then interrupts as before (pre-0284 or a database fault). */
 export async function interruptForCapacity(rpc:<T>(name:string,args:Record<string,unknown>)=>Promise<T>,
   args:Record<string,unknown>,error:unknown,epoch:number):Promise<boolean> {
  if(!(error instanceof Error)||!CAPACITY_FAILURE_CODES.includes(error.message))return false;

@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// Local-only PAY-DISPUTE-GUARD refund hold (0284) on the full file-built database: a credit pack refunded outside
+// Local-only PAY-DISPUTE-GUARD refund hold (0285) on the full file-built database: a credit pack refunded outside
 // Graylum without a clawback (0247 "pack_review") is held out of the spendable balance until a person settles it.
 // Synthetic profiles and orders only; no Auth, no provider, no network beyond the local container.
 import assert from 'node:assert/strict';
@@ -7,13 +7,13 @@ import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { localDb, read } from '../runtime-view-perf/local-db.mjs';
 
-const migrationPath = 'packages/db/migrations/0284_pay_refunded_pack_hold.sql';
+const migrationPath = 'packages/db/migrations/0285_pay_refunded_pack_hold.sql';
 const MARK = 'PAY-REFUND-HOLD';
-// Function -> marked lines 0284 adds to it.
+// Function -> marked lines 0285 adds to it.
 const HOOKED = { 'atomic_pre_deduct(uuid,integer,text,uuid)': 1, 'bill2_payg_claim(uuid,uuid,integer,jsonb)': 1,
   'credit_source_apply(uuid,uuid,integer,text)': 2 };
 const db = await localDb(), c = db.client;
-const report = { build: db.build, migration: '0284', checks: [] };
+const report = { build: db.build, migration: '0285', checks: [] };
 const v = async (sql, args = []) => (await c.query(sql, args)).rows[0]?.v;
 const fingerprint = read('packages/db/tests/baseline/fingerprint.sql');
 const catalog = () => v(fingerprint.slice(0, fingerprint.indexOf('-- FINAL')) + 'SELECT jsonb_object_agg(k,d ORDER BY k) v FROM grouped;');
@@ -192,7 +192,7 @@ try {
   assert.equal(await balance(u8), 40);
   await c.query(read(migrationPath));
   assert.equal(await v('SELECT status v FROM credit_package_sources WHERE id=$1', [legacy.source]), 'reversed',
-    'rerunning 0284 marks such a source reversed');
+    'rerunning 0285 marks such a source reversed');
   report.checks.push('a pack already clawed back by the legacy Stripe refund is not held, cannot be clawed back twice, and its source is marked reversed');
 
   // Concurrency (two connections, each in its own transaction, both orders): the profile lock serialises the refund,
@@ -279,7 +279,7 @@ try {
   }
   report.checks.push('settlement is service-role only; the hold and late-clawback helpers are not callable by any client role');
 
-  // Reapplying 0284 after the full chain is a structural no-op; each hooked function carries the marker once.
+  // Reapplying 0285 after the full chain is a structural no-op; each hooked function carries the marker once.
   const after = await catalog();
   await c.query(read(migrationPath));
   assert.deepEqual(await catalog(), after);
@@ -287,6 +287,6 @@ try {
     const src = await v('SELECT pg_get_functiondef($1::regprocedure) v', ['public.' + fn]);
     assert.equal(src.split(MARK).length - 1, lines, fn);
   }
-  report.checks.push('0284 reapplication after the full chain preserves the catalog; both reservation paths and the restore path hooked exactly once');
+  report.checks.push('0285 reapplication after the full chain preserves the catalog; both reservation paths and the restore path hooked exactly once');
 } catch (error) { report.failed = String(error.stack ?? error); process.exitCode = 1; }
 finally { await db.close(); console.log(JSON.stringify(report, null, 2)); }

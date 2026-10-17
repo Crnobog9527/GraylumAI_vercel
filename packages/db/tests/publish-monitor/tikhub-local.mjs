@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// Local-only PUBLISH-MONITOR PR-4a (0287) verification: own Xiaohongshu/Douyin connections, Gold benchmark accounts
+// Local-only PUBLISH-MONITOR PR-4a (0288) verification: own Xiaohongshu/Douyin connections, Gold benchmark accounts
 // with a per-brand cap, the daily TikHub claim, writing a read, and erasure.
 // Run: node packages/db/tests/publish-monitor/tikhub-local.mjs --local-only
 import assert from 'node:assert/strict';
@@ -8,13 +8,13 @@ import { localDb, read } from '../runtime-view-perf/local-db.mjs';
 import { closeAccount } from '../erasure-b2a/cases.mjs';
 import { fixtureSql } from './fixtures.mjs';
 
-const MIGRATION = 'packages/db/migrations/0287_publish_monitor_tikhub.sql';
+const MIGRATION = 'packages/db/migrations/0288_publish_monitor_tikhub.sql';
 const rpcs = ['publish_monitor_tikhub_connect(uuid,uuid,text,text,boolean)',
   'publish_monitor_benchmark_add(uuid,uuid,text,text,text,integer)', 'publish_monitor_tikhub_claim(integer,integer)',
   'publish_monitor_tikhub_write(uuid,uuid,uuid,jsonb,jsonb,text)'];
 const internal = ['publish_monitor_tikhub_own_platform(text)', 'publish_monitor_tikhub_item(social_connections)'];
 const db = await localDb(), c = db.client;
-const report = { build: db.build, migration: '0287', checks: [] };
+const report = { build: db.build, migration: '0288', checks: [] };
 const v = async (sql, args = []) => (await c.query(sql, args)).rows[0]?.v;
 const code = async (promise, expected) => assert.equal((await promise.then(() => null, e => e))?.code, expected);
 const svc = async (sql, args = []) => {

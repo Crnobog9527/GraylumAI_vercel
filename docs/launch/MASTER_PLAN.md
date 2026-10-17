@@ -2470,11 +2470,12 @@ node scripts/plan-progress.mjs --ref origin/staging
 | 0280 | [#1076](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1076) ANALYTICS 付款上报（合集 #1116） |
 | 0281 | [#1077](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1077) ANALYTICS 首次来源（合集 #1116） |
 | 0282 | [#1083](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1083) RT-5 对标表来源编号（合集 #1116） |
-| 0283 | [#1061](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1061) RUNTIME-FAILURE-RECONCILE（合集 #1119） |
-| 0284 | [#1069](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1069) PAY-DISPUTE-GUARD 积分包隔离（合集 #1119） |
-| 0285 | [#1042](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1042) LIB-DOCS LIB-2d BILL2 单图计费（合集 #1119） |
-| 0286 | [#1050](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1050) LIB-DOCS LIB-2d 保存识别文字（合集 #1119） |
-| 0287 | [#1075](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1075) PUBLISH-MONITOR 4a（合集 #1119） |
+| 0283 | [#1041](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1041) ADMIN-SECRETS OR-1（已上库合并） |
+| 0284 | [#1061](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1061) RUNTIME-FAILURE-RECONCILE（合集 #1119） |
+| 0285 | [#1069](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1069) PAY-DISPUTE-GUARD 积分包隔离（合集 #1119） |
+| 0286 | [#1042](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1042) LIB-DOCS LIB-2d BILL2 单图计费（合集 #1119） |
+| 0287 | [#1050](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1050) LIB-DOCS LIB-2d 保存识别文字（合集 #1119） |
+| 0288 | [#1075](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1075) PUBLISH-MONITOR 4a（合集 #1119） |
 
 ### 7.2 依赖简图
 
@@ -2551,7 +2552,7 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 - `V3-OPC-UI` 的 A / B / C / FINISH：改称 UI-A / UI-B / UI-C / UI-FINISH，UI-C 改为复用 LIB-DOCS。
 - `V3-GOLD`：改名 FUSION，拆成 FUSION-REVIEW 和 FUSION-COMPARE。
 - 新增：AGENT-CORE（含 AC-0）、AGENT-CORE-UI（从 AGENT-CORE 拆出的纯前端部分）、CI-TRUST（含 CI-TRUST-1）、DEBT-QUICK、COST-REPORT、MODEL-REASONING、UI-MODEL（从原 UI-A 拆出的输入框模型位置，上线只显示 Auto）、RUNTIME-PROD、ENTITLEMENTS、SEC-RATELIMIT、PII-REGEX（接手 PR #333）、RESEARCH-0、RESEARCH-TOOLS、DATA-ERASURE、LIB-DOCS、VOICE、LEARN-1、LEARN-2；2026-09-30 新增 MENTOR-BUDGET、REPORT-GEN、FORGOT-PASSWORD；2026-10-01 新增 BILL-PAYG（承接 RUNTIME-PROD ④）、BILL-UNIT（#565，含按模型倍数）、RATE-LIMIT、STG-MENTOR-MODEL（#561）、INVITE-ABUSE；2026-10-01—02 新增 PROMPT-CACHE（上线必做，第 35 项）、STAGING-HOST-CLEANUP（第 37 项）；2026-10-02—03 新增 MODEL-PRICING-SYNC（第 40 项）、MENTOR-PROMPT-V2、RUNTIME-VIEW-PERF、CONVERSATION-DRIVEN-CAPTURE（第 48 项）、PROMPT-CACHE-HISTORY（第 43 项）、CHAT-NATIVE-OUTPUT（第 44 项）、CONTENT-CONVERSATION-DRIVEN（第 45 项）；STG-MENTOR-MODEL 已关闭（第 38 项）；2026-10-03 新增 PAYWALL（第 50 项）；2026-10-04 新增 EXPERT-CONSULT（第 51 项）、PUBLISH-MONITOR、CHARGEBACK；2026-10-05 起"资料库扩展"的规范任务名为 LIB-EXT。
-- 迁移编号在实际实施时由总控分配，本文不预占；已分配的 0268–0287 见第 7.1 节末尾。
+- 迁移编号在实际实施时由总控分配，本文不预占；已分配的 0268–0288 见第 7.1 节末尾。
 
 ### 7.6 Owner 需要提前启动的事项
 

@@ -15,7 +15,7 @@ import { logger } from '../../lib/logger';
  * only through the 0220 functions.
  * Once the runtime-recovery job runs on a schedule, it applies the same rule and the same function
  * without a person (Owner 2026-10-12 supplement), so the two paths together refund a round once.
- * Content beyond capacity is user-side: the executor marks it (0283) and neither path refunds it.
+ * Content beyond capacity is user-side: the executor marks it (0284) and neither path refunds it.
  * Rounds created before markers were reliable stay with the operator (the automatic close skips them).
  */
 export const STALE_ROUND_AGE_MS = 24 * 3600 * 1000;
@@ -71,7 +71,7 @@ export async function compensateStaleRound(supabase: BillingRpc, runId: string, 
 
 export type StaleRoundAutoClose = {
   found: number; compensated: number; alreadyCompensated: number; skipped: number; failed: number; credits: number;
-  /** Rounds created before capacity markers were reliable (0283): ambiguous, left to an operator. */
+  /** Rounds created before capacity markers were reliable (0284): ambiguous, left to an operator. */
   manualReview: number;
   /** Reported rounds not attempted because the time budget ran out (including those past the report page). */
   deferred: number;
