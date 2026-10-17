@@ -61,7 +61,12 @@ Owner 选的选项（原文）："Agent 在自由对话里自己决定检索资�
 
 结论：Owner 担心的情况属实——今天的自由对话除了定位之外什么都不主动读。
 
-## 2. 新增的四个自由对话工具和放开的研究工具
+## 2. 自由对话新增的读取能力和放开的研究工具
+
+**工具个数受计费档案限制**：现有 PAYG 档案（`docs/launch/evidence/payg-profile-final.json`）全部是 `maxTools: 2`，
+请求里的工具超过档案上限时 `paygRuntime.ts:39` 直接报 `BILL2_INPUT_PROFILE_INVALID`，`researchAdmission.ts` 也会因为没有空位而不挂研究工具。
+所以免费的读取能力尽量不加新工具：**对标表和自己的作品数据都做成 `read_source` 目录里的条目**（和已确认定位同一个目录、同一个工具），
+资料库检索是唯一新增的免费工具，自由对话合计 2 个工具，正好在现有档案以内。研究工具要 6 个工具位，需要先做新档案（第 8 节 C0）。
 
 全部只在**自由对话**（`admission.ts:368` 的 `freeChat`）挂载；定位导师、Skill 步骤、整理、报告回合不变。
 每个工具一个后台开关，默认关，验收通过后打开。模型自己决定要不要调用（沿用 RESEARCH_TOOLS_PLAN 第 2.5 节"由模型判断"，
@@ -71,8 +76,8 @@ Owner 选的选项（原文）："Agent 在自由对话里自己决定检索资�
 | --- | --- | --- | --- | --- |
 | `library_search` | 本人资料库里和查询相关的文档段落（第 2.1 节） | 不收工具费 | 6000 B | 3 次 |
 | `read_source`（已有） | 读检索命中或 @ 引用的文档段落；读已确认定位 | 不收工具费 | 沿用 16384 B | 沿用每次执行 8 次 / 65536 B |
-| `my_posts` | 本人最近发布作品的数据（第 2.2 节） | 不收（Owner 2026-10-13：读自己作品数据不收积分） | 12000 B | 2 次 |
-| `my_benchmarks` | 定位时建立的对标表（已取到的数字和取数时间） | 不收 | 8000 B | 1 次 |
+| `read_source` 目录条目"我的作品"（`my_posts`） | 本人最近发布作品的数据（第 2.2 节） | 不收（Owner 2026-10-13：读自己作品数据不收积分） | 12000 B | 2 次 |
+| `read_source` 目录条目"对标表"（`benchmarks`） | 定位时建立的对标表（已取到的数字和取数时间） | 不收 | 8000 B | 1 次 |
 | `social_account`、`social_search`、`web_search`、`web_fetch` | 研究工具，实时向供应商取数（第 2.3 节） | 按 RESEARCH-TOOLS 逐条收费 | 沿用 20000 B | 见第 2.3.2 节 |
 
 工具结果对模型都是**数据不是指令**（工程规范第 6 节）：文档正文、作品标题、网页内容放在结果 JSON 字段里，不拼进系统提示。
@@ -129,7 +134,7 @@ Owner 选的选项（原文）："Agent 在自由对话里自己决定检索资�
 
 - 放开 `GENERAL_RESEARCH_TOOLS`：`social_account`（查一个账号资料 + 近期作品）、`social_search`（按关键词查近期作品）、`web_search`、`web_fetch`。
   不放开 `propose_keywords`、`benchmark_discover`、`propose_more_candidates`、`benchmark_fetch`（对标流程专用，要选择卡确认）。
-- **"刷新对标"在自由对话里的做法**：先用免费的 `my_benchmarks` 读对标表；模型判断需要最新作品时，对表里的账号调用 `social_account` 取近期作品。
+- **"刷新对标"在自由对话里的做法**：先用免费的 `read_source` 对标表条目读对标表；模型判断需要最新作品时，对表里的账号调用 `social_account` 取近期作品。
   结果**不写回对标表**（对标表只认带授权来源的 `benchmark_fetch`），所以不需要刷新授权（`researchRefreshId`）；要正式刷新对标表仍在定位页点"刷新"。
   `social_account` 只能查：对标表里的账号、或用户在本会话消息里给出主页链接的账号（沿用 `benchmark_fetch` 的 `user_message` 链接解析规则），
   模型自己编的账号返回 `not_confirmed`、不发请求、不收费。`social_search` 的关键词不需要卡片确认（RESEARCH_TOOLS_PLAN 第 2.1 节自由对话设计），
@@ -182,7 +187,7 @@ Owner 选的选项（原文）："Agent 在自由对话里自己决定检索资�
 | 检索查询词和命中摘录 | `runtime_tool_calls` 结果 | 已被 0201 清掉 | 已被 0150 清掉 | 测试覆盖自动检索的结果 |
 | 检索命中的冻结清单 | `runtime_library_references`（加 `origin`） | 不存正文，保留到会话删除；0262 propagate 规则照用 | 0262 已在清理清单 | 文档删除后清掉含该文档摘录的检索结果（第 2.1 节） |
 | 读到的文档段落 | 冻结读取 + 会话历史 | 已覆盖 | 已覆盖 | 无 |
-| `my_posts`、`my_benchmarks` 结果 | `runtime_tool_calls` 结果 | 已覆盖 | 已覆盖 | 用户断开账号后，旧回答里的作品数据不追删（同 D7"已显示的回答保留"），写进隐私说明由 Owner 的条款处理 |
+| "我的作品"、对标表条目的读取结果 | `runtime_tool_calls` 结果 | 已覆盖；对标表条目带定位会话的 `sessionId`，删定位对话时抄过它的自由对话回答一起清（0218 的范围计算） | 已覆盖 | 用户断开账号后，旧回答里的作品数据不追删（同 D7"已显示的回答保留"），写进隐私说明由 Owner 的条款处理 |
 | 自由对话研究证据 | `research_operations` 等 | 0263、0268 随会话删除，只留计费编号 | 0263、0268 已覆盖 | 补"只在自由对话里搜过的会话"的删会话和注销测试（实施时核对已有测试是否已含自由对话；单条回答删除对用户已取消，不在范围） |
 
 新迁移按 DATA-ERASURE 附录 A 的新表/新列约定补登记；不新建表。
@@ -220,11 +225,12 @@ Owner 选的选项（原文）："Agent 在自由对话里自己决定检索资�
 | A1 | 迁移：`pg_trgm` 索引、`library_runtime_search` 函数、`runtime_library_references.origin` 和 ordinal 上限、`runtime_library_read` 编号解析扩到 1–29、propagate 清检索摘录；开关 `chat_library_retrieval_enabled` 默认关 | high（迁移、权限、删除） | #1022（0279）合并；迁移编号向总控要 | 能（#1022 本周合并的前提下） |
 | A2 | 自由对话挂 `library_search`、执行时读检索命中文档、`agent_tool` 流事件、自由对话主指令补一段 | high（Runtime 准入） | A1 | 能 |
 | W | 前端：`agent-work-status.tsx` 纯展示组件 + 样例 + /runtime 挂载；落地页区域 6 改用它 | ordinary（只改前端） | A2 的事件格式（可先按约定的类型做） | 能 |
-| B1 | `my_benchmarks`（读 0268 对标表，按用户已确认定位找会话） | high（Runtime、权限） | A2 | 能 |
-| B2 | `my_posts`（复用 #1032 读取函数） | high（Runtime、权益） | #1032 合并；PR-6 分工已确认 | 看 #1032 何时合并，偏紧 |
-| C | 研究工具放开到自由对话：`social_search`、`social_account` 执行路径、`runtimeContext`、准入、每回答 3 次、每轮一个工具调用、子调用额度先预留、第 6 次请求不带工具、账号来源校验、容量 | high（计费、Runtime） | #1062 合并；RT-6 #1070 合并（容量） | **有风险**：动 admission/execute（RT 系列也在改），要先拆文件，排在 RT-6、#1062 之后 |
+| B1 | 对标表做成 `read_source` 目录条目（迁移重建 `runtime_workspace_source`，读 0268 对标表，按已确认定位找定位会话；不加新工具） | high（迁移、删除） | 无（0218、0268 已在 staging） | 能 |
+| B2 | "我的作品"做成 `read_source` 目录条目（复用 #1032 读取函数；不加新工具） | high（Runtime、权益） | #1032 合并；PR-6 分工已确认 | 看 #1032 何时合并，偏紧 |
+| C0 | 新 PAYG 档案：覆盖自由对话 6 个工具（`read_source`、`library_search` 和 4 个研究工具）的 `maxTools`，按现有档案取证流程实测（OpenRouter 现有测试余额内，Owner 10-02 授权），staging 配置更新由总控执行，再用真实请求验收 | high（计费配置） | 无；C 的前提 | 能，但要和 C 一起排 |
+| C | 研究工具放开到自由对话：`social_search`、`social_account` 执行路径、`runtimeContext`、准入、每回答 3 次、每轮一个工具调用、子调用额度先预留、第 6 次请求不带工具、账号来源校验、容量 | high（计费、Runtime） | C0；#1062 合并；RT-6 #1070 合并（容量） | **有风险**：动 admission/execute（RT 系列也在改），要先拆文件，排在 RT-6、#1062 之后 |
 
-同一时间只开一个写 Runtime 准入的 PR（A2 → B1 → B2 → C 排队），W 可以和 A2 并行。
+同一时间只开一个写 Runtime 准入的 PR（A2 → C 排队）；B1、B2 只改数据库里的目录函数，W 只改前端，都可以并行。
 
 **做不完时怎么降级**（按优先级从后往前砍，冻结时没验收的部分开关保持关、对外不提）：
 
