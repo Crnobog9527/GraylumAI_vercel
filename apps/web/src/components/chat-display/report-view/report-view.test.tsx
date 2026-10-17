@@ -85,6 +85,8 @@ describe('ReportView', () => {
     const out = html(`${SAMPLE_REPORT_BODY}\n\n${REPORT_DATA_FENCE}\n{"v":1,"field":"summ`, { streaming: true });
     expect(out).toContain('图表和策略要点整理中');
     expect(out).not.toContain('summ');
+    const stopped = `${SAMPLE_REPORT_BODY}\n\n${REPORT_DATA_FENCE}\n{"v":1,"field":"summ`;
+    expect(html(stopped)).toBe(renderToStaticMarkup(<MessageMarkdown text={SAMPLE_REPORT_BODY} />));
   });
 
   it('draws benchmark numbers only from server data, and marks chapters whose text was edited', () => {
