@@ -65,7 +65,6 @@
 }
 
 /* Region 4: the moving row of report cards */
-.marqueeHint { margin: 0; color: var(--k-secondary); font-size: 14px; }
 .marquee { overflow: hidden; padding: 8px 0 20px; mask-image: linear-gradient(90deg, transparent, #000 4%, #000 96%, transparent); }
 .marqueeTrack { display: flex; width: max-content; }
 .marqueeList { display: flex; gap: 16px; margin: 0; padding: 0 8px; list-style: none; }
@@ -147,13 +146,8 @@
   font-size: 12px; font-weight: 500; line-height: 22px; vertical-align: 2px;
 }
 
-/* "14 种人" and the other parts of the samples' title break only between them, never inside one. */
-.keep { display: inline-block; }
-/* The hint names the gesture of the device: hover with a mouse, swipe on a touch screen. */
-.marqueeHint [data-pointer='touch'] { display: none; }
+/* Touch screens: the row stands still and is swiped by hand. */
 @media (hover: none) and (pointer: coarse) {
-  .marqueeHint [data-pointer='fine'] { display: none; }
-  .marqueeHint [data-pointer='touch'] { display: inline; }
   .marquee { overflow-x: auto; mask-image: none; scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch; }
   .marqueeTrack { animation: none !important; }
   .marqueeList[aria-hidden] { display: none; }
@@ -179,3 +173,7 @@
   .flowArrow { width: 16px; height: 16px; }
 }
 @media (max-width: 767px) { .heroGrid .heroText { gap: 16px; } }
+
+/* Round three: "先聊后买" right by the price button (no plan cards on the home page). */
+.riskLine { display: flex; flex-wrap: wrap; gap: 4px 8px; margin: 0; color: #1f6b4a; font-size: 14px; }
+p.riskLine b { font-size: 15px; font-weight: 600; letter-spacing: 0; }

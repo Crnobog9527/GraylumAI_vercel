@@ -54,8 +54,9 @@ describe('style sample J, round six (Owner 2026-10-15)', () => {
     expect(html).toContain(ONE_LINE_DEFINITION['zh-Hans']);
     expect(html).toContain('© 2026 Grayscale Luminary LLC');
     expect(html).not.toMatch(/<h[1-6]/);
-    expect(html).toContain('用户案例');
-    expect(html).toContain('href="/landing/samples"');
+    // No 用户案例 link: the page is not built, and the fictional people are never called 用户案例 (Owner 2026-10-17).
+    expect(html).not.toContain('用户案例');
+    expect(html).not.toContain('href="/landing/samples"');
     expect(html).not.toMatch(/href="\/en/);
     expect(J_PENDING_PAGES).toContain('/refund');
   });

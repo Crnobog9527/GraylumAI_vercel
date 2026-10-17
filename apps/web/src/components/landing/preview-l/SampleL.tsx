@@ -13,19 +13,17 @@ import { VoiceWallJ } from '@/components/landing/preview-j/VoiceWallJ';
 import page from '@/components/landing/preview-j/j.module.css';
 import { CtaK } from '@/components/landing/preview-k/CtaK';
 import k from '@/components/landing/preview-k/k.module.css';
-import { PlanCardsMNO } from '@/components/landing/preview-mno/PlanCardsMNO';
 import { StickyCtaMNO } from '@/components/landing/preview-mno/StickyCtaMNO';
 import { HERO, RISK_REVERSAL } from '@/lib/landing/landing-copy';
 import { J_FINAL } from '@/lib/landing/landing-copy-j';
-import { K_GOLD_LINE, K_PRICE_TERMS } from '@/lib/landing/landing-copy-k';
-import {
-  L_COMPARE_NEXT, L_COMPARE_PICKS, L_COMPARE_STEPS, L_COMPARE_TITLE, L_NOTE_REGIONS, L_OPS, L_VOICE_FOLD,
-} from '@/lib/landing/landing-copy-l';
+import { K_PRICE_TERMS } from '@/lib/landing/landing-copy-k';
+import { L_TASKS, L_TASKS_TITLE } from '@/lib/landing/landing-copy-l-compare';
+import { L_NOTE_REGIONS, L_OPS, L_VOICE_FOLD } from '@/lib/landing/landing-copy-l';
 import { allOn, visibleItems } from '@/lib/landing/landing-flags';
 import { cn } from '@/lib/utils';
-import { CareL } from './CareL';
+import { ActsL } from './ActsL';
+import { ShowcaseL } from './ShowcaseL';
 import { HeroL } from './HeroL';
-import { OpsL } from './OpsL';
 import { SamplesL } from './SamplesL';
 import styles from './l.module.css';
 
@@ -41,18 +39,20 @@ const SAMPLES = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l'] as 
  * work chat, the coach heads), price quieter with the plan cards (Gold first, 先聊后买 under its button), one button
  * wording with a sticky bar after the first screen (at the foot of a phone), a button at least every two regions, the
  * voice wall tighter on a phone, the sample row swiped on touch screens.
+ * Round three (Owner 2026-10-17; tagged sample-l-before-round3-2026-10-17): region 3 in two acts (the whole positioning
+ * flow, then the week, with region 5's worries merged in and region 5 gone), the library and voice shown on their own,
+ * the sample reports for finding someone like you, the comparison as the same task done by both, no plan cards.
  */
-export function SampleL({ data, siteName, extras, membershipHref }: {
-  data: LandingData; siteName: string; extras: PageExtras; membershipHref: string;
-}) {
+export function SampleL({ data, siteName, extras }: { data: LandingData; siteName: string; extras: PageExtras }) {
   const faqIds = new Set(data.faqGroups.flatMap(group => group.items.map(item => item.id)));
   const terms = faqIds.has(K_PRICE_TERMS.faqId) ? (
     <p className={k.terms}>
       <a href={`#${K_PRICE_TERMS.faqId}`}>{K_PRICE_TERMS.cancel}</a> · <a href={`#${K_PRICE_TERMS.faqId}`}>{K_PRICE_TERMS.refund}</a>
     </p>
   ) : null;
-  const gold = allOn(extras.flags, K_GOLD_LINE.needs) ? <p className={k.gold}>{K_GOLD_LINE.text}</p> : null;
-  const riskLine = allOn(extras.flags, ['signupGrant']) ? <><b>{RISK_REVERSAL.title}</b>{J_FINAL.note}</> : null;
+  // "先聊后买" right by the price button (Owner 2026-10-17, round three: no plan cards on the home page).
+  const riskLine = allOn(extras.flags, ['signupGrant'])
+    ? <p className={styles.riskLine}><b>{RISK_REVERSAL.title}</b>{J_FINAL.note}</p> : null;
   return (
     <MotionJ className={cn(light.light, page.page, k.page)}>
       <nav aria-label="样稿切换" className={page.sampleBar}>
@@ -67,16 +67,12 @@ export function SampleL({ data, siteName, extras, membershipHref }: {
       <main data-calm="">
         <HeroL note={data.heroNote} flags={extras.flags} />
         <VoiceWallJ notes={data.notes} open regions={L_NOTE_REGIONS} compact={L_VOICE_FOLD} after={<CtaK />} />
-        <OpsL steps={visibleItems(extras.flags, L_OPS.steps)} flags={extras.flags} />
+        <ActsL flags={extras.flags} />
+        <ShowcaseL flags={extras.flags} />
         {extras.showSamples ? <SamplesL /> : null}
-        <CareL flags={extras.flags} />
-        <CompareJ title={L_COMPARE_TITLE} picks={L_COMPARE_PICKS} next={L_COMPARE_NEXT} steps={L_COMPARE_STEPS} after={<CtaK />} />
+        <CompareJ title={L_TASKS_TITLE} pairs={visibleItems(extras.flags, L_TASKS)} after={<CtaK />} />
         <PriceJ proMonthly={data.pricing.proMonthly} rows={data.compareRows} calm plainTotal checked={false} quiet
-          after={terms || gold ? <>{terms}{gold}</> : undefined} />
-        <div className={cn(k.wrap, styles.plans)}>
-          <PlanCardsMNO cards={data.pricing.cards} yearlyBadge={data.pricing.yearlyBadge} showResult={data.showResult}
-            membershipHref={membershipHref} risk={data.risk} recommendedFirst riskLine={riskLine} />
-        </div>
+          after={terms || riskLine ? <>{riskLine}{terms}</> : undefined} />
         <FaqJ groups={data.faqGroups} />
         <FinalJ freeTrial={allOn(extras.flags, ['signupGrant'])} />
       </main>

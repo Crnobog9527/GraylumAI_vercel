@@ -9,7 +9,6 @@ import { getLandingOffers } from '@/lib/landing/landing-offers';
 import { getPublicSiteSettings } from '@/lib/public-site';
 import { isPublicIndexingEnabled, SITE_INDEXING_ENV } from '@/lib/robots-policy';
 import { NOINDEX_ROBOTS } from '@/lib/seo/metadata';
-import { buildAuthHref } from '@/lib/site-config';
 
 // Style sample L (PUBLIC-SITE): sample K, second round (Owner 2026-10-17). Same rules as the /landing/preview/[variant]
 // samples of #893: static like the landing page, never indexed, not in the sitemap or any navigation, and gone once the
@@ -31,5 +30,5 @@ export default async function LandingPreviewL() {
   // The sample reports are not generated yet: their placeholder shows only in a local development preview, or once the
   // landing flag is turned on (off on staging and production by default).
   const extras = { flags: flagsUsed, showSamples: flags.sampleReports || process.env.NODE_ENV === 'development' };
-  return <SampleL data={data} siteName={siteName} extras={extras} membershipHref={buildAuthHref('/profile?tab=subscription')} />;
+  return <SampleL data={data} siteName={siteName} extras={extras} />;
 }

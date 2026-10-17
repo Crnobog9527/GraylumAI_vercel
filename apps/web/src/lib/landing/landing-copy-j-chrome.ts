@@ -69,8 +69,11 @@ export const J_FOOTER = {
       { label: '评审团', href: PLANNED.jury },
       { label: '价格', href: '/landing/pricing' },
     ] },
-    /** 用户案例 is the sample reports. */
-    { title: '资源', links: [TUTORIALS, { label: '用户案例', href: PLANNED.samples }, FAQ] },
+    /**
+     * No link to the sample reports yet (2026-10-17): /landing/samples is not built (it was a 404 on staging), and the
+     * people in them are fictional, so they must never be called 用户案例 (Owner 2026-10-17).
+     */
+    { title: '资源', links: [TUTORIALS, FAQ] },
     { title: '公司', links: [
       { label: '关于我们', href: '/about' },
       { label: '联系我们', href: '/contact' },

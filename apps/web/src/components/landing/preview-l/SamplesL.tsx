@@ -5,24 +5,28 @@ import { useRef, useState, type CSSProperties } from 'react';
 import { FileText, X } from 'lucide-react';
 import { CtaK } from '@/components/landing/preview-k/CtaK';
 import k from '@/components/landing/preview-k/k.module.css';
-import { FullReport, Glance } from '@/components/landing/preview-j/SamplesJ';
+import { FullReport } from '@/components/landing/preview-j/SamplesJ';
 import samples from '@/components/landing/preview-j/samples-j.module.css';
 import { J_SAMPLES } from '@/lib/landing/landing-copy-j-samples';
-import { L_REPORTS, L_SAMPLES } from '@/lib/landing/landing-copy-l';
+import { L_REPORTS } from '@/lib/landing/landing-copy-l';
+import { L_SAMPLES_REDO as COPY } from '@/lib/landing/landing-copy-l-samples';
 import { SAMPLE_CHAPTERS } from '@/lib/landing/sample-reports';
+import { GlanceL } from './GlanceL';
 import styles from './l.module.css';
+import own from './samples-l.module.css';
 
 type Report = (typeof L_REPORTS)[number];
 /** Each half of the moving row holds at least this many cards, so the row is never shorter than a wide screen. */
 const MIN_CARDS = 8;
 
 /**
- * Region 4 (Owner 2026-10-17): every group's sample report as a card in one row that keeps moving from right to left;
- * the pointer or keyboard focus on it holds it. A card opens its report in a dialog: the cover, the 10-second card and
- * the whole report behind "看完整报告". The row is the list twice over, the second copy hidden from screen readers and
- * the keyboard, so the loop is seamless. Reduced motion and touch screens: the row stands still and is swiped by hand
- * (fix plan item 12). New
- * reports join by adding them to L_REPORTS and sample-reports/.
+ * Region 4 (Owner 2026-10-17, redone): "找到和你情况一样的人". Every group's sample report is a card of one size in a row
+ * that keeps moving from right to left; the pointer or keyboard focus on it holds it. A card shows the group and
+ * platform, the one-sentence conclusion (three lines at most), its tags (「示例」, and 「方向已调整」 when the coach changed
+ * the direction) and 「看这份报告」. Every visible card opens its report, the loop's second copy too: that copy is hidden
+ * from screen readers and taken out of the tab order, but a click on it works. The dialog: the cover, the 10-second
+ * card (GlanceL) and the whole report behind "看完整报告". Reduced motion and touch screens: the row stands still and is
+ * swiped by hand. New reports join by adding them to L_REPORTS and sample-reports/.
  */
 export function SamplesL() {
   const [open, setOpen] = useState<Report | null>(null);
@@ -35,26 +39,30 @@ export function SamplesL() {
     <section aria-labelledby="samples-title" className={k.section} data-zone="takeover" data-region="样例报告">
       <div className={k.wrap}>
         <div className={k.samplesHead}>
-          <p className={k.bridge}>{L_SAMPLES.bridge}</p>
-          <h2 id="samples-title" className={k.lead}>
-            {L_SAMPLES.titleParts(reports.length).map(part => <span key={part} className={styles.keep}>{part}</span>)}
-          </h2>
-          <p className={styles.marqueeHint}><span data-pointer="fine">{L_SAMPLES.pause}</span><span data-pointer="touch">{L_SAMPLES.swipe}</span></p>
+          <h2 id="samples-title" className={k.lead}>{COPY.title}</h2>
+          <p className={own.lede}>
+            {COPY.ledeParts(reports.length).map(part => <span key={part} className={own.keep}>{part}</span>)}
+          </p>
+          <p className={own.hint}><span data-pointer="fine">{COPY.pause}</span><span data-pointer="touch">{COPY.swipe}</span></p>
         </div>
       </div>
       <div className={styles.marquee} data-region="报告卡片">
         <div className={styles.marqueeTrack} style={{ '--count': half.length } as CSSProperties}>
           {[0, 1].map(copy => (
-            <ul key={copy} className={styles.marqueeList} aria-hidden={copy === 1 || undefined} inert={copy === 1 || undefined}>
+            <ul key={copy} className={styles.marqueeList} aria-hidden={copy === 1 || undefined} data-copy={copy}>
               {half.map((report, index) => (
                 <li key={`${report.slug}-${index}`}>
-                  <button type="button" className={styles.reportCard} onClick={() => show(report)}
-                    aria-label={`${L_SAMPLES.open}：${report.who} · ${report.platform}`}>
-                    <span className={styles.cardHead}><FileText size={16} aria-hidden="true" /><b>{report.who}</b>{report.platform}</span>
-                    {report.truth ? <em>{J_SAMPLES.truthTag}</em> : null}
-                    <span className={styles.cardWho}>{SAMPLE_CHAPTERS[report.slug].summary.who}</span>
-                    <span className={styles.cardWhat}>{SAMPLE_CHAPTERS[report.slug].summary.what}</span>
-                    <span className={styles.cardOpen}>{L_SAMPLES.open}</span>
+                  <button type="button" className={own.card} onClick={() => show(report)} tabIndex={copy === 1 ? -1 : undefined}
+                    data-slug={report.slug} aria-label={`${COPY.open}：${report.who} · ${report.platform}`}>
+                    <span className={own.cardHead}>
+                      <FileText size={15} aria-hidden="true" /><span><b>{report.who}</b>{report.platform}</span>
+                    </span>
+                    <span className={own.cardWhat}>{SAMPLE_CHAPTERS[report.slug].summary.what}</span>
+                    <span className={own.tags}>
+                      <span className={own.sampleTag}>{COPY.sample}</span>
+                      {report.truth ? <span className={own.adjustedTag}>{COPY.adjusted}</span> : null}
+                    </span>
+                    <span className={own.cardOpen}>{COPY.open}</span>
                   </button>
                 </li>
               ))}
@@ -64,22 +72,22 @@ export function SamplesL() {
       </div>
       <div className={k.wrap}><CtaK /></div>
 
-      <dialog ref={dialog} className={styles.reportDialog} aria-label={open ? `${open.who} · ${open.platform}` : L_SAMPLES.title(reports.length)}
+      <dialog ref={dialog} className={styles.reportDialog} aria-label={open ? `${open.who} · ${open.platform}` : COPY.title}
         onClose={() => setOpen(null)} onClick={event => { if (event.target === event.currentTarget) dialog.current?.close(); }}>
         {open && data ? (
           <div className={styles.dialogBody}>
-            <button type="button" className={styles.dialogClose} onClick={() => dialog.current?.close()} aria-label={L_SAMPLES.close}>
+            <button type="button" className={styles.dialogClose} onClick={() => dialog.current?.close()} aria-label={COPY.close}>
               <X size={18} aria-hidden="true" />
             </button>
             <header className={samples.cover}>
               <FileText size={22} aria-hidden="true" />
-              <div>
-                <p className={samples.coverLabel}>{J_SAMPLES.coverLabel}{open.truth ? <em>{J_SAMPLES.truthTag}</em> : null}</p>
+              <div className={own.coverText}>
+                <p className={samples.coverLabel}>{J_SAMPLES.coverLabel}<span className={own.sampleTag}>{COPY.sample}</span></p>
                 <h3 className={k.coverTitle}>{open.who} · {open.platform}</h3>
-                <p className={samples.size}>{J_SAMPLES.size} · {J_SAMPLES.generated(data.generatedAt)}</p>
+                <p className={samples.size}>{J_SAMPLES.size}</p>
               </div>
             </header>
-            <Glance data={data} />
+            <GlanceL data={data} who={open.who} platform={open.platform} />
             <FullReport key={open.slug} slug={open.slug} />
           </div>
         ) : null}

@@ -49,7 +49,10 @@ export type OpsCard =
   | { kind: 'draft'; title: string; lines: readonly string[]; shots: string }
   | { kind: 'test'; variants: readonly { name: string; opening: string }[]; measure: string }
   | { kind: 'result'; columns: readonly string[]; rows: readonly (readonly string[])[]; winner: string }
-  | { kind: 'series'; items: readonly string[]; extra: string };
+  | { kind: 'series'; items: readonly string[]; extra: string }
+  | { kind: 'publish'; platforms: readonly { name: string; on: boolean }[]; action: string }
+  | { kind: 'fetch'; items: readonly string[] }
+  | { kind: 'platforms'; columns: readonly string[]; rows: readonly (readonly string[])[] };
 export type OpsLine = { role: 'user' | 'coach'; text: string; card?: OpsCard; needs?: readonly LandingFeature[]; without?: LandingFeature };
 
 export const L_OPS = {

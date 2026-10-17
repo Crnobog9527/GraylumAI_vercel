@@ -1,0 +1,39 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * Region 3 in two acts (ActsL): the act switch, the note or the worry/answer line above the window, the real workspace's
+ * frame (only the frame is the page's), act two's loop and the jury's one line.
+ */
+.actTabs { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-top: 28px; padding: 4px; border: 1px solid var(--j-line); border-radius: 999px; background: #fff; }
+.actTabs button {
+  min-height: 42px; padding: 0 18px; border: 0; border-radius: 999px; background: none; color: var(--j-body); font: inherit; font-size: 15.5px;
+  font-weight: 500; cursor: pointer; transition: background-color .2s, color .2s;
+}
+.actTabs button[aria-selected='true'] { background: var(--j-ink); color: #fff; }
+@media (max-width: 480px) { .actTabs { border-radius: 18px; } .actTabs button { width: 100%; font-size: 14.5px; } }
+
+.panel { display: grid; gap: 16px; margin-top: 22px; }
+.note, .care { margin: 0; color: var(--j-ink); font-size: 16.5px; line-height: 1.7; }
+.note b { margin-right: 8px; color: var(--j-gold-text); }
+/* The real workspace (sample J's takeover window): its own proportions inside, a fixed-height frame outside. */
+.workspace {
+  height: 620px; overflow: hidden; border: 1px solid var(--j-line); border-radius: 18px;
+  box-shadow: 0 1px 2px rgba(20, 19, 18, .05), 0 40px 80px -48px rgba(20, 19, 18, .45);
+}
+@media (max-width: 767px) { .workspace { height: 540px; } }
+
+.care { display: grid; gap: 6px 14px; align-items: center; }
+@media (min-width: 900px) { .care { grid-template-columns: auto minmax(0, 4fr) 24px minmax(0, 7fr); } }
+.care small { display: block; color: var(--k-secondary, #6b6b6b); font-size: 13px; }
+.care b { font-size: 17px; font-weight: 600; }
+.care > svg { color: var(--j-gold-text); }
+@media (max-width: 899px) { .care > svg { display: none; } }
+
+.loop { display: grid; gap: 10px; margin-top: 22px; padding: 16px 18px; border: 1px dashed var(--j-line); border-radius: 16px; background: #fff; }
+.loop ol { display: flex; flex-wrap: wrap; gap: 6px 4px; margin: 0; padding: 0; list-style: none; counter-reset: loop; }
+.loop li { display: inline-flex; align-items: center; gap: 4px; color: var(--j-ink); font-size: 14.5px; counter-increment: loop; }
+.loop li::before { content: counter(loop); display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: #f0efeb; font-size: 12px; font-weight: 600; }
+.loop li:not(:last-child)::after { content: '→'; margin: 0 6px; color: var(--k-secondary, #6b6b6b); }
+.loop p { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--j-gold-text); font-size: 15px; font-weight: 600; }
+
+.jury { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 18px 0 0; color: var(--j-body); font-size: 15px; }
+.jury a { display: inline-flex; align-items: center; gap: 4px; color: var(--j-ink); font-weight: 500; text-underline-offset: 4px; }

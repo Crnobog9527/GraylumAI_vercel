@@ -35,13 +35,15 @@ export function pairTiming(generic: string, coach: string, coachFirst = false) {
  * a closing line to a pair's coach reply (by index): what the person does next. Samples M–O (Owner 2026-10-17, no dark
  * blocks): `band="tint"` sets it on the light band. Sample L (Owner 2026-10-17, demos as the real product): `steps` gives a
  * pair's coach head its step, as the positioning workspace writes it ("AI 自媒体陪跑教练 · 诊断与平台对标"); `after` sits under
- * the board.
+ * the board. Sample L, round three (Owner 2026-10-17: the same task, what each one hands you): `pairs` replaces sample
+ * J's pairs; a pair may carry its own coach `head` (the product's, for that kind of conversation) and a `verdict` under it.
  */
-export function CompareJ({ title, picks, next, band = 'ink', steps, after }: {
+export function CompareJ({ title, picks, next, band = 'ink', steps, after, pairs }: {
   title?: string; picks?: readonly number[]; next?: Readonly<Record<number, string>>; band?: 'ink' | 'tint';
-  steps?: Readonly<Record<number, string>>; after?: ReactNode;
+  steps?: Readonly<Record<number, string>>; after?: ReactNode; pairs?: readonly ComparePair[];
 } = {}) {
-  const shown = (picks ?? J_COMPARE.pairs.map((_, index) => index)).map(index => ({ pair: J_COMPARE.pairs[index], index }));
+  const all: readonly ComparePair[] = pairs ?? J_COMPARE.pairs;
+  const shown = (picks ?? all.map((_, index) => index)).map(index => ({ pair: all[index], index }));
   return (
     <section aria-labelledby="compare-title" className={page.section} data-zone="compare" data-band={band} data-region="对比区">
       <div className={page.wrap}>
@@ -76,7 +78,7 @@ export function CompareJ({ title, picks, next, band = 'ink', steps, after }: {
                       {first ? null : <p className={styles.question}><span>你</span>{pair.question}</p>}
                       <div className={styles.coachReply}>
                         <span className={result.agentIdentity}>
-                          <img src="/graylum-logo.png" alt="" />AI 自媒体陪跑教练{steps?.[index] ? ` · ${steps[index]}` : ''}
+                          <img src="/graylum-logo.png" alt="" />{pair.head ?? `AI 自媒体陪跑教练${steps?.[index] ? ` · ${steps[index]}` : ''}`}
                         </span>
                         <p><Typed text={coach} start={timing.coachStart} /></p>
                       </div>
@@ -86,6 +88,7 @@ export function CompareJ({ title, picks, next, band = 'ink', steps, after }: {
                       <p className={styles.source}>{J_COMPARE.sourceLabel}：{pair.source}</p>
                     </div>
                   </div>
+                  {pair.verdict ? <p className={styles.verdict}>{pair.verdict}</p> : null}
                 </li>
               );
             })}
@@ -96,6 +99,12 @@ export function CompareJ({ title, picks, next, band = 'ink', steps, after }: {
     </section>
   );
 }
+
+/** One exchange: the same question to a general AI and to the coach, each window's note, where the coach's words come from. */
+export type ComparePair = {
+  question: string; generic: readonly string[]; coach: string; genericNote: string; coachNote: string; source: string;
+  coachFirst?: boolean; head?: string; verdict?: string;
+};
 
 /** A reply typed out: every character on its own delay; the finished text takes its place from the start. */
 function Typed({ text, start }: { text: string; start: number }) {

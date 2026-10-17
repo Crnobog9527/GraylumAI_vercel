@@ -87,3 +87,6 @@
 [data-calm-windows] :is(.badge, .question span) { font-size: 12px; }
 [data-calm-windows] :is(.question span, .coachReply > span) { color: #6b6b6b; }
 [data-calm-windows] .bar span { color: #55544f; }
+
+/* Sample L, round three: one line under each pair saying what the two answers come down to. */
+.verdict { grid-column: 1 / -1; margin: 4px 0 0; color: var(--j-ink); font-size: 16px; font-weight: 600; }
