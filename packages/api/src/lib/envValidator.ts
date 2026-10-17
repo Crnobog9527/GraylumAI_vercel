@@ -72,11 +72,6 @@ const envSchema = z.object({
     )
     .optional(),
 
-  // AI Provider API (OpenRouter)
-  OPENROUTER_API_KEY: apiKeySchema
-    .regex(/^sk-or-/, 'OPENROUTER_API_KEY 必须以 sk-or- 开头')
-    .optional(),
-
   // PUBLISH-MONITOR: Post for Me (optional; the feature switch stays off without it)
   POSTFORME_API_KEY: apiKeySchema
     .regex(/^pfm_(live|test)_/, 'POSTFORME_API_KEY 必须以 pfm_live_ 或 pfm_test_ 开头')
@@ -177,23 +172,13 @@ export function validateEnv(): ValidationResult {
 
   const env = result.success ? result.data : null;
   const nodeEnv = env?.NODE_ENV ?? process.env.NODE_ENV ?? 'development';
-  const hasOpenRouterKey = Boolean(process.env.OPENROUTER_API_KEY);
-
-  if (!hasOpenRouterKey) {
-    errors.push('必须配置 OPENROUTER_API_KEY');
-  }
-
+  // The OpenRouter key is entered in the admin's third-party keys page (Vault, ADMIN-SECRETS OR-1), not here.
   if (process.env.ANTHROPIC_API_KEY) {
-    warnings.push('ANTHROPIC_API_KEY 已退役；Claude 模型请通过 OPENROUTER_API_KEY 调用');
+    warnings.push('ANTHROPIC_API_KEY 已退役；Claude 模型通过 OpenRouter 调用（密钥在后台“第三方密钥”页填写）');
   }
 
   // 2. 生产环境特殊检查
   if (nodeEnv === 'production') {
-    // 检查是否使用测试密钥
-    if (process.env.OPENROUTER_API_KEY?.includes('test')) {
-      errors.push('生产环境不能使用测试 API 密钥');
-    }
-
     // 检查 Sentry 是否配置
     if (!process.env.NEXT_PUBLIC_SENTRY_DSN) {
       warnings.push('生产环境建议配置 Sentry 错误监控');
@@ -322,7 +307,6 @@ export function getSafeEnvSummary(): Record<string, string> {
     OPENING_GRANT_HMAC_KEYS_SET: process.env.OPENING_GRANT_HMAC_KEYS ? '✓' : '✗',
     DATABASE_URL_SET: process.env.DATABASE_URL ? '✓' : '✗',
     ANTHROPIC_KEY_RETIRED_SET: process.env.ANTHROPIC_API_KEY ? '⚠' : '✗',
-    OPENROUTER_KEY_SET: process.env.OPENROUTER_API_KEY ? '✓' : '✗',
     UPSTASH_REDIS_URL_SET: process.env.UPSTASH_REDIS_REST_URL ? '✓' : '✗',
     UPSTASH_REDIS_TOKEN_SET: process.env.UPSTASH_REDIS_REST_TOKEN ? '✓' : '✗',
     STRIPE_SECRET_KEY_SET: process.env.STRIPE_SECRET_KEY ? '✓' : '✗',

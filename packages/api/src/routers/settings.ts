@@ -10,6 +10,7 @@ import { parseSearchSurcharge } from '../services/searchPricing';
 import { BILLING_UNIT_SETTING_KEYS, parseCreditsPerUsd, parseMultiplier } from '../services/billingUnit';
 import { PROVIDER_PRICES_KEY } from '../services/billingProviderPrices';
 import { RUNTIME_MODEL_COLUMNS, runtimeModelOption } from "../services/models/runtimeEligibility";
+import { openRouterKeyConfigured } from "../services/models/openRouterKey";
 import { router, publicProcedure, adminProcedure } from '../trpc';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
@@ -178,12 +179,18 @@ async function assertSettingsWriter(client: SupabaseClient<any, 'public', any>, 
     throw new TRPCError({code:'FORBIDDEN',message:'当前账号无权修改系统设置'});
 }
 
+/** Whether the platform OpenRouter key is filled in (OR-1); an unreadable key is an error, not "not filled". */
+async function keyConfigured(client: Pick<SupabaseClient, 'rpc'>) {
+  try { return await openRouterKeyConfigured(client); }
+  catch { throw new TRPCError({code:'INTERNAL_SERVER_ERROR',message:'暂时无法读取第三方密钥状态，请稍后重试'}); }
+}
+
 async function validateSummarySelection(client: SupabaseClient<any, 'public', any>, input: Array<{key:string;value:unknown}>) {
   const value=input.find(item=>item.key==='v3_summary_model_id')?.value;
   if(typeof value!=='string' || !value)return;
   const {data,error}=await client.from('ai_models').select(RUNTIME_MODEL_COLUMNS).eq('id',value).single();
   if(error || !data)throw new TRPCError({code:'BAD_REQUEST',message:'所选整理模型不存在，请刷新模型列表'});
-  const option=runtimeModelOption(data,'organizer');
+  const option=runtimeModelOption(data,'organizer',await keyConfigured(client));
   if(!option.available)throw new TRPCError({code:'BAD_REQUEST',message:option.reason??'整理模型不可用'});
 }
 
@@ -228,8 +235,9 @@ export const settingsRouter = router({
   getSummaryModels: adminProcedure.input(z.object({use:z.enum(['organizer','skill'])}).strict().optional()).query(async ({ctx,input}) => {
     const {data,error}=await ctx.supabase.from('ai_models').select(RUNTIME_MODEL_COLUMNS).eq('is_active','true').order('name');
     if(error)throw new TRPCError({code:'INTERNAL_SERVER_ERROR',message:'无法读取整理模型列表'});
-    // Credentials participate only in server eligibility checks and never leave this projection.
-    return (data??[]).map(row=>runtimeModelOption(row,input?.use??'organizer'));
+    // The platform OpenRouter key participates only in server eligibility checks and never leaves this projection.
+    const configured=await keyConfigured(ctx.supabase);
+    return (data??[]).map(row=>runtimeModelOption(row,input?.use??'organizer',configured));
   }),
 
   /**

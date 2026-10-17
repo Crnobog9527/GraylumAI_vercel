@@ -2,12 +2,12 @@
 import { isOpenRouterEndpoint, resolveOpenAICompatibleEndpoint } from '../providerUtils';
 import { OPENROUTER_MODEL_ID, checkReasoningConfig, readReasoningConfig } from '../../shared/modelReasoning';
 
-/** Columns the eligibility check reads. The key is used here only and never returned. */
-export const RUNTIME_MODEL_COLUMNS = 'id,name,model_id,provider,is_active,max_tokens,input_limit,api_key,api_endpoint,config';
+/** Columns the eligibility check reads. The OpenRouter key is not a model column (platform secret, OR-1). */
+export const RUNTIME_MODEL_COLUMNS = 'id,name,model_id,provider,is_active,max_tokens,input_limit,api_endpoint,config';
 
 export type RuntimeModelRow = {
   id: string; name: string; model_id: string; provider?: string | null; is_active?: string | null;
-  max_tokens?: number | null; input_limit?: number | null; api_key?: string | null; api_endpoint?: string | null; config?: unknown;
+  max_tokens?: number | null; input_limit?: number | null; api_endpoint?: string | null; config?: unknown;
 };
 /** `skill`: the model a Skill (module) dialogue runs on. `organizer`: the step result organizer. */
 export type RuntimeModelUse = 'skill' | 'organizer';
@@ -20,12 +20,13 @@ export type RuntimeModelOption = { id: string; name: string; model_id: string; a
  *
  * A Skill model needs a checked reasoning config with the interactive purpose
  * set. The organizer needs no reasoning config (unset means the provider's
- * default), but a config it does have must pass the same checks.
+ * default), but a config it does have must pass the same checks. `keyConfigured`: whether the
+ * OpenRouter key is filled in the admin's third-party keys page (openRouterKeyConfigured).
  */
-export function runtimeModelOption(row: RuntimeModelRow, use: RuntimeModelUse): RuntimeModelOption {
+export function runtimeModelOption(row: RuntimeModelRow, use: RuntimeModelUse, keyConfigured: boolean): RuntimeModelOption {
   const result = (reason: string | null) => ({ id: row.id, name: row.name, model_id: row.model_id, available: reason === null, reason });
   if (row.is_active !== 'true') return result('模型已停用');
-  if (!row.api_key?.trim()) return result('请先配置 API 密钥');
+  if (!keyConfigured) return result('请先在后台“第三方密钥”页填写 OpenRouter 密钥');
   if (!isOpenRouterEndpoint(resolveOpenAICompatibleEndpoint(row.provider ?? null, row.api_endpoint ?? null) ?? ''))
     return result('当前 Runtime 需要 OpenRouter 接口');
   if (!OPENROUTER_MODEL_ID.test(row.model_id) || row.model_id.toLowerCase().startsWith('openrouter/')) return result('模型 ID 格式不受支持');
