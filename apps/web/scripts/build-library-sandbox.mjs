@@ -19,6 +19,7 @@ export const SANDBOX_WORKERS = {
   'docx-worker': 'src/lib/library-sandbox/docx/worker-entry.ts',
   'pdf-worker': 'src/lib/library-sandbox/pdf/worker-entry.ts',
   'ocr-worker': 'src/lib/library-sandbox/ocr/worker-entry.ts',
+  'pdf-render-worker': 'src/lib/library-sandbox/pdf/render-entry.ts',
 };
 
 /** Extra license files for data bundled from a package (pdf.js ships Adobe's CMaps under their own terms). */

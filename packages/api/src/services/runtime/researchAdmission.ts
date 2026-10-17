@@ -16,6 +16,9 @@ import type { FrozenPaygRun } from '../bill2/service';
 import { freezePaygMessageBudget } from './paygMessageBudget';
 import { fastSearchOnly, researchToolDescription, researchToolParameters } from './researchRuntimeTool';
 import type { StagingPolicy } from './stagingPolicy';
+import type { SettingsRead } from './newWorkGate';
+import type { HostTurnContext } from './hostTurn';
+import { researchHost } from './researchHostContext';
 import { frozenResearchTurn, LOCAL_RESEARCH_ACCOUNT, PRODUCTION_RESEARCH_ACCOUNT, RESEARCH_PHASE, RESEARCH_RESULT_RESERVE_BYTES,
   RESEARCH_TURN_VERSION,
   type FrozenResearchTurn } from './researchTurn';
@@ -42,8 +45,8 @@ export interface ResearchAdmissionInput {
   runMultiplier: string;
   /** Frozen prices must outlive the run. */
   deadline: string;
-  /** Whether the required context still fits with these extra tool bytes plus the result reserve. */
-  fits: (extraBytes: number) => boolean;
+  /** Whether the required context still fits with these extra tool bytes plus the result reserve (within `inputBytes` if given). */
+  fits: (extraBytes: number, inputBytes?: number) => boolean;
   now?: () => Date;
 }
 
@@ -141,20 +144,39 @@ export function fitsCapacity(check: () => void): boolean {
 const SCALE = 1_000_000_000_000n;
 const usd = (value: bigint) => `${value / SCALE}.${(value % SCALE).toString().padStart(12, '0')}`;
 
-type MentorContext = Parameters<typeof freezePaygMessageBudget>[0] & { tools: string[]; research?: FrozenResearchTurn };
+type MentorContext = Parameters<typeof freezePaygMessageBudget>[0] & { tools: string[]; research?: FrozenResearchTurn;
+  purposeBudget?: { purpose: string; inputBytes: number; historyItems: number }; hostTurnContext?: HostTurnContext };
+/**
+ * Owner 2026-10-17 ("同意 RT-6 输入上限选 A"): only a mentor turn that offers the research tools may use this input
+ * ceiling (the organize cap); every other turn keeps its interactive budget. Billing still follows the bytes actually sent.
+ */
+export const RESEARCH_TURN_INPUT_BYTES = 112000;
+/**
+ * The host context's bytes as sent: hostTurnInput serializes it into the message content, and the request serializes that
+ * string again (every quote and backslash escaped). The block's cost is the difference of this measure (#1070 review).
+ */
+export const sentHostBytes = (value: unknown) => Buffer.byteLength(JSON.stringify(JSON.stringify(value)));
 
 /**
  * Adds the admitted research tools to a positioning mentor turn's frozen context and v2 run: one more model call
  * to read a tool result, the subcall allowance, and the frozen tool prices. false = nothing changes.
  */
 export async function attachResearchTurn(input: Omit<ResearchAdmissionInput, 'modelCalls' | 'offeredTools' | 'maxTools'
-  | 'defaultMultiplier' | 'runMultiplier' | 'deadline'> & { context: MentorContext; billing: FrozenPaygRun }): Promise<boolean> {
+  | 'defaultMultiplier' | 'runMultiplier' | 'deadline'> & { context: MentorContext; billing: FrozenPaygRun;
+  /** RT-6: the research host block (cards, benchmark table) joins the turn only with the tools, sized with them. */
+  settings?: Promise<SettingsRead>; actorId?: string; sessionId?: string }): Promise<boolean> {
   const { context, billing } = input;
   const primary = billing.callPolicy.find(policy => policy.modelId === context.modelId);
   if (!primary?.payg || !billing.rules.billingUnit) return false;
   // One more serial tool round must still fit the profile's message budget (freezePaygMessageBudget).
   if (2 + 4 * Math.min(context.maxToolCalls + 1, context.maxTurns) > primary.payg.maxMessages) return false;
-  const admitted = await admitResearchTurn({ ...input, modelCalls: billing.limits.maxCalls, offeredTools: context.tools.length,
+  const budget = context.purposeBudget;
+  const raised = budget?.purpose === 'interactive' && budget.inputBytes < RESEARCH_TURN_INPUT_BYTES ? RESEARCH_TURN_INPUT_BYTES : undefined;
+  const host = context.hostTurnContext && input.settings && input.actorId && input.sessionId
+    ? await researchHost(context.hostTurnContext, input.admin, input.actorId, input.sessionId, input.settings) : context.hostTurnContext;
+  const hostBytes = host && host !== context.hostTurnContext ? sentHostBytes(host) - sentHostBytes(context.hostTurnContext) : 0;
+  const admitted = await admitResearchTurn({ ...input, fits: extra => input.fits(extra + hostBytes, raised),
+    modelCalls: billing.limits.maxCalls, offeredTools: context.tools.length,
     maxTools: primary.payg.maxTools, defaultMultiplier: billing.rules.billingUnit.defaultMultiplier,
     runMultiplier: billing.rules.multiplier, deadline: billing.limits.deadline });
   if (!admitted) return false;
@@ -162,6 +184,9 @@ export async function attachResearchTurn(input: Omit<ResearchAdmissionInput, 'mo
   context.maxTurns += 1;
   context.maxToolCalls += 1;
   context.research = admitted.research;
+  // Execution sizes every call of this turn with the frozen budget, so the raised ceiling is frozen with the tools.
+  if (raised) budget!.inputBytes = raised;
+  if (host) context.hostTurnContext = host;
   freezePaygMessageBudget(context, billing.callPolicy);
   const toolUpper = admitted.policies.reduce((upper, policy) => decimal(policy.upperUsd) > upper ? decimal(policy.upperUsd) : upper, 0n);
   billing.limits.costUsd = usd(decimal(billing.limits.costUsd) + decimal(primary.upperUsd) + toolUpper * BigInt(admitted.research.subcalls));

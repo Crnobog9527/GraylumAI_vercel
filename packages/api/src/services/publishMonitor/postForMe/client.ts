@@ -4,8 +4,8 @@ import { exchange, type FetchImpl, type PostForMeExchange, publicHttpsUrl } from
 import { MAX_POST_ID_LENGTH, normalizeFeedPage, type FeedPage } from './normalize';
 
 /**
- * Post for Me client for PUBLISH-MONITOR (plan §4.1). Read paths, consent links and account removal only;
- * there is deliberately no publishing call here (PR-5, every real publish needs Owner approval).
+ * Post for Me client for PUBLISH-MONITOR (plan §4.1). Read paths, consent links and account removal; publishing lives
+ * in posts.ts (PR-5).
  * Every call passes the shared limiter first: one key serves all users (40/min, 5/s measured 2026-10-13).
  */
 export type Limiter = { acquire(): Promise<{ ok: true } | { ok: false; retryAfterSeconds: number }> };
@@ -69,7 +69,7 @@ function classifyRead<T>(result: PostForMeExchange, parse: (json: unknown) => T 
   return value === null ? { kind: 'failed', status: result.status, reason: 'RESPONSE_SHAPE' } : { kind: 'ok', value };
 }
 
-async function call<T>(deps: ClientDeps, request: Parameters<typeof exchange>[0],
+export async function call<T>(deps: ClientDeps, request: Parameters<typeof exchange>[0],
   parse: (json: unknown) => T | null): Promise<Outcome<T>> {
   const slot = await deps.limiter.acquire();
   if (!slot.ok) return { kind: 'rate_limited', retryAfterSeconds: slot.retryAfterSeconds, sent: false };

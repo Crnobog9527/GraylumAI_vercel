@@ -134,24 +134,31 @@ describe('research user API', () => {
     await expect(researchToolCharges(db([{ provider: 'private' }]), actor, other))
       .rejects.toMatchObject({ message: 'RESEARCH_UNAVAILABLE' });
   });
-  it('reads the session benchmark table for its owner, keeping missing numbers null and dropping other fields', async () => {
+  it('reads the session benchmark table with its evidence refs, keeping missing numbers null', async () => {
+    const ref = (n: number) => `${id}#${n}`;
     const row = { platform: 'douyin', account: 'alpha', followers: 38200, medianViews: null, engagementRate: 0.0634,
       postsPerWeek: 4.2, lastPublishedAt: '2026-10-13T10:00:00+00:00', postsAnalyzed: 24, category: 'imitable',
-      qualified: true, excluded: null, missing: ['medianViews'], fetchedAt: '2026-10-15T08:00:00+00:00' };
-    const client = db({ rows: [row], hash: 'private-hash' });
+      qualified: true, excluded: null, fetchedAt: '2026-10-15T08:00:00+00:00', cost: 9,
+      refs: { followers: [ref(1)], medianViews: [], engagementRate: [ref(1), ref(2)], postsPerWeek: [ref(1)],
+        lastPublishedAt: [ref(2)] } };
+    const client = db([row]);
     const result = await researchBenchmarks(client, actor, other);
-    expect(client.rpc).toHaveBeenCalledWith('research_benchmark_rows', { a: actor, s: other });
-    expect(result).not.toHaveProperty('hash');
+    expect(client.rpc).toHaveBeenCalledWith('research_user_benchmarks', { a: actor, s: other });
     const expected: Partial<typeof row> = { ...row };
-    delete expected.missing;
+    delete expected.cost;
     expect(result.items).toEqual([expected]);
     expect(result.items[0]!.medianViews).toBeNull();
+    expect(result.items[0]!.refs.medianViews).toEqual([]);
   });
   it('denies another user\'s session benchmark table and rejects malformed rows', async () => {
     await expect(researchBenchmarks(db(null, { message: 'RESEARCH_SCOPE_DENIED' }), actor, other))
       .rejects.toMatchObject({ code: 'FORBIDDEN', message: 'RESEARCH_SCOPE_DENIED' });
-    await expect(researchBenchmarks(db({ rows: [{ platform: 'douyin', account: 'a', followers: -1 }] }), actor, other))
+    await expect(researchBenchmarks(db([{ platform: 'douyin', account: 'a', followers: -1 }]), actor, other))
       .rejects.toMatchObject({ message: 'RESEARCH_UNAVAILABLE' });
+    const bad = { platform: 'douyin', account: 'a', followers: 1, medianViews: null, engagementRate: null, postsPerWeek: null,
+      lastPublishedAt: null, postsAnalyzed: 0, category: null, qualified: false, excluded: 'NO_POSTS', fetchedAt: 'x',
+      refs: { followers: ['not-a-ref'], medianViews: [], engagementRate: [], postsPerWeek: [], lastPublishedAt: [] } };
+    await expect(researchBenchmarks(db([bad]), actor, other)).rejects.toMatchObject({ message: 'RESEARCH_UNAVAILABLE' });
     await expect(researchBenchmarks(db(null), actor, 'not-a-uuid')).rejects.toThrow();
   });
 });

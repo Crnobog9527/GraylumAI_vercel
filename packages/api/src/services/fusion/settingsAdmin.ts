@@ -7,6 +7,7 @@ import { realRuntimeEnvironment } from '../runtime/productionEnvironment';
 import { loadProductionPolicy } from '../runtime/productionPolicy';
 import { parseStagingPolicy, type StagingPolicy } from '../runtime/stagingPolicy';
 import { admitFusionModel, FUSION_MODEL_COLUMNS, type FusionModelRow, type FusionPhase } from './models';
+import { readOpenRouterKey } from '../models/openRouterKey';
 import { readReviewSkill, resolveReviewSkill } from './reviewPrompts';
 import { fusionSettings, readFusionSettings, writeFusionSettings, type FusionSettings } from './settings';
 
@@ -34,12 +35,13 @@ export async function saveFusionSettings(db: SupabaseClient, actorId: string, va
       if (settings.review.skillId) await readReviewSkill(db, await resolveReviewSkill(db, settings.review.skillId));
       const window = await adminWindow(db, actorId, env);
       const deadline = admissionDeadline(window.expiresAt);
+      const key = await readOpenRouterKey(db, { fresh: true }).catch(() => null); // one fresh read for all checks
       for (const row of models) {
         if (settings.review.reviewerModelIds.includes(row.id)) {
-          await admitFusionModel(db, window, row, 'fusion_review', settings.review.opinionOutputTokens, deadline, env);
+          await admitFusionModel(db, window, row, 'fusion_review', settings.review.opinionOutputTokens, deadline, env, key ?? null);
         }
         if (settings.review.summaryModelId === row.id) {
-          await admitFusionModel(db, window, row, 'fusion_summary', settings.review.summaryOutputTokens, deadline, env);
+          await admitFusionModel(db, window, row, 'fusion_summary', settings.review.summaryOutputTokens, deadline, env, key ?? null);
         }
       }
     }
@@ -76,8 +78,10 @@ export async function fusionModelOptions(db: SupabaseClient, actorId: string, en
   const rows = await db.from('ai_models').select(FUSION_MODEL_COLUMNS).in('id', window.callPolicies.map(policy => policy.modelId));
   if (rows.error) throw new Error('FUSION_SETTINGS_UNAVAILABLE');
   const deadline = admissionDeadline(window.expiresAt);
+  // Read-only listing: one read (the 60 s cache is fine for a display) shared by every per-model check.
+  const key = await readOpenRouterKey(db).catch(() => null);
   const admits = async (row: FusionModelRow, phase: FusionPhase, tokens: number) => {
-    try { await admitFusionModel(db, window, row, phase, tokens, deadline, env); return true; }
+    try { await admitFusionModel(db, window, row, phase, tokens, deadline, env, key ?? null); return true; }
     catch (error) {
       if (NOT_ELIGIBLE.has(error instanceof Error ? error.message : '')) return false;
       throw new Error('FUSION_SETTINGS_UNAVAILABLE');

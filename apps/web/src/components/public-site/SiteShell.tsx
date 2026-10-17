@@ -85,6 +85,11 @@ export function SiteShell({
             </Link>
           </nav>
         </div>
+        <nav aria-label={chrome.mobileNavLabel} className="flex gap-5 overflow-x-auto border-t border-[#1C1C1C] px-4 py-2 sm:hidden">
+          {chrome.nav.map(link => (
+            <Link key={link.href} href={link.href} className="shrink-0 text-sm text-[#B0B0B0] hover:text-white">{link.label}</Link>
+          ))}
+        </nav>
       </header>
       <main>{children}</main>
       <footer className="border-t border-[#262626]">
