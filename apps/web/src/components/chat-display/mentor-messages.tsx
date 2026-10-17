@@ -3,6 +3,7 @@ import type { ReactNode, Ref, UIEventHandler } from "react";
 import { ChatPendingStatus } from "@/components/chat/ChatInlineNotice";
 import resultStyles from "@/components/opc/positioning-result.module.css";
 import { MentorMarkdown } from "@/app/positioning/[draftId]/MentorMarkdown";
+import { DisplayHeading } from './display-heading';
 
 /**
  * Display-only message list of the positioning mentor chat. Every piece takes ready-made text
@@ -14,7 +15,7 @@ export function MentorChatHeading() {
   return (
     <div>
       <p className="text-xs text-[var(--text-secondary)]">全程同一对话</p>
-      <h3 className="font-semibold">和 AI 教练一起聊，每一步核对确认一次</h3>
+      <DisplayHeading as="h3" className="font-semibold">和 AI 教练一起聊，每一步核对确认一次</DisplayHeading>
     </div>
   );
 }

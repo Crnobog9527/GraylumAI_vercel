@@ -6,7 +6,7 @@ import type { UploadAttempt, UploadStage } from './upload-flow';
 
 /** Headings as the server checks them (#796): UTF-16 offsets into exactly the uploaded text. */
 export type WordHeading = { offset: number; level: number; text: string };
-/** UTF-16 offsets of the embedded images in the uploaded text (LIB-2d, 0280): one recognition unit each. */
+/** UTF-16 offsets of the embedded images in the uploaded text (LIB-2d, 0287): one recognition unit each. */
 export type WordImage = { offset: number };
 /** What the browser extracted (LIB-2b), ready to upload. Kept on the item so a retry does not re-extract. */
 export type PreparedWord = { text: Blob; headings: WordHeading[]; images?: WordImage[] };

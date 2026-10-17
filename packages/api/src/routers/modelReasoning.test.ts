@@ -2,6 +2,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { modelReasoningRouter } from './modelReasoning';
 
+// ADMIN-SECRETS OR-1: the try call uses the platform OpenRouter key.
+vi.mock('../services/models/openRouterKey', () => ({
+  readOpenRouterKey: async (_db: unknown, options?: { fresh?: boolean }) => {
+    if (!options?.fresh) throw new Error('provider calls must read the key fresh');
+    return 'SECRET_CANARY';
+  },
+}));
+
 const modelId = '11111111-1111-4111-8111-111111111111';
 const catalog = {
   fetchedAt: '2026-09-29T00:00:00.000Z', model: 'deepseek/deepseek-v4.1-flash',
@@ -25,7 +33,7 @@ function harness(role: 'admin' | 'user', config: Record<string, unknown> | null)
       return {
         select() { return this; }, eq() { return this; },
         maybeSingle: async () => ({ data: { id: modelId, name: 'DeepSeek', model_id: model, max_tokens: 8192, input_limit: 100000,
-          provider: 'openai', is_active: 'true', api_key: 'SECRET_CANARY', api_endpoint: '', config: stored, updated_at: stamp() }, error: null }),
+          provider: 'openai', is_active: 'true', api_endpoint: '', config: stored, updated_at: stamp() }, error: null }),
         update(payload: Record<string, unknown>) {
           const filters: Record<string, unknown> = {};
           const write = {

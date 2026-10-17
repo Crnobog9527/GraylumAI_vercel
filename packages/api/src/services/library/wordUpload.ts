@@ -20,7 +20,7 @@ export function wordUpload(client: SupabaseClient, actorId: string, storage: Lib
       const input = wordCompleteInput.parse(raw);
       return upload.complete(input.documentId, bytes => {
         if (input.images === undefined) return { rpc: 'library_word_publish', args: { segments: wordSegments(bytes, input.headings) } };
-        // LIB-2d (0280): segments also end at each image, and the publisher creates one recognition unit per image.
+        // LIB-2d (0287): segments also end at each image, and the publisher creates one recognition unit per image.
         const { segments, anchors } = wordSegmentsWithImages(bytes, input.headings, input.images);
         return { rpc: 'library_word_publish', args: { segments, images: anchors } };
       }, (input.images?.length ?? 0) > 0);

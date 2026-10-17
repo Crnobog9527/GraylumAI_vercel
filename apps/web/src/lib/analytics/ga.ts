@@ -103,6 +103,31 @@ export function sendGaEvent(measurementId: string | null, name: string, params: 
   return true;
 }
 
+export type GaCheckoutIds = { clientId: string; sessionId: string; capturedAt: string };
+const CLIENT_ID = /^[0-9]{1,20}\.[0-9]{1,20}$/;
+const SESSION_ID = /^[0-9]{1,20}$/;
+
+/**
+ * The GA client and session IDs for the server's purchase report, read with Google's own `gtag('get')` (never by
+ * parsing cookies). Null without live consent, on a page GA is paused for, or when gtag does not answer in time.
+ */
+export function readGaCheckoutIds(measurementId: string | null, timeoutMs = 800): Promise<GaCheckoutIds | null> {
+  if (!measurementId || typeof window === 'undefined' || loadedFor !== measurementId || !window.gtag) return Promise.resolve(null);
+  if (!analyticsAllowed() || window[`ga-disable-${measurementId}`]) return Promise.resolve(null);
+  // When consent was last confirmed live: the server refuses ids captured before a later withdrawal.
+  const capturedAt = new Date().toISOString();
+  const field = (name: 'client_id' | 'session_id') => new Promise<string | null>(resolve => {
+    const timer = setTimeout(() => resolve(null), timeoutMs);
+    window.gtag!('get', measurementId, name, (value: unknown) => {
+      clearTimeout(timer);
+      resolve(typeof value === 'string' || typeof value === 'number' ? String(value) : null);
+    });
+  });
+  return Promise.all([field('client_id'), field('session_id')]).then(([clientId, sessionId]) =>
+    clientId && sessionId && CLIENT_ID.test(clientId) && SESSION_ID.test(sessionId) && analyticsAllowed()
+      ? { clientId, sessionId, capturedAt } : null);
+}
+
 /** Test hook: forget the loaded state between tests. */
 export function resetGaForTests(): void {
   loadedFor = null;

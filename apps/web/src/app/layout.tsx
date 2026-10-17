@@ -50,10 +50,12 @@ export default function RootLayout({
       <body className="antialiased">
         <JsonLd data={[organizationJsonLd({ supportEmail: publicSupportEmail() }), websiteJsonLd()]} />
         <MiSansFont />
-        <Provider>{children}</Provider>
+        <Provider>
+          {children}
+          {/* Termly consent, GA4 and Vercel statistics; loads nothing until configured (ANALYTICS plan §3). */}
+          <SiteAnalytics onVercel={onVercel} />
+        </Provider>
         <Toaster />
-        {/* Termly consent, GA4 and Vercel statistics; loads nothing until configured (ANALYTICS plan §3). */}
-        <SiteAnalytics onVercel={onVercel} />
       </body>
     </html>
   );

@@ -12,7 +12,7 @@ export const wordHeadings = z.array(z.object({
 export const wordImages = z.array(z.object({ offset: z.number().int().min(0).max(MAX_BYTES) }).strict()).max(500);
 export const wordCompleteInput = z.object({ documentId: z.string().uuid(), headings: wordHeadings, images: wordImages.optional() }).strict();
 
-/** Segments plus, for each image, how many segments come before it (0280): its recognised text goes right there.
+/** Segments plus, for each image, how many segments come before it (0287): its recognised text goes right there.
  * Each image offset is also a segment boundary, so text before and after an inline image never share a segment. */
 export function wordSegmentsWithImages(bytes: Uint8Array, headings: z.infer<typeof wordHeadings>, images: z.infer<typeof wordImages>) {
   const parsed = wordImages.safeParse(images);

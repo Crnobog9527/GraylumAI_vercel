@@ -11,6 +11,7 @@ import {
 import { isLibraryScanRecognitionEnabled } from '@/lib/library-sandbox/feature-flag';
 import { scanProgressText, type ScanProgress } from '@/lib/library-documents/scan-recognition';
 import styles from './my-documents.module.css';
+import { DisplayHeading } from '@/components/chat-display/display-heading';
 
 /** Fixed sentence for the upload area: Owner 2026-10-17 (LIB_DOCS_PLAN §9), replacing the 2026-10-10 one. No estimated
  * charge is ever shown. */
@@ -45,7 +46,7 @@ export function UploadPanel(props: UploadPanelProps) {
   const scanOn = isLibraryScanRecognitionEnabled() && props.scanServerEnabled === true;
   const blocked = !props.uploadEnabled || space === null || space !== 'ok';
   return <section className={styles.panel} aria-label="上传文件">
-    <h2>上传文件</h2>
+    <DisplayHeading as="h2">上传文件</DisplayHeading>
     <p className={styles.hint}>
       支持{supportedText()}，单个文件不超过 10 MB。{comingSoonText()}
     </p>
@@ -114,7 +115,7 @@ export function SpacePanel({ usedBytes, capacityBytes }: { usedBytes?: number; c
   const state = known ? spaceState(usedBytes, capacityBytes) : 'ok';
   const percent = known && capacityBytes > 0 ? Math.min(100, Math.round((usedBytes / capacityBytes) * 100)) : 0;
   return <section className={styles.panel} aria-label="空间使用">
-    <h2>空间使用</h2>
+    <DisplayHeading as="h2">空间使用</DisplayHeading>
     <div className={styles.meter} data-state={state}><span style={{ width: percent + '%' }}/></div>
     <p className={styles.spaceText}>
       {known ? `已用 ${formatBytes(usedBytes)} / 共 ${formatBytes(capacityBytes)}` : '已用 — / 共 —'}

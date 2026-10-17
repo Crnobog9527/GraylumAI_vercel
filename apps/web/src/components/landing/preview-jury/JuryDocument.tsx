@@ -11,6 +11,7 @@ import { REPORT_CHAPTERS, REPORT_TITLE, WHOLE_DOCUMENT } from './jury-report';
 import { SeatMark } from './JuryBits';
 import { JuryMargin, type PeekHandlers } from './JuryMargin';
 import styles from './jury-document.module.css';
+import { DisplayHeading } from '@/components/chat-display/display-heading';
 
 const CURSOR_SEATS: readonly SeatCode[] = ['A', 'B', 'C', 'S'];
 
@@ -85,7 +86,7 @@ export function JuryDocument({ view, names, still, ...handlers }: PeekHandlers &
         <div className={styles.rowsWrap} ref={wrap}>
           <div className={styles.headRow} ref={node => { if (node) rows.current.set(DOC_HEAD, node); else rows.current.delete(DOC_HEAD); }}>
             <header className={styles.docHead}>
-              <h2>{REPORT_TITLE}</h2>
+              <DisplayHeading as="h2">{REPORT_TITLE}</DisplayHeading>
               <p>{REPORT_CHAPTERS.length} 章，评审期间这份报告保持冻结，不会被改动</p>
             </header>
             {view.revisionFailed ? <p className={styles.banner} role="status">修订稿没有通过检查，报告原文没有任何改动；评审意见保留在页边供你参考。</p> : null}
@@ -111,7 +112,7 @@ export function JuryDocument({ view, names, still, ...handlers }: PeekHandlers &
                 data-reader={readers[0]} ref={node => { if (node) rows.current.set(chapter.title, node); else rows.current.delete(chapter.title); }}
                 aria-label={chapter.title}>
                 <div className={styles.text}>
-                  <h3><span className={styles.num}>{chapter.number}</span>{chapter.name}</h3>
+                  <DisplayHeading as="h3"><span className={styles.num}>{chapter.number}</span>{chapter.name}</DisplayHeading>
                   {marked ? <Redline title={chapter.title} /> : chapter.body ? <p className={styles.body}>{chapter.body}</p> : null}
                   {marked ? <p className={styles.revNote}>修订稿改动了这一章</p> : null}
                 </div>
