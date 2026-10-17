@@ -116,10 +116,13 @@ describe('parseReportDataBlock', () => {
     ];
     const table = { platform: 'xiaohongshu', account: ' 甜点a ', followers: 12000, medianViews: null, engagementRate: 0.04,
       postsPerWeek: 3, fetchedAt: '2026-10-10T00:00:00Z' };
-    const parsed = parseReportDataBlock(block(row('benchmarks', { accounts })), { benchmarks: { rows: [table], current: true } });
-    expect(parsed.data.benchmarks!.accounts).toEqual([{ ...accounts[0], metrics: { followers: 12000, medianViews: null,
+    const parsed = parseReportDataBlock(block(row('benchmarks', { accounts: [{ ...accounts[0], platform: 'xiaohongshu' }, accounts[1]] })),
+      { benchmarks: { rows: [table], current: true } });
+    expect(parsed.data.benchmarks!.accounts).toEqual([{ ...accounts[0], platform: 'xiaohongshu', metrics: { followers: 12000, medianViews: null,
       engagementRate: 0.04, weeklyPosts: 3, capturedAt: '2026-10-10T00:00:00Z' } }]);
     expect(parsed.dropped).toEqual(['benchmarks.accounts[1]']);
+    const sole = parseReportDataBlock(block(row('benchmarks', { accounts: [accounts[0]] })), { benchmarks: { rows: [table], current: true } });
+    expect((sole.data.benchmarks!.accounts as BenchmarkAccount[])[0].metrics).toBeNull();
     const twice = parseReportDataBlock(block(row('benchmarks', { accounts: [accounts[0]] })),
       { benchmarks: { rows: [table, { ...table, platform: 'douyin', followers: 99 }], current: true } });
     expect((twice.data.benchmarks!.accounts as BenchmarkAccount[])[0].metrics).toBeNull();
