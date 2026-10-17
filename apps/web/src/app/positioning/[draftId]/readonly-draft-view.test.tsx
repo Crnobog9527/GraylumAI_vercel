@@ -18,7 +18,7 @@ describe('ReadonlyDraftView', () => {
     expect(html).toContain('这段定位对话已删除');
     expect(html).toContain('中文资料0');
     expect(html).toContain('导出已确认资料');
-    expect(html).not.toMatch(/不能导出|不可导出|内部|textarea|给导师的回复/);
+    expect(html).not.toMatch(/不能导出|不可导出|内部|textarea|给 AI 教练的回复/);
     // Deleting the whole draft while it is open leaves the page (work = the draft's project).
     expect(html).toContain('data-active="project"');
   });

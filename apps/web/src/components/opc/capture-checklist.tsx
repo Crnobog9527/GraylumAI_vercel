@@ -81,8 +81,8 @@ function WithdrawnBox({ props, step, fieldId, withdrawn }: {
 }) {
   const busy = props.locked || !props.editable || props.resolving === step.id + ":" + fieldId;
   return (
-    <div className={styles.update} data-withdrawn role="group" aria-label="导师已撤回建议">
-      <p className={styles.updateTitle}>导师已撤回建议</p>
+    <div className={styles.update} data-withdrawn role="group" aria-label="AI 教练已撤回建议">
+      <p className={styles.updateTitle}>AI 教练已撤回建议</p>
       <p className={styles.withdrawnValue}>{withdrawn.value}</p>
       <p className={styles.note}>你在对话里否定了这条建议，正式内容没有改动。</p>
       <div className={styles.updateActions}>
@@ -114,8 +114,8 @@ function StepFields({ props, step }: { props: CaptureChecklistProps; step: Step 
                 {editedLocally(info, edits, field.id) && state === "draft" ? "草稿 · 你填写的" : fieldStateLabel(value, meta, field)}</span>
             </div>
             {props.manual && <p className={styles.hint}>{field.elicitation === "agent_proposal"
-              ? "这是导师要给出的成果建议：可以先请导师提出草案，你核对、修改即可。"
-              : "这是你自己的事实：请按真实情况填写，导师不会替你编造。"}</p>}
+              ? "这是 AI 教练要给出的成果建议：可以先请 AI 教练提出草案，你核对、修改即可。"
+              : "这是你自己的事实：请按真实情况填写，AI 教练不会替你编造。"}</p>}
             <Textarea id={`${step.id}-${field.id}`} aria-label={field.title} maxLength={400}
               className="min-h-20 resize-none" placeholder={state === "missing" ? "还没聊到，也可以直接在这里填写" : undefined}
               disabled={!props.editable || confirmation !== "none"} value={value.value}
