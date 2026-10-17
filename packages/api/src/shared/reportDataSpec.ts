@@ -35,7 +35,7 @@ export const REPORT_DATA_FIELDS = {
   summary: text('一句话结论', { max: 200 }),
   thisWeek: list('这周就做的事', object('一件事', {
     action: text('做什么'), why: text('为什么'), done: text('做到什么算完成'),
-  }), 1, 8),
+  }), 3, 8),
   situation: object('现状', {
     strengths: list('能用的优势', sourced('优势'), 0, 8),
     resources: text('时间、人手和预算'),
