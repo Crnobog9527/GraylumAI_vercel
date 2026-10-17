@@ -3077,7 +3077,7 @@
   "fn:library_recognition_enabled()": "3497e791a0c8",
   "fn:library_recognition_fail(uuid,uuid,text,integer)": "525ebd660c6e",
   "fn:library_recognition_pending(uuid)": "456fa6809dc9",
-  "fn:library_recognition_save(uuid,uuid,text,integer,integer,jsonb)": "73277d456ee1",
+  "fn:library_recognition_save(uuid,uuid,text,integer,integer,jsonb)": "660d05471b5b",
   "fn:library_search(uuid,text,timestamp with time zone,uuid)": "1497811441e0",
   "fn:library_segments(uuid,uuid,integer,integer)": "dc4d9f9698e5",
   "fn:library_segments_range(uuid,uuid,integer,integer,integer)": "120bd87537ed",

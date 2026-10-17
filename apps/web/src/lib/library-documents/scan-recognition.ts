@@ -25,73 +25,89 @@ export type ScanProgress = { done: number; total: number; failed: number; state:
 
 const errorCode = (error: unknown) => (error as { message?: unknown } | null)?.message;
 
-/** Runs until every waiting page of every listed document is saved or marked failed, space runs out, or `signal` aborts. */
+/**
+ * Runs until every waiting page of every waiting document is saved or marked failed, space runs out, or `signal` aborts.
+ * The server lists a limited number of documents at a time, so the list is fetched again until it holds no document
+ * this run has not tried yet (a document left waiting after a stop is not retried in the same run).
+ */
 export async function runScanRecognition(api: ScanApi, signal: AbortSignal,
   onProgress: (documentId: string, progress: ScanProgress) => void): Promise<'done' | 'paused' | 'aborted'> {
-  const documents = await api.pending();
-  for (const document of documents) {
-    if (signal.aborted) return 'aborted';
-    const progress: ScanProgress = { done: 0, total: document.positions.length, failed: 0, state: 'running' };
-    const report = () => onProgress(document.documentId, { ...progress });
+  const tried = new Set<string>();
+  for (;;) {
+    const documents = (await api.pending()).filter((document) => !tried.has(document.documentId));
+    if (!documents.length) return 'done';
+    for (const document of documents) {
+      tried.add(document.documentId);
+      const outcome = await recognizeDocument(api, document, signal, onProgress);
+      if (outcome !== 'done') return outcome;
+    }
+  }
+}
+
+async function recognizeDocument(api: ScanApi, document: PendingDocument, signal: AbortSignal,
+  onProgress: (documentId: string, progress: ScanProgress) => void): Promise<'done' | 'paused' | 'aborted'> {
+  if (signal.aborted) return 'aborted';
+  const progress: ScanProgress = { done: 0, total: document.positions.length, failed: 0, state: 'running' };
+  const report = () => onProgress(document.documentId, { ...progress });
+  report();
+  let version = document.contentVersion;
+  const kind: UnitKind = document.format === 'pdf' ? 'pdf_page' : 'word_image';
+  let file: Blob;
+  try {
+    file = await api.original(document.documentId);
+  } catch {
+    progress.state = 'stopped';
     report();
-    let version = document.contentVersion;
-    const kind: UnitKind = document.format === 'pdf' ? 'pdf_page' : 'word_image';
-    let file: Blob;
+    return 'done';
+  }
+  for (let start = 0; start < document.positions.length; start += PDF_RENDER_LIMITS.maxPages) {
+    if (signal.aborted) return 'aborted';
+    let results: ScannedPageResult[];
     try {
-      file = await api.original(document.documentId);
+      results = await api.recognize(document, file, document.positions.slice(start, start + PDF_RENDER_LIMITS.maxPages), signal);
     } catch {
+      if (signal.aborted) return 'aborted';
+      // The whole batch could not run (sandbox unavailable, file unreadable): leave the pages waiting for next time.
       progress.state = 'stopped';
       report();
-      continue;
+      break;
     }
-    for (let start = 0; start < document.positions.length; start += PDF_RENDER_LIMITS.maxPages) {
+    for (const result of results) {
       if (signal.aborted) return 'aborted';
-      let results: ScannedPageResult[];
-      try {
-        results = await api.recognize(document, file, document.positions.slice(start, start + PDF_RENDER_LIMITS.maxPages), signal);
-      } catch {
-        if (signal.aborted) return 'aborted';
-        // The whole batch could not run (sandbox unavailable, file unreadable): leave the pages waiting for next time.
-        progress.state = 'stopped';
-        report();
-        break;
-      }
-      for (const result of results) {
-        if (signal.aborted) return 'aborted';
-        const text = result.ok ? result.text.trim() : '';
-        if (!text) {
-          // Unreadable page (for example a JPEG 2000 image the sandbox cannot draw) or no text found.
-          await api.fail({ documentId: document.documentId, kind, position: result.page }).catch(() => undefined);
-          progress.failed += 1;
-        } else {
-          let saved: SaveResult;
-          try {
-            saved = await api.save({ documentId: document.documentId, kind, position: result.page, version, text });
-          } catch (error) {
-            if (errorCode(error) !== 'LIBRARY_VERSION_CHANGED') throw error;
-            // Another tab saved a page in between: take the current version and save once more.
-            const fresh = (await api.pending()).find((item) => item.documentId === document.documentId);
-            if (!fresh) break;
-            version = fresh.contentVersion;
-            saved = await api.save({ documentId: document.documentId, kind, position: result.page, version, text });
-          }
-          if (saved.code === 'LIBRARY_SPACE') {
-            progress.state = 'paused';
-            report();
-            return 'paused';
-          }
-          version = saved.contentVersion;
-          // The server could not keep it (the document's text limit): counted as not recognised.
-          if (!saved.saved && saved.status === 'failed') progress.failed += 1;
+      const text = result.ok ? result.text.trim() : '';
+      if (!text) {
+        // Unreadable page (for example a JPEG 2000 image the sandbox cannot draw) or no text found.
+        // A failure that was not recorded is not counted: the error stops the run and the page stays waiting.
+        await api.fail({ documentId: document.documentId, kind, position: result.page });
+        progress.failed += 1;
+      } else {
+        let saved: SaveResult;
+        try {
+          saved = await api.save({ documentId: document.documentId, kind, position: result.page, version, text });
+        } catch (error) {
+          if (errorCode(error) !== 'LIBRARY_VERSION_CHANGED') throw error;
+          // Another tab saved a page in between: take the current version and save once more.
+          const fresh = (await api.pending()).find((item) => item.documentId === document.documentId);
+          if (!fresh) { progress.state = 'done'; report(); return 'done'; }
+          version = fresh.contentVersion;
+          saved = await api.save({ documentId: document.documentId, kind, position: result.page, version, text });
         }
-        progress.done += 1;
-        report();
+        if (saved.code === 'LIBRARY_SPACE') {
+          progress.state = 'paused';
+          report();
+          return 'paused';
+        }
+        version = saved.contentVersion;
+        // The server could not keep it (the document's text limit): counted as not recognised.
+        if (!saved.saved && saved.status === 'failed') progress.failed += 1;
       }
-    }
-    if (progress.state === 'running') {
-      progress.state = 'done';
+      progress.done += 1;
       report();
     }
+  }
+  if (progress.state === 'running') {
+    progress.state = 'done';
+    report();
   }
   return 'done';
 }

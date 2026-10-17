@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { renderPdfPagesInBrowser } from '../pdf/render-client';
 import { packRenderInput, unpackRenderInput } from '../pdf/render-pack';
 
 describe('render Worker input', () => {
@@ -13,5 +14,16 @@ describe('render Worker input', () => {
     expect(() => unpackRenderInput(new Uint8Array(packRenderInput(new Uint8Array([1]), [])))).toThrow('SANDBOX_PROTOCOL');
     expect(() => unpackRenderInput(new Uint8Array(packRenderInput(new Uint8Array([1]), [1, 2, 3, 4, 5, 6, 7, 8, 9])))).toThrow('SANDBOX_PROTOCOL');
     expect(() => unpackRenderInput(new Uint8Array(packRenderInput(new Uint8Array(0), [1])))).toThrow('SANDBOX_PROTOCOL');
+  });
+});
+
+describe('renderPdfPagesInBrowser', () => {
+  afterEach(() => vi.unstubAllEnvs());
+  it('refuses duplicate or out-of-range pages across the whole request, before any Worker runs', async () => {
+    vi.stubEnv('NEXT_PUBLIC_LIBRARY_SCAN_RECOGNITION', 'true');
+    const pdf = new Blob(['%PDF']);
+    for (const pages of [[], [1, 2, 3, 4, 5, 6, 7, 8, 1], [0], [1.5], [501]]) {
+      await expect(renderPdfPagesInBrowser(pdf, pages)).rejects.toThrow('SANDBOX_PROTOCOL');
+    }
   });
 });

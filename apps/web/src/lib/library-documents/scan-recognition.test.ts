@@ -35,6 +35,20 @@ describe('scan recognition driver', () => {
     expect(calls.save).not.toHaveBeenCalled();
     expect(vi.mocked(calls.fail).mock.calls.map(([input]) => input.position)).toEqual([2, 4]);
   });
+  it('does not count a failure the server did not record, and stops the run with the page still waiting', async () => {
+    const calls = api({ recognize: vi.fn(async () => [page(2, ''), page(4)]), fail: vi.fn(async () => { throw new Error('TOO_MANY_REQUESTS'); }) });
+    const seen: ScanProgress[] = [];
+    await expect(runScanRecognition(calls, new AbortController().signal, (_, p) => seen.push(p))).rejects.toThrow('TOO_MANY_REQUESTS');
+    expect(calls.save).not.toHaveBeenCalled();
+    expect(seen.at(-1)).toEqual({ done: 0, total: 2, failed: 0, state: 'running' });
+  });
+  it('fetches the waiting list again until it holds no document this run has not tried', async () => {
+    const lists = [[doc([2])], [doc([2]), { documentId: 'd21', format: 'pdf' as const, contentVersion: 2, positions: [3] }], [doc([2])]];
+    const calls = api({ pending: vi.fn(async () => lists.shift() ?? []) });
+    expect(await runScanRecognition(calls, new AbortController().signal, () => undefined)).toBe('done');
+    expect(vi.mocked(calls.save).mock.calls.map(([input]) => [input.documentId, input.position])).toEqual([['d1', 2], ['d21', 3]]);
+    expect(calls.pending).toHaveBeenCalledTimes(3);
+  });
   it('stops everything when space runs out and reports the pause', async () => {
     const calls = api({ save: vi.fn(async () => ({ saved: false, status: 'paused', contentVersion: 1, code: 'LIBRARY_SPACE' as const })) },
       [doc([2, 4]), { documentId: 'd2', format: 'docx', contentVersion: 1, positions: [1] }]);

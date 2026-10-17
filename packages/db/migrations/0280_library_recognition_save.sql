@@ -95,7 +95,8 @@ END $$;
 
 -- One unit's recognised segments, inserted in reading order: a PDF page after the earlier pages, a Word image at
 -- its anchor. A unit is saved once: a repeated or concurrent save (another tab) finds it complete and changes
--- nothing. Not enough space pauses the unit instead of failing.
+-- nothing. A failed unit can still be saved, so another tab's successful text wins over a tab that failed first.
+-- Not enough space pauses the unit instead of failing.
 CREATE OR REPLACE FUNCTION public.library_recognition_save(a uuid,did uuid,kind text,pos integer,ver integer,segments jsonb) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE d library_documents; u library_recognition_units; s jsonb; total bigint:=0; n integer; at_ordinal integer; idx integer:=0;
@@ -105,7 +106,7 @@ BEGIN
  d:=library_recognition_document(a,did,kind);
  SELECT * INTO u FROM library_recognition_units WHERE document_id=did AND unit_kind=kind AND position=pos FOR UPDATE;
  IF u.document_id IS NULL THEN RAISE EXCEPTION 'LIBRARY_NOT_FOUND'; END IF;
- IF u.status NOT IN ('pending','paused') THEN
+ IF u.status NOT IN ('pending','paused','failed') THEN
   RETURN jsonb_build_object('saved',false,'status',u.status,'contentVersion',d.content_version); END IF;
  IF ver IS DISTINCT FROM d.content_version THEN RAISE EXCEPTION 'LIBRARY_VERSION_CHANGED'; END IF;
  IF jsonb_typeof(segments) IS DISTINCT FROM 'array' OR jsonb_array_length(segments) NOT BETWEEN 1 AND 200
