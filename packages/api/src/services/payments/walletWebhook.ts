@@ -8,6 +8,7 @@ import { logger } from '../../lib/logger';
 import { readCardPaymentEvidence, recordCardPaymentTax, type CardOrder, type CardPaymentEvidence } from './cardPaymentEvidence';
 import { stopPriorAfterUpgrade } from './cardUpgrade';
 import { stopUndeliveredSubscription } from './cardSubscriptionStop';
+import { reportGaPurchase } from '../analytics/gaPurchase';
 
 const isCard = (method: string) => method === 'card' || method === 'card_cn';
 
@@ -117,6 +118,9 @@ export async function recoverMethodCheckout(db: SupabaseClient, stripe: Stripe, 
   // Paid but kept for review (not delivered): its card subscription must not renew; the prior Pro is kept.
   else if (card) await attempt(() => stopUndeliveredSubscription(stripe, card.id));
   if ('tax' in cash) await attempt(() => recordCardPaymentTax(db, scope.merchant, order.id, cash));
+  // ANALYTICS: only the call that newly delivered the order (duplicate false) reports, whichever caller wins
+  // (webhook, browser return, reconciliation). Statistics only: it never throws and never blocks delivery.
+  if (delivered && (applied.data as { duplicate?: unknown }).duplicate === false) await reportGaPurchase(db, order);
   if (failures.length) throw failures[0];
   return { orderId: order.id, checkoutStatus: validated?.status ?? null, paymentStatus: 'paid' as const };
 }

@@ -13,6 +13,26 @@ export const HOST_TURN_MAX_BYTES = 16000;
 export const RESEARCH_REFRESH_NOTE = 'The user pressed Refresh for this benchmark account in the interface. To fetch it again, ' +
   'call benchmark_fetch for exactly this platform and account with source {kind:"refresh",refreshId}. ' +
   'This grant authorizes one new paid fetch only.';
+/** RT-6: fixed host text for the session's selection cards and benchmark table; never model-written. */
+export const RESEARCH_CARDS_NOTE = 'Host records of this session, newest last. A card with confirmationId null still waits for the ' +
+  'user: do not search for it. Use ids only from here. benchmarks counts host-verified qualified accounts; numbers are host data.';
+const researchAccount = z.object({platform: z.enum(SOCIAL_PLATFORMS), account: z.string().min(1).max(200)}).strict();
+const researchCard = z.discriminatedUnion('kind', [
+  z.object({kind: z.literal('keywords'), cardId: z.string().uuid(), confirmationId: z.string().uuid().nullable(),
+    keywords: z.array(z.string().min(1).max(40)).max(10)}).strict(),
+  z.object({kind: z.literal('candidates'), cardId: z.string().uuid(), confirmationId: z.string().uuid().nullable(),
+    discoveryId: z.string().uuid().nullable(), accounts: z.array(researchAccount).max(12)}).strict(),
+]);
+const benchmarkNumber = z.number().finite().nullable();
+export const researchContextSchema = z.object({
+  note: z.literal(RESEARCH_CARDS_NOTE),
+  cards: z.array(researchCard).max(3),
+  benchmarks: z.object({required: z.number().int().min(3).max(12), qualified: z.number().int().min(0).max(30),
+    rows: z.array(researchAccount.extend({category: z.enum(['head_reference', 'imitable', 'fast_rising']).nullable(),
+      qualified: z.boolean(), excluded: z.string().max(64).nullable(), followers: benchmarkNumber,
+      medianViews: benchmarkNumber, engagementRate: benchmarkNumber, lastPublishedAt: z.string().max(40).nullable()}).strict()).max(12),
+  }).strict(),
+}).strict();
 // Values are per-turn data and never part of the stable instruction prefix.
 export const hostTurnContextSchema = z.object({
   cardContract: z.literal(GROUNDED_CARD_CONTRACT).optional(),
@@ -23,6 +43,7 @@ export const hostTurnContextSchema = z.object({
   updatedFieldIds: z.array(z.string().min(1).max(64)).max(100).optional(),
   researchRefresh: z.object({refreshId: z.string().uuid(), platform: z.enum(SOCIAL_PLATFORMS),
     account: z.string().min(1).max(200), note: z.literal(RESEARCH_REFRESH_NOTE)}).strict().optional(),
+  research: researchContextSchema.optional(),
   checklist: z.array(z.object({
     id: z.string().min(1).max(128), title: z.string().max(256),
     fields: z.array(z.object({

@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { assertCheckoutRateLimit, getStripeAppUrl, getStripeClient, isStripeCheckoutConfigured } from '../services/stripe';
-import { methodPurchaseInputSchema } from '../services/payments/methodPurchase';
+import { methodCheckoutInputSchema } from '../services/payments/methodPurchase';
+import { checkoutValue, storeGaCheckoutIds } from '../services/analytics/gaPurchase';
 import { createWalletCheckout } from '../services/payments/walletCheckout';
 import { createStripeCardCheckout } from '../services/payments/stripeMethodCheckout';
 import { readPaymentMethodRoutes, assertPaymentMethodRoute, isCardMethod } from '../services/payments/methodRouting';
@@ -44,7 +45,11 @@ export const methodPaymentProcedures = {
       throw createSafeServiceUnavailableError(error, '产品状态待核对，本站暂停新购期间请勿重复操作');
     }
   }),
-  methodCheckout: protectedProcedure.input(methodPurchaseInputSchema).mutation(async ({ ctx, input }) => {
+  methodCheckout: protectedProcedure.input(methodCheckoutInputSchema).mutation(async ({ ctx, input: request }) => {
+    // GA ids never reach the purchase (checkout_request, Stripe metadata); they are kept beside the order.
+    const { analytics, ...input } = request;
+    // Stamped before the provider is called: ids are refused if consent was withdrawn after this moment.
+    const requestedAt = new Date();
     try {
       // Staging card test only; card/card_cn.enabled in the versioned routes is the default-off switch below.
       assertMethodCheckoutEnvironment(process.env, input.method);
@@ -61,7 +66,11 @@ export const methodPaymentProcedures = {
       // environment gate until payment fulfillment (PAY-STRIPE-MP PR-3) lands.
       const checkout = { db: ctx.supabaseAdmin, stripe: getStripeClient(), userId: ctx.profileId,
         appUrl: getStripeAppUrl(), termsVersion: terms.data.value.version, purchase: input };
-      return await (isCardMethod(input.method) ? createStripeCardCheckout(checkout) : createWalletCheckout(checkout));
+      const result = await (isCardMethod(input.method) ? createStripeCardCheckout(checkout) : createWalletCheckout(checkout));
+      if (result.state !== 'open') return result;
+      if (analytics !== undefined) await storeGaCheckoutIds(ctx.supabaseAdmin, ctx.profileId, result.orderId, analytics, requestedAt);
+      // The order's pre-tax amount for the browser's begin_checkout (statistics only; null when unreadable).
+      return { ...result, checkoutValue: await checkoutValue(ctx.supabaseAdmin, ctx.profileId, result.orderId) };
     } catch (error) {
       logMethodPaymentFailure('method_checkout', ctx.profileId, error, { method: input.method });
       // A throttled buyer gets TOO_MANY_REQUESTS with its retry hint, which the purchase page shows as such.

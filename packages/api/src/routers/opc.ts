@@ -1,4 +1,4 @@
-import {contentVisibilityFence} from '../services/accountErasure/content';
+import {executionVisibility} from '../services/runtime/libraryVisibility';
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { AgentTurnEvent } from "../shared/agentTurn";
 import { capturePendingInput, captureResolveInput } from "../services/opc/capture";
@@ -112,11 +112,11 @@ export const opcRouter = router({
           throw isOpcRefusal(cause) ? cause : stagingProcedureError(cause, path);
         }
         yield { type: "admitted" as const, executionId: admitted.executionId };
+        const visibility = executionVisibility(ctx.supabaseAdmin, ctx.user.id, admitted.executionId);
         yield* streamOriginalExecution((onProgress) => executeOriginalExecution({
           admin: ctx.supabaseAdmin, user: ctx.userScopedSupabase, actorId: ctx.user.id, budget: ctx.runtimeBudget,
-          authorization: ctx.headers?.get("Authorization"), maintenanceEndpoint,
-        }, admitted.executionId, onProgress), timing, path, undefined, input.textProtocol,
-          contentVisibilityFence(ctx.supabaseAdmin, ctx.user.id, admitted.executionId));
+          authorization: ctx.headers?.get("Authorization"), maintenanceEndpoint, visibility,
+        }, admitted.executionId, onProgress), timing, path, undefined, input.textProtocol, visibility.visible);
       } finally {
         timing?.release();
       }

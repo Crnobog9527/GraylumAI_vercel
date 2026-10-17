@@ -3,7 +3,7 @@ import { reportDocumentInput, reportEditInput, reportFinalizeInput,
   reportFinalizationService } from '../services/report/finalization';
 import {reportRevisionService,revisionApplyInput,revisionDeclineInput,revisionLatestInput,revisionProposeInput,
   revisionReadInput} from '../services/report/revisionSync';
-import {contentVisibilityFence} from '../services/accountErasure/content';
+import {executionVisibility} from '../services/runtime/libraryVisibility';
 import {reportEnabled,reportLocate,reportService} from '../services/report/service';
 import {reportStart} from '../services/report/contract';
 import {readNativeRuntimeView} from '../services/runtime/nativeView';
@@ -68,9 +68,10 @@ const procedure=protectedProcedure.use(async({ctx,next,path})=>{
 });
 
 const executionProcedure=maintenanceProcedure.input(z.object({executionId:z.string().uuid(),textProtocol:z.literal('textDelta-v1').optional()}).strict());
-function executeOriginal({ctx,input}:inferProcedureBuilderResolverOptions<typeof executionProcedure>,onProgress?:(event:RuntimeProgress)=>void){
+function executeOriginal({ctx,input}:inferProcedureBuilderResolverOptions<typeof executionProcedure>,onProgress?:(event:RuntimeProgress)=>void,
+ visibility?:ReturnType<typeof executionVisibility>){
  return executeOriginalExecution({admin:ctx.supabaseAdmin!,user:ctx.userScopedSupabase,actorId:ctx.user.id,budget:ctx.runtimeBudget,
-  authorization:ctx.headers?.get('Authorization'),maintenanceEndpoint:ctx.maintenanceEndpoint},input.executionId,onProgress);
+  authorization:ctx.headers?.get('Authorization'),maintenanceEndpoint:ctx.maintenanceEndpoint,visibility},input.executionId,onProgress);
 }
 export const runtimeRouter=router({
  reportDocument:maintenanceProcedure.input(reportDocumentInput).query(({ctx,input})=>
@@ -158,19 +159,21 @@ export const runtimeRouter=router({
  resumeStream:maintenanceProcedure.input(resumeInput.extend({textProtocol:z.literal('textDelta-v1').optional()})).mutation(async function*({ctx,input}){
   const timing=ctx.runtimeBudget?.timing;
   const {textProtocol,...token}=input;
+  // One fence for the executor and every yield: content erasure, and deleted library sources (LIB-4b).
+  const visibility=executionVisibility(ctx.supabaseAdmin!,ctx.user.id,token.executionId);
   try{yield* streamOriginalExecution(onProgress=>executeOriginalExecution({
    admin:ctx.supabaseAdmin!,user:ctx.userScopedSupabase,actorId:ctx.user.id,budget:ctx.runtimeBudget,
-   authorization:ctx.headers?.get('Authorization'),maintenanceEndpoint:ctx.maintenanceEndpoint,
-  },token.executionId,onProgress,token),timing,'runtime.resumeStream',undefined,textProtocol,
-   contentVisibilityFence(ctx.supabaseAdmin!,ctx.user.id,token.executionId));}
+   authorization:ctx.headers?.get('Authorization'),maintenanceEndpoint:ctx.maintenanceEndpoint,visibility,
+  },token.executionId,onProgress,token),timing,'runtime.resumeStream',undefined,textProtocol,visibility.visible);}
   finally{timing?.release();}
  }),
  execute:executionProcedure.mutation(options=>executeOriginal(options)),
  executeStream:executionProcedure.mutation(async function*(options){
   // The route returns before this stream ends; release this stream's reference.
   const timing=options.ctx.runtimeBudget?.timing;
-  try{yield* streamOriginalExecution(onProgress=>executeOriginal(options,onProgress),timing,'runtime.executeStream',undefined,options.input.textProtocol,
-   contentVisibilityFence(options.ctx.supabaseAdmin!,options.ctx.user.id,options.input.executionId));}
+  const visibility=executionVisibility(options.ctx.supabaseAdmin!,options.ctx.user.id,options.input.executionId);
+  try{yield* streamOriginalExecution(onProgress=>executeOriginal(options,onProgress,visibility),timing,'runtime.executeStream',undefined,
+   options.input.textProtocol,visibility.visible);}
   finally{timing?.release();}
  }),
  view:maintenanceProcedure.input(z.object({sessionId:z.string().uuid()}).strict()).query(async({ctx,input})=>{

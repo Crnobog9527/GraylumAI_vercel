@@ -33,6 +33,7 @@ const PUBLIC_SITE_PATHS = [
 const PUBLIC_SITE_PAGE_PATHS = [
   '/about',
   '/features', // Product feature pages (/features and /features/<name>) linked from the public header and footer.
+  '/blog', // The tutorial blog (/blog and /blog/<article>), linked from the public header as 教程.
   '/zh-tw',
   '/refund',
 ];
