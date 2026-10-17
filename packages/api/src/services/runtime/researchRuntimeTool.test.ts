@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { researchRuntimeTools } from './researchRuntimeTool';
-import { requestIdentity, runSubcall, type SubcallContext } from '../research/runtime/subcall';
+import { requestIdentity, ResearchWaitingCredits, runSubcall, type SubcallContext } from '../research/runtime/subcall';
 import { socialRequest, stableResearchId, type ResearchToolContext } from '../research/runtime/toolContext';
 import type { DiscoveryRecord, FetchClaim, RuntimeOperation, RuntimePlan, RuntimeResearchStore } from '../research/runtime/store';
 import type { ToolEnvelope } from '../research/tools/envelope';
@@ -14,6 +14,7 @@ vi.mock('../research/runtime/subcall', async importOriginal => ({
   ...await importOriginal<typeof import('../research/runtime/subcall')>(), runSubcall: vi.fn(),
 }));
 const subcall = vi.mocked(runSubcall);
+const waiting = () => new ResearchWaitingCredits({ sequence: 2, requestHash: 'a'.repeat(64), phase: 'question' });
 const id = '11111111-1111-4111-8111-111111111111';
 const discoveryId = '22222222-2222-4222-8222-222222222222';
 const refreshId = '33333333-3333-4333-8333-333333333333';
@@ -346,7 +347,7 @@ describe('benchmark fetch cache and refresh', () => {
     expect(f.supplierCalls).not.toHaveBeenCalled();
   });
 
-  it.each(['VENDOR_RATE_LIMITED', 'KEY_MISSING', 'BALANCE_LOW'] as const)(
+  it.each(['VENDOR_RATE_LIMITED', 'KEY_MISSING'] as const)(
     'keeps an unsent %s refresh prepared for a later retry', async stop => {
     const f = fixture();
     f.store.authorization.refreshGrant.mockResolvedValue({ ...account, used: false });
@@ -362,18 +363,48 @@ describe('benchmark fetch cache and refresh', () => {
     expect(f.store.fetchDispatch).toHaveBeenCalledWith(id, refreshId);
   });
 
-  it('retains fetched profile data and the balance stop without trying another account', async () => {
+  it('a balance pause before an account\'s first subcall leaves its attempt unsent and recoverable', async () => {
     const f = fixture();
-    const secondAccount = { ...account, account: 'bob' };
-    f.store.authorization.candidateConfirmation.mockResolvedValue([account, secondAccount]);
+    f.store.authorization.refreshGrant.mockResolvedValue({ ...account, used: false });
+    subcall.mockRejectedValueOnce(waiting());
+    const args = { accounts: [account], source: { kind: 'refresh', refreshId } };
+    await expect(f.execute('benchmark_fetch', args)).rejects.toBeInstanceOf(ResearchWaitingCredits);
+    expect(f.store.fetchDispatch).not.toHaveBeenCalled();
+    expect(f.store.fetchFinish).not.toHaveBeenCalled();
+    expect(f.supplierCalls).not.toHaveBeenCalled();
+    expect(await f.makeExecute()('benchmark_fetch', args)).toMatchObject({ status: 'ok' });
+    expect(f.supplierCalls).toHaveBeenCalledTimes(2);
+  });
+
+  it('a balance pause inside an account keeps its attempt in progress; the resumed answer finishes it without repaying', async () => {
+    const f = fixture();
     const successful = subcall.getMockImplementation()!;
-    subcall.mockImplementationOnce(successful).mockResolvedValueOnce({ sent: false, stop: 'BALANCE_LOW', budget: true });
-    const result = await f.execute('benchmark_fetch', { ...fetchArgs, accounts: [account, secondAccount] });
-    expect(result).toMatchObject({ status: 'partial', reason: 'BALANCE_LOW' });
+    subcall.mockImplementationOnce(successful).mockRejectedValueOnce(waiting());
+    await expect(f.execute('benchmark_fetch', fetchArgs)).rejects.toBeInstanceOf(ResearchWaitingCredits);
+    expect(f.store.fetchDispatch).toHaveBeenCalledTimes(1);
+    // Neither failed nor charged-and-closed: the paid profile stays usable by this attempt.
+    expect(f.store.fetchFinish).not.toHaveBeenCalled();
+    expect(f.supplierCalls).toHaveBeenCalledTimes(1);
+    // After the top-up the same answer takes its own attempt back (SQL: resumed) and reuses the profile it paid for.
+    f.store.fetchClaim.mockResolvedValueOnce({ claimed: true, fetchId: id, attempt: 'first-attempt', resumed: true });
+    const result = await f.makeExecute()('benchmark_fetch', fetchArgs);
+    expect(result).toMatchObject({ status: 'ok' });
     expect(result.items).toHaveLength(1);
-    expect(result.items[0].fields.account).toBe('alice');
-    expect(f.store.fetchClaim).toHaveBeenCalledTimes(1);
-    expect(subcall).toHaveBeenCalledTimes(2);
+    expect(f.supplierCalls).toHaveBeenCalledTimes(2);
+    expect(f.supplierCalls.mock.calls.map(([request]) => request.call.kind)).toEqual(['account_profile', 'account_posts']);
+    expect(subcall.mock.calls[2]![0].newId()).toBe(stableResearchId(id, 'first-attempt', 'account_posts'));
+    expect(f.store.fetchDispatch).toHaveBeenCalledTimes(1);
+    expect(f.store.fetchFinish).toHaveBeenCalledExactlyOnceWith(id, 'first-attempt', 'succeeded', expect.any(Object));
+  });
+
+  it('a resumed attempt whose later subcall fails for another reason is not closed by the replaying answer', async () => {
+    const f = fixture();
+    f.store.fetchClaim.mockResolvedValueOnce({ claimed: true, fetchId: id, attempt: 'first-attempt', resumed: true });
+    const failure = new Error('RUNTIME_RESPONSE_PENDING');
+    subcall.mockRejectedValueOnce(failure);
+    await expect(f.execute('benchmark_fetch', fetchArgs)).rejects.toBe(failure);
+    expect(f.store.fetchDispatch).not.toHaveBeenCalled();
+    expect(f.store.fetchFinish).not.toHaveBeenCalled();
   });
 
   it.each(['claim', 'rate-limit', 'evidence-open'])('keeps the original refresh recoverable on pre-send %s errors', async stage => {
@@ -400,10 +431,10 @@ describe('benchmark fetch cache and refresh', () => {
 });
 
 describe('durable benchmark discovery and free follow-up', () => {
-  it.each(['VENDOR_RATE_LIMITED', 'KEY_MISSING', 'BALANCE_LOW', 'NOT_DISPATCHED'] as const)(
+  it.each(['VENDOR_RATE_LIMITED', 'KEY_MISSING', 'NOT_DISPATCHED'] as const)(
     'preserves discovery stop %s without requesting automatic continuation', async stop => {
       const f = fixture();
-      const budget = stop === 'BALANCE_LOW' || stop === 'VENDOR_RATE_LIMITED';
+      const budget = stop === 'VENDOR_RATE_LIMITED';
       subcall.mockResolvedValueOnce({ sent: false, stop, budget });
       expect(await f.execute('benchmark_discover', discoveryArgs)).toMatchObject({
         status: budget ? 'budget_exhausted' : 'unavailable', reason: stop, continue: false, discoveryId,
@@ -413,16 +444,24 @@ describe('durable benchmark discovery and free follow-up', () => {
       expect(f.discoveries.get(discoveryId)?.state).toBe('running');
     });
 
-  it('keeps already discovered accounts when balance runs out, without automatic continuation', async () => {
+  it('pauses discovery when the balance runs out and resumes at the same step without resending earlier ones', async () => {
     const f = fixture();
     const successful = subcall.getMockImplementation()!;
-    subcall.mockImplementation(async (context, request) => context.newId() === stableResearchId(discoveryId, '4')
-      ? { sent: false, stop: 'BALANCE_LOW', budget: true } : successful(context, request));
-    const result = await f.execute('benchmark_discover', discoveryArgs);
-    expect(result).toMatchObject({ status: 'partial', reason: 'BALANCE_LOW', continue: false });
-    expect(result.items).toHaveLength(1);
-    expect(subcall).toHaveBeenCalledTimes(5);
+    const paused = stableResearchId(discoveryId, '4');
+    subcall.mockImplementation(async (context, request) => {
+      if (context.newId() === paused) { subcall.mockImplementation(successful); throw waiting(); }
+      return successful(context, request);
+    });
+    await expect(f.execute('benchmark_discover', discoveryArgs)).rejects.toBeInstanceOf(ResearchWaitingCredits);
+    expect(f.supplierCalls).toHaveBeenCalledTimes(4);
+    expect(f.store.discoverySave).not.toHaveBeenCalled();
     expect(f.store.createCard).not.toHaveBeenCalled();
+    const before = subcall.mock.calls.length;
+    await f.makeExecute()('benchmark_discover', discoveryArgs);
+    const resumed = subcall.mock.calls.slice(before).map(([context]) => context.newId());
+    expect(resumed[0]).toBe(paused);
+    expect(resumed).not.toContain(stableResearchId(discoveryId, '0'));
+    expect(resumed).not.toContain(stableResearchId(discoveryId, '3'));
   });
 
   it('resumes across rounds from stable operation IDs without resending completed searches', async () => {

@@ -134,5 +134,29 @@ export async function researchRuntimeRegressionCases({db,report,createFixture}) 
       assert.deepEqual((await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null)).evidence,evidence);
     }
   });
+  await check('BILL-PAYG balance pause: only the answer holding an in-progress attempt continues it',async()=>{
+    const f=await fixture(db,createFixture),e2=await answer(db,f);
+    const fetch=await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null);
+    assert.equal(fetch.resumed,undefined);
+    // Still prepared (paused before its first subcall): an ordinary claim rotates it, as before.
+    const rotated=await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null);
+    assert.equal(rotated.resumed,undefined);assert.notEqual(rotated.attempt,fetch.attempt);
+    assert.equal(await rpc(db,'research_account_fetch_dispatch',f.actor,fetch.fetchId,rotated.attempt),true);
+    assert.deepEqual(await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null),
+      {claimed:true,fetchId:fetch.fetchId,attempt:rotated.attempt,resumed:true});
+    // Another answer never takes it over, and the resumed attempt cannot be marked sent a second time.
+    assert.equal((await rpc(db,'research_account_fetch_claim',f.actor,f.session,e2,'tiktok','alpha',null)).claimed,false);
+    assert.equal(await rpc(db,'research_account_fetch_dispatch',f.actor,fetch.fetchId,rotated.attempt),false);
+    await rpc(db,'research_account_fetch_finish',f.actor,fetch.fetchId,rotated.attempt,'succeeded',accountEvidence());
+    const done=await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null);
+    assert.deepEqual({claimed:done.claimed,state:done.state},{claimed:false,state:'succeeded'});
+    // A refresh attempt resumes only with its own grant; the ordinary path does not take it over.
+    const grant=await rpc(db,'research_refresh_create',f.actor,f.session,'tiktok','alpha');
+    const refresh=await rpc(db,'research_account_fetch_claim',f.actor,f.session,e2,'tiktok','alpha',grant);
+    await rpc(db,'research_account_fetch_dispatch',f.actor,fetch.fetchId,refresh.attempt);
+    assert.equal((await rpc(db,'research_account_fetch_claim',f.actor,f.session,e2,'tiktok','alpha',null)).claimed,false);
+    assert.deepEqual(await rpc(db,'research_account_fetch_claim',f.actor,f.session,e2,'tiktok','alpha',grant),
+      {claimed:true,fetchId:fetch.fetchId,attempt:refresh.attempt,resumed:true});
+  });
   assert.deepEqual(failures,[],'RT-3b review regressions');
 }

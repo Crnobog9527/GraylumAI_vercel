@@ -62,12 +62,20 @@ export interface SubcallContext {
 }
 
 /** Why nothing (or nothing usable) came back, as the tool envelope reports it. */
-export type SubcallStop = 'KEY_MISSING' | 'KEY_UNAVAILABLE' | 'ROUTE_NOT_FROZEN' | 'VENDOR_RATE_LIMITED' | 'BALANCE_LOW' | 'CALL_REPLAYED'
+export type SubcallStop = 'KEY_MISSING' | 'KEY_UNAVAILABLE' | 'ROUTE_NOT_FROZEN' | 'VENDOR_RATE_LIMITED' | 'CALL_REPLAYED'
   | 'NOT_DISPATCHED' | 'ACCOUNT_CLOSED' | 'CONTENT_DELETED' | `CLAIM_${string}`;
 
 export type SubcallOutcome =
   | { sent: true; result: ResearchCallResult; operationId: string; callId: string }
   | { sent: false; stop: SubcallStop; budget: boolean };
+
+/**
+ * The balance cannot start this subcall (BILL-PAYG, plan §2.1 2026-10-01): nothing was held or sent. The turn pauses at
+ * this slot (payg_wait) and the same request claims it again after a top-up; it is never skipped or reported as a failure.
+ */
+export class ResearchWaitingCredits extends Error {
+  constructor(readonly point: { sequence: number; requestHash: string; phase: string }) { super('RUNTIME_WAITING_CREDITS'); }
+}
 
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
 
@@ -112,15 +120,16 @@ export async function runSubcall(context: SubcallContext, request: SupplierReque
 
   const identity = requestIdentity(request);
   let claim;
+  const sequence = await context.nextSequence();
   try {
-    claim = await context.billing.claim(await context.nextSequence(), toolClaimPayload(policy, {
+    claim = await context.billing.claim(sequence, toolClaimPayload(policy, {
       phase: context.phase, requestHash: identity, ...(context.runtimeEpoch !== undefined ? { runtimeEpoch: context.runtimeEpoch } : {}),
     }));
   } catch (error) {
     if (error instanceof BillingClaimRejection) return { sent: false, stop: `CLAIM_${error.reason}`, budget: false };
     throw error;
   }
-  if (claim.state === 'waiting_credits') return { sent: false, stop: 'BALANCE_LOW', budget: true };
+  if (claim.state === 'waiting_credits') throw new ResearchWaitingCredits({ sequence, requestHash: identity, phase: context.phase });
   if (claim.state === 'replayed') return { sent: false, stop: 'CALL_REPLAYED', budget: false };
 
   const operationId = context.newId();

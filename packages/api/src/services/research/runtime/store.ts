@@ -25,7 +25,8 @@ export interface DiscoveryRecord {
   cursor: Record<string, unknown>; state: 'running' | 'completed';
 }
 export type FetchState = 'prepared' | 'in_progress' | 'succeeded' | 'unknown' | 'failed' | 'failed_charged';
-export type FetchClaim = { claimed: true; fetchId: string; attempt: string }
+/** resumed: this answer's own attempt, left in progress by a balance pause (BILL-PAYG); its finished subcalls are reused. */
+export type FetchClaim = { claimed: true; fetchId: string; attempt: string; resumed?: boolean }
   | { claimed: false; fetchId: string; state: FetchState; evidence: Record<string, unknown> | null };
 export interface RuntimePlan {
   executionId: string; discoveryId: string | null; budgetUnits: number; cancelled: boolean;

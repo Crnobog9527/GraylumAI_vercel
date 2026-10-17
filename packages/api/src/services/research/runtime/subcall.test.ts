@@ -4,7 +4,7 @@ import { BillingClaimRejection } from '../../bill2/claimFailure';
 import type { ToolCallPolicy } from '../../bill2/toolBilling';
 import type { ToolSubcallBilling } from '../../bill2/toolSubcall';
 import type { ResearchCallResult } from '../vendors/types';
-import { requestIdentity, runSubcall, type EvidencePort, type SubcallContext, type SupplierRequest, type VendorCalls } from './subcall';
+import { requestIdentity, ResearchWaitingCredits, runSubcall, type EvidencePort, type SubcallContext, type SupplierRequest, type VendorCalls } from './subcall';
 
 const request: SupplierRequest = { vendor: 'parallel', route: 'parallel:search:fast', query: 'research', mode: 'fast' };
 const policy: ToolCallPolicy = {
@@ -125,12 +125,25 @@ describe('research subcall safety and accounting', () => {
     expect(f.billing.claim).not.toHaveBeenCalled();
   });
 
-  it.each(['waiting_credits', 'replayed'] as const)('never resends a %s claim', async state => {
+  it('never resends a replayed claim', async () => {
     const f = fixture();
-    f.billing.claim.mockResolvedValue(state === 'replayed' ? { state, callId: 'call-1' } : { state });
-    expect(await runSubcall(f.context, request)).toEqual({ sent: false,
-      stop: state === 'replayed' ? 'CALL_REPLAYED' : 'BALANCE_LOW', budget: state === 'waiting_credits' });
+    f.billing.claim.mockResolvedValue({ state: 'replayed', callId: 'call-1' });
+    expect(await runSubcall(f.context, request)).toEqual({ sent: false, stop: 'CALL_REPLAYED', budget: false });
     expect(f.evidence.open).not.toHaveBeenCalled();
+    expect(f.billing.dispatch).not.toHaveBeenCalled();
+    expect(f.vendors.parallel).not.toHaveBeenCalled();
+  });
+
+  it('pauses at the slot when the balance cannot start the subcall, instead of reporting a stop (BILL-PAYG)', async () => {
+    const f = fixture();
+    f.billing.claim.mockResolvedValue({ state: 'waiting_credits' });
+    const paused = await runSubcall(f.context, request).catch(error => error);
+    expect(paused).toBeInstanceOf(ResearchWaitingCredits);
+    // The exact slot, request and phase the run resumes with (payg_wait → bill2_claim checkpoint check).
+    expect(paused.point).toEqual({ sequence: 1, requestHash: requestIdentity(request), phase: 'question' });
+    expect(f.billing.claim).toHaveBeenCalledWith(1, expect.objectContaining({ requestHash: requestIdentity(request), phase: 'question' }));
+    expect(f.evidence.open).not.toHaveBeenCalled();
+    expect(f.billing.record).not.toHaveBeenCalled();
     expect(f.billing.dispatch).not.toHaveBeenCalled();
     expect(f.vendors.parallel).not.toHaveBeenCalled();
   });

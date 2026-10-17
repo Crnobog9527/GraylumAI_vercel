@@ -28,7 +28,7 @@ it.each(['accountClosed', 'contentDeleted'] as const)('a subcall receipt reporti
   const onClosed = vi.fn();
   const built = researchExecution({ research, tools: ['web_search'], executionId: id(1), actorId: id(2), database: { rpc },
     execution: { sessionId: id(3), runId: id(4), epoch: 1, live: true, billing: { callPolicy: [] } } as never,
-    emit: event => events.push(event), onClosed, canSend: () => true })!;
+    emit: event => events.push(event), onClosed, onWaitingCredits: () => {}, canSend: () => true })!;
   await expect(built.tools[0]!.execute({ query: 'coffee', mode: 'fast' }, 'call-1')).rejects.toThrow('RUNTIME_ACCOUNT_CLOSED');
   expect(onClosed).toHaveBeenCalledOnce();
   // Only the event from before the confirmed erasure; the finishing event with the query is never sent.
