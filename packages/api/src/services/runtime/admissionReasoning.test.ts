@@ -9,6 +9,7 @@ import {configuredReasoning} from '../__tests__/fixtures/runtimeReasoning';
 import {testPrimaryModel} from '../__tests__/fixtures/runtimeGates';
 import {packageHash,sha256,type SkillSource} from '../skills/loader';
 import {runtimeContext} from './runtimeContext';
+import {sourceToolBytes} from './sourceRuntimeTool';
 import {openRouterRequestBody,STREAMING_FORMATS} from './providerRequest';
 import {frozenReasoningFields} from './reasoningPolicy';
 import {openRouterBound} from '../bill2/openRouterPolicy';
@@ -28,7 +29,7 @@ function fixture(budgetConfig?:unknown){
  testPrimaryModel.id=first;
  const models=[{id:first,model_id:'synthetic/first'}, {id:second,model_id:'synthetic/second'}, {id:organizer,model_id:'synthetic/organizer'}].map(m=>({...m,provider:'openrouter',is_active:'true',max_tokens:8192,input_limit:32000,config:configuredReasoning(m.model_id)}));
  models[1]!.config=configuredReasoning(models[1]!.model_id,{mode:'budget',maxTokens:2048});
- const settings=[{key:'v3_summary_model_id',value:organizer},{key:'v3_summary_max_tokens',value:'4096'}];
+ const settings:{key:string;value:unknown}[]=[{key:'v3_summary_model_id',value:organizer},{key:'v3_summary_max_tokens',value:'4096'}];
  const frozen=new Map<string,any>();let reads=0;
  const rpc=vi.fn(async(name:string,args:any)=>{
   if(name==='runtime_session_context')return {data:{scope:{kind:'positioning_draft',draftId:sessionId},dialogueModelId:first,dialogueModel:models[0]!.model_id},error:null};
@@ -346,6 +347,35 @@ it('CHAT-NATIVE-OUTPUT: a chosen Skill without an organizer freezes the evidence
  const request={context:{...context,textStream:undefined},policy,phase:'skill',primaryDialogue:true};
  expect(JSON.parse(openRouterRequestBody(sdk(frozenReasoningFields(context.reasoning)),request)).reasoning_effort).toBe('none');
  expect(()=>openRouterRequestBody(sdk({}),request)).toThrow('RUNTIME_PROVIDER_BINDING_DENIED');
+});
+
+// CHAT-AUTO-CONTEXT A2: real free chat may search the user's library when both server switches are on.
+it('real free chat freezes library retrieval, read_source and extra calls only with both switches on',async()=>{
+ const freeChat=(f:ReturnType<typeof fixture>)=>{
+  // Free chat is an ordinary selection without an OPC turn token (the fixture default is a mentor turn).
+  const free:Record<string,unknown>={...f.policy};
+  delete free.opcTurnToken;delete free.mentorStream;
+  return runtimeAdmissionService(f.user,f.admin,free as typeof f.policy);
+ };
+ for(const rows of [[],[{key:'library_agent_read_enabled',value:true}],[{key:'chat_library_retrieval_enabled',value:true}]]){
+  const f=fixture();f.settings.push(...rows);
+  const admitted=await freeChat(f).prepare({...f.input,organizeAfter:false});
+  expect(runtimeContext.parse(admitted.context)).not.toHaveProperty('libraryRetrieval');
+  expect(admitted.context.tools).toEqual([]);expect(admitted.context.maxTurns).toBe(2);
+ }
+ const on=fixture();
+ on.settings.push({key:'library_agent_read_enabled',value:true},{key:'chat_library_retrieval_enabled',value:'true'});
+ const admitted=await freeChat(on).prepare({...on.input,organizeAfter:false});
+ const context=runtimeContext.parse(admitted.context);
+ expect(context).toMatchObject({libraryRetrieval:true,tools:['read_source'],providerRequestFormat:'serial-tools-v6-reasoning'});
+ // Six model calls; this fixture's 32 KB input limit leaves room for one 16 KB read result, so one tool call (the slot
+ // arithmetic itself is covered in libraryAdmission.test.ts).
+ expect(context.maxTurns).toBe(6);expect(context.maxToolCalls).toBe(1);
+ // The tool description the model sees carries the search usage.
+ expect(sourceToolBytes(['read_source'],false,false,true)).toBeGreaterThan(sourceToolBytes(['read_source'],false));
+ // A mentor turn (the fixture default) never freezes it, whatever the switches say.
+ const mentor=fixture();mentor.settings.push({key:'library_agent_read_enabled',value:true},{key:'chat_library_retrieval_enabled',value:true});
+ expect(runtimeContext.parse((await mentor.service.prepare({...mentor.input,organizeAfter:false})).context)).not.toHaveProperty('libraryRetrieval');
 });
 
 // UI-MODEL: the request's modelId is never a fallback for the administrator's primary model.

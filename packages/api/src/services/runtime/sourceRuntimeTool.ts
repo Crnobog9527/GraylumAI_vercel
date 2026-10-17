@@ -3,18 +3,18 @@ import {z} from 'zod';
 import type {RuntimeTool} from './runner';
 import type {ToolRpc} from './skillFileExecution';
 import type {runtimeContext} from './runtimeContext';
-import {LIBRARY_READ_GUIDE,libraryQuery,readLibrary} from './libraryReadTool';
+import {LIBRARY_READ_GUIDE,LIBRARY_SEARCH_GUIDE,libraryQuery,readLibrary} from './libraryReadTool';
 import {WORKSPACE_STRATEGY_GUIDE} from './primaryInstructions';
 /** Fixed tool descriptions; admission sizes them with the executor's own formula. */
-function sourceToolDescription(name: string, workspaceContext?: boolean, library?: boolean): string {
+function sourceToolDescription(name: string, workspaceContext?: boolean, library?: boolean, retrieval?: boolean): string {
  const base=name==='search'?'Search current sources through the explicitly enabled local search adapter.':
   workspaceContext?'Read owned business context only when relevant. Omit query to list positioning/account/topic metadata; '+
    'pass an exact returned id to read that source. Read-only; no internet access.':'Read the selected source only.';
  // LIB-4: admission sizes the same text, so pass `library` there when the execution freezes references (4b).
- return name==='read_source'&&library?base+LIBRARY_READ_GUIDE:base;
+ return name==='read_source'&&(library||retrieval)?base+LIBRARY_READ_GUIDE+(retrieval?LIBRARY_SEARCH_GUIDE:''):base;
 }
-export function sourceToolBytes(names: string[], workspaceContext?: boolean, library?: boolean): number {
- return Buffer.byteLength(JSON.stringify(names.map(name=>({name,description:sourceToolDescription(name,workspaceContext,library)}))));
+export function sourceToolBytes(names: string[], workspaceContext?: boolean, library?: boolean, retrieval?: boolean): number {
+ return Buffer.byteLength(JSON.stringify(names.map(name=>({name,description:sourceToolDescription(name,workspaceContext,library,retrieval)}))));
 }
 export function sourceRuntimeTool(options: {
  name: string; context: z.infer<typeof runtimeContext>; args: {p_execution_id: string};
@@ -22,7 +22,7 @@ export function sourceRuntimeTool(options: {
  exchange: (request: string, phase: string) => Promise<{usage?: {toolResult?: unknown}}>;
 }): RuntimeTool {
  const {name,context,args,ownerRpc,budget,execution,exchange}=options;
- return {name,description:sourceToolDescription(name,context.workspaceContext,Boolean(context.libraryReferences?.length)),
+ return {name,description:sourceToolDescription(name,context.workspaceContext,Boolean(context.libraryReferences?.length),context.libraryRetrieval===true),
     execute:async(arguments_,callId)=>{
      budget.assertCanStart();
      const toolArgs={...args,p_call_id:callId,p_name:name,p_arguments:arguments_};

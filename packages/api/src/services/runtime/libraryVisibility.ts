@@ -4,7 +4,7 @@ import {contentVisibilityFence} from '../accountErasure/content';
 import {StagingAccessError,stagingProcedureError,stagingRpcFailure} from './stagingErrors';
 
 /** The frozen context fields the fence needs; the executor reports them before it can emit anything. */
-export type ObservedContext={libraryReferences?:unknown[]};
+export type ObservedContext={libraryReferences?:unknown[];libraryRetrieval?:boolean};
 export type ExecutionVisibility={visible:()=>Promise<void>;observe:(context:ObservedContext)=>void};
 
 /**
@@ -20,7 +20,7 @@ export function executionVisibility(database:SupabaseClient,actorId:string,execu
  const content=contentVisibilityFence(database,actorId,executionId);
  let referenced=false;
  return {
-  observe(context){if(context.libraryReferences?.length)referenced=true;},
+  observe(context){if(context.libraryReferences?.length||context.libraryRetrieval)referenced=true;},
   async visible(){
    await content();
    if(!referenced)return;

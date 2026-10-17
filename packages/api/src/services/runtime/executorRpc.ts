@@ -23,13 +23,14 @@ export type RuntimeExecutorOptions={budget?:RuntimeBudget;database:SessionRpc;ac
  resumePricing?:(policies:FrozenRun['callPolicy'])=>Promise<void>;
  callGate:RuntimeCallGate;endpoint?:string;adapter?:BillingTransport;activateSkill?:(candidate:MatchCandidate)=>Promise<string>;
  /** LIB-4b: told the frozen context of an execution about to run, before any progress (libraryVisibility.ts). */
- onContext?:(context:{libraryReferences?:unknown[]})=>void};
+ onContext?:(context:{libraryReferences?:unknown[];libraryRetrieval?:boolean})=>void};
 /** Report a frozen context to the host's visibility fence as soon as the execution is read, before any recovery
  * branch can emit progress. A completed execution is not reported: its answer predates any later deletion (D7). */
 export function observeContext(options:RuntimeExecutorOptions,execution:{state:string;context:unknown}){
  if(execution.state==='completed')return;
- const references=(execution.context as {libraryReferences?:unknown}|null)?.libraryReferences;
- options.onContext?.({libraryReferences:Array.isArray(references)?references:undefined});
+ const frozen=execution.context as {libraryReferences?:unknown;libraryRetrieval?:unknown}|null;
+ const references=frozen?.libraryReferences;
+ options.onContext?.({libraryReferences:Array.isArray(references)?references:undefined,libraryRetrieval:frozen?.libraryRetrieval===true});
 }
 export function executorRpc(options:{database:SessionRpc;actor:()=>Promise<string>}) {
  return async function rpc<T>(name:string,args:Record<string,unknown>,database=options.database):Promise<T>{

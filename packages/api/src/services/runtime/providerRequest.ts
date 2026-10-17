@@ -44,7 +44,7 @@ export const AGENT_TURN_REQUEST_FORMAT='agent-turn-v5-stream';
 type FrozenCallPolicy=z.infer<typeof frozenCallPolicy>;
 /** Only the frozen context fields that decide the provider bytes. */
 export type RequestContext={providerRequestFormat?:ProviderRequestFormat;textStream?:string;tools:readonly string[];workspaceContext?:boolean;
- libraryReferences?:readonly unknown[];
+ libraryReferences?:readonly unknown[];libraryRetrieval?:boolean;
  promptCache?:PromptCachePolicy;network?:string;reasoning?:ReasoningPolicy;attachedOrganizer?:{reasoning?:ReasoningPolicy}};
 
 /** Fail closed for reasoning attached to an older, unmarked request format. */
@@ -72,7 +72,7 @@ export function openRouterRequestBody(request:string,options:{context:RequestCon
  // Agent turns may use only the interactive tools their context lists; every
  // older format may use only the owned-source read of a workspace context
  // or of frozen library references (LIB-4b).
- const ownedRead=Boolean(context.workspaceContext||context.libraryReferences?.length);
+ const ownedRead=Boolean(context.workspaceContext||context.libraryReferences?.length||context.libraryRetrieval);
  const toolsDenied=format===AGENT_TURN_REQUEST_FORMAT
   ?context.tools.some(name=>!AGENT_TOOL_NAMES.has(name))||Boolean(context.workspaceContext)||
    requested.some(tool=>tool.type!=='function'||!context.tools.includes(String(tool.function?.name)))
