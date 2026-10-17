@@ -45,7 +45,9 @@ BEGIN
   result:=library_word_publish(a,did,actual,text_actual,segments);
  ELSE
   -- A Word file that is only images: an empty text object and no segments, checked like the original publisher.
+  -- Accepted only while recognition is on; otherwise it would become a ready document with nothing to read.
   PERFORM library_actor(a);
+  IF NOT library_recognition_enabled() THEN RAISE EXCEPTION 'LIBRARY_NO_TEXT'; END IF;
   SELECT * INTO d FROM library_documents WHERE id=did AND actor_id=a FOR UPDATE;
   IF d.id IS NULL OR d.deleted_at IS NOT NULL OR d.status NOT IN ('uploading','ready') THEN RAISE EXCEPTION 'LIBRARY_NOT_FOUND'; END IF;
   IF d.format IS DISTINCT FROM 'docx' THEN RAISE EXCEPTION 'LIBRARY_TYPE'; END IF;

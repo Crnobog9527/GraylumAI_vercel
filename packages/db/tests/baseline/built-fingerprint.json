@@ -3084,7 +3084,7 @@
   "fn:library_upload_begin(uuid,uuid,text,text,text,bigint)": "ebd27a6fffa6",
   "fn:library_usage(uuid)": "d64907cc1096",
   "fn:library_word_publish(uuid,uuid,bigint,bigint,jsonb)": "7c1870bb9a2f",
-  "fn:library_word_publish(uuid,uuid,bigint,bigint,jsonb,jsonb)": "d2b9b09c1430",
+  "fn:library_word_publish(uuid,uuid,bigint,bigint,jsonb,jsonb)": "ba05e5bf5081",
   "fn:library_word_text_begin(uuid,uuid,bigint)": "57c05fa59bec",
   "fn:log_retention_cleanup(integer)": "607bf290e33f",
   "fn:model_identity_guard_config()": "028ec3e408a0",
