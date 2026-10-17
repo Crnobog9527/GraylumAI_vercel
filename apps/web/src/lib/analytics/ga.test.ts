@@ -141,7 +141,8 @@ describe('GA in the browser', () => {
       if (args[0] === 'get') (args[3] as (value: unknown) => void)(answers[args[2] as string]);
       else gtag(...args);
     };
-    expect(await readGaCheckoutIds(ID)).toEqual({ clientId: '123456789.1700000000', sessionId: '1700000000' });
+    expect(await readGaCheckoutIds(ID)).toEqual({ clientId: '123456789.1700000000', sessionId: '1700000000',
+      capturedAt: expect.stringMatching(/^\d{4}-\d\d-\d\dT/) });
     answers.client_id = 'someone@example.com';
     expect(await readGaCheckoutIds(ID)).toBeNull();
     answers.client_id = '1.2';

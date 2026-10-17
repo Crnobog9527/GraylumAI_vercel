@@ -35,13 +35,24 @@ export function gaServerConfig(env: Record<string, string | undefined> = process
   return MEASUREMENT_ID.test(measurementId) && apiSecret.length >= 8 ? { measurementId, apiSecret } : null;
 }
 
-/** Checkout: keep the ids for this buyer's own unpaid order. Never fails the checkout. */
-export async function storeGaCheckoutIds(db: SupabaseClient, userId: string, orderId: string, raw: unknown) {
+/** The moment the ids' consent counts from: the browser's capture time when it is plausible (within 10 minutes of the
+ * server's own stamp) and earlier, else the server's request start. Never later than the server's stamp. */
+export function effectiveRequestTime(raw: unknown, requestedAt: Date): Date {
+  const captured = raw && typeof raw === 'object' ? Date.parse(String((raw as Record<string, unknown>).capturedAt ?? '')) : NaN;
+  const skew = Math.abs(requestedAt.getTime() - captured);
+  return Number.isFinite(captured) && skew <= 10 * 60_000 && captured < requestedAt.getTime() ? new Date(captured) : requestedAt;
+}
+
+/** Checkout: keep the ids for this buyer's own unpaid order. `requestedAt` is the server's stamp from before the
+ * provider was called: ids from a request that began before the latest consent withdrawal are refused.
+ * Never fails the checkout. */
+export async function storeGaCheckoutIds(db: SupabaseClient, userId: string, orderId: string, raw: unknown,
+  requestedAt: Date) {
   const ids = parseGaCheckoutIds(raw);
   if (!ids) return false;
   try {
     const stored = await db.rpc('analytics_store_checkout_ids', { p_user: userId, p_order: orderId,
-      p_client: ids.clientId, p_session: ids.sessionId });
+      p_client: ids.clientId, p_session: ids.sessionId, p_requested_at: effectiveRequestTime(raw, requestedAt).toISOString() });
     if (stored.error) throw stored.error;
     return stored.data === true;
   } catch (error) {
@@ -119,7 +130,7 @@ export async function checkoutValue(db: SupabaseClient, userId: string, orderId:
   }
 }
 
-/** Daily expiry of ids that were never taken (72 hours). Best effort. */
+/** Daily clean-up of ids that were never taken (well past their 45-minute window). Best effort. */
 export async function pruneGaCheckoutIds(db: SupabaseClient) {
   try {
     const result = await db.rpc('analytics_prune_checkout_ids');

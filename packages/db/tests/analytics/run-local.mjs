@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // Local-only ANALYTICS 0286 verification: GA checkout ids stored only in the right shape for the buyer's own unpaid
-// order, taken at most once (also under concurrency), withheld after a consent withdrawal, expired after 72 hours,
+// order, taken at most once (also under concurrency), withheld after a consent withdrawal, expired after the 45-minute window, refused when the request began before a withdrawal,
 // grants, and account-erasure cleanup.
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -22,7 +22,7 @@ try {
   assert.deepEqual(await v(catalogSql), before);
   ok('reapplication after the full chain preserves the complete catalog');
 
-  const fns = ['analytics_store_checkout_ids(uuid,uuid,text,text)', 'analytics_take_checkout_ids(uuid)',
+  const fns = ['analytics_store_checkout_ids(uuid,uuid,text,text,timestamp with time zone)', 'analytics_take_checkout_ids(uuid)',
     'analytics_withdraw_consent(uuid)', 'analytics_prune_checkout_ids()'];
   for (const f of fns) {
     for (const role of ['anon', 'authenticated']) {
@@ -66,8 +66,10 @@ try {
     [id, user, randomUUID(), fulfilled ? 'completed' : 'pending', fulfilled ? 'paid' : 'unpaid', fulfilled ? new Date() : null]);
     return id;
   });
-  const store = (u, o, client = '123456789.1700000000', session = '1700000000') =>
-    v('SELECT analytics_store_checkout_ids($1,$2,$3,$4) v', [u, o, client, session]);
+  const store = (u, o, client = '123456789.1700000000', session = '1700000000', requestedAt = null) =>
+    // Database time (the container clock may differ from this machine's); null = the request starts now.
+    v('SELECT analytics_store_checkout_ids($1,$2,$3,$4,coalesce($5::timestamptz,clock_timestamp())) v',
+      [u, o, client, session, requestedAt]);
   const take = (o, client = c) => v('SELECT analytics_take_checkout_ids($1) v', [o], client);
   const rows = u => v('SELECT count(*)::int v FROM analytics_checkout_ids WHERE user_id=$1', [u]);
 
@@ -117,6 +119,24 @@ try {
   assert.deepEqual(await take(b), { clientId: '123456789.1700000000', sessionId: '1700000000' });
   ok('withdrawal clears pending ids; ids older than the last withdrawal are withheld; renewed consent reports again');
 
+  // A request that began before the withdrawal cannot bring the ids back, whenever it finishes (provider call in flight).
+  const late = await order(buyer);
+  const startedAt = await v('SELECT clock_timestamp() v');
+  await v('SELECT analytics_withdraw_consent($1) v', [buyer]);
+  assert.equal(await store(buyer, late, '123456789.1700000000', '1700000000', startedAt), false, 'stale request refused');
+  assert.equal(await rows(buyer), 0);
+  assert.equal(await store(buyer, late), true, 'a request started after the withdrawal (renewed consent) is accepted');
+  assert.ok(await take(late));
+  ok('a checkout request that began before a withdrawal cannot store ids; one begun after (renewed consent) can');
+
+  // The ids are only good while the Stripe checkout can be paid.
+  const slow = await order(buyer);
+  await store(buyer, slow);
+  await c.query("UPDATE analytics_checkout_ids SET created_at=clock_timestamp()-interval '46 minutes' WHERE order_id=$1", [slow]);
+  assert.equal(await take(slow), null, 'older than the payable window: not reported');
+  assert.equal(await rows(buyer), 0, 'and cleared');
+  ok('ids older than 45 minutes are never reported');
+
   // Withdrawal racing the payment: either not reported or reported once, and nothing is left.
   for (let i = 0; i < 5; i++) {
     const raceOrder = await order(other);
@@ -133,11 +153,11 @@ try {
 
   const stale = await order(other), fresh = await order(other);
   await store(other, stale); await store(other, fresh);
-  await c.query("UPDATE analytics_checkout_ids SET created_at=clock_timestamp()-interval '73 hours' WHERE order_id=$1", [stale]);
+  await c.query("UPDATE analytics_checkout_ids SET created_at=clock_timestamp()-interval '2 hours' WHERE order_id=$1", [stale]);
   assert.equal(await v('SELECT analytics_prune_checkout_ids() v'), 1);
   assert.equal(await take(stale), null);
   assert.ok(await take(fresh));
-  ok('daily prune deletes ids older than 72 hours and keeps newer ones');
+  ok('daily clean-up deletes ids long past their window and keeps recent ones');
 
   // Account erasure: a closing account stores and reports nothing; both tables are pruned with the account.
   const leaving = await profile();

@@ -7,15 +7,18 @@
 --     reported at most once whatever the replay or concurrency.
 --   * Why tables instead of two payment_orders columns (AGENTS §5): payment_orders carries the finance and
 --     erasure guard triggers (an update on a closed account re-projects its metadata), and column grants are
---     per column there. A separate service_role-only table makes take-and-clear, the 72-hour expiry, consent
+--     per column there. A separate service_role-only table makes take-and-clear, the short expiry, consent
 --     withdrawal and account erasure plain deletes, with no change to any finance column or guard.
 --   * analytics_consent_withdrawals records when an account last withdrew statistics consent; ids written
---     before that moment are never reported, even if the browser's clean-up request was lost.
+--     before that moment are never reported, and a checkout request that STARTED before that moment cannot store
+--     ids afterwards (the server stamps the request start before the provider is called).
+--   * Ids live only as long as the Stripe checkout can be paid (45 minutes, the session lasts 31): older ones are
+--     never reported, so a lost withdrawal notice can only matter inside that short window.
 --   * Only GA formats are stored: client_id "digits.digits" (each ≤ 20), session_id ≤ 20 digits.
 --   * Account erasure deletes both tables' rows (business leaves, in-place patch pattern of 0269/0270).
 -- Tables and functions are service_role-only through functions; anon/authenticated have nothing.
 -- Recovery: forward only. Rows are disposable statistics hand-offs; to stop reporting, revoke EXECUTE on
--- analytics_store_checkout_ids from service_role (take keeps clearing what is left; prune expires the rest).
+-- analytics_store_checkout_ids from service_role (take keeps clearing what is left; prune deletes the rest).
 BEGIN;
 SET LOCAL lock_timeout='5s';
 
@@ -41,12 +44,17 @@ REVOKE ALL ON TABLE public.analytics_checkout_ids, public.analytics_consent_with
 
 -- Checkout: keep the ids for this user's own unpaid order. Malformed ids, someone else's order, a fulfilled
 -- order or a closing account store nothing (false). A repeated checkout of the same order replaces them.
-CREATE OR REPLACE FUNCTION public.analytics_store_checkout_ids(p_user uuid,p_order uuid,p_client text,p_session text)
+CREATE OR REPLACE FUNCTION public.analytics_store_checkout_ids(p_user uuid,p_order uuid,p_client text,p_session text,
+ p_requested_at timestamptz)
 RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 BEGIN
- IF p_user IS NULL OR p_order IS NULL OR p_client IS NULL OR p_session IS NULL
+ IF p_user IS NULL OR p_order IS NULL OR p_client IS NULL OR p_session IS NULL OR p_requested_at IS NULL
+  OR p_requested_at>clock_timestamp()+interval '1 minute'
   OR p_client !~ '^[0-9]{1,20}\.[0-9]{1,20}$' OR p_session !~ '^[0-9]{1,20}$' THEN RETURN false; END IF;
  IF EXISTS(SELECT 1 FROM account_erasure_requests WHERE profile_id=p_user) THEN RETURN false; END IF;
+ -- A request that began before the latest withdrawal must not bring the ids back.
+ IF EXISTS(SELECT 1 FROM analytics_consent_withdrawals w WHERE w.user_id=p_user AND w.withdrawn_at>=p_requested_at)
+  THEN RETURN false; END IF;
  INSERT INTO analytics_checkout_ids(order_id,user_id,client_id,session_id)
   SELECT o.id,o.user_id,p_client,p_session FROM payment_orders o
   WHERE o.id=p_order AND o.user_id=p_user AND o.fulfilled_at IS NULL
@@ -57,7 +65,8 @@ BEGIN
 END $$;
 
 -- Fulfilment: take the ids out (always cleared) and return them only when they were written after the
--- account's last withdrawal and the account is not closing. At most one caller ever gets them.
+-- account's last withdrawal, within the checkout's payable window (45 minutes) and the account is not closing.
+-- At most one caller ever gets them.
 CREATE OR REPLACE FUNCTION public.analytics_take_checkout_ids(p_order uuid)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE taken analytics_checkout_ids;
@@ -66,6 +75,7 @@ BEGIN
  IF taken.order_id IS NULL THEN RETURN NULL; END IF;
  IF EXISTS(SELECT 1 FROM analytics_consent_withdrawals w WHERE w.user_id=taken.user_id
    AND w.withdrawn_at>=taken.created_at)
+  OR taken.created_at<clock_timestamp()-interval '45 minutes'
   OR EXISTS(SELECT 1 FROM account_erasure_requests WHERE profile_id=taken.user_id) THEN RETURN NULL; END IF;
  RETURN jsonb_build_object('clientId',taken.client_id,'sessionId',taken.session_id);
 END $$;
@@ -83,12 +93,12 @@ BEGIN
  DELETE FROM analytics_checkout_ids WHERE user_id=p_user;
 END $$;
 
--- Daily expiry: ids not taken within 72 hours (unpaid or abandoned orders) are deleted.
+-- Daily clean-up: ids not taken (unpaid or abandoned orders) are long past their 45-minute window; delete them.
 CREATE OR REPLACE FUNCTION public.analytics_prune_checkout_ids()
 RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE n integer;
 BEGIN
- DELETE FROM analytics_checkout_ids WHERE created_at<clock_timestamp()-interval '72 hours';
+ DELETE FROM analytics_checkout_ids WHERE created_at<clock_timestamp()-interval '1 hour';
  GET DIAGNOSTICS n=ROW_COUNT;
  RETURN n;
 END $$;
