@@ -197,8 +197,10 @@ function dropUnknownBenchmarks(data: ReportData, options: ReportDataOptions, dro
   data.benchmarks.accounts.forEach((account, index) => {
     if (!table.current) return void accounts.push({ ...account, metrics: null });
     const same = table.rows.filter(row => accountKey(row.account) === accountKey(account.account));
-    const row = same.find(item => accountKey(item.platform) === accountKey(account.platform)) ?? same[0];
-    if (!row) return void dropped.push(`benchmarks.accounts[${index}]`);
+    if (same.length === 0) return void dropped.push(`benchmarks.accounts[${index}]`);
+    // The same name on several platforms: only an exact platform match gets numbers, never a guess.
+    const row = same.find(item => accountKey(item.platform) === accountKey(account.platform)) ?? (same.length === 1 ? same[0] : null);
+    if (!row) return void accounts.push({ ...account, metrics: null });
     accounts.push({ ...account, metrics: { followers: row.followers, medianViews: row.medianViews,
       engagementRate: row.engagementRate, weeklyPosts: row.postsPerWeek, capturedAt: row.fetchedAt } });
   });

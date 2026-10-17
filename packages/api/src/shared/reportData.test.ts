@@ -114,6 +114,12 @@ describe('parseReportDataBlock', () => {
     expect(parsed.data.benchmarks!.accounts).toEqual([{ ...accounts[0], metrics: { followers: 12000, medianViews: null,
       engagementRate: 0.04, weeklyPosts: 3, capturedAt: '2026-10-10T00:00:00Z' } }]);
     expect(parsed.dropped).toEqual(['benchmarks.accounts[1]']);
+    const twice = parseReportDataBlock(block(row('benchmarks', { accounts: [accounts[0]] })),
+      { benchmarks: { rows: [table, { ...table, platform: 'douyin', followers: 99 }], current: true } });
+    expect((twice.data.benchmarks!.accounts as BenchmarkAccount[])[0].metrics).toBeNull();
+    const exact = parseReportDataBlock(block(row('benchmarks', { accounts: [{ ...accounts[0], platform: 'douyin' }] })),
+      { benchmarks: { rows: [table, { ...table, platform: 'douyin', followers: 99 }], current: true } });
+    expect((exact.data.benchmarks!.accounts as BenchmarkAccount[])[0].metrics!.followers).toBe(99);
     const refreshed = parseReportDataBlock(block(row('benchmarks', { accounts })), { benchmarks: { rows: [table], current: false } });
     expect((refreshed.data.benchmarks!.accounts as BenchmarkAccount[]).map(account => account.metrics)).toEqual([null, null]);
     const none = parseReportDataBlock(block(row('benchmarks', { accounts, todo: { searchTerms: ['同城'], next: '再找' } })),
