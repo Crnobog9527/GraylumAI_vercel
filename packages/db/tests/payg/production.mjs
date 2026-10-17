@@ -23,9 +23,9 @@ const setting=(db,key,value)=>db.query(`INSERT INTO system_settings(key,value) V
 /** One production run: an OpenRouter model row with a stored price snapshot and key, the production profile
  * of its route, and the frozen v2 payload the TS host builds (productionPolicy.ts / admission.ts). */
 async function productionFixture(db,profiles,options={}) {
-  const actor=randomUUID(),credits=options.credits??100;
-  await db.query('INSERT INTO profiles(id,credits) VALUES($1,$2)',[actor,credits]);
-  await db.query(`INSERT INTO credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,
+  const actor=options.actor??randomUUID(),credits=options.credits??100,phase=options.phase??'question';
+  if (!options.actor) await db.query('INSERT INTO profiles(id,credits) VALUES($1,$2)',[actor,credits]);
+  if (!options.actor) await db.query(`INSERT INTO credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,
     idempotency_key,balance_before,balance_after) VALUES($1,$2::int,'addition','grant','opening_grant','system',$3,0,$2::int)`,
   [actor,credits,'opening_grant:'+actor]);
   const modelId=randomUUID(),model='prod-local/'+modelId.slice(0,8),key='sk-local-'+modelId,pricingHash='a'.repeat(64);
@@ -41,7 +41,7 @@ async function productionFixture(db,profiles,options={}) {
   const multiplier=options.multiplier??'6';
   const deadline=new Date(Date.now()+3600000).toISOString();
   const payg={...identity,version:'production-host-v1',admissionPath:'empirical',maxBytes:196608,maxMessages:32,maxTools:2,
-    maxSchemaBytes:16384,purposes:['question'],expiresAt:deadline};
+    maxSchemaBytes:16384,purposes:[phase],expiresAt:deadline};
   const base={provider:'openrouter',account:account(key),model,protocol:'openrouter-chat-v1',upperUsd:'0.008292000000',
     inputLimit:8292,outputLimit:1000,automaticRetry:false,hiddenTools:false,lookupSupported:false,
     providerLimits:{providerSlug:TAG,contextTokens:100000,promptUsdPerMillion:'1',completionUsdPerMillion:'0',requestUsd:'0'}};
@@ -51,7 +51,7 @@ async function productionFixture(db,profiles,options={}) {
     rules:{version:'runtime-production-v1',quoteVersion:POLICY,creditsPerUsd:'100',multiplier,fx:{},
       billingUnit:{version:'bill-unit-v2',creditsPerUsd:'100',defaultMultiplier:'6',hash:'f'.repeat(64)}},
     limits:{costUsd:'0.1',credits:0,maxPreDeduct:0,maxCalls:8,deadline}};
-  const claimPayload={...base,phase:'question',requestHash:'b'.repeat(64),billingUnit:{modelId,multiplier},
+  const claimPayload={...base,phase,requestHash:'b'.repeat(64),billingUnit:{modelId,multiplier},
     payg:{...identity,policyVersion:'production-host-v1',bytes:100,promptTokensUpper:8292,messages:1,tools:0,schemaBytes:0}};
   return {actor,draft,modelId,model,key,payload,claimPayload};
 }
@@ -330,6 +330,67 @@ export async function productionToolCases({db,report,claim,reapply=true}) {
   } finally {
     await db.query(`DELETE FROM system_settings WHERE key IN ('runtime_environment','runtime_payg_production','research_tools_config',
       'billing_provider_prices')`);
+    await db.query('UPDATE runtime_test_windows SET enabled=true WHERE id=ANY($1::uuid[])',[paused]);
+  }
+}
+
+// 0295: the review panel (Fusion) on the production database: group admission, batch claim and the recovery inventory.
+const fusionMigration=new URL(`../../migrations/${readdirSync(new URL('../../migrations/',import.meta.url))
+  .find(f=>/^\d{4}_runtime_production_fusion\.sql$/.test(f))}`,import.meta.url);
+export async function productionFusionCases({db,report,reapply=true}) {
+  // Earlier cases rerun 0235, which restores its own recovery inventory; put the 0295 patch back (a rerun is a no-op).
+  if (reapply) await db.query(readFileSync(fusionMigration,'utf8'));
+  const profiles=[];
+  const paused=(await db.query('UPDATE runtime_test_windows SET enabled=false WHERE enabled RETURNING id')).rows.map(r=>r.id);
+  const sha=text=>createHash('sha256').update(text).digest('hex');
+  await setting(db,'runtime_environment','production');
+  await setting(db,'billing_credits_per_usd','100');
+  await setting(db,'billing_token_price_multiplier','6');
+  await db.query(`INSERT INTO system_settings(key,value) VALUES('billing_payg_start_thresholds','{"version":"local-v1","thresholds":[]}')
+    ON CONFLICT(key) DO NOTHING`);
+  try {
+    const f=await productionFixture(db,profiles,{phase:'fusion_review'});
+    await db.query(`UPDATE system_settings SET value=jsonb_set(value,'{thresholds}',coalesce(value->'thresholds','[]')||$1::jsonb)
+      WHERE key='billing_payg_start_thresholds'`,[JSON.stringify([{model:f.model,purpose:'fusion_review',credits:1}])]);
+    await setting(db,'runtime_payg_production',{version:1,enabled:true,policyVersion:POLICY,profiles});
+    await setting(db,'fusion_settings',{version:1,compare:{enabled:false},review:{enabled:true,reviewerModelIds:[f.modelId],
+      summaryModelId:randomUUID(),maxBudgetUsd:'1'}});
+    await db.query(`INSERT INTO membership_plans(id,name,level,allow_fusion_review,allow_fusion_compare,library_storage_bytes)
+      VALUES($1,'Local fixture','gold',true,true,500000000) ON CONFLICT(level) DO UPDATE SET allow_fusion_review=true`,[randomUUID()]);
+    await db.query("UPDATE profiles SET membership_level='gold' WHERE id=$1",[f.actor]);
+    const session=randomUUID();
+    await db.query("INSERT INTO runtime_sessions(id,actor_id,scope,start_request_id,start_payload) VALUES($1,$2,$3,$4,'{}')",
+      [session,f.actor,f.payload.scope,randomUUID()]);
+    const member=async()=>{
+      const draft=await rpc(db,'bill2_create_draft',f.actor);
+      const fusion={index:0,phase:'fusion_review',body:'review request 0',call:{...f.claimPayload,requestHash:sha('review request 0')}};
+      return {requestId:randomUUID(),payload:{...f.payload,scope:{kind:'positioning_draft',draftId:draft},
+        input:{...f.payload.input,fusion},sourceHash:sha(JSON.stringify(fusion)),limits:{...f.payload.limits,maxCalls:1}}};
+    };
+    const admit=async(runs,request=randomUUID())=>{
+      await db.query('SET ROLE service_role');
+      try { return (await db.query('SELECT fusion_group_admit($1,$2,$3,$4,$5) v',[f.actor,request,'review',session,JSON.stringify(runs)])).rows[0].v; }
+      finally { await db.query('RESET ROLE'); }
+    };
+    await db.query("DELETE FROM system_settings WHERE key='runtime_environment'");
+    await rejects(admit([await member()]),/RUNTIME_PRODUCTION_DENIED/);
+    await setting(db,'runtime_environment','production');
+    const group=await admit([await member()]);
+    assert.equal(group.runs.length,1);
+    const run=(await db.query('SELECT payload->>\'mode\' mode,test_window_id FROM bill2_runs WHERE id=$1',[group.runs[0].runId])).rows[0];
+    assert.deepEqual(run,{mode:'production',test_window_id:null});
+    const claimed=await rpc(db,'fusion_group_claim',f.actor,group.groupId,'review:1',1,
+      JSON.stringify(group.runs.map(r=>({runId:r.runId,sequence:1,payload:r.fusion.call}))));
+    assert.equal(claimed.state,'claimed');
+    for (const c of claimed.calls) assert.equal((await rpc(db,'bill2_dispatch',f.actor,c.runId,c.id,c.dispatchToken)).dispatch,true);
+    const listed=(await db.query('SELECT * FROM fusion_pending_financial_batch(200)')).rows.find(r=>r.run_id===group.runs[0].runId);
+    assert.ok(listed,'the dispatched production call is in the recovery inventory');
+    assert.deepEqual({mode:listed.recovery.mode,id:listed.recovery.id,callPolicies:listed.recovery.callPolicies},
+      {mode:'production',id:POLICY,callPolicies:f.payload.callPolicy});
+    report.checks.push('production review panel: group admission refused without the marker, admitted as a production run, '
+      +'batch claim and dispatch, and the recovery inventory returns the run\'s own frozen production policy');
+  } finally {
+    await db.query("DELETE FROM system_settings WHERE key IN ('runtime_environment','runtime_payg_production')");
     await db.query('UPDATE runtime_test_windows SET enabled=true WHERE id=ANY($1::uuid[])',[paused]);
   }
 }
