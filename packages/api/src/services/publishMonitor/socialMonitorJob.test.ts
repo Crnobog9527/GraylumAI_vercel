@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
-import { runSocialMonitorJob } from './socialMonitorJob';
+import { runSocialMonitorJob, runSocialMonitorRetention } from './socialMonitorJob';
 import type { ClientDeps } from './postForMe/client';
 
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status });
@@ -65,4 +65,17 @@ describe('publish-monitor daily job', () => {
     expect(publishes.calls).toContain('publish_monitor_provider_work_claim');
     expect(broken.calls).toContain('publish_monitor_cleanup_claim');
   });
+
+  it('without a provider key, expired publish claims are still released (database only, no check work handed out)',
+    async () => {
+      const calls: Array<[string, unknown]> = [];
+      const noKey = { rpc: async (name: string, args: unknown) => {
+        calls.push([name, args]);
+        return { data: name === 'publish_monitor_snapshot_prune' ? 0 : [], error: null };
+      } } as never;
+      const result = await runSocialMonitorRetention(noKey, Date.now() + 60_000);
+      expect(result.publishes).toMatchObject({ processed: 0 });
+      expect(calls.find(([name]) => name === 'publish_monitor_publish_reconcile_claim')?.[1])
+        .toMatchObject({ p_release_only: true });
+    });
 });

@@ -13,7 +13,7 @@ const migrationPath = 'packages/db/migrations/0274_publish_monitor_publish.sql';
 const entry = ['publish_monitor_publish_claim(uuid,text,text,uuid,uuid,uuid[])', 'publish_monitor_publish_dispatch(uuid,uuid,jsonb)',
   'publish_monitor_publish_release(uuid,text)', 'publish_monitor_publish_unknown(uuid,text)',
   'publish_monitor_publish_record(uuid,text,jsonb)', 'publish_monitor_publish_webhook_result(text,text,boolean,text)',
-  'publish_monitor_publish_reconcile_claim(integer,integer)', 'publish_monitor_publish_check_later(uuid,uuid,text)',
+  'publish_monitor_publish_reconcile_claim(integer,integer,boolean)', 'publish_monitor_publish_check_later(uuid,uuid,text)',
   'publish_monitor_publish_unlease(uuid,uuid)', 'publish_monitor_publish_manual_resolve(uuid,uuid,boolean,jsonb)',
   'publish_monitor_publish_job(uuid,uuid)', 'publish_monitor_publish_targets(uuid,uuid)',
   'publish_monitor_publish_check_info(uuid,uuid)'];
@@ -182,6 +182,10 @@ try {
   await c.query("UPDATE social_publish_jobs SET claim_expires_at=now()-interval '1 second' WHERE id=$1", [stale.id]);
   await code(svc('SELECT publish_monitor_publish_dispatch($1,$2,$3) v', [u.a, stale.id, '[]']), 'PUBLISH_MONITOR_INPUT_INVALID');
   await c.query("UPDATE social_publish_jobs SET next_check_at=now()-interval '1 second' WHERE id=$1", [lost.id]);
+  const releaseOnly = await svc('SELECT publish_monitor_publish_reconcile_claim(50,120,true) v');
+  assert.deepEqual(releaseOnly.filter(x => [stale.id, lost.id].includes(x.jobId)).map(x => x.action), ['release'],
+    'without a provider key only expired claims are handed out');
+  await svc('SELECT publish_monitor_publish_unlease($1,$2) v', [stale.id, releaseOnly.find(x => x.jobId === stale.id).lease]);
   const items = await svc('SELECT publish_monitor_publish_reconcile_claim(50,120) v');
   const mine = Object.fromEntries(items.filter(x => [stale.id, lost.id].includes(x.jobId)).map(x => [x.jobId, x]));
   assert.equal(mine[stale.id].action, 'release');

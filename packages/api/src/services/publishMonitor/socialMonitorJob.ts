@@ -36,11 +36,14 @@ async function switchOn(db: Db, key: string): Promise<boolean> {
 const sweepDeleteEnabled = (db: Db) => switchOn(db, ORPHAN_SWEEP_DELETE_SWITCH).catch(() => false);
 
 /**
- * Retention only (plan §7), for an environment without a Post for Me key: snapshots already stored must still expire
- * after 100 days. Database only, no provider call.
+ * For an environment without a Post for Me key, database-only work: snapshots already stored must still expire after
+ * 100 days (plan §7), and expired publish claims are released (plan §6). No provider call.
  */
 export async function runSocialMonitorRetention(db: Db, until: number, now: () => number = Date.now) {
-  return { pruned: await pruneSnapshots(db, until, now) };
+  const pruned = await pruneSnapshots(db, until, now);
+  // Expired publish claims hold users' credits and slots; releasing them needs no provider either (plan §6).
+  const publishes = await reconcilePublishes(db, null, until, now);
+  return { pruned, publishes };
 }
 
 /**

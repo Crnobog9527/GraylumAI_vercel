@@ -383,7 +383,10 @@ END $$;
 -- Daily job (plan §6, §9 item 17): expired claims are released; dispatched jobs without a final result are checked
 -- against the provider by external_id. A job dispatched more than 5 minutes ago that never reached 'unknown' (the
 -- process died during the call) is checked the same way. Leased so two batches never work the same job.
-CREATE OR REPLACE FUNCTION public.publish_monitor_publish_reconcile_claim(p_limit integer,p_lease_seconds integer)
+-- p_release_only: without a provider key the daily job can still release expired claims (database only); jobs that
+-- need a provider check are then not handed out at all.
+CREATE OR REPLACE FUNCTION public.publish_monitor_publish_reconcile_claim(p_limit integer,p_lease_seconds integer,
+ p_release_only boolean DEFAULT false)
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE out jsonb;
@@ -394,8 +397,9 @@ BEGIN
  WITH due AS (
   SELECT id FROM social_publish_jobs WHERE (lease_until IS NULL OR lease_until<=clock_timestamp()) AND NOT manual_review
    AND ((state='claimed' AND claim_expires_at<=clock_timestamp())
-    OR (state='unknown' AND next_check_at<=clock_timestamp())
-    OR (state='dispatching' AND coalesce(dispatched_at,updated_at)<=clock_timestamp()-interval '5 minutes'))
+    OR (NOT coalesce(p_release_only,false) AND state='unknown' AND next_check_at<=clock_timestamp())
+    OR (NOT coalesce(p_release_only,false) AND state='dispatching'
+     AND coalesce(dispatched_at,updated_at)<=clock_timestamp()-interval '5 minutes'))
   ORDER BY updated_at,id LIMIT p_limit FOR UPDATE SKIP LOCKED),
  leased AS (
   UPDATE social_publish_jobs j SET lease=gen_random_uuid(),lease_until=clock_timestamp()+make_interval(secs=>p_lease_seconds)

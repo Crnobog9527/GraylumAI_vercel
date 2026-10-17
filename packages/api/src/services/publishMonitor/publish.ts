@@ -262,14 +262,15 @@ export type ReconcileReport = { processed: number; settled: number; deferred: nu
  * the user's own refresh; the 2-minute-to-4-hour backoff takes full effect once the job runs every 10 minutes after
  * the Vercel Pro upgrade (plan §8, REL-1).
  */
-export async function reconcilePublishes(db: Rpc, deps: ClientDeps, until: number,
+export async function reconcilePublishes(db: Rpc, deps: ClientDeps | null, until: number,
   now: () => number = Date.now): Promise<ReconcileReport> {
   const report: ReconcileReport = { processed: 0, settled: 0, deferred: 0, manual: 0 };
   // Drain batch after batch until nothing is due or the time budget ends: every handled job either settles, releases
   // its lease, or gets a later next_check_at, so a later claim never returns it again in the same run.
   for (let batch = 0; batch < MAX_BATCHES && now() < until; batch += 1) {
-    const items = await rpc(db, 'publish_monitor_publish_reconcile_claim', { p_limit: BATCH, p_lease_seconds: 300 },
-      z.array(reconcileItem));
+    // Without a provider key only expired claims are handed out: releasing them needs the database alone.
+    const items = await rpc(db, 'publish_monitor_publish_reconcile_claim', { p_limit: BATCH, p_lease_seconds: 300,
+      p_release_only: deps === null }, z.array(reconcileItem));
     for (const [index, item] of items.entries()) {
       // Out of time, or the shared provider budget is spent: hand the untried jobs back unchanged (no backoff step,
       // no move toward manual review) and stop; the next run or the user's refresh picks them up.
@@ -290,7 +291,7 @@ export async function reconcilePublishes(db: Rpc, deps: ClientDeps, until: numbe
 const BATCH = 50;
 const MAX_BATCHES = 40;
 
-async function reconcileOne(db: Rpc, deps: ClientDeps, item: z.infer<typeof reconcileItem>,
+async function reconcileOne(db: Rpc, deps: ClientDeps | null, item: z.infer<typeof reconcileItem>,
   report: ReconcileReport): Promise<'done' | 'busy'> {
   if (item.action === 'release') {
     report.processed += 1;
@@ -298,6 +299,7 @@ async function reconcileOne(db: Rpc, deps: ClientDeps, item: z.infer<typeof reco
     report.settled += 1;
     return 'done';
   }
+  if (!deps) return 'busy';
   const checked = await checkWithProvider(db, deps, item.jobId, item.providerPostId, item.targets);
   if (checked.busy) return 'busy';
   report.processed += 1;
