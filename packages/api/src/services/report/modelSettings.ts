@@ -4,7 +4,9 @@ import { paygStartThresholdsSchema } from '../adminSettings';
 import { aggregateCredits } from '../bill2/decimal';
 import { stagingRuntimeWindow } from '../runtime/stagingEnvironment';
 import { parseStagingPolicy, type StagingPolicy } from '../runtime/stagingPolicy';
-import { readPaygHostPolicies } from '../runtime/paygHostPolicy';
+import { readPaygPolicies } from '../runtime/realHost';
+import { realRuntimeEnvironment } from '../runtime/productionEnvironment';
+import { loadProductionPolicy } from '../runtime/productionPolicy';
 import { freezeStagingPaygPricing } from '../runtime/paygPricing';
 import { freezeWindowBillingUnit } from '../runtime/billingUnitAdmission';
 import { admitReasoning } from '../runtime/reasoningAdmission';
@@ -26,6 +28,10 @@ export async function readReportModel(db: SupabaseClient, moduleId: string) {
     effectiveModelId: (result.data.report_model_id ?? result.data.model_id) as string | null };
 }
 async function windowPolicy(db: SupabaseClient, actorId: string) {
+  // RUNTIME-PROD: production has no window; the admin route already requires an administrator.
+  if (realRuntimeEnvironment(process.env) === 'production')
+    // Offline: settings reads never renew a price snapshot over the network (#1073 review).
+    return loadProductionPolicy(db, actorId, process.env, {}, { offline: true }).catch(() => { throw unavailable(); });
   const windowId = stagingRuntimeWindow(process.env);
   // Administrators need not be test-call actors. This RPC is admin-only and does not admit a call.
   const result = await db.rpc('report_model_window', { p_actor_id: actorId, p_window_id: windowId });
@@ -42,7 +48,7 @@ async function eligible(db: SupabaseClient, window: StagingPolicy, row: Model) {
     throw new Error('REPORT_MODEL_ADMISSION_REQUIRED');
   const outputLimit = Math.min(PURPOSE_OUTPUT_CAP, row.max_tokens, quote.outputLimit);
   const reasoning = admitReasoning(row, 'interactive', quote.providerLimits.providerSlug, outputLimit);
-  const policies = await readPaygHostPolicies(db, window, [quote], [{ modelId: row.id, phase: 'report',
+  const policies = await readPaygPolicies(window)(db, window, [quote], [{ modelId: row.id, phase: 'report',
     outputLimit, reasoning, requestFormat: 'agent-turn-v5-stream' }], process.env,
     new Date(Math.min(Date.now() + 3600000, Date.parse(window.expiresAt))).toISOString());
   if (!policies) throw new Error('REPORT_MODEL_ADMISSION_REQUIRED');

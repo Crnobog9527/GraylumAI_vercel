@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { reportBodyText } from '../../shared/reportData';
 import { z } from 'zod';
 
 /** Host checks of FUSION-REVIEW §2.2: pure, deterministic functions over the saved text and the frozen
@@ -139,7 +140,9 @@ const revisionSchema = z.object({
 const FIELD_LIMIT = 400;
 
 /** "## Title" sections in order; null when the body does not have exactly the template sections. */
-export function reportSections(body: string, sections: string[], maxCharacters: number): Map<string, string> | null {
+export function reportSections(raw: string, sections: string[], maxCharacters: number): Map<string, string> | null {
+  // REPORT-VISUAL: the strategy data block is not report text; the limit and the sections are the text's (Owner's choice B).
+  const body = reportBodyText(raw);
   if (length(body) > maxCharacters) return null;
   const parts = body.split(/^##[ \t]+([^\r\n]+)\r?$/m);
   const titles = parts.filter((_, index) => index % 2 === 1).map(title => title.trim());

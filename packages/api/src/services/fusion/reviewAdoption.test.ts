@@ -27,4 +27,17 @@ describe('per-section adoption', () => {
     expect(() => applyChoices({ originalBody: original, revisedBody: revised, plan, maxCharacters: 90,
       choices: [{ section: '定位', use: 'original' }, { section: '结语', use: 'revised', confirmedNoFactChange: true }] })).toThrow('FUSION_ADOPTION_TOO_LONG');
   });
+
+  it('splits and limits the report text only, and keeps the original strategy data block (REPORT-VISUAL)', () => {
+    const block = '```graylum-report-data\n' + JSON.stringify({ v: 1, field: 'summary', value: '数'.repeat(200) }) + '\n```';
+    const original = '## 定位\n原定位\n## 结语\n原结语\n\n' + block;
+    const revised = '## 定位\n新定位\n## 结语\n原结语';
+    const plan = adoptionSections({ originalBody: original, revisedBody: revised, sections: ['定位', '结语'], changedSections: ['定位'],
+      changeNotes: [{ section: '定位', wordingOnly: true, fields: [] }], frozen: {}, revisedSteps: {} });
+    expect(plan.filter(section => section.changed).map(section => section.section)).toEqual(['定位']);
+    expect(sectionTexts(original, ['定位', '结语']).chapters[1].body).toBe('原结语');
+    const merged = applyChoices({ originalBody: original, revisedBody: revised, plan, maxCharacters: 30,
+      choices: [{ section: '定位', use: 'revised', confirmedNoFactChange: true }] });
+    expect(merged.body).toBe('## 定位\n新定位\n## 结语\n原结语\n\n' + block);
+  });
 });

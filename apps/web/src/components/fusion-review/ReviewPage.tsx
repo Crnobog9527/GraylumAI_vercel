@@ -1,10 +1,10 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
 
-import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useMemo, useRef, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Square } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
 import light from '@/components/design/light-tokens.module.css';
 import { cn } from '@/lib/utils';
 import { trpc } from '@/trpc/client';
@@ -49,7 +49,7 @@ export function ReviewPage({ draftId, reviewId }: { draftId: string; reviewId: s
           <Link href={back}><ArrowLeft size={15} aria-hidden="true" />返回：我的定位分析{account ? ` · ${account}` : ''}</Link>
         </nav>
         <h1 className={pageStyles.title}>{!raw ? '评审团' : ended ? '评审团的结果' : '评审团正在审阅你的定位报告'}</h1>
-        {raw ? <Controls reviewId={reviewId} state={raw.state} onChanged={reload} /> : null}
+        {raw ? <Controls state={raw.state} /> : null}
         {extra}
       </Toolbar>
       {body}
@@ -67,7 +67,7 @@ export function ReviewPage({ draftId, reviewId }: { draftId: string; reviewId: s
   if (!raw || !jury || !source || !report || !events.data) {
     return shell(null, <main className={styles.main}><p className={styles.state} role="status">正在读取评审…</p></main>);
   }
-  const result = <ReviewResult draftId={draftId} detail={jury} source={source} names={names} onChanged={reload} />;
+  const result = <ReviewResult draftId={draftId} detail={jury} source={source} names={names} fee={raw.fee} onChanged={reload} />;
   if (endedOnArrival.current) return shell(null, <main className={styles.main}>{result}</main>);
   return (
     <ReviewLive reviewId={reviewId} events={played} detail={jury} names={names} report={report} ended={ended}
@@ -75,32 +75,13 @@ export function ReviewPage({ draftId, reviewId }: { draftId: string; reviewId: s
   );
 }
 
-/** Stop a running review, or end a paused one. Both only cancel and release; calls already sent settle as usual. */
-function Controls({ reviewId, state, onChanged }: { reviewId: string; state: string; onChanged: () => void }) {
-  const stop = trpc.fusionReview.stop.useMutation({ onSettled: onChanged });
-  const end = trpc.fusionReview.end.useMutation({ onSettled: onChanged });
-  const [failed, setFailed] = useState(false);
-  const busy = stop.isPending || end.isPending;
-  if (state === 'running') {
-    return (
-      <span className={styles.controls}>
-        <button type="button" className={styles.toolButton} disabled={busy} onClick={() => {
-          if (!window.confirm('停止后不会再开始新的步骤；已经发出的评审照常结算。确定停止吗？')) return;
-          stop.mutate({ reviewId }, { onError: () => setFailed(true), onSuccess: () => setFailed(false) });
-        }}><Square size={13} aria-hidden="true" />停止评审</button>
-        {failed ? <span role="alert" className={styles.inlineError}>没有停止成功，请再试一次。</span> : null}
-      </span>
-    );
-  }
+/** No stop or end (Owner 2026-10-17: "评审团功能不提供中途停止的选项，用户只要点了启用，他就必须得用完"). A paused review
+ * says why and goes on by itself; it can only end on its own (finished, failed, or the content deleted). */
+function Controls({ state }: { state: string }) {
   if (state !== 'paused') return null;
   return (
     <p className={styles.paused} role="status">
-      评审暂停了，通常是余额不够下一步。充值后回到这里会接着进行，已经完成的意见不会丢，也不会重复扣费。
-      <button type="button" className={styles.toolButton} disabled={busy} onClick={() => {
-        if (!window.confirm('结束后这次评审不会再继续，已经收到的意见会保留。确定结束吗？')) return;
-        end.mutate({ reviewId }, { onError: () => setFailed(true), onSuccess: () => setFailed(false) });
-      }}>结束评审</button>
-      {failed ? <span role="alert" className={styles.inlineError}>没有结束成功，请再试一次。</span> : null}
+      评审暂停了，通常是可用积分不够下一步的临时冻结。充值后回到这里会接着进行，已经完成的意见不会丢，也不会重复扣费。
     </p>
   );
 }

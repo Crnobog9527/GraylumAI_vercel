@@ -7,6 +7,7 @@ vi.mock('../services/stripe', () => ({
     balance: { retrieve: async () => ({ livemode: false }) } }),
 }));
 import { getPublicReadClient, settingsRouter } from './settings';
+import { validateReportPrice } from '../services/report/fees';
 import { resetPlatformSecretCacheForTests } from '../services/platformSecrets/reader';
 
 describe('settings writer verification', () => {
@@ -28,6 +29,18 @@ describe('settings writer verification', () => {
     await expect(mode === 'single' ? caller.updateSystemSettings(input) : caller.updateSystemSettingsBulk([input]))
       .rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE', message: '暂时无法验证设置保存权限，请稍后重试' });
     expect(upsert).not.toHaveBeenCalled();
+  });
+});
+
+describe('report fixed price setting validation (0295)', () => {
+  it.each(['500', 500, '1200', '999999'])('accepts %s', value => {
+    expect(() => validateReportPrice([{ key: 'report_fixed_price_credits', value }])).not.toThrow();
+  });
+  it.each(['', '0', '-5', '1.5', '1e3', '1000000', 'abc', 0, ' 1200 ', '500 '])('rejects %s', value => {
+    expect(() => validateReportPrice([{ key: 'report_fixed_price_credits', value }])).toThrow('报告价格要填');
+  });
+  it('ignores other keys', () => {
+    expect(() => validateReportPrice([{ key: 'new_user_credits', value: '' }])).not.toThrow();
   });
 });
 

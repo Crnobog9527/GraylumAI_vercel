@@ -19,7 +19,8 @@ import type { StagingPolicy } from './stagingPolicy';
 import type { SettingsRead } from './newWorkGate';
 import type { HostTurnContext } from './hostTurn';
 import { researchHost } from './researchHostContext';
-import { frozenResearchTurn, LOCAL_RESEARCH_ACCOUNT, RESEARCH_PHASE, RESEARCH_RESULT_RESERVE_BYTES, RESEARCH_TURN_VERSION,
+import { frozenResearchTurn, LOCAL_RESEARCH_ACCOUNT, PRODUCTION_RESEARCH_ACCOUNT, RESEARCH_PHASE, RESEARCH_RESULT_RESERVE_BYTES,
+  RESEARCH_TURN_VERSION,
   type FrozenResearchTurn } from './researchTurn';
 
 /** Serialized tool definitions as the SDK sends them; the full request is checked again before dispatch. */
@@ -82,18 +83,22 @@ export async function admitResearchTurn(input: ResearchAdmissionInput): Promise<
     if (!config.vendors[entry.vendor].enabled) continue;
     if (entry.platform !== 'web' && !config.verifiedPlatforms.includes(entry.platform)) continue;
     const model = `${entry.vendor}:${entry.route}`;
-    const windowEntry = input.real?.toolPolicies?.find(policy => policy.model === model);
-    if (input.real && !windowEntry) continue;
+    // RUNTIME-PROD: production has no window; the research switch, vendor hard caps and price entries approve a route.
+    const production = input.real?.mode === 'production';
+    const windowEntry = production ? undefined : input.real?.toolPolicies?.find(policy => policy.model === model);
+    if (input.real && !production && !windowEntry) continue;
     let policy: ToolCallPolicy;
     try {
-      policy = toolCallPolicy({ vendor: entry.vendor, account: windowEntry?.account ?? LOCAL_RESEARCH_ACCOUNT, route: entry.route,
+      const account = windowEntry?.account ?? (production ? PRODUCTION_RESEARCH_ACCOUNT : LOCAL_RESEARCH_ACCOUNT);
+      policy = toolCallPolicy({ vendor: entry.vendor, account, route: entry.route,
         purposes: [RESEARCH_PHASE], maxUnitsPerCall: entry.maxUnitsPerCall,
         price: resolveProviderPrice(prices.config, { provider: entry.vendor, route: entry.route }, input.defaultMultiplier, now) });
     } catch { continue; }
     // Staging: the window must approve exactly this frozen price (runtime_test_window_allowed compares entries).
     if (windowEntry && canonical(windowEntry) !== canonical(policy)) continue;
     if (Date.parse(policy.toolPricing.validUntil) <= Date.parse(input.deadline)) continue;
-    if (decimal(policy.multiplier) > decimal(input.runMultiplier)) continue;
+    // A window reserves for its highest m; production has none, so the run multiplier follows the route (attachResearchTurn).
+    if (!production && decimal(policy.multiplier) > decimal(input.runMultiplier)) continue;
     if (!thresholds.has(`${model}\n${RESEARCH_PHASE}`)) continue;
     priced.set(`${entry.platform}:${entry.kind}`, { entry, policy });
   }
@@ -188,5 +193,8 @@ export async function attachResearchTurn(input: Omit<ResearchAdmissionInput, 'mo
   billing.limits.maxCalls += 1 + admitted.research.subcalls;
   // The run stores tool prices beside its models (0255); TS readers split them with modelCallPolicies/toolCallPolicies.
   (billing.callPolicy as unknown[]).push(...admitted.policies);
+  // Production: rules.multiplier stays the run's highest m_i (each call still bills its own frozen m_i).
+  billing.rules.multiplier = admitted.policies.reduce((max, policy) =>
+    decimal(policy.multiplier) > decimal(max) ? policy.multiplier : max, billing.rules.multiplier);
   return true;
 }
