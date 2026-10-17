@@ -17,12 +17,13 @@ const SESSION = "22222222-2222-4222-8222-222222222222";
 const KEYWORD_CARD = "33333333-3333-4333-8333-333333333333";
 const CANDIDATE_CARD = "44444444-4444-4444-8444-444444444444";
 const CONFIRMATION = "77777777-7777-4777-8777-777777777777";
+const REFRESH = "99999999-9999-4999-8999-999999999999";
 
 beforeAll(async () => {
   const require = createRequire(import.meta.url);
   const { build } = await import(pathToFileURL(createRequire(require.resolve("vitest/package.json")).resolve("vite")).href);
-  const [client, session, list, model] = ["../../../trpc/client.ts", "../research-session.tsx", "../research-call-list.tsx",
-    "../research-session-model.ts"].map(path => JSON.stringify(here(path)));
+  const [client, session, list] = ["../../../trpc/client.ts", "../research-session.tsx", "../research-call-list.tsx"]
+    .map(path => JSON.stringify(here(path)));
   const bundle = await build({ configFile: false, logLevel: "silent",
     define: { "process.env.NODE_ENV": JSON.stringify("development") },
     oxc: { jsx: { runtime: "automatic" } },
@@ -35,7 +36,6 @@ beforeAll(async () => {
           import {QueryClient,QueryClientProvider} from '@tanstack/react-query';
           import {httpLink} from '@trpc/client'; import {trpc} from ${client};
           import {ResearchSessionPanel,useResearchCalls} from ${session}; import {ResearchCallList} from ${list};
-          import {researchConfirmedInput} from ${model};
           const queryClient=new QueryClient({defaultOptions:{queries:{retry:false}}});
           const c=trpc.createClient({links:[httpLink({url:'http://research.test/api/trpc'})]});
           const e=React.createElement;
@@ -43,12 +43,14 @@ beforeAll(async () => {
           function Conversation(){
             const research=useResearchCalls(${JSON.stringify(SESSION)});
             const [settled,setSettled]=React.useState(0);
+            const [busy,setBusy]=React.useState(false);
+            window.setBusy=setBusy;
             window.emit=event=>research.observe('exec-1',event);
             window.settle=()=>setSettled(value=>value+1);
             return e('main',{style:{maxWidth:760,margin:'0 auto',padding:16,display:'grid',gap:16}},
               e(ResearchCallList,{calls:research.of('exec-1')}),
-              e(ResearchSessionPanel,{sessionId:${JSON.stringify(SESSION)},disabled:false,settledTurns:settled,
-                onConfirmed:confirmation=>window.sent.push(researchConfirmedInput(confirmation))}));
+              e(ResearchSessionPanel,{sessionId:${JSON.stringify(SESSION)},disabled:busy,settledTurns:settled,
+                onSend:(text,refreshId)=>{window.sent.push(refreshId?[text,refreshId]:text);}}));
           }
           createRoot(document.getElementById('root')).render(e(trpc.Provider,{client:c,queryClient},
             e(QueryClientProvider,{client:queryClient},e(Conversation))));`;
@@ -99,7 +101,8 @@ for (const width of [375, 1440]) {
         else if (url.pathname.endsWith("/research.confirmCard")) {
           keywordsConfirmed = true;
           data = { cardId: KEYWORD_CARD, confirmationId: CONFIRMATION, kind: "keywords", items: ["职场穿搭"] };
-        } else if (url.pathname.endsWith("/research.benchmarks")) data = { items: [
+        } else if (url.pathname.endsWith("/research.createRefresh")) data = { refreshId: REFRESH };
+        else if (url.pathname.endsWith("/research.benchmarks")) data = { items: [
           benchmark("sample_1"),
           benchmark("sample_2", { medianViews: null, engagementRate: null, fetchedAt: "2026-10-16T09:30:00Z" }),
           benchmark("sample_head", { followers: 2_350_000, category: "head_reference", qualified: false }),
@@ -134,7 +137,21 @@ for (const width of [375, 1440]) {
       await ui(table).toContainText("头部参考");
       await ui(table).toContainText("生成定位报告需要至少 3 个合格的对标账号，目前 2 个");
       await ui(table).toContainText("取数时间：");
-      expect(await table.getByRole("button", { name: /刷新/ }).count()).toBe(0);
+      // Refresh: one click asks the host for one grant, then the next mentor message carries it. While the grant is
+      // being created, the other rows are already locked (a second click cannot make a second grant).
+      await table.getByRole("button", { name: "刷新 sample_1 的数据" }).click();
+      await ui(table.getByRole("button", { name: "刷新 sample_1 的数据" })).toContainText("已申请刷新");
+      expect(calls.filter(item => item.path.endsWith("/research.createRefresh"))).toEqual([{ method: "POST",
+        path: "/api/trpc/research.createRefresh", input: { sessionId: SESSION, platform: "douyin", account: "sample_1" } }]);
+      expect(await page.evaluate(() => (window as unknown as { sent: unknown[] }).sent)).toEqual([
+        "我确认了这些关键词：职场穿搭", ["请重新读取对标账号 抖音 sample_1 的最新数据", REFRESH]]);
+      // One refresh at a time for the whole table: the other rows stay locked until the turn it started is over.
+      const other = table.getByRole("button", { name: "刷新 sample_2 的数据" });
+      await ui(other).toBeDisabled();
+      await page.evaluate(() => (window as unknown as { setBusy: (value: boolean) => void }).setBusy(true));
+      await ui(other).toBeDisabled();
+      await page.evaluate(() => (window as unknown as { setBusy: (value: boolean) => void }).setBusy(false));
+      await ui(other).toBeEnabled();
 
       // Live search rows of a turn: running, then settled with the user's credits.
       const before = calls.filter(call => call.path.endsWith("/research.benchmarks")).length;
