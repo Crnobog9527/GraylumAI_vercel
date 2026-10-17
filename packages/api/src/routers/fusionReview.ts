@@ -23,7 +23,7 @@ const uuid = z.string().uuid();
 const forbidden = new Set(['FUSION_REVIEW_DISABLED', 'FUSION_MEMBERSHIP_REQUIRED', 'REPORT_MEMBERSHIP_REQUIRED', 'FUSION_REVIEW_BREAKER']);
 const conflict = new Set(['FUSION_REVIEW_ACTIVE', 'FUSION_REVIEW_ENDED', 'FUSION_REVIEW_STEP_CONFLICT', 'FUSION_REVIEW_STALE',
   'FUSION_REVIEW_ADOPTED', 'FUSION_ADOPTION_STALE', 'REPORT_REVISION_STALE', 'REPORT_SOURCE_CONFLICT', 'REPORT_REVISION_DECIDED',
-  'FUSION_REVIEW_VERSION_BLOCKED', 'FUSION_REVIEW_CONFLICT']);
+  'FUSION_REVIEW_VERSION_BLOCKED', 'FUSION_REVIEW_CONFLICT', 'FUSION_REVIEW_ESTIMATE_CHANGED']);
 /** Exact Fusion refusals keep their code for the page; anything else goes through the staging error mapping. */
 function reviewError(cause: unknown, path: string): TRPCError {
   const message = cause instanceof Error ? cause.message : '';
@@ -103,7 +103,9 @@ const mineInput = z.object({ limit: z.number().int().min(1).max(50).default(10),
 const mineOutput = z.array(z.object({ reviewId: uuid, draftId: uuid, sourceVersionId: uuid, state: reviewState,
   round: z.number().int().min(1), phase: z.enum(['review', 'summary']), outcomeKind: z.string().nullable(),
   awaitingChoice: z.boolean(), createdAt: z.string(), endedAt: z.string().nullable(), seenAt: z.string().nullable() }));
-const startInput = z.object({ requestId: uuid, draftId: uuid, sourceVersionId: uuid }).strict();
+/** acceptedCredits: the "最多消耗 X 积分" the user agreed to; a start whose maximum is now higher is refused. */
+const startInput = z.object({ requestId: uuid, draftId: uuid, sourceVersionId: uuid,
+  acceptedCredits: z.number().int().positive().optional() }).strict();
 /** A retried start finds its review before the live-call window is required (#962 review); a new start needs it. */
 const startProcedure = protectedProcedure.input(startInput).use(async ({ ctx, input, next, path }) => {
   if (ctx.hasSupabaseAdminPrivileges && ctx.supabaseAdmin) {
@@ -116,6 +118,9 @@ const startProcedure = protectedProcedure.input(startInput).use(async ({ ctx, in
 });
 
 export const fusionReviewRouter = router({
+  /** The maximum a start would hold, before the user agrees; creates nothing and calls no model. */
+  estimate: procedure.input(z.object({ draftId: uuid, sourceVersionId: uuid }).strict())
+    .query(({ ctx, input }) => ctx.flow.estimate(input)),
   start: startProcedure.mutation(async ({ ctx, input, path }) => {
     const started = ctx.replayed ?? await (async () => {
       try { return await (await liveFlow(ctx)).start(input); } catch (cause) { throw unwrap(cause, path); }
@@ -162,6 +167,9 @@ export const fusionReviewRouter = router({
     .mutation(({ ctx, input }) => ctx.flow.confirmAdoption(input)),
   /** The owner's full record (Owner 2026-10-14): every seat's complete reasoning and the rulings by section; seats only. */
   detail: reader.input(review).query(({ ctx, input }) => ctx.flow.detail(input.reviewId)),
+  /** Whether the review is switched on, so the positioning page shows no entry (and no error) when it is off.
+   * Membership and balance are still checked by start; a failed settings read reads as off. */
+  available: reader.query(async ({ ctx }) => ({ enabled: await readFusionSettings(ctx.admin).then(s => s.review.enabled === true, () => false) })),
   /** Display names of the seats (Owner 2026-10-14): set by administrators, independent of the models; no model names. */
   panel: reader.query(async ({ ctx }) => {
     const names = (await readFusionSettings(ctx.admin)).review.displayNames;

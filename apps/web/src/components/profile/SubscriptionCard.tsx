@@ -221,8 +221,7 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
     const action = plan && checkout.open ? actionFor(plan.id, deepLink.cycle) : null;
     if (plan && action && !action.disabled) setTarget({ planId: plan.id, cycle: deepLink.cycle });
     const url = new URL(window.location.href);
-    url.searchParams.delete('buy');
-    url.searchParams.delete('cycle');
+    for (const key of ['buy', 'cycle', 'offer']) url.searchParams.delete(key);
     window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
   // Runs once, when the reads it needs have settled; the ref guards against replays.
   }, [deepLinkReady]); // eslint-disable-line react-hooks/exhaustive-deps

@@ -66,7 +66,11 @@ beforeAll(async () => {
       if (id === entry) return id;
       if (id === '@/trpc/client' || id.endsWith('/trpc/client')) return '\0paywall-trpc';
       if (id === './use-report-gen' || id.endsWith('/use-report-gen')) return '\0paywall-report';
+      // The jury entry next to the report entry links and navigates; it renders nothing here (no report version).
+      if (id === 'next/navigation' || id === 'next/link') return '\0paywall-' + id;
     }, load(id: string) {
+      if (id === '\0paywall-next/navigation') return 'export const useRouter=()=>({push:()=>{},replace:()=>{}});';
+      if (id === '\0paywall-next/link') return "import React from 'react'; export default function Link(p){return React.createElement('a',p)}";
       if (id === '\0paywall-trpc') return trpcMock;
       if (id === '\0paywall-report') return reportMock;
       if (id === entry) return `import React from 'react'; import { createRoot } from 'react-dom/client';

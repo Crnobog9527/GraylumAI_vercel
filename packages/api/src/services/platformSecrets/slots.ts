@@ -2,11 +2,11 @@
 
 /**
  * ADMIN-SECRETS (migration 0259): business third-party keys entered in the admin and kept in
- * Supabase Vault. System keys (database, service role, Stripe, Redis…) stay in Vercel and are
+ * Supabase Vault (PAY-NOTIFY added 'resend', the payment-notice mail key). System keys (database, service role, Stripe, Redis…) stay in Vercel and are
  * not handled here. The list must match the CHECK in public.platform_secrets.
  */
 export const PLATFORM_SECRET_SLOTS = [
-  'openrouter', 'postforme', 'postforme_webhook', 'tikhub', 'parallel', 'firecrawl',
+  'openrouter', 'postforme', 'postforme_webhook', 'tikhub', 'parallel', 'firecrawl', 'resend',
 ] as const;
 export type PlatformSecretSlot = typeof PLATFORM_SECRET_SLOTS[number];
 
@@ -22,6 +22,8 @@ export const PLATFORM_SECRET_ENV_FALLBACK: Record<PlatformSecretSlot, string | n
   tikhub: 'TIKHUB_API_KEY',
   parallel: 'PARALLEL_API_KEY',
   firecrawl: 'FIRECRAWL_API_KEY',
+  // PAY-NOTIFY: new slot, never read from Vercel.
+  resend: null,
 };
 
 // Printable ASCII without spaces, 16-1024 characters (the database enforces the same).
@@ -34,6 +36,7 @@ const FORMAT: Record<PlatformSecretSlot, RegExp> = {
   tikhub: BASE,
   parallel: BASE,
   firecrawl: BASE,
+  resend: /^re_[A-Za-z0-9_]{8,}$/,
 };
 
 export function isPlatformSecretSlot(value: unknown): value is PlatformSecretSlot {

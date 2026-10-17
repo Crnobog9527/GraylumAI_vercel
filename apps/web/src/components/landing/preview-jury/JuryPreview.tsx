@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
 
-import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, FastForward, Pause, Play, RotateCcw } from 'lucide-react';
 import light from '@/components/design/light-tokens.module.css';
@@ -15,10 +15,12 @@ import { remainingMs, remainingText, totalText } from './jury-eta';
 import { JuryCanvas } from './JuryCanvas';
 import { JuryEmbedDemo } from './JuryEmbedDemo';
 import { JuryAway, JuryIntro } from './JuryIntro';
-import { JuryReader } from './JuryReader';
+import { JuryReader, StaleSwitch } from './JuryReader';
 import { JuryRecords } from './JuryRecords';
 import { JuryStatic } from './JuryStatic';
 import { JuryStepsRail } from './JuryStepsRail';
+import { Toolbar } from './JuryToolbar';
+import { MOCK_ADOPT_ACTIONS, type AdoptActions, type Stale } from './use-adoption';
 import { useJuryPlayback, usePrefersReducedMotion } from './use-jury-playback';
 import { useRestoredStep, useReviewAddress } from './use-review-address';
 import styles from './jury.module.css';
@@ -90,26 +92,6 @@ export function JuryPreview() {
   );
 }
 
-/** One toolbar for everything: the stage below it fills the rest of the window, so its height is published as --j-bar. */
-function Toolbar({ children }: { children: ReactNode }) {
-  const bar = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    const node = bar.current;
-    const page = node?.parentElement;
-    if (!node || !page) return;
-    const publish = () => page.style.setProperty('--j-bar', `${Math.ceil(node.getBoundingClientRect().height)}px`);
-    publish();
-    const observer = new ResizeObserver(publish);
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, []);
-  return (
-    <div className={styles.toolbar} ref={bar}>
-      <div className={styles.toolRow}>{children}</div>
-    </div>
-  );
-}
-
 function Player({ scenario, names, background, settings }: {
   scenario: JuryScenario; names: JurySeatNames; background: boolean; settings: ReactNode;
 }) {
@@ -119,6 +101,8 @@ function Player({ scenario, names, background, settings }: {
   const playback = useJuryPlayback(length, !reduced);
   const [intro, setIntro] = useState<'shown' | 'stay' | 'away'>('shown');
   const [picked, setPicked] = useState<SeatCode | null>(null);
+  const [stale, setStale] = useState<Stale>('none');
+  const actions = useMemo(() => staleActions(stale, setStale), [stale]);
   const skipped = skippedStages(scenes);
   const restoreAt = playback.seek;
   const stepNow = playback.finished ? 'end' : sceneAt(scenes, playback.clock)?.stage ?? 'start';
@@ -190,7 +174,8 @@ function Player({ scenario, names, background, settings }: {
       <main className={styles.main}>
         {ended ? (
           <div className={layout.results}>
-            <JuryReader detail={scenario.detail} names={names} />
+            <JuryReader detail={scenario.detail} names={names} actions={actions}
+              tools={<StaleSwitch value={stale} onChange={setStale} />} />
             {records}
           </div>
         ) : (
@@ -210,4 +195,21 @@ function Player({ scenario, names, background, settings }: {
       </main>
     </>
   );
+}
+
+/** Prototype only: mock answers that can be told to refuse the way the server would after the draft changed. */
+function staleActions(stale: Stale, setStale: (value: Stale) => void): AdoptActions {
+  return {
+    propose: async input => {
+      if (stale === 'report') throw new Error('REPORT_REVISION_STALE');
+      return MOCK_ADOPT_ACTIONS.propose(input);
+    },
+    confirm: async input => {
+      if (input.decision === 'apply' && stale === 'proposal') {
+        setStale('none');
+        throw new Error('FUSION_ADOPTION_STALE');
+      }
+      return MOCK_ADOPT_ACTIONS.confirm(input);
+    },
+  };
 }
