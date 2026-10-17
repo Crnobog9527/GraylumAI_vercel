@@ -8,6 +8,8 @@ import { MessageMarkdown } from "@/components/chat/MessageMarkdown";
 import { ReportView } from "@/components/chat-display/report-view/report-view";
 import { ChatNoticeList, type ChatNotice } from "@/components/chat/ChatInlineNotice";
 import resultStyles from "@/components/opc/positioning-result.module.css";
+import { ExpertConsultCard } from "@/components/expert-consult/ExpertConsultCard";
+import { expertConsultPath } from "@/components/expert-consult/expertConsultCopy";
 import {
   askedVersion, bodyFromEditor, canFinalize, canSave, editorChanged, editorText, hasDataFence, savedAs, finalizedNotice, REPORT_DOC_TEXT, REPORT_MAX_CHARACTERS,
   reportDocumentError, reportLength, requestFor,
@@ -126,6 +128,7 @@ export function ReportDocumentPanel({ executionId, fallbackBody, generatedComple
           <summary className="text-xs">{REPORT_DOC_TEXT.showLatest}</summary><MessageMarkdown className="mt-2" text={editorText(doc.body)} /></details>}
       </div>}
     <ChatNoticeList className="mt-4" notices={notices} />
+    {doc.finalized && <ExpertConsultCard className="mt-4" href={expertConsultPath("report")} />}
     {!doc.finalized && <div className={resultStyles.consentActions}>
       {askingNow ? <>
         <p>{REPORT_DOC_TEXT.finalizeAsk}</p>

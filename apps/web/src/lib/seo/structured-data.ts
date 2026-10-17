@@ -92,6 +92,33 @@ export function webPageJsonLd(options: {
   return data;
 }
 
+/** A blog article (SEO_GEO_SPEC section 10): author and dates as the page shows them. */
+export function blogPostingJsonLd(options: {
+  path: string;
+  title: string;
+  description: string;
+  locale: SiteLocale;
+  published: string;
+  modified: string;
+  authorName: string;
+  authorPath: string;
+}): JsonLdObject {
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'BlogPosting',
+    '@id': `${absoluteUrl(options.path)}#article`,
+    mainEntityOfPage: absoluteUrl(options.path),
+    headline: options.title,
+    description: options.description,
+    inLanguage: SITE_LOCALES[options.locale].htmlLang,
+    datePublished: options.published,
+    dateModified: options.modified,
+    author: { '@type': 'Organization', name: options.authorName, url: absoluteUrl(options.authorPath) },
+    publisher: { '@id': ORGANIZATION_ID },
+    image: absoluteUrl('/og/default.png'),
+  };
+}
+
 export function breadcrumbJsonLd(items: { name: string; path: string }[]): JsonLdObject {
   return {
     '@context': 'https://schema.org',

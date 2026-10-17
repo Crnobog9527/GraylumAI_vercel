@@ -6,10 +6,13 @@
 
 import { ArrowRight, Mail, MessageSquareMore } from 'lucide-react';
 import MarketingShell from '@/components/landing/MarketingShell';
+import { ExpertConsultCard } from '@/components/expert-consult/ExpertConsultCard';
+import { expertConsultPath } from '@/components/expert-consult/expertConsultCopy';
 import PublicPageHero from '@/components/landing/PublicPageHero';
 import { contactChannels } from '@/lib/landing-content';
 import { getPublicSiteSettings } from '@/lib/public-site';
 import { buildPageMetadata } from '@/lib/seo/metadata';
+import { buildAuthHref } from '@/lib/site-config';
 
 // Static with hourly refresh: the support e-mail comes from site settings (SEO_GEO_SPEC section 9).
 export const revalidate = 3600;
@@ -47,6 +50,7 @@ export default async function ContactPage() {
                 <p className="mt-3 text-sm leading-7 text-[#B1B1B1]">{channel.description}</p>
               </div>
             ))}
+            <ExpertConsultCard href={buildAuthHref(expertConsultPath('studio'))} />
           </div>
 
           <div className="rounded-3xl border border-[#FFD700]/20 bg-gradient-to-b from-[#181818] to-[#111111] p-8 shadow-[0_18px_56px_rgba(0,0,0,0.18)]">
