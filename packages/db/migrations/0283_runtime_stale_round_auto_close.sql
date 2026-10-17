@@ -105,7 +105,7 @@ BEGIN
    -- Any pause (user stop, insufficient credits, a resumable HTTP budget) is user-side or
    -- resumable, never a Graylum failure to refund. Erased accounts belong to erasure recovery.
    AND r.paused_reason IS NULL
-   -- 0282: content beyond capacity (user material too long) is not refunded (Owner 2026-10-12).
+   -- 0283: content beyond capacity (user material too long) is not refunded (Owner 2026-10-12).
    AND coalesce(e.failure_code,'') NOT IN ('RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY','RUNTIME_COMPLETE_REQUEST_EXCEEDS_CAPACITY')
    AND EXISTS(SELECT 1 FROM profiles p WHERE p.id=e.actor_id AND p.is_deleted='false')
    -- Quiet since the cutoff: no live dispatch lease and no call created, sent or settled since.
@@ -158,7 +158,7 @@ BEGIN
    'executionState',e.state,'compensatedCredits',b.compensation_credits);
  END IF;
  IF b.contract_version<>'bill2.v2' OR b.closed OR b.cancel_requested OR b.paused_reason IS NOT NULL
-  -- 0282: content beyond capacity is user-side and never refunded.
+  -- 0283: content beyond capacity is user-side and never refunded.
   OR coalesce(e.failure_code,'') IN ('RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY','RUNTIME_COMPLETE_REQUEST_EXCEEDS_CAPACITY')
   OR NOT EXISTS(SELECT 1 FROM profiles p WHERE p.id=e.actor_id AND p.is_deleted='false')
   -- A retry just before the operator confirmed revives the round: it must still be quiet.

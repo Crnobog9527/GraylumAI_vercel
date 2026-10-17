@@ -8,9 +8,9 @@ import { localDb, read } from '../runtime-view-perf/local-db.mjs';
 
 const migrationPath = 'packages/db/migrations/0275_pay_dispute_credit_sources.sql';
 const MARK = ' -- PR-D0 credit sources';
-// Later migrations that replace or hook 0275's functions (0289 refund hold): reapplied after 0275 so the
+// Later migrations that replace or hook 0275's functions (0284 refund hold): reapplied after 0275 so the
 // end state is the full chain again.
-const LATER = ['packages/db/migrations/0289_pay_refunded_pack_hold.sql'];
+const LATER = ['packages/db/migrations/0284_pay_refunded_pack_hold.sql'];
 const reapply = async () => { for (const path of [migrationPath, ...LATER]) await c.query(read(path)); };
 const HOOKED = ['atomic_pre_deduct(uuid,integer,text,uuid)', 'bill2_legacy_settle(uuid,uuid,integer,jsonb,jsonb)',
   'bill2_legacy_refund(uuid,uuid,text)', 'bill2_legacy_abort_settle(uuid,uuid,integer,jsonb,text,text)',
@@ -161,7 +161,7 @@ try {
   const ext = await pack(u6, 100);
   p = await reserve(u6, 20);
   await c.query("UPDATE payment_orders SET status='refunded',payment_status='refunded' WHERE id=$1", [ext.order]);
-  // 0289: the held pack is out of the spendable balance, so only the 30 unattributed credits can be reserved.
+  // 0284: the held pack is out of the spendable balance, so only the 30 unattributed credits can be reserved.
   await assert.rejects(() => reserve(u6, 40), /PRE_DEDUCT_TERMINATED_GRANT_REMAINDER_QUARANTINED/);
   const p2 = await reserve(u6, 30);
   assert.deepEqual([await balance(u6), await packUsed(ext.source), await unattributed(u6)], [100, 0, 50],
@@ -258,7 +258,7 @@ try {
   await unhook();
   await c.query('DROP TABLE credit_source_entries, credit_source_reviews, credit_package_sources');
   await c.query('DROP TRIGGER credit_package_source_track ON credit_transactions');
-  // Before 0275 the 0289 refund-hold lines do not exist either.
+  // Before 0275 the 0284 refund-hold lines do not exist either.
   for (const fn of ['atomic_pre_deduct(uuid,integer,text,uuid)', 'bill2_payg_claim(uuid,uuid,integer,jsonb)']) {
     const src = await v('SELECT pg_get_functiondef($1::regprocedure) v', ['public.' + fn]);
     await c.query(src.split('\n').filter(line => !line.endsWith('-- PAY-REFUND-HOLD')).join('\n'));

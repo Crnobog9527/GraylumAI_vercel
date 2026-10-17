@@ -17,7 +17,7 @@ const uuid = z.string().uuid();
 const scope = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('positioning_draft'), draftId: uuid }).strict(),
   z.object({ kind: z.literal('work_item'), projectId: uuid, workItemId: uuid }).strict(),
-  // LIB-2d (0278): one of the actor's own PDF or Word documents in the library.
+  // LIB-2d (0285): one of the actor's own PDF or Word documents in the library.
   z.object({ kind: z.literal('library_document'), documentId: uuid }).strict(),
 ]);
 export const frozenCallPolicy = z.object({

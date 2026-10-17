@@ -10,7 +10,7 @@ export const openRouterLimits=z.object({
  promptUsdPerMillion:z.string(),completionUsdPerMillion:z.string(),requestUsd:z.string(),
  // MODEL-PRICING-SYNC / #572: total price of one cache-written token. Optional; absent on older quotes.
  cacheWriteUsdPerMillion:z.string().optional(),
- // LIB-2d (0278): the route's price per input image (snapshot `image`), "0" when it has none.
+ // LIB-2d (0285): the route's price per input image (snapshot `image`), "0" when it has none.
  // Present only on a route admitted for image input; it then also caps OpenRouter max_price.image.
  imageUsd:z.string().optional(),
 }).strict();

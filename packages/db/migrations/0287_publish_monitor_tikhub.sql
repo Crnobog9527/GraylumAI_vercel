@@ -1,6 +1,6 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
 -- PUBLISH-MONITOR PR-4a (docs/launch/tasks/PUBLISH-MONITOR.md §4.2, §8): the user's own Xiaohongshu/Douyin accounts and
--- Gold benchmark accounts read through TikHub. Number 0288 assigned by the controller. Connections, the daily claim and
+-- Gold benchmark accounts read through TikHub. Number 0287 assigned by the controller. Connections, the daily claim and
 -- writing a read's results; the billed read itself (BILL2 background runs) is PR-4b, so nothing here calls TikHub or
 -- charges credits, and the daily TikHub step stays off until 4b lands.
 BEGIN;

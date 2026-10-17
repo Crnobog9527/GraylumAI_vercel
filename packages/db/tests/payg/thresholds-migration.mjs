@@ -25,13 +25,13 @@ export async function thresholdMigrationCases(db,report,createFixture,claim,rece
     const config=(await db.query("SELECT value FROM system_settings WHERE key='billing_payg_start_thresholds'")).rows[0].value;
     await db.query(migration);
     await db.query(migration);
-    // 0234/0235 (FUSION-REVIEW), 0255 and 0268 (RESEARCH-TOOLS) and 0289 (refund hold) patch on top of 0180;
+    // 0234/0235 (FUSION-REVIEW), 0255 and 0268 (RESEARCH-TOOLS) and 0284 (refund hold) patch on top of 0180;
     // re-apply them in order to reach the latest source and grants.
     await db.query(read('0234_fusion_billing_group.sql'));
     await db.query(read('0235_fusion_sessionless_storage.sql'));
     await db.query(read('0255_research_tool_billing.sql'));
     await db.query(read('0268_research_benchmarks.sql'));
-    await db.query(read('0289_pay_refunded_pack_hold.sql'));
+    await db.query(read('0284_pay_refunded_pack_hold.sql'));
     assert.equal(await definition(),current);
     assert.deepEqual(await acl(),permissions);
     assert.deepEqual(await snapshot(),frozen);

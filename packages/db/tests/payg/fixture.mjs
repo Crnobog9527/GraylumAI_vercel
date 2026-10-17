@@ -11,7 +11,7 @@ export async function createFixture(db,options={}) {
   const bytes = options.bytes??100;
   const templateTokens = options.templateTokens??4096;
   const marginTokens = options.marginTokens??4096;
-  // LIB-2d (0278): options.image = {width,height,dataUrlBytes,imageUsd}; bytes then stays the text part.
+  // LIB-2d (0285): options.image = {width,height,dataUrlBytes,imageUsd}; bytes then stays the text part.
   const image = options.image ? {dataUrlBytes:options.image.dataUrlBytes,width:options.image.width,height:options.image.height,
     tokensUpper:options.image.tokensUpper??2*Math.ceil(options.image.width/14)*Math.ceil(options.image.height/14)+2048} : null;
   const promptTokensUpper = bytes+templateTokens+marginTokens+(image?image.tokensUpper:0);

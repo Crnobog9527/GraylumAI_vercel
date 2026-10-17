@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// LIB-2d (0280): saving browser-recognised text of scanned PDF pages and Word images (switch, ownership, version,
+// LIB-2d (0286): saving browser-recognised text of scanned PDF pages and Word images (switch, ownership, version,
 // order, quota, races, Word anchors, roles).
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';

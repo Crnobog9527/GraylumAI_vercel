@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 
-// PAY-DISPUTE-GUARD refund hold (0289): a pack refunded outside Graylum without a clawback is held out of the
+// PAY-DISPUTE-GUARD refund hold (0284): a pack refunded outside Graylum without a clawback is held out of the
 // PAYG claim balance like a terminated period's remainder, until a person settles it.
 export async function refundHoldCases(db,report,createFixture,claim) {
   const f=await createFixture(db);

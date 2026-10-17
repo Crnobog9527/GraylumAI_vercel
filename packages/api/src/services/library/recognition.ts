@@ -9,7 +9,7 @@ import { libraryRpc } from './rpc';
  * LIB-2d: saving text that the user's own browser recognised from a scanned PDF page or a Word image (Owner
  * 2026-10-17: browser PaddleOCR, no model call, no charge). The server never sees the image; it stores the text as
  * that unit's segments under the actor and document locks (quota, content version, one save per unit). Off unless
- * the `library_scan_recognition_enabled` setting is true (migration 0280).
+ * the `library_scan_recognition_enabled` setting is true (migration 0286).
  */
 
 /** Recognised text of one page: plain text, at most 100,000 characters (the browser engine's per-page cap). */

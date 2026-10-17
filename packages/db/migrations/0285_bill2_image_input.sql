@@ -42,13 +42,13 @@ REVOKE ALL ON FUNCTION public.bill2_payg_image(jsonb,jsonb,jsonb,text) FROM PUBL
 DO $$ DECLARE src text;n1 text;n2 text;n3 text;img text:=$i$bill2_payg_image(q,v,limits,p->>'phase')$i$;
 BEGIN
  src:=pg_get_functiondef('public.bill2_payg_validate_quote(bill2_runs,jsonb)'::regprocedure);
- IF position('-- 0278 image' IN src)>0 THEN RETURN;END IF;
+ IF position('-- 0285 image' IN src)>0 THEN RETURN;END IF;
  n1:=$n$ OR t<>(v->>'bytes')::bigint+(v->>'templateTokens')::bigint+(v->>'marginTokens')::bigint$n$;
  n2:=$n$ OR (v->>'bytes')::int NOT BETWEEN 1 AND least((q->>'maxBytes')::int,196608)$n$;
  n3:=$n$u:=ceil(((t*price+o*bill2_decimal(limits->'completionUsdPerMillion'))/1000000)*1e12)/1e12+bill2_decimal(limits->'requestUsd');$n$;
  IF (length(src)-length(replace(src,n1,'')))/length(n1)<>1 OR (length(src)-length(replace(src,n2,'')))/length(n2)<>1
- OR (length(src)-length(replace(src,n3,'')))/length(n3)<>1 THEN RAISE EXCEPTION 'BILL2_PAYG_QUOTE_SOURCE_MISMATCH: 0278';END IF;
- src:=replace(src,n1,format($r$ -- 0278 image
+ OR (length(src)-length(replace(src,n3,'')))/length(n3)<>1 THEN RAISE EXCEPTION 'BILL2_PAYG_QUOTE_SOURCE_MISMATCH: 0285';END IF;
+ src:=replace(src,n1,format($r$ -- 0285 image
  OR t<>(v->>'bytes')::bigint-(%1$s->>'bytes')::bigint+(%1$s->>'tokens')::bigint+(v->>'templateTokens')::bigint+(v->>'marginTokens')::bigint$r$,img));
  src:=replace(src,n2,format($r$ OR (v->>'bytes')::bigint-(%1$s->>'bytes')::bigint NOT BETWEEN 1 AND least((q->>'maxBytes')::int,196608)$r$,img));
  src:=replace(src,n3,format($r$u:=ceil(((t*price+o*bill2_decimal(limits->'completionUsdPerMillion'))/1000000)*1e12)/1e12+bill2_decimal(limits->'requestUsd')
@@ -80,7 +80,7 @@ BEGIN
  IF position('"imageUsd"' IN src)=0 THEN
   IF (length(src)-length(replace(src,'"cacheWriteUsdPerMillion": "decimal"','')))/length('"cacheWriteUsdPerMillion": "decimal"')<>1
   OR (length(src)-length(replace(src,'"expiresAt": "timestamp"','')))/length('"expiresAt": "timestamp"')<>1
-  THEN RAISE EXCEPTION 'BILL2_ERASURE_SOURCE_MISMATCH: 0278 run';END IF;
+  THEN RAISE EXCEPTION 'BILL2_ERASURE_SOURCE_MISMATCH: 0285 run';END IF;
   src:=replace(src,'"cacheWriteUsdPerMillion": "decimal"','"cacheWriteUsdPerMillion": "decimal", "imageUsd": "decimal"');
   src:=replace(src,'"expiresAt": "timestamp"','"expiresAt": "timestamp", "imageInput": {"maxDataUrlBytes": "integer", "maxEdge": "integer"}');
   EXECUTE src;
@@ -88,7 +88,7 @@ BEGIN
  src:=pg_get_functiondef('public.bill2_erasure_call_payload(jsonb)'::regprocedure);
  IF position('"tokensUpper"' IN src)=0 THEN
   IF (length(src)-length(replace(src,'"tools":"integer","schemaBytes":"integer"}','')))/length('"tools":"integer","schemaBytes":"integer"}')<>1
-  THEN RAISE EXCEPTION 'BILL2_ERASURE_SOURCE_MISMATCH: 0278 call';END IF;
+  THEN RAISE EXCEPTION 'BILL2_ERASURE_SOURCE_MISMATCH: 0285 call';END IF;
   EXECUTE replace(src,'"tools":"integer","schemaBytes":"integer"}',
    '"tools":"integer","schemaBytes":"integer","image":{"dataUrlBytes":"integer","width":"integer","height":"integer","tokensUpper":"integer"}}');
  END IF;
