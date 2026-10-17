@@ -311,6 +311,10 @@ BEGIN
   IF fc.group_id IS NULL THEN RETURN fusion_compare_view(fc); END IF;
   IF p_run_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM bill2_runs WHERE id=p_run_id AND fusion_group_id=fc.group_id) THEN
     RAISE EXCEPTION 'FUSION_COMPARE_DENIED'; END IF;
+  -- A single column stops only after the one atomic claim: before it, closing one run would leave the claim
+  -- (which must list every column) impossible. Before the claim the whole compare is stopped instead.
+  IF p_run_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM fusion_billing_group_steps WHERE group_id=fc.group_id AND step_key='compare:1') THEN
+    RAISE EXCEPTION 'FUSION_COMPARE_NOT_CLAIMED'; END IF;
   IF p_run_id IS NULL AND fc.state='running' THEN
     UPDATE fusion_compares SET state='stopped',updated_at=clock_timestamp() WHERE id=fc.id RETURNING * INTO fc;
   END IF;

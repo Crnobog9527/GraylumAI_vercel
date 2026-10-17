@@ -112,6 +112,8 @@ export async function fusionCompareCases({db,Client,connectionString,report,crea
 
   // The single group claim, under the compare lock: full holds for both columns, then a replay.
   const items = admitted.runs.map(r=>({runId:r.runId,sequence:1,payload:r.fusion.call}));
+  await assert.rejects(call(db,'fusion_compare_stop',actor,first.compareId,admitted.runs[1].runId),/FUSION_COMPARE_NOT_CLAIMED/,
+    'a single column cannot stop before the one claim');
   const before = await wallet(db,actor);
   await assert.rejects(call(db,'fusion_compare_claim',actor,first.compareId,items.slice(0,1)),/FUSION_COMPARE_CLAIM_INCOMPLETE/);
   assert.equal(await wallet(db,actor),before,'a truncated batch holds nothing');
@@ -213,6 +215,21 @@ export async function fusionCompareCases({db,Client,connectionString,report,crea
   assert.equal((await call(db,'fusion_compare_read',actor,fourth.compareId)).state,'refused');
   await assert.rejects(call(db,'fusion_compare_gate',actor,fourth.compareId,'clear'),/FUSION_COMPARE_ENDED/);
   report.checks.push('a blocked judgement refuses the compare with no group; an admitting record older than 5 minutes is refused');
+
+  // Recovery closes a running compare's runs (the page was closed before dispatch): the user can start again at
+  // once, without reading that compare first; the next read finishes the record.
+  await db.query("UPDATE fusion_compares SET state='refused' WHERE id=$1",[fourth.compareId]);
+  const id5 = randomUUID();
+  const fifth = await begin({...request(),historyRevision:'3',requestHash:sha('fifth')},id5);
+  await call(db,'fusion_compare_gate',actor,fifth.compareId,'clear');
+  const admitted5 = await call(db,'fusion_group_admit',actor,id5,'compare',session,[column(a,0),column(b,1)]);
+  await call(db,'fusion_compare_claim',actor,fifth.compareId,admitted5.runs.map(r=>({runId:r.runId,sequence:1,payload:r.fusion.call})));
+  await assert.rejects(begin({...request(),historyRevision:'3',requestHash:sha('sixth')}),/FUSION_COMPARE_ACTIVE/);
+  for (const r of admitted5.runs) { await rpc(db,'bill2_cancel',actor,r.runId); await rpc(db,'bill2_finalize',actor,r.runId); }
+  const sixth = await begin({...request(),historyRevision:'3',requestHash:sha('sixth')});
+  assert.equal(sixth.state,'admitting','a compare whose runs recovery closed no longer blocks a new one');
+  assert.equal((await call(db,'fusion_compare_read',actor,fifth.compareId)).state,'finished');
+  report.checks.push('after recovery closes a compare\'s runs the user can start a new compare without reading it; the next read finishes it');
 
   // Account erasure removes compare records and counts them while present.
   assert.ok(await count(db,'SELECT account_erasure_body_remaining($1)::bigint v',[actor])>0);
