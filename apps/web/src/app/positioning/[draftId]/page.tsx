@@ -45,21 +45,10 @@ import { checklistUpdatedInput, isOpeningInput, openingEntryKey } from "@repo/ap
 import { clearSavedFields, isHostAction, noteSavedFields, nudgeNotice, refusedTurn, savedFields, shownInput } from "./checklist-nudge";
 type Step = { id: string; title: string; dependsOn?: string[] };
 import { type Information, type Item, type StepEnvelope } from "./confirm-envelope";
-import { handoffIntent, readRetainedHandoff } from "./handoff-envelope";
-/**
- * Provably definite rollbacks of the `opc_handoff` SQL function. Every code
- * below is raised before that function's single durable write, so an exception
- * rolls the whole transaction back and a request carrying it can never commit:
- * releasing the retained request and forming a new explicit one is safe.
- * Timeouts, lost replies and every other error keep it for idempotent replay.
- */
-const definiteHandoffRejections = new Set([
-  "OPC_ACCOUNT_CONFLICT",
-  "OPC_ACCOUNTS_INVALID",
-  "OPC_VERSION_CONFLICT",
-  "OPC_REQUEST_CONFLICT",
-  "OPC_DENIED",
-]);
+import { definiteHandoffRejections, handoffIntent, readRetainedHandoff } from "./handoff-envelope";
+import { ResearchCallList } from "@/components/research/research-call-list";
+import { ResearchSessionPanel, useResearchCalls } from "@/components/research/research-session";
+import { researchConfirmedInput } from "@/components/research/research-session-model";
 /** The retained mentor request is either wrapped in `request` or legacy top-level. */
 export default function PositioningDraft({
   params,
@@ -137,7 +126,8 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const history = trpc.runtime.view.useQuery({ sessionId: read.data?.sessionId ?? "" },
     { enabled: Boolean(read.data?.sessionId) && !read.data?.conversationDeleted,
       refetchInterval: useHistoryPolling(draftId, read.data?.snapshot?.workflow.steps ?? []) });
-  const live = useLiveReply(draftId, history.data), liveReply = live.reply, stopLocal = live.stopLocal;
+  const research = useResearchCalls(read.data?.sessionId);
+  const live = useLiveReply(draftId, history.data, research.observe), liveReply = live.reply, stopLocal = live.stopLocal;
   const payg = usePaygResume(() => Promise.all([read.refetch(), history.refetch(), utils.credits.getBalance.invalidate()]));
   const [activeStep, setActiveStep] = useState<string | null>(null);
   // State, not a ref: on a client-side return cached history exists before the log mounts.
@@ -1196,6 +1186,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                         <MentorTurnGroup key={execution.executionId} executionId={execution.executionId}>
                           {/* The host opens the step itself: no fabricated user message. */}
                           {!openingTurn && <MentorUserMessage stepLabel={turnLabel} text={shownInput(execution.input) ?? "内容暂不可用"}/>}
+                          <ResearchCallList calls={research.of(execution.executionId)}/>
                           {reply.text && <MentorReply kind={summaryTurn ? "summary" : openingTurn ? "opening" : "reply"} stepLabel={turnLabel}
                             text={reply.text} live={Boolean(live)} result={execution}
                             summaryHint={Boolean(summaryTurn && !next && !s.valid && turn?.stepId === step.id && summaryShown(execution))}/>}
@@ -1211,7 +1202,10 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                     {pendingBubble&&!mentorExecutions.some(e=>e.request?.requestId===pendingBubble.requestId)&&<MentorPendingMessage
                       requestId={pendingBubble.requestId} stepTitle={steps.find(candidate => candidate.id === pendingBubble.stepId)?.title}
                       text={shownInput(pendingBubble.input)} sending={running}/>}
+                  {liveOnly && <ResearchCallList calls={research.of(liveOnly.executionId)}/>}
                   {liveOnly&&(liveOnly.text||!liveOnly.card)&&<MentorLiveReply text={liveOnly.text}/>}
+                  {read.data?.sessionId && <ResearchSessionPanel sessionId={read.data.sessionId} disabled={sendLocked || snap.state !== "draft"}
+                    onConfirmed={confirmed => void ask(step, researchConfirmedInput(confirmed))}/>}
                   <ChatNoticeList notices={[...payg.blockedNotices(mentorExecutions, busy),
                     nudgeNotice(nudged, () => void ask(step, checklistUpdatedInput(nudged)), sendLocked, hasPendingStepRequest),
                     ...mentorTailNotices({ livePhase: live.phase, stop: live.stopAction,

@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from 'vitest';
 import {
-  confirmResearchCard, createResearchRefresh, researchCards, researchEvidence, researchToolCharges,
+  confirmResearchCard, createResearchRefresh, researchBenchmarks, researchCards, researchEvidence, researchToolCharges,
 } from './userApi';
 const actor = '00000000-0000-4000-8000-000000000001';
 const id = '00000000-0000-4000-8000-000000000002';
@@ -133,5 +133,23 @@ describe('research user API', () => {
       .rejects.toMatchObject({ code: 'FORBIDDEN' });
     await expect(researchToolCharges(db([{ provider: 'private' }]), actor, other))
       .rejects.toMatchObject({ message: 'RESEARCH_UNAVAILABLE' });
+  });
+  it('reads the session benchmark table for its owner, keeping missing numbers null and dropping other fields', async () => {
+    const row = { platform: 'douyin', account: 'alpha', followers: 38200, medianViews: null, engagementRate: 0.0634,
+      postsPerWeek: 4.2, lastPublishedAt: '2026-10-13T10:00:00+00:00', postsAnalyzed: 24, category: 'imitable',
+      qualified: true, excluded: null, missing: ['medianViews'], fetchedAt: '2026-10-15T08:00:00+00:00' };
+    const client = db({ rows: [row], hash: 'private-hash' });
+    const result = await researchBenchmarks(client, actor, other);
+    expect(client.rpc).toHaveBeenCalledWith('research_benchmark_rows', { a: actor, s: other });
+    expect(result).not.toHaveProperty('hash');
+    expect(result.items).toEqual([{ ...row, missing: undefined }].map(({ missing: _missing, ...rest }) => rest));
+    expect(result.items[0]!.medianViews).toBeNull();
+  });
+  it('denies another user\'s session benchmark table and rejects malformed rows', async () => {
+    await expect(researchBenchmarks(db(null, { message: 'RESEARCH_SCOPE_DENIED' }), actor, other))
+      .rejects.toMatchObject({ code: 'FORBIDDEN', message: 'RESEARCH_SCOPE_DENIED' });
+    await expect(researchBenchmarks(db({ rows: [{ platform: 'douyin', account: 'a', followers: -1 }] }), actor, other))
+      .rejects.toMatchObject({ message: 'RESEARCH_UNAVAILABLE' });
+    await expect(researchBenchmarks(db(null), actor, 'not-a-uuid')).rejects.toThrow();
   });
 });

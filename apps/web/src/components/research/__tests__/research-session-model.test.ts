@@ -1,7 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from "vitest";
 import {
-  isResearchEvent, MAX_CALLS_PER_EXECUTION, openCards, toSessionCards, withResearchCall, type StoredCard,
+  isResearchEvent, MAX_CALLS_PER_EXECUTION, openCards, REPORT_MIN_QUALIFIED, toBenchmarkRows, toSessionCards, withResearchCall,
+  type StoredBenchmark, type StoredCard,
 } from "../research-session-model";
 
 type CallEvent = Parameters<typeof withResearchCall>[2];
@@ -88,5 +89,27 @@ describe("stored cards", () => {
   it("a later candidate card of the session is a follow-up card", () => {
     const cards = toSessionCards([KEYWORDS, CANDIDATES, FOLLOW_UP]);
     expect(cards[2]!.card).toMatchObject({ kind: "candidates", followUp: true });
+  });
+});
+
+describe("stored benchmark rows", () => {
+  const stored = (account: string, extra: Partial<StoredBenchmark> = {}): StoredBenchmark => ({
+    platform: "douyin", account, followers: 38200, medianViews: null, engagementRate: 0.05, postsPerWeek: 3,
+    lastPublishedAt: "2026-10-13T10:00:00Z", category: "imitable", qualified: true, fetchedAt: "2026-10-15T08:00:00Z", ...extra,
+  });
+
+  it("keeps nulls missing, cites no source without refs and reports the newest fetch", () => {
+    const { rows, fetchedAt } = toBenchmarkRows([stored("a"), stored("b", { fetchedAt: "2026-10-16T09:30:00Z", qualified: false,
+      category: null, followers: null })]);
+    expect(rows[0]!.metrics.medianViews).toEqual({ value: null, refs: [] });
+    expect(rows[0]!.metrics.followers).toEqual({ value: 38200, refs: [] });
+    expect(rows[1]!.metrics.followers.value).toBeNull();
+    expect(rows.map(row => [row.account, row.qualified, row.category])).toEqual([["a", true, "imitable"], ["b", false, null]]);
+    expect(fetchedAt).toBe("2026-10-16T09:30:00.000Z");
+    expect(REPORT_MIN_QUALIFIED).toBe(3);
+  });
+
+  it("has no fetch time without rows", () => {
+    expect(toBenchmarkRows([])).toEqual({ rows: [], fetchedAt: null });
   });
 });

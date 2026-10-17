@@ -3,13 +3,15 @@
 
 import { useCallback, useState } from "react";
 import { trpc } from "@/trpc/client";
+import { BenchmarkTable } from "./benchmark-table";
 import { CandidateCardView } from "./candidate-card";
 import { KeywordCardView } from "./keyword-card";
 import type { ResearchCall } from "./research-model";
 import {
-  isResearchEvent, toSessionCards, withResearchCall, type CallsByExecution, type StoredCard,
+  isResearchEvent, REPORT_MIN_QUALIFIED, toBenchmarkRows, toSessionCards, withResearchCall,
+  type CallsByExecution, type StoredBenchmark, type StoredCard,
 } from "./research-session-model";
-import type { CardConfirmation } from "./selection-card-model";
+import type { CandidateSubmission, CardConfirmation, KeywordSubmission } from "./selection-card-model";
 import styles from "./research.module.css";
 
 const NO_CALLS: readonly ResearchCall[] = [];
@@ -24,8 +26,13 @@ export function useResearchCalls(sessionId: string | null | undefined) {
   const [calls, setCalls] = useState<CallsByExecution>(() => new Map());
   const observe = useCallback((executionId: string, event: { type: string }) => {
     if (!isResearchEvent(event)) return;
-    if (event.type === "research_call") setCalls(current => withResearchCall(current, executionId, event));
-    else if (sessionId) void utils.research.cards.invalidate({ sessionId });
+    if (event.type === "research_call") {
+      setCalls(current => withResearchCall(current, executionId, event));
+      // A finished account fetch may have added or changed a benchmark row.
+      if (sessionId && event.state !== "running" && event.toolName === "benchmark_fetch") {
+        void utils.research.benchmarks.invalidate({ sessionId });
+      }
+    } else if (sessionId) void utils.research.cards.invalidate({ sessionId });
   }, [sessionId, utils]);
   const of = useCallback((executionId: string) => calls.get(executionId) ?? NO_CALLS, [calls]);
   return { observe, of };
@@ -45,14 +52,14 @@ export function ResearchSessionCards({ sessionId, disabled, onConfirmed }: {
   const utils = trpc.useUtils();
   const cards = trpc.research.cards.useQuery({ sessionId }, { staleTime: 30_000 });
   const confirm = trpc.research.confirmCard.useMutation();
-  const rows = cards.data ? toSessionCards(cards.data.items as StoredCard[]) : [];
+  const rows = toSessionCards((cards.data?.items ?? []) as StoredCard[]);
   if (rows.length === 0) {
     return cards.error ? <p role="alert" className={styles.problem}>选择卡没有读到，请刷新页面再试。</p> : null;
   }
-  const submit = async (cardId: string, submission: object) => {
+  const submit = async (cardId: string, submission: KeywordSubmission | CandidateSubmission) => {
     const confirmation = await confirm.mutateAsync({ cardId, ...submission }) as CardConfirmation;
-    await utils.research.cards.invalidate({ sessionId });
     onConfirmed?.(confirmation);
+    void utils.research.cards.invalidate({ sessionId });
     return confirmation;
   };
   return (
@@ -63,5 +70,32 @@ export function ResearchSessionCards({ sessionId, disabled, onConfirmed }: {
         : <CandidateCardView key={card.cardId} card={card} confirmation={confirmation} disabled={disabled}
           onConfirm={submission => submit(card.cardId, submission)}/>)}
     </div>
+  );
+}
+
+/**
+ * This session's benchmark table (plan §1.4) under the conversation, from `research.benchmarks`; nothing until the
+ * first account is fetched. Says how many qualified benchmarks the positioning report still needs.
+ */
+export function ResearchSessionBenchmarks({ sessionId }: { sessionId: string }) {
+  const table = trpc.research.benchmarks.useQuery({ sessionId }, { staleTime: 30_000 });
+  const { rows, fetchedAt } = toBenchmarkRows((table.data?.items ?? []) as StoredBenchmark[]);
+  if (rows.length === 0) return table.error ? <p role="alert" className={styles.problem}>对标表没有读到，请刷新页面再试。</p> : null;
+  const qualified = rows.filter(row => row.qualified).length;
+  return (
+    <BenchmarkTable rows={rows} fetchedAt={fetchedAt}>
+      {qualified < REPORT_MIN_QUALIFIED && <p className={styles.hint}>
+        生成定位报告需要至少 {REPORT_MIN_QUALIFIED} 个合格的对标账号，目前 {qualified} 个。可以换关键词再找，或直接贴对标账号的主页链接。</p>}
+    </BenchmarkTable>
+  );
+}
+
+/** Cards, then the benchmark table, under the positioning conversation. */
+export function ResearchSessionPanel(props: Parameters<typeof ResearchSessionCards>[0]) {
+  return (
+    <>
+      <ResearchSessionCards {...props}/>
+      <ResearchSessionBenchmarks sessionId={props.sessionId}/>
+    </>
   );
 }

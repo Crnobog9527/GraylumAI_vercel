@@ -11,7 +11,7 @@ const ICONS: Record<CallState, typeof Check> = { running: Loader2, success: Chec
  * (成功 / 未取到 / 待核) with the credits it settled at, from the stream's `research_call` events. No supplier
  * names or supplier costs.
  */
-export function ResearchCallList({ calls }: { calls: ResearchCall[] }) {
+export function ResearchCallList({ calls }: { calls: readonly ResearchCall[] }) {
   const rows = calls.map(call => ({ id: call.callId, view: describeCall(call) }));
   if (rows.length === 0) return null;
   return (
