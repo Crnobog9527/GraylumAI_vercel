@@ -79,13 +79,16 @@ export async function runCases({db,report,before0301}) {
  report.checks.push('strategy reports take none of the 40 index places');
 
  // Oversized data: whole fields are dropped in the fixed order, the confirmed fields stay, the JSON is whole.
- const big=await one(db,'SELECT ws_test.positioning($1,$2,$3) v',[a,'Big','BIG_CANARY']);
+ // Its own user: the 41 positionings above fill the first user's 40 places.
+ const b=await one(db,'SELECT ws_test.actor() v');
+ const bSid=await one(db,'SELECT ws_test.free_session($1) v',[b]);
+ const big=await one(db,'SELECT ws_test.positioning($1,$2,$3) v',[b,'Big','BIG_CANARY']);
  const filler=Array.from({length:10},()=>({signal:'字'.repeat(120),meaning:'字'.repeat(120),action:'字'.repeat(120)}));
  await finalize(db,big.version,stored({...content,...business,adjustments:filler,routine:filler.map(()=>({when:'周日',task:'字'.repeat(120),minutes:30})),
   topics:Array.from({length:12},()=>({title:'字'.repeat(120),forWhom:'字'.repeat(120),pain:'字'.repeat(120),howToShoot:'字'.repeat(120),
    tests:'字'.repeat(120),watch:'字'.repeat(120)})),assumptions:Array.from({length:10},()=>({assumption:'字'.repeat(120),
    why:'字'.repeat(120),howToTest:'字'.repeat(120),signal:'字'.repeat(120),passIf:'字'.repeat(120),when:'第 2 周',ifNot:'字'.repeat(120)}))}));
- const bigRead=await read(db,a,sid,'strategy_report:'+big.business);
+ const bigRead=await read(db,b,bSid,'strategy_report:'+big.business);
  assert.equal(bigRead.kind,'workspace_source');
  assert.ok(Buffer.byteLength(JSON.stringify(bigRead.body))<=50000);
  assert.ok(bigRead.body.strategyDropped.length>0);assert.equal(bigRead.truncated,true);
@@ -116,21 +119,17 @@ export async function runCases({db,report,before0301}) {
  await finalize(db,withData.version,stored({...content,topics:Array.from({length:12},()=>({title:'字'.repeat(120),forWhom:'字'.repeat(120),
   pain:'字'.repeat(120),howToShoot:'字'.repeat(120),tests:'字'.repeat(120),watch:'字'.repeat(120)}))}));
  const fitted=await one(db,`SELECT opc_source_material($1,$2) v`,[withData.version,longBrief]);
+ const trimmed=JSON.parse(fitted);
+ assert.ok(trimmed.strategy.topics.length>=1&&trimmed.strategy.topics.length<12,'topics lose items from the end, not the whole list');
+ assert.ok(trimmed.strategyDropped.includes('topics[11]'));assert.equal(trimmed.strategyDropped.includes('topics'),false);
  assert.ok(Buffer.byteLength(JSON.stringify({brief:longBrief,material:fitted,roundId:null}))<=24000);
  report.checks.push('content material: unchanged without data; profile + content group with data; always within 24000 bytes');
 
- // Positioning drafts of a business: v1 without data (unchanged), v2 with the content group when there is data.
+ // Positioning drafts of a business stay v1 (0159 pins the check of their frozen material); topic and edit paths patched.
  const ctx=async p=>one(db,'SELECT opc_business_context($1,$2,(SELECT round_id FROM opc_drafts WHERE draft_id=$3)) v',[a,p.draftSession,p.draft]);
- const v1=await ctx(legacy);
- assert.equal(v1.version,'opc-business-context.v1');assert.deepEqual(Object.keys(v1.source).sort(),['profile','versionId']);
- const v2=await ctx(withData);
- assert.equal(v2.version,'opc-business-context.v2');
- assert.deepEqual(v2.source.strategy,await one(db,'SELECT opc_business_strategy($1) v',[withData.version]));
- assert.equal(Object.hasOwn(v2.source.strategy.data,'funnel'),false);
- const check=await one(db,"SELECT pg_get_functiondef('public.runtime_material_allowed_before_b1(uuid,jsonb)'::regprocedure) v");
- assert.ok(check.includes("'opc-business-context.v2'")&&check.includes('opc_business_strategy(source_id)'));
+ assert.equal((await ctx(withData)).version,'opc-business-context.v1');
  for(const [fn,text] of [['opc_topic_bind(uuid,uuid,uuid,uuid)','opc_source_material(v.id'],
   ['opc_library_edit(uuid,uuid,text,uuid,bigint,jsonb)','opc_work_material_payload(i.work_item_id)']])
   assert.ok((await one(db,`SELECT pg_get_functiondef('public.${fn}'::regprocedure) v`)).includes(text),fn);
- report.checks.push('positioning drafts: v1 context unchanged without data, v2 with the content group; validator, topic and edit paths patched');
+ report.checks.push('topic and work-item edit paths use the new material; positioning-draft context unchanged (v1)');
 }

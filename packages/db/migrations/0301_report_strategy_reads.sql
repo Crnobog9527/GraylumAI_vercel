@@ -9,8 +9,9 @@
 --      One read returns the confirmed fields (opc_profile, same as the positioning entry) and both data groups
 --      (content and business), so "index + one read" answers any question; over 48000 bytes, whole strategy
 --      fields are dropped in the fixed order (§3.1) and listed, the confirmed fields are never cut.
---   2. Content sessions created from now on: first-week topics (0113), work items (0229) and positioning drafts of a
---      business (0139) get the content group with the confirmed fields. A version without strategy data gives
+--   2. Content sessions created from now on: first-week topics (0113) and work items (0229, 0123's edits) get the
+--      content group with the confirmed fields. (Positioning drafts of a business, 0139, are not extended: 0159's
+--      frozen-material check that would have to accept it is pinned by hash in 0159 and its rollback test.) A version without strategy data gives
 --      exactly today's material, byte for byte, so nothing changes for any existing report or session. Material
 --      that would exceed 0106's 24000-byte limit drops strategy fields (fixed order), at worst back to today's.
 --      Frozen material and its hash are never rewritten.
@@ -29,11 +30,12 @@ LANGUAGE sql STABLE SET search_path=public,pg_temp AS $$
 $$;
 REVOKE ALL ON FUNCTION public.opc_strategy_data(uuid) FROM PUBLIC,anon,authenticated,service_role;
 
--- Keep `fields` of the data, then drop whole fields in the fixed order of reportData.ts (§3.1: the content group's
--- own order, the business group's, then the field table bottom-up, summary and thisWeek last) until it fits.
+-- Keep `fields` of the data, then drop in the fixed order of reportData.ts (§3.1: the content group's own order, the
+-- business group's, then the field table bottom-up, summary and thisWeek last) until it fits. Like fitReportData,
+-- topics and assumptions lose items from the end first and the whole field only below their minimum of one item.
 CREATE OR REPLACE FUNCTION public.report_strategy_fit(p_data jsonb,p_fields text[],p_max_bytes integer) RETURNS jsonb
 LANGUAGE plpgsql IMMUTABLE SET search_path=public,pg_temp AS $$
-DECLARE kept jsonb:='{}'::jsonb;f text;dropped jsonb:='[]'::jsonb;
+DECLARE kept jsonb:='{}'::jsonb;f text;dropped jsonb:='[]'::jsonb;n integer;
  drop_order constant text[]:=ARRAY['adjustments','routine','compliance','topics','assumptions','roadmap','upgrades',
   'redLines','income','funnel','plan30','content','accountKit','positioning','benchmarks','platforms','audience','goal',
   'situation','thisWeek','summary'];
@@ -43,7 +45,16 @@ BEGIN
  END LOOP;
  FOREACH f IN ARRAY drop_order LOOP
   EXIT WHEN octet_length(kept::text)<=p_max_bytes;
-  IF kept ? f THEN kept:=kept-f;dropped:=dropped||to_jsonb(f);END IF;
+  CONTINUE WHEN NOT kept ? f;
+  IF f IN ('topics','assumptions') AND jsonb_typeof(kept->f)='array' THEN
+   n:=jsonb_array_length(kept->f);
+   WHILE n>1 AND octet_length(kept::text)>p_max_bytes LOOP
+    kept:=jsonb_set(kept,ARRAY[f],(kept->f)-(n-1));
+    dropped:=dropped||to_jsonb(f||'['||(n-1)||']');n:=n-1;
+   END LOOP;
+   CONTINUE WHEN octet_length(kept::text)<=p_max_bytes;
+  END IF;
+  kept:=kept-f;dropped:=dropped||to_jsonb(f);
  END LOOP;
  RETURN jsonb_build_object('strategy',kept,'dropped',dropped);
 END $$;
@@ -130,66 +141,6 @@ BEGIN
  END IF;
 END $$;
 
--- The content group a positioning draft of a business sees next to that business's confirmed fields (0139).
-CREATE OR REPLACE FUNCTION public.opc_business_strategy(p_version_id uuid) RETURNS jsonb
-LANGUAGE plpgsql STABLE SET search_path=public,pg_temp AS $$
-DECLARE d jsonb:=opc_strategy_data(p_version_id);fit jsonb;
-BEGIN
- IF d IS NULL THEN RETURN NULL;END IF;
- fit:=report_strategy_fit(d->'data',report_strategy_content_fields(),12000);
- RETURN jsonb_build_object('data',fit->'strategy','textEdited',d->'textEdited','dropped',fit->'dropped','use',opc_strategy_use());
-END $$;
-REVOKE ALL ON FUNCTION public.opc_business_strategy(uuid) FROM PUBLIC,anon,authenticated,service_role;
-
--- v1 context -> v2 when its profile is given and the version has strategy data; otherwise unchanged.
-CREATE OR REPLACE FUNCTION public.opc_business_context_v2(p_context jsonb) RETURNS jsonb
-LANGUAGE plpgsql STABLE SET search_path=public,pg_temp AS $$
-DECLARE strategy jsonb;
-BEGIN
- IF p_context IS NULL OR jsonb_typeof(p_context->'source') IS DISTINCT FROM 'object'
-  OR p_context->'source'->'profile' IS NULL OR p_context->'source'->'profile'='null'::jsonb THEN RETURN p_context;END IF;
- strategy:=opc_business_strategy((p_context->'source'->>'versionId')::uuid);
- IF strategy IS NULL THEN RETURN p_context;END IF;
- RETURN p_context||jsonb_build_object('version','opc-business-context.v2',
-  'source',(p_context->'source')||jsonb_build_object('strategy',strategy));
-END $$;
-REVOKE ALL ON FUNCTION public.opc_business_context_v2(jsonb) FROM PUBLIC,anon,authenticated,service_role;
-
--- 0139: a context whose profile is given and whose version has strategy data becomes v2 with source.strategy;
--- every other context stays exactly v1 (so every existing session and its frozen material compare as before).
-DO $$ DECLARE definition text;needle text;
-BEGIN
- definition:=pg_get_functiondef('public.opc_business_context(uuid,uuid,uuid)'::regprocedure);
- IF position('opc_business_context_v2(' IN definition)=0 THEN
-  needle:=' IF b.id IS NULL THEN RETURN NULL;END IF;
- RETURN jsonb_build_object(';
-  IF array_length(string_to_array(definition,needle),1)<>2 THEN RAISE EXCEPTION 'REPORT_STRATEGY_TARGET_MISMATCH: opc_business_context';END IF;
-  definition:=replace(definition,needle,' IF b.id IS NULL THEN RETURN NULL;END IF;
- RETURN opc_business_context_v2(jsonb_build_object(');
-  needle:='THEN opc_profile(b.current_source_version_id) ELSE NULL END) END);';
-  IF array_length(string_to_array(definition,needle),1)<>2 THEN RAISE EXCEPTION 'REPORT_STRATEGY_TARGET_MISMATCH: opc_business_context';END IF;
-  EXECUTE replace(definition,needle,'THEN opc_profile(b.current_source_version_id) ELSE NULL END) END));');
- END IF;
-END $$;
-
--- 0159's frozen-material check accepts v2: strategy only in v2, and still exactly what the version gives now.
-DO $$ DECLARE definition text;needle text;
-BEGIN
- definition:=pg_get_functiondef('public.runtime_material_allowed_before_b1(uuid,jsonb)'::regprocedure);
- IF position('opc-business-context.v2' IN definition)=0 THEN
-  needle:='context->>''version'' IS DISTINCT FROM ''opc-business-context.v1''';
-  IF array_length(string_to_array(definition,needle),1)<>2 THEN RAISE EXCEPTION 'REPORT_STRATEGY_TARGET_MISMATCH: material version';END IF;
-  definition:=replace(definition,needle,'coalesce(context->>''version'','''') NOT IN (''opc-business-context.v1'',''opc-business-context.v2'')');
-  needle:='OR (context->''source'')-ARRAY[''versionId'',''profile'']<>''{}''::jsonb';
-  IF array_length(string_to_array(definition,needle),1)<>2 THEN RAISE EXCEPTION 'REPORT_STRATEGY_TARGET_MISMATCH: material source';END IF;
-  definition:=replace(definition,needle,'OR (context->''source'')-ARRAY[''versionId'',''profile'',''strategy'']<>''{}''::jsonb '
-   ||'OR (context->''source'' ? ''strategy'') IS DISTINCT FROM (context->>''version''=''opc-business-context.v2'')');
-  needle:='OR context->''source''->''profile'' IS DISTINCT FROM opc_profile(source_id)';
-  IF array_length(string_to_array(definition,needle),1)<>2 THEN RAISE EXCEPTION 'REPORT_STRATEGY_TARGET_MISMATCH: material profile';END IF;
-  EXECUTE replace(definition,needle,needle||' OR (context->''source'' ? ''strategy'' '
-   ||'AND context->''source''->''strategy'' IS DISTINCT FROM opc_business_strategy(source_id))');
- END IF;
-END $$;
 
 -- 0298's free-conversation workspace source (CHAT-AUTO-CONTEXT B1) with the strategy report read (see top).
 CREATE OR REPLACE FUNCTION public.runtime_workspace_source(p_actor_id uuid,p_session_id uuid,p_query text DEFAULT '') RETURNS jsonb
