@@ -11,8 +11,9 @@ on:
     - cron: '0 9 * * 1'
 
 concurrency:
-  # A newer push to the same PR supersedes older runs; branch pushes and schedules keep every run.
-  group: ci-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.sha }}
+  # A newer push to the same PR supersedes older runs. Other runs group by event and commit, so a push and a
+  # scheduled run on one commit never replace each other; main gets its own merge commits from staging.
+  group: ci-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
