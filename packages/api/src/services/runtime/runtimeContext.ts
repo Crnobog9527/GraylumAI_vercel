@@ -12,6 +12,11 @@ import {ASK_QUESTION_TOOL} from '../../shared/agentTurn';
 import {frozenPurposeBudget,FROZEN_OUTPUT_CAP} from './purposeBudgets';
 import {matchingPlan} from './matching';
 import {reasoningPolicy} from './reasoningPolicy';
+import {frozenResearchTurn} from './researchTurn';
+import {POSITIONING_RESEARCH_TOOLS} from '../research/tools/names';
+/** Library documents the user referenced with @: each the caller's own document at the version they chose. */
+export const libraryReferences=z.array(z.object({documentId:z.string().uuid(),version:z.number().int().positive()}).strict())
+ .min(1).max(5).refine(items=>new Set(items.map(item=>item.documentId.toLowerCase())).size===items.length,'LIB_REFERENCE_INVALID');
 export const runtimeContext=z.object({
  version:z.literal('runtime.v1'),sdkVersion:z.literal('0.18.0'),role:z.enum(['ordinary','skill','organizer']),
  input:z.string().min(1).max(20000),instructions:z.string().max(262144),model:z.string().min(1),
@@ -28,7 +33,9 @@ export const runtimeContext=z.object({
  skillFile:skillFileBinding.optional(),
  skillFileReserve:z.number().int().min(12288).max(131072).optional(),
  historyRead:z.object({version:z.literal(MENTOR_HISTORY_VERSION),reserve:z.literal(MENTOR_HISTORY_RESERVE_BYTES)}).strict().optional(),
- tools:z.array(z.enum(['search','read_source','read_skill_file',READ_HISTORY_TOOL,ASK_QUESTION_TOOL])).default([]),
+ tools:z.array(z.enum(['search','read_source','read_skill_file',READ_HISTORY_TOOL,ASK_QUESTION_TOOL,...POSITIONING_RESEARCH_TOOLS])).default([]),
+ // RT-3b PR-3: a positioning mentor turn's research tools, routes, prices' phase and subcall allowance.
+ research:frozenResearchTurn.optional(),
  maxToolCalls:z.number().int().min(0).max(16).default(0),
  modelId:z.string().uuid().optional(),network:z.enum(['deny','allow','require_latest']).optional(),
  attachedOrganizer:z.object({
@@ -42,16 +49,26 @@ export const runtimeContext=z.object({
  workspaceContext:z.boolean().optional(),opcTurnToken:z.string().uuid().optional(),matching:matchingPlan.optional(),scopeMaterial:z.unknown().optional(),
  answeredCard:z.unknown().optional(),request:z.unknown().optional(),
  moduleId:z.string().uuid().optional(),skillId:z.string().uuid().optional(),revisionId:z.string().uuid().optional(),sources:z.array(z.unknown()).optional(),
+ // LIB-4: frozen with the execution by runtime_library_references_freeze (0262); read through read_source.
+ libraryReferences:libraryReferences.optional(),
 }).strict().superRefine((context, ctx) => {
  if (context.reportGeneration && (context.role !== 'skill' || context.historyItems !== 0 || context.maxTurns !== 1
    || context.tools.length || context.maxToolCalls || context.network !== 'deny' || context.attachedOrganizer
    || context.scopeMaterial || context.workspaceContext || context.promptCache || context.hostTurnContext
-   || context.historySelection || context.sources?.length || context.purposeBudget?.purpose !== 'report'))
+   || context.historySelection || context.sources?.length || context.libraryReferences
+   || context.purposeBudget?.purpose !== 'report'))
   ctx.addIssue({code:'custom',message:'REPORT_CONTEXT_INVALID'});
+ // A research slot adds one tool call and the model call that reads its result (a card turn already has one tool call).
+ const researchSlot=context.research?1:0;
+ if(Boolean(context.research)!==context.tools.some(name=>(POSITIONING_RESEARCH_TOOLS as readonly string[]).includes(name))||context.research&&
+  (!context.hostTurnContext||context.hostTurnContext.opening||context.hostTurnContext.stepSummary||
+   context.providerRequestFormat!=='agent-turn-v5-stream'||!context.tools.includes(ASK_QUESTION_TOOL)||context.network!=='deny'||
+   context.maxTurns!==2+(context.skillFile?1:0)||context.maxToolCalls!==2))
+  ctx.addIssue({code:'custom',message:'RUNTIME_RESEARCH_CONTEXT_INVALID'});
  if(Boolean(context.skillFile)!==context.tools.includes('read_skill_file')||context.skillFile&&
   (context.role!=='skill'||context.providerRequestFormat!=='agent-turn-v5-stream'||
    context.skillFile.packageId!==context.skillId||context.skillFile.revisionId!==context.revisionId||
-   !context.moduleId||context.maxTurns!==2||context.maxToolCalls!==1))
+   !context.moduleId||context.maxTurns!==2+researchSlot||context.maxToolCalls!==1+researchSlot))
   ctx.addIssue({code:'custom',message:'RUNTIME_SKILL_FILE_CONTEXT_INVALID'});
  // R4: earlier user messages share the bound Skill file's single read slot of a mentor turn.
  if(Boolean(context.historyRead)!==context.tools.includes(READ_HISTORY_TOOL)||context.historyRead&&

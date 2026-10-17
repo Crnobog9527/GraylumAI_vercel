@@ -88,7 +88,7 @@ function ResultJ({ reading }: { reading: number }) {
   return (
     <div ref={frame} className={cn(theme.theme, styles.result)} aria-label={J_JURY_RESULT_LABEL}
       onWheel={takeOver} onTouchMove={takeOver} onKeyDown={takeOver} onPointerDown={takeOver}>
-      <JuryReader detail={J_JURY_DETAIL} names={SEAT_NAMES} report={J_READER_REPORT} prototype={false} scrollRoot={frame} />
+      <JuryReader detail={J_JURY_DETAIL} names={SEAT_NAMES} source={J_READER_REPORT} scrollRoot={frame} />
     </div>
   );
 }

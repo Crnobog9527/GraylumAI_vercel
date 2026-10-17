@@ -2,6 +2,7 @@
 /** PUBLISH-MONITOR connect page: fixed, readable texts for each refusal code (never raw server text). */
 const MESSAGES: Record<string, string> = {
   PUBLISH_MONITOR_REQUEST_INVALID: '这次连接已失效（超时、已处理，或不是在这个浏览器里发起的），请回到账号页重新连接。',
+  PUBLISH_MONITOR_CALLBACK_STALE: '这是之前一次连接的返回，已经被新的连接取代。请在最新打开的页面里完成，或重新连接。',
   PUBLISH_MONITOR_AUTHORIZATION_CHANGED: '这个账号的授权在确认前发生了变化，请重新连接一次。',
   PUBLISH_MONITOR_ACCOUNT_OWNED_ELSEWHERE: '这个社媒账号已被其他 Graylum 用户连接。请联系对方，或换一个账号。',
   PUBLISH_MONITOR_ACCOUNT_BOUND_ELSEWHERE: '这个社媒账号已经挂在你的另一个品牌账号下，不能重复挂。',

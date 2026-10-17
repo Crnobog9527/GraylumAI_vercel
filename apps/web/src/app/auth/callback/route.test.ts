@@ -15,8 +15,6 @@ vi.mock('@supabase/ssr', () => ({
     return { auth };
   },
 }));
-vi.mock('@repo/api/src/root', () => ({ appRouter: { createCaller: vi.fn() } }));
-vi.mock('@repo/api/src/trpc', () => ({ createTRPCContext: vi.fn() }));
 vi.mock('@/lib/server-log', () => ({ logServerError: vi.fn() }));
 
 const { GET } = await import('./route');
@@ -124,6 +122,16 @@ describe('auth callback after a failed code exchange', () => {
     const next = encodeURIComponent('/library?item=1&error_code=otp_expired&code=old');
     const to = await callback(`code=abc&next=${next}`);
     expect(`${to.pathname}${to.search}`).toBe('/library?item=1');
+  });
+
+  it('ignores an invite code left in old signup metadata and signs the user in normally', async () => {
+    const { logServerError } = await import('@/lib/server-log');
+    auth.exchangeCodeForSession.mockResolvedValue({ error: null });
+    auth.getUser.mockResolvedValue({ data: { user: { email: 'a@example.test', email_confirmed_at: '2026-09-30T00:00:00Z',
+      user_metadata: { invite_code: 'OLDCODE' } } } });
+    const to = await callback('code=abc&next=%2Fprofile');
+    expect(`${to.pathname}${to.search}`).toBe('/profile');
+    expect(logServerError).not.toHaveBeenCalled();
   });
 });
 

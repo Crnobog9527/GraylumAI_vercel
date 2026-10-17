@@ -81,6 +81,8 @@ const envSchema = z.object({
   POSTFORME_API_KEY: apiKeySchema
     .regex(/^pfm_(live|test)_/, 'POSTFORME_API_KEY 必须以 pfm_live_ 或 pfm_test_ 开头')
     .optional(),
+  // Post for Me webhook secret: staging/local fallback only until ADMIN-SECRETS #975 (production reads the admin)
+  POSTFORME_WEBHOOK_SECRET: z.string().min(16, 'POSTFORME_WEBHOOK_SECRET 至少 16 个字符').optional(),
 
   // Sentry (可选但推荐)
   NEXT_PUBLIC_SENTRY_DSN: z

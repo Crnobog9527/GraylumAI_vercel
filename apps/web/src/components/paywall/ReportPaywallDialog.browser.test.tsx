@@ -14,8 +14,9 @@ beforeAll(async () => {
   const vite = createRequire(require.resolve('vitest/package.json')).resolve('vite');
   const { build } = await import(pathToFileURL(vite).href);
   const source = fileURLToPath(new URL('../../app/positioning/[draftId]/report-panel.tsx', import.meta.url));
-  // Server double. window.plans / window.matrix are the catalog and eligibility answers;
-  // window.report is what the report hook reports; window.checkouts records purchase requests.
+  // Server double. window.plans is the catalog, window.membership the methodMembership answer;
+  // window.report is what the report hook reports; window.checkouts records methodCheckout inputs.
+  // window.checkoutMode: 'open' (default, window.checkoutUrl), 'hang', 'recovery' or 'error' (window.checkoutError).
   const trpcMock = `
     import {useState} from 'react';
     window.checkouts = [];
@@ -31,15 +32,19 @@ beforeAll(async () => {
       settings: {getMembershipPlans: {useQuery: () => window.plansFail ? {data: window.stalePlans, isLoading: false, isError: true}
         : q(window.plans)}},
       payments: {
-        getMembershipEligibilityMatrix: {useQuery: () => q(window.matrix)},
-        createCheckoutSession: {useMutation: () => {
+        getMembershipEligibilityMatrix: {useQuery: () => q(window.matrix ?? {entries: []})},
+        methodMembership: {useQuery: () => q(window.membership)},
+        methodCheckout: {useMutation: () => {
           const [isPending, setPending] = useState(false);
           return {isPending, mutateAsync: async input => {
-            window.checkouts.push(input); setPending(true);
+            window.checkouts.push(input); window.recordCheckout?.(input); setPending(true);
             try {
               if (window.checkoutMode === 'hang') await new Promise(r => { window.releaseCheckout = r; });
-              if (window.checkoutMode === 'fail') throw new Error('当前支付渠道尚未接入，暂不可购买');
-              return {checkoutUrl: '#paid', sessionId: 'cs_test'};
+              if (window.checkoutMode === 'error') {
+                throw Object.assign(new Error(window.checkoutError.message), {data: {code: window.checkoutError.code}});
+              }
+              if (window.checkoutMode === 'recovery') return {orderId: 'o1', state: 'recovery_required', url: null};
+              return {orderId: 'o1', state: 'open', url: window.checkoutUrl ?? 'https://checkout.stripe.com/c/pay/cs_test_1'};
             } finally { setPending(false); }
           }};
         }},
@@ -61,7 +66,11 @@ beforeAll(async () => {
       if (id === entry) return id;
       if (id === '@/trpc/client' || id.endsWith('/trpc/client')) return '\0paywall-trpc';
       if (id === './use-report-gen' || id.endsWith('/use-report-gen')) return '\0paywall-report';
+      // The jury entry next to the report entry links and navigates; it renders nothing here (no report version).
+      if (id === 'next/navigation' || id === 'next/link') return '\0paywall-' + id;
     }, load(id: string) {
+      if (id === '\0paywall-next/navigation') return 'export const useRouter=()=>({push:()=>{},replace:()=>{}});';
+      if (id === '\0paywall-next/link') return "import React from 'react'; export default function Link(p){return React.createElement('a',p)}";
       if (id === '\0paywall-trpc') return trpcMock;
       if (id === '\0paywall-report') return reportMock;
       if (id === entry) return `import React from 'react'; import { createRoot } from 'react-dom/client';
@@ -83,11 +92,11 @@ const plan = (level: string, monthly: number, yearly: number, ready = true) => (
     monthlyBonus: 0 }, discount: level === 'pro' ? 0.05 : 0.1, checkoutReady: { monthly: ready, yearly: ready },
 });
 const PLANS = [plan('free', 0, 0), plan('pro', 29, 279), plan('gold', 69, 621)];
-const entryFor = (planId: string, billingCycle: string, allowed = true) => ({ planId, billingCycle, allowed,
-  action: allowed ? 'createCheckoutSession' : 'contactSupport', reasonCode: allowed ? 'OK' : 'BLOCKED',
-  safeMessage: allowed ? '' : '当前账号暂时不能购买，请联系客服。' });
-const MATRIX = { currentLevel: 'free', entries: ['pro-plan', 'gold-plan'].flatMap(id =>
-  [entryFor(id, 'monthly'), entryFor(id, 'yearly')]) };
+const ROUTES = { version: 7, card: { enabled: true }, card_cn: { enabled: true },
+  wechat_pay: { enabled: false, annualVerified: false }, alipay: { enabled: false, annualVerified: false } };
+const ENTRY = { mode: 'test', routes: ROUTES, checkoutReady: true, termsVersion: 'terms-v3', goldFirstMonthEligible: false,
+  founder: { total: 50, sold: 50, reserved: 0, available: 0 }, memberships: [] };
+const WITH_SEATS = { ...ENTRY, founder: { total: 50, sold: 37, reserved: 0, available: 13 } };
 const MEMBERSHIP = { executionId: null, refusal: { text: '生成完整报告需要开通会员。', membership: true } };
 
 async function open(setup: Record<string, unknown>, width = 1280) {
@@ -95,18 +104,28 @@ async function open(setup: Record<string, unknown>, width = 1280) {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   // A real origin, so the page can use sessionStorage; every other request is blocked.
-  await page.route('**/*', route => route.request().url() === 'http://paywall.test/'
-    ? route.fulfill({ contentType: 'text/html', body: '<!doctype html><div id="root"></div>' }) : route.abort());
+  await page.route('**/*', route => {
+    const url = route.request().url();
+    if (url === 'http://paywall.test/') return route.fulfill({ contentType: 'text/html', body: '<!doctype html><div id="root"></div>' });
+    // Stands in for the Stripe-hosted page; nothing leaves the machine.
+    if (url.startsWith('https://checkout.stripe.com/')) return route.fulfill({ contentType: 'text/html', body: 'stripe' });
+    return route.abort();
+  });
+  const sent: unknown[] = [];
+  sentByPage.set(page, sent);
+  await page.exposeFunction('recordCheckout', (input: unknown) => { sent.push(input); });
   await page.goto('http://paywall.test/');
-  await page.evaluate(value => { Object.assign(window, value); }, { plans: PLANS, matrix: MATRIX, report: MEMBERSHIP, ...setup });
+  await page.evaluate(value => { Object.assign(window, value); }, { plans: PLANS, membership: ENTRY, report: MEMBERSHIP, ...setup });
   if (setup.sessionFlag) await page.evaluate(() => sessionStorage.setItem('opc-report-paywall:d:r', 'membership'));
   await page.addScriptTag({ content: code });
   await page.getByRole('button', { name: '生成完整报告' }).click();
   return { page, errors };
 }
-const checkouts = (page: Page) => page.evaluate('window.checkouts');
+// Recorded on the test side too: a hand-off to checkout.stripe.com replaces the page and its window.
+const sentByPage = new WeakMap<Page, unknown[]>();
+const checkouts = async (page: Page) => sentByPage.get(page) ?? [];
 
-it('a membership refusal opens the paywall with server prices, monthly by default, and pays the chosen plan', async () => {
+it('a membership refusal opens the paywall with server prices, monthly by default, and pays the chosen plan by card', async () => {
   const { page, errors } = await open({});
   try {
     const dialog = page.getByTestId('report-paywall');
@@ -116,9 +135,11 @@ it('a membership refusal opens the paywall with server prices, monthly by defaul
     await browserExpect(page.getByRole('radio', { name: /月付/ })).toBeChecked();
     await browserExpect(page.getByTestId('report-paywall-pay')).toContainText('生成我的完整报告 · $29');
     await browserExpect(page.getByTestId('report-paywall-renewal')).toHaveText('每月自动续费 $29，可随时在个人中心取消，取消后用到当期结束。');
-    // Owner copy rules: no credit-cost estimate, no model names, no 7-day refund promise, no fake countdown.
+    // Record W: a short refund line beside checkout, without the 7-day window (that stays in the FAQ and terms).
+    await browserExpect(page.getByTestId('report-paywall-refund')).toHaveText('退款说明：从这次付款起，整个账户没有用过任何积分（包括之前的和赠送的积分）才可以申请退款；续费不退款。具体条件见《退款政策》。');
+    // Owner copy rules: no credit-cost estimate, no model names, no 7-day refund promise, no countdown, no tax amount.
     const text = await dialog.innerText();
-    expect(text).not.toMatch(/预计|消耗|模型|7 天|退款|倒计时|首月 \$49|创始/);
+    expect(text).not.toMatch(/预计|消耗|模型|7 天|倒计时|首月 \$49|创始|税额/);
 
     await page.getByText('年付').click();
     await browserExpect(page.getByText('最高省 25%')).toBeVisible();
@@ -126,69 +147,153 @@ it('a membership refusal opens the paywall with server prices, monthly by defaul
     await browserExpect(page.getByTestId('paywall-plan-gold')).toContainText('比按月付 12 个月省 $207');
     await browserExpect(page.getByTestId('report-paywall-pay')).toContainText('$621');
 
+    // Unticked terms: no purchase possible.
+    await browserExpect(page.getByTestId('report-paywall-terms')).not.toBeChecked();
+    await browserExpect(page.getByTestId('report-paywall-pay')).toBeDisabled();
+    await page.getByTestId('report-paywall-terms').check();
+
     await page.evaluate(() => { Object.assign(window, { checkoutMode: 'hang' }); });
     await page.getByTestId('report-paywall-pay').click();
     await page.getByTestId('report-paywall-pay').click({ force: true });
     await browserExpect(page.getByTestId('report-paywall-pay')).toBeDisabled();
     await page.evaluate(() => { (window as unknown as { releaseCheckout: () => void }).releaseCheckout(); });
-    await browserExpect(page).toHaveURL(/#paid$/);
-    expect(await checkouts(page)).toEqual([{ kind: 'membership_plan', planId: 'gold-plan', billingCycle: 'yearly' }]);
+    await browserExpect(page).toHaveURL('https://checkout.stripe.com/c/pay/cs_test_1');
+    expect(await checkouts(page)).toEqual([{ itemType: 'membership_plan', itemId: 'gold-plan', billingCycle: 'yearly', offer: 'standard',
+      method: 'card', routingVersion: 7, acceptedTerms: true, termsVersion: 'terms-v3' }]);
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 30000);
 
-it('keeps the pay button disabled with the server reason when checkout is not ready or not allowed', async () => {
+it('shows each card method with its own tax line and sends the mainland card when chosen', async () => {
+  const { page, errors } = await open({});
+  try {
+    await browserExpect(page.getByTestId('report-paywall-method-card')).toContainText('国际银行卡');
+    await browserExpect(page.getByTestId('report-paywall-tax')).toHaveText('税另计，结账时按所在地计算');
+    await browserExpect(page.getByTestId('report-paywall-method-card_cn')).toContainText('仅限中国大陆用户');
+    await page.getByTestId('report-paywall-method-card_cn').click();
+    await browserExpect(page.getByTestId('report-paywall-tax')).toHaveText('不另收税');
+    await page.getByTestId('report-paywall-terms').check();
+    await page.getByTestId('report-paywall-pay').click();
+    await browserExpect(page).toHaveURL(/checkout\.stripe\.com/);
+    expect(await checkouts(page)).toMatchObject([{ method: 'card_cn', itemId: 'pro-plan', billingCycle: 'monthly' }]);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 30000);
+
+it('shows no card entry until the server says checkout is ready and terms are published', async () => {
+  for (const membership of [{ ...ENTRY, checkoutReady: false }, { ...ENTRY, termsVersion: null }]) {
+    const { page, errors } = await open({ membership });
+    try {
+      await browserExpect(page.getByTestId('report-paywall-closed')).toHaveText('银行卡付款暂未开放，请稍后再来。');
+      await browserExpect(page.getByTestId('report-paywall-pay')).toHaveCount(0);
+      await browserExpect(page.getByTestId('report-paywall-terms')).toHaveCount(0);
+      expect(errors).toEqual([]);
+    } finally { await page.close(); }
+  }
+}, 30000);
+
+it('keeps the pay button disabled when the plan is not ready to sell', async () => {
   const notReady = [plan('pro', 29, 279, false), plan('gold', 69, 621, false)];
   const { page, errors } = await open({ plans: notReady });
   try {
+    await page.getByTestId('report-paywall-terms').check();
     await browserExpect(page.getByTestId('report-paywall-pay')).toBeDisabled();
-    await page.close();
-    const blocked = { currentLevel: 'free', entries: MATRIX.entries.map(item => entryFor(item.planId, item.billingCycle, false)) };
-    const second = await open({ matrix: blocked });
-    await browserExpect(second.page.getByTestId('report-paywall-pay')).toBeDisabled();
-    await browserExpect(second.page.getByText('当前账号暂时不能购买，请联系客服。')).toBeVisible();
-    expect(await checkouts(second.page)).toEqual([]);
-    expect([...errors, ...second.errors]).toEqual([]);
-    await second.page.close();
-  } finally { if (!page.isClosed()) await page.close(); }
-}, 30000);
-
-it('explains a subscription with an unsuccessful payment, and points to a support ticket', async () => {
-  const old = { currentLevel: 'free', entries: MATRIX.entries.map(item => ({ ...item, allowed: false,
-    action: 'resolvePaymentIssue', reasonCode: 'PAYMENT_ATTENTION_REQUIRED',
-    safeMessage: '当前订阅存在付款异常，请先处理付款问题后再切换套餐。' })) };
-  const { page, errors } = await open({ matrix: old });
-  try {
-    await browserExpect(page.getByTestId('report-paywall-pay')).toBeDisabled();
-    await browserExpect(page.getByText(/你还有一个付款没有成功的订阅/)).toBeVisible();
-    await browserExpect(page.getByText('当前订阅存在付款异常，请先处理付款问题后再切换套餐。')).toHaveCount(0);
-    const ticket = page.getByTestId('report-paywall-support-ticket');
-    await browserExpect(ticket).toHaveText('提交工单');
-    await browserExpect(ticket).toHaveAttribute('href', '/profile?tab=tickets');
+    await browserExpect(page.getByText('这个方案暂不可购买，请稍后再试或换一个方案。')).toBeVisible();
     expect(await checkouts(page)).toEqual([]);
     expect(errors).toEqual([]);
   } finally { await page.close(); }
-}, 30000);
+}, 20000);
 
-it('shows no support link for other refusals', async () => {
-  const blocked = { currentLevel: 'free', entries: MATRIX.entries.map(item => entryFor(item.planId, item.billingCycle, false)) };
-  const { page, errors } = await open({ matrix: blocked });
+it('refuses to follow a payment address that is not checkout.stripe.com', async () => {
+  const { page, errors } = await open({ checkoutUrl: 'https://checkout.stripe.com.evil.test/pay' });
   try {
-    await browserExpect(page.getByText('当前账号暂时不能购买，请联系客服。')).toBeVisible();
-    await browserExpect(page.getByTestId('report-paywall-support-ticket')).toHaveCount(0);
-    expect(errors).toEqual([]);
-  } finally { await page.close(); }
-}, 30000);
-
-it('shows a checkout failure in plain Chinese and lets the user try again', async () => {
-  const { page, errors } = await open({ checkoutMode: 'fail' });
-  try {
+    await page.getByTestId('report-paywall-terms').check();
     await page.getByTestId('report-paywall-pay').click();
-    await browserExpect(page.getByRole('alert')).toHaveText('当前支付渠道尚未接入，暂不可购买');
-    await browserExpect(page.getByTestId('report-paywall-pay')).toBeEnabled();
+    await browserExpect(page.getByTestId('report-paywall-outcome')).toContainText('付款页面地址异常，已停止跳转');
+    await browserExpect(page).toHaveURL('http://paywall.test/');
+    await browserExpect(page.getByTestId('report-paywall-pay')).toBeDisabled();
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 20000);
+
+it('sends the user to billing records instead of buying again when the old payment page is gone', async () => {
+  const { page, errors } = await open({ checkoutMode: 'recovery' });
+  try {
+    await page.getByTestId('report-paywall-terms').check();
+    await page.getByTestId('report-paywall-pay').click();
+    await browserExpect(page.getByTestId('report-paywall-outcome')).toContainText('请不要重新下单，稍后到个人中心的账单记录查看');
+    await browserExpect(page).toHaveURL('http://paywall.test/');
+    await browserExpect(page.getByTestId('report-paywall-pay')).toBeDisabled();
+    expect(await checkouts(page)).toHaveLength(1);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 20000);
+
+it('shows business refusals in the server words and outages as one generic line', async () => {
+  const cases: Array<[string, string, string]> = [
+    ['PRECONDITION_FAILED', '你已有生效中的会员，不能重复购买。会员到期前无需再次付款。', '你已有生效中的会员，不能重复购买。会员到期前无需再次付款。'],
+    ['CONFLICT', '你有一笔付款还在处理中，请先完成它，或等它超时关闭后再试。', '你有一笔付款还在处理中，请先完成它，或等它超时关闭后再试。'],
+    ['FORBIDDEN', '账号已停用或正在注销，不能购买。', '账号已停用或正在注销，不能购买。'],
+    ['BAD_REQUEST', '这个优惠不适用于所选套餐，请刷新页面后重试。', '这个优惠不适用于所选套餐，请刷新页面后重试。'],
+    ['TOO_MANY_REQUESTS', 'Too many', '下单太频繁了，请稍等一分钟再试。'],
+    ['SERVICE_UNAVAILABLE', 'internal reason', '暂时无法创建付款，请稍后查看原订单状态'],
+  ];
+  for (const [code, message, shown] of cases) {
+    const { page, errors } = await open({ checkoutMode: 'error', checkoutError: { code, message } });
+    try {
+      await page.getByTestId('report-paywall-terms').check();
+      await page.getByTestId('report-paywall-pay').click();
+      await browserExpect(page.getByRole('alert')).toHaveText(shown);
+      await browserExpect(page.getByTestId('report-paywall-pay')).toBeEnabled();
+      expect(errors).toEqual([]);
+    } finally { await page.close(); }
+  }
+}, 60000);
+
+it('offers Gold at $49 for the first month when eligible, and switches to the standard price after a refusal', async () => {
+  const { page, errors } = await open({ membership: { ...ENTRY, goldFirstMonthEligible: true }, checkoutMode: 'error',
+    checkoutError: { code: 'PRECONDITION_FAILED', message: 'Gold 首月优惠仅限首次购买 Gold 的账号，你的账号不符合条件。' } });
+  try {
+    await page.getByTestId('paywall-plan-gold').click();
+    await browserExpect(page.getByTestId('paywall-plan-gold')).toContainText('$49首月');
+    await browserExpect(page.getByTestId('paywall-plan-gold')).toContainText('之后每月 $69');
+    await browserExpect(page.getByTestId('report-paywall-renewal')).toHaveText('首月 $49，之后每月自动续费 $69，可随时在个人中心取消，取消后用到当期结束。');
+    await page.getByTestId('report-paywall-terms').check();
+    await page.getByTestId('report-paywall-pay').click();
+    await browserExpect(page.getByRole('alert')).toContainText('Gold 首月优惠仅限首次购买 Gold 的账号');
+    await page.getByRole('button', { name: '改按标准价购买' }).click();
+    await browserExpect(page.getByTestId('report-paywall-pay')).toContainText('$69');
+    await browserExpect(page.getByRole('alert')).toHaveCount(0);
+    await page.evaluate(() => { Object.assign(window, { checkoutMode: 'open' }); });
+    await page.getByTestId('report-paywall-pay').click();
+    await browserExpect(page).toHaveURL(/checkout\.stripe\.com/);
+    const sent = await checkouts(page) as Array<{ offer: string; itemId: string }>;
+    expect(sent.map(item => [item.itemId, item.offer])).toEqual([['gold-plan', 'gold_first30'], ['gold-plan', 'standard']]);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 30000);
+
+it('shows only the switched-on card: mainland only hides the international card, and the reverse', async () => {
+  const onlyCn = { ...ENTRY, routes: { ...ROUTES, card: { enabled: false } } };
+  const { page, errors } = await open({ membership: onlyCn });
+  try {
+    await browserExpect(page.getByTestId('report-paywall-method-card_cn')).toBeVisible();
+    await browserExpect(page.getByTestId('report-paywall-method-card')).toHaveCount(0);
+    await browserExpect(page.getByTestId('report-paywall-tax')).toHaveText('不另收税');
+    await page.getByTestId('report-paywall-terms').check();
+    await page.getByTestId('report-paywall-pay').click();
+    await browserExpect(page).toHaveURL(/checkout\.stripe\.com/);
+    expect(await checkouts(page)).toMatchObject([{ method: 'card_cn' }]);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+  const onlyCard = { ...ENTRY, routes: { ...ROUTES, card_cn: { enabled: false } } };
+  const second = await open({ membership: onlyCard });
+  try {
+    await browserExpect(second.page.getByTestId('report-paywall-method-card')).toBeVisible();
+    await browserExpect(second.page.getByTestId('report-paywall-method-card_cn')).toHaveCount(0);
+    expect(second.errors).toEqual([]);
+  } finally { await second.page.close(); }
+}, 30000);
 
 it('falls back to a calm message when the catalog cannot be read, and closes back to the page', async () => {
   const { page, errors } = await open({ plansFail: true });
@@ -205,8 +310,15 @@ it('fits a phone screen without horizontal scrolling', async () => {
   const { page, errors } = await open({}, 375);
   try {
     await browserExpect(page.getByTestId('report-paywall')).toBeVisible();
+    await page.getByTestId('report-paywall-method-card_cn').scrollIntoViewIfNeeded();
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     expect(overflow).toBeLessThanOrEqual(0);
+    // The card methods, terms and pay button stay inside the phone width.
+    for (const id of ['report-paywall-method-card', 'report-paywall-method-card_cn', 'report-paywall-terms', 'report-paywall-pay']) {
+      const box = (await page.getByTestId(id).boundingBox())!;
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(375);
+    }
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 20000);
@@ -299,3 +411,121 @@ it('keeps the remembered paywall while only a cached paid level is known', async
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 20000);
+
+it('with founder seats left, Gold yearly is the $496 founder price with the real seats and the founder offer', async () => {
+  const { page, errors } = await open({ membership: WITH_SEATS });
+  try {
+    await page.getByText('年付').click();
+    await browserExpect(page.getByText('最高省 40%')).toBeVisible();
+    await page.getByTestId('paywall-plan-gold').click();
+    await browserExpect(page.getByTestId('paywall-plan-gold')).toContainText('$496');
+    await browserExpect(page.getByTestId('paywall-plan-gold')).toContainText('创始会员 · 比按月付 12 个月省 $332');
+    await browserExpect(page.getByTestId('paywall-founder-seats')).toContainText('还剩 13 个名额（共 50 个）');
+    await browserExpect(page.getByTestId('report-paywall-renewal')).toHaveText(/首年 \$496，之后每年自动续费 \$496/);
+    await browserExpect(page.getByTestId('report-paywall-fineprint')).toContainText('创始会员终身 6 折续费（只要连续续费不中断）');
+    // The benefit itself never hard-codes a future amount (item 51); only the renewal line states today's charge.
+    await browserExpect(page.getByTestId('report-paywall-fineprint')).not.toContainText('$');
+    // Only the server's seat count: no countdown or timer copy.
+    expect(await page.getByTestId('report-paywall').innerText()).not.toMatch(/倒计时|分钟内|今天截止|社群|徽章/);
+    await page.getByTestId('report-paywall-terms').check();
+    await page.getByTestId('report-paywall-pay').click();
+    await browserExpect(page).toHaveURL(/checkout\.stripe\.com/);
+    expect(await checkouts(page)).toMatchObject([{ itemId: 'gold-plan', billingCycle: 'yearly', offer: 'founder' }]);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 30000);
+
+it('with no founder seats, Gold yearly is the $621 standard price and nothing mentions founders', async () => {
+  const { page, errors } = await open({});
+  try {
+    await page.getByText('年付').click();
+    await browserExpect(page.getByText('最高省 25%')).toBeVisible();
+    await page.getByTestId('paywall-plan-gold').click();
+    await browserExpect(page.getByTestId('report-paywall-pay')).toContainText('$621');
+    await browserExpect(page.getByTestId('paywall-founder-seats')).toHaveCount(0);
+    expect(await page.getByTestId('report-paywall').innerText()).not.toContain('创始');
+    await page.getByTestId('report-paywall-terms').check();
+    await page.getByTestId('report-paywall-pay').click();
+    await browserExpect(page).toHaveURL(/checkout\.stripe\.com/);
+    expect(await checkouts(page)).toMatchObject([{ itemId: 'gold-plan', billingCycle: 'yearly', offer: 'standard' }]);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 30000);
+
+it('when the last founder seat goes during checkout, it drops to $621, says so, and only charges after a new click', async () => {
+  const { page, errors } = await open({ membership: WITH_SEATS, checkoutMode: 'error',
+    checkoutError: { code: 'CONFLICT', message: '创始会员名额已售完。' } });
+  try {
+    await page.getByText('年付').click();
+    await page.getByTestId('paywall-plan-gold').click();
+    await page.getByTestId('report-paywall-terms').check();
+    await page.getByTestId('report-paywall-pay').click();
+    await browserExpect(page.getByTestId('report-paywall-notice')).toHaveText('创始会员名额刚刚售完，已改回 Gold 年付标准价，请看清价格后再付款。');
+    await browserExpect(page.getByTestId('report-paywall-pay')).toContainText('$621');
+    await browserExpect(page.getByText('最高省 25%')).toBeVisible();
+    await browserExpect(page.getByTestId('paywall-founder-seats')).toHaveCount(0);
+    await browserExpect(page).toHaveURL('http://paywall.test/');
+    await page.evaluate(() => { Object.assign(window, { checkoutMode: 'open' }); });
+    await page.getByTestId('report-paywall-pay').click();
+    await browserExpect(page).toHaveURL(/checkout\.stripe\.com/);
+    expect((await checkouts(page) as Array<{ offer: string }>).map(item => item.offer)).toEqual(['founder', 'standard']);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 30000);
+
+it('lets a former founder buy Gold yearly at the standard price after the founder price is refused', async () => {
+  const { page, errors } = await open({ membership: WITH_SEATS, checkoutMode: 'error',
+    checkoutError: { code: 'PRECONDITION_FAILED', message: '你已购买过创始会员，请通过创始会员续费入口操作。' } });
+  try {
+    await page.getByText('年付').click();
+    await page.getByTestId('paywall-plan-gold').click();
+    await page.getByTestId('report-paywall-terms').check();
+    await page.getByTestId('report-paywall-pay').click();
+    await browserExpect(page.getByRole('alert')).toContainText('你已购买过创始会员');
+    await page.getByRole('button', { name: '改按标准价购买' }).click();
+    await browserExpect(page.getByTestId('report-paywall-pay')).toContainText('$621');
+    await browserExpect(page.getByTestId('paywall-founder-seats')).toHaveCount(0);
+    await page.evaluate(() => { Object.assign(window, { checkoutMode: 'open' }); });
+    await page.getByTestId('report-paywall-pay').click();
+    await browserExpect(page).toHaveURL(/checkout\.stripe\.com/);
+    expect((await checkouts(page) as Array<{ offer: string }>).map(item => item.offer)).toEqual(['founder', 'standard']);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 30000);
+
+it('explains a subscription with an unsuccessful payment, and points to a support ticket (#937)', async () => {
+  const matrix = { currentLevel: 'free', entries: ['pro-plan', 'gold-plan'].map(planId => ({ planId, billingCycle: 'monthly',
+    allowed: false, action: 'resolvePaymentIssue', reasonCode: 'PAYMENT_ATTENTION_REQUIRED', safeMessage: '' })) };
+  const { page, errors } = await open({ matrix });
+  try {
+    await page.getByTestId('report-paywall-terms').check();
+    await browserExpect(page.getByTestId('report-paywall-pay')).toBeDisabled();
+    await browserExpect(page.getByText(/你还有一个付款没有成功的订阅/)).toBeVisible();
+    const ticket = page.getByTestId('report-paywall-support-ticket');
+    await browserExpect(ticket).toHaveText('提交工单');
+    await browserExpect(ticket).toHaveAttribute('href', '/profile?tab=tickets');
+    expect(await checkouts(page)).toEqual([]);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 30000);
+
+it('shows no support link without an unsuccessful old subscription', async () => {
+  const { page, errors } = await open({});
+  try {
+    await browserExpect(page.getByTestId('report-paywall-pay')).toBeVisible();
+    await browserExpect(page.getByTestId('report-paywall-support-ticket')).toHaveCount(0);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 30000);
+
+it('shows the founder seats only with yearly billing, never next to a monthly Gold price', async () => {
+  const { page, errors } = await open({ membership: { ...WITH_SEATS, goldFirstMonthEligible: true } });
+  try {
+    await page.getByTestId('paywall-plan-gold').click();
+    await browserExpect(page.getByTestId('report-paywall-pay')).toContainText('$49');
+    await browserExpect(page.getByTestId('paywall-founder-seats')).toHaveCount(0);
+    await page.getByText('年付').click();
+    await browserExpect(page.getByTestId('paywall-founder-seats')).toContainText('还剩 13 个名额');
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 30000);

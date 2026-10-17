@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { DetailSection, JuryDetail } from '@/components/landing/preview-jury/jury-events';
-import type { ReaderReport } from '@/components/landing/preview-jury/jury-reader';
+import type { ReaderSource } from '@/components/landing/preview-jury/jury-reader';
 import { WHOLE_DOCUMENT } from '@/components/landing/preview-jury/jury-report';
 import { J_REVISION } from '@/lib/landing/landing-copy-j-takeover';
 import { OFFICE_WORKER_REPORT } from '@/lib/landing/sample-reports/office-worker';
@@ -18,7 +18,7 @@ import { J_REVIEW_SEATS, J_RULINGS } from './jury-review-j';
 const place = (title: string) => asCanvasPlace(title);
 const firstSentence = (text: string) => /^[^。！？\n]*[。！？]?/.exec(text)?.[0] ?? text;
 
-export const J_READER_REPORT: ReaderReport = {
+export const J_READER_REPORT: ReaderSource = {
   chapters: OFFICE_WORKER_REPORT.revised.map(chapter => {
     const title = place(chapter.title);
     const [, number = '', name = title] = /^(第 \d+ 章) (.+)$/.exec(title) ?? [];
@@ -37,8 +37,9 @@ export const J_READER_REPORT: ReaderReport = {
     { label: '变现', section: place('10 变现路径'), original: '厨具和食材的联盟带货起步，同时用免费一周菜单测试',
       revised: '第一个月末先放免费一周菜单和报名表，带货放第二步（先调料和保鲜盒）' },
   ],
-  sections: [...OFFICE_WORKER_REPORT.revised.map(chapter => place(chapter.title)), WHOLE_DOCUMENT],
 };
+/** The review's places: the report's chapters in order, then the whole document. */
+const J_SECTIONS = [...OFFICE_WORKER_REPORT.revised.map(chapter => place(chapter.title)), WHOLE_DOCUMENT];
 
 function sectionFor(title: string): DetailSection {
   const rulings = J_RULINGS.filter(item => item.section === title);
@@ -53,7 +54,7 @@ function sectionFor(title: string): DetailSection {
 export const J_JURY_DETAIL: JuryDetail = {
   reviewId: 'landing-sample-j', state: 'completed', outcome: 'revised', revisionId: 'landing-sample-j-revision',
   seats: J_REVIEW_SEATS,
-  summary: { status: 'usable', sections: J_READER_REPORT.sections.map(sectionFor) },
+  summary: { status: 'usable', sections: J_SECTIONS.map(sectionFor) },
   adoption: null,
   awaitingChoice: true,
 };

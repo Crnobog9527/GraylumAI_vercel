@@ -9,7 +9,7 @@ import { trpc } from '@/trpc/client';
 import {
   LayoutDashboard, Bot, Wand2, Package, Users,
   CreditCard, Settings, ChevronLeft, Shield, DollarSign,
-  Megaphone, Headphones, Gift, Activity, Stethoscope, BarChart3, Receipt, RotateCcw
+  Megaphone, Headphones, Activity, Stethoscope, BarChart3, Receipt, RotateCcw, KeyRound
 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 
@@ -32,10 +32,10 @@ const menuItems: MenuItem[] = [
   { name: '财务统计', icon: DollarSign, href: '/admin/finance' },
   { name: '公告管理', icon: Megaphone, href: '/admin/announcements' },
   { name: '工单管理', icon: Headphones, href: '/admin/tickets' },
-  { name: '邀请码', icon: Gift, href: '/admin/invitations' },
   { name: '性能监控', icon: Activity, href: '/admin/performance' },
   { name: '系统诊断', icon: Stethoscope, href: '/admin/diagnostics' },
   { name: '系统设置', icon: Settings, href: '/admin/settings' },
+  { name: '第三方密钥', icon: KeyRound, href: '/admin/secrets' },
 ];
 
 export function getAdminPageMeta(pathname: string | null) {

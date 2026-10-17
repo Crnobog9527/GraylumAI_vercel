@@ -9,7 +9,8 @@
   height: calc(100svh - var(--j-bar, 96px) - 24px); min-height: 560px;
 }
 .stage { position: relative; min-width: 0; min-height: 0; }
-.results { display: grid; grid-template-columns: minmax(0, 1fr) clamp(300px, 23vw, 440px); gap: clamp(24px, 2vw, 40px); align-items: start; }
+/* The result page keeps the replay's right column and gaps; the reader inside keeps its left one. */
+.results { display: grid; grid-template-columns: minmax(0, 1fr) clamp(320px, 23vw, 440px); gap: clamp(16px, 1.4vw, 28px); align-items: start; }
 
 /* Steps */
 .steps { display: grid; align-content: start; gap: 10px; min-height: 0; overflow-y: auto; scrollbar-width: thin; }

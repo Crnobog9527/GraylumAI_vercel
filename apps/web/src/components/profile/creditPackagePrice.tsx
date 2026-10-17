@@ -9,8 +9,9 @@ type PlanDiscount = { level: string; discount: number };
 export type CreditPackagePrice = { payableUsd: number; listUsd: number; discounted: boolean };
 
 /**
- * The price a user pays for a credit pack, mirroring checkout (0173 pay_common purchase):
- * a member pays round(list_cents * package_discount / 100) of their level's active plan; free users pay the list price.
+ * The price a user pays for a credit pack, mirroring card checkout (0222 pay_waffo_admit_purchase):
+ * a member pays list_cents * package_discount / 100 rounded down to the nearest $0.10 (design v25: member prices
+ * floor to the dime); free users pay the list price.
  * When the discount cannot be read unambiguously the list price is shown, so no discount is ever invented.
  */
 export function getCreditPackagePrice(listUsd: number, level: string | null | undefined,
@@ -23,8 +24,8 @@ export function getCreditPackagePrice(listUsd: number, level: string | null | un
   if (typeof off !== 'number' || !Number.isFinite(off) || off <= 0 || off >= 1) return list;
   const listCents = Math.round(listUsd * 100);
   const packageDiscount = Math.round(100 - off * 100);
-  // Integer half-up rounding, as Postgres round(numeric) does for positive amounts.
-  const payableCents = Math.floor((listCents * packageDiscount + 50) / 100);
+  // floor(price * discount / 100 / 10) * 10, as 0222 computes the amount sent to Stripe.
+  const payableCents = Math.floor((listCents * packageDiscount) / 1000) * 10;
   if (payableCents <= 0 || payableCents >= listCents) return list;
   return { payableUsd: payableCents / 100, listUsd, discounted: true };
 }

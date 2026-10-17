@@ -182,14 +182,6 @@ DELETE FROM diagnostic_results
 WHERE created_at < now() - interval '30 days';
 ```
 
-#### Clean Expired Invitations
-```sql
-UPDATE invitations
-SET status = 'expired'
-WHERE status = 'active'
-  AND created_at < now() - interval '7 days';
-```
-
 ### Backup Operations
 
 #### Export User Data (GDPR)

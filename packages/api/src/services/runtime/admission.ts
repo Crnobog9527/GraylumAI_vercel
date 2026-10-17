@@ -40,6 +40,7 @@ import {PURPOSE_OUTPUT_CAP,readPurposeBudgets} from './purposeBudgets';
 import {assertFrozenPayloads} from './payloadSize';
 import {freezeWindowBillingUnit} from './billingUnitAdmission';
 import {newWorkGate,readAdmissionSettings,requireNewWork} from './newWorkGate';
+import {serverChatModel} from './serverChatModel';
 import {requireAllowedInput} from './moderation';
 import {FREE_CHAT_REQUEST_FORMAT,PLAIN_TEXT_STREAM,plainTextStreamAllowed} from './providerRequest';
 import {admissionDeadline,admittedOutputLimit} from './admissionLimits';
@@ -51,6 +52,7 @@ import {runAutomaticFinancialRecovery} from './automaticRecovery';
 import {readPositioningGate,judgePositioning,windowBoundKey,refusePositioning,POSITIONING_REFUSAL_CAP,
  type PositioningGatePolicy} from './positioningGate';
 import {POSITIONING_FALLBACK,POSITIONING_FALLBACK_INSTRUCTIONS} from './positioningFallback';
+import {attachResearchTurn,fitsCapacity} from './researchAdmission';
 
 const uuid=z.string().uuid();
 export const runtimeMaterialInput=z.object({sessionId:uuid,requestId:uuid,expectedRevision:z.number().int().nonnegative(),
@@ -75,6 +77,8 @@ export type LocalRuntimePolicy={
  skillFileRead?:boolean;maxCalls:number;maxOutputTokens:number;inputBytes:number;historyItems:number;
  expectedMaterialRevision?:number;opcTurnToken?:string;mentorStream?:boolean;organizeOpening?:boolean;
  additionalInstructions?:string;stableAdditionalInstructions?:string;skillResources?:readonly string[];searchEnabled?:boolean;workspaceContext?:boolean;
+ /** RT-3b PR-3: set only by the OPC mentor host; the research admin switch still decides per turn. */
+ researchTools?:boolean;
  organizerInstructions?:string;organizerInput?:string;answeredCard?:AnsweredCard;resolvedInput?:string;
  /** POSITIONING-GATE: set only by the free-chat host; OPC turns, reports and organizing are never gated. */
  positioningGate?:PositioningGatePolicy;
@@ -188,7 +192,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    let skillChars=0;
    let skillFile:SkillFileBinding|undefined,skillFileReserve=0;
    let skillId:string|undefined,moduleId:string|undefined,revisionId:string|undefined;
-   if(input.selection.kind==='ordinary'||input.selection.kind==='auto')modelId=input.selection.modelId;
+   if(input.selection.kind==='ordinary'||input.selection.kind==='auto')modelId=policy.real?serverChatModel(await settings):input.selection.modelId;
    else if(input.selection.kind==='skill'){
     const module=await admin.from('modules').select('id,active,skill_id,model_id,report_model_id,social_media_related')
      .eq('id',input.selection.moduleId).single();
@@ -289,11 +293,11 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    const inputLimit=inputCapacity(row.data,maxOutputTokens,inputBytes);
    const cardBytes=hostTurnContext?.cardContract?groundedCardToolBytes():askQuestionToolBytes(true);
    // One read slot: the continuation reserve is the larger of the two possible results.
-   const admissionToolBytes=(file:boolean,history=false)=>(mentorStream&&!stepSummary?cardBytes:policy.searchEnabled?2048:0)+
+   const admissionToolBytes=(file:boolean,history=false,extra=0)=>extra+(mentorStream&&!stepSummary?cardBytes:policy.searchEnabled?2048:0)+
     (file?skillFileToolBytes()+(history?mentorHistoryToolBytes()+Math.max(skillFileReserve,MENTOR_HISTORY_RESERVE_BYTES):skillFileReserve):0)+
     (historySelection?.markerReserveBytes??(promptCache?PROMPT_CACHE_OVERHEAD_BYTES:0));
-   const requireCapacity=(text:string,file:boolean,content=currentInput,history=false)=>selectRuntimeHistory([], [{role:'user',content}],
-    {instructions:text,inputBytes:inputLimit,historyItems:0,toolBytes:admissionToolBytes(file,history)});
+   const requireCapacity=(text:string,file:boolean,content=currentInput,history=false,extra=0)=>selectRuntimeHistory([], [{role:'user',content}],
+    {instructions:text,inputBytes:inputLimit,historyItems:0,toolBytes:admissionToolBytes(file,history,extra)});
    const skillFileInstructions='\nYou may read at most one declared Skill file in this turn with read_skill_file, '+
     (stepSummary?'then write the step summary. ':'then answer or show a question card. ')+
     'Use the exact relative path declared by the Skill; '+
@@ -362,11 +366,14 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    // Real free chat freezes the administrator's interactive reasoning (fail closed when unset).
    // Skill matching ('auto') stays on its original format: a matched Skill may use another model.
    const freeChat=Boolean(policy.real&&input.selection.kind==='ordinary'&&!mentorStream&&!stepStream&&!policy.reportGeneration);
-   if(policy.real&&(mentorStream||stepStream||organize||policy.reportGeneration||freeChat))
+   // A chosen Skill uses the PAYG-evidenced v6 format with the same administrator reasoning as free chat:
+   // a model whose reasoning is mandatory (Gemini) has no evidenced 'none' variant, so 'none' was refused (#1026).
+   const chosenSkill=Boolean(policy.real&&input.selection.kind==='skill'&&!mentorStream&&!stepStream&&!policy.reportGeneration);
+   if(policy.real&&(mentorStream||stepStream||organize||policy.reportGeneration||freeChat||chosenSkill))
     reasoning=admitReasoning(row.data,organize?'organize':'interactive',realModel(row.data).providerLimits!.providerSlug,maxOutputTokens);
    const organizerFormat=Boolean(policy.real&&!mentorStream&&(organize||attachedOrganizer));
    if(organizerFormat&&!reasoning)reasoning={parameter:'none'};
-   const providerRequestFormat=mentorStream||policy.reportGeneration?'agent-turn-v5-stream':stepStream?'serial-tools-v4-stream':organizerFormat?'serial-tools-v6-reasoning':freeChat?FREE_CHAT_REQUEST_FORMAT:'serial-tools-v2';
+   const providerRequestFormat=mentorStream||policy.reportGeneration?'agent-turn-v5-stream':stepStream?'serial-tools-v4-stream':organizerFormat||chosenSkill?'serial-tools-v6-reasoning':freeChat?FREE_CHAT_REQUEST_FORMAT:'serial-tools-v2';
    const frozen={version:'runtime.v1',sdkVersion:'0.18.0',inputSelection:hostTurnContext?'scope-projection-v2':'scope-projection-v1',
     ...(hostTurnContext?{hostTurnContext,historySelection}:{}),
     ...(policy.reportGeneration?{reportGeneration:policy.reportGeneration}:{}),
@@ -447,6 +454,11 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     billing={...billing,contractVersion:'bill2.v2',callPolicy,
      rules:{...billing.rules,billingUnit:realCalls?billing.rules.billingUnit!:policy.payg!.billingUnit},limits:{...billing.limits,credits:0}};
    }
+   // RT-3b PR-3: a positioning mentor turn may also offer the research tools (admin switch, priced routes, room left).
+   if(policy.researchTools&&mentorStream&&!opening&&hostTurnContext&&!stepSummary&&billing.contractVersion==='bill2.v2'&&
+    await attachResearchTurn({admin,real:policy.real,context,billing,
+     fits:extra=>fitsCapacity(()=>requireCapacity(instructions+positioningRule,Boolean(skillFile),currentInput,historyRead,extra))}))
+    billing.sourceHash=createHash('sha256').update(JSON.stringify(context)).digest('hex');
    // Both SQL CHECKs measure jsonb::text, not JSON.stringify or model input.
    // This runs before runtime_admit, which atomically creates the execution/reservation.
    await requireAllowedInput({actorId,sessionId:input.sessionId,requestId:input.requestId,

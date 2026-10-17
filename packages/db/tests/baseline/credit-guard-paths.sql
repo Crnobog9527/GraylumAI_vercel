@@ -42,14 +42,30 @@ INSERT INTO guard_results SELECT 'BILL2 pre-deduct (service_role) + settle refun
   p.credits = b.credits + 15 FROM public.profiles p, guard_balance b
   WHERE p.id = '00000000-0000-4000-8000-00000000c001';
 
--- 4. Invitation rebate: service_role, inviter credited for the invitee's consumption.
-INSERT INTO public.invitation_records (invite_code, inviter_id, invitee_id, status)
-  VALUES ('GUARD01', '00000000-0000-4000-8000-00000000c002', '00000000-0000-4000-8000-00000000c001', 'rewarded');
+-- 4. Invitation rewards were retired (0266): no reward RPC remains, and service_role can no longer
+-- write the archived invitation tables, so no path can credit an inviter or invitee.
+CREATE TEMP TABLE invitation_write_denied(ok boolean);
+GRANT INSERT ON invitation_write_denied TO service_role;
 SET ROLE service_role;
-SELECT * FROM public.atomic_apply_invitation_rebate('00000000-0000-4000-8000-00000000c001', 100, 'guard-pre-1', 10);
+DO $$
+DECLARE denied integer:=0;
+BEGIN
+  BEGIN
+    INSERT INTO public.invitation_records (invite_code, inviter_id, invitee_id, status)
+      VALUES ('GUARD01', '00000000-0000-4000-8000-00000000c002', '00000000-0000-4000-8000-00000000c001', 'rewarded');
+  EXCEPTION WHEN insufficient_privilege THEN denied:=denied+1;
+  END;
+  BEGIN
+    INSERT INTO public.invitations (code, created_by) VALUES ('GUARD01', '00000000-0000-4000-8000-00000000c002');
+  EXCEPTION WHEN insufficient_privilege THEN denied:=denied+1;
+  END;
+  INSERT INTO invitation_write_denied VALUES (denied=2);
+END $$;
 RESET ROLE;
-INSERT INTO guard_results SELECT 'invitation rebate via service_role', credits > 0
-  FROM public.profiles WHERE id = '00000000-0000-4000-8000-00000000c002';
+INSERT INTO guard_results SELECT 'retired invitation rewards: no reward RPC and archived tables read-only',
+  to_regproc('public.atomic_apply_invitation_rebate') IS NULL AND to_regproc('public.atomic_claim_invitation_code') IS NULL
+  AND to_regproc('public.validate_invitation_code') IS NULL AND (SELECT bool_and(ok) FROM invitation_write_denied)
+  AND (SELECT credits FROM public.profiles WHERE id = '00000000-0000-4000-8000-00000000c002') = 0;
 
 -- 5. Profile bootstrap by service_role (trpc.ts inserts credits 0; the opening grant is step 1).
 SET ROLE service_role;

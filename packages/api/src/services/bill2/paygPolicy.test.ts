@@ -12,8 +12,9 @@ it('strict stable/call contracts bind identity, exact T and profile bounds', () 
   expect(paygCallQuote.safeParse({ ...quote, promptTokensUpper: 8293 }).success).toBe(false);
   expect(paygCallQuote.safeParse({ ...quote, endpointTag: 'other' }).success).toBe(false);
   // B1 (0250): three tools per call, never four.
-  expect(paygCallQuote.safeParse({ ...quote, tools: 3 }).success).toBe(true);
-  expect(paygCallQuote.safeParse({ ...quote, tools: 4 }).success).toBe(false);
+  // RT-3b PR-2 (0267): up to nine tools per call (card, Skill file, history, six research tools), never ten.
+  expect(paygCallQuote.safeParse({ ...quote, tools: 9 }).success).toBe(true);
+  expect(paygCallQuote.safeParse({ ...quote, tools: 10 }).success).toBe(false);
   expect(paygCallQuote.safeParse({ ...quote, extra: true }).success).toBe(false);
   expect(paygStablePolicy.safeParse({ ...identity, version: 'v1', admissionPath: 'fixture',
     maxBytes: 196608, maxMessages: 32, maxTools: 2, maxSchemaBytes: 16384,

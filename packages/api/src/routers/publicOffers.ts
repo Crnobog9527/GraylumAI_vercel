@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { publicProcedure } from '../trpc';
 import { checkRateLimitOrThrow } from '../services/redisRateLimiter';
-import { getClientIp } from '../services/invitationRuntime';
+import { getClientIp } from '../services/clientIp';
 import { getStripeClient, isStripeCheckoutConfigured } from '../services/stripe';
 import { readPublicOffers } from '../services/payments/publicOffers';
 

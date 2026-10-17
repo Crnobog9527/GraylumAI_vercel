@@ -21,14 +21,14 @@ Rows not explicitly updated below retain the 2026-03-11 acceptance snapshot; the
 | Modules | `/admin/prompts` | Module CRUD, active toggle, confirmed batch removal | `trpc.admin.getPromptsDashboard` | `createPrompt`, `updatePrompt`, `skills.saveModule`, `batchSetPromptActive`, `batchDeletePrompts` (disable), `removePrompts` (delete), `removePrompt` (compatibility) | Yes | `workbench.integration.ts --admin-only` plus historical suites | Yes | `partial` |
 | Packages | `/admin/packages` | Credit package CRUD, membership plan CRUD, Stripe IDs | `trpc.admin.getPackagesDashboard` | `createPackage`, `updatePackage`, `deletePackage`, `createMembershipPlan`, `updateMembershipPlan`, `deleteMembershipPlan` | Yes | `admin-config.spec.ts`, `admin-destructive.spec.ts` | Yes | `verified` |
 | Announcements | `/admin/announcements` | Banner/home announcements CRUD, active toggle | `trpc.admin.getAllAnnouncements` | `createAnnouncement`, `updateAnnouncement`, `deleteAnnouncement` | Yes | `admin-config.spec.ts`, `admin-destructive.spec.ts` | Yes | `verified` |
-| Settings | `/admin/settings` | Global settings, feature flags, invite/check-in config, membership export policy | `trpc.admin.getSettingsDashboard`, `trpc.settings.getRoutingModels`, `trpc.settings.getSummaryModels` | `updateSystemSettings`, `updateSystemSettingsBulk`, `updateMembershipPlan` | Yes | `workbench.integration.ts --admin-only` plus historical suites | Yes | `partial` |
+| Settings | `/admin/settings` | Global settings, feature flags, check-in config (invite_* values are retired references), membership export policy | `trpc.admin.getSettingsDashboard`, `trpc.settings.getRoutingModels`, `trpc.settings.getSummaryModels` | `updateSystemSettings`, `updateSystemSettingsBulk`, `updateMembershipPlan` | Yes | `workbench.integration.ts --admin-only` plus historical suites | Yes | `partial` |
 | Diagnostics | `/admin/diagnostics` | Runtime proof, test definitions, category runs, cleanup | `trpc.diagnostics.*` | `runAllTests`, `runCategoryTests`, `runSingleTest`, `cleanupOldResults` | Yes | `admin.spec.ts`, `admin-ops.spec.ts`, `admin-destructive.spec.ts` | Yes | `verified` |
 | Tickets | `/admin/tickets` | Queue, detail sheet, reply, status updates | `trpc.admin.getAllTickets` | `updateTicketStatus`, `replyToTicket` | Yes | `admin-ops.spec.ts` | No | `verified` |
 | Transactions | `/admin/transactions` | Billing records, filters, tabs | `trpc.admin.getAllTransactions`, `getAllUsers` | None | Indirect only | `admin-ops.spec.ts` | No | `verified` |
 | Finance | `/admin/finance` | Finance/API statistics panels | `trpc.admin.getFinanceStats` | None | Indirect only | `admin-ops.spec.ts` | No | `verified` |
 | Costs | `/admin/costs` | Usage logs, cost stats, charts | `trpc.costs.*` | None | Indirect only | `admin-ops.spec.ts`, runtime proof support flows | No | `verified` |
 | Performance | `/admin/performance` | AI performance metrics, token distribution | `trpc.admin.getPerformanceStats` | None | Indirect only | `admin-ops.spec.ts` | No | `verified` |
-| Invitations | `/admin/invitations` | Invite stats, risk records, search | `trpc.invitation.getAdminInvitationsDashboard` | None | Indirect only | `admin-ops.spec.ts` | No | `verified` |
+| Invitations | `/admin/invitations` (removed) | Retired 2026-10-14 (#988, migration 0266): page, sidebar entry and tRPC router removed; tables kept read-only as an archive | None | None | No | None | No | `retired` |
 
 ## Acceptance Boundaries
 
@@ -46,7 +46,7 @@ The following notes describe the earlier acceptance baseline:
 1. `/admin/settings` is the canonical owner for global settings and page-experience settings.
 2. `/admin/announcements` is limited to announcement CRUD and active-state management.
 3. `/admin/packages` owns membership plan lifecycle, while `/admin/settings` owns membership policy fields such as export and retention.
-4. `transactions / finance / costs / performance / invitations` now have assertion-heavy read acceptance through `admin-ops.spec.ts`, not just shell coverage.
+4. `transactions / finance / costs / performance` now have assertion-heavy read acceptance through `admin-ops.spec.ts`, not just shell coverage.
 
 ## Acceptance Rule
 

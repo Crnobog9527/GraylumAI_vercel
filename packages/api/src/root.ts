@@ -1,3 +1,4 @@
+import { researchRouter } from './routers/research';
 import { libraryRouter } from './routers/library';
 import { reportModelRouter } from './routers/reportModel';
 import { socialMediaFlagRouter } from './routers/socialMediaFlag';
@@ -7,6 +8,7 @@ import { workbenchRouter } from './routers/workbench';
 import { router } from './trpc';
 import { runtimeRateLimitsRouter } from './routers/runtimeRateLimits';
 import { modelIdentityRouter } from './routers/modelIdentity';
+import { platformSecretsRouter } from './routers/platformSecrets';
 import { researchToolsRouter } from './routers/researchTools';
 import { mentorBudgetRouter } from './routers/mentorBudget';
 import { chatRouter } from './routers/chat';
@@ -18,7 +20,6 @@ import { modelRouter } from './routers/model';
 import { modelReasoningRouter } from './routers/modelReasoning';
 import { modelPricingRouter } from './routers/modelPricing';
 import { billingReportRouter } from './routers/billingReport';
-import { invitationRouter } from './routers/invitation';
 import { checkinRouter } from './routers/checkin';
 import { adminRouter } from './routers/admin';
 import { modulesRouter } from './routers/modules';
@@ -28,6 +29,7 @@ import { paymentsRouter } from './routers/payments';
 import { skillsRouter } from './routers/skills';
 import { accountRouter } from './routers/account';
 import { dataUseRouter } from './routers/dataUse';
+import { founderRouter } from './routers/founder';
 import { publishMonitorRouter } from './routers/publishMonitor';
 import { adminStaleRoundsRouter } from './routers/adminStaleRounds';
 import { fusionSettingsRouter } from './routers/fusionSettings';
@@ -55,8 +57,9 @@ export const appRouter = router({
   socialMediaFlag: socialMediaFlagRouter,
   runtimeRateLimits: runtimeRateLimitsRouter,
   modelIdentity: modelIdentityRouter,
+  platformSecrets: platformSecretsRouter,
   researchTools: researchToolsRouter,
-  invitation: invitationRouter,
+  research: researchRouter,
   checkin: checkinRouter,
   admin: adminRouter,
   adminStaleRounds: adminStaleRoundsRouter,
@@ -70,6 +73,7 @@ export const appRouter = router({
   opc: opcRouter,
   account: accountRouter,
   dataUse: dataUseRouter,
+  founder: founderRouter,
   publishMonitor: publishMonitorRouter,
   library: libraryRouter,
 });

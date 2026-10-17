@@ -58,7 +58,7 @@ it.each([
   f=>{f.profile.requestFormats=['agent-turn-v5-stream'];},
   f=>{f.profile.expiresAt='2000-01-01T00:00:00Z';},
   f=>{f.profile.evidence.maxPromptToUpper=0.71;},
-  f=>{delete (f.profile.evidence as Partial<PaygHostProfile['evidence']>).maxVerifiedMessages;},
+  f=>{delete (f.profile.evidence as Record<string,unknown>).maxVerifiedMessages;},
   f=>{f.config.profiles.push({...f.profile});},
   f=>{f.config.profiles=[];},
   f=>{f.config.windowId='20000000-0000-4000-8000-000000000002';},
@@ -94,6 +94,22 @@ it('staging-shaped profile (no v2) rejects old free chat and admits v6 + low; un
  // A model without an evidenced route profile (e.g. gpt-6.1-sol) is still refused.
  await expect(read('serial-tools-v6-reasoning',{effort:'low'},{...f.policy,model:'openai/gpt-6.1-sol',
   providerLimits:{...f.policy.providerLimits!,providerSlug:'openai'}})).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
+});
+it('admits the Fusion panel routes only on their evidenced route; other models stay denied',async()=>{
+ const read=async(model:string,endpointTag:string)=>{
+  const f=fixture();
+  f.profile.model=model;f.profile.endpointTag=endpointTag;
+  f.profile.purposes=['fusion_review','fusion_summary'];f.profile.requestFormats=['fusion-json-v1-stream'];
+  f.profile.reasoningVariants=[{...f.profile.reasoningVariants[0]!,reasoning:{effort:'low'}}];
+  const policy={...f.policy,model,providerLimits:{...f.policy.providerLimits!,providerSlug:endpointTag}};
+  return readPaygHostPolicies(f.db as unknown as SupabaseClient,f.window,[policy],
+   [{modelId:id,phase:'fusion_review',outputLimit:4096,requestFormat:'fusion-json-v1-stream',reasoning:{effort:'low'}}],env);
+ };
+ expect(await read('openai/gpt-6.1-sol','openai')).toHaveLength(1);
+ expect(await read('anthropic/claude-opus-5.5','anthropic')).toHaveLength(1);
+ await expect(read('openai/gpt-6.1-sol','azure')).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
+ await expect(read('anthropic/claude-opus-5.5','amazon-bedrock')).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
+ await expect(read('qwen/qwen3.8-max-0902','alibaba')).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
 });
 it('requires profile validity through the frozen execution deadline',async()=>{
  const f=fixture();f.profile.expiresAt='2098-01-01T00:00:00Z';
@@ -186,12 +202,58 @@ it('requires a 32768-authorized profile and sufficient context; rejects cap plus
  f.profile.outputLimit=32769;
  expect(paygHostProfile.safeParse(f.profile).success).toBe(false);
 });
-// B1 (0250): profiles move from 2 to 3 tools without a gap; anything above 3 stays a configuration error.
-it.each([2,3] as const)('accepts a %s-tool profile and freezes it unchanged',async maxTools=>{
+// B1 (0250) / RT-3b PR-2 (0267): profiles may carry 2–9 tools; anything above 9 stays a configuration error.
+it.each([2,3,9] as const)('accepts a %s-tool profile and freezes it unchanged',async maxTools=>{
   const f=fixture();f.profile.maxTools=maxTools;
   expect((await f.run())?.[0].payg).toMatchObject({maxTools});
 });
-it('refuses a profile above the 3-tool ceiling',async()=>{
-  const f=fixture();(f.profile as {maxTools:number}).maxTools=4;
+it.each([1,4.5,10])('refuses a %s-tool profile outside the 2–9 range (0267 ceiling)',async maxTools=>{
+  const f=fixture();(f.profile as {maxTools:number}).maxTools=maxTools;
   await expect(f.run()).rejects.toThrow();
+});
+// FUSION-PROFILE (Owner 2026-10-17, plan B): a profile used only for Fusion review/summary calls may cite evidence taken
+// on the real Fusion request shape instead of the full #665 matrix; every other purpose still needs the full matrix.
+function fusionOnly(model='anthropic/claude-opus-5.5',endpointTag='anthropic'){
+ const f=fixture();
+ f.profile.model=f.policy.model=model;f.profile.endpointTag=f.policy.providerLimits!.providerSlug=endpointTag;
+ f.profile.purposes=['fusion_summary'];f.profile.requestFormats=['fusion-json-v1-stream'];
+ f.profile.reasoningVariants=[{...f.profile.reasoningVariants[0]!,reasoning:{effort:'low'},testedOutputLimit:2048}];
+ (f.profile as {evidence:unknown}).evidence={scope:'fusion-request-shape',reference:'test-only',manifestHash:'a'.repeat(64),
+  distinctSamples:6,sizeBands:2,maxVerifiedBytes:186000,maxPromptToBytes:0.4,maxPromptToUpper:0.38,outputLimit:8192,testedOutputLimit:2048,
+  outputSemantics:'max-tokens-includes-reasoning',includesReasoning:true,cacheCovered:true,costBoundPassed:true};
+ const read=(phase:PaygHostProfile['purposes'][number]='fusion_summary',requestFormat='fusion-json-v1-stream')=>readPaygHostPolicies(
+  f.db as unknown as SupabaseClient,f.window,[f.policy],[{modelId:id,phase,outputLimit:8192,requestFormat,reasoning:{effort:'low'}}],env);
+ return {...f,read};
+}
+it('admits a Fusion-only profile on Fusion-shape evidence',async()=>{
+ const f=fusionOnly();
+ expect(paygHostProfile.safeParse(f.profile).success).toBe(true);
+ expect(await f.read()).toHaveLength(1);
+ const sol=fusionOnly('openai/gpt-6.1-sol','openai');sol.profile.purposes=['fusion_review','fusion_summary'];
+ expect(await sol.read('fusion_review')).toHaveLength(1);
+});
+it('Fusion-shape evidence never covers another purpose or request format',async()=>{
+ for(const purpose of ['ordinary','skill','report','organizer','skill_matching','attached_organizer'] as const){
+  const f=fusionOnly();f.profile.purposes=['fusion_summary',purpose];
+  expect(paygHostProfile.safeParse(f.profile).success).toBe(false);
+  await expect(f.read()).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
+ }
+ const f=fusionOnly();f.profile.requestFormats=['fusion-json-v1-stream','serial-tools-v6-reasoning'];
+ expect(paygHostProfile.safeParse(f.profile).success).toBe(false);
+});
+it('Fusion-shape evidence keeps its own bounds',()=>{
+ const bad:Array<(e:Record<string,unknown>)=>void>=[
+  e=>{e.distinctSamples=3;},e=>{e.sizeBands=1;},e=>{e.maxVerifiedBytes=120000;},e=>{e.maxVerifiedBytes=196609;},
+  e=>{e.maxPromptToBytes=0.71;},e=>{e.maxPromptToUpper=0.71;},e=>{e.costBoundPassed=false;},e=>{e.cacheCovered=false;},
+  e=>{e.scope='other';},e=>{e.extra=1;},e=>{delete e.testedOutputLimit;},
+ ];
+ for(const change of bad){
+  const f=fusionOnly();change(f.profile.evidence as unknown as Record<string,unknown>);
+  expect(paygHostProfile.safeParse(f.profile).success).toBe(false);
+ }
+ // Output evidence still applies: two stress samples, and the variant's tested limit must match the evidence.
+ const f=fusionOnly();f.profile.reasoningVariants[0]!.outputStressSamples=1;
+ expect(paygHostProfile.safeParse(f.profile).success).toBe(false);
+ const g=fusionOnly();g.profile.reasoningVariants[0]!.testedOutputLimit=512;
+ expect(paygHostProfile.safeParse(g.profile).success).toBe(false);
 });

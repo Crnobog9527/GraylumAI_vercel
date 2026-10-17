@@ -26,11 +26,12 @@ export function scrubText(value: string): string {
  */
 export const APP_SEGMENTS = new Set(['about', 'acceptable-use', 'access-denied', 'account-erasure', 'admin',
   'agent-first-preview', 'ai', 'announcements', 'api', 'auth', 'auto-close', 'billing-reconcile', 'callback', 'chat',
-  'advance', 'fusion', 'connect', 'contact', 'costs', 'cron', 'diagnostics', 'f', 'faq', 'finance', 'forgot-password', 'ig-jingying', 'invitations', 'landing',
+  'advance', 'fusion', 'connect', 'contact', 'costs', 'cron', 'diagnostics', 'f', 'faq', 'finance', 'forgot-password', 'ig-jingying', 'landing',
   'library', 'library-cleanup', 'login', 'maintenance', 'marketplace', 'models', 'orders', 'packages', 'performance',
-  'plan', 'positioning', 'preview', 'publish-monitor', 'pricing', 'privacy', 'profile', 'prompts', 'refunds', 'register', 'release-subscription-credits',
-  'requests', 'reset-password', 'runtime', 'runtime-recovery', 'search', 'settings', 'shequn-jingying', 'shequn-xingxiao',
-  'skills', 'start', 'stream', 'stripe', 'terms', 'tickets', 'topics', 'transactions', 'trpc', 'tutorials', 'upload', 'users',
+  'plan', 'positioning', 'postforme', 'preview', 'publish-monitor', 'pricing', 'privacy', 'profile', 'prompts', 'refunds',
+  'register', 'release-subscription-credits',
+  'requests', 'reset-password', 'review', 'runtime', 'runtime-recovery', 'search', 'secrets', 'settings', 'shequn-jingying', 'shequn-xingxiao',
+  'skills', 'social-monitor', 'start', 'stream', 'stripe', 'terms', 'tickets', 'topics', 'transactions', 'trpc', 'tutorials', 'upload', 'users',
   'verify-email', 'waffo', 'webhook', 'workbench', 'zh-tw', 'zimeiti-jingying', 'zimeiti-kecheng',
   // Style samples D, E, G to O (PUBLIC-SITE, /landing/preview/d … /o), removed with the samples.
   'd', 'e', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o',

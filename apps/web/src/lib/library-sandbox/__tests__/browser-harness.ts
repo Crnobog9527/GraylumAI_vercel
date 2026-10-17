@@ -21,6 +21,9 @@ export type Harness = {
   samples: Map<string, Buffer>;
   workerSource: string;
   pdfWorkerSource: string;
+  ocrWorkerSource: string;
+  /** LIB-2d: serve this recognition asset with one byte changed (SHA-256 check test). */
+  tamperOcrAsset: string | null;
   /** How server A answers the worker bundle request: normally, or like a signed-out visitor / an error page. */
   workerResponse: 'script' | 'login-redirect' | 'html' | 'stall';
   open(): Promise<Page>;
@@ -36,6 +39,7 @@ async function bundleHarness(): Promise<string> {
     logLevel: 'silent', define: {
       'process.env.NEXT_PUBLIC_LIBRARY_DOCX_EXTRACTION': '"true"',
       'process.env.NEXT_PUBLIC_LIBRARY_PDF_EXTRACTION': '"true"',
+      'process.env.NEXT_PUBLIC_LIBRARY_SCAN_RECOGNITION': '"true"',
       'process.env.NODE_ENV': '"test"',
     },
   });
@@ -49,10 +53,11 @@ function listen(server: Server): Promise<string> {
 }
 
 export async function startHarness(): Promise<Harness> {
-  const [{ 'docx-worker': docx, 'pdf-worker': pdf }, harnessCode] = await Promise.all([
-    buildLibrarySandbox({ outdir: null }), bundleHarness(),
-  ]);
-  const bundles: Record<string, string> = { '/library-sandbox/docx-worker.js': docx.code, '/library-sandbox/pdf-worker.js': pdf.code };
+  const [built, harnessCode] = await Promise.all([buildLibrarySandbox({ outdir: null }), bundleHarness()]);
+  const { 'docx-worker': docx, 'pdf-worker': pdf, 'ocr-worker': ocr } = built;
+  const ocrAssets = built.ocrAssets ?? {};
+  const bundles: Record<string, string> = { '/library-sandbox/docx-worker.js': docx.code, '/library-sandbox/pdf-worker.js': pdf.code,
+    '/library-sandbox/ocr-worker.js': ocr.code };
   const samples = new Map<string, Buffer>();
   const unexpected: string[] = [];
   const outsideRequests: string[] = [];
@@ -71,6 +76,12 @@ export async function startHarness(): Promise<Harness> {
       if (harness.workerResponse === 'html') return send('text/html; charset=utf-8', PAGE);
       if (harness.workerResponse === 'stall') return;
       return send('text/javascript', bundles[url]);
+    }
+    const asset = url.startsWith('/library-sandbox/ocr/') ? ocrAssets[url.slice('/library-sandbox/ocr/'.length)] : undefined;
+    if (asset) {
+      const body = harness.tamperOcrAsset === url.slice('/library-sandbox/ocr/'.length) ? Buffer.from(asset) : asset;
+      if (body !== asset) body[body.length - 1]! ^= 1;
+      return send(url.endsWith('.wasm') ? 'application/wasm' : 'application/octet-stream', body);
     }
     const sample = url.startsWith('/sample/') ? samples.get(decodeURIComponent(url.slice(8))) : undefined;
     if (sample) return send('application/octet-stream', sample);
@@ -99,7 +110,7 @@ export async function startHarness(): Promise<Harness> {
     : await chromium.launch({ executablePath: existsSync(chrome) ? chrome : undefined, headless: true });
   const harness: Harness = {
     browser, origin, outside, unexpected, outsideRequests, samples, workerSource: docx.code, pdfWorkerSource: pdf.code,
-    workerResponse: 'script',
+    ocrWorkerSource: ocr.code, tamperOcrAsset: null, workerResponse: 'script',
     async open() {
       const page = await browser.newPage();
       await page.goto(`${origin}/`);

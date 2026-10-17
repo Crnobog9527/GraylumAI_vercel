@@ -55,9 +55,10 @@
      `prepared → dispatched → succeeded / failed / unknown`，发出前写成 `dispatched` 才发请求（复用 `research_operations` 和 `research_transition`，不改状态集合）。
      进程中途崩溃后按游标续跑：`succeeded` 直接复用证据不重发；`prepared` 可以发；`dispatched` 但没有结果的记为 `unknown`，
      **不重发**，按第 3.4 节等对账。`benchmark_fetch` 用同样的做法。补测试：在第 k 个子调用发出后模拟崩溃，续跑不重复收费、不丢已取到的证据。
-   - **按阶段拆成多个研究计划**：`research_plans.max_operations` 限 1–20（0065），所以发现流程拆成"关键词搜索（≤ 10）"和
-     "作者资料（≤ 15）"两个计划，`benchmark_fetch` 一个计划（≤ 15），共用同一个发现流程编号，子调用稳定编号不变；
-     不改 0065 的上限。补测试：完整 25 次子调用的发现流程跑通。
+   - **每个子调用一个研究计划、一个操作**（RT-3b #997/#1005 交接细化）：`research_plans.max_operations` 限 1–20（0065），
+     每次通过 `research_runtime_plan_create` 创建即绑定回答，共用发现流程编号，子调用使用稳定编号；不改 0065 的上限。
+     已发送的操作恢复时不重发。跨回答恢复未发送计划时，先取消并确认尚未发送，再争用同一个稳定后继编号，不重绑旧回答的账务。
+     补测试：完整 25 次子调用、跨轮续跑和取消时的派发竞争。
    - **遇到结果未知不卡住整单**：`bill2_payg_claim` 不允许运行单上有未结算调用时再发新调用（0162 约 283 行），
      现有 `research_transition` 遇到未知会取消该计划。这两条规则都不改，做法是：
      - 未知的子调用**对用户当场结算为 0**（`settled_at` 照常写入，按第 3.3 节"用户结算"和"供应商成本待确认"分开记），
@@ -72,6 +73,9 @@
    - 同量级可模仿：粉丝 1 万–20 万，30 天内有更新。
    - 近期起号快：在"同量级可模仿"的门槛内，再满足"最早一条可取作品在 N 天内、或近期作品播放中位数 ≥ 粉丝数 × K"（N、K 后台配置，初值由 RT-4 用实测数据定，写进 PR）。
    - 30 天没更新的剔除；粉丝不到 1 万的剔除。
+   - 取数（`benchmark_fetch`）后至少分析到 20 条作品才算合格；只有供应商确认这个账号总共就这么多作品（新号，不到 20 条）时例外，按实际条数照常判定。
+     Owner 2026-10-16 原话："同意 RT-4b 作品条数选 A"（RT-4b，[#1015](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1015)）。
+     发现阶段的候选筛选只有搜索结果里的几条作品，不受这一条限制。
 5. 宿主把 8–12 个候选用**选择卡**（多选）展示，请用户挑 3–5 个；提交后同样保存为宿主记录。
    **可选的候选（不含头部参考）不到 8 个时不发卡**（Master Plan 第 3.7 节要求展示 8–12 个）：返回 `partial`，说明找到了几个、差几个，
    由模型请用户换关键词重新发现或贴链接（不跳过）。
@@ -442,3 +446,29 @@ RT-1 不碰任何在途文件，可以先开工；RT-2b 只在 RT-1 之后、和
 
 不需要 Owner 现在决定、但上线前要做的：各家平台硬上限金额（上线批准包）；Firecrawl 零保留是否开通；
 条款文字（Owner 用第三方软件生成，本方案不涉及）。
+
+### RT-3b PR-1 接线边界（2026-10-15）
+
+`runtime/researchRuntimeTool.ts` 提供六个定位研究工具工厂，`research/runtime/` 封装存储与串行子调用；
+`shared/researchTurn.ts` 定义卡片及搜索进度回调。PR-1 不注册到真实运行入口，不修改工具白名单或后台开关。
+流事件持久化、刷新授权进入下一轮受信任上下文、定位页面挂载由 PR-2 接入；对标表写入和报告门槛仍属 RT-4b。
+
+登录接口 `research.cards` / `confirmCard` / `createRefresh` / `toolCharges` / `evidence` 使用 0263 的受限函数；
+前端字段与 #1007 对齐。刷新只创建授权，不立即发起付费调用。费用只返回用户结算来源和取整前积分，
+证据只返回本人未删除内容的公开来源；存量缺失的工具参数等字段保持 null。没有供应商成本或密钥对外输出。
+
+### RT-3b PR-2 边界（2026-10-16，迁移 0267）
+
+- 消息入口 `opc.mentorTurnStream` / `prepareStep` 接受可选 `researchRefreshId`：宿主按登录用户、草稿会话读 0263 刷新授权
+  （别人的、别的会话的、来源回答已删除的、已用过的一律拒绝，错误码 `OPC_RESEARCH_REFRESH_INVALID`；研究工具总开关关闭时
+  `OPC_RESEARCH_REFRESH_UNAVAILABLE`），通过后作为 `hostTurnContext.researchRefresh` 冻结进该轮上下文交给模型；
+  不进 `runtime_admission_replay` 的请求身份。`benchmark_fetch` 以 `{kind:"refresh",refreshId}` 再次核验并一次性消耗。
+- PAYG 每次调用最多 9 个工具定义（SQL 报价校验、`PAYG_MAX_TOOLS`、host profile 2–9、`MAX_AGENT_TOOLS`）；
+  已冻结的 run 仍按自己的 maxTools。9 个工具定义合计约 7.4 KB，`maxSchemaBytes` 16384 不变。
+- `research_call` 结束事件带 `credits`（本次子调用的用户积分，取整前十进制；读不到为 null）；
+  `research.toolCharges` / `research.evidence` 每行返回子调用自己的 `query` / `platform` / `dataKind`，0267 之前的行为 null。
+- 证据派发顺序改为：建计划并预留 → 关联 BILL2 调用 → BILL2 派发 → 研究侧派发 → 供应商。未发送时取消该操作；
+  "已派发、无结果、无 BILL2 关联"的操作由 `research_runtime_close_unsent` 收口为已取消，发现流程换稳定后继编号（#1005 P2）。
+- **仍未接入真实定位回合**：冻结供应商价格进 run（`frozenCallPolicy` 增加 `research-tool-v1`）、准入里按开关给定位导师回合
+  加研究工具和子调用次数、`execute.ts` 组装工具、`AGENT_TOOL_NAMES` / `providerRequest` 白名单、流事件队列。另开 PR 做，
+  前端挂载在它之后。

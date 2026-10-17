@@ -691,11 +691,6 @@ describe('adminRouter dashboard statistics aggregation', () => {
                 data: [{ status: 'open' }, { status: 'closed' }, { status: 'in_progress' }],
                 error: null,
               };
-            case 'invitations':
-              return {
-                data: [{ status: 'active' }, { status: 'used' }, { status: 'expired' }, { status: 'active' }],
-                error: null,
-              };
             case 'conversations':
               if (state.head) {
                 return { data: null, error: null, count: 40 };
@@ -779,12 +774,7 @@ describe('adminRouter dashboard statistics aggregation', () => {
       thisWeek: 2,
     });
     expect(result.credits.totalInSystem).toBe(60);
-    expect(result.invitations).toMatchObject({
-      total: 4,
-      active: 2,
-      used: 1,
-      expired: 1,
-    });
+    expect(result).not.toHaveProperty('invitations');
     expect(result.tickets).toMatchObject({
       total: 3,
       open: 1,
@@ -798,7 +788,8 @@ describe('adminRouter dashboard statistics aggregation', () => {
         expect.objectContaining({ date: '2026-03-26', additions: 5, deductions: 0 }),
       ]),
     );
-    expect(adminQueries).toHaveLength(10);
+    expect(adminQueries).toHaveLength(9);
+    expect(adminQueries).not.toContain('invitations');
     expect(selectOptions).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ table: 'conversations', count: 'planned', head: true }),
@@ -826,11 +817,6 @@ describe('adminRouter dashboard statistics aggregation', () => {
             case 'tickets':
               return {
                 data: [{ status: 'closed' }],
-                error: null,
-              };
-            case 'invitations':
-              return {
-                data: [],
                 error: null,
               };
             case 'conversations':

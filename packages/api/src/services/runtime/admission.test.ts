@@ -5,12 +5,14 @@ import {createHash} from 'node:crypto';
 import {stagingProcedureError} from './stagingErrors';
 import {runtimeAdmissionService} from './admission';
 import {configuredReasoning} from '../__tests__/fixtures/runtimeReasoning';
+import {testPrimaryModel} from '../__tests__/fixtures/runtimeGates';
 // The window/configuration consistency of BILL-UNIT is covered in billingUnitAdmission.test.ts.
 vi.mock('./billingUnitAdmission', async (original) => ({
   ...(await original<typeof import('./billingUnitAdmission')>()),
   freezeWindowBillingUnit: async () => ({ version: 'bill-unit-v2', creditsPerUsd: '1000', defaultMultiplier: '1', models: {}, providers: {}, hash: 'f'.repeat(64) }),
 }));
 const actor='10000000-0000-4000-8000-000000000001',sessionId='10000000-0000-4000-8000-000000000002',modelId='10000000-0000-4000-8000-000000000003',requestId='10000000-0000-4000-8000-000000000004';
+testPrimaryModel.id=modelId;
 it.each(['PGRST202','42883','42501','PGRST301','XX000',null].flatMap(code=>[false,true].map(real=>({code,real}))))('workspace capability $code (real=$real) preserves free chat only for genuinely missing RPC',async({code,real})=>{
  let frozen:Record<string,unknown>|undefined;
  const rpc=vi.fn(async(name:string,args:Record<string,unknown>)=>{

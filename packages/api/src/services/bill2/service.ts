@@ -13,7 +13,6 @@ import { openRouterNotFound, type RejectionRecovery } from './openRouterNotFound
 import { openRouterEvidence } from './openRouterEvidence';
 import {consumeOpenRouterNotStarted} from './openRouterAdapter';
 import { aggregateCredits } from './decimal';
-import { applyInvitationRebateForSpend } from '../invitationRebate';
 const uuid = z.string().uuid();
 const scope = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('positioning_draft'), draftId: uuid }).strict(),
@@ -80,8 +79,6 @@ export type DispatchClaim = { id: string; state: string; dispatchToken: string |
 /** Trusted server composition only: actor comes from verified authentication, policy from the server.
  * No public route exposes raw RPC payloads or accepts a browser price/receipt. No env/fallback loading. */
 export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: BillingRpc; actor: () => Promise<string>; adapter: BillingTransport;
-  /** Existing downstream rebate, explicitly enabled only by the trusted host. */
-  rebateClient?: Parameters<typeof applyInvitationRebateForSpend>[0]['supabase'];
 }) {
   const capabilities = new Map<string, { token: string; frozen: FrozenCall; runId: string; actorId: string }>();
   const financialActors = new Map<string,string>();
@@ -99,6 +96,9 @@ export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: Billi
     const result=await (financialNames.has(name)&&query.abortSignal ? query.abortSignal(AbortSignal.timeout(Math.min(10_000,remaining))) : query);
     if (result.error) {
       if (name === 'bill2_claim' || name === 'bill2_dispatch' || name === 'fusion_group_claim') throw claimFailure(result.error);
+      // Before 0261 the database refuses a non-402 pending refusal; dispatch then records the plain observation.
+      if (name === 'bill2_record' && (result.error as { message?: unknown }).message === 'BILL2_REJECTION_PROOF_DENIED')
+        throw new Error('BILL2_REJECTION_PROOF_DENIED');
       throw new Error('BILL2_DATABASE_UNAVAILABLE');
     }
     return result.data as T;
@@ -122,19 +122,6 @@ export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: Billi
       // Ambiguous transaction result: inspect original identity; never redispatch or retry blindly.
       state = await readRun(runId);
       if (!['settled', 'refunded'].includes(state.state)) throw error;
-    }
-    if (state.contractVersion === 'bill2.v2' && state.state === 'settled' && deps.rebateClient) {
-      const current = await readRun(runId);
-      for (const item of current.calls ?? []) {
-        if (!item.preDeductId || !item.chargedCredits) continue;
-        await applyInvitationRebateForSpend({ supabase: deps.rebateClient, supabaseAdmin: deps.rebateClient,
-          inviteeId: financialActors.get(runId) ?? uuid.parse(await deps.actor()),
-          consumedCredits: item.chargedCredits, preDeductId: item.preDeductId });
-      }
-    } else if (state.contractVersion !== 'bill2.v2' && state.state === 'settled' && state.chargedCredits && deps.rebateClient) {
-      // Reuse the existing idempotent downstream; run identity is stable, releases/refunds never enter it.
-      await applyInvitationRebateForSpend({ supabase: deps.rebateClient, supabaseAdmin: deps.rebateClient,
-        inviteeId: financialActors.get(runId) ?? uuid.parse(await deps.actor()), consumedCredits: state.chargedCredits, preDeductId: state.preDeductId });
     }
     return state;
   }
@@ -281,7 +268,14 @@ export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: Billi
       }
       await early; // Owned by this invocation; database transport shares its persistence deadline.
       try {
-        const saved = await recordReceipt(capability.runId, callId, evidence);
+        let saved: RunView;
+        try { saved = await recordReceipt(capability.runId, callId, evidence); }
+        catch (error) {
+          if (!(error instanceof Error) || error.message !== 'BILL2_REJECTION_PROOF_DENIED' || !observation
+            || observation.httpStatus === 402 || !('evidenceKind' in evidence) || evidence.evidenceKind !== 'provider_rejection_pending') throw error;
+          evidence = providerEvidence(observation, identity, 'response');
+          saved = await recordReceipt(capability.runId, callId, evidence);
+        }
         if (saved.accountClosed) return { dispatched: true, accountClosed: true as const };
         if (saved.contentDeleted) return { dispatched: true, contentDeleted: true as const };
         if ('evidenceKind' in evidence && evidence.evidenceKind === 'provider_rejection_pending') {
@@ -290,12 +284,15 @@ export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: Billi
         }
       }
       catch { return { dispatched: true,
+        providerRejectionPending: 'evidenceKind' in evidence && evidence.evidenceKind === 'provider_rejection_pending',
         providerRejected: 'evidenceKind' in evidence &&
           ['provider_rejection', 'provider_rejection_pending'].includes(String(evidence.evidenceKind)),
         pendingReceipt: { runId: capability.runId, callId, evidence } }; }
+      // Keep Runtime rejection handling; Fusion must distinguish a pending refusal from no_delivery.
       // Confirmation can still commit after this receipt. Every later Runtime
       // read/write then refuses the actor (bill2_actor), so no content reaches SDK/history/result.
       return { dispatched: true, observation,
+        providerRejectionPending: 'evidenceKind' in evidence && evidence.evidenceKind === 'provider_rejection_pending',
         providerRejected: 'evidenceKind' in evidence &&
           ['provider_rejection', 'provider_rejection_pending'].includes(String(evidence.evidenceKind)) };
     },

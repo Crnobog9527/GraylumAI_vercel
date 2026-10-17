@@ -1,0 +1,104 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { accountMetrics, suppliedWholeHistory, type EvidenceItem } from '../benchmark/metrics';
+import { classifyAccount, qualifyFetchedAccount } from '../benchmark/classify';
+import { authorizeBenchmarkFetch } from '../tools/authorize';
+import { toolEnvelope } from '../tools/envelope';
+import type { ResearchToolArgs } from '../tools/schemas';
+import { BENCHMARK_ROUTE_KINDS } from '../vendors/config';
+import type { ResearchItem, SocialKind } from '../vendors/types';
+import { executeResearchCall, socialRequest, stableResearchId, type ResearchToolContext, type ToolAllowance } from './toolContext';
+
+export async function benchmarkFetch(ctx: ResearchToolContext, args: ResearchToolArgs<'benchmark_fetch'>,
+  budget: ToolAllowance): Promise<string> {
+  const authorization = await authorizeBenchmarkFetch(ctx.scope, args, ctx.store.authorization);
+  if (!authorization.ok) return toolEnvelope({ status: 'not_confirmed', reason: authorization.reason });
+  const rows: ResearchItem[] = [];
+  let partial = false;
+  let stopReason: string | null = null;
+  let stopBudget = false;
+  for (const account of authorization.accounts) {
+    const routes = BENCHMARK_ROUTE_KINDS[account.platform];
+    if (!routes?.verified || routes.kinds.some(kind => !socialRequest(ctx, account.platform, kind, { account: account.account }))) {
+      partial = true;
+      continue;
+    }
+    const claim = await ctx.store.fetchClaim(account.platform, account.account,
+      args.source.kind === 'refresh' ? args.source.refreshId : undefined);
+    if (!claim.claimed) {
+      if (claim.evidence) rows.push({ fields: { platform: account.platform, account: account.account,
+        evidence: JSON.stringify(claim.evidence) }, missing: [] });
+      else partial = true;
+      continue;
+    }
+    // Cached evidence is free. Only a newly claimed attempt needs a full account allowance.
+    if (budget.left < routes.kinds.length) {
+      partial = true;
+      stopReason = 'ROUND_LIMIT';
+      stopBudget = true;
+      break;
+    }
+    let dispatched = false;
+    let supplierStarted = false;
+    const fetchContext = { ...ctx, subcall: { ...ctx.subcall,
+      beforeSend: async () => {
+        if (ctx.subcall.beforeSend && !await ctx.subcall.beforeSend()) return false;
+        if (!dispatched) dispatched = await ctx.store.fetchDispatch(claim.fetchId, claim.attempt);
+        return dispatched;
+      },
+      onSupplierDispatch: () => { ctx.subcall.onSupplierDispatch?.(); supplierStarted = true; },
+    } };
+    const results: Partial<Record<SocialKind, EvidenceItem[]>> = {};
+    let charged = false;
+    let unknown = false;
+    let failed = false;
+    try {
+      for (const kind of routes.kinds) {
+        const postId = results.account_posts?.[0]?.fields.id;
+        const request = socialRequest(ctx, account.platform, kind,
+          { account: account.account, ...(typeof postId === 'string' ? { postId } : {}) });
+        if (!request) { failed = true; break; }
+        const outcome = await executeResearchCall(fetchContext, budget, request,
+          stableResearchId(claim.fetchId, claim.attempt, kind), 'benchmark_fetch', args);
+        if (!outcome.sent) {
+          failed = true;
+          stopReason = outcome.stop;
+          stopBudget = outcome.budget;
+          break;
+        }
+        charged ||= outcome.result.supplierMayCharge;
+        unknown ||= outcome.result.outcome === 'unknown';
+        if (!['ok', 'partial'].includes(outcome.result.outcome)) { failed = true; break; }
+        results[kind] = outcome.result.items.map((item, i) => ({ ...item, ref: `${outcome.operationId}#${i + 1}` }));
+      }
+      const profile = results.account_profile?.[0] ?? results.post_detail?.[0];
+      const posts = results.account_posts;
+      if (failed || !profile || !posts) {
+        if (dispatched) {
+          await ctx.store.fetchFinish(claim.fetchId, claim.attempt, unknown ? 'unknown' : charged ? 'failed_charged' : 'failed', null);
+        }
+        if (profile) {
+          const metrics = accountMetrics({ profile, posts: posts ?? [], followersItem: results[routes.followersFrom]?.[0],
+            complete: suppliedWholeHistory(results.account_profile?.[0], posts ?? []) }, ctx.now());
+          rows.push({ fields: { ...account, evidence: JSON.stringify({ ...account, metrics, partial: true }) }, missing: metrics.missing });
+        }
+        partial = true;
+        if (stopReason) break;
+        continue;
+      }
+      // Whole history only when the profile's own post count shows nothing is left (Owner 2026-10-16, A: new accounts).
+      const metrics = accountMetrics({ profile, posts, followersItem: results[routes.followersFrom]?.[0],
+        complete: suppliedWholeHistory(results.account_profile?.[0], posts) }, ctx.now());
+      const classification = qualifyFetchedAccount(metrics, classifyAccount(metrics, ctx.config.recentGrowth, ctx.now()));
+      const evidence = { ...account, metrics, classification, fetchedAt: ctx.now().toISOString() };
+      await ctx.store.fetchFinish(claim.fetchId, claim.attempt, 'succeeded', evidence);
+      rows.push({ fields: { ...account, evidence: JSON.stringify(evidence) }, missing: metrics.missing });
+    } catch (error) {
+      // A failure after dispatch can conceal a supplier response. Never make this attempt retryable.
+      // Keep an unsent prepared attempt recoverable (including its original refresh grant).
+      if (dispatched) await ctx.store.fetchFinish(claim.fetchId, claim.attempt, supplierStarted ? 'unknown' : 'failed', null);
+      throw error;
+    }
+  }
+  return toolEnvelope({ status: stopReason && rows.length === 0 ? (stopBudget ? 'budget_exhausted' : 'unavailable')
+    : partial ? 'partial' : 'ok', reason: stopReason ?? (partial ? 'ACCOUNT_DATA_INCOMPLETE' : null), items: rows });
+}

@@ -37,7 +37,17 @@ describe('pricing plans', () => {
     expect(html).toContain('最高省 25%');
     const inputs = html.match(/<input[^>]*name="pricing-billing"[^>]*>/g) ?? [];
     expect(inputs.find(input => input.includes('checked'))).toContain('value="monthly"');
-    expect(html).toContain('/profile?tab=subscription');
+    expect(html).toContain('/profile?tab=subscription&amp;buy=pro&amp;cycle=monthly');
+    expect(html).toContain('/profile?tab=subscription&amp;buy=gold&amp;cycle=monthly');
+  });
+
+  it('states the tax rule next to member prices without any tax amount', () => {
+    const html = renderToStaticMarkup(createElement(PricingPlans, { plans: PLANS, links: LINKS }));
+    expect(html).toContain('国际银行卡付款税另计，结账时按所在地计算；中国大陆银行卡订阅不另收税。');
+    expect(html).not.toMatch(/税额|预计税/);
+    const packs = renderToStaticMarkup(createElement(PricingCreditPacks, { plans: PLANS, failed: false,
+      packages: [{ id: 'a', credits: 990, bonus_credits: 0, price: 9.9 }] }));
+    expect(packs).toContain('积分包用国际银行卡付款，税另计，结账时按所在地计算。');
   });
 
   it('points to contact instead of a buy link when checkout is not ready', () => {

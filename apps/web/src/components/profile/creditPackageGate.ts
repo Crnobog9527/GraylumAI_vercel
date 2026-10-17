@@ -8,14 +8,34 @@
  */
 export type PackEntitlement = { status: 'loading' } | { status: 'error' } | { status: 'ready'; level: string | null | undefined };
 
+/** 0214 renewal grace keeps member access but not pack eligibility (MASTER_PLAN; assertCreditPackageMembership). */
+export const PACK_RENEWAL_GRACE_NOTICE = '会员正在等待续费扣款，续费完成后才能购买积分包。';
+
 export const PACK_MEMBERS_ONLY_NOTICE = '积分包只对付费会员（Pro、Gold）开放，开通会员后就能购买，会员购买有折扣。';
 
 export function isPaidMember(entitlement: PackEntitlement) {
   return entitlement.status === 'ready' && (entitlement.level === 'pro' || entitlement.level === 'gold');
 }
 
+/** Pro/Gold pack prices (0211 tiers) per pack, from `settings.getCreditPackages`. */
+export type MemberPackReadiness = { pro?: boolean | null; gold?: boolean | null } | null | undefined;
+
+/**
+ * Whether card checkout (0222) can charge this pack: it uses the buyer's own tier price, never the
+ * legacy generic price behind `checkout_ready`. A member needs their tier's price; anyone else is
+ * judged on any tier, so a free user gets the members-only answer instead of "not for sale".
+ */
+export function memberPackReady(ready: MemberPackReadiness, entitlement: PackEntitlement) {
+  if (entitlement.status === 'ready' && (entitlement.level === 'pro' || entitlement.level === 'gold')) {
+    return ready?.[entitlement.level] === true;
+  }
+  return ready?.pro === true || ready?.gold === true;
+}
+
 export function creditPackBuyState(input: {
   price: number; checkoutReady: boolean | undefined; pending: boolean; entitlement: PackEntitlement;
+  /** The current paid membership is in its 24-hour renewal grace (`methodMembership` inGrace). */
+  renewalGrace?: boolean;
 }): { disabled: boolean; label: string } {
   if (input.pending) return { disabled: true, label: '跳转中...' };
   // The store itself cannot sell this pack: same answer for everyone.
@@ -23,6 +43,7 @@ export function creditPackBuyState(input: {
   if (input.entitlement.status === 'loading') return { disabled: true, label: '正在确认会员状态' };
   if (input.entitlement.status === 'error') return { disabled: true, label: '暂时无法确认会员状态' };
   if (!isPaidMember(input.entitlement)) return { disabled: true, label: '开通会员后可购买' };
+  if (input.renewalGrace) return { disabled: true, label: '续费完成后可购买' };
   return { disabled: false, label: '购买' };
 }
 

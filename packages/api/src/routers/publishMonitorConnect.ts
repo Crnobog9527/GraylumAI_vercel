@@ -10,7 +10,7 @@ import {
 import {
   assertBound, cleanupUnselected, describeCandidates, disconnectTakenOver,
 } from '../services/publishMonitor/connectFlow';
-import { postForMeDeps } from '../services/publishMonitor/postForMe/config';
+import { requirePostForMeDeps } from '../services/publishMonitor/secrets';
 import { guarded } from './publishMonitorGuard';
 
 /**
@@ -45,12 +45,12 @@ export const publishMonitorConnectRouter = router({
     }
     // Each start costs a call from the site-wide provider budget; one user cannot drain it.
     await limitStep('connect', ctx.profileId);
-    return startConnect(ctx.supabaseAdmin, postForMeDeps(), ctx.profileId, input);
+    return startConnect(ctx.supabaseAdmin, await requirePostForMeDeps(ctx.supabaseAdmin), ctx.profileId, input);
   })),
   callback: protectedProcedure.input(callbackInput).mutation(({ ctx, input }) => guarded(ctx, async () => {
     assertBound(cookieOf(ctx), input.requestId);
     await limitStep('callback', ctx.profileId);
-    const deps = postForMeDeps();
+    const deps = await requirePostForMeDeps(ctx.supabaseAdmin);
     const result = await recordCallback(ctx.supabaseAdmin, deps, ctx.profileId, input.requestId,
       input.accountIds.slice(0, MAX_CALLBACK_HINTS));
     await disconnectTakenOver(deps, result.takenOver);
@@ -61,12 +61,12 @@ export const publishMonitorConnectRouter = router({
     assertBound(cookieOf(ctx), input.requestId);
     await limitStep('page', ctx.profileId);
     const pending = await readPending(ctx.supabaseAdmin, ctx.profileId, input.requestId);
-    return { ...pending, candidates: await describeCandidates(postForMeDeps(), pending) };
+    return { ...pending, candidates: await describeCandidates(await requirePostForMeDeps(ctx.supabaseAdmin), pending) };
   })),
   confirm: protectedProcedure.input(confirmInput).mutation(({ ctx, input }) => guarded(ctx, async () => {
     assertBound(cookieOf(ctx), input.requestId);
     await limitStep('decide', ctx.profileId);
-    const deps = postForMeDeps();
+    const deps = await requirePostForMeDeps(ctx.supabaseAdmin);
     const result = await confirmConnect(ctx.supabaseAdmin, deps, ctx.profileId, input.requestId,
       input.providerAccountId, input.autoTrack);
     const cleanup = await cleanupUnselected(deps, result.externalId, result.unselected);
@@ -76,7 +76,7 @@ export const publishMonitorConnectRouter = router({
     assertBound(cookieOf(ctx), input.requestId);
     await limitStep('decide', ctx.profileId);
     // Built before the attempt becomes final, so a missing provider key cannot fail an already-applied cancel.
-    const deps = postForMeDeps();
+    const deps = await requirePostForMeDeps(ctx.supabaseAdmin);
     const result = await cancelConnect(ctx.supabaseAdmin, ctx.profileId, input.requestId);
     const cleanup = await cleanupUnselected(deps, result.externalId, result.unselected);
     return { cancelled: true as const, cleanupPending: cleanup.deferred.length > 0 };

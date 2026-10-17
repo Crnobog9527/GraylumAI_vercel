@@ -51,7 +51,7 @@ describe('sample J names the report chapters one way everywhere', () => {
 
   it('the result page (JuryReader) reads this report: its chapters, the six changes, no prototype names or platforms', () => {
     const html = renderToStaticMarkup(createElement(JuryReader, {
-      detail: J_JURY_DETAIL, names: resolveSeatNames(SAMPLE_PANEL), report: J_READER_REPORT, prototype: false,
+      detail: J_JURY_DETAIL, names: resolveSeatNames(SAMPLE_PANEL), source: J_READER_REPORT,
     }));
     for (const chapter of J_REPORT.chapters) expect(html).toContain(canvasPlace(chapter.title));
     // The prototype's chapter names are gone (its reviewers may still use words like 受众画像 inside an opinion).
