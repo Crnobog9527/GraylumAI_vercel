@@ -12,8 +12,29 @@ export const POSITIONING_REQUIRED_NOTICE =
   '为自己的账号做社媒运营之前，需要先完成账号定位：请到“对话”里开始定位，或导入你已有的定位。本次没有扣积分。';
 const videoGatePrefix = 'OPC_CONTENT_GATE_';
 
+const LIBRARY_REFUSAL = /^(LIB_REFERENCE_[A-Z_]+)：(.+)$/s;
+
+/**
+ * UI-B: a `runtime.prepare` refusal of the message's library references (LIB-4b). Every one comes before any charge and
+ * its message is the stable code, a full-width colon and the user's text; the text is shown, never the code.
+ */
+export function libraryReferenceRefusal(cause: unknown): { code: string; notice: string } | null {
+  const data = cause instanceof Error ? (cause as { data?: { path?: unknown } }).data : undefined;
+  if (!(cause instanceof Error) || data?.path !== 'runtime.prepare') return null;
+  const match = LIBRARY_REFUSAL.exec(cause.message);
+  return match ? { code: match[1], notice: match[2] } : null;
+}
+
+/** LIB-4b: a referenced document was deleted while the turn ran; the stream ended and nothing of it may stay shown. */
+export function isLibrarySourceDeleted(cause: unknown) {
+  return cause instanceof Error && cause.message.startsWith('LIB_SOURCE_DELETED');
+}
+export const SOURCE_DELETED_NOTICE = '引用的文档已删除，这一轮回答不再显示。';
+
 /** A `runtime.prepare` refusal by the new-work gate; the caller keeps the request and input. */
 export function runtimeAdmissionNotice(cause: unknown): string | null {
+  const library = libraryReferenceRefusal(cause);
+  if (library) return library.notice;
   // Too-long input was refused before admission: the text stays in the box to shorten or split.
   const data = cause instanceof Error ? (cause as { data?: { code?: unknown; path?: unknown } }).data : undefined;
   if (cause instanceof Error && cause.message === RUNTIME_INPUT_TOO_LONG_MESSAGE && data?.code === 'PRECONDITION_FAILED' &&
