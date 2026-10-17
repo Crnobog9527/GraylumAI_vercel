@@ -3,7 +3,12 @@ import { describe, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { DEFAULT_FUSION_SETTINGS } from './settings';
 
-const skill = vi.hoisted(() => ({ available: true, writes: 0, refuse: new Map<string, string>() }));
+const skill = vi.hoisted(() => ({ available: true, writes: 0, refuse: new Map<string, string>(),
+  keyReads: [] as Array<{ fresh: boolean }>, admitKeys: [] as unknown[] }));
+// ADMIN-SECRETS OR-1: the platform OpenRouter key is read once per listing or save and shared by every per-model check.
+vi.mock('../models/openRouterKey', () => ({
+  readOpenRouterKey: async (_db: unknown, options?: { fresh?: boolean }) => { skill.keyReads.push({ fresh: options?.fresh === true }); return 'SYNTHETIC_KEY'; },
+}));
 vi.mock('./reviewPrompts', async original => ({ ...(await original<typeof import('./reviewPrompts')>()),
   resolveReviewSkill: async () => {
     if (!skill.available) throw new Error('FUSION_REVIEW_SKILL_UNAVAILABLE');
@@ -12,7 +17,9 @@ vi.mock('./reviewPrompts', async original => ({ ...(await original<typeof import
   readReviewSkill: async () => ({ reviewer: 'r', summary: 's', rubric: 'b' }) }));
 vi.mock('./models', async original => ({ ...(await original<typeof import('./models')>()),
   // A model refused for one purpose: key "<id>:<phase>" → the refusal (an Error with that message).
-  admitFusionModel: async (_db: unknown, _window: unknown, row: { id: string }, phase: string) => {
+  admitFusionModel: async (_db: unknown, _window: unknown, row: { id: string }, phase: string, _t: unknown, _d: unknown, _e: unknown,
+    knownKey?: string | null) => {
+    skill.admitKeys.push(knownKey);
     const code = skill.refuse.get(`${row.id}:${phase}`);
     if (code) throw new Error(code);
     return {};
@@ -40,6 +47,22 @@ describe('Fusion settings save', () => {
     skill.available = true;
     await expect(saveFusionSettings(db, id(7), enabled)).resolves.toMatchObject({ warnings: [] });
     expect(skill.writes).toBe(1);
+  });
+});
+
+describe('Fusion key reads', () => {
+  it('a save reads the key once, fresh, for all its checks; the read-only listing reads once from the cache', async () => {
+    skill.refuse = new Map(); skill.keyReads = []; skill.admitKeys = [];
+    await saveFusionSettings(db, id(7), enabled);
+    expect(skill.keyReads).toEqual([{ fresh: true }]);
+    expect(skill.admitKeys).toHaveLength(4);
+    expect(skill.admitKeys.every(key => key === 'SYNTHETIC_KEY')).toBe(true);
+    skill.keyReads = []; skill.admitKeys = [];
+    const window = { callPolicies: models.map(model => ({ modelId: model.id })), expiresAt: '2030-01-01T00:00:00Z' };
+    await fusionModelOptions(db, id(7), {}, window as never);
+    expect(skill.keyReads).toEqual([{ fresh: false }]); // 5 models × 2 purposes, one read
+    expect(skill.admitKeys).toHaveLength(10);
+    expect(skill.admitKeys.every(key => key === 'SYNTHETIC_KEY')).toBe(true);
   });
 });
 

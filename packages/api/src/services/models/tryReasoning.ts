@@ -54,8 +54,8 @@ export function tryMaxTokens(setting: PurposeSetting, defaultThinking: boolean, 
 export class TryRefused extends Error {}
 
 /** Builds the exact request, or refuses with an administrator-readable reason before any call. */
-export function tryRequest(row: RuntimeModelRow, purpose: ReasoningPurpose) {
-  const eligible = runtimeModelOption(row, 'organizer');
+export function tryRequest(row: RuntimeModelRow, purpose: ReasoningPurpose, keyConfigured: boolean) {
+  const eligible = runtimeModelOption(row, 'organizer', keyConfigured);
   if (!eligible.available) throw new TryRefused(eligible.reason ?? '模型配置不完整');
   const config = readReasoningConfig(row.config), maxTokens = Number(row.max_tokens);
   const issues = checkReasoningConfig(config, { maxTokens, modelId: row.model_id });
@@ -82,10 +82,10 @@ export function tryRequest(row: RuntimeModelRow, purpose: ReasoningPurpose) {
 
 const count = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) ? value : null);
 
-/** Sends the request once, reads the bounded stream and measures it. No retry. */
-export async function tryReasoning(row: RuntimeModelRow, purpose: ReasoningPurpose, transport: typeof fetch = fetch,
-  clock: () => number = () => performance.now()): Promise<TryResult> {
-  const { body, maxTokens } = tryRequest(row, purpose);
+/** Sends the request once with the platform OpenRouter key, reads the bounded stream and measures it. No retry. */
+export async function tryReasoning(row: RuntimeModelRow, key: string | undefined, purpose: ReasoningPurpose,
+  transport: typeof fetch = fetch, clock: () => number = () => performance.now()): Promise<TryResult> {
+  const { body, maxTokens } = tryRequest(row, purpose, key !== undefined);
   const started = clock();
   let firstTextMs: number | null = null;
   const base = { maxTokens, firstTextMs: null, hasText: false, finishReason: null, truncated: false,
@@ -94,7 +94,7 @@ export async function tryReasoning(row: RuntimeModelRow, purpose: ReasoningPurpo
   try {
     response = await transport(TRY_URL, {
       method: 'POST', redirect: 'error', signal: AbortSignal.timeout(TRY_TIMEOUT_MS),
-      headers: { Authorization: 'Bearer ' + row.api_key!.trim(), 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      headers: { Authorization: 'Bearer ' + key!, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     });
   } catch {
     return { ...base, ok: false, httpStatus: null, totalMs: Math.round(clock() - started), error: 'TRANSPORT_FAILED', providerMessage: null };
