@@ -1,5 +1,5 @@
 "use client";
-import { readAgentTurnBody, type AgentTurnEvent } from "@repo/api/src/shared/agentTurn";
+import { type AgentTurnEvent } from "@repo/api/src/shared/agentTurn";
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { use, useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
@@ -43,7 +43,7 @@ import { sameRequest, releaseRejectedAnswer, openingRequest, parseStepEnvelope, 
   retainExecution, settleEnvelope, TEXT_PROTOCOL, turnResultNotice, type MentorTurn, type MentorExecution } from "./mentor-turn";
 import { openOrganizer, usePaygResume } from "@/lib/use-payg-resume";
 import { checklistUpdatedInput, isOpeningInput, openingEntryKey } from "@repo/api/src/shared/opcQuestions";
-import { clearSavedFields, isHostAction, noteSavedFields, nudgeNotice, refusedTurn, savedFields, shownInput } from "./checklist-nudge";
+import { clearSavedFields, freeAnswerSource, isHostAction, noteSavedFields, nudgeNotice, refusedTurn, savedFields, shownInput } from "./checklist-nudge";
 type Step = { id: string; title: string; dependsOn?: string[] };
 import { type Information, type Item, type StepEnvelope } from "./confirm-envelope";
 import { definiteHandoffRejections, handoffIntent, readRetainedHandoff } from "./handoff-envelope";
@@ -656,10 +656,8 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     const input=(inputOverride??mentorInput).trim();if(!input)return;
     const latest = mentorExecutions.at(-1), sourceTurn = latest && mentorTurns.get(latest.executionId);
     const summary = inputOverride === STEP_SUMMARY_INPUT; // R16: only the button, never typed text; no card, no field.
-    // Typing instead of choosing still answers the newest card of this step and round.
-    if (!answerSource && !isHostAction(input) && latest?.state === "completed" && sourceTurn && sourceTurn.roundId === d.roundId &&
-      sourceTurn.stepId === step.id && readAgentTurnBody(latest.body).card)
-      answerSource = { executionId: latest.executionId };
+    // Typing instead of choosing still answers the newest card of this step and round (a refresh answers none).
+    answerSource = freeAnswerSource({ answerSource, input, researchRefreshId, latest, sourceTurn, roundId: d.roundId, stepId: step.id });
     const questionId = focusField(d.information[step.id]);
     const fixed:StepEnvelope={request:summary?stepSummaryRequest(draftId,step.id,crypto.randomUUID()):{...(answerSource ? {answerSource} : {}),
       ...(researchRefreshId ? {researchRefreshId} : {}),

@@ -43,11 +43,13 @@ beforeAll(async () => {
           function Conversation(){
             const research=useResearchCalls(${JSON.stringify(SESSION)});
             const [settled,setSettled]=React.useState(0);
+            const [busy,setBusy]=React.useState(false);
+            window.setBusy=setBusy;
             window.emit=event=>research.observe('exec-1',event);
             window.settle=()=>setSettled(value=>value+1);
             return e('main',{style:{maxWidth:760,margin:'0 auto',padding:16,display:'grid',gap:16}},
               e(ResearchCallList,{calls:research.of('exec-1')}),
-              e(ResearchSessionPanel,{sessionId:${JSON.stringify(SESSION)},disabled:false,settledTurns:settled,
+              e(ResearchSessionPanel,{sessionId:${JSON.stringify(SESSION)},disabled:busy,settledTurns:settled,
                 onSend:(text,refreshId)=>{window.sent.push(refreshId?[text,refreshId]:text);}}));
           }
           createRoot(document.getElementById('root')).render(e(trpc.Provider,{client:c,queryClient},
@@ -135,14 +137,21 @@ for (const width of [375, 1440]) {
       await ui(table).toContainText("头部参考");
       await ui(table).toContainText("生成定位报告需要至少 3 个合格的对标账号，目前 2 个");
       await ui(table).toContainText("取数时间：");
-      // Refresh: one click asks the host for one grant, then the next mentor message carries it.
+      // Refresh: one click asks the host for one grant, then the next mentor message carries it. While the grant is
+      // being created, the other rows are already locked (a second click cannot make a second grant).
       await table.getByRole("button", { name: "刷新 sample_1 的数据" }).click();
       await ui(table.getByRole("button", { name: "刷新 sample_1 的数据" })).toContainText("已申请刷新");
       expect(calls.filter(item => item.path.endsWith("/research.createRefresh"))).toEqual([{ method: "POST",
         path: "/api/trpc/research.createRefresh", input: { sessionId: SESSION, platform: "douyin", account: "sample_1" } }]);
       expect(await page.evaluate(() => (window as unknown as { sent: unknown[] }).sent)).toEqual([
         "我确认了这些关键词：职场穿搭", ["请重新读取对标账号 抖音 sample_1 的最新数据", REFRESH]]);
-      await ui(table.getByRole("button", { name: "刷新 sample_2 的数据" })).toBeEnabled();
+      // One refresh at a time for the whole table: the other rows stay locked until the turn it started is over.
+      const other = table.getByRole("button", { name: "刷新 sample_2 的数据" });
+      await ui(other).toBeDisabled();
+      await page.evaluate(() => (window as unknown as { setBusy: (value: boolean) => void }).setBusy(true));
+      await ui(other).toBeDisabled();
+      await page.evaluate(() => (window as unknown as { setBusy: (value: boolean) => void }).setBusy(false));
+      await ui(other).toBeEnabled();
 
       // Live search rows of a turn: running, then settled with the user's credits.
       const before = calls.filter(call => call.path.endsWith("/research.benchmarks")).length;

@@ -20,7 +20,7 @@
   "apps/web/src/app/maintenance/page.tsx": {"longLines":3},
   "apps/web/src/app/marketplace/page.tsx": {"lines":526,"longLines":7},
   "apps/web/src/app/page.tsx": {"longLines":4},
-  "apps/web/src/app/positioning/[draftId]/page.tsx": {"lines":1706,"longLines":15},
+  "apps/web/src/app/positioning/[draftId]/page.tsx": {"lines":1704,"longLines":15},
   "apps/web/src/app/positioning/[draftId]/topics/page.tsx": {"lines":608,"longLines":16},
   "apps/web/src/app/positioning/page.tsx": {"longLines":21},
   "apps/web/src/app/profile/page.tsx": {"longLines":1},
