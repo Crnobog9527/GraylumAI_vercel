@@ -70,6 +70,10 @@ export async function runReportFee({db,Client,connectionString,report}) {
   assert.deepEqual([Number(settledCall.charged_delta),settledCall.nominal_source],[0,'fixed_fee'],'the report call charges nothing');
   assert.ok(Number(settledCall.theoretical_delta)>=1);assert.equal(String(settledCall.selected_cost_usd),'0.0004');
   assert.equal(await wallet(db,f.actor),5000-PRICE,'the call hold is fully released');
+  // The real provider cost still reaches the cost projections, at zero credits (#1098 review, same rule).
+  const statRows = (await db.query('SELECT total_cost_usd,total_credits FROM token_stats WHERE bill2_call_id=$1',[c.id])).rows;
+  assert.deepEqual(statRows.map(r=>[String(r.total_cost_usd),Number(r.total_credits)]),[['0.0004',0]]);
+  assert.equal(Number((await db.query('SELECT count(*) v FROM ai_usage_logs WHERE bill2_call_id=$1',[c.id])).rows[0].v),1);
   assert.equal((await service(db,'report_fee_settle',f.actor,ok.id)).state,'held','a running report keeps its price held');
   await finish(db,ok.id,'completed',{body:completeBody,completeness:'complete'});
   const charged = await service(db,'report_fee_settle',f.actor,ok.id);
