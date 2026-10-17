@@ -241,6 +241,11 @@ test.describe('Authentication', () => {
         await expect(page.getByRole('heading', { name: expectation.heading })).toBeVisible();
       }
 
+      // The old tutorials page is gone: its address moves on to the blog.
+      steps.push('Open /tutorials');
+      await gotoWithBypass(page, '/tutorials');
+      await expect(page).toHaveURL(/\/blog/);
+
       monitor.removeIssues((issue) =>
         issue.source === 'requestfailed' &&
         issue.message === 'net::ERR_ABORTED' &&
