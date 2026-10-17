@@ -23,6 +23,7 @@ const readableImage = (image: DocxImage | undefined): image is DocxImage =>
   !!image && RECOGNIZABLE.has(image.contentType) && image.bytes.byteLength > 0 && image.bytes.byteLength <= OCR_LIMITS.maxImageBytes;
 
 export type ScanListeners = { onDocumentChanged(): void; onSaved(documentId: string, contentVersion: number): void };
+const SCAN_CHANNEL = 'graylum-library-scan-recognition';
 const NO_LISTENERS: ScanListeners = { onDocumentChanged: () => undefined, onSaved: () => undefined };
 export type ScanRecognition = ReturnType<typeof useScanRecognition>;
 
@@ -41,6 +42,7 @@ export function useScanRecognition() {
   const running = useRef<AbortController | null>(null);
   const again = useRef(false);
   const listeners = useRef<ScanListeners>(NO_LISTENERS);
+  const finished = useRef<() => void>(() => undefined);
   const latest = useRef({ download, save, fail });
   latest.current = { download, save, fail };
   const listen = useCallback((next: ScanListeners) => {
@@ -97,7 +99,7 @@ export function useScanRecognition() {
       if (value.state !== 'running' || value.done > 0) listeners.current.onDocumentChanged();
     }), controller.signal).then(() => {
       // A tab that waited for another tab's lock may have had nothing left to do; its list is refreshed once anyway.
-      if (!controller.signal.aborted) listeners.current.onDocumentChanged();
+      if (!controller.signal.aborted) { listeners.current.onDocumentChanged(); finished.current(); }
     }).catch(() => {
       // An unexpected failure leaves no document running, so the page stops warning before leaving.
       setProgress((current) => Object.fromEntries(Object.entries(current)
@@ -112,6 +114,21 @@ export function useScanRecognition() {
     start();
     return () => { running.current?.abort(); running.current = null; };
   }, [start]);
+
+  // Tabs of one browser take turns (see oneTabAtATime); a tab that finished tells the others, so a tab that waited
+  // or stopped earlier refreshes its list and drops its stale "will retry" lines.
+  const channel = useRef<BroadcastChannel | null>(null);
+  useEffect(() => {
+    if (typeof BroadcastChannel === 'undefined') return;
+    const peers = new BroadcastChannel(SCAN_CHANNEL);
+    channel.current = peers;
+    peers.onmessage = () => {
+      setProgress((current) => Object.fromEntries(Object.entries(current).filter(([, value]) => value.state === 'running')));
+      listeners.current.onDocumentChanged();
+    };
+    return () => { peers.close(); channel.current = null; };
+  }, []);
+  finished.current = () => channel.current?.postMessage('finished');
 
   const busy = Object.values(progress).some((p) => p.state === 'running');
   // Leaving while a page is being recognised loses that page's work (it is redone next time), so warn first.
