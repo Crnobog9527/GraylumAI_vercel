@@ -10,6 +10,11 @@ on:
   schedule:
     - cron: '0 9 * * 1'
 
+concurrency:
+  # A newer push to the same PR supersedes older runs; branch pushes keep every run.
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
