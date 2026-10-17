@@ -30,7 +30,8 @@ export async function readReportModel(db: SupabaseClient, moduleId: string) {
 async function windowPolicy(db: SupabaseClient, actorId: string) {
   // RUNTIME-PROD: production has no window; the admin route already requires an administrator.
   if (realRuntimeEnvironment(process.env) === 'production')
-    return loadProductionPolicy(db, actorId, process.env).catch(() => { throw unavailable(); });
+    // Offline: settings reads never renew a price snapshot over the network (#1073 review).
+    return loadProductionPolicy(db, actorId, process.env, {}, { offline: true }).catch(() => { throw unavailable(); });
   const windowId = stagingRuntimeWindow(process.env);
   // Administrators need not be test-call actors. This RPC is admin-only and does not admit a call.
   const result = await db.rpc('report_model_window', { p_actor_id: actorId, p_window_id: windowId });
