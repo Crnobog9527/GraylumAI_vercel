@@ -114,3 +114,8 @@ export async function injectContentSource(rpc: Rpc, args: { p_execution_id: stri
     inputBytes: Math.min(inputLimit, context.purposeBudget?.inputBytes ?? Infinity) });
   return injected;
 }
+
+/** Refusals raised by SQL (runtime_admit, 0276) that reach the user with their own fixed message. */
+const SQL_REFUSALS = new Set<string>(['RUNTIME_ORGANIZER_PENDING', refusalCode.enum.RUNTIME_CONTENT_SOURCE_MISSING,
+  refusalCode.enum.RUNTIME_CONTENT_SOURCE_STALE]);
+export const isSqlStagingRefusal = (message: string): message is ConstructorParameters<typeof StagingAccessError>[0] => SQL_REFUSALS.has(message);

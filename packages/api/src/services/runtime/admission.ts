@@ -52,7 +52,7 @@ import {runAutomaticFinancialRecovery} from './automaticRecovery';
 import {readPositioningGate,judgePositioning,windowBoundKey,refusePositioning,POSITIONING_REFUSAL_CAP,
  type PositioningGatePolicy} from './positioningGate';
 import {POSITIONING_FALLBACK,POSITIONING_FALLBACK_INSTRUCTIONS} from './positioningFallback';
-import {admitContentSource,type ContentSourceKind} from './contentSource';
+import {admitContentSource,isSqlStagingRefusal,type ContentSourceKind} from './contentSource';
 import {attachResearchTurn,fitsCapacity} from './researchAdmission';
 import {organizerSelection} from './organizerSelection';
 
@@ -122,7 +122,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    (['400: insufficient credits','insufficient credits'].includes(r.error.message)||
     /^积分不足: 需要 [0-9]+, 当前 [0-9]+$/.test(r.error.message)))
    throw new TRPCError({code:'BAD_REQUEST',message:'BILL2_INSUFFICIENT_CREDITS'});
-  if(r.error?.message==='RUNTIME_ORGANIZER_PENDING')throw new StagingAccessError('RUNTIME_ORGANIZER_PENDING');
+  if(r.error&&isSqlStagingRefusal(r.error.message))throw new StagingAccessError(r.error.message);
   if(r.error){
    if(policy.reportGeneration&&(r.error.message.startsWith('REPORT_')||
     ['OPC_CAPTURE_PENDING','RUNTIME_SKILL_MODEL_DENIED'].includes(r.error.message)))throw new Error(r.error.message);

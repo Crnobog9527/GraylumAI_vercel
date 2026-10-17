@@ -121,6 +121,22 @@ REVOKE ALL ON FUNCTION public.opc_injected_source_id(jsonb,text),
  public.runtime_source_checkpoint(uuid,runtime_sessions,runtime_executions,bill2_runs,jsonb) FROM PUBLIC,anon,authenticated,service_role;
 GRANT EXECUTE ON FUNCTION public.opc_content_source_current(uuid,uuid,text) TO service_role;
 
+-- runtime_admit: a frozen source (sourceContent) is validated and share-locked while admission holds the session lock, so a
+-- content deletion either committed first (admission is refused, nothing refers to the deleted content) or runs after
+-- this execution exists (its payload carries the content id, so the D7 closure includes it).
+CREATE OR REPLACE FUNCTION public.runtime_admit_source_check(p_actor_id uuid,s runtime_sessions,p_payload jsonb) RETURNS void
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE frozen jsonb:=p_payload->'sourceContent';picked jsonb;
+BEGIN
+ IF frozen IS NULL THEN RETURN;END IF;
+ IF jsonb_typeof(frozen) IS DISTINCT FROM 'object' OR coalesce(frozen->>'kind','') NOT IN ('script','storyboard')
+  OR coalesce(frozen->>'contentId','') !~ '^[0-9a-f-]{36}$' OR s.scope->>'kind' IS DISTINCT FROM 'work_item' THEN
+  RAISE EXCEPTION 'RUNTIME_CONTENT_SOURCE_MISSING';END IF;
+ picked:=opc_content_source_pick(p_actor_id,(s.scope->>'workItemId')::uuid,frozen->>'kind',(frozen->>'contentId')::uuid,true);
+ IF picked->>'status'<>'ready' THEN RAISE EXCEPTION '%',picked->>'code';END IF;
+END $$;
+REVOKE ALL ON FUNCTION public.runtime_admit_source_check(uuid,runtime_sessions,jsonb) FROM PUBLIC,anon,authenticated,service_role;
+
 -- Replace each anchor exactly once in the live definition, unless this migration's marker is already present.
 CREATE FUNCTION pg_temp.a2_patch(sig text,marker text,olds text[],news text[]) RETURNS void LANGUAGE plpgsql AS $$
 DECLARE definition text:=pg_get_functiondef(('public.'||sig)::regprocedure);
@@ -185,5 +201,13 @@ $a$,
  END IF;
 $b$,
  $b$IF p_kind IN ('script','storyboard','editing') AND opc_item_content_type$b$]);
+-- 5. Admission freezes the chosen source inside its own transaction (after the replay return, before any billing).
+SELECT pg_temp.a2_patch('runtime_admit(uuid,uuid,uuid,jsonb,jsonb)','-- A2 source freeze',ARRAY[
+ $a$ PERFORM runtime_context_allowed(p_actor_id,p_payload);
+$a$],ARRAY[
+ $b$ PERFORM runtime_context_allowed(p_actor_id,p_payload);
+ -- A2 source freeze
+ PERFORM runtime_admit_source_check(p_actor_id,s,p_payload);
+$b$]);
 DROP FUNCTION pg_temp.a2_patch(text,text,text[],text[]);
 COMMIT;

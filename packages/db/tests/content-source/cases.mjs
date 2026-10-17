@@ -53,6 +53,7 @@ export async function runCases(db,report){
   ['opc_content_from_execution(uuid,uuid,uuid,bigint,text,text,uuid,uuid)',[/-- D7 read boundary/,/-- A2 derived source/]],
   ['runtime_execution(uuid,uuid,text,jsonb)',[/-- A2 checkpoint_source/]],
   ['runtime_direct_billing_allowed(uuid,jsonb,uuid)',[/-- D7 original execution/,/-- A2 injected source/]],
+  ['runtime_admit(uuid,uuid,uuid,jsonb,jsonb)',[/-- D7 read boundary/,/-- A2 source freeze/]],
   ['content_erasure_scope(uuid,text,uuid)',[/-- A2 injected source/]]]){
   const d=await def(db,sig);for(const marker of markers)assert.match(d,marker,sig);
  }
@@ -121,6 +122,19 @@ export async function runCases(db,report){
  await refusedWith(save(db,t,'editing',y,1),/OPC_CONTENT_SOURCE/);
  report.checks.push('editing reads only a storyboard of the current final script and saves it as its source');
 
+ // Admission freezes the chosen source under the session lock (runtime_admit_source_check, called by runtime_admit).
+ const admit=(db2,t2,payload,session=t2.art.session)=>db2.query(
+  'SELECT runtime_admit_source_check($1,(SELECT s FROM runtime_sessions s WHERE s.id=$2),$3::jsonb)',[t2.actor,session,JSON.stringify(payload)]);
+ await admit(db,t,{});
+ await admit(db,t,{sourceContent:{contentId:t.art.content,kind:'script'}});
+ for(const bad of [{contentId:v2.id,kind:'storyboard'},{contentId:randomUUID(),kind:'script'},{contentId:'x',kind:'script'},
+  {contentId:t.art.content,kind:'editing'},'script'])
+  await refusedWith(admit(db,t,{sourceContent:bad}),/RUNTIME_CONTENT_SOURCE_MISSING/);
+ await refusedWith(admit(db,t,{sourceContent:{contentId:t.art.content,kind:'script'}},
+  (await one(db,"SELECT id FROM runtime_sessions WHERE actor_id=$1 AND scope->>'kind'='positioning_draft'",[t.actor])).id),
+  /RUNTIME_CONTENT_SOURCE_MISSING/);
+ report.checks.push('admission accepts a valid frozen source and refuses a missing, mismatched, malformed or non-topic one');
+
  // Not a topic window, or nothing saved yet.
  const empty=await topic(db);
  await db.query('DELETE FROM opc_content_versions WHERE id=$1',[empty.art.content]).catch(()=>{});
@@ -161,5 +175,5 @@ export async function runCases(db,report){
  assert.doesNotMatch(JSON.stringify(gone),/A2_READ_TURN|D7_INDEPENDENT_SAVED_BODY/);
  report.checks.push('D7 content deletion erases every execution that injected that content');
 
- return {topic,running,complete,checkpoint};
+ return {topic,running,complete,checkpoint,admit};
 }
