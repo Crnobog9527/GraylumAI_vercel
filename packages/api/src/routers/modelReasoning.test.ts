@@ -3,7 +3,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { modelReasoningRouter } from './modelReasoning';
 
 // ADMIN-SECRETS OR-1: the try call uses the platform OpenRouter key.
-vi.mock('../services/models/openRouterKey', () => ({ readOpenRouterKey: async () => 'SECRET_CANARY' }));
+vi.mock('../services/models/openRouterKey', () => ({
+  readOpenRouterKey: async (_db: unknown, options?: { fresh?: boolean }) => {
+    if (!options?.fresh) throw new Error('provider calls must read the key fresh');
+    return 'SECRET_CANARY';
+  },
+}));
 
 const modelId = '11111111-1111-4111-8111-111111111111';
 const catalog = {

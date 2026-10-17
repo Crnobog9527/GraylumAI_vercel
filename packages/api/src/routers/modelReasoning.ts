@@ -76,7 +76,7 @@ export const modelReasoningRouter = router({
       try {
         lastTry.set(input.modelId, now);
         let key: string | undefined;
-        try { key = await readOpenRouterKey(ctx.supabase); }
+        try { key = await readOpenRouterKey(ctx.supabase, { fresh: true }); }
         catch { lastTry.delete(input.modelId); throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: '暂时无法读取第三方密钥，请稍后重试' }); }
         const result = await tryReasoning(data, key, input.purpose);
         logger.info('api', 'model_reasoning_try', { modelId: input.modelId, purpose: input.purpose, ok: result.ok, httpStatus: result.httpStatus,

@@ -138,7 +138,7 @@ async function verifyAndPersistConnection(
   }
   let apiKey: string | undefined;
   try {
-    apiKey = await readOpenRouterKey(supabase);
+    apiKey = await readOpenRouterKey(supabase, { fresh: true }); // sends the key to OpenRouter: never a cached, retired one
   } catch {
     return persisted({
       success: false,
