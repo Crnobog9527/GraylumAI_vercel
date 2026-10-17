@@ -6,8 +6,7 @@ import {
   Headphones, MessageSquare, Clock, CheckCircle,
   AlertCircle, Send, ChevronRight, User, Shield, Bug,
   Lightbulb, HelpCircle, CreditCard, UserCircle, MoreHorizontal,
-  Image, FileText, Download, Copy, CheckCheck, Tag, Flag,
-  ArrowUpCircle, ArrowRightCircle
+  Image, FileText, Download, Copy, CheckCheck, Tag, Flag, ArrowUpCircle, ArrowRightCircle
 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -54,7 +53,7 @@ import AdminLoadingState from '@/components/admin/AdminLoadingState';
 import AdminErrorState from '@/components/admin/AdminErrorState';
 
 type TicketStatus = 'open' | 'in_progress' | 'closed';
-type TicketCategory = 'bug' | 'feature' | 'question' | 'account' | 'billing' | 'other';
+type TicketCategory = 'bug' | 'feature' | 'question' | 'account' | 'billing' | 'consult' | 'other';
 type TicketPriority = 'low' | 'medium' | 'high' | 'urgent';
 
 interface UserProfile {
@@ -131,6 +130,7 @@ const categoryConfig: Record<TicketCategory, { label: string; icon: React.Elemen
   question: { label: '咨询', icon: HelpCircle, color: 'text-blue-400 bg-blue-500/10' },
   account: { label: '账户问题', icon: UserCircle, color: 'text-orange-400 bg-orange-500/10' },
   billing: { label: '账单问题', icon: CreditCard, color: 'text-green-400 bg-green-500/10' },
+  consult: { label: '专家诊断预约', icon: UserCircle, color: 'text-amber-400 bg-amber-500/10' },
   other: { label: '其他', icon: MoreHorizontal, color: 'text-gray-400 bg-gray-500/10' },
 };
 

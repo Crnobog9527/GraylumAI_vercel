@@ -7,6 +7,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { MessageMarkdown } from "@/components/chat/MessageMarkdown";
 import { ChatNoticeList, type ChatNotice } from "@/components/chat/ChatInlineNotice";
 import resultStyles from "@/components/opc/positioning-result.module.css";
+import { ExpertConsultCard } from "@/components/expert-consult/ExpertConsultCard";
+import { expertConsultPath } from "@/components/expert-consult/expertConsultCopy";
 import {
   askedVersion, canFinalize, canSave, savedAs, finalizedNotice, REPORT_DOC_TEXT, REPORT_MAX_CHARACTERS, reportDocumentError, reportLength, requestFor,
   type PendingRequest, type ReportDocument,
@@ -122,6 +124,7 @@ export function ReportDocumentPanel({ executionId, fallbackBody, generatedComple
           <summary className="text-xs">{REPORT_DOC_TEXT.showLatest}</summary><MessageMarkdown className="mt-2" text={doc.body} /></details>}
       </div>}
     <ChatNoticeList className="mt-4" notices={notices} />
+    {doc.finalized && <ExpertConsultCard className="mt-4" href={expertConsultPath("report")} />}
     {!doc.finalized && <div className={resultStyles.consentActions}>
       {askingNow ? <>
         <p>{REPORT_DOC_TEXT.finalizeAsk}</p>

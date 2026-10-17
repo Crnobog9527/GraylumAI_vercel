@@ -29,6 +29,7 @@ import { paymentsRouter } from './routers/payments';
 import { skillsRouter } from './routers/skills';
 import { accountRouter } from './routers/account';
 import { dataUseRouter } from './routers/dataUse';
+import { expertConsultRouter } from './routers/expertConsult';
 import { publishMonitorRouter } from './routers/publishMonitor';
 import { adminStaleRoundsRouter } from './routers/adminStaleRounds';
 import { fusionSettingsRouter } from './routers/fusionSettings';
@@ -72,6 +73,7 @@ export const appRouter = router({
   opc: opcRouter,
   account: accountRouter,
   dataUse: dataUseRouter,
+  expertConsult: expertConsultRouter,
   publishMonitor: publishMonitorRouter,
   library: libraryRouter,
 });
