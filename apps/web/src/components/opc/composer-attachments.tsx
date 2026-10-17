@@ -1,11 +1,11 @@
 'use client';
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { useCallback, useRef, useState, type RefObject } from 'react';
+import { useCallback, useState, type RefObject } from 'react';
 import { trpc } from '@/trpc/client';
 import { useLibraryUploads, type UploadItem } from '@/hooks/use-library-uploads';
 import { extensionOf, isPdfUploadReady, isWordUploadReady } from '@/lib/library-documents/format';
 import type { ComposerEditorHandle } from './composer-editor';
-import { REFERENCE_LIMIT, type LibraryReference } from './composer-references';
+import { REFERENCE_LIMIT } from './composer-references';
 import { REFERENCE_LIMIT_NOTICE, referenceFor } from './reference-menu';
 import styles from './work-composer.module.css';
 
@@ -36,12 +36,10 @@ const STAGE: Partial<Record<UploadItem['status'], string>> = {
   removing: '正在移除',
 };
 
-export function useComposerAttachments(box: RefObject<ComposerEditorHandle | null>, references: readonly LibraryReference[]) {
+export function useComposerAttachments(box: RefObject<ComposerEditorHandle | null>) {
   const utils = trpc.useUtils();
   const [notices, setNotices] = useState<string[]>([]);
   const [linking, setLinking] = useState(0);
-  const current = useRef(references);
-  current.current = references;
   const say = (text: string) => setNotices(list => [...list, text]);
 
   // A finished file is found by name among the ready documents (#933 search) to learn its content version.
@@ -56,7 +54,10 @@ export function useComposerAttachments(box: RefObject<ComposerEditorHandle | nul
         return;
       }
       const reference = referenceFor(found);
-      if (current.current.length >= REFERENCE_LIMIT && !current.current.some(other => other.documentId === reference.documentId)) {
+      // Read from the box itself and append in the same synchronous step: uploads finishing together each see the
+      // references the previous one just added, so together they never pass five.
+      const inBox = box.current?.currentReferences() ?? [];
+      if (inBox.length >= REFERENCE_LIMIT && !inBox.some(other => other.documentId === reference.documentId)) {
         say(`「${item.filename}」已存入资料库，但${REFERENCE_LIMIT_NOTICE}`);
         return;
       }

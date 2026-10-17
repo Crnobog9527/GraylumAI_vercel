@@ -373,3 +373,10 @@ it('waits for an attachment still uploading: send stays off and Enter does not s
   await ui(box(page).locator('[data-library-reference="u1"]')).toHaveText('@慢文件.md');
   await ui(page.getByRole('button', { name: '发送' })).toBeEnabled();
 }));
+
+it('six files chosen together add five references and say so for the sixth', () => open(true, async page => {
+  await attach(page, ['一', '二', '三', '四', '五', '六'].map(name => ({ name: '文件' + name + '.md', text: name })));
+  await ui(page.getByRole('alert')).toHaveText(/已存入资料库，但每条消息最多引用 5 篇文档。/);
+  await ui(box(page).locator('.library-reference')).toHaveCount(5);
+  await ui(page.getByRole('button', { name: '发送' })).toBeEnabled();
+}));

@@ -30,7 +30,7 @@ export function WorkComposer({value,onChange,onSend,disabled=false,sendDisabled=
  const box=useRef<ComposerEditorHandle>(null);
  const referencePicker=useComposerReferences(references,box,onReferencesChange);
  // UI-C: with references on, a file goes into the library and joins the message as a reference (else UI-A's inline text).
- const attachments=useComposerAttachments(box,referencePicker.references);
+ const attachments=useComposerAttachments(box);
  function chooseFiles(files:FileList|null){
   if(!references){void addFiles(files);return;}
   if(files?.length)attachments.add(Array.from(files));setMenu(null);if(fileInput.current)fileInput.current.value='';
