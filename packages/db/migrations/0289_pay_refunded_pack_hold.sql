@@ -5,6 +5,8 @@
 -- of a terminated subscription period (0061 atomic_pre_deduct, 0162 bill2_payg_claim): a reservation that needs
 -- the held credits is refused the existing way (PRE_DEDUCT_TERMINATED_GRANT_REMAINDER_QUARANTINED / waiting_credits).
 -- Held amount = the pack source's unused credits (0275 credit_package_sources); other sources are never touched.
+-- A source whose remainder cannot be proven (0275 credit_source_reviews, "source unknown") is alert-only, never
+-- held or clawed back from the balance (PAY-DISPUTE-GUARD 4.3: never use other sources' credits in its place).
 -- Settlement (service role, by an active admin): "clawback" takes the unused credits back once, never below zero
 -- (the shortfall is Graylum's and is in the ledger); "kept" leaves them as ordinary balance (Graylum keeps the loss).
 -- Either way the hold ends, the decision is final and a repeat is a no-op.
@@ -19,7 +21,8 @@ ALTER TABLE public.credit_package_sources
  ADD COLUMN IF NOT EXISTS refund_reviewed_at timestamptz,
  ADD COLUMN IF NOT EXISTS refund_reviewed_by uuid;
 
--- Unused credits of the user's packs that ended refunded without a clawback and are not settled yet.
+-- Unused credits of the user's packs that ended refunded without a clawback and are not settled yet
+-- (source-unknown packs excluded).
 -- Callers hold the profile lock (the same lock the refund and the settlement take first).
 CREATE OR REPLACE FUNCTION public.credit_package_refund_hold(p_user uuid) RETURNS integer
 LANGUAGE sql STABLE SET search_path=public,pg_temp AS $$
@@ -27,9 +30,10 @@ LANGUAGE sql STABLE SET search_path=public,pg_temp AS $$
  FROM credit_package_sources s JOIN payment_orders o ON o.id=s.order_id
  WHERE s.user_id=p_user AND s.status='granted' AND s.refund_review IS NULL
   AND o.status IN ('refunded','partially_refunded')
+  AND NOT EXISTS(SELECT 1 FROM credit_source_reviews r WHERE r.source_kind='credit_package' AND r.source_id=s.id)
 $$;
 
--- 0275 body with one change: a settled refunded pack is no longer held back. "kept" credits are then ordinary
+-- 0275 body with one change: a settled or source-unknown refunded pack is no longer held back. "kept" credits are then ordinary
 -- (unattributed) balance; a refunded order is still never consumed from or restored to (credit_source_apply).
 CREATE OR REPLACE FUNCTION public.credit_source_rows(p_user uuid)
 RETURNS TABLE(kind text,id uuid,remaining integer,since timestamptz,current_period boolean,usable boolean,held boolean)
@@ -54,7 +58,7 @@ BEGIN
  -- A pack whose order ended as refunded without a clawback (0247 external refund "pack_review")
  -- keeps its credits in the balance for a person to settle: held back, never consumed or restored to.
  SELECT 'credit_package',p.id,p.left_,p.granted_at,false,NOT p.refunded AND NOT p.unknown,
-  p.refunded AND p.refund_review IS NULL FROM (
+  p.refunded AND p.refund_review IS NULL AND NOT p.unknown FROM (
   SELECT s.id,s.credits_granted-s.consumed_amount AS left_,s.granted_at,s.refund_review,
    EXISTS(SELECT 1 FROM payment_orders o WHERE o.id=s.order_id AND o.status IN ('refunded','partially_refunded')) AS refunded,
    EXISTS(SELECT 1 FROM credit_source_reviews r WHERE r.source_kind='credit_package' AND r.source_id=s.id) AS unknown
@@ -82,6 +86,9 @@ BEGIN
  END IF;
  IF s.status<>'granted' OR o.status NOT IN ('refunded','partially_refunded') THEN RAISE EXCEPTION 'PAY_PACK_REVIEW_NOT_HELD'; END IF;
  unused:=greatest(s.credits_granted-s.consumed_amount,0);
+ -- Its recorded remainder is not trusted: taking it from the balance could take other sources' credits.
+ IF p_decision='clawback' AND EXISTS(SELECT 1 FROM credit_source_reviews r WHERE r.source_kind='credit_package' AND r.source_id=s.id)
+  THEN RAISE EXCEPTION 'PAY_PACK_REVIEW_SOURCE_UNKNOWN'; END IF;
  IF p_decision='clawback' THEN
   taken:=least(greatest(owner.credits,0),unused);
   IF unused>0 THEN

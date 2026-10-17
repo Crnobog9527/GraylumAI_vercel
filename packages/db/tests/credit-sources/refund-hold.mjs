@@ -129,6 +129,20 @@ try {
     WHERE source_order_id=$1 AND ledger_type='refund_clawback'`, [short.order])), [[-40, 60]], 'the shortfall is on record');
   report.checks.push('"clawback" takes the unused pack credits back once, capped at the balance, shortfall recorded; other credits stay spendable');
 
+  // A pack whose remainder cannot be proven (0275 "source unknown") is alert-only: never held, never clawed back
+  // from the balance (PAY-DISPUTE-GUARD 4.3: never take other sources' credits); "kept" can still close the review.
+  const u4 = await profile(20);
+  const unknown = await pack(u4, 100);
+  await c.query(`INSERT INTO credit_source_reviews(source_kind,source_id,reason) VALUES('credit_package',$1,'pre_attribution_consumption')`,
+    [unknown.source]);
+  await externalRefund(unknown, 're_unknown');
+  assert.equal(await spendable(u4), 120, 'a source-unknown refunded pack is not held');
+  await assert.rejects(() => settle(ops, unknown.order, 'clawback'), /PAY_PACK_REVIEW_SOURCE_UNKNOWN/);
+  assert.equal(await balance(u4), 120);
+  assert.equal((await settle(ops, unknown.order, 'kept')).decision, 'kept');
+  assert.equal(await spendable(u4), 120);
+  report.checks.push('a source-unknown refunded pack is alert-only: not held, clawback refused (nothing taken), "kept" allowed');
+
   // Privileges: only the service role may settle; nobody calls the hold helper directly.
   for (const role of ['anon', 'authenticated', 'service_role']) {
     assert.equal(await v("SELECT has_function_privilege($1,'public.credit_package_refund_hold(uuid)','execute') v", [role]), false, role);
