@@ -48,8 +48,11 @@ export const reportDisplayTitle = (title: string) => title.replace(WRITING_HINT,
 export const reportChapterName = (title: string) => {
   const plain = reportDisplayTitle(title).replace(/^\s*(?:[一二三四五六七八九十]+|\d+)\s*[、.．]\s*/, '');
   return CHAPTER_NAMES.find(name => name === plain) ?? CHAPTER_NAMES.find(name => plain.startsWith(name))
-    ?? CHAPTER_NAMES.find(name => plain.includes(name));
+    ?? CHAPTER_NAMES.find(name => plain.includes(name)) ?? CHAPTER_ALIASES.find(([phrase]) => plain.includes(phrase))?.[1];
 };
+
+/** The Skill words some chapters differently from the names the data is keyed by ("二、你真正想要的结果，以及这条路能不能走通"). */
+const CHAPTER_ALIASES: ReadonlyArray<readonly [string, string]> = [['你真正想要的结果', '目标和可行性'], ['这条路能不能走通', '目标和可行性']];
 
 /**
  * The data fields whose chapter text differs from the generated text (§6.2): a deterministic per-chapter comparison,
