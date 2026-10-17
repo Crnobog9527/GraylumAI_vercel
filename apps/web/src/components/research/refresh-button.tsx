@@ -18,7 +18,7 @@ type State = { kind: "idle" } | { kind: "pending" } | { kind: "done" } | { kind:
  * grant; the coach then reads the account again, which counts as a new lookup. One request per click, locked
  * while it runs; after success the button stays done for this row.
  */
-export function RefreshButton({ account, onRefresh }: { account: string; onRefresh: () => Promise<void> }) {
+export function RefreshButton({ account, onRefresh, disabled = false }: { account: string; onRefresh: () => Promise<void>; disabled?: boolean }) {
   const [state, setState] = useState<State>({ kind: "idle" });
   const click = async () => {
     if (state.kind === "pending" || state.kind === "done") return;
@@ -33,7 +33,7 @@ export function RefreshButton({ account, onRefresh }: { account: string; onRefre
   return (
     <span className={styles.refresh}>
       <button type="button" className={styles.refreshButton} aria-label={`刷新 ${account} 的数据`}
-        disabled={state.kind === "pending" || state.kind === "done"} onClick={() => void click()}>
+        disabled={disabled || state.kind === "pending" || state.kind === "done"} onClick={() => void click()}>
         <RefreshCw size={12} aria-hidden />
         {state.kind === "pending" ? "正在申请…" : state.kind === "done" ? "已申请刷新" : "刷新"}
       </button>

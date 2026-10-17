@@ -54,10 +54,10 @@ function listen(server: Server): Promise<string> {
 
 export async function startHarness(): Promise<Harness> {
   const [built, harnessCode] = await Promise.all([buildLibrarySandbox({ outdir: null }), bundleHarness()]);
-  const { 'docx-worker': docx, 'pdf-worker': pdf, 'ocr-worker': ocr } = built;
+  const { 'docx-worker': docx, 'pdf-worker': pdf, 'ocr-worker': ocr, 'pdf-render-worker': render } = built;
   const ocrAssets = built.ocrAssets ?? {};
   const bundles: Record<string, string> = { '/library-sandbox/docx-worker.js': docx.code, '/library-sandbox/pdf-worker.js': pdf.code,
-    '/library-sandbox/ocr-worker.js': ocr.code };
+    '/library-sandbox/ocr-worker.js': ocr.code, '/library-sandbox/pdf-render-worker.js': render.code };
   const samples = new Map<string, Buffer>();
   const unexpected: string[] = [];
   const outsideRequests: string[] = [];
