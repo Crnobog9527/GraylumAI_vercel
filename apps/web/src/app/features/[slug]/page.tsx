@@ -28,5 +28,6 @@ export default async function Page({ params }: { params: Promise<{ slug: string 
   const entry = findFeature((await params).slug);
   if (!entry) notFound();
   const { supportEmail } = await getPublicSiteSettings();
-  return <ArticlePage content={entry.content} supportEmail={supportEmail} demo={TEXT_ONLY_FEATURES.includes(entry.slug) ? undefined : <FeatureDemo slug={entry.slug} />} />;
+  const demo = TEXT_ONLY_FEATURES.includes(entry.slug) ? undefined : <FeatureDemo slug={entry.slug} />;
+  return <ArticlePage content={entry.content} supportEmail={supportEmail} demo={demo} />;
 }
