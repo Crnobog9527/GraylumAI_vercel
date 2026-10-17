@@ -72,7 +72,11 @@ export function useScanRecognition(onDocumentChanged: () => void) {
     void runScanRecognition(api, controller.signal, (documentId, value) => {
       setProgress((current) => ({ ...current, [documentId]: value }));
       if (value.state !== 'running' || value.done > 0) latest.current.onDocumentChanged();
-    }).catch(() => undefined).finally(() => {
+    }).catch(() => {
+      // An unexpected failure leaves no document running, so the page stops warning before leaving.
+      setProgress((current) => Object.fromEntries(Object.entries(current)
+        .map(([id, value]) => [id, value.state === 'running' ? { ...value, state: 'stopped' as const } : value])));
+    }).finally(() => {
       if (running.current === controller) running.current = null;
       if (again.current && !controller.signal.aborted) { again.current = false; start(); }
     });

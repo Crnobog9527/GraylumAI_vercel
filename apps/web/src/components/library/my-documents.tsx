@@ -25,6 +25,13 @@ export function MyDocuments() {
   const [deleteState, setDeleteState] = useState({ pending: false, error: '' });
   const [busyId, setBusyId] = useState<string | null>(null);
 
+  // Recognition saves new text while a document may be open; show the refreshed version, not the stale one.
+  useEffect(() => {
+    if (!opened) return;
+    const fresh = library.documents.find((doc) => doc.id === opened.id);
+    if (fresh && fresh.content_version !== opened.content_version) setOpened(fresh);
+  }, [library.documents, opened]);
+
   useEffect(() => {
     if (!uploads.busy && !scan.busy) return;
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); };

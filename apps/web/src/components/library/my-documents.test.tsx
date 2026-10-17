@@ -67,6 +67,15 @@ describe('upload panel', () => {
     expect(text).not.toContain('AI 识别');
     expect(text).not.toMatch(/\d+\s*积分/);
   });
+  it('shows the scan sentence for Word alone and drops the old "images not recognised" note', () => {
+    vi.stubEnv('NEXT_PUBLIC_LIBRARY_DOCX_EXTRACTION', 'true');
+    expect(panel().text).toContain('文中的图片暂不识别');
+    vi.stubEnv('NEXT_PUBLIC_LIBRARY_SCAN_RECOGNITION', 'true');
+    const { text } = panel();
+    expect(text).toContain('扫描的 PDF 和 Word 里的图片上传后会在你自己的浏览器里自动识别文字');
+    expect(text).toContain('Word 的文字在你自己的浏览器里读取，不扣积分。');
+    expect(text).not.toContain('暂不识别');
+  });
   it('has no upload entry while the server switch is off', () => {
     const { html, text } = panel({ uploadEnabled: false });
     expect(text).toContain('上传暂未开放');

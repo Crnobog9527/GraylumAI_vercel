@@ -46,14 +46,14 @@ export function UploadPanel(props: UploadPanelProps) {
     <p className={styles.hint}>
       支持{supportedText()}，单个文件不超过 10 MB。{comingSoonText()}
     </p>
-    {isWordUploadReady() && <p className={styles.hint}>
+    {isWordUploadReady() && !isLibraryScanRecognitionEnabled() && <p className={styles.hint}>
       Word 的文字在你自己的浏览器里读取，不扣积分；文中的图片暂不识别。
     </p>}
     {isPdfUploadReady() && !isLibraryScanRecognitionEnabled() && <p className={styles.hint}>
       PDF 的文字在你自己的浏览器里读取，不扣积分；扫描页（没有可选中文字的页）会标为待识别，识别功能即将开放。
     </p>}
-    {isPdfUploadReady() && isLibraryScanRecognitionEnabled() && <>
-      <p className={styles.hint}>PDF 的文字在你自己的浏览器里读取，不扣积分。</p>
+    {isLibraryScanRecognitionEnabled() && (isWordUploadReady() || isPdfUploadReady()) && <>
+      <p className={styles.hint}>{isWordUploadReady() && isPdfUploadReady() ? 'Word 和 PDF' : isWordUploadReady() ? 'Word' : 'PDF'} 的文字在你自己的浏览器里读取，不扣积分。</p>
       <p className={styles.hint}>{SCAN_NOTICE}</p>
     </>}
     {!props.uploadEnabled && <p className={styles.closed} role="status">
