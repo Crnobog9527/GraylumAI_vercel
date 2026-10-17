@@ -142,7 +142,9 @@ describe('research user API', () => {
     const result = await researchBenchmarks(client, actor, other);
     expect(client.rpc).toHaveBeenCalledWith('research_benchmark_rows', { a: actor, s: other });
     expect(result).not.toHaveProperty('hash');
-    expect(result.items).toEqual([{ ...row, missing: undefined }].map(({ missing: _missing, ...rest }) => rest));
+    const expected: Partial<typeof row> = { ...row };
+    delete expected.missing;
+    expect(result.items).toEqual([expected]);
     expect(result.items[0]!.medianViews).toBeNull();
   });
   it('denies another user\'s session benchmark table and rejects malformed rows', async () => {
