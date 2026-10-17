@@ -3643,7 +3643,7 @@
   "fn:runtime_update_rate_limits(jsonb)": "af7298ecba69",
   "fn:runtime_update_stop_loss(jsonb,bigint)": "738e9178de32",
   "fn:runtime_view(uuid,uuid)": "364917b22a71",
-  "fn:runtime_work_items(uuid,uuid)": "27e713789454",
+  "fn:runtime_work_items(uuid,uuid)": "3ecf79d57d90",
   "fn:runtime_work_projection(uuid,uuid,uuid)": "f675d07d7c47",
   "fn:runtime_work_projection_before_opc(uuid,uuid,uuid)": "96650f24836b",
   "fn:runtime_workspace_session(uuid,uuid)": "4ada62e9e6a2",

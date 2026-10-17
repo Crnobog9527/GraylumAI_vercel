@@ -6,7 +6,7 @@
 -- Only plain facts leave the database: the kind of step, its state, a fixed label, and the user's own file names, search
 -- words and segment titles (never a document body, an excerpt or a benchmark number). Rows whose source is gone are not
 -- returned at once (library results are checked with runtime_library_visible, as a replay is), and erased or deleted
--- answers and conversations return nothing. At most 12 rows per answer, in a fixed kind order.
+-- answers and conversations return nothing; answers runtime_view hides (unavailable_reason, failed availability check) too. At most 12 rows per answer, in a fixed kind order.
 -- Rollback: DROP FUNCTION public.runtime_work_items(uuid,uuid); nothing else depends on it.
 BEGIN;
 CREATE OR REPLACE FUNCTION public.runtime_work_items(p_actor_id uuid,p_session_id uuid) RETURNS jsonb
@@ -17,6 +17,12 @@ BEGIN
  SELECT * INTO s FROM runtime_sessions WHERE id=p_session_id AND actor_id=p_actor_id;
  IF s.id IS NULL OR s.content_deleted_at IS NOT NULL OR s.erased_at IS NOT NULL
   OR NOT coalesce(bill2_scope_allowed(p_actor_id,s.scope),false) THEN RAISE EXCEPTION 'RUNTIME_SCOPE_DENIED'; END IF;
+ -- The same fence as runtime_view: an answer it hides (an unavailable_reason, or one that fails runtime_history_availability)
+ -- shows no work rows either.
+ WITH availability AS MATERIALIZED (
+  SELECT a.execution_id id,a.available FROM runtime_history_availability(ARRAY(
+   SELECT e.id FROM runtime_executions e JOIN bill2_runs b ON b.id=e.billing_run_id WHERE e.session_id=s.id)) a
+ )
  SELECT coalesce(jsonb_object_agg(g.execution_id::text,g.items),'{}'::jsonb) INTO result FROM (
   SELECT r.execution_id,jsonb_agg(r.item||jsonb_build_object('id',r.call_id) ORDER BY r.rank,r.call_id) items FROM (
    SELECT t.execution_id,t.call_id,w.rank,w.item,row_number() OVER (PARTITION BY t.execution_id ORDER BY w.rank,t.call_id) n
@@ -50,7 +56,9 @@ BEGIN
        jsonb_build_object('kind','library_search','state','running','label','')
       WHEN t.result IS NULL THEN jsonb_build_object('kind','library_read','state','running','label','')
      END)) v(rank,item) WHERE v.rank IS NOT NULL) w
+   JOIN availability av ON av.id=e.id AND av.available
    WHERE e.session_id=s.id AND e.actor_id=p_actor_id AND e.erased_at IS NULL AND e.content_deleted_at IS NULL
+    AND e.unavailable_reason IS NULL
     AND (t.result IS NULL OR t.result->>'kind' NOT IN ('library_search','library_segment')
      OR runtime_library_visible(p_actor_id,e.id,t.result))
   ) r WHERE r.n<=12 GROUP BY r.execution_id
