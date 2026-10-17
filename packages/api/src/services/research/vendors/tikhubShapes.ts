@@ -279,6 +279,7 @@ const EMPTY_LIST_PATHS: Partial<Record<`${SocialPlatform}:${SocialKind}`, readon
   'weibo:account_posts': ['data.statuses', 'data.data.statuses', 'data.data.list'],
   'bilibili:account_posts': ['data.data.list.vlist', 'data.list.vlist'],
   'xiaohongshu:account_posts': ['data.data.notes', 'data.notes'],
+  'douyin:account_posts': ['data.aweme_list'],
   'tiktok:keyword_posts': ['data.search_item_list', 'data.data'],
   'tiktok:account_posts': ['data.aweme_list'],
   'youtube:keyword_posts': ['data.videos', 'data.contents'],
