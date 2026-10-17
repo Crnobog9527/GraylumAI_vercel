@@ -3,6 +3,7 @@
 
 import { JuryCanvasPlayer } from '@/components/landing/preview-jury/JuryCanvasPlayer';
 import { JuryReader } from '@/components/landing/preview-jury/JuryReader';
+import theme from '@/components/landing/preview-jury/jury-theme.module.css';
 import * as jury from '@/components/chat-display/fixtures/jury';
 import { ProductFrame } from './ProductFrame';
 
@@ -16,8 +17,10 @@ export function DemoJury() {
         </div>
       </ProductFrame>
       <ProductFrame label="评审团结果页的示例" caption="示例结果页：每一章用修订还是原文，由你逐章决定">
-        <JuryReader detail={jury.SAMPLE_JURY_SCENARIO.detail} names={jury.SAMPLE_JURY_NAMES}
-          source={jury.SAMPLE_JURY_READER_SOURCE} actions={jury.SAMPLE_JURY_ADOPT_ACTIONS} />
+        <div className={theme.theme}>
+          <JuryReader detail={jury.SAMPLE_JURY_SCENARIO.detail} names={jury.SAMPLE_JURY_NAMES}
+            source={jury.SAMPLE_JURY_READER_SOURCE} actions={jury.SAMPLE_JURY_ADOPT_ACTIONS} />
+        </div>
       </ProductFrame>
     </div>
   );
