@@ -4,7 +4,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { AdoptChoice, AdoptProposed, AdoptRecorded, DetailSection, JuryDetail } from './jury-events';
 import {
-  adoptErrorLabel, choosable, chosenCount, isComplete, mockConfirm, mockPropose, needsConfirm, setConfirmed, setUse, toChoices, type Use,
+  adoptErrorLabel, choosable, chosenCount, isComplete, mockConfirm, mockPropose, needsConfirm, recordedState, setConfirmed, setUse, toChoices,
+  type Use,
 } from './jury-adopt';
 import { useDraftChoices } from './use-draft-choices';
 
@@ -84,10 +85,12 @@ export function useAdoption(detail: JuryDetail, actions: AdoptActions = MOCK_ADO
     setResult(decision === 'decline' ? { ...recorded, declined: true } : recorded);
   });
 
+  // Once recorded, every chapter shows the choice made then, not this device's (possibly cleared) draft.
+  const shown = result ? recordedState(result) : state;
   return {
-    state, proposal, result, error, later, busy,
+    state: shown, proposal, result, error, later, busy,
     total: choosable(sections).length,
-    done: chosenCount(state, sections),
+    done: chosenCount(shown, sections),
     locked: Boolean(result || proposal),
     use: (section: string, use: Use) => { setState(value => setUse(value, sections, section, use)); setError(null); },
     setConfirmed: (section: string, confirmed: boolean) => setState(value => setConfirmed(value, section, confirmed)),

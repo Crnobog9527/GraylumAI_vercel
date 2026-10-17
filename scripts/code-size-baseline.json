@@ -16,7 +16,7 @@
   "apps/web/src/app/admin/transactions/page.tsx": {"lines":705,"longLines":1},
   "apps/web/src/app/admin/users/page.tsx": {"lines":846,"longLines":2},
   "apps/web/src/app/library/page.tsx": {"longLines":34},
-  "apps/web/src/app/login/page.tsx": {"lines":524,"longLines":2},
+  "apps/web/src/app/login/page.tsx": {"lines":521,"longLines":2},
   "apps/web/src/app/maintenance/page.tsx": {"longLines":3},
   "apps/web/src/app/marketplace/page.tsx": {"lines":526,"longLines":7},
   "apps/web/src/app/page.tsx": {"longLines":4},

@@ -19,7 +19,7 @@ const ruling = (section: string, opinion: string, adopted: boolean) => ({ sectio
   disputed: false, opinion, reason: '理由足够长，写清楚为什么要这样改。', fix: '改法', adopted });
 /** Chapter titles as long as a real report's: the contents column must not grow over the reading column. */
 const LONG = '二、你真正想要的结果，以及这条路能不能走通（约 500 字）';
-const detail = (state: string, draftId = DRAFT, long = false) => ({
+const detail = (state: string, draftId = DRAFT, long = false, adoption: unknown = null) => ({
   reviewId: REVIEW, draftId, state, outcome: state === 'completed' ? { kind: 'revised' } : null,
   seats: ['A', 'B', 'C'].map(seat => ({ seat, rounds: [{ round: 1, status: state === 'running' ? 'pending' : 'usable', decisions: [], issues: [] }] })),
   summary: state === 'running' ? { status: 'none', sections: [] } : { status: 'usable', sections: [
@@ -27,7 +27,7 @@ const detail = (state: string, draftId = DRAFT, long = false) => ({
       fields: [], linkedSections: [], rulings: [ruling(long ? LONG : '定位', '定位要写清人群', true)] },
     { section: '全文', changed: false, wordingOnly: false, fields: [], linkedSections: [], rulings: [ruling('全文', '全文语气要统一', false)] },
   ] },
-  adoption: null, awaitingChoice: state === 'completed',
+  adoption, awaitingChoice: state === 'completed' && !adoption,
   chapters: [{ section: long ? LONG : '定位', body: '给所有上班族的家常菜。' }, { section: '结语', body: '先把承诺做扎实。' }],
 });
 const events = (state: string) => ({ ended: false, events: [
@@ -76,7 +76,7 @@ beforeAll(async () => {
 }, 60000);
 afterAll(async () => { await browser?.close(); }, 30000);
 
-async function open(state: string, opts: { draftId?: string; width?: number; long?: boolean } = {}) {
+async function open(state: string, opts: { draftId?: string; width?: number; long?: boolean; adoption?: unknown } = {}) {
   const page = await browser.newPage({ viewport: { width: opts.width ?? 1440, height: 900 } });
   page.setDefaultTimeout(5000);
   const errors: string[] = [];
@@ -89,7 +89,7 @@ async function open(state: string, opts: { draftId?: string; width?: number; lon
     calls[name] = (calls[name] ?? 0) + 1;
     // A slow server: a double click must still send one request.
     if (name === 'fusionReview.adopt' || name === 'fusionReview.confirmAdoption') await new Promise(done => setTimeout(done, 300));
-    const result = name === 'fusionReview.detail' ? detail(state, opts.draftId, opts.long) : name === 'fusionReview.events' ? events(state)
+    const result = name === 'fusionReview.detail' ? detail(state, opts.draftId, opts.long, opts.adoption) : name === 'fusionReview.events' ? events(state)
       : name === 'fusionReview.panel' ? PANEL : name === 'opc.list' ? { drafts: [{ draftId: DRAFT, businessName: '小林做饭' }] }
         : name === 'fusionReview.adopt' ? { state: 'proposed', revisionId: 'rev', diffHash: 'a'.repeat(64), adopted: ['定位'], kept: [],
           diff: { changes: [{ stepId: 's', stepTitle: '定位', fieldId: 'f', fieldTitle: '一句话定位', before: { value: '旧', status: 'confirmed' },
@@ -268,6 +268,24 @@ it('says a declined revision was declined, not that every chapter was kept', asy
     await ui(page.getByText(/你放弃了这次修改/)).toBeVisible({ timeout: 5000 });
     await ui(page.getByText(/你选择全部保留原文/)).toHaveCount(0);
     expect(calls['fusionReview.confirmAdoption']).toBe(1);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 30000);
+
+it('shows an adopted review with the choices made then, not as waiting for a choice (staging 2026-10-17)', async () => {
+  // As fusionReview.detail returns it after a reload: the choice draft on this device is gone, the record remains.
+  const adoption = { state: 'recorded', decision: 'apply', at: '2026-10-14T09:26:00Z', versionId: 'v2', adopted: ['定位'], kept: [] };
+  const { page, errors, calls } = await open('completed', { adoption });
+  try {
+    await ui(page.getByText('新版本已生成')).toBeVisible({ timeout: 8000 });
+    await ui(page.getByText(/逐章选择采用或保留/)).toHaveCount(0);
+    await ui(page.getByText('已选 1/1')).toBeVisible();
+    await ui(page.getByRole('navigation', { name: '报告目录' }).getByText('未选')).toHaveCount(0);
+    await ui(page.getByRole('navigation', { name: '报告目录' }).getByText('已选')).toHaveCount(1);
+    await ui(page.getByRole('radio', { name: /采用修订版/ })).toBeChecked();
+    await ui(page.getByRole('radio', { name: /采用修订版/ })).toBeDisabled();
+    await ui(page.getByRole('button', { name: '确认', exact: true })).toHaveCount(0);
+    expect(calls['fusionReview.adopt'] ?? 0).toBe(0);
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 30000);

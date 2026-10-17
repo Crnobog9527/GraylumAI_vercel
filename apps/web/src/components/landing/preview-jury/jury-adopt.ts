@@ -51,6 +51,14 @@ export function chosenCount(state: ChoiceState, sections: readonly DetailSection
 export const isComplete = (state: ChoiceState, sections: readonly DetailSection[]) =>
   chosenCount(state, sections) === choosable(sections).length;
 
+/** The chapters as a recorded choice left them; the draft on this device is gone after a reload or on another device. */
+export function recordedState(result: AdoptRecorded): ChoiceState {
+  return Object.fromEntries([
+    ...result.kept.map(section => [section, { use: 'original' as const }]),
+    ...result.adopted.map(section => [section, { use: 'revised' as const, confirmed: true }]),
+  ]);
+}
+
 export function toChoices(state: ChoiceState, sections: readonly DetailSection[]): AdoptChoice[] {
   return choosable(sections).map(item => {
     const use = state[item.section]?.use ?? 'original';
