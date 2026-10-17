@@ -12,11 +12,12 @@ const RETRY_MS = [0, 2_000, 8_000, 30_000, 120_000];
 
 /**
  * ANALYTICS §7 PR-3: when Termly says statistics are not allowed, drop the stored first touch and, for a logged-in
- * account, tell the server once per account per browser session, so GA ids kept for its unpaid orders are dropped and older ones are never reported.
- * The notice is durable: the request is retried with growing waits while the page is open, the "sent" marker is
- * only set after the server confirmed, and any page opened in a later session sends it again. The server also keeps these ids for the checkout's
- * payable window only (45 minutes), so a notice lost for good (browser closed offline) can matter only inside it.
- * Uses the plain client so a stale login never raises the app-wide re-login notice.
+ * account, tell the server once per account per browser session, so GA ids kept for its unpaid orders are dropped
+ * and older ones are never reported. The notice is durable: it is retried with growing waits while the page is
+ * open, the "sent" marker is only set after the server confirmed, and any page opened in a later session sends it
+ * again. The server also keeps these ids for the checkout's payable window only (45 minutes), so a notice lost for
+ * good (browser closed offline) can matter only inside it. Uses the plain client so a stale login never raises
+ * the app-wide re-login notice.
  */
 export function useConsentWithdrawalSync(consent: ConsentSnapshot, enabled: boolean) {
   const utils = trpc.useUtils();
