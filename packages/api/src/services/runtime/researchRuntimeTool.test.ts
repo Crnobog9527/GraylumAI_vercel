@@ -386,7 +386,7 @@ describe('benchmark fetch cache and refresh', () => {
     // Neither failed nor charged-and-closed: the paid profile stays usable by this attempt.
     expect(f.store.fetchFinish).not.toHaveBeenCalled();
     expect(f.supplierCalls).toHaveBeenCalledTimes(1);
-    // After the top-up the claim still reports the attempt in progress; the same answer takes it back (0283) and
+    // After the top-up the claim still reports the attempt in progress; the same answer takes it back (0279) and
     // reuses the profile it paid for.
     f.store.fetchClaim.mockResolvedValueOnce({ claimed: false, fetchId: id, state: 'in_progress', evidence: null });
     f.store.fetchResume.mockResolvedValueOnce({ fetchId: id, attempt: 'first-attempt' });

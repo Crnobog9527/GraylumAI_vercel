@@ -1,6 +1,6 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
 -- ANALYTICS: first source written into the account at sign-up (docs/launch/tasks/ANALYTICS.md §3.2, O8, O9).
--- Number 0287 assigned by the controller.
+-- Number 0281 assigned by the controller.
 --   * profiles.signup_attribution (nullable jsonb): registered utm_* values, the referrer host name, the landing
 --     route template and the first-visit time. No full URL, no IP. One per account, written once. Kept on the
 --     existing profile row (one value per account, no new table; plan §3.2, AGENTS §5).

@@ -6,7 +6,7 @@ import { notifyOwnerOfExpertConsult } from './notify';
 
 /**
  * EXPERT-CONSULT (Master Plan 2.1 item 51): a booking request for the Owner's one-to-one diagnosis.
- * Stored as a 'consult' ticket by service-role RPCs only (0281); the database decides eligibility
+ * Stored as a 'consult' ticket by service-role RPCs only (0278); the database decides eligibility
  * (a confirmed positioning) and keeps one request per account at a time. No price, no payment.
  */
 type Rpc = Pick<SupabaseClient, 'rpc'>;

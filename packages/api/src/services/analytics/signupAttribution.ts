@@ -4,7 +4,7 @@ import { logger } from '../../lib/logger';
 import { parseSignupAttribution } from '../../shared/analyticsAttribution';
 
 /**
- * First source of a new account (ANALYTICS plan §3.2, migration 0287). The browser sends it once, only with
+ * First source of a new account (ANALYTICS plan §3.2, migration 0281). The browser sends it once, only with
  * statistics consent; the server keeps registered UTM values, a referrer host name and a route template only,
  * and the database writes it only while empty, for an account created in the last 30 days. Statistics only:
  * a refusal or failure is logged and never reaches the user.

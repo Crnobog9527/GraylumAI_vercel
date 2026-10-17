@@ -4,7 +4,7 @@
 -- version is not a deletion (#1022 decision C): that round stays valid and is shown. Read-only (no locks, no writes):
 -- the stream fence and runtime.view use it to stop showing a round at once, before library cleanup runs, without the
 -- runtime_execution entry check (which may pause a running round). An execution without references is never returned,
--- so ordinary rounds are unaffected. Number 0279 assigned by control. Repeatable: CREATE OR REPLACE.
+-- so ordinary rounds are unaffected. Number 0277 assigned by control. Repeatable: CREATE OR REPLACE.
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 

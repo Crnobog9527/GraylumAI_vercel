@@ -1,13 +1,13 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// Local-only ANALYTICS 0287 verification: profiles.signup_attribution written once through the service function,
+// Local-only ANALYTICS 0281 verification: profiles.signup_attribution written once through the service function,
 // shape re-checked, clients cannot write it, account erasure clears it and refuses a refill, admin aggregates.
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { localDb, read } from '../runtime-view-perf/local-db.mjs';
 
-const migrationPath = 'packages/db/migrations/0287_analytics_signup_attribution.sql';
+const migrationPath = 'packages/db/migrations/0281_analytics_signup_attribution.sql';
 const db = await localDb(), c = db.client;
-const report = { build: db.build, migration: '0287', checks: [] };
+const report = { build: db.build, migration: '0281', checks: [] };
 const v = async (sql, args = []) => (await c.query(sql, args)).rows[0]?.v;
 const code = async (promise, expected) => assert.equal((await promise.then(() => null, e => e))?.code, expected);
 const ok = (name) => report.checks.push(name);

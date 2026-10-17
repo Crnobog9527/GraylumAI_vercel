@@ -5,7 +5,7 @@ import { logger } from '../../lib/logger';
 import { centsToMajor } from '../payments/purchaseFacts';
 
 /**
- * Server-side GA4 `purchase` (ANALYTICS plan §3.1, O3, O10 = B; migration 0286). The browser's GA ids are kept
+ * Server-side GA4 `purchase` (ANALYTICS plan §3.1, O3, O10 = B; migration 0280). The browser's GA ids are kept
  * per unpaid order only after Termly statistics consent; the fulfilment branch that actually delivers an order
  * takes them out (at most once) and reports one Measurement Protocol event. No order ID, user ID or email is
  * sent: the transaction ID is a fresh random value that is never stored. Statistics only: every failure is

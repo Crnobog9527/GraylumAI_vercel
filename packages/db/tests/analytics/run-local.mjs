@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// Local-only ANALYTICS 0286 verification: GA checkout ids stored only in the right shape for the buyer's own unpaid
+// Local-only ANALYTICS 0280 verification: GA checkout ids stored only in the right shape for the buyer's own unpaid
 // order, taken at most once (also under concurrency), withheld after a consent withdrawal, expired after the 45-minute window, refused when the request began before a withdrawal,
 // grants, and account-erasure cleanup.
 import assert from 'node:assert/strict';
@@ -7,9 +7,9 @@ import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { localDb, read } from '../runtime-view-perf/local-db.mjs';
 
-const migrationPath = 'packages/db/migrations/0286_analytics_purchase_report.sql';
+const migrationPath = 'packages/db/migrations/0280_analytics_purchase_report.sql';
 const db = await localDb(), c = db.client;
-const report = { build: db.build, migration: '0286', checks: [] };
+const report = { build: db.build, migration: '0280', checks: [] };
 const v = async (sql, args = [], client = c) => (await client.query(sql, args)).rows[0]?.v;
 const code = async (promise, expected) => assert.equal((await promise.then(() => null, e => e))?.code, expected);
 const ok = (name) => report.checks.push(name);

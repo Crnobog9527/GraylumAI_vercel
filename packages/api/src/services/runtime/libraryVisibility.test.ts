@@ -75,7 +75,7 @@ it('the executor reports references as soon as the execution is read, before rec
 });
 
 it('C (#1022 P1): a version change is not a deletion: the stream keeps showing the round, as a refresh will', async () => {
- // The document still exists at a newer version: runtime_library_visible rejects the frozen version, 0279 lists nothing.
+ // The document still exists at a newer version: runtime_library_visible rejects the frozen version, 0277 lists nothing.
  const rpc = vi.fn(async (name: string): Promise<{ data: unknown; error: null }> => name === 'content_erasure_visible'
   ? { data: true, error: null } : name === 'runtime_library_sources_gone' ? { data: [], error: null } : { data: false, error: null });
  const fence = executionVisibility({ rpc } as unknown as SupabaseClient, actor, execution);

@@ -216,7 +216,7 @@ export async function runCases({db,Client,connectionString,report}) {
         await assert.rejects(db.query('SELECT research_benchmark_rows($1,$2)',[f.actor,f.session]),/permission denied/,role);
       } finally {await db.query('ROLLBACK');}
     }
-    // 0291 research_user_benchmarks: the same rows for the owner, now with the refs of every displayed number.
+    // 0282 research_user_benchmarks: the same rows for the owner, now with the refs of every displayed number.
     const mine = await rpc(db,'research_user_benchmarks',f.actor,f.session);
     assert.equal(mine.length,18);
     const stored = await rows(db,'session_id=$1',[f.session]);

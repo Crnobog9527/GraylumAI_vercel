@@ -42,7 +42,7 @@ export async function benchmarkFetch(ctx: ResearchToolContext, args: ResearchToo
     }
     const refreshId = args.source.kind === 'refresh' ? args.source.refreshId : undefined;
     let claim = await ctx.store.fetchClaim(account.platform, account.account, refreshId);
-    // A balance pause left this answer's own attempt in progress: continue it after the top-up (BILL-PAYG, 0283).
+    // A balance pause left this answer's own attempt in progress: continue it after the top-up (BILL-PAYG, 0279).
     if (!claim.claimed && claim.state === 'in_progress') {
       const own = await ctx.store.fetchResume(account.platform, account.account, refreshId);
       if (own) claim = { claimed: true, ...own, resumed: true };

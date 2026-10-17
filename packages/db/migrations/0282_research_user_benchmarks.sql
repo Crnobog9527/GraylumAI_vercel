@@ -1,7 +1,7 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
 -- RESEARCH-TOOLS RT-5 follow-up: the user's own read of the session benchmark table, with the evidence refs of every
 -- number (docs/launch/implementation/RESEARCH_TOOLS_PLAN.md §1.4: each number shows its source).
--- Number 0291 assigned by the controller (2026-10-17).
+-- Number 0282 assigned by the controller (2026-10-17).
 --   * research_user_benchmarks(a,s): same rows, same ownership check and the same live-answer filter as
 --     research_benchmark_table (0268), plus the stored `refs` per number. Read only; nothing is written.
 --     A number that is NULL (missing, or nulled because the row was quarantined as EVIDENCE_UNVERIFIED) returns no

@@ -120,7 +120,7 @@ it('sends card purchases past the environment gate to the Stripe card checkout, 
   expect(mocks.card).toHaveBeenCalledTimes(2);
   expect(mocks.wallet).not.toHaveBeenCalled(); expect(mocks.provider).not.toHaveBeenCalled();
 });
-it('keeps GA ids out of the purchase and stores only well-formed ones beside the opened order (ANALYTICS 0286)', async () => {
+it('keeps GA ids out of the purchase and stores only well-formed ones beside the opened order (ANALYTICS 0280)', async () => {
   stubStaging(); mocks.gateOpen.value = true;
   const f = fixture('user', settings(true));
   const analytics = { clientId: '123456789.1700000000', sessionId: '1700000000' };

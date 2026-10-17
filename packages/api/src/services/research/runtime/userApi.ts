@@ -132,7 +132,7 @@ export async function researchCards(db: Db | null, actor: string, sessionId: str
   return { items: parse(z.array(card), await rpc(db, 'research_user_cards', { a: actor, s: id.parse(sessionId) })) };
 }
 
-// RT-5: the session's benchmark table for the conversation (0291 `research_user_benchmarks`, ownership checked in
+// RT-5: the session's benchmark table for the conversation (0282 `research_user_benchmarks`, ownership checked in
 // SQL). Numbers only as the host computed them, each with the evidence refs it came from; null stays null.
 const count = z.number().finite().min(0).nullable();
 const refList = z.array(z.string().regex(/^[0-9a-f-]{36}#\d{1,3}$/)).max(40);

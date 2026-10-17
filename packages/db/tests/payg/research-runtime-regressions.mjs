@@ -134,7 +134,7 @@ export async function researchRuntimeRegressionCases({db,report,createFixture}) 
       assert.deepEqual((await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null)).evidence,evidence);
     }
   });
-  await check('BILL-PAYG balance pause: only the answer holding an in-progress attempt gets it back (0283)',async()=>{
+  await check('BILL-PAYG balance pause: only the answer holding an in-progress attempt gets it back (0279)',async()=>{
     const f=await fixture(db,createFixture),e2=await answer(db,f);
     const resume=(e,refresh=null)=>rpc(db,'research_account_fetch_resume',f.actor,f.session,e,'tiktok','alpha',refresh);
     assert.equal(await resume(f.execution),null,'no fetch yet');

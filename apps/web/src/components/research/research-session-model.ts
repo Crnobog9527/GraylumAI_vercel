@@ -87,7 +87,7 @@ export function toSessionCards(rows: readonly StoredCard[]): SessionCard[] {
 /** Cards the user still has to answer. */
 export const openCards = (cards: readonly SessionCard[]) => cards.filter(item => !item.confirmation);
 
-/** A `research.benchmarks` row (0291 `research_user_benchmarks`): host-computed numbers with their evidence refs. */
+/** A `research.benchmarks` row (0282 `research_user_benchmarks`): host-computed numbers with their evidence refs. */
 export interface StoredBenchmark {
   platform: string; account: string; followers: number | null; medianViews: number | null; engagementRate: number | null;
   postsPerWeek: number | null; lastPublishedAt: string | null; category: BenchmarkRow["category"]; qualified: boolean;

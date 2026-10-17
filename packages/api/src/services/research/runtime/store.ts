@@ -206,7 +206,7 @@ export function databaseRuntimeResearchStore(deps: {
       a, s, e, p_platform: platform, p_account: account, p_refresh: refreshId ?? null,
     }),
     /**
-     * This answer's own in-progress attempt (left by a balance pause), or null (0283). Before 0283 is applied the
+     * This answer's own in-progress attempt (left by a balance pause), or null (0279). Before 0279 is applied the
      * function does not exist yet: the attempt then stays in progress, as before, instead of failing the turn.
      */
     async fetchResume(platform: SocialPlatform, account: string, refreshId?: string): Promise<{ fetchId: string; attempt: string } | null> {

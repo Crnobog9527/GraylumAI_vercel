@@ -10,7 +10,7 @@
 --     during a rolling deploy (#1062 review P1).
 -- Compatibility: additive function; old code never calls it. Repeatable: CREATE OR REPLACE plus grants.
 -- Recovery: DROP FUNCTION public.research_account_fetch_resume(uuid,uuid,uuid,text,text,uuid); paused fetches then
--- stay in progress (the pre-0283 behaviour).
+-- stay in progress (the pre-0279 behaviour).
 BEGIN;
 SET LOCAL lock_timeout='5s';
 

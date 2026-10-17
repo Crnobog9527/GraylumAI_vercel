@@ -31,7 +31,7 @@ describe('wallet callback/recovery', () => {
       p_order: 'order', p_start: '2028-01-31T00:00:00.000Z', p_end: '2028-02-29T00:00:00.000Z', p_payment: 'pi_1',
     }));
   });
-  it('reports the GA purchase only from the call that newly delivered the order (ANALYTICS 0286)', async () => {
+  it('reports the GA purchase only from the call that newly delivered the order (ANALYTICS 0280)', async () => {
     mocks.report.mockReset().mockResolvedValue(true);
     const first = fixture(); first.db.rpc.mockResolvedValue({ data: { state: 'fulfilled', duplicate: false }, error: null });
     expect(await first.run()).toBe(true);

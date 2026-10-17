@@ -10,7 +10,7 @@ export type ExecutionVisibility={visible:()=>Promise<void>;observe:(context:Obse
 /**
  * LIB-4b (LIB_DOCS_PLAN 7, #981 acceptance): the recheck before anything of one execution is shown. Content erasure (D7)
  * applies to every execution. An execution that froze library references also shows nothing more (streamed text or
- * deltas, cards, phases, the result) once a referenced document is deleted (0279, the 0262 entry check's test); a newer
+ * deltas, cards, phases, the result) once a referenced document is deleted (0277, the 0262 entry check's test); a newer
  * content version is not a deletion and stays shown, as runtime.view shows it after a refresh (#1022 decision C): late
  * provider output is neither shown here nor stored by SQL (0262 cancels at the next runtime_execution action). Only an
  * execution the executor actually runs is observed, so replaying an answer completed before the deletion stays as D7 keeps it,

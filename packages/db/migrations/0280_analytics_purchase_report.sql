@@ -1,6 +1,6 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
 -- ANALYTICS: server-side GA4 `purchase` report (docs/launch/tasks/ANALYTICS.md §3.1, §7 PR-3, O3, O10 = B).
--- Number 0286 assigned by the controller.
+-- Number 0280 assigned by the controller.
 --   * analytics_checkout_ids keeps, per unpaid order, the GA client_id/session_id the browser sent at checkout
 --     (only after Termly statistics consent). They never enter checkout_request, Stripe metadata or any
 --     finance-retained column. The fulfilment branch takes them out with DELETE … RETURNING, so one order is

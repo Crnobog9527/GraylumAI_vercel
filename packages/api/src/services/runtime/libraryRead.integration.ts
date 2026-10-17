@@ -190,7 +190,7 @@ it.runIf(staging)('RUNTIME: library document deleted after admission and before 
  const f=await fixture(),p=await provider({early:'x',late:'y'});
  try{
   const admitted=await f.admit();expect(admitted.error).toBeNull();const executionId=admitted.data.executionId;
-  // 0279: read-only, an execution is listed only while one of its frozen references is gone.
+  // 0277: read-only, an execution is listed only while one of its frozen references is gone.
   const gone=(ids:string[])=>rpc('runtime_library_sources_gone',{p_actor_id:f.actorId,p_execution_ids:ids});
   expect(await gone([executionId,randomUUID()])).toEqual([]);
   await rpc('library_delete',{a:f.actorId,did:f.documentId});

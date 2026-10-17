@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// Local-only EXPERT-CONSULT (0281) verification: eligibility, one request at a time, client denial,
+// Local-only EXPERT-CONSULT (0278) verification: eligibility, one request at a time, client denial,
 // account erasure of the stored contact details, idempotent reapplication and rollback.
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -8,9 +8,9 @@ import { localDb, read } from '../runtime-view-perf/local-db.mjs';
 import { rpc, closeAccount } from '../erasure-b2a/cases.mjs';
 import { recordLibraryProof } from '../erasure-completion/library-proof.mjs';
 
-const migrationPath = 'packages/db/migrations/0281_expert_consult_requests.sql';
+const migrationPath = 'packages/db/migrations/0278_expert_consult_requests.sql';
 const db = await localDb(), c = db.client;
-const report = { build: db.build, migration: '0281', checks: [] };
+const report = { build: db.build, migration: '0278', checks: [] };
 const v = async (sql, args = []) => (await c.query(sql, args)).rows[0]?.v;
 const failure = (promise) => promise.then(() => null, e => e.message);
 const NEED = '想请专家看看我的账号定位和变现路径';
@@ -31,7 +31,7 @@ try {
   assert.deepEqual(await v(catalogSql), applied);
   await c.query(read(migrationPath));
   assert.deepEqual(await v(catalogSql), applied);
-  report.checks.push('rollback removes only the 0281 functions; reapplying 0281 once and twice gives the same catalog');
+  report.checks.push('rollback removes only the 0278 functions; reapplying 0278 once and twice gives the same catalog');
 
   for (const role of ['anon', 'authenticated']) {
     for (const f of ['expert_consult_state(uuid)', 'expert_consult_request(uuid,text,text,text)', 'expert_consult_pending(uuid)']) {
