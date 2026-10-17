@@ -254,6 +254,12 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
   }
 
   const plan = (input: { draftId: string; sourceVersionId: string }) => planReview({ admin, actorId, env, ...input });
+  /** An ended review whose fee is still held (a stop waiting for in-flight calls) gets another settlement try. */
+  async function settled(view: ReviewView | null): Promise<ReviewView> {
+    if (!view) throw new Error('FUSION_REVIEW_DENIED');
+    if (!ENDED_STATES.has(view.state) || view.fee?.state !== 'held') return view;
+    return { ...view, fee: await record.settleFee(view.reviewId) ?? view.fee };
+  }
 
   return {
     /** The review an earlier start with this request created (lost response), without any live-call precondition. */
@@ -261,8 +267,10 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
     /** What a start would freeze and hold at most, computed exactly as start does, without creating anything: the page
      * shows "最多消耗 X 积分" from it before the user agrees (FUSION-REVIEW §3.2, Master Plan §4.1). */
     async estimate(input: { draftId: string; sourceVersionId: string }) {
-      const { settings, rounds, estimateCredits } = await plan(input);
-      return { estimateCredits, maxRounds: rounds, reviewers: settings.review.reviewerModelIds.length };
+      const { settings, rounds, priceCredits, holdCredits } = await plan(input);
+      // estimateCredits is now the fixed price (0294); requiredCredits is what the balance must cover to start.
+      return { estimateCredits: priceCredits, holdCredits, requiredCredits: priceCredits + holdCredits, maxRounds: rounds,
+        reviewers: settings.review.reviewerModelIds.length };
     },
     /** Freezes settings, Skill revision and estimate; refuses a review that cannot fit or exceeds the budget. A start
      * that carries the maximum the user agreed to is refused when the maximum is now higher (prices changed meanwhile). */
@@ -270,10 +278,11 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
       // A retried start (lost response) gets its review back before any check that may have changed since (#962 review).
       const existing = await record.replay(input);
       if (existing) return existing;
-      const { settings, skill, text, rounds, estimateUsd, estimateCredits, callCaps, requestBytes } = await plan(input);
-      if (input.acceptedCredits !== undefined && estimateCredits > input.acceptedCredits) throw new Error('FUSION_REVIEW_ESTIMATE_CHANGED');
+      const { settings, skill, text, rounds, estimateUsd, callCaps, requestBytes, priceCredits, holdCredits } = await plan(input);
+      if (input.acceptedCredits !== undefined && priceCredits !== input.acceptedCredits) throw new Error('FUSION_REVIEW_ESTIMATE_CHANGED');
       const view = await record.start({ requestId: input.requestId, draftId: input.draftId, sourceVersionId: input.sourceVersionId,
-        config: { estimateUsd, estimateCredits, callCaps, maxRounds: rounds, reviewers: settings.review.reviewerModelIds,
+        config: { estimateUsd, estimateCredits: priceCredits, fixedPrice: { credits: priceCredits, holdCredits }, callCaps,
+          maxRounds: rounds, reviewers: settings.review.reviewerModelIds,
           summary: settings.review.summaryModelId,
           opinionTokens: settings.review.opinionOutputTokens, summaryTokens: settings.review.summaryOutputTokens, skill, requestBytes } });
       // Before anything is claimed: round 1 and the most trimmed summary, measured exactly as they will be sent, must fit
@@ -389,11 +398,7 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
       return deps.executor.run(run, { runId: call.runId, id: callId, state: call.state, fresh: false }, judge, onChunk);
     },
     /** The review as it stands, without advancing it (the page reads while the server advances). */
-    async read(reviewId: string) {
-      const view = await record.read(reviewId);
-      if (!view) throw new Error('FUSION_REVIEW_DENIED');
-      return view;
-    },
+    read: async (reviewId: string) => settled(await record.read(reviewId)),
     stop: (reviewId: string) => record.close(reviewId, 'stopped'),
     end: (reviewId: string) => record.close(reviewId, 'interrupted'),
     /** Per-section adoption, step 1: validates the choices and, when any section is adopted, proposes the merged text
@@ -462,14 +467,13 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
     },
     /** Full record for the owner (no 120-character summaries): each seat's reasoning and the rulings by section. */
     async detail(reviewId: string) {
-      const view = await record.read(reviewId);
-      if (!view) throw new Error('FUSION_REVIEW_DENIED');
+      const view = await settled(await record.read(reviewId));
       const src = await readSource(reviewId);
       const detail = reviewDetail({ view, reviewers: config.parse(view.config).reviewers, sections: src.sections,
         outputs: await savedOutputs(view), revision: revisionInput(view, src), adoption: (await adoptionPlan(view, src))?.sections ?? null });
       // The reviewed (frozen) report by chapter: the result page shows the whole report, not only the changed chapters.
       const text = sectionTexts(src.body, src.sections);
-      return { ...detail, chapters: text.chapters, preamble: text.preamble };
+      return { ...detail, chapters: text.chapters, preamble: text.preamble, fee: view.fee ?? null };
     },
     /** Progress events for the animation (§2.2a), derived from the record and judged outputs only. */
     async events(reviewId: string) {

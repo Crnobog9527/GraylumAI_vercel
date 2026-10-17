@@ -67,7 +67,7 @@ export function ReviewPage({ draftId, reviewId }: { draftId: string; reviewId: s
   if (!raw || !jury || !source || !report || !events.data) {
     return shell(null, <main className={styles.main}><p className={styles.state} role="status">正在读取评审…</p></main>);
   }
-  const result = <ReviewResult draftId={draftId} detail={jury} source={source} names={names} onChanged={reload} />;
+  const result = <ReviewResult draftId={draftId} detail={jury} source={source} names={names} fee={raw.fee} onChanged={reload} />;
   if (endedOnArrival.current) return shell(null, <main className={styles.main}>{result}</main>);
   return (
     <ReviewLive reviewId={reviewId} events={played} detail={jury} names={names} report={report} ended={ended}
@@ -85,7 +85,7 @@ function Controls({ reviewId, state, onChanged }: { reviewId: string; state: str
     return (
       <span className={styles.controls}>
         <button type="button" className={styles.toolButton} disabled={busy} onClick={() => {
-          if (!window.confirm('停止后不会再开始新的步骤；已经发出的评审照常结算。确定停止吗？')) return;
+          if (!window.confirm('停止后不会再开始新的步骤，也不会生成修订稿。已经发出的评审按实际用量收费（不超过本次评审价格），还没发出的不收。确定停止吗？')) return;
           stop.mutate({ reviewId }, { onError: () => setFailed(true), onSuccess: () => setFailed(false) });
         }}><Square size={13} aria-hidden="true" />停止评审</button>
         {failed ? <span role="alert" className={styles.inlineError}>没有停止成功，请再试一次。</span> : null}
@@ -95,9 +95,9 @@ function Controls({ reviewId, state, onChanged }: { reviewId: string; state: str
   if (state !== 'paused') return null;
   return (
     <p className={styles.paused} role="status">
-      评审暂停了，通常是余额不够下一步。充值后回到这里会接着进行，已经完成的意见不会丢，也不会重复扣费。
+      评审暂停了，通常是可用积分不够下一步的临时冻结。充值后回到这里会接着进行，已经完成的意见不会丢，也不会重复扣费。
       <button type="button" className={styles.toolButton} disabled={busy} onClick={() => {
-        if (!window.confirm('结束后这次评审不会再继续，已经收到的意见会保留。确定结束吗？')) return;
+        if (!window.confirm('结束后这次评审不会再继续，已经收到的意见会保留，按已经发出的部分实际收费（不超过本次评审价格）。确定结束吗？')) return;
         end.mutate({ reviewId }, { onError: () => setFailed(true), onSuccess: () => setFailed(false) });
       }}>结束评审</button>
       {failed ? <span role="alert" className={styles.inlineError}>没有结束成功，请再试一次。</span> : null}

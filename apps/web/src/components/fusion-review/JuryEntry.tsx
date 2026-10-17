@@ -36,10 +36,11 @@ function ReportJury({ draftId, sourceVersionId, busy }: { draftId: string; sourc
   const panel = trpc.fusionReview.panel.useQuery(undefined, { enabled, staleTime: Infinity, retry: false });
   const start = trpc.fusionReview.start.useMutation();
   const [open, setOpen] = useState(false);
-  // The maximum this review may hold, computed as start will: shown before the user agrees (FUSION-REVIEW §3.2).
+  // The fixed price of a review and the balance a start needs (0294), shown before the user agrees.
   const estimate = trpc.fusionReview.estimate.useQuery({ draftId, sourceVersionId }, { enabled: enabled && open, retry: false,
     staleTime: 0, refetchOnWindowFocus: false });
   const cap = estimate.data?.estimateCredits;
+  const required = estimate.data?.requiredCredits;
   const [error, setError] = useState('');
   const requestId = useRef('');
   if (!enabled) return null;
@@ -66,7 +67,7 @@ function ReportJury({ draftId, sourceVersionId, busy }: { draftId: string; sourc
       if (/^(FUSION|REPORT)_[A-Z_]+$/.test(code)) requestId.current = '';
       setError(startErrorText(code));
       void mine.refetch();
-      if (code === 'FUSION_REVIEW_ESTIMATE_CHANGED') void estimate.refetch();
+      if (code === 'FUSION_REVIEW_ESTIMATE_CHANGED' || code === 'FUSION_REVIEW_PRICE_CHANGED') void estimate.refetch();
     }
   };
   return (
@@ -82,10 +83,13 @@ function ReportJury({ draftId, sourceVersionId, busy }: { draftId: string; sourc
             {seats.length} 位评审（{seats.map(seat => names[seat]).join('、')}）会各自读完你的定位报告、提出修改意见，
             意见不一的地方再辩论一轮，最后由{names.S}逐条裁决、写出修订稿。用不用修订稿，由你逐章决定。
           </p>
-          <p>大约需要 3–4 分钟，开始后可以离开页面。按实际用量扣积分，余额不够时会暂停，充值后接着进行。</p>
-          {cap ? <p className={styles.cap}>这次评审最多消耗 <b>{cap.toLocaleString('zh-CN')}</b> 积分，实际用多少扣多少。</p>
-            : estimate.error ? <p role="alert" className={styles.error}>{startErrorText(codeOf(estimate.error))}</p>
-              : <p role="status">正在计算最多消耗多少积分…</p>}
+          <p>大约需要 3–4 分钟，开始后可以离开页面。</p>
+          {cap ? <>
+            <p className={styles.cap}>本次评审 <b>{cap.toLocaleString('zh-CN')}</b> 积分。生成修订稿才扣，没有生成修订稿全额退回。</p>
+            {required && required > cap ? <p>开始时可用积分需要至少 {required.toLocaleString('zh-CN')}：
+              其中 {(required - cap).toLocaleString('zh-CN')} 是评审过程中每一步的临时冻结，这一步结束就退回。</p> : null}
+          </> : estimate.error ? <p role="alert" className={styles.error}>{startErrorText(codeOf(estimate.error))}</p>
+            : <p role="status">正在读取评审价格…</p>}
           {error ? <p role="alert" className={styles.error}>{error}</p> : null}
           <div className={styles.actions}>
             <Button variant="ghost" onClick={() => setOpen(false)} disabled={start.isPending}>先不用</Button>

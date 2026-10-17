@@ -12,7 +12,8 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { modelLabel } from './reportModelView';
 import {
-  affectsRunning, allSkills, countRunning, draftProblems, REVIEW_PAGE, SEAT_CODES, settingsErrorText, TOKEN_LIMITS, toSaved, warningText,
+  affectsRunning, allSkills, countRunning, draftProblems, PRICE_LIMITS, REVIEW_PAGE, SEAT_CODES, settingsErrorText, TOKEN_LIMITS, toSaved,
+  warningText,
   type FusionSettingsValue, type ReviewSettings,
 } from './fusionReviewSettingsView';
 
@@ -163,11 +164,14 @@ function ReviewForm({ saved, onSaved, notice, setNotice }: {
           value={review.opinionOutputTokens} onChange={opinionOutputTokens => set({ opinionOutputTokens })} />
         <NumberField id="fusion-summary" label={`汇总的输出长度（${TOKEN_LIMITS.summary.min}–${TOKEN_LIMITS.summary.max} token）`}
           value={review.summaryOutputTokens} onChange={summaryOutputTokens => set({ summaryOutputTokens })} />
+        <NumberField id="fusion-price" label={`每次评审的价格（积分，${PRICE_LIMITS.min}–${PRICE_LIMITS.max}）`}
+          value={review.fixedPriceCredits} onChange={fixedPriceCredits => set({ fixedPriceCredits })} />
+        <p className="text-xs" style={muted}>用户开始前看到的就是这个数。生成修订稿才扣，没有生成修订稿全额退回；模型实际成本超出的部分由平台承担。</p>
         <div className="space-y-1.5">
-          <Label htmlFor="fusion-budget">单次评审预算上限（美元）</Label>
-          <Input id="fusion-budget" inputMode="decimal" placeholder="例如 0.5" value={review.maxBudgetUsd ?? ''}
+          <Label htmlFor="fusion-budget">单次评审平台成本保护线（美元）</Label>
+          <Input id="fusion-budget" inputMode="decimal" placeholder="例如 5" value={review.maxBudgetUsd ?? ''}
             onChange={event => set({ maxBudgetUsd: event.target.value })} />
-          <p className="text-xs" style={muted}>一次评审预估超过这个数就不开始。用户看到的「最多消耗多少积分」按实际模型价格算，不是这个数。</p>
+          <p className="text-xs" style={muted}>按模型报价估出的最坏成本超过这个数时，先去掉第 2 轮辩论；1 轮也超过就不开始。和用户付多少积分无关。</p>
         </div>
       </div>
       {problems.length ? <ul role="alert" className="list-disc pl-5 text-sm" style={{ color: 'var(--color-destructive)' }}>

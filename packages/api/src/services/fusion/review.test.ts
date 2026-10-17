@@ -24,7 +24,8 @@ const ids = { reviewers: ['00000000-0000-4000-8000-0000000000a1', '00000000-0000
   summary: '00000000-0000-4000-8000-0000000000b1' };
 vi.mock('./settings', () => ({ readFusionSettings: async () => ({ version: 1, compare: { enabled: false }, review: { enabled: true,
   reviewerModelIds: ids.reviewers, summaryModelId: ids.summary, skillId: '00000000-0000-4000-8000-0000000000c1', maxRounds: 2,
-  opinionOutputTokens: 1000, summaryOutputTokens: 2000, maxBudgetUsd: '5', dispatchMinutes: 10, breaker: { platformUsd: '2', noDeliveryCalls: 10 } } }) }));
+  opinionOutputTokens: 1000, summaryOutputTokens: 2000, maxBudgetUsd: '5', fixedPriceCredits: 1500, dispatchMinutes: 10,
+  breaker: { platformUsd: '2', noDeliveryCalls: 10 } } }) }));
 vi.mock('../runtime/stagingPolicy', () => ({ loadStagingPolicy: async () => ({ creditsPerUsd: '100', callPolicies: [...ids.reviewers, ids.summary].map(modelId => ({ modelId,
   multiplier: '3', outputLimit: 8192, providerLimits: { providerSlug: 'x', contextTokens: 400000, promptUsdPerMillion: '0.1', completionUsdPerMillion: '0.1', requestUsd: '0' } })) }) }));
 vi.mock('./reviewPrompts', async original => ({ ...(await original<typeof import('./reviewPrompts')>()),
@@ -142,18 +143,21 @@ function setup(script: (call: Call) => string | null, refuse?: string) {
 describe('review flow', () => {
   beforeEach(() => { db.review = null; db.calls = []; db.outputs.clear(); db.savedAt.clear(); db.groups.clear(); requests.length = 0; caps.length = 0; creditCaps.length = 0; usdCaps.length = 0; memberCapsSeen.length = 0; priceRise.phase = ''; priceRise.code = 'FUSION_ESTIMATE_EXCEEDED'; });
 
-  it('estimates the maximum a start would hold without creating anything, and refuses a start above what the user agreed to', async () => {
+  it('estimates the fixed price without creating anything, and refuses a start at another price than the user agreed to', async () => {
     const t = setup(call => call.phase === 'fusion_summary' ? revision('新目标') : opinion('major'));
     const input = { draftId: randomUUID(), sourceVersionId: randomUUID() };
     const estimate = await t.flow.estimate(input);
-    expect(estimate).toMatchObject({ maxRounds: 2, reviewers: ids.reviewers.length });
-    expect(estimate.estimateCredits).toBeGreaterThan(0);
+    expect(estimate).toMatchObject({ maxRounds: 2, reviewers: ids.reviewers.length, estimateCredits: 1500 });
+    // The balance must also cover the largest step's temporary call hold (released at zero charge, 0294).
+    expect(estimate.holdCredits).toBeGreaterThan(0);
+    expect(estimate.requiredCredits).toBe(1500 + estimate.holdCredits);
     expect(db.review).toBeNull();
-    await expect(t.flow.start({ requestId: randomUUID(), ...input, acceptedCredits: estimate.estimateCredits - 1 }))
-      .rejects.toThrow('FUSION_REVIEW_ESTIMATE_CHANGED');
+    for (const accepted of [1499, 1501]) {
+      await expect(t.flow.start({ requestId: randomUUID(), ...input, acceptedCredits: accepted })).rejects.toThrow('FUSION_REVIEW_ESTIMATE_CHANGED');
+    }
     expect(db.review).toBeNull();
-    const started = await t.flow.start({ requestId: randomUUID(), ...input, acceptedCredits: estimate.estimateCredits });
-    expect(started.config).toMatchObject({ estimateCredits: estimate.estimateCredits });
+    const started = await t.flow.start({ requestId: randomUUID(), ...input, acceptedCredits: 1500 });
+    expect(started.config).toMatchObject({ estimateCredits: 1500, fixedPrice: { credits: 1500, holdCredits: estimate.holdCredits } });
   });
 
   it('without a split: round 1, one summary, proposes the revision to R14, never re-reviewed by the panel', async () => {
@@ -383,9 +387,11 @@ describe('review flow', () => {
     const t = setup(() => opinion('major'));
     const started = await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
     type Caps = Record<'review' | 'debate' | 'summary', Record<string, { credits: number; usd: string }>>;
-    const cfg = started.config as { estimateCredits: number; estimateUsd: string; callCaps: Caps };
+    const cfg = started.config as { estimateUsd: string; callCaps: Caps; fixedPrice: { holdCredits: number } };
     const all = Object.values(cfg.callCaps).flatMap(phase => Object.values(phase));
-    expect(cfg.estimateCredits).toBe(all.reduce((sum, cap) => sum + cap.credits, 0));
+    const phaseSum = (phase: Record<string, { credits: number }>) => Object.values(phase).reduce((n, cap) => n + cap.credits, 0);
+    // The temporary hold a start must cover is the largest step's, not the sum of all steps.
+    expect(cfg.fixedPrice.holdCredits).toBe(Math.max(...Object.values(cfg.callCaps).map(phaseSum)));
     expect(all.reduce((sum, cap) => sum + Number(cap.usd), 0)).toBeGreaterThanOrEqual(Number(cfg.estimateUsd) - 1e-9);
     priceRise.phase = 'fusion_summary';
     await t.runAll();

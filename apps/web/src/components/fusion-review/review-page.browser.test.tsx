@@ -203,7 +203,7 @@ async function openEntry(answers: { enabled: boolean; mine?: unknown[]; refuse?:
     }
     const result = name === 'fusionReview.available' ? { enabled: answers.enabled } : name === 'fusionReview.mine' ? answers.mine ?? []
       : name === 'fusionReview.panel' ? PANEL : name === 'fusionReview.start' ? { reviewId: REVIEW, state: 'running' }
-        : name === 'fusionReview.estimate' ? { estimateCredits: 1280, maxRounds: 2, reviewers: 3 } : {};
+        : name === 'fusionReview.estimate' ? { estimateCredits: 1500, holdCredits: 320, requiredCredits: 1820, maxRounds: 2, reviewers: 3 } : {};
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ result: { data: result } }) });
   });
   await page.goto('http://localhost/#entry');
@@ -232,12 +232,13 @@ it('starts one review with the panel\'s names and opens its page; a running one 
     await page.getByRole('button', { name: '请评审团审阅报告' }).click();
     await ui(page.getByText(/3 位评审（目标用户、操盘手、挑刺审核人）/)).toBeVisible();
     // The maximum is shown before the user agrees, and start carries exactly that maximum.
-    await ui(page.getByText('这次评审最多消耗 1,280 积分，实际用多少扣多少。')).toBeVisible();
+    await ui(page.getByText('本次评审 1,500 积分。生成修订稿才扣，没有生成修订稿全额退回。')).toBeVisible();
+    await ui(page.getByText(/开始时可用积分需要至少 1,820/)).toBeVisible();
     await page.getByRole('button', { name: '开始评审' }).dblclick();
     await page.waitForFunction(() => Boolean((window as unknown as { __pushed?: string }).__pushed));
     expect(await page.evaluate(() => (window as unknown as { __pushed?: string }).__pushed)).toBe(`/positioning/${DRAFT}/review/${REVIEW}`);
     expect(calls['fusionReview.start']).toBe(1);
-    expect(starts).toEqual([expect.objectContaining({ draftId: DRAFT, sourceVersionId: REVIEW, acceptedCredits: 1280 })]);
+    expect(starts).toEqual([expect.objectContaining({ draftId: DRAFT, sourceVersionId: REVIEW, acceptedCredits: 1500 })]);
     expect(errors).toEqual([]);
   } finally { await page.close(); }
   const running = await openEntry({ enabled: true, mine: [mineItem('running')] });
