@@ -5,7 +5,9 @@ const mocks = vi.hoisted(() => ({ auth: vi.fn(), create: vi.fn(), deps: vi.fn(),
 vi.mock('@/lib/cron-auth', () => ({ validateCronRequest: mocks.auth }));
 vi.mock('@supabase/supabase-js', () => ({ createClient: mocks.create }));
 vi.mock('@repo/api/src/services/publishMonitor/secrets', () => ({ loadPostForMeDeps: mocks.deps }));
-vi.mock('@repo/api/src/services/publishMonitor/socialMonitorJob', () => ({ runSocialMonitorJob: mocks.run }));
+vi.mock('@repo/api/src/services/publishMonitor/socialMonitorJob', () => ({ runSocialMonitorJob: mocks.run,
+  runSocialMonitorRetention: async () => ({ pruned: 4 }),
+  entitlementWindow: () => async () => 30 }));
 vi.mock('@repo/api/src/services/scheduledJobRuns', () => ({ startScheduledJobRun: mocks.start,
   finishScheduledJobRun: mocks.finish }));
 import { GET } from './route';
@@ -31,7 +33,8 @@ it('denies an unauthenticated call before any work', async () => {
 it('skips cleanly when this environment has no Post for Me key', async () => {
   mocks.deps.mockResolvedValue(null);
   const res = await call();
-  expect([res.status, await res.json()]).toEqual([200, { success: true, skipped: 'POSTFORME_NOT_CONFIGURED' }]);
+  // Retention still runs without a provider key.
+  expect([res.status, await res.json()]).toEqual([200, { success: true, skipped: 'POSTFORME_NOT_CONFIGURED', pruned: 4 }]);
   expect(mocks.run).not.toHaveBeenCalled();
   expect(mocks.finish).toHaveBeenCalledWith(expect.objectContaining({ runId: 'run-1', status: 'success' }));
 });

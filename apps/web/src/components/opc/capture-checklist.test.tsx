@@ -157,7 +157,7 @@ describe("CaptureChecklist withdrawn updates (CDC-WRITEBACK-V3)", () => {
   it("shows a withdrawn update as no longer pending, with the unchanged content and a dismissal", () => {
     const p = withMeta({ source: "user", protected: true, withdrawnSuggestion: withdrawn });
     const html = render(p);
-    expect(html).toContain("导师已撤回建议");
+    expect(html).toContain("AI 教练已撤回建议");
     expect(html).toContain("全国退休老人");
     expect(html).toContain("正式内容没有改动");
     expect(html).not.toContain("根据对话整理的更新");
@@ -168,7 +168,7 @@ describe("CaptureChecklist withdrawn updates (CDC-WRITEBACK-V3)", () => {
   });
   it("lets a newer pending update replace the withdrawn notice and keeps the dismissal locked while busy", () => {
     const both = withMeta({ source: "user", protected: true, suggestion: update, withdrawnSuggestion: withdrawn });
-    expect(render(both)).not.toContain("导师已撤回建议");
+    expect(render(both)).not.toContain("AI 教练已撤回建议");
     const busy = { ...withMeta({ source: "user", protected: true, withdrawnSuggestion: withdrawn }), locked: true };
     expect(button(busy, "知道了")[0]!.disabled).toBe(true);
   });
