@@ -2,7 +2,7 @@
 import { expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { REPORT_REQUEST_INPUT, reportEnabled, reportService, reportError } from './service';
+import { REPORT_REQUEST_INPUT, reportBenchmarks, reportEnabled, reportService, reportError } from './service';
 import { runtimeAdmissionService } from '../runtime/admission';
 const id = randomUUID();
 const input = { sessionId: id, projectId: id, roundId: id, requestId: id };
@@ -90,6 +90,16 @@ it('SQL OPC_CAPTURE_PENDING survives admission and the report error boundary', a
   await expect(admission.prepare({sessionId:id,requestId:id,input:'report',selection:{kind:'ordinary',modelId:id},
     organizeAfter:false,sources:[],network:'deny'}).catch(reportError))
     .rejects.toMatchObject({code:'BAD_REQUEST',message:'OPC_CAPTURE_PENDING'});
+});
+it('SQL REPORT_BENCHMARKS_REQUIRED survives admission and the report error boundary', async () => {
+  const admin = { rpc: async () => ({ data: null, error: {code:'P0001',message:'REPORT_BENCHMARKS_REQUIRED'} }) } as unknown as SupabaseClient;
+  const admission = runtimeAdmissionService(user as unknown as SupabaseClient, admin, { ...policy,
+    reportGeneration: {version:1,projectId:id,roundId:id,evidenceIds:[],snapshotHash:'a'.repeat(64),
+      packageHash:'b'.repeat(64),workflowHash:'c'.repeat(64),templateHash:'d'.repeat(64),sections:['One'],maxCharacters:12000},
+  });
+  await expect(admission.prepare({sessionId:id,requestId:id,input:'report',selection:{kind:'ordinary',modelId:id},
+    organizeAfter:false,sources:[],network:'deny'}).catch(reportError))
+    .rejects.toMatchObject({code:'BAD_REQUEST',message:'REPORT_BENCHMARKS_REQUIRED'});
 });
 it.each([[{ enabled: true }, true], [null, false], [{ enabled: false }, false], ['{"enabled":true}', false], [{ enabled: true, extra: 1 }, false]])(
   'reportEnabled reads the same strict switch as start (%j)', async (value, expected) => {
@@ -201,4 +211,15 @@ it.each([
   ['private database failure', 'REPORT_UNAVAILABLE'],
 ])('report boundary maps %s to a stable public code', (internal, expected) => {
   expect(() => reportError(new Error(internal))).toThrow(expected);
+});
+it('benchmark facts: rows and hash from the host RPC; an older database without it builds the report as before', async () => {
+  type Result = { data: unknown; error: { code: string; message: string } | null };
+  const rpc = vi.fn(async (): Promise<Result> => ({ data: { rows: [], hash: 'f'.repeat(64) }, error: null }));
+  const admin = { rpc } as unknown as SupabaseClient;
+  expect(await reportBenchmarks(admin, id, id)).toEqual({ serialized: null, hash: 'f'.repeat(64) });
+  expect(rpc).toHaveBeenCalledWith('research_benchmark_rows', { a: id, s: id });
+  rpc.mockResolvedValueOnce({ data: null, error: { code: 'PGRST202', message: 'Could not find the function' } });
+  expect(await reportBenchmarks(admin, id, id)).toEqual({ serialized: null, hash: undefined });
+  rpc.mockResolvedValueOnce({ data: null, error: { code: '42501', message: 'RESEARCH_SCOPE_DENIED' } });
+  await expect(reportBenchmarks(admin, id, id)).rejects.toThrow('REPORT_UNAVAILABLE');
 });

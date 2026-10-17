@@ -17,6 +17,23 @@ import type { FrozenPaygRun } from '../bill2/service';
 
 type Fixture = { actor: string; user: SupabaseClient; admin: SupabaseClient; registration: string;
   mentorModel: string; flow: ReturnType<typeof makeWorkflow> };
+/**
+ * RT-4b (0268): a positioning report needs three qualified benchmark accounts of its session. The fixture writes them as
+ * the test superuser; the evidence-checked production path is covered by packages/db/tests/research-benchmarks.
+ */
+async function seedQualifiedBenchmarks(db: pg.Client, actor: string, sessionId: string) {
+  const execution = randomUUID();
+  await db.query(`insert into runtime_executions(id,actor_id,session_id,request_id,payload,history_revision,state)
+    values($1,$2,$3,gen_random_uuid(),'{}',0,'completed')`, [execution, actor, sessionId]);
+  for (const account of ['benchmark_a', 'benchmark_b', 'benchmark_c']) {
+    const fetch = (await db.query(`insert into research_account_fetches(actor_id,session_id,execution_id,platform,account,account_key,state)
+      values($1,$2::uuid,$3,'tiktok',$4::text,encode(sha256(convert_to($2::uuid::text||':'||$4::text,'utf8')),'hex'),'succeeded') returning id`,
+    [actor, sessionId, execution, account])).rows[0].id;
+    await db.query(`insert into research_benchmarks(fetch_id,actor_id,session_id,execution_id,platform,account,followers,
+      posts_analyzed,last_published_at,category,qualified,refs,operation_ids,missing,fetched_at)
+      values($1,$2,$3,$4,'tiktok',$5,50000,20,now(),'imitable',true,'{}','{}','{}',now())`, [fetch, actor, sessionId, execution, account]);
+  }
+}
 export function registerReportTests(db: pg.Client, fixture: () => Promise<Fixture>) {
   it('RUNTIME: REPORT-MODEL configuration window and column deny non-admin clients', async () => {
     const f = await fixture();
@@ -59,6 +76,7 @@ export function registerReportTests(db: pg.Client, fixture: () => Promise<Fixtur
         await artifacts.execute({ action: 'confirm', projectId: detail.projectId, roundId: detail.roundId,
           requestId: randomUUID(), stepId: step.id, expectedVersion: updated.version, expectedReviewVersion: updated.reviewVersion });
       }
+      await seedQualifiedBenchmarks(db, f.actor, detail.sessionId);
       await db.query("update profiles set membership_level=$2 where id=$1", [f.actor, scenario === 'free' ? 'free' : 'pro']);
       const override = scenario.includes('override'), reportModelId = override ? randomUUID() : f.mentorModel;
       const waiting = scenario.startsWith('waiting') || scenario === 'override_waiting';

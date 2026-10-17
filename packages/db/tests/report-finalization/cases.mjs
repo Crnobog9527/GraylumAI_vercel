@@ -6,7 +6,7 @@ import {erase} from '../content-erasure/cases.mjs';
 const hash=body=>createHash('sha256').update(body).digest('hex');
 const original='## One\nOriginal confirmed facts.\n## Two\nKnown limitations.';
 const edited='## One\nR5_MANUAL_PRIVATE_BODY\n## Two\nManually retained limitations.';
-export async function seed(db,completeness='complete',evidenceCount=0) {
+export async function seed(db,completeness='complete',evidenceCount=0,reportExtra={}) {
  const base=await fixture(db);
  const f=(await db.query('SELECT d7_test.artifacts($1) v',[base.actor])).rows[0].v;
  const project=randomUUID(),round=randomUUID(),confirmation=randomUUID(),execution=randomUUID();
@@ -15,7 +15,7 @@ export async function seed(db,completeness='complete',evidenceCount=0) {
  const workflow={id:'r5-fixture',version:1,kind:'document',steps:[{id:'s',title:'Facts',dependsOn:[],
   resources:[],minLength:1,maxLength:20000,requiresEvidence:false,requiredCapabilities:[],information:[]}],
   report:{id:'report',version:1,title:'Positioning',sections:[{title:'Facts',stepId:'s'}]},
-  planResources:['report.md'],reportGeneration:{resources:['report.md'],sections:['One','Two'],maxCharacters:12000}};
+  planResources:['report.md'],reportGeneration:{resources:['report.md'],sections:['One','Two'],maxCharacters:12000,...reportExtra}};
  const sourceIds=Array.from({length:evidenceCount},()=>randomUUID()).sort();
  const steps={s:{body:'CONFIRMED_FIELDS_UNCHANGED',version:1,reviewVersion:0,valid:true,
   confirmationId:confirmation,evidenceIds:sourceIds,provenanceIds:sourceIds,information:{}}};
