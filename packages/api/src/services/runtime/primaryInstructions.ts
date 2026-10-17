@@ -21,6 +21,7 @@ const REQUIRE_LATEST_INSTRUCTIONS=
 // The model judges the language itself (docs/ENGINEERING.md section 6: no keyword or regex intent rules).
 // Positioning mentor turns get it too: their host rules only say "Reply in the user's language".
 // Admission freezes REPLY_LANGUAGE into every new execution; contexts admitted before it replay byte-identical.
+// prompt-cache-v2 (mentor turns) marks the whole system message, so admission freezes it with this rule appended.
 export const REPLY_LANGUAGE='reply-language-v1';
 export const REPLY_LANGUAGE_INSTRUCTIONS=
   "\nReply language (host rule): the Skill is written in Chinese, but write replies, questions, card options and reports "+

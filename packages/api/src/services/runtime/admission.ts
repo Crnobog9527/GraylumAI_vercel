@@ -320,7 +320,6 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    }
    if(hostTurnContext)promptCache=freezeHostPromptCache({real:Boolean(policy.real),role:input.selection.kind,
     model:row.data.model_id,cacheWriteUsdPerMillion:policy.real?realModel(row.data).providerLimits?.cacheWriteUsdPerMillion:undefined,
-    // prompt-cache-v2 marks the whole system message, which the executor ends with the frozen reply-language rule.
     instructions:instructions+REPLY_LANGUAGE_INSTRUCTIONS,skillChars,stableAdditionalPrefix:policy.stableAdditionalInstructions,
     additionalInstructions:policy.additionalInstructions,mentor:mentorStream,
     historyMarker:!hostTurnContext.opening&&!requestsHistoricalComparison(input.input)&&
