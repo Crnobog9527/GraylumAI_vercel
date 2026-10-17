@@ -59,9 +59,15 @@ export async function admitLibraryReferences(admin:SupabaseClient,request:{refer
  return references;
 }
 
-/** read_source slots: library reads may use every remaining turn up to 0262's ceiling; other sources keep theirs. */
-export function readSourceSlots(references:LibraryReference[],primaryTurns:number,otherSlots:number){
- return references.length?Math.max(otherSlots,Math.min(LIBRARY_READS,primaryTurns-1)):otherSlots;
+/** read_source slots: library reads may use every remaining turn up to 0262's ceiling, but each read leaves its result in
+ * the dialogue, so only as many reads as still fit (`fits` gets the extra result bytes beyond the one already reserved)
+ * are allowed; one read always stays. Other sources keep their slots when no document is referenced. */
+export function readSourceSlots(references:LibraryReference[],primaryTurns:number,otherSlots:number,
+ fits:(extraResultBytes:number)=>boolean=()=>true){
+ if(!references.length)return otherSlots;
+ let slots=Math.max(otherSlots,Math.min(LIBRARY_READS,primaryTurns-1));
+ while(slots>1&&!fits((slots-1)*LIBRARY_RESULT_BYTES))slots--;
+ return slots;
 }
 
 /** A matched Skill's sizing: its instructions already carry LIBRARY_INSTRUCTIONS (withPrimaryAddenda), so only the

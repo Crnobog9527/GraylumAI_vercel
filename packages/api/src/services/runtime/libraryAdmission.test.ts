@@ -3,7 +3,7 @@ import {it,expect,vi} from 'vitest';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {runtimeAdmissionService,runtimeAdmission} from './admission';
 import {stagingProcedureError} from './stagingErrors';
-import {LIBRARY_AGENT_READ_KEY,LIBRARY_RESULT_BYTES,candidateToolBytes,libraryReserveBytes,normalizeLibraryReferences} from './libraryAdmission';
+import {LIBRARY_AGENT_READ_KEY,LIBRARY_RESULT_BYTES,candidateToolBytes,libraryReserveBytes,normalizeLibraryReferences,readSourceSlots} from './libraryAdmission';
 import {sourceToolBytes} from './sourceRuntimeTool';
 import {LIBRARY_INSTRUCTIONS,withPrimaryAddenda} from './primaryInstructions';
 
@@ -65,7 +65,7 @@ it('an old client without references and one sending [] freeze the same payload,
 });
 
 it('references freeze deduplicated in order with read_source and every remaining turn as read slots',async()=>{
- const h=harness({enabled:true});
+ const h=harness({enabled:true,inputLimit:100000});
  await h.service.prepare(message({references:[ref(2),ref(1,3),ref(2)]}));
  expect(h.frozen()?.libraryReferences).toEqual([{documentId:doc(2),version:1},{documentId:doc(1),version:3}]);
  // The stored request keeps exactly what the client sent, so a resend with other references is another message.
@@ -73,6 +73,13 @@ it('references freeze deduplicated in order with read_source and every remaining
  expect(h.frozen()?.tools).toEqual(['read_source']);
  expect(h.frozen()?.maxToolCalls).toBe(2);expect(h.frozen()?.maxTurns).toBe(3);
  expect(h.settingReads()).toBe(1);
+});
+
+it('admits only as many read slots as the model capacity still holds results for',async()=>{
+ // 32000 bytes of input capacity hold the required context and one maximal result, not two.
+ const h=harness({enabled:true});
+ await h.service.prepare(message({references:[ref(1)]}));
+ expect(h.frozen()?.maxToolCalls).toBe(1);
 });
 
 it.each([
@@ -131,4 +138,17 @@ it('a matched Skill counts the library tool text and reserve once; its instructi
  expect(candidateToolBytes(refs,['read_source'],true)).toBe(sourceToolBytes(['read_source'],true,true)+LIBRARY_RESULT_BYTES);
  expect(candidateToolBytes([],['read_source'],true)).toBe(sourceToolBytes(['read_source'],true));
  expect(libraryReserveBytes(refs,['read_source'],true)-candidateToolBytes(refs,['read_source'],true)).toBe(Buffer.byteLength(LIBRARY_INSTRUCTIONS));
+});
+
+// Review P1 (#1116): every permitted library read keeps its result in the dialogue, so the read count must be paid for
+// in the admission capacity check; otherwise a near-capacity turn is charged and then cannot build its next request.
+it('limits library read slots to the results that still fit, never below one read',()=>{
+ const refs=[{documentId:'00000000-0000-4000-8000-000000000001',version:1}];
+ const fitsTwo=(extra:number)=>extra<=LIBRARY_RESULT_BYTES;
+ expect(readSourceSlots(refs,10,0,()=>true)).toBe(8);
+ expect(readSourceSlots(refs,10,0,fitsTwo)).toBe(2);
+ expect(readSourceSlots(refs,10,0,()=>false)).toBe(1);
+ expect(readSourceSlots(refs,10,2,()=>false)).toBe(1);
+ expect(readSourceSlots(refs,3,0,()=>true)).toBe(2);
+ expect(readSourceSlots([],10,2,()=>false)).toBe(2);
 });

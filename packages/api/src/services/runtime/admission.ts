@@ -401,7 +401,9 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
      ...(historyRead?[READ_HISTORY_TOOL]:[])]):
      sourceTools,
     maxToolCalls:mentorStream?(opening||stepSummary&&!skillFile?0:1):
-     (searchAllowed?1:0)+readSourceSlots(libraryReferences,primaryTurns,workspaceContext?Math.min(2,primaryTurns-1):input.sources.length),
+     (searchAllowed?1:0)+readSourceSlots(libraryReferences,primaryTurns,workspaceContext?Math.min(2,primaryTurns-1):input.sources.length,
+     extra=>fitsCapacity(()=>requireCapacity(instructions+positioningRule,Boolean(skillFile),
+      runtimeScopeInput(input.input,policy.reportGeneration?undefined:session.scopeMaterial,hostTurnContext),historyRead,extra))),
     request,...(policy.answeredCard?{answeredCard:policy.answeredCard}:{}),...(revisionId?{moduleId,skillId,revisionId}:{}),sources:input.sources};
    // CHAT-NATIVE-OUTPUT: free chat and a chosen Skill stream their plain reply; the format and billing profile stay as they were.
    const context:typeof frozen&{textStream?:typeof PLAIN_TEXT_STREAM}=plainTextStreamAllowed(frozen)?{...frozen,textStream:PLAIN_TEXT_STREAM}:frozen;
