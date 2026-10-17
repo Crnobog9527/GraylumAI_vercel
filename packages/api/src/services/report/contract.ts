@@ -13,12 +13,16 @@ export const reportManifest = z.object({
   resources: z.array(z.string().min(1).max(240)).min(1).max(64),
   sections: z.array(label).min(1).max(64),
   maxCharacters: z.number().int().min(1).max(12000),
+  /** RESEARCH_TOOLS_PLAN §1.5: qualified benchmark accounts required before a report; the host never accepts fewer than 3. */
+  minQualifiedBenchmarks: z.number().int().min(1).max(12).optional(),
 }).strict();
 export const frozenReport = z.object({
   version: z.literal(1), projectId: z.string().uuid(), roundId: z.string().uuid(),
   evidenceIds: z.array(z.string().uuid()).max(2048).default([]),
   snapshotHash: hash, packageHash: hash, workflowHash: hash, templateHash: hash,
   sections: reportManifest.shape.sections, maxCharacters: reportManifest.shape.maxCharacters,
+  /** Hash of the benchmark rows in the instructions; SQL admission refuses when the current rows differ. */
+  benchmarkHash: hash.optional(),
 }).strict();
 export type FrozenReport = z.infer<typeof frozenReport>;
 export const reportStart = z.object({
@@ -38,6 +42,25 @@ export function confirmedReportFacts(snapshot: ArtifactSnapshot) {
   const serialized = JSON.stringify(facts);
   if (Buffer.byteLength(serialized) > REPORT_FACT_BYTES) throw new Error('REPORT_FACTS_TOO_LARGE');
   return { serialized, snapshotHash: createHash('sha256').update(serialized).digest('hex') };
+}
+
+const benchmarkNumber = z.number().nonnegative().finite().nullable();
+const benchmarkRow = z.object({
+  platform: z.string().regex(/^[a-z]{1,20}$/), account: z.string().min(1).max(200),
+  followers: benchmarkNumber, medianViews: benchmarkNumber, engagementRate: benchmarkNumber, postsPerWeek: benchmarkNumber,
+  lastPublishedAt: z.string().nullable(), postsAnalyzed: z.number().int().min(0).max(30),
+  category: z.enum(['head_reference', 'imitable', 'fast_rising']).nullable(), qualified: z.boolean(),
+  excluded: z.string().nullable(), missing: z.array(z.string()), fetchedAt: z.string(),
+}).strict();
+/**
+ * The host benchmark table (research_benchmark_rows, computed from fetched evidence only) as report facts (null when
+ * the session has none) and its hash, which the frozen report carries into SQL admission. The report reads benchmark
+ * numbers from here, never from model output (plan §1.4).
+ */
+export function benchmarkReportFacts(table: unknown): { serialized: string | null; hash: string } {
+  const parsed = z.object({ rows: z.array(benchmarkRow).max(30), hash }).strict().safeParse(table);
+  if (!parsed.success) throw new Error('REPORT_UNAVAILABLE');
+  return { serialized: parsed.data.rows.length ? JSON.stringify(parsed.data.rows) : null, hash: parsed.data.hash };
 }
 
 /** Structure validation only; never guesses user intent or supplies missing sections. */

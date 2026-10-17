@@ -8,6 +8,8 @@ import { Button } from '@/components/ui/button';
 import {
   Sheet,
   SheetContent,
+  SheetDescription,
+  SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet';
 import { AppHeader } from '@/components/layout/AppHeader';
@@ -204,6 +206,8 @@ function ProfilePageContent() {
                 className="w-[88vw] max-w-80 p-0 pt-6"
                 style={{ background: 'var(--bg-secondary)', borderColor: 'var(--border-primary)' }}
               >
+                <SheetTitle className="sr-only">个人中心菜单</SheetTitle>
+                <SheetDescription className="sr-only">选择要查看的个人中心栏目</SheetDescription>
                 <ProfileSidebar
                   mobile
                   activeTab={activeTab}

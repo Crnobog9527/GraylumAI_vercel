@@ -2,11 +2,13 @@
 import type Stripe from 'stripe';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-const mocks = vi.hoisted(() => ({ scope: vi.fn(), prepare: vi.fn(), build: vi.fn(), dispatch: vi.fn() }));
+const mocks = vi.hoisted(() => ({ scope: vi.fn(), prepare: vi.fn(), build: vi.fn(), dispatch: vi.fn(), settle: vi.fn() }));
+vi.mock('./methodOrderSettle', () => ({ settleBuyerOrders: mocks.settle }));
 vi.mock('./methodPurchase', () => ({ prepareMethodPurchase: mocks.prepare }));
 vi.mock('./stripeCheckoutPersistence', () => ({ resolveStripeScope: mocks.scope }));
 vi.mock('./stripeCheckoutIntent', () => ({ buildStripeCheckoutRequest: mocks.build, dispatchStripeCheckoutIntent: mocks.dispatch }));
 import { createStripeCardCheckout } from './stripeMethodCheckout';
+import { MethodPurchaseRejected } from './methodPurchaseError';
 
 const id = '00000000-0000-4000-8000-000000000001';
 const plan = '00000000-0000-4000-8000-000000000002';
@@ -36,6 +38,7 @@ describe('PAY-STRIPE-MP card checkout adapter', () => {
     mocks.prepare.mockResolvedValue({ id, item_id: plan, price_ref_id: id, purchase_snapshot: snapshot('20.00') });
     mocks.build.mockReturnValue({ proposed: true });
     mocks.dispatch.mockResolvedValue({ id: 'cs_1', status: 'open', url: 'https://checkout.stripe.com/c/pay/test' });
+    mocks.settle.mockResolvedValue(false);
   });
   it('applies the plan\'s current first-month coupon; MP only for the international card', async () => {
     for (const method of ['card', 'card_cn'] as const) {
@@ -103,5 +106,42 @@ describe('PAY-STRIPE-MP card checkout adapter', () => {
       bound.push(await createStripeCardCheckout(f.input).then(() => true, () => false));
     }
     expect(bound).toEqual([true, false, true, false, false]);
+  });
+  it('#961: another plan\'s order that can no longer be paid is closed (Stripe read first), then admission runs again', async () => {
+    const pending = new MethodPurchaseRejected('PAY_WAFFO_PURCHASE_PENDING');
+    const f = fixture('card');
+    mocks.prepare.mockRejectedValueOnce(pending);
+    mocks.settle.mockResolvedValueOnce(true);
+    await expect(createStripeCardCheckout(f.input)).resolves.toMatchObject({ state: 'open' });
+    expect(mocks.settle).toHaveBeenCalledWith(f.input.db, f.input.stripe, { merchant: 'fixture', mode: 'test' }, id);
+    expect(mocks.prepare).toHaveBeenCalledTimes(2);
+    // Still payable, paid, unreadable at Stripe, or claimed meanwhile by a concurrent retry: the buyer keeps the answer.
+    mocks.prepare.mockReset().mockRejectedValue(pending);
+    await expect(createStripeCardCheckout(fixture('card').input)).rejects.toBe(pending);
+    expect(mocks.prepare).toHaveBeenCalledTimes(1);
+    mocks.settle.mockRejectedValueOnce(new Error('PAY_COMMON_CHECKOUT_RECONCILIATION_REQUIRED'));
+    await expect(createStripeCardCheckout(fixture('card').input)).rejects.toBe(pending);
+    // Other refusals never trigger a close.
+    mocks.prepare.mockReset().mockRejectedValue(new MethodPurchaseRejected('PAY_WAFFO_FOUNDER_SOLD_OUT'));
+    mocks.settle.mockClear();
+    await expect(createStripeCardCheckout(fixture('card').input)).rejects.toThrow('PAY_WAFFO_FOUNDER_SOLD_OUT');
+    expect(mocks.settle).not.toHaveBeenCalled();
+  });
+  it('#961: a failure after admission and before the claim releases the order instead of blocking other plans', async () => {
+    const f = fixture('card');
+    const chain = (f.input.db.from as unknown as () => { maybeSingle: ReturnType<typeof vi.fn> })();
+    chain.maybeSingle.mockReset().mockResolvedValueOnce({ data: null, error: null });
+    await expect(createStripeCardCheckout(f.input)).rejects.toThrow('PAY_WAFFO_PRICE_UNAVAILABLE');
+    expect(f.rpc).toHaveBeenCalledTimes(1);
+    expect(f.rpc).toHaveBeenCalledWith('pay_waffo_abort_before_dispatch', { p_user: id, p_order: id, p_merchant: 'fixture',
+      p_expected: null });
+    // A dispatched order recovered by a retry is never released here: its session may exist at Stripe.
+    mocks.prepare.mockResolvedValue({ id, item_id: plan, price_ref_id: id, purchase_snapshot: snapshot('20.00'),
+      method_dispatched_at: '2026-10-13T00:00:00Z', checkout_request: { providerRequest: { expires_at: 9999999999 } } });
+    const recovered = fixture('card');
+    const again = (recovered.input.db.from as unknown as () => { maybeSingle: ReturnType<typeof vi.fn> })();
+    again.maybeSingle.mockReset().mockResolvedValueOnce({ data: null, error: { message: 'read failed' } });
+    await expect(createStripeCardCheckout(recovered.input)).rejects.toThrow('PAY_WAFFO_PRICE_UNAVAILABLE');
+    expect(recovered.rpc).not.toHaveBeenCalled();
   });
 });

@@ -9,6 +9,9 @@ import {
   startSchema,
   webCommandSchema,
 } from "../services/artifacts/workbench";
+const LEGACY_READ_ONLY = "ARTIFACT_LEGACY_READ_ONLY";
+export const legacyReadOnlyMessage =
+  "旧工作台的项目已改为只读：已有内容可以查看，不能再新建或修改。新的内容创作请在对话里进行。";
 const scope = z
   .object({ projectId: z.string().uuid(), roundId: z.string().uuid() })
   .strict();
@@ -62,6 +65,7 @@ const procedure = protectedProcedure.use(async ({ ctx, next }) => {
         message: "操作未完成，请重新加载项目状态。",
       },
       ARTIFACT_DENIED: { code: "FORBIDDEN", message: "无权访问或项目不可用。" },
+      [LEGACY_READ_ONLY]: { code: "FORBIDDEN", message: legacyReadOnlyMessage },
       ARTIFACT_EVIDENCE_UNAVAILABLE: {
         code: "FORBIDDEN",
         message: "来源已受限，报告不可导出。",
@@ -82,6 +86,8 @@ const procedure = protectedProcedure.use(async ({ ctx, next }) => {
 });
 // LEGACY-CLOSE: the old /workbench page and its generation, search, reuse, project, round,
 // report and export procedures are gone. Positioning, runtime and the module catalog use these four.
+// Old workbench projects are read-only: read still works, start and execute refuse them.
+// New positioning drafts start through opc.start; other content work happens in conversations.
 export const workbenchRouter = router({
   catalog: procedure.input(z.object({moduleId:z.string().uuid()}).strict().optional()).query(({ ctx,input }) => ctx.workbench.catalog(input?.moduleId)),
   read: procedure
@@ -89,10 +95,16 @@ export const workbenchRouter = router({
     .query(({ ctx, input }) =>
       ctx.workbench.read(input.projectId, input.roundId),
     ),
+  // Every project or round this opens is an old workbench one; no page calls it any more.
   start: procedure
     .input(startSchema)
-    .mutation(({ ctx, input }) => ctx.workbench.start(input)),
+    .mutation((): never => {
+      throw new Error(LEGACY_READ_ONLY);
+    }),
   execute: procedure
     .input(webCommandSchema)
-    .mutation(({ ctx, input }) => ctx.workbench.execute(input)),
+    .mutation(async ({ ctx, input }) => {
+      if (await ctx.workbench.isLegacyProject(input.projectId)) throw new Error(LEGACY_READ_ONLY);
+      return ctx.workbench.execute(input);
+    }),
 });

@@ -19,6 +19,8 @@ export type SandboxRunOptions = {
   signal?: AbortSignal;
   /** Test hook: a different relay script, still allowed only by its own hash. */
   relayScript?: string;
+  /** LIB-2d recognition sandbox only: CSP also allows compiling WebAssembly (still no network). */
+  allowWasm?: boolean;
 };
 
 function randomToken(): string {
@@ -44,7 +46,7 @@ export async function runSandboxedWorker(options: SandboxRunOptions): Promise<un
   const frame = document.createElement('iframe');
   for (const [name, value] of Object.entries(SANDBOX_FRAME_ATTRIBUTES)) frame.setAttribute(name, value);
   frame.style.display = 'none';
-  frame.srcdoc = buildSandboxSrcdoc(token, hash, script);
+  frame.srcdoc = buildSandboxSrcdoc(token, hash, script, { wasm: options.allowWasm === true });
 
   return new Promise<unknown>((resolve, reject) => {
     let loads = 0;

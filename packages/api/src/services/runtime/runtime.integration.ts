@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import {allowTestCalls} from '../__tests__/fixtures/runtimeGates';
+import {allowTestCalls,testPrimaryModel} from '../__tests__/fixtures/runtimeGates';
 import { pricingConfig } from '../__tests__/fixtures/runtimePricing';
 import { configuredReasoning } from '../__tests__/fixtures/runtimeReasoning';
 import { beforeAll, afterAll, it, expect, vi } from 'vitest';
@@ -622,6 +622,8 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each([10000,1050000])('RU
  const call={multiplier:'1',modelId:model,provider:'openrouter',account:'synthetic-account',model:'test/admission',protocol:'openrouter-chat-v1',upperUsd,inputLimit:8000,outputLimit,automaticRetry:false,hiddenTools:false,lookupSupported:true,providerLimits:{providerSlug:'synthetic',contextTokens,promptUsdPerMillion:contextTokens===1050000?'0.4':'2',completionUsdPerMillion:contextTokens===1050000?'1.8':'0',requestUsd:'0'}};
  await db.query("insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,0.9,1,now()+interval '2 hours')",[windowId,[actor],JSON.stringify([call])]);
  const env={V3_RUNTIME_STAGING_ENABLED:'true',VERCEL:'1',VERCEL_PROJECT_PRODUCTION_URL:'auth-staging.graylum.com',VERCEL_GIT_COMMIT_REF:'staging',VERCEL_GIT_REPO_OWNER:'Crnobog9527',VERCEL_GIT_REPO_SLUG:'GraylumAI_vercel',V3_RUNTIME_STAGING_PROJECT_ID:'synthetic-project',VERCEL_PROJECT_ID:'synthetic-project',NEXT_PUBLIC_SUPABASE_URL:'https://synthetic.supabase.co',V3_RUNTIME_STAGING_DATABASE_HOST:'synthetic.supabase.co',V3_RUNTIME_STAGING_WINDOW_ID:windowId};
+ // UI-MODEL: real free chat runs on the administrator's primary model (admission settings are mocked below).
+ testPrimaryModel.id=model;
  const real=await loadStagingPolicy(admin,actor,env);
  const admission=runtimeAdmissionService(user,admin,{real,account:'unused-local',costPerCall:'999',creditsPerUsd:'999',multiplier:'999',maxCalls:1,maxOutputTokens:outputLimit,inputBytes:8000,historyItems:0,searchEnabled:false});
  const s=await admission.start(randomUUID(),{kind:'positioning_draft'});
@@ -645,6 +647,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each([10000,1050000])('RU
   expect((await db.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(1000);
  }finally{for(const [key,value] of Object.entries(previous)){if(value===undefined)delete process.env[key];else process.env[key]=value;}}
  await user.auth.signOut();await expect(admission.prepare(request)).rejects.toThrow('AUTH_REQUIRED');
+ testPrimaryModel.id=undefined;
 },30000);
 it('RUNTIME: atomic draft/session/start replay, admission and SDK append identities',async()=>{
  const f=await fixture();expect(await rpc('runtime_start',{p_actor_id:f.actorId,p_request_id:f.requestId,p_payload:f.start})).toEqual(f.s);
@@ -1599,6 +1602,45 @@ it('RUNTIME: lost dispatch commit response preserves unknown identity without ne
  }finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
 });
 
+it('RUNTIME: only a positioning workflow opens a guided step workspace through opc.start or workbench.start',async()=>{
+ // CONTENT-CONVERSATION-DRIVEN G (Owner 2026-10-13): every other Skill runs in free chat; its steps are a work guide.
+ const password='Local-'+randomUUID()+'!',email=randomUUID()+'@example.test';
+ const created=await admin.auth.admin.createUser({email,password,email_confirm:true});if(created.error)throw created.error;
+ const actor=created.data.user.id;await db.query("insert into profiles(id,email,credits,role) values($1,$2,500,'admin')",[actor,email]);
+ const user=createClient(process.env.V3_LOCAL_REST!,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,{auth:{persistSession:false}});
+ const login=await user.auth.signInWithPassword({email,password});if(login.error)throw login.error;
+ async function register(kind:'positioning'|'plain'|'unmapped'){
+  const pack=makePackage(),moduleId=randomUUID(),registration='guided-'+kind+'-'+randomUUID(),flow=makeWorkflow(2);
+  if(kind!=='plain')flow.steps.forEach((step,i)=>{step.information=[{id:'field'+i,title:'Field '+i,required:false,
+   ...(kind==='positioning'&&i===0?{profileKey:'audience'}:{})}];});
+  await db.query('insert into skills(id,skill_key,created_by) values($1,$2,$3)',[pack.id,registration,actor]);
+  await db.query('insert into modules(id,title,skill_id,active) values($1,$2,$3,true)',[moduleId,registration,pack.id]);
+  await publishSkillPackage(admin,actor,pack);
+  await db.query('insert into artifact_workflows(id,module_id,skill_id,revision_id,workflow,label,enabled) values($1,$2,$3,$4,$5,$6,true)',
+   [registration,moduleId,pack.id,pack.revisionId,flow,registration]);
+  return registration;
+ }
+ const service=workbenchService(user,admin);
+ const start=(registration:string)=>{const id=randomUUID();return service.start({projectId:id,roundId:id,requestId:id,registration,account:null});};
+ const draft=(registration:string)=>rpc('opc_start_b1',{p_actor_id:actor,p_request_id:randomUUID(),p_registration:registration,p_mode:'manual'});
+ const projects=async()=>(await db.query('select count(*)::int n from artifact_projects where actor_id=$1',[actor])).rows[0].n;
+ for(const kind of ['plain','unmapped'] as const){
+  const registration=await register(kind);
+  await expect(draft(registration)).rejects.toThrow('OPC_METHOD_INFORMATION_REQUIRED');
+  await expect(start(registration)).rejects.toThrow('ARTIFACT_INVALID_WORKFLOW');
+ }
+ expect(await projects()).toBe(0);
+ const positioning=await register('positioning');
+ const opened=await draft(positioning);
+ expect(opened.draftId).toEqual(expect.any(String));
+ await expect(start(positioning)).resolves.toEqual({roundId:expect.any(String)});
+ expect(await projects()).toBe(2);
+ // LEGACY-CLOSE read-only gate: the workbench router refuses writes to the old-workbench project, not to the draft.
+ const old=(await db.query("select id from artifact_projects where actor_id=$1 and work_kind='legacy'",[actor])).rows[0].id;
+ expect(await service.isLegacyProject(old)).toBe(true);
+ expect(await service.isLegacyProject(opened.projectId)).toBe(false);
+});
+
 it('RUNTIME: real published source revocation excludes derived Session history without deleting originals',async()=>{
  const password='Local-'+randomUUID()+'!',email=randomUUID()+'@example.test';
  const created=await admin.auth.admin.createUser({email,password,email_confirm:true});if(created.error)throw created.error;
@@ -1607,6 +1649,8 @@ it('RUNTIME: real published source revocation excludes derived Session history w
  const login=await user.auth.signInWithPassword({email,password});if(login.error)throw login.error;
  async function workflow(social:boolean){
   const pack=makePackage(),moduleId=randomUUID(),registration='runtime-source-'+randomUUID(),flow=makeWorkflow(social?6:1,social);
+  // Only a positioning workflow opens a workbench round (CONTENT-CONVERSATION-DRIVEN G): the started source declares its questions.
+  if(social)flow.steps.forEach((step,i)=>{step.information=[{id:'field'+i,title:'Field '+i,required:false,...(i===0?{profileKey:'audience'}:{})}];});
   await db.query('insert into skills(id,skill_key,created_by) values($1,$2,$3)',[pack.id,registration,actor]);
   await db.query('insert into modules(id,title,skill_id,active) values($1,$2,$3,true)',[moduleId,registration,pack.id]);
   await publishSkillPackage(admin,actor,pack);

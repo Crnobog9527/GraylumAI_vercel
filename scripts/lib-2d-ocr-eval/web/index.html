@@ -42,9 +42,9 @@ window.harness = {
     const dict = await bytes(tier === 'tiny' ? '/a/ppocrv6_tiny_dict.txt' : '/a/ppocrv6_dict.txt');
     return this.init({ wasm, det, rec, dict, ...(extra || {}) }, [wasm, det, rec, dict]);
   },
-  async ocr(id, deskew, columns) {
+  async ocr(id, deskew, columns, orient) {
     const b = await bytes('/set/' + id + '.jpg');
-    frame.contentWindow.postMessage({ type: 'ocr', id, bytes: b, deskew: !!deskew, columns: !!columns, transfer: [b] }, '*', [b]);
+    frame.contentWindow.postMessage({ type: 'ocr', id, bytes: b, deskew: !!deskew, columns: !!columns, orient: !!orient, transfer: [b] }, '*', [b]);
     return wait((m) => (m.type === 'result' || m.type === 'error') && (m.id === id || m.type === 'error'));
   },
   async probe(base) {
