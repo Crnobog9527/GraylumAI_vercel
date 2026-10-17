@@ -89,8 +89,6 @@ BEGIN
   IF tool_only OR m.id IS NULL OR entry->>'protocol' IS DISTINCT FROM 'openrouter-chat-v1' OR entry->>'provider' IS DISTINCT FROM 'openrouter'
   OR NOT EXISTS(SELECT 1 FROM jsonb_array_elements(cfg->'profiles') prof WHERE prof->>'model'=entry->>'model'
     AND prof->>'endpointTag'=entry->'providerLimits'->>'providerSlug')
-  OR coalesce(btrim(m.api_key,E' \t\r\n'),'')=''
-  OR entry->>'account' IS DISTINCT FROM 'openrouter-key:'||encode(sha256(convert_to(btrim(m.api_key,E' \t\r\n'),'UTF8')),'hex')
   THEN RAISE EXCEPTION 'RUNTIME_PRODUCTION_MODEL_DENIED' USING ERRCODE='42501';END IF;
   IF p_prepare THEN
    expected:=coalesce(m.price_multiplier,(dm#>>'{}')::numeric);

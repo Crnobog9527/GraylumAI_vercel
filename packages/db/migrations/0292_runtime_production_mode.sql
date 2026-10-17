@@ -23,7 +23,7 @@ $$;
 
 -- The production counterpart of runtime_test_window_allowed. p_prepare adds the checks that hold only when the run
 -- is created (profile version, configured q/m, stored price snapshot); later claims and dispatches recheck the host,
--- the switch, each route's profile and the credential, so revoking a route or rotating a key stops new calls.
+-- the switch and each route's profile; the credential (the platform Vault key, OR-1) is checked at dispatch by the transport.
 CREATE OR REPLACE FUNCTION public.runtime_production_allowed(a uuid,p jsonb,p_prepare boolean) RETURNS void
 LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
 DECLARE cfg jsonb;entry jsonb;q jsonb;dm jsonb;m ai_models;expected numeric;
@@ -52,8 +52,6 @@ BEGIN
   IF m.id IS NULL OR entry->>'protocol' IS DISTINCT FROM 'openrouter-chat-v1' OR entry->>'provider' IS DISTINCT FROM 'openrouter'
   OR NOT EXISTS(SELECT 1 FROM jsonb_array_elements(cfg->'profiles') prof WHERE prof->>'model'=entry->>'model'
     AND prof->>'endpointTag'=entry->'providerLimits'->>'providerSlug')
-  OR coalesce(btrim(m.api_key,E' \t\r\n'),'')=''
-  OR entry->>'account' IS DISTINCT FROM 'openrouter-key:'||encode(sha256(convert_to(btrim(m.api_key,E' \t\r\n'),'UTF8')),'hex')
   THEN RAISE EXCEPTION 'RUNTIME_PRODUCTION_MODEL_DENIED' USING ERRCODE='42501';END IF;
   IF p_prepare THEN
    expected:=coalesce(m.price_multiplier,(dm#>>'{}')::numeric);

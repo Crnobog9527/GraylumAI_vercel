@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { createHash } from 'node:crypto';
+import { openRouterAccount, readOpenRouterKey } from '../models/openRouterKey';
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { logger } from '../../lib/logger';
@@ -50,8 +50,7 @@ async function readSettings(admin: SupabaseClient): Promise<Settings> {
   return parsed.data;
 }
 
-type ModelRow = { id: string; model_id: string; provider: string | null; api_endpoint: string | null; api_key: string | null;
-  config: unknown; updated_at: string };
+type ModelRow = { id: string; model_id: string; provider: string | null; api_endpoint: string | null; config: unknown; updated_at: string };
 type CallPolicy = StagingPolicy['callPolicies'][number];
 
 function deriveLimits(row: Parameters<typeof pricingEndpoint>[0], snapshot: Parameters<typeof pricingEndpoint>[1],
@@ -89,7 +88,10 @@ export async function loadProductionPolicy(admin: SupabaseClient, actorId: strin
   // RUNTIME_PROD_PLAN 2.1: production q and m are explicit rows, never the code fallback.
   if (unitSettings.source.creditsPerUsd !== 'configured' || unitSettings.source.defaultMultiplier !== 'configured')
     throw new StagingAccessError('RUNTIME_BILLING_UNIT_UNAVAILABLE');
-  const rows = await admin.from('ai_models').select('id,model_id,provider,api_endpoint,api_key,config,updated_at')
+  // ADMIN-SECRETS OR-1: the one OpenRouter key lives in the platform Vault slot, not in the model rows. Settings pages
+  // (offline) may use a cached read; anything that authorizes a paid call reads it fresh.
+  const key = await readOpenRouterKey(admin, { fresh: !options.offline }).catch(() => undefined);
+  const rows = await admin.from('ai_models').select('id,model_id,provider,api_endpoint,config,updated_at')
     .in('model_id', config.profiles.map(p => p.model)).eq('is_active', 'true');
   if (rows.error) stagingRpcFailure(rows.error);
   const candidates: Array<{ row: ModelRow; profile: Settings['profiles'][number] }> = [];
@@ -101,13 +103,12 @@ export async function loadProductionPolicy(admin: SupabaseClient, actorId: strin
   }
   const built = await Promise.all(candidates.map(async ({ row, profile }): Promise<Omit<CallPolicy, 'multiplier'> | undefined> => {
     try {
-      const key = row.api_key?.trim();
       if (!key || !isOpenRouterEndpoint(resolveOpenAICompatibleEndpoint(row.provider, row.api_endpoint) ?? ''))
         throw new StagingAccessError('RUNTIME_STAGING_MODEL_DENIED');
       const state = options.offline ? storedState(row, (deps.now ?? Date.now)())
         : (await readPricingStates(admin, [{ modelId: row.id, model: row.model_id }], deps)).get(row.id)!;
       const providerLimits = deriveLimits(state.row, state.snapshot, row.model_id, profile.endpointTag);
-      return { modelId: row.id, provider: 'openrouter', account: 'openrouter-key:' + createHash('sha256').update(key).digest('hex'),
+      return { modelId: row.id, provider: 'openrouter', account: openRouterAccount(key),
         model: row.model_id, protocol: 'openrouter-chat-v1', providerLimits,
         upperUsd: openRouterBound(providerLimits, profile.outputLimit).upperUsd, inputLimit: PAYG_PROFILE_MAX_BYTES,
         outputLimit: profile.outputLimit, automaticRetry: false, hiddenTools: false, lookupSupported: true };

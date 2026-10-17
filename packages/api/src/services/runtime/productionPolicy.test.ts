@@ -8,6 +8,9 @@ import { loadProductionPolicy, readPaygProductionPolicies, PAYG_PRODUCTION_SETTI
 import { parseStagingPolicy } from './stagingPolicy';
 
 vi.mock('../../lib/logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
+const key = vi.hoisted(() => ({ value: 'platform-key' as string | undefined }));
+vi.mock('../models/openRouterKey', async original => ({ ...(await original<typeof import('../models/openRouterKey')>()),
+  readOpenRouterKey: async () => key.value }));
 vi.mock('../models/openRouterCatalog', () => ({ readOpenRouterPricing: vi.fn(() => { throw new Error('offline'); }) }));
 
 const actor = '30000000-0000-4000-8000-000000000003';
@@ -42,7 +45,7 @@ function fixture() {
     { key: 'billing_credits_per_usd', value: 100 }, { key: 'billing_token_price_multiplier', value: 6 },
   ];
   const models: Row[] = MODELS.map(m => ({ id: m.id, model_id: m.model, provider: 'openrouter', is_active: 'true',
-    api_endpoint: 'https://openrouter.ai/api/v1/chat/completions', api_key: `key-${m.id}`, price_multiplier: null,
+    api_endpoint: 'https://openrouter.ai/api/v1/chat/completions', price_multiplier: null,
     updated_at: '2026-10-01T00:00:00Z', config: pricingConfig(m.model, m.tag, '0.000003', '0.000015') }));
   const rpc = vi.fn<(name: string, args: unknown) => Promise<{ data: unknown; error: unknown }>>(
     async () => ({ data: true, error: null }));
@@ -71,7 +74,7 @@ it('derives every quote from the stored price snapshot and the configured q and 
     const m = MODELS.find(x => x.id === call.modelId)!;
     expect(call).toMatchObject({ provider: 'openrouter', protocol: 'openrouter-chat-v1', model: m.model, multiplier: '6',
       inputLimit: 196608, outputLimit: 8192, automaticRetry: false, hiddenTools: false, lookupSupported: true,
-      account: 'openrouter-key:' + createHash('sha256').update(`key-${m.id}`).digest('hex') });
+      account: 'openrouter-key:' + createHash('sha256').update('platform-key').digest('hex') });
     expect(call.providerLimits).toMatchObject({ providerSlug: m.tag, contextTokens: 1050000 });
     expect(call.upperUsd).toBe(openRouterBound(call.providerLimits!, 8192).upperUsd);
   }
@@ -126,8 +129,12 @@ it('leaves out a model whose key, route or price is unusable and fails only when
   expect((await load(f)).callPolicies.map(c => c.modelId)).toEqual([MODELS[0].id]);
   const g = fixture();
   g.models[0].config = pricingConfig(MODELS[0].model, 'another/route');
-  g.models[1].api_key = '';
+  g.models[1].api_endpoint = 'https://api.openai.com/v1/chat/completions';
   await expect(load(g)).rejects.toThrow('RUNTIME_PRODUCTION_CONFIG_INVALID');
+  // The one platform key (Vault, OR-1) is not filled in: no model can be dispatched.
+  key.value = undefined;
+  await expect(load(fixture())).rejects.toThrow('RUNTIME_PRODUCTION_CONFIG_INVALID');
+  key.value = 'platform-key';
 });
 
 it('admission reads the production profiles without a window or calendar expiry', async () => {
