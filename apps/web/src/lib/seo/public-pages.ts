@@ -24,6 +24,7 @@ export const PUBLIC_PAGES: PublicPage[] = [
   { path: '/', locale: 'zh-Hans', lastModified: '2026-10-13' },
   { path: '/landing/pricing', locale: 'zh-Hans', lastModified: '2026-10-12' },
   { path: '/tutorials', locale: 'zh-Hans', lastModified: '2026-10-12' },
+  { path: '/refund', locale: 'zh-Hans', lastModified: '2026-10-17' },
   { path: '/faq', locale: 'zh-Hans', lastModified: '2026-10-12' },
   { path: '/contact', locale: 'zh-Hans', lastModified: '2026-10-12' },
   { path: '/terms', locale: 'zh-Hans', lastModified: '2026-10-12' },
