@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { joinReportBody, reportBodyText, splitReportBody } from '../../shared/reportData';
 import { z } from 'zod';
 import type { StepValues } from './hostChecks';
 
@@ -17,7 +18,9 @@ export type AdoptionSection = { section: string; changed: boolean; wordingOnly: 
 /** The whole heading line is captured, so a kept section is rebuilt byte for byte (tabs, spaces, CRLF; #962 review). */
 const HEADING = /^(##[ \t]+[^\r\n]+\r?)$/m;
 /** Raw parts as written: the text before the first heading, then each section's heading line and raw content. */
-function rawSections(body: string) {
+/** The report text's sections; a trailing strategy data block (REPORT-VISUAL) is never part of a section. */
+function rawSections(raw: string) {
+  const body = reportBodyText(raw);
   const parts = body.split(HEADING);
   const sections = new Map<string, { heading: string; content: string }>();
   for (let i = 1; i < parts.length; i += 2) {
@@ -73,12 +76,16 @@ export function applyChoices(input: { originalBody: string; revisedBody: string;
   }
   const adopted = changed.filter(section => choice.get(section.section)!.use === 'revised').map(section => section.section);
   const kept = input.plan.filter(section => !adopted.includes(section.section)).map(section => section.section);
-  const original = rawSections(input.originalBody), revised = rawSections(input.revisedBody).sections;
+  // REPORT-VISUAL: sections and the limit are the report text's; the original strategy data block goes back after it
+  // unchanged (a review revision only changes text; the version keeps the original data, 0300).
+  const originalParts = splitReportBody(input.originalBody);
+  const original = rawSections(originalParts.text), revised = rawSections(input.revisedBody).sections;
   let body = original.preamble;
   for (const [title, part] of original.sections) {
     body += adopted.includes(title) ? revised.get(title)!.heading + revised.get(title)!.content : part.heading + part.content;
   }
   if (input.maxCharacters !== undefined && [...body].length > input.maxCharacters) throw new Error('FUSION_ADOPTION_TOO_LONG');
+  body = joinReportBody(body, originalParts.block);
   const fields: StepValues = {};
   for (const section of input.plan.filter(s => adopted.includes(s.section))) {
     for (const field of section.fields) if (field.after !== field.before) (fields[field.stepId] ??= {})[field.fieldId] = field.after;
