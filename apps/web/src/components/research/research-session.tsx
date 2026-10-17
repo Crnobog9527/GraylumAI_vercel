@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { trpc } from "@/trpc/client";
 import { BenchmarkTable } from "./benchmark-table";
 import { CandidateCardView } from "./candidate-card";
@@ -26,13 +26,9 @@ export function useResearchCalls(sessionId: string | null | undefined) {
   const [calls, setCalls] = useState<CallsByExecution>(() => new Map());
   const observe = useCallback((executionId: string, event: { type: string }) => {
     if (!isResearchEvent(event)) return;
-    if (event.type === "research_call") {
-      setCalls(current => withResearchCall(current, executionId, event));
-      // A finished account fetch may have added or changed a benchmark row.
-      if (sessionId && event.state !== "running" && event.toolName === "benchmark_fetch") {
-        void utils.research.benchmarks.invalidate({ sessionId });
-      }
-    } else if (sessionId) void utils.research.cards.invalidate({ sessionId });
+    // Benchmark rows are written after a call's final event; the panel re-reads them once the turn is saved.
+    if (event.type === "research_call") setCalls(current => withResearchCall(current, executionId, event));
+    else if (sessionId) void utils.research.cards.invalidate({ sessionId });
   }, [sessionId, utils]);
   const of = useCallback((executionId: string) => calls.get(executionId) ?? NO_CALLS, [calls]);
   return { observe, of };
@@ -90,8 +86,20 @@ export function ResearchSessionBenchmarks({ sessionId }: { sessionId: string }) 
   );
 }
 
-/** Cards, then the benchmark table, under the positioning conversation. */
-export function ResearchSessionPanel(props: Parameters<typeof ResearchSessionCards>[0]) {
+/**
+ * Cards, then the benchmark table, under the positioning conversation. `settledTurns` counts the session's saved
+ * mentor turns: each new one re-reads both, since a turn's account fetches commit their rows only as it finishes.
+ */
+export function ResearchSessionPanel({ settledTurns, ...props }: Parameters<typeof ResearchSessionCards>[0] & { settledTurns: number }) {
+  const utils = trpc.useUtils();
+  const { sessionId } = props;
+  const seen = useRef(settledTurns);
+  useEffect(() => {
+    if (seen.current === settledTurns) return;
+    seen.current = settledTurns;
+    void utils.research.cards.invalidate({ sessionId });
+    void utils.research.benchmarks.invalidate({ sessionId });
+  }, [settledTurns, sessionId, utils]);
   return (
     <>
       <ResearchSessionCards {...props}/>

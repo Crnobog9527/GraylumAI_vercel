@@ -42,10 +42,12 @@ beforeAll(async () => {
           window.sent=[];
           function Conversation(){
             const research=useResearchCalls(${JSON.stringify(SESSION)});
+            const [settled,setSettled]=React.useState(0);
             window.emit=event=>research.observe('exec-1',event);
+            window.settle=()=>setSettled(value=>value+1);
             return e('main',{style:{maxWidth:760,margin:'0 auto',padding:16,display:'grid',gap:16}},
               e(ResearchCallList,{calls:research.of('exec-1')}),
-              e(ResearchSessionPanel,{sessionId:${JSON.stringify(SESSION)},disabled:false,
+              e(ResearchSessionPanel,{sessionId:${JSON.stringify(SESSION)},disabled:false,settledTurns:settled,
                 onConfirmed:confirmation=>window.sent.push(researchConfirmedInput(confirmation))}));
           }
           createRoot(document.getElementById('root')).render(e(trpc.Provider,{client:c,queryClient},
@@ -134,8 +136,7 @@ for (const width of [375, 1440]) {
       await ui(table).toContainText("取数时间：");
       expect(await table.getByRole("button", { name: /刷新/ }).count()).toBe(0);
 
-      // Live search rows of a turn: running, then settled with the user's credits; a finished account fetch
-      // re-reads the table.
+      // Live search rows of a turn: running, then settled with the user's credits.
       const before = calls.filter(call => call.path.endsWith("/research.benchmarks")).length;
       const call = { type: "research_call", callId: "call-1", toolName: "benchmark_fetch", args: {}, query: "sample_1",
         platform: "douyin", dataKind: "account_posts" };
@@ -146,7 +147,13 @@ for (const width of [375, 1440]) {
         { ...call, state: "succeeded", evidenceId: "ev1", credits: "0.30" });
       await ui(rows).toContainText("成功");
       await ui(rows).toContainText("扣 0.3 积分");
-      await ui.poll(() => calls.filter(item => item.path.endsWith("/research.benchmarks")).length).toBeGreaterThan(before);
+      // The row is committed only as the turn finishes: no re-read on the call's own event, one once the turn is saved.
+      await page.waitForTimeout(300);
+      expect(calls.filter(item => item.path.endsWith("/research.benchmarks")).length).toBe(before);
+      const cardReads = calls.filter(item => item.path.endsWith("/research.cards")).length;
+      await page.evaluate(() => (window as unknown as { settle: () => void }).settle());
+      await ui.poll(() => calls.filter(item => item.path.endsWith("/research.benchmarks")).length).toBe(before + 1);
+      await ui.poll(() => calls.filter(item => item.path.endsWith("/research.cards")).length).toBe(cardReads + 1);
 
       const text = await page.locator("main").innerText();
       for (const word of ["TikHub", "tikhub", "Parallel", "Firecrawl", "美元", "$"]) expect(text).not.toContain(word);
