@@ -8,7 +8,7 @@ import {NativeProgressProjection} from './nativeProgress';
 import {visibleText,nativeMetadata,prepareNativePrimary,nativeFrameProjection,
  completedOutput,finalizeNativeSummary} from './nativeOutput';
 import {paygOwnerDatabase} from './paygOwner';
-import {executorRpc,historyGuard,terminalReplyGuard,recoverExecutorFinancial,recordCapacityFailure,
+import {executorRpc,historyGuard,terminalReplyGuard,recoverExecutorFinancial,interruptForCapacity,
  preflightCodes,platformFailureReason,hash,progressEmitter,diagnosticCode,failBeforeDispatch,cancelWithCode,type RuntimeExecutorOptions} from './executorRpc';
 import {fitNativeRequestOutput,runtimePaygCall, type ResumeInput, type PaygWait, type PaygPosition} from './paygRuntime';
 import {beginPaygExecution, type RuntimeExecution} from './paygResume';
@@ -490,8 +490,8 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     // Not refunded yet: keep the normal cost-verification result, never the "not charged" reason.
     if(ended?.state==='cost_pending')return {state:'cost_pending' as const};
    }
-   if(capacity&&isPayg)await recordCapacityFailure(rpc,args,error,execution.epoch!);
-   await ownerRpc('runtime_execution',{...args,p_action:'interrupt'}).catch(()=>{});
+   if(!(capacity&&isPayg&&await interruptForCapacity(rpc,args,error,execution.epoch!)))
+    await ownerRpc('runtime_execution',{...args,p_action:'interrupt'}).catch(()=>{});
    return {state:'pending' as const,...(capacity?{unavailable:'capacity' as const}:{}),...claimNoticeFields(claimNotice)};
   }
  }};

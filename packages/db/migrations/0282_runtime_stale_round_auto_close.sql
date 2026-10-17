@@ -4,15 +4,15 @@
 -- same rule and the same function an operator uses (0220), so either path refunds a round only once.
 -- "Content beyond capacity" (user material too long) is user-side and is never refunded, but it left
 -- no server trace (#832 known limitation). This migration records it and excludes it:
---  * runtime_record_capacity_failure: the current owner invocation (epoch-fenced, like its other owner
+--  * runtime_interrupt_capacity: the current owner invocation (epoch-fenced, like its other owner
 --    writes) records the capacity code in the diagnostic failure_code column (0248; nothing reads it
---    for availability) of its running or interrupted PAYG execution, once.
+--    for availability) and interrupts its PAYG execution in one transaction (write-once marker).
 --  * runtime_stale_charged_rounds / runtime_stale_round_compensate: unchanged from 0220/0239 except
 --    that a round marked with a capacity code is neither reported nor compensated.
 -- Repeatable (CREATE OR REPLACE only). No remote database use.
 BEGIN;
 
-CREATE OR REPLACE FUNCTION public.runtime_record_capacity_failure(p_actor_id uuid,p_execution_id uuid,p_epoch bigint,p_code text)
+CREATE OR REPLACE FUNCTION public.runtime_interrupt_capacity(p_actor_id uuid,p_execution_id uuid,p_epoch bigint,p_code text)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE e runtime_executions;b bill2_runs;
 BEGIN
@@ -24,19 +24,19 @@ BEGIN
  PERFORM 1 FROM runtime_sessions WHERE id=e.session_id FOR UPDATE;
  SELECT * INTO e FROM runtime_executions WHERE id=e.id FOR UPDATE;
  SELECT * INTO b FROM bill2_runs WHERE id=e.billing_run_id FOR UPDATE;
- -- Only the current owner invocation may mark the round, fenced like its other owner writes: an older
- -- invocation still unwinding after a resume advanced the epoch must not mark the resumed execution.
+ -- Only the current owner invocation, fenced like its other owner writes: an older invocation still
+ -- unwinding after a resume advanced the epoch must not mark the resumed execution.
  IF b.id IS NULL OR b.contract_version<>'bill2.v2' OR p_epoch IS NULL OR p_epoch<>b.runtime_epoch
   OR e.state NOT IN ('running','interrupted') THEN
   RAISE EXCEPTION 'RUNTIME_RESUME_CONFLICT' USING ERRCODE='P0001';END IF;
- -- Write-once.
  UPDATE runtime_executions SET failure_code=coalesce(failure_code,p_code)
- WHERE id=e.id AND erased_at IS NULL AND content_deleted_at IS NULL
- RETURNING * INTO e;
- RETURN jsonb_build_object('recorded',e.id IS NOT NULL AND e.failure_code=p_code);
+ WHERE id=e.id AND erased_at IS NULL AND content_deleted_at IS NULL;
+ -- The marker and the interruption commit together: the existing owner interrupt (same fence)
+ -- runs in this transaction, so an interrupted round without its marker cannot exist.
+ RETURN runtime_execution(p_actor_id,p_execution_id,'interrupt',jsonb_build_object('epoch',p_epoch,'value',NULL));
 END $$;
-REVOKE ALL ON FUNCTION public.runtime_record_capacity_failure(uuid,uuid,bigint,text) FROM PUBLIC,anon,authenticated,service_role;
-GRANT EXECUTE ON FUNCTION public.runtime_record_capacity_failure(uuid,uuid,bigint,text) TO service_role;
+REVOKE ALL ON FUNCTION public.runtime_interrupt_capacity(uuid,uuid,bigint,text) FROM PUBLIC,anon,authenticated,service_role;
+GRANT EXECUTE ON FUNCTION public.runtime_interrupt_capacity(uuid,uuid,bigint,text) TO service_role;
 
 CREATE OR REPLACE FUNCTION public.runtime_stale_charged_rounds(p_cutoff timestamp with time zone, p_limit integer DEFAULT 100)
  RETURNS jsonb

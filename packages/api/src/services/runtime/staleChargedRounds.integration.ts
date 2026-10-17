@@ -241,14 +241,14 @@ it('RUNTIME: a round whose account was later banned can still be compensated', a
 const epochOf = async (runId: string) =>
   Number((await db.query('select runtime_epoch from bill2_runs where id=$1', [runId])).rows[0].runtime_epoch);
 const markCapacity = async (round: { actor: string; executionId: string; runId: string },
-  code = 'RUNTIME_COMPLETE_REQUEST_EXCEEDS_CAPACITY', epoch?: number) => rpc('runtime_record_capacity_failure',
+  code = 'RUNTIME_COMPLETE_REQUEST_EXCEEDS_CAPACITY', epoch?: number) => rpc('runtime_interrupt_capacity',
   { p_actor_id: round.actor, p_execution_id: round.executionId, p_epoch: epoch ?? await epochOf(round.runId), p_code: code });
 
-it('RUNTIME: a round ended by content beyond capacity is marked once and never reported or compensated', async () => {
+it('RUNTIME: a round interrupted for content beyond capacity is marked atomically, once, and never reported or compensated', async () => {
   const round = await chargedOpenRound(2 * STALE_ROUND_AGE_MS), other = await chargedOpenRound(2 * STALE_ROUND_AGE_MS);
   expect(ids(await reported())).toContain(round.runId);
   // Only the service host can write the marker, only for the execution's own account and only a capacity code.
-  expect((await anon.rpc('runtime_record_capacity_failure', { p_actor_id: round.actor, p_execution_id: round.executionId,
+  expect((await anon.rpc('runtime_interrupt_capacity', { p_actor_id: round.actor, p_execution_id: round.executionId,
     p_epoch: await epochOf(round.runId), p_code: 'RUNTIME_COMPLETE_REQUEST_EXCEEDS_CAPACITY' })).error).toBeTruthy();
   await expect(markCapacity({ ...round, actor: other.actor })).rejects.toThrow('RUNTIME_EXECUTION_DENIED');
   await expect(markCapacity(round, 'RUNTIME_DATABASE_UNAVAILABLE')).rejects.toThrow('RUNTIME_FAILURE_CODE_INVALID');
@@ -256,9 +256,19 @@ it('RUNTIME: a round ended by content beyond capacity is marked once and never r
   await expect(markCapacity(round, undefined, await epochOf(round.runId) - 1)).rejects.toThrow('RUNTIME_RESUME_CONFLICT');
   expect((await db.query('select failure_code from runtime_executions where id=$1', [round.executionId])).rows[0])
     .toEqual({ failure_code: null });
-  expect(await markCapacity(round)).toEqual({ recorded: true });
+  // A running round: the marker and the interruption land together, or (refused) neither does.
+  const live = await chargedOpenRound(2 * STALE_ROUND_AGE_MS);
+  await db.query("update runtime_executions set state='running' where id=$1", [live.executionId]);
+  const state = async () => (await db.query('select state,failure_code from runtime_executions where id=$1', [live.executionId])).rows[0];
+  await expect(markCapacity(live, undefined, await epochOf(live.runId) + 1)).rejects.toThrow('RUNTIME_RESUME_CONFLICT');
+  expect(await state()).toEqual({ state: 'running', failure_code: null });
+  await markCapacity(live, 'RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY');
+  expect(await state()).toEqual({ state: 'interrupted', failure_code: 'RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY' });
+  expect(ids(await reported())).not.toContain(live.runId);
+  // The marker and the interruption commit together through the existing owner interrupt.
+  expect(await markCapacity(round)).toMatchObject({ state: 'interrupted' });
   // Write-once: the first code stays.
-  expect(await markCapacity(round, 'RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY')).toEqual({ recorded: false });
+  await markCapacity(round, 'RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY');
   expect((await db.query('select failure_code from runtime_executions where id=$1', [round.executionId])).rows[0])
     .toEqual({ failure_code: 'RUNTIME_COMPLETE_REQUEST_EXCEEDS_CAPACITY' });
   expect(ids(await reported())).not.toContain(round.runId);

@@ -74,14 +74,15 @@ export async function failBeforeDispatch(rpc:<T>(name:string,args:Record<string,
   .catch(()=>null);
 }
 export const CAPACITY_FAILURE_CODES=['RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY','RUNTIME_COMPLETE_REQUEST_EXCEEDS_CAPACITY'];
-/** Content beyond capacity after a charged call is user-side and never refunded: record it (0282) before the
- * execution is interrupted, so neither the 24-hour refund nor an operator applies. Best effort; before 0282 it is a no-op. */
-export async function recordCapacityFailure(rpc:<T>(name:string,args:Record<string,unknown>)=>Promise<T>,
-  args:Record<string,unknown>,error:unknown,epoch:number):Promise<void> {
- if(!(error instanceof Error)||!CAPACITY_FAILURE_CODES.includes(error.message))return;
- // Epoch-fenced in SQL like every owner write: a stale invocation cannot mark a resumed execution.
- await rpc('runtime_record_capacity_failure',{...args,p_epoch:epoch,p_code:error.message}).catch(()=>{
+/** Content beyond capacity after a charged call is user-side and never refunded: the marker (0282) and the
+ * interruption commit in one epoch-fenced transaction, so neither the 24-hour refund nor an operator applies.
+ * Returns false when that did not happen; the caller then interrupts as before (pre-0282 or a database fault). */
+export async function interruptForCapacity(rpc:<T>(name:string,args:Record<string,unknown>)=>Promise<T>,
+  args:Record<string,unknown>,error:unknown,epoch:number):Promise<boolean> {
+ if(!(error instanceof Error)||!CAPACITY_FAILURE_CODES.includes(error.message))return false;
+ return rpc('runtime_interrupt_capacity',{...args,p_epoch:epoch,p_code:error.message}).then(()=>true,()=>{
   logger.error('api','runtime_capacity_marker_failed',{executionId:args.p_execution_id});
+  return false;
  });
 }
 /** Cancels and records why in one transaction (0248); before 0248 exists, the plain cancellation runs. */

@@ -7,8 +7,8 @@ vi.mock('../bill2/service',()=>({authoritativeBilling:()=>mock.billing}));
 const id='10000000-0000-4000-8000-000000000001';
 beforeEach(()=>vi.clearAllMocks());
 
-// Content beyond capacity in a later call of a round that already charged an earlier one: the round
-// is interrupted as before, and the capacity code is recorded first so that no automatic or operator
+// Content beyond capacity in a later call of a round that already charged an earlier one: the capacity
+// code is recorded and the round interrupted in one transaction, so that no automatic or operator
 // refund applies to it (user material too long is not refunded, Owner 2026-10-12).
 function round(code:string,marker:'ok'|'error'='ok'){
  const context={version:'runtime.v1',sdkVersion:'0.18.0',role:'ordinary',input:'Current',instructions:'Fixed',model:'fixture',
@@ -21,7 +21,7 @@ function round(code:string,marker:'ok'|'error'='ok'){
   if(name==='runtime_session_items'&&args.p_action==='read')return {data:[],error:null};
   // An earlier call of this round was dispatched, so pre-dispatch cancellation does not apply.
   if(name==='runtime_execution'&&args.p_action==='fail_before_dispatch')return {data:{state:'running'},error:null};
-  if(name==='runtime_record_capacity_failure')return marker==='ok'?{data:{recorded:true},error:null}:{data:null,error:{message:'synthetic'}};
+  if(name==='runtime_interrupt_capacity')return marker==='ok'?{data:{state:'interrupted'},error:null}:{data:null,error:{message:'synthetic'}};
   return {data:{state:'running'},error:null};
  })};
  mock.run.mockImplementation(async()=>{throw new Error(code);});
@@ -32,21 +32,22 @@ const sequence=(calls:ReturnType<typeof round>['calls'])=>calls.map(c=>c.name===
  .filter(step=>!['owner_session','runtime_session_items'].includes(step));
 
 it.each(['RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY','RUNTIME_COMPLETE_REQUEST_EXCEEDS_CAPACITY'])(
- 'records %s on the execution before interrupting it',async code=>{
+ 'records %s and interrupts the execution in one database call',async code=>{
  const r=round(code);
  expect(await r.execute()).toEqual({state:'pending',unavailable:'capacity'});
- expect(sequence(r.calls)).toEqual(['begin','fail_before_dispatch','runtime_record_capacity_failure','interrupt']);
- expect(r.calls.find(c=>c.name==='runtime_record_capacity_failure')?.args).toEqual({p_actor_id:id,p_execution_id:id,p_epoch:3,p_code:code});
+ expect(sequence(r.calls)).toEqual(['begin','fail_before_dispatch','runtime_interrupt_capacity']);
+ expect(r.calls.find(c=>c.name==='runtime_interrupt_capacity')?.args).toEqual({p_actor_id:id,p_execution_id:id,p_epoch:3,p_code:code});
 });
 
-it('still interrupts when the marker cannot be written (before 0282, or an outage)',async()=>{
+it('falls back to the plain interruption when the combined call fails (before 0282, or an outage)',async()=>{
  const r=round('RUNTIME_COMPLETE_REQUEST_EXCEEDS_CAPACITY','error');
  expect(await r.execute()).toEqual({state:'pending',unavailable:'capacity'});
- expect(sequence(r.calls).at(-1)).toBe('interrupt');
+ expect(sequence(r.calls)).toEqual(['begin','fail_before_dispatch','runtime_interrupt_capacity','interrupt']);
 });
 
 it('other unclassified failures stay unmarked and remain eligible for the 24-hour refund',async()=>{
  const r=round('SYNTHETIC_UNKNOWN_FAILURE');
  expect(await r.execute()).toEqual({state:'pending'});
- expect(sequence(r.calls)).not.toContain('runtime_record_capacity_failure');
+ expect(sequence(r.calls)).not.toContain('runtime_interrupt_capacity');
+ expect(sequence(r.calls).at(-1)).toBe('interrupt');
 });
