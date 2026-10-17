@@ -7,6 +7,7 @@ import { protectedProcedure, router } from '../trpc';
 import { authoritativeBilling, type BillingRpc } from '../services/bill2/service';
 import { createRuntimeBudget } from '../services/runtime/budget';
 import { newWorkGate } from '../services/runtime/newWorkGate';
+import { runtimeGateEnvironment } from '../services/runtime/realHost';
 import { runtimeActor } from '../services/runtime/actor';
 import { loadStagingPolicy } from '../services/runtime/stagingPolicy';
 import { stagingTransport } from '../services/runtime/stagingTransport';
@@ -57,7 +58,8 @@ async function liveFlow(ctx: ProtectedCtx) {
   const budget = ctx.runtimeBudget ?? createRuntimeBudget();
   const actor = runtimeActor(ctx.userScopedSupabase.auth, ctx.user.id, budget, ctx.headers?.get('Authorization'));
   const billing = authoritativeBilling({ admin: admin as unknown as BillingRpc, actor, adapter: stagingTransport(admin, window, budget), budget });
-  const executor = fusionExecutor({ billing, admin, actorId: ctx.user.id, callGate: newWorkGate(admin, 'staging').calls, budget });
+  const executor = fusionExecutor({ billing, admin, actorId: ctx.user.id, callGate: newWorkGate(admin, runtimeGateEnvironment(window)).calls,
+    budget });
   return reviewFlow({ admin, actorId: ctx.user.id, executor, ...revisionHooks(reportRevisionService(ctx.userScopedSupabase, admin)) });
 }
 const unwrap = (cause: unknown, path: string) => reviewError(cause instanceof TRPCError && cause.cause ? cause.cause : cause, path);
