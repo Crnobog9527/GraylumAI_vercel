@@ -76,6 +76,9 @@ export async function stripeMpWalletRefundCases({admin,service}) {
   assert.equal((await admin.query('SELECT status FROM payment_orders WHERE id=$1',[f.o.id])).rows[0].status,'partially_refunded');
   const sub=(await admin.query('SELECT status,credit_release_terminated_reason FROM user_subscriptions WHERE id=$1',[f.sub])).rows[0];
   assert.deepEqual(sub,{status:'canceled',credit_release_terminated_reason:'approved_wallet_refund'});
+  const grants=async o=>(await admin.query('SELECT array_agg(DISTINCT status) s FROM subscription_credit_grants WHERE source_order_id=$1',
+    [o.id])).rows[0].s;
+  assert.deepEqual(await grants(f.o),['reversed'],'the taken-back grants are reversed, never left to quarantine later credits');
   assert.notEqual((await facts(f.user)).mapping_state,'internal_paid','no membership after the refund');
   assert.deepEqual(await profile(f.user),{credits:0,membership_level:'free'});
   await service.query('SELECT pay_waffo_release_due(500)');
@@ -95,6 +98,7 @@ export async function stripeMpWalletRefundCases({admin,service}) {
   await result(h,hi.i,hi.q.netMinor,'failed');
   assert.deepEqual(await profile(h.user),{credits:h.granted,membership_level:'gold'});
   assert.equal((await facts(h.user)).mapping_state,'internal_paid');
+  assert.deepEqual(await grants(h.o),['granted'],'a failed refund leaves the grants as they were');
   await shiftMonth(h);
   assert.ok((await one('SELECT pay_waffo_grant_period($1,2) n',[h.o.id])).n>0,'release resumes after a failed refund');
 

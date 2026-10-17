@@ -9,8 +9,8 @@
 --    far (pay_waffo_grant_period 'payment:<order>:NN' rows; a yearly order's released months). treatment
 --    'wallet_membership'; pack quotes are unchanged (same fields and hash).
 --  * While the refund is claimed or in flight, pay_waffo_grant_period releases nothing for that order.
---  * A successful refund ends the membership: the subscription is canceled with credit release terminated, and the
---    cached level follows pay_common_membership_facts (the order is no longer paid). A failed refund restores the
+--  * A successful refund ends the membership: the order's grants are reversed, the subscription is canceled with credit
+--    release terminated, and the cached level follows pay_common_membership_facts. A failed refund restores the
 --    credits (as for packs) and releases resume.
 -- Mode follows the order (0296/0297). Anchored on the latest bodies; a missing anchor stops the migration. Repeatable.
 -- No table or data change. Depends on 0297. Rollback: forward-fix (re-apply the previous bodies).
@@ -61,6 +61,9 @@ BEGIN
    E'   updated_at=clock_timestamp() WHERE id=o.id;\n'
    ||E' -- R7 B3 (0302): a refunded wallet membership ends now; the cached level follows the facts (order no longer paid).\n'
    ||E' IF next_status=\'succeeded\' AND o.item_type=\'membership_plan\' THEN\n'
+   -- The taken-back grants are reversed (as the monthly and external refunds do): a granted row of a terminated
+   -- subscription would otherwise keep quarantining later credits in atomic_pre_deduct.
+   ||E'  UPDATE subscription_credit_grants SET status=\'reversed\' WHERE source_order_id=o.id AND status=\'granted\';\n'
    ||E'  UPDATE user_subscriptions SET status=\'canceled\',cancel_at_period_end=\'true\',\n'
    ||E'   credit_release_terminated_at=coalesce(credit_release_terminated_at,clock_timestamp()),\n'
    ||E'   credit_release_terminated_reason=coalesce(credit_release_terminated_reason,\'approved_wallet_refund\')\n'
