@@ -88,6 +88,10 @@ export async function runFusionFee({db,Client,connectionString,report}) {
   assert.equal(Number(u.call.platform_absorbed_bound_credits),Number(u.call.theoretical_delta),'the platform absorbs the call');
   assert.equal(String((await db.query('SELECT selected_cost_usd v FROM bill2_calls WHERE id=$1',[u.c.id])).rows[0].v),'0.0004','real cost recorded');
   assert.equal(await wallet(db,f.actor),5000-FEE,'the call hold is fully released');
+  // The real provider cost still reaches the cost projections, at zero credits (#1098 review).
+  const statRows = (await db.query('SELECT total_cost_usd,total_credits FROM token_stats WHERE bill2_call_id=$1',[u.c.id])).rows;
+  assert.deepEqual(statRows.map(r=>[String(r.total_cost_usd),Number(r.total_credits)]),[['0.0004',0]]);
+  assert.equal(Number((await db.query('SELECT count(*) v FROM ai_usage_logs WHERE bill2_call_id=$1',[u.c.id])).rows[0].v),1);
   assert.equal((await db.query('SELECT fee_review_id FROM fusion_billing_groups WHERE id=$1',[u.s.group])).rows[0].fee_review_id,rv.reviewId);
   const done = await end(db,f,rv,{state:'completed',outcome:{kind:'revised',awaitingChoice:true}});
   assert.deepEqual({state:done.fee.state,charged:done.fee.chargedCredits},{state:'charged',charged:FEE});

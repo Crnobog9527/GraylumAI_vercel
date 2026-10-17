@@ -300,6 +300,24 @@ DO $$ DECLARE src text; a text:=$x$"tool_usage", "tool_no_usage", "tool_failed",
   END IF;
 END $$;
 
+-- Usage projections for a fixed-fee call: the settled-at-zero path skips token_stats / ai_usage_logs (the zero-charge
+-- refund path writes none), but the real provider cost must reach the cost dashboards (#1098 review). Same rows as a
+-- charged call, at zero credits. Shared marker: whichever of 0294 / 0299 applies first patches, the other skips.
+DO $$ DECLARE src text; a text:=$x$  UPDATE bill2_calls SET nominal_cost_usd=n,nominal_source=source,theoretical_delta=delta,charged_delta=debit,$x$; BEGIN
+  src:=pg_get_functiondef('public.bill2_payg_finalize(uuid,uuid)'::regprocedure);
+  IF position('-- fixed_fee usage rows' IN src)=0 THEN
+    IF array_length(string_to_array(src,a),1)<>2 THEN RAISE EXCEPTION 'FIXED_FEE_SOURCE_MISMATCH: bill2_payg_finalize usage rows'; END IF;
+    EXECUTE replace(src,a,$x$  -- fixed_fee usage rows
+  IF source='fixed_fee' AND c.dispatched_at IS NOT NULL THEN
+   INSERT INTO token_stats(bill2_run_id,bill2_call_id,user_id,model_used,input_tokens,output_tokens,cached_tokens,cache_creation_tokens,web_search_count,total_cost_usd,total_credits,metadata)
+   VALUES(rid,c.id,a,c.model,(selected_usage->>'inputTokens')::int,(selected_usage->>'outputTokens')::int,NULL,NULL,NULL,c.selected_cost_usd,0,meta);
+   INSERT INTO ai_usage_logs(bill2_run_id,bill2_call_id,user_id,request_id,model_id,status,metadata)
+   VALUES(rid,c.id,a,c.id::text,c.model,'success',meta);
+  END IF;
+$x$||a);
+  END IF;
+END $$;
+
 -- View: the fee next to the review.
 CREATE OR REPLACE FUNCTION public.fusion_review_view(rv fusion_reviews) RETURNS jsonb
 LANGUAGE sql STABLE SET search_path=public,pg_temp AS $$

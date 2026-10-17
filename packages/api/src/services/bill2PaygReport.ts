@@ -81,7 +81,10 @@ function project(row: Row) {
   const bound = credits(row.platform_absorbed_bound_credits);
   if (charged + cap + bound !== theoretical) throw new Error('Credit conservation failed');
   // tool_usage: the user nominal is the confirmed usage cost, so the margin is zero and has no cache split.
-  if (row.nominal_source !== 'nominal' && row.nominal_source !== 'actual_fallback' && row.nominal_source !== 'tool_usage') {
+  // fixed_fee (0294): a call of a fixed-price review, settled at zero user charge: its would-be charge is fully
+  // platform-absorbed, so there is no margin split either.
+  if (row.nominal_source !== 'nominal' && row.nominal_source !== 'actual_fallback' && row.nominal_source !== 'tool_usage'
+    && row.nominal_source !== 'fixed_fee') {
     throw new Error('Unknown nominal source');
   }
   if (row.nominal_source === 'tool_usage' && (row.supplier_cost_state !== 'confirmed' || n !== c)) throw new Error('Invalid tool settlement');
@@ -89,7 +92,7 @@ function project(row: Row) {
   const boundEquivalent = equivalent(bound, row);
   const fallback = row.nominal_source === 'actual_fallback';
   const pieces = [row.platform_margin_cache_read_usd, row.platform_margin_cache_write_usd, row.platform_margin_other_usd];
-  const split = !fallback && row.nominal_source !== 'tool_usage' && pieces.every(v => v !== null && v !== undefined) ? pieces.map(amount) : null;
+  const split = !fallback && row.nominal_source !== 'tool_usage' && row.nominal_source !== 'fixed_fee' && pieces.every(v => v !== null && v !== undefined) ? pieces.map(amount) : null;
   // The write-premium column is signed: a cost increase is a negative margin component.
   if (split && split.reduce((sum, v) => sum + v, 0n) !== n - c) throw new Error('Margin conservation failed');
   return { callId: row.call_id, provider: row.provider, model: row.model, purpose: row.purpose ?? 'unknown',

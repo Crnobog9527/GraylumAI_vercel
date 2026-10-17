@@ -2967,7 +2967,7 @@
   "fn:bill2_payg_call_stuck(bill2_calls,bill2_runs)": "f820a0a3a03e",
   "fn:bill2_payg_claim(uuid,uuid,integer,jsonb)": "839a78285950",
   "fn:bill2_payg_compensate(bill2_runs,bill2_calls)": "5c4b35a030fe",
-  "fn:bill2_payg_finalize(uuid,uuid)": "c284f97a2bd1",
+  "fn:bill2_payg_finalize(uuid,uuid)": "1999561dbd2c",
   "fn:bill2_payg_financial_binding(bill2_runs)": "c6515b16f4db",
   "fn:bill2_payg_lock_models(bill2_runs)": "e34331b9c52e",
   "fn:bill2_payg_metering_hash(bill2_calls)": "f8d2d37530de",
