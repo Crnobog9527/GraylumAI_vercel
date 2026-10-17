@@ -112,6 +112,9 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     }
     // Which stages show the product's real components and which the plan: every stage says so.
     for (const stage of [...L_LATER.two.stages, ...L_LATER.three.stages]) expect(['real', 'planned']).toContain(stage.source);
+    // The full launched version: no picture says a feature is not there yet.
+    for (const word of ['待接入', '即将上线', '未开放', '敬请期待']) expect(on).not.toContain(word);
+    expect(renderToStaticMarkup(withTrpc(createElement(PositioningPictureL, { moment: 0, local: 1 })))).not.toContain('待接入');
     expect(on).toContain(L_JURY.title);
     expect(on).toContain(`href="${L_JURY.href}"`);
     for (const word of ['世界最强', '没有分歧']) expect(on).not.toContain(word);

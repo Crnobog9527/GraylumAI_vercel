@@ -75,7 +75,7 @@ export function PositioningPictureL({ moment, local }: { moment: number; local: 
 
   return (
     <div className={takeover.app}>
-      <RailJ published={step === 3} />
+      <RailJ published={step === 3} launched />
       <section className={styles.column} inert>
         <div ref={column} className={styles.scroll}>
           <PositioningHeader title="我的定位分析" status={`整体规划 · ${step === 3 ? '已确认' : '进行中'}`} />

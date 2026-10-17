@@ -197,8 +197,12 @@ function Report({ writing, local }: { writing: boolean; local: number }) {
   );
 }
 
-/** The workspace sidebar as the product draws it: 新对话, the feature links, this person's draft under 待归类. */
-export function RailJ({ published }: { published: boolean }) {
+/**
+ * The workspace sidebar as the product draws it: 新对话, the feature links, this person's draft under 待归类. `launched`
+ * (sample L, Owner 2026-10-17: the page is the full launched version) shows 发布排期 and 数据复盘 as working links, like
+ * the others, instead of the product's current "待接入".
+ */
+export function RailJ({ published, launched = false }: { published: boolean; launched?: boolean }) {
   return (
     <aside className={cn(frame.rail, styles.rail)} aria-label="工作区导航" inert>
       <span className={frame.newConversation}><img className={frame.newConversationIcon} src="/opc-reference/new-chat.svg" alt="" />新对话</span>
@@ -206,8 +210,17 @@ export function RailJ({ published }: { published: boolean }) {
         <span><img className={frame.navIcon} src="/opc-reference/squares-four.svg" alt="" />功能广场</span>
         <span><img className={frame.navIcon} src="/opc-reference/magnifying-glass.svg" alt="" />搜索</span>
         <span><img className={frame.navIcon} src="/opc-reference/books.svg" alt="" />资料库</span>
-        <button type="button" disabled><img className={frame.navIcon} src="/opc-reference/calendar-blank.svg" alt="" />发布排期 <small>待接入</small></button>
-        <button type="button" disabled><img className={frame.navIcon} src="/opc-reference/chart-bar.svg" alt="" />数据复盘 <small>待接入</small></button>
+        {launched ? (
+          <>
+            <span><img className={frame.navIcon} src="/opc-reference/calendar-blank.svg" alt="" />发布排期</span>
+            <span><img className={frame.navIcon} src="/opc-reference/chart-bar.svg" alt="" />数据复盘</span>
+          </>
+        ) : (
+          <>
+            <button type="button" disabled><img className={frame.navIcon} src="/opc-reference/calendar-blank.svg" alt="" />发布排期 <small>待接入</small></button>
+            <button type="button" disabled><img className={frame.navIcon} src="/opc-reference/chart-bar.svg" alt="" />数据复盘 <small>待接入</small></button>
+          </>
+        )}
       </nav>
       <div className={frame.history}>
         <div className={frame.historyHead}><span>平台 · 账号 · 工作</span></div>

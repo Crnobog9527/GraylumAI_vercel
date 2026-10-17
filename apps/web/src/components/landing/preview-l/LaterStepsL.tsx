@@ -114,7 +114,7 @@ function WorkChatPicture({ id }: { id: string }) {
   useLayoutEffect(() => { if (chat.current) chat.current.scrollTop = chat.current.scrollHeight; }, [id]);
   return (
     <div className={takeover.app}>
-      <RailJ published />
+      <RailJ published launched />
       <section className={picture.column} inert>
         <div ref={chat} className={styles.chat}>
           <RuntimeHeader title={CHAT.title} meta={{ platform: CHAT.platform, account: CHAT.account, infoHref: '#' }} />
