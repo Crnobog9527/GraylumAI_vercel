@@ -135,7 +135,7 @@ export function ArticlePage({ content, supportEmail, demo }: {
             {content.faq.map(item => (
               <div key={item.question} className="mt-6">
                 <h3 className="text-lg font-semibold text-white">{item.question}</h3>
-                <p className={`mt-3 ${TEXT}`}>{item.answer}</p>
+                <p className={`mt-3 whitespace-pre-line ${TEXT}`}>{item.answer}</p>
               </div>
             ))}
           </section>
