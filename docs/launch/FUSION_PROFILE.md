@@ -96,6 +96,7 @@ Opus 4 次 1.5456（汇总对比 2 次 0.8724、大档 2 次 0.6731）；Sonnet 
 
 1. **思考设置**（优先走后台"模型管理 → 思考设置"，浏览器操作由 Codex 做；对话框里"评审""写作"两项提示"暂未接入任何调用"已过时，不影响保存）：
    Sonnet、Gemini、Sol 加"评审" = low（线路分别 anthropic、google-ai-studio、openai）；Opus 加"写作" = low（线路 anthropic）。
+   **Sonnet、Gemini 的"评审"已完成**（总控 2026-10-17 第一批写入，记录在 #1056 评论）；Sol 的"评审"、Opus 的"写作"待做。
    等价的数据是 `config.reasoning.purposes.review` / `.writing` = `{"mode":"effort","effort":"low","wire":"reasoning_effort"}`。
 2. **新增 Opus 模型行**：只在库内用 SQL 从 Sonnet 行（`d04a4800-…`，它的密钥就是测试窗口报价绑定的那把）复制密钥和接口，不读出、不打印：
    ```sql
@@ -115,7 +116,8 @@ Opus 4 次 1.5456（汇总对比 2 次 0.8724、大档 2 次 0.6731）；Sonnet 
      upperUsd 按 `openRouterBound` 计算、automaticRetry false、hiddenTools false、lookupSupported true。
    - Sol 改现价：promptUsdPerMillion "2"、completionUsdPerMillion "10"、cacheWriteUsdPerMillion "2.5"，inputLimit 90000 → 196608，upperUsd 重算。
 4. **`runtime_payg_staging`**：
-   - Sonnet、Gemini 两条：`purposes` 加 `fusion_review`；`requestFormats` 加 `fusion-json-v1-stream`；`profileVersion` 改为 `pr665-r9+fusion-20261017`。
+   - **已完成**（总控 2026-10-17 第一批写入，记录在 #1056 评论）——Sonnet、Gemini 两条：`purposes` 加 `fusion_review`；`requestFormats` 加 `fusion-json-v1-stream`；
+     `profileVersion` 改为 `pr665-r9+fusion-20261017-a`（这是一个标识字符串，代码和证据都不要求固定值，以 staging 实际写入的值为准）。
      现有 low 变体的 outputLimit 32768 已覆盖评审的 4096，其他字段不动。
    - 追加 Sol、Opus 两条：照抄档案草稿文件里的 `profiles`（Sol 只开 `fusion_review`，Opus 只开 `fusion_summary`）。
    - 写入前用 `paygHostSettings` 校验整份 value（本 PR 合并后的 schema 才认 `fusion-request-shape` 证据，所以 Sol、Opus 两条要等本 PR 合并部署后再写）。
