@@ -11,6 +11,7 @@ import { ContentEditor } from '@/components/opc/content-editor';
 import { VersionCompare } from '@/components/opc/version-compare';
 import { StrategyOverviewDialog } from '@/components/opc/strategy-overview-dialog';
 import { MyDocuments } from '@/components/library/my-documents';
+import { useScanRecognition } from '@/hooks/use-scan-recognition';
 import { LibraryEvidence } from '@/components/research/library-evidence';
 import { libraryTabFromParam, libraryTabParam, type LibraryTab } from './library-tab';
 import styles from './library.module.css';
@@ -70,6 +71,8 @@ export default function LibraryPage(){
  const [tab,setTab]=useState<LibraryTab>('topics');
  // Once opened, 我的文档 stays mounted (hidden) so switching tabs never drops an upload or its recovery state.
  const [documentsOpened,setDocumentsOpened]=useState(false);
+ // Scanned pages resume on every library visit (LIB-2d), not only once 我的文档 is opened.
+ const scan=useScanRecognition();
  useEffect(()=>{const next=libraryTabFromParam(new URL(location.href).searchParams.get('tab'));
   if(next!=='topics'){setTab(next);if(next==='documents')setDocumentsOpened(true);}},[]);
  function chooseTab(next:LibraryTab){
@@ -103,7 +106,8 @@ export default function LibraryPage(){
   </nav>
   <p className={styles.intro}>{INTRO[tab]}</p>
   {tab==='evidence'&&<div className={styles.evidencePane}><LibraryEvidence/></div>}
-  {documentsOpened&&<div className={styles.documentsPane} hidden={tab!=='documents'}><MyDocuments/></div>}{tab==='topics'&&<div className={styles.catalog}>
+  {documentsOpened&&<div className={styles.documentsPane} hidden={tab!=='documents'}>
+   <MyDocuments scan={scan}/></div>}{tab==='topics'&&<div className={styles.catalog}>
    <nav className={styles.catalogNav} aria-label="资料库平台与账号"><button type="button" aria-current={!selectedProject?'page':undefined} onClick={()=>{setSelectedProject('');setPage(1);}}>全部选题 <span>{count(accounts.reduce((n,a)=>n+a.items.length,0))}</span></button>{[...new Set(accounts.map(account=>account.platform))].map(platform=><div key={platform} className={styles.platform}><strong>{platform}<span>{count(accounts.filter(account=>account.platform===platform).reduce((n,a)=>n+a.items.length,0))}</span></strong>{accounts.filter(account=>account.platform===platform).map(account=><button key={account.projectId} type="button" aria-current={selectedProject===account.projectId?'page':undefined} onClick={()=>{setSelectedProject(account.projectId);setPage(1);}}>{(account.displayName??account.account)}<span>{count(account.items.length)}</span></button>)}</div>)}</nav>
    <div ref={contentRef} className={styles.catalogContent} onScroll={event=>{scroll.current=event.currentTarget.scrollTop;if(hydrated)sessionStorage.setItem('opc-library-view',JSON.stringify({search,selectedProject,statusFilter,sortOrder,page,scrollTop:scroll.current}));}}>
     <div className={styles.scopeHead}><div><h2>{selectedAccount?selectedAccount.platform+' · '+(selectedAccount.displayName??selectedAccount.account):'全部选题'}</h2><p>{count(rows.length)} 个选题 · {count(selectedAccount?1:accounts.length)} 个账号{selectedAccount?' · '+stageLabel[selectedAccount.stage]:''}</p></div>{selectedAccount&&<div className={styles.scopeActions}><button onClick={()=>setStrategyAccount({...selectedAccount,currentVersion:selectedAccount.sourceVersion??undefined})}>修改定位</button><Link href={'/positioning?account='+selectedAccount.projectId}>新建对话</Link><select aria-label={'当前阶段 '+(selectedAccount.displayName??selectedAccount.account)} value={selectedAccount.stage} onChange={event=>updateStage(selectedAccount,event.target.value as Account['stage'])}>{Object.entries(stageLabel).map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></div>}</div>
