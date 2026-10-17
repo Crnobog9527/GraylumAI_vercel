@@ -64,7 +64,9 @@ export function OwnerEditJ() {
     };
     const stopLinks = (event: MouseEvent) => {
       const target = event.target as HTMLElement;
-      if (target.closest('a, button') && !target.closest('[data-owner-edit]')) event.preventDefault();
+      // Placing the caret in a link's or button's words must not follow it nor run its click (that could switch or
+      // unmount what is being edited): this capture listener runs before React's, so stopping here stops both.
+      if (target.closest('a, button') && !target.closest('[data-owner-edit]')) { event.preventDefault(); event.stopPropagation(); }
     };
     for (const node of leaves) {
       node.dataset[ORIGINAL] ??= node.textContent ?? '';
