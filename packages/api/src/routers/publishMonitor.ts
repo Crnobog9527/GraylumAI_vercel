@@ -12,6 +12,7 @@ import { importManualRows, manualImportInput } from '../services/publishMonitor/
 import { requirePostForMeDeps } from '../services/publishMonitor/secrets';
 import { checkRateLimitOrThrow } from '../services/redisRateLimiter';
 import { publishMonitorConnectRouter } from './publishMonitorConnect';
+import { publishMonitorPublishRouter } from './publishMonitorPublish';
 import { guarded as safe } from './publishMonitorGuard';
 
 /** PUBLISH-MONITOR: a user reads and changes only their own monitoring state; off until enabled by admin. */
@@ -64,4 +65,5 @@ export const publishMonitorRouter = router({
     return importManualRows(ctx.supabaseAdmin, ctx.profileId, input);
   })),
   connect: publishMonitorConnectRouter,
+  publish: publishMonitorPublishRouter,
 });

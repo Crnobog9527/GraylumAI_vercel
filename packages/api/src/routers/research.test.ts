@@ -7,6 +7,7 @@ it('requires authentication for every user-facing research endpoint', async () =
   const id = '00000000-0000-4000-8000-000000000001';
   const calls = [
     caller.cards({ sessionId: id }),
+    caller.benchmarks({ sessionId: id }),
     caller.confirmCard({ cardId: id, selected: [] }),
     caller.createRefresh({ sessionId: id, platform: 'x', account: 'alice' }),
     caller.toolCharges({ transactionId: id }),

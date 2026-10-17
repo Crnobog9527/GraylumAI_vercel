@@ -11,6 +11,8 @@ import {agentTurnInstructions,AGENT_TURN_STABLE_PREFIX} from '../opc/agentTurnPr
 import {freezeHistorySelection,HOST_TURN_DATA_NOTICE_V1,type HostTurnContext} from './hostTurn';
 import {runtimeScopeInput} from './context';
 import {OPENING_INPUT} from '../../shared/opcQuestions';
+import {REPLY_LANGUAGE_INSTRUCTIONS,withPrimaryAddenda} from './primaryInstructions';
+import {applyPromptCache} from './promptCache';
 const skill='Pinned skill 正文';
 vi.mock('../skills/databaseSource',()=>({databaseSkillSource:()=>({list:async()=>[{revisionId:'10000000-0000-4000-8000-000000000003'}]})}));
 vi.mock('../skills/loader',()=>({identityOf:(value:unknown)=>value,activateSkill:async()=>({forModel:()=>skill})}));
@@ -65,7 +67,13 @@ it('freezes host, v2 selection and cache independently; replay ignores changed h
  expect(context.hostTurnContext).toEqual(hostState);
  expect(context.inputSelection).toBe('scope-projection-v2');
  expect(context.historySelection).toEqual(freezeHistorySelection());
- expect(context.promptCache).toMatchObject({version:'prompt-cache-v2',historyMarker:true,systemPrefixChars:context.instructions.length});
+ // v2 marks the whole system message the executor sends, which ends with the frozen reply-language rule.
+ const system=withPrimaryAddenda(context.instructions,context);
+ expect(system).toBe(context.instructions+REPLY_LANGUAGE_INSTRUCTIONS);
+ expect(context.promptCache).toMatchObject({version:'prompt-cache-v2',historyMarker:true,systemPrefixChars:system.length});
+ const request={messages:[{role:'system',content:system},{role:'user',content:'current'}]};
+ applyPromptCache(request,context.promptCache!,f.row.model_id,'2.5');
+ expect(request.messages[0]!.content).toEqual([{type:'text',text:system,cache_control:{type:'ephemeral'}}]);
  expect(context.instructions).toContain('complete public prose in message');
  const replay=await runtimeAdmissionService(f.user,f.admin,{...f.policy,hostTurnContext:{...hostState,stepId:'changed'}}).prepare(f.input);
  expect(replay).toEqual(result);
@@ -118,7 +126,9 @@ it('uses identical marker reservation at the admission byte boundary with and wi
  const context=(await runtimeAdmissionService(f.user,f.admin,f.policy).prepare(f.input)).context;
  const {askQuestionToolBytes}=await import('./agentTools');
  const current=runtimeScopeInput(context.input,context.scopeMaterial,context.hostTurnContext);
- const edge=Buffer.byteLength(JSON.stringify({instructions:context.instructions,messages:[{role:'user',content:current}]}))+
+ // The executor appends the reply-language rule (SKILL-I18N-HOOK); admission sizes it as well.
+ const edge=Buffer.byteLength(JSON.stringify({instructions:context.instructions+REPLY_LANGUAGE_INSTRUCTIONS,
+  messages:[{role:'user',content:current}]}))+
   askQuestionToolBytes(true)+150+1024;
  for(const enabled of [true,false])for(const delta of [0,-1]){
   const sample=hostFixture();
@@ -140,7 +150,7 @@ it('keeps checklist values and update events outside the cached prefix and count
  expect(first.hostTurnContext).toEqual(host);
  expect(runtimeScopeInput(first.input,first.scopeMaterial,first.hostTurnContext)).toContain('手填事实');
  const {askQuestionToolBytes}=await import('./agentTools');
- const edge=Buffer.byteLength(JSON.stringify({instructions:first.instructions,messages:[{role:'user',
+ const edge=Buffer.byteLength(JSON.stringify({instructions:first.instructions+REPLY_LANGUAGE_INSTRUCTIONS,messages:[{role:'user',
   content:runtimeScopeInput(first.input,first.scopeMaterial,first.hostTurnContext)}]}))+askQuestionToolBytes(true)+150+1024;
  for(const delta of [0,-1]) {
   const sample=hostFixture();

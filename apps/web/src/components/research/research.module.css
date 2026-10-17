@@ -17,6 +17,7 @@
 .callQuery{min-width:0;overflow-wrap:anywhere}
 .callMeta{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0;font-size:12px;line-height:18px;color:#8a8a8a}
 .callDetail{margin:0;font-size:12px;line-height:18px;color:#777}
+.callCredits{font-size:11px;line-height:18px;white-space:nowrap;color:#555}
 .chip{padding:0 6px;border-radius:999px;font-size:11px;line-height:18px;white-space:nowrap}
 .chip.state_success{background:#eaf4ec;color:#2f6b3a}
 .chip.state_missing{background:#f8ecea;color:#9a3b2e}

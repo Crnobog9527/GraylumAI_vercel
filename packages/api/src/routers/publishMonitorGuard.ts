@@ -7,6 +7,7 @@ import { ManualImportError } from '../services/publishMonitor/manualImport';
 import { RefreshError } from '../services/publishMonitor/refresh';
 import { assertPublishMonitorEnabled, PublishMonitorError } from '../services/publishMonitor/foundation';
 import { PostForMeNotConfigured } from '../services/publishMonitor/postForMe/config';
+import { PublishError } from '../services/publishMonitor/publish';
 
 /** PUBLISH-MONITOR: every procedure runs only with service-role access and while the admin switch is on. */
 type SwitchReader = Parameters<typeof assertPublishMonitorEnabled>[0];
@@ -17,8 +18,24 @@ const CONFLICT = new Set(['PUBLISH_MONITOR_REQUEST_INVALID', 'PUBLISH_MONITOR_AC
   'PUBLISH_MONITOR_TARGET_ALREADY_CONNECTED', 'PUBLISH_MONITOR_AUTHORIZATION_CHANGED', 'PUBLISH_MONITOR_CALLBACK_STALE',
   'PUBLISH_MONITOR_REFRESH_RUNNING']);
 
+const PUBLISH_FORBIDDEN = new Set(['PUBLISH_MONITOR_TARGET_INVALID', 'PUBLISH_MONITOR_WORK_ITEM_INVALID',
+  'PUBLISH_MONITOR_ACCOUNT_CLOSED']);
+const PUBLISH_PRECONDITION = new Set(['PUBLISH_MONITOR_QUOTA_EXHAUSTED', 'PUBLISH_MONITOR_QUOTA_NOT_CONFIGURED',
+  'PUBLISH_MONITOR_PRICE_NOT_CONFIGURED', 'PUBLISH_MONITOR_INSUFFICIENT_CREDITS']);
+
+function publishToTrpc(cause: PublishError): TRPCError {
+  if (cause.code === 'PUBLISH_MONITOR_PROVIDER_BUSY') return new RateLimitError('rate_limited', cause.retryAfterSeconds ?? 60);
+  if (cause.code === 'PUBLISH_MONITOR_TOO_MANY_REJECTIONS') return new RateLimitError('rate_limited', 3600);
+  const code = cause.code === 'PUBLISH_MONITOR_JOB_NOT_FOUND' ? 'NOT_FOUND'
+    : cause.code === 'PUBLISH_MONITOR_IDEMPOTENCY_MISMATCH' ? 'CONFLICT'
+      : PUBLISH_FORBIDDEN.has(cause.code) ? 'FORBIDDEN'
+        : PUBLISH_PRECONDITION.has(cause.code) ? 'PRECONDITION_FAILED' : 'INTERNAL_SERVER_ERROR';
+  return new TRPCError({ code, message: cause.code, cause });
+}
+
 function toTrpc(cause: unknown): TRPCError {
   if (cause instanceof TRPCError) return cause;
+  if (cause instanceof PublishError) return publishToTrpc(cause);
   if (cause instanceof ConnectError && cause.code === 'PUBLISH_MONITOR_PROVIDER_BUSY') {
     return new RateLimitError('rate_limited', cause.retryAfterSeconds ?? 60);
   }
