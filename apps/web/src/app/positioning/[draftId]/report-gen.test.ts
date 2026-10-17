@@ -5,7 +5,7 @@ import {
   readReportRecord, REPORT_DISABLED_NOTICE, REPORT_EMPTY_NOTICE, REPORT_INCOMPLETE_NOTICE, REPORT_INTRO, REPORT_STOPPED_NOTICE,
   REPORT_TRUNCATED_NOTICE, REPORT_UNCONFIRMED_NOTICE, reportAttachable, reportCanStart, reportProgressing, reportRecordKey,
   reportResultRefusal, reportStartRefusal, reportView, startedExecution, writeReportRecord, type ReportStatus,
-  ATTACH_RETRY_DELAYS_MS, attachRetryDelay, generationOffer, needsReattach, newerRead, nextRequestId, REPORT_ALREADY_EXISTS_NOTICE, shownExecution,
+  ATTACH_RETRY_DELAYS_MS, attachRetryDelay, generationOffer, reportActionLabel, reportFeeText, needsReattach, newerRead, nextRequestId, REPORT_ALREADY_EXISTS_NOTICE, shownExecution,
 } from "./report-gen";
 
 const id = "11111111-2222-4333-8444-555555555555";
@@ -75,7 +75,8 @@ describe("reportView", () => {
   });
   it("never offers a new paid request over a saved or running report", () => {
     expect(reportCanStart(status({}))).toBe(false);
-    expect(reportCanStart(status({ completeness: "length_limit", candidate: false }))).toBe(false);
+    // A cut-off report had its fixed price refunded (0299): a new paid request is offered again.
+    expect(reportCanStart(status({ completeness: "length_limit", candidate: false }))).toBe(true);
     expect(reportCanStart(status({ state: "running", body: null }))).toBe(false);
     expect(reportCanStart(status({ state: "waiting_credits", body: null }))).toBe(false);
     expect(reportCanStart(null)).toBe(true);
@@ -177,17 +178,29 @@ describe("restoring and offering", () => {
     expect(generationOffer({ canGenerate: true, working: true, server: known, executionId: null, status: null })).toBeNull();
   });
   it.each([
-    ["a saved report", status({})], ["a truncated report", status({ completeness: "length_limit", candidate: false })],
+    ["a saved report", status({})],
     ["a running report", status({ state: "running", body: null })], ["a report waiting for credits", status({ state: "waiting_credits", body: null })],
     ["a status still loading", null], ["a status of another execution", status({ executionId: other, body: null, state: "cancelled" })],
   ])("never offers a paid start over %s", (_name, saved) => {
     expect(generationOffer({ canGenerate: true, working: false, server: { kind: "known", executionId: id }, executionId: id, status: saved }))
       .toBeNull();
   });
-  it("offers a new request only after the round's last report ended without text", () => {
+  it("offers a new request only after the round's last report ended without a complete report", () => {
     const empty = status({ state: "cancelled", body: null, completeness: null, candidate: false });
-    expect(generationOffer({ canGenerate: true, working: false, server: { kind: "known", executionId: id }, executionId: id, status: empty }))
-      .toBe("restart");
+    const cut = status({ completeness: "length_limit", candidate: false });
+    for (const ended of [empty, cut])
+      expect(generationOffer({ canGenerate: true, working: false, server: { kind: "known", executionId: id }, executionId: id, status: ended }))
+        .toBe("restart");
+  });
+  it("names the fixed price on the button and says what the report cost (0299)", () => {
+    expect(reportActionLabel("生成完整报告", 500)).toBe("生成完整报告（500 积分）");
+    expect(reportActionLabel("重新生成", 1200)).toBe("重新生成（1,200 积分）");
+    expect(reportActionLabel("生成完整报告", null)).toBe("生成完整报告");
+    expect(reportFeeText({ credits: 500, state: "charged", chargedCredits: 500 })).toBe("这份完整报告扣了 500 积分。");
+    expect(reportFeeText({ credits: 500, state: "refunded", chargedCredits: 0 })).toMatch(/^没有生成出完整报告，500 积分已全额退回。/);
+    expect(reportFeeText({ credits: 500, state: "held", chargedCredits: null })).toBeNull();
+    expect(reportFeeText(null)).toBeNull();
+    expect(reportStartRefusal(new Error("REPORT_CREDITS")).text).toBe("可用积分不够，报告没有开始生成。充值后再试。");
   });
   it("re-attaches a stream that ended with the execution unfinished on the server", () => {
     expect(needsReattach({ state: "pending" })).toBe(true);

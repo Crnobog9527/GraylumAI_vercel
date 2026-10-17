@@ -12,6 +12,7 @@ import {runCases} from './cases.mjs';
 import {runFusionReview} from './fusion-review.mjs';
 import {runFusionBackground} from './fusion-background.mjs';
 import {runFusionFee} from './fusion-fee.mjs';
+import {runReportFee} from './report-fee.mjs';
 const development=process.argv.slice(2).join(' ')==='--local-only --development';
 if ((!development && process.argv.slice(2).join(' ') !== '--local-only') || process.env.CI) throw new Error('Require --local-only');
 const root=resolve(import.meta.dirname,'../../../..');
@@ -28,8 +29,8 @@ const sql=input=>docker(['exec','-i',name,'psql','-X','-qAt','-U','postgres','-d
 const fp=read('packages/db/tests/baseline/fingerprint.sql');
 const objectSql=fp.slice(0,fp.indexOf('-- FINAL'))+'SELECT jsonb_object_agg(k,d ORDER BY k) FROM grouped;';
 const snapshot=()=>JSON.parse(ok(sql(objectSql)));
-// 0223 (R14) and 0294 (Fusion fixed price) are each re-applied twice after the full build.
-const migrations=['packages/db/migrations/0223_report_revision_sync.sql','packages/db/migrations/0294_fusion_fixed_price.sql'];
+// 0223 (R14), 0294 (Fusion fixed price) and 0299 (report fixed price) are each re-applied twice after the full build.
+const migrations=['packages/db/migrations/0223_report_revision_sync.sql','packages/db/migrations/0294_fusion_fixed_price.sql','packages/db/migrations/0299_report_fixed_price.sql'];
 const report={development,build:null,checks:[],failed:null};
 let client;
 try {
@@ -66,6 +67,7 @@ try {
  await runFusionReview({db:client,Client,connectionString,report});
  await runFusionBackground({db:client,Client,connectionString,report});
  await runFusionFee({db:client,Client,connectionString,report});
+ await runReportFee({db:client,Client,connectionString,report});
  const audits=ok(sql(read('packages/db/tests/account-open-policy-audit.sql')));
  assert.equal(audits,'');report.checks.push('account-open policy audit unchanged');
 } catch(error) {report.failed=String(error.stack??error);process.exitCode=1;}
