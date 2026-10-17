@@ -37,7 +37,8 @@ export const TIKHUB_ROUTES: Partial<Record<`${SocialPlatform}:${SocialKind}`, Ti
   },
   'douyin:account_posts': {
     method: 'GET', path: '/douyin/app/v3/fetch_user_post_videos', account: 'douyin_sec_uid',
-    params: ({ account, limit }) => ({ sec_user_id: account!, max_cursor: 0, count: limit }),
+    // TikHub documents count <= 20 for this endpoint, whatever the shared default is.
+    params: ({ account, limit }) => ({ sec_user_id: account!, max_cursor: 0, count: Math.min(limit, 20) }),
   },
   'xiaohongshu:keyword_posts': {
     method: 'GET', path: '/xiaohongshu/app_v2/search_notes',
