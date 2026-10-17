@@ -10,7 +10,7 @@ import { freezeWindowBillingUnit } from '../runtime/billingUnitAdmission';
 import { fitNativeRequestOutput, runtimePaygCall } from '../runtime/paygRuntime';
 import { freezeStagingPaygPricing } from '../runtime/paygPricing';
 import { loadStagingPolicy } from '../runtime/stagingPolicy';
-import { refuseOnProduction } from '../runtime/realHost';
+import { realContract } from '../runtime/realHost';
 import { admitFusionModel, FUSION_MODEL_COLUMNS, type FusionModelRow, type FusionPhase } from './models';
 import { fusionRequestBody, type FusionRequest } from './request';
 import { readFusionSettings } from './settings';
@@ -26,7 +26,7 @@ const admitted = z.object({ groupId: uuid, replayed: z.boolean(), runs: z.array(
 const refusals = new Set(['FUSION_REVIEW_DISABLED', 'FUSION_MEMBERSHIP_REQUIRED', 'REPORT_MEMBERSHIP_REQUIRED',
   'REPORT_ENTITLEMENTS_UNAVAILABLE', 'FUSION_MODEL_DENIED', 'FUSION_BUDGET_EXCEEDED', 'FUSION_GROUP_INVALID',
   'FUSION_GROUP_CONFLICT', 'FUSION_GROUP_DENIED', 'BILL2_REQUEST_CONFLICT', 'RUNTIME_TEST_WINDOW_DENIED',
-  'RUNTIME_TEST_MODEL_DENIED']);
+  'RUNTIME_TEST_MODEL_DENIED', 'RUNTIME_PRODUCTION_DENIED', 'RUNTIME_PRODUCTION_MODEL_DENIED']);
 /** A stable UUID derived from a seed (retries of the same step reuse the same request ids). */
 export function derivedUuid(seed: string) {
   const hex = createHash('sha256').update(seed).digest('hex');
@@ -79,7 +79,6 @@ export async function admitFusionGroup(input: { admin: SupabaseClient; actorId: 
   try { return toGroup(await rpc<unknown>(admin, 'fusion_group_admit', { ...groupArgs, p_runs: [] })); }
   catch (error) { if (!(error instanceof Error) || error.message !== 'FUSION_GROUP_INVALID') throw error; }
   const window = await loadStagingPolicy(admin as unknown as BillingRpc, actorId, env);
-  refuseOnProduction(window);
   const rows = await admin.from('ai_models').select(FUSION_MODEL_COLUMNS).in('id', [...new Set(members.map(m => m.modelId))]);
   if (rows.error) throw new Error('FUSION_ADMISSION_UNAVAILABLE');
   const deadline = new Date(Math.min(Date.now() + settings.review.dispatchMinutes * 60_000,
@@ -93,7 +92,8 @@ export async function admitFusionGroup(input: { admin: SupabaseClient; actorId: 
   }));
   const priced = await freezeStagingPaygPricing(admin, models.map(model => model.policy));
   const billingUnit = await freezeWindowBillingUnit(admin, window, models.map(model => model.quote));
-  const rules: FrozenPaygRun['rules'] = { version: 'runtime-staging-v1', quoteVersion: window.id,
+  // RUNTIME-PROD: a staging window or the production host (no test window); realContract keeps them apart.
+  const rules: FrozenPaygRun['rules'] = { ...realContract(window).rules,
     creditsPerUsd: window.creditsPerUsd, multiplier: window.multiplier, fx: {}, billingUnit };
   const runs = await Promise.all(members.map(async (member, index) => {
     const policy = priced[index]!;
@@ -104,7 +104,7 @@ export async function admitFusionGroup(input: { admin: SupabaseClient; actorId: 
     const draftId = await rpc<string>(admin, 'bill2_create_draft', { p_actor_id: actorId });
     const context = { version: 'runtime.v1', network: 'deny', tools: [], sources: [],
       fusion: { index, phase: member.phase, body, call } };
-    const payload = frozenPaygRunSchema.parse({ contractVersion: 'bill2.v2', mode: 'staging_test', testWindowId: window.id,
+    const payload = frozenPaygRunSchema.parse({ contractVersion: 'bill2.v2', ...realContract(window).host,
       scope: { kind: 'positioning_draft', draftId: uuid.parse(draftId) }, operation: 'question', modelId: member.modelId,
       sourceHash: createHash('sha256').update(JSON.stringify(context)).digest('hex'), input: context, callPolicy: [policy], rules,
       limits: { costUsd: call.upperUsd, credits: 0, maxPreDeduct: upperCredits, maxCalls: 1, deadline } });

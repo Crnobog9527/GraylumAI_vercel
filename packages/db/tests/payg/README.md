@@ -43,6 +43,8 @@ node packages/db/tests/payg/run-local.mjs --local-only
 - RUNTIME-PROD 研究工具正式线路（0293，`production.mjs` 的 `productionToolCases`）：价格、倍数、工具模型编号不符在准备时拒绝；
   模型加工具线路的正式运行单准备、领取、派发、结算（只进位一次）；关掉供应商开关挡住下一次工具领取和新运行单；发布监控纯工具单
   不需要正式模型档案和研究总开关，但仍需正式库标记、供应商开关和只含工具线路、固定占位模型。
+- RUNTIME-PROD 评审团（0295，`productionFusionCases`）：没有正式库标记时整组准入被拒；正式运行单整组准入、领取、派发；
+  恢复清单返回运行单自己冻结的正式策略。
 
 所有身份、余额、门槛、模型与价格均为每次本地建库的合成 fixture，v2 不接入默认 Runtime。
 结构指纹提交仍使用工程规范要求的 `run-db-baseline-replay.mjs --local-only --write-built`。

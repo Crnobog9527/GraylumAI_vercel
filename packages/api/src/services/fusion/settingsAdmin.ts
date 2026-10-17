@@ -3,6 +3,8 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { isPlainOpenRouterModel } from '../openRouterSearch';
 import { admissionDeadline } from '../runtime/admissionLimits';
 import { stagingRuntimeWindow } from '../runtime/stagingEnvironment';
+import { realRuntimeEnvironment } from '../runtime/productionEnvironment';
+import { loadProductionPolicy } from '../runtime/productionPolicy';
 import { parseStagingPolicy, type StagingPolicy } from '../runtime/stagingPolicy';
 import { admitFusionModel, FUSION_MODEL_COLUMNS, type FusionModelRow, type FusionPhase } from './models';
 import { readOpenRouterKey } from '../models/openRouterKey';
@@ -51,6 +53,10 @@ export const fusionSettingsView = (db: SupabaseClient) => readFusionSettings(db)
 
 /** The staging window as an administrator reads it; administrators need not be test-call actors and nothing is admitted. */
 async function adminWindow(db: SupabaseClient, actorId: string, env: Record<string, string | undefined>) {
+  // RUNTIME-PROD: production has no window; the admin route already requires an administrator.
+  if (realRuntimeEnvironment(env) === 'production')
+    // Offline: settings reads never renew a price snapshot over the network.
+    return loadProductionPolicy(db, actorId, env, {}, { offline: true }).catch(() => { throw new Error('FUSION_SETTINGS_UNAVAILABLE'); });
   const windowId = stagingRuntimeWindow(env);
   const result = await db.rpc('report_model_window', { p_actor_id: actorId, p_window_id: windowId });
   if (result.error) throw new Error('FUSION_SETTINGS_UNAVAILABLE');

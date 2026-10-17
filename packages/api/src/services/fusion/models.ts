@@ -7,6 +7,7 @@ import type { frozenCallPolicy } from '../bill2/service';
 import { PURPOSE_OUTPUT_CAP } from '../bill2/responseCapacity';
 import { isPlainOpenRouterModel } from '../openRouterSearch';
 import { readPaygHostPolicies } from '../runtime/paygHostPolicy';
+import { readPaygPolicies } from '../runtime/realHost';
 import { admitReasoning } from '../runtime/reasoningAdmission';
 import type { ReasoningPolicy } from '../runtime/reasoningPolicy';
 import type { StagingPolicy } from '../runtime/stagingPolicy';
@@ -52,7 +53,7 @@ export async function admitFusionModel(db: SupabaseClient, window: StagingPolicy
   const outputLimit = Math.min(outputTokens, row.max_tokens, quote.outputLimit, PURPOSE_OUTPUT_CAP);
   const reasoning = admitReasoning(row, phase === 'fusion_review' ? 'review' : 'writing',
     quote.providerLimits.providerSlug, outputLimit);
-  const policies = await readPaygHostPolicies(db, window, [quote], [{ modelId: row.id, phase, outputLimit, reasoning,
+  const policies = await readPaygPolicies(window)(db, window, [quote], [{ modelId: row.id, phase, outputLimit, reasoning,
     requestFormat: FUSION_REQUEST_FORMAT }], env, deadline);
   if (!policies?.[0]) throw new Error('FUSION_PAYG_REQUIRED');
   return { quote, policy: policies[0], outputLimit, reasoning };
