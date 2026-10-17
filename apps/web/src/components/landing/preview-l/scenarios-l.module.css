@@ -50,3 +50,8 @@
   .held .log { height: max(180px, calc(100svh - 524px)); max-height: none; }
   .held [data-centred] { margin-top: 6px; font-size: 14px; }
 }
+/* Narrow Android phones (360): the closing line stays on one line, and the chat leaves a little room above the button. */
+@media (max-width: 380px) {
+  .held [data-centred] { font-size: 13px; }
+  .held .log { height: max(180px, calc(100svh - 534px)); }
+}
