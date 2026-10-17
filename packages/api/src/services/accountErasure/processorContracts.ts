@@ -31,7 +31,9 @@ export const beginSchema = z.object({
 export const resultSchema = z.object({ stage: stageSchema }).strict();
 
 /** Every count key the account scrub RPCs may return (a `_skipped` suffix counts as remaining).
- * A new key added by a migration must be listed here, or every erasure stops at ERASURE_INVALID_RESULT. */
+ * A new key added by a migration must be listed here, or every erasure stops at ERASURE_INVALID_RESULT.
+ * Keys of tables dropped later (0271: ordinary_chat_requests and the two agent preference tables) stay
+ * listed: a database not yet migrated still returns them. */
 export const ERASURE_CONTENT_TABLES: ReadonlySet<string> = new Set([
   'runtime_executions', 'runtime_history_dependencies', 'runtime_session_batches', 'runtime_session_history',
   'runtime_tool_calls', 'runtime_scope_material', 'runtime_sessions', 'ordinary_chat_requests', 'messages',
