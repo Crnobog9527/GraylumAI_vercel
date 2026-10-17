@@ -5,7 +5,9 @@ import { useLayoutEffect, useRef } from 'react';
 import { X } from 'lucide-react';
 import { REPORT_TITLE, REPORT_WRITING_NOTICE } from '@/app/positioning/[draftId]/report-gen';
 import { CHAT_ACTION, ChatNoticeList } from '@/components/chat/ChatInlineNotice';
-import { MessageMarkdown } from '@/components/chat/MessageMarkdown';
+import { REPORT_OUTLINE_MIN_CHAPTERS, ReportWithOutline } from '@/components/chat-display/report-outline';
+import { ReportView } from '@/components/chat-display/report-view/report-view';
+import { useReportOutline } from '@/components/chat-display/use-report-outline';
 import type { ClipParts } from '@/components/landing/preview-j/PositioningClipJ';
 import result from '@/components/opc/positioning-result.module.css';
 import { BenchmarkTable } from '@/components/research/benchmark-table';
@@ -54,7 +56,7 @@ const CALLS: readonly Omit<ResearchCall, 'state'>[] = [
 const callsAt = (local: number): ResearchCall[] =>
   CALLS.map((call, index) => ({ ...call, state: local * CALLS.length > index + 0.5 ? 'succeeded' : 'running' } as ResearchCall));
 
-/** The whole report, for "看完整报告": its chapters in order, as Markdown (the version the overview is drawn from). */
+/** The whole report: its chapters in order, as Markdown (the version the overview is drawn from). */
 const REPORT_TEXT = OFFICE_WORKER_REPORT.revised.map(chapter => `## ${chapter.title}\n\n${chapter.markdown}`).join('\n\n');
 const OVERVIEW = SAMPLE_OVERVIEWS['office-worker'];
 
@@ -62,13 +64,21 @@ const OVERVIEW = SAMPLE_OVERVIEWS['office-worker'];
  * The report at the end of step one, round six (Owner 2026-10-17: "这个 1 万多字的报告是没人看的，把这里这个报告替换为我们现在新版
  * 的可视化的这个报告……这个报告的显示框现在是被裁切掉的"): the product's report dialog card (report-panel.tsx's layout, its
  * title, close button and "正在写报告…" with 停止) holding the visual overview the sample reports use (OverviewL), drawn
- * from this person's own report and written block by block; the whole report stays behind "看完整报告". The card fits the
+ * from this person's own report and written block by block. The card fits the
  * picture: its frame here gives it the picture's height and it scrolls inside, following the writing.
+ *
+ * Round seven (T4): once written, the whole report follows the overview the way the product dialog reads it — the real
+ * ReportView (REPORT-VISUAL, PR #1103) with its chapter list (ReportWithOutline, useReportOutline: a column on a computer,
+ * a "目录" bar on a phone, a click jumps to the chapter), the card widening as the product's does. This report carries
+ * no strategy data block, so ReportView shows its text without per-chapter charts; the overview above (OverviewL, with
+ * the earnings example) is the quick look.
  */
 function ReportDialogL({ writing, local }: { writing: boolean; local: number }) {
   const reveal = writing ? Math.min(1, Math.max(0.1, local * 1.15)) : 1;
   const live = writing && reveal < 1;
   const card = useRef<HTMLDivElement>(null);
+  const outline = useReportOutline(card);
+  const wide = !live && outline.chapters.length >= REPORT_OUTLINE_MIN_CHAPTERS;
   useLayoutEffect(() => {
     if (live && card.current) card.current.scrollTop = card.current.scrollHeight;
   }, [live, reveal]);
@@ -77,9 +87,9 @@ function ReportDialogL({ writing, local }: { writing: boolean; local: number }) 
   return (
     <div role="dialog" aria-modal="false" aria-label={REPORT_TITLE}
       className="absolute inset-0 z-50 flex justify-center bg-black/40 p-4">
-      <div className={picture.reportFit}>
-        {/* The card as report-panel.tsx's ReportDialog writes it, `!max-w-3xl` included. */}
-        <div ref={card} className={`${result.consentCard} !max-w-3xl`}>
+      <div className={wide ? `${picture.reportFit} ${picture.reportWide}` : picture.reportFit}>
+        {/* The card as report-panel.tsx's ReportDialog writes it, `!max-w-3xl`, or `!max-w-5xl` with its chapter list. */}
+        <div ref={card} className={`${result.consentCard} ${wide ? '!max-w-5xl' : '!max-w-3xl'}`}>
           <header>
             <h2>{REPORT_TITLE}</h2>
             <Button className={result.consentClose} variant="ghost" aria-label={`关闭${REPORT_TITLE}`} tabIndex={-1}>
@@ -88,12 +98,12 @@ function ReportDialogL({ writing, local }: { writing: boolean; local: number }) 
           </header>
           <div className="mt-4"><OverviewL data={OVERVIEW} reveal={reveal} money={<EarningsL />} /></div>
           <ChatNoticeList className="mt-4" notices={notices} />
-          {live ? null : (
-            <details className={picture.fullReport}>
-              <summary>{L_SAMPLES_REDO.fullReport}</summary>
-              <MessageMarkdown className="mt-3" text={REPORT_TEXT} />
-            </details>
-          )}
+          {/* The outline watches its text from the start (as in the product dialog); the text arrives once written. */}
+          <section className={live ? undefined : picture.fullReport} aria-label={L_SAMPLES_REDO.reportBody}>
+            <ReportWithOutline bodyRef={outline.bodyRef} chapters={outline.chapters} activeId={outline.activeId} onSelect={outline.select}>
+              {live ? null : <ReportView body={REPORT_TEXT} />}
+            </ReportWithOutline>
+          </section>
         </div>
       </div>
     </div>

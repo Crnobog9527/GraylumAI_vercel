@@ -22,7 +22,8 @@
 /* Step one's report (RealPartsL): the frame gives the product's dialog card the picture's height; the card scrolls inside. */
 .reportFit { display: flex; width: 100%; max-width: 48rem; height: 100%; }
 .reportFit > * { max-height: 100%; }
+/* Round seven (T4): with its chapter list the card is the product's wider one. */
+.reportWide.reportWide { max-width: 64rem; }
 .fullReport { margin-top: 16px; padding-top: 12px; border-top: 1px solid #eee; }
-.fullReport summary { cursor: default; color: #262626; font-size: 14px; font-weight: 500; }
 /* Round seven: the conversation's log, which the visitor may scroll (its content stays a picture). */
 .logHost { min-width: 0; }

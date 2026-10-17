@@ -19,6 +19,8 @@ export const L_SAMPLES_REDO = {
   open: '看这份报告',
   /** NEW (round six): the secondary entry to the whole report under the overview. */
   fullReport: '看完整报告',
+  /** Step one's report, round seven (T4): the whole report under the overview, with its chapter list. */
+  reportBody: '完整报告',
   close: '关闭',
   /** NEW (round five): the dialog's 15-second overview, its blocks' headings. */
   overview: {
