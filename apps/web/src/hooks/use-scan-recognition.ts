@@ -43,6 +43,8 @@ export function useScanRecognition() {
   const again = useRef(false);
   const listeners = useRef<ScanListeners>(NO_LISTENERS);
   const finished = useRef<() => void>(() => undefined);
+  const progressRef = useRef<Record<string, ScanProgress>>({});
+  progressRef.current = progress;
   const latest = useRef({ download, save, fail });
   latest.current = { download, save, fail };
   const listen = useCallback((next: ScanListeners) => {
@@ -122,13 +124,16 @@ export function useScanRecognition() {
     if (typeof BroadcastChannel === 'undefined') return;
     const peers = new BroadcastChannel(SCAN_CHANNEL);
     channel.current = peers;
-    peers.onmessage = () => {
-      setProgress((current) => Object.fromEntries(Object.entries(current).filter(([, value]) => value.state === 'running')));
+    // Only the documents the finished tab completed lose their notice; a paused or stopped one stays as it is.
+    peers.onmessage = (event: MessageEvent<unknown>) => {
+      const done = new Set(Array.isArray(event.data) ? event.data.filter((id): id is string => typeof id === 'string') : []);
+      setProgress((current) => Object.fromEntries(Object.entries(current).filter(([id, value]) => value.state === 'running' || !done.has(id))));
       listeners.current.onDocumentChanged();
     };
     return () => { peers.close(); channel.current = null; };
   }, []);
-  finished.current = () => channel.current?.postMessage('finished');
+  finished.current = () => channel.current?.postMessage(
+    Object.entries(progressRef.current).filter(([, value]) => value.state === 'done').map(([id]) => id));
 
   const busy = Object.values(progress).some((p) => p.state === 'running');
   // Leaving while a page is being recognised loses that page's work (it is redone next time), so warn first.
