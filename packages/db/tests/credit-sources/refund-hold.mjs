@@ -8,7 +8,9 @@ import { localDb, read } from '../runtime-view-perf/local-db.mjs';
 
 const migrationPath = 'packages/db/migrations/0289_pay_refunded_pack_hold.sql';
 const MARK = 'PAY-REFUND-HOLD';
-const HOOKED = ['atomic_pre_deduct(uuid,integer,text,uuid)', 'bill2_payg_claim(uuid,uuid,integer,jsonb)'];
+// Function -> marked lines 0289 adds to it.
+const HOOKED = { 'atomic_pre_deduct(uuid,integer,text,uuid)': 1, 'bill2_payg_claim(uuid,uuid,integer,jsonb)': 1,
+  'credit_source_apply(uuid,uuid,integer,text)': 2 };
 const db = await localDb(), c = db.client;
 const report = { build: db.build, migration: '0289', checks: [] };
 const v = async (sql, args = []) => (await c.query(sql, args)).rows[0]?.v;
@@ -129,6 +131,28 @@ try {
     WHERE source_order_id=$1 AND ledger_type='refund_clawback'`, [short.order])), [[-40, 60]], 'the shortfall is on record');
   report.checks.push('"clawback" takes the unused pack credits back once, capped at the balance, shortfall recorded; other credits stay spendable');
 
+  // A reservation that took pack credits before the refund and comes back afterwards returns them into the hold;
+  // after a clawback they are taken back on return (never below zero), so nothing escapes the settlement.
+  const u5 = await profile(0);
+  const inflight = await pack(u5, 100);
+  p = await reserve(u5, 30);
+  await externalRefund(inflight, 're_inflight');
+  assert.deepEqual([await balance(u5), await spendable(u5)], [70, 0]);
+  await refund(u5, p);
+  assert.deepEqual([await balance(u5), await packUsed(inflight.source), await spendable(u5)], [100, 0, 0],
+    'returned credits go back into the held pack');
+  const u6 = await profile(0);
+  const late = await pack(u6, 100);
+  p = await reserve(u6, 30);
+  await externalRefund(late, 're_late');
+  assert.equal((await settle(ops, late.order, 'clawback')).creditsTakenBack, 70);
+  assert.equal(await balance(u6), 0);
+  await refund(u6, p);
+  assert.equal(await balance(u6), 0, 'credits returned after the clawback are taken back too');
+  assert.deepEqual(await v(`SELECT jsonb_agg(amount ORDER BY id) v FROM credit_transactions WHERE source_order_id=$1
+    AND ledger_type='refund_clawback'`, [late.order]), [-70, -30]);
+  report.checks.push('reservations returned after the refund stay in the hold; after a clawback they are taken back on return');
+
   // A pack whose remainder cannot be proven (0275 "source unknown") is alert-only: never held, never clawed back
   // from the balance (PAY-DISPUTE-GUARD 4.3: never take other sources' credits); "kept" can still close the review.
   const u4 = await profile(20);
@@ -146,19 +170,21 @@ try {
   // Privileges: only the service role may settle; nobody calls the hold helper directly.
   for (const role of ['anon', 'authenticated', 'service_role']) {
     assert.equal(await v("SELECT has_function_privilege($1,'public.credit_package_refund_hold(uuid)','execute') v", [role]), false, role);
+    assert.equal(await v("SELECT has_function_privilege($1,'public.credit_package_refund_late_clawback(uuid,uuid,integer)','execute') v",
+      [role]), false, role);
     assert.equal(await v("SELECT has_function_privilege($1,'public.pay_common_pack_refund_review_settle(uuid,uuid,text)','execute') v",
       [role]), role === 'service_role', role);
   }
-  report.checks.push('settlement is service-role only; the hold helper is not callable by any client role');
+  report.checks.push('settlement is service-role only; the hold and late-clawback helpers are not callable by any client role');
 
   // Reapplying 0289 after the full chain is a structural no-op; each hooked function carries the marker once.
   const after = await catalog();
   await c.query(read(migrationPath));
   assert.deepEqual(await catalog(), after);
-  for (const fn of HOOKED) {
+  for (const [fn, lines] of Object.entries(HOOKED)) {
     const src = await v('SELECT pg_get_functiondef($1::regprocedure) v', ['public.' + fn]);
-    assert.equal(src.split(MARK).length - 1, 1, fn);
+    assert.equal(src.split(MARK).length - 1, lines, fn);
   }
-  report.checks.push('0289 reapplication after the full chain preserves the catalog; both reservation paths hooked exactly once');
+  report.checks.push('0289 reapplication after the full chain preserves the catalog; both reservation paths and the restore path hooked exactly once');
 } catch (error) { report.failed = String(error.stack ?? error); process.exitCode = 1; }
 finally { await db.close(); console.log(JSON.stringify(report, null, 2)); }

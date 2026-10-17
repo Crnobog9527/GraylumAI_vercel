@@ -11,7 +11,7 @@
 -- (the shortfall is Graylum's and is in the ledger); "kept" leaves them as ordinary balance (Graylum keeps the loss).
 -- Either way the hold ends, the decision is final and a repeat is a no-op.
 -- Repeatable: column IF NOT EXISTS, functions CREATE OR REPLACE, source edits guarded by a marker.
--- Recovery: restore 0275 credit_source_rows and the predecessor bodies without the marked lines; the review
+-- Recovery: restore 0275 credit_source_rows/credit_source_apply and the predecessor bodies without the marked lines; the review
 -- columns are then unused and kept (financial records are never dropped).
 BEGIN;
 SET LOCAL lock_timeout='5s';
@@ -112,26 +112,54 @@ BEGIN
   'creditsTakenBack',taken,'creditsShortfall',CASE WHEN p_decision='clawback' THEN unused-taken ELSE 0 END);
 END $$;
 
+-- Credits a reservation took from a pack that has since been clawed back here, returned to the balance afterwards
+-- (refund, abort, settlement below the reservation, PAYG compensation): take them back as well, never below zero,
+-- so a reservation in flight at settlement time cannot keep part of the refunded pack. Callers hold the profile lock.
+CREATE OR REPLACE FUNCTION public.credit_package_refund_late_clawback(p_user uuid,p_source uuid,p_n integer)
+RETURNS void LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
+DECLARE s credit_package_sources; balance integer; taken integer;
+BEGIN
+ SELECT * INTO s FROM credit_package_sources WHERE id=p_source AND user_id=p_user;
+ IF s.refund_review IS DISTINCT FROM 'clawback' OR coalesce(p_n,0)<=0 THEN RETURN; END IF;
+ SELECT credits INTO balance FROM profiles WHERE id=p_user FOR UPDATE;
+ taken:=least(greatest(balance,0),p_n);
+ UPDATE profiles SET credits=credits-taken WHERE id=p_user;
+ INSERT INTO credit_transactions(user_id,amount,type,description,ledger_type,reason_code,source_type,source_order_id,
+  idempotency_key,balance_before,balance_after,metadata)
+ VALUES(p_user,-taken,'deduction','Refunded credit pack settled (returned reservation)','refund_clawback','refund_clawback',
+  'stripe_refund',s.order_id,'pay-common:pack-review:'||s.order_id||':returned:'||gen_random_uuid(),balance,balance-taken,
+  jsonb_build_object('creditsReturned',p_n,'creditsTakenBack',taken,'creditsShortfall',p_n-taken,'shortfallAbsorbedBy','graylum'));
+END $$;
+
 REVOKE ALL ON FUNCTION public.credit_package_refund_hold(uuid) FROM PUBLIC,anon,authenticated,service_role;
 REVOKE ALL ON FUNCTION public.credit_source_rows(uuid) FROM PUBLIC,anon,authenticated,service_role;
+REVOKE ALL ON FUNCTION public.credit_package_refund_late_clawback(uuid,uuid,integer) FROM PUBLIC,anon,authenticated,service_role;
 REVOKE ALL ON FUNCTION public.pay_common_pack_refund_review_settle(uuid,uuid,text) FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON FUNCTION public.pay_common_pack_refund_review_settle(uuid,uuid,text) TO service_role;
 
--- Add the held pack credits to the existing quarantine of both reservation paths. One line after each anchor;
--- the marker makes a second run a no-op.
+-- Add the held pack credits to the existing quarantine of both reservation paths, and let returned reservations
+-- follow the hold (0275 credit_source_apply: a held pack takes its credits back; a clawed-back pack has them taken
+-- from the balance again). The marker makes a second run a no-op.
 DO $$ DECLARE f record;src text;BEGIN
  FOR f IN SELECT * FROM (VALUES
   ('public.atomic_pre_deduct(uuid,integer,text,uuid)',
    E'  IF v_review_required_count > 0 THEN\n',
-   E'  v_quarantined_terminated_amount := v_quarantined_terminated_amount + credit_package_refund_hold(p_user_id); -- PAY-REFUND-HOLD\n'),
+   E'  v_quarantined_terminated_amount := v_quarantined_terminated_amount + credit_package_refund_hold(p_user_id); -- PAY-REFUND-HOLD\n'
+   ||E'  IF v_review_required_count > 0 THEN\n'),
   ('public.bill2_payg_claim(uuid,uuid,integer,jsonb)',
    E' avail:=greatest(avail-quarantine,0);\n',
-   E' quarantine:=quarantine+credit_package_refund_hold(a); -- PAY-REFUND-HOLD\n')
- ) v(sig,anchor,line) LOOP
+   E' quarantine:=quarantine+credit_package_refund_hold(a); -- PAY-REFUND-HOLD\n avail:=greatest(avail-quarantine,0);\n'),
+  ('public.credit_source_apply(uuid,uuid,integer,text)',
+   E'    AND NOT EXISTS(SELECT 1 FROM payment_orders o WHERE o.id=order_id AND o.status IN (\'refunded\',\'partially_refunded\'));\n   ok:=FOUND;\n',
+   E'    AND (NOT EXISTS(SELECT 1 FROM payment_orders o WHERE o.id=order_id AND o.status IN (\'refunded\',\'partially_refunded\'))\n'
+   ||E'     OR refund_review IS NULL AND NOT EXISTS(SELECT 1 FROM credit_source_reviews r WHERE r.source_kind=\'credit_package\'\n'
+   ||E'      AND r.source_id=credit_package_sources.id)); -- PAY-REFUND-HOLD\n   ok:=FOUND;\n'
+   ||E'   IF NOT ok THEN PERFORM credit_package_refund_late_clawback(p_user,src.source_id,x); END IF; -- PAY-REFUND-HOLD\n')
+ ) v(sig,anchor,replacement) LOOP
   src:=pg_get_functiondef(f.sig::regprocedure);
   IF position('-- PAY-REFUND-HOLD' IN src)>0 THEN CONTINUE;END IF;
   IF array_length(string_to_array(src,f.anchor),1)<>2 THEN RAISE EXCEPTION 'PAY_REFUND_HOLD_SOURCE_MISMATCH: %',f.sig;END IF;
-  EXECUTE replace(src,f.anchor,f.line||f.anchor);
+  EXECUTE replace(src,f.anchor,f.replacement);
  END LOOP;
 END $$;
 
