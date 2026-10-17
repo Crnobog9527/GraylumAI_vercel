@@ -36,7 +36,9 @@ beforeAll(async () => {
           // Real Skill titles carry numbering and writing hints for the model (staging #1109 acceptance).
           const nums = '一二三四五六七八九十'.split('').concat(['十一','十二','十三','十四']);
           let i = 0;
-          const BODY = SAMPLE_REPORT_BODY_WITH_DATA.replace(/^## (.+)$/gm, (_, t) => '## ' + nums[i++] + '、' + t + '：从你的情况出发的完整说明' + (i % 2 ? '（约 800 字，3–10 个合格账号）' : '（至少 2000 字，建议约 2400 字）'));
+          const WIDE = '\\n\\n| 人群 | 他们在做什么 | 痛点 | 触发时刻 | 愿意付多少 | 为什么现在买 |\\n| --- | --- | --- | --- | --- | --- |\\n' + [1,2].map(n => '| 人群' + n + ' | 每天下班后还要照顾孩子和家里 | 担心时间不够又怕买贵 | 孩子生日前两周才开始找 | 愿意为省心多付一点 | 活动日期固定没有退路 |').join('\\n') + '\\n';
+          const BODY0 = SAMPLE_REPORT_BODY_WITH_DATA.replace(/^(## .+)$/m, (h) => h + WIDE);
+          const BODY = BODY0.replace(/^## (.+)$/gm, (_, t) => '## ' + nums[i++] + '、' + t + '：从你的情况出发的完整说明' + (i % 2 ? '（约 800 字，3–10 个合格账号）' : '（至少 2000 字，建议约 2400 字）'));
           const data = parseReportBody(BODY).data;
           data.data.benchmarks.accounts = data.data.benchmarks.accounts.map((a, i) => ({...a,
             metrics: {followers: 18000 - i * 9000, medianViews: 4200 - i * 1500, engagementRate: 0.05, weeklyPosts: 3, capturedAt: null}}));
@@ -58,7 +60,7 @@ beforeAll(async () => {
 }, 60000);
 afterAll(async () => { await browser?.close(); }, 30000);
 
-for (const viewport of [{ width: 1280, height: 900 }, { width: 375, height: 812 }]) {
+for (const viewport of [{ width: 1440, height: 900 }, { width: 1280, height: 900 }, { width: 1024, height: 800 }, { width: 375, height: 812 }]) {
   it(`shows the chapters, the charts and folded reasons at ${viewport.width}px without sideways scrolling`, async () => {
     const page = await browser.newPage({ viewport });
     const errors: string[] = [];
@@ -91,6 +93,17 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 375, height: 812 
         .map(element => `${element.tagName}.${element.className} ${element.scrollWidth}>${element.clientWidth}`));
       expect(overflow).toEqual([]);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      // Tables (markdown and data): wide screens wrap them to the width, nothing is cut off; phones scroll and say so.
+      const tables = await page.evaluate(() => [...document.querySelectorAll('table')].map(table => {
+        const box = table.parentElement!, lastCell = table.querySelector('tr:last-child td:last-child, tr:first-child th:last-child')!;
+        return { scroll: box.scrollWidth - box.clientWidth, lastRight: lastCell.getBoundingClientRect().right, boxRight: box.getBoundingClientRect().right };
+      }));
+      expect(tables.length).toBeGreaterThan(3);
+      if (viewport.width >= 768) for (const table of tables) {
+        expect(table.scroll).toBeLessThanOrEqual(1);
+        expect(table.lastRight).toBeLessThanOrEqual(table.boxRight + 1);
+      }
+      else expect(await page.evaluate(() => getComputedStyle(document.querySelector('table')!.parentElement!, '::before').content)).toContain('左右滑动');
       if (process.env.REPORT_VIEW_SHOTS) {
         const card = page.locator('[class*="consentCard"]');
         await card.evaluate(element => { element.style.maxHeight = 'none'; element.style.overflow = 'visible'; });
