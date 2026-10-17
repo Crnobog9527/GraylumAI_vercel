@@ -11,14 +11,16 @@ const SEC = 'MS4wLjABAAAA0123456789abcdefghijklmnopqrstuvwxyzABCDEFG_-';
 const deps = (fetchImpl: typeof fetch) => ({ apiKey: 'test-key', fetchImpl, now: FIXED_NOW, timeoutMs: 50 });
 
 describe('Douyin account routes', () => {
-  it('sends only a well-formed sec_user_id and caps the page size', () => {
+  it("sends only a well-formed sec_user_id and caps the page size at TikHub's documented 20", () => {
     expect(buildTikhubRequest({ platform: 'douyin', kind: 'account_profile', account: '123456' })).toEqual({ reason: 'INVALID_ACCOUNT' });
     expect(buildTikhubRequest({ platform: 'douyin', kind: 'account_profile', account: `${SEC}/x` })).toEqual({ reason: 'INVALID_ACCOUNT' });
     const profile = buildTikhubRequest({ platform: 'douyin', kind: 'account_profile', account: SEC });
     expect(profile).toEqual({ request: expect.objectContaining({ method: 'GET',
       url: `https://api.tikhub.io/api/v1/douyin/app/v3/handler_user_profile?sec_user_id=${SEC}` }) });
     const posts = buildTikhubRequest({ platform: 'douyin', kind: 'account_posts', account: SEC, limit: 500 });
-    expect('request' in posts && new URL(posts.request.url).searchParams.get('count')).toBe('30');
+    expect('request' in posts && new URL(posts.request.url).searchParams.get('count')).toBe('20');
+    const dflt = buildTikhubRequest({ platform: 'douyin', kind: 'account_posts', account: SEC });
+    expect('request' in dflt && new URL(dflt.request.url).searchParams.get('count')).toBe('20');
   });
 
   it('normalizes a profile and a post page; an empty aweme_list is "no results", not a failure', async () => {
