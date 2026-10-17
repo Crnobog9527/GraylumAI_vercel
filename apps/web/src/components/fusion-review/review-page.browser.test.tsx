@@ -137,7 +137,8 @@ it('plays a running review with the administrator\'s seat names, hands it to the
     await ui(page.getByRole('heading', { name: '评审团正在审阅你的定位报告' })).toBeVisible({ timeout: 8000 });
     await ui(page.getByText(/评审在后台进行/)).toBeVisible();
     await ui(page.getByText('挑刺审核人').first()).toBeVisible();
-    await ui(page.getByRole('button', { name: '停止评审' })).toBeVisible();
+    // Owner 2026-10-17: once started, a review cannot be stopped or ended by the user.
+    expect(await page.getByRole('button', { name: /停止评审|结束评审/ }).count()).toBe(0);
     expect(calls['fusionReview.continue']).toBeGreaterThanOrEqual(1);
     await page.getByRole('button', { name: '先去忙别的' }).click();
     expect(await page.evaluate(() => (window as unknown as { __pushed?: string }).__pushed)).toBe(`/positioning/${DRAFT}`);

@@ -555,10 +555,11 @@ describe('review flow', () => {
     expect(request.instructions).toContain('不要提到你是哪个模型');
   });
 
-  it('stop ends the review; continue then claims nothing', async () => {
+  it('offers no stop or end once started (Owner 2026-10-17); an ended review claims and dispatches nothing', async () => {
     const t = setup(() => opinion('major'));
+    expect('stop' in t.flow || 'end' in t.flow).toBe(false);
     await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
-    await t.flow.stop(String(db.review!.reviewId));
+    db.review!.state = 'stopped';
     expect(await t.flow.continue(String(db.review!.reviewId))).toMatchObject({ review: { state: 'stopped' }, calls: [] });
     await expect(t.flow.dispatch(String(db.review!.reviewId), randomUUID())).rejects.toThrow('FUSION_REVIEW_ENDED');
   });

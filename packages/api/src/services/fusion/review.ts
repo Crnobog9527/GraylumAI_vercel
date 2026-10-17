@@ -399,8 +399,6 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
     },
     /** The review as it stands, without advancing it (the page reads while the server advances). */
     read: async (reviewId: string) => settled(await record.read(reviewId)),
-    stop: (reviewId: string) => record.close(reviewId, 'stopped'),
-    end: (reviewId: string) => record.close(reviewId, 'interrupted'),
     /** Per-section adoption, step 1: validates the choices and, when any section is adopted, proposes the merged text
      * to R14 and returns its diff (field changes and the cascade of dependent steps) for the user to see. Nothing is
      * applied here. Choosing to keep every section records the choice at once (nothing to confirm). */
