@@ -136,7 +136,10 @@
     和普通 `runtime_admission_replay` 一样：同一 `requestId` 再来时先比较哈希，不一致就返回 `FUSION_COMPARE_REQUEST_CONFLICT`，不返回旧结果；
     一致的重放或并发请求拿到已有记录：判断结果已写入就直接返回同一结果，
     还在判断就返回"处理中"让前端稍后读，不再判断。判断结果（`clear / allow / block / unavailable`）写进对比记录、只能写一次；
-    判为拦截时记录结束为终态 `refused`、不建组；否则同一记录继续建组和领取。`admitting` 超过 5 分钟没写结果的记录视为失败（`refused`），
+    判为拦截时记录结束为终态 `refused`、不建组；否则同一记录继续建组和领取。
+    **判断已写、组还没建时可以接着做**：进程在写入 `clear` / `allow` / `unavailable` 之后、建组之前退出时，同一 `requestId` 的重试拿到"判断已写、
+    `group_id` 为空、还没过 5 分钟"的记录，不再调 Decisions，直接继续建组（`fusion_group_admit` 本身按 `requestId` 幂等，并发重试只会建一组），
+    然后领取和派发；过了 5 分钟才按失败处理。PR-2 验收：模拟判断写入后、建组前中断，重试不再调用 Decisions、能建组跑完。`admitting` 超过 5 分钟没写结果的记录视为失败（`refused`），
     换新的 `requestId` 才能再发。这样同一请求最多触发一次 Decisions 调用。
   - 静态拒绝和 Decisions 判为拦截：`estimate`（只静态）/ `start` 直接返回同一个拒绝（引导去做定位），不建组、不冻结、不收费；Decisions 这一次判断的费用和普通对话一样由 Graylum 承担。
   - **退款次数到上限**：普通 Runtime 在用户 24 小时内的定位兜底退款已达 `POSITIONING_REFUSAL_CAP`（5 次）时，除了 Decisions 判 `clear` 以外一律拒绝
@@ -153,6 +156,8 @@
   并正常返回，各列就会在用户不知情时拿到不同的回答上限。做法：按冻结的回答上限组装请求，测量"输入 + 回答上限"是否完整装进该模型窗口，
   装不下（或者调用 `fitNativeRequestOutput` 后请求有任何变化）就按 `FUSION_COMPARE_INPUT_TOO_LARGE` 拒绝整次对比。
   PR-2 验收：构造一个只有降低回答上限才装得下的模型，对比在冻结前被拒，不会悄悄缩短。
+  依据：Master Plan 第 4.2 节写的是"Skill 加资料放不进某个模型的上下文时，在扣费前拒绝该模型并说明原因"；"先按规则调低上限，仍装不下才拒绝"
+  只写在同一条的"评审模式另外"部分，对比模式没有这条规则，所以对比不调低上限。拒绝时告诉用户是哪个模型装不下，用户取消勾选它就能重发。
 - **模型名称（Q1 已定，Owner 2026-10-17）**：勾选框和每列回答的标题显示后台配置的真实模型名称（`ai_models` 里管理员配置的名称，不另设显示名）。
   `modelIdentity/display.ts` 现在只允许评审团界面显示真实名，PR-2 加一个对比界面的例外（`FUSION_COMPARE_SURFACE`），只有 `fusionCompare.*` 接口能传，
   其他接口照旧只返回"模型 A/B/C"；采用写回主对话后，主对话里这条回答不再标模型名（按普通对话显示）。
