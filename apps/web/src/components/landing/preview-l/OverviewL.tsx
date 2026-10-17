@@ -25,10 +25,12 @@ const shareOf = (text: string | null) => { const found = text?.match(/(\d+(?:\.\
  * the numbers to watch and this week's first steps. Every figure is the report's own text; a missing one is not drawn.
  * A summary drawn for the page, not a product screen: it carries 示意.
  */
-export function OverviewL({ data, reveal }: {
+export function OverviewL({ data, reveal, money }: {
   data: SampleOverview;
   /** How much of it has been written so far, 0 → 1 (step one's report being written); absent, all of it. */
   reveal?: number;
+  /** Shown at the end of the money card (round seven, T6: step one's report only, EarningsL). */
+  money?: ReactNode;
 }) {
   const copy = L_SAMPLES_REDO.overview;
   const counts = data.benchmarks.map(item => countOf(item.followers));
@@ -140,6 +142,7 @@ export function OverviewL({ data, reveal }: {
             </li>
           ))}
         </ol>
+        {money}
       </Block>
 
       <Block title={copy.plan30} icon={CalendarDays}>

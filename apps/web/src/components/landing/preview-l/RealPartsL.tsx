@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/button';
 import { L_SAMPLES_REDO } from '@/lib/landing/landing-copy-l-samples';
 import { OFFICE_WORKER_REPORT } from '@/lib/landing/sample-reports/office-worker';
 import { SAMPLE_OVERVIEWS } from '@/lib/landing/sample-reports/overview';
+import { EarningsL } from './EarningsL';
 import { OverviewL } from './OverviewL';
 import picture from './picture-l.module.css';
 
@@ -85,7 +86,7 @@ function ReportDialogL({ writing, local }: { writing: boolean; local: number }) 
               <X size={18} aria-hidden="true" />
             </Button>
           </header>
-          <div className="mt-4"><OverviewL data={OVERVIEW} reveal={reveal} /></div>
+          <div className="mt-4"><OverviewL data={OVERVIEW} reveal={reveal} money={<EarningsL />} /></div>
           <ChatNoticeList className="mt-4" notices={notices} />
           {live ? null : (
             <details className={picture.fullReport}>
