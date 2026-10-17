@@ -24,7 +24,8 @@ function requireEvidence(condition: unknown, reason: string): asserts condition 
 const review = (reason: string): RefundPolicyResult => ({ status: 'review_required', reason, quote: null, executable: false });
 function scopeMatches(row: { channel?: string; payment_channel?: string | null; mode?: string; payment_mode?: string | null;
   merchant_namespace: string | null }, order: PreviewOrder) {
-  return (row.channel ?? row.payment_channel) === 'stripe' && (row.mode ?? row.payment_mode) === 'test'
+  // R7 (0297): the refund target's own mode (verifyOrder: test or live); history never mixes modes.
+  return (row.channel ?? row.payment_channel) === 'stripe' && (row.mode ?? row.payment_mode) === order.payment_mode
     && row.merchant_namespace === order.merchant_namespace;
 }
 // PAY-STRIPE-MP: a card subscription order (0222) maps its invoices as 'payment' references, and an international
@@ -50,7 +51,7 @@ function mapped(evidence: SubscriptionRefundEvidence, order: PreviewOrder, kind:
 }
 function verifyOrder(order: PreviewOrder) {
   requireEvidence(order.item_type === 'membership_plan' && order.payment_channel === 'stripe'
-    && order.payment_mode === 'test' && order.merchant_namespace, 'PAY_REFUND_TEST_SUBSCRIPTION_ONLY');
+    && (order.payment_mode === 'test' || order.payment_mode === 'live') && order.merchant_namespace, 'PAY_REFUND_TEST_SUBSCRIPTION_ONLY');
   const snapshot = freezePurchaseSnapshot(order.purchase_snapshot);
   requireEvidence(snapshot.item_type === 'membership_plan' && snapshot.item_id === order.item_id
     && snapshot.billing_cycle === order.billing_cycle && snapshot.currency === order.currency
@@ -78,7 +79,7 @@ async function readInvoiceHistory(stripe: SubscriptionRefundStripe, evidence: Su
       for (const invoice of result.data) {
         requireEvidence(!seen.has(invoice.id) && seen.size < 2000, 'PAY_REFUND_PROVIDER_HISTORY_INCOMPLETE');
         seen.add(invoice.id);
-        requireEvidence(invoice.object === 'invoice' && invoice.livemode === false
+        requireEvidence(invoice.object === 'invoice' && invoice.livemode === (order.payment_mode === 'live')
           && objectId(invoice.parent?.subscription_details?.subscription) === subscriptionId,
         'PAY_REFUND_INVOICE_MISMATCH');
         // Open/draft invoices may still complete. They cannot prove a closed history.
@@ -115,7 +116,8 @@ async function readInvoiceHistory(stripe: SubscriptionRefundStripe, evidence: Su
 }
 async function providerFacts(stripe: SubscriptionRefundStripe, evidence: SubscriptionRefundEvidence, order: PreviewOrder) {
   const scope = await resolveStripeScope(stripe);
-  requireEvidence(scope.mode === 'test' && scope.merchant === order.merchant_namespace, 'PAY_REFUND_SCOPE_MISMATCH');
+  requireEvidence(scope.mode === order.payment_mode && scope.merchant === order.merchant_namespace, 'PAY_REFUND_SCOPE_MISMATCH');
+  const live = scope.mode === 'live';
   const invoices = await readInvoiceHistory(stripe, evidence, order);
   const invoice = invoices.find(row => row.orderId === order.id);
   requireEvidence(invoice, 'PAY_REFUND_INVOICE_MISSING');
@@ -127,18 +129,18 @@ async function providerFacts(stripe: SubscriptionRefundStripe, evidence: Subscri
   requireEvidence(payments.has_more === false && payments.data.length === 1, 'PAY_REFUND_INVOICE_PAYMENT_UNRESOLVED');
   const payment = payments.data[0];
   const intentId = objectId(payment.payment.payment_intent);
-  requireEvidence(payment.object === 'invoice_payment' && payment.livemode === false && payment.status === 'paid'
+  requireEvidence(payment.object === 'invoice_payment' && payment.livemode === live && payment.status === 'paid'
     && objectId(payment.invoice) === invoice.id && payment.payment.type === 'payment_intent' && intentId
     && payment.amount_paid === charged && payment.currency === order.currency
     && Number.isSafeInteger(payment.status_transitions?.paid_at), 'PAY_REFUND_INVOICE_PAYMENT_MISMATCH');
   const intent = await stripe.paymentIntents.retrieve(intentId);
   const chargeId = objectId(intent.latest_charge);
-  requireEvidence(intent.id === intentId && intent.livemode === false && intent.status === 'succeeded'
+  requireEvidence(intent.id === intentId && intent.livemode === live && intent.status === 'succeeded'
     && intent.amount_received === charged && intent.currency === order.currency && chargeId,
   'PAY_REFUND_PAYMENT_MISMATCH');
   const charge = await stripe.charges.retrieve(chargeId, { expand: ['balance_transaction'] });
   const balance = charge.balance_transaction;
-  requireEvidence(charge.id === chargeId && charge.livemode === false && charge.paid === true && charge.captured === true
+  requireEvidence(charge.id === chargeId && charge.livemode === live && charge.paid === true && charge.captured === true
     && objectId(charge.payment_intent) === intentId && charge.amount === charged
     && charge.amount_captured === charged && charge.currency === order.currency
     && balance && typeof balance !== 'string' && Number.isSafeInteger(balance.created), 'PAY_REFUND_CHARGE_MISMATCH');
@@ -216,7 +218,8 @@ export async function readSubscriptionRefundFacts(
     const kind = target.billingReason === 'subscription_create' && !order.source_order_id ? 'membership_first'
       : target.billingReason === 'subscription_cycle' ? 'renewal' : 'unknown';
     const policy: RefundPolicyInput = {
-      order: { id: order.id, userId: order.user_id, channel: 'stripe', mode: 'test', merchant: order.merchant_namespace!,
+      order: { id: order.id, userId: order.user_id, channel: 'stripe', mode: order.payment_mode as 'test' | 'live',
+        merchant: order.merchant_namespace!,
         currency: order.currency, paidAt, paidMinor: provider.cash.paidMinor, refundedMinor: 0,
         paymentEvidenceRef: hash(provider), kind, refundState: 'none' },
       ticket: { id: last.ticket.id, userId: last.ticket.user_id, orderId: order.id,

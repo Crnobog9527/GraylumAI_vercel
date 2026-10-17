@@ -17,6 +17,16 @@ describe('monthly first purchase approval material (not approval)', () => {
     const legacy = prepareMonthlyRefundQuote(policy, binding);
     expect(legacy.status === 'eligible' && 'taxMinor' in legacy.quote.terms).toBe(false);
   });
+  it('R7: freezes the order\'s own Stripe mode (live in production) into the terms and their version', () => {
+    const { policy, binding } = quoteInput();
+    const test = prepareMonthlyRefundQuote(policy, binding);
+    const live = prepareMonthlyRefundQuote({ ...policy, order: { ...policy.order, mode: 'live' } }, binding);
+    expect(test).toMatchObject({ status: 'eligible', quote: { terms: { mode: 'test' } } });
+    expect(live).toMatchObject({ status: 'eligible', quote: { terms: { mode: 'live' } } });
+    if (test.status !== 'eligible' || live.status !== 'eligible') throw new Error('unreachable');
+    expect(live.quote.versionHash).not.toBe(test.quote.versionHash);
+    expect(monthlyRefundVersion(test.quote.terms)).toBe(test.quote.versionHash);
+  });
   it.each(['yearly', 'one_time', 'unknown'])('rejects unsupported %s cycle', billingCycle => {
     const { policy, binding } = quoteInput(); binding.billingCycle = billingCycle;
     expect(prepareMonthlyRefundQuote(policy, binding)).toMatchObject({ status: 'review_required', executable: false });
@@ -38,7 +48,6 @@ describe('monthly first purchase approval material (not approval)', () => {
     ['renewal', f => { f.policy.order.kind = 'renewal'; }],
     ['upgrade', f => { f.policy.order.kind = 'pro_to_gold'; }],
     ['waffo', f => { f.policy.order.channel = 'waffo'; }],
-    ['live', f => { f.policy.order.mode = 'live'; }],
     ['consumed', f => { f.policy.consumption.state = 'consumed'; }],
     ['hold from before payment', f => { f.policy.consumption.settlementState = 'pending'; }],
     ['missing history', f => { f.policy.membershipHistory = undefined; }],
