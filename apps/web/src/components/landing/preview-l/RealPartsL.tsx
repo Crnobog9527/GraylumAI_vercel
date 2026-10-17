@@ -13,7 +13,11 @@ import type { BenchmarkRow } from '@/components/research/benchmark-table-model';
 import { ResearchCallList } from '@/components/research/research-call-list';
 import type { ResearchCall } from '@/components/research/research-model';
 import { Button } from '@/components/ui/button';
+import { L_SAMPLES_REDO } from '@/lib/landing/landing-copy-l-samples';
 import { OFFICE_WORKER_REPORT } from '@/lib/landing/sample-reports/office-worker';
+import { SAMPLE_OVERVIEWS } from '@/lib/landing/sample-reports/overview';
+import { OverviewL } from './OverviewL';
+import picture from './picture-l.module.css';
 
 /**
  * Sample L, round four (Owner 2026-10-17: "落地页所有产品界面的这个组件，你不要自己再重新写一遍"): the real product's
@@ -49,35 +53,47 @@ const CALLS: readonly Omit<ResearchCall, 'state'>[] = [
 const callsAt = (local: number): ResearchCall[] =>
   CALLS.map((call, index) => ({ ...call, state: local * CALLS.length > index + 0.5 ? 'succeeded' : 'running' } as ResearchCall));
 
-/** The whole report as the product writes it: its chapters in order, as Markdown. */
-const REPORT_TEXT = OFFICE_WORKER_REPORT.original.map(chapter => `## ${chapter.title}\n\n${chapter.markdown}`).join('\n\n');
+/** The whole report, for "看完整报告": its chapters in order, as Markdown (the version the overview is drawn from). */
+const REPORT_TEXT = OFFICE_WORKER_REPORT.revised.map(chapter => `## ${chapter.title}\n\n${chapter.markdown}`).join('\n\n');
+const OVERVIEW = SAMPLE_OVERVIEWS['office-worker'];
 
+/**
+ * The report at the end of step one, round six (Owner 2026-10-17: "这个 1 万多字的报告是没人看的，把这里这个报告替换为我们现在新版
+ * 的可视化的这个报告……这个报告的显示框现在是被裁切掉的"): the product's report dialog card (report-panel.tsx's layout, its
+ * title, close button and "正在写报告…" with 停止) holding the visual overview the sample reports use (OverviewL), drawn
+ * from this person's own report and written block by block; the whole report stays behind "看完整报告". The card fits the
+ * picture: its frame here gives it the picture's height and it scrolls inside, following the writing.
+ */
 function ReportDialogL({ writing, local }: { writing: boolean; local: number }) {
-  const shown = writing ? Math.min(1, Math.max(0.12, local * 1.1)) : 1;
-  const text = REPORT_TEXT.slice(0, Math.round(REPORT_TEXT.length * shown));
-  const live = writing && shown < 1;
-  // The card keeps the product's own size; the layer over the picture scrolls when the picture is shorter than it.
-  const layer = useRef<HTMLDivElement>(null);
+  const reveal = writing ? Math.min(1, Math.max(0.1, local * 1.15)) : 1;
+  const live = writing && reveal < 1;
   const card = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
-    if (!live) return;
-    for (const node of [card.current, layer.current]) if (node) node.scrollTop = node.scrollHeight;
-  }, [live, text]);
+    if (live && card.current) card.current.scrollTop = card.current.scrollHeight;
+  }, [live, reveal]);
   const notices = live ? [{ id: 'report-live', tone: 'status' as const, busy: true, text: REPORT_WRITING_NOTICE,
     actions: [{ label: CHAT_ACTION.stop, onClick: () => undefined }] }] : [];
   return (
-    <div ref={layer} role="dialog" aria-modal="false" aria-label={REPORT_TITLE}
-      className="absolute inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4">
-      {/* The card as report-panel.tsx's ReportDialog writes it, `!max-w-3xl` included. */}
-      <div ref={card} className={`${result.consentCard} !max-w-3xl`}>
-        <header>
-          <h2>{REPORT_TITLE}</h2>
-          <Button className={result.consentClose} variant="ghost" aria-label={`关闭${REPORT_TITLE}`} tabIndex={-1}>
-            <X size={18} aria-hidden="true" />
-          </Button>
-        </header>
-        <MessageMarkdown className="mt-4" text={text} streaming={live} />
-        <ChatNoticeList className="mt-4" notices={notices} />
+    <div role="dialog" aria-modal="false" aria-label={REPORT_TITLE}
+      className="absolute inset-0 z-50 flex justify-center bg-black/40 p-4">
+      <div className={picture.reportFit}>
+        {/* The card as report-panel.tsx's ReportDialog writes it, `!max-w-3xl` included. */}
+        <div ref={card} className={`${result.consentCard} !max-w-3xl`}>
+          <header>
+            <h2>{REPORT_TITLE}</h2>
+            <Button className={result.consentClose} variant="ghost" aria-label={`关闭${REPORT_TITLE}`} tabIndex={-1}>
+              <X size={18} aria-hidden="true" />
+            </Button>
+          </header>
+          <div className="mt-4"><OverviewL data={OVERVIEW} reveal={reveal} /></div>
+          <ChatNoticeList className="mt-4" notices={notices} />
+          {live ? null : (
+            <details className={picture.fullReport}>
+              <summary>{L_SAMPLES_REDO.fullReport}</summary>
+              <MessageMarkdown className="mt-3" text={REPORT_TEXT} />
+            </details>
+          )}
+        </div>
       </div>
     </div>
   );

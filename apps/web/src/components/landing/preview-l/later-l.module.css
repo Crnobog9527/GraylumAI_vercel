@@ -18,7 +18,10 @@
 .note { margin: 0; max-width: 46em; color: var(--j-ink); font-size: 16.5px; line-height: 1.7; }
 .picture { position: relative; height: clamp(520px, 64svh, 640px); overflow: hidden; border: 1px solid var(--j-line); border-radius: 22px; box-shadow: var(--j-shadow-lift); }
 @media (max-width: 767px) { .picture { height: 560px; } }
-.chat { height: 100%; overflow: hidden; }
+.chat { flex: 1 1 auto; min-height: 0; overflow: hidden; }
+/* The work chat's message box, pinned under the conversation as on the product page. */
+.composer { flex: none; padding: 0 18px 10px; }
+@media (max-width: 860px) { .composer { padding: 0 12px 8px; } }
 
 /* Planned (not built yet): the voice profile and its side-by-side, as MASTER_PLAN §5 describes them. */
 .voice { display: grid; gap: 12px; margin: 0 0 24px; }

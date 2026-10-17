@@ -5,6 +5,7 @@ import creator from './overview/creator.json';
 import crossBorder from './overview/cross-border.json';
 import designer from './overview/designer.json';
 import handmade from './overview/handmade.json';
+import officeWorker from './overview/office-worker.json';
 import mom from './overview/mom.json';
 import realtor from './overview/realtor.json';
 import restaurant from './overview/restaurant.json';
@@ -33,11 +34,20 @@ export type SampleOverview = {
   differentiation: string;
   threePiece: { name: string; bio: string };
   contentPillars: { name: string; share: string | null }[];
-  funnel: { layer: string; offer: string; price: string | null }[];
+  /** Each layer, what it does and why it is there (the report's own words, round six). */
+  funnel: { layer: string; offer: string; price: string | null; why?: string }[];
   plan30: { week: number; focus: string }[];
   metricsToWatch: string[];
   firstStep: string[];
   sourceNote: string;
+  /**
+   * The person's account as the report recommends it (name and bio from the report's 三件套; followers and posts are
+   * the existing account's figures, when the report gives them); null when the person has no account yet.
+   */
+  ownAccount?: {
+    platform: string; displayName: string; which: string; bio: string;
+    followers: string | null; posts: string | null; topStat: string | null;
+  } | null;
 };
 
 export const SAMPLE_OVERVIEWS: Record<string, SampleOverview> = {
@@ -47,6 +57,7 @@ export const SAMPLE_OVERVIEWS: Record<string, SampleOverview> = {
   'cross-border': crossBorder,
   'designer': designer,
   'handmade': handmade,
+  'office-worker': officeWorker,
   'mom': mom,
   'realtor': realtor,
   'restaurant': restaurant,

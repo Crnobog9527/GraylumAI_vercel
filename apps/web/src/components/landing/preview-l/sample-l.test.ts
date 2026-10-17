@@ -97,7 +97,11 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
   });
 
   it('docks the open question in the real message box, as the product page does, and drops it once answered', () => {
-    const open = renderToStaticMarkup(withTrpc(createElement(PositioningPictureL, { moment: 0, local: 0 })));
+    // While its message is read, the question is folded into one line in the conversation; read, it is docked.
+    const reading = renderToStaticMarkup(withTrpc(createElement(PositioningPictureL, { moment: 0, local: 0 })));
+    expect(reading).toContain('data-question-card="folded"');
+    expect(reading).not.toContain('data-question-card="open"');
+    const open = renderToStaticMarkup(withTrpc(createElement(PositioningPictureL, { moment: 0, local: 0.12 })));
     expect(open).toContain('data-question-card="open"');
     expect(open.indexOf('data-question-card="open"')).toBeGreaterThan(open.indexOf('role="log"'));
     expect(open).toContain('AI 自媒体陪跑教练 · 主动引导');

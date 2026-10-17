@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import type { CSSProperties, ReactNode } from 'react';
+import { Children, type CSSProperties, type ReactElement, type ReactNode } from 'react';
 import { TriangleAlert } from 'lucide-react';
 import { L_SAMPLES_REDO } from '@/lib/landing/landing-copy-l-samples';
 import type { SampleOverview } from '@/lib/landing/sample-reports/overview';
@@ -22,13 +22,17 @@ const shareOf = (text: string | null) => { const found = text?.match(/(\d+(?:\.\
  * the numbers to watch and this week's first steps. Every figure is the report's own text; a missing one is not drawn.
  * A summary drawn for the page, not a product screen: it carries 示意.
  */
-export function OverviewL({ data }: { data: SampleOverview }) {
+export function OverviewL({ data, reveal }: {
+  data: SampleOverview;
+  /** How much of it has been written so far, 0 → 1 (step one's report being written); absent, all of it. */
+  reveal?: number;
+}) {
   const copy = L_SAMPLES_REDO.overview;
   const counts = data.benchmarks.map(item => countOf(item.followers));
   const most = Math.max(1, ...counts.map(count => count ?? 0));
   const pillars = data.contentPillars.map(item => ({ ...item, value: shareOf(item.share) }));
-  return (
-    <section className={styles.overview} aria-label={copy.title}>
+  const body: ReactElement<{ children: ReactNode }> = (
+    <>
       <header className={styles.head}>
         <p className={styles.who}><b>{data.persona.label}</b><span className={own.sketch}>{copy.sketch}</span></p>
         <p className={styles.whoLine}>{data.persona.who}</p>
@@ -130,8 +134,12 @@ export function OverviewL({ data }: { data: SampleOverview }) {
           </ul>
         </Block>
       </div>
-    </section>
+    </>
   );
+  // Written block by block: the blocks so far, in order.
+  const parts = Children.toArray(body.props.children);
+  const shown = reveal === undefined ? parts : parts.slice(0, Math.max(1, Math.ceil(parts.length * Math.min(1, reveal))));
+  return <section className={styles.overview} aria-label={copy.title}>{shown}</section>;
 }
 
 function Block({ title, todo = false, children }: { title: string; todo?: boolean; children: ReactNode }) {

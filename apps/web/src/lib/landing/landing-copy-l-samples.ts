@@ -17,6 +17,8 @@ export const L_SAMPLES_REDO = {
   /** NEW: the card's tag when the coach changed the person's direction. */
   adjusted: '方向已调整',
   open: '看这份报告',
+  /** NEW (round six): the secondary entry to the whole report under the overview. */
+  fullReport: '看完整报告',
   close: '关闭',
   /** NEW (round five): the dialog's 15-second overview, its blocks' headings. */
   overview: {

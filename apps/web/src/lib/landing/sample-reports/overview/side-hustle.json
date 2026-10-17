@@ -64,6 +64,15 @@
     "name": "Small Space Ops",
     "bio": "物流人用仓库方法整理小租房，租房友好，大多 20 美元以内"
   },
+  "ownAccount": {
+    "platform": "TikTok",
+    "displayName": "Small Space Ops",
+    "which": "recommended",
+    "bio": "物流人用仓库方法整理小租房，租房友好，大多 20 美元以内",
+    "followers": "几十个粉丝",
+    "posts": null,
+    "topStat": "一条衣柜收纳视频到过一万多播放"
+  },
   "contentPillars": [
     {
       "name": "流量型",
@@ -82,22 +91,26 @@
     {
       "layer": "免费内容",
       "offer": "每条解决一个具体问题的视频",
-      "price": null
+      "price": null,
+      "why": "让陌生人认识你；收藏的是真有这个烦恼的人"
     },
     {
       "layer": "入门商品",
       "offer": "TikTok Shop 单品",
-      "price": "十几到二十美元"
+      "price": "十几到二十美元",
+      "why": "第一次掏钱，最关键的分水岭：说明他真想解决"
     },
     {
       "layer": "整套方案",
       "offer": "一个角落 3–5 样东西的组合",
-      "price": "约 30–100 美元（假设）"
+      "price": "约 30–100 美元（假设）",
+      "why": "解决一整个角落；肯量尺寸的人已信你的判断"
     },
     {
       "layer": "品牌合作",
       "offer": "先寄样，再谈付费视频",
-      "price": null
+      "price": null,
+      "why": "把观众价值卖给品牌；被选上说明观众有购买力"
     }
   ],
   "plan30": [

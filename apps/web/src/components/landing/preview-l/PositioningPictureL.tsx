@@ -12,7 +12,7 @@ import takeover from '@/components/landing/preview-j/takeover-j.module.css';
 import { ConfirmJ, filledUpTo, personaInformation } from '@/components/landing/preview-j/WorkbenchPartsJ';
 import { CaptureChecklist } from '@/components/opc/capture-checklist';
 import result from '@/components/opc/positioning-result.module.css';
-import { OTHER_PLACEHOLDER, QuestionCardView } from '@/components/opc/question-card';
+import { OpenQuestionRecord, OTHER_PLACEHOLDER, QuestionCardView } from '@/components/opc/question-card';
 import { WorkComposer } from '@/components/opc/work-composer';
 import { Button } from '@/components/ui/button';
 import { J_PERSONA_DIRECTION, J_PERSONA_ON_CAMERA, J_STEPS } from '@/lib/landing/landing-copy-j-persona';
@@ -54,10 +54,13 @@ export function PositioningPictureL({ moment, local }: { moment: number; local: 
   // The open question sits docked above the message box, as on the product page; answered, it is gone.
   const question = last?.role === 'coach' && last.card && last.card in QUESTIONS ? QUESTIONS[last.card as keyof typeof QUESTIONS] : null;
   const confirming = step < 3 && lines.some(line => line.card === 'confirm');
+  const reading = step === 3 ? 1 : readThrough(local, all.length);
+  // As on the product page, an open question is either folded into one line in the conversation or docked on the message
+  // box: folded while its message is being read, docked once it has been read (round six: the message box stays whole).
+  const docked = Boolean(question) && reading >= 0.55;
 
   const log = useRef<HTMLDivElement>(null);
   const column = useRef<HTMLDivElement>(null);
-  const reading = step === 3 ? 1 : readThrough(local, all.length);
   useLayoutEffect(() => {
     const node = log.current;
     const newest = node?.querySelector<HTMLElement>('[data-line]:last-of-type');
@@ -68,12 +71,12 @@ export function PositioningPictureL({ moment, local }: { moment: number; local: 
     const top = newest.getBoundingClientRect().top - node.getBoundingClientRect().top + node.scrollTop;
     const extra = Math.max(0, newest.offsetHeight + 24 - node.clientHeight);
     node.scrollTop = Math.min(node.scrollHeight - node.clientHeight, Math.max(0, top - 12 + extra * reading));
-    // The column follows the reading too: first the conversation from the newest message's top, then down to the
-    // message box and the question docked on it, as a person reads before answering.
+    // The conversation area follows the reading too: first from the log's top, then on to what follows it (the
+    // step's confirm area). The message box stays pinned below it, whole.
     const end = box.scrollHeight - box.clientHeight;
     const logTop = Math.min(end, Math.max(0, box.scrollTop + node.getBoundingClientRect().top - box.getBoundingClientRect().top - 4));
     box.scrollTop = logTop + (end - logTop) * reading;
-  }, [moment, lines.length, reading, question]);
+  }, [moment, lines.length, reading, question, docked]);
 
   return (
     <div className={takeover.app}>
@@ -92,13 +95,16 @@ export function PositioningPictureL({ moment, local }: { moment: number; local: 
                     stepLabel={` · ${stepTitle}`} text={line.text} />
                 )}
                 {line.card === 'fetch' || line.card === 'table' ? L_CLIP_PARTS.card?.(line.card, fetchLocal) : null}
+                {question && !docked && line === last ? <OpenQuestionRecord card={question} /> : null}
               </div>
             ))}
           </MentorChatLog>
           {confirming ? <ConfirmJ step={stepTitle} information={information} /> : null}
+        </div>
+        <div className={styles.bottom}>
           <div className={styles.composer}>
             <WorkComposer value="" onChange={noop} onSend={noop} label="给 AI 教练的回复" placeholder={OTHER_PLACEHOLDER} maxLength={8000}
-              attachment={question ? <QuestionCardView card={question} disabled docked /> : null} />
+              attachment={question && docked ? <QuestionCardView card={question} disabled docked /> : null} />
           </div>
           <footer className={result.publishBar}>
             <Button size="sm" variant="outline" tabIndex={-1}>{J_REPORT.export}</Button>

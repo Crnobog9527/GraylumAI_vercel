@@ -68,6 +68,15 @@
     "name": "怡婷・小店品牌改造",
     "bio": "帮咖啡、甜点、手作小店改头换面｜Logo・菜单・包装一次做齐"
   },
+  "ownAccount": {
+    "platform": "Instagram",
+    "displayName": "怡婷・小店品牌改造",
+    "which": "recommended",
+    "bio": "帮咖啡、甜点、手作小店改头换面｜Logo・菜单・包装一次做齐",
+    "followers": "约 900 追踪",
+    "posts": null,
+    "topStat": null
+  },
   "contentPillars": [
     {
       "name": "流量型",
@@ -86,27 +95,32 @@
     {
       "layer": "改造内容",
       "offer": "IG 图集、Threads 案例",
-      "price": "免费"
+      "price": "免费",
+      "why": "让陌生老板认识你；收藏的是真在想自己店的人"
     },
     {
       "layer": "免费门面健检",
       "offer": "每周公开点评 1 家",
-      "price": "免费"
+      "price": "免费",
+      "why": "找出有需求的老板；肯报名、同意公开的才真在烦恼"
     },
     {
       "layer": "品牌健诊",
       "offer": "线上 40 分钟 + 一页改造方向",
-      "price": "NT$2,500（假设，可抵扣套组）"
+      "price": "NT$2,500（假设，可抵扣套组）",
+      "why": "第一次付费；付过钱的人已经信你的判断"
     },
     {
       "layer": "品牌起步套组",
       "offer": "logo、标准色字、菜单、IG 版型等",
-      "price": "NT$30,000 起"
+      "price": "NT$30,000 起",
+      "why": "主要收入；留下最在意结果、预算够的人"
     },
     {
       "layer": "包装系列和年度视觉",
       "offer": "季节包装、新品贴纸",
-      "price": null
+      "price": null,
+      "why": "复购和口碑；回头客最精准、成本最低"
     }
   ],
   "plan30": [
