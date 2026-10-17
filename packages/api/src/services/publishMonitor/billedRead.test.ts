@@ -32,7 +32,7 @@ const answer = (route: string): ResearchCallResult => ({ vendor: 'tikhub', route
   truncated: false, fetchedAt: '2026-10-17T00:00:00.000Z' });
 
 function admin(opts: { stored?: Record<string, ResearchCallResult>; open?: { runId: string; policies: unknown[] };
-  recovery?: Array<Record<string, unknown>>; claimState?: string; closed?: boolean } = {}) {
+  recovery?: Array<Record<string, unknown>>; claimState?: string; closed?: boolean; finalizeState?: string } = {}) {
   const calls: Array<[string, Record<string, unknown>]> = [];
   let claims = 0;
   const rpc = vi.fn(async (name: string, args: Record<string, unknown>) => {
@@ -60,7 +60,8 @@ function admin(opts: { stored?: Record<string, ResearchCallResult>; open?: { run
       case 'bill2_dispatch': return ok({ dispatch: true });
       case 'bill2_record': return ok({});
       case 'bill2_read': return ok({ closed: opts.closed === true });
-      case 'bill2_close': case 'bill2_finalize': return ok({});
+      case 'bill2_close': return ok({});
+      case 'bill2_finalize': return ok({ state: opts.finalizeState ?? 'settled' });
       default: return { data: null, error: { message: `unexpected ${name}` } };
     }
   });
@@ -114,6 +115,16 @@ describe('publish-monitor billed TikHub read', () => {
     const order = names(a.calls);
     expect(a.calls.find(c => c[0] === 'bill2_close')![1].p_outcome).toBe('delivered');
     expect(order.indexOf('bill2_finalize')).toBeLessThan(order.indexOf('bill2_prepare'));
+  });
+
+  it('a run that finalizes as cost_pending (a call without its receipt) is not marked closed, so recovery can replay it', async () => {
+    const a = admin({ finalizeState: 'cost_pending' });
+    await billedTikhubRead(deps(a.db), keys, 'xiaohongshu', XHS);
+    expect(a.calls.some(c => c[0] === 'bill2_finalize')).toBe(true);
+    expect(a.calls.some(c => c[0] === 'publish_monitor_billed_closed')).toBe(false);
+    const settled = admin();
+    await billedTikhubRead(deps(settled.db), keys, 'xiaohongshu', XHS);
+    expect(settled.calls.some(c => c[0] === 'publish_monitor_billed_closed')).toBe(true);
   });
 
   it('resumes a close that already committed: the outcome is kept, only finalize and the marker repeat', async () => {

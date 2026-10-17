@@ -135,14 +135,19 @@ export async function closeRun(admin: Pick<SupabaseClient, 'rpc'>, actorId: stri
   if (!alreadyClosed.success) throw new BilledReadError('PUBLISH_MONITOR_BILLING_UNAVAILABLE');
   const result = delivered ? { kind: 'usable_result', evidenceRef: `publish-monitor:${runId}`,
     evidenceHash: createHash('sha256').update(`publish-monitor:${runId}`).digest('hex') } : null;
-  const steps: Array<[string, Record<string, unknown>]> = [];
-  if (!alreadyClosed.data.closed) steps.push(['bill2_close', { p_outcome: delivered ? 'delivered' : 'cancelled', p_result: result }]);
-  steps.push(['bill2_finalize', {}]);
-  for (const [name, args] of steps) {
-    const done = await admin.rpc(name, { p_actor_id: actorId, p_run_id: runId, ...args });
-    if (done.error) throw new BilledReadError('PUBLISH_MONITOR_BILLING_UNAVAILABLE');
+  if (!alreadyClosed.data.closed) {
+    const closed = await admin.rpc('bill2_close', { p_actor_id: actorId, p_run_id: runId,
+      p_outcome: delivered ? 'delivered' : 'cancelled', p_result: result });
+    if (closed.error) throw new BilledReadError('PUBLISH_MONITOR_BILLING_UNAVAILABLE');
   }
-  await rpc(admin, 'publish_monitor_billed_closed', { p_run_id: runId }, z.unknown());
+  const finalized = await admin.rpc('bill2_finalize', { p_actor_id: actorId, p_run_id: runId });
+  if (finalized.error) throw new BilledReadError('PUBLISH_MONITOR_BILLING_UNAVAILABLE');
+  // Marked closed only once BILL2 says the run is settled or refunded. A run still waiting on a receipt (cost_pending:
+  // a dispatched call whose receipt could not be recorded) stays listed, so the daily job replays the saved receipt.
+  const state = z.object({ state: z.string() }).passthrough().safeParse(finalized.data);
+  if (state.success && ['settled', 'refunded'].includes(state.data.state)) {
+    await rpc(admin, 'publish_monitor_billed_closed', { p_run_id: runId }, z.unknown());
+  }
 }
 
 /**
