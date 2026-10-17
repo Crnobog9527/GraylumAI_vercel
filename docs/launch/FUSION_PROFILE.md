@@ -112,9 +112,12 @@ Opus 4 次 1.5456（汇总对比 2 次 0.8724、大档 2 次 0.6731）；Sonnet 
    之后在后台点"同步价格/目录"填好 `config.pricing` 和目录，再做第 1 步的"写作"。回滚：`DELETE FROM ai_models WHERE id = <返回的 id>`（在任何调用使用它之前）。
 3. **测试窗口报价**（`runtime_test_windows` 9d02a18e 的 `call_policies`）：
    - 加 Opus：provider openrouter、protocol openrouter-chat-v1、account 与现有条目相同、inputLimit 196608、outputLimit 32768、multiplier 3、
-     providerLimits `{providerSlug:"anthropic", contextTokens:1000000, promptUsdPerMillion:"4", completionUsdPerMillion:"20", cacheWriteUsdPerMillion:"5", requestUsd:"0"}`、
+     providerLimits `{providerSlug:"anthropic", contextTokens:1000000, promptUsdPerMillion:"5", completionUsdPerMillion:"20", cacheWriteUsdPerMillion:"5", requestUsd:"0"}`、
      upperUsd 按 `openRouterBound` 计算、automaticRetry false、hiddenTools false、lookupSupported true。
-   - Sol 改现价：promptUsdPerMillion "2"、completionUsdPerMillion "10"、cacheWriteUsdPerMillion "2.5"，inputLimit 90000 → 196608，upperUsd 重算。
+   - Sol：promptUsdPerMillion "5"、completionUsdPerMillion "15"、cacheWriteUsdPerMillion "5"（价格不变），inputLimit 90000 → 196608，upperUsd 5.12288。
+   - **报价取值规则（2026-10-17 总控更正）**：准入用 `deriveFrozenPrices` 按价格快照推导最高单价——promptUsdPerMillion 取各适用档位里 max(输入价, 缓存写入价)，
+     档位按 contextTokens 判断（contextTokens 1000000 会进入 Sol 的 ≥272000 档）；报价低于推导值就拒绝（RUNTIME_PRICE_INCREASED）。
+     本节原写的 Sol "2/10/2.5"、Opus 输入 "4" 低于推导值，导致 10-17 staging 评审团复验第 1 轮被拒（#1003），staging 已改正为上面的数值。
 4. **`runtime_payg_staging`**：
    - **已完成**（总控 2026-10-17 第一批写入，记录在 #1056 评论）——Sonnet、Gemini 两条：`purposes` 加 `fusion_review`；`requestFormats` 加 `fusion-json-v1-stream`；
      `profileVersion` 改为 `pr665-r9+fusion-20261017-a`（这是一个标识字符串，代码和证据都不要求固定值，以 staging 实际写入的值为准）。
