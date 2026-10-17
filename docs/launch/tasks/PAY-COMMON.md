@@ -3,6 +3,23 @@
 状态：第四版修订（仅状态标记），待总控安排复核；本次只修改本文，不实施代码、迁移、远程数据库访问、支付调用或外部配置。
 PAY-WAFFO 不在本次范围。方案通过也不等于实施、迁移应用、渠道启用或合并批准。
 
+> **2026-10-12 起的补充（PAY-STRIPE-MP PR-6 同步；本文是 2026-10-03 的钱路方案，下面写"D17 后台只有 Waffo / Stripe 两个渠道选项""Waffo 未接入时拒绝新购买"的部分，已被按付款方式路由取代；以本段为准）**
+>
+> - **新购买不再用一个全局渠道开关选 Waffo / Stripe，而是按付款方式路由**（`methodRouting.ts`，[#856](https://github.com/Crnobog9527/GraylumAI_vercel/pull/856)，迁移 0221；Owner 决定见 [MASTER_PLAN 第 2.1 节](../MASTER_PLAN.md)，方案见 [MIGRATION-PLAN.md](../evidence/stripe-managed-payments-20261012/MIGRATION-PLAN.md)）：
+>
+>   | 付款方式 | 实际走 | 能买什么 |
+>   | --- | --- | --- |
+>   | `card`（国际银行卡 / Apple Pay / Google Pay） | Stripe Managed Payments（MP），Stripe 为卖家，税结账时另加 | 会员订阅；会员可买积分包（单笔） |
+>   | `card_cn`（中国大陆银行卡） | 普通 Stripe 订阅，不开 MP，Graylum 为卖家 | 只能买会员订阅，不能买积分包 |
+>   | `wechat_pay` / `alipay` | 普通 Stripe 单笔，不变 | 一次性会员、积分包 |
+>
+>   路由设置是 `payment_method_routes`，`card_cn` 缺省视为关闭；服务端只认用户选的方式，不用 IP 强制。Waffo 不再是任何方式的路由目标，但代码、数据表、回调和每日对账保留（PAY-WAFFO 已冻结），旧 Waffo 订单的续费、停止续费、退款仍沿原渠道——"旧订单原渠道"这条不变。
+> - **订单与金额**：`payment_orders.stripe_managed_payments` 在下单时冻结；订单快照 `tax_behavior` 统一记 `exclusive`，核对金额为"税前 = 价格 − 折扣"，MP 加的税单独记（`total_details.amount_tax`），其余付款方式金额不变（[#894](https://github.com/Crnobog9527/GraylumAI_vercel/pull/894)，迁移 0222）；`payment_provider_refs` 增加 `price_usage`（subscription / one_time / package）和首月优惠券映射，Gold 首月按"月付价 69 减一次性优惠券 20"下单。
+> - **付款后**：银行卡首次付款走 `pay_waffo_fulfill_payment`（与钱包同一套，[#909](https://github.com/Crnobog9527/GraylumAI_vercel/pull/909)，0237）；续费走 `pay_stripe_mp_renew_subscription`，只认 `subscription_cycle` 发票、按冻结标价、每张发票只发一次（[#922](https://github.com/Crnobog9527/GraylumAI_vercel/pull/922)，0238）；24 小时宽限、创始 7 天宽限、订阅状态同步见同一 PR；全额外部退款收回该期未用完积分并结束这一期，部分退款和积分包退款转人工（[#941](https://github.com/Crnobog9527/GraylumAI_vercel/pull/941)，0247）；04:00 的 `billing-reconcile` 增加"Stripe 银行卡对账"，由环境变量 `STRIPE_CARD_RECONCILIATION_MODE`（`test` / `live`，默认不设=关闭）控制（[#943](https://github.com/Crnobog9527/GraylumAI_vercel/pull/943)）。
+> - **退款与升级**：人工审批的积分包退款、订阅首购退款支持银行卡订单，含税金额规则：退给用户 = 税前 − 手续费（法律允许时 6%，按税前算）+ 已记录的税全额（[#951](https://github.com/Crnobog9527/GraylumAI_vercel/pull/951) 0252、[#953](https://github.com/Crnobog9527/GraylumAI_vercel/pull/953) 0253）；期末停止入口和 Pro→Gold 升级（新开 Gold 结账 + Pro 期末停止）见 [#949](https://github.com/Crnobog9527/GraylumAI_vercel/pull/949)（0251）。
+> - **开关**：银行卡下单的代码闸门只在 staging 部署打开（[#948](https://github.com/Crnobog9527/GraylumAI_vercel/pull/948)），后台开关默认关闭；正式环境在代码里关闭，打开需要 Owner 批准。前端付款方式选择、税务文案、条款勾选见 [#961](https://github.com/Crnobog9527/GraylumAI_vercel/pull/961)。
+> - 仍属 PAY-COMMON 的部分（共用购买契约、订单/订阅/发放快照、PR-5 积分来源通用化、BILL2 钱路）不因此改变。
+
 ## 1. 结论与范围
 
 复用现有商品、订单、订阅、积分发放和唯一账本，逐步把 Stripe 特定输入隔离在支付服务边缘。
@@ -112,7 +129,7 @@ PR-5 把剩余来源 join 改为内部订阅 ID，完成调用方核查后停止
 本版不新增事件总线或通用事件表；若实现证实字段无法满足原子性/容量，先在本方案范围内说明
 具体最小缺口并审阅调整，不能默默扩成新基础设施。
 
-### 4.2 D17：新购买渠道和原订单渠道
+### 4.2 D17：新购买渠道和原订单渠道（2026-10-12 起新购买改按付款方式路由，见文首补充；本节其余为历史方案，"旧订单原渠道"仍有效）
 
 - 后台标签就是“新购买使用的渠道”；显示当前选择、可用/未接入状态，以及“只影响新购买”。
   提供 Waffo / Stripe 两个选项，保存后刷新从服务器读回；失败不显示成功。切换须管理员明确操作。

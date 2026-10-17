@@ -51,6 +51,13 @@ export function workerProbe(target: string): string {
 })();`;
 }
 
+/** LIB-2d: the network and eval probes above, plus compiling a minimal WebAssembly module. */
+export function wasmWorkerProbe(target: string): string {
+  return workerProbe(target).replace("  await attempt('importScripts',", `  await attempt('wasmCompile', function () {
+    return WebAssembly.compile(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0])).then(function () { return 'compiled'; }); });
+  await attempt('importScripts',`);
+}
+
 /** Relay replacement: the same requests from the frame document, plus DOM-driven loads and storage. */
 export function frameProbe(target: string): string {
   return `(async function () {
