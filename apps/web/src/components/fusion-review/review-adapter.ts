@@ -124,8 +124,9 @@ const START_ERROR: Record<string, string> = {
   FUSION_REVIEW_INCOMPLETE: '评审团暂时没有开放。',
   FUSION_BUDGET_EXCEEDED: '这份报告太长，超出了评审团单次的成本上限，暂时不能评审。',
   FUSION_REVIEW_CREDITS: '可用积分不够开始这次评审，充值后再试。',
-  FUSION_MEMBERSHIP_REQUIRED: '评审团是会员功能，开通会员后可以使用。',
-  REPORT_MEMBERSHIP_REQUIRED: '评审团是会员功能，开通会员后可以使用。',
+  // Gold only (Owner 2026-10-17): a Pro member is already a member, so the message names the plan.
+  FUSION_MEMBERSHIP_REQUIRED: '评审团仅限 Gold 会员使用，升级到 Gold 后可以使用。',
+  REPORT_MEMBERSHIP_REQUIRED: '评审团仅限 Gold 会员使用，升级到 Gold 后可以使用。',
   FUSION_REVIEW_ACTIVE: '你还有一个评审正在进行，等它结束后再开新的。',
   FUSION_REVIEW_BREAKER: '评审最近多次没有完成，暂时停用了，请稍后再试或联系客服。',
   FUSION_REVIEW_VERSION_BLOCKED: '这份报告连续 3 次评审没有完成，已暂停对它评审，请联系客服。',

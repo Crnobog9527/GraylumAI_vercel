@@ -258,7 +258,7 @@ it('explains a refused start in plain words and keeps the page usable', async ()
     await ui(page.getByRole('link', { name: '评审完成，去逐章选择 →' })).toBeVisible();
     await page.getByRole('button', { name: '请评审团审阅报告' }).click();
     await page.getByRole('button', { name: '开始评审' }).click();
-    await ui(page.getByRole('alert')).toHaveText('评审团是会员功能，开通会员后可以使用。');
+    await ui(page.getByRole('alert')).toHaveText('评审团仅限 Gold 会员使用，升级到 Gold 后可以使用。');
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 30000);
