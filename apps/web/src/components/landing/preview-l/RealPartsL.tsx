@@ -4,6 +4,7 @@
 import { useLayoutEffect, useRef } from 'react';
 import { X } from 'lucide-react';
 import { REPORT_TITLE, REPORT_WRITING_NOTICE } from '@/app/positioning/[draftId]/report-gen';
+import { DisplayHeading } from '@/components/chat-display/display-heading';
 import { CHAT_ACTION, ChatNoticeList } from '@/components/chat/ChatInlineNotice';
 import type { ClipParts } from '@/components/landing/preview-j/PositioningClipJ';
 import result from '@/components/opc/positioning-result.module.css';
@@ -85,7 +86,7 @@ function ReportDialogL({ writing, local }: { writing: boolean; local: number }) 
         {/* The card as report-panel.tsx's ReportDialog writes it, `!max-w-3xl` included. */}
         <div ref={card} className={`${result.consentCard} !max-w-3xl`}>
           <header>
-            <h2>{REPORT_TITLE}</h2>
+            <DisplayHeading as="h2">{REPORT_TITLE}</DisplayHeading>
             <Button className={result.consentClose} variant="ghost" aria-label={`关闭${REPORT_TITLE}`} tabIndex={-1}>
               <X size={18} aria-hidden="true" />
             </Button>

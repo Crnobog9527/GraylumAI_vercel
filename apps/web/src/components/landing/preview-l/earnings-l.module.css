@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 /* Round seven (T6): "一个月能赚多少？算给你看", in the report overview's money card (overview-l.module.css's palette). */
 .earnings { display: grid; gap: 12px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--j-line); }
-.earnings h5 { margin: 0; color: var(--j-ink); font-size: 15px; font-weight: 600; }
+.title { margin: 0; color: var(--j-ink); font-size: 15px; font-weight: 600; }
 .switch { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; color: var(--j-body); font-size: 13px; }
 .switch [role='radiogroup'] { display: inline-flex; padding: 3px; border-radius: 999px; background: #f4f3ef; }
 .switch button {
@@ -24,7 +24,7 @@
 .total b { color: var(--j-ink); font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .total em { color: var(--j-gold-text); font-size: 13px; font-style: normal; font-weight: 600; }
 .formula, .layers { display: grid; gap: 6px; padding: 12px 14px; border-radius: 12px; background: #f7f6f2; }
-.formula h6, .layers h6 { margin: 0; color: var(--j-ink); font-size: 14px; font-weight: 600; }
+.subtitle { margin: 0; color: var(--j-ink); font-size: 14px; font-weight: 600; }
 .general { margin: 0; color: var(--j-ink); font-size: 13px; line-height: 1.7; }
 .put { display: grid; gap: 2px; margin: 0; color: var(--j-ink); font-size: 13px; font-variant-numeric: tabular-nums; line-height: 1.7; }
 .plain { margin: 0; color: var(--j-body); font-size: 13px; line-height: 1.7; }

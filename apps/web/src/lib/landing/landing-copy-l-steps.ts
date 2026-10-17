@@ -62,6 +62,10 @@ export const L_SCENARIOS = {
   label: '选一个场景',
   /** Not a product window: a marketing comparison. */
   badge: '示意',
+  /** Round nine (V5): under the held region, what the next notch of the wheel does. */
+  hintNext: (next: number, count: number) => `往下滚，看下一个场景（${next}/${count}）`,
+  hintFinish: (count: number) => `往下滚，看完这个场景（${count}/${count}）`,
+  hintOn: '往下滚，继续',
   /** By the task's index in L_TASKS. */
   items: [
     { tab: '加做小红书', title: '同样问「小红书也想做起来，该怎么弄」', lede: '一个给你一套通用做法，一个按你已有的 TikTok 数据，告诉你哪些不用变、哪些要改。' },

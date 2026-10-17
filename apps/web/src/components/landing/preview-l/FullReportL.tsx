@@ -3,6 +3,7 @@
 
 import { useRef, useState } from 'react';
 import { FileText, X } from 'lucide-react';
+import { AsDemo } from '@/components/chat-display/display-heading';
 import { ReportWithOutline } from '@/components/chat-display/report-outline';
 import { ReportView } from '@/components/chat-display/report-view/report-view';
 import { useReportOutline } from '@/components/chat-display/use-report-outline';
@@ -43,9 +44,10 @@ export function FullReportL({ title, text, slug }: { title: string; text?: strin
           </button>
         </header>
         {/* The outline watches its text from the start; the text arrives when the dialog is first opened. */}
-        <ReportWithOutline bodyRef={outline.bodyRef} chapters={outline.chapters} activeId={outline.activeId} onSelect={outline.select}>
+        {/* An example of the product's report: its chapter titles are no page headings (SEO_GEO_SPEC section 6). */}
+        <AsDemo><ReportWithOutline bodyRef={outline.bodyRef} chapters={outline.chapters} activeId={outline.activeId} onSelect={outline.select}>
           {shown || body !== null ? (body === null ? <p className={styles.loading}>{COPY.loading}</p> : <ReportView body={body} />) : null}
-        </ReportWithOutline>
+        </ReportWithOutline></AsDemo>
       </dialog>
     </>
   );

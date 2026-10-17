@@ -49,7 +49,7 @@ export function EarningsL() {
   const top = rolled[0];
   return (
     <section className={styles.earnings} aria-labelledby={`${base}-title`}>
-      <h5 id={`${base}-title`}>{E.title}</h5>
+      <p id={`${base}-title`} className={styles.title}>{E.title}</p>
       <div className={styles.switch}>
         <span id={`${base}-switch`}>{E.switchLabel}</span>
         <div role="radiogroup" aria-labelledby={`${base}-switch`}>
@@ -59,7 +59,7 @@ export function EarningsL() {
         </div>
       </div>
       <div className={styles.formula}>
-        <h6>{E.formula.title}</h6>
+        <p className={styles.subtitle}>{E.formula.title}</p>
         <p className={styles.general}>{E.formula.general}</p>
         <p className={styles.put}>
           <span>= {E.formula.plays[tier]} × 0.2% ×（{E.formula.rates}）</span>
@@ -84,7 +84,7 @@ export function EarningsL() {
         {E.yearly[tier] ? <em>{E.yearly[tier]}</em> : null}
       </p>
       <div className={styles.layers}>
-        <h6>{E.layers.title}</h6>
+        <p className={styles.subtitle}>{E.layers.title}</p>
         <ol>{E.layers.items.map(item => <li key={item.name}><b>{item.name}</b><span>{item.text}</span></li>)}</ol>
         <p className={styles.summary}>{E.layers.close}</p>
       </div>

@@ -3,6 +3,7 @@
 
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { ChevronsDown } from 'lucide-react';
+import { AsDemo } from '@/components/chat-display/display-heading';
 import compare from '@/components/landing/preview-j/compare-j.module.css';
 import page from '@/components/landing/preview-j/j.module.css';
 import { L_TASKS, L_TASKS_TITLE } from '@/lib/landing/landing-copy-l-compare';
@@ -21,6 +22,9 @@ const BEAT_MS = 1100;
 const HOLD_BEATS = 3;
 /** After the visitor scrolls the page, the play waits this long before going on by itself. */
 const SCROLL_QUIET_MS = 1500;
+/** One step of the wheel or a finger (round nine, V5): this much scrolling, and not sooner than this after the last. */
+const STEP_PX = 50;
+const STEP_MS = 420;
 const SEEN_KEY = 'graylum-landing-l-scenarios-seen';
 const reducedMotion = () => Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
 const readSeen = () => { try { return window.localStorage.getItem(SEEN_KEY) === '1'; } catch { return false; } };
@@ -57,6 +61,11 @@ export function scenarioAt(items: readonly Item[], position: number) {
  * to the next scenario by itself only when this one is written, has been on screen 8 seconds since, and the pointer has
  * been out of the chat windows for a second (a finger in them holds it 8 seconds); a thin bar on the next tab fills for
  * 3 seconds first and empties when the pointer comes back. A tab clicked stays until the same holds.
+ * Round nine (V5, Owner 2026-10-18: "我老以为我卡在这个页面了，怎么滚都没用"): while the region holds, the wheel (or a
+ * finger) always does something, one step per notch: down finishes the scenario being written, or, written, goes on
+ * to the next; up goes back to the one before, shown finished. Over the coach's chat it first scrolls the chat, and
+ * only at its end moves the scenarios. With the fourth written, the page goes on. A line under the region says what
+ * the next notch does, with the four scenarios as a bar.
  * Server HTML, no JavaScript and reduced motion: one scenario at a time with the tabs, each conversation whole.
  */
 export function ScenariosL({ flags, after }: { flags: LandingFlags; after?: ReactNode }) {
@@ -74,34 +83,75 @@ export function ScenariosL({ flags, after }: { flags: LandingFlags; after?: Reac
   const ref = useRef<HTMLDivElement>(null);
   const tabs = useRef<HTMLDivElement>(null);
   const lastScroll = useRef(0);
-  const lastProgress = useRef(0);
   const base = useId();
   const startOf = (index: number) => items.slice(0, index).reduce((sum, item) => sum + spanOf(item), 0);
 
   useEffect(() => { setHeld(!reducedMotion()); setSeen(readSeen()); }, []);
-  // The page's scroll through the region sets the position: down never moves it back, up does.
+  const at = scenarioAt(items, position);
+  // What one step of the wheel does now (V5); read by the listener below, which stays bound.
+  const markPlayed = (index: number) => setPlayed(list => {
+    if (list.includes(index)) return list;
+    const next = [...list, index];
+    writePlayed(next);
+    return next;
+  });
+  const steps = useRef({ index: 0, written: false, last: false, finish: () => {}, next: () => {}, prev: () => {} });
+  // The scroll only tells whether the region is on screen; the wheel and fingers move it (V5).
   useEffect(() => {
     const node = ref.current;
     if (!held || !node) return;
     let frame = 0;
+    let acc = 0;
+    let lastStep = 0;
+    let touchY = 0;
     const measure = () => {
       frame = 0;
       const rect = node.getBoundingClientRect();
       setInView(rect.top < window.innerHeight && rect.bottom > 0);
-      const progress = Math.min(1, Math.max(0, -rect.top / Math.max(1, rect.height - window.innerHeight)));
-      const down = progress >= lastProgress.current;
-      if (progress !== lastProgress.current) lastScroll.current = Date.now();
-      lastProgress.current = progress;
-      const scrolled = Math.floor(progress * total);
-      setPosition(current => (down ? Math.max(current, scrolled) : scrolled));
     };
     const onScroll = () => { if (!frame) frame = requestAnimationFrame(measure); };
+    const holding = () => { const rect = node.getBoundingClientRect(); return rect.top <= 4 && rect.bottom >= window.innerHeight - 4; };
+    // Over the coach's chat, the chat scrolls first, as long as it can go further that way.
+    const chatScrolls = (target: EventTarget | null, delta: number) => {
+      const log = target instanceof Element ? target.closest<HTMLElement>('[data-coach-log]') : null;
+      if (!log) return false;
+      return delta > 0 ? log.scrollTop + log.clientHeight < log.scrollHeight - 1 : log.scrollTop > 0;
+    };
+    const step = (delta: number, event: Event) => {
+      if (!holding() || chatScrolls(event.target, delta)) return;
+      const now = steps.current;
+      if (delta > 0 && now.last && now.written) return;
+      if (delta < 0 && now.index === 0) return;
+      event.preventDefault();
+      lastScroll.current = Date.now();
+      acc += delta;
+      if (Math.abs(acc) < STEP_PX || performance.now() - lastStep < STEP_MS) return;
+      acc = 0;
+      lastStep = performance.now();
+      if (delta < 0) now.prev();
+      else if (now.written) now.next();
+      else now.finish();
+    };
+    const onWheel = (event: WheelEvent) => step(event.deltaY * (event.deltaMode === 1 ? 16 : 1), event);
+    const onTouchStart = (event: TouchEvent) => { touchY = event.touches[0]?.clientY ?? 0; acc = 0; };
+    const onTouchMove = (event: TouchEvent) => {
+      const y = event.touches[0]?.clientY ?? touchY;
+      step(touchY - y, event);
+      touchY = y;
+    };
     measure();
     window.addEventListener('scroll', onScroll, { passive: true });
     window.addEventListener('resize', onScroll);
-    return () => { cancelAnimationFrame(frame); window.removeEventListener('scroll', onScroll); window.removeEventListener('resize', onScroll); };
-  }, [held, total]);
-  const at = scenarioAt(items, position);
+    window.addEventListener('wheel', onWheel, { passive: false });
+    window.addEventListener('touchstart', onTouchStart, { passive: true });
+    window.addEventListener('touchmove', onTouchMove, { passive: false });
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener('scroll', onScroll); window.removeEventListener('resize', onScroll);
+      window.removeEventListener('wheel', onWheel); window.removeEventListener('touchstart', onTouchStart);
+      window.removeEventListener('touchmove', onTouchMove);
+    };
+  }, [held]);
   const playBeats = items[at.index] ? workflowBeats(items[at.index].turns) : 0;
   const written = played.includes(at.index) || (at.beat >= playBeats && !busy);
   // Left alone and on screen, a scenario plays on by itself to its end (not while the page is being scrolled).
@@ -115,6 +165,12 @@ export function ScenariosL({ flags, after }: { flags: LandingFlags; after?: Reac
     }, BEAT_MS);
     return () => window.clearTimeout(timer);
   }, [playing, position, total, tick]);
+  steps.current = {
+    index: at.index, written, last: at.index === items.length - 1,
+    finish: () => markPlayed(at.index),
+    next: () => setPosition(startOf(at.index + 1)),
+    prev: () => { markPlayed(at.index - 1); setPosition(startOf(at.index - 1)); },
+  };
   // All of them seen: remembered, so a later visit may skip.
   const lastWritten = held && written && at.index === items.length - 1;
   useEffect(() => { if (lastWritten) writeSeen(); }, [lastWritten]);
@@ -128,12 +184,7 @@ export function ScenariosL({ flags, after }: { flags: LandingFlags; after?: Reac
   // A scenario played to its end is remembered (round eight, U8): from then on it shows finished.
   const playedOut = held && items[at.index] ? at.beat >= workflowBeats(items[at.index].turns) : false;
   useEffect(() => { setPlayed(readPlayed()); }, []);
-  useEffect(() => {
-    if (!playedOut || played.includes(at.index)) return;
-    const next = [...played, at.index];
-    setPlayed(next);
-    writePlayed(next);
-  }, [playedOut, played, at.index]);
+  useEffect(() => { if (playedOut) markPlayed(at.index); }, [playedOut, at.index]);
   // On a phone the tabs share a row with the controls and scroll sideways: the current one is kept in view.
   useEffect(() => {
     const row = tabs.current;
@@ -183,10 +234,18 @@ export function ScenariosL({ flags, after }: { flags: LandingFlags; after?: Reac
         <h3 className={styles.title}>{current.copy.title}</h3>
         <p className={styles.lede}>{current.copy.lede}</p>
         <TypingScope>
-          <div className={styles.hands} {...hand}><WorkflowCompareL task={current.task} turns={current.turns} badge={L_SCENARIOS.badge}
-            beat={held && !played.includes(active) ? at.beat : Infinity} /></div>
+          <div className={styles.hands} {...hand}><AsDemo><WorkflowCompareL task={current.task} turns={current.turns} badge={L_SCENARIOS.badge}
+            beat={held && !played.includes(active) ? at.beat : Infinity} /></AsDemo></div>
         </TypingScope>
       </div>
+      {held && items.length > 1 ? (
+        <div className={styles.hint} aria-hidden="true">
+          <span>{at.index < items.length - 1 ? L_SCENARIOS.hintNext(at.index + 2, items.length)
+            : written ? L_SCENARIOS.hintOn : L_SCENARIOS.hintFinish(items.length)}</span>
+          <ol>{items.map((item, index) => <li key={item.copy.tab} data-on={index < at.index || (index === at.index && written) || undefined}
+            data-here={index === at.index || undefined} />)}</ol>
+        </div>
+      ) : null}
     </div>
   );
 

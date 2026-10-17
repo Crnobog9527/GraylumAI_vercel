@@ -68,8 +68,10 @@ export function WorkflowCompareL({ task, turns, beat, badge }: { task: Task; tur
             <p className={compare.mobileName} aria-hidden="true"><img src="/graylum-logo.png" alt="" />{J_COMPARE.coachName}
               <i className={compare.badge}>{badge}</i></p>
             <div className={cn(work.conversation, styles.conversation)}>
-              {/* The scroll is the visitor's to use (round six, S14); what it holds is a picture (inert). */}
-              <div ref={log} className={cn(styles.log, demo.scrollbar)} onWheel={takeOver} onTouchMove={takeOver} onPointerDown={takeOver}>
+              {/* The scroll is the visitor's to use (round six, S14); what it holds is a picture (inert). At its end the wheel
+                  goes on to the page (round nine, V5), which then moves the scenarios: no trapping overscroll here. */}
+              <div ref={log} className={cn(styles.log, demo.scrollbar)} data-coach-log="" onWheel={takeOver} onTouchMove={takeOver}
+                onPointerDown={takeOver} style={{ overscrollBehavior: 'auto' }}>
                 <div className={work.transcript} inert aria-hidden="true">
                   {shown.map(({ turn, start }) => <Turn key={turn.user} turn={turn} local={beat - start} />)}
                 </div>

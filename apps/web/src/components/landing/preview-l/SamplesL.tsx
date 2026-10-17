@@ -4,6 +4,7 @@
 import { useRef, useState } from 'react';
 import Link from 'next/link';
 import { FileText } from 'lucide-react';
+import { AsDemo } from '@/components/chat-display/display-heading';
 import k from '@/components/landing/preview-k/k.module.css';
 import page from '@/components/landing/preview-j/j.module.css';
 import { L_REPORTS } from '@/lib/landing/landing-copy-l';
@@ -72,7 +73,7 @@ export function SamplesL() {
             {chosen.truth && overview?.riskAlert ? (
               <p className={own.adjustedNote}><b>{COPY.adjustedLead}</b>{overview.riskAlert.headline}</p>
             ) : null}
-            {overview ? <OverviewL key={chosen.slug} data={overview} /> : null}
+            {overview ? <AsDemo><OverviewL key={chosen.slug} data={overview} /></AsDemo> : null}
             <div className={own.actions}>
               <FullReportL key={chosen.slug} title={`${chosen.who} · ${chosen.platform}`} slug={chosen.slug} />
               <Link href={SIGNUP_CTA_HREF} className={page.pill}>{COPY.mine}</Link>

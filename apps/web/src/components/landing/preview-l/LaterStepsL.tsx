@@ -7,6 +7,7 @@ import work from '@/app/runtime/runtime-work.module.css';
 import {
   RuntimeHeader, RuntimeProposal, RuntimeReply, RuntimeResultsSection, RuntimeTurnView, RuntimeTypePendingPanel,
 } from '@/components/chat-display/runtime-messages';
+import { AsDemo } from '@/components/chat-display/display-heading';
 import { ChatNoticeList } from '@/components/chat/ChatInlineNotice';
 import { CtaK } from '@/components/landing/preview-k/CtaK';
 import k from '@/components/landing/preview-k/k.module.css';
@@ -130,7 +131,7 @@ function LaterStep({ step, flags }: { step: { title: string; lede: string; stage
         <div role="tabpanel" id={`${base}-panel`} aria-labelledby={`${base}-${current.id}`} className={styles.panel} key={current.id}>
           <p className={styles.note}><DemoTag />{current.note}</p>
           <div className={styles.picture} {...hand}>
-            <TypingScope><StagePicture id={current.id} beat={shownBeat} live={moving && seen} /></TypingScope>
+            <TypingScope><AsDemo><StagePicture id={current.id} beat={shownBeat} live={moving && seen} /></AsDemo></TypingScope>
           </div>
         </div>
         <CtaK />

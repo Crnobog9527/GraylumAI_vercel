@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronsDown } from 'lucide-react';
+import { AsDemo } from '@/components/chat-display/display-heading';
 import { CtaK } from '@/components/landing/preview-k/CtaK';
 import k from '@/components/landing/preview-k/k.module.css';
 import page from '@/components/landing/preview-j/j.module.css';
@@ -99,8 +100,8 @@ export function StepsL({ flags }: { flags: LandingFlags }) {
               <div className={cn(takeover.caption, styles.oneCaption)} aria-live="polite" key={stage.label}>
                 <h3>{stage.label}<DemoTag /></h3><p>{stage.note}</p>
               </div>
-              <div className={takeover.picture}><PositioningPictureL moment={stage.moment} at={at}
-                reportLocal={stage.moment === 3 ? inStage / ONE_MS.report : 1} /></div>
+              <div className={takeover.picture}><AsDemo><PositioningPictureL moment={stage.moment} at={at}
+                reportLocal={stage.moment === 3 ? inStage / ONE_MS.report : 1} /></AsDemo></div>
             </div>
           </div>
         </div>
@@ -111,7 +112,7 @@ export function StepsL({ flags }: { flags: LandingFlags }) {
             {stages.map(item => (
               <article key={item.label} className={takeover.staticStep} data-region="第一步的阶段">
                 <div className={takeover.caption}><h3>{item.label}<DemoTag /></h3><p>{item.note}</p></div>
-                <div className={takeover.picture}><PositioningPictureL moment={item.moment} at={null} /></div>
+                <div className={takeover.picture}><AsDemo><PositioningPictureL moment={item.moment} at={null} /></AsDemo></div>
               </article>
             ))}
           </div>

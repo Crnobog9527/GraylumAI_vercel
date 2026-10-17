@@ -174,7 +174,8 @@ function Block({ title, icon: Icon, tone, note = false, todo = false, children }
 }) {
   return (
     <section className={styles.block} data-todo={todo || undefined} data-tone={tone} role={note ? 'note' : undefined}>
-      <h4>{Icon ? <Icon size={15} aria-hidden="true" /> : null}{title}</h4>
+      {/* A card's title, not a page heading (SEO_GEO_SPEC section 6). */}
+      <p className={styles.blockTitle}>{Icon ? <Icon size={15} aria-hidden="true" /> : null}{title}</p>
       {children}
     </section>
   );
