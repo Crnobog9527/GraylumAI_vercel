@@ -49,9 +49,25 @@ export function splitReasons(body: string): { main: string; reasons: string | nu
   return { main, reasons: reasons || null };
 }
 
-/** Titles may carry a note (`变现路径（漏斗）`): the Skill's chapter name at the start is what counts. */
-const chapterOf = (title: string, chapters: string[]) =>
-  chapters.find(name => name === title) ?? chapters.find(name => title.startsWith(name));
+/** Writing hints the Skill puts at the end of a chapter title for the model, never for the reader: "（约 800 字，…）". */
+// Only "约 N 字…" hints: a title like "见效时间（约 3 个月）" keeps its business information.
+const WRITING_HINT = /\s*[（(]\s*约\s*\d[^（）()]*字[^（）()]*[）)]\s*$/;
+/** A chapter title as the reader sees it: without the writing hint. */
+export const reportDisplayTitle = (title: string) => title.replace(WRITING_HINT, "").trim() || title;
+
+/** Headings of the text without writing hints (display only; the stored text keeps them for the completeness check). */
+export function withDisplayHeadings(text: string): string {
+  const lines = text.split("\n");
+  const heads = new Set(headingLines(lines, /^#{1,3}\s+\S/));
+  return lines.map((line, index) => heads.has(index)
+    ? line.replace(/^(#{1,3}\s+)(.+)$/, (_, mark: string, title: string) => mark + reportDisplayTitle(title)) : line).join("\n");
+}
+
+/** "五、对标账号分析（约 800 字）" stands for 对标账号分析: numbering and hints do not count, then the name in the title. */
+const chapterOf = (title: string, chapters: string[]) => {
+  const plain = reportDisplayTitle(title).replace(/^\s*(?:[一二三四五六七八九十]+|\d+)\s*[、.．]\s*/, "");
+  return chapters.find(name => name === plain) ?? chapters.find(name => plain.startsWith(name)) ?? chapters.find(name => plain.includes(name));
+};
 
 /**
  * Which fields each chapter shows, keyed by the chapter's index; fields whose chapter the report does not
