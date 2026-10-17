@@ -175,6 +175,8 @@ export async function fusionCompareCases({db,Client,connectionString,report,crea
   assert.equal((await call(db,'fusion_compare_adopt',actor,first.compareId,0,adoptRequest,billing(0),items2)).adoption.executionId,
     adopted.adoption.executionId,'the same request replays the same adoption');
   await assert.rejects(call(db,'fusion_compare_adopt',actor,first.compareId,1,randomUUID(),billing(1),items2),/FUSION_COMPARE_ADOPTED/);
+  await assert.rejects(call(db,'fusion_compare_adopt',actor,first.compareId,1,adoptRequest,billing(1),items2),/FUSION_COMPARE_REQUEST_CONFLICT/,
+    'a replay of the adoption request for another column is a conflict, not a success');
   report.checks.push('adoption writes the question and chosen answer through a zero-amount adoption run bound like an ordinary turn; '+
     'the execution ends cancelled, the conversation shows it, the next turn can read it; written once, replayable');
 
@@ -195,6 +197,8 @@ export async function fusionCompareCases({db,Client,connectionString,report,crea
   // As the executor settles: finalize, then close the run (cancel) and finalize again.
   await rpc(db,'bill2_finalize',actor,d0.runId);await rpc(db,'bill2_cancel',actor,d0.runId);await rpc(db,'bill2_finalize',actor,d0.runId);
   await call(db,'fusion_compare_stop',actor,second.compareId,null);
+  assert.equal((await call(db,'fusion_compare_read',actor,second.compareId)).state,'stopped');
+  // Reading a stopped compare whose runs are all closed keeps it stopped (finishing moves only running records).
   assert.equal((await call(db,'fusion_compare_read',actor,second.compareId)).state,'stopped');
   await db.query('UPDATE runtime_sessions SET revision=revision+1 WHERE id=$1',[session]);
   for (let i=0;i<2;i++) {

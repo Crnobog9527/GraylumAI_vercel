@@ -280,9 +280,11 @@ BEGIN
   IF fc.id IS NULL THEN RETURN NULL; END IF;
   PERFORM 1 FROM runtime_sessions WHERE id=fc.session_id AND actor_id=p_actor_id AND content_deleted_at IS NULL AND erased_at IS NULL FOR SHARE;
   IF NOT FOUND THEN RETURN NULL; END IF;
+  -- Finishing takes the compare lock and only moves a still-running record: a concurrent stop that won keeps stopped.
   IF fc.state='running' AND NOT EXISTS(SELECT 1 FROM bill2_runs WHERE fusion_group_id=fc.group_id AND NOT closed) THEN
-    UPDATE fusion_compares SET state='finished',updated_at=clock_timestamp() WHERE id=fc.id RETURNING * INTO fc;
+    UPDATE fusion_compares SET state='finished',updated_at=clock_timestamp() WHERE id=fc.id AND state='running';
   END IF;
+  SELECT * INTO fc FROM fusion_compares WHERE id=p_compare_id AND actor_id=p_actor_id;
   SELECT coalesce(jsonb_agg(jsonb_build_object('column',(r.payload#>>'{input,fusion,index}')::int,'runId',r.id,
     'modelId',r.payload->>'modelId','billing',bill2_public(r),
     'call',(SELECT jsonb_build_object('callId',c.id,'state',c.state,'dispatched',c.dispatched_at IS NOT NULL,
@@ -348,7 +350,10 @@ BEGIN
   IF fc.id IS NULL OR s.id IS NULL THEN RAISE EXCEPTION 'FUSION_COMPARE_DENIED'; END IF;
   IF s.content_deleted_at IS NOT NULL OR s.erased_at IS NOT NULL THEN RAISE EXCEPTION 'FUSION_COMPARE_SESSION_GONE'; END IF;
   IF fc.adoption IS NOT NULL THEN
-    IF fc.adoption->>'requestId'=p_request_id::text THEN RETURN jsonb_build_object('state','adopted','adoption',fc.adoption); END IF;
+    IF fc.adoption->>'requestId'=p_request_id::text THEN
+      IF fc.adoption->>'column' IS DISTINCT FROM p_column::text THEN RAISE EXCEPTION 'FUSION_COMPARE_REQUEST_CONFLICT'; END IF;
+      RETURN jsonb_build_object('state','adopted','adoption',fc.adoption);
+    END IF;
     RAISE EXCEPTION 'FUSION_COMPARE_ADOPTED';
   END IF;
   IF fc.group_id IS NULL OR fc.state NOT IN ('running','finished','stopped') THEN RAISE EXCEPTION 'FUSION_COMPARE_DENIED'; END IF;
@@ -358,7 +363,14 @@ BEGIN
     WHERE o2.run_id=r.id AND c.fusion_verdict='usable' AND c.settled_at IS NOT NULL;
   IF r.id IS NULL OR NOT r.closed OR o.call_id IS NULL THEN RAISE EXCEPTION 'FUSION_COMPARE_NOT_ADOPTABLE'; END IF;
   -- The main conversation moved on (or a turn is running): hand back a quote, change nothing.
-  IF s.revision<>fc.history_revision OR s.active_execution IS NOT NULL THEN
+  -- "A turn is running" uses runtime_admit's rule: a stopped turn whose cancelled run only waits for its cost
+  -- (cost_pending, closed, cancel requested) is replaceable and does not block.
+  IF s.revision<>fc.history_revision OR (s.active_execution IS NOT NULL AND NOT EXISTS(SELECT 1 FROM runtime_executions old_execution
+      JOIN bill2_runs old_run ON old_run.id=old_execution.billing_run_id
+      WHERE old_execution.id=s.active_execution AND old_execution.session_id=s.id
+        AND old_execution.actor_id=p_actor_id AND old_run.actor_id=p_actor_id
+        AND old_run.session_ref=s.id AND old_execution.state='cost_pending'
+        AND old_run.closed AND old_run.cancel_requested)) THEN
     RETURN jsonb_build_object('state','stale','quote',o.body);
   END IF;
   -- Two history items: the compare question as the user turn, the chosen answer as the assistant turn.
