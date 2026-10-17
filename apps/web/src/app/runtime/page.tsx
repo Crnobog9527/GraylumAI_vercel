@@ -22,7 +22,7 @@ import {
  saveDraftReferences,
 } from './send-input';
 import {
- COMPOSER_REFERENCES_ENABLED, mergeReferences, referenceRequest, type LibraryReference,
+ COMPOSER_REFERENCES_ENABLED, mergeReferences, referenceRequest, referencesNamedIn, type LibraryReference,
 } from '@/components/opc/composer-references';
 import { QueryNotice } from '@/components/opc/query-notice';
 import { trpc } from '@/trpc/client';
@@ -93,7 +93,9 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  // off the box shows no tags that could remove them, so stored references are never loaded or sent.
  const [references,setReferences]=useState<LibraryReference[]>([]);
  useEffect(()=>{if(!sessionId)return;const draft=openingDraftWithReferences(localStorage,sessionId);
-  setReferences(COMPOSER_REFERENCES_ENABLED?draft.references:[]);setInput(draft.text);},[sessionId]);
+  // Switch off: forget the stored list. Switch on: keep only references the restored text still names.
+  if(!COMPOSER_REFERENCES_ENABLED)saveDraftReferences(localStorage,sessionId,[]);
+  setReferences(COMPOSER_REFERENCES_ENABLED?referencesNamedIn(draft.text,draft.references):[]);setInput(draft.text);},[sessionId]);
  function updateReferences(next:LibraryReference[]){setReferences(next);if(sessionId)saveDraftReferences(localStorage,sessionId,next);}
  useEffect(()=>{setStoredModule(sessionId?localStorage.getItem('opc-runtime-skill:'+sessionId)??'':'');},[sessionId]);
  function updateInput(value:string){setInput(value);if(sessionId)localStorage.setItem('opc-runtime-input:'+sessionId,value);}
@@ -179,7 +181,7 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
   try{
   const chosen=choices.data?.skills.find(s=>'skill:'+s.moduleId===activeSelection);
   const selected=chosen?{kind:'skill' as const,moduleId:chosen.moduleId,revisionId:chosen.revisionId}:activeSelection.startsWith('auto:')?{kind:'auto' as const,modelId:activeSelection.slice(5)}:{kind:'ordinary' as const,modelId:activeSelection};
-  const submitted=input,sent=COMPOSER_REFERENCES_ENABLED?references:[];
+  const submitted=input,sent=COMPOSER_REFERENCES_ENABLED?referencesNamedIn(input,references):[];
   const requestInput=scriptRequest?'[OPC_SCRIPT_V1] 请基于当前选题简报讨论并给出可修改的口播稿。'+(submitted.trim()||'先给我一版口播稿。'):submitted;
   // An unconfirmed earlier send of the same input keeps its request id, so the server replays instead of charging twice.
   const url=new URL(location.href),requestId=requestIdFor(url.searchParams.get('request'),readPending(localStorage,sessionId),requestInput,undefined,sent);

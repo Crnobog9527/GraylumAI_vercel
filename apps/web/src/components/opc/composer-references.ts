@@ -28,6 +28,14 @@ export function sameReferences(a: readonly LibraryReference[], b: readonly Libra
   return a.length === b.length && a.every((item, index) => item.documentId === b[index].documentId && item.version === b[index].version);
 }
 
+/**
+ * Only the references whose `@名称` is still in the text. A stored list can outlive an edit made while references were
+ * unavailable (switch off, another deployment); a document the text no longer names must never ride along unseen.
+ */
+export function referencesNamedIn(text: string, references: readonly LibraryReference[]) {
+  return references.filter(item => text.includes('@' + item.label));
+}
+
 /** References from storage or an older record; anything malformed is dropped rather than sent. */
 export function parseReferences(value: unknown): LibraryReference[] {
   if (!Array.isArray(value)) return [];

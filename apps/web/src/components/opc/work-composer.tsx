@@ -7,7 +7,7 @@ import { trpc } from '@/trpc/client';
 import styles from './work-composer.module.css';
 import { QueryNotice, workspaceErrorMessage } from './query-notice';
 import { ComposerEditor, type ComposerEditorHandle } from './composer-editor';
-import { COMPOSER_REFERENCES_ENABLED, parseReferences, type LibraryReference } from './composer-references';
+import { COMPOSER_REFERENCES_ENABLED, parseReferences, referencesNamedIn, type LibraryReference } from './composer-references';
 import { useComposerReferences } from './reference-menu';
 import { attachmentAccept, attachmentFormatsText, useComposerAttachments } from './composer-attachments';
 
@@ -118,8 +118,12 @@ export function useFreeConversation(options:{withReferences?:boolean}={}){
  const request=useRef('');
  const [error,setError]=useState('');
  const [references,setStoredReferences]=useState<LibraryReference[]>([]);
- useEffect(()=>{if(!withReferences)return;
-  try{setStoredReferences(parseReferences(JSON.parse(sessionStorage.getItem(NEW_TASK_REFERENCES)??'[]')));}catch{/* No saved references. */}
+ useEffect(()=>{
+  try{
+   if(!withReferences){sessionStorage.removeItem(NEW_TASK_REFERENCES);return;}
+   const text=sessionStorage.getItem('opc-new-task-input')??'';
+   setStoredReferences(referencesNamedIn(text,parseReferences(JSON.parse(sessionStorage.getItem(NEW_TASK_REFERENCES)??'[]'))));
+  }catch{/* No saved references. */}
  },[withReferences]);
  function setReferences(next:LibraryReference[]){setStoredReferences(next);
   try{if(next.length)sessionStorage.setItem(NEW_TASK_REFERENCES,JSON.stringify(next));else sessionStorage.removeItem(NEW_TASK_REFERENCES);}
@@ -131,7 +135,8 @@ export function useFreeConversation(options:{withReferences?:boolean}={}){
    const result=await start.mutateAsync({requestId:request.current,scope:{kind:'positioning_draft'}});
    const sendId=crypto.randomUUID();
    localStorage.setItem('opc-runtime-input:'+result.sessionId,input);
-   if(withReferences&&references.length)localStorage.setItem('opc-runtime-references:'+result.sessionId,JSON.stringify(references));
+   const named=referencesNamedIn(input,references);
+   if(withReferences&&named.length)localStorage.setItem('opc-runtime-references:'+result.sessionId,JSON.stringify(named));
    if(moduleId)localStorage.setItem('opc-runtime-skill:'+result.sessionId,moduleId);
    sessionStorage.setItem('opc-runtime-send:'+result.sessionId,sendId);
    sessionStorage.removeItem('opc-new-task-input');sessionStorage.removeItem(NEW_TASK_REFERENCES);
