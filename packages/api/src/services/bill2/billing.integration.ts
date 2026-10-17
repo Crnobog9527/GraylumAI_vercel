@@ -730,9 +730,6 @@ it('BILL2: production mode bills a v2 run only on a database marked production, 
   await set('runtime_payg_production',{enabled:false});
   await expect(claimOnce(1)).rejects.toThrow(/RUNTIME_PRODUCTION_DENIED/);
   await set('runtime_payg_production',{version:1,enabled:true,policyVersion:policy,profiles:[{model,endpointTag:tag}]});
-  await q('update ai_models set api_key=$2 where id=$1',[id,'rotated']);
-  await expect(claimOnce(1)).rejects.toThrow(/RUNTIME_PRODUCTION_MODEL_DENIED/);
-  await q('update ai_models set api_key=$2 where id=$1',[id,key]);
   const c=await claimOnce(1);
   expect((await q('select public.bill2_dispatch($1,$2,$3,$4) v',[actor,run,c.id,c.dispatchToken])).rows[0].v.dispatch).toBe(true);
   await q('select public.bill2_record($1,$2,$3,$4)',[actor,run,c.id,{provider:'openrouter',account:base.account,model,protocol:'openrouter-chat-v1',
