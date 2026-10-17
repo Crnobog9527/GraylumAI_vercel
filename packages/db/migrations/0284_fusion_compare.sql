@@ -23,6 +23,9 @@ CREATE TABLE IF NOT EXISTS public.fusion_compares (
   -- Hash of the whole frozen request (session, question, Skill, references, models, shown estimate): a replay
   -- of the same request id with anything else is a conflict, never the old result (like runtime_admission_replay).
   request_hash text NOT NULL CHECK (request_hash ~ '^[a-f0-9]{64}$'),
+  -- Hash of every frozen column request body: a start resumed after the judgement (group not yet built) must
+  -- rebuild exactly this snapshot, or the host ends the record instead (FUSION-COMPARE §3.2).
+  snapshot_hash text NOT NULL CHECK (snapshot_hash ~ '^[a-f0-9]{64}$'),
   -- Frozen choices: {models: [modelId...], skill: {moduleId, revisionId, instructionsHash} | null, settings}.
   config jsonb NOT NULL,
   -- clear | allow | block | unavailable; written once by the positioning gate before any group exists.
@@ -105,6 +108,10 @@ BEGIN
     OR p_request->>'questionHash' IS DISTINCT FROM encode(sha256(convert_to(p_request->>'question','UTF8')),'hex')
     OR jsonb_typeof(p_request->'config') IS DISTINCT FROM 'object' OR coalesce(p_request->>'historyRevision','')!~'^[0-9]+$'
     OR jsonb_typeof(coalesce(p_request->'workspaceDependencies','[]')) IS DISTINCT FROM 'array'
+    OR coalesce(p_request->>'snapshotHash','')!~'^[a-f0-9]{64}$'
+    OR EXISTS(SELECT 1 FROM jsonb_array_elements(coalesce(p_request->'workspaceDependencies','[]')) d
+      WHERE jsonb_typeof(d) IS DISTINCT FROM 'object' OR coalesce(d->>'sourceVersionId','')
+        !~'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' OR (SELECT count(*) FROM jsonb_object_keys(d))<>1)
   THEN RAISE EXCEPTION 'FUSION_COMPARE_INVALID'; END IF;
   SELECT * INTO fc FROM fusion_compares WHERE actor_id=p_actor_id AND request_id=p_request_id;
   IF fc.id IS NOT NULL THEN
@@ -124,16 +131,25 @@ BEGIN
   IF (SELECT count(DISTINCT x) FROM jsonb_array_elements_text(models) x)<>n
     OR EXISTS(SELECT 1 FROM jsonb_array_elements_text(models) x WHERE NOT coalesce(v#>'{compare,allowedModelIds}','[]') ? x)
   THEN RAISE EXCEPTION 'FUSION_COMPARE_MODEL_NOT_ALLOWED'; END IF;
+  -- Frozen workspace sources: like runtime_workspace_tool_guard (0218), take the source projects in share mode
+  -- first, then require each source still allowed. A deletion that committed earlier is refused here; one that
+  -- comes later waits for this record and then finds it (content_erasure_confirm, below).
+  PERFORM p.id FROM artifact_projects p JOIN artifact_versions v ON v.project_id=p.id
+    WHERE p.actor_id=p_actor_id AND v.id::text IN (SELECT d->>'sourceVersionId'
+      FROM jsonb_array_elements(coalesce(p_request->'workspaceDependencies','[]')) d) ORDER BY p.id FOR SHARE OF p;
+  IF EXISTS(SELECT 1 FROM jsonb_array_elements(coalesce(p_request->'workspaceDependencies','[]')) d
+    WHERE NOT coalesce(opc_source_allowed(p_actor_id,(d->>'sourceVersionId')::uuid),false)) THEN
+    RAISE EXCEPTION 'FUSION_COMPARE_SOURCE_REVOKED'; END IF;
   IF fusion_compare_active(p_actor_id) OR EXISTS(SELECT 1 FROM fusion_reviews WHERE actor_id=p_actor_id AND state IN ('running','paused')) THEN
     RAISE EXCEPTION 'FUSION_COMPARE_ACTIVE'; END IF;
   usage:=fusion_review_breaker_usage(p_actor_id);
   IF (usage->>'noDeliveryCalls')::int>=coalesce((v#>>'{compare,breaker,noDeliveryCalls}')::int,10)
     OR (usage->>'platformUsd')::numeric>=coalesce((v#>>'{compare,breaker,platformUsd}')::numeric,2) THEN
     RAISE EXCEPTION 'FUSION_COMPARE_BREAKER'; END IF;
-  INSERT INTO fusion_compares(actor_id,request_id,session_id,history_revision,question,question_hash,request_hash,config,
+  INSERT INTO fusion_compares(actor_id,request_id,session_id,history_revision,question,question_hash,request_hash,snapshot_hash,config,
     workspace_dependencies,state)
   VALUES(p_actor_id,p_request_id,s.id,s.revision,p_request->>'question',p_request->>'questionHash',p_request->>'requestHash',
-    p_request->'config',coalesce(p_request->'workspaceDependencies','[]'),'admitting')
+    p_request->>'snapshotHash',p_request->'config',coalesce(p_request->'workspaceDependencies','[]'),'admitting')
   RETURNING * INTO fc;
   RETURN fusion_compare_view(fc)||jsonb_build_object('created',true);
 END $$;
@@ -179,6 +195,9 @@ BEGIN
     PERFORM 1 FROM runtime_sessions WHERE id=g.source_session_id AND actor_id=p_actor_id
       AND content_deleted_at IS NULL AND erased_at IS NULL FOR SHARE;
     IF NOT FOUND THEN RAISE EXCEPTION 'FUSION_GROUP_DENIED'; END IF;
+    -- A compare whose record a source deletion removed (its runs scrubbed) has nothing left to replay.
+    IF p_kind='compare' AND NOT EXISTS(SELECT 1 FROM fusion_compares WHERE actor_id=p_actor_id AND group_id=g.id) THEN
+      RAISE EXCEPTION 'FUSION_GROUP_DENIED'; END IF;
     RETURN jsonb_build_object('groupId',g.id,'replayed',true,'runs',coalesce((SELECT jsonb_agg(jsonb_build_object(
       'runId',r.id,'fusion',r.payload#>'{input,fusion}') ORDER BY (r.payload#>>'{input,fusion,index}')::int)
       FROM bill2_runs r WHERE r.fusion_group_id=g.id AND r.actor_id=p_actor_id),'[]'));

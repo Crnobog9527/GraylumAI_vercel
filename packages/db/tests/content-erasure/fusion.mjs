@@ -43,8 +43,8 @@ export async function runFusionCompare(db,report){
  const other=(await db.query(`INSERT INTO runtime_sessions(actor_id,scope,start_request_id,start_payload)
   VALUES($1,jsonb_build_object('kind','positioning_draft','draftId',$2::uuid),gen_random_uuid(),'{}') RETURNING id`,[f.actor,free])).rows[0].id;
  const record=async(session,deps)=>(await db.query(`INSERT INTO fusion_compares(actor_id,request_id,session_id,history_revision,question,
-  question_hash,request_hash,config,workspace_dependencies,state) VALUES($1,gen_random_uuid(),$2,0,'private compare question',
-  repeat('a',64),repeat('b',64),'{"models":[]}',$3,'running') RETURNING id`,[f.actor,session,JSON.stringify(deps)])).rows[0].id;
+  question_hash,request_hash,snapshot_hash,config,workspace_dependencies,state) VALUES($1,gen_random_uuid(),$2,0,'private compare question',
+  repeat('a',64),repeat('b',64),repeat('c',64),'{"models":[]}',$3,'running') RETURNING id`,[f.actor,session,JSON.stringify(deps)])).rows[0].id;
  const inDraft=await record(draftSession,[]);
  const viaSource=await record(other,[{sourceVersionId:f.version}]);
  const unrelated=await record(other,[{sourceVersionId:randomUUID()}]);
@@ -62,5 +62,12 @@ export async function runFusionCompare(db,report){
  assert.ok(left.includes(unrelated),'other compares stay');
  const r=(await db.query('SELECT content_deleted_at,closed FROM bill2_runs WHERE id=$1',[run.run])).rows[0];
  assert.ok(r.content_deleted_at&&r.closed,'the compare group run that copied the source is marked and closed');
+ // A compare admission replay after the source deletion removed its record returns nothing.
+ const groupRequest=(await db.query('SELECT request_id FROM fusion_billing_groups WHERE id=$1',[group])).rows[0].request_id;
+ await db.query('SET ROLE service_role');
+ try { await assert.rejects(db.query('SELECT fusion_group_admit($1,$2,$3,$4,$5)',[f.actor,groupRequest,'compare',other,'[]']),/FUSION_GROUP_DENIED/); }
+ finally { await db.query('RESET ROLE'); }
+ // The deleted source is no longer allowed, so a new compare cannot freeze it (fusion_compare_begin checks this).
+ assert.equal((await db.query('SELECT opc_source_allowed($1,$2) v',[f.actor,f.version])).rows[0].v,false);
  report.checks.push('deleting a draft deletes its compares; deleting a workspace source deletes the compares (and scrubs their runs) that froze it, in any conversation');
 }

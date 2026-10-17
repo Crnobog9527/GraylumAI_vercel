@@ -17,6 +17,7 @@ import {thresholdCases} from './thresholds.mjs';
 import {monitorCases} from './monitor.mjs';
 import {edgeCases} from './edges.mjs';
 import {grantCases} from './grants.mjs';
+import {refundHoldCases} from './refund-hold.mjs';
 import {nominalCases} from './nominal.mjs';
 import {erasureCases} from './erasure.mjs';
 import {concurrencyCases} from './concurrency.mjs';
@@ -30,6 +31,7 @@ import {researchRuntimeRegressionCases} from './research-runtime-regressions.mjs
 import {researchRuntimeCases} from './research-runtime.mjs';
 import {researchRuntimeReadCases} from './research-runtime-reads.mjs';
 import {researchRuntimeWiringCases} from './research-runtime-wiring.mjs';
+import {imageCases} from './image.mjs';
 
 const development = process.argv.slice(2).join(' ')==='--local-only --development';
 if ((!development&&process.argv.slice(2).join(' ')!=='--local-only')||process.env.CI) throw Error('Require --local-only outside CI');
@@ -126,6 +128,7 @@ try {
   await thresholdCases(db,report,createFixture,claim,receipt);
   await nominalCases(db,report,createFixture,claim,receipt);
   await grantCases(db,report,createFixture,claim,receipt);
+  await refundHoldCases(db,report,createFixture,claim);
   await edgeCases(db,report,createFixture,claim,receipt);
   await monitorCases(db,report,createFixture,claim,receipt);
   await erasureCases(db,report,createFixture,claim,receipt);
@@ -140,6 +143,7 @@ try {
   await researchRuntimeCases({db,Client,connectionString,report,createFixture});
   await researchRuntimeReadCases({db,report,createFixture});
   await researchRuntimeWiringCases({db,report,createFixture});
+  await imageCases({db,report,createFixture,claim,receipt});
 } catch (error) {
   report.failed = String(error.stack??error);
   report.databaseError = {code:error.code,detail:error.detail,where:error.where,position:error.position};

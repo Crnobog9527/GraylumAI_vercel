@@ -45,7 +45,7 @@ export async function fusionCompareCases({db,Client,connectionString,report,crea
   const question = 'Which hook works best?';
   const request = (picked=models.slice(0,2),extra={}) => {
     const config = {models:picked,skill:null};
-    const r = {question,questionHash:sha(question),historyRevision:'0',config,workspaceDependencies:[],...extra};
+    const r = {question,questionHash:sha(question),historyRevision:'0',config,workspaceDependencies:[],snapshotHash:sha('snapshot'),...extra};
     return {...r,requestHash:sha(JSON.stringify([session,question,config,extra]))};
   };
   const begin = (req,id=randomUUID(),sess=session) => call(db,'fusion_compare_begin',actor,id,sess,req);
@@ -73,6 +73,9 @@ export async function fusionCompareCases({db,Client,connectionString,report,crea
   await assert.rejects(begin({...request(),historyRevision:'7'}),/FUSION_COMPARE_STALE/);
   await assert.rejects(begin({...request(),question:'tampered'}),/FUSION_COMPARE_INVALID/,'question hash binds the text');
   await assert.rejects(begin(request(),randomUUID(),randomUUID()),/FUSION_COMPARE_SESSION_GONE/);
+  await assert.rejects(begin({...request(),workspaceDependencies:[{sourceVersionId:randomUUID()}]}),/FUSION_COMPARE_SOURCE_REVOKED/,
+    'a missing or deleted workspace source is refused before anything is recorded');
+  await assert.rejects(begin({...request(),workspaceDependencies:['bare-string']}),/FUSION_COMPARE_INVALID/);
   assert.equal(await records(),0);
   report.checks.push('compare begin reads the switch, membership, [minModels, D3], allowlist and conversation revision; refusals record nothing');
 

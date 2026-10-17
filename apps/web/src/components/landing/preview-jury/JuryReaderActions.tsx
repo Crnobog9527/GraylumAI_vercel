@@ -7,6 +7,7 @@ import type { AdoptProposed, AdoptRecorded } from './jury-events';
 import type { Adoption } from './use-adoption';
 import { adoptErrorLabel } from './jury-adopt';
 import styles from './jury-reader.module.css';
+import { DisplayHeading } from '@/components/chat-display/display-heading';
 
 /** The bar that stays at the bottom while choosing: how many chapters are chosen, later, and confirm. */
 export function ChoiceBar({ adoption }: { adoption: Adoption }) {
@@ -50,7 +51,7 @@ export function Review({ proposal, adoption }: { proposal: AdoptProposed; adopti
   }, []);
   return (
     <section ref={ref} className={styles.review} aria-labelledby="jury-review-title">
-      <h4 id="jury-review-title">确认前先看一眼：采用 {proposal.adopted.length} 章会改动这些定位内容</h4>
+      <DisplayHeading as="h4" id="jury-review-title">确认前先看一眼：采用 {proposal.adopted.length} 章会改动这些定位内容</DisplayHeading>
       {changes.length > 0 ? (
         <ul className={styles.diff}>
           {changes.map(item => (
