@@ -347,7 +347,7 @@ describe('membership page in a local browser', () => {
       await browserExpect(dialog).toContainText('开通 Pro 月付');
       await browserExpect(page.getByTestId('method-checkout-tax')).toHaveText('税另计，结账时按所在地计算');
       await browserExpect(page.getByTestId('method-checkout-pay')).toBeDisabled();
-      await browserExpect(page.getByTestId('method-checkout-refund-link')).toHaveAttribute('href', '/faq');
+      await browserExpect(page.getByTestId('method-checkout-refund-link')).toHaveAttribute('href', '/refund');
       await page.getByTestId('method-checkout-terms').check();
       await page.getByTestId('method-checkout-pay').click();
       await browserExpect(page).toHaveURL('https://checkout.stripe.com/c/pay/cs_test_9');
