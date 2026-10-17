@@ -108,6 +108,42 @@ describe('checkoutValue', () => {
 
 describe('effectiveRequestTime', () => {
   const server = new Date('2026-10-17T10:00:00Z');
+  it('counts consent from the browser capture time when it agrees with the server clock', () => {
+    expect(effectiveRequestTime({ capturedAt: '2026-10-17T09:58:00Z' }, server)?.toISOString()).toBe('2026-10-17T09:58:00.000Z');
+    expect(effectiveRequestTime({ capturedAt: '2026-10-17T10:00:03Z' }, server)?.toISOString()).toBe('2026-10-17T10:00:00.000Z');
+    expect(effectiveRequestTime(null, server)).toBe(server);
+    expect(effectiveRequestTime({ clientId: '1.1' }, server)).toBe(server);
+  });
+  it('refuses skewed or unreadable capture times instead of moving them forward', () => {
+    for (const capturedAt of ['2026-10-17T10:05:00Z', '2026-10-17T10:00:09Z', '2026-10-17T09:30:00Z', 'later', 5]) {
+      expect(effectiveRequestTime({ capturedAt }, server), String(capturedAt)).toBeNull();
+    }
+  });
+  it('stores nothing for a skewed capture', async () => {
+    for (const capturedAt of ['2026-10-17T10:30:00Z', '2026-10-17T08:00:00Z']) {
+      const d = db(true);
+      expect(await storeGaCheckoutIds(d.client, 'user', 'order', { ...ids, capturedAt }, server)).toBe(false);
+      expect(d.rpc).not.toHaveBeenCalled();
+    }
+  });
+});
+
+describe('checkoutValue', () => {
+  const read = (data: unknown, error: unknown = null) => {
+    const chain = { select: () => chain, eq: vi.fn(() => chain), maybeSingle: async () => ({ data, error }) };
+    return { from: vi.fn(() => chain), chain } as unknown as SupabaseClient & { chain: typeof chain };
+  };
+  it('reads the buyer\'s own order amount before tax, in dollars', async () => {
+    const db = read({ amount_total: 4900 });
+    expect(await checkoutValue(db, 'user', 'order')).toBe(49);
+    expect((db as unknown as { chain: { eq: ReturnType<typeof vi.fn> } }).chain.eq).toHaveBeenCalledWith('user_id', 'user');
+    expect(await checkoutValue(read(null), 'user', 'order')).toBeNull();
+    expect(await checkoutValue(read(null, { message: 'x' }), 'user', 'order')).toBeNull();
+  });
+});
+
+describe('effectiveRequestTime', () => {
+  const server = new Date('2026-10-17T10:00:00Z');
   it('counts consent from the earlier plausible browser capture time', () => {
     expect(effectiveRequestTime({ capturedAt: '2026-10-17T09:58:00Z' }, server)?.toISOString()).toBe('2026-10-17T09:58:00.000Z');
     expect(effectiveRequestTime({ capturedAt: '2026-10-17T08:00:00Z' }, server)).toBe(server);
