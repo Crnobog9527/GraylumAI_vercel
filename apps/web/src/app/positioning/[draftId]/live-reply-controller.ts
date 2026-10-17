@@ -26,6 +26,8 @@ export function liveReplyController(options: {
   storage: () => PrefixStorage | null;
   show: (reply: LiveReply | null) => void;
   now?: () => number;
+  /** Sees every streamed event of a turn first, e.g. research calls and cards (RT-5), which the reply itself ignores. */
+  observe?: (executionId: string, event: AgentTurnEvent) => void;
 }) {
   const { draftId, storage } = options;
   const now = options.now ?? Date.now;
@@ -86,6 +88,7 @@ export function liveReplyController(options: {
       show(startLiveReply(executionId));
     },
     apply(executionId: string, event: AgentTurnEvent) {
+      options.observe?.(executionId, event);
       const old = current;
       const next = liveReplyAfter(old, executionId, event);
       if (!next || next === old) return;

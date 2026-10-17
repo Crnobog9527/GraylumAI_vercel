@@ -131,3 +131,18 @@ const card = z.discriminatedUnion('kind', [
 export async function researchCards(db: Db | null, actor: string, sessionId: string) {
   return { items: parse(z.array(card), await rpc(db, 'research_user_cards', { a: actor, s: id.parse(sessionId) })) };
 }
+
+// RT-5: the session's benchmark table for the conversation (0268 `research_benchmark_rows`, ownership checked in SQL).
+// Numbers only as the host computed them; null stays null. Evidence refs are not in this read yet.
+const count = z.number().finite().min(0).nullable();
+const benchmark = z.object({
+  platform: z.string(), account: z.string(), followers: count, medianViews: count, engagementRate: count,
+  postsPerWeek: count, lastPublishedAt: z.string().nullable(), postsAnalyzed: z.number().int().min(0),
+  category: z.enum(['head_reference', 'imitable', 'fast_rising']).nullable(), qualified: z.boolean(),
+  excluded: z.string().nullable(), fetchedAt: z.string(),
+});
+export async function researchBenchmarks(db: Db | null, actor: string, sessionId: string) {
+  const table = parse(z.object({ rows: z.array(benchmark) }), await rpc(db, 'research_benchmark_rows', {
+    a: actor, s: id.parse(sessionId) }));
+  return { items: table.rows };
+}
