@@ -68,20 +68,25 @@ export async function compensateStaleRound(supabase: BillingRpc, runId: string, 
 
 export type StaleRoundAutoClose = {
   found: number; compensated: number; alreadyCompensated: number; skipped: number; failed: number; credits: number;
+  /** Reported rounds not attempted because the time budget ran out (including those past the report page). */
+  deferred: number;
 };
 
 /** runtime-recovery: closes and refunds each reported round through the operator function. A round an
  * operator refunded meanwhile, or one a retry revived, is not a failure; an unknown result is, and is
- * retried on the next run (the function is idempotent). Rounds past the time budget wait for the next run. */
+ * retried on the next run (the function is idempotent). Rounds past the time budget wait for the next run and are
+ * counted as `deferred`, which fails the job. */
 export async function autoCompensateStaleRounds(supabase: BillingRpc,
   options: { now?: number; canStart?: () => boolean } = {}): Promise<StaleRoundAutoClose> {
   const now = options.now ?? Date.now();
-  const summary: StaleRoundAutoClose = { found: 0, compensated: 0, alreadyCompensated: 0, skipped: 0, failed: 0, credits: 0 };
+  const summary: StaleRoundAutoClose = { found: 0, compensated: 0, alreadyCompensated: 0, skipped: 0, failed: 0, credits: 0, deferred: 0 };
   let report: StaleChargedRoundReport;
   try { report = await findStaleChargedRounds(supabase, now); } catch { summary.failed++; return summary; }
   summary.found = report.total;
+  let attempted = 0;
   for (const round of report.findings) {
     if (options.canStart && !options.canStart()) break;
+    attempted++;
     try {
       const outcome = await compensateStaleRound(supabase, round.runId, now);
       if (outcome.state === 'already_compensated') { summary.alreadyCompensated++; continue; }
@@ -94,5 +99,7 @@ export async function autoCompensateStaleRounds(supabase: BillingRpc,
       else summary.failed++;
     }
   }
+  // Known refunds left undone must not look like success: the job alerts until a run finishes them.
+  summary.deferred = Math.max(0, report.total - attempted);
   return summary;
 }

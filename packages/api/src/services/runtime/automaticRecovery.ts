@@ -88,6 +88,7 @@ export async function runAutomaticFinancialRecovery(admin: SupabaseClient, actor
   });
   if (actorId) return summary;
   const canStart = () => { try { budget.assertCanStart(STALE_ROUND_STEP_MS); return true; } catch { return false; } };
+  // No time left even to read the report: not knowing is a failure, so a recovery backlog cannot starve refunds silently.
   return { ...summary, staleRounds: canStart() ? await autoCompensateStaleRounds(database, { canStart })
-    : { found: 0, compensated: 0, alreadyCompensated: 0, skipped: 0, failed: 0, credits: 0 } };
+    : { found: 0, compensated: 0, alreadyCompensated: 0, skipped: 0, failed: 1, credits: 0, deferred: 0 } };
 }

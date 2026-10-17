@@ -70,7 +70,7 @@ describe('automatic close', () => {
   it('refunds every reported round once through the operator function and counts the credits', async () => {
     const f = database([1, 2], {});
     expect(await autoCompensateStaleRounds(f.database, { now })).toEqual({ found: 2, compensated: 2, alreadyCompensated: 0,
-      skipped: 0, failed: 0, credits: 6 });
+      skipped: 0, failed: 0, credits: 6, deferred: 0 });
     expect(f.rpc).toHaveBeenCalledWith('runtime_stale_charged_rounds', { p_cutoff: cutoff, p_limit: STALE_ROUND_REPORT_LIMIT });
     expect(f.rpc).toHaveBeenCalledWith('runtime_stale_round_compensate', { p_run_id: uuid(2, 1), p_cutoff: cutoff });
     expect(f.rpc).toHaveBeenCalledWith('runtime_stale_round_compensate', { p_run_id: uuid(2, 2), p_cutoff: cutoff });
@@ -80,7 +80,7 @@ describe('automatic close', () => {
     const f = database([1, 2, 3], { 1: { data: outcome(1, 'already_compensated'), error: null },
       2: { data: null, error: { message: 'STALE_ROUND_NOT_ELIGIBLE' } } });
     expect(await autoCompensateStaleRounds(f.database, { now })).toEqual({ found: 3, compensated: 1, alreadyCompensated: 1,
-      skipped: 1, failed: 0, credits: 3 });
+      skipped: 1, failed: 0, credits: 3, deferred: 0 });
   });
 
   it('an unknown compensation result is a failure and the batch continues', async () => {
@@ -91,15 +91,15 @@ describe('automatic close', () => {
   it('an unreadable report is one failure and compensates nothing', async () => {
     const rpc = vi.fn(async () => ({ data: null, error: { message: 'permission denied' } }));
     expect(await autoCompensateStaleRounds({ rpc }, { now })).toEqual({ found: 0, compensated: 0, alreadyCompensated: 0,
-      skipped: 0, failed: 1, credits: 0 });
+      skipped: 0, failed: 1, credits: 0, deferred: 0 });
     expect(rpc).toHaveBeenCalledTimes(1);
   });
 
-  it('stops before a round when the job has no time left; the rest waits for the next run', async () => {
+  it('stops before a round when the job has no time left; the rest is counted as deferred for the next run', async () => {
     const f = database([1, 2, 3], {});
     let left = 1;
     expect(await autoCompensateStaleRounds(f.database, { now, canStart: () => left-- > 0 }))
-      .toMatchObject({ found: 3, compensated: 1, failed: 0 });
+      .toMatchObject({ found: 3, compensated: 1, failed: 0, deferred: 2 });
     expect(f.rpc.mock.calls.filter(([name]) => name === 'runtime_stale_round_compensate')).toHaveLength(1);
   });
 });

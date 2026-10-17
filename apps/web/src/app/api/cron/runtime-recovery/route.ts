@@ -15,8 +15,9 @@ export async function GET(request: Request) {
   if (!url || !key) return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
   try {
     const summary = await runAutomaticFinancialRecovery(createClient(url, key));
-    // An unconfirmed automatic stale-round refund keeps the job failing (alerting) until a later run settles it.
-    const success = summary.failed === 0 && (summary.staleRounds?.failed ?? 0) === 0;
+    // An unconfirmed or time-deferred automatic stale-round refund keeps the job failing (alerting) until a later run settles it.
+    const success = summary.failed === 0 && (summary.staleRounds?.failed ?? 0) === 0
+      && (summary.staleRounds?.deferred ?? 0) === 0;
     return NextResponse.json({ success, ...summary }, { status: success ? 200 : 500 });
   } catch {
     return NextResponse.json({ error: 'Runtime recovery failed' }, { status: 500 });

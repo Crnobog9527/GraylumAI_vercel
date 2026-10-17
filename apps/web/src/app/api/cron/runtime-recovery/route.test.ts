@@ -43,9 +43,14 @@ it('keeps the unapproved minute schedule disabled on the current plan', () => {
   expect(config.crons).toContainEqual({ path: '/api/cron/billing-reconcile', schedule: '0 4 * * *' });
 });
 it('reports the automatic stale-round close and fails while any of its refunds is unconfirmed', async () => {
-  const staleRounds = { found: 2, compensated: 1, alreadyCompensated: 0, skipped: 0, failed: 1, credits: 3 };
+  const staleRounds = { found: 2, compensated: 1, alreadyCompensated: 0, skipped: 0, failed: 1, credits: 3, deferred: 0 };
   mocks.recover.mockResolvedValue({ selected: 0, processed: 0, settled: 0, pending: 0, failed: 0, staleRounds });
   const response = await GET(new Request('https://synthetic.test/api/cron/runtime-recovery'));
   expect(response.status).toBe(500);
   expect(await response.json()).toEqual({ success: false, selected: 0, processed: 0, settled: 0, pending: 0, failed: 0, staleRounds });
+});
+it('fails while reported stale-round refunds were deferred by the time budget', async () => {
+  const staleRounds = { found: 5, compensated: 2, alreadyCompensated: 0, skipped: 0, failed: 0, credits: 6, deferred: 3 };
+  mocks.recover.mockResolvedValue({ selected: 0, processed: 0, settled: 0, pending: 0, failed: 0, staleRounds });
+  expect((await GET(new Request('https://synthetic.test/api/cron/runtime-recovery'))).status).toBe(500);
 });
