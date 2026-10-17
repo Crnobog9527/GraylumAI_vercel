@@ -138,14 +138,16 @@ export function historyGuard(executionId:string,failed:(code:string)=>void) {
   };
 }
 
-export function terminalReplyGuard(active:boolean,allowsCard:boolean,failed:()=>void,allowsSkillFile=false,allowsHistory=false) {
-  // One read per turn: a Skill file or the user's earlier messages (R4), never both.
-  let fileRequested=false;
+export function terminalReplyGuard(active:boolean,allowsCard:boolean,failed:()=>void,allowsSkillFile=false,allowsHistory=false,
+  researchTools:readonly string[]=[]) {
+  // One read per turn: a Skill file or the user's earlier messages (R4), never both. RT-3b PR-3: one research call.
+  let fileRequested=false,researchRequested=false;
   return (response:unknown,organizer=false)=>{
     const message=(response as {choices?:Array<{message?:{tool_calls?:Array<{id?:string;type?:string;
       function?:{name?:string;arguments?:string}}>}}>})?.choices?.[0]?.message;
     const readsFile=message?.tool_calls?.[0]?.function?.name==='read_skill_file';
     const readsHistory=message?.tool_calls?.[0]?.function?.name===READ_HISTORY_TOOL;
+    const researches=researchTools.includes(String(message?.tool_calls?.[0]?.function?.name));
     let invalidFileArguments=false;
     if(readsFile){try{
       const call=message!.tool_calls![0]!,{path}=skillFileParameters.parse(JSON.parse(call.function!.arguments!));
@@ -160,11 +162,13 @@ export function terminalReplyGuard(active:boolean,allowsCard:boolean,failed:()=>
         call.id.includes('\0')||Buffer.from(call.id).toString('utf8')!==call.id;
      }catch{invalidFileArguments=true;}}
     const oversized=(readsFile||readsHistory)&&Buffer.byteLength(JSON.stringify(JSON.stringify(message)))>SKILL_FILE_TRACE_BYTES;
-    if(active&&(terminalAgentReplyFailure(response,organizer,allowsCard,allowsSkillFile&&!fileRequested,allowsHistory&&!fileRequested)||
+    if(active&&(terminalAgentReplyFailure(response,organizer,allowsCard,allowsSkillFile&&!fileRequested,allowsHistory&&!fileRequested,
+      researchRequested?[]:researchTools)||
       oversized||invalidFileArguments)){
       failed();
       throw new Error('RUNTIME_TERMINAL_REPLY');
     }
     if(active&&!organizer&&(readsFile||readsHistory))fileRequested=true;
+    if(active&&!organizer&&researches)researchRequested=true;
   };
 }

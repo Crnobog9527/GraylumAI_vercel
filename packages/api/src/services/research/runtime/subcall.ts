@@ -47,9 +47,10 @@ export interface SubcallContext {
   policies: readonly ToolCallPolicy[];
   billing: ToolSubcallBilling;
   evidence: EvidencePort;
-  nextSequence: () => number;
+  /** The run's next free BILL2 sequence; model calls and subcalls share one contiguous sequence (0162). */
+  nextSequence: () => number | Promise<number>;
   phase: string;
-  runtimeEpoch?: string;
+  runtimeEpoch?: number;
   secrets: SecretReader;
   rateCounter: VendorCounter;
   vendors?: VendorCalls;
@@ -61,7 +62,7 @@ export interface SubcallContext {
 }
 
 /** Why nothing (or nothing usable) came back, as the tool envelope reports it. */
-export type SubcallStop = 'KEY_MISSING' | 'ROUTE_NOT_FROZEN' | 'VENDOR_RATE_LIMITED' | 'BALANCE_LOW' | 'CALL_REPLAYED'
+export type SubcallStop = 'KEY_MISSING' | 'KEY_UNAVAILABLE' | 'ROUTE_NOT_FROZEN' | 'VENDOR_RATE_LIMITED' | 'BALANCE_LOW' | 'CALL_REPLAYED'
   | 'NOT_DISPATCHED' | 'ACCOUNT_CLOSED' | 'CONTENT_DELETED' | `CLAIM_${string}`;
 
 export type SubcallOutcome =
@@ -101,7 +102,10 @@ function unknownResult(request: SupplierRequest, vendor: ResearchVendor, now?: (
 export async function runSubcall(context: SubcallContext, request: SupplierRequest): Promise<SubcallOutcome> {
   const policy = context.policies.find(item => item.provider === request.vendor && item.model === `${request.vendor}:${request.route}`);
   if (!policy) return { sent: false, stop: 'ROUTE_NOT_FROZEN', budget: false };
-  const apiKey = await context.secrets(request.vendor);
+  // Before any claim: a missing or unreadable key sends nothing and charges nothing (ADMIN-SECRETS §10 RT).
+  let apiKey: string | null;
+  try { apiKey = await context.secrets(request.vendor); }
+  catch { return { sent: false, stop: 'KEY_UNAVAILABLE', budget: false }; }
   if (!apiKey) return { sent: false, stop: 'KEY_MISSING', budget: false };
   const limited = await admitVendorCall(request.vendor, request.route, context.rateCounter);
   if (!limited.ok) return { sent: false, stop: 'VENDOR_RATE_LIMITED', budget: true };
@@ -109,8 +113,8 @@ export async function runSubcall(context: SubcallContext, request: SupplierReque
   const identity = requestIdentity(request);
   let claim;
   try {
-    claim = await context.billing.claim(context.nextSequence(), toolClaimPayload(policy, {
-      phase: context.phase, requestHash: identity, ...(context.runtimeEpoch ? { runtimeEpoch: context.runtimeEpoch } : {}),
+    claim = await context.billing.claim(await context.nextSequence(), toolClaimPayload(policy, {
+      phase: context.phase, requestHash: identity, ...(context.runtimeEpoch !== undefined ? { runtimeEpoch: context.runtimeEpoch } : {}),
     }));
   } catch (error) {
     if (error instanceof BillingClaimRejection) return { sent: false, stop: `CLAIM_${error.reason}`, budget: false };

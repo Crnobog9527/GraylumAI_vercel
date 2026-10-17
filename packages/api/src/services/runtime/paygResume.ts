@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {StagingAccessError} from './stagingErrors';
 import type { FrozenRun, FrozenPaygRun } from '../bill2/service';
+import { modelCallPolicies } from '../bill2/runPolicies';
 import type { RuntimeCallGate } from './newWorkGate';
 import type { PaygWait, ResumeInput } from './paygRuntime';
 
@@ -48,7 +49,8 @@ export async function beginPaygExecution(input: {
     if (!verdict.ok) return { execution, resumedGate: false, wait: wait(verdict.reason) };
     if (execution.billing.mode === 'staging_test') {
       if (!input.resumePricing) return { execution, resumedGate: false, wait: wait('RUNTIME_PRICE_UNCONFIRMED') };
-      try { await input.resumePricing(execution.billing.callPolicy); }
+      // Tool-route prices (RT-3b PR-3) have no model price row; their frozen expiry is checked by each claim (0255).
+      try { await input.resumePricing(modelCallPolicies(execution.billing.callPolicy)); }
       catch { return { execution, resumedGate: false, wait: wait('RUNTIME_PRICE_CONFIGURATION_PENDING') }; }
     }
     try {
