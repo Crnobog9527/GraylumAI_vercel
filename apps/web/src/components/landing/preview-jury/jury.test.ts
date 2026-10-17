@@ -297,6 +297,18 @@ describe('chapter-by-chapter choice', () => {
     expect(proposal.diff.cascade.length).toBeGreaterThan(0);
   });
 
+  it('counts every chapter not adopted as kept, unchanged ones included, like the server', () => {
+    let state: ChoiceState = {};
+    for (const item of choosable(sections)) state = setUse(state, sections, item.section, 'original');
+    state = setUse(state, sections, '第 10 章 变现路径', 'revised');
+    const proposal = mockPropose(sections, toChoices(state, sections));
+    if (proposal.state !== 'proposed') throw new Error('expected a proposal');
+    const chapters = sections.filter(item => item.section !== '全文').length;
+    expect(proposal.kept).toHaveLength(chapters - proposal.adopted.length);
+    expect(proposal.kept).not.toContain('全文');
+    expect(mockConfirm(proposal, 'apply').kept).toEqual(proposal.kept);
+  });
+
   it('explains every refusal code in plain words', () => {
     for (const code of ['FUSION_ADOPTION_INCOMPLETE', 'FUSION_ADOPTION_INVALID', 'FUSION_ADOPTION_CONFIRM_REQUIRED', 'FUSION_ADOPTION_LINKED',
       'FUSION_ADOPTION_STALE', 'FUSION_REVIEW_ADOPTED', 'REPORT_REVISION_STALE']) {
