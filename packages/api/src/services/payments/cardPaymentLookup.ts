@@ -64,6 +64,7 @@ async function loadMatch(db: Pick<SupabaseClient, 'from'>, scope: StripeScope, o
   if (order.payment_channel !== 'stripe' || order.merchant_namespace !== scope.merchant || order.payment_mode !== scope.mode) {
     throw new Error(PAYMENT_EVIDENCE_CONFLICT);
   }
-  const kind = wallet ? 'wallet_membership' : order.item_type === 'credit_package' ? 'pack' : order.source_order_id ? 'subscription_renewal' : 'subscription_first';
+  const kind = wallet ? 'wallet_membership' : order.item_type === 'credit_package' ? 'pack'
+    : order.source_order_id ? 'subscription_renewal' : 'subscription_first';
   return { order, paymentId, paymentIntentId, kind };
 }
