@@ -8,7 +8,7 @@ vi.mock('./walletPaymentEvidence', () => ({ readWalletPaymentEvidence: mocks.cas
 import { recoverWalletCheckout } from './walletWebhook';
 function fixture(overrides = {}) {
   const order = { referenceMissing: false, orderMissing: false, id: 'order', user_id: 'user', payment_method: 'alipay', item_type: 'membership_plan',
-    entitlement_term: 'month', ...overrides };
+    entitlement_term: 'month', payment_mode: 'test', ...overrides };
   const db = { rpc: vi.fn().mockResolvedValue({ data: { state: 'fulfilled' }, error: null }),
     from: vi.fn((table: string) => {
       const chain = { select: vi.fn(() => chain), eq: vi.fn(() => chain),
@@ -35,7 +35,17 @@ describe('wallet callback/recovery', () => {
     expect(f.db.rpc).not.toHaveBeenCalled();
     mocks.cash.mockRejectedValue(new Error('timeout')); await expect(f.run()).rejects.toThrow('timeout');
     expect(f.db.rpc).not.toHaveBeenCalled();
+    // R7: a test order never settles through the live account, and the reverse.
     mocks.scope.mockResolvedValue({ mode: 'live', merchant: 'fixture' }); await expect(f.run()).rejects.toThrow('PAY_WAFFO_PAYMENT_CONFLICT');
+    mocks.scope.mockResolvedValue({ mode: 'test', merchant: 'fixture' });
+    await expect(fixture({ payment_mode: 'live' }).run()).rejects.toThrow('PAY_WAFFO_PAYMENT_CONFLICT');
+    expect(f.db.rpc).not.toHaveBeenCalled();
+  });
+  it('R7: a live order settles through the live account in live mode', async () => {
+    mocks.scope.mockResolvedValue({ mode: 'live', merchant: 'fixture' });
+    const f = fixture({ payment_mode: 'live' }); expect(await f.run()).toBe(true);
+    expect(mocks.cash).toHaveBeenCalledWith(expect.objectContaining({ scope: { mode: 'live', merchant: 'fixture' } }));
+    expect(f.db.rpc).toHaveBeenCalledWith('pay_waffo_fulfill_payment', expect.objectContaining({ p_order: 'order' }));
   });
   it('recovers a successful provider session when the original mapping write was lost', async () => {
     const originalId = '00000000-0000-4000-8000-000000000001';

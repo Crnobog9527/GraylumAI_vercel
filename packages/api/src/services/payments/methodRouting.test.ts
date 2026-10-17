@@ -5,7 +5,7 @@ import { assertPaymentMethodRoute, paymentMethodRoutesSchema, paymentRoute } fro
 const routes = { version: 3, card: { enabled: true }, card_cn: { enabled: true },
   wechat_pay: { enabled: true, annualVerified: false }, alipay: { enabled: true, annualVerified: true } };
 const base = { routes, expectedVersion: 3, method: 'wechat_pay' as const, annual: false,
-  itemType: 'membership_plan' as const, paymentMode: 'test' as const };
+  itemType: 'membership_plan' as const };
 describe('PAY-STRIPE-MP fixed method routing', () => {
   it('missing and disabled switches fail closed', () => {
     expect(() => assertPaymentMethodRoute({ ...base, routes: null })).toThrow('SALES_DISABLED');
@@ -31,9 +31,8 @@ describe('PAY-STRIPE-MP fixed method routing', () => {
     }
     expect(paymentMethodRoutesSchema.safeParse({ ...routes, channel: 'waffo' }).success).toBe(false);
   });
-  it('rejects stale decisions, live sales and mainland card packs', () => {
+  it('rejects stale decisions and mainland card packs (the mode follows the Stripe account, 0296)', () => {
     expect(() => assertPaymentMethodRoute({ ...base, expectedVersion: 2 })).toThrow('VERSION_CONFLICT');
-    expect(() => assertPaymentMethodRoute({ ...base, paymentMode: 'live' })).toThrow('LIVE_DISABLED');
     expect(() => assertPaymentMethodRoute({ ...base, method: 'card_cn', itemType: 'credit_package' })).toThrow('METHOD_DENIED');
     expect(assertPaymentMethodRoute({ ...base, method: 'card', itemType: 'credit_package' }).managedPayments).toBe(true);
   });

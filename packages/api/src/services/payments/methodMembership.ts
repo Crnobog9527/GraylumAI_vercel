@@ -14,13 +14,14 @@ const GRACE_MS = 24 * 3600 * 1000;
  * checkout or provider subscription status alone cannot grant membership. Founder capacity is
  * shared across merchants/methods in the same mode, matching 0204's atomic reservation. */
 export async function readMethodMembership(db: SupabaseClient, userId: string, now = Date.now(),
-  env: Record<string, string | undefined> = process.env) {
+  env: Record<string, string | undefined> = process.env, mode: 'test' | 'live' = 'test') {
+  // R7 (0296): the Stripe account's mode (live in production); founder seats are counted per mode like admission.
   const [routes, orders, founderOrders] = await Promise.all([
     readPaymentMethodRoutes(db),
     db.from('payment_orders').select([
       'id', 'subscription_id', 'purchase_membership_level', 'payment_method', 'payment_channel', 'auto_renew',
       'entitlement_start', 'entitlement_end', 'offer_kind', 'billing_cycle',
-    ].join(',')).eq('user_id', userId).eq('payment_mode', 'test')
+    ].join(',')).eq('user_id', userId).eq('payment_mode', mode)
       .eq('item_type', 'membership_plan').eq('qualification_state', 'sold')
       .eq('payment_status', 'paid').eq('status', 'completed').not('fulfilled_at', 'is', null)
       // Also the last 24 hours: a still-renewing card subscription keeps access in its renewal grace (0214/0238).
@@ -28,7 +29,7 @@ export async function readMethodMembership(db: SupabaseClient, userId: string, n
     // One statement/snapshot: separately reading sold and reserved can double-count a
     // reservation that becomes sold between reads, or temporarily understate occupied slots.
     db.from('payment_orders').select('qualification_state')
-      .eq('payment_mode', 'test').eq('offer_kind', 'founder')
+      .eq('payment_mode', mode).eq('offer_kind', 'founder')
       .or('qualification_state.in.(sold,reserved),and(qualification_state.eq.review,qualification_closed_ref.is.null)')
       .limit(51),
   ]);
@@ -74,7 +75,7 @@ export async function readMethodMembership(db: SupabaseClient, userId: string, n
   const goldPlans = plans.data.map(row => String(row.id));
   const isGold = ['purchase_membership_level.eq.gold', 'metadata->>membershipLevel.eq.gold',
     ...(goldPlans.length ? [`item_id.in.(${goldPlans.join(',')})`] : [])].join(',');
-  const gold = await db.from('payment_orders').select('id').eq('user_id', userId).eq('payment_mode', 'test')
+  const gold = await db.from('payment_orders').select('id').eq('user_id', userId).eq('payment_mode', mode)
     .or(`and(or(${isGold}),or(payment_status.in.(paid,refunded,partially_refunded),fulfilled_at.not.is.null))`).limit(1);
   if (!gold || gold.error || !Array.isArray(gold.data)) throw new Error('PAY_WAFFO_MEMBERSHIP_UNAVAILABLE');
   const version = (terms.data as { value?: { version?: unknown } } | null)?.value?.version;
@@ -82,7 +83,7 @@ export async function readMethodMembership(db: SupabaseClient, userId: string, n
   const occupied = founderOrders.data.length;
   const sold = founderOrders.data.filter(row => row.qualification_state === 'sold').length;
   if (occupied > 50) throw new Error('PAY_WAFFO_FOUNDER_CAPACITY_CONFLICT');
-  return { mode: 'test' as const, routes,
+  return { mode, routes,
     // Card only, staging test mode with the default-off route switch; wallets stay closed.
     checkoutReady: methodCardCheckoutReady(env, routes),
     founder: { total: 50, sold, reserved: occupied - sold, available: 50 - occupied },

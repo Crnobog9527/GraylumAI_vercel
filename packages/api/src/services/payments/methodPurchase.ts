@@ -25,7 +25,8 @@ export async function prepareMethodPurchase(input: {
   merchantNamespace: string; paymentMode: 'test' | 'live'; termsVersion: string;
 }) {
   const purchase = methodPurchaseInputSchema.parse(input.purchase);
-  if (input.paymentMode !== 'test') throw new Error('PAY_WAFFO_LIVE_DISABLED');
+  // The mode is the server Stripe scope's (R7): admission accepts live for Stripe only (0296); Waffo passes 'test'.
+  if (input.paymentMode !== 'test' && input.paymentMode !== 'live') throw new Error('PAY_WAFFO_LIVE_DISABLED');
   if (!/^[A-Za-z0-9_.:-]{1,80}$/.test(input.termsVersion)) throw new Error('PAY_WAFFO_TERMS_UNAVAILABLE');
   const digests = await loadOpeningGrantDigests(input.admin, input.userId);
   const args = {
@@ -38,7 +39,7 @@ export async function prepareMethodPurchase(input: {
     ? await input.admin.rpc('pay_waffo_create_transition', { p_user: args.p_user, p_item: args.p_item,
       p_cycle: args.p_cycle, p_method: args.p_method, p_offer: args.p_offer, p_merchant: args.p_merchant,
       p_version: args.p_version, p_terms: args.p_terms, p_digests: args.p_digests,
-      p_transition: purchase.transition, p_prior: purchase.priorSubscriptionId })
+      p_transition: purchase.transition, p_prior: purchase.priorSubscriptionId, p_mode: args.p_mode })
     : await input.admin.rpc('pay_waffo_create_purchase', args);
   // Keep the database's own refusal code so expected business answers are not reported as outages.
   if (result.error) throw admissionError(result.error.message, result.error);

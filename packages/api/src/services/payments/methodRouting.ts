@@ -42,9 +42,8 @@ export async function readPaymentMethodRoutes(db: Pick<SupabaseClient, 'from'>) 
 export function assertPaymentMethodRoute(input: {
   routes: PaymentMethodRoutes | null; expectedVersion: number;
   method: PaymentMethod; annual: boolean; itemType: 'membership_plan' | 'credit_package';
-  paymentMode: 'test' | 'live';
 }) {
-  if (input.paymentMode !== 'test') throw new Error('PAY_WAFFO_LIVE_DISABLED');
+  // No mode here: the Stripe account decides test or live (R7, 0296), and admission refuses any other mode.
   const { routes, method } = input;
   if (!routes || routes[method]?.enabled !== true) throw new Error('PAY_WAFFO_SALES_DISABLED');
   if (routes.version !== input.expectedVersion) throw new Error('PAY_WAFFO_ROUTE_VERSION_CONFLICT');

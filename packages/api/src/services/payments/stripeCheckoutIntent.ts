@@ -157,8 +157,7 @@ export async function dispatchStripeCheckoutIntent(input: {
     if (intent.scope.merchant !== scope.merchant || intent.scope.mode !== scope.mode
       || intent.request.metadata?.orderId !== intent.id || intent.request.metadata?.userId !== intent.userId
       || intent.request.client_reference_id !== intent.userId) throw new Error('PAY_COMMON_ATTEMPT_IDENTITY_MISMATCH');
-    if (intent.walletMethod && (scope.mode !== 'test'
-      || intent.request.payment_method_types?.length !== 1
+    if (intent.walletMethod && (intent.request.payment_method_types?.length !== 1
       || intent.request.payment_method_types[0] !== intent.walletMethod)) throw new Error('PAY_WAFFO_METHOD_DENIED');
     const snapshot = freezePurchaseSnapshot(intent.snapshot);
     const item = intent.request.line_items?.[0];
