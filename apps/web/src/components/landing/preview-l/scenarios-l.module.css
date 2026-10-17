@@ -69,3 +69,10 @@
   .held .bar { margin-bottom: 4px; }
   .held .pair { gap: 6px; }
 }
+/* Round seven, returned (T11): on a computer the coach's tables fit the window whole, no sideways scroll; cells wrap,
+   headings stay on one line (so short columns keep their width). A phone keeps the product's sideways scroll. */
+@media (min-width: 768px) {
+  .log.log table { width: 100%; min-width: 0; }
+  .log.log :is(th, td) { max-width: none; white-space: normal; overflow-wrap: anywhere; }
+  .log.log th { white-space: nowrap; }
+}
