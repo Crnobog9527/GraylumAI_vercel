@@ -31,7 +31,7 @@ const snowflake = (ms: number) => String((BigInt(ms) - 1288834974657n) << 22n);
 describe('post for me client', () => {
   it('passes the shared limiter before any request and sends the key only as a bearer header', async () => {
     const blocked = deps([], false);
-    expect(await getAccount(blocked.deps, 'spc_1')).toEqual({ kind: 'rate_limited', retryAfterSeconds: 7 });
+    expect(await getAccount(blocked.deps, 'spc_1')).toEqual({ kind: 'rate_limited', retryAfterSeconds: 7, sent: false });
     expect(blocked.calls).toEqual([]);
     const ok = deps([json(200, { id: 'spc_1', platform: 'x', status: 'connected', external_id: EXTERNAL, username: 'u' })]);
     const result = await getAccount(ok.deps, 'spc_1');
@@ -45,7 +45,7 @@ describe('post for me client', () => {
 
   it('classifies provider answers without guessing', async () => {
     const run = async (r: Response | Error) => getAccount(deps([r]).deps, 'spc_1');
-    expect(await run(json(429, {}, { 'retry-after': '37' }))).toEqual({ kind: 'rate_limited', retryAfterSeconds: 37 });
+    expect(await run(json(429, {}, { 'retry-after': '37' }))).toEqual({ kind: 'rate_limited', retryAfterSeconds: 37, sent: true });
     expect(await run(json(401, { error: {} }))).toEqual({ kind: 'rejected', status: 401 });
     expect(await run(json(500, { statusCode: 500 }))).toMatchObject({ kind: 'failed', status: 500 });
     expect(await run(json(200, { id: 'spc_1' }))).toMatchObject({ kind: 'failed', reason: 'RESPONSE_SHAPE' });

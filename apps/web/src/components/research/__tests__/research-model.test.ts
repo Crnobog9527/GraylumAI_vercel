@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   cellSourceNumbers, cellText, formatCount, formatFrequency, formatLastUpdate, formatRate, numberSources,
 } from "../benchmark-table-model";
-import { DATA_SOURCE_NOTE, describeCall, MISSING_TEXT } from "../research-model";
+import { callCredits, DATA_SOURCE_NOTE, describeCall, MISSING_TEXT } from "../research-model";
 import {
   buildCandidateSubmission, buildKeywordSubmission, cardErrorText, initialKeywordDraft, keywordProblem,
 } from "../selection-card-model";
@@ -30,6 +30,16 @@ describe("describeCall", () => {
     for (const word of ["tikhub", "parallel", "firecrawl", "TikHub", "Parallel", "Firecrawl", "美元", "积分", "$"]) {
       expect(shown).not.toContain(word);
     }
+  });
+
+  it("shows the user's settled credits of a finished call only", () => {
+    expect(callCredits({ state: "succeeded", credits: "0.30" })).toBe("0.3 积分");
+    expect(callCredits({ state: "failed", credits: "2" })).toBe("2 积分");
+    expect(callCredits({ state: "running", credits: "1" })).toBeNull();
+    expect(callCredits({ state: "succeeded", credits: "0.000" })).toBeNull();
+    expect(callCredits({ state: "succeeded", credits: null })).toBeNull();
+    expect(callCredits({ state: "succeeded", credits: "-1" })).toBeNull();
+    expect(describeCall({ ...CALLS[0]!, credits: "1.50" }).credits).toBe("1.5 积分");
   });
 
   it("uses the Owner-approved source sentence", () => {
