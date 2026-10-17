@@ -149,6 +149,8 @@ it('keeps 看全文 clickable at computer width when chapter titles are long (st
   const { page, errors } = await open('completed', { long: true });
   try {
     await ui(page.getByRole('heading', { name: '评审团的结果' })).toBeVisible({ timeout: 8000 });
+    // The heading shows as soon as the review is read; the chapters only once the events are too, so wait for them.
+    await ui(page.locator('#jury-reader-chapters')).toBeVisible({ timeout: 8000 });
     // The contents stay inside their column: nothing of them lies over the reading column.
     const overlap = await page.evaluate(() => {
       const toc = document.querySelector('nav[aria-label="报告目录"]')!;
@@ -166,6 +168,7 @@ it('works at phone width without sideways scrolling', async () => {
   const { page, errors } = await open('completed', { width: 390 });
   try {
     await ui(page.getByRole('heading', { name: '评审团的结果' })).toBeVisible({ timeout: 8000 });
+    await ui(page.locator('#jury-reader-chapters')).toBeVisible({ timeout: 8000 }); // measure the loaded report, not the loading note
     expect(await noSideScroll(page)).toBe(true);
     expect(errors).toEqual([]);
   } finally { await page.close(); }
