@@ -131,13 +131,16 @@ function check(spec: Spec, raw: unknown, path: string, dropped: string[]): Check
 }
 
 /** Every string inside a value, for showing a field that did not pass as plain text. */
-function leafTexts(raw: unknown, out: string[] = []): string[] {
-  if (out.length >= 40) return out;
+/** No field nests deeper than this; anything deeper in a broken value is not looked at (no unbounded recursion). */
+const LEAF_DEPTH = 6;
+
+function leafTexts(raw: unknown, out: string[] = [], depth = 0): string[] {
+  if (out.length >= 40 || depth > LEAF_DEPTH) return out;
   if (typeof raw === 'string') {
     const value = plain(raw);
     if (value) out.push([...value].slice(0, 200).join(''));
-  } else if (Array.isArray(raw)) raw.forEach(item => leafTexts(item, out));
-  else if (isRecord(raw)) Object.values(raw).forEach(item => leafTexts(item, out));
+  } else if (Array.isArray(raw)) raw.forEach(item => leafTexts(item, out, depth + 1));
+  else if (isRecord(raw)) Object.values(raw).forEach(item => leafTexts(item, out, depth + 1));
   return out;
 }
 
