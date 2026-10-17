@@ -25,8 +25,8 @@ export function scrubText(value: string): string {
  * route list complete; any other segment of one of our URLs is a dynamic value and becomes `:param`.
  */
 export const APP_SEGMENTS = new Set(['about', 'acceptable-use', 'access-denied', 'account-erasure', 'admin',
-  'agent-first-preview', 'ai', 'announcements', 'api', 'auth', 'auto-close', 'billing-reconcile', 'callback', 'chat',
-  'advance', 'fusion', 'connect', 'contact', 'costs', 'cron', 'diagnostics', 'f', 'faq', 'finance', 'forgot-password', 'ig-jingying', 'landing',
+  'agent-first-preview', 'ai', 'announcements', 'api', 'auth', 'auto-close', 'billing-reconcile', 'blog', 'callback', 'chat',
+  'advance', 'fusion', 'connect', 'contact', 'costs', 'cron', 'diagnostics', 'f', 'faq', 'features', 'finance', 'forgot-password', 'ig-jingying', 'landing',
   'library', 'library-cleanup', 'login', 'maintenance', 'marketplace', 'models', 'orders', 'packages', 'payment-notices', 'performance',
   'plan', 'positioning', 'postforme', 'preview', 'publish-monitor', 'pricing', 'privacy', 'profile', 'prompts', 'refunds',
   'register', 'release-subscription-credits',
