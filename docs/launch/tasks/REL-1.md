@@ -102,13 +102,13 @@ Owner 2026-10-17 选 A（原话见第 6 节）：**日期不变，10-25 冻结**
 | N2 | 项目设置 `rls_auto_enable` / `ensure_rls` 事件触发器的取值和 staging 一致 | 总控（需批准）核对；需要改时 Owner 在后台点 | 读回设置 | STAGING_REPRODUCIBILITY 第 233–235 行 |
 | N3 | 扩展：确认平台自带 `supabase_vault`；确认项目允许迁移 0010 建 `pg_cron`、0148 再删掉 | 总控（需批准只读） | 扩展列表读回；不允许时停下请 Owner 定，不跳过迁移 | ADMIN-SECRETS 第 38 行；STAGING_REPRODUCIBILITY 第 243–246 行 |
 | N4 | 从空库建库（B1）并导入配置（B2）。存储桶（资料库私有桶、工单附件等）由 `0000` 基线和迁移建出来，不手动建 | 总控（需批准） | 指纹比对通过；B6 存储桶核对 | 第 2337 行（基线补存储桶）；STAGING_REPRODUCIBILITY 第 223–255 行 |
-| N5 | Auth 基本设置：Site URL `https://www.graylum.com`；允许的回跳地址（登录回调、`verify-email`、找回密码页，都在 www 下）；邮箱确认开启 | 总控（需批准）按 staging 的设置列出清单，Owner 在后台点或批准总控点 | 新邮箱注册、确认、找回密码都回到 www | 第 934 行；PRODUCTION_RELEASE 第二节 |
+| N5 | Auth 基本设置：Site URL 是主机根 `https://www.graylum.com`（**不是** `/app`）；Redirect URLs 允许 `https://www.graylum.com/**`，不加 app 域；登录回调处理仍是根路径的 `/auth/callback`，`verify-email`、找回密码等登录入口页也留在根路径；邮件模板不改；邮箱确认开启 | 总控（需批准）按 staging 的设置列出清单，Owner 在后台点或批准总控点 | 新邮箱注册、确认、找回密码都回到 www | 第 934 行；SEO_GEO_SPEC 第 24–26、223 行；PRODUCTION_RELEASE 第二节 |
 | N6 | Google 登录：在 Google Cloud 的 OAuth 客户端里加上新项目的回调地址（`https://<新项目编号>.supabase.co/auth/v1/callback`），把客户端编号和密钥填进新项目 | Owner 操作（凭证） | 用 Google 账号真实登录一次，只发一次注册赠送 | **待核实**：OAuth 客户端设置仓库里没有记录；Google 登录相关的产品规则见第 1294 行 |
 | N7 | 邮件 SMTP：新项目里配 Resend SMTP（发件人 `no-reply@graylum.com`），SMTP 密码是 Resend 的密钥 | Owner 操作（凭证） | 注册确认邮件真实送达 | [v10.1](../Graylum_Master_Plan_v10.1.md) 第 305 行；第 604 行（N5 发件地址） |
 | N8 | 人机验证：新项目开启 hCaptcha（填 hCaptcha 的密钥）；Vercel 正式环境的 `NEXT_PUBLIC_HCAPTCHA_SITEKEY` 用同一个站点 | Owner 操作（凭证） | 登录、注册、注销弹窗都出现验证 | `.env.example`；DATA_ERASURE_RETENTION_CHECKLISTS 第 52 行 |
 | N9 | 邮件模板、密码强度等其余 Auth 设置和 staging 对齐 | 总控（需批准）列出差异，Owner 在后台点 | 逐项读回 | **待核实**：staging 现在的 Auth 设置仓库里没有完整记录 |
 | N10 | 把新项目的 `NEXT_PUBLIC_SUPABASE_URL`、`NEXT_PUBLIC_SUPABASE_ANON_KEY`、`SUPABASE_SERVICE_ROLE_KEY`、`DATABASE_URL` 填进 Vercel 正式项目 `graylum-ai-vercel-v1`；`EXPECTED_SUPABASE_PROJECT_REF` 改成新项目编号，`EXPECTED_APP_HOST` 改成 `www.graylum.com` | Owner 操作（新凭证） | 变量名存在（不读值）；部署后应用连的是新项目 | `.env.example` |
-| N11 | Vercel 正式环境其余变量：`NEXT_PUBLIC_APP_URL`、`NEXT_PUBLIC_AUTH_APP_URL`、`NEXT_PUBLIC_SITE_NAME`、`NEXT_PUBLIC_APP_NAME`、`NEXT_PUBLIC_SUPPORT_EMAIL`、`APP_ENV` / `NEXT_PUBLIC_APP_ENV`、`CRON_SECRET`、`OPENING_GRANT_HMAC_KEYS`、`API_SIGNATURE_SECRET` / `REQUIRE_API_SIGNATURE`、Sentry 几个变量、Upstash 两个（A5）、Stripe 三个和 `STRIPE_CARD_RECONCILIATION_MODE`（D7）、`SITE_INDEXING`（E3）、功能开关（F 组）。**不设**：`V3_RUNTIME_STAGING_ENABLED`、`WAFFO_TEST_*`、`LANDING_PREVIEW_FEATURES`、`E2E_*` | 新密钥类由 Owner 操作；非密钥的值由总控（需批准）设置 | 变量名清单读回，和本行对照 | `.env.example`；`apps/web/src/lib/landing/landing-flags.ts` 第 12–13 行；RELEASE_PREP_CHECKLIST 第 55 行 |
+| N11 | Vercel 正式环境其余变量：`NEXT_PUBLIC_APP_URL`、`NEXT_PUBLIC_AUTH_APP_URL`、`NEXT_PUBLIC_SITE_NAME`、`NEXT_PUBLIC_APP_NAME`、`NEXT_PUBLIC_SUPPORT_EMAIL`、`APP_ENV` / `NEXT_PUBLIC_APP_ENV`、`CRON_SECRET`（**新增凭证，Owner 设置**；没有它正式环境所有定时任务都返回 503，A2 的前提）、`OPENING_GRANT_HMAC_KEYS`、`API_SIGNATURE_SECRET` / `REQUIRE_API_SIGNATURE`、Sentry 几个变量、Upstash 两个（A5）、Stripe 三个和 `STRIPE_CARD_RECONCILIATION_MODE`（D7）、`SITE_INDEXING`（E3）、功能开关（F 组）。**不设**：`V3_RUNTIME_STAGING_ENABLED`、`WAFFO_TEST_*`、`LANDING_PREVIEW_FEATURES`、`E2E_*` | 新密钥类由 Owner 操作；非密钥的值由总控（需批准）设置 | 变量名清单读回，和本行对照 | `.env.example`；`apps/web/src/lib/landing/landing-flags.ts` 第 12–13 行；RELEASE_PREP_CHECKLIST 第 55 行 |
 | N12 | Vault：确认装好并应用了 0259（B3）；6 把业务密钥和 Resend 由 Owner 在新站后台填（C1、C3） | Owner 操作；总控只读核对 | 后台槽位都显示"后台已填写" | ADMIN-SECRETS 第 8 节 |
 | N13 | 各平台回调地址改到新环境：Stripe 回调（D4）、Post for Me Webhook（C8）都指向 `https://www.graylum.com/api/...` | Owner 操作 | 平台后台投递成功 | MIGRATION-PLAN 第五节第 4 项；ADMIN-SECRETS 第 8 节第 2 项 |
 | N14 | 管理员账号：在新项目里注册 Owner 的管理员账号并授予管理员角色（staging 的测试账号不复制） | Owner 注册；授权由总控（需批准）执行 | 管理员能进后台，普通账号被拒 | 第 9.3 节第 2677 行（不复制测试账号） |
@@ -125,7 +125,7 @@ Owner 2026-10-17 选 A（原话见第 6 节）：**日期不变，10-25 冻结**
 | # | 做什么 | 为什么 | 谁做 | 依赖 | 怎么验证 | 出处 |
 | --- | --- | --- | --- | --- | --- | --- |
 | A1 | 升级 Vercel Pro | 正式运营要用；Hobby 单次函数 300 秒、定时任务每天一次，不够 A2 用 | Owner 操作（付费） | — | Vercel 账单页显示 Pro；正式项目的函数时长上限读回 | Master Plan 第 1237 行、第 7.6 节第 2491 行 |
-| A2 | 改 `apps/web/vercel.json` 定时任务频率：新增 `/api/cron/runtime-recovery`（分钟级）；`account-erasure` 和 `library-cleanup` 每 5 分钟（Master Plan 要求注销兜底至少每小时一次，LIB_DOCS_PLAN 要求两者一起改成每 5 分钟，取更严的 5 分钟）；`social-monitor` 每 10 分钟 | 删除后 24 小时内清完（T_online）；超时回合自动收口退回；资料库清理；作品数据刷新容量 | 执行窗口开 PR | A1；`runtime-recovery` 路由已在 staging，但 `vercel.json` 里还没有这一条 | 会写运行记录的任务（`social-monitor`、`tickets/auto-close` 等）看 `scheduled_job_runs` 有成功记录；`runtime-recovery` 和 `account-erasure` 目前不写这张表，看 Vercel 定时任务调用记录和函数日志里的 HTTP 200（不是 401/503） | 第 2335、2375、2491 行；[LIB_DOCS_PLAN](../LIB_DOCS_PLAN.md) 第 144 行；[PUBLISH-MONITOR](PUBLISH-MONITOR.md) 第 338 行；[FUSION-REVIEW](FUSION-REVIEW.md) 第 44 行 |
+| A2 | 改 `apps/web/vercel.json` 定时任务频率：新增 `/api/cron/runtime-recovery`（分钟级）；`account-erasure` 和 `library-cleanup` 每 5 分钟（Master Plan 要求注销兜底至少每小时一次，LIB_DOCS_PLAN 要求两者一起改成每 5 分钟，取更严的 5 分钟）；`social-monitor` 每 10 分钟 | 删除后 24 小时内清完（T_online）；超时回合自动收口退回；资料库清理；作品数据刷新容量 | 执行窗口开 PR | A1；Vercel 正式环境已有 `CRON_SECRET`（N11，`apps/web/src/lib/cron-auth.ts` 没有它就拒绝全部定时请求）；`runtime-recovery` 路由已在 staging，但 `vercel.json` 里还没有这一条 | 会写运行记录的任务（`social-monitor`、`tickets/auto-close` 等）看 `scheduled_job_runs` 有成功记录；`runtime-recovery` 和 `account-erasure` 目前不写这张表，看 Vercel 定时任务调用记录和函数日志里的 HTTP 200（不是 401/503） | 第 2335、2375、2491 行；[LIB_DOCS_PLAN](../LIB_DOCS_PLAN.md) 第 144 行；[PUBLISH-MONITOR](PUBLISH-MONITOR.md) 第 338 行；[FUSION-REVIEW](FUSION-REVIEW.md) 第 44 行 |
 | A2a | **待核实**：staging 和正式两个 Vercel 项目是否在同一个团队、staging 是否也会变成 Pro | `vercel.json` 两个项目共用；如果 staging 仍是 Hobby，分钟级定时任务可能让 staging 部署失败 | 总控只读核对 | A1 | 看两个项目所属团队和套餐 | 仓库里没有出处，待核实 |
 | A3 | 恢复正式站（取消暂停） | 正式 Vercel 项目 `graylum-ai-vercel-v1` 目前是暂停状态（**待核实**：暂停原因和日期仓库里没写，总控记录为 2026-10-05） | Owner 操作（MCP 没有这个权限） | 维护态准备完成（第 4 节第 4 步） | 访问正式域名不再是暂停页；新调用仍是关闭状态 | [RUNTIME_PROD_PLAN](../RUNTIME_PROD_PLAN.md) 第 7.3 节第 3、5 步、第 8 节 Vercel 行 |
 | A4 | 处理 `main` 的 Next 安全漏洞 | `main` 停在 2026-08 的依赖，必需检查 Dependency Audit 失败；正式站公开可达 | 总控（需批准合并 `main`） | 冻结版本 | staging → `main` 的合并 PR 上 Dependency Audit 和全部必需检查通过，不新增豁免 | 第 2628 行；RUNTIME_PROD_PLAN 第 7.3 节第 1 步 |
@@ -173,7 +173,7 @@ Owner 2026-10-17 选 A（原话见第 6 节）：**日期不变，10-25 冻结**
 | D1 | 正式模式开通 Stripe Managed Payments，提交资格信息，接受条款 | 银行卡订阅走 MP；平台审核可能要几天，**要尽早开始** | Owner 操作 | — | Stripe 后台显示 MP 已开通 | [MIGRATION-PLAN](../evidence/stripe-managed-payments-20261012/MIGRATION-PLAN.md) 第五节第 1 项 |
 | D2 | 正式模式建产品和价格：Pro / Gold 月付和年付、创始年付、Gold 首月优惠券；税务编码 `txcd_10105001`，价格不含税 | 价格和 Master Plan 第 51 项一致 | Owner 操作（或批准 AI 按脚本建） | D1 | 价格 ID 和后台套餐一一对应 | MIGRATION-PLAN 第五节第 2 项 |
 | D3 | "收入恢复 → 重试"改为第 1、3、6 天重试，失败后取消订阅 | 配合 24 小时宽限和创始会员 7 天规则 | Owner 操作 | D1 | 后台设置读回 | MIGRATION-PLAN 第五节第 3 项 |
-| D4 | 正式回调地址订阅 `invoice.*`、`customer.subscription.*`、`charge.refunded`、`charge.dispute.*`；新建回调地址会产生新的回调密钥（新增凭证） | 续费、退款、拒付事件都要收到 | Owner 操作 | E1（回调地址用正式域名） | 发一个错误签名的请求返回 400；Stripe 后台投递成功 | MIGRATION-PLAN 第五节第 4 项；PRODUCTION_RELEASE 第二节 |
+| D4 | 正式回调地址订阅 `invoice.*`、`customer.subscription.*`、`charge.refunded`、`charge.dispute.*`；新建回调地址会产生新的回调密钥（新增凭证） | 续费、退款、拒付事件都要收到 | Owner 操作 | **在 E1 的 308 生效之前**把回调主机改成 `www.graylum.com`（路径不变），回调不能依赖跳转 | 直接发到 www 的投递成功、错误签名返回 400；之后才放 E1 的 308，再用带请求体的 POST 实测旧域名跳转后方法和内容不变 | MIGRATION-PLAN 第五节第 4 项；SEO_GEO_SPEC 第 24、222 行；PRODUCTION_RELEASE 第二节 |
 | D5 | 账单描述、客服邮箱、结账页的条款和隐私链接；开通 Stripe Tax 门槛监控 | MP 不负责税务的国家照常卖，接近门槛时提醒（Owner 2026-10-12 选 A） | Owner 操作 | D1 | Stripe Tax 页显示监控已开 | 第 720、2375 行；MIGRATION-PLAN 第 2.4 节、第五节第 5 项 |
 | D6 | 正式环境 Stripe 客户门户关闭"切换套餐" | 升级要走"新开 Gold 结账 + Pro 期末停"，门户里直接换套餐会绕过 | Owner 操作 | — | 门户设置读回 | 第 2375 行 |
 | D7 | 打开正式银行卡下单，同时设置 `STRIPE_CARD_RECONCILIATION_MODE=live`、放开银行卡处理只认测试模式的限制 | 默认关闭；三件事一起开 | 总控（需批准；放开测试模式限制是改配置还是改代码，**待核实**） | D1–D6；PAY-STRIPE-MP 全部 PR；#961 | 每日对账在正式环境跑出成功记录 | 第 2375 行；MIGRATION-PLAN 第五节第 7 项 |
@@ -186,7 +186,7 @@ Owner 2026-10-17 选 A（原话见第 6 节）：**日期不变，10-25 冻结**
 
 | # | 做什么 | 为什么 | 谁做 | 依赖 | 怎么验证 | 出处 |
 | --- | --- | --- | --- | --- | --- | --- |
-| E1 | 应用并入 `www.graylum.com`，登录后页面放 `/app`；`graylum.com` 和 `app.graylum.com` **308**（保留请求方法和请求体，切换期间还在发往旧主机的 Stripe 回调 POST 不丢）到 www；**必须先做完 E2** 再让这两条 308 生效，否则两条反向跳转会无限循环 | Owner 2026-10-12 定为上线前完成 | 代码：执行窗口（**还没开 PR**，冻结窗口最后做）；Vercel 域名、Supabase Site URL 和回调、Stripe 回调、环境变量：Owner 逐项批准 | PUBLIC-SITE；E2 | 三个域名都落到 www，状态码是 308；登录回跳、Stripe 回跳正确 | 第 748、934 行；[SEO_GEO_SPEC](../SEO_GEO_SPEC.md) 第 19、24、220、225 行 |
+| E1 | 应用并入 `www.graylum.com`，登录后页面放 `/app`；`graylum.com` 和 `app.graylum.com` **308**（保留请求方法和请求体，切换期间还在发往旧主机的 Stripe 回调 POST 不丢）到 www；**必须先做完 E2，并把 Stripe 和 Post for Me 的回调主机先改成 www（D4、N13）**，再让这两条 308 生效，否则两条反向跳转会无限循环 | Owner 2026-10-12 定为上线前完成 | 代码：执行窗口（**还没开 PR**，冻结窗口最后做）；Vercel 域名、Supabase Site URL 和回调、Stripe 回调、环境变量：Owner 逐项批准 | PUBLIC-SITE；E2；D4、N13（回调主机先改成 www） | 三个域名都落到 www，状态码是 308；登录回跳、Stripe 回跳正确 | 第 748、934 行；[SEO_GEO_SPEC](../SEO_GEO_SPEC.md) 第 19、24、220、225 行 |
 | E2 | 如果当时在 Vercel 设过 `www.graylum.com` → `app.graylum.com` 的临时 307，**在 E1 的反向跳转生效之前**先撤回 | 和 E1 方向相反，同时存在会无限循环；不撤回整站也不会被收录 | Owner 操作 | 取得正式环境设置批准 | 实测访问 www 不再跳到 app，之后才放 E1 的 308 | 第 2493、2628 行；SEO_GEO_SPEC 第 224–225 行。**待核实**：这条 307 实际有没有设过（正式站后来改为整站暂停） |
 | E3 | 正式环境设置 `SITE_INDEXING=public` 后重新构建 | `/robots.txt` 才会放行搜索爬虫、拒绝训练爬虫；noindex 响应头也随之只留在登录后页面 | 总控（需批准环境变量） | E2、E1；落地页能力核对（H1）通过 | `/robots.txt` 内容；首页响应头没有 `X-Robots-Tag: noindex` | RELEASE_PREP_CHECKLIST 第 54 行；`apps/web/next.config.ts` 第 63–66 行；`apps/web/src/lib/landing/landing-flags.ts` 第 12–13 行 |
 | E4 | Google Search Console、Bing 提交站点和 sitemap | SEO 第 0 阶段地基 | Owner 操作（对外账号） | E3 | 后台显示已验证 | SEO_GEO_SPEC 第 306 行 |
@@ -245,8 +245,8 @@ Owner 2026-10-17 选 A（原话见第 6 节）：**日期不变，10-25 冻结**
 | 10-27 | 准备批准包（RUNTIME_PROD_PLAN 第 7.3 节第 2 步）：正式项目、版本、迁移、配置值、各家上限金额、冒烟预算 | 总控 |
 | 10-28 | 正式只读核验（第 4 节第 3 步）：新项目的 N1–N3、A7、Vault；旧 Vercel 项目的暂停状态和绑定 | 总控（需批准只读） |
 | 10-29 | 维护态准备（第 4 节第 4 步）：在新项目里 B1 建库、B2 配置、A6 停止新调用；N10–N11 把 Vercel 正式变量换成新项目（**必须在合并 `main` 之前**，否则部署出来连的是旧库）；N14 管理员账号；之后 A4 staging → `main` 合并并部署（站点仍暂停），再由 Owner 在新站后台填密钥（C1、C3、N12） | 总控（需批准）；Owner 操作 |
-| 10-30 | 恢复站点但新调用仍关（第 5 步）；H4 正式小额冒烟和 D9 真钱付款退款；同日对账 | 总控（需批准）；Owner |
-| **10-31** | 对账无误后公开开放（第 7 步）：关掉 `stopNewCalls`、打开银行卡下单（D7）、E3 `SITE_INDEXING=public`；上线后观察成本、错误和未结算项 | 总控（需批准）；Owner |
+| 10-30 | 恢复站点但新调用仍关、公众访问仍由部署访问保护挡住（第 5 步）；**先打开 D7 银行卡下单**（只有受控身份能进站），再做 H4 正式小额冒烟和 D9 真钱付款退款；同日对账 | 总控（需批准）；Owner |
+| **10-31** | 对账无误后公开开放（第 7 步）：关掉 `stopNewCalls`、撤掉部署访问保护、E3 `SITE_INDEXING=public`；上线后观察成本、错误和未结算项 | 总控（需批准）；Owner |
 
 缓冲：10-30 冒烟失败或对账不一致时，保持新调用关闭、站点维持当时状态，修复后重新批准，不硬上。
 
@@ -260,7 +260,7 @@ Owner 2026-10-17 选 A（原话见第 6 节）：**日期不变，10-25 冻结**
 4. **维护态准备（需批准）**：站点保持暂停、新调用保持关闭；建库（B1）、导入配置（B2）、凭据和限额（C1–C7）、监控（A9）；所有值读回核对。
    合并到 `main` 可能自动触发正式部署，**合并前就要拿到批准**。
 5. **恢复访问（需批准）**：确认新调用仍关闭，再取消暂停（A3）。冒烟期间用部署访问保护限制公众访问。
-6. **小额正式冒烟（需批准）**：H4 + D9。
+6. **小额正式冒烟（需批准）**：先在部署访问保护下打开 D7 银行卡下单，再做 H4 + D9。
 7. **对账后公开开放（需批准）**：核对成本、扣款、平台承担、冻结释放、重复请求没有新派发、告警和停止开关可用；再按批准范围开放。
    站点恢复、模型调用开放和真钱付款是三件事，不能合成一次隐含授权。
 8. **出问题时**：立即用 `stopNewCalls` 停新调用，保留账务恢复；先查实际状态再决定重试；没解决的账务或安全问题不扩大开放。
@@ -286,6 +286,8 @@ Owner 2026-10-17 选 A（原话见第 6 节）：**日期不变，10-25 冻结**
 - 我来新建 Supabase 正式项目（PostgreSQL 17，区域 `<区域>`），数据库密码存进 `~/.graylum/secrets/`。
 - 我来在新正式项目里配好 Google 登录（Google Cloud 加新回调地址）、Resend SMTP 和 hCaptcha。
 - 我来把新正式项目的 Supabase 地址和密钥填进 Vercel 正式项目，并把 `EXPECTED_SUPABASE_PROJECT_REF` 改成新项目编号。
+- 我来在 Vercel 正式环境新建 `CRON_SECRET`（定时任务的口令）。
+- 我来在开启域名跳转之前，把 Stripe 和 Post for Me 的回调地址主机改成 `www.graylum.com`。
 
 **上线前要批准的事**
 - 同意 REL-1 冻结版本 `<版本>`，从 10-25 起只修上线阻塞问题。
@@ -300,10 +302,10 @@ Owner 2026-10-17 选 A（原话见第 6 节）：**日期不变，10-25 冻结**
 
 **上线当天要批准的事**
 - 同意恢复正式站 `graylum-ai-vercel-v1` 的访问，新调用仍保持关闭。
+- 同意在部署访问保护下打开正式银行卡下单，同时设置 `STRIPE_CARD_RECONCILIATION_MODE=live`（公众仍进不来）。
 - 同意正式小额冒烟：用 `<测试身份>` 调用 `<模型和次数>`，总预算不超过 `<金额>` 美元。
 - 同意上线当天真实付款再退款：银行卡 `<金额和笔数>`，微信和支付宝年付 279 / 496 / 621 美元各一笔，退款后核对到账和收回。
-- 同意打开正式银行卡下单，同时设置 `STRIPE_CARD_RECONCILIATION_MODE=live`。
-- 同意对账无误后公开开放：关闭"停止新调用"，设置 `SITE_INDEXING=public` 让搜索引擎收录。
+- 同意对账无误后公开开放：关闭"停止新调用"、撤掉部署访问保护，设置 `SITE_INDEXING=public` 让搜索引擎收录。
 - 我来在正式站后台填好 6 把第三方密钥，并对照 Post for Me Webhook 共享密钥的末 4 位。
 - 我来删除 Vercel 正式环境里 6 个过渡期旧变量和不再需要的 E2E 测试凭证。
 
