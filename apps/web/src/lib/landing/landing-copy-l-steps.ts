@@ -60,8 +60,6 @@ export const L_JURY = {
 /** Region 6, one scenario at a time (Owner 2026-10-17): its tab, title and one line saying the point. NEW. */
 export const L_SCENARIOS = {
   label: '选一个场景',
-  pause: '暂停',
-  play: '继续播放',
   /** Not a product window: a marketing comparison. */
   badge: '示意',
   /** By the task's index in L_TASKS. */

@@ -2,7 +2,7 @@
 'use client';
 
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
-import { ChevronsDown, Pause, Play } from 'lucide-react';
+import { ChevronsDown } from 'lucide-react';
 import compare from '@/components/landing/preview-j/compare-j.module.css';
 import page from '@/components/landing/preview-j/j.module.css';
 import { L_TASKS, L_TASKS_TITLE } from '@/lib/landing/landing-copy-l-compare';
@@ -24,6 +24,9 @@ const SEEN_KEY = 'graylum-landing-l-scenarios-seen';
 const reducedMotion = () => Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
 const readSeen = () => { try { return window.localStorage.getItem(SEEN_KEY) === '1'; } catch { return false; } };
 const writeSeen = () => { try { window.localStorage.setItem(SEEN_KEY, '1'); } catch { /* private window: not remembered */ } };
+const PLAYED_KEY = 'graylum-landing-l-scenarios-played';
+const readPlayed = (): number[] => { try { return JSON.parse(window.localStorage.getItem(PLAYED_KEY) ?? '[]'); } catch { return []; } };
+const writePlayed = (ids: readonly number[]) => { try { window.localStorage.setItem(PLAYED_KEY, JSON.stringify(ids)); } catch { /* not remembered */ } };
 
 type Item = { task: (typeof L_TASKS)[number]; copy: (typeof L_SCENARIOS.items)[number]; turns: (typeof L_WORKFLOWS)[number] };
 const spanOf = (item: Item) => workflowBeats(item.turns) + HOLD_BEATS;
@@ -44,10 +47,12 @@ export function scenarioAt(items: readonly Item[], position: number) {
  * - The region holds on screen while the page scrolls through it; the scroll plays the four scenarios in order, beat by
  *   beat, so they are all seen before the page goes on. A visitor who has seen them before (remembered in this browser)
  *   gets a button that jumps past.
- * - Left alone, it plays on by itself; the visitor's hand on the coach's chat (pointer over it, scrolling it, a click) or
- *   the pause button stops it, and it goes on when the hand leaves. Scrolling the page down never moves it back;
- *   scrolling up does. A tab jumps to its scenario.
- * - The coach's chat can be scrolled by the visitor (it stops following the newest line until the next scenario).
+ * - Left alone, it plays on by itself. Scrolling the page down never moves it back; scrolling up does. A tab jumps to
+ *   its scenario.
+ * - The coach's chat shows its scrollbar and can be scrolled by the visitor (it stops following the newest line until
+ *   the next scenario).
+ * Round eight (U8, Owner 2026-10-18): no pause, by the pointer or a button; each scenario plays once and, played, is
+ * remembered in this browser and shown finished when it comes back.
  * Server HTML, no JavaScript and reduced motion: one scenario at a time with the tabs, each conversation whole.
  */
 export function ScenariosL({ flags, after }: { flags: LandingFlags; after?: ReactNode }) {
@@ -56,8 +61,7 @@ export function ScenariosL({ flags, after }: { flags: LandingFlags; after?: Reac
   const total = items.reduce((sum, item) => sum + spanOf(item), 0);
   const [held, setHeld] = useState(false);
   const [position, setPosition] = useState(0);
-  const [stopped, setStopped] = useState(false);
-  const [holding, setHolding] = useState(false);
+  const [played, setPlayed] = useState<readonly number[]>([]);
   const [inView, setInView] = useState(false);
   const [seen, setSeen] = useState(false);
   const [staticActive, setStaticActive] = useState(0);
@@ -93,7 +97,7 @@ export function ScenariosL({ flags, after }: { flags: LandingFlags; after?: Reac
     return () => { cancelAnimationFrame(frame); window.removeEventListener('scroll', onScroll); window.removeEventListener('resize', onScroll); };
   }, [held, total]);
   // Left alone and on screen, it plays on by itself (not while the page is being scrolled).
-  const playing = held && inView && !stopped && !holding && !busy && position < total;
+  const playing = held && inView && !busy && position < total;
   const [tick, setTick] = useState(0);
   useEffect(() => {
     if (!playing) return;
@@ -108,6 +112,15 @@ export function ScenariosL({ flags, after }: { flags: LandingFlags; after?: Reac
 
   const at = scenarioAt(items, position);
   const active = held ? at.index : staticActive;
+  // A scenario played to its end is remembered (round eight, U8): from then on it shows finished.
+  const playedOut = held && items[at.index] ? at.beat >= workflowBeats(items[at.index].turns) : false;
+  useEffect(() => { setPlayed(readPlayed()); }, []);
+  useEffect(() => {
+    if (!playedOut || played.includes(at.index)) return;
+    const next = [...played, at.index];
+    setPlayed(next);
+    writePlayed(next);
+  }, [playedOut, played, at.index]);
   // On a phone the tabs share a row with the controls and scroll sideways: the current one is kept in view.
   useEffect(() => {
     const row = tabs.current;
@@ -145,11 +158,6 @@ export function ScenariosL({ flags, after }: { flags: LandingFlags; after?: Reac
                   <ChevronsDown size={14} aria-hidden="true" /><span className={styles.label}>{L_STEPS.skip}</span>
                 </button>
               ) : null}
-              <button type="button" className={styles.pause} onClick={() => setStopped(value => !value)}
-                aria-label={stopped ? L_SCENARIOS.play : L_SCENARIOS.pause}>
-                {stopped ? <Play size={14} aria-hidden="true" /> : <Pause size={14} aria-hidden="true" />}
-                <span className={styles.label}>{stopped ? L_SCENARIOS.play : L_SCENARIOS.pause}</span>
-              </button>
             </div>
           ) : null}
         </div>
@@ -159,8 +167,8 @@ export function ScenariosL({ flags, after }: { flags: LandingFlags; after?: Reac
         <h3 className={styles.title}>{current.copy.title}</h3>
         <p className={styles.lede}>{current.copy.lede}</p>
         <TypingScope>
-          <WorkflowCompareL task={current.task} turns={current.turns} beat={held ? at.beat : Infinity} badge={L_SCENARIOS.badge}
-            onHold={setHolding} />
+          <WorkflowCompareL task={current.task} turns={current.turns} badge={L_SCENARIOS.badge}
+            beat={held && !played.includes(active) ? at.beat : Infinity} />
         </TypingScope>
       </div>
     </div>

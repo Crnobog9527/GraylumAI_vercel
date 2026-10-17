@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronsDown } from 'lucide-react';
 import { CtaK } from '@/components/landing/preview-k/CtaK';
 import k from '@/components/landing/preview-k/k.module.css';
@@ -16,11 +16,9 @@ import { DemoTag } from './DemoTag';
 import { LaterStepsL } from './LaterStepsL';
 import { PositioningPictureL, stepOneScript } from './PositioningPictureL';
 import styles from './steps-l.module.css';
-import { usePlayClock } from './use-play-clock';
 
-/** Scrolling down while the step plays speeds it up this much, for this long after the last push. */
-const BOOST = 3;
-const BOOST_MS = 900;
+/** How much of the step's clock one pixel of scrolling moves (milliseconds): a notch of the wheel types a sentence or two. */
+const MS_PER_PX = 25;
 const SEEN_KEY = 'graylum-landing-l-step-one-seen';
 const reducedMotion = () => Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
 const readSeen = () => { try { return window.localStorage.getItem(SEEN_KEY) === '1'; } catch { return false; } };
@@ -28,79 +26,40 @@ const writeSeen = () => { try { window.localStorage.setItem(SEEN_KEY, '1'); } ca
 
 /**
  * Region 3 (Owner 2026-10-17): 第一步/第二步/第三步. Step one is the whole positioning flow on the real product's display
- * components (PositioningPictureL). Round seven (T2): it plays by itself once on screen, in time, every message typed
- * (step-one-timeline.ts), its four stages in order, and the stage holds still meanwhile. The page cannot be scrolled
- * past it before the end on a first visit: scrolling down only speeds the play up (three times) and the page follows
- * it. The pointer on the conversation, or scrolling it, pauses the play. A visitor who has seen it before (remembered
- * in this browser) scrolls freely and gets a button that jumps past it. Steps two and three follow (LaterStepsL).
- * Server HTML and reduced motion: the four stages stacked, finished.
+ * components (PositioningPictureL). Round eight (U1, Owner 2026-10-18: "通过用户自己滚动鼠标来控制这个进度……这一次，
+ * 用户滚动鼠标控制的是现在流式输入输出的展现效果"): the stage holds still while the page scrolls through its track, and
+ * the scroll is the step's clock (step-one-timeline.ts): scrolling down types it on, character by character, scrolling
+ * up takes it back; the track is long enough that the visitor goes through all four stages, the report opening last,
+ * before the page goes on to step two. Scrolling inside the conversation only reads it. A visitor who has seen it
+ * before (remembered in this browser) gets a button that jumps past it. Server HTML and reduced motion: the four
+ * stages stacked, finished.
  */
 export function StepsL({ flags }: { flags: LandingFlags }) {
   const stages = visibleItems(flags, L_STEPS.one.stages);
   const durations = useMemo(() => stages.map(stage => (stage.moment === 3 ? ONE_MS.report : momentMs(stepOneScript(stage.moment)))), [stages]);
-  const total = durations.reduce((sum, ms) => sum + ms, 0);
+  const total = durations.reduce((sum, length) => sum + length, 0);
   const ref = useRef<HTMLDivElement>(null);
   const [locked, setLocked] = useState(false);
   const [seen, setSeen] = useState(false);
-  const [inView, setInView] = useState(false);
-  const [holding, setHolding] = useState(false);
-  const boostUntil = useRef(0);
-  const rate = useCallback(() => (performance.now() < boostUntil.current ? BOOST : 1), []);
-  const ms = usePlayClock(locked && inView && !holding, total, rate);
-  const done = ms >= total;
-  const state = useRef({ ms, total, free: seen || done });
-  state.current = { ms, total, free: seen || done };
+  const [ms, setMs] = useState(0);
 
   useEffect(() => { setLocked(!reducedMotion()); setSeen(readSeen()); }, []);
   useEffect(() => {
     const node = ref.current;
     if (!locked || !node) return;
-    const top = () => node.getBoundingClientRect().top + window.scrollY;
-    // How far down the page may go: the step's track, as far as the play has got.
-    const allowed = () => top() + Math.max(0, node.offsetHeight - window.innerHeight) * (state.current.ms / state.current.total);
-    const inChat = (target: EventTarget | null) => target instanceof Element && Boolean(target.closest('[data-step-one-chat]'));
-    // Only a visitor scrolling inside the step is held; a jump past it (a link in the menu) is left alone.
-    const inside = (y: number) => y >= top() - 2 && y <= allowed() + 4;
-    let lastY = window.scrollY;
-    const hold = (down: number, event?: Event) => {
-      if (state.current.free || down <= 0 || !inside(window.scrollY)) return;
-      if (window.scrollY + down <= allowed()) return;
-      event?.preventDefault();
-      boostUntil.current = performance.now() + BOOST_MS;
-    };
     let frame = 0;
     const measure = () => {
       frame = 0;
       const rect = node.getBoundingClientRect();
-      setInView(rect.top < window.innerHeight * 0.35 && rect.bottom > window.innerHeight * 0.65);
-      if (!state.current.free && inside(lastY) && window.scrollY > allowed() + 4 && window.scrollY - lastY < window.innerHeight * 2) {
-        boostUntil.current = performance.now() + BOOST_MS;
-        window.scrollTo({ top: allowed(), behavior: 'instant' });
-      }
-      lastY = window.scrollY;
+      const run = Math.max(1, rect.height - window.innerHeight);
+      setMs(Math.min(1, Math.max(0, -rect.top / run)) * total);
     };
     const onScroll = () => { if (!frame) frame = requestAnimationFrame(measure); };
-    const onWheel = (event: WheelEvent) => { if (!inChat(event.target)) hold(event.deltaY, event); };
-    let touchY = 0;
-    const onTouchStart = (event: TouchEvent) => { touchY = event.touches[0]?.clientY ?? 0; };
-    const onTouchMove = (event: TouchEvent) => {
-      const y = event.touches[0]?.clientY ?? touchY;
-      if (!inChat(event.target)) hold(touchY - y, event);
-      touchY = y;
-    };
     measure();
     window.addEventListener('scroll', onScroll, { passive: true });
     window.addEventListener('resize', onScroll);
-    window.addEventListener('wheel', onWheel, { passive: false });
-    window.addEventListener('touchstart', onTouchStart, { passive: true });
-    window.addEventListener('touchmove', onTouchMove, { passive: false });
-    return () => {
-      cancelAnimationFrame(frame);
-      window.removeEventListener('scroll', onScroll); window.removeEventListener('resize', onScroll);
-      window.removeEventListener('wheel', onWheel); window.removeEventListener('touchstart', onTouchStart);
-      window.removeEventListener('touchmove', onTouchMove);
-    };
-  }, [locked]);
+    return () => { cancelAnimationFrame(frame); window.removeEventListener('scroll', onScroll); window.removeEventListener('resize', onScroll); };
+  }, [locked, total]);
 
   const skip = () => {
     const node = ref.current;
@@ -118,7 +77,8 @@ export function StepsL({ flags }: { flags: LandingFlags }) {
     <section id="how-it-works" aria-labelledby="steps-title" data-zone="takeover" data-region="三步">
       <div className={cn(k.wrap, styles.intro)}><h2 id="steps-title" className={k.lead}>{HOW_IT_WORKS.title}</h2></div>
       {locked && stage ? (
-        <div ref={ref} role="group" aria-labelledby="step-one-title" className={cn(takeover.takeover, styles.story)}>
+        <div ref={ref} role="group" aria-labelledby="step-one-title" className={cn(takeover.takeover, styles.story)}
+          style={{ height: `calc(100svh + ${Math.round(total / MS_PER_PX)}px)` }}>
           <div className={cn(takeover.stage, styles.stage)}>
             <div className={cn(page.wrap, takeover.frame, styles.oneFrame)}>
               {/* Round seven (T1): the step's title on a line of its own; under it the progress and the stage names; then
@@ -140,7 +100,7 @@ export function StepsL({ flags }: { flags: LandingFlags }) {
                 <h3>{stage.label}<DemoTag /></h3><p>{stage.note}</p>
               </div>
               <div className={takeover.picture}><PositioningPictureL moment={stage.moment} at={at}
-                reportLocal={stage.moment === 3 ? inStage / ONE_MS.report : 1} onHold={setHolding} /></div>
+                reportLocal={stage.moment === 3 ? inStage / ONE_MS.report : 1} /></div>
             </div>
           </div>
         </div>

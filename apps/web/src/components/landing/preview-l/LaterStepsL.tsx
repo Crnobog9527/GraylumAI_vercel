@@ -39,10 +39,16 @@ const STAGE_BEATS: Record<string, number> = { topics: 6, library: 4, voice: 8, s
 
 const PUBLISHING = '发布中';
 const reducedMotion = () => Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
+/** Stages already played in this browser (round eight, U4): shown finished from then on. */
+const PLAYED_KEY = 'graylum-landing-l-later-played';
+const readPlayed = (): string[] => { try { return JSON.parse(window.localStorage.getItem(PLAYED_KEY) ?? '[]'); } catch { return []; } };
+const writePlayed = (ids: readonly string[]) => { try { window.localStorage.setItem(PLAYED_KEY, JSON.stringify(ids)); } catch { /* not remembered */ } };
 
 /**
  * Region 3's 第二步 and 第三步 (Owner 2026-10-17, round five, R5): each a row of its stages, one shown at a time, moving
- * on by themselves while on screen (the pointer or focus holds them; no pause button, round seven T7), a click picks any. Step two is
+ * on by themselves while on screen (no pause button, round seven T7; the pointer does not stop them either, round eight
+ * U3; focus holds them), a click picks any. Each stage plays once (round eight, U4: "用户只要看过一次以后……直接给他看
+ * 最终结果"): played, it is remembered in this browser and shown finished from then on. Step two is
  * the work conversation as the product draws it (chat-display's work-chat pieces, the 正文稿件 column, 分镜与剪辑建议);
  * its voice stage, and all of step three (publishing, monitoring, the weekly review), are drawn from the plan because
  * the product has not built them yet (L_LATER marks which). The page is the full launched version (Owner
@@ -64,8 +70,7 @@ function LaterStep({ step, flags }: { step: { title: string; lede: string; stage
   const [moving, setMoving] = useState(false);
   const [held, setHeld] = useState(false);
   const [beat, setBeat] = useState(0);
-  // The visitor's hand on the picture (pointer over it, scrolling or clicking in it) pauses it, as region 6 does.
-  const [touching, setTouching] = useState(false);
+  const [played, setPlayed] = useState<readonly string[]>([]);
   const { Provider: TypingScope, busy } = useTypingGate();
   const ref = useRef<HTMLDivElement>(null);
   const base = useId();
@@ -73,31 +78,39 @@ function LaterStep({ step, flags }: { step: { title: string; lede: string; stage
     const node = ref.current;
     if (!node || reducedMotion() || typeof IntersectionObserver === 'undefined') return;
     setMoving(true);
+    setPlayed(readPlayed());
     const observer = new IntersectionObserver(entries => setSeen(entries.some(entry => entry.isIntersecting)), { threshold: 0.35 });
     observer.observe(node);
     return () => observer.disconnect();
   }, []);
   const current = stages[Math.min(active, stages.length - 1)];
   const total = current ? STAGE_BEATS[current.id] ?? 4 : 0;
-  // A stage plays beat by beat while on screen (the pointer on the picture stops it; what is being typed holds the next
-  // beat); once whole it holds, then the next stage starts, unless the pointer or focus is on the step.
-  const playing = moving && seen && !touching && !busy;
+  const replayed = Boolean(current && played.includes(current.id));
+  // A stage plays beat by beat while on screen (what is being typed holds the next beat); once whole it is remembered,
+  // holds, then the next stage starts, unless focus is on the step. One already played shows finished and just holds.
+  const playing = moving && seen && !busy;
+  const finished = replayed || beat >= total;
+  useEffect(() => {
+    if (!moving || !current || !finished || played.includes(current.id)) return;
+    const next = [...played, current.id];
+    setPlayed(next);
+    writePlayed(next);
+  }, [moving, current, finished, played]);
   useEffect(() => {
     if (!playing) return;
-    const whole = beat >= total;
+    const whole = finished;
     if (whole && (held || stages.length < 2)) return;
     const timer = window.setTimeout(() => {
       if (!whole) { setBeat(value => value + 1); return; }
       setActive(index => (index + 1) % stages.length); setBeat(0);
     }, whole ? HOLD_MS[current.id] ?? HOLD_DEFAULT_MS : BEAT_MS);
     return () => window.clearTimeout(timer);
-  }, [playing, held, beat, total, stages.length, current]);
+  }, [playing, held, beat, finished, stages.length, current]);
   const pick = (index: number) => { setActive(index); setBeat(0); };
   if (!current) return null;
-  const shownBeat = moving ? beat : Infinity;
+  const shownBeat = moving && !replayed ? beat : Infinity;
   return (
     <div ref={ref} role="group" aria-label={step.title} className={styles.step} data-region={step.title.slice(0, 3)}
-      onPointerEnter={() => setHeld(true)} onPointerLeave={() => setHeld(false)}
       onFocus={() => setHeld(true)} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setHeld(false); }}>
       <div className={k.wrap}>
         <h3 className={styles.title}>{step.title}</h3>
@@ -114,7 +127,7 @@ function LaterStep({ step, flags }: { step: { title: string; lede: string; stage
         </div>
         <div role="tabpanel" id={`${base}-panel`} aria-labelledby={`${base}-${current.id}`} className={styles.panel} key={current.id}>
           <p className={styles.note}><DemoTag />{current.note}</p>
-          <div className={styles.picture} onPointerEnter={() => setTouching(true)} onPointerLeave={() => setTouching(false)}>
+          <div className={styles.picture}>
             <TypingScope><StagePicture id={current.id} beat={shownBeat} live={moving && seen} /></TypingScope>
           </div>
         </div>

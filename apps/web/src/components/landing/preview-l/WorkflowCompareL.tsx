@@ -30,18 +30,14 @@ export function workflowBeats(turns: readonly WorkflowTurn[]) {
  * (ResearchCallList). The general AI side stays sample J's typical answer. Not a product window as a whole: the coach
  * window carries 示意. A picture: inert; the verdict under both says the point.
  */
-export function WorkflowCompareL({ task, turns, beat, badge, onHold }: {
-  task: Task; turns: readonly WorkflowTurn[]; beat: number; badge: string;
-  /** The visitor's hand on the coach's chat (pointer over it, or scrolling it): the caller pauses its play (round six, S14). */
-  onHold?: (holding: boolean) => void;
-}) {
+export function WorkflowCompareL({ task, turns, beat, badge }: { task: Task; turns: readonly WorkflowTurn[]; beat: number; badge: string }) {
   const log = useRef<HTMLDivElement>(null);
   // The chat follows the newest line until the visitor scrolls it; a new scenario follows again.
   const [follow, setFollow] = useState(true);
   useEffect(() => setFollow(true), [task]);
   useLayoutEffect(() => { if (follow && log.current) log.current.scrollTop = log.current.scrollHeight; }, [beat, follow]);
   useStickToEnd(log, follow);
-  const takeOver = () => { setFollow(false); onHold?.(true); };
+  const takeOver = () => setFollow(false);
   let at = 0;
   const shown = turns.map(turn => {
     const start = at;
@@ -72,8 +68,7 @@ export function WorkflowCompareL({ task, turns, beat, badge, onHold }: {
               <i className={compare.badge}>{badge}</i></p>
             <div className={cn(work.conversation, styles.conversation)}>
               {/* The scroll is the visitor's to use (round six, S14); what it holds is a picture (inert). */}
-              <div ref={log} className={styles.log} onWheel={takeOver} onTouchMove={takeOver} onPointerDown={takeOver}
-                onPointerEnter={() => onHold?.(true)} onPointerLeave={() => onHold?.(false)}>
+              <div ref={log} className={styles.log} onWheel={takeOver} onTouchMove={takeOver} onPointerDown={takeOver}>
                 <div className={work.transcript} inert aria-hidden="true">
                   {shown.map(({ turn, start }) => <Turn key={turn.user} turn={turn} local={beat - start} />)}
                 </div>

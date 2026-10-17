@@ -17,7 +17,14 @@
 @keyframes in { from { opacity: 0; translate: 0 8px; } to { opacity: 1; translate: 0 0; } }
 @media (max-width: 480px) { .tabs button { min-height: 40px; padding: 0 12px; font-size: 14px; } }
 /* Round five: the coach's work conversation in its window, kept at its newest line. */
-.log { max-height: 520px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.log { max-height: 520px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: auto; scrollbar-color: auto; }
+/* Round eight (U8): the coach's chat always shows its scrollbar, also where the system hides scrollbars until used
+   (a styled scrollbar is drawn; the page's own thin standard scrollbar would give the system's hidden one back, so it
+   is reset here and only browsers without the styled kind get the standard properties). */
+.log::-webkit-scrollbar { width: 8px; }
+.log::-webkit-scrollbar-track { background: transparent; }
+.log::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 4px; background: #c9c6bf padding-box; }
+@supports not selector(::-webkit-scrollbar) { .log { scrollbar-width: thin; scrollbar-color: #c9c6bf transparent; } }
 @media (max-width: 899px) { .log { max-height: 460px; } }
 /* Round six (S14): the region held on screen while the page scrolls through its four scenarios. */
 .held.held { padding-block: 0; }

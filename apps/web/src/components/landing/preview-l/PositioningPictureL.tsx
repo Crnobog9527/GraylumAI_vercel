@@ -42,15 +42,10 @@ const isQuestion = (line?: Line) => line?.role === 'coach' && Boolean(line.card 
  *
  * Round seven (T2, T8): it shows the stage `at` a point of its clock (step-one-timeline.ts): the person's message typed
  * into the message box, then sent; the coach's typed out with a caret; its card; the confirm area at the end. `at` null
- * is the stage finished (no JavaScript, reduced motion). The visitor may scroll the conversation; the pointer on it
- * holds the clock (`onHold`). Only the frame around the components is this page's.
+ * is the stage finished (no JavaScript, reduced motion). The visitor may scroll the conversation to read it (round
+ * eight: that does not move the step on). Only the frame around the components is this page's.
  */
-export function PositioningPictureL({ moment, at, reportLocal = 1, onHold }: {
-  moment: number;
-  at: MomentAt | null;
-  reportLocal?: number;
-  onHold?: (held: boolean) => void;
-}) {
+export function PositioningPictureL({ moment, at, reportLocal = 1 }: { moment: number; at: MomentAt | null; reportLocal?: number }) {
   const current = J_TAKEOVER_MOMENTS[moment] ?? J_TAKEOVER_MOMENTS[0];
   const step = current.step;
   const chatMoment = step === 3 ? 2 : moment;
@@ -87,13 +82,12 @@ export function PositioningPictureL({ moment, at, reportLocal = 1, onHold }: {
     if (log.current) log.current.scrollTop = log.current.scrollHeight;
     if (column.current) column.current.scrollTop = column.current.scrollHeight;
   });
-  const takeOver = () => { setFollow(false); onHold?.(true); };
+  const takeOver = () => setFollow(false);
 
   return (
     <div className={takeover.app}>
       <RailJ published={step === 3} launched />
-      <section className={styles.column} data-step-one-chat="" onPointerEnter={() => onHold?.(true)}
-        onPointerLeave={() => { onHold?.(false); setFollow(true); }}>
+      <section className={styles.column} onPointerLeave={() => setFollow(true)}>
         <div ref={column} className={styles.scroll}>
           <div inert><PositioningHeader headingLevel="h2" title="我的定位分析" status={`整体规划 · ${step === 3 ? '已确认' : '进行中'}`} /></div>
           <div inert>
