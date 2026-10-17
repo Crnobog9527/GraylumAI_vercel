@@ -12,6 +12,7 @@ import { admitFusionGroup, type FusionMember } from './admission';
 import { fusionExecutor } from './executor';
 import { recoverFusionFinancials } from './recovery';
 import { DEFAULT_FUSION_SETTINGS, FUSION_SETTINGS_KEY } from './settings';
+import { seedTestOpenRouterKey } from '../models/openRouterKey.testing';
 
 // Real admission -> PostgREST -> PostgreSQL (0234/0235) with a synthetic OpenRouter stream. No network.
 const db = new pg.Client({ connectionString: process.env.V3_LOCAL_DB! });
@@ -81,6 +82,7 @@ beforeAll(async () => {
     await db.query(`insert into ai_models(id,name,model_id,provider,is_active,input_limit,max_tokens,config,api_key,api_endpoint)
       values($1,$2,$2,'openrouter','true',250000,8192,$3,$4,'https://openrouter.ai/api/v1')`, [models[i], model, { ...config, reasoning }, syntheticKey]);
   }
+  await seedTestOpenRouterKey(db, syntheticKey);
   const profiles = pairs.map(([model, endpointTag]) => ({ model, endpointTag, protocol: 'openrouter-chat-v1', profileVersion: 'synthetic-only',
     evidenceVersion: 'synthetic-only', admissionPath: 'empirical', templateTokens: 4096, marginTokens: 4096, maxBytes: 196608,
     maxMessages: 128, maxTools: 2, maxSchemaBytes: 16384, purposes: ['ordinary', 'fusion_review', 'fusion_summary'],
