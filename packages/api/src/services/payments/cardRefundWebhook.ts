@@ -148,7 +148,7 @@ async function referencedPayment(db: SupabaseClient, stripe: RefundStripe, scope
   return false;
 }
 
-/** True when the payment belongs to a card order whose payment has not been recorded yet: a credit pack's
+/** True when the payment belongs to a card (or wallet membership) order whose payment has not been recorded yet: a credit pack's
  * PaymentIntent, or a subscription invoice's subscription, names an order paid by card. */
 async function cardOrderAwaitingPayment(db: Pick<SupabaseClient, 'from'>, stripe: RefundStripe, paymentIntentId: string | null) {
   if (!paymentIntentId) return false;
@@ -163,8 +163,10 @@ async function cardOrderAwaitingPayment(db: Pick<SupabaseClient, 'from'>, stripe
     orderId = subscriptionId ? (await stripe.subscriptions.retrieve(subscriptionId)).metadata?.orderId ?? null : null;
   }
   if (!orderId || !/^[0-9a-f-]{36}$/i.test(orderId)) return false;
-  const order = await db.from('payment_orders').select('payment_method,payment_channel').eq('id', orderId).maybeSingle();
+  const order = await db.from('payment_orders').select('payment_method,payment_channel,item_type').eq('id', orderId).maybeSingle();
   if (order.error) throw new Error('PAY_WAFFO_PERSISTENCE_UNAVAILABLE', { cause: order.error });
-  return order.data?.payment_channel === 'stripe' && ['card', 'card_cn'].includes(order.data.payment_method);
+  // R7 (0302): a wallet one-time membership is settled by this handler too, so its refund also waits for the payment.
+  return order.data?.payment_channel === 'stripe' && (['card', 'card_cn'].includes(order.data.payment_method)
+    || order.data.item_type === 'membership_plan' && ['wechat_pay', 'alipay'].includes(order.data.payment_method));
 }
 

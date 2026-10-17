@@ -52,6 +52,23 @@ describe('R7: external refunds of wallet one-time memberships (0302)', () => {
   });
 });
 
+describe('R7: a wallet membership refunded before its payment is recorded is retried (0302)', () => {
+  it('retries until the payment exists instead of acknowledging the refund as unmatched', async () => {
+    mocks.scope.mockReset().mockResolvedValue({ mode: 'live', merchant: 'fixture' });
+    mocks.find.mockReset().mockResolvedValue(null); mocks.ref.mockReset().mockResolvedValue(undefined); mocks.error.mockReset();
+    const f = fixture([refund({ amount: 49600 })]);
+    f.stripe.paymentIntents.retrieve.mockResolvedValue({ metadata: { orderId: '00000000-0000-4000-8000-000000000001' } });
+    const wallet = { payment_channel: 'stripe', payment_method: 'alipay', item_type: 'membership_plan' };
+    f.db.from = vi.fn(() => { const chain = { select: vi.fn(() => chain), eq: vi.fn(() => chain),
+      maybeSingle: vi.fn(async () => ({ error: null, data: wallet })) }; return chain; }) as never;
+    await expect(f.run({ refundId: 're_1' })).rejects.toThrow('PAY_STRIPE_MP_FIRST_PAYMENT_PENDING');
+    expect(f.db.rpc).not.toHaveBeenCalled(); expect(f.alert).not.toHaveBeenCalled();
+    // A wallet credit pack is not settled here: it keeps going to the existing path.
+    wallet.item_type = 'credit_package';
+    await expect(f.run({ refundId: 're_1' })).resolves.toBe(true);
+  });
+});
+
 describe('PAY-STRIPE-MP external refunds of card orders', () => {
   beforeEach(() => {
     mocks.scope.mockReset().mockResolvedValue({ mode: 'test', merchant: 'fixture' });
