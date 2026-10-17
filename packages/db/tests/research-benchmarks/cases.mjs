@@ -324,12 +324,31 @@ export async function runCases({db,Client,connectionString,report}) {
       const [kept] = await rows(db,'fetch_id=$1',[refreshed.fetchId]);
       assert.deepEqual([kept.qualified,kept.excluded,Number(kept.followers),kept.execution_id],[true,null,60000,e2],outcome);
     }
+    // Re-running 0268 (its backfill) after those failed refreshes keeps the verified row: projection uses the attempt
+    // that produced the success, not the failed refresh's attempt.
+    const migration = readFileSync(new URL('../../migrations/0268_research_benchmarks.sql',import.meta.url),'utf8');
+    await db.query(migration);
+    const [again0] = await rows(db,'fetch_id=$1',[refreshed.fetchId]);
+    assert.deepEqual([again0.qualified,again0.excluded,Number(again0.followers)],[true,null,60000]);
+    // A cache from before 0268 (no recorded success attempt) whose last refresh failed: its attempt is unknowable, so
+    // the backfill gives it no row rather than a misleading unverified one.
+    await db.query('UPDATE research_account_fetches SET last_success_attempt=NULL WHERE id=$1',[refreshed.fetchId]);
+    await db.query('DELETE FROM research_benchmarks WHERE fetch_id=$1',[refreshed.fetchId]);
+    await db.query(migration);
+    assert.equal((await rows(db,'fetch_id=$1',[refreshed.fetchId])).length,0);
+    // ...while one still ending in its success gets its verified row back, and the inferred attempt is kept.
+    const legacy = await fetchAccount(f,await answer(db,f),'legacy',imitable);
+    await db.query('UPDATE research_account_fetches SET last_success_attempt=NULL WHERE id=$1',[legacy.fetchId]);
+    await db.query('DELETE FROM research_benchmarks WHERE fetch_id=$1',[legacy.fetchId]);
+    await db.query(migration);
+    assert.deepEqual((await rows(db,'fetch_id=$1',[legacy.fetchId])).map(r=>[r.qualified,r.excluded]),[[true,null]]);
+    assert.equal((await db.query('SELECT last_success_attempt=attempt v FROM research_account_fetches WHERE id=$1',[legacy.fetchId])).rows[0].v,true);
     await erase(db,f,'answer',e2);
-    assert.equal((await rows(db,'session_id=$1',[f.session])).length,0);
+    assert.equal((await rows(db,'session_id=$1 AND account=$2',[f.session,'fresh'])).length,0);
     // The rows the report reads exclude deleted answers and carry no supplier cost.
     await fetchAccount(f,e,'again',imitable);
     const facts = (await rpc(db,'research_benchmark_rows',f.actor,f.session)).rows;
-    assert.deepEqual(facts.map(x=>[x.account,x.qualified]),[['again',true]]);
+    assert.deepEqual(facts.map(x=>[x.account,x.qualified]).sort(),[['again',true],['legacy',true]]);
     assert.ok(!JSON.stringify(facts).includes('cost'));
   });
   await check('RT-4b a fetch finishing during report admission is serialized with it (no stale report)', async () => {

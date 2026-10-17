@@ -25,6 +25,22 @@
 BEGIN;
 SET LOCAL lock_timeout='5s';
 
+-- The attempt whose result is last_success. research_account_fetch_finish (0263) rewrites last_success unchanged when a
+-- later refresh fails or ends unknown, and erasure can rotate the attempt token, so the current attempt is not
+-- necessarily the one whose subcalls produced the evidence. Recorded whenever last_success changes.
+ALTER TABLE public.research_account_fetches ADD COLUMN IF NOT EXISTS last_success_attempt uuid;
+CREATE OR REPLACE FUNCTION public.research_fetch_success_attempt() RETURNS trigger
+LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
+BEGIN
+  NEW.last_success_attempt:=CASE WHEN NEW.last_success IS NULL THEN NULL ELSE NEW.attempt END;
+  RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS research_fetch_success_attempt ON public.research_account_fetches;
+CREATE TRIGGER research_fetch_success_attempt
+  BEFORE UPDATE OF last_success ON public.research_account_fetches
+  FOR EACH ROW WHEN (OLD.last_success IS DISTINCT FROM NEW.last_success)
+  EXECUTE FUNCTION public.research_fetch_success_attempt();
+
 CREATE TABLE IF NOT EXISTS public.research_benchmarks (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   fetch_id uuid NOT NULL UNIQUE REFERENCES public.research_account_fetches(id) ON DELETE CASCADE,
@@ -99,7 +115,7 @@ LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
 DECLARE e jsonb:=f.last_success; m jsonb; c jsonb; refs jsonb:='{}'; ops uuid[]:='{}'; key text; ref text; item jsonb;
   ok boolean:=true; expected double precision; actual double precision; viewed text[]; rated text[]; analyzed_refs text[];
 BEGIN
-  IF e IS NULL OR f.last_success_execution_id IS NULL OR f.account IS NULL THEN
+  IF e IS NULL OR f.last_success_execution_id IS NULL OR f.account IS NULL OR f.last_success_attempt IS NULL THEN
     DELETE FROM research_benchmarks WHERE fetch_id=f.id;
     RETURN;
   END IF;
@@ -111,7 +127,7 @@ BEGIN
       SELECT split_part(r,'#',1)::uuid FROM jsonb_each(m) k
       CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(k.value->'refs')='array' THEN k.value->'refs' ELSE '[]' END) r
       WHERE r ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}#[1-9][0-9]{0,4}$'
-      UNION SELECT research_benchmark_operation_id(f.id,f.attempt,k) FROM unnest(ARRAY['account_profile','account_posts']) k)) THEN
+      UNION SELECT research_benchmark_operation_id(f.id,f.last_success_attempt,k) FROM unnest(ARRAY['account_profile','account_posts']) k)) THEN
     DELETE FROM research_benchmarks WHERE fetch_id=f.id;
     RETURN;
   END IF;
@@ -124,19 +140,19 @@ BEGIN
     END LOOP;
   END LOOP;
   -- Every cited operation is a subcall of this very fetch attempt (not another account fetched in the same session).
-  ok:=ok AND ops<@ARRAY(SELECT research_benchmark_operation_id(f.id,f.attempt,k)
+  ok:=ok AND ops<@ARRAY(SELECT research_benchmark_operation_id(f.id,f.last_success_attempt,k)
     FROM unnest(ARRAY['account_profile','account_posts','account_relation','post_detail']) k);
   -- A whole-history claim (the new-account exception to the 20-post minimum) needs this fetch's own profile to report
   -- no more posts than were analyzed (suppliedWholeHistory in research/benchmark/metrics.ts).
   IF ok AND (m->'wholeHistory')::boolean THEN
-    item:=research_benchmark_item(f.actor_id,f.session_id,research_benchmark_operation_id(f.id,f.attempt,'account_profile')::text||'#1');
+    item:=research_benchmark_item(f.actor_id,f.session_id,research_benchmark_operation_id(f.id,f.last_success_attempt,'account_profile')::text||'#1');
     ok:=coalesce(jsonb_typeof(item->'postsCount')='number' AND (m->>'postsAnalyzed')::numeric>=(item->>'postsCount')::numeric,false)
       -- ...counting distinct post ids: every item carries one and none repeats (as suppliedWholeHistory).
       AND coalesce((SELECT count(*)=count(DISTINCT x->'fields'->>'id') AND coalesce(bool_and(jsonb_typeof(x->'fields'->'id')='string'
           AND length(x->'fields'->>'id')>0),true) AND count(DISTINCT x->'fields'->>'id')>=(item->>'postsCount')::numeric
         FROM research_operations o JOIN research_plans p ON p.id=o.plan_id
         CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(o.result->'items')='array' THEN o.result->'items' ELSE '[]' END) x
-        WHERE o.id=research_benchmark_operation_id(f.id,f.attempt,'account_posts') AND p.actor_id=f.actor_id
+        WHERE o.id=research_benchmark_operation_id(f.id,f.last_success_attempt,'account_posts') AND p.actor_id=f.actor_id
           AND p.session_id=f.session_id AND o.state='succeeded' AND o.erased_at IS NULL),false);
   END IF;
   -- Single-item numbers equal the item field they name.
@@ -165,12 +181,12 @@ BEGIN
       FROM research_operations o JOIN research_plans p ON p.id=o.plan_id
       CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(o.result->'items')='array' THEN o.result->'items' ELSE '[]' END)
         WITH ORDINALITY t(x,i)
-      WHERE o.id=research_benchmark_operation_id(f.id,f.attempt,'account_posts') AND p.actor_id=f.actor_id
+      WHERE o.id=research_benchmark_operation_id(f.id,f.last_success_attempt,'account_posts') AND p.actor_id=f.actor_id
         AND p.session_id=f.session_id AND o.state='succeeded' AND o.erased_at IS NULL
     ), analyzed AS (SELECT * FROM items ORDER BY published DESC NULLS LAST,i LIMIT 30)
     SELECT coalesce(array_agg(r ORDER BY r) FILTER (WHERE v),'{}'),coalesce(array_agg(r ORDER BY r) FILTER (WHERE v AND rate),'{}'),
         coalesce(array_agg(r ORDER BY r),'{}')
-      INTO viewed,rated,analyzed_refs FROM (SELECT research_benchmark_operation_id(f.id,f.attempt,'account_posts')::text||'#'||i r,
+      INTO viewed,rated,analyzed_refs FROM (SELECT research_benchmark_operation_id(f.id,f.last_success_attempt,'account_posts')::text||'#'||i r,
         jsonb_typeof(fl->'views')='number' AND (fl->>'views')::numeric>=0 v,
         coalesce((fl->>'views')::numeric>0,false) AND jsonb_typeof(fl->'likes')='number' AND (fl->>'likes')::numeric>=0
         AND jsonb_typeof(fl->'comments')='number' AND (fl->>'comments')::numeric>=0
@@ -221,7 +237,7 @@ BEGIN
   IF ok THEN
     ok:=coalesce((m->>'postsAnalyzed')::integer=(SELECT least(30,jsonb_array_length(o.result->'items'))
       FROM research_operations o JOIN research_plans p ON p.id=o.plan_id
-      WHERE o.id=research_benchmark_operation_id(f.id,f.attempt,'account_posts') AND p.actor_id=f.actor_id
+      WHERE o.id=research_benchmark_operation_id(f.id,f.last_success_attempt,'account_posts') AND p.actor_id=f.actor_id
         AND p.session_id=f.session_id AND o.state='succeeded' AND o.erased_at IS NULL AND jsonb_typeof(o.result->'items')='array'),false);
   END IF;
   -- The category must agree with the thresholds the numbers support.
@@ -251,7 +267,7 @@ BEGIN
     -- Every operation the row was derived or checked from, cited or not (an uncited posts request still gives the
     -- analyzed count), so erasing any of them deletes the row.
     refs,ARRAY(SELECT DISTINCT x FROM unnest(ops||ARRAY(SELECT o.id FROM research_operations o
-      WHERE o.id IN (SELECT research_benchmark_operation_id(f.id,f.attempt,k)
+      WHERE o.id IN (SELECT research_benchmark_operation_id(f.id,f.last_success_attempt,k)
         FROM unnest(ARRAY['account_profile','account_posts','account_relation','post_detail']) k))) x ORDER BY x),
     ARRAY(SELECT jsonb_array_elements_text(m->'missing')),(e->>'fetchedAt')::timestamptz)
   ON CONFLICT (fetch_id) DO UPDATE SET execution_id=excluded.execution_id,account=excluded.account,
@@ -278,11 +294,21 @@ CREATE TRIGGER research_benchmarks_from_fetch
   FOR EACH ROW WHEN (OLD.last_success IS DISTINCT FROM NEW.last_success
     OR OLD.last_success_execution_id IS DISTINCT FROM NEW.last_success_execution_id OR OLD.account IS DISTINCT FROM NEW.account)
   EXECUTE FUNCTION public.research_benchmark_sync();
--- Successful caches stored before this migration get their rows now (the current attempt is checked as for a new one;
--- a cache whose later refresh failed may not verify and then stays unqualified until refreshed).
+-- Successful caches stored before this migration get their rows now. Their success attempt was never recorded: it is
+-- the current attempt only while the record still ends in that success (state succeeded); a later refresh (failed,
+-- unknown, in progress) or erasure's token rotation makes it unknowable. Such a cache, or one whose evidence does not
+-- verify under the inferred attempt, gets no row (never a misleading unverified one) until the user refreshes it.
 DO $$ DECLARE f research_account_fetches; BEGIN
-  FOR f IN SELECT * FROM research_account_fetches WHERE last_success IS NOT NULL ORDER BY id LOOP
+  FOR f IN SELECT * FROM research_account_fetches WHERE last_success IS NOT NULL AND last_success_attempt IS NULL
+    AND state='succeeded' AND evidence IS NOT DISTINCT FROM last_success ORDER BY id LOOP
+    f.last_success_attempt:=f.attempt;
     PERFORM research_benchmark_project(f);
+    IF EXISTS(SELECT 1 FROM research_benchmarks WHERE fetch_id=f.id AND excluded='EVIDENCE_UNVERIFIED') THEN
+      DELETE FROM research_benchmarks WHERE fetch_id=f.id;
+    ELSE
+      -- Kept only together with its row, so a later re-projection uses the same, verified attempt.
+      UPDATE research_account_fetches SET last_success_attempt=f.attempt WHERE id=f.id AND last_success_attempt IS NULL;
+    END IF;
   END LOOP;
 END $$;
 
@@ -435,7 +461,7 @@ $x$||r);
   END IF;
 END $$;
 
-REVOKE ALL ON FUNCTION public.research_benchmark_item(uuid,uuid,text),public.research_benchmark_project(research_account_fetches),
+REVOKE ALL ON FUNCTION public.research_fetch_success_attempt(),public.research_benchmark_item(uuid,uuid,text),public.research_benchmark_project(research_account_fetches),
   public.research_benchmark_sync(),public.research_benchmark_qualified(uuid,uuid),public.research_benchmark_required(jsonb,jsonb),
   public.research_benchmark_table(uuid,uuid),public.research_benchmark_report_current(uuid,uuid,jsonb),
   public.research_benchmark_operation_id(uuid,uuid,text)
