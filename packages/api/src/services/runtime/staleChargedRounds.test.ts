@@ -84,11 +84,20 @@ describe('automatic close', () => {
     expect(f.rpc).toHaveBeenCalledWith('runtime_stale_round_compensate', { p_run_id: uuid(2, 2), p_cutoff: cutoff });
   });
 
-  it.each([['created before markers were reliable', '2026-10-12T00:00:00Z'], ['no marker time recorded (0282 not applied)', null],
-    ['an unreadable marker time', 'garbage']])('leaves a round to the operator when %s, and never refunds it', async (_name, since) => {
+  it.each([['created before markers were reliable', '2026-10-12T00:00:00Z'], ['an unreadable marker time', 'garbage']])('leaves a round to the operator when %s, and never refunds it', async (_name, since) => {
     const f = database([1, 2], {}, since);
     expect(await autoCompensateStaleRounds(f.database, { now })).toEqual({ ...none, found: 2, manualReview: 2 });
     expect(f.rpc).not.toHaveBeenCalledWith('runtime_stale_round_compensate', expect.anything());
+  });
+
+  it('the first run arms the marker clock and refunds nothing; later runs never re-arm', async () => {
+    const f = database([1, 2], {}, null);
+    expect(await autoCompensateStaleRounds(f.database, { now })).toEqual({ ...none, found: 2, manualReview: 2 });
+    expect(f.rpc).toHaveBeenCalledWith('runtime_capacity_marker_arm', {});
+    expect(f.rpc).not.toHaveBeenCalledWith('runtime_stale_round_compensate', expect.anything());
+    const armed = database([1], {});
+    await autoCompensateStaleRounds(armed.database, { now });
+    expect(armed.rpc).not.toHaveBeenCalledWith('runtime_capacity_marker_arm', expect.anything());
   });
 
   it('an operator refund in between, or a retry that revived the round, is not a failure and refunds nothing more', async () => {

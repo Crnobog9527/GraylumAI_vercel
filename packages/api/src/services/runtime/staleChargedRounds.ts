@@ -90,7 +90,15 @@ export async function autoCompensateStaleRounds(supabase: BillingRpc,
   try {
     const marker = await supabase.rpc('runtime_capacity_marker_since', {});
     if (marker.error) throw new Error('STALE_ROUND_MARKER_UNREADABLE');
-    const since = typeof marker.data === 'string' && Number.isFinite(Date.parse(marker.data)) ? new Date(marker.data).toISOString() : null;
+    let value = marker.data;
+    if (value === null) {
+      // First run of the application version that writes the markers: start the clock now (write-once). Nothing is
+      // refunded by this run, and nothing created before the armed time ever is: only an operator refunds those.
+      const armed = await supabase.rpc('runtime_capacity_marker_arm', {});
+      if (armed.error) throw new Error('STALE_ROUND_MARKER_UNREADABLE');
+      value = null;
+    }
+    const since = typeof value === 'string' && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : null;
     // Eligible rounds are selected in SQL before the page limit, so older ambiguous rounds cannot crowd them out.
     all = await findStaleChargedRounds(supabase, now, 1);
     report = since ? await findStaleChargedRounds(supabase, now, 500, since) : { success: true, findings: [], total: 0, truncated: false };

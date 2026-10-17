@@ -280,25 +280,29 @@ it('RUNTIME: a round interrupted for content beyond capacity is marked atomicall
 }, 60000);
 
 const markerSince = async (iso: string) => db.query(
-  "update system_settings set value=to_jsonb($1::text) where key='runtime_capacity_marker_since'", [iso]);
+  `insert into system_settings(key,value) values('runtime_capacity_marker_since',to_jsonb($1::text))
+   on conflict(key) do update set value=excluded.value`, [iso]);
 
-it('RUNTIME: the recovery job leaves rounds created before the marker was reliable to the operator', async () => {
-  // 0282 wrote the time it first ran: the older fixtures below predate it.
-  const migrated = (await db.query("select value from system_settings where key='runtime_capacity_marker_since'")).rows[0];
-  expect(migrated).toBeTruthy();
-  expect(typeof (await rpc('runtime_capacity_marker_since', {}))).toBe('string');
-  expect((await anon.rpc('runtime_capacity_marker_since', {})).error).toBeTruthy();
+it('RUNTIME: the recovery job arms the marker clock itself and leaves older rounds to the operator', async () => {
+  // The migration does not start the clock: a migration-first rollout would count old-version rounds as marked.
+  await db.query("delete from system_settings where key='runtime_capacity_marker_since'");
+  expect(await rpc('runtime_capacity_marker_since', {})).toBeNull();
+  expect((await anon.rpc('runtime_capacity_marker_arm', {})).error).toBeTruthy();
   const old = await chargedOpenRound(2 * STALE_ROUND_AGE_MS);
   const before = await ledger(old);
+  const first = await autoCompensateStaleRounds(service);
+  expect(first.compensated).toBe(0);
+  expect(first.manualReview).toBeGreaterThanOrEqual(1);
+  const armed = Date.parse(await rpc('runtime_capacity_marker_since', {}) as string);
+  // Armed in the future (margin for requests of the previous version), once: another run keeps the value.
+  expect(armed).toBeGreaterThan(Date.now());
+  await autoCompensateStaleRounds(service);
+  expect(Date.parse(await rpc('runtime_capacity_marker_since', {}) as string)).toBe(armed);
   // Selected in SQL before the page limit: the old round is not in a page filtered by the marker time.
-  const since = new Date(Date.parse(String(migrated.value)) ).toISOString();
   const filtered = await rpc('runtime_stale_charged_rounds', { p_cutoff: new Date(Date.now() - STALE_ROUND_AGE_MS).toISOString(),
-    p_limit: 500, p_created_since: since }) as { total: number; rounds: Array<{ runId: string }> };
+    p_limit: 500, p_created_since: new Date(armed).toISOString() }) as { total: number; rounds: Array<{ runId: string }> };
   expect(filtered.rounds.map(round => round.runId)).not.toContain(old.runId);
   expect(ids(await reported(500))).toContain(old.runId);
-  const result = await autoCompensateStaleRounds(service);
-  expect(result.manualReview).toBeGreaterThanOrEqual(1);
-  expect(result.compensated).toBe(0);
   expect(await ledger(old)).toEqual(before);
   // The operator path is unchanged and still refunds it.
   expect(await compensateStaleRound(service, old.runId)).toMatchObject({ state: 'compensated', compensatedCredits: 3 });

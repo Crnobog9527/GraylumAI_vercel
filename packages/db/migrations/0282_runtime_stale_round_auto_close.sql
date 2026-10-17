@@ -9,10 +9,11 @@
 --    for availability) and interrupts its PAYG execution in one transaction (write-once marker).
 --  * runtime_stale_charged_rounds / runtime_stale_round_compensate: unchanged from 0220/0239 except
 --    that a round marked with a capacity code is neither reported nor compensated.
---  * runtime_capacity_marker_since: when markers became reliable (the time this migration first ran).
+--  * runtime_capacity_marker_since / runtime_capacity_marker_arm: when markers became reliable. The application
+--    version that writes them arms it on its first recovery run (write-once, +15 minutes), not this migration.
 --    Rounds created earlier may be capacity failures without a trace, so only an operator refunds those;
---    the automatic close handles rounds created at or after it. Without the value it refunds nothing.
--- Repeatable (the setting is written once; the rest is CREATE OR REPLACE). No remote database use.
+--    the automatic close handles rounds created at or after it, and refunds nothing until it is armed.
+-- Repeatable (the setting is written once, by the application; the rest is CREATE OR REPLACE). No remote database use.
 BEGIN;
 
 CREATE OR REPLACE FUNCTION public.runtime_interrupt_capacity(p_actor_id uuid,p_execution_id uuid,p_epoch bigint,p_code text)
@@ -38,13 +39,24 @@ BEGIN
  -- runs in this transaction, so an interrupted round without its marker cannot exist.
  RETURN runtime_execution(p_actor_id,p_execution_id,'interrupt',jsonb_build_object('epoch',p_epoch,'value',NULL));
 END $$;
-INSERT INTO public.system_settings(key,value) VALUES('runtime_capacity_marker_since',to_jsonb(to_char(clock_timestamp() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"')))
- ON CONFLICT (key) DO NOTHING;
 CREATE OR REPLACE FUNCTION public.runtime_capacity_marker_since() RETURNS timestamptz
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
  SELECT (value #>> '{}')::timestamptz FROM system_settings WHERE key='runtime_capacity_marker_since' $$;
 REVOKE ALL ON FUNCTION public.runtime_capacity_marker_since() FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON FUNCTION public.runtime_capacity_marker_since() TO service_role;
+-- Armed by the application version that writes the markers (its first recovery run), never by this migration:
+-- a migration-first rollout would otherwise count rounds served by the old, marker-less code as marked.
+-- Write-once; 15 minutes of margin for requests of the previous version still finishing.
+CREATE OR REPLACE FUNCTION public.runtime_capacity_marker_arm() RETURNS timestamptz
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+BEGIN
+ INSERT INTO system_settings(key,value) VALUES('runtime_capacity_marker_since',
+  to_jsonb(to_char((clock_timestamp()+interval '15 minutes') AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"')))
+ ON CONFLICT (key) DO NOTHING;
+ RETURN runtime_capacity_marker_since();
+END $$;
+REVOKE ALL ON FUNCTION public.runtime_capacity_marker_arm() FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.runtime_capacity_marker_arm() TO service_role;
 REVOKE ALL ON FUNCTION public.runtime_interrupt_capacity(uuid,uuid,bigint,text) FROM PUBLIC,anon,authenticated,service_role;
 GRANT EXECUTE ON FUNCTION public.runtime_interrupt_capacity(uuid,uuid,bigint,text) TO service_role;
 
