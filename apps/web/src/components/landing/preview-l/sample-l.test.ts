@@ -104,25 +104,16 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     expect(answered).not.toContain('data-question-card="open"');
   });
 
-  it('shows steps two and three, each stage behind its own switch, and the jury larger with the fusion flag', () => {
+  it('shows steps two and three in full, as the launched product, and the jury larger', () => {
     const on = render();
     for (const step of [L_LATER.two, L_LATER.three]) {
       expect(on).toContain(step.title);
       for (const stage of step.stages) expect(on).toContain(`${stage.label}</button>`);
     }
-    // One switch hides only its own stages: voice off drops the voice stage and nothing else of step two.
-    const noVoice = render({ ...ALL_ON, voice: false });
-    expect(noVoice).not.toContain('按你的文风写</button>');
-    expect(noVoice).toContain('口播稿和分镜</button>');
-    expect(noVoice).toContain(L_LATER.three.title);
-    const noPublish = render({ ...ALL_ON, publish: false });
-    expect(noPublish).not.toContain(L_LATER.three.title);
-    expect(noPublish).toContain(L_LATER.two.title);
     // Which stages show the product's real components and which the plan: every stage says so.
     for (const stage of [...L_LATER.two.stages, ...L_LATER.three.stages]) expect(['real', 'planned']).toContain(stage.source);
     expect(on).toContain(L_JURY.title);
     expect(on).toContain(`href="${L_JURY.href}"`);
-    expect(render({ ...ALL_ON, fusion: false })).not.toContain(L_JURY.title);
     for (const word of ['世界最强', '没有分歧']) expect(on).not.toContain(word);
   });
 
@@ -190,11 +181,6 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     for (const turns of L_WORKFLOWS) expect(turns.every(turn => turn.reply.includes('接下来你做') || turn === turns[0] && turns.length > 1)).toBe(true);
     for (const task of L_TASKS) expect(task.coach).toContain('接下来你做');
     for (const brand of ['ChatGPT', 'Claude', 'Gemini', 'DeepSeek', '豆包', 'Kimi']) expect(text).not.toContain(brand);
-    // A scenario whose capability is not built does not show; by default only the positioning one, so no tabs.
-    const off = render({ ...ALL_ON, content: false, publish: false });
-    const offTabs = off.slice(off.indexOf('id="compare-title"'), off.indexOf('id="pricing-title"'));
-    expect(offTabs).not.toContain('role="tab"');
-    expect(offTabs).toContain(L_TASKS[0].question);
   });
 
   it('shows the usual total whole (not struck) and drops the check date', () => {

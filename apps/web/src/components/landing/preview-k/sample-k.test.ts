@@ -63,8 +63,8 @@ describe('style sample K (sample J slimmed down, Owner 2026-10-17)', () => {
     for (const moment of K_MOMENTS) expect(html).toContain(escape(moment.note));
     expect(html).not.toContain(J_REPORT.juryEntry);
     expect(html).not.toContain('600svh');
-    // A moment whose capability is off is gone.
-    expect(render({ ...ALL_ON, research: false })).not.toContain(escape(K_MOMENTS[1].note));
+    // Every moment shows: a capability is not a switch (Owner 2026-10-17).
+    expect(html).toContain(escape(K_MOMENTS[1].note));
   });
 
   it('shows the sample reports as 10-second cards only, after "换成你，会是这样", with the button', () => {
@@ -81,11 +81,9 @@ describe('style sample K (sample J slimmed down, Owner 2026-10-17)', () => {
     expect(count(off, K_CTA)).toBe(2);
   });
 
-  it('turns the work into one row of the week, each item behind its capability', () => {
+  it('turns the work into one row of the week, every item shown', () => {
     const html = render();
     for (const item of K_RHYTHM) expect(html).toContain(item.text);
-    const noPublish = render({ ...ALL_ON, publish: false });
-    for (const item of K_RHYTHM) expect(noPublish.includes(item.text)).toBe(!item.needs.includes('publish'));
   });
 
   it('keeps two comparisons, the 穿搭博主 one first, in plain type', () => {
@@ -103,7 +101,6 @@ describe('style sample K (sample J slimmed down, Owner 2026-10-17)', () => {
     expect(html).toContain(`href="#${K_PRICE_TERMS.faqId}"`);
     expect(html).toContain(`id="${K_PRICE_TERMS.faqId}"`);
     expect(html).toContain(K_GOLD_LINE.text);
-    expect(render({ ...ALL_ON, fusion: false })).not.toContain(K_GOLD_LINE.text);
   });
 
   it('leaves sample J as it was', () => {

@@ -56,18 +56,16 @@ describe('landing page sections', () => {
     expect(html.match(/为什么不是正确的废话/g)).toHaveLength(9);
   });
 
-  it('hides the library step when the coach is off, since its note promises the coach answering', () => {
-    const data = buildLandingPageData({ ...ALL_ON, coach: false }, CATALOG);
-    expect(data.flowSteps.map(step => step.id)).not.toContain('step-library');
+  it('keeps the library step: a capability is not a switch (Owner 2026-10-17, the page is the full launched version)', () => {
+    const data = buildLandingPageData(ALL_ON, CATALOG);
+    expect(data.flowSteps.map(step => step.id)).toContain('step-library');
   });
 
-  it('hides walk-through steps whose capability is off, numbered without gaps', () => {
+  it('shows every walk-through step even with every switch off: capabilities are not switches (Owner 2026-10-17)', () => {
     const html = renderPage(CORE_ONLY);
-    expect(html).toContain('>和教练聊<');
-    expect(html).toContain('>教练说真话<');
-    expect(html).not.toContain('>找对标<');
-    expect(html).not.toContain('模型 A');
-    expect(html.match(/为什么不是正确的废话/g)).toHaveLength(2);
+    for (const step of ['和教练聊', '教练说真话', '找对标', '出报告', '写内容', '发出去', '看复盘']) expect(html).toContain(`>${step}<`);
+    expect(html.match(/为什么不是正确的废话/g)).toHaveLength(9);
+    // Sample reports are a switch (never invented content): off, they stay away.
     expect(html).not.toContain('不同人群的样例报告');
   });
 
@@ -91,13 +89,10 @@ describe('landing page sections', () => {
     expect(html).toContain('HeyOrca 2024 年社媒经理调查');
   });
 
-  it('leaves out the promises of capabilities that are switched off', () => {
+  it('keeps every capability\'s promise and leaves out only what the switches say is not true yet', () => {
     const html = renderPage(CORE_ONLY);
-    expect(html).not.toContain('一键发');
-    expect(html).not.toContain('每周告诉你哪条有效');
-    expect(html).not.toContain('排程工具');
+    for (const promise of ['一键发', '排程工具']) expect(html).toContain(promise);
     expect(html).not.toContain('创始会员');
-    expect(html).not.toContain('模型 A');
     // The page says "free trial" and never how many credits come with sign-up (Owner 2026-10-14).
     expect(html).not.toContain('500 积分');
     expect(html).not.toContain('不会收回');

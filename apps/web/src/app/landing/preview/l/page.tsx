@@ -27,8 +27,8 @@ export default async function LandingPreviewL() {
   // Owner 2026-10-15: the founder offer is off the home page, so its FAQ entries go with it.
   const flagsUsed = { ...flags, founder: false };
   const data = buildLandingPageData(flagsUsed, priced.plans, priced.offers);
-  // The sample reports are not generated yet: their placeholder shows only in a local development preview, or once the
-  // landing flag is turned on (off on staging and production by default).
-  const extras = { flags: flagsUsed, showSamples: flags.sampleReports || process.env.NODE_ENV === 'development' };
+  // Region 4's 14 sample reports are generated and privacy-checked (lib/landing/sample-reports): the page is the full
+  // launched version (Owner 2026-10-17), so they always show, on staging and production alike.
+  const extras = { flags: flagsUsed, showSamples: true };
   return <SampleL data={data} siteName={siteName} extras={extras} />;
 }

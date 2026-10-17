@@ -18,7 +18,7 @@ import styles from './l.module.css';
 export function OpsChatL({ step, stepName, flags }: {
   step: { lines: readonly OpsLine[] }; stepName: string; flags: LandingFlags;
 }) {
-  const lines = step.lines.filter(line => allOn(flags, line.needs) && !(line.without && flags[line.without]));
+  const lines = step.lines.filter(line => allOn(flags, line.needs) && !(line.without && allOn(flags, [line.without])));
   return (
     <div className={cn(week.window, styles.opsWindow)} inert aria-hidden="true">
       <div className={week.chrome}>

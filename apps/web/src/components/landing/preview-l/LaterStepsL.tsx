@@ -14,6 +14,8 @@ import k from '@/components/landing/preview-k/k.module.css';
 import { RailJ } from '@/components/landing/preview-j/PositioningClipJ';
 import takeover from '@/components/landing/preview-j/takeover-j.module.css';
 import { ContentDraftView } from '@/components/opc/content-draft-view';
+import { ResearchCallList } from '@/components/research/research-call-list';
+import type { ResearchCall } from '@/components/research/research-model';
 import { L_LATER, L_LATER_CHAT as CHAT, L_LATER_FLYWHEEL as FLY, type LaterStage } from '@/lib/landing/landing-copy-l-later';
 import { allOn, type LandingFlags } from '@/lib/landing/landing-flags';
 import picture from './picture-l.module.css';
@@ -27,7 +29,8 @@ const reducedMotion = () => Boolean(window.matchMedia?.('(prefers-reduced-motion
  * on by themselves while on screen (the pointer or focus holds them; a button pauses), a click picks any. Step two is
  * the work conversation as the product draws it (chat-display's work-chat pieces, the 正文稿件 column, 分镜与剪辑建议);
  * its voice stage, and all of step three (publishing, monitoring, the weekly review), are drawn from the plan because
- * the product has not built them yet (L_LATER marks which). Every stage sits behind its own feature's switch.
+ * the product has not built them yet (L_LATER marks which). The page is the full launched version (Owner
+ * 2026-10-17): every stage shows.
  */
 export function LaterStepsL({ flags }: { flags: LandingFlags }) {
   return (
@@ -118,7 +121,12 @@ function WorkChatPicture({ id }: { id: string }) {
           <div className={work.conversation}>
             <div className={work.transcript}>
               {id === 'topics' ? (
-                <RuntimeTurnView userText={CHAT.topics.user}><RuntimeReply text={CHAT.topics.reply} /></RuntimeTurnView>
+                <RuntimeTurnView userText={CHAT.topics.user}>
+                  <ChatNoticeList notices={[{ id: 'read', tone: 'status', text: `已读取资料库：${CHAT.topics.read.join('、')}` }]} />
+                  <ResearchCallList calls={CHAT.topics.calls.map(call => ({ ...call, callId: call.query, args: {}, platform: 'tiktok',
+                    state: 'succeeded' }) as ResearchCall)} />
+                  <RuntimeReply text={CHAT.topics.reply} />
+                </RuntimeTurnView>
               ) : null}
               {id === 'library' || id === 'voice' || script ? (
                 <RuntimeTurnView userText={`@${CHAT.library.document} ${CHAT.library.user}`}>

@@ -5,8 +5,8 @@ import type { LandingFeature } from './landing-flags';
  * Sample L, round five, R5 (Owner 2026-10-17: "还没开发完的功能，现在也全部都要在落地页上展示出来"): steps two and three of
  * region 3, the page's own person's week after step one. Each stage says whether the page shows the product's real
  * components ("real") or the planned design ("planned": MASTER_PLAN §5 for the voice profile, PUBLISH-MONITOR.md §1
- * and §5 for publishing, monitoring and the weekly review); each sits behind the switch of its own feature, so one
- * switch hides only its own stage. Lines are NEW unless noted.
+ * and §5 for publishing, monitoring and the weekly review); `needs` names what each promises (Owner 2026-10-17: the
+ * page is the full launched version, no switch hides a stage). Lines are NEW unless noted.
  */
 export type LaterStage = {
   id: string; label: string; note: string; needs: readonly LandingFeature[]; source: 'real' | 'planned';
@@ -50,6 +50,12 @@ export const L_LATER_CHAT = {
   account: '下班后 15 分钟家常菜',
   topics: {
     user: '这周拍什么？',
+    /** Its work first, as region 6 shows it: the library read, then the data fetched. */
+    read: ['《我的定位报告》', '《上周拍摄清单》'],
+    calls: [
+      { query: '我的账号 · 上周发布的 3 条', dataKind: 'account_posts', toolName: 'social_account' },
+      { query: '对标账号 A–E · 近 7 天作品', dataKind: 'account_posts', toolName: 'benchmark_fetch' },
+    ],
     reply: '按你的定位和上周的数据，这周拍这三条：\n1. **一口锅，15 分钟两菜一汤**——最能证明"下班后也来得及"；\n'
       + '2. **一个人的菜怎么买不浪费**——上周评论里问得最多；\n3. **超市半成品改造**——最省事，留给最累的那天。\n\n先做第 1 条？',
   },

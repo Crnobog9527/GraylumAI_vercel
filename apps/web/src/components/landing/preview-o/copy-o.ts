@@ -16,7 +16,7 @@ export const O_STATIONS = {
 
 /** The messages of one step the chat window shows (as OpsChatL filters them). */
 export const shownLines = (lines: readonly OpsLine[], flags: LandingFlags) =>
-  lines.filter(line => allOn(flags, line.needs) && !(line.without && flags[line.without]));
+  lines.filter(line => allOn(flags, line.needs) && !(line.without && allOn(flags, [line.without])));
 
 /**
  * The numbered notes beside region 3's window, made only of the step's own line (L_OPS): when the step opens with the

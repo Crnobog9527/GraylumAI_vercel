@@ -104,11 +104,9 @@ describe('style sample H', () => {
     for (const line of SCENES[0].lines) expect(html).toContain(escape(line.text));
   });
 
-  it('hides the scenes of switched-off capabilities with their steps', () => {
-    const { html } = render({ ...ALL_ON, publish: false });
-    expect(html).not.toContain('id="h-step-publish-tab"');
-    expect(html).not.toContain('id="h-step-review-tab"');
-    expect(html).toContain('id="h-step-chat-tab"');
+  it('shows every scene with its step: no capability is a switch (Owner 2026-10-17)', () => {
+    const { html } = render(ALL_ON);
+    for (const id of ['publish', 'review', 'chat']) expect(html).toContain(`id="h-step-${id}-tab"`);
   });
 
   it('drops "免费试用" from every CTA note when the sign-up grant is off', () => {
@@ -117,14 +115,10 @@ describe('style sample H', () => {
     expect(html).not.toContain('免费试用');
   });
 
-  it('keeps the weekly-review promise behind the publish flag, like the other needs-publish copy', () => {
+  it('keeps the weekly-review promise, which names publishing as what it promises', () => {
     const review = HERO_H.differenceBody.find(part => part.text.includes('每周和你复盘'));
     expect(review?.needs).toContain('publish');
     expect(render(ALL_ON).data.differenceBody).toContain('每周和你复盘');
-    const off = render({ ...ALL_ON, publish: false });
-    expect(off.data.differenceBody).not.toContain('每周和你复盘');
-    expect(off.data.differenceBody).toContain('Graylum AI 先了解你的情况');
-    expect(off.html).not.toContain('每周和你复盘');
   });
 });
 

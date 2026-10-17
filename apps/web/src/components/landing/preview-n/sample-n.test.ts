@@ -55,8 +55,7 @@ describe('style sample N (direction E, the bento grid, Owner 2026-10-17)', () =>
     const html = render();
     const hero = between(html, 'id="hero-title"', 'id="voice-title"');
     for (const part of [L_HERO_FLOW.youSay.text, L_HERO_FLOW.youGet.text, '免费和教练聊聊']) expect(hero).toContain(part);
-    const off = render({ ...ALL_ON, publish: false });
-    for (const item of L_HERO_FLOW.coachDoes.items) expect(off.includes(item.text)).toBe(!item.needs.includes('publish'));
+    for (const item of L_HERO_FLOW.coachDoes.items) expect(render()).toContain(item.text);
   });
 
   it('only repeats facts the page already says: 24 hours from the p1 answer, the number of sample reports', () => {
@@ -104,7 +103,6 @@ describe('style sample N (direction E, the bento grid, Owner 2026-10-17)', () =>
     for (const item of L_CARE.items) expect(care).toContain(escape(item.does));
     expect(care.indexOf(L_CARE.items[0].worry)).toBeLessThan(care.indexOf(L_CARE.items[1].worry));
     expect(care).toContain(K_CTA);
-    expect(render({ ...ALL_ON, voice: false })).not.toContain(L_CARE.items[0].worry);
   });
 
   it('keeps the comparison\'s title and next steps', () => {

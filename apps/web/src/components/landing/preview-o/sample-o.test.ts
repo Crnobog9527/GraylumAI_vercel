@@ -63,8 +63,7 @@ describe('style sample O (direction C, 路线图, Owner 2026-10-17)', () => {
   it('shows sample L\'s first screen: you say → the coach does (each line behind its flag) → you get', () => {
     const hero = between(render(), 'id="hero-title"', 'id="voice-title"');
     for (const text of [L_HERO_FLOW.youSay.text, L_HERO_FLOW.youGet.text]) expect(hero).toContain(text);
-    const off = render({ ...ALL_ON, publish: false });
-    for (const item of L_HERO_FLOW.coachDoes.items) expect(off.includes(item.text)).toBe(!item.needs.includes('publish'));
+    for (const item of L_HERO_FLOW.coachDoes.items) expect(render()).toContain(item.text);
   });
 
   it('shows every voice unfolded, with its region, source and the coach\'s answer', () => {
@@ -104,7 +103,6 @@ describe('style sample O (direction C, 路线图, Owner 2026-10-17)', () => {
   it('lists the worries behind their flags and keeps the comparison on the light band, each pair ending on what to do', () => {
     const html = render();
     for (const item of L_CARE.items) expect(html).toContain(item.worry);
-    expect(render({ ...ALL_ON, voice: false })).not.toContain(L_CARE.items[0].worry);
     expect(html).not.toContain('data-band="ink"');
     expect(html).toContain('data-band="tint"');
     const text = html.replace(/<[^>]+>/g, '').replace(/&quot;/g, '"');

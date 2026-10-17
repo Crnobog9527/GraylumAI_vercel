@@ -157,8 +157,6 @@ export const L_SAMPLES = {
   /** NEW: sample J's title, with the number of groups shown; the count and its measure word never part. */
   title: (count: number) => `先看成果：${count} 种人拿到的完整报告`,
   titleParts: (count: number) => ['先看成果：', `${count} 种人`, '拿到的完整报告'] as const,
-  /** NEW (fix plan item 12): on a touch screen the row is swiped, not hovered. */
-  swipe: '左右滑动看更多',
   bridge: '找一个和你情况像的，点开看',
   pause: '移到卡片上会停下',
   open: '看这份报告',
