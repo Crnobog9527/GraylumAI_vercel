@@ -3124,7 +3124,7 @@
   "fn:library_purpose(uuid,uuid,text)": "5ace37d0550d",
   "fn:library_recognition_document(uuid,uuid,text)": "f2e897eb4610",
   "fn:library_recognition_enabled()": "3497e791a0c8",
-  "fn:library_recognition_fail(uuid,uuid,text,integer)": "525ebd660c6e",
+  "fn:library_recognition_fail(uuid,uuid,text,integer)": "14ae8b7e10d6",
   "fn:library_recognition_pending(uuid)": "456fa6809dc9",
   "fn:library_recognition_save(uuid,uuid,text,integer,integer,jsonb)": "660d05471b5b",
   "fn:library_search(uuid,text,timestamp with time zone,uuid)": "1497811441e0",
