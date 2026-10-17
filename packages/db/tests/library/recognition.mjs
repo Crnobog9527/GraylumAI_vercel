@@ -93,14 +93,17 @@ export async function verifyRecognition(admin, one, two) {
   const full = await pdf(a);
   await admin.query('UPDATE library_upload_reservations SET segment_hold=9999998 WHERE document_id=$1', [full]);
   assert.deepEqual(await save(one, 2, 1, page(2, 'abc'), a, full), { saved: false, status: 'failed', contentVersion: 1, code: 'LIBRARY_TEXT_LIMIT' });
-  assert.deepEqual(await save(one, 2, 1, page(2, 'abc'), a, full), { saved: false, status: 'failed', contentVersion: 1 });
+  assert.deepEqual(await save(one, 2, 1, page(2, 'abc'), a, full), { saved: false, status: 'failed', contentVersion: 1, code: 'LIBRARY_TEXT_LIMIT' });
   assert.equal(await value(admin, "SELECT count(*)::int v FROM library_document_segments WHERE document_id=$1 AND source='recognized'", [full]), 0);
 
-  // A page the browser could not read is marked failed; it cannot be saved afterwards, and completed pages stay complete.
+  // A page the browser could not read is marked failed and completed pages stay complete; another tab that did
+  // read it can still save its text afterwards, and a save cannot be undone by a later failure.
   const failing = await pdf(a);
   assert.deepEqual(await value(one, "SELECT library_recognition_fail($1,$2,'pdf_page',2) v", [a, failing]), { status: 'failed' });
   assert.deepEqual(await value(one, "SELECT library_recognition_fail($1,$2,'pdf_page',1) v", [a, failing]), { status: 'complete' });
-  assert.deepEqual(await save(one, 2, 1, page(2, 'late'), a, failing), { saved: false, status: 'failed', contentVersion: 1 });
+  assert.deepEqual(await save(one, 2, 1, page(2, 'late'), a, failing), { saved: true, status: 'complete', contentVersion: 2 });
+  assert.deepEqual(await value(one, "SELECT library_recognition_fail($1,$2,'pdf_page',2) v", [a, failing]), { status: 'complete' });
+  assert.equal(await value(admin, "SELECT count(*)::int v FROM library_document_segments WHERE document_id=$1 AND source='recognized' AND body='late'", [failing]), 1);
 
   // Deleted documents and non-PDF documents are refused.
   await one.query('SELECT library_delete($1,$2)', [a, failing]);
