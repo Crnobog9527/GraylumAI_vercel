@@ -2558,17 +2558,17 @@ node scripts/plan-progress.mjs --ref origin/staging
 | 0288 | [#1075](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1075) PUBLISH-MONITOR 4a（合集 #1119） |
 | 0289 | [#1081](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1081) PUBLISH-MONITOR 4b（已上库合并） |
 | 0290 | FUSION-COMPARE（已上库合并） |
-| 0291 | [#1073](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1073) RUNTIME-PROD 核心（合集 #BATCH3） |
-| 0292 | [#1086](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1086) RUNTIME-PROD 研究工具线路（合集 #BATCH3） |
-| 0293 | [#1094](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1094) RUNTIME-PROD 评审团正式模式（合集 #BATCH3） |
-| 0294 | [#1098](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1098) 评审团固定价（合集 #BATCH3） |
-| 0295 | [#1102](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1102) 报告固定价（合集 #BATCH3） |
-| 0296 | [#1101](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1101) R7 B1 正式收款（合集 #BATCH3） |
-| 0297 | [#1104](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1104) R7 B2 四类退款（合集 #BATCH3） |
-| 0298 | [#1111](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1111) R7 B3 钱包会员退款（合集 #BATCH3） |
-| 0299 | [#1100](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1100) CHAT-AUTO-CONTEXT B1（合集 #BATCH3） |
-| 0300 | [#1106](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1106) REPORT-VISUAL PR-2（合集 #BATCH3） |
-| 0301 | [#1108](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1108) REPORT-VISUAL PR-3（合集 #BATCH3） |
+| 0291 | [#1073](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1073) RUNTIME-PROD 核心（合集 #1129） |
+| 0292 | [#1086](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1086) RUNTIME-PROD 研究工具线路（合集 #1129） |
+| 0293 | [#1094](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1094) RUNTIME-PROD 评审团正式模式（合集 #1129） |
+| 0294 | [#1098](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1098) 评审团固定价（合集 #1129） |
+| 0295 | [#1102](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1102) 报告固定价（合集 #1129） |
+| 0296 | [#1101](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1101) R7 B1 正式收款（合集 #1129） |
+| 0297 | [#1104](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1104) R7 B2 四类退款（合集 #1129） |
+| 0298 | [#1111](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1111) R7 B3 钱包会员退款（合集 #1129） |
+| 0299 | [#1100](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1100) CHAT-AUTO-CONTEXT B1（合集 #1129） |
+| 0300 | [#1106](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1106) REPORT-VISUAL PR-2（合集 #1129） |
+| 0301 | [#1108](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1108) REPORT-VISUAL PR-3（合集 #1129） |
 
 ### 7.2 依赖简图
 
