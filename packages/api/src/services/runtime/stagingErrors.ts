@@ -51,6 +51,16 @@ const failures = {
   RUNTIME_PRICE_UNKNOWN_FIELD: ['PRECONDITION_FAILED', '供应商价格里出现了系统还不认识的收费项，这个模型暂停使用，等待系统更新。'],
   // POSITIONING-GATE: stable code first; the front end shows its guide card for it.
   POSITIONING_REQUIRED: ['PRECONDITION_FAILED', POSITIONING_REQUIRED_MESSAGE],
+  // LIB-4b (LIB_DOCS_PLAN 6.1): stable code before the colon; every refusal happens before any charge.
+  LIB_REFERENCE_INVALID: ['BAD_REQUEST', 'LIB_REFERENCE_INVALID：引用的文档格式不对，请重新选择；未扣费。'],
+  LIB_REFERENCE_LIMIT: ['BAD_REQUEST', 'LIB_REFERENCE_LIMIT：每条消息最多引用 5 篇文档；未扣费。'],
+  LIB_REFERENCE_NOT_FOUND: ['PRECONDITION_FAILED', 'LIB_REFERENCE_NOT_FOUND：引用的文档不存在或已删除，请重新选择；未扣费。'],
+  LIB_REFERENCE_NOT_READY: ['PRECONDITION_FAILED', 'LIB_REFERENCE_NOT_READY：引用的文档还没处理好，请稍后再发；未扣费。'],
+  LIB_REFERENCE_STALE: ['PRECONDITION_FAILED', 'LIB_REFERENCE_STALE：引用的文档已经更新，请重新选择；未扣费。'],
+  LIB_REFERENCE_UNSUPPORTED: ['PRECONDITION_FAILED', 'LIB_REFERENCE_UNSUPPORTED：这里不能引用资料库文档；未扣费。'],
+  LIB_REFERENCE_DISABLED: ['PRECONDITION_FAILED', 'LIB_REFERENCE_DISABLED：引用资料库文档的功能还没有开放；未扣费。'],
+  LIB_REFERENCE_CAPACITY: ['PRECONDITION_FAILED', 'LIB_REFERENCE_CAPACITY：本轮内容加上文档读取超过模型容量，请缩短输入或少引用一些；未扣费。'],
+  LIB_SOURCE_DELETED: ['PRECONDITION_FAILED', 'LIB_SOURCE_DELETED：本轮引用的文档已删除或已更新，这一轮回答不再显示。'],
 } as const;
 export type StagingFailure = keyof typeof failures;
 export class StagingAccessError extends Error {
