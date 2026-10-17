@@ -62,6 +62,12 @@ describe('parseReportDataBlock', () => {
     expect(parsed.fallback.goal).toEqual(['涨粉', '接单', 'maybe']);
   });
 
+  it('survives a deeply nested broken value', () => {
+    const line = '{"v":1,"field":"summary","value":' + '['.repeat(6000) + '"x"' + ']'.repeat(6000) + '}';
+    const parsed = parseReportDataBlock(block(line));
+    expect(parsed.dropped).toEqual(['summary']);
+    expect(parsed.fallback.summary).toBeUndefined();
+  });
   it('checks lengths in Unicode characters, and turns links and HTML into nothing special', () => {
     expect(parseReportDataBlock(block(row('summary', '字'.repeat(200)))).data.summary).toHaveLength(200);
     expect(parseReportDataBlock(block(row('summary', '字'.repeat(201)))).dropped).toEqual(['summary']);
