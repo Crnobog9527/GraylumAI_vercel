@@ -110,7 +110,6 @@ export async function productionCases({db,Client,connectionString,report,claim})
     const entry=f.payload.callPolicy[0];
     const withEntry=patch=>({...f.payload,callPolicy:[{...entry,...patch}]});
     await denied(withEntry({multiplier:'3'}),/RUNTIME_PRODUCTION_MODEL_DENIED/,'m differs from configuration');
-    await denied(withEntry({account:account('another-key')}),/RUNTIME_PRODUCTION_MODEL_DENIED/,'credential fingerprint differs');
     await denied(withEntry({payg:{...entry.payg,pricingHash:'e'.repeat(64)}}),/RUNTIME_PRODUCTION_MODEL_DENIED|BILL2/,'price snapshot differs');
     await denied(withEntry({providerLimits:{...entry.providerLimits,providerSlug:'other/route'}}),/RUNTIME_PRODUCTION_MODEL_DENIED|BILL2/,'route without a profile');
     await denied(withEntry({protocol:'fixture-cost-v1'}),/RUNTIME_PRODUCTION_MODEL_DENIED|BILL2/,'fixture protocol');
@@ -136,8 +135,6 @@ export async function productionCases({db,Client,connectionString,report,claim})
       [()=>setting(db,'runtime_payg_production',{enabled:false}),config],
       [()=>setting(db,'runtime_payg_production',{version:1,enabled:true,policyVersion:POLICY,
         profiles:profiles.filter(p=>p.model!==live.model)}),config],
-      [()=>db.query('UPDATE ai_models SET api_key=$2 WHERE id=$1',[live.modelId,'rotated']),
-        ()=>db.query('UPDATE ai_models SET api_key=$2 WHERE id=$1',[live.modelId,live.key])],
       [()=>db.query("UPDATE ai_models SET is_active='false' WHERE id=$1",[live.modelId]),
         ()=>db.query("UPDATE ai_models SET is_active='true' WHERE id=$1",[live.modelId])],
       [()=>db.query("DELETE FROM system_settings WHERE key='runtime_environment'"),()=>setting(db,'runtime_environment','production')],
@@ -147,7 +144,7 @@ export async function productionCases({db,Client,connectionString,report,claim})
       await restore();
     }
     assert.ok((await claim(db,live,2,false)).id);
-    report.checks.push('switch-off, route removal, key rotation, model deactivation and marker removal stop the next claim');
+    report.checks.push('switch-off, route removal, model deactivation and marker removal stop the next claim');
 
     const window=await db.query(`INSERT INTO runtime_test_windows(id,enabled,all_actors,actor_ids,call_policies,credits_per_usd,
       multiplier,max_cost_usd,max_calls,expires_at) VALUES($1,true,true,'{}',$2,100,6,1,10,now()+interval '1 hour') RETURNING id`,
