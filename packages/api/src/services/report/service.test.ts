@@ -241,7 +241,7 @@ it('a start without an accepted price is refused when the fixed price cannot be 
 });
 it('a new start without the accepted price is refused before any admission (0295)', async () => {
   const { admin, past } = startAdmin([], {});
-  const { acceptedCredits: _shown, ...withoutPrice } = startInput;
+  const withoutPrice = { sessionId: startInput.sessionId, projectId: startInput.projectId, roundId: startInput.roundId };
   await expect(reportService(user as unknown as SupabaseClient, admin, policy).start({ ...withoutPrice, requestId: randomUUID() }))
     .rejects.toMatchObject({ message: 'REPORT_PRICE_REQUIRED' });
   expect(past.reached).toBe(false);
