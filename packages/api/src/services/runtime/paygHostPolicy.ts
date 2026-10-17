@@ -23,6 +23,8 @@ const admittedRoutes: Readonly<Record<string,string>> = {
   'openai/gpt-6.1-sol':'openai',
   'anthropic/claude-opus-5.5':'anthropic',
 };
+/** The model/route pairs whose request shape and output semantics were approved (staging and production alike). */
+export const isAdmittedRoute = (model: string, endpointTag: string) => admittedRoutes[model] === endpointTag;
 // fusion_review / fusion_summary: FUSION-REVIEW per-model calls, claimed only as a billing group (0234).
 const phase = z.enum(['ordinary', 'skill', 'organizer', 'skill_matching', 'attached_organizer', 'report',
   'fusion_review', 'fusion_summary']);

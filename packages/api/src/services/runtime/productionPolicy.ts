@@ -9,10 +9,11 @@ import { openRouterBound, type OpenRouterLimits } from '../bill2/openRouterPolic
 import type { FrozenRun } from '../bill2/service';
 import { BillingUnitConfigError, readBillingUnitSettings, readMultiplierSnapshot } from '../billingUnit';
 import { isOpenRouterEndpoint, resolveOpenAICompatibleEndpoint } from '../providerUtils';
-import { matchedProfile, paygProductionSettings, paygTemplate, PAYG_PRODUCTION_SETTING, PAYG_PROFILE_MAX_BYTES,
+import { isAdmittedRoute, matchedProfile, paygProductionSettings, paygTemplate, PAYG_PRODUCTION_SETTING, PAYG_PROFILE_MAX_BYTES,
   type Requirement } from './paygHostPolicy';
 export { PAYG_PRODUCTION_SETTING } from './paygHostPolicy';
-import { pricingEndpoint, readPricingStates, type PricingDeps } from './pricingAdmission';
+import { pricingEndpoint, PRICE_SNAPSHOT_MAX_AGE_MS, readPricingStates, type PricingDeps } from './pricingAdmission';
+import { readPricingSnapshot } from '../../shared/modelPricing';
 import { productionRuntimeTarget } from './productionEnvironment';
 import { StagingAccessError, stagingRpcFailure } from './stagingErrors';
 import { parseStagingPolicy, type StagingPolicy } from './stagingPolicy';
@@ -49,7 +50,8 @@ async function readSettings(admin: SupabaseClient): Promise<Settings> {
   return parsed.data;
 }
 
-type ModelRow = { id: string; model_id: string; provider: string | null; api_endpoint: string | null; api_key: string | null };
+type ModelRow = { id: string; model_id: string; provider: string | null; api_endpoint: string | null; api_key: string | null;
+  config: unknown; updated_at: string };
 type CallPolicy = StagingPolicy['callPolicies'][number];
 
 function deriveLimits(row: Parameters<typeof pricingEndpoint>[0], snapshot: Parameters<typeof pricingEndpoint>[1],
@@ -66,9 +68,18 @@ function deriveLimits(row: Parameters<typeof pricingEndpoint>[0], snapshot: Para
     ...(prices.cacheWriteUsdPerMillion !== undefined ? { cacheWriteUsdPerMillion: prices.cacheWriteUsdPerMillion } : {}) };
 }
 
+function storedState(row: ModelRow, now: number) {
+  const snapshot = readPricingSnapshot(row.config);
+  if (!snapshot || now - Date.parse(snapshot.fetchedAt) > PRICE_SNAPSHOT_MAX_AGE_MS)
+    throw new StagingAccessError('RUNTIME_PRICE_SNAPSHOT_STALE');
+  return { row, snapshot };
+}
+
 /** Called by the authenticated host for new work. Target and enable switch first, then the database decision. */
 export async function loadProductionPolicy(admin: SupabaseClient, actorId: string,
-  env: Record<string, string | undefined> = process.env, deps: PricingDeps = {}): Promise<StagingPolicy> {
+  env: Record<string, string | undefined> = process.env, deps: PricingDeps = {},
+  /** offline: settings pages only read stored snapshots; a stale one leaves its model out instead of renewing it. */
+  options: { offline?: boolean } = {}): Promise<StagingPolicy> {
   productionRuntimeTarget(env);
   await assertProductionAccess(admin, actorId);
   const config = await readSettings(admin);
@@ -78,21 +89,23 @@ export async function loadProductionPolicy(admin: SupabaseClient, actorId: strin
   // RUNTIME_PROD_PLAN 2.1: production q and m are explicit rows, never the code fallback.
   if (unitSettings.source.creditsPerUsd !== 'configured' || unitSettings.source.defaultMultiplier !== 'configured')
     throw new StagingAccessError('RUNTIME_BILLING_UNIT_UNAVAILABLE');
-  const rows = await admin.from('ai_models').select('id,model_id,provider,api_endpoint,api_key')
+  const rows = await admin.from('ai_models').select('id,model_id,provider,api_endpoint,api_key,config,updated_at')
     .in('model_id', config.profiles.map(p => p.model)).eq('is_active', 'true');
   if (rows.error) stagingRpcFailure(rows.error);
   const candidates: Array<{ row: ModelRow; profile: Settings['profiles'][number] }> = [];
   for (const profile of config.profiles) {
     const matches = ((rows.data ?? []) as ModelRow[]).filter(row => row.model_id === profile.model);
     if (matches.length > 1) throw new StagingAccessError('RUNTIME_PRODUCTION_CONFIG_INVALID');
-    if (matches.length === 1) candidates.push({ row: matches[0]!, profile });
+    // Only approved request shapes (#1073 review): schema-valid evidence for another route is not enough.
+    if (matches.length === 1 && isAdmittedRoute(profile.model, profile.endpointTag)) candidates.push({ row: matches[0]!, profile });
   }
   const built = await Promise.all(candidates.map(async ({ row, profile }): Promise<Omit<CallPolicy, 'multiplier'> | undefined> => {
     try {
       const key = row.api_key?.trim();
       if (!key || !isOpenRouterEndpoint(resolveOpenAICompatibleEndpoint(row.provider, row.api_endpoint) ?? ''))
         throw new StagingAccessError('RUNTIME_STAGING_MODEL_DENIED');
-      const state = (await readPricingStates(admin, [{ modelId: row.id, model: row.model_id }], deps)).get(row.id)!;
+      const state = options.offline ? storedState(row, (deps.now ?? Date.now)())
+        : (await readPricingStates(admin, [{ modelId: row.id, model: row.model_id }], deps)).get(row.id)!;
       const providerLimits = deriveLimits(state.row, state.snapshot, row.model_id, profile.endpointTag);
       return { modelId: row.id, provider: 'openrouter', account: 'openrouter-key:' + createHash('sha256').update(key).digest('hex'),
         model: row.model_id, protocol: 'openrouter-chat-v1', providerLimits,
@@ -129,7 +142,7 @@ export async function readPaygProductionPolicies(admin: SupabaseClient, policy: 
   if (config.policyVersion !== policy.id) throw new StagingAccessError('RUNTIME_PAYG_PROFILE_REQUIRED');
   return policies.map(entry => {
     const profile = matchedProfile(config.profiles, entry, requirements);
-    if (!profile) throw new StagingAccessError('RUNTIME_PAYG_PROFILE_REQUIRED');
+    if (!profile || !isAdmittedRoute(profile.model, profile.endpointTag)) throw new StagingAccessError('RUNTIME_PAYG_PROFILE_REQUIRED');
     return { ...entry, payg: paygTemplate(profile, 'production-host-v1', policy.id, deadline) };
   });
 }
