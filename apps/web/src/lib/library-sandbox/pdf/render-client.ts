@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { isSandboxErrorCode, SandboxError, type SandboxErrorCode } from '../errors';
 import { isLibraryScanRecognitionEnabled } from '../feature-flag';
-import { PDF_RENDER_LIMITS, SANDBOX_LIMITS } from '../limits';
+import { PDF_LIMITS, PDF_RENDER_LIMITS, SANDBOX_LIMITS } from '../limits';
 import { isRecord } from '../protocol';
 import { runSandboxedWorker } from '../sandbox-host';
 import { loadWorkerBundle, withinDeadline } from '../worker-bundle';
@@ -37,6 +37,9 @@ export async function renderPdfPagesInBrowser(file: Blob, pages: number[],
   if (!isLibraryScanRecognitionEnabled()) throw new SandboxError('FEATURE_DISABLED');
   if (file.size === 0) throw new SandboxError('INPUT_EMPTY');
   if (file.size > SANDBOX_LIMITS.maxInputBytes) throw new SandboxError('INPUT_TOO_LARGE');
+  // Checked across the whole request, not only inside one Worker batch, so no page is rendered twice.
+  if (!pages.length || new Set(pages).size !== pages.length
+    || !pages.every((page) => Number.isInteger(page) && page >= 1 && page <= PDF_LIMITS.maxPages)) throw new SandboxError('SANDBOX_PROTOCOL');
   const [source, pdf] = await withinDeadline(Promise.all([loadWorkerBundle(PDF_RENDER_WORKER_PATH), file.arrayBuffer()]),
     Date.now() + LOAD_TIMEOUT_MS, options.signal);
   const results: PageImage[] = [];
