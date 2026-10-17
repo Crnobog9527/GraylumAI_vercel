@@ -66,6 +66,30 @@ export function sharedLimiter(env: NodeJS.ProcessEnv = process.env): Limiter {
   };
 }
 
+// Per user, upload slots are counted one by one (a post has up to 10 files): at most 10 provider upload calls per user
+// in 5 minutes, however the requests are split or run in parallel, so one user cannot tie up the shared budget.
+export const UPLOAD_SLOTS_PER_USER = 10;
+let uploads: Ratelimit | null = null;
+
+/** Takes `count` upload slots for one user at once; Redis unavailable means no slots (fail closed). */
+export async function takeUploadSlots(userId: string, count: number,
+  env: NodeJS.ProcessEnv = process.env): Promise<{ ok: true } | { ok: false; retryAfterSeconds: number }> {
+  try {
+    if (!uploads) {
+      const { url, token } = redisEnvironment(env);
+      const redis = new Redis({ url, token, retry: { retries: 0 }, signal: () => AbortSignal.timeout(DEADLINE_MS) });
+      uploads = new Ratelimit({ redis, analytics: false, timeout: 0, prefix: 'graylum:ratelimit:postforme:uploads:',
+        limiter: Ratelimit.slidingWindow(UPLOAD_SLOTS_PER_USER, '5 m') });
+    }
+    const result = await deadline(uploads.limit(userId, { rate: count }));
+    if (result.reason === 'timeout') return { ok: false, retryAfterSeconds: 5 };
+    return result.success ? { ok: true }
+      : { ok: false, retryAfterSeconds: Math.max(1, Math.ceil((result.reset - Date.now()) / 1000)) };
+  } catch {
+    return { ok: false, retryAfterSeconds: 5 };
+  }
+}
+
 export function postForMeDeps(env: NodeJS.ProcessEnv = process.env): ClientDeps {
   return { apiKey: postForMeApiKey(env), limiter: sharedLimiter(env) };
 }

@@ -131,18 +131,16 @@ export async function runLeaves(db,report){
  assert.equal(lateLog.rowCount,0,'late diagnostic body cannot refill a closed subject');
  report.checks.push('chat pruning severs only nullable usage links; token/usage rows and all monetary fields survive conversation/message deletion');
 
- const pending=await conversation(db),requestId=randomUUID(),writer=randomUUID();
- await db.query(`INSERT INTO ordinary_chat_requests(request_id,user_id,conversation_id,writer_token,input,state)
-  VALUES($1,$2,$3,$4,'{"message":"PRIVATE"}','running')`,[requestId,pending.actor,pending.conversation,writer]);
- await closeAccount(db,pending);await scrubRuntime(db,pending);
- const pendingBefore=(await db.query('SELECT * FROM ordinary_chat_requests WHERE request_id=$1',[requestId])).rows[0];
- assert.equal(pendingBefore.erased_at,null);
- assert.equal((await db.query('DELETE FROM conversations WHERE id=$1',[pending.conversation])).rowCount,0,
-  'existing ordinary request delete guard still refuses parent deletion');
- assert.ok((await cleanup(db,pending)).remaining>0);
- assert.equal(await count(db,'conversations','id',pending.conversation),1);
- assert.deepEqual((await db.query('SELECT * FROM ordinary_chat_requests WHERE request_id=$1',[requestId])).rows[0],pendingBefore);
- report.checks.push('pending ordinary request and recovery context retained; original parent-delete guard not bypassed');
+ // LEGACY-CLOSE 0271 dropped three legacy chat tables, the ordinary chat settlement function and the conversations
+ // delete guard; cleanup must not depend on any of them.
+ const legacy=(await db.query(`SELECT
+  to_regclass('public.ordinary_chat_requests') IS NULL
+  AND to_regclass('public.agent_confirmed_preferences') IS NULL AND to_regclass('public.agent_preference_requests') IS NULL
+  AND to_regprocedure('public.ordinary_chat_transition(uuid,uuid,uuid,text,jsonb)') IS NULL
+  AND to_regprocedure('public.ordinary_chat_delete_guard()') IS NULL
+  AND NOT EXISTS(SELECT 1 FROM pg_trigger WHERE tgname='ordinary_chat_delete') AS gone`)).rows[0].gone;
+ assert.equal(legacy,true,'0271 legacy chat tables, settlement function and delete guard are gone');
+ report.checks.push('0271: legacy chat tables, ordinary_chat_transition and the conversations delete guard are gone');
 
  const batch=await conversation(db);
  await db.query(`INSERT INTO messages(conversation_id,role,content)

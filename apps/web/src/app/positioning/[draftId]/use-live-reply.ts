@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { AgentTurnEvent } from "@repo/api/src/shared/agentTurn";
 import { trpc } from "@/trpc/client";
 import type { LiveReply } from "./agent-turn-display";
 import { liveReplyController, type LiveReplyController } from "./live-reply-controller";
@@ -24,14 +25,19 @@ function tabStorage() {
  * A stopped turn that this page no longer streams is re-read a bounded number
  * of times (STOP_FOLLOW_UP_DELAYS_MS), never polled without end.
  */
-export function useLiveReply(draftId: string, history: RecoveryHistory | undefined):
+export function useLiveReply(draftId: string, history: RecoveryHistory | undefined,
+  observe?: (executionId: string, event: AgentTurnEvent) => void):
   LiveReplyController & {
     reply: LiveReply | null; phase: string | null; stopAction: { onClick: () => void } | null;
     /** This tab's own knowledge of its stop of `executionId` (MentorReplySource.stopLocal). */
     stopLocal: (executionId: string) => "unconfirmed" | "stopped" | undefined;
   } {
   const [reply, setReply] = useState<LiveReply | null>(null);
-  const live = useMemo(() => liveReplyController({ draftId, storage: tabStorage, show: setReply }), [draftId]);
+  // The latest observer, read at each event: the controller lives as long as the draft.
+  const observer = useRef(observe);
+  useEffect(() => { observer.current = observe; }, [observe]);
+  const live = useMemo(() => liveReplyController({ draftId, storage: tabStorage, show: setReply,
+    observe: (executionId, event) => observer.current?.(executionId, event) }), [draftId]);
   const utils = trpc.useUtils();
   const cancel = trpc.runtime.cancel.useMutation();
   useEffect(() => {
