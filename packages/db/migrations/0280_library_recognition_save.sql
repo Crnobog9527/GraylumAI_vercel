@@ -167,7 +167,8 @@ BEGIN
  PERFORM library_recognition_document(a,did,kind);
  SELECT * INTO u FROM library_recognition_units WHERE document_id=did AND unit_kind=kind AND position=pos FOR UPDATE;
  IF u.document_id IS NULL THEN RAISE EXCEPTION 'LIBRARY_NOT_FOUND'; END IF;
- IF u.status IN ('pending','paused') THEN
+ -- Only a waiting unit becomes failed: one paused for space was read by another tab and resumes when space frees.
+ IF u.status='pending' THEN
   UPDATE library_recognition_units SET status='failed' WHERE document_id=did AND unit_kind=kind AND position=pos;
   RETURN jsonb_build_object('status','failed');
  END IF;

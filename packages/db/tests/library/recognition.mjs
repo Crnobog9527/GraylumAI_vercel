@@ -85,6 +85,8 @@ export async function verifyRecognition(admin, one, two) {
   await admin.query("UPDATE membership_plans SET library_storage_bytes=$1 WHERE level='free'", [used + 3]);
   assert.deepEqual(await save(one, 4, 2, page(4, 'longer'), a, race), { saved: false, status: 'paused', contentVersion: 2, code: 'LIBRARY_SPACE' });
   assert.equal(await value(admin, "SELECT status v FROM library_recognition_units WHERE document_id=$1 AND position=4", [race]), 'paused');
+  // Another tab that could not read it does not turn a paused page into a failed one; it resumes when space frees.
+  assert.deepEqual(await value(one, "SELECT library_recognition_fail($1,$2,'pdf_page',4) v", [a, race]), { status: 'paused' });
   assert.equal(await usage(), used);
   await admin.query("UPDATE membership_plans SET library_storage_bytes=100000000 WHERE level='free'");
   assert.equal((await save(one, 4, 2, page(4, 'longer'), a, race)).saved, true);
