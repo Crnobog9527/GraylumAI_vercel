@@ -12,6 +12,7 @@ import { allOn, type LandingFlags } from '@/lib/landing/landing-flags';
 import { cn } from '@/lib/utils';
 import styles from './scenarios-l.module.css';
 import { useTypingGate } from './typing-l';
+import { CountdownBar, countdownHost, useAutoAdvance } from './use-auto-advance';
 import { WorkflowCompareL, workflowBeats } from './WorkflowCompareL';
 
 /** How long one beat of the coach's work lasts when it plays by itself (milliseconds). */
@@ -52,7 +53,10 @@ export function scenarioAt(items: readonly Item[], position: number) {
  * - The coach's chat shows its scrollbar and can be scrolled by the visitor (it stops following the newest line until
  *   the next scenario).
  * Round eight (U8, Owner 2026-10-18): no pause, by the pointer or a button; each scenario plays once and, played, is
- * remembered in this browser and shown finished when it comes back.
+ * remembered in this browser and shown finished when it comes back. U9: the typing never stops, but the page moves on
+ * to the next scenario by itself only when this one is written, has been on screen 8 seconds since, and the pointer has
+ * been out of the chat windows for a second (a finger in them holds it 8 seconds); a thin bar on the next tab fills for
+ * 3 seconds first and empties when the pointer comes back. A tab clicked stays until the same holds.
  * Server HTML, no JavaScript and reduced motion: one scenario at a time with the tabs, each conversation whole.
  */
 export function ScenariosL({ flags, after }: { flags: LandingFlags; after?: ReactNode }) {
@@ -72,6 +76,7 @@ export function ScenariosL({ flags, after }: { flags: LandingFlags; after?: Reac
   const lastScroll = useRef(0);
   const lastProgress = useRef(0);
   const base = useId();
+  const startOf = (index: number) => items.slice(0, index).reduce((sum, item) => sum + spanOf(item), 0);
 
   useEffect(() => { setHeld(!reducedMotion()); setSeen(readSeen()); }, []);
   // The page's scroll through the region sets the position: down never moves it back, up does.
@@ -96,8 +101,11 @@ export function ScenariosL({ flags, after }: { flags: LandingFlags; after?: Reac
     window.addEventListener('resize', onScroll);
     return () => { cancelAnimationFrame(frame); window.removeEventListener('scroll', onScroll); window.removeEventListener('resize', onScroll); };
   }, [held, total]);
-  // Left alone and on screen, it plays on by itself (not while the page is being scrolled).
-  const playing = held && inView && !busy && position < total;
+  const at = scenarioAt(items, position);
+  const playBeats = items[at.index] ? workflowBeats(items[at.index].turns) : 0;
+  const written = played.includes(at.index) || (at.beat >= playBeats && !busy);
+  // Left alone and on screen, a scenario plays on by itself to its end (not while the page is being scrolled).
+  const playing = held && inView && !busy && !played.includes(at.index) && at.beat < playBeats;
   const [tick, setTick] = useState(0);
   useEffect(() => {
     if (!playing) return;
@@ -108,9 +116,14 @@ export function ScenariosL({ flags, after }: { flags: LandingFlags; after?: Reac
     return () => window.clearTimeout(timer);
   }, [playing, position, total, tick]);
   // All of them seen: remembered, so a later visit may skip.
-  useEffect(() => { if (held && position >= total - HOLD_BEATS) writeSeen(); }, [held, position, total]);
+  const lastWritten = held && written && at.index === items.length - 1;
+  useEffect(() => { if (lastWritten) writeSeen(); }, [lastWritten]);
+  // Written, it moves on to the next scenario by the shared rules (U9, use-auto-advance.tsx).
+  const { countdown, hand } = useAutoAdvance({
+    on: held && inView, written, hasNext: at.index < items.length - 1, part: at.index,
+    next: () => setPosition(startOf(at.index + 1)),
+  });
 
-  const at = scenarioAt(items, position);
   const active = held ? at.index : staticActive;
   // A scenario played to its end is remembered (round eight, U8): from then on it shows finished.
   const playedOut = held && items[at.index] ? at.beat >= workflowBeats(items[at.index].turns) : false;
@@ -131,7 +144,6 @@ export function ScenariosL({ flags, after }: { flags: LandingFlags; after?: Reac
 
   if (!items.length) return null;
   const current = items[active];
-  const startOf = (index: number) => items.slice(0, index).reduce((sum, item) => sum + spanOf(item), 0);
   const pick = (index: number) => (held ? setPosition(startOf(index)) : setStaticActive(index));
   const skip = () => {
     const node = ref.current;
@@ -148,7 +160,11 @@ export function ScenariosL({ flags, after }: { flags: LandingFlags; after?: Reac
           <div ref={tabs} role="tablist" aria-label={L_SCENARIOS.label} className={styles.tabs}>
             {items.map((item, index) => (
               <button key={item.copy.tab} type="button" role="tab" id={`${base}-tab-${index}`} aria-controls={`${base}-panel`}
-                aria-selected={index === active} tabIndex={index === active ? 0 : -1} onClick={() => pick(index)}>{item.copy.tab}</button>
+                className={countdownHost}
+                aria-selected={index === active} tabIndex={index === active ? 0 : -1} onClick={() => pick(index)}>
+                {item.copy.tab}
+                {held && index === at.index + 1 ? <CountdownBar share={countdown} /> : null}
+              </button>
             ))}
           </div>
           {held ? (
@@ -167,8 +183,8 @@ export function ScenariosL({ flags, after }: { flags: LandingFlags; after?: Reac
         <h3 className={styles.title}>{current.copy.title}</h3>
         <p className={styles.lede}>{current.copy.lede}</p>
         <TypingScope>
-          <WorkflowCompareL task={current.task} turns={current.turns} badge={L_SCENARIOS.badge}
-            beat={held && !played.includes(active) ? at.beat : Infinity} />
+          <div className={styles.hands} {...hand}><WorkflowCompareL task={current.task} turns={current.turns} badge={L_SCENARIOS.badge}
+            beat={held && !played.includes(active) ? at.beat : Infinity} /></div>
         </TypingScope>
       </div>
     </div>

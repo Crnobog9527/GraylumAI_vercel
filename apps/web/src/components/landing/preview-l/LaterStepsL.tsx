@@ -19,17 +19,17 @@ import type { ResearchCall } from '@/components/research/research-model';
 import { L_LATER, L_LATER_CHAT as CHAT, L_LATER_FLYWHEEL as FLY, type LaterStage } from '@/lib/landing/landing-copy-l-later';
 import { allOn, type LandingFlags } from '@/lib/landing/landing-flags';
 import { USER_CPS } from '@/lib/landing/typing';
+import { cn } from '@/lib/utils';
 import picture from './picture-l.module.css';
 import { ComposerL } from './ComposerL';
 import { DemoTag } from './DemoTag';
 import styles from './later-l.module.css';
 import { Caret, TypingFrame, useStickToEnd, useTyped, useTypingGate } from './typing-l';
+import { CountdownBar, countdownHost, useAutoAdvance } from './use-auto-advance';
+import demo from './demo-l.module.css';
 
-/** How long one beat of a stage lasts, and the hold once a stage is whole before the next one (milliseconds). */
+/** How long one beat of a stage lasts (milliseconds); when a whole stage moves on is use-auto-advance.tsx's (U11). */
 const BEAT_MS = 900;
-/** Once whole, a stage stays long enough to be read (round six: the script and its 11-shot table at least 15 seconds). */
-const HOLD_MS: Record<string, number> = { script: 15000 };
-const HOLD_DEFAULT_MS = 6000;
 /**
  * How many beats each stage plays in (round six: everything arrives as in the product, nothing laid out at once). Round
  * seven (T8): what is typed (the person's message in the box, the coach's reply, the table row by row) is typed live, and
@@ -97,15 +97,16 @@ function LaterStep({ step, flags }: { step: { title: string; lede: string; stage
     writePlayed(next);
   }, [moving, current, finished, played]);
   useEffect(() => {
-    if (!playing) return;
-    const whole = finished;
-    if (whole && (held || stages.length < 2)) return;
-    const timer = window.setTimeout(() => {
-      if (!whole) { setBeat(value => value + 1); return; }
-      setActive(index => (index + 1) % stages.length); setBeat(0);
-    }, whole ? HOLD_MS[current.id] ?? HOLD_DEFAULT_MS : BEAT_MS);
+    if (!playing || finished) return;
+    const timer = window.setTimeout(() => setBeat(value => value + 1), BEAT_MS);
     return () => window.clearTimeout(timer);
-  }, [playing, held, beat, finished, stages.length, current]);
+  }, [playing, beat, finished]);
+  // Round eight (U11): whole, it moves on to the next stage by the same rules as region 6 (use-auto-advance.tsx): the
+  // pointer anywhere on the demo window holds it, a stage the visitor picked stays until the rules hold.
+  const { countdown, hand } = useAutoAdvance({
+    on: moving && seen && !held, written: finished && !busy, hasNext: stages.length > 1, part: current?.id,
+    next: () => { setActive(index => (index + 1) % stages.length); setBeat(0); },
+  });
   const pick = (index: number) => { setActive(index); setBeat(0); };
   if (!current) return null;
   const shownBeat = moving && !replayed ? beat : Infinity;
@@ -119,15 +120,16 @@ function LaterStep({ step, flags }: { step: { title: string; lede: string; stage
           <div role="tablist" aria-label={L_LATER.label} className={styles.tabs}>
             {stages.map((stage, index) => (
               <button key={stage.id} type="button" role="tab" id={`${base}-${stage.id}`} aria-controls={`${base}-panel`}
-                aria-selected={index === active} tabIndex={index === active ? 0 : -1} onClick={() => pick(index)}>
+                aria-selected={index === active} tabIndex={index === active ? 0 : -1} onClick={() => pick(index)} className={countdownHost}>
                 <span aria-hidden="true">{index + 1}</span>{stage.label}
+                {index === (active + 1) % stages.length ? <CountdownBar share={countdown} /> : null}
               </button>
             ))}
           </div>
         </div>
         <div role="tabpanel" id={`${base}-panel`} aria-labelledby={`${base}-${current.id}`} className={styles.panel} key={current.id}>
           <p className={styles.note}><DemoTag />{current.note}</p>
-          <div className={styles.picture}>
+          <div className={styles.picture} {...hand}>
             <TypingScope><StagePicture id={current.id} beat={shownBeat} live={moving && seen} /></TypingScope>
           </div>
         </div>
@@ -196,7 +198,7 @@ function WorkChatPicture({ id, beat, live }: { id: string; beat: number; live: b
       <RailJ published launched />
       <section className={picture.column}>
         {/* The scroll is the visitor's to use; what it holds is a picture (inert). */}
-        <div ref={chat} className={styles.chat} onWheel={takeOver} onTouchMove={takeOver} onPointerDown={takeOver}>
+        <div ref={chat} className={cn(styles.chat, demo.scrollbar)} onWheel={takeOver} onTouchMove={takeOver} onPointerDown={takeOver}>
           <div inert>
             <RuntimeHeader headingLevel="h2" title={CHAT.title} meta={{ platform: CHAT.platform, account: CHAT.account, infoHref: '#' }} />
             <div className={work.conversation}>
@@ -219,7 +221,8 @@ function WorkChatPicture({ id, beat, live }: { id: string; beat: number; live: b
           <ComposerL paragraphs={askParagraphs(ask.typing ? ask.shown : '')} caret={ask.typing ? <Caret /> : undefined} />
         </div>
       </section>
-      <aside className={takeover.checklist} inert>
+      {/* The right column scrolls too, its scrollbar shown (round eight, U11); what it holds is a picture (inert). */}
+      <aside className={takeover.checklist}><div className={cn(styles.side, demo.scrollbar)}><div inert>
         {script && beat >= 3 ? (
           <ContentDraftView platform={CHAT.platform} account={CHAT.account} contentLabel="口播稿" title={CHAT.script.draftTitle}
             body={proposal.shown} versionLine={CHAT.script.versionLine}>
@@ -229,7 +232,7 @@ function WorkChatPicture({ id, beat, live }: { id: string; beat: number; live: b
             ]} />
           </ContentDraftView>
         ) : <RuntimeTypePendingPanel />}
-      </aside>
+      </div></div></aside>
     </div>
   );
 }
@@ -294,7 +297,7 @@ function FlywheelPicture({ id, beat }: { id: string; beat: number }) {
   if (id === 'publish') {
     const p = FLY.publish;
     return (
-      <section className={styles.sheet}>
+      <section className={cn(styles.sheet, demo.scrollbar)}>
         <header><b>{p.title}</b><span>{p.video}</span></header>
         <ul className={styles.platforms}>
           {p.platforms.map(([name, state], index) => {
@@ -311,7 +314,7 @@ function FlywheelPicture({ id, beat }: { id: string; beat: number }) {
   if (id === 'monitor') {
     const m = FLY.monitor;
     return (
-      <section className={styles.sheet}>
+      <section className={cn(styles.sheet, demo.scrollbar)}>
         <header><b>{m.title}</b><span>{m.updated}</span></header>
         <div className={styles.tableWrap}>
           <table className={styles.table}>
@@ -328,7 +331,7 @@ function FlywheelPicture({ id, beat }: { id: string; beat: number }) {
   }
   const r = FLY.review;
   return (
-    <section className={styles.sheet}>
+    <section className={cn(styles.sheet, demo.scrollbar)}>
       <header><b>{r.title}</b><span className={styles.notice}>{r.notice}</span></header>
       <p className={styles.small}>{r.compare}</p>
       <ul className={styles.review}>

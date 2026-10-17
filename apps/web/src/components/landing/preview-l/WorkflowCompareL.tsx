@@ -12,6 +12,7 @@ import type { ResearchCall } from '@/components/research/research-model';
 import { J_COMPARE } from '@/lib/landing/landing-copy-j-compare';
 import type { WorkflowTurn } from '@/lib/landing/landing-copy-l-workflows';
 import { cn } from '@/lib/utils';
+import demo from './demo-l.module.css';
 import styles from './scenarios-l.module.css';
 import { TypingFrame, useStickToEnd, useTyped } from './typing-l';
 
@@ -68,7 +69,7 @@ export function WorkflowCompareL({ task, turns, beat, badge }: { task: Task; tur
               <i className={compare.badge}>{badge}</i></p>
             <div className={cn(work.conversation, styles.conversation)}>
               {/* The scroll is the visitor's to use (round six, S14); what it holds is a picture (inert). */}
-              <div ref={log} className={styles.log} onWheel={takeOver} onTouchMove={takeOver} onPointerDown={takeOver}>
+              <div ref={log} className={cn(styles.log, demo.scrollbar)} onWheel={takeOver} onTouchMove={takeOver} onPointerDown={takeOver}>
                 <div className={work.transcript} inert aria-hidden="true">
                   {shown.map(({ turn, start }) => <Turn key={turn.user} turn={turn} local={beat - start} />)}
                 </div>
@@ -108,20 +109,25 @@ function Turn({ turn, local }: { turn: WorkflowTurn; local: number }) {
       {reading.length ? <ChatNoticeList notices={reading} /> : null}
       {calls.length ? <ResearchCallList calls={calls} /> : null}
       {/* Round seven (T8): the reply typed out live; once the conversation has moved on, whole. */}
-      {replied ? <TurnReply reply={turn.reply} proposal={turn.proposal} whole={local > replyAt} /> : null}
+      {replied ? <TurnReply reply={turn.reply} proposal={turn.proposal} after={turn.after} whole={local > replyAt} /> : null}
     </RuntimeTurnView>
   );
 }
 
-/** The coach's reply typed out, then its 建议稿 (if any). */
-function TurnReply({ reply, proposal, whole }: { reply: string; proposal?: string; whole: boolean }) {
+/** The coach's reply typed out, then its 建议稿 (if any), then what it adds after the draft (if any). */
+function TurnReply({ reply, proposal, after, whole }: { reply: string; proposal?: string; after?: string; whole: boolean }) {
   const first = useTyped(reply, { whole });
   const second = useTyped(proposal && !first.typing ? proposal : '', { whole });
+  const draftDone = !first.typing && (!proposal || (second.shown.length === proposal.length && !second.typing));
+  const third = useTyped(after && draftDone ? after : '', { whole });
   return (
     <>
       <TypingFrame typing={first.typing}><RuntimeReply text={first.shown} streaming={first.typing} /></TypingFrame>
       {proposal && !first.typing ? (
         <TypingFrame typing={second.typing}><RuntimeProposal adopted={false} text={second.shown} /></TypingFrame>
+      ) : null}
+      {after && draftDone ? (
+        <TypingFrame typing={third.typing}><RuntimeReply text={third.shown} streaming={third.typing} /></TypingFrame>
       ) : null}
     </>
   );

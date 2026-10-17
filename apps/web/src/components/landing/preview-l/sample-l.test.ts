@@ -211,17 +211,20 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     expect(text).toContain(`${L_WORKFLOWS[0][0].readLabel?.[1] ?? '已读取资料库'}：${L_WORKFLOWS[0][0].read?.join('、')}`);
     expect(text).toContain(L_WORKFLOWS[0][0].calls?.[0].found);
     expect(compare).toContain('aria-label="搜索记录"');
-    for (const turns of L_WORKFLOWS) expect(turns.every(turn => turn.reply.includes('接下来你做') || turn === turns[0] && turns.length > 1)).toBe(true);
+    for (const turns of L_WORKFLOWS) {
+      expect(turns.every(turn => (turn.after ?? turn.reply).includes('接下来你做') || turn === turns[0] && turns.length > 1)).toBe(true);
+    }
     for (const task of L_TASKS) expect(task.coach).toContain('接下来你做');
     for (const brand of ['ChatGPT', 'Claude', 'Gemini', 'DeepSeek', '豆包', 'Kimi']) expect(text).not.toContain(brand);
   });
 
   it('gives every region 6 scenario work, numbers, something ready to use and a dated next step (round seven, T11)', () => {
     for (const turns of L_WORKFLOWS) {
-      const all = turns.map(turn => turn.reply).join('\n');
+      const all = turns.map(turn => turn.reply + (turn.after ? `\n${turn.after}` : '')).join('\n');
       expect(all).toMatch(/\n\|[^\n]+\|\n\|(-+\|)+/);
       expect(turns.some(turn => turn.read?.length || turn.calls?.length)).toBe(true);
-      expect(turns[turns.length - 1].reply).toMatch(/\*\*接下来你做\*\*：.*(今晚|明天|周[一二三四五六日])/);
+      const last = turns[turns.length - 1];
+      expect(last.after ?? last.reply).toMatch(/\*\*接下来你做\*\*：.*(今晚|明天|周[一二三四五六日])/);
     }
     // The script: about 300 characters, 9 to 11 shots, about 65 seconds, the shots' lines joined being the whole text.
     expect(SCRIPT.replace(/\n/g, '').length).toBeGreaterThan(250);
@@ -238,6 +241,10 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     expect(L_WORKFLOWS[3][0].reply).toContain('| 完播率 | 28% |');
     expect(L_WORKFLOWS[3][0].reply).toContain('| 收藏率 | 3.4% |');
     expect(L_TASKS[3].question).toBe(L_WORKFLOWS[3][0].user);
+    // Round eight (U10): the 小红书 note's four steps run 0–15 minutes without a gap, and the coach says why it is written so.
+    const spans = [...(L_WORKFLOWS[0][0].proposal ?? '').matchAll(/(\d+)–(\d+) 分钟/g)].map(m => [Number(m[1]), Number(m[2])]);
+    expect(spans).toEqual([[0, 4], [4, 7], [7, 11], [11, 15]]);
+    expect(L_WORKFLOWS[0][0].after?.match(/^\d\. /gm)).toHaveLength(4);
   });
 
   it('shows the usual total whole (not struck) and drops the check date', () => {
