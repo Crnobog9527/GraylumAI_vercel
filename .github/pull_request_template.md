@@ -13,6 +13,7 @@
 
 - 改了哪些地方：
 - 是否涉及 AGENTS.md 第 1 节事项（正式环境、密钥、真钱、平台设置或 staging 绑定、规则变更、产品决定）：`否` / 说明并附 Owner 同意记录
+- 是否新增第三方脚本或像素：`否` / `是`，统计和广告类只在 Termly 判定同意后加载，并在 Termly 后台登记分类（[ANALYTICS 方案](https://github.com/Crnobog9527/GraylumAI_vercel/blob/staging/docs/launch/tasks/ANALYTICS.md) 第 3.4 节）
 - 是否新增或修改公开页面（不登录可见、对搜索引擎开放）：`否` / `是`，并逐项勾选下面的 [SEO/GEO 规范](https://github.com/Crnobog9527/GraylumAI_vercel/blob/staging/docs/launch/SEO_GEO_SPEC.md) 第 13 节检查单：
   - [ ] title / description / canonical / hreflang / OG 图齐全；`keywords` 已删
   - [ ] 只有一个 H1；H2 覆盖真实疑问

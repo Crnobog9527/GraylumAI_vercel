@@ -5,10 +5,23 @@ import { readMembershipEntitlements } from '../services/membershipEntitlements';
 import {
   autoReviewInput, disconnectConnection, disconnectInput, listConnections, readPublishMonitorSettings, setAutoReview,
 } from '../services/publishMonitor/foundation';
+import {
+  dataInput, historyInput, linkInput, linkPost, manualRefresh, readData, readPostHistory, refreshInput,
+} from '../services/publishMonitor/data';
+import { requirePostForMeDeps } from '../services/publishMonitor/secrets';
 import { publishMonitorConnectRouter } from './publishMonitorConnect';
+import { publishMonitorPublishRouter } from './publishMonitorPublish';
 import { guarded as safe } from './publishMonitorGuard';
 
 /** PUBLISH-MONITOR: a user reads and changes only their own monitoring state; off until enabled by admin. */
+
+type Ctx = { profileId: string; supabaseAdmin: Parameters<typeof readMembershipEntitlements>[0] };
+/** The data window always comes from the server-side entitlement (plan §9 item 4); free accounts have none. */
+async function dataWindow(ctx: Ctx): Promise<number> {
+  const days = (await readMembershipEntitlements(ctx.supabaseAdmin, ctx.profileId)).ownDataWindowDays;
+  if (days <= 0) throw new TRPCError({ code: 'FORBIDDEN', message: 'PUBLISH_MONITOR_ENTITLEMENT_REQUIRED' });
+  return days;
+}
 
 export const publishMonitorRouter = router({
   settings: protectedProcedure.query(({ ctx }) =>
@@ -29,5 +42,20 @@ export const publishMonitorRouter = router({
   // Always allowed, even while the feature is paused: a user can always remove their data.
   disconnect: protectedProcedure.input(disconnectInput).mutation(({ ctx, input }) =>
     safe(ctx, () => disconnectConnection(ctx.supabaseAdmin, ctx.profileId, input), false)),
+  // PR-3a: the user's own posts and daily snapshots inside their plan's window (Pro 30 days, Gold 90).
+  data: protectedProcedure.input(dataInput).query(({ ctx, input }) =>
+    safe(ctx, async () => readData(ctx.supabaseAdmin, ctx.profileId, await dataWindow(ctx), input))),
+  postHistory: protectedProcedure.input(historyInput).query(({ ctx, input }) =>
+    safe(ctx, async () => readPostHistory(ctx.supabaseAdmin, ctx.profileId, await dataWindow(ctx), input))),
+  linkPost: protectedProcedure.input(linkInput).mutation(({ ctx, input }) => safe(ctx, async () => {
+    await dataWindow(ctx);
+    return linkPost(ctx.supabaseAdmin, ctx.profileId, input);
+  })),
+  // Once an hour per connection (enforced in the database); reading one's own data is free (Owner 2026-10-13).
+  refresh: protectedProcedure.input(refreshInput).mutation(({ ctx, input }) => safe(ctx, async () => {
+    const days = await dataWindow(ctx);
+    return manualRefresh(ctx.supabaseAdmin, await requirePostForMeDeps(ctx.supabaseAdmin), ctx.profileId, days, input);
+  })),
   connect: publishMonitorConnectRouter,
+  publish: publishMonitorPublishRouter,
 });

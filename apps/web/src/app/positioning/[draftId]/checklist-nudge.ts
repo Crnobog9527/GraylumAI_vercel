@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { readAgentTurnBody, type QuestionAnswerSource } from "@repo/api/src/shared/agentTurn";
 import { CHECKLIST_UPDATED_INPUT, readChecklistUpdatedInput } from "@repo/api/src/shared/opcQuestions";
 import type { ChatNotice } from "@/components/chat/ChatInlineNotice";
 import { isStepSummaryInput, STEP_SUMMARY_LABEL } from "./step-summary";
@@ -71,4 +72,22 @@ export function nudgeNotice(fieldIds: readonly string[], onClick: () => void, di
   if (!fieldIds.length || queued) return null;
   return { id: "checklist-nudge", tone: "status", text: `你在清单里更新了 ${fieldIds.length} 项`,
     actions: [{ label: "让 AI 教练接着聊", onClick, disabled }] };
+}
+
+/**
+ * The card a typed message answers: the newest completed turn of this step and round, when it carries a question
+ * card. Host actions (a checklist update, a step summary) and a research refresh answer no card, and an explicit
+ * `answerSource` is kept as given.
+ */
+export function freeAnswerSource(args: {
+  answerSource?: QuestionAnswerSource; input: string; researchRefreshId?: string;
+  latest?: { executionId: string; state: string; body: string | null | undefined } | null;
+  sourceTurn?: { roundId?: string | null; stepId: string } | null; roundId: string; stepId: string;
+}): QuestionAnswerSource | undefined {
+  const { answerSource, latest, sourceTurn } = args;
+  if (answerSource) return answerSource;
+  if (args.researchRefreshId || isHostAction(args.input)) return undefined;
+  if (latest?.state === "completed" && sourceTurn && sourceTurn.roundId === args.roundId && sourceTurn.stepId === args.stepId
+    && readAgentTurnBody(latest.body).card) return { executionId: latest.executionId };
+  return undefined;
 }

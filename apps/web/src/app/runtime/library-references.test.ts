@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from 'vitest';
-import type { AgentTurnEvent } from '@repo/api/src/shared/agentTurn';
+import type { AgentTurnEvent, AgentTurnOutcome } from '@repo/api/src/shared/agentTurn';
 import { liveReplyController } from '@/app/positioning/[draftId]/live-reply-controller';
 import type { LiveReply } from '@/app/positioning/[draftId]/agent-turn-display';
 import { definiteRefusalNotice, isLibrarySourceDeleted, libraryReferenceRefusal, runtimeAdmissionNotice, SOURCE_DELETED_NOTICE } from './gate-notices';
@@ -127,6 +127,18 @@ describe('a referenced document deleted while the turn runs', () => {
     expect(handlers.onSourceDeleted).toHaveBeenCalledWith(ID);
     expect(handlers.onResult).not.toHaveBeenCalled();
     expect(handlers.refreshBalance).toHaveBeenCalledTimes(1);
+  });
+
+  it('a result that says the source was deleted clears the shown text the same way', async () => {
+    const shown: Array<LiveReply | null> = [];
+    const live = liveReplyController({ draftId: 'runtime:s', storage: () => null, show: reply => shown.push(reply) });
+    const handlers = { onResult: vi.fn(), refreshBalance: vi.fn(), onSourceDeleted: vi.fn() };
+    const outcome = { state: 'cancelled', unavailable: 'source_deleted' } as unknown as AgentTurnOutcome;
+    async function* events(): AsyncGenerator<AgentTurnEvent> { yield delta('前半段回答', 0); yield { type: 'result', result: outcome }; }
+    await expect(runStreamedExecution(live, async () => events(), ID, handlers)).resolves.toBe(outcome);
+    expect(shown.some(reply => reply?.text === '前半段回答')).toBe(true);
+    expect(live.current()).toBeNull();
+    expect(handlers.onSourceDeleted).toHaveBeenCalledWith(ID);
   });
 
   it('a lost stream for any other reason still keeps its text waiting', async () => {
