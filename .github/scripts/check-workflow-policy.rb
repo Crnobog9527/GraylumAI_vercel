@@ -6,6 +6,8 @@ MAX_WORKFLOW_BYTES = 512 * 1024
 REQUIRED_WORKFLOW_FILES = %w[ci.yml security.yml].freeze
 ALLOWED_REQUIRED_BRANCHES = %w[main staging develop].freeze
 ALLOWED_GITHUB_CONTEXTS = %w[github.sha github.event_name].freeze
+# Top-level concurrency.group may also read the PR number (an integer) to cancel superseded runs.
+CONCURRENCY_GROUP_GITHUB_CONTEXTS = (ALLOWED_GITHUB_CONTEXTS + %w[github.event.pull_request.number]).freeze
 APPROVED_ACTION_REPOSITORIES = %w[
   actions/cache
   actions/checkout
@@ -275,9 +277,9 @@ def github_contexts_in_implicit_if_expression(value)
   github_contexts_in_expression(value).uniq
 end
 
-def forbidden_github_contexts?(contexts)
+def forbidden_github_contexts?(contexts, allowed = ALLOWED_GITHUB_CONTEXTS)
   contexts.any? do |context|
-    !ALLOWED_GITHUB_CONTEXTS.include?(context)
+    !allowed.include?(context)
   end
 end
 
@@ -352,8 +354,16 @@ files.each do |file|
     failures << "#{file}: trusted_policy_material_v1 workflows must not declare or pass secrets"
   end
 
+  concurrency = workflow['concurrency']
+  if concurrency.is_a?(Hash) && concurrency['group'].is_a?(String) &&
+     forbidden_github_contexts?(github_contexts_in_wrapped_expressions(concurrency['group']), CONCURRENCY_GROUP_GITHUB_CONTEXTS)
+    failures << "#{file}: direct github context interpolation is forbidden except github.sha and github.event_name (concurrency.group may also use github.event.pull_request.number)"
+  end
+  # The group string was context-checked above; it still goes through every other check below.
+  group = concurrency.is_a?(Hash) && concurrency['group'].is_a?(String) ? concurrency['group'] : nil
+
   each_string(workflow) do |value|
-    if forbidden_github_context_in_wrapped_expressions?(value)
+    if !value.equal?(group) && forbidden_github_context_in_wrapped_expressions?(value)
       failures << "#{file}: direct github context interpolation is forbidden except github.sha and github.event_name"
     end
     next unless secret_reference?(value)
