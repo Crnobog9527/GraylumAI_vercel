@@ -120,7 +120,7 @@ export async function GET(request: Request) {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
     logger.system.cronJob('billing-reconcile', 'started');
-    // ANALYTICS 0286: GA checkout ids never taken within 72 hours are deleted (statistics only, never fails the job).
+    // ANALYTICS 0286: GA checkout ids never taken (long past their 45-minute window) are deleted (statistics only, never fails the job).
     const analyticsIds = pruneGaCheckoutIds(supabase);
     const [result, readinessAudit, erasureFinancial, waffo, staleRounds, stripeCard, { fusion, fusionKick }, stuckCalls] = await Promise.all([
       runDailyBillingReconciliation(supabase),

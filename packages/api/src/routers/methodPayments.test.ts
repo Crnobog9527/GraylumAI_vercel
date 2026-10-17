@@ -128,7 +128,7 @@ it('keeps GA ids out of the purchase and stores only well-formed ones beside the
   expect(mocks.card).toHaveBeenLastCalledWith(expect.objectContaining({ purchase: card }));
   expect(JSON.stringify(mocks.card.mock.lastCall)).not.toContain('1700000000');
   expect(f.rpc).toHaveBeenCalledWith('analytics_store_checkout_ids', { p_user: userId, p_order: 'card-order',
-    p_client: analytics.clientId, p_session: analytics.sessionId });
+    p_client: analytics.clientId, p_session: analytics.sessionId, p_requested_at: expect.stringMatching(/^\d{4}-\d\d-\d\dT/) });
   // Forged values never refuse the purchase and are never stored.
   const forged = fixture('user', settings(true));
   await expect(forged.caller.methodCheckout({ ...card, analytics: { clientId: 'someone@example.com', sessionId: 'x' } }))

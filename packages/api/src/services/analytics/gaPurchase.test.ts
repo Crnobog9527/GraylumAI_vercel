@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { checkoutValue, gaServerConfig, parseGaCheckoutIds, purchaseEvent, reportGaPurchase, storeGaCheckoutIds, withdrawGaConsent } from './gaPurchase';
+import { checkoutValue, effectiveRequestTime, gaServerConfig, parseGaCheckoutIds, purchaseEvent, reportGaPurchase, storeGaCheckoutIds, withdrawGaConsent } from './gaPurchase';
 
 const env = { NEXT_PUBLIC_GA4_MEASUREMENT_ID: 'G-TEST1234', GA4_API_SECRET: 'secret-value-123' };
 const ids = { clientId: '123456789.1700000000', sessionId: '1700000000' };
@@ -76,13 +76,14 @@ describe('reportGaPurchase', () => {
 describe('store and withdraw', () => {
   it('stores only well-formed ids and never throws', async () => {
     const d = db(true);
-    expect(await storeGaCheckoutIds(d.client, 'user', 'order', ids)).toBe(true);
+    const requestedAt = new Date('2026-10-17T10:00:00Z');
+    expect(await storeGaCheckoutIds(d.client, 'user', 'order', ids, requestedAt)).toBe(true);
     expect(d.rpc).toHaveBeenCalledWith('analytics_store_checkout_ids', { p_user: 'user', p_order: 'order',
-      p_client: ids.clientId, p_session: ids.sessionId });
+      p_client: ids.clientId, p_session: ids.sessionId, p_requested_at: '2026-10-17T10:00:00.000Z' });
     const forged = db(true);
-    expect(await storeGaCheckoutIds(forged.client, 'user', 'order', { clientId: 'a@b.c', sessionId: '1' })).toBe(false);
+    expect(await storeGaCheckoutIds(forged.client, 'user', 'order', { clientId: 'a@b.c', sessionId: '1' }, new Date())).toBe(false);
     expect(forged.rpc).not.toHaveBeenCalled();
-    expect(await storeGaCheckoutIds(db(null, { message: 'x' }).client, 'user', 'order', ids)).toBe(false);
+    expect(await storeGaCheckoutIds(db(null, { message: 'x' }).client, 'user', 'order', ids, new Date())).toBe(false);
   });
 
   it('withdrawal surfaces a failure so the browser retries', async () => {
@@ -102,5 +103,16 @@ describe('checkoutValue', () => {
     expect((db as unknown as { chain: { eq: ReturnType<typeof vi.fn> } }).chain.eq).toHaveBeenCalledWith('user_id', 'user');
     expect(await checkoutValue(read(null), 'user', 'order')).toBeNull();
     expect(await checkoutValue(read(null, { message: 'x' }), 'user', 'order')).toBeNull();
+  });
+});
+
+describe('effectiveRequestTime', () => {
+  const server = new Date('2026-10-17T10:00:00Z');
+  it('counts consent from the earlier plausible browser capture time, never from a later or absurd one', () => {
+    expect(effectiveRequestTime({ capturedAt: '2026-10-17T09:58:00Z' }, server).toISOString()).toBe('2026-10-17T09:58:00.000Z');
+    expect(effectiveRequestTime({ capturedAt: '2026-10-17T10:05:00Z' }, server)).toBe(server);
+    expect(effectiveRequestTime({ capturedAt: '2026-10-17T08:00:00Z' }, server)).toBe(server);
+    expect(effectiveRequestTime({ capturedAt: 'later' }, server)).toBe(server);
+    expect(effectiveRequestTime(null, server)).toBe(server);
   });
 });

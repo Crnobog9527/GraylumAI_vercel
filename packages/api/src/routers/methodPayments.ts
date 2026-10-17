@@ -47,6 +47,8 @@ export const methodPaymentProcedures = {
   methodCheckout: protectedProcedure.input(methodCheckoutInputSchema).mutation(async ({ ctx, input: request }) => {
     // GA ids never reach the purchase (checkout_request, Stripe metadata); they are kept beside the order.
     const { analytics, ...input } = request;
+    // Stamped before the provider is called: ids are refused if consent was withdrawn after this moment.
+    const requestedAt = new Date();
     try {
       // Staging card test only; card/card_cn.enabled in the versioned routes is the default-off switch below.
       assertMethodCheckoutEnvironment(process.env, input.method);
@@ -65,7 +67,7 @@ export const methodPaymentProcedures = {
         appUrl: getStripeAppUrl(), termsVersion: terms.data.value.version, purchase: input };
       const result = await (isCardMethod(input.method) ? createStripeCardCheckout(checkout) : createWalletCheckout(checkout));
       if (result.state !== 'open') return result;
-      if (analytics !== undefined) await storeGaCheckoutIds(ctx.supabaseAdmin, ctx.profileId, result.orderId, analytics);
+      if (analytics !== undefined) await storeGaCheckoutIds(ctx.supabaseAdmin, ctx.profileId, result.orderId, analytics, requestedAt);
       // The order's pre-tax amount for the browser's begin_checkout (statistics only; null when unreadable).
       return { ...result, checkoutValue: await checkoutValue(ctx.supabaseAdmin, ctx.profileId, result.orderId) };
     } catch (error) {

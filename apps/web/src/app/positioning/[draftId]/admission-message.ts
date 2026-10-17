@@ -17,8 +17,8 @@ export function admissionMessage(cause:unknown):string|null {
  if(isOrganizerPendingError(cause))return ORGANIZER_PENDING_NOTICE;
  // Only a released summary click (step-summary.ts); an ordinary turn's refusal keeps its retained request.
  if(cause instanceof Error&&cause.message===STEP_SUMMARY_REFUSED)return (cause as {code?:unknown}).code==='OPC_CAPTURE_INPUT_LIMIT'
-  ? '这一步的内容超出了导师单次能处理的长度，这次小结没有生成，也没有扣费。可以直接在右侧清单核对后确认。'
-  : '这次“这一步先到这里”没有被接受，没有扣费。可以继续和导师聊，或稍后再点一次。';
+  ? '这一步的内容超出了 AI 教练单次能处理的长度，这次小结没有生成，也没有扣费。可以直接在右侧清单核对后确认。'
+  : '这次“这一步先到这里”没有被接受，没有扣费。可以继续和 AI 教练聊，或稍后再点一次。';
  const gate=gateAdmissionNotice(cause,admissionPaths);
  if(gate)return gate;
  if(!(cause instanceof Error)||!('data' in cause)||!cause.data||typeof cause.data!=='object')return null;
