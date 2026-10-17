@@ -18,7 +18,11 @@ beforeAll(async () => {
   const source = fileURLToPath(new URL('./work-composer.tsx', import.meta.url));
   const bundle = await build({
     configFile: false, logLevel: 'silent', define: { 'process.env.NODE_ENV': JSON.stringify('development'),
-      'process.env.NEXT_PUBLIC_COMPOSER_REFERENCES': JSON.stringify('') },
+      'process.env.NEXT_PUBLIC_COMPOSER_REFERENCES': JSON.stringify(''),
+      // Word and PDF extraction stay closed here, so attachments take TXT and Markdown (UI-C).
+      'process.env.NEXT_PUBLIC_LIBRARY_DOCX_EXTRACTION': JSON.stringify(''),
+      'process.env.NEXT_PUBLIC_LIBRARY_PDF_EXTRACTION': JSON.stringify(''),
+      'process.env.NEXT_PUBLIC_LIBRARY_SCAN_RECOGNITION': JSON.stringify('') },
     oxc: { jsx: { runtime: 'automatic' } },
     resolve: { alias: { '@': fileURLToPath(new URL('../../', import.meta.url)) } },
     plugins: [{ name: 'references-fixture', enforce: 'pre', resolveId(id: string) {
@@ -26,27 +30,55 @@ beforeAll(async () => {
       if (id === '@/trpc/client' || id.endsWith('/trpc/client')) return TRPC;
       if (id === 'next/link') return LINK;
     }, load(id: string) {
-      // Library list answers from window.listData and records every call's `enabled`, so "off" can prove no request.
-      if (id === TRPC) return `export const trpc={
-        library:{list:{useQuery:(input,options)=>{window.listCalls.push(Boolean(options&&options.enabled));
+      // Library list and search answer from window.listData and record every call's `enabled`, so "off" can prove no
+      // request; search filters by file name as the server does (#933) and records the text it was asked for.
+      if (id === TRPC) return `const answer=(options,data)=>{
           if(options&&options.enabled&&window.listLoading)return {isLoading:true,error:null,data:undefined,refetch(){}};
-          return options&&options.enabled?{isLoading:false,error:null,data:window.listData,refetch(){}}
-            :{isLoading:false,error:null,data:undefined,refetch(){}}}}},
+          return options&&options.enabled?{isLoading:false,error:null,data,refetch(){}}
+            :{isLoading:false,error:null,data:undefined,refetch(){}}};
+        const found=query=>({nextCursor:null,documents:window.listData.documents.filter(d=>d.kind==='document'
+          &&d.status==='ready'&&d.filename.toLowerCase().includes(query.toLowerCase()))});
+        // UI-C: an upload is granted ready at once (a plain text file the server already holds), recorded in window.uploads;
+        // window.uploadMode 'fail' refuses it, 'processing' leaves it out of the ready documents (a scan to recognise).
+        const library={list:{useQuery:(input,options)=>{window.listCalls.push(Boolean(options&&options.enabled));
+          return answer(options,window.listData)}},
+          search:{useQuery:(input,options)=>{window.listCalls.push(Boolean(options&&options.enabled));
+            if(options&&options.enabled)window.searches.push(input.query);
+            return answer(options,found(input.query))}},
+          beginUpload:{useMutation:()=>({mutateAsync:async input=>{window.uploads.push(input);
+            if(window.uploadMode==='slow')await new Promise(resolve=>{window.releaseUpload=resolve;});
+            if(window.uploadMode==='fail')throw Object.assign(new Error('LIBRARY_QUOTA'),{data:{code:'BAD_REQUEST'}});
+            const id='u'+window.uploads.length;
+            if(window.uploadMode!=='processing')window.listData.documents.unshift({id,filename:input.filename,kind:'document',
+              status:'ready',content_version:1});
+            return {documentId:id,status:'ready',upload:null}}})}};
+        for(const name of ['completeUpload','abandonUpload','beginWordUpload','beginWordTextUpload','completeWordUpload',
+          'beginPdfUpload','beginPdfTextUpload','completePdfUpload'])library[name]={useMutation:()=>({mutateAsync:async()=>({})})};
+        const utils={library:{invalidate:async()=>{},search:{fetch:async input=>found(input.query)}}};
+        export const trpc={useUtils:()=>utils,
+        library,
         runtime:{choices:{useQuery:()=>({isLoading:false,error:null,data:undefined,refetch(){}})}}};`;
       if (id === LINK) return `import React from 'react'; export default function Link(p){return React.createElement('a',p)}`;
       if (id === entry) return `import React from 'react'; import {createRoot} from 'react-dom/client';
         import {WorkComposer} from ${JSON.stringify(source)};
-        window.sent=[]; window.value=''; window.listCalls=[];
+        // about:blank is not a secure context; the upload flow needs request ids.
+        let uuid=0; if(!crypto.randomUUID)crypto.randomUUID=()=>'00000000-0000-4000-8000-'+String(++uuid).padStart(12,'0');
+        window.sent=[]; window.value=''; window.listCalls=[]; window.searches=[]; window.reported=[]; window.sentReferences=[]; window.uploads=[];
         const doc=(id,filename,extra={})=>({id,filename,kind:'document',status:'ready',content_version:4,format:'md',purpose:'reference',
           original_bytes:1,text_bytes:1,created_at:'2026-10-13T00:00:00Z',...extra});
         window.listData={usedBytes:0,capacityBytes:1,uploadEnabled:false,nextCursor:null,documents:[
           doc('d1','周报 第1周.md'),doc('d2','周报草稿.docx',{status:'processing'}),doc('d3','周报截图.png',{kind:'image'}),
-          doc('d4','月报.pdf'),doc('d5','周报 第2周.md')]};
+          doc('d4','月报.pdf'),doc('d5','周报 第2周.md'),
+          ...['甲','乙','丙','丁','戊'].map((name,index)=>doc('k'+index,'资料'+name+'.md'))]};
+        // A page like /runtime: it keeps the references with the value and can set both (a restored draft).
         function Host({references,maxLength}){
           const [value,setValue]=React.useState('');
+          const [list,setList]=React.useState([]);
           window.value=value; window.setValue=setValue;
+          window.setDraft=(text,refs)=>{setValue(text);setList(refs);};
           return React.createElement(WorkComposer,{value,onChange:setValue,label:'消息',placeholder:'写点什么',references,maxLength,
-            onSend:()=>{window.sent.push(value);setValue('');}});
+            referenceList:list,onReferencesChange:next=>{window.reported.push(next);setList(next);},
+            onSend:()=>{window.sent.push(value);window.sentReferences.push(list.map(r=>r.documentId+'@'+r.version));setValue('');}});
         }
         const root=createRoot(document.getElementById('root'));
         window.mount=(references,maxLength=20000)=>root.render(React.createElement(Host,{references,maxLength}));`;
@@ -194,4 +226,173 @@ it('does not send while the document list is still loading', () => open(true, as
   await page.keyboard.press('Enter');
   expect(await read<string[]>(page, 'sent')).toEqual([]);
   expect(await read<string>(page, 'value')).toBe('参考@周');
+}));
+
+// UI-B wiring (#1022): server search, references reported to the page, restored from it, at most five.
+it('searches every document on the server by the typed name; an empty @ lists the recent ones', () => open(true, async page => {
+  await page.keyboard.type('@');
+  await ui(page.getByRole('option')).toHaveCount(8);
+  expect(await read<string[]>(page, 'searches')).toEqual([]);
+  await page.keyboard.type('资料');
+  await ui(page.getByRole('option')).toHaveText(['资料甲.md', '资料乙.md', '资料丙.md', '资料丁.md', '资料戊.md']);
+  expect(await read<string[]>(page, 'searches')).toContain('资料');
+  await ui(menu(page)).toContainText('每条消息最多引用 5 篇文档。');
+  await ui(menu(page)).not.toContainText('尚未开放');
+}));
+
+it('reports each change of the references to the page, which sends them with the text', () => open(true, async page => {
+  await page.keyboard.type('对比@月');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('和@第1周');
+  await ui(page.getByRole('option')).toHaveCount(1);
+  await page.keyboard.press('Enter');
+  expect((await read<Array<Array<{ documentId: string }>>>(page, 'reported')).at(-1)!.map(r => r.documentId)).toEqual(['d4', 'd1']);
+  await page.keyboard.press('Backspace');
+  await page.keyboard.press('Backspace');
+  expect((await read<Array<Array<{ documentId: string }>>>(page, 'reported')).at(-1)!.map(r => r.documentId)).toEqual(['d4']);
+  await page.keyboard.type('总结');
+  await page.keyboard.press('Enter');
+  expect(await read<string[]>(page, 'sent')).toEqual(['对比@月报.pdf 和总结']);
+  expect(await read<string[][]>(page, 'sentReferences')).toEqual([['d4@4']]);
+  // The box is empty after the send: no references are left over for the next message.
+  expect((await read<Array<unknown[]>>(page, 'reported')).at(-1)).toEqual([]);
+}));
+
+it('a draft the page restores (reload, failed send) gets its references back as tags', () => open(true, async page => {
+  await page.evaluate(() => (window as unknown as { setDraft: (t: string, r: unknown[]) => void }).setDraft('看 @月报.pdf 和 @周报 第2周.md',
+    [{ documentId: 'd4', version: 4, label: '月报.pdf' }, { documentId: 'd5', version: 4, label: '周报 第2周.md' }]));
+  await ui(box(page).locator('[data-library-reference="d4"]')).toHaveText('@月报.pdf');
+  await ui(box(page).locator('[data-library-reference="d5"]')).toHaveText('@周报 第2周.md');
+  expect(await read<string>(page, 'value')).toBe('看 @月报.pdf 和 @周报 第2周.md');
+  await box(page).click();
+  await page.keyboard.press('End');
+  await page.keyboard.press('Enter');
+  expect(await read<string[][]>(page, 'sentReferences')).toEqual([['d4@4', 'd5@4']]);
+}));
+
+it('refuses a sixth document with a notice, and Enter sends again', () => open(true, async page => {
+  for (const name of ['甲', '乙', '丙', '丁', '戊']) {
+    await page.keyboard.type('@资料' + name);
+    await ui(page.getByRole('option')).toHaveCount(1);
+    await page.keyboard.press('Enter');
+  }
+  await ui(box(page).locator('.library-reference')).toHaveCount(5);
+  await page.keyboard.type('@月');
+  await ui(page.getByRole('option')).toHaveCount(1);
+  await page.keyboard.press('Enter');
+  await ui(page.getByRole('alert')).toHaveText('每条消息最多引用 5 篇文档。');
+  await ui(box(page).locator('.library-reference')).toHaveCount(5);
+  // The same document again is not a sixth one: it replaces its earlier tag.
+  await page.keyboard.press('Backspace');
+  await page.keyboard.press('Backspace');
+  await page.keyboard.type('@资料甲');
+  await ui(page.getByRole('option')).toHaveCount(1);
+  await page.keyboard.press('Enter');
+  await ui(box(page).locator('.library-reference')).toHaveCount(5);
+  await ui(box(page).locator('[data-library-reference="k0"]')).toHaveCount(1);
+  await page.keyboard.press('Enter');
+  expect((await read<string[][]>(page, 'sentReferences'))[0]).toHaveLength(5);
+}));
+
+// UI-C: a file added in the box goes into the library (its own upload flow) and joins the message as a reference.
+const attach = (page: Page, files: Array<{ name: string; text: string; mimeType?: string }>) =>
+  page.locator('input[aria-label="选择附件"]').setInputFiles(files.map(file => ({
+    name: file.name, mimeType: file.mimeType ?? 'text/plain', buffer: Buffer.from(file.text),
+  })));
+
+it('uploads an attached document into the library as reference material and adds it as a reference', () => open(true, async page => {
+  await page.keyboard.type('总结一下');
+  await page.getByRole('button', { name: '添加资料' }).click();
+  await ui(page.getByRole('dialog', { name: '添加资料' })).toContainText('文件会存进你的资料库，并作为引用加入本条消息');
+  expect(await page.locator('input[aria-label="选择附件"]').getAttribute('accept')).toMatch(/^\.txt,\.md/);
+  await attach(page, [{ name: '会议纪要.md', text: '# 纪要\n第一条' }]);
+  await ui(box(page).locator('[data-library-reference="u1"]')).toHaveText('@会议纪要.md');
+  expect(await read<Array<{ filename: string; purpose: string }>>(page, 'uploads'))
+    .toMatchObject([{ filename: '会议纪要.md', purpose: 'reference' }]);
+  // The file's text is not pasted into the message; only the reference is.
+  expect(await read<string>(page, 'value')).toBe('总结一下 @会议纪要.md ');
+  await ui(page.getByRole('button', { name: '发送' })).toBeEnabled();
+  await box(page).click();
+  await page.keyboard.press('Enter');
+  expect(await read<string[][]>(page, 'sentReferences')).toEqual([['u1@1']]);
+}));
+
+it('refuses images and other files with a reason and uploads nothing', () => open(true, async page => {
+  await attach(page, [{ name: '截图.png', text: 'x', mimeType: 'image/png' }, { name: '数据.csv', text: 'a,b' }]);
+  await ui(page.getByRole('alert')).toHaveText([
+    '「截图.png」不能作为附件：这里只支持 TXT、Markdown 文档。图片请到资料库上传。',
+    '「数据.csv」不能作为附件：这里只支持 TXT、Markdown 文档。图片请到资料库上传。',
+  ]);
+  expect(await read<unknown[]>(page, 'uploads')).toEqual([]);
+  await ui(box(page).locator('.library-reference')).toHaveCount(0);
+}));
+
+it('shows a failed upload with 重试 and 移除, and adds no reference', () => open(true, async page => {
+  await page.evaluate(() => { (window as unknown as { uploadMode: string }).uploadMode = 'fail'; });
+  await attach(page, [{ name: '计划.txt', text: '计划' }]);
+  const failed = page.getByRole('alert').filter({ hasText: '计划.txt' });
+  await ui(failed).toBeVisible();
+  await ui(failed.getByRole('button', { name: '重试' })).toBeVisible();
+  await failed.getByRole('button', { name: '移除' }).click();
+  await ui(page.getByRole('alert')).toHaveCount(0);
+  await ui(box(page).locator('.library-reference')).toHaveCount(0);
+}));
+
+it('says when a stored file is not ready to reference yet, or would be a sixth document', () => open(true, async page => {
+  await page.evaluate(() => { (window as unknown as { uploadMode: string }).uploadMode = 'processing'; });
+  await attach(page, [{ name: '扫描件.txt', text: '扫描' }]);
+  await ui(page.getByRole('alert')).toHaveText('「扫描件.txt」已存入资料库，文字还在处理（扫描页要先识别），处理好后可以用 @ 引用。');
+  await page.evaluate(() => { (window as unknown as { uploadMode: string }).uploadMode = ''; });
+  await box(page).click();
+  for (const name of ['甲', '乙', '丙', '丁', '戊']) {
+    await page.keyboard.type('@资料' + name);
+    await ui(page.getByRole('option')).toHaveCount(1);
+    await page.keyboard.press('Enter');
+  }
+  await attach(page, [{ name: '第六篇.md', text: '六' }]);
+  await ui(page.getByRole('alert')).toHaveText('「第六篇.md」已存入资料库，但每条消息最多引用 5 篇文档。');
+  await ui(box(page).locator('.library-reference')).toHaveCount(5);
+}));
+
+it('switched off: a file is read into the message as before and nothing is uploaded', () => open(false, async page => {
+  expect(await page.locator('input[aria-label="选择附件"]').getAttribute('accept')).toBe('.txt,.md,.csv,.json,.log');
+  await attach(page, [{ name: '笔记.txt', text: '第一行' }]);
+  await ui.poll(() => read<string>(page, 'value')).toContain('【文件：笔记.txt】');
+  expect(await read<unknown[]>(page, 'uploads')).toEqual([]);
+}));
+
+it('waits for an attachment still uploading: send stays off and Enter does not send without it', () => open(true, async page => {
+  await page.evaluate(() => { (window as unknown as { uploadMode: string }).uploadMode = 'slow'; });
+  await page.keyboard.type('看看这个');
+  await attach(page, [{ name: '慢文件.md', text: '慢' }]);
+  await ui(page.getByRole('status').filter({ hasText: '慢文件.md' })).toContainText('正在存入资料库');
+  await ui(page.getByRole('button', { name: '发送' })).toBeDisabled();
+  await box(page).click();
+  await page.keyboard.press('Enter');
+  expect(await read<string[]>(page, 'sent')).toEqual([]);
+  await page.evaluate(() => (window as unknown as { releaseUpload: () => void }).releaseUpload());
+  await ui(box(page).locator('[data-library-reference="u1"]')).toHaveText('@慢文件.md');
+  await ui(page.getByRole('button', { name: '发送' })).toBeEnabled();
+}));
+
+it('six files chosen together add five references and say so for the sixth', () => open(true, async page => {
+  await attach(page, ['一', '二', '三', '四', '五', '六'].map(name => ({ name: '文件' + name + '.md', text: name })));
+  await ui(page.getByRole('alert')).toHaveText(/已存入资料库，但每条消息最多引用 5 篇文档。/);
+  await ui(box(page).locator('.library-reference')).toHaveCount(5);
+  await ui(page.getByRole('button', { name: '发送' })).toBeEnabled();
+}));
+
+it('choosing a document that is already in the message replaces its older tag with the new version', () => open(true, async page => {
+  await page.evaluate(() => (window as unknown as { setDraft: (t: string, r: unknown[]) => void }).setDraft('看 @月报.pdf 然后',
+    [{ documentId: 'd4', version: 1, label: '月报.pdf' }]));
+  await ui(box(page).locator('[data-library-reference="d4"]')).toHaveCount(1);
+  await box(page).click();
+  await page.keyboard.press('End');
+  await page.keyboard.type(' @月');
+  await ui(page.getByRole('option')).toHaveCount(1);
+  await page.keyboard.press('Enter');
+  await ui(box(page).locator('[data-library-reference="d4"]')).toHaveCount(1);
+  expect((await read<Array<Array<{ documentId: string; version: number }>>>(page, 'reported')).at(-1)).toMatchObject([{ documentId: 'd4', version: 4 }]);
+  await page.keyboard.press('Enter');
+  expect(await read<string[][]>(page, 'sentReferences')).toEqual([['d4@4']]);
 }));

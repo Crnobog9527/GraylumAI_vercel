@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { enterPage, resetGaForTests, sendGaEvent, syncGa } from './ga';
+import { enterPage, readGaCheckoutIds, resetGaForTests, sendGaEvent, syncGa } from './ga';
 
 const ID = 'G-TEST123';
 const ORIGIN = 'https://auth-staging.graylum.com';
@@ -128,5 +128,28 @@ describe('GA in the browser', () => {
     syncGa(ID);
     const update = calls().find(call => call[0] === 'consent' && call[1] === 'update');
     expect(update?.[2]).toEqual({ analytics_storage: 'granted', ad_storage: 'denied', ad_user_data: 'denied', ad_personalization: 'denied' });
+  });
+
+  it('reads checkout ids through gtag get only with live consent, in GA format', async () => {
+    expect(await readGaCheckoutIds(ID)).toBeNull();
+    consent.analytics = true;
+    enterPage(`${ORIGIN}/landing/pricing`, null);
+    syncGa(ID);
+    const answers: Record<string, unknown> = { client_id: '123456789.1700000000', session_id: 1700000000 };
+    const gtag = win.gtag as (...args: unknown[]) => void;
+    win.gtag = (...args: unknown[]) => {
+      if (args[0] === 'get') (args[3] as (value: unknown) => void)(answers[args[2] as string]);
+      else gtag(...args);
+    };
+    expect(await readGaCheckoutIds(ID)).toEqual({ clientId: '123456789.1700000000', sessionId: '1700000000',
+      capturedAt: expect.stringMatching(/^\d{4}-\d\d-\d\dT/) });
+    answers.client_id = 'someone@example.com';
+    expect(await readGaCheckoutIds(ID)).toBeNull();
+    answers.client_id = '1.2';
+    consent.analytics = false;
+    expect(await readGaCheckoutIds(ID)).toBeNull();
+    consent.analytics = true;
+    win.gtag = () => undefined;
+    expect(await readGaCheckoutIds(ID, 5)).toBeNull();
   });
 });

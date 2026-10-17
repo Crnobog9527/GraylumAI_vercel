@@ -67,8 +67,9 @@ describe('PUBLIC-SITE pages without login', () => {
 
 // Product feature pages linked from the public header and footer open without login like About.
 describe('PUBLIC-SITE feature pages without login', () => {
-  const FEATURES = ['/features', '/features/', '/features/positioning', '/features/jury'];
-  const FEATURE_LOOKALIKES = ['/featuresx', '/features-admin', '/feature'];
+  // The tutorial blog is opened the same way (the header's 教程 menu).
+  const FEATURES = ['/features', '/features/', '/features/positioning', '/features/jury', '/blog', '/blog/', '/blog/first-positioning-conversation'];
+  const FEATURE_LOOKALIKES = ['/featuresx', '/features-admin', '/feature', '/blogs', '/blog-admin']; 
 
   beforeEach(() => {
     getUser.mockResolvedValue({ data: { user: null } });

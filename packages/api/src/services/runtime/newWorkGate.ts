@@ -8,6 +8,7 @@ import { checkRuntimeRateLimit } from '../redisRateLimiter';
 import { DEFAULT_RUNTIME_RATE_LIMITS, RUNTIME_RATE_LIMIT_KEY, readRuntimeRateLimits, storedRateLimits, type RuntimeRateLimits }
   from './rateLimitSettings';
 import { identityGuardFromStored, MODEL_IDENTITY_GUARD_KEY } from '../modelIdentity/guardSetting';
+import { RESEARCH_TOOLS_KEY, storedResearchToolsSchema } from '../research/vendors/config';
 
 export type GateRejection = 'call_limited' | 'paused' | 'limit_unavailable' | 'usage_configuration_required';
 export type NewWorkGateResult = { ok: true } | {
@@ -16,7 +17,13 @@ export type NewWorkGateResult = { ok: true } | {
 export type RuntimeCallGate = (actorId: string, maxCalls: number, contractVersion?: 'bill2.v1' | 'bill2.v2') => Promise<NewWorkGateResult>;
 /** identityGuard: MODEL-IDENTITY-GUARD switch, read in the same query (absent = on).
  * primaryModelId: the administrator's free-chat model (UI-MODEL), absent when unset or malformed. */
-export type SettingsRead = { ok: true; config: RuntimeRateLimits; identityGuard?: boolean; primaryModelId?: string } | { ok: false };
+/** researchEnabled: the research tools master switch (RT-6), true only for a valid stored config that is on. */
+export type SettingsRead = { ok: true; config: RuntimeRateLimits; identityGuard?: boolean; primaryModelId?: string; researchEnabled?: boolean }
+  | { ok: false };
+const researchEnabled = (value: unknown) => {
+  try { return storedResearchToolsSchema.safeParse(typeof value === 'string' ? JSON.parse(value) : value).data?.enabled === true; }
+  catch { return false; }
+};
 const PRIMARY_MODEL_KEY = 'primary_model_id';
 const primaryModel = (value: unknown) => z.string().uuid().safeParse(value).success ? { primaryModelId: value as string } : {};
 const unavailable = (): NewWorkGateResult => ({ ok: false, reason: 'limit_unavailable', retryAfter: 60 });
@@ -28,15 +35,17 @@ export async function readNewWorkSettings(admin: SupabaseClient): Promise<Settin
   catch { return { ok: false }; }
 }
 
-/** Admission's read: the same rate limits plus the MODEL-IDENTITY-GUARD switch and primary model, in one round trip. */
+/** Admission's read: the same rate limits plus the MODEL-IDENTITY-GUARD switch, primary model and research switch, in one round trip. */
 export async function readAdmissionSettings(admin: SupabaseClient): Promise<SettingsRead> {
   try {
-    const rows = await admin.from('system_settings').select('key,value').in('key', [RUNTIME_RATE_LIMIT_KEY, MODEL_IDENTITY_GUARD_KEY, PRIMARY_MODEL_KEY]);
+    const rows = await admin.from('system_settings').select('key,value').in('key', [RUNTIME_RATE_LIMIT_KEY, MODEL_IDENTITY_GUARD_KEY, PRIMARY_MODEL_KEY,
+      RESEARCH_TOOLS_KEY]);
     if (rows.error || !Array.isArray(rows.data)) return { ok: false };
     const value = (key: string) => (rows.data as Array<{ key: string; value: unknown }>).find(row => row.key === key)?.value;
     const limits = value(RUNTIME_RATE_LIMIT_KEY);
     return { ok: true, config: limits === undefined ? { ...DEFAULT_RUNTIME_RATE_LIMITS } : storedRateLimits(limits),
-      identityGuard: identityGuardFromStored(value(MODEL_IDENTITY_GUARD_KEY)), ...primaryModel(value(PRIMARY_MODEL_KEY)) };
+      identityGuard: identityGuardFromStored(value(MODEL_IDENTITY_GUARD_KEY)), ...primaryModel(value(PRIMARY_MODEL_KEY)),
+      researchEnabled: researchEnabled(value(RESEARCH_TOOLS_KEY)) };
   } catch { return { ok: false }; }
 }
 
