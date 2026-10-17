@@ -5,6 +5,7 @@ import { trpc } from '@/trpc/client';
 import { useLibraryUploads, type UploadItem } from '@/hooks/use-library-uploads';
 import { extensionOf, isPdfUploadReady, isWordUploadReady } from '@/lib/library-documents/format';
 import type { ComposerEditorHandle } from './composer-editor';
+import { fitText } from './composer-text';
 import { REFERENCE_LIMIT } from './composer-references';
 import { REFERENCE_LIMIT_NOTICE, referenceFor } from './reference-menu';
 import styles from './work-composer.module.css';
@@ -45,7 +46,7 @@ export function useComposerAttachments(box: RefObject<ComposerEditorHandle | nul
     setLinking(count => count + 1);
     try {
       await utils.library.invalidate();
-      const found = (await utils.library.search.fetch({ query: item.filename.slice(0, 100) })).documents
+      const found = (await utils.library.search.fetch({ query: fitText(item.filename, 100) })).documents
         .find(document => document.id === documentId);
       if (!found) {
         say(`「${item.filename}」已存入资料库，文字还在处理（扫描页要先识别），处理好后可以用 @ 引用。`);
