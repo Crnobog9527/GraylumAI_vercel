@@ -28,6 +28,7 @@ export type AdmittedFusionModel = { quote: CallPolicy; policy: HostPolicy; outpu
  * (FUSION-REVIEW §4.1), here and again on every request. */
 export async function admitFusionModel(db: SupabaseClient, window: StagingPolicy, row: FusionModelRow,
   phase: FusionPhase, outputTokens: number, deadline: string, env: Record<string, string | undefined> = process.env,
+  knownKey?: string | null,
 ): Promise<AdmittedFusionModel> {
   if (row.is_active !== 'true' || !['openrouter', 'openai', 'anthropic'].includes(row.provider)) {
     throw new Error('FUSION_MODEL_UNAVAILABLE');
@@ -37,8 +38,9 @@ export async function admitFusionModel(db: SupabaseClient, window: StagingPolicy
   // and the key must be the one the window's quote is bound to, as stagingTransport checks at dispatch:
   // otherwise credits would be held for calls that can never be sent (#954 review).
   // Admission creates the runs and credit holds that dispatch (a fresh read) will check: read fresh here too, so a
-  // cleared or replaced key is refused now instead of after holds were created.
-  const key = await readOpenRouterKey(db, { fresh: true }).catch(() => undefined);
+  // cleared or replaced key is refused now instead of after holds were created. A caller that checks many models
+  // without creating anything (the settings listing and save) reads once and passes it: string = the key, null = none.
+  const key = knownKey === undefined ? await readOpenRouterKey(db, { fresh: true }).catch(() => undefined) : knownKey ?? undefined;
   if (!runtimeModelOption(row, 'organizer', key !== undefined).available) throw new Error('FUSION_MODEL_UNAVAILABLE');
   const quote = window.callPolicies.find(policy => policy.modelId === row.id);
   if (quote && quote.account !== openRouterAccount(key ?? '')) {
