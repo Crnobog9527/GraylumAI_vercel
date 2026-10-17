@@ -5,7 +5,7 @@ import type { BillingRpc, BillingTransport } from '../bill2/service';
 import { createRuntimeBudget, type RuntimeBudget } from '../runtime/budget';
 import { finishOriginalFinancial } from '../runtime/inflightFinancial';
 import { stagingTransport } from '../runtime/stagingTransport';
-import { stagingRuntimeWindow } from '../runtime/stagingEnvironment';
+import { assertRealRuntimeTarget } from '../runtime/productionEnvironment';
 import type { StagingPolicy } from '../runtime/stagingPolicy';
 
 const itemSchema = z.object({
@@ -122,7 +122,7 @@ export async function runErasureFinancialReconciliation(admin: SupabaseClient, b
   return recoverErasedAccounts({ database: boundedFinancialDatabase(admin, budget), budget,
     adapter: policy => {
       // Retain original target/credential controls. An unavailable policy never prevents closing.
-      stagingRuntimeWindow(process.env, true);
+      assertRealRuntimeTarget(process.env);
       return stagingTransport(admin, policy as StagingPolicy, budget);
     },
   });

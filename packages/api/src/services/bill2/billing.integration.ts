@@ -687,3 +687,59 @@ it('BILL2: RUNTIME-PROD actual settled USD, paused completion, exact cap and ato
   for(const row of previous)await setting(row.key,row.value);
  }
 });
+it('BILL2: production mode bills a v2 run only on a database marked production, and every guard holds at claim',async()=>{
+ // RUNTIME-PROD: one transaction, rolled back; the marker, settings and rows never outlive this test.
+ const tx=new pg.Client({connectionString});await tx.connect();
+ const q=(text:string,args:unknown[]=[])=>tx.query(text,args);
+ const set=(key:string,value:unknown)=>q(`insert into system_settings(key,value) values($1,$2::jsonb)
+  on conflict(key) do update set value=excluded.value`,[key,JSON.stringify(value)]);
+ try{
+  await q('begin');await q('update runtime_test_windows set enabled=false where enabled');
+  const actor=randomUUID();await q('insert into profiles(id,credits) values($1,100)',[actor]);
+  await q(`insert into credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,idempotency_key,balance_before,balance_after)
+   values($1,100,'addition','grant','opening_grant','system',$2,0,100)`,[actor,'opening_grant:'+actor]);
+  const id=randomUUID(),model='prod-ci/'+id.slice(0,8),key='sk-ci-'+id,pricingHash='a'.repeat(64),tag='ci/route',policy='prod-ci-v1';
+  await q(`insert into ai_models(id,model_id,name,provider,is_active,api_key,config) values($1,$2,'CI','openrouter','true',$3,$4)`,
+   [id,model,key,{pricing:{pricingHash}}]);
+  await set('runtime_payg_production',{version:1,enabled:true,policyVersion:policy,profiles:[{model,endpointTag:tag}]});
+  await set('billing_credits_per_usd','100');await set('billing_token_price_multiplier','6');
+  await set('billing_payg_start_thresholds',{version:'ci',thresholds:[{model,purpose:'question',credits:1}]});
+  const draft=(await q('select public.bill2_create_draft($1) v',[actor])).rows[0].v;
+  const nominalPricing={version:'nominal-v1',pricingHash,endpointTag:tag,tiers:[{minPromptTokens:0,prompt:'1',completion:'0',request:'0'}],timeOfDay:[]};
+  const identity={policyId:policy,profileVersion:'ci',evidenceVersion:'ci',pricingHash,endpointTag:tag,nominalPricing,templateTokens:4096,marginTokens:4096};
+  const deadline=new Date(Date.now()+3600000).toISOString();
+  const base={provider:'openrouter',account:'openrouter-key:'+hash(key),model,protocol:'openrouter-chat-v1' as const,upperUsd:'0.008292000000',
+   inputLimit:8292,outputLimit:1000,automaticRetry:false as const,hiddenTools:false as const,lookupSupported:false,
+   providerLimits:{providerSlug:tag,contextTokens:100000,promptUsdPerMillion:'1',completionUsdPerMillion:'0',requestUsd:'0'}};
+  const payload={contractVersion:'bill2.v2',mode:'production',scope:{kind:'positioning_draft',draftId:draft},operation:'question',modelId:id,
+   sourceHash:hash('prod'),input:{version:'runtime.v1',network:'deny',tools:[],sources:[]},
+   callPolicy:[{...base,modelId:id,multiplier:'6',payg:{...identity,version:'production-host-v1',admissionPath:'empirical',maxBytes:196608,
+    maxMessages:32,maxTools:2,maxSchemaBytes:16384,purposes:['question'],expiresAt:deadline}}],
+   rules:{version:'runtime-production-v1',quoteVersion:policy,creditsPerUsd:'100',multiplier:'6',fx:{},
+    billingUnit:{version:'bill-unit-v2',creditsPerUsd:'100',defaultMultiplier:'6',hash:'f'.repeat(64)}},
+   limits:{costUsd:'0.1',credits:0,maxPreDeduct:0,maxCalls:4,deadline}};
+  const prepare=async()=>{await q('savepoint p');try{return (await q('select public.bill2_prepare($1,$2,$3) v',[actor,randomUUID(),payload])).rows[0].v;}
+   catch(error){await q('rollback to savepoint p');throw error;}};
+  await expect(prepare()).rejects.toThrow(/RUNTIME_PRODUCTION_DENIED/);
+  await set('runtime_environment','production');
+  const run=(await prepare()).id as string;
+  const claimPayload={...base,phase:'question',requestHash:'b'.repeat(64),billingUnit:{modelId:id,multiplier:'6'},
+   payg:{...identity,policyVersion:'production-host-v1',bytes:100,promptTokensUpper:8292,messages:1,tools:0,schemaBytes:0}};
+  const claimOnce=async(sequence:number)=>{await q('savepoint c');try{return (await q('select public.bill2_claim($1,$2,$3,$4) v',[actor,run,sequence,claimPayload])).rows[0].v;}
+   catch(error){await q('rollback to savepoint c');throw error;}};
+  await set('runtime_payg_production',{enabled:false});
+  await expect(claimOnce(1)).rejects.toThrow(/RUNTIME_PRODUCTION_DENIED/);
+  await set('runtime_payg_production',{version:1,enabled:true,policyVersion:policy,profiles:[{model,endpointTag:tag}]});
+  await q('update ai_models set api_key=$2 where id=$1',[id,'rotated']);
+  await expect(claimOnce(1)).rejects.toThrow(/RUNTIME_PRODUCTION_MODEL_DENIED/);
+  await q('update ai_models set api_key=$2 where id=$1',[id,key]);
+  const c=await claimOnce(1);
+  expect((await q('select public.bill2_dispatch($1,$2,$3,$4) v',[actor,run,c.id,c.dispatchToken])).rows[0].v.dispatch).toBe(true);
+  await q('select public.bill2_record($1,$2,$3,$4)',[actor,run,c.id,{provider:'openrouter',account:base.account,model,protocol:'openrouter-chat-v1',
+   providerId:'generation-'+c.id,source:'response',sourceHash:hash(c.id),observedAt:new Date().toISOString(),coverage:'request_total',final:true,
+   cost:'0.00005',currency:'USD',usage:{inputTokens:50,outputTokens:0}}]);
+  await q('select public.bill2_finalize($1,$2)',[actor,run]);
+  const charged=(await q('select r.charged,p.credits from bill2_runs r join profiles p on p.id=r.actor_id where r.id=$1',[run])).rows[0];
+  expect([Number(charged.charged),charged.credits]).toEqual([1,99]);
+ }finally{await q('rollback').catch(()=>{});await tx.end();}
+});

@@ -10,6 +10,7 @@ import { freezeWindowBillingUnit } from '../runtime/billingUnitAdmission';
 import { fitNativeRequestOutput, runtimePaygCall } from '../runtime/paygRuntime';
 import { freezeStagingPaygPricing } from '../runtime/paygPricing';
 import { loadStagingPolicy } from '../runtime/stagingPolicy';
+import { refuseOnProduction } from '../runtime/realHost';
 import { admitFusionModel, FUSION_MODEL_COLUMNS, type FusionModelRow, type FusionPhase } from './models';
 import { fusionRequestBody, type FusionRequest } from './request';
 import { readFusionSettings } from './settings';
@@ -78,6 +79,7 @@ export async function admitFusionGroup(input: { admin: SupabaseClient; actorId: 
   try { return toGroup(await rpc<unknown>(admin, 'fusion_group_admit', { ...groupArgs, p_runs: [] })); }
   catch (error) { if (!(error instanceof Error) || error.message !== 'FUSION_GROUP_INVALID') throw error; }
   const window = await loadStagingPolicy(admin as unknown as BillingRpc, actorId, env);
+  refuseOnProduction(window);
   const rows = await admin.from('ai_models').select(FUSION_MODEL_COLUMNS).in('id', [...new Set(members.map(m => m.modelId))]);
   if (rows.error) throw new Error('FUSION_ADMISSION_UNAVAILABLE');
   const deadline = new Date(Math.min(Date.now() + settings.review.dispatchMinutes * 60_000,
