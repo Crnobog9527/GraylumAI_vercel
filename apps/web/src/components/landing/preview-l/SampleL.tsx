@@ -15,7 +15,7 @@ import k from '@/components/landing/preview-k/k.module.css';
 import { StickyCtaMNO } from '@/components/landing/preview-mno/StickyCtaMNO';
 import { HERO, RISK_REVERSAL } from '@/lib/landing/landing-copy';
 import { J_FINAL } from '@/lib/landing/landing-copy-j';
-import { K_PRICE_TERMS } from '@/lib/landing/landing-copy-k';
+import { K_GOLD_LINE, K_PRICE_TERMS } from '@/lib/landing/landing-copy-k';
 import { L_NOTE_REGIONS, L_OPS, L_VOICE_FOLD } from '@/lib/landing/landing-copy-l';
 import { allOn } from '@/lib/landing/landing-flags';
 import { cn } from '@/lib/utils';
@@ -53,6 +53,8 @@ export function SampleL({ data, siteName, extras }: { data: LandingData; siteNam
       <a href={`#${K_PRICE_TERMS.faqId}`}>{K_PRICE_TERMS.cancel}</a> · <a href={`#${K_PRICE_TERMS.faqId}`}>{K_PRICE_TERMS.refund}</a>
     </p>
   ) : null;
+  // The price area as before round three (Owner 2026-10-17: "区域 7 的价格对比照旧"), with its Gold line.
+  const gold = allOn(extras.flags, K_GOLD_LINE.needs) ? <p className={k.gold}>{K_GOLD_LINE.text}</p> : null;
   // "先聊后买" right by the price button (Owner 2026-10-17, round three: no plan cards on the home page).
   const riskLine = allOn(extras.flags, ['signupGrant'])
     ? <p className={styles.riskLine}><b>{RISK_REVERSAL.title}</b>{J_FINAL.note}</p> : null;
@@ -75,7 +77,7 @@ export function SampleL({ data, siteName, extras }: { data: LandingData; siteNam
         {extras.showSamples ? <SamplesL /> : null}
         <ScenariosL flags={extras.flags} after={<CtaK />} />
         <PriceJ proMonthly={data.pricing.proMonthly} rows={data.compareRows} calm plainTotal checked={false} quiet
-          after={terms || riskLine ? <>{riskLine}{terms}</> : undefined} />
+          after={terms || gold || riskLine ? <>{riskLine}{terms}{gold}</> : undefined} />
         <FaqJ groups={data.faqGroups} />
         <FinalJ freeTrial={allOn(extras.flags, ['signupGrant'])} />
       </main>

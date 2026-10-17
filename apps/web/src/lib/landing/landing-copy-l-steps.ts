@@ -6,8 +6,8 @@ import type { LandingFeature } from './landing-flags';
  * Sample L, round four (Owner 2026-10-17). Region 3 in three steps headed 第一步/第二步/第三步: step one is sample J's
  * whole positioning flow on the real product's parts (its four stages under the product's own step names, each with
  * sample J's note, no "为什么不是正确的废话" lead-in); step two (content each week) and step three (the data loop,
- * "数据飞轮" being the Owner's title) show only when their capability ships, behind `content` and `publish`, and then with
- * the product's real components. Then the jury, larger, and region 6 one scenario at a time. NEW lines are marked.
+ * "数据飞轮" being the Owner's title) show only once built, and then with the product's real components. Then the jury,
+ * larger, and region 6 one scenario at a time. NEW lines are marked.
  */
 export type StepStage = { label: string; moment: number; note: string; needs?: readonly LandingFeature[] };
 
@@ -25,13 +25,17 @@ export const L_STEPS = {
       { label: '生成完整运营策略报告', moment: 3, note: J_TAKEOVER_MOMENTS[3].note, needs: ['report'] },
     ] as readonly StepStage[],
   },
-  /** Steps two and three: off until the product has them (landing-flags); their real components go in then. */
+  /**
+   * Steps two and three: not built in the product yet, so not shown on this page (`built: false`) whatever the site's
+   * flags say; the site's flags keep the rest of the page (voices, FAQ, price rows, region 6) as it was. When a step
+   * ships, its real components go in and `built` turns true.
+   */
   later: [
-    { title: '第二步：每周带你做内容', needs: ['content'] as readonly LandingFeature[],
+    { title: '第二步：每周带你做内容', needs: ['content'] as readonly LandingFeature[], built: false,
       items: ['选题', '口播稿和分镜脚本'] },
-    { title: '第三步：帮你建立数据飞轮', needs: ['publish'] as readonly LandingFeature[],
+    { title: '第三步：帮你建立数据飞轮', needs: ['publish'] as readonly LandingFeature[], built: false,
       items: ['自动发布', '数据监控', '复盘'] },
-  ],
+  ] as readonly { title: string; needs: readonly LandingFeature[]; built: boolean; items: readonly string[] }[],
 } as const;
 
 /** The jury, larger (Owner 2026-10-17: "把这个按钮和模块稍微做大一点"); wording from the plan, true to the mechanism. */

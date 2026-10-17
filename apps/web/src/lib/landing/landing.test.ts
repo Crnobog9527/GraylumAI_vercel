@@ -15,12 +15,12 @@ const ALL_ON = Object.fromEntries(Object.keys(LANDING_FEATURES).map(key => [key,
 const CORE_ONLY = Object.fromEntries(Object.keys(LANDING_FEATURES).map(key => [key, key === 'coach'])) as LandingFlags;
 
 describe('landing flags', () => {
-  it('shows what is built by default; sample reports and the unbuilt voice, content and publishing stay off (Owner 2026-10-17)', () => {
+  it('shows the finished product by default, except sample reports that are not generated yet (Owner 2026-10-13)', () => {
     const flags = resolveLandingFlags({});
     for (const [key, feature] of Object.entries(LANDING_FEATURES)) {
       expect(flags[key as keyof LandingFlags]).toBe(feature.show);
     }
-    expect(Object.entries(flags).filter(([, on]) => !on).map(([key]) => key)).toEqual(['voice', 'content', 'publish', 'sampleReports']);
+    expect(Object.entries(flags).filter(([, on]) => !on).map(([key]) => key)).toEqual(['sampleReports']);
   });
 
   it('lets staging and previews show blocks that are off, never the indexed production page', () => {
@@ -120,13 +120,13 @@ describe('landing page data', () => {
     expect(data.showResult).toEqual({ pro: false, gold: false });
   });
 
-  it('shows only what is built by default (Owner 2026-10-17), still without invented founder or first-month prices', () => {
+  it('shows the finished-product page by default, still without invented founder or first-month prices', () => {
     const data = buildLandingPageData(resolveLandingFlags({}), CATALOG);
-    // Notes, FAQ answers and compare rows that promise content, publishing or the voice profile wait for those features.
-    expect(data.notes.map(note => note.id)).toEqual(['p1', 'p2', 'p5', 'p7']);
-    expect(data.faqItems).toHaveLength(5);
+    expect(data.notes).toHaveLength(7);
+    // FAQ 15 and 16 promise the founder offer and its live seat count, so they wait for the server answer too.
+    expect(data.faqItems).toHaveLength(14);
     expect(data.faqItems.map(item => item.question)).not.toContain('为什么创始会员只有 50 个名额？');
-    expect(data.compareRows).toHaveLength(2);
+    expect(data.compareRows).toHaveLength(4);
     expect(data.heroNote).toBe('无需绑卡，免费试用');
     // No public price answer yet: no founder card, no seats, Gold monthly stays at the catalog price.
     expect(data.pricing.cards.map(card => card.key)).toEqual(['pro', 'gold']);

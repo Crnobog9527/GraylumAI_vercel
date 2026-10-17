@@ -75,11 +75,10 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     expect(steps).not.toContain('AB 测试');
   });
 
-  it('shows steps two and three only once their capability is built, and the jury larger with the fusion flag', () => {
-    const off = render({ ...ALL_ON, content: false, publish: false });
-    for (const step of L_STEPS.later) expect(off).not.toContain(step.title);
+  it('keeps steps two and three off until built, even with every flag on, and the jury larger with the fusion flag', () => {
     const on = render();
-    for (const step of L_STEPS.later) expect(on).toContain(step.title);
+    for (const step of L_STEPS.later) expect(on).not.toContain(step.title);
+    expect(L_STEPS.later.every(step => !step.built)).toBe(true);
     expect(on).toContain(L_JURY.title);
     expect(on).toContain(`href="${L_JURY.href}"`);
     expect(render({ ...ALL_ON, fusion: false })).not.toContain(L_JURY.title);

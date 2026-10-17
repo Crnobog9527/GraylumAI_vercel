@@ -73,7 +73,7 @@ export function StepsL({ flags }: { flags: LandingFlags }) {
     const node = ref.current;
     if (node) window.scrollTo({ top: window.scrollY + node.getBoundingClientRect().bottom - 80, behavior: 'auto' });
   };
-  const later = L_STEPS.later.filter(step => allOn(flags, step.needs));
+  const later = L_STEPS.later.filter(step => step.built && allOn(flags, step.needs));
   const { index, local } = stageAt(stages, progress);
   const stage = stages[index];
 
