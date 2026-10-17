@@ -14,8 +14,10 @@ import { admitFusionModel, FUSION_MODEL_COLUMNS, type FusionModelRow, type Fusio
 import { fusionRequestBody, type FusionRequest } from './request';
 import { readFusionSettings } from './settings';
 
-export type FusionMember = { modelId: string; phase: FusionPhase; request: FusionRequest };
-export type AdmittedFusionRun = { runId: string; index: number; phase: FusionPhase; body: string; call: FrozenCall };
+/** Review admission only (kind 'review'); compare columns are admitted by compareAdmission.ts. */
+type ReviewPhase = Exclude<FusionPhase, 'fusion_compare'>;
+export type FusionMember = { modelId: string; phase: ReviewPhase; request: FusionRequest };
+export type AdmittedFusionRun = { runId: string; index: number; phase: ReviewPhase; body: string; call: FrozenCall };
 export type AdmittedFusionGroup = { groupId: string; replayed: boolean; runs: AdmittedFusionRun[] };
 const uuid = z.string().uuid();
 const admitted = z.object({ groupId: uuid, replayed: z.boolean(), runs: z.array(z.object({ runId: uuid,
