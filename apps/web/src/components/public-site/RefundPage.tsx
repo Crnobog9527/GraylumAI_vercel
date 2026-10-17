@@ -34,7 +34,10 @@ export function RefundPage({ supportEmail }: { supportEmail?: string | null }) {
         </nav>
         <h1 className="text-3xl font-bold leading-tight sm:text-4xl">{REFUND_PAGE.h1}</h1>
         <p className="mt-5 text-lg leading-8 text-[#E6E6E6]">{REFUND_PAGE.lead}</p>
-        <p className="mt-5 text-sm text-[#8A8A8A]">{chrome.updatedLabel} <time dateTime={REFUND_PAGE.updated}>{REFUND_PAGE.updated}</time></p>
+        <p className="mt-5 text-sm text-[#8A8A8A]">
+          <Link href={chrome.company[0].href} rel="author" className="underline hover:text-[#FFD700]">{chrome.authorLabel}</Link>
+          {' · '}{chrome.updatedLabel} <time dateTime={REFUND_PAGE.updated}>{REFUND_PAGE.updated}</time>
+        </p>
         {REFUND_PAGE.sections.map(section => (
           <section key={section.h2} className="mt-12">
             <h2 className="text-2xl font-semibold">{section.h2}</h2>
