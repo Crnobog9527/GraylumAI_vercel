@@ -32,35 +32,41 @@ function productionDeployment(env: Env) {
     && url.pathname === '/' && !url.search && !url.hash;
 }
 
+/** Hard guard (R7 review P1): the checkout path behind this gate (methodPayments paymentMode, createStripeMethodCheckout
+ * scope, methodMembership mode, database functions) is still test-only. Until R7 PR-B wires live mode through all of it,
+ * production stays closed here even with the bound deployment and a switch set to `true`. PR-B flips this to `true` and
+ * updates the test. Staging is not affected. */
+export const LIVE_PAYMENT_PIPELINE_READY = false;
+
 /** Stripe card checkout (PAY-STRIPE-MP 3c, "打开银行卡下单"). Staging: open on the staging deployment, behind the
  * default-off server switch `payment_method_routes.card.enabled` / `card_cn.enabled` (the controller turns it on).
  * Production (R7): open only on the bound production deployment while PAY_PRODUCTION_CARD_CHECKOUT_ENABLED is exactly
  * `true`; that variable is set only after the Owner approves opening production card checkout, never in code. Waffo
  * takes no new card purchases (Owner 2026-10-12). */
-function cardCheckoutEnvironmentOpen(env: Env) {
+function cardCheckoutEnvironmentOpen(env: Env, liveReady: boolean) {
   if (stagingDeployment(env)) return true;
-  return productionDeployment(env) && env.PAY_PRODUCTION_CARD_CHECKOUT_ENABLED === 'true';
+  return liveReady && productionDeployment(env) && env.PAY_PRODUCTION_CARD_CHECKOUT_ENABLED === 'true';
 }
 
 /** Stripe wallet purchases (WeChat Pay, Alipay) through the method checkout. Staging stays closed as before; they
  * never follow the card switch. Production (R7): only the bound production deployment, behind its own default-off
  * switch PAY_PRODUCTION_WALLET_CHECKOUT_ENABLED (set only after the Owner approves). */
-function walletCheckoutEnvironmentOpen(env: Env) {
-  return productionDeployment(env) && env.PAY_PRODUCTION_WALLET_CHECKOUT_ENABLED === 'true';
+function walletCheckoutEnvironmentOpen(env: Env, liveReady: boolean) {
+  return liveReady && productionDeployment(env) && env.PAY_PRODUCTION_WALLET_CHECKOUT_ENABLED === 'true';
 }
 
 /** Card and wallet admission, checked before any settings, order or provider access. The server switches
  * `payment_method_routes.<method>.enabled` are enforced separately by assertPaymentMethodRoute with the route version. */
-export function methodCheckoutEnvironmentOpen(env: Env, method: PaymentMethod) {
-  return method === 'card' || method === 'card_cn' ? cardCheckoutEnvironmentOpen(env) : walletCheckoutEnvironmentOpen(env);
+export function methodCheckoutEnvironmentOpen(env: Env, method: PaymentMethod, liveReady = LIVE_PAYMENT_PIPELINE_READY) {
+  return method === 'card' || method === 'card_cn' ? cardCheckoutEnvironmentOpen(env, liveReady) : walletCheckoutEnvironmentOpen(env, liveReady);
 }
 
-export function assertMethodCheckoutEnvironment(env: Env, method: PaymentMethod) {
-  if (!methodCheckoutEnvironmentOpen(env, method)) throw new Error('PAY_WAFFO_STEP2_NOT_READY');
+export function assertMethodCheckoutEnvironment(env: Env, method: PaymentMethod, liveReady = LIVE_PAYMENT_PIPELINE_READY) {
+  if (!methodCheckoutEnvironmentOpen(env, method, liveReady)) throw new Error('PAY_WAFFO_STEP2_NOT_READY');
 }
 
 /** Member-page projection: open when either card route is on (`routes` tells which one); the checkout mutation
  * re-checks the same conditions for the method actually chosen. */
-export function methodCardCheckoutReady(env: Env, routes: PaymentMethodRoutes | null) {
-  return methodCheckoutEnvironmentOpen(env, 'card') && (routes?.card.enabled === true || routes?.card_cn?.enabled === true);
+export function methodCardCheckoutReady(env: Env, routes: PaymentMethodRoutes | null, liveReady = LIVE_PAYMENT_PIPELINE_READY) {
+  return methodCheckoutEnvironmentOpen(env, 'card', liveReady) && (routes?.card.enabled === true || routes?.card_cn?.enabled === true);
 }
