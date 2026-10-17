@@ -5,8 +5,8 @@
  */
 
 import { formatUsd, pickPaywallPlans, type PaywallPlanSource } from '@/components/paywall/paywallPlans';
-import { faqAnswerText, LANDING_FAQ } from '@/lib/landing/landing-faq';
 import type { ArticleContent } from '../article';
+import { landingFaq, signupGrantShown } from './landing-faq-pick';
 import { SIGNUP_CTA_HREF, SIGNUP_GRANT_CREDITS } from './shared';
 import { ZH_TW_CRUMB } from './zh-tw/links';
 
@@ -32,19 +32,12 @@ const ALTERNATES = { 'zh-Hans': COMPARE_PATH, 'zh-TW': COMPARE_PATH_TW } as cons
 
 function graylumPrice(plans: readonly PaywallPlanSource[], zh: 'hans' | 'tw') {
   const pro = pickPaywallPlans(plans).find(plan => plan.level === 'pro');
-  const free = zh === 'hans' ? `免费开始，注册送 ${SIGNUP_GRANT_CREDITS} 积分` : `免費開始，註冊送 ${SIGNUP_GRANT_CREDITS} 點數`;
+  const grant = signupGrantShown();
+  const free = zh === 'hans' ? (grant ? `免费开始，注册送 ${SIGNUP_GRANT_CREDITS} 积分` : '免费开始')
+    : (grant ? `免費開始，註冊送 ${SIGNUP_GRANT_CREDITS} 點數` : '免費開始');
   if (!pro) return zh === 'hans' ? `${free}；会员价格见价格页` : `${free}；會員價格見價格頁`;
   const price = formatUsd(pro.price.monthly);
   return zh === 'hans' ? `${free}；会员 Pro 每月 ${price} 起` : `${free}；會員 Pro 每月 ${price} 起`;
-}
-
-function landingFaq(...ids: string[]) {
-  const items = LANDING_FAQ.flatMap(group => group.items);
-  return ids.map(id => {
-    const item = items.find(entry => entry.id === id);
-    if (!item) throw new Error(`landing FAQ ${id} not found`);
-    return { question: item.question, answer: faqAnswerText(item) };
-  });
 }
 
 /** Simplified comparison page. `plans` is the public plan catalog (empty when it cannot be read). */
@@ -89,8 +82,8 @@ export function compareHans(plans: readonly PaywallPlanSource[] = []): ArticleCo
           rows: [
             ['做账号定位', '可以聊定位，由你来提问、追问和整理。', '教练分三步主动提问，每一步由你确认，聊到的信息边聊边记成清单。'],
             ['记住你的情况', `有记忆功能：可以保存你的信息，也可以参考过往对话，并可在设置里关闭（OpenAI 帮助中心，${COMPARED_ON} 查阅）。`, '你确认过的定位和资料保存在清单和资料库里，换窗口、换天都找得到。'],
-            ['完整的定位报告', '没有固定的报告流程，需要你自己写要求、自己整理。', '三步走完可以生成按章节阅读的定位与执行方案报告（付费会员功能）。'],
-            ['多模型评审', '需要你自己在不同的工具里分别问，再自己对比。', '评审团让几个不同的大模型分别审报告，有分歧再辩一轮，汇总成修订稿（Gold 会员功能）。'],
+            ['完整的定位报告', '对话式：你提出要求，它来回答；要不要整理成报告、怎么整理，由你自己决定。', '三步走完可以生成按章节阅读的定位与执行方案报告（付费会员功能）。'],
+            ['多模型评审', '对话式：怎么对比不同的答案，由你自己决定。', '评审团让几个不同的大模型分别审报告，有分歧再辩一轮，汇总成修订稿（Gold 会员功能）。'],
             ['价格', `有免费版和付费版：Plus 每月 $20，Pro 每月 $100 起（OpenAI 官方页面，${COMPARED_ON} 查阅，以官方页面为准）。`, `${graylumPrice(plans, 'hans')}（以价格页为准）。`],
           ],
         },
@@ -119,7 +112,7 @@ export function compareHans(plans: readonly PaywallPlanSource[] = []): ArticleCo
         question: '我已经在用 ChatGPT 了，还需要 Graylum 吗？',
         answer: '看你卡在哪里。如果卡在"不知道该做什么、给谁看"或者"每周不知道发什么"，分步提问的教练会更省事；如果只是零散的写作需求，继续用 ChatGPT 就行，两者可以一起用。',
       },
-      ...landingFaq('faq-1', 'faq-11'),
+      ...landingFaq('faq-11'),
     ],
     related: [
       { label: '定位分析', href: '/features/positioning', description: '三步对话想清楚账号做什么、给谁看。' },
@@ -174,8 +167,8 @@ export function compareTw(plans: readonly PaywallPlanSource[] = []): ArticleCont
           rows: [
             ['做帳號定位', '可以聊定位，由你自己提問、追問和整理。', '教練分三步主動提問，每一步由你確認，聊到的資訊邊聊邊記成清單。'],
             ['記住你的狀況', `有記憶功能：可以儲存你的資訊，也能參考過去的對話，並可在設定中關閉（OpenAI 說明中心，${COMPARED_ON} 查閱）。`, '你確認過的定位和資料存在清單與資料庫裡，換視窗、換天都找得到。'],
-            ['完整的定位報告', '沒有固定的報告流程，需要自己寫需求、自己整理。', '三步走完可以產出依章節閱讀的定位與執行方案報告（付費會員功能）。'],
-            ['多模型評審', '需要自己在不同工具分別詢問，再自行比對。', '評審團讓幾個不同的大模型分別審閱報告，有分歧再討論一輪，彙整成修訂稿（Gold 會員功能）。'],
+            ['完整的定位報告', '對話式：由你提出需求、它來回答；要不要整理成報告、怎麼整理，都由你自己決定。', '三步走完可以產出依章節閱讀的定位與執行方案報告（付費會員功能）。'],
+            ['多模型評審', '對話式：怎麼比對不同的答案，由你自己決定。', '評審團讓幾個不同的大模型分別審閱報告，有分歧再討論一輪，彙整成修訂稿（Gold 會員功能）。'],
             ['價格', `有免費版和付費版：Plus 每月 $20，Pro 每月 $100 起（OpenAI 官方頁面，${COMPARED_ON} 查閱，以官方頁面為準）。`, `${graylumPrice(plans, 'tw')}（以價格頁為準）。`],
           ],
         },
