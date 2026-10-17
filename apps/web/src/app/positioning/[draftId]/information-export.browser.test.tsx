@@ -165,7 +165,7 @@ for (const width of [390, 1920]) it(`downloads from the actual positioning page 
     await page.evaluate(() => (window as unknown as { renderPositioning: () => void }).renderPositioning());
     await ui(page.getByRole('heading', { name: '核对已有定位', exact: true })).toBeVisible({ timeout: 3000 });
     await ui(page.getByRole('button', { name: '导出已确认资料' })).toBeVisible();
-    await page.getByRole('textbox', { name: '给导师的回复' }).fill('未发送的本机输入');
+    await page.getByRole('textbox', { name: '给 AI 教练的回复' }).fill('未发送的本机输入');
     // Page initialization has its own existing reads/capture catch-up. Measure the export action separately.
     await page.waitForLoadState('networkidle');
     requests.length = 0;
