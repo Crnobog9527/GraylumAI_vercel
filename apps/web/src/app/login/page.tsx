@@ -19,6 +19,7 @@ import { Label } from '@/components/ui/label';
 import { trpc } from '@/trpc/client';
 import { invisibleCaptchaOptions } from '@/lib/invisibleCaptcha';
 import { AuthStatusBanner, type AuthStatus } from '@/components/auth/AuthStatusBanner';
+import { AuthRedirectNotice } from '@/components/auth/AuthRedirectNotice';
 import { GoogleIcon } from '@/components/auth/GoogleIcon';
 import { FORGOT_PASSWORD_PATH, PASSWORD_RESET_DONE_MESSAGE } from '@/lib/passwordRecovery';
 import { clearPendingEmail, rememberPendingEmail, restorePendingEmail } from '@/lib/pendingAuthEmail';
@@ -321,11 +322,7 @@ export function LoginPageContent() {
                         ? '邮箱注册完成后将收到验证邮件，验证通过后才可使用核心功能。'
                         : 'Google 登录无需再次验证邮箱，邮箱账户会按验证状态自动拦截。'}
                     </p>
-                    {redirectTarget !== '/profile' && (
-                      <p className="rounded-xl border px-3 py-2 text-xs text-[#c8c8c8]" style={{ borderColor: 'rgba(255,255,255,0.08)' }}>
-                        登录完成后将返回 <span className="font-mono">{redirectTarget}</span>
-                      </p>
-                    )}
+                    <AuthRedirectNotice target={redirectTarget} />
                     {mode === 'signup' && selectedPlan && (
                       <p className="rounded-xl border px-3 py-2 text-xs text-[#f6dd96]" style={{ borderColor: 'rgba(255,215,0,0.16)' }}>
                         当前来自 <span className="font-semibold">{selectedPlan}</span> 套餐入口。注册后可在产品内查看该套餐对应的最新权益与购买状态。

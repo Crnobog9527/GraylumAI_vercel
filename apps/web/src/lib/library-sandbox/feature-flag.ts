@@ -16,3 +16,12 @@ export function isLibraryDocxExtractionEnabled(): boolean {
 export function isLibraryPdfExtractionEnabled(): boolean {
   return process.env.NEXT_PUBLIC_LIBRARY_PDF_EXTRACTION === 'true';
 }
+
+/**
+ * LIB-2d, same staging rule: browser recognition of scanned pages runs only when the build sets
+ * `NEXT_PUBLIC_LIBRARY_SCAN_RECOGNITION=true`. Nothing in the app calls it yet; it opens to users only after the
+ * LIB_DOCS_PLAN §4.5 checks (real Word files, a mid-range computer) are reported to the Owner.
+ */
+export function isLibraryScanRecognitionEnabled(): boolean {
+  return process.env.NEXT_PUBLIC_LIBRARY_SCAN_RECOGNITION === 'true';
+}

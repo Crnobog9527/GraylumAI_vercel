@@ -31,6 +31,7 @@ const startRefusals: Record<string, string> = {
   REPORT_PAYG_REQUIRED: "报告生成暂时不可用，报告没有开始生成。请稍后再试。",
   REPORT_FACTS_TOO_LARGE: "确认的信息太长，暂时无法一次写成报告。",
   OPC_CAPTURE_PENDING: "右侧信息还在整理，请等整理完成后再生成。",
+  REPORT_BENCHMARKS_REQUIRED: "合格的对标账号还不到 3 个，报告没有开始生成。请回到对话里补充对标账号（换关键词或贴主页链接）后再生成。",
   REPORT_ALREADY_EXISTS: REPORT_ALREADY_EXISTS_NOTICE,
 };
 

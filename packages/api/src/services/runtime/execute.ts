@@ -1,8 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import {executionSkillFileTool} from './skillFileExecution';
-import {skillFileToolBytes} from './skillFile';
-import {executionMentorHistoryTool,mentorHistoryToolBytes} from './mentorHistory';
-import {sourceRuntimeTool} from './sourceRuntimeTool';
+import {executionTools} from './executionTools';
+import {researchExecution,responseAfterResearch} from './researchExecution';
 import {billingClaimNotice,claimNoticeFields} from './claimNotice';
 import {stoppedCompletion} from './stoppedCompletion';
 import {NativeSession} from './nativeSession';
@@ -14,7 +12,6 @@ import {executorRpc,historyGuard,terminalReplyGuard,recoverExecutorFinancial,
  preflightCodes,platformFailureReason,hash,progressEmitter,diagnosticCode,failBeforeDispatch,cancelWithCode,type RuntimeExecutorOptions} from './executorRpc';
 import {fitNativeRequestOutput,runtimePaygCall, type ResumeInput, type PaygWait, type PaygPosition} from './paygRuntime';
 import {beginPaygExecution, type RuntimeExecution} from './paygResume';
-import {PROMPT_CACHE_OVERHEAD_BYTES} from './promptCache';
 import {runtimeContext} from './runtimeContext';
 export {runtimeContext};
 import {projectHostTurnItem} from './hostTurn';
@@ -26,17 +23,18 @@ import {recoverOpenRouterHistory,latestHistoryTurn,assertLatestHistoryRetained} 
 import {projectOpenRouterItemsForSizing} from './openRouterHistory';
 import {AGENT_TURN_REQUEST_FORMAT,validReasoningFormat,
  PLAIN_TEXT_STREAM,streamsPrimary,historyToolNames,openRouterRequestBody} from './providerRequest';
-import {cardSources, groundedCardTool, groundedCardToolBytes, rejectSeparateCardProse} from './groundedCard';
+import {cardSources, rejectSeparateCardProse} from './groundedCard';
 import {agentTurnResult} from './agentTurnResult';
-import {askQuestionTool,askQuestionToolBytes,questionMessageFromArguments,QUESTION_CONTRACT,READ_HISTORY_TOOL} from './agentTools';
+import {questionMessageFromArguments,QUESTION_CONTRACT,READ_HISTORY_TOOL} from './agentTools';
 import {ASK_QUESTION_TOOL,INVALID_REPLY_NOTICE} from '../../shared/agentTurn';
 import { authoritativeBilling, type FrozenCall } from '../bill2/service';
+import { modelCallPolicies } from '../bill2/runPolicies';
 import {OPENROUTER_RESPONSE_TIMEOUT_MS} from '../bill2/openRouterPolicy';
 import {createRuntimeBudget} from './budget';
 import {expiringAuthAfterProvider} from './authReuse';
 import { localFixtureAdapter } from '../bill2/fixtureAdapter';
 import { PostgresSession } from './session';
-import { runRuntime, type RuntimeTool } from './runner';
+import { runRuntime } from './runner';
 import { selectRuntimeHistory, selectRuntimeCallInput, projectSupersededScopeItem, requestsHistoricalComparison, assertRuntimeRequestCapacity, runtimeScopeInput } from './context';
 import { matchingInput, MATCH_INSTRUCTIONS, parseMatch } from './matching';
 import { withPrimaryAddenda } from './primaryInstructions';
@@ -94,10 +92,11 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   let projection=new NativeProgressProjection(projectionOptions);
   let primaryLength=false;
   if(fiveFields&&!agentTurn)throw new Error('RUNTIME_CONTEXT_INVALID');
-  if(agentTurn&&(context.matching||context.workspaceContext||
-   context.tools.some(name=>name!==ASK_QUESTION_TOOL&&name!=='read_skill_file'&&name!==READ_HISTORY_TOOL)))throw new Error('RUNTIME_CONTEXT_INVALID');
+  // RT-3b PR-3: research tools only with their frozen research context (runtimeContext checks the pairing).
+  if(agentTurn&&(context.matching||context.workspaceContext||context.tools.some(name=>name!==ASK_QUESTION_TOOL&&
+   name!=='read_skill_file'&&name!==READ_HISTORY_TOOL&&!context.research)))throw new Error('RUNTIME_CONTEXT_INVALID');
   if(!agentTurn&&context.tools.includes(ASK_QUESTION_TOOL))throw new Error('RUNTIME_CONTEXT_INVALID');
-  const policy=execution.billing.callPolicy.find(p=>p.model===context.model);
+  const policy=modelCallPolicies(execution.billing.callPolicy).find(p=>p.model===context.model);
   if(!policy)throw new Error('RUNTIME_MODEL_DENIED');
   const session=new PostgresSession(ownerDatabase,{actorId:await options.actor(),sessionId:execution.sessionId,executionId});
   const nativeSession=native&&!context.reportGeneration?new NativeSession(session,Boolean(context.mentorText)):undefined;
@@ -108,7 +107,11 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   let gateChecked=resumedGate,moderationBlocked=false;
   let waitPoint:{epoch:number;sequence:number;requestHash:string;phase:string;state:PaygWait['state']}|undefined;
   let gateRejection:GateRejection|undefined;
-  const checkAgentReply=terminalReplyGuard(agentTurn,context.tools.includes(ASK_QUESTION_TOOL),()=>{terminalReplyFailure=true;},Boolean(context.skillFile),Boolean(context.historyRead));
+  const research=researchExecution({research:context.research,tools:context.tools,execution,executionId,actorId:await options.actor(),
+   database:options.database,emit:event=>progress(event),onClosed:()=>{accountClosed=true;},
+   canSend:()=>{try{budget.assertCanStart(5000);return true;}catch{return false;}}});
+  const checkAgentReply=terminalReplyGuard(agentTurn,context.tools.includes(ASK_QUESTION_TOOL),()=>{terminalReplyFailure=true;},
+   Boolean(context.skillFile),Boolean(context.historyRead),research?.tools.map(tool=>tool.name));
   let preflightFailure:string|undefined,transportFailureCode:string|undefined;
   const streaming=streamsPrimary(context);
   // B2a: once BILL2 reports a confirmed erasure, nothing more reaches the client.
@@ -132,15 +135,16 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     if(native)request=fitNativeRequestOutput(request,selectedPolicy);
     const configuredInput=phase==='attached_organizer'?context.attachedOrganizer?.inputBytes:context.purposeBudget?.inputBytes;
     assertRuntimeRequestCapacity(request,Math.min(selectedPolicy.inputLimit,configuredInput??Infinity));
-    let sequence=++callSequence;
      const requestHash=hash(request);
      const pause=(state:PaygWait['state']):never=>{
       waitPoint={epoch:execution.epoch!,sequence,requestHash,phase,state};
       throw new Error(state==='waiting_credits'?'RUNTIME_WAITING_CREDITS':'RUNTIME_WAITING_RESUME');
      };
-     let existing=await ownerRpc<{callId:string;state:string;rawBody:string|null;retryable?:boolean}|null>('runtime_response',{...args,p_sequence:sequence,p_request_hash:requestHash}).catch(error=>{
+     let {sequence,existing}=await responseAfterResearch(seq=>ownerRpc<{callId:string;state:string;rawBody:string|null;retryable?:boolean}|null>(
+      'runtime_response',{...args,p_sequence:seq,p_request_hash:requestHash}),++callSequence,research,execution.billing.limits.maxCalls).catch(error=>{
       responseConflict=error instanceof Error&&error.message==='RUNTIME_RESPONSE_CONFLICT';throw error;
      });
+     callSequence=sequence;
      while(isPayg&&existing?.retryable){
       sequence=++callSequence;
       existing=await ownerRpc('runtime_response',{...args,p_sequence:sequence,p_request_hash:requestHash});
@@ -243,24 +247,15 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
      if(!options.activateSkill)throw new Error('RUNTIME_SKILL_ACTIVATION_UNAVAILABLE');
      // MODEL-IDENTITY-GUARD: a matched Skill keeps the brand identity frozen into this admission.
      const instructions=withBrandIdentity(await options.activateSkill(candidate),frozenBrandIdentity(context.instructions));
-     const selectedPolicy=execution.billing.callPolicy.find(p=>p.modelId===candidate.modelId&&p.model===candidate.model);
+     const selectedPolicy=modelCallPolicies(execution.billing.callPolicy).find(p=>p.modelId===candidate.modelId&&p.model===candidate.model);
      if(!selectedPolicy)throw new Error('RUNTIME_MODEL_DENIED');
      primaryPolicy=selectedPolicy;
      effective={model:candidate.model,instructions,maxOutputTokens:candidate.outputLimit,role:'skill'};
     }
    }
    effective.instructions=withPrimaryAddenda(effective.instructions,context);
-   const questionTool=grounded?groundedCardTool(()=>sources):askQuestionTool(fiveFields);
-   const tools:RuntimeTool[]=context.tools.map(name=>name===ASK_QUESTION_TOOL?questionTool:
-    name==='read_skill_file'?executionSkillFileTool({executionId,moduleId:context.moduleId!,binding:context.skillFile!,
-     rpc:ownerRpc,assertCanStart:()=>budget.assertCanStart(),timing:budget.timing,onRefused:()=>{terminalReplyFailure=true;}}):
-    name===READ_HISTORY_TOOL?executionMentorHistoryTool({executionId,rpc:ownerRpc,assertCanStart:()=>budget.assertCanStart(),
-     onRefused:()=>{terminalReplyFailure=true;}}):
-    sourceRuntimeTool({name,context,args,ownerRpc,budget,execution,exchange}));
-   const toolBytes=(agentTurn?(grounded?groundedCardToolBytes():askQuestionToolBytes(fiveFields)):
-    Buffer.byteLength(JSON.stringify(tools.map(t=>({name:t.name,description:t.description})))))+
-    (context.skillFile?skillFileToolBytes():0)+(context.historyRead?mentorHistoryToolBytes():0)+
-    (context.historySelection?.markerReserveBytes??(context.promptCache?PROMPT_CACHE_OVERHEAD_BYTES:0));
+   const {tools,toolBytes}=executionTools({context,executionId,args,agentTurn,grounded,fiveFields,sources:()=>sources,ownerRpc,budget,
+    execution,research,exchange,onRefused:()=>{terminalReplyFailure=true;}});
    const preserveHistoricalMaterial=Boolean(context.sources?.length)||requestsHistoricalComparison(context.input);
    const primarySequence=callSequence;
    let agentText="";
@@ -302,7 +297,8 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
      logger.warn('api','runtime_history_prefix_omitted',{executionId,omittedItems:originalCount-history.length});
     }
     const selectionOptions={instructions:effective.instructions,inputBytes:Math.min(primaryPolicy.inputLimit,context.purposeBudget?.inputBytes??Infinity),
-     historyItems:context.historyItems,toolBytes:toolBytes+Math.max(context.skillFileReserve??0,context.historyRead?.reserve??0),...sizing,
+     historyItems:context.historyItems,
+     toolBytes:toolBytes+Math.max(context.skillFileReserve??0,context.historyRead?.reserve??0)+(research?.reserve??0),...sizing,
      projectHistoryItem:(item:unknown)=>context.hostTurnContext?
       projectHostTurnItem(item,context.scopeMaterial,preserveHistoricalMaterial,projectSupersededScopeItem):
       legacyInput||preserveHistoricalMaterial?item:projectSupersededScopeItem(item,context.scopeMaterial)};
@@ -391,7 +387,8 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     await ownerRpc('runtime_execution',{...args,p_action:'checkpoint_primary',p_result:{body,lastSequence:callSequence,...turnMetadata}});
     if(native&&(turnMetadata.completeness==='length_limit'||turnMetadata.envelopeCompact))summary='';
     else {
-    const organizer=context.attachedOrganizer,organizerPolicy=execution.billing.callPolicy.find(p=>p.modelId===organizer.modelId&&p.model===organizer.model);
+    const organizer=context.attachedOrganizer;
+    const organizerPolicy=modelCallPolicies(execution.billing.callPolicy).find(p=>p.modelId===organizer.modelId&&p.model===organizer.model);
     if(!organizerPolicy)throw new Error('RUNTIME_ORGANIZER_DENIED');
     const instructions=organizer.instructions ?? 'Organize this operation result. Preserve provenance and uncertainty. Do not add new facts.';
     const organizerInput=organizer.input ? organizer.input+'\n\nPrimary assistant reply:\n'+body : body;

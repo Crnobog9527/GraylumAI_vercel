@@ -38,7 +38,8 @@ export interface RuntimeOperation {
 
 /** Construct from authenticated host identity only. The migration owns every state transition. */
 export function databaseRuntimeResearchStore(deps: {
-  admin: BillingRpc; db: SupabaseClient; scope: RuntimeResearchScope;
+  /** Unused: every read and write goes through the 0263 RPCs (tables stay closed). */
+  admin: BillingRpc; db?: SupabaseClient; scope: RuntimeResearchScope;
 }) {
   const { admin, scope } = deps;
   const a = scope.userId;

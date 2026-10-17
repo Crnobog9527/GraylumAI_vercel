@@ -8,6 +8,7 @@ import { afterAll, beforeAll, expect, it } from 'vitest';
 // The real review page against fusionReview answers shaped like the API's (FUSION-REVIEW PR-5). No model is called.
 let browser: Browser;
 let code: string;
+let css: string;
 const entry = fileURLToPath(new URL('./__review_page_fixture__.js', import.meta.url));
 const DRAFT = '30000000-0000-4000-8000-000000000001';
 const REVIEW = '30000000-0000-4000-8000-000000000002';
@@ -16,16 +17,18 @@ const PANEL = { reviewers: [{ seat: 'A', name: '目标用户' }, { seat: 'B', na
   summary: { seat: 'S', name: '主笔' } };
 const ruling = (section: string, opinion: string, adopted: boolean) => ({ section, issue: '问题', reviewers: ['A', 'C'], single: false,
   disputed: false, opinion, reason: '理由足够长，写清楚为什么要这样改。', fix: '改法', adopted });
-const detail = (state: string, draftId = DRAFT) => ({
+/** Chapter titles as long as a real report's: the contents column must not grow over the reading column. */
+const LONG = '二、你真正想要的结果，以及这条路能不能走通（约 500 字）';
+const detail = (state: string, draftId = DRAFT, long = false, adoption: unknown = null) => ({
   reviewId: REVIEW, draftId, state, outcome: state === 'completed' ? { kind: 'revised' } : null,
   seats: ['A', 'B', 'C'].map(seat => ({ seat, rounds: [{ round: 1, status: state === 'running' ? 'pending' : 'usable', decisions: [], issues: [] }] })),
   summary: state === 'running' ? { status: 'none', sections: [] } : { status: 'usable', sections: [
-    { section: '定位', changed: true, wordingOnly: false, original: '给所有上班族的家常菜。', revised: '给刚独居的上班族的十五分钟家常菜。',
-      fields: [], linkedSections: [], rulings: [ruling('定位', '定位要写清人群', true)] },
+    { section: long ? LONG : '定位', changed: true, wordingOnly: false, original: '给所有上班族的家常菜。', revised: '给刚独居的上班族的十五分钟家常菜。',
+      fields: [], linkedSections: [], rulings: [ruling(long ? LONG : '定位', '定位要写清人群', true)] },
     { section: '全文', changed: false, wordingOnly: false, fields: [], linkedSections: [], rulings: [ruling('全文', '全文语气要统一', false)] },
   ] },
-  adoption: null, awaitingChoice: state === 'completed',
-  chapters: [{ section: '定位', body: '给所有上班族的家常菜。' }, { section: '结语', body: '先把承诺做扎实。' }],
+  adoption, awaitingChoice: state === 'completed' && !adoption,
+  chapters: [{ section: long ? LONG : '定位', body: '给所有上班族的家常菜。' }, { section: '结语', body: '先把承诺做扎实。' }],
 });
 const events = (state: string) => ({ ended: false, events: [
   { id: 'review_started', type: 'review_started', reviewers: ['A', 'B', 'C'], sections: 2 },
@@ -65,12 +68,15 @@ beforeAll(async () => {
   });
   const output = Array.isArray(bundle) ? bundle[0].output : bundle.output;
   code = output.find((item: { type: string }) => item.type === 'chunk').code;
+  // The page's own stylesheets, so layout checks (overlap, sideways scrolling) run on the real layout.
+  css = output.filter((item: { type: string; fileName: string }) => item.type === 'asset' && item.fileName.endsWith('.css'))
+    .map((item: { source: string | Uint8Array }) => String(item.source)).join('\n');
   const chrome = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
   browser = await chromium.launch({ executablePath: existsSync(chrome) ? chrome : undefined, headless: true });
 }, 60000);
 afterAll(async () => { await browser?.close(); }, 30000);
 
-async function open(state: string, opts: { draftId?: string; width?: number } = {}) {
+async function open(state: string, opts: { draftId?: string; width?: number; long?: boolean; adoption?: unknown } = {}) {
   const page = await browser.newPage({ viewport: { width: opts.width ?? 1440, height: 900 } });
   page.setDefaultTimeout(5000);
   const errors: string[] = [];
@@ -83,7 +89,7 @@ async function open(state: string, opts: { draftId?: string; width?: number } = 
     calls[name] = (calls[name] ?? 0) + 1;
     // A slow server: a double click must still send one request.
     if (name === 'fusionReview.adopt' || name === 'fusionReview.confirmAdoption') await new Promise(done => setTimeout(done, 300));
-    const result = name === 'fusionReview.detail' ? detail(state, opts.draftId) : name === 'fusionReview.events' ? events(state)
+    const result = name === 'fusionReview.detail' ? detail(state, opts.draftId, opts.long, opts.adoption) : name === 'fusionReview.events' ? events(state)
       : name === 'fusionReview.panel' ? PANEL : name === 'opc.list' ? { drafts: [{ draftId: DRAFT, businessName: '小林做饭' }] }
         : name === 'fusionReview.adopt' ? { state: 'proposed', revisionId: 'rev', diffHash: 'a'.repeat(64), adopted: ['定位'], kept: [],
           diff: { changes: [{ stepId: 's', stepTitle: '定位', fieldId: 'f', fieldTitle: '一句话定位', before: { value: '旧', status: 'confirmed' },
@@ -96,6 +102,7 @@ async function open(state: string, opts: { draftId?: string; width?: number } = 
   });
   // localhost is a secure context, as the real https site is (crypto.randomUUID).
   await page.goto('http://localhost/');
+  await page.addStyleTag({ content: css });
   await page.addScriptTag({ content: code });
   return { page, errors, calls };
 }
@@ -134,6 +141,23 @@ it('plays a running review with the administrator\'s seat names, hands it to the
     expect(calls['fusionReview.continue']).toBeGreaterThanOrEqual(1);
     await page.getByRole('button', { name: '先去忙别的' }).click();
     expect(await page.evaluate(() => (window as unknown as { __pushed?: string }).__pushed)).toBe(`/positioning/${DRAFT}`);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 30000);
+
+it('keeps 看全文 clickable at computer width when chapter titles are long (staging 2026-10-17)', async () => {
+  const { page, errors } = await open('completed', { long: true });
+  try {
+    await ui(page.getByRole('heading', { name: '评审团的结果' })).toBeVisible({ timeout: 8000 });
+    // The contents stay inside their column: nothing of them lies over the reading column.
+    const overlap = await page.evaluate(() => {
+      const toc = document.querySelector('nav[aria-label="报告目录"]')!;
+      const column = document.getElementById('jury-reader-chapters')!.getBoundingClientRect().left;
+      return [toc, ...toc.querySelectorAll('*')].some(node => node.getBoundingClientRect().right > column);
+    });
+    expect(overlap).toBe(false);
+    await page.getByRole('radio', { name: '看全文' }).click({ timeout: 3000 });
+    await ui(page.getByText('先把承诺做扎实。').first()).toBeVisible();
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 30000);
@@ -183,6 +207,7 @@ async function openEntry(answers: { enabled: boolean; mine?: unknown[]; refuse?:
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ result: { data: result } }) });
   });
   await page.goto('http://localhost/#entry');
+  await page.addStyleTag({ content: css });
   await page.addScriptTag({ content: code });
   await ui(page.getByText('定位页脚')).toBeVisible({ timeout: 8000 });
   await page.waitForLoadState('networkidle');
@@ -243,6 +268,24 @@ it('says a declined revision was declined, not that every chapter was kept', asy
     await ui(page.getByText(/你放弃了这次修改/)).toBeVisible({ timeout: 5000 });
     await ui(page.getByText(/你选择全部保留原文/)).toHaveCount(0);
     expect(calls['fusionReview.confirmAdoption']).toBe(1);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 30000);
+
+it('shows an adopted review with the choices made then, not as waiting for a choice (staging 2026-10-17)', async () => {
+  // As fusionReview.detail returns it after a reload: the choice draft on this device is gone, the record remains.
+  const adoption = { state: 'recorded', decision: 'apply', at: '2026-10-14T09:26:00Z', versionId: 'v2', adopted: ['定位'], kept: [] };
+  const { page, errors, calls } = await open('completed', { adoption });
+  try {
+    await ui(page.getByText('新版本已生成')).toBeVisible({ timeout: 8000 });
+    await ui(page.getByText(/逐章选择采用或保留/)).toHaveCount(0);
+    await ui(page.getByText('已选 1/1')).toBeVisible();
+    await ui(page.getByRole('navigation', { name: '报告目录' }).getByText('未选')).toHaveCount(0);
+    await ui(page.getByRole('navigation', { name: '报告目录' }).getByText('已选')).toHaveCount(1);
+    await ui(page.getByRole('radio', { name: /采用修订版/ })).toBeChecked();
+    await ui(page.getByRole('radio', { name: /采用修订版/ })).toBeDisabled();
+    await ui(page.getByRole('button', { name: '确认', exact: true })).toHaveCount(0);
+    expect(calls['fusionReview.adopt'] ?? 0).toBe(0);
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 30000);
