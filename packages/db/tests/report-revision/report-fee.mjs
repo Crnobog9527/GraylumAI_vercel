@@ -197,8 +197,8 @@ export async function runReportFee({db,Client,connectionString,report}) {
   // Reports still going (older than the ended ones) must not crowd the ended ones out of a small batch.
   await db.query(`INSERT INTO runtime_executions(id,actor_id,session_id,request_id,payload,history_revision,state)
     SELECT gen_random_uuid(),$1,$2,gen_random_uuid(),'{}',0,'running' FROM generate_series(1,3)`,[job.actor,job.session]);
-  const running = (await db.query(`SELECT id FROM runtime_executions WHERE actor_id=$1 AND state='running' AND billing_run_id IS NULL`,[job.actor])).rows;
-  for (const r of running) await db.query(`INSERT INTO report_fees(execution_id,actor_id,credits,pre_deduct_id,state,created_at)
+  const stillGoing = (await db.query(`SELECT id FROM runtime_executions WHERE actor_id=$1 AND state='running' AND billing_run_id IS NULL`,[job.actor])).rows;
+  for (const r of stillGoing) await db.query(`INSERT INTO report_fees(execution_id,actor_id,credits,pre_deduct_id,state,created_at)
     SELECT $1,$2,500,gen_random_uuid(),'held',now()-interval '2 days'`,[r.id,job.actor]);
   assert.equal(await service(db,'report_fee_settle_due',1),1,'a batch of one still reaches an ended fee behind running ones');
   assert.ok(await service(db,'report_fee_settle_due',100)>=1);
