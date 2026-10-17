@@ -19,8 +19,8 @@
 | L5 | Supabase Storage 文件的备份 | 未核实 | 数据库备份不含 Storage 文件 [S8]；Storage 自身是否另有备份，公开资料未写 | 未核实。需要问 Supabase 或看套餐说明 | 上线前核对 |
 | L6 | Vercel 运行日志（函数 stdout/stderr） | staging 为 Hobby（EXECUTOR.md 记录）。正式未核实。Log Drains：staging 团队查询返回 404，没有看到已配置的转存 | Hobby 1 小时、Pro 1 天、Enterprise 3 天；Observability Plus 30 天 [S7] | Hobby/Pro 都在 30 天以内。买 Observability Plus 正好 30 天。**以后加 Log Drains 会把日志转到第三方，必须先补那一家的保留期** | 升级 Pro 时确认没有开超过 30 天的附加项 |
 | L7 | Vercel 构建日志 | 每次部署都有 | 构建日志随部署长期保存（Vercel 社区和文档的说法） | **Owner 2026-10-12 已定：不含用户数据，不在承诺范围**（构建时不读用户数据） | — |
-| L8 | Vercel Analytics | 是否启用未核实 | 默认聚合，session hash 24 小时 [S11] | 自定义事件里不能放用户正文 | 前端改动时注意 |
-| L8b | Vercel Speed Insights | `apps/web/src/app/layout.tsx` 在 Vercel 的生产模式部署里挂了 `@vercel/speed-insights`，会上报真实用户的性能数据 | 保留期未查到 | 未核实：项目里是否已启用、保留多久、数据里有没有页面完整网址 | 上线前核对 |
+| L8 | Vercel Analytics | ANALYTICS PR-2 起代码里挂了 `<Analytics />`：只在 Vercel 生产模式部署、配置了 Termly、并且 Termly 判定可以统计时才加载（`NEXT_PUBLIC_VERCEL_ANALYTICS_CATEGORY=essential` 时不等同意）；上报前网址换成路由模板、只留登记过的 utm，登录验证页不上报。项目里是否打开 Web Analytics 未核实（Owner 平台设置） | 默认聚合，session hash 24 小时 [S11] | 自定义事件里不能放用户正文 | 前端改动时注意 |
+| L8b | Vercel Speed Insights | ANALYTICS PR-2 起和 L8 一样按 Termly 同意门控，上报的网址换成路由模板、去掉参数，登录验证页不上报（以前在生产模式部署里无条件上报真实网址） | 保留期未查到 | 未核实：项目里是否已启用、保留多久 | 上线前核对 |
 | L9 | Sentry 错误事件、性能追踪、会话回放 | staging 项目设了 `NEXT_PUBLIC_SENTRY_DSN`、`SENTRY_ORG/PROJECT`，staging 在上报。#865 起三处（浏览器、服务端、Edge）都在上报前脱敏，会话回放已关闭；#888 起改为白名单：事件只保留列出的字段（错误码、按路由模板处理的网址、代码位置、环境和版本、模型名和用量），其余字段和自由文本一律丢掉。`SENTRY_OTLP_TRACES_URL` 变量代码里没有引用，用途待总控核实 | 错误事件：Developer 30 天，Team 和 Business 90 天，按上报时的套餐计算 [Sentry 文档]；部分备份最多 90 天 [S11] | 保留期：**Owner 2026-10-12 已定：第三方例外，写入隐私条款**。内容：已核实（单元测试覆盖各类泄露情形）；staging 真实事件待 Owner 在 Sentry 抽查 | Owner 抽查 staging 事件；OTLP 变量由总控核实用途 |
 | L10 | Upstash Redis（限流） | staging 变量里有 `UPSTASH_REDIS_REST_URL/TOKEN` 和 `REDIS_URL`。限流键里带用户编号，比如 `account-erasure:<用户编号>`。`apps/web/src/lib/rateLimit.ts` 和 `packages/api/src/services/redisRateLimiter.ts` 的限流器都开了 `analytics: true` | 限流计数键按窗口过期；但 `@upstash/ratelimit` 2.0.8 的 analytics 会把传入的标识（含用户编号）写进统计桶，库里写死保留 `90d`。Upstash 控制台审计日志记录的是账号操作，免费库 7 天、按量 30 天、Pro 1 年 | **缺口**：analytics 统计里的用户编号保留 90 天，超过 E7，注销也不会删它。需要关掉 analytics，或者改成不带用户编号的标识，或者在 30 天内清掉 | 新开代码任务（见缺口汇总第 6 条） |
 | L11 | 邮件（Resend，作为 Supabase Auth 的 SMTP，Tokyo 区） | 用于验证码和找回密码邮件 | Resend 定价页：各套餐"数据保留 30 天"（2026-10-12 读取） | 在 30 天以内。已经发到用户邮箱的邮件我们删不掉 | — |
@@ -51,6 +51,9 @@
 | Sentry | 错误码、按路由模板处理的网址、代码位置、环境和版本（白名单，见 L9） | 30 或 90 天（看套餐） | Sentry 控制台可以删除单个问题和事件；也可以联系支持 | 上报前白名单脱敏已完成（#865、#888，见 L9），事件里不含能定位到个人的内容，所以注销时不需要逐条删 Sentry 事件；万一发现漏网事件，再按左列渠道删除。保留期按 Owner 决定作为第三方例外写入隐私条款 | 若要删除个别事件，记录事件编号（不记内容） |
 | hCaptcha（人机验证，登录、注册和注销弹窗都会用） | 用户浏览器直接把 IP、浏览器信息和验证数据发给 hCaptcha，不经过我们的服务器 | 隐私政策：IP、浏览器等技术数据尽快丢弃，但最多可保留到 cookie 过期后一年；发现滥用时更久。终端用户的请求要找网站方（我们），hCaptcha 不直接处理（2026-10-12 读取 [hCaptcha Privacy](https://www.hcaptcha.com/privacy)） | 网站方发邮件到 hCaptcha 支持邮箱申请删除，45 天内答复 | 我们这边不保存 hCaptcha 的验证数据；令牌由 Supabase Auth 校验一次 | 对方最长保留一年，超过 E7：**Owner 2026-10-12 已定：第三方例外，写入隐私条款**（原话："保留期选 A：第三方例外写进隐私条款；同意上线前补日志清理、限流统计清理、库外删除清单和 Sentry 脱敏。"）；不按用户逐个申请删除 |
 | Upstash | 限流键（含用户编号）、计数 | 键按我们设的过期时间失效 | 我们自己删除键，或等待过期 | 注销后键会按窗口过期；如有不过期的键要补删除 | 不需要对外申请 |
+| Google（GA4，ANALYTICS） | 浏览器在访客同意统计后直接发给 Google：随机 `client_id`（Cookie 里的假名编号）、页面路由模板（不含编号和参数）、来源域名、登记过的 utm、设备和大致地区、`sign_up`/`positioning_complete`/`begin_checkout` 事件；Google 另外处理 IP、设备和大致位置。`client_id` 和 IP 属于假名或技术个人数据。不发邮箱、用户编号、订单号 | GA4 后台保留期按 ANALYTICS O6 设 2 个月（Owner 操作，未核实） | GA 管理接口可按 `client_id` 删除，但按 O10 选 B 我们不保留账号和 `client_id` 的对应关系 | 注销不需要也无法按账号删 GA 数据，靠 2 个月保留期到期；按 O10 写入隐私条款 | 不需要逐个申请 |
+| Termly（同意弹窗） | 访客的同意记录（同意编号、时间、选择、IP 和浏览器信息），由浏览器直接发给 Termly | 按 Termly 政策，开账号后核对（未核实） | Termly 后台和支持渠道 | 同意记录是合规证据，按 Termly 规则保留 | 不按用户申请删除 |
+| Vercel（Web Analytics、Speed Insights，见 L8、L8b） | 页面路由模板（已去参数）、来源、国家、设备、性能指标；不用 Cookie | 访客识别哈希 24 小时；报表窗口按套餐 | 等待过期 | 不放个人信息，不需要按用户删除 | 不需要申请 |
 | Vercel | 运行日志（可能含请求网址和错误） | 1 小时到 3 天，看套餐 [S7] | 等待过期；没有逐条删除 | 日志里不写用户正文、邮箱、完整网址 | 自然过期，不需要申请 |
 | Supabase | 数据库、Storage 文件、Auth 账号、平台日志、备份 | 见清单一 L1–L5 | 我们自己用服务端接口删除；备份等过期 | 注销执行器已删除数据库内容、存储对象和 Auth 账号（staging 10-11 那条已核实） | 执行器在 `account_erasure_requests` 记录时间 |
 
