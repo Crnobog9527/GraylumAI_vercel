@@ -141,6 +141,29 @@ describe('ENTITLEMENTS APIs with real tRPC authentication middleware', () => {
     expect(f.writes.length).toBe(writes);
     expect(f.rows.system_settings![0]!.value).toBe(8);
   });
+  it.each(['single', 'bulk'] as const)('refuses D3 below the compare minimum or default tick count in %s writes (Owner 2026-10-03)', async mode => {
+    const f = fixture(); f.rows.profiles![0]!.role = 'admin';
+    const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+    f.rows.system_settings!.push({ key: 'fusion_settings', value: { version: 1,
+      compare: { enabled: false, minModels: 3, defaultModelIds: [id(1), id(2), id(3)], allowedModelIds: [id(1), id(2), id(3)] } } });
+    const caller = settingsRouter.createCaller(f.context);
+    const save = (value: unknown) => {
+      const input = { key: 'fusion_compare_max_models', value };
+      return mode === 'single' ? caller.updateSystemSettings(input) : caller.updateSystemSettingsBulk([input]);
+    };
+    const writes = f.writes.length;
+    await expect(save(2)).rejects.toBeDefined();
+    expect(f.writes.length).toBe(writes);
+    expect(f.rows.system_settings![0]!.value).toBe(4);
+    await save(3); // equal to the minimum and to the tick count is allowed
+    expect(f.rows.system_settings![0]!.value).toBe(3);
+  });
+  it('still changes D3 when the stored Fusion settings row is unreadable (D3 must stay repairable)', async () => {
+    const f = fixture(); f.rows.profiles![0]!.role = 'admin';
+    f.rows.system_settings!.push({ key: 'fusion_settings', value: '{not json' });
+    await settingsRouter.createCaller(f.context).updateSystemSettings({ key: 'fusion_compare_max_models', value: 2 });
+    expect(f.rows.system_settings![0]!.value).toBe(2);
+  });
   it('sanitizes management read/write failures', async () => {
     const f = fixture(); f.rows.profiles![0]!.role = 'admin'; f.failures.add('membership_plans');
     await expect(adminRouter.createCaller(f.context).updateMembershipPlan({ id: planIds.pro, allowFusionReview: true }))

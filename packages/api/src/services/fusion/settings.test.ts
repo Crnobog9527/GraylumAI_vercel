@@ -49,3 +49,31 @@ describe('Fusion settings', () => {
       displayNames: { reviewers: ['   ', 'B', 'C'], summary: 'S' } } }).success).toBe(false);
   });
 });
+
+describe('Fusion compare settings (FUSION-COMPARE §3.3)', () => {
+  const on = { ...DEFAULT_FUSION_SETTINGS, compare: { ...DEFAULT_FUSION_SETTINGS.compare, enabled: true,
+    allowedModelIds: [id(1), id(2), id(3)], defaultModelIds: [id(1), id(2)], minModels: 2, maxBudgetUsd: '2' } };
+  it('reads a row stored before this task (only `enabled`) with every other field at its default, off and unusable', async () => {
+    const old = { version: 1, review: DEFAULT_FUSION_SETTINGS.review, compare: { enabled: false } };
+    const read = await readFusionSettings(db(old));
+    expect(read.compare).toEqual(DEFAULT_FUSION_SETTINGS.compare);
+    expect(read.compare).toMatchObject({ minModels: 2, allowedModelIds: [], defaultModelIds: [], maxBudgetUsd: null });
+    // An old row that says enabled has no models or budget: refused, never half-configured.
+    await expect(readFusionSettings(db({ ...old, compare: { enabled: true } }))).rejects.toThrow('FUSION_SETTINGS_INVALID');
+  });
+  it('accepts a complete configuration and requires enough models, default ticks and a budget to enable', () => {
+    expect(fusionSettings.safeParse(on).success).toBe(true);
+    for (const compare of [{ allowedModelIds: [id(1)], defaultModelIds: [id(1)] }, { defaultModelIds: [id(1)] }, { maxBudgetUsd: null },
+      { minModels: 3 }])
+      expect(fusionSettings.safeParse({ ...on, compare: { ...on.compare, ...compare } }).success).toBe(false);
+  });
+  it('keeps the default ticks inside the allowlist, without duplicates, and the minimum at 2 or more', () => {
+    for (const compare of [{ defaultModelIds: [id(1), id(9)] }, { defaultModelIds: [id(1), id(1)] }, { allowedModelIds: [id(1), id(1), id(2)] },
+      { minModels: 1 }, { minModels: 9 }])
+      expect(fusionSettings.safeParse({ ...on, compare: { ...on.compare, ...compare } }).success).toBe(false);
+    // Disabled keeps its structure rules but needs no models.
+    expect(fusionSettings.safeParse({ ...on, compare: { ...on.compare, enabled: false, allowedModelIds: [], defaultModelIds: [] } }).success).toBe(true);
+    expect(fusionSettings.safeParse({ ...on, compare: { ...on.compare, answerOutputTokens: 100 } }).success).toBe(false);
+  });
+});
+

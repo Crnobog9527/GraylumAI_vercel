@@ -24,8 +24,10 @@ const admittedRoutes: Readonly<Record<string,string>> = {
   'anthropic/claude-opus-5.5':'anthropic',
 };
 // fusion_review / fusion_summary: FUSION-REVIEW per-model calls, claimed only as a billing group (0234).
+// fusion_compare: FUSION-COMPARE columns (0290), one plain-text streamed answer per model; its profile entry and
+// evidence come with FUSION-COMPARE PR-4.
 const phase = z.enum(['ordinary', 'skill', 'organizer', 'skill_matching', 'attached_organizer', 'report',
-  'fusion_review', 'fusion_summary']);
+  'fusion_review', 'fusion_summary', 'fusion_compare']);
 const sharedEvidence = {
   maxPromptToBytes: z.number().positive().max(0.7), maxPromptToUpper: z.number().positive().max(0.7),
   outputLimit: z.number().int().positive().max(PURPOSE_OUTPUT_CAP),
@@ -59,7 +61,7 @@ export const paygHostProfile = z.object({
   maxTools: z.number().int().min(2).max(PAYG_MAX_TOOLS), maxSchemaBytes: z.literal(16384),
   purposes: z.array(phase).min(1).max(8),
   requestFormats: z.array(z.enum(['serial-tools-v2', 'serial-tools-v4-stream',
-    'agent-turn-v5-stream', 'serial-tools-v6-reasoning', 'fusion-json-v1-stream'])).min(1).max(5),
+    'agent-turn-v5-stream', 'serial-tools-v6-reasoning', 'fusion-json-v1-stream', 'fusion-text-v1-stream'])).min(1).max(6),
   reasoningVariants: z.array(z.object({
     reasoning: reasoningPolicy,
     outputLimit: z.number().int().positive().max(PURPOSE_OUTPUT_CAP),
