@@ -84,3 +84,14 @@ describe("report document (R5)", () => {
     expect(canSave(doc, "## 一句话结论\n\n改了\n" + block)).toBe(false);
   });
 });
+
+describe("saved formal report strategy (REPORT-VISUAL)", async () => {
+  const { savedFormalStrategy } = await import("./saved-report");
+  it("takes the data stored at 定稿 and says when a jury revision kept the original data", () => {
+    const stored = { dataVersion: 1, validatedAt: "x", dropped: ["topics[3]"], textEdited: ["funnel"], data: { summary: "结论" } };
+    expect(savedFormalStrategy({ available: true, report: { generatedReport: { body: "## 一", data: stored, dataFrom: "source_version" } } }))
+      .toEqual({ data: { v: 1, data: { summary: "结论" }, dropped: ["topics[3]"], fallback: {} }, textEdited: ["funnel"], fromSource: true });
+    expect(savedFormalStrategy({ available: true, report: { generatedReport: { body: "## 一" } } })).toBeNull();
+    expect(savedFormalStrategy({ available: false, report: { generatedReport: { body: "## 一", data: stored } } })).toBeNull();
+  });
+});
