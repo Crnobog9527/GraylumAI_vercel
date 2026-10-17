@@ -16,7 +16,6 @@ function applyBaseEnv(): void {
     NEXT_PUBLIC_APP_URL: 'https://app.example.com',
     NEXT_PUBLIC_SITE_NAME: 'ExampleAI',
     NEXT_PUBLIC_SUPPORT_EMAIL: 'support@example.com',
-    OPENROUTER_API_KEY: `sk-or-${'a'.repeat(32)}`,
     DATABASE_URL: 'postgresql://postgres:password@example.supabase.co:6543/postgres',
     SENTRY_AUTH_TOKEN: `sntrys_${'a'.repeat(32)}`,
   };
@@ -116,15 +115,15 @@ describe('validateEnv', () => {
     expect(result.errors).toContain('启用 Stripe 时必须配置 NEXT_PUBLIC_APP_URL');
   });
 
-  it('requires OpenRouter as the only AI provider environment key', () => {
+  it('no longer requires an OpenRouter environment key (admin third-party keys page, OR-1) and still flags ANTHROPIC', () => {
     delete process.env.OPENROUTER_API_KEY;
     process.env.ANTHROPIC_API_KEY = `sk-ant-${'a'.repeat(40)}`;
 
     const result = validateEnv();
 
-    expect(result.valid).toBe(false);
-    expect(result.errors).toContain('必须配置 OPENROUTER_API_KEY');
-    expect(result.warnings).toContain('ANTHROPIC_API_KEY 已退役；Claude 模型请通过 OPENROUTER_API_KEY 调用');
+    expect(result.valid).toBe(true);
+    expect(result.errors.join('\n')).not.toContain('OPENROUTER');
+    expect(result.warnings).toContain('ANTHROPIC_API_KEY 已退役；Claude 模型通过 OpenRouter 调用（密钥在后台“第三方密钥”页填写）');
   });
 
   it('requires SUPABASE_SERVICE_ROLE_KEY when Stripe is enabled', () => {

@@ -10,6 +10,9 @@ export const openRouterLimits=z.object({
  promptUsdPerMillion:z.string(),completionUsdPerMillion:z.string(),requestUsd:z.string(),
  // MODEL-PRICING-SYNC / #572: total price of one cache-written token. Optional; absent on older quotes.
  cacheWriteUsdPerMillion:z.string().optional(),
+ // LIB-2d (0286): the route's price per input image (snapshot `image`), "0" when it has none.
+ // Present only on a route admitted for image input; it then also caps OpenRouter max_price.image.
+ imageUsd:z.string().optional(),
 }).strict();
 export type OpenRouterLimits=z.infer<typeof openRouterLimits>;
 const scale=1_000_000_000_000n;
@@ -40,6 +43,7 @@ export function openRouterBound(value:OpenRouterLimits,maxOutputTokens:number){
  if(bound<=0n)throw new Error('BILL2_PROVIDER_QUOTE_INVALID');
  return {upperUsd:formatted(bound),routing:{allow_fallbacks:false as const,require_parameters:true as const,only:[limits.providerSlug],max_price:{
   prompt:wireNumber(limits.promptUsdPerMillion),completion:wireNumber(limits.completionUsdPerMillion),request:wireNumber(limits.requestUsd),
+  ...(limits.imageUsd===undefined?{}:{image:wireNumber(limits.imageUsd)}),
  }}};
 }
 
@@ -55,9 +59,14 @@ export function measureCallInput(serializedRequest:string,protocolOverhead:numbe
   return {requestBytes,promptTokensUpper};
 }
 
-/** v2 only: same price maxima, routing and 12-place upward rounding as v1. */
-export function openRouterCallBound(value:OpenRouterLimits,maxOutputTokens:number,promptTokensUpper:number){
+/** v2 only: same price maxima, routing and 12-place upward rounding as v1.
+ * imageTokensUpper (already inside promptTokensUpper) also bills the route's image price once per
+ * token: an upper bound whether OpenRouter's `image` price is per image or per image token. */
+export function openRouterCallBound(value:OpenRouterLimits,maxOutputTokens:number,promptTokensUpper:number,imageTokensUpper=0){
   const limits=openRouterLimits.parse(value);
+  if(!Number.isSafeInteger(imageTokensUpper)||imageTokensUpper<0||imageTokensUpper>promptTokensUpper
+    ||(imageTokensUpper>0&&limits.imageUsd===undefined))throw new Error('BILL2_IMAGE_PRICE_REQUIRED');
+  const image=imageTokensUpper===0?0n:decimal(limits.imageUsd!)*BigInt(imageTokensUpper);
   if(!Number.isSafeInteger(promptTokensUpper)||promptTokensUpper<1
     ||!Number.isSafeInteger(maxOutputTokens)||maxOutputTokens<1
     ||promptTokensUpper+maxOutputTokens>limits.contextTokens)throw new Error('BILL2_PROVIDER_CAPACITY');
@@ -65,7 +74,7 @@ export function openRouterCallBound(value:OpenRouterLimits,maxOutputTokens:numbe
   const write=limits.cacheWriteUsdPerMillion===undefined?0n:decimal(limits.cacheWriteUsdPerMillion);
   const prompt=write>listed?write:listed;
   const numerator=prompt*BigInt(promptTokensUpper)+decimal(limits.completionUsdPerMillion)*BigInt(maxOutputTokens);
-  const bound=(numerator+999_999n)/1_000_000n+decimal(limits.requestUsd);
+  const bound=(numerator+999_999n)/1_000_000n+decimal(limits.requestUsd)+image;
   if(bound<=0n)throw new Error('BILL2_PROVIDER_QUOTE_INVALID');
   return {upperUsd:formatted(bound),routing:openRouterBound(limits,maxOutputTokens).routing};
 }

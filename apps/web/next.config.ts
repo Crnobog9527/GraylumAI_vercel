@@ -47,6 +47,8 @@ const nextConfig: NextConfig = {
     return [
       { source: "/chat", destination: "/positioning", permanent: false },
       { source: "/workbench", destination: "/positioning", permanent: false },
+      // The old /tutorials page (four generic cards) is gone; the tutorials live in the blog (PUBLIC-SITE cleanup).
+      { source: "/tutorials", destination: "/blog", permanent: true },
     ];
   },
   async headers() {

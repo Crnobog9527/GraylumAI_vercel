@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import {contentVisibilityFence} from '../accountErasure/content';
+import {executionVisibility,type ExecutionVisibility} from './libraryVisibility';
 import {withClaimNotice} from './claimNotice';
 import {NativeTextTransport,type NativeTextDelta} from './nativeProgress';
 import type {ResumeInput} from './paygRuntime';
@@ -37,6 +37,8 @@ export function runtimeLocalEndpoint(){
 export type OriginalExecutionHost={
  admin:SupabaseClient;user:SupabaseClient;actorId:string;budget:RuntimeBudget;
  authorization?:string|null;maintenanceEndpoint?:string;
+ /** A streaming route shares one fence between its yields and the executor (libraryVisibility.ts). */
+ visibility?:ExecutionVisibility;
 };
 
 /** Runs or recovers one admitted execution under its original frozen policy.
@@ -49,7 +51,7 @@ export async function executeOriginalExecution(host:OriginalExecutionHost,execut
   const actor=runtimeActor(host.user.auth,host.actorId,host.budget,host.authorization);
   const activateSkill=(candidate:Parameters<typeof activateRuntimeCandidate>[2])=>activateRuntimeCandidate(host.user,host.admin,candidate);
   let erasedWaitingClosed=false;
-  const visible=contentVisibilityFence(host.admin,host.actorId,executionId);
+  const fence=host.visibility??executionVisibility(host.admin,host.actorId,executionId),visible=fence.visible;
   const outcome=async<T extends {state:AgentTurnOutcome['state']}>(result:T)=>{
    if(erasedWaitingClosed)return {state:result.state};
    await visible();
@@ -65,7 +67,7 @@ export async function executeOriginalExecution(host:OriginalExecutionHost,execut
    return retained?{...result,...(reason?{unavailable:reason}:{})}:withClaimNotice(result);
   };
   const financial=inflightFinancialHost({database:host.admin,actorId:host.actorId,executionId,actor,budget:host.budget});
-  const base={database:financial.database,budget:host.budget,actor};
+  const base={database:financial.database,budget:host.budget,actor,onContext:fence.observe};
   const publicProgress=(event:RuntimeProgress)=>{if(!financial.isAccountClosed())onProgress?.(event);};
   const closeWaiting=async()=>{
    const closed=await finishErasedWaiting({database:host.admin,actorId:host.actorId,executionId,budget:host.budget});
@@ -104,6 +106,7 @@ export async function executeOriginalExecution(host:OriginalExecutionHost,execut
     const disabled={dispatch:async()=>{throw new Error('RUNTIME_DISPATCH_DISABLED');},
      lookup:async()=>{throw new Error('RUNTIME_DISPATCH_DISABLED');}};
     const waiting=await runtimeExecutor({...base,adapter:disabled,callGate:denyNewCalls}).execute(executionId);
+    await visible();// a waiting round may carry its saved primary body
     return ['waiting_credits','waiting_resume'].includes(waiting.state)
      ?{...waiting,unavailable:'RUNTIME_PRICE_CONFIGURATION_PENDING'}:waiting;
    }

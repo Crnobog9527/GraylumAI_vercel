@@ -277,3 +277,40 @@ it('bounds short lookup credential reads before any GET is sent',async()=>{
   expect(await result).toBeInstanceOf(Error);expect(transport).not.toHaveBeenCalled();
  }finally{timeout.mockRestore();vi.useRealTimers();}
 });
+it('LIB-2d: sends one measured inline JPEG only for the image purpose and its exact quote',async()=>{
+ const {openRouterCallBound}=await import('./openRouterPolicy');
+ const {syntheticJpeg}=await import('../__tests__/fixtures/syntheticJpeg');
+ const url='data:image/jpeg;base64,'+syntheticJpeg(1600,1131).toString('base64');
+ const limits={...identity.providerLimits,contextTokens:100000,imageUsd:'0'};
+ const routing=openRouterCallBound(limits,identity.outputLimit,1,0).routing;
+ const part={type:'image_url',image_url:{url}};
+ const wireFor=(content:unknown[],role='user')=>JSON.stringify({...JSON.parse(body),provider:routing,messages:[{role,content}]});
+ const wire=wireFor([{type:'text',text:'识别'},part]);
+ const image={dataUrlBytes:Buffer.byteLength(url),width:1600,height:1131,tokensUpper:2*115*81+2048};
+ const bytes=Buffer.byteLength(wire),t=bytes-image.dataUrlBytes+image.tokensUpper+200;
+ const nominalPricing={version:'nominal-v1' as const,pricingHash:'a'.repeat(64),endpointTag:'synthetic',
+  tiers:[{minPromptTokens:0,prompt:'2',completion:'0',request:'0'}],timeOfDay:[]};
+ const payg={policyId:'policy',policyVersion:'v1',profileVersion:'v1',evidenceVersion:'fixture-v1',bytes,templateTokens:100,
+  marginTokens:100,promptTokensUpper:t,messages:1,tools:0,schemaBytes:0,pricingHash:nominalPricing.pricingHash,endpointTag:'synthetic',
+  nominalPricing,image};
+ const v2={...identity,providerLimits:limits,payg,phase:'library_ocr',
+  upperUsd:openRouterCallBound(limits,identity.outputLimit,t,image.tokensUpper).upperUsd};
+ const credential=vi.fn(async()=> 'LOCAL_SYNTHETIC_KEY'),transport=vi.fn(async()=>new Response('{}'));
+ const adapter=openRouterAdapter({credential,transport});
+ await adapter.prepareDispatch({input:wire},v2);
+ expect(credential).toHaveBeenCalledTimes(1);credential.mockClear();
+ const textQuote:Record<string,unknown>={...payg};delete textQuote.image;
+ const denied:Array<[string,unknown]>=[
+  ['another purpose',{...v2,phase:'ordinary'}],
+  ['a quote without the image',{...v2,payg:{...textQuote,promptTokensUpper:bytes+200},
+   upperUsd:openRouterCallBound(limits,identity.outputLimit,bytes+200).upperUsd}],
+  ['a different measured size',{...v2,payg:{...payg,image:{...image,width:1599,tokensUpper:2*115*81+2048}}}],
+ ];
+ for(const [,frozen] of denied)await expect(adapter.prepareDispatch({input:wire},frozen as typeof v2)).rejects.toThrow(/DENIED|CONFLICT/);
+ for(const other of [wireFor([part,part]),wireFor([{type:'image_url',image_url:{url:'https://example.invalid/a.jpg'}}]),
+  wireFor([{type:'text',text:'x'},part],'assistant')]){
+  await expect(adapter.prepareDispatch({input:other},{...v2,payg:{...payg,bytes:Buffer.byteLength(other),
+   promptTokensUpper:Buffer.byteLength(other)-image.dataUrlBytes+image.tokensUpper+200}})).rejects.toThrow(/DENIED|CONFLICT/);
+ }
+ expect(credential).not.toHaveBeenCalled();expect(transport).not.toHaveBeenCalled();
+});

@@ -1,5 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import MarketingShell from '@/components/landing/MarketingShell';
+import { ExpertConsultCard } from '@/components/expert-consult/ExpertConsultCard';
+import { expertConsultPath } from '@/components/expert-consult/expertConsultCopy';
 import { PricingPlans } from '@/components/pricing/PricingPlans';
 import { PricingCreditPacks, PricingFaq, PricingStudio } from '@/components/pricing/PricingExtras';
 import { PRICING_COPY as COPY } from '@/components/pricing/pricingContent';
@@ -36,6 +38,7 @@ export default async function PricingPage() {
           membership: buildAuthHref('/profile?tab=subscription') }} />
         <PricingCreditPacks packages={packs.packages} plans={plans} failed={packs.failed} />
         <PricingStudio />
+        <ExpertConsultCard href={buildAuthHref(expertConsultPath('pricing'))} />
         <PricingFaq />
       </div>
     </MarketingShell>

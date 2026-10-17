@@ -21,7 +21,7 @@ const footerLinks = {
   support: {
     title: '支持',
     links: [
-      { label: '使用教程', href: '/tutorials' },
+      { label: '教程', href: '/blog' },
       { label: '常见问题', href: '/faq' },
     ],
   },

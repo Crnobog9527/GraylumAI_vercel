@@ -52,7 +52,7 @@
   border: 1px dashed var(--j-ink-soft); border-radius: 8px; background: var(--j-paper); color: var(--j-muted); font-size: 15px;
   animation: captionIn .45s var(--j-ease) both;
 }
-.doc h2 { margin: 0; font-family: var(--j-serif); font-size: 20px; font-weight: 700; line-height: 1.45; }
+.doc :is(h2,:where([data-demo-heading="h2"])) { margin: 0; font-family: var(--j-serif); font-size: 20px; font-weight: 700; line-height: 1.45; }
 .excerpt {
   display: -webkit-box; margin: 0; overflow: hidden; color: var(--j-muted); font-family: var(--j-serif); font-size: 15px; line-height: 1.75;
   -webkit-box-orient: vertical; -webkit-line-clamp: 2;
@@ -164,7 +164,7 @@ div.head, div.card { cursor: default; }
   .cards li, .doc, .unchanged { scroll-margin-top: 104px; scroll-margin-bottom: 16px; }
   .doc { width: 100%; padding: 14px 16px 12px; }
   .sink + .doc, .sink + .unchanged { margin-top: 20px; }
-  .doc h2 { font-size: 18px; }
+  .doc :is(h2,:where([data-demo-heading="h2"])) { font-size: 18px; }
   .wires { display: none; }
   .lanes {
     grid-template-columns: minmax(0, 1fr); gap: 16px; margin: 14px 0 0 12px; padding: 4px 0 0 16px; border-left: 1px solid var(--j-ink-soft);

@@ -4,7 +4,7 @@ const send = vi.fn<(...args: unknown[]) => boolean>(() => true);
 vi.mock('./ga', () => ({ sendGaEvent: (...args: unknown[]) => send(...args) }));
 vi.mock('./config', () => ({ ANALYTICS_CONFIG: { gaMeasurementId: 'G-TEST123' } }));
 
-const { reportSignUpIfNew } = await import('./events');
+const { reportBeginCheckout, reportSignUpIfNew } = await import('./events');
 
 const NOW = Date.parse('2026-10-17T10:00:00Z');
 let store: Record<string, string>;
@@ -46,5 +46,14 @@ describe('reportSignUpIfNew', () => {
     send.mockReturnValue(true);
     expect(reportSignUpIfNew(email, true, NOW)).toBe(true);
     expect(send).toHaveBeenLastCalledWith('G-TEST123', 'sign_up', { method: 'email' });
+  });
+});
+
+describe('reportBeginCheckout', () => {
+  it('sends only currency, the pre-tax value and the catalog item ID', () => {
+    reportBeginCheckout('plan-gold', 49);
+    expect(send).toHaveBeenLastCalledWith('G-TEST123', 'begin_checkout', { currency: 'USD', value: 49, items: [{ item_id: 'plan-gold' }] });
+    reportBeginCheckout('plan-gold', null);
+    expect(send).toHaveBeenLastCalledWith('G-TEST123', 'begin_checkout', { currency: 'USD', items: [{ item_id: 'plan-gold' }] });
   });
 });
