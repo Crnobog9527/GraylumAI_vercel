@@ -19,7 +19,10 @@ export function RefundPage({ supportEmail }: { supportEmail?: string | null }) {
   return (
     <SiteShell locale="zh-Hans" supportEmail={supportEmail}>
       <JsonLd data={[
-        webPageJsonLd({ path: REFUND_PAGE.path, title: REFUND_PAGE.metaTitle, description: REFUND_PAGE.metaDescription, locale: 'zh-Hans', dateModified: REFUND_PAGE.updated }),
+        webPageJsonLd({
+          path: REFUND_PAGE.path, title: REFUND_PAGE.metaTitle, description: REFUND_PAGE.metaDescription,
+          locale: 'zh-Hans', dateModified: REFUND_PAGE.updated,
+        }),
         breadcrumbJsonLd([...REFUND_PAGE.crumbs]),
       ]} />
       <article className="mx-auto max-w-3xl px-4 py-10 sm:px-6 md:py-14">
