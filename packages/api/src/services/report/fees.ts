@@ -32,7 +32,8 @@ export async function settleDueReportFees(admin: SupabaseClient): Promise<{ succ
 export function validateReportPrice(input: Array<{ key: string; value: unknown }>) {
   for (const setting of input) {
     if (setting.key !== REPORT_PRICE_KEY) continue;
-    if (!/^[1-9][0-9]{0,5}$/.test(String(setting.value).trim())) {
+    // Not trimmed: the stored value is what the database reads, so surrounding spaces are refused rather than saved.
+    if (!/^[1-9][0-9]{0,5}$/.test(String(setting.value))) {
       throw new TRPCError({ code: 'BAD_REQUEST', message: '报告价格要填 1–999999 之间的整数积分' });
     }
   }

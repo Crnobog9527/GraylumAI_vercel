@@ -33,10 +33,10 @@ describe('settings writer verification', () => {
 });
 
 describe('report fixed price setting validation (0299)', () => {
-  it.each(['500', 500, ' 1200 ', '999999'])('accepts %s', value => {
+  it.each(['500', 500, '1200', '999999'])('accepts %s', value => {
     expect(() => validateReportPrice([{ key: 'report_fixed_price_credits', value }])).not.toThrow();
   });
-  it.each(['', '0', '-5', '1.5', '1e3', '1000000', 'abc', 0])('rejects %s', value => {
+  it.each(['', '0', '-5', '1.5', '1e3', '1000000', 'abc', 0, ' 1200 ', '500 '])('rejects %s', value => {
     expect(() => validateReportPrice([{ key: 'report_fixed_price_credits', value }])).toThrow('报告价格要填');
   });
   it('ignores other keys', () => {
