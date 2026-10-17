@@ -15,7 +15,7 @@ vi.mock('@/lib/use-payg-resume',()=>({usePaygResume:(refetch:()=>Promise<unknown
   call:(token:{executionId:string;cursor:number;epoch:number})=>Promise<unknown>)=>{state.resumeRefetch=refetch;state.resumeCall=call;
  return {busy:false,admitted:()=>true,block:()=>undefined,turnNotices:()=>[],blockedNotices:()=>[]};}}));
 vi.mock('./use-runtime-stream',()=>({useRuntimeStream:(sessionId:string)=>{state.sessionArg=sessionId;
- return {reply:state.reply,run:vi.fn(),resume:state.resume,freeze:vi.fn(),call:{isSuccess:false},streaming:Boolean(state.reply)};}}));
+ return {reply:state.reply,run:vi.fn(),resume:state.resume,freeze:vi.fn(),sourceDeleted:[],call:{isSuccess:false},streaming:Boolean(state.reply)};}}));
 vi.mock('@/trpc/client',()=>{
  const namespace=(group:string)=>new Proxy({}, {get:(_,name)=>({
   useQuery:()=>({data:group==='runtime'&&name==='view'?{scope:{kind:'positioning_draft'},executions:state.executions}:undefined,error:null,refetch:async()=>undefined}),

@@ -5,8 +5,10 @@ import Paragraph from "@tiptap/extension-paragraph";
 import Text from "@tiptap/extension-text";
 import { EditorState, TextSelection } from "@tiptap/pm/state";
 import { expect, it } from "vitest";
-import { COMPOSER_REFERENCES_ENABLED, findReferenceQuery, LibraryReferenceNode, referencesIn } from "./composer-references";
-import { docToText } from "./composer-text";
+import {
+  COMPOSER_REFERENCES_ENABLED, findReferenceQuery, LibraryReferenceNode, mergeReferences, referenceRequest, referencesIn, referencesNamedIn, sameReferences,
+} from "./composer-references";
+import { docToText, textToDoc } from "./composer-text";
 import { matchingDocuments, referenceFor } from "./reference-menu";
 
 const schema = getSchema([Document, Paragraph, Text, LibraryReferenceNode]);
@@ -61,4 +63,44 @@ it("offers only ready text documents whose name matches, at most eight", () => {
   expect(matchingDocuments(documents, "WEEKLY").length).toBe(8);
   expect(matchingDocuments(documents, "").map(d => d.id).slice(0, 3)).toEqual(["a", "d", "e"]);
   expect(referenceFor(item("e", null))).toEqual({ documentId: "e", version: 3, label: "未命名文档" });
+});
+
+// UI-B wiring: a value the page sets (restored draft, failed send) gets its references back.
+it("turns each @名称 of a known reference back into that reference, and reads back as the same text", () => {
+  const weekly = { documentId: "d1", version: 2, label: "周报 (v1).md" };
+  const monthly = { documentId: "d2", version: 7, label: "月报" };
+  const text = "对比@周报 (v1).md和 @月报\n\n@月报汇总 不是 @别的";
+  const doc = schema.nodeFromJSON(textToDoc(text, [weekly, monthly]));
+  // "@月报汇总" also starts with a known name: it is that reference followed by text, as the box showed it.
+  expect(referencesIn(doc)).toEqual([weekly, monthly]);
+  expect(docToText(doc)).toBe(text);
+  expect(schema.nodeFromJSON(textToDoc(text)).toJSON()).toEqual(schema.nodeFromJSON(textToDoc(text, [])).toJSON());
+  expect(referencesIn(schema.nodeFromJSON(textToDoc(text)))).toEqual([]);
+});
+
+it("restores two documents with the same name in their order", () => {
+  const a = { documentId: "a", version: 1, label: "笔记" }, b = { documentId: "b", version: 1, label: "笔记" };
+  const doc = schema.nodeFromJSON(textToDoc("@笔记 和 @笔记", [a, b]));
+  expect(referencesIn(doc)).toEqual([a, b]);
+});
+
+it("sends only id and version, compares versions too, and merges failed-send references first", () => {
+  const a = { documentId: "a", version: 1, label: "甲" }, b = { documentId: "b", version: 2, label: "乙" };
+  expect(referenceRequest([a, b])).toEqual([
+    { kind: "library_document", documentId: "a", version: 1 }, { kind: "library_document", documentId: "b", version: 2 },
+  ]);
+  expect(sameReferences([a], [{ ...a, label: "改名" }])).toBe(true);
+  expect(sameReferences([a], [{ ...a, version: 2 }])).toBe(false);
+  expect(sameReferences([a, b], [b, a])).toBe(false);
+  expect(mergeReferences([b], [a, { ...b, version: 9 }])).toEqual([b, a]);
+  // Two valid sets never add up past the server's limit of five.
+  const many = (prefix: string, count: number) => Array.from({ length: count }, (_, n) => ({ documentId: prefix + n, version: 1, label: prefix + n }));
+  expect(mergeReferences(many("p", 5), many("q", 3)).map(item => item.documentId)).toEqual(["p0", "p1", "p2", "p3", "p4"]);
+  expect(mergeReferences(many("p", 3), many("q", 4)).map(item => item.documentId)).toEqual(["p0", "p1", "p2", "q0", "q1"]);
+});
+
+it("keeps only the references the text still names, so a stale stored list never rides along", () => {
+  const a = { documentId: "a", version: 1, label: "甲.md" }, b = { documentId: "b", version: 1, label: "乙.md" };
+  expect(referencesNamedIn("看 @甲.md 然后", [a, b])).toEqual([a]);
+  expect(referencesNamedIn("改过了，不再提文档", [a, b])).toEqual([]);
 });
