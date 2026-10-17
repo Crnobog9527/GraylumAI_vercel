@@ -22,6 +22,23 @@ export const L_SAMPLES_REDO = {
   /** Step one's report, round seven (T4): the whole report under the overview, with its chapter list. */
   reportBody: '完整报告',
   close: '关闭',
+  /**
+   * Round eight (U6, Owner 2026-10-18: "用户案例和用户成果对用户来说特别重要……要加强这种重视感"): a strip of figures under
+   * the title, then pick a person on the left and read their report's overview on the right. The people stay examples.
+   */
+  stats: (count: number) => [`${count} 种人`, '每份都是 13 章的完整报告', '对标数据来自公开平台'] as const,
+  pickLabel: '选一种和你像的人',
+  groups: [
+    { name: '副业', slugs: ['side-hustle', 'student', 'mom', 'cross-border'] },
+    { name: '实体店', slugs: ['shop', 'restaurant', 'handmade'] },
+    { name: '专业服务', slugs: ['accountant', 'designer', 'trainer', 'realtor'] },
+    { name: '创作者', slugs: ['creator', 'course-creator', 'solo-founder'] },
+  ] as const,
+  /** The widest group first: a side income next to a day job. */
+  defaultSlug: 'side-hustle',
+  adjustedLead: '教练建议调整了方向：',
+  viewing: (who: string, platform: string) => `${who} · ${platform} 的报告概览`,
+  mine: '我也要一份 → 免费和教练聊聊',
   /** NEW (round five): the dialog's 15-second overview, its blocks' headings. */
   overview: {
     title: '15 秒看懂这份报告',

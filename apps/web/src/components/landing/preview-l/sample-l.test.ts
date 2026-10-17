@@ -149,26 +149,29 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     for (const word of ['世界最强', '没有分歧', '再辩一轮', '最多两轮']) expect(on).not.toContain(word);
   });
 
-  it('moves every group\'s sample report as a card of one shape, every copy clickable, opening in a dialog', () => {
+  it('lets a visitor pick one of the 14 people and read their report overview in place (round eight, U6)', () => {
     const html = render();
     expect(L_REPORTS.length).toBe(14);
     const start = html.indexOf('id="samples-title"');
     const region = html.slice(start, html.indexOf('</dialog>', start));
     expect(region).toContain(L_SAMPLES_REDO.title);
-    for (const word of ['用户案例', '人物为虚构', '教练说真话']) expect(region).not.toContain(word);
+    for (const stat of L_SAMPLES_REDO.stats(L_REPORTS.length)) expect(region).toContain(escape(stat));
+    for (const word of ['用户案例', '人物为虚构', '教练说真话', '由产品实际生成']) expect(region).not.toContain(word);
+    // Every person once, in one of the four groups, as a button that shows their report.
+    const grouped = L_SAMPLES_REDO.groups.flatMap(group => group.slugs) as readonly string[];
+    expect([...grouped].sort()).toEqual(L_REPORTS.map(report => report.slug).sort());
     for (const report of L_REPORTS) {
-      expect(region).toContain(`<b>${escape(report.who)}</b>${escape(report.platform)}`);
-      expect(region).toContain(escape(SAMPLE_CHAPTERS[report.slug].summary.what));
+      expect(region).toContain(`data-slug="${report.slug}"`);
+      expect(region).toContain(`<b>${escape(report.who)}</b><span>${escape(report.platform)}</span>`);
     }
-    // The loop's second copy is hidden from screen readers and the tab order, but never inert: a click on it works.
-    expect(region).not.toContain('inert');
-    expect(region).toMatch(/<ul[^>]*aria-hidden="true"/);
-    const buttons = region.match(/<button type="button"[^>]*data-slug="[^"]+"[^>]*>/g) ?? [];
-    expect(buttons.length).toBe(L_REPORTS.length * 2);
-    expect(buttons.filter(button => button.includes('tabindex="-1"'))).toHaveLength(L_REPORTS.length);
-    // One grey 示例 tag on every card, 方向已调整 on the reports whose direction the coach changed.
-    expect(region.split(`>${L_SAMPLES_REDO.sample}<`).length - 1).toBe(L_REPORTS.length * 2);
-    expect(region.split(`>${L_SAMPLES_REDO.adjusted}<`).length - 1).toBe(L_REPORTS.filter(report => report.truth).length * 2);
+    // 方向已调整 on the people whose direction the coach changed; the chosen one (the widest group) shown with 示例.
+    const picker = region.slice(region.indexOf('<nav'), region.indexOf('</nav>'));
+    expect(picker.split(`>${L_SAMPLES_REDO.adjusted}<`).length - 1).toBe(L_REPORTS.filter(report => report.truth).length);
+    expect(region).toContain(`data-slug="${L_SAMPLES_REDO.defaultSlug}" aria-pressed="true"`);
+    expect(region).toContain(`>${L_SAMPLES_REDO.sample}<`);
+    expect(region).toContain(escape(SAMPLE_OVERVIEWS[L_SAMPLES_REDO.defaultSlug].positioning));
+    expect(region).toContain(`>${L_SAMPLES_REDO.fullReport}</button>`);
+    expect(region).toContain(escape(L_SAMPLES_REDO.mine));
     expect(html).toContain('<dialog');
     expect(render(ALL_ON, false)).not.toContain('id="samples-title"');
   });
@@ -361,8 +364,8 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     expect(seenOrder).toEqual([0, 1, 2, 3]);
   });
 
-  it('keeps "14 种人" in one piece in the samples\' lede', () => {
-    expect(render()).toMatch(/<span[^>]*>14 种人<\/span>/);
+  it('keeps "14 种人" in one piece in the samples\' strip of figures', () => {
+    expect(render()).toMatch(/<li>14 种人<\/li>/);
   });
 });
 

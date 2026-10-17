@@ -1,76 +1,94 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
 
-import { useRef, useState, type CSSProperties } from 'react';
+import { useRef, useState } from 'react';
+import Link from 'next/link';
 import { FileText, X } from 'lucide-react';
-import { CtaK } from '@/components/landing/preview-k/CtaK';
 import k from '@/components/landing/preview-k/k.module.css';
 import { FullReport } from '@/components/landing/preview-j/SamplesJ';
+import page from '@/components/landing/preview-j/j.module.css';
 import samples from '@/components/landing/preview-j/samples-j.module.css';
 import { J_SAMPLES } from '@/lib/landing/landing-copy-j-samples';
 import { L_REPORTS } from '@/lib/landing/landing-copy-l';
 import { L_SAMPLES_REDO as COPY } from '@/lib/landing/landing-copy-l-samples';
 import { SAMPLE_CHAPTERS } from '@/lib/landing/sample-reports';
 import { SAMPLE_OVERVIEWS } from '@/lib/landing/sample-reports/overview';
+import { SIGNUP_CTA_HREF } from '@/lib/seo/content/shared';
+import { cn } from '@/lib/utils';
+import demo from './demo-l.module.css';
 import { OverviewL } from './OverviewL';
 import styles from './l.module.css';
 import own from './samples-l.module.css';
 
 type Report = (typeof L_REPORTS)[number];
-/** Each half of the moving row holds at least this many cards, so the row is never shorter than a wide screen. */
-const MIN_CARDS = 8;
+const bySlug = new Map(L_REPORTS.map(report => [report.slug, report]));
 
 /**
- * Region 4 (Owner 2026-10-17, redone): "找到和你情况一样的人". Every group's sample report is a card of one size in a row
- * that keeps moving from right to left; the pointer or keyboard focus on it holds it. A card shows the group and
- * platform, the one-sentence conclusion (three lines at most), its tags (「示例」, and 「方向已调整」 when the coach changed
- * the direction) and 「看这份报告」. Every visible card opens its report, the loop's second copy too: that copy is hidden
- * from screen readers and taken out of the tab order, but a click on it works. The dialog: the cover, the 15-second
- * overview (OverviewL, round five) and the whole report behind "看完整报告". Reduced motion and touch screens: the row stands still and is
- * swiped by hand. New reports join by adding them to L_REPORTS and sample-reports/.
+ * Region 5 (Owner 2026-10-17; round eight, U6, 2026-10-18: "用户案例和用户成果对用户来说特别重要，也是增加信任度的地方……
+ * 怎么样去加强这种重视感"): "找到和你情况一样的人". Under the title a strip of figures; then two columns: on the left the
+ * 14 people in four groups (on a phone, one row of chips that scrolls sideways), on the right the chosen person's
+ * report overview itself (OverviewL, the dialog's), read in place without opening anything: the coach's change of
+ * direction first when there was one, then the overview, then "看完整报告" (the dialog: cover, overview and the whole
+ * report) and the way to get one's own. Every person is an example and says so (「示例」, 「方向已调整」).
  */
 export function SamplesL() {
+  const [slug, setSlug] = useState<string>(COPY.defaultSlug);
   const [open, setOpen] = useState<Report | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
-  const reports = L_REPORTS;
-  const half = Array.from({ length: Math.ceil(MIN_CARDS / reports.length) }, () => reports).flat();
+  const viewer = useRef<HTMLDivElement>(null);
+  const chosen = bySlug.get(slug) ?? L_REPORTS[0];
+  const overview = SAMPLE_OVERVIEWS[chosen.slug];
   const show = (report: Report) => { setOpen(report); dialog.current?.showModal(); };
+  const pick = (next: string) => { setSlug(next); if (viewer.current) viewer.current.scrollTop = 0; };
   const data = open ? SAMPLE_CHAPTERS[open.slug] : null;
   return (
     <section aria-labelledby="samples-title" className={k.section} data-zone="takeover" data-region="样例报告">
       <div className={k.wrap}>
-        <div className={k.samplesHead}>
+        <div className={own.head}>
           <h2 id="samples-title" className={k.lead}>{COPY.title}</h2>
-          <p className={own.lede}>
-            {COPY.ledeParts(reports.length).map(part => <span key={part} className={own.keep}>{part}</span>)}
-          </p>
+          <ul className={own.stats}>{COPY.stats(L_REPORTS.length).map(item => <li key={item}>{item}</li>)}</ul>
+        </div>
+        <div className={own.browser}>
+          <nav aria-label={COPY.pickLabel} className={cn(own.picker, demo.scrollbar)}>
+            {COPY.groups.map(group => (
+              <div key={group.name} className={own.group}>
+                <p className={own.groupName}>{group.name}</p>
+                <ul>
+                  {group.slugs.map(id => bySlug.get(id)).filter((report): report is Report => Boolean(report)).map(report => (
+                    <li key={report.slug}>
+                      <button type="button" data-slug={report.slug} aria-pressed={report.slug === chosen.slug} onClick={() => pick(report.slug)}>
+                        <b>{report.who}</b><span>{report.platform}</span>
+                        {report.truth ? <em className={own.adjustedTag}>{COPY.adjusted}</em> : null}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </nav>
+          <div ref={viewer} className={cn(own.viewer, demo.scrollbar)} role="region" aria-live="polite"
+            aria-label={COPY.viewing(chosen.who, chosen.platform)}>
+            <header className={own.viewerHead}>
+              <FileText size={18} aria-hidden="true" />
+              <p><b>{chosen.who}</b><span>{chosen.platform}</span></p>
+              <span className={own.tags}>
+                <span className={own.sampleTag}>{COPY.sample}</span>
+                {chosen.truth ? <span className={own.adjustedTag}>{COPY.adjusted}</span> : null}
+              </span>
+            </header>
+            {chosen.truth && overview?.riskAlert ? (
+              <p className={own.adjustedNote}><b>{COPY.adjustedLead}</b>{overview.riskAlert.headline}</p>
+            ) : null}
+            {overview ? <OverviewL key={chosen.slug} data={overview} /> : null}
+            <div className={own.actions}>
+              <button type="button" className={own.fullButton} onClick={() => show(chosen)}>
+                <FileText size={16} aria-hidden="true" />{COPY.fullReport}
+              </button>
+              <Link href={SIGNUP_CTA_HREF} className={page.pill}>{COPY.mine}</Link>
+            </div>
+          </div>
         </div>
       </div>
-      <div className={styles.marquee} data-region="报告卡片">
-        <div className={styles.marqueeTrack} style={{ '--count': half.length } as CSSProperties}>
-          {[0, 1].map(copy => (
-            <ul key={copy} className={styles.marqueeList} aria-hidden={copy === 1 || undefined} data-copy={copy}>
-              {half.map((report, index) => (
-                <li key={`${report.slug}-${index}`}>
-                  <button type="button" className={own.card} onClick={() => show(report)} tabIndex={copy === 1 ? -1 : undefined}
-                    data-slug={report.slug} aria-label={`${COPY.open}：${report.who} · ${report.platform}`}>
-                    <span className={own.cardHead}>
-                      <FileText size={15} aria-hidden="true" /><span><b>{report.who}</b>{report.platform}</span>
-                    </span>
-                    <span className={own.cardWhat}>{SAMPLE_CHAPTERS[report.slug].summary.what}</span>
-                    <span className={own.tags}>
-                      <span className={own.sampleTag}>{COPY.sample}</span>
-                      {report.truth ? <span className={own.adjustedTag}>{COPY.adjusted}</span> : null}
-                    </span>
-                    <span className={own.cardOpen}>{COPY.open}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ))}
-        </div>
-      </div>
-      <div className={k.wrap}><CtaK /></div>
 
       <dialog ref={dialog} className={styles.reportDialog} aria-label={open ? `${open.who} · ${open.platform}` : COPY.title}
         onClose={() => setOpen(null)} onClick={event => { if (event.target === event.currentTarget) dialog.current?.close(); }}>
