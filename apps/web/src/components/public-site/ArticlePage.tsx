@@ -120,6 +120,25 @@ export function ArticlePage({ content, supportEmail, demo }: {
           <section key={section.h2} className="mt-12">
             <h2 className="text-2xl font-semibold">{section.h2}</h2>
             <Block block={section} />
+            {section.table ? (
+              <div className="mt-6 overflow-x-auto rounded-xl border border-[#262626]">
+                <table className="w-full min-w-[34rem] border-collapse text-left text-sm leading-7 text-[#C8C8C8]">
+                  <caption className="sr-only">{section.table.caption}</caption>
+                  <thead className="bg-[#141414] text-white">
+                    <tr>{section.table.head.map(cell => <th key={cell} scope="col" className="px-4 py-3 font-semibold">{cell}</th>)}</tr>
+                  </thead>
+                  <tbody>
+                    {section.table.rows.map(row => (
+                      <tr key={row[0]} className="border-t border-[#262626] align-top">
+                        {row.map((cell, index) => index === 0
+                          ? <th key={cell} scope="row" className="px-4 py-3 font-semibold text-white">{cell}</th>
+                          : <td key={cell} className="px-4 py-3">{cell}</td>)}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
             {section.subsections?.map(subsection => (
               <div key={subsection.h3} className="mt-6">
                 <h3 className="text-lg font-semibold text-white">{subsection.h3}</h3>
