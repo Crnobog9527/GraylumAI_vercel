@@ -88,6 +88,7 @@ function fixture(limit = 12) {
       if (!refresh && fetches.has('account')) return fetches.get('account')!;
       return { claimed: true, fetchId: id, attempt: refresh ?? 'first-attempt' };
     }),
+    fetchResume: vi.fn<RuntimeResearchStore['fetchResume']>().mockResolvedValue(null),
     fetchDispatch: vi.fn<RuntimeResearchStore['fetchDispatch']>().mockResolvedValue(true),
     fetchFinish: vi.fn<RuntimeResearchStore['fetchFinish']>(async (fetchId, _attempt, state, saved) => {
       fetches.set('account', { claimed: false, fetchId, state, evidence: saved });
@@ -385,8 +386,10 @@ describe('benchmark fetch cache and refresh', () => {
     // Neither failed nor charged-and-closed: the paid profile stays usable by this attempt.
     expect(f.store.fetchFinish).not.toHaveBeenCalled();
     expect(f.supplierCalls).toHaveBeenCalledTimes(1);
-    // After the top-up the same answer takes its own attempt back (SQL: resumed) and reuses the profile it paid for.
-    f.store.fetchClaim.mockResolvedValueOnce({ claimed: true, fetchId: id, attempt: 'first-attempt', resumed: true });
+    // After the top-up the claim still reports the attempt in progress; the same answer takes it back (0283) and
+    // reuses the profile it paid for.
+    f.store.fetchClaim.mockResolvedValueOnce({ claimed: false, fetchId: id, state: 'in_progress', evidence: null });
+    f.store.fetchResume.mockResolvedValueOnce({ fetchId: id, attempt: 'first-attempt' });
     const result = await f.makeExecute()('benchmark_fetch', fetchArgs);
     expect(result).toMatchObject({ status: 'ok' });
     expect(result.items).toHaveLength(1);
@@ -397,9 +400,19 @@ describe('benchmark fetch cache and refresh', () => {
     expect(f.store.fetchFinish).toHaveBeenCalledExactlyOnceWith(id, 'first-attempt', 'succeeded', expect.any(Object));
   });
 
+  it('an in-progress attempt this answer does not hold stays untouched and is reported incomplete', async () => {
+    const f = fixture();
+    f.store.fetchClaim.mockResolvedValueOnce({ claimed: false, fetchId: id, state: 'in_progress', evidence: null });
+    expect(await f.execute('benchmark_fetch', fetchArgs)).toMatchObject({ status: 'partial' });
+    expect(f.store.fetchResume).toHaveBeenCalledExactlyOnceWith('tiktok', 'alice', undefined);
+    expect(subcall).not.toHaveBeenCalled();
+    expect(f.store.fetchFinish).not.toHaveBeenCalled();
+  });
+
   it('a resumed attempt whose later subcall fails for another reason is not closed by the replaying answer', async () => {
     const f = fixture();
-    f.store.fetchClaim.mockResolvedValueOnce({ claimed: true, fetchId: id, attempt: 'first-attempt', resumed: true });
+    f.store.fetchClaim.mockResolvedValueOnce({ claimed: false, fetchId: id, state: 'in_progress', evidence: null });
+    f.store.fetchResume.mockResolvedValueOnce({ fetchId: id, attempt: 'first-attempt' });
     const failure = new Error('RUNTIME_RESPONSE_PENDING');
     subcall.mockRejectedValueOnce(failure);
     await expect(f.execute('benchmark_fetch', fetchArgs)).rejects.toBe(failure);

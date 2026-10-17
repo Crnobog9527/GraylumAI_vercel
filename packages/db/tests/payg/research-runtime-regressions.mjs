@@ -134,29 +134,32 @@ export async function researchRuntimeRegressionCases({db,report,createFixture}) 
       assert.deepEqual((await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null)).evidence,evidence);
     }
   });
-  await check('BILL-PAYG balance pause: only the answer holding an in-progress attempt continues it',async()=>{
+  await check('BILL-PAYG balance pause: only the answer holding an in-progress attempt gets it back (0283)',async()=>{
     const f=await fixture(db,createFixture),e2=await answer(db,f);
+    const resume=(e,refresh=null)=>rpc(db,'research_account_fetch_resume',f.actor,f.session,e,'tiktok','alpha',refresh);
+    assert.equal(await resume(f.execution),null,'no fetch yet');
     const fetch=await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null);
-    assert.equal(fetch.resumed,undefined);
-    // Still prepared (paused before its first subcall): an ordinary claim rotates it, as before.
-    const rotated=await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null);
-    assert.equal(rotated.resumed,undefined);assert.notEqual(rotated.attempt,fetch.attempt);
-    assert.equal(await rpc(db,'research_account_fetch_dispatch',f.actor,fetch.fetchId,rotated.attempt),true);
-    assert.deepEqual(await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null),
-      {claimed:true,fetchId:fetch.fetchId,attempt:rotated.attempt,resumed:true});
-    // Another answer never takes it over, and the resumed attempt cannot be marked sent a second time.
-    assert.equal((await rpc(db,'research_account_fetch_claim',f.actor,f.session,e2,'tiktok','alpha',null)).claimed,false);
-    assert.equal(await rpc(db,'research_account_fetch_dispatch',f.actor,fetch.fetchId,rotated.attempt),false);
-    await rpc(db,'research_account_fetch_finish',f.actor,fetch.fetchId,rotated.attempt,'succeeded',accountEvidence());
-    const done=await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null);
-    assert.deepEqual({claimed:done.claimed,state:done.state},{claimed:false,state:'succeeded'});
-    // A refresh attempt resumes only with its own grant; the ordinary path does not take it over.
+    assert.equal(await resume(f.execution),null,'prepared: an ordinary claim takes it over instead');
+    assert.equal(await rpc(db,'research_account_fetch_dispatch',f.actor,fetch.fetchId,fetch.attempt),true);
+    // The claim itself is unchanged: old hosts keep seeing the attempt in progress during a rolling deploy.
+    assert.deepEqual(await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','@Alpha',null),
+      {claimed:false,fetchId:fetch.fetchId,state:'in_progress',evidence:null});
+    assert.deepEqual(await rpc(db,'research_account_fetch_resume',f.actor,f.session,f.execution,'tiktok',' Alpha ',null),
+      {fetchId:fetch.fetchId,attempt:fetch.attempt});
+    // Another answer never gets it; a resumed attempt cannot be marked sent a second time.
+    assert.equal(await resume(e2),null);
+    assert.equal(await rpc(db,'research_account_fetch_dispatch',f.actor,fetch.fetchId,fetch.attempt),false);
+    await rpc(db,'research_account_fetch_finish',f.actor,fetch.fetchId,fetch.attempt,'succeeded',accountEvidence());
+    assert.equal(await resume(f.execution),null,'finished attempts are not resumed');
+    // A refresh attempt is returned only with its own grant.
     const grant=await rpc(db,'research_refresh_create',f.actor,f.session,'tiktok','alpha');
     const refresh=await rpc(db,'research_account_fetch_claim',f.actor,f.session,e2,'tiktok','alpha',grant);
     await rpc(db,'research_account_fetch_dispatch',f.actor,fetch.fetchId,refresh.attempt);
-    assert.equal((await rpc(db,'research_account_fetch_claim',f.actor,f.session,e2,'tiktok','alpha',null)).claimed,false);
-    assert.deepEqual(await rpc(db,'research_account_fetch_claim',f.actor,f.session,e2,'tiktok','alpha',grant),
-      {claimed:true,fetchId:fetch.fetchId,attempt:refresh.attempt,resumed:true});
+    assert.equal(await resume(e2),null);
+    assert.deepEqual(await resume(e2,grant),{fetchId:fetch.fetchId,attempt:refresh.attempt});
+    // Host only.
+    for(const role of ['anon','authenticated'])
+      assert.equal((await db.query(`SELECT has_function_privilege($1,'public.research_account_fetch_resume(uuid,uuid,uuid,text,text,uuid)','EXECUTE') v`,[role])).rows[0].v,false);
   });
   assert.deepEqual(failures,[],'RT-3b review regressions');
 }

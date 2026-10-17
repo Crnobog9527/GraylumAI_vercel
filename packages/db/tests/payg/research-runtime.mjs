@@ -121,11 +121,9 @@ export async function researchRuntimeCases({db,Client,connectionString,report,cr
     assert.equal(await rpc(db,'research_account_fetch_dispatch',f.actor,first.fetchId,crashed.attempt),false);
     assert.equal(await rpc(db,'research_account_fetch_dispatch',f.actor,first.fetchId,first.attempt),true);
     assert.equal(await rpc(db,'research_account_fetch_dispatch',f.actor,first.fetchId,first.attempt),false,'sent once');
-    // Once sent, it is never claimed anew: only the same answer gets the same attempt back after a balance pause (0283),
-    // and that attempt still cannot be marked sent again. Other answers: BILL-PAYG case in research-runtime-regressions.
+    // Once sent, it is never claimed again.
     assert.deepEqual(await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null),
-      {claimed:true,fetchId:first.fetchId,attempt:first.attempt,resumed:true});
-    assert.equal(await rpc(db,'research_account_fetch_dispatch',f.actor,first.fetchId,first.attempt),false,'still sent once');
+      {claimed:false,fetchId:first.fetchId,state:'in_progress',evidence:null});
     await assert.rejects(rpc(db,'research_refresh_create',f.actor,f.session,'tiktok','alpha'),/RESEARCH_REFRESH_INVALID/);
     await rpc(db,'research_account_fetch_finish',f.actor,first.fetchId,first.attempt,'succeeded',accountEvidence('op-1'));
     assert.deepEqual((await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null)).evidence,accountEvidence('op-1'));
@@ -154,10 +152,7 @@ export async function researchRuntimeCases({db,Client,connectionString,report,cr
     assert.notEqual(r2.attempt,crashedRefresh.attempt);
     assert.equal(await rpc(db,'research_account_fetch_dispatch',f.actor,first.fetchId,crashedRefresh.attempt),false);
     await rpc(db,'research_account_fetch_dispatch',f.actor,first.fetchId,r2.attempt);
-    // Sent: the same answer and grant only get this attempt back (balance pause, 0283), never a new one to send.
-    assert.deepEqual(await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',grant2),
-      {claimed:true,fetchId:first.fetchId,attempt:r2.attempt,resumed:true});
-    assert.equal(await rpc(db,'research_account_fetch_dispatch',f.actor,first.fetchId,r2.attempt),false);
+    await assert.rejects(rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',grant2),/RESEARCH_REFRESH_USED/);
     await assert.rejects(rpc(db,'research_account_fetch_finish',f.actor,first.fetchId,r2.attempt,'succeeded',null),/RESEARCH_FETCH_INVALID/);
     await rpc(db,'research_account_fetch_finish',f.actor,first.fetchId,r2.attempt,'succeeded',accountEvidence('op-2'));
     assert.deepEqual((await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null)).evidence,accountEvidence('op-2'));
@@ -347,12 +342,9 @@ export async function researchRuntimeCases({db,Client,connectionString,report,cr
     const one = await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok','alpha',null);
     assert.equal(one.claimed,true);
     await rpc(db,'research_account_fetch_dispatch',f.actor,one.fetchId,one.attempt);
-    // Sent once: any other spelling of the same account finds that fetch and never gets a new attempt to send
-    // (the same answer only gets the sent attempt back, 0283; it cannot be marked sent again).
+    // Sent once: any other spelling of the same account finds that fetch and never sends again.
     for (const written of [' Alpha ','@ALPHA','alpha'])
-      assert.deepEqual(await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok',written,null),
-        {claimed:true,fetchId:one.fetchId,attempt:one.attempt,resumed:true},written);
-    assert.equal(await rpc(db,'research_account_fetch_dispatch',f.actor,one.fetchId,one.attempt),false);
+      assert.equal((await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok',written,null)).claimed,false,written);
     await rpc(db,'research_account_fetch_finish',f.actor,one.fetchId,one.attempt,'succeeded',accountEvidence('op-1'));
     const grant = await rpc(db,'research_refresh_create',f.actor,f.session,'tiktok','@Alpha');
     const refreshed = await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'tiktok',' alpha',grant);
@@ -364,9 +356,7 @@ export async function researchRuntimeCases({db,Client,connectionString,report,cr
     await rpc(db,'research_account_fetch_dispatch',f.actor,lower.fetchId,lower.attempt);
     const upper = await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'youtube',yt.toUpperCase(),null);
     assert.deepEqual([upper.claimed,upper.fetchId===lower.fetchId],[true,false]);
-    // Spaces around the same channel id find the sent attempt (returned only to this answer, 0283), never a new one.
-    assert.deepEqual(await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'youtube',' '+yt+' ',null),
-      {claimed:true,fetchId:lower.fetchId,attempt:lower.attempt,resumed:true});
+    assert.equal((await rpc(db,'research_account_fetch_claim',f.actor,f.session,f.execution,'youtube',' '+yt+' ',null)).claimed,false);
     report.checks.push('RT-3b account key: on TikTok, X and Instagram, case, surrounding spaces and a leading @ name the same account for cards, fetches and refresh grants (fetched and paid for once); case-sensitive ids (YouTube channel) stay distinct');
   }
 
