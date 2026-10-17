@@ -205,6 +205,17 @@ export async function runCases({db,Client,connectionString,report}) {
       await db.query('SET LOCAL ROLE service_role');
       assert.equal((await db.query('SELECT research_benchmark_rows($1,$2) v',[f.actor,f.session])).rows[0].v.rows.length,18);
     } finally {await db.query('ROLLBACK');}
+    // RT-5 research.benchmarks reads through research_benchmark_rows: the owner only. Another user, or the owner
+    // naming another user's session, is refused; client roles cannot call it at all.
+    await assert.rejects(rpc(db,'research_benchmark_rows',other.actor,f.session),/RESEARCH_SCOPE_DENIED/);
+    await assert.rejects(rpc(db,'research_benchmark_rows',f.actor,other.session),/RESEARCH_SCOPE_DENIED/);
+    for (const role of ['anon','authenticated']) {
+      await db.query('BEGIN');
+      try {
+        await db.query(`SET LOCAL ROLE ${role}`);
+        await assert.rejects(db.query('SELECT research_benchmark_rows($1,$2)',[f.actor,f.session]),/permission denied/,role);
+      } finally {await db.query('ROLLBACK');}
+    }
     await assert.rejects(db.query(`UPDATE research_benchmarks SET qualified=true,category='imitable',excluded=NULL,followers=5000,
       last_published_at=now(),posts_analyzed=1 WHERE fetch_id=$1`,[got.fetchId]),/check constraint/);
   });

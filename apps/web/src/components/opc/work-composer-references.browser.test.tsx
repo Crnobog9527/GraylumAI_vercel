@@ -26,27 +26,39 @@ beforeAll(async () => {
       if (id === '@/trpc/client' || id.endsWith('/trpc/client')) return TRPC;
       if (id === 'next/link') return LINK;
     }, load(id: string) {
-      // Library list answers from window.listData and records every call's `enabled`, so "off" can prove no request.
-      if (id === TRPC) return `export const trpc={
-        library:{list:{useQuery:(input,options)=>{window.listCalls.push(Boolean(options&&options.enabled));
+      // Library list and search answer from window.listData and record every call's `enabled`, so "off" can prove no
+      // request; search filters by file name as the server does (#933) and records the text it was asked for.
+      if (id === TRPC) return `const answer=(options,data)=>{
           if(options&&options.enabled&&window.listLoading)return {isLoading:true,error:null,data:undefined,refetch(){}};
-          return options&&options.enabled?{isLoading:false,error:null,data:window.listData,refetch(){}}
-            :{isLoading:false,error:null,data:undefined,refetch(){}}}}},
+          return options&&options.enabled?{isLoading:false,error:null,data,refetch(){}}
+            :{isLoading:false,error:null,data:undefined,refetch(){}}};
+        export const trpc={
+        library:{list:{useQuery:(input,options)=>{window.listCalls.push(Boolean(options&&options.enabled));
+          return answer(options,window.listData)}},
+          search:{useQuery:(input,options)=>{window.listCalls.push(Boolean(options&&options.enabled));
+            if(options&&options.enabled)window.searches.push(input.query);
+            return answer(options,{nextCursor:null,documents:window.listData.documents.filter(d=>d.kind==='document'
+              &&d.status==='ready'&&d.filename.toLowerCase().includes(input.query.toLowerCase()))})}}},
         runtime:{choices:{useQuery:()=>({isLoading:false,error:null,data:undefined,refetch(){}})}}};`;
       if (id === LINK) return `import React from 'react'; export default function Link(p){return React.createElement('a',p)}`;
       if (id === entry) return `import React from 'react'; import {createRoot} from 'react-dom/client';
         import {WorkComposer} from ${JSON.stringify(source)};
-        window.sent=[]; window.value=''; window.listCalls=[];
+        window.sent=[]; window.value=''; window.listCalls=[]; window.searches=[]; window.reported=[]; window.sentReferences=[];
         const doc=(id,filename,extra={})=>({id,filename,kind:'document',status:'ready',content_version:4,format:'md',purpose:'reference',
           original_bytes:1,text_bytes:1,created_at:'2026-10-13T00:00:00Z',...extra});
         window.listData={usedBytes:0,capacityBytes:1,uploadEnabled:false,nextCursor:null,documents:[
           doc('d1','周报 第1周.md'),doc('d2','周报草稿.docx',{status:'processing'}),doc('d3','周报截图.png',{kind:'image'}),
-          doc('d4','月报.pdf'),doc('d5','周报 第2周.md')]};
+          doc('d4','月报.pdf'),doc('d5','周报 第2周.md'),
+          ...['甲','乙','丙','丁','戊'].map((name,index)=>doc('k'+index,'资料'+name+'.md'))]};
+        // A page like /runtime: it keeps the references with the value and can set both (a restored draft).
         function Host({references,maxLength}){
           const [value,setValue]=React.useState('');
+          const [list,setList]=React.useState([]);
           window.value=value; window.setValue=setValue;
+          window.setDraft=(text,refs)=>{setValue(text);setList(refs);};
           return React.createElement(WorkComposer,{value,onChange:setValue,label:'消息',placeholder:'写点什么',references,maxLength,
-            onSend:()=>{window.sent.push(value);setValue('');}});
+            referenceList:list,onReferencesChange:next=>{window.reported.push(next);setList(next);},
+            onSend:()=>{window.sent.push(value);window.sentReferences.push(list.map(r=>r.documentId+'@'+r.version));setValue('');}});
         }
         const root=createRoot(document.getElementById('root'));
         window.mount=(references,maxLength=20000)=>root.render(React.createElement(Host,{references,maxLength}));`;
@@ -194,4 +206,85 @@ it('does not send while the document list is still loading', () => open(true, as
   await page.keyboard.press('Enter');
   expect(await read<string[]>(page, 'sent')).toEqual([]);
   expect(await read<string>(page, 'value')).toBe('参考@周');
+}));
+
+// UI-B wiring (#1022): server search, references reported to the page, restored from it, at most five.
+it('searches every document on the server by the typed name; an empty @ lists the recent ones', () => open(true, async page => {
+  await page.keyboard.type('@');
+  await ui(page.getByRole('option')).toHaveCount(8);
+  expect(await read<string[]>(page, 'searches')).toEqual([]);
+  await page.keyboard.type('资料');
+  await ui(page.getByRole('option')).toHaveText(['资料甲.md', '资料乙.md', '资料丙.md', '资料丁.md', '资料戊.md']);
+  expect(await read<string[]>(page, 'searches')).toContain('资料');
+  await ui(menu(page)).toContainText('每条消息最多引用 5 篇文档。');
+  await ui(menu(page)).not.toContainText('尚未开放');
+}));
+
+it('reports each change of the references to the page, which sends them with the text', () => open(true, async page => {
+  await page.keyboard.type('对比@月');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('和@第1周');
+  await ui(page.getByRole('option')).toHaveCount(1);
+  await page.keyboard.press('Enter');
+  expect((await read<Array<Array<{ documentId: string }>>>(page, 'reported')).at(-1)!.map(r => r.documentId)).toEqual(['d4', 'd1']);
+  await page.keyboard.press('Backspace');
+  await page.keyboard.press('Backspace');
+  expect((await read<Array<Array<{ documentId: string }>>>(page, 'reported')).at(-1)!.map(r => r.documentId)).toEqual(['d4']);
+  await page.keyboard.type('总结');
+  await page.keyboard.press('Enter');
+  expect(await read<string[]>(page, 'sent')).toEqual(['对比@月报.pdf 和总结']);
+  expect(await read<string[][]>(page, 'sentReferences')).toEqual([['d4@4']]);
+  // The box is empty after the send: no references are left over for the next message.
+  expect((await read<Array<unknown[]>>(page, 'reported')).at(-1)).toEqual([]);
+}));
+
+it('a draft the page restores (reload, failed send) gets its references back as tags', () => open(true, async page => {
+  await page.evaluate(() => (window as unknown as { setDraft: (t: string, r: unknown[]) => void }).setDraft('看 @月报.pdf 和 @周报 第2周.md',
+    [{ documentId: 'd4', version: 4, label: '月报.pdf' }, { documentId: 'd5', version: 4, label: '周报 第2周.md' }]));
+  await ui(box(page).locator('[data-library-reference="d4"]')).toHaveText('@月报.pdf');
+  await ui(box(page).locator('[data-library-reference="d5"]')).toHaveText('@周报 第2周.md');
+  expect(await read<string>(page, 'value')).toBe('看 @月报.pdf 和 @周报 第2周.md');
+  await box(page).click();
+  await page.keyboard.press('End');
+  await page.keyboard.press('Enter');
+  expect(await read<string[][]>(page, 'sentReferences')).toEqual([['d4@4', 'd5@4']]);
+}));
+
+it('refuses a sixth document with a notice, and Enter sends again', () => open(true, async page => {
+  for (const name of ['甲', '乙', '丙', '丁', '戊']) {
+    await page.keyboard.type('@资料' + name);
+    await ui(page.getByRole('option')).toHaveCount(1);
+    await page.keyboard.press('Enter');
+  }
+  await ui(box(page).locator('.library-reference')).toHaveCount(5);
+  await page.keyboard.type('@月');
+  await ui(page.getByRole('option')).toHaveCount(1);
+  await page.keyboard.press('Enter');
+  await ui(page.getByRole('alert')).toHaveText('每条消息最多引用 5 篇文档。');
+  await ui(box(page).locator('.library-reference')).toHaveCount(5);
+  // The same document again is not a sixth one: it replaces its earlier tag.
+  await page.keyboard.press('Backspace');
+  await page.keyboard.press('Backspace');
+  await page.keyboard.type('@资料甲');
+  await ui(page.getByRole('option')).toHaveCount(1);
+  await page.keyboard.press('Enter');
+  await ui(box(page).locator('.library-reference')).toHaveCount(5);
+  await ui(box(page).locator('[data-library-reference="k0"]')).toHaveCount(1);
+  await page.keyboard.press('Enter');
+  expect((await read<string[][]>(page, 'sentReferences'))[0]).toHaveLength(5);
+}));
+
+it('choosing a document that is already in the message replaces its older tag with the new version', () => open(true, async page => {
+  await page.evaluate(() => (window as unknown as { setDraft: (t: string, r: unknown[]) => void }).setDraft('看 @月报.pdf 然后',
+    [{ documentId: 'd4', version: 1, label: '月报.pdf' }]));
+  await ui(box(page).locator('[data-library-reference="d4"]')).toHaveCount(1);
+  await box(page).click();
+  await page.keyboard.press('End');
+  await page.keyboard.type(' @月');
+  await ui(page.getByRole('option')).toHaveCount(1);
+  await page.keyboard.press('Enter');
+  await ui(box(page).locator('[data-library-reference="d4"]')).toHaveCount(1);
+  expect((await read<Array<Array<{ documentId: string; version: number }>>>(page, 'reported')).at(-1)).toMatchObject([{ documentId: 'd4', version: 4 }]);
+  await page.keyboard.press('Enter');
+  expect(await read<string[][]>(page, 'sentReferences')).toEqual([['d4@4']]);
 }));

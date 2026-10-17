@@ -35,6 +35,22 @@ describe('Post for Me webhook', () => {
     expect(rpc).not.toHaveBeenCalled();
   });
 
+  it('a publish result goes through the idempotent record path with a safe link only', async () => {
+    const rpc = vi.fn(() => ({ abortSignal: () => Promise.resolve({ data: true, error: null }) }));
+    const db = () => ({ rpc }) as never;
+    const result = { event_type: 'social.post.result.created', data: { id: 'spr_1', post_id: 'sp_1',
+      social_account_id: 'spc_1', success: true, platform_data: { url: 'https://x.com/u/status/1' } } };
+    expect(await handlePostForMeWebhook(post(result), SECRET, db)).toEqual({ status: 200, body: { ok: true } });
+    expect(rpc).toHaveBeenCalledWith('publish_monitor_publish_webhook_result', { p_provider_post_id: 'sp_1',
+      p_provider_account_id: 'spc_1', p_success: true, p_url: 'https://x.com/u/status/1' });
+    rpc.mockClear();
+    await handlePostForMeWebhook(post({ ...result, data: { ...result.data, platform_data: { url: 'http://127.0.0.1/x' } } }),
+      SECRET, db);
+    expect(rpc).toHaveBeenCalledWith('publish_monitor_publish_webhook_result', expect.objectContaining({ p_url: null }));
+    expect((await handlePostForMeWebhook(post({ event_type: 'social.post.result.created', data: { post_id: '../x' } }),
+      SECRET, db)).status).toBe(400);
+  });
+
   it('a slow or failing write answers 503 within the deadline so the provider retries', async () => {
     const slow = vi.fn(() => ({ abortSignal: (signal: AbortSignal) => new Promise((_, reject) =>
       signal.addEventListener('abort', () => reject(new Error('aborted')))) }));
