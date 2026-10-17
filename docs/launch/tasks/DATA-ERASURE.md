@@ -331,7 +331,7 @@ PR-A 留给后续 PR 的必做事项：
 |conversations ([0002][m0002],[0004][m0004],[0069][m0069],[0091][m0091])|D 标题/摘要/summary_metadata|其 messages/snapshots/chat/slice/ordinary 请求处理后；[0078][m0078] 拦截|
 |messages ([0002][m0002],[0004][m0004],[0014][m0014])|D 正文/部分回答及 metadata|先清 snapshots 派生、token_stats.message_id 断链；原始 FK 未证实|
 |credit_transactions ([0002][m0002],[0018][m0018a],[0024][m0024],[0044][m0044],[0053][m0053],[0105][m0105])|M description 可含被邀请者邮箱([0025][m0025]/[0028][m0028])；留 amount、余额前后、ledger/source/reason code、订单/退款/周期/幂等编号和时间|不随 profile 删；billing_history/subscription grants 对其 FK SET NULL，但账务证据期内保持必要关联|
-|tickets ([0002][m0002],[0004][m0004],[0010][m0010])|D 工单描述、附件；若金钱争议仅摘取最少 M 字段|ticket_replies 后；基线 FK 未证实|
+|tickets ([0002][m0002],[0004][m0004],[0010][m0010],[0278][m0278])|D 工单描述、附件；若金钱争议仅摘取最少 M 字段。EXPERT-CONSULT 的专家诊断预约（`category='consult'`）就是工单，需求和联系方式只存在工单描述里，同样删除，不另设保留期|ticket_replies 后；基线 FK 未证实|
 |ticket_replies ([0002][m0002],[0004][m0004],[0010][m0010])|D content/attachments、回复人标识|先清存储对象再删 replies；同一工单他人/管理员回复不能保留用户正文副本|
 |invitations ([0002][m0002],[0019][m0019],[0025][m0025],[0028][m0028])|D code、created_by/used_by 关系；必要防刷另用 Owner 批准最小标识|invitation_records/返佣关联先结算脱敏，原始 FK 未证实|
 |invitation_records ([0002][m0002],[0020][m0020],[0025][m0025],[0026][m0026],[0028][m0028])|M 奖励证据；删 inviter_email/invitee_email/IP/UA/block_reason 自由文本，移除两端账户身份|涉及未注销邀请人时保留其合法账项但删被注销者身份；编号/奖励金额留最少；基线 FK 未证实|
@@ -505,6 +505,7 @@ PR-A 留给后续 PR 的必做事项：
 [m0008]: ../../../packages/db/migrations/0008_modules_schema_update.sql
 [m0009]: ../../../packages/db/migrations/0009_context_length_limit.sql
 [m0010]: ../../../packages/db/migrations/0010_ticket_auto_close_supabase_cron.sql
+[m0278]: ../../../packages/db/migrations/0278_expert_consult_requests.sql
 [m0012]: ../../../packages/db/migrations/0012_stripe_payments.sql
 [m0013]: ../../../packages/db/migrations/0013_checkin_rewards.sql
 [m0014]: ../../../packages/db/migrations/0014_ai_runtime_closure.sql
