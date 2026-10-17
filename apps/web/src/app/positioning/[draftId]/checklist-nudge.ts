@@ -5,7 +5,7 @@ import { isStepSummaryInput, STEP_SUMMARY_LABEL } from "./step-summary";
 
 /**
  * Fields the user changed in the checklist and saved since their last message, per step.
- * The mentor is told about them only when the user clicks "让导师接着聊": saving never
+ * The mentor is told about them only when the user clicks "让 AI 教练接着聊": saving never
  * calls the model by itself, and any message the user sends clears the list.
  */
 type Storage = Pick<globalThis.Storage, "getItem" | "setItem" | "removeItem">;
@@ -70,5 +70,5 @@ export function shownInput(input: string | null | undefined) {
 export function nudgeNotice(fieldIds: readonly string[], onClick: () => void, disabled: boolean, queued = false): ChatNotice | null {
   if (!fieldIds.length || queued) return null;
   return { id: "checklist-nudge", tone: "status", text: `你在清单里更新了 ${fieldIds.length} 项`,
-    actions: [{ label: "让导师接着聊", onClick, disabled }] };
+    actions: [{ label: "让 AI 教练接着聊", onClick, disabled }] };
 }
