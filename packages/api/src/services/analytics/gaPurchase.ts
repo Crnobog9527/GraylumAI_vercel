@@ -35,12 +35,14 @@ export function gaServerConfig(env: Record<string, string | undefined> = process
   return MEASUREMENT_ID.test(measurementId) && apiSecret.length >= 8 ? { measurementId, apiSecret } : null;
 }
 
-/** The moment the ids' consent counts from: the browser's capture time when it is plausible (within 10 minutes of the
- * server's own stamp) and earlier, else the server's request start. Never later than the server's stamp. */
-export function effectiveRequestTime(raw: unknown, requestedAt: Date): Date {
+/** The moment the ids' consent counts from: the browser's capture time when it is plausible and earlier than the
+ * server's own request stamp, else that stamp. A capture time later than the stamp (beyond a few seconds of
+ * latency) means the browser clock is ahead and the real capture time is unknown: null, and nothing is stored. */
+export function effectiveRequestTime(raw: unknown, requestedAt: Date): Date | null {
   const captured = raw && typeof raw === 'object' ? Date.parse(String((raw as Record<string, unknown>).capturedAt ?? '')) : NaN;
-  const skew = Math.abs(requestedAt.getTime() - captured);
-  return Number.isFinite(captured) && skew <= 10 * 60_000 && captured < requestedAt.getTime() ? new Date(captured) : requestedAt;
+  if (!Number.isFinite(captured)) return requestedAt;
+  if (captured > requestedAt.getTime() + 5_000) return null;
+  return requestedAt.getTime() - captured <= 10 * 60_000 && captured < requestedAt.getTime() ? new Date(captured) : requestedAt;
 }
 
 /** Checkout: keep the ids for this buyer's own unpaid order. `requestedAt` is the server's stamp from before the
@@ -49,10 +51,11 @@ export function effectiveRequestTime(raw: unknown, requestedAt: Date): Date {
 export async function storeGaCheckoutIds(db: SupabaseClient, userId: string, orderId: string, raw: unknown,
   requestedAt: Date) {
   const ids = parseGaCheckoutIds(raw);
-  if (!ids) return false;
+  const effective = effectiveRequestTime(raw, requestedAt);
+  if (!ids || !effective) return false;
   try {
     const stored = await db.rpc('analytics_store_checkout_ids', { p_user: userId, p_order: orderId,
-      p_client: ids.clientId, p_session: ids.sessionId, p_requested_at: effectiveRequestTime(raw, requestedAt).toISOString() });
+      p_client: ids.clientId, p_session: ids.sessionId, p_requested_at: effective.toISOString() });
     if (stored.error) throw stored.error;
     return stored.data === true;
   } catch (error) {

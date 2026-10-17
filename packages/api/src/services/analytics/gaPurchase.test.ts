@@ -108,11 +108,20 @@ describe('checkoutValue', () => {
 
 describe('effectiveRequestTime', () => {
   const server = new Date('2026-10-17T10:00:00Z');
-  it('counts consent from the earlier plausible browser capture time, never from a later or absurd one', () => {
-    expect(effectiveRequestTime({ capturedAt: '2026-10-17T09:58:00Z' }, server).toISOString()).toBe('2026-10-17T09:58:00.000Z');
-    expect(effectiveRequestTime({ capturedAt: '2026-10-17T10:05:00Z' }, server)).toBe(server);
+  it('counts consent from the earlier plausible browser capture time', () => {
+    expect(effectiveRequestTime({ capturedAt: '2026-10-17T09:58:00Z' }, server)?.toISOString()).toBe('2026-10-17T09:58:00.000Z');
     expect(effectiveRequestTime({ capturedAt: '2026-10-17T08:00:00Z' }, server)).toBe(server);
     expect(effectiveRequestTime({ capturedAt: 'later' }, server)).toBe(server);
     expect(effectiveRequestTime(null, server)).toBe(server);
+  });
+  it('refuses a capture time ahead of the server (browser clock ahead), allowing a few seconds of latency', () => {
+    expect(effectiveRequestTime({ capturedAt: '2026-10-17T10:05:00Z' }, server)).toBeNull();
+    expect(effectiveRequestTime({ capturedAt: '2026-10-17T10:00:09Z' }, server)).toBeNull();
+    expect(effectiveRequestTime({ capturedAt: '2026-10-17T10:00:03Z' }, server)).toBe(server);
+  });
+  it('stores nothing for a clock-ahead capture', async () => {
+    const d = db(true);
+    expect(await storeGaCheckoutIds(d.client, 'user', 'order', { ...ids, capturedAt: '2026-10-17T10:30:00Z' }, server)).toBe(false);
+    expect(d.rpc).not.toHaveBeenCalled();
   });
 });
