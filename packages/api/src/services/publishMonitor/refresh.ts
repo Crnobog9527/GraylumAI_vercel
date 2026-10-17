@@ -68,9 +68,16 @@ function outcomeFor(outcome: Exclude<Outcome<unknown>, { kind: 'ok' }>): Exclude
   return 'failed';
 }
 
-function toRow(post: NormalizedPost) {
+/** Below the database's 64 KiB limit per snapshot column (0272), with room for JSON encoding differences. */
+const MAX_BREAKDOWN_BYTES = 48_000;
+export const BREAKDOWNS_TRUNCATED = 'breakdowns.truncated';
+
+/** A post's breakdowns larger than the database accepts are dropped and listed as missing, never failing the page. */
+export function toRow(post: NormalizedPost) {
+  const oversized = Buffer.byteLength(JSON.stringify(post.breakdowns)) > MAX_BREAKDOWN_BYTES;
   return { platformPostId: post.platformPostId, url: post.url, postedAt: post.postedAt, postedAtSource: post.postedAtSource,
-    titleExcerpt: post.titleExcerpt, metrics: post.metrics, breakdowns: post.breakdowns, missingFields: post.missingFields };
+    titleExcerpt: post.titleExcerpt, metrics: post.metrics, breakdowns: oversized ? {} : post.breakdowns,
+    missingFields: oversized ? [...post.missingFields, BREAKDOWNS_TRUNCATED].sort() : post.missingFields };
 }
 
 const pageResult = z.union([
@@ -135,6 +142,12 @@ export async function refreshConnection(db: Rpc, client: ClientDeps, claim: Refr
   const cutoff = now() - windowDays * 86_400_000;
   const inWindow = (post: NormalizedPost) => post.postedAt === null || Date.parse(post.postedAt) >= cutoff;
   let budget = pageCap - claim.pagesUsed;
+  // Every provider call is bounded by what is left of the deadline, so a page started near the end cannot run past it
+  // (the cron function and the manual request both have hard limits).
+  const bounded = (): ClientDeps | null => {
+    const left = until - now();
+    return left < 1_000 ? null : { ...client, timeoutMs: Math.min(client.timeoutMs ?? 30_000, left) };
+  };
   /**
    * One feed page read and confirmed as still the owner's; budget and deadline are checked first. Every read that
    * reached the provider is counted in the persistent daily cap at once (a failed read, or a page whose ownership
@@ -147,9 +160,13 @@ export async function refreshConnection(db: Rpc, client: ClientDeps, claim: Refr
     if (budget <= 0) return { outcome: 'partial', error: 'PAGE_CAP' };
     if (now() >= until) return { outcome: 'release', error: null };
     // Ownership is checked right before every feed request (plan §4.1), and again after it, before anything is stored.
-    const before = await ownership(client, claim);
+    let deps = bounded();
+    if (!deps) return { outcome: 'release', error: null };
+    const before = await ownership(deps, claim);
     if (before) return before;
-    const page: Outcome<FeedPage> = await readFeedPage(client, claim.providerAccountId, claim.platform, query);
+    deps = bounded();
+    if (!deps) return { outcome: 'release', error: null };
+    const page: Outcome<FeedPage> = await readFeedPage(deps, claim.providerAccountId, claim.platform, query);
     budget -= 1;
     if (page.kind === 'rate_limited') {
       // The provider's own 429 was a real request: it counts against the daily cap. A local refusal sent nothing.
@@ -161,7 +178,9 @@ export async function refreshConnection(db: Rpc, client: ClientDeps, claim: Refr
       if (!await write(run, [], null, cursorRefused && savedCursor)) return { outcome: 'stale' };
       return cursorRefused ? 'rejected_cursor' : { outcome: outcomeFor(page), error: errorCode(page) };
     }
-    const stopped = await ownership(client, claim);
+    // The post-read check must still run (nothing is stored without it): give it at least a few seconds.
+    const stopped = await ownership({ ...client, timeoutMs: Math.min(client.timeoutMs ?? 30_000, Math.max(5_000, until - now())) },
+      claim);
     if (stopped) return await write(run, [], null, false) ? stopped : { outcome: 'stale' };
     return page.value;
   };
