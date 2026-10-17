@@ -174,8 +174,11 @@ CREATE OR REPLACE FUNCTION public.report_fee_settle_due(p_limit integer) RETURNS
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE due report_fees; n integer:=0; v jsonb; stale boolean;
 BEGIN
-  FOR due IN SELECT f.* FROM report_fees f WHERE f.state='held' ORDER BY f.created_at
-    LIMIT least(greatest(coalesce(p_limit,100),1),500) LOOP
+  -- Only fees that can settle are listed (the execution ended or is gone, or the price is stale), before the batch limit:
+  -- running reports never crowd out newer ended ones.
+  FOR due IN SELECT f.* FROM report_fees f LEFT JOIN runtime_executions fx ON fx.id=f.execution_id
+    WHERE f.state='held' AND (fx.id IS NULL OR fx.state IN ('completed','cancelled') OR f.created_at<=clock_timestamp()-interval '3 days')
+    ORDER BY f.created_at LIMIT least(greatest(coalesce(p_limit,100),1),500) LOOP
     SELECT due.created_at<=clock_timestamp()-interval '3 days' AND coalesce(r.closed,true)
       AND NOT EXISTS(SELECT 1 FROM bill2_calls c WHERE c.run_id=r.id AND c.settled_at IS NULL)
       INTO stale FROM runtime_executions e LEFT JOIN bill2_runs r ON r.id=e.billing_run_id WHERE e.id=due.execution_id;
