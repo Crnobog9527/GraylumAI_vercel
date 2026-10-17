@@ -113,6 +113,8 @@ export async function fusionCompareCases({db,Client,connectionString,report,crea
   // The single group claim, under the compare lock: full holds for both columns, then a replay.
   const items = admitted.runs.map(r=>({runId:r.runId,sequence:1,payload:r.fusion.call}));
   const before = await wallet(db,actor);
+  await assert.rejects(call(db,'fusion_compare_claim',actor,first.compareId,items.slice(0,1)),/FUSION_COMPARE_CLAIM_INCOMPLETE/);
+  assert.equal(await wallet(db,actor),before,'a truncated batch holds nothing');
   const claimed = await call(db,'fusion_compare_claim',actor,first.compareId,items);
   assert.equal(claimed.state,'claimed');assert.equal(claimed.calls.length,2);
   assert.ok(await wallet(db,actor)<before,'both columns hold their bound');
@@ -150,6 +152,9 @@ export async function fusionCompareCases({db,Client,connectionString,report,crea
     [items2[0],{...items2[1],content:[{type:'output_text',text:'not the saved answer'}]}]),/FUSION_COMPARE_INVALID/);
   await assert.rejects(call(db,'fusion_compare_adopt',actor,first.compareId,0,randomUUID(),billing(0,{scope:{kind:'positioning_draft',draftId:randomUUID()}}),items2),
     /FUSION_COMPARE_INVALID/,'the adoption run is frozen with the conversation scope');
+  await assert.rejects(call(db,'fusion_compare_adopt',actor,first.compareId,0,randomUUID(),
+    billing(0,{moduleId:randomUUID(),skillId:randomUUID(),revisionId:randomUUID()}),items2),/FUSION_COMPARE_SKILL_MISMATCH/,
+    'a compare without a Skill adopts without one');
   const adoptRequest = randomUUID();
   const funds = await wallet(db,actor);
   const adopted = await call(db,'fusion_compare_adopt',actor,first.compareId,0,adoptRequest,billing(0),items2);

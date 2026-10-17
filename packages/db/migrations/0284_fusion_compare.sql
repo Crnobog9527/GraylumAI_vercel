@@ -259,6 +259,12 @@ BEGIN
   SELECT * INTO fc FROM fusion_compares WHERE id=p_compare_id AND actor_id=p_actor_id FOR UPDATE;
   IF fc.id IS NULL OR fc.group_id IS NULL THEN RAISE EXCEPTION 'FUSION_COMPARE_DENIED'; END IF;
   IF fc.state<>'running' THEN RAISE EXCEPTION 'FUSION_COMPARE_ENDED'; END IF;
+  -- The one claim covers every column: a truncated batch would freeze compare:1 for a subset and leave the
+  -- other runs open with no way to claim them.
+  IF jsonb_typeof(p_items) IS DISTINCT FROM 'array'
+    OR (SELECT array_agg(x->>'runId' ORDER BY x->>'runId') FROM jsonb_array_elements(p_items) x)
+      IS DISTINCT FROM (SELECT array_agg(id::text ORDER BY id::text) FROM bill2_runs WHERE fusion_group_id=fc.group_id AND actor_id=p_actor_id)
+  THEN RAISE EXCEPTION 'FUSION_COMPARE_CLAIM_INCOMPLETE'; END IF;
   RETURN fusion_group_claim(p_actor_id,fc.group_id,'compare:1',1,p_items);
 END $$;
 
@@ -363,6 +369,12 @@ BEGIN
     OR p_billing#>>'{input,input}' IS DISTINCT FROM fc.question
     OR p_billing#>'{input,dependencies}' IS DISTINCT FROM fc.workspace_dependencies THEN
     RAISE EXCEPTION 'FUSION_COMPARE_INVALID'; END IF;
+  -- The adoption carries the Skill identity the compare was frozen with (none when none was used).
+  IF p_billing->>'moduleId' IS DISTINCT FROM fc.config#>>'{skill,moduleId}'
+    OR p_billing->>'revisionId' IS DISTINCT FROM fc.config#>>'{skill,revisionId}'
+    OR (fc.config#>>'{skill,skillId}' IS NOT NULL AND p_billing->>'skillId' IS DISTINCT FROM fc.config#>>'{skill,skillId}')
+    OR (fc.config#>>'{skill,moduleId}' IS NULL AND p_billing ?| ARRAY['moduleId','skillId','revisionId'])
+  THEN RAISE EXCEPTION 'FUSION_COMPARE_SKILL_MISMATCH'; END IF;
   IF p_billing->>'revisionId' IS NOT NULL THEN
     PERFORM id FROM modules WHERE id=(p_billing->>'moduleId')::uuid
       AND skill_id=(p_billing->>'skillId')::uuid AND active AND model_id=(p_billing->>'modelId')::uuid FOR SHARE;
