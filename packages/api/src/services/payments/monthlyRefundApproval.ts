@@ -19,7 +19,8 @@ export const monthlyRefundTermsSchema = z.object({
   chargeId: ref,
   invoiceId: ref,
   merchant: ref,
-  mode: z.literal('test'),
+  // R7 (0297): the order's Stripe mode; the stored hash of an existing test intent is unchanged.
+  mode: z.enum(['test', 'live']),
   currency: z.string().regex(/^[a-z]{3}$/),
   plan: z.enum(['pro', 'gold']),
   paidAt: time,
@@ -81,7 +82,7 @@ export function prepareMonthlyRefundQuote(policy: RefundPolicyInput, binding: Bi
     || snapshot.data.billing_cycle !== 'monthly' || binding.billingCycle !== 'monthly'
     || !['pro', 'gold'].includes(binding.plan) || policy.reason !== 'ordinary'
     || policy.order.kind !== 'membership_first' || policy.order.channel !== 'stripe'
-    || policy.order.mode !== 'test' || policy.accountState !== 'active') return fail('monthly_scope_required');
+    || policy.accountState !== 'active') return fail('monthly_scope_required');
   if (binding.orderId !== policy.order.id || binding.userId !== policy.order.userId
     || snapshot.data.currency !== policy.order.currency
     || binding.credits !== snapshot.data.credits + snapshot.data.bonus_credits) return fail('binding_mismatch');
@@ -92,7 +93,7 @@ export function prepareMonthlyRefundQuote(policy: RefundPolicyInput, binding: Bi
     ticketId: policy.ticket.id, subscriptionId: binding.subscriptionId,
     providerSubscriptionId: binding.providerSubscriptionId, paymentIntentId: binding.paymentIntentId,
     chargeId: binding.chargeId, invoiceId: binding.invoiceId, merchant: policy.order.merchant,
-    mode: 'test', currency: policy.order.currency, plan: binding.plan,
+    mode: policy.order.mode, currency: policy.order.currency, plan: binding.plan,
     paidAt: policy.order.paidAt, submittedAt: policy.ticket.submittedAt, periodEnd: binding.periodEnd,
     originalCancelAtPeriodEnd: binding.originalCancelAtPeriodEnd,
     paidMinor: policy.order.paidMinor, basisMinor: evaluation.quote!.basisMinor,

@@ -21,7 +21,7 @@ const muted = { color: 'var(--text-tertiary)' };
 
 /** Progress of one stored refund decision, plus the separate execute step. */
 export function MonthlyRefundStatusCard({ intent, executeResult, executing, disabled, onExecute }: Props) {
-  const terms = (intent.terms ?? {}) as { netMinor?: number; currency?: string; credits?: number };
+  const terms = (intent.terms ?? {}) as { netMinor?: number; currency?: string; credits?: number; mode?: 'test' | 'live' };
   const refund = intent.recordedRefund as { status?: string } | null | undefined;
   const claimed = typeof intent.claimedAt === 'string';
   const stopped = executeResult && !('terms' in executeResult) ? executeResult : null;
@@ -86,7 +86,7 @@ export function MonthlyRefundStatusCard({ intent, executeResult, executing, disa
         <ConfirmRefundAction testId="monthly-refund-execute" destructive label={claimed ? '继续执行' : '执行退款'}
           pendingLabel="正在执行…" title={claimed ? '继续执行这笔退款？' : '确认执行退款？'}
           confirmLabel={claimed ? '继续执行' : '执行退款'} pending={executing} disabled={disabled} onConfirm={onExecute}>
-          <p>将向支付商（Stripe 测试模式）退回 <strong>{formatMinorAmount(terms.netMinor, terms.currency)}</strong>，
+          <p>将向支付商（{terms.mode === 'live' ? 'Stripe 正式账户，退真钱' : 'Stripe 测试模式'}）退回 <strong>{formatMinorAmount(terms.netMinor, terms.currency)}</strong>，
             并取消这份订阅、收回 {(terms.credits ?? 0).toLocaleString()} 积分。</p>
           <p>执行前服务端会重新核对一次；有变化会停止，不会退款。重复点击不会重复退款。</p>
         </ConfirmRefundAction>

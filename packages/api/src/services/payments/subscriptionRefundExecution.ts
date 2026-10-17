@@ -113,7 +113,7 @@ function next(intent: MonthlyRefundIntent, seen: MonthlyRefundObservation, now: 
   if (monthlyRefundVersion(terms) !== intent.versionHash || local.approvalVersion !== intent.versionHash) {
     return review('approval_changed');
   }
-  if (seen.mode !== 'test' || seen.merchant !== terms.merchant
+  if (seen.mode !== terms.mode || seen.merchant !== terms.merchant
     || subscription.id !== terms.providerSubscriptionId || subscription.periodEnd !== terms.periodEnd) {
     return review('original_identity_changed');
   }
@@ -123,7 +123,7 @@ function next(intent: MonthlyRefundIntent, seen: MonthlyRefundObservation, now: 
   if (refund && (refund.intentId !== intent.id || refund.orderId !== terms.orderId
     || refund.chargeId !== terms.chargeId || refund.paymentIntentId !== terms.paymentIntentId
     || refund.currency !== terms.currency || refund.amount !== terms.netMinor
-    || refund.merchant !== terms.merchant || refund.mode !== 'test')) return review('refund_identity_mismatch');
+    || refund.merchant !== terms.merchant || refund.mode !== terms.mode)) return review('refund_identity_mismatch');
   if (intent.started.cancel && intent.started.restore_renewal
     || (intent.started.cancel || intent.started.restore_renewal || intent.recordedRefund) && !intent.started.refund
     || intent.started.stop_renewal && terms.originalCancelAtPeriodEnd) return review('stage_order_invalid');

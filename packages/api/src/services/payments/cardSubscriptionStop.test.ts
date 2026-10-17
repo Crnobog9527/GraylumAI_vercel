@@ -1,6 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type Stripe from 'stripe';
+const mocks = vi.hoisted(() => ({ scope: vi.fn() }));
+vi.mock('./stripeCheckoutPersistence', () => ({ resolveStripeScope: mocks.scope }));
 import { stopUndeliveredSubscription } from './cardSubscriptionStop';
 
 const sub = (patch: Record<string, unknown> = {}) => ({ object: 'subscription', id: 'sub_gold', livemode: false, status: 'active',
@@ -12,6 +14,14 @@ function stripe(states: Array<Record<string, unknown>>) {
 }
 
 describe('stopping an undelivered card subscription (paid first period kept for review)', () => {
+  beforeEach(() => { mocks.scope.mockReset().mockResolvedValue({ merchant: 'acct_fixture', mode: 'test' }); });
+  it('R7: reads the subscription in the account mode; a live account accepts only a live subscription', async () => {
+    mocks.scope.mockResolvedValue({ merchant: 'acct_fixture', mode: 'live' });
+    await expect(stopUndeliveredSubscription(stripe([{}]).client, 'sub_gold')).rejects.toThrow();
+    const live = stripe([{ livemode: true, cancel_at_period_end: true }]);
+    await expect(stopUndeliveredSubscription(live.client, 'sub_gold')).resolves.toBeUndefined();
+    expect(live.update).not.toHaveBeenCalled();
+  });
   it('stops renewal at Stripe marked as ours and confirms it', async () => {
     const s = stripe([{}, { cancel_at_period_end: true }]);
     await stopUndeliveredSubscription(s.client, 'sub_gold');
