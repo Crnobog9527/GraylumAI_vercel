@@ -6,7 +6,7 @@ import { SAMPLE_REPORT_DATA, sampleReportDataBlock } from '@repo/api/src/shared/
 import { MessageMarkdown } from '@/components/chat/MessageMarkdown';
 import { SAMPLE_REPORT_BODY, SAMPLE_REPORT_BODY_WITH_DATA, SAMPLE_REPORT_CHAPTER_TITLES } from '../fixtures/report';
 import { ReportView } from './report-view';
-import { placeFields, splitChapters, splitReasons } from './report-sections';
+import { placeFields, reportDisplayTitle, splitChapters, splitReasons, withDisplayHeadings } from './report-sections';
 import { REPORT_FIXED_NOTES } from './report-text';
 
 const html = (body: string, extra: Partial<Parameters<typeof ReportView>[0]> = {}) => renderToStaticMarkup(<ReportView body={body} {...extra} />);
@@ -22,6 +22,15 @@ describe('report sections', () => {
     expect(splitReasons('结论。\n\n### 理由\n\n因为 A。\n\n### 补充\n\n还有 B。'))
       .toEqual({ main: '结论。\n\n### 补充\n\n还有 B。', reasons: '因为 A。' });
     expect(splitReasons('只有结论。')).toEqual({ main: '只有结论。', reasons: null });
+  });
+  it('drops writing hints from titles for display, and matches numbered titles to chapters', () => {
+    expect(reportDisplayTitle('五、对标账号分析（约 800 字，3–10 个合格账号）')).toBe('五、对标账号分析');
+    expect(reportDisplayTitle('一句话结论（约 200 字）')).toBe('一句话结论');
+    expect(reportDisplayTitle('变现路径（漏斗）')).toBe('变现路径（漏斗）');
+    expect(withDisplayHeadings('## 一句话结论（约 200 字）\n正文（约 3 条）\n```\n## 代码（约 1 字）\n```'))
+      .toBe('## 一句话结论\n正文（约 3 条）\n```\n## 代码（约 1 字）\n```');
+    const { byChapter } = placeFields(SAMPLE_REPORT_DATA, ['一句话结论（约 200 字）', '十一、变现路径：销售漏斗（约 2000 字）']);
+    expect(byChapter.get(1)).toEqual(['funnel', 'upgrades', 'income']);
   });
   it('places every field in its chapter, and the ones whose chapter is missing after the end', () => {
     const { byChapter, unplaced } = placeFields(SAMPLE_REPORT_DATA, ['一句话结论', '变现路径（漏斗）']);
@@ -115,6 +124,13 @@ describe('ReportView', () => {
     expect(out).toContain('3.1%');
     expect(out).toContain('2 次');
     expect(out).not.toContain('这些账号暂时没有可以对上的数据');
+  });
+
+  it('never shows writing hints in headings, with or without data', () => {
+    const hinted = SAMPLE_REPORT_BODY.replace('## 受众', '## 四、受众（约 1500 字）');
+    expect(html(hinted)).not.toContain('约 1500 字');
+    expect(html(hinted + '\n\n' + sampleReportDataBlock())).not.toContain('约 1500 字');
+    expect(html(hinted + '\n\n' + sampleReportDataBlock())).toContain('内容匹配：高');
   });
 
   it('shows the plain text when there are no chapters at all', () => {
