@@ -176,5 +176,6 @@ describe('field definitions', () => {
     const weeks = REPORT_DATA_FIELDS.plan30.fields.weeks.of.fields;
     expect(weeks.passIf.label).toBe('怎样算过关');
     expect(REPORT_DATA_FIELDS.compliance.of.fields.advice.label).toBe('具体该怎么做');
+    expect(REPORT_DATA_FIELDS.plan30.fields.weeks.min).toBe(4);
   });
 });
