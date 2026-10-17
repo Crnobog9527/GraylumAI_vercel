@@ -58,7 +58,7 @@ it.each([
   f=>{f.profile.requestFormats=['agent-turn-v5-stream'];},
   f=>{f.profile.expiresAt='2000-01-01T00:00:00Z';},
   f=>{f.profile.evidence.maxPromptToUpper=0.71;},
-  f=>{delete (f.profile.evidence as Partial<PaygHostProfile['evidence']>).maxVerifiedMessages;},
+  f=>{delete (f.profile.evidence as Record<string,unknown>).maxVerifiedMessages;},
   f=>{f.config.profiles.push({...f.profile});},
   f=>{f.config.profiles=[];},
   f=>{f.config.windowId='20000000-0000-4000-8000-000000000002';},
@@ -210,4 +210,50 @@ it.each([2,3,9] as const)('accepts a %s-tool profile and freezes it unchanged',a
 it.each([1,4.5,10])('refuses a %s-tool profile outside the 2–9 range (0267 ceiling)',async maxTools=>{
   const f=fixture();(f.profile as {maxTools:number}).maxTools=maxTools;
   await expect(f.run()).rejects.toThrow();
+});
+// FUSION-PROFILE (Owner 2026-10-17, plan B): a profile used only for Fusion review/summary calls may cite evidence taken
+// on the real Fusion request shape instead of the full #665 matrix; every other purpose still needs the full matrix.
+function fusionOnly(model='anthropic/claude-opus-5.5',endpointTag='anthropic'){
+ const f=fixture();
+ f.profile.model=f.policy.model=model;f.profile.endpointTag=f.policy.providerLimits!.providerSlug=endpointTag;
+ f.profile.purposes=['fusion_summary'];f.profile.requestFormats=['fusion-json-v1-stream'];
+ f.profile.reasoningVariants=[{...f.profile.reasoningVariants[0]!,reasoning:{effort:'low'},testedOutputLimit:2048}];
+ (f.profile as {evidence:unknown}).evidence={scope:'fusion-request-shape',reference:'test-only',manifestHash:'a'.repeat(64),
+  distinctSamples:6,sizeBands:2,maxVerifiedBytes:186000,maxPromptToBytes:0.4,maxPromptToUpper:0.38,outputLimit:8192,testedOutputLimit:2048,
+  outputSemantics:'max-tokens-includes-reasoning',includesReasoning:true,cacheCovered:true,costBoundPassed:true};
+ const read=(phase:PaygHostProfile['purposes'][number]='fusion_summary',requestFormat='fusion-json-v1-stream')=>readPaygHostPolicies(
+  f.db as unknown as SupabaseClient,f.window,[f.policy],[{modelId:id,phase,outputLimit:8192,requestFormat,reasoning:{effort:'low'}}],env);
+ return {...f,read};
+}
+it('admits a Fusion-only profile on Fusion-shape evidence',async()=>{
+ const f=fusionOnly();
+ expect(paygHostProfile.safeParse(f.profile).success).toBe(true);
+ expect(await f.read()).toHaveLength(1);
+ const sol=fusionOnly('openai/gpt-6.1-sol','openai');sol.profile.purposes=['fusion_review','fusion_summary'];
+ expect(await sol.read('fusion_review')).toHaveLength(1);
+});
+it('Fusion-shape evidence never covers another purpose or request format',async()=>{
+ for(const purpose of ['ordinary','skill','report','organizer','skill_matching','attached_organizer'] as const){
+  const f=fusionOnly();f.profile.purposes=['fusion_summary',purpose];
+  expect(paygHostProfile.safeParse(f.profile).success).toBe(false);
+  await expect(f.read()).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
+ }
+ const f=fusionOnly();f.profile.requestFormats=['fusion-json-v1-stream','serial-tools-v6-reasoning'];
+ expect(paygHostProfile.safeParse(f.profile).success).toBe(false);
+});
+it('Fusion-shape evidence keeps its own bounds',()=>{
+ const bad:Array<(e:Record<string,unknown>)=>void>=[
+  e=>{e.distinctSamples=3;},e=>{e.sizeBands=1;},e=>{e.maxVerifiedBytes=120000;},e=>{e.maxVerifiedBytes=196609;},
+  e=>{e.maxPromptToBytes=0.71;},e=>{e.maxPromptToUpper=0.71;},e=>{e.costBoundPassed=false;},e=>{e.cacheCovered=false;},
+  e=>{e.scope='other';},e=>{e.extra=1;},e=>{delete e.testedOutputLimit;},
+ ];
+ for(const change of bad){
+  const f=fusionOnly();change(f.profile.evidence as unknown as Record<string,unknown>);
+  expect(paygHostProfile.safeParse(f.profile).success).toBe(false);
+ }
+ // Output evidence still applies: two stress samples, and the variant's tested limit must match the evidence.
+ const f=fusionOnly();f.profile.reasoningVariants[0]!.outputStressSamples=1;
+ expect(paygHostProfile.safeParse(f.profile).success).toBe(false);
+ const g=fusionOnly();g.profile.reasoningVariants[0]!.testedOutputLimit=512;
+ expect(paygHostProfile.safeParse(g.profile).success).toBe(false);
 });
