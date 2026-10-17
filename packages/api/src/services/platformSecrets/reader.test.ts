@@ -87,6 +87,27 @@ describe('getPlatformSecret', () => {
     expect(calls).toHaveLength(3);
   });
 
+  it('fresh reads the database every time, so a key cleared elsewhere stops working at once (paid-call paths)', async () => {
+    let value: string | null = STORED;
+    const { db, calls } = client(() => ({ data: value, error: null }));
+    expect((await getPlatformSecret(db, 'openrouter')).value).toBe(STORED); // fills this instance's cache
+    value = null; // another instance's admin cleared the slot
+    expect((await getPlatformSecret(db, 'openrouter')).value).toBe(STORED); // the cache still answers for 60 s
+    await expect(getPlatformSecret(db, 'openrouter', { fresh: true })).rejects.toMatchObject({ code: 'PLATFORM_SECRET_NOT_CONFIGURED' });
+    value = 'or-test-replaced-1111bbbb';
+    expect((await getPlatformSecret(db, 'openrouter', { fresh: true })).value).toBe('or-test-replaced-1111bbbb');
+    expect(calls).toHaveLength(3);
+  });
+
+  it('fresh does not share or poison the cache, and a failed fresh read is an error, not the cached key', async () => {
+    const ok = client(() => ({ data: STORED, error: null }));
+    await getPlatformSecret(ok.db, 'openrouter');
+    const broken = client(() => ({ data: null, error: { code: '57014' } }));
+    await expect(getPlatformSecret(broken.db, 'openrouter', { fresh: true })).rejects.toMatchObject({ code: 'PLATFORM_SECRET_UNAVAILABLE' });
+    expect((await getPlatformSecret(broken.db, 'openrouter')).value).toBe(STORED); // normal reads keep their cache
+    expect(broken.calls).toHaveLength(1);
+  });
+
   it('after a clear, the cached "not filled" result falls back to the environment', async () => {
     let value: string | null = STORED;
     const { db } = client(() => ({ data: value, error: null }));

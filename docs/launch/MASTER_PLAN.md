@@ -184,13 +184,22 @@ Owner 原话（2026-10-17，总控-8 对话）：
 
 范围：只改用户看得到的文字（例如"导师提问"→"AI 教练提问"、"给导师的回复"→"给 AI 教练的回复"）；不改代码里的变量名、数据库字段、Skill 内部指令和后台管理页面的文字。取代此前产品界面里"导师"的叫法。归属任务 PUBLIC-SITE，实现见本条所在的 PR。资料库引用开关（`NEXT_PUBLIC_COMPOSER_REFERENCES`）的打开时间按本条定在上线前，由上线准备清单承接，本条所在的 PR 不改开关。
 
+**2026-10-17：结账处的退款政策链接指向 /refund**
+
+Owner 原话（2026-10-17，总控-8 对话）：
+
+> 同意把结账处退款政策链接改成 /refund（staging 是测试模式，正式环境开收钱另批）
+
+- 取代此前"退款政策页未发布前，测试模式结账链接退回 /faq、正式模式关闭结账入口"的临时做法：结账处一律链接 /refund。
+- 正式环境能否收钱仍由 R7 入口闸门（#1093）和 Owner 的上线批准控制，本条不放开任何正式收款。实现见 [#1097](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1097)。
+
 **2026-10-17：未登录点开通会员先去注册并记住所选方案；退款说明页 /refund 公开**
 
 Owner 原话（2026-10-17，总控-8 对话）：
 
 > 确认：未登录点开通会员，先去注册并记住所选方案，注册后直接回到该方案付款；退款说明页 /refund 不登录也能看。
 
-归属任务 PUBLIC-SITE / PAYWALL：实现见 [#1054](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1054)（注册后回到原方案付款，首月优惠资格仍以服务端判断为准）和 [#1053](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1053)（/refund 不需要登录）。staging 目前还没有 /refund 页面，退款政策正文由 Owner 准备，发布前未登录访问是 404。价格区的支付安全说明，等支付通道定了再写。
+归属任务 PUBLIC-SITE / PAYWALL：实现见 [#1054](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1054)（注册后回到原方案付款，首月优惠资格仍以服务端判断为准）和 [#1053](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1053)（/refund 不需要登录）。/refund 规则摘要页已由 [#1091](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1091) 上线 staging（完整退款政策正文仍由 Owner 用第三方工具生成）。价格区的支付安全说明，等支付通道定了再写。
 
 **2026-10-17：评审团模型——评审用 Claude Sonnet 5.5、GPT-6.1 Sol、Gemini 3.8 Flash，汇总用 Claude Opus 5.5；评审团专用计费档案按实际请求取证**
 

@@ -5,6 +5,7 @@ import {writeFile} from 'node:fs/promises';
 import {configuredReasoning} from '../__tests__/fixtures/runtimeReasoning';
 import {pricingConfig} from '../__tests__/fixtures/runtimePricing';
 import {mergedPositioningFixture,sql} from './opc.integration';
+import { seedTestOpenRouterKey } from '../models/openRouterKey.testing';
 const poll:typeof expect.poll=(callback,options)=>expect.poll(callback,{timeout:30000,...options});
 
 // Auth, OPC, Runtime, SDK, HTTP streaming and BILL2 are real local paths.
@@ -24,6 +25,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','p
   ).pricing};
   await sql.query("insert into ai_models(id,name,model_id,provider,is_active,api_endpoint,api_key,max_tokens,input_limit,config) values($1,'Synthetic browser streaming',$2,'openai','true','https://openrouter.ai/api/v1',$3,1000,10000,$4)",[p.modelId,p.model,key,JSON.stringify(config)]);
  }
+ await seedTestOpenRouterKey(sql,key);
  await sql.query('update modules set model_id=$1 where id=$2',[mentorId,f.moduleId]);
  // BILL-UNIT window: entries carry m_i=1, equal to these models' configured multiplier.
  await sql.query('update ai_models set price_multiplier=1 where id=any($1)',[[mentorId,organizerId]]);
