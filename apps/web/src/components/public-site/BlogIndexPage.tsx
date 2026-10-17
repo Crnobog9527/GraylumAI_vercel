@@ -44,7 +44,7 @@ export function BlogIndexPage({ supportEmail }: { supportEmail?: string | null }
         </ul>
         <p className="mt-10 text-base leading-8 text-[#C8C8C8]">
           想先看看产品能做什么？<Link href="/features" className="font-semibold text-[#FFD700] hover:underline">功能介绍</Link>
-          里每一项功能都配有真实产品界面的示例。
+          介绍每一项功能；已有产品界面的功能，页面里配有真实界面的示例。
         </p>
       </div>
     </SiteShell>
