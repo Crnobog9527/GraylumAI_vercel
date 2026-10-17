@@ -47,6 +47,10 @@ export type RuntimeRunnerInput = {
    * parallel_tool_calls hint, which no catalogued route supports. */
   firstToolCallOnly?: boolean;
   onToolCallsDropped?: (dropped:number)=>void;
+  /** CHAT-AUTO-CONTEXT: a free chat that may search the library. It runs one tool call per response (like firstToolCallOnly)
+   * and, once `maxToolCalls` calls ran, offers no tool to the next request so that request can only answer. */
+  libraryRetrieval?: boolean;
+  maxToolCalls?: number;
 };
 type ToolCalls=unknown[]|null|undefined;
 /** One response message, with only its first tool call when that is allowed. */
@@ -85,6 +89,7 @@ export function emptyTruncatedResponse(decoded:unknown):boolean{
 
 /** One official SDK loop for all roles. No SDK trace, remote Session, fallback or retry. */
 export async function runRuntime(input: RuntimeRunnerInput) {
+  if(input.libraryRetrieval&&!input.firstToolCallOnly)input={...input,firstToolCallOnly:true};
   // A bounded v5 turn: one reply, plus one call per frozen slot (a Skill file read, one research call).
   const slots=1+(input.tools.some(tool=>tool.name==='read_skill_file')?1:0)+(input.tools.some(tool=>RESEARCH_SLOT_TOOLS.has(tool.name))?1:0);
   if(input.commitSessionOnSuccess&&(!input.firstToolCallOnly||input.maxTurns!==1&&input.maxTurns!==slots))
@@ -166,11 +171,14 @@ export async function runRuntime(input: RuntimeRunnerInput) {
   // the SDK signal or use it to interrupt durable evidence writes.
   const client=new OpenAI({apiKey:'local-fixture-only',baseURL:'http://127.0.0.1/runtime',fetch:guardedFetch,maxRetries:0,timeout:OPENROUTER_RESPONSE_TIMEOUT_MS+30_000});
   const model=new OpenAIChatCompletionsModel(client,input.model,{strictFeatureValidation:true});
+  let toolCalls=0;
   const tools=input.tools.map(t=>tool({name:t.name,description:t.description,
+    isEnabled:()=>!input.libraryRetrieval||input.maxToolCalls===undefined||toolCalls<input.maxToolCalls,
     parameters:t.parameters??defaultToolParameters,errorFunction:t.invalidResult===undefined?null:()=>t.invalidResult!,
     execute:async(args,_context,details)=>{
       const callId=details?.toolCall?.callId;
       if(!callId)throw new Error('RUNTIME_TOOL_ID_REQUIRED');
+      toolCalls++;
       return t.execute(args,callId);
     }}));
   const agent=new Agent({name:'Graylum Runtime',model,instructions:input.instructions,tools,
