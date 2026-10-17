@@ -19,7 +19,7 @@ export function stagingTransport(admin:SupabaseClient,policy:StagingPolicy,budge
   const row=await (bounded?query.abortSignal(bounded):query).single();
   const model=row.data;
   // A key that cannot be read (not filled, database unavailable) is a refusal, never another key.
-  const key=row.error?undefined:await readOpenRouterKey(admin).catch(()=>undefined);
+  const key=row.error?undefined:await readOpenRouterKey(admin,{fresh:true}).catch(()=>undefined);
   if(row.error||model?.model_id!==identity.model||!key||!isOpenRouterEndpoint(resolveOpenAICompatibleEndpoint(model.provider,model.api_endpoint)??'')||
    openRouterAccount(key)!==identity.account)
    throw new Error('RUNTIME_PROVIDER_BINDING_DENIED');

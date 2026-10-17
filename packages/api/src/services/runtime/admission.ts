@@ -242,7 +242,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    if(policy.real&&row.error){if(row.error.code==='PGRST116')throw unavailableModel();stagingRpcFailure(row.error);}
    if(row.error||row.data?.is_active!=='true'||(!policy.real&&row.data.provider!=='fixture'))throw unavailableModel();
    // The window-bound platform OpenRouter key serves Decisions only; unreadable means Decisions unavailable, never another key.
-   const apiKey=policy.real?windowBoundKey(row.data,await readOpenRouterKey(admin).catch(()=>undefined),realModel(row.data).account):undefined;
+   const apiKey=policy.real?windowBoundKey(row.data,await readOpenRouterKey(admin,{fresh:true}).catch(()=>undefined),realModel(row.data).account):undefined;
    if(policy.real)realModel(row.data);
    // Decisions judges every other gated message, including a non-social Skill turning to social media; an admitted
    // gated turn always keeps the fallback rule, since Decisions does not see earlier turns ("好的，那帮我写三条").
