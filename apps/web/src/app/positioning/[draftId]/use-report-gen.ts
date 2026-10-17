@@ -29,8 +29,10 @@ const POLL_MS = 5000;
  * Reading a saved report never depends on the switch or membership; `canGenerate` (switch on and
  * every step confirmed) only allows a new paid start.
  */
-export function useReportGen(input: { draftId: string; sessionId: string; projectId: string; roundId: string; canGenerate: boolean }) {
-  const { draftId, sessionId, projectId, roundId, canGenerate } = input;
+export function useReportGen(input: { draftId: string; sessionId: string; projectId: string; roundId: string; canGenerate: boolean;
+  /** The fixed price the button shows (0299): sent with the start, which is refused if the price changed meanwhile. */
+  price?: number | null }) {
+  const { draftId, sessionId, projectId, roundId, canGenerate, price } = input;
   const key = reportRecordKey(draftId, roundId);
   const utils = trpc.useUtils();
   const [record, setRecord] = useState<ReportRecord | null>(null);
@@ -68,6 +70,9 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
     refetchInterval: query => !streaming && reportProgressing(query.state.data) ? POLL_MS : false,
   });
   const shown = status.data && status.data.executionId === executionId ? status.data : null;
+  // The status read settles the fixed price (0299: charged or refunded): the cached balance is stale until it is read again.
+  const settledFee = shown?.fee && shown.fee.state !== "held" ? shown.fee.state : null;
+  useEffect(() => { if (settledFee) void utils.credits.getBalance.invalidate(); }, [settledFee, executionId, utils]);
   const refuse = (result: unknown) => {
     const refusal = reportResultRefusal(result);
     if (refusal) setRefusal(refusal);
@@ -136,7 +141,8 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
     const requestId = nextRequestId(record, () => crypto.randomUUID());
     save({ requestId });
     try {
-      const id = startedExecution(await start.mutateAsync({ sessionId, projectId, roundId, requestId }));
+      const id = startedExecution(await start.mutateAsync({ sessionId, projectId, roundId, requestId,
+        ...(price ? { acceptedCredits: price } : {}) }));
       if (!id) throw new Error("REPORT_UNAVAILABLE");
       save({ requestId, executionId: id });
       setPinned({ executionId: id, generation: ++generation.current });

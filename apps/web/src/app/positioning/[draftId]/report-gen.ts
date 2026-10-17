@@ -19,6 +19,22 @@ export const REPORT_STOPPED_NOTICE = "停止的报告不能作为正式报告。
 export const REPORT_EMPTY_NOTICE = "这次没有生成报告。";
 export const REPORT_UNCONFIRMED_NOTICE = "开始生成的结果暂未确认。再点一次“生成完整报告”会接着同一次请求，不会重复扣费。";
 export const REPORT_DISABLED_NOTICE = "报告生成暂未开放。";
+export const REPORT_CREDITS_NOTICE = "可用积分不够，报告没有开始生成。充值后再试。";
+
+/** The button names its fixed price (Owner 2026-10-17 "按钮写明价格"); no number when it could not be read. */
+export function reportActionLabel(label: string, price: number | null | undefined) {
+  return price ? `${label}（${price.toLocaleString("zh-CN")} 积分）` : label;
+}
+
+export type ReportFee = { credits: number; state: "held" | "charged" | "refunded"; chargedCredits: number | null } | null | undefined;
+/** What this report cost (fixed price, 0299); nothing for reports generated before it. */
+export function reportFeeText(fee: ReportFee): string | null {
+  if (!fee) return null;
+  const n = fee.credits.toLocaleString("zh-CN");
+  if (fee.state === "charged") return `这份完整报告扣了 ${n} 积分。`;
+  if (fee.state === "refunded") return `没有生成出完整报告，${n} 积分已全额退回。可以重新生成，重新生成照收 ${n} 积分。`;
+  return null;
+}
 export const REPORT_ALREADY_EXISTS_NOTICE = "这一轮已经有报告了，已为你打开。";
 
 const startRefusals: Record<string, string> = {
@@ -33,6 +49,8 @@ const startRefusals: Record<string, string> = {
   OPC_CAPTURE_PENDING: "右侧信息还在整理，请等整理完成后再生成。",
   REPORT_BENCHMARKS_REQUIRED: "合格的对标账号还不到 3 个，报告没有开始生成。请回到对话里补充对标账号（换关键词或贴主页链接）后再生成。",
   REPORT_ALREADY_EXISTS: REPORT_ALREADY_EXISTS_NOTICE,
+  REPORT_CREDITS: REPORT_CREDITS_NOTICE,
+  REPORT_PRICE_CHANGED: "报告价格刚刚调整了，报告没有开始生成。请刷新页面看一下新的价格再生成。",
 };
 
 /** `opened`: the round already has its report on the server; the page shows that one instead. */
@@ -63,6 +81,8 @@ export function reportResultRefusal(result: unknown): StartRefusal | null {
 export type ReportStatus = {
   executionId: string; state: string; cursor?: number | null; epoch?: number | null;
   body: string | null; completeness: string | null; candidate: boolean; code?: string | null;
+  /** The fixed price of this report and whether it was charged or refunded (0299); null before it. */
+  fee?: ReportFee;
 };
 
 /** States the server still advances by itself; the page re-reads them. */
@@ -85,8 +105,8 @@ export type ReportView =
 
 /**
  * What a saved report execution shows. Only `complete` and `candidate` is a full report; a
- * `length_limit` keeps its text with the truncation notice (charged like any reply, Owner
- * 2026-10-06) and is never offered for finalizing. Saved output stays readable whatever the
+ * `length_limit` keeps its text with the truncation notice and is never offered for finalizing; its fixed price is
+ * refunded (Owner 2026-10-17, replacing "截断照常收费" of 2026-10-06). Saved output stays readable whatever the
  * membership is now.
  */
 export function reportView(status: ReportStatus): ReportView {
@@ -101,9 +121,12 @@ export function reportView(status: ReportStatus): ReportView {
   return { kind: "report", body: status.body, notices, candidate: false };
 }
 
-/** A new report (new request) may be started: nothing yet, or the last one ended without text. */
+/** A new report (new request) may be started: nothing yet, or the last one ended without a complete report (its
+ * fixed price was refunded; a new one pays it again, Owner 2026-10-17 "重新生成照收全价"). */
 export function reportCanStart(status: ReportStatus | null | undefined) {
-  return !status || reportView(status).kind === "empty";
+  if (!status) return true;
+  const view = reportView(status);
+  return view.kind === "empty" || (view.kind === "report" && !view.candidate);
 }
 
 /**

@@ -14,6 +14,7 @@ import { openRouterKeyConfigured } from "../services/models/openRouterKey";
 import { router, publicProcedure, adminProcedure } from '../trpc';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
+import { validateReportPrice } from '../services/report/fees';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { isStripeCheckoutConfigured } from '../services/stripe';
 import { isSellableMemberPack, loadConfiguredStripePrices, loadMemberPackReadiness } from '../services/payments/stripeCatalog';
@@ -315,6 +316,7 @@ export const settingsRouter = router({
     .input(systemSettingInputSchema)
     .mutation(async ({ ctx, input }) => {
       await assertSettingsWriter(ctx.supabase,ctx.profileId);
+      validateReportPrice([input]);
       await validateRoutingSelections(ctx.supabase, [input]);
       await validateSummarySelection(ctx.supabase,Array.isArray(input)?input:[input]);
       const { data, error } = await ctx.supabase
@@ -332,6 +334,7 @@ export const settingsRouter = router({
     .input(z.array(systemSettingInputSchema).min(1))
     .mutation(async ({ ctx, input }) => {
       await assertSettingsWriter(ctx.supabase,ctx.profileId);
+      validateReportPrice(input);
       await validateRoutingSelections(ctx.supabase, input);
       await validateSummarySelection(ctx.supabase,Array.isArray(input)?input:[input]);
       const { data, error } = await ctx.supabase
