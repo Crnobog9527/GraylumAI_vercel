@@ -100,6 +100,9 @@ Owner 选的选项（原文）："Agent 在自由对话里自己决定检索资�
 - `providerRequest.ts` 的 v6（`serial-tools-v6-reasoning`）请求校验和 `historyToolNames`（现在只认 `SOURCE_TOOL_NAMES`），否则发请求前报 `RUNTIME_REAL_TOOLS_DISABLED`；
 - OpenRouter 适配器的工具白名单；
 - `executionTools.ts` 加一个本地执行的 RuntimeTool，调用 A1 的 `library_runtime_search`（现在非内置名称都落到 `sourceRuntimeTool`，只会处理 `read_source`）；
+- **`doc-N` 要走资料库读取路径**：`libraryReadTool.ts` 现在只在冻结上下文里有 `libraryReferences`（@ 引用）时才把 `doc-N` 路由到 `runtime_library_read`，`sourceRuntimeTool.ts` 也只在那时给 `read_source` 加资料库说明。
+  零个 @ 引用、靠搜索命中的执行，这两处都不会触发，`doc-N` 会落到 `runtime_workspace_source`。A2 要让"启用了 `library_search` 的执行"也走资料库读取路径（路由 `doc-N`、带资料库工具说明，说明的字节数也计入准入容量），
+  检索命中在搜索时才写入引用，所以路由和说明不能依赖冻结时的 `libraryReferences`。补测试：零 @ 引用 → 搜索 → 读命中段落成功；没启用检索的执行行为不变。
 - 数据库 `runtime_tool` 的工具名和参数校验（现在只准 `search`、`read_source` 等，`library_search` 会报 `RUNTIME_TOOL_DENIED`）。
 
 补真实请求格式测试和回放测试（中途中断后恢复，同一调用读回保存的结果）。
