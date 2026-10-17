@@ -59,7 +59,7 @@ export function registerReportTests(db: pg.Client, fixture: () => Promise<Fixtur
     expect(grants).toEqual({ can_update: false, can_read: false, can_execute: false });
     await db.query('update modules set active=false where id=(select module_id from artifact_workflows where id=$1)', [f.registration]);
   });
-  it.each(['complete', 'length', 'poor', 'waiting', 'expired', 'free', 'disabled', 'changed', 'equal', 'cancelled', 'off_after', 'missing', 'string_flag', 'foreign', 'waiting_expired',
+  it.each(['complete', 'length', 'no_price', 'poor', 'waiting', 'expired', 'free', 'disabled', 'changed', 'equal', 'cancelled', 'off_after', 'missing', 'string_flag', 'foreign', 'waiting_expired',
     'sonnet_low', 'sonnet_missing_config', 'sonnet_missing_purpose',
     'override', 'override_changed', 'legacy_changed', 'override_disabled', 'override_no_quote', 'override_waiting', 'override_race', 'sonnet_override', 'sonnet_override_denied'] as const)(
     'RUNTIME: REPORT-GEN real SQL and SDK %s', async scenario => {
@@ -164,7 +164,15 @@ export function registerReportTests(db: pg.Client, fixture: () => Promise<Fixtur
         const service = reportService(f.user, f.admin, { ...(real ? { real: { id: windowId, creditsPerUsd: '100',
           multiplier: '6', expiresAt: new Date(Date.now() + 7200000).toISOString(), callPolicies: scenario === 'sonnet_override_denied' ? [] : [policy] } } : {}), payg: { callPolicies: scenario === 'override_no_quote' ? [] : [policy], billingUnit }, account: 'report-fixture',
           costPerCall: '0.3', creditsPerUsd: '100', multiplier: '6', maxCalls: 1, maxOutputTokens: 1000, inputBytes: 196608, historyItems: 0 });
-        const input = { sessionId: detail.sessionId, projectId: detail.projectId, roundId: detail.roundId, requestId: randomUUID() };
+        const input = { sessionId: detail.sessionId, projectId: detail.projectId, roundId: detail.roundId, requestId: randomUUID(),
+          acceptedCredits: 500 };
+        if (scenario === 'no_price') {
+          // A start must carry the price the button showed: refused before any execution, charge or model call.
+          const withoutPrice = { sessionId: input.sessionId, projectId: input.projectId, roundId: input.roundId, requestId: input.requestId };
+          await expect(service.start(withoutPrice)).rejects.toThrow('REPORT_PRICE_REQUIRED');
+          expect((await db.query('select count(*)::int n from runtime_executions where request_id=$1', [input.requestId])).rows[0].n).toBe(0);
+          expect(calls).toBe(0); return;
+        }
         if (scenario === 'poor') {
           // Fixed price (0295): admission needs the 500 price plus the call's own hold (0.3 USD x 100 x 6 = 180).
           await db.query(`insert into credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,idempotency_key,balance_before,balance_after)
