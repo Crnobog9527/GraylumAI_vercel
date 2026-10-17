@@ -50,7 +50,7 @@ export async function authorizeBenchmarkFetch(
   if (source.kind === 'candidate') {
     allowed = await store.candidateConfirmation(scope, source.confirmationId);
   } else if (source.kind === 'user_message') {
-    const body = await store.userMessage(scope, source.messageId);
+    const body = source.messageId ? await store.userMessage(scope, source.messageId) : null;
     allowed = body === null ? null : profileLinksIn(body);
   } else {
     const grant = await store.refreshGrant(scope, source.refreshId);

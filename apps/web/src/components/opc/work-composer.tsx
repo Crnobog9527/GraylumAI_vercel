@@ -7,25 +7,34 @@ import { trpc } from '@/trpc/client';
 import styles from './work-composer.module.css';
 import { QueryNotice, workspaceErrorMessage } from './query-notice';
 import { ComposerEditor, type ComposerEditorHandle } from './composer-editor';
-import { COMPOSER_REFERENCES_ENABLED } from './composer-references';
+import { COMPOSER_REFERENCES_ENABLED, parseReferences, referencesNamedIn, type LibraryReference } from './composer-references';
 import { useComposerReferences } from './reference-menu';
+import { attachmentAccept, attachmentFormatsText, useComposerAttachments } from './composer-attachments';
 
 /**
  * One input surface for free conversation, positioning and topic work.
  * `attachment` is shown inside the same frame, above the text box (the mentor's open question card).
  */
 export function WorkComposer({value,onChange,onSend,disabled=false,sendDisabled=false,label='消息',placeholder='消息',maxLength=20000,sessionId,skillId='',onSkillChange,note,attachment,
- references=COMPOSER_REFERENCES_ENABLED}: {
+ references=COMPOSER_REFERENCES_ENABLED,referenceList,onReferencesChange}: {
  value:string;onChange:(value:string)=>void;onSend:(skillId?:string)=>void;disabled?:boolean;sendDisabled?:boolean;label?:string;placeholder?:string;maxLength?:number;
  sessionId?:string;skillId?:string;onSkillChange?:(id:string)=>void;note?:string;attachment?:ReactNode;
- /** UI-B skeleton (default off): `@` picks library documents; they are kept but not sent yet. */
+ /** UI-B (default off): `@` picks library documents. Pages whose send cannot carry them pass false. */
  references?:boolean;
+ /** The references of `value`, kept by the page with its draft and sent with the message (UI-B). */
+ referenceList?:readonly LibraryReference[];onReferencesChange?:(references:LibraryReference[])=>void;
 }) {
  const [menu,setMenu]=useState<'files'|'skills'|null>(null),[query,setQuery]=useState(''),[localSkill,setLocalSkill]=useState(''),[error,setError]=useState(''),[reading,setReading]=useState(false);
  const root=useRef<HTMLDivElement>(null);
  const fileInput=useRef<HTMLInputElement>(null),current=useRef(value);current.current=value;
  const box=useRef<ComposerEditorHandle>(null);
- const referencePicker=useComposerReferences(references,box);
+ const referencePicker=useComposerReferences(references,box,onReferencesChange);
+ // UI-C: with references on, a file goes into the library and joins the message as a reference (else UI-A's inline text).
+ const attachments=useComposerAttachments(box);
+ function chooseFiles(files:FileList|null){
+  if(!references){void addFiles(files);return;}
+  if(files?.length)attachments.add(Array.from(files));setMenu(null);if(fileInput.current)fileInput.current.value='';
+ }
  // The box stays enabled while a turn runs, so focus is kept after Enter; a click on send returns it.
  const sendAndFocus=()=>sendKeepingFocus(()=>onSend(selected),box.current);
  useEffect(()=>{if(!menu)return;const key=(event:KeyboardEvent)=>{if(event.key==='Escape')setMenu(null);};const outside=(event:PointerEvent)=>{if(!root.current?.contains(event.target as Node))setMenu(null);};document.addEventListener('keydown',key);document.addEventListener('pointerdown',outside);return()=>{document.removeEventListener('keydown',key);document.removeEventListener('pointerdown',outside);};},[menu]);
@@ -50,22 +59,25 @@ export function WorkComposer({value,onChange,onSend,disabled=false,sendDisabled=
   }catch(cause){setError(cause instanceof Error?cause.message:'附件读取失败，请重试。');}
   finally{setReading(false);if(fileInput.current)fileInput.current.value='';}
  }
- const cannotSend=disabled||sendDisabled||reading||!value.trim();
+ const cannotSend=disabled||sendDisabled||reading||attachments.busy||!value.trim();
  // Counter only near the limit, so ordinary messages stay uncluttered.
  const nearLimit=value.length>=maxLength*0.9;
  return <div ref={root} className={styles.wrap}><div className={styles.composer}>
   {attachment&&<div className={styles.attachment}>{attachment}</div>}
   <ComposerEditor ref={box} label={label} placeholder={placeholder} value={value} maxLength={maxLength}
    disabled={disabled||reading} onChange={onChange} onEscape={()=>setMenu(null)}
-   onEnter={()=>{if(!cannotSend)onSend(selected);}} className={styles.editor} references={referencePicker.hooks}/>
+   onEnter={()=>{if(!cannotSend)onSend(selected);}} className={styles.editor} references={referencePicker.hooks} knownReferences={referenceList}/>
   {referencePicker.menu}
   <div className={styles.tools}><div className={styles.toolLeft}>
-   <div className={styles.menuAnchor}><button type="button" aria-label="添加资料" disabled={disabled||reading} aria-expanded={menu==='files'} onClick={()=>setMenu(menu==='files'?null:'files')}><Plus size={19}/></button>{menu==='files'&&<div className={styles.menu} role="dialog" aria-label="添加资料"><button type="button" onClick={()=>fileInput.current?.click()}><FileText size={16}/> 从文件添加</button><p>支持 TXT、Markdown、CSV、JSON、日志。内容会加入本条消息，发送前可以检查或删除。</p></div>}</div>
-   <input ref={fileInput} type="file" aria-label="选择附件" accept=".txt,.md,.csv,.json,.log" multiple hidden onChange={event=>void addFiles(event.target.files)}/>
+   <div className={styles.menuAnchor}><button type="button" aria-label="添加资料" disabled={disabled||reading} aria-expanded={menu==='files'} onClick={()=>setMenu(menu==='files'?null:'files')}><Plus size={19}/></button>{menu==='files'&&<div className={styles.menu} role="dialog" aria-label="添加资料"><button type="button" onClick={()=>fileInput.current?.click()}><FileText size={16}/> 从文件添加</button><p>{references
+    ?'支持 '+attachmentFormatsText()+'。文件会存进你的资料库，并作为引用加入本条消息。'
+    :'支持 TXT、Markdown、CSV、JSON、日志。内容会加入本条消息，发送前可以检查或删除。'}</p></div>}</div>
+   <input ref={fileInput} type="file" aria-label="选择附件" accept={references?attachmentAccept():'.txt,.md,.csv,.json,.log'} multiple hidden
+    onChange={event=>chooseFiles(event.target.files)}/>
    <div className={styles.menuAnchor}><button type="button" aria-label="使用技能" disabled={disabled} aria-expanded={menu==='skills'} onClick={toggleSkills}><Box size={18}/></button>{menu==='skills'&&<div className={styles.skillMenu} role="dialog" aria-label="使用技能"><div className={styles.skillHead}><strong>使用技能</strong><button type="button" aria-label="关闭技能菜单" onClick={()=>setMenu(null)}><X size={16}/></button></div><label className={styles.skillSearch}><Search size={16}/><input aria-label="搜索技能" placeholder="搜索技能" value={query} onChange={event=>setQuery(event.target.value)}/></label><div className={styles.skillList}>{choices.isLoading?<p role="status">正在读取技能…</p>:choices.error?<QueryNotice error={choices.error} label="技能列表" retry={()=>choices.refetch()}/>:<>{skills.map(skill=><button type="button" key={skill.moduleId} onClick={()=>changeSkill(skill.moduleId)}><span className={styles.skillGlyph}><Box size={16}/></span><span><strong>{skill.name}</strong><small>{onSkillChange?'加载到本对话，不自动发送':'使用此技能开展独立对话'}</small></span></button>)}{!skills.length&&<p>没有匹配的可用技能</p>}</>}</div><div className={styles.skillFoot}><Link href="/workbench/marketplace">浏览功能广场</Link></div></div>}</div>
   </div><div className={styles.toolRight}>{nearLimit&&<span>{value.length} / {maxLength}</span>}
   {selected&&<span>{choices.data?.skills.find(skill=>skill.moduleId===selected)?.name??'已选择技能'}</span>}<ModelSlot/><button type="button" aria-label="发送" className={styles.send} disabled={cannotSend} onClick={sendAndFocus}><ArrowUp size={18}/></button></div></div>
- </div>{reading&&<p role="status" className={styles.note}>正在读取附件…</p>}{error&&<p role="alert" className={styles.note}>{error}</p>}{note&&<p className={styles.note}>{note}</p>}</div>;
+ </div>{attachments.status}{reading&&<p role="status" className={styles.note}>正在读取附件…</p>}{error&&<p role="alert" className={styles.note}>{error}</p>}{note&&<p className={styles.note}>{note}</p>}</div>;
 }
 
 /**
@@ -92,11 +104,30 @@ export function sendKeepingFocus(send:()=>void,box:{focus:(options?:FocusOptions
  box?.focus({preventScroll:true});
 }
 
-/** Start an unbound session, then hand the explicit send to its recoverable Runtime. */
-export function useFreeConversation(){
+const NEW_TASK_REFERENCES='opc-new-task-references';
+
+/**
+ * Start an unbound session, then hand the explicit send to its recoverable Runtime.
+ * `withReferences` (UI-B, the new-task page only): the box's library references are kept with its draft in this tab
+ * and handed to the new session's draft, which /runtime sends with the text. Other pages never pick them up.
+ */
+export function useFreeConversation(options:{withReferences?:boolean}={}){
+ // With the composer switch off nothing could show or remove stored references, so none are kept.
+ const withReferences=Boolean(options.withReferences)&&COMPOSER_REFERENCES_ENABLED;
  const start=trpc.runtime.start.useMutation();
  const request=useRef('');
  const [error,setError]=useState('');
+ const [references,setStoredReferences]=useState<LibraryReference[]>([]);
+ useEffect(()=>{
+  try{
+   if(!withReferences){sessionStorage.removeItem(NEW_TASK_REFERENCES);return;}
+   const text=sessionStorage.getItem('opc-new-task-input')??'';
+   setStoredReferences(referencesNamedIn(text,parseReferences(JSON.parse(sessionStorage.getItem(NEW_TASK_REFERENCES)??'[]'))));
+  }catch{/* No saved references. */}
+ },[withReferences]);
+ function setReferences(next:LibraryReference[]){setStoredReferences(next);
+  try{if(next.length)sessionStorage.setItem(NEW_TASK_REFERENCES,JSON.stringify(next));else sessionStorage.removeItem(NEW_TASK_REFERENCES);}
+  catch{/* The box still holds them for this send. */}}
  async function send(input:string,moduleId=''){
   if(!input.trim()||start.isPending)return;setError('');
   request.current ||= crypto.randomUUID();
@@ -104,11 +135,13 @@ export function useFreeConversation(){
    const result=await start.mutateAsync({requestId:request.current,scope:{kind:'positioning_draft'}});
    const sendId=crypto.randomUUID();
    localStorage.setItem('opc-runtime-input:'+result.sessionId,input);
+   const named=referencesNamedIn(input,references);
+   if(withReferences&&named.length)localStorage.setItem('opc-runtime-references:'+result.sessionId,JSON.stringify(named));
    if(moduleId)localStorage.setItem('opc-runtime-skill:'+result.sessionId,moduleId);
    sessionStorage.setItem('opc-runtime-send:'+result.sessionId,sendId);
-   sessionStorage.removeItem('opc-new-task-input');
+   sessionStorage.removeItem('opc-new-task-input');sessionStorage.removeItem(NEW_TASK_REFERENCES);
    location.assign('/runtime?session='+result.sessionId+'&request='+sendId);
   }catch(cause){setError(workspaceErrorMessage(cause as Parameters<typeof workspaceErrorMessage>[0])+' 输入已保留；再次发送会恢复同一次开始请求。');}
  }
- return {send,busy:start.isPending,error};
+ return {send,busy:start.isPending,error,references,setReferences};
 }

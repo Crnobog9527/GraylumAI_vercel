@@ -21,11 +21,14 @@ import { REPORT_DOC_TEXT } from "./report-document";
 import { JuryEntry } from "@/components/fusion-review/JuryEntry";
 import { REPORT_OUTLINE_MIN_CHAPTERS, ReportWithOutline } from "@/components/chat-display/report-outline";
 import { useReportOutline } from "@/components/chat-display/use-report-outline";
+import { savedFormalReport, type FormalReport } from "./saved-report";
 
 type Props = {
   draftId: string; sessionId: string; projectId: string; roundId: string; confirmed: boolean; busy: boolean;
-  /** The formal version's report (opc.read), for the jury entry next to this one. */
-  report?: { available?: boolean; id?: string | null } | null;
+  /** The formal version's report (opc.read): the jury entry next to this one, and its saved text (savedFormalReport). */
+  report?: FormalReport;
+  /** This round is published (a formal version), not a revision in progress. */
+  published?: boolean;
   /** After 定稿: refresh the page and ask, explicitly, whether to start the first-week topics. */
   onTopics: () => void;
 };
@@ -42,31 +45,33 @@ export function ReportEntry(props: Props) {
 
 function RoundReportEntry(props: Props) {
   const available = trpc.runtime.reportAvailable.useQuery(undefined, { enabled: props.confirmed, staleTime: 60_000 });
-  const canGenerate = props.confirmed && available.data?.enabled === true;
+  // A published round with a saved formal report (e.g. adopted from the jury) shows it; it never offers a new paid one.
+  const saved = savedFormalReport(Boolean(props.published), props.report);
+  const canGenerate = props.confirmed && available.data?.enabled === true && !saved;
   const report = useReportGen({ ...props, canGenerate: canGenerate });
   const [open, setOpen] = useState(false);
   // A first start refused for membership opens the paywall (design v25 scene 1), also after leaving
   // and coming back in this tab. A saved report of this round keeps its own dialog.
   const paywall = useReportPaywallMemory({ draftId: props.draftId, roundId: props.roundId,
-    refusedForMembership: Boolean(report.refusal?.membership), hasReport: Boolean(report.executionId) });
+    refusedForMembership: Boolean(report.refusal?.membership), hasReport: Boolean(report.executionId || saved) });
   // The jury (FUSION-REVIEW) sits next to it: it reviews the report of the formal version, whatever this entry shows.
   const jury = <JuryEntry draftId={props.draftId} report={props.report} busy={props.busy} />;
-  if (!report.executionId && (!canGenerate || report.refusal?.hideEntry)) return jury;
+  if (!report.executionId && !saved && (!canGenerate || report.refusal?.hideEntry)) return jury;
   return (
     <>
       <Button variant="outline" disabled={props.busy} onClick={() => setOpen(true)}>
-        {report.executionId ? REPORT_TITLE : REPORT_ACTION.start}
+        {report.executionId || saved ? REPORT_TITLE : REPORT_ACTION.start}
       </Button>
       {jury}
       {open && (paywall ? <ReportPaywallDialog onClose={() => setOpen(false)} />
-        : <ReportDialog report={report} busy={props.busy} onClose={() => setOpen(false)}
+        : <ReportDialog report={report} savedBody={report.executionId ? null : saved} busy={props.busy} onClose={() => setOpen(false)}
           onTopics={() => { setOpen(false); props.onTopics(); }} />)}
     </>
   );
 }
 
-function ReportDialog({ report, busy, onClose, onTopics }:
-  { report: ReturnType<typeof useReportGen>; busy: boolean; onClose: () => void; onTopics: () => void }) {
+export function ReportDialog({ report, savedBody, busy, onClose, onTopics }:
+  { report: ReturnType<typeof useReportGen>; savedBody?: string | null; busy: boolean; onClose: () => void; onTopics: () => void }) {
   // Unsaved report edits live in the panel: closing asks first instead of dropping them silently.
   const unsaved = useRef(false);
   const [trackUnsaved] = useState(() => (value: boolean) => { unsaved.current = value; });
@@ -77,7 +82,7 @@ function ReportDialog({ report, busy, onClose, onTopics }:
   const status = report.status;
   const view = status ? reportView(status) : null;
   const working = report.starting || report.streaming;
-  const body = report.live?.text || (view && (view.kind === "report" || view.kind === "progress") ? view.body : null);
+  const body = report.live?.text || (view && (view.kind === "report" || view.kind === "progress") ? view.body : null) || savedBody;
   const notices: ChatNotice[] = [];
   if (report.stopUnconfirmed) notices.push({ id: "report-stop-unconfirmed", tone: "warning", text: STOP_UNCONFIRMED_NOTICE,
     actions: [{ label: CHAT_ACTION.stop, onClick: report.retryStop }] });
@@ -94,7 +99,7 @@ function ReportDialog({ report, busy, onClose, onTopics }:
   if (report.refusal && !repeats) notices.push({ id: "report-refusal", tone: "warning", text: report.refusal.text,
     ...(report.refusal.membership ? { actions: [{ label: REPORT_ACTION.membership,
       onClick: () => void window.open(profileTabHref("subscription"), "_blank", "noopener") }] } : {}) });
-  const first = !report.executionId;
+  const first = !report.executionId && !savedBody;
   return (
     <div role="dialog" aria-modal="true" aria-label={REPORT_TITLE} tabIndex={-1}
       onKeyDown={event => { if (event.key === "Escape") close(); }}
@@ -114,7 +119,7 @@ function ReportDialog({ report, busy, onClose, onTopics }:
               generatedComplete={view.candidate} busy={busy || working} onTopics={onTopics} onUnsaved={trackUnsaved} />
             : body && <MessageMarkdown className="mt-4" text={body} streaming={Boolean(report.live && !report.live.stopped)} />}
           <ChatNoticeList className="mt-4" notices={notices} />
-          {report.offer && !report.refusal?.hideEntry && (
+          {report.offer && !savedBody && !report.refusal?.hideEntry && (
             <div className={resultStyles.consentActions}>
               <Button disabled={busy} onClick={report.offer === "start" ? report.start : report.restart}>
                 {report.offer === "start" ? REPORT_ACTION.start : REPORT_ACTION.retry}
