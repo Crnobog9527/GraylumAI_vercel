@@ -86,7 +86,7 @@ Master Plan 第 588 行写明"缩小上线范围须 Owner 另行决定"，AI 不
 | # | 做什么 | 为什么 | 谁做 | 依赖 | 怎么验证 | 出处 |
 | --- | --- | --- | --- | --- | --- | --- |
 | A1 | 升级 Vercel Pro | 正式运营要用；Hobby 单次函数 300 秒、定时任务每天一次，不够 A2 用 | Owner 操作（付费） | — | Vercel 账单页显示 Pro；正式项目的函数时长上限读回 | Master Plan 第 1237 行、第 7.6 节第 2491 行 |
-| A2 | 改 `apps/web/vercel.json` 定时任务频率：新增 `/api/cron/runtime-recovery`（分钟级）；`account-erasure` 至少每小时一次；`library-cleanup` 每 5 分钟；`social-monitor` 每 10 分钟 | 删除后 24 小时内清完（T_online）；超时回合自动收口退回；资料库清理；作品数据刷新容量 | 执行窗口开 PR | A1；`runtime-recovery` 路由已在 staging，但 `vercel.json` 里还没有这一条 | 正式环境 `scheduled_job_runs` 里每个任务都有成功记录（不是 401/503） | 第 2335、2375、2491 行；[LIB_DOCS_PLAN](../LIB_DOCS_PLAN.md) 第 144 行；[PUBLISH-MONITOR](PUBLISH-MONITOR.md) 第 338 行；[FUSION-REVIEW](FUSION-REVIEW.md) 第 44 行 |
+| A2 | 改 `apps/web/vercel.json` 定时任务频率：新增 `/api/cron/runtime-recovery`（分钟级）；`account-erasure` 和 `library-cleanup` 每 5 分钟（Master Plan 要求注销兜底至少每小时一次，LIB_DOCS_PLAN 要求两者一起改成每 5 分钟，取更严的 5 分钟）；`social-monitor` 每 10 分钟 | 删除后 24 小时内清完（T_online）；超时回合自动收口退回；资料库清理；作品数据刷新容量 | 执行窗口开 PR | A1；`runtime-recovery` 路由已在 staging，但 `vercel.json` 里还没有这一条 | 会写运行记录的任务（`social-monitor`、`tickets/auto-close` 等）看 `scheduled_job_runs` 有成功记录；`runtime-recovery` 和 `account-erasure` 目前不写这张表，看 Vercel 定时任务调用记录和函数日志里的 HTTP 200（不是 401/503） | 第 2335、2375、2491 行；[LIB_DOCS_PLAN](../LIB_DOCS_PLAN.md) 第 144 行；[PUBLISH-MONITOR](PUBLISH-MONITOR.md) 第 338 行；[FUSION-REVIEW](FUSION-REVIEW.md) 第 44 行 |
 | A2a | **待核实**：staging 和正式两个 Vercel 项目是否在同一个团队、staging 是否也会变成 Pro | `vercel.json` 两个项目共用；如果 staging 仍是 Hobby，分钟级定时任务可能让 staging 部署失败 | 总控只读核对 | A1 | 看两个项目所属团队和套餐 | 仓库里没有出处，待核实 |
 | A3 | 恢复正式站（取消暂停） | 正式 Vercel 项目 `graylum-ai-vercel-v1` 目前是暂停状态（**待核实**：暂停原因和日期仓库里没写，总控记录为 2026-10-05） | Owner 操作（MCP 没有这个权限） | 维护态准备完成（第 4 节第 4 步） | 访问正式域名不再是暂停页；新调用仍是关闭状态 | [RUNTIME_PROD_PLAN](../RUNTIME_PROD_PLAN.md) 第 7.3 节第 3、5 步、第 8 节 Vercel 行 |
 | A4 | 处理 `main` 的 Next 安全漏洞 | `main` 停在 2026-08 的依赖，必需检查 Dependency Audit 失败；正式站公开可达 | 总控（需批准合并 `main`） | 冻结版本 | staging → `main` 的合并 PR 上 Dependency Audit 和全部必需检查通过，不新增豁免 | 第 2628 行；RUNTIME_PROD_PLAN 第 7.3 节第 1 步 |
@@ -147,9 +147,9 @@ Master Plan 第 588 行写明"缩小上线范围须 Owner 另行决定"，AI 不
 
 | # | 做什么 | 为什么 | 谁做 | 依赖 | 怎么验证 | 出处 |
 | --- | --- | --- | --- | --- | --- | --- |
-| E1 | 应用并入 `www.graylum.com`，登录后页面放 `/app`；`graylum.com` 和 `app.graylum.com` 301 到 www | Owner 2026-10-12 定为上线前完成 | 代码：执行窗口（**还没开 PR**，冻结窗口最后做）；Vercel 域名、Supabase Site URL 和回调、Stripe 回调、环境变量：Owner 逐项批准 | PUBLIC-SITE | 三个域名都落到 www；登录回跳、Stripe 回跳正确 | 第 748、934 行；[SEO_GEO_SPEC](../SEO_GEO_SPEC.md) 第 19 行 |
-| E2 | 如果当时在 Vercel 设过 `www.graylum.com` → `app.graylum.com` 的临时 307，先撤回 | 不撤回整站不会被收录 | Owner 操作 | E1 | 访问 www 不再 307 | 第 2493、2628 行。**待核实**：这条 307 实际有没有设过（正式站后来改为整站暂停） |
-| E3 | 正式环境设置 `SITE_INDEXING=public` 后重新构建 | `/robots.txt` 才会放行搜索爬虫、拒绝训练爬虫；noindex 响应头也随之只留在登录后页面 | 总控（需批准环境变量） | E1、E2；落地页能力核对（H1）通过 | `/robots.txt` 内容；首页响应头没有 `X-Robots-Tag: noindex` | RELEASE_PREP_CHECKLIST 第 54 行；`apps/web/next.config.ts` 第 63–66 行；`apps/web/src/lib/landing/landing-flags.ts` 第 12–13 行 |
+| E1 | 应用并入 `www.graylum.com`，登录后页面放 `/app`；`graylum.com` 和 `app.graylum.com` **308**（保留请求方法和请求体，切换期间还在发往旧主机的 Stripe 回调 POST 不丢）到 www；**必须先做完 E2** 再让这两条 308 生效，否则两条反向跳转会无限循环 | Owner 2026-10-12 定为上线前完成 | 代码：执行窗口（**还没开 PR**，冻结窗口最后做）；Vercel 域名、Supabase Site URL 和回调、Stripe 回调、环境变量：Owner 逐项批准 | PUBLIC-SITE；E2 | 三个域名都落到 www，状态码是 308；登录回跳、Stripe 回跳正确 | 第 748、934 行；[SEO_GEO_SPEC](../SEO_GEO_SPEC.md) 第 19、24、220、225 行 |
+| E2 | 如果当时在 Vercel 设过 `www.graylum.com` → `app.graylum.com` 的临时 307，**在 E1 的反向跳转生效之前**先撤回 | 和 E1 方向相反，同时存在会无限循环；不撤回整站也不会被收录 | Owner 操作 | 取得正式环境设置批准 | 实测访问 www 不再跳到 app，之后才放 E1 的 308 | 第 2493、2628 行；SEO_GEO_SPEC 第 224–225 行。**待核实**：这条 307 实际有没有设过（正式站后来改为整站暂停） |
+| E3 | 正式环境设置 `SITE_INDEXING=public` 后重新构建 | `/robots.txt` 才会放行搜索爬虫、拒绝训练爬虫；noindex 响应头也随之只留在登录后页面 | 总控（需批准环境变量） | E2、E1；落地页能力核对（H1）通过 | `/robots.txt` 内容；首页响应头没有 `X-Robots-Tag: noindex` | RELEASE_PREP_CHECKLIST 第 54 行；`apps/web/next.config.ts` 第 63–66 行；`apps/web/src/lib/landing/landing-flags.ts` 第 12–13 行 |
 | E4 | Google Search Console、Bing 提交站点和 sitemap | SEO 第 0 阶段地基 | Owner 操作（对外账号） | E3 | 后台显示已验证 | SEO_GEO_SPEC 第 306 行 |
 
 ### F. 正式环境功能开关
@@ -198,7 +198,7 @@ Master Plan 第 588 行写明"缩小上线范围须 Owner 另行决定"，AI 不
 | --- | --- | --- |
 | **10-17（今天）起立刻开始** | 外部有等待时间的事：D1 Stripe MP 开通、D2–D6 Stripe 后台设置、A1 Vercel Pro、A5 正式 Upstash、C3 Resend 域名、C6 Parallel 书面确认、C8/C9 Post for Me 订阅和询问、C10 统计账号、D8 钱包税务核实、D10 条款正文、D11 客服邮箱；Owner 决定第 6 节第 1–3 项 | Owner |
 | 10-17 → 10-22 | 按编号合并 0271–0283（第 1.2 节），每个合并后应用 staging、重建指纹；同时推进 1.1 节剩余任务；开 A2（定时任务）和 OR-2、T-END 的 PR | 执行窗口；总控应用迁移 |
-| 10-22 → 10-24 | E1 `/app` 单主机搬迁（冻结窗口最后做）；F8 落地页开关 PR；10-24 总控把"冻结时还没验收的功能"缺口清单交 Owner 一次批 | 执行窗口；总控；Owner |
+| 10-22 → 10-24 | E1 `/app` 单主机搬迁的代码（冻结窗口最后做；正式环境切换时按 E2 → E1 的顺序：先撤 307、实测，再放 308）；F8 落地页开关 PR；10-24 总控把"冻结时还没验收的功能"缺口清单交 Owner 一次批 | 执行窗口；总控；Owner |
 | **10-25 冻结** | staging 冻结一个版本：之后只修上线阻塞问题（登录、对话、付款、回调、监控），不加功能 | 总控 |
 | 10-25 → 10-27 | H2 staging 全量回归：自动化全部跑一遍；Codex 浏览器验收按清单一次一个；修复只走阻塞问题 | 执行窗口；Codex |
 | 10-27 | 准备批准包（RUNTIME_PROD_PLAN 第 7.3 节第 2 步）：正式项目、版本、迁移、配置值、各家上限金额、冒烟预算 | 总控 |
