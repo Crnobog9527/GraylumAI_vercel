@@ -73,6 +73,16 @@ export async function failBeforeDispatch(rpc:<T>(name:string,args:Record<string,
   .catch(refused=>refused instanceof Error&&refused.message==='RUNTIME_FAILURE_REASON_DENIED'?send(reason):null)
   .catch(()=>null);
 }
+export const CAPACITY_FAILURE_CODES=['RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY','RUNTIME_COMPLETE_REQUEST_EXCEEDS_CAPACITY'];
+/** Content beyond capacity after a charged call is user-side and never refunded: record it (0282) before the
+ * execution is interrupted, so neither the 24-hour refund nor an operator applies. Best effort; before 0282 it is a no-op. */
+export async function recordCapacityFailure(rpc:<T>(name:string,args:Record<string,unknown>)=>Promise<T>,
+  args:Record<string,unknown>,error:unknown):Promise<void> {
+ if(!(error instanceof Error)||!CAPACITY_FAILURE_CODES.includes(error.message))return;
+ await rpc('runtime_record_capacity_failure',{...args,p_code:error.message}).catch(()=>{
+  logger.error('api','runtime_capacity_marker_failed',{executionId:args.p_execution_id});
+ });
+}
 /** Cancels and records why in one transaction (0248); before 0248 exists, the plain cancellation runs. */
 export async function cancelWithCode(rpc:<T>(name:string,args:Record<string,unknown>)=>Promise<T>,
   args:Record<string,unknown>,code:string):Promise<{state:'cancelled'|'completed'|'cost_pending'}> {
