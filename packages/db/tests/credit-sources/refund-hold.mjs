@@ -4,6 +4,7 @@
 // Synthetic profiles and orders only; no Auth, no provider, no network beyond the local container.
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import pg from 'pg';
 import { localDb, read } from '../runtime-view-perf/local-db.mjs';
 
 const migrationPath = 'packages/db/migrations/0289_pay_refunded_pack_hold.sql';
@@ -193,6 +194,65 @@ try {
   assert.equal(await v('SELECT status v FROM credit_package_sources WHERE id=$1', [legacy.source]), 'reversed',
     'rerunning 0289 marks such a source reversed');
   report.checks.push('a pack already clawed back by the legacy Stripe refund is not held, cannot be clawed back twice, and its source is marked reversed');
+
+  // Concurrency (two connections, each in its own transaction, both orders): the profile lock serialises the refund,
+  // the settlement, reservations and returns, and every order ends in the same consistent state.
+  const race = async (first, second) => {
+    const sessions = [new pg.Client(c.connectionParameters), new pg.Client(c.connectionParameters)];
+    await Promise.all(sessions.map(x => x.connect()));
+    try {
+      const run = async (x, work, delay) => {
+        await new Promise(t => setTimeout(t, delay));
+        await x.query('BEGIN');
+        try { await work(x); await new Promise(t => setTimeout(t, 80)); await x.query('COMMIT'); return 'ok'; }
+        catch (error) { await x.query('ROLLBACK'); return error.message; }
+      };
+      return await Promise.all([run(sessions[0], first, 0), run(sessions[1], second, 20)]);
+    } finally { await Promise.all(sessions.map(x => x.end())); }
+  };
+  const on = x => ({
+    reserve: (user, n) => x.query("SELECT * FROM atomic_pre_deduct($1,$2,'fixture',gen_random_uuid())", [user, n]),
+    refundEvent: (pk, id) => x.query(`SELECT pay_stripe_mp_record_external_refund($1,'fixture',$2,$3,1000,'usd',now())`, [pk.order, pk.payment, id]),
+    restore: (user, pre) => x.query('SELECT * FROM bill2_legacy_refund($1,$2)', [user, pre]),
+    settle: order => x.query("SELECT pay_common_pack_refund_review_settle($1,$2,'clawback')", [ops, order]),
+  });
+  const holdOf = user => v('SELECT credit_package_refund_hold($1) v', [user]);
+  for (const reserveFirst of [true, false]) {
+    // A reservation races the external refund: it either went first (and the hold is the pack's remainder) or it is
+    // refused because the pack's credits are already held.
+    const u = await profile(50), pk = await pack(u, 100), tag = 're_race_a_' + reserveFirst;
+    const reserveWork = x => on(x).reserve(u, 120), refundWork = x => on(x).refundEvent(pk, tag);
+    const [a, b] = reserveFirst ? await race(reserveWork, refundWork) : await race(refundWork, reserveWork);
+    const reserved = reserveFirst ? a : b;
+    assert.equal(reserveFirst ? b : a, 'ok');
+    const [bal, used, hold] = [await balance(u), await packUsed(pk.source), await holdOf(u)];
+    // The first transaction holds its locks for 80 ms, so the order is the one requested.
+    assert.equal(reserved === 'ok', reserveFirst, reserved);
+    if (reserved === 'ok') assert.deepEqual([bal, used, hold], [30, 70, 30], 'reservation first: 50 unattributed + 70 pack');
+    else {
+      assert.match(reserved, /PRE_DEDUCT_TERMINATED_GRANT_REMAINDER_QUARANTINED/);
+      assert.deepEqual([bal, used, hold], [150, 0, 100], 'refund first: the reservation needed held credits');
+    }
+    assert.equal(await spendable(u), bal - hold);
+  }
+  for (const restoreFirst of [true, false]) {
+    // A reservation's return races the clawback: either way all 100 pack credits are taken back exactly once.
+    const u = await profile(0), pk = await pack(u, 100);
+    const pre = await reserve(u, 30);
+    await externalRefund(pk, 're_race_b_' + restoreFirst);
+    const restoreWork = x => on(x).restore(u, pre), settleWork = x => on(x).settle(pk.order);
+    const results = restoreFirst ? await race(restoreWork, settleWork) : await race(settleWork, restoreWork);
+    assert.deepEqual(results, ['ok', 'ok']);
+    const taken = await v(`SELECT coalesce(sum(amount),0)::int v FROM credit_transactions WHERE source_order_id=$1
+      AND ledger_type='refund_clawback'`, [pk.order]);
+    // Return first: one clawback of all 100; clawback first: 70 now, the returned 30 at the return's commit.
+    assert.deepEqual(await v(`SELECT jsonb_agg(amount ORDER BY created_at) v FROM credit_transactions WHERE source_order_id=$1
+      AND ledger_type='refund_clawback'`, [pk.order]), restoreFirst ? [-100] : [-70, -30]);
+    const src = (await c.query('SELECT status,refund_review,refund_clawback_due FROM credit_package_sources WHERE id=$1', [pk.source])).rows[0];
+    assert.deepEqual([await balance(u), taken, await holdOf(u), src.status, src.refund_review, src.refund_clawback_due],
+      [0, -100, 0, 'reversed', 'clawback', 0], restoreFirst ? 'return first' : 'clawback first');
+  }
+  report.checks.push('two-connection races (both orders): reservation vs external refund, reservation return vs clawback end consistent');
 
   // A pack whose remainder cannot be proven (0275 "source unknown") is alert-only: never held, never clawed back
   // from the balance (PAY-DISPUTE-GUARD 4.3: never take other sources' credits); "kept" can still close the review.
