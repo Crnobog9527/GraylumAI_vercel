@@ -5,15 +5,14 @@
 .lede { margin: 10px 0 0; max-width: 42em; color: var(--j-body); font-size: clamp(16px, 1.4vw, 18px); line-height: 1.7; }
 .bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-top: 22px; }
 .tabs { display: flex; flex-wrap: wrap; gap: 8px; }
-.tabs button, .pause {
+.tabs button {
   display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 16px 0 8px; border: 1px solid var(--j-line);
   border-radius: 999px; background: #fff; color: var(--j-body); font: inherit; font-size: 15px; font-weight: 500; cursor: pointer;
 }
 .tabs button span { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: #f0efeb; color: var(--j-ink); font-size: 13px; }
 .tabs button[aria-selected='true'] { border-color: var(--j-ink); background: var(--j-ink); color: #fff; }
 .tabs button[aria-selected='true'] span { background: var(--j-gold); }
-.pause { padding: 0 14px; background: transparent; font-size: 14px; }
-.tabs button:focus-visible, .pause:focus-visible { outline: 2px solid var(--j-ink); outline-offset: 2px; }
+.tabs button:focus-visible { outline: 2px solid var(--j-ink); outline-offset: 2px; }
 .panel { display: grid; gap: 14px; margin-top: 18px; }
 .note { margin: 0; max-width: 46em; color: var(--j-ink); font-size: 16.5px; line-height: 1.7; }
 .picture { position: relative; height: clamp(520px, 64svh, 640px); overflow: hidden; border: 1px solid var(--j-line); border-radius: 22px; box-shadow: var(--j-shadow-lift); }

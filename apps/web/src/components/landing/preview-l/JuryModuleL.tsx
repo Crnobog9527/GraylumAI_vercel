@@ -40,7 +40,8 @@ export function JuryModuleL({ flags }: { flags: LandingFlags }) {
  * How the jury works, drawn (Owner 2026-10-17, round six: "让用户通过这个可视化的动画，大概能了解到什么叫做评审团"), true to
  * FUSION-REVIEW: the report goes to three reviewers who find faults on their own; only where they disagree is there one
  * more round (two rounds at most); the lead writer puts it into a revised draft; every chapter, revision or original, is
- * the person's to pick. The parts light up in turn, in a loop; with reduced motion they are simply there. A picture.
+ * the person's to pick (round seven, T9: said in a line of its own, then the choices under "你来决定"). The parts light up
+ * in turn, in a loop; with reduced motion they are simply there. A picture.
  */
 function JuryFlowL() {
   const a = L_JURY.anim;
@@ -60,9 +61,11 @@ function JuryFlowL() {
       <ArrowDown className={styles.jfArrow} size={16} aria-hidden="true" data-s={2} />
       <p className={styles.jfLead} data-s={3}><PenLine size={15} aria-hidden="true" />{a.lead}</p>
       <ArrowDown className={styles.jfArrow} size={16} aria-hidden="true" data-s={3} />
+      <p className={styles.jfDecide} data-s={4}>{a.decide}</p>
+      <p className={styles.jfDecideTitle} data-s={5}>{a.decideTitle}</p>
       <ul className={styles.jfChapters}>
         {a.chapters.map((title, index) => (
-          <li key={title} data-s={4} style={{ '--i': index } as CSSProperties}>
+          <li key={title} data-s={5} style={{ '--i': index } as CSSProperties}>
             <span>{title}</span>
             <em data-on={index !== 1 || undefined}>{a.adopt}</em><em data-on={index === 1 || undefined}>{a.keep}</em>
           </li>

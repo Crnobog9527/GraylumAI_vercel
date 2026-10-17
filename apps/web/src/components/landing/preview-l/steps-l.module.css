@@ -5,6 +5,11 @@
 /* Room for sample L's sticky bar: under the header on a computer, at the foot of a phone. */
 .stage.stage { padding-top: 132px; }
 @media (max-width: 767px) { .stage.stage { padding-top: 66px; padding-bottom: 84px; } }
+/* Round seven (T1): title, then the progress and stage names, then the stage's name and note (at least 32px under the title). */
+.oneFrame.oneFrame { grid-template-rows: auto auto auto minmax(0, 1fr); gap: 0; }
+.oneTitle.oneTitle { margin-bottom: 20px; }
+.oneCaption.oneCaption { margin: 14px 0; }
+@media (max-width: 767px) { .oneCaption.oneCaption { margin: 14px 0 10px; } }
 .progress { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px 16px; }
 .progress > :first-child { grid-column: 1 / -1; }
 .stages { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 0; padding: 0; list-style: none; color: var(--j-body); font-size: 13px; }
@@ -54,22 +59,26 @@
 .jfReviewers li { display: grid; justify-items: center; gap: 2px; padding: 8px 6px; border-radius: 10px; background: #fff; box-shadow: inset 0 0 0 1px var(--j-line); }
 .jfReviewers b { color: var(--j-ink); font-size: 14px; }
 .jfReviewers span { color: var(--j-body); font-size: 12.5px; }
+.jfDecide { max-width: 26em; color: var(--j-ink); font-size: 13.5px; line-height: 1.6; text-align: center; }
+.jfDecideTitle { justify-self: start; margin-top: 6px; color: var(--j-ink); font-size: 13px; font-weight: 600; }
 .jfChapters { display: grid; gap: 6px; width: 100%; margin: 0; padding: 0; list-style: none; }
 .jfChapters li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 10px; background: #fff; box-shadow: inset 0 0 0 1px var(--j-line); }
 .jfChapters span { margin-right: auto; color: var(--j-ink); font-size: 13.5px; }
 .jfChapters em { padding: 1px 8px; border-radius: 6px; color: var(--j-body); font-size: 12px; font-style: normal; box-shadow: inset 0 0 0 1px var(--j-line); }
 .jfChapters em[data-on] { background: var(--j-ink); color: #fff; box-shadow: none; }
 @media (prefers-reduced-motion: no-preference) {
-  .juryAnim [data-s] { animation: 11s ease infinite both; animation-delay: calc(var(--i, 0) * .25s); }
+  .juryAnim [data-s] { animation: 12s ease infinite both; animation-delay: calc(var(--i, 0) * .25s); }
   .juryAnim [data-s='0'] { animation-name: jf0; }
   .juryAnim [data-s='1'] { animation-name: jf1; }
   .juryAnim [data-s='2'] { animation-name: jf2; }
   .juryAnim [data-s='3'] { animation-name: jf3; }
   .juryAnim [data-s='4'] { animation-name: jf4; }
+  .juryAnim [data-s='5'] { animation-name: jf5; }
 }
 /* One loop: the report, the reviewers, the second round, the lead writer, the chapters, each lit in turn; then all fade. */
 @keyframes jf0 { 0% { opacity: .15; } 4%, 90% { opacity: 1; } 100% { opacity: .15; } }
-@keyframes jf1 { 0%, 16% { opacity: .15; } 22%, 90% { opacity: 1; } 100% { opacity: .15; } }
-@keyframes jf2 { 0%, 34% { opacity: .15; } 40%, 90% { opacity: 1; } 100% { opacity: .15; } }
-@keyframes jf3 { 0%, 52% { opacity: .15; } 58%, 90% { opacity: 1; } 100% { opacity: .15; } }
-@keyframes jf4 { 0%, 66% { opacity: .15; } 72%, 90% { opacity: 1; } 100% { opacity: .15; } }
+@keyframes jf1 { 0%, 14% { opacity: .15; } 20%, 90% { opacity: 1; } 100% { opacity: .15; } }
+@keyframes jf2 { 0%, 28% { opacity: .15; } 34%, 90% { opacity: 1; } 100% { opacity: .15; } }
+@keyframes jf3 { 0%, 42% { opacity: .15; } 48%, 90% { opacity: 1; } 100% { opacity: .15; } }
+@keyframes jf4 { 0%, 56% { opacity: .15; } 62%, 90% { opacity: 1; } 100% { opacity: .15; } }
+@keyframes jf5 { 0%, 68% { opacity: .15; } 74%, 90% { opacity: 1; } 100% { opacity: .15; } }

@@ -86,11 +86,10 @@ export function StepsL({ flags }: { flags: LandingFlags }) {
       {locked && stage ? (
         <div ref={ref} role="group" aria-labelledby="step-one-title" className={cn(takeover.takeover, styles.story)}>
           <div className={cn(takeover.stage, styles.stage)}>
-            <div className={cn(page.wrap, takeover.frame)}>
-              <div className={takeover.head}>
-                <h3 id="step-one-title" className={takeover.title}>{L_STEPS.one.title}</h3>
-                <div className={takeover.caption} aria-live="polite" key={stage.label}><h3>{stage.label}<DemoTag /></h3><p>{stage.note}</p></div>
-              </div>
+            <div className={cn(page.wrap, takeover.frame, styles.oneFrame)}>
+              {/* Round seven (T1): the step's title on a line of its own; under it the progress and the stage names; then
+                  the current stage's name and note, just above the picture. */}
+              <h3 id="step-one-title" className={cn(takeover.title, styles.oneTitle)}>{L_STEPS.one.title}</h3>
               <div className={styles.progress}>
                 <div className={takeover.bar} role="progressbar" aria-label={L_STEPS.progress} aria-valuenow={Math.round(progress * 100)}
                   aria-valuemin={0} aria-valuemax={100}><i style={{ transform: `scaleX(${progress})` }} /></div>
@@ -102,6 +101,9 @@ export function StepsL({ flags }: { flags: LandingFlags }) {
                 {seen ? (
                   <button type="button" className={styles.skip} onClick={skip}><ChevronsDown size={15} aria-hidden="true" />{L_STEPS.skip}</button>
                 ) : null}
+              </div>
+              <div className={cn(takeover.caption, styles.oneCaption)} aria-live="polite" key={stage.label}>
+                <h3>{stage.label}<DemoTag /></h3><p>{stage.note}</p>
               </div>
               <div className={takeover.picture}><PositioningPictureL moment={stage.moment} local={local} /></div>
             </div>

@@ -64,7 +64,7 @@ export function OverviewL({ data, reveal }: {
             <>
               <p className={styles.noAccount}>{copy.noAccount}</p>
               <ul className={styles.badges}>
-                {[data.platform.main, ...data.platform.support].map(name => <li key={name}><PlatformMark name={name} />{name}</li>)}
+                {[data.platform.main, ...data.platform.support].map(name => <li key={name}>{name}</li>)}
               </ul>
             </>
           )}
@@ -177,10 +177,6 @@ function Block({ title, icon: Icon, tone, note = false, todo = false, children }
   );
 }
 
-/** A platform's mark: its first character in a small round badge (an identifier only, not the platform's logo). */
-function PlatformMark({ name }: { name: string }) {
-  return <i className={styles.mark} aria-hidden="true">{Array.from(name.replace(/^[^A-Za-z\u4e00-\u9fff]+/, ''))[0] ?? '·'}</i>;
-}
 
 type Account = NonNullable<SampleOverview['ownAccount']>;
 /** The person's account as the report recommends it (round six, S12): name and bio from the report, figures where it gives them. */
@@ -190,7 +186,7 @@ function AccountCard({ account }: { account: Account }) {
     .filter((stat): stat is [string, string] => Boolean(stat[1]));
   return (
     <div className={styles.account}>
-      <p className={styles.accountPlatform}><PlatformMark name={account.platform} />{account.platform}</p>
+      <p className={styles.accountPlatform}>{account.platform}</p>
       <div className={styles.accountHead}>
         <span className={styles.avatar} aria-hidden="true">{Array.from(account.displayName.replace(/[〔〕·｜|]/g, ''))[0]}</span>
         <div><b>{account.displayName}</b><p>{account.bio}</p></div>

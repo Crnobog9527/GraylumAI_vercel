@@ -2,7 +2,7 @@
 'use client';
 
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
-import { Check, Loader2, Pause, Play, RotateCw } from 'lucide-react';
+import { Check, Loader2, RotateCw } from 'lucide-react';
 import work from '@/app/runtime/runtime-work.module.css';
 import {
   RuntimeHeader, RuntimeProposal, RuntimeReply, RuntimeResultsSection, RuntimeTurnView, RuntimeTypePendingPanel,
@@ -12,13 +12,14 @@ import { CtaK } from '@/components/landing/preview-k/CtaK';
 import k from '@/components/landing/preview-k/k.module.css';
 import { RailJ } from '@/components/landing/preview-j/PositioningClipJ';
 import takeover from '@/components/landing/preview-j/takeover-j.module.css';
+import type { ComposerPreviewParagraph } from '@/components/opc/composer-view';
 import { ContentDraftView } from '@/components/opc/content-draft-view';
-import { WorkComposer } from '@/components/opc/work-composer';
 import { ResearchCallList } from '@/components/research/research-call-list';
 import type { ResearchCall } from '@/components/research/research-model';
 import { L_LATER, L_LATER_CHAT as CHAT, L_LATER_FLYWHEEL as FLY, type LaterStage } from '@/lib/landing/landing-copy-l-later';
 import { allOn, type LandingFlags } from '@/lib/landing/landing-flags';
 import picture from './picture-l.module.css';
+import { ComposerL } from './ComposerL';
 import { DemoTag } from './DemoTag';
 import styles from './later-l.module.css';
 
@@ -32,13 +33,12 @@ const STAGE_BEATS: Record<string, number> = { topics: 8, library: 8, voice: 9, s
 /** The part of `text` written by beat `beat` of `from`..`from + span`: the reply streams in. */
 const typed = (text: string, beat: number, from: number, span: number) =>
   beat >= from + span ? text : beat < from ? '' : text.slice(0, Math.round(text.length * (beat - from + 1) / (span + 1)));
-const noop = () => undefined;
 const PUBLISHING = '发布中';
 const reducedMotion = () => Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
 
 /**
  * Region 3's 第二步 and 第三步 (Owner 2026-10-17, round five, R5): each a row of its stages, one shown at a time, moving
- * on by themselves while on screen (the pointer or focus holds them; a button pauses), a click picks any. Step two is
+ * on by themselves while on screen (the pointer or focus holds them; no pause button, round seven T7), a click picks any. Step two is
  * the work conversation as the product draws it (chat-display's work-chat pieces, the 正文稿件 column, 分镜与剪辑建议);
  * its voice stage, and all of step three (publishing, monitoring, the weekly review), are drawn from the plan because
  * the product has not built them yet (L_LATER marks which). The page is the full launched version (Owner
@@ -59,7 +59,6 @@ function LaterStep({ step, flags }: { step: { title: string; lede: string; stage
   const [seen, setSeen] = useState(false);
   const [moving, setMoving] = useState(false);
   const [held, setHeld] = useState(false);
-  const [stopped, setStopped] = useState(false);
   const [beat, setBeat] = useState(0);
   // The visitor's hand on the picture (pointer over it, scrolling or clicking in it) pauses it, as region 6 does.
   const [touching, setTouching] = useState(false);
@@ -75,9 +74,9 @@ function LaterStep({ step, flags }: { step: { title: string; lede: string; stage
   }, []);
   const current = stages[Math.min(active, stages.length - 1)];
   const total = current ? STAGE_BEATS[current.id] ?? 4 : 0;
-  // A stage plays beat by beat while on screen (the pause button stops it); once whole it holds, then the next stage
+  // A stage plays beat by beat while on screen (the pointer on the picture stops it); once whole it holds, then the next stage
   // starts, unless the pointer or focus is on the step.
-  const playing = moving && seen && !stopped && !touching;
+  const playing = moving && seen && !touching;
   useEffect(() => {
     if (!playing) return;
     const whole = beat >= total;
@@ -107,11 +106,6 @@ function LaterStep({ step, flags }: { step: { title: string; lede: string; stage
               </button>
             ))}
           </div>
-          {moving && stages.length > 1 ? (
-            <button type="button" className={styles.pause} onClick={() => setStopped(value => !value)}>
-              {stopped ? <Play size={14} aria-hidden="true" /> : <Pause size={14} aria-hidden="true" />}{stopped ? '继续播放' : '暂停'}
-            </button>
-          ) : null}
         </div>
         <div role="tabpanel" id={`${base}-panel`} aria-labelledby={`${base}-${current.id}`} className={styles.panel} key={current.id}>
           <p className={styles.note}><DemoTag />{current.note}</p>
@@ -141,6 +135,10 @@ const shotTable = (rows: number) => SHOTS + CHAT.script.shots.slice(0, rows).map
   + (rows >= CHAT.script.shots.length ? `\n\n${CHAT.script.total}` : '');
 const STORYBOARD = CHAT.script.shots.map(([n, size, frame, , time]) => `镜头 ${n}（${size}）：${frame} · ${time}`).join('\n');
 const LIBRARY_ASK = `@${CHAT.library.document} ${CHAT.library.user}`;
+const ASK_PREFIX = `@${CHAT.library.document} `;
+/** The library question as typed so far: the @ reference becomes the product's chip once it is whole. */
+const askParagraphs = (typed: string): ComposerPreviewParagraph[] => (typed.length < ASK_PREFIX.length ? [[typed]]
+  : [[{ reference: CHAT.library.document }, ' ', typed.slice(ASK_PREFIX.length)]]);
 
 /**
  * Step two in the work conversation (round six: as in the product, everything arrives: the message sent, the library
@@ -182,7 +180,7 @@ function WorkChatPicture({ id, beat }: { id: string; beat: number }) {
           </div>
         </div>
         <div className={styles.composer} inert>
-          <WorkComposer value={composer} onChange={noop} onSend={noop} label="消息" placeholder="消息" />
+          <ComposerL paragraphs={askParagraphs(composer)} />
         </div>
       </section>
       <aside className={takeover.checklist} inert>

@@ -60,7 +60,7 @@ export function ScenariosL({ flags, after }: { flags: LandingFlags; after?: Reac
   const [inView, setInView] = useState(false);
   const [seen, setSeen] = useState(false);
   const [staticActive, setStaticActive] = useState(0);
-  const ref = useRef<HTMLElement>(null);
+  const ref = useRef<HTMLDivElement>(null);
   const tabs = useRef<HTMLDivElement>(null);
   const lastScroll = useRef(0);
   const lastProgress = useRef(0);
@@ -162,10 +162,12 @@ export function ScenariosL({ flags, after }: { flags: LandingFlags; after?: Reac
   );
 
   return (
-    <section ref={ref} aria-labelledby="compare-title" className={cn(page.section, held && styles.held)} data-zone="compare"
+    <section aria-labelledby="compare-title" className={cn(page.section, held && styles.held)} data-zone="compare"
       data-band="ink" data-region="对比区">
-      {held ? <div className={styles.stage}>{stage}</div> : stage}
-      {after ? <div className={page.wrap}>{after}</div> : null}
+      {/* Round seven (T10): the held stage has its own track, so what follows (the call to action) comes after it
+          instead of scrolling across the held picture. */}
+      {held ? <div ref={ref} className={styles.track}><div className={styles.stage}>{stage}</div></div> : stage}
+      {after ? <div className={cn(page.wrap, held && styles.after)}>{after}</div> : null}
     </section>
   );
 }

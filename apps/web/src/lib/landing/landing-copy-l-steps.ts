@@ -48,6 +48,8 @@ export const L_JURY = {
     debate: '意见不一致的地方，再辩一轮',
     debateNote: '最多两轮',
     lead: '主笔汇总成修订稿',
+    decide: '每一章由你决定：采用评审团的修订，还是保留原来的方向。',
+    decideTitle: '你来决定',
     chapters: ['3 受众', '5 对标账号分析', '9 运营手册'],
     adopt: '采用修订',
     keep: '保留原文',

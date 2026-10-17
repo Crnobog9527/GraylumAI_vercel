@@ -71,10 +71,10 @@
 .todo { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .todo li { display: flex; align-items: flex-start; gap: 8px; color: var(--j-ink); font-size: 14.5px; font-weight: 500; line-height: 1.55; }
 
-/* Round six (S12): where to post. An account card as the report recommends it, or platform marks and the reason. */
-.mark { display: inline-grid; flex: none; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: #262626; color: #fff; font-size: 11px; font-style: normal; font-weight: 600; }
+/* Round six (S12): where to post. An account card as the report recommends it, or the platforms' names and the reason
+   (round seven, T5: names only, no marks). */
 .badges { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
-.badges li { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px 4px 4px; border-radius: 999px; background: #f4f3ef; color: var(--j-ink); font-size: 14px; }
+.badges li { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 999px; background: #f4f3ef; color: var(--j-ink); font-size: 14px; }
 .noAccount { color: var(--j-ink); font-size: 15px; font-weight: 600; }
 .account { display: grid; gap: 10px; padding: 12px; border: 1px solid #ececea; border-radius: 12px; background: #fafaf8; }
 .accountPlatform { display: flex; align-items: center; gap: 6px; color: var(--j-body); font-size: 13px; }

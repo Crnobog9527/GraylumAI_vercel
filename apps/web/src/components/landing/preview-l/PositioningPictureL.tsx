@@ -12,11 +12,11 @@ import { ConfirmJ, filledUpTo, personaInformation } from '@/components/landing/p
 import { CaptureChecklist } from '@/components/opc/capture-checklist';
 import result from '@/components/opc/positioning-result.module.css';
 import { OpenQuestionRecord, OTHER_PLACEHOLDER, QuestionCardView } from '@/components/opc/question-card';
-import { WorkComposer } from '@/components/opc/work-composer';
 import { Button } from '@/components/ui/button';
 import { J_PERSONA_DIRECTION, J_PERSONA_ON_CAMERA, J_STEPS } from '@/lib/landing/landing-copy-j-persona';
 import { J_REPORT, J_TAKEOVER_MOMENTS, type TakeoverLine } from '@/lib/landing/landing-copy-j-takeover';
 import { L_GOAL_CARD, L_POSITIONING_MOMENTS } from '@/lib/landing/landing-copy-l-positioning';
+import { ComposerL } from './ComposerL';
 import { L_CLIP_PARTS } from './RealPartsL';
 import styles from './picture-l.module.css';
 
@@ -42,7 +42,7 @@ function newestShare(local: number, count: number) {
  * Sample L's step one picture (Owner 2026-10-17: "落地页所有产品界面的这个组件，你不要自己再重新写一遍"): the positioning
  * workspace put together from the product's own display components, the ones the product page renders
  * (chat-display: header, step strip, the message list and its bubbles, the checklist column; CaptureChecklist; the
- * question card docked in the real message box, WorkComposer; StepConfirmCard; the research record and benchmark
+ * question card docked in the product's message box (ComposerL); StepConfirmCard; the research record and benchmark
  * table; RealPartsL's report dialog). Sample L's own script plays through it (landing-copy-l-positioning.ts); the sidebar is sample J's (the product's
  * workspace frame is not a display component yet). Only the frame around them is this page's: the grid and the scroll
  * that keeps the newest message and the message box in view, as the product page does. A picture: inert.
@@ -122,7 +122,7 @@ export function PositioningPictureL({ moment, local }: { moment: number; local: 
         </div>
         <div className={styles.bottom}>
           <div className={styles.composer}>
-            <WorkComposer value="" onChange={noop} onSend={noop} label="给 AI 教练的回复" placeholder={OTHER_PLACEHOLDER} maxLength={8000}
+            <ComposerL label="给 AI 教练的回复" placeholder={OTHER_PLACEHOLDER}
               attachment={question && docked ? <QuestionCardView card={question} disabled docked /> : null} />
           </div>
           <footer className={result.publishBar}>
