@@ -13,6 +13,8 @@
 -- keys and 0218 already scopes read_source tool results. Deleting that positioning conversation, the positioning itself,
 -- or (internally) one producing answer clears free-conversation answers that copied the table. Its dependency is the
 -- positioning version, so 0218's tool guard still refuses a copy stored after the positioning was revoked or deleted.
+-- A single read keeps only the stable identity of the entry (id, name, session, version); the per-answer aggregates
+-- (accounts, qualified, fetchedAt) are in the body, computed with producedBy in one statement, so nothing stale is stored.
 -- Rollback: re-run 0218's definition and drop runtime_workspace_benchmark_guard (no data is written by this migration).
 BEGIN;
 CREATE OR REPLACE FUNCTION runtime_workspace_source(p_actor_id uuid,p_session_id uuid,p_query text DEFAULT '') RETURNS jsonb
@@ -73,7 +75,7 @@ BEGIN
     WHERE rb.actor_id=p_actor_id AND rb.session_id=(entry->>'sessionId')::uuid AND x.content_deleted_at IS NULL AND x.erased_at IS NULL
     ORDER BY rb.qualified DESC,rb.followers DESC NULLS LAST,rb.platform,rb.account LIMIT 30) b;
   cap:=8000;
-  RETURN jsonb_build_object('kind','workspace_source','identity',entry-'producedBy','body',left(body,cap),'truncated',length(body)>cap,
+  RETURN jsonb_build_object('kind','workspace_source','identity',entry-'producedBy'-'accounts'-'qualified'-'fetchedAt','body',left(body,cap),'truncated',length(body)>cap,
    'producedBy',produced,'dependencies',jsonb_build_array(version_id));
  ELSE SELECT coalesce((SELECT ed.brief FROM opc_item_edits ed WHERE ed.work_item_id=i.work_item_id),i.brief) INTO body FROM opc_items i WHERE i.work_item_id=(entry->>'id')::uuid;END IF;
  RETURN jsonb_build_object('kind','workspace_source','identity',entry,'body',left(body,cap),'truncated',length(body)>cap,'dependencies',jsonb_build_array(version_id));

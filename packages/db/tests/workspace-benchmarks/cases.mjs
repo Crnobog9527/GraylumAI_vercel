@@ -55,6 +55,7 @@ export async function runCases({db,Client,report,oldDefinition}) {
  assert.deepEqual(listed.dependencies,[main.version]);
  const body=await read(db,a,sid,main.draftSession);
  assert.equal(body.kind,'workspace_source');assert.equal(body.identity.kind,'benchmarks');
+ assert.deepEqual(Object.keys(body.identity).sort(),['id','kind','name','sessionId','sourceVersionId','use']); // no per-answer aggregates
  const rows=JSON.parse(body.body);
  assert.deepEqual(rows.map(r=>[r.account,r.qualified,r.followers]),[['BENCH_QUALIFIED_CANARY',true,51234],['BENCH_EXCLUDED_CANARY',false,null]]);
  assert.deepEqual(rows[1].missing,['followers']);assert.equal(body.truncated,false);
