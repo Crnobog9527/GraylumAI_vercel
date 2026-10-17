@@ -29,8 +29,6 @@ export function attachmentRefusal(name: string): string | null {
   return `「${name}」不能作为附件：这里只支持 ${attachmentFormatsText()} 文档。图片请到资料库上传。`;
 }
 
-/** Upload states still in progress: the message waits for them, so a sent message never misses its file. */
-const ACTIVE: UploadItem['status'][] = ['waiting', 'extract', 'begin', 'transfer', 'complete', 'removing'];
 const STAGE: Partial<Record<UploadItem['status'], string>> = {
   waiting: '等待上传', extract: '正在读取文字', begin: '正在存入资料库', transfer: '正在存入资料库', complete: '正在存入资料库',
   removing: '正在移除',
@@ -84,7 +82,9 @@ export function useComposerAttachments(box: RefObject<ComposerEditorHandle | nul
 
   // A finished PDF with scanned pages keeps its line: only the pages with text are readable until they are recognised.
   const shown = uploads.items.filter(item => item.status !== 'done' || item.message);
-  const busy = linking > 0 || uploads.items.some(item => ACTIVE.includes(item.status));
+  // `uploads.busy` also covers a failed upload whose server row is still unresolved (outcome unknown): sending waits
+  // until the user retries or removes it, so the message never goes out missing a file that may yet exist.
+  const busy = linking > 0 || uploads.busy;
   const status = shown.length || notices.length ? <div className={styles.note} aria-label="附件">
     {shown.map(item => <p key={item.key} role={item.status === 'failed' || item.status === 'rejected' ? 'alert' : 'status'}>
       <span>{item.filename}：{STAGE[item.status] ?? item.message ?? '上传失败'}{STAGE[item.status] ? '…' : ''}</span>
