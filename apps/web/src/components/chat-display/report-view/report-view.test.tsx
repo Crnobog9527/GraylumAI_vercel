@@ -6,6 +6,7 @@ import { SAMPLE_REPORT_DATA, sampleReportDataBlock } from '@repo/api/src/shared/
 import { MessageMarkdown } from '@/components/chat/MessageMarkdown';
 import { SAMPLE_REPORT_BODY, SAMPLE_REPORT_BODY_WITH_DATA, SAMPLE_REPORT_CHAPTER_TITLES } from '../fixtures/report';
 import { ReportView } from './report-view';
+import styles from './report-view.module.css';
 import { placeFields, reportDisplayTitle, splitChapters, splitReasons, withDisplayHeadings } from './report-sections';
 import { REPORT_FIXED_NOTES } from './report-text';
 
@@ -59,7 +60,7 @@ describe('report sections', () => {
 
 describe('ReportView', () => {
   it('renders a report without data exactly as before', () => {
-    expect(html(SAMPLE_REPORT_BODY)).toBe(renderToStaticMarkup(<MessageMarkdown text={SAMPLE_REPORT_BODY} />));
+    expect(html(SAMPLE_REPORT_BODY)).toBe(renderToStaticMarkup(<MessageMarkdown className={styles.tables} text={SAMPLE_REPORT_BODY} />));
   });
 
   it('never shows the data block as text, and keeps one h2 per chapter for the chapter list', () => {
@@ -119,7 +120,7 @@ describe('ReportView', () => {
     expect(out).toContain('图表和策略要点整理中');
     expect(out).not.toContain('summ');
     const stopped = `${SAMPLE_REPORT_BODY}\n\n${REPORT_DATA_FENCE}\n{"v":1,"field":"summ`;
-    expect(html(stopped)).toBe(renderToStaticMarkup(<MessageMarkdown text={SAMPLE_REPORT_BODY} />));
+    expect(html(stopped)).toBe(renderToStaticMarkup(<MessageMarkdown className={styles.tables} text={SAMPLE_REPORT_BODY} />));
   });
 
   it('draws benchmark numbers only from server data, and marks chapters whose text was edited', () => {
@@ -151,6 +152,6 @@ describe('ReportView', () => {
   });
 
   it('shows the plain text when there are no chapters at all', () => {
-    expect(html(`只有一段。\n\n${sampleReportDataBlock()}`)).toBe(renderToStaticMarkup(<MessageMarkdown text="只有一段。" />));
+    expect(html(`只有一段。\n\n${sampleReportDataBlock()}`)).toBe(renderToStaticMarkup(<MessageMarkdown className={styles.tables} text="只有一段。" />));
   });
 });

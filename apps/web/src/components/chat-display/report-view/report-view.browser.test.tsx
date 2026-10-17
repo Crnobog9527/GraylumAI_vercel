@@ -46,7 +46,9 @@ beforeAll(async () => {
             return React.createElement('div',{style:{position:'fixed',inset:0,display:'flex',alignItems:'center',justifyContent:'center',padding:16}},
               React.createElement('div',{ref,className:card.consentCard,style:{maxWidth:1024}},
                 React.createElement(ReportWithOutline,{bodyRef:o.bodyRef,chapters:o.chapters,activeId:o.activeId,onSelect:o.select},
-                  React.createElement(ReportView,{body:BODY,data}))));}
+                  React.createElement(ReportView,{body:BODY,data})),
+                // A report without a data block (older reports) renders as plain text and must get the same tables.
+                React.createElement('div',{style:{marginTop:16}},React.createElement(ReportView,{body:BODY.slice(0, BODY.indexOf('graylum-report-data') - 3)}))));}
           createRoot(document.getElementById('root')).render(React.createElement(Dialog));`;
       } }],
     build: { write: false, minify: false, cssCodeSplit: false, lib: { entry, name: 'ReportViewTest', formats: ['iife'] } },
@@ -83,9 +85,10 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 1280, height: 900
         const text = await nav.locator('li button').evaluateAll(items => items.map(item => item.scrollHeight <= item.clientHeight + 1));
         expect(text.every(Boolean)).toBe(true);
       }
-      expect(await page.getByText('你的客户会先在小红书搜').count()).toBe(0);
+      const view = page.locator('[class*="_view_"]');
+      expect(await view.getByText('你的客户会先在小红书搜').count()).toBe(0);
       await page.getByRole('button', { name: '展开理由' }).click();
-      await ui(page.getByText('你的客户会先在小红书搜', { exact: false })).toBeVisible();
+      await ui(view.getByText('你的客户会先在小红书搜', { exact: false })).toBeVisible();
       await ui(page.getByText('平台怎么推荐内容（大白话）')).toBeVisible();
       const overflow = await page.evaluate(() => [...document.querySelectorAll('section, figure, ol, dl')]
         .filter(element => !element.closest('[class*="tableScroll"], [class*="timeline"]'))

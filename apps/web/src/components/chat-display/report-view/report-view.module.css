@@ -86,22 +86,24 @@
 .reasonsBody{margin-top:8px;padding:10px 14px;border-left:2px solid var(--rv-rule)}
 .fixedNote{margin-top:14px;padding:12px 14px;border-radius:10px;background:var(--rv-fill);font-size:13px}
 
-/* Wide screens: tables take the dialog's width and wrap their cells, so no column is cut off. Phones scroll sideways and say so. */
+/* Wide screens: tables take the dialog's width and wrap their cells, so no column is cut off. Phones scroll sideways and say so.
+   `.tables` is on the report view and on the plain-text fallback (reports without data), so both get the same tables. */
 @media(min-width:768px){
-  .view [data-message-markdown] table{width:100%;max-width:100%}
-  .view [data-message-markdown] :is(th,td){max-width:none;min-width:0;overflow-wrap:anywhere}
+  :is(.tables [data-message-markdown],.tables[data-message-markdown]) table{width:100%;max-width:100%}
+  :is(.tables [data-message-markdown],.tables[data-message-markdown]) :is(th,td){max-width:none;min-width:0;overflow-wrap:anywhere}
   .table{min-width:0}
   .table th{white-space:normal}
 }
 @media(max-width:767px){
-  .view [data-message-markdown] div:has(>table),.tableScroll{
+  :is(.tables [data-message-markdown],.tables[data-message-markdown]) div:has(>table),.tableScroll{
     background:linear-gradient(90deg,var(--rv-fade-bg,#fff) 30%,transparent) left center/24px 100% no-repeat local,
       linear-gradient(270deg,var(--rv-fade-bg,#fff) 30%,transparent) right center/24px 100% no-repeat local,
-      linear-gradient(90deg,var(--rv-rule),transparent) left center/10px 100% no-repeat scroll,
-      linear-gradient(270deg,var(--rv-rule),transparent) right center/10px 100% no-repeat scroll}
-  .view [data-message-markdown] div:has(>table)::before,.tableScroll::before{content:"← 左右滑动查看完整表格 →";display:block;
-    position:sticky;left:0;width:max-content;padding:4px 10px;color:var(--rv-quiet);font-size:11px;line-height:16px}
-  .view [data-message-markdown] table{min-width:560px}
+      linear-gradient(90deg,var(--rv-rule,#0002),transparent) left center/10px 100% no-repeat scroll,
+      linear-gradient(270deg,var(--rv-rule,#0002),transparent) right center/10px 100% no-repeat scroll}
+  :is(.tables [data-message-markdown],.tables[data-message-markdown]) div:has(>table)::before,.tableScroll::before{
+    content:"← 左右滑动查看完整表格 →";display:block;position:sticky;left:0;width:max-content;padding:4px 10px;
+    color:var(--rv-quiet,#777);font-size:11px;line-height:16px}
+  :is(.tables [data-message-markdown],.tables[data-message-markdown]) table{min-width:560px}
 }
 @media(max-width:767px){
   .cards,.bars,.pairs,.firstStepPairs{grid-template-columns:minmax(0,1fr)}
