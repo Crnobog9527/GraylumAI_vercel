@@ -114,13 +114,15 @@
   选了"与社交媒体相关"的 Skill 直接拒绝；其他请求先由 Decisions 判断，判为拦截就拒绝，判不准时主模型带兜底指令、回答兜底标记时这一轮不收费。
   对比在建运行单之前复用同一套：
   - 静态拒绝和 Decisions 判为拦截：`estimate` / `start` 直接返回同一个拒绝（引导去做定位），不建组、不冻结、不收费；Decisions 这一次判断的费用和普通对话一样由 Graylum 承担。
-  - 判不准或 Decisions 不可用：每一列都带同一份兜底指令；某一列回答了兜底标记，这一列判定 `no_delivery`、不收费（成本由平台承担、计入熔断统计），
+  - **退款次数到上限**：普通 Runtime 在用户 24 小时内的定位兜底退款已达 `POSITIONING_REFUSAL_CAP`（5 次）时，除了 Decisions 判 `clear` 以外一律拒绝
+    （`judgePositioning(..., capped)` 第 150–155 行）。对比复用同一个分支：到上限时只有 `clear` 能继续，其他结果在建组前拒绝、不建运行单、不调用任何对比模型。
+  - 判不准或 Decisions 不可用（且没到上限）：每一列都带同一份兜底指令；某一列回答了兜底标记，这一列判定 `no_delivery`、不收费（成本由平台承担、计入熔断统计），
     其他列照常；全部列都是兜底标记时整次对比显示和普通对话一样的定位引导。
     **识别标记必须在保存之前**：现有 `fusionExecutor.run` 先 `fusion_call_output_save` 再判定，而 0235 不允许给已保存输出的调用写 `no_delivery`，
     照搬就会在恢复期限按 `unjudged_saved` 收费。所以带兜底指令的列，执行器像普通 Runtime 一样先缓冲开头、识别兜底标记
     （复用 `positioningFallback.ts` 的 `isPositioningRefusal`）：命中时不转发、不保存正文，直接写 `no_delivery` 结算为零；没命中才开始转发和保存。
     不带兜底指令的列照常边收边转。
-  - PR-2 验收：没有定位的用户选社媒 Skill 发起对比被拒且余额不变；Decisions 判拦截时被拒且不建运行单；判不准时模拟某列回答兜底标记，该列不收费、其他列照常收费；该列没有 `fusion_call_outputs` 记录、判定是 `no_delivery`，到恢复期限也不会变成 `unjudged_saved`。
+  - PR-2 验收：退款次数到上限时判不准或 Decisions 不可用都被拒、不建运行单；没有定位的用户选社媒 Skill 发起对比被拒且余额不变；Decisions 判拦截时被拒且不建运行单；判不准时模拟某列回答兜底标记，该列不收费、其他列照常收费；该列没有 `fusion_call_outputs` 记录、判定是 `no_delivery`，到恢复期限也不会变成 `unjudged_saved`。
 - 上下文容量：按每个模型的窗口分别检查"输入 + 回答上限"，装不下的模型在冻结前拒绝；用户勾选里有装不下的就整次拒绝并告诉用户是哪一个
   （不悄悄去掉，用户可以取消它再发）。复用 `measureCallInput` / `fitNativeRequestOutput`。
 - **模型名称（Q1 已定，Owner 2026-10-17）**：勾选框和每列回答的标题显示后台配置的真实模型名称（`ai_models` 里管理员配置的名称，不另设显示名）。
@@ -169,10 +171,15 @@
   2. 把"用户问题 + 选中的回答"按普通对话历史条目的格式追加进 `runtime_session_history`，`revision` +2；
   3. 记 `adoption`。同一 `requestId` 重放返回同一结果；已采用过别的列时拒绝（`FUSION_COMPARE_ADOPTED`）。
   - 现有追加路径 `runtime_session_items('append')` 要求一个正在跑的执行和打开的计费运行单，所以采用不能直接用它。
-    做法：写一条不计费的"采用"执行记录（`runtime_executions.billing_run_id` 本来可以为空，状态直接 `completed`，`payload` 标记 `kind: fusion_adopt`），
-    历史条目挂在它上面，满足 `runtime_session_history.execution_id NOT NULL`。PR-1 开工时先核对所有读 `runtime_executions` 的地方
-    （对话列表、计费核对、恢复、删对话、注销、草稿续接）对"没有运行单的已完成执行"都安全；有任何一处不安全，就在 PR-1 里一起处理并加测试，
-    不改普通执行的行为。
+    而且对话页（`runtime_view`）和"历史能否给下一轮看"（`runtime_history_availability`）都和 `bill2_runs` 内连接，
+    没有计费运行单的执行既不显示、它的历史条目也不会被下一轮读到——所以不能写"没有运行单的采用执行"。
+    做法：**采用执行记录直接指向被采用那一列自己的运行单**（`runtime_executions.billing_run_id` = 该列的 Fusion 运行单；
+    每个运行单只有一列、只能被采用一次，正好满足 `billing_run_id` 唯一），状态 `completed`，`payload` 里放问题、`result.body` 放回答，
+    历史条目挂在它上面。这条执行不新建运行单、不冻结、不收费（该列已经按自己的结局结算过），也不改 `runtime_view` 和
+    `runtime_history_availability`。为了让它和普通执行一样通过这两处的计费和上下文检查（`runtime_direct_billing_allowed`、`runtime_context_allowed`），
+    **对比的运行单在准入时冻结来源会话的真实 scope**（不用评审团那种 `bill2_create_draft` 占位草稿 scope），需要时同时带上 `sessionRef` =
+    来源会话（0235 的准入对评审拒绝 `sessionRef`，对比分支放开）。PR-1 必测：采用后 `runtime_view` 显示这一问一答、下一轮普通对话的历史里读得到它、
+    对话列表和删对话/注销的现有路径都把它当普通执行处理；被采用列的运行单不会被重复结算或重新冻结。
   - 主对话已有新内容（`revision ≠ R`）或正在跑执行：返回 `FUSION_COMPARE_STALE` 和引用文本，前端把选中的回答作为引用预填进输入框（FUSION.md 必测项 4）。
     这一步**不改** `adoption`，引用不算终态：用户刷新、关页面、清空输入框，或带引用的消息后来在执行或保存时失败，都可以再点"采用"重新拿到引用文本；
     引用只是把文字预填进输入框，发出后就是一条普通消息，照普通对话收费，不和对比记录绑定。`adoption` 只在第 2 步直接写回成功时记一次。
