@@ -66,7 +66,10 @@ export function translationsFrom(source: SkillDisplaySource, draft: TranslationD
     if (title) steps[step.id] = { original: step.title, text: title };
     for (const field of step.fields) {
       const text = value(`field:${step.id}:${field.id}`);
-      if (text) (fields[step.id] ??= {})[field.id] = { original: field.title, text };
+      if (!text) continue;
+      // Own keys only: a valid step id such as `constructor` must not resolve to an inherited member.
+      if (!Object.hasOwn(fields, step.id)) fields[step.id] = {};
+      fields[step.id]![field.id] = { original: field.title, text };
     }
   }
   sectionTitles(source).forEach((title, index) => {

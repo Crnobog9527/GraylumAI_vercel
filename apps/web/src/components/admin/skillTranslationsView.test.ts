@@ -45,6 +45,18 @@ it('shows a repeated report section title once, so its single translation is nev
   expect(translationsFrom(repeated, { 'section:0': '' })).toEqual({});
 });
 
+it('keeps field translations of steps whose ids are names of object members', () => {
+  const special = { reportTitle: 'R', reportSections: [], steps: [
+    { id: 'constructor', title: '了解你', fields: [{ id: 'tostring', title: '目标' }, { id: 'valueof', title: '时间' }] },
+  ] };
+  const draft = { 'step:constructor': 'About you', 'field:constructor:tostring': 'Goal', 'field:constructor:valueof': 'Time' };
+  const saved = translationsFrom(special, draft);
+  expect(saved).toEqual({ steps: { constructor: { original: '了解你', text: 'About you' } },
+    fields: { constructor: { tostring: { original: '目标', text: 'Goal' }, valueof: { original: '时间', text: 'Time' } } } });
+  expect(Object.hasOwn(saved.fields!, 'constructor')).toBe(true);
+  expect(draftFrom(special, saved)).toEqual(draft);
+});
+
 it('flags multi-line or over-long inputs before saving', () => {
   const rows = translationRows(source);
   expect(invalidTranslation(rows, { 'step:step-1': 'ok' })).toBeUndefined();
