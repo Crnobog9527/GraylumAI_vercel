@@ -42,6 +42,13 @@ describe('scan recognition driver', () => {
     expect(calls.save).not.toHaveBeenCalled();
     expect(seen.at(-1)).toEqual({ done: 0, total: 2, failed: 0, state: 'running' });
   });
+  it('does not count a page as failed when another tab already saved its text', async () => {
+    const calls = api({ recognize: vi.fn(async () => [page(2, ''), page(4, '')]),
+      fail: vi.fn(async ({ position }) => ({ status: position === 2 ? 'complete' : 'failed' })) });
+    const seen: ScanProgress[] = [];
+    await runScanRecognition(calls, new AbortController().signal, (_, p) => seen.push(p));
+    expect(seen.at(-1)).toEqual({ done: 2, total: 2, failed: 1, state: 'done' });
+  });
   it('fetches the waiting list again until it holds no document this run has not tried', async () => {
     const lists = [[doc([2])], [doc([2]), { documentId: 'd21', format: 'pdf' as const, contentVersion: 2, positions: [3] }], [doc([2])]];
     const calls = api({ pending: vi.fn(async () => lists.shift() ?? []) });

@@ -19,7 +19,8 @@ export type ScanApi = {
   /** One result per position (`page` = the position), from a PDF page render or a Word image, all in the browser. */
   recognize(document: PendingDocument, file: Blob, positions: number[], signal: AbortSignal): Promise<ScannedPageResult[]>;
   save(input: { documentId: string; kind: UnitKind; position: number; version: number; text: string }): Promise<SaveResult>;
-  fail(input: { documentId: string; kind: UnitKind; position: number }): Promise<unknown>;
+  /** `status` is the unit's state afterwards: 'complete' when another tab saved its text first. */
+  fail(input: { documentId: string; kind: UnitKind; position: number }): Promise<{ status: string }>;
 };
 export type ScanProgress = { done: number; total: number; failed: number; state: 'running' | 'done' | 'paused' | 'stopped' };
 
@@ -78,8 +79,8 @@ async function recognizeDocument(api: ScanApi, document: PendingDocument, signal
       if (!text) {
         // Unreadable page (for example a JPEG 2000 image the sandbox cannot draw) or no text found.
         // A failure that was not recorded is not counted: the error stops the run and the page stays waiting.
-        await api.fail({ documentId: document.documentId, kind, position: result.page });
-        progress.failed += 1;
+        const failed = await api.fail({ documentId: document.documentId, kind, position: result.page });
+        if (failed.status === 'failed') progress.failed += 1;
       } else {
         let saved: SaveResult;
         try {

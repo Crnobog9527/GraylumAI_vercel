@@ -15,8 +15,8 @@ import styles from './my-documents.module.css';
 /** 资料库「我的文档」(LIB-3). Upload stays hidden until the server's upload switch is on. */
 export function MyDocuments() {
   const library = useLibraryDocuments();
-  const { reload, markDisabled } = library;
-  const scan = useScanRecognition(useCallback(() => { void reload(); }, [reload]));
+  const { reload, refresh, patchVersion, markDisabled } = library;
+  const scan = useScanRecognition(useCallback(() => { void refresh(); }, [refresh]), patchVersion);
   const { start: startScan } = scan;
   const uploads = useLibraryUploads(useCallback(() => { void reload(); startScan(); }, [reload, startScan]), markDisabled);
   const download = trpc.library.download.useMutation();

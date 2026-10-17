@@ -39,14 +39,22 @@ export function useLibraryDocuments() {
   const setPurpose = trpc.library.setPurpose.useMutation();
   const [deleting, setDeleting] = useState<Set<string>>(() => new Set());
   const [purposes, setPurposes] = useState<Record<string, LibraryPurpose>>({});
+  const [versions, setVersions] = useState<Record<string, number>>({});
 
   const { refetch } = list;
   const reload = useCallback(async () => {
     setMore([]);
     setPurposes({});
+    setVersions({});
     setMoreState({ loading: false, error: '' });
     await refetch();
   }, [refetch]);
+  // Recognised text (LIB-2d) adds no file and moves none, so page one is refetched (for space and status) and
+  // older pages stay; the new content version is patched in, so a document open from an older page updates too.
+  const refresh = useCallback(async () => { await refetch(); }, [refetch]);
+  const patchVersion = useCallback((documentId: string, contentVersion: number) => {
+    setVersions((current) => (current[documentId] === contentVersion ? current : { ...current, [documentId]: contentVersion }));
+  }, []);
 
   const markDisabled = useCallback(() => setDisabledByServer(true), []);
   const raw = useMemo(() => (list.data ? mergePages([list.data, ...more]) : []), [list.data, more]);
@@ -97,13 +105,14 @@ export function useLibraryDocuments() {
     () => raw.map((item) => ({
       ...item,
       purpose: purposes[item.id] ?? item.purpose,
+      content_version: Math.max(versions[item.id] ?? 0, item.content_version),
       status: deleting.has(item.id) ? 'deleting' as const : item.status,
     })),
-    [deleting, purposes, raw],
+    [deleting, purposes, raw, versions],
   );
   return {
     ready: list.isSuccess && !list.error, pending: list.isPending, error: list.error as unknown,
-    documents, reload, loadMore, hasMore: !!cursor, moreState, deleteDocument, changePurpose,
+    documents, reload, refresh, patchVersion, loadMore, hasMore: !!cursor, moreState, deleteDocument, changePurpose,
     usedBytes: list.data?.usedBytes, capacityBytes: list.data?.capacityBytes,
     uploadEnabled: readUploadEnabled(list.data) && !disabledByServer,
     markDisabled,

@@ -18,7 +18,7 @@ import { runScanRecognition, type ScanApi, type ScanProgress } from '@/lib/libra
 /** Image types the recognition engine reads (others, such as EMF or GIF, are marked failed). */
 const RECOGNIZABLE = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
-export function useScanRecognition(onDocumentChanged: () => void) {
+export function useScanRecognition(onDocumentChanged: () => void, onSaved: (documentId: string, contentVersion: number) => void) {
   const utils = trpc.useUtils();
   const download = trpc.library.download.useMutation();
   const save = trpc.library.saveRecognizedPage.useMutation();
@@ -26,8 +26,8 @@ export function useScanRecognition(onDocumentChanged: () => void) {
   const [progress, setProgress] = useState<Record<string, ScanProgress>>({});
   const running = useRef<AbortController | null>(null);
   const again = useRef(false);
-  const latest = useRef({ download, save, fail, onDocumentChanged });
-  latest.current = { download, save, fail, onDocumentChanged };
+  const latest = useRef({ download, save, fail, onDocumentChanged, onSaved });
+  latest.current = { download, save, fail, onDocumentChanged, onSaved };
 
   const start = useCallback(() => {
     if (!isLibraryScanRecognitionEnabled()) return;
@@ -66,7 +66,11 @@ export function useScanRecognition(onDocumentChanged: () => void) {
           return { page: position, ...pages[next++]! };
         });
       },
-      save: (input) => latest.current.save.mutateAsync(input),
+      save: async (input) => {
+        const saved = await latest.current.save.mutateAsync(input);
+        latest.current.onSaved(input.documentId, saved.contentVersion);
+        return saved;
+      },
       fail: (input) => latest.current.fail.mutateAsync(input),
     };
     void runScanRecognition(api, controller.signal, (documentId, value) => {
