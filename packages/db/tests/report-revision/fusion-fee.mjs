@@ -141,7 +141,14 @@ export async function runFusionFee({db,Client,connectionString,report}) {
     await assert.rejects(start(db,other),/FUSION_MEMBERSHIP_REQUIRED|REPORT_MEMBERSHIP_REQUIRED/,level);
     assert.equal(await wallet(db,other.actor),5000,level+': nothing held');
   }
-  report.checks.push('fixed price: only Gold starts a review; Free and Pro are refused with nothing held');
+  // Even with the Pro plan switch turned back on by an administrator, Pro stays refused (#1098 review).
+  await db.query(`UPDATE membership_plans SET allow_fusion_review=true WHERE level='pro'`);
+  const pro = await member(db,5000);
+  await db.query(`UPDATE profiles SET membership_level='pro' WHERE id=$1`,[pro.actor]);
+  await assert.rejects(start(db,pro),/FUSION_MEMBERSHIP_REQUIRED/,'Pro with the plan switch on');
+  assert.equal(await wallet(db,pro.actor),5000);
+  await db.query(`UPDATE membership_plans SET allow_fusion_review=false WHERE level='pro'`);
+  report.checks.push('fixed price: only Gold starts a review; Free and Pro are refused with nothing held, also with the Pro plan switch on');
 
   // Duplicate and concurrent starts: one review, one hold.
   const dup = await member(db,5000);
@@ -217,6 +224,24 @@ export async function runFusionFee({db,Client,connectionString,report}) {
   assert.equal((await fee(db,arv.reviewId)).state,'refunded','account erasure refunds the held fee');
   assert.equal(await wallet(db,ac.actor),5000);assert.equal(await openHolds(db,ac.actor),0);
   report.checks.push('fixed price: draft deletion and account erasure refund a held fee; a held fee keeps account erasure pending');
+
+  // A usable summary is a delivered revision: a review ended any other way afterwards still pays the full price (#1098 review).
+  const late = await member(db,5000);
+  const lr = await start(db,late);
+  const ls = await step(db,late);
+  const lsItems = JSON.parse(ls.items);
+  lsItems[0].payload = {...lsItems[0].payload,phase:'fusion_summary'};
+  await db.query(`UPDATE bill2_runs SET payload=jsonb_set(payload,'{callPolicy,0,payg,purposes}','["fusion_summary"]') WHERE id=$1`,[ls.run.run]);
+  const lc = (await service(db,'fusion_review_claim',late.actor,lr.reviewId,1,'review',1,ls.group,JSON.stringify(lsItems))).calls[0];
+  await rpc(db,'bill2_dispatch',late.actor,ls.run.run,lc.id,lc.dispatchToken);
+  await record(db,late,ls,lc);
+  await rpc(db,'fusion_call_output_save',late.actor,lc.id,'{"body":"revised"}');
+  await rpc(db,'fusion_call_verdict',late.actor,lc.id,'usable');
+  await rpc(db,'bill2_finalize',late.actor,ls.run.run);
+  await service(db,'fusion_review_close',late.actor,lr.reviewId,'stopped');
+  const lateFee = await fee(db,lr.reviewId);
+  assert.deepEqual({state:lateFee.state,charged:lateFee.charged_credits},{state:'charged',charged:FEE},'a delivered revision pays the full price');
+  report.checks.push('fixed price: once a summary is judged usable, the full price is charged however the review ends');
 
   // The daily job settles fees whose review ended while a call was still in flight.
   const dj = await member(db,5000);

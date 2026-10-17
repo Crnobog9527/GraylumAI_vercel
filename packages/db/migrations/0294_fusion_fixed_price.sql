@@ -80,6 +80,13 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION public.fusion_review_available(uuid,integer) FROM PUBLIC, anon, authenticated, service_role;
 
+-- Gold only (Owner 2026-10-17), independent of the per-plan switch (which also still applies).
+CREATE OR REPLACE FUNCTION public.fusion_review_gold(a uuid) RETURNS boolean
+LANGUAGE sql STABLE SET search_path=public,pg_temp AS $$
+  SELECT coalesce((SELECT membership_level='gold' FROM profiles WHERE id=a),false);
+$$;
+REVOKE ALL ON FUNCTION public.fusion_review_gold(uuid) FROM PUBLIC, anon, authenticated, service_role;
+
 -- Holds the fixed price of a review being created (called inside fusion_review_start, after the insert).
 CREATE OR REPLACE FUNCTION public.fusion_review_fee_hold(rv fusion_reviews, v jsonb, cfg jsonb) RETURNS void
 LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
@@ -95,6 +102,8 @@ BEGIN
   hold:=(cfg#>>'{fixedPrice,holdCredits}')::int;
   SELECT credits INTO balance FROM profiles WHERE id=rv.actor_id AND status='active' AND is_deleted='false' FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'BILL2_ACTOR_DENIED'; END IF;
+  -- "只给 Gold" (Owner 2026-10-17) holds whatever the plan switches say: an administrator can re-enable the plan flag.
+  IF fusion_review_gold(rv.actor_id) IS NOT TRUE THEN RAISE EXCEPTION 'FUSION_MEMBERSHIP_REQUIRED'; END IF;
   IF fusion_review_available(rv.actor_id,balance)<fee::bigint+hold THEN RAISE EXCEPTION 'FUSION_REVIEW_CREDITS'; END IF;
   SELECT * INTO q FROM atomic_pre_deduct(rv.actor_id,fee,'Expert review hold',rv.id);
   IF q.is_idempotent THEN RAISE EXCEPTION 'FUSION_REVIEW_CONFLICT'; END IF;
@@ -131,6 +140,10 @@ BEGIN
   IF rv.id IS NULL THEN charge:=0; reason:='deleted';
   ELSIF rv.state IN ('running','paused') THEN RETURN fusion_review_fee_view(f.review_id);
   ELSIF rv.state='completed' AND rv.outcome->>'kind'='revised' THEN charge:=f.credits; reason:='revised';
+  -- A summary judged usable means the revision was delivered: the full price, whatever ended the review afterwards.
+  ELSIF EXISTS(SELECT 1 FROM fusion_billing_groups g JOIN bill2_runs br ON br.fusion_group_id=g.id JOIN bill2_calls c ON c.run_id=br.id
+    WHERE g.fee_review_id=f.review_id AND c.payload->>'phase'='fusion_summary' AND c.fusion_verdict IN ('usable','unjudged_saved')) THEN
+    charge:=f.credits; reason:='revised';
   ELSIF rv.state IN ('stopped','interrupted') THEN
     -- The existing stop rule: dispatched calls pay their known usage. Wait until every call has settled.
     IF EXISTS(SELECT 1 FROM fusion_billing_groups g JOIN bill2_runs br ON br.fusion_group_id=g.id JOIN bill2_calls c ON c.run_id=br.id
@@ -219,6 +232,7 @@ DO $$ DECLARE src text; a text:=$x$  res:=fusion_group_claim(p_actor_id,p_group_
     IF array_length(string_to_array(src,a),1)<>2 THEN RAISE EXCEPTION 'FUSION_SOURCE_MISMATCH: fusion_review_claim 0294'; END IF;
     EXECUTE replace(src,a,$x$  -- 0294 fee marker
   IF EXISTS(SELECT 1 FROM fusion_review_fees WHERE review_id=rv.id) THEN
+    IF fusion_review_gold(p_actor_id) IS NOT TRUE THEN RAISE EXCEPTION 'FUSION_MEMBERSHIP_REQUIRED'; END IF;
     UPDATE fusion_billing_groups SET fee_review_id=rv.id WHERE id=g.id AND fee_review_id IS NULL;
     IF (SELECT fee_review_id FROM fusion_billing_groups WHERE id=g.id) IS DISTINCT FROM rv.id THEN RAISE EXCEPTION 'FUSION_GROUP_DENIED'; END IF;
   ELSIF (SELECT fee_review_id FROM fusion_billing_groups WHERE id=g.id) IS NOT NULL THEN RAISE EXCEPTION 'FUSION_GROUP_DENIED';
