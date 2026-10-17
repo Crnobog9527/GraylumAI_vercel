@@ -164,11 +164,10 @@ export async function submitPublish(db: Rpc, deps: ClientDeps, profileId: string
       socialAccountIds: ready.providerAccountIds, mediaUrls: input.media.map(item => item.mediaUrl) });
   } catch {
     // createPost only throws while checking its input, before any request: provably not sent, so release now.
-    return rpc(db, 'publish_monitor_publish_release', { p_job: job.id, p_code: 'PUBLISH_MONITOR_REQUEST_INVALID' }, jobView);
+    return releaseProven(db, job.id, 'PUBLISH_MONITOR_REQUEST_INVALID', pacing);
   }
   if (created.kind === 'rejected') {
-    return rpc(db, 'publish_monitor_publish_release', { p_job: job.id,
-      p_code: `PUBLISH_MONITOR_PROVIDER_REJECTED_${created.status}` }, jobView);
+    return releaseProven(db, job.id, `PUBLISH_MONITOR_PROVIDER_REJECTED_${created.status}`, pacing);
   }
   if (created.kind === 'unknown') {
     logger.warn('api', 'publish_monitor_publish_unknown', { jobId: job.id, reason: created.reason });
@@ -176,6 +175,24 @@ export async function submitPublish(db: Rpc, deps: ClientDeps, profileId: string
   }
   return rpc(db, 'publish_monitor_publish_record', { p_job: job.id, p_provider_post_id: created.providerPostId,
     p_results: {} }, jobView);
+}
+
+/**
+ * This request proved nothing was sent: release now, retrying the (idempotent) release a few times, because a job left
+ * in "dispatching" could only be settled by an admin later while the user's credits stay frozen.
+ */
+async function releaseProven(db: Rpc, jobId: string, code: string, pacing: Pacing): Promise<PublishJob> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await rpc(db, 'publish_monitor_publish_release', { p_job: jobId, p_code: code }, jobView);
+    } catch (error) {
+      if (attempt >= 3) {
+        logger.error('api', 'publish_monitor_release_failed', { jobId, code });
+        throw error;
+      }
+      await pacing.sleep(500 * attempt);
+    }
+  }
 }
 
 const accountIds = z.object({ providerAccountIds: z.array(providerId).min(1).max(9) }).passthrough();

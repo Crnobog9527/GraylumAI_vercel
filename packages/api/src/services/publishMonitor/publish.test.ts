@@ -195,6 +195,20 @@ describe('submit publish (simulated provider)', () => {
     await expect(createMediaUploads(p.deps, 11)).rejects.toMatchObject({ code: 'PUBLISH_MONITOR_UNAVAILABLE' });
   });
 
+  it('retries the release after a definite refusal, so a proven unsent job does not stay frozen', async () => {
+    const pacing: Pacing = { now: () => 0, sleep: async () => undefined, budgetMs: 15_000 };
+    const flaky = database({ ...fresh(), publish_monitor_publish_release: [new Error('timeout'), new Error('timeout'),
+      view('failed')] });
+    const p = provider([account('spc_x'), account('spc_y'), json(422, { error: ['bad'] })]);
+    expect((await submitPublish(flaky.db, p.deps, USER, input, pacing)).state).toBe('failed');
+    expect(flaky.names().filter(n => n === 'publish_monitor_publish_release')).toHaveLength(3);
+    expect(p.calls.filter(c => c.line === 'POST /social-posts')).toHaveLength(1);
+    const down = database({ ...fresh(), publish_monitor_publish_release: [new Error('x'), new Error('x'), new Error('x')] });
+    await expect(submitPublish(down.db, provider([account('spc_x'), account('spc_y'), json(400, {})]).deps, USER, input,
+      pacing)).rejects.toMatchObject({ code: 'PUBLISH_MONITOR_UNAVAILABLE' });
+    expect(down.names().filter(n => n === 'publish_monitor_publish_release')).toHaveLength(3);
+  });
+
   it('maps database refusals to stable codes', async () => {
     for (const code of ['PUBLISH_MONITOR_IDEMPOTENCY_MISMATCH', 'PUBLISH_MONITOR_QUOTA_EXHAUSTED',
       'PUBLISH_MONITOR_INSUFFICIENT_CREDITS', 'PUBLISH_MONITOR_TARGET_INVALID']) {

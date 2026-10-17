@@ -7,7 +7,9 @@ import { checkRateLimitOrThrow } from '../services/redisRateLimiter';
 import {
   createMediaUploads, MAX_MEDIA, publishInput, readPublishJob, refreshPublishJob, submitPublish,
 } from '../services/publishMonitor/publish';
+import { takeUploadSlots } from '../services/publishMonitor/postForMe/config';
 import { requirePostForMeDeps } from '../services/publishMonitor/secrets';
+import { RateLimitError } from '../lib/rateLimitError';
 import { guarded } from './publishMonitorGuard';
 
 /**
@@ -32,6 +34,9 @@ export const publishMonitorPublishRouter = router({
   uploadUrl: protectedProcedure.input(uploadInput).mutation(({ ctx, input }) => guarded(ctx, async () => {
     await requirePublishEntitlement(ctx);
     await limitStep('upload', ctx.profileId);
+    // Weighted by the number of slots, so parallel or split requests cannot exceed the per-user upload allowance.
+    const slots = await takeUploadSlots(ctx.profileId, input.count);
+    if (!slots.ok) throw new RateLimitError('rate_limited', slots.retryAfterSeconds);
     return createMediaUploads(await requirePostForMeDeps(ctx.supabaseAdmin), input.count);
   })),
   submit: protectedProcedure.input(publishInput).mutation(({ ctx, input }) => guarded(ctx, async () => {

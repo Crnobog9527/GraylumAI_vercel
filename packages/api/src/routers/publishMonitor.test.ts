@@ -1,7 +1,10 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from 'vitest';
-const mocks = vi.hoisted(() => ({ entitlements: vi.fn() }));
+const mocks = vi.hoisted(() => ({ entitlements: vi.fn(), uploads: vi.fn(), limit: vi.fn() }));
 vi.mock('../services/membershipEntitlements', () => ({ readMembershipEntitlements: mocks.entitlements }));
+vi.mock('../services/publishMonitor/postForMe/config', async importOriginal => ({
+  ...(await importOriginal<object>()), takeUploadSlots: mocks.uploads }));
+vi.mock('../services/redisRateLimiter', () => ({ checkRateLimitOrThrow: mocks.limit }));
 import { publishMonitorRouter } from './publishMonitor';
 
 const actor = '00000000-0000-4000-8000-0000000f0001';
@@ -56,6 +59,16 @@ describe('publish-monitor one-click publishing', () => {
     await expect(caller(rpc, false).publish.submit(submit))
       .rejects.toMatchObject({ code: 'FORBIDDEN', message: 'PUBLISH_MONITOR_DISABLED' });
     expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('upload slots are counted one by one against the per-user allowance before any provider call', async () => {
+    mocks.entitlements.mockResolvedValue({ allowPublish: true });
+    mocks.limit.mockResolvedValue({ success: true });
+    mocks.uploads.mockResolvedValue({ ok: false, retryAfterSeconds: 120 });
+    const rpc = vi.fn();
+    await expect(caller(rpc, true).publish.uploadUrl({ disclosureAccepted: true, count: 7 }))
+      .rejects.toMatchObject({ code: 'TOO_MANY_REQUESTS' });
+    expect(mocks.uploads).toHaveBeenCalledWith(actor, 7);
   });
 
   it('an upload slot needs the confirmed disclosure; a job is readable only through the owner-scoped lookup', async () => {
