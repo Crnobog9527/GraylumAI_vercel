@@ -12,7 +12,8 @@ export function DemoJury() {
   return (
     <div className="space-y-8">
       <ProductFrame label="评审团审阅过程的示例" caption="示例评审：使用示例报告和示例评审名字，不是真实用户的报告">
-        <div style={{ height: 560 }}>
+        {/* The canvas fills a fixed viewport on desktop; below 768px it stacks and grows with its content. */}
+        <div className="md:h-[560px]">
           <JuryCanvasPlayer data={jury.SAMPLE_JURY_CASE} names={jury.SAMPLE_JURY_NAMES} brief speed={1} />
         </div>
       </ProductFrame>
