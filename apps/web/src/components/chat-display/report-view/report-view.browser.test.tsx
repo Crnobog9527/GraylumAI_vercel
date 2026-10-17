@@ -52,7 +52,7 @@ beforeAll(async () => {
   const chrome = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
   browser = await chromium.launch({ executablePath: existsSync(chrome) ? chrome : undefined, headless: true });
 }, 60000);
-afterAll(async () => { await browser?.close(); });
+afterAll(async () => { await browser?.close(); }, 30000);
 
 for (const viewport of [{ width: 1280, height: 900 }, { width: 375, height: 812 }]) {
   it(`shows the chapters, the charts and folded reasons at ${viewport.width}px without sideways scrolling`, async () => {
