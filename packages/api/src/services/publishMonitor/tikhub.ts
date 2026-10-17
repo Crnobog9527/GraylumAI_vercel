@@ -64,12 +64,15 @@ export async function connectOwnTikhub(db: Rpc, profileId: string, input: z.infe
 }
 
 /**
- * Platforms a benchmark may be on: Xiaohongshu and Douyin, plus the overseas platforms RESEARCH-TOOLS has verified
- * (plan §4.2: "海外平台对标沿用 RESEARCH-TOOLS 已验证平台清单") that have both a profile and a post-list route.
+ * Platforms a benchmark may be on: Xiaohongshu and Douyin, plus the overseas platforms RESEARCH-TOOLS lists for
+ * benchmarks (plan §4.2: "海外平台对标沿用 RESEARCH-TOOLS 已验证平台清单"). It is the benchmark-specific list, not the
+ * general verified one: a platform can be verified for lookups yet excluded here (Instagram: unreliable publication
+ * times), and accepting it would create a connection the daily read could never use. Needs both an account profile and
+ * an account post-list route.
  */
 export async function benchmarkPlatforms(db: Pick<SupabaseClient, 'from'>): Promise<SocialPlatform[]> {
   const { config } = await readResearchToolsConfig(db as SupabaseClient);
-  const overseas = config.verifiedPlatforms.filter(platform => Boolean(TIKHUB_ROUTES[`${platform}:account_profile`])
+  const overseas = config.benchmarkPlatforms.filter(platform => Boolean(TIKHUB_ROUTES[`${platform}:account_profile`])
     && Boolean(TIKHUB_ROUTES[`${platform}:account_posts`]));
   return [...new Set([...OWN_TIKHUB_PLATFORMS, ...overseas])];
 }
