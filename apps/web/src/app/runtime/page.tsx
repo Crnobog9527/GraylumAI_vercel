@@ -18,7 +18,9 @@ import {
  clearForSend, forgetPending, markPendingRestored, openingDraftWithReferences, readPending, rememberPending, requestIdFor,
  saveDraftReferences,
 } from './send-input';
-import { mergeReferences, referenceRequest, type LibraryReference } from '@/components/opc/composer-references';
+import {
+ COMPOSER_REFERENCES_ENABLED, mergeReferences, referenceRequest, type LibraryReference,
+} from '@/components/opc/composer-references';
 import { QueryNotice } from '@/components/opc/query-notice';
 import { trpc } from '@/trpc/client';
 import {
@@ -79,10 +81,11 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  const requestedModule=routeModule;
  const alive=useRef(true);
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
- // UI-B: the draft's library references come back with its text (both from this browser's storage).
+ // UI-B: the draft's library references come back with its text (both from this browser's storage). With the switch
+ // off the box shows no tags that could remove them, so stored references are never loaded or sent.
  const [references,setReferences]=useState<LibraryReference[]>([]);
  useEffect(()=>{if(!sessionId)return;const draft=openingDraftWithReferences(localStorage,sessionId);
-  setReferences(draft.references);setInput(draft.text);},[sessionId]);
+  setReferences(COMPOSER_REFERENCES_ENABLED?draft.references:[]);setInput(draft.text);},[sessionId]);
  function updateReferences(next:LibraryReference[]){setReferences(next);if(sessionId)saveDraftReferences(localStorage,sessionId,next);}
  useEffect(()=>{setStoredModule(sessionId?localStorage.getItem('opc-runtime-skill:'+sessionId)??'':'');},[sessionId]);
  function updateInput(value:string){setInput(value);if(sessionId)localStorage.setItem('opc-runtime-input:'+sessionId,value);}
@@ -168,7 +171,7 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
   try{
   const chosen=choices.data?.skills.find(s=>'skill:'+s.moduleId===activeSelection);
   const selected=chosen?{kind:'skill' as const,moduleId:chosen.moduleId,revisionId:chosen.revisionId}:activeSelection.startsWith('auto:')?{kind:'auto' as const,modelId:activeSelection.slice(5)}:{kind:'ordinary' as const,modelId:activeSelection};
-  const submitted=input,sent=references;
+  const submitted=input,sent=COMPOSER_REFERENCES_ENABLED?references:[];
   const requestInput=scriptRequest?'[OPC_SCRIPT_V1] 请基于当前选题简报讨论并给出可修改的口播稿。'+(submitted.trim()||'先给我一版口播稿。'):submitted;
   // An unconfirmed earlier send of the same input keeps its request id, so the server replays instead of charging twice.
   const url=new URL(location.href),requestId=requestIdFor(url.searchParams.get('request'),readPending(localStorage,sessionId),requestInput,undefined,sent);
