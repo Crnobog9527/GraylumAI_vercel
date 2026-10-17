@@ -101,7 +101,9 @@ export function reportService(user: SupabaseClient, admin: SupabaseClient, polic
         const replay = await rpc('runtime_admission_replay', { p_request_id: input.requestId, p_request: { reportStart: input } });
         if (replay) return replay;
         if (!await reportEnabled(admin)) throw new Error('REPORT_DISABLED');
-        if (acceptedCredits !== undefined && acceptedCredits !== await reportPrice(admin)) throw new Error('REPORT_PRICE_CHANGED');
+        // Without an accepted price the unreadable one still refuses here, so nothing is charged that was never shown.
+        const price = await reportPrice(admin);
+        if (acceptedCredits !== undefined && acceptedCredits !== price) throw new Error('REPORT_PRICE_CHANGED');
         const source = await rpc('report_source', {
           p_session_id: input.sessionId, p_project_id: input.projectId, p_round_id: input.roundId,
         });

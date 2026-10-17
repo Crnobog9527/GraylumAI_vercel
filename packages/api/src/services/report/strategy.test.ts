@@ -67,4 +67,16 @@ describe('reportStrategy', () => {
   it('binds what 定稿 stores to the body hash', () => {
     expect(storedReportData(null, 'a'.repeat(64))).toBeNull();
   });
+
+  // Review P1 (#1129): 定稿 must carry the hash of the table whose numbers were checked, so the database can refuse
+  // when a refresh committed between the read and the finalize.
+  it('carries the benchmark table hash the numbers were checked against into the stored value', async () => {
+    const f = admin();
+    const strategy = (await reportStrategy(f.client, actor, execution, draft()))!;
+    expect(storedReportData(strategy, 'a'.repeat(64))).toMatchObject({ bodyHash: 'a'.repeat(64), benchmarkHash: 'h1' });
+    const none = (await reportStrategy(admin({ source: { benchmarkHash: null } }).client, actor, execution, draft()))!;
+    expect(storedReportData(none, 'a'.repeat(64))).not.toHaveProperty('benchmarkHash');
+    const refreshed = (await reportStrategy(admin({ table: { rows: [row('示例甜点工作室')], hash: 'h2' } }).client, actor, execution, draft()))!;
+    expect(storedReportData(refreshed, 'a'.repeat(64))).not.toHaveProperty('benchmarkHash');
+  });
 });

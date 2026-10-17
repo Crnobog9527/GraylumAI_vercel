@@ -31,7 +31,10 @@ it('free member is rejected before creating a report run or reading facts', asyn
       get snapshot() { throw new Error('FACTS_READ_BEFORE_MEMBERSHIP'); } }, error: null };
     return { data: null, error: { message: 'REPORT_MEMBERSHIP_REQUIRED' } };
   });
-  const query = { select: () => query, eq: () => query, maybeSingle: async () => ({ data: { value: { enabled: true } }, error: null }) };
+  // The report switch is on; the fixed price row is absent, so the default price applies.
+  let key = '';
+  const query = { select: () => query, eq: (_c: string, value: string) => { key = value; return query; },
+    maybeSingle: async () => ({ data: key === 'report_fixed_price_credits' ? null : { value: { enabled: true } }, error: null }) };
   const admin = { from: () => query, rpc } as unknown as SupabaseClient;
   await expect(reportService(user as unknown as SupabaseClient, admin, policy).start(input)).rejects.toMatchObject({
     code: 'FORBIDDEN', message: 'REPORT_MEMBERSHIP_REQUIRED',
@@ -46,7 +49,10 @@ it.each([false, true])('missing report manifest precedes membership for paid=%s'
     if (name === 'report_membership_check') return { data: null, error: paid ? null : { message: 'REPORT_MEMBERSHIP_REQUIRED' } };
     throw new Error('UNEXPECTED_ADMISSION_OR_BILLING');
   });
-  const query = { select: () => query, eq: () => query, maybeSingle: async () => ({ data: { value: { enabled: true } }, error: null }) };
+  // The report switch is on; the fixed price row is absent, so the default price applies.
+  let key = '';
+  const query = { select: () => query, eq: (_c: string, value: string) => { key = value; return query; },
+    maybeSingle: async () => ({ data: key === 'report_fixed_price_credits' ? null : { value: { enabled: true } }, error: null }) };
   const admin = { from: () => query, rpc } as unknown as SupabaseClient;
   await expect(reportService(user as unknown as SupabaseClient, admin, policy).start(input)).rejects.toMatchObject({
     code: 'BAD_REQUEST', message: 'REPORT_MANIFEST_REQUIRED',
@@ -174,7 +180,10 @@ function startAdmin(executions: unknown[], saved: Record<string, { state: string
     if (name === 'report_source') return { data: { workflow: workflow(), get snapshot() { past.reached = true; return null; } }, error: null };
     return { data: null, error: { message: 'UNEXPECTED_RPC' } };
   });
-  const query = { select: () => query, eq: () => query, maybeSingle: async () => ({ data: { value: { enabled: true } }, error: null }) };
+  // The report switch is on; the fixed price row is absent, so the default price applies.
+  let key = '';
+  const query = { select: () => query, eq: (_c: string, value: string) => { key = value; return query; },
+    maybeSingle: async () => ({ data: key === 'report_fixed_price_credits' ? null : { value: { enabled: true } }, error: null }) };
   return { admin: { rpc, from: () => query } as unknown as SupabaseClient, rpc, past };
 }
 const startInput = { ...locate, requestId: randomUUID() };
@@ -215,6 +224,19 @@ it('a start at another price than the button showed is refused before any admiss
   await expect(reportService(user as unknown as SupabaseClient, priced, policy).start({ ...startInput, requestId: randomUUID(), acceptedCredits: 500 }))
     .rejects.toMatchObject({ message: 'REPORT_UNAVAILABLE' });
   expect(past.reached).toBe(true);
+});
+// Review P1 (#1129): when the price cannot be read the button shows none, and a start without acceptedCredits must not
+// be charged the database's fixed price anyway: it is refused before any admission.
+it('a start without an accepted price is refused when the fixed price cannot be read (0295)', async () => {
+  const { admin, past } = startAdmin([], {});
+  const settings: Record<string, unknown> = { runtime_report_generation: { enabled: true }, report_fixed_price_credits: 'abc' };
+  let key = '';
+  const query = { select: () => query, eq: (_c: string, value: string) => { key = value; return query; },
+    maybeSingle: async () => ({ data: { value: settings[key] }, error: null }) };
+  const unreadable = { ...admin, from: () => query } as unknown as SupabaseClient;
+  await expect(reportService(user as unknown as SupabaseClient, unreadable, policy).start({ ...startInput, requestId: randomUUID() }))
+    .rejects.toMatchObject({ message: 'REPORT_UNAVAILABLE' });
+  expect(past.reached).toBe(false);
 });
 it('a report of another round or project does not block this round', async () => {
   const otherRound = run(REPORT_REQUEST_INPUT, '2026-10-02T00:00:00Z'), otherProject = run(REPORT_REQUEST_INPUT, '2026-10-03T00:00:00Z');

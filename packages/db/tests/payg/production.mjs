@@ -330,14 +330,14 @@ export async function productionToolCases({db,report,claim,reapply=true}) {
     await rejects(gate(monitorPayload()),/RUNTIME_PRODUCTION_DENIED/);
     report.checks.push('tool-only publish monitor run: needs no model profile or research master switch, still needs the production '
       +'database, the production switch, the vendor switch and a tool-only policy with the fixed placeholder model');
-    // The whole prepare path needs 0290 (PUBLISH-MONITOR 4b, #1081), which lets bill2_prepare skip the model row for
+    // The whole prepare path needs 0289 (PUBLISH-MONITOR 4b, #1081), which lets bill2_prepare skip the model row for
     // these runs; until it is applied only the gate above can run.
     if ((await db.query("SELECT to_regprocedure('public.publish_monitor_tool_only_run(jsonb)') IS NOT NULL v")).rows[0].v) {
       await setting(db,'runtime_environment','production');
       const monitor=monitorPayload({rules:{...f.payload.rules,quoteVersion:'publish-monitor'}});
       assert.ok((await prepare(db,f,monitor)).id);
-      report.checks.push('tool-only publish monitor run prepares through bill2_prepare on the production database (0290 present)');
-    } else report.checks.push('SKIPPED until 0290: tool-only publish monitor run through bill2_prepare');
+      report.checks.push('tool-only publish monitor run prepares through bill2_prepare on the production database (0289 present)');
+    } else report.checks.push('SKIPPED until 0289: tool-only publish monitor run through bill2_prepare');
   } finally {
     await db.query(`DELETE FROM system_settings WHERE key IN ('runtime_environment','runtime_payg_production','research_tools_config',
       'billing_provider_prices')`);

@@ -22,7 +22,9 @@ export type StoredReportData = {
 };
 
 /** What the read answer carries: the checked data for the page, or null for a report without a data block. */
-export type ReportStrategy = { data: SanitizedReportData; textEdited: string[]; stored: boolean } | null;
+export type ReportStrategy = { data: SanitizedReportData; textEdited: string[]; stored: boolean;
+  /** The benchmark table hash the numbers were checked against (draft only; absent when no numbers were used). */
+  benchmarkHash?: string } | null;
 
 const source = z.object({
   sessionId: z.string().uuid().nullable(),
@@ -46,12 +48,13 @@ const stored = z.object({
 
 async function benchmarkRows(admin: SupabaseClient, actorId: string, sessionId: string | null, frozenHash: string | null) {
   // A report frozen without a table was written without benchmark accounts: any account it names is not the host's.
-  if (!frozenHash || !sessionId) return { rows: [] as BenchmarkRow[], current: true };
+  if (!frozenHash || !sessionId) return { rows: [] as BenchmarkRow[], current: true, hash: undefined as string | undefined };
   const { data, error } = await admin.rpc('research_benchmark_rows', { a: actorId, s: sessionId });
   const table = benchmarkTable.safeParse(error ? null : data);
   // Unreadable now (the research session was deleted): keep what to learn, show no numbers.
-  if (!table.success) return { rows: [] as BenchmarkRow[], current: false };
-  return { rows: table.data.rows as BenchmarkRow[], current: table.data.hash === frozenHash };
+  if (!table.success) return { rows: [] as BenchmarkRow[], current: false, hash: undefined as string | undefined };
+  const current = table.data.hash === frozenHash;
+  return { rows: table.data.rows as BenchmarkRow[], current, hash: current ? frozenHash : undefined };
 }
 
 /**
@@ -79,7 +82,7 @@ export async function reportStrategy(admin: SupabaseClient, actorId: string, exe
   const textEdited = doc.manuallyEdited && facts.generatedBody
     ? editedReportFields(reportBodyText(facts.generatedBody), parsed.text).filter(field => checked.data[field] !== undefined)
     : [];
-  return { data: checked, textEdited, stored: false };
+  return { data: checked, textEdited, stored: false, ...(benchmarks.hash ? { benchmarkHash: benchmarks.hash } : {}) };
 }
 
 /** The value 定稿 passes to the database, bound to the exact body being finalized; null without a data block. */
@@ -87,5 +90,6 @@ export function storedReportData(strategy: ReportStrategy, bodyHash: string, now
   if (!strategy) return null;
   const value: StoredReportData = { dataVersion: 1, validatedAt: now.toISOString(), dropped: strategy.data.dropped,
     data: strategy.data.data, textEdited: strategy.textEdited };
-  return { ...value, bodyHash };
+  // The database rechecks this table under lock (0300 report_final_data): a refresh committed since the read refuses.
+  return { ...value, bodyHash, ...(strategy.benchmarkHash ? { benchmarkHash: strategy.benchmarkHash } : {}) };
 }

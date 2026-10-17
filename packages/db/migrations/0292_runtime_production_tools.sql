@@ -6,10 +6,10 @@
 -- current entry: price, units, currency, usage unit, exchange rate and validity; and the
 -- route multiplier must equal its override or the configured default m). Claims recheck the vendor switch.
 --
--- PUBLISH-MONITOR 4b (0290, Owner 2026-10-17): a tool-only publish monitor run (v2, input.publishMonitor object, the
+-- PUBLISH-MONITOR 4b (0289, Owner 2026-10-17): a tool-only publish monitor run (v2, input.publishMonitor object, the
 -- fixed placeholder model id, every entry a tool route) has no model and so needs no production model profile; it
 -- still needs the production database, the production switch, the vendor switch and an exact price. The recognition is spelled out here so
--- this file does not depend on the order in which 0290 and 0292 are applied.
+-- this file does not depend on the order in which 0289 and 0292 are applied.
 --
 -- Replaces runtime_production_allowed (0291) only. No data change. Rollback: switch the vendors off in
 -- research_tools_config; the 0291 definition can be restored from that file.

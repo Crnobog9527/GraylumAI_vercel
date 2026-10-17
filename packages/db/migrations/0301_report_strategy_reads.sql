@@ -161,9 +161,11 @@ BEGIN
   UNION ALL
   SELECT 1,s.session_id::text,jsonb_build_object('id',s.session_id,'kind','benchmarks','name',b.name,'sessionId',s.session_id,
    'accounts',s.accounts,'qualified',s.qualified,'fetchedAt',s.fetched_at,'sourceVersionId',b.current_source_version_id,
+   'producedBy',s.produced_by,
    'use','Real public data of benchmark accounts fetched during positioning research; numbers come only from this table.')
   FROM opc_businesses b CROSS JOIN LATERAL (
-   SELECT d.session_id,count(*)::int accounts,(count(*) FILTER (WHERE rb.qualified))::int qualified,max(rb.fetched_at) fetched_at
+   SELECT d.session_id,count(*)::int accounts,(count(*) FILTER (WHERE rb.qualified))::int qualified,max(rb.fetched_at) fetched_at,
+    jsonb_agg(DISTINCT jsonb_build_object('executionId',rb.execution_id)) produced_by
    FROM opc_draft_businesses db JOIN opc_drafts d ON d.draft_id=db.draft_id AND d.actor_id=p_actor_id
     AND d.project_id=(SELECT cv.project_id FROM artifact_versions cv WHERE cv.id=b.current_source_version_id)
    JOIN runtime_sessions rs ON rs.id=d.session_id AND rs.actor_id=p_actor_id AND rs.content_deleted_at IS NULL AND rs.erased_at IS NULL
@@ -204,14 +206,21 @@ BEGIN
  version_id:=(entry->>'sourceVersionId')::uuid;
  IF entry->>'kind' IN ('strategy','positioning') THEN body:=opc_profile(version_id)::text;
  ELSIF entry->>'kind'='benchmarks' THEN
-  body:=(research_benchmark_table(p_actor_id,(entry->>'sessionId')::uuid)->'rows')::text;cap:=8000;
-  -- Same rows as research_benchmark_table (live answers of this session, at most 30): the answers they came from.
-  SELECT coalesce(jsonb_agg(DISTINCT jsonb_build_object('executionId',t.execution_id)),'[]') INTO produced FROM (
-   SELECT rb.execution_id FROM research_benchmarks rb JOIN runtime_executions x ON x.id=rb.execution_id AND x.actor_id=p_actor_id
-    AND x.session_id=rb.session_id WHERE rb.actor_id=p_actor_id AND rb.session_id=(entry->>'sessionId')::uuid
-    AND x.content_deleted_at IS NULL AND x.erased_at IS NULL
-   ORDER BY rb.qualified DESC,rb.followers DESC NULLS LAST,rb.platform,rb.account LIMIT 30) t;
-  RETURN jsonb_build_object('kind','workspace_source','identity',entry,'body',left(body,cap),'truncated',length(body)>cap,
+  -- 0299 unchanged: one statement, one snapshot. The rows (same projection as research_benchmark_table: live answers of
+  -- this session, at most 30, same order) and the answers they came from are computed together, so producedBy always
+  -- describes the body even if a content erasure commits meanwhile.
+  SELECT coalesce(jsonb_agg(jsonb_build_object('platform',b.platform,'account',b.account,'followers',b.followers,
+    'medianViews',b.median_views,'engagementRate',b.engagement_rate,'postsPerWeek',b.posts_per_week,
+    'lastPublishedAt',b.last_published_at,'postsAnalyzed',b.posts_analyzed,'category',b.category,'qualified',b.qualified,
+    'excluded',b.excluded,'missing',to_jsonb(b.missing),'fetchedAt',b.fetched_at)
+    ORDER BY b.qualified DESC,b.followers DESC NULLS LAST,b.platform,b.account),'[]'::jsonb)::text,
+   coalesce(jsonb_agg(DISTINCT jsonb_build_object('executionId',b.execution_id)),'[]'::jsonb) INTO body,produced
+  FROM (SELECT rb.* FROM research_benchmarks rb
+    JOIN runtime_executions x ON x.id=rb.execution_id AND x.actor_id=p_actor_id AND x.session_id=rb.session_id
+    WHERE rb.actor_id=p_actor_id AND rb.session_id=(entry->>'sessionId')::uuid AND x.content_deleted_at IS NULL AND x.erased_at IS NULL
+    ORDER BY rb.qualified DESC,rb.followers DESC NULLS LAST,rb.platform,rb.account LIMIT 30) b;
+  cap:=8000;
+  RETURN jsonb_build_object('kind','workspace_source','identity',entry-'producedBy'-'accounts'-'qualified'-'fetchedAt','body',left(body,cap),'truncated',length(body)>cap,
    'producedBy',produced,'dependencies',jsonb_build_array(version_id));
  ELSE SELECT coalesce((SELECT ed.brief FROM opc_item_edits ed WHERE ed.work_item_id=i.work_item_id),i.brief) INTO body FROM opc_items i WHERE i.work_item_id=(entry->>'id')::uuid;END IF;
  RETURN jsonb_build_object('kind','workspace_source','identity',entry,'body',left(body,cap),'truncated',length(body)>cap,'dependencies',jsonb_build_array(version_id));

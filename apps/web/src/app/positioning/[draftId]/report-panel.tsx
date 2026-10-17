@@ -48,7 +48,8 @@ function RoundReportEntry(props: Props) {
   const available = trpc.runtime.reportAvailable.useQuery(undefined, { enabled: props.confirmed, staleTime: 60_000 });
   // A published round with a saved formal report (e.g. adopted from the jury) shows it; it never offers a new paid one.
   const saved = savedFormalReport(Boolean(props.published), props.report);
-  const canGenerate = props.confirmed && available.data?.enabled === true && !saved;
+  // A new paid start needs the price on the button: without a readable price nothing is offered (and none would be accepted).
+  const canGenerate = props.confirmed && available.data?.enabled === true && typeof available.data.priceCredits === 'number' && !saved;
   const report = useReportGen({ ...props, canGenerate: canGenerate, price: available.data?.priceCredits });
   const [open, setOpen] = useState(false);
   // A first start refused for membership opens the paywall (design v25 scene 1), also after leaving

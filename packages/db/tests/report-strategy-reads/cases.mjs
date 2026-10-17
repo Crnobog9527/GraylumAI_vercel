@@ -69,6 +69,12 @@ export async function runCases({db,report,before0301}) {
  [fetch,a,main.draftSession,execution]);
  assert.deepEqual(await kinds(db,a,sid),['positioning','benchmarks']);
  assert.ok((await read(db,a,sid,main.draftSession)).body.includes('bench_a'));
+ // Review P1 (#1129): 0301 rebuilt the function and must keep 0299's producer provenance (content erasure matches on it).
+ const benchEntry=(await index(db,a,sid)).entries.find(e=>e.kind==="benchmarks");
+ assert.deepEqual(benchEntry.producedBy,[{executionId:execution}],'the index entry names the answers it copied');
+ const readBack=await read(db,a,sid,main.draftSession);
+ assert.deepEqual(readBack.producedBy,[{executionId:execution}],'a read names the answers its rows came from');
+ assert.equal(readBack.identity.producedBy,undefined,'the stored identity keeps only the stable keys');
  report.checks.push('the benchmarks entry of 0299 is still listed after the positioning and readable');
 
  // 40 places: many positionings with reports still list only 40 entries, each report readable by id.
