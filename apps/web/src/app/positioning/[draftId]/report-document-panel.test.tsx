@@ -71,3 +71,11 @@ it("locks the actions while the page is busy", () => {
   expect(html).toMatch(/<button[^>]*disabled=""[^>]*>定稿</);
   expect(html).toMatch(/<button[^>]*disabled=""[^>]*>修改报告</);
 });
+
+it("ends a finalized report with the expert booking entry, and only a finalized one", () => {
+  expect(render()).not.toContain("预约咨询，免费询价");
+  state.read = { data: { ...doc, finalized: true, versionId: "v", version: 2 }, isError: false };
+  const html = render();
+  expect(html).toContain("预约咨询，免费询价");
+  expect(html).toContain('href="/expert-consult?from=report"');
+});
