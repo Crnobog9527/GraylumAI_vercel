@@ -366,13 +366,13 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    // Real free chat freezes the administrator's interactive reasoning (fail closed when unset).
    // Skill matching ('auto') stays on its original format: a matched Skill may use another model.
    const freeChat=Boolean(policy.real&&input.selection.kind==='ordinary'&&!mentorStream&&!stepStream&&!policy.reportGeneration);
-   if(policy.real&&(mentorStream||stepStream||organize||policy.reportGeneration||freeChat))
+   // A chosen Skill uses the PAYG-evidenced v6 format with the same administrator reasoning as free chat:
+   // a model whose reasoning is mandatory (Gemini) has no evidenced 'none' variant, so 'none' was refused (#1026).
+   const chosenSkill=Boolean(policy.real&&input.selection.kind==='skill'&&!mentorStream&&!stepStream&&!policy.reportGeneration);
+   if(policy.real&&(mentorStream||stepStream||organize||policy.reportGeneration||freeChat||chosenSkill))
     reasoning=admitReasoning(row.data,organize?'organize':'interactive',realModel(row.data).providerLimits!.providerSlug,maxOutputTokens);
    const organizerFormat=Boolean(policy.real&&!mentorStream&&(organize||attachedOrganizer));
    if(organizerFormat&&!reasoning)reasoning={parameter:'none'};
-   // A chosen Skill uses the PAYG-evidenced v6 format without reasoning: the same request bytes as the unevidenced v2.
-   const chosenSkill=Boolean(policy.real&&input.selection.kind==='skill'&&!mentorStream&&!stepStream&&!policy.reportGeneration);
-   if(chosenSkill&&!reasoning)reasoning={parameter:'none'};
    const providerRequestFormat=mentorStream||policy.reportGeneration?'agent-turn-v5-stream':stepStream?'serial-tools-v4-stream':organizerFormat||chosenSkill?'serial-tools-v6-reasoning':freeChat?FREE_CHAT_REQUEST_FORMAT:'serial-tools-v2';
    const frozen={version:'runtime.v1',sdkVersion:'0.18.0',inputSelection:hostTurnContext?'scope-projection-v2':'scope-projection-v1',
     ...(hostTurnContext?{hostTurnContext,historySelection}:{}),
