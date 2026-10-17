@@ -13,12 +13,14 @@ const STATE_ICONS: Record<Exclude<WorkState, 'running'>, typeof Check> = { done:
 /**
  * What the coach did before answering (CHAT-AUTO-CONTEXT §4): one compact row per step, e.g. "正在查资料库…"
  * while it runs, then "在资料库里找到 3 篇相关内容" with the file names. Display only: rows come in as props,
- * built by the page from the turn stream or by the landing page from the shared samples.
+ * built by the page from the turn stream or by the landing page from the shared samples. The list is a polite live
+ * region (`role="status"`): screen readers hear a step when it starts or finishes, without re-reading the whole list.
  */
 export function AgentWorkStatus({ items }: { items: readonly WorkItem[] }) {
   if (items.length === 0) return null;
   return (
-    <ul aria-label="AI 教练的工作记录" className={styles.list}>
+    <ul role="status" aria-live="polite" aria-relevant="additions text" aria-atomic="false" aria-label="AI 教练的工作记录"
+      className={styles.list}>
       {items.map(item => {
         const running = item.state === 'running';
         const Icon = running ? Loader2 : KIND_ICONS[item.kind];

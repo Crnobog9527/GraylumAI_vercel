@@ -24,6 +24,13 @@ describe('AgentWorkStatus', () => {
     expect(html).not.toContain('完成'); // a finished row needs no chip
   });
 
+  it('is a polite live region so screen readers hear steps start and finish', () => {
+    const html = renderToStaticMarkup(<AgentWorkStatus items={W.SAMPLE_WORK_ITEMS_RUNNING}/>);
+    expect(html).toContain('role="status"');
+    expect(html).toContain('aria-live="polite"');
+    expect(html).toContain('aria-atomic="false"');
+  });
+
   it('uses the running text while a step runs', () => {
     const html = renderToStaticMarkup(<AgentWorkStatus items={W.SAMPLE_WORK_ITEMS_RUNNING}/>);
     expect(html).toContain(RUNNING_LABELS.my_posts);
