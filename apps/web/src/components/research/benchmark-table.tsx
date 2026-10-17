@@ -16,7 +16,7 @@ const formatFetchedAt = (value: string) => new Date(value).toLocaleString("zh-CN
  * account. Every number cites its source number; a number the evidence cannot support reads "缺失 / 未取到".
  * On a phone each account becomes a stacked block with the column names inline.
  */
-export function BenchmarkTable({ rows, now = new Date(), onRefresh, fetchedAt, children }: {
+export function BenchmarkTable({ rows, now = new Date(), onRefresh, refreshDisabled = false, fetchedAt, children }: {
   rows: BenchmarkRow[];
   now?: Date;
   /** When the newest row was fetched (ISO time), shown in the viewer's own time. */
@@ -25,6 +25,8 @@ export function BenchmarkTable({ rows, now = new Date(), onRefresh, fetchedAt, c
   children?: ReactNode;
   /** Asks the host for a refresh grant for one row; absent = no refresh buttons (e.g. a read-only report). */
   onRefresh?: (row: BenchmarkRow) => Promise<void>;
+  /** The conversation cannot take a message now: the refresh buttons stay visible but locked. */
+  refreshDisabled?: boolean;
 }) {
   const { entries, numberOf } = numberSources(rows);
   const qualified = rows.filter(row => row.qualified).length;
@@ -53,7 +55,7 @@ export function BenchmarkTable({ rows, now = new Date(), onRefresh, fetchedAt, c
                     {row.qualified ? "合格" : "不计入"}
                   </span>
                 </span>
-                {onRefresh && <RefreshButton account={row.account} onRefresh={() => onRefresh(row)} />}
+                {onRefresh && <RefreshButton account={row.account} disabled={refreshDisabled} onRefresh={() => onRefresh(row)} />}
               </th>
               {COLUMNS.map(column => {
                 const value = cellText(row, column.key, now);

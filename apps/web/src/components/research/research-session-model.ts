@@ -121,3 +121,11 @@ export function researchConfirmedInput(confirmation: CardConfirmation): string {
   if (confirmation.kind === "keywords") return `我确认了这些关键词：${confirmation.items.join("、")}`;
   return `我选好了对标账号：${confirmation.items.map(item => `${platformLabel(item.platform)} ${item.account}`).join("、")}`;
 }
+
+/**
+ * The mentor message sent with a refresh grant: it names the account in the user's words. The grant itself travels
+ * as `researchRefreshId`; the host checks it and tells the model which account it covers.
+ */
+export function researchRefreshInput(platform: string, account: string): string {
+  return `请重新读取对标账号 ${platformLabel(platform)} ${account} 的最新数据`;
+}
