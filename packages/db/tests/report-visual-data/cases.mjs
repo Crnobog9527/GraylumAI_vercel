@@ -69,8 +69,11 @@ export async function runCases({db,report,before0300}) {
  await assert.rejects(doc(db,f,'finalize',{revision:1,bodyHash:hash(edited),data:stored(withData())}),/REPORT_DATA_INVALID/);
  await assert.rejects(doc(db,f,'finalize',{revision:1,bodyHash:hash(edited),data:{...stored(edited),dataVersion:2}}),/REPORT_DATA_INVALID/);
  assert.equal((await db.query('SELECT count(*) n FROM artifact_versions WHERE project_id=$1',[f.project])).rows[0].n,'0');
+ const emptyTable=(await db.query('SELECT research_benchmark_table($1,$2)->>\'hash\' v',[f.actor,f.session])).rows[0].v;
+ await assert.rejects(doc(db,f,'finalize',{revision:1,bodyHash:hash(edited),data:stored(edited,{benchmarkHash:'0'.repeat(64)})}),
+  /REPORT_DATA_INVALID/,'numbers from a benchmark table that is no longer current');
  const request=randomUUID();
- const done=await doc(db,f,'finalize',{request,revision:1,bodyHash:hash(edited),data:stored(edited,{textEdited:['summary']})});
+ const done=await doc(db,f,'finalize',{request,revision:1,bodyHash:hash(edited),data:stored(edited,{textEdited:['summary'],benchmarkHash:emptyTable})});
  assert.equal(done.finalized,true);
  const formal=await versionReport(db,done.versionId);
  assert.equal(formal.generatedReport.body,edited);
@@ -83,7 +86,7 @@ export async function runCases({db,report,before0300}) {
  assert.deepEqual(source.storedData,formal.generatedReport.data);
  const foreign=await fixture(db);
  await assert.rejects(rpc(db,'report_document_data_source',foreign.actor,f.execution),/REPORT_EXECUTION_REQUIRED/);
- report.checks.push('data bound to the finalized body hash; wrong hash or version refused atomically; replay stable; data source owner-only');
+ report.checks.push('data bound to the finalized body hash and the current benchmark table; stale ones refused atomically; replay stable; owner-only');
 
  const plain=await seed(db);
  const old=await doc(db,plain,'finalize',{bodyHash:hash('## One\nOriginal confirmed facts.\n## Two\nKnown limitations.')});

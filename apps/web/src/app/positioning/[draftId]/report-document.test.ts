@@ -79,5 +79,8 @@ describe("report document (R5)", () => {
     expect(bodyFromEditor({ body: "## 旧报告" }, "## 改过")).toBe("## 改过");
     // A stored body that ends with a newline after the block: opening the editor is not a change.
     expect(canSave({ ...doc, body: doc.body + "\n" }, editorText(doc.body + "\n"))).toBe(false);
+    // A pasted data fence can never be saved, with or without a generated block.
+    expect(canSave({ body: "## 旧报告", finalized: false }, "## 旧报告\n" + block)).toBe(false);
+    expect(canSave(doc, "## 一句话结论\n\n改了\n" + block)).toBe(false);
   });
 });
