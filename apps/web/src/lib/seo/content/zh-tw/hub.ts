@@ -100,6 +100,7 @@ export const ZH_TW_HUB: ArticleContent = {
     { label: '社群行銷是什麼？', href: '/zh-tw/shequn-xingxiao', description: '個人與小品牌用社群達成名單和銷售的做法。' },
     { label: '社群經營怎麼做？', href: '/zh-tw/shequn-jingying', description: '從規劃、內容到互動的社群經營流程。' },
     { label: '自媒體課程怎麼選？', href: '/zh-tw/zimeiti-kecheng', description: '上課、真人陪跑和 AI 陪跑的差別與適合對象。' },
+    { label: 'Graylum 和 ChatGPT 差在哪？', href: '/zh-tw/graylum-vs-chatgpt', description: '經營自媒體時，通用 AI 和專屬教練的差別與適合對象。' },
     { label: '關於 Graylum', href: '/zh-tw/about', description: '公司資訊、編輯原則和聯絡方式。' },
     { label: '價格（簡體）', href: '/landing/pricing', description: '免費開始，以及會員和點數包的說明。' },
   ],

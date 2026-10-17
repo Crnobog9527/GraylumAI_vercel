@@ -34,6 +34,7 @@ export const PUBLIC_PAGES: PublicPage[] = [
   { path: '/blog/first-positioning-conversation', locale: 'zh-Hans', lastModified: '2026-10-17' },
   { path: '/blog/before-you-start-posting', locale: 'zh-Hans', lastModified: '2026-10-17' },
   { path: '/refund', locale: 'zh-Hans', lastModified: '2026-10-17' },
+  { path: '/graylum-vs-chatgpt', locale: 'zh-Hans', lastModified: '2026-10-18', alternates: { 'zh-TW': '/zh-tw/graylum-vs-chatgpt' } },
   { path: '/faq', locale: 'zh-Hans', lastModified: '2026-10-18' },
   { path: '/contact', locale: 'zh-Hans', lastModified: '2026-10-12' },
   { path: '/terms', locale: 'zh-Hans', lastModified: '2026-10-12' },
@@ -47,5 +48,6 @@ export const PUBLIC_PAGES: PublicPage[] = [
   { path: '/zh-tw/shequn-xingxiao', locale: 'zh-TW', lastModified: '2026-10-12', footerLabel: '社群行銷' },
   { path: '/zh-tw/shequn-jingying', locale: 'zh-TW', lastModified: '2026-10-12', footerLabel: '社群經營' },
   { path: '/zh-tw/ig-jingying', locale: 'zh-TW', lastModified: '2026-10-12', footerLabel: 'IG 經營' },
+  { path: '/zh-tw/graylum-vs-chatgpt', locale: 'zh-TW', lastModified: '2026-10-18', alternates: { 'zh-Hans': '/graylum-vs-chatgpt' } },
   { path: '/zh-tw/zimeiti-kecheng', locale: 'zh-TW', lastModified: '2026-10-12', footerLabel: '自媒體課程' },
 ];
