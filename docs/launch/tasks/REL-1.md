@@ -1,0 +1,289 @@
+# REL-1 上线手册和上线前清单（目标 2026-10-31）
+
+> 2026-10-17 整理，依据 staging `9f1bd6f7` 和当天 GitHub 上的 PR 状态。
+> **这份文件不授权任何操作。** 合并到 `main`、读写正式库、改正式平台设置、新增或更换密钥、真钱操作，
+> 都要按 [AGENTS.md](../../../AGENTS.md) 第 1 节在动手前由 Owner 在当前对话里明确同意；同意只对当时说清楚的那一个版本有效。
+
+## 0. 这次要做到什么、怎样算做完、不做什么
+
+- **要做到**：Owner 要求应用 2026-10-31 前正式上线（总控-8 转达）。本文把散在
+  [Master Plan](../MASTER_PLAN.md) 第 7.1 节 V3-M3 → REL-1 行、第 2.1 节、第 7.6 节、第 9.3 节和各任务文档里的
+  "上线前 / 上线时"事项收成一张清单，排出到 10-31 的倒排时间表，列出所有需要 Owner 亲自操作或批准的点。
+- **怎样算做完**：清单每一项都写了是什么、为什么、谁做、依赖哪个 PR、怎么验证，并给出仓库里的出处；
+  仓库里找不到出处的标 **待核实**，不编。
+- **不做什么**：不执行任何正式环境操作，不读正式库（`fhmshnqjjnnlvplojktv`），不碰正式 Vercel；
+  不改产品决定；不替代 [RUNTIME_PROD_PLAN](../RUNTIME_PROD_PLAN.md) 第 7.3 节的上线顺序和第 8 节的批准包，本文按它们展开。
+
+"谁做"一栏的三种写法：
+
+| 写法 | 意思 |
+| --- | --- |
+| **Owner 操作** | 只能由 Owner 本人在平台后台或外部账号上点（付费、密钥、条款、对外发信等） |
+| **总控（需批准）** | 总控执行，但每一次正式环境的读、写、合并都要 Owner 当次批准 |
+| **执行窗口** | AI 在 staging 上自己做完（开 PR、测试、复审），按 AGENTS 第 3、4 节合并到 staging |
+
+旧文档的关系：[RELEASE_PREP_CHECKLIST](../../RELEASE_PREP_CHECKLIST.md) 和
+[PRODUCTION_RELEASE](../../runbooks/PRODUCTION_RELEASE.md) 写于旧 Stripe Checkout 和旧聊天时期，
+其中的环境变量核对、Auth 回调、Sentry、发布后记录仍可参考；和本文冲突的以本文和 Master Plan 为准。
+例如 RELEASE_PREP_CHECKLIST 第 54 行"撤掉 `next.config.ts` 里的 noindex 响应头"已不需要改代码：
+现在 `next.config.ts` 第 63–66 行按 `SITE_INDEXING` 生成响应头，设成 `public` 后构建出来就不再带 noindex。
+
+## 1. 现在离上线还差什么（2026-10-17）
+
+### 1.1 还没完成的上线前置任务
+
+V3-M3 → REL-1 的依赖是"以上全部"（Master Plan 第 7.1 节第 2375 行、第 7.2 节第 2413 行）。
+按 `node scripts/plan-progress.mjs --ref origin/staging` 的结果，下面这些还没标完成：
+
+| 情况 | 任务 | 在途 PR |
+| --- | --- | --- |
+| 被阻塞，没开工 | VOICE、UI-C | — |
+| 只有方案 | FUSION-COMPARE | #1059 |
+| 实施中，有在途 PR | CONTENT-CONVERSATION-DRIVEN、RUNTIME-FAILURE-RECONCILE、RESEARCH-TOOLS、ADMIN-SECRETS、LIB-DOCS、EXPERT-CONSULT、PUBLISH-MONITOR、LEGACY-CLOSE、SKILL-I18N-HOOK、PAY-DISPUTE-GUARD、PUBLIC-SITE | #1036、#1061、#1062、#1041、#1022/#1042/#1048/#1050/#1051、#1060、#1032/#1033/#1039、#1030、#1027、#1038、#992/#1063 |
+| 实施中，没有在途 PR（剩余工作待核实） | AGENT-CORE、AGENT-CORE-UI、REPORT-GEN、CONVERSATION-DRIVEN-CAPTURE、CHAT-NATIVE-OUTPUT、RUNTIME-PROD、PROMPT-CACHE-HISTORY、DB-BASELINE、STAGING-HOST-CLEANUP、DATA-ERASURE、FUSION-REVIEW、UI-A、UI-MODEL、UI-B、UI-FINISH、PAY-COMMON、PAYWALL、POSITIONING-GATE、MODEL-IDENTITY-GUARD、PAY-STRIPE-MP、PAY-FOUNDER、PAY-NOTIFY、PAY-EVIDENCE、ANALYTICS | — |
+| 等 Owner 决定 | MODERATION（暂缓，公开上线前请 Owner 定实现时间，第 2414、2716 行） | — |
+
+"实施中、没有在途 PR"的任务，有的可能其实已经做完、只是没在第 7.1 节标"完成"。
+冻结前由总控逐个对照验收记录，做完的标"完成"，没做完的列进第 3 节的缺口清单。
+
+另外两项没有对应任务行、但上线前必须做：
+- **单主机 `/app` 路由搬迁**：Master Plan 第 934 行定为上线前完成，第 748 行排在"冻结窗口最后做"。
+  staging 的 `apps/web/src/app/` 下目前还没有 `/app` 前缀的目录，归 PUBLIC-SITE，**还没开 PR**。
+- **vercel.json 定时任务改频率**：见清单 A2，**还没开 PR**。
+
+### 1.2 staging 迁移队列 0271–0283（必须在冻结前按编号顺序合并并应用）
+
+| 编号 | PR | 任务 |
+| --- | --- | --- |
+| 0271 | #1030 | LEGACY-CLOSE PR-C 删除 3 张旧对话表 |
+| 0272 | #1032 | PUBLISH-MONITOR PR-3a 每日刷新和快照 |
+| 0273 | #1027 | SKILL-I18N-HOOK |
+| 0274 | #1033 | PUBLISH-MONITOR PR-5 一键发布 |
+| 0275 | #1038 | PAY-DISPUTE-GUARD PR-D0 |
+| 0276 | #1036 | CONTENT-CONVERSATION-DRIVEN A2 |
+| 0277 | #1041 | ADMIN-SECRETS OR-1 |
+| 0278 | #1042 | LIB-2d 单图计费前提 |
+| 0279 | #1022 | LIB-4b Agent 读资料库 |
+| 0280 | #1050 | LIB-2d 保存浏览器识别结果 |
+| 0281 | #1060 | EXPERT-CONSULT |
+| 0282 | #1061 | RUNTIME-FAILURE-RECONCILE |
+| 0283 | #1062 | RESEARCH-TOOLS 研究子调用余额不足暂停 |
+
+编号以总控的账本为准；账本要求连续，前一个没合，后面的不能先应用。
+0283 之后还会有新迁移（至少 ADMIN-SECRETS 的 OR-2，见清单 B4），编号由总控再分配。
+
+### 1.3 范围和日期的冲突（已报总控转 Owner）
+
+剩 14 天，VOICE、UI-C 还没开工，FUSION-COMPARE 只有方案，PUBLISH-MONITOR 还有多个 PR。
+Master Plan 第 588 行写明"缩小上线范围须 Owner 另行决定"，AI 不能自己砍范围。选项见第 6 节第 1 项。
+
+## 2. 上线前清单
+
+每一项的"出处"都是仓库里的文件和行号（以 staging `9f1bd6f7` 为准）。
+
+### A. 平台和基础设施
+
+| # | 做什么 | 为什么 | 谁做 | 依赖 | 怎么验证 | 出处 |
+| --- | --- | --- | --- | --- | --- | --- |
+| A1 | 升级 Vercel Pro | 正式运营要用；Hobby 单次函数 300 秒、定时任务每天一次，不够 A2 用 | Owner 操作（付费） | — | Vercel 账单页显示 Pro；正式项目的函数时长上限读回 | Master Plan 第 1237 行、第 7.6 节第 2491 行 |
+| A2 | 改 `apps/web/vercel.json` 定时任务频率：新增 `/api/cron/runtime-recovery`（分钟级）；`account-erasure` 至少每小时一次；`library-cleanup` 每 5 分钟；`social-monitor` 每 10 分钟 | 删除后 24 小时内清完（T_online）；超时回合自动收口退回；资料库清理；作品数据刷新容量 | 执行窗口开 PR | A1；`runtime-recovery` 路由已在 staging，但 `vercel.json` 里还没有这一条 | 正式环境 `scheduled_job_runs` 里每个任务都有成功记录（不是 401/503） | 第 2335、2375、2491 行；[LIB_DOCS_PLAN](../LIB_DOCS_PLAN.md) 第 144 行；[PUBLISH-MONITOR](PUBLISH-MONITOR.md) 第 338 行；[FUSION-REVIEW](FUSION-REVIEW.md) 第 44 行 |
+| A2a | **待核实**：staging 和正式两个 Vercel 项目是否在同一个团队、staging 是否也会变成 Pro | `vercel.json` 两个项目共用；如果 staging 仍是 Hobby，分钟级定时任务可能让 staging 部署失败 | 总控只读核对 | A1 | 看两个项目所属团队和套餐 | 仓库里没有出处，待核实 |
+| A3 | 恢复正式站（取消暂停） | 正式 Vercel 项目 `graylum-ai-vercel-v1` 目前是暂停状态（**待核实**：暂停原因和日期仓库里没写，总控记录为 2026-10-05） | Owner 操作（MCP 没有这个权限） | 维护态准备完成（第 4 节第 4 步） | 访问正式域名不再是暂停页；新调用仍是关闭状态 | [RUNTIME_PROD_PLAN](../RUNTIME_PROD_PLAN.md) 第 7.3 节第 3、5 步、第 8 节 Vercel 行 |
+| A4 | 处理 `main` 的 Next 安全漏洞 | `main` 停在 2026-08 的依赖，必需检查 Dependency Audit 失败；正式站公开可达 | 总控（需批准合并 `main`） | 冻结版本 | staging → `main` 的合并 PR 上 Dependency Audit 和全部必需检查通过，不新增豁免 | 第 2628 行；RUNTIME_PROD_PLAN 第 7.3 节第 1 步 |
+| A5 | 正式环境 Upstash Redis（`UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`） | 限流是 fail-closed：没配好，所有新消息都会被拒；删除清单也存在这里 | Owner 操作（新增凭证） | — | Vercel 正式环境变量名存在（不读值）；限流冒烟通过；命令额度够用 | 第 1249–1251 行、第 7.6 节第 2490 行；[RATE_LIMIT_WIRING_PLAN](../RATE_LIMIT_WIRING_PLAN.md) 第 276–282 行；[DATA_ERASURE_BACKUP_RESTORE_REPLAY](../../runbooks/DATA_ERASURE_BACKUP_RESTORE_REPLAY.md) 第 12–14 行 |
+| A6 | 限流初始值和一键暂停：消息 10/分钟、200/天，调用 30/分钟、600/天；`stopNewCalls` 先设为开（停止新调用） | 第 30 项已定；上线当天先关住新调用，冒烟后再开 | 总控（需批准） | A5、B1 | 读回 `system_settings.runtime_rate_limits` | 第 1251 行；RUNTIME_PROD_PLAN 第 5.1 节、第 8 节"限流与开关"行 |
+| A7 | 核对正式 Supabase 的套餐、每日备份和 PITR 保留期 | 删除清单在 Redis 里保留 35 天；备份保留期超过 30 天时要先把 35 天调大，否则恢复备份会让已删内容复活 | 总控（需批准只读） | B1 | 套餐和备份窗口记录在 PR 交接里 | DATA_ERASURE_BACKUP_RESTORE_REPLAY 第 34–36 行 |
+| A8 | 用虚构账号演练一次"恢复备份 → 重放删除 → 开放" | 这套流程还没真实演练过 | 执行窗口 + 总控（在哪个环境演练待定，见第 6 节第 5 项） | A7 | 演练记录：重放后已删内容不再出现 | DATA_ERASURE_BACKUP_RESTORE_REPLAY 第 3–4 行 |
+| A9 | Sentry 正式项目、告警通知渠道；diagnostics 定时任务 | 上线后要能第一时间看到错误和余额告警 | 总控（需批准） | — | 发一次合成告警能收到；告警里没有用户内容 | RUNTIME_PROD_PLAN 第 8 节"监控告警"行；RELEASE_PREP_CHECKLIST 第 53、136 行 |
+
+### B. 正式数据库
+
+| # | 做什么 | 为什么 | 谁做 | 依赖 | 怎么验证 | 出处 |
+| --- | --- | --- | --- | --- | --- | --- |
+| B0 | 确认正式库没有真实用户数据 | 整个发布按"新建环境"做；一旦发现真实用户数据，这个前提失效，停下请 Owner 重新决定 | 总控（需批准只读） | — | 只读查 `auth.users` 和 `profiles` 行数 | 第 9.3 节第 2676 行；第 1156 行 |
+| B1 | 正式库从空库建库：平台前置 → `packages/db/baseline` → 全部迁移（同名 bridge 紧挨在迁移前）；用 PostgreSQL 17；**每个文件整段交给服务端执行，不用 `psql -f`**；先确认目标项目允许 0010 建 `pg_cron`、0148 再删掉 | DB-BASELINE 方案 B（Owner 2026-09-29）：结构只由迁移文件决定 | 总控（需批准；建在哪个项目见第 6 节第 2 项） | 0271–0283 及之后所有迁移已合并；DB-BASELINE 剩余部分（**待核实**是否还有未完成项） | 建完后只读抓指纹，用 `--local-only --staging <快照>` 和 `built-fingerprint`、`expected-differences.json` 比对，没有解释不了的差异 | [STAGING_REPRODUCIBILITY](../../runbooks/STAGING_REPRODUCIBILITY.md) 第 223–255 行；第 9.3 节第 2677 行；第 1185 行 |
+| B1a | 确认 Supabase 项目设置 `rls_auto_enable` / `ensure_rls` 事件触发器的取值 | 这两项属于项目设置，不在仓库迁移里，不能从本机重放成功推断 | 总控（需批准只读） | B1 | 读回项目设置 | STAGING_REPRODUCIBILITY 第 233–235 行 |
+| B2 | 导入配置类数据：套餐（Pro $29 / 3,480、Gold $69 / 8,970，年付 $279 / $621，免费套餐每月 0、每年 0）、积分包和会员折扣、q=100、m=6、模型和线路、`runtime_purpose_budgets`、已发布的 Skill 和模块配置；不复制 staging 的测试账号、对话、订单、流水、沙盒编号和测试窗口 | 正式库只要结构和配置；价格写入要另批 | 总控（需批准每一组数值） | B1 | 逐项读回；模型行导入后在后台点"读取价格"，不从 staging 复制价格 | 第 9.3 节第 2677 行；第 289、1450、2720 行；[MODEL_PRICING_SYNC_PLAN](../MODEL_PRICING_SYNC_PLAN.md) 第 394 行；[AGENT_CORE_R15](../implementation/AGENT_CORE_R15.md) 第 24–27 行 |
+| B3 | 只读核对正式库已装 Supabase Vault，且已应用 0259 | 后台第三方密钥存在 Vault；没装时函数直接报错，不会退成明文 | 总控（需批准只读） | B1 | `supabase_vault` 扩展存在；0259 在账本里 | [ADMIN-SECRETS](ADMIN-SECRETS.md) 第 8 节第 1 项；第 2375 行 |
+| B4 | ADMIN-SECRETS 的 OR-2 已应用：正式库 `ai_models` 没有 `api_key` 列 | 不再有明文密钥列 | 执行窗口（OR-2 PR，**还没开**）；正式库随 B1 建出来 | #1041（OR-1，0277）合并后 | 只读查列不存在 | ADMIN-SECRETS 第 8 节第 3 项、第 10 节 OR-2 |
+| B5 | 只读核对没有"付款方式为空、未关闭、未付款"的旧路径待付款订单 | 有的话会挡住这些账号用新路径下单 | 总控（需批准只读） | B1 | 查询结果为 0（新建库正常就是 0） | 第 2375 行（#961）；[LEGACY_CHECKOUT_CLEANUP](../../runbooks/LEGACY_CHECKOUT_CLEANUP.md) 第 69–74 行 |
+| B6 | 核对 Storage：两个资料库桶都是私有，`storage.objects` / `storage.buckets` 上没有策略，匿名和普通登录角色没有新增授权；工单附件上传和签名读取一起回归 | 上传文件不能被别人读到 | 总控（需批准只读） | B1 | SQL 只读核对 + 正式冒烟上传一次 | [LIB_DOCS_PLAN](../LIB_DOCS_PLAN.md) 第 300–303 行；第 2632 行 |
+
+### C. 密钥和第三方供应商
+
+| # | 做什么 | 为什么 | 谁做 | 依赖 | 怎么验证 | 出处 |
+| --- | --- | --- | --- | --- | --- | --- |
+| C1 | 在正式站后台"第三方密钥"页填 6 个槽位：OpenRouter、Post for Me API 密钥、Post for Me Webhook 共享密钥、TikHub、Parallel、Firecrawl | 业务密钥只放后台，AI 不经手 | Owner 操作 | B3；ADMIN-SECRETS 的 PFM、RT、OR-1 接线都已合并（#1041 在途） | 6 个槽位都显示"后台已填写"（只看状态和末 4 位）；Owner 对照 Post for Me 那边的 Webhook 共享密钥末 4 位一致 | ADMIN-SECRETS 第 8 节第 2 项；第 182、2375 行 |
+| C2 | 结束过渡期：Vercel 正式环境里删除 6 个旧环境变量（5 个后备变量和残留的 `OPENROUTER_API_KEY`） | 只留一个来源，避免读错 | Owner 操作 | T-END PR 合并；C1 | 删除后发布、Webhook、三家搜索和模型调用都正常 | ADMIN-SECRETS 第 8 节第 4 项、第 10 节 T-END |
+| C3 | Resend：正式发信域名的 DNS（SPF/DKIM）、生成密钥填进后台 `resend` 槽位、确认发件人 `Graylum AI <no-reply@graylum.com>` | 续费提醒、到期提醒等付款邮件要能发出去 | Owner 操作（新增凭证） | PAY-NOTIFY PR-N1（#1031，已合并） | 后台槽位显示已填写；正式冒烟发一封到测试邮箱 | [PAY-NOTIFY](PAY-NOTIFY.md) 第 47–55 行；第 604 行（N5 上线前确认地址） |
+| C3a | 正式 Supabase 的 Auth 邮件 SMTP、Google 登录、hCaptcha、Site URL 和回调地址 | 新建项目时这些都要重新配；不新建也要改到 `www.graylum.com/app` | Owner 操作（凭证）/ 总控核对 | B1、E1 | 用新邮箱真实走一次注册、确认邮件、Google 登录、找回密码 | 第 934 行；PRODUCTION_RELEASE 第二节；SMTP 用 Resend 的历史记录见 [v10.1](../Graylum_Master_Plan_v10.1.md) 第 305 行 |
+| C4 | OpenRouter 账号和各 workspace 的隐私设置里关闭"允许用于训练" | Owner 2026-10-12 选 A：账号层面关，代码不强制 | Owner 操作；总控上线前核对 | — | Owner 截图或口头确认，记在上线 PR | 第 719、2375 行 |
+| C5 | OpenRouter 正式运行凭据：专用一把、每日美元上限、不自动充值、首版禁用 BYOK | 平台没有固定的亏损上限，靠供应商侧硬上限兜底 | Owner 操作（金额由 Owner 定） | C1 | 凭据设置页读回；核对 BYOK 关闭 | RUNTIME_PROD_PLAN 第 5.1 节第 234–239 行、第 8 节 OpenRouter 行 |
+| C6 | Owner 向 Parallel 取得"Search API 零保留、不训练"的书面确认 | 第 2.1 节 RESEARCH-TOOLS 9.1 选 A；确认前隐私条款按"可能用于训练"写 | Owner 操作（对外发信） | — | 书面回复存档；隐私条款相应措辞 | 第 497、2375 行 |
+| C7 | TikHub、Parallel、Firecrawl 各自在平台上设好硬上限（预付余额或平台限额） | 没设硬上限前不开放对应搜索；后台打开供应商时必须勾选"已设硬上限" | Owner 操作（金额由 Owner 定） | — | 各家后台读回；RT-2b 审计记录里有勾选人和时间 | 第 1127 行；[RESEARCH_TOOLS_PLAN](../implementation/RESEARCH_TOOLS_PLAN.md) 第 371、447 行 |
+| C8 | Post for Me：订阅一个**正式环境独占**的项目；打开孤儿清扫删除开关 `publish_monitor_orphan_sweep_delete` 前确认独占 | 默认只记录不删除；共用项目时可能误删 staging 或手动测试的账号 | Owner 操作（订阅，每月至少 10 美元）；开关由总控（需批准） | PUBLISH-MONITOR 各 PR | 正式项目里只有正式环境的账号；开关读回 | 第 2375 行；PUBLISH-MONITOR 第 164–166 行、第 11 节第 7 项 |
+| C9 | 订阅前向 Post for Me 官方邮箱书面问两件事：条款是否允许嵌入付费 SaaS；超量自动升级和价格页说法不一致 | 条款没写明 | Owner 当次同意后发送 | — | 回复存档 | PUBLISH-MONITOR 第 452–453 行 |
+| C10 | 统计：GA4 正式媒体资源、Termly 网站编号、Vercel Web Analytics 打开；GA4 上报密钥放 `~/.graylum/secrets/`，往 Vercel 加变量当次批准 | 上线时能回答"人从哪里来、多少人付款" | Owner 操作 | ANALYTICS 各 PR | 正式站能看到页面访问；同意弹窗出现 | [ANALYTICS](ANALYTICS.md) 第 8 节 |
+| C11 | 删除或重置 E2E 测试账号，正式环境变量里去掉不再需要的 E2E 凭证 | 测试凭证不留在正式环境 | Owner 操作 | — | Vercel 正式环境没有 `E2E_*` 变量 | RELEASE_PREP_CHECKLIST 第 55 行 |
+| C12 | Firecrawl 是否开通零保留 | 上线前要定，不阻塞代码 | Owner 决定 | — | 决定记进 Master Plan 第 2.1 节 | RESEARCH_TOOLS_PLAN 第 447 行 |
+
+### D. 收款（Stripe）
+
+| # | 做什么 | 为什么 | 谁做 | 依赖 | 怎么验证 | 出处 |
+| --- | --- | --- | --- | --- | --- | --- |
+| D1 | 正式模式开通 Stripe Managed Payments，提交资格信息，接受条款 | 银行卡订阅走 MP；平台审核可能要几天，**要尽早开始** | Owner 操作 | — | Stripe 后台显示 MP 已开通 | [MIGRATION-PLAN](../evidence/stripe-managed-payments-20261012/MIGRATION-PLAN.md) 第五节第 1 项 |
+| D2 | 正式模式建产品和价格：Pro / Gold 月付和年付、创始年付、Gold 首月优惠券；税务编码 `txcd_10105001`，价格不含税 | 价格和 Master Plan 第 51 项一致 | Owner 操作（或批准 AI 按脚本建） | D1 | 价格 ID 和后台套餐一一对应 | MIGRATION-PLAN 第五节第 2 项 |
+| D3 | "收入恢复 → 重试"改为第 1、3、6 天重试，失败后取消订阅 | 配合 24 小时宽限和创始会员 7 天规则 | Owner 操作 | D1 | 后台设置读回 | MIGRATION-PLAN 第五节第 3 项 |
+| D4 | 正式回调地址订阅 `invoice.*`、`customer.subscription.*`、`charge.refunded`、`charge.dispute.*`；新建回调地址会产生新的回调密钥（新增凭证） | 续费、退款、拒付事件都要收到 | Owner 操作 | E1（回调地址用正式域名） | 发一个错误签名的请求返回 400；Stripe 后台投递成功 | MIGRATION-PLAN 第五节第 4 项；PRODUCTION_RELEASE 第二节 |
+| D5 | 账单描述、客服邮箱、结账页的条款和隐私链接；开通 Stripe Tax 门槛监控 | MP 不负责税务的国家照常卖，接近门槛时提醒（Owner 2026-10-12 选 A） | Owner 操作 | D1 | Stripe Tax 页显示监控已开 | 第 720、2375 行；MIGRATION-PLAN 第 2.4 节、第五节第 5 项 |
+| D6 | 正式环境 Stripe 客户门户关闭"切换套餐" | 升级要走"新开 Gold 结账 + Pro 期末停"，门户里直接换套餐会绕过 | Owner 操作 | — | 门户设置读回 | 第 2375 行 |
+| D7 | 打开正式银行卡下单，同时设置 `STRIPE_CARD_RECONCILIATION_MODE=live`、放开银行卡处理只认测试模式的限制 | 默认关闭；三件事一起开 | 总控（需批准；放开测试模式限制是改配置还是改代码，**待核实**） | D1–D6；PAY-STRIPE-MP 全部 PR；#961 | 每日对账在正式环境跑出成功记录 | 第 2375 行；MIGRATION-PLAN 第五节第 7 项 |
+| D8 | 微信、支付宝单笔启售前完成税务核实、价格口径批准和结账金额验证 | 不能因为用户在中国就假设免税 | Owner 操作（核实）/ 批准 | — | 核实结果记在 PAY-STRIPE-MP 验收 PR | 第 7.6 节"Stripe 钱包启售前核实"行 |
+| D9 | 上线当天有上限的真实小额支付、退款和同日对账；279 / 496 / 621 美元钱包年付各真付一次再退款 | 第 9.3 节保留的上线条件 | Owner 批准金额、笔数和恢复安排；第一笔真钱由 Owner 或其指定的人付 | D1–D8 | `payment_orders`、`credit_transactions`、订阅和积分到账一致，退款后收回 | 第 2683、1863 行；[PAY-WAFFO](PAY-WAFFO.md) 第 297 行 |
+| D10 | 服务条款、隐私政策、退款政策、可接受使用政策的正文 | 付款前的勾选框链接这两份文件；`/refund` 没有正文前未登录访问是 404 | Owner 操作（第三方工具生成，不在 AI 范围） | — | 4 个页面未登录都能打开 | 第 93、1631 行；第 7.6 节"隐私条款"行 |
+| D11 | 客服邮箱 | v11 第 13.3 节的发布条件之一 | Owner 操作 | — | 页面和 Stripe 上的客服邮箱一致、能收信 | 第 7.6 节第 2494 行 |
+
+### E. 域名和搜索收录
+
+| # | 做什么 | 为什么 | 谁做 | 依赖 | 怎么验证 | 出处 |
+| --- | --- | --- | --- | --- | --- | --- |
+| E1 | 应用并入 `www.graylum.com`，登录后页面放 `/app`；`graylum.com` 和 `app.graylum.com` 301 到 www | Owner 2026-10-12 定为上线前完成 | 代码：执行窗口（**还没开 PR**，冻结窗口最后做）；Vercel 域名、Supabase Site URL 和回调、Stripe 回调、环境变量：Owner 逐项批准 | PUBLIC-SITE | 三个域名都落到 www；登录回跳、Stripe 回跳正确 | 第 748、934 行；[SEO_GEO_SPEC](../SEO_GEO_SPEC.md) 第 19 行 |
+| E2 | 如果当时在 Vercel 设过 `www.graylum.com` → `app.graylum.com` 的临时 307，先撤回 | 不撤回整站不会被收录 | Owner 操作 | E1 | 访问 www 不再 307 | 第 2493、2628 行。**待核实**：这条 307 实际有没有设过（正式站后来改为整站暂停） |
+| E3 | 正式环境设置 `SITE_INDEXING=public` 后重新构建 | `/robots.txt` 才会放行搜索爬虫、拒绝训练爬虫；noindex 响应头也随之只留在登录后页面 | 总控（需批准环境变量） | E1、E2；落地页能力核对（H1）通过 | `/robots.txt` 内容；首页响应头没有 `X-Robots-Tag: noindex` | RELEASE_PREP_CHECKLIST 第 54 行；`apps/web/next.config.ts` 第 63–66 行；`apps/web/src/lib/landing/landing-flags.ts` 第 12–13 行 |
+| E4 | Google Search Console、Bing 提交站点和 sitemap | SEO 第 0 阶段地基 | Owner 操作（对外账号） | E3 | 后台显示已验证 | SEO_GEO_SPEC 第 306 行 |
+
+### F. 正式环境功能开关
+
+这些开关在 staging 和正式环境各自独立；`NEXT_PUBLIC_*` 是构建时读的，改了要重新部署。
+
+| # | 做什么 | 为什么 | 谁做 | 依赖 | 怎么验证 | 出处 |
+| --- | --- | --- | --- | --- | --- | --- |
+| F1 | 打开资料库 @ 引用：前端 `NEXT_PUBLIC_COMPOSER_REFERENCES=on`；服务端 `library_agent_read_enabled` | Owner 2026-10-17 确认上线前打开 | 总控（需批准） | #1022（0279）合并；staging 浏览器验收通过（验收前保持关闭） | 正式冒烟：@ 一份文档，回答里用到了它 | LIB_DOCS_PLAN 第 374 行。**待核实**：Owner 10-17 原话"上线前打开资料库的引用开关"还没写进 Master Plan 第 2.1 节（总控对话记录）；`library_agent_read_enabled` 只在 #1022 里，还没合并 |
+| F2 | 打开资料库上传：`library_upload_enabled`，以及 `NEXT_PUBLIC_LIBRARY_DOCX_EXTRACTION`、`NEXT_PUBLIC_LIBRARY_PDF_EXTRACTION` | Owner 2026-10-10：上传先默认关闭，等 Agent 能读文档后一起打开 | 总控（需批准） | LIB-2a/LIB-3 验收、注销接线完整、`.docx`/`.pdf` 各自验收；和 F1 一起开 | 上传、删除、注销后文件被清掉 | 第 1043–1046 行；LIB_DOCS_PLAN 第 7 节"对用户打开上传"行 |
+| F3 | 打开扫描件识别：`NEXT_PUBLIC_LIBRARY_SCAN_RECOGNITION`、`library_scan_recognition_enabled`（`library_recognition_enabled` 是否也要开，**待核实**） | Owner 2026-10-17 选浏览器 PaddleOCR | 总控（需批准） | #1048、#1050、#1051；打开前补测真实 Word 文件和中端电脑速度 | 补测记录；正式冒烟识别一页 | 第 106–114 行；LIB_DOCS_PLAN 第 7 节"对用户打开扫描件识别"行 |
+| F4 | RESEARCH-TOOLS 后台：总开关和每家供应商开关、已验证平台、调用上限、价格配置 | 对标研究是出报告的前提（不提供跳过） | 总控（需批准） | C1、C7；RT-8 把这些写进上线清单（**RT-8 还没做**） | 后台读回；正式冒烟一次对标 | 第 718 行；RESEARCH_TOOLS_PLAN RT-2b、RT-8 行 |
+| F5 | `publish_monitor_enabled` 和 F 档位功能行 | 发布和数据复盘是上线范围 | 总控（需批准） | PUBLISH-MONITOR 验收；C8 | 价格页和付费墙的功能行跟着开关显示 | 第 1606、1611 行 |
+| F6 | 模型身份保护开关 `model_identity_guard` 打开，品牌话术由 Owner 确认 | 用户在任何地方看不到真实模型名 | 总控（需批准）；话术 Owner 确认 | MODEL-IDENTITY-GUARD | 正式冒烟问"你是什么模型" | 第 849、2366 行 |
+| F7 | 评审团默认权限只给 Gold；评审模型 Sonnet 5.5 / GPT-6.1 Sol / Gemini 3.8 Flash，汇总 Opus 5.5 | 第 51 项和 2026-10-17 决定 | 总控（实际改配置前单独批准） | FUSION-REVIEW | 后台读回 | 第 95–104、2361 行 |
+| F8 | 落地页能力开关：`landing-flags.ts` 里每个 `show: true` 的能力，对应任务都已验收；没验收的在一个审查过的 PR 里改成 `show: false`；样例报告真实生成前保持 `false` | 落地页按全部功能已上线来写，上线前逐条核对 | 执行窗口（改开关 PR）；总控核对 | 第 3 节冻结结果 | 逐条对照验收记录 | `landing-flags.ts` 第 5–30 行；第 217、542、559、583、588 行 |
+| F9 | 输出上限：正式环境单次上限 32768 | 第 #604 决定 | 总控（需批准） | B2 | 读回配置 | 第 1387–1389 行；[REPORT_GEN_PLAN](../REPORT_GEN_PLAN.md) 第 156 行 |
+| F10 | 个人中心的数据使用同意卡片已隐藏 | 2026-10-12 决定开关上线先隐藏 | 执行窗口核对（AGENT-CORE R10） | — | 正式冒烟看不到这张卡片 | 第 732 行 |
+| F11 | Skill 正式版：首批创作 Skill 发到正式环境前，Owner 看过样例并单独确认 | 第 2.1 节 2026-10-17 决定 | Owner 确认；总控发布 | CONTENT-CONVERSATION-DRIVEN | 正式后台 Skill 版本读回 | 第 156–168 行 |
+
+### G. 数据保留和合规
+
+| # | 做什么 | 为什么 | 谁做 | 依赖 | 怎么验证 | 出处 |
+| --- | --- | --- | --- | --- | --- | --- |
+| G1 | 核对 DATA-ERASURE 上线前补齐的四项都已合并并在正式环境生效：日志表定期清理（#867，0226）、Upstash 限流统计清理（#866）、库外删除清单（#869，0227）、Sentry 上报前脱敏（#865、#888） | Owner 2026-10-12 同意上线前补 | 总控核对 | B1、A5 | 各 PR 已合并；正式冒烟后 Sentry 事件里没有正文 | 第 675 行；[DATA_ERASURE_RETENTION_CHECKLISTS](../../runbooks/DATA_ERASURE_RETENTION_CHECKLISTS.md) 第 72–78 行 |
+| G2 | 注销时 `user_activity_logs` 改为保留并去掉可识别内容 | 和账务记录同样处理 | 执行窗口（**待核实**是否已做） | — | 注销测试 | 第 682 行 |
+| G3 | MODERATION 正式实现时间 | 公开上线前请 Owner 决定 | Owner 决定 | — | 决定写进 Master Plan 第 2.1 节 | 第 1190、2414、2716 行 |
+| G4 | 隐私条款写明：Parallel 训练措辞（C6 确认前）、Post for Me 公开链接短暂留存、统计工具和收集的数据、第三方保留例外 | 产品行为要和条款一致 | Owner 操作（条款文字不在 AI 范围） | C6、C10 | Owner 确认 | 第 497、670 行；PUBLISH-MONITOR 第 11 节第 9 项；ANALYTICS 第 8 节第 6 项 |
+
+### H. 验收和冒烟
+
+| # | 做什么 | 为什么 | 谁做 | 依赖 | 怎么验证 | 出处 |
+| --- | --- | --- | --- | --- | --- | --- |
+| H1 | 落地页、价格页、付费墙上的每条能力说法逐条对照验收结果；"复盘数据"只在 PUBLISH-MONITOR 验收通过后展示；国内平台数据说法和实际能力一致 | 不对外承诺做不到的功能 | 总控核对；文案改动由执行窗口开 PR | 第 3 节冻结 | 逐条记录 | 第 217、542、559、583、588 行；PUBLISH-MONITOR 第 427 行 |
+| H2 | staging 全量回归：v11 第 13 节验收矩阵 + 第 3.5、4、5 节 + DATA-ERASURE；没实测的标 NOT_RUN，不能算通过 | 第 9.3 节验收出口 | 执行窗口（自动化）+ Codex（浏览器，同一测试账号一次一个） | 冻结版本已部署 staging | 回归记录贴在冻结版本的 PR 上 | 第 2673–2674 行 |
+| H3 | 正式准入：初始模型和线路（Owner 当前计划：对话和报告用 Claude、Gemini，整理用 GPT-6 Luna，以后台配置为准）、各用途的 typicalUsd | 正式环境不设到期日，换模型或线路才重测 | 总控（需批准） | B2、C5 | 后台准入记录 | 第 1127、1165–1167 行；RUNTIME_PROD_PLAN 第 8 节"正式准入"行 |
+| H4 | 有上限的正式小额冒烟：一次成功、一次已确认拒绝、一次重复操作、回执对账 | 第 9.3 节保留条件 | 总控（需批准身份、调用数和美元总预算） | 第 4 节第 5 步 | 官方成本、名义费用、实际扣款、平台承担一致；重复请求没有新派发 | RUNTIME_PROD_PLAN 第 7.3 节第 6–7 步 |
+| H5 | 创始会员 F8：第一场直播时间、案例拆解如何取得会员同意 | 售卖前验收项，仍待 Owner 决定 | Owner 决定 | — | 决定记录 | 第 604 行 |
+| H6 | PAY-DISPUTE-GUARD 赢了之后的撤回冻结上线前是管理员手动；管理员会操作 | 量小、人工处理 | Owner 知悉 | PAY-DISPUTE-GUARD | 后台有"撤回冻结"入口 | [PAY-DISPUTE-GUARD](PAY-DISPUTE-GUARD.md) 第 102、238 行 |
+
+## 3. 倒排时间表（今天 2026-10-17 → 上线 2026-10-31）
+
+日期是目标，不是授权；每个"需批准"的点到时仍要 Owner 当次同意。
+
+| 日期 | 要完成的事 | 谁 |
+| --- | --- | --- |
+| **10-17（今天）起立刻开始** | 外部有等待时间的事：D1 Stripe MP 开通、D2–D6 Stripe 后台设置、A1 Vercel Pro、A5 正式 Upstash、C3 Resend 域名、C6 Parallel 书面确认、C8/C9 Post for Me 订阅和询问、C10 统计账号、D8 钱包税务核实、D10 条款正文、D11 客服邮箱；Owner 决定第 6 节第 1–3 项 | Owner |
+| 10-17 → 10-22 | 按编号合并 0271–0283（第 1.2 节），每个合并后应用 staging、重建指纹；同时推进 1.1 节剩余任务；开 A2（定时任务）和 OR-2、T-END 的 PR | 执行窗口；总控应用迁移 |
+| 10-22 → 10-24 | E1 `/app` 单主机搬迁（冻结窗口最后做）；F8 落地页开关 PR；10-24 总控把"冻结时还没验收的功能"缺口清单交 Owner 一次批 | 执行窗口；总控；Owner |
+| **10-25 冻结** | staging 冻结一个版本：之后只修上线阻塞问题（登录、对话、付款、回调、监控），不加功能 | 总控 |
+| 10-25 → 10-27 | H2 staging 全量回归：自动化全部跑一遍；Codex 浏览器验收按清单一次一个；修复只走阻塞问题 | 执行窗口；Codex |
+| 10-27 | 准备批准包（RUNTIME_PROD_PLAN 第 7.3 节第 2 步）：正式项目、版本、迁移、配置值、各家上限金额、冒烟预算 | 总控 |
+| 10-28 | 正式只读核验（第 4 节第 3 步）：B0、A7、站点暂停状态、Vault、平台设置 | 总控（需批准只读） |
+| 10-29 | 维护态准备（第 4 节第 4 步）：B1 建库、B2 配置、A6 停止新调用、C1 填密钥、C3a Auth 设置、A2 定时任务；A4 staging → `main` 合并并部署（站点仍暂停） | 总控（需批准）；Owner 操作 |
+| 10-30 | 恢复站点但新调用仍关（第 5 步）；H4 正式小额冒烟和 D9 真钱付款退款；同日对账 | 总控（需批准）；Owner |
+| **10-31** | 对账无误后公开开放（第 7 步）：关掉 `stopNewCalls`、打开银行卡下单（D7）、E3 `SITE_INDEXING=public`；上线后观察成本、错误和未结算项 | 总控（需批准）；Owner |
+
+缓冲：10-30 冒烟失败或对账不一致时，保持新调用关闭、站点维持当时状态，修复后重新批准，不硬上。
+
+## 4. 上线当天的操作顺序
+
+按 [RUNTIME_PROD_PLAN](../RUNTIME_PROD_PLAN.md) 第 7.3 节，每一步都是一个停止点：
+
+1. **无正式副作用的准备**：冻结版本的 CI、独立审查、staging 回归全部对应同一个版本；`main` 的依赖审计修复已在这个版本里（A4）。
+2. **批准包**：列出正式项目、域名、数据库目标、版本、迁移、配置值、各家硬上限金额、冒烟预算；没读过的正式事实标 NOT_RUN。
+3. **正式只读核验（需批准）**：站点暂停状态、Vercel/Supabase 绑定、数据库版本和结构、配置是否存在、供应商限额；不输出密钥。
+4. **维护态准备（需批准）**：站点保持暂停、新调用保持关闭；建库（B1）、导入配置（B2）、凭据和限额（C1–C7）、监控（A9）；所有值读回核对。
+   合并到 `main` 可能自动触发正式部署，**合并前就要拿到批准**。
+5. **恢复访问（需批准）**：确认新调用仍关闭，再取消暂停（A3）。冒烟期间用部署访问保护限制公众访问。
+6. **小额正式冒烟（需批准）**：H4 + D9。
+7. **对账后公开开放（需批准）**：核对成本、扣款、平台承担、冻结释放、重复请求没有新派发、告警和停止开关可用；再按批准范围开放。
+   站点恢复、模型调用开放和真钱付款是三件事，不能合成一次隐含授权。
+8. **出问题时**：立即用 `stopNewCalls` 停新调用，保留账务恢复；先查实际状态再决定重试；没解决的账务或安全问题不扩大开放。
+   回滚触发条件参考 PRODUCTION_RELEASE 第五节（登录不可用、对话主流程不可用、后台进不去、结账建不了、回调大面积失败、付了钱没到账）。
+
+上线后记录：正式部署地址和编号、Stripe 模式、冒烟结果、真钱付款和退款结果（PRODUCTION_RELEASE 第七节）。
+
+## 5. 需要 Owner 亲自操作或批准的点（一行一句，可以直接复制）
+
+金额、版本号、日期用 `<…>` 标出的，到时由总控填实后再发给 Owner；没填实的句子不能当授权。
+
+**现在就可以开始的 Owner 操作**
+- 同意升级 Vercel Pro（正式运营用），费用按 Vercel 当时标价。
+- 我来开通正式环境的 Upstash Redis，把 URL 和令牌填进 Vercel 正式环境变量。
+- 我来在 Stripe 正式模式开通 Managed Payments、建 Pro/Gold 月付年付、创始年付和首月优惠券，并设好重试规则、回调事件、账单描述和客服邮箱。
+- 我来在 Stripe 正式环境开通 Stripe Tax 门槛监控，并在客户门户里关闭"切换套餐"。
+- 我来在 OpenRouter 账号和每个 workspace 的隐私设置里关闭"允许用于训练"。
+- 同意向 Parallel 发邮件索取"Search API 零保留、不训练"的书面确认。
+- 同意向 Post for Me 官方邮箱询问"能否嵌入付费 SaaS"和"超量自动升级"两件事，并为正式环境单独订阅一个独占项目。
+- 我来注册 Resend、给 graylum.com 加发信 DNS 记录，并把正式密钥填进后台的 Resend 槽位。
+- 我来给 TikHub、Parallel、Firecrawl 各自设好硬上限：TikHub `<金额>`、Parallel `<金额>`、Firecrawl `<金额>`。
+- 我来准备服务条款、隐私政策、退款政策和可接受使用政策的正文，以及客服邮箱。
+
+**上线前要批准的事**
+- 同意 REL-1 冻结版本 `<版本>`，从 10-25 起只修上线阻塞问题。
+- 同意总控只读核验正式环境：Vercel 项目 `graylum-ai-vercel-v1` 的暂停状态和绑定、Supabase 正式项目 `<项目>` 的结构、扩展和备份设置，以及用户表行数；不读用户内容、不输出密钥。
+- 同意总控在正式项目 `<项目>` 按迁移文件从空库建库，并导入已核对的配置（套餐、积分包、q=100、m=6、模型和线路、免费套餐每月 0 积分）。
+- 同意正式环境打开资料库 @ 引用（`NEXT_PUBLIC_COMPOSER_REFERENCES`、`library_agent_read_enabled`）和资料库上传。
+- 同意正式环境的 OpenRouter 每日上限设为 `<金额>` 美元、禁用 BYOK、不自动充值。
+- 同意正式环境限流初始值：新消息每分钟 10 次、每天 200 次，模型调用每分钟 30 次、每天 600 次，上线时先停止新调用。
+- 同意把 staging `<版本>` 合并到 `main` 并部署正式环境，部署时站点保持暂停、新调用保持关闭。
+
+**上线当天要批准的事**
+- 同意恢复正式站 `graylum-ai-vercel-v1` 的访问，新调用仍保持关闭。
+- 同意正式小额冒烟：用 `<测试身份>` 调用 `<模型和次数>`，总预算不超过 `<金额>` 美元。
+- 同意上线当天真实付款再退款：银行卡 `<金额和笔数>`，微信和支付宝年付 279 / 496 / 621 美元各一笔，退款后核对到账和收回。
+- 同意打开正式银行卡下单，同时设置 `STRIPE_CARD_RECONCILIATION_MODE=live`。
+- 同意对账无误后公开开放：关闭"停止新调用"，设置 `SITE_INDEXING=public` 让搜索引擎收录。
+- 我来在正式站后台填好 6 把第三方密钥，并对照 Post for Me Webhook 共享密钥的末 4 位。
+- 我来删除 Vercel 正式环境里 6 个过渡期旧变量和不再需要的 E2E 测试凭证。
+
+## 6. 需要 Owner 决定的问题（2026-10-17 已发总控）
+
+| # | 问题 | 选项 | 推荐 | 可复制 |
+| --- | --- | --- | --- | --- |
+| 1 | 10-31 和上线范围冲突（第 1.3 节） | A：日期不变，10-25 冻结，没验收的功能关开关、对外说法隐藏，10-24 总控把缺口清单交 Owner 一次批；B：范围不变，日期按完成情况往后推 | A | 同意 REL-1 选 A：10-31 按时上线，10-25 冻结，没验收的功能关开关、对外说法隐藏，10-24 由总控把缺口清单给我一次批。 |
+| 2 | 正式库建在哪 | A：新建一个 Supabase 正式项目从空库建库，Auth 设置和 Supabase 密钥重新配；B：清空现有正式项目后重建（对正式库做破坏性操作，旧对象要逐项清理） | A | 同意正式库选 A：新建 Supabase 正式项目，从空库按迁移建库。 |
+| 3 | MODERATION 正式实现时间 | A：上线时继续暂缓，只保留默认放行的检查点；B：上线前接 OpenAI Moderation（新增密钥和开发量） | A | 同意 MODERATION 上线时继续暂缓，上线后再定。 |
+| 4 | Firecrawl 零保留是否开通（C12） | 由 Owner 看 Firecrawl 套餐后定 | — | — |
+| 5 | 备份恢复演练在哪做（A8）：staging 没有每日备份和 PITR | A：在新建的正式项目上线前用虚构账号演练；B：上线后再演练 | A（上线前正式库里只有虚构数据） | 同意上线前在正式项目用虚构账号演练一次备份恢复和删除重放。 |
+
+## 7. 待核实汇总
+
+- A2a：staging 和正式 Vercel 项目是否同团队、staging 套餐是否支持分钟级定时任务。
+- A3：正式站暂停的原因和日期仓库里没写。
+- B1：DB-BASELINE 剩余工作是否已全部完成（第 7.1 节没标"完成"）。
+- D7：放开银行卡处理"只认测试模式"是配置还是代码改动。
+- E2：Vercel 上的 www → app 307 实际是否设过。
+- F1：Owner 10-17"上线前打开资料库的引用开关"还没写进 Master Plan 第 2.1 节；`library_agent_read_enabled` 在 #1022 里，未合并。
+- F3：`library_recognition_enabled` 是否也要打开。
+- G2：`user_activity_logs` 注销保留改造是否已完成。
+- 第 1.1 节"实施中、没有在途 PR"的 24 个任务，哪些其实已完成。
+
+## 交接
+
+- 做完了：本文初稿（只写文档，没有执行任何正式环境操作）。
+- 下一步：Owner 回复第 6 节第 1–3 项后，按选择更新第 3 节时间表；冻结前由总控补齐第 7 节待核实项。
