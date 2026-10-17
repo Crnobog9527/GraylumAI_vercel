@@ -140,6 +140,10 @@ export async function verifyRecognition(admin, one, two) {
   const pictures = (await value(one, "SELECT library_upload_begin($1,$2,'p.docx','docx','reference',5) v", [a, randomUUID()])).documentId;
   await one.query('SELECT library_word_text_begin($1,$2,5)', [a, pictures]);
   await assert.rejects(one.query(`SELECT library_word_publish($1,$2,5,3,'[]','[{"anchor":0}]')`, [a, pictures]), /LIBRARY_INVALID/);
+  // With recognition off it would become a ready document with nothing to read, so it is refused.
+  await admin.query("UPDATE system_settings SET value='false' WHERE key='library_scan_recognition_enabled'");
+  await assert.rejects(one.query(`SELECT library_word_publish($1,$2,5,0,'[]','[{"anchor":0}]')`, [a, pictures]), /LIBRARY_NO_TEXT/);
+  await admin.query("UPDATE system_settings SET value='true' WHERE key='library_scan_recognition_enabled'");
   assert.equal((await value(one, `SELECT library_word_publish($1,$2,5,0,'[]','[{"anchor":0},{"anchor":0}]') v`, [a, pictures])).status, 'ready');
   assert.equal(await value(admin, "SELECT count(*)::int v FROM library_recognition_units WHERE document_id=$1 AND status='pending'", [pictures]), 2);
   assert.equal((await save(one, 2, 1, [{ title: '图片 2（识别）', body: 'second' }], a, pictures, 'word_image')).saved, true);
