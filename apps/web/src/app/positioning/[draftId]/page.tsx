@@ -31,6 +31,7 @@ import { MentorChatHeading, MentorChatLog, MentorLiveReply, MentorPendingMessage
 import { useMentorLogScroll } from "./use-mentor-log-scroll";
 import { mentorTailNotices, mentorTurnNotice, RETRY_PENDING_NOTICE, turnNeedsRetry } from "./mentor-notices";
 import { useAutoStepRecovery, useHistoryPolling } from "./use-step-recovery";
+import { executionSettled } from "./step-recovery";
 import { useLiveReply } from "./use-live-reply";
 import { PublishFootnote, PublishNext, ReportEntry, reportPublishes } from "./report-panel";
 import { ReadonlyDraftView } from './readonly-draft-view';
@@ -1041,7 +1042,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
         .map((execution) => [execution.executionId, execution]),
     ).values(),
   );
-  const settledTurns = mentorExecutions.filter(execution => execution.state === "completed").length;
+  const settledTurns = mentorExecutions.filter(execution => executionSettled(history.data, execution.executionId)).length;
   const hasPendingConfirmation = steps.some(step => confirmation.envelopeState(step.id).kind === "valid");
   /** A streaming reply whose execution is not in history yet. */
   const liveOnly = liveReply && !mentorExecutions.some(e => e.executionId === liveReply.executionId) ? liveReply : null;
@@ -1201,8 +1202,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                       text={shownInput(pendingBubble.input)} sending={running}/>}
                   {liveOnly && <ResearchCallList calls={research.of(liveOnly.executionId)}/>}
                   {liveOnly&&(liveOnly.text||!liveOnly.card)&&<MentorLiveReply text={liveOnly.text}/>}
-                  {/* A card is answered on the step of the latest mentor turn, so its continuation keeps that step. */
-                    read.data?.sessionId && <ResearchSessionPanel sessionId={read.data.sessionId} settledTurns={settledTurns}
+                  {read.data?.sessionId && <ResearchSessionPanel sessionId={read.data.sessionId} settledTurns={settledTurns}
                     disabled={sendLocked || snap.state !== "draft" || mentorTurns.get(mentorExecutions.at(-1)?.executionId ?? "")?.stepId !== step.id}
                     onConfirmed={confirmed => void ask(step, researchConfirmedInput(confirmed))}/>}
                   <ChatNoticeList notices={[...payg.blockedNotices(mentorExecutions, busy),

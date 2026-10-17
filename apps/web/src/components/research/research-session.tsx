@@ -41,7 +41,10 @@ export function useResearchCalls(sessionId: string | null | undefined) {
  */
 export function ResearchSessionCards({ sessionId, disabled, onConfirmed }: {
   sessionId: string;
-  /** The conversation cannot take an answer right now (a reply is running, the draft is read-only). */
+  /**
+   * The conversation cannot take an answer right now: a reply is running, the draft is read-only, or another step
+   * than the latest mentor turn's is shown (the continuation is sent on the shown step).
+   */
   disabled: boolean;
   onConfirmed?: (confirmation: CardConfirmation) => void;
 }) {
