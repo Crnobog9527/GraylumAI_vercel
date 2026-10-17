@@ -28,6 +28,9 @@ export function FullReportL({ title, text, slug }: { title: string; text?: strin
   const open = () => {
     setShown(true);
     dialog.current?.showModal();
+    // The dialog stays mounted while closed (the product's mounts on opening), so the chapter list last measured the
+    // text at no size and took the last chapter as the one being read: once open and laid out, it measures again.
+    requestAnimationFrame(() => dialog.current?.dispatchEvent(new Event('scroll')));
     if (body === null && slug) void loadSampleReport(slug).then(setBody);
   };
   return (

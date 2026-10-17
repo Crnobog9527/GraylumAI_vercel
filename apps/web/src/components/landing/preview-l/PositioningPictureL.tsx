@@ -6,7 +6,6 @@ import {
   MentorChatHeading, MentorChatLog, MentorReply, MentorUserMessage,
 } from '@/components/chat-display/mentor-messages';
 import { PositioningHeader, PositioningResultPanel, PositioningStepStrip } from '@/components/chat-display/positioning-chrome';
-import { RailJ } from '@/components/landing/preview-j/PositioningClipJ';
 import takeover from '@/components/landing/preview-j/takeover-j.module.css';
 import { ConfirmJ, filledUpTo, personaInformation } from '@/components/landing/preview-j/WorkbenchPartsJ';
 import { CaptureChecklist } from '@/components/opc/capture-checklist';
@@ -18,6 +17,7 @@ import { J_REPORT, J_TAKEOVER_MOMENTS, type TakeoverLine } from '@/lib/landing/l
 import { L_GOAL_CARD, L_POSITIONING_MOMENTS } from '@/lib/landing/landing-copy-l-positioning';
 import type { MomentAt } from '@/lib/landing/step-one-timeline';
 import { ComposerL } from './ComposerL';
+import { RailL } from './RailL';
 import { L_CLIP_PARTS } from './RealPartsL';
 import { Caret, TypingFrame } from './typing-l';
 import styles from './picture-l.module.css';
@@ -86,7 +86,7 @@ export function PositioningPictureL({ moment, at, reportLocal = 1 }: { moment: n
 
   return (
     <div className={takeover.app}>
-      <RailJ published={step === 3} launched />
+      <RailL published={step === 3} />
       <section className={styles.column} onPointerLeave={() => setFollow(true)}>
         <div ref={column} className={styles.scroll}>
           <div inert><PositioningHeader headingLevel="h2" title="我的定位分析" status={`整体规划 · ${step === 3 ? '已确认' : '进行中'}`} /></div>

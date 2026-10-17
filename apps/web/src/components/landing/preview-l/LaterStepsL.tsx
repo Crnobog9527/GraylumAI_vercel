@@ -11,7 +11,6 @@ import { AsDemo } from '@/components/chat-display/display-heading';
 import { ChatNoticeList } from '@/components/chat/ChatInlineNotice';
 import { CtaK } from '@/components/landing/preview-k/CtaK';
 import k from '@/components/landing/preview-k/k.module.css';
-import { RailJ } from '@/components/landing/preview-j/PositioningClipJ';
 import takeover from '@/components/landing/preview-j/takeover-j.module.css';
 import { ContentDraftView } from '@/components/opc/content-draft-view';
 import { ResearchCallList } from '@/components/research/research-call-list';
@@ -22,6 +21,7 @@ import { USER_CPS } from '@/lib/landing/typing';
 import { cn } from '@/lib/utils';
 import picture from './picture-l.module.css';
 import { ComposerL } from './ComposerL';
+import { RailL } from './RailL';
 import { DemoTag } from './DemoTag';
 import styles from './later-l.module.css';
 import { Caret, TypingFrame, useStickToEnd, useTyped, useTypingGate } from './typing-l';
@@ -199,7 +199,7 @@ function WorkChatPicture({ id, beat, live }: { id: string; beat: number; live: b
   const proposal = useTyped(script && beat >= 3 ? CHAT.script.proposal : '', { whole: still });
   return (
     <div className={takeover.app}>
-      <RailJ published launched />
+      <RailL published />
       <section className={picture.column}>
         {/* The scroll is the visitor's to use; what it holds is a picture (inert). */}
         <div ref={chat} className={cn(styles.chat, demo.scrollbar)} onWheel={takeOver} onTouchMove={takeOver} onPointerDown={takeOver}>

@@ -25,3 +25,6 @@
 .fullReport { margin-top: 16px; padding-top: 12px; border-top: 1px solid #eee; }
 /* Round seven: the conversation's log, which the visitor may scroll (its content stays a picture). */
 .logHost { min-width: 0; }
+/* Round nine: the product's rail (RailL) inside the picture's grid cell, its full height. */
+.railHost { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.railHost > aside { flex: 1 1 auto; min-height: 0; }
