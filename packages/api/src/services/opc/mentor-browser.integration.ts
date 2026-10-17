@@ -50,10 +50,10 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','p
   await page.goto(process.env.V3_LOCAL_APP+'/login?redirect='+encodeURIComponent(path));
   await page.getByPlaceholder('name@example.com').fill(f.email);await page.getByPlaceholder('输入你的密码').fill(f.password);await page.getByRole('button',{name:'登录',exact:true}).last().click();await page.waitForURL('**'+path);
   await poll(async()=>(await control()).length,{timeout:60000}).toBe(1);
-  const composer=page.getByRole('textbox',{name:'给导师的回复'}),send=page.getByRole('button',{name:'发送',exact:true});
+  const composer=page.getByRole('textbox',{name:'给 AI 教练的回复'}),send=page.getByRole('button',{name:'发送',exact:true});
   // The whole middle panel is the chat's scroll surface (scrollbar at its right edge), while
   // messages, the current check, composer and notes keep one centered column of at most 720px.
-  const log=page.getByRole('log',{name:'完整导师消息'});
+  const log=page.getByRole('log',{name:'完整 AI 教练消息'});
   const layout=()=>log.evaluate(node=>{
    const main=node.closest('main')!,panel=main.getBoundingClientRect(),box=node.getBoundingClientRect(),middle=panel.left+panel.width/2;
    const rect=(element:Element|null|undefined)=>{if(!element)return null;const r=element.getBoundingClientRect();return {width:r.width,center:r.left+r.width/2-middle,left:r.left-middle,right:r.right-middle,top:r.top,bottom:r.bottom};};
@@ -61,7 +61,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','p
    return {panelWidth:panel.width,panelBottom:panel.bottom,left:box.left-panel.left,right:panel.right-box.right,logTop:box.top,
     overflowY:getComputedStyle(node).overflowY,scrolls:node.scrollHeight>node.clientHeight,
     messages:[...node.querySelectorAll('[data-message-role=assistant]')].map(rect),current:rect(node.querySelector('[aria-label="本步小结"]')),
-    composer:rect([...chat.children].find(child=>child.querySelector('[role="textbox"][aria-label="给导师的回复"]'))),notes:rect(chat.lastElementChild),
+    composer:rect([...chat.children].find(child=>child.querySelector('[role="textbox"][aria-label="给 AI 教练的回复"]'))),notes:rect(chat.lastElementChild),
     steps:rect(main.querySelector('nav[aria-label="定位步骤"]')),footer:rect(main.querySelector(':scope>div>footer')),
     pageFits:document.documentElement.scrollWidth<=innerWidth,logFits:node.scrollWidth<=node.clientWidth};
   });
@@ -165,10 +165,10 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','p
   expect(saved.message).toContain('本地流式导师正文：');
   expect(await page.getByText('DISCARDED_SEPARATE_ASSISTANT_TEXT',{exact:true}).count()).toBe(0);
   if(scenario==='invalid'){
-   expect(saved.card).toBeNull();expect(await page.getByRole('region',{name:'导师提问'}).count()).toBe(0);
+   expect(saved.card).toBeNull();expect(await page.getByRole('region',{name:'AI 教练提问'}).count()).toBe(0);
   }else{
    await poll(()=>page.getByText('请选择当前问题最接近的答案：',{exact:true}).isVisible()).toBe(true);
-   const card=page.getByRole('region',{name:'导师提问'}).last();
+   const card=page.getByRole('region',{name:'AI 教练提问'}).last();
    await poll(()=>card.getByText('推荐',{exact:true}).isVisible()).toBe(true);
    expect(await card.getByText(saved.card.recommendationReason,{exact:true}).isVisible()).toBe(true);
    // The reason sits directly under the recommended option and describes it.
@@ -200,7 +200,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','p
    const original=(await sql.query('select id,created_at from runtime_executions where actor_id=$1 order by created_at limit 1',[f.actor])).rows[0];
    await sql.query("update runtime_executions set created_at=now()+interval '1 second' where id=$1",[original.id]);
    const requestsBefore=turnRequests;
-   await page.getByRole('region',{name:'导师提问'}).last().getByRole('button').first().click();
+   await page.getByRole('region',{name:'AI 教练提问'}).last().getByRole('button').first().click();
    await poll(()=>page.getByText('这张卡已经过期，请看最新的回复。',{exact:true}).isVisible()).toBe(true);
    expect(await page.evaluate(id=>sessionStorage.getItem('opc-step:'+id+':step-0'),d.draftId)).toBeNull();
    expect(await page.getByRole('status',{name:'恢复提示'}).count()).toBe(0);
@@ -209,12 +209,12 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','p
    await page.screenshot({path:process.env.V3_WORKBENCH_OUTPUT+'/mentor-source-denied-released.png',fullPage:true});
    await sql.query('update runtime_executions set created_at=$2 where id=$1',[original.id,original.created_at]);
    await page.reload();await poll(()=>send.isEnabled()).toBe(true);
-   await poll(()=>page.getByRole('region',{name:'导师提问'}).last().isVisible()).toBe(true);
+   await poll(()=>page.getByRole('region',{name:'AI 教练提问'}).last().isVisible()).toBe(true);
   }
   // Exercise both chosen-option and free-input correlation through the real HTTP admission.
   if(scenario==='refresh'||scenario==='invalid'){
    await composer.fill('我主要提供每周摄影练习课程。');await send.click();
-  }else await page.getByRole('region',{name:'导师提问'}).last().getByRole('button').first().click();
+  }else await page.getByRole('region',{name:'AI 教练提问'}).last().getByRole('button').first().click();
   await poll(async()=>(await control()).length).toBe(5);await control(5);
   await poll(async()=>(await control()).length).toBe(6);await control(6);await composer.fill('后续尚未发送草稿');
   await poll(()=>send.isEnabled()).toBe(true);
