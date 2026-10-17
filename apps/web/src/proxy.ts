@@ -28,11 +28,13 @@ const PUBLIC_SITE_PATHS = [
 ];
 
 // Public site pages added by PUBLIC-SITE. Unlike the prefix list above, these match whole path segments
-// only: /zh-tw and /zh-tw/... are public on the public host, /zh-twx is not.
+// only: /zh-tw and /zh-tw/... are public on the public host, /zh-twx is not. /refund is the public refund
+// policy (Owner 2026-10-17), matched by segment so /refunds and /refund-x stay on the app host.
 const PUBLIC_SITE_PAGE_PATHS = [
   '/about',
   '/features', // Product feature pages (/features and /features/<name>) linked from the public header and footer.
   '/zh-tw',
+  '/refund',
 ];
 
 const PUBLIC_PRICING_ENTRY_PATHS = [
