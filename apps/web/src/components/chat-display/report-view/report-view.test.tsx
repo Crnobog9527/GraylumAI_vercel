@@ -36,7 +36,7 @@ describe('report sections', () => {
     ['八、内容规划 (约 1300 字)', '八、内容规划'],
     ['九、运营手册：照着做就行（约 2400 字）', '九、运营手册：照着做就行'],
   ])('shows the title %s without its length hint', (title, shown) => expect(reportDisplayTitle(title)).toBe(shown));
-  it.each(['见效时间（约 3 个月）', '预算（约 500 元）', '对标账号分析（3–10 个合格账号）', '变现路径（漏斗）', '定位（B 版）', '一句话结论'])(
+  it.each(['账号三件套（昵称建议 4 字，简介 20 字）', '发布节奏（每天写 100 字）', '简介（约 20 字）', '见效时间（约 3 个月）', '预算（约 500 元）', '对标账号分析（3–10 个合格账号）', '变现路径（漏斗）', '定位（B 版）', '一句话结论'])(
     'keeps the business bracket in %s', title => expect(reportDisplayTitle(title)).toBe(title));
   it('drops writing hints from titles for display, and matches numbered titles to chapters', () => {
     expect(reportDisplayTitle('五、对标账号分析（约 800 字，3–10 个合格账号）')).toBe('五、对标账号分析');
