@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { trpc } from '@/trpc/client';
 import { ModelReasoningButton } from '@/components/admin/ModelReasoningDialog';
 import { ModelMultiplierPanel } from '@/components/admin/ModelMultiplierPanel';
@@ -86,7 +87,6 @@ interface FormData {
   name: string;
   modelId: string;
   provider: ProviderType;
-  apiKey: string;
   apiEndpoint: string;
   description: string;
   enableWebSearch: boolean;
@@ -96,7 +96,6 @@ const initialFormData: FormData = {
   name: '',
   modelId: '',
   provider: 'openai',
-  apiKey: '',
   apiEndpoint: '',
   description: '',
   enableWebSearch: false,
@@ -192,7 +191,7 @@ export default function AdminModelsPage() {
     if (!status) return { label: '未知', color: 'bg-gray-500/20 text-gray-400', icon: HelpCircle };
 
     if (!status.hasApiKey) {
-      return { label: '未配置 API Key', color: 'bg-rose-500/20 text-rose-400', icon: X };
+      return { label: '未填写 OpenRouter 密钥', color: 'bg-rose-500/20 text-rose-400', icon: X };
     }
 
     switch (status.connectionStatus) {
@@ -250,7 +249,6 @@ export default function AdminModelsPage() {
       name: model.name || '',
       modelId: model.model_id || '',
       provider: model.provider || 'anthropic',
-      apiKey: '',
       apiEndpoint: model.api_endpoint || '',
       description: model.description || '',
       enableWebSearch: model.enable_web_search === 'true',
@@ -266,7 +264,6 @@ export default function AdminModelsPage() {
       apiEndpoint: formData.apiEndpoint,
       description: formData.description,
       enableWebSearch: formData.enableWebSearch,
-      ...(formData.apiKey.trim() ? { apiKey: formData.apiKey.trim() } : {}),
     };
 
     if (selectedModel) {
@@ -283,9 +280,9 @@ export default function AdminModelsPage() {
     const isEnabling = model.is_active !== 'true';
     const status = connectionStatus?.find(s => s.id === model.id);
 
-    // 如果要启用，但没有 API Key，显示警告
+    // 如果要启用，但后台还没填写 OpenRouter 密钥，显示警告
     if (isEnabling && status && !status.hasApiKey) {
-      toast.warning('该模型未配置 API Key，启用后用户将无法使用');
+      toast.warning('后台“第三方密钥”页还没填写 OpenRouter 密钥，启用后用户将无法使用');
     }
 
     updateModel.mutate({
@@ -630,21 +627,11 @@ export default function AdminModelsPage() {
 
               <div className="space-y-2">
                 <Label style={{ color: 'var(--text-secondary)' }}>API Key</Label>
-                <Input
-                  data-testid="admin-model-api-key-input"
-                  type="password"
-                  value={formData.apiKey}
-                  onChange={(e) => setFormData({ ...formData, apiKey: e.target.value })}
-                  placeholder={selectedModel ? '留空则保持当前密钥' : 'sk-...'}
-                  className="bg-[var(--bg-tertiary)] border-[var(--border-primary)] text-[var(--text-primary)]"
-                />
-                {selectedModel && (
-                  <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                    {selectedModelStatus?.hasApiKey
-                      ? '出于安全原因，已配置的密钥不会回显；留空将保持原值。'
-                      : '该模型当前未配置 API Key；如需启用请在此填入新密钥。'}
-                  </p>
-                )}
+                <p data-testid="admin-model-api-key-note" className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                  所有模型共用一把 OpenRouter 密钥，在{' '}
+                  <Link href="/admin/secrets" className="underline">第三方密钥</Link>
+                  {' '}页填写和替换{selectedModelStatus && !selectedModelStatus.hasApiKey ? '（目前还没填写）' : ''}。
+                </p>
               </div>
 
               <div className="space-y-2">
