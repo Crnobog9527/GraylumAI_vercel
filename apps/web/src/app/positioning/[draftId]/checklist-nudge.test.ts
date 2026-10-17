@@ -47,7 +47,7 @@ describe("checklist nudge", () => {
     expect(nudgeNotice([], click, false)).toBeNull();
     const notice = nudgeNotice(["goal", "audience"], click, true)!;
     expect(notice.text).toBe("你在清单里更新了 2 项");
-    expect(notice.actions).toEqual([{ label: "让导师接着聊", onClick: click, disabled: true }]);
+    expect(notice.actions).toEqual([{ label: "让 AI 教练接着聊", onClick: click, disabled: true }]);
     expect(click).not.toHaveBeenCalled();
   });
 
