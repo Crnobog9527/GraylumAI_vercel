@@ -27,6 +27,7 @@ import { L_PRICE_NOTE } from '@/lib/landing/landing-copy-l';
 import { HOW_IT_WORKS as HOW } from '@/lib/landing/landing-copy';
 import { trpc } from '@/trpc/client';
 import { countOf, OverviewL } from './OverviewL';
+import { scenarioAt } from './ScenariosL';
 import { PositioningPictureL } from './PositioningPictureL';
 import { SampleL } from './SampleL';
 
@@ -298,6 +299,16 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
       }
       for (const layer of data.funnel) if (layer.why) expect(html).toContain(escape(layer.why));
     }
+  });
+
+  it('plays region 6\'s four scenarios in order over the held scroll, each from its first beat (round six, S14)', () => {
+    const items = L_TASKS.map((task, index) => ({ task, copy: L_SCENARIOS.items[index], turns: L_WORKFLOWS[index] }));
+    const seenOrder: number[] = [];
+    for (let position = 0; position < 200; position += 1) {
+      const { index, beat } = scenarioAt(items, position);
+      if (seenOrder.at(-1) !== index) { seenOrder.push(index); expect(beat).toBe(0); }
+    }
+    expect(seenOrder).toEqual([0, 1, 2, 3]);
   });
 
   it('keeps "14 种人" in one piece in the samples\' lede', () => {

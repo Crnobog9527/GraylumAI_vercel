@@ -17,5 +17,18 @@
 @keyframes in { from { opacity: 0; translate: 0 8px; } to { opacity: 1; translate: 0 0; } }
 @media (max-width: 480px) { .tabs button { min-height: 40px; padding: 0 12px; font-size: 14px; } }
 /* Round five: the coach's work conversation in its window, kept at its newest line. */
-.log { max-height: 520px; overflow: hidden; }
+.log { max-height: 520px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
 @media (max-width: 899px) { .log { max-height: 460px; } }
+/* Round six (S14): the region held on screen while the page scrolls through its four scenarios. */
+.held.held { height: 520svh; padding-block: 0; }
+@media (max-width: 767px) { .held.held { height: 480svh; } }
+.stage { position: sticky; top: 0; display: flex; flex-direction: column; justify-content: flex-start; height: 100svh; padding: 130px 0 12px; overflow: hidden; }
+@media (max-width: 767px) { .stage { padding: 70px 0 88px; } }
+.heldTitle { margin-bottom: 12px; font-size: clamp(22px, 2.4vw, 34px); }
+@media (max-width: 767px) { .heldTitle { margin-bottom: 8px; font-size: 19px; } .held .bar { gap: 8px; margin-bottom: 8px; } .held .title { font-size: 19px; } .held .lede { display: none; } }
+.held .bar { margin-bottom: 14px; }
+.held .lede { margin-bottom: 10px; }
+.controls { display: flex; flex-wrap: wrap; gap: 8px; }
+/* The coach's chat takes what the screen leaves it. */
+.held .log { max-height: max(200px, calc(100svh - 540px)); }
+@media (max-width: 899px) { .held .log { max-height: max(130px, calc(100svh - 700px)); } }
