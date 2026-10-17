@@ -14,7 +14,7 @@ export function MentorChatHeading() {
   return (
     <div>
       <p className="text-xs text-[var(--text-secondary)]">全程同一对话</p>
-      <h3 className="font-semibold">和导师一起聊，每一步核对确认一次</h3>
+      <h3 className="font-semibold">和 AI 教练一起聊，每一步核对确认一次</h3>
     </div>
   );
 }
@@ -26,7 +26,7 @@ export function MentorChatLog({ logRef, onScroll, children }: {
   children: ReactNode;
 }) {
   return (
-    <div ref={logRef} onScroll={onScroll} role="log" aria-label="完整导师消息" aria-live="polite"
+    <div ref={logRef} onScroll={onScroll} role="log" aria-label="完整 AI 教练消息" aria-live="polite"
       className="max-h-[55vh] min-h-56 space-y-3 overflow-y-auto overscroll-contain pr-2">
       {children}
     </div>

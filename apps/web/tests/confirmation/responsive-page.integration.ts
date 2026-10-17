@@ -51,7 +51,7 @@ it('OPC: UI_COVERAGE long card scroll and mobile edit in complete local page', a
     await page.getByPlaceholder('输入你的密码').fill(password);
     await page.getByRole('button', { name: '登录', exact: true }).last().click();
     await page.waitForURL('**' + path);
-    await ui(page.getByRole('textbox', { name: '给导师的回复', exact: true })).toBeEnabled();
+    await ui(page.getByRole('textbox', { name: '给 AI 教练的回复', exact: true })).toBeEnabled();
     await page.locator('#step-0-audience').fill('社区3公里');
     await expect.poll(async () => (await read()).information['step-0'].values.audience?.value, { timeout: 30000 }).toBe('社区3公里');
     const card = page.getByRole('region', { name: '本步确认', exact: true });

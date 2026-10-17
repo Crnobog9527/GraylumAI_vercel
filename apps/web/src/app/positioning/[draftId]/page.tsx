@@ -476,7 +476,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
         // entry identity is deterministic, so a later retry reuses the same
         // turn instead of producing a second one or a second charge.
         sessionStorage.removeItem(key);
-        setNotice("导师引导这次没有加载成功。你可以直接填写右侧表单，或刷新后重试；不会重复生成或重复扣费。");
+        setNotice("AI 教练引导这次没有加载成功。你可以直接填写右侧表单，或刷新后重试；不会重复生成或重复扣费。");
       } finally {
         openingInFlight.current.delete(step.id);
         setOpeningSteps([...openingInFlight.current]);
@@ -663,7 +663,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     if (sessionStorage.getItem(key)) {
       // A retained envelope still owns this step. Never create a second
       // identity; the explicit recovery control resumes the original request.
-      setError("上一条发给导师的内容仍在核对。请先点“重试”恢复，不会重复发送。");
+      setError("上一条发给 AI 教练的内容仍在核对。请先点“重试”恢复，不会重复发送。");
       return;
     }
     if(running||openingInFlight.current.size||history.data?.activeExecution)return;
@@ -1164,7 +1164,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
             <article key="positioning-workspace" className={`${resultStyles.stepArticle} space-y-3`}>
               <h2 className="text-lg">{index + 1}. {step.title} {s.valid ? "· 已确认" : "· 待确认"}</h2>
               <div className={resultStyles.stepColumns}>
-                <aside aria-label="全程导师聊天" className={`${resultStyles.mentorChat} space-y-3`}>
+                <aside aria-label="全程 AI 教练聊天" className={`${resultStyles.mentorChat} space-y-3`}>
                   <MentorChatHeading/>
                   <MentorChatLog logRef={attachChatScroll} onScroll={onChatScroll}>
                     {mentorExecutions.length===0&&<MentorWelcome text={existingEntry ? EXISTING_WELCOME : d.accountRevision
@@ -1229,9 +1229,9 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                     return turn?.stepId === step.id && (!Object.hasOwn(turn, "roundId") || turn.roundId === d.roundId);
                   })) && <div className="flex flex-wrap items-center gap-2">
                     <Button variant="outline" size="sm" disabled={sendLocked} onClick={() => void ask(step, STEP_SUMMARY_INPUT)}>{STEP_SUMMARY_LABEL}</Button>
-                    <span className="text-xs text-[var(--text-secondary)]">让导师先整理这一步的小结，还缺什么会如实列出；确认仍由你来点。</span>
+                    <span className="text-xs text-[var(--text-secondary)]">让 AI 教练先整理这一步的小结，还缺什么会如实列出；确认仍由你来点。</span>
                   </div>}
-                  <WorkComposer value={mentorInput} onChange={setMentorInput} label="给导师的回复" placeholder={OTHER_PLACEHOLDER} attachment={dock} maxLength={8000} disabled={snap.state!=="draft"} sendDisabled={sendLocked} onSend={skill=>{if(skill)void free.send(mentorInput,skill);else void ask(step);}}/>
+                  <WorkComposer value={mentorInput} onChange={setMentorInput} label="给 AI 教练的回复" placeholder={OTHER_PLACEHOLDER} attachment={dock} maxLength={8000} disabled={snap.state!=="draft"} sendDisabled={sendLocked} onSend={skill=>{if(skill)void free.send(mentorInput,skill);else void ask(step);}}/>
                   <p className="text-xs text-[var(--text-secondary)]">
                     同一账号的步骤共用这条对话，未确认内容保留在草稿中。{d?.runtimeMode==='staging_test'||d?.runtimeMode==='production'?'当前使用真实模型，仅处理你提供的资料。':'当前为隔离模拟，不调用真实模型。'}
                   </p>
@@ -1379,7 +1379,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
           </div>
         </div>
       )}
-      {planView && <Link className="block underline" href={`/positioning/${draftId}`}>返回定位与导师对话</Link>}
+      {planView && <Link className="block underline" href={`/positioning/${draftId}`}>返回定位与 AI 教练对话</Link>}
       {planView && !d.report?.available && <p role="status">请先确认正式定位，再制定第一周计划。原定位和对话仍保留。</p>}
           {planView && retainedPlan && (
             <div className="space-y-3 rounded-xl border border-[var(--border-primary)] p-4">
@@ -1482,7 +1482,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
             <div className="space-y-3 rounded border border-[var(--border-primary)] p-4">
               <h3>AI 计划候选 · 尚未替换你的编辑</h3>
               <p className="text-xs text-[var(--text-secondary)]">
-                以下选题、日期、标题和简报由导师生成。其中的账号名称是待创建的建议，不代表已注册或已验证。
+                以下选题、日期、标题和简报由 AI 教练生成。其中的账号名称是待创建的建议，不代表已注册或已验证。
               </p>
               {shownPlanCandidate.map((i) => (
                 <p key={i.id}>
@@ -1554,7 +1554,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
           <div className="space-y-3 rounded border border-[var(--border-primary)] p-4">
             <h3>生成前只需要你的事实与选择</h3>
             <p className="text-sm text-[var(--text-secondary)]">
-              定位已确认。下面这些是你自己的选择（可以留空由导师按已确认定位建议）；选题、日期、标题和简报由导师生成，不需要你先手动添加选题行。
+              定位已确认。下面这些是你自己的选择（可以留空由 AI 教练按已确认定位建议）；选题、日期、标题和简报由 AI 教练生成，不需要你先手动添加选题行。
             </p>
             <div className="flex flex-wrap gap-3">
               <label className="text-sm">
@@ -1576,7 +1576,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                   disabled={busy}
                   value={planAccount}
                   onChange={(e) => setPlanAccount(e.target.value)}
-                  placeholder="留空则由导师建议名称"
+                  placeholder="留空则由 AI 教练建议名称"
                 />
               </label>
               <label className="text-sm">
@@ -1606,7 +1606,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
             </div>
             {planAccount.trim() === "" && (
               <p className="text-xs text-[var(--text-secondary)]">
-                没有账号也可以生成。导师建议的账号名称只是待创建的建议，并不代表已经注册或验证过。
+                没有账号也可以生成。AI 教练建议的账号名称只是待创建的建议，并不代表已经注册或验证过。
               </p>
             )}
           </div>
@@ -1664,7 +1664,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
           </div>
           {planNeedsCandidate && (
             <p className="text-xs text-[var(--text-secondary)]">
-              第一周计划默认由导师先给出候选，你只需要核对和修改。采用候选后，或者已经有保存过的计划版本时，也可以自己增删选题。
+              第一周计划默认由 AI 教练先给出候选，你只需要核对和修改。采用候选后，或者已经有保存过的计划版本时，也可以自己增删选题。
             </p>
           )}
           {latest && !dirtyPlan && (
