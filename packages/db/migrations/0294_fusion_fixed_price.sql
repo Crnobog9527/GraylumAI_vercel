@@ -143,8 +143,11 @@ BEGIN
   ELSIF rv.state IN ('running','paused') THEN RETURN fusion_review_fee_view(f.review_id);
   ELSIF rv.state='completed' AND rv.outcome->>'kind'='revised' THEN charge:=f.credits; reason:='revised';
   -- A summary judged usable means the revision was delivered: the full price, whatever ended the review afterwards.
+  -- unjudged_saved is only the deadline's provisional verdict (the saved body was not checked): when the review then
+  -- ended as revision_failed the revision was not delivered, so that case falls through to the refund below.
   ELSIF EXISTS(SELECT 1 FROM fusion_billing_groups g JOIN bill2_runs br ON br.fusion_group_id=g.id JOIN bill2_calls c ON c.run_id=br.id
-    WHERE g.fee_review_id=f.review_id AND c.payload->>'phase'='fusion_summary' AND c.fusion_verdict IN ('usable','unjudged_saved')) THEN
+    WHERE g.fee_review_id=f.review_id AND c.payload->>'phase'='fusion_summary'
+      AND (c.fusion_verdict='usable' OR c.fusion_verdict='unjudged_saved' AND rv.state<>'revision_failed')) THEN
     charge:=f.credits; reason:='revised';
   ELSIF rv.state IN ('stopped','interrupted') THEN
     -- The existing stop rule: dispatched calls pay their known usage. Wait until every call has settled.

@@ -264,6 +264,26 @@ export async function runFusionFee({db,Client,connectionString,report}) {
   assert.deepEqual({state:lateFee.state,charged:lateFee.charged_credits},{state:'charged',charged:FEE},'a delivered revision pays the full price');
   report.checks.push('fixed price: once a summary is judged usable, the full price is charged however the review ends');
 
+  // Review P1 (#1129): a summary only provisionally saved (unjudged_saved, recovery deadline) is not a delivered revision
+  // when the review then ends as revision_failed: the whole fee is refunded, the platform keeps the call cost.
+  const prov = await member(db,5000);
+  const pr = await start(db,prov);
+  const ps = await step(db,prov);
+  const psItems = JSON.parse(ps.items);
+  psItems[0].payload = {...psItems[0].payload,phase:'fusion_summary'};
+  await db.query(`UPDATE bill2_runs SET payload=jsonb_set(payload,'{callPolicy,0,payg,purposes}','["fusion_summary"]') WHERE id=$1`,[ps.run.run]);
+  const pc = (await service(db,'fusion_review_claim',prov.actor,pr.reviewId,1,'review',1,ps.group,JSON.stringify(psItems))).calls[0];
+  await rpc(db,'bill2_dispatch',prov.actor,ps.run.run,pc.id,pc.dispatchToken);
+  await record(db,prov,ps,pc);
+  await rpc(db,'fusion_call_output_save',prov.actor,pc.id,'{"body":"revised"}');
+  // The deadline recovery assigns unjudged_saved (0234); the fixture sets the same verdict on the saved call.
+  await db.query(`UPDATE bill2_calls SET fusion_verdict='unjudged_saved' WHERE id=$1`,[pc.id]);
+  await rpc(db,'bill2_finalize',prov.actor,ps.run.run);
+  const provEnded = await end(db,prov,pr,{state:'revision_failed',outcome:{kind:'revision_failed'}});
+  assert.deepEqual({state:provEnded.fee.state,charged:provEnded.fee.chargedCredits},{state:'refunded',charged:0},'unjudged summary + revision_failed refunds');
+  assert.equal(await wallet(db,prov.actor),5000,'the whole fixed price is back');
+  report.checks.push('fixed price: a provisionally saved (unjudged_saved) summary whose review ends revision_failed refunds the whole fee');
+
   // The daily job settles fees whose review ended while a call was still in flight.
   const dj = await member(db,5000);
   const djr = await start(db,dj);

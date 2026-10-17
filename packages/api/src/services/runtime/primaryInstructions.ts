@@ -19,7 +19,14 @@ const WORKSPACE_CONTEXT_INSTRUCTIONS=
 // WORKSPACE_STRATEGY_GUIDE into the execution, so an execution admitted before it replays byte-identical.
 export const WORKSPACE_STRATEGY_GUIDE='strategy-read-v1';
 /** What admission freezes (and sizes with) for a free conversation that reads the workspace. */
-export const workspaceFrozen=(on:boolean)=>(on?{workspaceContext:true as const,workspaceGuide:WORKSPACE_STRATEGY_GUIDE}:{});
+/** The largest result of one strategy read (0301: 48000 bytes of data plus its identity and reading rules). A read keeps its
+ * result in the dialogue for the rest of the execution, so admission freezes the guide only when this many bytes per read
+ * slot still fit; otherwise the strategy report is not offered and not read (the other workspace reads stay small). */
+export const WORKSPACE_STRATEGY_RESULT_BYTES=52000;
+/** Bytes to keep free for the strategy results the execution may still read (its read slots, at most two). */
+export const workspaceStrategyReserve=(maxCalls:number)=>Math.max(1,Math.min(2,maxCalls-1))*WORKSPACE_STRATEGY_RESULT_BYTES;
+export const workspaceFrozen=(on:boolean,strategy=on)=>(on?{workspaceContext:true as const,
+ ...(strategy?{workspaceGuide:WORKSPACE_STRATEGY_GUIDE}:{})}:{});
 const WORKSPACE_STRATEGY_INSTRUCTIONS=
   '\nWhen a listed positioning has a strategyReport id and the request concerns next steps, this week, the plan and its '+
   'metrics, monetization, audience, benchmarks, assumptions or content direction, make your one read that id instead of the '+

@@ -3238,7 +3238,7 @@
   "fn:fusion_review_fee_hold(fusion_reviews,jsonb,jsonb)": "3eea3b6429bc",
   "fn:fusion_review_fee_settle(uuid,uuid)": "da7d2e052dd1",
   "fn:fusion_review_fee_settle_due(integer)": "31c5a5bf48f0",
-  "fn:fusion_review_fee_settle_internal(uuid)": "02efdbb57d52",
+  "fn:fusion_review_fee_settle_internal(uuid)": "e7adbdcc67c5",
   "fn:fusion_review_fee_view(uuid)": "15440728c306",
   "fn:fusion_review_gold(uuid)": "13d800dfee90",
   "fn:fusion_review_kick_reset(uuid,timestamp with time zone)": "e75321fe017a",
