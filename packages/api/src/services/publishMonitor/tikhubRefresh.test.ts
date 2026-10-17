@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ read: vi.fn(), settleOpen: vi.fn(), apply: vi.fn(), partial: vi.fn() }));
 vi.mock('./billedRead', () => ({ billedTikhubRead: mocks.read, settleLeftOpenRun: mocks.settleOpen }));
 vi.mock('./tikhub', async original => ({ ...(await original<object>()), applyTikhubRead: mocks.apply, applyTikhubPartial: mocks.partial }));
-import { runTikhubRefresh } from './tikhubRefresh';
+import { closeOrphanRuns, runTikhubRefresh } from './tikhubRefresh';
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const claim = (n: number, role: 'own' | 'benchmark', actor = id(900)) => ({ connectionId: id(n), actorId: actor, businessId: id(800),
@@ -62,5 +62,16 @@ describe('publish-monitor daily TikHub step', () => {
     const e = db([[claim(1, 'own')]]);
     await runTikhubRefresh(e.db, { env: {} }, async () => ({ windowDays: 30, benchmark: true }), Date.now() + 60_000);
     expect(outcomes(e.calls)).toEqual(['failed']);
+  });
+});
+
+describe('closing left-open billed runs', () => {
+  it('one run that cannot be settled does not hold back the others, and the failure is still reported', async () => {
+    mocks.settleOpen.mockReset();
+    mocks.settleOpen.mockRejectedValueOnce(new Error('x')).mockResolvedValue(undefined);
+    const rows = [1, 2, 3].map(n => ({ connectionId: id(n), actorId: id(900), runId: id(500 + n), policies: [] }));
+    const database = { rpc: async () => ({ data: rows, error: null }) } as never;
+    await expect(closeOrphanRuns(database)).rejects.toThrow('PUBLISH_MONITOR_BILLED_RUNS_UNSETTLED');
+    expect(mocks.settleOpen).toHaveBeenCalledTimes(3);
   });
 });

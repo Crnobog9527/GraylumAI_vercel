@@ -121,12 +121,22 @@ export async function admitReadRun(admin: Admin, keys: ClaimKeys, routes: string
 const SCALE = 1_000_000_000_000n;
 const usd = (value: bigint) => `${value / SCALE}.${(value % SCALE).toString().padStart(12, '0')}`;
 
-/** Closes and finalizes a run (delivered when at least one answer was used, otherwise cancelled), then marks it closed. */
+/**
+ * Closes and finalizes a run (delivered when at least one answer was used, otherwise cancelled), then marks it closed.
+ * Resumable: a run that an earlier attempt already closed (the process died between close and finalize) keeps the
+ * outcome it was closed with; only finalize and the closed marker are repeated.
+ */
 export async function closeRun(admin: Pick<SupabaseClient, 'rpc'>, actorId: string, runId: string, delivered: boolean) {
+  const view = await admin.rpc('bill2_read', { p_actor_id: actorId, p_run_id: runId });
+  if (view.error) throw new BilledReadError('PUBLISH_MONITOR_BILLING_UNAVAILABLE');
+  const alreadyClosed = z.object({ closed: z.boolean() }).passthrough().safeParse(view.data);
+  if (!alreadyClosed.success) throw new BilledReadError('PUBLISH_MONITOR_BILLING_UNAVAILABLE');
   const result = delivered ? { kind: 'usable_result', evidenceRef: `publish-monitor:${runId}`,
     evidenceHash: createHash('sha256').update(`publish-monitor:${runId}`).digest('hex') } : null;
-  for (const [name, args] of [['bill2_close', { p_outcome: delivered ? 'delivered' : 'cancelled', p_result: result }],
-    ['bill2_finalize', {}]] as const) {
+  const steps: Array<[string, Record<string, unknown>]> = [];
+  if (!alreadyClosed.data.closed) steps.push(['bill2_close', { p_outcome: delivered ? 'delivered' : 'cancelled', p_result: result }]);
+  steps.push(['bill2_finalize', {}]);
+  for (const [name, args] of steps) {
     const done = await admin.rpc(name, { p_actor_id: actorId, p_run_id: runId, ...args });
     if (done.error) throw new BilledReadError('PUBLISH_MONITOR_BILLING_UNAVAILABLE');
   }

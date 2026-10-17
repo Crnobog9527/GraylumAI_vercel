@@ -32,7 +32,7 @@ const answer = (route: string): ResearchCallResult => ({ vendor: 'tikhub', route
   truncated: false, fetchedAt: '2026-10-17T00:00:00.000Z' });
 
 function admin(opts: { stored?: Record<string, ResearchCallResult>; open?: { runId: string; policies: unknown[] };
-  recovery?: Array<Record<string, unknown>>; claimState?: string } = {}) {
+  recovery?: Array<Record<string, unknown>>; claimState?: string; closed?: boolean } = {}) {
   const calls: Array<[string, Record<string, unknown>]> = [];
   let claims = 0;
   const rpc = vi.fn(async (name: string, args: Record<string, unknown>) => {
@@ -59,6 +59,7 @@ function admin(opts: { stored?: Record<string, ResearchCallResult>; open?: { run
           : { id: `00000000-0000-4000-8000-00000000010${claims}`, state: 'prepared', dispatchToken: '00000000-0000-4000-8000-000000000201' });
       case 'bill2_dispatch': return ok({ dispatch: true });
       case 'bill2_record': return ok({});
+      case 'bill2_read': return ok({ closed: opts.closed === true });
       case 'bill2_close': case 'bill2_finalize': return ok({});
       default: return { data: null, error: { message: `unexpected ${name}` } };
     }
@@ -113,6 +114,15 @@ describe('publish-monitor billed TikHub read', () => {
     const order = names(a.calls);
     expect(a.calls.find(c => c[0] === 'bill2_close')![1].p_outcome).toBe('delivered');
     expect(order.indexOf('bill2_finalize')).toBeLessThan(order.indexOf('bill2_prepare'));
+  });
+
+  it('resumes a close that already committed: the outcome is kept, only finalize and the marker repeat', async () => {
+    const a = admin({ open: { runId: RUN, policies: [policy(POSTS)] }, closed: true });
+    await billedTikhubRead(deps(a.db), keys, 'xiaohongshu', XHS);
+    const first = names(a.calls);
+    const before = first.slice(0, first.indexOf('bill2_prepare'));
+    expect(before).toContain('bill2_finalize');
+    expect(before).not.toContain('bill2_close');
   });
 
   it('a balance too low for the next call stops with nothing sent, and the run is still closed', async () => {

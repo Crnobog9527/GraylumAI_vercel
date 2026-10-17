@@ -179,9 +179,24 @@ try {
   await dstep('finish', { state: 'succeeded', result: { items: [{ id: 'secret-post' }], billing: { receipt: { toolOutcome: 'delivered' } } } });
   await svc('SELECT publish_monitor_disconnect($1,$2) v', [dm.a, dm.conn]);
   const kept = (await c.query('SELECT state,result,call_id FROM social_billed_reads WHERE run_id=$1', [drun.id])).rows;
-  assert.deepEqual([kept.length, kept[0].result, kept[0].call_id], [1, null, dcall.id], 'recovery row survives, answer wiped');
+  assert.deepEqual([kept.length, kept[0].result, kept[0].call_id], [1, { billing: { receipt: { toolOutcome: 'delivered' } } }, dcall.id],
+    'recovery row survives; the answer is wiped and only the receipt stays');
   const rec = await svc('SELECT publish_monitor_billed_recovery($1) v', [drun.id]);
-  assert.deepEqual([rec[0].callPending, rec[0].receipt], [true, null], 'the unsettled call is still found after the disconnect');
+  assert.deepEqual([rec[0].callPending, rec[0].receipt], [true, { toolOutcome: 'delivered' }],
+    'the unsettled call is still found after the disconnect, with its saved receipt');
+  // A request still in flight when the connection is deleted: its late finish stores the receipt only, never the answer.
+  const lm = await member();
+  const lclaim = (await svc('SELECT publish_monitor_tikhub_claim(10,120) v')).find(x => x.connectionId === lm.conn);
+  const lkeys = [lm.conn, lclaim.lease, lclaim.refreshId];
+  const lrun = await rpc(c, 'bill2_prepare', lm.a, randomUUID(), await payload(lm.a));
+  await svc('SELECT publish_monitor_billed_run($1,$2,$3,$4,$5) v', [...lkeys, lrun.id, JSON.stringify([toolPolicy])]);
+  const lop = randomUUID(), lstep = (name, extra = {}) => svc('SELECT publish_monitor_billed_step($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) v',
+    [...lkeys, lop, name, 'b'.repeat(64), ROUTE, token, extra.call ?? null, extra.state ?? null, extra.result ? JSON.stringify(extra.result) : null]);
+  await lstep('open'); await lstep('link', { call: randomUUID() }); await lstep('dispatch');
+  await svc('SELECT publish_monitor_disconnect($1,$2) v', [lm.a, lm.conn]);
+  assert.deepEqual(await lstep('finish', { state: 'succeeded', result: { items: [{ id: 'late-secret' }], billing: { receipt: { toolOutcome: 'delivered' } } } }), { ok: true });
+  const late = (await c.query('SELECT state,result FROM social_billed_reads WHERE id=$1', [lop])).rows[0];
+  assert.deepEqual([late.state, late.result], ['answered', { billing: { receipt: { toolOutcome: 'delivered' } } }]);
   report.checks.push('disconnecting keeps the recovery row of an unsettled call (answer wiped) so its hold can still be released');
 
   // Pruning leaves evidence of open runs alone, whatever its age.

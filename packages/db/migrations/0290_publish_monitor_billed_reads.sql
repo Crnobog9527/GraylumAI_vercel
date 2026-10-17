@@ -103,10 +103,18 @@ CREATE TABLE IF NOT EXISTS public.social_billed_reads(
 -- still unsettled must not delete the only record that lets the call be settled and its hold released. The stored
 -- supplier answer (public profile data) is wiped the moment the connection goes; ids and states stay until the billed
 -- run is settled and a week has passed.
+-- What survives once the connection is gone: only the BILL2 receipt of the call (so a delivered call is still settled at
+-- what it cost), never the supplier's answer.
+CREATE OR REPLACE FUNCTION public.publish_monitor_billed_strip(p_result jsonb) RETURNS jsonb
+LANGUAGE sql IMMUTABLE SET search_path=public,pg_temp AS $$
+ SELECT CASE WHEN p_result IS NULL OR p_result#>'{billing,receipt}' IS NULL THEN NULL
+  ELSE jsonb_build_object('billing',jsonb_build_object('receipt',p_result#>'{billing,receipt}')) END
+$$;
+
 CREATE OR REPLACE FUNCTION public.publish_monitor_billed_wipe_results() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 BEGIN
- UPDATE social_billed_reads SET result=NULL WHERE connection_id=OLD.id AND result IS NOT NULL;
+ UPDATE social_billed_reads SET result=publish_monitor_billed_strip(result) WHERE connection_id=OLD.id AND result IS NOT NULL;
  RETURN OLD;
 END $$;
 DROP TRIGGER IF EXISTS social_connections_wipe_billed_results ON public.social_connections;
@@ -219,8 +227,11 @@ BEGIN
  ELSIF p_step='finish' THEN
   IF r.state NOT IN ('opened','dispatched') OR r.token IS DISTINCT FROM p_token THEN RETURN jsonb_build_object('ok',false); END IF;
   -- Only a usable answer is kept for re-use; a failed or unknown one leaves nothing to re-apply.
+  -- A connection deleted while the request was in flight gets no answer stored back; only the receipt is kept.
   UPDATE social_billed_reads SET state=CASE WHEN p_state='succeeded' AND p_result IS NOT NULL THEN 'answered' ELSE 'abandoned' END,
-   result=CASE WHEN p_state='succeeded' THEN p_result END,updated_at=clock_timestamp() WHERE id=r.id;
+   result=CASE WHEN p_state<>'succeeded' THEN NULL
+    WHEN EXISTS(SELECT 1 FROM social_connections WHERE id=r.connection_id) THEN p_result
+    ELSE publish_monitor_billed_strip(p_result) END,updated_at=clock_timestamp() WHERE id=r.id;
  ELSE
   IF r.state<>'opened' THEN RETURN jsonb_build_object('ok',false); END IF;
   UPDATE social_billed_reads SET state='cancelled',updated_at=clock_timestamp() WHERE id=r.id;
@@ -280,10 +291,11 @@ DO $$ DECLARE f regprocedure; BEGIN
  FOR f IN SELECT p.oid::regprocedure FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
   WHERE n.nspname='public' AND p.proname IN ('publish_monitor_billed_run','publish_monitor_billed_lookup',
    'publish_monitor_billed_step','publish_monitor_billed_closed','publish_monitor_billed_orphans',
-   'publish_monitor_billed_recovery','publish_monitor_billed_abandon','publish_monitor_billed_wipe_results',
+   'publish_monitor_billed_recovery','publish_monitor_billed_abandon','publish_monitor_billed_wipe_results','publish_monitor_billed_strip',
    'publish_monitor_billed_prune','publish_monitor_refresh_insufficient','publish_monitor_tool_only_run') LOOP
   EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC,anon,authenticated,service_role',f);
-  IF split_part(f::text,'(',1) NOT IN ('publish_monitor_tool_only_run','publish_monitor_billed_wipe_results') THEN
+  IF split_part(f::text,'(',1) NOT IN ('publish_monitor_tool_only_run','publish_monitor_billed_wipe_results',
+   'publish_monitor_billed_strip') THEN
    EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO service_role',f); END IF;
  END LOOP;
 END $$;
