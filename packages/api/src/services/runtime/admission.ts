@@ -52,6 +52,7 @@ import {runAutomaticFinancialRecovery} from './automaticRecovery';
 import {readPositioningGate,judgePositioning,windowBoundKey,refusePositioning,POSITIONING_REFUSAL_CAP,
  type PositioningGatePolicy} from './positioningGate';
 import {POSITIONING_FALLBACK,POSITIONING_FALLBACK_INSTRUCTIONS} from './positioningFallback';
+import {attachResearchTurn,fitsCapacity} from './researchAdmission';
 
 const uuid=z.string().uuid();
 export const runtimeMaterialInput=z.object({sessionId:uuid,requestId:uuid,expectedRevision:z.number().int().nonnegative(),
@@ -76,6 +77,8 @@ export type LocalRuntimePolicy={
  skillFileRead?:boolean;maxCalls:number;maxOutputTokens:number;inputBytes:number;historyItems:number;
  expectedMaterialRevision?:number;opcTurnToken?:string;mentorStream?:boolean;organizeOpening?:boolean;
  additionalInstructions?:string;stableAdditionalInstructions?:string;skillResources?:readonly string[];searchEnabled?:boolean;workspaceContext?:boolean;
+ /** RT-3b PR-3: set only by the OPC mentor host; the research admin switch still decides per turn. */
+ researchTools?:boolean;
  organizerInstructions?:string;organizerInput?:string;answeredCard?:AnsweredCard;resolvedInput?:string;
  /** POSITIONING-GATE: set only by the free-chat host; OPC turns, reports and organizing are never gated. */
  positioningGate?:PositioningGatePolicy;
@@ -290,11 +293,11 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    const inputLimit=inputCapacity(row.data,maxOutputTokens,inputBytes);
    const cardBytes=hostTurnContext?.cardContract?groundedCardToolBytes():askQuestionToolBytes(true);
    // One read slot: the continuation reserve is the larger of the two possible results.
-   const admissionToolBytes=(file:boolean,history=false)=>(mentorStream&&!stepSummary?cardBytes:policy.searchEnabled?2048:0)+
+   const admissionToolBytes=(file:boolean,history=false,extra=0)=>extra+(mentorStream&&!stepSummary?cardBytes:policy.searchEnabled?2048:0)+
     (file?skillFileToolBytes()+(history?mentorHistoryToolBytes()+Math.max(skillFileReserve,MENTOR_HISTORY_RESERVE_BYTES):skillFileReserve):0)+
     (historySelection?.markerReserveBytes??(promptCache?PROMPT_CACHE_OVERHEAD_BYTES:0));
-   const requireCapacity=(text:string,file:boolean,content=currentInput,history=false)=>selectRuntimeHistory([], [{role:'user',content}],
-    {instructions:text,inputBytes:inputLimit,historyItems:0,toolBytes:admissionToolBytes(file,history)});
+   const requireCapacity=(text:string,file:boolean,content=currentInput,history=false,extra=0)=>selectRuntimeHistory([], [{role:'user',content}],
+    {instructions:text,inputBytes:inputLimit,historyItems:0,toolBytes:admissionToolBytes(file,history,extra)});
    const skillFileInstructions='\nYou may read at most one declared Skill file in this turn with read_skill_file, '+
     (stepSummary?'then write the step summary. ':'then answer or show a question card. ')+
     'Use the exact relative path declared by the Skill; '+
@@ -451,6 +454,11 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     billing={...billing,contractVersion:'bill2.v2',callPolicy,
      rules:{...billing.rules,billingUnit:realCalls?billing.rules.billingUnit!:policy.payg!.billingUnit},limits:{...billing.limits,credits:0}};
    }
+   // RT-3b PR-3: a positioning mentor turn may also offer the research tools (admin switch, priced routes, room left).
+   if(policy.researchTools&&mentorStream&&!opening&&hostTurnContext&&!stepSummary&&billing.contractVersion==='bill2.v2'&&
+    await attachResearchTurn({admin,real:policy.real,context,billing,
+     fits:extra=>fitsCapacity(()=>requireCapacity(instructions+positioningRule,Boolean(skillFile),currentInput,historyRead,extra))}))
+    billing.sourceHash=createHash('sha256').update(JSON.stringify(context)).digest('hex');
    // Both SQL CHECKs measure jsonb::text, not JSON.stringify or model input.
    // This runs before runtime_admit, which atomically creates the execution/reservation.
    await requireAllowedInput({actorId,sessionId:input.sessionId,requestId:input.requestId,
