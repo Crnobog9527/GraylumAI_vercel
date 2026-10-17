@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import { finishScheduledJobRun, startScheduledJobRun } from '@repo/api/src/services/scheduledJobRuns';
 import { loadPostForMeDeps } from '@repo/api/src/services/publishMonitor/secrets';
 import {
-  entitlementWindow, runSocialMonitorJob, runSocialMonitorRetention,
+  entitlementWindow, runSocialMonitorJob, tikhubEntitlements,
 } from '@repo/api/src/services/publishMonitor/socialMonitorJob';
 import { validateCronRequest } from '@/lib/cron-auth';
 
@@ -32,24 +32,22 @@ export async function GET(request: Request) {
   // A failed final write fails the response too, so a "running" record never sits behind a reported success.
   const finish = (status: 'success' | 'error', summary: Record<string, unknown>, error: string | null = null) =>
     finishScheduledJobRun({ supabase: client, runId, status, summary, error });
-  // A missing key skips the run; a configured but invalid key fails it (caught below), so monitoring sees it.
-  let deps: Awaited<ReturnType<typeof loadPostForMeDeps>>;
+  // A missing key means no Post for Me client; a configured but invalid key, or a Vault that cannot be read, is a
+  // failure monitoring must see. Either way the work that needs no Post for Me key still runs: retention, held credits
+  // (billed TikHub runs a killed process left open must not stay frozen until the key is repaired) and TikHub reads.
+  let deps: Awaited<ReturnType<typeof loadPostForMeDeps>> = null;
+  let keyError: string | null = null;
   try { deps = await loadPostForMeDeps(client); } catch (error) {
-    await finish('error', {}, error instanceof Error && error.message === 'POSTFORME_KEY_INVALID'
-      ? 'POSTFORME_KEY_INVALID' : 'PLATFORM_SECRET_UNAVAILABLE').catch(() => undefined);
-    return NextResponse.json({ error: 'Social monitor job failed' }, { status: 500 });
+    keyError = error instanceof Error && error.message === 'POSTFORME_KEY_INVALID'
+      ? 'POSTFORME_KEY_INVALID' : 'PLATFORM_SECRET_UNAVAILABLE';
   }
-  // No Post for Me key in this environment: nothing to clean at the provider yet.
   try {
-    if (!deps) {
-      // Stored snapshots still expire without a provider key (plan §7: at most 100 days).
-      const retention = await runSocialMonitorRetention(client, Date.now() + 240_000);
-      await finish('success', { skipped: 'POSTFORME_NOT_CONFIGURED', ...retention });
-      return NextResponse.json({ success: true, skipped: 'POSTFORME_NOT_CONFIGURED', ...retention });
-    }
-    const report = await runSocialMonitorJob(client, deps, Date.now() + 240_000, entitlementWindow(client));
+    const report = await runSocialMonitorJob(client, deps, Date.now() + 240_000, entitlementWindow(client), Date.now,
+      { env: process.env, entitlement: tikhubEntitlements(client) });
+    if (keyError) report.failures.push('postforme_key');
     const success = report.failures.length === 0;
-    await finish(success ? 'success' : 'error', report, success ? null : `FAILED_STEPS:${report.failures.join(',')}`);
+    await finish(success ? 'success' : 'error', { ...report, ...(keyError ? { postForMeKeyError: keyError } : {}) },
+      keyError ?? (success ? null : `FAILED_STEPS:${report.failures.join(',')}`));
     return NextResponse.json({ success, ...report }, { status: success ? 200 : 500 });
   } catch {
     await finish('error', {}, 'SOCIAL_MONITOR_FAILED').catch(() => undefined);
