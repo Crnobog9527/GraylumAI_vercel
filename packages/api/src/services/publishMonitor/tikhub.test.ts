@@ -62,9 +62,9 @@ describe('publish-monitor TikHub read rows', () => {
       missingFields: ['views'] }]);
   });
 
-  it('settles: posts -> done, no results -> empty rules, failures -> not fetched (never re-authorise)', () => {
+  it('settles: posts or no results -> done (never the re-authorise rules), failures -> not fetched', () => {
     expect(tikhubOutcome(posts)).toEqual({ outcome: 'done', error: null });
-    expect(tikhubOutcome(result({ reason: 'NO_RESULTS' }))).toEqual({ outcome: 'empty', error: null });
+    expect(tikhubOutcome(result({ reason: 'NO_RESULTS' }))).toEqual({ outcome: 'done', error: null });
     expect(tikhubOutcome(result({ outcome: 'failed', reason: 'UPSTREAM_400' }))).toEqual({ outcome: 'failed', error: 'TIKHUB_UPSTREAM_400' });
     expect(tikhubOutcome(result({ outcome: 'unknown', reason: 'TIMEOUT' })).outcome).toBe('failed');
   });

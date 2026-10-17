@@ -134,12 +134,11 @@ export function tikhubRows(profile: ResearchCallResult | null, posts: ResearchCa
 }
 
 /**
- * How a read settles (0272's publish_monitor_refresh_finish): a post list, even with some posts, is done; TikHub's own
- * "no results" is empty (the database applies the empty-list rules); anything else keeps old data as "not fetched".
- * A refused or unknown account is a failed read, never "re-authorise" (there is no authorization to renew).
+ * How a read settles (0272's publish_monitor_refresh_finish): a post list is done, and so is TikHub's own "no
+ * results" (a public profile with no posts is an answer, and the Post for Me empty-list rules would ask the user to
+ * re-authorise, which a public profile link has nothing to renew); anything else keeps old data as "not fetched".
  */
-export function tikhubOutcome(posts: ResearchCallResult): { outcome: 'done' | 'empty' | 'failed'; error: string | null } {
-  if (posts.outcome === 'ok' && posts.reason === 'NO_RESULTS') return { outcome: 'empty', error: null };
+export function tikhubOutcome(posts: ResearchCallResult): { outcome: 'done' | 'failed'; error: string | null } {
   if (posts.outcome === 'ok' || posts.outcome === 'partial') return { outcome: 'done', error: null };
   return { outcome: 'failed', error: `TIKHUB_${(posts.reason ?? posts.outcome).toUpperCase().replace(/[^A-Z0-9_]/g, '_')}`.slice(0, 64) };
 }
