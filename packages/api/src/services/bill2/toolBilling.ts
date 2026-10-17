@@ -4,6 +4,7 @@
 // subcall with toolClaimPayload, and records exactly one toolResultEvidence after the supplier answers.
 // The SQL side recomputes every amount from the frozen price; these helpers only have to agree with it.
 import { createHash } from 'node:crypto';
+import { z } from 'zod';
 import type { ResolvedProviderPrice } from '../billingProviderPrices';
 import type { ResearchCallResult, ResearchUsage, ResearchVendor } from '../research/vendors/types';
 
@@ -38,6 +39,22 @@ export interface ToolCallPolicy {
   toolPricing: ToolPricing;
 }
 
+const decimalText = z.string().regex(/^(0|[1-9][0-9]{0,11})(\.[0-9]{1,12})?$/);
+/** A frozen tool-route policy as the run stores it (0255 run creation and claim checks); read back at execution. */
+export const frozenToolPolicy = z.object({
+  provider: z.enum(['tikhub', 'parallel', 'firecrawl']), account: z.string().min(1).max(120), model: z.string().min(1).max(160),
+  // md5-shaped like SQL bill2_tool_model_id: no RFC version bits, so not z.uuid(); the refine pins it to the route.
+  protocol: z.literal(TOOL_PROTOCOL), modelId: z.string().regex(/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/), multiplier: z.string().min(1).max(32),
+  lookupSupported: z.literal(false), upperUsd: decimalText, purposes: z.array(z.string().min(1).max(64)).min(1).max(8),
+  toolPricing: z.object({
+    unit: z.enum(['call', 'sku_search', 'credit']), currency: z.string().min(1).max(8), price: decimalText,
+    unitsPerPrice: z.string().regex(/^[1-9][0-9]{0,8}$/), usdPerCurrency: decimalText.nullable(),
+    entryHash: z.string().regex(/^[a-f0-9]{64}$/), validUntil: z.string().datetime({ offset: true }),
+    maxUnitsPerCall: z.string().regex(/^[1-9][0-9]{0,5}$/),
+  }).strict(),
+}).strict().refine(policy => policy.modelId === toolModelId(policy.model) && policy.model.startsWith(`${policy.provider}:`)
+  && VENDOR_USAGE_UNIT[policy.provider] === policy.toolPricing.unit, 'TOOL_POLICY_INVALID');
+
 export interface ToolClaimPayload {
   provider: ResearchVendor;
   account: string;
@@ -51,7 +68,8 @@ export interface ToolClaimPayload {
   upperUsd: string;
   billingUnit: { modelId: string; multiplier: string };
   toolPricing: ToolPricing;
-  runtimeEpoch?: string;
+  /** The run's owner epoch, an integer like a model call's (0167; erasure keeps it as an integer, 0184). */
+  runtimeEpoch?: number;
 }
 
 export type ToolOutcome = 'delivered' | 'failed_free' | 'failed_charged' | 'unknown';
@@ -131,13 +149,13 @@ export function toolCallPolicy(input: {
   };
 }
 
-export function toolClaimPayload(policy: ToolCallPolicy, call: { phase: string; requestHash: string; runtimeEpoch?: string }): ToolClaimPayload {
+export function toolClaimPayload(policy: ToolCallPolicy, call: { phase: string; requestHash: string; runtimeEpoch?: number }): ToolClaimPayload {
   if (!policy.purposes.includes(call.phase) || !/^[a-f0-9]{64}$/.test(call.requestHash)) throw new ToolBillingError('TOOL_INPUT_INVALID');
   return {
     provider: policy.provider, account: policy.account, model: policy.model, protocol: TOOL_PROTOCOL,
     phase: call.phase, requestHash: call.requestHash, automaticRetry: false, hiddenTools: false, lookupSupported: false,
     upperUsd: policy.upperUsd, billingUnit: { modelId: policy.modelId, multiplier: policy.multiplier },
-    toolPricing: policy.toolPricing, ...(call.runtimeEpoch ? { runtimeEpoch: call.runtimeEpoch } : {}),
+    toolPricing: policy.toolPricing, ...(call.runtimeEpoch !== undefined ? { runtimeEpoch: z.number().int().positive().parse(call.runtimeEpoch) } : {}),
   };
 }
 

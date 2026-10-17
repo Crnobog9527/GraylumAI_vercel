@@ -49,6 +49,18 @@ export interface AccountMetrics {
   missing: string[];
 }
 
+/**
+ * The fetched posts are the account's whole history when the profile's own post count (`postsCount`, whitelisted by
+ * the TikHub adapter) is no more than the posts returned. No count, no claim: an unknown history is never "whole".
+ * 0268 re-checks this against the same profile item before a row may use it.
+ */
+export function suppliedWholeHistory(profile: EvidenceItem | undefined, posts: EvidenceItem[]): boolean {
+  const total = profile ? num(profile, 'postsCount') : null;
+  // Distinct post identities only: a repeated entry must not make a short list look complete.
+  const ids = new Set(posts.map(post => post.fields.id).filter(id => typeof id === 'string' && id.length > 0));
+  return total !== null && ids.size === posts.length && ids.size >= total;
+}
+
 const num = (item: EvidenceItem, field: string): number | null => {
   const value = item.fields[field];
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
@@ -79,9 +91,21 @@ function newestPosts(posts: EvidenceItem[], time: (item: EvidenceItem) => number
   return [...dated, ...undated].slice(0, BENCHMARK_RULES.postsMax);
 }
 
+/** One entry per post id, the first in supplier order (0268 counts the same way): a repeated post is not more posts. */
+function distinctPosts(posts: EvidenceItem[]): EvidenceItem[] {
+  const seen = new Set<string>();
+  return posts.filter(post => {
+    const id = post.fields.id;
+    if ((typeof id !== 'string' && typeof id !== 'number') || id === '') return true;
+    if (seen.has(String(id))) return false;
+    seen.add(String(id));
+    return true;
+  });
+}
+
 export function accountMetrics(evidence: AccountEvidence, now: Date): AccountMetrics {
   const time = timeAt(now.getTime());
-  const posts = newestPosts(evidence.posts, time);
+  const posts = newestPosts(distinctPosts(evidence.posts), time);
   const followersSource = evidence.followersItem ?? evidence.profile;
   const followers = num(followersSource, 'followers');
 
