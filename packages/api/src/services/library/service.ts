@@ -7,6 +7,7 @@ import { beginInput, formatFor, formats, textSegments, verifyHeader, type Format
 import { cleanupLibrary } from './cleanup';
 import { pdfUpload } from './pdfUpload';
 import { wordUpload } from './wordUpload';
+import { libraryRecognition } from './recognition';
 import { libraryRpc } from './rpc';
 import { scheduleErasureManifestSync } from '../accountErasure/offdbManifest';
 import { libraryStorage, type LibraryStorage } from './storage';
@@ -39,6 +40,7 @@ export function libraryService(client: SupabaseClient, actorId: string, storage:
   return {
     ...wordUpload(client, actorId, storage),
     ...pdfUpload(client, actorId, storage),
+    ...libraryRecognition(client, actorId),
     async begin(raw: z.infer<typeof beginInput>) {
       const input = beginInput.parse(raw);
       const format = formatFor(input.filename, input.contentType);

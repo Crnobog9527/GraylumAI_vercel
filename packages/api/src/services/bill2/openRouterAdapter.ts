@@ -9,6 +9,8 @@ import {withRuntimeBudget,type RuntimeBudget} from '../runtime/budget';
 import {openRouterBound,openRouterCallBound,OPENROUTER_RESPONSE_TIMEOUT_MS,OPENROUTER_LOOKUP_TIMEOUT_MS} from './openRouterPolicy';
 import {decimal} from './decimal';
 import {paygCallQuote} from './paygPolicy';
+import {IMAGE_MAX_DATA_URL_BYTES,IMAGE_MAX_EDGE,IMAGE_PURPOSES,measureImage} from './imageInput';
+import {isDeepStrictEqual} from 'node:util';
 import {validateNominalBound} from '../../shared/nominalPricing';
 import {createHash} from 'node:crypto';
 import {openRouterEvidence,validGenerationId,type OpenRouterIdentity} from './openRouterEvidence';
@@ -144,7 +146,11 @@ export function openRouterAdapter(options:{credential:(identity:OpenRouterIdenti
       ||payg.tools!==tools.length||payg.schemaBytes!==schemaBytes)throw new Error('BILL2_PROVIDER_QUOTE_CONFLICT');
     validateNominalBound(payg.nominalPricing,{...identity.providerLimits,...payg});
    }
-   const quote=payg?openRouterCallBound(identity.providerLimits,identity.outputLimit,payg.promptTokensUpper)
+   // LIB-2d: an image part only when the frozen quote measured this exact one (re-measured here).
+   const image=measureImage(parsed??{},{maxDataUrlBytes:IMAGE_MAX_DATA_URL_BYTES,maxEdge:IMAGE_MAX_EDGE});
+   if((image||payg?.image)&&(!payg?.image||!isDeepStrictEqual(image,payg.image)
+     ||!IMAGE_PURPOSES.has(String(identity.phase))))throw new Error('BILL2_PROVIDER_REQUEST_DENIED');
+   const quote=payg?openRouterCallBound(identity.providerLimits,identity.outputLimit,payg.promptTokensUpper,payg.image?.tokensUpper??0)
     :openRouterBound(identity.providerLimits,identity.outputLimit);
    if(decimal(quote.upperUsd)!==decimal(identity.upperUsd))throw new Error('BILL2_PROVIDER_QUOTE_CONFLICT');
    // An Agent turn request carries only the interactive tools (or none, when it
@@ -179,7 +185,9 @@ export function openRouterAdapter(options:{credential:(identity:OpenRouterIdenti
        cachedSystemContent.safeParse(m.content).success)return false;
       return Object.keys(m).some(key=>!['role','content'].includes(key)) || !['system','developer','user','assistant'].includes(String(m.role)) ||
        !(typeof m.content==='string' || (Array.isArray(m.content) && m.content.every(part=>part && typeof part==='object' &&
-         Object.keys(part).every(key=>['type','text'].includes(key)) && part.type==='text' && typeof part.text==='string')));
+         (Object.keys(part).every(key=>['type','text'].includes(key)) && part.type==='text' && typeof part.text==='string'
+          // The one image part was shape-checked and measured above.
+          || image!==null && m.role==='user' && part.type==='image_url'))));
      }))
       throw new Error('BILL2_PROVIDER_REQUEST_DENIED');
    const key=await credential({...identity,provider:'openrouter',protocol:'openrouter-chat-v1'});

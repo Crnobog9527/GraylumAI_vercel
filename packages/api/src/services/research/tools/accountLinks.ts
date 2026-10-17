@@ -43,6 +43,15 @@ function fromUrl(url: URL): { platform: SocialPlatform; raw: string } | null {
   if (hostIs(host, 'youtube.com')) return only(2) && parts[0] === 'channel' ? { platform: 'youtube', raw: parts[1] } : null;
   if (host === 'space.bilibili.com') return only(1) ? { platform: 'bilibili', raw: parts[0] } : null;
   if (hostIs(host, 'weibo.com', 'weibo.cn')) return only(2) && parts[0] === 'u' ? { platform: 'weibo', raw: parts[1] } : null;
+  // PUBLISH-MONITOR PR-4: full profile links only; short share links (xhslink.com, v.douyin.com) would need a redirect
+  // lookup and are not followed.
+  if (hostIs(host, 'xiaohongshu.com')) {
+    return only(3) && parts[0] === 'user' && parts[1] === 'profile' ? { platform: 'xiaohongshu', raw: parts[2] } : null;
+  }
+  if (hostIs(host, 'douyin.com', 'iesdouyin.com')) {
+    if (only(2) && parts[0] === 'user') return { platform: 'douyin', raw: parts[1] };
+    return only(3) && parts[0] === 'share' && parts[1] === 'user' ? { platform: 'douyin', raw: parts[2] } : null;
+  }
   return null;
 }
 

@@ -94,13 +94,13 @@
 .staticLead { margin: 0; color: var(--j-muted); font-size: 13.5px; }
 .staticDesk { padding: 18px clamp(8px, 2vw, 20px) 22px 0; border: 1px solid var(--j-rule); border-radius: 10px; background: var(--j-desk); }
 .staticRecords { display: grid; gap: 12px; }
-.staticRecords h2 { margin: 0; font-size: 18px; font-weight: 600; }
+.staticRecords :is(h2,:where([data-demo-heading="h2"])) { margin: 0; font-size: 18px; font-weight: 600; }
 .staticColumns { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; align-items: start; }
 .staticRecord {
   display: grid; gap: 12px; padding: 16px; border: 1px solid var(--j-rule); border-radius: 8px; background: var(--j-paper);
   scroll-margin-top: calc(var(--j-bar, 0px) + 12px);
 }
-.staticRecord h3 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
+.staticRecord :is(h3,:where([data-demo-heading="h3"])) { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
 @media (max-width: 1279px) { .staticColumns { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
 @media (max-width: 767px) {

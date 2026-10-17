@@ -32,6 +32,7 @@ const dbToCategoryMap: Record<string, string> = {
   bug: 'bug_report',
   account: 'account_issue',
   billing: 'billing',
+  consult: 'expert_consult',
   other: 'other',
 };
 

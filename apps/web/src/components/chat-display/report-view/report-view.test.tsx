@@ -6,6 +6,7 @@ import { SAMPLE_REPORT_DATA, sampleReportDataBlock } from '@repo/api/src/shared/
 import { MessageMarkdown } from '@/components/chat/MessageMarkdown';
 import { SAMPLE_REPORT_BODY, SAMPLE_REPORT_BODY_WITH_DATA, SAMPLE_REPORT_CHAPTER_TITLES } from '../fixtures/report';
 import { ReportView } from './report-view';
+import styles from './report-view.module.css';
 import { placeFields, reportDisplayTitle, splitChapters, splitReasons, withDisplayHeadings } from './report-sections';
 import { REPORT_FIXED_NOTES } from './report-text';
 
@@ -23,10 +24,27 @@ describe('report sections', () => {
       .toEqual({ main: '结论。\n\n### 补充\n\n还有 B。', reasons: '因为 A。' });
     expect(splitReasons('只有结论。')).toEqual({ main: '只有结论。', reasons: null });
   });
+  it.each([
+    ['一句话结论（约 200 字）', '一句话结论'],
+    ['二、现状盘点（约 300 字）', '二、现状盘点'],
+    ['四、受众（约 1500 字）', '四、受众'],
+    ['五、对标账号分析（约 800 字，3–10 个合格账号）', '五、对标账号分析'],
+    ['十、变现路径：销售漏斗和商业飞轮（至少 2000 字，建议约 2400 字）', '十、变现路径：销售漏斗和商业飞轮'],
+    ['十一、运营手册（不超过 2400 字）', '十一、运营手册'],
+    ['十二、合规提醒（800 字以内）', '十二、合规提醒'],
+    ['十三、见效时间（字数 150 左右）', '十三、见效时间'],
+    ['十四、待验证的假设（約 800 字）', '十四、待验证的假设'],
+    ['八、内容规划 (约 1300 字)', '八、内容规划'],
+    ['九、运营手册：照着做就行（约 2400 字）', '九、运营手册：照着做就行'],
+  ])('shows the title %s without its length hint', (title, shown) => expect(reportDisplayTitle(title)).toBe(shown));
+  it.each(['账号三件套（昵称建议 4 字，简介 20 字）', '发布节奏（每天写 100 字）', '简介（约 20 字）', '见效时间（约 3 个月）', '预算（约 500 元）', '对标账号分析（3–10 个合格账号）', '变现路径（漏斗）', '定位（B 版）', '一句话结论'])(
+    'keeps the business bracket in %s', title => expect(reportDisplayTitle(title)).toBe(title));
   it('drops writing hints from titles for display, and matches numbered titles to chapters', () => {
     expect(reportDisplayTitle('五、对标账号分析（约 800 字，3–10 个合格账号）')).toBe('五、对标账号分析');
     expect(reportDisplayTitle('一句话结论（约 200 字）')).toBe('一句话结论');
     expect(reportDisplayTitle('变现路径（漏斗）')).toBe('变现路径（漏斗）');
+    expect(reportDisplayTitle('见效时间（约 3 个月）')).toBe('见效时间（约 3 个月）');
+    expect(reportDisplayTitle('预算（约 500 元）')).toBe('预算（约 500 元）');
     expect(withDisplayHeadings('## 一句话结论（约 200 字）\n正文（约 3 条）\n```\n## 代码（约 1 字）\n```'))
       .toBe('## 一句话结论\n正文（约 3 条）\n```\n## 代码（约 1 字）\n```');
     const { byChapter } = placeFields(SAMPLE_REPORT_DATA, ['一句话结论（约 200 字）', '十一、变现路径：销售漏斗（约 2000 字）']);
@@ -42,7 +60,7 @@ describe('report sections', () => {
 
 describe('ReportView', () => {
   it('renders a report without data exactly as before', () => {
-    expect(html(SAMPLE_REPORT_BODY)).toBe(renderToStaticMarkup(<MessageMarkdown text={SAMPLE_REPORT_BODY} />));
+    expect(html(SAMPLE_REPORT_BODY)).toBe(renderToStaticMarkup(<MessageMarkdown className={styles.tables} text={SAMPLE_REPORT_BODY} />));
   });
 
   it('never shows the data block as text, and keeps one h2 per chapter for the chapter list', () => {
@@ -102,7 +120,7 @@ describe('ReportView', () => {
     expect(out).toContain('图表和策略要点整理中');
     expect(out).not.toContain('summ');
     const stopped = `${SAMPLE_REPORT_BODY}\n\n${REPORT_DATA_FENCE}\n{"v":1,"field":"summ`;
-    expect(html(stopped)).toBe(renderToStaticMarkup(<MessageMarkdown text={SAMPLE_REPORT_BODY} />));
+    expect(html(stopped)).toBe(renderToStaticMarkup(<MessageMarkdown className={styles.tables} text={SAMPLE_REPORT_BODY} />));
   });
 
   it('draws benchmark numbers only from server data, and marks chapters whose text was edited', () => {
@@ -134,6 +152,6 @@ describe('ReportView', () => {
   });
 
   it('shows the plain text when there are no chapters at all', () => {
-    expect(html(`只有一段。\n\n${sampleReportDataBlock()}`)).toBe(renderToStaticMarkup(<MessageMarkdown text="只有一段。" />));
+    expect(html(`只有一段。\n\n${sampleReportDataBlock()}`)).toBe(renderToStaticMarkup(<MessageMarkdown className={styles.tables} text="只有一段。" />));
   });
 });

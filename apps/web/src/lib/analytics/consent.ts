@@ -20,9 +20,11 @@ declare global {
   }
 }
 
-export type ConsentSnapshot = { analytics: boolean; advertising: boolean };
+/** `ready`: Termly has initialised (or reported a choice), so a false `analytics` is the visitor's real state. */
+export type ConsentSnapshot = { ready: boolean; analytics: boolean; advertising: boolean };
 
-const DENIED: ConsentSnapshot = { analytics: false, advertising: false };
+const DENIED: ConsentSnapshot = { ready: false, analytics: false, advertising: false };
+let termlyReady = false;
 const listeners = new Set<() => void>();
 let snapshot: ConsentSnapshot = DENIED;
 
@@ -31,7 +33,7 @@ export function readTermlyConsent(): ConsentSnapshot {
   if (typeof window === 'undefined') return DENIED;
   try {
     const state = window.Termly?.getConsentState?.();
-    return { analytics: state?.analytics === true, advertising: state?.advertising === true };
+    return { ready: termlyReady, analytics: state?.analytics === true, advertising: state?.advertising === true };
   } catch {
     return DENIED;
   }
@@ -44,7 +46,7 @@ export function analyticsAllowed(): boolean {
 /** Re-read Termly and tell subscribers when the answer changed. */
 export function refreshConsent(): void {
   const next = readTermlyConsent();
-  if (next.analytics === snapshot.analytics && next.advertising === snapshot.advertising) return;
+  if (next.ready === snapshot.ready && next.analytics === snapshot.analytics && next.advertising === snapshot.advertising) return;
   snapshot = next;
   for (const listener of listeners) listener();
 }
@@ -65,8 +67,16 @@ export function serverConsentSnapshot(): ConsentSnapshot {
 /** Called from the Termly script's onload: follow its initialisation and every later consent change. */
 export function attachTermly(): void {
   const termly = typeof window === 'undefined' ? undefined : window.Termly;
-  termly?.on?.('initialized', refreshConsent);
-  termly?.on?.('consent', refreshConsent);
+  const markReady = () => { termlyReady = true; refreshConsent(); };
+  termly?.on?.('initialized', markReady);
+  termly?.on?.('consent', markReady);
+  // Already initialised before this ran: its state carries the categories.
+  try {
+    const state = termly?.getConsentState?.();
+    if (state && typeof state.essential === 'boolean') termlyReady = true;
+  } catch {
+    // Not answered yet; the initialized event follows.
+  }
   refreshConsent();
 }
 

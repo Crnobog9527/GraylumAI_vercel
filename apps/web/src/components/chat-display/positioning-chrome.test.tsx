@@ -38,5 +38,5 @@ it('keeps the title an h1 by default and renders it at the level a page asks for
   expect(nested).not.toContain('<h1');
   const { readFileSync } = await import('node:fs');
   const css = readFileSync(new URL('../opc/positioning-result.module.css', import.meta.url), 'utf8');
-  expect(css).toContain('.positionTop :is(h1,h2){');
+  expect(css).toContain('.positionTop :is(h1,h2,:where(');
 });

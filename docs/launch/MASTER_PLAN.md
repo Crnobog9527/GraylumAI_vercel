@@ -82,7 +82,46 @@
 <a id="changes"></a><a id="conflicts"></a>
 ## 2. 本版的新决定和被取代的旧规则
 
-### 2.1 Owner 的新决定（2026-09-27 起，2026-10-17 更新）
+### 2.1 Owner 的新决定（2026-09-27 起，2026-10-18 更新）
+
+**2026-10-18：SEO 关键词总表批准，写进 `docs/launch/SEO_GEO_SPEC.md`**
+
+Owner 原话（2026-10-18，经 SEO/GEO 窗口转交总控）：
+
+> 同意这份关键词总表，交给总控写进规范。
+
+规范被更新的位置：第 3.2 节（繁体第一批补词、第二批、简体不追词、英文第二批指引）、第 7 节第 9 条（页面分工，一个词只给一个页面）、第 12 节第 9 条（简体、繁体对比页）、附录 A（英文第二批新增、`/en/what-to-post` 并入、第三批重申、新增不做）、附录 B（台湾短影音腳本取代“开工前补查”、新增 IG 文案、新增不做）、附录 D。取代：附录 B 中“短影音腳本难度开工前补查”。不改任何代码和页面正文，正文改写另派。
+
+
+**2026-10-17：REL-1 按期 10-31 上线、10-25 冻结；正式库新建 Supabase 项目；MODERATION 上线时继续暂缓**
+
+Owner 原话（2026-10-17，总控-8 对话，经总控转达 REL-1 执行窗口）：
+
+> 同意 REL-1 选 A：10-31 按时上线，10-25 冻结，没验收的功能关开关、对外说法隐藏，10-24 由总控把缺口清单给我一次批。
+
+> 同意正式库选 A：新建 Supabase 正式项目，从空库按迁移建库。
+
+> 同意 MODERATION 上线时继续暂缓，上线后再定。
+
+同日 Owner 一次批准 staging 迁移队列 0271–0288（总控转达）。
+
+- 归属任务 REL-1，清单和时间表见 [REL-1 上线手册](tasks/REL-1.md)。
+- 上线范围：本节 2026-10-13"数据复盘上线前完成"一条里"缩小上线范围须 Owner 另行决定"，由第一条原话给出做法——10-25 冻结时还没验收的功能关开关、落地页和价格页隐藏对应说法；具体哪些功能不上，以 10-24 总控交 Owner 一次批的缺口清单为准，本条不预先认定哪项功能退出。
+- 正式库：第 9.3 节"正式库的建法"不变（结构只由迁移文件决定），建在新建的 Supabase 正式项目里，不在现有正式项目上清空重建；新项目的 Vercel 绑定、Auth 设置、密钥和环境变量按 REL-1 手册逐项由 Owner 操作或批准。
+- MODERATION：取代第 7.1 节 MODERATION 行、第 7.2 节和第 10 节"公开上线前再请 Owner 决定"——上线时不做内容审核，只保留随 RATE-LIMIT 接线、默认放行的检查点，上线后再定。
+
+**2026-10-17：挂了研究工具的定位导师回合，输入上限提到 112000 字节（RT-6）**
+
+Owner 原话（2026-10-17，总控-8 对话）：
+
+> 同意 RT-6 输入上限选 A
+
+以下是本次决定的落实范围，不是原话：
+
+- 选项 A 指：只在挂了研究工具的那一轮把输入上限从 90000 提到 112000 字节（和"整理"用途一样），其他回合仍是 90000。
+  原因：研究工具约占 31KB（工具说明加取数结果预留），90000 时"诊断与平台对标"一步放不下，准入会自动不给研究工具，合格对标凑不够、报告出不来（[#1070](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1070) 实测）。
+- 计费照常按实际发出的输入计算；上限只是检查，不改收费口径。长对话里这些回合可能多带一些历史。
+- 后台 `runtime_purpose_budgets` 的交互上限和代码里 90000 的上限都不变。
 
 **2026-10-17：报告存两种形态——给 Agent 读的结构化数据，给用户看的图表和精简正文；正式产品一起改**
 
@@ -122,13 +161,22 @@ Owner 原话（2026-10-17，总控-8 对话）：
 
 范围：只改用户看得到的文字（例如"导师提问"→"AI 教练提问"、"给导师的回复"→"给 AI 教练的回复"）；不改代码里的变量名、数据库字段、Skill 内部指令和后台管理页面的文字。取代此前产品界面里"导师"的叫法。归属任务 PUBLIC-SITE，实现见本条所在的 PR。资料库引用开关（`NEXT_PUBLIC_COMPOSER_REFERENCES`）的打开时间按本条定在上线前，由上线准备清单承接，本条所在的 PR 不改开关。
 
+**2026-10-17：结账处的退款政策链接指向 /refund**
+
+Owner 原话（2026-10-17，总控-8 对话）：
+
+> 同意把结账处退款政策链接改成 /refund（staging 是测试模式，正式环境开收钱另批）
+
+- 取代此前"退款政策页未发布前，测试模式结账链接退回 /faq、正式模式关闭结账入口"的临时做法：结账处一律链接 /refund。
+- 正式环境能否收钱仍由 R7 入口闸门（#1093）和 Owner 的上线批准控制，本条不放开任何正式收款。实现见 [#1097](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1097)。
+
 **2026-10-17：未登录点开通会员先去注册并记住所选方案；退款说明页 /refund 公开**
 
 Owner 原话（2026-10-17，总控-8 对话）：
 
 > 确认：未登录点开通会员，先去注册并记住所选方案，注册后直接回到该方案付款；退款说明页 /refund 不登录也能看。
 
-归属任务 PUBLIC-SITE / PAYWALL：实现见 [#1054](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1054)（注册后回到原方案付款，首月优惠资格仍以服务端判断为准）和 [#1053](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1053)（/refund 不需要登录）。staging 目前还没有 /refund 页面，退款政策正文由 Owner 准备，发布前未登录访问是 404。价格区的支付安全说明，等支付通道定了再写。
+归属任务 PUBLIC-SITE / PAYWALL：实现见 [#1054](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1054)（注册后回到原方案付款，首月优惠资格仍以服务端判断为准）和 [#1053](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1053)（/refund 不需要登录）。/refund 规则摘要页已由 [#1091](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1091) 上线 staging（完整退款政策正文仍由 Owner 用第三方工具生成）。价格区的支付安全说明，等支付通道定了再写。
 
 **2026-10-17：评审团模型——评审用 Claude Sonnet 5.5、GPT-6.1 Sol、Gemini 3.8 Flash，汇总用 Claude Opus 5.5；评审团专用计费档案按实际请求取证**
 
@@ -2374,7 +2422,7 @@ node scripts/plan-progress.mjs --ref origin/staging
 | | RUNTIME-FAILURE-RECONCILE | 白名单以外的我方未知异常兜底退回（第 2.1 节 2026-10-12 系统原因失败退款决定的 Owner 补充）：每日对账扫描已扣费、超过 24 小时仍未收口且没有结果未知调用的 Runtime 回合，人工核对后通过补偿路径退回并记账；上线前启用恢复定时任务（`/api/cron/runtime-recovery`，与 Vercel Pro 升级同步，见 REL-1 清单），超时仍未重试的回合按同样规则自动收口退回。验收：对账能列出这类回合、退回只发生一次、恢复任务收口后结算正确。白名单内的自动退款已由 #827 交付。 | BILL-PAYG（#827） | 高 | 小 / 1–2 | — |
 | | DEP-BATCH-A | 依赖升级（第 2.1 节 2026-10-12 决定）：关闭 Dependabot 开到 `main` 的 #833–#843，在 staging 上做一个低风险（A 类）依赖批量升级 PR，CI 和测试通过后由 AI 合并到 staging。Sentry 11、Supabase SSR 0.12、Next 16.4、Radix 组件、vitest coverage 5 暂缓到上线后（Radix 排在 UI 统一之后），期间只跟进安全补丁。 | — | 普通 | 小 / 1 | 完成：A 类低风险批量升级由 #846 合并进 staging（2026-10-12），大版本按 Owner 决定暂缓 |
 | | DB-BASELINE | 按 Owner 2026-09-29 选择的 C3 方案 B（第 9.3 节）：① 先修完 S1（#498）查出的 staging 权限漂移；引入 `0000` 前，先完成与现有追加式迁移账本、检查器及 CI 的兼容过渡，涉及的治理变更单独按受保护流程先行交付，不得在新增基线的同一 PR 中修改检查器来放行自身；② 从 staging 导出只有结构的建库脚本作为核对来源，整理成只补缺失前置对象的 `0000` 基线，补上 16 张核心表及缺失的相关函数、触发器、扩展、存储桶、授权；已有迁移负责创建的 75 张表及其对象仍由原文件创建，不把完整 staging 结构直接放进 `0000`；③ 用空库按顺序跑完全部迁移，并跑完整测试；④ 退役 `db:push`，更新 `docs/ENGINEERING.md` 和 `docs/runbooks/STAGING_REPRODUCIBILITY.md`，这部分属于治理变更，按受保护流程走。必须在 V3-M3 / REL-1 之前完成。每次结构变更后的 staging 指纹刷新 PR 也归在本任务。验收与交接：[0186 快照验证与后续迁移边界](https://github.com/Crnobog9527/GraylumAI_vercel/issues/716#issuecomment-6038774649)。 | S1 的权限修复 | 高 | 待实施方案细化 | — |
-| | MODERATION | **暂缓**（Owner 2026-10-01，第 19 项）：不再是封闭内测前提；正式功能何时实现，公开上线前再请 Owner 决定。此前不接 OpenAI Moderation、不需密钥、不核实价格。MODERATION-HOOK 的输入/输出检查点随 RATE-LIMIT 接线（#594），默认放行；拦截后的不收费、独立终止状态与日志以后正式实现时补齐 | 正式功能待 Owner 决定 | 高 | 待定 | 阻塞：Owner 2026-10-01 决定暂缓（第 19 项），公开上线前再请 Owner 决定 |
+| | MODERATION | **暂缓**（Owner 2026-10-01，第 19 项）：不再是封闭内测前提；正式功能何时实现，公开上线前再请 Owner 决定。此前不接 OpenAI Moderation、不需密钥、不核实价格。MODERATION-HOOK 的输入/输出检查点随 RATE-LIMIT 接线（#594），默认放行；拦截后的不收费、独立终止状态与日志以后正式实现时补齐 | 正式功能待 Owner 决定 | 高 | 待定 | 阻塞：Owner 2026-10-01 决定暂缓（第 19 项），2026-10-17 定上线时继续暂缓，上线后再定（第 2.1 节） |
 | | MODEL-REASONING | ① 添加或编辑模型时，从 OpenRouter 公开模型目录读取该模型支持的思考档位、默认档位、能否关闭，保存快照并可"重新读取"；② 管理员按模型和用途（交互对话、整理、评审、写作）选择思考强度，选项只来自该模型支持的档位，外加"关闭"（允许时）和"用供应商默认"；③ 保存前检查所选供应商线路支持这个参数；④ 准入时把所选档位冻结进执行记录，重放用原值；⑤ 档位和回复长度上限联动校验；⑥ "试一次"按钮，用固定短问题真实调用一次，显示首字时间和是否有正文，费用由平台承担。取代 PR #446 里写死的对照表。**按 Owner 2026-09-28 决定，MODEL-REASONING 提前到 N1b，在 AC1-4 之前完成**（Owner 要求模型在后台随时切换、不绑在代码里）。由 #480、#494、#495 实施 | P0-1（和 RUNTIME-PROD 由同一个 writer 完成，同一个后台模型页） | 高 | 中 / 2–3 | 完成 |
 | | ENTITLEMENTS | 会员权限配置：Fusion 两种模式的开关和上限、资料库总存储空间；服务端检查（系统级文件数量保护上限不属于会员权益，不在这里配置）。PR-1 #540（迁移 0153）、PR-2 后台会员权限与 Fusion 数量设置界面 #609（Owner 2026-10-03 批准合并）；合并后的 staging 冒烟由总控另行安排。2026-10-04 起 Fusion 默认只给 Gold、新增定位档案上限（第 51 项），由 PAYWALL 实施，本任务不重开 | —（和 PAY-COMMON 由同一条钱路线先后完成） | 高 | 中 / 2 | 完成 |
 | | RESEARCH-TOOLS | 第三方搜索统一接口层和对标研究（第 3.7 节，见 [实施说明](tasks/RESEARCH-TOOLS.md)）：规则表和已验证平台清单、统一返回格式、美元成本接入 BILL2、确认失败时如实告知取不到数据（以后经批准增加备用线路后才换备用；2026-10-04 Owner 定 Bright Data 为备用渠道、Facebook 由它抓取，接入前实测和条款核对，第 52 项）、证据进资料库并接入账号注销、打开真实模型的搜索开关、对标流程的代码计算和表格写入限制。在封闭内测之前完成（封闭内测已取消；2026-10-12 R11 决定以它在正式上线前完成为前提，对标不提供跳过）。验收与交接：[Bright Data 公开资料、账户与实测证据边界](https://github.com/Crnobog9527/GraylumAI_vercel/issues/716#issuecomment-6038239994)。 | RESEARCH-0、AC-1、RUNTIME-PROD、DATA-ERASURE | 高 | 大 / 3–5 | — |
@@ -2433,10 +2481,19 @@ node scripts/plan-progress.mjs --ref origin/staging
 | 0273 | SKILL-I18N-HOOK |
 | 0274 | [#1033](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1033) PUBLISH-MONITOR PR-5 |
 | 0275 | [#1038](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1038) PAY-DISPUTE-GUARD D0（取代已关闭的 #1025） |
-| 0276 | [#1036](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1036) CONTENT-CONVERSATION-DRIVEN A2 |
-| 0277 | [#1041](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1041) ADMIN-SECRETS OR-1 |
-| 0278 | LIB-DOCS LIB-2d |
-| 0279 | [#1022](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1022) LIB-DOCS LIB-4b |
+| 0276 | [#1036](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1036) CONTENT-CONVERSATION-DRIVEN A2（已上库合并） |
+| 0277 | [#1022](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1022) LIB-DOCS LIB-4b（合集 [#1116](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1116)） |
+| 0278 | [#1060](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1060) EXPERT-CONSULT（合集 #1116） |
+| 0279 | [#1062](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1062) 研究工具余额不足暂停（合集 #1116） |
+| 0280 | [#1076](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1076) ANALYTICS 付款上报（合集 #1116） |
+| 0281 | [#1077](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1077) ANALYTICS 首次来源（合集 #1116） |
+| 0282 | [#1083](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1083) RT-5 对标表来源编号（合集 #1116） |
+| 0283 | [#1041](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1041) ADMIN-SECRETS OR-1（已上库合并） |
+| 0284 | [#1061](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1061) RUNTIME-FAILURE-RECONCILE（合集 #1119） |
+| 0285 | [#1069](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1069) PAY-DISPUTE-GUARD 积分包隔离（合集 #1119） |
+| 0286 | [#1042](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1042) LIB-DOCS LIB-2d BILL2 单图计费（合集 #1119） |
+| 0287 | [#1050](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1050) LIB-DOCS LIB-2d 保存识别文字（合集 #1119） |
+| 0288 | [#1075](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1075) PUBLISH-MONITOR 4a（合集 #1119） |
 
 ### 7.2 依赖简图
 
@@ -2450,7 +2507,7 @@ PAYWALL + DATA-ERASURE ─→ EXPERT-CONSULT（第 7.4 节 N3 批次）
 RESEARCH-TOOLS + Post for Me 实测和条款核对 ─→ PUBLISH-MONITOR（第 7.4 节 N3 批次）
 PAY-STRIPE-MP（含付款同意记录）+ PAY-DISPUTE-GUARD ─→ CHARGEBACK（上线后；旧 Waffo 订单另按 Waffo 核实结果处理）
 D1 范围全部完成（第 0–4 阶段：上线基础含 RESEARCH-TOOLS、RUNTIME-FAILURE-RECONCILE；FUSION-REVIEW、LIB-DOCS、VOICE、UI-A—UI-FINISH、FUSION-COMPARE；PAY-COMMON → PAY-STRIPE-MP（PAY-WAFFO 2026-10-12 冻结）、PAYWALL、EXPERT-CONSULT、PUBLISH-MONITOR、POSITIONING-GATE、MODEL-IDENTITY-GUARD、SKILL-I18N-HOOK、PUBLIC-SITE、LEGACY-CLOSE）─→ V3-M3 ─→ REL-1 ─→ 公开上线售卖（生产另行批准）
-公开上线前 ─→ Owner 决定 MODERATION 正式实现时间（暂缓；默认放行的检查点随 #594 接线）
+上线后 ─→ Owner 决定 MODERATION 正式实现时间（2026-10-17 定：上线时继续暂缓；默认放行的检查点随 #594 接线）
 S1 权限修复 ─→ DB-BASELINE ─→ V3-M3 ─→ REL-1
 RUNTIME-PROD ─→ MODEL-IDENTITY-GUARD ─→ POSITIONING-GATE（同一块 runtime，排队写）─→ V3-M3
 BILL-PAYG（#827）─→ RUNTIME-FAILURE-RECONCILE ─→ V3-M3
@@ -2501,7 +2558,7 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 | N1d 推广 | AC-4 及其对应的 AGENT-CORE-UI 部分；CONTENT-CONVERSATION-DRIVEN（暂列，待 Owner 选定批次）；DEBT-QUICK、CI-TRUST 其余部分 | 自由对话和其他 Skill 用上新工作区；检查线的任务并行，不阻塞前面的验收 |
 | N2 上线基础 | RUNTIME-PROD（含 BILL-UNIT、BILL-PAYG、RUNTIME-FAILURE-RECONCILE）、DEP-BATCH-A（Owner 2026-10-12 已选中）、PROMPT-CACHE、PROMPT-CACHE-HISTORY、RATE-LIMIT 接线（含默认放行的 MODERATION-HOOK）、DB-BASELINE、RESEARCH-TOOLS、ENTITLEMENTS、SEC-RATELIMIT、PII-REGEX、DATA-ERASURE 实现、COST-REPORT、PAY-COMMON。钱路线已由 Owner 批准并行开工（第 46 项） | 上线基础完成。原定此后先做 5–10 人封闭内测（D8），2026-10-03 已取消（第 2.1 节第 50 项），按 D1 范围完成后直接公开上线售卖 |
 | N3 差异化功能 | 先 FUSION-REVIEW、LIB-DOCS、VOICE；再 UI-A、UI-MODEL、FUSION-COMPARE、UI-B、UI-C、UI-FINISH；收款按第 2.1 节 2026-10-12 决定：#847 迁移方案合并后做 PAY-STRIPE-MP（PR-1 起；国际银行卡、Apple Pay、Google Pay 走 Stripe Managed Payments，中国大陆用户自选微信/支付宝单笔或普通 Stripe 银行卡订阅；正式平台操作逐项另获批准），再 PAYWALL 接线，再 PAY-FOUNDER、PAY-NOTIFY、PAY-EVIDENCE、PAY-DISPUTE-GUARD（独立售前任务）；PAY-WAFFO 已于 2026-10-12 冻结（停用新购、代码保留，旧 Waffo 订单沿原渠道），不再排期；MODEL-IDENTITY-GUARD → POSITIONING-GATE（上线前完成，排在在途 runtime 改动之后）；PAYWALL（依赖 REPORT-GEN、BILL-PAYG、PAY-COMMON、PAY-STRIPE-MP、ENTITLEMENTS 和已入库的付费墙设计定稿 v25，须在 REL-1 之前完成）；EXPERT-CONSULT（依赖 PAYWALL、DATA-ERASURE，须在 REL-1 之前完成）；PUBLISH-MONITOR（依赖 RESEARCH-TOOLS 和 Post for Me 实测、条款核对，须在 REL-1 之前完成，D1 范围变更） | 差异化功能完成（对比模式对钱路核心改动最大，放在后面） |
-| N4 收口 | PUBLIC-SITE（域名合并、公开页面风格、新落地页；正式环境设置另行批准）、LEGACY-CLOSE、V3-M3；公开上线前请 Owner 决定 MODERATION 正式实现时间 | 完整验收；REL-1 和生产另行批准 |
+| N4 收口 | PUBLIC-SITE（域名合并、公开页面风格、新落地页；正式环境设置另行批准）、LEGACY-CLOSE、V3-M3；MODERATION 上线时继续暂缓（Owner 2026-10-17，第 2.1 节） | 完整验收；REL-1 和生产另行批准 |
 | **当前批次：8 条线并行（Owner 2026-10-12 选定，第 2.1 节）** | 同一条线内排队，不同线并行：① AI 核心：#829 → #845 → POSITIONING-GATE PR2 → SKILL-I18N-HOOK（⑦ 改为上线前核对 OpenRouter 账号和各 workspace 已关闭训练，代码不强制，第 2.1 节）；② 读资料：#830 → AGENT-CORE R4 → LIB-4（R4 和 LIB-4 都改 `read_source`）；③ 收款：#847 → PAY-STRIPE-MP PR-1…6 → PAYWALL 接线 → PAY-FOUNDER / PAY-NOTIFY / PAY-EVIDENCE / PAY-DISPUTE-GUARD；④ 输入框：UI-A 编辑器依赖 PR → 新输入框（与 R8a/R8b 工作区页面排队）→ UI-B / UI-C → UI-FINISH → LEGACY-CLOSE；⑤ 定位流程：#818（已合并）→ R14（R8b 已取消，2026-10-13）；⑥ 官网：PUBLIC-SITE 第一段 + 台湾 6 页，`/app` 路由搬迁放在冻结窗口最后做，正式域名切换上线前逐项批准；⑦ 数据库改动：0217 #828 → 0218 #830 → 0219 #831 → 0220 #832 → 0221/0222 PAY-STRIPE-MP，按合并顺序重建指纹；⑧ 不写代码：DATA-ERASURE 收尾梳理、Fusion 实测（已完成，见 [#852](https://github.com/Crnobog9527/GraylumAI_vercel/pull/852)；之后按 Owner 2026-10-12 决定，FUSION-REVIEW 开工前先做 GitHub 开源项目和 flowith.io 调研，排期由总控安排）、R11。Codex 浏览器验收同一测试账号一次一个，按顺序排。跨线的真实依赖仍按第 7.1 节（例如 UI-B/UI-C 还要等 LIB-DOCS 和 RUNTIME-PROD） | 每条线做完自己的最后一项就停；合并到 `main`、正式环境和平台设置仍按 AGENTS.md 第 1 节逐项批准 |
 
 每批由 Owner 选定后开工，批次内由 Agent 自主排序、测试、修复，完成后停下，不自动开始下一批（AGENTS.md 第 2 节）。
@@ -2513,7 +2570,7 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 - `V3-OPC-UI` 的 A / B / C / FINISH：改称 UI-A / UI-B / UI-C / UI-FINISH，UI-C 改为复用 LIB-DOCS。
 - `V3-GOLD`：改名 FUSION，拆成 FUSION-REVIEW 和 FUSION-COMPARE。
 - 新增：AGENT-CORE（含 AC-0）、AGENT-CORE-UI（从 AGENT-CORE 拆出的纯前端部分）、CI-TRUST（含 CI-TRUST-1）、DEBT-QUICK、COST-REPORT、MODEL-REASONING、UI-MODEL（从原 UI-A 拆出的输入框模型位置，上线只显示 Auto）、RUNTIME-PROD、ENTITLEMENTS、SEC-RATELIMIT、PII-REGEX（接手 PR #333）、RESEARCH-0、RESEARCH-TOOLS、DATA-ERASURE、LIB-DOCS、VOICE、LEARN-1、LEARN-2；2026-09-30 新增 MENTOR-BUDGET、REPORT-GEN、FORGOT-PASSWORD；2026-10-01 新增 BILL-PAYG（承接 RUNTIME-PROD ④）、BILL-UNIT（#565，含按模型倍数）、RATE-LIMIT、STG-MENTOR-MODEL（#561）、INVITE-ABUSE；2026-10-01—02 新增 PROMPT-CACHE（上线必做，第 35 项）、STAGING-HOST-CLEANUP（第 37 项）；2026-10-02—03 新增 MODEL-PRICING-SYNC（第 40 项）、MENTOR-PROMPT-V2、RUNTIME-VIEW-PERF、CONVERSATION-DRIVEN-CAPTURE（第 48 项）、PROMPT-CACHE-HISTORY（第 43 项）、CHAT-NATIVE-OUTPUT（第 44 项）、CONTENT-CONVERSATION-DRIVEN（第 45 项）；STG-MENTOR-MODEL 已关闭（第 38 项）；2026-10-03 新增 PAYWALL（第 50 项）；2026-10-04 新增 EXPERT-CONSULT（第 51 项）、PUBLISH-MONITOR、CHARGEBACK；2026-10-05 起"资料库扩展"的规范任务名为 LIB-EXT。
-- 迁移编号在实际实施时由总控分配，本文不预占；已分配的 0268–0279 见第 7.1 节末尾。
+- 迁移编号在实际实施时由总控分配，本文不预占；已分配的 0268–0288 见第 7.1 节末尾。
 
 ### 7.6 Owner 需要提前启动的事项
 
@@ -2752,7 +2809,7 @@ Owner 于 2026-09-27 确认 D1–D17（D6 在 Fable 评估后改为不含 PDF；
 
 | 事项 | 现状 | 何时需要定案 |
 | --- | --- | --- |
-| MODERATION 正式实现时间 | Owner 2026-10-01 决定暂缓，只留接口；MODERATION-HOOK 随 RATE-LIMIT 接线默认放行，不作为已实现内容审核（第 19 项及[总控记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/566#issuecomment-5930126786)） | 公开上线前再请 Owner 决定；不阻塞封闭内测 |
+| MODERATION 正式实现时间 | Owner 2026-10-01 决定暂缓，只留接口；MODERATION-HOOK 随 RATE-LIMIT 接线默认放行，不作为已实现内容审核（第 19 项及[总控记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/566#issuecomment-5930126786)） | 已定（Owner 2026-10-17，第 2.1 节）：上线时继续暂缓，上线后再定 |
 | 正式环境是否强制"数据不用于训练"（RUNTIME-PROD 第 ⑦ 项、第 2.1 节第 9 项的举例、VOICE 的前置条件） | **已定**（Owner 2026-10-12 选 A，第 2.1 节）：在 OpenRouter 账号和各 workspace 隐私设置统一关闭“允许用于训练”，代码不强制 `data_collection: deny`；上线前核对 | 已定 |
 | 删除规则 E5"付费默认不退款、Owner 逐笔批准手动退款"（2026-10-05 已由第 51 项退款规则取代，[记录 Y](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982111397)）与现有退款代码和 v11 退款规则（REFUND-1B 等）的衔接 | **已定**（Owner 2026-10-03，第 2.1 节第 47 项）：PAY-COMMON 方案 #608 第 8 节 P1；退款功能按 PAY-COMMON 实施调整；2026-10-05 起退款规则按第 51 项（记录 Y、AA），积分包退款的执行能力已纳入 [PAY-COMMON 实施说明](tasks/PAY-COMMON.md) PR-4 | 已定；实施随 PAY-COMMON PR-4 |
 | staging 服务商回调地址（2026-10-01） | 旧域名已删除（第 37 项）；Stripe / Waffo 沙箱回调和 Supabase Site URL 待 Owner 自行检查确认 | 支付或邮件回调相关的 staging 验证前（建议） |
