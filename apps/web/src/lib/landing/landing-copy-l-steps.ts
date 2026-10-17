@@ -35,6 +35,23 @@ export const L_JURY = {
   flow: ['站在你的受众和你本人的角度，各自独立挑错', '意见不一致就再辩一轮', '汇总成一份修订稿，每一章用不用由你决定。'],
   link: '看评审团怎么工作',
   href: '/landing/preview/jury',
+  /**
+   * NEW (round six, S10: "让用户通过这个可视化的动画，大概能了解到什么叫做评审团"): the flow beside the card, as the jury
+   * works (FUSION-REVIEW): the report in; three reviewers find faults on their own; only where they disagree, one more
+   * round (two rounds at most); the lead writer puts it together; each chapter, revision or original, is yours to pick.
+   */
+  anim: {
+    label: '评审团怎么工作',
+    report: '你的报告',
+    reviewers: ['模型 A', '模型 B', '模型 C'],
+    review: '各自挑错',
+    debate: '意见不一致的地方，再辩一轮',
+    debateNote: '最多两轮',
+    lead: '主笔汇总成修订稿',
+    chapters: ['3 受众', '5 对标账号分析', '9 运营手册'],
+    adopt: '采用修订',
+    keep: '保留原文',
+  },
   needs: ['fusion'] as readonly LandingFeature[],
 } as const;
 

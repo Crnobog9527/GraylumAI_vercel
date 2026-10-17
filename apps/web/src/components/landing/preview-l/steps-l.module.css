@@ -24,9 +24,12 @@
 
 /* The jury, larger (JuryModuleL): the product's own entry card (fusion-review/jury-entry.module.css), at page size. */
 .jury {
-  display: grid; gap: 14px; max-width: 760px; padding: clamp(22px, 3vw, 36px); border: 1px solid var(--j-line);
+  display: grid; gap: 24px clamp(24px, 4vw, 56px); padding: clamp(22px, 3vw, 36px); border: 1px solid var(--j-line);
   border-radius: 16px; background: #fff; line-height: 1.7;
 }
+/* Round six (S10): the copy on the left, the jury's flow on the right (stacked on a phone). */
+@media (min-width: 900px) { .jury { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); align-items: center; } }
+.juryCopy { display: grid; gap: 14px; align-content: start; }
 .jury p { margin: 0; }
 .juryName { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 15px; font-weight: 600; }
 .juryName span { padding: 0 8px; border-radius: 999px; background: var(--j-gold); color: #1a1a1a; font-size: 12px; line-height: 22px; }
@@ -38,3 +41,35 @@
   justify-self: start; display: inline-flex; align-items: center; gap: 6px; min-height: 44px; color: var(--j-ink); font-size: 16px;
   text-decoration: underline; text-underline-offset: 3px;
 }
+
+/* The jury's flow (JuryFlowL): each part lights up in turn, then stays until the loop starts again. */
+.juryAnim { display: grid; justify-items: center; gap: 6px; margin: 0; padding: 18px; border-radius: 14px; background: #faf9f5; font-size: 14px; }
+.juryAnim p { margin: 0; }
+.jfReport, .jfDebate, .jfLead { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 10px; background: #fff; box-shadow: inset 0 0 0 1px var(--j-line); color: var(--j-ink); }
+.jfDebate { flex-wrap: wrap; justify-content: center; text-align: center; background: #fff7e0; }
+.jfDebate small { color: var(--j-gold-text); font-size: 12px; font-weight: 600; }
+.jfLead { background: var(--j-ink); color: #fff; }
+.jfArrow { color: #b9b7b0; }
+.jfReviewers { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; width: 100%; margin: 0; padding: 0; list-style: none; }
+.jfReviewers li { display: grid; justify-items: center; gap: 2px; padding: 8px 6px; border-radius: 10px; background: #fff; box-shadow: inset 0 0 0 1px var(--j-line); }
+.jfReviewers b { color: var(--j-ink); font-size: 14px; }
+.jfReviewers span { color: var(--j-body); font-size: 12.5px; }
+.jfChapters { display: grid; gap: 6px; width: 100%; margin: 0; padding: 0; list-style: none; }
+.jfChapters li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 10px; background: #fff; box-shadow: inset 0 0 0 1px var(--j-line); }
+.jfChapters span { margin-right: auto; color: var(--j-ink); font-size: 13.5px; }
+.jfChapters em { padding: 1px 8px; border-radius: 6px; color: var(--j-body); font-size: 12px; font-style: normal; box-shadow: inset 0 0 0 1px var(--j-line); }
+.jfChapters em[data-on] { background: var(--j-ink); color: #fff; box-shadow: none; }
+@media (prefers-reduced-motion: no-preference) {
+  .juryAnim [data-s] { animation: 11s ease infinite both; animation-delay: calc(var(--i, 0) * .25s); }
+  .juryAnim [data-s='0'] { animation-name: jf0; }
+  .juryAnim [data-s='1'] { animation-name: jf1; }
+  .juryAnim [data-s='2'] { animation-name: jf2; }
+  .juryAnim [data-s='3'] { animation-name: jf3; }
+  .juryAnim [data-s='4'] { animation-name: jf4; }
+}
+/* One loop: the report, the reviewers, the second round, the lead writer, the chapters, each lit in turn; then all fade. */
+@keyframes jf0 { 0% { opacity: .15; } 4%, 90% { opacity: 1; } 100% { opacity: .15; } }
+@keyframes jf1 { 0%, 16% { opacity: .15; } 22%, 90% { opacity: 1; } 100% { opacity: .15; } }
+@keyframes jf2 { 0%, 34% { opacity: .15; } 40%, 90% { opacity: 1; } 100% { opacity: .15; } }
+@keyframes jf3 { 0%, 52% { opacity: .15; } 58%, 90% { opacity: 1; } 100% { opacity: .15; } }
+@keyframes jf4 { 0%, 66% { opacity: .15; } 72%, 90% { opacity: 1; } 100% { opacity: .15; } }
