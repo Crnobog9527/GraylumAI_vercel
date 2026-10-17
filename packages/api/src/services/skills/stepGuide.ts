@@ -33,13 +33,21 @@ export function stepGuideText(manifest: WorkflowManifest, maxBytes = Number.POSI
 
 /** The step work of a non-positioning Skill: the guide text and the files its steps declare, in order. */
 export type StepWork = {guide: string; resources: string[]};
+/** A2: the saved content this Skill derives from (workflow.yaml `contentSource`). */
+export type ContentSourceKind = NonNullable<WorkflowManifest['contentSource']>;
 
 /** The immutable package, not today's module version, is the authority (same as the R3 organizer template). */
 export async function loadStepWork(source: SkillSource, descriptor: PackageDescriptor,
   maxGuideBytes = Number.POSITIVE_INFINITY): Promise<StepWork | undefined> {
+  const manifest = await readStepManifest(source, descriptor);
+  return manifest && stepWorkOf(manifest, maxGuideBytes);
+}
+async function readStepManifest(source: SkillSource, descriptor: PackageDescriptor): Promise<WorkflowManifest | undefined> {
   // Treat a descriptor without a file list as one without workflow.yaml.
   if (!(descriptor.files ?? []).some(item => item.path === workflowManifestPath)) return undefined;
-  const manifest = parseWorkflowManifest(await readSkillResource(source, identityOf(descriptor), workflowManifestPath, 2 * 1024 * 1024));
+  return parseWorkflowManifest(await readSkillResource(source, identityOf(descriptor), workflowManifestPath, 2 * 1024 * 1024));
+}
+function stepWorkOf(manifest: WorkflowManifest, maxGuideBytes: number): StepWork | undefined {
   const guide = stepGuideText(manifest, maxGuideBytes);
   if (guide === undefined) return undefined;
   const resources = [...new Set([...manifest.steps.flatMap(step => step.resources), ...(manifest.planResources ?? [])])]
@@ -53,13 +61,17 @@ export async function loadStepWork(source: SkillSource, descriptor: PackageDescr
  * the Skill; positioning and packages without workflow.yaml load exactly as before.
  */
 export async function activateFreeChatSkill(source: SkillSource, descriptor: PackageDescriptor,
-  options: {task?: string; maxContextBytes: number; withResources?: boolean}): Promise<{loaded: LoadedSkill; instructions: string}> {
+  options: {task?: string; maxContextBytes: number; withResources?: boolean}):
+  Promise<{loaded: LoadedSkill; instructions: string; contentSource?: ContentSourceKind}> {
   // Bounded shares keep room for the user input, history and tools, which are sized later in admission:
   // the guide at most 1/8 of the budget, the steps' files at most 1/4.
   // A package with legacy tasks keeps its mandatory task selection: never reach it through workflow resources.
   const taskPackage = Object.keys(descriptor.tasks ?? {}).length > 0;
-  const work = options.task === undefined && !taskPackage
-    ? await loadStepWork(source, descriptor, Math.floor(options.maxContextBytes / 8)) : undefined;
+  const manifest = options.task === undefined && !taskPackage ? await readStepManifest(source, descriptor) : undefined;
+  // Positioning never derives from saved content (it is the guided flow, not a free chat Skill).
+  const contentSource = manifest && !isPositioningWorkflow(manifest) ? manifest.contentSource : undefined;
+  const sourced = contentSource ? {contentSource} : {};
+  const work = manifest && stepWorkOf(manifest, Math.floor(options.maxContextBytes / 8));
   const capacity = (error: unknown) => String((error as Error)?.message).includes('CAPACITY_EXCEEDED');
   if (work) {
     // The guide is appended after loading, so its bytes come out of the budget first.
@@ -72,11 +84,11 @@ export async function activateFreeChatSkill(source: SkillSource, descriptor: Pac
     for (const attempt of attempts) {
       try {
         const loaded = await activateSkill(source, identityOf(descriptor), attempt);
-        return {loaded, instructions: loaded.forModel() + '\n' + work.guide};
+        return {loaded, instructions: loaded.forModel() + '\n' + work.guide, ...sourced};
       } catch (error) { if (!capacity(error)) throw error; }
     }
   }
   // No guide, or not even SKILL.md and the guide fit: load exactly as before.
   const loaded = await activateSkill(source, identityOf(descriptor), {task: options.task, maxContextBytes: options.maxContextBytes});
-  return {loaded, instructions: loaded.forModel()};
+  return {loaded, instructions: loaded.forModel(), ...sourced};
 }

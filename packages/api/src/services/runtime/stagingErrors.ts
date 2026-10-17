@@ -6,6 +6,7 @@ import { DatabaseReadError } from '../../lib/databaseReadError';
 import { RUNTIME_INPUT_TOO_LONG_MESSAGE } from '../../shared/runtimeInputMessages';
 import { RUNTIME_PAYG_PROFILE_REQUIRED_MESSAGE } from '../../shared/runtimeAdmissionMessages';
 import { POSITIONING_REQUIRED_MESSAGE } from '../../shared/positioningGate';
+import { CONTENT_SOURCE_MESSAGES } from '../../shared/contentSourceMessages';
 
 const failures = {
   CONTENT_ERASED: ['PRECONDITION_FAILED', 'CONTENT_ERASED'],
@@ -51,6 +52,10 @@ const failures = {
   RUNTIME_PRICE_UNKNOWN_FIELD: ['PRECONDITION_FAILED', '供应商价格里出现了系统还不认识的收费项，这个模型暂停使用，等待系统更新。'],
   // POSITIONING-GATE: stable code first; the front end shows its guide card for it.
   POSITIONING_REQUIRED: ['PRECONDITION_FAILED', POSITIONING_REQUIRED_MESSAGE],
+  // A2: a directly chosen derived-content Skill refused before any charge.
+  RUNTIME_CONTENT_SOURCE_MISSING: ['PRECONDITION_FAILED', CONTENT_SOURCE_MESSAGES.RUNTIME_CONTENT_SOURCE_MISSING],
+  RUNTIME_CONTENT_SOURCE_STALE: ['PRECONDITION_FAILED', CONTENT_SOURCE_MESSAGES.RUNTIME_CONTENT_SOURCE_STALE],
+  RUNTIME_CONTENT_SOURCE_TOO_LARGE: ['PRECONDITION_FAILED', CONTENT_SOURCE_MESSAGES.RUNTIME_CONTENT_SOURCE_TOO_LARGE],
 } as const;
 export type StagingFailure = keyof typeof failures;
 export class StagingAccessError extends Error {

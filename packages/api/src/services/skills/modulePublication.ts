@@ -49,6 +49,8 @@ export function prepareModuleSkill(value: ModuleSkillInput) {
     try { manifestText = new TextDecoder('utf-8',{fatal:true}).decode(Buffer.from(manifestFile.base64,'base64')); }
     catch { throw new Error('workflow.yaml 必须使用 UTF-8 编码'); }
     const {organizerTemplate, ...declared} = parseWorkflowManifest(manifestText);
+    // contentSource, like organizerTemplate, is read from the immutable package at run time, not stored in the workflow.
+    delete declared.contentSource;
     if (organizerTemplate !== undefined) {
       const file = input.files.find(item => item.path === organizerTemplate);
       if (!file) throw new Error('SKILL_ORGANIZER_TEMPLATE_INVALID');

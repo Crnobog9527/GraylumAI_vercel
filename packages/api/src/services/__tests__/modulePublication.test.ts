@@ -127,6 +127,15 @@ describe('administrator module publication', () => {
     input.steps[1].information![0].title='旧问题';
     expect(()=>prepareModuleSkill(input)).toThrow('不一致');
   });
+  it('A2: publishes a derived-content Skill; its contentSource stays in the package, not in the stored workflow', () => {
+    const input = moduleInput();
+    input.steps = [{ title: '出分镜', resources: ['SKILL.md'] }];
+    input.files.push({path:'workflow.yaml',base64:Buffer.from(
+      'kind: document\ncontentSource: script\nsteps:\n  - title: 出分镜\n    resources: [SKILL.md]\n').toString('base64')});
+    const prepared = prepareModuleSkill(input);
+    expect(JSON.stringify(prepared.workflow)).not.toContain('contentSource');
+    expect(prepared.files.some(file => file.path === 'workflow.yaml')).toBe(true);
+  });
   it('keeps an older revision without the property valid and publishable', async () => {
     const input = moduleInput();
     input.steps[0].information = [{ id: 'legacy_fact', title: '旧版字段', required: true, profileKey: 'legacy_fact' }];
