@@ -23,6 +23,21 @@ describe('report sections', () => {
       .toEqual({ main: '结论。\n\n### 补充\n\n还有 B。', reasons: '因为 A。' });
     expect(splitReasons('只有结论。')).toEqual({ main: '只有结论。', reasons: null });
   });
+  it.each([
+    ['一句话结论（约 200 字）', '一句话结论'],
+    ['二、现状盘点（约 300 字）', '二、现状盘点'],
+    ['四、受众（约 1500 字）', '四、受众'],
+    ['五、对标账号分析（约 800 字，3–10 个合格账号）', '五、对标账号分析'],
+    ['十、变现路径：销售漏斗和商业飞轮（至少 2000 字，建议约 2400 字）', '十、变现路径：销售漏斗和商业飞轮'],
+    ['十一、运营手册（不超过 2400 字）', '十一、运营手册'],
+    ['十二、合规提醒（800 字以内）', '十二、合规提醒'],
+    ['十三、见效时间（字数 150 左右）', '十三、见效时间'],
+    ['十四、待验证的假设（約 800 字）', '十四、待验证的假设'],
+    ['八、内容规划 (约 1300 字)', '八、内容规划'],
+    ['九、运营手册：照着做就行（约 2400 字）', '九、运营手册：照着做就行'],
+  ])('shows the title %s without its length hint', (title, shown) => expect(reportDisplayTitle(title)).toBe(shown));
+  it.each(['见效时间（约 3 个月）', '预算（约 500 元）', '对标账号分析（3–10 个合格账号）', '变现路径（漏斗）', '定位（B 版）', '一句话结论'])(
+    'keeps the business bracket in %s', title => expect(reportDisplayTitle(title)).toBe(title));
   it('drops writing hints from titles for display, and matches numbered titles to chapters', () => {
     expect(reportDisplayTitle('五、对标账号分析（约 800 字，3–10 个合格账号）')).toBe('五、对标账号分析');
     expect(reportDisplayTitle('一句话结论（约 200 字）')).toBe('一句话结论');
