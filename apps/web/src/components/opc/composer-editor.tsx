@@ -186,9 +186,20 @@ export function ComposerEditor(props: Props) {
     insertReference: (range, reference) => {
       if (!editor) return false;
       const before = editor.state.doc;
-      editor.chain().focus().insertContentAt({ from: range.from, to: range.to }, [
-        { type: REFERENCE_NODE, attrs: reference }, { type: 'text', text: ' ' },
-      ]).run();
+      editor.chain().focus().command(({ tr }) => {
+        // Choosing a document that is already in the message (e.g. its newer version after LIB_REFERENCE_STALE)
+        // replaces the older tag: the request carries one version per document, the first tag's.
+        const older: number[] = [];
+        tr.doc.descendants((node, pos) => {
+          if (node.type.name === REFERENCE_NODE && node.attrs.documentId === reference.documentId) older.push(pos);
+        });
+        tr.insert(range.to, [
+          tr.doc.type.schema.nodes[REFERENCE_NODE].create(reference), tr.doc.type.schema.text(' '),
+        ]);
+        tr.delete(range.from, range.to);
+        for (const pos of older.map(at => tr.mapping.map(at)).sort((a, b) => b - a)) tr.delete(pos, pos + 1);
+        return true;
+      }).run();
       // The length filter drops a transaction silently; an unchanged document means it did not fit.
       return editor.state.doc !== before;
     },
