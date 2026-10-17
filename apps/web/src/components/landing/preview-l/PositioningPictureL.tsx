@@ -18,7 +18,6 @@ import { Button } from '@/components/ui/button';
 import { J_PERSONA_DIRECTION, J_PERSONA_GOAL, J_PERSONA_ON_CAMERA, J_STEPS } from '@/lib/landing/landing-copy-j-persona';
 import { J_REPORT, J_TAKEOVER_MOMENTS, type TakeoverLine } from '@/lib/landing/landing-copy-j-takeover';
 import { L_OPENING } from '@/lib/landing/landing-copy-l-steps';
-import { cn } from '@/lib/utils';
 import { L_CLIP_PARTS } from './RealPartsL';
 import styles from './picture-l.module.css';
 
