@@ -29,7 +29,7 @@ export function arrivedAt(local: number, count: number) {
 }
 
 /** How far the newest message has been read, 0 to 1: a short hold after it arrives, then on to its end. */
-function readThrough(local: number, count: number) {
+export function readThrough(local: number, count: number) {
   const position = local * count * 1.15;
   const arrived = arrivedAt(local, count);
   const share = arrived < count ? position - Math.floor(position) : Math.min(1, (position - (count - 1)) / (count * 1.15 - (count - 1)));
@@ -83,23 +83,7 @@ export function PositioningClipJ({ moment, local, pick, parts }: {
   const stepTitle = J_STEPS[shownStep].title;
   return (
     <div className={styles.app}>
-      <aside className={cn(frame.rail, styles.rail)} aria-label="工作区导航" inert>
-        <span className={frame.newConversation}><img className={frame.newConversationIcon} src="/opc-reference/new-chat.svg" alt="" />新对话</span>
-        <nav className={frame.railNav}>
-          <span><img className={frame.navIcon} src="/opc-reference/squares-four.svg" alt="" />功能广场</span>
-          <span><img className={frame.navIcon} src="/opc-reference/magnifying-glass.svg" alt="" />搜索</span>
-          <span><img className={frame.navIcon} src="/opc-reference/books.svg" alt="" />资料库</span>
-          <button type="button" disabled><img className={frame.navIcon} src="/opc-reference/calendar-blank.svg" alt="" />发布排期 <small>待接入</small></button>
-          <button type="button" disabled><img className={frame.navIcon} src="/opc-reference/chart-bar.svg" alt="" />数据复盘 <small>待接入</small></button>
-        </nav>
-        <div className={frame.history}>
-          <div className={frame.historyHead}><span>平台 · 账号 · 工作</span></div>
-          <details open><summary>待归类</summary>
-            <DraftRow draft={{ draftId: 'sample', businessName: J_PERSONA.account, state: step === 3 ? 'published' : 'draft' }}
-              menuOpen={false} menuPosition={{}} onOpenMenu={noop} onCloseMenu={noop} onDeleteConversation={noop} onDeleteDraft={noop} />
-          </details>
-        </div>
-      </aside>
+      <RailJ published={step === 3} />
 
       <section className={styles.center} inert>
         <header className={result.positionTop}>
@@ -210,6 +194,29 @@ function Report({ writing, local }: { writing: boolean; local: number }) {
         </footer>
       </section>
     </div>
+  );
+}
+
+/** The workspace sidebar as the product draws it: 新对话, the feature links, this person's draft under 待归类. */
+export function RailJ({ published }: { published: boolean }) {
+  return (
+    <aside className={cn(frame.rail, styles.rail)} aria-label="工作区导航" inert>
+      <span className={frame.newConversation}><img className={frame.newConversationIcon} src="/opc-reference/new-chat.svg" alt="" />新对话</span>
+      <nav className={frame.railNav}>
+        <span><img className={frame.navIcon} src="/opc-reference/squares-four.svg" alt="" />功能广场</span>
+        <span><img className={frame.navIcon} src="/opc-reference/magnifying-glass.svg" alt="" />搜索</span>
+        <span><img className={frame.navIcon} src="/opc-reference/books.svg" alt="" />资料库</span>
+        <button type="button" disabled><img className={frame.navIcon} src="/opc-reference/calendar-blank.svg" alt="" />发布排期 <small>待接入</small></button>
+        <button type="button" disabled><img className={frame.navIcon} src="/opc-reference/chart-bar.svg" alt="" />数据复盘 <small>待接入</small></button>
+      </nav>
+      <div className={frame.history}>
+        <div className={frame.historyHead}><span>平台 · 账号 · 工作</span></div>
+        <details open><summary>待归类</summary>
+          <DraftRow draft={{ draftId: 'sample', businessName: J_PERSONA.account, state: published ? 'published' : 'draft' }}
+            menuOpen={false} menuPosition={{}} onOpenMenu={noop} onCloseMenu={noop} onDeleteConversation={noop} onDeleteDraft={noop} />
+        </details>
+      </div>
+    </aside>
   );
 }
 

@@ -6,12 +6,11 @@ import { ChevronsDown } from 'lucide-react';
 import { CtaK } from '@/components/landing/preview-k/CtaK';
 import k from '@/components/landing/preview-k/k.module.css';
 import page from '@/components/landing/preview-j/j.module.css';
-import { PositioningClipJ } from '@/components/landing/preview-j/PositioningClipJ';
 import takeover from '@/components/landing/preview-j/takeover-j.module.css';
 import { L_STEPS, type StepStage } from '@/lib/landing/landing-copy-l-steps';
 import { allOn, visibleItems, type LandingFlags } from '@/lib/landing/landing-flags';
 import { cn } from '@/lib/utils';
-import { L_CLIP_PARTS } from './RealPartsL';
+import { PositioningPictureL } from './PositioningPictureL';
 import styles from './steps-l.module.css';
 
 /** How much of the scroll each stage takes: the two long conversations more, the plan's short summary less. */
@@ -37,8 +36,8 @@ export function stageAt(stages: readonly StepStage[], progress: number) {
 
 /**
  * Region 3, round four (Owner 2026-10-17): 第一步/第二步/第三步. Step one is sample J's whole positioning flow, the
- * real product's parts inside it (the question card, checklist, confirm area, research record, benchmark table and
- * report dialog; RealPartsL). The visitor watches it through: on screen the stage holds still and the scroll plays the
+ * real product's display components (PositioningPictureL). The visitor watches it through: on screen the stage holds
+ * still and the scroll plays the
  * four stages, with the step's progress shown; a visitor who has seen it to the end before (remembered in this
  * browser) gets a button that jumps past it. Steps two and three show only once their capability ships. Server HTML
  * and reduced motion: the four stages stacked, finished.
@@ -99,7 +98,7 @@ export function StepsL({ flags }: { flags: LandingFlags }) {
                   <button type="button" className={styles.skip} onClick={skip}><ChevronsDown size={15} aria-hidden="true" />{L_STEPS.skip}</button>
                 ) : null}
               </div>
-              <div className={takeover.picture}><PositioningClipJ moment={stage.moment} local={local} parts={L_CLIP_PARTS} /></div>
+              <div className={takeover.picture}><PositioningPictureL moment={stage.moment} local={local} /></div>
             </div>
           </div>
         </section>
@@ -110,7 +109,7 @@ export function StepsL({ flags }: { flags: LandingFlags }) {
             {stages.map(item => (
               <article key={item.label} className={takeover.staticStep} data-region="第一步的阶段">
                 <div className={takeover.caption}><h3>{item.label}</h3><p>{item.note}</p></div>
-                <div className={takeover.picture}><PositioningClipJ moment={item.moment} local={1} parts={L_CLIP_PARTS} /></div>
+                <div className={takeover.picture}><PositioningPictureL moment={item.moment} local={1} /></div>
               </article>
             ))}
           </div>

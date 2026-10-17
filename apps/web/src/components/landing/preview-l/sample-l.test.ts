@@ -1,4 +1,6 @@
-import { createElement } from 'react';
+import { createElement, type ReactElement } from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { httpLink } from '@trpc/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import sitemap from '@/app/sitemap';
@@ -17,7 +19,9 @@ import { LANDING_FEATURES, type LandingFlags } from '@/lib/landing/landing-flags
 import { buildLandingPageData } from '@/lib/landing/landing-page-data';
 import { APP_SEGMENTS } from '@/lib/sentry-scrub';
 import { L_SAMPLES_REDO } from '@/lib/landing/landing-copy-l-samples';
+import { trpc } from '@/trpc/client';
 import { GlanceL } from './GlanceL';
+import { PositioningPictureL } from './PositioningPictureL';
 import { SampleL } from './SampleL';
 
 const ALL_ON = Object.fromEntries(Object.keys(LANDING_FEATURES).map(key => [key, true])) as LandingFlags;
@@ -27,8 +31,13 @@ const plan = (level: string, monthly: number, yearly: number) => ({
   credits: { monthly: 1000, monthlyBonus: 0 }, discount: 0, checkoutReady: { monthly: true, yearly: true },
 });
 const data = buildLandingPageData(ALL_ON, [plan('pro', 29, 279), plan('gold', 69, 621)]);
+// The page sits inside the app's tRPC provider (root layout); the real message box (WorkComposer) needs it. Nothing is fetched.
+const queryClient = new QueryClient();
+const client = trpc.createClient({ links: [httpLink({ url: 'http://landing.test/api/trpc' })] });
+const withTrpc = (node: ReactElement) =>
+  createElement(trpc.Provider, { client, queryClient }, createElement(QueryClientProvider, { client: queryClient }, node));
 const render = (flags: LandingFlags = ALL_ON, showSamples = true) =>
-  renderToStaticMarkup(createElement(SampleL, { data, siteName: 'Graylum', extras: { flags, showSamples } }));
+  renderToStaticMarkup(withTrpc(createElement(SampleL, { data, siteName: 'Graylum', extras: { flags, showSamples } })));
 
 describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
   it('is never indexed, never listed in the sitemap, and its segment is known to the Sentry scrubber', () => {
@@ -67,12 +76,26 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     const html = render();
     const steps = html.slice(html.indexOf('id="steps-title"'), html.indexOf('id="jury-title"'));
     expect(steps).toContain(L_STEPS.one.title);
-    for (const real of ['我的定位分析', '定位清单', 'AI 自媒体陪跑教练 · 了解你']) expect(steps).toContain(real);
+    for (const real of ['我的定位分析', '定位清单', 'AI 自媒体陪跑教练 · 主动引导 · 了解你', 'aria-label="添加资料"', 'aria-label="发送"']) {
+      expect(steps).toContain(real);
+    }
+    // It opens with the coach, never with a message of the person's.
+    expect(steps.indexOf('data-message-role="assistant"')).toBeLessThan(steps.indexOf('data-message-role="user"'));
     for (const stage of L_STEPS.one.stages) { expect(steps).toContain(stage.label); expect(steps).toContain(escape(stage.note)); }
     expect(steps).not.toContain('为什么不是正确的废话');
     // The research stage shows the product's own search record and benchmark table; the report its dialog, written.
     for (const real of ['aria-label="搜索记录"', '对标账号 A', '对标账号 G', '完整运营策略报告']) expect(steps).toContain(real);
     expect(steps).not.toContain('AB 测试');
+  });
+
+  it('docks the open question in the real message box, as the product page does, and drops it once answered', () => {
+    const open = renderToStaticMarkup(withTrpc(createElement(PositioningPictureL, { moment: 0, local: 0 })));
+    expect(open).toContain('data-question-card="open"');
+    expect(open.indexOf('data-question-card="open"')).toBeGreaterThan(open.indexOf('role="log"'));
+    expect(open).toContain('AI 自媒体陪跑教练 · 主动引导');
+    expect(open).not.toContain('data-message-role="user"');
+    const answered = renderToStaticMarkup(withTrpc(createElement(PositioningPictureL, { moment: 0, local: 1 })));
+    expect(answered).not.toContain('data-question-card="open"');
   });
 
   it('keeps steps two and three off until built, even with every flag on, and the jury larger with the fusion flag', () => {
@@ -134,7 +157,7 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     for (const shown of first) expect(text).toContain(shown);
     expect(text).not.toContain(L_TASKS[1].question);
     expect(text).toContain(L_SCENARIOS.badge);
-    expect(text).not.toContain('AI 自媒体陪跑教练 ·');
+    expect(text).not.toContain('AI 自媒体陪跑教练');
     for (const task of L_TASKS) expect(task.coach).toContain('接下来你做');
     for (const brand of ['ChatGPT', 'Claude', 'Gemini', 'DeepSeek', '豆包', 'Kimi']) expect(text).not.toContain(brand);
     // A scenario whose capability is not built does not show; by default only the positioning one, so no tabs.

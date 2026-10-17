@@ -75,7 +75,7 @@ export function ScenariosL({ flags, after }: { flags: LandingFlags; after?: Reac
           aria-labelledby={items.length > 1 ? `${base}-tab-${active}` : undefined} className={styles.panel} key={current.copy.tab}>
           <h3 className={styles.title}>{current.copy.title}</h3>
           <p className={styles.lede}>{current.copy.lede}</p>
-          <CompareJ embedded pairs={[current.task]} played={!moving || seen} badge={L_SCENARIOS.badge} />
+          <CompareJ embedded pairs={[current.task]} played={!moving || seen} badge={L_SCENARIOS.badge} plainCoach />
         </div>
         {after}
       </div>

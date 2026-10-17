@@ -90,3 +90,6 @@
 
 /* Sample L, round three: one line under each pair saying what the two answers come down to. */
 .verdict { grid-column: 1 / -1; margin: 4px 0 0; color: var(--j-ink); font-size: 16px; font-weight: 600; }
+.verdict[data-centred] { margin-top: 14px; text-align: center; }
+.mobileName img { width: 14px; height: 14px; border-radius: 4px; }
+.mobileName .badge { font-weight: 500; }

@@ -56,13 +56,20 @@ function ReportDialogL({ writing, local }: { writing: boolean; local: number }) 
   const shown = writing ? Math.min(1, Math.max(0.12, local * 1.1)) : 1;
   const text = REPORT_TEXT.slice(0, Math.round(REPORT_TEXT.length * shown));
   const live = writing && shown < 1;
-  const box = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => { if (live && box.current) box.current.scrollTop = box.current.scrollHeight; }, [live, text]);
+  // The card keeps the product's own size; the layer over the picture scrolls when the picture is shorter than it.
+  const layer = useRef<HTMLDivElement>(null);
+  const card = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (!live) return;
+    for (const node of [card.current, layer.current]) if (node) node.scrollTop = node.scrollHeight;
+  }, [live, text]);
   const notices = live ? [{ id: 'report-live', tone: 'status' as const, busy: true, text: REPORT_WRITING_NOTICE,
     actions: [{ label: CHAT_ACTION.stop, onClick: () => undefined }] }] : [];
   return (
-    <div role="dialog" aria-modal="false" aria-label={REPORT_TITLE} className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div ref={box} className={`${result.consentCard} !max-w-3xl`} style={{ maxHeight: '100%', overflowY: 'auto' }}>
+    <div ref={layer} role="dialog" aria-modal="false" aria-label={REPORT_TITLE}
+      className="absolute inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4">
+      {/* The card as report-panel.tsx's ReportDialog writes it, `!max-w-3xl` included. */}
+      <div ref={card} className={`${result.consentCard} !max-w-3xl`}>
         <header>
           <h2>{REPORT_TITLE}</h2>
           <Button className={result.consentClose} variant="ghost" aria-label={`关闭${REPORT_TITLE}`} tabIndex={-1}>

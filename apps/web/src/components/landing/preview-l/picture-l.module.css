@@ -1,0 +1,12 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/* Sample L's step one picture (PositioningPictureL): only the frame around the product's own components. The middle
+   column scrolls as a whole, like the product page, kept at its end (newest message, the message box, the footer). */
+.column { position: relative; min-width: 0; min-height: 0; margin: 6px 0; border-radius: 12px; background: #fff; overflow: hidden; }
+.scroll { display: grid; align-content: start; gap: 12px; height: 100%; padding: 12px 18px; overflow: hidden; }
+/* A block around the message box, as on the product page, so it takes the column's width up to its own maximum. */
+.composer { display: block; min-width: 0; }
+.demo {
+  position: absolute; top: 12px; right: 14px; padding: 0 8px; border-radius: 999px; background: var(--gl-accent-tag);
+  color: var(--gl-accent-tag-text); font-size: 11.5px; line-height: 20px;
+}
+@media (max-width: 860px) { .column { margin: 0; border-radius: 0; } .scroll { padding: 10px 12px; } }

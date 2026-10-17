@@ -39,12 +39,14 @@ export function pairTiming(generic: string, coach: string, coachFirst = false) {
  * J's pairs; a pair may carry its own coach `head` (the product's, for that kind of conversation) and a `verdict` under it.
  * Round four (Owner 2026-10-17: one scenario at a time): `embedded` gives the board alone, for a section of the caller's,
  * `played` plays its rows at once (rows mounted after the page's scroll watcher started are not watched), and `badge`
- * replaces the coach window's tag (示意: a comparison, not a product window).
+ * replaces the coach window's tag (示意: a comparison, not a product window). With `badge` the coach side also carries its
+ * name and tag on a phone, where the window bars are hidden; `plainCoach` drops the product's message head inside the
+ * coach's reply (a marketing comparison, Owner 2026-10-17), and an embedded board's verdict is centred under both.
  */
-export function CompareJ({ title, picks, next, band = 'ink', steps, after, pairs, embedded, played, badge }: {
+export function CompareJ({ title, picks, next, band = 'ink', steps, after, pairs, embedded, played, badge, plainCoach }: {
   title?: string; picks?: readonly number[]; next?: Readonly<Record<number, string>>; band?: 'ink' | 'tint';
   steps?: Readonly<Record<number, string>>; after?: ReactNode; pairs?: readonly ComparePair[];
-  embedded?: boolean; played?: boolean; badge?: string;
+  embedded?: boolean; played?: boolean; badge?: string; plainCoach?: boolean;
 } = {}) {
   const all: readonly ComparePair[] = pairs ?? J_COMPARE.pairs;
   const shown = (picks ?? all.map((_, index) => index)).map(index => ({ pair: all[index], index }));
@@ -74,11 +76,15 @@ export function CompareJ({ title, picks, next, band = 'ink', steps, after, pairs
               </div>
               <div className={styles.cell} data-side="coach">
                 <div inert aria-hidden="true">
+                  {badge ? <p className={styles.mobileName}><img src="/graylum-logo.png" alt="" />{J_COMPARE.coachName}
+                    <i className={styles.badge}>{badge}</i></p> : null}
                   {first ? null : <p className={styles.question}><span>你</span>{pair.question}</p>}
                   <div className={styles.coachReply}>
-                    <span className={result.agentIdentity}>
-                      <img src="/graylum-logo.png" alt="" />{pair.head ?? `AI 自媒体陪跑教练${steps?.[index] ? ` · ${steps[index]}` : ''}`}
-                    </span>
+                    {plainCoach ? null : (
+                      <span className={result.agentIdentity}>
+                        <img src="/graylum-logo.png" alt="" />{pair.head ?? `AI 自媒体陪跑教练${steps?.[index] ? ` · ${steps[index]}` : ''}`}
+                      </span>
+                    )}
                     <p><Typed text={coach} start={timing.coachStart} /></p>
                   </div>
                 </div>
@@ -87,7 +93,7 @@ export function CompareJ({ title, picks, next, band = 'ink', steps, after, pairs
                   <p className={styles.source}>{J_COMPARE.sourceLabel}：{pair.source}</p>
                 </div>
               </div>
-              {pair.verdict ? <p className={styles.verdict}>{pair.verdict}</p> : null}
+              {pair.verdict ? <p className={styles.verdict} data-centred={embedded || undefined}>{pair.verdict}</p> : null}
             </li>
           );
         })}

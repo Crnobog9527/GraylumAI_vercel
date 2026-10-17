@@ -123,7 +123,8 @@
 @media (prefers-reduced-motion: no-preference) {
   .opsLog > * { animation: flowIn .5s var(--j-ease) both; animation-delay: calc(var(--m) * 900ms + 150ms); }
 }
-.opsNote { margin: 6px 0 0 !important; color: #5f5e5a; font-size: 13px !important; }
+/* Doubled class: above the card's own `p` rule (week-j .doc p) without !important. */
+.opsNote.opsNote { margin: 6px 0 0; color: #5f5e5a; font-size: 13px; }
 .opsTest { display: grid; gap: 6px; }
 .opsTest p { display: flex; gap: 10px; margin: 0; padding: 8px 10px; border-radius: 10px; background: #fafaf8; font-size: 14px; }
 .opsTest b { flex: none; color: var(--j-gold-text); }
