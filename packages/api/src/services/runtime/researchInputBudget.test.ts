@@ -12,8 +12,12 @@ import {RESEARCH_TURN_INPUT_BYTES} from './researchAdmission';
 import {DISABLED_RESEARCH_TOOLS,researchToolsConfigSchema} from '../research/vendors/config';
 import {tikhubRouteId} from '../research/vendors/tikhub';
 import {FIRECRAWL_ROUTE} from '../research/vendors/firecrawl';
-vi.mock('./newWorkGate',async original=>({...await original<typeof import('./newWorkGate')>(),
- ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates}));
+const switchRead=vi.hoisted(()=>({on:false}));
+vi.mock('./newWorkGate',async original=>{
+ const gates=(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates;
+ return {...await original<typeof import('./newWorkGate')>(),...gates,
+  readAdmissionSettings:async()=>({...await gates.readAdmissionSettings(),researchEnabled:switchRead.on})};
+});
 vi.mock('../skills/databaseSource',()=>({databaseSkillSource:()=>({list:async()=>[{revisionId}]})}));
 const skill=vi.hoisted(()=>({text:'Pinned skill'}));
 vi.mock('../skills/loader',()=>({identityOf:(value:unknown)=>value,activateSkill:async()=>({forModel:()=>skill.text})}));
@@ -56,6 +60,9 @@ function fixture(enabled:boolean,budgets=true){
  const rpc=vi.fn(async(name:string,args:Record<string,unknown>)=>{
   if(name==='runtime_session_context')return {data:{scope:{kind:'positioning_draft',draftId:actor}},error:null};
   if(name==='runtime_admission_replay')return {data:saved,error:null};
+  if(name==='research_user_cards')return {data:[{cardId:requestId,kind:'keywords',options:[],minSelect:1,maxSelect:5,
+   confirmationId:modelId,items:['家居收纳']}],error:null};
+  if(name==='research_benchmark_rows')return {data:{rows:[],hash:'c'.repeat(64)},error:null};
   if(name==='runtime_admit'){saved={context:args.p_payload,billing:args.p_billing};return {data:saved,error:null};}
   throw new Error(name);
  });
@@ -106,4 +113,18 @@ it('a small research turn is frozen at the raised ceiling too, and without purpo
  expect(small.purposeBudget?.inputBytes).toBe(RESEARCH_TURN_INPUT_BYTES);
  const legacy=await admit(true,300,false);
  expect(legacy.purposeBudget).toBeUndefined();
+});
+
+it('with the switch on, the cards and benchmark table join the turn only together with the tools (#1070 review)',async()=>{
+ switchRead.on=true;
+ try{
+  const attached=await admit(true,300);
+  expect(attached.research).toBeDefined();
+  expect(attached.hostTurnContext?.research?.cards).toEqual([{kind:'keywords',cardId:requestId,confirmationId:modelId,keywords:['家居收纳']}]);
+  // Tools that cannot attach leave the ordinary turn exactly as it was: no block, no capacity refusal.
+  const plain=await admit(true,84000);
+  expect(plain.research).toBeUndefined();
+  expect(plain.hostTurnContext?.research).toBeUndefined();
+  expect(plain.purposeBudget?.inputBytes).toBe(90000);
+ }finally{switchRead.on=false;}
 });
