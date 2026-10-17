@@ -49,6 +49,12 @@ describe('scan recognition driver', () => {
     await runScanRecognition(calls, new AbortController().signal, (_, p) => seen.push(p));
     expect(seen.at(-1)).toEqual({ done: 2, total: 2, failed: 1, state: 'done' });
   });
+  it('stops and reports the pause when another browser already paused the unit for space', async () => {
+    const calls = api({ recognize: vi.fn(async () => [page(2, '')]), fail: vi.fn(async () => ({ status: 'paused' })) });
+    const seen: ScanProgress[] = [];
+    expect(await runScanRecognition(calls, new AbortController().signal, (_, p) => seen.push(p))).toBe('paused');
+    expect(seen.at(-1)).toMatchObject({ state: 'paused' });
+  });
   it('ends only the document that was deleted mid-run and carries on with the rest of the queue', async () => {
     const queue = [doc([2]), { documentId: 'd2', format: 'pdf' as const, contentVersion: 1, positions: [3] }];
     const calls = api({

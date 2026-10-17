@@ -32,7 +32,9 @@ function queueLabel(item: UploadItem): string {
 }
 
 export type UploadPanelProps = {
-  uploadEnabled: boolean; /** The server's recognition switch; the scan sentence needs it as well as the build flag. */ scanServerEnabled?: boolean; spaceKnown: boolean; usedBytes?: number; capacityBytes?: number;
+  uploadEnabled: boolean; spaceKnown: boolean;
+  /** The server's recognition switch; the scan sentence needs it as well as the build flag. */
+  scanServerEnabled?: boolean; usedBytes?: number; capacityBytes?: number;
   uploads: UploadItem[]; onAdd: (files: File[], purpose: LibraryPurpose) => void;
   onRetry: (key: string) => void; onDismiss: (key: string) => void | Promise<void>;
 };

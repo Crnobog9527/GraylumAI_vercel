@@ -120,6 +120,12 @@ async function recognizeDocument(api: ScanApi, document: PendingDocument, signal
         // Unreadable page (for example a JPEG 2000 image the sandbox cannot draw) or no text found.
         // A failure that was not recorded is not counted: the error stops the run and the page stays waiting.
         const failed = await persist(() => api.fail({ documentId: document.documentId, kind, position: result.page }), signal);
+        if (failed.status === 'paused') {
+          // Another browser paused this unit for space: report the pause and stop, as the save path does.
+          progress.state = 'paused';
+          report();
+          return 'paused';
+        }
         if (failed.status === 'failed') progress.failed += 1;
       } else {
         let saved: SaveResult;

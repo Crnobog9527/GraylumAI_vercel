@@ -5,6 +5,7 @@ import { trpc } from '@/trpc/client';
 import { isLibraryScanRecognitionEnabled } from '@/lib/library-sandbox/feature-flag';
 import { recognizePdfPagesInBrowser } from '@/lib/library-sandbox/ocr/scan';
 import { recognizeImagesInBrowser } from '@/lib/library-sandbox/ocr/client';
+import { OCR_LIMITS } from '@/lib/library-sandbox/limits';
 import { extractDocxInBrowser } from '@/lib/library-sandbox/docx/client';
 import type { DocxImage } from '@/lib/library-sandbox/docx/document-text';
 import { isSignedStorageUrl } from '@/lib/library-documents/signed-url';
@@ -17,6 +18,9 @@ import { oneTabAtATime, runScanRecognition, type ScanApi, type ScanProgress } fr
  */
 /** Image types the recognition engine reads (others, such as EMF or GIF, are marked failed). */
 const RECOGNIZABLE = new Set(['image/jpeg', 'image/png', 'image/webp']);
+/** An image the engine accepts: a supported type and a size it can read (empty or over the limit fails alone). */
+const readableImage = (image: DocxImage | undefined): image is DocxImage =>
+  !!image && RECOGNIZABLE.has(image.contentType) && image.bytes.byteLength > 0 && image.bytes.byteLength <= OCR_LIMITS.maxImageBytes;
 
 export type ScanListeners = { onDocumentChanged(): void; onSaved(documentId: string, contentVersion: number): void };
 const NO_LISTENERS: ScanListeners = { onDocumentChanged: () => undefined, onSaved: () => undefined };
@@ -70,14 +74,14 @@ export function useScanRecognition() {
         }
         const images = await extraction;
         const picked = positions.map((position) => images[position - 1]);
-        const readable = picked.filter((image): image is DocxImage => !!image && RECOGNIZABLE.has(image.contentType));
+        const readable = picked.filter(readableImage);
         const pages = readable.length
           ? await recognizeImagesInBrowser(readable.map((image) => new Blob([image.bytes], { type: image.contentType })), { signal })
           : [];
         let next = 0;
         return positions.map((position, i) => {
           const image = picked[i];
-          if (!image || !RECOGNIZABLE.has(image.contentType)) return { page: position, ok: false as const, code: 'IMAGE_INVALID' as const };
+          if (!readableImage(image)) return { page: position, ok: false as const, code: 'IMAGE_INVALID' as const };
           return { page: position, ...pages[next++]! };
         });
       },
@@ -91,7 +95,10 @@ export function useScanRecognition() {
     void oneTabAtATime(() => runScanRecognition(api, controller.signal, (documentId, value) => {
       setProgress((current) => ({ ...current, [documentId]: value }));
       if (value.state !== 'running' || value.done > 0) listeners.current.onDocumentChanged();
-    }), controller.signal).catch(() => {
+    }), controller.signal).then(() => {
+      // A tab that waited for another tab's lock may have had nothing left to do; its list is refreshed once anyway.
+      if (!controller.signal.aborted) listeners.current.onDocumentChanged();
+    }).catch(() => {
       // An unexpected failure leaves no document running, so the page stops warning before leaving.
       setProgress((current) => Object.fromEntries(Object.entries(current)
         .map(([id, value]) => [id, value.state === 'running' ? { ...value, state: 'stopped' as const } : value])));
