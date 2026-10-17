@@ -8,7 +8,7 @@ import { recognizeImagesInBrowser } from '@/lib/library-sandbox/ocr/client';
 import { extractDocxInBrowser } from '@/lib/library-sandbox/docx/client';
 import type { DocxImage } from '@/lib/library-sandbox/docx/document-text';
 import { isSignedStorageUrl } from '@/lib/library-documents/signed-url';
-import { runScanRecognition, type ScanApi, type ScanProgress } from '@/lib/library-documents/scan-recognition';
+import { oneTabAtATime, runScanRecognition, type ScanApi, type ScanProgress } from '@/lib/library-documents/scan-recognition';
 
 /**
  * LIB-2d: while the library page is open, recognises waiting scanned PDF pages and Word images in the browser and saves their text
@@ -73,10 +73,10 @@ export function useScanRecognition(onDocumentChanged: () => void, onSaved: (docu
       },
       fail: (input) => latest.current.fail.mutateAsync(input),
     };
-    void runScanRecognition(api, controller.signal, (documentId, value) => {
+    void oneTabAtATime(() => runScanRecognition(api, controller.signal, (documentId, value) => {
       setProgress((current) => ({ ...current, [documentId]: value }));
       if (value.state !== 'running' || value.done > 0) latest.current.onDocumentChanged();
-    }).catch(() => {
+    }), controller.signal).catch(() => {
       // An unexpected failure leaves no document running, so the page stops warning before leaving.
       setProgress((current) => Object.fromEntries(Object.entries(current)
         .map(([id, value]) => [id, value.state === 'running' ? { ...value, state: 'stopped' as const } : value])));

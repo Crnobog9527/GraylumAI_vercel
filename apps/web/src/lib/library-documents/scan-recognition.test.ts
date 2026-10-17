@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from 'vitest';
-import { runScanRecognition, scanProgressText, type PendingDocument, type ScanApi, type ScanProgress } from './scan-recognition';
+import { oneTabAtATime, runScanRecognition, SCAN_LOCK, scanProgressText, type PendingDocument, type ScanApi, type ScanProgress } from './scan-recognition';
 
 const doc = (positions: number[], contentVersion = 1): PendingDocument => ({ documentId: 'd1', format: 'pdf', contentVersion, positions });
 const page = (n: number, text = `第 ${n} 页文字`) => ({ page: n, ok: true as const, text, confidence: 0.9, angle: 0, flipped: false, ms: 1 });
@@ -110,5 +110,33 @@ describe('scan recognition driver', () => {
     expect(scanProgressText({ done: 12, total: 12, failed: 2, state: 'done' })).toBe('扫描页识别完成，2 页没能识别');
     expect(scanProgressText({ done: 0, total: 2, failed: 0, state: 'paused' })).toContain('空间不够');
     expect(scanProgressText(undefined)).toBeUndefined();
+  });
+});
+
+describe('one tab at a time', () => {
+  it('runs inside the shared lock, so a second tab waits until the first one finishes', async () => {
+    let held: Promise<unknown> = Promise.resolve();
+    const names: string[] = [];
+    const locks = { request: <T>(name: string, _options: { signal?: AbortSignal }, run: () => Promise<T>) => {
+      names.push(name);
+      const next = held.then(run);
+      held = next.catch(() => undefined);
+      return next;
+    } };
+    const order: string[] = [];
+    let release!: () => void;
+    const first = oneTabAtATime(async () => { order.push('a start'); await new Promise<void>((r) => { release = r; }); order.push('a end'); },
+      new AbortController().signal, locks);
+    const second = oneTabAtATime(async () => { order.push('b'); }, new AbortController().signal, locks);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(order).toEqual(['a start']);
+    release();
+    await Promise.all([first, second]);
+    expect(order).toEqual(['a start', 'a end', 'b']);
+    expect(names).toEqual([SCAN_LOCK, SCAN_LOCK]);
+  });
+  it('runs directly in a browser without Web Locks', async () => {
+    expect(await oneTabAtATime(async () => 'ran', new AbortController().signal, undefined)).toBe('ran');
   });
 });

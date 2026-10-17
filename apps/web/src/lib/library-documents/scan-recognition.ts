@@ -26,6 +26,19 @@ export type ScanProgress = { done: number; total: number; failed: number; state:
 
 const errorCode = (error: unknown) => (error as { message?: unknown } | null)?.message;
 
+export const SCAN_LOCK = 'graylum-library-scan-recognition';
+type Locks = { request<T>(name: string, options: { signal?: AbortSignal }, run: () => Promise<T>): Promise<T> };
+
+/**
+ * Two tabs of the same browser never recognise at the same time (LIB_DOCS_PLAN §10 item 19: each unit processed
+ * once): a second tab waits for the first tab's lock and takes over when that tab closes. Browsers without Web
+ * Locks run directly; the database still saves each unit once.
+ */
+export function oneTabAtATime<T>(run: () => Promise<T>, signal: AbortSignal,
+  locks: Locks | undefined = (globalThis.navigator as { locks?: Locks } | undefined)?.locks): Promise<T> {
+  return locks ? locks.request(SCAN_LOCK, { signal }, run) : run();
+}
+
 /**
  * Runs until every waiting page of every waiting document is saved or marked failed, space runs out, or `signal` aborts.
  * The server lists a limited number of documents at a time, so the list is fetched again until it holds no document
