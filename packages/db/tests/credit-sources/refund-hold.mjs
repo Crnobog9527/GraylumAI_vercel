@@ -254,6 +254,26 @@ try {
   }
   report.checks.push('two-connection races (both orders): reservation vs external refund, reservation return vs clawback end consistent');
 
+  // Review P1 (#1119): an approved refund through Graylum (0185 claim + result) takes the whole pack back with its own
+  // 'pay-common:refund:' ledger row, which marks the source reversed; the order then ends refunded without
+  // stripeRefundReconciliation.clawbackApplied. That is not an unresolved external refund: nothing is held, nothing
+  // else of the user's balance is quarantined, and the pack can never be taken back a second time.
+  {
+    const u = await profile(130), pk = await pack(u, 100);
+    const intent = randomUUID();
+    await c.query(`UPDATE profiles SET credits=credits-100 WHERE id=$1`, [u]);
+    await c.query(`INSERT INTO credit_transactions(user_id,amount,type,description,ledger_type,reason_code,
+      source_type,source_order_id,idempotency_key,balance_before,balance_after)
+      VALUES($1,-100,'deduction','Approved package refund','refund_clawback','refund_clawback','stripe_refund',$2,$3,230,130)`,
+    [u, pk.order, 'pay-common:refund:' + intent]);
+    await c.query(`UPDATE payment_orders SET status='refunded' WHERE id=$1`, [pk.order]);
+    assert.equal((await c.query('SELECT status FROM credit_package_sources WHERE id=$1', [pk.source])).rows[0].status, 'reversed');
+    assert.equal(await v('SELECT credit_package_refund_held($1) v', [pk.source]), false, 'an approved internal refund is not held');
+    assert.equal(await holdOf(u), 0, 'no unrelated balance is quarantined');
+    assert.equal(await spendable(u), 130, 'the whole remaining balance stays spendable');
+  }
+  report.checks.push('an approved refund through Graylum (clawback row, order refunded without the external flag) holds nothing');
+
   // A pack whose remainder cannot be proven (0275 "source unknown") is alert-only: never held, never clawed back
   // from the balance (PAY-DISPUTE-GUARD 4.3: never take other sources' credits); "kept" can still close the review.
   const u4 = await profile(20);
