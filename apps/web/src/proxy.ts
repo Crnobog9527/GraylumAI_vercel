@@ -31,6 +31,7 @@ const PUBLIC_SITE_PATHS = [
 // only: /zh-tw and /zh-tw/... are public on the public host, /zh-twx is not.
 const PUBLIC_SITE_PAGE_PATHS = [
   '/about',
+  '/features', // Product feature pages (/features and /features/<name>) linked from the public header and footer.
   '/zh-tw',
 ];
 

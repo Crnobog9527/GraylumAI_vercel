@@ -17,6 +17,8 @@ export const PUBLIC_PATHS = [
   // Public site pages (PUBLIC-SITE, SEO_GEO_SPEC 3.2): About and the Traditional Chinese (Taiwan) section.
   '/about',
   '/zh-tw',
+  // Product feature pages linked from the public header and footer (PUBLIC-SITE): /features and /features/<name>.
+  '/features',
   '/auth',
   '/landing',
   '/api',

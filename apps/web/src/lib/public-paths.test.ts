@@ -16,3 +16,14 @@ describe('isPublicPathname', () => {
     }
   });
 });
+
+describe('isPublicPathname: product feature pages', () => {
+  it('opens /features and the pages below it, by whole segment only', () => {
+    for (const path of ['/features', '/features/', '/features/positioning', '/features/jury']) {
+      expect(isPublicPathname(path)).toBe(true);
+    }
+    for (const path of ['/featuresx', '/features-admin', '/feature', '/admin/features']) {
+      expect(isPublicPathname(path)).toBe(false);
+    }
+  });
+});

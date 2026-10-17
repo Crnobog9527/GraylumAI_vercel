@@ -64,3 +64,38 @@ describe('PUBLIC-SITE pages without login', () => {
     }
   });
 });
+
+// Product feature pages linked from the public header and footer open without login like About.
+describe('PUBLIC-SITE feature pages without login', () => {
+  const FEATURES = ['/features', '/features/', '/features/positioning', '/features/jury'];
+  const FEATURE_LOOKALIKES = ['/featuresx', '/features-admin', '/feature'];
+
+  beforeEach(() => {
+    getUser.mockResolvedValue({ data: { user: null } });
+    vi.stubEnv('NEXT_PUBLIC_AUTH_APP_URL', '');
+    vi.stubEnv('NEXT_PUBLIC_APP_URL', '');
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('serves them on the public host and on an app host such as staging', async () => {
+    for (const path of FEATURES) {
+      expect(await get(`https://www.graylum.com${path}`), path).toEqual({ status: 200, to: null });
+      expect(await get(`https://auth-staging.graylum.com${path}`), path).toEqual({ status: 200, to: null });
+    }
+  });
+
+  it('keeps lookalike paths protected', async () => {
+    for (const path of FEATURE_LOOKALIKES) {
+      const app = await get(`https://www.graylum.com${path}`);
+      expect(app.status, path).toBe(307);
+      expect(app.to?.hostname, path).toBe('app.graylum.com');
+      const staging = await get(`https://auth-staging.graylum.com${path}`);
+      expect(staging.status, path).toBe(307);
+      expect(staging.to?.pathname, path).toBe('/login');
+      expect(staging.to?.searchParams.get('redirect'), path).toBe(path);
+    }
+  });
+});
