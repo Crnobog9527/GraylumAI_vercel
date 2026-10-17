@@ -111,7 +111,9 @@ const NEW_TASK_REFERENCES='opc-new-task-references';
  * `withReferences` (UI-B, the new-task page only): the box's library references are kept with its draft in this tab
  * and handed to the new session's draft, which /runtime sends with the text. Other pages never pick them up.
  */
-export function useFreeConversation({withReferences=false}:{withReferences?:boolean}={}){
+export function useFreeConversation(options:{withReferences?:boolean}={}){
+ // With the composer switch off nothing could show or remove stored references, so none are kept.
+ const withReferences=Boolean(options.withReferences)&&COMPOSER_REFERENCES_ENABLED;
  const start=trpc.runtime.start.useMutation();
  const request=useRef('');
  const [error,setError]=useState('');
