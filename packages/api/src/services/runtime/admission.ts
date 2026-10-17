@@ -26,7 +26,7 @@ import {readOpenRouterKey} from '../models/openRouterKey';
 import {frozenCallPolicy, type FrozenPaygRun, type FrozenRun} from '../bill2/service';
 import { selectRuntimeHistory, fixtureInputCapacity, runtimeScopeInput } from './context';
 import { activateCandidateWithSource, discoverRuntimeCandidates, fittingCandidates, matchingInput, MATCH_INSTRUCTIONS } from './matching';
-import { REPLY_LANGUAGE, REPLY_LANGUAGE_INSTRUCTIONS, withPrimaryAddenda } from './primaryInstructions';
+import { REPLY_LANGUAGE, REPLY_LANGUAGE_INSTRUCTIONS, withPrimaryAddenda, workspaceFrozen } from './primaryInstructions';
 import { type ReasoningPolicy } from './reasoningPolicy';
 import { admitReasoning } from './reasoningAdmission';
 import type {AnsweredCard} from '../opc/answerCard';
@@ -343,7 +343,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    if(candidates.length)candidates=await fittingCandidates(candidates,candidate=>activateCandidateWithSource(user,admin,candidate,brandIdentity),
     {input:currentInput,inputBytes,toolBytes:candidateToolBytes(libraryReferences,sourceTools,workspaceContext)+
      (historySelection?.markerReserveBytes??(promptCache?PROMPT_CACHE_OVERHEAD_BYTES:0)),
-     instructions:skill=>withPrimaryAddenda(skill,{workspaceContext,network:input.network,replyLanguage:REPLY_LANGUAGE,libraryReferences,
+     instructions:skill=>withPrimaryAddenda(skill,{...workspaceFrozen(workspaceContext),network:input.network,replyLanguage:REPLY_LANGUAGE,libraryReferences,
       ...(positioningFallback?{positioningGate:POSITIONING_FALLBACK}:{})})});
    const primaryTurns=maxCalls-(attachedOrganizer?1:0)-(searchAllowed?1:0)-(candidates.length?1:0);
    if(primaryTurns<(searchAllowed||input.sources.length||workspaceContext||libraryReferences.length?2:1))throw new Error('RUNTIME_CALL_BUDGET');
@@ -390,7 +390,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     ...(policy.real||mentorStream||stepStream||policy.reportGeneration?{providerRequestFormat}:{}),...(reasoning?{reasoning}:{}),
     role:input.selection.kind==='auto'?'ordinary':input.selection.kind,input:input.input,instructions,model:row.data.model_id,
     ...(policy.opcTurnToken?{opcTurnToken:uuid.parse(policy.opcTurnToken)}:{}),...(candidates.length?{matching:{candidates}}:{}),
-    ...(!policy.reportGeneration&&session.scopeMaterial?{scopeMaterial:session.scopeMaterial}:{}),...(workspaceContext?{workspaceContext:true}:{}),
+    ...(!policy.reportGeneration&&session.scopeMaterial?{scopeMaterial:session.scopeMaterial}:{}),...workspaceFrozen(workspaceContext),
     ...(positioningFallback?{positioningGate:POSITIONING_FALLBACK}:{}),replyLanguage:REPLY_LANGUAGE,...(sourceContent?{sourceContent}:{}),
     modelId,...(attachedOrganizer?{attachedOrganizer}:{}),maxOutputTokens,maxTurns:primaryTurns,historyItems,network:input.network,
     // Freeze the purpose ceiling; each selected model keeps its own call-policy limit.

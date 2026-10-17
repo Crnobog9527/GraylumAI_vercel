@@ -137,7 +137,8 @@ it('sizes candidates with the workspace read_source description the executor wil
  const probe=await admit(31000);
  expect(probe.context.tools).toEqual(['read_source']);expect(probe.context.matching.candidates).toHaveLength(1);
  const instructions=withPrimaryAddenda(withBrandIdentity(skill.instructions,true),{workspaceContext:true,network:'deny',
-  replyLanguage:probe.context.replyLanguage});
+  replyLanguage:probe.context.replyLanguage,workspaceGuide:probe.context.workspaceGuide});
+ expect(probe.context.workspaceGuide).toBe('strategy-read-v1');
  expect(probe.context.replyLanguage).toBe('reply-language-v1');
  const required=Buffer.byteLength(JSON.stringify({instructions,messages:[{role:'user',content:input}]}))+1024+
   sourceToolBytes(['read_source'],true)+(probe.context.promptCache?PROMPT_CACHE_OVERHEAD_BYTES:0);
