@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {
-  MANUAL_METRICS, type ManualMetric, type ManualRow,
+  MANUAL_METRICS, MAX_METRIC_VALUE, publicHttpsUrl, type ManualMetric, type ManualRow,
 } from '@repo/api/src/services/publishMonitor/manualImport';
 import type { Grid } from './table';
 
@@ -28,7 +28,8 @@ const SYNONYMS: Record<Field, string[]> = {
   comments: ['评论量', '评论数', '评论', 'comments', 'replies'],
   shares: ['分享量', '分享数', '分享', '转发', 'shares', 'reposts', 'retweets'],
   saves: ['收藏量', '收藏数', '收藏', 'saves', 'saved', 'bookmarks'],
-  followers_gained: ['涨粉', '新增粉丝', '粉丝增量', '净增粉丝', 'followersgained', 'newfollowers', 'follows',
+  // Gains only: a net-change column (净增粉丝, can be negative) is left for the user to map.
+  followers_gained: ['涨粉', '新增粉丝', 'followersgained', 'newfollowers', 'follows',
     'subscribersgained'],
   profile_visits: ['主页访问', '主页访问量', '主页浏览', 'profilevisits', 'profileviews'],
   completion_rate: ['完播率', '完播', 'completionrate'],
@@ -79,7 +80,8 @@ export function parseNumber(raw: string, percent: boolean): number | null | unde
   const value = Number(match[1]);
   if (match[2] === '%') return percent ? value : null;
   const scaled = match[2] ? value * UNITS[match[2]]! : value;
-  return Number.isFinite(scaled) ? Math.round(scaled * 100) / 100 : null;
+  // The server refuses anything above its cap; reported here per row instead of failing the whole import.
+  return Number.isFinite(scaled) && scaled <= MAX_METRIC_VALUE ? Math.round(scaled * 100) / 100 : null;
 }
 
 /** Local calendar time to an ISO instant, refusing impossible dates (2026-02-30) instead of rolling them over. */
@@ -143,11 +145,9 @@ export function buildRows(grid: Grid, mapping: Mapping): BuiltRows {
       else if (field === 'title') title = cell || null;
       else if (field === 'url') {
         if (!cell) return;
-        try {
-          const parsed = new URL(cell);
-          if (parsed.protocol !== 'https:') throw new Error('scheme');
-          url = parsed.href;
-        } catch { errors.push({ line, code: 'URL_INVALID', column }); broken = true; }
+        // The server's own rule (public https, no credentials, no private host), so a bad link is reported per row.
+        const safe = publicHttpsUrl(cell);
+        if (safe) url = safe; else { errors.push({ line, code: 'URL_INVALID', column }); broken = true; }
       } else if (field === 'postedAt') {
         const date = parseDate(cell, grid.date1904);
         if (date === null) { errors.push({ line, code: 'DATE_INVALID', column }); broken = true; } else postedAt = date ?? null;
