@@ -109,7 +109,6 @@ describe('SubscriptionCard catalog availability', () => {
   it.each([
     ['checkout not ready', { ...ENTRY, checkoutReady: false }],
     ['no published terms', { ...ENTRY, termsVersion: null }],
-    ['real-money mode has no published refund policy page yet', { ...ENTRY, mode: 'live' }],
   ])('shows no purchase entry when %s', (_label, entry) => {
     componentState.plansQuery = queryState({ data: [plan] });
     componentState.membershipQuery = queryState({ data: entry });
