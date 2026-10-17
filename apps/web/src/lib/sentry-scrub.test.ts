@@ -23,6 +23,7 @@ describe('sentry allowlist scrub', () => {
     expect(scrubText('ACME merger failed')).toBe('[text]');
     expect(scrubText('LI_LEI profile failed')).toBe('[text]');
     expect(scrubText('ACCOUNT_ERASURE_FAILED: 李雷的账号')).toBe('ACCOUNT_ERASURE_FAILED');
+    expect(scrubText('EXPERT_CONSULT_UNAVAILABLE: 联系方式 wechat abc')).toBe('EXPERT_CONSULT_UNAVAILABLE');
   });
 
   it('knows every static route segment of the app', () => {

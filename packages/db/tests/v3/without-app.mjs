@@ -16,7 +16,8 @@ export const WITHOUT_APP_SUITES = {
       'src/services/opc/capture.integration.ts', 'src/services/opc/agentCorePlanB.integration.ts',
       'src/services/bill2/agentCorePlanB.integration.ts', 'src/services/runtime/platformFailure.integration.ts',
       'src/services/runtime/staleChargedRounds.integration.ts', 'src/services/runtime/positioningRefusal.integration.ts',
-      'src/services/fusion/fusion.integration.ts', 'src/services/runtime/researchTurn.integration.ts'],
+      'src/services/fusion/fusion.integration.ts', 'src/services/runtime/researchTurn.integration.ts',
+      'src/services/runtime/libraryRead.integration.ts'],
     prefix: 'RUNTIME: ',
     excluded: [
       {
