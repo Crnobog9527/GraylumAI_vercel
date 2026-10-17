@@ -32,7 +32,7 @@ export function provider(f) {
     if(failStage==='stop')throw new Error('Synthetic timeout after acceptance');return snapshot(sub);
    },
    cancel:async(id,params)=>{
-    assert.equal(id,sub.id);assert.deepEqual(params,{invoice_now:false,prorate:false});writes.push({stage:'cancel',params});
+    assert.equal(id,sub.id);assert.deepEqual(params,{invoice_now:false,prorate:false,cancellation_details:{comment:'graylum_initiated'}});writes.push({stage:'cancel',params});
     if(failStage==='cancel')throw new Error('Synthetic cancellation timeout');sub.status='canceled';return snapshot(sub);
    }},
   refunds:{list:async()=>page(refunds),retrieve:async id=>snapshot(refunds.find(r=>r.id===id)),

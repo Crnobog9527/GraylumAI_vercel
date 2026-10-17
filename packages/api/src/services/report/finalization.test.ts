@@ -18,7 +18,7 @@ it('uses the verified actor and exact revision; never admits a model run', async
   const requestId = randomUUID();
   const value = await reportFinalizationService(user(), f.admin).save({ executionId, requestId,
     expectedRevision: 0, body: '## 定位\n手动版本' });
-  expect(value).toEqual({ revision: 1, manuallyEdited: true });
+  expect(value).toEqual({ revision: 1, manuallyEdited: true, strategy: null });
   expect(f.rpc).toHaveBeenCalledExactlyOnceWith('report_document', {
     p_actor_id: actor, p_execution_id: executionId, p_action: 'save', p_request_id: requestId,
     p_expected_revision: 0, p_body: '## 定位\n手动版本', p_expected_body_hash: null,
@@ -30,7 +30,10 @@ it('read and finalize preserve server identity and displayed body hash', async (
   await service.read({ executionId });
   expect(f.rpc.mock.calls[0]).toEqual(['report_document', expect.objectContaining({ p_action: 'read', p_request_id: null })]);
   await service.finalize({ executionId, requestId: randomUUID(), expectedRevision: 2, expectedBodyHash: 'a'.repeat(64) });
-  expect(f.rpc.mock.calls[1]).toEqual(['report_document', expect.objectContaining({ p_action: 'finalize',
+  // 定稿 reads the current body first (for its strategy data), then finalizes; without a data block it sends none.
+  expect(f.rpc.mock.calls[1]).toEqual(['report_document', expect.objectContaining({ p_action: 'read' })]);
+  expect((f.rpc.mock.calls[2] as unknown[])[1]).not.toHaveProperty('p_report_data');
+  expect(f.rpc.mock.calls[2]).toEqual(['report_document', expect.objectContaining({ p_action: 'finalize',
     p_expected_revision: 2, p_expected_body_hash: 'a'.repeat(64), p_body: null })]);
 });
 it('rejects unverified identity before any privileged call', async () => {
@@ -55,6 +58,9 @@ it('does not expose internal database errors', async () => {
 it('validates unicode size, forbids forged actor and invalid revisions', () => {
   const input = { executionId, requestId: randomUUID(), expectedRevision: 0, body: '😀'.repeat(12000) };
   expect(reportEditInput.safeParse(input).success).toBe(true);
+  // The data block is not counted (Owner's choice B).
+  const block = '```graylum-report-data\n' + JSON.stringify({ v: 1, field: 'summary', value: '字'.repeat(100) }) + '\n```';
+  expect(reportEditInput.safeParse({ ...input, body: `${input.body}\n\n${block}` }).success).toBe(true);
   for (const change of [{ body: '😀'.repeat(12001) }, { actorId: randomUUID() }, { expectedRevision: -1 }]) {
     expect(reportEditInput.safeParse({ ...input, ...change }).success).toBe(false);
   }

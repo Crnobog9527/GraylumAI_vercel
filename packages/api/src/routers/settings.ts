@@ -15,6 +15,7 @@ import { openRouterKeyConfigured } from "../services/models/openRouterKey";
 import { router, publicProcedure, adminProcedure } from '../trpc';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
+import { validateReportPrice } from '../services/report/fees';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { isStripeCheckoutConfigured } from '../services/stripe';
 import { isSellableMemberPack, loadConfiguredStripePrices, loadMemberPackReadiness } from '../services/payments/stripeCatalog';
@@ -315,7 +316,7 @@ export const settingsRouter = router({
   updateSystemSettings: adminProcedure
     .input(systemSettingInputSchema)
     .mutation(async ({ ctx, input }) => {
-      await assertSettingsWriter(ctx.supabase,ctx.profileId);
+      await assertSettingsWriter(ctx.supabase,ctx.profileId); validateReportPrice([input]);
       await validateRoutingSelections(ctx.supabase, [input]);
       await validateCompareLimit(ctx.supabase, [input]);
       await validateSummarySelection(ctx.supabase,Array.isArray(input)?input:[input]);
@@ -333,7 +334,7 @@ export const settingsRouter = router({
   updateSystemSettingsBulk: adminProcedure
     .input(z.array(systemSettingInputSchema).min(1))
     .mutation(async ({ ctx, input }) => {
-      await assertSettingsWriter(ctx.supabase,ctx.profileId);
+      await assertSettingsWriter(ctx.supabase,ctx.profileId); validateReportPrice(input);
       await validateRoutingSelections(ctx.supabase, input);
       await validateCompareLimit(ctx.supabase, input);
       await validateSummarySelection(ctx.supabase,Array.isArray(input)?input:[input]);
@@ -390,7 +391,7 @@ export const settingsRouter = router({
     );
 
     const priceRefs = stripeReady && ctx.hasSupabaseAdminPrivileges
-      ? await loadConfiguredStripePrices({ db: ctx.supabaseAdmin, testOnly: true,
+      ? await loadConfiguredStripePrices({ db: ctx.supabaseAdmin,
         kind: 'credit_package', ids: packages.map(pkg => pkg.id) }).catch(error => {
           throw createSafeServiceUnavailableError(error, CATALOG_UNAVAILABLE_MESSAGE);
         }) : new Map<string, string>();
@@ -461,7 +462,7 @@ export const settingsRouter = router({
     );
 
     const priceRefs = stripeReady && ctx.hasSupabaseAdminPrivileges
-      ? await loadConfiguredStripePrices({ db: ctx.supabaseAdmin, testOnly: true,
+      ? await loadConfiguredStripePrices({ db: ctx.supabaseAdmin,
         kind: 'membership_plan', ids: plans.map(plan => plan.id) }).catch(error => {
           throw createSafeServiceUnavailableError(error, CATALOG_UNAVAILABLE_MESSAGE);
         }) : new Map<string, string>();

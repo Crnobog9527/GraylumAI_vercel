@@ -63,6 +63,25 @@ describe('PAY-STRIPE-MP international card pack (Managed Payments, tax on top)',
     await expect(readPackageRefundCash(plain.db, plain.provider, orderId)).resolves.toMatchObject({ paidMinor: 10000, taxMinor: 0 });
   });
 });
+describe('R7: pack refunds follow the Stripe account mode', () => {
+  it('a live account refunds a live order from live objects; a test order or test objects are refused', async () => {
+    const live = () => {
+      const f = fixture(); f.order.payment_mode = 'live';
+      f.stripe.balance.retrieve.mockResolvedValue({ livemode: true });
+      f.stripe.paymentIntents.retrieve.mockResolvedValue({ id: 'pi_fixture', livemode: true, status: 'succeeded',
+        amount_received: 10000, currency: 'usd', latest_charge: 'ch_fixture' });
+      f.stripe.charges.retrieve.mockResolvedValue({ id: 'ch_fixture', livemode: true, paid: true, captured: true,
+        payment_intent: 'pi_fixture', amount: 10000, amount_captured: 10000, amount_refunded: 0,
+        currency: 'usd', disputed: false, balance_transaction: { created: 1790800000 } });
+      return f;
+    };
+    await expect(readPackageRefundCash(live().db, live().provider, orderId)).resolves.toMatchObject({ mode: 'live', paidMinor: 10000 });
+    const testOrder = live(); testOrder.order.payment_mode = 'test';
+    await expect(readPackageRefundCash(testOrder.db, testOrder.provider, orderId)).rejects.toThrow('PAY_REFUND_TEST_STRIPE_ONLY');
+    const mixed = live(); mixed.stripe.charges.retrieve.mockResolvedValue({ ...(await mixed.stripe.charges.retrieve()), livemode: false });
+    await expect(readPackageRefundCash(mixed.db, mixed.provider, orderId)).rejects.toThrow('PAY_REFUND_CHARGE_MISMATCH');
+  });
+});
 describe('package refund dispatch boundary', () => {
   it('commits stable identity before sending exact net cash', async () => {
     const f = fixture();

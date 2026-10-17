@@ -42,7 +42,7 @@ export function MonthlyRefundQuoteCard({ terms, approving, disabled, onApprove }
     ['手续费', `${money(terms.feeMinor)}（${FEE_PERMITTED_LABELS[terms.feePermitted]}）`],
     ['退回给用户', money(terms.netMinor)],
     ['收回积分', `${terms.credits.toLocaleString()} 积分`],
-    ['支付模式', terms.mode === 'test' ? '测试（Stripe 沙盒）' : '未知'],
+    ['支付模式', terms.mode === 'test' ? '测试（Stripe 沙盒）' : terms.mode === 'live' ? '正式（真实付款，会退真钱）' : '未知'],
   ];
   return (
     <section data-testid="monthly-refund-quote" className="space-y-4 rounded-xl border p-4"

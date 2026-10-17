@@ -15,6 +15,15 @@ describe('Fusion settings', () => {
     expect(DEFAULT_FUSION_SETTINGS.review).toMatchObject({ enabled: false, maxRounds: 2, dispatchMinutes: 10, maxBudgetUsd: null });
     expect(DEFAULT_FUSION_SETTINGS.compare.enabled).toBe(false);
   });
+  it('fixed price per review: 1500 credits by default, also for a stored row saved before the field existed (0294)', async () => {
+    expect(DEFAULT_FUSION_SETTINGS.review.fixedPriceCredits).toBe(1500);
+    const older: Partial<typeof enabled.review> = { ...enabled.review };
+    delete older.fixedPriceCredits;
+    expect((await readFusionSettings(db({ ...enabled, review: older }))).review.fixedPriceCredits).toBe(1500);
+    for (const fixedPriceCredits of [0, 1.5, 1_000_000])
+      expect(fusionSettings.safeParse({ ...enabled, review: { ...enabled.review, fixedPriceCredits } }).success).toBe(false);
+    expect(fusionSettings.parse({ ...enabled, review: { ...enabled.review, fixedPriceCredits: 1200 } }).review.fixedPriceCredits).toBe(1200);
+  });
   it('reads a stored object or JSON string; refuses invalid or unreadable values', async () => {
     expect(await readFusionSettings(db(enabled))).toEqual(enabled);
     expect(await readFusionSettings(db(JSON.stringify(enabled)))).toEqual(enabled);

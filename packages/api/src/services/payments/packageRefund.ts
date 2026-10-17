@@ -37,7 +37,8 @@ async function loadOrder(db: Db, orderId: string): Promise<Order> {
 async function scopedOrder(db: Db, stripe: RefundStripe, orderId: string) {
   const order = await loadOrder(db, orderId);
   const scope = await resolveStripeScope(stripe);
-  if (scope.mode !== 'test' || order.payment_channel !== 'stripe' || order.payment_mode !== 'test'
+  // R7 (0297): the order's mode must be the connected account's (live in production, test on staging).
+  if (order.payment_channel !== 'stripe' || order.payment_mode !== scope.mode
     || order.merchant_namespace !== scope.merchant) throw new Error('PAY_REFUND_TEST_STRIPE_ONLY');
   return { order, scope };
 }
@@ -58,12 +59,13 @@ export async function readPackageRefundCash(db: Db, stripe: RefundStripe, orderI
   const charged = order.amount_total + taxMinor;
   const payment = await stripe.paymentIntents.retrieve(intentId);
   const chargeId = id(payment.latest_charge);
-  if (payment.id !== intentId || payment.livemode || payment.status !== 'succeeded'
+  const live = scope.mode === 'live';
+  if (payment.id !== intentId || payment.livemode !== live || payment.status !== 'succeeded'
     || payment.amount_received !== charged || payment.currency !== order.currency
     || !chargeId) throw new Error('PAY_REFUND_PAYMENT_MISMATCH');
   const charge = await stripe.charges.retrieve(chargeId, { expand: ['balance_transaction'] });
   const balance = charge.balance_transaction;
-  if (charge.id !== chargeId || charge.livemode || !charge.paid || !charge.captured
+  if (charge.id !== chargeId || charge.livemode !== live || !charge.paid || !charge.captured
     || id(charge.payment_intent) !== intentId || charge.amount !== charged
     || charge.amount_captured !== charged || charge.currency !== order.currency
     || !balance || typeof balance === 'string' || !Number.isSafeInteger(balance.created)) {

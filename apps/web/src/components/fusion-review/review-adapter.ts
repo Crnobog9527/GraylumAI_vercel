@@ -105,19 +105,35 @@ export function endedNotice(state: string, outcome: string): string | null {
   return '这次评审没有完成，没有生成修订稿；下面是已经收到的意见。';
 }
 
+export type ReviewFee = { credits: number; state: 'held' | 'charged' | 'refunded'; chargedCredits: number | null;
+  reason: string | null } | null | undefined;
+/** What the review cost the user (fixed price, 0294); nothing for reviews started before it (per-call billing). */
+export function feeText(fee: ReviewFee): string | null {
+  if (!fee) return null;
+  const n = (value: number) => value.toLocaleString('zh-CN');
+  if (fee.state === 'held') return `本次评审 ${n(fee.credits)} 积分，还在结算，已经发出的评审结算完就会更新。`;
+  if (fee.state === 'refunded') return `没有生成修订稿，${n(fee.credits)} 积分已全额退回。`;
+  const charged = fee.chargedCredits ?? fee.credits;
+  if (fee.reason === 'revised') return `本次评审实际扣了 ${n(charged)} 积分。`;
+  return `评审中途结束，按已经发出的部分实际扣了 ${n(charged)} 积分（本次评审价格 ${n(fee.credits)} 积分）。`;
+}
+
 /** fusionReview.start refusals in plain words. */
 const START_ERROR: Record<string, string> = {
   FUSION_REVIEW_DISABLED: '评审团暂时没有开放。',
   FUSION_REVIEW_INCOMPLETE: '评审团暂时没有开放。',
-  FUSION_BUDGET_EXCEEDED: '这份报告太长，超出了评审团单次的预算上限，暂时不能评审。',
-  FUSION_MEMBERSHIP_REQUIRED: '评审团是会员功能，开通会员后可以使用。',
-  REPORT_MEMBERSHIP_REQUIRED: '评审团是会员功能，开通会员后可以使用。',
+  FUSION_BUDGET_EXCEEDED: '这份报告太长，超出了评审团单次的成本上限，暂时不能评审。',
+  FUSION_REVIEW_CREDITS: '可用积分不够开始这次评审，充值后再试。',
+  // Gold only (Owner 2026-10-17): a Pro member is already a member, so the message names the plan.
+  FUSION_MEMBERSHIP_REQUIRED: '评审团仅限 Gold 会员使用，升级到 Gold 后可以使用。',
+  REPORT_MEMBERSHIP_REQUIRED: '评审团仅限 Gold 会员使用，升级到 Gold 后可以使用。',
   FUSION_REVIEW_ACTIVE: '你还有一个评审正在进行，等它结束后再开新的。',
   FUSION_REVIEW_BREAKER: '评审最近多次没有完成，暂时停用了，请稍后再试或联系客服。',
   FUSION_REVIEW_VERSION_BLOCKED: '这份报告连续 3 次评审没有完成，已暂停对它评审，请联系客服。',
   FUSION_REVIEW_STALE: '报告有更新，或者还没有生成定位报告。请刷新页面，生成报告后再试。',
   FUSION_REVIEW_CONFLICT: '没能开始评审，请刷新页面后再试。',
-  FUSION_REVIEW_ESTIMATE_CHANGED: '模型价格刚刚有变化，最多消耗的积分也变了。请看一下新的数字，再决定要不要开始。',
+  FUSION_REVIEW_ESTIMATE_CHANGED: '评审团的价格刚刚有调整。请看一下新的积分数，再决定要不要开始。',
+  FUSION_REVIEW_PRICE_CHANGED: '评审团的价格刚刚有调整。请看一下新的积分数，再决定要不要开始。',
   FUSION_INPUT_TOO_LARGE: '报告和资料太长，评审团一次读不完，暂时不能评审。',
   FUSION_REVIEW_CONTEXT: '报告和资料太长，评审团一次读不完，暂时不能评审。',
 };

@@ -394,7 +394,7 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
       }).prepare(runtimeRequest);
     },
     read: async (draftId: string) => ({...await draftReadResponse(await rpc("opc_query", {p_draft_id: uuid.parse(draftId)}), rpc),
-      runtimeMode:real?"staging_test":"isolated"}),
+      runtimeMode:real?(real.mode==="production"?"production":"staging_test"):"isolated"}),
     start: async (value: unknown) => {
       const v = opcStart.parse(value);
       return rpc("opc_start_b1", {

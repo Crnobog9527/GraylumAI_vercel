@@ -38,7 +38,7 @@ export async function quoteMonthlyRefund(
   const mapping = f.evidence.refs.filter(r => r.object_type === 'subscription' && r.subscription_id === f.order.subscription_id);
   evidence(mapping.length === 1);
   const sub = await stripe.subscriptions.retrieve(mapping[0].external_id);
-  evidence(sub.items.data.length === 1 && sub.status === 'active' && sub.livemode === false);
+  evidence(sub.items.data.length === 1 && sub.status === 'active' && sub.livemode === (f.order.payment_mode === 'live'));
   const prepared = prepareMonthlyRefundQuote(f.policy, {
     orderId: f.order.id, userId: f.order.user_id, subscriptionId: f.order.subscription_id!,
     providerSubscriptionId: sub.id, paymentIntentId: f.provider.cash.paymentIntentId, chargeId: f.provider.cash.chargeId,
@@ -161,7 +161,7 @@ export async function executeMonthlyRefund(db: MonthlyDb, stripe: MonthlyStripe,
 export async function recordMonthlyRefund(db: MonthlyDb, stripe: MonthlyStripe, orderId: string, refund: Stripe.Refund) {
   const i = await readMonthlyRefundStatus(db, orderId);
   const scope = await resolveStripeScope(stripe);
-  evidence(scope.mode === 'test' && scope.merchant === i.terms.merchant);
+  evidence(scope.mode === i.terms.mode && scope.merchant === i.terms.merchant);
   evidence(objectId(refund.charge) === i.terms.chargeId && objectId(refund.payment_intent) === i.terms.paymentIntentId
     && refund.currency === i.terms.currency);
   let fact;

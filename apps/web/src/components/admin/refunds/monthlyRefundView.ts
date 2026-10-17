@@ -56,7 +56,7 @@ export const MONTHLY_REFUND_RULES = [
   '这是该账号第一次购买 Pro 或 Gold 月付会员，不是续费',
   '付款后 7 天内提交了退款工单',
   '从这次付款起，整个账户没有用过任何积分',
-  '只在测试模式（Stripe 沙盒）下处理',
+  '按这笔付款原来的模式退款（测试付款在 Stripe 沙盒退，正式付款退真钱）',
 ] as const;
 
 export const FEE_PERMITTED_LABELS: Record<FeePermitted, string> = {

@@ -66,6 +66,20 @@ describe('PAY-STRIPE-MP card first-payment evidence', () => {
     await expect(t.read()).resolves.toMatchObject({ paidAt: '2026-10-12T08:42:40.000Z',
       subscription: { start: '2026-10-12T08:42:34.000Z', end: '2026-11-12T08:42:34.000Z' } });
   });
+  it('R7: a live account reads a live order only from live objects (subscription and one-time pack)', async () => {
+    const live = { ...scope, mode: 'live' as const };
+    const run = (t: ReturnType<typeof fixture>) => readCardPaymentEvidence({ stripe: { checkout: { sessions: { retrieve: async () => t.session } },
+      subscriptions: { retrieve: async () => t.subscription }, invoices: { retrieve: async () => t.invoice },
+      paymentIntents: { retrieve: async () => t.intent }, charges: { retrieve: async () => t.charge } } as never,
+    scope: live, order: { ...t.order, payment_mode: 'live' }, priceId: 'price_gold_month', sessionId: 'cs_1' });
+    for (const target of [fixture(), fixture('card', pack)]) {
+      for (const value of [target.session, target.subscription, target.invoice, target.intent, target.charge]) value.livemode = true;
+      await expect(run(target)).resolves.toMatchObject({ checkoutId: 'cs_1' });
+    }
+    const mixed = fixture();
+    for (const value of [mixed.session, mixed.subscription]) value.livemode = true;
+    await expect(run(mixed)).rejects.toThrow(PAYMENT_EVIDENCE_CONFLICT);
+  });
   it('returns null while the session is unpaid', async () => {
     const t = fixture(); t.session.payment_status = 'unpaid';
     await expect(t.read()).resolves.toBeNull();

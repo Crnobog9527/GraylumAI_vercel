@@ -144,3 +144,10 @@ describe('revision host check', () => {
     expect(checkRevision(spaced, base)).toEqual({ ok: false, reason: 'REVISION_NOTES' });
   });
 });
+
+it('REPORT-VISUAL: checks the sections and the limit on the report text, leaving the strategy data block out', async () => {
+  const { reportSections } = await import('./hostChecks');
+  const block = '```graylum-report-data\n' + JSON.stringify({ v: 1, field: 'summary', value: '数'.repeat(200) }) + '\n```';
+  const sections = reportSections('## 定位\n原定位\n## 结语\n原结语\n\n' + block, ['定位', '结语'], 30);
+  expect(sections && [...sections.values()].map(value => value.trim())).toEqual(['原定位', '原结语']);
+});

@@ -30,8 +30,12 @@ const review = z.object({
   /** Per opinion, reasoning tokens included; set explicitly on every review request. */
   opinionOutputTokens: z.number().int().min(512).max(PURPOSE_OUTPUT_CAP),
   summaryOutputTokens: z.number().int().min(1024).max(PURPOSE_OUTPUT_CAP),
-  /** Single-review budget in USD; no default, so enabling requires an administrator value. */
+  /** Platform cost protection line per review in USD (provider cost bound, not what the user pays); above it the
+   * debate round is dropped. No default, so enabling requires an administrator value. */
   maxBudgetUsd: usd.nullable(),
+  /** What the user pays per review, in credits (Owner 2026-10-17 "暂定每次 1500 积分"): held at start, charged only
+   * for a usable revision, refunded on failure. Administrators may change it; 0294 reads the same value. */
+  fixedPriceCredits: z.number().int().min(1).max(999999).default(1500),
   /** A claimed call not dispatched within this time is cancelled by the daily reconciliation. */
   dispatchMinutes: z.number().int().min(1).max(60),
   /** Platform-borne cost breaker per user over 7 days (§3.3); used by review admission (PR-4). */
@@ -84,7 +88,7 @@ export const DEFAULT_FUSION_SETTINGS: FusionSettings = {
   review: { enabled: false, reviewerModelIds: [], summaryModelId: null, skillId: null, maxRounds: 2,
     opinionOutputTokens: 4096,
     // The summary writes the whole report plus a ruling per issue: 16384 was cut off in a staging run (#962).
-    summaryOutputTokens: PURPOSE_OUTPUT_CAP, maxBudgetUsd: null,
+    summaryOutputTokens: PURPOSE_OUTPUT_CAP, maxBudgetUsd: null, fixedPriceCredits: 1500,
     dispatchMinutes: 10, breaker: { platformUsd: '2', noDeliveryCalls: 10 }, displayNames: DEFAULT_PANEL_NAMES },
   compare: { enabled: false, allowedModelIds: [], defaultModelIds: [], minModels: 2, answerOutputTokens: 8192, maxBudgetUsd: null,
     dispatchMinutes: 10, breaker: { platformUsd: '2', noDeliveryCalls: 10 } },

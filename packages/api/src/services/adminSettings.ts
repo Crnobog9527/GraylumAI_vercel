@@ -6,7 +6,8 @@ import { PAYG_START_THRESHOLDS_KEY } from './bill2/settingKeys';
 import { REPORT_SETTING } from './report/contract';
 import { PAYMENT_CHANNEL_KEY } from './payments/channelSettings';
 import { PAYMENT_METHOD_ROUTES_KEY } from './payments/methodRouting';
-import { PAYG_HOST_SETTING, paygHostSettingWrite } from './runtime/paygHostPolicy';
+import { PAYG_HOST_SETTING, PAYG_PRODUCTION_SETTING, paygHostSettingWrite, paygProductionSettingWrite,
+  RUNTIME_ENVIRONMENT_SETTING } from './runtime/paygHostPolicy';
 import { RUNTIME_RATE_LIMIT_KEY } from './runtime/rateLimitSettings';
 import { PURPOSE_BUDGET_KEY } from './runtime/purposeBudgets';
 import { STOP_LOSS_KEY } from './runtime/stopLossSettings';
@@ -16,7 +17,7 @@ import { MODEL_IDENTITY_GUARD_KEY } from './modelIdentity/guardSetting';
 
 // Dedicated readers own these values and their validation, including serialized JSON.
 const dedicatedSettingKeys = new Set([
-  PAYMENT_CHANNEL_KEY, PAYG_HOST_SETTING, REPORT_SETTING, RUNTIME_RATE_LIMIT_KEY, PURPOSE_BUDGET_KEY,
+  PAYMENT_CHANNEL_KEY, PAYG_HOST_SETTING, PAYG_PRODUCTION_SETTING, RUNTIME_ENVIRONMENT_SETTING, REPORT_SETTING, RUNTIME_RATE_LIMIT_KEY, PURPOSE_BUDGET_KEY,
   PROVIDER_PRICES_KEY, ABSORB_CONFIG_KEY, ABSORB_ACK_KEY, PAYG_START_THRESHOLDS_KEY, STOP_LOSS_KEY,
   MODEL_IDENTITY_GUARD_KEY, PAYMENT_METHOD_ROUTES_KEY, FUSION_SETTINGS_KEY,
   // Read by methodPayments checkout; the settings page has no field for it.
@@ -65,6 +66,12 @@ export const paygStartThresholdsSchema = z.object({
 export function validatePaygAdminSetting(setting: { key: string; value?: unknown }, ctx: z.RefinementCtx) {
   if (setting.key === PAYG_HOST_SETTING && !paygHostSettingWrite.safeParse(setting.value).success) {
     ctx.addIssue({ code: 'custom', path: ['value'], message: 'PAYG 设置须为有效对象，关闭可保存 {enabled:false}' });
+  }
+  if (setting.key === PAYG_PRODUCTION_SETTING && !paygProductionSettingWrite.safeParse(setting.value).success) {
+    ctx.addIssue({ code: 'custom', path: ['value'], message: '正式 PAYG 设置须为有效对象，关闭可保存 {enabled:false}' });
+  }
+  if (setting.key === RUNTIME_ENVIRONMENT_SETTING) {
+    ctx.addIssue({ code: 'custom', path: ['key'], message: '正式库标记只能由上线批准的数据库操作写入' });
   }
   if (setting.key === PAYG_START_THRESHOLDS_KEY && !paygStartThresholdsSchema.safeParse(setting.value).success) {
     ctx.addIssue({ code: 'custom', path: ['value'], message: '启动门槛须含版本、唯一模型和用途，以及美元十进制字符串' });
