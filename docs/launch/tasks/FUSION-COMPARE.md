@@ -113,7 +113,9 @@
 - **定位前置检查（POSITIONING-GATE）**：普通 Runtime 准入时对没有定位的用户做两层检查（`services/runtime/positioningGate.ts`、`positioningFallback.ts`）：
   选了"与社交媒体相关"的 Skill 直接拒绝；其他请求先由 Decisions 判断，判为拦截就拒绝，判不准时主模型带兜底指令、回答兜底标记时这一轮不收费。
   对比在建运行单之前复用同一套：
-  - 静态拒绝和 Decisions 判为拦截：`estimate` / `start` 直接返回同一个拒绝（引导去做定位），不建组、不冻结、不收费；Decisions 这一次判断的费用和普通对话一样由 Graylum 承担。
+  - **付费的 Decisions 判断只在 `start` 做**：`estimate` 没有请求编号、可以反复调用，只做静态检查（社媒 Skill、退款次数是否已到上限、开关和权限），
+    不调用 Decisions；`start` 按 `requestId` 幂等，在建组前判断一次，同一请求重放不再判断。
+  - 静态拒绝和 Decisions 判为拦截：`estimate`（只静态）/ `start` 直接返回同一个拒绝（引导去做定位），不建组、不冻结、不收费；Decisions 这一次判断的费用和普通对话一样由 Graylum 承担。
   - **退款次数到上限**：普通 Runtime 在用户 24 小时内的定位兜底退款已达 `POSITIONING_REFUSAL_CAP`（5 次）时，除了 Decisions 判 `clear` 以外一律拒绝
     （`judgePositioning(..., capped)` 第 150–155 行）。对比复用同一个分支：到上限时只有 `clear` 能继续，其他结果在建组前拒绝、不建运行单、不调用任何对比模型。
   - 判不准或 Decisions 不可用（且没到上限）：每一列都带同一份兜底指令；某一列回答了兜底标记，这一列判定 `no_delivery`、不收费（成本由平台承担、计入熔断统计），
@@ -122,7 +124,7 @@
     照搬就会在恢复期限按 `unjudged_saved` 收费。所以带兜底指令的列，执行器像普通 Runtime 一样先缓冲开头、识别兜底标记
     （复用 `positioningFallback.ts` 的 `isPositioningRefusal`）：命中时不转发、不保存正文，直接写 `no_delivery` 结算为零；没命中才开始转发和保存。
     不带兜底指令的列照常边收边转。
-  - PR-2 验收：退款次数到上限时判不准或 Decisions 不可用都被拒、不建运行单；没有定位的用户选社媒 Skill 发起对比被拒且余额不变；Decisions 判拦截时被拒且不建运行单；判不准时模拟某列回答兜底标记，该列不收费、其他列照常收费；该列没有 `fusion_call_outputs` 记录、判定是 `no_delivery`，到恢复期限也不会变成 `unjudged_saved`。
+  - PR-2 验收：连续调用 `estimate` 不产生任何 Decisions 调用；同一 `requestId` 重放 `start` 只判断一次；退款次数到上限时判不准或 Decisions 不可用都被拒、不建运行单；没有定位的用户选社媒 Skill 发起对比被拒且余额不变；Decisions 判拦截时被拒且不建运行单；判不准时模拟某列回答兜底标记，该列不收费、其他列照常收费；该列没有 `fusion_call_outputs` 记录、判定是 `no_delivery`，到恢复期限也不会变成 `unjudged_saved`。
 - 上下文容量：按每个模型的窗口分别检查"输入 + 回答上限"，装不下的模型在冻结前拒绝；用户勾选里有装不下的就整次拒绝并告诉用户是哪一个
   （不悄悄去掉，用户可以取消它再发）。复用 `measureCallInput` / `fitNativeRequestOutput`。
 - **模型名称（Q1 已定，Owner 2026-10-17）**：勾选框和每列回答的标题显示后台配置的真实模型名称（`ai_models` 里管理员配置的名称，不另设显示名）。
@@ -177,8 +179,13 @@
     每个运行单只有一列、只能被采用一次，正好满足 `billing_run_id` 唯一），状态 `completed`，`payload` 里放问题、`result.body` 放回答，
     历史条目挂在它上面。这条执行不新建运行单、不冻结、不收费（该列已经按自己的结局结算过），也不改 `runtime_view` 和
     `runtime_history_availability`。为了让它和普通执行一样通过这两处的计费和上下文检查（`runtime_direct_billing_allowed`、`runtime_context_allowed`），
-    **对比的运行单在准入时冻结来源会话的真实 scope**（不用评审团那种 `bill2_create_draft` 占位草稿 scope），需要时同时带上 `sessionRef` =
-    来源会话（0235 的准入对评审拒绝 `sessionRef`，对比分支放开）。PR-1 必测：采用后 `runtime_view` 显示这一问一答、下一轮普通对话的历史里读得到它、
+    对比运行单沿用评审团已经通过这两处检查的冻结方式（`runtime_direct_billing_allowed` 对 `positioning_draft` 占位草稿只要求草稿属于本人且未吊销）。
+    **不写 `bill2_runs.session_ref`**：`runtime_binding_guard` 只允许在运行单还是 `prepared`、且对应执行已存在时写它，
+    `frozenPaygRunSchema` 和 `bill2_prepare` 也拒绝非空 `sessionRef`，采用时运行单早已结算，所以不改绑定触发器、不绕开它。
+    这样做不破坏普通执行的不变量，因为：① 只允许采用**已关闭、已结算**的列（判定 `usable`、`bill2_runs.closed`），runtime 的恢复、续跑和停止都不会再碰它；
+    ② 删对话时，采用执行和它的历史条目按 `session_id` 由现有会话清理删除（`content_erasure_confirm` 不读 `session_ref`），运行单本身由 0235 按计费组的
+    `source_session_id` 清洗；③ `runtime_view` 的 `activeExecution` 判断只看 `s.active_execution`，采用不改它。
+    如果 PR-1 核对时发现还有别的路径依赖 `session_ref`，就改用"不复用运行单"的写回（新建一条零金额的采用运行单），不放宽绑定保护。PR-1 必测：采用后 `runtime_view` 显示这一问一答、下一轮普通对话的历史里读得到它、
     对话列表和删对话/注销的现有路径都把它当普通执行处理；被采用列的运行单不会被重复结算或重新冻结。
   - 主对话已有新内容（`revision ≠ R`）或正在跑执行：返回 `FUSION_COMPARE_STALE` 和引用文本，前端把选中的回答作为引用预填进输入框（FUSION.md 必测项 4）。
     这一步**不改** `adoption`，引用不算终态：用户刷新、关页面、清空输入框，或带引用的消息后来在执行或保存时失败，都可以再点"采用"重新拿到引用文本；
