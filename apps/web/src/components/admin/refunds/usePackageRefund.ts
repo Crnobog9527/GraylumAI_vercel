@@ -11,7 +11,8 @@ import {
 const FALLBACK = '退款证据不足或状态已变化，请重新核对订单与工单';
 /** Server quote (pay_common_package_refund_quote, 0252): minor units; netMinor = basis - fee + tax. */
 export type PackageRefundQuote = { versionHash: string; currency: string; basisMinor: number; feeMinor: number;
-  taxMinor?: number; netMinor: number; credits: number };
+  taxMinor?: number; netMinor: number; credits: number; treatment?: 'credit_package' | 'wallet_membership';
+  cash?: { mode?: 'test' | 'live' } };
 export type PackageRefundIntent = Record<string, unknown> & { id?: unknown; status?: unknown };
 
 /**

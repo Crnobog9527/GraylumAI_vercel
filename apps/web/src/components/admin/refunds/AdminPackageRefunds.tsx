@@ -74,10 +74,14 @@ export function AdminPackageRefunds() {
             <dt>税（全额退还）</dt><dd>{money(quote.taxMinor, quote.currency)}</dd>
             <dt>退给用户</dt><dd data-testid="package-refund-net">{money(quote.netMinor, quote.currency)}</dd>
             <dt>扣回积分</dt><dd>{quote.credits}</dd>
+            <dt>订单类型</dt><dd>{quote.treatment === 'wallet_membership' ? '钱包会员（退款成功后会员立即结束）' : '积分包'}</dd>
+            <dt>支付模式</dt><dd data-testid="package-refund-mode">{quote.cash?.mode === 'live' ? '正式（真实付款，会退真钱）'
+              : quote.cash?.mode === 'test' ? '测试（Stripe 沙盒）' : '未知'}</dd>
           </dl>
           <ConfirmRefundAction testId="package-refund-approve-button" label="批准退款" pendingLabel="正在批准…"
             title="确认批准这次退款？" confirmLabel="批准" pending={refund.busy} disabled={refund.busy} onConfirm={() => void refund.approve()}>
-            <p>批准后还要再点"执行退款"才会真正退钱。退给用户 {money(quote.netMinor, quote.currency)}，扣回 {quote.credits} 积分。</p>
+            <p>批准后还要再点"执行退款"才会真正退钱。退给用户 {money(quote.netMinor, quote.currency)}，扣回 {quote.credits} 积分。
+              {quote.cash?.mode === 'live' ? '这是正式付款，执行后会退真钱。' : ''}</p>
           </ConfirmRefundAction>
         </section>
       ) : null}
@@ -89,7 +93,8 @@ export function AdminPackageRefunds() {
             {status === 'approved' ? (
               <ConfirmRefundAction testId="package-refund-execute-button" label="执行退款" pendingLabel="正在执行…"
                 title="确认执行这次退款？" confirmLabel="执行" pending={refund.busy} disabled={refund.busy} onConfirm={() => void refund.execute()}>
-                <p>会立即在 Stripe 发起退款并扣回积分。执行后不能撤销。</p>
+                <p>会立即在 Stripe 发起退款并扣回积分。执行后不能撤销。
+                  {(intent.cash as { mode?: string } | undefined)?.mode === 'live' ? '这是正式付款，会退真钱。' : ''}</p>
               </ConfirmRefundAction>
             ) : null}
             {status && ['dispatching', 'pending', 'review_required'].includes(status) ? (
