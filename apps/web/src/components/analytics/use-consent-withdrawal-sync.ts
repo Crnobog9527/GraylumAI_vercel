@@ -7,12 +7,13 @@ import { createClient } from '@/lib/supabase';
 import { trpc } from '@/trpc/client';
 
 const SENT_KEY = 'graylum.analytics.withdrawal-sent';
-const RETRY_MS = [0, 2_000, 8_000, 30_000, 120_000];
+// Growing waits, then every two minutes for as long as the page stays open; the browser coming back online retries at once.
+const RETRY_MS = [2_000, 8_000, 30_000, 120_000];
 
 /**
  * ANALYTICS §7 PR-3: when Termly says statistics are not allowed for a logged-in account, tell the server once per
  * account per browser session, so GA ids kept for its unpaid orders are dropped and older ones are never reported.
- * The notice is durable: the request is retried with growing waits while the page is open, the "sent" marker is
+ * The notice is durable: the request is retried with growing waits (then every two minutes) for as long as the page is open, and at once when the browser comes back online; the "sent" marker is
  * only set after the server confirmed, and any page opened in a later session sends it again. The server also keeps these ids for the checkout's
  * payable window only (45 minutes), so a notice lost for good (browser closed offline) can matter only inside it.
  * Uses the plain client so a stale login never raises the app-wide re-login notice.
@@ -42,19 +43,22 @@ export function useConsentWithdrawalSync(consent: ConsentSnapshot, enabled: bool
           try { window.sessionStorage.setItem(SENT_KEY, userId); } catch { /* sent; may repeat next page */ }
         })
         .catch(() => {
-          const wait = RETRY_MS[attempt + 1];
-          if (!active || wait === undefined) return;
+          if (!active) return;
+          const wait = RETRY_MS[Math.min(attempt, RETRY_MS.length - 1)];
           const timer = setTimeout(() => { timers.delete(timer); sync(attempt + 1); }, wait);
           timers.add(timer);
         });
     };
+    const retryNow = () => { for (const timer of timers) clearTimeout(timer); timers.clear(); sync(); };
     sync();
+    window.addEventListener('online', retryNow);
     // A different account signing in on this page is synchronised too.
     const { data: listener } = client.auth.onAuthStateChange(event => { if (event === 'SIGNED_IN') sync(); });
     return () => {
       active = false;
       for (const timer of timers) clearTimeout(timer);
       listener.subscription.unsubscribe();
+      window.removeEventListener('online', retryNow);
     };
   }, [enabled, consent.ready, consent.analytics, utils]);
 }
