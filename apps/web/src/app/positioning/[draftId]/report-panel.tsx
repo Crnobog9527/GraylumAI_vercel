@@ -43,7 +43,7 @@ export function ReportEntry(props: Props) {
 function RoundReportEntry(props: Props) {
   const available = trpc.runtime.reportAvailable.useQuery(undefined, { enabled: props.confirmed, staleTime: 60_000 });
   const canGenerate = props.confirmed && available.data?.enabled === true;
-  const report = useReportGen({ ...props, canGenerate: canGenerate });
+  const report = useReportGen({ ...props, canGenerate: canGenerate, price: available.data?.priceCredits });
   const [open, setOpen] = useState(false);
   // A first start refused for membership opens the paywall (design v25 scene 1), also after leaving
   // and coming back in this tab. A saved report of this round keeps its own dialog.

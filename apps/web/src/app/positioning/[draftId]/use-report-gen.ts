@@ -29,8 +29,10 @@ const POLL_MS = 5000;
  * Reading a saved report never depends on the switch or membership; `canGenerate` (switch on and
  * every step confirmed) only allows a new paid start.
  */
-export function useReportGen(input: { draftId: string; sessionId: string; projectId: string; roundId: string; canGenerate: boolean }) {
-  const { draftId, sessionId, projectId, roundId, canGenerate } = input;
+export function useReportGen(input: { draftId: string; sessionId: string; projectId: string; roundId: string; canGenerate: boolean;
+  /** The fixed price the button shows (0299): sent with the start, which is refused if the price changed meanwhile. */
+  price?: number | null }) {
+  const { draftId, sessionId, projectId, roundId, canGenerate, price } = input;
   const key = reportRecordKey(draftId, roundId);
   const utils = trpc.useUtils();
   const [record, setRecord] = useState<ReportRecord | null>(null);
@@ -136,7 +138,8 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
     const requestId = nextRequestId(record, () => crypto.randomUUID());
     save({ requestId });
     try {
-      const id = startedExecution(await start.mutateAsync({ sessionId, projectId, roundId, requestId }));
+      const id = startedExecution(await start.mutateAsync({ sessionId, projectId, roundId, requestId,
+        ...(price ? { acceptedCredits: price } : {}) }));
       if (!id) throw new Error("REPORT_UNAVAILABLE");
       save({ requestId, executionId: id });
       setPinned({ executionId: id, generation: ++generation.current });

@@ -91,7 +91,8 @@ export const runtimeRouter=router({
   reportRevisionService(ctx.userScopedSupabase,ctx.supabaseAdmin!).apply(input)),
  reportRevisionDecline:maintenanceProcedure.input(revisionDeclineInput).mutation(({ctx,input})=>
   reportRevisionService(ctx.userScopedSupabase,ctx.supabaseAdmin!).decline(input)),
- reportStart:procedure.input(reportStart).mutation(({ctx,input})=>ctx.report.start(input)),
+ // acceptedCredits: the fixed price the button showed (0299); the service refuses a start at another price.
+ reportStart:procedure.input(reportStart.extend({acceptedCredits:z.number().int().positive().optional()})).mutation(({ctx,input})=>ctx.report.start(input)),
  // Display only: whether the report entry is shown. reportStart checks the same switch again.
  // The fixed price (0299) is shown on the button; null when it cannot be read (the button then shows no number).
  reportAvailable:maintenanceProcedure.query(async({ctx})=>({enabled:await reportEnabled(ctx.supabaseAdmin!).catch(()=>false),

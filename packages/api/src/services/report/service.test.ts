@@ -192,13 +192,30 @@ it.each([
 // A report that ended without a complete report had its fixed price refunded (0299): a new start pays it again
 // (Owner 2026-10-17 "重新生成照收全价"), also when the incomplete one has text (cut off, stopped).
 it.each([['cancelled', null], ['completed', { body: '', completeness: 'complete' }], ['completed', null],
-  ['completed', { body: '## One\nx', completeness: 'length_limit' }], ['completed', { body: 'x', completeness: 'stopped' }]])(
+  ['completed', { body: '## One\nx', completeness: 'length_limit' }], ['completed', { body: 'x', completeness: 'stopped' }],
+  // Marked complete but a required section is missing or empty: refunded too, so the same structural check (#1102 review).
+  ['completed', { body: 'No headings at all', completeness: 'complete' }], ['completed', { body: '## One\n', completeness: 'complete' }]])(
   'a round whose last report ended %s without a complete report allows a new start', async (state, result) => {
     const existing = run(REPORT_REQUEST_INPUT, '2026-10-02T00:00:00Z');
     const { admin, past } = startAdmin([existing], { [existing.executionId]: { state, result, context: frozen(locate.projectId, locate.roundId) } });
     await expect(reportService(user as unknown as SupabaseClient, admin, policy).start(startInput)).rejects.toMatchObject({ message: 'REPORT_UNAVAILABLE' });
     expect(past.reached).toBe(true);
   });
+it('a start at another price than the button showed is refused before any admission (0299)', async () => {
+  const { admin, past } = startAdmin([], {});
+  const settings: Record<string, unknown> = { runtime_report_generation: { enabled: true }, report_fixed_price_credits: 500 };
+  let key = '';
+  const query = { select: () => query, eq: (_c: string, value: string) => { key = value; return query; },
+    maybeSingle: async () => ({ data: { value: settings[key] }, error: null }) };
+  const priced = { ...admin, from: () => query } as unknown as SupabaseClient;
+  await expect(reportService(user as unknown as SupabaseClient, priced, policy).start({ ...startInput, requestId: randomUUID(), acceptedCredits: 400 }))
+    .rejects.toMatchObject({ message: 'REPORT_PRICE_CHANGED' });
+  expect(past.reached).toBe(false);
+  // The shown price matches: the start goes on (to the next refusal of this mock).
+  await expect(reportService(user as unknown as SupabaseClient, priced, policy).start({ ...startInput, requestId: randomUUID(), acceptedCredits: 500 }))
+    .rejects.toMatchObject({ message: 'REPORT_UNAVAILABLE' });
+  expect(past.reached).toBe(true);
+});
 it('a report of another round or project does not block this round', async () => {
   const otherRound = run(REPORT_REQUEST_INPUT, '2026-10-02T00:00:00Z'), otherProject = run(REPORT_REQUEST_INPUT, '2026-10-03T00:00:00Z');
   const done = { state: 'completed', result: { body: 'x', completeness: 'complete' } };

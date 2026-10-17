@@ -101,12 +101,14 @@ $$;
 REVOKE ALL ON FUNCTION public.report_fee_view(uuid) FROM PUBLIC, anon, authenticated, service_role;
 
 -- Settles a held price (idempotent). Complete report: charge; ended without one, deleted, or p_refund: refund;
--- still running or waiting: stays held. Lock order: fee row -> profile.
+-- still running or waiting: stays held. Lock order: profile -> fee row, the order content erasure (which already
+-- holds the profile) reaches it in.
 CREATE OR REPLACE FUNCTION public.report_fee_settle_internal(p_execution_id uuid, p_refund boolean DEFAULT false) RETURNS jsonb
 LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
 DECLARE f report_fees; e runtime_executions; charge integer; reason text; before_balance integer; restored integer; q record;
   meta jsonb; complete boolean;
 BEGIN
+  PERFORM 1 FROM profiles WHERE id=(SELECT actor_id FROM report_fees WHERE execution_id=p_execution_id) FOR UPDATE;
   SELECT * INTO f FROM report_fees WHERE execution_id=p_execution_id FOR UPDATE;
   IF f.execution_id IS NULL THEN RETURN NULL; END IF;
   IF f.state<>'held' THEN RETURN report_fee_view(f.execution_id); END IF;
@@ -154,13 +156,14 @@ BEGIN
 END $$;
 
 -- Daily recovery: held prices whose execution ended; one left held for 3 days with its billing run closed and every
--- call settled (an execution that never reaches an end state) is refunded. Rows another transaction holds are skipped.
+-- call settled (an execution that never reaches an end state) is refunded. Listed without locks: the settlement takes
+-- the profile, then the fee row, and is idempotent.
 CREATE OR REPLACE FUNCTION public.report_fee_settle_due(p_limit integer) RETURNS integer
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE due report_fees; n integer:=0; v jsonb; stale boolean;
 BEGIN
   FOR due IN SELECT f.* FROM report_fees f WHERE f.state='held' ORDER BY f.created_at
-    LIMIT least(greatest(coalesce(p_limit,100),1),500) FOR UPDATE OF f SKIP LOCKED LOOP
+    LIMIT least(greatest(coalesce(p_limit,100),1),500) LOOP
     SELECT due.created_at<=clock_timestamp()-interval '3 days' AND coalesce(r.closed,true)
       AND NOT EXISTS(SELECT 1 FROM bill2_calls c WHERE c.run_id=r.id AND c.settled_at IS NULL)
       INTO stale FROM runtime_executions e LEFT JOIN bill2_runs r ON r.id=e.billing_run_id WHERE e.id=due.execution_id;

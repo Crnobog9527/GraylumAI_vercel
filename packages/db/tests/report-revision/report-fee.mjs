@@ -140,18 +140,31 @@ export async function runReportFee({db,Client,connectionString,report}) {
   await closeAccount(db,acc);
   await db.query('SELECT account_erasure_scrub_content($1)',[acc.actor]);
   assert.equal(await wallet(db,acc.actor),5000,'account erasure refunds a held price');
-  report.checks.push('report price: draft deletion charges a complete report and refunds a running one; account erasure refunds; held price pending');
+  // Deletion racing the daily settlement: one lock order (profile, then fee), no deadlock, settled once.
+  const rc = await seed(db);
+  await setBalance(db,rc.actor,5000);
+  const ended = await execution(db,rc,undefined,false);
+  await finish(db,ended.id,'cancelled',null);
+  const racers = [new Client({connectionString}),new Client({connectionString})];
+  await Promise.all(racers.map(x=>x.connect()));
+  try {
+    const raced = await Promise.all([erase(racers[0],rc,'artifact',rc.project).then(r=>r.status,e=>e.message),
+      service(racers[1],'report_fee_settle_due',100).then(()=>'settled',e=>e.message)]);
+    assert.ok(!raced.some(r=>/deadlock/i.test(r)),JSON.stringify(raced));
+  } finally { await Promise.all(racers.map(x=>x.end())); }
+  assert.equal((await fee(db,ended.id)).state,'refunded');assert.equal(await wallet(db,rc.actor),5000,'refunded once');
+  report.checks.push('report price: draft deletion charges a complete report and refunds a running one; account erasure refunds; held price pending; deletion racing the daily settlement does not deadlock');
 
   // Daily job: ended executions settle; one stuck for 3 days with its run closed and settled is refunded.
   const job = await seed(db);
   await setBalance(db,job.actor,5000);
-  const ended = await execution(db,job);
-  await finish(db,ended.id,'cancelled',null);
+  const jobEnded = await execution(db,job);
+  await finish(db,jobEnded.id,'cancelled',null);
   const stuck = await execution(db,job);
   await db.query(`UPDATE report_fees SET created_at=now()-interval '4 days' WHERE execution_id=$1`,[stuck.id]);
   await rpc(db,'bill2_cancel',job.actor,stuck.run.run);
   assert.ok(await service(db,'report_fee_settle_due',100)>=2);
-  assert.equal((await fee(db,ended.id)).state,'refunded');assert.equal((await fee(db,stuck.id)).state,'refunded');
+  assert.equal((await fee(db,jobEnded.id)).state,'refunded');assert.equal((await fee(db,stuck.id)).state,'refunded');
   assert.equal(await wallet(db,job.actor),5000);
   report.checks.push('report price: the daily job settles ended executions and refunds a price stuck for 3 days');
 
