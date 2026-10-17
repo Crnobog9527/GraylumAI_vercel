@@ -3260,7 +3260,7 @@
   "fn:publish_monitor_refresh_claim(integer,integer)": "3a2438b82b22",
   "fn:publish_monitor_refresh_current(uuid,uuid,uuid)": "871a5c6323e4",
   "fn:publish_monitor_refresh_due(uuid,uuid,uuid,integer,integer)": "0ba2853f7e94",
-  "fn:publish_monitor_refresh_finish(uuid,uuid,uuid,text,text)": "1f306a7c393e",
+  "fn:publish_monitor_refresh_finish(uuid,uuid,uuid,text,text)": "794e220b665f",
   "fn:publish_monitor_refresh_item(social_connections)": "0330b1c78a15",
   "fn:publish_monitor_refresh_page(uuid,uuid,uuid,jsonb,text,boolean)": "d5d01eaa2464",
   "fn:publish_monitor_refresh_request(uuid,uuid,integer)": "edc068d77cdd",
