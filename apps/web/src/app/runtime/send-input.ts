@@ -1,4 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {
+  mergeReferences, parseReferences, sameReferences, type LibraryReference,
+} from '@/components/opc/composer-references';
+
 type SetInput = (update: (current: string) => string) => void;
 
 /**
@@ -28,6 +32,18 @@ export function clearForSend(setInput: SetInput, submitted: string, save: (text:
 type DraftStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 const draftKey = (sessionId: string) => 'opc-runtime-input:' + sessionId;
 const pendingKey = (sessionId: string) => 'opc-runtime-pending:' + sessionId;
+/** UI-B: the library references of the draft, kept next to its text (the text reads them as `@名称`). */
+export const draftReferencesKey = (sessionId: string) => 'opc-runtime-references:' + sessionId;
+
+export function readDraftReferences(storage: Pick<Storage, 'getItem'>, sessionId: string) {
+  try { return parseReferences(JSON.parse(storage.getItem(draftReferencesKey(sessionId)) ?? '[]')); } catch { return []; }
+}
+
+export function saveDraftReferences(storage: Pick<Storage, 'setItem' | 'removeItem'>, sessionId: string,
+  references: readonly LibraryReference[]) {
+  if (references.length) storage.setItem(draftReferencesKey(sessionId), JSON.stringify(references));
+  else storage.removeItem(draftReferencesKey(sessionId));
+}
 
 /**
  * A send not yet confirmed by this page: the box text, the exact request input and its request id.
@@ -36,15 +52,19 @@ const pendingKey = (sessionId: string) => 'opc-runtime-pending:' + sessionId;
  */
 export type PendingSend = {
   requestId: string; text: string; input: string; at: number;
+  /** UI-B: the references sent with it; part of the request, so a different set needs a new request id. */
+  references?: LibraryReference[];
   /** True once the text was put back in the box, so a reload does not add it a second time. */
   restored?: boolean;
 };
 
 export function rememberPending(storage: DraftStorage, sessionId: string,
-  send: { requestId: string; text: string; input: string }, now = Date.now()) {
-  storage.setItem(pendingKey(sessionId), JSON.stringify({ ...send, at: now }));
+  send: { requestId: string; text: string; input: string; references?: LibraryReference[] }, now = Date.now()) {
+  const { references, ...rest } = send;
+  storage.setItem(pendingKey(sessionId), JSON.stringify(references?.length ? { ...rest, references, at: now } : { ...rest, at: now }));
   // The sent text now lives only in this record; the draft key keeps just what is typed from here on.
   storage.removeItem(draftKey(sessionId));
+  storage.removeItem(draftReferencesKey(sessionId));
 }
 
 export function forgetPending(storage: DraftStorage, sessionId: string) {
@@ -65,7 +85,7 @@ export function readPending(storage: DraftStorage, sessionId: string): PendingSe
     const value = JSON.parse(storage.getItem(pendingKey(sessionId)) ?? 'null');
     const ok = value && typeof value.requestId === 'string' && typeof value.text === 'string'
       && typeof value.input === 'string' && typeof value.at === 'number';
-    return ok ? value : null;
+    return ok ? { ...value, references: parseReferences(value.references) } : null;
   } catch {
     return null;
   }
@@ -77,13 +97,21 @@ export function readPending(storage: DraftStorage, sessionId: string): PendingSe
  * If the server had in fact stored it, that resend is a replay of the same request: no second turn, no second charge.
  */
 export function openingDraft(storage: DraftStorage, sessionId: string) {
+  return openingDraftWithReferences(storage, sessionId).text;
+}
+
+/** `openingDraft` with the draft's library references (UI-B); a send put back brings its references back too. */
+export function openingDraftWithReferences(storage: DraftStorage, sessionId: string) {
   const draft = storage.getItem(draftKey(sessionId)) ?? '';
+  const references = readDraftReferences(storage, sessionId);
   const pending = readPending(storage, sessionId);
-  if (!pending || pending.restored) return draft;
+  if (!pending || pending.restored) return { text: draft, references };
   const merged = restoredDraft(draft, pending.text);
+  const mergedReferences = mergeReferences(pending.references ?? [], references);
   storage.setItem(draftKey(sessionId), merged);
+  saveDraftReferences(storage, sessionId, mergedReferences);
   storage.setItem(pendingKey(sessionId), JSON.stringify({ ...pending, restored: true }));
-  return merged;
+  return { text: merged, references: mergedReferences };
 }
 
 /**
@@ -92,8 +120,9 @@ export function openingDraft(storage: DraftStorage, sessionId: string) {
  * changed the text: then this is a different message and gets a new id (reusing it would be RUNTIME_REQUEST_CONFLICT).
  */
 export function requestIdFor(fromAddress: string | null, pending: PendingSend | null, input: string,
-  fresh: () => string = () => crypto.randomUUID()) {
+  fresh: () => string = () => crypto.randomUUID(), references: readonly LibraryReference[] = []) {
   if (fromAddress && pending?.requestId !== fromAddress) return fromAddress;
-  if (pending?.input === input) return pending.requestId;
+  // UI-B: the server stores `references` with the request; the same text with other references is another message.
+  if (pending?.input === input && sameReferences(pending.references ?? [], references)) return pending.requestId;
   return fresh();
 }
