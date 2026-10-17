@@ -9,6 +9,17 @@ import { paygStablePolicy } from '../bill2/paygPolicy';
 import { validateNominalBound } from '../../shared/nominalPricing';
 import { aggregateCredits } from '../bill2/decimal';
 import { callBillingUnit } from './billingUnitAdmission';
+import { IMAGE_PURPOSES, measureImage, type ImageQuote } from '../bill2/imageInput';
+
+type StablePayg = z.infer<typeof paygStablePolicy>;
+/** T for one request: the text bytes plus the image token ceiling (LIB-2d), never the base64 length. */
+function measurePaygInput(request: string, stable: StablePayg, parsed: { messages?: unknown }) {
+  const image: ImageQuote | null = measureImage(parsed, stable.imageInput);
+  const measured = measureCallInput(request, stable.templateTokens, stable.marginTokens);
+  const imageBytes = image?.dataUrlBytes ?? 0;
+  return { image, bytes: measured.requestBytes, textBytes: measured.requestBytes - imageBytes,
+    promptTokensUpper: measured.promptTokensUpper - imageBytes + (image?.tokensUpper ?? 0) };
+}
 
 export const resumeInput = z.object({
   executionId: z.string().uuid(), cursor: z.number().int().nonnegative(), epoch: z.number().int().nonnegative(),
@@ -34,11 +45,12 @@ export function runtimePaygCall(request: string, phase: string,
   const schemaBytes = tools.reduce((sum: number, tool: { function?: { parameters?: unknown } }) => sum
     + (tool.function?.parameters === undefined ? 0 : Buffer.byteLength(JSON.stringify(tool.function.parameters))), 0)
     + (parsed.response_format === undefined ? 0 : Buffer.byteLength(JSON.stringify(parsed.response_format)));
-  const { requestBytes: bytes, promptTokensUpper } = measureCallInput(request, stable.templateTokens, stable.marginTokens);
-  if (bytes > stable.maxBytes || bytes > policy.inputLimit || messages < 1 || messages > stable.maxMessages
+  const { image, bytes, textBytes, promptTokensUpper } = measurePaygInput(request, stable, parsed);
+  if (image && !IMAGE_PURPOSES.has(phase)) throw new Error('BILL2_IMAGE_DENIED');
+  if (textBytes > stable.maxBytes || bytes > policy.inputLimit || messages < 1 || messages > stable.maxMessages
     || tools.length > stable.maxTools || schemaBytes > stable.maxSchemaBytes) throw new Error('BILL2_INPUT_PROFILE_INVALID');
   const outputLimit = nativeOutput ? requestOutputLimit(parsed, policy.outputLimit) : policy.outputLimit;
-  const { upperUsd } = openRouterCallBound(limits, outputLimit, promptTokensUpper);
+  const { upperUsd } = openRouterCallBound(limits, outputLimit, promptTokensUpper, image?.tokensUpper ?? 0);
   validateNominalBound(stable.nominalPricing, { ...limits, pricingHash: stable.pricingHash,
     endpointTag: stable.endpointTag, promptTokensUpper });
   const unit = callBillingUnit(rules, policy);
@@ -51,7 +63,7 @@ export function runtimePaygCall(request: string, phase: string,
     payg: { policyId: stable.policyId, policyVersion: stable.version, profileVersion: stable.profileVersion,
       evidenceVersion: stable.evidenceVersion, pricingHash: stable.pricingHash, endpointTag: stable.endpointTag,
       nominalPricing: stable.nominalPricing, templateTokens: stable.templateTokens, marginTokens: stable.marginTokens,
-      bytes, promptTokensUpper, messages, tools: tools.length, schemaBytes },
+      bytes, promptTokensUpper, messages, tools: tools.length, schemaBytes, ...(image ? { image } : {}) },
   };
   return { call, upperCredits: aggregateCredits([upperUsd], rules.creditsPerUsd, unit.billingUnit.multiplier) };
 }
@@ -79,7 +91,7 @@ export function fitNativeRequestOutput(request: string, policy: z.infer<typeof f
   const reasoning = parsed.reasoning as {max_tokens?: unknown} | undefined;
   const minimum = Number.isSafeInteger(reasoning?.max_tokens)
     ? Number(reasoning!.max_tokens) + MIN_ANSWER_TOKENS_AFTER_BUDGET : 1;
-  const fits = (body: string, output: number) => measureCallInput(body, stable.templateTokens, stable.marginTokens)
+  const fits = (body: string, output: number) => measurePaygInput(body, stable, JSON.parse(body))
     .promptTokensUpper + output <= policy.providerLimits!.contextTokens;
   if (originalLimit >= minimum && fits(request, originalLimit)) return request;
   const serialize = (output: number) => JSON.stringify({...parsed, [key]: output});
