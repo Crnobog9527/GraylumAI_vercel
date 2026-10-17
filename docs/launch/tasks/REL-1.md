@@ -122,7 +122,7 @@ Owner 2026-10-17 选 A（原话见第 6 节）：**日期不变，10-25 冻结**
 | R2 | 正式库标记：新建正式库按迁移建库（含 0292）之后、开放模型调用之前，用库所有者执行 `INSERT INTO system_settings(key,value) VALUES('runtime_environment','"production"'::jsonb) ON CONFLICT(key) DO UPDATE SET value=excluded.value;`，读回 `SELECT public.runtime_production_database();` 为 true（该函数不对 service_role 开放；后台设置页不能写这个键）。正式库里不能有启用的测试窗口，否则正式调用自动关闭。**绝不在 staging 库写这个标记** | 代码靠它认出"这是正式库"，才走正式模式 | 总控（需批准） | R1 合并；B1 | 读回为 true；正式库测试窗口为 0 条启用 | RUNTIME-PROD 窗口转交（PR #1073） |
 | R3 | 计费配置行：`billing_credits_per_usd`=100、`billing_token_price_multiplier`=6 必须作为真实设置行写入（正式模式不接受代码默认值） | q=100、m=6 是 Owner 已定数值 | 总控（需批准每一组数值） | R1；B1 | 读回两行 | 同上；第 1450 行 |
 | R4 | 正式准入档案：`system_settings.runtime_payg_production` = `{version:1, enabled, policyVersion, profiles:[…]}`，结构同 staging 的 `runtime_payg_staging`，但没有 windowId 和到期日（取代 H3 里"准入记录"的写法）；应急关闭写 `{"enabled":false}` | 哪些模型和线路能被正式调用 | 总控（需批准） | R1；R3 | 读回档案；关闭后新调用被拒 | 同上 |
-| R5 | Vercel 正式项目环境变量（非密钥）：`V3_RUNTIME_PRODUCTION_PROJECT_ID`（正式项目 ID）、`V3_RUNTIME_PRODUCTION_DATABASE_HOST`（新正式 Supabase 主机）、`V3_RUNTIME_PRODUCTION_ENABLED=true`（冒烟前保持 false 或不设）；**正式项目不能设任何 `V3_RUNTIME_STAGING_*`**（设了代码拒绝）；正式域名代码里只认 `app.graylum.com` 和 `www.graylum.com` | 项目和库绑定，防止误连 | 总控（需批准） | R1；N1 | 变量名清单读回；冒烟前确认 `ENABLED` 不是 true | 同上 |
+| R5 | Vercel 正式项目环境变量（非密钥）：`V3_RUNTIME_PRODUCTION_PROJECT_ID`（正式项目 ID）、`V3_RUNTIME_PRODUCTION_DATABASE_HOST`（新正式 Supabase 主机）、`V3_RUNTIME_PRODUCTION_ENABLED=true`（**随 10-29 的部署一起设成 true**，此时 `stopNewCalls` 仍是开的，新调用照样被拒；环境变量只对新部署生效，冒烟当天只靠临时关 `stopNewCalls`，不再改变量、不再重新部署）；**正式项目不能设任何 `V3_RUNTIME_STAGING_*`**（设了代码拒绝）；正式域名代码里只认 `app.graylum.com` 和 `www.graylum.com` | 项目和库绑定，防止误连 | 总控（需批准） | R1；N1 | 变量名清单读回；`stopNewCalls` 开着时模型调用被拒 | 同上 |
 | R6 | 首版正式环境的评审团和研究工具还不可用，由后续两个 PR 在冻结前补上（总控已排）；补不上就按 10-24 缺口清单处理 | 避免对外说有但实际没有 | RUNTIME-PROD 窗口 | R1 | 缺口清单里列明 | 同上 |
 
 ### A. 平台和基础设施
@@ -182,7 +182,7 @@ Owner 2026-10-17 选 A（原话见第 6 节）：**日期不变，10-25 冻结**
 | D4a | 冒烟期间（10-30）站点还在 Vercel 部署访问保护后面，第三方回调也会被挡。由 Owner 在 Vercel 生成一个专用的保护绕过口令（新增凭证），只加在 Stripe 和 Post for Me 的回调地址上（`x-vercel-protection-bypass` 参数）；公开开放、撤掉访问保护后，从回调地址上去掉并作废这个口令。Vercel 定时任务在保护下能否照常触发，**待核实** | 否则真钱付款成功了，但开通和退款的回调被 Vercel 拒掉 | Owner 操作（凭证） | D4、C8；在打开 D7 之前 | 访问保护开着时，Stripe 后台测试投递和一次真实付款的回调都成功；开放后口令已作废 | Vercel 部署访问保护绕过说明（外部文档）；本仓库只有预览测试用的绕过处理，**待核实**正式环境做法 |
 | D5 | 账单描述、客服邮箱、结账页的条款和隐私链接；开通 Stripe Tax 门槛监控 | MP 不负责税务的国家照常卖，接近门槛时提醒（Owner 2026-10-12 选 A） | Owner 操作 | D1 | Stripe Tax 页显示监控已开 | 第 720、2375 行；MIGRATION-PLAN 第 2.4 节、第五节第 5 项 |
 | D6 | 正式环境 Stripe 客户门户关闭"切换套餐" | 升级要走"新开 Gold 结账 + Pro 期末停"，门户里直接换套餐会绕过 | Owner 操作 | — | 门户设置读回 | 第 2375 行 |
-| D7 | 打开正式银行卡下单，同时设置 `STRIPE_CARD_RECONCILIATION_MODE=live`、放开银行卡处理只认测试模式的限制 | 默认关闭；三件事一起开 | 总控（需批准；放开测试模式限制是改配置还是改代码，**待核实**） | D1–D6；PAY-STRIPE-MP 全部 PR；#961 | 每日对账在正式环境跑出成功记录 | 第 2375 行；MIGRATION-PLAN 第五节第 7 项 |
+| D7 | `STRIPE_CARD_RECONCILIATION_MODE=live` **在 10-29 部署之前就设好**（银行卡下单此时仍关着；环境变量只对新部署生效，不能留到 10-30 才设），放开银行卡处理只认测试模式的限制；10-30 只打开银行卡下单本身（如果这一步还需要改环境变量或代码，必须先重新部署再打开） | 默认关闭；三件事一起开 | 总控（需批准；放开测试模式限制是改配置还是改代码，**待核实**） | D1–D6；PAY-STRIPE-MP 全部 PR；#961 | 每日对账在正式环境跑出成功记录 | 第 2375 行；MIGRATION-PLAN 第五节第 7 项 |
 | D8 | 微信、支付宝单笔启售前完成税务核实、价格口径批准和结账金额验证 | 不能因为用户在中国就假设免税 | Owner 操作（核实）/ 批准 | — | 核实结果记在 PAY-STRIPE-MP 验收 PR | 第 7.6 节"Stripe 钱包启售前核实"行 |
 | D9 | 上线当天有上限的真实小额支付、退款和同日对账；279 / 496 / 621 美元钱包年付各真付一次再退款 | 第 9.3 节保留的上线条件 | Owner 批准金额、笔数和恢复安排；第一笔真钱由 Owner 或其指定的人付 | D1–D8 | `payment_orders`、`credit_transactions`、订阅和积分到账一致，退款后收回 | 第 2683、1863 行；[PAY-WAFFO](PAY-WAFFO.md) 第 297 行 |
 | D10 | 服务条款、隐私政策、退款政策、可接受使用政策的正文 | 付款前的勾选框链接这两份文件；`/refund` 没有正文前未登录访问是 404 | Owner 操作（第三方工具生成，不在 AI 范围） | — | 4 个页面未登录都能打开 | 第 93、1631 行；第 7.6 节"隐私条款"行 |
@@ -250,8 +250,8 @@ Owner 2026-10-17 选 A（原话见第 6 节）：**日期不变，10-25 冻结**
 | 10-25 → 10-27 | H2 staging 全量回归：自动化全部跑一遍；Codex 浏览器验收按清单一次一个；修复只走阻塞问题 | 执行窗口；Codex |
 | 10-27 | 准备批准包（RUNTIME_PROD_PLAN 第 7.3 节第 2 步）：正式项目、版本、迁移、配置值、各家上限金额、冒烟预算 | 总控 |
 | 10-28 | 正式只读核验（第 4 节第 3 步）：新项目的 N1–N3、A7、Vault；旧 Vercel 项目的暂停状态和绑定 | 总控（需批准只读） |
-| 10-29 | 维护态准备（第 4 节第 4 步）：在新项目里 B1 建库、B2 配置、A6 停止新调用；N10–N11 把 Vercel 正式变量换成新项目（**必须在合并 `main` 之前**，否则部署出来连的是旧库）；N14 管理员账号；之后 A4 staging → `main` 合并并部署（站点仍暂停），再由 Owner 在新站后台填密钥（C1、C3、N12）；建库后立刻用虚构账号做 A8 备份恢复和删除重放演练（通过才能 10-31 公开开放；演练建在新库里，演练数据在冒烟前清掉） | 总控（需批准）；Owner 操作；执行窗口 |
-| 10-30 | 恢复站点、公众访问仍由部署访问保护挡住（第 5 步）；**冒烟窗口内**由总控（需批准）把 `stopNewCalls` 临时关掉，让受控身份能产生一次成功调用，冒烟结束后立刻重新打开（`newWorkGate.ts` 开着时对所有人都拒绝新调用，没有按身份放行）；**先配好 D4a 回调绕过并验证投递，再打开 D7 银行卡下单**（只有受控身份能进站），再做 H4 正式小额冒烟和 D9 真钱付款退款；同日对账 | 总控（需批准）；Owner |
+| 10-29 | 维护态准备（第 4 节第 4 步）：在新项目里 B1 建库、B2 配置、A6 停止新调用；`V3_RUNTIME_PRODUCTION_ENABLED=true` 和 `STRIPE_CARD_RECONCILIATION_MODE=live` 都在这次部署前设好（R5、D7；变量只对新部署生效）；N10–N11 把 Vercel 正式变量换成新项目（**必须在合并 `main` 之前**，否则部署出来连的是旧库）；N14 管理员账号；之后 A4 staging → `main` 合并并部署（站点仍暂停），再由 Owner 在新站后台填密钥（C1、C3、N12）；建库后立刻用虚构账号做 A8 备份恢复和删除重放演练（通过才能 10-31 公开开放；演练建在新库里，演练数据在冒烟前清掉） | 总控（需批准）；Owner 操作；执行窗口 |
+| 10-30 | 恢复站点、公众访问仍由部署访问保护挡住（第 5 步）；**冒烟窗口内**由总控（需批准）把 `stopNewCalls` 临时关掉，让受控身份能产生一次成功调用，冒烟结束后立刻重新打开（`newWorkGate.ts` 开着时对所有人都拒绝新调用，没有按身份放行）；**先配好 D4a 回调绕过并验证投递，再打开 D7 银行卡下单（对账变量已在 10-29 部署里生效）**（只有受控身份能进站），再做 H4 正式小额冒烟和 D9 真钱付款退款；同日对账 | 总控（需批准）；Owner |
 | **10-31** | 对账无误后公开开放（第 7 步）：关掉 `stopNewCalls`、撤掉部署访问保护、E3 `SITE_INDEXING=public`；上线后观察成本、错误和未结算项 | 总控（需批准）；Owner |
 
 缓冲：10-30 冒烟失败或对账不一致时，保持新调用关闭、站点维持当时状态，修复后重新批准，不硬上。
@@ -310,7 +310,8 @@ Owner 2026-10-17 选 A（原话见第 6 节）：**日期不变，10-25 冻结**
 - 同意恢复正式站 `graylum-ai-vercel-v1` 的访问，新调用仍保持关闭。
 - 我来在 Vercel 生成冒烟期间专用的访问保护绕过口令，只加在 Stripe 和 Post for Me 的回调地址上，正式开放后作废。
 - 同意冒烟窗口内临时关闭 `stopNewCalls`（站点仍在部署访问保护后），冒烟结束后重新打开。
-- 同意在部署访问保护下打开正式银行卡下单，同时设置 `STRIPE_CARD_RECONCILIATION_MODE=live`（公众仍进不来）。
+- 同意在 10-29 部署前设置 `V3_RUNTIME_PRODUCTION_ENABLED=true` 和 `STRIPE_CARD_RECONCILIATION_MODE=live`（此时 `stopNewCalls` 开着、银行卡下单关着）。
+- 同意在部署访问保护下打开正式银行卡下单（公众仍进不来）。
 - 同意正式小额冒烟：用 `<测试身份>` 调用 `<模型和次数>`，总预算不超过 `<金额>` 美元。
 - 同意上线当天真实付款再退款：银行卡 `<金额和笔数>`，微信和支付宝年付 279 / 496 / 621 美元各一笔，退款后核对到账和收回。
 - 同意对账无误后公开开放：关闭"停止新调用"、撤掉部署访问保护，设置 `SITE_INDEXING=public` 让搜索引擎收录。
