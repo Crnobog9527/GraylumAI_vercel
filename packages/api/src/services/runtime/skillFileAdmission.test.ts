@@ -136,7 +136,9 @@ it('sizes candidates with the workspace read_source description the executor wil
   return runtimeAdmissionService(f.user,f.admin,{...f.policy,...autoPolicy,workspaceContext:true,maxCalls:3}).prepare({...f.input,...autoInput,input});};
  const probe=await admit(31000);
  expect(probe.context.tools).toEqual(['read_source']);expect(probe.context.matching.candidates).toHaveLength(1);
- const instructions=withPrimaryAddenda(withBrandIdentity(skill.instructions,true),{workspaceContext:true,network:'deny'});
+ const instructions=withPrimaryAddenda(withBrandIdentity(skill.instructions,true),{workspaceContext:true,network:'deny',
+  replyLanguage:probe.context.replyLanguage});
+ expect(probe.context.replyLanguage).toBe('reply-language-v1');
  const required=Buffer.byteLength(JSON.stringify({instructions,messages:[{role:'user',content:input}]}))+1024+
   sourceToolBytes(['read_source'],true)+(probe.context.promptCache?PROMPT_CACHE_OVERHEAD_BYTES:0);
  expect((await admit(required)).context.matching.candidates).toHaveLength(1);
@@ -209,6 +211,22 @@ it('R4: drops only the history read when its larger reserve does not fit, keepin
   hostTurnContext:{stepId:'first',opening:false,checklist:[]}}).prepare(f.input),context=runtimeContext.parse(admitted.context);
  expect(context.tools).toEqual(['ask_question','read_skill_file']);expect(context.historyRead).toBeUndefined();
  expect(context.instructions).not.toContain('read_history');expect(context.maxTurns).toBe(2);
+});
+
+it('R4: the history-read probe counts the same execution-time rules as the final check (SKILL-I18N-HOOK)',async()=>{
+ // Smallest input budget that keeps the optional history read...
+ const admit=async(inputBytes:number)=>{
+  const f=fixture();skill.instructions='S'.repeat(13000);
+  try{return runtimeContext.parse((await runtimeAdmissionService(f.user,f.admin,{...f.policy,inputBytes,
+   hostTurnContext:{stepId:'first',opening:false,checklist:[]}}).prepare(f.input)).context);}
+  catch(error){expect(error).toMatchObject({message:'RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY'});return null;}
+ };
+ let low=32000,high=90000;
+ while(low<high){const mid=Math.floor((low+high)/2);if((await admit(mid))?.historyRead)high=mid;else low=mid+1;}
+ expect((await admit(low))?.historyRead).toBeDefined();
+ // ...and one byte less (inside the reply-language rule's size) drops only that read instead of refusing the turn.
+ const below=await admit(low-1);
+ expect(below).not.toBeNull();expect(below!.historyRead).toBeUndefined();expect(below!.tools).toEqual(['ask_question','read_skill_file']);
 });
 
 const hash='a'.repeat(64);

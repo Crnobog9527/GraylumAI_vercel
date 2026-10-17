@@ -1,5 +1,5 @@
 "use client";
-import { readAgentTurnBody, type AgentTurnEvent } from "@repo/api/src/shared/agentTurn";
+import { type AgentTurnEvent } from "@repo/api/src/shared/agentTurn";
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { use, useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
@@ -43,13 +43,12 @@ import { sameRequest, releaseRejectedAnswer, openingRequest, parseStepEnvelope, 
   retainExecution, settleEnvelope, TEXT_PROTOCOL, turnResultNotice, type MentorTurn, type MentorExecution } from "./mentor-turn";
 import { openOrganizer, usePaygResume } from "@/lib/use-payg-resume";
 import { checklistUpdatedInput, isOpeningInput, openingEntryKey } from "@repo/api/src/shared/opcQuestions";
-import { clearSavedFields, isHostAction, noteSavedFields, nudgeNotice, refusedTurn, savedFields, shownInput } from "./checklist-nudge";
+import { clearSavedFields, freeAnswerSource, isHostAction, noteSavedFields, nudgeNotice, refusedTurn, savedFields, shownInput } from "./checklist-nudge";
 type Step = { id: string; title: string; dependsOn?: string[] };
 import { type Information, type Item, type StepEnvelope } from "./confirm-envelope";
 import { definiteHandoffRejections, handoffIntent, readRetainedHandoff } from "./handoff-envelope";
 import { ResearchCallList } from "@/components/research/research-call-list";
 import { ResearchSessionPanel, useResearchCalls } from "@/components/research/research-session";
-import { researchConfirmedInput } from "@/components/research/research-session-model";
 /** The retained mentor request is either wrapped in `request` or legacy top-level. */
 export default function PositioningDraft({ params }: { params: Promise<{ draftId: string }> }) {
   const { draftId } = use(params);
@@ -644,7 +643,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
    * One user turn on a step. The focus is only the request identity: the server
    * re-derives it, and an answered card keeps the card's own turn.
    */
-  async function ask(step: Step, inputOverride?: string, answerSource?: MentorRequest["answerSource"]) {
+  async function ask(step: Step, inputOverride?: string, answerSource?: MentorRequest["answerSource"], researchRefreshId?: string) {
     if(mentorSendInFlight.current)return;
     const key = "opc-step:" + draftId + ":" + step.id;
     if (sessionStorage.getItem(key)) {
@@ -657,12 +656,11 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     const input=(inputOverride??mentorInput).trim();if(!input)return;
     const latest = mentorExecutions.at(-1), sourceTurn = latest && mentorTurns.get(latest.executionId);
     const summary = inputOverride === STEP_SUMMARY_INPUT; // R16: only the button, never typed text; no card, no field.
-    // Typing instead of choosing still answers the newest card of this step and round.
-    if (!answerSource && !isHostAction(input) && latest?.state === "completed" && sourceTurn && sourceTurn.roundId === d.roundId &&
-      sourceTurn.stepId === step.id && readAgentTurnBody(latest.body).card)
-      answerSource = { executionId: latest.executionId };
+    // Typing instead of choosing still answers the newest card of this step and round (a refresh answers none).
+    answerSource = freeAnswerSource({ answerSource, input, researchRefreshId, latest, sourceTurn, roundId: d.roundId, stepId: step.id });
     const questionId = focusField(d.information[step.id]);
     const fixed:StepEnvelope={request:summary?stepSummaryRequest(draftId,step.id,crypto.randomUUID()):{...(answerSource ? {answerSource} : {}),
+      ...(researchRefreshId ? {researchRefreshId} : {}),
       draftId,stepId:step.id,purpose:'mentor',requestId:crypto.randomUUID(),input,questionId,organizeAfter:true}};
     sessionStorage.setItem(key,JSON.stringify(fixed));
     mentorSendInFlight.current=true;
@@ -1204,7 +1202,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                   {liveOnly&&(liveOnly.text||!liveOnly.card)&&<MentorLiveReply text={liveOnly.text}/>}
                   {read.data?.sessionId && <ResearchSessionPanel sessionId={read.data.sessionId} settledTurns={settledTurns}
                     disabled={sendLocked || snap.state !== "draft" || mentorTurns.get(mentorExecutions.at(-1)?.executionId ?? "")?.stepId !== step.id}
-                    onConfirmed={confirmed => void ask(step, researchConfirmedInput(confirmed))}/>}
+                    onSend={(text, refreshId) => ask(step, text, undefined, refreshId)}/>}
                   <ChatNoticeList notices={[...payg.blockedNotices(mentorExecutions, busy),
                     nudgeNotice(nudged, () => void ask(step, checklistUpdatedInput(nudged)), sendLocked, hasPendingStepRequest),
                     ...mentorTailNotices({ livePhase: live.phase, stop: live.stopAction,
@@ -1224,7 +1222,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                     <Button variant="outline" size="sm" disabled={sendLocked} onClick={() => void ask(step, STEP_SUMMARY_INPUT)}>{STEP_SUMMARY_LABEL}</Button>
                     <span className="text-xs text-[var(--text-secondary)]">让 AI 教练先整理这一步的小结，还缺什么会如实列出；确认仍由你来点。</span>
                   </div>}
-                  <WorkComposer value={mentorInput} onChange={setMentorInput} label="给 AI 教练的回复" placeholder={OTHER_PLACEHOLDER} attachment={dock} maxLength={8000} disabled={snap.state!=="draft"} sendDisabled={sendLocked} onSend={skill=>{if(skill)void free.send(mentorInput,skill);else void ask(step);}}/>
+                  <WorkComposer references={false} value={mentorInput} onChange={setMentorInput} label="给 AI 教练的回复" placeholder={OTHER_PLACEHOLDER} attachment={dock} maxLength={8000} disabled={snap.state!=="draft"} sendDisabled={sendLocked} onSend={skill=>{if(skill)void free.send(mentorInput,skill);else void ask(step);}}/>
                   <p className="text-xs text-[var(--text-secondary)]">
                     同一账号的步骤共用这条对话，未确认内容保留在草稿中。{d?.runtimeMode==='staging_test'?'当前使用真实模型，仅处理你提供的资料。':'当前为隔离模拟，不调用真实模型。'}
                   </p>
@@ -1326,7 +1324,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
           继续生成第一周选题
         </Button>
       )}
-      {!planView && read.data?.sessionId && <ReportEntry draftId={draftId} sessionId={read.data.sessionId}
+      {!planView && read.data?.sessionId && <ReportEntry draftId={draftId} sessionId={read.data.sessionId} published={snap.state === "published"}
         projectId={d.projectId} roundId={d.roundId} report={d.report} busy={busy || hasUnsavedInformation || hasPendingStepRequest}
         onTopics={() => void run(async () => { if ((await read.refetch()).isError) throw new Error("OPC_UNAVAILABLE"); })
           .then(failure => { if (!failure) setConsentOpen(true); })} // Only with the finalized version read back.

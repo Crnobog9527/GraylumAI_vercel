@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from "vitest";
 import {
-  isResearchEvent, MAX_CALLS_PER_EXECUTION, openCards, REPORT_MIN_QUALIFIED, toBenchmarkRows, toSessionCards, withResearchCall,
+  isResearchEvent, MAX_CALLS_PER_EXECUTION, openCards, REPORT_MIN_QUALIFIED, researchConfirmedInput, researchRefreshInput, toBenchmarkRows, toSessionCards, withResearchCall,
   type StoredBenchmark, type StoredCard,
 } from "../research-session-model";
 
@@ -114,5 +114,16 @@ describe("stored benchmark rows", () => {
 
   it("has no fetch time without rows", () => {
     expect(toBenchmarkRows([])).toEqual({ rows: [], fetchedAt: null });
+  });
+});
+
+describe("messages the panel sends", () => {
+  it("names the account after a card confirmation or a refresh, without ids or suppliers", () => {
+    expect(researchConfirmedInput({ cardId: "c", confirmationId: "x", kind: "keywords", items: ["职场穿搭", "通勤"] }))
+      .toBe("我确认了这些关键词：职场穿搭、通勤");
+    expect(researchConfirmedInput({ cardId: "c", confirmationId: "x", kind: "candidates",
+      items: [{ id: "c1", platform: "douyin", account: "sample_1", evidenceRef: "ev1#1" }] }))
+      .toBe("我选好了对标账号：抖音 sample_1");
+    expect(researchRefreshInput("xiaohongshu", "sample_2")).toBe("请重新读取对标账号 小红书 sample_2 的最新数据");
   });
 });
