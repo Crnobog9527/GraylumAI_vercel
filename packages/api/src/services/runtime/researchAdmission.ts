@@ -16,7 +16,8 @@ import type { FrozenPaygRun } from '../bill2/service';
 import { freezePaygMessageBudget } from './paygMessageBudget';
 import { fastSearchOnly, researchToolDescription, researchToolParameters } from './researchRuntimeTool';
 import type { StagingPolicy } from './stagingPolicy';
-import { frozenResearchTurn, LOCAL_RESEARCH_ACCOUNT, RESEARCH_PHASE, RESEARCH_RESULT_RESERVE_BYTES, RESEARCH_TURN_VERSION,
+import { frozenResearchTurn, LOCAL_RESEARCH_ACCOUNT, PRODUCTION_RESEARCH_ACCOUNT, RESEARCH_PHASE, RESEARCH_RESULT_RESERVE_BYTES,
+  RESEARCH_TURN_VERSION,
   type FrozenResearchTurn } from './researchTurn';
 
 /** Serialized tool definitions as the SDK sends them; the full request is checked again before dispatch. */
@@ -79,11 +80,14 @@ export async function admitResearchTurn(input: ResearchAdmissionInput): Promise<
     if (!config.vendors[entry.vendor].enabled) continue;
     if (entry.platform !== 'web' && !config.verifiedPlatforms.includes(entry.platform)) continue;
     const model = `${entry.vendor}:${entry.route}`;
-    const windowEntry = input.real?.toolPolicies?.find(policy => policy.model === model);
-    if (input.real && !windowEntry) continue;
+    // RUNTIME-PROD: production has no window; the research switch, vendor hard caps and price entries approve a route.
+    const production = input.real?.mode === 'production';
+    const windowEntry = production ? undefined : input.real?.toolPolicies?.find(policy => policy.model === model);
+    if (input.real && !production && !windowEntry) continue;
     let policy: ToolCallPolicy;
     try {
-      policy = toolCallPolicy({ vendor: entry.vendor, account: windowEntry?.account ?? LOCAL_RESEARCH_ACCOUNT, route: entry.route,
+      const account = windowEntry?.account ?? (production ? PRODUCTION_RESEARCH_ACCOUNT : LOCAL_RESEARCH_ACCOUNT);
+      policy = toolCallPolicy({ vendor: entry.vendor, account, route: entry.route,
         purposes: [RESEARCH_PHASE], maxUnitsPerCall: entry.maxUnitsPerCall,
         price: resolveProviderPrice(prices.config, { provider: entry.vendor, route: entry.route }, input.defaultMultiplier, now) });
     } catch { continue; }

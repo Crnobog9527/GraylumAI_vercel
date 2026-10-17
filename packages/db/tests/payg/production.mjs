@@ -220,3 +220,99 @@ export async function productionCases({db,Client,connectionString,report,claim})
     await db.query('UPDATE runtime_test_windows SET enabled=true WHERE id=ANY($1::uuid[])',[paused]);
   }
 }
+
+// 0293: research tool routes and tool-only publish monitor runs on the production database.
+const toolsMigration=new URL(`../../migrations/${readdirSync(new URL('../../migrations/',import.meta.url))
+  .find(f=>/^\d{4}_runtime_production_tools\.sql$/.test(f))}`,import.meta.url);
+const toolModelId=route=>createHash('md5').update('bill2-research-tool:'+route).digest('hex')
+  .replace(/^(.{8})(.{4})(.{4})(.{4})(.{12})$/,'$1-$2-$3-$4-$5');
+const toolPolicy=(route,patch={})=>({provider:'tikhub',account:'research-production',model:route,protocol:'research-tool-v1',
+  modelId:toolModelId(route),multiplier:'6',lookupSupported:false,upperUsd:'0.01',purposes:['question'],
+  toolPricing:{unit:'call',currency:'USD',price:'0.01',unitsPerPrice:'1',usdPerCurrency:null,entryHash:'e'.repeat(64),
+    validUntil:new Date(Date.now()+7*86400000).toISOString(),maxUnitsPerCall:'1'},...patch});
+const priceEntry=(patch={})=>({provider:'tikhub',route:null,appliesToUnlistedRoutes:true,currency:'USD',usageUnit:'call',
+  unitsPerPrice:'1',price:'0.01',usdPerCurrency:null,fxSourceUrl:null,fxEffectiveAt:null,fxValidUntil:null,pricingBasis:'list',
+  sourceUrl:'https://example.com/p',evidenceHash:'a'.repeat(64),verifiedAt:new Date(Date.now()-86400000).toISOString(),
+  validUntil:null,chargeCondition:'per call',includedInReceipt:false,priceMultiplier:null,...patch});
+const researchConfig=(enabled=true,vendor=true)=>({version:1,enabled,vendors:{tikhub:{enabled:vendor,hardCapAttested:vendor?{by:randomUUID(),at:new Date().toISOString()}:null},
+  parallel:{enabled:false,hardCapAttested:null},firecrawl:{enabled:false,hardCapAttested:null}}});
+
+export async function productionToolCases({db,report,claim,reapply=true}) {
+  // productionCases reran 0292, which restores its own gate; put the 0293 gate back (a rerun is a no-op otherwise).
+  if (reapply) await db.query(readFileSync(toolsMigration,'utf8'));
+  const profiles=[];
+  const paused=(await db.query('UPDATE runtime_test_windows SET enabled=false WHERE enabled RETURNING id')).rows.map(r=>r.id);
+  const config=()=>setting(db,'runtime_payg_production',{version:1,enabled:true,policyVersion:POLICY,profiles});
+  await setting(db,'runtime_environment','production');
+  await setting(db,'billing_credits_per_usd','100');
+  await setting(db,'billing_token_price_multiplier','6');
+  await setting(db,'research_tools_config',researchConfig());
+  await setting(db,'billing_provider_prices',{version:1,entries:[priceEntry()]});
+  await db.query(`INSERT INTO system_settings(key,value) VALUES('billing_payg_start_thresholds','{"version":"local-v1","thresholds":[]}')
+    ON CONFLICT(key) DO NOTHING`);
+  try {
+    const f=await productionFixture(db,profiles);
+    const route='tikhub:/tiktok/app/v3/handler_user_profile#'+randomUUID().slice(0,8);
+    const tool=toolPolicy(route);
+    f.payload.callPolicy.push(tool);
+    await db.query(`UPDATE system_settings SET value=jsonb_set(value,'{thresholds}',coalesce(value->'thresholds','[]')||$1::jsonb)
+      WHERE key='billing_payg_start_thresholds'`,[JSON.stringify([f.model,route].map(model=>({model,purpose:'question',credits:1})))]);
+    await config();
+    for (const [payload,why] of [
+      [{...f.payload,callPolicy:[f.payload.callPolicy[0],{...tool,toolPricing:{...tool.toolPricing,price:'0.005'}}]},'a frozen price below the configured price'],
+      [{...f.payload,callPolicy:[f.payload.callPolicy[0],{...tool,multiplier:'3'}]},'a route multiplier other than the configured one'],
+      [{...f.payload,callPolicy:[f.payload.callPolicy[0],{...tool,modelId:toolModelId('tikhub:other')}]},'a tool model id that is not its route'],
+    ]) {
+      await rejects(prepare(db,f,payload),/RUNTIME_PRODUCTION_MODEL_DENIED|BILL2_CALL_POLICY_DENIED/);
+      report.checks.push(`production tool route refused at prepare: ${why}`);
+    }
+    await setting(db,'research_tools_config',researchConfig(true,false));
+    await rejects(prepare(db,f),/RUNTIME_PRODUCTION_MODEL_DENIED/);
+    await setting(db,'research_tools_config',researchConfig());
+    f.run=(await prepare(db,f)).id;
+    const m=await claim(db,f,1,true);
+    await record(db,f,m,'0.00005');
+    const toolClaim=(seq)=>rpc(db,'bill2_claim',f.actor,f.run,seq,{provider:'tikhub',account:'research-production',model:route,
+      protocol:'research-tool-v1',phase:'question',requestHash:'d'.repeat(64),automaticRetry:false,hiddenTools:false,lookupSupported:false,
+      upperUsd:tool.upperUsd,billingUnit:{modelId:tool.modelId,multiplier:'6'},toolPricing:tool.toolPricing});
+    await setting(db,'research_tools_config',researchConfig(true,false));
+    await rejects(toolClaim(2),/RUNTIME_PRODUCTION_MODEL_DENIED/);
+    await setting(db,'research_tools_config',researchConfig());
+    const c=await toolClaim(2);
+    assert.equal((await rpc(db,'bill2_dispatch',f.actor,f.run,c.id,c.dispatchToken)).dispatch,true);
+    await rpc(db,'bill2_record',f.actor,f.run,c.id,{provider:'tikhub',account:'research-production',protocol:'research-tool-v1',
+      model:route,providerId:c.id,source:'response',sourceHash:'c'.repeat(64),observedAt:new Date().toISOString(),
+      coverage:'request_total',final:true,currency:'USD',cost:'0.01',usage:{unit:'call',units:'1'},evidenceKind:'tool_result',
+      toolOutcome:'delivered'});
+    await rpc(db,'bill2_finalize',f.actor,f.run);
+    const v=await conserved(db,f);
+    // (0.00005 + 0.01) × 100 × 6 = 6.03 → 7 credits, rounded once for the run.
+    assert.equal(Number(v.charged_credits),7);
+    report.checks.push('production run with a model and an approved tool route: prepare, claim, dispatch, settle (q=100, m=6)');
+    report.checks.push('turning the vendor off (no attested hard cap) refuses the next tool claim and new runs');
+
+    const monitorPayload=(patch={})=>({contractVersion:'bill2.v2',mode:'production',scope:f.payload.scope,operation:'question',
+      modelId:toolModelId('publish-monitor:read-run'),sourceHash:'a'.repeat(64),
+      input:{version:'runtime.v1',network:'deny',tools:[],sources:[],publishMonitor:{kind:'refresh'}},callPolicy:[tool],
+      rules:{...f.payload.rules,quoteVersion:'publish-monitor'},limits:f.payload.limits,...patch});
+    const gate=(payload,prepareTime=true)=>db.query('SELECT public.runtime_production_allowed($1,$2,$3)',[f.actor,payload,prepareTime]);
+    await setting(db,'runtime_payg_production',{enabled:false});
+    await gate(monitorPayload());
+    await rejects(gate({...monitorPayload(),input:{...monitorPayload().input,publishMonitor:undefined}}),/RUNTIME_PRODUCTION_DENIED/);
+    await rejects(gate(monitorPayload({callPolicy:[tool,f.payload.callPolicy[0]]})),/RUNTIME_PRODUCTION_(MODEL_)?DENIED/);
+    await rejects(gate(monitorPayload({modelId:randomUUID()})),/RUNTIME_PRODUCTION_DENIED/);
+    await setting(db,'research_tools_config',researchConfig(false,true));
+    await gate(monitorPayload());
+    await setting(db,'research_tools_config',researchConfig(true,false));
+    await rejects(gate(monitorPayload()),/RUNTIME_PRODUCTION_MODEL_DENIED/);
+    await db.query("DELETE FROM system_settings WHERE key='runtime_environment'");
+    await setting(db,'research_tools_config',researchConfig());
+    await rejects(gate(monitorPayload()),/RUNTIME_PRODUCTION_DENIED/);
+    report.checks.push('tool-only publish monitor run: needs no model profile or research master switch, still needs the production '
+      +'database, the vendor switch and a tool-only policy with the fixed placeholder model');
+  } finally {
+    await db.query(`DELETE FROM system_settings WHERE key IN ('runtime_environment','runtime_payg_production','research_tools_config',
+      'billing_provider_prices')`);
+    await db.query('UPDATE runtime_test_windows SET enabled=true WHERE id=ANY($1::uuid[])',[paused]);
+  }
+}

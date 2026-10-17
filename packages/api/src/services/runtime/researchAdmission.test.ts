@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { admitResearchTurn, attachResearchTurn, researchToolBytes } from './researchAdmission';
-import { frozenResearchConfig, RESEARCH_PHASE } from './researchTurn';
+import { frozenResearchConfig, PRODUCTION_RESEARCH_ACCOUNT, RESEARCH_PHASE } from './researchTurn';
 import { runtimeContext } from './runtimeContext';
 import { DISABLED_RESEARCH_TOOLS, researchToolsConfigSchema, selectRoute } from '../research/vendors/config';
 import { tikhubRouteId } from '../research/vendors/tikhub';
@@ -112,6 +112,21 @@ describe('admitResearchTurn (RT-3b PR-3)', () => {
     const stale = local.policies.map(p => p.provider === 'parallel' ? { ...p, upperUsd: '0.02' } : p);
     expect((await admitResearchTurn(input(full(), { real: window('tikhub-staging', stale) })))!.tools).not.toContain('web_search');
     expect(await admitResearchTurn(input(full(), { real: window('x', []) }))).toBeNull();
+  });
+
+  it('RUNTIME-PROD: production prices tool routes from the approved configuration alone, with the production account', async () => {
+    const local = (await admitResearchTurn(input(full())))!;
+    const production = { mode: 'production', id: 'prod-v1', creditsPerUsd: '100', multiplier: '6', expiresAt: deadline,
+      callPolicies: [] } as unknown as StagingPolicy;
+    const real = (await admitResearchTurn(input(full(), { real: production })))!;
+    expect(real.tools).toEqual(local.tools);
+    expect(real.policies).toEqual(local.policies.map(p => ({ ...p, account: PRODUCTION_RESEARCH_ACCOUNT })));
+    // The same switches still decide: a vendor that is off (no attested hard cap) offers nothing on production either.
+    const off = database({ config: config({ vendors: { ...config().vendors, parallel: { enabled: false, hardCapAttested: null } } }),
+      prices: allPrices(), thresholds: allThresholds() });
+    expect((await admitResearchTurn(input(off, { real: production })))!.tools).not.toContain('web_search');
+    expect(await admitResearchTurn(input(database({ config: config(), prices: { version: 1, entries: [] }, thresholds: allThresholds() }),
+      { real: production }))).toBeNull();
   });
 });
 
