@@ -8,8 +8,14 @@ import {
   comingSoonText, extensionOf, isPdfUploadReady, isWordUploadReady, formatBytes, libraryAccept, PURPOSE_LABEL, spaceState,
   supportedText, type LibraryPurpose,
 } from '@/lib/library-documents/format';
+import { isLibraryScanRecognitionEnabled } from '@/lib/library-sandbox/feature-flag';
+import { scanProgressText, type ScanProgress } from '@/lib/library-documents/scan-recognition';
 import styles from './my-documents.module.css';
 import { DisplayHeading } from '@/components/chat-display/display-heading';
+
+/** Fixed sentence for the upload area: Owner 2026-10-17 (LIB_DOCS_PLAN §9), replacing the 2026-10-10 one. No estimated
+ * charge is ever shown. */
+export const SCAN_NOTICE = '扫描的 PDF 和 Word 里的图片上传后会在你自己的浏览器里自动识别文字，不扣积分；识别时请保持这个页面打开。';
 
 const STATUS_LABEL: Record<LibraryDocument['status'], string> = {
   uploading: '上传未完成', processing: '处理中', ready: '可用', failed: '上传失败', deleting: '删除中，空间暂未释放',
@@ -27,7 +33,9 @@ function queueLabel(item: UploadItem): string {
 }
 
 export type UploadPanelProps = {
-  uploadEnabled: boolean; spaceKnown: boolean; usedBytes?: number; capacityBytes?: number;
+  uploadEnabled: boolean; spaceKnown: boolean;
+  /** The server's recognition switch; the scan sentence needs it as well as the build flag. */
+  scanServerEnabled?: boolean; usedBytes?: number; capacityBytes?: number;
   uploads: UploadItem[]; onAdd: (files: File[], purpose: LibraryPurpose) => void;
   onRetry: (key: string) => void; onDismiss: (key: string) => void | Promise<void>;
 };
@@ -35,18 +43,23 @@ export type UploadPanelProps = {
 export function UploadPanel(props: UploadPanelProps) {
   const [purpose, setPurpose] = useState<LibraryPurpose | null>(null);
   const space = props.spaceKnown ? spaceState(props.usedBytes ?? 0, props.capacityBytes ?? 0) : null;
+  const scanOn = isLibraryScanRecognitionEnabled() && props.scanServerEnabled === true;
   const blocked = !props.uploadEnabled || space === null || space !== 'ok';
   return <section className={styles.panel} aria-label="上传文件">
     <DisplayHeading as="h2">上传文件</DisplayHeading>
     <p className={styles.hint}>
       支持{supportedText()}，单个文件不超过 10 MB。{comingSoonText()}
     </p>
-    {isWordUploadReady() && <p className={styles.hint}>
+    {isWordUploadReady() && !scanOn && <p className={styles.hint}>
       Word 的文字在你自己的浏览器里读取，不扣积分；文中的图片暂不识别。
     </p>}
-    {isPdfUploadReady() && <p className={styles.hint}>
+    {isPdfUploadReady() && !scanOn && <p className={styles.hint}>
       PDF 的文字在你自己的浏览器里读取，不扣积分；扫描页（没有可选中文字的页）会标为待识别，识别功能即将开放。
     </p>}
+    {scanOn && (isWordUploadReady() || isPdfUploadReady()) && <>
+      <p className={styles.hint}>{isWordUploadReady() && isPdfUploadReady() ? 'Word 和 PDF' : isWordUploadReady() ? 'Word' : 'PDF'} 的文字在你自己的浏览器里读取，不扣积分。</p>
+      <p className={styles.hint}>{SCAN_NOTICE}</p>
+    </>}
     {!props.uploadEnabled && <p className={styles.closed} role="status">
       上传暂未开放。已上传的文件仍可查看、下载和删除。
     </p>}
@@ -117,6 +130,8 @@ export type DocumentListProps = {
   onOpen: (doc: LibraryDocument) => void; onDownload: (doc: LibraryDocument) => void;
   onDelete: (doc: LibraryDocument) => void; onPurpose: (doc: LibraryDocument, purpose: LibraryPurpose) => void;
   busyId?: string | null;
+  /** LIB-2d: recognition progress of scanned pages, by document id. */
+  scan?: Record<string, ScanProgress>;
 };
 
 export function DocumentList(props: DocumentListProps) {
@@ -149,6 +164,7 @@ function DocumentRow({ doc, ...props }: DocumentListProps & { doc: LibraryDocume
       <div style={{ minWidth: 0 }}>
         <span title={name}>{name}</span>
         <small>{doc.status === 'deleting' ? '—' : new Date(doc.created_at).toLocaleDateString('sv-SE')}</small>
+        {ready && scanProgressText(props.scan?.[doc.id]) && <small role="status">{scanProgressText(props.scan?.[doc.id])}</small>}
       </div>
     </div>
     <div>{ready && doc.purpose
