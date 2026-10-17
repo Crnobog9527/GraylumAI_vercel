@@ -82,11 +82,13 @@ export function useComposerAttachments(box: RefObject<ComposerEditorHandle | nul
     if (accepted.length) uploads.add(accepted, 'reference');
   }
 
-  const shown = uploads.items.filter(item => item.status !== 'done');
+  // A finished PDF with scanned pages keeps its line: only the pages with text are readable until they are recognised.
+  const shown = uploads.items.filter(item => item.status !== 'done' || item.message);
   const busy = linking > 0 || uploads.items.some(item => ACTIVE.includes(item.status));
   const status = shown.length || notices.length ? <div className={styles.note} aria-label="附件">
     {shown.map(item => <p key={item.key} role={item.status === 'failed' || item.status === 'rejected' ? 'alert' : 'status'}>
       <span>{item.filename}：{STAGE[item.status] ?? item.message ?? '上传失败'}{STAGE[item.status] ? '…' : ''}</span>
+      {item.status === 'done' && <button type="button" onClick={() => void uploads.dismiss(item.key)}>知道了</button>}
       {item.status === 'failed' && <button type="button" onClick={() => uploads.retry(item.key)}>重试</button>}
       {(item.status === 'failed' || item.status === 'rejected')
         && <button type="button" onClick={() => void uploads.dismiss(item.key)}>移除</button>}
