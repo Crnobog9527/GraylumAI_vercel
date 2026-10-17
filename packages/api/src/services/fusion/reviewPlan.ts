@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { BillingRpc } from '../bill2/service';
 import { loadStagingPolicy } from '../runtime/stagingPolicy';
+import { refuseOnProduction } from '../runtime/realHost';
 import { estimateReview } from './reviewEstimate';
 import { readReviewSkill, resolveReviewSkill } from './reviewPrompts';
 import { readFusionSettings } from './settings';
@@ -20,6 +21,7 @@ export async function planReview(input: { admin: SupabaseClient; actorId: string
   const skill = await resolveReviewSkill(admin, settings.review.skillId);
   const text = await readReviewSkill(admin, skill);
   const window = await loadStagingPolicy(admin as unknown as BillingRpc, actorId, input.env);
+  refuseOnProduction(window);
   const sizes = await admin.rpc('fusion_review_preview', { p_actor_id: actorId, p_draft_id: input.draftId,
     p_source_version_id: input.sourceVersionId });
   if (sizes.error) throw new Error('FUSION_REVIEW_STALE');

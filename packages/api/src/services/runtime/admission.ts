@@ -47,7 +47,7 @@ import {admissionDeadline,admittedOutputLimit,timedAdmission} from './admissionL
 import {admitPricing} from './pricingAdmission';
 import {freezeStagingPaygPricing} from './paygPricing';
 import {freezePaygMessageBudget} from './paygMessageBudget';
-import {readPaygHostPolicies} from './paygHostPolicy';
+import {isProductionPolicy,readPaygPolicies,realContract,runtimeGateEnvironment} from './realHost';
 import {runAutomaticFinancialRecovery} from './automaticRecovery';
 import {readPositioningGate,judgePositioning,windowBoundKey,refusePositioning,POSITIONING_REFUSAL_CAP,
  type PositioningGatePolicy} from './positioningGate';
@@ -164,7 +164,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    if(blocked)return blocked;
    if(session.waitingOrganizer)session=await query('runtime_session_context',{p_session_id:input.sessionId});
    const leaveRateLimit=currentRequestTiming()?.enter('rateLimit');
-   try{requireNewWork(await newWorkGate(admin,policy.real?'staging':'local').message(actorId,settings));}
+   try{requireNewWork(await newWorkGate(admin,runtimeGateEnvironment(policy.real)).message(actorId,settings));}
    finally{leaveRateLimit?.();}
    // Only users without a confirmed positioning are checked, after the rate limit.
    const gateState=await positioning;
@@ -415,10 +415,10 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    const credits=aggregateCredits(costUsd,policy.creditsPerUsd,policy.multiplier);
    const total=decimal(costPerCall)*BigInt(maxCalls);
    const cost=(total/1_000_000_000_000n).toString()+'.'+(total%1_000_000_000_000n).toString().padStart(12,'0');
-   let billing:FrozenRun|FrozenPaygRun={contractVersion:'bill2.v1',mode:policy.real?'staging_test':'isolated',...(policy.real?{testWindowId:policy.real.id}:{}),scope:session.scope,operation:input.selection.kind==='organizer'?'organize':'question',modelId,
+   let billing:FrozenRun|FrozenPaygRun={contractVersion:'bill2.v1',...realContract(policy.real).host,scope:session.scope,operation:input.selection.kind==='organizer'?'organize':'question',modelId,
     ...(revisionId?{moduleId,skillId,revisionId}:{}),sourceHash:createHash('sha256').update(JSON.stringify(context)).digest('hex'),input:context,
     callPolicy:[{modelId,provider:'fixture',account:policy.account,model:row.data.model_id,protocol:'fixture-cost-v1',upperUsd:policy.costPerCall,inputLimit,outputLimit:maxOutputTokens,automaticRetry:false,hiddenTools:false,lookupSupported:true}],
-    rules:{version:policy.real?'runtime-staging-v1':'runtime-local-v1',quoteVersion:policy.real?.id??'runtime-local-v1',creditsPerUsd:policy.creditsPerUsd,multiplier:policy.multiplier,fx:{}},
+    rules:{...realContract(policy.real).rules,creditsPerUsd:policy.creditsPerUsd,multiplier:policy.multiplier,fx:{}},
     limits:{costUsd:cost,credits,maxPreDeduct:credits,maxCalls,deadline:admissionDeadline(policy.real?.expiresAt)}};
    if(attachedOrganizer)billing.callPolicy.push({...billing.callPolicy[0],modelId:attachedOrganizer.modelId,model:attachedOrganizer.model,inputLimit:attachedInputLimit!,outputLimit:attachedOrganizer.maxOutputTokens});
    for(const candidate of candidates){
@@ -426,7 +426,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     if(!billing.callPolicy.some(p=>p.modelId===candidate.modelId))billing.callPolicy.push({...billing.callPolicy[0],modelId:candidate.modelId,model:candidate.model,inputLimit:candidate.inputLimit,outputLimit:candidate.outputLimit});
    }
    // MODEL-PRICING-SYNC: every selected quote must still cover its route's current OpenRouter prices.
-   const hostPayg=realCalls&&policy.paygHost?await readPaygHostPolicies(admin,policy.real!,realCalls,[
+   const hostPayg=realCalls&&policy.paygHost?await readPaygPolicies(policy.real!)(admin,policy.real!,realCalls,[
     {modelId,phase:policy.reportGeneration?'report':context.role,outputLimit:maxOutputTokens,requestFormat:providerRequestFormat,reasoning},
     ...(attachedOrganizer?[{modelId:attachedOrganizer.modelId,phase:'attached_organizer' as const,
      outputLimit:attachedOrganizer.maxOutputTokens,requestFormat:providerRequestFormat,reasoning:attachedOrganizer.reasoning}]:[]),
@@ -435,7 +435,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    ],process.env,billing.limits.deadline):undefined;
    const paygTemplates=hostPayg??policy.payg?.callPolicies;
    if(policy.reportGeneration&&!paygTemplates)throw new Error('REPORT_PAYG_REQUIRED');
-   if(realCalls&&!paygTemplates)await admitPricing(admin,realCalls);
+   if(realCalls&&!paygTemplates){if(isProductionPolicy(policy.real))throw new StagingAccessError('RUNTIME_PAYG_PROFILE_REQUIRED');/* production: v2 only */await admitPricing(admin,realCalls);}
    if(realCalls)billing.callPolicy=realCalls;
    // BILL-UNIT: the window must match the current q and each selected model's m_i (0157 claim/finalize).
    if(realCalls)billing.rules.billingUnit=await freezeWindowBillingUnit(admin,policy.real!,realCalls);

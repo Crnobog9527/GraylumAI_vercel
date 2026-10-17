@@ -59,7 +59,7 @@ function pauseResult(settings: SettingsRead, bucket: 'admission' | 'calls' | 'le
 }
 
 /** Identity must come from the authenticated host, never from the request payload. */
-export function newWorkGate(admin: SupabaseClient, environment: 'local' | 'staging') {
+export function newWorkGate(admin: SupabaseClient, environment: 'local' | 'staging' | 'production') {
   async function check(actorId: string, bucket: 'admission' | 'calls', rate: number,
     read?: Promise<SettingsRead>, contractVersion: 'bill2.v1' | 'bill2.v2' = 'bill2.v1') {
     const settings = await (read ?? readNewWorkSettings(admin));

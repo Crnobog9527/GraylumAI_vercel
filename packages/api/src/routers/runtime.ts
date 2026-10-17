@@ -18,6 +18,8 @@ import {StagingAccessError,stagingProcedureError} from '../services/runtime/stag
 import {stagingTransport} from '../services/runtime/stagingTransport';
 import { runtimeExecutor } from '../services/runtime/execute';
 import {newWorkGate} from '../services/runtime/newWorkGate';
+import {realContract,runtimeGateEnvironment} from '../services/runtime/realHost';
+import {realHostMode} from '../services/runtime/productionEnvironment';
 import {runtimeActor} from '../services/runtime/actor';
 import { databaseSkillSource, userVisibleModules } from '../services/skills/databaseSource';
 import { discoverSkills } from '../services/skills/loader';
@@ -58,7 +60,7 @@ const procedure=protectedProcedure.use(async({ctx,next,path})=>{
   const admission=runtimeAdmissionService(ctx.userScopedSupabase,ctx.supabaseAdmin,admissionPolicy);
   const report=reportService(ctx.userScopedSupabase,ctx.supabaseAdmin,admissionPolicy);
   const executor=runtimeExecutor({database:ctx.supabaseAdmin,budget:ctx.runtimeBudget,actor,endpoint,
-   callGate:newWorkGate(ctx.supabaseAdmin,endpoint?'local':'staging').calls,
+   callGate:newWorkGate(ctx.supabaseAdmin,runtimeGateEnvironment(real)).calls,
    ...(real?{adapter:stagingTransport(ctx.supabaseAdmin,real,ctx.runtimeBudget)}:{}),
    activateSkill:c=>activateRuntimeCandidate(ctx.userScopedSupabase,ctx.supabaseAdmin!,c)});
   const result=await next({ctx:{...ctx,admission,executor,real,report}});
@@ -133,7 +135,7 @@ export const runtimeRouter=router({
   // MODEL-IDENTITY-GUARD: opaque id plus display label only; never model_id or provider.
   const ordered=await defaultModelFirst(ctx.supabaseAdmin!,offered);
   const choices=publicModelChoices(ordered,{surface:'user'});
-  return {models:choices,skills,defaultSkill:skills.find(skill=>skill.moduleId===workModuleId)??null,mode:ctx.real?'staging_test' as const:'isolated' as const};
+  return {models:choices,skills,defaultSkill:skills.find(skill=>skill.moduleId===workModuleId)??null,mode:realContract(ctx.real).host.mode};
  }),
  start:procedure.input(z.object({requestId:z.string().uuid(),scope:z.unknown()}).strict()).mutation(({ctx,input})=>ctx.admission.start(input.requestId,input.scope)),
  saveMaterial:procedure.input(runtimeMaterialInput).mutation(({ctx,input})=>ctx.admission.saveMaterial(input)),
@@ -178,6 +180,6 @@ export const runtimeRouter=router({
  }),
  view:maintenanceProcedure.input(z.object({sessionId:z.string().uuid()}).strict()).query(async({ctx,input})=>{
   const view=await readNativeRuntimeView(ctx.supabaseAdmin!,ctx.user.id,input.sessionId);
-  return {...view,mode:ctx.maintenanceEndpoint?'isolated':'staging_test'};
+  return {...view,mode:ctx.maintenanceEndpoint?'isolated':realHostMode(process.env)};
  }),
 });
