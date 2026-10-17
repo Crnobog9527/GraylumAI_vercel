@@ -4,10 +4,11 @@
  * This code is proprietary and confidential.
  */
 
+import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { JsonLd } from '@/components/seo/JsonLd';
 import type { ArticleBlock, ArticleContent } from '@/lib/seo/article';
-import { breadcrumbJsonLd, faqPageJsonLd, webPageJsonLd } from '@/lib/seo/structured-data';
+import { blogPostingJsonLd, breadcrumbJsonLd, faqPageJsonLd, softwareApplicationJsonLd, webPageJsonLd } from '@/lib/seo/structured-data';
 import { SiteShell } from './SiteShell';
 import { SITE_CHROME, visibleHref } from './site-chrome';
 
@@ -32,17 +33,36 @@ function Block({ block }: { block: ArticleBlock }) {
  * One public keyword or info page (SEO_GEO_SPEC sections 6–8 and 10): a single H1 with the answer on the
  * first screen, a product entry, H2 questions with H3 details, visible FAQ, related links, date and author.
  */
-export function ArticlePage({ content, supportEmail }: { content: ArticleContent; supportEmail?: string | null }) {
+export function ArticlePage({ content, supportEmail, demo }: {
+  content: ArticleContent;
+  supportEmail?: string | null;
+  // The product screen shown under the first-screen answer (feature pages); the text above and below stays server-rendered.
+  demo?: ReactNode;
+}) {
   const chrome = SITE_CHROME[content.locale];
   const aboutHref = chrome.company[0].href;
   const jsonLd = [
-    webPageJsonLd({
-      path: content.path,
-      title: content.metaTitle,
-      description: content.metaDescription,
-      locale: content.locale,
-      dateModified: content.updated,
-    }),
+    content.published
+      ? blogPostingJsonLd({
+        path: content.path,
+        title: content.h1,
+        description: content.metaDescription,
+        locale: content.locale,
+        published: content.published,
+        modified: content.updated,
+        authorName: chrome.authorLabel,
+        authorPath: aboutHref,
+      })
+      : webPageJsonLd({
+        path: content.path,
+        title: content.metaTitle,
+        description: content.metaDescription,
+        locale: content.locale,
+        dateModified: content.updated,
+      }),
+    ...(content.product
+      ? [softwareApplicationJsonLd({ description: content.metaDescription, path: content.path })]
+      : []),
     breadcrumbJsonLd(content.breadcrumb),
     ...(content.faq?.length ? [faqPageJsonLd(content.faq)] : []),
   ];
@@ -50,7 +70,7 @@ export function ArticlePage({ content, supportEmail }: { content: ArticleContent
   return (
     <SiteShell locale={content.locale} alternates={content.alternates} supportEmail={supportEmail}>
       <JsonLd data={jsonLd} />
-      <article className="mx-auto max-w-3xl px-4 py-10 sm:px-6 md:py-14">
+      <article className={`mx-auto px-4 py-10 sm:px-6 md:py-14 ${demo ? 'max-w-4xl' : 'max-w-3xl'}`}>
         {content.breadcrumb.length > 1 ? (
           <nav aria-label={chrome.breadcrumbLabel} className="mb-6 text-sm text-[#8A8A8A]">
             <ol className="flex flex-wrap gap-2">
@@ -87,6 +107,8 @@ export function ArticlePage({ content, supportEmail }: { content: ArticleContent
             {content.cta.label}
           </Link>
         </div>
+
+        {demo ? <div className="mt-10">{demo}</div> : null}
 
         {content.definition ? (
           <section className="mt-10 border-l-2 border-[#FFD700] pl-5">

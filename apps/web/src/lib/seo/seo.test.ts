@@ -72,7 +72,8 @@ describe('sitemap', () => {
     expect(new Set(entries.map(entry => entry.url)).size).toBe(entries.length);
     for (const entry of entries) {
       expect(entry.lastModified).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-      expect(entry.url).not.toMatch(/\/(app|admin|auth|login|register|profile|positioning)(\/|$)/);
+      // Anchored at the root: /features/positioning is a public feature page, /positioning is the logged-in tool.
+      expect(entry.url).not.toMatch(/^https:\/\/[^/]+\/(app|admin|auth|login|register|profile|positioning)(\/|$)/);
     }
   });
 });
