@@ -113,7 +113,7 @@ $$;
 CREATE OR REPLACE FUNCTION public.research_benchmark_project(f research_account_fetches) RETURNS void
 LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
 DECLARE e jsonb:=f.last_success; m jsonb; c jsonb; refs jsonb:='{}'; ops uuid[]:='{}'; key text; ref text; item jsonb;
-  ok boolean:=true; expected double precision; actual double precision; viewed text[]; rated text[]; analyzed_refs text[];
+  ok boolean:=true; expected double precision; actual double precision; viewed text[]; rated text[]; analyzed_refs text[]; analyzed_count integer;
 BEGIN
   IF e IS NULL OR f.last_success_execution_id IS NULL OR f.account IS NULL OR f.last_success_attempt IS NULL THEN
     DELETE FROM research_benchmarks WHERE fetch_id=f.id;
@@ -173,8 +173,9 @@ BEGIN
   -- newest 30 (accountMetrics: dated newest first, then undated in supplier order; a time over 5 minutes ahead is
   -- missing), those with views (median), and those with views > 0 and all three counters (engagement).
   IF ok THEN
-    WITH items AS (
-      SELECT t.i,t.x->'fields' fl,CASE WHEN jsonb_typeof(t.x->'fields'->'publishedAt')='string'
+    -- One entry per post identity (the first in supplier order), as accountMetrics: a repeated post is not more posts.
+    WITH entries AS (
+      SELECT t.i,t.x->'fields' fl,coalesce(nullif(t.x->'fields'->>'id',''),'#'||t.i) post_key,CASE WHEN jsonb_typeof(t.x->'fields'->'publishedAt')='string'
           AND pg_input_is_valid(t.x->'fields'->>'publishedAt','timestamp with time zone')
           AND (t.x->'fields'->>'publishedAt')::timestamptz<=(e->>'fetchedAt')::timestamptz+interval '5 minutes'
         THEN (t.x->'fields'->>'publishedAt')::timestamptz END published
@@ -183,10 +184,11 @@ BEGIN
         WITH ORDINALITY t(x,i)
       WHERE o.id=research_benchmark_operation_id(f.id,f.last_success_attempt,'account_posts') AND p.actor_id=f.actor_id
         AND p.session_id=f.session_id AND o.state='succeeded' AND o.erased_at IS NULL
-    ), analyzed AS (SELECT * FROM items ORDER BY published DESC NULLS LAST,i LIMIT 30)
+    ), items AS (SELECT DISTINCT ON (post_key) * FROM entries ORDER BY post_key,i),
+    analyzed AS (SELECT * FROM items ORDER BY published DESC NULLS LAST,i LIMIT 30)
     SELECT coalesce(array_agg(r ORDER BY r) FILTER (WHERE v),'{}'),coalesce(array_agg(r ORDER BY r) FILTER (WHERE v AND rate),'{}'),
-        coalesce(array_agg(r ORDER BY r),'{}')
-      INTO viewed,rated,analyzed_refs FROM (SELECT research_benchmark_operation_id(f.id,f.last_success_attempt,'account_posts')::text||'#'||i r,
+        coalesce(array_agg(r ORDER BY r),'{}'),count(*)
+      INTO viewed,rated,analyzed_refs,analyzed_count FROM (SELECT research_benchmark_operation_id(f.id,f.last_success_attempt,'account_posts')::text||'#'||i r,
         jsonb_typeof(fl->'views')='number' AND (fl->>'views')::numeric>=0 v,
         coalesce((fl->>'views')::numeric>0,false) AND jsonb_typeof(fl->'likes')='number' AND (fl->>'likes')::numeric>=0
         AND jsonb_typeof(fl->'comments')='number' AND (fl->>'comments')::numeric>=0
@@ -233,10 +235,10 @@ BEGIN
       AND round((m->'postsPerWeek'->>'value')::numeric*30/7,6) BETWEEN actual AND expected
       AND round((m->'postsPerWeek'->>'value')::numeric*30/7,6)=trunc(round((m->'postsPerWeek'->>'value')::numeric*30/7,6));
   END IF;
-  -- The analyzed count is exactly accountMetrics' newest 30 of this attempt's own account_posts operation.
+  -- The analyzed count is exactly accountMetrics' newest 30 distinct posts of this attempt's own account_posts operation.
   IF ok THEN
-    ok:=coalesce((m->>'postsAnalyzed')::integer=(SELECT least(30,jsonb_array_length(o.result->'items'))
-      FROM research_operations o JOIN research_plans p ON p.id=o.plan_id
+    ok:=coalesce((m->>'postsAnalyzed')::integer=analyzed_count AND EXISTS(SELECT 1 FROM research_operations o
+      JOIN research_plans p ON p.id=o.plan_id
       WHERE o.id=research_benchmark_operation_id(f.id,f.last_success_attempt,'account_posts') AND p.actor_id=f.actor_id
         AND p.session_id=f.session_id AND o.state='succeeded' AND o.erased_at IS NULL AND jsonb_typeof(o.result->'items')='array'),false);
   END IF;

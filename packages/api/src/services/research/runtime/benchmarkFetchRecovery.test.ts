@@ -181,7 +181,7 @@ describe('benchmark fetch: the 20-post minimum and its new-account exception (Ow
     const f = fixture();
     respond(f, profile, posts);
     expect(JSON.parse(await f.run())).toMatchObject({ status: 'ok' });
-    expect(saved(f).metrics.postsAnalyzed).toBe(Math.abs(posts));
+    expect(saved(f).metrics.postsAnalyzed).toBe(posts < 0 ? 1 : posts);
     expect(saved(f).classification).toMatchObject({ qualified, excluded });
     expect(saved(f).metrics.wholeHistory).toBe('postsCount' in profile && posts > 0 && profile.postsCount <= posts);
   });

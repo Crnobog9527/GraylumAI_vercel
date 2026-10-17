@@ -121,6 +121,14 @@ export async function runCases({db,Client,connectionString,report}) {
     const repeated = await fetchAccount(f,e,'repeated',{followers:50000,posts:[one,one,one],complete:true});
     assert.equal(repeated.evidence.metrics.wholeHistory,false);
     assert.deepEqual([(await get(repeated)).excluded,(await get(repeated)).qualified],['TOO_FEW_POSTS',false]);
+    // 20 entries of 3 posts are 3 analyzed posts: below the minimum, and a cache claiming 20 is refused.
+    const three = [post(1,9000),post(2,10000),post(3,11000)];
+    const twentyOfThree = Array.from({length:20},(_,i)=>three[i%3]);
+    const dup = await fetchAccount(f,e,'dupentries',{followers:50000,posts:twentyOfThree,complete:false});
+    assert.deepEqual([(await get(dup)).posts_analyzed,(await get(dup)).excluded],[3,'TOO_FEW_POSTS']);
+    const dupForged = await fetchAccount(f,e,'dupforged',{followers:50000,posts:twentyOfThree,complete:false,
+      tamper:x=>{x.metrics.postsAnalyzed=20;x.classification={category:'imitable',qualified:true,excluded:null};return x;}});
+    assert.deepEqual([(await get(dupForged)).excluded,(await get(dupForged)).qualified],['EVIDENCE_UNVERIFIED',false]);
     const forcedWhole = await fetchAccount(f,e,'forcedwhole',{followers:50000,posts:[one,one,one],complete:true,
       tamper:x=>{x.metrics.wholeHistory=true;x.classification={category:'imitable',qualified:true,excluded:null};return x;}});
     assert.deepEqual([(await get(forcedWhole)).excluded,(await get(forcedWhole)).qualified],['EVIDENCE_UNVERIFIED',false]);

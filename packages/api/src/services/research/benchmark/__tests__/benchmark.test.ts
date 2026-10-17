@@ -26,6 +26,14 @@ describe('benchmark metrics', () => {
     expect(m.missing).toEqual([]);
   });
 
+  it('counts a repeated post once (the first entry), for the analyzed count and every median', () => {
+    const repeated = Array.from({ length: 20 }, (_, i) =>
+      item(`p#${i + 1}`, { id: `post${i % 3}`, publishedAt: daysAgo(1 + (i % 3)), views: i < 3 ? 100 : 999999 }));
+    const m = accountMetrics({ profile: profile(50_000), posts: repeated }, now);
+    expect(m.postsAnalyzed).toBe(3);
+    expect(m.medianViews).toEqual({ value: 100, refs: ['p#1', 'p#2', 'p#3'] });
+  });
+
   it('keeps missing data missing instead of zero (e.g. Xiaohongshu has no views)', () => {
     const m = accountMetrics({ profile: profile(undefined), posts: posts(5, i => ({ publishedAt: daysAgo(i), likes: 3 })) }, now);
     expect(m.followers.value).toBeNull();
