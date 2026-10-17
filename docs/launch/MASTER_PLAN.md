@@ -2446,10 +2446,13 @@ node scripts/plan-progress.mjs --ref origin/staging
 | 0273 | SKILL-I18N-HOOK |
 | 0274 | [#1033](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1033) PUBLISH-MONITOR PR-5 |
 | 0275 | [#1038](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1038) PAY-DISPUTE-GUARD D0（取代已关闭的 #1025） |
-| 0276 | [#1036](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1036) CONTENT-CONVERSATION-DRIVEN A2 |
-| 0277 | [#1041](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1041) ADMIN-SECRETS OR-1 |
-| 0278 | LIB-DOCS LIB-2d |
-| 0277 | [#1022](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1022) LIB-DOCS LIB-4b |
+| 0276 | [#1041](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1041) ADMIN-SECRETS OR-1 |
+| 0277 | [#1022](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1022) LIB-DOCS LIB-4b（合集 [#1116](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1116)） |
+| 0278 | [#1060](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1060) EXPERT-CONSULT（合集 #1116） |
+| 0279 | [#1062](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1062) 研究工具余额不足暂停（合集 #1116） |
+| 0280 | [#1076](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1076) ANALYTICS 付款上报（合集 #1116） |
+| 0281 | [#1077](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1077) ANALYTICS 首次来源（合集 #1116） |
+| 0282 | [#1083](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1083) RT-5 对标表来源编号（合集 #1116） |
 
 ### 7.2 依赖简图
 
