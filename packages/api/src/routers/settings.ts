@@ -387,7 +387,7 @@ export const settingsRouter = router({
     );
 
     const priceRefs = stripeReady && ctx.hasSupabaseAdminPrivileges
-      ? await loadConfiguredStripePrices({ db: ctx.supabaseAdmin, testOnly: true,
+      ? await loadConfiguredStripePrices({ db: ctx.supabaseAdmin,
         kind: 'credit_package', ids: packages.map(pkg => pkg.id) }).catch(error => {
           throw createSafeServiceUnavailableError(error, CATALOG_UNAVAILABLE_MESSAGE);
         }) : new Map<string, string>();
@@ -458,7 +458,7 @@ export const settingsRouter = router({
     );
 
     const priceRefs = stripeReady && ctx.hasSupabaseAdminPrivileges
-      ? await loadConfiguredStripePrices({ db: ctx.supabaseAdmin, testOnly: true,
+      ? await loadConfiguredStripePrices({ db: ctx.supabaseAdmin,
         kind: 'membership_plan', ids: plans.map(plan => plan.id) }).catch(error => {
           throw createSafeServiceUnavailableError(error, CATALOG_UNAVAILABLE_MESSAGE);
         }) : new Map<string, string>();
