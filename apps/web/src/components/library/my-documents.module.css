@@ -2,7 +2,7 @@
 .root { flex: 1; min-height: 0; overflow: auto; margin: 0 24px; padding: 20px 0 40px; color: #292929; }
 .topRow { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 20px; align-items: start; margin-bottom: 22px; }
 .panel { padding: 16px 18px; border: 1px solid #ebebeb; border-radius: 12px; background: #fff; }
-.panel h2 { font-size: 14px; font-weight: 550; }
+.panel :is(h2,:where([data-demo-heading="h2"])) { font-size: 14px; font-weight: 550; }
 .hint { margin-top: 6px; color: #888; font-size: 12px; line-height: 1.6; }
 .purposes { display: flex; gap: 8px; margin: 12px 0; flex-wrap: wrap; }
 .purposes label {
@@ -70,7 +70,7 @@
   display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 24px;
   border-bottom: 1px solid #eee;
 }
-.dialogHead h2 { min-width: 0; font-size: 16px; font-weight: 550; overflow-wrap: anywhere; }
+.dialogHead :is(h2,:where([data-demo-heading="h2"])) { min-width: 0; font-size: 16px; font-weight: 550; overflow-wrap: anywhere; }
 .dialogHead button { border: 0; background: none; color: #666; font-size: 22px; }
 .dialogBody { min-height: 0; overflow: auto; padding: 18px 24px 24px; font-size: 13px; }
 .segment {
@@ -101,7 +101,7 @@
 .reader { display: grid; grid-template-columns: minmax(150px, 220px) minmax(0, 1fr); gap: 18px; align-items: start; }
 .reader:not(:has(.toc)) { grid-template-columns: minmax(0, 1fr); }
 .toc { position: sticky; top: 0; max-height: 60dvh; overflow: auto; font-size: 12px; }
-.toc h3 { margin-bottom: 6px; font-size: 12px; font-weight: 550; color: #666; }
+.toc :is(h3,:where([data-demo-heading="h3"])) { margin-bottom: 6px; font-size: 12px; font-weight: 550; color: #666; }
 .toc ol { display: grid; gap: 2px; list-style: none; padding: 0; margin: 0; }
 .toc button {
   width: 100%; padding: 5px 8px; border: 0; border-radius: 6px; background: none; color: #555;
@@ -109,5 +109,5 @@
 }
 .toc button[aria-current] { background: #f2f2f2; color: #222; font-weight: 550; }
 .readerBody { min-width: 0; }
-.segment h4 { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: #222; white-space: normal; }
+.segment :is(h4,:where([data-demo-heading="h4"])) { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: #222; white-space: normal; }
 @media (max-width: 640px) { .reader { grid-template-columns: minmax(0, 1fr); } .toc { position: static; max-height: 30dvh; } }
