@@ -30,7 +30,8 @@
 /* The product workspace: sidebar, workbench, 定位清单 (workspace-frame's own proportions) */
 .app { position: relative; display: grid; grid-template-columns: 220px minmax(0, 1fr) 280px; height: 100%; overflow: hidden; background: #f7f7f5; color: #262626; }
 .static .app { height: 640px; }
-.rail { display: flex !important; position: static !important; width: auto !important; box-shadow: none !important; background: transparent !important; overflow: hidden; }
+/* The sidebar keeps the product's own rail styles (workspace-frame.module.css); only the picture's grid places it. */
+.rail { overflow: hidden; }
 .rail nav > span { display: flex; align-items: center; gap: 9px; height: 38px; padding: 0 12px; color: #414141; font-size: 14px; }
 .rail summary { padding: 4px 8px; color: #888; font-size: 12px; list-style: none; }
 .center { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; min-width: 0; min-height: 0; margin: 6px 0; padding: 0 18px; border-radius: 12px; background: #fff; }
@@ -43,7 +44,7 @@
 .footer button[data-on] { border-color: var(--j-gold); box-shadow: 0 0 0 3px rgba(255, 187, 23, .3); color: var(--j-ink); }
 .app > .checklist { min-height: 0; margin: 6px 8px 6px 8px; border-radius: 12px; background: #fff; overflow: hidden; }
 @media (max-width: 1279px) { .app { grid-template-columns: 200px minmax(0, 1fr); } .app > .checklist { display: none; } }
-@media (max-width: 860px) { .app { grid-template-columns: minmax(0, 1fr); } .rail { display: none !important; } .center { margin: 0; padding: 0 12px; border-radius: 0; } }
+@media (max-width: 860px) { .app { grid-template-columns: minmax(0, 1fr); } .app > .rail { display: none; } .center { margin: 0; padding: 0 12px; border-radius: 0; } }
 
 /* The long report over the workbench: chapter list beside a preview that scrolls through the chapters */
 .reportLayer { position: absolute; inset: 0; z-index: 3; display: grid; place-items: center; padding: 18px; background: rgba(20, 19, 18, .12); }
