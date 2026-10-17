@@ -30,10 +30,9 @@ const rpc = vi.fn(async (name: string, args: Record<string, unknown>) => {
 const admin = { rpc } as unknown as SupabaseClient;
 const settings = (researchEnabled?: boolean): Promise<SettingsRead> => Promise.resolve({ ok: true, config: { ...DEFAULT_RUNTIME_RATE_LIMITS },
   ...(researchEnabled === undefined ? {} : { researchEnabled }) });
-const actorRead = vi.fn(async () => actor);
 const base: HostTurnContext = { stepId: 'step-2', opening: false, checklist: [] };
 
-beforeEach(() => { failing = null; rows = []; rpc.mockClear(); actorRead.mockClear(); });
+beforeEach(() => { failing = null; rows = []; rpc.mockClear(); });
 
 describe('RT-6 research host context', () => {
   it('hands over the newest three cards with their confirmation ids, and counts host-qualified benchmarks', async () => {
@@ -53,15 +52,14 @@ describe('RT-6 research host context', () => {
 
   it('admission adds it only with the switch on (from its one settings read) for a non-opening, non-summary turn', async () => {
     for (const read of [null, settings(), settings(false), Promise.resolve({ ok: false } as const)]) {
-      expect(await researchHost(base, admin, actorRead, session, read)).toBe(base);
+      expect(await researchHost(base, admin, actor, session, read)).toBe(base);
     }
     for (const other of [{ ...base, opening: true }, { ...base, stepSummary: { stepId: 'step-2' } } as unknown as HostTurnContext]) {
-      expect(await researchHost(other, admin, actorRead, session, settings(true))).toBe(other);
+      expect(await researchHost(other, admin, actor, session, settings(true))).toBe(other);
     }
-    // No identity read and no research read happens on any of these paths.
-    expect(actorRead).not.toHaveBeenCalled();
+    // No research read happens on any of these paths.
     expect(rpc).not.toHaveBeenCalled();
-    const on = await researchHost(base, admin, actorRead, session, settings(true));
+    const on = await researchHost(base, admin, actor, session, settings(true));
     expect(on.research?.note).toBe(RESEARCH_CARDS_NOTE);
     expect(rpc).toHaveBeenCalledWith('research_user_cards', { a: actor, s: session });
   });
@@ -71,7 +69,7 @@ describe('RT-6 research host context', () => {
       failing = name;
       expect(await researchHostContext(admin, actor, session)).toBeUndefined();
     }
-    expect(await researchHost(base, admin, actorRead, session, settings(true))).toEqual(base);
+    expect(await researchHost(base, admin, actor, session, settings(true))).toEqual(base);
   });
 
   it('stays within the host context ceiling: unqualified rows go first, then the oldest cards', async () => {

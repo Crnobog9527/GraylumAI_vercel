@@ -81,10 +81,11 @@ export function withResearchContext(context: HostTurnContext, research: Research
  * Admission: only a non-opening, non-summary mentor turn with the research switch on (read in admission's one settings
  * query, so a switched-off turn costs no extra round trip) gets the block; it is then sized like the rest of the turn.
  */
-export async function researchHost(context: HostTurnContext, admin: SupabaseClient, actor: () => Promise<string>, sessionId: string,
+/** `actorId` is the identity admission already verified; no second authentication happens here. */
+export async function researchHost(context: HostTurnContext, admin: SupabaseClient, actorId: string, sessionId: string,
   read: Promise<SettingsRead> | null): Promise<HostTurnContext> {
   if (!read || context.opening || context.stepSummary) return context;
   const settings = await read;
   if (!settings.ok || settings.researchEnabled !== true) return context;
-  return withResearchContext(context, await researchHostContext(admin, await actor(), sessionId));
+  return withResearchContext(context, await researchHostContext(admin, actorId, sessionId));
 }

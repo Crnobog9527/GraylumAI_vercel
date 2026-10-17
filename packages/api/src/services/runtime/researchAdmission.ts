@@ -159,7 +159,7 @@ export const sentHostBytes = (value: unknown) => Buffer.byteLength(JSON.stringif
 export async function attachResearchTurn(input: Omit<ResearchAdmissionInput, 'modelCalls' | 'offeredTools' | 'maxTools'
   | 'defaultMultiplier' | 'runMultiplier' | 'deadline'> & { context: MentorContext; billing: FrozenPaygRun;
   /** RT-6: the research host block (cards, benchmark table) joins the turn only with the tools, sized with them. */
-  settings?: Promise<SettingsRead>; actor?: () => Promise<string>; sessionId?: string }): Promise<boolean> {
+  settings?: Promise<SettingsRead>; actorId?: string; sessionId?: string }): Promise<boolean> {
   const { context, billing } = input;
   const primary = billing.callPolicy.find(policy => policy.modelId === context.modelId);
   if (!primary?.payg || !billing.rules.billingUnit) return false;
@@ -167,8 +167,8 @@ export async function attachResearchTurn(input: Omit<ResearchAdmissionInput, 'mo
   if (2 + 4 * Math.min(context.maxToolCalls + 1, context.maxTurns) > primary.payg.maxMessages) return false;
   const budget = context.purposeBudget;
   const raised = budget?.purpose === 'interactive' && budget.inputBytes < RESEARCH_TURN_INPUT_BYTES ? RESEARCH_TURN_INPUT_BYTES : undefined;
-  const host = context.hostTurnContext && input.settings && input.actor && input.sessionId
-    ? await researchHost(context.hostTurnContext, input.admin, input.actor, input.sessionId, input.settings) : context.hostTurnContext;
+  const host = context.hostTurnContext && input.settings && input.actorId && input.sessionId
+    ? await researchHost(context.hostTurnContext, input.admin, input.actorId, input.sessionId, input.settings) : context.hostTurnContext;
   const hostBytes = host && host !== context.hostTurnContext ? sentHostBytes(host) - sentHostBytes(context.hostTurnContext) : 0;
   const admitted = await admitResearchTurn({ ...input, fits: extra => input.fits(extra + hostBytes, raised),
     modelCalls: billing.limits.maxCalls, offeredTools: context.tools.length,

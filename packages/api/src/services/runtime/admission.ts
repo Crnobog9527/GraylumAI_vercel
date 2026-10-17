@@ -456,7 +456,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    }
    // RT-3b PR-3: a positioning mentor turn may also offer the research tools (admin switch, priced routes, room left).
    if(policy.researchTools&&mentorStream&&!opening&&hostTurnContext&&!stepSummary&&billing.contractVersion==='bill2.v2'&&
-    await attachResearchTurn({admin,real:policy.real,context,billing,settings,actor,sessionId:input.sessionId,
+    await attachResearchTurn({admin,real:policy.real,context,billing,settings,actorId,sessionId:input.sessionId,
      fits:(extra,bytes)=>fitsCapacity(()=>requireCapacity(instructions+positioningRule,Boolean(skillFile),currentInput,historyRead,extra,bytes))}))
     billing.sourceHash=createHash('sha256').update(JSON.stringify(context)).digest('hex');
    // Both SQL CHECKs measure jsonb::text, not JSON.stringify or model input.
