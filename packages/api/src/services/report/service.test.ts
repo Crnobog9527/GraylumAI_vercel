@@ -5,7 +5,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { REPORT_REQUEST_INPUT, reportBenchmarks, reportEnabled, reportService, reportError } from './service';
 import { runtimeAdmissionService } from '../runtime/admission';
 const id = randomUUID();
-const input = { sessionId: id, projectId: id, roundId: id, requestId: id };
+const input = { sessionId: id, projectId: id, roundId: id, requestId: id, acceptedCredits: 500 };
 const user = { auth: { getUser: async () => ({ data: { user: { id, email_confirmed_at: '2026-01-01T00:00:00Z' } } }) } };
 const policy = { account: 'synthetic', costPerCall: '0.1', creditsPerUsd: '100', multiplier: '6',
   maxCalls: 1, maxOutputTokens: 8192, inputBytes: 196608, historyItems: 0 };
@@ -97,7 +97,8 @@ it('existing request replay precedes settings, membership and source reads', asy
   const admin = { rpc, from } as unknown as SupabaseClient;
   expect(await reportService(user as unknown as SupabaseClient, admin, policy).start(input)).toEqual(data);
   expect(rpc).toHaveBeenCalledWith('runtime_admission_replay', {
-    p_actor_id: id, p_request_id: id, p_request: { reportStart: input },
+    // The accepted price is not part of the stored request identity.
+    p_actor_id: id, p_request_id: id, p_request: { reportStart: { sessionId: id, projectId: id, roundId: id, requestId: id } },
   });
   expect(from).not.toHaveBeenCalled();
 });
@@ -186,7 +187,7 @@ function startAdmin(executions: unknown[], saved: Record<string, { state: string
     maybeSingle: async () => ({ data: key === 'report_fixed_price_credits' ? null : { value: { enabled: true } }, error: null }) };
   return { admin: { rpc, from: () => query } as unknown as SupabaseClient, rpc, past };
 }
-const startInput = { ...locate, requestId: randomUUID() };
+const startInput = { ...locate, requestId: randomUUID(), acceptedCredits: 500 };
 it.each([
   ['a complete report', 'completed', { body: '## One\nx', completeness: 'complete' }],
   ['a running report', 'running', null], ['a report waiting for credits', 'waiting_credits', null],
@@ -236,6 +237,13 @@ it('a start without an accepted price is refused when the fixed price cannot be 
   const unreadable = { ...admin, from: () => query } as unknown as SupabaseClient;
   await expect(reportService(user as unknown as SupabaseClient, unreadable, policy).start({ ...startInput, requestId: randomUUID() }))
     .rejects.toMatchObject({ message: 'REPORT_UNAVAILABLE' });
+  expect(past.reached).toBe(false);
+});
+it('a new start without the accepted price is refused before any admission (0295)', async () => {
+  const { admin, past } = startAdmin([], {});
+  const { acceptedCredits: _shown, ...withoutPrice } = startInput;
+  await expect(reportService(user as unknown as SupabaseClient, admin, policy).start({ ...withoutPrice, requestId: randomUUID() }))
+    .rejects.toMatchObject({ message: 'REPORT_PRICE_REQUIRED' });
   expect(past.reached).toBe(false);
 });
 it('a report of another round or project does not block this round', async () => {

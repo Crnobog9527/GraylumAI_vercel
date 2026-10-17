@@ -51,6 +51,7 @@ const startRefusals: Record<string, string> = {
   REPORT_ALREADY_EXISTS: REPORT_ALREADY_EXISTS_NOTICE,
   REPORT_CREDITS: REPORT_CREDITS_NOTICE,
   REPORT_PRICE_CHANGED: "报告价格刚刚调整了，报告没有开始生成。请刷新页面看一下新的价格再生成。",
+  REPORT_PRICE_REQUIRED: "报告价格还没有显示出来，报告没有开始生成。请刷新页面看到价格后再生成。",
 };
 
 /** `opened`: the round already has its report on the server; the page shows that one instead. */

@@ -22,7 +22,7 @@ export const reportCodes = new Set(['REPORT_DISABLED', 'REPORT_MEMBERSHIP_REQUIR
   'REPORT_PAYG_REQUIRED', 'OPC_CAPTURE_PENDING', 'REPORT_EXECUTION_REQUIRED', 'REPORT_REQUEST_CONFLICT', 'REPORT_ALREADY_EXISTS',
   'REPORT_BENCHMARKS_REQUIRED',
   // 0295: the balance does not cover the report's fixed price plus its call's temporary hold.
-  'REPORT_CREDITS', 'REPORT_PRICE_CHANGED']);
+  'REPORT_CREDITS', 'REPORT_PRICE_CHANGED', 'REPORT_PRICE_REQUIRED']);
 /**
  * A saved report execution blocks a new paid start while it is a complete report, or still going or waiting for
  * credits/resume. One that ended without a complete report (failed, cut off, stopped, empty) had its fixed price
@@ -101,9 +101,9 @@ export function reportService(user: SupabaseClient, admin: SupabaseClient, polic
         const replay = await rpc('runtime_admission_replay', { p_request_id: input.requestId, p_request: { reportStart: input } });
         if (replay) return replay;
         if (!await reportEnabled(admin)) throw new Error('REPORT_DISABLED');
-        // Without an accepted price the unreadable one still refuses here, so nothing is charged that was never shown.
-        const price = await reportPrice(admin);
-        if (acceptedCredits !== undefined && acceptedCredits !== price) throw new Error('REPORT_PRICE_CHANGED');
+        // A new start must carry the price the button showed (none shown: no start) and it must still be the price.
+        if (acceptedCredits === undefined) throw new Error('REPORT_PRICE_REQUIRED');
+        if (acceptedCredits !== await reportPrice(admin)) throw new Error('REPORT_PRICE_CHANGED');
         const source = await rpc('report_source', {
           p_session_id: input.sessionId, p_project_id: input.projectId, p_round_id: input.roundId,
         });

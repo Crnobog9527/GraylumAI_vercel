@@ -135,14 +135,15 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
   const working = start.isPending || streaming;
   const offer = generationOffer({ canGenerate, working, server, executionId, status: shown });
   const run = async (kind: "start" | "restart") => {
-    if (working || offer !== kind) return;
+    // No price on the button, no paid start: the request must carry the price the user was shown.
+    if (working || offer !== kind || typeof price !== "number") return;
     setRefusal(null);
     // A start or 重新生成 whose answer never came resends the same request until the server answers.
     const requestId = nextRequestId(record, () => crypto.randomUUID());
     save({ requestId });
     try {
       const id = startedExecution(await start.mutateAsync({ sessionId, projectId, roundId, requestId,
-        ...(price ? { acceptedCredits: price } : {}) }));
+        acceptedCredits: price }));
       if (!id) throw new Error("REPORT_UNAVAILABLE");
       save({ requestId, executionId: id });
       setPinned({ executionId: id, generation: ++generation.current });
