@@ -6,7 +6,7 @@ import Text from "@tiptap/extension-text";
 import { EditorState, TextSelection } from "@tiptap/pm/state";
 import { expect, it } from "vitest";
 import {
-  COMPOSER_REFERENCES_ENABLED, findReferenceQuery, LibraryReferenceNode, mergeReferences, referenceRequest, referencesIn, sameReferences,
+  COMPOSER_REFERENCES_ENABLED, findReferenceQuery, LibraryReferenceNode, mergeReferences, referenceRequest, referencesIn, referencesNamedIn, sameReferences,
 } from "./composer-references";
 import { docToText, textToDoc } from "./composer-text";
 import { matchingDocuments, referenceFor } from "./reference-menu";
@@ -97,4 +97,10 @@ it("sends only id and version, compares versions too, and merges failed-send ref
   const many = (prefix: string, count: number) => Array.from({ length: count }, (_, n) => ({ documentId: prefix + n, version: 1, label: prefix + n }));
   expect(mergeReferences(many("p", 5), many("q", 3)).map(item => item.documentId)).toEqual(["p0", "p1", "p2", "p3", "p4"]);
   expect(mergeReferences(many("p", 3), many("q", 4)).map(item => item.documentId)).toEqual(["p0", "p1", "p2", "q0", "q1"]);
+});
+
+it("keeps only the references the text still names, so a stale stored list never rides along", () => {
+  const a = { documentId: "a", version: 1, label: "甲.md" }, b = { documentId: "b", version: 1, label: "乙.md" };
+  expect(referencesNamedIn("看 @甲.md 然后", [a, b])).toEqual([a]);
+  expect(referencesNamedIn("改过了，不再提文档", [a, b])).toEqual([]);
 });
