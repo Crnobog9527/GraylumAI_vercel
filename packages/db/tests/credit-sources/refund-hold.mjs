@@ -149,9 +149,35 @@ try {
   assert.equal(await balance(u6), 0);
   await refund(u6, p);
   assert.equal(await balance(u6), 0, 'credits returned after the clawback are taken back too');
-  assert.deepEqual(await v(`SELECT jsonb_agg(amount ORDER BY id) v FROM credit_transactions WHERE source_order_id=$1
+  assert.deepEqual(await v(`SELECT jsonb_agg(amount ORDER BY created_at) v FROM credit_transactions WHERE source_order_id=$1
     AND ledger_type='refund_clawback'`, [late.order]), [-70, -30]);
-  report.checks.push('reservations returned after the refund stay in the hold; after a clawback they are taken back on return');
+  // The take-back is written after the caller's own ledger row: a PAYG confirmed-failure compensation records the
+  // credits it restores, then the clawback takes them back, and the last row matches the balance.
+  const u7 = await profile(0);
+  const comp = await pack(u7, 100);
+  p = await reserve(u7, 30);
+  await c.query('SELECT * FROM bill2_legacy_settle($1,$2,$3)', [u7, p, 30]);
+  await externalRefund(comp, 're_comp');
+  assert.equal((await settle(ops, comp.order, 'clawback')).creditsTakenBack, 70);
+  const call = randomUUID(), run = randomUUID();
+  const runRow = { id: run, actor_id: u7, closed: true, outcome: 'confirmed_failure' };
+  const callRow = { id: call, run_id: run, pre_deduct_id: p, settled_at: new Date().toISOString(), charged_delta: 30 };
+  // Synthetic run/call rows exist only as records: credit_transactions triggers stay off for this one call (as in run-local.mjs).
+  await c.query('ALTER TABLE credit_transactions DISABLE TRIGGER ALL');
+  await c.query(`INSERT INTO credit_transactions(user_id,amount,type,ledger_type,reason_code,bill2_call_id,idempotency_key)
+    VALUES($1,0,'adjustment','spend','bill2_spend',$2,$3)`, [u7, call, 'fixture-spend:' + call]);
+  assert.equal(await v('SELECT bill2_payg_compensate(jsonb_populate_record(NULL::bill2_runs,$1),jsonb_populate_record(NULL::bill2_calls,$2)) v',
+    [runRow, callRow]), 30);
+  await c.query('ALTER TABLE credit_transactions ENABLE TRIGGER ALL');
+  // The take-back row is written last and stamped later than the caller's rows (which share now()).
+  const tx = (await c.query(`SELECT amount,ledger_type,balance_before,balance_after,created_at FROM credit_transactions WHERE user_id=$1
+    AND amount<>0 AND (bill2_call_id=$2 OR ledger_type='refund_clawback' AND metadata ? 'creditsReturned')`, [u7, call])).rows;
+  const restored = tx.find(r => r.amount === 30), takeBack = tx.find(r => r.amount === -30);
+  assert.ok(restored && takeBack, JSON.stringify(tx));
+  assert.deepEqual([restored.balance_after, takeBack.balance_before, takeBack.balance_after, await balance(u7)].map(Number), [30, 30, 0, 0],
+    'compensation restores 0 -> 30, then the take-back 30 -> 0: the ledger chain ends at the balance');
+  assert.ok(takeBack.created_at > restored.created_at, 'the take-back comes after the compensation row');
+  report.checks.push('reservations returned after the refund stay in the hold; after a clawback they are taken back at commit, after the caller\'s own ledger row (PAYG compensation)');
 
   // A pack whose remainder cannot be proven (0275 "source unknown") is alert-only: never held, never clawed back
   // from the balance (PAY-DISPUTE-GUARD 4.3: never take other sources' credits); "kept" can still close the review.

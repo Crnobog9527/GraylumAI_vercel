@@ -19,18 +19,23 @@ SET LOCAL lock_timeout='5s';
 ALTER TABLE public.credit_package_sources
  ADD COLUMN IF NOT EXISTS refund_review text CONSTRAINT credit_package_sources_refund_review CHECK(refund_review IN ('clawback','kept')),
  ADD COLUMN IF NOT EXISTS refund_reviewed_at timestamptz,
- ADD COLUMN IF NOT EXISTS refund_reviewed_by uuid;
+ ADD COLUMN IF NOT EXISTS refund_reviewed_by uuid,
+ -- Credits returned to the balance after this pack was clawed back (a reservation in flight at settlement time),
+ -- still to be taken back: held at once, taken back at commit (credit_package_refund_due_take).
+ ADD COLUMN IF NOT EXISTS refund_clawback_due integer NOT NULL DEFAULT 0
+  CONSTRAINT credit_package_sources_refund_clawback_due CHECK(refund_clawback_due>=0);
 
 -- Unused credits of the user's packs that ended refunded without a clawback and are not settled yet
--- (source-unknown packs excluded).
+-- (source-unknown packs excluded), plus credits still due to a clawback.
 -- Callers hold the profile lock (the same lock the refund and the settlement take first).
 CREATE OR REPLACE FUNCTION public.credit_package_refund_hold(p_user uuid) RETURNS integer
 LANGUAGE sql STABLE SET search_path=public,pg_temp AS $$
- SELECT coalesce(sum(greatest(s.credits_granted-s.consumed_amount,0)),0)::integer
+ SELECT coalesce(sum(s.refund_clawback_due+CASE WHEN s.status='granted' AND s.refund_review IS NULL
+   AND o.status IN ('refunded','partially_refunded')
+   AND NOT EXISTS(SELECT 1 FROM credit_source_reviews r WHERE r.source_kind='credit_package' AND r.source_id=s.id)
+  THEN greatest(s.credits_granted-s.consumed_amount,0) ELSE 0 END),0)::integer
  FROM credit_package_sources s JOIN payment_orders o ON o.id=s.order_id
- WHERE s.user_id=p_user AND s.status='granted' AND s.refund_review IS NULL
-  AND o.status IN ('refunded','partially_refunded')
-  AND NOT EXISTS(SELECT 1 FROM credit_source_reviews r WHERE r.source_kind='credit_package' AND r.source_id=s.id)
+ WHERE s.user_id=p_user
 $$;
 
 -- 0275 body with one change: a settled or source-unknown refunded pack is no longer held back. "kept" credits are then ordinary
@@ -113,27 +118,46 @@ BEGIN
 END $$;
 
 -- Credits a reservation took from a pack that has since been clawed back here, returned to the balance afterwards
--- (refund, abort, settlement below the reservation, PAYG compensation): take them back as well, never below zero,
--- so a reservation in flight at settlement time cannot keep part of the refunded pack. Callers hold the profile lock.
+-- (refund, abort, settlement below the reservation, PAYG compensation), are taken back as well, so a reservation in
+-- flight at settlement time cannot keep part of the refunded pack. The caller is still writing its own ledger row for
+-- the return, so this only records them as due (held from now on); the deferred trigger takes them back at commit,
+-- after every row the caller writes, never below zero. Callers hold the profile lock.
 CREATE OR REPLACE FUNCTION public.credit_package_refund_late_clawback(p_user uuid,p_source uuid,p_n integer)
 RETURNS void LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
+BEGIN
+ IF coalesce(p_n,0)<=0 THEN RETURN; END IF;
+ UPDATE credit_package_sources SET refund_clawback_due=refund_clawback_due+p_n,updated_at=clock_timestamp()
+ WHERE id=p_source AND user_id=p_user AND refund_review='clawback';
+END $$;
+
+CREATE OR REPLACE FUNCTION public.credit_package_refund_due_take() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE s credit_package_sources; balance integer; taken integer;
 BEGIN
- SELECT * INTO s FROM credit_package_sources WHERE id=p_source AND user_id=p_user;
- IF s.refund_review IS DISTINCT FROM 'clawback' OR coalesce(p_n,0)<=0 THEN RETURN; END IF;
- SELECT credits INTO balance FROM profiles WHERE id=p_user FOR UPDATE;
- taken:=least(greatest(balance,0),p_n);
- UPDATE profiles SET credits=credits-taken WHERE id=p_user;
+ -- Profile first, then source: the lock order of the settlement and of every reservation path.
+ SELECT credits INTO balance FROM profiles WHERE id=NEW.user_id FOR UPDATE;
+ SELECT * INTO s FROM credit_package_sources WHERE id=NEW.id FOR UPDATE;
+ IF s.refund_clawback_due<=0 THEN RETURN NULL; END IF;
+ taken:=least(greatest(balance,0),s.refund_clawback_due);
+ UPDATE profiles SET credits=credits-taken WHERE id=s.user_id;
  INSERT INTO credit_transactions(user_id,amount,type,description,ledger_type,reason_code,source_type,source_order_id,
-  idempotency_key,balance_before,balance_after,metadata)
- VALUES(p_user,-taken,'deduction','Refunded credit pack settled (returned reservation)','refund_clawback','refund_clawback',
+  idempotency_key,balance_before,balance_after,metadata,created_at)
+ VALUES(s.user_id,-taken,'deduction','Refunded credit pack settled (returned reservation)','refund_clawback','refund_clawback',
   'stripe_refund',s.order_id,'pay-common:pack-review:'||s.order_id||':returned:'||gen_random_uuid(),balance,balance-taken,
-  jsonb_build_object('creditsReturned',p_n,'creditsTakenBack',taken,'creditsShortfall',p_n-taken,'shortfallAbsorbedBy','graylum'));
+  jsonb_build_object('creditsReturned',s.refund_clawback_due,'creditsTakenBack',taken,
+   'creditsShortfall',s.refund_clawback_due-taken,'shortfallAbsorbedBy','graylum'),clock_timestamp());
+ UPDATE credit_package_sources SET refund_clawback_due=0,updated_at=clock_timestamp() WHERE id=s.id;
+ RETURN NULL;
 END $$;
+DROP TRIGGER IF EXISTS credit_package_refund_due_take ON public.credit_package_sources;
+CREATE CONSTRAINT TRIGGER credit_package_refund_due_take AFTER UPDATE OF refund_clawback_due ON public.credit_package_sources
+ DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (NEW.refund_clawback_due>0)
+ EXECUTE FUNCTION public.credit_package_refund_due_take();
 
 REVOKE ALL ON FUNCTION public.credit_package_refund_hold(uuid) FROM PUBLIC,anon,authenticated,service_role;
 REVOKE ALL ON FUNCTION public.credit_source_rows(uuid) FROM PUBLIC,anon,authenticated,service_role;
 REVOKE ALL ON FUNCTION public.credit_package_refund_late_clawback(uuid,uuid,integer) FROM PUBLIC,anon,authenticated,service_role;
+REVOKE ALL ON FUNCTION public.credit_package_refund_due_take() FROM PUBLIC,anon,authenticated,service_role;
 REVOKE ALL ON FUNCTION public.pay_common_pack_refund_review_settle(uuid,uuid,text) FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON FUNCTION public.pay_common_pack_refund_review_settle(uuid,uuid,text) TO service_role;
 
