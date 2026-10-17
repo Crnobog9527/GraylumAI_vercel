@@ -38,7 +38,8 @@ it.each(['local', 'staging', 'recovery'])('wires the %s host gate explicitly', a
 });
 it('router constructor wires its authenticated admin and resolved environment', () => {
   const source = readFileSync(new URL('../../routers/runtime.ts', import.meta.url), 'utf8');
-  expect(source).toContain("callGate:newWorkGate(ctx.supabaseAdmin,endpoint?'local':'staging').calls");
+  // RUNTIME-PROD: the namespace follows the loaded policy (local, staging window or production).
+  expect(source).toContain('callGate:newWorkGate(ctx.supabaseAdmin,runtimeGateEnvironment(real)).calls');
 });
 it('no production source imports the test-only allowing gate', () => {
   // pathname keeps percent-encoding, which breaks checkouts under non-ASCII or spaced paths.
