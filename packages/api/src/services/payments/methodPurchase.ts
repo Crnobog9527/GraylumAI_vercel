@@ -5,7 +5,7 @@ import { loadOpeningGrantDigests } from '../accountErasure/openingGrantIdentity'
 import { paymentMethodSchema } from './methodRouting';
 import { admissionError } from './methodPurchaseError';
 
-export const methodPurchaseInputSchema = z.object({
+const methodPurchaseShape = {
   itemType: z.enum(['membership_plan', 'credit_package']),
   itemId: z.string().uuid(),
   billingCycle: z.enum(['monthly', 'yearly', 'one_time']),
@@ -16,7 +16,17 @@ export const methodPurchaseInputSchema = z.object({
   termsVersion: z.string().regex(/^[A-Za-z0-9_.:-]{1,80}$/).optional(),
   transition: z.enum(['upgrade', 'founder_renewal']).optional(),
   priorSubscriptionId: z.uuid().optional(),
-}).strict().refine(value => Boolean(value.transition) === Boolean(value.priorSubscriptionId), 'Transition requires original subscription');
+};
+const transitionPaired = (value: { transition?: unknown; priorSubscriptionId?: unknown }) =>
+  Boolean(value.transition) === Boolean(value.priorSubscriptionId);
+
+export const methodPurchaseInputSchema = z.object(methodPurchaseShape).strict()
+  .refine(transitionPaired, 'Transition requires original subscription');
+
+/** The checkout request: the purchase plus the browser's optional GA ids (ANALYTICS §3.1). The ids are checked
+ * separately and dropped when malformed, never refusing the purchase; they never reach the purchase itself. */
+export const methodCheckoutInputSchema = z.object({ ...methodPurchaseShape, analytics: z.unknown().optional() }).strict()
+  .refine(transitionPaired, 'Transition requires original subscription');
 
 /** Server-only preparation, no provider dispatch. PR-2 supplies the authenticated route and
  * authoritative published terms version; caller input cannot set prices or provider scope. */

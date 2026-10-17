@@ -19,6 +19,7 @@ import { settleDueReportFees } from '@repo/api/src/services/report/fees';
 import { findStuckPaygCalls } from '@repo/api/src/services/bill2/stuckCalls';
 import { kickStalledReviews } from '@repo/api/src/services/fusion/background';
 import { validateCronRequest } from '@/lib/cron-auth';
+import { pruneGaCheckoutIds } from '@repo/api/src/services/analytics/gaPurchase';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -126,7 +127,13 @@ export async function GET(request: Request) {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
     logger.system.cronJob('billing-reconcile', 'started');
+<<<<<<< HEAD
     const [result, readinessAudit, erasureFinancial, waffo, staleRounds, stripeCard, { fusion, fusionKick }, stuckCalls, reportFees] = await Promise.all([
+=======
+    // ANALYTICS 0280: GA checkout ids never taken (long past their 45-minute window) are deleted (statistics only, never fails the job).
+    const analyticsIds = pruneGaCheckoutIds(supabase);
+    const [result, readinessAudit, erasureFinancial, waffo, staleRounds, stripeCard, { fusion, fusionKick }, stuckCalls] = await Promise.all([
+>>>>>>> origin/staging
       runDailyBillingReconciliation(supabase),
       runBillingEngineV15ReadinessAudit(supabase),
       runErasureFinancialReconciliation(supabase),
@@ -197,6 +204,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       success,
+      analyticsIds: await analyticsIds,
       periodStart: result.periodStart,
       periodEnd: result.periodEnd,
       mismatches: result.mismatches,
