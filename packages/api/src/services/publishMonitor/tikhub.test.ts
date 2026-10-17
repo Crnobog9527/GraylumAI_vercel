@@ -1,5 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from 'vitest';
+const research = vi.hoisted(() => ({ benchmark: [] as string[] }));
+vi.mock('../research/vendors/config', async original => ({ ...(await original<object>()),
+  readResearchToolsConfig: async () => ({ config: { verifiedPlatforms: ['tiktok', 'instagram'], benchmarkPlatforms: research.benchmark } }) }));
 import type { ResearchCallResult } from '../research/vendors/types';
 import {
   addBenchmark, applyTikhubRead, connectOwnTikhub, tikhubOutcome, tikhubRows, type TikhubClaim,
@@ -35,10 +38,12 @@ describe('publish-monitor TikHub connections', () => {
 
   it('adds a benchmark under the admin limit, on Xiaohongshu/Douyin or a verified overseas platform', async () => {
     const rpc = vi.fn().mockResolvedValue({ data: { connectionId: account, platform: 'tiktok', count: 1 }, error: null });
-    const db = (verified: string[]) => ({ rpc, from: settings({ publish_monitor_benchmark_limit: 3,
-      research_tools_config: { config: { verifiedPlatforms: verified } } }) });
+    const db = (benchmark: string[]) => { research.benchmark = benchmark; return { rpc, from: settings({ publish_monitor_benchmark_limit: 3 }) }; };
+    // Verified for lookups but not on the benchmark list: refused.
     expect(await code(addBenchmark(db([]) as never, actor, { businessId: account, profileLink: 'https://www.tiktok.com/@natgeo' })))
       .toBe('PUBLISH_MONITOR_PLATFORM_UNSUPPORTED');
+    await addBenchmark(db(['tiktok']) as never, actor, { businessId: account, profileLink: 'https://www.tiktok.com/@natgeo' });
+    expect(rpc).toHaveBeenLastCalledWith('publish_monitor_benchmark_add', expect.objectContaining({ p_platform: 'tiktok' }));
     await addBenchmark(db([]) as never, actor, { businessId: account, profileLink: XHS });
     expect(rpc).toHaveBeenLastCalledWith('publish_monitor_benchmark_add', expect.objectContaining({ p_platform: 'xiaohongshu',
       p_max: expect.any(Number) }));
