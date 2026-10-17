@@ -2963,7 +2963,7 @@
   "fn:content_erasure_visible(uuid,uuid)": "1911501257a1",
   "fn:credit_package_refund_hold(uuid)": "648a949789a2",
   "fn:credit_package_source_track()": "c664a76aec94",
-  "fn:credit_source_apply(uuid,uuid,integer,text)": "96822b75947e",
+  "fn:credit_source_apply(uuid,uuid,integer,text)": "df2524e6970d",
   "fn:credit_source_rows(uuid)": "0ab77b9422bd",
   "fn:current_account_is_closed()": "6b52c34956bb",
   "fn:data_use_consent_current_version()": "385f073c1dea",
