@@ -94,7 +94,7 @@ export const J_FIELDS: Record<JStepId, readonly JField[]> = {
 
 /**
  * This person's values, field by field, from the real conversation's step summaries; `proposal` marks what the coach
- * proposed ("草稿 · 导师建议"), the rest is what the person said ("草稿 · 从对话记下").
+ * proposed ("草稿 · AI 教练建议"), the rest is what the person said ("草稿 · 从对话记下").
  */
 export const J_FIELD_VALUES: Record<string, { value: string; proposal: boolean }> = {
   goal: { value: '做副业，不辞职；一年后希望每月多几百美元，起步先走厨具和食材带货', proposal: true },

@@ -79,7 +79,7 @@ export const J_TAKEOVER_MOMENTS: readonly TakeoverMoment[] = [
       {
         role: 'summary', card: 'confirm', fills: ['track', 'platforms', 'benchmarks', 'assets'],
         text: '请核对，确认后进入第二步：\n'
-          + '- 目标：做副业，不辞职；一年后希望每月多几百美元，起步先走厨具和食材带货（导师建议，可改）。\n'
+          + '- 目标：做副业，不辞职；一年后希望每月多几百美元，起步先走厨具和食材带货（AI 教练建议，可改）。\n'
           + '- 内容：中式家常菜，二十多道，多数 15 分钟上桌。\n'
           + '- 想吸引：刚开始一个人住的上班族——下班晚、累、外卖贵、一人份食材吃不完。\n'
           + '- 资源：工作日每晚约 1 小时，周末不固定；不露脸，可出声；手机 + 支架。\n'

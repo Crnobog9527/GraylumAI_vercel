@@ -67,7 +67,7 @@ function Message({ message, shown }: { message: DemoMessage; shown: number | nul
       className="mr-4 rounded-xl border border-[var(--border-primary)] p-3">
       <span className={result.agentIdentity}><img src="/graylum-logo.png" alt="" width={22} height={22} />{message.label}</span>
       {live && shown < 0
-        ? <p className={cn('mt-1', result.messageBody, styles.thinking)}>导师正在思考…</p>
+        ? <p className={cn('mt-1', result.messageBody, styles.thinking)}>AI 教练正在思考…</p>
         : <MessageMarkdown className={`mt-1 ${result.messageBody}`} text={live ? message.text.slice(0, shown) : message.text} streaming={live} />}
     </div>
   );
@@ -178,7 +178,7 @@ export function DemoWorkspace({ start = 'beginning' }: { start?: 'beginning' | '
                                 onOther={() => box.current?.focus()} />
                             </div>
                           ) : null}
-                          <ComposerEditor ref={box} label="给导师的回复" placeholder={OTHER_PLACEHOLDER} value={draft} maxLength={8000}
+                          <ComposerEditor ref={box} label="给AI 教练的回复" placeholder={OTHER_PLACEHOLDER} value={draft} maxLength={8000}
                             onChange={setDraft} onEnter={send} className={composer.editor} />
                           <div className={composer.tools}>
                             <div className={composer.toolLeft}>
