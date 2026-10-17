@@ -2470,11 +2470,11 @@ node scripts/plan-progress.mjs --ref origin/staging
 | 0280 | [#1076](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1076) ANALYTICS 付款上报（合集 #1116） |
 | 0281 | [#1077](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1077) ANALYTICS 首次来源（合集 #1116） |
 | 0282 | [#1083](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1083) RT-5 对标表来源编号（合集 #1116） |
-| 0283 | [#1061](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1061) RUNTIME-FAILURE-RECONCILE（合集 (待开 PR)） |
-| 0284 | [#1069](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1069) PAY-DISPUTE-GUARD 积分包隔离（合集 (待开 PR)） |
-| 0285 | [#1042](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1042) LIB-DOCS LIB-2d BILL2 单图计费（合集 (待开 PR)） |
-| 0286 | [#1050](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1050) LIB-DOCS LIB-2d 保存识别文字（合集 (待开 PR)） |
-| 0287 | [#1075](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1075) PUBLISH-MONITOR 4a（合集 (待开 PR)） |
+| 0283 | [#1061](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1061) RUNTIME-FAILURE-RECONCILE（合集 #1119） |
+| 0284 | [#1069](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1069) PAY-DISPUTE-GUARD 积分包隔离（合集 #1119） |
+| 0285 | [#1042](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1042) LIB-DOCS LIB-2d BILL2 单图计费（合集 #1119） |
+| 0286 | [#1050](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1050) LIB-DOCS LIB-2d 保存识别文字（合集 #1119） |
+| 0287 | [#1075](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1075) PUBLISH-MONITOR 4a（合集 #1119） |
 
 ### 7.2 依赖简图
 
