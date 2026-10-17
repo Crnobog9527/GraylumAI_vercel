@@ -1,0 +1,145 @@
+{
+  "reviewId": "e10f0cb8-75f5-4bd3-aa5d-e8bef3788664",
+  "startAt": "2026-10-17T10:49:33.683Z",
+  "closedAt": "2026-10-17T10:49:36.723Z",
+  "reopenedAt": "2026-10-17T10:54:47.229Z",
+  "firstReopenState": "completed",
+  "awaitingChoiceAtReopen": true,
+  "estimate": {
+    "credits": 696,
+    "usd": "2.310190",
+    "rounds": 1
+  },
+  "seats": [
+    {
+      "seat": "A",
+      "rounds": [
+        {
+          "round": 1,
+          "status": "usable"
+        }
+      ]
+    },
+    {
+      "seat": "B",
+      "rounds": [
+        {
+          "round": 1,
+          "status": "usable"
+        }
+      ]
+    },
+    {
+      "seat": "C",
+      "rounds": [
+        {
+          "round": 1,
+          "status": "usable"
+        }
+      ]
+    }
+  ],
+  "summaryStatus": "usable",
+  "cost": {
+    "credits": 177,
+    "convertedUsd": 0.59,
+    "holds": [
+      18,
+      52,
+      97,
+      314
+    ],
+    "charges": [
+      5,
+      19,
+      15,
+      138
+    ],
+    "before": 8099,
+    "after": 7922
+  },
+  "adoption": {
+    "versionId": "370a4dae-6ebd-4e45-8a27-dbb2db6b0e4f",
+    "version": 3,
+    "adopted": [
+      "一句话结论（约 200 字）",
+      "三、你的受众：谁会看，谁会买（约 1300 字）"
+    ],
+    "kept": 12,
+    "completion": "新版本已生成：2 章采用修订版，其余 12 章没有修改。之后的选题和写作会用新版本。",
+    "originalLabelsRemain": true
+  },
+  "chapterCount": 14,
+  "comparisons": [
+    {
+      "section": "一句话结论（约 200 字）",
+      "exactMatch": true
+    },
+    {
+      "section": "一、你的现状盘点（约 300 字）",
+      "exactMatch": true
+    },
+    {
+      "section": "二、你真正想要的结果，以及这条路能不能走通（约 500 字）",
+      "exactMatch": true
+    },
+    {
+      "section": "三、你的受众：谁会看，谁会买（约 1300 字）",
+      "exactMatch": true
+    },
+    {
+      "section": "四、平台选择（约 300 字）",
+      "exactMatch": true
+    },
+    {
+      "section": "五、对标账号分析（约 800 字，3–10 个合格账号）",
+      "exactMatch": true
+    },
+    {
+      "section": "六、账号定位（约 400 字）",
+      "exactMatch": true
+    },
+    {
+      "section": "七、账号三件套（约 700 字）",
+      "exactMatch": true
+    },
+    {
+      "section": "八、内容规划（约 1300 字）",
+      "exactMatch": true
+    },
+    {
+      "section": "九、运营手册：照着做就行（约 2400 字）",
+      "exactMatch": true
+    },
+    {
+      "section": "十、变现路径：销售漏斗和商业飞轮（至少 2000 字，建议约 2400 字）",
+      "exactMatch": true
+    },
+    {
+      "section": "十一、合规提醒（约 300 字，每份报告必写）",
+      "exactMatch": true
+    },
+    {
+      "section": "十二、关于见效时间和投入（约 150 字）",
+      "exactMatch": true
+    },
+    {
+      "section": "十三、待验证的假设（约 800 字）",
+      "exactMatch": true
+    }
+  ],
+  "mine": {
+    "reviewId": "e10f0cb8-75f5-4bd3-aa5d-e8bef3788664",
+    "draftId": "cf4ef8bc-9971-4491-9f24-2586dea8ae51",
+    "sourceVersionId": "c8a9bfaa-000e-4676-b306-09dd8bad9ac7",
+    "state": "completed",
+    "round": 1,
+    "phase": "summary",
+    "outcomeKind": "revised",
+    "awaitingChoice": false,
+    "createdAt": "2026-10-17T10:49:35.74402+00:00",
+    "endedAt": "2026-10-17T10:52:45.420746+00:00",
+    "seenAt": "2026-10-17T10:54:52.626765+00:00"
+  },
+  "uiReminderRepeated": false
+}
