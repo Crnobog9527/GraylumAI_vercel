@@ -76,9 +76,9 @@ export function fieldState(value: FieldValue | undefined): FieldState {
 
 /**
  * Where a draft value came from. The server marks captured values `capture` and the user's own edits
- * (and adopted updates) `user`. A capture records its basis (#702): `agent_proposal` reads as 导师建议.
+ * (and adopted updates) `user`. A capture records its basis (#702): `agent_proposal` reads as AI 教练建议.
  * Captures from before that have no basis; a field the Skill declares as the mentor's proposal can only
- * hold the mentor's suggestion, so it still reads as 导师建议. Unknown history stays unknown.
+ * hold the mentor's suggestion, so it still reads as AI 教练建议. Unknown history stays unknown.
  */
 export type FieldOrigin = "user" | "capture" | "proposal" | "unknown";
 export function fieldOrigin(field: Pick<ChecklistField, "elicitation">, meta: FieldMeta): FieldOrigin {
@@ -88,7 +88,7 @@ export function fieldOrigin(field: Pick<ChecklistField, "elicitation">, meta: Fi
   return "unknown";
 }
 const originLabels: Record<FieldOrigin, string> = {
-  user: "草稿 · 你填写的", capture: "草稿 · 从对话记下", proposal: "草稿 · 导师建议", unknown: "草稿",
+  user: "草稿 · 你填写的", capture: "草稿 · 从对话记下", proposal: "草稿 · AI 教练建议", unknown: "草稿",
 };
 
 /** The user changed this field locally (the edit buffer holds every field of a step, changed or not). */

@@ -31,6 +31,7 @@ import { MentorChatHeading, MentorChatLog, MentorLiveReply, MentorPendingMessage
 import { useMentorLogScroll } from "./use-mentor-log-scroll";
 import { mentorTailNotices, mentorTurnNotice, RETRY_PENDING_NOTICE, turnNeedsRetry } from "./mentor-notices";
 import { useAutoStepRecovery, useHistoryPolling } from "./use-step-recovery";
+import { executionSettled } from "./step-recovery";
 import { useLiveReply } from "./use-live-reply";
 import { PublishFootnote, PublishNext, ReportEntry, reportPublishes } from "./report-panel";
 import { ReadonlyDraftView } from './readonly-draft-view';
@@ -45,27 +46,12 @@ import { checklistUpdatedInput, isOpeningInput, openingEntryKey } from "@repo/ap
 import { clearSavedFields, isHostAction, noteSavedFields, nudgeNotice, refusedTurn, savedFields, shownInput } from "./checklist-nudge";
 type Step = { id: string; title: string; dependsOn?: string[] };
 import { type Information, type Item, type StepEnvelope } from "./confirm-envelope";
-import { handoffIntent, readRetainedHandoff } from "./handoff-envelope";
-/**
- * Provably definite rollbacks of the `opc_handoff` SQL function. Every code
- * below is raised before that function's single durable write, so an exception
- * rolls the whole transaction back and a request carrying it can never commit:
- * releasing the retained request and forming a new explicit one is safe.
- * Timeouts, lost replies and every other error keep it for idempotent replay.
- */
-const definiteHandoffRejections = new Set([
-  "OPC_ACCOUNT_CONFLICT",
-  "OPC_ACCOUNTS_INVALID",
-  "OPC_VERSION_CONFLICT",
-  "OPC_REQUEST_CONFLICT",
-  "OPC_DENIED",
-]);
+import { definiteHandoffRejections, handoffIntent, readRetainedHandoff } from "./handoff-envelope";
+import { ResearchCallList } from "@/components/research/research-call-list";
+import { ResearchSessionPanel, useResearchCalls } from "@/components/research/research-session";
+import { researchConfirmedInput } from "@/components/research/research-session-model";
 /** The retained mentor request is either wrapped in `request` or legacy top-level. */
-export default function PositioningDraft({
-  params,
-}: {
-  params: Promise<{ draftId: string }>;
-}) {
+export default function PositioningDraft({ params }: { params: Promise<{ draftId: string }> }) {
   const { draftId } = use(params);
   return <PositioningDraftContent key={draftId} draftId={draftId}/>;
 }
@@ -137,7 +123,8 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const history = trpc.runtime.view.useQuery({ sessionId: read.data?.sessionId ?? "" },
     { enabled: Boolean(read.data?.sessionId) && !read.data?.conversationDeleted,
       refetchInterval: useHistoryPolling(draftId, read.data?.snapshot?.workflow.steps ?? []) });
-  const live = useLiveReply(draftId, history.data), liveReply = live.reply, stopLocal = live.stopLocal;
+  const research = useResearchCalls(read.data?.sessionId);
+  const live = useLiveReply(draftId, history.data, research.observe), liveReply = live.reply, stopLocal = live.stopLocal;
   const payg = usePaygResume(() => Promise.all([read.refetch(), history.refetch(), utils.credits.getBalance.invalidate()]));
   const [activeStep, setActiveStep] = useState<string | null>(null);
   // State, not a ref: on a client-side return cached history exists before the log mounts.
@@ -476,7 +463,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
         // entry identity is deterministic, so a later retry reuses the same
         // turn instead of producing a second one or a second charge.
         sessionStorage.removeItem(key);
-        setNotice("导师引导这次没有加载成功。你可以直接填写右侧表单，或刷新后重试；不会重复生成或重复扣费。");
+        setNotice("AI 教练引导这次没有加载成功。你可以直接填写右侧表单，或刷新后重试；不会重复生成或重复扣费。");
       } finally {
         openingInFlight.current.delete(step.id);
         setOpeningSteps([...openingInFlight.current]);
@@ -663,7 +650,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     if (sessionStorage.getItem(key)) {
       // A retained envelope still owns this step. Never create a second
       // identity; the explicit recovery control resumes the original request.
-      setError("上一条发给导师的内容仍在核对。请先点“重试”恢复，不会重复发送。");
+      setError("上一条发给 AI 教练的内容仍在核对。请先点“重试”恢复，不会重复发送。");
       return;
     }
     if(running||openingInFlight.current.size||history.data?.activeExecution)return;
@@ -1055,6 +1042,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
         .map((execution) => [execution.executionId, execution]),
     ).values(),
   );
+  const settledTurns = mentorExecutions.filter(execution => executionSettled(history.data, execution.executionId)).length;
   const hasPendingConfirmation = steps.some(step => confirmation.envelopeState(step.id).kind === "valid");
   /** A streaming reply whose execution is not in history yet. */
   const liveOnly = liveReply && !mentorExecutions.some(e => e.executionId === liveReply.executionId) ? liveReply : null;
@@ -1164,7 +1152,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
             <article key="positioning-workspace" className={`${resultStyles.stepArticle} space-y-3`}>
               <h2 className="text-lg">{index + 1}. {step.title} {s.valid ? "· 已确认" : "· 待确认"}</h2>
               <div className={resultStyles.stepColumns}>
-                <aside aria-label="全程导师聊天" className={`${resultStyles.mentorChat} space-y-3`}>
+                <aside aria-label="全程 AI 教练聊天" className={`${resultStyles.mentorChat} space-y-3`}>
                   <MentorChatHeading/>
                   <MentorChatLog logRef={attachChatScroll} onScroll={onChatScroll}>
                     {mentorExecutions.length===0&&<MentorWelcome text={existingEntry ? EXISTING_WELCOME : d.accountRevision
@@ -1196,6 +1184,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                         <MentorTurnGroup key={execution.executionId} executionId={execution.executionId}>
                           {/* The host opens the step itself: no fabricated user message. */}
                           {!openingTurn && <MentorUserMessage stepLabel={turnLabel} text={shownInput(execution.input) ?? "内容暂不可用"}/>}
+                          <ResearchCallList calls={research.of(execution.executionId)}/>
                           {reply.text && <MentorReply kind={summaryTurn ? "summary" : openingTurn ? "opening" : "reply"} stepLabel={turnLabel}
                             text={reply.text} live={Boolean(live)} result={execution}
                             summaryHint={Boolean(summaryTurn && !next && !s.valid && turn?.stepId === step.id && summaryShown(execution))}/>}
@@ -1211,7 +1200,11 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                     {pendingBubble&&!mentorExecutions.some(e=>e.request?.requestId===pendingBubble.requestId)&&<MentorPendingMessage
                       requestId={pendingBubble.requestId} stepTitle={steps.find(candidate => candidate.id === pendingBubble.stepId)?.title}
                       text={shownInput(pendingBubble.input)} sending={running}/>}
+                  {liveOnly && <ResearchCallList calls={research.of(liveOnly.executionId)}/>}
                   {liveOnly&&(liveOnly.text||!liveOnly.card)&&<MentorLiveReply text={liveOnly.text}/>}
+                  {read.data?.sessionId && <ResearchSessionPanel sessionId={read.data.sessionId} settledTurns={settledTurns}
+                    disabled={sendLocked || snap.state !== "draft" || mentorTurns.get(mentorExecutions.at(-1)?.executionId ?? "")?.stepId !== step.id}
+                    onConfirmed={confirmed => void ask(step, researchConfirmedInput(confirmed))}/>}
                   <ChatNoticeList notices={[...payg.blockedNotices(mentorExecutions, busy),
                     nudgeNotice(nudged, () => void ask(step, checklistUpdatedInput(nudged)), sendLocked, hasPendingStepRequest),
                     ...mentorTailNotices({ livePhase: live.phase, stop: live.stopAction,
@@ -1229,9 +1222,9 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                     return turn?.stepId === step.id && (!Object.hasOwn(turn, "roundId") || turn.roundId === d.roundId);
                   })) && <div className="flex flex-wrap items-center gap-2">
                     <Button variant="outline" size="sm" disabled={sendLocked} onClick={() => void ask(step, STEP_SUMMARY_INPUT)}>{STEP_SUMMARY_LABEL}</Button>
-                    <span className="text-xs text-[var(--text-secondary)]">让导师先整理这一步的小结，还缺什么会如实列出；确认仍由你来点。</span>
+                    <span className="text-xs text-[var(--text-secondary)]">让 AI 教练先整理这一步的小结，还缺什么会如实列出；确认仍由你来点。</span>
                   </div>}
-                  <WorkComposer value={mentorInput} onChange={setMentorInput} label="给导师的回复" placeholder={OTHER_PLACEHOLDER} attachment={dock} maxLength={8000} disabled={snap.state!=="draft"} sendDisabled={sendLocked} onSend={skill=>{if(skill)void free.send(mentorInput,skill);else void ask(step);}}/>
+                  <WorkComposer value={mentorInput} onChange={setMentorInput} label="给 AI 教练的回复" placeholder={OTHER_PLACEHOLDER} attachment={dock} maxLength={8000} disabled={snap.state!=="draft"} sendDisabled={sendLocked} onSend={skill=>{if(skill)void free.send(mentorInput,skill);else void ask(step);}}/>
                   <p className="text-xs text-[var(--text-secondary)]">
                     同一账号的步骤共用这条对话，未确认内容保留在草稿中。{d?.runtimeMode==='staging_test'?'当前使用真实模型，仅处理你提供的资料。':'当前为隔离模拟，不调用真实模型。'}
                   </p>
@@ -1379,7 +1372,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
           </div>
         </div>
       )}
-      {planView && <Link className="block underline" href={`/positioning/${draftId}`}>返回定位与导师对话</Link>}
+      {planView && <Link className="block underline" href={`/positioning/${draftId}`}>返回定位与 AI 教练对话</Link>}
       {planView && !d.report?.available && <p role="status">请先确认正式定位，再制定第一周计划。原定位和对话仍保留。</p>}
           {planView && retainedPlan && (
             <div className="space-y-3 rounded-xl border border-[var(--border-primary)] p-4">
@@ -1482,7 +1475,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
             <div className="space-y-3 rounded border border-[var(--border-primary)] p-4">
               <h3>AI 计划候选 · 尚未替换你的编辑</h3>
               <p className="text-xs text-[var(--text-secondary)]">
-                以下选题、日期、标题和简报由导师生成。其中的账号名称是待创建的建议，不代表已注册或已验证。
+                以下选题、日期、标题和简报由 AI 教练生成。其中的账号名称是待创建的建议，不代表已注册或已验证。
               </p>
               {shownPlanCandidate.map((i) => (
                 <p key={i.id}>
@@ -1554,7 +1547,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
           <div className="space-y-3 rounded border border-[var(--border-primary)] p-4">
             <h3>生成前只需要你的事实与选择</h3>
             <p className="text-sm text-[var(--text-secondary)]">
-              定位已确认。下面这些是你自己的选择（可以留空由导师按已确认定位建议）；选题、日期、标题和简报由导师生成，不需要你先手动添加选题行。
+              定位已确认。下面这些是你自己的选择（可以留空由 AI 教练按已确认定位建议）；选题、日期、标题和简报由 AI 教练生成，不需要你先手动添加选题行。
             </p>
             <div className="flex flex-wrap gap-3">
               <label className="text-sm">
@@ -1576,7 +1569,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                   disabled={busy}
                   value={planAccount}
                   onChange={(e) => setPlanAccount(e.target.value)}
-                  placeholder="留空则由导师建议名称"
+                  placeholder="留空则由 AI 教练建议名称"
                 />
               </label>
               <label className="text-sm">
@@ -1606,7 +1599,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
             </div>
             {planAccount.trim() === "" && (
               <p className="text-xs text-[var(--text-secondary)]">
-                没有账号也可以生成。导师建议的账号名称只是待创建的建议，并不代表已经注册或验证过。
+                没有账号也可以生成。AI 教练建议的账号名称只是待创建的建议，并不代表已经注册或验证过。
               </p>
             )}
           </div>
@@ -1664,7 +1657,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
           </div>
           {planNeedsCandidate && (
             <p className="text-xs text-[var(--text-secondary)]">
-              第一周计划默认由导师先给出候选，你只需要核对和修改。采用候选后，或者已经有保存过的计划版本时，也可以自己增删选题。
+              第一周计划默认由 AI 教练先给出候选，你只需要核对和修改。采用候选后，或者已经有保存过的计划版本时，也可以自己增删选题。
             </p>
           )}
           {latest && !dirtyPlan && (
