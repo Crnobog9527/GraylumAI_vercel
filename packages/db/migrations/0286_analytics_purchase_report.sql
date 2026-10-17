@@ -51,6 +51,8 @@ BEGIN
  IF p_user IS NULL OR p_order IS NULL OR p_client IS NULL OR p_session IS NULL OR p_requested_at IS NULL
   OR p_requested_at>clock_timestamp()+interval '1 minute'
   OR p_client !~ '^[0-9]{1,20}\.[0-9]{1,20}$' OR p_session !~ '^[0-9]{1,20}$' THEN RETURN false; END IF;
+ -- One writer per account at a time (store and withdraw), so the withdrawal check and the insert are atomic.
+ PERFORM pg_advisory_xact_lock(hashtextextended('analytics_consent:'||p_user::text,0));
  IF EXISTS(SELECT 1 FROM account_erasure_requests WHERE profile_id=p_user) THEN RETURN false; END IF;
  -- A request that began before the latest withdrawal must not bring the ids back.
  IF EXISTS(SELECT 1 FROM analytics_consent_withdrawals w WHERE w.user_id=p_user AND w.withdrawn_at>=p_requested_at)
@@ -85,6 +87,7 @@ CREATE OR REPLACE FUNCTION public.analytics_withdraw_consent(p_user uuid)
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 BEGIN
  IF p_user IS NULL THEN RAISE EXCEPTION 'ANALYTICS_USER_REQUIRED'; END IF;
+ PERFORM pg_advisory_xact_lock(hashtextextended('analytics_consent:'||p_user::text,0));
  IF NOT EXISTS(SELECT 1 FROM account_erasure_requests WHERE profile_id=p_user)
   AND EXISTS(SELECT 1 FROM profiles WHERE id=p_user) THEN
   INSERT INTO analytics_consent_withdrawals(user_id,withdrawn_at) VALUES(p_user,clock_timestamp())
