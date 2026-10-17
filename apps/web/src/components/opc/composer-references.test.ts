@@ -8,7 +8,7 @@ import { expect, it } from "vitest";
 import {
   COMPOSER_REFERENCES_ENABLED, findReferenceQuery, LibraryReferenceNode, mergeReferences, referenceRequest, referencesIn, referencesNamedIn, sameReferences,
 } from "./composer-references";
-import { docToText, textToDoc } from "./composer-text";
+import { docToText, fitText, textToDoc } from "./composer-text";
 import { matchingDocuments, referenceFor } from "./reference-menu";
 
 const schema = getSchema([Document, Paragraph, Text, LibraryReferenceNode]);
@@ -103,4 +103,12 @@ it("keeps only the references the text still names, so a stale stored list never
   const a = { documentId: "a", version: 1, label: "甲.md" }, b = { documentId: "b", version: 1, label: "乙.md" };
   expect(referencesNamedIn("看 @甲.md 然后", [a, b])).toEqual([a]);
   expect(referencesNamedIn("改过了，不再提文档", [a, b])).toEqual([]);
+});
+
+it("cuts a long file name for the search query without leaving half a character", () => {
+  const name = "a".repeat(99) + "😀.txt";
+  const query = fitText(name, 100);
+  expect(query).toBe("a".repeat(99));
+  expect(query.length).toBeLessThanOrEqual(100);
+  expect(fitText("短.md", 100)).toBe("短.md");
 });
