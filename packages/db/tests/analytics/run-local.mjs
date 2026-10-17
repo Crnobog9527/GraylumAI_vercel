@@ -147,14 +147,14 @@ try {
   await store(leaving, leavingOrder);
   const remaining = u => v('SELECT account_erasure_business_remaining($1)::int v', [u]);
   await v('SELECT account_erasure_confirm($1,$2) v', [leaving, randomUUID()]);
-  const before = await remaining(leaving);
+  const beforeErase = await remaining(leaving);
   assert.equal(await store(leaving, leavingOther), false, 'a closing account stores nothing');
-  assert.equal(await v('SELECT analytics_take_checkout_ids($1) v IS NULL v', [leavingOrder]), true, 'and is never reported');
+  assert.equal(await v('SELECT analytics_take_checkout_ids($1) IS NULL v', [leavingOrder]), true, 'and is never reported');
   await store(buyer, await order(buyer));
   await v('SELECT account_erasure_prune_business($1,100) v', [leaving]);
   assert.equal(await v('SELECT count(*)::int v FROM analytics_consent_withdrawals WHERE user_id=$1', [leaving]), 0);
   assert.equal(await rows(leaving), 0);
-  assert.ok(await remaining(leaving) < before, 'the withdrawal row was counted as remaining work and is gone');
+  assert.ok(await remaining(leaving) < beforeErase, 'the withdrawal row was counted as remaining work and is gone');
   assert.equal(await rows(buyer), 1, 'other accounts are untouched');
   ok('erasure: closing accounts store and report nothing; both tables pruned with the account; others untouched');
 
