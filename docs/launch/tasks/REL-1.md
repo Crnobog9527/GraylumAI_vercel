@@ -124,14 +124,16 @@ Owner 2026-10-17 选 A（原话见第 6 节）：**日期不变，10-25 冻结**
 | R4 | 正式准入档案：`system_settings.runtime_payg_production` = `{version:1, enabled, policyVersion, profiles:[…]}`，结构同 staging 的 `runtime_payg_staging`，但没有 windowId 和到期日（取代 H3 里"准入记录"的写法）；应急关闭写 `{"enabled":false}` | 哪些模型和线路能被正式调用 | 总控（需批准） | R1；R3 | 读回档案；关闭后新调用被拒 | 同上 |
 | R5 | Vercel 正式项目环境变量（非密钥）：`V3_RUNTIME_PRODUCTION_PROJECT_ID`（正式项目 ID）、`V3_RUNTIME_PRODUCTION_DATABASE_HOST`（新正式 Supabase 主机）、`V3_RUNTIME_PRODUCTION_ENABLED=true`（**随 10-29 的部署一起设成 true**，此时 `stopNewCalls` 仍是开的，新调用照样被拒；环境变量只对新部署生效，冒烟当天只靠临时关 `stopNewCalls`，不再改变量、不再重新部署）；**正式项目不能设任何 `V3_RUNTIME_STAGING_*`**（设了代码拒绝）；正式域名代码里只认 `app.graylum.com` 和 `www.graylum.com` | 项目和库绑定，防止误连 | 总控（需批准） | R1；N1 | 变量名清单读回；`stopNewCalls` 开着时模型调用被拒 | 同上 |
 | R6 | 首版正式环境的评审团和研究工具还不可用，由后续两个 PR 在冻结前补上（总控已排）；补不上就按 10-24 缺口清单处理 | 避免对外说有但实际没有 | RUNTIME-PROD 窗口 | R1 | 缺口清单里列明 | 同上 |
-| R7 | **正式环境付款入口的代码闸门**：`packages/api/src/services/payments/methodCheckoutGate.ts` 现在把银行卡下单写死成只在 staging 部署上开放（第 25–31 行），微信和支付宝一律关闭（`WALLET_CHECKOUT_READY = false`）；正式环境靠配置打不开。需要一个 PR：为正式部署加上和 R5 同样的"项目、数据库主机"绑定的放行条件，银行卡和钱包分别放行；**默认仍关闭**，真正打开仍要 Owner 批准 | 不做这一项，D7 和 D9 在正式环境都会被拒，上线后一单都收不了 | **PAY-STRIPE-MP 执行窗口**（high；PR 还没开，**待总控分配**） | R5（正式部署识别方式）；PAY-STRIPE-MP 已合并部分 | **10-25 冻结前合并并在 staging 验证**（正式放行条件在隔离测试里通过、staging 行为不变、未绑定的部署仍然被拒）；冻结后才发现就得改冻结版本重走回归 | `methodCheckoutGate.ts` 第 14–16、25–31 行；MIGRATION-PLAN 第五节第 7 项 |
+| R7 | **正式环境付款入口的代码闸门**：`packages/api/src/services/payments/methodCheckoutGate.ts` 现在把银行卡下单写死成只在 staging 部署上开放（第 25–31 行），微信和支付宝一律关闭（`WALLET_CHECKOUT_READY = false`）；正式环境靠配置打不开。需要一个 PR：为正式部署加上和 R5 同样的"项目、数据库主机"绑定的放行条件，银行卡和钱包分别放行；**默认仍关闭**，真正打开仍要 Owner 批准。
+
+**范围不止这一个文件**，所有"只认测试模式"的检查都要换成审查过的正式绑定：`methodRouting.ts` 第 47 行、`methodPurchase.ts` 第 28 行、`stripeMethodCheckout.ts` 第 53 行、迁移 `0222_pay_stripe_mp_checkout.sql` 第 31–32 行都拒绝 `paymentMode='live'`（正式 Stripe 密钥就是 live）；**退款路径也只认测试**：`packageRefund.ts` 第 40–41、61–66 行、`subscriptionRefundPreview.ts` 第 27–28、51–53、81、117–118 行、`monthlyRefundService.ts` 第 40–41、164 行都要求测试模式或 `livemode === false`，不改的话正式订单无法在应用里报价和退款（D9 要真付再退）。钱包年付还要 `annualVerified` 标记（见 D8a）。隔离测试必须覆盖 live 路径的下单、发放、退款，且 staging 行为不变、未绑定的部署仍被拒 | 不做这一项，D7 和 D9 在正式环境都会被拒，上线后一单都收不了 | **PAY-STRIPE-MP 执行窗口**（high；PR 还没开，**待总控分配**） | R5（正式部署识别方式）；PAY-STRIPE-MP 已合并部分 | **10-25 冻结前合并并在 staging 验证**（正式放行条件在隔离测试里通过、staging 行为不变、未绑定的部署仍然被拒）；冻结后才发现就得改冻结版本重走回归 | `methodCheckoutGate.ts` 第 14–16、25–31 行；上面列出的各文件行号；MIGRATION-PLAN 第五节第 7 项 |
 
 ### A. 平台和基础设施
 
 | # | 做什么 | 为什么 | 谁做 | 依赖 | 怎么验证 | 出处 |
 | --- | --- | --- | --- | --- | --- | --- |
 | A1 | 升级 Vercel Pro | 正式运营要用；Hobby 单次函数 300 秒、定时任务每天一次，不够 A2 用 | Owner 操作（付费） | — | Vercel 账单页显示 Pro；正式项目的函数时长上限读回 | Master Plan 第 1237 行、第 7.6 节第 2491 行 |
-| A2 | 改 `apps/web/vercel.json` 定时任务频率：新增 `/api/cron/runtime-recovery`（分钟级）；`account-erasure` 和 `library-cleanup` 每 5 分钟（Master Plan 要求注销兜底至少每小时一次，LIB_DOCS_PLAN 要求两者一起改成每 5 分钟，取更严的 5 分钟）；`social-monitor` 每 10 分钟 | 删除后 24 小时内清完（T_online）；超时回合自动收口退回；资料库清理；作品数据刷新容量 | 执行窗口开 PR | A1；Vercel 正式环境已有 `CRON_SECRET`（N11，`apps/web/src/lib/cron-auth.ts` 没有它就拒绝全部定时请求）；`runtime-recovery` 路由已在 staging，但 `vercel.json` 里还没有这一条 | 会写运行记录的任务（`social-monitor`、`tickets/auto-close` 等）看 `scheduled_job_runs` 有成功记录；`runtime-recovery` 和 `account-erasure` 目前不写这张表，看 Vercel 定时任务调用记录和函数日志里的 HTTP 200（不是 401/503） | 第 2335、2375、2491 行；[LIB_DOCS_PLAN](../LIB_DOCS_PLAN.md) 第 144 行；[PUBLISH-MONITOR](PUBLISH-MONITOR.md) 第 338 行；[FUSION-REVIEW](FUSION-REVIEW.md) 第 44 行 |
+| A2 | 改 `apps/web/vercel.json` 定时任务频率：新增 `/api/cron/runtime-recovery`（分钟级）；`account-erasure` 和 `library-cleanup` 每 5 分钟（Master Plan 要求注销兜底至少每小时一次，LIB_DOCS_PLAN 要求两者一起改成每 5 分钟，取更严的 5 分钟）；`social-monitor` 每 10 分钟 | 删除后 24 小时内清完（T_online）；超时回合自动收口退回；资料库清理；作品数据刷新容量 | 执行窗口开 PR | A1；Vercel 正式环境已有 `CRON_SECRET`（N11，`apps/web/src/lib/cron-auth.ts` 没有它就拒绝全部定时请求）；`runtime-recovery` 路由已在 staging，但 `vercel.json` 里还没有这一条 | 会写运行记录的任务（`social-monitor`、`tickets/auto-close` 等）看 `scheduled_job_runs` 有成功记录；`runtime-recovery`、`account-erasure` 和 `library-cleanup` 目前不写这张表，看 Vercel 定时任务调用记录和函数日志里的 HTTP 200（不是 401/503） | 第 2335、2375、2491 行；[LIB_DOCS_PLAN](../LIB_DOCS_PLAN.md) 第 144 行；[PUBLISH-MONITOR](PUBLISH-MONITOR.md) 第 338 行；[FUSION-REVIEW](FUSION-REVIEW.md) 第 44 行 |
 | A2a | **待核实**：staging 和正式两个 Vercel 项目是否在同一个团队、staging 是否也会变成 Pro | `vercel.json` 两个项目共用；如果 staging 仍是 Hobby，分钟级定时任务可能让 staging 部署失败 | 总控只读核对 | A1 | 看两个项目所属团队和套餐 | 仓库里没有出处，待核实 |
 | A3 | 恢复正式站（取消暂停） | 正式 Vercel 项目 `graylum-ai-vercel-v1` 目前是暂停状态（**待核实**：暂停原因和日期仓库里没写，总控记录为 2026-10-05） | Owner 操作（MCP 没有这个权限） | 维护态准备完成（第 4 节第 4 步） | 访问正式域名不再是暂停页；新调用仍是关闭状态 | [RUNTIME_PROD_PLAN](../RUNTIME_PROD_PLAN.md) 第 7.3 节第 3、5 步、第 8 节 Vercel 行 |
 | A4 | 处理 `main` 的 Next 安全漏洞 | `main` 停在 2026-08 的依赖，必需检查 Dependency Audit 失败；正式站公开可达 | 总控（需批准合并 `main`） | 冻结版本 | staging → `main` 的合并 PR 上 Dependency Audit 和全部必需检查通过，不新增豁免 | 第 2628 行；RUNTIME_PROD_PLAN 第 7.3 节第 1 步 |
@@ -185,7 +187,8 @@ Owner 2026-10-17 选 A（原话见第 6 节）：**日期不变，10-25 冻结**
 | D6 | 正式环境 Stripe 客户门户关闭"切换套餐" | 升级要走"新开 Gold 结账 + Pro 期末停"，门户里直接换套餐会绕过 | Owner 操作 | — | 门户设置读回 | 第 2375 行 |
 | D7 | `STRIPE_CARD_RECONCILIATION_MODE=live` **在 10-29 部署之前就设好**（银行卡下单此时仍关着；环境变量只对新部署生效，不能留到 10-30 才设），放开银行卡处理只认测试模式的限制，**已经确认是代码闸门（R7），不是配置**，必须在冻结前合并；10-30 只用后台开关 `payment_method_routes.card.enabled` / `card_cn.enabled` 打开银行卡下单本身 | 默认关闭；三件事一起开 | 总控（需批准；放开测试模式限制是改配置还是改代码，**待核实**） | D1–D6；PAY-STRIPE-MP 全部 PR；#961 | 每日对账在正式环境跑出成功记录 | 第 2375 行；MIGRATION-PLAN 第五节第 7 项 |
 | D8 | 微信、支付宝单笔启售前完成税务核实、价格口径批准和结账金额验证 | 不能因为用户在中国就假设免税 | Owner 操作（核实）/ 批准 | — | 核实结果记在 PAY-STRIPE-MP 验收 PR | 第 7.6 节"Stripe 钱包启售前核实"行 |
-| D9 | 上线当天有上限的真实小额支付、退款和同日对账；279 / 496 / 621 美元钱包年付各真付一次再退款 | 第 9.3 节保留的上线条件 | Owner 批准金额、笔数和恢复安排；第一笔真钱由 Owner 或其指定的人付 | D1–D8；**R7（银行卡、钱包两个代码闸门都已放行）** | `payment_orders`、`credit_transactions`、订阅和积分到账一致，退款后收回 | 第 2683、1863 行；[PAY-WAFFO](PAY-WAFFO.md) 第 297 行 |
+| D8a | 钱包年付的验证标记：写入并读回 `payment_method_routes` 里微信、支付宝各自的 `annualVerified=true`（`methodRouting.ts` 第 53–54 行和 `0222` 第 87–90 行：没有这个标记，钱包年付订单一律被拒） | D9 要真付 279 / 496 / 621 美元的钱包年付 | 总控（需批准）；前提是 Owner 完成 D8 | D8、R7 | 读回两个标记；D9 年付订单能建单 | `methodRouting.ts`；`0222_pay_stripe_mp_checkout.sql` |
+| D9 | 上线当天有上限的真实小额支付、退款和同日对账；279 / 496 / 621 美元钱包年付各真付一次再退款 | 第 9.3 节保留的上线条件 | Owner 批准金额、笔数和恢复安排；第一笔真钱由 Owner 或其指定的人付 | D1–D8、D8a；**R7（银行卡、钱包两个代码闸门、live 模式检查和退款路径都已放行）** | `payment_orders`、`credit_transactions`、订阅和积分到账一致，退款后收回 | 第 2683、1863 行；[PAY-WAFFO](PAY-WAFFO.md) 第 297 行 |
 | D10 | 服务条款、隐私政策、退款政策、可接受使用政策的正文 | 付款前的勾选框链接这两份文件；`/refund` 没有正文前未登录访问是 404 | Owner 操作（第三方工具生成，不在 AI 范围） | — | 4 个页面未登录都能打开 | 第 93、1631 行；第 7.6 节"隐私条款"行 |
 | D11 | 客服邮箱 | v11 第 13.3 节的发布条件之一 | Owner 操作 | — | 页面和 Stripe 上的客服邮箱一致、能收信 | 第 7.6 节第 2494 行 |
 
@@ -252,7 +255,7 @@ Owner 2026-10-17 选 A（原话见第 6 节）：**日期不变，10-25 冻结**
 | 10-27 | 准备批准包（RUNTIME_PROD_PLAN 第 7.3 节第 2 步）：正式项目、版本、迁移、配置值、各家上限金额、冒烟预算 | 总控 |
 | 10-28 | 正式只读核验（第 4 节第 3 步）：新项目的 N1–N3、A7、Vault；旧 Vercel 项目的暂停状态和绑定 | 总控（需批准只读） |
 | 10-27 → 10-29 | A8 备份恢复和删除重放演练，在单独的隔离演练项目里做（不接 Vercel 和付款回调），通过是 10-31 公开开放的前提 | 执行窗口；总控（需批准） |
-| 10-29 | 维护态准备（第 4 节第 4 步）：在新项目里 B1 建库、B2 配置、A6 停止新调用；`V3_RUNTIME_PRODUCTION_ENABLED=true` 和 `STRIPE_CARD_RECONCILIATION_MODE=live` 都在这次部署前设好（R5、D7；变量只对新部署生效）；N10–N11 把 Vercel 正式变量换成新项目（**必须在合并 `main` 之前**，否则部署出来连的是旧库）；N14 管理员账号；之后 A4 staging → `main` 合并并部署（站点仍暂停），再由 Owner 在新站后台填密钥（C1、C3、N12） | 总控（需批准）；Owner 操作；执行窗口 |
+| 10-29 | 维护态准备（第 4 节第 4 步）：在新项目里 B1 建库、B2 配置、**R2 写入正式库标记并读回、R3 计费配置行、R4 准入档案**、A6 停止新调用；`V3_RUNTIME_PRODUCTION_ENABLED=true` 和 `STRIPE_CARD_RECONCILIATION_MODE=live` 都在这次部署前设好（R5、D7；变量只对新部署生效）；N10–N11 把 Vercel 正式变量换成新项目（**必须在合并 `main` 之前**，否则部署出来连的是旧库）；N14 管理员账号；之后 A4 staging → `main` 合并并部署（站点仍暂停），再由 Owner 在新站后台填密钥（C1、C3、N12） | 总控（需批准）；Owner 操作；执行窗口 |
 | 10-30 | 恢复站点、公众访问仍由部署访问保护挡住（第 5 步）；**冒烟窗口内**由总控（需批准）把 `stopNewCalls` 临时关掉，让受控身份能产生一次成功调用，冒烟结束后立刻重新打开（`newWorkGate.ts` 开着时对所有人都拒绝新调用，没有按身份放行）；**先配好 D4a 回调绕过并验证投递，再打开 D7 银行卡下单（对账变量已在 10-29 部署里生效）**（只有受控身份能进站），再做 H4 正式小额冒烟和 D9 真钱付款退款；同日对账 | 总控（需批准）；Owner |
 | **10-31** | 对账无误后公开开放（第 7 步）：关掉 `stopNewCalls`、撤掉部署访问保护、E3 `SITE_INDEXING=public` 并重新部署、核对 robots 和响应头；上线后观察成本、错误和未结算项 | 总控（需批准）；Owner |
 
@@ -301,7 +304,7 @@ Owner 2026-10-17 选 A（原话见第 6 节）：**日期不变，10-25 冻结**
 - 同意 REL-1 冻结版本 `<版本>`，从 10-25 起只修上线阻塞问题。
 - 同意总控只读核验正式环境：Vercel 项目 `graylum-ai-vercel-v1` 的暂停状态和绑定、新 Supabase 正式项目 `<项目编号>` 的版本、扩展、项目设置和备份设置；不输出密钥。
 - 同意总控按 staging 的设置清单，在新正式项目里设置 Site URL 和回跳地址（`https://www.graylum.com`）以及其余 Auth 设置。
-- 同意总控在新正式项目 `<项目编号>` 按迁移文件从空库建库，并导入已核对的配置（套餐、积分包、q=100、m=6、模型和线路、免费套餐每月 0 积分）。
+- 同意总控在新正式项目 `<项目编号>` 按迁移文件从空库建库，写入正式库标记 `runtime_environment="production"` 并读回确认，并导入已核对的配置（套餐、积分包、q=100、m=6、模型和线路、免费套餐每月 0 积分）。
 - 同意正式环境打开资料库 @ 引用（`NEXT_PUBLIC_COMPOSER_REFERENCES`、`library_agent_read_enabled`）和资料库上传。
 - 同意正式环境的 OpenRouter 每日上限设为 `<金额>` 美元、禁用 BYOK、不自动充值。
 - 同意正式环境限流初始值：新消息每分钟 10 次、每天 200 次，模型调用每分钟 30 次、每天 600 次，上线时先停止新调用。
@@ -311,6 +314,7 @@ Owner 2026-10-17 选 A（原话见第 6 节）：**日期不变，10-25 冻结**
 **上线当天要批准的事**
 - 同意恢复正式站 `graylum-ai-vercel-v1` 的访问，新调用仍保持关闭。
 - 我来在 Vercel 生成冒烟期间专用的访问保护绕过口令，只加在 Stripe 和 Post for Me 的回调地址上，正式开放后作废。
+- 同意总控在钱包年付验证完成后写入微信、支付宝的 `annualVerified=true` 并读回。
 - 同意冒烟窗口内临时关闭 `stopNewCalls`（站点仍在部署访问保护后），冒烟结束后重新打开。
 - 同意在 10-29 部署前设置 `V3_RUNTIME_PRODUCTION_ENABLED=true` 和 `STRIPE_CARD_RECONCILIATION_MODE=live`（此时 `stopNewCalls` 开着、银行卡下单关着）。
 - 同意在部署访问保护下用后台开关打开正式银行卡和微信、支付宝下单（代码闸门 R7 已合并并随 10-29 部署生效，公众仍进不来）。
