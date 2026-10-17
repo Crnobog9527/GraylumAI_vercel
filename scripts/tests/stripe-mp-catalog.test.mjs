@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
-import { COUPON, PRICES, SANDBOX_TARGETS, assertAccount, liveTargets, sql, sqlPacks, stripeClient }
+import { COUPON, PRICES, SANDBOX_TARGETS, assertAccount, inspect, liveTargets, sql, sqlPacks, stripeClient }
   from '../pay-stripe-mp/catalog-core.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
@@ -50,11 +50,22 @@ test('a live run stops on any test-mode object and on a test-mode account', asyn
 });
 
 test('the live script refuses a missing or test key before any network call and never prints the key', () => {
-  for (const key of ['', 'sk_test_fixtureSecretValue', 'pk_live_fixtureSecretValue']) {
+  for (const key of ['', 'sk_test_fake', 'pk_live_fake']) {
     const run = spawnSync(process.execPath, [resolve(root, 'scripts/stripe-mp-live-catalog.mjs'), 'plan'], { encoding: 'utf8',
       env: { PATH: process.env.PATH, STRIPE_LIVE_SECRET_KEY: key, MP_EXPECT_ACCOUNT: 'acct_LiveFixture' } });
     assert.equal(run.status, 2);
     assert.match(run.stderr, /not a live key/);
     if (key) assert.ok(!`${run.stdout}${run.stderr}`.includes(key));
+  }
+});
+
+test('a capped or expiring first-month coupon is reported as a mismatch, never mapped', async () => {
+  const coupon = { id: COUPON.id, valid: true, amount_off: COUPON.amountOff, currency: 'usd', duration: 'once', percent_off: null,
+    redeem_by: null, max_redemptions: null, applies_to: { products: ['graylum_mp_gold'] } };
+  const run = patch => inspect(async (_method, path) => path.startsWith('/coupons/') ? { ...coupon, ...patch }
+    : path === '/prices' ? { data: [] } : null);
+  assert.deepEqual((await run({})).problems, []);
+  for (const patch of [{ redeem_by: 1900000000 }, { max_redemptions: 100 }]) {
+    assert.deepEqual((await run(patch)).problems, [[COUPON.id, 'redeem_by/max_redemptions']]);
   }
 });

@@ -95,6 +95,8 @@ function priceProblem(price, want) {
 function couponProblem(coupon) {
   if (!coupon.valid || coupon.amount_off !== COUPON.amountOff || coupon.currency !== 'usd' || coupon.duration !== 'once'
     || coupon.percent_off !== null) return 'amount/duration';
+  // A date or redemption cap would silently end the promised first-month price; apply never replaces a coupon.
+  if (coupon.redeem_by != null || coupon.max_redemptions != null) return 'redeem_by/max_redemptions';
   const products = coupon.applies_to?.products ?? [];
   return products.length === 1 && products[0] === 'graylum_mp_gold' ? null : 'applies_to';
 }
