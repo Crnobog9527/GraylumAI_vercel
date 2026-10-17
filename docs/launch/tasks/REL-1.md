@@ -58,9 +58,9 @@ V3-M3 → REL-1 的依赖是"以上全部"（Master Plan 第 7.1 节第 2375 行
   staging 的 `apps/web/src/app/` 下目前还没有 `/app` 前缀的目录，归 PUBLIC-SITE，**还没开 PR**。
 - **vercel.json 定时任务改频率**：见清单 A2，**还没开 PR**。
 
-### 1.2 staging 迁移队列 0271–0288（Owner 2026-10-17 已一次批准，冻结前按编号顺序合并并应用）
+### 1.2 staging 迁移队列 0271–0288（Owner 2026-10-17 已一次批准，冻结前合并并应用；编号为暂定，最终号由总控在合并时按“谁先准备好谁拿号”逐个给，不按下表编号顺序）
 
-| 编号 | PR | 任务 |
+| 暂定号（2026-10-17 旧分配，已不唯一） | PR | 任务 |
 | --- | --- | --- |
 | 0271 | #1030（已合并） | LEGACY-CLOSE PR-C 删除 3 张旧对话表 |
 | 0272 | #1032 | PUBLISH-MONITOR PR-3a 每日刷新和快照 |
@@ -75,7 +75,7 @@ V3-M3 → REL-1 的依赖是"以上全部"（Master Plan 第 7.1 节第 2375 行
 | 0281 | #1060 | EXPERT-CONSULT |
 | 0282 | #1061 | RUNTIME-FAILURE-RECONCILE |
 | 0283 | #1062 | RESEARCH-TOOLS 研究子调用余额不足暂停 |
-| 0284–0288 | 见第 7 节 | 2026-10-18 起编号改为“谁先准备好谁拿号”，上表后半的号只是暂定；0271–0275 已合并并应用到 staging；合集 #1116 暂定 0277–0282；以总控回复的号为准 |
+| 0284–0288 | 见第 7 节 | 2026-10-18 起编号改为“谁先准备好谁拿号”。0271–0275 已合并并应用到 staging，号已定；0276–0283 已有重复（#1041/#1036 同为 0276；合集 #1116 把 #1022、#1060、#1062 等改为暂定 0277–0282，与上表 #1042/#1050 等冲突），**不要照本表的号建文件**，每个 PR 合并时由总控给唯一号并同步本表 |
 
 编号以总控的账本为准；账本要求连续，前一个没合，后面的不能先应用。
 Owner 2026-10-17 一次批准了 0271–0288 在 staging 的应用（总控转达），不再逐个请批；0288 之后的新迁移仍由总控分配编号。
@@ -107,7 +107,7 @@ Owner 2026-10-17 选 A（原话见第 6 节）：**日期不变，10-25 冻结**
 | N6 | Google 登录：在 Google Cloud 的 OAuth 客户端里加上新项目的回调地址（`https://<新项目编号>.supabase.co/auth/v1/callback`），把客户端编号和密钥填进新项目 | Owner 操作（凭证） | 用 Google 账号真实登录一次，只发一次注册赠送 | **仍需 Owner**：OAuth 客户端在 Google Cloud 后台，仓库和 staging 数据库里都查不到；需要 Owner 在 Google Cloud 控制台确认现有客户端编号，并在“已授权的重定向 URI”里加新项目回调；Google 登录相关的产品规则见第 1294 行 |
 | N7 | 邮件 SMTP：新项目里配 Resend SMTP（发件人 `no-reply@graylum.com`），SMTP 密码是 Resend 的密钥 | Owner 操作（凭证） | 注册确认邮件真实送达 | [v10.1](../Graylum_Master_Plan_v10.1.md) 第 305 行；第 604 行（N5 发件地址） |
 | N8 | 人机验证：新项目开启 hCaptcha（填 hCaptcha 的密钥）；Vercel 正式环境的 `NEXT_PUBLIC_HCAPTCHA_SITEKEY` 用同一个站点 | Owner 操作（凭证） | 登录、注册、注销弹窗都出现验证 | `.env.example`；DATA_ERASURE_RETENTION_CHECKLISTS 第 52 行 |
-| N9 | 邮件模板、密码强度等其余 Auth 设置和 staging 对齐 | 总控（需批准）列出差异，Owner 在后台点 | 逐项读回 | **仍需 Owner/总控**：仓库里没有 `supabase/config.toml`，Auth 设置（邮件模板、密码强度、Site URL 等）只存在 Supabase 后台，只读 select 读不到；需要总控批准后用管理接口只读导出 staging 的 Auth 配置，或由 Owner 在后台截图，再逐项对齐 |
+| N9 | 邮件模板、密码强度等其余 Auth 设置和 staging 对齐 | 总控（需批准）列出差异，Owner 在后台点 | 逐项读回 | **总控任务（不需 Owner 批准）**：仓库里没有 `supabase/config.toml`，Auth 设置（邮件模板、密码强度、Site URL 等）只存在 Supabase 后台，select 读不到；由总控用管理接口只读导出 staging 的 Auth 配置（只读 staging，不涉及凭证和设置修改），整理成与新项目对照的清单；只有把设置应用到新正式项目时才需 Owner |
 | N10 | 把新项目的 `NEXT_PUBLIC_SUPABASE_URL`、`NEXT_PUBLIC_SUPABASE_ANON_KEY`、`SUPABASE_SERVICE_ROLE_KEY`、`DATABASE_URL` 填进 Vercel 正式项目 `graylum-ai-vercel-v1`；`EXPECTED_SUPABASE_PROJECT_REF` 改成新项目编号，`EXPECTED_APP_HOST` 改成 `www.graylum.com` | Owner 操作（新凭证） | 变量名存在（不读值）；部署后应用连的是新项目 | `.env.example` |
 | N11 | Vercel 正式环境其余变量：`NEXT_PUBLIC_APP_URL`、`NEXT_PUBLIC_AUTH_APP_URL`、`NEXT_PUBLIC_SITE_NAME`、`NEXT_PUBLIC_APP_NAME`、`NEXT_PUBLIC_SUPPORT_EMAIL`、`APP_ENV` / `NEXT_PUBLIC_APP_ENV`、`CRON_SECRET`（**新增凭证，Owner 设置**；没有它正式环境所有定时任务都返回 503，A2 的前提）、`OPENING_GRANT_HMAC_KEYS`、`API_SIGNATURE_SECRET` / `REQUIRE_API_SIGNATURE`、Sentry 几个变量、Upstash 两个（A5）、Stripe 三个和 `STRIPE_CARD_RECONCILIATION_MODE`（D7）、`SITE_INDEXING`（E3）、功能开关（F 组）。**不设**：任何 `V3_RUNTIME_STAGING_*`（含 `V3_RUNTIME_STAGING_ENABLED`）；运行时相关变量见 R5、`WAFFO_TEST_*`、`LANDING_PREVIEW_FEATURES`、`E2E_*` | 新密钥类由 Owner 操作；非密钥的值由总控（需批准）设置 | 变量名清单读回，和本行对照 | `.env.example`；`apps/web/src/lib/landing/landing-flags.ts` 第 12–13 行；RELEASE_PREP_CHECKLIST 第 55 行 |
 | N12 | Vault：确认装好并应用了 0259（B3）；6 把业务密钥和 Resend 由 Owner 在新站后台填（C1、C3） | Owner 操作；总控只读核对 | 后台槽位都显示"后台已填写" | ADMIN-SECRETS 第 8 节 |
@@ -205,7 +205,7 @@ Owner 2026-10-17 选 A（原话见第 6 节）：**日期不变，10-25 冻结**
 | # | 做什么 | 为什么 | 谁做 | 依赖 | 怎么验证 | 出处 |
 | --- | --- | --- | --- | --- | --- | --- |
 | E1 | 应用并入 `www.graylum.com`，登录后页面放 `/app`；`graylum.com` 和 `app.graylum.com` **308**（保留请求方法和请求体，切换期间还在发往旧主机的 Stripe 回调 POST 不丢）到 www；**必须先做完 E2，并把 Stripe 和 Post for Me 的回调主机先改成 www（D4、N13）**，再让这两条 308 生效，否则两条反向跳转会无限循环 | Owner 2026-10-12 定为上线前完成 | 代码：执行窗口（**还没开 PR**，冻结窗口最后做）；Vercel 域名、Supabase Site URL 和回调、Stripe 回调、环境变量：Owner 逐项批准 | PUBLIC-SITE；E2；D4、N13（回调主机先改成 www） | 三个域名都落到 www，状态码是 308；登录回跳、Stripe 回跳正确 | 第 748、934 行；[SEO_GEO_SPEC](../SEO_GEO_SPEC.md) 第 19、24、220、225 行 |
-| E2 | 如果当时在 Vercel 设过 `www.graylum.com` → `app.graylum.com` 的临时 307，**在 E1 的反向跳转生效之前**先撤回 | 和 E1 方向相反，同时存在会无限循环；不撤回整站也不会被收录 | Owner 操作 | 取得正式环境设置批准 | 实测访问 www 不再跳到 app，之后才放 E1 的 308 | 第 2493、2628 行；SEO_GEO_SPEC 第 224–225 行。**已核实**：设过。Vercel 只读读回（2026-10-18）：`www.graylum.com` 与 `graylum.com` 现在都是 307 → `app.graylum.com`（改于 2026-10-03）。撤回顺序：先把 `graylum.com` 改回 308 → www，再把 `www` 改回直接服务（Vercel 不允许链式重定向）；操作仍归 Owner |
+| E2 | 如果当时在 Vercel 设过 `www.graylum.com` → `app.graylum.com` 的临时 307，**在 E1 的反向跳转生效之前**先撤回 | 和 E1 方向相反，同时存在会无限循环；不撤回整站也不会被收录 | Owner 操作 | 取得正式环境设置批准 | 实测访问 www 不再跳到 app，之后才放 E1 的 308 | 第 2493、2628 行；SEO_GEO_SPEC 第 224–225 行。**已核实**：设过。Vercel 只读读回（2026-10-18）：`www.graylum.com` 与 `graylum.com` 现在都是 307 → `app.graylum.com`（改于 2026-10-03）。撤回顺序：先把 `www` 改回直接服务（去掉到 app 的重定向），再把 `graylum.com` 改回 308 → www，避免出现 graylum.com → www → app 的链式重定向（Vercel 不允许）；操作仍归 Owner |
 | E3 | 正式环境设置 `SITE_INDEXING=public` 后**重新部署**（这个值在构建时读，不重新部署响应头不变） | `/robots.txt` 才会放行搜索爬虫、拒绝训练爬虫；noindex 响应头也随之只留在登录后页面 | 总控（需批准环境变量） | E2、E1；落地页能力核对（H1）通过 | 重新部署完成后核对 `/robots.txt` 内容；首页响应头没有 `X-Robots-Tag: noindex` | RELEASE_PREP_CHECKLIST 第 54 行；`apps/web/next.config.ts` 第 63–66 行；`apps/web/src/lib/landing/landing-flags.ts` 第 12–13 行 |
 | E4 | Google Search Console、Bing 提交站点和 sitemap | SEO 第 0 阶段地基 | Owner 操作（对外账号） | E3 | 后台显示已验证 | SEO_GEO_SPEC 第 306 行 |
 
@@ -268,7 +268,7 @@ Owner 2026-10-17 选 A（原话见第 6 节）：**日期不变，10-25 冻结**
 | --- | --- | --- |
 | **10-17（今天）起立刻开始** | 外部有等待时间的事：D1 Stripe MP 开通、D2–D6 Stripe 后台设置、A1 Vercel Pro、A5 正式 Upstash、C3 Resend 域名、C6 Parallel 书面确认、C8/C9 Post for Me 订阅和询问、C10 统计账号、D10 条款正文、D11 客服邮箱；**N1 新建正式 Supabase 项目**（越早越好，N2–N15 的配置都依赖它） | Owner |
 | **10-17 → 10-24（最高优先）** | R1 RUNTIME-PROD 正式环境模型调用；R7 正式环境付款入口代码闸门（同样赶在冻结前）：方案对齐 → 实施 → 复审 → 合并 → staging 验证，**10-24 前完成**，赶不上 10-25 冻结就不能上线 | RUNTIME-PROD 执行窗口；总控分配迁移编号 |
-| 10-17 → 10-22 | 按编号合并 0271–0288（第 1.2 节，Owner 已一次批准），每个合并后应用 staging、重建指纹；同时推进 1.1 节剩余任务；开 A2（定时任务）和 OR-2、T-END 的 PR | 执行窗口；总控应用迁移 |
+| 10-17 → 10-22 | 合并第 1.2 节的迁移队列（Owner 已一次批准；号由总控合并时逐个给，不按旧表号），每个合并后应用 staging、重建指纹；同时推进 1.1 节剩余任务；开 A2（定时任务）和 OR-2、T-END 的 PR | 执行窗口；总控应用迁移 |
 | 10-20 → 10-24 | 新正式项目的不依赖冻结版本的设置：N2、N3 核对，N5–N9 Auth 设置，N15 备份；总控整理 staging 的 Auth 设置清单（N9）给 Owner 对照 | Owner 操作；总控（需批准） |
 | 10-22 → 10-24 | E1 `/app` 单主机搬迁的代码（冻结窗口最后做；正式环境切换时按 E2 → E1 的顺序：先撤 307、实测，再放 308）；F8 落地页开关 PR；10-24 总控把"冻结时还没验收的功能"缺口清单交 Owner 一次批 | 执行窗口；总控；Owner |
 | **10-25 冻结** | staging 冻结一个版本：之后只修上线阻塞问题（登录、对话、付款、回调、监控），不加功能 | 总控 |
@@ -372,17 +372,17 @@ Owner 2026-10-17 选 A（原话见第 6 节）：**日期不变，10-25 冻结**
 | A8 | 已核实：staging 的 Supabase 组织是 free 套餐；免费套餐无每日备份/PITR（按公开套餐说明，未在线复核），演练项目需 Pro。仍需 Owner 批准付费演练项目及金额。 |
 | N1 | 建议：正式项目区域选 `us-west-2`（staging 同区，目标用户主要在美国），PG 17（staging 为 17.6）；套餐 Pro 以上才有备份。区域和付费由 Owner 定。 |
 | R7 | 等 B1/B2/B3 合并后核对（#1101、#1104、#1111 均未合并）。当前 staging 上仍拒绝 live 的行：`methodRouting.ts:47`、`methodPurchase.ts:28`、`stripeMethodCheckout.ts:55`（`scope.mode`）、`0222_pay_stripe_mp_checkout.sql:139`；退款：`packageRefund.ts:61,66`、`subscriptionRefundPreview.ts:81,130,136,141`、`monthlyRefundService.ts:41`。D8a：`annualVerified` 由总控在正式库建好后写入（Owner 10-17 已确认税务核实完成）；staging 已读回两个标记为 true，钱包 `enabled` 仍为 false。 |
-| E2 | 已核实：设过。`www` 与 `graylum.com` 现在都是 307 → app（2026-10-03 设置），`app.graylum.com` 直接服务。撤回由 Owner 做，先 `graylum.com` 后 `www`。 |
+| E2 | 已核实：设过。`www` 与 `graylum.com` 现在都是 307 → app（2026-10-03 设置），`app.graylum.com` 直接服务。撤回由 Owner 做，先 `www` 改回直接服务，再把 `graylum.com` 改回 308 → www。 |
 | F1 | 已核实：Owner 10-17 原话已由 #1071 写进 Master Plan 第 2.1 节；`library_agent_read_enabled` 在 #1022（现随合集 #1116，暂定 0277），未合并。 |
 | F3 | 已核实：`library_recognition_enabled` 是数据库函数不是开关，只需开 `library_scan_recognition_enabled` 与前端环境变量。 |
 | G2 | 已核实：已做（0226 / #867），staging 已应用。 |
 | N6 | 仍需 Owner：Google Cloud OAuth 客户端设置仓库和数据库都没有，需 Owner 在控制台确认并加回调。 |
-| N9 | 仍需总控/Owner：Auth 设置只在 Supabase 后台，只读 select 读不到；需批准后导出或截图。 |
+| N9 | 总控任务：Auth 设置只在 Supabase 后台，select 读不到；由总控用管理接口只读导出 staging 配置并整理对照清单（不需 Owner 批准），应用到新正式项目时才需 Owner。 |
 | D4a | 已核实：回调可用 `x-vercel-protection-bypass` 查询参数（官方文档）。仍需实测：保护下定时任务能否触发，文档没写。口令由 Owner 生成。 |
 | 第 1.1 节 24 项 | 部分核实：已按 plan-progress 更新第 1.1 节；DB-BASELINE 实质完成。其余逐项对照验收记录不在本次只读范围，仍由总控冻结前核对。 |
 | 0284–0288 | 迁移编号改为“谁先准备好谁拿号”。当前占号或原占号的 PR：0284=#1099（FUSION-COMPARE PR-1）；0285=无 PR；0286=#1076、0287=#1077（已编入合集 #1116，分别暂定 0280、0281）；0288=#1075（PUBLISH-MONITOR PR-4a，未完成）。另有原号：0289=#1069、0290=#1081、0291=#1083（合集内暂定 0282）、0292=#1073、0293=#1086、0294=#1098、0295=#1094，0296–0302 见 R7 与 REPORT-VISUAL 等 PR。staging 已应用到 0275；0276 暂时 #1036 和 #1041 同号待总控定。 |
 
-**仍需 Owner 的项：** A1 上线前升级 Pro（已承诺）、A8 批准付费演练项目、N1 区域与套餐、N6 Google OAuth、N9 Auth 设置对齐、D4a 绕过口令与定时任务实测、A3/E2 的 Vercel 操作。
+**仍需 Owner 的项：** A1 上线前升级 Pro（已承诺）、A8 批准付费演练项目、N1 区域与套餐、N6 Google OAuth、D4a 绕过口令与定时任务实测、A3/E2 的 Vercel 操作。
 
 ## 交接
 
