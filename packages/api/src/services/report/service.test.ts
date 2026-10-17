@@ -54,14 +54,29 @@ it.each([false, true])('missing report manifest precedes membership for paid=%s'
   expect(rpc.mock.calls.map(call => call[0])).toEqual(['runtime_admission_replay', 'report_source']);
 });
 it('saved reports remain readable without a flag or membership read', async () => {
-  const rpc = vi.fn(async () => ({ error: null, data: { state: 'completed', result: { body: '## One\nSaved', completeness: 'complete' },
+  const rpc = vi.fn(async (name: string) => name === 'report_fee_settle' ? { error: null, data: null }
+    : ({ error: null, data: { state: 'completed', result: { body: '## One\nSaved', completeness: 'complete' },
     context: { reportGeneration: { version: 1, projectId: id, roundId: id, snapshotHash: 'a'.repeat(64),
       packageHash: 'b'.repeat(64), workflowHash: 'c'.repeat(64), templateHash: 'd'.repeat(64), sections: ['One'], maxCharacters: 12000 } } } }));
   const from = vi.fn(() => { throw new Error('UNEXPECTED_MEMBERSHIP_READ'); });
   const service = reportService(user as unknown as SupabaseClient, { rpc, from } as unknown as SupabaseClient, policy);
-  expect(await service.status(id)).toMatchObject({ state: 'completed', body: '## One\nSaved', candidate: true });
+  expect(await service.status(id)).toMatchObject({ state: 'completed', body: '## One\nSaved', candidate: true, fee: null });
   expect(from).not.toHaveBeenCalled();
   expect((rpc.mock.calls as unknown[][])[0]![0]).toBe('runtime_execution');
+});
+
+it('status settles and returns the fixed price (0299); before 0299 it shows none', async () => {
+  const saved = { state: 'completed', result: { body: '## One\nSaved', completeness: 'complete' },
+    context: { reportGeneration: { version: 1, projectId: id, roundId: id, snapshotHash: 'a'.repeat(64),
+      packageHash: 'b'.repeat(64), workflowHash: 'c'.repeat(64), templateHash: 'd'.repeat(64), sections: ['One'], maxCharacters: 12000 } } };
+  const fee = { credits: 500, state: 'charged', chargedCredits: 500, reason: 'complete', settledAt: '2026-10-17T00:00:00Z' };
+  const admin = (settle: unknown) => ({ rpc: vi.fn(async (name: string, args: Record<string, unknown>) => name === 'report_fee_settle'
+    ? (expect(args).toEqual({ p_actor_id: id, p_execution_id: id }), settle) : { error: null, data: saved }) }) as unknown as SupabaseClient;
+  expect(await reportService(user as unknown as SupabaseClient, admin({ error: null, data: fee }), policy).status(id)).toMatchObject({ fee });
+  expect(await reportService(user as unknown as SupabaseClient, admin({ error: { code: 'PGRST202', message: 'x' }, data: null }), policy)
+    .status(id)).toMatchObject({ fee: null });
+  await expect(reportService(user as unknown as SupabaseClient, admin({ error: { code: 'P0001', message: 'x' }, data: null }), policy)
+    .status(id)).rejects.toMatchObject({ message: 'REPORT_UNAVAILABLE' });
 });
 
 it('non-report execution returns a stable 400 error', async () => {
@@ -165,8 +180,6 @@ function startAdmin(executions: unknown[], saved: Record<string, { state: string
 const startInput = { ...locate, requestId: randomUUID() };
 it.each([
   ['a complete report', 'completed', { body: '## One\nx', completeness: 'complete' }],
-  ['a truncated report', 'completed', { body: '## One\nx', completeness: 'length_limit' }],
-  ['a stopped report with text', 'completed', { body: 'x', completeness: 'stopped' }],
   ['a running report', 'running', null], ['a report waiting for credits', 'waiting_credits', null],
   ['a report waiting to resume', 'waiting_resume', null], ['a report settling its cost', 'cost_pending', null],
 ])('a stale tab with a new requestId is refused when the round has %s', async (_name, state, result) => {
@@ -176,8 +189,11 @@ it.each([
     .rejects.toMatchObject({ code: 'BAD_REQUEST', message: 'REPORT_ALREADY_EXISTS' });
   expect(past.reached).toBe(false);
 });
-it.each([['cancelled', null], ['completed', { body: '', completeness: 'complete' }], ['completed', null]])(
-  'a round whose last report ended %s without text still allows a new start', async (state, result) => {
+// A report that ended without a complete report had its fixed price refunded (0299): a new start pays it again
+// (Owner 2026-10-17 "重新生成照收全价"), also when the incomplete one has text (cut off, stopped).
+it.each([['cancelled', null], ['completed', { body: '', completeness: 'complete' }], ['completed', null],
+  ['completed', { body: '## One\nx', completeness: 'length_limit' }], ['completed', { body: 'x', completeness: 'stopped' }]])(
+  'a round whose last report ended %s without a complete report allows a new start', async (state, result) => {
     const existing = run(REPORT_REQUEST_INPUT, '2026-10-02T00:00:00Z');
     const { admin, past } = startAdmin([existing], { [existing.executionId]: { state, result, context: frozen(locate.projectId, locate.roundId) } });
     await expect(reportService(user as unknown as SupabaseClient, admin, policy).start(startInput)).rejects.toMatchObject({ message: 'REPORT_UNAVAILABLE' });

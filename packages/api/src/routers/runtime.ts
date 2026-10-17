@@ -5,6 +5,7 @@ import {reportRevisionService,revisionApplyInput,revisionDeclineInput,revisionLa
   revisionReadInput} from '../services/report/revisionSync';
 import {contentVisibilityFence} from '../services/accountErasure/content';
 import {reportEnabled,reportLocate,reportService} from '../services/report/service';
+import {reportPrice} from '../services/report/fees';
 import {reportStart} from '../services/report/contract';
 import {readNativeRuntimeView} from '../services/runtime/nativeView';
 import {resumeInput} from '../services/runtime/paygRuntime';
@@ -92,7 +93,9 @@ export const runtimeRouter=router({
   reportRevisionService(ctx.userScopedSupabase,ctx.supabaseAdmin!).decline(input)),
  reportStart:procedure.input(reportStart).mutation(({ctx,input})=>ctx.report.start(input)),
  // Display only: whether the report entry is shown. reportStart checks the same switch again.
- reportAvailable:maintenanceProcedure.query(async({ctx})=>({enabled:await reportEnabled(ctx.supabaseAdmin!).catch(()=>false)})),
+ // The fixed price (0299) is shown on the button; null when it cannot be read (the button then shows no number).
+ reportAvailable:maintenanceProcedure.query(async({ctx})=>({enabled:await reportEnabled(ctx.supabaseAdmin!).catch(()=>false),
+  priceCredits:await reportPrice(ctx.supabaseAdmin!).catch(()=>null)})),
  // Saved reports stay discoverable whatever the switch or membership is now.
  reportLatest:maintenanceProcedure.input(reportLocate).query(({ctx,input})=>reportService(ctx.userScopedSupabase,ctx.supabaseAdmin!,
   {account:'read-only',costPerCall:'0',creditsPerUsd:'100',multiplier:'6',maxCalls:1,maxOutputTokens:1,inputBytes:1024,historyItems:0}).latest(input)),
