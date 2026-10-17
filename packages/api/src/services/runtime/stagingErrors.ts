@@ -42,6 +42,12 @@ const failures = {
   RUNTIME_STAGING_MODEL_DENIED: ['SERVICE_UNAVAILABLE', '当前测试模型配置暂不可用，请联系管理员。'],
   RUNTIME_STAGING_QUOTE_CONFLICT: ['SERVICE_UNAVAILABLE', '当前测试模型配置暂不可用，请联系管理员。'],
   RUNTIME_STAGING_POLICY_INVALID: ['SERVICE_UNAVAILABLE', '当前测试窗口配置暂不可用，请联系管理员。'],
+  // RUNTIME-PROD: production host. Wording never mentions test windows; codes stay stable for the client.
+  RUNTIME_PRODUCTION_NOT_CONFIGURED: ['SERVICE_UNAVAILABLE', 'AI 服务尚未开放，请稍后再试。'],
+  RUNTIME_PRODUCTION_DISABLED: ['SERVICE_UNAVAILABLE', 'AI 服务暂时关闭，请稍后再试。'],
+  RUNTIME_PRODUCTION_TARGET_DENIED: ['FORBIDDEN', '当前环境不允许访问此工作空间。'],
+  RUNTIME_PRODUCTION_CONFIG_INVALID: ['SERVICE_UNAVAILABLE', 'AI 服务配置暂不可用，请稍后再试。'],
+  RUNTIME_PRODUCTION_FEATURE_UNAVAILABLE: ['PRECONDITION_FAILED', '这个功能暂未开放。'],
   RUNTIME_BILLING_UNIT_UNAVAILABLE: ['SERVICE_UNAVAILABLE', '计费配置暂不可用，新的收费已暂停，请稍后重试。'],
   RUNTIME_BILLING_UNIT_MISMATCH: ['PRECONDITION_FAILED', '测试窗口的每美元积分数或模型加价倍数与后台配置不一致，请管理员核对。'],
   RUNTIME_BILLING_UNIT_WINDOW_OUTDATED: ['PRECONDITION_FAILED', '当前测试窗口还没有按模型的加价倍数，需要管理员按新计费重新建立窗口。'],

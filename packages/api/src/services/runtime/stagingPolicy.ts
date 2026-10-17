@@ -8,7 +8,10 @@ import {openRouterBound} from '../bill2/openRouterPolicy';
 import {stagingRuntimeWindow} from './stagingEnvironment';
 import {StagingAccessError,stagingRpcFailure} from './stagingErrors';
 import {assertWindowMultipliers} from './billingUnitAdmission';
-const schema=z.object({id:z.string().uuid(),callPolicies:z.array(frozenCallPolicy).min(1).max(16),creditsPerUsd:z.string(),multiplier:z.string(),expiresAt:z.string().datetime({offset:true})}).strict();
+import {productionRuntimeTarget,realRuntimeEnvironment} from './productionEnvironment';
+import {assertProductionAccess,loadProductionPolicy} from './productionPolicy';
+// RUNTIME-PROD: mode marks a production policy (productionPolicy.ts); a staging window never carries it.
+const schema=z.object({mode:z.literal('production').optional(),id:z.string().min(1).max(128),callPolicies:z.array(frozenCallPolicy).min(1).max(16),creditsPerUsd:z.string(),multiplier:z.string(),expiresAt:z.string().datetime({offset:true})}).strict();
 /** RESEARCH-TOOLS RT-3b PR-3: the window may also approve tool routes (0255); they are kept apart from the models. */
 export type StagingPolicy=z.infer<typeof schema>&{toolPolicies?:ToolCallPolicy[]};
 /** Called only after authentication by the server host. The SQL procedure
@@ -16,6 +19,8 @@ export type StagingPolicy=z.infer<typeof schema>&{toolPolicies?:ToolCallPolicy[]
  * No credential, client policy or mutable balance is returned here.
  */
 export async function loadStagingPolicy(database:BillingRpc,actorId:string,env:Record<string,string|undefined>):Promise<StagingPolicy>{
+ // RUNTIME-PROD: the production deployment has no window; the same entry point serves both hosts.
+ if(realRuntimeEnvironment(env)==='production')return loadProductionPolicy(database as never,actorId,env);
  const windowId=stagingRuntimeWindow(env);
  const response=await database.rpc('runtime_test_policy',{p_actor_id:z.string().uuid().parse(actorId),p_window_id:windowId});
  if(response.error)stagingRpcFailure(response.error,'RUNTIME_TEST_WINDOW_DENIED','RUNTIME_STAGING_POLICY_DENIED');
@@ -29,6 +34,7 @@ export function parseStagingPolicy(value:unknown,windowId?:string):StagingPolicy
  const parsed=schema.safeParse({...raw.data,callPolicies:modelCallPolicies(raw.data.callPolicies)});
  if(!parsed.success)throw new StagingAccessError('RUNTIME_STAGING_POLICY_INVALID');
  const policy:StagingPolicy={...parsed.data,...(tools.length?{toolPolicies:tools}:{})};
+ if(!policy.mode&&!z.string().uuid().safeParse(policy.id).success)throw new StagingAccessError('RUNTIME_STAGING_POLICY_INVALID');
  if(windowId!==undefined&&Date.parse(policy.expiresAt)<=Date.now())throw new StagingAccessError('RUNTIME_STAGING_WINDOW_EXPIRED');
  if((windowId!==undefined&&policy.id!==windowId) || decimal(policy.creditsPerUsd)<=0n || decimal(policy.multiplier)<=0n)
   throw new StagingAccessError('RUNTIME_STAGING_POLICY_INVALID');
@@ -45,6 +51,7 @@ export function parseStagingPolicy(value:unknown,windowId?:string):StagingPolicy
 
 /** Reads and maintenance remain target-bound after enablement is switched off. */
 export async function assertStagingReadAccess(database:BillingRpc,actorId:string,env:Record<string,string|undefined>){
+ if(realRuntimeEnvironment(env)==='production'){productionRuntimeTarget(env,true);return assertProductionAccess(database as never,actorId);}
  stagingRuntimeWindow(env,true);
  const r=await database.rpc('runtime_test_actor_access',{p_actor_id:z.string().uuid().parse(actorId)});
  if(r.error)stagingRpcFailure(r.error,'RUNTIME_TEST_ACTOR_DENIED','RUNTIME_STAGING_ACTOR_DENIED');
@@ -52,6 +59,14 @@ export async function assertStagingReadAccess(database:BillingRpc,actorId:string
 }
 /** Only original private bindings, for GET receipt lookup; never SDK/POST. */
 export async function loadStagingRecoveryPolicy(database:BillingRpc,actorId:string,executionId:string,env:Record<string,string|undefined>):Promise<StagingPolicy>{
+ if(realRuntimeEnvironment(env)==='production'){
+  productionRuntimeTarget(env,true);
+  const r=await database.rpc('runtime_production_recovery_policy',{p_actor_id:z.string().uuid().parse(actorId),p_execution_id:z.string().uuid().parse(executionId)});
+  if(r.error)stagingRpcFailure(r.error,'RUNTIME_TEST_RECOVERY_DENIED','RUNTIME_STAGING_RECOVERY_DENIED');
+  const policy=parseStagingPolicy(r.data);
+  if(policy.mode!=='production')throw new StagingAccessError('RUNTIME_PRODUCTION_TARGET_DENIED');
+  return policy;
+ }
  stagingRuntimeWindow(env,true);
  const r=await database.rpc('runtime_test_recovery_policy',{p_actor_id:z.string().uuid().parse(actorId),p_execution_id:z.string().uuid().parse(executionId)});
  if(r.error)stagingRpcFailure(r.error,'RUNTIME_TEST_RECOVERY_DENIED','RUNTIME_STAGING_RECOVERY_DENIED');
