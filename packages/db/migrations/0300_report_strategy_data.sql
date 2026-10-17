@@ -6,7 +6,8 @@
 --      revisions: the 12000-character limit is the text's (Owner's choice B); the block is checked by the host;
 --   2. keeps the block out of hand edits: a saved body must carry exactly the generated block (or none);
 --   3. at 定稿, stores the host-checked strategy data in the formal version (generatedReport.data), accepted only
---      for the exact body being finalized; a report without data publishes exactly as before;
+--      for the exact body being finalized and, when it carries benchmark numbers, only while the benchmark table is
+--      still the one they came from; a report without data publishes exactly as before;
 --   4. lets an adopted review revision keep the strategy data of the version it revises (text-only revision);
 --   5. adds a read-only helper for the host (session, frozen benchmark hash, generated body, stored data).
 -- Erasure needs nothing new: the data lives inside runtime_executions.result and artifact_versions.report, which the
@@ -56,7 +57,7 @@ REVOKE ALL ON FUNCTION public.report_body_complete(text,jsonb) FROM PUBLIC,anon,
 -- Accepted only for the very body being finalized, and only when that body carries a data block.
 CREATE OR REPLACE FUNCTION public.report_final_data(source jsonb) RETURNS jsonb
 LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
-DECLARE raw text:=current_setting('graylum.report_data',true);d jsonb;
+DECLARE raw text:=current_setting('graylum.report_data',true);d jsonb;a uuid;sid uuid;
 BEGIN
  IF raw IS NULL OR raw='' THEN RETURN '{}'::jsonb; END IF;
  d:=raw::jsonb;
@@ -66,7 +67,15 @@ BEGIN
   OR jsonb_typeof(d->'validatedAt') IS DISTINCT FROM 'string' OR octet_length(d::text)>65536
   OR report_body_parts(source->>'body')->>'block' IS NULL THEN
   RAISE EXCEPTION 'REPORT_DATA_INVALID'; END IF;
- RETURN jsonb_build_object('data',d-'bodyHash');
+ -- Benchmark numbers were taken from the table with this hash: it must still be the table now. Same locks and order as
+ -- 0268's research_benchmark_report_current, so a refresh either commits first (and this refuses) or waits.
+ IF d ? 'benchmarkHash' THEN
+  SELECT x.actor_id,x.session_id INTO a,sid FROM runtime_executions x WHERE x.id=(source->>'executionId')::uuid;
+  PERFORM 1 FROM research_account_fetches WHERE session_id=sid FOR SHARE;
+  PERFORM 1 FROM research_benchmarks WHERE session_id=sid FOR SHARE;
+  IF (research_benchmark_table(a,sid)->>'hash') IS DISTINCT FROM d->>'benchmarkHash' THEN RAISE EXCEPTION 'REPORT_DATA_INVALID'; END IF;
+ END IF;
+ RETURN jsonb_build_object('data',d-'bodyHash'-'benchmarkHash');
 END $$;
 REVOKE ALL ON FUNCTION public.report_final_data(jsonb) FROM PUBLIC,anon,authenticated,service_role;
 
