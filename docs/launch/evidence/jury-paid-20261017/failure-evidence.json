@@ -1,0 +1,60 @@
+{
+  "reviewId": "5ac2aa32-a1a9-4f90-ab76-2c6200075d44",
+  "startAt": "2026-10-17T10:27:40.615Z",
+  "config": {
+    "estimateUsd": "2.901197",
+    "estimateCredits": 874,
+    "maxRounds": 2
+  },
+  "state": "incomplete",
+  "outcome": {
+    "kind": "claim_refused",
+    "phase": "review",
+    "reason": "RUNTIME_PRICE_INCREASED"
+  },
+  "seats": [
+    {
+      "seat": "A",
+      "rounds": []
+    },
+    {
+      "seat": "B",
+      "rounds": []
+    },
+    {
+      "seat": "C",
+      "rounds": []
+    }
+  ],
+  "summary": {
+    "status": "none",
+    "sections": []
+  },
+  "events": {
+    "events": [
+      {
+        "id": "review_started",
+        "type": "review_started",
+        "reviewers": [
+          "A",
+          "B",
+          "C"
+        ],
+        "sections": 14
+      },
+      {
+        "id": "review_ended",
+        "type": "review_ended",
+        "state": "incomplete",
+        "outcome": {
+          "kind": "claim_refused",
+          "phase": "review",
+          "reason": "RUNTIME_PRICE_INCREASED"
+        }
+      }
+    ],
+    "ended": true
+  },
+  "endedAtFromStartResponse": null,
+  "finalObservedAt": "2026-10-17T10:27:47.194Z"
+}
