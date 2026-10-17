@@ -46,7 +46,13 @@ const SAMPLES = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l'] as 
  * watched through, steps two and three only once built; the jury larger, after step one; region 6 one scenario at a
  * time. Every capability not built yet is off (landing-flags), so its block does not show.
  */
-export function SampleL({ data, siteName, extras }: { data: LandingData; siteName: string; extras: PageExtras }) {
+export function SampleL({ data, siteName, extras, production = false, supportEmail }: {
+  data: LandingData; siteName: string; extras: PageExtras;
+  /** The support address from the admin settings, in the footer (as the public site's footer shows it). */
+  supportEmail?: string | null;
+  /** The public home page (Owner 2026-10-17: /landing becomes sample L): no sample switcher, only links that lead somewhere. */
+  production?: boolean;
+}) {
   const faqIds = new Set(data.faqGroups.flatMap(group => group.items.map(item => item.id)));
   const terms = faqIds.has(K_PRICE_TERMS.faqId) ? (
     <p className={k.terms}>
@@ -60,20 +66,22 @@ export function SampleL({ data, siteName, extras }: { data: LandingData; siteNam
     ? <p className={styles.riskLine}><b>{RISK_REVERSAL.title}</b>{J_FINAL.note}</p> : null;
   return (
     <MotionJ className={cn(light.light, page.page, k.page)}>
-      <nav aria-label="样稿切换" className={page.sampleBar}>
-        <span>不公开的风格样稿（L：K 的第二轮）</span>
-        {SAMPLES.map(id => (
-          <Link key={id} href={`/landing/preview/${id}`} aria-current={id === 'l' ? 'page' : undefined}>{id.toUpperCase()}</Link>
-        ))}
-      </nav>
-      <SiteHeaderJ siteName={siteName} cta={HERO.primaryCta} />
+      {production ? null : (
+        <nav aria-label="样稿切换" className={page.sampleBar}>
+          <span>不公开的风格样稿（L：K 的第二轮）</span>
+          {SAMPLES.map(id => (
+            <Link key={id} href={`/landing/preview/${id}`} aria-current={id === 'l' ? 'page' : undefined}>{id.toUpperCase()}</Link>
+          ))}
+        </nav>
+      )}
+      <SiteHeaderJ siteName={siteName} cta={HERO.primaryCta} onlyBuilt={production} />
       <StickyCtaMNO line={L_OPS.lede} phoneBottom hideHeaderCta />
 
       <main data-calm="">
         <HeroL note={data.heroNote} />
         <VoiceWallJ notes={data.notes} open regions={L_NOTE_REGIONS} compact={L_VOICE_FOLD} after={<CtaK />} />
         <StepsL flags={extras.flags} />
-        <JuryModuleL flags={extras.flags} />
+        <JuryModuleL flags={extras.flags} href={production ? null : undefined} />
         {extras.showSamples ? <SamplesL /> : null}
         <ScenariosL flags={extras.flags} after={<CtaK />} />
         <PriceJ proMonthly={data.pricing.proMonthly} rows={data.compareRows} calm plainTotal checked={false} quiet
@@ -82,7 +90,7 @@ export function SampleL({ data, siteName, extras }: { data: LandingData; siteNam
         <FinalJ freeTrial={allOn(extras.flags, ['signupGrant'])} />
       </main>
 
-      <SiteFooterJ />
+      <SiteFooterJ onlyBuilt={production} supportEmail={supportEmail} />
     </MotionJ>
   );
 }

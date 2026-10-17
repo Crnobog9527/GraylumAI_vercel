@@ -24,6 +24,7 @@ import { L_WORKFLOWS } from '@/lib/landing/landing-copy-l-workflows';
 import { L_LATER } from '@/lib/landing/landing-copy-l-later';
 import { HOW_IT_WORKS as HOW } from '@/lib/landing/landing-copy';
 import { trpc } from '@/trpc/client';
+import { J_PENDING_PAGES, linkReady } from '@/lib/landing/landing-copy-j-chrome';
 import { countOf, OverviewL } from './OverviewL';
 import { PositioningPictureL } from './PositioningPictureL';
 import { SampleL } from './SampleL';
@@ -246,6 +247,24 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     expect(between('id="voice-title"', 'id="steps-title"')).toBe(true);
     expect(between('id="steps-title"', 'id="jury-title"')).toBe(true);
     expect(between('id="compare-title"', 'id="pricing-title"')).toBe(true);
+  });
+
+  it('as the public home page: no sample switcher, links only to pages that exist, the support address in the footer', () => {
+    const html = renderToStaticMarkup(withTrpc(createElement(SampleL, {
+      data, siteName: 'Graylum', extras: { flags: ALL_ON, showSamples: true }, production: true, supportEmail: 'help@example.com',
+    })));
+    expect(html).not.toContain('样稿切换');
+    expect(html).not.toContain('/landing/preview/');
+    for (const href of J_PENDING_PAGES) {
+      if (linkReady(href)) continue;
+      expect(html).not.toContain(`href="${href}"`);
+    }
+    for (const href of ['/landing/pricing', '/faq', '/about', '/contact', '/terms', '/privacy']) expect(html).toContain(`href="${href}"`);
+    expect(html).toContain('mailto:help@example.com');
+    // The jury module still says what the jury is; its link waits for a public jury page.
+    expect(html).toContain(L_JURY.title);
+    // The samples keep every planned link.
+    expect(render()).toContain('href="/landing/preview/jury"');
   });
 
   it('keeps "14 种人" in one piece in the samples\' lede', () => {

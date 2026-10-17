@@ -96,3 +96,12 @@ export const J_PENDING_PAGES = [
   PLANNED.features, PLANNED.positioning, PLANNED.content, PLANNED.jury, PLANNED.library, PLANNED.publish, PLANNED.review,
   PLANNED.samples, PLANNED.blog, PLANNED.refund, PLANNED.cookies,
 ] as const;
+
+/**
+ * Whether a header or footer link leads to a page that exists. The production home page (sample L on /landing, Owner
+ * 2026-10-17) links only those; a link comes back by itself once its page is built and taken off J_PENDING_PAGES.
+ * Cookie settings point into the privacy page, which exists, until Termly's button replaces them.
+ */
+export function linkReady(href: string) {
+  return href === PLANNED.cookies || !(J_PENDING_PAGES as readonly string[]).includes(href);
+}
