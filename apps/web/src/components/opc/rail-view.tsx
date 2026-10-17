@@ -52,10 +52,16 @@ export function RailView({ area, returnParam = '', onCloseMobile, launched = fal
         <img className={styles.navIcon} src="/opc-reference/magnifying-glass.svg" alt=""/>搜索</Link>
       <Link href={'/library'+returnParam} aria-current={area==='library'?'page':undefined}>
         <img className={styles.navIcon} src="/opc-reference/books.svg" alt=""/>资料库</Link>
-      <button disabled={!launched}>
-        <img className={styles.navIcon} src="/opc-reference/calendar-blank.svg" alt=""/>发布排期{launched ? null : <> <small>待接入</small></>}</button>
-      <button disabled={!launched}>
-        <img className={styles.navIcon} src="/opc-reference/chart-bar.svg" alt=""/>数据复盘{launched ? null : <> <small>待接入</small></>}</button>
+      {launched ? <>
+        {/* Shown as available, like the other items, but not controls: there is nothing to open yet (no href, not focusable). */}
+        <a><img className={styles.navIcon} src="/opc-reference/calendar-blank.svg" alt=""/>发布排期</a>
+        <a><img className={styles.navIcon} src="/opc-reference/chart-bar.svg" alt=""/>数据复盘</a>
+      </> : <>
+        <button disabled>
+          <img className={styles.navIcon} src="/opc-reference/calendar-blank.svg" alt=""/>发布排期 <small>待接入</small></button>
+        <button disabled>
+          <img className={styles.navIcon} src="/opc-reference/chart-bar.svg" alt=""/>数据复盘 <small>待接入</small></button>
+      </>}
     </nav>
     {children}
   </aside>;

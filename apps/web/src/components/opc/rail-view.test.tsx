@@ -78,5 +78,8 @@ it('keeps 发布排期 and 数据复盘 unavailable by default and shows them av
   const launched = renderToStaticMarkup(<RailView area="chat" launched><span/></RailView>);
   expect(launched).not.toContain('待接入');
   expect(launched).not.toContain('disabled');
+  // Not controls with nothing behind them: plain links without a target, so neither focusable nor clickable.
+  expect(launched).not.toMatch(/<button[^>]*>[^<]*<img[^>]*calendar-blank/);
+  expect(launched).toMatch(/<a><img[^>]*calendar-blank[^>]*\/>发布排期<\/a>/);
   for (const name of ['发布排期', '数据复盘']) expect(launched).toContain(name);
 });
