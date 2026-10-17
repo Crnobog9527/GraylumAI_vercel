@@ -146,7 +146,7 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     expect(renderToStaticMarkup(withTrpc(createElement(PositioningPictureL, { moment: 0, at: null })))).not.toContain('待接入');
     expect(on).toContain(L_JURY.title);
     expect(on).toContain(`href="${L_JURY.href}"`);
-    for (const word of ['世界最强', '没有分歧']) expect(on).not.toContain(word);
+    for (const word of ['世界最强', '没有分歧', '再辩一轮', '最多两轮']) expect(on).not.toContain(word);
   });
 
   it('moves every group\'s sample report as a card of one shape, every copy clickable, opening in a dialog', () => {
@@ -208,7 +208,7 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     expect(text).toContain(L_SCENARIOS.badge);
     // The coach's side is a whole work conversation: library read, data fetched, the decision, what to do next, a follow-up.
     for (const turn of L_WORKFLOWS[0]) expect(text).toContain(turn.user);
-    expect(text).toContain(`已读取：${L_WORKFLOWS[0][0].read?.join('、')}`);
+    expect(text).toContain(`${L_WORKFLOWS[0][0].readLabel?.[1] ?? '已读取资料库'}：${L_WORKFLOWS[0][0].read?.join('、')}`);
     expect(text).toContain(L_WORKFLOWS[0][0].calls?.[0].found);
     expect(compare).toContain('aria-label="搜索记录"');
     for (const turns of L_WORKFLOWS) expect(turns.every(turn => turn.reply.includes('接下来你做') || turn === turns[0] && turns.length > 1)).toBe(true);

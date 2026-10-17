@@ -56,7 +56,7 @@ function JuryFlowL() {
       </ul>
       <ArrowDown className={styles.jfArrow} size={16} aria-hidden="true" data-s={1} />
       <p className={styles.jfDebate} data-s={2}>
-        <MessagesSquare size={15} aria-hidden="true" />{a.debate}<small>{a.debateNote}</small>
+        <MessagesSquare size={15} aria-hidden="true" />{a.debate}
       </p>
       <ArrowDown className={styles.jfArrow} size={16} aria-hidden="true" data-s={2} />
       <p className={styles.jfLead} data-s={3}><PenLine size={15} aria-hidden="true" />{a.lead}</p>

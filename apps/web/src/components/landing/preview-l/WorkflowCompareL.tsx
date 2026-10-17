@@ -58,7 +58,7 @@ export function WorkflowCompareL({ task, turns, beat, badge }: { task: Task; tur
           <div className={compare.cell} data-side="generic">
             <div inert aria-hidden="true">
               <p className={compare.mobileName}><Bot size={13} />{J_COMPARE.genericName}</p>
-              <p className={compare.question}><span>你</span>{task.question}</p>
+              <p className={cn(compare.question, styles.genericQuestion)}><span>你</span>{task.question}</p>
               <div className={cn(compare.genericReply, styles.genericReply)}>{task.generic.join('\n')}</div>
             </div>
             <p className={compare.note} data-side="generic"><b>{J_COMPARE.genericNoteLabel}</b>{task.genericNote}</p>
@@ -93,7 +93,7 @@ function Turn({ turn, local }: { turn: WorkflowTurn; local: number }) {
     if (local < at) return [];
     const done = local > at;
     return [{
-      callId: call.query, toolName: call.toolName, args: {}, platform: 'tiktok', dataKind: call.dataKind,
+      callId: call.query, toolName: call.toolName, args: {}, platform: call.platform ?? 'tiktok', dataKind: call.dataKind,
       query: done && call.found ? `${call.query}：${call.found}` : call.query, state: done ? 'succeeded' : 'running',
     } as ResearchCall];
   });

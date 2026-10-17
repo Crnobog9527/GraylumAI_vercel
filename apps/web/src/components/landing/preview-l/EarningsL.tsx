@@ -35,9 +35,10 @@ function useRolled(targets: readonly number[]) {
 const barOf = (count: number, top: number) => Math.max(3, (Math.log10(count + 1) / Math.log10(top + 1)) * 100);
 
 /**
- * "一个月能赚多少？算给你看" under the report's money card: a switch for how many people see the videos a month, and the
- * people left at each step, each with its share in brackets and, in grey, who it is counted from; the month's total
- * at the bottom. The plan's conservative example, marked as one.
+ * "一个月能赚多少？算给你看" under the report's money card: a switch for how many people see the videos a month; the
+ * formula with this tier's numbers put in; the people left at each step, each with its share of the step before in
+ * brackets and, in grey, who it is counted from; the month's total; then how the five steps work, told with 10 万
+ * plays. The plan's conservative example, marked as one.
  */
 export function EarningsL() {
   const [tier, setTier] = useState(0);
@@ -57,6 +58,15 @@ export function EarningsL() {
           ))}
         </div>
       </div>
+      <div className={styles.formula}>
+        <h6>{E.formula.title}</h6>
+        <p className={styles.general}>{E.formula.general}</p>
+        <p className={styles.put}>
+          <span>= {E.formula.plays[tier]} × 0.2% ×（{E.formula.rates}）</span>
+          <span>= {E.formula.menus[tier]} ×（{E.formula.perPerson}）≈ {E.formula.results[tier]} / 月</span>
+        </p>
+        <p className={styles.plain}>{E.formula.plain}</p>
+      </div>
       <ol className={styles.steps}>
         {E.rows.map((row, index) => (
           <li key={row.what}>
@@ -73,7 +83,11 @@ export function EarningsL() {
         <span>{E.totalLabel}</span><b>{earningTotal(rolled[E.rows.length])}</b>
         {E.yearly[tier] ? <em>{E.yearly[tier]}</em> : null}
       </p>
-      <p className={styles.summary}>{E.summary}</p>
+      <div className={styles.layers}>
+        <h6>{E.layers.title}</h6>
+        <ol>{E.layers.items.map(item => <li key={item.name}><b>{item.name}</b><span>{item.text}</span></li>)}</ol>
+        <p className={styles.summary}>{E.layers.close}</p>
+      </div>
       <p className={styles.disclaimer}>{E.disclaimer}</p>
     </section>
   );

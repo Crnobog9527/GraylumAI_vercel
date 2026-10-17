@@ -63,6 +63,9 @@
   .held .pair > * { flex: none; }
   .held .pair > .coach, .held .coach > .conversation { flex: 1 1 0; }
   .held .genericReply { max-height: 4.65em; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+  /* Round eight: the general AI's copy of the question keeps to one line (the coach's side shows it whole). */
+  .held .genericQuestion.genericQuestion { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .held .genericQuestion > span { margin-right: 6px; }
   .held .log { flex: 1 1 0; height: auto; min-height: 0; max-height: none; }
   .held [data-centred] { margin-top: 2px; font-size: 14px; }
 }
@@ -73,6 +76,8 @@
 @media (max-width: 767px) and (max-height: 700px) {
   .held .genericReply { max-height: 1.55em; }
   .held .heldTitle { margin-bottom: 4px; font-size: 16px; line-height: 1.2; }
+  /* The tab and the question already name the scenario: its title gives its room to the coach's chat. */
+  .held .title { display: none; }
   .held .bar { margin-bottom: 4px; }
   .held .pair { gap: 6px; }
 }

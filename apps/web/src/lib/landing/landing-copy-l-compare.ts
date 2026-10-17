@@ -16,14 +16,13 @@ export const L_TASKS: readonly {
   verdict: string; needs?: readonly LandingFeature[];
 }[] = [
   {
-    question: '我想做美食号，该怎么定位？',
-    generic: ['可以先想清楚三件事：拍什么类型的美食、给谁看、和别人有什么不同。',
-      '常见方向有家常菜、探店、烘焙、减脂餐。选一个你喜欢的，保持更新，慢慢找到自己的风格。'],
-    coach: '好，做饭是个好起点。先不急着定拍什么，我先把你的情况弄清楚，一次只问一个问题。先问第一件：'
-      + '你做这个账号，最希望它最后给你带来什么？……同样是做饭账号，想记录生活和想赚钱，拍法、选平台、找对标完全不一样。'
-      + '\n\n接下来你做：回答这一个问题就行，记录、零花钱、慢慢做成主业，还是先试试。',
-    genericNote: '给你一套框架，自己去套', coachNote: '先问清你，再下判断', source: SOURCE,
-    verdict: '一个给你方法，一个先把你弄清楚', needs: ['coach'],
+    // Round eight (U7, Owner 2026-10-18): the positioning was just shown in step one, so this scenario adds a platform.
+    question: '我在 TikTok 做了两个月，想把小红书也做起来，该怎么弄？',
+    generic: ['小红书的常见做法：', '多发图文笔记，标题里加关键词，封面做得好看一点，保持稳定更新，多和评论区互动。'],
+    coach: '定位不用变，要变的是内容的样子和别人找到你的方式：每条视频在小红书发原视频加一篇图文笔记，标题写搜索词，'
+      + '"免费一周菜单"放到置顶笔记。\n\n接下来你做：这周日把"一口锅两菜一汤"那条改成图文发出去。',
+    genericNote: '一套通用建议', coachNote: '按你已有的 TikTok 数据适配', source: SOURCE,
+    verdict: '一个给你通用做法，一个按你已有的 TikTok 数据，告诉你哪些不用变、哪些要改', needs: ['coach'],
   },
   {
     question: '这周拍什么？',
