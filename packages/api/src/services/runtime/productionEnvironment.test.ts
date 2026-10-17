@@ -1,7 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { it, expect } from 'vitest';
-import { assertRealRuntimeTarget, productionRuntimeTarget, realHostMode, realRuntimeEnabled, realRuntimeEnvironment } from './productionEnvironment';
+import { assertRealRuntimeTarget, productionRuntimeTarget, realHostMode, realRuntimeClosed, realRuntimeEnabled,
+  realRuntimeEnvironment } from './productionEnvironment';
 import { stagingRuntimeWindow } from './stagingEnvironment';
+import { StagingAccessError } from './stagingErrors';
 
 const env = {
   V3_RUNTIME_PRODUCTION_ENABLED: 'true', VERCEL: '1', VERCEL_ENV: 'production',
@@ -57,4 +59,13 @@ it('maintenance helpers follow the host: switch, target and the mode shown to th
   expect(() => assertRealRuntimeTarget({ ...env, VERCEL_GIT_COMMIT_REF: 'staging' })).toThrow('RUNTIME_PRODUCTION_TARGET_DENIED');
   expect(() => assertRealRuntimeTarget({})).toThrow('RUNTIME_STAGING_NOT_CONFIGURED');
   expect([realHostMode(env), realHostMode({})]).toEqual(['production', 'staging_test']);
+});
+
+it('an original execution is closed when its host is switched off, by variable or by the production profile', () => {
+  const off = new StagingAccessError('RUNTIME_PRODUCTION_DISABLED');
+  expect(realRuntimeClosed(env, new StagingAccessError('RUNTIME_PRODUCTION_NOT_CONFIGURED'))).toBe(false);
+  expect(realRuntimeClosed(env, off)).toBe(true);
+  expect(realRuntimeClosed({ ...env, V3_RUNTIME_PRODUCTION_ENABLED: 'false' }, new Error('x'))).toBe(true);
+  expect(realRuntimeClosed({ V3_RUNTIME_STAGING_ENABLED: 'true' }, new Error('x'))).toBe(false);
+  expect(realRuntimeClosed({ V3_RUNTIME_STAGING_ENABLED: 'false' }, new Error('x'))).toBe(true);
 });

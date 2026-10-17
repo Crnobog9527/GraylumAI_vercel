@@ -50,3 +50,9 @@ export function assertRealRuntimeTarget(env: Record<string, string | undefined>)
 export function realHostMode(env: Record<string, string | undefined>): 'production' | 'staging_test' {
   return realRuntimeEnvironment(env) === 'production' ? 'production' : 'staging_test';
 }
+
+/** Whether an original execution must be closed: its host switch is off, or (production) the production profile is off,
+ * which loadStagingPolicy reports as RUNTIME_PRODUCTION_DISABLED. */
+export function realRuntimeClosed(env: Record<string, string | undefined>, cause: unknown): boolean {
+  return !realRuntimeEnabled(env) || (cause instanceof StagingAccessError && cause.reason === 'RUNTIME_PRODUCTION_DISABLED');
+}
