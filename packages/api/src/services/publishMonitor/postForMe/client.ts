@@ -4,8 +4,8 @@ import { exchange, type FetchImpl, type PostForMeExchange, publicHttpsUrl } from
 import { MAX_POST_ID_LENGTH, normalizeFeedPage, type FeedPage } from './normalize';
 
 /**
- * Post for Me client for PUBLISH-MONITOR (plan §4.1). Read paths, consent links and account removal only;
- * there is deliberately no publishing call here (PR-5, every real publish needs Owner approval).
+ * Post for Me client for PUBLISH-MONITOR (plan §4.1). Read paths, consent links and account removal; publishing lives
+ * in posts.ts (PR-5).
  * Every call passes the shared limiter first: one key serves all users (40/min, 5/s measured 2026-10-13).
  */
 export type Limiter = { acquire(): Promise<{ ok: true } | { ok: false; retryAfterSeconds: number }> };
@@ -13,8 +13,11 @@ export type ClientDeps = { apiKey: string; limiter: Limiter; fetchImpl?: FetchIm
 
 export type Outcome<T> =
   | { kind: 'ok'; value: T }
-  /** Shared limiter or provider 429: nothing was done; try again after the delay. */
-  | { kind: 'rate_limited'; retryAfterSeconds: number }
+  /**
+   * Nothing was done; try again after the delay. `sent` tells whether the request reached the provider (its 429)
+   * or the shared limiter refused it before sending (a provider request still counts against daily read caps).
+   */
+  | { kind: 'rate_limited'; retryAfterSeconds: number; sent: boolean }
   /** The provider answered with a definite client error: the request was not carried out. */
   | { kind: 'rejected'; status: number }
   /** Answered but unusable (5xx, unreadable, wrong shape): treat as "not fetched", keep old data. */
@@ -53,11 +56,11 @@ function classifyRead<T>(result: PostForMeExchange, parse: (json: unknown) => T 
   if (result.kind === 'unknown') return { kind: 'unknown', reason: result.reason };
   if (result.status === 408) return { kind: 'unknown', reason: 'PROVIDER_TIMEOUT' };
   if (result.kind === 'unreadable') {
-    if (result.status === 429) return { kind: 'rate_limited', retryAfterSeconds: 60 };
+    if (result.status === 429) return { kind: 'rate_limited', retryAfterSeconds: 60, sent: true };
     return result.status >= 400 && result.status < 500
       ? { kind: 'rejected', status: result.status } : { kind: 'failed', status: result.status, reason: result.reason };
   }
-  if (result.status === 429) return { kind: 'rate_limited', retryAfterSeconds: result.retryAfterSeconds ?? 60 };
+  if (result.status === 429) return { kind: 'rate_limited', retryAfterSeconds: result.retryAfterSeconds ?? 60, sent: true };
   if (result.status >= 400 && result.status < 500) return { kind: 'rejected', status: result.status };
   if (result.status < 200 || result.status >= 300) {
     return { kind: 'failed', status: result.status, reason: 'PROVIDER_ERROR' };
@@ -66,10 +69,10 @@ function classifyRead<T>(result: PostForMeExchange, parse: (json: unknown) => T 
   return value === null ? { kind: 'failed', status: result.status, reason: 'RESPONSE_SHAPE' } : { kind: 'ok', value };
 }
 
-async function call<T>(deps: ClientDeps, request: Parameters<typeof exchange>[0],
+export async function call<T>(deps: ClientDeps, request: Parameters<typeof exchange>[0],
   parse: (json: unknown) => T | null): Promise<Outcome<T>> {
   const slot = await deps.limiter.acquire();
-  if (!slot.ok) return { kind: 'rate_limited', retryAfterSeconds: slot.retryAfterSeconds };
+  if (!slot.ok) return { kind: 'rate_limited', retryAfterSeconds: slot.retryAfterSeconds, sent: false };
   // Creating a consent link changes nothing the user relies on; account removal/disconnect does.
   const write = request.method === 'DELETE' || request.path.endsWith('/disconnect');
   return classify(await exchange(request, deps.apiKey, deps), parse, write);

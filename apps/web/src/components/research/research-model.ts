@@ -40,6 +40,15 @@ export interface CallView {
   state: CallState;
   /** One plain sentence for anything other than a success. */
   detail: string | null;
+  /** What the user was charged for this call once it settled, e.g. "0.3 积分"; null while unknown or free. */
+  credits: string | null;
+}
+
+/** Settled user credits of a finished call ("0.30" → "0.3 积分"); nothing for running, zero or unreadable values. */
+export function callCredits(call: Pick<ResearchCall, "state" | "credits">): string | null {
+  const value = call.credits;
+  if (call.state === "running" || typeof value !== "string" || !/^\d+(\.\d+)?$/.test(value) || Number(value) === 0) return null;
+  return `${value.replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "")} 积分`;
 }
 
 export const DATA_KIND_LABELS: Record<ResearchCall["dataKind"], string> = {
@@ -111,7 +120,7 @@ export function describeRequest(tool: ResearchToolName, rawArgs: unknown): { que
 export function describeCall(call: ResearchCall): CallView {
   const kind = DATA_KIND_LABELS[call.dataKind] ?? "数据";
   const line = call.platform === "web" ? kind : `${platformLabel(call.platform)} · ${kind}`;
-  const base = { query: call.query, line };
+  const base = { query: call.query, line, credits: callCredits(call) };
   switch (call.state) {
     case "running": return { ...base, state: "running", detail: null };
     case "succeeded": return { ...base, state: "success", detail: null };
