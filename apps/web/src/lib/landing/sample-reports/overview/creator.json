@@ -1,0 +1,84 @@
+{
+  "slug": "creator",
+  "persona": {
+    "label": "华人生活博主 · YouTube",
+    "who": "温哥华 6.5 万订阅生活博主，测试工程师，想辞职全职做频道"
+  },
+  "positioning": "测试工程师实测温哥华新移民第一年：租房、落地手续、真实开销",
+  "riskAlert": {
+    "headline": "现在辞职全职做 YouTube，很难养活一家人",
+    "why": [
+      "频道月入 300–600 加元，离目标差 8 到 16 倍",
+      "内容太杂，品牌看不出观众是谁，合作接不起来"
+    ]
+  },
+  "audience": [
+    { "name": "即将落地的家庭", "trigger": "拿到签证、定机票" },
+    { "name": "落地 0–12 个月的家庭", "trigger": "租约到期、找工作卡住" },
+    { "name": "留学生和年轻工签", "trigger": "开学前、搬家季" }
+  ],
+  "platform": {
+    "main": "YouTube 长视频",
+    "support": ["YouTube Shorts（做预告）"],
+    "why": "6.5 万订阅和 4 年老内容都在这里，攻略能被长期搜到"
+  },
+  "benchmarks": [
+    {
+      "id": "A",
+      "type": "温哥华生活和活动资讯频道",
+      "followers": "4.23 万订阅",
+      "medianViews": "约 5,400",
+      "engagementRate": null,
+      "updateFreq": "每周更新",
+      "learn": "固定栏目让品牌找得到对应题材"
+    },
+    {
+      "id": "B",
+      "type": "华人新移民职业重建",
+      "followers": "1.81 万订阅",
+      "medianViews": "约 760",
+      "engagementRate": null,
+      "updateFreq": "最近一个月几乎每天更新",
+      "learn": "免费地图做引子，再接咨询和课程"
+    },
+    {
+      "id": "C",
+      "type": "温哥华华人访谈",
+      "followers": "1.39 万订阅",
+      "medianViews": "约 5,650",
+      "engagementRate": null,
+      "updateFreq": "约每月 1–2 条",
+      "learn": "访谈别人的经验，制作轻"
+    }
+  ],
+  "differentiation": "4 年亲历租房求职，用测试工程师“实测报告”格式讲，同类少见",
+  "threePiece": {
+    "name": "Leo 实测温哥华｜新移民第一年",
+    "bio": "在温哥华住了 4 年的测试工程师，把新移民第一年实测一遍给你看"
+  },
+  "contentPillars": [
+    { "name": "流量型：租房和选区", "share": "50%" },
+    { "name": "信任型：落地手续、真实开销、求职", "share": "35%" },
+    { "name": "转化型", "share": "15%" }
+  ],
+  "funnel": [
+    { "layer": "免费视频", "offer": "长视频和 Shorts，让新移民认识你", "price": "免费" },
+    { "layer": "免费清单", "offer": "《温哥华落地第一个月清单》，留邮箱领", "price": "免费" },
+    { "layer": "入门产品", "offer": "《租房避坑包》", "price": "15–30 加元（假设）" },
+    { "layer": "落地咨询", "offer": "60 分钟视频通话：选区、合同、顺序", "price": "80–150 加元（假设）" },
+    { "layer": "品牌合作", "offer": "只接新移民用得上的品牌", "price": null }
+  ],
+  "plan30": [
+    { "week": 1, "focus": "测租房入口：租房踩过的 7 个坑" },
+    { "week": 2, "focus": "测开销话题：一家三口真实账单" },
+    { "week": 3, "focus": "测清单需求：落地第一周办事顺序" },
+    { "week": 4, "focus": "测问答形式，上线免费落地清单" }
+  ],
+  "metricsToWatch": ["评论提问数", "收藏数", "清单领取人数", "单条制作时间"],
+  "firstStep": [
+    "查后台：播放前 10 名、观众国家和年龄",
+    "改显示名、头像和简介",
+    "问清公司对副业的规定"
+  ],
+  "sourceNote": "对标数据观察日期 2026-10-17，来自网络公开信息，真实性待考证，仅供参考"
+}

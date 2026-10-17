@@ -1,0 +1,85 @@
+{
+  "slug": "realtor",
+  "persona": {
+    "label": "地产经纪 · 小红书",
+    "who": "悉尼持牌经纪 7 年，主做华人买家，想多接首置家庭"
+  },
+  "positioning": "持牌经纪带首置华人家庭看真实悉尼房子，把流程和缺点讲清楚",
+  "riskAlert": {
+    "headline": "路走得通，但不能再靠发房源帖",
+    "why": [
+      "经纪的房源帖一条 4 赞、一条 6 赞",
+      "房子卖掉帖子就过期，看的人没理由关注你"
+    ]
+  },
+  "audience": [
+    { "name": "刚拿 PR 的首置家庭", "trigger": "拿 PR、孩子上学" },
+    { "name": "租房多年想换自住的华人", "trigger": "租约到期、涨租" },
+    { "name": "为学区搬家的家庭", "trigger": "孩子入学前一年" }
+  ],
+  "platform": {
+    "main": "小红书",
+    "support": ["YouTube（每两周一条长视频）"],
+    "why": "新移民查攻略先上小红书，流程类笔记能被长期搜到"
+  },
+  "benchmarks": [
+    {
+      "id": "A",
+      "type": "悉尼华人买房、实地看区",
+      "followers": "订阅 15,200",
+      "medianViews": null,
+      "engagementRate": null,
+      "updateFreq": "近 30 条约 6 个月",
+      "learn": "一期讲透一个区适合什么人"
+    },
+    {
+      "id": "B",
+      "type": "华人买房和政策解读",
+      "followers": "订阅 13,600",
+      "medianViews": null,
+      "engagementRate": null,
+      "updateFreq": "近 30 条约 6 个月",
+      "learn": "政策一出就讲对你有什么影响"
+    },
+    {
+      "id": "C",
+      "type": "持牌卖方经纪",
+      "followers": "订阅 15,500",
+      "medianViews": null,
+      "engagementRate": null,
+      "updateFreq": "近 30 条约 13 个月",
+      "learn": "讲具体一套房，写清价格和通勤"
+    }
+  ],
+  "differentiation": "持牌 7 年、每周在看房现场，固定讲房子缺点，对标几乎没人做",
+  "threePiece": {
+    "name": "思远带你看悉尼房",
+    "bio": "悉尼持牌地产经纪 7 年｜带你看真实的悉尼房子，优点缺点都说"
+  },
+  "contentPillars": [
+    { "name": "流量型：流程和避坑", "share": "60%" },
+    { "name": "信任型：看房讲缺点、现场经历", "share": "30%" },
+    { "name": "转化型：open home 邀请、直播答疑", "share": "10%" }
+  ],
+  "funnel": [
+    { "layer": "免费内容", "offer": "小红书笔记、YouTube 长视频", "price": "免费" },
+    { "layer": "直播答疑", "offer": "每月一次小红书直播", "price": "免费" },
+    { "layer": "30 分钟面谈", "offer": "帮买家理清下一步先做什么", "price": "免费" },
+    { "layer": "带看与成交", "offer": "你和公司的房源", "price": "佣金由业主付，一单几千到上万澳元" },
+    { "layer": "卖房委托（中后期）", "offer": "老客户卖旧换新", "price": null },
+    { "layer": "买房讲座（中后期）", "offer": "线下小班讲全流程", "price": "先免费" }
+  ],
+  "plan30": [
+    { "week": 1, "focus": "测流程类：看房先看 5 处、印花税" },
+    { "week": 2, "focus": "测拍卖和讲内幕，YouTube 第 1 条" },
+    { "week": 3, "focus": "测选区：两区取舍、学区划片" },
+    { "week": 4, "focus": "测转化：本周在卖的房，优缺点都说" }
+  ],
+  "metricsToWatch": ["收藏数", "评论里的具体提问", "私信约看房人数"],
+  "firstStep": [
+    "发邮件要公司对个人账号的书面规定",
+    "改小红书三件套，旧房源帖设为仅自己可见",
+    "买领夹麦，周六拍 1、2 号选题素材"
+  ],
+  "sourceNote": "对标数据观察日期 2026-10-17，来自网络公开信息，真实性待考证，仅供参考"
+}

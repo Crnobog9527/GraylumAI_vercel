@@ -17,17 +17,29 @@ export const L_SAMPLES_REDO = {
   /** NEW: the card's tag when the coach changed the person's direction. */
   adjusted: '方向已调整',
   open: '看这份报告',
-  pause: '移到卡片上会停下',
-  swipe: '左右滑动看更多',
   close: '关闭',
-  /** NEW: the 10-second card, read top to bottom. */
-  glance: {
-    title: '10 秒看懂',
-    /** NEW (round four): the card is a summary drawn for the page, not a product screen. */
+  /** NEW (round five): the dialog's 15-second overview, its blocks' headings. */
+  overview: {
+    title: '15 秒看懂这份报告',
     sketch: '示意',
     risk: '风险提醒',
-    who: '你是谁',
-    money: '怎么赚钱',
+    audience: '给谁看',
+    platform: '在哪发',
+    support: '同步',
+    benchmarks: '对标账号',
+    benchmark: (id: string) => `对标账号 ${id}`,
+    followers: '粉丝',
+    medianViews: '播放中位数',
+    engagementRate: '互动',
+    updateFreq: '更新',
+    learn: '学它',
+    differentiation: '你和别人不一样在哪',
+    threePiece: '账号三件套',
+    pillars: '内容怎么配',
+    funnel: '怎么赚钱',
+    plan30: '前 30 天',
+    week: (n: number) => `第 ${n} 周`,
+    metrics: '每周看这几个数',
     first: '这周第一步',
   },
 } as const;

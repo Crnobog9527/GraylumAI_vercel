@@ -1,0 +1,87 @@
+{
+  "slug": "trainer",
+  "persona": {
+    "label": "华人私教 · 小红书+IG",
+    "who": "新泽西持证女私教，想让附近华人女性找她上一对一课"
+  },
+  "positioning": "为新泽西附近久坐和产后华人女性，先评估再训练的一对一体态私教",
+  "riskAlert": null,
+  "audience": [
+    { "name": "久坐的华人上班族女性", "trigger": "体检、疼得影响工作" },
+    { "name": "产后半年到两年的妈妈", "trigger": "医生允许运动后" },
+    { "name": "孩子上学后的全职妈妈", "trigger": "孩子开学" }
+  ],
+  "platform": {
+    "main": "小红书",
+    "support": ["Instagram"],
+    "why": "华人女性找私教会搜“新泽西 私教”，笔记能被搜很久"
+  },
+  "benchmarks": [
+    {
+      "id": "A",
+      "type": "纽约女性私教（体态认证）",
+      "followers": "1.78 万粉",
+      "medianViews": null,
+      "engagementRate": null,
+      "updateFreq": null,
+      "learn": "和本地小店合办线下课"
+    },
+    {
+      "id": "B",
+      "type": "纽约亚裔女性教练",
+      "followers": "2.17 万粉",
+      "medianViews": null,
+      "engagementRate": null,
+      "updateFreq": null,
+      "learn": "用反常识问题讲专业"
+    },
+    {
+      "id": "C",
+      "type": "体态矫正教练",
+      "followers": "3.19 万粉",
+      "medianViews": null,
+      "engagementRate": null,
+      "updateFreq": null,
+      "learn": "评论关键词领评估，让看客举手"
+    },
+    {
+      "id": "D",
+      "type": "孕产期运动教练",
+      "followers": "9.99 万粉",
+      "medianViews": null,
+      "engagementRate": null,
+      "updateFreq": null,
+      "learn": "用征集让妈妈们主动留言"
+    }
+  ],
+  "differentiation": "讲中文、专做产后和久坐体态、在新泽西线下接课，两平台都没人做成",
+  "threePiece": {
+    "name": "Amy 教练｜新泽西体态私教",
+    "bio": "专帮久坐上班族和产后妈妈：先评估，再训练｜中英双语"
+  },
+  "contentPillars": [
+    { "name": "流量型", "share": "60%" },
+    { "name": "信任型", "share": "30%" },
+    { "name": "转化型", "share": "10%" }
+  ],
+  "funnel": [
+    { "layer": "免费内容", "offer": "视频、图文，让附近的人认识你", "price": "免费" },
+    { "layer": "免费线下讲座", "offer": "每月一次，在合作的店或场馆", "price": "免费（假设）" },
+    { "layer": "体态评估", "offer": "单次评估，可抵课包", "price": null },
+    { "layer": "私教课包", "offer": "一对一私教，8 或 12 节打包", "price": "一节 80 美元" },
+    { "layer": "小团课、老客介绍", "offer": "4–6 人小团课（中后期）", "price": null }
+  ],
+  "plan30": [
+    { "week": 1, "focus": "测“久坐”：圆肩自测、拉伸了还是紧" },
+    { "week": 2, "focus": "测“产后”：产后 3 个动作、抱娃腰疼" },
+    { "week": 3, "focus": "测信任内容：评估过程、教练自述" },
+    { "week": 4, "focus": "第一次约评估：会员 8 周变化、留镇名" }
+  ],
+  "metricsToWatch": ["收藏数", "私信数", "附近的人关注", "评估预约数"],
+  "firstStep": [
+    "问健身房要自带客户和拍摄的书面规定",
+    "改好两个平台的显示名、头像和简介",
+    "查 3–5 家附近同行价格，定评估价"
+  ],
+  "sourceNote": "对标数据观察日期 2026-10-17，来自网络公开信息，真实性待考证，仅供参考"
+}

@@ -19,8 +19,11 @@ import { LANDING_FEATURES, type LandingFlags } from '@/lib/landing/landing-flags
 import { buildLandingPageData } from '@/lib/landing/landing-page-data';
 import { APP_SEGMENTS } from '@/lib/sentry-scrub';
 import { L_SAMPLES_REDO } from '@/lib/landing/landing-copy-l-samples';
+import { SAMPLE_OVERVIEWS } from '@/lib/landing/sample-reports/overview';
+import { L_WORKFLOWS } from '@/lib/landing/landing-copy-l-workflows';
+import { HOW_IT_WORKS as HOW } from '@/lib/landing/landing-copy';
 import { trpc } from '@/trpc/client';
-import { GlanceL } from './GlanceL';
+import { countOf, OverviewL } from './OverviewL';
 import { PositioningPictureL } from './PositioningPictureL';
 import { SampleL } from './SampleL';
 
@@ -35,7 +38,7 @@ const data = buildLandingPageData(ALL_ON, [plan('pro', 29, 279), plan('gold', 69
 const queryClient = new QueryClient();
 const client = trpc.createClient({ links: [httpLink({ url: 'http://landing.test/api/trpc' })] });
 const withTrpc = (node: ReactElement) =>
-  createElement(trpc.Provider, { client, queryClient }, createElement(QueryClientProvider, { client: queryClient }, node));
+  createElement(trpc.Provider, { client, queryClient, children: createElement(QueryClientProvider, { client: queryClient }, node) });
 const render = (flags: LandingFlags = ALL_ON, showSamples = true) =>
   renderToStaticMarkup(withTrpc(createElement(SampleL, { data, siteName: 'Graylum', extras: { flags, showSamples } })));
 
@@ -75,7 +78,9 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
   it('plays step one as sample J\'s whole flow on the real product\'s parts, no lead-in before its notes', () => {
     const html = render();
     const steps = html.slice(html.indexOf('id="steps-title"'), html.indexOf('id="jury-title"'));
-    expect(steps).toContain(L_STEPS.one.title);
+    // The region's own title first, then 第一步 under it (round five).
+    expect(steps.indexOf(HOW.title)).toBeGreaterThanOrEqual(0);
+    expect(steps.indexOf(HOW.title)).toBeLessThan(steps.indexOf(L_STEPS.one.title));
     for (const real of ['我的定位分析', '定位清单', 'AI 自媒体陪跑教练 · 主动引导 · 了解你', 'aria-label="添加资料"', 'aria-label="发送"']) {
       expect(steps).toContain(real);
     }
@@ -132,17 +137,25 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     expect(render(ALL_ON, false)).not.toContain('id="samples-title"');
   });
 
-  it('reads the 10-second card top to bottom: who and platform, the risk first, the sentence, three blocks', () => {
-    const report = L_REPORTS.find(item => item.truth) ?? L_REPORTS[0];
-    const data = SAMPLE_CHAPTERS[report.slug];
-    const html = renderToStaticMarkup(createElement(GlanceL, { data, who: report.who, platform: report.platform }));
-    const order = [escape(report.who), L_SAMPLES_REDO.glance.risk, escape(data.summary.truth ?? ''), escape(data.summary.what),
-      L_SAMPLES_REDO.glance.who, L_SAMPLES_REDO.glance.money, L_SAMPLES_REDO.glance.first].map(mark => html.indexOf(mark));
-    expect(order.every(index => index >= 0)).toBe(true);
-    expect([...order].sort((a, b) => a - b)).toEqual(order);
-    const plain = L_REPORTS.find(item => !item.truth) ?? L_REPORTS[0];
-    const calm = renderToStaticMarkup(createElement(GlanceL, { data: SAMPLE_CHAPTERS[plain.slug], who: plain.who, platform: plain.platform }));
-    expect(calm).not.toContain(L_SAMPLES_REDO.glance.risk);
+  it('draws each report\'s 15-second overview from its own figures: risk first, missing figures not drawn', () => {
+    for (const report of L_REPORTS) {
+      const data = SAMPLE_OVERVIEWS[report.slug];
+      expect(data).toBeDefined();
+      const html = renderToStaticMarkup(createElement(OverviewL, { data }));
+      const copy = L_SAMPLES_REDO.overview;
+      const order = [escape(data.positioning), data.riskAlert ? copy.risk : null, copy.audience, copy.platform, copy.funnel, copy.plan30, copy.first]
+        .filter((mark): mark is string => Boolean(mark)).map(mark => html.indexOf(mark));
+      expect(order.every(index => index >= 0)).toBe(true);
+      expect([...order].sort((a, b) => a - b)).toEqual(order);
+      for (const item of data.benchmarks) expect(html).toContain(copy.benchmark(item.id));
+      if (data.benchmarks.every(item => !item.medianViews)) expect(html).not.toContain(copy.medianViews);
+      expect(html).toContain(`>${copy.sketch}<`);
+      const text = html.replace(/<[^>]+>/g, '');
+      for (const word of ['虚构', 'AI 自媒体陪跑教练', 'http', '@']) expect(text).not.toContain(word);
+    }
+    expect(countOf('约 1.93 万')).toBe(19300);
+    expect(countOf('订阅 15,200')).toBe(15200);
+    expect(countOf(null)).toBeNull();
   });
 
   it('compares one scenario at a time: tabs, its title and point, the typed pair, the verdict, marked 示意', () => {
@@ -157,7 +170,11 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     for (const shown of first) expect(text).toContain(shown);
     expect(text).not.toContain(L_TASKS[1].question);
     expect(text).toContain(L_SCENARIOS.badge);
-    expect(text).not.toContain('AI 自媒体陪跑教练');
+    // The coach's side is a whole work conversation: library read, data fetched, the decision, what to do next, a follow-up.
+    for (const turn of L_WORKFLOWS[0]) expect(text).toContain(turn.user);
+    expect(text).toContain('已读取资料库');
+    expect(compare).toContain('aria-label="搜索记录"');
+    for (const turns of L_WORKFLOWS) expect(turns.every(turn => turn.reply.includes('接下来你做') || turn === turns[0] && turns.length > 1)).toBe(true);
     for (const task of L_TASKS) expect(task.coach).toContain('接下来你做');
     for (const brand of ['ChatGPT', 'Claude', 'Gemini', 'DeepSeek', '豆包', 'Kimi']) expect(text).not.toContain(brand);
     // A scenario whose capability is not built does not show; by default only the positioning one, so no tabs.
@@ -201,11 +218,13 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     }
   });
 
-  it('marks the 10-second card 示意: a summary drawn for the page, not a product screen', () => {
-    const report = L_REPORTS[0];
-    const html = renderToStaticMarkup(createElement(GlanceL, { data: SAMPLE_CHAPTERS[report.slug], who: report.who, platform: report.platform }));
-    expect(html).toContain(`>${L_SAMPLES_REDO.glance.sketch}<`);
-    expect(html).not.toContain('AI 自媒体陪跑教练');
+  it('carries no statement that the people are made up, and no hover hint under the cards (round five)', async () => {
+    for (const report of L_REPORTS) {
+      const markdown = await loadSampleReport(report.slug);
+      for (const line of ['人物是为说明各人群虚构的示例', '人物虚构', '细节虚构', '人物为虚构']) expect(markdown).not.toContain(line);
+    }
+    const html = render();
+    for (const hint of ['移到卡片上会停下', '左右滑动看更多']) expect(html).not.toContain(hint);
   });
 
   it('keeps the price comparison, our price quiet, and 先聊后买 right by its button', () => {

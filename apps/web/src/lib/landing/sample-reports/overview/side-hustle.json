@@ -1,0 +1,132 @@
+{
+  "slug": "side-hustle",
+  "persona": {
+    "label": "租房收纳副业 · TikTok",
+    "who": "在美国做物流运营的上班族，住一室一厅，不露脸，每周 7–8 小时"
+  },
+  "positioning": "英文、只拍手，用“仓库式整理”讲租房小空间低预算解法，承接 TikTok Shop 佣金",
+  "riskAlert": {
+    "headline": "可行但难：有人买，难在做出差别",
+    "why": [
+      "大量账号只是“一个商品 + 一句 game changer”",
+      "人群一次只花十几二十美元，单笔佣金低",
+      "几十个粉丝，大概率还达不到带货门槛"
+    ]
+  },
+  "audience": [
+    {
+      "name": "刚搬出来的新上班族",
+      "trigger": "入住、第一次领工资"
+    },
+    {
+      "name": "长住小公寓的租房族",
+      "trigger": "东西放不下、换季"
+    }
+  ],
+  "platform": {
+    "main": "TikTok（英文为主）",
+    "support": [
+      "Instagram Reels（第 3 周起同步）"
+    ],
+    "why": "佣金在 TikTok Shop 成交，视频挂商品点一下就能买"
+  },
+  "benchmarks": [
+    {
+      "id": "A",
+      "type": "租房小空间整理改造号",
+      "followers": "约 5.4 万",
+      "medianViews": null,
+      "engagementRate": "衣柜视频收藏率约 4.8%",
+      "updateFreq": "近一个月仍在更新",
+      "learn": "清单式标题，一个空间讲透做系列"
+    },
+    {
+      "id": "B",
+      "type": "物品镜头为主的家居好物号",
+      "followers": "约 15.9 万",
+      "medianViews": null,
+      "engagementRate": "浴室好物收藏率约 5%",
+      "updateFreq": null,
+      "learn": "7–18 秒，一条讲一个空间"
+    },
+    {
+      "id": "C",
+      "type": "TikTok Shop 带货号",
+      "followers": "约 2.3 万",
+      "medianViews": null,
+      "engagementRate": "浴室置物架收藏率约 0.1%",
+      "updateFreq": null,
+      "learn": "普通人用手机就能跑通挂车成交"
+    }
+  ],
+  "differentiation": "物流人用仓库思路整理，专做不打孔、大多 20 美元内的解法",
+  "threePiece": {
+    "name": "Small Space Ops",
+    "bio": "物流人用仓库方法整理小租房，租房友好，大多 20 美元以内"
+  },
+  "contentPillars": [
+    {
+      "name": "流量型",
+      "share": "60%"
+    },
+    {
+      "name": "信任型",
+      "share": "30%"
+    },
+    {
+      "name": "转化型",
+      "share": "10%"
+    }
+  ],
+  "funnel": [
+    {
+      "layer": "免费内容",
+      "offer": "每条解决一个具体问题的视频",
+      "price": null
+    },
+    {
+      "layer": "入门商品",
+      "offer": "TikTok Shop 单品",
+      "price": "十几到二十美元"
+    },
+    {
+      "layer": "整套方案",
+      "offer": "一个角落 3–5 样东西的组合",
+      "price": "约 30–100 美元（假设）"
+    },
+    {
+      "layer": "品牌合作",
+      "offer": "先寄样，再谈付费视频",
+      "price": null
+    }
+  ],
+  "plan30": [
+    {
+      "week": 1,
+      "focus": "三条支柱各试一条（选题 1、2、3）"
+    },
+    {
+      "week": 2,
+      "focus": "试对比、清单、厨房三种结构"
+    },
+    {
+      "week": 3,
+      "focus": "加量做好的结构，开始同步 Reels"
+    },
+    {
+      "week": 4,
+      "focus": "继续加量，月底复盘"
+    }
+  ],
+  "metricsToWatch": [
+    "收藏率",
+    "问链接和尺寸的评论",
+    "新增关注"
+  ],
+  "firstStep": [
+    "改名 Small Space Ops，复制推荐简介",
+    "旧开箱视频设为仅自己可见，只留小空间内容",
+    "打开创作者中心，记下离带货门槛还差什么"
+  ],
+  "sourceNote": "2026-10-15 通过数据工具查到的 TikTok 公开数据，来自网络，真实性待考证，仅供参考"
+}

@@ -7,6 +7,7 @@ import { CtaK } from '@/components/landing/preview-k/CtaK';
 import k from '@/components/landing/preview-k/k.module.css';
 import page from '@/components/landing/preview-j/j.module.css';
 import takeover from '@/components/landing/preview-j/takeover-j.module.css';
+import { HOW_IT_WORKS } from '@/lib/landing/landing-copy';
 import { L_STEPS, type StepStage } from '@/lib/landing/landing-copy-l-steps';
 import { allOn, visibleItems, type LandingFlags } from '@/lib/landing/landing-flags';
 import { cn } from '@/lib/utils';
@@ -14,7 +15,7 @@ import { PositioningPictureL } from './PositioningPictureL';
 import styles from './steps-l.module.css';
 
 /** How much of the scroll each stage takes: the two long conversations more, the plan's short summary less. */
-const WEIGHT: Record<number, number> = { 0: 3, 1: 3, 2: 1.5, 3: 2.5 };
+const WEIGHT: Record<number, number> = { 0: 3, 1: 3, 2: 1.5, 3: 1.2 };
 const SEEN_KEY = 'graylum-landing-l-step-one-seen';
 const reducedMotion = () => Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
 const readSeen = () => { try { return window.localStorage.getItem(SEEN_KEY) === '1'; } catch { return false; } };
@@ -44,7 +45,7 @@ export function stageAt(stages: readonly StepStage[], progress: number) {
  */
 export function StepsL({ flags }: { flags: LandingFlags }) {
   const stages = visibleItems(flags, L_STEPS.one.stages);
-  const ref = useRef<HTMLElement>(null);
+  const ref = useRef<HTMLDivElement>(null);
   const [locked, setLocked] = useState(false);
   const [progress, setProgress] = useState(0);
   const [seen, setSeen] = useState(false);
@@ -59,7 +60,6 @@ export function StepsL({ flags }: { flags: LandingFlags }) {
       const rect = node.getBoundingClientRect();
       const next = Math.round(Math.min(1, Math.max(0, -rect.top / Math.max(1, rect.height - window.innerHeight))) * 400) / 400;
       setProgress(next);
-      if (next >= 0.98) writeSeen();
     };
     const onScroll = () => { if (!frame) frame = requestAnimationFrame(measure); };
     measure();
@@ -75,15 +75,19 @@ export function StepsL({ flags }: { flags: LandingFlags }) {
   const later = L_STEPS.later.filter(step => step.built && allOn(flags, step.needs));
   const { index, local } = stageAt(stages, progress);
   const stage = stages[index];
+  // Owner 2026-10-17, round five: the step counts as watched once the report dialog opens; from then on it can be skipped.
+  const reportOpen = locked && stage?.moment === 3;
+  useEffect(() => { if (reportOpen) { writeSeen(); setSeen(true); } }, [reportOpen]);
 
   return (
-    <div id="how-it-works" data-zone="takeover" data-region="三步">
+    <section id="how-it-works" aria-labelledby="steps-title" data-zone="takeover" data-region="三步">
+      <div className={cn(k.wrap, styles.intro)}><h2 id="steps-title" className={k.lead}>{HOW_IT_WORKS.title}</h2></div>
       {locked && stage ? (
-        <section ref={ref} aria-labelledby="steps-title" className={cn(takeover.takeover, styles.story)}>
+        <div ref={ref} role="group" aria-labelledby="step-one-title" className={cn(takeover.takeover, styles.story)}>
           <div className={cn(takeover.stage, styles.stage)}>
             <div className={cn(page.wrap, takeover.frame)}>
               <div className={takeover.head}>
-                <h2 id="steps-title" className={takeover.title}>{L_STEPS.one.title}</h2>
+                <h3 id="step-one-title" className={takeover.title}>{L_STEPS.one.title}</h3>
                 <div className={takeover.caption} aria-live="polite" key={stage.label}><h3>{stage.label}</h3><p>{stage.note}</p></div>
               </div>
               <div className={styles.progress}>
@@ -101,11 +105,11 @@ export function StepsL({ flags }: { flags: LandingFlags }) {
               <div className={takeover.picture}><PositioningPictureL moment={stage.moment} local={local} /></div>
             </div>
           </div>
-        </section>
+        </div>
       ) : (
-        <section aria-labelledby="steps-title" className={cn(page.section, takeover.static)}>
+        <div role="group" aria-labelledby="step-one-title" className={cn(styles.staticOne, takeover.static)}>
           <div className={page.wrap}>
-            <h2 id="steps-title" className={page.display}>{L_STEPS.one.title}</h2>
+            <h3 id="step-one-title" className={styles.stepTitle}>{L_STEPS.one.title}</h3>
             {stages.map(item => (
               <article key={item.label} className={takeover.staticStep} data-region="第一步的阶段">
                 <div className={takeover.caption}><h3>{item.label}</h3><p>{item.note}</p></div>
@@ -113,18 +117,18 @@ export function StepsL({ flags }: { flags: LandingFlags }) {
               </article>
             ))}
           </div>
-        </section>
+        </div>
       )}
       <div className={cn(k.wrap, styles.after)}><CtaK /></div>
       {later.map(step => (
-        <section key={step.title} aria-label={step.title} className={k.section} data-region={step.title.slice(0, 3)}>
+        <div key={step.title} role="group" aria-label={step.title} className={styles.later} data-region={step.title.slice(0, 3)}>
           <div className={k.wrap}>
-            <h2 className={k.lead}>{step.title}</h2>
-            <ol className={styles.later}>{step.items.map(item => <li key={item}>{item}</li>)}</ol>
+            <h3 className={styles.stepTitle}>{step.title}</h3>
+            <ol className={styles.laterItems}>{step.items.map(item => <li key={item}>{item}</li>)}</ol>
             <CtaK />
           </div>
-        </section>
+        </div>
       ))}
-    </div>
+    </section>
   );
 }

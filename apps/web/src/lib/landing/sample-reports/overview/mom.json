@@ -1,0 +1,157 @@
+{
+  "slug": "mom",
+  "persona": {
+    "label": "幼师妈妈 · 小红书",
+    "who": "当了 6 年幼儿园老师的两娃妈妈，家有 200 多本绘本"
+  },
+  "positioning": "幼儿园老师出身，教 2–6 岁孩子的妈妈把绘本讲活，承接付费亲子共读",
+  "riskAlert": {
+    "headline": "起步不做广告带货，先做付费亲子共读",
+    "why": [
+      "广告要等粉丝和数据，你控制不了",
+      "绘本单价几十元，佣金薄",
+      "讲绘本账号很多，只列书名难被记住"
+    ]
+  },
+  "audience": [
+    {
+      "name": "上班妈妈，孩子 3–5 岁",
+      "trigger": "孩子一听就跑、自己读得没劲"
+    },
+    {
+      "name": "同小区的妈妈",
+      "trigger": "周六上午、下雨天"
+    },
+    {
+      "name": "快入园、刚入园的妈妈",
+      "trigger": "入园前后一两个月"
+    }
+  ],
+  "platform": {
+    "main": "小红书",
+    "support": [],
+    "why": "妈妈们习惯在上面搜书单、搜“怎么办”"
+  },
+  "benchmarks": [
+    {
+      "id": "A",
+      "type": "3–6 岁绘本图文号",
+      "followers": "3.7 万",
+      "medianViews": null,
+      "engagementRate": null,
+      "updateFreq": "近一个月 12 篇",
+      "learn": "固定“一个问题 + 一本书”标题"
+    },
+    {
+      "id": "B",
+      "type": "绘本动画精读视频号",
+      "followers": "9.2 万",
+      "medianViews": null,
+      "engagementRate": null,
+      "updateFreq": "近一个月 10 条",
+      "learn": "每本书挂一个育儿问题"
+    },
+    {
+      "id": "C",
+      "type": "学习型妈妈综合号",
+      "followers": "5.7 万",
+      "medianViews": null,
+      "engagementRate": null,
+      "updateFreq": "还在更新",
+      "learn": "“怎么选、怎么做”工具型内容"
+    },
+    {
+      "id": "D",
+      "type": "全职妈妈养娃好物号",
+      "followers": "1.9 万",
+      "medianViews": null,
+      "engagementRate": null,
+      "updateFreq": "近半年有更新",
+      "learn": "证明“不会讲”是妈妈的大痛点"
+    },
+    {
+      "id": "E",
+      "type": "妈妈博主书单号",
+      "followers": "7.4 万",
+      "medianViews": null,
+      "engagementRate": null,
+      "updateFreq": "近一个月 4 篇",
+      "learn": "置顶一份高收藏总书单"
+    }
+  ],
+  "differentiation": "6 年幼师教妈妈自己讲，讲完带手工，还劝你少买",
+  "threePiece": {
+    "name": "林老师讲绘本",
+    "bio": "当了 6 年幼儿园老师，教你把绘本讲活：怎么讲、讲完玩什么"
+  },
+  "contentPillars": [
+    {
+      "name": "流量型（孩子的问题 + 一本书）",
+      "share": "50%"
+    },
+    {
+      "name": "信任型（讲法、翻读记录、共读现场）",
+      "share": "35%"
+    },
+    {
+      "name": "转化型（第 5 周后才出现）",
+      "share": "15%"
+    }
+  ],
+  "funnel": [
+    {
+      "layer": "免费",
+      "offer": "小红书笔记；群里每周推荐一本书",
+      "price": null
+    },
+    {
+      "layer": "入门",
+      "offer": "单次体验共读 1 小时",
+      "price": "29 元/孩（假设）"
+    },
+    {
+      "layer": "主力",
+      "offer": "4 次共读卡",
+      "price": "168 元（假设）"
+    },
+    {
+      "layer": "线上主力（中期）",
+      "offer": "21 天睡前共读",
+      "price": "49–99 元（假设）"
+    },
+    {
+      "layer": "深度",
+      "offer": "家庭阅读规划",
+      "price": "199 元（假设）"
+    }
+  ],
+  "plan30": [
+    {
+      "week": 1,
+      "focus": "验证“怎么讲”是不是主线：发 2 篇图文"
+    },
+    {
+      "week": 2,
+      "focus": "试声音短视频和“少买”内容"
+    },
+    {
+      "week": 3,
+      "focus": "试入园人群，办第一次周六共读"
+    },
+    {
+      "week": 4,
+      "focus": "加量最好的一类，试手工"
+    }
+  ],
+  "metricsToWatch": [
+    "收藏",
+    "“怎么讲”的追问",
+    "共读报名和付费人数"
+  ],
+  "firstStep": [
+    "改名“林老师讲绘本”，换头像和简介",
+    "拍好选题 1 的照片",
+    "在妈妈群问共读意向，约活动室"
+  ],
+  "sourceNote": "观察日期 2026-10-17，数据来自小红书公开主页和公开平台接口，来自网络公开信息，真实性待考证，仅供参考"
+}

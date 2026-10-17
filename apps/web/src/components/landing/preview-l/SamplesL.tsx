@@ -11,7 +11,8 @@ import { J_SAMPLES } from '@/lib/landing/landing-copy-j-samples';
 import { L_REPORTS } from '@/lib/landing/landing-copy-l';
 import { L_SAMPLES_REDO as COPY } from '@/lib/landing/landing-copy-l-samples';
 import { SAMPLE_CHAPTERS } from '@/lib/landing/sample-reports';
-import { GlanceL } from './GlanceL';
+import { SAMPLE_OVERVIEWS } from '@/lib/landing/sample-reports/overview';
+import { OverviewL } from './OverviewL';
 import styles from './l.module.css';
 import own from './samples-l.module.css';
 
@@ -24,8 +25,8 @@ const MIN_CARDS = 8;
  * that keeps moving from right to left; the pointer or keyboard focus on it holds it. A card shows the group and
  * platform, the one-sentence conclusion (three lines at most), its tags (「示例」, and 「方向已调整」 when the coach changed
  * the direction) and 「看这份报告」. Every visible card opens its report, the loop's second copy too: that copy is hidden
- * from screen readers and taken out of the tab order, but a click on it works. The dialog: the cover, the 10-second
- * card (GlanceL) and the whole report behind "看完整报告". Reduced motion and touch screens: the row stands still and is
+ * from screen readers and taken out of the tab order, but a click on it works. The dialog: the cover, the 15-second
+ * overview (OverviewL, round five) and the whole report behind "看完整报告". Reduced motion and touch screens: the row stands still and is
  * swiped by hand. New reports join by adding them to L_REPORTS and sample-reports/.
  */
 export function SamplesL() {
@@ -43,7 +44,6 @@ export function SamplesL() {
           <p className={own.lede}>
             {COPY.ledeParts(reports.length).map(part => <span key={part} className={own.keep}>{part}</span>)}
           </p>
-          <p className={own.hint}><span data-pointer="fine">{COPY.pause}</span><span data-pointer="touch">{COPY.swipe}</span></p>
         </div>
       </div>
       <div className={styles.marquee} data-region="报告卡片">
@@ -87,7 +87,7 @@ export function SamplesL() {
                 <p className={samples.size}>{J_SAMPLES.size}</p>
               </div>
             </header>
-            <GlanceL data={data} who={open.who} platform={open.platform} />
+            {SAMPLE_OVERVIEWS[open.slug] ? <OverviewL data={SAMPLE_OVERVIEWS[open.slug]} /> : null}
             <FullReport key={open.slug} slug={open.slug} />
           </div>
         ) : null}

@@ -1,0 +1,83 @@
+{
+  "slug": "course-creator",
+  "persona": {
+    "label": "职场技能讲师 · 小红书",
+    "who": "外企财务分析师，副业教 Excel 3 年，小红书 2.8 万粉"
+  },
+  "positioning": "10 年外企财务分析师拆真实汇报，教职场人让老板一眼看到结论",
+  "riskAlert": {
+    "headline": "下个月直接对所有粉丝公开招训练营，不建议",
+    "why": [
+      "录播课完课率只有三成，交付还没跑通",
+      "技巧赛道太挤，两个卖课同类号点赞中位数仅 4 和 11"
+    ]
+  },
+  "audience": [
+    { "name": "每周交数据汇报的业务岗", "trigger": "被问“所以结论是什么”之后" },
+    { "name": "老学员", "trigger": "看到老同学有进步" },
+    { "name": "刚转岗或刚升小主管的人", "trigger": "升职、转岗后第一次汇报前" }
+  ],
+  "platform": {
+    "main": "小红书",
+    "support": ["视频号（只同步）"],
+    "why": "2.8 万粉和过去的成交都在这里，实用内容能被长期搜到"
+  },
+  "benchmarks": [
+    {
+      "id": "A",
+      "type": "财务分析和建模",
+      "followers": "2.41 万粉",
+      "medianViews": null,
+      "engagementRate": null,
+      "updateFreq": "8 月仍在更新",
+      "learn": "置顶笔记就是产品说明"
+    },
+    {
+      "id": "B",
+      "type": "职场 Excel 报表",
+      "followers": "2.32 万粉",
+      "medianViews": null,
+      "engagementRate": null,
+      "updateFreq": "9 月仍在更新",
+      "learn": "产品名直接写周期和结果"
+    },
+    {
+      "id": "C",
+      "type": "Excel 技巧和系列课（B 站）",
+      "followers": "10.1 万粉",
+      "medianViews": "约 6,286",
+      "engagementRate": null,
+      "updateFreq": "两周一条",
+      "learn": "“常见误区”类收藏型选题"
+    }
+  ],
+  "differentiation": "不比谁函数讲得多，改讲老板怎么看你的汇报",
+  "threePiece": {
+    "name": "沈悦拆汇报",
+    "bio": "外企财务分析 10 年｜教你把数据做成“老板一眼看懂”的周报月报"
+  },
+  "contentPillars": [
+    { "name": "流量型", "share": "40%" },
+    { "name": "信任型", "share": "40%" },
+    { "name": "转化型：小班过程和学员作业", "share": "20%" }
+  ],
+  "funnel": [
+    { "layer": "免费价值", "offer": "小红书笔记、视频，模板截图", "price": "免费" },
+    { "layer": "入门产品", "offer": "现有录播课", "price": "199 元" },
+    { "layer": "主力产品", "offer": "4 周小班训练营，每期 20 人", "price": null },
+    { "layer": "深度服务", "offer": "一对一汇报诊断，每月少量名额", "price": null }
+  ],
+  "plan30": [
+    { "week": 1, "focus": "测“汇报”痛点：案例型对比误区型" },
+    { "week": 2, "focus": "测身份内容，学员群发意向问卷" },
+    { "week": 3, "focus": "公布 20 人小班，开始报名" },
+    { "week": 4, "focus": "开营，内容和交付合并" }
+  ],
+  "metricsToWatch": ["案例类收藏和追问", "问卷回收数", "报名人数", "作业提交率"],
+  "firstStep": [
+    "显示名改成“沈悦拆汇报”，换头像和简介",
+    "在学员群发“首期小班意向问卷”",
+    "定下每周二、五晚上固定发布"
+  ],
+  "sourceNote": "对标数据观察日期 2026-10-17，来自网络公开信息，真实性待考证，仅供参考"
+}

@@ -1,0 +1,101 @@
+{
+  "slug": "restaurant",
+  "persona": {
+    "label": "湘菜馆老板 · 抖音",
+    "who": "长沙开店 6 年的湘菜馆老板，想让附近的人晚上、周末来吃饭"
+  },
+  "positioning": "老刘亲自炒招牌湘菜，讲清附近一家人晚上怎么吃，承接晚市和周末到店",
+  "riskAlert": {
+    "headline": "别把上热门当目标，也别再做低价团购",
+    "why": [
+      "外地播放不会来吃晚饭",
+      "低价券招来用完就走的人，上次核销一半、回头不多"
+    ]
+  },
+  "audience": [
+    { "name": "3 公里内的家庭聚餐", "trigger": "周五定周末去哪吃、老人生日" },
+    { "name": "附近朋友聚会", "trigger": "周五、发工资、有人请客" },
+    { "name": "午市老面孔", "trigger": "工作日中午，晚上带家人来要理由" }
+  ],
+  "platform": {
+    "main": "抖音（现有店铺号）",
+    "support": ["大众点评（只维护，不做内容）"],
+    "why": "能卖团购、挂门店，附近的人刷到可直接买券到店"
+  },
+  "benchmarks": [
+    {
+      "id": "A",
+      "type": "长沙湘菜馆，老板娘出镜",
+      "followers": "39,384 粉",
+      "medianViews": null,
+      "engagementRate": null,
+      "updateFreq": "持续更新",
+      "learn": "老板一天的真实片段带门店"
+    },
+    {
+      "id": "B",
+      "type": "湘菜小店",
+      "followers": "14,633 粉",
+      "medianViews": null,
+      "engagementRate": null,
+      "updateFreq": "在更新",
+      "learn": "一个具体的食材故事最有力"
+    },
+    {
+      "id": "C",
+      "type": "湘菜馆女老板人设号",
+      "followers": "14,164 粉",
+      "medianViews": null,
+      "engagementRate": null,
+      "updateFreq": "在更新",
+      "learn": "签名把老板性格说清楚，好记"
+    },
+    {
+      "id": "D",
+      "type": "东北菜馆，主打家庭聚餐",
+      "followers": "23,133 粉",
+      "medianViews": null,
+      "engagementRate": null,
+      "updateFreq": "几乎每天发",
+      "learn": "一道招牌硬菜当固定标签"
+    },
+    {
+      "id": "E",
+      "type": "江西小炒单店",
+      "followers": "17,273 粉",
+      "medianViews": null,
+      "engagementRate": null,
+      "updateFreq": "在更新",
+      "learn": "拍招牌菜制作过程"
+    }
+  ],
+  "differentiation": "老板本人掌勺，专讲“一桌人晚上怎么点”，对标里没人做",
+  "threePiece": {
+    "name": "湘菜老刘·（你的店名）",
+    "bio": "长沙开湘菜馆第 6 年，老刘自己掌勺｜附近一家人晚上来坐坐"
+  },
+  "contentPillars": [
+    { "name": "流量型", "share": "50%" },
+    { "name": "信任型", "share": "40%" },
+    { "name": "转化型", "share": "10%" }
+  ],
+  "funnel": [
+    { "layer": "免费内容", "offer": "老刘炒菜视频，挂门店位置", "price": "免费" },
+    { "layer": "入门", "offer": "晚市招牌套餐，限晚市和周末", "price": null },
+    { "layer": "主力", "offer": "正价到店点菜", "price": null },
+    { "layer": "深度", "offer": "生日宴、小包厢、家宴菜", "price": null }
+  ],
+  "plan30": [
+    { "week": 1, "focus": "习惯对着镜头炒菜，拍招牌菜和后厨" },
+    { "week": 2, "focus": "测“一桌人怎么吃”：家庭和朋友" },
+    { "week": 3, "focus": "测信任类：晚市卖点、进货、老客" },
+    { "week": 4, "focus": "小量上晚市招牌套餐" }
+  ],
+  "metricsToWatch": ["问地址的评论", "门店点击", "团购核销率", "晚市翻台"],
+  "firstStep": [
+    "改好显示名、头像和简介",
+    "算清晚市桌均和团购底线价",
+    "拍第一条：剁椒鱼头上桌前的三个讲究"
+  ],
+  "sourceNote": "对标数据观察日期 2026-10-17，来自网络公开信息，真实性待考证，仅供参考"
+}

@@ -1,0 +1,137 @@
+{
+  "slug": "accountant",
+  "persona": {
+    "label": "在美持证会计 · YouTube",
+    "who": "加州事务所 9 年持证税务会计，中英双语，每周 4–5 小时"
+  },
+  "positioning": "不卖产品的持证会计，用一张表加一个例子，把在美华人第一次报税讲慢、讲清楚",
+  "riskAlert": {
+    "headline": "观众最需要你的 1–4 月，正好是你最忙的时候",
+    "why": [
+      "同类账号常见的问题是税季后断更",
+      "评论区给个人下结论，接近个人税务建议",
+      "收费前须确认事务所规定、执照和保险"
+    ]
+  },
+  "audience": [
+    {
+      "name": "第二年想自己报的新移民上班族",
+      "trigger": "1 月收到 W-2；去年找人报觉得贵"
+    },
+    {
+      "name": "有孩子的双职工小家庭",
+      "trigger": "孩子出生、上学、换工作"
+    },
+    {
+      "name": "身份转换年的人",
+      "trigger": "拿到新身份后的第一个报税季"
+    }
+  ],
+  "platform": {
+    "main": "YouTube 长视频",
+    "support": [
+      "YouTube Shorts"
+    ],
+    "why": "报税是搜索型需求，讲清楚的一条视频能被搜几年"
+  },
+  "benchmarks": [
+    {
+      "id": "A",
+      "type": "持证税务师个人频道",
+      "followers": "约 1.93 万",
+      "medianViews": null,
+      "engagementRate": null,
+      "updateFreq": "近两周每周 4–5 条",
+      "learn": "做系列，跟时间节点选题"
+    },
+    {
+      "id": "B",
+      "type": "注册税务师团队频道",
+      "followers": "约 3.05 万",
+      "medianViews": null,
+      "engagementRate": null,
+      "updateFreq": "每周约 1 条",
+      "learn": "编号分集，免费咨询作入口"
+    },
+    {
+      "id": "C",
+      "type": "个人理财创作者",
+      "followers": "约 2.32 万",
+      "medianViews": null,
+      "engagementRate": null,
+      "updateFreq": "近 1 个月在更新",
+      "learn": "“A 和 B 差在哪”的对比题"
+    }
+  ],
+  "differentiation": "持证 9 年会计亲自讲，不卖产品、不接金融广告，用表格慢讲",
+  "threePiece": {
+    "name": "周会计慢慢讲税",
+    "bio": "加州事务所 9 年持证税务会计，用表格和例子慢慢讲清报税，不卖理财产品"
+  },
+  "contentPillars": [
+    {
+      "name": "流量型",
+      "share": "60%"
+    },
+    {
+      "name": "信任型（脱敏案例）",
+      "share": "30%"
+    },
+    {
+      "name": "转化型（什么情况该找人）",
+      "share": "10%"
+    }
+  ],
+  "funnel": [
+    {
+      "layer": "免费",
+      "offer": "长视频 + 一页报税前资料清单",
+      "price": "免费"
+    },
+    {
+      "layer": "入门",
+      "offer": "1 月开放 30 分钟报税前资料梳理",
+      "price": "价格假设 49–79 美元"
+    },
+    {
+      "layer": "主力",
+      "offer": "5–12 月年度税务体检 60 分钟",
+      "price": "价格假设 149–249 美元"
+    },
+    {
+      "layer": "深度 / 睡后",
+      "offer": "录播小课“第一次自己报税”，第二年做",
+      "price": "价格假设 49–99 美元"
+    }
+  ],
+  "plan30": [
+    {
+      "week": 1,
+      "focus": "跑通流程：发第 1 条“W-2 每一格是什么意思”"
+    },
+    {
+      "week": 2,
+      "focus": "测讲法 A：一张表对比 401(k) 和 IRA"
+    },
+    {
+      "week": 3,
+      "focus": "测讲法 B：常见错误，退税为什么比去年少"
+    },
+    {
+      "week": 4,
+      "focus": "加量表现好的讲法，加 1 条 Shorts"
+    }
+  ],
+  "metricsToWatch": [
+    "观看时长",
+    "收藏",
+    "评论提问",
+    "订阅转化"
+  ],
+  "firstStep": [
+    "书面问清事务所对外部咨询、做频道的规定",
+    "改好频道名称、头像、简介",
+    "做一个“表格讲解”模板"
+  ],
+  "sourceNote": "对标数据来自 YouTube 公开页面，观察日期 2026-10-15，来自网络公开信息，真实性待考证，仅供参考"
+}

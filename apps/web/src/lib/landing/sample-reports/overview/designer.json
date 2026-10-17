@@ -1,0 +1,141 @@
+{
+  "slug": "designer",
+  "persona": {
+    "label": "小店品牌设计师 · IG",
+    "who": "台湾接案两年的平面设计师，40 多个案子，不露脸，每周约 6 小时"
+  },
+  "positioning": "不教设计，改给小店老板看品牌改造前后，承接 NT$30,000 起的品牌起步套组",
+  "riskAlert": {
+    "headline": "要换内容方向：不教设计，改做给老板看的品牌改造",
+    "why": [
+      "教设计吸引同行和学生，和目标对不上",
+      "3 万在个人设计师价格带的顶端",
+      "台湾同类账号普遍做不大"
+    ]
+  },
+  "audience": [
+    {
+      "name": "筹备开店的咖啡、甜点店老板",
+      "trigger": "开店前 1–3 个月"
+    },
+    {
+      "name": "开店 1–3 年想改版的小店",
+      "trigger": "开店一两年后"
+    },
+    {
+      "name": "手作、文创品牌主理人",
+      "trigger": "上市集、上网店、送礼季前"
+    }
+  ],
+  "platform": {
+    "main": "Instagram",
+    "support": [
+      "Threads"
+    ],
+    "why": "老板找设计师会看 IG 作品，图集适合放改造前后"
+  },
+  "benchmarks": [
+    {
+      "id": "A",
+      "type": "台湾小品牌 logo 设计师",
+      "followers": "IG 2.27 万",
+      "medianViews": null,
+      "engagementRate": "约 0.7%",
+      "updateFreq": "近 6 个月约每月 1 帖",
+      "learn": "用老板的疑问开头，先列旧图问题"
+    },
+    {
+      "id": "B",
+      "type": "台湾 logo 设计服务号",
+      "followers": "IG 4.6 万",
+      "medianViews": null,
+      "engagementRate": null,
+      "updateFreq": null,
+      "learn": "按留言点名做 logo 的系列"
+    },
+    {
+      "id": "C",
+      "type": "平面设计师转插画角色号",
+      "followers": "IG 8.03 万",
+      "medianViews": null,
+      "engagementRate": null,
+      "updateFreq": null,
+      "learn": "固定角色、固定画风的系列"
+    }
+  ],
+  "differentiation": "有旧图做真实改造前后，能卖整套，还公开起价",
+  "threePiece": {
+    "name": "怡婷・小店品牌改造",
+    "bio": "帮咖啡、甜点、手作小店改头换面｜Logo・菜单・包装一次做齐"
+  },
+  "contentPillars": [
+    {
+      "name": "流量型",
+      "share": "50%"
+    },
+    {
+      "name": "信任型",
+      "share": "35%"
+    },
+    {
+      "name": "转化型（第 3 周开始）",
+      "share": "15%"
+    }
+  ],
+  "funnel": [
+    {
+      "layer": "改造内容",
+      "offer": "IG 图集、Threads 案例",
+      "price": "免费"
+    },
+    {
+      "layer": "免费门面健检",
+      "offer": "每周公开点评 1 家",
+      "price": "免费"
+    },
+    {
+      "layer": "品牌健诊",
+      "offer": "线上 40 分钟 + 一页改造方向",
+      "price": "NT$2,500（假设，可抵扣套组）"
+    },
+    {
+      "layer": "品牌起步套组",
+      "offer": "logo、标准色字、菜单、IG 版型等",
+      "price": "NT$30,000 起"
+    },
+    {
+      "layer": "包装系列和年度视觉",
+      "offer": "季节包装、新品贴纸",
+      "price": null
+    }
+  ],
+  "plan30": [
+    {
+      "week": 1,
+      "focus": "测“改造前后”能不能让老板停下"
+    },
+    {
+      "week": 2,
+      "focus": "测清单型内容和菜单切口"
+    },
+    {
+      "week": 3,
+      "focus": "测案例故事，征集免费门面健检"
+    },
+    {
+      "week": 4,
+      "focus": "公开起价，看询价预算对不对"
+    }
+  ],
+  "metricsToWatch": [
+    "收藏",
+    "老板身份的留言",
+    "询价表单的预算区间"
+  ],
+  "firstStep": [
+    "换好 IG 名称、头像、简介",
+    "整理 15 个可公开案例，有旧图的标星",
+    "开 LINE 官方帐号，设询价表单"
+  ],
+  "sourceNote": "观察日期 2026-10-17，数据来自公开平台接口，来自网络公开信息，真实性待考证，仅供参考"
+}
