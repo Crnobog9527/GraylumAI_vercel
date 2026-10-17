@@ -107,16 +107,17 @@ export async function runCases({db,report}) {
  assert.deepEqual(listing.documents.map(d=>[d.ref,d.title]),[['doc-1','Menu.md'],['doc-2','Notes.md']]);
  report.checks.push('library index lists retrieved documents of an execution without @ references');
 
- // Trigram indexes are used by the ILIKE patterns (index scans forced so a tiny table cannot hide a missing index).
+ // The search filters are 'column ILIKE ANY(array)': the trigram indexes serve exactly that shape (index scans are forced
+ // so a tiny table cannot hide a missing index; a 1- or 2-character pattern cannot use a trigram index, only 3+ can).
  await db.query('BEGIN');await db.query('SET LOCAL enable_seqscan=off');
  try{
-  for(const [table,column,pattern] of [['library_document_segments','body','%苹果派%'],['library_document_segments','title','%开场%'],
-   ['library_documents','filename','%Menu%']]){
-   const plan=(await db.query(`EXPLAIN SELECT 1 FROM ${table} WHERE ${column} ILIKE $1`.replace('$1',`'${pattern}'`))).rows.map(r=>r['QUERY PLAN']).join('\n');
+  for(const [table,column,patterns] of [['library_document_segments','body',"'%苹果派%','%banana%'"],
+   ['library_document_segments','title',"'%开场%','%Chapter%'"],['library_documents','filename',"'%Menu%','%Notes%'"]]){
+   const plan=(await db.query(`EXPLAIN SELECT 1 FROM ${table} WHERE ${column} ILIKE ANY(ARRAY[${patterns}])`)).rows.map(r=>r['QUERY PLAN']).join('\n');
    assert.ok(/trgm/.test(plan),`${table}.${column}: ${plan}`);
   }
  }finally{await db.query('ROLLBACK');}
- report.checks.push('trigram indexes serve ILIKE on segment body, segment title and file name');
+ report.checks.push('ILIKE ANY(patterns) on segment body, segment title and file name is served by the trigram indexes');
 
  // Replay: a stored search result is visible only while all its documents are live at their frozen version.
  const replay=await exec(db,a,sid);

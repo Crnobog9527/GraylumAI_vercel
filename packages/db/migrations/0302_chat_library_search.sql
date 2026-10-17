@@ -38,7 +38,7 @@ CREATE OR REPLACE FUNCTION public.runtime_library_read(p_actor_id uuid,p_executi
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE e runtime_executions; ref runtime_library_references; d library_documents; m text[]; result jsonb;
  page integer; total integer; used bigint; reads integer; cap integer; seg library_document_segments;
- terms text[]; searches integer; next_ordinal integer; hit record; hits jsonb:='[]'; picked uuid[]:='{}'; note text;
+ terms text[]; pats text[]; body_pats text[]; searches integer; next_ordinal integer; hit record; hits jsonb:='[]'; picked uuid[]:='{}'; note text;
 BEGIN
  PERFORM bill2_actor(p_actor_id);
  SELECT * INTO e FROM runtime_executions WHERE id=p_execution_id AND actor_id=p_actor_id;
@@ -79,6 +79,11 @@ BEGIN
    SELECT btrim(x) w FROM unnest(regexp_split_to_array(substr(p_query,8),'[\s,，、;；]+')) x) q WHERE w<>'';
   IF cardinality(terms) NOT BETWEEN 1 AND 5 OR EXISTS(SELECT 1 FROM unnest(terms) w WHERE char_length(w) NOT BETWEEN 1 AND 40)
   THEN RETURN jsonb_build_object('kind','unavailable','reason','unknown_query'); END IF;
+  -- Literal LIKE patterns, built once so the filters below are plain 'column ILIKE ANY(array)' conditions the trigram
+  -- indexes can serve. Bodies are matched by words of 2 or more characters only (a 1-character word is too noisy).
+  SELECT array_agg('%'||replace(replace(replace(w,E'\\',E'\\\\'),'%',E'\\%'),'_',E'\\_')||'%'),
+   coalesce(array_agg('%'||replace(replace(replace(w,E'\\',E'\\\\'),'%',E'\\%'),'_',E'\\_')||'%') FILTER (WHERE char_length(w)>=2),'{}')
+   INTO pats,body_pats FROM unnest(terms) w;
   -- Top 8 segments (at most 3 per document) by how many words they match.
   FOR hit IN SELECT * FROM (
     SELECT sg.document_id,sg.ordinal,sg.title,sg.page_number,ld.filename,ld.content_version,mt.score,mt.pos,sg.body,
@@ -89,7 +94,8 @@ BEGIN
       WHERE (char_length(w)>=2 AND sg.body ILIKE '%'||replace(replace(replace(w,E'\\',E'\\\\'),'%',E'\\%'),'_',E'\\_')||'%')
        OR sg.title ILIKE '%'||replace(replace(replace(w,E'\\',E'\\\\'),'%',E'\\%'),'_',E'\\_')||'%'
        OR coalesce(ld.filename,'') ILIKE '%'||replace(replace(replace(w,E'\\',E'\\\\'),'%',E'\\%'),'_',E'\\_')||'%') mt
-    WHERE sg.actor_id=p_actor_id AND ld.kind='document' AND ld.status='ready' AND ld.deleted_at IS NULL AND mt.score>0) ranked
+    WHERE sg.actor_id=p_actor_id AND ld.kind='document' AND ld.status='ready' AND ld.deleted_at IS NULL AND mt.score>0
+     AND (sg.body ILIKE ANY(body_pats) OR sg.title ILIKE ANY(pats) OR coalesce(ld.filename,'') ILIKE ANY(pats))) ranked
    WHERE per_doc<=3 ORDER BY score DESC,document_id,ordinal LIMIT 8 LOOP
    picked:=picked||hit.document_id;
   END LOOP;
@@ -105,6 +111,7 @@ BEGIN
        OR sg.title ILIKE '%'||replace(replace(replace(w,E'\\',E'\\\\'),'%',E'\\%'),'_',E'\\_')||'%'
        OR coalesce(ld.filename,'') ILIKE '%'||replace(replace(replace(w,E'\\',E'\\\\'),'%',E'\\%'),'_',E'\\_')||'%') mt
     WHERE sg.actor_id=p_actor_id AND ld.kind='document' AND ld.status='ready' AND ld.deleted_at IS NULL AND mt.score>0
+     AND (sg.body ILIKE ANY(body_pats) OR sg.title ILIKE ANY(pats) OR coalesce(ld.filename,'') ILIKE ANY(pats))
      AND sg.document_id=ANY(picked)) ranked
    WHERE per_doc<=3 ORDER BY score DESC,document_id,ordinal LIMIT 8 LOOP
    SELECT * INTO ref FROM runtime_library_references WHERE execution_id=e.id AND document_id=hit.document_id;
