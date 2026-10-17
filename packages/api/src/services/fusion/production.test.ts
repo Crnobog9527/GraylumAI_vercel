@@ -62,7 +62,7 @@ it('a panel model on production is checked against the production profile, never
   const key = 'SYNTHETIC_LOCAL_ONLY', model = 'anthropic/claude-sonnet-5.5';
   const reasoning = configuredReasoning(model, { mode: 'off', wire: 'reasoning_effort' }, 'review' as never).reasoning;
   const row = { id: ids.reviewer, name: 'Synthetic', model_id: model, provider: 'openrouter', is_active: 'true', input_limit: 250000,
-    max_tokens: 8192, api_key: key, api_endpoint: 'https://openrouter.ai/api/v1',
+    max_tokens: 8192, api_endpoint: 'https://openrouter.ai/api/v1',
     config: { reasoning: { ...reasoning, route: 'synthetic/fp8' } } };
   const providerLimits = { providerSlug: 'synthetic/fp8', contextTokens: 250000, promptUsdPerMillion: '1',
     completionUsdPerMillion: '1', requestUsd: '0' };
@@ -70,8 +70,9 @@ it('a panel model on production is checked against the production profile, never
     account: 'openrouter-key:' + createHash('sha256').update(key).digest('hex'), upperUsd: '1', inputLimit: 196608, outputLimit: 8192,
     automaticRetry: false, hiddenTools: false, lookupSupported: true, multiplier: '6' };
   mocks.production.mockResolvedValue([{ ...quote, payg: {} }]);
+  // The one platform OpenRouter key (Vault, OR-1) is passed in, as the settings listing does.
   const admitted = await realAdmitFusionModel({} as SupabaseClient, { ...production, callPolicies: [quote] } as never, row as never,
-    'fusion_review', 4096, new Date().toISOString(), {});
+    'fusion_review', 4096, new Date().toISOString(), {}, key);
   expect(admitted.policy).toMatchObject({ modelId: row.id });
   expect(mocks.production).toHaveBeenCalledTimes(1);
   expect(mocks.staging).not.toHaveBeenCalled();
