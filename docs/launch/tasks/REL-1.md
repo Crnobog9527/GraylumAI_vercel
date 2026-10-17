@@ -108,7 +108,7 @@ Owner 2026-10-17 选 A（原话见第 6 节）：**日期不变，10-25 冻结**
 | N8 | 人机验证：新项目开启 hCaptcha（填 hCaptcha 的密钥）；Vercel 正式环境的 `NEXT_PUBLIC_HCAPTCHA_SITEKEY` 用同一个站点 | Owner 操作（凭证） | 登录、注册、注销弹窗都出现验证 | `.env.example`；DATA_ERASURE_RETENTION_CHECKLISTS 第 52 行 |
 | N9 | 邮件模板、密码强度等其余 Auth 设置和 staging 对齐 | 总控（需批准）列出差异，Owner 在后台点 | 逐项读回 | **待核实**：staging 现在的 Auth 设置仓库里没有完整记录 |
 | N10 | 把新项目的 `NEXT_PUBLIC_SUPABASE_URL`、`NEXT_PUBLIC_SUPABASE_ANON_KEY`、`SUPABASE_SERVICE_ROLE_KEY`、`DATABASE_URL` 填进 Vercel 正式项目 `graylum-ai-vercel-v1`；`EXPECTED_SUPABASE_PROJECT_REF` 改成新项目编号，`EXPECTED_APP_HOST` 改成 `www.graylum.com` | Owner 操作（新凭证） | 变量名存在（不读值）；部署后应用连的是新项目 | `.env.example` |
-| N11 | Vercel 正式环境其余变量：`NEXT_PUBLIC_APP_URL`、`NEXT_PUBLIC_AUTH_APP_URL`、`NEXT_PUBLIC_SITE_NAME`、`NEXT_PUBLIC_APP_NAME`、`NEXT_PUBLIC_SUPPORT_EMAIL`、`APP_ENV` / `NEXT_PUBLIC_APP_ENV`、`CRON_SECRET`（**新增凭证，Owner 设置**；没有它正式环境所有定时任务都返回 503，A2 的前提）、`OPENING_GRANT_HMAC_KEYS`、`API_SIGNATURE_SECRET` / `REQUIRE_API_SIGNATURE`、Sentry 几个变量、Upstash 两个（A5）、Stripe 三个和 `STRIPE_CARD_RECONCILIATION_MODE`（D7）、`SITE_INDEXING`（E3）、功能开关（F 组）。**不设**：`V3_RUNTIME_STAGING_ENABLED`、`WAFFO_TEST_*`、`LANDING_PREVIEW_FEATURES`、`E2E_*` | 新密钥类由 Owner 操作；非密钥的值由总控（需批准）设置 | 变量名清单读回，和本行对照 | `.env.example`；`apps/web/src/lib/landing/landing-flags.ts` 第 12–13 行；RELEASE_PREP_CHECKLIST 第 55 行 |
+| N11 | Vercel 正式环境其余变量：`NEXT_PUBLIC_APP_URL`、`NEXT_PUBLIC_AUTH_APP_URL`、`NEXT_PUBLIC_SITE_NAME`、`NEXT_PUBLIC_APP_NAME`、`NEXT_PUBLIC_SUPPORT_EMAIL`、`APP_ENV` / `NEXT_PUBLIC_APP_ENV`、`CRON_SECRET`（**新增凭证，Owner 设置**；没有它正式环境所有定时任务都返回 503，A2 的前提）、`OPENING_GRANT_HMAC_KEYS`、`API_SIGNATURE_SECRET` / `REQUIRE_API_SIGNATURE`、Sentry 几个变量、Upstash 两个（A5）、Stripe 三个和 `STRIPE_CARD_RECONCILIATION_MODE`（D7）、`SITE_INDEXING`（E3）、功能开关（F 组）。**不设**：任何 `V3_RUNTIME_STAGING_*`（含 `V3_RUNTIME_STAGING_ENABLED`）；运行时相关变量见 R5、`WAFFO_TEST_*`、`LANDING_PREVIEW_FEATURES`、`E2E_*` | 新密钥类由 Owner 操作；非密钥的值由总控（需批准）设置 | 变量名清单读回，和本行对照 | `.env.example`；`apps/web/src/lib/landing/landing-flags.ts` 第 12–13 行；RELEASE_PREP_CHECKLIST 第 55 行 |
 | N12 | Vault：确认装好并应用了 0259（B3）；6 把业务密钥和 Resend 由 Owner 在新站后台填（C1、C3） | Owner 操作；总控只读核对 | 后台槽位都显示"后台已填写" | ADMIN-SECRETS 第 8 节 |
 | N13 | 各平台回调地址改到新环境：Stripe 回调（D4）、Post for Me Webhook（C8）都指向 `https://www.graylum.com/api/...` | Owner 操作 | 平台后台投递成功 | MIGRATION-PLAN 第五节第 4 项；ADMIN-SECRETS 第 8 节第 2 项 |
 | N14 | 管理员账号：在新项目里注册 Owner 的管理员账号并授予管理员角色（staging 的测试账号不复制） | Owner 注册；授权由总控（需批准）执行 | 管理员能进后台，普通账号被拒 | 第 9.3 节第 2677 行（不复制测试账号） |
@@ -118,7 +118,12 @@ Owner 2026-10-17 选 A（原话见第 6 节）：**日期不变，10-25 冻结**
 
 | # | 做什么 | 为什么 | 谁做 | 依赖 | 怎么验证 | 出处 |
 | --- | --- | --- | --- | --- | --- | --- |
-| R1 | 正式环境的模型调用通路：`bill2_prepare` 等计费入口接受正式模式；正式环境按最新价格快照自动推导冻结上限和 `max_price`（涨价按新价冻结，不需要重新批准、不停止调用）；正式准入的审批和开放机制；止损（每用户每日上限、全站每日成本上限和告警、供应商余额告警，一键停止开关已由 RATE-LIMIT 交付）；`provider` 字段语义理清 | 不做这一项，上线后用户发消息模型根本不会回答 | **RUNTIME-PROD 执行窗口**（high，含迁移，编号向总控要） | AGENT-CORE 稳定；BILL-PAYG（已交付的逐次冻结）；MODEL-PRICING-SYNC（价格读取） | **10-25 冻结前合并并在 staging 验证**：正式模式的计费、冻结、结算、拒绝、重复提交、并发和失败路径在隔离测试里通过；staging 测试窗口的现有路径不变；上线当天 H4 小额冒烟再验一次 | 第 71、1335、2328、2545 行；[RUNTIME_PROD_PLAN](../RUNTIME_PROD_PLAN.md) 第 7.3、8 节；`packages/db/migrations/0162_bill_payg.sql` 第 518 行 |
+| R1 | 正式环境的模型调用通路：`bill2_prepare` 等计费入口接受正式模式；正式环境按最新价格快照自动推导冻结上限和 `max_price`（涨价按新价冻结，不需要重新批准、不停止调用）；正式准入的审批和开放机制；止损（每用户每日上限、全站每日成本上限和告警、供应商余额告警，一键停止开关已由 RATE-LIMIT 交付）；`provider` 字段语义理清 | 不做这一项，上线后用户发消息模型根本不会回答 | **RUNTIME-PROD 执行窗口**（PR #1073，迁移 0292，high） | AGENT-CORE 稳定；BILL-PAYG（已交付的逐次冻结）；MODEL-PRICING-SYNC（价格读取） | **10-25 冻结前合并并在 staging 验证**：正式模式的计费、冻结、结算、拒绝、重复提交、并发和失败路径在隔离测试里通过；staging 测试窗口的现有路径不变；上线当天 H4 小额冒烟再验一次 | 第 71、1335、2328、2545 行；[RUNTIME_PROD_PLAN](../RUNTIME_PROD_PLAN.md) 第 7.3、8 节；`packages/db/migrations/0162_bill_payg.sql` 第 518 行 |
+| R2 | 正式库标记：新建正式库按迁移建库（含 0292）之后、开放模型调用之前，用库所有者执行 `INSERT INTO system_settings(key,value) VALUES('runtime_environment','"production"'::jsonb) ON CONFLICT(key) DO UPDATE SET value=excluded.value;`，读回 `SELECT public.runtime_production_database();` 为 true（该函数不对 service_role 开放；后台设置页不能写这个键）。正式库里不能有启用的测试窗口，否则正式调用自动关闭。**绝不在 staging 库写这个标记** | 代码靠它认出"这是正式库"，才走正式模式 | 总控（需批准） | R1 合并；B1 | 读回为 true；正式库测试窗口为 0 条启用 | RUNTIME-PROD 窗口转交（PR #1073） |
+| R3 | 计费配置行：`billing_credits_per_usd`=100、`billing_token_price_multiplier`=6 必须作为真实设置行写入（正式模式不接受代码默认值） | q=100、m=6 是 Owner 已定数值 | 总控（需批准每一组数值） | R1；B1 | 读回两行 | 同上；第 1450 行 |
+| R4 | 正式准入档案：`system_settings.runtime_payg_production` = `{version:1, enabled, policyVersion, profiles:[…]}`，结构同 staging 的 `runtime_payg_staging`，但没有 windowId 和到期日（取代 H3 里"准入记录"的写法）；应急关闭写 `{"enabled":false}` | 哪些模型和线路能被正式调用 | 总控（需批准） | R1；R3 | 读回档案；关闭后新调用被拒 | 同上 |
+| R5 | Vercel 正式项目环境变量（非密钥）：`V3_RUNTIME_PRODUCTION_PROJECT_ID`（正式项目 ID）、`V3_RUNTIME_PRODUCTION_DATABASE_HOST`（新正式 Supabase 主机）、`V3_RUNTIME_PRODUCTION_ENABLED=true`（冒烟前保持 false 或不设）；**正式项目不能设任何 `V3_RUNTIME_STAGING_*`**（设了代码拒绝）；正式域名代码里只认 `app.graylum.com` 和 `www.graylum.com` | 项目和库绑定，防止误连 | 总控（需批准） | R1；N1 | 变量名清单读回；冒烟前确认 `ENABLED` 不是 true | 同上 |
+| R6 | 首版正式环境的评审团和研究工具还不可用，由后续两个 PR 在冻结前补上（总控已排）；补不上就按 10-24 缺口清单处理 | 避免对外说有但实际没有 | RUNTIME-PROD 窗口 | R1 | 缺口清单里列明 | 同上 |
 
 ### A. 平台和基础设施
 
@@ -132,7 +137,7 @@ Owner 2026-10-17 选 A（原话见第 6 节）：**日期不变，10-25 冻结**
 | A5 | 正式环境 Upstash Redis（`UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`） | 限流是 fail-closed：没配好，所有新消息都会被拒；删除清单也存在这里 | Owner 操作（新增凭证） | — | Vercel 正式环境变量名存在（不读值）；限流冒烟通过；命令额度够用 | 第 1249–1251 行、第 7.6 节第 2490 行；[RATE_LIMIT_WIRING_PLAN](../RATE_LIMIT_WIRING_PLAN.md) 第 276–282 行；[DATA_ERASURE_BACKUP_RESTORE_REPLAY](../../runbooks/DATA_ERASURE_BACKUP_RESTORE_REPLAY.md) 第 12–14 行 |
 | A6 | 限流初始值和一键暂停：消息 10/分钟、200/天，调用 30/分钟、600/天；`stopNewCalls` 先设为开（停止新调用） | 第 30 项已定；上线当天先关住新调用，冒烟后再开 | 总控（需批准） | A5、B1 | 读回 `system_settings.runtime_rate_limits` | 第 1251 行；RUNTIME_PROD_PLAN 第 5.1 节、第 8 节"限流与开关"行 |
 | A7 | 核对新正式 Supabase 项目的套餐、每日备份和 PITR 保留期 | 删除清单在 Redis 里保留 35 天；备份保留期超过 30 天时要先把 35 天调大，否则恢复备份会让已删内容复活 | 总控（需批准只读） | B1 | 套餐和备份窗口记录在 PR 交接里 | DATA_ERASURE_BACKUP_RESTORE_REPLAY 第 34–36 行 |
-| A8 | 用虚构账号演练一次"恢复备份 → 重放删除 → 开放" | 这套流程还没真实演练过 | 执行窗口 + 总控（建议在新正式项目上线前用虚构账号演练，见第 6 节第 4 项） | A7 | 演练记录：重放后已删内容不再出现 | DATA_ERASURE_BACKUP_RESTORE_REPLAY 第 3–4 行 |
+| A8 | 用虚构账号演练一次"恢复备份 → 重放删除 → 开放" | 这套流程还没真实演练过 | 执行窗口 + 总控（在新正式项目上线前用虚构账号演练） | A7 | **公开开放（10-31）的前提**：演练通过，记录重放后已删内容不再出现；演练没通过不开放 | DATA_ERASURE_BACKUP_RESTORE_REPLAY 第 3–4 行 |
 | A9 | Sentry 正式项目、告警通知渠道；diagnostics 定时任务 | 上线后要能第一时间看到错误和余额告警 | 总控（需批准） | — | 发一次合成告警能收到；告警里没有用户内容 | RUNTIME_PROD_PLAN 第 8 节"监控告警"行；RELEASE_PREP_CHECKLIST 第 53、136 行 |
 
 ### B. 正式数据库
@@ -154,7 +159,7 @@ Owner 2026-10-17 选 A（原话见第 6 节）：**日期不变，10-25 冻结**
 | --- | --- | --- | --- | --- | --- | --- |
 | C1 | 在正式站后台"第三方密钥"页填 6 个槽位：OpenRouter、Post for Me API 密钥、Post for Me Webhook 共享密钥、TikHub、Parallel、Firecrawl | 业务密钥只放后台，AI 不经手 | Owner 操作 | B3；ADMIN-SECRETS 的 PFM、RT、OR-1 接线都已合并（#1041 在途） | 6 个槽位都显示"后台已填写"（只看状态和末 4 位）；Owner 对照 Post for Me 那边的 Webhook 共享密钥末 4 位一致 | ADMIN-SECRETS 第 8 节第 2 项；第 182、2375 行 |
 | C2 | 结束过渡期：Vercel 正式环境里删除 6 个旧环境变量（5 个后备变量和残留的 `OPENROUTER_API_KEY`） | 只留一个来源，避免读错 | Owner 操作 | T-END PR 合并；C1 | 删除后发布、Webhook、三家搜索和模型调用都正常 | ADMIN-SECRETS 第 8 节第 4 项、第 10 节 T-END |
-| C3 | Resend：正式发信域名的 DNS（SPF/DKIM）、生成密钥填进后台 `resend` 槽位、确认发件人 `Graylum AI <no-reply@graylum.com>` | 续费提醒、到期提醒等付款邮件要能发出去 | Owner 操作（新增凭证） | PAY-NOTIFY PR-N1（#1031，已合并） | 后台槽位显示已填写；正式冒烟发一封到测试邮箱 | [PAY-NOTIFY](PAY-NOTIFY.md) 第 47–55 行；第 604 行（N5 上线前确认地址） |
+| C3 | Resend：正式发信域名的 DNS（SPF/DKIM）现在做；生成密钥可以现在做，但**填进后台 `resend` 槽位要等 B1 新库（含 0270）和管理员账号 N14 就绪之后**（10-29）；确认发件人 `Graylum AI <no-reply@graylum.com>` | 续费提醒、到期提醒等付款邮件要能发出去 | Owner 操作（新增凭证） | PAY-NOTIFY PR-N1（#1031，已合并） | 后台槽位显示已填写；正式冒烟发一封到测试邮箱 | [PAY-NOTIFY](PAY-NOTIFY.md) 第 47–55 行；第 604 行（N5 上线前确认地址） |
 | C3a | 新正式项目的 Auth 设置（逐项见第 2.0 节 N5–N9） | 新项目里这些都是空的，要重新配 | Owner 操作（凭证）/ 总控核对 | N1、E1 | 用新邮箱真实走一次注册、确认邮件、Google 登录、找回密码 | 第 934 行；PRODUCTION_RELEASE 第二节；SMTP 用 Resend 的历史记录见 [v10.1](../Graylum_Master_Plan_v10.1.md) 第 305 行 |
 | C4 | OpenRouter 账号和各 workspace 的隐私设置里关闭"允许用于训练" | Owner 2026-10-12 选 A：账号层面关，代码不强制 | Owner 操作；总控上线前核对 | — | Owner 截图或口头确认，记在上线 PR | 第 719、2375 行 |
 | C5 | OpenRouter 正式运行凭据：专用一把、每日美元上限、不自动充值、首版禁用 BYOK | 平台没有固定的亏损上限，靠供应商侧硬上限兜底 | Owner 操作（金额由 Owner 定） | C1 | 凭据设置页读回；核对 BYOK 关闭 | RUNTIME_PROD_PLAN 第 5.1 节第 234–239 行、第 8 节 OpenRouter 行 |
@@ -225,7 +230,7 @@ Owner 2026-10-17 选 A（原话见第 6 节）：**日期不变，10-25 冻结**
 | --- | --- | --- | --- | --- | --- | --- |
 | H1 | 落地页、价格页、付费墙上的每条能力说法逐条对照验收结果；"复盘数据"只在 PUBLISH-MONITOR 验收通过后展示；国内平台数据说法和实际能力一致 | 不对外承诺做不到的功能 | 总控核对；文案改动由执行窗口开 PR | 第 3 节冻结 | 逐条记录 | 第 217、542、559、583、588 行；PUBLISH-MONITOR 第 427 行 |
 | H2 | staging 全量回归：v11 第 13 节验收矩阵 + 第 3.5、4、5 节 + DATA-ERASURE；没实测的标 NOT_RUN，不能算通过 | 第 9.3 节验收出口 | 执行窗口（自动化）+ Codex（浏览器，同一测试账号一次一个） | 冻结版本已部署 staging | 回归记录贴在冻结版本的 PR 上 | 第 2673–2674 行 |
-| H3 | 正式准入：初始模型和线路（Owner 当前计划：对话和报告用 Claude、Gemini，整理用 GPT-6 Luna，以后台配置为准）、各用途的 typicalUsd | 正式环境不设到期日，换模型或线路才重测 | 总控（需批准） | B2、C5 | 后台准入记录 | 第 1127、1165–1167 行；RUNTIME_PROD_PLAN 第 8 节"正式准入"行 |
+| H3 | 正式准入：初始模型和线路（Owner 当前计划：对话和报告用 Claude、Gemini，整理用 GPT-6 Luna，以后台配置为准）、各用途的 typicalUsd | 正式环境不设到期日，换模型或线路才重测 | 总控（需批准）；准入档案见 R4（取代旧的"准入记录"写法） | B2、C5、R4 | 读回 `runtime_payg_production` | 第 1127、1165–1167 行；RUNTIME_PROD_PLAN 第 8 节"正式准入"行 |
 | H4 | 有上限的正式小额冒烟：一次成功、一次已确认拒绝、一次重复操作、回执对账 | 第 9.3 节保留条件 | 总控（需批准身份、调用数和美元总预算） | 第 4 节第 5 步 | 官方成本、名义费用、实际扣款、平台承担一致；重复请求没有新派发 | RUNTIME_PROD_PLAN 第 7.3 节第 6–7 步 |
 | H5 | 创始会员 F8：第一场直播时间、案例拆解如何取得会员同意 | 售卖前验收项，仍待 Owner 决定 | Owner 决定 | — | 决定记录 | 第 604 行 |
 | H6 | PAY-DISPUTE-GUARD 赢了之后的撤回冻结上线前是管理员手动；管理员会操作 | 量小、人工处理 | Owner 知悉 | PAY-DISPUTE-GUARD | 后台有"撤回冻结"入口 | [PAY-DISPUTE-GUARD](PAY-DISPUTE-GUARD.md) 第 102、238 行 |
@@ -244,9 +249,10 @@ Owner 2026-10-17 选 A（原话见第 6 节）：**日期不变，10-25 冻结**
 | **10-25 冻结** | staging 冻结一个版本：之后只修上线阻塞问题（登录、对话、付款、回调、监控），不加功能 | 总控 |
 | 10-25 → 10-27 | H2 staging 全量回归：自动化全部跑一遍；Codex 浏览器验收按清单一次一个；修复只走阻塞问题 | 执行窗口；Codex |
 | 10-27 | 准备批准包（RUNTIME_PROD_PLAN 第 7.3 节第 2 步）：正式项目、版本、迁移、配置值、各家上限金额、冒烟预算 | 总控 |
+| 10-27 → 10-28 | A8 备份恢复和删除重放演练（新项目里只有虚构账号，建库后即可演练，演练通过是 10-31 公开开放的前提）；总控 | 总控（需批准）；执行窗口 |
 | 10-28 | 正式只读核验（第 4 节第 3 步）：新项目的 N1–N3、A7、Vault；旧 Vercel 项目的暂停状态和绑定 | 总控（需批准只读） |
 | 10-29 | 维护态准备（第 4 节第 4 步）：在新项目里 B1 建库、B2 配置、A6 停止新调用；N10–N11 把 Vercel 正式变量换成新项目（**必须在合并 `main` 之前**，否则部署出来连的是旧库）；N14 管理员账号；之后 A4 staging → `main` 合并并部署（站点仍暂停），再由 Owner 在新站后台填密钥（C1、C3、N12） | 总控（需批准）；Owner 操作 |
-| 10-30 | 恢复站点但新调用仍关、公众访问仍由部署访问保护挡住（第 5 步）；**先配好 D4a 回调绕过并验证投递，再打开 D7 银行卡下单**（只有受控身份能进站），再做 H4 正式小额冒烟和 D9 真钱付款退款；同日对账 | 总控（需批准）；Owner |
+| 10-30 | 恢复站点、公众访问仍由部署访问保护挡住（第 5 步）；**冒烟窗口内**由总控（需批准）把 `stopNewCalls` 临时关掉，让受控身份能产生一次成功调用，冒烟结束后立刻重新打开（`newWorkGate.ts` 开着时对所有人都拒绝新调用，没有按身份放行）；**先配好 D4a 回调绕过并验证投递，再打开 D7 银行卡下单**（只有受控身份能进站），再做 H4 正式小额冒烟和 D9 真钱付款退款；同日对账 | 总控（需批准）；Owner |
 | **10-31** | 对账无误后公开开放（第 7 步）：关掉 `stopNewCalls`、撤掉部署访问保护、E3 `SITE_INDEXING=public`；上线后观察成本、错误和未结算项 | 总控（需批准）；Owner |
 
 缓冲：10-30 冒烟失败或对账不一致时，保持新调用关闭、站点维持当时状态，修复后重新批准，不硬上。
@@ -261,8 +267,8 @@ Owner 2026-10-17 选 A（原话见第 6 节）：**日期不变，10-25 冻结**
 4. **维护态准备（需批准）**：站点保持暂停、新调用保持关闭；建库（B1）、导入配置（B2）、凭据和限额（C1–C7）、监控（A9）；所有值读回核对。
    合并到 `main` 可能自动触发正式部署，**合并前就要拿到批准**。
 5. **恢复访问（需批准）**：确认新调用仍关闭，再取消暂停（A3）。冒烟期间用部署访问保护限制公众访问。
-6. **小额正式冒烟（需批准）**：先给 Stripe 和 Post for Me 回调配好访问保护绕过（D4a）并验证投递，再在部署访问保护下打开 D7 银行卡下单，然后做 H4 + D9。
-7. **对账后公开开放（需批准）**：核对成本、扣款、平台承担、冻结释放、重复请求没有新派发、告警和停止开关可用；再按批准范围开放。
+6. **小额正式冒烟（需批准）**：批准里写明"冒烟窗口内临时关闭 `stopNewCalls`、冒烟结束后重新打开"，窗口内靠部署访问保护限制谁能进站；先给 Stripe 和 Post for Me 回调配好访问保护绕过（D4a）并验证投递，再在部署访问保护下打开 D7 银行卡下单，然后做 H4 + D9。
+7. **对账后公开开放（需批准）**：确认 A8 演练已通过；核对成本、扣款、平台承担、冻结释放、重复请求没有新派发、告警和停止开关可用；再按批准范围开放。
    站点恢复、模型调用开放和真钱付款是三件事，不能合成一次隐含授权。
 8. **出问题时**：立即用 `stopNewCalls` 停新调用，保留账务恢复；先查实际状态再决定重试；没解决的账务或安全问题不扩大开放。
    回滚触发条件参考 PRODUCTION_RELEASE 第五节（登录不可用、对话主流程不可用、后台进不去、结账建不了、回调大面积失败、付了钱没到账）。
@@ -281,7 +287,7 @@ Owner 2026-10-17 选 A（原话见第 6 节）：**日期不变，10-25 冻结**
 - 我来在 OpenRouter 账号和每个 workspace 的隐私设置里关闭"允许用于训练"。
 - 同意向 Parallel 发邮件索取"Search API 零保留、不训练"的书面确认。
 - 同意向 Post for Me 官方邮箱询问"能否嵌入付费 SaaS"和"超量自动升级"两件事，并为正式环境单独订阅一个独占项目。
-- 我来注册 Resend、给 graylum.com 加发信 DNS 记录，并把正式密钥填进后台的 Resend 槽位。
+- 我来注册 Resend、给 graylum.com 加发信 DNS 记录（现在做）；Resend 密钥等 10-29 新库建好、管理员账号就绪后再填进后台的 Resend 槽位并验证。
 - 我来给 TikHub、Parallel、Firecrawl 各自设好硬上限：TikHub `<金额>`、Parallel `<金额>`、Firecrawl `<金额>`。
 - 我来准备服务条款、隐私政策、退款政策和可接受使用政策的正文，以及客服邮箱。
 - 我来新建 Supabase 正式项目（PostgreSQL 17，区域 `<区域>`），数据库密码存进 `~/.graylum/secrets/`。
@@ -304,6 +310,7 @@ Owner 2026-10-17 选 A（原话见第 6 节）：**日期不变，10-25 冻结**
 **上线当天要批准的事**
 - 同意恢复正式站 `graylum-ai-vercel-v1` 的访问，新调用仍保持关闭。
 - 我来在 Vercel 生成冒烟期间专用的访问保护绕过口令，只加在 Stripe 和 Post for Me 的回调地址上，正式开放后作废。
+- 同意冒烟窗口内临时关闭 `stopNewCalls`（站点仍在部署访问保护后），冒烟结束后重新打开。
 - 同意在部署访问保护下打开正式银行卡下单，同时设置 `STRIPE_CARD_RECONCILIATION_MODE=live`（公众仍进不来）。
 - 同意正式小额冒烟：用 `<测试身份>` 调用 `<模型和次数>`，总预算不超过 `<金额>` 美元。
 - 同意上线当天真实付款再退款：银行卡 `<金额和笔数>`，微信和支付宝年付 279 / 496 / 621 美元各一笔，退款后核对到账和收回。
