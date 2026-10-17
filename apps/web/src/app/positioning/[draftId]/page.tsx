@@ -8,7 +8,7 @@ import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { WorkspaceFrame } from "@/components/opc/workspace-frame";
-import { PanelRightOpen, X } from "lucide-react";
+import { X } from "lucide-react";
 import resultStyles from "@/components/opc/positioning-result.module.css";
 import { WorkComposer, useFreeConversation } from '@/components/opc/work-composer';
 import { createInformationAutosave, informationBaseKey, keepConflictingEdits, tabStorage, savedRead, stepView,
@@ -24,8 +24,10 @@ import { focusChecklistField, StepConfirmCard } from "@/components/opc/step-conf
 import { cardStatus, editedValue, fieldMeta, focusField, type StepInformation } from "@/components/opc/capture-state";
 import { reviewedStep, useStepConfirmation } from "@/hooks/use-step-confirmation";
 import { useCaptureResolve } from "@/hooks/use-capture-resolve";
-import { MentorMarkdown } from "./MentorMarkdown";
-import { ChatInlineNotice, ChatNoticeList, ChatPendingStatus } from "@/components/chat/ChatInlineNotice";
+import { ChatInlineNotice, ChatNoticeList } from "@/components/chat/ChatInlineNotice";
+import { PositioningHeader, PositioningResultPanel, PositioningStepStrip } from "@/components/chat-display/positioning-chrome";
+import { MentorChatHeading, MentorChatLog, MentorLiveReply, MentorPendingMessage, MentorReply, MentorTurnGroup, MentorUserMessage,
+  MentorWelcome } from "@/components/chat-display/mentor-messages";
 import { useMentorLogScroll } from "./use-mentor-log-scroll";
 import { mentorTailNotices, mentorTurnNotice, RETRY_PENDING_NOTICE, turnNeedsRetry } from "./mentor-notices";
 import { useAutoStepRecovery, useHistoryPolling } from "./use-step-recovery";
@@ -1132,40 +1134,24 @@ function PositioningDraftContent({draftId}:{draftId:string}){
       loading={review.loading} loadError={review.loadError} onConfirm={() => confirmation.submit(info)} onClose={confirmation.close}/>;
   }
   return (
-    <WorkspaceFrame area="chat" notice={d?.runtimeMode==='staging_test'?'Staging 真实模型测试 · 未开放联网研究':'本地模拟 · 回复、保存与交接均为演示'} revealRight={reveal} rightOpen={resultOpen} onToggleRight={()=>setResultOpen(value=>!value)} right={<div className={resultStyles.panel}><header><h2>定位清单</h2><p>{snap.state==='draft'?'跟着对话自动记录；每一步核对后确认一次':'已确认的定位'}</p></header>
-      <div className={resultStyles.body} ref={setResultBodyNode}><CaptureChecklist {...checklistProps()}/></div></div>}>
+    <WorkspaceFrame area="chat" notice={d?.runtimeMode==='staging_test'?'Staging 真实模型测试 · 未开放联网研究':'本地模拟 · 回复、保存与交接均为演示'} revealRight={reveal} rightOpen={resultOpen} onToggleRight={()=>setResultOpen(value=>!value)} right={<PositioningResultPanel
+      subtitle={snap.state==='draft'?'跟着对话自动记录；每一步核对后确认一次':'已确认的定位'} bodyRef={setResultBodyNode}><CaptureChecklist {...checklistProps()}/></PositioningResultPanel>}>
     <main className={`${resultStyles.workspaceMain} ${!planView ? resultStyles.conversationPage : ""} h-full w-full overflow-y-auto text-[var(--text-primary)]`}><div className={resultStyles.workspaceContent}>
-      <header className={resultStyles.positionTop}>
-        <h1>{planView ? "第一周计划" : discussionAccount ? (discussionAccount.displayName??discussionAccount.account)+" · 定位策略" : existingEntry ? "核对已有定位" : "我的定位分析"}</h1>
-        <div className={resultStyles.positionActions}>
-          <span>{(discussionAccount?discussionAccount.platform:'整体规划')+(snap.state==='published'?' · 已确认':' · 进行中')}</span>
-          <button type="button" onClick={()=>setWorkInfoOpen(true)}>工作信息</button>
-          {!resultOpen&&<button type="button" aria-label="展开右边栏" onClick={()=>setResultOpen(true)}><PanelRightOpen size={18}/></button>}
-        </div>
-      </header>
+      <PositioningHeader
+        title={planView ? "第一周计划" : discussionAccount ? (discussionAccount.displayName??discussionAccount.account)+" · 定位策略"
+          : existingEntry ? "核对已有定位" : "我的定位分析"}
+        status={(discussionAccount?discussionAccount.platform:'整体规划')+(snap.state==='published'?' · 已确认':' · 进行中')}
+        onWorkInfo={()=>setWorkInfoOpen(true)} showExpand={!resultOpen} onExpand={()=>setResultOpen(true)}/>
       {workInfoOpen&&<div className={resultStyles.infoBackdrop} onMouseDown={event=>{if(event.target===event.currentTarget)setWorkInfoOpen(false);}}><section role="dialog" aria-modal="true" aria-label="工作信息" className={resultStyles.infoDialog}><header><h2>工作信息</h2><button type="button" aria-label="关闭工作信息" onClick={()=>setWorkInfoOpen(false)}>×</button></header><p>当前工作：{existingEntry?'已有定位核对':'定位分析'}</p><p>状态：{snap.state==='published'?'定位已确认':'定位进行中'}</p><p>定位讨论、待确认修改与历史版本留在原工作；查看不会确认或保存。</p><footer><button type="button" onClick={()=>{void read.refetch();setWorkInfoOpen(false);}}>重新读取状态</button><Link href="/positioning">新任务与账号</Link></footer></section></div>}
       {!planView && <>
       {d.accountRevision?.methodConflict&&<ChatInlineNotice tone="warning" alert>此修改草稿使用的方法与原正式版本不同，未自动合并或覆盖任何答案。请对照原正式内容核对当前草稿。
           <details><summary>查看原正式版本完整内容</summary>{Object.entries(d.accountRevision.sourceInformation as Record<string,{title:string;schema:Array<{id:string;title:string}>;values:Record<string,Information>}>).map(([id,part])=><section key={id}><h4>{part.title}</h4>{part.schema.map(field=><p key={field.id}>{field.title}：{part.values?.[field.id]?.value}</p>)}</section>)}</details>
       </ChatInlineNotice>}
-      <nav aria-label="定位步骤" className={resultStyles.phaseStrip} style={{gridTemplateColumns:`repeat(${steps.length},minmax(0,1fr))`}}>
-        {steps.map((step, index) => (
-          <Button
-            key={step.id}
-            variant={selectedStep.id === step.id ? "default" : "outline"}
-            aria-current={selectedStep.id === step.id ? "step" : undefined}
-            disabled={
-              busy || hasPendingConfirmation || hasPendingStepRequest ||
-              (!d.accountRevision && firstPending >= 0 &&
-                index > firstPending &&
-                !snap.steps[step.id].valid)
-            }
-            onClick={() => setActiveStep(step.id)}
-          >
-            {snap.steps[step.id].valid ? "✓ " : `${index + 1} `}{step.title}
-          </Button>
-        ))}
-      </nav>
+      <PositioningStepStrip selectedId={selectedStep.id} onSelect={setActiveStep} steps={steps.map((step, index) => ({
+        id: step.id, title: step.title, valid: Boolean(snap.steps[step.id].valid),
+        disabled: busy || hasPendingConfirmation || hasPendingStepRequest ||
+          (!d.accountRevision && firstPending >= 0 && index > firstPending && !snap.steps[step.id].valid),
+      }))}/>
       <section aria-label="当前定位步骤" className="space-y-4">
         {snap.workflow.steps.map((step: Step, index: number) => {
           if (step.id !== selectedStep.id) return null;
@@ -1179,18 +1165,11 @@ function PositioningDraftContent({draftId}:{draftId:string}){
               <h2 className="text-lg">{index + 1}. {step.title} {s.valid ? "· 已确认" : "· 待确认"}</h2>
               <div className={resultStyles.stepColumns}>
                 <aside aria-label="全程导师聊天" className={`${resultStyles.mentorChat} space-y-3`}>
-                  <div>
-                    <p className="text-xs text-[var(--text-secondary)]">全程同一对话</p>
-                    <h3 className="font-semibold">和导师一起聊，每一步核对确认一次</h3>
-                  </div>
-                  <div ref={attachChatScroll} onScroll={onChatScroll} role="log" aria-label="完整导师消息" aria-live="polite"
-                    className="max-h-[55vh] min-h-56 space-y-3 overflow-y-auto overscroll-contain pr-2">
-                    {mentorExecutions.length===0&&<div className="mr-4 rounded-xl border border-[var(--border-primary)] p-3">
-                      <span className={resultStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/>Graylum · AI 自媒体陪跑教练</span>
-                      <p className={`mt-1 whitespace-pre-wrap break-words ${resultStyles.messageBody}`}>
-                        {existingEntry ? EXISTING_WELCOME : d.accountRevision ? "已保留原正式定位的全部步骤。请选择需要修改的部分；未变化且已确认的内容无需重新填写。修改保存为草稿，核对后可更新正式版本。" : "我会在同一个对话里陪你完成全部步骤。你聊到的信息会自动记到右侧清单的对应栏目，每一步齐了以后由你核对并确认一次。"}
-                      </p>
-                    </div>}
+                  <MentorChatHeading/>
+                  <MentorChatLog logRef={attachChatScroll} onScroll={onChatScroll}>
+                    {mentorExecutions.length===0&&<MentorWelcome text={existingEntry ? EXISTING_WELCOME : d.accountRevision
+                      ? "已保留原正式定位的全部步骤。请选择需要修改的部分；未变化且已确认的内容无需重新填写。修改保存为草稿，核对后可更新正式版本。"
+                      : "我会在同一个对话里陪你完成全部步骤。你聊到的信息会自动记到右侧清单的对应栏目，每一步齐了以后由你核对并确认一次。"}/>}
                     {mentorExecutions.map((execution, executionIndex) => {
                       const turn = mentorTurns.get(execution.executionId);
                       const turnStep = steps.find(candidate => candidate.id === turn?.stepId);
@@ -1214,45 +1193,32 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                           onOther={focusReply} onDismiss={() => setFoldedCard(execution.executionId)}/>;
                       }
                       return (
-                        <div key={execution.executionId} data-execution-id={execution.executionId} className="space-y-2">
+                        <MentorTurnGroup key={execution.executionId} executionId={execution.executionId}>
                           {/* The host opens the step itself: no fabricated user message. */}
-                          {!openingTurn && (
-                            <div data-message-role="user" className="ml-8 rounded-xl bg-[var(--bg-tertiary)] p-3">
-                              <span className="text-xs text-[var(--text-secondary)]">你{turnLabel}</span>
-                              <p className={`mt-1 whitespace-pre-wrap break-words ${resultStyles.messageBody}`}>
-                                {shownInput(execution.input) ?? "内容暂不可用"}</p>
-                            </div>
-                          )}
-                          {reply.text && <div data-message-role="assistant" data-step-summary={summaryTurn || undefined}
-                            aria-label={summaryTurn ? "本步小结卡" : undefined}
-                            className="mr-4 rounded-xl border border-[var(--border-primary)] p-3">
-                            <span className={resultStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/>
-                              {summaryTurn ? "本步小结" : openingTurn ? "AI 自媒体陪跑教练 · 主动引导" : "AI 自媒体陪跑教练"}{turnLabel}</span>
-                            <MentorMarkdown className={`mt-1 ${resultStyles.messageBody}`} text={reply.text} live={Boolean(live)} result={execution}/>
-                            {summaryTurn && !next && !s.valid && turn?.stepId === step.id && summaryShown(execution) &&
-                              <p className="mt-2 text-xs text-[var(--text-secondary)]">小结不会自动确认这一步；请在下方确认卡核对后再点确认。</p>}
-                          </div>}
+                          {!openingTurn && <MentorUserMessage stepLabel={turnLabel} text={shownInput(execution.input) ?? "内容暂不可用"}/>}
+                          {reply.text && <MentorReply kind={summaryTurn ? "summary" : openingTurn ? "opening" : "reply"} stepLabel={turnLabel}
+                            text={reply.text} live={Boolean(live)} result={execution}
+                            summaryHint={Boolean(summaryTurn && !next && !s.valid && turn?.stepId === step.id && summaryShown(execution))}/>}
                           {/* Answered: gone. Open: docked. Folded: one line. */reply.card && !status.answered && foldedCard === execution.executionId
                             && <OpenQuestionRecord card={reply.card} onShow={() => setFoldedCard("")}/>}
                           {/* Polling follows a running turn; the retry is for one that stopped advancing. */}
                           <ChatNoticeList notices={[...payg.turnNotices(execution, busy), mentorTurnNotice(execution.executionId, reply.notice,
                             !busy && execution.executionId === history.data?.activeExecution && turnNeedsRetry(execution)
                             ? { onClick: () => void run(() => execute.mutateAsync({ executionId: execution.executionId })) } : null)]}/>
-                        </div>
+                        </MentorTurnGroup>
                       );
                     })}
-                    {pendingBubble&&!mentorExecutions.some(e=>e.request?.requestId===pendingBubble.requestId)&&<div data-message-role="user" data-request-id={pendingBubble.requestId} className="ml-8 rounded-xl bg-[var(--bg-tertiary)] p-3">
-                      <span>你 · {steps.find(candidate => candidate.id === pendingBubble.stepId)?.title}</span>
-                      <p className={`whitespace-pre-wrap ${resultStyles.messageBody}`}>
-                        {shownInput(pendingBubble.input)}</p><ChatPendingStatus sending={running}/></div>}
-                  {liveOnly&&(liveOnly.text||!liveOnly.card)&&<div data-message-role="assistant" aria-label="AI 自媒体陪跑教练正在回复" className="mr-4 rounded-xl border border-[var(--border-primary)] p-3"><span className={resultStyles.agentIdentity}><img src="/graylum-logo.png" alt=""/>AI 自媒体陪跑教练</span>{liveOnly.text?<MentorMarkdown className={`mt-1 ${resultStyles.messageBody}`} text={liveOnly.text} live/>:<p className={`mt-1 ${resultStyles.messageBody}`}>正在思考…</p>}</div>}
+                    {pendingBubble&&!mentorExecutions.some(e=>e.request?.requestId===pendingBubble.requestId)&&<MentorPendingMessage
+                      requestId={pendingBubble.requestId} stepTitle={steps.find(candidate => candidate.id === pendingBubble.stepId)?.title}
+                      text={shownInput(pendingBubble.input)} sending={running}/>}
+                  {liveOnly&&(liveOnly.text||!liveOnly.card)&&<MentorLiveReply text={liveOnly.text}/>}
                   <ChatNoticeList notices={[...payg.blockedNotices(mentorExecutions, busy),
                     nudgeNotice(nudged, () => void ask(step, checklistUpdatedInput(nudged)), sendLocked, hasPendingStepRequest),
                     ...mentorTailNotices({ livePhase: live.phase, stop: live.stopAction,
                     saving: hasUnsavedInformation, error, notice, freeError: free.error, replying: awaitingReply, lastTurnOpen: lastTurnNotice, lastTurnText,
                     recovery: recoveryNeedsUser[0] && !busy
                       ? { readable: recoveryNeedsUser[0].readable, onClick: () => void recoverPendingStep(recoveryNeedsUser[0]!.step) } : null })]}/>
-                  </div>
+                  </MentorChatLog>
                   {snap.state === "draft" && !s.valid && <StepConfirmCard stays={!!d.accountRevision || index === steps.length - 1}
                     title={step.title} info={d.information[step.id]} edits={infoEdits[step.id]} resuming={confirmation.envelopeState(step.id).kind === "valid"}
                     stepId={step.id} canConfirm={confirmableStep(step)} disabled={busy || hasPendingStepRequest} signal={d.stepConfirmation?.[step.id]}

@@ -105,7 +105,8 @@
 
 1. **PR-A（high，无迁移）**：删 `services/billing.ts` 和两个测试、整体导出、`package.json` 子路径、`logger.billing.*`、相关 ESLint/大小基线条目；删 4 个旧预扣设置（后台页面 + staging 种子）；删 `checkOutputSecurity` / `sanitizeOutputSecurity` 及独用辅助函数和测试。`types/billing.ts` 里只服务旧预扣的类型在这个 PR 里逐个确认后删。
 2. **PR-B（high，迁移 0240）**：删第 5.1 节标"删"的 SQL 函数（`ordinary_chat_claim`、`agent_preference`、`soft_delete_conversation` 等无结算职责的死函数）；标"有条件删"的（8 个旧结算函数、`ordinary_chat_transition`、切片结算函数、旧工作台生成/退款函数）只在对应门槛满足时才一起删，否则留下；同步改 `check-staging-db-readiness.mjs`；确认 0162 的 md5 固定检查和 0204 重写不受影响；空库建库 + 重放 + 指纹。
-3. **PR-C（high，迁移，编号再申请）**：删第 5.2 节标"删"的 4 张表（`ordinary_chat_requests`、`conversation_context_snapshots`、`agent_confirmed_preferences`、`agent_preference_requests`；`agent_slice_calls` 作为财务证据保留），同时改所有引用它们的注销函数（含财务证据函数）、`processorContracts.ts`、`schema.ts` 和注销数据库测试。上 staging 前先只读确认这些表的行数；staging 的旧测试数据随删表丢弃（正式环境上线前清空，按第 1 节规则单独批准）。
+3. **PR-C（high，迁移 0271）**：删第 5.2 节标"删"的表中的 3 张（`ordinary_chat_requests`、`agent_confirmed_preferences`、`agent_preference_requests`；`agent_slice_calls` 作为财务证据保留），连同 `ordinary_chat_transition`、`conversations` 上的 `ordinary_chat_delete` 触发器及其函数，同时改所有引用它们的注销函数（含财务证据函数）和 `agent_slice_preferences_valid`。staging 只读核对（2026-10-16）：4 张表都是 0 行，结算门槛满足；正式库的同一组核对写进 REL-1 清单（读正式库要 Owner 批准）。`processorContracts.ts` 里这几张表的计数键保留，兼容还没应用 0271 的库。
+   - **后续（总控 2026-10-16 决定）**：`conversation_context_snapshots` 这次不删。CI 的空库建库检查（`run-db-baseline-replay.mjs`）会在最终库上重跑 0148，而 0148 按表名改这张表的外键名，删表后必然失败。它的删除要等 baseline-replay 的 0148 收敛检查改造后，单独开 PR，并请 Owner 批准 CI 变更。在那之前注销流程照旧清理这张表。
 4. **待定项**（`agent_slice_executions/links/pairs`、`artifact_chat*`、`prompts`、`purge_deleted_records`、`preAICallSecurityChecks` 一整条链、签名函数）：记入后续，每项需要先改一条活着的链或做产品/保护层面的确认，不在本轮删除。
 
 ## 7. 没验证的 / 限制
