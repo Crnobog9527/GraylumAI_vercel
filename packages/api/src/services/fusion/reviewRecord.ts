@@ -9,6 +9,9 @@ export const reviewState = z.enum(['running', 'paused', 'stopped', 'interrupted'
 export type ReviewState = z.infer<typeof reviewState>;
 export const ENDED_STATES: ReadonlySet<ReviewState> = new Set(['stopped', 'interrupted', 'revision_failed', 'incomplete', 'completed']);
 export type ReviewPosition = { round: number; phase: 'review' | 'summary'; attempt: number };
+export const reviewFee = z.object({ credits: z.number().int().positive(), state: z.enum(['held', 'charged', 'refunded']),
+  chargedCredits: z.number().int().nonnegative().nullable(), reason: z.string().nullable(), settledAt: z.string().nullable() });
+export type ReviewFee = z.infer<typeof reviewFee>;
 const reviewView = z.object({
   reviewId: uuid, state: reviewState, round: z.number().int().min(1), phase: z.enum(['review', 'summary']),
   attempt: z.number().int().min(1), draftId: uuid, sourceVersionId: uuid, sourceSessionId: uuid,
@@ -19,6 +22,8 @@ const reviewView = z.object({
   outcome: z.unknown().nullable(), revisionId: uuid.nullable(), endedAt: z.string().nullable(),
   /** The user's per-section choice (0256), once made. */
   adoption: z.record(z.string(), z.unknown()).nullable().optional(),
+  /** The fixed price of the review (0294); null for reviews started before it (per-call billing). */
+  fee: reviewFee.nullable().optional(),
   calls: z.array(z.object({ groupId: uuid, runId: uuid, callId: uuid, modelId: uuid, phase: z.string(), dispatched: z.boolean(),
     verdict: z.string().nullable(), settled: z.boolean(), state: z.string(),
     dispatchedAt: z.string().nullable().optional(), settledAt: z.string().nullable().optional() })),
@@ -30,7 +35,9 @@ const refusals = new Set(['FUSION_REVIEW_DISABLED', 'FUSION_MEMBERSHIP_REQUIRED'
   'FUSION_REVIEW_DENIED', 'FUSION_REVIEW_ENDED', 'FUSION_REVIEW_STEP_CONFLICT', 'FUSION_GROUP_DENIED', 'FUSION_GROUP_CONFLICT',
   'FUSION_GROUP_INVALID', 'BILL2_CALL_CONFLICT', 'BILL2_RUN_DENIED',
   // The losing side of a concurrent adoption: the conflict, never a generic failure (#962 review).
-  'FUSION_REVIEW_ADOPTED']);
+  'FUSION_REVIEW_ADOPTED',
+  // 0294: the balance does not cover the fixed price (plus a step's temporary hold), or the price changed meanwhile.
+  'FUSION_REVIEW_CREDITS', 'FUSION_REVIEW_PRICE_CHANGED']);
 
 export function reviewRecord(admin: SupabaseClient, actorId: string) {
   async function rpc(name: string, args: Record<string, unknown>): Promise<unknown> {
@@ -75,6 +82,11 @@ export function reviewRecord(admin: SupabaseClient, actorId: string) {
     advance: (reviewId: string, from: ReviewPosition, to: ({ state: 'running' } & ReviewPosition)
       | { state: 'revision_failed' | 'incomplete' | 'completed'; outcome: unknown; revisionId?: string }) =>
       view(rpc('fusion_review_advance', { p_review_id: uuid.parse(reviewId), p_from: from, p_to: to })),
+    /** Settles the held fee of an ended review once its calls have settled (idempotent; 0294). */
+    async settleFee(reviewId: string): Promise<ReviewFee | null> {
+      const value = await rpc('fusion_review_fee_settle', { p_review_id: uuid.parse(reviewId) });
+      return value === null ? null : reviewFee.parse(value);
+    },
     /** stopped: user stop of a running or paused review; interrupted: user ends a paused review. */
     close: (reviewId: string, state: 'stopped' | 'interrupted') =>
       view(rpc('fusion_review_close', { p_review_id: uuid.parse(reviewId), p_state: state })),
