@@ -144,7 +144,9 @@ try {
   assert.equal(await v("SELECT count(*)::int v FROM pg_policies WHERE coalesce(qual,'')||coalesce(with_check,'') ~ 'data_use'"), 0);
   assert.deepEqual((await c.query("SELECT p.proname FROM pg_proc p WHERE p.pronamespace='public'::regnamespace"
     + " AND p.prosrc ~ 'data_use_' ORDER BY 1")).rows.map(r => r.proname), ['data_use_consent_erasure_revoke',
-    'data_use_consent_expire', 'data_use_consent_set', 'data_use_consent_state', 'data_use_team_allowed', 'data_use_team_readable']);
+    'data_use_consent_expire', 'data_use_consent_set', 'data_use_consent_state', 'data_use_team_allowed', 'data_use_team_readable',
+    // PAY-FOUNDER (0269): the founder_wall purpose of the same table, read and written by its own functions only.
+    'founder_member_state', 'founder_wall_consented', 'founder_wall_submit', 'founder_wall_withdraw'].sort());
   report.checks.push('own-data reads unaffected: no RLS policy or existing function depends on consent');
   assert.equal(db.sql(read('packages/db/tests/account-open-policy-audit.sql')), '');
   report.checks.push('account-open policy audit still returns zero rows');

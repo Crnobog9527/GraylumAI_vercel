@@ -9,7 +9,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 export type BenchmarkCategory = 'head_reference' | 'imitable' | 'fast_rising';
 export type ExclusionReason =
-  | 'FOLLOWERS_MISSING' | 'FOLLOWERS_BELOW_MIN' | 'NO_PUBLISH_TIME' | 'INACTIVE_30_DAYS' | 'NO_POSTS';
+  | 'FOLLOWERS_MISSING' | 'FOLLOWERS_BELOW_MIN' | 'NO_PUBLISH_TIME' | 'INACTIVE_30_DAYS' | 'NO_POSTS' | 'TOO_FEW_POSTS';
 
 export type Classification =
   | { category: BenchmarkCategory; qualified: boolean; excluded: null }
@@ -45,6 +45,16 @@ export function classifyAccount(
   const k = ratio(growth.minViewsToFollowers);
   const viral = k !== null && metrics.medianViews.value !== null && metrics.medianViews.value >= followers * k;
   return { category: young || viral ? 'fast_rising' : 'imitable', qualified: true, excluded: null };
+}
+
+/**
+ * A fetched benchmark (benchmark_fetch, not discovery screening) is qualified only with at least postsMin analyzed
+ * posts, unless the supplier confirmed those are the account's whole history (a new account with fewer posts).
+ * Owner 2026-10-16: "同意 RT-4b 作品条数选 A" (RESEARCH_TOOLS_PLAN §1.2 step 4).
+ */
+export function qualifyFetchedAccount(metrics: AccountMetrics, classification: Classification): Classification {
+  if (!classification.qualified || metrics.postsAnalyzed >= BENCHMARK_RULES.postsMin || metrics.wholeHistory) return classification;
+  return { category: null, qualified: false, excluded: 'TOO_FEW_POSTS' };
 }
 
 export interface ScoredAccount {

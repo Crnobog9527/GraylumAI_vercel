@@ -376,3 +376,12 @@ it('a refusal before admission releases its envelope and gives the text back; af
  expect(releaseRejectedAnswer(storage,'key','b',refusal(412,'opc.prepareStep'),text=>restored.push(text),false)).toBe(true);
  expect(storage.getItem('key')).toBeNull();expect(restored).toEqual(['我的回答']);
 });
+
+describe("a retained mentor request with a research refresh grant", () => {
+  it("keeps the grant through the stored envelope, so a resend replays the same request", () => {
+    const request = { draftId: "d", stepId: "s", purpose: "mentor", requestId: "r", input: "请重新读取对标账号 抖音 sample_1 的最新数据",
+      researchRefreshId: "99999999-9999-4999-8999-999999999999" };
+    expect(parseStepEnvelope(JSON.stringify({ request }))?.request).toEqual(request);
+    expect(parseStepEnvelope(JSON.stringify(request))?.request).toEqual(request);
+  });
+});

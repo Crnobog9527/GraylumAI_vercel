@@ -28,7 +28,7 @@ function tree(props: Props): ReactNode {
 describe("QuestionCardView: open card", () => {
   it("shows the question, every option and the fixed Other entry, without the old unsure button", () => {
     const html = render({ card, onAnswer: () => {} });
-    expect(html).toContain('aria-label="导师提问"');
+    expect(html).toContain('aria-label="AI 教练提问"');
     expect(html).toContain(card.question);
     for (const option of card.options) expect(html).toContain(`>${option}</button>`);
     expect(html).toContain(`>${OTHER_LABEL}</button>`);
@@ -136,7 +136,7 @@ describe("OpenQuestionRecord", () => {
 
   it("is a one-line placeholder for a folded unanswered card, without its options", () => {
     const html = record({ card });
-    expect(html).toContain('aria-label="导师提问记录"');
+    expect(html).toContain('aria-label="AI 教练提问记录"');
     expect(html).toContain(card.question);
     expect(html).toContain("待回答");
     for (const option of card.options) expect(html).not.toContain(option);

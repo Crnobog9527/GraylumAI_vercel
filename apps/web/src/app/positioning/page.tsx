@@ -20,7 +20,7 @@ export default function PositioningHome() {
   const [directEntry,setDirectEntry]=useState<StartMode|null>(null);
   // Only a complete entry (mode and intent) auto-starts; anything else shows the ordinary start page.
   useEffect(()=>{const entry=readStartEntry(location.search);setDirectEntry(entry?.intent?entry.mode:null);},[]);
-  const free = useFreeConversation();
+  const free = useFreeConversation({ withReferences: true });
   const [skillId,setSkillId]=useState('');
   const catalog = trpc.opc.catalog.useQuery(undefined,{retry:false}),
     list = trpc.opc.list.useQuery(undefined,{retry:false}),
@@ -91,8 +91,11 @@ export default function PositioningHome() {
         <button aria-pressed={intent==='position'} onClick={choosePosition}><Target size={15}/>梳理账号定位</button>
         <button disabled><ChartNoAxesColumnIncreasing size={15}/>数据复盘</button><button disabled><CalendarDays size={15}/>发布排期</button>
       </section>
-      <WorkComposer value={startInput} onChange={value=>{setStartInput(value);sessionStorage.setItem('opc-new-task-input',value);}} onSend={()=>void free.send(startInput,skillId)} disabled={free.busy} label="新任务内容" placeholder="问一个问题，或描述你想做的事…" skillId={skillId} onSkillChange={setSkillId} note="直接发送即可开始对话，也可以添加资料或选择技能。"/>
+      <WorkComposer value={startInput} onChange={value=>{setStartInput(value);sessionStorage.setItem('opc-new-task-input',value);}} onSend={()=>void free.send(startInput,skillId)} disabled={free.busy} referenceList={free.references} onReferencesChange={free.setReferences} label="新任务内容" placeholder="问一个问题，或描述你想做的事…" skillId={skillId} onSkillChange={setSkillId} note="直接发送即可开始对话，也可以添加资料或选择技能。"/>
       {free.error&&<p role="alert">{free.error}</p>}
+      {/* UI-B: topic and positioning work cannot read referenced documents; the text carries over without them. */}
+      {intent&&free.references.length>0&&<p role="note">
+        选题、内容和账号定位流程不会读取 @ 引用的文档，带过去的只是文件名文字。要让 AI 读文档，请直接发送，开始一段对话。</p>}
       {showSource&&intent==='topics'&&<section className={styles.selection} aria-label="选择任务来源"><h2>选择账号的定位策略</h2><p>查看账号与来源后进入对应选题对话；此步不会自动采用选题或生成内容。</p>{topicAccounts.filter(a=>!sourceAccount||a.projectId===sourceAccount).map(a=><Link key={a.projectId} href={'/positioning/'+a.strategyDraftId+'/topics'} onClick={()=>{if(startInput.trim())localStorage.setItem('opc-topic-input:'+a.strategyDraftId,startInput);}}>{a.platform} · {a.account}<small>{a.businessName}{a.strategyState==='published'?' · 定位已确认':' · 定位修订中；可继续已绑定工作'}</small></Link>)}{library.isSuccess&&list.isSuccess&&!library.error&&!list.error&&!topicAccounts.length&&<p>还没有可用于选题的已确认策略账号。请先梳理定位。</p>}</section>}
       <section className={styles.discovery}><div className={styles.discoveryHead}><div className={styles.recommendTabs}>{([['all','为你推荐'],['strategy','策略'],['writing','写作'],['operations','运营']] as const).map(([id,label])=><button key={id} aria-pressed={recommendation===id} onClick={()=>setRecommendation(id)}>{label}</button>)}</div><Link href="/workbench/marketplace">浏览全部 →</Link></div><div className={styles.discoverGrid}>
         {(recommendation==='all'||recommendation==='strategy')&&<><button onClick={chooseTopics}><span className={`${styles.moduleVisual} ${styles.artTopics}`}><span className={styles.big}>让好想法<br/>接着发生。</span><span className={styles.mini}>IDEAS, INTO STORIES.</span></span><strong>做一批新选题</strong><small>选定规划，找到值得写的方向</small></button><button onClick={choosePosition}><span className={`${styles.moduleVisual} ${styles.artPosition}`}><span className={styles.targetRings}/><b>找到<br/>你的坐标</b></span><strong>找到你的内容定位</strong><small>定位分析，明确受众与价值</small></button></>}
@@ -104,7 +107,7 @@ export default function PositioningHome() {
       <QueryNotice error={catalog.error} loading={catalog.isPending} label="定位方法" retry={()=>catalog.refetch()}/>
       <QueryNotice error={library.error||list.error} loading={library.isPending||list.isPending} label="账号与资料" retry={()=>Promise.all([library.refetch(),list.refetch()])}/>
       {pendingStart&&!start.isPending&&<section className={styles.selection} aria-label="待恢复的开始请求"><p>上次开始定位的结果尚未确认。先恢复同一请求，避免把草稿绑定到另一个业务。</p><Button onClick={()=>runStart(pendingStart)}>恢复上次开始请求</Button></section>}
-      {methodDialog&&<div className={styles.modalScrim} role="presentation"><section className={styles.methodDialog} role="dialog" aria-modal="true" aria-label="梳理账号定位"><header><h2>梳理账号定位</h2><button autoFocus aria-label="关闭窗口" onClick={()=>setMethodDialog(false)}><X size={17}/></button></header><p>开始新账号的定位分析；已经有定位的，选「我已有定位」，把它粘贴或描述给导师，再逐步核对确认。</p><div className={styles.methodActions}><button disabled={!actorId||!catalog.data?.length||start.isPending||Boolean(pendingStart)} onClick={()=>{setMethodDialog(false);void begin('mentor');}}>{START_TEXT.mentor.action}</button><button disabled={!actorId||!catalog.data?.length||start.isPending||Boolean(pendingStart)} onClick={()=>{setMethodDialog(false);void begin('manual');}}>{START_TEXT.manual.action}</button></div></section></div>}
+      {methodDialog&&<div className={styles.modalScrim} role="presentation"><section className={styles.methodDialog} role="dialog" aria-modal="true" aria-label="梳理账号定位"><header><h2>梳理账号定位</h2><button autoFocus aria-label="关闭窗口" onClick={()=>setMethodDialog(false)}><X size={17}/></button></header><p>开始新账号的定位分析；已经有定位的，选「我已有定位」，把它粘贴或描述给 AI 教练，再逐步核对确认。</p><div className={styles.methodActions}><button disabled={!actorId||!catalog.data?.length||start.isPending||Boolean(pendingStart)} onClick={()=>{setMethodDialog(false);void begin('mentor');}}>{START_TEXT.mentor.action}</button><button disabled={!actorId||!catalog.data?.length||start.isPending||Boolean(pendingStart)} onClick={()=>{setMethodDialog(false);void begin('manual');}}>{START_TEXT.manual.action}</button></div></section></div>}
       {error && <p role="alert">{error}</p>}
     </div></main></WorkspaceFrame>
   );

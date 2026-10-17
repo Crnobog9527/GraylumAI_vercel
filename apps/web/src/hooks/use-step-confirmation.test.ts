@@ -4,6 +4,9 @@ import { confirmKey, executeConfirmation, prepareConfirmation, refreshedDeferral
 import { stepConfirmationValues, visibleStep, type FieldValue, type VisibleStep } from "@/components/opc/capture-state";
 import type { ConfirmStepEnvelope } from "@/app/positioning/[draftId]/confirm-envelope";
 
+const positioningComplete = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/analytics/events", () => ({ reportPositioningComplete: positioningComplete }));
+
 const v = (value: string, status: FieldValue["status"] = "provisional"): FieldValue => ({ value, status, nature: "decision" });
 const schema = [{ id: "goal", title: "目标", required: true }, { id: "audience", title: "受众", required: true }];
 const step = { id: "s1", title: "了解你" };
@@ -104,6 +107,21 @@ describe("executeConfirmation", () => {
     expect(s.io.releaseEdits).toHaveBeenCalledWith("s1", "null");
     expect(s.store.size).toBe(0);
     expect(s.io.onConfirmed).toHaveBeenCalledWith("s1");
+    // The only step is now confirmed: the positioning is complete (statistics only).
+    expect(positioningComplete).toHaveBeenCalledTimes(1);
+  });
+  it("does not count an account revision, or a step that leaves others unconfirmed, as a completed positioning", async () => {
+    positioningComplete.mockClear();
+    await executeConfirmation(server(confirmed, { accountRevision: 2 }).io, step, envelope(confirmed, { phase: "save" }));
+    const open = server(confirmed), refetch = open.io.refetch;
+    open.io.refetch = async () => {
+      const read = await refetch();
+      return { data: { ...read.data!, snapshot: { steps: { ...read.data!.snapshot.steps,
+        s2: { version: 1, reviewVersion: 0, valid: false, evidenceIds: [] } } } } };
+    };
+    await executeConfirmation(open.io, step, envelope(confirmed, { phase: "save" }));
+    expect(open.io.onConfirmed).toHaveBeenCalledWith("s1");
+    expect(positioningComplete).not.toHaveBeenCalled();
   });
   it("resumes a retained envelope from its saved phase with its original identities", async () => {
     const s = server(confirmed);
