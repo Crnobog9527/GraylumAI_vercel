@@ -13,8 +13,8 @@
 -- existing account and content erasure already clear (packages/db/tests/report-visual-data covers it).
 BEGIN;
 
--- Mirrors splitReportBody in packages/api/src/shared/reportData.ts: the first fence line opens the block, the next
--- bare ``` line closes it. No closing line: the text before it (still written, or cut off) and no block.
+-- Mirrors splitReportBody in packages/api/src/shared/reportData.ts: the LAST fence line opens the block (a fence typed
+-- into the text stays text), the next bare ``` line closes it. No closing line: the text before it and no block.
 CREATE OR REPLACE FUNCTION public.report_body_parts(body text) RETURNS jsonb
 LANGUAGE plpgsql IMMUTABLE SET search_path=public,pg_temp AS $$
 DECLARE lines text[];n integer;open_at integer;close_at integer;before text;after text;
@@ -22,13 +22,13 @@ DECLARE lines text[];n integer;open_at integer;close_at integer;before text;afte
 BEGIN
  IF body IS NULL THEN RETURN NULL; END IF;
  lines:=string_to_array(body,E'\n');n:=coalesce(array_length(lines,1),0);
- FOR i IN 1..n LOOP
-  IF open_at IS NULL THEN
-   IF btrim(lines[i],ws)='```graylum-report-data' THEN open_at:=i; END IF;
-  ELSIF btrim(lines[i],ws)='```' THEN close_at:=i; EXIT;
-  END IF;
+ FOR i IN REVERSE n..1 LOOP
+  IF btrim(lines[i],ws)='```graylum-report-data' THEN open_at:=i; EXIT; END IF;
  END LOOP;
  IF open_at IS NULL THEN RETURN jsonb_build_object('text',body,'block',NULL); END IF;
+ FOR i IN open_at+1..n LOOP
+  IF btrim(lines[i],ws)='```' THEN close_at:=i; EXIT; END IF;
+ END LOOP;
  before:=rtrim(coalesce(array_to_string(lines[1:open_at-1],E'\n'),''),ws);
  IF close_at IS NULL THEN RETURN jsonb_build_object('text',before,'block',NULL); END IF;
  after:=btrim(coalesce(array_to_string(lines[close_at+1:n],E'\n'),''),ws);

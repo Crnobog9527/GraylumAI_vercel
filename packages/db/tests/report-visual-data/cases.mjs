@@ -40,6 +40,7 @@ export async function runCases({db,report}) {
  assert.deepEqual(await parts(withData()),{text:text(),block:block()});
  assert.deepEqual(await parts(`${text()}\n\n\`\`\`graylum-report-data\n{"v":1`),{text:text(),block:null});
  assert.deepEqual(await parts(text()),{text:text(),block:null});
+ assert.deepEqual(await parts(withData(withData(),block('生成的'))),{text:withData(),block:block('生成的')},'the last block is the data');
  const long=withData(text('字'.repeat(12000-text().length)),block('数'.repeat(5000)));
  const big=await seedBody(db,long);
  assert.equal((await read(db,big)).candidate,true,'12000-character text plus a data block is complete');
