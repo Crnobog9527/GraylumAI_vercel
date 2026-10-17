@@ -14,6 +14,7 @@ import { enterPage, syncGa } from '@/lib/analytics/ga';
 import { isSensitivePath } from '@/lib/analytics/routes';
 import { cleanVercelEvent } from '@/lib/analytics/vercel';
 import { createClient } from '@/lib/supabase';
+import { useConsentWithdrawalSync } from './use-consent-withdrawal-sync';
 
 /**
  * Consent banner and statistics for every page (ANALYTICS plan §3). Termly loads asynchronously and never
@@ -22,14 +23,20 @@ import { createClient } from '@/lib/supabase';
  * component that reads nothing on the server, so public pages stay static.
  */
 export function SiteAnalytics({ onVercel }: { onVercel: boolean }) {
-  const { termlyWebsiteUuid, gaMeasurementId, vercelCategory } = ANALYTICS_CONFIG;
+  // Not configured: nothing renders, no hook runs and no request is made.
+  const { termlyWebsiteUuid } = ANALYTICS_CONFIG;
+  return termlyWebsiteUuid ? <ConfiguredAnalytics termlyWebsiteUuid={termlyWebsiteUuid} onVercel={onVercel} /> : null;
+}
+
+function ConfiguredAnalytics({ termlyWebsiteUuid, onVercel }: { termlyWebsiteUuid: string; onVercel: boolean }) {
+  const { gaMeasurementId, vercelCategory } = ANALYTICS_CONFIG;
   const pathname = usePathname();
   const consent = useSyncExternalStore(subscribeConsent, consentSnapshot, serverConsentSnapshot);
   const previous = useRef<string | null>(null);
+  useConsentWithdrawalSync(consent, true);
 
   // A new address: record it (cleaned) and report it if consent allows.
   useEffect(() => {
-    if (!termlyWebsiteUuid) return;
     enterPage(window.location.href, previous.current);
     previous.current = window.location.href;
     syncGa(gaMeasurementId);
@@ -50,7 +57,6 @@ export function SiteAnalytics({ onVercel }: { onVercel: boolean }) {
     return () => { active = false; };
   }, [pathname, consent.analytics, termlyWebsiteUuid, gaMeasurementId]);
 
-  if (!termlyWebsiteUuid) return null;
   // Injected scripts outlive this component, so cleanVercelEvent re-checks consent and the page on every event.
   const vercelOn = onVercel && (vercelCategory === 'essential' || consent.analytics) && !isSensitivePath(pathname ?? '/');
   return (

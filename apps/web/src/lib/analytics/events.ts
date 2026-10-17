@@ -1,12 +1,12 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 
 import { ANALYTICS_CONFIG } from './config';
-import { sendGaEvent } from './ga';
+import { readGaCheckoutIds, sendGaEvent, type GaCheckoutIds } from './ga';
 
 /**
  * The browser key events (ANALYTICS plan §3.1). Parameters are limited to the ones listed in the plan: never
  * an email, a name, a user or order ID. Each call is a no-op unless GA is configured, Termly reports statistics
- * consent right now and the current page is reportable. Checkout and purchase events come with the server PR.
+ * consent right now and the current page is reportable. Purchase success is reported by the server instead.
  */
 const SIGNUP_KEY = 'graylum.analytics.signup';
 const SIGNUP_WINDOW_MS = 30 * 60 * 1000;
@@ -43,3 +43,17 @@ export function reportSignUpIfNew(user: SignUpUser | null | undefined, verified:
 export function reportPositioningComplete(): boolean {
   return sendGaEvent(ANALYTICS_CONFIG.gaMeasurementId, 'positioning_complete');
 }
+
+/** A Stripe checkout session was created and the user is about to be sent to it (plan §3.1: currency, value and
+ * the catalog item ID only; the value is the order's pre-tax amount from the server). */
+export function reportBeginCheckout(itemId: string, value: number | null): boolean {
+  return sendGaEvent(ANALYTICS_CONFIG.gaMeasurementId, 'begin_checkout', {
+    currency: 'USD', ...(value === null ? {} : { value }), items: [{ item_id: itemId }],
+  });
+}
+
+/** GA ids to send with a checkout request (consent only); the server reports the purchase after delivery. */
+export function checkoutAnalyticsIds(): Promise<GaCheckoutIds | null> {
+  return readGaCheckoutIds(ANALYTICS_CONFIG.gaMeasurementId).catch(() => null);
+}
+
