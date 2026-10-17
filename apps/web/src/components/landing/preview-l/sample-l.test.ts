@@ -20,7 +20,7 @@ import { buildLandingPageData } from '@/lib/landing/landing-page-data';
 import { APP_SEGMENTS } from '@/lib/sentry-scrub';
 import { L_SAMPLES_REDO } from '@/lib/landing/landing-copy-l-samples';
 import { SAMPLE_OVERVIEWS } from '@/lib/landing/sample-reports/overview';
-import { L_WORKFLOWS } from '@/lib/landing/landing-copy-l-workflows';
+import { L_WORKFLOWS, SCRIPT, SHOTS } from '@/lib/landing/landing-copy-l-workflows';
 import { L_LATER, L_LATER_CHAT } from '@/lib/landing/landing-copy-l-later';
 import { L_POSITIONING_MOMENTS, L_SKILL_OPENING } from '@/lib/landing/landing-copy-l-positioning';
 import { L_PRICE_NOTE } from '@/lib/landing/landing-copy-l';
@@ -208,11 +208,36 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     expect(text).toContain(L_SCENARIOS.badge);
     // The coach's side is a whole work conversation: library read, data fetched, the decision, what to do next, a follow-up.
     for (const turn of L_WORKFLOWS[0]) expect(text).toContain(turn.user);
-    expect(text).toContain('已读取资料库');
+    expect(text).toContain(`已读取：${L_WORKFLOWS[0][0].read?.join('、')}`);
+    expect(text).toContain(L_WORKFLOWS[0][0].calls?.[0].found);
     expect(compare).toContain('aria-label="搜索记录"');
     for (const turns of L_WORKFLOWS) expect(turns.every(turn => turn.reply.includes('接下来你做') || turn === turns[0] && turns.length > 1)).toBe(true);
     for (const task of L_TASKS) expect(task.coach).toContain('接下来你做');
     for (const brand of ['ChatGPT', 'Claude', 'Gemini', 'DeepSeek', '豆包', 'Kimi']) expect(text).not.toContain(brand);
+  });
+
+  it('gives every region 6 scenario work, numbers, something ready to use and a dated next step (round seven, T11)', () => {
+    for (const turns of L_WORKFLOWS) {
+      const all = turns.map(turn => turn.reply).join('\n');
+      expect(all).toMatch(/\n\|[^\n]+\|\n\|(-+\|)+/);
+      expect(turns.some(turn => turn.read?.length || turn.calls?.length)).toBe(true);
+      expect(turns[turns.length - 1].reply).toMatch(/\*\*接下来你做\*\*：.*(今晚|明天|周[一二三四五六日])/);
+    }
+    // The script: about 300 characters, 9 to 11 shots, about 65 seconds, the shots' lines joined being the whole text.
+    expect(SCRIPT.replace(/\n/g, '').length).toBeGreaterThan(250);
+    expect(SHOTS.length).toBeGreaterThanOrEqual(9);
+    expect(SHOTS.length).toBeLessThanOrEqual(11);
+    const seconds = SHOTS.reduce((sum, shot) => sum + shot[4], 0);
+    expect(seconds).toBeGreaterThanOrEqual(60);
+    expect(seconds).toBeLessThanOrEqual(70);
+    expect(SHOTS.map(shot => shot[3]).join('')).toBe(SCRIPT.replace(/\n/g, ''));
+    expect(L_WORKFLOWS[2][0].proposal).toBe(SCRIPT);
+    // The same video in two scenarios: 64 saves of 1,870 plays is the 3.4% save rate, 28% watched to the end.
+    expect((64 / 1870) * 100).toBeCloseTo(3.4, 1);
+    expect(L_WORKFLOWS[1][0].reply).toContain('| 冰箱剩菜三种做法 | 1,870 | 28% | 64 |');
+    expect(L_WORKFLOWS[3][0].reply).toContain('| 完播率 | 28% |');
+    expect(L_WORKFLOWS[3][0].reply).toContain('| 收藏率 | 3.4% |');
+    expect(L_TASKS[3].question).toBe(L_WORKFLOWS[3][0].user);
   });
 
   it('shows the usual total whole (not struck) and drops the check date', () => {

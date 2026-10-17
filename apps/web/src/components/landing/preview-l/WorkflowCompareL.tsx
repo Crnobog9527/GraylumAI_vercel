@@ -96,14 +96,16 @@ function Turn({ turn, local }: { turn: WorkflowTurn; local: number }) {
   const calls: ResearchCall[] = (turn.calls ?? []).flatMap((call, index) => {
     const at = callsFrom + index;
     if (local < at) return [];
+    const done = local > at;
     return [{
-      callId: call.query, toolName: call.toolName, args: {}, query: call.query, platform: 'tiktok', dataKind: call.dataKind,
-      state: local > at ? 'succeeded' : 'running',
+      callId: call.query, toolName: call.toolName, args: {}, platform: 'tiktok', dataKind: call.dataKind,
+      query: done && call.found ? `${call.query}：${call.found}` : call.query, state: done ? 'succeeded' : 'running',
     } as ResearchCall];
   });
+  const [readingLabel, readLabel] = turn.readLabel ?? ['正在读取资料库', '已读取资料库'];
   const reading = turn.read && local >= readAt
     ? [{ id: 'read', tone: 'status' as const, busy: local === readAt,
-      text: `${local === readAt ? '正在读取资料库' : '已读取资料库'}：${turn.read.join('、')}` }]
+      text: `${local === readAt ? readingLabel : readLabel}：${turn.read.join('、')}` }]
     : [];
   const replied = local >= replyAt;
   return (
