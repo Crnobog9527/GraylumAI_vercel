@@ -1,11 +1,11 @@
 'use client';
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { useRef, useState, type RefObject } from 'react';
+import { FileText } from 'lucide-react';
 import { trpc } from '@/trpc/client';
 import type { ComposerEditorHandle, ComposerReferenceHooks } from './composer-editor';
 import type { LibraryReference, ReferenceQuery } from './composer-references';
 import { QueryNotice } from './query-notice';
-import { ReferenceMenuView } from './composer-view';
 import styles from './work-composer.module.css';
 
 type ListedDocument = {
@@ -92,11 +92,17 @@ export function useComposerReferences(enabled: boolean, box: RefObject<ComposerE
     },
   };
 
-  const menu = open ? <ReferenceMenuView choices={choices.map(item => ({ id: item.id, label: item.filename ?? '未命名文档' }))}
-    highlighted={highlighted} onPick={index => pick(choices[index])}
-    status={list.isLoading ? <p role="status">正在读取资料库…</p>
-      : list.error ? <QueryNotice error={list.error} label="资料库" retry={() => list.refetch()}/> : undefined}/>
-    : notice ? <p role="alert" className={styles.note}>{notice}</p> : null;
+  const menu = open ? <div className={styles.referenceMenu} role="dialog" aria-label="引用资料库文档">
+    {list.isLoading ? <p role="status">正在读取资料库…</p>
+      : list.error ? <QueryNotice error={list.error} label="资料库" retry={() => list.refetch()}/>
+        : choices.length ? <div role="listbox" aria-label="资料库文档">{choices.map((item, index) =>
+          <button type="button" role="option" key={item.id} aria-selected={index === highlighted}
+            onMouseDown={event => event.preventDefault()} onClick={() => pick(item)}>
+            <FileText size={15}/><span>{item.filename ?? '未命名文档'}</span>
+          </button>)}</div>
+          : <p>没有匹配的已就绪文档</p>}
+    <small>引用尚未开放：选中的文档暂时不会发送给 AI。</small>
+  </div> : notice ? <p role="alert" className={styles.note}>{notice}</p> : null;
 
   return { hooks: enabled ? hooks : undefined, menu, references };
 }

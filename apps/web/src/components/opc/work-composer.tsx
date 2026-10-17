@@ -1,13 +1,14 @@
 'use client';
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { ArrowUp, Box, FileText, Plus, Search, X } from 'lucide-react';
+import Link from 'next/link';
 import { trpc } from '@/trpc/client';
 import styles from './work-composer.module.css';
 import { QueryNotice, workspaceErrorMessage } from './query-notice';
 import { ComposerEditor, type ComposerEditorHandle } from './composer-editor';
 import { COMPOSER_REFERENCES_ENABLED } from './composer-references';
 import { useComposerReferences } from './reference-menu';
-import { ComposerView, SkillMenuView } from './composer-view';
 
 /**
  * One input surface for free conversation, positioning and topic work.
@@ -52,23 +53,29 @@ export function WorkComposer({value,onChange,onSend,disabled=false,sendDisabled=
  const cannotSend=disabled||sendDisabled||reading||!value.trim();
  // Counter only near the limit, so ordinary messages stay uncluttered.
  const nearLimit=value.length>=maxLength*0.9;
- return <ComposerView rootRef={root} attachment={attachment} referenceMenu={referencePicker.menu} menu={menu} disabled={disabled} reading={reading}
-  editor={<ComposerEditor ref={box} label={label} placeholder={placeholder} value={value} maxLength={maxLength}
+ return <div ref={root} className={styles.wrap}><div className={styles.composer}>
+  {attachment&&<div className={styles.attachment}>{attachment}</div>}
+  <ComposerEditor ref={box} label={label} placeholder={placeholder} value={value} maxLength={maxLength}
    disabled={disabled||reading} onChange={onChange} onEscape={()=>setMenu(null)}
-   onEnter={()=>{if(!cannotSend)onSend(selected);}} className={styles.editor} references={referencePicker.hooks}/>}
-  onToggleFiles={()=>setMenu(menu==='files'?null:'files')} onPickFile={()=>fileInput.current?.click()}
-  fileInput={<input ref={fileInput} type="file" aria-label="选择附件" accept=".txt,.md,.csv,.json,.log" multiple hidden
-   onChange={event=>void addFiles(event.target.files)}/>}
-  onToggleSkills={toggleSkills}
-  skillMenu={<SkillMenuView query={query} onQuery={setQuery} onClose={()=>setMenu(null)} skills={skills} onPick={changeSkill}
-   hint={onSkillChange?'加载到本对话，不自动发送':'使用此技能开展独立对话'}
-   status={choices.isLoading?<p role="status">正在读取技能…</p>:choices.error?<QueryNotice error={choices.error} label="技能列表" retry={()=>choices.refetch()}/>:undefined}/>}
-  counter={nearLimit?{length:value.length,max:maxLength}:null}
-  skillName={selected?choices.data?.skills.find(skill=>skill.moduleId===selected)?.name??'已选择技能':undefined}
-  sendDisabled={cannotSend} onSend={sendAndFocus} error={error} note={note}/>;
+   onEnter={()=>{if(!cannotSend)onSend(selected);}} className={styles.editor} references={referencePicker.hooks}/>
+  {referencePicker.menu}
+  <div className={styles.tools}><div className={styles.toolLeft}>
+   <div className={styles.menuAnchor}><button type="button" aria-label="添加资料" disabled={disabled||reading} aria-expanded={menu==='files'} onClick={()=>setMenu(menu==='files'?null:'files')}><Plus size={19}/></button>{menu==='files'&&<div className={styles.menu} role="dialog" aria-label="添加资料"><button type="button" onClick={()=>fileInput.current?.click()}><FileText size={16}/> 从文件添加</button><p>支持 TXT、Markdown、CSV、JSON、日志。内容会加入本条消息，发送前可以检查或删除。</p></div>}</div>
+   <input ref={fileInput} type="file" aria-label="选择附件" accept=".txt,.md,.csv,.json,.log" multiple hidden onChange={event=>void addFiles(event.target.files)}/>
+   <div className={styles.menuAnchor}><button type="button" aria-label="使用技能" disabled={disabled} aria-expanded={menu==='skills'} onClick={toggleSkills}><Box size={18}/></button>{menu==='skills'&&<div className={styles.skillMenu} role="dialog" aria-label="使用技能"><div className={styles.skillHead}><strong>使用技能</strong><button type="button" aria-label="关闭技能菜单" onClick={()=>setMenu(null)}><X size={16}/></button></div><label className={styles.skillSearch}><Search size={16}/><input aria-label="搜索技能" placeholder="搜索技能" value={query} onChange={event=>setQuery(event.target.value)}/></label><div className={styles.skillList}>{choices.isLoading?<p role="status">正在读取技能…</p>:choices.error?<QueryNotice error={choices.error} label="技能列表" retry={()=>choices.refetch()}/>:<>{skills.map(skill=><button type="button" key={skill.moduleId} onClick={()=>changeSkill(skill.moduleId)}><span className={styles.skillGlyph}><Box size={16}/></span><span><strong>{skill.name}</strong><small>{onSkillChange?'加载到本对话，不自动发送':'使用此技能开展独立对话'}</small></span></button>)}{!skills.length&&<p>没有匹配的可用技能</p>}</>}</div><div className={styles.skillFoot}><Link href="/workbench/marketplace">浏览功能广场</Link></div></div>}</div>
+  </div><div className={styles.toolRight}>{nearLimit&&<span>{value.length} / {maxLength}</span>}
+  {selected&&<span>{choices.data?.skills.find(skill=>skill.moduleId===selected)?.name??'已选择技能'}</span>}<ModelSlot/><button type="button" aria-label="发送" className={styles.send} disabled={cannotSend} onClick={sendAndFocus}><ArrowUp size={18}/></button></div></div>
+ </div>{reading&&<p role="status" className={styles.note}>正在读取附件…</p>}{error&&<p role="alert" className={styles.note}>{error}</p>}{note&&<p className={styles.note}>{note}</p>}</div>;
 }
 
-export { ModelSlot, MODEL_SLOT_HINT } from './composer-view';
+/**
+ * UI-MODEL (Owner 2026-10-03, plan §2.1 item 50): the model position stays in the box but only shows Auto.
+ * Users cannot switch; the backend picks the model by purpose, the same for every plan. Plain text, not a control.
+ */
+export function ModelSlot(){
+ return <span className={styles.model} title={MODEL_SLOT_HINT}>Auto<span className={styles.srOnly}>{'，'+MODEL_SLOT_HINT}</span></span>;
+}
+export const MODEL_SLOT_HINT='模型由系统按用途自动选择';
 
 /**
  * Files added to the message, readable in the box: each file's own lines between a start and an end marker.
