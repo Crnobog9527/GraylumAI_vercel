@@ -6,6 +6,7 @@ import { beginInput } from '../services/library/content';
 import { pdfBeginInput, pdfCompleteInput } from '../services/library/pdfContent';
 import { wordBeginInput, wordCompleteInput } from '../services/library/wordContent';
 import { libraryService } from '../services/library/service';
+import { recognitionFailInput, recognitionSaveInput } from '../services/library/recognition';
 
 // The existing tRPC HTTP entry enforces maintenance mode; actor is bound only from the session.
 const procedure = protectedProcedure.use(async ({ ctx, next }) => {
@@ -41,4 +42,8 @@ export const libraryRouter = router({
     .query(({ ctx, input }) => ctx.library.directory(input.documentId, input.version)),
   setPurpose: procedure.input(document.extend({ purpose: z.enum(['authored', 'reference']) }))
     .mutation(({ ctx, input }) => ctx.library.purpose(input.documentId, input.purpose)),
+  // LIB-2d: the browser recognises scanned PDF pages and Word images and saves only the text (off unless the server switch is on).
+  recognitionPending: procedure.query(({ ctx }) => ctx.library.recognitionPending()),
+  saveRecognizedPage: procedure.input(recognitionSaveInput).mutation(({ ctx, input }) => ctx.library.saveRecognized(input)),
+  failRecognizedPage: procedure.input(recognitionFailInput).mutation(({ ctx, input }) => ctx.library.failRecognized(input)),
 });
