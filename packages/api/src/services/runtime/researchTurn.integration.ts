@@ -13,6 +13,7 @@ import { freezeHistorySelection } from './hostTurn';
 import { frozenResearchTurn, RESEARCH_PHASE, RESEARCH_RESULT_RESERVE_BYTES, RESEARCH_TURN_VERSION } from './researchTurn';
 import { toolCallPolicy } from '../bill2/toolBilling';
 import type { RuntimeProgress } from './progress';
+import type { PaygWait } from './paygRuntime';
 
 const supplier = vi.hoisted(() => ({ calls: 0 }));
 vi.mock('../redisRateLimiter', () => ({ checkVendorRateLimit: async () => true }));
@@ -183,7 +184,7 @@ it('RUNTIME: a subcall the balance cannot start pauses the turn at its slot; aft
     expect(waiting).toMatchObject({ state: 'waiting_credits', code: 'RUNTIME_WAITING_CREDITS', executionId: f.admitted.executionId });
     expect(supplier.calls).toBe(0);
     expect(f.requests).toHaveLength(1);
-    expect(await calls()).toEqual([{ sequence: 1, call_kind: 'model', state: 'succeeded', settled: true }]);
+    expect(await calls()).toEqual([{ sequence: 1, call_kind: 'model', state: 'responded', settled: true }]);
     expect(await credits()).toBe(997);
     expect(events.filter(event => event.type === 'research_call').map(event => event.type === 'research_call' && event.state))
       .toEqual(['running']);
@@ -199,7 +200,7 @@ it('RUNTIME: a subcall the balance cannot start pauses the turn at its slot; aft
     [f.actor, 'research-turn-topup:' + f.actor]);
     await f.db.query('update profiles set credits=1097 where id=$1', [f.actor]);
     const resumed = await host().execute(f.admitted.executionId, undefined,
-      { executionId: f.admitted.executionId, cursor: waiting.cursor!, epoch: waiting.epoch! });
+      { executionId: f.admitted.executionId, cursor: (waiting as PaygWait).cursor, epoch: (waiting as PaygWait).epoch });
     expect(resumed).toMatchObject({ state: 'completed' });
     // The saved first reply is replayed; the subcall claims the paused slot with the same request, then the reply after it.
     expect((await calls()).map(c => [c.sequence, c.call_kind, c.settled])).toEqual([[1, 'model', true], [2, 'tool', true], [3, 'model', true]]);
@@ -207,6 +208,9 @@ it('RUNTIME: a subcall the balance cannot start pauses the turn at its slot; aft
     expect(f.requests).toHaveLength(2);
     const charged = (await f.db.query('select charged from bill2_runs where id=$1', [f.admitted.runId])).rows[0].charged;
     expect(charged).toBe(11);
-    expect(await credits()).toBe(1097 - 11);
+    // Granted 1000 + 100 in total; the whole turn costs 11 once (3 of them were already taken before the pause).
+    expect(await credits()).toBe(1000 + 100 - 11);
+    const ledger = await f.db.query('select sum(amount)::int n from credit_transactions where user_id=$1', [f.actor]);
+    expect(ledger.rows[0].n).toBe(1000 + 100 - 11);
   } finally { await f.close(); }
 }, 60000);

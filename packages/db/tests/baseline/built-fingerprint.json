@@ -3165,7 +3165,7 @@
   "fn:report_revision_values(jsonb,jsonb,jsonb)": "c1429dcbce4d",
   "fn:report_source(uuid,uuid,uuid,uuid)": "12a302383629",
   "fn:report_source_for_read(uuid,uuid,uuid,uuid)": "d4d9dbff879b",
-  "fn:research_account_fetch_claim(uuid,uuid,uuid,text,text,uuid)": "b7ac0398f4a4",
+  "fn:research_account_fetch_claim(uuid,uuid,uuid,text,text,uuid)": "464f7145eb11",
   "fn:research_account_fetch_dispatch(uuid,uuid,uuid)": "f2def6fa7137",
   "fn:research_account_fetch_finish(uuid,uuid,uuid,text,jsonb)": "5b67a19a8605",
   "fn:research_account_key(text,text)": "65de89a495ee",
