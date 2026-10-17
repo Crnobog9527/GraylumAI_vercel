@@ -4,7 +4,6 @@ import { useRef, useState } from "react";
 import { X } from "lucide-react";
 import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
-import { MessageMarkdown } from "@/components/chat/MessageMarkdown";
 import { CHAT_ACTION, ChatNoticeList, type ChatNotice } from "@/components/chat/ChatInlineNotice";
 import { profileTabHref } from "@/lib/profile-tabs";
 import { ReportPaywallDialog } from "@/components/paywall/ReportPaywallDialog";
@@ -21,6 +20,7 @@ import { REPORT_DOC_TEXT } from "./report-document";
 import { JuryEntry } from "@/components/fusion-review/JuryEntry";
 import { REPORT_OUTLINE_MIN_CHAPTERS, ReportWithOutline } from "@/components/chat-display/report-outline";
 import { useReportOutline } from "@/components/chat-display/use-report-outline";
+import { ReportView } from "@/components/chat-display/report-view/report-view";
 import { savedFormalReport, type FormalReport } from "./saved-report";
 
 type Props = {
@@ -117,7 +117,7 @@ export function ReportDialog({ report, savedBody, busy, onClose, onTopics }:
           {view?.kind === "report" && !report.live && report.executionId
             ? <ReportDocumentPanel key={report.executionId} executionId={report.executionId} fallbackBody={view.body}
               generatedComplete={view.candidate} busy={busy || working} onTopics={onTopics} onUnsaved={trackUnsaved} />
-            : body && <MessageMarkdown className="mt-4" text={body} streaming={Boolean(report.live && !report.live.stopped)} />}
+            : body && <ReportView className="mt-4" body={body} streaming={Boolean(report.live && !report.live.stopped)} />}
           <ChatNoticeList className="mt-4" notices={notices} />
           {report.offer && !savedBody && !report.refusal?.hideEntry && (
             <div className={resultStyles.consentActions}>
