@@ -2,7 +2,8 @@ import fs from 'node:fs';
 const files = process.argv.slice(2);
 const sec = (x) => (x / 1000).toFixed(1);
 const pct = (x) => (x * 100).toFixed(1) + '%';
-const CATS = ['clean', 'rotated', 'blur', 'noise_jpeg', 'phone_photo', 'two_column', 'table', 'mixed_zh_en'];
+const files0 = JSON.parse(fs.readFileSync(files[0], 'utf8')).rows;
+const CATS = [...new Set(files0.map((r) => r.cat))];
 const out = [];
 const agg = (rows) => {
   const e = rows.reduce((a, r) => a + r.edits, 0),

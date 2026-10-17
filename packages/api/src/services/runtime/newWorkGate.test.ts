@@ -94,7 +94,17 @@ describe('MODEL-IDENTITY-GUARD switch rides on the admission settings read', () 
     const f = db([...rows]);
     const read = await readAdmissionSettings(f.client);
     expect(read).toMatchObject({ ok: true, config: defaults, identityGuard: expected });
-    expect(f.keys).toEqual([['runtime_rate_limits', 'model_identity_guard']]);
+    expect(f.keys).toEqual([['runtime_rate_limits', 'model_identity_guard', 'primary_model_id']]);
+  });
+  // UI-MODEL: the administrator's primary model rides on the same read; only a uuid counts as configured.
+  it.each([
+    ['set', [{ key: 'primary_model_id', value: '10000000-0000-4000-8000-000000000003' }], '10000000-0000-4000-8000-000000000003'],
+    ['absent', [], undefined],
+    ['cleared', [{ key: 'primary_model_id', value: '' }], undefined],
+    ['model name', [{ key: 'primary_model_id', value: 'anthropic/claude' }], undefined],
+  ] as const)('primary model %s', async (_name, rows, expected) => {
+    const read = await readAdmissionSettings(db([...rows]).client);
+    expect(read.ok && read.primaryModelId).toBe(expected ?? undefined);
   });
   it('malformed rate limits still fail closed', async () => {
     expect(await readAdmissionSettings(db([{ key: 'runtime_rate_limits', value: { version: 2 } }]).client)).toEqual({ ok: false });

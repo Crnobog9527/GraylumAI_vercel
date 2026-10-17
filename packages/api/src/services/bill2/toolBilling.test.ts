@@ -34,10 +34,10 @@ describe('tool billing payloads', () => {
       protocol: 'research-tool-v1', multiplier: '6', upperUsd: '0.01', lookupSupported: false,
       toolPricing: { unit: 'call', price: '0.01', unitsPerPrice: '1', usdPerCurrency: null, maxUnitsPerCall: '1',
         validUntil: '2026-10-20T00:00:00Z' } });
-    expect(toolClaimPayload(p, { phase: 'question', requestHash: 'd'.repeat(64), runtimeEpoch: '3' })).toEqual({
+    expect(toolClaimPayload(p, { phase: 'question', requestHash: 'd'.repeat(64), runtimeEpoch: 3 })).toEqual({
       provider: 'tikhub', account: 'tikhub-main', model: p.model, protocol: 'research-tool-v1', phase: 'question',
       requestHash: 'd'.repeat(64), automaticRetry: false, hiddenTools: false, lookupSupported: false, upperUsd: '0.01',
-      billingUnit: { modelId: p.modelId, multiplier: '6' }, toolPricing: p.toolPricing, runtimeEpoch: '3' });
+      billingUnit: { modelId: p.modelId, multiplier: '6' }, toolPricing: p.toolPricing, runtimeEpoch: 3 });
     expect(() => toolClaimPayload(p, { phase: 'report', requestHash: 'd'.repeat(64) })).toThrow(ToolBillingError);
   });
 
