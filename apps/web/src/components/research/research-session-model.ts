@@ -87,27 +87,32 @@ export function toSessionCards(rows: readonly StoredCard[]): SessionCard[] {
 /** Cards the user still has to answer. */
 export const openCards = (cards: readonly SessionCard[]) => cards.filter(item => !item.confirmation);
 
-/** A `research.benchmarks` row (0268 `research_benchmark_rows`): host-computed numbers, null where evidence had none. */
+/** A `research.benchmarks` row (0291 `research_user_benchmarks`): host-computed numbers with their evidence refs. */
 export interface StoredBenchmark {
   platform: string; account: string; followers: number | null; medianViews: number | null; engagementRate: number | null;
   postsPerWeek: number | null; lastPublishedAt: string | null; category: BenchmarkRow["category"]; qualified: boolean;
   fetchedAt: string;
+  /** Evidence refs (`<research operation id>#<item>`) each displayed number was computed from. */
+  refs: Record<"followers" | "medianViews" | "engagementRate" | "postsPerWeek" | "lastPublishedAt", string[]>;
 }
 
 /** The report needs this many qualified benchmarks of the session (0268 `research_benchmark_required`, positioning). */
 export const REPORT_MIN_QUALIFIED = 3;
 
 /**
- * Stored rows → table rows. This read carries no evidence refs yet, so no cell cites a source number; a null stays
- * missing. The latest fetch time is returned for the table's note.
+ * Stored rows → table rows. Each number keeps the refs the host stored, so the table can cite its source; a null
+ * stays missing (the table shows no source for it). The latest fetch time is returned for the table's note.
  */
 export function toBenchmarkRows(items: readonly StoredBenchmark[]): { rows: BenchmarkRow[]; fetchedAt: string | null } {
-  const metric = (value: number | null) => ({ value, refs: [] as string[] });
-  const rows = items.map(item => ({
+  const rows = items.map(item => {
+    const metric = (value: number | null, key: keyof StoredBenchmark["refs"]) => ({ value, refs: item.refs[key] ?? [] });
+    return {
     platform: item.platform as BenchmarkRow["platform"], account: item.account, category: item.category, qualified: item.qualified,
-    metrics: { followers: metric(item.followers), medianViews: metric(item.medianViews), engagementRate: metric(item.engagementRate),
-      postsPerWeek: metric(item.postsPerWeek), lastPublishedAt: { value: item.lastPublishedAt, refs: [] as string[] } },
-  }));
+    metrics: { followers: metric(item.followers, "followers"), medianViews: metric(item.medianViews, "medianViews"),
+      engagementRate: metric(item.engagementRate, "engagementRate"), postsPerWeek: metric(item.postsPerWeek, "postsPerWeek"),
+      lastPublishedAt: { value: item.lastPublishedAt, refs: item.refs.lastPublishedAt ?? [] } },
+    };
+  });
   const times = items.map(item => Date.parse(item.fetchedAt)).filter(Number.isFinite);
   return { rows, fetchedAt: times.length > 0 ? new Date(Math.max(...times)).toISOString() : null };
 }
