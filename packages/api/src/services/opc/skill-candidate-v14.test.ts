@@ -67,6 +67,10 @@ describe("positioning Skill v14 candidate (benchmark research tools)", () => {
     // R11: three qualified benchmarks stay a completion gate, now also declared for the report.
     expect(text("SKILL.md")).toContain("至少凑够 3 个");
     expect(text("SKILL.md")).toContain('version: "2.7.0"');
+    // Owner 2026-10-17: the user-facing self-reference is "AI 教练"; "导师" survives only in the rule forbidding it.
+    expect(text("SKILL.md")).toContain("# 社交媒体账号定位 AI 教练");
+    expect(text("SKILL.md").split("\n").filter(line => line.includes("导师"))).toEqual([expect.stringContaining("不要自称\"导师\"")]);
+    expect(text("workflow.yaml")).not.toContain("导师");
     const workflow = JSON.parse(text("workflow.yaml")) as { reportGeneration: unknown; steps: { resources: string[] }[] };
     expect(reportManifest.parse(workflow.reportGeneration).minQualifiedBenchmarks).toBe(3);
     expect(workflow.steps[1]!.resources).toContain(benchmark);
