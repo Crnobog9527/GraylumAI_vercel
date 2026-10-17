@@ -5,7 +5,7 @@
   "apps/web/src/app/admin/finance/page.tsx": {"lines":690},
   "apps/web/src/app/admin/models/page.tsx": {"lines":764,"longLines":1},
   "apps/web/src/app/admin/packages/page.tsx": {"lines":1333,"longLines":2},
-  "apps/web/src/app/admin/page.tsx": {"lines":546,"longLines":1},
+  "apps/web/src/app/admin/page.tsx": {"lines":544,"longLines":1},
   "apps/web/src/app/admin/performance/page.tsx": {"lines":755,"longLines":2},
   "apps/web/src/app/admin/prompts/module-skill-editor.tsx": {"longLines":9},
   "apps/web/src/app/admin/prompts/page.tsx": {"lines":1322,"longLines":6},

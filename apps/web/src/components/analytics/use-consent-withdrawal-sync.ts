@@ -2,6 +2,7 @@
 'use client';
 
 import { useEffect } from 'react';
+import { clearFirstTouch } from '@/lib/analytics/attribution';
 import { analyticsAllowed, type ConsentSnapshot } from '@/lib/analytics/consent';
 import { createClient } from '@/lib/supabase';
 import { trpc } from '@/trpc/client';
@@ -11,8 +12,8 @@ const SENT_KEY = 'graylum.analytics.withdrawal-sent';
 const RETRY_MS = [2_000, 8_000, 30_000, 120_000];
 
 /**
- * ANALYTICS §7 PR-3: when Termly says statistics are not allowed for a logged-in account, tell the server once per
- * account per browser session, so GA ids kept for its unpaid orders are dropped and older ones are never reported.
+ * ANALYTICS §7 PR-3: when Termly says statistics are not allowed, drop the stored first touch and, for a logged-in
+ * account, tell the server once per account per browser session, so GA ids kept for its unpaid orders are dropped and older ones are never reported.
  * The notice is durable: it is retried with growing waits (then every two minutes) for as long as the page is
  * open, and at once when the browser comes back online; the "sent" marker is only set after the server confirmed,
  * and any page opened in a later session sends it again. The server also keeps these ids for the checkout's
@@ -27,6 +28,8 @@ export function useConsentWithdrawalSync(consent: ConsentSnapshot, enabled: bool
       try { window.sessionStorage.removeItem(SENT_KEY); } catch { /* storage unavailable */ }
       return;
     }
+    // No consent (refused or withdrawn): the stored first touch goes too (ANALYTICS §7 PR-3 acceptance).
+    clearFirstTouch();
     let active = true;
     const timers = new Set<ReturnType<typeof setTimeout>>();
     const client = createClient();

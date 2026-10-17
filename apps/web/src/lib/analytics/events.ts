@@ -17,13 +17,19 @@ export type SignUpUser = {
   app_metadata?: { provider?: unknown } | null;
 };
 
+/** Sign-up completed in the last 30 minutes: email verified, or the first Google sign-in. */
+export function isFreshSignUp(user: SignUpUser | null | undefined, verified: boolean, now = Date.now()): boolean {
+  if (!user || !verified || !user.created_at) return false;
+  const google = user.app_metadata?.provider === 'google';
+  const completed = Date.parse((google ? user.created_at : user.email_confirmed_at) ?? '');
+  return Number.isFinite(completed) && now - completed <= SIGNUP_WINDOW_MS && completed - now <= 60_000;
+}
+
 /** `sign_up` once, within 30 minutes of completing sign-up: email verified, or the first Google sign-in. */
 export function reportSignUpIfNew(user: SignUpUser | null | undefined, verified: boolean, now = Date.now()): boolean {
-  const createdAt = user?.created_at;
-  if (!user || !verified || !createdAt) return false;
+  if (!user || !isFreshSignUp(user, verified, now)) return false;
+  const createdAt = user.created_at!;
   const method = user.app_metadata?.provider === 'google' ? 'google' : 'email';
-  const completed = Date.parse((method === 'google' ? createdAt : user.email_confirmed_at) ?? '');
-  if (!Number.isFinite(completed) || now - completed > SIGNUP_WINDOW_MS || completed - now > 60_000) return false;
   // Only the account's creation time is kept, to skip a repeat on the next page; written after consent only.
   try {
     if (window.localStorage.getItem(SIGNUP_KEY) === createdAt) return false;
