@@ -160,6 +160,11 @@ Owner 选的选项（原文）："Agent 在自由对话里自己决定检索资�
   PR C 要为 `social_search`（按关键词：TikHub 关键词作品线路，每个关键词一次子调用）和 `social_account`（账号资料 + 近期作品，B 站另加关系接口）
   各写一个执行分支：按规则表选线路、按 `subcallNeed` 折算预检、逐次子调用冻结结算、结果按 RESEARCH_TOOLS_PLAN 第 2.2 节的统一格式返回，
   流事件的 `dataKind` 用已有的 `keyword_posts` / `account_profile` / `account_posts` / `account_relation`。补测试：两个工具各自成功、确认失败、结果未知、超子调用上限。
+- **额度要跨暂停和重启延续**：`researchRuntimeTool.ts` 的剩余额度只存在进程内的闭包里，每次构造都从 `maxSubcallsPerRound` 重新开始，回放已保存的操作又不增加已用量，
+  所以余额不足暂停、充值后恢复（或进程重启）会再放出一份 12 次。PR C 要在构造时从本次执行已持久化的子调用（`research_operations` 里属于这个执行的行）算出已用额度，
+  剩余 = 上限 − 已用；补测试：用到第 8 次时暂停、恢复后只剩 4 次，第 5 次被拒；进程重启同理。
+- **工具要挂到 runner 上**：`researchExecution.ts` 现在用 `POSITIONING_RESEARCH_TOOLS` 过滤出工具列表，`admitResearchTurn` 也只从这个集合生成准入结果，两者都不含 `social_search`、`social_account`。
+  PR C 要把自由对话的通用工具集合（`GENERAL_RESEARCH_TOOLS`）接入准入和 `researchExecution`，并断言最终传给 runner 的工具列表里有这 4 个、导师回合的列表不变。
 - **自由对话专用的研究工具说明**：`researchRuntimeTool.ts` 现在给每个研究工具附带"每条回答最多调用一次，随后直接回答"的说明（导师回合的一次限制）。PR C 要按用途生成说明：导师回合保持一次；自由对话改成"同一条回答最多 3 次，查够就回答"，并增加真实请求断言（两种说明各自出现在对应回合的请求里）。
 - **代码改动**：`runtimeContext.ts:36, 61-67` 现在要求研究工具只配 `agent-turn-v5-stream` 和导师上下文；改为允许自由对话格式
   （`serial-tools-v6-reasoning`）挂通用研究工具，`researchAdmission.ts` 的准入（总开关、供应商开关、已验证平台、冻结价格、启动门槛、staging 窗口批准）原样复用，
@@ -198,6 +203,9 @@ Owner 选的选项（原文）："Agent 在自由对话里自己决定检索资�
   完成后"在资料库里找到 3 篇相关内容""读了你最近 14 天的 6 条作品""未取到：还没有连接账号""扣 4 积分"。
 - 研究工具这一行直接复用 `ResearchCallList` 的 `describeCall`（RT-5 已有的映射），不重写；新组件把它当作 `research` 类条目的展示。
 - 数据来源：后端给非研究工具也发流事件。在 `AgentTurnEvent` 里加 `agent_tool` 事件（`callId`、`tool`、`state`、结果摘要，如命中篇数、作品条数、文件名列表），
+  **刷新页面后要能恢复这些行**：现有 `runtime_view` 只返回执行正文、摘要和账务等白名单字段，不返回 `runtime_tool_calls`。A2 要在 `runtime_view` 里加一个经过所有权和删除状态过滤的
+  "工作项"投影（只含 `agent_tool` 行需要的字段：工具、状态、命中篇数、文件名、作品条数、天数等，不含摘录正文），已删除的会话、回答、被删文档的行不返回；
+  W 的前端从这个投影恢复。补刷新后真实 `runtime_view` 路径的测试（第 7 节第 9 项在刷新后也成立）。
   和 `research_call` 同一条流、同一个顺序保证；刷新页面后从已保存的执行结果恢复（不在浏览器另存状态）。
 - 挂载点：`/runtime` 页面的回答上方（`runtime-messages.tsx` 的回复块里加一个可选的 `work` 插槽）。
 
