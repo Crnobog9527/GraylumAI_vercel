@@ -120,13 +120,20 @@ export async function runReportFee({db,Client,connectionString,report}) {
   const firstReport = await execution(db,dup,undefined,false,sameRound);
   await assert.rejects(execution(db,dup,undefined,false,sameRound),/REPORT_ALREADY_EXISTS/,'a report still going');
   assert.equal(await wallet(db,dup.actor),5000-PRICE,'nothing more held');
+  // Terminal and complete, price not settled yet: still blocks (the window between finishing and the status read).
+  const sameRound2 = randomUUID();
+  const unsettled = await execution(db,dup,undefined,false,sameRound2);
+  await finish(db,unsettled.id,'completed',{body:completeBody,completeness:'complete'});
+  await assert.rejects(execution(db,dup,undefined,false,sameRound2),/REPORT_ALREADY_EXISTS/,'a complete report not yet settled');
   await finish(db,firstReport.id,'completed',{body:'## One\nCut off',completeness:'length_limit'});
   await service(db,'report_fee_settle',dup.actor,firstReport.id);
   const retry = await execution(db,dup,undefined,false,sameRound);
   await finish(db,retry.id,'completed',{body:completeBody,completeness:'complete'});
   await service(db,'report_fee_settle',dup.actor,retry.id);
   await assert.rejects(execution(db,dup,undefined,false,sameRound),/REPORT_ALREADY_EXISTS/,'a charged complete report');
-  assert.equal(await wallet(db,dup.actor),5000-PRICE,'the retry paid once, nothing more');
+  // The unsettled complete report of the other round still holds its price; the retry of the first round paid once.
+  await service(db,'report_fee_settle',dup.actor,unsettled.id);
+  assert.equal(await wallet(db,dup.actor),5000-2*PRICE,'each round paid once, nothing more');
   report.checks.push('report price: a second admission for a round with a going or charged report is refused with nothing held; a retry after a refunded one pays once');
 
   // Concurrent settlements of one finished report: one charge.
@@ -171,7 +178,10 @@ export async function runReportFee({db,Client,connectionString,report}) {
   try {
     const raced = await Promise.all([erase(racers[0],rc,'artifact',rc.project).then(r=>r.status,e=>e.message),
       service(racers[1],'report_fee_settle_due',100).then(()=>'settled',e=>e.message)]);
-    assert.ok(!raced.some(r=>/deadlock/i.test(r)),JSON.stringify(raced));
+    // The daily settlement never fails on the race; a deletion that lost it answers the retryable busy refusal.
+    assert.equal(raced[1],'settled',JSON.stringify(raced));
+    assert.ok(['deleted','review_required'].includes(raced[0])||/CONTENT_ERASURE_BUSY/.test(raced[0]),JSON.stringify(raced));
+    if (/CONTENT_ERASURE_BUSY/.test(raced[0])) await erase(racers[0],rc,'artifact',rc.project);
   } finally { await Promise.all(racers.map(x=>x.end())); }
   assert.equal((await fee(db,ended.id)).state,'refunded');assert.equal(await wallet(db,rc.actor),5000,'refunded once');
   report.checks.push('report price: draft deletion charges a complete report and refunds a running one; account erasure refunds; held price pending; deletion racing the daily settlement does not deadlock');

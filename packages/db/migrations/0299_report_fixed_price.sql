@@ -65,12 +65,15 @@ BEGIN
   IF EXISTS(SELECT 1 FROM report_fees WHERE execution_id=e.id) THEN RETURN; END IF;
   -- One complete report per round, rechecked under the session lock runtime_admit holds: a second tab that passed the
   -- host-side check before the first report finished cannot be admitted and charged again (#1102 review). A report
-  -- still going counts too; one that ended without a complete report (its price refunded) does not.
+  -- still going counts too, and so does a finished complete report whose price is not settled yet; one that ended
+  -- without a complete report (its price refunded or about to be) does not.
   IF EXISTS(SELECT 1 FROM report_fees f JOIN runtime_executions x ON x.id=f.execution_id
     WHERE x.session_id=e.session_id AND x.id<>e.id
       AND x.payload#>>'{reportGeneration,projectId}'=e.payload#>>'{reportGeneration,projectId}'
       AND x.payload#>>'{reportGeneration,roundId}'=e.payload#>>'{reportGeneration,roundId}'
-      AND (f.state='charged' OR (f.state='held' AND x.state NOT IN ('completed','cancelled')))) THEN
+      AND (f.state='charged'
+        OR (f.state='held' AND (x.state NOT IN ('completed','cancelled')
+          OR (x.result->>'completeness'='complete' AND report_body_complete(x.result->>'body',x.payload->'reportGeneration')))))) THEN
     RAISE EXCEPTION 'REPORT_ALREADY_EXISTS'; END IF;
   -- The report call's own temporary hold: its frozen cost bound in credits (released at zero charge).
   BEGIN
@@ -176,8 +179,13 @@ BEGIN
     SELECT due.created_at<=clock_timestamp()-interval '3 days' AND coalesce(r.closed,true)
       AND NOT EXISTS(SELECT 1 FROM bill2_calls c WHERE c.run_id=r.id AND c.settled_at IS NULL)
       INTO stale FROM runtime_executions e LEFT JOIN bill2_runs r ON r.id=e.billing_run_id WHERE e.id=due.execution_id;
-    v:=report_fee_settle_internal(due.execution_id,coalesce(stale,true) AND due.created_at<=clock_timestamp()-interval '3 days');
-    IF v->>'state'<>'held' THEN n:=n+1; END IF;
+    -- A fee whose profile is locked by a deletion that waits on a lock this transaction holds is skipped, not failed: the
+    -- deletion goes first and the next run settles it (or the deletion already refunded it).
+    BEGIN
+      v:=report_fee_settle_internal(due.execution_id,coalesce(stale,true) AND due.created_at<=clock_timestamp()-interval '3 days');
+      IF v->>'state'<>'held' THEN n:=n+1; END IF;
+    EXCEPTION WHEN deadlock_detected OR lock_not_available THEN NULL;
+    END;
   END LOOP;
   RETURN n;
 END $$;

@@ -187,6 +187,16 @@ async function validateSummarySelection(client: SupabaseClient<any, 'public', an
   if(!option.available)throw new TRPCError({code:'BAD_REQUEST',message:option.reason??'整理模型不可用'});
 }
 
+/** The report's fixed price (0299) is a whole number of credits, 1–999999: anything else would make every report fail. */
+export function validateReportPrice(input: Array<{key:string;value:unknown}>) {
+  for (const setting of input) {
+    if (setting.key !== 'report_fixed_price_credits') continue;
+    if (!/^[1-9][0-9]{0,5}$/.test(String(setting.value).trim())) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: '报告价格要填 1–999999 之间的整数积分' });
+    }
+  }
+}
+
 async function validateRoutingSelections(client: SupabaseClient<any, 'public', any>, input: Array<{key:string;value:unknown}>) {
   for (const setting of input) {
     if (setting.key !== 'primary_model_id') continue;
@@ -307,6 +317,7 @@ export const settingsRouter = router({
     .input(systemSettingInputSchema)
     .mutation(async ({ ctx, input }) => {
       await assertSettingsWriter(ctx.supabase,ctx.profileId);
+      validateReportPrice([input]);
       await validateRoutingSelections(ctx.supabase, [input]);
       await validateSummarySelection(ctx.supabase,Array.isArray(input)?input:[input]);
       const { data, error } = await ctx.supabase
@@ -324,6 +335,7 @@ export const settingsRouter = router({
     .input(z.array(systemSettingInputSchema).min(1))
     .mutation(async ({ ctx, input }) => {
       await assertSettingsWriter(ctx.supabase,ctx.profileId);
+      validateReportPrice(input);
       await validateRoutingSelections(ctx.supabase, input);
       await validateSummarySelection(ctx.supabase,Array.isArray(input)?input:[input]);
       const { data, error } = await ctx.supabase
