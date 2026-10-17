@@ -87,6 +87,7 @@ const POSITIONING: ArticleContent = {
     { question: '清单里记错了怎么办？', answer: '直接在右侧改。每一步只有在你核对并确认之后才算数。' },
   ],
   related: [
+    { label: 'Graylum 和 ChatGPT 有什么不同', href: '/graylum-vs-chatgpt', description: '通用 AI 和专属教练的对比，以及什么情况下用 ChatGPT 就够了。' },
     { label: '选题与创作', href: featurePath('content'), description: '定位确认后，每周怎么选题、怎么写稿。' },
     { label: '评审团', href: featurePath('jury'), description: '把报告交给几位评审各审一遍。' },
     { label: '资料库', href: featurePath('library'), description: '把你的文章和参考资料放进来，让教练按你的情况回答。' },
@@ -136,6 +137,7 @@ const CONTENT: ArticleContent = {
     { question: '稿子一定要用教练写的吗？', answer: '不用。你可以只用选题建议，自己写；也可以让教练写初稿再改。' },
   ],
   related: [
+    { label: 'Graylum 和 ChatGPT 有什么不同', href: '/graylum-vs-chatgpt', description: '通用 AI 和专属教练的对比，以及什么情况下用 ChatGPT 就够了。' },
     { label: '定位分析', href: featurePath('positioning'), description: '先弄清做什么、给谁看、靠什么赚钱。' },
     { label: '资料库', href: featurePath('library'), description: '保存成果，也让教练参考你以前写过的内容。' },
     { label: '评审团', href: featurePath('jury'), description: '重要的报告，再让几位评审审一遍。' },
@@ -195,6 +197,7 @@ const JURY: ArticleContent = {
     { question: '评审团的演示是真实评审吗？', answer: '页面上的演示使用的是示例报告和示例评审名字，只用来说明评审是怎么进行的，不是某个真实用户的报告。' },
   ],
   related: [
+    { label: 'Graylum 和 ChatGPT 有什么不同', href: '/graylum-vs-chatgpt', description: '通用 AI 和专属教练的对比，以及什么情况下用 ChatGPT 就够了。' },
     { label: '定位分析', href: featurePath('positioning'), description: '评审团审的报告就是从这里生成的。' },
     { label: '选题与创作', href: featurePath('content'), description: '定位确认后，每周发什么、怎么写。' },
     { label: '价格', href: '/landing/pricing', description: '各个会员等级包含的功能和价格。' },
@@ -248,6 +251,7 @@ const LIBRARY: ArticleContent = {
     { question: '删除文件后，空间会马上释放吗？', answer: '删除中的文件会显示“删除中，空间暂未释放”，完成后释放。' },
   ],
   related: [
+    { label: 'Graylum 和 ChatGPT 有什么不同', href: '/graylum-vs-chatgpt', description: '通用 AI 和专属教练的对比，以及什么情况下用 ChatGPT 就够了。' },
     { label: '定位分析', href: featurePath('positioning'), description: '先弄清做什么、给谁看、靠什么赚钱。' },
     { label: '选题与创作', href: featurePath('content'), description: '保存下来的稿件会进入资料库。' },
   ],
@@ -278,6 +282,7 @@ const PUBLISH: ArticleContent = {
     { question: '发布排期和选题与创作是什么关系？', answer: '先在选题与创作里把稿件写好，再来这里按平台改好、排期和发布。' },
   ],
   related: [
+    { label: 'Graylum 和 ChatGPT 有什么不同', href: '/graylum-vs-chatgpt', description: '通用 AI 和专属教练的对比，以及什么情况下用 ChatGPT 就够了。' },
     { label: '选题与创作', href: featurePath('content'), description: '先把每周发什么和稿件定下来。' },
     { label: '数据复盘', href: featurePath('review'), description: '发出去之后，看数据、调方向。' },
     { label: '定位分析', href: featurePath('positioning'), description: '先弄清做什么、给谁看、靠什么赚钱。' },
@@ -309,6 +314,7 @@ const REVIEW: ArticleContent = {
     { question: '没有数据的新账号能复盘吗？', answer: '没有作品数据时先发内容；有了第一批数据，复盘才有东西可读。' },
   ],
   related: [
+    { label: 'Graylum 和 ChatGPT 有什么不同', href: '/graylum-vs-chatgpt', description: '通用 AI 和专属教练的对比，以及什么情况下用 ChatGPT 就够了。' },
     { label: '发布排期', href: featurePath('publish'), description: '把内容按平台改好，排进日历。' },
     { label: '选题与创作', href: featurePath('content'), description: '复盘之后，下周发什么。' },
     { label: '定位分析', href: featurePath('positioning'), description: '先弄清做什么、给谁看、靠什么赚钱。' },
@@ -362,7 +368,10 @@ export const FEATURES_HUB: ArticleContent = {
       paragraphs: ['是。功能页里的界面用的是产品里同一批显示组件，只是内容换成了虚构的示例数据：示例里的账号、对话和文件都不是真实用户的。'],
     },
   ],
-  related: FEATURES.map(entry => ({ label: entry.name, href: entry.content.path, description: entry.note })),
+  related: [
+    ...FEATURES.map(entry => ({ label: entry.name, href: entry.content.path, description: entry.note })),
+    { label: 'Graylum 和 ChatGPT 有什么不同', href: '/graylum-vs-chatgpt', description: '通用 AI 和专属教练的对比，以及什么情况下用 ChatGPT 就够了。' },
+  ],
   updated: UPDATED,
   product: true,
 };
