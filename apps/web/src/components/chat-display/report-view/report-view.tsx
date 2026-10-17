@@ -39,7 +39,9 @@ export function ReportView({ body, streaming = false, data, editedFields, classN
   const parsed = useMemo(() => parseReportBody(body), [body]);
   const checked = data === undefined ? parsed.data : data;
   const { preamble, chapters } = useMemo(() => splitChapters(parsed.text), [parsed.text]);
-  if ((!checked && !parsed.pending) || chapters.length === 0)
+  // A block that never closed (stopped or cut off) is not being prepared any more: the text alone, as before.
+  const preparing = parsed.pending && streaming;
+  if ((!checked && !preparing) || chapters.length === 0)
     return <MessageMarkdown className={className} text={parsed.text} streaming={streaming} />;
 
   const values = checked?.data ?? {};
@@ -64,7 +66,7 @@ export function ReportView({ body, streaming = false, data, editedFields, classN
             <h2 className={styles.chapterTitle}>{chapter.title}</h2>
             {main && <MessageMarkdown text={main} streaming={streaming && last && !reasons} />}
             {fields.some(item => edited.has(item)) && <p className={styles.note}>{T.edited}</p>}
-            {parsed.pending && charted && <p className={styles.note}>{T.preparing}</p>}
+            {preparing && charted && <p className={styles.note}>{T.preparing}</p>}
             {fields.map(field)}
             {reasons && <Reasons text={reasons} streaming={streaming && last} />}
             {checked && name && REPORT_FIXED_NOTES[name] && (
