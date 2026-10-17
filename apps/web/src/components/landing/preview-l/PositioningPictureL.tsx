@@ -6,7 +6,6 @@ import {
   MentorChatHeading, MentorChatLog, MentorReply, MentorUserMessage,
 } from '@/components/chat-display/mentor-messages';
 import { PositioningHeader, PositioningResultPanel, PositioningStepStrip } from '@/components/chat-display/positioning-chrome';
-import { DEMO_LABEL } from '@/components/landing/demo/demo-script';
 import { arrivedAt, RailJ, readThrough } from '@/components/landing/preview-j/PositioningClipJ';
 import takeover from '@/components/landing/preview-j/takeover-j.module.css';
 import { ConfirmJ, filledUpTo, personaInformation } from '@/components/landing/preview-j/WorkbenchPartsJ';
@@ -111,7 +110,6 @@ export function PositioningPictureL({ moment, local }: { moment: number; local: 
             <Button size="sm" variant={step === 3 ? 'default' : 'outline'} tabIndex={-1}>{J_REPORT.generate}</Button>
           </footer>
         </div>
-        <span className={styles.demo}>{DEMO_LABEL}</span>
       </section>
       <aside className={takeover.checklist} inert>
         <PositioningResultPanel subtitle="跟着对话自动记录；每一步核对后确认一次">

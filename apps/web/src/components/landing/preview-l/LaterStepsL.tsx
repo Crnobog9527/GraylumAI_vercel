@@ -8,7 +8,6 @@ import {
   RuntimeHeader, RuntimeProposal, RuntimeReply, RuntimeResultsSection, RuntimeTurnView, RuntimeTypePendingPanel,
 } from '@/components/chat-display/runtime-messages';
 import { ChatNoticeList } from '@/components/chat/ChatInlineNotice';
-import { DEMO_LABEL } from '@/components/landing/demo/demo-script';
 import { CtaK } from '@/components/landing/preview-k/CtaK';
 import k from '@/components/landing/preview-k/k.module.css';
 import { RailJ } from '@/components/landing/preview-j/PositioningClipJ';
@@ -20,11 +19,14 @@ import type { ResearchCall } from '@/components/research/research-model';
 import { L_LATER, L_LATER_CHAT as CHAT, L_LATER_FLYWHEEL as FLY, type LaterStage } from '@/lib/landing/landing-copy-l-later';
 import { allOn, type LandingFlags } from '@/lib/landing/landing-flags';
 import picture from './picture-l.module.css';
+import { DemoTag } from './DemoTag';
 import styles from './later-l.module.css';
 
 /** How long one beat of a stage lasts, and the hold once a stage is whole before the next one (milliseconds). */
 const BEAT_MS = 900;
-const HOLD_MS = 3000;
+/** Once whole, a stage stays long enough to be read (round six: the script and its 11-shot table at least 15 seconds). */
+const HOLD_MS: Record<string, number> = { script: 15000 };
+const HOLD_DEFAULT_MS = 6000;
 /** How many beats each stage plays in (round six: everything arrives as in the product, nothing laid out at once). */
 const STAGE_BEATS: Record<string, number> = { topics: 8, library: 8, voice: 9, script: 12, publish: 4, monitor: 4, review: 6 };
 /** The part of `text` written by beat `beat` of `from`..`from + span`: the reply streams in. */
@@ -59,6 +61,8 @@ function LaterStep({ step, flags }: { step: { title: string; lede: string; stage
   const [held, setHeld] = useState(false);
   const [stopped, setStopped] = useState(false);
   const [beat, setBeat] = useState(0);
+  // The visitor's hand on the picture (pointer over it, scrolling or clicking in it) pauses it, as region 6 does.
+  const [touching, setTouching] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const base = useId();
   useEffect(() => {
@@ -73,7 +77,7 @@ function LaterStep({ step, flags }: { step: { title: string; lede: string; stage
   const total = current ? STAGE_BEATS[current.id] ?? 4 : 0;
   // A stage plays beat by beat while on screen (the pause button stops it); once whole it holds, then the next stage
   // starts, unless the pointer or focus is on the step.
-  const playing = moving && seen && !stopped;
+  const playing = moving && seen && !stopped && !touching;
   useEffect(() => {
     if (!playing) return;
     const whole = beat >= total;
@@ -81,9 +85,9 @@ function LaterStep({ step, flags }: { step: { title: string; lede: string; stage
     const timer = window.setTimeout(() => {
       if (!whole) { setBeat(value => value + 1); return; }
       setActive(index => (index + 1) % stages.length); setBeat(0);
-    }, whole ? HOLD_MS : BEAT_MS);
+    }, whole ? HOLD_MS[current.id] ?? HOLD_DEFAULT_MS : BEAT_MS);
     return () => window.clearTimeout(timer);
-  }, [playing, held, beat, total, stages.length]);
+  }, [playing, held, beat, total, stages.length, current]);
   const pick = (index: number) => { setActive(index); setBeat(0); };
   if (!current) return null;
   const shownBeat = moving ? beat : Infinity;
@@ -110,10 +114,9 @@ function LaterStep({ step, flags }: { step: { title: string; lede: string; stage
           ) : null}
         </div>
         <div role="tabpanel" id={`${base}-panel`} aria-labelledby={`${base}-${current.id}`} className={styles.panel} key={current.id}>
-          <p className={styles.note}>{current.note}</p>
-          <div className={styles.picture}>
+          <p className={styles.note}><DemoTag />{current.note}</p>
+          <div className={styles.picture} onPointerEnter={() => setTouching(true)} onPointerLeave={() => setTouching(false)}>
             <StagePicture id={current.id} beat={shownBeat} />
-            <span className={picture.demo}>{DEMO_LABEL}</span>
           </div>
         </div>
         <CtaK />
@@ -147,31 +150,38 @@ const LIBRARY_ASK = `@${CHAT.library.document} ${CHAT.library.user}`;
 function WorkChatPicture({ id, beat }: { id: string; beat: number }) {
   const script = id === 'script';
   const chat = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => { if (chat.current) chat.current.scrollTop = chat.current.scrollHeight; }, [id, beat]);
+  // It follows the newest line until the visitor scrolls it themselves; a new stage follows again.
+  const [follow, setFollow] = useState(true);
+  useEffect(() => setFollow(true), [id]);
+  useLayoutEffect(() => { if (follow && chat.current) chat.current.scrollTop = chat.current.scrollHeight; }, [id, beat, follow]);
+  const takeOver = () => setFollow(false);
   const proposal = script ? typed(CHAT.script.proposal, beat, 9, 2) : '';
   const composer = id === 'library' && beat < 2 ? LIBRARY_ASK.slice(0, Math.round(LIBRARY_ASK.length * (beat + 1) / 2)) : '';
   return (
     <div className={takeover.app}>
       <RailJ published launched />
-      <section className={picture.column} inert>
-        <div ref={chat} className={styles.chat}>
-          <RuntimeHeader headingLevel="h2" title={CHAT.title} meta={{ platform: CHAT.platform, account: CHAT.account, infoHref: '#' }} />
-          <div className={work.conversation}>
-            <div className={work.transcript}>
-              {id === 'topics' ? <TopicsTurn beat={beat} /> : null}
-              {id === 'library' && beat >= 2 ? <LibraryTurn beat={beat - 2} /> : null}
-              {id === 'voice' ? <><LibraryTurn beat={Infinity} /><VoicePicture beat={beat} /></> : null}
-              {script ? (
-                <RuntimeTurnView userText={CHAT.script.user} completed={beat >= 12}>
-                  {beat >= 1 ? <RuntimeReply text={typed(CHAT.script.reply, beat, 1, 1)} /> : null}
-                  {beat >= 3 ? <RuntimeReply text={shotTable(Math.min(CHAT.script.shots.length, (beat - 2) * 2))} /> : null}
-                  {beat >= 9 ? <RuntimeProposal adopted={false} text={proposal} /> : null}
-                </RuntimeTurnView>
-              ) : null}
+      <section className={picture.column}>
+        {/* The scroll is the visitor's to use; what it holds is a picture (inert). */}
+        <div ref={chat} className={styles.chat} onWheel={takeOver} onTouchMove={takeOver} onPointerDown={takeOver}>
+          <div inert>
+            <RuntimeHeader headingLevel="h2" title={CHAT.title} meta={{ platform: CHAT.platform, account: CHAT.account, infoHref: '#' }} />
+            <div className={work.conversation}>
+              <div className={work.transcript}>
+                {id === 'topics' ? <TopicsTurn beat={beat} /> : null}
+                {id === 'library' && beat >= 2 ? <LibraryTurn beat={beat - 2} /> : null}
+                {id === 'voice' ? <><LibraryTurn beat={Infinity} /><VoicePicture beat={beat} /></> : null}
+                {script ? (
+                  <RuntimeTurnView userText={CHAT.script.user} completed={beat >= 12}>
+                    {beat >= 1 ? <RuntimeReply text={typed(CHAT.script.reply, beat, 1, 1)} /> : null}
+                    {beat >= 3 ? <RuntimeReply text={shotTable(Math.min(CHAT.script.shots.length, (beat - 2) * 2))} /> : null}
+                    {beat >= 9 ? <RuntimeProposal adopted={false} text={proposal} /> : null}
+                  </RuntimeTurnView>
+                ) : null}
+              </div>
             </div>
           </div>
         </div>
-        <div className={styles.composer}>
+        <div className={styles.composer} inert>
           <WorkComposer value={composer} onChange={noop} onSend={noop} label="消息" placeholder="消息" />
         </div>
       </section>

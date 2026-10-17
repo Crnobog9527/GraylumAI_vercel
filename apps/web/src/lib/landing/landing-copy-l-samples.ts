@@ -23,6 +23,23 @@ export const L_SAMPLES_REDO = {
   /** NEW (round five): the dialog's 15-second overview, its blocks' headings. */
   overview: {
     title: '15 秒看懂这份报告',
+    /** NEW (round six, S11): the top blocks, in the same cards as the rest. */
+    person: '这份报告写给谁',
+    position: '一句话定位',
+    /** NEW (round six, S12): the account card; its name and bio are the report's recommended ones. */
+    accountTag: '按报告建议改好后的样子 · 示意',
+    accountFollowers: '粉丝',
+    accountPosts: '作品',
+    accountTop: '最好的一条',
+    noAccount: '还没有账号，从这里开始',
+    /** NEW (round six, S13): plain-language help for the content mix and the funnel (sent to the offer window to review). */
+    pillarsLede: '每发 10 条内容，大概按这个比例分：',
+    pillarHelp: [
+      { key: '流量', what: '让没见过你的人刷到你、停下来看', example: '例：一看就懂、值得收藏的实用内容' },
+      { key: '信任', what: '让刷到的人相信你懂行、愿意关注你', example: '例：讲清为什么这么做，分享你的真实经历' },
+      { key: '转化', what: '让信任你的人愿意掏钱', example: '例：介绍你的产品、服务，或你真在用的东西' },
+    ] as const,
+    funnelLede: '从上往下，人越来越少、关系越来越近：上面几层让人认识你、信你，下面几层才让人付钱。',
     sketch: '示意',
     risk: '风险提醒',
     audience: '给谁看',

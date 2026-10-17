@@ -21,7 +21,7 @@ import { APP_SEGMENTS } from '@/lib/sentry-scrub';
 import { L_SAMPLES_REDO } from '@/lib/landing/landing-copy-l-samples';
 import { SAMPLE_OVERVIEWS } from '@/lib/landing/sample-reports/overview';
 import { L_WORKFLOWS } from '@/lib/landing/landing-copy-l-workflows';
-import { L_LATER } from '@/lib/landing/landing-copy-l-later';
+import { L_LATER, L_LATER_CHAT } from '@/lib/landing/landing-copy-l-later';
 import { L_POSITIONING_MOMENTS, L_SKILL_OPENING } from '@/lib/landing/landing-copy-l-positioning';
 import { L_PRICE_NOTE } from '@/lib/landing/landing-copy-l';
 import { HOW_IT_WORKS as HOW } from '@/lib/landing/landing-copy';
@@ -31,7 +31,7 @@ import { PositioningPictureL } from './PositioningPictureL';
 import { SampleL } from './SampleL';
 
 const ALL_ON = Object.fromEntries(Object.keys(LANDING_FEATURES).map(key => [key, true])) as LandingFlags;
-const escape = (text: string) => text.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+const escape = (text: string) => text.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#x27;');
 const plan = (level: string, monthly: number, yearly: number) => ({
   id: `plan-${level}`, name: level, level, price: { monthly, yearly },
   credits: { monthly: 1000, monthlyBonus: 0 }, discount: 0, checkoutReady: { monthly: true, yearly: true },
@@ -270,6 +270,30 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     expect(between('id="voice-title"', 'id="steps-title"')).toBe(true);
     expect(between('id="steps-title"', 'id="jury-title"')).toBe(true);
     expect(between('id="compare-title"', 'id="pricing-title"')).toBe(true);
+  });
+
+  it('gives a complete storyboard: the 11 shots\' lines are the script word for word, 70 seconds in all (round six)', () => {
+    const { shots, proposal } = L_LATER_CHAT.script;
+    expect(shots).toHaveLength(11);
+    expect(shots.map(shot => shot[3]).join('')).toBe(proposal.replace(/\n/g, ''));
+    expect(shots.reduce((sum, shot) => sum + Number.parseInt(shot[4], 10), 0)).toBe(70);
+    expect(proposal.replace(/\n/g, '').length).toBeGreaterThanOrEqual(280);
+  });
+
+  it('draws where to post as the recommended account, or as platform marks for a person with no account yet', () => {
+    const copy = L_SAMPLES_REDO.overview;
+    for (const [slug, data] of Object.entries(SAMPLE_OVERVIEWS)) {
+      const html = renderToStaticMarkup(createElement(OverviewL, { data }));
+      if (data.ownAccount) {
+        expect(html).toContain(copy.accountTag);
+        expect(html).toContain(escape(data.ownAccount.displayName));
+        if (!data.ownAccount.followers) expect(html).not.toContain(`<dt>${copy.accountFollowers}</dt>`);
+      } else {
+        expect(html, slug).toContain(copy.noAccount);
+        expect(html).not.toContain(copy.accountTag);
+      }
+      for (const layer of data.funnel) if (layer.why) expect(html).toContain(escape(layer.why));
+    }
   });
 
   it('keeps "14 种人" in one piece in the samples\' lede', () => {

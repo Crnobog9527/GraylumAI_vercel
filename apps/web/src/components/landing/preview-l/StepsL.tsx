@@ -11,6 +11,7 @@ import { HOW_IT_WORKS } from '@/lib/landing/landing-copy';
 import { L_STEPS, type StepStage } from '@/lib/landing/landing-copy-l-steps';
 import { visibleItems, type LandingFlags } from '@/lib/landing/landing-flags';
 import { cn } from '@/lib/utils';
+import { DemoTag } from './DemoTag';
 import { LaterStepsL } from './LaterStepsL';
 import { PositioningPictureL } from './PositioningPictureL';
 import styles from './steps-l.module.css';
@@ -88,7 +89,7 @@ export function StepsL({ flags }: { flags: LandingFlags }) {
             <div className={cn(page.wrap, takeover.frame)}>
               <div className={takeover.head}>
                 <h3 id="step-one-title" className={takeover.title}>{L_STEPS.one.title}</h3>
-                <div className={takeover.caption} aria-live="polite" key={stage.label}><h3>{stage.label}</h3><p>{stage.note}</p></div>
+                <div className={takeover.caption} aria-live="polite" key={stage.label}><h3>{stage.label}<DemoTag /></h3><p>{stage.note}</p></div>
               </div>
               <div className={styles.progress}>
                 <div className={takeover.bar} role="progressbar" aria-label={L_STEPS.progress} aria-valuenow={Math.round(progress * 100)}
@@ -112,7 +113,7 @@ export function StepsL({ flags }: { flags: LandingFlags }) {
             <h3 id="step-one-title" className={styles.stepTitle}>{L_STEPS.one.title}</h3>
             {stages.map(item => (
               <article key={item.label} className={takeover.staticStep} data-region="第一步的阶段">
-                <div className={takeover.caption}><h3>{item.label}</h3><p>{item.note}</p></div>
+                <div className={takeover.caption}><h3>{item.label}<DemoTag /></h3><p>{item.note}</p></div>
                 <div className={takeover.picture}><PositioningPictureL moment={item.moment} local={1} /></div>
               </article>
             ))}
