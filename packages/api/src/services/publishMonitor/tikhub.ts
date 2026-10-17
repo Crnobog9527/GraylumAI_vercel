@@ -149,6 +149,18 @@ export function tikhubOutcome(posts: ResearchCallResult): { outcome: 'done' | 'f
 const writeResult = z.union([z.object({ stale: z.literal(true) }).strict(),
   z.object({ stale: z.literal(false), inserted: z.number().int().min(0), existing: z.number().int().min(0) }).strict()]);
 
+/**
+ * A read that ran out of balance after its first (charged) request: the profile numbers already paid for are kept as
+ * today's account snapshot. Does not settle the claim; the caller then settles it as "insufficient credits".
+ */
+export async function applyTikhubPartial(db: Rpc, claim: TikhubClaim, profile: ResearchCallResult | null, evidenceRef: string) {
+  const rows = tikhubRows(profile, { vendor: 'tikhub', route: '', outcome: 'failed', reason: 'BALANCE_LOW', httpStatus: null,
+    supplierMayCharge: false, usage: { unit: 'call', units: '0' }, items: [], truncated: false, fetchedAt: new Date().toISOString() });
+  if (!rows.profile) return;
+  await call(db, 'publish_monitor_tikhub_write', { p_connection_id: claim.connectionId, p_lease: claim.lease,
+    p_refresh_id: claim.refreshId, p_profile: rows.profile, p_posts: [], p_evidence_ref: evidenceRef }, writeResult);
+}
+
 /** Writes one read and settles the claim; false when the claim was no longer current (nothing changed). */
 export async function applyTikhubRead(db: Rpc, claim: TikhubClaim, profile: ResearchCallResult | null,
   posts: ResearchCallResult, evidenceRef: string): Promise<boolean> {
