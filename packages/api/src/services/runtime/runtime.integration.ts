@@ -1631,9 +1631,14 @@ it('RUNTIME: only a positioning workflow opens a guided step workspace through o
  }
  expect(await projects()).toBe(0);
  const positioning=await register('positioning');
- expect((await draft(positioning)).draftId).toEqual(expect.any(String));
+ const opened=await draft(positioning);
+ expect(opened.draftId).toEqual(expect.any(String));
  await expect(start(positioning)).resolves.toEqual({roundId:expect.any(String)});
  expect(await projects()).toBe(2);
+ // LEGACY-CLOSE read-only gate: the workbench router refuses writes to the old-workbench project, not to the draft.
+ const old=(await db.query("select id from artifact_projects where actor_id=$1 and work_kind='legacy'",[actor])).rows[0].id;
+ expect(await service.isLegacyProject(old)).toBe(true);
+ expect(await service.isLegacyProject(opened.projectId)).toBe(false);
 });
 
 it('RUNTIME: real published source revocation excludes derived Session history without deleting originals',async()=>{
