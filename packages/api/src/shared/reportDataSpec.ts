@@ -109,7 +109,7 @@ export const REPORT_DATA_FIELDS = {
       week: { kind: 'int', label: '第几周', min: 1, max: 5 },
       purpose: text('这周重点'), posts: text('发几条', { max: 40 }), topics: text('发什么'),
       watch: text('看哪个指标'), passIf: text('怎样算过关'), reviewQuestion: text('周末复盘问什么'),
-    }), 1, 5),
+    }), 4, 5),
     day30Questions: texts('第 30 天要回答的问题', 0, 5),
   }),
   routine: list('每周固定流程', object('一项', {
