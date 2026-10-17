@@ -2,6 +2,7 @@
 'use client';
 
 import { useRef, useState } from 'react';
+import { reportBeginCheckout } from '@/lib/analytics/events';
 import { trpc } from '@/trpc/client';
 import {
   CHECKOUT_COPY, cardMethods, checkoutEntryOpen, describeCheckoutError, isStripeCheckoutUrl,
@@ -43,6 +44,8 @@ export function useMethodCheckout() {
         acceptedTerms: true, termsVersion: acceptedTermsVersion });
       if (result.state === 'open' && isStripeCheckoutUrl(result.url)) {
         setRedirecting(true);
+        // Statistics only (no order ID); a no-op without consent, and it never delays the hand-off.
+        reportBeginCheckout(purchase);
         window.location.assign(result.url);
         return;
       }
