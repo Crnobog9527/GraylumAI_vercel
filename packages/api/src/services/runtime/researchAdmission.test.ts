@@ -128,6 +128,18 @@ describe('admitResearchTurn (RT-3b PR-3)', () => {
     expect(await admitResearchTurn(input(database({ config: config(), prices: { version: 1, entries: [] }, thresholds: allThresholds() }),
       { real: production }))).toBeNull();
   });
+
+  it('RUNTIME-PROD: a route multiplier above the models\' is kept on production (the run multiplier follows it)', async () => {
+    const production = { mode: 'production', id: 'prod-v1', creditsPerUsd: '100', multiplier: '6', expiresAt: deadline,
+      callPolicies: [] } as unknown as StagingPolicy;
+    const prices = allPrices();
+    prices.entries[0] = { ...prices.entries[0]!, priceMultiplier: '8' } as never;
+    const db = database({ config: config(), prices, thresholds: allThresholds() });
+    expect((await admitResearchTurn(input(db)))!.tools).not.toContain('benchmark_fetch');
+    const real = (await admitResearchTurn(input(db, { real: production })))!;
+    expect(real.tools).toContain('benchmark_fetch');
+    expect(real.policies.filter(p => p.provider === 'tikhub').every(p => p.multiplier === '8')).toBe(true);
+  });
 });
 
 describe('attachResearchTurn', () => {

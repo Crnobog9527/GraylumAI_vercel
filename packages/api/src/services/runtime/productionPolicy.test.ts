@@ -182,3 +182,27 @@ it('the staging deployment never reads production state', async () => {
   await expect(loadStagingPolicy(f.admin as never, actor, {})).rejects.toThrow('RUNTIME_STAGING_NOT_CONFIGURED');
   expect(f.rpc).not.toHaveBeenCalled();
 });
+
+it('a route outside the admitted request-shape list is never offered or frozen, even with schema-valid evidence', async () => {
+  const f = fixture();
+  ((f.settings[0].value as Row).profiles as Row[])[1]!.endpointTag = 'azure';
+  f.models[1].config = pricingConfig(MODELS[1].model, 'azure', '0.000003', '0.000015');
+  const policy = await load(f);
+  expect(policy.callPolicies.map(c => c.modelId)).toEqual([MODELS[0].id]);
+  const forged = { ...policy.callPolicies[0]!, modelId: MODELS[1].id, model: MODELS[1].model,
+    providerLimits: { ...policy.callPolicies[0]!.providerLimits!, providerSlug: 'azure' } };
+  await expect(readPaygProductionPolicies(f.admin, policy, [forged],
+    [{ modelId: MODELS[1].id, phase: 'ordinary', outputLimit: 8192, requestFormat: 'serial-tools-v2' }], env,
+    new Date(Date.now() + 3600000).toISOString())).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
+});
+
+it('offline loading (admin settings pages) never renews a stale price snapshot over the network', async () => {
+  const f = fixture();
+  const stale = pricingConfig(MODELS[1].model, MODELS[1].tag, '0.000003', '0.000015');
+  stale.pricing.fetchedAt = new Date(Date.now() - 8 * 86400000).toISOString();
+  f.models[1].config = stale;
+  const read = vi.fn(async () => { throw new Error('network'); });
+  const policy = await loadProductionPolicy(f.admin, actor, env, { read }, { offline: true });
+  expect(read).not.toHaveBeenCalled();
+  expect(policy.callPolicies.map(c => c.modelId)).toEqual([MODELS[0].id]);
+});
