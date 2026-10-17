@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import {
   CATEGORY_LABELS, cellSourceNumbers, cellText, COLUMNS, numberSources, type BenchmarkRow,
@@ -7,14 +8,21 @@ import { DATA_SOURCE_NOTE, MISSING_TEXT, platformLabel } from "./research-model"
 import { RefreshButton } from "./refresh-button";
 import styles from "./research-table.module.css";
 
+const formatFetchedAt = (value: string) => new Date(value).toLocaleString("zh-CN", { hour12: false,
+  year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+
 /**
  * Benchmark table (plan §1.4): followers, median views, engagement rate, posting frequency and last update per
  * account. Every number cites its source number; a number the evidence cannot support reads "缺失 / 未取到".
  * On a phone each account becomes a stacked block with the column names inline.
  */
-export function BenchmarkTable({ rows, now = new Date(), onRefresh }: {
+export function BenchmarkTable({ rows, now = new Date(), onRefresh, fetchedAt, children }: {
   rows: BenchmarkRow[];
   now?: Date;
+  /** When the newest row was fetched (ISO time), shown in the viewer's own time. */
+  fetchedAt?: string | null;
+  /** Extra notes under the table, e.g. how many qualified benchmarks the report still needs. */
+  children?: ReactNode;
   /** Asks the host for a refresh grant for one row; absent = no refresh buttons (e.g. a read-only report). */
   onRefresh?: (row: BenchmarkRow) => Promise<void>;
 }) {
@@ -71,6 +79,8 @@ export function BenchmarkTable({ rows, now = new Date(), onRefresh }: {
           ))}
         </ol>
       )}
+      {fetchedAt && <p className={styles.note}>取数时间：{formatFetchedAt(fetchedAt)}</p>}
+      {children}
       {onRefresh && <p className={styles.note}>点“刷新”会重新读取这个账号的最新数据，算一次新的查询。</p>}
       <p className={styles.note}>{DATA_SOURCE_NOTE}缺失的数字标为“{MISSING_TEXT}”，不按 0 计算。</p>
     </section>
