@@ -120,6 +120,32 @@ it('sends card purchases past the environment gate to the Stripe card checkout, 
   expect(mocks.card).toHaveBeenCalledTimes(2);
   expect(mocks.wallet).not.toHaveBeenCalled(); expect(mocks.provider).not.toHaveBeenCalled();
 });
+it('keeps GA ids out of the purchase and stores only well-formed ones beside the opened order (ANALYTICS 0286)', async () => {
+  stubStaging(); mocks.gateOpen.value = true;
+  const f = fixture('user', settings(true));
+  const analytics = { clientId: '123456789.1700000000', sessionId: '1700000000' };
+  await expect(f.caller.methodCheckout({ ...card, analytics })).resolves.toMatchObject({ orderId: 'card-order', state: 'open' });
+  expect(mocks.card).toHaveBeenLastCalledWith(expect.objectContaining({ purchase: card }));
+  expect(JSON.stringify(mocks.card.mock.lastCall)).not.toContain('1700000000');
+  expect(f.rpc).toHaveBeenCalledWith('analytics_store_checkout_ids', { p_user: userId, p_order: 'card-order',
+    p_client: analytics.clientId, p_session: analytics.sessionId });
+  // Forged values never refuse the purchase and are never stored.
+  const forged = fixture('user', settings(true));
+  await expect(forged.caller.methodCheckout({ ...card, analytics: { clientId: 'someone@example.com', sessionId: 'x' } }))
+    .resolves.toMatchObject({ state: 'open' });
+  expect(forged.rpc).not.toHaveBeenCalledWith('analytics_store_checkout_ids', expect.anything());
+  // A failed store is statistics only: the checkout still opens.
+  const failing = fixture('user', settings(true));
+  failing.rpc.mockResolvedValueOnce({ data: null, error: { message: 'down' } });
+  await expect(failing.caller.methodCheckout({ ...card, analytics })).resolves.toMatchObject({ state: 'open' });
+  // Without ids, or when the checkout did not open, nothing is stored.
+  const none = fixture('user', settings(true));
+  await none.caller.methodCheckout(card);
+  mocks.card.mockResolvedValueOnce({ orderId: 'card-order', state: 'recovery_required', url: null });
+  await none.caller.methodCheckout({ ...card, analytics });
+  expect(none.rpc).not.toHaveBeenCalledWith('analytics_store_checkout_ids', expect.anything());
+  await expect(none.caller.methodCheckout({ ...card, extra: 1 } as typeof card)).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+});
 it('checks the route switch and version before the wallet checkout', async () => {
   stubStaging(); mocks.gateOpen.value = true;
   await expect(fixture('user', settings(false)).caller.methodCheckout(wallet)).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });

@@ -2,7 +2,7 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import { reportBeginCheckout } from '@/lib/analytics/events';
+import { checkoutAnalyticsIds, reportBeginCheckout } from '@/lib/analytics/events';
 import { trpc } from '@/trpc/client';
 import {
   CHECKOUT_COPY, cardMethods, checkoutEntryOpen, describeCheckoutError, isStripeCheckoutUrl,
@@ -40,8 +40,10 @@ export function useMethodCheckout() {
     inFlight.current = true;
     setOutcome(null);
     try {
+      // GA ids only with statistics consent (ANALYTICS §3.1); the server keeps them beside the order, never in it.
+      const analytics = await checkoutAnalyticsIds();
       const result = await mutation.mutateAsync({ ...purchase, method, routingVersion: entry.routes.version,
-        acceptedTerms: true, termsVersion: acceptedTermsVersion });
+        acceptedTerms: true, termsVersion: acceptedTermsVersion, ...(analytics ? { analytics } : {}) });
       if (result.state === 'open' && isStripeCheckoutUrl(result.url)) {
         setRedirecting(true);
         // Statistics only (no order ID); a no-op without consent, and it never delays the hand-off.

@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 
 import { ANALYTICS_CONFIG } from './config';
-import { sendGaEvent } from './ga';
+import { readGaCheckoutIds, sendGaEvent, type GaCheckoutIds } from './ga';
 
 /**
  * The browser key events (ANALYTICS plan §3.1). Parameters are limited to the ones listed in the plan: never
@@ -52,4 +52,9 @@ export function reportBeginCheckout(item: CheckoutItem): boolean {
     currency: 'USD',
     items: [{ item_id: item.itemId, item_category: item.itemType, item_variant: `${item.billingCycle}/${item.offer}` }],
   });
+}
+
+/** GA ids to send with a checkout request (consent only); the server reports the purchase after delivery. */
+export function checkoutAnalyticsIds(): Promise<GaCheckoutIds | null> {
+  return readGaCheckoutIds(ANALYTICS_CONFIG.gaMeasurementId).catch(() => null);
 }

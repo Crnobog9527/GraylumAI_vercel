@@ -30,6 +30,7 @@ import { paymentsRouter } from './routers/payments';
 import { skillsRouter } from './routers/skills';
 import { accountRouter } from './routers/account';
 import { dataUseRouter } from './routers/dataUse';
+import { analyticsRouter } from './routers/analytics';
 import { founderRouter } from './routers/founder';
 import { publishMonitorRouter } from './routers/publishMonitor';
 import { adminStaleRoundsRouter } from './routers/adminStaleRounds';
@@ -44,6 +45,7 @@ import { fusionReviewRouter } from './routers/fusionReview';
 export const appRouter = router({
   chat: chatRouter,
   user: userRouter,
+  analytics: analyticsRouter,
   credits: creditsRouter,
   ticket: ticketRouter,
   settings: settingsRouter,

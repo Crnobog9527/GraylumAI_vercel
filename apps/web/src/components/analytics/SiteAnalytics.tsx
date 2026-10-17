@@ -14,6 +14,7 @@ import { enterPage, syncGa } from '@/lib/analytics/ga';
 import { isSensitivePath } from '@/lib/analytics/routes';
 import { cleanVercelEvent } from '@/lib/analytics/vercel';
 import { createClient } from '@/lib/supabase';
+import { useConsentWithdrawalSync } from './use-consent-withdrawal-sync';
 
 /**
  * Consent banner and statistics for every page (ANALYTICS plan §3). Termly loads asynchronously and never
@@ -26,6 +27,7 @@ export function SiteAnalytics({ onVercel }: { onVercel: boolean }) {
   const pathname = usePathname();
   const consent = useSyncExternalStore(subscribeConsent, consentSnapshot, serverConsentSnapshot);
   const previous = useRef<string | null>(null);
+  useConsentWithdrawalSync(consent, Boolean(termlyWebsiteUuid));
 
   // A new address: record it (cleaned) and report it if consent allows.
   useEffect(() => {

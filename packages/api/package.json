@@ -36,6 +36,7 @@
     "./src/services/subscriptionCreditGrants": "./src/services/subscriptionCreditGrants.ts",
     "./src/services/accountErasure/financialRecovery": "./src/services/accountErasure/financialRecovery.ts",
     "./src/services/billingReconciliation": "./src/services/billingReconciliation.ts",
+    "./src/services/analytics/gaPurchase": "./src/services/analytics/gaPurchase.ts",
     "./src/services/artifacts/public": "./src/services/artifacts/public.ts",
     "./src/services/artifacts/chat": "./src/services/artifacts/chat.ts",
     "./src/shared/opcRequests": "./src/shared/opcRequests.ts",

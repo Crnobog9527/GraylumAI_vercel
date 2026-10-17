@@ -2,7 +2,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type Stripe from 'stripe';
 import type { SupabaseClient } from '@supabase/supabase-js';
-const mocks = vi.hoisted(() => ({ scope: vi.fn(), cash: vi.fn() }));
+const mocks = vi.hoisted(() => ({ scope: vi.fn(), cash: vi.fn(), report: vi.fn() }));
+vi.mock('../analytics/gaPurchase', () => ({ reportGaPurchase: mocks.report }));
 vi.mock('./stripeCheckoutPersistence', () => ({ resolveStripeScope: mocks.scope }));
 vi.mock('./walletPaymentEvidence', () => ({ readWalletPaymentEvidence: mocks.cash }));
 import { recoverWalletCheckout } from './walletWebhook';
@@ -29,6 +30,18 @@ describe('wallet callback/recovery', () => {
     expect(f.db.rpc).toHaveBeenCalledWith('pay_waffo_fulfill_payment', expect.objectContaining({
       p_order: 'order', p_start: '2028-01-31T00:00:00.000Z', p_end: '2028-02-29T00:00:00.000Z', p_payment: 'pi_1',
     }));
+  });
+  it('reports the GA purchase only from the call that newly delivered the order (ANALYTICS 0286)', async () => {
+    mocks.report.mockReset().mockResolvedValue(true);
+    const first = fixture(); first.db.rpc.mockResolvedValue({ data: { state: 'fulfilled', duplicate: false }, error: null });
+    expect(await first.run()).toBe(true);
+    expect(mocks.report).toHaveBeenCalledTimes(1);
+    expect(mocks.report).toHaveBeenCalledWith(first.db, expect.objectContaining({ id: 'order' }));
+    for (const data of [{ state: 'fulfilled', duplicate: true }, { state: 'fulfilled' }, { state: 'review', reason: 'account_closed' }]) {
+      const replay = fixture(); replay.db.rpc.mockResolvedValue({ data, error: null });
+      await replay.run();
+    }
+    expect(mocks.report).toHaveBeenCalledTimes(1);
   });
   it('does not grant for pending, timeout, live, or unimplemented transitions', async () => {
     const f = fixture(); mocks.cash.mockResolvedValue(null); expect(await f.run()).toBe(true);
