@@ -28,7 +28,8 @@ beforeAll(async () => {
       skillTranslations: {
         get: {useQuery: () => {
           const data = useSyncExternalStore(subscribe, current);
-          return {data, isLoading: false, isError: false, error: null, refetch: async () => { snapshot = row(); notify(); }};
+          return {data, isLoading: false, isError: false, error: null,
+            refetch: async () => { snapshot = row(); notify(); return {data: snapshot}; }};
         }},
         update: {useMutation: () => {
           const [isPending, setPending] = useState(false);
@@ -60,6 +61,7 @@ beforeAll(async () => {
         window.adopted = [];
         function Host() {
           const [opened, setOpened] = React.useState(window.opened);
+          window.setOpened = setOpened; // another setting in this editor adopting a new module version
           return React.createElement(SkillTranslationsSetting, {moduleId: window.moduleId, moduleUpdatedAt: opened,
             onVersion: v => { window.adopted.push(v); setOpened(v); }});
         }
@@ -132,6 +134,29 @@ it('shows saved English, refuses a stale editor and an invalid input in plain Ch
     await browserExpect(notice(page)).toContainText('请关闭窗口重新打开');
     await browserExpect(notice(page)).not.toContainText('SKILL_');
     expect(await page.evaluate('window.adopted')).toEqual([]);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 20000);
+
+it('after another setting moves the version, saves only if no other tab changed the translations meanwhile', async () => {
+  const { page, errors } = await open({});
+  try {
+    await page.getByTestId('skill-translation-step:step-1').fill('About you');
+    // The report-model setting saved in this editor (v0 -> r1) while another tab saved translations at r1.
+    await page.evaluate(() => { const w = window as never as Record<string, unknown>;
+      w.version = 'r1'; w.stored = { en: { reportTitle: { original: '账号定位报告', text: 'Other tab' } } };
+      (w.setOpened as (v: string) => void)('r1'); });
+    await save(page).click();
+    await browserExpect(notice(page)).toContainText('请关闭窗口重新打开');
+    expect(await updates(page)).toEqual([]);
+    // Only the version moved (the translations are what this editor read): the save goes through.
+    await page.evaluate(() => { const w = window as never as Record<string, unknown>;
+      w.version = 'r2'; (w.setOpened as (v: string) => void)('r2'); });
+    await page.getByTestId('skill-translation-step:step-1').fill('About you');
+    await save(page).click();
+    await browserExpect(notice(page)).toContainText('已保存英文对照');
+    expect(await updates(page)).toEqual([{ moduleId: MODULE, locale: 'en', expectedModuleUpdatedAt: 'r2', translations: {
+      reportTitle: { original: '账号定位报告', text: 'Other tab' }, steps: { 'step-1': { original: '了解你', text: 'About you' } } } }]);
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 20000);

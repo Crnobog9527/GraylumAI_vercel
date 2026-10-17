@@ -31,15 +31,16 @@ function SkillTranslationsPanel({ moduleId, moduleUpdatedAt, onVersion }: {
   const utils = trpc.useUtils();
   const current = trpc.skillTranslations.get.useQuery({ moduleId }, { staleTime: 0, retry: false });
   const update = trpc.skillTranslations.update.useMutation();
-  const [edits, setEdits] = useState<TranslationDraft | null>(null);
+  // Only the inputs this editor changed; every other input shows the latest saved translation.
+  const [edits, setEdits] = useState<TranslationDraft>({});
   const [notice, setNotice] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
   const inFlight = useRef(false);
 
   const source = current.data?.source ?? null;
   const saved = useMemo(() => (source ? draftFrom(source, current.data?.translations.en) : {}), [source, current.data]);
   const rows = useMemo(() => (source ? translationRows(source) : []), [source]);
-  const draft = edits ?? saved;
-  const dirty = edits !== null && rows.some(row => (edits[row.key] ?? '').trim() !== (saved[row.key] ?? ''));
+  const draft = { ...saved, ...edits };
+  const dirty = Object.entries(edits).some(([key, value]) => value.trim() !== (saved[key] ?? ''));
 
   async function save() {
     if (!source || !dirty || inFlight.current) return;
@@ -48,10 +49,20 @@ function SkillTranslationsPanel({ moduleId, moduleUpdatedAt, onVersion }: {
     inFlight.current = true;
     setNotice(null);
     try {
+      // Another setting in this editor may have moved the module version after these translations were read; the
+      // version alone would then let this draft overwrite translations another tab saved, so re-read them first.
+      if (current.data?.moduleUpdatedAt !== moduleUpdatedAt) {
+        const fresh = (await current.refetch()).data;
+        if (!fresh || fresh.moduleUpdatedAt !== moduleUpdatedAt
+          || JSON.stringify(fresh.translations) !== JSON.stringify(current.data?.translations)) {
+          setNotice({ tone: 'error', text: skillTranslationsErrorText(new Error('SKILL_TRANSLATIONS_CONFLICT')) });
+          return;
+        }
+      }
       const next = await update.mutateAsync({ moduleId, locale: 'en', translations: translationsFrom(source, draft),
         expectedModuleUpdatedAt: moduleUpdatedAt });
       utils.skillTranslations.get.setData({ moduleId }, next);
-      setEdits(null);
+      setEdits({});
       // Only this save moved the version (it was conditioned on the editor's), so the form above may adopt it.
       onVersion(next.moduleUpdatedAt);
       setNotice({ tone: 'ok', text: '已保存英文对照。没填的地方，英文界面会显示中文原文。' });
@@ -84,7 +95,7 @@ function SkillTranslationsPanel({ moduleId, moduleUpdatedAt, onVersion }: {
                     </span>
                     <Input aria-label={`${row.kind}「${row.original}」的英文`} data-testid={`skill-translation-${row.key}`}
                       value={draft[row.key] ?? ''} maxLength={200} disabled={update.isPending} placeholder="English"
-                      onChange={e => { setNotice(null); setEdits({ ...draft, [row.key]: e.target.value }); }} />
+                      onChange={e => { setNotice(null); const value = e.target.value; setEdits(old => ({ ...old, [row.key]: value })); }} />
                   </div>
                 ))}
               </div>
