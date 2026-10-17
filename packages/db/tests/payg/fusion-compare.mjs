@@ -3,7 +3,7 @@
 // compare branch of the group admission, claim, read, stop, adoption write-back and account erasure.
 import assert from 'node:assert/strict';
 import {randomUUID,createHash} from 'node:crypto';
-import {rpc} from '../erasure-b2a/cases.mjs';
+import {rpc,closeAccount} from '../erasure-b2a/cases.mjs';
 
 const sha = text => createHash('sha256').update(text).digest('hex');
 const count = async (db,sql,args) => Number((await db.query(sql,args)).rows[0].v);
@@ -128,7 +128,8 @@ export async function fusionCompareCases({db,Client,connectionString,report,crea
   const answer = 'Hook A: lead with the result.';
   await rpc(db,'fusion_call_output_save',actor,c0.id,answer);
   await rpc(db,'fusion_call_verdict',actor,c0.id,'usable');
-  await rpc(db,'bill2_finalize',actor,c0.runId);
+  // As the executor settles: finalize, then close the run (cancel) and finalize again.
+  await rpc(db,'bill2_finalize',actor,c0.runId);await rpc(db,'bill2_cancel',actor,c0.runId);await rpc(db,'bill2_finalize',actor,c0.runId);
   await call(db,'fusion_compare_stop',actor,first.compareId,c1.runId);
   const read = await call(db,'fusion_compare_read',actor,first.compareId);
   assert.equal(read.state,'finished','all runs closed');
@@ -184,7 +185,8 @@ export async function fusionCompareCases({db,Client,connectionString,report,crea
     observedAt:new Date().toISOString(),coverage:'request_total',final:true,cost:'0.0004',currency:'USD',usage:{inputTokens:400,outputTokens:0}});
   await rpc(db,'fusion_call_output_save',actor,d0.id,'second answer');
   await rpc(db,'fusion_call_verdict',actor,d0.id,'usable');
-  await rpc(db,'bill2_finalize',actor,d0.runId);
+  // As the executor settles: finalize, then close the run (cancel) and finalize again.
+  await rpc(db,'bill2_finalize',actor,d0.runId);await rpc(db,'bill2_cancel',actor,d0.runId);await rpc(db,'bill2_finalize',actor,d0.runId);
   await call(db,'fusion_compare_stop',actor,second.compareId,null);
   assert.equal((await call(db,'fusion_compare_read',actor,second.compareId)).state,'stopped');
   await db.query('UPDATE runtime_sessions SET revision=revision+1 WHERE id=$1',[session]);
@@ -209,6 +211,7 @@ export async function fusionCompareCases({db,Client,connectionString,report,crea
 
   // Account erasure removes compare records and counts them while present.
   assert.ok(await count(db,'SELECT account_erasure_body_remaining($1)::bigint v',[actor])>0);
+  await closeAccount(db,{actor});
   const scrubbed = (await db.query('SELECT account_erasure_scrub_content($1) v',[actor])).rows[0].v;
   assert.ok(scrubbed.fusion_compares>=4);
   assert.equal(await records(),0);

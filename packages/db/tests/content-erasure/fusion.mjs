@@ -31,3 +31,36 @@ export async function runFusion(db,report){
  assert.ok(r.content_deleted_at&&r.closed,'the group run is marked and closed');
  report.checks.push('deleting a whole positioning draft deletes the Fusion outputs started from its conversation and closes the group runs');
 }
+
+// FUSION-COMPARE PR-1 (0284): a compare record is removed with its source conversation's draft, and a compare
+// that froze a workspace source is removed (record, outputs, scrubbed runs) when that source is deleted, even
+// when the compare lives in another conversation.
+export async function runFusionCompare(db,report){
+ const base=await fixture(db);
+ const f=(await db.query('SELECT d7_test.artifacts($1) v',[base.actor])).rows[0].v;
+ const draftSession=(await db.query('SELECT session_id FROM opc_drafts WHERE actor_id=$1 AND project_id=$2',[f.actor,f.project])).rows[0].session_id;
+ const free=await rpc(db,'bill2_create_draft',f.actor);
+ const other=(await db.query(`INSERT INTO runtime_sessions(actor_id,scope,start_request_id,start_payload)
+  VALUES($1,jsonb_build_object('kind','positioning_draft','draftId',$2::uuid),gen_random_uuid(),'{}') RETURNING id`,[f.actor,free])).rows[0].id;
+ const record=async(session,deps)=>(await db.query(`INSERT INTO fusion_compares(actor_id,request_id,session_id,history_revision,question,
+  question_hash,request_hash,config,workspace_dependencies,state) VALUES($1,gen_random_uuid(),$2,0,'private compare question',
+  repeat('a',64),repeat('b',64),'{"models":[]}',$3,'running') RETURNING id`,[f.actor,session,JSON.stringify(deps)])).rows[0].id;
+ const inDraft=await record(draftSession,[]);
+ const viaSource=await record(other,[{sourceVersionId:f.version}]);
+ const unrelated=await record(other,[{sourceVersionId:randomUUID()}]);
+ // The compare that froze the source has a group run in the other conversation.
+ const run=await createFixture(db,{actor:f.actor,phase:'fusion_compare'});
+ const group=await rpc(db,'fusion_group_create',f.actor,randomUUID(),'compare',other);
+ await rpc(db,'fusion_group_attach',f.actor,group,run.run);
+ await db.query('UPDATE fusion_compares SET group_id=$2 WHERE id=$1',[viaSource,group]);
+ assert.equal((await db.query('SELECT content_erasure_references($1::jsonb,ARRAY[$2::uuid]) v',
+  [JSON.stringify([{sourceVersionId:f.version}]),f.version])).rows[0].v,true,'the stored dependency format is recognised');
+ assert.equal((await erase(db,f,'artifact',f.project)).status,'deleted');
+ const left=(await db.query('SELECT id FROM fusion_compares WHERE actor_id=$1',[f.actor])).rows.map(r=>r.id);
+ assert.ok(!left.includes(inDraft),'deleting the draft deletes compares started from its conversation');
+ assert.ok(!left.includes(viaSource),'deleting a source deletes compares that froze it');
+ assert.ok(left.includes(unrelated),'other compares stay');
+ const r=(await db.query('SELECT content_deleted_at,closed FROM bill2_runs WHERE id=$1',[run.run])).rows[0];
+ assert.ok(r.content_deleted_at&&r.closed,'the compare group run that copied the source is marked and closed');
+ report.checks.push('deleting a draft deletes its compares; deleting a workspace source deletes the compares (and scrubs their runs) that froze it, in any conversation');
+}
