@@ -4,7 +4,7 @@
  * R5 report editing and 定稿 (#783 backend), without React so the rules are testable. The server owns
  * versions, completeness and the publish checks; the page keeps the user's text and explains answers.
  */
-import { joinReportBody, splitReportBody } from "@repo/api/src/shared/reportData";
+import { REPORT_DATA_FENCE, joinReportBody, splitReportBody } from "@repo/api/src/shared/reportData";
 
 export const REPORT_MAX_CHARACTERS = 12000;
 
@@ -23,6 +23,7 @@ export const REPORT_DOC_TEXT = {
   newerElsewhere: "这份报告在别处有了更新的版本。保存时会提示冲突，不会覆盖那边的修改。",
   showLatest: "查看最新保存的内容",
   closeUnsaved: "报告的修改还没有保存，关闭后会丢失。确定关闭吗？",
+  dataFence: "正文里不能有 ```graylum-report-data 这一行（它是报告数据块专用的），删掉后才能保存。",
   loadFailed: "暂时无法读取报告的最新版本，下面显示的是生成时的内容，暂时不能修改或定稿；请稍后重新打开。",
 } as const;
 
@@ -79,9 +80,13 @@ export const bodyFromEditor = (doc: Pick<ReportDocument, "body">, text: string) 
 /** The text differs from what the editor started with (spacing around the data block is not a change). */
 export const editorChanged = (doc: Pick<ReportDocument, "body">, text: string) => text !== editorText(doc.body);
 
+/** The reserved data fence typed into the text: only the generated report may carry a data block. */
+export const hasDataFence = (text: string) => text.split("\n").some(line => line.trim() === REPORT_DATA_FENCE);
+
 /** `text` is the editor's text; the limit counts it alone (Owner's choice B). */
 export function canSave(doc: Pick<ReportDocument, "body" | "finalized">, text: string) {
-  return !doc.finalized && text.trim().length > 0 && reportLength(text) <= REPORT_MAX_CHARACTERS && editorChanged(doc, text);
+  return !doc.finalized && text.trim().length > 0 && reportLength(text) <= REPORT_MAX_CHARACTERS && editorChanged(doc, text)
+    && !hasDataFence(text);
 }
 
 export function canFinalize(doc: Pick<ReportDocument, "candidate" | "finalized">, editing: boolean) {
