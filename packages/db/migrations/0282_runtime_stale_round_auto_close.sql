@@ -4,32 +4,39 @@
 -- same rule and the same function an operator uses (0220), so either path refunds a round only once.
 -- "Content beyond capacity" (user material too long) is user-side and is never refunded, but it left
 -- no server trace (#832 known limitation). This migration records it and excludes it:
---  * runtime_record_capacity_failure: the executor records the capacity code in the diagnostic
---    failure_code column (0248; nothing reads it for availability) of an unfinished execution, once.
+--  * runtime_record_capacity_failure: the current owner invocation (epoch-fenced, like its other owner
+--    writes) records the capacity code in the diagnostic failure_code column (0248; nothing reads it
+--    for availability) of its running or interrupted PAYG execution, once.
 --  * runtime_stale_charged_rounds / runtime_stale_round_compensate: unchanged from 0220/0239 except
 --    that a round marked with a capacity code is neither reported nor compensated.
 -- Repeatable (CREATE OR REPLACE only). No remote database use.
 BEGIN;
 
-CREATE OR REPLACE FUNCTION public.runtime_record_capacity_failure(p_actor_id uuid,p_execution_id uuid,p_code text) RETURNS jsonb
-LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
-DECLARE e runtime_executions;
+CREATE OR REPLACE FUNCTION public.runtime_record_capacity_failure(p_actor_id uuid,p_execution_id uuid,p_epoch bigint,p_code text)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE e runtime_executions;b bill2_runs;
 BEGIN
  IF p_code IS NULL OR p_code NOT IN ('RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY','RUNTIME_COMPLETE_REQUEST_EXCEEDS_CAPACITY') THEN
   RAISE EXCEPTION 'RUNTIME_FAILURE_CODE_INVALID' USING ERRCODE='22023';END IF;
  SELECT * INTO e FROM runtime_executions WHERE id=p_execution_id AND actor_id=p_actor_id;
  IF e.id IS NULL THEN RAISE EXCEPTION 'RUNTIME_EXECUTION_DENIED' USING ERRCODE='42501';END IF;
- -- Same lock order as runtime_execution and runtime_stale_round_compensate: Session, then execution.
+ -- Same lock order as runtime_execution and runtime_stale_round_compensate: Session, execution, run.
  PERFORM 1 FROM runtime_sessions WHERE id=e.session_id FOR UPDATE;
- -- Write-once; a finished (or compensated) execution keeps what it has.
+ SELECT * INTO e FROM runtime_executions WHERE id=e.id FOR UPDATE;
+ SELECT * INTO b FROM bill2_runs WHERE id=e.billing_run_id FOR UPDATE;
+ -- Only the current owner invocation may mark the round, fenced like its other owner writes: an older
+ -- invocation still unwinding after a resume advanced the epoch must not mark the resumed execution.
+ IF b.id IS NULL OR b.contract_version<>'bill2.v2' OR p_epoch IS NULL OR p_epoch<>b.runtime_epoch
+  OR e.state NOT IN ('running','interrupted') THEN
+  RAISE EXCEPTION 'RUNTIME_RESUME_CONFLICT' USING ERRCODE='P0001';END IF;
+ -- Write-once.
  UPDATE runtime_executions SET failure_code=coalesce(failure_code,p_code)
- WHERE id=e.id AND state IN ('prepared','running','interrupted','cost_pending')
-  AND erased_at IS NULL AND content_deleted_at IS NULL
+ WHERE id=e.id AND erased_at IS NULL AND content_deleted_at IS NULL
  RETURNING * INTO e;
  RETURN jsonb_build_object('recorded',e.id IS NOT NULL AND e.failure_code=p_code);
 END $$;
-REVOKE ALL ON FUNCTION public.runtime_record_capacity_failure(uuid,uuid,text) FROM PUBLIC,anon,authenticated,service_role;
-GRANT EXECUTE ON FUNCTION public.runtime_record_capacity_failure(uuid,uuid,text) TO service_role;
+REVOKE ALL ON FUNCTION public.runtime_record_capacity_failure(uuid,uuid,bigint,text) FROM PUBLIC,anon,authenticated,service_role;
+GRANT EXECUTE ON FUNCTION public.runtime_record_capacity_failure(uuid,uuid,bigint,text) TO service_role;
 
 CREATE OR REPLACE FUNCTION public.runtime_stale_charged_rounds(p_cutoff timestamp with time zone, p_limit integer DEFAULT 100)
  RETURNS jsonb

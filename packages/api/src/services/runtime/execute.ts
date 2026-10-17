@@ -490,7 +490,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     // Not refunded yet: keep the normal cost-verification result, never the "not charged" reason.
     if(ended?.state==='cost_pending')return {state:'cost_pending' as const};
    }
-   if(capacity)await recordCapacityFailure(rpc,args,error);
+   if(capacity&&isPayg)await recordCapacityFailure(rpc,args,error,execution.epoch!);
    await ownerRpc('runtime_execution',{...args,p_action:'interrupt'}).catch(()=>{});
    return {state:'pending' as const,...(capacity?{unavailable:'capacity' as const}:{}),...claimNoticeFields(claimNotice)};
   }

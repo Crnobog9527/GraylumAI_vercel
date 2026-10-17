@@ -77,9 +77,10 @@ export const CAPACITY_FAILURE_CODES=['RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY'
 /** Content beyond capacity after a charged call is user-side and never refunded: record it (0282) before the
  * execution is interrupted, so neither the 24-hour refund nor an operator applies. Best effort; before 0282 it is a no-op. */
 export async function recordCapacityFailure(rpc:<T>(name:string,args:Record<string,unknown>)=>Promise<T>,
-  args:Record<string,unknown>,error:unknown):Promise<void> {
+  args:Record<string,unknown>,error:unknown,epoch:number):Promise<void> {
  if(!(error instanceof Error)||!CAPACITY_FAILURE_CODES.includes(error.message))return;
- await rpc('runtime_record_capacity_failure',{...args,p_code:error.message}).catch(()=>{
+ // Epoch-fenced in SQL like every owner write: a stale invocation cannot mark a resumed execution.
+ await rpc('runtime_record_capacity_failure',{...args,p_epoch:epoch,p_code:error.message}).catch(()=>{
   logger.error('api','runtime_capacity_marker_failed',{executionId:args.p_execution_id});
  });
 }

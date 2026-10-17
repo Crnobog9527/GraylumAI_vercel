@@ -238,17 +238,24 @@ it('RUNTIME: a round whose account was later banned can still be compensated', a
   expect(await ledger(round)).toMatchObject({ credits: 100, ledger: 100, compensations: 1, run_state: 'refunded' });
 }, 60000);
 
-const markCapacity = (round: { actor: string; executionId: string }, code = 'RUNTIME_COMPLETE_REQUEST_EXCEEDS_CAPACITY') =>
-  rpc('runtime_record_capacity_failure', { p_actor_id: round.actor, p_execution_id: round.executionId, p_code: code });
+const epochOf = async (runId: string) =>
+  Number((await db.query('select runtime_epoch from bill2_runs where id=$1', [runId])).rows[0].runtime_epoch);
+const markCapacity = async (round: { actor: string; executionId: string; runId: string },
+  code = 'RUNTIME_COMPLETE_REQUEST_EXCEEDS_CAPACITY', epoch?: number) => rpc('runtime_record_capacity_failure',
+  { p_actor_id: round.actor, p_execution_id: round.executionId, p_epoch: epoch ?? await epochOf(round.runId), p_code: code });
 
 it('RUNTIME: a round ended by content beyond capacity is marked once and never reported or compensated', async () => {
   const round = await chargedOpenRound(2 * STALE_ROUND_AGE_MS), other = await chargedOpenRound(2 * STALE_ROUND_AGE_MS);
   expect(ids(await reported())).toContain(round.runId);
   // Only the service host can write the marker, only for the execution's own account and only a capacity code.
   expect((await anon.rpc('runtime_record_capacity_failure', { p_actor_id: round.actor, p_execution_id: round.executionId,
-    p_code: 'RUNTIME_COMPLETE_REQUEST_EXCEEDS_CAPACITY' })).error).toBeTruthy();
-  await expect(markCapacity({ actor: other.actor, executionId: round.executionId })).rejects.toThrow('RUNTIME_EXECUTION_DENIED');
+    p_epoch: await epochOf(round.runId), p_code: 'RUNTIME_COMPLETE_REQUEST_EXCEEDS_CAPACITY' })).error).toBeTruthy();
+  await expect(markCapacity({ ...round, actor: other.actor })).rejects.toThrow('RUNTIME_EXECUTION_DENIED');
   await expect(markCapacity(round, 'RUNTIME_DATABASE_UNAVAILABLE')).rejects.toThrow('RUNTIME_FAILURE_CODE_INVALID');
+  // An older invocation still unwinding after a resume advanced the epoch cannot mark the resumed round.
+  await expect(markCapacity(round, undefined, await epochOf(round.runId) - 1)).rejects.toThrow('RUNTIME_RESUME_CONFLICT');
+  expect((await db.query('select failure_code from runtime_executions where id=$1', [round.executionId])).rows[0])
+    .toEqual({ failure_code: null });
   expect(await markCapacity(round)).toEqual({ recorded: true });
   // Write-once: the first code stays.
   expect(await markCapacity(round, 'RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY')).toEqual({ recorded: false });

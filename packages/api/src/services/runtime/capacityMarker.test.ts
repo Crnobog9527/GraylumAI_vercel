@@ -36,7 +36,7 @@ it.each(['RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY','RUNTIME_COMPLETE_REQUEST_E
  const r=round(code);
  expect(await r.execute()).toEqual({state:'pending',unavailable:'capacity'});
  expect(sequence(r.calls)).toEqual(['begin','fail_before_dispatch','runtime_record_capacity_failure','interrupt']);
- expect(r.calls.find(c=>c.name==='runtime_record_capacity_failure')?.args).toEqual({p_actor_id:id,p_execution_id:id,p_code:code});
+ expect(r.calls.find(c=>c.name==='runtime_record_capacity_failure')?.args).toEqual({p_actor_id:id,p_execution_id:id,p_epoch:3,p_code:code});
 });
 
 it('still interrupts when the marker cannot be written (before 0282, or an outage)',async()=>{
