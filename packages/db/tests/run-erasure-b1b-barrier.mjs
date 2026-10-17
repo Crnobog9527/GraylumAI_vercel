@@ -30,7 +30,7 @@ function clear(actor) {
 const fingerprint = () => q(`SELECT md5(jsonb_build_array(
   (SELECT jsonb_agg(to_jsonb(s) ORDER BY id) FROM runtime_sessions s),
   (SELECT jsonb_agg(to_jsonb(s) ORDER BY id) FROM research_plans s),
-  (SELECT jsonb_agg(to_jsonb(s) ORDER BY actor_id,scope_key,name) FROM agent_confirmed_preferences s),
+  (SELECT jsonb_agg(to_jsonb(s) ORDER BY session_id) FROM runtime_session_names s),
   (SELECT jsonb_agg(to_jsonb(s) ORDER BY actor_id,account_project_id) FROM opc_account_ui s),
   (SELECT jsonb_agg(to_jsonb(s) ORDER BY id) FROM artifact_projects s),
   (SELECT jsonb_agg(to_jsonb(s) ORDER BY id) FROM conversations s))::text)`);

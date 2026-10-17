@@ -67,11 +67,11 @@ function scrub(holderPid) {
 const normal = {
   runtime_sessions: [1, 1], runtime_executions: [2, 2], runtime_history_dependencies: [1, 2],
   runtime_session_batches: [2, 2], runtime_session_history: [2, 2], runtime_tool_calls: [2, 2],
-  runtime_scope_material: [1, 1], conversations: [2, 2], messages: [2, 2],
-  conversation_context_snapshots: [2, 2], ordinary_chat_requests: [2, 1],
+  runtime_scope_material: [1, 1], conversations: [3, 1], messages: [3, 1],
+  conversation_context_snapshots: [3, 1],
 };
 function counts(result, expected) {
-  assert.equal(Object.keys(result).length, 22);
+  assert.equal(Object.keys(result).length, 20);
   for (const [table, [done, skipped]] of Object.entries(expected)) {
     assert.equal(result[table], done, `${table} processed`);
     assert.equal(result[`${table}_skipped`], skipped, `${table} skipped`);
