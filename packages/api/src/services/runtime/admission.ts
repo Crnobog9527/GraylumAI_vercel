@@ -241,8 +241,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    // Match the actual administrator model to the enabled protocol and exact quote. Never substitute a default model.
    if(policy.real&&row.error){if(row.error.code==='PGRST116')throw unavailableModel();stagingRpcFailure(row.error);}
    if(row.error||row.data?.is_active!=='true'||(!policy.real&&row.data.provider!=='fixture'))throw unavailableModel();
-   // The platform OpenRouter key bound to this window serves Decisions; it never travels further. An unreadable key
-   // only makes Decisions unavailable (conservative verdict), never another key.
+   // The window-bound platform OpenRouter key serves Decisions only; unreadable means Decisions unavailable, never another key.
    const apiKey=policy.real?windowBoundKey(row.data,await readOpenRouterKey(admin).catch(()=>undefined),realModel(row.data).account):undefined;
    if(policy.real)realModel(row.data);
    // Decisions judges every other gated message, including a non-social Skill turning to social media; an admitted
