@@ -65,6 +65,21 @@ describe('library read execution', () => {
     expect(replay).not.toContain('原文');
   });
 
+  it('checks a frozen search result before replay so a deleted document excerpt is never sent again', async () => {
+    const search = {kind: 'library_search', terms: ['苹果派'], hits: [{ref: 'doc-1', documentId: doc, version: 2,
+      title: 'PRIVATE_NAME.md', excerpt: '苹果派的做法 SEARCH_EXCERPT'}]};
+    const live = vi.fn(async () => true);
+    expect(JSON.parse(await readLibrary({ownerRpc: live as never, executionId: execution, query: 'search:苹果派',
+      saved: {result: search}, toolArgs}))).toEqual(search);
+    expect(live).toHaveBeenCalledWith('runtime_library_visible', {p_execution_id: execution, p_result: search});
+    const gone = vi.fn(async () => false);
+    const replay = await readLibrary({ownerRpc: gone as never, executionId: execution, query: 'search:苹果派',
+      saved: {result: search}, toolArgs});
+    expect(JSON.parse(replay)).toEqual({kind: 'unavailable', reason: 'source_deleted'});
+    expect(replay).not.toContain('SEARCH_EXCERPT');
+    expect(replay).not.toContain('PRIVATE_NAME');
+  });
+
   it('checks a frozen index before replay so a deleted filename is never sent again', async () => {
     const index = {kind: 'library_index', documents: [{documentId: doc, title: 'PRIVATE_NAME.md', version: 2}]};
     for (const visible of [true, false]) {
