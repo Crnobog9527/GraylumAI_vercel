@@ -8,7 +8,7 @@
 --
 -- PUBLISH-MONITOR 4b (0290, Owner 2026-10-17): a tool-only publish monitor run (v2, input.publishMonitor object, the
 -- fixed placeholder model id, every entry a tool route) has no model and so needs no production model profile; it
--- still needs the production database, the vendor switch and an exact price. The recognition is spelled out here so
+-- still needs the production database, the production switch, the vendor switch and an exact price. The recognition is spelled out here so
 -- this file does not depend on the order in which 0290 and 0293 are applied.
 --
 -- Replaces runtime_production_allowed (0292) only. No data change. Rollback: switch the vendors off in
@@ -33,9 +33,11 @@ BEGIN
   AND NOT EXISTS(SELECT 1 FROM jsonb_array_elements(p->'callPolicy') x WHERE x->>'protocol' IS DISTINCT FROM 'research-tool-v1'),false);
  SELECT value INTO cfg FROM system_settings WHERE key='runtime_payg_production';
  IF jsonb_typeof(cfg)='string' THEN cfg:=(cfg#>>'{}')::jsonb;END IF;
- IF NOT tool_only AND (jsonb_typeof(cfg) IS DISTINCT FROM 'object' OR cfg->'enabled' IS DISTINCT FROM 'true'::jsonb
-  OR jsonb_typeof(cfg->'profiles') IS DISTINCT FROM 'array'
-  OR (p_prepare AND cfg->>'policyVersion' IS DISTINCT FROM p->'rules'->>'quoteVersion'))
+ -- The production switch (enabled:false) stops every production run, monitor runs included (#1086 review);
+ -- only the model-profile checks are skipped for a tool-only monitor run.
+ IF jsonb_typeof(cfg) IS DISTINCT FROM 'object' OR cfg->'enabled' IS DISTINCT FROM 'true'::jsonb
+ OR (NOT tool_only AND (jsonb_typeof(cfg->'profiles') IS DISTINCT FROM 'array'
+  OR (p_prepare AND cfg->>'policyVersion' IS DISTINCT FROM p->'rules'->>'quoteVersion')))
  THEN RAISE EXCEPTION 'RUNTIME_PRODUCTION_DENIED' USING ERRCODE='42501';END IF;
  SELECT value INTO dm FROM system_settings WHERE key='billing_token_price_multiplier';
  IF p_prepare THEN
