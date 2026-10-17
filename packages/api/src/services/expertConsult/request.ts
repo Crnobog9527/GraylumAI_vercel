@@ -43,13 +43,15 @@ export async function readExpertConsult(db: Rpc, profileId: string): Promise<Exp
 }
 
 /**
- * Tells the Owner a new request arrived. PAY-NOTIFY's sender (#1031) is not on staging yet, so this only
- * logs; once it is, send through it here. Only the ticket id leaves the database — never the need or
- * contact details, which stay in the ticket and are erased with the account. Never fails the request.
+ * Tells the Owner a new request arrived. The request itself is the durable record: an open, high-priority
+ * '专家诊断预约' ticket in the admin ticket queue. PAY-NOTIFY's sender (#1031) is not on staging yet, so until
+ * then the notice is a warn-level log, which the logger persists to application_logs (info is not kept);
+ * once #1031 lands, send the e-mail here. Only the ticket id leaves the ticket — never the need or contact
+ * details, which stay in the ticket and are erased with the account. Never fails the request.
  */
 export type ExpertConsultNotifier = (request: { ticketId: string }) => Promise<void>;
 export const notifyOwnerOfExpertConsult: ExpertConsultNotifier = async ({ ticketId }) => {
-  logger.info('api', 'expert_consult_requested', { ticketId });
+  logger.warn('api', 'expert_consult_requested', { ticketId });
 };
 
 export async function requestExpertConsult(db: Rpc, profileId: string, input: ExpertConsultInput,
