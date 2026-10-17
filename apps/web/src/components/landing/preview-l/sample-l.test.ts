@@ -98,7 +98,11 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
 
   it('docks the open question in the real message box, as the product page does, and drops it once answered', () => {
     // While its message is read, the question is folded into one line in the conversation; read, it is docked.
-    const reading = renderToStaticMarkup(withTrpc(createElement(PositioningPictureL, { moment: 0, local: 0 })));
+    // At the very start the opening is still being written (streamed), with nothing after it yet.
+    const writing = renderToStaticMarkup(withTrpc(createElement(PositioningPictureL, { moment: 0, local: 0 })));
+    expect(writing).not.toContain('data-question-card');
+    expect(writing).not.toContain(escape(L_SKILL_OPENING));
+    const reading = renderToStaticMarkup(withTrpc(createElement(PositioningPictureL, { moment: 0, local: 0.08 })));
     expect(reading).toContain('data-question-card="folded"');
     expect(reading).not.toContain('data-question-card="open"');
     const open = renderToStaticMarkup(withTrpc(createElement(PositioningPictureL, { moment: 0, local: 0.12 })));
@@ -256,7 +260,7 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     // What the first summary lists, the person said before it.
     const said = know.lines.filter(line => line.role === 'user').map(line => line.text).join('');
     for (const fact of ['一年后', 'TikTok', 'Instagram', '长视频', '二十多道', '常问', '不知道该找谁', '支架']) expect(said).toContain(fact);
-    const picture = renderToStaticMarkup(withTrpc(createElement(PositioningPictureL, { moment: 0, local: 0 })));
+    const picture = renderToStaticMarkup(withTrpc(createElement(PositioningPictureL, { moment: 0, local: 0.08 })));
     expect(picture).toContain(escape(L_SKILL_OPENING));
     expect(picture).not.toContain('<h1');
   });

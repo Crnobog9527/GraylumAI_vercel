@@ -6,7 +6,7 @@ import {
   MentorChatHeading, MentorChatLog, MentorReply, MentorUserMessage,
 } from '@/components/chat-display/mentor-messages';
 import { PositioningHeader, PositioningResultPanel, PositioningStepStrip } from '@/components/chat-display/positioning-chrome';
-import { arrivedAt, RailJ, readThrough } from '@/components/landing/preview-j/PositioningClipJ';
+import { arrivedAt, RailJ } from '@/components/landing/preview-j/PositioningClipJ';
 import takeover from '@/components/landing/preview-j/takeover-j.module.css';
 import { ConfirmJ, filledUpTo, personaInformation } from '@/components/landing/preview-j/WorkbenchPartsJ';
 import { CaptureChecklist } from '@/components/opc/capture-checklist';
@@ -26,6 +26,17 @@ type Line = TakeoverLine & { opening?: boolean };
 
 /** A moment's messages: sample L's own script (round six), opening with the coach. */
 const script = (moment: number): readonly Line[] => L_POSITIONING_MOMENTS[moment]?.lines ?? [];
+
+/**
+ * How far the newest message is, 0 → 1, at `local` of a moment with `count` messages: the first half of its time it is
+ * being written (round six, S5: streamed as in the product), the second half it is read through.
+ */
+function newestShare(local: number, count: number) {
+  const position = local * count * 1.15;
+  return arrivedAt(local, count) < count
+    ? position - Math.floor(position)
+    : Math.min(1, Math.max(0, (position - (count - 1)) / (count * 1.15 - (count - 1))));
+}
 
 /**
  * Sample L's step one picture (Owner 2026-10-17: "落地页所有产品界面的这个组件，你不要自己再重新写一遍"): the positioning
@@ -52,8 +63,13 @@ export function PositioningPictureL({ moment, local }: { moment: number; local: 
   const last = lines[lines.length - 1];
   // The open question sits docked above the message box, as on the product page; answered, it is gone.
   const question = last?.role === 'coach' && last.card && last.card in QUESTIONS ? QUESTIONS[last.card as keyof typeof QUESTIONS] : null;
-  const confirming = step < 3 && lines.some(line => line.card === 'confirm');
-  const reading = step === 3 ? 1 : readThrough(local, all.length);
+  const share = step === 3 ? 1 : newestShare(local, all.length);
+  const written = Math.min(1, share / 0.5);
+  const reading = Math.max(0, Math.min(1, (share - 0.5) / 0.5));
+  const last_ = lines[lines.length - 1];
+  const streaming = written < 1 && last_ !== undefined && last_.role !== 'user';
+  // What follows a message (its card, the step's confirm area) comes once the message is written.
+  const confirming = step < 3 && lines.some(line => line.card === 'confirm') && !(streaming && last_?.card === 'confirm');
   // As on the product page, an open question is either folded into one line in the conversation or docked on the message
   // box: folded while its message is being read, docked once it has been read (round six: the message box stays whole).
   const docked = Boolean(question) && reading >= 0.55;
@@ -87,16 +103,20 @@ export function PositioningPictureL({ moment, local }: { moment: number; local: 
             selectedId={J_STEPS[shownStep].id} />
           <MentorChatHeading />
           <MentorChatLog logRef={log}>
-            {lines.map((line, index) => (
+            {lines.map((line, index) => {
+              const live = streaming && index === lines.length - 1;
+              const text = live ? line.text.slice(0, Math.max(1, Math.round(line.text.length * written))) : line.text;
+              return (
               <div key={`${chatMoment}-${index}`} data-line="" className="space-y-2">
                 {line.role === 'user' ? <MentorUserMessage stepLabel={` · ${stepTitle}`} text={line.text} /> : (
                   <MentorReply kind={line.role === 'summary' ? 'summary' : line.opening ? 'opening' : 'reply'}
-                    stepLabel={` · ${stepTitle}`} text={line.text} />
+                    stepLabel={` · ${stepTitle}`} text={text} live={live} />
                 )}
-                {line.card === 'fetch' || line.card === 'table' ? L_CLIP_PARTS.card?.(line.card, fetchLocal) : null}
-                {question && !docked && line === last ? <OpenQuestionRecord card={question} /> : null}
+                {!live && (line.card === 'fetch' || line.card === 'table') ? L_CLIP_PARTS.card?.(line.card, fetchLocal) : null}
+                {question && !docked && !live && line === last ? <OpenQuestionRecord card={question} /> : null}
               </div>
-            ))}
+              );
+            })}
           </MentorChatLog>
           {confirming ? <ConfirmJ step={stepTitle} information={information} /> : null}
         </div>
