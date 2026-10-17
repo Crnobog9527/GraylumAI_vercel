@@ -89,7 +89,15 @@ describe('publish-monitor refresh of one connection', () => {
     const busy = database();
     await run(busy, provider([{ status: 429 }]).deps);
     expect(finished(busy.calls)).toEqual([['release', 'PROVIDER_BUSY']]);
-    expect(busy.calls.some(c => c.name === 'publish_monitor_refresh_page')).toBe(false);
+    // The provider's own 429 was a real request: counted. A refusal by the shared limiter sent nothing: not counted.
+    expect(busy.calls.filter(c => c.name === 'publish_monitor_refresh_page').map(c => c.args.p_posts)).toEqual([[]]);
+    const local = database();
+    const limited = provider([{ posts: [post('a', 1)] }]);
+    let slots = 1;
+    await run(local, { ...limited.deps, limiter: { acquire: async () => (slots-- > 0 ? { ok: true as const }
+      : { ok: false as const, retryAfterSeconds: 5 }) } });
+    expect(finished(local.calls)).toEqual([['release', 'PROVIDER_BUSY']]);
+    expect(local.calls.some(c => c.name === 'publish_monitor_refresh_page')).toBe(false);
   });
 
   it('an empty first page counts against the daily cap and is reported as empty for the database rules', async () => {
@@ -179,6 +187,16 @@ describe('publish-monitor refresh of one connection', () => {
     const written = db.calls.filter(c => c.name === 'publish_monitor_refresh_page')
       .flatMap(c => (c.args.p_posts as Array<{ platformPostId: string }>).map(x => x.platformPostId));
     expect(due.every(id => written.includes(id))).toBe(true);
+  });
+
+  it('ownership is checked before every feed request: a takeover between pages stops the next read', async () => {
+    const db = database();
+    let checks = 0;
+    // Checks 1-2 surround page 1; check 3 (before page 2) already sees the new owner.
+    const p = provider([{ posts: [post('a', 1)], cursor: 'c2' }, { posts: [post('theirs', 1)] }],
+      () => (++checks <= 2 ? account() : account(`${'c'.repeat(32)}.${'d'.repeat(32)}`)));
+    expect((await run(db, p.deps)).outcome).toBe('taken_over');
+    expect(p.urls.filter(u => u.includes('/social-account-feeds/')).length).toBe(1);
   });
 
   it('a page whose ownership re-check fails is still counted against the daily cap', async () => {

@@ -131,8 +131,6 @@ export async function refreshConnection(db: Rpc, client: ClientDeps, claim: Refr
   if (!claim.ownerRef) return settle(run, 'failed', 'OWNER_REF_MISSING');
   if (now() >= until) return settle(run, 'release');
   const stop = (reason: Stop) => reason.outcome === 'stale' ? stale(run) : settle(run, reason.outcome, reason.error);
-  const before = await ownership(client, claim);
-  if (before) return stop(before);
 
   const cutoff = now() - windowDays * 86_400_000;
   const inWindow = (post: NormalizedPost) => post.postedAt === null || Date.parse(post.postedAt) >= cutoff;
@@ -148,9 +146,16 @@ export async function refreshConnection(db: Rpc, client: ClientDeps, claim: Refr
     : Promise<FeedPage | Stop | 'rejected_cursor'> => {
     if (budget <= 0) return { outcome: 'partial', error: 'PAGE_CAP' };
     if (now() >= until) return { outcome: 'release', error: null };
+    // Ownership is checked right before every feed request (plan §4.1), and again after it, before anything is stored.
+    const before = await ownership(client, claim);
+    if (before) return before;
     const page: Outcome<FeedPage> = await readFeedPage(client, claim.providerAccountId, claim.platform, query);
     budget -= 1;
-    if (page.kind === 'rate_limited') return { outcome: 'release', error: errorCode(page) };
+    if (page.kind === 'rate_limited') {
+      // The provider's own 429 was a real request: it counts against the daily cap. A local refusal sent nothing.
+      if (page.sent && !await write(run, [], null, false)) return { outcome: 'stale' };
+      return { outcome: 'release', error: errorCode(page) };
+    }
     if (page.kind !== 'ok') {
       const cursorRefused = Boolean(query?.cursor) && page.kind === 'rejected' && outcomeFor(page) === 'failed';
       if (!await write(run, [], null, cursorRefused && savedCursor)) return { outcome: 'stale' };
@@ -215,6 +220,11 @@ export async function refreshConnection(db: Rpc, client: ClientDeps, claim: Refr
       const page = await read({ platformPostIds: asked, limit: DUE_BATCH, cursor: next });
       if (page === 'rejected_cursor') return settle(run, 'failed', 'PROVIDER_CURSOR_REJECTED');
       if (!isPage(page)) return stop(page);
+      // Every entry unreadable: counted, settled as failed, never a success that skipped the due posts.
+      if (page.posts.length === 0 && page.rejected > 0) {
+        if (!await write(run, [], null, false)) return stale(run);
+        return settle(run, 'failed', 'PROVIDER_RESPONSE_SHAPE');
+      }
       filtered = page.posts.every(post => askedSet.has(post.platformPostId));
       if (!await write(run, scope(page.posts).kept, null, false)) return stale(run);
       for (const post of page.posts) waiting.delete(post.platformPostId);
