@@ -48,11 +48,12 @@ export async function runCases({db,report}) {
  assert.equal((await read(db,a,e,'search:黄油 苹果派')).hits[0].ref,'doc-1');
  report.checks.push('Chinese and English words find their documents; hits freeze as retrieved doc-N and read like @ references');
 
- // Words shorter than 3 characters match only titles and file names, never bodies.
+ // A 2-character word (very common in Chinese) matches bodies; a 1-character word matches only titles and file names.
  const shortWord=await exec(db,a,sid);
- assert.deepEqual((await read(db,a,shortWord,'search:黄油')).hits,[],'a 2-character word does not scan bodies');
- assert.equal((await read(db,a,shortWord,'search:开场')).hits[0].title,'Menu.md');
- report.checks.push('words under 3 characters match titles and file names only');
+ assert.ok((await read(db,a,shortWord,'search:黄油')).hits.length>0,'a 2-character word matches bodies');
+ assert.deepEqual((await read(db,a,shortWord,'search:黄')).hits,[],'a 1-character word does not scan bodies');
+ assert.equal((await read(db,a,shortWord,'search:开')).hits[0].title,'Menu.md');
+ report.checks.push('2-character words match bodies; 1-character words match titles and file names only');
 
  // Never found: other users, deleted, not ready, non-text documents, other user'"'"'s numbers.
  const other=await one(db,'SELECT ws_test.actor() v');

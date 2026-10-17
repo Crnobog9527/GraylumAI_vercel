@@ -69,8 +69,8 @@ BEGIN
 
  -- CHAT-AUTO-CONTEXT A1: 'search:<words>' finds the caller's own ready documents by trigram match on words (up to 5, each
  -- 1-40 characters) in body, segment title and file name, freezes every hit document at its current version into this
- -- execution (origin 'retrieved', doc-6 … doc-29 beside the @ references) and returns short excerpts. Words shorter than 3
- -- characters match only titles and file names. At most 3 searches count toward the 8 reads and 65,536 bytes of 0262.
+ -- execution (origin 'retrieved', doc-6 … doc-29 beside the @ references) and returns short excerpts. Words of 2 or
+ -- more characters also match bodies; a 1-character word matches only titles and file names (too noisy for bodies). At most 3 searches count toward the 8 reads and 65,536 bytes of 0262.
  IF p_query LIKE 'search:%' THEN
   IF coalesce(e.payload->>'libraryRetrieval','') IS DISTINCT FROM 'true' THEN RAISE EXCEPTION 'LIB_REFERENCE_READ_DENIED'; END IF;
   SELECT count(*) INTO searches FROM runtime_tool_calls t WHERE t.execution_id=e.id AND t.name='read_source' AND t.result->>'kind'='library_search';
@@ -86,7 +86,7 @@ BEGIN
     FROM library_document_segments sg
     JOIN library_documents ld ON ld.id=sg.document_id AND ld.actor_id=sg.actor_id
     CROSS JOIN LATERAL (SELECT count(*)::int score,min(nullif(position(lower(w) IN lower(sg.body)),0)) pos FROM unnest(terms) w
-      WHERE (char_length(w)>=3 AND sg.body ILIKE '%'||replace(replace(replace(w,E'\\',E'\\\\'),'%',E'\\%'),'_',E'\\_')||'%')
+      WHERE (char_length(w)>=2 AND sg.body ILIKE '%'||replace(replace(replace(w,E'\\',E'\\\\'),'%',E'\\%'),'_',E'\\_')||'%')
        OR sg.title ILIKE '%'||replace(replace(replace(w,E'\\',E'\\\\'),'%',E'\\%'),'_',E'\\_')||'%'
        OR coalesce(ld.filename,'') ILIKE '%'||replace(replace(replace(w,E'\\',E'\\\\'),'%',E'\\%'),'_',E'\\_')||'%') mt
     WHERE sg.actor_id=p_actor_id AND ld.kind='document' AND ld.status='ready' AND ld.deleted_at IS NULL AND mt.score>0) ranked
@@ -101,7 +101,7 @@ BEGIN
     FROM library_document_segments sg
     JOIN library_documents ld ON ld.id=sg.document_id AND ld.actor_id=sg.actor_id
     CROSS JOIN LATERAL (SELECT count(*)::int score,min(nullif(position(lower(w) IN lower(sg.body)),0)) pos FROM unnest(terms) w
-      WHERE (char_length(w)>=3 AND sg.body ILIKE '%'||replace(replace(replace(w,E'\\',E'\\\\'),'%',E'\\%'),'_',E'\\_')||'%')
+      WHERE (char_length(w)>=2 AND sg.body ILIKE '%'||replace(replace(replace(w,E'\\',E'\\\\'),'%',E'\\%'),'_',E'\\_')||'%')
        OR sg.title ILIKE '%'||replace(replace(replace(w,E'\\',E'\\\\'),'%',E'\\%'),'_',E'\\_')||'%'
        OR coalesce(ld.filename,'') ILIKE '%'||replace(replace(replace(w,E'\\',E'\\\\'),'%',E'\\%'),'_',E'\\_')||'%') mt
     WHERE sg.actor_id=p_actor_id AND ld.kind='document' AND ld.status='ready' AND ld.deleted_at IS NULL AND mt.score>0
