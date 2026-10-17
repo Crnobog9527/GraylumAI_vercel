@@ -45,11 +45,6 @@
 .adjustedNote { margin: 0; padding: 12px 14px; border-radius: 12px; background: #fff4d6; color: #5c3d00; font-size: 15px; line-height: 1.6; }
 .adjustedNote b { font-weight: 700; }
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding-top: 4px; }
-.fullButton {
-  display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 18px; border: 1px solid var(--j-ink); border-radius: 999px;
-  background: #fff; color: var(--j-ink); font: inherit; font-size: 15px; font-weight: 600; cursor: pointer;
-}
-.fullButton:focus-visible { outline: 2px solid var(--j-ink); outline-offset: 2px; }
 .tags { display: flex; flex-wrap: wrap; gap: 6px; min-height: 22px; }
 .sampleTag, .adjustedTag {
   display: inline-block; padding: 0 8px; border-radius: 999px; font-size: 12px; font-style: normal; font-weight: 500; line-height: 22px;

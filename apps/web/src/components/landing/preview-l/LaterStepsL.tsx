@@ -222,7 +222,7 @@ function WorkChatPicture({ id, beat, live }: { id: string; beat: number; live: b
         </div>
       </section>
       {/* The right column scrolls too, its scrollbar shown (round eight, U11); what it holds is a picture (inert). */}
-      <aside className={takeover.checklist}><div className={cn(styles.side, demo.scrollbar)}><div inert>
+      <aside className={takeover.checklist}><div className={cn(styles.sideScroll, demo.scrollbar)}><div inert>
         {script && beat >= 3 ? (
           <ContentDraftView platform={CHAT.platform} account={CHAT.account} contentLabel="口播稿" title={CHAT.script.draftTitle}
             body={proposal.shown} versionLine={CHAT.script.versionLine}>

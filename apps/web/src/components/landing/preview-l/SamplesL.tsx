@@ -3,21 +3,17 @@
 
 import { useRef, useState } from 'react';
 import Link from 'next/link';
-import { FileText, X } from 'lucide-react';
+import { FileText } from 'lucide-react';
 import k from '@/components/landing/preview-k/k.module.css';
-import { FullReport } from '@/components/landing/preview-j/SamplesJ';
 import page from '@/components/landing/preview-j/j.module.css';
-import samples from '@/components/landing/preview-j/samples-j.module.css';
-import { J_SAMPLES } from '@/lib/landing/landing-copy-j-samples';
 import { L_REPORTS } from '@/lib/landing/landing-copy-l';
 import { L_SAMPLES_REDO as COPY } from '@/lib/landing/landing-copy-l-samples';
-import { SAMPLE_CHAPTERS } from '@/lib/landing/sample-reports';
 import { SAMPLE_OVERVIEWS } from '@/lib/landing/sample-reports/overview';
 import { SIGNUP_CTA_HREF } from '@/lib/seo/content/shared';
 import { cn } from '@/lib/utils';
 import demo from './demo-l.module.css';
+import { FullReportL } from './FullReportL';
 import { OverviewL } from './OverviewL';
-import styles from './l.module.css';
 import own from './samples-l.module.css';
 
 type Report = (typeof L_REPORTS)[number];
@@ -28,19 +24,16 @@ const bySlug = new Map(L_REPORTS.map(report => [report.slug, report]));
  * 怎么样去加强这种重视感"): "找到和你情况一样的人". Under the title a strip of figures; then two columns: on the left the
  * 14 people in four groups (on a phone, one row of chips that scrolls sideways), on the right the chosen person's
  * report overview itself (OverviewL, the dialog's), read in place without opening anything: the coach's change of
- * direction first when there was one, then the overview, then "看完整报告" (the dialog: cover, overview and the whole
- * report) and the way to get one's own. Every person is an example and says so (「示例」, 「方向已调整」).
+ * direction first when there was one, then the overview, then "查看完整报告" (round nine, V1: the whole report alone in
+ * a dialog of its own, FullReportL) and the way to get one's own. Every person is an example and says so (「示例」,
+ * 「方向已调整」).
  */
 export function SamplesL() {
   const [slug, setSlug] = useState<string>(COPY.defaultSlug);
-  const [open, setOpen] = useState<Report | null>(null);
-  const dialog = useRef<HTMLDialogElement>(null);
   const viewer = useRef<HTMLDivElement>(null);
   const chosen = bySlug.get(slug) ?? L_REPORTS[0];
   const overview = SAMPLE_OVERVIEWS[chosen.slug];
-  const show = (report: Report) => { setOpen(report); dialog.current?.showModal(); };
   const pick = (next: string) => { setSlug(next); if (viewer.current) viewer.current.scrollTop = 0; };
-  const data = open ? SAMPLE_CHAPTERS[open.slug] : null;
   return (
     <section aria-labelledby="samples-title" className={k.section} data-zone="takeover" data-region="样例报告">
       <div className={k.wrap}>
@@ -81,35 +74,12 @@ export function SamplesL() {
             ) : null}
             {overview ? <OverviewL key={chosen.slug} data={overview} /> : null}
             <div className={own.actions}>
-              <button type="button" className={own.fullButton} onClick={() => show(chosen)}>
-                <FileText size={16} aria-hidden="true" />{COPY.fullReport}
-              </button>
+              <FullReportL key={chosen.slug} title={`${chosen.who} · ${chosen.platform}`} slug={chosen.slug} />
               <Link href={SIGNUP_CTA_HREF} className={page.pill}>{COPY.mine}</Link>
             </div>
           </div>
         </div>
       </div>
-
-      <dialog ref={dialog} className={styles.reportDialog} aria-label={open ? `${open.who} · ${open.platform}` : COPY.title}
-        onClose={() => setOpen(null)} onClick={event => { if (event.target === event.currentTarget) dialog.current?.close(); }}>
-        {open && data ? (
-          <div className={styles.dialogBody}>
-            <button type="button" className={styles.dialogClose} onClick={() => dialog.current?.close()} aria-label={COPY.close}>
-              <X size={18} aria-hidden="true" />
-            </button>
-            <header className={samples.cover}>
-              <FileText size={22} aria-hidden="true" />
-              <div className={own.coverText}>
-                <p className={samples.coverLabel}>{J_SAMPLES.coverLabel}<span className={own.sampleTag}>{COPY.sample}</span></p>
-                <h3 className={k.coverTitle}>{open.who} · {open.platform}</h3>
-                <p className={samples.size}>{J_SAMPLES.size}</p>
-              </div>
-            </header>
-            {SAMPLE_OVERVIEWS[open.slug] ? <OverviewL data={SAMPLE_OVERVIEWS[open.slug]} /> : null}
-            <FullReport key={open.slug} slug={open.slug} />
-          </div>
-        ) : null}
-      </dialog>
     </section>
   );
 }

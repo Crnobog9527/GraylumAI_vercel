@@ -21,6 +21,9 @@ export const L_SAMPLES_REDO = {
   fullReport: '看完整报告',
   /** Step one's report, round seven (T4): the whole report under the overview, with its chapter list. */
   reportBody: '完整报告',
+  /** Round nine (V1): under every overview, the one way into the whole report (a dialog of its own). */
+  fullReportOpen: '查看完整报告',
+  loading: '正在加载完整报告…',
   close: '关闭',
   /**
    * Round eight (U6, Owner 2026-10-18: "用户案例和用户成果对用户来说特别重要……要加强这种重视感"): a strip of figures under

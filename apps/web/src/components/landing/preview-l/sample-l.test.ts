@@ -153,7 +153,7 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     const html = render();
     expect(L_REPORTS.length).toBe(14);
     const start = html.indexOf('id="samples-title"');
-    const region = html.slice(start, html.indexOf('</dialog>', start));
+    const region = html.slice(start, html.indexOf('<h2', start + 10));
     expect(region).toContain(L_SAMPLES_REDO.title);
     for (const stat of L_SAMPLES_REDO.stats(L_REPORTS.length)) expect(region).toContain(escape(stat));
     for (const word of ['用户案例', '人物为虚构', '教练说真话', '由产品实际生成']) expect(region).not.toContain(word);
@@ -170,7 +170,9 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     expect(region).toContain(`data-slug="${L_SAMPLES_REDO.defaultSlug}" aria-pressed="true"`);
     expect(region).toContain(`>${L_SAMPLES_REDO.sample}<`);
     expect(region).toContain(escape(SAMPLE_OVERVIEWS[L_SAMPLES_REDO.defaultSlug].positioning));
-    expect(region).toContain(`>${L_SAMPLES_REDO.fullReport}</button>`);
+    // Round nine (V1): the whole report is behind one button, in a dialog of its own (not under the overview).
+    expect(region).toContain(`${L_SAMPLES_REDO.fullReportOpen}</button>`);
+    expect(region).toContain(`aria-label="${escape(L_REPORTS.find(report => report.slug === L_SAMPLES_REDO.defaultSlug)!.who)}`);
     expect(region).toContain(escape(L_SAMPLES_REDO.mine));
     expect(html).toContain('<dialog');
     expect(render(ALL_ON, false)).not.toContain('id="samples-title"');
