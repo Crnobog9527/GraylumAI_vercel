@@ -8,11 +8,14 @@ import { boundedFinancialDatabase, erasureFinancialBudget } from '../accountEras
 import type { RuntimeBudget } from './budget';
 import { stagingTransport } from './stagingTransport';
 import type { StagingPolicy } from './stagingPolicy';
+import { autoCompensateStaleRounds, type StaleRoundAutoClose } from './staleChargedRounds';
 
 export const AUTOMATIC_RECOVERY_LOOKUP_MS = 2_000;
 export const ADMISSION_RECOVERY_MS = 8_000;
 export const CRON_RECOVERY_MS = 55_000;
 export const RECOVERY_BATCH_SIZE = 20;
+/** Time reserved for one stale-round refund (one report read or one compensation transaction). */
+export const STALE_ROUND_STEP_MS = 2_000;
 const inventorySchema = z.array(z.object({
   actorId: z.string().uuid(), executionId: z.string().uuid(), runId: z.string().uuid(),
   recoveryPolicy: z.unknown(), finishAllowed: z.boolean(), userStop: z.boolean().optional(),
@@ -72,10 +75,20 @@ export async function recoverPendingFinancials(input: {
 }
 
 /** Frozen provider/account/model bindings authorize GET recovery in either
- * deployment. No current test-window setting grants new generation authority. */
-export async function runAutomaticFinancialRecovery(admin: SupabaseClient, actorId?: string) {
+ * deployment. No current test-window setting grants new generation authority.
+ * The scheduled job (no actor) then closes rounds still open and quiet after 24 hours and refunds
+ * them by the daily reconciliation's rule (Owner 2026-10-12 supplement); a user's admission never does.
+ * Recovery runs first: a call it settles counts as activity, so that round waits another 24 hours. */
+export async function runAutomaticFinancialRecovery(admin: SupabaseClient, actorId?: string):
+  Promise<AutomaticRecoverySummary & { staleRounds?: StaleRoundAutoClose }> {
   const budget = erasureFinancialBudget(actorId ? ADMISSION_RECOVERY_MS : CRON_RECOVERY_MS);
-  return recoverPendingFinancials({ database: boundedFinancialDatabase(admin, budget), budget, actorId,
+  const database = boundedFinancialDatabase(admin, budget);
+  const summary = await recoverPendingFinancials({ database, budget, actorId,
     adapter: policy => stagingTransport(admin, policy as StagingPolicy, budget),
   });
+  if (actorId) return summary;
+  const canStart = () => { try { budget.assertCanStart(STALE_ROUND_STEP_MS); return true; } catch { return false; } };
+  // No time left even to read the report: not knowing is a failure, so a recovery backlog cannot starve refunds silently.
+  return { ...summary, staleRounds: canStart() ? await autoCompensateStaleRounds(database, { canStart })
+    : { found: 0, compensated: 0, alreadyCompensated: 0, skipped: 0, failed: 1, credits: 0, manualReview: 0, deferred: 0 } };
 }
