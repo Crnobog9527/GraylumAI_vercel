@@ -208,16 +208,19 @@ type ReconcileTarget = { connectionId: string; providerAccountId: string };
  * nothing could be learned (not found yet, or the provider could not be read); the caller backs off.
  */
 async function checkWithProvider(db: Rpc, deps: ClientDeps, jobId: string, providerPostId: string | null,
-  targets: ReconcileTarget[]): Promise<{ learned: boolean; code: string; job: PublishJob | null }> {
+  targets: ReconcileTarget[]): Promise<{ learned: boolean; busy: boolean; code: string; job: PublishJob | null }> {
   let postId = providerPostId;
   if (!postId) {
     const found = await findPostByExternalId(deps, jobId);
-    if (found.kind !== 'ok') return { learned: false, code: 'PUBLISH_MONITOR_CHECK_FAILED', job: null };
-    if (!found.value) return { learned: false, code: 'PUBLISH_MONITOR_NOT_FOUND_YET', job: null };
+    // The shared limiter refused: nothing was asked, so this is no evidence about the post at all.
+    if (found.kind === 'rate_limited') return { learned: false, busy: true, code: 'PUBLISH_MONITOR_PROVIDER_BUSY', job: null };
+    if (found.kind !== 'ok') return { learned: false, busy: false, code: 'PUBLISH_MONITOR_CHECK_FAILED', job: null };
+    if (!found.value) return { learned: false, busy: false, code: 'PUBLISH_MONITOR_NOT_FOUND_YET', job: null };
     postId = found.value;
   }
   const rows = await listPostResults(deps, postId);
-  if (rows.kind !== 'ok') return { learned: false, code: 'PUBLISH_MONITOR_CHECK_FAILED', job: null };
+  if (rows.kind === 'rate_limited') return { learned: false, busy: true, code: 'PUBLISH_MONITOR_PROVIDER_BUSY', job: null };
+  if (rows.kind !== 'ok') return { learned: false, busy: false, code: 'PUBLISH_MONITOR_CHECK_FAILED', job: null };
   const results: Record<string, { status: 'published' | 'failed'; url?: string }> = {};
   for (const target of targets) {
     const row = rows.value.find(result => result.socialAccountId === target.providerAccountId);
@@ -227,7 +230,7 @@ async function checkWithProvider(db: Rpc, deps: ClientDeps, jobId: string, provi
   const job = await rpc(db, 'publish_monitor_publish_record', { p_job: jobId, p_provider_post_id: postId, p_results: results },
     jobView);
   const final = job.state === 'completed' || job.state === 'failed';
-  return { learned: final, code: 'PUBLISH_MONITOR_RESULT_PENDING', job };
+  return { learned: final, busy: false, code: 'PUBLISH_MONITOR_RESULT_PENDING', job };
 }
 
 const userCheck = z.object({ jobId: uuid, providerPostId: providerId.nullable(),
@@ -239,6 +242,7 @@ export async function refreshPublishJob(db: Rpc, deps: ClientDeps, profileId: st
   if (job.state !== 'dispatching' && job.state !== 'unknown') return job;
   const open = await rpc(db, 'publish_monitor_publish_check_info', { a: profileId, p_job: jobId }, userCheck);
   const checked = await checkWithProvider(db, deps, jobId, open.providerPostId, open.targets);
+  if (checked.busy) throw new PublishError('PUBLISH_MONITOR_PROVIDER_BUSY', 60);
   return checked.job ?? job;
 }
 
@@ -249,7 +253,8 @@ export async function readPublishJob(db: Rpc, profileId: string, jobId: string):
 const reconcileItem = z.object({ jobId: uuid, lease: uuid, action: z.enum(['release', 'check']), externalId: uuid,
   providerPostId: providerId.nullable(), targets: z.array(z.object({ connectionId: uuid, providerAccountId: providerId })
     .strict()) }).strict();
-export type ReconcileReport = { processed: number; settled: number; deferred: number; manual: number };
+export type ReconcileReport = { processed: number; settled: number; deferred: number; manual: number;
+  stopped?: 'deadline' | 'provider_busy' };
 
 /**
  * Daily job step: release expired claims and reconcile every dispatched job that has no final result yet.
@@ -265,9 +270,17 @@ export async function reconcilePublishes(db: Rpc, deps: ClientDeps, until: numbe
   for (let batch = 0; batch < MAX_BATCHES && now() < until; batch += 1) {
     const items = await rpc(db, 'publish_monitor_publish_reconcile_claim', { p_limit: BATCH, p_lease_seconds: 300 },
       z.array(reconcileItem));
-    for (const item of items) {
-      if (now() >= until) return report;
-      await reconcileOne(db, deps, item, report);
+    for (const [index, item] of items.entries()) {
+      // Out of time, or the shared provider budget is spent: hand the untried jobs back unchanged (no backoff step,
+      // no move toward manual review) and stop; the next run or the user's refresh picks them up.
+      const stop = now() >= until || (await reconcileOne(db, deps, item, report)) === 'busy';
+      if (stop) {
+        for (const rest of items.slice(index)) {
+          await rpc(db, 'publish_monitor_publish_unlease', { p_job: rest.jobId, p_lease: rest.lease }, z.unknown());
+        }
+        report.stopped = now() >= until ? 'deadline' : 'provider_busy';
+        return report;
+      }
     }
     if (items.length < BATCH) break;
   }
@@ -277,18 +290,21 @@ export async function reconcilePublishes(db: Rpc, deps: ClientDeps, until: numbe
 const BATCH = 50;
 const MAX_BATCHES = 40;
 
-async function reconcileOne(db: Rpc, deps: ClientDeps, item: z.infer<typeof reconcileItem>, report: ReconcileReport) {
-  report.processed += 1;
+async function reconcileOne(db: Rpc, deps: ClientDeps, item: z.infer<typeof reconcileItem>,
+  report: ReconcileReport): Promise<'done' | 'busy'> {
   if (item.action === 'release') {
+    report.processed += 1;
     await rpc(db, 'publish_monitor_publish_release', { p_job: item.jobId, p_code: 'PUBLISH_MONITOR_CLAIM_EXPIRED' }, jobView);
     report.settled += 1;
-    return;
+    return 'done';
   }
   const checked = await checkWithProvider(db, deps, item.jobId, item.providerPostId, item.targets);
+  if (checked.busy) return 'busy';
+  report.processed += 1;
   if (checked.learned) {
     report.settled += 1;
     await rpc(db, 'publish_monitor_publish_unlease', { p_job: item.jobId, p_lease: item.lease }, z.unknown());
-    return;
+    return 'done';
   }
   const later = await rpc(db, 'publish_monitor_publish_check_later', { p_job: item.jobId, p_lease: item.lease,
     p_code: checked.code }, jobView);
@@ -296,6 +312,7 @@ async function reconcileOne(db: Rpc, deps: ClientDeps, item: z.infer<typeof reco
     report.manual += 1;
     logger.warn('api', 'publish_monitor_publish_manual_review', { jobId: item.jobId });
   } else report.deferred += 1;
+  return 'done';
 }
 
 export const MAX_MEDIA = MAX_MEDIA_ITEMS;

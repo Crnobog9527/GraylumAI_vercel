@@ -44,7 +44,9 @@ export async function uploadPublishFiles(files: File[], requestSlots: (count: nu
     if (!MIME.test(file.type.toLowerCase())) throw new MediaUploadError('MEDIA_TYPE_UNSUPPORTED');
     if (file.size < 1 || file.size > MAX_MEDIA_BYTES) throw new MediaUploadError('MEDIA_TOO_LARGE');
   }
-  const digests = await Promise.all(files.map(mediaDigest));
+  // One file at a time: only one sample (at most 8 MB) is in memory, however many files the post has.
+  const digests: string[] = [];
+  for (const file of files) digests.push(await mediaDigest(file));
   const slots = await requestSlots(files.length);
   if (slots.length !== files.length) throw new MediaUploadError('MEDIA_UPLOAD_FAILED');
   const uploaded: UploadedMedia[] = [];

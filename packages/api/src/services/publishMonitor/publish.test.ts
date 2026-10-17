@@ -276,6 +276,17 @@ describe('reconcile publishes (simulated provider)', () => {
     expect(timed.names().filter(n => n === 'publish_monitor_publish_reconcile_claim')).toHaveLength(1);
   });
 
+  it('stops when the shared provider budget is spent: untried jobs are handed back without a backoff step', async () => {
+    const second = { ...item('check'), jobId: CX, lease: CY };
+    const d = database({ publish_monitor_publish_reconcile_claim: [[item('check'), second]],
+      publish_monitor_publish_unlease: [null, null] });
+    const report = await reconcilePublishes(d.db, provider([], [false]).deps, Date.now() + 60_000);
+    expect(report).toEqual({ processed: 0, settled: 0, deferred: 0, manual: 0, stopped: 'provider_busy' });
+    expect(d.names()).not.toContain('publish_monitor_publish_check_later');
+    expect(d.calls.slice(1)).toEqual([['publish_monitor_publish_unlease', { p_job: JOB, p_lease: LEASE }],
+      ['publish_monitor_publish_unlease', { p_job: CX, p_lease: CY }]]);
+  });
+
   it('does not start work after the deadline', async () => {
     const d = database({});
     expect(await reconcilePublishes(d.db, provider([]).deps, Date.now() - 1)).toEqual({ processed: 0, settled: 0,
