@@ -316,8 +316,7 @@ export const settingsRouter = router({
   updateSystemSettings: adminProcedure
     .input(systemSettingInputSchema)
     .mutation(async ({ ctx, input }) => {
-      await assertSettingsWriter(ctx.supabase,ctx.profileId);
-      validateReportPrice([input]);
+      await assertSettingsWriter(ctx.supabase,ctx.profileId); validateReportPrice([input]);
       await validateRoutingSelections(ctx.supabase, [input]);
       await validateCompareLimit(ctx.supabase, [input]);
       await validateSummarySelection(ctx.supabase,Array.isArray(input)?input:[input]);
@@ -335,8 +334,7 @@ export const settingsRouter = router({
   updateSystemSettingsBulk: adminProcedure
     .input(z.array(systemSettingInputSchema).min(1))
     .mutation(async ({ ctx, input }) => {
-      await assertSettingsWriter(ctx.supabase,ctx.profileId);
-      validateReportPrice(input);
+      await assertSettingsWriter(ctx.supabase,ctx.profileId); validateReportPrice(input);
       await validateRoutingSelections(ctx.supabase, input);
       await validateCompareLimit(ctx.supabase, input);
       await validateSummarySelection(ctx.supabase,Array.isArray(input)?input:[input]);
