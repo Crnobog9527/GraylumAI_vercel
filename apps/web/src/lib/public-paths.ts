@@ -21,6 +21,8 @@ export const PUBLIC_PATHS = [
   '/zh-tw',
   // Product feature pages linked from the public header and footer (PUBLIC-SITE): /features and /features/<name>.
   '/features',
+  // The tutorial blog (SEO_GEO_SPEC 14): /blog and /blog/<article>, linked from the public header as 教程.
+  '/blog',
   '/auth',
   '/landing',
   '/api',

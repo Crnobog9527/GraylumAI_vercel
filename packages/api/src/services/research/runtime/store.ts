@@ -25,7 +25,8 @@ export interface DiscoveryRecord {
   cursor: Record<string, unknown>; state: 'running' | 'completed';
 }
 export type FetchState = 'prepared' | 'in_progress' | 'succeeded' | 'unknown' | 'failed' | 'failed_charged';
-export type FetchClaim = { claimed: true; fetchId: string; attempt: string }
+/** resumed: this answer's own attempt, left in progress by a balance pause (BILL-PAYG); its finished subcalls are reused. */
+export type FetchClaim = { claimed: true; fetchId: string; attempt: string; resumed?: true }
   | { claimed: false; fetchId: string; state: FetchState; evidence: Record<string, unknown> | null };
 export interface RuntimePlan {
   executionId: string; discoveryId: string | null; budgetUnits: number; cancelled: boolean;
@@ -204,6 +205,18 @@ export function databaseRuntimeResearchStore(deps: {
     fetchClaim: (platform: SocialPlatform, account: string, refreshId?: string) => rpc<FetchClaim>('research_account_fetch_claim', {
       a, s, e, p_platform: platform, p_account: account, p_refresh: refreshId ?? null,
     }),
+    /**
+     * This answer's own in-progress attempt (left by a balance pause), or null (0279). Before 0279 is applied the
+     * function does not exist yet: the attempt then stays in progress, as before, instead of failing the turn.
+     */
+    async fetchResume(platform: SocialPlatform, account: string, refreshId?: string): Promise<{ fetchId: string; attempt: string } | null> {
+      const { data, error } = await admin.rpc('research_account_fetch_resume', {
+        a, s, e, p_platform: platform, p_account: account, p_refresh: refreshId ?? null,
+      });
+      if (error && (error as { code?: string }).code === 'PGRST202') return null;
+      check(error);
+      return data as { fetchId: string; attempt: string } | null;
+    },
     fetchDispatch: (fetchId: string, attempt: string) => rpc<boolean>('research_account_fetch_dispatch', {
       a, p_fetch: fetchId, p_attempt: attempt,
     }),

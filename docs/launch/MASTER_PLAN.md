@@ -2463,10 +2463,13 @@ node scripts/plan-progress.mjs --ref origin/staging
 | 0273 | SKILL-I18N-HOOK |
 | 0274 | [#1033](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1033) PUBLISH-MONITOR PR-5 |
 | 0275 | [#1038](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1038) PAY-DISPUTE-GUARD D0（取代已关闭的 #1025） |
-| 0276 | [#1036](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1036) CONTENT-CONVERSATION-DRIVEN A2 |
-| 0277 | [#1041](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1041) ADMIN-SECRETS OR-1 |
-| 0278 | LIB-DOCS LIB-2d |
-| 0279 | [#1022](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1022) LIB-DOCS LIB-4b |
+| 0276 | [#1036](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1036) CONTENT-CONVERSATION-DRIVEN A2（已上库合并） |
+| 0277 | [#1022](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1022) LIB-DOCS LIB-4b（合集 [#1116](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1116)） |
+| 0278 | [#1060](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1060) EXPERT-CONSULT（合集 #1116） |
+| 0279 | [#1062](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1062) 研究工具余额不足暂停（合集 #1116） |
+| 0280 | [#1076](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1076) ANALYTICS 付款上报（合集 #1116） |
+| 0281 | [#1077](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1077) ANALYTICS 首次来源（合集 #1116） |
+| 0282 | [#1083](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1083) RT-5 对标表来源编号（合集 #1116） |
 
 ### 7.2 依赖简图
 
@@ -2543,7 +2546,7 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 - `V3-OPC-UI` 的 A / B / C / FINISH：改称 UI-A / UI-B / UI-C / UI-FINISH，UI-C 改为复用 LIB-DOCS。
 - `V3-GOLD`：改名 FUSION，拆成 FUSION-REVIEW 和 FUSION-COMPARE。
 - 新增：AGENT-CORE（含 AC-0）、AGENT-CORE-UI（从 AGENT-CORE 拆出的纯前端部分）、CI-TRUST（含 CI-TRUST-1）、DEBT-QUICK、COST-REPORT、MODEL-REASONING、UI-MODEL（从原 UI-A 拆出的输入框模型位置，上线只显示 Auto）、RUNTIME-PROD、ENTITLEMENTS、SEC-RATELIMIT、PII-REGEX（接手 PR #333）、RESEARCH-0、RESEARCH-TOOLS、DATA-ERASURE、LIB-DOCS、VOICE、LEARN-1、LEARN-2；2026-09-30 新增 MENTOR-BUDGET、REPORT-GEN、FORGOT-PASSWORD；2026-10-01 新增 BILL-PAYG（承接 RUNTIME-PROD ④）、BILL-UNIT（#565，含按模型倍数）、RATE-LIMIT、STG-MENTOR-MODEL（#561）、INVITE-ABUSE；2026-10-01—02 新增 PROMPT-CACHE（上线必做，第 35 项）、STAGING-HOST-CLEANUP（第 37 项）；2026-10-02—03 新增 MODEL-PRICING-SYNC（第 40 项）、MENTOR-PROMPT-V2、RUNTIME-VIEW-PERF、CONVERSATION-DRIVEN-CAPTURE（第 48 项）、PROMPT-CACHE-HISTORY（第 43 项）、CHAT-NATIVE-OUTPUT（第 44 项）、CONTENT-CONVERSATION-DRIVEN（第 45 项）；STG-MENTOR-MODEL 已关闭（第 38 项）；2026-10-03 新增 PAYWALL（第 50 项）；2026-10-04 新增 EXPERT-CONSULT（第 51 项）、PUBLISH-MONITOR、CHARGEBACK；2026-10-05 起"资料库扩展"的规范任务名为 LIB-EXT。
-- 迁移编号在实际实施时由总控分配，本文不预占；已分配的 0268–0279 见第 7.1 节末尾。
+- 迁移编号在实际实施时由总控分配，本文不预占；已分配的 0268–0282 见第 7.1 节末尾。
 
 ### 7.6 Owner 需要提前启动的事项
 

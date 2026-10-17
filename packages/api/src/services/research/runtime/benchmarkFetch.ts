@@ -6,7 +6,23 @@ import { toolEnvelope } from '../tools/envelope';
 import type { ResearchToolArgs } from '../tools/schemas';
 import { BENCHMARK_ROUTE_KINDS } from '../vendors/config';
 import type { ResearchItem, SocialKind } from '../vendors/types';
+import { ResearchPause, type SubcallOutcome } from './subcall';
 import { executeResearchCall, socialRequest, stableResearchId, type ResearchToolContext, type ToolAllowance } from './toolContext';
+
+/** A subcall this attempt already finished before a balance pause: its saved result, never a second claim or request. */
+async function savedSubcall(ctx: ResearchToolContext, operationId: string): Promise<SubcallOutcome | null> {
+  const prior = await ctx.store.readOperation(operationId);
+  if (!prior || prior.state === 'prepared') return null;
+  const saved = prior.result ?? {};
+  const outcome = prior.state === 'succeeded' && (saved.outcome === 'ok' || saved.outcome === 'partial') ? saved.outcome
+    : prior.state === 'succeeded' || prior.state === 'failed' ? 'failed' : prior.state === 'cancelled' ? 'not_sent' : 'unknown';
+  // callId is not read for a saved subcall; its BILL2 row was settled by the run that sent it.
+  return { sent: true, operationId, callId: operationId, result: { vendor: 'tikhub', route: String(saved.route ?? ''), outcome,
+    reason: typeof saved.reason === 'string' ? saved.reason : null, httpStatus: null,
+    supplierMayCharge: outcome !== 'not_sent' && saved.supplierMayCharge !== false,
+    usage: { unit: 'call', units: null }, items: Array.isArray(saved.items) ? saved.items as ResearchItem[] : [],
+    truncated: saved.truncated === true, fetchedAt: String(saved.fetchedAt ?? '') } };
+}
 
 export async function benchmarkFetch(ctx: ResearchToolContext, args: ResearchToolArgs<'benchmark_fetch'>,
   budget: ToolAllowance): Promise<string> {
@@ -24,8 +40,13 @@ export async function benchmarkFetch(ctx: ResearchToolContext, args: ResearchToo
       partial = true;
       continue;
     }
-    const claim = await ctx.store.fetchClaim(account.platform, account.account,
-      args.source.kind === 'refresh' ? args.source.refreshId : undefined);
+    const refreshId = args.source.kind === 'refresh' ? args.source.refreshId : undefined;
+    let claim = await ctx.store.fetchClaim(account.platform, account.account, refreshId);
+    // A balance pause left this answer's own attempt in progress: continue it after the top-up (BILL-PAYG, 0279).
+    if (!claim.claimed && claim.state === 'in_progress') {
+      const own = await ctx.store.fetchResume(account.platform, account.account, refreshId);
+      if (own) claim = { claimed: true, ...own, resumed: true };
+    }
     if (!claim.claimed) {
       if (claim.evidence) rows.push({ fields: { platform: account.platform, account: account.account,
         evidence: JSON.stringify(claim.evidence) }, missing: [] });
@@ -39,12 +60,14 @@ export async function benchmarkFetch(ctx: ResearchToolContext, args: ResearchToo
       stopBudget = true;
       break;
     }
-    let dispatched = false;
+    // A resumed attempt was marked sent before its balance pause; only this run's own dispatch may close it on an error.
+    let dispatched = claim.resumed === true;
+    let dispatchedHere = false;
     let supplierStarted = false;
     const fetchContext = { ...ctx, subcall: { ...ctx.subcall,
       beforeSend: async () => {
         if (ctx.subcall.beforeSend && !await ctx.subcall.beforeSend()) return false;
-        if (!dispatched) dispatched = await ctx.store.fetchDispatch(claim.fetchId, claim.attempt);
+        if (!dispatched) dispatched = dispatchedHere = await ctx.store.fetchDispatch(claim.fetchId, claim.attempt);
         return dispatched;
       },
       onSupplierDispatch: () => { ctx.subcall.onSupplierDispatch?.(); supplierStarted = true; },
@@ -59,8 +82,9 @@ export async function benchmarkFetch(ctx: ResearchToolContext, args: ResearchToo
         const request = socialRequest(ctx, account.platform, kind,
           { account: account.account, ...(typeof postId === 'string' ? { postId } : {}) });
         if (!request) { failed = true; break; }
-        const outcome = await executeResearchCall(fetchContext, budget, request,
-          stableResearchId(claim.fetchId, claim.attempt, kind), 'benchmark_fetch', args);
+        const operationId = stableResearchId(claim.fetchId, claim.attempt, kind);
+        const outcome = (claim.resumed ? await savedSubcall(ctx, operationId) : null)
+          ?? await executeResearchCall(fetchContext, budget, request, operationId, 'benchmark_fetch', args);
         if (!outcome.sent) {
           failed = true;
           stopReason = outcome.stop;
@@ -96,8 +120,11 @@ export async function benchmarkFetch(ctx: ResearchToolContext, args: ResearchToo
       rows.push({ fields: { ...account, evidence: JSON.stringify(evidence) }, missing: metrics.missing });
     } catch (error) {
       // A failure after dispatch can conceal a supplier response. Never make this attempt retryable.
-      // Keep an unsent prepared attempt recoverable (including its original refresh grant).
-      if (dispatched) await ctx.store.fetchFinish(claim.fetchId, claim.attempt, supplierStarted ? 'unknown' : 'failed', null);
+      // Keep an unsent prepared attempt recoverable (including its original refresh grant). A balance pause keeps the
+      // attempt in progress: the resumed answer continues it, reusing what it already paid for (BILL-PAYG).
+      if (dispatchedHere && !(error instanceof ResearchPause)) {
+        await ctx.store.fetchFinish(claim.fetchId, claim.attempt, supplierStarted ? 'unknown' : 'failed', null);
+      }
       throw error;
     }
   }

@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { readNativeRuntimeView } from './nativeView';
 const actor = '10000000-0000-4000-8000-000000000001';
@@ -70,4 +70,32 @@ it('answers another actor\'s, missing or out-of-scope sessions with one indistin
  const db={rpc:vi.fn(async()=>({data:null,error:{code:'P0001',message:'RUNTIME_SCOPE_DENIED'}}))};
  await expect(readNativeRuntimeView(db as unknown as SupabaseClient,actor,session))
   .rejects.toMatchObject({code:'NOT_FOUND',message:'RUNTIME_SESSION_NOT_FOUND'});
+});
+
+describe('LIB-4b: unfinished rounds show no body once a referenced source is gone', () => {
+  const rows = [
+    { executionId: 'waiting', state: 'waiting_credits', contentAvailable: true, primaryBody: 'GONE_WAITING' },
+    { executionId: 'interrupted', state: 'interrupted', contentAvailable: true, primaryBody: 'KEPT_INTERRUPTED' },
+    { executionId: 'running', state: 'running', contentAvailable: true, primaryBody: 'GONE_RUNNING' },
+    { executionId: 'marked', state: 'cost_pending', unavailableReason: 'source_deleted', primaryBody: 'GONE_MARKED' },
+    { ...visible, executionId: 'done', body: 'KEPT_DONE' },
+    { executionId: 'stopped', state: 'cancelled', contentAvailable: true, body: 'KEPT_STOPPED' },
+    { executionId: 'empty', state: 'waiting_resume', contentAvailable: true, primaryBody: null },
+  ];
+  function source(gone: { data?: unknown; error?: unknown }) {
+    const rpc = vi.fn(async (name: string) => name === 'runtime_view'
+      ? { data: { sessionId: session, executions: structuredClone(rows) }, error: null } : { data: null, error: null, ...gone });
+    return { db: { rpc } as unknown as SupabaseClient, rpc };
+  }
+  it('asks once, read-only, about every unfinished round that shows a body and hides the gone ones', async () => {
+    const f = source({ data: ['waiting', 'running'] });
+    const text = JSON.stringify(await readNativeRuntimeView(f.db, actor, session));
+    expect(text).not.toMatch(/GONE_/);expect(text).toMatch(/KEPT_INTERRUPTED[\s\S]*KEPT_DONE[\s\S]*KEPT_STOPPED/);
+    expect(f.rpc.mock.calls).toEqual([['runtime_view', { p_actor_id: actor, p_session_id: session }],
+      ['runtime_library_sources_gone', { p_actor_id: actor, p_execution_ids: ['waiting', 'interrupted', 'running'] }]]);
+  });
+  it('fails closed for unfinished rounds when the check is unavailable, keeping finished answers', async () => {
+    const text = JSON.stringify(await readNativeRuntimeView(source({ error: { code: '57014' } }).db, actor, session));
+    expect(text).not.toMatch(/GONE_|KEPT_INTERRUPTED/);expect(text).toMatch(/KEPT_DONE[\s\S]*KEPT_STOPPED/);
+  });
 });
