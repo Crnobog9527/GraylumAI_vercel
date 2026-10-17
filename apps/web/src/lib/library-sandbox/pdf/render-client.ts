@@ -29,9 +29,11 @@ function validate(value: unknown, pages: number[]): PageImage[] {
 /**
  * Renders scanned PDF pages to JPEG images in the user's browser (LIB-2d), inside a sandbox without network
  * or WebAssembly, batch by batch. A page that cannot be rendered fails alone; a limit hit inside pdf.js stops
- * the batch early, and the missing pages are reported as failed.
+ * the batch early, and the missing pages are reported as failed. `onBatch` is awaited after each batch, before the
+ * next one renders, so a later batch failing never loses the pages already rendered.
  */
-export async function renderPdfPagesInBrowser(file: Blob, pages: number[], options: { signal?: AbortSignal } = {}): Promise<PageImage[]> {
+export async function renderPdfPagesInBrowser(file: Blob, pages: number[],
+  options: { signal?: AbortSignal; onBatch?: (batch: PageImage[]) => Promise<void> } = {}): Promise<PageImage[]> {
   if (!isLibraryScanRecognitionEnabled()) throw new SandboxError('FEATURE_DISABLED');
   if (file.size === 0) throw new SandboxError('INPUT_EMPTY');
   if (file.size > SANDBOX_LIMITS.maxInputBytes) throw new SandboxError('INPUT_TOO_LARGE');
@@ -43,7 +45,9 @@ export async function renderPdfPagesInBrowser(file: Blob, pages: number[], optio
     const value = await runSandboxedWorker({ workerSource: source, input: packRenderInput(new Uint8Array(pdf), batch),
       timeoutMs: LOAD_TIMEOUT_MS + batch.length * PDF_RENDER_LIMITS.pageTimeoutMs, signal: options.signal });
     const rendered = validate(value, batch);
-    results.push(...rendered, ...batch.slice(rendered.length).map((page): PageImage => ({ ok: false, page, code: 'PDF_INVALID' })));
+    const done = [...rendered, ...batch.slice(rendered.length).map((page): PageImage => ({ ok: false, page, code: 'PDF_INVALID' }))];
+    results.push(...done);
+    await options.onBatch?.(done);
   }
   return results;
 }
