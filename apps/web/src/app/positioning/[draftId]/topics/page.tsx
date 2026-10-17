@@ -591,7 +591,7 @@ export default function TopicWorkspacePage() {
 
           <footer className={composerStyles.zone}>
             <div className={composerStyles.wrap}>
-              <WorkComposer maxLength={8000} value={input} onChange={updateInput}
+              <WorkComposer references={false} maxLength={8000} value={input} onChange={updateInput}
                 sendDisabled={busy||Boolean(pending)||Boolean(view.data?.activeExecution)||free.busy}
                 onSend={skill=>{if(skill)void free.send(input,skill);else void send();}}/>
               <p className={composerStyles.note}>

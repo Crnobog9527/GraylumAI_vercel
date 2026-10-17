@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
 import { accountMetrics, type EvidenceItem } from '../metrics';
-import { aggregateAuthors, classifyAccount, qualifiedCount, selectCandidates, type ScoredAccount } from '../classify';
+import { aggregateAuthors, classifyAccount, qualifiedCount, qualifyFetchedAccount, selectCandidates, type ScoredAccount } from '../classify';
 
 const now = new Date('2026-10-14T00:00:00Z');
 const daysAgo = (d: number) => new Date(now.getTime() - d * 86400000).toISOString();
@@ -24,6 +24,14 @@ describe('benchmark metrics', () => {
     expect(m.lastPublishedAt.value).toBe(daysAgo(0));
     expect(m.wholeHistory).toBe(false);
     expect(m.missing).toEqual([]);
+  });
+
+  it('counts a repeated post once (the first entry), for the analyzed count and every median', () => {
+    const repeated = Array.from({ length: 20 }, (_, i) =>
+      item(`p#${i + 1}`, { id: `post${i % 3}`, publishedAt: daysAgo(1 + (i % 3)), views: i < 3 ? 100 : 999999 }));
+    const m = accountMetrics({ profile: profile(50_000), posts: repeated }, now);
+    expect(m.postsAnalyzed).toBe(3);
+    expect(m.medianViews).toEqual({ value: 100, refs: ['p#1', 'p#2', 'p#3'] });
   });
 
   it('keeps missing data missing instead of zero (e.g. Xiaohongshu has no views)', () => {
@@ -90,6 +98,19 @@ describe('benchmark classification', () => {
     accountMetrics({ profile: profile(followers), posts: lastDays === null ? posts(extra.count ?? 25, () => ({ views: 1 }))
       // 30 posts = a full page, so the fetched posts are not the whole history unless a test says so.
       : posts(extra.count ?? 30, i => ({ publishedAt: daysAgo(lastDays + i), views: extra.views ?? 100 })) }, now);
+
+  it('a fetched account needs 20 analyzed posts unless that is its whole history (Owner 2026-10-16, A)', () => {
+    const fetched = (count: number, complete = false) => {
+      const m = accountMetrics({ profile: profile(50_000), complete,
+        posts: posts(count, i => ({ publishedAt: daysAgo(1 + i), views: 100 })) }, now);
+      return qualifyFetchedAccount(m, classifyAccount(m, growth, now));
+    };
+    expect(fetched(19)).toEqual({ category: null, qualified: false, excluded: 'TOO_FEW_POSTS' });
+    expect(fetched(20)).toMatchObject({ qualified: true });
+    expect(fetched(5, true)).toMatchObject({ qualified: true });
+    const head = accountMetrics({ profile: profile(300_000), posts: posts(3, i => ({ publishedAt: daysAgo(1 + i), views: 1 })) }, now);
+    expect(qualifyFetchedAccount(head, classifyAccount(head, growth, now))).toEqual({ category: 'head_reference', qualified: false, excluded: null });
+  });
 
   it('applies the fixed product thresholds', () => {
     expect(classifyAccount(metrics(undefined, 1), growth, now)).toMatchObject({ qualified: false, excluded: 'FOLLOWERS_MISSING' });

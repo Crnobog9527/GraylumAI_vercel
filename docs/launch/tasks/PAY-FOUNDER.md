@@ -118,6 +118,13 @@
 
 如果 MP 窗口在 PR-3/4 里没能顺带做上面三项，由总控决定是补一个 MP 窗口的小 PR，还是等 MP 全部完成后由本任务接手（届时 MP 窗口已停止写入）。
 
+**PR-F1 实施时的细化（2026-10-17，不改变上面的规则）**：
+- MP 第一项已由 0238 完成（`pay_stripe_mp_record_renewal_failure` 写、续费成功清空 `founder_failed_at`），第二、三项由 0238/0247/0253 完成（续费写 `founder_renewal` 订单，退款把订单标成 `refunded` / `partially_refunded`）。
+- 银行卡续费结果还没到（到期后 Stripe 还在扣款、也没有失败记录、用户没关续费）时，同样按 7 天宽限算，避免到期那几分钟被误判成"已结束"。
+- 银行卡续费如果在 7 天宽限过后才扣成功（Stripe 自动重试），创始身份仍然算已结束（"`ended` 不回到 `active`"）；这笔钱怎么处理见 PR 的"发现的问题"。
+- 拒付冻结：本 PR 只留一个固定返回"没冻结"的检查点 `pay_founder_order_frozen`，由 PAY-DISPUTE-GUARD PR-D1 换成真实判断；冻结中的会员不能新提交展示卡。
+- 社群入口存在 `system_settings` 的 `founder_community_entry`（链接 + 说明文字），只给 `active` / `grace` 的会员看。
+
 ## 6. 验收（Stripe 测试模式 + 本机数据库测试）
 
 - **正常**：分别用 MP 测试卡、`card_cn` 测试卡、支付宝测试付款买创始年付 → `pay_founder_status=active`、个人中心有徽章；
