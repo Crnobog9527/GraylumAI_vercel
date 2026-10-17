@@ -10,7 +10,7 @@ import type {RuntimeProgress} from './progress';
 import type {AgentTurnOutcome} from '../../shared/agentTurn';
 import type {RuntimeBudget} from './budget';
 import {loadStagingPolicy,loadStagingRecoveryPolicy} from './stagingPolicy';
-import {realRuntimeEnabled,realRuntimeEnvironment} from './productionEnvironment';
+import {realRuntimeClosed,realRuntimeEnvironment} from './productionEnvironment';
 import {StagingAccessError,stagingProcedureError,stagingRpcFailure} from './stagingErrors';
 import {stagingTransport} from './stagingTransport';
 import {retainedOutputReason} from './view';
@@ -96,7 +96,9 @@ export async function executeOriginalExecution(host:OriginalExecutionHost,execut
    return outcome(await run(localFixtureAdapter(host.maintenanceEndpoint),()=>runtimeExecutor({
     ...base,endpoint:host.maintenanceEndpoint,activateSkill,
     callGate:replayOnly?denyNewCalls:newWorkGate(host.admin,'local').calls}).execute(executionId,publicProgress,resume)));
-  try{await loadStagingPolicy(host.admin,host.actorId,process.env);}catch{
+  let policyFailure:unknown;
+  try{await loadStagingPolicy(host.admin,host.actorId,process.env);}catch(cause){
+   policyFailure=cause;
    const closed=await closeWaiting();if(closed)return closed;
    const observed=await host.admin.rpc('runtime_execution',{
     p_actor_id:host.actorId,p_execution_id:executionId,p_action:'read',
@@ -121,7 +123,7 @@ export async function executeOriginalExecution(host:OriginalExecutionHost,execut
    }
    // This branch never constructs/runs an SDK request. It only looks up the
    // persisted original provider ID and finishes existing financial state.
-   const runtimeDisabled=!realRuntimeEnabled(process.env);
+   const runtimeDisabled=realRuntimeClosed(process.env,policyFailure);
    if(runtimeDisabled){
     // An explicit host stop also closes this original execution. A failed or
     // lost cancellation response is inspected by financial recovery below;

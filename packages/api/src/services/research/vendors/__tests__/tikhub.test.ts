@@ -29,7 +29,8 @@ describe('TikHub routes', () => {
   it('refuses unsupported pairs and bad input before any network call', async () => {
     const calls: RecordedCall[] = [];
     const fetchImpl = jsonFetch(200, {}, calls);
-    expect(buildTikhubRequest({ platform: 'douyin', kind: 'account_profile', account: 'x' })).toEqual({ reason: 'ROUTE_NOT_SUPPORTED' });
+    expect(buildTikhubRequest({ platform: 'douyin', kind: 'post_detail', postId: 'x' })).toEqual({ reason: 'ROUTE_NOT_SUPPORTED' });
+    expect(buildTikhubRequest({ platform: 'douyin', kind: 'account_profile', account: 'x' })).toEqual({ reason: 'INVALID_ACCOUNT' });
     expect(buildTikhubRequest({ platform: 'tiktok', kind: 'keyword_posts', keyword: '  ' })).toEqual({ reason: 'INVALID_KEYWORD' });
     expect(buildTikhubRequest({ platform: 'tiktok', kind: 'keyword_posts', keyword: '一'.repeat(41) })).toEqual({ reason: 'INVALID_KEYWORD' });
     expect(buildTikhubRequest({ platform: 'weibo', kind: 'account_posts', account: 'abc' })).toEqual({ reason: 'INVALID_ACCOUNT' });
@@ -44,7 +45,7 @@ describe('TikHub routes', () => {
       expect(buildTikhubRequest({ platform: 'instagram', kind: 'account_posts', account: bad })).toEqual({ reason: 'INVALID_ACCOUNT' });
     }
     expect('request' in buildTikhubRequest({ platform: 'youtube', kind: 'account_profile', account: 'UCLA_DiR1FfKNvjuUpBHmylQ' })).toBe(true);
-    const result = await callTikhub({ platform: 'douyin', kind: 'account_posts', account: '123' }, deps(fetchImpl));
+    const result = await callTikhub({ platform: 'weibo', kind: 'keyword_posts', keyword: 'a' }, deps(fetchImpl));
     expect(result).toMatchObject({ outcome: 'not_sent', reason: 'ROUTE_NOT_SUPPORTED', supplierMayCharge: false });
     expect(calls).toHaveLength(0);
   });

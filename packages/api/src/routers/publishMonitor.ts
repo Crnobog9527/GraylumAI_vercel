@@ -10,6 +10,9 @@ import {
 } from '../services/publishMonitor/data';
 import { importManualRows, manualImportInput } from '../services/publishMonitor/manualImport';
 import { requirePostForMeDeps } from '../services/publishMonitor/secrets';
+import {
+  addBenchmark, benchmarkAddInput, connectOwnTikhub, tikhubConnectInput,
+} from '../services/publishMonitor/tikhub';
 import { checkRateLimitOrThrow } from '../services/redisRateLimiter';
 import { publishMonitorConnectRouter } from './publishMonitorConnect';
 import { publishMonitorPublishRouter } from './publishMonitorPublish';
@@ -63,6 +66,19 @@ export const publishMonitorRouter = router({
     await dataWindow(ctx);
     await checkRateLimitOrThrow(`publish-monitor-import:${ctx.profileId}`, 'api');
     return importManualRows(ctx.supabaseAdmin, ctx.profileId, input);
+  })),
+  // PR-4a: own Xiaohongshu/Douyin accounts by public profile link (Pro/Gold), and Gold benchmark accounts. Connecting
+  // is free; the daily TikHub read (billed per call) arrives with PR-4b. Removing either uses `disconnect`.
+  connectTikhub: protectedProcedure.input(tikhubConnectInput).mutation(({ ctx, input }) => safe(ctx, async () => {
+    await dataWindow(ctx);
+    return connectOwnTikhub(ctx.supabaseAdmin, ctx.profileId, input);
+  })),
+  addBenchmark: protectedProcedure.input(benchmarkAddInput).mutation(({ ctx, input }) => safe(ctx, async () => {
+    if (!(await readMembershipEntitlements(ctx.supabaseAdmin, ctx.profileId)).allowBenchmarkMonitor) {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'PUBLISH_MONITOR_ENTITLEMENT_REQUIRED' });
+    }
+    await checkRateLimitOrThrow(`publish-monitor-benchmark:${ctx.profileId}`, 'api');
+    return addBenchmark(ctx.supabaseAdmin, ctx.profileId, input);
   })),
   connect: publishMonitorConnectRouter,
   publish: publishMonitorPublishRouter,

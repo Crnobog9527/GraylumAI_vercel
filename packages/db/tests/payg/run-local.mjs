@@ -17,6 +17,7 @@ import {thresholdCases} from './thresholds.mjs';
 import {monitorCases} from './monitor.mjs';
 import {edgeCases} from './edges.mjs';
 import {grantCases} from './grants.mjs';
+import {refundHoldCases} from './refund-hold.mjs';
 import {nominalCases} from './nominal.mjs';
 import {erasureCases} from './erasure.mjs';
 import {concurrencyCases} from './concurrency.mjs';
@@ -29,6 +30,7 @@ import {researchRuntimeRegressionCases} from './research-runtime-regressions.mjs
 import {researchRuntimeCases} from './research-runtime.mjs';
 import {researchRuntimeReadCases} from './research-runtime-reads.mjs';
 import {researchRuntimeWiringCases} from './research-runtime-wiring.mjs';
+import {imageCases} from './image.mjs';
 import {productionCases,productionFusionCases,productionToolCases} from './production.mjs';
 
 const development = process.argv.slice(2).join(' ')==='--local-only --development';
@@ -126,6 +128,7 @@ try {
   await thresholdCases(db,report,createFixture,claim,receipt);
   await nominalCases(db,report,createFixture,claim,receipt);
   await grantCases(db,report,createFixture,claim,receipt);
+  await refundHoldCases(db,report,createFixture,claim);
   await edgeCases(db,report,createFixture,claim,receipt);
   await monitorCases(db,report,createFixture,claim,receipt);
   await erasureCases(db,report,createFixture,claim,receipt);
@@ -139,6 +142,7 @@ try {
   await researchRuntimeCases({db,Client,connectionString,report,createFixture});
   await researchRuntimeReadCases({db,report,createFixture});
   await researchRuntimeWiringCases({db,report,createFixture});
+  await imageCases({db,report,createFixture,claim,receipt});
   // Last: marks this database as production and pauses enabled windows until it restores them.
   await productionCases({db,Client,connectionString,report,claim});
   await productionToolCases({db,report,claim});
