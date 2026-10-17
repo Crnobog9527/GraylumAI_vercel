@@ -65,7 +65,7 @@ it('saved reports remain readable without a flag or membership read', async () =
   expect((rpc.mock.calls as unknown[][])[0]![0]).toBe('runtime_execution');
 });
 
-it('status settles and returns the fixed price (0299); before 0299 it shows none', async () => {
+it('status settles and returns the fixed price (0295); before 0295 it shows none', async () => {
   const saved = { state: 'completed', result: { body: '## One\nSaved', completeness: 'complete' },
     context: { reportGeneration: { version: 1, projectId: id, roundId: id, snapshotHash: 'a'.repeat(64),
       packageHash: 'b'.repeat(64), workflowHash: 'c'.repeat(64), templateHash: 'd'.repeat(64), sections: ['One'], maxCharacters: 12000 } } };
@@ -189,7 +189,7 @@ it.each([
     .rejects.toMatchObject({ code: 'BAD_REQUEST', message: 'REPORT_ALREADY_EXISTS' });
   expect(past.reached).toBe(false);
 });
-// A report that ended without a complete report had its fixed price refunded (0299): a new start pays it again
+// A report that ended without a complete report had its fixed price refunded (0295): a new start pays it again
 // (Owner 2026-10-17 "重新生成照收全价"), also when the incomplete one has text (cut off, stopped).
 it.each([['cancelled', null], ['completed', { body: '', completeness: 'complete' }], ['completed', null],
   ['completed', { body: '## One\nx', completeness: 'length_limit' }], ['completed', { body: 'x', completeness: 'stopped' }],
@@ -201,7 +201,7 @@ it.each([['cancelled', null], ['completed', { body: '', completeness: 'complete'
     await expect(reportService(user as unknown as SupabaseClient, admin, policy).start(startInput)).rejects.toMatchObject({ message: 'REPORT_UNAVAILABLE' });
     expect(past.reached).toBe(true);
   });
-it('a start at another price than the button showed is refused before any admission (0299)', async () => {
+it('a start at another price than the button showed is refused before any admission (0295)', async () => {
   const { admin, past } = startAdmin([], {});
   const settings: Record<string, unknown> = { runtime_report_generation: { enabled: true }, report_fixed_price_credits: 500 };
   let key = '';

@@ -307,7 +307,7 @@ END $$;
 
 -- Usage projections for a fixed-fee call: the settled-at-zero path skips token_stats / ai_usage_logs (the zero-charge
 -- refund path writes none), but the real provider cost must reach the cost dashboards (#1098 review). Same rows as a
--- charged call, at zero credits. Shared marker: whichever of 0294 / 0299 applies first patches, the other skips.
+-- charged call, at zero credits. Shared marker: whichever of 0294 / 0295 applies first patches, the other skips.
 DO $$ DECLARE src text; a text:=$x$  UPDATE bill2_calls SET nominal_cost_usd=n,nominal_source=source,theoretical_delta=delta,charged_delta=debit,$x$; BEGIN
   src:=pg_get_functiondef('public.bill2_payg_finalize(uuid,uuid)'::regprocedure);
   IF position('-- fixed_fee usage rows' IN src)=0 THEN

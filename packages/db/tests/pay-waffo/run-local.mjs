@@ -65,7 +65,7 @@ try {
     // 0296 patches the bodies replayed above; applied twice it leaves the patched bodies unchanged.
     '0296_pay_stripe_live_mode.sql', '0296_pay_stripe_live_mode.sql',
     '0297_pay_stripe_live_refunds.sql', '0297_pay_stripe_live_refunds.sql',
-    '0302_pay_wallet_membership_refund.sql', '0302_pay_wallet_membership_refund.sql']) {
+    '0298_pay_wallet_membership_refund.sql', '0298_pay_wallet_membership_refund.sql']) {
     sql(readFileSync(resolve(root, 'packages/db/migrations', file),'utf8'));
   }
   assert.deepEqual(fingerprint(),before,'new migration repeat preserves structure');

@@ -229,7 +229,7 @@ export async function productionCases({db,Client,connectionString,report,claim})
   }
 }
 
-// 0293: research tool routes and tool-only publish monitor runs on the production database.
+// 0292: research tool routes and tool-only publish monitor runs on the production database.
 const toolsMigration=new URL(`../../migrations/${readdirSync(new URL('../../migrations/',import.meta.url))
   .find(f=>/^\d{4}_runtime_production_tools\.sql$/.test(f))}`,import.meta.url);
 const toolModelId=route=>createHash('md5').update('bill2-research-tool:'+route).digest('hex')
@@ -247,7 +247,7 @@ const researchConfig=(enabled=true,vendor=true)=>({version:1,enabled,vendors:{ti
   parallel:{enabled:false,hardCapAttested:null},firecrawl:{enabled:false,hardCapAttested:null}}});
 
 export async function productionToolCases({db,report,claim,reapply=true}) {
-  // productionCases reran 0292, which restores its own gate; put the 0293 gate back (a rerun is a no-op otherwise).
+  // productionCases reran 0291, which restores its own gate; put the 0292 gate back (a rerun is a no-op otherwise).
   if (reapply) await db.query(readFileSync(toolsMigration,'utf8'));
   const profiles=[];
   const paused=(await db.query('UPDATE runtime_test_windows SET enabled=false WHERE enabled RETURNING id')).rows.map(r=>r.id);
@@ -345,11 +345,11 @@ export async function productionToolCases({db,report,claim,reapply=true}) {
   }
 }
 
-// 0295: the review panel (Fusion) on the production database: group admission, batch claim and the recovery inventory.
+// 0293: the review panel (Fusion) on the production database: group admission, batch claim and the recovery inventory.
 const fusionMigration=new URL(`../../migrations/${readdirSync(new URL('../../migrations/',import.meta.url))
   .find(f=>/^\d{4}_runtime_production_fusion\.sql$/.test(f))}`,import.meta.url);
 export async function productionFusionCases({db,report,reapply=true}) {
-  // Earlier cases rerun 0235, which restores its own recovery inventory; put the 0295 patch back (a rerun is a no-op).
+  // Earlier cases rerun 0235, which restores its own recovery inventory; put the 0293 patch back (a rerun is a no-op).
   if (reapply) await db.query(readFileSync(fusionMigration,'utf8'));
   const profiles=[];
   const paused=(await db.query('UPDATE runtime_test_windows SET enabled=false WHERE enabled RETURNING id')).rows.map(r=>r.id);

@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// REPORT-FIXED-PRICE (0299, Owner 2026-10-17): one fixed price per report generation, held at admission, charged once
+// REPORT-FIXED-PRICE (0295, Owner 2026-10-17): one fixed price per report generation, held at admission, charged once
 // for a complete report, refunded otherwise; the report's model call settles at zero user charge. No model call.
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
@@ -28,7 +28,7 @@ async function setBalance(db,actor,credits) {
       'report-fee:'||gen_random_uuid(),credits-$2::int,credits FROM profiles WHERE id=$1`,[actor,delta]);
 }
 /** A report execution of the seeded session with a PAYG run, as runtime_admit creates it; the price hold is what the
- * 0299 admission hook runs (the hook itself is exercised end to end by report.integration.ts). */
+ * 0295 admission hook runs (the hook itself is exercised end to end by report.integration.ts). */
 async function execution(db,f,billing={limits:{costUsd:'0.1'},rules:{creditsPerUsd:'1000',multiplier:'1'}},link=true,round=randomUUID()) {
   const run = await createFixture(db,{actor:f.actor});
   const id = randomUUID();
@@ -43,7 +43,7 @@ const balanced = async (db,actor,label) => assert.equal(await ledger(db,actor),a
 export async function runReportFee({db,Client,connectionString,report}) {
   // The admission hook is in runtime_admit, after the execution insert, for report executions only.
   const admitDef = (await db.query(`SELECT pg_get_functiondef('public.runtime_admit(uuid,uuid,uuid,jsonb,jsonb)'::regprocedure) d`)).rows[0].d;
-  assert.match(admitDef,/-- 0299 report price\n IF p_payload \? 'reportGeneration' THEN PERFORM report_fee_hold\(e,p_billing\)/);
+  assert.match(admitDef,/-- 0295 report price\n IF p_payload \? 'reportGeneration' THEN PERFORM report_fee_hold\(e,p_billing\)/);
   assert.equal(await service(db,'report_fixed_price'),PRICE,'default price 500, read from settings');
 
   // Complete report: 500 held at admission, the call settles at zero (cost recorded), 500 charged once.
@@ -206,7 +206,7 @@ export async function runReportFee({db,Client,connectionString,report}) {
   assert.equal(await wallet(db,job.actor),5000);
   report.checks.push('report price: the daily job settles ended executions and refunds a price stuck for 3 days');
 
-  // A report without a price (admitted before 0299) keeps per-call billing.
+  // A report without a price (admitted before 0295) keeps per-call billing.
   const old = await createFixture(db,{actor:f.actor});
   const oc = await rpc(db,'bill2_claim',f.actor,old.run,1,old.claimPayload);
   await rpc(db,'bill2_dispatch',f.actor,old.run,oc.id,oc.dispatchToken);

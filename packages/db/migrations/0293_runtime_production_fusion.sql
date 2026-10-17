@@ -3,7 +3,7 @@
 -- so the recovery inventory returns its own frozen policy (id = rules.quoteVersion, mode = production) for receipt
 -- lookups and settlement, exactly as it returns the window's for a staging run. Admission, the group claim and every
 -- dispatch already go through runtime_test_window_allowed, which sends production runs to runtime_production_allowed
--- (0292/0293); nothing else changes.
+-- (0291/0292); nothing else changes.
 -- Patched at an exact anchor (a missing anchor aborts the migration, a rerun is a no-op). No data change.
 -- Rollback: none needed; without it production Fusion receipts are looked up by no one (staging is unaffected).
 BEGIN;

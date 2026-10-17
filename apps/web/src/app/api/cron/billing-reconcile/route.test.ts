@@ -141,7 +141,7 @@ describe('/api/cron/billing-reconcile', () => {
     expect(await response.json()).toMatchObject({ fusionKick: { success: false } });
   });
 
-  it('settles held report prices (0299) and fails the job when that step fails', async () => {
+  it('settles held report prices (0295) and fails the job when that step fails', async () => {
     expect((await GET(new Request('https://graylum.test/api/cron/billing-reconcile'))).status).toBe(200);
     expect(mocks.reportFees).toHaveBeenCalledWith({ client: 'service-role' });
     mocks.reportFees.mockResolvedValue({ success: false, settled: 0 });

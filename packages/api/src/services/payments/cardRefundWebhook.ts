@@ -165,7 +165,7 @@ async function cardOrderAwaitingPayment(db: Pick<SupabaseClient, 'from'>, stripe
   if (!orderId || !/^[0-9a-f-]{36}$/i.test(orderId)) return false;
   const order = await db.from('payment_orders').select('payment_method,payment_channel,item_type').eq('id', orderId).maybeSingle();
   if (order.error) throw new Error('PAY_WAFFO_PERSISTENCE_UNAVAILABLE', { cause: order.error });
-  // R7 (0302): a wallet one-time membership is settled by this handler too, so its refund also waits for the payment.
+  // R7 (0298): a wallet one-time membership is settled by this handler too, so its refund also waits for the payment.
   return order.data?.payment_channel === 'stripe' && (['card', 'card_cn'].includes(order.data.payment_method)
     || order.data.item_type === 'membership_plan' && ['wechat_pay', 'alipay'].includes(order.data.payment_method));
 }

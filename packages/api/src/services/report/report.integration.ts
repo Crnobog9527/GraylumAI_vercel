@@ -166,7 +166,7 @@ export function registerReportTests(db: pg.Client, fixture: () => Promise<Fixtur
           costPerCall: '0.3', creditsPerUsd: '100', multiplier: '6', maxCalls: 1, maxOutputTokens: 1000, inputBytes: 196608, historyItems: 0 });
         const input = { sessionId: detail.sessionId, projectId: detail.projectId, roundId: detail.roundId, requestId: randomUUID() };
         if (scenario === 'poor') {
-          // Fixed price (0299): admission needs the 500 price plus the call's own hold (0.3 USD x 100 x 6 = 180).
+          // Fixed price (0295): admission needs the 500 price plus the call's own hold (0.3 USD x 100 x 6 = 180).
           await db.query(`insert into credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,idempotency_key,balance_before,balance_after)
             values($1,-321,'adjustment','adjustment','admin_adjustment','admin',$2,1000,679)`, [f.actor, 'report-poor:' + f.actor]);
           await db.query('update profiles set credits=679 where id=$1', [f.actor]);
@@ -319,7 +319,7 @@ export function registerReportTests(db: pg.Client, fixture: () => Promise<Fixtur
           expect(billed.model).toBe(model);
           expect(Number(billed.upper_usd)).toBeGreaterThan(0);
           expect(billed.reserved_credits).toBe(Math.ceil(Number(billed.upper_usd) * 100 * 6));
-          // Fixed price (0299): the call is recorded at its would-be charge but charges nothing.
+          // Fixed price (0295): the call is recorded at its would-be charge but charges nothing.
           expect(billed.charged_delta).toBe(0);
           expect((await db.query('select theoretical_delta from bill2_calls where run_id=$1', [admitted.runId])).rows[0].theoretical_delta)
             .toBe('4'); // ceil((3000*2 + 10)/1e6 * 100 * 6)
@@ -346,7 +346,7 @@ export function registerReportTests(db: pg.Client, fixture: () => Promise<Fixtur
         await db.query("update profiles set membership_level='free' where id=$1", [f.actor]);
         const read = await service.status(admitted.executionId);
         expect(read.body).toContain('Report body'); expect(read.candidate).toBe(scenario !== 'length');
-        // Fixed price (0299): reading the ended report settles it once: a complete report pays 500, a cut-off one is refunded.
+        // Fixed price (0295): reading the ended report settles it once: a complete report pays 500, a cut-off one is refunded.
         expect(read.fee).toMatchObject(scenario === 'length' ? { state: 'refunded', chargedCredits: 0 } : { state: 'charged', chargedCredits: 500 });
         if (!waiting) expect((await db.query('select credits from profiles where id=$1', [f.actor])).rows[0].credits)
           .toBe(scenario === 'length' ? 1000 : 500);

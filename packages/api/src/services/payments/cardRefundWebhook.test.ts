@@ -33,7 +33,7 @@ function fixture(refunds: ReturnType<typeof refund>[], result: Record<string, un
   return { db, stripe, alert, run };
 }
 
-describe('R7: external refunds of wallet one-time memberships (0302)', () => {
+describe('R7: external refunds of wallet one-time memberships (0298)', () => {
   beforeEach(() => {
     mocks.scope.mockReset().mockResolvedValue({ mode: 'live', merchant: 'fixture' });
     mocks.find.mockReset(); mocks.error.mockReset(); mocks.monthly.mockReset().mockResolvedValue({ handled: false });
@@ -52,7 +52,7 @@ describe('R7: external refunds of wallet one-time memberships (0302)', () => {
   });
 });
 
-describe('R7: a wallet membership refunded before its payment is recorded is retried (0302)', () => {
+describe('R7: a wallet membership refunded before its payment is recorded is retried (0298)', () => {
   it('retries until the payment exists instead of acknowledging the refund as unmatched', async () => {
     mocks.scope.mockReset().mockResolvedValue({ mode: 'live', merchant: 'fixture' });
     mocks.find.mockReset().mockResolvedValue(null); mocks.ref.mockReset().mockResolvedValue(undefined); mocks.error.mockReset();

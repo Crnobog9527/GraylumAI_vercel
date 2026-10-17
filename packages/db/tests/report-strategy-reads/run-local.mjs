@@ -56,8 +56,8 @@ try {
  client=new Client({connectionString});await client.connect();
  await client.query(read('packages/db/tests/erasure-b2a/fixture.sql'));
  await client.query(read('packages/db/tests/workspace-positioning/fixture.sql'));
- // The pre-fix definition (0298), to show the gap this migration closes (rolled back inside the case).
- const before=read('packages/db/migrations/0298_runtime_workspace_benchmarks.sql');
+ // The pre-fix definition (0299), to show the gap this migration closes (rolled back inside the case).
+ const before=read('packages/db/migrations/0299_runtime_workspace_benchmarks.sql');
  const start=before.indexOf('CREATE OR REPLACE FUNCTION runtime_workspace_source(');
  const oldDefinition=before.slice(start,before.indexOf('END $$;',start)+'END $$;'.length);
  assert.ok(start>0&&oldDefinition.includes("'positioning'"));

@@ -33,7 +33,7 @@ function productionDeployment(env: Env) {
 }
 
 /** Hard guard (R7 review P1): production stays closed here until the checkout, fulfilment, renewal, entitlement and
- * refund paths run in the Stripe account's live mode. R7 PR-B1/B2/B3 (0296/0297/0302) wired them, so the marker is on;
+ * refund paths run in the Stripe account's live mode. R7 PR-B1/B2/B3 (0296/0297/0298) wired them, so the marker is on;
  * opening production still needs the bound deployment and a switch set to `true` (Owner approval). Staging is not
  * affected. */
 export const LIVE_PAYMENT_PIPELINE_READY = true;

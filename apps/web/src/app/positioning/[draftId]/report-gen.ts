@@ -27,7 +27,7 @@ export function reportActionLabel(label: string, price: number | null | undefine
 }
 
 export type ReportFee = { credits: number; state: "held" | "charged" | "refunded"; chargedCredits: number | null } | null | undefined;
-/** What this report cost (fixed price, 0299); nothing for reports generated before it. */
+/** What this report cost (fixed price, 0295); nothing for reports generated before it. */
 export function reportFeeText(fee: ReportFee): string | null {
   if (!fee) return null;
   const n = fee.credits.toLocaleString("zh-CN");
@@ -81,7 +81,7 @@ export function reportResultRefusal(result: unknown): StartRefusal | null {
 export type ReportStatus = {
   executionId: string; state: string; cursor?: number | null; epoch?: number | null;
   body: string | null; completeness: string | null; candidate: boolean; code?: string | null;
-  /** The fixed price of this report and whether it was charged or refunded (0299); null before it. */
+  /** The fixed price of this report and whether it was charged or refunded (0295); null before it. */
   fee?: ReportFee;
 };
 

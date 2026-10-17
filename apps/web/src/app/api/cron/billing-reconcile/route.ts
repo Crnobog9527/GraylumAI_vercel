@@ -39,7 +39,7 @@ async function runFusionRecovery(supabase: SupabaseClient) {
   catch { return { success: false, scanned: 0, cancelled: 0, recovered: 0, scrubbed: 0, failed: 1 }; }
 }
 
-/** REPORT fixed price (0299): settle held prices of report executions that have ended. */
+/** REPORT fixed price (0295): settle held prices of report executions that have ended. */
 async function runReportFeeSettlement(supabase: SupabaseClient) {
   try { return await settleDueReportFees(supabase); }
   catch { return { success: false, settled: 0 }; }

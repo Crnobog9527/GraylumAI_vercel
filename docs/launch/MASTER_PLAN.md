@@ -153,7 +153,7 @@ Owner 原话（2026-10-17，总控-8 对话）：
 
 > 报告固定价 500 积分，替代按量扣费；失败全额退回；重新生成照收全价；按钮写明价格
 
-归属任务 REPORT-GEN（报告固定价，迁移 0299）。价格放在后台设置 `report_fixed_price_credits`（默认 500，管理员可改）。点"生成完整报告"时冻结这个价格（开始需要的可用积分是价格加上这次调用的临时冻结，调用结束马上全额退回）；生成出完整报告（每个章节都在、没有截断，判定用现有的 `report_body_complete`）时扣这个价格；没生成出完整报告（失败、截断、停止、取消）全额退回；删除对话或注销账号时，已经生成的完整报告照收，其余冻结全额退回。报告的模型调用真实成本仍逐次记账，但不再向用户收费，超出部分由平台承担。没生成出完整报告的一轮可以重新生成，重新生成照收全价；完整报告仍然一轮只有一份。报告只有会员能生成的规则不变。按钮显示"生成完整报告（500 积分）""重新生成（500 积分）"。本条取代此前报告"按每次调用实际用量扣费"、2026-10-06"截断的报告照常收费"以及本节第 25、50 项里报告入口"不显示预计扣多少积分"的写法（只对报告固定价生效）。报告可视化方案 #1078 以后把完整判定改成"只数正文"时，改 `report_body_complete` 即可，固定价跟着走。
+归属任务 REPORT-GEN（报告固定价，迁移 0295）。价格放在后台设置 `report_fixed_price_credits`（默认 500，管理员可改）。点"生成完整报告"时冻结这个价格（开始需要的可用积分是价格加上这次调用的临时冻结，调用结束马上全额退回）；生成出完整报告（每个章节都在、没有截断，判定用现有的 `report_body_complete`）时扣这个价格；没生成出完整报告（失败、截断、停止、取消）全额退回；删除对话或注销账号时，已经生成的完整报告照收，其余冻结全额退回。报告的模型调用真实成本仍逐次记账，但不再向用户收费，超出部分由平台承担。没生成出完整报告的一轮可以重新生成，重新生成照收全价；完整报告仍然一轮只有一份。报告只有会员能生成的规则不变。按钮显示"生成完整报告（500 积分）""重新生成（500 积分）"。本条取代此前报告"按每次调用实际用量扣费"、2026-10-06"截断的报告照常收费"以及本节第 25、50 项里报告入口"不显示预计扣多少积分"的写法（只对报告固定价生效）。报告可视化方案 #1078 以后把完整判定改成"只数正文"时，改 `report_body_complete` 即可，固定价跟着走。
 
 **2026-10-17：REL-1 按期 10-31 上线、10-25 冻结；正式库新建 Supabase 项目；MODERATION 上线时继续暂缓**
 
@@ -2556,6 +2556,19 @@ node scripts/plan-progress.mjs --ref origin/staging
 | 0286 | [#1042](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1042) LIB-DOCS LIB-2d BILL2 单图计费（合集 #1119） |
 | 0287 | [#1050](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1050) LIB-DOCS LIB-2d 保存识别文字（合集 #1119） |
 | 0288 | [#1075](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1075) PUBLISH-MONITOR 4a（合集 #1119） |
+| 0289 | [#1081](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1081) PUBLISH-MONITOR 4b（已上库合并） |
+| 0290 | FUSION-COMPARE（已上库合并） |
+| 0291 | [#1073](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1073) RUNTIME-PROD 核心（合集 #BATCH3） |
+| 0292 | [#1086](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1086) RUNTIME-PROD 研究工具线路（合集 #BATCH3） |
+| 0293 | [#1094](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1094) RUNTIME-PROD 评审团正式模式（合集 #BATCH3） |
+| 0294 | [#1098](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1098) 评审团固定价（合集 #BATCH3） |
+| 0295 | [#1102](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1102) 报告固定价（合集 #BATCH3） |
+| 0296 | [#1101](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1101) R7 B1 正式收款（合集 #BATCH3） |
+| 0297 | [#1104](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1104) R7 B2 四类退款（合集 #BATCH3） |
+| 0298 | [#1111](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1111) R7 B3 钱包会员退款（合集 #BATCH3） |
+| 0299 | [#1100](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1100) CHAT-AUTO-CONTEXT B1（合集 #BATCH3） |
+| 0300 | [#1106](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1106) REPORT-VISUAL PR-2（合集 #BATCH3） |
+| 0301 | [#1108](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1108) REPORT-VISUAL PR-3（合集 #BATCH3） |
 
 ### 7.2 依赖简图
 
@@ -2632,7 +2645,7 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 - `V3-OPC-UI` 的 A / B / C / FINISH：改称 UI-A / UI-B / UI-C / UI-FINISH，UI-C 改为复用 LIB-DOCS。
 - `V3-GOLD`：改名 FUSION，拆成 FUSION-REVIEW 和 FUSION-COMPARE。
 - 新增：AGENT-CORE（含 AC-0）、AGENT-CORE-UI（从 AGENT-CORE 拆出的纯前端部分）、CI-TRUST（含 CI-TRUST-1）、DEBT-QUICK、COST-REPORT、MODEL-REASONING、UI-MODEL（从原 UI-A 拆出的输入框模型位置，上线只显示 Auto）、RUNTIME-PROD、ENTITLEMENTS、SEC-RATELIMIT、PII-REGEX（接手 PR #333）、RESEARCH-0、RESEARCH-TOOLS、DATA-ERASURE、LIB-DOCS、VOICE、LEARN-1、LEARN-2；2026-09-30 新增 MENTOR-BUDGET、REPORT-GEN、FORGOT-PASSWORD；2026-10-01 新增 BILL-PAYG（承接 RUNTIME-PROD ④）、BILL-UNIT（#565，含按模型倍数）、RATE-LIMIT、STG-MENTOR-MODEL（#561）、INVITE-ABUSE；2026-10-01—02 新增 PROMPT-CACHE（上线必做，第 35 项）、STAGING-HOST-CLEANUP（第 37 项）；2026-10-02—03 新增 MODEL-PRICING-SYNC（第 40 项）、MENTOR-PROMPT-V2、RUNTIME-VIEW-PERF、CONVERSATION-DRIVEN-CAPTURE（第 48 项）、PROMPT-CACHE-HISTORY（第 43 项）、CHAT-NATIVE-OUTPUT（第 44 项）、CONTENT-CONVERSATION-DRIVEN（第 45 项）；STG-MENTOR-MODEL 已关闭（第 38 项）；2026-10-03 新增 PAYWALL（第 50 项）；2026-10-04 新增 EXPERT-CONSULT（第 51 项）、PUBLISH-MONITOR、CHARGEBACK；2026-10-05 起"资料库扩展"的规范任务名为 LIB-EXT。
-- 迁移编号在实际实施时由总控分配，本文不预占；已分配的 0268–0288 见第 7.1 节末尾。
+- 迁移编号在实际实施时由总控分配，本文不预占；已分配的 0268–0301 见第 7.1 节末尾。
 
 ### 7.6 Owner 需要提前启动的事项
 

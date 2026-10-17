@@ -32,7 +32,7 @@ describe('settings writer verification', () => {
   });
 });
 
-describe('report fixed price setting validation (0299)', () => {
+describe('report fixed price setting validation (0295)', () => {
   it.each(['500', 500, '1200', '999999'])('accepts %s', value => {
     expect(() => validateReportPrice([{ key: 'report_fixed_price_credits', value }])).not.toThrow();
   });

@@ -24,7 +24,7 @@ export type CardPaymentMatch = {
 export async function findCardOrderForPayment(db: Pick<SupabaseClient, 'from'>,
   stripe: Pick<Stripe, 'charges' | 'invoicePayments'>, scope: StripeScope,
   input: { chargeId?: string | null; paymentIntentId?: string | null; invoiceId?: string | null },
-  // R7 (0302): external refunds also settle a wallet one-time membership; disputes and the rest still see card orders only.
+  // R7 (0298): external refunds also settle a wallet one-time membership; disputes and the rest still see card orders only.
   options: { includeWalletMembership?: boolean } = {}): Promise<CardPaymentMatch | null> {
   let paymentIntentId = input.paymentIntentId ?? null;
   if (!paymentIntentId && input.chargeId) {

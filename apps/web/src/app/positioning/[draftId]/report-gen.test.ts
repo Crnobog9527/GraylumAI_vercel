@@ -75,7 +75,7 @@ describe("reportView", () => {
   });
   it("never offers a new paid request over a saved or running report", () => {
     expect(reportCanStart(status({}))).toBe(false);
-    // A cut-off report had its fixed price refunded (0299): a new paid request is offered again.
+    // A cut-off report had its fixed price refunded (0295): a new paid request is offered again.
     expect(reportCanStart(status({ completeness: "length_limit", candidate: false }))).toBe(true);
     expect(reportCanStart(status({ state: "running", body: null }))).toBe(false);
     expect(reportCanStart(status({ state: "waiting_credits", body: null }))).toBe(false);
@@ -192,7 +192,7 @@ describe("restoring and offering", () => {
       expect(generationOffer({ canGenerate: true, working: false, server: { kind: "known", executionId: id }, executionId: id, status: ended }))
         .toBe("restart");
   });
-  it("names the fixed price on the button and says what the report cost (0299)", () => {
+  it("names the fixed price on the button and says what the report cost (0295)", () => {
     expect(reportActionLabel("生成完整报告", 500)).toBe("生成完整报告（500 积分）");
     expect(reportActionLabel("重新生成", 1200)).toBe("重新生成（1,200 积分）");
     expect(reportActionLabel("生成完整报告", null)).toBe("生成完整报告");

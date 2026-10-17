@@ -41,7 +41,7 @@ export async function runCases({db,report,before0301}) {
   const old=await index(db,a,sid);
   assert.equal(Object.hasOwn(old.entries[0],'strategyReport'),false);
   assert.equal((await read(db,a,sid,'strategy_report:'+main.business)).kind,'unavailable');
-  report.checks.push('before fix (0298): the finalized strategy data is not listed or readable');
+  report.checks.push('before fix (0299): the finalized strategy data is not listed or readable');
  } finally {await db.query('ROLLBACK');}
 
  const listed=await index(db,a,sid);
@@ -58,7 +58,7 @@ export async function runCases({db,report,before0301}) {
  assert.deepEqual(await read(db,a,sid,main.business).then(r=>r.identity.kind),'positioning','the positioning read is unchanged');
  report.checks.push('index + one read: confirmed fields and both strategy groups, with edit marks and reading rules');
 
- // The 0298 benchmarks entry stays as it is (rank 1, after the positionings).
+ // The 0299 benchmarks entry stays as it is (rank 1, after the positionings).
  const execution=randomUUID();
  await db.query(`INSERT INTO runtime_executions(id,actor_id,session_id,request_id,payload,history_revision,state)
   VALUES($1,$2,$3,$4,'{}',0,'completed')`,[execution,a,main.draftSession,randomUUID()]);
@@ -69,7 +69,7 @@ export async function runCases({db,report,before0301}) {
  [fetch,a,main.draftSession,execution]);
  assert.deepEqual(await kinds(db,a,sid),['positioning','benchmarks']);
  assert.ok((await read(db,a,sid,main.draftSession)).body.includes('bench_a'));
- report.checks.push('the benchmarks entry of 0298 is still listed after the positioning and readable');
+ report.checks.push('the benchmarks entry of 0299 is still listed after the positioning and readable');
 
  // 40 places: many positionings with reports still list only 40 entries, each report readable by id.
  const many=[];

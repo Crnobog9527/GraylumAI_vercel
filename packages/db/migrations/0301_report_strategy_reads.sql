@@ -2,7 +2,7 @@
 -- REPORT-VISUAL PR-3 (docs/launch/tasks/REPORT-VISUAL.md §5). Number 0301 assigned by the controller.
 --
 -- The AI coach reads the strategy data that 定稿 stored (0300, artifact_versions.report.generatedReport.data):
---   1. Free conversations (read_source). Built on CHAT-AUTO-CONTEXT B1's 0298 runtime_workspace_source, kept as it is
+--   1. Free conversations (read_source). Built on CHAT-AUTO-CONTEXT B1's 0299 runtime_workspace_source, kept as it is
 --      (positionings rank 0, 'benchmarks' rank 1 with its 8000-character body, strategies/topics rank 2, 40 entries).
 --      A positioning entry whose version has strategy data gains `strategyReport` (an id and when to read it). The
 --      report is read by that id, `strategy_report:<positioning id>`, without taking any of the 40 index places.
@@ -15,7 +15,7 @@
 --      exactly today's material, byte for byte, so nothing changes for any existing report or session. Material
 --      that would exceed 0106's 24000-byte limit drops strategy fields (fixed order), at worst back to today's.
 --      Frozen material and its hash are never rewritten.
--- Rules for the model travel with the data (host-authored `use`/`rules`, as 0298's benchmarks entry): strategy data is
+-- Rules for the model travel with the data (host-authored `use`/`rules`, as 0299's benchmarks entry): strategy data is
 -- the finalized report's conclusions; the confirmed fields win on conflict; fields in textEdited were changed in the
 -- report text by the user, so confirm before acting; say the answer is based on that positioning version.
 -- Erasure: the read carries the version as sourceVersionId and dependency, so 0218's tool-copy cleanup and guard apply.
@@ -97,7 +97,7 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION public.opc_source_material(uuid,text) FROM PUBLIC,anon,authenticated,service_role;
 
--- Host-authored reading rules that travel with the data (as 0298's benchmarks `use`).
+-- Host-authored reading rules that travel with the data (as 0299's benchmarks `use`).
 CREATE OR REPLACE FUNCTION public.opc_strategy_use() RETURNS text
 LANGUAGE sql IMMUTABLE SET search_path=public,pg_temp AS $$
  SELECT 'Structured conclusions of the user''s finalized positioning report (strategy data): read them for next steps, '
@@ -142,7 +142,7 @@ BEGIN
 END $$;
 
 
--- 0298's free-conversation workspace source (CHAT-AUTO-CONTEXT B1) with the strategy report read (see top).
+-- 0299's free-conversation workspace source (CHAT-AUTO-CONTEXT B1) with the strategy report read (see top).
 CREATE OR REPLACE FUNCTION public.runtime_workspace_source(p_actor_id uuid,p_session_id uuid,p_query text DEFAULT '') RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE entries jsonb;entry jsonb;body text;version_id uuid;cap integer:=4000;produced jsonb;strategy jsonb;fit jsonb;profile jsonb;

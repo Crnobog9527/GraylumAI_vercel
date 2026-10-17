@@ -203,10 +203,10 @@ END $$;
 -- Admission: hold the price in the transaction that creates a report execution (a refusal creates nothing).
 DO $$ DECLARE src text; a text:=$x$ UPDATE runtime_sessions SET active_execution=e.id WHERE id=s.id;$x$; BEGIN
   src:=pg_get_functiondef('public.runtime_admit(uuid,uuid,uuid,jsonb,jsonb)'::regprocedure);
-  IF position('-- 0299 report price' IN src)=0 THEN
+  IF position('-- 0295 report price' IN src)=0 THEN
     IF array_length(string_to_array(src,a),1)<>2 THEN RAISE EXCEPTION 'REPORT_PRICE_SOURCE_MISMATCH: runtime_admit'; END IF;
     EXECUTE replace(src,a,a||$x$
- -- 0299 report price
+ -- 0295 report price
  IF p_payload ? 'reportGeneration' THEN PERFORM report_fee_hold(e,p_billing); END IF;$x$);
   END IF;
 END $$;
@@ -220,10 +220,10 @@ $$;
 REVOKE ALL ON FUNCTION public.bill2_payg_zero_source(text) FROM PUBLIC, anon, authenticated, service_role;
 DO $$ DECLARE src text; a text:=$x$debit:=least(delta,c.reserved_credits)::int;cap:=greatest(bounded-c.reserved_credits,0);bound:=delta-debit-cap;$x$; BEGIN
   src:=pg_get_functiondef('public.bill2_payg_finalize(uuid,uuid)'::regprocedure);
-  IF position('-- 0299 report price' IN src)=0 THEN
+  IF position('-- 0295 report price' IN src)=0 THEN
     IF array_length(string_to_array(src,a),1)<>2 THEN RAISE EXCEPTION 'REPORT_PRICE_SOURCE_MISMATCH: bill2_payg_finalize'; END IF;
     EXECUTE replace(src,a,a||$x$
-   -- 0299 report price: the report's fixed price covers this call; the hold is released through the refund path.
+   -- 0295 report price: the report's fixed price covers this call; the hold is released through the refund path.
    IF r.session_ref IS NOT NULL AND EXISTS(SELECT 1 FROM report_fees rf JOIN runtime_executions re ON re.id=rf.execution_id
     WHERE re.billing_run_id=r.id) THEN debit:=0;cap:=0;bound:=delta;source:='fixed_fee';END IF;$x$);
   END IF;
@@ -238,7 +238,7 @@ END $$;
 
 -- Usage projections for a fixed-fee call: the settled-at-zero path skips token_stats / ai_usage_logs (the zero-charge
 -- refund path writes none), but the real provider cost must reach the cost dashboards (#1098 review). Same rows as a
--- charged call, at zero credits. Shared marker: whichever of 0294 / 0299 applies first patches, the other skips.
+-- charged call, at zero credits. Shared marker: whichever of 0294 / 0295 applies first patches, the other skips.
 DO $$ DECLARE src text; a text:=$x$  UPDATE bill2_calls SET nominal_cost_usd=n,nominal_source=source,theoretical_delta=delta,charged_delta=debit,$x$; BEGIN
   src:=pg_get_functiondef('public.bill2_payg_finalize(uuid,uuid)'::regprocedure);
   IF position('-- fixed_fee usage rows' IN src)=0 THEN
@@ -257,9 +257,9 @@ END $$;
 -- Content deletion: before results are removed, a complete report is charged and any other held price refunded.
 DO $$ DECLARE src text; a text:=$x$ UPDATE runtime_sessions SET content_deleted_at=stamp WHERE id=ANY(sessions) AND content_deleted_at IS NULL;$x$; BEGIN
   src:=pg_get_functiondef('public.content_erasure_confirm(uuid,text,uuid,text)'::regprocedure);
-  IF position('-- 0299 report price' IN src)=0 THEN
+  IF position('-- 0295 report price' IN src)=0 THEN
     IF array_length(string_to_array(src,a),1)<>2 THEN RAISE EXCEPTION 'REPORT_PRICE_SOURCE_MISMATCH: content_erasure_confirm'; END IF;
-    EXECUTE replace(src,a,$x$ -- 0299 report price
+    EXECUTE replace(src,a,$x$ -- 0295 report price
  PERFORM report_fee_settle_internal(held_fee.execution_id,false) FROM report_fees held_fee JOIN runtime_executions fe ON fe.id=held_fee.execution_id
   WHERE held_fee.actor_id=a AND held_fee.state='held' AND (fe.id=ANY(ids) OR fe.session_id=ANY(sessions));
  PERFORM report_fee_settle_internal(held_fee.execution_id,true) FROM report_fees held_fee JOIN runtime_executions fe ON fe.id=held_fee.execution_id
@@ -271,9 +271,9 @@ END $$;
 -- Account erasure: the same two steps for every held price of the account; a held price keeps it pending.
 DO $$ DECLARE src text; a text:=$x$  RETURN counts;$x$; BEGIN
   src:=pg_get_functiondef('public.account_erasure_scrub_content(uuid)'::regprocedure);
-  IF position('-- 0299 report price' IN src)=0 THEN
+  IF position('-- 0295 report price' IN src)=0 THEN
     IF array_length(string_to_array(src,a),1)<>2 THEN RAISE EXCEPTION 'REPORT_PRICE_SOURCE_MISMATCH: account_erasure_scrub_content'; END IF;
-    EXECUTE replace(src,a,$x$  -- 0299 report price
+    EXECUTE replace(src,a,$x$  -- 0295 report price
   PERFORM report_fee_settle_internal(held_fee.execution_id,false) FROM report_fees held_fee
    WHERE held_fee.actor_id=p_profile_id AND held_fee.state='held';
   PERFORM report_fee_settle_internal(held_fee.execution_id,true) FROM report_fees held_fee

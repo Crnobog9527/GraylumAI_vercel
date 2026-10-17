@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 
-/** R7 PR-B3 (0302): our approved refund of a wallet one-time membership (WeChat Pay / Alipay), through the pack refund
+/** R7 PR-B3 (0298): our approved refund of a wallet one-time membership (WeChat Pay / Alipay), through the pack refund
  * path, in the order's mode (live here). Runs after the live cases, which created the live catalog. */
 export async function stripeMpWalletRefundCases({admin,service}) {
   const plan=(await admin.query("SELECT id FROM membership_plans WHERE level='gold'")).rows[0].id;

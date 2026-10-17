@@ -30,7 +30,7 @@ const POLL_MS = 5000;
  * every step confirmed) only allows a new paid start.
  */
 export function useReportGen(input: { draftId: string; sessionId: string; projectId: string; roundId: string; canGenerate: boolean;
-  /** The fixed price the button shows (0299): sent with the start, which is refused if the price changed meanwhile. */
+  /** The fixed price the button shows (0295): sent with the start, which is refused if the price changed meanwhile. */
   price?: number | null }) {
   const { draftId, sessionId, projectId, roundId, canGenerate, price } = input;
   const key = reportRecordKey(draftId, roundId);
@@ -70,7 +70,7 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
     refetchInterval: query => !streaming && reportProgressing(query.state.data) ? POLL_MS : false,
   });
   const shown = status.data && status.data.executionId === executionId ? status.data : null;
-  // The status read settles the fixed price (0299: charged or refunded): the cached balance is stale until it is read again.
+  // The status read settles the fixed price (0295: charged or refunded): the cached balance is stale until it is read again.
   const settledFee = shown?.fee && shown.fee.state !== "held" ? shown.fee.state : null;
   useEffect(() => { if (settledFee) void utils.credits.getBalance.invalidate(); }, [settledFee, executionId, utils]);
   const refuse = (result: unknown) => {

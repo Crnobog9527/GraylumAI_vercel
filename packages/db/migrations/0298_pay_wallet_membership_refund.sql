@@ -32,7 +32,7 @@ BEGIN
    ||E' THEN RAISE EXCEPTION \'PAY_REFUND_TYPE_NOT_IMPLEMENTED\'; END IF;',1),
   (2,'pay_common_package_refund_quote',
    E' total:=(o.purchase_snapshot->>\'credits\')::integer+(o.purchase_snapshot->>\'bonus_credits\')::integer;\n IF total IS NULL OR total<=0\n',
-   E' -- R7 B3 (0302): a wallet one-time membership takes back every credit it granted so far (a yearly order: the months\n'
+   E' -- R7 B3 (0298): a wallet one-time membership takes back every credit it granted so far (a yearly order: the months\n'
    ||E' -- released); its subscription must still be active and releasing.\n'
    ||E' total:=CASE WHEN o.item_type=\'membership_plan\' THEN (SELECT coalesce(sum(c.amount),0) FROM credit_transactions c\n'
    ||E'   WHERE c.user_id=o.user_id AND c.source_order_id=o.id AND c.amount>0\n'
@@ -58,7 +58,7 @@ BEGIN
   (6,'pay_waffo_grant_period',
    E'   OR o.status IS DISTINCT FROM \'completed\' OR o.fulfilled_at IS NULL\n',
    E'   OR o.status IS DISTINCT FROM \'completed\' OR o.fulfilled_at IS NULL\n'
-   ||E'   -- R7 B3 (0302): nothing is released while our refund of this order is claimed or in flight.\n'
+   ||E'   -- R7 B3 (0298): nothing is released while our refund of this order is claimed or in flight.\n'
    ||E'   OR coalesce(o.refund_approval->>\'status\',\'\') IN (\'dispatching\',\'pending\',\'review_required\',\'succeeded\')\n',1),
   (8,'pay_stripe_mp_record_external_refund',
    E'o.payment_method NOT IN (\'card\',\'card_cn\')',
@@ -80,7 +80,7 @@ BEGIN
   (7,'pay_common_package_refund_result',
    E'   updated_at=clock_timestamp() WHERE id=o.id;\n RETURN i;\n',
    E'   updated_at=clock_timestamp() WHERE id=o.id;\n'
-   ||E' -- R7 B3 (0302): a refunded wallet membership ends now; the cached level follows the facts (order no longer paid).\n'
+   ||E' -- R7 B3 (0298): a refunded wallet membership ends now; the cached level follows the facts (order no longer paid).\n'
    ||E' IF next_status=\'succeeded\' AND o.item_type=\'membership_plan\' THEN\n'
    -- The taken-back grants are reversed (as the monthly and external refunds do): a granted row of a terminated
    -- subscription would otherwise keep quarantining later credits in atomic_pre_deduct.

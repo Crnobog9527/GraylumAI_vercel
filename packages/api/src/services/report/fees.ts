@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-/** The report's fixed price (0299, Owner 2026-10-17 "报告固定价 500 积分"): an administrator-editable scalar setting. */
+/** The report's fixed price (0295, Owner 2026-10-17 "报告固定价 500 积分"): an administrator-editable scalar setting. */
 export const REPORT_PRICE_KEY = 'report_fixed_price_credits';
 export const DEFAULT_REPORT_PRICE = 500;
 
@@ -28,7 +28,7 @@ export async function settleDueReportFees(admin: SupabaseClient): Promise<{ succ
   return { success: true, settled: Number(result.data) || 0 };
 }
 
-/** The report's fixed price (0299) is a whole number of credits, 1–999999: anything else would make every report fail. */
+/** The report's fixed price (0295) is a whole number of credits, 1–999999: anything else would make every report fail. */
 export function validateReportPrice(input: Array<{ key: string; value: unknown }>) {
   for (const setting of input) {
     if (setting.key !== REPORT_PRICE_KEY) continue;
