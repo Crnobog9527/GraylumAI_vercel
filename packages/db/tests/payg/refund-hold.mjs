@@ -9,8 +9,8 @@ export async function refundHoldCases(db,report,createFixture,claim) {
   const order=randomUUID(),item=randomUUID();
   await db.query('INSERT INTO credit_packages(id,name,credits_amount,price,bonus_credits) VALUES($1,$2,100,10,0)',[item,'Hold '+item]);
   await db.query(`INSERT INTO payment_orders(id,user_id,item_type,item_id,billing_cycle,mode,status,payment_status,payment_channel,
-    merchant_namespace,payment_mode,payment_method,purchase_request_id,purchase_payload_hash,purchase_snapshot,amount_total,currency,
-    fulfilled_at) VALUES($1,$2,'credit_package',$3,'one_time','payment','completed','paid','stripe','fixture','test','card',
+    merchant_namespace,payment_mode,purchase_request_id,purchase_payload_hash,purchase_snapshot,amount_total,currency,
+    fulfilled_at) VALUES($1,$2,'credit_package',$3,'one_time','payment','completed','paid','stripe','fixture','test',
     gen_random_uuid(),repeat('a',64),$4,1000,'usd',now())`,[order,f.actor,item,{version:1,item_type:'credit_package',item_id:item,
     item_updated_at:'2026-10-01T00:00:00Z',billing_cycle:'one_time',currency:'usd',unit:'major',price:'10',discount:'0',
     tax_behavior:'inclusive',credits:100,bonus_credits:0}]);

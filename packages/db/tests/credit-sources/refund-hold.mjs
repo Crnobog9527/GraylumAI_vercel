@@ -31,10 +31,11 @@ const pack = async (user, credits, at = iso(0)) => {
     credits, bonus_credits: 0 };
   await c.query(`INSERT INTO payment_orders(id,user_id,item_type,item_id,billing_cycle,mode,status,payment_status,
     payment_channel,merchant_namespace,payment_mode,payment_method,purchase_request_id,purchase_payload_hash,purchase_snapshot,
-    amount_total,currency,fulfilled_at,payment_amount_facts,metadata) VALUES($1,$2,'credit_package',$3,'one_time','payment','completed','paid',
+    amount_total,currency,fulfilled_at,payment_amount_facts,metadata,routing_version,terms_version,terms_accepted_at,auto_renew,offer_kind,
+    qualification_state,stripe_managed_payments) VALUES($1,$2,'credit_package',$3,'one_time','payment','completed','paid',
     'stripe','fixture','test','card',gen_random_uuid(),repeat('a',64),$4,1000,'usd',$5,
     jsonb_build_array(jsonb_build_object('kind','tax','amount','0.00','currency','usd','unit','major','evidence_ref',$6::text)),
-    jsonb_build_object('grantedCredits',$7::int))`, [order, user, item, snap, at, payment, credits]);
+    jsonb_build_object('grantedCredits',$7::int),1,'terms-v1',$5,false,'standard','sold',true)`, [order, user, item, snap, at, payment, credits]);
   await c.query(`INSERT INTO payment_provider_refs(channel,merchant_namespace,mode,object_type,external_id,order_id)
     VALUES('stripe','fixture','test','payment',$1,$2)`, [payment, order]);
   await c.query('UPDATE profiles SET credits=credits+$2 WHERE id=$1', [user, credits]);
