@@ -52,3 +52,25 @@ export function workItemLine(item: WorkItem): string {
   if (item.state !== 'running') return item.label;
   return item.kind === 'research' && item.label ? `正在${item.label}…` : RUNNING_LABELS[item.kind];
 }
+
+const KINDS: readonly WorkKind[] = ['positioning', 'library_search', 'library_read', 'my_posts', 'my_benchmarks', 'research'];
+const STATES: readonly WorkState[] = ['running', 'done', 'missing', 'pending'];
+const text = (value: unknown, max: number): string | null => (typeof value === 'string' ? value.slice(0, max) : null);
+
+/**
+ * The work rows a view attaches to one answer (`workItems`, from runtime_work_items). Anything that is not a well-formed
+ * row is dropped, so a malformed reply can never break the page.
+ */
+export function workItemsOf(execution: unknown): WorkItem[] {
+  const rows = (execution as {workItems?: unknown} | null)?.workItems;
+  if (!Array.isArray(rows)) return [];
+  const items: WorkItem[] = [];
+  for (const row of rows.slice(0, 12)) {
+    const value = (row ?? {}) as Record<string, unknown>;
+    const id = text(value.id, 256), label = text(value.label, 200);
+    if (!id || label === null || !KINDS.includes(value.kind as WorkKind) || !STATES.includes(value.state as WorkState)) continue;
+    items.push({id, kind: value.kind as WorkKind, state: value.state as WorkState, label,
+      detail: text(value.detail, 200), credits: text(value.credits, 40)});
+  }
+  return items;
+}
