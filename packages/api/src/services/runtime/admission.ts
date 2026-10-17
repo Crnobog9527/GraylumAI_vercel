@@ -25,7 +25,7 @@ import {StagingAccessError,stagingRpcFailure} from './stagingErrors';
 import {frozenCallPolicy, type FrozenPaygRun, type FrozenRun} from '../bill2/service';
 import { selectRuntimeHistory, fixtureInputCapacity, runtimeScopeInput } from './context';
 import { activateCandidateWithSource, discoverRuntimeCandidates, fittingCandidates, matchingInput, MATCH_INSTRUCTIONS } from './matching';
-import { withPrimaryAddenda } from './primaryInstructions';
+import { REPLY_LANGUAGE, REPLY_LANGUAGE_INSTRUCTIONS, withPrimaryAddenda } from './primaryInstructions';
 import { sourceToolBytes } from './sourceRuntimeTool';
 import { type ReasoningPolicy } from './reasoningPolicy';
 import { admitReasoning } from './reasoningAdmission';
@@ -244,8 +244,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    // Decisions judges every other gated message, including a non-social Skill turning to social media; an admitted
    // gated turn always keeps the fallback rule, since Decisions does not see earlier turns ("好的，那帮我写三条").
    const positioningFallback=gated&&await judgePositioning(policy.positioningGate!,{text:input.input,apiKey},capped);
-   // The executor appends this rule (withPrimaryAddenda); admission sizes it too, so a fitting turn never fails later.
-   const positioningRule=positioningFallback?POSITIONING_FALLBACK_INSTRUCTIONS:'';
+   // The executor appends these rules (withPrimaryAddenda); admission sizes them too, so a fitting turn never fails later.
+   const positioningRule=REPLY_LANGUAGE_INSTRUCTIONS+(positioningFallback?POSITIONING_FALLBACK_INSTRUCTIONS:'');
    if(input.selection.kind==='organizer')modelConfiguration(()=>assertSeparateSummaryModel(session.dialogueModel,row.data.model_id));
    let attachedOrganizer:{
     modelId:string;model:string;maxOutputTokens:number;inputBytes?:number;historyItems?:number;reasoning?:ReasoningPolicy;instructions?:string;input?:string
@@ -312,12 +312,12 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    // R4: the user's earlier messages share that same optional read; dropping it never blocks the turn.
    let historyRead=false;
    if(skillFile&&hostTurnContext&&!stepSummary){
-    try{requireCapacity(instructions,true,currentInput,true);historyRead=true;}
+    try{requireCapacity(instructions+positioningRule,true,currentInput,true);historyRead=true;}
     catch(error){if(!(error instanceof Error)||error.message!=='RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY')throw error;}
    }
    if(hostTurnContext)promptCache=freezeHostPromptCache({real:Boolean(policy.real),role:input.selection.kind,
     model:row.data.model_id,cacheWriteUsdPerMillion:policy.real?realModel(row.data).providerLimits?.cacheWriteUsdPerMillion:undefined,
-    instructions,skillChars,stableAdditionalPrefix:policy.stableAdditionalInstructions,
+    instructions:instructions+REPLY_LANGUAGE_INSTRUCTIONS,skillChars,stableAdditionalPrefix:policy.stableAdditionalInstructions,
     additionalInstructions:policy.additionalInstructions,mentor:mentorStream,
     historyMarker:!hostTurnContext.opening&&!requestsHistoricalComparison(input.input)&&
      currentInputBytes([{role:'user',content:currentInput}])<=historySelection!.currentReserveBytes});
@@ -336,7 +336,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    if(candidates.length)candidates=await fittingCandidates(candidates,candidate=>activateCandidateWithSource(user,admin,candidate,brandIdentity),
     {input:currentInput,inputBytes,toolBytes:sourceToolBytes(sourceTools,workspaceContext)+
      (historySelection?.markerReserveBytes??(promptCache?PROMPT_CACHE_OVERHEAD_BYTES:0)),
-     instructions:skill=>withPrimaryAddenda(skill,{workspaceContext,network:input.network,
+     instructions:skill=>withPrimaryAddenda(skill,{workspaceContext,network:input.network,replyLanguage:REPLY_LANGUAGE,
       ...(positioningFallback?{positioningGate:POSITIONING_FALLBACK}:{})})});
    const primaryTurns=maxCalls-(attachedOrganizer?1:0)-(searchAllowed?1:0)-(candidates.length?1:0);
    if(primaryTurns<(searchAllowed||input.sources.length||workspaceContext?2:1))throw new Error('RUNTIME_CALL_BUDGET');
@@ -384,7 +384,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     role:input.selection.kind==='auto'?'ordinary':input.selection.kind,input:input.input,instructions,model:row.data.model_id,
     ...(policy.opcTurnToken?{opcTurnToken:uuid.parse(policy.opcTurnToken)}:{}),...(candidates.length?{matching:{candidates}}:{}),
     ...(!policy.reportGeneration&&session.scopeMaterial?{scopeMaterial:session.scopeMaterial}:{}),...(workspaceContext?{workspaceContext:true}:{}),
-    ...(positioningFallback?{positioningGate:POSITIONING_FALLBACK}:{}),...(sourceContent?{sourceContent}:{}),
+    ...(positioningFallback?{positioningGate:POSITIONING_FALLBACK}:{}),replyLanguage:REPLY_LANGUAGE,...(sourceContent?{sourceContent}:{}),
     modelId,...(attachedOrganizer?{attachedOrganizer}:{}),maxOutputTokens,maxTurns:primaryTurns,historyItems,network:input.network,
     // Freeze the purpose ceiling; each selected model keeps its own call-policy limit.
     ...(budgets||policy.reportGeneration?{purposeBudget:{purpose,inputBytes,historyItems}}:{}),

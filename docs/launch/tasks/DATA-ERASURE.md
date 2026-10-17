@@ -360,6 +360,7 @@ PR-A 留给后续 PR 的必做事项：
 |research_discoveries ([0263][m0263])|D 整行（确认的关键词、发现进度）|删会话、删回答（本回答发起的）和注销时直接删除；先于 cards 无 FK 依赖|
 |research_account_fetches ([0263][m0263])|D 账号原文、证据及回答关联；会话内防重试散列|删会话和注销时整行删除；删回答时 charged/unknown 失败仅留无正文的会话级拒绝重试记录，清空账号原文、证据、回答及授权关联并撤销旧令牌；证据正文在 research_operations 按上一行清|
 |research_refresh_grants ([0263][m0263])|D 整行（平台、账号标识、使用时间）|删会话和注销时直接删除|
+|research_benchmarks ([0268][m0268])|D 整行（账号标识、粉丝/播放/互动等派生数字、证据编号）|删会话、删产生它的回答、删用到其证据的成果和注销时直接删除；随 research_account_fetches 级联删除；不含财务|
 |artifact_projects ([0066][m0066],[0080][m0080],[0107][m0107])|D account/work_title；必要下游依赖留 tombstone|所有 rounds/versions/evidence/OPC/其他 source_project_id 后，source_project 自引用倒序|
 |artifact_rounds ([0066][m0066])|D workflow 中混入的私文/steps 全部正文|confirmations/candidates/versions/requests/OPC/link/chat 后；固定轮 guard 要改|
 |artifact_evidence ([0066][m0066])|D payload、content_hash 等可关联内容指纹|restrictions/links/result_links/子 supersedes 后；operation FK 需先断/删|
@@ -543,6 +544,7 @@ PR-A 留给后续 PR 的必做事项：
 [m0070]: ../../../packages/db/migrations/0070_v3_separate_summary.sql
 [m0071]: ../../../packages/db/migrations/0071_v3_research_billing.sql
 [m0263]: ../../../packages/db/migrations/0263_research_runtime_storage.sql
+[m0268]: ../../../packages/db/migrations/0268_research_benchmarks.sql
 [m0072]: ../../../packages/db/migrations/0072_v3_admin_skill_modules.sql
 [m0073]: ../../../packages/db/migrations/0073_admin_management_write_grants.sql
 [m0077]: ../../../packages/db/migrations/0077_workbench_provider_rejection.sql

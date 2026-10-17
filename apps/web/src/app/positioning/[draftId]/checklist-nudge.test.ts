@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from "vitest";
 import { checklistUpdatedInput } from "@repo/api/src/shared/opcQuestions";
-import { clearSavedFields, isChecklistUpdate, noteSavedFields, nudgeNotice, refusedTurn, savedFields, shownInput } from "./checklist-nudge";
+import { clearSavedFields, freeAnswerSource, isChecklistUpdate, noteSavedFields, nudgeNotice, refusedTurn, savedFields, shownInput } from "./checklist-nudge";
 
 function memory() {
   const map = new Map<string, string>();
@@ -47,7 +47,7 @@ describe("checklist nudge", () => {
     expect(nudgeNotice([], click, false)).toBeNull();
     const notice = nudgeNotice(["goal", "audience"], click, true)!;
     expect(notice.text).toBe("你在清单里更新了 2 项");
-    expect(notice.actions).toEqual([{ label: "让导师接着聊", onClick: click, disabled: true }]);
+    expect(notice.actions).toEqual([{ label: "让 AI 教练接着聊", onClick: click, disabled: true }]);
     expect(click).not.toHaveBeenCalled();
   });
 
@@ -77,4 +77,29 @@ it("brings the prompt back after an unadmitted checklist turn, and a typed messa
   expect(restore).not.toHaveBeenCalled();
   refusedTurn(storage, "d", "s1", "我的回答", restore);
   expect(restore).toHaveBeenCalledTimes(1);
+});
+
+describe("freeAnswerSource", () => {
+  const latest = { executionId: "e1", state: "completed", body: JSON.stringify({ format: "agent-turn.v1", text: "hi",
+    card: { question: "你每周能拿出多少时间？", options: ["3 小时以内", "3–10 小时"], recommended: 0 } }) };
+  const turn = { roundId: "r1", stepId: "s1" };
+  const base = { input: "三小时左右", latest, sourceTurn: turn, roundId: "r1", stepId: "s1" };
+
+  it("answers the newest card of this step and round with typed text", () => {
+    expect(freeAnswerSource(base)).toEqual({ executionId: "e1" });
+  });
+  it("keeps an explicit answer source", () => {
+    expect(freeAnswerSource({ ...base, answerSource: { executionId: "e0", optionIndex: 1 } })).toEqual({ executionId: "e0", optionIndex: 1 });
+  });
+  it("a research refresh answers no card", () => {
+    expect(freeAnswerSource({ ...base, input: "请重新读取对标账号 抖音 sample_1 的最新数据",
+      researchRefreshId: "99999999-9999-4999-8999-999999999999" })).toBeUndefined();
+  });
+  it("another step or round, a turn without a card and an unfinished turn answer none", () => {
+    expect(freeAnswerSource({ ...base, stepId: "s2" })).toBeUndefined();
+    expect(freeAnswerSource({ ...base, roundId: "r2" })).toBeUndefined();
+    expect(freeAnswerSource({ ...base, latest: { ...latest, body: JSON.stringify({ format: "agent-turn.v1", text: "hi" }) } })).toBeUndefined();
+    expect(freeAnswerSource({ ...base, latest: { ...latest, state: "running" } })).toBeUndefined();
+    expect(freeAnswerSource({ ...base, latest: null })).toBeUndefined();
+  });
 });

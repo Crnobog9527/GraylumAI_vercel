@@ -144,6 +144,11 @@ exercises authenticated/anon, and C9 calls actual post-migration definer functio
 ordinary request directly before switching role, asserts claim permission denial in that fresh
 session, and verifies existing transitions. No production RPC is replaced or re-granted in tests.
 
+The two `replay-with-new-migrations.mjs --new 0150` commands below are the PR #537 verification, kept as a record:
+they replay 0150 as the newest migration and their fixtures predate LEGACY-CLOSE (0241 dropped `ordinary_chat_claim`,
+0271 dropped `ordinary_chat_requests`, `ordinary_chat_transition` and the agent preference tables). The maintained
+checks on the current chain are `run-erasure-b1b-locks.mjs` and `run-erasure-b1b-barrier.mjs`, updated in 0271.
+
 ```sh
 node packages/db/tests/baseline/replay-with-new-migrations.mjs --local-only \
   --new 0150_erasure_content_channel_runtime_chat.sql \

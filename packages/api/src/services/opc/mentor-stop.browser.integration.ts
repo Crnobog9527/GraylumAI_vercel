@@ -227,7 +227,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST === 'true')('OPC: MENTOR_STREAM C2_ST
     await poll(() => stopped.isVisible(), { timeout: 60000 }).toBe(true);
     expect(await page.getByText('本轮未整理', { exact: false }).isVisible()).toBe(true);
     expect(await page.getByRole('button', { name: '重试', exact: true }).count()).toBe(0);
-    expect(await page.getByRole('region', { name: '导师提问' }).count()).toBe(0);
+    expect(await page.getByRole('region', { name: 'AI 教练提问' }).count()).toBe(0);
     const trace = await page.evaluate(() => (window as unknown as TestWindow).finishStopTrace());
     expect(trace.trusted).toBe(true);
     expect(trace.clicks).toBe(1);
@@ -240,7 +240,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST === 'true')('OPC: MENTOR_STREAM C2_ST
     }));
     expect(finalBody).toEqual({ text: baseline.text, html: baseline.html });
     expect(await page.getByText('本轮未整理', { exact: false }).isVisible()).toBe(true);
-    expect(await page.getByRole('region', { name: '导师提问' }).count()).toBe(0);
+    expect(await page.getByRole('region', { name: 'AI 教练提问' }).count()).toBe(0);
     expect(turns).toBe(1);
     expect(stops).toHaveLength(1);
     expect(await control()).toHaveLength(1);

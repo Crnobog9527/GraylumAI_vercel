@@ -47,6 +47,8 @@ export const runtimeContext=z.object({
   input:z.string().max(24000).optional()}).strict().optional(),
  // POSITIONING-GATE: Decisions was unavailable; the primary model carries the fallback rule.
  positioningGate:z.literal('fallback-v1').optional(),
+ // SKILL-I18N-HOOK: the primary call carries the reply-language rule (absent on contexts admitted before it).
+ replyLanguage:z.literal('reply-language-v1').optional(),
  // A2: the saved version a directly chosen derived-content Skill was admitted with (checkpoint_source injects it).
  sourceContent:frozenSourceContent.optional(),
  workspaceContext:z.boolean().optional(),opcTurnToken:z.string().uuid().optional(),matching:matchingPlan.optional(),scopeMaterial:z.unknown().optional(),
