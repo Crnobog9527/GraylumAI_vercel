@@ -28,6 +28,19 @@ export const OCR_LIMITS = {
   maxPageChars: 100_000,
 } as const;
 
+/** Scanned PDF pages rendered to images for recognition (LIB-2d, LIB_DOCS_PLAN §4.4 initial values). */
+export const PDF_RENDER_LIMITS = {
+  maxPages: 8,
+  longEdgePixels: 1600,
+  maxJpegBytes: 600_000,
+  jpegQualities: [0.85, 0.75, 0.6, 0.45],
+  /** One decoded embedded image (pdf.js `maxImageSize`); larger images are left out of the render. */
+  maxImagePixels: 40_000_000,
+  /** Any canvas pdf.js asks for (pattern, mask, group), not only the page. */
+  maxCanvasPixels: 40_000_000,
+  pageTimeoutMs: 30_000,
+} as const;
+
 /** PDF text extraction (LIB-2c, LIB_DOCS_PLAN §4.2 initial values). */
 export const PDF_LIMITS = {
   maxPages: 500,
