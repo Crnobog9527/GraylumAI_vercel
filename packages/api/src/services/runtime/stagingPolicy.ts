@@ -1,13 +1,16 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {z} from 'zod';
 import {frozenCallPolicy,type BillingRpc} from '../bill2/service';
+import {modelCallPolicies,toolCallPolicies} from '../bill2/runPolicies';
+import type {ToolCallPolicy} from '../bill2/toolBilling';
 import {decimal} from '../bill2/decimal';
 import {openRouterBound} from '../bill2/openRouterPolicy';
 import {stagingRuntimeWindow} from './stagingEnvironment';
 import {StagingAccessError,stagingRpcFailure} from './stagingErrors';
 import {assertWindowMultipliers} from './billingUnitAdmission';
 const schema=z.object({id:z.string().uuid(),callPolicies:z.array(frozenCallPolicy).min(1).max(16),creditsPerUsd:z.string(),multiplier:z.string(),expiresAt:z.string().datetime({offset:true})}).strict();
-export type StagingPolicy=z.infer<typeof schema>;
+/** RESEARCH-TOOLS RT-3b PR-3: the window may also approve tool routes (0255); they are kept apart from the models. */
+export type StagingPolicy=z.infer<typeof schema>&{toolPolicies?:ToolCallPolicy[]};
 /** Called only after authentication by the server host. The SQL procedure
  * verifies the same actor against the enabled immutable window identity.
  * No credential, client policy or mutable balance is returned here.
@@ -19,9 +22,13 @@ export async function loadStagingPolicy(database:BillingRpc,actorId:string,env:R
  return parseStagingPolicy(response.data,windowId);
 }
 export function parseStagingPolicy(value:unknown,windowId?:string):StagingPolicy{
- const parsed=schema.safeParse(value);
+ const raw=z.object({callPolicies:z.array(z.object({protocol:z.string()}).passthrough()).max(32)}).passthrough().safeParse(value);
+ if(!raw.success)throw new StagingAccessError('RUNTIME_STAGING_POLICY_INVALID');
+ let tools:ToolCallPolicy[];
+ try{tools=toolCallPolicies(raw.data.callPolicies);}catch{throw new StagingAccessError('RUNTIME_STAGING_POLICY_INVALID');}
+ const parsed=schema.safeParse({...raw.data,callPolicies:modelCallPolicies(raw.data.callPolicies)});
  if(!parsed.success)throw new StagingAccessError('RUNTIME_STAGING_POLICY_INVALID');
- const policy=parsed.data;
+ const policy:StagingPolicy={...parsed.data,...(tools.length?{toolPolicies:tools}:{})};
  if(windowId!==undefined&&Date.parse(policy.expiresAt)<=Date.now())throw new StagingAccessError('RUNTIME_STAGING_WINDOW_EXPIRED');
  if((windowId!==undefined&&policy.id!==windowId) || decimal(policy.creditsPerUsd)<=0n || decimal(policy.multiplier)<=0n)
   throw new StagingAccessError('RUNTIME_STAGING_POLICY_INVALID');

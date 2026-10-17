@@ -1,8 +1,13 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
-import { adoptionSections, applyChoices } from './reviewAdoption';
+import { adoptionSections, applyChoices, sectionTexts } from './reviewAdoption';
 
 describe('per-section adoption', () => {
+  it('gives the reader the whole report: the text before the first section and every section as written', () => {
+    expect(sectionTexts('# 定位报告\r\n写在前面。\r\n##\t定位\r\n原定位\r\n## 结语\r\n原结语', ['定位', '结语'])).toEqual({
+      preamble: '# 定位报告\r\n写在前面。', chapters: [{ section: '定位', body: '原定位' }, { section: '结语', body: '原结语' }] });
+    expect(sectionTexts('## 定位\n原定位', ['定位', '结语']).preamble).toBe('');
+  });
   it('keeps unchosen sections byte for byte, including unusual heading spacing and CRLF', () => {
     const original = '前言\r\n##\t定位\r\n原定位\r\n##   结语\r\n原结语';
     const revised = '前言\r\n## 定位\r\n新定位\r\n## 结语\r\n新结语';

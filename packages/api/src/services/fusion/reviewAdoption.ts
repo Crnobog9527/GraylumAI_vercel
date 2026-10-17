@@ -27,6 +27,13 @@ function rawSections(body: string) {
 }
 const shown = (content: string) => content.replace(/^\r?\n/, '').replace(/\r?\n$/, '');
 
+/** The frozen report's text by template section, as the adoption plan reads it (the result page shows the whole report),
+ * and the text before the first section (a title or introduction), which adoption keeps as written. */
+export function sectionTexts(body: string, sections: string[]): { preamble: string; chapters: Array<{ section: string; body: string }> } {
+  const { preamble, sections: parsed } = rawSections(body);
+  return { preamble: preamble.trim(), chapters: sections.map(section => ({ section, body: shown(parsed.get(section)?.content ?? '') })) };
+}
+
 export function adoptionSections(input: { originalBody: string; revisedBody: string; sections: string[]; changedSections: string[];
   changeNotes: Note[]; frozen: StepValues; revisedSteps: StepValues }): AdoptionSection[] {
   const before = rawSections(input.originalBody).sections, after = rawSections(input.revisedBody).sections;
