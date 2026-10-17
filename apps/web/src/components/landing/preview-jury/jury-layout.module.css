@@ -67,7 +67,7 @@
   background: var(--j-paper); box-shadow: 0 30px 60px -30px rgba(0, 0, 0, .35); animation: cardUp .45s var(--j-ease) both;
 }
 .introIcon { color: var(--j-bronze); }
-.intro h2 { margin: 0; font-size: 21px; font-weight: 700; line-height: 1.4; }
+.intro :is(h2,:where([data-demo-heading="h2"])) { margin: 0; font-size: 21px; font-weight: 700; line-height: 1.4; }
 .intro p { margin: 0; color: var(--j-body); font-size: 16px; line-height: 1.75; }
 .introActions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 6px; }
 .introPrimary, .introSecondary {
@@ -84,7 +84,7 @@
   display: grid; justify-items: start; gap: 8px; max-width: 560px; padding: 28px; border: 1px dashed var(--j-ink-soft); border-radius: 14px;
   color: var(--j-muted);
 }
-.workbench h2 { margin: 0; color: var(--j-ink); font-size: 20px; }
+.workbench :is(h2,:where([data-demo-heading="h2"])) { margin: 0; color: var(--j-ink); font-size: 20px; }
 .workbench p { margin: 0; }
 .statusTag {
   position: fixed; right: 24px; bottom: 24px; z-index: 30; display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px;

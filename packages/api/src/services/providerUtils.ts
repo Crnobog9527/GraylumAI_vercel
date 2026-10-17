@@ -26,24 +26,6 @@ export function looksLikeOpenRouterKey(apiKey?: string | null) {
   return Boolean(apiKey?.startsWith('sk-or-'));
 }
 
-export function getFallbackProviderApiKey() {
-  const openRouterKey = process.env.OPENROUTER_API_KEY?.trim();
-  if (openRouterKey) return openRouterKey;
-
-  return null;
-}
-
-export function getConfiguredProviderApiKey(apiKey?: string | null) {
-  const explicitKey = apiKey?.trim();
-  return explicitKey || getFallbackProviderApiKey();
-}
-
-export function getConfiguredProviderApiKeySource(apiKey?: string | null) {
-  if (apiKey?.trim()) return 'database';
-  if (process.env.OPENROUTER_API_KEY?.trim()) return 'env:OPENROUTER_API_KEY';
-  return null;
-}
-
 export function usesOpenAICompatibleApi(params: {
   endpoint?: string | null;
   apiKey?: string | null;
