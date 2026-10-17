@@ -1463,6 +1463,35 @@ add_case.call(
   true
 )
 add_case.call(
+  'safe-pr-number-in-concurrency-group',
+  amend_workflow(workflow_yaml(safe_sha)) { |workflow| workflow['concurrency'] = { 'group' => "ci-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.sha }}", 'cancel-in-progress' => "${{ github.event_name == 'pull_request' }}" } },
+  true
+)
+add_case.call(
+  'pr-number-in-concurrency-cancel-flag',
+  amend_workflow(workflow_yaml(safe_sha)) { |workflow| workflow['concurrency'] = { 'group' => 'ci', 'cancel-in-progress' => '${{ github.event.pull_request.number > 0 }}' } },
+  false,
+  'direct github context interpolation is forbidden except github.sha and github.event_name'
+)
+add_case.call(
+  'pr-number-in-job-concurrency-group',
+  amend_workflow(workflow_yaml(safe_sha)) { |workflow| workflow['jobs']['test']['concurrency'] = { 'group' => '${{ github.event.pull_request.number }}' } },
+  false,
+  'direct github context interpolation is forbidden except github.sha and github.event_name'
+)
+add_case.call(
+  'secret-in-concurrency-group',
+  amend_workflow(workflow_yaml(safe_sha)) { |workflow| workflow['concurrency'] = { 'group' => 'ci-${{ secrets.DEPLOY_KEY }}' } },
+  false,
+  'trusted_policy_material_v1 workflows must not reference secrets'
+)
+add_case.call(
+  'pr-head-ref-in-concurrency-group',
+  amend_workflow(workflow_yaml(safe_sha)) { |workflow| workflow['concurrency'] = { 'group' => '${{ github.event.pull_request.head.ref }}' } },
+  false,
+  'direct github context interpolation is forbidden except github.sha and github.event_name (concurrency.group may also use github.event.pull_request.number)'
+)
+add_case.call(
   'trusted-event-name-in-run',
   workflow_yaml(safe_sha, jobs: { 'safe' => standard_job(safe_sha, 'steps' => [{ 'run' => 'echo "${{ github.event_name }}"' }]) }),
   true

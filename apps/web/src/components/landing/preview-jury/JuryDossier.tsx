@@ -6,6 +6,7 @@ import {
 } from './jury-events';
 import { ChapterTag, SeatBadge, SeverityTag, VerdictStamp } from './JuryBits';
 import styles from './jury-dossier.module.css';
+import { DisplayHeading } from '@/components/chat-display/display-heading';
 
 export const DOSSIER_SEATS: readonly SeatCode[] = ['A', 'B', 'C', 'S'];
 
@@ -73,7 +74,7 @@ function RoundBlock({ round, names, previous }: { round: DetailRound; names: Jur
     <>
       {round.responses?.length ? (
         <>
-          <h4>回应别人（{round.responses.length} 条）</h4>
+          <DisplayHeading as="h4">回应别人（{round.responses.length} 条）</DisplayHeading>
           <ul className={styles.list}>
             {round.responses.map(item => (
               <li key={`${item.reviewer}-${item.decision}`} className={styles.entry}>
@@ -92,7 +93,7 @@ function RoundBlock({ round, names, previous }: { round: DetailRound; names: Jur
       ) : null}
       {round.round === 1 || decisions.length > 0 ? (
         <>
-          <h4>{round.round === 1 ? '4 个关键决定' : '改判的决定'}</h4>
+          <DisplayHeading as="h4">{round.round === 1 ? '4 个关键决定' : '改判的决定'}</DisplayHeading>
           <ul className={styles.list}>
             {decisions.map(item => (
               <DecisionBlock key={item.decision} item={item} before={previous?.decisions?.find(old => old.decision === item.decision)} />
@@ -102,7 +103,7 @@ function RoundBlock({ round, names, previous }: { round: DetailRound; names: Jur
       ) : <p className={styles.note}>其余决定和第 1 轮相同。</p>}
       {round.issues?.length ? (
         <>
-          <h4>提出的问题（{round.issues.length} 条）</h4>
+          <DisplayHeading as="h4">提出的问题（{round.issues.length} 条）</DisplayHeading>
           <ul className={styles.list}>
             {round.issues.map(item => (
               <li key={item.problem} className={styles.entry}>
@@ -127,7 +128,7 @@ function ReviewerFolder({ detail, names, seat, arrived, live }: {
       <p className={styles.lead}>{names[seat]}的完整意见原文，按轮次排列。</p>
       {rounds.map(round => (
         <section key={round.round} className={styles.round}>
-          <h3>第 {round.round} 轮</h3>
+          <DisplayHeading as="h3">第 {round.round} 轮</DisplayHeading>
           {arrived.includes(round.round)
             ? <RoundBlock round={round} names={names} previous={rounds.find(item => item.round === 1)} />
             : <p className={cn(styles.note, live && styles.waiting)}>{live ? '还在审阅，交卷后这里会出现完整原文。' : '这一轮没有进行。'}</p>}
@@ -148,7 +149,7 @@ function SummaryFolder({ detail, names, ready, live }: { detail: JuryDetail; nam
       <p className={styles.lead}>{names.S}的全部裁决，按报告章节排列。</p>
       {sections.map(section => (
         <section key={section.section} className={styles.round}>
-          <h3>{section.section}{section.changed ? <span className={styles.changed}>修订稿改了这一章</span> : null}</h3>
+          <DisplayHeading as="h3">{section.section}{section.changed ? <span className={styles.changed}>修订稿改了这一章</span> : null}</DisplayHeading>
           <ul className={styles.list}>
             {section.rulings.map(item => (
               <li key={item.issue} className={styles.entry}>

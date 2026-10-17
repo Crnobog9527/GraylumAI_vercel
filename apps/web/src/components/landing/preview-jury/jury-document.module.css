@@ -19,7 +19,7 @@
   padding: 36px 44px 20px; border: 1px solid var(--j-rule); border-bottom: 0; border-radius: 4px 4px 0 0;
   background: var(--j-paper);
 }
-.docHead h2 { margin: 0; font-family: var(--j-serif); font-size: 24px; font-weight: 600; line-height: 1.35; letter-spacing: .01em; }
+.docHead :is(h2,:where([data-demo-heading="h2"])) { margin: 0; font-family: var(--j-serif); font-size: 24px; font-weight: 600; line-height: 1.35; letter-spacing: .01em; }
 .docHead p { margin: 6px 0 0; color: var(--j-muted); font-size: 12.5px; }
 .banner {
   margin: 0; padding: 10px 44px; border-inline: 1px solid var(--j-rule);
@@ -33,7 +33,7 @@
   grid-column: 2; min-height: 100%; padding: 16px 44px; border-inline: 1px solid var(--j-rule); background: var(--j-paper);
   transition: background-color .6s var(--j-ease), box-shadow .6s var(--j-ease);
 }
-.text h3 {
+.text :is(h3,:where([data-demo-heading="h3"])) {
   display: flex; align-items: baseline; gap: 10px; margin: 6px 0 8px; font-family: var(--j-serif); font-size: 18px; font-weight: 600;
   line-height: 1.5;
 }
@@ -47,7 +47,7 @@
 .row[data-reader='C'] .text { --reader: var(--j-seat-c); }
 .row[data-reader='S'] .text { --reader: var(--j-bronze); }
 .row[data-focus='true'] .body { background: var(--j-bronze-soft); box-shadow: -8px 0 0 var(--j-bronze-soft), 8px 0 0 var(--j-bronze-soft); }
-.row[data-focus='true'] .text h3 { color: var(--j-ink); }
+.row[data-focus='true'] .text :is(h3,:where([data-demo-heading="h3"])) { color: var(--j-ink); }
 .page[data-mode='seated'] .text, .page[data-mode='reading'] .text { color: var(--j-body); }
 
 .gutter { grid-column: 3; min-width: 0; padding: 12px 0 12px 12px; }

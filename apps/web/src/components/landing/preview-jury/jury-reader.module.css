@@ -43,13 +43,13 @@
 
 /* 30 秒看懂 */
 .glance { display: grid; gap: 20px; padding: 26px clamp(18px, 3vw, 32px); border: 1px solid var(--j-ink-soft); border-radius: 12px; background: var(--j-paper); }
-.glance h2 { margin: 0; font-size: clamp(22px, 2.6vw, 28px); font-weight: 700; line-height: 1.3; }
+.glance :is(h2,:where([data-demo-heading="h2"])) { margin: 0; font-size: clamp(22px, 2.6vw, 28px); font-weight: 700; line-height: 1.3; }
 .onePage { display: grid; gap: 4px; margin: 0; }
 .onePage div { display: grid; grid-template-columns: 4.5em minmax(0, 1fr); gap: 12px; }
 .onePage dt { color: var(--j-muted); font-size: 15px; line-height: 1.75; }
 .onePage dd { margin: 0; color: var(--j-ink); font-weight: 600; }
 .revisedMark { margin-left: 8px; padding: 1px 7px; border-radius: 999px; background: var(--j-bronze-soft); color: var(--j-bronze); font-size: 12px; font-weight: 700; vertical-align: 2px; }
-.top3 h3 { margin: 0 0 8px; font-size: 16px; font-weight: 700; }
+.top3 :is(h3,:where([data-demo-heading="h3"])) { margin: 0 0 8px; font-size: 16px; font-weight: 700; }
 .top3 ol { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; counter-reset: point; }
 .top3 li { counter-increment: point; }
 .top3 button {
@@ -97,7 +97,7 @@
 .lineTag { color: var(--j-muted); font-size: 12.5px; white-space: nowrap; }
 .lineGist { min-width: 0; overflow: hidden; color: var(--j-muted); font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
 .chapterHead { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.chapterHead h3 { margin: 0 6px 0 0; font-size: 19px; font-weight: 700; line-height: 1.4; }
+.chapterHead :is(h3,:where([data-demo-heading="h3"])) { margin: 0 6px 0 0; font-size: 19px; font-weight: 700; line-height: 1.4; }
 .tag { padding: 1px 9px; border-radius: 999px; background: var(--j-desk); color: var(--j-muted); font-size: 12.5px; font-weight: 600; }
 .tag[data-tone='changed'] { background: var(--j-bronze-soft); color: var(--j-bronze); }
 .fold { margin-left: auto; padding: 4px 10px; border: 1px solid var(--j-rule); border-radius: 8px; background: var(--j-paper); font: inherit; font-size: 13px; cursor: pointer; }
@@ -175,7 +175,7 @@
   display: grid; gap: 12px; padding: 20px; border: 1.5px solid var(--j-ink); border-radius: 10px; background: var(--j-paper);
   box-shadow: var(--j-lift); scroll-margin-top: calc(var(--j-bar, 0px) + 16px);
 }
-.review h4 { margin: 0; font-size: 17px; font-weight: 700; }
+.review :is(h4,:where([data-demo-heading="h4"])) { margin: 0; font-size: 17px; font-weight: 700; }
 .diff { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .diff li { display: grid; grid-template-columns: minmax(0, 13em) minmax(0, 1fr); gap: 4px 12px; padding: 8px 10px; border-radius: 8px; background: var(--j-canvas); }
 .diffWhere { color: var(--j-muted); font-size: 14px; font-weight: 700; }
@@ -195,7 +195,7 @@
  * side, so the extra width carries content instead of empty card. */
 @container reader (min-width: 880px) {
   .glance { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: clamp(24px, 3vw, 48px); }
-  .glance > h2, .next { grid-column: 1 / -1; }
+  .glance > :is(h2,:where([data-demo-heading="h2"])), .next { grid-column: 1 / -1; }
   .change:has(> [data-side='before']):has(> [data-side='after']) { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 }
 
