@@ -11,7 +11,8 @@ import type {
 export const TIKHUB_BASE = 'https://api.tikhub.io/api/v1';
 export const MAX_POSTS = 30;
 
-type AccountId = 'tiktok_handle' | 'x_handle' | 'instagram_handle' | 'numeric' | 'youtube_channel' | 'xhs_user' | 'youtube_video';
+type AccountId = 'tiktok_handle' | 'x_handle' | 'instagram_handle' | 'numeric' | 'youtube_channel' | 'xhs_user' | 'youtube_video'
+  | 'douyin_sec_uid';
 interface TikhubRoute {
   method: 'GET' | 'POST';
   path: string;
@@ -26,6 +27,17 @@ export const TIKHUB_ROUTES: Partial<Record<`${SocialPlatform}:${SocialKind}`, Ti
     method: 'POST', path: '/douyin/search/fetch_video_search_v2',
     params: ({ keyword }) => ({ keyword: keyword!, cursor: 0, sort_type: '0', publish_time: '0', filter_duration: '0',
       content_type: '0', search_id: '', backtrace: '' }),
+  },
+  // PUBLISH-MONITOR PR-4 (TikHub OpenAPI, NOT YET VERIFIED with a real call: RT-7 / staging check before release).
+  // Douyin identifies a profile by its sec_user_id (the /user/<sec_uid> segment of a profile link); a wrong one may
+  // still be billed, so it is checked strictly before any call. One page of the newest posts per call.
+  'douyin:account_profile': {
+    method: 'GET', path: '/douyin/app/v3/handler_user_profile', account: 'douyin_sec_uid',
+    params: ({ account }) => ({ sec_user_id: account! }),
+  },
+  'douyin:account_posts': {
+    method: 'GET', path: '/douyin/app/v3/fetch_user_post_videos', account: 'douyin_sec_uid',
+    params: ({ account, limit }) => ({ sec_user_id: account!, max_cursor: 0, count: limit }),
   },
   'xiaohongshu:keyword_posts': {
     method: 'GET', path: '/xiaohongshu/app_v2/search_notes',
@@ -119,6 +131,8 @@ const ACCOUNT_PATTERNS: Record<AccountId, RegExp> = {
   // Xiaohongshu user ids are 24 lowercase hex characters (e.g. 61b46d790000000010008153).
   xhs_user: /^[0-9a-f]{24}$/,
   youtube_video: /^[A-Za-z0-9_-]{11}$/,
+  // Douyin sec_user_id: base64url text that always starts with MS4wLjABAAAA.
+  douyin_sec_uid: /^MS4wLjABAAAA[A-Za-z0-9_-]{20,120}$/,
 };
 
 export interface TikhubCall {
