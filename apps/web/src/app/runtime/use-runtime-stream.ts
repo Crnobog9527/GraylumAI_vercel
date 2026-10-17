@@ -28,9 +28,15 @@ export async function runStreamedExecution(live: LiveReplyController, open: Open
   onSourceDeleted?: (executionId: string) => void;
 }): Promise<AgentTurnOutcome> {
   try {
-    return await live.stream(() => open(executionId), {
+    const outcome = await live.stream(() => open(executionId), {
       executionId, onResult: result => handlers.onResult(executionId, result),
     });
+    // The server may also end the turn with a result instead of an error: cancelled, source deleted (LIB-4b).
+    if ((outcome as { unavailable?: string }).unavailable === 'source_deleted') {
+      live.clear();
+      handlers.onSourceDeleted?.(executionId);
+    }
+    return outcome;
   } catch (cause) {
     // A referenced document was deleted mid-turn: drop the half answer at once, never keep it as "waiting".
     if (isLibrarySourceDeleted(cause)) {
