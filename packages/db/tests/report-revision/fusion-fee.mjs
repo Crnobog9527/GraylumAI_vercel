@@ -223,7 +223,21 @@ export async function runFusionFee({db,Client,connectionString,report}) {
   await db.query('SELECT account_erasure_scrub_content($1)',[ac.actor]);
   assert.equal((await fee(db,arv.reviewId)).state,'refunded','account erasure refunds the held fee');
   assert.equal(await wallet(db,ac.actor),5000);assert.equal(await openHolds(db,ac.actor),0);
-  report.checks.push('fixed price: draft deletion and account erasure refund a held fee; a held fee keeps account erasure pending');
+  // Deletion racing the daily settlement of an ended review: one consistent lock order (profile, then fee), no
+  // deadlock, settled once (#1098 review).
+  const rc = await member(db,5000);
+  const rcr = await start(db,rc);
+  await db.query(`UPDATE fusion_reviews SET state='incomplete',ended_at=now() WHERE id=$1`,[rcr.reviewId]);
+  const racers = [new Client({connectionString}),new Client({connectionString})];
+  await Promise.all(racers.map(x=>x.connect()));
+  try {
+    const raced = await Promise.all([erase(racers[0],rc,'artifact',rc.project).then(r=>r.status,e=>e.message),
+      service(racers[1],'fusion_review_fee_settle_due',100).then(()=>'settled',e=>e.message)]);
+    assert.ok(!raced.some(r=>/deadlock/i.test(r)),JSON.stringify(raced));
+  } finally { await Promise.all(racers.map(x=>x.end())); }
+  assert.equal((await fee(db,rcr.reviewId)).state,'refunded');
+  assert.equal(await wallet(db,rc.actor),5000,'refunded once');
+  report.checks.push('fixed price: draft deletion and account erasure refund a held fee; a held fee keeps account erasure pending; deletion racing the daily settlement does not deadlock');
 
   // A usable summary is a delivered revision: a review ended any other way afterwards still pays the full price (#1098 review).
   const late = await member(db,5000);

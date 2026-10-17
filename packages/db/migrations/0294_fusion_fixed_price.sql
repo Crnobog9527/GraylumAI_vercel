@@ -127,12 +127,14 @@ $$;
 REVOKE ALL ON FUNCTION public.fusion_review_fee_view(uuid) FROM PUBLIC, anon, authenticated, service_role;
 
 -- Settles a held fee once its review has ended (idempotent; a running review or a stop with calls still
--- unsettled leaves it held). Lock order: fee row -> profile (callers may already hold the review row).
+-- unsettled leaves it held). Lock order: profile -> fee row, as content erasure (which already holds the profile)
+-- reaches it (callers may already hold the review row).
 CREATE OR REPLACE FUNCTION public.fusion_review_fee_settle_internal(p_review_id uuid) RETURNS jsonb
 LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
 DECLARE f fusion_review_fees; rv fusion_reviews; charge integer; reason text; before_balance integer; restored integer;
   q record; meta jsonb;
 BEGIN
+  PERFORM 1 FROM profiles WHERE id=(SELECT actor_id FROM fusion_review_fees WHERE review_id=p_review_id) FOR UPDATE;
   SELECT * INTO f FROM fusion_review_fees WHERE review_id=p_review_id FOR UPDATE;
   IF f.review_id IS NULL THEN RETURN NULL; END IF;
   IF f.state<>'held' THEN RETURN fusion_review_fee_view(f.review_id); END IF;
@@ -190,14 +192,15 @@ BEGIN
   RETURN fusion_review_fee_settle_internal(p_review_id);
 END $$;
 
--- Daily recovery: held fees whose review has ended or is gone. Rows another transaction holds are skipped.
+-- Daily recovery: held fees whose review has ended or is gone. Listed without locks: the settlement takes the
+-- profile, then the fee row (the erasure order), and is idempotent.
 CREATE OR REPLACE FUNCTION public.fusion_review_fee_settle_due(p_limit integer) RETURNS integer
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE due uuid; n integer:=0; v jsonb;
 BEGIN
   FOR due IN SELECT f.review_id FROM fusion_review_fees f LEFT JOIN fusion_reviews rv ON rv.id=f.review_id
     WHERE f.state='held' AND (rv.id IS NULL OR rv.state NOT IN ('running','paused'))
-    ORDER BY f.created_at LIMIT least(greatest(coalesce(p_limit,100),1),500) FOR UPDATE OF f SKIP LOCKED LOOP
+    ORDER BY f.created_at LIMIT least(greatest(coalesce(p_limit,100),1),500) LOOP
     v:=fusion_review_fee_settle_internal(due);
     IF v->>'state'<>'held' THEN n:=n+1; END IF;
   END LOOP;
