@@ -24,7 +24,11 @@ const ACCOUNT = REPORT_DATA_FIELDS.benchmarks.fields.accounts.of.fields;
  */
 export function BenchmarkChart({ benchmarks }: { benchmarks: NonNullable<ReportData["benchmarks"]> }) {
   const accounts = benchmarks.accounts as BenchmarkAccount[];
-  const measured = accounts.some(account => account.metrics && (account.metrics.followers !== null || account.metrics.medianViews !== null));
+  const has = (value: number | null | undefined) => typeof value === "number";
+  // Any trusted number is shown in the table; the bars only when followers or views exist.
+  const measured = accounts.some(account => account.metrics && (has(account.metrics.followers) || has(account.metrics.medianViews)
+    || has(account.metrics.engagementRate) || has(account.metrics.weeklyPosts)));
+  const charted = accounts.some(account => has(account.metrics?.followers) || has(account.metrics?.medianViews));
   const summary = accounts.map(account => [account.account,
     account.metrics?.followers != null ? `粉丝 ${formatCount(account.metrics.followers)}` : "",
     account.metrics?.medianViews != null ? `中位播放 ${formatCount(account.metrics.medianViews)}` : "",
@@ -32,12 +36,12 @@ export function BenchmarkChart({ benchmarks }: { benchmarks: NonNullable<ReportD
   return (
     <figure className={styles.block}>
       <figcaption className={styles.blockTitle}>{REPORT_DATA_FIELDS.benchmarks.fields.accounts.label}</figcaption>
-      {accounts.length > 0 && (measured
+      {accounts.length > 0 && (charted
         ? <>
           <p className={styles.srOnly}>{summary}</p>
           <Suspense fallback={<p className={styles.note}>{T.preparing}</p>}><BenchmarkBars accounts={accounts} /></Suspense>
         </>
-        : <p className={styles.note}>{T.noMetrics}</p>)}
+        : !measured && <p className={styles.note}>{T.noMetrics}</p>)}
       {accounts.length > 0 && <div className={styles.tableScroll}>
         <table className={styles.table}>
           <thead><tr>

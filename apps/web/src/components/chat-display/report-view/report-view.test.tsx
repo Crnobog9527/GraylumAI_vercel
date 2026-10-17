@@ -100,6 +100,16 @@ describe('ReportView', () => {
     expect(out.match(/这一章的文字你改过/g)).toHaveLength(1);
   });
 
+  it('shows engagement and posting numbers even when followers and views are unknown', () => {
+    const parsed = parseReportBody(SAMPLE_REPORT_BODY_WITH_DATA).data!;
+    parsed.data.benchmarks!.accounts = parsed.data.benchmarks!.accounts.map(account => ({ ...account,
+      metrics: { followers: null, medianViews: null, engagementRate: 0.031, weeklyPosts: 2, capturedAt: null } }));
+    const out = html(SAMPLE_REPORT_BODY_WITH_DATA, { data: parsed });
+    expect(out).toContain('3.1%');
+    expect(out).toContain('2 次');
+    expect(out).not.toContain('这些账号暂时没有可以对上的数据');
+  });
+
   it('shows the plain text when there are no chapters at all', () => {
     expect(html(`只有一段。\n\n${sampleReportDataBlock()}`)).toBe(renderToStaticMarkup(<MessageMarkdown text="只有一段。" />));
   });
