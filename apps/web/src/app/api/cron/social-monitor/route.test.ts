@@ -54,11 +54,13 @@ it('runs the job within its 240-second budget and fails the run when a step fail
     error: 'FAILED_STEPS:sweep' }));
 });
 
-it('a configured but invalid key fails the run instead of skipping it', async () => {
+it('a configured but invalid key fails the run, yet held-credit recovery and retention still run without a client', async () => {
   mocks.deps.mockRejectedValue(new Error('POSTFORME_KEY_INVALID'));
+  mocks.run.mockResolvedValue({ failures: [], billedRunsClosed: 2 });
   expect((await call()).status).toBe(500);
   expect(mocks.finish).toHaveBeenCalledWith(expect.objectContaining({ status: 'error', error: 'POSTFORME_KEY_INVALID' }));
-  expect(mocks.run).not.toHaveBeenCalled();
+  expect(mocks.run).toHaveBeenCalledTimes(1);
+  expect(mocks.run.mock.calls[0]![1]).toBeNull();
 });
 
 it('a failed run-record write fails the response instead of reporting success', async () => {
@@ -74,11 +76,12 @@ it('is scheduled once a day, apart from the other daily jobs', () => {
   expect(new Set(hours).size).toBe(hours.length);
 });
 
-it('records unavailable Vault as an error, never as an unconfigured successful skip', async () => {
+it('records unavailable Vault as an error, never as an unconfigured successful skip, and still runs the key-free steps', async () => {
   mocks.deps.mockRejectedValue(new Error('PLATFORM_SECRET_UNAVAILABLE'));
+  mocks.run.mockResolvedValue({ failures: [] });
   const res = await call();
   expect(res.status).toBe(500);
   expect(mocks.deps).toHaveBeenCalledWith({ synthetic: true });
   expect(mocks.finish).toHaveBeenCalledWith(expect.objectContaining({ status: 'error', error: 'PLATFORM_SECRET_UNAVAILABLE' }));
-  expect(mocks.run).not.toHaveBeenCalled();
+  expect(mocks.run.mock.calls[0]![1]).toBeNull();
 });
