@@ -84,3 +84,25 @@ describe('library read execution', () => {
     expect(ownerRpc).not.toHaveBeenCalled();
   });
 });
+
+describe('library search routing (CHAT-AUTO-CONTEXT)', () => {
+  const retrieval = (extra: Record<string, unknown> = {}) => ({libraryRetrieval: true, ...extra}) as never;
+  it('routes search: and doc-N for an execution that froze retrieval, even without @ references', () => {
+    expect(libraryQuery({query: 'search:定位 选题'}, retrieval())).toBe('search:定位 选题');
+    expect(libraryQuery({query: ' search: banana '}, retrieval())).toBe('search: banana');
+    expect(libraryQuery({query: 'doc-7/segment-2'}, retrieval())).toBe('doc-7/segment-2');
+    expect(libraryQuery({query: 'library'}, retrieval())).toBe('');
+    expect(libraryQuery({query: 'search:x', path: '/etc'}, retrieval())).toBeNull();
+  });
+  it('never routes search: without retrieval, and leaves workspace reads alone', () => {
+    expect(libraryQuery({query: 'search:定位'}, {} as never)).toBeNull();
+    expect(libraryQuery({query: 'search:定位'}, withRefs())).toBeNull();
+    expect(libraryQuery({query: 'positioning:abc'}, retrieval({workspaceContext: true}))).toBeNull();
+    expect(libraryQuery({}, retrieval({workspaceContext: true}))).toBeNull();
+  });
+  it('describes the search usage only for retrieval and sizes the same text', () => {
+    expect(sourceToolBytes(['read_source'], false, false, true)).toBeGreaterThan(sourceToolBytes(['read_source'], false, true));
+    expect(sourceToolBytes(['read_source'], false, false, false)).toBe(sourceToolBytes(['read_source'], false));
+  });
+});
+

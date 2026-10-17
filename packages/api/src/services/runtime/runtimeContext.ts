@@ -56,11 +56,13 @@ export const runtimeContext=z.object({
  moduleId:z.string().uuid().optional(),skillId:z.string().uuid().optional(),revisionId:z.string().uuid().optional(),sources:z.array(z.unknown()).optional(),
  // LIB-4: frozen with the execution by runtime_library_references_freeze (0262); read through read_source.
  libraryReferences:libraryReferences.optional(),
+ // CHAT-AUTO-CONTEXT A1/A2: free chat may search the user's own library with read_source query 'search:<words>'.
+ libraryRetrieval:z.literal(true).optional(),
 }).strict().superRefine((context, ctx) => {
  if (context.reportGeneration && (context.role !== 'skill' || context.historyItems !== 0 || context.maxTurns !== 1
    || context.tools.length || context.maxToolCalls || context.network !== 'deny' || context.attachedOrganizer
    || context.scopeMaterial || context.workspaceContext || context.promptCache || context.hostTurnContext
-   || context.historySelection || context.sources?.length || context.libraryReferences
+   || context.historySelection || context.sources?.length || context.libraryReferences || context.libraryRetrieval
    || context.purposeBudget?.purpose !== 'report'))
   ctx.addIssue({code:'custom',message:'REPORT_CONTEXT_INVALID'});
  // A research slot adds one tool call and the model call that reads its result (a card turn already has one tool call).
