@@ -10,6 +10,7 @@ import {
 } from '../services/publishMonitor/data';
 import { requirePostForMeDeps } from '../services/publishMonitor/secrets';
 import { publishMonitorConnectRouter } from './publishMonitorConnect';
+import { publishMonitorPublishRouter } from './publishMonitorPublish';
 import { guarded as safe } from './publishMonitorGuard';
 
 /** PUBLISH-MONITOR: a user reads and changes only their own monitoring state; off until enabled by admin. */
@@ -56,4 +57,5 @@ export const publishMonitorRouter = router({
     return manualRefresh(ctx.supabaseAdmin, await requirePostForMeDeps(ctx.supabaseAdmin), ctx.profileId, days, input);
   })),
   connect: publishMonitorConnectRouter,
+  publish: publishMonitorPublishRouter,
 });
