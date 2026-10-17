@@ -84,6 +84,25 @@
 
 ### 2.1 Owner 的新决定（2026-09-27 起，2026-10-17 更新）
 
+**2026-10-17：未登录点开通会员先去注册并记住所选方案；退款说明页 /refund 公开**
+
+Owner 原话（2026-10-17，总控-8 对话）：
+
+> 确认：未登录点开通会员，先去注册并记住所选方案，注册后直接回到该方案付款；退款说明页 /refund 不登录也能看。
+
+归属任务 PUBLIC-SITE / PAYWALL：实现见 [#1054](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1054)（注册后回到原方案付款，首月优惠资格仍以服务端判断为准）和 [#1053](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1053)（/refund 不需要登录）。staging 目前还没有 /refund 页面，退款政策正文由 Owner 准备，发布前未登录访问是 404。价格区的支付安全说明，等支付通道定了再写。
+
+**2026-10-17：评审团模型——评审用 Claude Sonnet 5.5、GPT-6.1 Sol、Gemini 3.8 Flash，汇总用 Claude Opus 5.5；评审团专用计费档案按实际请求取证**
+
+Owner 原话（2026-10-17，总控-8 对话）：
+
+> 评审模型： Claude Sonnet 5.5、chatgpt 6 sol、Gemini 3.8 Flash
+> 汇总模型： Claude opus 5.5
+
+> B：只按评审团实际会发的请求测，约 3.5 美元，在原预算内。但要改规则，让评审团专用的核验记录可以少做测试，opus 和GPT-6.1 Sol 的能力只会比 sonnet 更强，不用再跑一套Sonnet 和 Gemini 以前已经测过的这一整套标准测试了，浪费钱。
+
+归属任务 FUSION-REVIEW / FUSION-PROFILE（[FUSION-REVIEW.md](tasks/FUSION-REVIEW.md) 第 462 行）。"chatgpt 6 sol"指 OpenRouter 的 `openai/gpt-6.1-sol`。放宽只适用于 `fusion_review` / `fusion_summary` 用途的逐次计费档案，其他用途仍按 #665 的完整采样矩阵；FUSION-PROFILE 真实调用上限 5 美元，从 OpenRouter 现有测试余额出。
+
 **2026-10-17：扫描件识别用浏览器端 PaddleOCR；识别专用沙箱允许运行 WebAssembly，仍然禁止联网**
 
 Owner 原话（2026-10-17，总控-8 对话，对两个选项分别回复）：
@@ -104,7 +123,11 @@ Owner 原话（2026-10-17，总控-8 对话）：
 
 **2026-10-17：新增的人群样例报告在本机 Claude 应用里生成，不走 OpenRouter 额度，不设预算**
 
-Owner 2026-10-17 的决定（总控-8 转达，原话待补）：新增的人群样例报告在本机 Claude 应用里生成，不占 OpenRouter 额度，不设预算。承接 2026-10-16 "样例报告改由 Claude 在本地用定位 Skill 生成"的做法（见下面 2026-10-14 落地页条目）；本条只涉及模型生成；对标取数如果还要调用 monid（按次收费），这条决定没有给出额度，该笔费用要另获 Owner 批准并定上限，或复用已有数据。
+Owner 原话（2026-10-17，总控-8 对话）：
+
+> 8 个新样例报告是在本机 claude 应用跑的。 不是用 openrouter 的 API 额度跑的，所以不用设置预算。
+
+新增的人群样例报告在本机 Claude 应用里生成，不占 OpenRouter 额度，不设预算。承接 2026-10-16 "样例报告改由 Claude 在本地用定位 Skill 生成"的做法（见下面 2026-10-14 落地页条目）；本条只涉及模型生成；对标取数如果还要调用 monid（按次收费），这条决定没有给出额度，该笔费用要另获 Owner 批准并定上限，或复用已有数据。
 
 **2026-10-16：Codex 只做浏览器 E2E 验收，其余开发都由 Claude 做**
 
