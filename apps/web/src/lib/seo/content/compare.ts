@@ -18,12 +18,10 @@ export const COMPARED_ON = '2026-10-18';
 export const CHATGPT_SOURCES = [
   { label: 'OpenAI：ChatGPT 套餐与定价（ChatGPT Plans and Pricing）', href: 'https://chatgpt.com/pricing/' },
   { label: 'OpenAI 帮助中心：About ChatGPT Pro tiers（英文）', href: 'https://help.openai.com/en/articles/9793128-about-chatgpt-pro-tiers' },
-  { label: 'OpenAI 帮助中心：Memory in ChatGPT（英文）', href: 'https://help.openai.com/en/articles/8590148-memory-faq' },
 ];
 const CHATGPT_SOURCES_TW = [
   { label: 'OpenAI：ChatGPT 方案與定價（ChatGPT Plans and Pricing，英文）', href: CHATGPT_SOURCES[0].href },
   { label: 'OpenAI 說明中心：About ChatGPT Pro tiers（英文）', href: CHATGPT_SOURCES[1].href },
-  { label: 'OpenAI 說明中心：Memory in ChatGPT（英文）', href: CHATGPT_SOURCES[2].href },
 ];
 
 export const COMPARE_PATH = '/graylum-vs-chatgpt';
@@ -81,7 +79,7 @@ export function compareHans(plans: readonly PaywallPlanSource[] = []): ArticleCo
           head: ['比较项', 'ChatGPT', 'Graylum'],
           rows: [
             ['做账号定位', '可以聊定位，由你来提问、追问和整理。', '教练分三步主动提问，每一步由你确认，聊到的信息边聊边记成清单。'],
-            ['记住你的情况', `有记忆功能：可以保存你的信息，也可以参考过往对话，并可在设置里关闭（OpenAI 帮助中心，${COMPARED_ON} 查阅）。`, '你确认过的定位和资料保存在清单和资料库里，换窗口、换天都找得到。'],
+            ['记住你的情况', `有记忆功能：可以保存你的信息，也可以参考过往对话（OpenAI 官方定价页，${COMPARED_ON} 查阅）。`, '你确认过的定位和资料保存在清单和资料库里，换窗口、换天都找得到。'],
             ['完整的定位报告', '对话式：你提出要求，它来回答；要不要整理成报告、怎么整理，由你自己决定。', '三步走完可以生成按章节阅读的定位与执行方案报告（付费会员功能）。'],
             ['多模型评审', '对话式：怎么对比不同的答案，由你自己决定。', '评审团让几个不同的大模型分别审报告，有分歧再辩一轮，汇总成修订稿（Gold 会员功能）。'],
             ['价格', `有免费版和付费版：Plus 每月 $20，Pro 每月 $100 起（OpenAI 官方页面，${COMPARED_ON} 查阅，以官方页面为准）。`, `${graylumPrice(plans, 'hans')}（以价格页为准）。`],
@@ -166,7 +164,7 @@ export function compareTw(plans: readonly PaywallPlanSource[] = []): ArticleCont
           head: ['比較項目', 'ChatGPT', 'Graylum'],
           rows: [
             ['做帳號定位', '可以聊定位，由你自己提問、追問和整理。', '教練分三步主動提問，每一步由你確認，聊到的資訊邊聊邊記成清單。'],
-            ['記住你的狀況', `有記憶功能：可以儲存你的資訊，也能參考過去的對話，並可在設定中關閉（OpenAI 說明中心，${COMPARED_ON} 查閱）。`, '你確認過的定位和資料存在清單與資料庫裡，換視窗、換天都找得到。'],
+            ['記住你的狀況', `有記憶功能：可以儲存你的資訊，也能參考過去的對話（OpenAI 官方定價頁，${COMPARED_ON} 查閱）。`, '你確認過的定位和資料存在清單與資料庫裡，換視窗、換天都找得到。'],
             ['完整的定位報告', '對話式：由你提出需求、它來回答；要不要整理成報告、怎麼整理，都由你自己決定。', '三步走完可以產出依章節閱讀的定位與執行方案報告（付費會員功能）。'],
             ['多模型評審', '對話式：怎麼比對不同的答案，由你自己決定。', '評審團讓幾個不同的大模型分別審閱報告，有分歧再討論一輪，彙整成修訂稿（Gold 會員功能）。'],
             ['價格', `有免費版和付費版：Plus 每月 $20，Pro 每月 $100 起（OpenAI 官方頁面，${COMPARED_ON} 查閱，以官方頁面為準）。`, `${graylumPrice(plans, 'tw')}（以價格頁為準）。`],
