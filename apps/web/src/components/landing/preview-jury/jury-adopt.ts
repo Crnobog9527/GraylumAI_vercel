@@ -51,6 +51,14 @@ export function chosenCount(state: ChoiceState, sections: readonly DetailSection
 export const isComplete = (state: ChoiceState, sections: readonly DetailSection[]) =>
   chosenCount(state, sections) === choosable(sections).length;
 
+/** The chapters as a recorded choice left them; the draft on this device is gone after a reload or on another device. */
+export function recordedState(result: AdoptRecorded): ChoiceState {
+  return Object.fromEntries([
+    ...result.kept.map(section => [section, { use: 'original' as const }]),
+    ...result.adopted.map(section => [section, { use: 'revised' as const, confirmed: true }]),
+  ]);
+}
+
 export function toChoices(state: ChoiceState, sections: readonly DetailSection[]): AdoptChoice[] {
   return choosable(sections).map(item => {
     const use = state[item.section]?.use ?? 'original';
@@ -78,7 +86,9 @@ const CASCADE: AdoptProposed['diff']['cascade'] = [
  */
 export function mockPropose(sections: readonly DetailSection[], choices: readonly AdoptChoice[]): AdoptProposed | AdoptRecorded {
   const adopted = choices.filter(item => item.use === 'revised').map(item => item.section);
-  const kept = choices.filter(item => item.use === 'original').map(item => item.section);
+  // Like the server, every chapter not adopted counts as kept, unchanged ones included; the summary's whole-text entry
+  // ("全文", WHOLE_DOCUMENT in jury-report) is not a chapter.
+  const kept = sections.filter(item => item.section !== '全文' && !adopted.includes(item.section)).map(item => item.section);
   if (adopted.length === 0) return { state: 'recorded', versionId: null, adopted, kept };
   const seen = new Set<string>();
   const changes = sections.filter(item => adopted.includes(item.section)).flatMap(item => item.fields)

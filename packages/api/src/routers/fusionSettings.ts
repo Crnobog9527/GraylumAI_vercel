@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { adminProcedure, router } from '../trpc';
 import { fusionSettings } from '../services/fusion/settings';
-import { fusionSettingsView, saveFusionSettings } from '../services/fusion/settingsAdmin';
+import { fusionModelOptions, fusionSettingsView, saveFusionSettings } from '../services/fusion/settingsAdmin';
 
 const unavailable = new Set(['FUSION_SETTINGS_UNAVAILABLE']);
 async function safe<T>(work: () => Promise<T>): Promise<T> {
@@ -19,6 +19,8 @@ export const fusionSettingsRouter = router({
   get: adminProcedure.query(({ ctx }) => safe(() => fusionSettingsView(ctx.supabase))),
   update: adminProcedure.input(fusionSettings).mutation(({ ctx, input }) =>
     safe(() => saveFusionSettings(ctx.supabase, ctx.user.id, input))),
+  /** Models the panel may use, per purpose, checked by the Fusion admission (not the report one). Read-only. */
+  models: adminProcedure.query(({ ctx }) => safe(() => fusionModelOptions(ctx.supabase, ctx.user.id))),
   /** Look-back at real reviews (Owner 2026-10-14 "边用边调"): newest first, keyset paged. */
   reviews: adminProcedure.input(z.object({ limit: z.number().int().min(1).max(100).default(20),
     before: z.object({ createdAt: z.string().datetime({ offset: true }), reviewId: z.string().uuid() }).strict().optional() }).strict())

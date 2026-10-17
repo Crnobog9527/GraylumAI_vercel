@@ -9,6 +9,7 @@ import { router } from './trpc';
 import { runtimeRateLimitsRouter } from './routers/runtimeRateLimits';
 import { modelIdentityRouter } from './routers/modelIdentity';
 import { platformSecretsRouter } from './routers/platformSecrets';
+import { paymentNoticesRouter } from './routers/paymentNotices';
 import { researchToolsRouter } from './routers/researchTools';
 import { mentorBudgetRouter } from './routers/mentorBudget';
 import { chatRouter } from './routers/chat';
@@ -29,6 +30,7 @@ import { paymentsRouter } from './routers/payments';
 import { skillsRouter } from './routers/skills';
 import { accountRouter } from './routers/account';
 import { dataUseRouter } from './routers/dataUse';
+import { founderRouter } from './routers/founder';
 import { publishMonitorRouter } from './routers/publishMonitor';
 import { adminStaleRoundsRouter } from './routers/adminStaleRounds';
 import { fusionSettingsRouter } from './routers/fusionSettings';
@@ -57,6 +59,7 @@ export const appRouter = router({
   runtimeRateLimits: runtimeRateLimitsRouter,
   modelIdentity: modelIdentityRouter,
   platformSecrets: platformSecretsRouter,
+  paymentNotices: paymentNoticesRouter,
   researchTools: researchToolsRouter,
   research: researchRouter,
   checkin: checkinRouter,
@@ -72,6 +75,7 @@ export const appRouter = router({
   opc: opcRouter,
   account: accountRouter,
   dataUse: dataUseRouter,
+  founder: founderRouter,
   publishMonitor: publishMonitorRouter,
   library: libraryRouter,
 });

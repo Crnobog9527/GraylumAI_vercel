@@ -30,3 +30,15 @@ export function reportStripeCardReconciliation(findings) {
     extra: { count: findings.length, kinds: [...new Set(findings.map(item => item.kind))] },
   });
 }
+
+// PAY-NOTIFY: notices that need a person (uncertain after same-run retries, retries exhausted, digest
+// changed, missing template). Fixed codes and counts only: no notice ids, addresses or mail content.
+export function reportPaymentNoticeAttention(results) {
+  const codes = [...new Set(results.map(item => item.attention).filter(Boolean))];
+  if (!codes.length) return;
+  const code = 'PAY_NOTIFY_REVIEW_REQUIRED';
+  captureMessage(code, {
+    level: 'error', fingerprint: [code], tags: { category: 'billing', code },
+    extra: { count: results.filter(item => item.attention).length, reasons: codes },
+  });
+}

@@ -1,0 +1,108 @@
+{
+ "note": "Profile entries to append to runtime_payg_staging.profiles (Owner 2026-10-17 plan B). Not written by this PR; the controller applies them.",
+ "evidenceSha256": "d80cee10d3b8f6d12a75ecf46d9a8948971291350f5e0d2855fd07638e248864",
+ "profiles": [
+  {
+   "model": "openai/gpt-6.1-sol",
+   "endpointTag": "openai",
+   "protocol": "openrouter-chat-v1",
+   "profileVersion": "fusion-profile-20261017",
+   "evidenceVersion": "fusion-profile-20261017",
+   "admissionPath": "empirical",
+   "templateTokens": 4096,
+   "marginTokens": 4096,
+   "maxBytes": 196608,
+   "maxMessages": 128,
+   "maxTools": 2,
+   "maxSchemaBytes": 16384,
+   "purposes": [
+    "fusion_review"
+   ],
+   "requestFormats": [
+    "fusion-json-v1-stream"
+   ],
+   "reasoningVariants": [
+    {
+     "reasoning": {
+      "effort": "low"
+     },
+     "outputLimit": 8192,
+     "testedOutputLimit": 512,
+     "evidenceReference": "fusion-profile-20261017",
+     "manifestHash": "d80cee10d3b8f6d12a75ecf46d9a8948971291350f5e0d2855fd07638e248864",
+     "outputStressSamples": 2,
+     "includesReasoning": true
+    }
+   ],
+   "outputLimit": 8192,
+   "expiresAt": "2027-12-31T00:00:00Z",
+   "evidence": {
+    "scope": "fusion-request-shape",
+    "reference": "fusion-profile-20261017",
+    "manifestHash": "d80cee10d3b8f6d12a75ecf46d9a8948971291350f5e0d2855fd07638e248864",
+    "distinctSamples": 6,
+    "sizeBands": 2,
+    "maxVerifiedBytes": 186000,
+    "maxPromptToBytes": 0.2814,
+    "maxPromptToUpper": 0.2695,
+    "outputLimit": 8192,
+    "testedOutputLimit": 512,
+    "outputSemantics": "max-tokens-includes-reasoning",
+    "includesReasoning": true,
+    "cacheCovered": true,
+    "costBoundPassed": true
+   }
+  },
+  {
+   "model": "anthropic/claude-opus-5.5",
+   "endpointTag": "anthropic",
+   "protocol": "openrouter-chat-v1",
+   "profileVersion": "fusion-profile-20261017",
+   "evidenceVersion": "fusion-profile-20261017",
+   "admissionPath": "empirical",
+   "templateTokens": 4096,
+   "marginTokens": 4096,
+   "maxBytes": 196608,
+   "maxMessages": 128,
+   "maxTools": 2,
+   "maxSchemaBytes": 16384,
+   "purposes": [
+    "fusion_summary"
+   ],
+   "requestFormats": [
+    "fusion-json-v1-stream"
+   ],
+   "reasoningVariants": [
+    {
+     "reasoning": {
+      "effort": "low"
+     },
+     "outputLimit": 32768,
+     "testedOutputLimit": 2048,
+     "evidenceReference": "fusion-profile-20261017",
+     "manifestHash": "d80cee10d3b8f6d12a75ecf46d9a8948971291350f5e0d2855fd07638e248864",
+     "outputStressSamples": 2,
+     "includesReasoning": true
+    }
+   ],
+   "outputLimit": 32768,
+   "expiresAt": "2027-12-31T00:00:00Z",
+   "evidence": {
+    "scope": "fusion-request-shape",
+    "reference": "fusion-profile-20261017",
+    "manifestHash": "d80cee10d3b8f6d12a75ecf46d9a8948971291350f5e0d2855fd07638e248864",
+    "distinctSamples": 4,
+    "sizeBands": 2,
+    "maxVerifiedBytes": 185970,
+    "maxPromptToBytes": 0.3975,
+    "maxPromptToUpper": 0.3807,
+    "outputLimit": 32768,
+    "testedOutputLimit": 2048,
+    "outputSemantics": "max-tokens-includes-reasoning",
+    "includesReasoning": true,
+    "cacheCovered": true,
+    "costBoundPassed": true
+   }
+  }
+ ]
+}

@@ -49,8 +49,10 @@
 - 备选：如果 Owner 在 Supabase 后台给 Auth 配的 SMTP 本来就是某家邮件服务，可以直接用同一家的 API，少开一个账号；这需要 Owner 告诉我们是哪家（不需要给密钥）。
 - 接入方式：服务端一个很薄的发送模块（`packages/api/src/services/notify/`），只用 HTTPS API，不引入模板框架；
   模板是代码里的纯文本 + 简单 HTML，中英文各一份（语言规则见决定项 N4）。
-- 需要 Owner 做的平台事项：注册账号、在 graylum.com 加发信域名的 DNS 记录（SPF/DKIM）、生成 API 密钥并自己放进 Vercel 环境变量
-  （新增凭证，AGENTS 第 1 节）。staging 用单独的密钥和单独的子域名（例如 `notify-staging`），只发到测试邮箱。
+- 需要 Owner 做的平台事项：注册账号、在 graylum.com 加发信域名的 DNS 记录（SPF/DKIM）、生成 API 密钥并自己填进后台"第三方密钥"页的
+  Resend 槽位（`resend`，按 Owner 2026-10-14"业务第三方密钥放后台"的决定，不设 Vercel 环境变量后备；新增凭证，AGENTS 第 1 节）。
+  staging 用单独的密钥和单独的子域名（例如 `notify-staging`），只发到测试邮箱：测试收件名单放 Vercel 环境变量
+  `PAYMENT_NOTICE_TEST_RECIPIENTS`（逗号分隔，不是密钥），名单为空时 staging 一封都不发。
 
 ### 4.2 发送记录（防重复）
 

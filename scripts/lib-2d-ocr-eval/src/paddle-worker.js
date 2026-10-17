@@ -3,6 +3,14 @@ import { probeNetwork } from './probe.js';
 import { deskew } from './deskew.js';
 import { orderColumns, orderRows } from './columns.js';
 let service = null;
+async function rotate180(input) {
+  const bmp = input instanceof OffscreenCanvas ? input : await createImageBitmap(new Blob([input]));
+  const c = new OffscreenCanvas(bmp.width, bmp.height), x = c.getContext('2d');
+  x.translate(bmp.width, bmp.height);
+  x.rotate(Math.PI);
+  x.drawImage(bmp, 0, 0);
+  return c;
+}
 self.onmessage = async ({ data }) => {
   try {
     if (data.type === 'probe') {
@@ -34,13 +42,21 @@ self.onmessage = async ({ data }) => {
         angle = d.angle;
         input = d.canvas;
       }
-      let r;
-      if (data.columns) {
-        const f = await service.recognize(input, { flatten: true, strategy: 'per-box' });
+      const once = async (img) => {
+        if (!data.columns) return service.recognize(img);
+        const f = await service.recognize(img, { flatten: true, strategy: 'per-box' });
         const items = f.results || f;
-        r = { text: orderColumns(items) ?? orderRows(items) };
-      } else r = await service.recognize(input);
-      self.postMessage({ type: 'result', id: data.id, text: r.text, ms: performance.now() - t0, angle });
+        const conf = items.length ? items.reduce((a, i) => a + (i.confidence || 0), 0) / items.length : 0;
+        return { text: orderColumns(items) ?? orderRows(items), confidence: conf };
+      };
+      let r = await once(input);
+      // +orient: a page scanned upside down reads as low-confidence noise; retry it turned 180° and keep the better pass.
+      if (data.orient && !(r.confidence >= 0.8)) {
+        const flipped = await rotate180(input);
+        const second = await once(flipped);
+        if ((second.confidence || 0) > (r.confidence || 0)) r = { ...second, flipped: true };
+      }
+      self.postMessage({ type: 'result', id: data.id, text: r.text, ms: performance.now() - t0, angle, flipped: !!r.flipped });
     }
   } catch (e) {
     self.postMessage({ type: 'error', id: data.id, msg: String((e && (e.stack || e.message)) || e).slice(0, 800) });

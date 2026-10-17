@@ -3,6 +3,7 @@
 // production entry points plus a main-thread responsiveness probe.
 import { extractDocxInBrowser } from '../docx/client';
 import { extractPdfInBrowser } from '../pdf/client';
+import { recognizeImagesInBrowser } from '../ocr/client';
 import { SandboxError } from '../errors';
 import { runSandboxedWorker } from '../sandbox-host';
 
@@ -54,8 +55,24 @@ const api = {
     if (options.abortAfterMs !== undefined) setTimeout(() => controller.abort(), options.abortAfterMs);
     return measured(() => extractPdfInBrowser(blob, { timeoutMs: options.timeoutMs, signal: controller.signal }));
   },
-  runWorker(workerSource: string, timeoutMs: number) {
-    return measured(() => runSandboxedWorker({ workerSource, input: new ArrayBuffer(8), timeoutMs }));
+  runWorker(workerSource: string, timeoutMs: number, allowWasm = false) {
+    return measured(() => runSandboxedWorker({ workerSource, input: new ArrayBuffer(8), timeoutMs, allowWasm }));
+  },
+  /** LIB-2d: recognises samples; `flip` turns a sample upside down first, `garbage` sends random bytes. */
+  async recognizeSamples(names: string[], options: { flip?: string[] } = {}) {
+    const blobs = await Promise.all(names.map(async (name) => {
+      if (name === 'garbage') return new Blob([crypto.getRandomValues(new Uint8Array(4096))]);
+      const blob = await (await fetch(`/sample/${encodeURIComponent(name)}`)).blob();
+      if (!options.flip?.includes(name)) return blob;
+      const bitmap = await createImageBitmap(blob);
+      const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+      const ctx = canvas.getContext('2d')!;
+      ctx.translate(bitmap.width, bitmap.height);
+      ctx.rotate(Math.PI);
+      ctx.drawImage(bitmap, 0, 0);
+      return canvas.convertToBlob({ type: 'image/jpeg', quality: 0.9 });
+    }));
+    return measured(() => recognizeImagesInBrowser(blobs));
   },
   /** Cancels while the relay hash is still being computed (before any frame exists). */
   runCancelledEarly() {

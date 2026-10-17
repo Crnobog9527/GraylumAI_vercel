@@ -7,7 +7,9 @@ import { Button } from '@/components/ui/button';
 import { trpc } from '@/trpc/client';
 import { CreditPackagePriceTag } from './creditPackagePrice';
 import { ProfileCatalogState } from './ProfileCatalogState';
-import { PACK_MEMBERS_ONLY_NOTICE, PACK_RENEWAL_GRACE_NOTICE, creditPackBuyState, isPaidMember, type PackEntitlement } from './creditPackageGate';
+import {
+  PACK_MEMBERS_ONLY_NOTICE, PACK_RENEWAL_GRACE_NOTICE, creditPackBuyState, isPaidMember, memberPackReady, type PackEntitlement,
+} from './creditPackageGate';
 
 // 积分加油包区块
 export const CreditPackagesSection = memo(function CreditPackagesSection({
@@ -89,7 +91,7 @@ export const CreditPackagesSection = memo(function CreditPackagesSection({
         ) : packages.length === 0 ? (
           <ProfileCatalogState status="empty" />
         ) : packages.map((pkg) => {
-          const buy = creditPackBuyState({ price: pkg.price, checkoutReady: pkg.checkout_ready && checkoutOpen,
+          const buy = creditPackBuyState({ price: pkg.price, checkoutReady: memberPackReady(pkg.member_checkout_ready, entitlement) && checkoutOpen,
             pending: pendingPackageId === pkg.id, entitlement, renewalGrace });
           return (
           <div

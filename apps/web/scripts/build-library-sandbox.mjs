@@ -1,21 +1,24 @@
 #!/usr/bin/env node
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// Bundles the library sandbox parser Workers (LIB-2b Word, LIB-2c PDF) into public/library-sandbox/ so they are served
+// Bundles the library sandbox parser Workers (LIB-2b Word, LIB-2c PDF, LIB-2d recognition) into public/library-sandbox/ so they are served
 // from Graylum's own origin, never a CDN. The page fetches the bundle text and starts it from a blob
 // inside the sandboxed frame. Third-party license texts go into a file next to each bundle.
 
 import { build } from 'esbuild';
+import { existsSync } from 'node:fs';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { pdfjsSandboxPlugin } from './library-sandbox-pdfjs.mjs';
+import { libraryOcrAssets } from './library-ocr-assets.mjs';
 
 const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 export const SANDBOX_WORKERS = {
   'docx-worker': 'src/lib/library-sandbox/docx/worker-entry.ts',
   'pdf-worker': 'src/lib/library-sandbox/pdf/worker-entry.ts',
+  'ocr-worker': 'src/lib/library-sandbox/ocr/worker-entry.ts',
 };
 
 /** Extra license files for data bundled from a package (pdf.js ships Adobe's CMaps under their own terms). */
@@ -34,6 +37,19 @@ function packageRoots(inputs) {
   return [...roots].sort();
 }
 
+/** A dependency's root; some packages (onnxruntime-web's) do not export their package.json. */
+function packageDirectory(require, name) {
+  try {
+    return path.dirname(require.resolve(`${name}/package.json`));
+  } catch {
+    // Fall through: look for the folder along the module search paths.
+  }
+  for (const dir of require.resolve.paths(`${name}/`) ?? []) {
+    if (existsSync(path.join(dir, name, 'package.json'))) return path.join(dir, name);
+  }
+  throw new Error(`library sandbox: cannot find package ${name}`);
+}
+
 /**
  * Adds every production dependency of the bundled packages: some ship prebuilt files that already
  * contain their dependencies (JSZip's dist includes pako), so their notices must be listed too.
@@ -46,7 +62,7 @@ async function withDependencies(roots) {
     const manifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
     const require = createRequire(path.join(root, 'package.json'));
     for (const name of Object.keys(manifest.dependencies ?? {})) {
-      const dependency = path.dirname(require.resolve(`${name}/package.json`));
+      const dependency = packageDirectory(require, name);
       if (!all.has(dependency)) {
         all.add(dependency);
         queue.push(dependency);
@@ -65,10 +81,23 @@ async function licenseText(root) {
   return `${manifest.name}@${manifest.version} — ${manifest.license ?? 'UNKNOWN'}\n\n${text.trim()}\n${extra.join('')}`;
 }
 
+/** Recognition runtime and models (LIB-2d), checked by SHA-256, plus their licence notice. */
+async function writeOcrAssets(outdir) {
+  const files = await libraryOcrAssets(webRoot);
+  const notice = [await readFile(path.join(webRoot, 'assets/library-ocr/README.md'), 'utf8'),
+    await readFile(path.join(webRoot, 'assets/library-ocr/LICENSE-Apache-2.0.txt'), 'utf8')].join('\n---\n\n');
+  if (outdir) {
+    await mkdir(path.join(outdir, 'ocr'), { recursive: true });
+    for (const [name, bytes] of Object.entries(files)) await writeFile(path.join(outdir, 'ocr', name), bytes);
+    await writeFile(path.join(outdir, 'ocr', 'MODELS-LICENSE.txt'), notice);
+  }
+  return files;
+}
+
 /**
- * Returns `{ name: { code, licenses } }`; writes files unless `outdir` is null.
+ * Returns `{ name: { code, licenses } }` and the recognition assets; writes files unless `outdir` is null.
  * @param {{ outdir?: string | null, minify?: boolean }} [options]
- * @returns {Promise<Record<string, { code: string, licenses: string }>>}
+ * @returns {Promise<Record<string, { code: string, licenses: string }> & { ocrAssets?: Record<string, Buffer> }>>}
  */
 export async function buildLibrarySandbox({ outdir = path.join(webRoot, 'public/library-sandbox'), minify = true } = {}) {
   /** @type {Record<string, { code: string, licenses: string }>} */
@@ -99,6 +128,7 @@ export async function buildLibrarySandbox({ outdir = path.join(webRoot, 'public/
       await writeFile(path.join(outdir, `${name}.licenses.txt`), licenses);
     }
   }
+  Object.defineProperty(results, 'ocrAssets', { value: await writeOcrAssets(outdir), enumerable: false });
   return results;
 }
 

@@ -1,0 +1,16 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/* The 评审团 entry in the positioning footer: the app's own tokens, next to the report entry. */
+
+.link {
+  display: inline-flex; align-items: center; min-height: 36px; color: var(--color-foreground); font-size: 14px;
+  text-decoration: underline; text-underline-offset: 3px;
+}
+
+.card {
+  flex: 1 0 100%; display: grid; gap: 8px; max-width: 640px; padding: 14px 16px; border: 1px solid var(--border-primary);
+  border-radius: 12px; background: var(--bg-primary); font-size: 14px; line-height: 1.7;
+}
+.card p { margin: 0; }
+.actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.error { color: var(--color-destructive); }
+.cap b { font-variant-numeric: tabular-nums; }

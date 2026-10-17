@@ -238,7 +238,7 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
                 (step: { id: string; resources: string[] }) =>
                   step.id === v.stepId,
               ).resources,
-        searchEnabled: false,
+        searchEnabled: false, researchTools: v.purpose === "mentor", // RT-3b PR-3: still off unless the admin switch is on
       }).prepare(runtimeRequest);
     },
     async saveResult(value: unknown) {
