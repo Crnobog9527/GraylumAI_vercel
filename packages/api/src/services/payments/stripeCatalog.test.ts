@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ retrieve: vi.fn(), scope: vi.fn(), rpc: vi.fn() }));
 vi.mock('../stripe', () => ({ getStripeClient: () => ({ prices: { retrieve: mocks.retrieve } }) }));
 vi.mock('./stripeCheckoutPersistence', () => ({ resolveStripeScope: mocks.scope }));
-import { loadCurrentStripePrices, saveStripeCatalog } from './stripeCatalog';
+import { loadConfiguredStripePrices, loadCurrentStripePrices, loadMemberPackReadiness, saveStripeCatalog } from './stripeCatalog';
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -145,5 +145,24 @@ describe('Stripe catalog authority', () => {
     await expect(loadCurrentStripePrices(input)).rejects.toThrow('PAY_COMMON_PRICE_MAPPING_AMBIGUOUS');
     query.in.mockResolvedValue({ data: null, error: { code: '42501' } });
     await expect(loadCurrentStripePrices(input)).rejects.toThrow('PAY_COMMON_MAPPING_READ_FAILED');
+  });
+});
+
+describe('R7: the catalog shown for checkout follows the Stripe account mode', () => {
+  const db = (rows: unknown[]) => {
+    const query: Record<string, ReturnType<typeof vi.fn>> = {};
+    for (const method of ['select', 'eq', 'in']) query[method] = vi.fn(() => chain);
+    const chain = { ...query, then: (resolve: (value: unknown) => unknown) => Promise.resolve({ data: rows, error: null }).then(resolve) };
+    return { from: vi.fn(() => chain), eq: query.eq! };
+  };
+  it('a live account reads its live plan and pack prices instead of reporting nothing buyable', async () => {
+    mocks.scope.mockResolvedValue({ merchant: 'acct_live', mode: 'live' });
+    const plans = db([{ external_id: 'price_live', membership_plan_id: 'plan', billing_cycle: 'monthly' }]);
+    expect(await loadConfiguredStripePrices({ db: plans as never, kind: 'membership_plan', ids: ['plan'] }))
+      .toEqual(new Map([['plan:monthly', 'price_live']]));
+    expect(plans.eq).toHaveBeenCalledWith('mode', 'live');
+    const packs = db([{ external_id: 'price_pack_live', credit_package_id: 'pack', package_tier: 'gold' }]);
+    expect(await loadMemberPackReadiness({ db: packs as never, ids: ['pack'] })).toEqual(new Map([['pack:gold', true]]));
+    expect(packs.eq).toHaveBeenCalledWith('mode', 'live');
   });
 });

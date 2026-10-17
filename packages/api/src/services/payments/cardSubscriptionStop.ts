@@ -3,6 +3,7 @@ import type Stripe from 'stripe';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { GRAYLUM_INITIATED_CANCEL } from './purchaseFacts';
 import { PAYMENT_EVIDENCE_CONFLICT } from './stripeWebhookError';
+import { resolveStripeScope } from './stripeCheckoutPersistence';
 
 /** "Stopped" means no further renewal: cancel_at_period_end, or a cancel_at exactly at the current paid-period end
  * (a later cancel_at still renews in between, so it is not a stop). */
@@ -13,9 +14,11 @@ export function stripeStopState(subscription: Stripe.Subscription) {
   return { stop: stopAtEnd, canceled: subscription.status === 'canceled' || subscription.status === 'incomplete_expired' };
 }
 
+/** The subscription as Stripe has it, in this account's own mode (R7: live in production, test on staging). */
 export async function readSubscription(stripe: Stripe, subscriptionId: string) {
-  const subscription = await stripe.subscriptions.retrieve(subscriptionId);
-  if (subscription.object !== 'subscription' || subscription.id !== subscriptionId || subscription.livemode) {
+  const [scope, subscription] = await Promise.all([resolveStripeScope(stripe), stripe.subscriptions.retrieve(subscriptionId)]);
+  if (subscription.object !== 'subscription' || subscription.id !== subscriptionId
+    || subscription.livemode !== (scope.mode === 'live')) {
     throw new Error(PAYMENT_EVIDENCE_CONFLICT);
   }
   return subscription;

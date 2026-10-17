@@ -13,7 +13,7 @@ import { recoverMethodCheckout } from './walletWebhook';
 
 function fixture(overrides: Record<string, unknown> = {}) {
   const order = { id: 'order', user_id: 'user', payment_method: 'card', item_type: 'membership_plan', entitlement_term: 'month',
-    price_ref_id: 'ref', merchant_namespace: 'fixture', ...overrides };
+    price_ref_id: 'ref', merchant_namespace: 'fixture', payment_mode: 'test', ...overrides };
   const db = { rpc: vi.fn().mockResolvedValue({ data: { state: 'fulfilled' }, error: null }),
     from: vi.fn((table: string) => {
       const chain = { select: vi.fn(() => chain), eq: vi.fn(() => chain), maybeSingle: vi.fn().mockResolvedValue({ error: null,

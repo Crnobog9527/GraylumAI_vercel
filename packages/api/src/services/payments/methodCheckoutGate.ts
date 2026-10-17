@@ -32,11 +32,11 @@ function productionDeployment(env: Env) {
     && url.pathname === '/' && !url.search && !url.hash;
 }
 
-/** Hard guard (R7 review P1): the checkout path behind this gate (methodPayments paymentMode, createStripeMethodCheckout
- * scope, methodMembership mode, database functions) is still test-only. Until R7 PR-B wires live mode through all of it,
- * production stays closed here even with the bound deployment and a switch set to `true`. PR-B flips this to `true` and
- * updates the test. Staging is not affected. */
-export const LIVE_PAYMENT_PIPELINE_READY = false;
+/** Hard guard (R7 review P1): production stays closed here until the checkout, fulfilment, renewal, entitlement and
+ * refund paths run in the Stripe account's live mode. R7 PR-B1/B2/B3 (0296/0297/0302) wired them, so the marker is on;
+ * opening production still needs the bound deployment and a switch set to `true` (Owner approval). Staging is not
+ * affected. */
+export const LIVE_PAYMENT_PIPELINE_READY = true;
 
 /** Stripe card checkout (PAY-STRIPE-MP 3c, "打开银行卡下单"). Staging: open on the staging deployment, behind the
  * default-off server switch `payment_method_routes.card.enabled` / `card_cn.enabled` (the controller turns it on).

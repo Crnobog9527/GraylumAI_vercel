@@ -21,6 +21,7 @@ import { stripeMpExternalRefundCases } from './stripe-mp-external-refund.mjs';
 import { stripeMpUpgradeCases } from './stripe-mp-upgrade.mjs';
 import { stripeMpPackRefundCases } from './stripe-mp-pack-refund.mjs';
 import { stripeMpSubscriptionRefundCases } from './stripe-mp-subscription-refund.mjs';
+import { stripeMpLiveCases } from './stripe-mp-live.mjs';
 import { POSTGRES_IMAGE } from '../v3/images.mjs';
 import { buildFromFiles, installPgCronStub } from '../baseline/build-from-files.mjs';
 
@@ -58,7 +59,9 @@ try {
     '0237_pay_stripe_mp_card_packs.sql', '0238_pay_stripe_mp_renewal.sql',
     '0243_pay_common_membership_expiry.sql', '0247_pay_stripe_mp_external_refund.sql',
     '0251_pay_stripe_mp_upgrade_observation.sql', '0252_pay_stripe_mp_pack_refund.sql',
-    '0253_pay_stripe_mp_subscription_refund.sql']) {
+    '0253_pay_stripe_mp_subscription_refund.sql',
+    // 0296 patches the bodies replayed above; applied twice it leaves the patched bodies unchanged.
+    '0296_pay_stripe_live_mode.sql', '0296_pay_stripe_live_mode.sql']) {
     sql(readFileSync(resolve(root, 'packages/db/migrations', file),'utf8'));
   }
   assert.deepEqual(fingerprint(),before,'new migration repeat preserves structure');
@@ -114,6 +117,7 @@ try {
   cases.push(...await stripeMpUpgradeCases({admin,service}));
   cases.push(...await stripeMpPackRefundCases({admin,service}));
   cases.push(...await stripeMpSubscriptionRefundCases({admin,service}));
+  cases.push(...await stripeMpLiveCases({admin,service}));
   console.log(JSON.stringify({result:'PASS',replay:report,
     cases:['event-idempotency','event-conflict','test-live-isolation','refund-event-not-payment-dedup',
       'service-only-receipt','durable-lookup-refs-no-contact-data','route-version-cas','route-delete-denied',...scopedCases,...cases]}));

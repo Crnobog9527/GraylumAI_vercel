@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { inferRouterContext } from '@trpc/server';
 import { router as createTRPCRouter } from '../trpc';
 import { methodPaymentProcedures } from './methodPayments';
@@ -7,7 +7,10 @@ import { logger } from '../lib/logger';
 import { WaffoFailure } from '../services/payments/waffoFailure';
 import { RateLimitError } from '../lib/rateLimitError';
 import { assertCheckoutRateLimit } from '../services/stripe';
-const mocks = vi.hoisted(() => ({ cancel: vi.fn(), provider: vi.fn(), wallet: vi.fn(), card: vi.fn(), gateOpen: { value: false } }));
+const mocks = vi.hoisted(() => ({ cancel: vi.fn(), provider: vi.fn(), wallet: vi.fn(), card: vi.fn(), gateOpen: { value: false },
+  membership: vi.fn(), scope: vi.fn(), stripeConfigured: { value: false } }));
+vi.mock('../services/payments/methodMembership', () => ({ readMethodMembership: mocks.membership }));
+vi.mock('../services/payments/stripeCheckoutPersistence', () => ({ resolveStripeScope: mocks.scope }));
 vi.mock('../services/payments/waffoTestOperationsClient', () => ({ getWaffoTestOperationsClient: mocks.provider }));
 // Every new checkout is closed in code during PR-1; the error-mapping tests open the gate explicitly.
 vi.mock('../services/payments/methodCheckoutGate', async (load) => {
@@ -19,7 +22,7 @@ vi.mock('../services/payments/methodCheckoutGate', async (load) => {
 vi.mock('../services/payments/walletCheckout', () => ({ createWalletCheckout: mocks.wallet }));
 vi.mock('../services/payments/stripeMethodCheckout', () => ({ createStripeCardCheckout: mocks.card }));
 vi.mock('../services/stripe', () => ({ assertCheckoutRateLimit: vi.fn(), getStripeAppUrl: () => 'https://auth-staging.graylum.com',
-  getStripeClient: vi.fn() }));
+  getStripeClient: vi.fn(), isStripeCheckoutConfigured: () => mocks.stripeConfigured.value }));
 const router = createTRPCRouter(methodPaymentProcedures);
 const userId = '00000000-0000-4000-8000-000000000001';
 const subscriptionId = '00000000-0000-4000-8000-000000000002';
@@ -200,4 +203,18 @@ it('answers an expected admission refusal with a typed error and plain message, 
   expect(warn).toHaveBeenCalledWith('billing', 'pay_waffo_method_failed', expect.objectContaining({
     operation: 'method_checkout', code: 'PAY_WAFFO_MEMBERSHIP_TRANSITION_REQUIRED' }));
   warn.mockRestore();
+});
+
+describe('R7: member page reads in the connected Stripe account mode', () => {
+  it('reads local membership in test mode without calling Stripe when checkout is not configured; live when it is', async () => {
+    mocks.membership.mockResolvedValue({ mode: 'test' });
+    mocks.stripeConfigured.value = false;
+    await fixture().caller.methodMembership();
+    expect(mocks.scope).not.toHaveBeenCalled();
+    expect(mocks.membership).toHaveBeenLastCalledWith(expect.anything(), userId, expect.any(Number), process.env, 'test');
+    mocks.stripeConfigured.value = true; mocks.scope.mockResolvedValue({ merchant: 'acct_live', mode: 'live' });
+    await fixture().caller.methodMembership();
+    expect(mocks.membership).toHaveBeenLastCalledWith(expect.anything(), userId, expect.any(Number), process.env, 'live');
+    mocks.stripeConfigured.value = false;
+  });
 });
