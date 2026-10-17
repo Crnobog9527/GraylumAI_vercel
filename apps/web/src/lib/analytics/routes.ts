@@ -31,6 +31,7 @@ const APP_TEMPLATES = [
   '/marketplace',
   '/library',
   '/profile',
+  '/expert-consult',
   '/runtime',
   '/positioning',
   '/positioning/[draftId]',
