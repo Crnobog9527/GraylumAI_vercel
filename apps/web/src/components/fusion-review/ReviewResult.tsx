@@ -10,15 +10,17 @@ import type { AdoptActions } from '@/components/landing/preview-jury/use-adoptio
 import { JuryReader } from '@/components/landing/preview-jury/JuryReader';
 import { JuryRecords } from '@/components/landing/preview-jury/JuryRecords';
 import layout from '@/components/landing/preview-jury/jury-layout.module.css';
-import { endedNotice } from './review-adapter';
+import { endedNotice, feeText, type ReviewFee } from './review-adapter';
 import styles from './review-page.module.css';
 
 /**
  * The ended review: the whole report made easy to read with the chapter choice (the prototype's result page, now on
  * the real adopt / confirmAdoption), and each person's record beside it. Opening it marks the review as seen.
  */
-export function ReviewResult({ draftId, detail, source, names, onChanged }: {
+export function ReviewResult({ draftId, detail, source, names, fee, onChanged }: {
   draftId: string; detail: JuryDetail; source: ReaderSource; names: JurySeatNames;
+  /** The review's fixed price and what was actually charged (0294). */
+  fee?: ReviewFee;
   /** Read the review again (a choice recorded in another tab, or a new formal version). */
   onChanged: () => void;
 }) {
@@ -49,9 +51,11 @@ export function ReviewResult({ draftId, detail, source, names, onChanged }: {
     summary: detail.summary.status !== 'none',
   };
   const notice = endedNotice(detail.state, detail.outcome);
+  const charge = feeText(fee);
   return (
     <>
       {notice ? <p className={styles.notice} role="status">{notice}</p> : null}
+      {charge ? <p className={styles.notice} role="status">{charge}</p> : null}
       <div className={layout.results}>
         <JuryReader detail={detail} names={names} source={source} actions={actions} />
         <JuryRecords detail={detail} names={names} arrived={arrived} live={false} following="S" picked={picked}

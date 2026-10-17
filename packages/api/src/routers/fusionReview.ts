@@ -155,10 +155,8 @@ export const fusionReviewRouter = router({
     if (result.error) throw new Error(result.error.message === 'FUSION_REVIEW_DENIED' ? 'FUSION_REVIEW_DENIED' : 'FUSION_REVIEW_UNAVAILABLE');
     return { seen: true };
   }),
-  // Closing only cancels and releases in the database: it must work even after the staging call window is
-  // closed or switched off, so a user can always stop and free the review slot (#962 review).
-  stop: reader.input(review).mutation(({ ctx, input }) => ctx.flow.stop(input.reviewId)),
-  end: reader.input(review).mutation(({ ctx, input }) => ctx.flow.end(input.reviewId)),
+  // No stop or end (Owner 2026-10-17: "评审团功能不提供中途停止的选项，用户只要点了启用，他就必须得用完"): a review only
+  // ends on its own; deleting the content or the account still ends it with a full refund (0294).
   /** Progress events for the animation (FUSION-REVIEW §2.2a); clients play the ids they have not seen. */
   events: reader.input(review).query(({ ctx, input }) => ctx.flow.events(input.reviewId)),
   /** Per-section adoption (Owner 2026-10-14): R14 propose + apply only, no model call, so no staging call window is needed. */

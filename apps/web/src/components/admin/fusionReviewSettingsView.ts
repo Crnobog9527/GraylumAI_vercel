@@ -8,10 +8,12 @@ export type ReviewSettings = FusionSettingsValue['review'];
 
 export const SEAT_CODES = ['A', 'B', 'C'] as const;
 export const NAME_MAX = 20;
+/** Credits per review (Owner 2026-10-17: 暂定 1500); the server allows 1–999999. */
+export const PRICE_LIMITS = { min: 1, max: 999999 } as const;
 export const TOKEN_LIMITS = { opinion: { min: 512, max: 32768 }, summary: { min: 1024, max: 32768 } } as const;
 
 const ERRORS: Record<string, string> = {
-  FUSION_REVIEW_INCOMPLETE: '开启评审团前，要选好 3 位评审的模型、汇总模型、评审 Skill，并填写单次评审预算。',
+  FUSION_REVIEW_INCOMPLETE: '开启评审团前，要选好 3 位评审的模型、汇总模型、评审 Skill，并填写单次评审平台成本保护线。',
   FUSION_REVIEWERS_DUPLICATE: '3 位评审要用 3 个不同的模型。',
   FUSION_REVIEW_CALLS_EXCEEDED: '轮数和评审人数加起来超过单次评审的调用上限。',
   FUSION_PANEL_NAME_INVALID: '评审和汇总的显示名要填，最多 20 个字。',
@@ -51,7 +53,11 @@ export function draftProblems(review: ReviewSettings): string[] {
   }
   const budget = review.maxBudgetUsd?.trim() ?? '';
   if (budget && (!/^(0|[1-9]\d{0,3})(\.\d{1,6})?$/.test(budget) || Number(budget) <= 0)) {
-    problems.push('单次评审预算要填大于 0 的美元金额，例如 0.5。');
+    problems.push('平台成本保护线要填大于 0 的美元金额，例如 5。');
+  }
+  const price = review.fixedPriceCredits;
+  if (!Number.isInteger(price) || price < PRICE_LIMITS.min || price > PRICE_LIMITS.max) {
+    problems.push(`每次评审的价格要是 ${PRICE_LIMITS.min}–${PRICE_LIMITS.max} 之间的整数积分。`);
   }
   if (review.enabled && (picked.length !== SEAT_CODES.length || !review.summaryModelId || !review.skillId || !review.maxBudgetUsd)) {
     problems.push(ERRORS.FUSION_REVIEW_INCOMPLETE);
