@@ -133,6 +133,15 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     expect(answered).not.toContain('data-question-card="open"');
   });
 
+  it('orders step two as the creation Skill does: topic, title and cover, material and voice, script (round nine, V2)', () => {
+    expect(L_LATER.two.stages.map(stage => stage.label)).toEqual(['选题', '标题和封面', '找资料和文风', '口播稿和分镜']);
+    const { titles, covers, pick } = L_LATER_CHAT.cover;
+    expect(titles).toHaveLength(10);
+    expect(covers).toHaveLength(10);
+    for (const choice of ['**#1**', '**#6**', '**#2**', '**#10**']) expect(pick).toContain(choice);
+    expect(L_LATER_CHAT.voice.fields.map(([name]) => name)).toEqual(['语气', '句子长短', '开头方式', '常用表达']);
+  });
+
   it('shows steps two and three in full, as the launched product, and the jury larger', () => {
     const on = render();
     for (const step of [L_LATER.two, L_LATER.three]) {

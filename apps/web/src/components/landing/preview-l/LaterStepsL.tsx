@@ -13,7 +13,6 @@ import { CtaK } from '@/components/landing/preview-k/CtaK';
 import k from '@/components/landing/preview-k/k.module.css';
 import { RailJ } from '@/components/landing/preview-j/PositioningClipJ';
 import takeover from '@/components/landing/preview-j/takeover-j.module.css';
-import type { ComposerPreviewParagraph } from '@/components/opc/composer-view';
 import { ContentDraftView } from '@/components/opc/content-draft-view';
 import { ResearchCallList } from '@/components/research/research-call-list';
 import type { ResearchCall } from '@/components/research/research-model';
@@ -36,7 +35,7 @@ const BEAT_MS = 900;
  * seven (T8): what is typed (the person's message in the box, the coach's reply, the table row by row) is typed live, and
  * the next beat waits for it (useTypingGate).
  */
-const STAGE_BEATS: Record<string, number> = { topics: 6, library: 4, voice: 8, script: 5, publish: 4, monitor: 4, review: 6 };
+const STAGE_BEATS: Record<string, number> = { topics: 6, cover: 5, material: 8, script: 5, publish: 4, monitor: 4, review: 6 };
 
 const PUBLISHING = '发布中';
 const reducedMotion = () => Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
@@ -145,21 +144,25 @@ function StagePicture({ id, beat, live }: { id: string; beat: number; live: bool
   return <WorkChatPicture id={id} beat={beat} live={live} />;
 }
 
-const call = (query: string, dataKind: string, toolName: string, done: boolean) => ({
-  callId: query, toolName, args: {}, query, platform: 'tiktok', dataKind, state: done ? 'succeeded' : 'running',
+/** A fetch as the product's search record: running, then done (with what came back, when said). */
+const call = (query: string, dataKind: string, toolName: string, done: boolean, found?: string) => ({
+  callId: query, toolName, args: {}, query: done && found ? `${query}：${found}` : query, platform: 'tiktok', dataKind,
+  state: done ? 'succeeded' : 'running',
 }) as ResearchCall;
-/** The library read, as the product's status line: in progress, then done. */
-const readNotice = (files: readonly string[], done: boolean) =>
-  [{ id: 'read', tone: 'status' as const, busy: !done, text: `${done ? CHAT.library.read : CHAT.library.reading}：${files.join('、')}` }];
+/** A status line as the product shows it: in progress, then done. */
+const notice = (id: string, text: string, busy: boolean) => ({ id, tone: 'status' as const, busy, text });
+/** The library read: in progress, then done. */
+const readNotice = (files: readonly string[], done: boolean) => [notice('read', `${done ? '已读取资料库' : '正在读取资料库'}：${files.join('、')}`, !done)];
+/** The title and cover reply (round nine, V2): ten titles with their hooks, ten covers, the pick. */
+const COVER_REPLY = '先给 10 个标题，每个标了用的什么钩子（数据为示意）：\n\n| # | 标题 | 钩子 |\n|---|---|---|\n'
+  + CHAT.cover.titles.map(([title, hook], index) => `| ${index + 1} | ${title} | ${hook} |`).join('\n')
+  + '\n\n再给 10 种封面做法：\n\n| # | 封面画面 | 适合 |\n|---|---|---|\n'
+  + CHAT.cover.covers.map(([cover, fits], index) => `| ${index + 1} | ${cover} | ${fits} |`).join('\n')
+  + `\n\n${CHAT.cover.pick}`;
 const SHOTS = `| ${CHAT.script.shotHead.join(' | ')} |\n|${CHAT.script.shotHead.map(() => '---').join('|')}|\n`;
 const STORYBOARD = CHAT.script.shots.map(([n, size, frame, , time]) => `镜头 ${n}（${size}）：${frame} · ${time}`).join('\n');
-const LIBRARY_ASK = `@${CHAT.library.document} ${CHAT.library.user}`;
-const ASK_PREFIX = `@${CHAT.library.document} `;
-/** The library question as typed so far: the @ reference becomes the product's chip once it is whole. */
-const askParagraphs = (typed: string): ComposerPreviewParagraph[] => (typed.length < ASK_PREFIX.length ? [[typed]]
-  : [[{ reference: CHAT.library.document }, ' ', typed.slice(ASK_PREFIX.length)]]);
 /** What the person types into the message box before each stage's turn is sent (round seven, T8). */
-const ASKS: Record<string, string> = { topics: CHAT.topics.user, library: LIBRARY_ASK, script: CHAT.script.user };
+const ASKS: Record<string, string> = { topics: CHAT.topics.user, cover: CHAT.cover.user, material: CHAT.material.user, script: CHAT.script.user };
 
 /** A coach reply typed out live, with its caret. */
 function StreamedReply({ text, whole }: { text: string; whole: boolean }) {
@@ -205,8 +208,8 @@ function WorkChatPicture({ id, beat, live }: { id: string; beat: number; live: b
             <div className={work.conversation}>
               <div className={work.transcript}>
                 {id === 'topics' && sent ? <TopicsTurn beat={beat} /> : null}
-                {id === 'library' && sent ? <LibraryTurn beat={beat} /> : null}
-                {id === 'voice' ? <><LibraryTurn beat={Infinity} /><VoicePicture beat={beat} /></> : null}
+                {id === 'cover' && sent ? <CoverTurn beat={beat} /> : null}
+                {id === 'material' && sent ? <MaterialTurn beat={beat} /> : null}
                 {script && sent ? (
                   <RuntimeTurnView userText={CHAT.script.user} completed={beat >= 4}>
                     {beat >= 1 ? <StreamedReply text={CHAT.script.reply} whole={still} /> : null}
@@ -219,7 +222,7 @@ function WorkChatPicture({ id, beat, live }: { id: string; beat: number; live: b
           </div>
         </div>
         <div className={styles.composer} inert>
-          <ComposerL paragraphs={askParagraphs(ask.typing ? ask.shown : '')} caret={ask.typing ? <Caret /> : undefined} />
+          <ComposerL paragraphs={[[ask.typing ? ask.shown : '']]} caret={ask.typing ? <Caret /> : undefined} />
         </div>
       </section>
       {/* The right column scrolls too, its scrollbar shown (round eight, U11); what it holds is a picture (inert). */}
@@ -232,6 +235,9 @@ function WorkChatPicture({ id, beat, live }: { id: string; beat: number; live: b
               { id: 'edit-1', kind: 'editing', version: 1, status: 'draft', body: CHAT.script.editing, sourceContentId: 'script-1' },
             ]} />
           </ContentDraftView>
+        ) : (id === 'cover' && beat >= 4) || id === 'material' ? (
+          <ContentDraftView platform={CHAT.platform} account={CHAT.account} contentLabel={CHAT.cover.chosenLabel}
+            title={CHAT.cover.chosenTitle} body={CHAT.cover.chosenBody} versionLine={CHAT.cover.chosenLine} />
         ) : <RuntimeTypePendingPanel />}
       </div></div></aside>
     </div>
@@ -253,43 +259,58 @@ function TopicsTurn({ beat }: { beat: number }) {
   );
 }
 
-/** The library turn (round six, S6): sent with the @ reference; the library is read (in progress, then done); the reply. */
-function LibraryTurn({ beat }: { beat: number }) {
+/** Title and cover (round nine, V2): the report read, last week's three fetched, then the lists and the pick. */
+function CoverTurn({ beat }: { beat: number }) {
+  const { read, call: fetch } = CHAT.cover;
   return (
-    <RuntimeTurnView userText={LIBRARY_ASK}>
-      {beat >= 1 ? <ChatNoticeList notices={readNotice([CHAT.library.document], beat >= 2)} /> : null}
-      {beat >= 3 ? <StreamedReply text={CHAT.library.reply} whole={beat === Infinity} /> : null}
+    <RuntimeTurnView userText={CHAT.cover.user}>
+      {beat >= 1 ? <ChatNoticeList notices={readNotice(read, beat >= 2)} /> : null}
+      {beat >= 2 ? <ResearchCallList calls={[call(fetch.query, 'account_posts', 'social_account', beat >= 3, fetch.found)]} /> : null}
+      {beat >= 4 ? <StreamedReply text={COVER_REPLY} whole={beat === Infinity} /> : null}
     </RuntimeTurnView>
   );
 }
 
-/** The voice profile and the side-by-side, drawn from MASTER_PLAN §5 (VOICE is not built yet), filled in beat by beat. */
-function VoicePicture({ beat }: { beat: number }) {
+/**
+ * The material and the voice (round nine, V2: the two former stages in one, half their room): the library searched,
+ * the notes found and read, the voice profile loaded; one paragraph; the profile's four lines and the side-by-side
+ * (the profile drawn from MASTER_PLAN §5, VOICE not built yet).
+ */
+function MaterialTurn({ beat }: { beat: number }) {
+  const m = CHAT.material;
   const voice = CHAT.voice;
+  const notices = [
+    ...(beat >= 1 ? [notice('search', beat >= 2 ? `已找到：《${m.document}》` : `正在搜索资料库：${m.search}`, beat < 2)] : []),
+    ...(beat >= 2 ? readNotice([`《${m.document}》`], beat >= 3) : []),
+    ...(beat >= 3 ? [notice('voice', `已加载${m.voice}`, false)] : []),
+  ];
   return (
-    <div className={styles.voice}>
-      <section className={styles.card}>
-        <header><b>{voice.profileTitle}</b><span>{voice.status}</span></header>
-        <dl>
-          {voice.fields.slice(0, Math.min(voice.fields.length, beat + 1)).map(([name, value]) => (
-            <div key={name}><dt>{name}</dt><dd>{value}</dd></div>
-          ))}
-        </dl>
-        {beat >= 5 ? <p className={styles.toggle}><i aria-hidden="true" />{voice.toggle}</p> : null}
-      </section>
-      {beat >= 6 ? (
-        <section className={styles.card}>
-          <header><b>{voice.compareTitle}</b></header>
-          <div className={styles.side}>
-            <figure><figcaption>{voice.original.label}</figcaption><p>{voice.original.text}</p></figure>
-            {beat >= 7 ? (
-              <figure data-new=""><figcaption>{voice.draft.label}</figcaption>
-                <TypedLine text={voice.draft.text} whole={beat === Infinity} /></figure>
-            ) : null}
-          </div>
-        </section>
+    <>
+      <RuntimeTurnView userText={m.user}>
+        {notices.length ? <ChatNoticeList notices={notices} /> : null}
+        {beat >= 4 ? <StreamedReply text={m.reply} whole={beat === Infinity} /> : null}
+      </RuntimeTurnView>
+      {beat >= 5 ? (
+        <div className={styles.voice}>
+          <section className={styles.card}>
+            <header><b>{voice.profileTitle}</b><span>{voice.status}</span></header>
+            <dl>{voice.fields.map(([name, value]) => <div key={name}><dt>{name}</dt><dd>{value}</dd></div>)}</dl>
+          </section>
+          {beat >= 6 ? (
+            <section className={styles.card}>
+              <header><b>{voice.compareTitle}</b></header>
+              <div className={styles.side}>
+                <figure><figcaption>{voice.original.label}</figcaption><p>{voice.original.text}</p></figure>
+                {beat >= 7 ? (
+                  <figure data-new=""><figcaption>{voice.draft.label}</figcaption>
+                    <TypedLine text={voice.draft.text} whole={beat === Infinity} /></figure>
+                ) : null}
+              </div>
+            </section>
+          ) : null}
+        </div>
       ) : null}
-    </div>
+    </>
   );
 }
 

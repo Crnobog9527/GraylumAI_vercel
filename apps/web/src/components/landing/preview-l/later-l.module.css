@@ -34,9 +34,6 @@
 .card dl div { display: grid; grid-template-columns: 7em minmax(0, 1fr); gap: 8px; }
 .card dt { color: #8e8e8e; }
 .card dd { margin: 0; color: #262626; }
-.toggle { display: flex; align-items: center; gap: 8px; margin: 0; color: #262626; }
-.toggle i { position: relative; width: 30px; height: 18px; border-radius: 999px; background: #262626; }
-.toggle i::after { content: ''; position: absolute; top: 2px; right: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; }
 .side { display: grid; gap: 10px; }
 @media (min-width: 720px) { .side { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .side figure { margin: 0; padding: 10px 12px; border-radius: 10px; background: #f7f7f5; }

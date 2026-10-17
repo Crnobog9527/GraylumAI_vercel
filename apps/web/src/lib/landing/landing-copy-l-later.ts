@@ -17,14 +17,16 @@ export const L_LATER = {
   label: '这一步的几个环节',
   two: {
     title: '第二步：每周带你做内容',
-    lede: '定位定下来以后，每周在同一个对话里：先选题，再按你的资料和说话习惯写稿、出分镜。',
+    // Round nine (V2, Owner 2026-10-18): the creation Skill's order — topic, then title and cover, then the material and
+    // the person's voice, then the script and storyboard.
+    lede: '定位定下来以后，每周在同一个对话里：先选题，再定标题和封面，然后找资料、按你说话的样子写稿、出分镜。',
     stages: [
       { id: 'topics', label: '选题', needs: ['content'], source: 'real',
         note: '按你的定位、上周的数据和对标账号的近况，挑出这周最值得拍的几条，每条写清理由。' },
-      { id: 'library', label: '引用你的资料', needs: ['content', 'library'], source: 'real',
-        note: '在输入框里 @ 一份你上传过的资料，教练读完再写，不用每次从头介绍自己。' },
-      { id: 'voice', label: '按你的文风写', needs: ['content', 'voice'], source: 'planned',
-        note: '从你写过的东西里学出文风画像：语气、句子长短、开头方式、常用表达。你确认后才用；写出来的稿子和你原文放在一起看。' },
+      { id: 'cover', label: '标题和封面', needs: ['content'], source: 'real',
+        note: '围绕选好的题，出 10 个不同钩子的标题和 10 种封面做法，教练标出推荐和理由；选定的写到右边。' },
+      { id: 'material', label: '找资料和文风', needs: ['content', 'library', 'voice'], source: 'planned',
+        note: '先在资料库里找这个选题的资料，读完再写；同时加载你的文风画像，稿子按你说话的样子写。' },
       { id: 'script', label: '口播稿和分镜', needs: ['content'], source: 'real',
         note: '稿子出现在对话里的"建议稿"，右边是正文稿件和分镜；你改哪句，它就接着改哪句。' },
     ] as readonly LaterStage[],
@@ -59,13 +61,50 @@ export const L_LATER_CHAT = {
     reply: '按你的定位和上周的数据，这周拍这三条：\n1. **一口锅，15 分钟两菜一汤**——最能证明"下班后也来得及"；\n'
       + '2. **一个人的菜怎么买不浪费**——上周评论里问得最多；\n3. **超市半成品改造**——最省事，留给最累的那天。\n\n先做第 1 条？',
   },
-  library: {
+  /** Round nine (V2): titles with their hooks and cover ideas for the chosen topic (the plan's lists, copied as given). */
+  cover: {
+    user: '就拍第 1 条，标题和封面怎么弄？',
+    read: ['《我的定位报告》'],
+    call: { query: '我的账号 · 上周 3 条的数据', found: '成品先出镜那条收藏最高' },
+    titles: [
+      ['15 分钟两菜一汤，只洗 1 口锅', '数字 + 意外好处'],
+      ['下班累到连外卖都懒得点？试试这个', '戳痛点'],
+      ['一口锅做两菜一汤，比等外卖还快', '反常识'],
+      ['外卖 30 刀 vs 自己做 6 刀，差在哪', '价格对比'],
+      ['一个人住第 3 个月，终于不点外卖了', '身份代入'],
+      ['锅底这层油别倒，第三道菜全靠它', '悬念'],
+      ['掐表实测：一口锅能不能 15 分钟出三样', '挑战'],
+      ['一个人吃饭，这样做一周少花一百多刀', '省钱'],
+      ['下班快手菜公式：1 口锅 + 3 样菜 + 15 分钟', '清单 / 收藏'],
+      ['你下班第一件事，是点外卖还是做饭？', '提问互动'],
+    ] as const,
+    covers: [
+      ['成品俯拍，大字"15 分钟"', '搜索、收藏'],
+      ['计时器停在 14:52，成品在背景里虚化', '证明"真的 15 分钟"'],
+      ['左右对比：外卖盒 $30 / 一口锅成品 $6', '价格敏感的人'],
+      ['一口锅里三样菜分区摆好', '制造"怎么做到的"好奇'],
+      ['冰箱打开前后对比：几样菜 → 一桌饭', '剩菜、清冰箱人群'],
+      ['九宫格步骤缩略图', '想收藏照做的人'],
+      ['水槽里只有一口锅，大字"只洗 1 口锅"', '怕洗碗的人'],
+      ['第一视角：进门挂钥匙，手表显示 19:00', '上班族代入'],
+      ['成品 + 字幕"累死了，但还是想吃口热的"', '情绪共鸣'],
+      ['系列固定模板：底部色条"下班 15 分钟 · 第 N 道"', '长期做系列、主页统一'],
+    ] as const,
+    pick: '**我推荐**：标题用 **#1**，备选 **#6**；封面用 **#2**，长期加上 **#10** 的系列模板。上周开头先给成品的那条收藏最高，'
+      + '#1 和 #2 都是"先给结果"；#6 留着测完播率。\n\n**接下来你做**：确认标题和封面后，开始写稿。',
+    /** The right column once chosen. */
+    chosenLabel: '标题和封面',
+    chosenTitle: '15 分钟两菜一汤，只洗 1 口锅',
+    chosenBody: '标题：#1 15 分钟两菜一汤，只洗 1 口锅（备选 #6）\n封面：#2 计时器停在 14:52，成品在背景里虚化；长期用 #10 的系列模板',
+    chosenLine: '已选 · 标题 #1 · 封面 #2',
+  },
+  /** Round nine (V2): the library searched and read, the voice profile loaded, in half the room the two stages took. */
+  material: {
+    user: '标题就用 #1，封面用 #2。',
+    search: '一口锅 / 两菜一汤',
     document: '一口锅两菜一汤 · 拍摄笔记.md',
-    user: '按这份笔记写第 1 条的口播稿。',
-    /** Round six (Owner: "必须要显示加载资料库的过程"): the notice while the library is read. */
-    reading: '正在读取资料库',
-    read: '已读取资料库',
-    reply: '读完了。你笔记里写了三处要点：青菜先炒先盛、锅底的油直接煮汤、米饭用早上剩的。稿子就按这个顺序走。',
+    voice: '《我的说话习惯》（文风画像）',
+    reply: '找到你的拍摄笔记，读完了：青菜先炒先盛、锅底的油直接煮汤、米饭用早上剩的，稿子就按这个顺序走。你的文风画像也加载了，下面是要点。',
   },
   voice: {
     profileTitle: '我的文风画像',
@@ -76,9 +115,7 @@ export const L_LATER_CHAT = {
       ['句子长短', '长短不一，想到哪说到哪，常拿短句收尾'],
       ['开头方式', '先吐槽一句下班的累，再说今天吃啥'],
       ['常用表达', '"咋整""搞定""一口锅""还挺香"'],
-      ['不喜欢的表达', '"家人们""绝绝子""赶紧码住"'],
     ] as const,
-    toggle: '使用我的文风',
     compareTitle: '写出来的，和你原来写的放在一起看',
     original: { label: '你以前写的', text: '哎今天又七点才到家，冰箱里就剩两根青菜了，那咋整，一口锅搞定呗。先炒菜，炒完别急着刷锅啊，锅底那点油直接加水煮个汤，嘿还挺香。' },
     draft: { label: '按你的文风写的', text: '哎下班到家都七点了，冰箱里就俩青菜，咋整？一口锅，十五分钟搞定呗。先炒青菜，盛出来；锅底的油别倒啊，加水直接煮汤。嘿，一个人也能吃得挺香。' },
@@ -109,7 +146,8 @@ export const L_LATER_CHAT = {
     ] as const,
     shotHead: ['镜号', '景别', '画面', '口播台词', '时长'] as const,
     total: '合计约 70 秒',
-    draftTitle: '一口锅，15 分钟两菜一汤',
+    /** Round nine (V2): the title picked in 标题和封面 (#1). */
+    draftTitle: '15 分钟两菜一汤，只洗 1 口锅',
     versionLine: '账号已保存 v1 · 草稿',
     editing: '前 3 秒放成品；字幕只写步骤，不写形容词；第 10 镜的计时器要拍清楚',
   },
