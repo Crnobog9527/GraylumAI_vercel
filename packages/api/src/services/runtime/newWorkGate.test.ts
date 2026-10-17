@@ -94,7 +94,7 @@ describe('MODEL-IDENTITY-GUARD switch rides on the admission settings read', () 
     const f = db([...rows]);
     const read = await readAdmissionSettings(f.client);
     expect(read).toMatchObject({ ok: true, config: defaults, identityGuard: expected });
-    expect(f.keys).toEqual([['runtime_rate_limits', 'model_identity_guard', 'primary_model_id']]);
+    expect(f.keys).toEqual([['runtime_rate_limits', 'model_identity_guard', 'primary_model_id', 'research_tools_config']]);
   });
   // UI-MODEL: the administrator's primary model rides on the same read; only a uuid counts as configured.
   it.each([
@@ -105,6 +105,20 @@ describe('MODEL-IDENTITY-GUARD switch rides on the admission settings read', () 
   ] as const)('primary model %s', async (_name, rows, expected) => {
     const read = await readAdmissionSettings(db([...rows]).client);
     expect(read.ok && read.primaryModelId).toBe(expected ?? undefined);
+  });
+  // RT-6: the research master switch rides on the same read; only a valid stored config that is on counts.
+  it('research switch on the same read', async () => {
+    const { DISABLED_RESEARCH_TOOLS } = await import('../research/vendors/config');
+    const stored = (enabled: boolean) => ({ ...DISABLED_RESEARCH_TOOLS, enabled, revision: 3,
+      updatedBy: '10000000-0000-4000-8000-000000000001', updatedAt: '2026-10-17T00:00:00.000Z' });
+    for (const [value, expected] of [[stored(true), true], [JSON.stringify(stored(true)), true], [stored(false), false]] as const) {
+      const read = await readAdmissionSettings(db([{ key: 'research_tools_config', value }]).client);
+      expect(read.ok && read.researchEnabled).toBe(expected);
+    }
+    for (const value of [undefined, 'not json', { enabled: true }]) {
+      const read = await readAdmissionSettings(db(value === undefined ? [] : [{ key: 'research_tools_config', value }]).client);
+      expect(read.ok && read.researchEnabled).toBe(false);
+    }
   });
   it('malformed rate limits still fail closed', async () => {
     expect(await readAdmissionSettings(db([{ key: 'runtime_rate_limits', value: { version: 2 } }]).client)).toEqual({ ok: false });

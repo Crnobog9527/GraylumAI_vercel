@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { sampleReportDataBlock } from '@repo/api/src/shared/reportDataSample';
 import type { ReportChapter } from '../report-outline';
 
 /**
@@ -38,3 +39,12 @@ const SAMPLE_SECTIONS: Record<string, string> = {
 /** A short sample report body in the report's markdown shape: one `##` heading per chapter. */
 export const SAMPLE_REPORT_BODY = SAMPLE_REPORT_CHAPTER_TITLES
   .map(title => `## ${title}\n\n${SAMPLE_SECTIONS[title]}`).join('\n\n');
+
+/**
+ * The same sample in the new report shape (REPORT-VISUAL): each chapter states its conclusion, one chapter keeps
+ * its reasons under `### 理由`, and the strategy data block follows the text (made-up data, see reportDataSample).
+ */
+export const SAMPLE_REPORT_BODY_WITH_DATA = SAMPLE_REPORT_CHAPTER_TITLES
+  .map(title => `## ${title}\n\n${SAMPLE_SECTIONS[title]}`
+    + (title === '平台选择' ? '\n\n### 理由\n\n你的客户会先在小红书搜"同城定制蛋糕"，再私信下单。' : ''))
+  .join('\n\n') + '\n\n' + sampleReportDataBlock();
