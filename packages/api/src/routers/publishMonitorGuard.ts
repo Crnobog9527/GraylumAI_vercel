@@ -5,6 +5,7 @@ import { ConnectError } from '../services/publishMonitor/connect';
 import { DataError } from '../services/publishMonitor/data';
 import { ManualImportError } from '../services/publishMonitor/manualImport';
 import { RefreshError } from '../services/publishMonitor/refresh';
+import { TikhubConnectionError } from '../services/publishMonitor/tikhub';
 import { assertPublishMonitorEnabled, PublishMonitorError } from '../services/publishMonitor/foundation';
 import { PostForMeNotConfigured } from '../services/publishMonitor/postForMe/config';
 
@@ -15,7 +16,7 @@ const FORBIDDEN = new Set(['PUBLISH_MONITOR_DISABLED', 'PUBLISH_MONITOR_ACCOUNT_
   'PUBLISH_MONITOR_REFRESH_UNAVAILABLE']);
 const CONFLICT = new Set(['PUBLISH_MONITOR_REQUEST_INVALID', 'PUBLISH_MONITOR_ACCOUNT_BOUND_ELSEWHERE',
   'PUBLISH_MONITOR_TARGET_ALREADY_CONNECTED', 'PUBLISH_MONITOR_AUTHORIZATION_CHANGED', 'PUBLISH_MONITOR_CALLBACK_STALE',
-  'PUBLISH_MONITOR_REFRESH_RUNNING']);
+  'PUBLISH_MONITOR_REFRESH_RUNNING', 'PUBLISH_MONITOR_BENCHMARK_EXISTS', 'PUBLISH_MONITOR_BENCHMARK_LIMIT']);
 
 function toTrpc(cause: unknown): TRPCError {
   if (cause instanceof TRPCError) return cause;
@@ -26,12 +27,14 @@ function toTrpc(cause: unknown): TRPCError {
     return new RateLimitError('rate_limited', 3600);
   }
   const code = cause instanceof PublishMonitorError || cause instanceof ConnectError || cause instanceof DataError
-    || cause instanceof RefreshError || cause instanceof ManualImportError ? cause.code
+    || cause instanceof RefreshError || cause instanceof ManualImportError || cause instanceof TikhubConnectionError
+    ? cause.code
     : cause instanceof PostForMeNotConfigured ? 'PUBLISH_MONITOR_PROVIDER_UNAVAILABLE' : 'PUBLISH_MONITOR_UNAVAILABLE';
   if (code === 'PUBLISH_MONITOR_ACCOUNT_NOT_FOUND' || code === 'PUBLISH_MONITOR_CONNECTION_NOT_FOUND'
     || code === 'PUBLISH_MONITOR_POST_NOT_FOUND') {
     return new TRPCError({ code: 'NOT_FOUND', message: code, cause });
   }
+  if (code === 'PUBLISH_MONITOR_PROFILE_LINK_INVALID') return new TRPCError({ code: 'BAD_REQUEST', message: code, cause });
   if (code === 'PUBLISH_MONITOR_IMPORT_INVALID') return new TRPCError({ code: 'BAD_REQUEST', message: code, cause });
   if (code === 'PUBLISH_MONITOR_PLATFORM_UNSUPPORTED') return new TRPCError({ code: 'BAD_REQUEST', message: code, cause });
   if (FORBIDDEN.has(code)) return new TRPCError({ code: 'FORBIDDEN', message: code, cause });
