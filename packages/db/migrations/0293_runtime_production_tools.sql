@@ -2,7 +2,8 @@
 -- RUNTIME-PROD research tools (docs/launch/tasks/RUNTIME-PROD.md section 6): production runs may carry research tool
 -- routes (protocol research-tool-v1, 0255). There is no test window, so a route is approved by the settings the admin
 -- already maintains: research_tools_config (the master switch, and the vendor switch that needs an attested platform
--- hard cap, Owner 2026-10-07) and billing_provider_prices (the frozen price must equal the current entry, and the
+-- hard cap, Owner 2026-10-07) and billing_provider_prices (every charge-bearing field of the frozen price must equal the
+-- current entry: price, units, currency, usage unit, exchange rate and validity; and the
 -- route multiplier must equal its override or the configured default m). Claims recheck the vendor switch.
 --
 -- PUBLISH-MONITOR 4b (0290, Owner 2026-10-17): a tool-only publish monitor run (v2, input.publishMonitor object, the
@@ -69,6 +70,13 @@ BEGIN
     OR (entry->'toolPricing'->>'price')::numeric IS DISTINCT FROM (pe->>'price')::numeric
     OR entry->'toolPricing'->>'unitsPerPrice' IS DISTINCT FROM pe->>'unitsPerPrice'
     OR entry->'toolPricing'->>'currency' IS DISTINCT FROM pe->>'currency'
+    -- Every charge-bearing field of toolBilling.toolCallPolicy (#1086 review): unit, exchange rate, validity, chargeable.
+    OR entry->'toolPricing'->>'unit' IS DISTINCT FROM pe->>'usageUnit'
+    OR (entry->'toolPricing'->>'usdPerCurrency')::numeric IS DISTINCT FROM (pe->>'usdPerCurrency')::numeric
+    OR pe->'includedInReceipt' IS DISTINCT FROM 'false'::jsonb OR pe->>'validUntil' IS NULL
+    OR (entry->'toolPricing'->>'validUntil')::timestamptz IS DISTINCT FROM
+      least((pe->>'validUntil')::timestamptz,(pe->>'fxValidUntil')::timestamptz)
+    OR (entry->'toolPricing'->>'validUntil')::timestamptz<=clock_timestamp()
     OR bill2_unit_multiplier(entry->'multiplier') IS DISTINCT FROM expected
     THEN RAISE EXCEPTION 'RUNTIME_PRODUCTION_MODEL_DENIED' USING ERRCODE='42501';END IF;
     pe:=NULL;

@@ -226,14 +226,15 @@ const toolsMigration=new URL(`../../migrations/${readdirSync(new URL('../../migr
   .find(f=>/^\d{4}_runtime_production_tools\.sql$/.test(f))}`,import.meta.url);
 const toolModelId=route=>createHash('md5').update('bill2-research-tool:'+route).digest('hex')
   .replace(/^(.{8})(.{4})(.{4})(.{4})(.{12})$/,'$1-$2-$3-$4-$5');
+const VALID=new Date(Date.now()+7*86400000).toISOString();
 const toolPolicy=(route,patch={})=>({provider:'tikhub',account:'research-production',model:route,protocol:'research-tool-v1',
   modelId:toolModelId(route),multiplier:'6',lookupSupported:false,upperUsd:'0.01',purposes:['question'],
   toolPricing:{unit:'call',currency:'USD',price:'0.01',unitsPerPrice:'1',usdPerCurrency:null,entryHash:'e'.repeat(64),
-    validUntil:new Date(Date.now()+7*86400000).toISOString(),maxUnitsPerCall:'1'},...patch});
+    validUntil:VALID,maxUnitsPerCall:'1'},...patch});
 const priceEntry=(patch={})=>({provider:'tikhub',route:null,appliesToUnlistedRoutes:true,currency:'USD',usageUnit:'call',
   unitsPerPrice:'1',price:'0.01',usdPerCurrency:null,fxSourceUrl:null,fxEffectiveAt:null,fxValidUntil:null,pricingBasis:'list',
   sourceUrl:'https://example.com/p',evidenceHash:'a'.repeat(64),verifiedAt:new Date(Date.now()-86400000).toISOString(),
-  validUntil:null,chargeCondition:'per call',includedInReceipt:false,priceMultiplier:null,...patch});
+  validUntil:VALID,chargeCondition:'per call',includedInReceipt:false,priceMultiplier:null,...patch});
 const researchConfig=(enabled=true,vendor=true)=>({version:1,enabled,vendors:{tikhub:{enabled:vendor,hardCapAttested:vendor?{by:randomUUID(),at:new Date().toISOString()}:null},
   parallel:{enabled:false,hardCapAttested:null},firecrawl:{enabled:false,hardCapAttested:null}}});
 
@@ -266,6 +267,15 @@ export async function productionToolCases({db,report,claim,reapply=true}) {
       await rejects(prepare(db,f,payload),/RUNTIME_PRODUCTION_MODEL_DENIED|BILL2_CALL_POLICY_DENIED/);
       report.checks.push(`production tool route refused at prepare: ${why}`);
     }
+    for (const [entry,why] of [[{validUntil:new Date(Date.now()+86400000).toISOString()},'the price validity changed'],
+      [{usageUnit:'credit'},'the usage unit changed'],[{includedInReceipt:true},'the price is included in another receipt'],
+      [{currency:'EUR',usdPerCurrency:'1.1',fxSourceUrl:'https://example.com/fx',fxEffectiveAt:new Date(Date.now()-86400000).toISOString(),
+        fxValidUntil:new Date(Date.now()+86400000).toISOString()},'the currency and exchange rate changed']]) {
+      await setting(db,'billing_provider_prices',{version:1,entries:[priceEntry(entry)]});
+      await rejects(prepare(db,f),/RUNTIME_PRODUCTION_MODEL_DENIED/);
+      report.checks.push(`production tool route refused at prepare: ${why}`);
+    }
+    await setting(db,'billing_provider_prices',{version:1,entries:[priceEntry()]});
     await setting(db,'research_tools_config',researchConfig(true,false));
     await rejects(prepare(db,f),/RUNTIME_PRODUCTION_MODEL_DENIED/);
     await setting(db,'research_tools_config',researchConfig());

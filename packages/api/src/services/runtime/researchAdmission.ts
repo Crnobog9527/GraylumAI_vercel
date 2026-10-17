@@ -94,7 +94,8 @@ export async function admitResearchTurn(input: ResearchAdmissionInput): Promise<
     // Staging: the window must approve exactly this frozen price (runtime_test_window_allowed compares entries).
     if (windowEntry && canonical(windowEntry) !== canonical(policy)) continue;
     if (Date.parse(policy.toolPricing.validUntil) <= Date.parse(input.deadline)) continue;
-    if (decimal(policy.multiplier) > decimal(input.runMultiplier)) continue;
+    // A window reserves for its highest m; production has none, so the run multiplier follows the route (attachResearchTurn).
+    if (!production && decimal(policy.multiplier) > decimal(input.runMultiplier)) continue;
     if (!thresholds.has(`${model}\n${RESEARCH_PHASE}`)) continue;
     priced.set(`${entry.platform}:${entry.kind}`, { entry, policy });
   }
@@ -167,5 +168,8 @@ export async function attachResearchTurn(input: Omit<ResearchAdmissionInput, 'mo
   billing.limits.maxCalls += 1 + admitted.research.subcalls;
   // The run stores tool prices beside its models (0255); TS readers split them with modelCallPolicies/toolCallPolicies.
   (billing.callPolicy as unknown[]).push(...admitted.policies);
+  // Production: rules.multiplier stays the run's highest m_i (each call still bills its own frozen m_i).
+  billing.rules.multiplier = admitted.policies.reduce((max, policy) =>
+    decimal(policy.multiplier) > decimal(max) ? policy.multiplier : max, billing.rules.multiplier);
   return true;
 }
