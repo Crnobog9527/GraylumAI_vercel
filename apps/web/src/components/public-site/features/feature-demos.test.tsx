@@ -33,3 +33,11 @@ describe.each(FEATURES.map(entry => [entry.slug, entry] as const))('feature demo
     expect(JSON.stringify(entry.content)).not.toContain('导师');
   });
 });
+
+it('marks every feature page and the overview as a product page with SoftwareApplication data', async () => {
+  const { FEATURES_HUB } = await import('@/lib/seo/content/features');
+  for (const content of [FEATURES_HUB, ...FEATURES.map(entry => entry.content)]) {
+    const html = renderToStaticMarkup(<ArticlePage content={content} />);
+    expect(html, content.path).toContain('&quot;SoftwareApplication&quot;'.replace(/&quot;/g, '"'));
+  }
+});

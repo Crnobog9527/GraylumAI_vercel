@@ -8,7 +8,7 @@ import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { JsonLd } from '@/components/seo/JsonLd';
 import type { ArticleBlock, ArticleContent } from '@/lib/seo/article';
-import { blogPostingJsonLd, breadcrumbJsonLd, faqPageJsonLd, webPageJsonLd } from '@/lib/seo/structured-data';
+import { blogPostingJsonLd, breadcrumbJsonLd, faqPageJsonLd, softwareApplicationJsonLd, webPageJsonLd } from '@/lib/seo/structured-data';
 import { SiteShell } from './SiteShell';
 import { SITE_CHROME, visibleHref } from './site-chrome';
 
@@ -60,6 +60,9 @@ export function ArticlePage({ content, supportEmail, demo }: {
         locale: content.locale,
         dateModified: content.updated,
       }),
+    ...(content.product
+      ? [softwareApplicationJsonLd({ description: content.metaDescription, path: content.path })]
+      : []),
     breadcrumbJsonLd(content.breadcrumb),
     ...(content.faq?.length ? [faqPageJsonLd(content.faq)] : []),
   ];

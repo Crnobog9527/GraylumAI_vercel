@@ -92,6 +92,7 @@ const POSITIONING: ArticleContent = {
     { label: '资料库', href: featurePath('library'), description: '把你的文章和参考资料放进来，让教练按你的情况回答。' },
   ],
   updated: UPDATED,
+  product: true,
 };
 
 const CONTENT: ArticleContent = {
@@ -140,6 +141,7 @@ const CONTENT: ArticleContent = {
     { label: '评审团', href: featurePath('jury'), description: '重要的报告，再让几位评审审一遍。' },
   ],
   updated: UPDATED,
+  product: true,
 };
 
 const JURY: ArticleContent = {
@@ -198,6 +200,7 @@ const JURY: ArticleContent = {
     { label: '价格', href: '/landing/pricing', description: '各个会员等级包含的功能和价格。' },
   ],
   updated: UPDATED,
+  product: true,
 };
 
 const LIBRARY: ArticleContent = {
@@ -249,6 +252,7 @@ const LIBRARY: ArticleContent = {
     { label: '选题与创作', href: featurePath('content'), description: '保存下来的稿件会进入资料库。' },
   ],
   updated: UPDATED,
+  product: true,
 };
 
 const PUBLISH: ArticleContent = {
@@ -279,6 +283,7 @@ const PUBLISH: ArticleContent = {
     { label: '定位分析', href: featurePath('positioning'), description: '先弄清做什么、给谁看、靠什么赚钱。' },
   ],
   updated: UPDATED,
+  product: true,
 };
 
 const REVIEW: ArticleContent = {
@@ -309,6 +314,7 @@ const REVIEW: ArticleContent = {
     { label: '定位分析', href: featurePath('positioning'), description: '先弄清做什么、给谁看、靠什么赚钱。' },
   ],
   updated: UPDATED,
+  product: true,
 };
 
 export const FEATURES: FeatureEntry[] = [
@@ -358,4 +364,5 @@ export const FEATURES_HUB: ArticleContent = {
   ],
   related: FEATURES.map(entry => ({ label: entry.name, href: entry.content.path, description: entry.note })),
   updated: UPDATED,
+  product: true,
 };
