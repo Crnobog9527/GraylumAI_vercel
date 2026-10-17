@@ -29,7 +29,7 @@ type ViewedExecution = { executionId?: unknown; state?: unknown; unavailableReas
   body?: unknown; primaryBody?: unknown; summary?: unknown };
 /**
  * LIB-4b: an unfinished round may already show a saved body (a PAYG or organizer primary checkpoint, an interrupted
- * round). Once a document it referenced is deleted or no longer at its frozen version, that body is not shown, at once
+ * round). Once a document it referenced is deleted (a newer version is not a deletion), that body is not shown, at once
  * and before any cleanup. One read-only query answers for every such round; if it fails, they show no body (fail
  * closed). Completed and cancelled answers stay as D7 keeps them; a round marked source_deleted never shows one.
  */

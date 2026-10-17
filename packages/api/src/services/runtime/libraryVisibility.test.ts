@@ -12,9 +12,9 @@ function database(state:{live:boolean;error?:boolean}){
  const rpc=vi.fn(async(name:string,args:Record<string,unknown>)=>{
   calls.push(name);
   if(name==='content_erasure_visible')return {data:true,error:null};
-  if(name==='runtime_library_visible'){
-   expect(args).toEqual({p_actor_id:actor,p_execution_id:execution,p_result:{kind:'library_index'}});
-   return state.error?{data:null,error:{code:'57014',message:'timeout'}}:{data:state.live,error:null};
+  if(name==='runtime_library_sources_gone'){
+   expect(args).toEqual({p_actor_id:actor,p_execution_ids:[execution]});
+   return state.error?{data:null,error:{code:'57014',message:'timeout'}}:{data:state.live?[]:[execution],error:null};
   }
   throw new Error(name);
  });
@@ -72,4 +72,17 @@ it('the executor reports references as soon as the execution is read, before rec
  observeContext(options,{state:'completed',context:{libraryReferences:references}});
  observeContext(options,{state:'running',context:{}});
  expect(seen).toEqual([references,references,references,references,undefined]);
+});
+
+it('C (#1022 P1): a version change is not a deletion: the stream keeps showing the round, as a refresh will', async () => {
+ // The document still exists at a newer version: runtime_library_visible rejects the frozen version, 0279 lists nothing.
+ const rpc = vi.fn(async (name: string): Promise<{ data: unknown; error: null }> => name === 'content_erasure_visible'
+  ? { data: true, error: null } : name === 'runtime_library_sources_gone' ? { data: [], error: null } : { data: false, error: null });
+ const fence = executionVisibility({ rpc } as unknown as SupabaseClient, actor, execution);
+ fence.observe({ libraryReferences: [{ documentId: execution, version: 1 }] });
+ await expect(fence.visible()).resolves.toBeUndefined();
+ // A deletion is still refused.
+ rpc.mockImplementation(async (name: string) => name === 'content_erasure_visible' ? { data: true, error: null }
+  : { data: name === 'runtime_library_sources_gone' ? [execution] : false, error: null });
+ await expect(fence.visible()).rejects.toMatchObject({ message: expect.stringMatching(/^LIB_SOURCE_DELETED：/) });
 });

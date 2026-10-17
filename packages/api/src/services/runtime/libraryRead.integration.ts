@@ -169,6 +169,23 @@ it.runIf(staging)('RUNTIME: library document deleted mid-stream hides late text,
  }finally{gate.release();await p.close();}
 });
 
+it.runIf(staging)('RUNTIME: library document changing version mid-stream is not a deletion: shown while streaming and after refresh',async()=>{
+ const gate=latch(),f=await fixture(),p=await provider({early:'EARLY_SHOWN ',late:'LATE_SHOWN',gate:gate.promise});
+ try{
+  const admitted=await f.admit();expect(admitted.error).toBeNull();const executionId=admitted.data.executionId;
+  const s=stream(f,executionId,p.adapter);
+  await until(()=>shown(s.events).includes('EARLY_SHOWN'));
+  // A recognized page raises the content version; the document is not deleted (#1022 decision C).
+  await db.query('update library_documents set content_version=2 where id=$1',[f.documentId]);
+  gate.release();await s.done;
+  expect(s.outcome()).toMatchObject({state:'completed'});
+  expect(shown(s.events)).toContain('LATE_SHOWN');
+  const view=await rpc('runtime_view',{p_actor_id:f.actorId,p_session_id:f.session.sessionId});
+  expect(view.executions[0].body).toContain('LATE_SHOWN');
+  expect(await rpc('runtime_library_sources_gone',{p_actor_id:f.actorId,p_execution_ids:[executionId]})).toEqual([]);
+ }finally{gate.release();await p.close();}
+});
+
 it.runIf(staging)('RUNTIME: library document deleted after admission and before any read cancels the turn without a provider call',async()=>{
  const f=await fixture(),p=await provider({early:'x',late:'y'});
  try{
@@ -205,7 +222,8 @@ it.runIf(staging)('RUNTIME: library read replayed in recovery is rechecked and a
    [executionId])).rows[0].n).toBe(1);
   // The document changes version (e.g. a recognized page); the frozen segment is no longer at the referenced version.
   await db.query('update library_documents set content_version=2 where id=$1',[f.documentId]);
-  expect(await rpc('runtime_library_sources_gone',{p_actor_id:f.actorId,p_execution_ids:[executionId]})).toEqual([executionId]);
+  // A version change is not a deletion (#1022 decision C); the replayed read below is still rechecked.
+  expect(await rpc('runtime_library_sources_gone',{p_actor_id:f.actorId,p_execution_ids:[executionId]})).toEqual([]);
   // Recovery replays the SDK from the stored round: the saved read is rechecked before it reaches the model again.
   const checks:unknown[]=[];
   const database={rpc:async(name:string,args:Record<string,unknown>)=>{
