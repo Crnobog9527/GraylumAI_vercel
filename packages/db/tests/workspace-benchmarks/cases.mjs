@@ -47,7 +47,8 @@ export async function runCases({db,Client,report,oldDefinition}) {
 
  const listed=await index(db,a,sid);
  assert.deepEqual(listed.entries.map(e=>e.kind),['positioning','benchmarks']);
- const {fetchedAt,use,...entry}=listed.entries[1];
+ const {fetchedAt,use,producedBy,...entry}=listed.entries[1];
+ assert.deepEqual(producedBy,[{executionId:produced}]);
  assert.deepEqual(entry,{id:main.draftSession,kind:'benchmarks',name:'Tea studio',sessionId:main.draftSession,
   accounts:2,qualified:1,sourceVersionId:main.version});
  assert.ok(!Number.isNaN(Date.parse(fetchedAt)));assert.ok(use.includes('only from this table'));
@@ -139,6 +140,7 @@ export async function runCases({db,Client,report,oldDefinition}) {
  const gProducer=await answer(db,g,gPos.draftSession);
  await benchmark(db,g,gPos.draftSession,gProducer,'GUARD_BENCH_CANARY',{qualified:true});
  const gBody=await read(db,g,gSid,gPos.draftSession);
+ const gIndex=await index(db,g,gSid); // read while the producer is still live
  const gExec=randomUUID();
  await db.query(`INSERT INTO runtime_executions(id,actor_id,session_id,request_id,payload,history_revision,state)
   VALUES($1,$2,$3,$4,'{}',0,'interrupted')`,[gExec,g,gSid,randomUUID()]);
@@ -153,6 +155,14 @@ export async function runCases({db,Client,report,oldDefinition}) {
  await denied(store(),'RUNTIME_WORKSPACE_SOURCE_REVOKED');
  assert.equal(await one(db,"SELECT result IS NULL v FROM runtime_tool_calls WHERE execution_id=$1 AND call_id='call-0'",[gExec]),true);
  report.checks.push('a benchmark read completed after its producing answer was deleted cannot store the deleted rows');
+ // The same holds for an index listing the table: it carries the producers and is rechecked on save.
+ assert.deepEqual(gIndex.entries.find(e=>e.kind==='benchmarks').producedBy,[{executionId:gProducer}]);
+ const gExec2=randomUUID();
+ await db.query(`INSERT INTO runtime_executions(id,actor_id,session_id,request_id,payload,history_revision,state)
+  VALUES($1,$2,$3,$4,'{}',0,'interrupted')`,[gExec2,g,gSid,randomUUID()]);
+ await db.query(`INSERT INTO runtime_tool_calls(execution_id,call_id,name,arguments,result) VALUES($1,'call-0','read_source','{}',NULL)`,[gExec2]);
+ await denied(db.query("UPDATE runtime_tool_calls SET result=$2 WHERE execution_id=$1 AND call_id='call-0'",[gExec2,gIndex]),'RUNTIME_WORKSPACE_SOURCE_REVOKED');
+ report.checks.push('an index listing the benchmark table carries its producers and is refused once a producer was deleted');
 
  const closing=await one(db,'SELECT ws_test.actor() v');
  const closingSid=await one(db,'SELECT ws_test.free_session($1) v',[closing]);

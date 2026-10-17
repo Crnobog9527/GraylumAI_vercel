@@ -29,9 +29,11 @@ BEGIN
   UNION ALL
   SELECT 1,s.session_id::text,jsonb_build_object('id',s.session_id,'kind','benchmarks','name',b.name,'sessionId',s.session_id,
    'accounts',s.accounts,'qualified',s.qualified,'fetchedAt',s.fetched_at,'sourceVersionId',b.current_source_version_id,
+   'producedBy',s.produced_by,
    'use','Real public data of benchmark accounts fetched during positioning research; numbers come only from this table.')
   FROM opc_businesses b CROSS JOIN LATERAL (
-   SELECT d.session_id,count(*)::int accounts,(count(*) FILTER (WHERE rb.qualified))::int qualified,max(rb.fetched_at) fetched_at
+   SELECT d.session_id,count(*)::int accounts,(count(*) FILTER (WHERE rb.qualified))::int qualified,max(rb.fetched_at) fetched_at,
+    jsonb_agg(DISTINCT jsonb_build_object('executionId',rb.execution_id)) produced_by
    FROM opc_draft_businesses db JOIN opc_drafts d ON d.draft_id=db.draft_id AND d.actor_id=p_actor_id
     AND d.project_id=(SELECT cv.project_id FROM artifact_versions cv WHERE cv.id=b.current_source_version_id)
    JOIN runtime_sessions rs ON rs.id=d.session_id AND rs.actor_id=p_actor_id AND rs.content_deleted_at IS NULL AND rs.erased_at IS NULL
@@ -71,7 +73,7 @@ BEGIN
     WHERE rb.actor_id=p_actor_id AND rb.session_id=(entry->>'sessionId')::uuid AND x.content_deleted_at IS NULL AND x.erased_at IS NULL
     ORDER BY rb.qualified DESC,rb.followers DESC NULLS LAST,rb.platform,rb.account LIMIT 30) b;
   cap:=8000;
-  RETURN jsonb_build_object('kind','workspace_source','identity',entry,'body',left(body,cap),'truncated',length(body)>cap,
+  RETURN jsonb_build_object('kind','workspace_source','identity',entry-'producedBy','body',left(body,cap),'truncated',length(body)>cap,
    'producedBy',produced,'dependencies',jsonb_build_array(version_id));
  ELSE SELECT coalesce((SELECT ed.brief FROM opc_item_edits ed WHERE ed.work_item_id=i.work_item_id),i.brief) INTO body FROM opc_items i WHERE i.work_item_id=(entry->>'id')::uuid;END IF;
  RETURN jsonb_build_object('kind','workspace_source','identity',entry,'body',left(body,cap),'truncated',length(body)>cap,'dependencies',jsonb_build_array(version_id));
@@ -83,19 +85,29 @@ GRANT EXECUTE ON FUNCTION runtime_workspace_source(uuid,uuid,text) TO service_ro
 -- every producing answer are still live, so a copy can never be stored after its source answer or session was deleted.
 CREATE OR REPLACE FUNCTION runtime_workspace_benchmark_guard() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
-DECLARE a uuid;s uuid;
+DECLARE a uuid;s uuid;sessions uuid[];one jsonb;
 BEGIN
- IF NEW.name<>'read_source' OR NEW.result IS NULL OR NEW.result->>'kind' IS DISTINCT FROM 'workspace_source'
-  OR NEW.result#>>'{identity,kind}' IS DISTINCT FROM 'benchmarks' THEN RETURN NEW;END IF;
+ -- A read of one benchmark table ('workspace_source') or an index listing one ('workspace_index'): both carry producedBy.
+ IF NEW.name<>'read_source' OR NEW.result IS NULL THEN RETURN NEW;END IF;
+ IF NEW.result->>'kind'='workspace_source' AND NEW.result#>>'{identity,kind}'='benchmarks' THEN
+  sessions:=ARRAY[(NEW.result#>>'{identity,sessionId}')::uuid];
+ ELSIF NEW.result->>'kind'='workspace_index' THEN
+  sessions:=ARRAY(SELECT (e->>'sessionId')::uuid FROM jsonb_array_elements(NEW.result->'entries') e WHERE e->>'kind'='benchmarks');
+ END IF;
+ IF coalesce(cardinality(sessions),0)=0 THEN RETURN NEW;END IF;
  SELECT actor_id INTO a FROM runtime_executions WHERE id=NEW.execution_id;
- s:=(NEW.result#>>'{identity,sessionId}')::uuid;
  PERFORM p.id FROM artifact_projects p JOIN opc_drafts od ON od.project_id=p.id
-  WHERE od.session_id=s AND p.actor_id=a ORDER BY p.id FOR SHARE OF p;
- IF NOT EXISTS(SELECT 1 FROM runtime_sessions rs WHERE rs.id=s AND rs.actor_id=a AND rs.content_deleted_at IS NULL AND rs.erased_at IS NULL)
-  OR EXISTS(SELECT 1 FROM jsonb_array_elements(coalesce(NEW.result->'producedBy','[]'::jsonb)) i
-   WHERE NOT EXISTS(SELECT 1 FROM runtime_executions x WHERE x.id=(i->>'executionId')::uuid AND x.actor_id=a
-    AND x.session_id=s AND x.content_deleted_at IS NULL AND x.erased_at IS NULL))
- THEN RAISE EXCEPTION 'RUNTIME_WORKSPACE_SOURCE_REVOKED';END IF;
+  WHERE od.session_id=ANY(sessions) AND p.actor_id=a ORDER BY p.id FOR SHARE OF p;
+ FOR one IN SELECT x FROM jsonb_array_elements(CASE WHEN NEW.result->>'kind'='workspace_index'
+   THEN (SELECT coalesce(jsonb_agg(e),'[]') FROM jsonb_array_elements(NEW.result->'entries') e WHERE e->>'kind'='benchmarks')
+   ELSE jsonb_build_array(NEW.result||jsonb_build_object('sessionId',NEW.result#>>'{identity,sessionId}')) END) x LOOP
+  s:=(one->>'sessionId')::uuid;
+  IF NOT EXISTS(SELECT 1 FROM runtime_sessions rs WHERE rs.id=s AND rs.actor_id=a AND rs.content_deleted_at IS NULL AND rs.erased_at IS NULL)
+   OR EXISTS(SELECT 1 FROM jsonb_array_elements(coalesce(one->'producedBy','[]'::jsonb)) i
+    WHERE NOT EXISTS(SELECT 1 FROM runtime_executions x WHERE x.id=(i->>'executionId')::uuid AND x.actor_id=a
+     AND x.session_id=s AND x.content_deleted_at IS NULL AND x.erased_at IS NULL))
+  THEN RAISE EXCEPTION 'RUNTIME_WORKSPACE_SOURCE_REVOKED';END IF;
+ END LOOP;
  RETURN NEW;
 END $$;
 REVOKE ALL ON FUNCTION runtime_workspace_benchmark_guard() FROM PUBLIC,anon,authenticated,service_role;
