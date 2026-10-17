@@ -145,6 +145,14 @@ try {
     await nextDay(cf);
     await c.query('UPDATE social_connections SET manual_refresh_at=NULL WHERE id=$1', [cf]);
   }
+  // Posts stored by a refresh that never settled successfully still count as "seen before".
+  const hm = await member(), ch = await connection(hm);
+  const kh = await claimOf(ch);
+  await page(kh, [post('h1', ago(1))], 'cz');
+  await finish(kh, 'failed', 'PROVIDER_FAILED_500');
+  assert.equal((await row(ch)).last_success_at, null);
+  for (let d = 1; d <= 2; d++) { await nextDay(ch); await finish(await claimOf(ch), 'empty'); }
+  assert.equal((await row(ch)).status, 'reauth_required');
   report.checks.push('empty reads: with earlier posts two days -> re-authorise; never any posts -> prompt after 7 days');
 
   // Failures keep old data and the cursor; three in a row show "failed". Provider refusal asks to re-authorise.
