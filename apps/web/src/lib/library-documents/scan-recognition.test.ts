@@ -49,6 +49,34 @@ describe('scan recognition driver', () => {
     await runScanRecognition(calls, new AbortController().signal, (_, p) => seen.push(p));
     expect(seen.at(-1)).toEqual({ done: 2, total: 2, failed: 1, state: 'done' });
   });
+  it('ends only the document that was deleted mid-run and carries on with the rest of the queue', async () => {
+    const queue = [doc([2]), { documentId: 'd2', format: 'pdf' as const, contentVersion: 1, positions: [3] }];
+    const calls = api({
+      pending: vi.fn(async () => queue),
+      save: vi.fn(async ({ documentId }) => {
+        if (documentId === 'd1') throw new Error('LIBRARY_NOT_FOUND');
+        return { saved: true, status: 'complete', contentVersion: 2 };
+      }),
+    });
+    const seen: Array<[string, ScanProgress]> = [];
+    expect(await runScanRecognition(calls, new AbortController().signal, (id, p) => seen.push([id, p]))).toBe('done');
+    expect(vi.mocked(calls.save).mock.calls.map(([input]) => input.documentId)).toEqual(['d1', 'd2']);
+    expect(seen.find(([id, p]) => id === 'd1' && p.state === 'stopped')).toBeTruthy();
+  });
+  it('waits for the server retry hint and tries a rate-limited save again', async () => {
+    vi.useFakeTimers();
+    try {
+      let limited = true;
+      const calls = api({ save: vi.fn(async ({ version }) => {
+        if (limited) { limited = false; throw Object.assign(new Error('rate'), { data: { code: 'TOO_MANY_REQUESTS', retryAfter: 7 } }); }
+        return { saved: true, status: 'complete', contentVersion: version + 1 };
+      }) }, [doc([2])]);
+      const run = runScanRecognition(calls, new AbortController().signal, () => undefined);
+      await vi.advanceTimersByTimeAsync(7000);
+      expect(await run).toBe('done');
+      expect(calls.save).toHaveBeenCalledTimes(2);
+    } finally { vi.useRealTimers(); }
+  });
   it('fetches the waiting list again until it holds no document this run has not tried', async () => {
     const lists = [[doc([2])], [doc([2]), { documentId: 'd21', format: 'pdf' as const, contentVersion: 2, positions: [3] }], [doc([2])]];
     const calls = api({ pending: vi.fn(async () => lists.shift() ?? []) });

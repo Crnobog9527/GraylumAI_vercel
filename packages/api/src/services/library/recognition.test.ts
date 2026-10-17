@@ -62,6 +62,13 @@ describe('recognition service', () => {
     await libraryRecognition(client, a).failRecognized({ documentId: id, kind: 'word_image', position: 4 });
     expect(rpc).toHaveBeenLastCalledWith('library_recognition_fail', { a, did: id, kind: 'word_image', pos: 4 });
   });
+  it('reports the server switch as on only when the setting is exactly true', async () => {
+    const from = (result: { data: { value: unknown } | null; error: unknown }) => ({ from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => result }) }) }) }) as unknown as SupabaseClient;
+    expect(await libraryRecognition(from({ data: { value: true }, error: null }), a).recognitionEnabled()).toBe(true);
+    expect(await libraryRecognition(from({ data: { value: 'true' }, error: null }), a).recognitionEnabled()).toBe(false);
+    expect(await libraryRecognition(from({ data: null, error: null }), a).recognitionEnabled()).toBe(false);
+    expect(await libraryRecognition(from({ data: { value: true }, error: { message: 'x' } }), a).recognitionEnabled()).toBe(false);
+  });
   it('maps database refusals to stable codes', async () => {
     rpc.mockResolvedValueOnce({ data: null, error: { message: 'LIBRARY_DISABLED' } });
     await expect(libraryRecognition(client, a).failRecognized({ documentId: id, kind: 'pdf_page', position: 1 })).rejects.toThrow('LIBRARY_DISABLED');

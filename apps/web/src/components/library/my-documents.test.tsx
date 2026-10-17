@@ -28,11 +28,13 @@ vi.mock('@/trpc/client', () => ({
       completePdfUpload: { useMutation: mutation },
       abandonUpload: { useMutation: mutation }, delete: { useMutation: mutation },
       setPurpose: { useMutation: mutation }, download: { useMutation: mutation }, preview: { useMutation: mutation },
+      recognitionEnabled: { useQuery: () => ({ data: false }) },
       saveRecognizedPage: { useMutation: mutation }, failRecognizedPage: { useMutation: mutation },
     },
   },
 }));
 vi.mock('sonner', () => ({ toast: { error: vi.fn() } }));
+const scanStub = { progress: {}, start: () => undefined, listen: () => () => undefined, busy: false, serverEnabled: false };
 
 import { DocumentList, UploadPanel, type UploadPanelProps } from './my-documents-view';
 import { DeleteConfirmDialog } from './document-dialogs';
@@ -62,7 +64,8 @@ describe('upload panel', () => {
     const sentence = '扫描的 PDF 和 Word 里的图片上传后会在你自己的浏览器里自动识别文字，不扣积分；识别时请保持这个页面打开。';
     expect(panel().text).not.toContain(sentence);
     vi.stubEnv('NEXT_PUBLIC_LIBRARY_SCAN_RECOGNITION', 'true');
-    const { text } = panel();
+    expect(panel().text).not.toContain(sentence);
+    const { text } = panel({ scanServerEnabled: true });
     expect(text).toContain(sentence);
     expect(text).not.toContain('AI 识别');
     expect(text).not.toMatch(/\d+\s*积分/);
@@ -71,7 +74,8 @@ describe('upload panel', () => {
     vi.stubEnv('NEXT_PUBLIC_LIBRARY_DOCX_EXTRACTION', 'true');
     expect(panel().text).toContain('文中的图片暂不识别');
     vi.stubEnv('NEXT_PUBLIC_LIBRARY_SCAN_RECOGNITION', 'true');
-    const { text } = panel();
+    expect(panel().text).toContain('文中的图片暂不识别');
+    const { text } = panel({ scanServerEnabled: true });
     expect(text).toContain('扫描的 PDF 和 Word 里的图片上传后会在你自己的浏览器里自动识别文字');
     expect(text).toContain('Word 的文字在你自己的浏览器里读取，不扣积分。');
     expect(text).not.toContain('暂不识别');
@@ -210,7 +214,7 @@ describe('my documents container', () => {
       data: { usedBytes: 2_200, capacityBytes: 50_000_000, documents: [doc()] } };
   });
   it('stays closed when the list does not report the upload switch as on', () => {
-    const { html, text } = render(<MyDocuments/>);
+    const { html, text } = render(<MyDocuments scan={scanStub}/>);
     expect(text).toContain('上传暂未开放');
     expect(html).not.toContain('type="file"');
     expect(text).toContain('我的文章.md');
@@ -218,17 +222,17 @@ describe('my documents container', () => {
   });
   it('opens upload when the server reports uploadEnabled', () => {
     state.list = { ...state.list, data: { ...(state.list.data as object), uploadEnabled: true } };
-    expect(render(<MyDocuments/>).html).toContain('type="file"');
+    expect(render(<MyDocuments scan={scanStub}/>).html).toContain('type="file"');
   });
   it('offers "load more" only while the server returns a next cursor', () => {
-    expect(render(<MyDocuments/>).text).not.toContain('加载更多');
+    expect(render(<MyDocuments scan={scanStub}/>).text).not.toContain('加载更多');
     state.list = { ...state.list, data: { ...(state.list.data as object),
       nextCursor: { createdAt: '2026-10-10T00:00:00.123456+00:00', id: doc().id } } };
-    expect(render(<MyDocuments/>).text).toContain('加载更多');
+    expect(render(<MyDocuments scan={scanStub}/>).text).toContain('加载更多');
   });
   it('shows a read failure without claiming the library is empty', () => {
     state.list = { isSuccess: false, isPending: false, error: { message: 'LIBRARY_ACCOUNT_CLOSED' }, data: undefined, refetch: vi.fn() };
-    const { text } = render(<MyDocuments/>);
+    const { text } = render(<MyDocuments scan={scanStub}/>);
     expect(text).toContain('账号当前不可用');
     expect(text).not.toContain('还没有文件');
     expect(text).toContain('已用 — / 共 —');

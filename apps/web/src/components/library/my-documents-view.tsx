@@ -32,7 +32,7 @@ function queueLabel(item: UploadItem): string {
 }
 
 export type UploadPanelProps = {
-  uploadEnabled: boolean; spaceKnown: boolean; usedBytes?: number; capacityBytes?: number;
+  uploadEnabled: boolean; /** The server's recognition switch; the scan sentence needs it as well as the build flag. */ scanServerEnabled?: boolean; spaceKnown: boolean; usedBytes?: number; capacityBytes?: number;
   uploads: UploadItem[]; onAdd: (files: File[], purpose: LibraryPurpose) => void;
   onRetry: (key: string) => void; onDismiss: (key: string) => void | Promise<void>;
 };
@@ -40,19 +40,20 @@ export type UploadPanelProps = {
 export function UploadPanel(props: UploadPanelProps) {
   const [purpose, setPurpose] = useState<LibraryPurpose | null>(null);
   const space = props.spaceKnown ? spaceState(props.usedBytes ?? 0, props.capacityBytes ?? 0) : null;
+  const scanOn = isLibraryScanRecognitionEnabled() && props.scanServerEnabled === true;
   const blocked = !props.uploadEnabled || space === null || space !== 'ok';
   return <section className={styles.panel} aria-label="上传文件">
     <h2>上传文件</h2>
     <p className={styles.hint}>
       支持{supportedText()}，单个文件不超过 10 MB。{comingSoonText()}
     </p>
-    {isWordUploadReady() && !isLibraryScanRecognitionEnabled() && <p className={styles.hint}>
+    {isWordUploadReady() && !scanOn && <p className={styles.hint}>
       Word 的文字在你自己的浏览器里读取，不扣积分；文中的图片暂不识别。
     </p>}
-    {isPdfUploadReady() && !isLibraryScanRecognitionEnabled() && <p className={styles.hint}>
+    {isPdfUploadReady() && !scanOn && <p className={styles.hint}>
       PDF 的文字在你自己的浏览器里读取，不扣积分；扫描页（没有可选中文字的页）会标为待识别，识别功能即将开放。
     </p>}
-    {isLibraryScanRecognitionEnabled() && (isWordUploadReady() || isPdfUploadReady()) && <>
+    {scanOn && (isWordUploadReady() || isPdfUploadReady()) && <>
       <p className={styles.hint}>{isWordUploadReady() && isPdfUploadReady() ? 'Word 和 PDF' : isWordUploadReady() ? 'Word' : 'PDF'} 的文字在你自己的浏览器里读取，不扣积分。</p>
       <p className={styles.hint}>{SCAN_NOTICE}</p>
     </>}

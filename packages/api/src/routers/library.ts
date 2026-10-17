@@ -43,6 +43,7 @@ export const libraryRouter = router({
   setPurpose: procedure.input(document.extend({ purpose: z.enum(['authored', 'reference']) }))
     .mutation(({ ctx, input }) => ctx.library.purpose(input.documentId, input.purpose)),
   // LIB-2d: the browser recognises scanned PDF pages and Word images and saves only the text (off unless the server switch is on).
+  recognitionEnabled: procedure.query(({ ctx }) => ctx.library.recognitionEnabled()),
   recognitionPending: procedure.query(({ ctx }) => ctx.library.recognitionPending()),
   saveRecognizedPage: procedure.input(recognitionSaveInput).mutation(({ ctx, input }) => ctx.library.saveRecognized(input)),
   failRecognizedPage: procedure.input(recognitionFailInput).mutation(({ ctx, input }) => ctx.library.failRecognized(input)),

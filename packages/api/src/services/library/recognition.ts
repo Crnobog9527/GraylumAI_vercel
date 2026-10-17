@@ -65,6 +65,11 @@ export function libraryRecognition(client: SupabaseClient, actorId: string) {
     recognitionPending() {
       return libraryRpc<RecognitionPending>(client, 'library_recognition_pending', { a: actorId });
     },
+    /** Whether the server switch is on, so the page promises automatic recognition only when it will happen. */
+    async recognitionEnabled() {
+      const { data, error } = await client.from('system_settings').select('value').eq('key', 'library_scan_recognition_enabled').maybeSingle();
+      return !error && data?.value === true;
+    },
     async saveRecognized(raw: z.infer<typeof recognitionSaveInput>) {
       const input = recognitionSaveInput.parse(raw);
       await checkRateLimitAsync(actorId, 'api');

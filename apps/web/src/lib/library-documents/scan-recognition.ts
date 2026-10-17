@@ -25,6 +25,25 @@ export type ScanApi = {
 export type ScanProgress = { done: number; total: number; failed: number; state: 'running' | 'done' | 'paused' | 'stopped' };
 
 const errorCode = (error: unknown) => (error as { message?: unknown } | null)?.message;
+const MAX_RATE_LIMIT_RETRIES = 5;
+
+/** A rate-limited call waits the server's `retryAfter` (at most two minutes) and is tried again, a few times. */
+async function persist<T>(call: () => Promise<T>, signal: AbortSignal): Promise<T> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await call();
+    } catch (error) {
+      const data = (error as { data?: { code?: unknown; retryAfter?: unknown } } | null)?.data;
+      if (data?.code !== 'TOO_MANY_REQUESTS' || attempt >= MAX_RATE_LIMIT_RETRIES || signal.aborted) throw error;
+      const seconds = typeof data.retryAfter === 'number' && data.retryAfter > 0 ? Math.min(data.retryAfter, 120) : 30;
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, seconds * 1000);
+        signal.addEventListener('abort', () => { clearTimeout(timer); resolve(); }, { once: true });
+      });
+      if (signal.aborted) throw error;
+    }
+  }
+}
 
 export const SCAN_LOCK = 'graylum-library-scan-recognition';
 type Locks = { request<T>(name: string, options: { signal?: AbortSignal }, run: () => Promise<T>): Promise<T> };
@@ -52,7 +71,15 @@ export async function runScanRecognition(api: ScanApi, signal: AbortSignal,
     if (!documents.length) return 'done';
     for (const document of documents) {
       tried.add(document.documentId);
-      const outcome = await recognizeDocument(api, document, signal, onProgress);
+      let outcome: Awaited<ReturnType<typeof recognizeDocument>>;
+      try {
+        outcome = await recognizeDocument(api, document, signal, onProgress);
+      } catch (error) {
+        // Deleted while it was being recognised: that document ends, the rest of the queue continues.
+        if (errorCode(error) !== 'LIBRARY_NOT_FOUND') throw error;
+        onProgress(document.documentId, { done: 0, total: document.positions.length, failed: 0, state: 'stopped' });
+        continue;
+      }
       if (outcome !== 'done') return outcome;
     }
   }
@@ -92,19 +119,19 @@ async function recognizeDocument(api: ScanApi, document: PendingDocument, signal
       if (!text) {
         // Unreadable page (for example a JPEG 2000 image the sandbox cannot draw) or no text found.
         // A failure that was not recorded is not counted: the error stops the run and the page stays waiting.
-        const failed = await api.fail({ documentId: document.documentId, kind, position: result.page });
+        const failed = await persist(() => api.fail({ documentId: document.documentId, kind, position: result.page }), signal);
         if (failed.status === 'failed') progress.failed += 1;
       } else {
         let saved: SaveResult;
         try {
-          saved = await api.save({ documentId: document.documentId, kind, position: result.page, version, text });
+          saved = await persist(() => api.save({ documentId: document.documentId, kind, position: result.page, version, text }), signal);
         } catch (error) {
           if (errorCode(error) !== 'LIBRARY_VERSION_CHANGED') throw error;
           // Another tab saved a page in between: take the current version and save once more.
           const fresh = (await api.pending()).find((item) => item.documentId === document.documentId);
           if (!fresh) { progress.state = 'done'; report(); return 'done'; }
           version = fresh.contentVersion;
-          saved = await api.save({ documentId: document.documentId, kind, position: result.page, version, text });
+          saved = await persist(() => api.save({ documentId: document.documentId, kind, position: result.page, version, text }), signal);
         }
         if (saved.code === 'LIBRARY_SPACE') {
           progress.state = 'paused';

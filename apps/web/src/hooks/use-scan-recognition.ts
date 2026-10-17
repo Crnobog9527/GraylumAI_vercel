@@ -18,16 +18,31 @@ import { oneTabAtATime, runScanRecognition, type ScanApi, type ScanProgress } fr
 /** Image types the recognition engine reads (others, such as EMF or GIF, are marked failed). */
 const RECOGNIZABLE = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
-export function useScanRecognition(onDocumentChanged: () => void, onSaved: (documentId: string, contentVersion: number) => void) {
+export type ScanListeners = { onDocumentChanged(): void; onSaved(documentId: string, contentVersion: number): void };
+const NO_LISTENERS: ScanListeners = { onDocumentChanged: () => undefined, onSaved: () => undefined };
+export type ScanRecognition = ReturnType<typeof useScanRecognition>;
+
+/**
+ * Mounted by the library page itself, so waiting pages resume on every library visit even before 我的文档 is
+ * opened; the documents pane registers `listen` to refresh its list while it is shown.
+ */
+export function useScanRecognition() {
   const utils = trpc.useUtils();
   const download = trpc.library.download.useMutation();
+  // The page promises automatic recognition only when the server switch is on too (fail closed until known).
+  const enabled = trpc.library.recognitionEnabled.useQuery(undefined, { staleTime: 60_000 });
   const save = trpc.library.saveRecognizedPage.useMutation();
   const fail = trpc.library.failRecognizedPage.useMutation();
   const [progress, setProgress] = useState<Record<string, ScanProgress>>({});
   const running = useRef<AbortController | null>(null);
   const again = useRef(false);
-  const latest = useRef({ download, save, fail, onDocumentChanged, onSaved });
-  latest.current = { download, save, fail, onDocumentChanged, onSaved };
+  const listeners = useRef<ScanListeners>(NO_LISTENERS);
+  const latest = useRef({ download, save, fail });
+  latest.current = { download, save, fail };
+  const listen = useCallback((next: ScanListeners) => {
+    listeners.current = next;
+    return () => { if (listeners.current === next) listeners.current = NO_LISTENERS; };
+  }, []);
 
   const start = useCallback(() => {
     if (!isLibraryScanRecognitionEnabled()) return;
@@ -68,14 +83,14 @@ export function useScanRecognition(onDocumentChanged: () => void, onSaved: (docu
       },
       save: async (input) => {
         const saved = await latest.current.save.mutateAsync(input);
-        latest.current.onSaved(input.documentId, saved.contentVersion);
+        listeners.current.onSaved(input.documentId, saved.contentVersion);
         return saved;
       },
       fail: (input) => latest.current.fail.mutateAsync(input),
     };
     void oneTabAtATime(() => runScanRecognition(api, controller.signal, (documentId, value) => {
       setProgress((current) => ({ ...current, [documentId]: value }));
-      if (value.state !== 'running' || value.done > 0) latest.current.onDocumentChanged();
+      if (value.state !== 'running' || value.done > 0) listeners.current.onDocumentChanged();
     }), controller.signal).catch(() => {
       // An unexpected failure leaves no document running, so the page stops warning before leaving.
       setProgress((current) => Object.fromEntries(Object.entries(current)
@@ -91,5 +106,14 @@ export function useScanRecognition(onDocumentChanged: () => void, onSaved: (docu
     return () => { running.current?.abort(); running.current = null; };
   }, [start]);
 
-  return { progress, start, busy: Object.values(progress).some((p) => p.state === 'running') };
+  const busy = Object.values(progress).some((p) => p.state === 'running');
+  // Leaving while a page is being recognised loses that page's work (it is redone next time), so warn first.
+  useEffect(() => {
+    if (!busy) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [busy]);
+
+  return { progress, start, listen, busy, serverEnabled: enabled.data === true };
 }

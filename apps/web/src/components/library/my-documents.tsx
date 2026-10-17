@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import { trpc } from '@/trpc/client';
 import { useLibraryDocuments, type LibraryDocument } from '@/hooks/use-library-documents';
 import { useLibraryUploads } from '@/hooks/use-library-uploads';
-import { useScanRecognition } from '@/hooks/use-scan-recognition';
+import type { ScanRecognition } from '@/hooks/use-scan-recognition';
 import { libraryErrorMessage } from '@/lib/library-documents/format';
 import { isSignedStorageUrl, startDownload } from '@/lib/library-documents/signed-url';
 import { DocumentList, SpacePanel, UploadPanel } from './my-documents-view';
@@ -13,11 +13,11 @@ import { DeleteConfirmDialog, DocumentDetailDialog } from './document-dialogs';
 import styles from './my-documents.module.css';
 
 /** 资料库「我的文档」(LIB-3). Upload stays hidden until the server's upload switch is on. */
-export function MyDocuments() {
+export function MyDocuments({ scan }: { scan: ScanRecognition }) {
   const library = useLibraryDocuments();
   const { reload, refresh, patchVersion, markDisabled } = library;
-  const scan = useScanRecognition(useCallback(() => { void refresh(); }, [refresh]), patchVersion);
-  const { start: startScan } = scan;
+  const { start: startScan, listen } = scan;
+  useEffect(() => listen({ onDocumentChanged: () => { void refresh(); }, onSaved: patchVersion }), [listen, refresh, patchVersion]);
   const uploads = useLibraryUploads(useCallback(() => { void reload(); startScan(); }, [reload, startScan]), markDisabled);
   const download = trpc.library.download.useMutation();
   const [opened, setOpened] = useState<LibraryDocument | null>(null);
@@ -33,11 +33,11 @@ export function MyDocuments() {
   }, [library.documents, opened]);
 
   useEffect(() => {
-    if (!uploads.busy && !scan.busy) return;
+    if (!uploads.busy) return;
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); };
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
-  }, [uploads.busy, scan.busy]);
+  }, [uploads.busy]);
 
   async function onDownload(doc: LibraryDocument) {
     setBusyId(doc.id);
@@ -73,7 +73,7 @@ export function MyDocuments() {
   const ready = library.ready;
   return <div className={styles.root}>
     <div className={styles.topRow}>
-      <UploadPanel uploadEnabled={ready && library.uploadEnabled} spaceKnown={ready}
+      <UploadPanel uploadEnabled={ready && library.uploadEnabled} scanServerEnabled={scan.serverEnabled} spaceKnown={ready}
         usedBytes={library.usedBytes} capacityBytes={library.capacityBytes}
         uploads={uploads.items}
         onAdd={(files, purpose) => uploads.add(files, purpose, ready && library.capacityBytes !== undefined && library.usedBytes !== undefined
