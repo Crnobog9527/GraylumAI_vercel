@@ -116,7 +116,11 @@
   - 静态拒绝和 Decisions 判为拦截：`estimate` / `start` 直接返回同一个拒绝（引导去做定位），不建组、不冻结、不收费；Decisions 这一次判断的费用和普通对话一样由 Graylum 承担。
   - 判不准或 Decisions 不可用：每一列都带同一份兜底指令；某一列回答了兜底标记，这一列判定 `no_delivery`、不收费（成本由平台承担、计入熔断统计），
     其他列照常；全部列都是兜底标记时整次对比显示和普通对话一样的定位引导。
-  - PR-2 验收：没有定位的用户选社媒 Skill 发起对比被拒且余额不变；Decisions 判拦截时被拒且不建运行单；判不准时模拟某列回答兜底标记，该列不收费、其他列照常收费。
+    **识别标记必须在保存之前**：现有 `fusionExecutor.run` 先 `fusion_call_output_save` 再判定，而 0235 不允许给已保存输出的调用写 `no_delivery`，
+    照搬就会在恢复期限按 `unjudged_saved` 收费。所以带兜底指令的列，执行器像普通 Runtime 一样先缓冲开头、识别兜底标记
+    （复用 `positioningFallback.ts` 的 `isPositioningRefusal`）：命中时不转发、不保存正文，直接写 `no_delivery` 结算为零；没命中才开始转发和保存。
+    不带兜底指令的列照常边收边转。
+  - PR-2 验收：没有定位的用户选社媒 Skill 发起对比被拒且余额不变；Decisions 判拦截时被拒且不建运行单；判不准时模拟某列回答兜底标记，该列不收费、其他列照常收费；该列没有 `fusion_call_outputs` 记录、判定是 `no_delivery`，到恢复期限也不会变成 `unjudged_saved`。
 - 上下文容量：按每个模型的窗口分别检查"输入 + 回答上限"，装不下的模型在冻结前拒绝；用户勾选里有装不下的就整次拒绝并告诉用户是哪一个
   （不悄悄去掉，用户可以取消它再发）。复用 `measureCallInput` / `fitNativeRequestOutput`。
 - **模型名称（Q1 已定，Owner 2026-10-17）**：勾选框和每列回答的标题显示后台配置的真实模型名称（`ai_models` 里管理员配置的名称，不另设显示名）。
