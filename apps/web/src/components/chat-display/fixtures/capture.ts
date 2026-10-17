@@ -27,7 +27,11 @@ export const SAMPLE_CHECKLIST_INFORMATION: CaptureChecklistProps['information'] 
       audience: value('本地想订生日蛋糕的年轻人'),
       resource: value('每周 3–10 小时'),
     },
-    meta: { goal: { source: 'capture', protected: false }, audience: { source: 'capture', protected: false }, resource: { source: 'capture', protected: false } },
+    meta: {
+      goal: { source: 'capture', protected: false },
+      audience: { source: 'capture', protected: false },
+      resource: { source: 'capture', protected: false },
+    },
   },
   diagnose: {
     schema: [{ id: 'platform', title: '平台', required: true }, { id: 'rival', title: '竞品', required: false }],

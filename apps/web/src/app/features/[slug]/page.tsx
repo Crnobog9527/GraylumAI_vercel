@@ -5,7 +5,7 @@
  */
 
 import { notFound } from 'next/navigation';
-import { FeatureDemo } from '@/components/public-site/features/FeatureDemos';
+import { FeatureDemo } from '@/components/public-site/features/FeatureDemo';
 import { ArticlePage } from '@/components/public-site/ArticlePage';
 import { getPublicSiteSettings } from '@/lib/public-site';
 import { articleMetadata } from '@/lib/seo/article';

@@ -15,7 +15,10 @@ export function BlogIndexPage({ supportEmail }: { supportEmail?: string | null }
   return (
     <SiteShell locale="zh-Hans" supportEmail={supportEmail}>
       <JsonLd data={[
-        webPageJsonLd({ path: BLOG_INDEX.path, title: BLOG_INDEX.metaTitle, description: BLOG_INDEX.metaDescription, locale: 'zh-Hans', dateModified: BLOG_INDEX.updated }),
+        webPageJsonLd({
+          path: BLOG_INDEX.path, title: BLOG_INDEX.metaTitle, description: BLOG_INDEX.metaDescription,
+          locale: 'zh-Hans', dateModified: BLOG_INDEX.updated,
+        }),
         breadcrumbJsonLd(BLOG_INDEX.breadcrumb),
       ]} />
       <div className="mx-auto max-w-3xl px-4 py-10 sm:px-6 md:py-14">

@@ -6,7 +6,7 @@ import { FEATURES } from '@/lib/seo/content/features';
 import * as library from '@/components/chat-display/fixtures/library';
 import * as positioning from '@/components/chat-display/fixtures/positioning';
 import * as runtime from '@/components/chat-display/fixtures/runtime';
-import { FeatureDemo } from './FeatureDemos';
+import { FeatureDemo } from './FeatureDemo';
 
 vi.mock('next/link', () => ({
   default: ({ href, children, ...rest }: { href: string; children: React.ReactNode }) => <a href={href} {...rest}>{children}</a>,

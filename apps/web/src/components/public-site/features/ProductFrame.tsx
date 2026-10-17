@@ -16,7 +16,13 @@ export function ProductFrame({ label, caption, className, children }: {
 }) {
   return (
     <figure className="m-0">
-      <div role="group" aria-label={label} className={cn(light.light, 'overflow-hidden rounded-2xl border border-[#2B2B2B] bg-[var(--gl-canvas)] p-3 text-[var(--gl-text)] sm:p-5', className)}>
+      <div
+        role="group" aria-label={label}
+        className={cn(
+          light.light, 'overflow-hidden rounded-2xl border border-[#2B2B2B] bg-[var(--gl-canvas)] p-3',
+          'text-[var(--gl-text)] sm:p-5', className,
+        )}
+      >
         {children}
       </div>
       <figcaption className="mt-3 text-center text-xs text-[#8A8A8A]">{caption}</figcaption>
