@@ -359,13 +359,11 @@ files.each do |file|
      forbidden_github_contexts?(github_contexts_in_wrapped_expressions(concurrency['group']), CONCURRENCY_GROUP_GITHUB_CONTEXTS)
     failures << "#{file}: direct github context interpolation is forbidden except github.sha and github.event_name (concurrency.group may also use github.event.pull_request.number)"
   end
-  scanned = workflow
-  if concurrency.is_a?(Hash) && concurrency['group'].is_a?(String)
-    scanned = workflow.merge('concurrency' => concurrency.reject { |key, _| key == 'group' })
-  end
+  # The group string was context-checked above; it still goes through every other check below.
+  group = concurrency.is_a?(Hash) && concurrency['group'].is_a?(String) ? concurrency['group'] : nil
 
-  each_string(scanned) do |value|
-    if forbidden_github_context_in_wrapped_expressions?(value)
+  each_string(workflow) do |value|
+    if !value.equal?(group) && forbidden_github_context_in_wrapped_expressions?(value)
       failures << "#{file}: direct github context interpolation is forbidden except github.sha and github.event_name"
     end
     next unless secret_reference?(value)

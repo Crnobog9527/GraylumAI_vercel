@@ -1480,6 +1480,12 @@ add_case.call(
   'direct github context interpolation is forbidden except github.sha and github.event_name'
 )
 add_case.call(
+  'secret-in-concurrency-group',
+  amend_workflow(workflow_yaml(safe_sha)) { |workflow| workflow['concurrency'] = { 'group' => 'ci-${{ secrets.DEPLOY_KEY }}' } },
+  false,
+  'trusted_policy_material_v1 workflows must not reference secrets'
+)
+add_case.call(
   'pr-head-ref-in-concurrency-group',
   amend_workflow(workflow_yaml(safe_sha)) { |workflow| workflow['concurrency'] = { 'group' => '${{ github.event.pull_request.head.ref }}' } },
   false,
