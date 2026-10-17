@@ -115,8 +115,8 @@ Opus 4 次 1.5456（汇总对比 2 次 0.8724、大档 2 次 0.6731）；Sonnet 
      providerLimits `{providerSlug:"anthropic", contextTokens:1000000, promptUsdPerMillion:"5", completionUsdPerMillion:"20", cacheWriteUsdPerMillion:"5", requestUsd:"0"}`、
      upperUsd 按 `openRouterBound` 计算、automaticRetry false、hiddenTools false、lookupSupported true。
    - Sol：promptUsdPerMillion "5"、completionUsdPerMillion "15"、cacheWriteUsdPerMillion "5"（价格不变），inputLimit 90000 → 196608，upperUsd 5.12288。
-   - **报价取值规则（2026-10-17 总控更正）**：准入用 `deriveFrozenPrices` 按价格快照推导最高单价——promptUsdPerMillion 取各适用档位里 max(输入价, 缓存写入价)，
-     档位按 contextTokens 判断（contextTokens 1000000 会进入 Sol 的 ≥272000 档）；报价低于推导值就拒绝（RUNTIME_PRICE_INCREASED）。
+   - **报价取值规则（2026-10-17 总控更正）**：准入用 `deriveFrozenPrices` 按价格快照推导最高单价——promptUsdPerMillion 取各适用档位里"含缓存写入的输入价"的最大值——缓存写入价是总价（不低于输入价，如 Anthropic、OpenAI）时取 max(输入价, 缓存写入价)；缓存写入价低于输入价、按附加费计（`cacheWriteIsAdditive`，如 Google 线路）时取 输入价 + 缓存写入价，
+     档位按 contextTokens 判断（contextTokens 1000000 会进入 Sol 的 ≥272000 档）；报价低于推导值就拒绝（RUNTIME_PRICE_INCREASED）。写报价前用 `deriveFrozenPrices` 按当前价格快照实际算一遍，不要手算。
      本节原写的 Sol "2/10/2.5"、Opus 输入 "4" 低于推导值，导致 10-17 staging 评审团复验第 1 轮被拒（#1003），staging 已改正为上面的数值。
 4. **`runtime_payg_staging`**：
    - **已完成**（总控 2026-10-17 第一批写入，记录在 #1056 评论）——Sonnet、Gemini 两条：`purposes` 加 `fusion_review`；`requestFormats` 加 `fusion-json-v1-stream`；
