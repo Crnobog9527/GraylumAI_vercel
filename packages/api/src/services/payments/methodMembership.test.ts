@@ -29,6 +29,14 @@ function fixture(counts: Array<number | null> = [40, 3, 2], route: unknown = nul
   return { db: { from } as unknown as SupabaseClient, queries };
 }
 describe('method membership read projection', () => {
+  it('R7: reads paid memberships, founder seats and Gold history in the Stripe account mode it is given', async () => {
+    const f = fixture(); const result = await readMethodMembership(f.db, 'actor', 1791676800000, staging, 'live');
+    expect(result.mode).toBe('live');
+    for (const q of [f.queries[1], f.queries[2], f.queries.at(-1)]) {
+      expect(q?.eq).toHaveBeenCalledWith('payment_mode', 'live');
+      expect(q?.eq).not.toHaveBeenCalledWith('payment_mode', 'test');
+    }
+  });
   it('uses real sold/reserved/review counts across channels; remains closed', async () => {
     const f = fixture(); const result = await readMethodMembership(f.db, 'actor', 1791676800000, staging);
     expect(result.founder).toEqual({ total: 50, sold: 40, reserved: 5, available: 5 });

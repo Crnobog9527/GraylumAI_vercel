@@ -38,7 +38,7 @@ export function refundFact(refund: Stripe.Refund, terms: MonthlyRefundTerms, int
     && ['pending', 'requires_action', 'succeeded', 'failed', 'canceled'].includes(refund.status ?? ''));
   return { id: refund.id, intentId, orderId: terms.orderId, chargeId: terms.chargeId,
     paymentIntentId: terms.paymentIntentId, currency: terms.currency, amount: refund.amount,
-    merchant: terms.merchant, mode: 'test' as const,
+    merchant: terms.merchant, mode: terms.mode,
     status: refund.status as MonthlyRefundObservation['refunds']['rows'][number]['status'] };
 }
 
@@ -57,7 +57,7 @@ async function renewalOwnership(stripe: MonthlyStripe, intent: MonthlyRefundInte
   if (!latest) return intent.terms.originalCancelAtPeriodEnd === sub.cancel_at_period_end ? 'original' as const : 'unknown' as const;
   const key = latest.request?.idempotency_key;
   const target = latest.data.object as Stripe.Subscription;
-  if (latest.livemode !== false || target.cancel_at_period_end !== sub.cancel_at_period_end
+  if (latest.livemode !== (intent.terms.mode === 'live') || target.cancel_at_period_end !== sub.cancel_at_period_end
     || target.metadata?.graylum_monthly_refund_intent !== intent.id
     || sub.metadata?.graylum_monthly_refund_intent !== intent.id) return 'unknown' as const;
   if (key === stageKey(intent, sub.cancel_at_period_end ? 'stop_renewal' : 'restore_renewal')) return 'intent' as const;
@@ -70,15 +70,17 @@ export async function readMonthlyProvider(stripe: MonthlyStripe, intent: Monthly
   // A card order (PAY-STRIPE-MP) was charged the pre-tax amount plus its tax.
   const charged = t.paidMinor + (t.taxMinor ?? 0);
   const scope = await resolveStripeScope(stripe);
-  evidence(scope.mode === 'test' && scope.merchant === t.merchant);
+  // R7 (0297): the frozen terms carry the order's mode; the connected account and every object must match it.
+  evidence(scope.mode === t.mode && scope.merchant === t.merchant);
+  const live = t.mode === 'live';
   const [sub, pi, charge] = await Promise.all([
     stripe.subscriptions.retrieve(t.providerSubscriptionId), stripe.paymentIntents.retrieve(t.paymentIntentId),
     stripe.charges.retrieve(t.chargeId),
   ]);
-  evidence(sub.id === t.providerSubscriptionId && sub.livemode === false
-    && pi.id === t.paymentIntentId && pi.livemode === false && pi.status === 'succeeded'
+  evidence(sub.id === t.providerSubscriptionId && sub.livemode === live
+    && pi.id === t.paymentIntentId && pi.livemode === live && pi.status === 'succeeded'
     && pi.amount_received === charged && pi.currency === t.currency && objectId(pi.latest_charge) === t.chargeId
-    && charge.id === t.chargeId && charge.livemode === false && charge.paid && charge.captured
+    && charge.id === t.chargeId && charge.livemode === live && charge.paid && charge.captured
     && charge.amount === charged && charge.amount_captured === charged && charge.currency === t.currency
     && objectId(charge.payment_intent) === t.paymentIntentId && objectId(sub.customer)
     && objectId(charge.customer) === objectId(sub.customer) && objectId(pi.customer) === objectId(sub.customer));
@@ -99,17 +101,17 @@ export async function readMonthlyProvider(stripe: MonthlyStripe, intent: Monthly
     renewalOwnership(stripe, intent, sub),
   ]);
   const original = invoices.filter(row => row.id === t.invoiceId);
-  const originalValid = original.length === 1 && original[0].livemode === false && original[0].status === 'paid'
+  const originalValid = original.length === 1 && original[0].livemode === live && original[0].status === 'paid'
     && original[0].amount_paid === charged && original[0].currency === t.currency
     && objectId(original[0].parent?.subscription_details?.subscription) === sub.id;
-  const clear = originalValid && invoices.every(row => row.livemode === false
+  const clear = originalValid && invoices.every(row => row.livemode === live
     && (row.id === t.invoiceId || row.status === 'void' || row.status === 'uncollectible'))
     && invoiceItems.length === 0 && sub.schedule === null && sub.pending_update === null
     && sub.pause_collection === null && sub.pending_setup_intent == null
     && sub.pending_invoice_item_interval == null && charge.disputed === false
     && charge.amount_refunded <= t.netMinor && sub.collection_method === 'charge_automatically'
     && (sub.cancel_at === null || sub.cancel_at === item.current_period_end);
-  return { checkedAt: new Date().toISOString(), merchant: scope.merchant, mode: 'test' as const,
+  return { checkedAt: new Date().toISOString(), merchant: scope.merchant, mode: scope.mode,
     subscription: { id: sub.id, status: (sub.status === 'active' || sub.status === 'canceled' ? sub.status : 'unknown'),
       periodEnd: t.periodEnd, cancelAtPeriodEnd: sub.cancel_at_period_end,
       renewalOwnership: ownership, preflight: clear ? 'clear' as const : 'conflict' as const },
