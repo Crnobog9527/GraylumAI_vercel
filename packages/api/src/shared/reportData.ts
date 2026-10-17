@@ -55,10 +55,13 @@ export type ReportBodyParts = {
 const isFenceOpen = (line: string) => line.trim() === REPORT_DATA_FENCE;
 const isFenceClose = (line: string) => line.trim() === '```';
 
-/** Split a report body into its text and its data block (the first `graylum-report-data` block). */
+/**
+ * Split a report body into its text and its data block. The block is the LAST `graylum-report-data` fence: the
+ * model writes it at the end and an edit puts it back at the end, so a fence typed into the text stays text.
+ */
 export function splitReportBody(body: string): ReportBodyParts {
   const lines = body.split('\n');
-  const open = lines.findIndex(isFenceOpen);
+  const open = lines.findLastIndex(isFenceOpen);
   if (open < 0) return { text: body, block: null, pending: false };
   const close = lines.findIndex((line, index) => index > open && isFenceClose(line));
   const before = lines.slice(0, open).join('\n').trimEnd();

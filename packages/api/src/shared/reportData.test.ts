@@ -26,6 +26,13 @@ describe('splitReportBody', () => {
     expect(splitReportBody(`${text}\n\n${REPORT_DATA_FENCE}\n{"v":1,"field":"summ`)).toEqual({ text, block: null, pending: true });
     expect(parseReportBody(`${text}\n\n${REPORT_DATA_FENCE}\n{"v":1`).data).toBeNull();
   });
+  it('takes the last block, so a fence typed into the text cannot replace the data', () => {
+    const typed = block(row('summary', '用户写的'));
+    const real = block(row('summary', '生成的'));
+    const body = joinReportBody(`${text}\n\n${typed}`, real);
+    expect(splitReportBody(body)).toEqual({ text: `${text}\n\n${typed}`, block: real, pending: false });
+    expect(parseReportBody(body).data!.data.summary).toBe('生成的');
+  });
   it('never lets a data line look like a chapter heading', () => {
     const body = `${text}\n\n${sampleReportDataBlock()}`;
     expect(body.split('\n').filter(line => /^##\s+/.test(line))).toEqual(['## 一句话结论']);
@@ -65,12 +72,13 @@ describe('parseReportDataBlock', () => {
 
   it('drops bad items of a list, and the whole list when too few remain', () => {
     const good = { action: '注册账号', why: '先占名字', done: '名字和头像设好' };
-    const parsed = parseReportDataBlock(block(row('thisWeek', [good, { action: '缺两项' }, good])));
-    expect(parsed.data.thisWeek).toEqual([good, good]);
+    const parsed = parseReportDataBlock(block(row('thisWeek', [good, { action: '缺两项' }, good, good])));
+    expect(parsed.data.thisWeek).toEqual([good, good, good]);
     expect(parsed.dropped).toEqual(['thisWeek[1]']);
-    const none = parseReportDataBlock(block(row('thisWeek', [{ action: '缺两项' }])));
+    const none = parseReportDataBlock(block(row('thisWeek', [good, { action: '缺两项' }, good])));
     expect(none.data.thisWeek).toBeUndefined();
     expect(none.dropped).toEqual(['thisWeek']);
+    expect(none.fallback.thisWeek).toContain('注册账号');
   });
 
   it('cuts a list at its maximum and records the rest', () => {
