@@ -15,7 +15,7 @@ function runtime(includeHistory = false) {
   const root = new URL('../../', import.meta.url);
   const known = new Map([
     'shared/agentTurn', 'shared/opcMethodPolicy', 'shared/modelReasoning', 'lib/logger',
-    'services/runtime/agentTools', 'services/runtime/openRouterHistory', 'services/runtime/reasoningPolicy',
+    'services/runtime/agentTools', 'services/research/tools/names', 'services/runtime/openRouterHistory', 'services/runtime/reasoningPolicy',
     'services/runtime/budget', 'services/runtime/timing', 'services/runtime/authReuse',
     'services/bill2/cacheMessages', 'services/bill2/openRouterAdapter', 'services/bill2/openRouterStream', 'services/bill2/openRouterPolicy',
     'services/bill2/openRouterEvidence', 'services/bill2/decimal', 'services/bill2/responseCapacity',
