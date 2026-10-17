@@ -43,7 +43,7 @@
 3. **上线基础**：正式环境能真实调用模型（含止损和 BILL-PAYG 逐次冻结、按名义费用结算）、后台配置模型思考强度、第三方搜索和对标研究（基于真实数据）、会员权限、限流修复、账号注销和数据删除。不再做封闭内测，按 D1 范围完成后直接公开上线售卖（2026-10-03，第 2.1 节第 50 项）。
 4. **差异化功能**：Fusion 多模型（定稿报告评审、多模型对比），个人资料库和语料库（学习用户文风），输入框的引用和附件。
 5. **收费和上线**：Stripe 收款（2026-10-12 起银行卡订阅走 Stripe Managed Payments，Waffo 冻结）、下线旧对话链路、完整验收、发布。
-6. **上线后**：飞书等连接器、Skill 的后续学习机制、资料库检索和图片音频。（2026-10-13：社媒数据同步并入 PUBLISH-MONITOR，上线前完成，第 2.1 节）
+6. **上线后**：飞书等连接器、Skill 的后续学习机制、资料库检索和图片音频（2026-10-17：自由对话的资料库自动检索提前到上线前，由 CHAT-AUTO-CONTEXT 负责，第 2.1 节）。（2026-10-13：社媒数据同步并入 PUBLISH-MONITOR，上线前完成，第 2.1 节）
 
 **不重复建设**：计费（BILL2）、Runtime、持久会话、Skill 版本、成果版本都已存在，新功能在它们上面加最小的工具和界面，不新建第二套钱包、执行链、资料库或记忆系统。
 
@@ -2232,7 +2232,7 @@ v10.2 的"Gold 多模型智囊团"（任务 `V3-GOLD`）由本节取代，任务
 
 实现机制和必测项见 [LIB-DOCS 与 VOICE 实施说明](tasks/LIBRARY-VOICE.md)。
 
-**检索（以后再做）**：第一版 Agent 通过用户的明确引用（输入框 @ 引用，UI-B）和上面的分段读取使用资料库文档，不做自动检索。文档多到需要检索时，先用 Postgres 自带的全文检索，再视需要在同一个 Supabase 数据库里加 pgvector，都不引入第二家存储供应商。
+（2026-10-17 部分取代：自由对话里的资料库自动检索提前到上线前，用 Postgres 自带能力，见第 2.1 节 CHAT-AUTO-CONTEXT 一条和[实施方案](tasks/CHAT-AUTO-CONTEXT.md)；本段其余仍适用于向量检索等后续扩展。）**检索（以后再做）**：第一版 Agent 通过用户的明确引用（输入框 @ 引用，UI-B）和上面的分段读取使用资料库文档，不做自动检索。文档多到需要检索时，先用 Postgres 自带的全文检索，再视需要在同一个 Supabase 数据库里加 pgvector，都不引入第二家存储供应商。
 
 ### 5.4 成本核算（2026-09-27 官方价格）
 
@@ -2404,7 +2404,7 @@ node scripts/plan-progress.mjs --ref origin/staging
 | | CHARGEBACK | 方向（Owner 2026-10-04，第 2.1 节第 51 项，[记录 W](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981381009)、[记录 X](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981808905)；**上线后任务，不阻塞上线**）：拒付最终判定输了，按商品分别处理：订阅按退款规则处理这一期（扣掉还没用完的积分、终止这份订阅以后的积分发放，是创始会员的立即结束创始身份，名额不放回）；微信一次性会员结束这一期，1 年期的终止以后按月发放的积分、扣掉这一期还没用完的积分（是创始会员的同样结束创始身份）；订阅和微信一次性会员被冻结的已发积分判输扣回、判赢解冻，不动其他来源（[记录 AC](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982525998)）；积分包扣回这个包里没用完的积分、判赢解冻，不动其他来源的积分（[记录 Z](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982115736)）；所有拒付都不自动接受，由 Owner 人工处理（[记录 Y](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982111397)）；赢了就解除 PAY-DISPUTE-GUARD 的冻结、恢复，按幂等处理（拒付期间被暂停的按月积分，判赢后按原发放日逐期补发，幂等，不改变原会员期限和发放日期，不延到原到期日之后）；订阅判赢后不自动恢复扣费，提醒用户自己重新订阅；判输时订阅终止（[记录 AD](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982615688)），具体由 CHARGEBACK 方案提出、Owner 批准；一键导出申诉材料（用收款核心的同意记录，原写 PAY-WAFFO，及 PAY-EVIDENCE 的付款证据）；限制同一人反复拒付；信用卡账单商户名（由 Waffo 控制）。续费和到期提醒归 PAY-NOTIFY，拒付事件接收和可撤回冻结归 PAY-DISPUTE-GUARD，上线前完成（2026-10-09 拆分）。拒付通知方式、举证截止日和手续费（每笔 $25）已由 [Waffo 2026-10-10 答复](https://github.com/Crnobog9527/GraylumAI_vercel/pull/752#issuecomment-6095292601)；开工前仍须向 Waffo 核实要交的材料和账单商户名。2026-10-12 补充：新订单改走 Stripe（MP 订单由 Stripe 作为记录商户处理拒付，大陆通道和钱包单笔由我们处理），上文 Waffo 的通知方式、手续费、材料和账单商户名只适用于旧 Waffo 订单；按 Stripe 的做法实施时由方案细化 | PAY-STRIPE-MP、PAY-NOTIFY、PAY-EVIDENCE、PAY-DISPUTE-GUARD；拒付材料和账单商户名核实（旧 Waffo 订单仍向 Waffo 核实） | 高 | 待实施方案细化 | — |
 | | LEARN-1 | 第 6.3 节：读取用户数据、依赖数据使用同意（2026-10-12：同意开关上线先隐藏，LEARN-1 做问题案例分析时再定开关方案，第 2.1 节） | 有真实用户 | 高 | 中 | — |
 | | LEARN-2 | 第 6.3 节：读取用户数据和社媒作品数据、依赖数据使用同意（同上） | 有真实用户 / PUBLISH-MONITOR（2026-10-13 起取代 SOCIAL-SYNC） | 高 | 中 | — |
-| | LIB-EXT（资料库扩展） | 全文检索或 pgvector、音频和视频、Agent 看图、Google Drive / Notion 导入（PDF 和图片已于 2026-10-10 移入 LIB-DOCS，第 2.1 节，[#770 决定记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/770#issuecomment-6095169943)） | LIB-DOCS | 高 | 大 | — |
+| | LIB-EXT（资料库扩展） | 全文检索或 pgvector（2026-10-17：自由对话自动检索的基础检索提前到上线前，由 CHAT-AUTO-CONTEXT 负责；向量检索仍在这里）、音频和视频、Agent 看图、Google Drive / Notion 导入（PDF 和图片已于 2026-10-10 移入 LIB-DOCS，第 2.1 节，[#770 决定记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/770#issuecomment-6095169943)） | LIB-DOCS | 高 | 大 | — |
 | | I18N-EN | 产品英文版（第 2.1 节 2026-10-12 多语言决定）：产品界面英文化、语言切换提示条、英文 Skill 用户可见文字、英文网站页面（/en）；Skill 内核仍以简体中文为唯一原版。上线前只做 SKILL-I18N-HOOK 打底。 | REL-1 上线、SKILL-I18N-HOOK | 高 | 中 | — |
 
 **已应用到 staging 的迁移**（总控记录，2026-10-16）：0263（version 20261016094713）、0264（20261016110732）、0265（20261016141209）、0266（20261016145300，邀请码下线，按"先部署代码、再应用迁移"的顺序做，记录在 [#988](https://github.com/Crnobog9527/GraylumAI_vercel/pull/988) 评论里）、0267（20261016153437）。正式环境一律另获批准。
