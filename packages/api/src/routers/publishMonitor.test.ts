@@ -39,3 +39,30 @@ describe('publish-monitor automatic review switch', () => {
       .rejects.toMatchObject({ code: 'NOT_FOUND', message: 'PUBLISH_MONITOR_CONNECTION_NOT_FOUND' });
   });
 });
+
+describe('publish-monitor own data (PR-3a)', () => {
+  const empty = { windowDays: 30, connections: [], posts: [] };
+  it('the window comes from the entitlement; a plan without one is refused before any read', async () => {
+    mocks.entitlements.mockResolvedValue({ ownDataWindowDays: 0 });
+    const none = vi.fn();
+    await expect(caller(none, true).data({})).rejects.toMatchObject({ code: 'FORBIDDEN',
+      message: 'PUBLISH_MONITOR_ENTITLEMENT_REQUIRED' });
+    await expect(caller(none, true).refresh({ connectionId: actor })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    expect(none).not.toHaveBeenCalled();
+    mocks.entitlements.mockResolvedValue({ ownDataWindowDays: 90 });
+    const rpc = vi.fn().mockResolvedValue({ data: { ...empty, windowDays: 90 }, error: null });
+    await caller(rpc, true).data({});
+    expect(rpc).toHaveBeenCalledWith('publish_monitor_data', { a: actor, p_window_days: 90, p_connection_id: null });
+  });
+
+  it('reading needs the feature switch; a refresh within the hour is a rate limit; a foreign item is refused', async () => {
+    mocks.entitlements.mockResolvedValue({ ownDataWindowDays: 30 });
+    await expect(caller(vi.fn(), false).data({})).rejects.toMatchObject({ message: 'PUBLISH_MONITOR_DISABLED' });
+    const soon = vi.fn().mockResolvedValue({ data: null, error: { message: 'PUBLISH_MONITOR_REFRESH_TOO_SOON' } });
+    await expect(caller(soon, true).linkPost({ postId: actor, workItemId: actor }))
+      .rejects.toMatchObject({ code: 'TOO_MANY_REQUESTS' });
+    const foreign = vi.fn().mockResolvedValue({ data: null, error: { message: 'PUBLISH_MONITOR_WORK_ITEM_MISMATCH' } });
+    await expect(caller(foreign, true).linkPost({ postId: actor, workItemId: actor }))
+      .rejects.toMatchObject({ code: 'FORBIDDEN', message: 'PUBLISH_MONITOR_WORK_ITEM_MISMATCH' });
+  });
+});
