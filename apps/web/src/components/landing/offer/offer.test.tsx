@@ -47,13 +47,14 @@ describe('landing page sections', () => {
     expect(html).toContain('id="how-it-works"');
   });
 
-  it('shows all nine walk-through steps in order by default (finished product, Owner 2026-10-13)', () => {
+  it('shows the built walk-through steps in order by default (Owner 2026-10-17: unbuilt ones off)', () => {
     const html = renderPage(resolveLandingFlags({}));
-    const titles = ['和教练聊', '教练说真话', '找对标', '出报告', '资料库，它记得你', '写内容', '发出去', '看复盘', '多模型评审团（Gold）'];
+    const titles = ['和教练聊', '教练说真话', '找对标', '出报告', '多模型评审团（Gold）'];
+    for (const unbuilt of ['资料库，它记得你', '写内容', '发出去', '看复盘']) expect(html).not.toContain(`>${unbuilt}<`);
     const positions = titles.map(title => html.indexOf(`>${title}<`));
     expect(positions.every(position => position >= 0)).toBe(true);
     expect([...positions].sort((a, b) => a - b)).toEqual(positions);
-    expect(html.match(/为什么不是正确的废话/g)).toHaveLength(9);
+    expect(html.match(/为什么不是正确的废话/g)).toHaveLength(5);
   });
 
   it('hides the library step when the coach is off, since its note promises the coach answering', () => {

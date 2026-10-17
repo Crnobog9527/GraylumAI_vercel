@@ -9,14 +9,14 @@ import styles from './samples-l.module.css';
  * and platform on top; the coach's warning first when there is one (「风险提醒」); the one sentence of what to make for
  * whom, large; then three small blocks side by side (stacked on a phone): who you are, how it earns, and this week's
  * first step as an unticked to-do. The data has no separate audience field (it is inside `what`), so the first block
- * is 你是谁.
+ * is 你是谁. Round four: it is no product screen, so it carries a small 「示意」 tag and no product head.
  */
 export function GlanceL({ data, who, platform }: { data: SampleData; who: string; platform: string }) {
   const { glance } = L_SAMPLES_REDO;
   const { summary } = data;
   return (
     <section className={styles.glance} aria-label={glance.title}>
-      <p className={styles.glanceWho}><b>{who}</b><span aria-hidden="true"> · </span>{platform}</p>
+      <p className={styles.glanceWho}><b>{who}</b><span aria-hidden="true"> · </span>{platform}<span className={styles.sketch}>{glance.sketch}</span></p>
       {summary.truth ? (
         <div className={styles.risk} role="note">
           <p className={styles.riskLabel}><TriangleAlert size={16} aria-hidden="true" />{glance.risk}</p>

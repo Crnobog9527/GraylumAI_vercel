@@ -11,6 +11,10 @@
   .heroGrid .heroText { max-width: none; }
 }
 .heroText .promise { max-width: none; }
+/* Round four: the first screen's text alone, centred (the three-step picture is gone from sample L). */
+.heroCentre { display: grid; justify-items: center; }
+.heroCentre .heroText { justify-items: center; max-width: none; text-align: center; }
+.heroCentre .heroText > * { justify-items: center; }
 /* The promise breaks only at its comma, and never on a computer. */
 .promise span { display: inline-block; }
 @media (min-width: 1024px) { .heroText .promise { white-space: nowrap; font-size: clamp(17px, 1.45vw, 22px); } }

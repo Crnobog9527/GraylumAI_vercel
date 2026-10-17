@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { REPORT_SECTIONS } from '@/components/landing/preview-jury/jury-mock-reviews';
 import { QuestionCardView } from '@/components/opc/question-card';
-import { J_PERSONA_GOAL, J_QUESTION_HEADING } from '@/lib/landing/landing-copy-j-persona';
+import { J_PERSONA_GOAL } from '@/lib/landing/landing-copy-j-persona';
 import { J_REPORT, J_REVISION } from '@/lib/landing/landing-copy-j-takeover';
 import { JuryReader } from '@/components/landing/preview-jury/JuryReader';
 import { resolveSeatNames, SAMPLE_PANEL } from '@/components/landing/preview-jury/jury-events';
@@ -42,10 +42,9 @@ describe('sample J names the report chapters one way everywhere', () => {
     expect(J_JURY_CASE.report.chapters).toBe(13);
   });
 
-  it('the public site calls the question card the AI coach\'s', () => {
-    const html = renderToStaticMarkup(createElement(QuestionCardView, { card: J_PERSONA_GOAL, heading: J_QUESTION_HEADING }));
-    expect(html).toContain('AI 教练提问');
-    expect(html).not.toContain('导师');
+  it('shows the product\'s own question card, unchanged (its heading follows the product; the rename is scheduled)', () => {
+    const html = renderToStaticMarkup(createElement(QuestionCardView, { card: J_PERSONA_GOAL }));
+    expect(html).toContain('data-question-card="open"');
     expect(J_REPORT.intro).not.toContain('导师');
   });
 

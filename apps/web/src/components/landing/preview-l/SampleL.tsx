@@ -1,7 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import Link from 'next/link';
 import light from '@/components/design/light-tokens.module.css';
-import { CompareJ } from '@/components/landing/preview-j/CompareJ';
 import { MotionJ } from '@/components/landing/preview-j/MotionJ';
 import type { PageExtras } from '@/components/landing/preview-j/extras-j';
 import { PriceJ } from '@/components/landing/preview-j/PriceJ';
@@ -17,14 +16,14 @@ import { StickyCtaMNO } from '@/components/landing/preview-mno/StickyCtaMNO';
 import { HERO, RISK_REVERSAL } from '@/lib/landing/landing-copy';
 import { J_FINAL } from '@/lib/landing/landing-copy-j';
 import { K_PRICE_TERMS } from '@/lib/landing/landing-copy-k';
-import { L_TASKS, L_TASKS_TITLE } from '@/lib/landing/landing-copy-l-compare';
 import { L_NOTE_REGIONS, L_OPS, L_VOICE_FOLD } from '@/lib/landing/landing-copy-l';
-import { allOn, visibleItems } from '@/lib/landing/landing-flags';
+import { allOn } from '@/lib/landing/landing-flags';
 import { cn } from '@/lib/utils';
-import { ActsL } from './ActsL';
-import { ShowcaseL } from './ShowcaseL';
 import { HeroL } from './HeroL';
+import { JuryModuleL } from './JuryModuleL';
 import { SamplesL } from './SamplesL';
+import { ScenariosL } from './ScenariosL';
+import { StepsL } from './StepsL';
 import styles from './l.module.css';
 
 const SAMPLES = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l'] as const;
@@ -42,6 +41,10 @@ const SAMPLES = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l'] as 
  * Round three (Owner 2026-10-17; tagged sample-l-before-round3-2026-10-17): region 3 in two acts (the whole positioning
  * flow, then the week, with region 5's worries merged in and region 5 gone), the library and voice shown on their own,
  * the sample reports for finding someone like you, the comparison as the same task done by both, no plan cards.
+ * Round four (Owner 2026-10-17, content and parts only; tagged sample-l-before-round4-2026-10-17): the first screen's
+ * text alone, centred; region 3 as 第一步/第二步/第三步, step one sample J's whole flow on the real product's parts and
+ * watched through, steps two and three only once built; the jury larger, after step one; region 6 one scenario at a
+ * time. Every capability not built yet is off (landing-flags), so its block does not show.
  */
 export function SampleL({ data, siteName, extras }: { data: LandingData; siteName: string; extras: PageExtras }) {
   const faqIds = new Set(data.faqGroups.flatMap(group => group.items.map(item => item.id)));
@@ -65,12 +68,12 @@ export function SampleL({ data, siteName, extras }: { data: LandingData; siteNam
       <StickyCtaMNO line={L_OPS.lede} phoneBottom hideHeaderCta />
 
       <main data-calm="">
-        <HeroL note={data.heroNote} flags={extras.flags} />
+        <HeroL note={data.heroNote} />
         <VoiceWallJ notes={data.notes} open regions={L_NOTE_REGIONS} compact={L_VOICE_FOLD} after={<CtaK />} />
-        <ActsL flags={extras.flags} />
-        <ShowcaseL flags={extras.flags} />
+        <StepsL flags={extras.flags} />
+        <JuryModuleL flags={extras.flags} />
         {extras.showSamples ? <SamplesL /> : null}
-        <CompareJ title={L_TASKS_TITLE} pairs={visibleItems(extras.flags, L_TASKS)} after={<CtaK />} />
+        <ScenariosL flags={extras.flags} after={<CtaK />} />
         <PriceJ proMonthly={data.pricing.proMonthly} rows={data.compareRows} calm plainTotal checked={false} quiet
           after={terms || riskLine ? <>{riskLine}{terms}</> : undefined} />
         <FaqJ groups={data.faqGroups} />

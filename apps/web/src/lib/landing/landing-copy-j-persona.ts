@@ -21,10 +21,6 @@ export const J_PERSONA = {
   },
 } as const;
 
-/** "帮你挖掘定位" (the product step is 你是谁): the coach's first question, the product's question card. */
-/** NEW: the question card's heading on the public site (the product says 导师提问; the site says AI 教练). */
-export const J_QUESTION_HEADING = 'AI 教练提问';
-
 /**
  * The question cards of the real conversation (transcript.md T1-2, T1-10; round seven, Owner 2026-10-15): short labels
  * only, the question's examples stay in the coach's message (Skill rule). The goal card replaces the old

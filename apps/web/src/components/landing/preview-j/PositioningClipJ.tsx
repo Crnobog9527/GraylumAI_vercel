@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
 
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { Check, FileText, Loader2, Sparkles } from 'lucide-react';
 import { MentorMarkdown } from '@/app/positioning/[draftId]/MentorMarkdown';
 import { DEMO_LABEL } from '@/components/landing/demo/demo-script';
@@ -12,7 +12,7 @@ import { QuestionCardView } from '@/components/opc/question-card';
 import frame from '@/components/opc/workspace-frame.module.css';
 import { Button } from '@/components/ui/button';
 import {
-  J_PERSONA, J_PERSONA_DIRECTION, J_PERSONA_GOAL, J_PERSONA_KINDS, J_PERSONA_ON_CAMERA, J_QUESTION_HEADING, J_STEPS,
+  J_PERSONA, J_PERSONA_DIRECTION, J_PERSONA_GOAL, J_PERSONA_KINDS, J_PERSONA_ON_CAMERA, J_STEPS,
 } from '@/lib/landing/landing-copy-j-persona';
 import {
   J_BENCHMARK_TABLE, J_PLAN_ROWS, J_REPORT, J_TAKEOVER_MOMENTS, type TakeoverCard, type TakeoverLine,
@@ -45,7 +45,17 @@ function readThrough(local: number, count: number) {
  * `pick` (sample K, Owner 2026-10-17): a still picture of one step, showing only these messages of it (by index), as
  * they stand once the step is done; the checklist is filled as far as the last of them.
  */
-export function PositioningClipJ({ moment, local, pick }: { moment: number; local: number; pick?: readonly number[] }) {
+/** Sample L (Owner 2026-10-17, round four): what a caller puts in place of a drawn card or of the drawn report window. */
+export type ClipParts = {
+  /** A card in place of the drawn one; null drops it, undefined keeps sample J's. */
+  card?: (card: TakeoverCard, fetchLocal: number) => ReactNode | undefined;
+  /** The report in place of the drawn report window, while the report moment is on. */
+  report?: (writing: boolean, local: number) => ReactNode;
+};
+
+export function PositioningClipJ({ moment, local, pick, parts }: {
+  moment: number; local: number; pick?: readonly number[]; parts?: ClipParts;
+}) {
   const current = J_TAKEOVER_MOMENTS[moment] ?? J_TAKEOVER_MOMENTS[0];
   const step = current.step;
   const chat = step === 3 ? J_TAKEOVER_MOMENTS[2] : current;
@@ -109,7 +119,7 @@ export function PositioningClipJ({ moment, local, pick }: { moment: number; loca
           <div className={styles.logInner}>
             {lines.map((line, index) => (
               <div key={`${chat.id}-${index}`} data-line="" className={styles.line}>
-                <Message line={line} step={stepTitle} fetchLocal={fetchLocal} information={information} />
+                <Message line={line} step={stepTitle} fetchLocal={fetchLocal} information={information} parts={parts} />
               </div>
             ))}
           </div>
@@ -132,7 +142,7 @@ export function PositioningClipJ({ moment, local, pick }: { moment: number; loca
         </div>
       </aside>
 
-      {step === 3 ? <Report writing={current.id === 'report'} local={local} /> : null}
+      {step === 3 ? (parts?.report ? parts.report(current.id === 'report', local) : <Report writing={current.id === 'report'} local={local} />) : null}
       {current.id === 'jury' ? <JuryJ local={local} /> : null}
     </div>
   );
@@ -203,8 +213,8 @@ function Report({ writing, local }: { writing: boolean; local: number }) {
   );
 }
 
-function Message({ line, step, fetchLocal, information }: {
-  line: TakeoverLine; step: string; fetchLocal: number; information: ReturnType<typeof personaInformation>;
+function Message({ line, step, fetchLocal, information, parts }: {
+  line: TakeoverLine; step: string; fetchLocal: number; information: ReturnType<typeof personaInformation>; parts?: ClipParts;
 }) {
   if (line.role === 'user') {
     return (
@@ -221,16 +231,22 @@ function Message({ line, step, fetchLocal, information }: {
       <div data-message-role="assistant" className="mr-4 rounded-xl border border-[var(--border-primary)] p-3">
         <span className={result.agentIdentity}><img src="/graylum-logo.png" alt="" />{summary ? '本步小结' : 'AI 自媒体陪跑教练'} · {step}</span>
         <MentorMarkdown className={`mt-1 ${result.messageBody}`} text={text} live={false} />
-        {line.card ? <Card card={line.card} fetchLocal={fetchLocal} /> : null}
+        {line.card ? <CardOrPart card={line.card} fetchLocal={fetchLocal} parts={parts} /> : null}
       </div>
       {line.card === 'confirm' ? <ConfirmJ step={step} information={information} /> : null}
     </>
   );
 }
 
+/** The caller's own card when it gives one (null drops the card), else sample J's drawn card. */
+function CardOrPart({ card, fetchLocal, parts }: { card: TakeoverCard; fetchLocal: number; parts?: ClipParts }) {
+  const own = parts?.card ? parts.card(card, fetchLocal) : undefined;
+  return own === undefined ? <Card card={card} fetchLocal={fetchLocal} /> : <>{own}</>;
+}
+
 function Card({ card, fetchLocal }: { card: TakeoverCard; fetchLocal: number }) {
   const question = { goal: J_PERSONA_GOAL, camera: J_PERSONA_ON_CAMERA, direction: J_PERSONA_DIRECTION }[card as 'goal'];
-  if (question) return <div className={styles.cardSlot}><QuestionCardView card={question} heading={J_QUESTION_HEADING} /></div>;
+  if (question) return <div className={styles.cardSlot}><QuestionCardView card={question} /></div>;
   if (card === 'fetch') {
     const fetched = Math.min(J_PERSONA_KINDS.length, Math.floor(fetchLocal * 4));
     return (

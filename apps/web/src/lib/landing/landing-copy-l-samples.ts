@@ -23,6 +23,8 @@ export const L_SAMPLES_REDO = {
   /** NEW: the 10-second card, read top to bottom. */
   glance: {
     title: '10 秒看懂',
+    /** NEW (round four): the card is a summary drawn for the page, not a product screen. */
+    sketch: '示意',
     risk: '风险提醒',
     who: '你是谁',
     money: '怎么赚钱',

@@ -19,9 +19,11 @@ export const LANDING_FEATURES = {
   research: { task: 'RESEARCH-TOOLS', show: true },
   report: { task: 'REPORT-GEN', show: true },
   library: { task: 'LIB-DOCS + #830', show: true },
-  voice: { task: 'VOICE', show: true },
-  content: { task: 'CONTENT-CONVERSATION-DRIVEN', show: true },
-  publish: { task: 'PUBLISH-MONITOR', show: true },
+  // Owner 2026-10-17 (landing L, round four): a capability the product has not built yet is off by default; when it
+  // ships, its block shows the real component and its switch goes back on. VOICE, content and publishing are not built.
+  voice: { task: 'VOICE', show: false },
+  content: { task: 'CONTENT-CONVERSATION-DRIVEN', show: false },
+  publish: { task: 'PUBLISH-MONITOR', show: false },
   fusion: { task: 'FUSION-REVIEW', show: true },
   // The page promises 500 sign-up credits; the grant is 500 once migration 0230 is applied (before that, 100).
   signupGrant: { task: 'PAYWALL（注册赠送 500 积分）', show: true },

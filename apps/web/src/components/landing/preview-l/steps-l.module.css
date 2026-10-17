@@ -1,0 +1,37 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/* Sample L, round four: region 3's step one on sample J's held stage (takeover-j.module.css), four stages long. */
+.story.story { height: 460svh; }
+@media (max-width: 767px) { .story.story { height: 420svh; } }
+/* Room for sample L's sticky bar: under the header on a computer, at the foot of a phone. */
+.stage.stage { padding-top: 132px; }
+@media (max-width: 767px) { .stage.stage { padding-top: 66px; padding-bottom: 84px; } }
+.progress { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px 16px; }
+.progress > :first-child { grid-column: 1 / -1; }
+.stages { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 0; padding: 0; list-style: none; color: var(--j-body); font-size: 13px; }
+.stages li[data-done] { color: var(--j-ink); }
+.stages li[data-on] { color: var(--j-ink); font-weight: 600; }
+.skip {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 12px; border: 1px solid var(--j-line);
+  border-radius: 999px; background: transparent; color: var(--j-ink); font: inherit; font-size: 13px; cursor: pointer;
+}
+.skip:focus-visible { outline: 2px solid var(--j-ink); outline-offset: 2px; }
+@media (max-width: 767px) { .stages { display: none; } }
+.after { padding-top: 28px; }
+.later { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 18px 0 24px; padding: 0; list-style: none; font-size: 17px; }
+
+/* The jury, larger (JuryModuleL): the product's own entry card (fusion-review/jury-entry.module.css), at page size. */
+.jury {
+  display: grid; gap: 14px; max-width: 760px; padding: clamp(22px, 3vw, 36px); border: 1px solid var(--j-line);
+  border-radius: 16px; background: #fff; line-height: 1.7;
+}
+.jury p { margin: 0; }
+.juryName { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 15px; font-weight: 600; }
+.juryName span { padding: 0 8px; border-radius: 999px; background: var(--j-gold); color: #1a1a1a; font-size: 12px; line-height: 22px; }
+.juryTitle { font-size: clamp(22px, 2.4vw, 32px); font-weight: 600; line-height: 1.3; letter-spacing: -.02em; }
+.juryFlow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0; padding: 0; list-style: none; color: var(--j-body); font-size: 16px; }
+.juryFlow li { display: inline-flex; align-items: center; gap: 10px; }
+.juryFlow svg { flex: none; color: var(--j-body); }
+.juryLink {
+  justify-self: start; display: inline-flex; align-items: center; gap: 6px; min-height: 44px; color: var(--j-ink); font-size: 16px;
+  text-decoration: underline; text-underline-offset: 3px;
+}

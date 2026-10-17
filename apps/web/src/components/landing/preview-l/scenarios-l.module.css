@@ -1,0 +1,18 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/* Region 6, one scenario at a time (ScenariosL): sample L's step buttons (l.module.css .opsSteps), on the comparison's band. */
+.bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 28px; }
+.tabs { display: flex; flex-wrap: wrap; gap: 8px; }
+.tabs button, .pause {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 16px; border: 1px solid var(--j-line);
+  border-radius: 999px; background: transparent; color: var(--j-body); font: inherit; font-size: 15px; font-weight: 500; cursor: pointer;
+  transition: background-color .2s, color .2s, border-color .2s;
+}
+.tabs button[aria-selected='true'] { border-color: var(--j-ink); background: var(--j-ink); color: #1b1a18; }
+.tabs button:focus-visible, .pause:focus-visible { outline: 2px solid var(--j-ink); outline-offset: 2px; }
+.pause { font-size: 14px; }
+.panel { display: grid; gap: 10px; }
+.title { margin: 0; font-size: clamp(22px, 2.2vw, 30px); font-weight: 600; letter-spacing: -.02em; }
+.lede { margin: 0 0 18px; max-width: 42em; color: var(--j-body); font-size: clamp(16px, 1.4vw, 18px); line-height: 1.7; }
+@media (prefers-reduced-motion: no-preference) { .panel { animation: in .4s ease both; } }
+@keyframes in { from { opacity: 0; translate: 0 8px; } to { opacity: 1; translate: 0 0; } }
+@media (max-width: 480px) { .tabs button { min-height: 40px; padding: 0 12px; font-size: 14px; } }
