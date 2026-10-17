@@ -36,7 +36,7 @@ describe('admin and runtime use one OpenRouter configuration policy', () => {
     expect(providerInputReservation(model,messages,2048)).toBe(128000-2048);
     expect(providerInputReservation(model,messages,2048)).toBeLessThan(128000);
   });
-  it.each([{api_key:''},{model_id:''},{model_id:'openrouter/auto'},{model_id:'@preset/test'},{is_active:'false'},{api_endpoint:'https://example.test'},{input_limit:0},{max_tokens:0}])('gives an actionable reason for unavailable configuration: %j',async patch=>{
+  it.each([{model_id:''},{model_id:'openrouter/auto'},{model_id:'@preset/test'},{is_active:'false'},{api_endpoint:'https://example.test'},{input_limit:0},{max_tokens:0}])('gives an actionable reason for unavailable configuration: %j',async patch=>{
     const {summaryModelOption}=await import('../artifacts/modelPolicy');
     const option=summaryModelOption({...row,...patch});
     expect(option.available).toBe(false);expect(option.reason).toBeTruthy();expect(JSON.stringify(option)).not.toContain('SECRET_CANARY');

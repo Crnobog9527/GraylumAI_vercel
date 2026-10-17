@@ -6,6 +6,7 @@ import {saveModuleSkill,type ModuleSkillInput} from '../services/skills/modulePu
 import {opcService} from '../services/opc/service.ts';
 import {pricingConfig} from '../services/__tests__/fixtures/runtimePricing.ts';
 import {outputCap,profiles,quote,type Role} from '../../../../scripts/cdc-b2-eval/policy.ts';
+import {seedTestOpenRouterKey} from '../services/models/openRouterKey.testing';
 // organizerOutput: optional live organizer cap for V3 hosts; omitted keeps the B2 profile (2048).
 export async function fixture(input:ModuleSkillInput,organizerOutput?:number){
  const connectionString=process.env.V3_LOCAL_DB!;
@@ -31,6 +32,7 @@ export async function fixture(input:ModuleSkillInput,organizerOutput?:number){
    values($1,'CDC local model',$2,'openai','true','LOCAL_BOUNDARY_ONLY','https://openrouter.ai/api/v1',$3,$4,$5)`,
    [ids[role],p.model,outputCap(role,organizerOutput),p.context,config]);
  }
+ await seedTestOpenRouterKey(db,'LOCAL_BOUNDARY_ONLY');
  const settings={v3_summary_model_id:ids.organizer,v3_summary_max_tokens:outputCap('organizer',organizerOutput),
   billing_credits_per_usd:'100',billing_token_price_multiplier:'3',
   runtime_purpose_budgets:{version:2,interactive:{inputBytes:90000,historyItems:100},organize:{inputBytes:64000,historyItems:0},
