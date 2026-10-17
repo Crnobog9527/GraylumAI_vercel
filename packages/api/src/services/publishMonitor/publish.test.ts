@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { logger } from '../../lib/logger';
 import type { ClientDeps } from './postForMe/client';
 import {
-  publishFingerprint, reconcilePublishes, refreshPublishJob, submitPublish, type PublishInput,
+  createMediaUploads, publishFingerprint, reconcilePublishes, refreshPublishJob, submitPublish, type Pacing, type PublishInput,
 } from './publish';
 
 // Simulated provider only: no request leaves the test (PR-5 never publishes for real without Owner approval).
@@ -156,6 +156,44 @@ describe('submit publish (simulated provider)', () => {
       expect(d.calls.at(-1)).toEqual(['publish_monitor_publish_release', { p_job: JOB, p_code: 'PUBLISH_MONITOR_REQUEST_INVALID' }]);
       expect(p.calls.map(c => c.line)).not.toContain('POST /social-posts');
     });
+
+  it('waits out short limiter windows so a 9-target job still gets its create call; long waits still fail', async () => {
+    let clock = 0;
+    const pacing: Pacing = { now: () => clock, sleep: async ms => { clock += ms; }, budgetMs: 15_000 };
+    const many = Array.from({ length: 9 }, (_, i) => `spc_${i}`);
+    const d = database({ ...fresh(), publish_monitor_publish_targets: [{ providerAccountIds: many }],
+      publish_monitor_publish_dispatch: [{ ...view('dispatching'), dispatch: true, providerAccountIds: many }] });
+    // Four calls per one-second window: lookups 5 and 9 and the create call each hit a closed window first.
+    let used = 0;
+    let windowStart = 0;
+    const p = provider([...many.map(id => account(id)), json(200, { id: 'sp_9', external_id: JOB })]);
+    p.deps.limiter = { acquire: async () => {
+      if (clock - windowStart >= 1000) { windowStart = clock; used = 0; }
+      if (used >= 4) return { ok: false, retryAfterSeconds: 1 };
+      used += 1;
+      return { ok: true };
+    } };
+    expect((await submitPublish(d.db, p.deps, USER, input, pacing)).state).toBe('unknown');
+    expect(p.calls.filter(c => c.line === 'POST /social-posts')).toHaveLength(1);
+    expect(clock).toBeGreaterThanOrEqual(2000);
+    const slow = database(fresh());
+    const blocked = provider([]);
+    blocked.deps.limiter = { acquire: async () => ({ ok: false, retryAfterSeconds: 30 }) };
+    await expect(submitPublish(slow.db, blocked.deps, USER, input, pacing)).rejects.toMatchObject({
+      code: 'PUBLISH_MONITOR_PROVIDER_BUSY', retryAfterSeconds: 30 });
+    expect(slow.names()).not.toContain('publish_monitor_publish_dispatch');
+  });
+
+  it('returns every upload slot of a post from one request', async () => {
+    const slots = Array.from({ length: 3 }, (_, i) => json(200, { upload_url: `https://s.example/up/${i}`,
+      media_url: `https://s.example/pub/${i}.jpg` }));
+    const p = provider(slots);
+    const result = await createMediaUploads(p.deps, 3);
+    expect(result.map(x => x.mediaUrl)).toEqual(['https://s.example/pub/0.jpg', 'https://s.example/pub/1.jpg',
+      'https://s.example/pub/2.jpg']);
+    expect(p.calls.map(c => c.line)).toEqual(Array(3).fill('POST /media/create-upload-url'));
+    await expect(createMediaUploads(p.deps, 11)).rejects.toMatchObject({ code: 'PUBLISH_MONITOR_UNAVAILABLE' });
+  });
 
   it('maps database refusals to stable codes', async () => {
     for (const code of ['PUBLISH_MONITOR_IDEMPOTENCY_MISMATCH', 'PUBLISH_MONITOR_QUOTA_EXHAUSTED',

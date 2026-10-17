@@ -5,7 +5,7 @@ import { protectedProcedure, router } from '../trpc';
 import { readMembershipEntitlements } from '../services/membershipEntitlements';
 import { checkRateLimitOrThrow } from '../services/redisRateLimiter';
 import {
-  createMediaUpload, publishInput, readPublishJob, refreshPublishJob, submitPublish,
+  createMediaUploads, MAX_MEDIA, publishInput, readPublishJob, refreshPublishJob, submitPublish,
 } from '../services/publishMonitor/publish';
 import { requirePostForMeDeps } from '../services/publishMonitor/secrets';
 import { guarded } from './publishMonitorGuard';
@@ -16,7 +16,8 @@ import { guarded } from './publishMonitorGuard';
  * user confirmed that the files go to a third-party service on a public link (the input must say so).
  */
 const uuid = z.string().uuid();
-const uploadInput = z.object({ disclosureAccepted: z.literal(true) }).strict();
+// One request returns every upload slot a post needs, so a complete post fits the per-user step allowance.
+const uploadInput = z.object({ disclosureAccepted: z.literal(true), count: z.number().int().min(1).max(MAX_MEDIA) }).strict();
 const jobInput = z.object({ jobId: uuid }).strict();
 // Each step reads from the site-wide Post for Me budget; one user gets a small allowance per step (5 per 5 minutes).
 const limitStep = (step: string, profileId: string) => checkRateLimitOrThrow(`publish-monitor-${step}:${profileId}`, 'auth');
@@ -28,10 +29,10 @@ async function requirePublishEntitlement(ctx: { supabaseAdmin: Parameters<typeof
 }
 
 export const publishMonitorPublishRouter = router({
-  uploadUrl: protectedProcedure.input(uploadInput).mutation(({ ctx }) => guarded(ctx, async () => {
+  uploadUrl: protectedProcedure.input(uploadInput).mutation(({ ctx, input }) => guarded(ctx, async () => {
     await requirePublishEntitlement(ctx);
     await limitStep('upload', ctx.profileId);
-    return createMediaUpload(await requirePostForMeDeps(ctx.supabaseAdmin));
+    return createMediaUploads(await requirePostForMeDeps(ctx.supabaseAdmin), input.count);
   })),
   submit: protectedProcedure.input(publishInput).mutation(({ ctx, input }) => guarded(ctx, async () => {
     await requirePublishEntitlement(ctx);

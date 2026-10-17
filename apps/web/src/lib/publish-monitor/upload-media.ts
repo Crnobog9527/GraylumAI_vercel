@@ -11,6 +11,8 @@ export type UploadedMedia = { mediaUrl: string; sha256: string; size: number; mi
 const MIME = /^(image|video)\/[a-z0-9.+-]{1,64}$/;
 // Post for Me accepts files up to 5 GB (plan §2 item 10).
 export const MAX_MEDIA_BYTES = 5 * 1024 ** 3;
+// The server accepts at most 10 files per post.
+export const MAX_MEDIA_FILES = 10;
 const SAMPLE_BYTES = 4 * 1024 * 1024;
 
 /**
@@ -30,16 +32,28 @@ export class MediaUploadError extends Error {
   constructor(readonly code: 'MEDIA_TYPE_UNSUPPORTED' | 'MEDIA_TOO_LARGE' | 'MEDIA_UPLOAD_FAILED') { super(code); }
 }
 
-/** requestSlot is the tRPC `publishMonitor.publish.uploadUrl({ disclosureAccepted: true })` mutation. */
-export async function uploadPublishMedia(file: File, requestSlot: () => Promise<UploadSlot>,
-  fetchImpl: typeof fetch = fetch): Promise<UploadedMedia> {
-  const mimeType = file.type.toLowerCase();
-  if (!MIME.test(mimeType)) throw new MediaUploadError('MEDIA_TYPE_UNSUPPORTED');
-  if (file.size < 1 || file.size > MAX_MEDIA_BYTES) throw new MediaUploadError('MEDIA_TOO_LARGE');
-  const sha256 = await mediaDigest(file);
-  const slot = await requestSlot();
-  const response = await fetchImpl(slot.uploadUrl, { method: 'PUT', headers: { 'Content-Type': mimeType }, body: file,
-    credentials: 'omit', redirect: 'error' }).catch(() => null);
-  if (!response?.ok) throw new MediaUploadError('MEDIA_UPLOAD_FAILED');
-  return { mediaUrl: slot.mediaUrl, sha256, size: file.size, mimeType };
+/**
+ * Uploads all files of one post. requestSlots is the tRPC
+ * `publishMonitor.publish.uploadUrl({ disclosureAccepted: true, count })` mutation: one request for the whole post.
+ * Every file is checked before any slot is requested.
+ */
+export async function uploadPublishFiles(files: File[], requestSlots: (count: number) => Promise<UploadSlot[]>,
+  fetchImpl: typeof fetch = fetch): Promise<UploadedMedia[]> {
+  if (files.length < 1 || files.length > MAX_MEDIA_FILES) throw new MediaUploadError('MEDIA_TOO_LARGE');
+  for (const file of files) {
+    if (!MIME.test(file.type.toLowerCase())) throw new MediaUploadError('MEDIA_TYPE_UNSUPPORTED');
+    if (file.size < 1 || file.size > MAX_MEDIA_BYTES) throw new MediaUploadError('MEDIA_TOO_LARGE');
+  }
+  const digests = await Promise.all(files.map(mediaDigest));
+  const slots = await requestSlots(files.length);
+  if (slots.length !== files.length) throw new MediaUploadError('MEDIA_UPLOAD_FAILED');
+  const uploaded: UploadedMedia[] = [];
+  for (const [i, file] of files.entries()) {
+    const mimeType = file.type.toLowerCase();
+    const response = await fetchImpl(slots[i]!.uploadUrl, { method: 'PUT', headers: { 'Content-Type': mimeType }, body: file,
+      credentials: 'omit', redirect: 'error' }).catch(() => null);
+    if (!response?.ok) throw new MediaUploadError('MEDIA_UPLOAD_FAILED');
+    uploaded.push({ mediaUrl: slots[i]!.mediaUrl, sha256: digests[i]!, size: file.size, mimeType });
+  }
+  return uploaded;
 }

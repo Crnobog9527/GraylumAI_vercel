@@ -17,6 +17,7 @@ const uuid = z.string().uuid();
 const providerId = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/);
 
 export const MAX_CAPTION = 5000;
+const MAX_MEDIA_ITEMS = 10;
 const media = z.object({
   // The public URL Post for Me returned with the upload slot; a retry must upload again (plan §2.1).
   mediaUrl: z.string().max(2048).refine(url => publicHttpsUrl(url) !== null, 'MEDIA_URL_NOT_PUBLIC_HTTPS'),
@@ -33,7 +34,7 @@ export const publishInput = z.object({
   workItemId: uuid.nullable(),
   connectionIds: z.array(uuid).min(1).max(9),
   caption: z.string().min(1).max(MAX_CAPTION),
-  media: z.array(media).max(10),
+  media: z.array(media).max(MAX_MEDIA_ITEMS),
 }).strict();
 export type PublishInput = z.infer<typeof publishInput>;
 
@@ -90,13 +91,41 @@ const busy = (outcome: Outcome<unknown>) => new PublishError('PUBLISH_MONITOR_PR
   outcome.kind === 'rate_limited' ? outcome.retryAfterSeconds : 30);
 
 /**
+ * The site-wide limiter allows 4 provider calls per second; a 9-target publish needs 10. A short wait (the limiter's
+ * one-second window) is spent here instead of failing, within a bounded budget, so a large publish never keeps
+ * consuming the same window on every retry while its credits and slots stay reserved.
+ */
+export type Pacing = { sleep(ms: number): Promise<void>; now(): number; budgetMs: number };
+const realPacing: Pacing = { sleep: ms => new Promise(resolve => setTimeout(resolve, ms)), now: Date.now, budgetMs: 15_000 };
+const SHORT_WAIT_SECONDS = 2;
+
+async function paced<T>(pacing: Pacing, call: () => Promise<Outcome<T>>): Promise<Outcome<T>> {
+  const until = pacing.now() + pacing.budgetMs;
+  for (;;) {
+    const outcome = await call();
+    if (outcome.kind !== 'rate_limited' || outcome.retryAfterSeconds > SHORT_WAIT_SECONDS
+      || pacing.now() + outcome.retryAfterSeconds * 1000 > until) return outcome;
+    await pacing.sleep(outcome.retryAfterSeconds * 1000);
+  }
+}
+
+async function acquirePaced(deps: ClientDeps, pacing: Pacing): Promise<{ ok: true } | { ok: false; retryAfterSeconds: number }> {
+  const outcome = await paced(pacing, async () => {
+    const slot = await deps.limiter.acquire();
+    return slot.ok ? { kind: 'ok' as const, value: true } : { kind: 'rate_limited' as const, retryAfterSeconds: slot.retryAfterSeconds };
+  });
+  return outcome.kind === 'ok' ? { ok: true } : { ok: false, retryAfterSeconds: outcome.kind === 'rate_limited' ? outcome.retryAfterSeconds : 5 };
+}
+
+/**
  * What Post for Me says about each target account right now (plan §4.1: check the owner before every publish).
  * A transient read failure stops here and leaves the job claimed, so the same request can try again.
  */
-async function observeTargets(deps: ClientDeps, ids: string[]): Promise<Record<string, { ownerRef: string | null; connected: boolean }>> {
+async function observeTargets(deps: ClientDeps, ids: string[],
+  pacing: Pacing): Promise<Record<string, { ownerRef: string | null; connected: boolean }>> {
   const observed: Record<string, { ownerRef: string | null; connected: boolean }> = {};
   for (const id of ids) {
-    const account = await getAccount(deps, id);
+    const account = await paced(pacing, () => getAccount(deps, id));
     if (account.kind === 'rejected' && account.status === 404) {
       observed[id] = { ownerRef: null, connected: false };
       continue;
@@ -113,7 +142,8 @@ async function observeTargets(deps: ClientDeps, ids: string[]): Promise<Record<s
  * Submits one publish request. A replay with the same key and content returns the existing job and never sends again,
  * except a job that is still only claimed (interrupted before sending), which this same request may send now.
  */
-export async function submitPublish(db: Rpc, deps: ClientDeps, profileId: string, raw: PublishInput): Promise<PublishJob> {
+export async function submitPublish(db: Rpc, deps: ClientDeps, profileId: string, raw: PublishInput,
+  pacing: Pacing = realPacing): Promise<PublishJob> {
   const input = publishInput.parse(raw);
   const job = await rpc(db, 'publish_monitor_publish_claim', { a: uuid.parse(profileId), p_key: input.idempotencyKey,
     p_fingerprint: publishFingerprint(input), p_business: input.businessId, p_work_item: input.workItemId,
@@ -121,9 +151,9 @@ export async function submitPublish(db: Rpc, deps: ClientDeps, profileId: string
   if (job.quotaAlert) logger.warn('api', 'publish_monitor_quota_80_percent', { jobId: job.id });
   if (job.state !== 'claimed') return job;
   const ids = await targetAccountIds(db, profileId, job.id);
-  const observed = await observeTargets(deps, ids);
+  const observed = await observeTargets(deps, ids, pacing);
   // The slot for the create call is taken before the job is marked as possibly sent.
-  const slot = await deps.limiter.acquire();
+  const slot = await acquirePaced(deps, pacing);
   if (!slot.ok) throw new PublishError('PUBLISH_MONITOR_PROVIDER_BUSY', slot.retryAfterSeconds);
   const ready = await rpc(db, 'publish_monitor_publish_dispatch', { a: profileId, p_job: job.id, p_observed: observed },
     dispatched);
@@ -251,9 +281,19 @@ async function reconcileOne(db: Rpc, deps: ClientDeps, item: z.infer<typeof reco
   } else report.deferred += 1;
 }
 
-/** An upload slot for the browser, requested only after the user confirmed the disclosure (plan §2.1). */
-export async function createMediaUpload(deps: ClientDeps): Promise<UploadSlot> {
-  const slot = await createUploadUrl(deps);
-  if (slot.kind !== 'ok') throw busy(slot);
-  return slot.value;
+export const MAX_MEDIA = MAX_MEDIA_ITEMS;
+
+/**
+ * Upload slots for one post (1 to MAX_MEDIA files) in one request, requested only after the user confirmed the
+ * disclosure (plan §2.1). One request per post keeps a complete post within the per-user step allowance.
+ */
+export async function createMediaUploads(deps: ClientDeps, count: number, pacing: Pacing = realPacing): Promise<UploadSlot[]> {
+  if (!Number.isInteger(count) || count < 1 || count > MAX_MEDIA) throw new PublishError('PUBLISH_MONITOR_UNAVAILABLE');
+  const slots: UploadSlot[] = [];
+  for (let i = 0; i < count; i += 1) {
+    const slot = await paced(pacing, () => createUploadUrl(deps));
+    if (slot.kind !== 'ok') throw busy(slot);
+    slots.push(slot.value);
+  }
+  return slots;
 }

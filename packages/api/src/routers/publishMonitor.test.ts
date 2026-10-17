@@ -50,7 +50,7 @@ describe('publish-monitor one-click publishing', () => {
     const rpc = vi.fn();
     await expect(caller(rpc, true).publish.submit(submit))
       .rejects.toMatchObject({ code: 'FORBIDDEN', message: 'PUBLISH_MONITOR_ENTITLEMENT_REQUIRED' });
-    await expect(caller(rpc, true).publish.uploadUrl({ disclosureAccepted: true }))
+    await expect(caller(rpc, true).publish.uploadUrl({ disclosureAccepted: true, count: 1 }))
       .rejects.toMatchObject({ code: 'FORBIDDEN', message: 'PUBLISH_MONITOR_ENTITLEMENT_REQUIRED' });
     mocks.entitlements.mockResolvedValue({ allowPublish: true });
     await expect(caller(rpc, false).publish.submit(submit))
@@ -59,7 +59,9 @@ describe('publish-monitor one-click publishing', () => {
   });
 
   it('an upload slot needs the confirmed disclosure; a job is readable only through the owner-scoped lookup', async () => {
-    await expect(caller(vi.fn(), true).publish.uploadUrl({ disclosureAccepted: false } as never))
+    await expect(caller(vi.fn(), true).publish.uploadUrl({ disclosureAccepted: false, count: 1 } as never))
+      .rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(caller(vi.fn(), true).publish.uploadUrl({ disclosureAccepted: true, count: 11 }))
       .rejects.toMatchObject({ code: 'BAD_REQUEST' });
     const job = '00000000-0000-4000-8000-0000000f0005';
     const rpc = vi.fn().mockResolvedValue({ data: null, error: { message: 'PUBLISH_MONITOR_JOB_NOT_FOUND' } });
