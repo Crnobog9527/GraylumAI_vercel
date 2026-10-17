@@ -4,6 +4,7 @@ import {renderToStaticMarkup} from 'react-dom/server';
 import type {ReactNode} from 'react';
 const state=vi.hoisted(()=>({library:{} as Record<string,unknown>}));
 vi.mock('@/trpc/client',()=>({trpc:{opc:{library:{useQuery:()=>state.library},editLibrary:{useMutation:()=>({})},saveContentManual:{useMutation:()=>({})},publicationUiChange:{useMutation:()=>({})}}}}));
+vi.mock('@/hooks/use-scan-recognition',()=>({useScanRecognition:()=>({progress:{},start:()=>undefined,listen:()=>()=>undefined,busy:false,serverEnabled:false})}));
 vi.mock('@/components/opc/workspace-frame',()=>({WorkspaceFrame:({children}:{children:ReactNode})=>children}));
 vi.mock('@/components/opc/content-editor',()=>({ContentEditor:()=>null}));
 vi.mock('@/components/opc/version-compare',()=>({VersionCompare:()=>null}));

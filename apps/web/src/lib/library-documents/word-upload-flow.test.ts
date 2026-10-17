@@ -106,3 +106,22 @@ describe('prepareWord', () => {
     expect(prepareWord({ text: ' \n\t', headings: [] })).toMatchObject({ ok: false, message: expect.stringContaining('没有可以读取的文字') });
   });
 });
+
+describe('prepareWord image offsets (LIB-2d)', () => {
+  it('sends image offsets only when browser recognition is built in', async () => {
+    const extraction = { text: '一\n二', headings: [], images: [{ offset: 2, index: 0, contentType: 'image/png', bytes: new ArrayBuffer(1) }] };
+    const off = prepareWord(extraction);
+    expect(off.ok && off.prepared).not.toHaveProperty('images');
+    vi.stubEnv('NEXT_PUBLIC_LIBRARY_SCAN_RECOGNITION', 'true');
+    try {
+      const result = prepareWord(extraction);
+      expect(result.ok && result.prepared.images).toEqual([{ offset: 2 }]);
+      // Only images (blank text): uploaded as empty text, every image at the start.
+      const pictures = prepareWord({ ...extraction, text: ' \n ' });
+      expect(pictures.ok && pictures.prepared.images).toEqual([{ offset: 0 }]);
+      expect(pictures.ok && pictures.prepared.text.size).toBe(0);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+});

@@ -91,6 +91,10 @@ async function writeOcrAssets(outdir) {
     await mkdir(path.join(outdir, 'ocr'), { recursive: true });
     for (const [name, bytes] of Object.entries(files)) await writeFile(path.join(outdir, 'ocr', name), bytes);
     await writeFile(path.join(outdir, 'ocr', 'MODELS-LICENSE.txt'), notice);
+    // Speed-check samples for /library/scan-check (synthetic pages from scripts/lib-2d-ocr-eval, no user data).
+    const samples = path.join(webRoot, 'assets/library-ocr/samples');
+    await mkdir(path.join(outdir, 'ocr', 'samples'), { recursive: true });
+    for (const name of await readdir(samples)) await writeFile(path.join(outdir, 'ocr', 'samples', name), await readFile(path.join(samples, name)));
   }
   return files;
 }

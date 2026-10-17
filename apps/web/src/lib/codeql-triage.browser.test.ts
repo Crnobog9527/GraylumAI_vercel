@@ -18,6 +18,9 @@ it('checks return links, maintenance recovery and escaped ticket previews in Chr
     const mutation = { useMutation: () => ({ isPending: false }) };
     const endpoint = data => ({ useQuery: () => query(data) });
     export const trpc = {
+      useUtils: () => ({ library: { recognitionPending: { fetch: async () => [] } } }),
+      library: { recognitionEnabled: endpoint(false), download: mutation,
+        saveRecognizedPage: mutation, failRecognizedPage: mutation },
       opc: { library: endpoint({businesses: []}), list: endpoint({drafts: []}),
         editLibrary: mutation, saveContentManual: mutation, publicationUiChange: mutation,
         workUiChange: mutation },

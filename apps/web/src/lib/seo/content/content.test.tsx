@@ -96,8 +96,10 @@ describe.each(ARTICLES.map(content => [content.path, content] as const))('public
     const data = JSON.parse(html.match(/<script type="application\/ld\+json">(.*?)<\/script>/)![1]);
     const faq = data.find((item: { '@type': string }) => item['@type'] === 'FAQPage');
     expect(faq?.mainEntity.map((item: { name: string }) => item.name)).toEqual(content.faq?.map(item => item.question));
+    // The visible text, with the HTML escapes of quotation marks and the like undone (landing answers carry quotation marks).
+    const text = html.replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
     for (const item of content.faq ?? []) {
-      expect(html).toContain(item.answer);
+      expect(text).toContain(item.answer);
     }
     expect(html.match(/<h[1-6][\s>]/g)!.length).toBe(html.match(/<h[1-6][\s>]/g)!.filter(tag => !tag.startsWith('<h4')).length);
   });
