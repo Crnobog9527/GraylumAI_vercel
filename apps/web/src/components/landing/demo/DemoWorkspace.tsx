@@ -14,7 +14,8 @@ import result from '@/components/opc/positioning-result.module.css';
 import { cn } from '@/lib/utils';
 import { DemoReportDialog } from './DemoReportDialog';
 import {
-  DEMO_LABEL, DEMO_NOTE, DEMO_STEPS, demoInformation, demoReducer, initialDemoState, openQuestion, type DemoMessage,
+  DEMO_LABEL, DEMO_NOTE, DEMO_STEPS, demoInformation, demoReducer, initialDemoState, openQuestion, summaryDemoState,
+  type DemoMessage,
 } from './demo-script';
 import styles from './demo.module.css';
 
@@ -66,19 +67,25 @@ function Message({ message, shown }: { message: DemoMessage; shown: number | nul
       className="mr-4 rounded-xl border border-[var(--border-primary)] p-3">
       <span className={result.agentIdentity}><img src="/graylum-logo.png" alt="" width={22} height={22} />{message.label}</span>
       {live && shown < 0
-        ? <p className={cn('mt-1', result.messageBody, styles.thinking)}>导师正在思考…</p>
+        ? <p className={cn('mt-1', result.messageBody, styles.thinking)}>AI 教练正在思考…</p>
         : <MessageMarkdown className={`mt-1 ${result.messageBody}`} text={live ? message.text.slice(0, shown) : message.text} streaming={live} />}
     </div>
   );
 }
 
+/** How long the finished step summary stays on screen before the first-screen demo confirms the step. */
+export const CONFIRM_AFTER_MS = 1600;
+
 /**
- * The landing demo (module 3): the real conversation components fed with a scripted, made-up case. The visitor
- * can answer the question card, edit and confirm the checklist, open the report and switch panels. No request
- * leaves the page: nothing here imports the tRPC client, Supabase or fetch.
+ * The landing demo: the real conversation components fed with a scripted, made-up case. The visitor can answer
+ * the question card, edit and confirm the checklist, open the report and switch panels. No request leaves the
+ * page: nothing here imports the tRPC client, Supabase or fetch.
+ * `start="summary"` (the first screen) opens on the step summary arriving and, once it has, confirms the step in
+ * the checklist by itself, unless the visitor has touched the demo by then. "重新开始" plays the whole step.
  */
-export function DemoWorkspace() {
-  const [state, dispatch] = useReducer(demoReducer, undefined, initialDemoState);
+export function DemoWorkspace({ start = 'beginning' }: { start?: 'beginning' | 'summary' }) {
+  const [state, dispatch] = useReducer(demoReducer, undefined, start === 'summary' ? summaryDemoState : initialDemoState);
+  const [touched, setTouched] = useState(false);
   const [rightOpen, setRightOpen] = useState(true);
   const [draft, setDraft] = useState('');
   const box = useRef<ComposerEditorHandle>(null);
@@ -104,9 +111,21 @@ export function DemoWorkspace() {
     if (node) node.scrollTop = node.scrollHeight;
   }, [state.messages.length, shown, card]);
 
+  const autoConfirm = start === 'summary' && !touched && state.run === 0 && state.phase === 'summary' && !state.liveId;
+  useEffect(() => {
+    if (!autoConfirm) return;
+    const timer = window.setTimeout(() => {
+      // On a phone only one panel fits: show the checklist, where the step is confirmed.
+      dispatch({ type: 'panel', panel: 'checklist' });
+      dispatch({ type: 'confirm' });
+    }, prefersReducedMotion() ? 0 : CONFIRM_AFTER_MS);
+    return () => window.clearTimeout(timer);
+  }, [autoConfirm]);
+
   const steps = DEMO_STEPS;
   return (
-    <div className={styles.window} role="group" aria-label="教练工作演示（示例）">
+    <div className={styles.window} role="group" aria-label="教练工作演示（示例）"
+      onPointerDown={() => setTouched(true)} onKeyDown={() => setTouched(true)}>
       <div className={styles.chrome}>
         <span className={styles.badge}>{DEMO_LABEL}</span>
         <p>{DEMO_NOTE}</p>
@@ -159,7 +178,7 @@ export function DemoWorkspace() {
                                 onOther={() => box.current?.focus()} />
                             </div>
                           ) : null}
-                          <ComposerEditor ref={box} label="给导师的回复" placeholder={OTHER_PLACEHOLDER} value={draft} maxLength={8000}
+                          <ComposerEditor ref={box} label="给AI 教练的回复" placeholder={OTHER_PLACEHOLDER} value={draft} maxLength={8000}
                             onChange={setDraft} onEnter={send} className={composer.editor} />
                           <div className={composer.tools}>
                             <div className={composer.toolLeft}>

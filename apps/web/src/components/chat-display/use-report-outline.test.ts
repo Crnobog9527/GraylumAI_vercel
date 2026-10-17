@@ -17,3 +17,9 @@ it('ignores headings in a closed details box and empty headings', () => {
 it('finds nothing in a report without repeated headings', () => {
   expect(findReportChapters(root(['H2', '唯一']))).toEqual([]);
 });
+it('finds the chapters of a report shown as an example, whose headings are plain elements (display-heading.tsx)', () => {
+  const demo = (...items: [string, string][]) => ({
+    querySelectorAll: () => items.map(([level, textContent]) => ({ tagName: 'DIV', dataset: { demoHeading: level }, textContent, closest: () => null })),
+  }) as unknown as HTMLElement;
+  expect(titles(findReportChapters(demo(['h1', '报告'], ['h2', '甲'], ['h2', '乙'])))).toEqual(['甲', '乙']);
+});

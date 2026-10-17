@@ -1,0 +1,88 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * Sample J's price section: only the comparison (Owner 2026-10-15). The rows drop in one after another as the table
+ * scrolls in, their figures adding up (PriceJ); then the total adds up, a line strikes it (data-phase="strike") and
+ * only then our own price rises beside it in gold (data-phase="own"). With reduced motion everything is simply there, and the total keeps
+ * its line so the contrast still reads.
+ */
+h2.title { margin-bottom: clamp(32px, 4vw, 56px); }
+.compareCost { padding: clamp(24px, 3vw, 44px); border: 1px solid var(--j-line); border-radius: 28px; background: #fff; box-shadow: var(--j-shadow); }
+.compareCost h3 { margin: 0 0 16px; font-size: clamp(20px, 2vw, 26px); font-weight: 600; letter-spacing: -.02em; }
+.compareCost ul { display: grid; margin: 0; padding: 0; list-style: none; }
+.compareCost li { display: grid; gap: 4px 24px; padding: 18px 0; border-top: 1px solid rgba(20, 19, 18, .1); }
+@media (min-width: 900px) { .compareCost li { grid-template-columns: minmax(0, 4fr) minmax(0, 4fr) minmax(0, 5fr); align-items: baseline; } }
+.compareCost li > span { color: var(--j-body); }
+.compareCost li > b { font-size: 19px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.compareCost li > small { color: var(--j-muted); font-size: 13px; line-height: 1.6; }
+
+/* The total against our price */
+.versus { display: grid; gap: 18px; margin-top: 8px; padding-top: 22px; border-top: 1px solid rgba(20, 19, 18, .3); }
+@media (min-width: 900px) { .versus { grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); align-items: center; gap: 40px; } }
+.total { display: grid; gap: 4px; margin: 0; }
+.total span { color: var(--j-muted); font-size: 14px; }
+.total b { position: relative; width: fit-content; color: #8a8985; font-size: clamp(24px, 2.6vw, 34px); font-weight: 600; letter-spacing: -.02em; }
+.total b::after {
+  content: ''; position: absolute; left: -4px; right: -4px; top: 52%; height: 2px; border-radius: 2px; background: #b45309;
+  transform-origin: 0 50%;
+}
+/* Our price: a warm box whose gold edge slowly travels round it (a conic border under the padding-box fill). */
+@property --edge { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+.own {
+  min-width: 0; display: grid; gap: 16px; justify-items: start; padding: 24px 26px; border: 1.5px solid transparent; border-radius: 20px;
+  background:
+    linear-gradient(160deg, #fffdf6, #fff6e0) padding-box,
+    conic-gradient(from var(--edge), #f3d58a, #c8962a, #ffe9a8, #b9861f, #f3d58a) border-box;
+  box-shadow: 0 24px 50px -30px rgba(138, 90, 0, .45), inset 0 1px 0 rgba(255, 255, 255, .8);
+}
+.own p { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0; }
+.own b { font-size: clamp(22px, 5.6vw, 42px); font-weight: 600; letter-spacing: -.03em; white-space: nowrap; }
+/* The figure: ink at rest; one gold highlight passes over it as it lands (the gradient's two ends are both ink). */
+.price {
+  background: linear-gradient(100deg, var(--j-ink) 42%, #d9a531 50%, #fff1c2 52%, #d9a531 54%, var(--j-ink) 62%) 100% 0 / 260% 100% no-repeat;
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+/* The button: a fine gold line inside, and a sheen that crosses it on hover. */
+.cta { position: relative; overflow: hidden; box-shadow: inset 0 0 0 1px rgba(255, 199, 77, .35), 0 12px 24px -14px rgba(20, 19, 18, .6); }
+.cta svg { color: #ffd77a; }
+.cta::after {
+  content: ''; position: absolute; inset: 0 auto 0 -60%; width: 50%; pointer-events: none;
+  background: linear-gradient(100deg, transparent, rgba(255, 231, 170, .38), transparent); translate: 0 0;
+}
+.own a { white-space: nowrap; }
+.checked { margin: 14px 0 0; color: var(--j-muted); font-size: 13px; }
+
+@media (prefers-reduced-motion: no-preference) {
+  /* The rows drop in one after another as their figures add up (PriceJ sets data-play on the list). */
+  .compareCost li { transition: opacity .6s var(--j-ease), translate .7s var(--j-ease); transition-delay: calc(var(--i, 0) * 180ms); }
+  [data-motion='on'] .compareCost ul:not([data-play]) li { opacity: 0; translate: 0 -18px; }
+  /* The total: dark while it adds up, then a line strikes it and it greys; only then our price rises. */
+  .versus .total b { transition: color .5s; }
+  .versus:is([data-phase='wait'], [data-phase='count']) .total b { color: var(--j-ink); }
+  .versus .total b::after { transition: scale .6s var(--j-ease); }
+  .versus:is([data-phase='wait'], [data-phase='count']) .total b::after { scale: 0 1; }
+  .versus .own { transition: opacity .6s var(--j-ease), scale .8s cubic-bezier(.34, 1.56, .64, 1); }
+  .versus:is([data-phase='wait'], [data-phase='count'], [data-phase='strike']) .own { opacity: 0; scale: .92; }
+  [data-motion='on'] .own { animation: edge 9s linear infinite; }
+  .versus[data-phase='own'] .price { animation: glint 1.4s var(--j-ease) .6s both; }
+  .cta::after { transition: translate .8s var(--j-ease); }
+  .cta:hover::after, .cta:focus-visible::after { translate: 320% 0; }
+}
+@keyframes edge { to { --edge: 360deg; } }
+@keyframes glint { from { background-position: 100% 0; } to { background-position: 0 0; } }
+
+/* Sample K (data-calm): flat panel, a smooth rise, the gold edge still. */
+[data-calm] .compareCost { box-shadow: none; }
+@media (prefers-reduced-motion: no-preference) {
+  [data-calm] .versus .own { transition: opacity .6s var(--j-ease), scale .8s var(--j-ease); }
+  [data-motion='on'] [data-calm] .own { animation: none; }
+}
+
+/* Sample L (data-plain): the usual ways' total stays whole and stands out; no strike. */
+.versus[data-plain] .total b { color: var(--j-ink); font-size: clamp(28px, 3.2vw, 42px); }
+.versus[data-plain] .total b::after { display: none; }
+
+/* Sample L (data-quiet): our price in plain ink, no sheen; the full-pricing link as a quiet text link. */
+.versus[data-quiet] .price { background: none; color: var(--j-ink); }
+.versus[data-quiet] .price { animation: none !important; }
+.moreLink { display: inline-flex; align-items: center; gap: 4px; color: var(--j-ink); font-size: 15px; font-weight: 500; text-underline-offset: 4px; }
+.moreLink:hover { text-decoration: underline; }

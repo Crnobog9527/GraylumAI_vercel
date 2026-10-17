@@ -45,3 +45,15 @@ describe.each(FEATURES.map(entry => [entry.slug] as const))('feature page demo %
     expect(html).not.toMatch(HEADING_TAG);
   });
 });
+
+describe('Markdown headings in an example', () => {
+  it('stay h1–h4 in the product and become plain elements that look the same inside AsDemo', async () => {
+    const { MessageMarkdown } = await import('@/components/chat/MessageMarkdown');
+    const text = '# 报告\n\n## 第一章\n\n### 小节\n\n正文';
+    const product = renderToStaticMarkup(<MessageMarkdown text={text} />);
+    for (const tag of ['<h1>', '<h2>', '<h3>']) expect(product).toContain(tag);
+    const demo = renderToStaticMarkup(<AsDemo><MessageMarkdown text={text} /></AsDemo>);
+    expect(demo).not.toMatch(/<h[1-6][ >]/);
+    expect(demo).toContain('<div data-demo-heading="h2">第一章</div>');
+  });
+});

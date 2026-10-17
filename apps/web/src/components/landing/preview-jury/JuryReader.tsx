@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
 
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode, type RefObject } from 'react';
 import { ArrowDownToLine, Check, Circle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { JuryDetail, JurySeatNames } from './jury-events';
@@ -22,9 +22,11 @@ type Mode = 'changes' | 'all';
  * The result page as the whole report, made easy to read: first "30 秒看懂" (the report on one page, the three changes
  * that matter most, and what to do next), then the chapters as cards. Changed chapters stand out and open with only
  * what changed; the rest stay quiet. A contents list on the left tracks progress and choices; a bar at the bottom
- * confirms. The chapter-by-chapter choice in two steps is unchanged (use-adoption.ts).
+ * confirms. The chapter-by-chapter choice in two steps is unchanged (use-adoption.ts). `scrollRoot` is the box the
+ * page scrolls in when it is not the window (the landing page's frame): jumps and reading progress then move that box
+ * only, never the page around it.
  */
-export function JuryReader({ detail, names, source = MOCK_READER_SOURCE, actions = MOCK_ADOPT_ACTIONS, tools }: {
+export function JuryReader({ detail, names, source = MOCK_READER_SOURCE, actions = MOCK_ADOPT_ACTIONS, tools, scrollRoot }: {
   detail: JuryDetail; names: JurySeatNames;
   /** The reviewed report and its reading aids; the prototype's mock creator by default. */
   source?: ReaderSource;
@@ -32,6 +34,7 @@ export function JuryReader({ detail, names, source = MOCK_READER_SOURCE, actions
   actions?: AdoptActions;
   /** Extra controls next to the mode switch (the prototype's simulated refusals). */
   tools?: ReactNode;
+  scrollRoot?: RefObject<HTMLElement | null>;
 }) {
   const failed = detail.summary.status !== 'usable';
   const chapters = useMemo(() => readerChapters(detail, source), [detail, source]);
@@ -41,15 +44,24 @@ export function JuryReader({ detail, names, source = MOCK_READER_SOURCE, actions
   const choosing = !failed && adoption.total > 0 ? adoption : null;
   const [mode, setMode] = useState<Mode>('changes');
   const [opened, setOpened] = useState<string[]>([]);
-  const progress = useReadingProgress('jury-reader-chapters');
+  const progress = useReadingProgress('jury-reader-chapters', scrollRoot);
+  /** Where the reading line is: the top of the scrolling box (or of the window, under its sticky bar). */
+  const lineTop = () => (scrollRoot?.current?.getBoundingClientRect().top ?? 0) + (scrollRoot?.current ? 24 : 140);
   const toggle = (title: string) => setOpened(list => (list.includes(title) ? list.filter(item => item !== title) : [...list, title]));
   const jump = (title: string) => {
     if (!opened.includes(title)) setOpened(list => [...list, title]);
-    requestAnimationFrame(() => document.getElementById(`chapter-${title}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+    requestAnimationFrame(() => {
+      const node = document.getElementById(`chapter-${title}`);
+      const box = scrollRoot?.current;
+      if (!node) return;
+      if (!box) { node.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+      const top = node.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop - 12;
+      box.scrollTo({ top, behavior: 'smooth' });
+    });
   };
   const nextChange = () => {
     if (flagged.length === 0) return;
-    const below = flagged.find(chapter => (document.getElementById(`chapter-${chapter.title}`)?.getBoundingClientRect().top ?? 0) > 140);
+    const below = flagged.find(chapter => (document.getElementById(`chapter-${chapter.title}`)?.getBoundingClientRect().top ?? 0) > lineTop());
     jump((below ?? flagged[0]).title);
   };
 

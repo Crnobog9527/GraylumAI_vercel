@@ -14,7 +14,8 @@ const formatFetchedAt = (value: string) => new Date(value).toLocaleString("zh-CN
 /**
  * Benchmark table (plan §1.4): followers, median views, engagement rate, posting frequency and last update per
  * account. Every number cites its source number; a number the evidence cannot support reads "缺失 / 未取到".
- * On a phone each account becomes a stacked block with the column names inline.
+ * In a narrow column (a chat) the table scrolls sideways and the account column stays on one line; on a phone each
+ * account becomes a stacked block with the column names inline.
  */
 export function BenchmarkTable({ rows, now = new Date(), onRefresh, refreshDisabled = false, fetchedAt, children }: {
   rows: BenchmarkRow[];
@@ -36,6 +37,7 @@ export function BenchmarkTable({ rows, now = new Date(), onRefresh, refreshDisab
         <p className={styles.head}>对标表</p>
         <p className={styles.summary}>{rows.length} 个账号 · 合格 {qualified} 个</p>
       </div>
+      <div className={styles.scroll}>
       <table className={styles.table}>
         <thead>
           <tr>
@@ -74,6 +76,7 @@ export function BenchmarkTable({ rows, now = new Date(), onRefresh, refreshDisab
           ))}
         </tbody>
       </table>
+      </div>
       {entries.length > 0 && (
         <ol aria-label="数据来源" className={styles.sources}>
           {entries.map(entry => (

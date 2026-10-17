@@ -2,16 +2,19 @@
 'use client';
 
 import { useEffect, useRef, useState, type ComponentType } from 'react';
+import type { DemoWorkspace } from './DemoWorkspace';
 import { DEMO_LABEL, DEMO_NOTE } from './demo-script';
 import styles from './demo.module.css';
 
 /**
  * Loads the demo's code only when the visitor scrolls near it, so the first screen does not pay for the
  * Markdown renderer and the conversation components. The placeholder keeps the same height (no layout shift).
+ * `start` is passed through to the demo. Opened on the step summary, it plays by itself, so it mounts only once it
+ * is well inside the screen; the full demo loads early instead, since it waits for the visitor anyway.
  */
-export function LazyDemo() {
+export function LazyDemo({ start }: { start?: 'beginning' | 'summary' }) {
   const ref = useRef<HTMLDivElement>(null);
-  const [Demo, setDemo] = useState<ComponentType | null>(null);
+  const [Demo, setDemo] = useState<ComponentType<Parameters<typeof DemoWorkspace>[0]> | null>(null);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
@@ -28,12 +31,12 @@ export function LazyDemo() {
       if (!entries.some(entry => entry.isIntersecting)) return;
       observer.disconnect();
       load();
-    }, { rootMargin: '600px 0px' });
+    }, { rootMargin: start === 'summary' ? '0px 0px -25% 0px' : '600px 0px' });
     observer.observe(node);
     return () => { cancelled = true; observer.disconnect(); };
-  }, []);
+  }, [start]);
 
-  if (Demo) return <Demo />;
+  if (Demo) return <Demo start={start} />;
   return (
     <div ref={ref} className={styles.window} aria-busy={!failed}>
       <div className={styles.chrome}><span className={styles.badge}>{DEMO_LABEL}</span><p>{DEMO_NOTE}</p></div>

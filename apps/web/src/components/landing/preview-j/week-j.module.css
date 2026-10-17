@@ -1,0 +1,135 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * The first screen's week window (WeekJ): a small workbench window lifted off the backdrop, the five stage labels
+ * around it on a faint loop, the current one lit in gold. Steps cross-fade (opacity and a short rise only). Phone:
+ * the window sits under the text, smaller, and only its top part shows; the labels line up above it.
+ */
+.stage { --bleed: 0px; position: relative; width: calc(100% + var(--bleed)); max-width: 760px; margin: 0 calc(-1 * var(--bleed)) 0 auto; padding: 44px 40px; }
+@media (min-width: 1280px) { .stage { --bleed: min(120px, max(0px, (100vw - 1240px) / 2 - 24px)); } }
+/* The loop the labels sit on. */
+.stage::before {
+  content: ''; position: absolute; inset: 18px 6px; border: 1.5px dashed rgba(20, 19, 18, .14); border-radius: 48px; pointer-events: none;
+}
+.stages { position: absolute; inset: 0; z-index: 2; margin: 0; padding: 0; list-style: none; pointer-events: none; }
+.stages li {
+  position: absolute; display: flex; padding: 0; border: 1px solid var(--j-line); pointer-events: auto;
+  border-radius: 999px; background: #fff; color: var(--j-muted); font-size: 14px; font-weight: 600; white-space: nowrap;
+  box-shadow: 0 1px 2px rgba(20, 19, 18, .05), 0 10px 24px -16px rgba(20, 19, 18, .35); translate: -50% -50%;
+  transition: color .4s, border-color .4s, box-shadow .4s, scale .5s var(--j-ease);
+}
+.stages li svg { color: #a3a19b; transition: color .4s; }
+/* Each label is a button that plays its module (Owner 2026-10-15): it lifts and darkens under the pointer. */
+.stages button {
+  display: flex; align-items: center; gap: 6px; padding: 7px 13px; border: 0; border-radius: 999px; background: none; color: inherit;
+  font: inherit; cursor: pointer;
+}
+.stages button:focus-visible { outline: 2px solid var(--j-ink); outline-offset: 3px; }
+.stages li:not([data-on]):hover {
+  border-color: rgba(20, 19, 18, .35); color: var(--j-ink); box-shadow: 0 1px 2px rgba(20, 19, 18, .06), 0 14px 28px -14px rgba(20, 19, 18, .45);
+}
+.stages li:hover svg { color: var(--j-gold-text); }
+.stages li:active { scale: .97; }
+.stages li[data-done] { color: var(--j-ink); }
+.stages li[data-on] {
+  border-color: var(--j-gold); color: var(--j-ink); scale: 1.08;
+  box-shadow: 0 0 0 4px rgba(255, 187, 23, .22), 0 12px 28px -16px rgba(20, 19, 18, .4);
+}
+.stages li[data-on] svg, .stages li[data-done] svg { color: var(--j-gold-text); }
+/* Clockwise from the top left: 定位, 选题, 创作 (right), 发布 (bottom right), 复盘 (bottom left). */
+.stages li:nth-child(1) { top: 18px; left: 22%; }
+.stages li:nth-child(2) { top: 18px; left: 78%; }
+.stages li:nth-child(3) { top: 50%; left: calc(100% - 6px); }
+.stages li:nth-child(4) { top: calc(100% - 18px); left: 72%; }
+.stages li:nth-child(5) { top: calc(100% - 18px); left: 28%; }
+
+.window {
+  position: relative; z-index: 1; overflow: hidden; border: 1px solid var(--j-line); border-radius: 22px; background: #fff; color: #262626;
+  box-shadow: 0 1px 2px rgba(20, 19, 18, .05), 0 50px 90px -50px rgba(20, 19, 18, .55);
+}
+.chrome { display: flex; align-items: center; gap: 8px; padding: 11px 14px; border-bottom: 1px solid #efefed; font-size: 12.5px; }
+.dots { display: flex; flex: none; gap: 5px; }
+.dots i { width: 8px; height: 8px; border-radius: 50%; background: #e2e1dd; }
+.badge {
+  flex: none; white-space: nowrap; padding: 0 7px; border-radius: 999px; background: var(--gl-accent-tag); color: var(--gl-accent-tag-text);
+  font-size: 11px; line-height: 19px;
+}
+.chromeTitle { min-width: 0; overflow: hidden; color: #777; white-space: nowrap; text-overflow: ellipsis; }
+/* A phone keeps the bar on one line: the subtitle goes, the stage tag stays. */
+@media (max-width: 480px) { .chromeTitle { display: none; } }
+.chromeStage {
+  flex: none; white-space: nowrap; margin-left: auto; padding: 0 8px; border-radius: 999px; background: #f3f2ee; color: var(--j-ink);
+  font-size: 12px; font-weight: 600; line-height: 22px;
+}
+.body { position: relative; height: 500px; overflow: hidden; }
+/* Messages start at the top; once they no longer fit, WeekJ drops whole older ones so the newest stay in view. */
+.log { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: flex-start; gap: 10px; padding: 16px; overflow: hidden; }
+.log > * { flex: none; }
+.divider { display: flex; align-items: center; gap: 10px; margin: 6px 0 0; color: #999; font-size: 11.5px; }
+.divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: #eee; }
+@media (prefers-reduced-motion: no-preference) { .log [data-live] { animation: rise .5s var(--j-ease) both; } }
+.user { align-self: flex-end; justify-self: end; max-width: 82%; margin: 0; padding: 9px 13px; border-radius: 14px; background: #f3f3f1; font-size: 13.5px; line-height: 1.65; }
+.coach { display: grid; gap: 8px; min-width: 0; padding: 10px 13px 12px; border: 1px solid #ececea; border-radius: 14px; font-size: 13.5px; line-height: 1.65; }
+.coach > span { color: #8a8a87; font-size: 11.5px; }
+.coach > p { margin: 0; }
+.docTitle { margin: 0 0 4px !important; color: var(--j-ink); font-size: 13px; font-weight: 600; }
+
+.confirm section { margin: 0; padding: 10px 12px !important; }
+.confirm section p, .confirm section button { font-size: 12.5px !important; line-height: 1.55 !important; }
+
+.topics { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; counter-reset: topic; }
+.topics li { display: grid; gap: 1px; padding: 8px 10px 8px 34px; border-radius: 10px; background: #fafaf8; position: relative; counter-increment: topic; }
+.topics li::before {
+  content: counter(topic); position: absolute; top: 9px; left: 10px; display: grid; place-items: center; width: 17px; height: 17px;
+  border-radius: 50%; background: var(--j-ink); color: #fff; font-size: 10.5px; font-weight: 600;
+}
+.topics b { font-weight: 600; }
+.topics span { color: #6f6e6a; font-size: 12.5px; }
+.why { margin: 0; padding: 6px 10px; border-radius: 8px; background: #fff7e0; color: #4a4946; font-size: 12.5px; }
+
+.doc, .publish, .doc p { margin: 0; font-size: 13px; }
+.publish ul { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; margin: 0 0 4px; padding: 0; list-style: none; }
+.fetch { display: grid; gap: 4px; margin: 0; padding: 8px 10px; border: 1px dashed #ddd; border-radius: 10px; list-style: none; font-size: 12.5px; }
+.fetch li { display: flex; align-items: center; gap: 6px; }
+.fetch svg { color: #1a7f45; }
+.table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.table th, .table td { padding: 5px 6px; border-bottom: 1px solid #ececea; text-align: left; }
+.table thead th { color: #888; font-weight: 500; }
+.table tbody th { font-weight: 600; }
+.table td[data-trend='up'] { color: #1a7f45; }
+.table td[data-trend='down'] { color: #b45309; }
+.table td[data-trend='flat'] { color: #666; }
+.publish li { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+
+.trend { display: grid; gap: 4px; padding: 8px 10px; border: 1px solid #ececea; border-radius: 10px; background: #fff; }
+.trend span { color: #6f6e6a; font-size: 12px; }
+.trend svg { width: 100%; height: 64px; overflow: visible; }
+.trendLine { fill: none; stroke: var(--j-ink); stroke-width: 2; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.trendFill { fill: rgba(255, 187, 23, .18); }
+
+@media (prefers-reduced-motion: no-preference) {
+  .log [data-live] .trendLine { stroke-dasharray: 260; animation: draw 1.6s var(--j-ease) .3s both; }
+  .log [data-live] .trendFill { animation: fade 1s ease .9s both; }
+}
+@keyframes draw { from { stroke-dashoffset: 260; } to { stroke-dashoffset: 0; } }
+@keyframes fade { from { opacity: 0; } }
+@keyframes rise { from { opacity: 0; translate: 0 8px; } }
+@media (prefers-reduced-motion: reduce) { .stages li { transition: none; } }
+
+/* Phone and narrow screens: labels in one row above, the window smaller and cut off at the bottom. */
+@media (max-width: 640px) {
+  .stage { padding: 0; }
+  .stage::before { display: none; }
+  .stages { position: static; display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin-bottom: 14px; }
+  .stages { flex-wrap: nowrap; gap: 4px; }
+  .stages li { position: static; translate: none; font-size: 12.5px; }
+  .stages button { padding: 4px 9px; }
+  .stages li svg { display: none; }
+  .stages li[data-on] { scale: 1; }
+  .window { max-height: 420px; mask-image: linear-gradient(#000 82%, transparent); }
+  .body { height: 420px; }
+}
+
+/* Samples K, M–O (data-calm-windows, distill plan items 15–16): the still window's small print at least 12px and 4.5:1. */
+[data-calm-windows] .badge { font-size: 12px; }
+[data-calm-windows] .chromeTitle, [data-calm-windows] .coach > span { color: #6b6b6b; }
+[data-calm-windows] .coach > span { font-size: 12px; }
