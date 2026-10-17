@@ -5,6 +5,10 @@ import { prepareModuleSkill, saveModuleSkill, type ModuleSkillInput } from '../s
 import { parseWorkflowManifest } from '../skills/workflowManifest';
 import { workflowSchema } from '../artifacts/workflow';
 import { makePackage } from './fixtures/artifacts';
+
+// ADMIN-SECRETS OR-1: the platform OpenRouter key is filled in unless a test says otherwise.
+const keyState = vi.hoisted(() => ({ configured: true }));
+vi.mock('../models/openRouterKey', () => ({ openRouterKeyConfigured: async () => keyState.configured }));
 export function moduleInput(): ModuleSkillInput {
   const pack = makePackage();
   return { moduleId: randomUUID(), skillId: pack.id, revisionId: pack.revisionId, requestId: pack.requestId,
@@ -52,14 +56,14 @@ describe('administrator module publication', () => {
       await expect(saveModuleSkill(db as any, randomUUID(), input)).rejects.toThrow(); expect(db.rpc).not.toHaveBeenCalled(); }
   });
   it('writes package, binding, workflow and visibility through one atomic RPC with server actor', async () => {
-    const input = moduleInput(), actor = randomUUID(), db = { from:()=>({select(){return this;},eq(){return this;},single:async()=>({data:{id:input.module.model_id,name:'Qwen',model_id:'qwen/qwen3.8-27b',provider:'openai',is_active:'true',max_tokens:4096,input_limit:800000,api_key:'LOCAL_ONLY',api_endpoint:'',config:configuredReasoning},error:null})}), rpc: vi.fn().mockResolvedValue({ data: { moduleId: input.moduleId }, error: null }) };
+    const input = moduleInput(), actor = randomUUID(), db = { from:()=>({select(){return this;},eq(){return this;},single:async()=>({data:{id:input.module.model_id,name:'Qwen',model_id:'qwen/qwen3.8-27b',provider:'openai',is_active:'true',max_tokens:4096,input_limit:800000,api_endpoint:'',config:configuredReasoning},error:null})}), rpc: vi.fn().mockResolvedValue({ data: { moduleId: input.moduleId }, error: null }) };
     await saveModuleSkill(db as any, actor, input);
     expect(db.rpc).toHaveBeenCalledExactlyOnceWith('admin_publish_skill_module', expect.objectContaining({
       p_actor_id: actor, p_metadata: input.module, p_expected_updated_at: null, p_request_id: input.requestId,
     }));
   });
   it('reports the POSITIONING-GATE refusal distinctly and keeps other database failures generic', async () => {
-    const model = {data:{id:'',name:'Qwen',model_id:'qwen/qwen3.8-27b',provider:'openai',is_active:'true',max_tokens:4096,input_limit:800000,api_key:'LOCAL_ONLY',api_endpoint:'',config:configuredReasoning},error:null};
+    const model = {data:{id:'',name:'Qwen',model_id:'qwen/qwen3.8-27b',provider:'openai',is_active:'true',max_tokens:4096,input_limit:800000,api_endpoint:'',config:configuredReasoning},error:null};
     const db = (message: string) => ({ from:()=>({select(){return this;},eq(){return this;},single:async()=>model}),
       rpc: vi.fn().mockResolvedValue({ data: null, error: { code: 'P0001', message } }) });
     await expect(saveModuleSkill(db('SOCIAL_MEDIA_FLAG_POSITIONING_SKILL') as never, randomUUID(), moduleInput()))
@@ -74,14 +78,24 @@ describe('administrator module publication', () => {
     // A model outside the old fixed list (artifacts/modelPolicy.ts) is publishable once configured.
   ])('refuses a Skill model with %s before publishing', async (_name, config, message) => {
     const input = moduleInput(), db = { from:()=>({select(){return this;},eq(){return this;},single:async()=>({data:{id:input.module.model_id,name:'Qwen',
-      model_id:'qwen/qwen3.8-27b',provider:'openai',is_active:'true',max_tokens:4096,input_limit:800000,api_key:'LOCAL_ONLY',api_endpoint:'',config},error:null})}),
+      model_id:'qwen/qwen3.8-27b',provider:'openai',is_active:'true',max_tokens:4096,input_limit:800000,api_endpoint:'',config},error:null})}),
       rpc: vi.fn() };
     await expect(saveModuleSkill(db as any, randomUUID(), input)).rejects.toThrow(message); expect(db.rpc).not.toHaveBeenCalled();
+  });
+  it('refuses publishing while the platform OpenRouter key is not filled in', async () => {
+    const input = moduleInput(), db = { from:()=>({select(){return this;},eq(){return this;},single:async()=>({data:{id:input.module.model_id,name:'Qwen',
+      model_id:'qwen/qwen3.8-27b',provider:'openai',is_active:'true',max_tokens:4096,input_limit:800000,api_endpoint:'',config:configuredReasoning},error:null})}),
+      rpc: vi.fn() };
+    keyState.configured = false;
+    try {
+      await expect(saveModuleSkill(db as never, randomUUID(), input)).rejects.toThrow('请先在后台“第三方密钥”页填写 OpenRouter 密钥');
+      expect(db.rpc).not.toHaveBeenCalled();
+    } finally { keyState.configured = true; }
   });
   it('publishes a configured model that the old fixed model list never allowed', async () => {
     const input = moduleInput(), config = {reasoning:{...configuredReasoning.reasoning,catalog:{...configuredReasoning.reasoning.catalog,model:'deepseek/deepseek-v4.1-flash'}}};
     const db = { from:()=>({select(){return this;},eq(){return this;},single:async()=>({data:{id:input.module.model_id,name:'DeepSeek',
-      model_id:'deepseek/deepseek-v4.1-flash',provider:'openai',is_active:'true',max_tokens:4096,input_limit:800000,api_key:'LOCAL_ONLY',api_endpoint:'',config},error:null})}),
+      model_id:'deepseek/deepseek-v4.1-flash',provider:'openai',is_active:'true',max_tokens:4096,input_limit:800000,api_endpoint:'',config},error:null})}),
       rpc: vi.fn().mockResolvedValue({ data: { moduleId: input.moduleId }, error: null }) };
     await saveModuleSkill(db as any, randomUUID(), input); expect(db.rpc).toHaveBeenCalledOnce();
   });
@@ -128,7 +142,7 @@ describe('administrator module publication', () => {
     const published = prepareModuleSkill(input).workflow.steps[0].information;
     expect(published).toEqual([{ id: 'legacy_fact', title: '旧版字段', required: true, profileKey: 'legacy_fact' }]);
     expect(published?.[0]).not.toHaveProperty('elicitation');
-    const db = { from:()=>({select(){return this;},eq(){return this;},single:async()=>({data:{id:input.module.model_id,name:'Qwen',model_id:'qwen/qwen3.8-27b',provider:'openai',is_active:'true',max_tokens:4096,input_limit:800000,api_key:'LOCAL_ONLY',api_endpoint:'',config:configuredReasoning},error:null})}), rpc: vi.fn().mockResolvedValue({ data: { moduleId: input.moduleId }, error: null }) };
+    const db = { from:()=>({select(){return this;},eq(){return this;},single:async()=>({data:{id:input.module.model_id,name:'Qwen',model_id:'qwen/qwen3.8-27b',provider:'openai',is_active:'true',max_tokens:4096,input_limit:800000,api_endpoint:'',config:configuredReasoning},error:null})}), rpc: vi.fn().mockResolvedValue({ data: { moduleId: input.moduleId }, error: null }) };
     await expect(saveModuleSkill(db as any, randomUUID(), input)).resolves.toBeTruthy();
     expect(db.rpc).toHaveBeenCalledOnce();
   });

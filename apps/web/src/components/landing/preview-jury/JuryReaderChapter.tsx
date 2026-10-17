@@ -10,6 +10,7 @@ import type { ReaderChapter } from './jury-reader';
 import type { Adoption } from './use-adoption';
 import { SeatBadge, SeverityTag } from './JuryBits';
 import styles from './jury-reader.module.css';
+import { DisplayHeading } from '@/components/chat-display/display-heading';
 
 
 /**
@@ -39,7 +40,7 @@ export function JuryReaderChapter({ chapter, names, adoption, compact, open, onT
   return (
     <article className={cn(styles.chapter)} data-tone={changed ? 'changed' : issues.length > 0 ? 'issues' : 'quiet'} id={id}>
       <header className={styles.chapterHead}>
-        <h3>{title}</h3>
+        <DisplayHeading as="h3">{title}</DisplayHeading>
         {changed ? <span className={styles.tag} data-tone="changed">修订稿改了这一章</span> : null}
         {section?.wordingOnly ? <span className={styles.tag}>只改了表述</span> : null}
         {!changed && (section?.rulings.length ?? 0) > 0 ? <span className={styles.tag}>有意见，没改</span> : null}
