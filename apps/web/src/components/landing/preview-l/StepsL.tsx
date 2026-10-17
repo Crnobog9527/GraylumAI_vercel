@@ -9,8 +9,9 @@ import page from '@/components/landing/preview-j/j.module.css';
 import takeover from '@/components/landing/preview-j/takeover-j.module.css';
 import { HOW_IT_WORKS } from '@/lib/landing/landing-copy';
 import { L_STEPS, type StepStage } from '@/lib/landing/landing-copy-l-steps';
-import { allOn, visibleItems, type LandingFlags } from '@/lib/landing/landing-flags';
+import { visibleItems, type LandingFlags } from '@/lib/landing/landing-flags';
 import { cn } from '@/lib/utils';
+import { LaterStepsL } from './LaterStepsL';
 import { PositioningPictureL } from './PositioningPictureL';
 import styles from './steps-l.module.css';
 
@@ -40,7 +41,7 @@ export function stageAt(stages: readonly StepStage[], progress: number) {
  * real product's display components (PositioningPictureL). The visitor watches it through: on screen the stage holds
  * still and the scroll plays the
  * four stages, with the step's progress shown; a visitor who has seen it to the end before (remembered in this
- * browser) gets a button that jumps past it. Steps two and three show only once their capability ships. Server HTML
+ * browser) gets a button that jumps past it. Steps two and three follow (LaterStepsL), each stage behind its own feature's switch. Server HTML
  * and reduced motion: the four stages stacked, finished.
  */
 export function StepsL({ flags }: { flags: LandingFlags }) {
@@ -72,7 +73,6 @@ export function StepsL({ flags }: { flags: LandingFlags }) {
     const node = ref.current;
     if (node) window.scrollTo({ top: window.scrollY + node.getBoundingClientRect().bottom - 80, behavior: 'auto' });
   };
-  const later = L_STEPS.later.filter(step => step.built && allOn(flags, step.needs));
   const { index, local } = stageAt(stages, progress);
   const stage = stages[index];
   // Owner 2026-10-17, round five: the step counts as watched once the report dialog opens; from then on it can be skipped.
@@ -120,15 +120,7 @@ export function StepsL({ flags }: { flags: LandingFlags }) {
         </div>
       )}
       <div className={cn(k.wrap, styles.after)}><CtaK /></div>
-      {later.map(step => (
-        <div key={step.title} role="group" aria-label={step.title} className={styles.later} data-region={step.title.slice(0, 3)}>
-          <div className={k.wrap}>
-            <h3 className={styles.stepTitle}>{step.title}</h3>
-            <ol className={styles.laterItems}>{step.items.map(item => <li key={item}>{item}</li>)}</ol>
-            <CtaK />
-          </div>
-        </div>
-      ))}
+      <LaterStepsL flags={flags} />
     </section>
   );
 }

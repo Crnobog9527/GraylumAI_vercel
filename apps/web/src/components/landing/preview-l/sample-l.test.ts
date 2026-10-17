@@ -21,6 +21,7 @@ import { APP_SEGMENTS } from '@/lib/sentry-scrub';
 import { L_SAMPLES_REDO } from '@/lib/landing/landing-copy-l-samples';
 import { SAMPLE_OVERVIEWS } from '@/lib/landing/sample-reports/overview';
 import { L_WORKFLOWS } from '@/lib/landing/landing-copy-l-workflows';
+import { L_LATER } from '@/lib/landing/landing-copy-l-later';
 import { HOW_IT_WORKS as HOW } from '@/lib/landing/landing-copy';
 import { trpc } from '@/trpc/client';
 import { countOf, OverviewL } from './OverviewL';
@@ -103,10 +104,22 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     expect(answered).not.toContain('data-question-card="open"');
   });
 
-  it('keeps steps two and three off until built, even with every flag on, and the jury larger with the fusion flag', () => {
+  it('shows steps two and three, each stage behind its own switch, and the jury larger with the fusion flag', () => {
     const on = render();
-    for (const step of L_STEPS.later) expect(on).not.toContain(step.title);
-    expect(L_STEPS.later.every(step => !step.built)).toBe(true);
+    for (const step of [L_LATER.two, L_LATER.three]) {
+      expect(on).toContain(step.title);
+      for (const stage of step.stages) expect(on).toContain(`${stage.label}</button>`);
+    }
+    // One switch hides only its own stages: voice off drops the voice stage and nothing else of step two.
+    const noVoice = render({ ...ALL_ON, voice: false });
+    expect(noVoice).not.toContain('按你的文风写</button>');
+    expect(noVoice).toContain('口播稿和分镜</button>');
+    expect(noVoice).toContain(L_LATER.three.title);
+    const noPublish = render({ ...ALL_ON, publish: false });
+    expect(noPublish).not.toContain(L_LATER.three.title);
+    expect(noPublish).toContain(L_LATER.two.title);
+    // Which stages show the product's real components and which the plan: every stage says so.
+    for (const stage of [...L_LATER.two.stages, ...L_LATER.three.stages]) expect(['real', 'planned']).toContain(stage.source);
     expect(on).toContain(L_JURY.title);
     expect(on).toContain(`href="${L_JURY.href}"`);
     expect(render({ ...ALL_ON, fusion: false })).not.toContain(L_JURY.title);

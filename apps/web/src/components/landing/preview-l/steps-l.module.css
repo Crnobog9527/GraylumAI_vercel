@@ -17,8 +17,6 @@
 .skip:focus-visible { outline: 2px solid var(--j-ink); outline-offset: 2px; }
 @media (max-width: 767px) { .stages { display: none; } }
 .after { padding-top: 28px; }
-.later { padding: 56px 0 24px; }
-.laterItems { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 18px 0 24px; padding: 0; list-style: none; font-size: 17px; }
 /* Round five: the region's own title above 第一步/第二步/第三步. */
 .intro { padding-top: clamp(72px, 9vw, 112px); }
 .staticOne { padding-top: 24px; }
