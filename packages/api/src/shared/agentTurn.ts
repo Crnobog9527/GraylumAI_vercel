@@ -18,6 +18,7 @@
  * Changing an exported shape after the UI depends on it is a contract change:
  * report it to the controller first.
  */
+import type { CONTENT_SOURCE_MESSAGES } from './contentSourceMessages';
 import { z } from "zod";
 import type { ResearchTurnEvent } from "./researchTurn";
 
@@ -136,7 +137,8 @@ export type AgentTurnOutcome = {
   admitted?: false; blockedRequestId?: string;
   code?: 'RUNTIME_NEW_CALLS_STOPPED' | 'RUNTIME_USER_DAILY_USD_LIMIT' | 'RUNTIME_SITE_DAILY_USD_LIMIT'
     | 'RUNTIME_STOP_LOSS_CONFIG_INVALID' | 'REPORT_MEMBERSHIP_REQUIRED' | 'REPORT_ENTITLEMENTS_UNAVAILABLE' | 'REPORT_SOURCE_CONFLICT'
-    | 'RUNTIME_WAITING_CREDITS' | 'RUNTIME_WAITING_RESUME' | 'RUNTIME_USAGE_CONFIGURATION_REQUIRED';
+    | 'RUNTIME_WAITING_CREDITS' | 'RUNTIME_WAITING_RESUME' | 'RUNTIME_USAGE_CONFIGURATION_REQUIRED'
+    | keyof typeof CONTENT_SOURCE_MESSAGES;
   executionId?: string; cursor?: number; epoch?: number; remainingCalls?: number;
   /** Fixed host-authored notice; never raw database or provider details. */
   notice?: string;
