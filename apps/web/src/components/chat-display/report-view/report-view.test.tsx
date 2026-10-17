@@ -81,6 +81,13 @@ describe('ReportView', () => {
     expect(out).not.toContain('看这一层的细节');
   });
 
+  it('lists an invalid summary as text in its chapter', () => {
+    const long = '长'.repeat(201);
+    const out = html(`## 一句话结论\n\n结论。\n\n## 受众\n\n人群。\n\n${REPORT_DATA_FENCE}\n${JSON.stringify({ v: 1, field: 'summary', value: long })}\n\`\`\``);
+    expect(out).toContain('这一项的数据不完整');
+    expect(out).toContain(long.slice(0, 200));
+  });
+
   it('says the charts are being prepared while the block is still being written', () => {
     const out = html(`${SAMPLE_REPORT_BODY}\n\n${REPORT_DATA_FENCE}\n{"v":1,"field":"summ`, { streaming: true });
     expect(out).toContain('图表和策略要点整理中');
