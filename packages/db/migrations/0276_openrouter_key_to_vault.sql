@@ -1,5 +1,5 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
--- ADMIN-SECRETS OR-1 (0277, allocated by the controller 2026-10-17): move the OpenRouter key from ai_models.api_key into the platform `openrouter` Vault slot
+-- ADMIN-SECRETS OR-1 (0276, allocated by the controller 2026-10-17): move the OpenRouter key from ai_models.api_key into the platform `openrouter` Vault slot
 -- (docs/launch/tasks/ADMIN-SECRETS.md 5.3). The application reads it from there from now on; the column stays until
 -- OR-2 but is no longer read or written by the application.
 --   * Only when the slot is empty. Already filled (by an earlier run or by an admin): nothing happens.
