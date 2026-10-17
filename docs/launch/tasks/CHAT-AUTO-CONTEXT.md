@@ -95,6 +95,15 @@ Owner 选的选项（原文）："Agent 在自由对话里自己决定检索资�
 - 先确认 `pg_trgm` 在 staging 和正式库都可用（`list_extensions` 只读核对，正式库需 Owner 授权，放进 REL-1 清单）；不可用时退回"文件名 + 段标题"匹配，
   功能降级但不报错。
 
+**新工具要接通的几处（A2）**：今天自由对话只放行 `read_source`，加 `library_search` 要一起改：
+
+- `providerRequest.ts` 的 v6（`serial-tools-v6-reasoning`）请求校验和 `historyToolNames`（现在只认 `SOURCE_TOOL_NAMES`），否则发请求前报 `RUNTIME_REAL_TOOLS_DISABLED`；
+- OpenRouter 适配器的工具白名单；
+- `executionTools.ts` 加一个本地执行的 RuntimeTool，调用 A1 的 `library_runtime_search`（现在非内置名称都落到 `sourceRuntimeTool`，只会处理 `read_source`）；
+- 数据库 `runtime_tool` 的工具名和参数校验（现在只准 `search`、`read_source` 等，`library_search` 会报 `RUNTIME_TOOL_DENIED`）。
+
+补真实请求格式测试和回放测试（中途中断后恢复，同一调用读回保存的结果）。
+
 **和 @ 引用的关系**：
 
 - @ 引用照 #1022 不变：用户点名的文档整篇可读、优先；@ 引用开关（`library_agent_read_enabled`）关着时，自动检索也不挂（读文档的底层是同一套）。
@@ -119,7 +128,9 @@ Owner 选的选项（原文）："Agent 在自由对话里自己决定检索资�
   手动导入（#1039）和小红书/抖音本人账号（#1075 PR-4a、PR-4b）合并后，数据自然变多，工具不用改。
 - **和 PUBLISH-MONITOR PR-6 的分工**：PR-6 写的是"复盘用的只读数据工具 + 对话复盘 + 每周自动复盘"。为了不做两遍，**本任务只做通用的只读工具 `my_posts`**
   （复用 #1032 的服务端读取函数，不直连表），PR-6 在它上面加复盘逻辑和对齐天数的计算。总控 2026-10-17 已确认这个分工（技术分工，不是产品决定）。
-- **读什么**：最近 N 天（模型可传 `days`，默认 14 天，宿主裁剪到会员的数据窗口：Pro 30、Gold 90；结果里返回裁剪后的实际天数）每条作品的平台、发布时间、标题摘录（≤ 120 字）、
+- **读什么**：最近 N 天，用目录条目编号选窗口，不改 `read_source` 的参数结构（它只收 `query`，数据库工具日志也只认 `query`）：
+  目录里按会员窗口列出"我的作品 · 14 天 / 30 天 / 90 天"几个条目（免费不列，Pro 列 14、30，Gold 列 14、30、90），模型选一个编号读；默认用 14 天。补 30 天、90 天和越权编号（Pro 读 90 天返回 `unavailable`）的测试。
+  结果里返回实际天数。读的内容：每条作品的平台、发布时间、标题摘录（≤ 120 字）、
   最新一次快照的指标和取数日期，按发布时间倒序，最多 30 条；`missing_fields` 原样带上，不当 0。代码先算好每个平台的中位数，模型只解读。
 - **不触发实时刷新**：工具只读已存数据，不调用 Post for Me 或 TikHub；最新程度写在结果里（"数据截至 10-16"）。要刷新由用户在作品数据页点"刷新"（PUBLISH-MONITOR 规则）。
 - **没数据时怎么说**（工具返回固定状态码和 `note`，模型照说）：
@@ -145,6 +156,7 @@ Owner 选的选项（原文）："Agent 在自由对话里自己决定检索资�
   流事件的 `dataKind` 用已有的 `keyword_posts` / `account_profile` / `account_posts` / `account_relation`。补测试：两个工具各自成功、确认失败、结果未知、超子调用上限。
 - **代码改动**：`runtimeContext.ts:36, 61-67` 现在要求研究工具只配 `agent-turn-v5-stream` 和导师上下文；改为允许自由对话格式
   （`serial-tools-v6-reasoning`）挂通用研究工具，`researchAdmission.ts` 的准入（总开关、供应商开关、已验证平台、冻结价格、启动门槛、staging 窗口批准）原样复用，
+  研究工具也要像 A2 的 `library_search` 一样接通 v6 请求校验、`historyToolNames` 和 OpenRouter 适配器白名单（`social_search`、`social_account`、`web_search`、`web_fetch`），并补真实请求格式测试。
   全有或全无。`admission.ts`、`execute.ts` 已在 500 行附近，先按工程规范第 3 节拆文件再加逻辑，拆分是行为不变的独立提交。
 
 #### 2.3.2 每条回答的上限和积分
