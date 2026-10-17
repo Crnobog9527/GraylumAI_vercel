@@ -21,12 +21,14 @@ describe('purchase entry', () => {
     expect(checkoutEntryOpen(undefined)).toBe(false);
   });
   it('never takes real money without a published refund policy page (record W)', () => {
-    // No policy page yet: live mode stays closed, a missing mode counts as live, test mode links the FAQ interim.
-    expect(REFUND_POLICY_PATH).toBeNull();
-    expect(checkoutEntryOpen(entry({ mode: 'live' }))).toBe(false);
-    expect(checkoutEntryOpen(entry({ mode: undefined }))).toBe(false);
-    expect(refundPolicyHref({ mode: 'live' })).toBeNull();
-    expect(refundPolicyHref({ mode: 'test' })).toBe('/faq');
+    // The published policy page is /refund and is linked in every mode.
+    expect(REFUND_POLICY_PATH).toBe('/refund');
+    expect(refundPolicyHref({ mode: 'live' })).toBe('/refund');
+    expect(refundPolicyHref({ mode: 'test' })).toBe('/refund');
+    // Without a policy page: live (or a missing mode) gets no link, test mode links the FAQ interim.
+    expect(refundPolicyHref({ mode: 'live' }, null)).toBeNull();
+    expect(refundPolicyHref({ mode: undefined }, null)).toBeNull();
+    expect(refundPolicyHref({ mode: 'test' }, null)).toBe('/faq');
     // Once the Owner's policy page is published its path is used in every mode.
     expect(refundPolicyHref({ mode: 'live' }, '/refund-policy')).toBe('/refund-policy');
     expect(refundPolicyHref({ mode: 'test' }, '/refund-policy')).toBe('/refund-policy');

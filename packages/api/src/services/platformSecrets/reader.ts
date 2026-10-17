@@ -22,6 +22,9 @@ export interface PlatformSecretDeps {
   env?: Record<string, string | undefined>;
   now?: () => number;
   timeoutMs?: number;
+  /** Read the database now, ignoring and not touching the per-instance cache. For paths that authorize a paid
+   * call, so a cleared or replaced key stops working on every instance at once, not after the cache expires. */
+  fresh?: boolean;
 }
 type RpcClient = Pick<SupabaseClient, 'rpc'>;
 
@@ -66,6 +69,7 @@ async function readStored(admin: RpcClient, slot: PlatformSecretSlot, timeoutMs:
 
 /** The admin-stored value (null when not filled), cached for PLATFORM_SECRET_CACHE_MS. */
 async function storedValue(admin: RpcClient, slot: PlatformSecretSlot, deps: PlatformSecretDeps) {
+  if (deps.fresh) return readStored(admin, slot, deps.timeoutMs ?? PLATFORM_SECRET_READ_TIMEOUT_MS);
   const now = deps.now ?? Date.now;
   const hit = cache.get(slot);
   if (hit && now() - hit.at < PLATFORM_SECRET_CACHE_MS) return hit.value;

@@ -1,19 +1,29 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { randomUUID } from 'node:crypto';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { modelRouter } from './model';
 import { settingsRouter } from './settings';
 import { DiagnosticsService } from '../services/diagnostics';
+import { resetPlatformSecretCacheForTests } from '../services/platformSecrets/reader';
+
+beforeEach(() => resetPlatformSecretCacheForTests());
 
 const id = '11111111-1111-4111-8111-111111111111';
 function fixture(role: 'admin' | 'user' = 'admin') {
   const secret = randomUUID() + randomUUID();
   const row = { id, name: 'Synthetic model', model_id: 'synthetic/model', provider: 'openai',
-    api_key: secret, api_endpoint: '', config: {}, is_active: 'true', max_tokens: 1024,
+    api_endpoint: '', config: {}, is_active: 'true', max_tokens: 1024,
     input_limit: 8192, input_token_cost: 1000000, output_token_cost: 1000000 };
   const calls: { admin: boolean; columns: string }[] = [];
+  const secretReads: boolean[] = [];
   function client(admin: boolean) {
-    return { from(table: string) {
+    // ADMIN-SECRETS OR-1: the OpenRouter key comes only from platform_secret_read, which only service role may call.
+    const rpc = (name: string) => ({ abortSignal: async () => {
+      if (name !== 'platform_secret_read') throw new Error('Unexpected rpc: ' + name);
+      secretReads.push(admin);
+      return admin ? { data: secret, error: null } : { data: null, error: { code: '42501' } };
+    } });
+    return { rpc, from(table: string) {
       let single = false;
       let columns = '*';
       const builder: any = {
@@ -54,7 +64,7 @@ function fixture(role: 'admin' | 'user' = 'admin') {
     expect(json).not.toContain(secret.slice(0, 20));
     expect(json).not.toContain(secret.slice(-20));
   }
-  return { context, user, admin, row, secret, calls, noSecret };
+  return { context, user, admin, row, secret, calls, secretReads, noSecret };
 }
 
 describe('B01 model credential boundary', () => {
@@ -63,6 +73,7 @@ describe('B01 model credential boundary', () => {
     // MODEL-IDENTITY-GUARD: name-bearing model procedures are administrator-only.
     await expect(modelRouter.createCaller(f.context).getActiveModels()).rejects.toMatchObject({ code: 'FORBIDDEN' });
     expect(f.calls.every(call => !call.admin && call.columns !== '*' && !call.columns.includes('api_key'))).toBe(true);
+    expect(f.secretReads).toEqual([]);
   });
 
   it('admin lists and eligibility use service role, returning metadata or booleans only', async () => {
@@ -72,7 +83,8 @@ describe('B01 model credential boundary', () => {
       await caller.getConnectionStatus(), await settingsRouter.createCaller(f.context).getSummaryModels()]) f.noSecret(result);
     expect((await caller.getConnectionStatus())[0].hasApiKey).toBe(true);
     expect((await settingsRouter.createCaller(f.context).getSummaryModels())[0].available).toBe(true);
-    expect(f.calls.every(call => call.admin)).toBe(true);
+    expect(f.calls.every(call => call.admin && !call.columns.includes('api_key'))).toBe(true);
+    expect(f.secretReads.every(Boolean)).toBe(true);
   });
 
   it('create, update and legacy config responses omit credentials, including failed provider checks', async () => {
@@ -81,24 +93,24 @@ describe('B01 model credential boundary', () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(f.secret, { status: 401 }));
     try {
       for (const result of [
-        await caller.createModel({ name: f.row.name, modelId: f.row.model_id, provider: 'openai', apiKey: f.secret }),
-        await caller.updateModel({ id, name: f.row.name, apiKey: f.secret }),
+        await caller.createModel({ name: f.row.name, modelId: f.row.model_id, provider: 'openai' }),
+        await caller.updateModel({ id, name: f.row.name, modelId: f.row.model_id }),
         await caller.updateModelConfig({ id, config: {} }),
         await caller.testConnection({ id }),
       ]) f.noSecret(result);
       expect(f.calls.every(call => call.admin)).toBe(true);
+      expect(f.secretReads.every(Boolean)).toBe(true);
     } finally { fetchMock.mockRestore(); }
   });
 
-  it('diagnostic model status reads credentials only through service role', async () => {
+  it('diagnostic model status reads the platform key only through service role', async () => {
     const f = fixture();
     const service = new DiagnosticsService({ supabase: f.user as any, supabaseAdmin: f.admin as any, userId: id });
     const result = (await service.runCategoryTests('ai')).results.find(row => row.testId === 'ai_model_status');
     expect(result?.status).toBe('passed');
     f.noSecret(result);
-    expect(f.calls.filter(call => call.columns.includes('api_key'))).toEqual([
-      { admin: true, columns: 'id, name, model_id, provider, is_active, api_key, config' },
-    ]);
+    expect(f.calls.filter(call => call.columns.includes('api_key'))).toEqual([]);
+    expect(f.secretReads).toEqual([true]);
   });
 
   it('non-admin users cannot call credential-bearing administration paths', async () => {
@@ -106,5 +118,6 @@ describe('B01 model credential boundary', () => {
     await expect(modelRouter.createCaller(f.context).getAvailableModels()).rejects.toMatchObject({ code: 'FORBIDDEN' });
     await expect(settingsRouter.createCaller(f.context).getSummaryModels()).rejects.toMatchObject({ code: 'FORBIDDEN' });
     expect(f.calls).toEqual([]);
+    expect(f.secretReads).toEqual([]);
   });
 });

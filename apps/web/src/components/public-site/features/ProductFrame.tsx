@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { ReactNode } from 'react';
+import { AsDemo } from '@/components/chat-display/display-heading';
 import light from '@/components/design/light-tokens.module.css';
 import { cn } from '@/lib/utils';
 
@@ -23,7 +24,7 @@ export function ProductFrame({ label, caption, className, children }: {
           'text-[var(--gl-text)] sm:p-5', className,
         )}
       >
-        {children}
+        <AsDemo>{children}</AsDemo>
       </div>
       <figcaption className="mt-3 text-center text-xs text-[#8A8A8A]">{caption}</figcaption>
     </figure>

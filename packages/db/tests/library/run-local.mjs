@@ -10,6 +10,7 @@ import { verifySupplement } from './supplement.mjs';
 import { verifyErasure } from './erasure.mjs';
 import { verifyReadyUsage } from './ready-usage.mjs';
 import { verifySearch } from './search.mjs';
+import { verifyRecognition } from './recognition.mjs';
 import { POSTGRES_IMAGE } from '../v3/images.mjs';
 import { buildFromFiles, installPgCronStub } from '../baseline/build-from-files.mjs';
 
@@ -198,6 +199,7 @@ try {
   await verifyErasure(admin, one, 'pdf');
   await verifyReadyUsage(admin, one);
   await verifySearch(admin, one);
+  await verifyRecognition(admin, one, two);
   console.log(JSON.stringify({result:'PASS',steps:report.passed,newMigrationRepeated:true,
     cases:['default-off','concurrent-quota-barrier','idempotent-no-new-token','cross-user-denial','actual-size',
       'atomic-publication','downgrade-read-delete','delete-private-fields','delete-publish-denial','live-token-hold',
