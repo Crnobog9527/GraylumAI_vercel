@@ -29,7 +29,7 @@ import {researchRuntimeRegressionCases} from './research-runtime-regressions.mjs
 import {researchRuntimeCases} from './research-runtime.mjs';
 import {researchRuntimeReadCases} from './research-runtime-reads.mjs';
 import {researchRuntimeWiringCases} from './research-runtime-wiring.mjs';
-import {productionCases} from './production.mjs';
+import {productionCases,productionToolCases} from './production.mjs';
 
 const development = process.argv.slice(2).join(' ')==='--local-only --development';
 if ((!development&&process.argv.slice(2).join(' ')!=='--local-only')||process.env.CI) throw Error('Require --local-only outside CI');
@@ -141,6 +141,7 @@ try {
   await researchRuntimeWiringCases({db,report,createFixture});
   // Last: marks this database as production and pauses enabled windows until it restores them.
   await productionCases({db,Client,connectionString,report,claim});
+  await productionToolCases({db,report,claim});
 } catch (error) {
   report.failed = String(error.stack??error);
   report.databaseError = {code:error.code,detail:error.detail,where:error.where,position:error.position};

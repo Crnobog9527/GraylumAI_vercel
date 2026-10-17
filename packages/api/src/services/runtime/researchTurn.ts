@@ -12,6 +12,8 @@ export const RESEARCH_PHASE = 'research';
 export const RESEARCH_RESULT_RESERVE_BYTES = 24576;
 /** Account namespace of locally priced tool routes; staging windows name their own. */
 export const LOCAL_RESEARCH_ACCOUNT = 'research-local';
+/** RUNTIME-PROD: production has no window; its routes are approved by the research and price settings (SQL 0293). */
+export const PRODUCTION_RESEARCH_ACCOUNT = 'research-production';
 
 const route = z.object({
   platform: z.enum([...SOCIAL_PLATFORMS, 'web']),

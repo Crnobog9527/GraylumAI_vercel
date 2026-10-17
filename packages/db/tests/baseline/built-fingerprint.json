@@ -3494,7 +3494,7 @@
   "fn:runtime_pending_financial_batch(uuid,integer)": "6482836b241f",
   "fn:runtime_positioning_gate(uuid)": "96ee9b81bcd9",
   "fn:runtime_production_access(uuid)": "c9711ad70d32",
-  "fn:runtime_production_allowed(uuid,jsonb,boolean)": "bac88a7752c3",
+  "fn:runtime_production_allowed(uuid,jsonb,boolean)": "93eb569de3f5",
   "fn:runtime_production_database()": "79714495fc44",
   "fn:runtime_production_recovery_policy(uuid,uuid)": "0283b368e41b",
   "fn:runtime_rate_limits_patch(jsonb)": "2c5d14950037",
