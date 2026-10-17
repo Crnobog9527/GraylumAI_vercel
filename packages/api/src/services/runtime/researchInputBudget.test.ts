@@ -7,14 +7,11 @@ import {runtimeAdmissionService} from './admission';
 import {runtimeContext} from './runtimeContext';
 import {openRouterBound} from '../bill2/openRouterPolicy';
 import type {FrozenPaygRun} from '../bill2/service';
-import {toolCallPolicies} from '../bill2/runPolicies';
 import {RESEARCH_PHASE} from './researchTurn';
 import {RESEARCH_TURN_INPUT_BYTES} from './researchAdmission';
 import {DISABLED_RESEARCH_TOOLS,researchToolsConfigSchema} from '../research/vendors/config';
-import {POSITIONING_RESEARCH_TOOLS} from '../research/tools/schemas';
 import {tikhubRouteId} from '../research/vendors/tikhub';
 import {FIRECRAWL_ROUTE} from '../research/vendors/firecrawl';
-import {OPENING_INPUT} from '../../shared/opcQuestions';
 vi.mock('./newWorkGate',async original=>({...await original<typeof import('./newWorkGate')>(),
  ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates}));
 vi.mock('../skills/databaseSource',()=>({databaseSkillSource:()=>({list:async()=>[{revisionId}]})}));
