@@ -90,7 +90,7 @@ export function findPost(slug: string): ArticleContent | undefined {
 export const BLOG_INDEX = {
   path: BLOG_PATH,
   metaTitle: '教程：怎么用 AI 教练做账号',
-  metaDescription: 'Graylum 教程集中放在这里：第一次做账号定位怎么聊，开始发内容之前要想清楚什么，以及每个功能怎么用。文章持续补充，只写已经上线的功能。',
+  metaDescription: 'Graylum 教程集中放在这里：第一次做账号定位怎么聊，开始发内容之前要想清楚什么，以及每个功能怎么用。文章会持续补充，内容只写产品已经有的功能，不夸大、不编造数据。',
   h1: 'Graylum 教程',
   lead: '这里放的是怎么用 AI 教练做账号的教程：先从定位开始，再到选题、写稿和复盘。文章会陆续补充。',
   breadcrumb: CRUMBS.slice(0, 2),

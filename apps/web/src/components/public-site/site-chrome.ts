@@ -38,6 +38,7 @@ export type SiteChrome = {
   updatedLabel: string;
   authorLabel: string;
   breadcrumbLabel: string;
+  mobileNavLabel: string;
   faqTitle: string;
   relatedTitle: string;
   sourcesTitle: string;
@@ -74,6 +75,7 @@ export const SITE_CHROME: Record<SiteLocale, SiteChrome> = {
     updatedLabel: '更新于',
     authorLabel: 'Graylum 编辑团队',
     breadcrumbLabel: '当前位置',
+    mobileNavLabel: '主导航',
     faqTitle: '常见问题',
     relatedTitle: '继续阅读',
     sourcesTitle: '资料来源',
@@ -104,6 +106,7 @@ export const SITE_CHROME: Record<SiteLocale, SiteChrome> = {
     updatedLabel: '更新於',
     authorLabel: 'Graylum 編輯團隊',
     breadcrumbLabel: '目前位置',
+    mobileNavLabel: '主選單',
     faqTitle: '常見問題',
     relatedTitle: '延伸閱讀',
     sourcesTitle: '資料來源',
