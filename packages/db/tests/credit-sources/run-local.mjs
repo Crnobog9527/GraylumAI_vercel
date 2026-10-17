@@ -255,12 +255,16 @@ try {
   const cleanGrant = await period(clean2, 300, -60 * 24 * hour, -30 * 24 * hour, 100);
   const spentPack = (await pack(spent, 100, 'method-package:', iso(-hour))).order;
   await reserve(spent, 10);
+  const adjusted = await profile(0);
+  const adjustedPack = (await pack(adjusted, 100)).order;
+  await c.query("SELECT * FROM atomic_apply_credit_ledger_entry($1::uuid,-5,'deduction','Synthetic admin deduction',$2)", [adjusted, 'test-admin:' + adjusted]);
   await c.query(read(migrationPath));
   const reviewed = async (kind, id) => v('SELECT count(*)::int v FROM credit_source_reviews WHERE source_kind=$1 AND source_id=$2', [kind, id]);
   const sourceOf = order => v('SELECT id v FROM credit_package_sources WHERE order_id=$1', [order]);
   assert.equal(await reviewed('credit_package', await sourceOf(cleanPack)), 0);
   assert.equal(await reviewed('subscription_grant', cleanGrant.grant), 0);
   assert.equal(await reviewed('credit_package', await sourceOf(spentPack)), 1, 'spent outside a period after the pack: source unknown');
+  assert.equal(await reviewed('credit_package', await sourceOf(adjustedPack)), 1, 'an order-less deduction after the pack: source unknown');
   // A source unknown is never consumed and stays inside the unattributed balance.
   const before2 = await v('SELECT consumed_amount v FROM credit_package_sources WHERE order_id=$1', [spentPack]);
   await reserve(spent, 50);
