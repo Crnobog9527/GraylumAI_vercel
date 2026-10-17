@@ -95,14 +95,17 @@ describe("stored cards", () => {
 describe("stored benchmark rows", () => {
   const stored = (account: string, extra: Partial<StoredBenchmark> = {}): StoredBenchmark => ({
     platform: "douyin", account, followers: 38200, medianViews: null, engagementRate: 0.05, postsPerWeek: 3,
-    lastPublishedAt: "2026-10-13T10:00:00Z", category: "imitable", qualified: true, fetchedAt: "2026-10-15T08:00:00Z", ...extra,
+    lastPublishedAt: "2026-10-13T10:00:00Z", category: "imitable", qualified: true, fetchedAt: "2026-10-15T08:00:00Z",
+    refs: { followers: [`ev-${account}#1`], medianViews: [], engagementRate: [`ev-${account}#2`], postsPerWeek: [`ev-${account}#2`],
+      lastPublishedAt: [`ev-${account}#2`] }, ...extra,
   });
 
-  it("keeps nulls missing, cites no source without refs and reports the newest fetch", () => {
+  it("keeps nulls missing, carries each number's refs and reports the newest fetch", () => {
     const { rows, fetchedAt } = toBenchmarkRows([stored("a"), stored("b", { fetchedAt: "2026-10-16T09:30:00Z", qualified: false,
       category: null, followers: null })]);
     expect(rows[0]!.metrics.medianViews).toEqual({ value: null, refs: [] });
-    expect(rows[0]!.metrics.followers).toEqual({ value: 38200, refs: [] });
+    expect(rows[0]!.metrics.followers).toEqual({ value: 38200, refs: ["ev-a#1"] });
+    expect(rows[0]!.metrics.lastPublishedAt.refs).toEqual(["ev-a#2"]);
     expect(rows[1]!.metrics.followers.value).toBeNull();
     expect(rows.map(row => [row.account, row.qualified, row.category])).toEqual([["a", true, "imitable"], ["b", false, null]]);
     expect(fetchedAt).toBe("2026-10-16T09:30:00.000Z");

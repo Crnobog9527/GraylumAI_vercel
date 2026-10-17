@@ -68,7 +68,9 @@ const option = (n: number) => ({ id: `c${n}`, platform: "douyin", account: `samp
 const benchmark = (account: string, extra: Record<string, unknown> = {}) => ({
   platform: "douyin", account, followers: 38200, medianViews: 52000, engagementRate: 0.0634, postsPerWeek: 4.2,
   lastPublishedAt: "2026-10-13T10:00:00Z", postsAnalyzed: 24, category: "imitable", qualified: true, excluded: null,
-  fetchedAt: "2026-10-15T08:00:00Z", ...extra,
+  fetchedAt: "2026-10-15T08:00:00Z",
+  refs: { followers: [`${account}-op#1`], medianViews: [`${account}-op#2`], engagementRate: [`${account}-op#2`],
+    postsPerWeek: [`${account}-op#2`], lastPublishedAt: [`${account}-op#2`] }, ...extra,
 });
 
 for (const width of [375, 1440]) {
@@ -101,7 +103,9 @@ for (const width of [375, 1440]) {
           data = { cardId: KEYWORD_CARD, confirmationId: CONFIRMATION, kind: "keywords", items: ["职场穿搭"] };
         } else if (url.pathname.endsWith("/research.benchmarks")) data = { items: [
           benchmark("sample_1"),
-          benchmark("sample_2", { medianViews: null, engagementRate: null, fetchedAt: "2026-10-16T09:30:00Z" }),
+          benchmark("sample_2", { medianViews: null, engagementRate: null,
+            refs: { followers: ["sample_2-op#1"], medianViews: [], engagementRate: [], postsPerWeek: ["sample_2-op#2"],
+              lastPublishedAt: ["sample_2-op#2"] }, fetchedAt: "2026-10-16T09:30:00Z" }),
           benchmark("sample_head", { followers: 2_350_000, category: "head_reference", qualified: false }),
         ] };
         await route.fulfill({ contentType: "application/json", body: JSON.stringify({ result: { data } }) });
@@ -134,6 +138,9 @@ for (const width of [375, 1440]) {
       await ui(table).toContainText("头部参考");
       await ui(table).toContainText("生成定位报告需要至少 3 个合格的对标账号，目前 2 个");
       await ui(table).toContainText("取数时间：");
+      // Each number cites a source number; the missing ones cite none; sources are listed below the table.
+      await ui(table.getByRole("list", { name: "数据来源" })).toContainText("[1]");
+      await ui(table.locator("tr").filter({ hasText: "sample_2" }).locator("td").nth(1)).not.toContainText("[");
       expect(await table.getByRole("button", { name: /刷新/ }).count()).toBe(0);
 
       // Live search rows of a turn: running, then settled with the user's credits.
