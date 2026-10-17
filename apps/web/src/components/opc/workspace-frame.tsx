@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { BookOpen, ChevronDown, Ellipsis, Grid2X2, LogOut, Menu, PanelRightClose, Pencil, Pin, Sparkles, UserRound, X } from 'lucide-react';
+import { BookOpen, Grid2X2, LogOut, Menu, PanelRightClose, Sparkles, UserRound, X } from 'lucide-react';
 import { trpc } from '@/trpc/client';
 import { useCreditsBalance } from '@/hooks/use-credits';
 import { createClient } from '@/lib/supabase';
@@ -20,6 +20,10 @@ import { useConversationErasure } from '@/hooks/use-conversation-erasure';
 import { useContentErasureSync } from '@/hooks/use-content-erasure';
 import type { ContentErasureTarget } from '@/lib/content-erasure';
 import { QueryNotice } from './query-notice';
+import {
+ AnnouncementBar, GlobalHeader, RailAccount, RailBottom, RailEmpty, RailGroup, RailHistory, RailNotices, RailOlder, RailStrategyRow, RailView,
+ RailWorkThread,
+} from './rail-view';
 import { useAccountDiscussion } from './use-account-discussion';
 import styles from './workspace-frame.module.css';
 
@@ -181,37 +185,28 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
   try{await changeAccountUi.mutateAsync(frozen);sessionStorage.removeItem(key);await library.refetch();setRenameAccountId('');}
   catch(cause){const code=cause instanceof Error?cause.message:'';if(['OPC_VERSION_CONFLICT','OPC_REQUEST_CONFLICT','OPC_DENIED','OPC_LIBRARY_INVALID'].includes(code)){sessionStorage.removeItem(key);await library.refetch();setUiError('账号名称未保存（'+code+'）。请核对最新状态。');}else setUiError('账号名称保存结果待核实；原请求已保留，请用同一名称恢复。');}
  }
- function recordMenu(item:Item){return <div className={styles.threadRow} key={item.workItemId}>
-  {renameId===item.workItemId?<div className={styles.renameThread}><input className={styles.inlineRename} autoFocus aria-label="重命名对话" maxLength={160} value={renameValue} onChange={event=>setRenameValue(event.target.value)} onKeyDown={event=>{if(event.key==='Escape')setRenameId('');if(event.key==='Enter'&&renameValue.trim())void changeRecord(item,'rename',renameValue.trim());}}/><small>{item.lastActivityAt?new Date(item.lastActivityAt).toLocaleDateString('zh-CN'):''} · 工作对话</small></div>:<Link className={styles.thread} aria-current={activeWorkItemId===item.workItemId?'page':undefined} href={'/runtime?session='+item.sessionId}><span>{item.pinned&&<Pin size={12} aria-label="已置顶"/>}{item.chatName??item.title}</span><small>{item.lastActivityAt?new Date(item.lastActivityAt).toLocaleDateString('zh-CN'):''} · 工作对话</small></Link>}
-  <button className={styles.more} aria-label={(item.chatName??item.title)+'的更多操作'} aria-expanded={menuId===item.workItemId} onClick={event=>openRowMenu(event,item.workItemId)}><Ellipsis size={17}/></button>
-  {menuId===item.workItemId&&<div className={styles.workMenu} style={menuPosition} role="menu"><button role="menuitem" onClick={()=>{setRenameId(item.workItemId);setRenameValue(item.chatName??item.title);setMenuId('');}}>重命名</button>{archiveView?<button role="menuitem" onClick={()=>void changeRecord(item,'restore')}>恢复归档</button>:<><button role="menuitem" onClick={()=>void changeRecord(item,item.pinned?'unpin':'pin')}>{item.pinned?'取消置顶':'置顶'}</button><button role="menuitem" onClick={()=>void changeRecord(item,'archive')}>归档</button></>}<button role="menuitem" className={styles.danger} onClick={()=>{if(confirmDelete===item.workItemId)void changeRecord(item,'delete');else setConfirmDelete(item.workItemId);}}>{confirmDelete===item.workItemId?'确认从列表移除（内容不删除）':'从列表移除'}</button>
-   <button role="menuitem" className={styles.danger}
-    onClick={()=>{setMenuId('');setDeletingConversation({id:item.sessionId,name:(item.chatName??item.title)+' · 对话记录'});}}>
-    永久删除对话记录</button>
-   <button role="menuitem" className={styles.danger} onClick={()=>startErasure('artifact',item.workItemId,item.title+' · 稿件与成果')}>
-    永久删除稿件与成果</button></div>}
- </div>}
+ function recordMenu(item:Item){
+  const name=item.chatName??item.title,open=menuId===item.workItemId;
+  return <RailWorkThread key={item.workItemId} sessionId={item.sessionId} name={name} pinned={item.pinned}
+   dateLabel={item.lastActivityAt?new Date(item.lastActivityAt).toLocaleDateString('zh-CN'):''} active={activeWorkItemId===item.workItemId}
+   renaming={renameId===item.workItemId} renameValue={renameValue} onRenameValue={setRenameValue} onCancelRename={()=>setRenameId('')}
+   onSaveRename={()=>void changeRecord(item,'rename',renameValue.trim())} menuOpen={open} menuPosition={menuPosition}
+   onOpenMenu={event=>openRowMenu(event,item.workItemId)} archiveView={archiveView} confirming={confirmDelete===item.workItemId}
+   onRename={()=>{setRenameId(item.workItemId);setRenameValue(name);setMenuId('');}}
+   onPin={()=>void changeRecord(item,item.pinned?'unpin':'pin')} onArchive={()=>void changeRecord(item,'archive')}
+   onRestore={()=>void changeRecord(item,'restore')}
+   onRemove={()=>{if(confirmDelete===item.workItemId)void changeRecord(item,'delete');else setConfirmDelete(item.workItemId);}}
+   onDeleteConversation={()=>{setMenuId('');setDeletingConversation({id:item.sessionId,name:name+' · 对话记录'});}}
+   onDeleteArtifact={()=>startErasure('artifact',item.workItemId,item.title+' · 稿件与成果')}/>;
+ }
 
  return <div className={styles.workspace}>
-  <header className={styles.global}>
-   <Link href="/" className={styles.brand}><img src="/graylum-logo.png" alt="" />Graylum</Link>
-   <button type="button" className={styles.mobileGlobalMenu} aria-label="打开导航" onClick={()=>setMobileNav(true)}><Grid2X2 size={17}/></button>
-   <nav aria-label="全局导航"><Link href="/">首页</Link><Link href="/positioning" aria-current={area==='chat'||area==='topics'||area==='start'?'page':undefined}>对话</Link><Link href="/profile">个人中心</Link></nav>
-  </header>
-  {noticeOpen&&<div className={styles.announcement}>{notice&&<span>{notice}</span>}<Sparkles size={15}/><strong>让好想法，继续向前。</strong><Link href={'/workbench/marketplace'+returnParam}>探索创作功能</Link><button aria-label="关闭公告" onClick={()=>setNoticeOpen(false)}><X size={15}/></button></div>}
+  <GlobalHeader area={area} onOpenNav={()=>setMobileNav(true)}/>
+  {noticeOpen&&<AnnouncementBar notice={notice} returnParam={returnParam} onClose={()=>setNoticeOpen(false)}/>}
   <div className={[styles.shell,right&&rightOpen?styles.withRight:'',mobileNav?styles.navOpen:'',mobileRight?styles.mobileRightOpen:'',!noticeOpen?styles.noNotice:''].join(' ')}>
-   <aside className={styles.rail} aria-label="工作区导航">
-    <div className={styles.railMobile}><button aria-label="关闭导航" onClick={()=>setMobileNav(false)}>关闭工作列表</button></div>
-    <Link className={styles.newConversation} href="/positioning"><img className={styles.newConversationIcon} src="/opc-reference/new-chat.svg" alt=""/>新对话</Link>
-    <nav className={styles.railNav} aria-label="工作区功能">
-     <Link href={'/workbench/marketplace'+returnParam} aria-current={area==='marketplace'?'page':undefined}><img className={styles.navIcon} src="/opc-reference/squares-four.svg" alt=""/>功能广场</Link>
-     <Link href={'/workbench/search'+returnParam} aria-current={area==='search'?'page':undefined}><img className={styles.navIcon} src="/opc-reference/magnifying-glass.svg" alt=""/>搜索</Link>
-     <Link href={'/library'+returnParam} aria-current={area==='library'?'page':undefined}><img className={styles.navIcon} src="/opc-reference/books.svg" alt=""/>资料库</Link>
-     <button disabled><img className={styles.navIcon} src="/opc-reference/calendar-blank.svg" alt=""/>发布排期 <small>待接入</small></button>
-     <button disabled><img className={styles.navIcon} src="/opc-reference/chart-bar.svg" alt=""/>数据复盘 <small>待接入</small></button>
-    </nav>
-    <div ref={historyRef} className={styles.history} aria-label="平台、账号与工作" onPointerDownCapture={takeSidebarControl} onWheelCapture={takeSidebarControl} onTouchStartCapture={takeSidebarControl} onKeyDownCapture={takeSidebarControl} onScroll={()=>{setMenuId('');if(!restoringScroll.current&&pendingScroll.current===null)saveSidebar();}}>
-    <div className={styles.historyHead}><span>{archiveView?'归档记录':'平台 · 账号 · 工作'}</span><button onClick={()=>setArchiveView(value=>!value)}>{archiveView?'返回最近工作':'查看归档'}</button></div>
+   <RailView area={area} returnParam={returnParam} onCloseMobile={()=>setMobileNav(false)}>
+    <RailHistory historyRef={historyRef} archiveView={archiveView} onToggleArchive={()=>setArchiveView(value=>!value)} onControl={takeSidebarControl}
+     onScroll={()=>{setMenuId('');if(!restoringScroll.current&&pendingScroll.current===null)saveSidebar();}}>
      {[...platforms].map(([platform,accounts])=>{
       const visible=accounts.map(account=>{
        const showStrategy=Boolean(account.strategyDraftId);
@@ -219,39 +214,52 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
         .sort((a,b)=>Number(Boolean(b.pinned))-Number(Boolean(a.pinned))||(b.lastActivityAt??'').localeCompare(a.lastActivityAt??''))};})
        .filter(row=>archiveView?row.items.length:true);
       if(!visible.length)return null;
-      return <details key={platform} open={groupOpen['platform:'+platform]??true} onToggle={event=>{const next=event.currentTarget.open;setGroupOpen(current=>current['platform:'+platform]===next?current:{...current,['platform:'+platform]:next});}}>
-       <summary>{platform}<ChevronDown size={14}/></summary>
+      return <RailGroup key={platform} title={platform} open={groupOpen['platform:'+platform]??true}
+       onToggle={next=>setGroupOpen(current=>current['platform:'+platform]===next?current:{...current,['platform:'+platform]:next})}>
        {visible.map(({account,items,showStrategy})=>{
         const shown=expanded.includes(account.projectId)?items:items.slice(0,6);
-        return <details key={account.projectId} open={groupOpen['account:'+account.projectId]??true} onToggle={event=>{const next=event.currentTarget.open;setGroupOpen(current=>current['account:'+account.projectId]===next?current:{...current,['account:'+account.projectId]:next});}} className={styles.account}>
-         <summary>{renameAccountId===account.projectId?<input className={styles.accountRename} aria-label="重命名账号" maxLength={120} autoFocus value={renameAccountValue} onClick={event=>event.stopPropagation()} onChange={event=>setRenameAccountValue(event.target.value)} onKeyDown={event=>{event.stopPropagation();if(event.key==='Escape')setRenameAccountId('');if(event.key==='Enter')void renameAccount(account);}}/>:<span>{account.displayName??account.account}</span>}<button type="button" aria-label={renameAccountId===account.projectId?'保存账号名称':'重命名账号 '+(account.displayName??account.account)} onClick={event=>{event.preventDefault();event.stopPropagation();if(renameAccountId===account.projectId)void renameAccount(account);else{setRenameAccountId(account.projectId);setRenameAccountValue(account.displayName??account.account);}}}>{renameAccountId===account.projectId?'✓':<Pencil size={14}/>}</button><ChevronDown size={13}/></summary>
-         {showStrategy&&account.strategyDraftId?<div className={styles.strategyRow}>{account.sourceVersionId?<button type="button" className={styles.strategy} onClick={()=>setStrategyAccount(account)}><span><Pin size={12}/>定位策略</span><small>{account.sourceVersion?`当前 v${account.sourceVersion}`:'已确认'} · {account.displayName??account.account}{reviewNote(account.strategyDraftId)}</small></button>:<Link className={styles.strategy} href={'/positioning/'+account.strategyDraftId}><span><Pin size={12}/>定位策略</span><small>进行中 · {account.displayName??account.account}{reviewNote(account.strategyDraftId)}</small></Link>}<button type="button" className={styles.strategyMore} aria-label="定位策略的更多操作" aria-expanded={menuId==='strategy:'+account.projectId} onClick={event=>{menuTrigger.current=event.currentTarget;const rect=event.currentTarget.getBoundingClientRect();setMenuPosition({top:Math.max(8,Math.min(window.innerHeight-130,rect.bottom+4)),left:Math.max(8,Math.min(window.innerWidth-186,rect.right-178))});setMenuId(current=>current==='strategy:'+account.projectId?'':'strategy:'+account.projectId);}}>···</button>{menuId==='strategy:'+account.projectId&&<div className={styles.workMenu} style={menuPosition} role="menu">{account.sourceVersionId&&<button role="menuitem" onClick={()=>{setMenuId('');setStrategyAccount(account);}}>查看或修改定位</button>}{account.sourceVersionId?<button role="menuitem" disabled={discussion.opening} onClick={()=>void discussion.open(account.projectId,()=>setMenuId(''))}>{discussion.opening?'正在打开…':'回到策略讨论'}</button>:<Link role="menuitem" href={'/positioning/'+account.strategyDraftId}>回到策略讨论</Link>}</div>}</div>:!account.strategyDraftId?<p className={styles.empty}>定位策略待建立</p>:null}
+        const accountName=account.displayName??account.account,renaming=renameAccountId===account.projectId;
+        return <RailAccount key={account.projectId} name={accountName} open={groupOpen['account:'+account.projectId]??true}
+         onToggle={next=>setGroupOpen(current=>current['account:'+account.projectId]===next?current:{...current,['account:'+account.projectId]:next})}
+         renaming={renaming} renameValue={renameAccountValue} onRenameValue={setRenameAccountValue}
+         onStartRename={()=>{setRenameAccountId(account.projectId);setRenameAccountValue(accountName);}}
+         onSaveRename={()=>void renameAccount(account)} onCancelRename={()=>setRenameAccountId('')}>
+         {showStrategy&&account.strategyDraftId?<RailStrategyRow draftId={account.strategyDraftId} accountName={accountName}
+          confirmed={Boolean(account.sourceVersionId)} statusLabel={account.sourceVersion?`当前 v${account.sourceVersion}`:'已确认'}
+          reviewNote={reviewNote(account.strategyDraftId)} onOpen={()=>setStrategyAccount(account)}
+          menuOpen={menuId==='strategy:'+account.projectId} menuPosition={menuPosition}
+          onOpenMenu={event=>{menuTrigger.current=event.currentTarget;const rect=event.currentTarget.getBoundingClientRect();setMenuPosition({top:Math.max(8,Math.min(window.innerHeight-130,rect.bottom+4)),left:Math.max(8,Math.min(window.innerWidth-186,rect.right-178))});setMenuId(current=>current==='strategy:'+account.projectId?'':'strategy:'+account.projectId);}}
+          onView={()=>{setMenuId('');setStrategyAccount(account);}} opening={discussion.opening}
+          onBackToDiscussion={()=>void discussion.open(account.projectId,()=>setMenuId(''))}/>:!account.strategyDraftId?<RailEmpty>定位策略待建立</RailEmpty>:null}
          {shown.map(recordMenu)}
-         {shown.length<items.length&&<button className={styles.older} onClick={()=>setExpanded(current=>[...current,account.projectId])}>查看更早 {items.length-shown.length} 项</button>}
-        </details>;
+         {shown.length<items.length&&<RailOlder count={items.length-shown.length} onClick={()=>setExpanded(current=>[...current,account.projectId])}/>}
+        </RailAccount>;
        })}
-      </details>;
+      </RailGroup>;
      })}
      {!archiveView&&<QueryNotice error={conversations.error} loading={conversations.isPending} label="对话记录" retry={()=>conversations.refetch()}/>}
-     {!archiveView&&visibleConversations.length>0&&<details open={groupOpen.conversations??true} onToggle={event=>{const next=event.currentTarget.open;setGroupOpen(current=>current.conversations===next?current:{...current,conversations:next});}}><summary>对话<ChevronDown size={14}/></summary>{visibleConversations.map(conversation=><ConversationRow key={conversation.sessionId}
+     {!archiveView&&visibleConversations.length>0&&<RailGroup title="对话" open={groupOpen.conversations??true} onToggle={next=>setGroupOpen(current=>current.conversations===next?current:{...current,conversations:next})}>{visibleConversations.map(conversation=><ConversationRow key={conversation.sessionId}
       conversation={conversation} menuOpen={menuId==='conversation:'+conversation.sessionId} menuPosition={menuPosition}
       onOpenMenu={event=>openRowMenu(event,'conversation:'+conversation.sessionId)} onCloseMenu={()=>setMenuId('')}
       onDelete={()=>setDeletingConversation({id:conversation.sessionId,
-       name:conversationRename.titleOf(conversation.sessionId,conversation.title)})} rename={conversationRename}/>)}</details>}
-     {!archiveView&&unassigned.length>0&&<details open={groupOpen.unassigned??true} onToggle={event=>{const next=event.currentTarget.open;setGroupOpen(current=>current.unassigned===next?current:{...current,unassigned:next});}}><summary>待归类<ChevronDown size={14}/></summary>{unassigned.map(draft=><DraftRow key={draft.draftId} draft={draft} review={draftMark(reviewMarks.get(draft.draftId))?.label}
+       name:conversationRename.titleOf(conversation.sessionId,conversation.title)})} rename={conversationRename}/>)}</RailGroup>}
+     {!archiveView&&unassigned.length>0&&<RailGroup title="待归类" open={groupOpen.unassigned??true} onToggle={next=>setGroupOpen(current=>current.unassigned===next?current:{...current,unassigned:next})}>{unassigned.map(draft=><DraftRow key={draft.draftId} draft={draft} review={draftMark(reviewMarks.get(draft.draftId))?.label}
       menuOpen={menuId==='draft:'+draft.draftId} menuPosition={menuPosition} onCloseMenu={()=>setMenuId('')}
       onOpenMenu={event=>openRowMenu(event,'draft:'+draft.draftId)}
       onDeleteConversation={(id,name)=>setDeletingConversation({id,name,related:[draft.draftId]})}
-      onDeleteDraft={(id,name)=>startErasure('artifact',id,name+' · 稿件与成果',[draft.draftId,...(draft.topicSessionId?[draft.topicSessionId]:[])])}/>)}</details>}
+      onDeleteDraft={(id,name)=>startErasure('artifact',id,name+' · 稿件与成果',[draft.draftId,...(draft.topicSessionId?[draft.topicSessionId]:[])])}/>)}</RailGroup>}
      <QueryNotice error={library.error||drafts.error} loading={library.isPending||drafts.isPending} label="账号与资料" retry={()=>Promise.all([library.refetch(),drafts.refetch()])}/>
      {library.isSuccess&&drafts.isSuccess&&!library.error&&!drafts.error&&(!archiveView&&!platforms.size&&!unassigned.length||archiveView&&![...platforms.values()].flat().some(account=>account.items.some(item=>item.archived&&!item.deleted)))&&<p className={styles.empty}>{archiveView?'暂无归档记录。':'完成定位并采用选题后，账号工作会出现在这里。'}</p>}
-    </div>
-    {discussion.error&&<p role="alert" className={styles.uiError}>{discussion.error}</p>}{uiError&&<p role="alert" className={styles.uiError}>{uiError}</p>}
-    {conversationRename.error&&<p role="alert" className={styles.uiError}>{conversationRename.error}</p>}
-    {conversationErasure.notice&&<p role={conversationErasure.notice.tone==='error'?'alert':'status'} className={styles.uiError}>
-     {conversationErasure.notice.text}</p>}
-    <div className={styles.railBottom}><div className={styles.creditWidget}><button type="button" onClick={event=>{setFeedbackSent(false);openBottomPanel('feedback',event.currentTarget);}}><img className={styles.navIcon} src="/opc-reference/feedback.svg" alt=""/>在线反馈<img className={styles.externalIcon} src="/opc-reference/arrow-up-right.svg" alt=""/></button><button type="button" aria-expanded={bottomPanel==='credits'} onClick={event=>openBottomPanel('credits',event.currentTarget)}><img className={styles.navIcon} src="/opc-reference/wallet-color.svg" alt=""/>积分 <small>{credits.status==='ready'?credits.credits:'查看'}</small></button></div><button type="button" className={styles.profile} aria-expanded={bottomPanel==='profile'} onClick={event=>openBottomPanel('profile',event.currentTarget)}><span className={styles.avatar}>{(profile.data?.nickname??profile.data?.email??'我').slice(0,1)}</span><span>{profile.data?.nickname??profile.data?.email??'个人中心'}<small>{membershipText(profile,'普通会员','查看账户')}</small></span><ChevronDown size={14}/></button></div>
-   </aside>
+    </RailHistory>
+    <RailNotices items={[discussion.error&&{text:discussion.error,role:'alert' as const},uiError&&{text:uiError,role:'alert' as const},
+     conversationRename.error&&{text:conversationRename.error,role:'alert' as const},
+     conversationErasure.notice&&{text:conversationErasure.notice.text,role:conversationErasure.notice.tone==='error'?'alert' as const:'status' as const}].filter(Boolean) as Array<{text:string;role:'alert'|'status'}>}/>
+    <RailBottom creditsLabel={credits.status==='ready'?credits.credits:'查看'} creditsOpen={bottomPanel==='credits'} profileOpen={bottomPanel==='profile'}
+     avatar={(profile.data?.nickname??profile.data?.email??'我').slice(0,1)} name={profile.data?.nickname??profile.data?.email??'个人中心'}
+     membership={membershipText(profile,'普通会员','查看账户')}
+     onFeedback={event=>{setFeedbackSent(false);openBottomPanel('feedback',event.currentTarget);}} onCredits={event=>openBottomPanel('credits',event.currentTarget)}
+     onProfile={event=>openBottomPanel('profile',event.currentTarget)}/>
+   </RailView>
    <section className={styles.center}>
    {right&&<button type="button" className={styles.mobileRightToggle} aria-label="展开右边栏" onClick={()=>{if(!rightOpen)onToggleRight?.();setMobileRight(true);}}><PanelRightClose size={18}/></button>}
    <div className={styles.mobileBar}><button aria-label="打开导航" onClick={()=>setMobileNav(true)}><Menu size={19}/></button><span>Graylum · 工作区</span>{right&&<button onClick={()=>{if(!rightOpen)onToggleRight?.();setMobileRight(true);}} aria-label="打开成果"><BookOpen size={18}/></button>}</div>

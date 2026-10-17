@@ -86,7 +86,9 @@ const CASCADE: AdoptProposed['diff']['cascade'] = [
  */
 export function mockPropose(sections: readonly DetailSection[], choices: readonly AdoptChoice[]): AdoptProposed | AdoptRecorded {
   const adopted = choices.filter(item => item.use === 'revised').map(item => item.section);
-  const kept = choices.filter(item => item.use === 'original').map(item => item.section);
+  // Like the server, every chapter not adopted counts as kept, unchanged ones included; the summary's whole-text entry
+  // ("全文", WHOLE_DOCUMENT in jury-report) is not a chapter.
+  const kept = sections.filter(item => item.section !== '全文' && !adopted.includes(item.section)).map(item => item.section);
   if (adopted.length === 0) return { state: 'recorded', versionId: null, adopted, kept };
   const seen = new Set<string>();
   const changes = sections.filter(item => adopted.includes(item.section)).flatMap(item => item.fields)

@@ -61,12 +61,13 @@ PGDLLEXPORT void b1b_proof_main(Datum arg) {
   PushActiveSnapshot(GetTransactionSnapshot());
   SPI_connect();
   if (active) {
-    if (SPI_execute("INSERT INTO agent_confirmed_preferences(actor_id,scope_key,name,value,version,active,source) "
-        "SELECT actor,'user','worker','late private preference',1,true,'explicit_user_confirmation' "
-        "FROM b1b_worker_fixture", false, 0) != SPI_OK_INSERT) elog(ERROR, "late preference write failed");
     if (SPI_execute("INSERT INTO runtime_sessions(actor_id,scope,start_request_id,start_payload) "
         "SELECT actor,'{\"kind\":\"worker_test\"}',gen_random_uuid(),'{\"private\":\"late body\"}' "
         "FROM b1b_worker_fixture", false, 0) != SPI_OK_INSERT) elog(ERROR, "late runtime write failed");
+    /* Content channel: a late private conversation name (0271 dropped the former preference table). */
+    if (SPI_execute("INSERT INTO runtime_session_names(session_id,actor_id,name) "
+        "SELECT s.id,s.actor_id,'late private name' FROM runtime_sessions s JOIN b1b_worker_fixture f ON f.actor=s.actor_id",
+        false, 0) != SPI_OK_INSERT) elog(ERROR, "late name write failed");
   }
   SPI_finish();
   PopActiveSnapshot();
