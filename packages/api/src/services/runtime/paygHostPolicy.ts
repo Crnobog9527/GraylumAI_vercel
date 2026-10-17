@@ -18,6 +18,10 @@ const admittedRoutes: Readonly<Record<string,string>> = {
   'anthropic/claude-sonnet-5.5':'anthropic',
   'google/gemini-3.8-flash':'google-ai-studio',
   'openai/gpt-6-luna':'openai',
+  // FUSION-REVIEW panel (Owner 2026-10-17): Sol as a reviewer, Opus as the summary. A route here only allows
+  // a profile; admission still needs a profile entry with evidence for the purpose, format and reasoning.
+  'openai/gpt-6.1-sol':'openai',
+  'anthropic/claude-opus-5.5':'anthropic',
 };
 // fusion_review / fusion_summary: FUSION-REVIEW per-model calls, claimed only as a billing group (0234).
 const phase = z.enum(['ordinary', 'skill', 'organizer', 'skill_matching', 'attached_organizer', 'report',

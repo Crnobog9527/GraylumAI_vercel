@@ -95,6 +95,22 @@ it('staging-shaped profile (no v2) rejects old free chat and admits v6 + low; un
  await expect(read('serial-tools-v6-reasoning',{effort:'low'},{...f.policy,model:'openai/gpt-6.1-sol',
   providerLimits:{...f.policy.providerLimits!,providerSlug:'openai'}})).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
 });
+it('admits the Fusion panel routes only on their evidenced route; other models stay denied',async()=>{
+ const read=async(model:string,endpointTag:string)=>{
+  const f=fixture();
+  f.profile.model=model;f.profile.endpointTag=endpointTag;
+  f.profile.purposes=['fusion_review','fusion_summary'];f.profile.requestFormats=['fusion-json-v1-stream'];
+  f.profile.reasoningVariants=[{...f.profile.reasoningVariants[0]!,reasoning:{effort:'low'}}];
+  const policy={...f.policy,model,providerLimits:{...f.policy.providerLimits!,providerSlug:endpointTag}};
+  return readPaygHostPolicies(f.db as unknown as SupabaseClient,f.window,[policy],
+   [{modelId:id,phase:'fusion_review',outputLimit:4096,requestFormat:'fusion-json-v1-stream',reasoning:{effort:'low'}}],env);
+ };
+ expect(await read('openai/gpt-6.1-sol','openai')).toHaveLength(1);
+ expect(await read('anthropic/claude-opus-5.5','anthropic')).toHaveLength(1);
+ await expect(read('openai/gpt-6.1-sol','azure')).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
+ await expect(read('anthropic/claude-opus-5.5','amazon-bedrock')).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
+ await expect(read('qwen/qwen3.8-max-0902','alibaba')).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
+});
 it('requires profile validity through the frozen execution deadline',async()=>{
  const f=fixture();f.profile.expiresAt='2098-01-01T00:00:00Z';
  await expect(f.run()).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
