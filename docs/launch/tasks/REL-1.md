@@ -137,7 +137,7 @@ Owner 2026-10-17 选 A（原话见第 6 节）：**日期不变，10-25 冻结**
 | --- | --- | --- | --- | --- | --- | --- |
 | A1 | 升级 Vercel Pro | 正式运营要用；Hobby 单次函数 300 秒、定时任务每天一次，不够 A2 用 | Owner 操作（付费） | — | Vercel 账单页显示 Pro；正式项目的函数时长上限读回 | Master Plan 第 1237 行、第 7.6 节第 2491 行 |
 | A2 | 改 `apps/web/vercel.json` 定时任务频率：新增 `/api/cron/runtime-recovery`（分钟级）；`account-erasure` 和 `library-cleanup` 每 5 分钟（Master Plan 要求注销兜底至少每小时一次，LIB_DOCS_PLAN 要求两者一起改成每 5 分钟，取更严的 5 分钟）；`social-monitor` 每 10 分钟 | 删除后 24 小时内清完（T_online）；超时回合自动收口退回；资料库清理；作品数据刷新容量 | 执行窗口开 PR | A1；Vercel 正式环境已有 `CRON_SECRET`（N11，`apps/web/src/lib/cron-auth.ts` 没有它就拒绝全部定时请求）；`runtime-recovery` 路由已在 staging，但 `vercel.json` 里还没有这一条 | **24 小时删除承诺的积压演练（上线前门槛）**：在 Pro 频率（每 5 分钟）下做一次资料库清理积压测试，覆盖并发删除、存储删除失败重试、晚到的签名对象和告警阈值，结果记录在 PR 上；只看 HTTP 200 不能证明 24 小时内清完（LIB_DOCS_PLAN 第 147 行）。其余：会写运行记录的任务（`social-monitor`、`tickets/auto-close` 等）看 `scheduled_job_runs` 有成功记录；`runtime-recovery`、`account-erasure` 和 `library-cleanup` 目前不写这张表，看 Vercel 定时任务调用记录和函数日志里的 HTTP 200（不是 401/503） | 第 2335、2375、2491 行；[LIB_DOCS_PLAN](../LIB_DOCS_PLAN.md) 第 144 行；[PUBLISH-MONITOR](PUBLISH-MONITOR.md) 第 338 行；[FUSION-REVIEW](FUSION-REVIEW.md) 第 44 行 |
-| A2a | **已核实/仍需 Owner**：两个项目在同一个团队 Grayscale Luminary LLC（只有 Owner 一个成员），所以升级 Pro 会同时覆盖两者；套餐名 Vercel 接口读不到（账单接口返回“Plan not found”），仓库里全部 7 个定时任务都是每天一次，与 Hobby 一致，请 Owner 在账单页确认当前是 Hobby 还是 Pro | `vercel.json` 两个项目共用；如果 staging 仍是 Hobby，分钟级定时任务可能让 staging 部署失败 | 总控只读核对 | A1 | 看两个项目所属团队和套餐 | Vercel 只读团队和项目列表（2026-10-18） |
+| A2a | **已核实**：两个项目在同一个团队 Grayscale Luminary LLC（只有 Owner 一个成员），升级 Pro 会同时覆盖两者；Owner 2026-10-18 在总控对话中确认：staging 是 Vercel 免费版，不支持分钟级定时任务，Owner 会在正式上线前升级 Pro，之后再启用 `runtime-recovery` 分钟级定时任务（上线前 Owner 操作项，见 A1） | `vercel.json` 两个项目共用；如果 staging 仍是 Hobby，分钟级定时任务可能让 staging 部署失败 | 总控只读核对 | A1 | 看两个项目所属团队和套餐 | Vercel 只读团队和项目列表（2026-10-18） |
 | A3 | 恢复正式站（取消暂停） | 正式 Vercel 项目 `graylum-ai-vercel-v1` 目前是暂停状态（**已核实**：三个正式域名仍返回 503 `DEPLOYMENT_PAUSED`（2026-10-18 实测）；项目更新时间 2026-10-05 14:57 UTC 与暂停日相符；原因是 `main` 的 Next 有严重漏洞，Owner 当日决定“正式站按方案 1 暂停”，出处为总控备忘，仓库里仍没有书面记录） | Owner 操作（MCP 没有这个权限） | 维护态准备完成（第 4 节第 4 步） | 访问正式域名不再是暂停页；新调用仍是关闭状态 | [RUNTIME_PROD_PLAN](../RUNTIME_PROD_PLAN.md) 第 7.3 节第 3、5 步、第 8 节 Vercel 行 |
 | A4 | 处理 `main` 的 Next 安全漏洞 | `main` 停在 2026-08 的依赖，必需检查 Dependency Audit 失败；正式站公开可达 | 总控（需批准合并 `main`） | 冻结版本 | staging → `main` 的合并 PR 上 Dependency Audit 和全部必需检查通过，不新增豁免 | 第 2628 行；RUNTIME_PROD_PLAN 第 7.3 节第 1 步 |
 | A5 | 正式环境 Upstash Redis（`UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`） | 限流是 fail-closed：没配好，所有新消息都会被拒；删除清单也存在这里 | Owner 操作（新增凭证） | — | Vercel 正式环境变量名存在（不读值）；限流冒烟通过；命令额度够用 | 第 1249–1251 行、第 7.6 节第 2490 行；[RATE_LIMIT_WIRING_PLAN](../RATE_LIMIT_WIRING_PLAN.md) 第 276–282 行；[DATA_ERASURE_BACKUP_RESTORE_REPLAY](../../runbooks/DATA_ERASURE_BACKUP_RESTORE_REPLAY.md) 第 12–14 行 |
@@ -366,7 +366,7 @@ Owner 2026-10-17 选 A（原话见第 6 节）：**日期不变，10-25 冻结**
 
 | 项 | 结论 |
 | --- | --- |
-| A2a | 已核实：staging 与正式项目在同一团队（Grayscale Luminary LLC，唯一成员 Owner），升级 Pro 同时覆盖两者。仍需 Owner：当前套餐接口读不到（账单接口 404），仓库定时任务全是每天一次；请在账单页确认。 |
+| A2a | 已核实：两项目同团队，升级 Pro 同时覆盖两者；Owner 2026-10-18 确认 staging 是免费版、不支持分钟级定时任务，上线前由 Owner 升级 Pro，之后再启用 `runtime-recovery` 分钟级任务。 |
 | A3 | 已核实：正式站仍暂停，三个域名返回 503 DEPLOYMENT_PAUSED（实测）；项目 2026-10-05 14:57 UTC 更新；原因是 `main` 的 Next 严重漏洞（Owner 当日决定，总控备忘）。恢复由 Owner 执行。 |
 | B1 | 已核实：DB-BASELINE 实质完成——基线文件、空库建库 CI（#528、#532、#535）、`db:push` 退役、指纹刷新（#539 等七个 PR 全部合并）；plan-progress 仍显示“实施中”，由总控标完成。 |
 | A8 | 已核实：staging 的 Supabase 组织是 free 套餐；免费套餐无每日备份/PITR（按公开套餐说明，未在线复核），演练项目需 Pro。仍需 Owner 批准付费演练项目及金额。 |
@@ -382,7 +382,7 @@ Owner 2026-10-17 选 A（原话见第 6 节）：**日期不变，10-25 冻结**
 | 第 1.1 节 24 项 | 部分核实：已按 plan-progress 更新第 1.1 节；DB-BASELINE 实质完成。其余逐项对照验收记录不在本次只读范围，仍由总控冻结前核对。 |
 | 0284–0288 | 迁移编号改为“谁先准备好谁拿号”。当前占号或原占号的 PR：0284=#1099（FUSION-COMPARE PR-1）；0285=无 PR；0286=#1076、0287=#1077（已编入合集 #1116，分别暂定 0280、0281）；0288=#1075（PUBLISH-MONITOR PR-4a，未完成）。另有原号：0289=#1069、0290=#1081、0291=#1083（合集内暂定 0282）、0292=#1073、0293=#1086、0294=#1098、0295=#1094，0296–0302 见 R7 与 REPORT-VISUAL 等 PR。staging 已应用到 0275；0276 暂时 #1036 和 #1041 同号待总控定。 |
 
-**仍需 Owner 的项：** A2a 确认套餐、A8 批准付费演练项目、N1 区域与套餐、N6 Google OAuth、N9 Auth 设置对齐、D4a 绕过口令与定时任务实测、A3/E2 的 Vercel 操作。
+**仍需 Owner 的项：** A1 上线前升级 Pro（已承诺）、A8 批准付费演练项目、N1 区域与套餐、N6 Google OAuth、N9 Auth 设置对齐、D4a 绕过口令与定时任务实测、A3/E2 的 Vercel 操作。
 
 ## 交接
 
