@@ -121,6 +121,9 @@ Owner 选的选项（原文）："Agent 在自由对话里自己决定检索资�
 - 回答结束后文档被删：`runtime_library_propagate` 清掉冻结的读取内容和会话历史里的那段文字，已经显示的回答保留（D7）。检索命中行和引用行一样处理。
 - 改版（重新识别后 `content_version` 变了）：本回合不作废，读到 `source_changed`，模型如实说"这篇资料刚更新过，请再问一次"（决定 C）。
 - 搜索结果里的摘录属于工具结果，存在 `runtime_tool_calls`，已被内容删除和注销覆盖（0201、0150）；`propagate` 要补上"清掉含已删文档摘录的检索结果"，补测试。
+- **检索结果写入要和删除互斥**：0262 的 `runtime_library_tool_guard` 只保护 `read_source`。A1 同样要给保存 `library_search` 结果的写入加保护：
+  在写入事务里先给命中文档加共享锁（和删除的锁顺序一致），再复核每个命中文档的 `documentId + version` 仍然有效，否则报 `LIB_SOURCE_DELETED`、不保存。
+  补数据库测试：检索读完摘录、尚未写入时删除文档，写入被拒，已删正文不进执行记录。
 
 ### 2.2 读最近发布的数据（`my_posts`）
 
@@ -236,7 +239,7 @@ Owner 选的选项（原文）："Agent 在自由对话里自己决定检索资�
 
 | PR | 内容 | 风险 | 依赖 | 能否在 10-25 前做完 |
 | --- | --- | --- | --- | --- |
-| A1 | 迁移：`pg_trgm` 索引、`library_runtime_search` 函数、`runtime_library_references.origin` 和 ordinal 上限、`runtime_library_read` 编号解析扩到 1–29、propagate 清检索摘录；开关 `chat_library_retrieval_enabled` 默认关 | high（迁移、权限、删除） | #1022（0279）合并；迁移编号向总控要 | 能（#1022 本周合并的前提下） |
+| A1 | 迁移：`pg_trgm` 索引、`library_runtime_search` 函数、`library_search` 结果写入的删除保护、`runtime_library_references.origin` 和 ordinal 上限、`runtime_library_read` 编号解析扩到 1–29、propagate 清检索摘录；开关 `chat_library_retrieval_enabled` 默认关 | high（迁移、权限、删除） | #1022（0279）合并；迁移编号向总控要 | 能（#1022 本周合并的前提下） |
 | A2 | 自由对话挂 `library_search`、执行时读检索命中文档、`agent_tool` 流事件、自由对话主指令补一段 | high（Runtime 准入） | A1 | 能 |
 | W | 前端：`agent-work-status.tsx` 纯展示组件 + 样例 + /runtime 挂载；落地页区域 6 改用它 | ordinary（只改前端） | A2 的事件格式（可先按约定的类型做） | 能 |
 | B1 | 对标表做成 `read_source` 目录条目（迁移重建 `runtime_workspace_source`，读 0268 对标表，按已确认定位找定位会话；不加新工具） | high（迁移、删除） | 无（0218、0268 已在 staging） | 能 |
