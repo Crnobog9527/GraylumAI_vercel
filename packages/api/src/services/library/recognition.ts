@@ -4,7 +4,6 @@ import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { checkRateLimitAsync } from '../../middleware/securityChecks';
 import { libraryRpc } from './rpc';
-import { wordSegments } from './wordContent';
 
 /**
  * LIB-2d: saving text that the user's own browser recognised from a scanned PDF page or a Word image (Owner
@@ -29,12 +28,35 @@ export type RecognitionStatus = 'pending' | 'running' | 'complete' | 'paused' | 
 export type RecognitionPending = Array<{ documentId: string; format: 'pdf' | 'docx'; contentVersion: number; positions: number[] }>;
 export type RecognitionSave = { saved: boolean; status: RecognitionStatus; contentVersion: number; code?: 'LIBRARY_SPACE' | 'LIBRARY_TEXT_LIMIT' };
 
-/** Same segmentation as extracted text: paragraphs up to 8,192 bytes, titled with the page or image number. */
+const SEGMENT_MAX_BYTES = 8192;
+
+/**
+ * Recognised text as segments of at most 8,192 bytes, titled with the page or image number. A segment ends at a
+ * blank line only once it holds half of that, so a page of many short paragraphs stays far under the database's
+ * 200 segments per unit (100,000 characters are at most about 100 segments). The text itself is unchanged.
+ */
 export function recognizedSegments(text: string, unit: z.infer<typeof recognitionKind>, page: number) {
   if (!text.isWellFormed() || /[\x00-\x08\x0b-\x1f\x7f\u2028\u2029]/.test(text)) throw new Error('LIBRARY_TYPE');
   if (!/\S/u.test(text)) throw new Error('LIBRARY_INVALID');
   const title = unit === 'pdf_page' ? `第 ${page} 页` : `图片 ${page}（识别）`;
-  return wordSegments(Buffer.from(text), []).map((segment) => ({ ...segment, title }));
+  const segments: Array<{ title: string; body: string }> = [];
+  let body = '';
+  let size = 0;
+  const flush = () => {
+    if (body) segments.push({ title, body });
+    body = ''; size = 0;
+  };
+  for (const line of text.match(/[^\n]*\n|[^\n]+$/g) ?? []) {
+    if (Buffer.byteLength(line) > 65_536) throw new Error('LIBRARY_LINE_LIMIT');
+    if (!line.trim() && size >= SEGMENT_MAX_BYTES / 2) flush();
+    for (const char of line) {
+      const width = Buffer.byteLength(char);
+      if (size + width > SEGMENT_MAX_BYTES) flush();
+      body += char; size += width;
+    }
+  }
+  flush();
+  return segments;
 }
 
 export function libraryRecognition(client: SupabaseClient, actorId: string) {

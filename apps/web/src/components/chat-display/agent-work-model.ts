@@ -1,0 +1,54 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+// CHAT-AUTO-CONTEXT §4: the rows a free-chat reply shows while the coach reads the user's own material and data
+// (docs/launch/tasks/CHAT-AUTO-CONTEXT.md). Pure functions only; research rows reuse the RT-5 mapping so the
+// positioning page and the work conversation describe a search the same way. No supplier names, no US dollars.
+import { describeCall, type ResearchCall } from '@/components/research/research-model';
+
+export type WorkKind = 'positioning' | 'library_search' | 'library_read' | 'my_posts' | 'my_benchmarks' | 'research';
+export type WorkState = 'running' | 'done' | 'missing' | 'pending';
+
+export interface WorkItem {
+  id: string;
+  kind: WorkKind;
+  state: WorkState;
+  /** Main line once the step has finished, e.g. "在资料库里找到 3 篇相关内容". Running rows use RUNNING_LABELS. */
+  label: string;
+  /** Second line: file names, data kind, or why nothing came back. */
+  detail?: string | null;
+  /** Settled credits, already formatted (research rows only), e.g. "0.3 积分". */
+  credits?: string | null;
+}
+
+/** What a step says while it runs. */
+export const RUNNING_LABELS: Record<WorkKind, string> = {
+  positioning: '正在读你的定位…',
+  library_search: '正在查资料库…',
+  library_read: '正在读资料…',
+  my_posts: '正在读你最近的作品数据…',
+  my_benchmarks: '正在看你的对标账号…',
+  research: '正在取最新数据…',
+};
+
+export const STATE_LABELS: Record<Exclude<WorkState, 'running'>, string> = {
+  done: '完成', missing: '未取到', pending: '待核',
+};
+
+/** One research call from the stream (`research_call`) as a work row. */
+export function workItemFromResearchCall(call: ResearchCall): WorkItem {
+  const view = describeCall(call);
+  const state: WorkState = view.state === 'success' ? 'done' : view.state;
+  return {
+    id: call.callId,
+    kind: 'research',
+    state,
+    label: view.query ? `搜索 ${view.query}` : '搜索',
+    detail: [view.line, view.detail].filter(Boolean).join(' · '),
+    credits: view.credits,
+  };
+}
+
+/** The line a row shows: the running text while it runs, its own label after. */
+export function workItemLine(item: WorkItem): string {
+  if (item.state !== 'running') return item.label;
+  return item.kind === 'research' && item.label ? `正在${item.label}…` : RUNNING_LABELS[item.kind];
+}

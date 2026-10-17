@@ -21,6 +21,15 @@ describe('recognised page text', () => {
     expect(segments.every((s) => s.title === '第 7 页' && Buffer.byteLength(s.body) <= 8192)).toBe(true);
     expect(segments.map((s) => s.body).join('')).toContain('第一段');
   });
+  it('joins many short paragraphs so a page stays under 200 segments, without changing the text', () => {
+    const text = Array.from({ length: 5000 }, (_, i) => `第 ${i} 段`).join('\n\n');
+    const segments = recognizedSegments(text, 'pdf_page', 3);
+    expect(segments.length).toBeLessThanOrEqual(200);
+    expect(segments.every((s) => Buffer.byteLength(s.body) <= 8192)).toBe(true);
+    expect(segments.map((s) => s.body).join('')).toBe(text);
+    const worst = recognizedSegments(Array.from({ length: 25_000 }, () => '字').join('\n\n').slice(0, 100_000), 'pdf_page', 1);
+    expect(worst.length).toBeLessThanOrEqual(200);
+  });
   it('refuses blank text, control characters and form feeds', () => {
     expect(() => recognizedSegments('   \n', 'pdf_page', 1)).toThrow('LIBRARY_INVALID');
     expect(recognizedSegments('图里的字', 'word_image', 3)[0]!.title).toBe('图片 3（识别）');
