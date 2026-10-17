@@ -84,6 +84,17 @@ Owner 选的选项（原文）："Agent 在自由对话里自己决定检索资�
 
 ### 2.1 资料库自动检索（`library_search`）
 
+> **实施修订（A1，2026-10-18，技术决定）**：资料库检索不新增工具，做成 `read_source` 的一种查询：`search:<词1 词2 …>`
+> （最多 5 个词，每个 ≤ 40 字）。理由：自由对话仍然只有 `read_source` 一个工具，计费档案 `maxTools: 2` 不受影响；
+> `providerRequest.ts` 的 v6 请求校验、`historyToolNames`、OpenRouter 适配器白名单、数据库 `runtime_tool` 的工具名校验都不用改，
+> 下面"新工具要接通的几处"里的四项因此不再需要，A2 只剩：冻结 `libraryRetrieval` 标记并受后台开关控制、`libraryQuery` 把 `search:` 和 `doc-N`
+> 路由到资料库读取、`read_source` 说明里加检索用法（字节数计入准入容量）、放宽调用次数。
+> 数据库侧（迁移，A1）：`runtime_library_read` 识别 `search:`（每次执行最多 3 次，计入原有的 8 次 / 65536 字节）、
+> 命中文档按搜索时的版本冻结进 `runtime_library_references`（`origin='retrieved'`，`doc-6`…`doc-29`），保存搜索结果前在文档锁下复核
+> （文档已删或改版则存成 `unavailable / source_deleted`，不存摘录），重放时只在文档仍有效时返回，删除清理和 @ 引用的读取一起清掉。
+> 本节其余描述里的"`library_search` 工具"按这条理解为"`read_source` 的 `search:` 查询"。
+
+
 **检索办法**：在同一个 Supabase 库里给 `library_document_segments` 的 `title`、`body` 和 `library_documents.filename`
 建 `pg_trgm` 三元组 GIN 索引，按"包含查询词"匹配（`ILIKE '%词%'`，走索引）并按命中词数和相似度排序。
 
@@ -91,7 +102,7 @@ Owner 选的选项（原文）："Agent 在自由对话里自己决定检索资�
   `pg_trgm` 是 Supabase 自带扩展。为什么不用向量：要多一家向量化调用和计费，已定上线后再看（MASTER_PLAN 第 5.3 节）。
 - 查询：模型给 1–5 个关键词（每个 ≤ 40 字），宿主逐个匹配，最多返回 8 个命中段落，每段摘录前后 300 字以内；
   只查本人、`status='ready'`、`kind='document'` 的文档，和 0244 的权限一致（SECURITY DEFINER + `auth.uid()` 之外再按执行的 actor 校验）。
-- 中文单字或两个字的查询三元组索引帮不上（三元组至少 3 个字符），这时只匹配文件名和段标题，不扫正文，避免全表扫描；写进工具描述和测试。
+- 中文两个字的词很常见（"定位""对标"），所以 2 个字起就搜正文；三元组索引用不上这样的短词，退化成只扫这个用户自己的段落，内测规模可以接受。单个字只匹配标题和文件名，不扫正文。写进工具说明和测试。
 - 先确认 `pg_trgm` 在 staging 和正式库都可用（`list_extensions` 只读核对，正式库需 Owner 授权，放进 REL-1 清单）；不可用时退回"文件名 + 段标题"匹配，
   功能降级但不报错。
 
