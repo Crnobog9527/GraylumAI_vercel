@@ -42,6 +42,7 @@ export const REPORT_VIEW_TEXT = {
   hideReasons: "收起理由",
   preparing: "图表和策略要点整理中…",
   fallback: "这一项的数据不完整，没有画成图表，下面只列出其中的文字。",
+  revisionKeepsData: "评审团修订只更新了文字；图表和策略要点仍是原报告的建议，如果和文字不一致，以文字为准。",
   edited: "这一章的文字你改过，下面的图表仍是 AI 教练的原建议；如果不一致，以你改的文字为准。",
   more: "其他策略要点",
   layerDetail: "看这一层的细节",
