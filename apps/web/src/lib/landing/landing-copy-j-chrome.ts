@@ -91,8 +91,8 @@ export const J_FOOTER = {
   rights: '© 2026 Grayscale Luminary LLC',
 } as const;
 
-/** Pages the header and footer link to that do not exist yet (for the PR's "待建页面" list); /en is not linked at all. */
-export const J_PENDING_PAGES = [
-  PLANNED.features, PLANNED.positioning, PLANNED.content, PLANNED.jury, PLANNED.library, PLANNED.publish, PLANNED.review,
-  PLANNED.samples, PLANNED.blog, PLANNED.refund, PLANNED.cookies,
-] as const;
+/**
+ * Pages the header and footer link to that do not exist yet (for the PR's "待建页面" list); /en is not linked at all.
+ * /features, its six pages and /blog came with PR #1090 (2026-10-18).
+ */
+export const J_PENDING_PAGES = [PLANNED.samples, PLANNED.refund, PLANNED.cookies] as const;
