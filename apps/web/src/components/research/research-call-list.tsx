@@ -8,7 +8,8 @@ const ICONS: Record<CallState, typeof Check> = { running: Loader2, success: Chec
 
 /**
  * Every research call of a reply, one compact row each: what was searched, which kind of data, and the result
- * (成功 / 未取到 / 待核), from the stream's `research_call` events. No supplier names, no costs.
+ * (成功 / 未取到 / 待核) with the credits it settled at, from the stream's `research_call` events. No supplier
+ * names or supplier costs.
  */
 export function ResearchCallList({ calls }: { calls: ResearchCall[] }) {
   const rows = calls.map(call => ({ id: call.callId, view: describeCall(call) }));
@@ -31,6 +32,7 @@ export function ResearchCallList({ calls }: { calls: ResearchCall[] }) {
                 {view.state !== "running" && (
                   <span className={cn(styles.chip, styles[`state_${view.state}`])}>{CALL_STATE_LABELS[view.state]}</span>
                 )}
+                {view.credits && <span className={styles.callCredits}>扣 {view.credits}</span>}
               </p>
               {view.detail && <p className={styles.callDetail}>{view.detail}</p>}
             </div>
