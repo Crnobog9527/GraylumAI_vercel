@@ -34,9 +34,20 @@ export function splitChapters(text: string): { preamble: string; chapters: Repor
 
 const CHAPTER_NAMES = [...new Set(Object.values(REPORT_DATA_CHAPTER)), '见效时间'];
 
-/** The Skill chapter a report chapter title stands for (`变现路径（漏斗）` is 变现路径), if any. */
-export const reportChapterName = (title: string) =>
-  CHAPTER_NAMES.find(name => name === title) ?? CHAPTER_NAMES.find(name => title.startsWith(name));
+/** Writing hints the Skill puts at the end of a chapter title for the model, never for the reader: "（约 800 字，…）". */
+const WRITING_HINT = /\s*[（(]\s*约[^（）()]*[）)]\s*$/;
+/** A chapter title as the reader sees it: without the writing hint. */
+export const reportDisplayTitle = (title: string) => title.replace(WRITING_HINT, '').trim() || title;
+
+/**
+ * The Skill chapter a report chapter title stands for, if any: "五、对标账号分析（约 800 字）" and "变现路径（漏斗）" are
+ * 对标账号分析 and 变现路径. Numbering and writing hints do not count; then the exact name, its start, or the name in it.
+ */
+export const reportChapterName = (title: string) => {
+  const plain = reportDisplayTitle(title).replace(/^\s*(?:[一二三四五六七八九十]+|\d+)\s*[、.．]\s*/, '');
+  return CHAPTER_NAMES.find(name => name === plain) ?? CHAPTER_NAMES.find(name => plain.startsWith(name))
+    ?? CHAPTER_NAMES.find(name => plain.includes(name));
+};
 
 /**
  * The data fields whose chapter text differs from the generated text (§6.2): a deterministic per-chapter comparison,

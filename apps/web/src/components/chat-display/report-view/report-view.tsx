@@ -8,7 +8,9 @@ import { cn } from "@/lib/utils";
 import { AudienceCards, FirstStepCard, FunnelChart, Plan30Timeline, ThisWeekList } from "./report-charts";
 import { BenchmarkChart } from "./report-benchmarks";
 import { ReportDataBlock, ReportDataFallback } from "./report-data-table";
-import { placeFields, presentFields, reportChapterName, splitChapters, splitReasons } from "./report-sections";
+import {
+  placeFields, presentFields, reportChapterName, reportDisplayTitle, splitChapters, splitReasons, withDisplayHeadings,
+} from "./report-sections";
 import { REPORT_FIXED_NOTES, REPORT_VIEW_TEXT as T } from "./report-text";
 import styles from "./report-view.module.css";
 
@@ -44,7 +46,7 @@ export function ReportView({ body, streaming = false, data, editedFields, notice
   // A block that never closed (stopped or cut off) is not being prepared any more: the text alone, as before.
   const preparing = parsed.pending && streaming;
   if ((!checked && !preparing) || chapters.length === 0)
-    return <MessageMarkdown className={className} text={parsed.text} streaming={streaming} />;
+    return <MessageMarkdown className={className} text={withDisplayHeadings(parsed.text)} streaming={streaming} />;
 
   const values = checked?.data ?? {};
   const fallback = checked?.fallback ?? {};
@@ -58,7 +60,7 @@ export function ReportView({ body, streaming = false, data, editedFields, notice
     <div className={cn(styles.view, className)}>
       {notice && <p className={styles.note}>{notice}</p>}
       <QuickLook data={values} />
-      {preamble && <MessageMarkdown text={preamble} />}
+      {preamble && <MessageMarkdown text={withDisplayHeadings(preamble)} />}
       {chapters.map((chapter, index) => {
         const fields = byChapter.get(index) ?? [];
         const name = reportChapterName(chapter.title);
@@ -67,8 +69,8 @@ export function ReportView({ body, streaming = false, data, editedFields, notice
         const charted = name ? CHART_FIELDS.some(item => REPORT_DATA_CHAPTER[item] === name) : false;
         return (
           <section key={index} className={styles.chapter}>
-            <h2 className={styles.chapterTitle}>{chapter.title}</h2>
-            {main && <MessageMarkdown text={main} streaming={streaming && last && !reasons} />}
+            <h2 className={styles.chapterTitle}>{reportDisplayTitle(chapter.title)}</h2>
+            {main && <MessageMarkdown text={withDisplayHeadings(main)} streaming={streaming && last && !reasons} />}
             {fields.some(item => edited.has(item)) && <p className={styles.note}>{T.edited}</p>}
             {preparing && charted && <p className={styles.note}>{T.preparing}</p>}
             {fields.map(field)}

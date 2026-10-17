@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { REPORT_DATA_CHAPTER, REPORT_DATA_FIELD_NAMES, type ReportDataField } from "@repo/api/src/shared/reportDataSpec";
-import { headingLines, reportChapterName } from "@repo/api/src/shared/reportDataText";
+import { headingLines, reportChapterName, reportDisplayTitle } from "@repo/api/src/shared/reportDataText";
 import type { ReportData } from "@repo/api/src/shared/reportData";
 
 /**
@@ -42,7 +42,15 @@ export function placeFields(data: ReportData, titles: string[], present: ReportD
 
 export const presentFields = (data: ReportData) => REPORT_DATA_FIELD_NAMES.filter(field => data[field] !== undefined);
 
-export { reportChapterName, splitChapters } from "@repo/api/src/shared/reportDataText";
+export { reportChapterName, reportDisplayTitle, splitChapters } from "@repo/api/src/shared/reportDataText";
+
+/** Headings of the text without writing hints (display only; the stored text keeps them for the completeness check). */
+export function withDisplayHeadings(text: string): string {
+  const lines = text.split("\n");
+  const heads = new Set(headingLines(lines, /^#{1,3}\s+\S/));
+  return lines.map((line, index) => heads.has(index)
+    ? line.replace(/^(#{1,3}\s+)(.+)$/, (_, mark: string, title: string) => mark + reportDisplayTitle(title)) : line).join("\n");
+}
 
 const count = new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 1 });
 /** 12345 → 1.2 万; smaller numbers as they are. */
