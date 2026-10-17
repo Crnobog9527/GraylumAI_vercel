@@ -9,7 +9,7 @@ import { ReportView } from "@/components/chat-display/report-view/report-view";
 import { ChatNoticeList, type ChatNotice } from "@/components/chat/ChatInlineNotice";
 import resultStyles from "@/components/opc/positioning-result.module.css";
 import {
-  askedVersion, bodyFromEditor, canFinalize, canSave, editorChanged, editorText, savedAs, finalizedNotice, REPORT_DOC_TEXT, REPORT_MAX_CHARACTERS,
+  askedVersion, bodyFromEditor, canFinalize, canSave, editorChanged, editorText, hasDataFence, savedAs, finalizedNotice, REPORT_DOC_TEXT, REPORT_MAX_CHARACTERS,
   reportDocumentError, reportLength, requestFor,
   type PendingRequest, type ReportDocument,
 } from "./report-document";
@@ -120,6 +120,7 @@ export function ReportDocumentPanel({ executionId, fallbackBody, generatedComple
           onChange={event => { const text = event.target.value; setDraft(old => old && { ...old, text }); }} />
         <p className="text-xs text-[var(--text-secondary)]" aria-live="polite">
           {length} / {REPORT_MAX_CHARACTERS} 字{length > REPORT_MAX_CHARACTERS ? "，超出上限，删减后才能保存" : ""}</p>
+        {hasDataFence(draft.text) && <p className="text-xs" role="alert">{REPORT_DOC_TEXT.dataFence}</p>}
         {doc.revision !== draft.revision && <p className="text-xs">{REPORT_DOC_TEXT.newerElsewhere}</p>}
         {draft.rebased && doc.revision === draft.revision && <details>
           <summary className="text-xs">{REPORT_DOC_TEXT.showLatest}</summary><MessageMarkdown className="mt-2" text={editorText(doc.body)} /></details>}
