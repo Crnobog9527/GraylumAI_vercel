@@ -153,7 +153,7 @@ Owner 2026-10-17 选 A（原话见第 6 节）：**日期不变，10-25 冻结**
 | B1 | 正式库从空库建库：平台前置 → `packages/db/baseline` → 全部迁移（同名 bridge 紧挨在迁移前）；用 PostgreSQL 17；**每个文件整段交给服务端执行，不用 `psql -f`**；先确认目标项目允许 0010 建 `pg_cron`、0148 再删掉 | DB-BASELINE 方案 B（Owner 2026-09-29）：结构只由迁移文件决定 | 总控（需批准），建在第 2.0 节的新正式项目里 | 0271–0283 及之后所有迁移已合并；DB-BASELINE 剩余部分（**待核实**是否还有未完成项） | 建完后只读抓指纹，用 `--local-only --staging <快照>` 和 `built-fingerprint`、`expected-differences.json` 比对，没有解释不了的差异 | [STAGING_REPRODUCIBILITY](../../runbooks/STAGING_REPRODUCIBILITY.md) 第 223–255 行；第 9.3 节第 2677 行；第 1185 行 |
 | B1a | 确认 Supabase 项目设置 `rls_auto_enable` / `ensure_rls` 事件触发器的取值 | 这两项属于项目设置，不在仓库迁移里，不能从本机重放成功推断 | 总控（需批准只读） | B1 | 读回项目设置 | STAGING_REPRODUCIBILITY 第 233–235 行 |
 | B2 | 导入配置类数据：套餐（Pro $29 / 3,480、Gold $69 / 8,970，年付 $279 / $621，免费套餐每月 0、每年 0）、积分包和会员折扣、q=100、m=6、模型和线路、`runtime_purpose_budgets`、已发布的 Skill 和模块配置；不复制 staging 的测试账号、对话、订单、流水、沙盒编号和测试窗口 | 正式库只要结构和配置；价格写入要另批 | 总控（需批准每一组数值） | B1 | 逐项读回；模型行导入后在后台点"读取价格"，不从 staging 复制价格 | 第 9.3 节第 2677 行；第 289、1450、2720 行；[MODEL_PRICING_SYNC_PLAN](../MODEL_PRICING_SYNC_PLAN.md) 第 394 行；[AGENT_CORE_R15](../implementation/AGENT_CORE_R15.md) 第 24–27 行 |
-| B2a | **完整的 Stripe 目录并绑定到新库**：在 Stripe 正式模式建好**全部**价格——银行卡订阅（Pro/Gold 月付年付、创始年付、Gold 首月优惠券，见 D2）、**微信/支付宝的一次性会员价格**（Pro 月/年、Gold 月/年、创始 Gold 年共六个）、**六个会员档积分包价格**（S/M/L × Pro/Gold）——再把每个价格绑定写进新库 `payment_provider_refs`（live 模式、用途 `price_usage`、周期、方案、档位，每组恰好一条当前映射）。少一条，对应的结账会报 `PAY_WAFFO_PRICE_MAPPING_MISSING` | 新库是空的，目录绑定不会自己出现；缺了钱包 D9 和积分包都无法售卖 | Owner 在 Stripe 建价格（D2）；绑定写入由总控（需批准） | B1、D2 | 读回 `payment_provider_refs`：每个套餐/积分包/方式/周期恰好一条当前 live 映射；逐个对账 | `0222_pay_stripe_mp_checkout.sql` 第 206–212 行；[PAY-WAFFO](PAY-WAFFO.md) 第 4 节（第 106–135 行） |
+| B2a | **完整的 Stripe 目录并绑定到新库（步骤见第 2.5 节）**：在 Stripe 正式模式建好**全部**价格——银行卡订阅（Pro/Gold 月付年付、创始年付、Gold 首月优惠券，见 D2）、**微信/支付宝的一次性会员价格**（Pro 月/年、Gold 月/年、创始 Gold 年共六个）、**六个会员档积分包价格**（S/M/L × Pro/Gold）——再把每个价格绑定写进新库 `payment_provider_refs`（live 模式、用途 `price_usage`、周期、方案、档位，每组恰好一条当前映射）。少一条，对应的结账会报 `PAY_WAFFO_PRICE_MAPPING_MISSING` | 新库是空的，目录绑定不会自己出现；缺了钱包 D9 和积分包都无法售卖 | Owner 在 Stripe 建价格（D2）；绑定写入由总控（需批准） | B1、D2 | 读回 `payment_provider_refs`：每个套餐/积分包/方式/周期恰好一条当前 live 映射；逐个对账 | `0222_pay_stripe_mp_checkout.sql` 第 206–212 行；[PAY-WAFFO](PAY-WAFFO.md) 第 4 节（第 106–135 行） |
 | B2b | 已发布的付款条款版本：写入 `system_settings.payment_terms_version`（字符串，和结账请求里的版本一致）。没有它，所有结账都被拒 | 空库没有这条 | 总控（需批准）；版本号随 Owner 的条款定稿 | B1、D10 | 读回；会员页读出的 `termsVersion` 不为空 | `methodMembership.ts` 第 69–90 行；`methodPayments.ts` 第 54–56 行 |
 | B2c | 新购买渠道：写入 `system_settings.payment_new_purchase_channel='stripe'`。没有它默认是 Waffo，会员页和积分包页都不显示可结账 | 空库默认值是 Waffo | 总控（需批准） | B1 | 读回；套餐和积分包接口报告可结账 | `readPaymentChannel`；`settings.getMembershipPlans` / `getCreditPackages` |
 | B2d | 对账起点：写入 `system_settings.launch_baseline_at`。没有它每日对账返回 BLOCKED/MISSING，公开开放前的对账验证过不了 | 空库没有起点 | 总控（需批准）；时间取 B1 建库完成之后、第一笔真钱付款之前 | B1 | 读回；10-30 对账不再是 BLOCKED | `packages/api/src/services/billingReconciliation.ts`（`readLaunchBaselineAt`） |
@@ -245,6 +245,20 @@ Owner 2026-10-17 选 A（原话见第 6 节）：**日期不变，10-25 冻结**
 | H4 | 有上限的正式小额冒烟：一次成功、一次已确认拒绝、一次重复操作、回执对账 | 第 9.3 节保留条件 | 总控（需批准身份、调用数和美元总预算） | 第 4 节第 5 步 | 官方成本、名义费用、实际扣款、平台承担一致；重复请求没有新派发 | RUNTIME_PROD_PLAN 第 7.3 节第 6–7 步 |
 | H6 | PAY-DISPUTE-GUARD 赢了之后的撤回冻结上线前是管理员手动；管理员会操作 | 量小、人工处理 | Owner 知悉 | PAY-DISPUTE-GUARD | 后台有"撤回冻结"入口 | [PAY-DISPUTE-GUARD](PAY-DISPUTE-GUARD.md) 第 102、238 行 |
 
+### 2.5 正式 Stripe 商品目录（Owner 亲自操作；#1113 已合并，脚本 `scripts/stripe-mp-live-catalog.mjs`）
+
+放在正式库建好（B1）之后、开收钱（D7、D9）之前。这一节就是 B2a 的操作步骤；脚本在 Stripe 正式账号里建商品、价格和首月优惠券（建对象不扣任何人的钱），并打印要在正式库执行的绑定 SQL。
+
+| # | 谁 | 做什么 | 怎么验证 |
+| --- | --- | --- | --- |
+| S1 | **Owner 亲自操作** | 在 Stripe 正式后台创建一把**受限密钥**（`rk_live_…`），只开 Products、Prices、Coupons 读写和 Balance/Account 读；放在本机环境变量里，**不发给任何人，不进仓库、PR、聊天** | 密钥权限页读回 |
+| S2 | Owner | `STRIPE_LIVE_SECRET_KEY=… MP_EXPECT_ACCOUNT=acct_… node scripts/stripe-mp-live-catalog.mjs plan`，看清缺什么（只读） | 输出里账号是预期的正式账号，缺失项清楚 |
+| S3 | Owner | 同样的变量运行 `apply` 创建缺少的对象（只建缺的，不改已有的），再跑一次 `plan` | 全部显示 exists、没有 MISMATCH |
+| S4 | Owner 运行；输出交总控审核；**Owner 批准后总控在正式库执行** | 运行 `sql`（会员价格和首月优惠券）和 `sql-packs`（积分包）打印绑定 SQL，**输出只交总控审核，不提交到仓库** | 在正式库执行后读回 `payment_provider_refs`（B2a） |
+| S5 | **Owner 亲自操作** | 用完立刻删除这把受限密钥 | Stripe 后台密钥列表里没有它 |
+
+依赖：B1（正式库已按迁移建好）、B2、R7 的 B1/B2/B3 已合并。脚本只认 live 密钥（`sk_live_` / `rk_live_`），拿到非 live 密钥会直接停下、不发任何请求。
+
 ## 3. 倒排时间表（今天 2026-10-17 → 上线 2026-10-31）
 
 日期是目标，不是授权；每个"需批准"的点到时仍要 Owner 当次同意。
@@ -261,7 +275,7 @@ Owner 2026-10-17 选 A（原话见第 6 节）：**日期不变，10-25 冻结**
 | 10-27 | 准备批准包（RUNTIME_PROD_PLAN 第 7.3 节第 2 步）：正式项目、版本、迁移、配置值、各家上限金额、冒烟预算 | 总控 |
 | 10-28 | 正式只读核验（第 4 节第 3 步）：新项目的 N1–N3、A7、Vault；旧 Vercel 项目的暂停状态和绑定 | 总控（需批准只读） |
 | 10-27 → 10-29 | A8 备份恢复和删除重放演练，在单独的隔离演练项目里做（不接 Vercel 和付款回调），通过是 10-31 公开开放的前提 | 执行窗口；总控（需批准） |
-| 10-29 | 维护态准备（第 4 节第 4 步）：在新项目里 B1 建库、B2 配置、**B2a 绑定完整的 Stripe 目录、B2b 付款条款版本、B2c 新购买渠道、B2d 对账起点、B2e 种子配置全量核对**、**R2 写入正式库标记并读回、R3 计费配置行、R4 准入档案**、A6 停止新调用；`V3_RUNTIME_PRODUCTION_ENABLED=true` 和 `STRIPE_CARD_RECONCILIATION_MODE=live`、`PAY_PRODUCTION_CARD_CHECKOUT_ENABLED=true`、`PAY_PRODUCTION_WALLET_CHECKOUT_ENABLED=true` 都在这次部署前设好（R5、R7、D7；变量只对新部署生效，后台 `payment_method_routes` 开关此时仍关）；N10–N11 把 Vercel 正式变量换成新项目（**必须在合并 `main` 之前**，否则部署出来连的是旧库）；N14 管理员账号；之后 A4 staging → `main` 合并并部署（站点仍暂停），再由 Owner 在新站后台填密钥（C1、C3、N12） | 总控（需批准）；Owner 操作；执行窗口 |
+| 10-29 | 维护态准备（第 4 节第 4 步）：在新项目里 B1 建库、B2 配置、**B2a 绑定完整的 Stripe 目录（Owner 先按第 2.5 节 S1–S5 在 Stripe 正式账号建好目录并交 SQL 给总控）、B2b 付款条款版本、B2c 新购买渠道、B2d 对账起点、B2e 种子配置全量核对**、**R2 写入正式库标记并读回、R3 计费配置行、R4 准入档案**、A6 停止新调用；`V3_RUNTIME_PRODUCTION_ENABLED=true` 和 `STRIPE_CARD_RECONCILIATION_MODE=live`、`PAY_PRODUCTION_CARD_CHECKOUT_ENABLED=true`、`PAY_PRODUCTION_WALLET_CHECKOUT_ENABLED=true` 都在这次部署前设好（R5、R7、D7；变量只对新部署生效，后台 `payment_method_routes` 开关此时仍关）；N10–N11 把 Vercel 正式变量换成新项目（**必须在合并 `main` 之前**，否则部署出来连的是旧库）；N14 管理员账号；之后 A4 staging → `main` 合并并部署（站点仍暂停），再由 Owner 在新站后台填密钥（C1、C3、N12） | 总控（需批准）；Owner 操作；执行窗口 |
 | 10-30 | 恢复站点、公众访问仍由部署访问保护挡住（第 5 步）；**冒烟窗口内**由总控（需批准）把 `stopNewCalls` 临时关掉，让受控身份能产生一次成功调用，冒烟结束后立刻重新打开（`newWorkGate.ts` 开着时对所有人都拒绝新调用，没有按身份放行）；**先配好 D4a 回调绕过并验证投递，再用后台开关打开 `card`、`card_cn`、`wechat_pay`、`alipay` 四条路由并逐个读回（对账变量和两个代码闸门开关已在 10-29 部署里生效）**（只有受控身份能进站），再做 H4 正式小额冒烟和 D9 真钱付款退款；同日对账 | 总控（需批准）；Owner |
 | **10-31** | 对账无误后公开开放（第 7 步）：关掉 `stopNewCalls`、撤掉部署访问保护、E3 `SITE_INDEXING=public` 并重新部署、核对 robots 和响应头；上线后观察成本、错误和未结算项 | 总控（需批准）；Owner |
 
@@ -300,6 +314,7 @@ Owner 2026-10-17 选 A（原话见第 6 节）：**日期不变，10-25 冻结**
 - 我来注册 Resend、给 graylum.com 加发信 DNS 记录（现在做）；Resend 密钥等 10-29 新库建好、管理员账号就绪后再填进后台的 Resend 槽位并验证。
 - 我来给 TikHub、Parallel、Firecrawl 各自设好硬上限：TikHub `<金额>`、Parallel `<金额>`、Firecrawl `<金额>`。
 - 我来准备服务条款、隐私政策、退款政策和可接受使用政策的正文，以及客服邮箱。
+- 我来在 Stripe 正式后台创建只开 Products、Prices、Coupons 读写和 Balance/Account 读的受限密钥，放在本机环境变量里，按第 2.5 节运行 `plan`、`apply`、`sql`、`sql-packs`，把 SQL 交给总控审核，用完删除这把密钥。
 - 我来新建 Supabase 正式项目（PostgreSQL 17，区域 `<区域>`），数据库密码存进 `~/.graylum/secrets/`。
 - 我来在新正式项目里配好 Google 登录（Google Cloud 加新回调地址）、Resend SMTP 和 hCaptcha。
 - 我来把新正式项目的 Supabase 地址和密钥填进 Vercel 正式项目，并把 `EXPECTED_SUPABASE_PROJECT_REF` 改成新项目编号。
