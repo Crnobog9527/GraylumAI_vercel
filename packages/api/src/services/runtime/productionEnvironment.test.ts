@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { it, expect } from 'vitest';
-import { productionRuntimeTarget, realRuntimeEnvironment } from './productionEnvironment';
+import { assertRealRuntimeTarget, productionRuntimeTarget, realHostMode, realRuntimeEnabled, realRuntimeEnvironment } from './productionEnvironment';
 import { stagingRuntimeWindow } from './stagingEnvironment';
 
 const env = {
@@ -47,4 +47,14 @@ it('chooses the environment only from the production project variable', () => {
   expect(realRuntimeEnvironment(env)).toBe('production');
   expect(realRuntimeEnvironment({ V3_RUNTIME_STAGING_WINDOW_ID: 'x' })).toBe('staging');
   expect(realRuntimeEnvironment({})).toBe('staging');
+});
+
+it('maintenance helpers follow the host: switch, target and the mode shown to the client', () => {
+  expect(realRuntimeEnabled(env)).toBe(true);
+  expect(realRuntimeEnabled({ ...env, V3_RUNTIME_PRODUCTION_ENABLED: 'false', V3_RUNTIME_STAGING_ENABLED: 'true' })).toBe(false);
+  expect(realRuntimeEnabled({ V3_RUNTIME_STAGING_ENABLED: 'true' })).toBe(true);
+  expect(() => assertRealRuntimeTarget({ ...env, V3_RUNTIME_PRODUCTION_ENABLED: 'false' })).not.toThrow();
+  expect(() => assertRealRuntimeTarget({ ...env, VERCEL_GIT_COMMIT_REF: 'staging' })).toThrow('RUNTIME_PRODUCTION_TARGET_DENIED');
+  expect(() => assertRealRuntimeTarget({})).toThrow('RUNTIME_STAGING_NOT_CONFIGURED');
+  expect([realHostMode(env), realHostMode({})]).toEqual(['production', 'staging_test']);
 });

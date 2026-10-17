@@ -44,7 +44,8 @@ function fixture() {
   const models: Row[] = MODELS.map(m => ({ id: m.id, model_id: m.model, provider: 'openrouter', is_active: 'true',
     api_endpoint: 'https://openrouter.ai/api/v1/chat/completions', api_key: `key-${m.id}`, price_multiplier: null,
     updated_at: '2026-10-01T00:00:00Z', config: pricingConfig(m.model, m.tag, '0.000003', '0.000015') }));
-  const rpc = vi.fn(async (_name: string, _args: unknown) => ({ data: true as unknown, error: null as unknown }));
+  const rpc = vi.fn<(name: string, args: unknown) => Promise<{ data: unknown; error: unknown }>>(
+    async () => ({ data: true, error: null }));
   const filter = (rows: Row[]) => {
     let out = rows;
     const q = {
