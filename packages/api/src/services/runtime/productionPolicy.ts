@@ -15,7 +15,7 @@ export { PAYG_PRODUCTION_SETTING } from './paygHostPolicy';
 import { pricingEndpoint, readPricingStates, type PricingDeps } from './pricingAdmission';
 import { productionRuntimeTarget } from './productionEnvironment';
 import { StagingAccessError, stagingRpcFailure } from './stagingErrors';
-import type { StagingPolicy } from './stagingPolicy';
+import { parseStagingPolicy, type StagingPolicy } from './stagingPolicy';
 
 /**
  * RUNTIME-PROD production host (docs/launch/tasks/RUNTIME-PROD.md). There is no test window: every new
@@ -112,8 +112,11 @@ export async function loadProductionPolicy(admin: SupabaseClient, actorId: strin
   catch (cause) { if (cause instanceof BillingUnitConfigError) throw new StagingAccessError('RUNTIME_BILLING_UNIT_UNAVAILABLE'); throw cause; }
   const callPolicies = quotes.map(q => ({ ...q, multiplier: snapshot.models[q.modelId]!.multiplier }));
   const multiplier = callPolicies.reduce((max, q) => decimal(q.multiplier) > decimal(max) ? q.multiplier : max, callPolicies[0]!.multiplier);
-  return { mode: 'production', id: config.policyVersion, callPolicies, creditsPerUsd: snapshot.creditsPerUsd, multiplier,
-    expiresAt: new Date((deps.now ?? Date.now)() + POLICY_HORIZON_MS).toISOString() };
+  // The same structural checks a staging window gets (route identity, bound = upperUsd, multipliers).
+  try {
+    return parseStagingPolicy({ mode: 'production', id: config.policyVersion, callPolicies, creditsPerUsd: snapshot.creditsPerUsd,
+      multiplier, expiresAt: new Date((deps.now ?? Date.now)() + POLICY_HORIZON_MS).toISOString() });
+  } catch { throw new StagingAccessError('RUNTIME_PRODUCTION_CONFIG_INVALID'); }
 }
 
 /** Admission's PAYG profiles for the selected production quotes. Off, missing or invalid refuses: production never
