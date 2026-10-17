@@ -5,12 +5,11 @@
 // sends a supplier request or charges; every id is checked again by the tool that uses it (0263).
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import type { SettingsRead } from './newWorkGate';
 import { logger } from '../../lib/logger';
-import { readResearchToolsConfig } from '../research/vendors/config';
 import { SOCIAL_PLATFORMS } from '../research/vendors/types';
 import { benchmarkReportFacts } from '../report/contract';
-import { researchRefreshContext, withResearchRefresh } from './researchRefresh';
-import { HOST_TURN_MAX_BYTES, RESEARCH_CARDS_NOTE, researchContextSchema, type HostTurnContext } from '../runtime/hostTurn';
+import { HOST_TURN_MAX_BYTES, RESEARCH_CARDS_NOTE, researchContextSchema, type HostTurnContext } from './hostTurn';
 
 type Research = NonNullable<HostTurnContext['research']>;
 /** The product rule (Master Plan 3.7, R11): a positioning report needs at least this many qualified benchmarks. */
@@ -32,15 +31,9 @@ async function read(admin: SupabaseClient, name: string, args: Record<string, un
   return result.data;
 }
 
-/**
- * Only a non-opening mentor answer with the research switch on gets it. A read failure leaves it out instead of
- * blocking the conversation: without the ids the tools refuse (not_confirmed), so nothing is sent or charged.
- */
-export async function researchHostContext(admin: SupabaseClient, actorId: string, sessionId: string,
-  turn: { purpose: string; opening: boolean; stepSummary: boolean }): Promise<Research | undefined> {
-  if (turn.purpose !== 'mentor' || turn.opening || turn.stepSummary) return undefined;
+/** Read only; a read failure leaves it out: without the ids the tools refuse (not_confirmed), so nothing is sent or charged. */
+export async function researchHostContext(admin: SupabaseClient, actorId: string, sessionId: string): Promise<Research | undefined> {
   try {
-    if (!(await readResearchToolsConfig(admin)).config.enabled) return undefined;
     const cards = z.array(card).parse(await read(admin, 'research_user_cards', { a: actorId, s: sessionId })).slice(-MAX_CARDS);
     const out: Research['cards'] = [];
     for (const item of cards) {
@@ -84,10 +77,14 @@ export function withResearchContext(context: HostTurnContext, research: Research
   return fits() ? { ...context, research: next } : context;
 }
 
-/** The mentor turn's research host state: a refresh grant the user pressed (#1014) and the benchmark flow records. */
-export async function withMentorResearch(admin: SupabaseClient, actorId: string, sessionId: string,
-  request: { purpose: string; researchRefreshId?: string }, turn: { opening: boolean; stepSummary: boolean },
-  context: HostTurnContext): Promise<HostTurnContext> {
-  const refreshed = withResearchRefresh(context, await researchRefreshContext(admin, actorId, sessionId, request, turn));
-  return withResearchContext(refreshed, await researchHostContext(admin, actorId, sessionId, { ...turn, purpose: request.purpose }));
+/**
+ * Admission: only a non-opening, non-summary mentor turn with the research switch on (read in admission's one settings
+ * query, so a switched-off turn costs no extra round trip) gets the block; it is then sized like the rest of the turn.
+ */
+export async function researchHost(context: HostTurnContext, admin: SupabaseClient, actor: () => Promise<string>, sessionId: string,
+  read: Promise<SettingsRead> | null): Promise<HostTurnContext> {
+  if (!read || context.opening || context.stepSummary) return context;
+  const settings = await read;
+  if (!settings.ok || settings.researchEnabled !== true) return context;
+  return withResearchContext(context, await researchHostContext(admin, await actor(), sessionId));
 }

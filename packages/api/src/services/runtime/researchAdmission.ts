@@ -176,3 +176,6 @@ export async function attachResearchTurn(input: Omit<ResearchAdmissionInput, 'mo
   (billing.callPolicy as unknown[]).push(...admitted.policies);
   return true;
 }
+
+/** RT-6: the turn's research host block is built in admission, next to the tools it serves. */
+export { researchHost } from './researchHostContext';

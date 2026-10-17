@@ -1,12 +1,10 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { HOST_TURN_MAX_BYTES, hostTurnContextSchema, RESEARCH_CARDS_NOTE, type HostTurnContext } from '../runtime/hostTurn';
-
-const config = vi.hoisted(() => ({ enabled: true }));
-vi.mock('../research/vendors/config', async original => ({ ...await original<typeof import('../research/vendors/config')>(),
-  readResearchToolsConfig: async () => ({ config: { enabled: config.enabled } }) }));
-const { researchHostContext, withResearchContext, withMentorResearch } = await import('./researchContext');
+import { HOST_TURN_MAX_BYTES, hostTurnContextSchema, RESEARCH_CARDS_NOTE, type HostTurnContext } from './hostTurn';
+import { researchHost, researchHostContext, withResearchContext } from './researchHostContext';
+import { DEFAULT_RUNTIME_RATE_LIMITS } from './rateLimitSettings';
+import type { SettingsRead } from './newWorkGate';
 
 const actor = '10000000-0000-4000-8000-000000000001', session = '10000000-0000-4000-8000-000000000002';
 const uuid = (n: number) => `20000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -30,15 +28,17 @@ const rpc = vi.fn(async (name: string, args: Record<string, unknown>) => {
   throw new Error(`${name} ${JSON.stringify(args)}`);
 });
 const admin = { rpc } as unknown as SupabaseClient;
-const turn = { purpose: 'mentor', opening: false, stepSummary: false };
+const settings = (researchEnabled?: boolean): Promise<SettingsRead> => Promise.resolve({ ok: true, config: { ...DEFAULT_RUNTIME_RATE_LIMITS },
+  ...(researchEnabled === undefined ? {} : { researchEnabled }) });
+const actorRead = vi.fn(async () => actor);
 const base: HostTurnContext = { stepId: 'step-2', opening: false, checklist: [] };
 
-beforeEach(() => { config.enabled = true; failing = null; rows = []; rpc.mockClear(); });
+beforeEach(() => { failing = null; rows = []; rpc.mockClear(); actorRead.mockClear(); });
 
 describe('RT-6 research host context', () => {
   it('hands over the newest three cards with their confirmation ids, and counts host-qualified benchmarks', async () => {
     rows = [row('a', true, 12000), row('big', false, 300000), row('b', true, 50000), row('a', true, 12000)];
-    const research = await researchHostContext(admin, actor, session, turn);
+    const research = await researchHostContext(admin, actor, session);
     expect(research).toEqual({ note: RESEARCH_CARDS_NOTE, cards: [
       { kind: 'keywords', cardId: uuid(2), confirmationId: uuid(12), keywords: ['小户型'] },
       { kind: 'candidates', cardId: uuid(3), confirmationId: uuid(13), discoveryId: uuid(99),
@@ -46,32 +46,37 @@ describe('RT-6 research host context', () => {
       { kind: 'candidates', cardId: uuid(4), confirmationId: null, discoveryId: null, accounts: [] },
     ], benchmarks: { required: 3, qualified: 2, rows: expect.any(Array) } });
     // Qualified first; numbers are copied from the host table, not computed here.
-    expect(research!.benchmarks.rows.map(r => r.account)).toEqual(['a', 'b', 'a', 'big']);
+    expect(research!.benchmarks.rows.map((r: { account: string }) => r.account)).toEqual(['a', 'b', 'a', 'big']);
     expect(rpc).toHaveBeenCalledWith('research_confirmation_read', { a: actor, s: session, p_confirmation: uuid(13) });
     expect(hostTurnContextSchema.parse(withResearchContext(base, research)).research).toEqual(research);
   });
 
-  it('is absent with the switch off, on openings and step summaries, and for other purposes; no read happens', async () => {
-    config.enabled = false;
-    expect(await researchHostContext(admin, actor, session, turn)).toBeUndefined();
-    config.enabled = true;
-    for (const other of [{ ...turn, opening: true }, { ...turn, stepSummary: true }, { ...turn, purpose: 'step' }]) {
-      expect(await researchHostContext(admin, actor, session, other)).toBeUndefined();
+  it('admission adds it only with the switch on (from its one settings read) for a non-opening, non-summary turn', async () => {
+    for (const read of [null, settings(), settings(false), Promise.resolve({ ok: false } as const)]) {
+      expect(await researchHost(base, admin, actorRead, session, read)).toBe(base);
     }
+    for (const other of [{ ...base, opening: true }, { ...base, stepSummary: { stepId: 'step-2' } } as unknown as HostTurnContext]) {
+      expect(await researchHost(other, admin, actorRead, session, settings(true))).toBe(other);
+    }
+    // No identity read and no research read happens on any of these paths.
+    expect(actorRead).not.toHaveBeenCalled();
     expect(rpc).not.toHaveBeenCalled();
+    const on = await researchHost(base, admin, actorRead, session, settings(true));
+    expect(on.research?.note).toBe(RESEARCH_CARDS_NOTE);
+    expect(rpc).toHaveBeenCalledWith('research_user_cards', { a: actor, s: session });
   });
 
   it('a read failure leaves it out instead of failing the turn', async () => {
     for (const name of ['research_user_cards', 'research_confirmation_read', 'research_benchmark_rows']) {
       failing = name;
-      expect(await researchHostContext(admin, actor, session, turn)).toBeUndefined();
+      expect(await researchHostContext(admin, actor, session)).toBeUndefined();
     }
-    expect(await withMentorResearch(admin, actor, session, { purpose: 'mentor' }, turn, base)).toEqual(base);
+    expect(await researchHost(base, admin, actorRead, session, settings(true))).toEqual(base);
   });
 
   it('stays within the host context ceiling: unqualified rows go first, then the oldest cards', async () => {
     rows = [...Array.from({ length: 6 }, (_, i) => row(`q${i}`, true, 20000)), ...Array.from({ length: 6 }, (_, i) => row(`h${i}`, false, 300000))];
-    const research = (await researchHostContext(admin, actor, session, turn))!;
+    const research = (await researchHostContext(admin, actor, session))!;
     // Pad the checklist until the full research block overflows the ceiling by a few hundred bytes.
     const fields: HostTurnContext['checklist'][number]['fields'] = [];
     const padded: HostTurnContext = { ...base, checklist: [{ id: 's', title: 'pad', fields }] };
@@ -81,7 +86,7 @@ describe('RT-6 research host context', () => {
     const merged = withResearchContext(padded, research);
     expect(Buffer.byteLength(JSON.stringify(merged))).toBeLessThanOrEqual(HOST_TURN_MAX_BYTES);
     expect(merged.research!.benchmarks.qualified).toBe(6);
-    expect(merged.research!.benchmarks.rows.filter(r => r.qualified)).toHaveLength(6);
+    expect(merged.research!.benchmarks.rows.filter((r: { qualified: boolean }) => r.qualified)).toHaveLength(6);
     expect(merged.research!.benchmarks.rows.length).toBeLessThan(12);
     expect(hostTurnContextSchema.safeParse(merged).success).toBe(true);
   });

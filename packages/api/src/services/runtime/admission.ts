@@ -52,7 +52,7 @@ import {runAutomaticFinancialRecovery} from './automaticRecovery';
 import {readPositioningGate,judgePositioning,windowBoundKey,refusePositioning,POSITIONING_REFUSAL_CAP,
  type PositioningGatePolicy} from './positioningGate';
 import {POSITIONING_FALLBACK,POSITIONING_FALLBACK_INSTRUCTIONS} from './positioningFallback';
-import {attachResearchTurn,fitsCapacity} from './researchAdmission';
+import {attachResearchTurn,fitsCapacity,researchHost} from './researchAdmission';
 
 const uuid=z.string().uuid();
 export const runtimeMaterialInput=z.object({sessionId:uuid,requestId:uuid,expectedRevision:z.number().int().nonnegative(),
@@ -167,8 +167,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    const hostParsed=hostTurnContextSchema.safeParse(policy.hostTurnContext);
    if(policy.hostTurnContext!==undefined&&(!hostParsed.success||!mentorStream||input.selection.kind!=='skill'||
     hostParsed.data.opening!==isOpeningInput(input.input)))throw new Error('RUNTIME_CONTEXT_INVALID');
-   const hostTurnContext=policy.hostTurnContext===undefined?undefined:hostParsed.data;
-   const stepSummary=Boolean(hostTurnContext?.stepSummary);
+   const hostTurnContext=policy.hostTurnContext===undefined?undefined:await researchHost(hostParsed.data!,admin,actor,input.sessionId,
+    policy.researchTools?settings:null),stepSummary=Boolean(hostTurnContext?.stepSummary);
    if(stepSummary&&(input.input!==STEP_SUMMARY_INPUT||input.organizeAfter||hostTurnContext!.opening))
     throw new Error('RUNTIME_CONTEXT_INVALID');
    const historySelection=hostTurnContext?freezeHistorySelection():undefined;
