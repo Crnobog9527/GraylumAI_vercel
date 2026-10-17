@@ -59,6 +59,8 @@ export async function runCases({db,Client,report,oldDefinition}) {
  assert.deepEqual(rows[1].missing,['followers']);assert.equal(body.truncated,false);
  assert.deepEqual(body.dependencies,[main.version]);
  assert.deepEqual(body.producedBy,[{executionId:produced}]);
+ // Body and provenance come from one query, yet the rows stay exactly what the positioning page's table shows (0268).
+ assert.deepEqual(rows,(await rpc(db,'research_benchmark_table',a,main.draftSession)).rows);
  report.checks.push('after fix: the benchmark table is listed after the positioning and readable; missing numbers stay null');
 
  // A newer, unconfirmed draft of the same business with its own (newer) research is never used.
