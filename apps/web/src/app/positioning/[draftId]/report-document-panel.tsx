@@ -9,7 +9,7 @@ import { ReportView } from "@/components/chat-display/report-view/report-view";
 import { ChatNoticeList, type ChatNotice } from "@/components/chat/ChatInlineNotice";
 import resultStyles from "@/components/opc/positioning-result.module.css";
 import {
-  askedVersion, bodyFromEditor, canFinalize, canSave, editorText, savedAs, finalizedNotice, REPORT_DOC_TEXT, REPORT_MAX_CHARACTERS,
+  askedVersion, bodyFromEditor, canFinalize, canSave, editorChanged, editorText, savedAs, finalizedNotice, REPORT_DOC_TEXT, REPORT_MAX_CHARACTERS,
   reportDocumentError, reportLength, requestFor,
   type PendingRequest, type ReportDocument,
 } from "./report-document";
@@ -50,7 +50,7 @@ export function ReportDocumentPanel({ executionId, fallbackBody, generatedComple
   const pending = useRef<PendingRequest | null>(null);
   const doc = read.data as ReportDocument | undefined;
   const working = save.isPending || finalize.isPending;
-  const unsaved = working || (draft !== null && (!doc || bodyFromEditor(doc, draft.text) !== doc.body));
+  const unsaved = working || (draft !== null && (!doc || editorChanged(doc, draft.text)));
   useEffect(() => { onUnsaved?.(unsaved); }, [unsaved, onUnsaved]);
   useEffect(() => () => onUnsaved?.(false), [onUnsaved]);
 

@@ -78,9 +78,12 @@ export const reportLength = (text: string) => [...text].length;
 export const editorText = (body: string) => splitReportBody(body).text;
 export const bodyFromEditor = (doc: Pick<ReportDocument, "body">, text: string) => joinReportBody(text, splitReportBody(doc.body).block);
 
+/** The text differs from what the editor started with (spacing around the data block is not a change). */
+export const editorChanged = (doc: Pick<ReportDocument, "body">, text: string) => text !== editorText(doc.body);
+
 /** `text` is the editor's text; the limit counts it alone (Owner's choice B). */
 export function canSave(doc: Pick<ReportDocument, "body" | "finalized">, text: string) {
-  return !doc.finalized && text.trim().length > 0 && reportLength(text) <= REPORT_MAX_CHARACTERS && bodyFromEditor(doc, text) !== doc.body;
+  return !doc.finalized && text.trim().length > 0 && reportLength(text) <= REPORT_MAX_CHARACTERS && editorChanged(doc, text);
 }
 
 export function canFinalize(doc: Pick<ReportDocument, "candidate" | "finalized">, editing: boolean) {
