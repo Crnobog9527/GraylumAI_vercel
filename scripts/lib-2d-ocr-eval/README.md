@@ -40,3 +40,19 @@ node summarize.mjs results/*.json
 CSP 为 `connect-src 'none'` 加 `'wasm-unsafe-eval'`（见 `server.mjs`）；另起的「外部」服务器记录任何泄漏请求。
 
 `src/columns.js` 的双栏排序和 `src/deskew.js` 的摆正只是评测用的示例实现，不是产品代码。
+
+## 第 2 步（2026-10-17）
+
+报告见 [LIB-2D-OCR-EVAL-STEP2-2026-10-17.md](../../docs/launch/evidence/LIB-2D-OCR-EVAL-STEP2-2026-10-17.md)。
+`gen2.mjs` 生成 36 页更难的样本（q01–q36，固定随机种子），版式和做旧与第 1 步共用 `pagekit.mjs`；
+`data/ground-truth-2.json`、`data/manifest-2.json`、`data/outputs-2.json` 是本步的标准文本、页面参数和识别原文，`rescore.mjs` 会一并复算。
+配置名可以再加 `+orient`（Paddle 低置信度时整页转 180° 重试）。环境变量 `TAG` 给结果文件名加前缀。
+手写风格字体（Hannotate SC、HanziPen SC、Xingkai SC）是 macOS 的可下载字体，没装时 `gen2.mjs` 会在该页后面标 `FONT MISSING`。
+
+```bash
+node gen2.mjs set
+MANIFEST=set/manifest-2.json TAG=set2 node run.mjs paddle-tiny+deskew+cols+orient
+MANIFEST=set/manifest-2.json TAG=set2 node run.mjs tess+deskew
+TAG=set1 node run.mjs paddle-tiny+deskew+cols+orient
+node pack2.mjs   # 把 set/ 和 results/ 里第 2 步的结果写进 data/*-2.json
+```

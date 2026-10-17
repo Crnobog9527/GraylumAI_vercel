@@ -3,7 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type Stripe from 'stripe';
 import type { SupabaseClient } from '@supabase/supabase-js';
 const mocks = vi.hoisted(() => ({ scope: vi.fn(), ref: vi.fn(), recover: vi.fn(), invoice: vi.fn(), refund: vi.fn(),
-  stripeId: vi.fn(), stop: vi.fn() }));
+  stripeId: vi.fn(), stop: vi.fn(), settle: vi.fn() }));
+vi.mock('./methodOrderSettle', () => ({ settleOpenMethodOrders: mocks.settle }));
 vi.mock('./stripeCheckoutPersistence', () => ({ resolveStripeScope: mocks.scope }));
 vi.mock('./stripeReferences', () => ({ findStripeReference: mocks.ref }));
 vi.mock('./walletWebhook', () => ({ recoverMethodCheckout: mocks.recover }));
@@ -54,6 +55,7 @@ describe('PAY-STRIPE-MP daily Stripe card reconciliation', () => {
   beforeEach(() => {
     mocks.scope.mockReset().mockResolvedValue({ mode: 'test', merchant: 'fixture' });
     for (const mock of [mocks.recover, mocks.invoice, mocks.refund, mocks.stop]) mock.mockReset();
+    mocks.settle.mockReset().mockResolvedValue({ checked: 0, repaired: 0, complete: true, findings: [] });
     mocks.stripeId.mockReset().mockImplementation(async (_db: unknown, _scope: unknown, local: string) => `sub_${local}`);
   });
   it('retries a requested stop Stripe has not confirmed (an upgrade-replaced Pro) and reports one that still fails', async () => {
@@ -188,5 +190,17 @@ describe('PAY-STRIPE-MP daily Stripe card reconciliation', () => {
     expect(slow.stripe.invoices.list).not.toHaveBeenCalled();
     f.stripe.invoices.list = vi.fn(async () => { throw new Error('stripe down'); });
     await expect(f.run()).rejects.toThrow('stripe down');
+  });
+  it('#961: closes open unpaid orders that can no longer be paid (expired sessions are not in the paid scan)', async () => {
+    mocks.settle.mockResolvedValue({ checked: 2, repaired: 1, complete: true,
+      findings: [{ kind: 'open_order_unresolved', object: 'order', orderId: ORDER, code: 'PAY_WAFFO_CHECKOUT_UNAVAILABLE' }] });
+    const f = fixture();
+    const result = await f.run();
+    expect(mocks.settle).toHaveBeenCalledWith(f.db, f.stripe, { mode: 'test', merchant: 'fixture' },
+      expect.objectContaining({ now: now.getTime() / 1000, maxPages: 10 }));
+    expect(result).toMatchObject({ success: false, complete: true, checked: 2, repaired: 1,
+      findings: [{ kind: 'open_order_unresolved', orderId: ORDER }] });
+    mocks.settle.mockResolvedValue({ checked: 0, repaired: 0, complete: false, findings: [{ kind: 'scan_incomplete', object: 'order' }] });
+    await expect(fixture().run()).resolves.toMatchObject({ success: false, complete: false });
   });
 });

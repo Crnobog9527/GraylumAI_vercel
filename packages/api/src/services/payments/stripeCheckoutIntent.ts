@@ -111,16 +111,21 @@ export const CHECKOUT_ABSENCE_GRACE_SECONDS = 3600;
 async function findOriginalCheckout(stripe: Pick<Stripe, 'checkout'>, intent: StripeCheckoutIntent) {
   const expiry = intent.request.expires_at;
   if (!Number.isSafeInteger(expiry)) throw new Error('PAY_COMMON_CHECKOUT_REQUEST_INVALID');
+  return findCheckoutForOrder(stripe, intent.id, expiry! - 24 * 3600, expiry!);
+}
+
+/** The order's Session created in [from, to] (unix seconds), or null after a complete scan of that window. */
+export async function findCheckoutForOrder(stripe: Pick<Stripe, 'checkout'>, orderId: string, from: number, to: number) {
   let cursor: string | undefined;
   let found: string | undefined;
   for (let page = 0; page < 10; page++) {
     const result = await stripe.checkout.sessions.list({ limit: 100,
-      created: { gte: expiry! - 24 * 3600, lte: expiry! }, ...(cursor ? { starting_after: cursor } : {}) });
+      created: { gte: from, lte: to }, ...(cursor ? { starting_after: cursor } : {}) });
     if (!Array.isArray(result.data) || typeof result.has_more !== 'boolean') {
       throw new Error('PAY_COMMON_CHECKOUT_RECONCILIATION_REQUIRED');
     }
     for (const session of result.data) {
-      if (session.metadata?.orderId !== intent.id) continue;
+      if (session.metadata?.orderId !== orderId) continue;
       if (found && found !== session.id) throw new Error('PAY_COMMON_ATTEMPT_IDENTITY_MISMATCH');
       found = session.id;
     }

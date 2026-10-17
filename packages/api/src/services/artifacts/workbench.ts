@@ -16,6 +16,7 @@ import {
   reportMarkdown,
 } from "./public";
 import { researchIdentity } from '../research/agentKey';
+import { isPositioningWorkflow } from '../opc/positioningWorkflow';
 import { tavilyCapabilities, tavilyParameters } from '../research/tavilyContract';
 const uuid = z.string().uuid();
 export const webCommandSchema = z.discriminatedUnion("action", [
@@ -152,6 +153,15 @@ export function workbenchService(
     async projects() {
       return projectSchema.array().parse(await query("projects"));
     },
+    /**
+     * LEGACY-CLOSE: a project the old /workbench created (not a positioning draft or one of its
+     * account, result or topic works). artifact_query 'projects' lists exactly these (0107/0134).
+     */
+    async isLegacyProject(projectId: string) {
+      const id = uuid.parse(projectId);
+      const listed = z.object({ projectId: uuid }).passthrough().array().parse(await query("projects"));
+      return listed.some((p) => p.projectId === id);
+    },
     async rounds(projectId: string) {
       return roundSchema
         .array()
@@ -174,6 +184,10 @@ export function workbenchService(
           ? prior
           : (await catalog(moduleId)).find((r) => r.id === v.registration);
       if (!entry) throw new Error("ARTIFACT_UNAVAILABLE");
+      // Owner 2026-10-13 (CONTENT-CONVERSATION-DRIVEN G): only a positioning Skill opens a guided step workspace.
+      // Any other Skill is used in free chat, where its steps are a work guide; a new round (first, next or upgrade)
+      // of such a workflow is refused here, the one remaining entry that could start one.
+      if (!isPositioningWorkflow(entry.workflow)) throw new Error("ARTIFACT_INVALID_WORKFLOW");
       if (
         prior &&
         (entry.moduleId !== prior.moduleId || entry.skillId !== prior.skillId)

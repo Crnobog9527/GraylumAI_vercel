@@ -50,3 +50,15 @@ it('mine rejects anonymous access and incomplete cursors', async () => {
     .rejects.toThrow();
   expect(signed.rpc).not.toHaveBeenCalled();
 });
+it('available tells a signed-in user whether the review is switched on, and fails closed', async () => {
+  const settings = await import('../services/fusion/settings');
+  const read = vi.spyOn(settings, 'readFusionSettings');
+  read.mockResolvedValueOnce({ review: { enabled: true } } as never);
+  expect(await mineFixture().caller.available()).toEqual({ enabled: true });
+  read.mockResolvedValueOnce({ review: { enabled: false } } as never);
+  expect(await mineFixture().caller.available()).toEqual({ enabled: false });
+  read.mockRejectedValueOnce(new Error('down'));
+  expect(await mineFixture().caller.available()).toEqual({ enabled: false });
+  await expect(mineFixture(false).caller.available()).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+  read.mockRestore();
+});
