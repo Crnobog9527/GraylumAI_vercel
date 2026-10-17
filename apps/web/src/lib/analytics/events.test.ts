@@ -50,9 +50,10 @@ describe('reportSignUpIfNew', () => {
 });
 
 describe('reportBeginCheckout', () => {
-  it('sends the catalog item, never an order', () => {
-    reportBeginCheckout({ itemType: 'membership_plan', itemId: 'plan-gold', billingCycle: 'yearly', offer: 'founder' });
-    expect(send).toHaveBeenCalledWith('G-TEST123', 'begin_checkout', { currency: 'USD',
-      items: [{ item_id: 'plan-gold', item_category: 'membership_plan', item_variant: 'yearly/founder' }] });
+  it('sends only currency, the pre-tax value and the catalog item ID', () => {
+    reportBeginCheckout('plan-gold', 49);
+    expect(send).toHaveBeenLastCalledWith('G-TEST123', 'begin_checkout', { currency: 'USD', value: 49, items: [{ item_id: 'plan-gold' }] });
+    reportBeginCheckout('plan-gold', null);
+    expect(send).toHaveBeenLastCalledWith('G-TEST123', 'begin_checkout', { currency: 'USD', items: [{ item_id: 'plan-gold' }] });
   });
 });

@@ -46,8 +46,8 @@ export function useMethodCheckout() {
         acceptedTerms: true, termsVersion: acceptedTermsVersion, ...(analytics ? { analytics } : {}) });
       if (result.state === 'open' && isStripeCheckoutUrl(result.url)) {
         setRedirecting(true);
-        // Statistics only (no order ID); a no-op without consent, and it never delays the hand-off.
-        reportBeginCheckout(purchase);
+        // Statistics only (catalog item and pre-tax value, no order ID); a no-op without consent.
+        reportBeginCheckout(purchase.itemId, 'checkoutValue' in result ? result.checkoutValue ?? null : null);
         window.location.assign(result.url);
         return;
       }

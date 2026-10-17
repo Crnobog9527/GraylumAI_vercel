@@ -1,12 +1,12 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 
 import { analyticsAllowed, readTermlyConsent } from './consent';
-import { gtagScriptUrl } from './config';
 import { pageTitleFor, sanitizePageUrl, sanitizeReferrer } from './sanitize';
 
 /**
- * GA4 in the browser (ANALYTICS plan §3.1, O2). gtag.js loads only after Termly reports statistics consent,
- * and only on a page we may report. Page views are sent by this code alone (`send_page_view: false`), with the
+ * GA4 in the browser (ANALYTICS plan §3.1, O2). gtag.js is a Termly-classified tag (category analytics) that
+ * Termly releases after consent; this code fills its command queue only with live consent and on a page we may
+ * report. Page views are sent by this code alone (`send_page_view: false`), with the
  * cleaned address, referrer and a fixed title set globally first, so GA's own automatic events
  * (session_start, first_visit, user_engagement) carry the same cleaned values. On a sensitive page, or when
  * consent is withdrawn, Google's opt-out switch `ga-disable-<ID>` stops every request; it flips back when
@@ -50,10 +50,8 @@ function load(measurementId: string) {
   window.gtag('config', measurementId, {
     send_page_view: false, allow_google_signals: false, allow_ad_personalization_signals: false,
   });
-  const script = document.createElement('script');
-  script.async = true;
-  script.src = gtagScriptUrl(measurementId);
-  document.head.appendChild(script);
+  // gtag.js itself is the Termly-classified tag rendered by SiteAnalytics; Termly releases it, and it then reads
+  // the queue above. Nothing here loads a script.
   loadedFor = measurementId;
 }
 

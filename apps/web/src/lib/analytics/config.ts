@@ -29,15 +29,20 @@ export function parseAnalyticsConfig(env: Record<string, string | undefined>): A
   };
 }
 
+// A bundle built without Next.js (component tests) has no `process`: read as unset there.
+const fromEnv = (read: () => string | undefined) => {
+  try { return read(); } catch { return undefined; }
+};
+
 // Written out one by one so Next.js inlines each NEXT_PUBLIC_ value into the client bundle.
 export const ANALYTICS_CONFIG: AnalyticsConfig = parseAnalyticsConfig({
-  NEXT_PUBLIC_TERMLY_WEBSITE_UUID: process.env.NEXT_PUBLIC_TERMLY_WEBSITE_UUID,
-  NEXT_PUBLIC_GA4_MEASUREMENT_ID: process.env.NEXT_PUBLIC_GA4_MEASUREMENT_ID,
-  NEXT_PUBLIC_VERCEL_ANALYTICS_CATEGORY: process.env.NEXT_PUBLIC_VERCEL_ANALYTICS_CATEGORY,
+  NEXT_PUBLIC_TERMLY_WEBSITE_UUID: fromEnv(() => process.env.NEXT_PUBLIC_TERMLY_WEBSITE_UUID),
+  NEXT_PUBLIC_GA4_MEASUREMENT_ID: fromEnv(() => process.env.NEXT_PUBLIC_GA4_MEASUREMENT_ID),
+  NEXT_PUBLIC_VERCEL_ANALYTICS_CATEGORY: fromEnv(() => process.env.NEXT_PUBLIC_VERCEL_ANALYTICS_CATEGORY),
 });
 
-/** Termly's resource blocker with automatic blocking off (plan O1 option A): it loads asynchronously, and our
- * code loads GA and Vercel only once Termly's consent state allows statistics (consent.ts). */
+/** Termly's resource blocker with automatic blocking off (plan O1 option A): it loads asynchronously and releases
+ * scripts we classify by hand (`type="text/plain" data-categories="analytics"`) once the visitor's consent allows. */
 export function termlyScriptUrl(uuid: string): string {
   return `https://app.termly.io/resource-blocker/${uuid}?autoBlock=off`;
 }

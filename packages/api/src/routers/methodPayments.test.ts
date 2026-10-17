@@ -113,7 +113,7 @@ it('sends card purchases past the environment gate to the Stripe card checkout, 
   stubStaging(); mocks.gateOpen.value = true;
   for (const method of ['card', 'card_cn'] as const) {
     await expect(fixture('user', settings(true)).caller.methodCheckout({ ...card, method }))
-      .resolves.toEqual({ orderId: 'card-order', state: 'open', url: 'https://checkout.stripe.com/c/pay/card' });
+      .resolves.toEqual({ orderId: 'card-order', state: 'open', url: 'https://checkout.stripe.com/c/pay/card', checkoutValue: null });
     expect(mocks.card).toHaveBeenLastCalledWith(expect.objectContaining({ purchase: { ...card, method } }));
   }
   await expect(fixture('user', settings(false)).caller.methodCheckout(card)).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
@@ -153,7 +153,7 @@ it('checks the route switch and version before the wallet checkout', async () =>
     .rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
   expect(mocks.wallet).not.toHaveBeenCalled();
   await expect(fixture('user', settings(true)).caller.methodCheckout(wallet))
-    .resolves.toEqual({ orderId: 'order', state: 'open', url: 'https://checkout.stripe.com/c/pay/x' });
+    .resolves.toEqual({ orderId: 'order', state: 'open', url: 'https://checkout.stripe.com/c/pay/x', checkoutValue: null });
   expect(mocks.wallet).toHaveBeenCalledWith(expect.objectContaining({ userId, termsVersion: 'terms-test', purchase: wallet }));
 });
 it('does not open Stripe wallets while the code gate is closed', async () => {

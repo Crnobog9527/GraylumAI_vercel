@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { gaServerConfig, parseGaCheckoutIds, purchaseEvent, reportGaPurchase, storeGaCheckoutIds, withdrawGaConsent } from './gaPurchase';
+import { checkoutValue, gaServerConfig, parseGaCheckoutIds, purchaseEvent, reportGaPurchase, storeGaCheckoutIds, withdrawGaConsent } from './gaPurchase';
 
 const env = { NEXT_PUBLIC_GA4_MEASUREMENT_ID: 'G-TEST1234', GA4_API_SECRET: 'secret-value-123' };
 const ids = { clientId: '123456789.1700000000', sessionId: '1700000000' };
@@ -38,7 +38,7 @@ describe('purchaseEvent', () => {
     const event = purchaseEvent(order, ids, 'random-tx');
     expect(event.events[0]!.params.value).toBe(17.99);
     expect(event.events[0]!.params).toMatchObject({ transaction_id: 'random-tx', currency: 'USD', session_id: '1700000000',
-      engagement_time_msec: 1, items: [{ item_id: 'plan-1', item_category: 'credit_package', item_variant: 'one_time/standard' }] });
+      engagement_time_msec: 1, items: [{ item_id: 'plan-1' }] });
     expect(JSON.stringify(event)).not.toContain(order.id);
     expect(purchaseEvent({ ...order, amount_total: 49600 }, ids, 't').events[0]!.params.value).toBe(496);
     expect(purchaseEvent({ ...order, amount_total: 5 }, ids, 't').events[0]!.params.value).toBe(0.05);
@@ -88,5 +88,19 @@ describe('store and withdraw', () => {
   it('withdrawal surfaces a failure so the browser retries', async () => {
     await expect(withdrawGaConsent(db(null).client, 'user')).resolves.toBeUndefined();
     await expect(withdrawGaConsent(db(null, { message: 'x' }).client, 'user')).rejects.toThrow('ANALYTICS_WITHDRAW_UNAVAILABLE');
+  });
+});
+
+describe('checkoutValue', () => {
+  const read = (data: unknown, error: unknown = null) => {
+    const chain = { select: () => chain, eq: vi.fn(() => chain), maybeSingle: async () => ({ data, error }) };
+    return { from: vi.fn(() => chain), chain } as unknown as SupabaseClient & { chain: typeof chain };
+  };
+  it('reads the buyer\'s own order amount before tax, in dollars', async () => {
+    const db = read({ amount_total: 4900 });
+    expect(await checkoutValue(db, 'user', 'order')).toBe(49);
+    expect((db as unknown as { chain: { eq: ReturnType<typeof vi.fn> } }).chain.eq).toHaveBeenCalledWith('user_id', 'user');
+    expect(await checkoutValue(read(null), 'user', 'order')).toBeNull();
+    expect(await checkoutValue(read(null, { message: 'x' }), 'user', 'order')).toBeNull();
   });
 });

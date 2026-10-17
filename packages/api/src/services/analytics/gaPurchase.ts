@@ -66,8 +66,7 @@ export function purchaseEvent(order: PurchaseOrder, ids: GaCheckoutIds, transact
         currency: 'USD',
         // amount_total is the pre-tax price the order was admitted with (tax is charged on top at Stripe).
         value: Number(centsToMajor(order.amount_total)),
-        items: [{ item_id: order.item_id, item_category: order.item_type,
-          item_variant: `${order.billing_cycle}/${order.offer_kind ?? 'standard'}` }],
+        items: [{ item_id: order.item_id }],
         session_id: ids.sessionId,
         engagement_time_msec: 1,
       },
@@ -107,6 +106,17 @@ export async function reportGaPurchase(db: SupabaseClient, order: PurchaseOrder,
 export async function withdrawGaConsent(db: SupabaseClient, userId: string) {
   const result = await db.rpc('analytics_withdraw_consent', { p_user: userId });
   if (result.error) throw new Error('ANALYTICS_WITHDRAW_UNAVAILABLE', { cause: result.error });
+}
+
+/** The opened order's pre-tax amount in dollars for the browser's begin_checkout, or null (statistics only). */
+export async function checkoutValue(db: SupabaseClient, userId: string, orderId: string): Promise<number | null> {
+  try {
+    const row = await db.from('payment_orders').select('amount_total').eq('id', orderId).eq('user_id', userId).maybeSingle();
+    const cents = row.data?.amount_total;
+    return row.error || typeof cents !== 'number' ? null : Number(centsToMajor(cents));
+  } catch {
+    return null;
+  }
 }
 
 /** Daily expiry of ids that were never taken (72 hours). Best effort. */

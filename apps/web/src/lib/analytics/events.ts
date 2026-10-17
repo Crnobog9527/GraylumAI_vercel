@@ -44,13 +44,11 @@ export function reportPositioningComplete(): boolean {
   return sendGaEvent(ANALYTICS_CONFIG.gaMeasurementId, 'positioning_complete');
 }
 
-export type CheckoutItem = { itemType: string; itemId: string; billingCycle: string; offer: string };
-
-/** A Stripe checkout session was created and the user is about to be sent to it. The catalog item ID only. */
-export function reportBeginCheckout(item: CheckoutItem): boolean {
+/** A Stripe checkout session was created and the user is about to be sent to it (plan §3.1: currency, value and
+ * the catalog item ID only; the value is the order's pre-tax amount from the server). */
+export function reportBeginCheckout(itemId: string, value: number | null): boolean {
   return sendGaEvent(ANALYTICS_CONFIG.gaMeasurementId, 'begin_checkout', {
-    currency: 'USD',
-    items: [{ item_id: item.itemId, item_category: item.itemType, item_variant: `${item.billingCycle}/${item.offer}` }],
+    currency: 'USD', ...(value === null ? {} : { value }), items: [{ item_id: itemId }],
   });
 }
 
@@ -58,3 +56,4 @@ export function reportBeginCheckout(item: CheckoutItem): boolean {
 export function checkoutAnalyticsIds(): Promise<GaCheckoutIds | null> {
   return readGaCheckoutIds(ANALYTICS_CONFIG.gaMeasurementId).catch(() => null);
 }
+

@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { assertCheckoutRateLimit, getStripeAppUrl, getStripeClient } from '../services/stripe';
 import { methodCheckoutInputSchema } from '../services/payments/methodPurchase';
-import { storeGaCheckoutIds } from '../services/analytics/gaPurchase';
+import { checkoutValue, storeGaCheckoutIds } from '../services/analytics/gaPurchase';
 import { createWalletCheckout } from '../services/payments/walletCheckout';
 import { createStripeCardCheckout } from '../services/payments/stripeMethodCheckout';
 import { readPaymentMethodRoutes, assertPaymentMethodRoute, isCardMethod } from '../services/payments/methodRouting';
@@ -64,8 +64,10 @@ export const methodPaymentProcedures = {
       const checkout = { db: ctx.supabaseAdmin, stripe: getStripeClient(), userId: ctx.profileId,
         appUrl: getStripeAppUrl(), termsVersion: terms.data.value.version, purchase: input };
       const result = await (isCardMethod(input.method) ? createStripeCardCheckout(checkout) : createWalletCheckout(checkout));
-      if (result.state === 'open' && analytics !== undefined) await storeGaCheckoutIds(ctx.supabaseAdmin, ctx.profileId, result.orderId, analytics);
-      return result;
+      if (result.state !== 'open') return result;
+      if (analytics !== undefined) await storeGaCheckoutIds(ctx.supabaseAdmin, ctx.profileId, result.orderId, analytics);
+      // The order's pre-tax amount for the browser's begin_checkout (statistics only; null when unreadable).
+      return { ...result, checkoutValue: await checkoutValue(ctx.supabaseAdmin, ctx.profileId, result.orderId) };
     } catch (error) {
       logMethodPaymentFailure('method_checkout', ctx.profileId, error, { method: input.method });
       // A throttled buyer gets TOO_MANY_REQUESTS with its retry hint, which the purchase page shows as such.
