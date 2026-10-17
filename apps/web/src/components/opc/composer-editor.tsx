@@ -68,6 +68,8 @@ type Props = {
   maxLength: number;
   className?: string;
   references?: ComposerReferenceHooks;
+  /** The parent's references for its `value` (UI-B): a value set from outside gets them back as references. */
+  knownReferences?: readonly LibraryReference[];
   ref?: Ref<ComposerEditorHandle>;
 };
 
@@ -77,14 +79,15 @@ type Props = {
  */
 export function ComposerEditor(props: Props) {
   const { value, onChange, onEnter, onEscape, disabled = false, label, placeholder, maxLength, className, references, ref } = props;
-  const latest = useRef({ onChange, onEnter, onEscape, disabled, label, placeholder, maxLength, references });
-  latest.current = { onChange, onEnter, onEscape, disabled, label, placeholder, maxLength, references };
+  const known = references ? props.knownReferences ?? [] : [];
+  const latest = useRef({ onChange, onEnter, onEscape, disabled, label, placeholder, maxLength, references, known });
+  latest.current = { onChange, onEnter, onEscape, disabled, label, placeholder, maxLength, references, known };
   // The text this editor last reported (or was given); a different `value` prop comes from the parent.
   const emitted = useRef(value);
   const editor = useEditor({
     immediatelyRender: false,
     editable: !disabled,
-    content: textToDoc(value),
+    content: textToDoc(value, known),
     extensions: [
       Document, Paragraph, Text, UndoRedo, LibraryReferenceNode,
       Placeholder.configure({ placeholder: () => latest.current.placeholder }),
@@ -148,7 +151,7 @@ export function ComposerEditor(props: Props) {
     editor.chain().setMeta(EXTERNAL, true).setMeta('addToHistory', false)
       .command(({ tr, state }) => {
         if (appended === null) {
-          tr.replaceWith(0, tr.doc.content.size, state.schema.nodeFromJSON(textToDoc(value)).content);
+          tr.replaceWith(0, tr.doc.content.size, state.schema.nodeFromJSON(textToDoc(value, latest.current.known)).content);
         } else {
           const end = Selection.atEnd(tr.doc).from;
           tr.replace(end, end, textToSlice(state.schema, appended));
@@ -183,9 +186,20 @@ export function ComposerEditor(props: Props) {
     insertReference: (range, reference) => {
       if (!editor) return false;
       const before = editor.state.doc;
-      editor.chain().focus().insertContentAt({ from: range.from, to: range.to }, [
-        { type: REFERENCE_NODE, attrs: reference }, { type: 'text', text: ' ' },
-      ]).run();
+      editor.chain().focus().command(({ tr }) => {
+        // Choosing a document that is already in the message (e.g. its newer version after LIB_REFERENCE_STALE)
+        // replaces the older tag: the request carries one version per document, the first tag's.
+        const older: number[] = [];
+        tr.doc.descendants((node, pos) => {
+          if (node.type.name === REFERENCE_NODE && node.attrs.documentId === reference.documentId) older.push(pos);
+        });
+        tr.insert(range.to, [
+          tr.doc.type.schema.nodes[REFERENCE_NODE].create(reference), tr.doc.type.schema.text(' '),
+        ]);
+        tr.delete(range.from, range.to);
+        for (const pos of older.map(at => tr.mapping.map(at)).sort((a, b) => b - a)) tr.delete(pos, pos + 1);
+        return true;
+      }).run();
       // The length filter drops a transaction silently; an unchanged document means it did not fit.
       return editor.state.doc !== before;
     },

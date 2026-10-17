@@ -13,15 +13,16 @@ import workStyles from '@/app/runtime/runtime-work.module.css';
  */
 
 /** Title row. With `meta` it shows the topic's platform, account and work info; otherwise `action`. */
-export function RuntimeHeader({ title, subtitle, meta, action, headingLevel: Heading = 'h1' }: {
+export function RuntimeHeader({ title, subtitle, meta, action, headingLevel = 'h1' }: {
   title: string;
-  /** The product page's title is its H1; a page that shows this header as an example under its own H1 passes 'h2'. */
+  /** The title's heading level: the page's own title (h1) by default; a page showing it inside its own content, h2. */
   headingLevel?: 'h1' | 'h2';
   /** Small line under the title (only shown without a topic). */
   subtitle?: string;
   meta?: { platform: string; account: string; infoHref: string; showExpand?: boolean; onExpand?: () => void };
   action?: ReactNode;
 }) {
+  const Heading = headingLevel;
   return (
     <header className={workStyles.workHead}>
       <div className={workStyles.workTitle}><Heading>{title}</Heading>{subtitle&&<small>{subtitle}</small>}</div>

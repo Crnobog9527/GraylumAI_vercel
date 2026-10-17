@@ -11,9 +11,9 @@ import resultStyles from "@/components/opc/positioning-result.module.css";
  */
 
 /** Title row of the positioning page: title, platform and state, work info, and reopening the right column. */
-export function PositioningHeader({ title, status, onWorkInfo, showExpand, onExpand, headingLevel: Heading = 'h1' }: {
+export function PositioningHeader({ title, status, onWorkInfo, showExpand, onExpand, headingLevel = 'h1' }: {
   title: string;
-  /** The product page's title is its H1; a page that shows this header as an example under its own H1 passes 'h2'. */
+  /** The title's heading level: the page's own title (h1) by default; a page showing it inside its own content, h2. */
   headingLevel?: 'h1' | 'h2';
   /** For example "整体规划 · 进行中". */
   status: string;
@@ -22,6 +22,7 @@ export function PositioningHeader({ title, status, onWorkInfo, showExpand, onExp
   showExpand?: boolean;
   onExpand?: () => void;
 }) {
+  const Heading = headingLevel;
   return (
     <header className={resultStyles.positionTop}>
       <Heading>{title}</Heading>
