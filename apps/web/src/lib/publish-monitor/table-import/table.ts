@@ -54,17 +54,36 @@ function decodeText(bytes: Uint8Array): string {
   }
 }
 
-/** The separator used most often outside quotes in the first record (comma on a tie). */
-function delimiterOf(text: string): string {
-  const counts: Record<string, number> = { ',': 0, ';': 0, '\t': 0 };
+/** Separator counts outside quotes for each of the first records (a header alone can contain a stray comma). */
+function separatorCounts(text: string, records = 5): Array<Record<string, number>> {
+  const out: Array<Record<string, number>> = [];
+  let counts: Record<string, number> = { ',': 0, ';': 0, '\t': 0 };
   let quoted = false;
-  for (let i = 0; i < text.length && i < 65_536; i += 1) {
+  for (let i = 0; i < text.length && i < 262_144 && out.length < records; i += 1) {
     const ch = text[i]!;
     if (ch === '"') quoted = !quoted;
-    else if (!quoted && (ch === '\n' || ch === '\r')) break;
-    else if (!quoted && ch in counts) counts[ch]! += 1;
+    else if (!quoted && (ch === '\n' || ch === '\r')) {
+      if (ch === '\r' && text[i + 1] === '\n') i += 1;
+      if (Object.values(counts).some(n => n > 0)) out.push(counts);
+      counts = { ',': 0, ';': 0, '\t': 0 };
+    } else if (!quoted && ch in counts) counts[ch]! += 1;
   }
-  return [',', ';', '\t'].reduce((best, d) => (counts[d]! > counts[best]! ? d : best), ',');
+  if (out.length < records && Object.values(counts).some(n => n > 0)) out.push(counts);
+  return out;
+}
+
+/**
+ * The separator that splits the first records into the same number of columns (more than one), preferring the one
+ * giving the most columns; plain text such as "Revenue, USD" in a semicolon file does not win, because its comma count
+ * differs from record to record. Falls back to the most frequent separator, comma on a tie.
+ */
+function delimiterOf(text: string): string {
+  const records = separatorCounts(text);
+  const candidates = [',', ';', '\t'];
+  const consistent = candidates.filter(d => records.length > 0 && records.every(r => r[d] === records[0]![d] && r[d]! > 0));
+  const pool = consistent.length ? consistent : candidates;
+  const first = records[0] ?? { ',': 0, ';': 0, '\t': 0 };
+  return pool.reduce((best, d) => (first[d]! > first[best]! ? d : best), pool[0]!);
 }
 
 /** RFC 4180 CSV: quoted fields with doubled quotes and embedded newlines; comma, semicolon or tab delimited. */
@@ -149,6 +168,25 @@ function firstSheetName(parts: Map<string, Uint8Array>): string {
   return name;
 }
 
+/** Built-in percentage number formats (0%, 0.00%) and any custom format containing a percent sign. */
+const BUILTIN_PERCENT_FORMATS = new Set([9, 10]);
+function percentStyleIndexes(styles: string | null): Set<number> {
+  const found = new Set<number>();
+  if (!styles) return found;
+  const percentFormats = new Set(BUILTIN_PERCENT_FORMATS);
+  for (const fmt of styles.matchAll(/<numFmt\b[^>]*>/g)) {
+    const id = Number(attribute(fmt[0], 'numFmtId'));
+    const code = unescapeXml(attribute(fmt[0], 'formatCode') ?? '');
+    // A percent sign outside quoted literal text.
+    if (Number.isInteger(id) && /%/.test(code.replace(/"[^"]*"/g, ''))) percentFormats.add(id);
+  }
+  const xfs = /<cellXfs\b[^>]*>([\s\S]*?)<\/cellXfs>/.exec(styles)?.[1] ?? '';
+  [...xfs.matchAll(/<xf\b[^>]*>/g)].forEach((xf, index) => {
+    if (percentFormats.has(Number(attribute(xf[0], 'numFmtId')))) found.add(index);
+  });
+  return found;
+}
+
 /** XLSX (Office Open XML spreadsheet), first worksheet only; formulas are read as their cached values. */
 export async function parseXlsx(bytes: Uint8Array): Promise<Grid> {
   if (bytes.length === 0) fail('TABLE_EMPTY');
@@ -159,6 +197,7 @@ export async function parseXlsx(bytes: Uint8Array): Promise<Grid> {
     const shared = part(parts, 'xl/sharedStrings.xml');
     const strings = shared ? [...shared.matchAll(/<si\b[^>]*>([\s\S]*?)<\/si>|<si\b[^>]*\/>/g)].map(m => runText(m[1] ?? '')) : [];
     const sheet = part(parts, firstSheetName(parts)) ?? fail('TABLE_MALFORMED');
+    const percentStyles = percentStyleIndexes(part(parts, 'xl/styles.xml'));
     const lines: string[][] = [];
     for (const row of sheet.matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>|<row\b[^>]*\/>/g)) {
       const rowIndex = Number(attribute(row[0].slice(0, row[0].indexOf('>') + 1), 'r') ?? lines.length + 1) - 1;
@@ -177,7 +216,14 @@ export async function parseXlsx(bytes: Uint8Array): Promise<Grid> {
         if (type === 's') text = strings[Number(value)] ?? '';
         else if (type === 'inlineStr') text = runText(body);
         else if (type === 'b') text = value === '1' ? 'TRUE' : 'FALSE';
-        else if (type !== 'e' && value !== undefined) text = unescapeXml(value);
+        else if (type !== 'e' && value !== undefined) {
+          text = unescapeXml(value);
+          // A percentage-formatted number is stored as a fraction (45% is 0.45): read it as the user sees it.
+          const style = Number(attribute(attrs, 's') ?? -1);
+          if (percentStyles.has(style) && /^-?\d+(\.\d+)?(E-?\d+)?$/i.test(text)) {
+            text = `${Math.round(Number(text) * 100 * 1e6) / 1e6}%`;
+          }
+        }
         line[column] = checkCell(text);
       }
       lines[rowIndex] = Array.from({ length: line.length }, (_, i) => line[i] ?? '');

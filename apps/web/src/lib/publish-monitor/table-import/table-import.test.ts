@@ -32,6 +32,11 @@ describe('CSV', () => {
     expect(parseCsv(utf8('"Post, title";Likes\n"a, b";3\n'))).toEqual({ header: ['Post, title', 'Likes'], rows: [['a, b', '3']] });
   });
 
+  it('resolves separator ties by structure: plain text commas in a semicolon file do not win', () => {
+    expect(parseCsv(utf8('Revenue, USD;Likes\n10,50;3\n7;1\n'))).toEqual({ header: ['Revenue, USD', 'Likes'],
+      rows: [['10,50', '3'], ['7', '1']] });
+  });
+
   it('falls back to GB18030 for Chinese exports', () => {
     const gbk = new Uint8Array([0xb2, 0xa5, 0xb7, 0xc5, 0x2c, 0x61, 0x0a, 0x31, 0x2c, 0x32]); // "播放,a\n1,2"
     expect(parseCsv(gbk).header).toEqual(['播放', 'a']);
@@ -84,6 +89,22 @@ describe('XLSX', () => {
     expect(parseDate('44834', true)).toBe(new Date(2026, 9, 1).toISOString());
   });
 
+  it('reads percentage-formatted cells as the user sees them (45% is stored as 0.45)', async () => {
+    const book = new Uint8Array(zipFixture([
+      { name: 'xl/workbook.xml', body: `${HEAD}<workbook xmlns:r="r"><sheets><sheet r:id="rId1"/></sheets></workbook>` },
+      { name: 'xl/_rels/workbook.xml.rels', body: `${HEAD}<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>` },
+      { name: 'xl/styles.xml', body: `${HEAD}<styleSheet><numFmts count="1"><numFmt numFmtId="164" formatCode="0.0%"/></numFmts>`
+        + '<cellXfs count="3"><xf numFmtId="0"/><xf numFmtId="9"/><xf numFmtId="164"/></cellXfs></styleSheet>' },
+      { name: 'xl/worksheets/sheet1.xml', body: `${HEAD}<worksheet><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>完播率</t></is></c>`
+        + '<c r="B1" t="inlineStr"><is><t>播放量</t></is></c></row><row r="2"><c r="A2" s="1"><v>0.45</v></c><c r="B2" s="0"><v>1200</v></c></row>'
+        + '<row r="3"><c r="A3" s="2"><v>0.125</v></c><c r="B3"><v>3</v></c></row></sheetData></worksheet>' },
+    ]));
+    const grid = await parseXlsx(book);
+    expect(grid.rows).toEqual([['45%', '1200'], ['12.5%', '3']]);
+    expect(buildRows({ ...grid, rows: grid.rows.map(r => ['https://x.com/a', ...r]), header: ['链接', ...grid.header] },
+      ['url', 'completion_rate', 'views']).rows[0]!.metrics).toEqual({ completion_rate: 45, views: 1200 });
+  });
+
   it('caps rows in a worksheet', async () => {
     const rows = Array.from({ length: TABLE_LIMITS.maxRows + 2 }, (_, i) => `<row r="${i + 1}"><c r="A${i + 1}"><v>${i}</v></c></row>`);
     expect(await code(() => parseXlsx(xlsx(rows.join(''))))).toBe('TABLE_TOO_MANY_ROWS');
@@ -126,6 +147,11 @@ describe('column mapping and rows', () => {
     expect(built.errors.map(e => [e.line, e.code])).toEqual([[3, 'POST_KEY_MISSING'], [4, 'METRICS_EMPTY'],
       [5, 'NUMBER_INVALID'], [6, 'URL_INVALID']]);
     expect(buildRows(grid, ['url', 'views', 'views']).duplicateFields).toEqual(['views']);
+    // The server's rules apply per row: credentials or a private host in a link, a value above the cap.
+    const strict = buildRows({ header: ['链接', '播放量'], rows: [['https://user:pass@example.com/p', '1'],
+      ['https://127.0.0.1/p', '1'], ['https://x.com/ok', '10000000000000']] }, ['url', 'views']);
+    expect(strict.errors.map(e => e.code)).toEqual(['URL_INVALID', 'URL_INVALID', 'NUMBER_INVALID']);
+    expect(suggestMapping(['净增粉丝'])).toEqual([null]);
     // A post key longer than the stored identity is refused, never shortened into another post's key.
     const long = `https://example.com/${'a'.repeat(300)}`;
     expect(buildRows({ header: ['链接', '播放量'], rows: [[long, '1']] }, ['url', 'views']).errors.map(e => e.code))

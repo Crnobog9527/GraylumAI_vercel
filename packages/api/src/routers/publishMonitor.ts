@@ -15,6 +15,7 @@ import {
 } from '../services/publishMonitor/tikhub';
 import { checkRateLimitOrThrow } from '../services/redisRateLimiter';
 import { publishMonitorConnectRouter } from './publishMonitorConnect';
+import { publishMonitorPublishRouter } from './publishMonitorPublish';
 import { guarded as safe } from './publishMonitorGuard';
 
 /** PUBLISH-MONITOR: a user reads and changes only their own monitoring state; off until enabled by admin. */
@@ -80,4 +81,5 @@ export const publishMonitorRouter = router({
     return addBenchmark(ctx.supabaseAdmin, ctx.profileId, input);
   })),
   connect: publishMonitorConnectRouter,
+  publish: publishMonitorPublishRouter,
 });
