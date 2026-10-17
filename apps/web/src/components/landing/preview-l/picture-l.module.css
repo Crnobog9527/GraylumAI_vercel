@@ -2,7 +2,8 @@
 /* Sample L's step one picture (PositioningPictureL): only the frame around the product's own components. The middle
    column scrolls as a whole, like the product page, kept at its end (newest message, the message box, the footer). */
 .column { position: relative; min-width: 0; min-height: 0; margin: 6px 0; border-radius: 12px; background: #fff; overflow: hidden; }
-.scroll { display: grid; align-content: start; gap: 12px; height: 100%; padding: 12px 18px; overflow: hidden; }
+/* Rows keep their own height (the log its own, up to the product's 55vh): the column scrolls, nothing is squeezed. */
+.scroll { display: grid; grid-auto-rows: max-content; align-content: start; gap: 12px; height: 100%; padding: 12px 18px; overflow: hidden; }
 /* A block around the message box, as on the product page, so it takes the column's width up to its own maximum. */
 .composer { display: block; min-width: 0; }
 .demo {

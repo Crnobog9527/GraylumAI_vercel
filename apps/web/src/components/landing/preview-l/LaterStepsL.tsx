@@ -117,7 +117,7 @@ function WorkChatPicture({ id }: { id: string }) {
       <RailJ published launched />
       <section className={picture.column} inert>
         <div ref={chat} className={styles.chat}>
-          <RuntimeHeader title={CHAT.title} meta={{ platform: CHAT.platform, account: CHAT.account, infoHref: '#' }} />
+          <RuntimeHeader headingLevel="h2" title={CHAT.title} meta={{ platform: CHAT.platform, account: CHAT.account, infoHref: '#' }} />
           <div className={work.conversation}>
             <div className={work.transcript}>
               {id === 'topics' ? (

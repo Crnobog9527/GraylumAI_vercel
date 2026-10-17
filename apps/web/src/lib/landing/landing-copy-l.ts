@@ -197,3 +197,6 @@ export const L_COMPARE_NEXT: Readonly<Record<number, string>> = {
  */
 export const L_VOICE_FOLD = '看完整做法';
 export const L_COMPARE_STEPS: Readonly<Record<number, string>> = { 1: '诊断与平台对标', 3: '诊断与平台对标' };
+
+/** Owner 2026-10-17, round six: the line under the price button (no free trial without the sign-up credits). */
+export const L_PRICE_NOTE = { free: '无需绑卡 · 免费试用', noCard: '无需绑卡' } as const;

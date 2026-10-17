@@ -13,10 +13,8 @@ import page from '@/components/landing/preview-j/j.module.css';
 import { CtaK } from '@/components/landing/preview-k/CtaK';
 import k from '@/components/landing/preview-k/k.module.css';
 import { StickyCtaMNO } from '@/components/landing/preview-mno/StickyCtaMNO';
-import { HERO, RISK_REVERSAL } from '@/lib/landing/landing-copy';
-import { J_FINAL } from '@/lib/landing/landing-copy-j';
-import { K_GOLD_LINE, K_PRICE_TERMS } from '@/lib/landing/landing-copy-k';
-import { L_NOTE_REGIONS, L_OPS, L_VOICE_FOLD } from '@/lib/landing/landing-copy-l';
+import { HERO } from '@/lib/landing/landing-copy';
+import { L_NOTE_REGIONS, L_OPS, L_PRICE_NOTE, L_VOICE_FOLD } from '@/lib/landing/landing-copy-l';
 import { allOn } from '@/lib/landing/landing-flags';
 import { cn } from '@/lib/utils';
 import { HeroL } from './HeroL';
@@ -24,7 +22,6 @@ import { JuryModuleL } from './JuryModuleL';
 import { SamplesL } from './SamplesL';
 import { ScenariosL } from './ScenariosL';
 import { StepsL } from './StepsL';
-import styles from './l.module.css';
 
 const SAMPLES = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l'] as const;
 
@@ -47,17 +44,9 @@ const SAMPLES = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l'] as 
  * time. Every capability not built yet is off (landing-flags), so its block does not show.
  */
 export function SampleL({ data, siteName, extras }: { data: LandingData; siteName: string; extras: PageExtras }) {
-  const faqIds = new Set(data.faqGroups.flatMap(group => group.items.map(item => item.id)));
-  const terms = faqIds.has(K_PRICE_TERMS.faqId) ? (
-    <p className={k.terms}>
-      <a href={`#${K_PRICE_TERMS.faqId}`}>{K_PRICE_TERMS.cancel}</a> · <a href={`#${K_PRICE_TERMS.faqId}`}>{K_PRICE_TERMS.refund}</a>
-    </p>
-  ) : null;
-  // The price area as before round three (Owner 2026-10-17: "区域 7 的价格对比照旧"), with its Gold line.
-  const gold = allOn(extras.flags, K_GOLD_LINE.needs) ? <p className={k.gold}>{K_GOLD_LINE.text}</p> : null;
-  // "先聊后买" right by the price button (Owner 2026-10-17, round three: no plan cards on the home page).
-  const riskLine = allOn(extras.flags, ['signupGrant'])
-    ? <p className={styles.riskLine}><b>{RISK_REVERSAL.title}</b>{J_FINAL.note}</p> : null;
+  // Under the price button (Owner 2026-10-17, round six): "无需绑卡 · 免费试用"; cancelling and refunds are explained on
+  // the price page, not here, and the home page carries no "先聊后买" or Gold line.
+  const terms = <p className={k.terms}>{allOn(extras.flags, ['signupGrant']) ? L_PRICE_NOTE.free : L_PRICE_NOTE.noCard}</p>;
   return (
     <MotionJ className={cn(light.light, page.page, k.page)}>
       <nav aria-label="样稿切换" className={page.sampleBar}>
@@ -77,7 +66,7 @@ export function SampleL({ data, siteName, extras }: { data: LandingData; siteNam
         {extras.showSamples ? <SamplesL /> : null}
         <ScenariosL flags={extras.flags} after={<CtaK />} />
         <PriceJ proMonthly={data.pricing.proMonthly} rows={data.compareRows} calm plainTotal checked={false} quiet
-          after={terms || gold || riskLine ? <>{riskLine}{terms}{gold}</> : undefined} />
+          after={terms} />
         <FaqJ groups={data.faqGroups} />
         <FinalJ freeTrial={allOn(extras.flags, ['signupGrant'])} />
       </main>

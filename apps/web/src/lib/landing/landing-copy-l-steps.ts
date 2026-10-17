@@ -27,16 +27,6 @@ export const L_STEPS = {
   },
 } as const;
 
-/**
- * Step one opens as the product does (Owner 2026-10-17, round four review): the coach speaks first ("AI 自媒体陪跑教练 ·
- * 主动引导"), no message of the person's before it. NEW: the lead-in of sample J's first question, rewritten for an
- * opening; the question itself follows unchanged.
- */
-export const L_OPENING = {
-  replace: '好，做饭是个好起点。先不急着定拍什么，我先把你的情况弄清楚，一次只问一个问题。',
-  with: '你好，我是你的 AI 自媒体陪跑教练。你想做下班后家常菜的账号，我们先把你的情况弄清楚，一次只问一个问题。',
-} as const;
-
 /** The jury, larger (Owner 2026-10-17: "把这个按钮和模块稍微做大一点"); wording from the plan, true to the mechanism. */
 export const L_JURY = {
   name: '多模型评审团',

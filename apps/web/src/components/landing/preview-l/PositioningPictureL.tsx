@@ -15,30 +15,25 @@ import result from '@/components/opc/positioning-result.module.css';
 import { OTHER_PLACEHOLDER, QuestionCardView } from '@/components/opc/question-card';
 import { WorkComposer } from '@/components/opc/work-composer';
 import { Button } from '@/components/ui/button';
-import { J_PERSONA_DIRECTION, J_PERSONA_GOAL, J_PERSONA_ON_CAMERA, J_STEPS } from '@/lib/landing/landing-copy-j-persona';
+import { J_PERSONA_DIRECTION, J_PERSONA_ON_CAMERA, J_STEPS } from '@/lib/landing/landing-copy-j-persona';
 import { J_REPORT, J_TAKEOVER_MOMENTS, type TakeoverLine } from '@/lib/landing/landing-copy-j-takeover';
-import { L_OPENING } from '@/lib/landing/landing-copy-l-steps';
+import { L_GOAL_CARD, L_POSITIONING_MOMENTS } from '@/lib/landing/landing-copy-l-positioning';
 import { L_CLIP_PARTS } from './RealPartsL';
 import styles from './picture-l.module.css';
 
 const noop = () => undefined;
-const QUESTIONS = { goal: J_PERSONA_GOAL, camera: J_PERSONA_ON_CAMERA, direction: J_PERSONA_DIRECTION } as const;
+const QUESTIONS = { goal: L_GOAL_CARD, camera: J_PERSONA_ON_CAMERA, direction: J_PERSONA_DIRECTION } as const;
 type Line = TakeoverLine & { opening?: boolean };
 
-/** A moment's messages for sample L: the first moment opens with the coach (主动引导), not with the person. */
-function script(moment: number): readonly Line[] {
-  const lines = J_TAKEOVER_MOMENTS[moment]?.lines ?? [];
-  if (moment !== 0) return lines;
-  const [, first, ...rest] = lines;
-  return [{ ...first, opening: true, text: first.text.replace(L_OPENING.replace, L_OPENING.with) }, ...rest];
-}
+/** A moment's messages: sample L's own script (round six), opening with the coach. */
+const script = (moment: number): readonly Line[] => L_POSITIONING_MOMENTS[moment]?.lines ?? [];
 
 /**
  * Sample L's step one picture (Owner 2026-10-17: "落地页所有产品界面的这个组件，你不要自己再重新写一遍"): the positioning
  * workspace put together from the product's own display components, the ones the product page renders
  * (chat-display: header, step strip, the message list and its bubbles, the checklist column; CaptureChecklist; the
  * question card docked in the real message box, WorkComposer; StepConfirmCard; the research record and benchmark
- * table; RealPartsL's report dialog). Sample J's script plays through it; the sidebar is sample J's (the product's
+ * table; RealPartsL's report dialog). Sample L's own script plays through it (landing-copy-l-positioning.ts); the sidebar is sample J's (the product's
  * workspace frame is not a display component yet). Only the frame around them is this page's: the grid and the scroll
  * that keeps the newest message and the message box in view, as the product page does. A picture: inert.
  */
@@ -66,11 +61,18 @@ export function PositioningPictureL({ moment, local }: { moment: number; local: 
   useLayoutEffect(() => {
     const node = log.current;
     const newest = node?.querySelector<HTMLElement>('[data-line]:last-of-type');
-    if (node && newest) {
-      const extra = Math.max(0, newest.offsetHeight + 24 - node.clientHeight);
-      node.scrollTop = Math.min(node.scrollHeight - node.clientHeight, Math.max(0, newest.offsetTop - 12 + extra * reading));
-    }
-    if (column.current) column.current.scrollTop = column.current.scrollHeight;
+    const box = column.current;
+    if (!node || !newest || !box) return;
+    // The log puts the newest message at its top, then reads on through a long one as the scroll goes.
+    // Positions inside the log are measured from the log itself (it is not the messages' offset parent).
+    const top = newest.getBoundingClientRect().top - node.getBoundingClientRect().top + node.scrollTop;
+    const extra = Math.max(0, newest.offsetHeight + 24 - node.clientHeight);
+    node.scrollTop = Math.min(node.scrollHeight - node.clientHeight, Math.max(0, top - 12 + extra * reading));
+    // The column follows the reading too: first the conversation from the newest message's top, then down to the
+    // message box and the question docked on it, as a person reads before answering.
+    const end = box.scrollHeight - box.clientHeight;
+    const logTop = Math.min(end, Math.max(0, box.scrollTop + node.getBoundingClientRect().top - box.getBoundingClientRect().top - 4));
+    box.scrollTop = logTop + (end - logTop) * reading;
   }, [moment, lines.length, reading, question]);
 
   return (
@@ -78,7 +80,7 @@ export function PositioningPictureL({ moment, local }: { moment: number; local: 
       <RailJ published={step === 3} launched />
       <section className={styles.column} inert>
         <div ref={column} className={styles.scroll}>
-          <PositioningHeader title="我的定位分析" status={`整体规划 · ${step === 3 ? '已确认' : '进行中'}`} />
+          <PositioningHeader headingLevel="h2" title="我的定位分析" status={`整体规划 · ${step === 3 ? '已确认' : '进行中'}`} />
           <PositioningStepStrip steps={J_STEPS.map(item => ({ id: item.id, title: item.title, valid: valid[item.id] }))}
             selectedId={J_STEPS[shownStep].id} />
           <MentorChatHeading />

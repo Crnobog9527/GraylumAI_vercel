@@ -22,6 +22,8 @@ import { L_SAMPLES_REDO } from '@/lib/landing/landing-copy-l-samples';
 import { SAMPLE_OVERVIEWS } from '@/lib/landing/sample-reports/overview';
 import { L_WORKFLOWS } from '@/lib/landing/landing-copy-l-workflows';
 import { L_LATER } from '@/lib/landing/landing-copy-l-later';
+import { L_POSITIONING_MOMENTS, L_SKILL_OPENING } from '@/lib/landing/landing-copy-l-positioning';
+import { L_PRICE_NOTE } from '@/lib/landing/landing-copy-l';
 import { HOW_IT_WORKS as HOW } from '@/lib/landing/landing-copy';
 import { trpc } from '@/trpc/client';
 import { countOf, OverviewL } from './OverviewL';
@@ -229,12 +231,30 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     for (const hint of ['移到卡片上会停下', '左右滑动看更多']) expect(html).not.toContain(hint);
   });
 
-  it('keeps the price comparison, our price quiet, and 先聊后买 right by its button', () => {
+  it('keeps the price comparison quiet, with only "无需绑卡 · 免费试用" under its button (round six)', () => {
     const html = render();
     const price = html.slice(html.indexOf('id="pricing-title"'), html.indexOf('id="faq-title"'));
     expect(price).toContain('data-quiet="true"');
-    expect(price).toContain('先聊后买');
+    expect(price).toContain(L_PRICE_NOTE.free);
+    for (const gone of ['先聊后买', '多位顶级模型再审一遍', '随时取消', '退款规则']) expect(price).not.toContain(gone);
     expect(price).not.toContain('data-plan=');
+  });
+
+  it('opens step one with the positioning Skill\'s own opening and keeps one person throughout (round six)', () => {
+    const [know, diagnose] = L_POSITIONING_MOMENTS;
+    expect(know.lines[0]).toMatchObject({ role: 'coach', opening: true });
+    expect(know.lines[0].text.startsWith(L_SKILL_OPENING)).toBe(true);
+    // The person never turns to weekend dinners on their own; the coach raises them as one of the directions.
+    for (const moment of L_POSITIONING_MOMENTS) {
+      for (const line of moment.lines) if (line.role === 'user') expect(line.text).not.toContain('精致大餐');
+    }
+    expect(diagnose.lines[0]).toMatchObject({ role: 'coach', card: 'direction' });
+    // What the first summary lists, the person said before it.
+    const said = know.lines.filter(line => line.role === 'user').map(line => line.text).join('');
+    for (const fact of ['一年后', 'TikTok', 'Instagram', '长视频', '二十多道', '常问', '不知道该找谁', '支架']) expect(said).toContain(fact);
+    const picture = renderToStaticMarkup(withTrpc(createElement(PositioningPictureL, { moment: 0, local: 0 })));
+    expect(picture).toContain(escape(L_SKILL_OPENING));
+    expect(picture).not.toContain('<h1');
   });
 
   it('keeps one button wording and a button at least every two regions', () => {
