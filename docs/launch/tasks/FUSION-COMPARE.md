@@ -102,8 +102,14 @@
   各列请求里的指令和资源与同一时刻普通自由对话 `activateFreeChatSkill` 的结果一致（测试比较两边）。
 - **本次输入里 `@` 引用的资料库文档**：普通对话的引用不在正文里，由 `runtime/page.tsx` 第 184–199 行作为 `references` 单独提交、由 runtime 准入按引用读取。
   对比的 `estimate` / `start` 接收同一个 `references` 字段，服务端用普通对话同一个引用读取函数校验（本人的、未删除）并读出正文，整份冻结进快照，
-  记下每份文档的版本标识和哈希；放不进 90000 B 时整次拒绝。引用的文档按第 3.7 节和工作区资料一样接入来源删除（依赖用 `content_erasure_references`
-  能识别的键记录）。PR-2 验收：带 `@` 引用发起对比，各列请求里有这些文档正文；引用别人的或已删除的文档被拒。
+  记下每份文档的版本标识和哈希；放不进 90000 B 时整次拒绝。
+  **资料库文档的删除走它自己的流程**，不是第 3.7 节的工作区来源删除：资料库删除由 `runtime_library_propagate`（`0262_runtime_library_references.sql` 第 205 行起）
+  扫描 `runtime_library_references.document_id` 找到复制过文档的执行再清洗，不经过按 `sourceVersionId` 匹配的 `content_erasure_scope`；对比没有 Runtime 执行，
+  不会写进那张表。所以 PR-2 的迁移（0285）给对比登记 `documentId` 依赖（在 `fusion_compares` 上加文档依赖列，或在 `runtime_library_references`
+  旁边加对比专用的依赖行，取改动小的一种），并扩展 `runtime_library_propagate`：文档删除时，引用过它的对比按 0235 同样的逐运行单步骤清洗冻结输入、
+  删各列正文和对比记录；采用写回的执行在建执行时同样写进 `runtime_library_references`（照普通执行由 0262 的冻结触发器登记），随文档删除一起处理。
+  PR-2 验收：带 `@` 引用发起对比，各列请求里有这些文档正文；引用别人的或已删除的文档被拒；对比之后删除被引用的文档，对比记录、各列正文和冻结输入都被清掉，
+  采用写回的那条回答按普通执行的规则处理。
 - 历史的读取复用 runtime 现有的"按会话读历史并裁剪到用途上限"的读取函数，口径和普通对话一样，不另写一套裁剪；裁剪后整份输入受 90000 B 上限（`FUSION_INPUT_CAP`）。
   超过就在冻结前拒绝并说明原因，不悄悄截掉问题本身。
 - 不带工具：请求里没有 `tools`、`tool_choice`，web 插件显式关闭（复用 `fusionRequestBody`）。Skill 指令里提到的工具，模型没法调用；
@@ -121,7 +127,7 @@
 - **定位前置检查（POSITIONING-GATE）**：普通 Runtime 准入时对没有定位的用户做两层检查（`services/runtime/positioningGate.ts`、`positioningFallback.ts`）：
   选了"与社交媒体相关"的 Skill 直接拒绝；其他请求先由 Decisions 判断，判为拦截就拒绝，判不准时主模型带兜底指令、回答兜底标记时这一轮不收费。
   对比在建运行单之前复用同一套：
-  - **付费的 Decisions 判断只在 `start` 做，并且先落库再判断**：`estimate` 没有请求编号、可以反复调用，只做静态检查（社媒 Skill、退款次数是否已到上限、开关和权限），
+  - **付费的 Decisions 判断只在 `start` 做，并且先落库再判断**：`estimate` 没有请求编号、可以反复调用，只做静态检查（社媒 Skill、开关和权限；退款次数已到上限只作为提示返回，不拒绝——到上限时 Decisions 判 `clear` 仍可继续，最终由 `start` 的 capped 分支决定），
     不调用 Decisions。`start` 第一步在一个事务里按 `UNIQUE(actor_id, request_id)` 插入对比记录（状态 `admitting`，还没有计费组）——
     只有插入成功的那个请求才去调 Decisions。插入时同时冻结**整份请求的哈希**（会话、问题、Skill 选择、引用、勾选的模型、用户看到的预估），
     和普通 `runtime_admission_replay` 一样：同一 `requestId` 再来时先比较哈希，不一致就返回 `FUSION_COMPARE_REQUEST_CONFLICT`，不返回旧结果；
