@@ -19,15 +19,20 @@ const reportOnlyCsp = [
   "base-uri 'self'",
   "object-src 'none'",
   "frame-ancestors 'none'",
-  "script-src 'self' 'unsafe-inline' https://hcaptcha.com https://*.hcaptcha.com",
+  "script-src 'self' 'unsafe-inline' https://hcaptcha.com https://*.hcaptcha.com https://app.termly.io https://www.googletagmanager.com",
   "style-src 'self' 'unsafe-inline' https://hcaptcha.com https://*.hcaptcha.com",
-  "img-src 'self' data: blob: https://*.supabase.co https://hcaptcha.com https://*.hcaptcha.com",
+  [
+    "img-src 'self' data: blob: https://*.supabase.co https://hcaptcha.com https://*.hcaptcha.com",
+    "https://*.termly.io https://*.google-analytics.com https://www.googletagmanager.com",
+  ].join(" "),
   "font-src 'self'",
   "media-src 'self' blob: https://*.supabase.co",
   [
     "connect-src 'self' https://*.supabase.co wss://*.supabase.co",
     "https://*.ingest.sentry.io https://*.ingest.us.sentry.io https://*.ingest.de.sentry.io",
     "https://hcaptcha.com https://*.hcaptcha.com https://vitals.vercel-insights.com",
+    // ANALYTICS: Termly consent records and GA4 collection (report-only, observed before enforcing).
+    "https://*.termly.io https://*.google-analytics.com https://*.analytics.google.com https://www.googletagmanager.com",
   ].join(" "),
   "frame-src https://hcaptcha.com https://*.hcaptcha.com",
   // Session Replay uses a compression worker.
@@ -49,7 +54,8 @@ const nextConfig: NextConfig = {
       source: "/:path*",
       headers: [
         { key: "X-Content-Type-Options", value: "nosniff" },
-        { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+        // ANALYTICS plan §3.3: only the origin, even within the site, so no path or query reaches a referrer.
+        { key: "Referrer-Policy", value: "strict-origin" },
         { key: "X-Frame-Options", value: "DENY" },
         {
           key: "Permissions-Policy",

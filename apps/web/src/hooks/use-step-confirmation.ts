@@ -5,6 +5,7 @@ import {
   isConfirmStepEnvelope, type ConfirmEnvelopeState, type ConfirmStepEnvelope, type Information,
 } from "@/app/positioning/[draftId]/confirm-envelope";
 import { isDefiniteConfirmConflict } from "@/app/positioning/[draftId]/confirm-conflict";
+import { reportPositioningComplete } from "@/lib/analytics/events";
 import {
   sameVisibleStep, stepBody, stepConfirmationValues, visibleStep, withEdits,
   type FieldValue, type ReviewProblem, type StepInformation, type VisibleStep,
@@ -99,7 +100,11 @@ export async function executeConfirmation(io: ConfirmationIo, step: Step, reques
   }
   const current = await readCurrent();
   io.storage.removeItem(k);
-  if (request.finishStep !== false && current.snapshot.steps[step.id]?.valid) io.onConfirmed(step.id);
+  if (request.finishStep !== false && current.snapshot.steps[step.id]?.valid) {
+    io.onConfirmed(step.id);
+    // Statistics only: the step that leaves every step confirmed completes a new positioning (not an account revision).
+    if (!current.accountRevision && Object.values(current.snapshot.steps).every(state => state.valid)) reportPositioningComplete();
+  }
 }
 
 /**

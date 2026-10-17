@@ -110,9 +110,9 @@ async function paced<T>(pacing: Pacing, call: () => Promise<Outcome<T>>): Promis
 }
 
 async function acquirePaced(deps: ClientDeps, pacing: Pacing): Promise<{ ok: true } | { ok: false; retryAfterSeconds: number }> {
-  const outcome = await paced(pacing, async () => {
+  const outcome = await paced(pacing, async (): Promise<Outcome<true>> => {
     const slot = await deps.limiter.acquire();
-    return slot.ok ? { kind: 'ok' as const, value: true } : { kind: 'rate_limited' as const, retryAfterSeconds: slot.retryAfterSeconds };
+    return slot.ok ? { kind: 'ok', value: true } : { kind: 'rate_limited', retryAfterSeconds: slot.retryAfterSeconds, sent: false };
   });
   return outcome.kind === 'ok' ? { ok: true } : { ok: false, retryAfterSeconds: outcome.kind === 'rate_limited' ? outcome.retryAfterSeconds : 5 };
 }
@@ -212,7 +212,7 @@ async function checkWithProvider(db: Rpc, deps: ClientDeps, jobId: string, provi
   let postId = providerPostId;
   if (!postId) {
     const found = await findPostByExternalId(deps, jobId);
-    // The shared limiter refused: nothing was asked, so this is no evidence about the post at all.
+    // Rate limited (our limiter or the provider's 429): no answer about the post, so this is no evidence at all.
     if (found.kind === 'rate_limited') return { learned: false, busy: true, code: 'PUBLISH_MONITOR_PROVIDER_BUSY', job: null };
     if (found.kind !== 'ok') return { learned: false, busy: false, code: 'PUBLISH_MONITOR_CHECK_FAILED', job: null };
     if (!found.value) return { learned: false, busy: false, code: 'PUBLISH_MONITOR_NOT_FOUND_YET', job: null };

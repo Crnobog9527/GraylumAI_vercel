@@ -43,8 +43,8 @@ export function QuestionCardView({
   const reasonId = useId();
   const reasonIndex = card.recommendationReason ? card.recommended : null;
   return (
-    <section aria-label="导师提问" data-question-card="open" className={cn(styles.card, docked && styles.docked)}>
-      <p className={styles.head}>导师提问</p>
+    <section aria-label="AI 教练提问" data-question-card="open" className={cn(styles.card, docked && styles.docked)}>
+      <p className={styles.head}>AI 教练提问</p>
       <p className={styles.question}>{card.question}</p>
       <div role="group" aria-label="建议选项" className={styles.options}>
         {card.options.map((option, index) => (
@@ -72,8 +72,8 @@ export function QuestionCardView({
 /** One-line placeholder in the conversation while an unanswered docked card is folded away. */
 export function OpenQuestionRecord({ card, onShow }: { card: QuestionCard; onShow?: () => void }) {
   return (
-    <section aria-label="导师提问记录" data-question-card="folded" className={styles.folded}>
-      <span className={styles.foldedText}><span className={styles.head}>导师提问 · 待回答</span>{card.question}</span>
+    <section aria-label="AI 教练提问记录" data-question-card="folded" className={styles.folded}>
+      <span className={styles.foldedText}><span className={styles.head}>AI 教练提问 · 待回答</span>{card.question}</span>
       <button type="button" className={styles.show} onClick={onShow}>显示选项</button>
     </section>
   );
