@@ -118,7 +118,7 @@ export function StepConfirmCard({ stepId, title, info, edits, signal, resuming, 
   if (!model.ready && !model.rows.length && !resuming) return null;
   if (!model.ready && !resuming) return (
     <section className={styles.confirmCard} aria-label="本步确认">
-      <p>“{title}”还差：{model.missing.map(field => field.title).join("、")}。可以继续和导师聊，或在右侧直接填写。</p>
+      <p>“{title}”还差：{model.missing.map(field => field.title).join("、")}。可以继续和 AI 教练聊，或在右侧直接填写。</p>
       <div>
         <Button variant="outline" disabled={disabled} onClick={() => onEdit(model.missing.map(field => field.id))}>去右侧补充</Button>
         <button type="button" className={styles.linkButton} disabled={disabled || !canConfirm} onClick={onReview}>暂时无法确定，写原因暂缓</button>
@@ -130,7 +130,7 @@ export function StepConfirmCard({ stepId, title, info, edits, signal, resuming, 
       <p>{resuming ? `“${title}”的确认还没完成，点一下继续。` : `“${title}”的信息齐了，请看一眼再确认：`}</p>
       <ul>{model.rows.map(row => <li key={row.id} data-look={row.look || undefined}><span>{row.title}</span>
         {row.state === "deferred" ? "（暂缓）" : ""}{row.text}</li>)}</ul>
-      {model.look.length > 0 && <p>标出“请看一眼”的是根据对话整理或导师建议的内容，你自己填写的不用再看。</p>}
+      {model.look.length > 0 && <p>标出“请看一眼”的是根据对话整理或 AI 教练建议的内容，你自己填写的不用再看。</p>}
       {!model.current && !resuming && <p>刚改过的内容正在保存和刷新，完成后就可以确认。</p>}
       {model.updates > 0 && <p>还有 {model.updates} 条“根据对话整理的更新”没处理，它们不会被确认，确认后仍可采用。</p>}
       <div>

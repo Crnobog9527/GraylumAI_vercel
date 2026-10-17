@@ -4,6 +4,8 @@
 import { extractDocxInBrowser } from '../docx/client';
 import { extractPdfInBrowser } from '../pdf/client';
 import { recognizeImagesInBrowser } from '../ocr/client';
+import { recognizePdfPagesInBrowser } from '../ocr/scan';
+import { renderPdfPagesInBrowser } from '../pdf/render-client';
 import { SandboxError } from '../errors';
 import { runSandboxedWorker } from '../sandbox-host';
 
@@ -85,6 +87,19 @@ const api = {
   },
   runRelay(relayScript: string, timeoutMs: number) {
     return measured(() => runSandboxedWorker({ workerSource: '', input: new ArrayBuffer(0), timeoutMs, relayScript }));
+  },
+  /** LIB-2d: renders PDF sample pages; returns sizes only (the images stay in the page). */
+  async renderSample(name: string, pages: number[]) {
+    const blob = await (await fetch(`/sample/${encodeURIComponent(name)}`)).blob();
+    return measured(async () => Promise.all((await renderPdfPagesInBrowser(blob, pages)).map(async (page) => {
+      if (!page.ok) return page;
+      const bitmap = await createImageBitmap(page.image);
+      return { ok: true, page: page.page, bytes: page.image.size, width: bitmap.width, height: bitmap.height };
+    })));
+  },
+  async recognizePdfSample(name: string, pages: number[]) {
+    const blob = await (await fetch(`/sample/${encodeURIComponent(name)}`)).blob();
+    return measured(() => recognizePdfPagesInBrowser(blob, pages));
   },
   frameCount: () => document.querySelectorAll('iframe').length,
 };
