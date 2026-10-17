@@ -57,6 +57,16 @@ const list = (documents: LibraryDocument[]) => render(<DocumentList documents={d
   onDownload={vi.fn()} onDelete={vi.fn()} onPurpose={vi.fn()}/>);
 
 describe('upload panel', () => {
+  it('shows the Owner 2026-10-17 scan sentence only when browser recognition is built in, with no charge figures', () => {
+    vi.stubEnv('NEXT_PUBLIC_LIBRARY_PDF_EXTRACTION', 'true');
+    const sentence = '扫描的 PDF 和 Word 里的图片上传后会在你自己的浏览器里自动识别文字，不扣积分；识别时请保持这个页面打开。';
+    expect(panel().text).not.toContain(sentence);
+    vi.stubEnv('NEXT_PUBLIC_LIBRARY_SCAN_RECOGNITION', 'true');
+    const { text } = panel();
+    expect(text).toContain(sentence);
+    expect(text).not.toContain('AI 识别');
+    expect(text).not.toMatch(/\d+\s*积分/);
+  });
   it('has no upload entry while the server switch is off', () => {
     const { html, text } = panel({ uploadEnabled: false });
     expect(text).toContain('上传暂未开放');
