@@ -2,6 +2,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { logger } from '../../lib/logger';
+import { notifyOwnerOfExpertConsult } from './notify';
 
 /**
  * EXPERT-CONSULT (Master Plan 2.1 item 51): a booking request for the Owner's one-to-one diagnosis.
@@ -42,20 +43,12 @@ export async function readExpertConsult(db: Rpc, profileId: string): Promise<Exp
   return parsed.data;
 }
 
-/**
- * Tells the Owner a new request arrived. The request itself is the durable record: an open, high-priority
- * '专家诊断预约' ticket in the admin ticket queue. PAY-NOTIFY's sender (#1031) is not on staging yet, so until
- * then the notice is a warn-level log, which the logger persists to application_logs (info is not kept);
- * once #1031 lands, send the e-mail here. Only the ticket id leaves the ticket — never the need or contact
- * details, which stay in the ticket and are erased with the account. Never fails the request.
- */
-export type ExpertConsultNotifier = (request: { ticketId: string }) => Promise<void>;
-export const notifyOwnerOfExpertConsult: ExpertConsultNotifier = async ({ ticketId }) => {
-  logger.warn('api', 'expert_consult_requested', { ticketId });
-};
+/** Called once per newly created request; failures never fail the request. */
+export type ExpertConsultNotifier = (request: { ticketId: string }) => Promise<unknown>;
 
-export async function requestExpertConsult(db: Rpc, profileId: string, input: ExpertConsultInput,
-  notify: ExpertConsultNotifier = notifyOwnerOfExpertConsult): Promise<ExpertConsultResult> {
+export async function requestExpertConsult(db: Rpc & Pick<SupabaseClient, 'from'>, profileId: string,
+  input: ExpertConsultInput, notify: ExpertConsultNotifier = ({ ticketId }) => notifyOwnerOfExpertConsult(db, ticketId),
+): Promise<ExpertConsultResult> {
   const { need, contact, source } = expertConsultInput.parse(input);
   const result = await db.rpc('expert_consult_request', {
     p_actor_id: uuid.parse(profileId), p_need: need, p_contact: contact, p_source: source,

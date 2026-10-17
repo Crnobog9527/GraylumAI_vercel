@@ -1,8 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { expect, it, vi } from 'vitest';
 import { expertConsultRouter } from './expertConsult';
-import { notifyOwnerOfExpertConsult, requestExpertConsult } from '../services/expertConsult/request';
-import { logger } from '../lib/logger';
+import { requestExpertConsult } from '../services/expertConsult/request';
 
 const id = (n: number) => `30000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const created = { ticketId: id(9), createdAt: '2026-10-17T00:00:00Z', created: true };
@@ -83,12 +82,4 @@ it('notifies the Owner once, with the ticket id only, and a failed notice never 
   db.rpc.mockResolvedValueOnce({ data: { ...created, created: false }, error: null });
   await requestExpertConsult(db as never, id(1), input, notify);
   expect(notify).toHaveBeenCalledTimes(1);
-});
-
-it('the default notice is a persisted warn-level log carrying only the ticket id', async () => {
-  const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
-  try {
-    await notifyOwnerOfExpertConsult({ ticketId: id(9) });
-    expect(warn).toHaveBeenCalledExactlyOnceWith('api', 'expert_consult_requested', { ticketId: id(9) });
-  } finally { warn.mockRestore(); }
 });
