@@ -15,7 +15,10 @@ export const FEATURES_PATH = '/features';
 const CRUMBS = [{ name: '首页', path: '/' }, { name: '功能介绍', path: FEATURES_PATH }];
 const UPDATED = '2026-10-17';
 
-export type FeatureSlug = 'positioning' | 'content' | 'jury' | 'library';
+export type FeatureSlug = 'positioning' | 'content' | 'jury' | 'library' | 'publish' | 'review';
+
+/** Pages without a product screen yet (the product has no display component for them); text only until one exists. */
+export const TEXT_ONLY_FEATURES: readonly FeatureSlug[] = ['publish', 'review'];
 
 export type FeatureEntry = {
   slug: FeatureSlug;
@@ -248,11 +251,73 @@ const LIBRARY: ArticleContent = {
   updated: UPDATED,
 };
 
+const PUBLISH: ArticleContent = {
+  locale: 'zh-Hans',
+  path: featurePath('publish'),
+  metaTitle: '发布排期：标题标签按平台改好，排进日历',
+  metaDescription: 'Graylum 的发布排期帮你把写好的内容按平台改好标题和标签，排进日历，再发到你授权的账号。每个平台的写法不同，教练替你对着平台改，发布前由你确认。',
+  breadcrumb: [...CRUMBS, { name: '发布排期', path: featurePath('publish') }],
+  h1: '发布排期：写好的内容，按平台改好再排进日历',
+  lead: '发布排期负责写完稿之后的最后一段：按目标平台改好标题和标签，排进日历，发到你授权的账号。每一步发布前都由你确认。',
+  keyPoints: [
+    '同一份内容，按不同平台的习惯改好标题和标签。',
+    '排进日历，一眼看清这周什么时候发什么。',
+    '只发到你自己授权的账号，发布前由你确认。',
+  ],
+  cta: cta('从定位分析开始，选题和稿件有了，再来排发布。'),
+  sections: [
+    { h2: '为什么要按平台改标题和标签？', paragraphs: ['同一条内容在不同平台的标题长度、标签写法和发布习惯都不一样。发布排期把这件事交给教练，对着目标平台改好，你只需要看一眼确认。'] },
+    { h2: '排期怎么用？', paragraphs: ['写好的稿件可以排进日历，选好平台和时间。日历上能看到已排好的内容，方便把一周的节奏排匀。'] },
+    { h2: '发布到哪里？', paragraphs: ['只发布到你自己授权接入的账号，不会替你使用别人的账号；每次发布前由你确认内容。'] },
+  ],
+  faq: [
+    { question: '发布排期和选题与创作是什么关系？', answer: '先在选题与创作里把稿件写好，再来这里按平台改好、排期和发布。' },
+  ],
+  related: [
+    { label: '选题与创作', href: featurePath('content'), description: '先把每周发什么和稿件定下来。' },
+    { label: '数据复盘', href: featurePath('review'), description: '发出去之后，看数据、调方向。' },
+    { label: '定位分析', href: featurePath('positioning'), description: '先弄清做什么、给谁看、靠什么赚钱。' },
+  ],
+  updated: UPDATED,
+};
+
+const REVIEW: ArticleContent = {
+  locale: 'zh-Hans',
+  path: featurePath('review'),
+  metaTitle: '数据复盘：读真实数据，告诉你下周怎么调',
+  metaDescription: 'Graylum 的数据复盘读取你自己账号作品的真实数据，由 AI 教练告诉你哪些内容有效、哪些该调整，以及下周具体怎么改，让每周的内容越做越准，而不是凭感觉。',
+  breadcrumb: [...CRUMBS, { name: '数据复盘', path: featurePath('review') }],
+  h1: '数据复盘：读你自己的真实数据，告诉你下周怎么调',
+  lead: '数据复盘读取你自己账号作品的数据，由 AI 教练指出哪些内容有效、哪些该调整，并给出下周具体怎么改。',
+  keyPoints: [
+    '用你自己作品的真实数据，不是行业平均数。',
+    '告诉你哪些有效、哪些该调整。',
+    '给出下一周具体怎么改的建议。',
+  ],
+  cta: cta('从定位分析开始，账号方向清楚了，复盘才有可比较的目标。'),
+  sections: [
+    { h2: '复盘读的是什么数据？', paragraphs: ['读的是你自己账号作品的数据，例如播放、互动等指标，而不是泛泛的行业数字。没有数据可读的平台，可以手动导入。'] },
+    { h2: '复盘会告诉你什么？', paragraphs: ['教练对照你的账号定位，指出哪些内容表现好、哪些没达到预期，并解释可能的原因，再给出下周具体怎么调整。'] },
+    { h2: '为什么要每周复盘？', paragraphs: ['固定节奏地看数据、改方向，比凭感觉连续发更容易发现问题。复盘结果也会成为下周选题的依据。'] },
+  ],
+  faq: [
+    { question: '没有数据的新账号能复盘吗？', answer: '没有作品数据时先发内容；有了第一批数据，复盘才有东西可读。' },
+  ],
+  related: [
+    { label: '发布排期', href: featurePath('publish'), description: '把内容按平台改好，排进日历。' },
+    { label: '选题与创作', href: featurePath('content'), description: '复盘之后，下周发什么。' },
+    { label: '定位分析', href: featurePath('positioning'), description: '先弄清做什么、给谁看、靠什么赚钱。' },
+  ],
+  updated: UPDATED,
+};
+
 export const FEATURES: FeatureEntry[] = [
   { slug: 'positioning', name: '定位分析', note: '先弄清做什么、给谁看、靠什么赚钱', content: POSITIONING },
   { slug: 'content', name: '选题与创作', note: '每周排好选题，按你的文风写稿', content: CONTENT },
   { slug: 'jury', name: '评审团', note: '几位评审各审一遍，写出修订稿', content: JURY },
   { slug: 'library', name: '资料库', note: '定位和资料都记着，换窗口也不忘', content: LIBRARY },
+  { slug: 'publish', name: '发布排期', note: '标题标签按平台改好，排进日历', content: PUBLISH },
+  { slug: 'review', name: '数据复盘', note: '读真实数据，告诉你下周怎么调', content: REVIEW },
 ];
 
 export function findFeature(slug: string): FeatureEntry | undefined {
@@ -263,7 +328,7 @@ export const FEATURES_HUB: ArticleContent = {
   locale: 'zh-Hans',
   path: FEATURES_PATH,
   metaTitle: '功能介绍：AI 教练陪你做自媒体',
-  metaDescription: 'Graylum 是 AI 自媒体陪跑教练。这里介绍产品的主要功能：定位分析、选题与创作、多模型评审团和资料库，每一项都配有真实产品界面的示例，看完再决定要不要试。',
+  metaDescription: 'Graylum 是 AI 自媒体陪跑教练。这里介绍产品的主要功能：定位分析、选题与创作、评审团、资料库、发布排期和数据复盘，已有界面的功能都配有真实产品界面的示例。',
   breadcrumb: [{ name: '首页', path: '/' }, { name: '功能介绍', path: FEATURES_PATH }],
   h1: 'Graylum 功能介绍：AI 教练在每一步怎么帮你',
   lead: 'Graylum 是 AI 自媒体陪跑教练。从弄清账号定位，到每周选题写稿，再到让评审团审报告，每一项功能都在同一个对话式工作区里完成。',
@@ -272,17 +337,19 @@ export const FEATURES_HUB: ArticleContent = {
     '选题与创作：商量选题，按你的文风写稿。',
     '评审团：几位评审各审一遍，写出修订稿。',
     '资料库：你的文章、资料和成果，放在一起管理。',
+    '发布排期：按平台改好标题标签，排进日历。',
+    '数据复盘：读真实数据，告诉你下周怎么调。',
   ],
   cta: cta('不确定从哪一项开始？先做定位分析，免费开始。'),
   sections: [
     {
       h2: '主要功能一览',
-      paragraphs: ['下面每一项都有单独的页面，页面里的界面都是真实产品的示例，用的是虚构的示例内容。'],
+      paragraphs: ['下面每一项都有单独的页面；已有产品界面的功能，页面里的界面都是真实产品的示例，用的是虚构的示例内容。'],
       subsections: FEATURES.map(entry => ({ h3: entry.name, paragraphs: [`${entry.note}。`] })),
     },
     {
       h2: '功能之间怎么配合？',
-      paragraphs: ['典型的顺序是：先做定位分析，把方向确认下来；之后每周在选题与创作里排选题、写稿；重要的报告可以交给评审团再审一遍；你的文章、资料和保存下来的成果放在资料库里，随时查看。'],
+      paragraphs: ['典型的顺序是：先做定位分析，把方向确认下来；之后每周在选题与创作里排选题、写稿，在发布排期里按平台排好发布，再用数据复盘调整下一周；重要的报告可以交给评审团再审一遍；你的文章、资料和保存下来的成果放在资料库里，随时查看。'],
     },
     {
       h2: '页面上的界面是真的吗？',

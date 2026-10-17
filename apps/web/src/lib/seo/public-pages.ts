@@ -29,6 +29,8 @@ export const PUBLIC_PAGES: PublicPage[] = [
   { path: '/features/content', locale: 'zh-Hans', lastModified: '2026-10-17' },
   { path: '/features/jury', locale: 'zh-Hans', lastModified: '2026-10-17' },
   { path: '/features/library', locale: 'zh-Hans', lastModified: '2026-10-17' },
+  { path: '/features/publish', locale: 'zh-Hans', lastModified: '2026-10-17' },
+  { path: '/features/review', locale: 'zh-Hans', lastModified: '2026-10-17' },
   { path: '/blog', locale: 'zh-Hans', lastModified: '2026-10-17', footerLabel: '教程' },
   { path: '/blog/first-positioning-conversation', locale: 'zh-Hans', lastModified: '2026-10-17' },
   { path: '/blog/before-you-start-posting', locale: 'zh-Hans', lastModified: '2026-10-17' },

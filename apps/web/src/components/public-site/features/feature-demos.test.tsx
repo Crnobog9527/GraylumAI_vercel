@@ -18,6 +18,8 @@ const EXPECTED: Record<string, string[]> = {
   content: [runtime.SAMPLE_RUNTIME_HEADER.title, '建议稿', '正文稿件'],
   library: [library.SAMPLE_LIBRARY_DOCUMENTS[0].filename ?? '', '空间使用'],
   jury: ['示例评审'],
+  publish: [],
+  review: [],
 };
 
 describe.each(FEATURES.map(entry => [entry.slug, entry] as const))('feature demo %s', (slug, entry) => {

@@ -15,5 +15,8 @@ export function FeatureDemo({ slug }: { slug: FeatureSlug }) {
     case 'content': return <DemoContent />;
     case 'library': return <DemoLibrary />;
     case 'jury': return <DemoJury />;
+    // Publishing and data review have no product screen to reuse yet: text only until the product has display components.
+    case 'publish':
+    case 'review': return null;
   }
 }
