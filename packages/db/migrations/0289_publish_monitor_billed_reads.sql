@@ -1,6 +1,6 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
 -- PUBLISH-MONITOR PR-4b (docs/launch/tasks/PUBLISH-MONITOR.md §6, §8): billed TikHub reads outside a chat turn. Number
--- 0290 assigned by the controller. Each refresh of a TikHub connection bills on its own sessionless PAYG v2 run (the
+-- 0289 assigned by the controller. Each refresh of a TikHub connection bills on its own sessionless PAYG v2 run (the
 -- FUSION-REVIEW pattern: a fresh BILL2 draft scope, no new scope kind). BILL2 only learns to accept a run that freezes
 -- tool routes and no model (Owner-approved, two marker-guarded edits below). This migration also adds the ledger that makes a re-read after an interruption free for the user: every supplier request of a refresh is
 -- recorded with its BILL2 call and, once answered, its normalized result, so a re-run re-applies the stored result
@@ -46,7 +46,7 @@ BEGIN
  END IF;
 END $$;
 
--- Owner 2026-10-17: "同意 PUBLISH-MONITOR 4b 在 0290 里为发布监控的纯工具计费单放宽 BILL2 模型检查（仅限带标记的运行单）".
+-- Owner 2026-10-17: "同意 PUBLISH-MONITOR 4b 在 0289 里为发布监控的纯工具计费单放宽 BILL2 模型检查（仅限带标记的运行单）".
 -- A publish-monitor read run bills only TikHub calls and freezes no model. BILL2 requires the run's top-level model to
 -- be an active ai_models row that also appears in its call policy; for this one run shape only, the top-level model is a
 -- fixed placeholder id. Recognised only by all of: v2 contract, the publishMonitor input marker the server writes, the
@@ -63,18 +63,18 @@ $$;
 DO $$ DECLARE src text; a text; BEGIN
  src:=pg_get_functiondef('public.bill2_prepare(uuid,uuid,jsonb)'::regprocedure);
  a:=$x$ IF NOT EXISTS(SELECT 1 FROM ai_models WHERE id=(p_payload->>'modelId')::uuid AND is_active='true') THEN RAISE EXCEPTION 'BILL2_MODEL_DENIED';END IF;$x$;
- IF position('-- 0290 tool-only run' IN src)=0 THEN
+ IF position('-- 0289 tool-only run' IN src)=0 THEN
   IF array_length(string_to_array(src,a),1)<>2 THEN RAISE EXCEPTION 'PUBLISH_MONITOR_BILLING_SOURCE_MISMATCH: bill2_prepare'; END IF;
-  EXECUTE replace(src,a,$x$ -- 0290 tool-only run
+  EXECUTE replace(src,a,$x$ -- 0289 tool-only run
  IF NOT EXISTS(SELECT 1 FROM ai_models WHERE id=(p_payload->>'modelId')::uuid AND is_active='true')
   AND NOT publish_monitor_tool_only_run(p_payload) THEN RAISE EXCEPTION 'BILL2_MODEL_DENIED';END IF;$x$);
  END IF;
  src:=pg_get_functiondef('public.runtime_direct_billing_allowed_before_opc(uuid,jsonb,uuid)'::regprocedure);
  a:=$x$ IF NOT EXISTS(SELECT 1 FROM jsonb_array_elements(policy) x WHERE x->>'modelId'=p->>'modelId') THEN RAISE EXCEPTION 'BILL2_MODEL_DENIED';END IF;$x$;
- IF position('-- 0290 tool-only run' IN src)=0 THEN
+ IF position('-- 0289 tool-only run' IN src)=0 THEN
   IF array_length(string_to_array(src,a),1)<>2 THEN
    RAISE EXCEPTION 'PUBLISH_MONITOR_BILLING_SOURCE_MISMATCH: runtime_direct_billing_allowed_before_opc'; END IF;
-  EXECUTE replace(src,a,$x$ -- 0290 tool-only run
+  EXECUTE replace(src,a,$x$ -- 0289 tool-only run
  IF NOT EXISTS(SELECT 1 FROM jsonb_array_elements(policy) x WHERE x->>'modelId'=p->>'modelId')
   AND NOT publish_monitor_tool_only_run(p) THEN RAISE EXCEPTION 'BILL2_MODEL_DENIED';END IF;$x$);
  END IF;

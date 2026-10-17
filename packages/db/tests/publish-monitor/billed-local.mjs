@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// Local-only PUBLISH-MONITOR PR-4b (0290) verification: the Owner-approved tool-only BILL2 run (and that every other run
+// Local-only PUBLISH-MONITOR PR-4b (0289) verification: the Owner-approved tool-only BILL2 run (and that every other run
 // shape is still refused), one billed TikHub call end to end, the billed-read ledger, and orphaned-run discovery.
 // Run: node packages/db/tests/publish-monitor/billed-local.mjs --local-only
 import assert from 'node:assert/strict';
@@ -8,9 +8,9 @@ import { localDb, read } from '../runtime-view-perf/local-db.mjs';
 import { rpc } from '../erasure-b2a/cases.mjs';
 import { fixtureSql } from './fixtures.mjs';
 
-const MIGRATION = 'packages/db/migrations/0290_publish_monitor_billed_reads.sql';
+const MIGRATION = 'packages/db/migrations/0289_publish_monitor_billed_reads.sql';
 const db = await localDb(), c = db.client;
-const report = { build: db.build, migration: '0290', checks: [] };
+const report = { build: db.build, migration: '0289', checks: [] };
 const v = async (sql, args = []) => (await c.query(sql, args)).rows[0]?.v;
 const svc = async (sql, args = []) => {
   await c.query('SET ROLE service_role');

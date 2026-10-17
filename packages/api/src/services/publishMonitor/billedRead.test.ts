@@ -132,6 +132,15 @@ describe('publish-monitor billed TikHub read', () => {
     expect(a.calls.find(c => c[0] === 'bill2_close')![1].p_outcome).toBe('cancelled');
   });
 
+  it('a key store or supplier limit that is unavailable right now stops the read for today without charging', async () => {
+    const a = admin(), seen: string[] = [];
+    const d = { ...deps(a.db, seen), secrets: async () => { throw new Error('vault down'); } };
+    const read = await billedTikhubRead(d as never, keys, 'xiaohongshu', XHS);
+    expect(read.kind).toBe('unavailable');
+    expect(seen).toEqual([]);
+    expect(a.calls.find(c => c[0] === 'bill2_close')![1].p_outcome).toBe('cancelled');
+  });
+
   it('TikHub switched off: nothing is prepared, held or read', async () => {
     mocks.tools.tikhub = false;
     const a = admin(), seen: string[] = [];

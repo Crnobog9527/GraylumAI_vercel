@@ -7,7 +7,9 @@ import { decimal } from '../bill2/decimal';
 import type { BillingRpc } from '../bill2/service';
 import { frozenToolPolicy, toolCallPolicy, toolModelId, toolResultEvidence, type ToolCallPolicy } from '../bill2/toolBilling';
 import { toolSubcallBilling } from '../bill2/toolSubcall';
-import { requestIdentity, runSubcall, type EvidencePort, type SubcallContext, type SupplierRequest } from '../research/runtime/subcall';
+import {
+  requestIdentity, ResearchPause, runSubcall, type EvidencePort, type SubcallContext, type SupplierRequest,
+} from '../research/runtime/subcall';
 import { platformSecretReader } from '../research/runtime/secrets';
 import { checkVendorRateLimit } from '../redisRateLimiter';
 import { readResearchToolsConfig } from '../research/vendors/config';
@@ -20,7 +22,7 @@ import { derivedUuid } from '../fusion/admission';
 /**
  * PUBLISH-MONITOR PR-4b (plan §6, §8): one billed TikHub read of a claimed connection, outside a chat turn.
  * Each refresh bills on its own sessionless PAYG v2 run that freezes only the TikHub routes it may use (Owner
- * 2026-10-17 approved this tool-only run shape, migration 0290). Each supplier request is the RESEARCH-TOOLS subcall
+ * 2026-10-17 approved this tool-only run shape, migration 0289). Each supplier request is the RESEARCH-TOOLS subcall
  * (price frozen at the start, hold, dispatch, record), with the evidence kept in the billed-read ledger: a re-run of the
  * same refresh re-applies a stored answer instead of calling and charging again (plan §8). A request that was sent but
  * never answered (a killed process) settles at zero for the user before anything is resent.
@@ -28,7 +30,7 @@ import { derivedUuid } from '../fusion/admission';
 type Admin = SupabaseClient;
 type Env = Record<string, string | undefined>;
 export const PUBLISH_MONITOR_PHASE = 'publish_monitor';
-/** Same id as SQL bill2_tool_model_id('publish-monitor:read-run') (0290 publish_monitor_tool_only_run). */
+/** Same id as SQL bill2_tool_model_id('publish-monitor:read-run') (0289 publish_monitor_tool_only_run). */
 export const READ_RUN_MODEL_ID = toolModelId('publish-monitor:read-run');
 const RUN_MINUTES = 30;
 const uuid = z.string().uuid();
@@ -253,11 +255,18 @@ export async function billedTikhubRead(deps: BilledReadDeps, keys: ClaimKeys, pl
         secrets: deps.secrets ?? platformSecretReader(admin as unknown as BillingRpc, deps.env),
         rateCounter: deps.rateCounter ?? checkVendorRateLimit, newId: () => crypto.randomUUID(),
         ...(deps.vendors ? { vendors: deps.vendors } : {}), ...(deps.now ? { now: deps.now } : {}) };
-      const outcome = await runSubcall(context, item.request);
-      if (!outcome.sent) {
-        if (outcome.stop === 'BALANCE_LOW') return { kind: 'insufficient_credits', results };
-        return { kind: 'unavailable', reason: outcome.stop.slice(0, 64) };
+      let outcome: Awaited<ReturnType<typeof runSubcall>>;
+      try { outcome = await runSubcall(context, item.request); } catch (error) {
+        // The shared subcall pauses instead of failing when the balance cannot start the call (nothing was held or sent)
+        // or the key store / supplier limit is unavailable right now. A background read has no turn to resume: it
+        // settles for today and the next daily run tries again.
+        if (error instanceof ResearchPause) {
+          return error.state === 'waiting_credits' ? { kind: 'insufficient_credits', results }
+            : { kind: 'unavailable', reason: 'WAITING_RESUME' };
+        }
+        throw error;
       }
+      if (!outcome.sent) return { kind: 'unavailable', reason: outcome.stop.slice(0, 64) };
       results[item.kind] = outcome.result;
       delivered ||= outcome.result.outcome === 'ok' || outcome.result.outcome === 'partial';
     }
