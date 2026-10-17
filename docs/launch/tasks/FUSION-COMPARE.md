@@ -93,9 +93,17 @@
 - **Skill 由请求带上、服务端校验后冻结**：服务端会话不记"当前选的 Skill"（`runtime/page.tsx` 的选择只在页面状态和 localStorage 里），
   所以 `estimate` / `start` 和普通对话的 `runtime.prepare` 一样，接收同一个 Skill 选择字段（`services/runtime/admission.ts` 第 64 行
   `{kind:'skill', moduleId, revisionId}`，没有 Skill 时不传）。服务端用普通对话同一套校验（模块对用户可见、Skill 版本存在且用户有权使用，
-  `databaseSkillSource` 的检查）读出这个版本的 Skill 指令，把 `moduleId`、`revisionId` 和指令哈希一起冻结进对比记录和每个运行单；
+  `databaseSkillSource` 的检查）读出这个版本的 Skill；**冻结的是完整的自由对话 Skill 激活结果**，不只是主指令：带 `workflow.yaml` 的 Skill，
+  普通自由对话经 `activateFreeChatSkill`（`services/runtime/admission.ts`）加载各步骤声明的资源文件和有序工作指南，对比复用同一个激活函数，
+  把它产出的指令和资源正文整份放进快照（对比不开工具，模型没法再按需读文件），并把 `moduleId`、`revisionId`、所用资源的路径和各自哈希、
+  整份指令哈希冻结进对比记录和每个运行单；放不进 90000 B 时整次拒绝（`FUSION_COMPARE_INPUT_TOO_LARGE`）；
   校验不过就拒绝（`FUSION_COMPARE_SKILL_INVALID`），不退回"无 Skill"或上一次执行的配置。各列请求都用这一份冻结的指令。
-  PR-2 验收：刚在输入框切换 Skill 就发起对比，各列请求里是新选的 Skill 版本；传一个用户看不到的模块被拒。
+  PR-2 验收：刚在输入框切换 Skill 就发起对比，各列请求里是新选的 Skill 版本；传一个用户看不到的模块被拒；带 `workflow.yaml` 的 Skill，
+  各列请求里的指令和资源与同一时刻普通自由对话 `activateFreeChatSkill` 的结果一致（测试比较两边）。
+- **本次输入里 `@` 引用的资料库文档**：普通对话的引用不在正文里，由 `runtime/page.tsx` 第 184–199 行作为 `references` 单独提交、由 runtime 准入按引用读取。
+  对比的 `estimate` / `start` 接收同一个 `references` 字段，服务端用普通对话同一个引用读取函数校验（本人的、未删除）并读出正文，整份冻结进快照，
+  记下每份文档的版本标识和哈希；放不进 90000 B 时整次拒绝。引用的文档按第 3.7 节和工作区资料一样接入来源删除（依赖用 `content_erasure_references`
+  能识别的键记录）。PR-2 验收：带 `@` 引用发起对比，各列请求里有这些文档正文；引用别人的或已删除的文档被拒。
 - 历史的读取复用 runtime 现有的"按会话读历史并裁剪到用途上限"的读取函数，口径和普通对话一样，不另写一套裁剪；裁剪后整份输入受 90000 B 上限（`FUSION_INPUT_CAP`）。
   超过就在冻结前拒绝并说明原因，不悄悄截掉问题本身。
 - 不带工具：请求里没有 `tools`、`tool_choice`，web 插件显式关闭（复用 `fusionRequestBody`）。Skill 指令里提到的工具，模型没法调用；
@@ -115,7 +123,9 @@
   对比在建运行单之前复用同一套：
   - **付费的 Decisions 判断只在 `start` 做，并且先落库再判断**：`estimate` 没有请求编号、可以反复调用，只做静态检查（社媒 Skill、退款次数是否已到上限、开关和权限），
     不调用 Decisions。`start` 第一步在一个事务里按 `UNIQUE(actor_id, request_id)` 插入对比记录（状态 `admitting`，还没有计费组）——
-    只有插入成功的那个请求才去调 Decisions；同一 `requestId` 的重放或并发请求拿到已有记录：判断结果已写入就直接返回同一结果，
+    只有插入成功的那个请求才去调 Decisions。插入时同时冻结**整份请求的哈希**（会话、问题、Skill 选择、引用、勾选的模型、用户看到的预估），
+    和普通 `runtime_admission_replay` 一样：同一 `requestId` 再来时先比较哈希，不一致就返回 `FUSION_COMPARE_REQUEST_CONFLICT`，不返回旧结果；
+    一致的重放或并发请求拿到已有记录：判断结果已写入就直接返回同一结果，
     还在判断就返回"处理中"让前端稍后读，不再判断。判断结果（`clear / allow / block / unavailable`）写进对比记录、只能写一次；
     判为拦截时记录结束为终态 `refused`、不建组；否则同一记录继续建组和领取。`admitting` 超过 5 分钟没写结果的记录视为失败（`refused`），
     换新的 `requestId` 才能再发。这样同一请求最多触发一次 Decisions 调用。
@@ -130,7 +140,10 @@
     不带兜底指令的列照常边收边转。
   - PR-2 验收：连续调用 `estimate` 不产生任何 Decisions 调用；同一 `requestId` 重放或并发两个 `start`（含判为拦截的情况）都只调用一次 Decisions；退款次数到上限时判不准或 Decisions 不可用都被拒、不建运行单；没有定位的用户选社媒 Skill 发起对比被拒且余额不变；Decisions 判拦截时被拒且不建运行单；判不准时模拟某列回答兜底标记，该列不收费、其他列照常收费；该列没有 `fusion_call_outputs` 记录、判定是 `no_delivery`，到恢复期限也不会变成 `unjudged_saved`。
 - 上下文容量：按每个模型的窗口分别检查"输入 + 回答上限"，装不下的模型在冻结前拒绝；用户勾选里有装不下的就整次拒绝并告诉用户是哪一个
-  （不悄悄去掉，用户可以取消它再发）。复用 `measureCallInput` / `fitNativeRequestOutput`。
+  （不悄悄去掉，用户可以取消它再发）。只用 `measureCallInput` 测量；**不用 `fitNativeRequestOutput` 去适配**——它会在装不下时自动二分降低 `max_tokens`
+  并正常返回，各列就会在用户不知情时拿到不同的回答上限。做法：按冻结的回答上限组装请求，测量"输入 + 回答上限"是否完整装进该模型窗口，
+  装不下（或者调用 `fitNativeRequestOutput` 后请求有任何变化）就按 `FUSION_COMPARE_INPUT_TOO_LARGE` 拒绝整次对比。
+  PR-2 验收：构造一个只有降低回答上限才装得下的模型，对比在冻结前被拒，不会悄悄缩短。
 - **模型名称（Q1 已定，Owner 2026-10-17）**：勾选框和每列回答的标题显示后台配置的真实模型名称（`ai_models` 里管理员配置的名称，不另设显示名）。
   `modelIdentity/display.ts` 现在只允许评审团界面显示真实名，PR-2 加一个对比界面的例外（`FUSION_COMPARE_SURFACE`），只有 `fusionCompare.*` 接口能传，
   其他接口照旧只返回"模型 A/B/C"；采用写回主对话后，主对话里这条回答不再标模型名（按普通对话显示）。
@@ -169,7 +182,7 @@
 
 - **对比记录表**（新表，理由：对比的产品状态——属于哪个对话、冻结的历史版本 R、用户的问题、勾了哪些模型、每列结局、采用了哪一列——
   不是计费状态，`bill2_runs` 只放钱，`fusion_call_outputs` 只按调用存正文，现有表放不下；和评审团的 `fusion_reviews` 是同样的理由）：
-  `fusion_compares(id, actor_id, session_id, group_id, request_id, history_revision, question, models, gate_verdict, workspace_dependencies, state, adoption, created_at)`（`group_id` 在 `admitting` 时为空），
+  `fusion_compares(id, actor_id, session_id, group_id, request_id, history_revision, question, request_hash, models, gate_verdict, workspace_dependencies, state, adoption, created_at)`（`group_id` 在 `admitting` 时为空），
   `UNIQUE(actor_id, request_id)`；`state` ∈ `admitting / refused / running / finished / stopped`（`admitting`、`refused` 见第 3.2 节定位前置检查）；`adoption` 只能写一次（采用的列、采用运行单和执行、写回的版本区间），只在直接写回成功时写，没有"已引用"这种状态。
   正文不重复存，各列回答从 `fusion_call_outputs` 读。
 - **采用写回**：`fusion_compare_adopt(actor, compareId, column, requestId)`，一个事务里：
@@ -235,7 +248,7 @@
 - **平台承担熔断**：对比里应收为 0 的结局只有 `no_delivery` 和 `erased_before_verdict`，仍可能被反复触发（例如故意断流）。
   复用评审团的 7 天统计 `fusion_review_breaker_usage`（它本来就统计所有 Fusion 组内调用，对比也算进去），对比准入也查同样的上限，
   达到后不能开新对比、进行中的照常收尾。上限是技术参数，后台可调，不改变正常收费。
-- **采用不收费**：不调用模型，不建运行单。
+- **采用不收费**：不调用模型；按第 3.4 节新建的零金额采用运行单没有任何调用，结算为 0。
 - **月度积分释放、退款发生在冻结和结算之间**：每个运行单走现有 PAYG 处理，PR-1 加测试（必测项 8、9）。
 - **只在 staging 测试窗口里跑**：Fusion 运行单目前都冻结成 `mode: 'staging_test'`、走 `newWorkGate(admin,'staging')`，对比也一样；
   正式环境开放随 RUNTIME-PROD / REL-1 另行批准。
@@ -248,11 +261,14 @@
 - **删除某个工作区来源**（定位、账号策略、选题）：普通自由对话靠 `runtime_tool_calls` 里 `read_source` 结果带的 `sourceVersionId` 找到复制过它的回答并删除
   （`0218_runtime_workspace_positioning.sql` 第 44–55 行给 `content_erasure_scope` 加的分支）；0235 的 Fusion 清理只按 `source_session_id` 匹配，管不到这种情况。
   对比开始时冻结的工作区资料（第 3.2 节）是同样的复制，所以：
-  - 冻结时把 `runtime_workspace_source` 返回的 `dependencies`（各来源的 `sourceVersionId`）记进 `fusion_compares.workspace_dependencies`；
+  - 冻结时把 `runtime_workspace_source` 返回的 `dependencies`（各来源的版本 UUID）**改写成 `[{"sourceVersionId": "<uuid>"}, …]`** 记进
+    `fusion_compares.workspace_dependencies`：`content_erasure_references` 只认 `sourceVersionId` 等白名单键下的 UUID，数组里的裸字符串会被忽略；
+    资料库引用同样按它认得的键记录；
   - PR-1 用 0218 同样的"按锚点改函数"方式，给 `content_erasure_scope` 加一个分支：引用了被删来源的对比也算在删除范围里；给 `content_erasure_confirm`
     加一段：对这些对比的计费组，按 0235 同样的逐运行单步骤取消、结算、清洗（冻结输入和调用证据），删 `fusion_call_outputs` 和对比记录本身——
     和普通回答"复制过来源就随来源删除"一致；
-  - 采用写回的执行把同样的 `dependencies` 放进自己的 `payload`，现有 `content_erasure_scope` 对执行 `payload` 的引用检查就会把它连带删除；
+  - 采用写回的执行把同样格式（`{sourceVersionId: …}` 对象）的依赖放进自己的 `payload`，现有 `content_erasure_scope` 对执行 `payload` 的引用检查就会把它连带删除
+    （PR-1 用测试直接验证 `content_erasure_references(采用执行的 payload, [被删版本])` 为真）；
   - 读取工作区资料时照 `runtime_workspace_tool_guard` 的做法先给相关项目加共享锁，删除和冻结按锁排先后，不会出现删除之后才冻结进副本。
   - PR-1 验收：自由对话里冻结过某个定位的对比，删除那个定位后对比记录、各列正文、冻结输入都清掉，采用写回的那条回答也随之删除；没有引用它的对比不受影响。
 - 计费组和组步骤行是钱的记录，照旧不删（和评审团一致）。
@@ -283,8 +299,8 @@
 | 接口 | 作用 |
 | --- | --- |
 | `fusionCompare.options({ sessionId })` | 返回能不能用（开关、权限）、允许列表（显示后台配置的真实模型名称）、默认勾选、`minModels`、D3 |
-| `fusionCompare.estimate({ sessionId, skill?, question, modelIds })` | 校验 Skill、数量和输入大小，返回"最多消耗 X 积分"和装不下的模型；`skill` 同 `runtime.prepare`；第一版不收 `positioning`（第 3.8 节只作以后参考） |
-| `fusionCompare.start({ sessionId, requestId, skill?, question, modelIds, estimateCredits })` | 校验并冻结 Skill 版本、准入、冻结、整组领取；按 `requestId` 幂等；余额不够返回 `waiting_credits`、一个都不建 |
+| `fusionCompare.estimate({ sessionId, skill?, references?, question, modelIds })` | 校验 Skill、数量和输入大小，返回"最多消耗 X 积分"和装不下的模型；`skill` 同 `runtime.prepare`；第一版不收 `positioning`（第 3.8 节只作以后参考） |
+| `fusionCompare.start({ sessionId, requestId, skill?, references?, question, modelIds, estimateCredits })` | 校验并冻结 Skill 版本、准入、冻结、整组领取；按 `requestId` 幂等；余额不够返回 `waiting_credits`、一个都不建 |
 | `fusionCompare.stream({ compareId, column })` | 派发这一列并逐字返回；重复调用不重复派发 |
 | `fusionCompare.read({ compareId })` | 每列状态（排队 / 生成中 / 成功 / 失败 / 待核对 + 冻结积分）、正文、**每列实际扣费积分和合计**（来自各运行单的结算，未结算的列标"待结算"）、采用状态；刷新后恢复用 |
 | `fusionCompare.stop({ compareId, column? })` | 停整组或某一列 |
@@ -294,7 +310,7 @@
 
 拒绝代号：`FUSION_COMPARE_DISABLED`、`FUSION_COMPARE_FORBIDDEN`、`FUSION_COMPARE_TOO_FEW`、`FUSION_COMPARE_TOO_MANY`、`FUSION_COMPARE_MODEL_NOT_ALLOWED`、
 `FUSION_COMPARE_INPUT_TOO_LARGE`、`FUSION_COMPARE_PRICE_CHANGED`、`FUSION_COMPARE_BUDGET`、`FUSION_COMPARE_ACTIVE`、`FUSION_COMPARE_BREAKER`、
-`FUSION_COMPARE_STALE`、`FUSION_COMPARE_ADOPTED`、`FUSION_COMPARE_SESSION_GONE`、`FUSION_COMPARE_SKILL_INVALID`。前端映射成大白话提示，不显示原始错误。
+`FUSION_COMPARE_STALE`、`FUSION_COMPARE_ADOPTED`、`FUSION_COMPARE_SESSION_GONE`、`FUSION_COMPARE_SKILL_INVALID`、`FUSION_COMPARE_REQUEST_CONFLICT`。前端映射成大白话提示，不显示原始错误。
 
 ## 5. 和其他任务的关系
 
