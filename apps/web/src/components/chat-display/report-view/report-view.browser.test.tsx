@@ -36,7 +36,7 @@ beforeAll(async () => {
           // Real Skill titles carry numbering and writing hints for the model (staging #1109 acceptance).
           const nums = '一二三四五六七八九十'.split('').concat(['十一','十二','十三','十四']);
           let i = 0;
-          const BODY = SAMPLE_REPORT_BODY_WITH_DATA.replace(/^## (.+)$/gm, (_, t) => '## ' + nums[i++] + '、' + t + '：从你的情况出发的完整说明（约 800 字，3–10 个合格账号）');
+          const BODY = SAMPLE_REPORT_BODY_WITH_DATA.replace(/^## (.+)$/gm, (_, t) => '## ' + nums[i++] + '、' + t + '：从你的情况出发的完整说明' + (i % 2 ? '（约 800 字，3–10 个合格账号）' : '（至少 2000 字，建议约 2400 字）'));
           const data = parseReportBody(BODY).data;
           data.data.benchmarks.accounts = data.data.benchmarks.accounts.map((a, i) => ({...a,
             metrics: {followers: 18000 - i * 9000, medianViews: 4200 - i * 1500, engagementRate: 0.05, weeklyPosts: 3, capturedAt: null}}));
@@ -73,7 +73,7 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 375, height: 812 
       const nav = page.getByRole('navigation', { name: '报告目录' });
       expect(await nav.locator('li').count()).toBe(14);
       await ui(page.getByText('怎样算过关').first()).toBeVisible();
-      expect(await page.locator('body').innerText()).not.toMatch(/约 800 字/);
+      expect(await page.locator('body').innerText()).not.toMatch(/约 800 字|至少 2000 字|建议约 2400 字/);
       if (viewport.width > 767) {
         const boxes = await nav.locator('li button').evaluateAll(items => items.map(item => item.getBoundingClientRect())
           .map(box => ({ top: box.top, bottom: box.bottom })));

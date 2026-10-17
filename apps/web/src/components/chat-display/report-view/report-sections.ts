@@ -50,8 +50,9 @@ export function splitReasons(body: string): { main: string; reasons: string | nu
 }
 
 /** Writing hints the Skill puts at the end of a chapter title for the model, never for the reader: "（约 800 字，…）". */
-// Only "约 N 字…" hints: a title like "见效时间（约 3 个月）" keeps its business information.
-const WRITING_HINT = /\s*[（(]\s*约\s*\d[^（）()]*字[^（）()]*[）)]\s*$/;
+// A trailing bracket that states a length ("约 800 字", "至少 2000 字，建议约 2400 字", "不超过 500 字", "800 字以内", "字数…")
+// is a writing hint for the model. Brackets that say anything else ("约 3 个月", "3–10 个合格账号", "漏斗") are content.
+const WRITING_HINT = /\s*[（(][^（）()]*(?:\d\s*字|字数)[^（）()]*[）)]\s*$/;
 /** A chapter title as the reader sees it: without the writing hint. */
 export const reportDisplayTitle = (title: string) => title.replace(WRITING_HINT, "").trim() || title;
 
