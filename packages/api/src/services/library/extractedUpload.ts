@@ -74,7 +74,8 @@ export function extractedUpload(client: SupabaseClient, actorId: string, storage
       const grant = await libraryRpc<Grant>(client, rpc, { a: actorId, did: documentId, actual: file.size });
       return dispatch(grant, started);
     },
-    async complete(documentId: string, publish: (bytes: Buffer) => Publication) {
+    /** `allowEmptyText`: a Word file that is only images (LIB-2d) uploads an empty text object, as scanned PDFs do. */
+    async complete(documentId: string, publish: (bytes: Buffer) => Publication, allowEmptyText = false) {
       await checkRateLimitAsync(actorId, 'api');
       const doc = await read(documentId);
       if (doc.format !== config.format || !doc.textPath) throw new TRPCError({ code: 'BAD_REQUEST', message: 'LIBRARY_TYPE' });
@@ -82,7 +83,7 @@ export function extractedUpload(client: SupabaseClient, actorId: string, storage
       if (!doc.textGuardUntil) throw new TRPCError({ code: 'BAD_REQUEST', message: 'LIBRARY_UPLOAD_INCOMPLETE' });
       try {
         const file = await original(doc.path);
-        const text = config.format === 'pdf' ? await storage.inspect(doc.textPath, true, true)
+        const text = config.format === 'pdf' || allowEmptyText ? await storage.inspect(doc.textPath, true, true)
           : await storage.inspect(doc.textPath, true);
         if (text.contentType !== 'text/plain') throw new Error('LIBRARY_TYPE');
         const publication = publish(text.bytes);

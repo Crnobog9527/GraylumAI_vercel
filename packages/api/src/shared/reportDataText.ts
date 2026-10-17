@@ -34,8 +34,10 @@ export function splitChapters(text: string): { preamble: string; chapters: Repor
 
 const CHAPTER_NAMES = [...new Set(Object.values(REPORT_DATA_CHAPTER)), '见效时间'];
 
-/** Writing hints the Skill puts at the end of a chapter title for the model, never for the reader: "（约 800 字，…）". */
-const WRITING_HINT = /\s*[（(]\s*约[^（）()]*[）)]\s*$/;
+// A trailing bracket that states how long the CHAPTER should be is a writing hint for the model: a length marker
+// (约 / 至少 / 建议 / 不超过 / 最多 / 以内 / 左右) with a chapter-sized count ("800 字", 3+ digits), or "字数".
+// Brackets that say anything else stay: "约 3 个月", "3–10 个合格账号", "昵称建议 4 字，简介 20 字", "每天写 100 字".
+const WRITING_HINT = /\s*[（(](?=[^（）()]*(?:[约約]|至少|建议|不超过|最多|以内|左右|字数))[^（）()]*(?:\d{3,}\s*字|字数)[^（）()]*[）)]\s*$/;
 /** A chapter title as the reader sees it: without the writing hint. */
 export const reportDisplayTitle = (title: string) => title.replace(WRITING_HINT, '').trim() || title;
 

@@ -1,8 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { logger } from '../../lib/logger';
+import { openRouterAccount } from '../models/openRouterKey';
 import { isOpenRouterEndpoint, resolveOpenAICompatibleEndpoint } from '../providerUtils';
 import { StagingAccessError, stagingRpcFailure } from './stagingErrors';
 
@@ -113,12 +113,12 @@ export async function decide(apiKey: string, text: string, transport: typeof fet
   return verdict;
 }
 
-/** The OpenRouter key already configured on the admitted model's row (Decisions never gets a new credential). */
-export function openRouterKey(row: { provider?: unknown; api_endpoint?: unknown; api_key?: unknown } | null | undefined) {
-  if (!row || typeof row.api_key !== 'string') return undefined;
+/** The platform OpenRouter key when the admitted model is served by OpenRouter (Decisions never gets a new credential). */
+export function openRouterKey(row: { provider?: unknown; api_endpoint?: unknown } | null | undefined, key: string | undefined) {
+  if (!row || !key?.trim()) return undefined;
   const endpoint = resolveOpenAICompatibleEndpoint(typeof row.provider === 'string' ? row.provider : null,
     typeof row.api_endpoint === 'string' ? row.api_endpoint : null);
-  return endpoint && isOpenRouterEndpoint(endpoint) ? row.api_key.trim() || undefined : undefined;
+  return endpoint && isOpenRouterEndpoint(endpoint) ? key.trim() : undefined;
 }
 
 /**
@@ -126,9 +126,10 @@ export function openRouterKey(row: { provider?: unknown; api_endpoint?: unknown;
  * (the same `openrouter-key:<sha256>` binding the primary transport enforces). Anything else, and every local
  * fixture run, is "no key", so Decisions is skipped and the fallback rule applies.
  */
-export function windowBoundKey(row: Parameters<typeof openRouterKey>[0], account: string | undefined) {
-  const key = openRouterKey(row);
-  return key && account === 'openrouter-key:' + createHash('sha256').update(key).digest('hex') ? key : undefined;
+export function windowBoundKey(row: Parameters<typeof openRouterKey>[0], platformKey: string | undefined,
+  account: string | undefined) {
+  const key = openRouterKey(row, platformKey);
+  return key && account === openRouterAccount(key) ? key : undefined;
 }
 
 export function decisionsClassifier(transport: typeof fetch = fetch): PositioningClassifier {

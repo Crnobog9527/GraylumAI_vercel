@@ -8,7 +8,12 @@ import {
 import {
   dataInput, historyInput, linkInput, linkPost, manualRefresh, readData, readPostHistory, refreshInput,
 } from '../services/publishMonitor/data';
+import { importManualRows, manualImportInput } from '../services/publishMonitor/manualImport';
 import { requirePostForMeDeps } from '../services/publishMonitor/secrets';
+import {
+  addBenchmark, benchmarkAddInput, connectOwnTikhub, tikhubConnectInput,
+} from '../services/publishMonitor/tikhub';
+import { checkRateLimitOrThrow } from '../services/redisRateLimiter';
 import { publishMonitorConnectRouter } from './publishMonitorConnect';
 import { publishMonitorPublishRouter } from './publishMonitorPublish';
 import { guarded as safe } from './publishMonitorGuard';
@@ -55,6 +60,25 @@ export const publishMonitorRouter = router({
   refresh: protectedProcedure.input(refreshInput).mutation(({ ctx, input }) => safe(ctx, async () => {
     const days = await dataWindow(ctx);
     return manualRefresh(ctx.supabaseAdmin, await requirePostForMeDeps(ctx.supabaseAdmin), ctx.profileId, days, input);
+  })),
+  // PR-3b: rows the user confirmed from a table export or typed next to a post link (Pro/Gold, plan §11 item 5).
+  manualImport: protectedProcedure.input(manualImportInput).mutation(({ ctx, input }) => safe(ctx, async () => {
+    await dataWindow(ctx);
+    await checkRateLimitOrThrow(`publish-monitor-import:${ctx.profileId}`, 'api');
+    return importManualRows(ctx.supabaseAdmin, ctx.profileId, input);
+  })),
+  // PR-4a: own Xiaohongshu/Douyin accounts by public profile link (Pro/Gold), and Gold benchmark accounts. Connecting
+  // is free; the daily TikHub read (billed per call) arrives with PR-4b. Removing either uses `disconnect`.
+  connectTikhub: protectedProcedure.input(tikhubConnectInput).mutation(({ ctx, input }) => safe(ctx, async () => {
+    await dataWindow(ctx);
+    return connectOwnTikhub(ctx.supabaseAdmin, ctx.profileId, input);
+  })),
+  addBenchmark: protectedProcedure.input(benchmarkAddInput).mutation(({ ctx, input }) => safe(ctx, async () => {
+    if (!(await readMembershipEntitlements(ctx.supabaseAdmin, ctx.profileId)).allowBenchmarkMonitor) {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'PUBLISH_MONITOR_ENTITLEMENT_REQUIRED' });
+    }
+    await checkRateLimitOrThrow(`publish-monitor-benchmark:${ctx.profileId}`, 'api');
+    return addBenchmark(ctx.supabaseAdmin, ctx.profileId, input);
   })),
   connect: publishMonitorConnectRouter,
   publish: publishMonitorPublishRouter,

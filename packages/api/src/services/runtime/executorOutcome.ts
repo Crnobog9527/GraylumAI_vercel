@@ -19,3 +19,10 @@ export async function finishCancelRequested(billing: { recoverReceipts(runId: st
     ...(execution.result ? { body: execution.result.body,
       ...(execution.result.summary !== undefined ? { summary: execution.result.summary } : {}) } : {}) };
 }
+
+/** A blocked or refused round cancels (settling known charges once). A cancellation failure propagates: it is never
+ * rewritten as pending or retried here. */
+export async function cancelRound(rpc: Rpc, args: { p_execution_id: string }) {
+  const stopped = await rpc<{ state: 'cancelled' | 'cost_pending' }>('runtime_cancel', args);
+  return { state: stopped.state };
+}

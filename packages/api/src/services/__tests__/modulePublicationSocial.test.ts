@@ -4,6 +4,10 @@ import { expect, it, vi } from 'vitest';
 import { saveModuleSkill, type ModuleSkillInput } from '../skills/modulePublication';
 import { makePackage } from './fixtures/artifacts';
 
+// ADMIN-SECRETS OR-1: the platform OpenRouter key is filled in unless a test says otherwise.
+const keyState = vi.hoisted(() => ({ configured: true }));
+vi.mock('../models/openRouterKey', () => ({ openRouterKeyConfigured: async () => keyState.configured }));
+
 function moduleInput(): ModuleSkillInput {
   const pack = makePackage();
   return { moduleId: randomUUID(), skillId: pack.id, revisionId: pack.revisionId, requestId: pack.requestId,
@@ -34,7 +38,7 @@ function database(options: { flagFails?: boolean; enableFails?: boolean; flagged
       update: (values: unknown) => { step.op = 'update'; step.values = values; return chain; },
       eq: (column: string, value: unknown) => { step.filters.push([column, value]); return chain; },
       single: async () => ({ data: { id: randomUUID(), name: 'Qwen', model_id: 'qwen/qwen3.8-27b', provider: 'openai', is_active: 'true',
-        max_tokens: 4096, input_limit: 800000, api_key: 'LOCAL_ONLY', api_endpoint: '', config: reasoning }, error: null }),
+        max_tokens: 4096, input_limit: 800000, api_endpoint: '', config: reasoning }, error: null }),
       maybeSingle: async () => ({ data: { id: 'm', social_media_related: flagged, updated_at: version,
         skill_id: options.skillBound ? 'bound-skill' : null }, error: null }),
       then: (resolve: (value: unknown) => void) => {

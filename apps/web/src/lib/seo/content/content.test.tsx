@@ -6,6 +6,8 @@ import { SIMPLIFIED_HOME_HREF, SITE_CHROME } from '@/components/public-site/site
 import type { ArticleContent } from '../article';
 import { PUBLIC_PAGES } from '../public-pages';
 import { ABOUT_ZH_HANS, ABOUT_ZH_TW } from './about';
+import { BLOG_INDEX, BLOG_POSTS } from './blog';
+import { FEATURES, FEATURES_HUB } from './features';
 import { SIGNUP_CTA_HREF } from './shared';
 import { ZH_TW_GLOSSARY } from './zh-tw/glossary';
 import { ZH_TW_HUB } from './zh-tw/hub';
@@ -29,6 +31,9 @@ const ARTICLES: ArticleContent[] = [
   ZH_TW_SHEQUN_JINGYING,
   ZH_TW_IG_JINGYING,
   ZH_TW_ZIMEITI_KECHENG,
+  FEATURES_HUB,
+  ...FEATURES.map(entry => entry.content),
+  ...BLOG_POSTS,
 ];
 
 // Login entry pages are not in the sitemap but are real pages every visitor can open.
@@ -135,5 +140,15 @@ describe.each(ARTICLES.map(content => [content.path, content] as const))('public
         expect(text.includes(word), `${word} → ${entry.taiwan}`).toBe(false);
       }
     }
+  });
+});
+
+describe('blog index page metadata', () => {
+  it('keeps the title and description within the spec limits', () => {
+    const cjk = (text: string) => (text.match(/[㐀-鿿]/g) ?? []).length;
+    expect(cjk(BLOG_INDEX.metaTitle)).toBeLessThanOrEqual(30);
+    expect(cjk(BLOG_INDEX.metaDescription)).toBeGreaterThanOrEqual(60);
+    expect(cjk(BLOG_INDEX.metaDescription)).toBeLessThanOrEqual(80);
+    expect(BLOG_INDEX.lead.length).toBeLessThanOrEqual(100);
   });
 });

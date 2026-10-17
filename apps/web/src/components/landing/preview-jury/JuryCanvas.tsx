@@ -11,6 +11,7 @@ import { MOCK_REPORT, type JuryCaseReport } from './jury-case';
 import { frameTop, type Span } from './jury-frame';
 import { RulingSeal, SeatMark } from './JuryBits';
 import styles from './jury-canvas.module.css';
+import { DisplayHeading } from '@/components/chat-display/display-heading';
 
 type Box = { cx: number; cy: number; top: number; bottom: number; left: number; right: number };
 type Boxes = Partial<Record<Node | `end-${SeatCode}`, Box>>;
@@ -50,7 +51,7 @@ export function JuryCanvas({ view, names, selected, onPeek, onPick, report = MOC
         {captionAbove ? null : caption}
         <Wires boxes={boxes} edges={view.edges} joined={view.joined} />
         <article className={styles.doc} data-node="doc" data-state={view.doc.state}>
-          <h2>{report.title}</h2>
+          <DisplayHeading as="h2">{report.title}</DisplayHeading>
           <p className={styles.excerpt}>{report.excerpt}</p>
           <footer>
             <span>{report.chapters} 章</span>
@@ -65,7 +66,7 @@ export function JuryCanvas({ view, names, selected, onPeek, onPick, report = MOC
         </div>
         {view.next.state === 'revised' ? (
           <article className={styles.doc} data-node="next" data-state="revised" data-current={view.current === 'next'}>
-            <h2>修订后的{report.title}</h2>
+            <DisplayHeading as="h2">修订后的{report.title}</DisplayHeading>
             <p className={styles.excerpt}>{report.revisedExcerpt}</p>
             <footer>
               <span>{report.chapters} 章</span>

@@ -4,8 +4,6 @@
  * This code is proprietary and confidential.
  */
 
-import { BarChart3, FileSearch, Lightbulb, Users } from 'lucide-react';
-
 export const faqItems = [
   {
     question: '这个产品适合哪些用户？',
@@ -45,53 +43,6 @@ export const faqItems = [
     question: '是否适合团队协作？',
     answer:
       '适合。对于需要共同制定策略、统一内容方向并跟踪执行结果的运营团队，平台会比单点式聊天工具更容易形成共享流程。',
-  },
-];
-
-export const tutorials = [
-  {
-    slug: 'account-audit',
-    title: '如何完成账号审计',
-    summary: '先厘清账号定位、内容现状和增长瓶颈，再决定后续策略的优先级。',
-    steps: [
-      '梳理账号当前目标、定位和最近内容表现。',
-      '识别内容主题、节奏和互动数据中的强弱项。',
-      '总结最先需要修正的账号问题，并形成下一步动作清单.',
-    ],
-    icon: FileSearch,
-  },
-  {
-    slug: 'audience-research',
-    title: '如何做受众研究',
-    summary: '把“谁会关注你、为什么关注你、他们真正关心什么”具体化。',
-    steps: [
-      '定义核心受众和次级受众的画像。',
-      '拆出他们的高频痛点、兴趣点与表达方式。',
-      '把研究结果转成后续选题与内容结构的依据。',
-    ],
-    icon: Users,
-  },
-  {
-    slug: 'content-strategy',
-    title: '如何生成内容策略',
-    summary: '把零散想法整理成明确的内容主线、栏目节奏和输出标准。',
-    steps: [
-      '确定内容目标：增长、转化、品牌表达或教育市场。',
-      '规划内容支柱、系列主题与发布节奏。',
-      '为每类内容建立统一的结构与判断标准。',
-    ],
-    icon: Lightbulb,
-  },
-  {
-    slug: 'growth-optimization',
-    title: '如何优化增长结果',
-    summary: '通过复盘内容表现，把有效经验沉淀成下一轮可复用的方法。',
-    steps: [
-      '追踪内容表现与关键互动信号。',
-      '识别表现最强和最弱的内容模式。',
-      '基于复盘结果调整选题、表达、节奏与目标。',
-    ],
-    icon: BarChart3,
   },
 ];
 

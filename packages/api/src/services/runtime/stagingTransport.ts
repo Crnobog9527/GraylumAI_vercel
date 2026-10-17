@@ -1,11 +1,11 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import {createHash} from 'node:crypto';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {openRouterAdapter} from '../bill2/openRouterAdapter';
+import {openRouterAccount,readOpenRouterKey} from '../models/openRouterKey';
 import {isOpenRouterEndpoint,resolveOpenAICompatibleEndpoint} from '../providerUtils';
 import type {RuntimeBudget} from './budget';
 import type {StagingPolicy} from './stagingPolicy';
-/** Reuses the selected model's existing private credential, with no environment
+/** Uses the platform OpenRouter key (admin third-party keys page, Vault; OR-1), with no environment
  * key fallback. The namespace binds recovery to the exact original credential.
  */
 export function stagingTransport(admin:SupabaseClient,policy:StagingPolicy,budget?:RuntimeBudget){
@@ -13,13 +13,15 @@ export function stagingTransport(admin:SupabaseClient,policy:StagingPolicy,budge
   const quotes=policy.callPolicies.filter(q=>q.account===identity.account&&q.model===identity.model);
   if(quotes.length!==1)throw new Error('RUNTIME_PROVIDER_BINDING_DENIED');
   budget?.assertCanPersist();
-  const query=admin.from('ai_models').select('id,model_id,provider,api_endpoint,api_key').eq('id',quotes[0]!.modelId);
+  const query=admin.from('ai_models').select('id,model_id,provider,api_endpoint').eq('id',quotes[0]!.modelId);
   const deadline=budget?AbortSignal.timeout(Math.max(1,Math.ceil(budget.remainingPersistence()))):undefined;
   const bounded=signal&&deadline?AbortSignal.any([signal,deadline]):signal??deadline;
   const row=await (bounded?query.abortSignal(bounded):query).single();
-  const model=row.data,key=model?.api_key?.trim();
+  const model=row.data;
+  // A key that cannot be read (not filled, database unavailable) is a refusal, never another key.
+  const key=row.error?undefined:await readOpenRouterKey(admin,{fresh:true}).catch(()=>undefined);
   if(row.error||model?.model_id!==identity.model||!key||!isOpenRouterEndpoint(resolveOpenAICompatibleEndpoint(model.provider,model.api_endpoint)??'')||
-   'openrouter-key:'+createHash('sha256').update(key).digest('hex')!==identity.account)
+   openRouterAccount(key)!==identity.account)
    throw new Error('RUNTIME_PROVIDER_BINDING_DENIED');
   return key;
  }});

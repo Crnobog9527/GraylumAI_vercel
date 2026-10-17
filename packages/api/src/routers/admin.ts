@@ -694,7 +694,7 @@ export const adminRouter = router({
   getAllTickets: adminProcedure
     .input(z.object({
       status: z.enum(['open', 'in_progress', 'closed']).optional(),
-      category: z.enum(['bug', 'feature', 'question', 'account', 'billing', 'other']).optional(),
+      category: z.enum(['bug', 'feature', 'question', 'account', 'billing', 'consult', 'other']).optional(),
       priority: z.enum(['low', 'medium', 'high', 'urgent']).optional(),
       limit: z.number().min(1).max(100).default(20),
       offset: z.number().min(0).default(0),

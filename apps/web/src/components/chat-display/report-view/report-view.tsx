@@ -46,7 +46,7 @@ export function ReportView({ body, streaming = false, data, editedFields, notice
   // A block that never closed (stopped or cut off) is not being prepared any more: the text alone, as before.
   const preparing = parsed.pending && streaming;
   if ((!checked && !preparing) || chapters.length === 0)
-    return <MessageMarkdown className={className} text={withDisplayHeadings(parsed.text)} streaming={streaming} />;
+    return <MessageMarkdown className={cn(className, styles.tables)} text={withDisplayHeadings(parsed.text)} streaming={streaming} />;
 
   const values = checked?.data ?? {};
   const fallback = checked?.fallback ?? {};
@@ -57,7 +57,7 @@ export function ReportView({ body, streaming = false, data, editedFields, notice
   const field = (name: ReportDataField) => <ReportField key={name} name={name} data={values} fallback={fallback[name]} />;
   const edited = new Set(editedFields);
   return (
-    <div className={cn(styles.view, className)}>
+    <div className={cn(styles.view, styles.tables, className)}>
       {notice && <p className={styles.note}>{notice}</p>}
       <QuickLook data={values} />
       {preamble && <MessageMarkdown text={withDisplayHeadings(preamble)} />}

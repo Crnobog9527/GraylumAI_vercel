@@ -28,6 +28,7 @@ const runtimeReport = (extra = [], failed = 0) => ({
     file(runtime.files[9], [pass('RUNTIME: a fallback positioning refusal restores its charge once')]),
     file(runtime.files[10], [pass('RUNTIME: Fusion group admission, streamed dispatch, saved body, verdict and per-run settlement')]),
     file(runtime.files[11], [pass('RUNTIME: a research mentor turn claims the subcall between its model calls')]),
+    file(runtime.files[12], [pass('RUNTIME: library document deleted mid-stream hides late text, deltas and result and keeps no copy')]),
   ],
 });
 
@@ -45,7 +46,7 @@ test('name patterns select the suite prefix and exclude exactly the app-only cas
 test('verification passes only when every non-excluded case passed', () => {
   const result = verifyWithoutAppResults('runtime', runtimeReport());
   assert.deepEqual(result.errors, []);
-  assert.equal(result.passed, 12);
+  assert.equal(result.passed, 13);
   assert.equal(result.skipped, 5);
 });
 
