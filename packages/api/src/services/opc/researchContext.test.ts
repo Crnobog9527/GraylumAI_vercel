@@ -86,3 +86,13 @@ describe('RT-6 research host context', () => {
     expect(hostTurnContextSchema.safeParse(merged).success).toBe(true);
   });
 });
+
+describe('RT-6 tool descriptions name the real host field', () => {
+  it('every description that points at host records uses hostTurnContext.research.cards, which the schema has', async () => {
+    const { RESEARCH_TOOL_DESCRIPTIONS } = await import('../research/tools/schemas');
+    const pointing = Object.values(RESEARCH_TOOL_DESCRIPTIONS).filter(text => text.includes('hostTurnContext'));
+    expect(pointing).toHaveLength(3);
+    for (const text of pointing) expect(text.match(/hostTurnContext\.[A-Za-z.]+/g)).toEqual(['hostTurnContext.research.cards']);
+    expect(Object.keys(hostTurnContextSchema.shape.research.unwrap().shape)).toContain('cards');
+  });
+});

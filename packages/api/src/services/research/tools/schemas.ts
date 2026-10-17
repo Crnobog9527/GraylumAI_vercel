@@ -59,12 +59,12 @@ const PRIVACY = 'Send only keywords, public links or public account names; never
 export const RESEARCH_TOOL_DESCRIPTIONS: Record<ResearchToolName, string> = {
   propose_keywords: 'Show the user a keyword selection card (3-5 keywords) before any benchmark search. Free.',
   benchmark_discover: 'Find benchmark candidates for a keyword card the user confirmed (keywordConfirmationId from ' +
-    `hostTurnContext.researchCards). To continue, call again with the same confirmation and platforms. ${PRIVACY}`,
+    `hostTurnContext.research.cards). To continue, call again with the same confirmation and platforms. ${PRIVACY}`,
   social_search: `Search recent public posts on one platform by keyword. ${PRIVACY}`,
-  propose_more_candidates: 'Show another candidate card from an earlier discovery (discoveryId from hostTurnContext.researchCards), ' +
+  propose_more_candidates: 'Show another candidate card from an earlier discovery (discoveryId from hostTurnContext.research.cards), ' +
     'excluding accounts already chosen. Free.',
   benchmark_fetch: 'Fetch profile and recent posts for benchmark accounts. source: {kind:"candidate",confirmationId} from ' +
-    'hostTurnContext.researchCards, or {kind:"user_message"} for profile links in the message you are answering. ' + PRIVACY,
+    'hostTurnContext.research.cards, or {kind:"user_message"} for profile links in the message you are answering. ' + PRIVACY,
   social_account: `Look up one public account and its recent posts (not saved as a benchmark). ${PRIVACY}`,
   web_search: `Search the web. ${PRIVACY}`,
   web_fetch: 'Read the main text of one public web page. Pass only a public http(s) link.',
