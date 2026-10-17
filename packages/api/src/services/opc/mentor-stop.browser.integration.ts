@@ -8,6 +8,7 @@ import { createRequire } from 'node:module';
 import type { Client } from 'pg';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { opcService } from './service';
+import { seedTestOpenRouterKey } from '../models/openRouterKey.testing';
 
 // Reuse the existing runtime fixture without importing its legacy, excluded test
 // cases into the API type-check graph. This narrow boundary is typed, not skipped.
@@ -86,6 +87,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST === 'true')('OPC: MENTOR_STREAM C2_ST
       values($1,'Synthetic C2 stop',$2,'openai','true','https://openrouter.ai/api/v1',$3,1000,10000,$4,1)`,
     [policy.modelId, policy.model, key, JSON.stringify(config)]);
   }
+  await seedTestOpenRouterKey(sql, key);
   await sql.query('update modules set model_id=$1 where id=$2', [mentorId, f.moduleId]);
   await sql.query(`insert into system_settings(key,value)
     values('v3_summary_model_id',$1),('v3_summary_max_tokens','128')

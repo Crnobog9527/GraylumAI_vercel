@@ -8,6 +8,15 @@ const diagnosticsServiceState = vi.hoisted(() => ({
   getSummaryStats: vi.fn(),
 }));
 
+// ADMIN-SECRETS OR-1: the health check asks whether the platform OpenRouter key is filled in.
+const platformKey = vi.hoisted(() => ({ state: 'configured' as 'configured' | 'missing' | 'unavailable' }));
+vi.mock('../services/models/openRouterKey', () => ({
+  openRouterKeyConfigured: async () => {
+    if (platformKey.state === 'unavailable') throw new Error('PLATFORM_SECRET_UNAVAILABLE');
+    return platformKey.state === 'configured';
+  },
+}));
+
 vi.mock('../services/diagnostics', () => {
   class DiagnosticsService {
     runAllTests = diagnosticsServiceState.runAllTests;
@@ -321,11 +330,8 @@ describe('diagnosticsRouter error sanitization', () => {
         data: null,
         error: { message: 'relation ai_models does not exist' },
       },
-      aiModelsKeyResult: {
-        data: null,
-        error: { message: 'relation ai_models does not exist' },
-      },
     });
+    platformKey.state = 'unavailable';
 
     await expect(caller.healthCheck()).resolves.toMatchObject({
       checks: {
@@ -339,10 +345,15 @@ describe('diagnosticsRouter error sanitization', () => {
         },
         apiKey: {
           ok: false,
-          message: 'API 密钥未配置，请检查服务配置',
+          message: '暂时无法读取第三方密钥状态，请检查服务端日志',
         },
       },
     });
+    platformKey.state = 'missing';
+    await expect(createAdminHealthCaller().healthCheck()).resolves.toMatchObject({
+      checks: { apiKey: { ok: false, message: 'OpenRouter 密钥未填写，请到后台“第三方密钥”页填写' } },
+    });
+    platformKey.state = 'configured';
   });
 
   it('aggregates diagnostics dashboard payload from one query', async () => {
