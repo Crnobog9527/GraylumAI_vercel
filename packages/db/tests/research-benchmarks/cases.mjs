@@ -220,10 +220,15 @@ export async function runCases({db,Client,connectionString,report}) {
     const mine = await rpc(db,'research_user_benchmarks',f.actor,f.session);
     assert.equal(mine.length,18);
     const stored = await rows(db,'session_id=$1',[f.session]);
+    assert.ok(stored.some(x=>x.excluded==='EVIDENCE_UNVERIFIED'&&JSON.stringify(x.refs).includes('model-said-so')),'the textRef case is in the table');
     for (const row of mine) {
       const source = stored.find(x=>x.platform===row.platform&&x.account===row.account);
       for (const key of ['followers','medianViews','engagementRate','postsPerWeek','lastPublishedAt']) {
-        assert.deepEqual(row.refs[key],source.refs[key]??[],row.account+' '+key);
+        // A quarantined row (EVIDENCE_UNVERIFIED) keeps its unverified raw refs in the table (the textRef case stores
+        // 'model-said-so'); the user never gets them, nor refs of a number that is null.
+        const none = source.excluded==='EVIDENCE_UNVERIFIED' || row[key]===null;
+        assert.deepEqual(row.refs[key],none?[]:(source.refs[key]??[]),row.account+' '+key);
+        for (const ref of row.refs[key]) assert.match(ref,/^[0-9a-f-]{36}#\d{1,3}$/,row.account+' '+key);
       }
       assert.ok(!JSON.stringify(row).match(/cost|operation_ids|execution_id|fetch_id/));
     }
