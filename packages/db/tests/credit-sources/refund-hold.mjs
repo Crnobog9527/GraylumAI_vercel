@@ -179,6 +179,21 @@ try {
   assert.ok(takeBack.created_at > restored.created_at, 'the take-back comes after the compensation row');
   report.checks.push('reservations returned after the refund stay in the hold; after a clawback they are taken back at commit, after the caller\'s own ledger row (PAYG compensation)');
 
+  // The legacy Stripe refund (0041 via 0185) already claws the whole pack back without an order-linked ledger row:
+  // such a pack is not held again and cannot be clawed back a second time; other credits stay spendable.
+  const u8 = await profile(40);
+  const legacy = await pack(u8, 100);
+  const r = await v(`SELECT to_jsonb(x) v FROM atomic_reconcile_stripe_refund($1,$2,'charge.refunded','re_legacy','succeeded',1000,'usd',
+    NULL,NULL,NULL,NULL,NULL,now(),true,false) x`, [legacy.order, 'stripe-refund:' + legacy.order]);
+  assert.deepEqual([r.order_status, r.clawback_amount, await balance(u8)], ['refunded', 100, 40], JSON.stringify(r));
+  assert.equal(await spendable(u8), 40, 'an already clawed-back pack is not held again');
+  await assert.rejects(() => settle(ops, legacy.order, 'clawback'), /PAY_PACK_REVIEW_NOT_HELD/);
+  assert.equal(await balance(u8), 40);
+  await c.query(read(migrationPath));
+  assert.equal(await v('SELECT status v FROM credit_package_sources WHERE id=$1', [legacy.source]), 'reversed',
+    'rerunning 0289 marks such a source reversed');
+  report.checks.push('a pack already clawed back by the legacy Stripe refund is not held, cannot be clawed back twice, and its source is marked reversed');
+
   // A pack whose remainder cannot be proven (0275 "source unknown") is alert-only: never held, never clawed back
   // from the balance (PAY-DISPUTE-GUARD 4.3: never take other sources' credits); "kept" can still close the review.
   const u4 = await profile(20);
@@ -196,6 +211,7 @@ try {
   // Privileges: only the service role may settle; nobody calls the hold helper directly.
   for (const role of ['anon', 'authenticated', 'service_role']) {
     assert.equal(await v("SELECT has_function_privilege($1,'public.credit_package_refund_hold(uuid)','execute') v", [role]), false, role);
+    assert.equal(await v("SELECT has_function_privilege($1,'public.credit_package_refund_held(uuid)','execute') v", [role]), false, role);
     assert.equal(await v("SELECT has_function_privilege($1,'public.credit_package_refund_late_clawback(uuid,uuid,integer)','execute') v",
       [role]), false, role);
     assert.equal(await v("SELECT has_function_privilege($1,'public.pay_common_pack_refund_review_settle(uuid,uuid,text)','execute') v",

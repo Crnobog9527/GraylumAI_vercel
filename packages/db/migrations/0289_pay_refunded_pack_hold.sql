@@ -25,20 +25,34 @@ ALTER TABLE public.credit_package_sources
  ADD COLUMN IF NOT EXISTS refund_clawback_due integer NOT NULL DEFAULT 0
   CONSTRAINT credit_package_sources_refund_clawback_due CHECK(refund_clawback_due>=0);
 
--- Unused credits of the user's packs that ended refunded without a clawback and are not settled yet
--- (source-unknown packs excluded), plus credits still due to a clawback.
+-- The one rule for "this pack is held": its order ended refunded without its credits being taken back, nobody has
+-- settled it yet, and its remainder is provable. Not held: a pack the legacy Stripe refund already clawed back
+-- (0041 via 0185: whole pack taken back, ledger row without the order, so the source was never marked reversed)
+-- and a source-unknown pack (alert-only).
+CREATE OR REPLACE FUNCTION public.credit_package_refund_held(p_source uuid) RETURNS boolean
+LANGUAGE sql STABLE SET search_path=public,pg_temp AS $$
+ SELECT EXISTS(SELECT 1 FROM credit_package_sources s JOIN payment_orders o ON o.id=s.order_id
+  WHERE s.id=p_source AND s.status='granted' AND s.refund_review IS NULL
+   AND o.status IN ('refunded','partially_refunded')
+   AND coalesce(o.metadata->'stripeRefundReconciliation'->>'clawbackApplied','false')<>'true'
+   AND NOT EXISTS(SELECT 1 FROM credit_source_reviews r WHERE r.source_kind='credit_package' AND r.source_id=s.id))
+$$;
+
+-- Unused credits of the user's held packs, plus credits still due to a clawback.
 -- Callers hold the profile lock (the same lock the refund and the settlement take first).
 CREATE OR REPLACE FUNCTION public.credit_package_refund_hold(p_user uuid) RETURNS integer
 LANGUAGE sql STABLE SET search_path=public,pg_temp AS $$
- SELECT coalesce(sum(s.refund_clawback_due+CASE WHEN s.status='granted' AND s.refund_review IS NULL
-   AND o.status IN ('refunded','partially_refunded')
-   AND NOT EXISTS(SELECT 1 FROM credit_source_reviews r WHERE r.source_kind='credit_package' AND r.source_id=s.id)
+ SELECT coalesce(sum(s.refund_clawback_due+CASE WHEN credit_package_refund_held(s.id)
   THEN greatest(s.credits_granted-s.consumed_amount,0) ELSE 0 END),0)::integer
- FROM credit_package_sources s JOIN payment_orders o ON o.id=s.order_id
- WHERE s.user_id=p_user
+ FROM credit_package_sources s WHERE s.user_id=p_user
 $$;
 
--- 0275 body with one change: a settled or source-unknown refunded pack is no longer held back. "kept" credits are then ordinary
+-- Packs already clawed back by the legacy Stripe refund: mark their sources reversed (repeatable).
+UPDATE public.credit_package_sources s SET status='reversed',updated_at=clock_timestamp()
+FROM public.payment_orders o WHERE o.id=s.order_id AND s.status='granted' AND o.status='refunded'
+ AND o.metadata->'stripeRefundReconciliation'->>'clawbackApplied'='true';
+
+-- 0275 body with one change: only a held pack (credit_package_refund_held) is held back. "kept" credits are then ordinary
 -- (unattributed) balance; a refunded order is still never consumed from or restored to (credit_source_apply).
 CREATE OR REPLACE FUNCTION public.credit_source_rows(p_user uuid)
 RETURNS TABLE(kind text,id uuid,remaining integer,since timestamptz,current_period boolean,usable boolean,held boolean)
@@ -63,8 +77,8 @@ BEGIN
  -- A pack whose order ended as refunded without a clawback (0247 external refund "pack_review")
  -- keeps its credits in the balance for a person to settle: held back, never consumed or restored to.
  SELECT 'credit_package',p.id,p.left_,p.granted_at,false,NOT p.refunded AND NOT p.unknown,
-  p.refunded AND p.refund_review IS NULL AND NOT p.unknown FROM (
-  SELECT s.id,s.credits_granted-s.consumed_amount AS left_,s.granted_at,s.refund_review,
+  credit_package_refund_held(p.id) FROM (
+  SELECT s.id,s.credits_granted-s.consumed_amount AS left_,s.granted_at,
    EXISTS(SELECT 1 FROM payment_orders o WHERE o.id=s.order_id AND o.status IN ('refunded','partially_refunded')) AS refunded,
    EXISTS(SELECT 1 FROM credit_source_reviews r WHERE r.source_kind='credit_package' AND r.source_id=s.id) AS unknown
   FROM credit_package_sources s WHERE s.user_id=p_user AND s.status='granted' AND s.credits_granted>s.consumed_amount) p;
@@ -89,7 +103,9 @@ BEGIN
    'creditsTakenBack',coalesce((o.metadata->'packRefundReview'->>'creditsTakenBack')::integer,0),
    'creditsShortfall',coalesce((o.metadata->'packRefundReview'->>'creditsShortfall')::integer,0));
  END IF;
- IF s.status<>'granted' OR o.status NOT IN ('refunded','partially_refunded') THEN RAISE EXCEPTION 'PAY_PACK_REVIEW_NOT_HELD'; END IF;
+ IF s.status<>'granted' OR o.status NOT IN ('refunded','partially_refunded')
+  OR coalesce(o.metadata->'stripeRefundReconciliation'->>'clawbackApplied','false')='true'
+  THEN RAISE EXCEPTION 'PAY_PACK_REVIEW_NOT_HELD'; END IF;
  unused:=greatest(s.credits_granted-s.consumed_amount,0);
  -- Its recorded remainder is not trusted: taking it from the balance could take other sources' credits.
  IF p_decision='clawback' AND EXISTS(SELECT 1 FROM credit_source_reviews r WHERE r.source_kind='credit_package' AND r.source_id=s.id)
@@ -155,6 +171,7 @@ CREATE CONSTRAINT TRIGGER credit_package_refund_due_take AFTER UPDATE OF refund_
  EXECUTE FUNCTION public.credit_package_refund_due_take();
 
 REVOKE ALL ON FUNCTION public.credit_package_refund_hold(uuid) FROM PUBLIC,anon,authenticated,service_role;
+REVOKE ALL ON FUNCTION public.credit_package_refund_held(uuid) FROM PUBLIC,anon,authenticated,service_role;
 REVOKE ALL ON FUNCTION public.credit_source_rows(uuid) FROM PUBLIC,anon,authenticated,service_role;
 REVOKE ALL ON FUNCTION public.credit_package_refund_late_clawback(uuid,uuid,integer) FROM PUBLIC,anon,authenticated,service_role;
 REVOKE ALL ON FUNCTION public.credit_package_refund_due_take() FROM PUBLIC,anon,authenticated,service_role;
@@ -176,8 +193,7 @@ DO $$ DECLARE f record;src text;BEGIN
   ('public.credit_source_apply(uuid,uuid,integer,text)',
    E'    AND NOT EXISTS(SELECT 1 FROM payment_orders o WHERE o.id=order_id AND o.status IN (\'refunded\',\'partially_refunded\'));\n   ok:=FOUND;\n',
    E'    AND (NOT EXISTS(SELECT 1 FROM payment_orders o WHERE o.id=order_id AND o.status IN (\'refunded\',\'partially_refunded\'))\n'
-   ||E'     OR refund_review IS NULL AND NOT EXISTS(SELECT 1 FROM credit_source_reviews r WHERE r.source_kind=\'credit_package\'\n'
-   ||E'      AND r.source_id=credit_package_sources.id)); -- PAY-REFUND-HOLD\n   ok:=FOUND;\n'
+   ||E'     OR credit_package_refund_held(credit_package_sources.id)); -- PAY-REFUND-HOLD\n   ok:=FOUND;\n'
    ||E'   IF NOT ok THEN PERFORM credit_package_refund_late_clawback(p_user,src.source_id,x); END IF; -- PAY-REFUND-HOLD\n')
  ) v(sig,anchor,replacement) LOOP
   src:=pg_get_functiondef(f.sig::regprocedure);
