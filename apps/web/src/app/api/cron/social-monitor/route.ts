@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import { finishScheduledJobRun, startScheduledJobRun } from '@repo/api/src/services/scheduledJobRuns';
 import { loadPostForMeDeps } from '@repo/api/src/services/publishMonitor/secrets';
 import {
-  entitlementWindow, runSocialMonitorJob, runSocialMonitorRetention,
+  entitlementWindow, runSocialMonitorJob, runSocialMonitorRetention, tikhubEntitlements,
 } from '@repo/api/src/services/publishMonitor/socialMonitorJob';
 import { validateCronRequest } from '@/lib/cron-auth';
 
@@ -47,7 +47,8 @@ export async function GET(request: Request) {
       await finish('success', { skipped: 'POSTFORME_NOT_CONFIGURED', ...retention });
       return NextResponse.json({ success: true, skipped: 'POSTFORME_NOT_CONFIGURED', ...retention });
     }
-    const report = await runSocialMonitorJob(client, deps, Date.now() + 240_000, entitlementWindow(client));
+    const report = await runSocialMonitorJob(client, deps, Date.now() + 240_000, entitlementWindow(client), Date.now,
+      { env: process.env, entitlement: tikhubEntitlements(client) });
     const success = report.failures.length === 0;
     await finish(success ? 'success' : 'error', report, success ? null : `FAILED_STEPS:${report.failures.join(',')}`);
     return NextResponse.json({ success, ...report }, { status: success ? 200 : 500 });

@@ -6,7 +6,7 @@ vi.mock('@/lib/cron-auth', () => ({ validateCronRequest: mocks.auth }));
 vi.mock('@supabase/supabase-js', () => ({ createClient: mocks.create }));
 vi.mock('@repo/api/src/services/publishMonitor/secrets', () => ({ loadPostForMeDeps: mocks.deps }));
 vi.mock('@repo/api/src/services/publishMonitor/socialMonitorJob', () => ({ runSocialMonitorJob: mocks.run,
-  runSocialMonitorRetention: async () => ({ pruned: 4 }),
+  runSocialMonitorRetention: async () => ({ pruned: 4 }), tikhubEntitlements: () => async () => ({ windowDays: 30, benchmark: false }),
   entitlementWindow: () => async () => 30 }));
 vi.mock('@repo/api/src/services/scheduledJobRuns', () => ({ startScheduledJobRun: mocks.start,
   finishScheduledJobRun: mocks.finish }));

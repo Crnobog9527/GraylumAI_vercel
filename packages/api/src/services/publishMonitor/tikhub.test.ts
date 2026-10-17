@@ -13,7 +13,7 @@ const result = (over: Partial<ResearchCallResult>): ResearchCallResult => ({ ven
   fetchedAt: '2026-10-17T00:00:00.000Z', ...over });
 const code = (promise: Promise<unknown>) => promise.then(() => 'OK', (error: { code?: string }) => error.code);
 function settings(values: Record<string, unknown>) {
-  return (_table: string) => {
+  return () => {
     let key = '';
     return { select() { return this; }, eq(_: string, value: string) { key = value; return this; },
       maybeSingle: async () => ({ data: key in values ? { value: values[key] } : null, error: null }) };

@@ -8,18 +8,21 @@
 BEGIN;
 SET LOCAL lock_timeout='5s';
 
--- The run that bills one refresh of one connection, reused by every re-run of that refresh (a run's frozen prices cannot
--- be frozen again). Ids only, no content, and deliberately not tied to the connection row: a run left open by a killed
--- process must still be found and closed after the connection or the account is deleted.
+-- The runs that bill one refresh of one connection. A refresh normally has one; a re-run after a killed process first
+-- closes the left-open run (its unanswered calls settle at zero for the user) and opens a new one. The frozen tool
+-- policies are kept so a later process can build those zero receipts. Ids and prices only, no content, and deliberately
+-- not tied to the connection row: an open run must still be found and closed after the connection or account is gone.
 CREATE TABLE IF NOT EXISTS public.social_billed_runs(
+ run_id uuid PRIMARY KEY,
  connection_id uuid NOT NULL,
  refresh_id uuid NOT NULL,
  actor_id uuid NOT NULL,
- run_id uuid NOT NULL UNIQUE,
+ policies jsonb NOT NULL CHECK(jsonb_typeof(policies)='array' AND pg_column_size(policies)<=65536),
  closed_at timestamptz,
- created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
- PRIMARY KEY(connection_id,refresh_id)
+ created_at timestamptz NOT NULL DEFAULT clock_timestamp()
 );
+CREATE UNIQUE INDEX IF NOT EXISTS social_billed_runs_one_open
+ ON public.social_billed_runs(connection_id,refresh_id) WHERE closed_at IS NULL;
 CREATE INDEX IF NOT EXISTS social_billed_runs_open ON public.social_billed_runs(created_at) WHERE closed_at IS NULL;
 ALTER TABLE public.social_billed_runs ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.social_billed_runs FROM PUBLIC,anon,authenticated,service_role;
@@ -86,6 +89,8 @@ CREATE TABLE IF NOT EXISTS public.social_billed_reads(
  connection_id uuid NOT NULL,
  refresh_id uuid NOT NULL,
  request_key text NOT NULL CHECK(request_key ~ '^[0-9a-f]{64}$'),
+ -- The frozen route of the request (tikhub:<path>), so a zero receipt for an unanswered call names the right route.
+ model text NOT NULL CHECK(model ~ '^tikhub:/[A-Za-z0-9_/.-]{1,200}$'),
  run_id uuid NOT NULL,
  call_id uuid,
  state text NOT NULL CHECK(state IN ('opened','dispatched','answered','cancelled','abandoned')),
@@ -104,23 +109,35 @@ CREATE INDEX IF NOT EXISTS social_billed_reads_retention ON public.social_billed
 ALTER TABLE public.social_billed_reads ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.social_billed_reads FROM PUBLIC,anon,authenticated,service_role;
 
--- Binds the run of the current refresh, once. Returns the bound run (an earlier one wins), or NULL when the claim is no
--- longer current.
+-- The open run of the current refresh, if any ({runId, policies}); with p_run_id, binds that new run when none is open.
+-- NULL when the claim is no longer current.
 CREATE OR REPLACE FUNCTION public.publish_monitor_billed_run(p_connection_id uuid,p_lease uuid,p_refresh_id uuid,
- p_run_id uuid) RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
-DECLARE c social_connections; bound uuid;
+ p_run_id uuid,p_policies jsonb) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE c social_connections; b social_billed_runs;
 BEGIN
  c:=publish_monitor_refresh_current(p_connection_id,p_lease,p_refresh_id);
  IF c.id IS NULL THEN RETURN NULL; END IF;
- SELECT run_id INTO bound FROM social_billed_runs WHERE connection_id=c.id AND refresh_id=p_refresh_id;
- IF bound IS NULL AND p_run_id IS NOT NULL THEN
-  IF NOT EXISTS(SELECT 1 FROM bill2_runs WHERE id=p_run_id AND actor_id=c.actor_id) THEN
+ SELECT * INTO b FROM social_billed_runs WHERE connection_id=c.id AND refresh_id=p_refresh_id AND closed_at IS NULL FOR UPDATE;
+ IF b.run_id IS NULL AND p_run_id IS NOT NULL THEN
+  IF jsonb_typeof(p_policies) IS DISTINCT FROM 'array'
+   OR NOT EXISTS(SELECT 1 FROM bill2_runs WHERE id=p_run_id AND actor_id=c.actor_id) THEN
    RAISE EXCEPTION 'PUBLISH_MONITOR_INPUT_INVALID' USING ERRCODE='22023'; END IF;
-  INSERT INTO social_billed_runs(connection_id,refresh_id,actor_id,run_id) VALUES(c.id,p_refresh_id,c.actor_id,p_run_id);
-  bound:=p_run_id;
+  INSERT INTO social_billed_runs(run_id,connection_id,refresh_id,actor_id,policies)
+  VALUES(p_run_id,c.id,p_refresh_id,c.actor_id,p_policies) RETURNING * INTO b;
  END IF;
- RETURN bound;
+ RETURN CASE WHEN b.run_id IS NULL THEN jsonb_build_object('runId',NULL)
+  ELSE jsonb_build_object('runId',b.run_id,'policies',b.policies) END;
 END $$;
+
+-- Calls of a run that were sent but never got a stored answer (a killed process): they are settled at zero for the
+-- user before the run closes. Their ledger attempts are marked abandoned by the same step.
+CREATE OR REPLACE FUNCTION public.publish_monitor_billed_unanswered(p_run_id uuid) RETURNS jsonb
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
+ SELECT COALESCE(jsonb_agg(jsonb_build_object('operationId',r.id,'callId',r.call_id,'state',r.state,'model',r.model)
+  ORDER BY r.created_at),
+  '[]'::jsonb)
+ FROM social_billed_reads r WHERE r.run_id=p_run_id AND r.state IN ('opened','dispatched') AND r.call_id IS NOT NULL
+$$;
 
 -- What a re-run finds for one request of this refresh: the live attempt, if any (its state, call and stored answer).
 CREATE OR REPLACE FUNCTION public.publish_monitor_billed_lookup(p_connection_id uuid,p_lease uuid,p_refresh_id uuid,
@@ -139,7 +156,7 @@ END $$;
 -- Evidence steps (the RESEARCH-TOOLS EvidencePort contract, research/runtime/subcall.ts), bound to the current claim:
 -- open (reserve, before any send) → link (BILL2 call) → dispatch (right before the send) → finish (store the answer).
 CREATE OR REPLACE FUNCTION public.publish_monitor_billed_step(p_connection_id uuid,p_lease uuid,p_refresh_id uuid,
- p_operation_id uuid,p_step text,p_request_key text,p_token uuid,p_call_id uuid,p_state text,p_result jsonb) RETURNS jsonb
+ p_operation_id uuid,p_step text,p_request_key text,p_model text,p_token uuid,p_call_id uuid,p_state text,p_result jsonb) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE c social_connections; r social_billed_reads; n integer;
 BEGIN
@@ -147,14 +164,15 @@ BEGIN
   RAISE EXCEPTION 'PUBLISH_MONITOR_INPUT_INVALID' USING ERRCODE='22023'; END IF;
  c:=publish_monitor_refresh_current(p_connection_id,p_lease,p_refresh_id);
  -- A stale claim may still finish what it already sent (the answer is kept for the next run), nothing else.
- IF c.id IS NULL AND p_step<>'finish' THEN RETURN jsonb_build_object('ok',false); END IF;
+ IF c.id IS NULL AND p_step NOT IN ('finish','abandon') THEN RETURN jsonb_build_object('ok',false); END IF;
  IF p_step='open' THEN
   IF p_token IS NULL OR p_request_key IS NULL OR NOT EXISTS(SELECT 1 FROM social_billed_runs
     WHERE connection_id=c.id AND refresh_id=p_refresh_id AND closed_at IS NULL) THEN
    RAISE EXCEPTION 'PUBLISH_MONITOR_INPUT_INVALID' USING ERRCODE='22023'; END IF;
-  INSERT INTO social_billed_reads(id,actor_id,connection_id,refresh_id,request_key,run_id,state,token)
-  VALUES(p_operation_id,c.actor_id,c.id,p_refresh_id,p_request_key,
-   (SELECT run_id FROM social_billed_runs WHERE connection_id=c.id AND refresh_id=p_refresh_id),'opened',p_token)
+  INSERT INTO social_billed_reads(id,actor_id,connection_id,refresh_id,request_key,model,run_id,state,token)
+  VALUES(p_operation_id,c.actor_id,c.id,p_refresh_id,p_request_key,p_model,
+   (SELECT run_id FROM social_billed_runs WHERE connection_id=c.id AND refresh_id=p_refresh_id AND closed_at IS NULL),
+   'opened',p_token)
   ON CONFLICT DO NOTHING;
   GET DIAGNOSTICS n=ROW_COUNT;
   RETURN jsonb_build_object('ok',n=1);
@@ -193,7 +211,8 @@ $$;
 -- has moved on to another refresh. The daily job closes and finalizes them so no hold stays frozen.
 CREATE OR REPLACE FUNCTION public.publish_monitor_billed_orphans(p_limit integer) RETURNS jsonb
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
- SELECT COALESCE(jsonb_agg(jsonb_build_object('connectionId',b.connection_id,'actorId',b.actor_id,'runId',b.run_id)),'[]'::jsonb)
+ SELECT COALESCE(jsonb_agg(jsonb_build_object('connectionId',b.connection_id,'actorId',b.actor_id,'runId',b.run_id,
+  'policies',b.policies)),'[]'::jsonb)
  FROM (SELECT b.* FROM social_billed_runs b LEFT JOIN social_connections c ON c.id=b.connection_id
   WHERE b.closed_at IS NULL AND (c.id IS NULL OR c.refresh_id IS DISTINCT FROM b.refresh_id
    OR c.lease_expires_at IS NULL OR c.lease_expires_at<clock_timestamp()-interval '1 hour')
@@ -230,6 +249,7 @@ DO $$ DECLARE f regprocedure; BEGIN
  FOR f IN SELECT p.oid::regprocedure FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
   WHERE n.nspname='public' AND p.proname IN ('publish_monitor_billed_run','publish_monitor_billed_lookup',
    'publish_monitor_billed_step','publish_monitor_billed_closed','publish_monitor_billed_orphans',
+   'publish_monitor_billed_unanswered',
    'publish_monitor_billed_prune','publish_monitor_refresh_insufficient','publish_monitor_tool_only_run') LOOP
   EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC,anon,authenticated,service_role',f);
   IF split_part(f::text,'(',1)<>'publish_monitor_tool_only_run' THEN

@@ -97,17 +97,30 @@ try {
   const claim = (await svc('SELECT publish_monitor_tikhub_claim(10,120) v')).find(x => x.connectionId === m.conn);
   const keys = [m.conn, claim.lease, claim.refreshId];
   const run2 = await rpc(c, 'bill2_prepare', m.a, randomUUID(), await payload(m.a));
-  assert.equal(await svc('SELECT publish_monitor_billed_run($1,$2,$3,$4) v', [...keys, run2.id]), run2.id);
-  assert.equal(await svc('SELECT publish_monitor_billed_run($1,$2,$3,$4) v', [...keys, randomUUID()]), run2.id, 'an earlier run wins');
+  const bind = id => svc('SELECT publish_monitor_billed_run($1,$2,$3,$4,$5) v', [...keys, id, JSON.stringify([toolPolicy])]);
+  assert.equal((await bind(run2.id)).runId, run2.id);
+  assert.equal((await bind(randomUUID())).runId, run2.id, 'the open run wins');
   const op = randomUUID(), token = randomUUID(), key = 'f'.repeat(64);
-  const step = (name, extra = {}) => svc('SELECT publish_monitor_billed_step($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) v', [...keys, extra.op ?? op,
-    name, key, extra.token ?? token, extra.call ?? null, extra.state ?? null, extra.result ? JSON.stringify(extra.result) : null]);
+  const step = (name, extra = {}) => svc('SELECT publish_monitor_billed_step($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) v', [...keys,
+    extra.op ?? op, name, key, ROUTE, extra.token ?? token, extra.call ?? null, extra.state ?? null,
+    extra.result ? JSON.stringify(extra.result) : null]);
   assert.deepEqual(await step('open'), { ok: true });
   assert.deepEqual(await step('open', { op: randomUUID() }), { ok: false }, 'one live attempt per key');
   assert.deepEqual(await step('dispatch'), { ok: false }, 'never dispatched before its BILL2 call is linked');
   assert.deepEqual(await step('link', { call: randomUUID() }), { ok: true });
   assert.deepEqual(await step('dispatch', { token: randomUUID() }), { ok: false }, 'the token must match');
   assert.deepEqual(await step('dispatch'), { ok: true });
+  // A second key, sent but never answered (a killed process): listed for a zero receipt, then abandoned.
+  const op2 = randomUUID(), key2 = 'e'.repeat(64), call2 = randomUUID();
+  const step2 = (name, extra = {}) => svc('SELECT publish_monitor_billed_step($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) v', [...keys,
+    op2, name, key2, ROUTE, token, extra.call ?? null, null, null]);
+  await step2('open'); await step2('link', { call: call2 }); await step2('dispatch');
+  // Both sent requests are unanswered at this point (the first one gets its answer below).
+  const pending = (await svc('SELECT publish_monitor_billed_unanswered($1) v', [run2.id])).map(x => [x.callId, x.model, x.state]);
+  assert.equal(pending.length, 2);
+  assert.ok(pending.some(([id, model, state]) => id === call2 && model === ROUTE && state === 'dispatched'));
+  assert.deepEqual(await step2('abandon'), { ok: true });
+  assert.equal((await svc('SELECT publish_monitor_billed_lookup($1,$2,$3,$4) v', [...keys, key2])).found, false, 'the key is free again');
   assert.deepEqual(await step('finish', { state: 'succeeded', result: { items: [{ id: 'n1' }] } }), { ok: true });
   const found = await svc('SELECT publish_monitor_billed_lookup($1,$2,$3,$4) v', [...keys, key]);
   assert.deepEqual([found.found, found.state, found.result], [true, 'answered', { items: [{ id: 'n1' }] }]);
