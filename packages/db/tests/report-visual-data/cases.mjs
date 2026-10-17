@@ -23,7 +23,7 @@ const doc=(db,f,action,{request=randomUUID(),revision=0,body=null,bodyHash=null,
 const read=(db,f)=>rpc(db,'report_document',f.actor,f.execution,'read',null,null,null,null);
 const versionReport=async(db,id)=>(await db.query('SELECT report FROM artifact_versions WHERE id=$1',[id])).rows[0]?.report;
 
-export async function runCases({db,report}) {
+export async function runCases({db,report,before0300}) {
  for(const role of ['anon','authenticated']) {
   await db.query('SET ROLE '+role);
   await assert.rejects(rpc(db,'report_document_data_source',randomUUID(),randomUUID()),/permission denied/);
@@ -43,6 +43,12 @@ export async function runCases({db,report}) {
  assert.deepEqual(await parts(withData(withData(),block('生成的'))),{text:withData(),block:block('生成的')},'the last block is the data');
  const long=withData(text('字'.repeat(12000-text().length)),block('数'.repeat(5000)));
  const big=await seedBody(db,long);
+ await db.query('BEGIN');
+ try {
+  await db.query(before0300);
+  assert.equal((await read(db,big)).candidate,false);
+  report.checks.push('before fix (0206): a 12000-character text plus a data block is judged incomplete');
+ } finally {await db.query('ROLLBACK');}
  assert.equal((await read(db,big)).candidate,true,'12000-character text plus a data block is complete');
  const over=await seedBody(db,withData(text('字'.repeat(12001-text().length))));
  assert.equal((await read(db,over)).candidate,false,'the text alone over 12000 is not complete');
@@ -97,6 +103,7 @@ export async function runCases({db,report}) {
  const closedFinal=await doc(db,closed,'finalize',{bodyHash:hash(withData()),data:stored(withData())});
  await closeAccount(db,closed.base);
  await rpc(db,'account_erasure_scrub_content',closed.actor);
+ await rpc(db,'account_erasure_scrub_runtime',closed.actor);
  assert.equal(await versionReport(db,closedFinal.versionId),null);
  assert.doesNotMatch(JSON.stringify((await db.query('SELECT result FROM runtime_executions WHERE id=$1',[closed.execution])).rows),
   /VISUAL_PRIVATE/);

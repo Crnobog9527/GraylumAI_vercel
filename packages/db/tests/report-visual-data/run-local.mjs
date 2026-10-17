@@ -56,7 +56,12 @@ try {
  client=new Client({connectionString});await client.connect();
  await client.query(read('packages/db/tests/erasure-b2a/fixture.sql'));
  await client.query(read('packages/db/tests/content-erasure/fixture.sql'));
- await runCases({db:client,Client,connectionString,report});
+ // The pre-fix completeness check (0206), to show the gap this migration closes (rolled back inside the case).
+ const before=read('packages/db/migrations/0206_report_finalization.sql');
+ const start=before.indexOf('CREATE OR REPLACE FUNCTION public.report_body_complete(');
+ const before0300=before.slice(start,before.indexOf('END $$;',start)+'END $$;'.length);
+ assert.ok(start>0);
+ await runCases({db:client,Client,connectionString,report,before0300});
  const audits=ok(sql(read('packages/db/tests/account-open-policy-audit.sql')));
  assert.equal(audits,'');report.checks.push('account-open policy audit unchanged');
 } catch(error) {report.failed=String(error.stack??error);process.exitCode=1;}

@@ -16,6 +16,8 @@ export const reportManifest = z.object({
   maxCharacters: z.number().int().min(1).max(12000),
   /** RESEARCH_TOOLS_PLAN §1.5: qualified benchmark accounts required before a report; the host never accepts fewer than 3. */
   minQualifiedBenchmarks: z.number().int().min(1).max(12).optional(),
+  /** REPORT-VISUAL: the report ends with the strategy data block (host format). Absent: as before (the switch). */
+  data: z.object({ version: z.literal(1) }).strict().optional(),
 }).strict();
 export const frozenReport = z.object({
   version: z.literal(1), projectId: z.string().uuid(), roundId: z.string().uuid(),
@@ -24,6 +26,8 @@ export const frozenReport = z.object({
   sections: reportManifest.shape.sections, maxCharacters: reportManifest.shape.maxCharacters,
   /** Hash of the benchmark rows in the instructions; SQL admission refuses when the current rows differ. */
   benchmarkHash: hash.optional(),
+  /** Frozen from the manifest: this report was asked for the strategy data block. */
+  data: z.object({ version: z.literal(1) }).strict().optional(),
 }).strict();
 export type FrozenReport = z.infer<typeof frozenReport>;
 export const reportStart = z.object({

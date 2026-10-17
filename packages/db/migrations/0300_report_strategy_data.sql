@@ -120,7 +120,7 @@ BEGIN
   END IF;
   IF source->>'finalized'='true' OR source->>'state'<>'draft' THEN RAISE EXCEPTION 'REPORT_ALREADY_FINALIZED'; END IF;
   IF (source->>'revision')::bigint<>p_expected_revision THEN RAISE EXCEPTION 'REPORT_VERSION_CONFLICT'; END IF;
-  SELECT payload->'reportGeneration',result->>'body' INTO spec,generated FROM runtime_executions WHERE id=p_execution_id;
+  SELECT x.payload->'reportGeneration',x.result->>'body' INTO spec,generated FROM runtime_executions x WHERE x.id=p_execution_id;
   parts:=report_body_parts(p_body);
   IF p_body IS NULL OR btrim(parts->>'text')='' OR char_length(parts->>'text')>(spec->>'maxCharacters')::integer
    OR parts->>'block' IS DISTINCT FROM report_body_parts(generated)->>'block' THEN
