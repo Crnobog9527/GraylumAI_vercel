@@ -18,21 +18,25 @@ import { ResearchCallList } from '@/components/research/research-call-list';
 import type { ResearchCall } from '@/components/research/research-model';
 import { L_LATER, L_LATER_CHAT as CHAT, L_LATER_FLYWHEEL as FLY, type LaterStage } from '@/lib/landing/landing-copy-l-later';
 import { allOn, type LandingFlags } from '@/lib/landing/landing-flags';
+import { USER_CPS } from '@/lib/landing/typing';
 import picture from './picture-l.module.css';
 import { ComposerL } from './ComposerL';
 import { DemoTag } from './DemoTag';
 import styles from './later-l.module.css';
+import { Caret, TypingFrame, useStickToEnd, useTyped, useTypingGate } from './typing-l';
 
 /** How long one beat of a stage lasts, and the hold once a stage is whole before the next one (milliseconds). */
 const BEAT_MS = 900;
 /** Once whole, a stage stays long enough to be read (round six: the script and its 11-shot table at least 15 seconds). */
 const HOLD_MS: Record<string, number> = { script: 15000 };
 const HOLD_DEFAULT_MS = 6000;
-/** How many beats each stage plays in (round six: everything arrives as in the product, nothing laid out at once). */
-const STAGE_BEATS: Record<string, number> = { topics: 8, library: 8, voice: 9, script: 12, publish: 4, monitor: 4, review: 6 };
-/** The part of `text` written by beat `beat` of `from`..`from + span`: the reply streams in. */
-const typed = (text: string, beat: number, from: number, span: number) =>
-  beat >= from + span ? text : beat < from ? '' : text.slice(0, Math.round(text.length * (beat - from + 1) / (span + 1)));
+/**
+ * How many beats each stage plays in (round six: everything arrives as in the product, nothing laid out at once). Round
+ * seven (T8): what is typed (the person's message in the box, the coach's reply, the table row by row) is typed live, and
+ * the next beat waits for it (useTypingGate).
+ */
+const STAGE_BEATS: Record<string, number> = { topics: 6, library: 4, voice: 8, script: 5, publish: 4, monitor: 4, review: 6 };
+
 const PUBLISHING = '发布中';
 const reducedMotion = () => Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
 
@@ -62,6 +66,7 @@ function LaterStep({ step, flags }: { step: { title: string; lede: string; stage
   const [beat, setBeat] = useState(0);
   // The visitor's hand on the picture (pointer over it, scrolling or clicking in it) pauses it, as region 6 does.
   const [touching, setTouching] = useState(false);
+  const { Provider: TypingScope, busy } = useTypingGate();
   const ref = useRef<HTMLDivElement>(null);
   const base = useId();
   useEffect(() => {
@@ -74,9 +79,9 @@ function LaterStep({ step, flags }: { step: { title: string; lede: string; stage
   }, []);
   const current = stages[Math.min(active, stages.length - 1)];
   const total = current ? STAGE_BEATS[current.id] ?? 4 : 0;
-  // A stage plays beat by beat while on screen (the pointer on the picture stops it); once whole it holds, then the next stage
-  // starts, unless the pointer or focus is on the step.
-  const playing = moving && seen && !touching;
+  // A stage plays beat by beat while on screen (the pointer on the picture stops it; what is being typed holds the next
+  // beat); once whole it holds, then the next stage starts, unless the pointer or focus is on the step.
+  const playing = moving && seen && !touching && !busy;
   useEffect(() => {
     if (!playing) return;
     const whole = beat >= total;
@@ -110,7 +115,7 @@ function LaterStep({ step, flags }: { step: { title: string; lede: string; stage
         <div role="tabpanel" id={`${base}-panel`} aria-labelledby={`${base}-${current.id}`} className={styles.panel} key={current.id}>
           <p className={styles.note}><DemoTag />{current.note}</p>
           <div className={styles.picture} onPointerEnter={() => setTouching(true)} onPointerLeave={() => setTouching(false)}>
-            <StagePicture id={current.id} beat={shownBeat} />
+            <TypingScope><StagePicture id={current.id} beat={shownBeat} live={moving && seen} /></TypingScope>
           </div>
         </div>
         <CtaK />
@@ -119,9 +124,9 @@ function LaterStep({ step, flags }: { step: { title: string; lede: string; stage
   );
 }
 
-function StagePicture({ id, beat }: { id: string; beat: number }) {
+function StagePicture({ id, beat, live }: { id: string; beat: number; live: boolean }) {
   if (id === 'publish' || id === 'monitor' || id === 'review') return <FlywheelPicture id={id} beat={beat} />;
-  return <WorkChatPicture id={id} beat={beat} />;
+  return <WorkChatPicture id={id} beat={beat} live={live} />;
 }
 
 const call = (query: string, dataKind: string, toolName: string, done: boolean) => ({
@@ -131,30 +136,48 @@ const call = (query: string, dataKind: string, toolName: string, done: boolean) 
 const readNotice = (files: readonly string[], done: boolean) =>
   [{ id: 'read', tone: 'status' as const, busy: !done, text: `${done ? CHAT.library.read : CHAT.library.reading}：${files.join('、')}` }];
 const SHOTS = `| ${CHAT.script.shotHead.join(' | ')} |\n|${CHAT.script.shotHead.map(() => '---').join('|')}|\n`;
-const shotTable = (rows: number) => SHOTS + CHAT.script.shots.slice(0, rows).map(shot => `| ${shot.join(' | ')} |`).join('\n')
-  + (rows >= CHAT.script.shots.length ? `\n\n${CHAT.script.total}` : '');
 const STORYBOARD = CHAT.script.shots.map(([n, size, frame, , time]) => `镜头 ${n}（${size}）：${frame} · ${time}`).join('\n');
 const LIBRARY_ASK = `@${CHAT.library.document} ${CHAT.library.user}`;
 const ASK_PREFIX = `@${CHAT.library.document} `;
 /** The library question as typed so far: the @ reference becomes the product's chip once it is whole. */
 const askParagraphs = (typed: string): ComposerPreviewParagraph[] => (typed.length < ASK_PREFIX.length ? [[typed]]
   : [[{ reference: CHAT.library.document }, ' ', typed.slice(ASK_PREFIX.length)]]);
+/** What the person types into the message box before each stage's turn is sent (round seven, T8). */
+const ASKS: Record<string, string> = { topics: CHAT.topics.user, library: LIBRARY_ASK, script: CHAT.script.user };
+
+/** A coach reply typed out live, with its caret. */
+function StreamedReply({ text, whole }: { text: string; whole: boolean }) {
+  const { shown, typing } = useTyped(text, { whole });
+  return <TypingFrame typing={typing}><RuntimeReply text={shown} streaming={typing} /></TypingFrame>;
+}
+
+/** The storyboard table: its head at once, then row by row, each row's words typed. */
+function StreamedShots({ whole }: { whole: boolean }) {
+  const body = CHAT.script.shots.map(shot => `| ${shot.join(' | ')} |`).join('\n') + `\n\n${CHAT.script.total}`;
+  const { shown, typing } = useTyped(body, { whole });
+  return <TypingFrame typing={typing}><RuntimeReply text={SHOTS + shown} streaming={typing} /></TypingFrame>;
+}
 
 /**
  * Step two in the work conversation (round six: as in the product, everything arrives: the message sent, the library
  * being read, each fetch running then done, the reply written out): the product's header, turns, replies, 建议稿, its
  * message box and the right column, played by `beat`.
  */
-function WorkChatPicture({ id, beat }: { id: string; beat: number }) {
+function WorkChatPicture({ id, beat, live }: { id: string; beat: number; live: boolean }) {
   const script = id === 'script';
   const chat = useRef<HTMLDivElement>(null);
   // It follows the newest line until the visitor scrolls it themselves; a new stage follows again.
   const [follow, setFollow] = useState(true);
   useEffect(() => setFollow(true), [id]);
-  useLayoutEffect(() => { if (follow && chat.current) chat.current.scrollTop = chat.current.scrollHeight; }, [id, beat, follow]);
+  useLayoutEffect(() => { if (follow && chat.current) chat.current.scrollTop = chat.current.scrollHeight; });
+  useStickToEnd(chat, follow);
   const takeOver = () => setFollow(false);
-  const proposal = script ? typed(CHAT.script.proposal, beat, 9, 2) : '';
-  const composer = id === 'library' && beat < 2 ? LIBRARY_ASK.slice(0, Math.round(LIBRARY_ASK.length * (beat + 1) / 2)) : '';
+  const still = beat === Infinity;
+  // The person's message is typed into the box first; once sent, the turn shows.
+  // It starts once the step is on screen.
+  const ask = useTyped(live || still ? ASKS[id] ?? '' : '', { whole: still, cps: USER_CPS });
+  const sent = (live || still) && !ask.typing;
+  const proposal = useTyped(script && beat >= 3 ? CHAT.script.proposal : '', { whole: still });
   return (
     <div className={takeover.app}>
       <RailJ published launched />
@@ -165,14 +188,14 @@ function WorkChatPicture({ id, beat }: { id: string; beat: number }) {
             <RuntimeHeader headingLevel="h2" title={CHAT.title} meta={{ platform: CHAT.platform, account: CHAT.account, infoHref: '#' }} />
             <div className={work.conversation}>
               <div className={work.transcript}>
-                {id === 'topics' ? <TopicsTurn beat={beat} /> : null}
-                {id === 'library' && beat >= 2 ? <LibraryTurn beat={beat - 2} /> : null}
+                {id === 'topics' && sent ? <TopicsTurn beat={beat} /> : null}
+                {id === 'library' && sent ? <LibraryTurn beat={beat} /> : null}
                 {id === 'voice' ? <><LibraryTurn beat={Infinity} /><VoicePicture beat={beat} /></> : null}
-                {script ? (
-                  <RuntimeTurnView userText={CHAT.script.user} completed={beat >= 12}>
-                    {beat >= 1 ? <RuntimeReply text={typed(CHAT.script.reply, beat, 1, 1)} /> : null}
-                    {beat >= 3 ? <RuntimeReply text={shotTable(Math.min(CHAT.script.shots.length, (beat - 2) * 2))} /> : null}
-                    {beat >= 9 ? <RuntimeProposal adopted={false} text={proposal} /> : null}
+                {script && sent ? (
+                  <RuntimeTurnView userText={CHAT.script.user} completed={beat >= 4}>
+                    {beat >= 1 ? <StreamedReply text={CHAT.script.reply} whole={still} /> : null}
+                    {beat >= 2 ? <StreamedShots whole={still} /> : null}
+                    {beat >= 3 ? <TypingFrame typing={proposal.typing}><RuntimeProposal adopted={false} text={proposal.shown} /></TypingFrame> : null}
                   </RuntimeTurnView>
                 ) : null}
               </div>
@@ -180,13 +203,13 @@ function WorkChatPicture({ id, beat }: { id: string; beat: number }) {
           </div>
         </div>
         <div className={styles.composer} inert>
-          <ComposerL paragraphs={askParagraphs(composer)} />
+          <ComposerL paragraphs={askParagraphs(ask.typing ? ask.shown : '')} caret={ask.typing ? <Caret /> : undefined} />
         </div>
       </section>
       <aside className={takeover.checklist} inert>
-        {script && beat >= 9 ? (
+        {script && beat >= 3 ? (
           <ContentDraftView platform={CHAT.platform} account={CHAT.account} contentLabel="口播稿" title={CHAT.script.draftTitle}
-            body={proposal} versionLine={CHAT.script.versionLine}>
+            body={proposal.shown} versionLine={CHAT.script.versionLine}>
             <RuntimeResultsSection isVideo libraryHref="#" currentScriptId="script-1" versions={[
               { id: 'board-1', kind: 'storyboard', version: 1, status: 'draft', body: STORYBOARD, sourceContentId: 'script-1' },
               { id: 'edit-1', kind: 'editing', version: 1, status: 'draft', body: CHAT.script.editing, sourceContentId: 'script-1' },
@@ -208,7 +231,7 @@ function TopicsTurn({ beat }: { beat: number }) {
     <RuntimeTurnView userText={CHAT.topics.user}>
       {beat >= 1 ? <ChatNoticeList notices={readNotice(CHAT.topics.read, beat >= 2)} /> : null}
       {calls.length ? <ResearchCallList calls={calls} /> : null}
-      {beat >= 5 ? <RuntimeReply text={typed(CHAT.topics.reply, beat, 5, 2)} /> : null}
+      {beat >= 5 ? <StreamedReply text={CHAT.topics.reply} whole={beat === Infinity} /> : null}
     </RuntimeTurnView>
   );
 }
@@ -218,7 +241,7 @@ function LibraryTurn({ beat }: { beat: number }) {
   return (
     <RuntimeTurnView userText={LIBRARY_ASK}>
       {beat >= 1 ? <ChatNoticeList notices={readNotice([CHAT.library.document], beat >= 2)} /> : null}
-      {beat >= 3 ? <RuntimeReply text={typed(CHAT.library.reply, beat, 3, 2)} /> : null}
+      {beat >= 3 ? <StreamedReply text={CHAT.library.reply} whole={beat === Infinity} /> : null}
     </RuntimeTurnView>
   );
 }
@@ -242,7 +265,10 @@ function VoicePicture({ beat }: { beat: number }) {
           <header><b>{voice.compareTitle}</b></header>
           <div className={styles.side}>
             <figure><figcaption>{voice.original.label}</figcaption><p>{voice.original.text}</p></figure>
-            {beat >= 7 ? <figure data-new=""><figcaption>{voice.draft.label}</figcaption><p>{typed(voice.draft.text, beat, 7, 1)}</p></figure> : null}
+            {beat >= 7 ? (
+              <figure data-new=""><figcaption>{voice.draft.label}</figcaption>
+                <TypedLine text={voice.draft.text} whole={beat === Infinity} /></figure>
+            ) : null}
           </div>
         </section>
       ) : null}
@@ -297,7 +323,7 @@ function FlywheelPicture({ id, beat }: { id: string; beat: number }) {
           <li key={name}><b>{name}</b><span>{result}</span><em data-verdict={verdict}>{verdict}</em></li>
         ))}
       </ul>
-      {beat >= 3 ? <p className={styles.why}>{r.why}</p> : null}
+      {beat >= 3 ? <TypedLine className={styles.why} text={r.why} whole={beat === Infinity} /> : null}
       {beat >= 4 ? (
         <>
           <p className={styles.small}>{r.nextTitle}</p>
@@ -307,4 +333,10 @@ function FlywheelPicture({ id, beat }: { id: string; beat: number }) {
       {beat >= 5 ? <p className={styles.loop}><RotateCw size={15} aria-hidden="true" />{r.loop}</p> : null}
     </section>
   );
+}
+
+/** A plain line typed out live, with its caret. */
+function TypedLine({ text, whole, className }: { text: string; whole: boolean; className?: string }) {
+  const { shown, typing } = useTyped(text, { whole });
+  return <p className={className}>{shown}{typing ? <Caret /> : null}</p>;
 }

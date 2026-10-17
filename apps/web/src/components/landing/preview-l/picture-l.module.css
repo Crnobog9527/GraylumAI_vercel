@@ -5,6 +5,10 @@
 /* The conversation area: rows keep their own height (the log its own, up to the product's 55vh) and it scrolls,
    nothing squeezed; the message box and the footer sit below it, always whole (round six). */
 .scroll { display: grid; flex: 1 1 auto; grid-auto-rows: max-content; align-content: start; gap: 12px; min-height: 0; padding: 12px 18px; overflow: hidden; }
+/* Round seven (T3): the coach's cards sit with equal room on both sides of the log (the product's right margin and
+   scrollbar gutter left a lone line on the right), so all four borders read as one card. */
+.scroll [role='log'] { padding-inline: 2px; }
+.scroll [role='log'] [data-message-role='assistant'] { margin-right: 0; }
 .bottom { display: grid; flex: none; gap: 8px; padding: 0 18px 8px; }
 /* A block around the message box, as on the product page, so it takes the column's width up to its own maximum. */
 .composer { display: block; min-width: 0; }
@@ -20,3 +24,5 @@
 .reportFit > * { max-height: 100%; }
 .fullReport { margin-top: 16px; padding-top: 12px; border-top: 1px solid #eee; }
 .fullReport summary { cursor: default; color: #262626; font-size: 14px; font-weight: 500; }
+/* Round seven: the conversation's log, which the visitor may scroll (its content stays a picture). */
+.logHost { min-width: 0; }

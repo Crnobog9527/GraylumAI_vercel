@@ -29,6 +29,7 @@ import { trpc } from '@/trpc/client';
 import { countOf, OverviewL } from './OverviewL';
 import { scenarioAt } from './ScenariosL';
 import { PositioningPictureL } from './PositioningPictureL';
+import { linePhases, momentAt } from '@/lib/landing/step-one-timeline';
 import { SampleL } from './SampleL';
 
 const ALL_ON = Object.fromEntries(Object.keys(LANDING_FEATURES).map(key => [key, true])) as LandingFlags;
@@ -97,21 +98,38 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     expect(steps).not.toContain('AB 测试');
   });
 
-  it('docks the open question in the real message box, as the product page does, and drops it once answered', () => {
-    // While its message is read, the question is folded into one line in the conversation; read, it is docked.
-    // At the very start the opening is still being written (streamed), with nothing after it yet.
-    const writing = renderToStaticMarkup(withTrpc(createElement(PositioningPictureL, { moment: 0, local: 0 })));
+  it('plays step one in time: typed out, the question folded then docked, the answer typed into the message box', () => {
+    // Round seven (T2, T8): the clock decides what shows. Phases of the opening line: think, stream, (card), hold.
+    const lines = L_POSITIONING_MOMENTS[0].lines;
+    const picture = (ms: number | null) => renderToStaticMarkup(withTrpc(createElement(PositioningPictureL,
+      { moment: 0, at: ms === null ? null : momentAt(lines, ms) })));
+    const [[, think], [, stream], [, card], [, hold]] = linePhases(lines[0]);
+    // At the very start the coach is about to write: nothing in the conversation yet.
+    const writing = picture(0);
     expect(writing).not.toContain('data-question-card');
-    expect(writing).not.toContain(escape(L_SKILL_OPENING));
-    const reading = renderToStaticMarkup(withTrpc(createElement(PositioningPictureL, { moment: 0, local: 0.08 })));
+    expect(writing).not.toContain('data-message-role="assistant"');
+    // Half way through writing, part of the opening shows, not all of it, and no card yet.
+    const half = picture(think + stream / 2);
+    expect(half).toContain('AI 自媒体陪跑教练 · 主动引导');
+    expect(half).not.toContain('说说你真实的想法就行');
+    expect(half).not.toContain('data-question-card');
+    // Written: first folded into one line while it is read, then docked on the message box.
+    const reading = picture(think + stream + card + hold * 0.1);
+    expect(reading).toContain(escape(L_SKILL_OPENING));
     expect(reading).toContain('data-question-card="folded"');
-    expect(reading).not.toContain('data-question-card="open"');
-    const open = renderToStaticMarkup(withTrpc(createElement(PositioningPictureL, { moment: 0, local: 0.12 })));
+    const open = picture(think + stream + card + hold * 0.8);
     expect(open).toContain('data-question-card="open"');
     expect(open.indexOf('data-question-card="open"')).toBeGreaterThan(open.indexOf('role="log"'));
-    expect(open).toContain('AI 自媒体陪跑教练 · 主动引导');
     expect(open).not.toContain('data-message-role="user"');
-    const answered = renderToStaticMarkup(withTrpc(createElement(PositioningPictureL, { moment: 0, local: 1 })));
+    // The answer is typed into the message box (the card still docked), then sent.
+    const [[, compose]] = linePhases(lines[1]);
+    const typing = picture(think + stream + card + hold + compose / 2);
+    expect(typing).toContain('data-question-card="open"');
+    expect(typing).toContain(escape(lines[1].text.slice(0, 4)));
+    expect(typing).not.toContain('data-message-role="user"');
+    // The stage finished: everything whole, the question answered.
+    const answered = picture(null);
+    expect(answered).toContain('data-message-role="user"');
     expect(answered).not.toContain('data-question-card="open"');
   });
 
@@ -125,7 +143,7 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     for (const stage of [...L_LATER.two.stages, ...L_LATER.three.stages]) expect(['real', 'planned']).toContain(stage.source);
     // The full launched version: no picture says a feature is not there yet.
     for (const word of ['待接入', '即将上线', '未开放', '敬请期待']) expect(on).not.toContain(word);
-    expect(renderToStaticMarkup(withTrpc(createElement(PositioningPictureL, { moment: 0, local: 1 })))).not.toContain('待接入');
+    expect(renderToStaticMarkup(withTrpc(createElement(PositioningPictureL, { moment: 0, at: null })))).not.toContain('待接入');
     expect(on).toContain(L_JURY.title);
     expect(on).toContain(`href="${L_JURY.href}"`);
     for (const word of ['世界最强', '没有分歧']) expect(on).not.toContain(word);
@@ -261,7 +279,7 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     // What the first summary lists, the person said before it.
     const said = know.lines.filter(line => line.role === 'user').map(line => line.text).join('');
     for (const fact of ['一年后', 'TikTok', 'Instagram', '长视频', '二十多道', '常问', '不知道该找谁', '支架']) expect(said).toContain(fact);
-    const picture = renderToStaticMarkup(withTrpc(createElement(PositioningPictureL, { moment: 0, local: 0.08 })));
+    const picture = renderToStaticMarkup(withTrpc(createElement(PositioningPictureL, { moment: 0, at: null })));
     expect(picture).toContain(escape(L_SKILL_OPENING));
     expect(picture).not.toContain('<h1');
   });

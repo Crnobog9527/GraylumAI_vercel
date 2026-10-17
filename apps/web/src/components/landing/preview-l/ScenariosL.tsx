@@ -11,6 +11,7 @@ import { L_WORKFLOWS } from '@/lib/landing/landing-copy-l-workflows';
 import { allOn, type LandingFlags } from '@/lib/landing/landing-flags';
 import { cn } from '@/lib/utils';
 import styles from './scenarios-l.module.css';
+import { useTypingGate } from './typing-l';
 import { WorkflowCompareL, workflowBeats } from './WorkflowCompareL';
 
 /** How long one beat of the coach's work lasts when it plays by itself (milliseconds). */
@@ -60,6 +61,8 @@ export function ScenariosL({ flags, after }: { flags: LandingFlags; after?: Reac
   const [inView, setInView] = useState(false);
   const [seen, setSeen] = useState(false);
   const [staticActive, setStaticActive] = useState(0);
+  // What the coach is typing holds the next beat (round seven, T8).
+  const { Provider: TypingScope, busy } = useTypingGate();
   const ref = useRef<HTMLDivElement>(null);
   const tabs = useRef<HTMLDivElement>(null);
   const lastScroll = useRef(0);
@@ -90,7 +93,7 @@ export function ScenariosL({ flags, after }: { flags: LandingFlags; after?: Reac
     return () => { cancelAnimationFrame(frame); window.removeEventListener('scroll', onScroll); window.removeEventListener('resize', onScroll); };
   }, [held, total]);
   // Left alone and on screen, it plays on by itself (not while the page is being scrolled).
-  const playing = held && inView && !stopped && !holding && position < total;
+  const playing = held && inView && !stopped && !holding && !busy && position < total;
   const [tick, setTick] = useState(0);
   useEffect(() => {
     if (!playing) return;
@@ -155,8 +158,10 @@ export function ScenariosL({ flags, after }: { flags: LandingFlags; after?: Reac
         aria-labelledby={items.length > 1 ? `${base}-tab-${active}` : undefined} className={styles.panel} key={current.copy.tab}>
         <h3 className={styles.title}>{current.copy.title}</h3>
         <p className={styles.lede}>{current.copy.lede}</p>
-        <WorkflowCompareL task={current.task} turns={current.turns} beat={held ? at.beat : Infinity} badge={L_SCENARIOS.badge}
-          onHold={setHolding} />
+        <TypingScope>
+          <WorkflowCompareL task={current.task} turns={current.turns} beat={held ? at.beat : Infinity} badge={L_SCENARIOS.badge}
+            onHold={setHolding} />
+        </TypingScope>
       </div>
     </div>
   );

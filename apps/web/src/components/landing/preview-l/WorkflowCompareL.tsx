@@ -13,6 +13,7 @@ import { J_COMPARE } from '@/lib/landing/landing-copy-j-compare';
 import type { WorkflowTurn } from '@/lib/landing/landing-copy-l-workflows';
 import { cn } from '@/lib/utils';
 import styles from './scenarios-l.module.css';
+import { TypingFrame, useStickToEnd, useTyped } from './typing-l';
 
 type Task = { question: string; generic: readonly string[]; genericNote: string; coachNote: string; verdict: string };
 
@@ -39,6 +40,7 @@ export function WorkflowCompareL({ task, turns, beat, badge, onHold }: {
   const [follow, setFollow] = useState(true);
   useEffect(() => setFollow(true), [task]);
   useLayoutEffect(() => { if (follow && log.current) log.current.scrollTop = log.current.scrollHeight; }, [beat, follow]);
+  useStickToEnd(log, follow);
   const takeOver = () => { setFollow(false); onHold?.(true); };
   let at = 0;
   const shown = turns.map(turn => {
@@ -108,8 +110,22 @@ function Turn({ turn, local }: { turn: WorkflowTurn; local: number }) {
     <RuntimeTurnView userText={turn.user} completed={replied && Boolean(turn.proposal)}>
       {reading.length ? <ChatNoticeList notices={reading} /> : null}
       {calls.length ? <ResearchCallList calls={calls} /> : null}
-      {replied ? <RuntimeReply text={turn.reply} /> : null}
-      {replied && turn.proposal ? <RuntimeProposal adopted={false} text={turn.proposal} /> : null}
+      {/* Round seven (T8): the reply typed out live; once the conversation has moved on, whole. */}
+      {replied ? <TurnReply reply={turn.reply} proposal={turn.proposal} whole={local > replyAt} /> : null}
     </RuntimeTurnView>
+  );
+}
+
+/** The coach's reply typed out, then its 建议稿 (if any). */
+function TurnReply({ reply, proposal, whole }: { reply: string; proposal?: string; whole: boolean }) {
+  const first = useTyped(reply, { whole });
+  const second = useTyped(proposal && !first.typing ? proposal : '', { whole });
+  return (
+    <>
+      <TypingFrame typing={first.typing}><RuntimeReply text={first.shown} streaming={first.typing} /></TypingFrame>
+      {proposal && !first.typing ? (
+        <TypingFrame typing={second.typing}><RuntimeProposal adopted={false} text={second.shown} /></TypingFrame>
+      ) : null}
+    </>
   );
 }
