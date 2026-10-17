@@ -8,7 +8,7 @@ import {NativeProgressProjection} from './nativeProgress';
 import {visibleText,nativeMetadata,prepareNativePrimary,nativeFrameProjection,
  completedOutput,finalizeNativeSummary} from './nativeOutput';
 import {paygOwnerDatabase} from './paygOwner';
-import {executorRpc,historyGuard,terminalReplyGuard,recoverExecutorFinancial,
+import {executorRpc,historyGuard,terminalReplyGuard,recoverExecutorFinancial,observeContext,
  preflightCodes,platformFailureReason,hash,progressEmitter,diagnosticCode,failBeforeDispatch,cancelWithCode,type RuntimeExecutorOptions} from './executorRpc';
 import {fitNativeRequestOutput,runtimePaygCall, type ResumeInput, type PaygWait, type PaygPosition} from './paygRuntime';
 import {beginPaygExecution, type RuntimeExecution} from './paygResume';
@@ -63,7 +63,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   budget.timing?.enter('execute');
   const started=await beginPaygExecution({executionId,resume,actor:options.actor,callGate:options.callGate,
    resumePricing:options.resumePricing,read:(action,value)=>rpc<RuntimeExecution>('runtime_execution',
-    {...args,p_action:action,...(value?{p_result:value}:{})})});
+    {...args,p_action:action,...(value?{p_result:value}:{})}),observe:read=>observeContext(options,read)});
   if(started.wait)return started.wait;
   const {execution,resumedGate}=started;
   const stopped=await finishStop(executionId,onProgress,execution);if(stopped)return stopped;
@@ -111,6 +111,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   let gateRejection:GateRejection|undefined;
   const research=researchExecution({research:context.research,tools:context.tools,execution,executionId,actorId:await options.actor(),
    database:options.database,emit:event=>progress(event),onClosed:()=>{accountClosed=true;},
+   onPause:(point,state)=>{if(isPayg)waitPoint={epoch:execution.epoch!,...point,state};},
    canSend:()=>{try{budget.assertCanStart(5000);return true;}catch{return false;}}});
   const checkAgentReply=terminalReplyGuard(agentTurn,context.tools.includes(ASK_QUESTION_TOOL),()=>{terminalReplyFailure=true;},
    Boolean(context.skillFile),Boolean(context.historyRead),research?.tools.map(tool=>tool.name));

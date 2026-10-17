@@ -11,7 +11,7 @@ type AnyRecord = Record<string, unknown>;
 
 /** Domains whose stable error codes the application emits (e.g. `ACCOUNT_ERASURE_FAILED`). */
 const CODE_PREFIXES = ['ACCOUNT', 'AGENT', 'ARTIFACT', 'AUTH', 'BILL2', 'BILLING', 'CAPTURE', 'CONTENT', 'CREDIT',
-  'DATA_USE', 'ERASURE', 'LIBRARY', 'MODEL', 'OPC', 'OPENING_GRANT', 'PAY', 'PAYG', 'RATE_LIMIT', 'REPORT', 'RESEARCH',
+  'DATA_USE', 'ERASURE', 'EXPERT_CONSULT', 'LIBRARY', 'MODEL', 'OPC', 'OPENING_GRANT', 'PAY', 'PAYG', 'RATE_LIMIT', 'REPORT', 'RESEARCH',
   'RUNTIME', 'SKILL', 'STRIPE', 'WAFFO'];
 const ERROR_CODE = new RegExp(`^(?:${CODE_PREFIXES.join('|')})_[A-Z0-9_]{2,60}(?=$|[:\\s])`);
 
@@ -26,9 +26,10 @@ export function scrubText(value: string): string {
  */
 export const APP_SEGMENTS = new Set(['about', 'acceptable-use', 'access-denied', 'account-erasure', 'admin',
   'agent-first-preview', 'ai', 'announcements', 'api', 'auth', 'auto-close', 'billing-reconcile', 'callback', 'chat',
-  'advance', 'fusion', 'connect', 'contact', 'costs', 'cron', 'diagnostics', 'f', 'faq', 'finance', 'forgot-password', 'ig-jingying', 'landing',
+  'advance', 'fusion', 'connect', 'contact', 'costs', 'cron', 'diagnostics', 'expert-consult', 'f', 'faq', 'finance',
+  'forgot-password', 'ig-jingying', 'landing',
   'library', 'library-cleanup', 'login', 'maintenance', 'marketplace', 'models', 'orders', 'packages', 'payment-notices', 'performance',
-  'plan', 'positioning', 'postforme', 'preview', 'publish-monitor', 'pricing', 'privacy', 'profile', 'prompts', 'refunds',
+  'plan', 'positioning', 'postforme', 'preview', 'publish-monitor', 'pricing', 'privacy', 'profile', 'prompts', 'refund', 'refunds',
   'register', 'release-subscription-credits',
   'requests', 'reset-password', 'review', 'runtime', 'runtime-recovery', 'search', 'secrets', 'settings', 'shequn-jingying', 'shequn-xingxiao',
   'skills', 'social-monitor', 'start', 'stream', 'stripe', 'terms', 'tickets', 'topics', 'transactions', 'trpc', 'tutorials', 'upload', 'users',

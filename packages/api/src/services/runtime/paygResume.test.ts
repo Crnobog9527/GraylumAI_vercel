@@ -13,6 +13,15 @@ function fixture(state = 'waiting_credits', staging = false) {
     resume: { executionId: id, cursor: 3, epoch: 2 } };
 }
 describe('explicit original-execution resume', () => {
+  it.each([
+    ['a plain read', undefined, {}],
+    ['a refused call gate', { executionId: id, cursor: 3, epoch: 2 }, { callGate: async () => ({ ok: false as const, reason: 'paused' as const, retryAfter: 60 }) }],
+  ] as const)('LIB-4b: the execution is observed before %s returns its wait and saved body', async (_name, resume, patch) => {
+    const f = fixture(), seen: string[] = [];
+    const result = await beginPaygExecution({ ...f, ...patch, resume, observe: execution => { seen.push(execution.state); } });
+    expect(result.wait).toMatchObject({ body: 'saved reply' });
+    expect(seen).toEqual(['waiting_credits']);
+  });
   it.each(['waiting_credits', 'waiting_resume'])('reading %s never grants execution', async state => {
     const f = fixture(state);
     const result = await beginPaygExecution({ ...f, resume: undefined });
