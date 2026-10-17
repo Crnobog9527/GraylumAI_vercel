@@ -32,7 +32,7 @@ export { opcGenerate } from "./answerCard";
 const uuid = z.string().uuid();
 import {opcStart, opcTopicBind} from './start';
 import {isPositioningWorkflow} from './positioningWorkflow';
-import {researchRefreshContext, withResearchRefresh} from './researchRefresh';
+import {withMentorResearch} from './researchContext';
 export {opcStart, opcTopicBind} from './start';
 export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:StagingPolicy, resumeWaitingOrganizer?:ResumeWaitingOrganizer) {
   async function rpc(name: string, args: Record<string, unknown>) {
@@ -195,9 +195,9 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
         captureConfirmed = Object.fromEntries(snapshot.workflow.steps.map(step => [step.id, Boolean(frozenSteps[step.id]?.valid)]));
         if (!opening && !answeredCard) runtimeRequest.selection.task = questionTask(captureFocus(captureInformation[v.stepId]!));
       }
-      const hostTurnContext = v.purpose === "mentor" ? withResearchRefresh(captureHostContext(snapshot.workflow.steps, captureInformation,
-        v.stepId, opening, updatedFieldIds, captureConfirmed, stepSummary), await researchRefreshContext(admin,
-        (await user.auth.getUser()).data.user!.id, d.sessionId, v, {opening, stepSummary: Boolean(stepSummary)})) : undefined;
+      const hostTurnContext = v.purpose === "mentor" ? await withMentorResearch(admin, (await user.auth.getUser()).data.user!.id, d.sessionId, v,
+        {opening, stepSummary: Boolean(stepSummary)}, captureHostContext(snapshot.workflow.steps, captureInformation,
+        v.stepId, opening, updatedFieldIds, captureConfirmed, stepSummary)) : undefined;
       let organizerInstructions = v.purpose === "mentor" && organizeAfter
         ? ORGANIZER_INSTRUCTIONS : undefined;
       if (organizerInstructions) organizerInstructions += "\n" + ANSWER_CARD_RULE;
