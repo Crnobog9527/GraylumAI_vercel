@@ -46,19 +46,19 @@ export async function backgroundWorker({ q, exec }) {
         const result = JSON.parse(q(`SET ROLE service_role; SELECT ${name}('${actor}')`));
         assert.deepEqual(result, { retry: true, reason: 'transactions_pending' });
       }
-      assert.equal(q(`SELECT (SELECT count(*) FROM agent_confirmed_preferences WHERE actor_id='${actor}')
+      assert.equal(q(`SELECT (SELECT count(*) FROM runtime_session_names WHERE actor_id='${actor}')
         + (SELECT count(*) FROM runtime_sessions WHERE actor_id='${actor}')`), '0');
       exec(['touch', '/tmp/b1b-proof-resume']);
       await marker('finished');
       assert.deepEqual(observe(), { state: null, xact_start_null: true, xid_null: true,
         xmin_null: true, row_candidate: true, has_virtual_xact: false });
-      assert.equal(q(`SELECT (SELECT count(*) FROM agent_confirmed_preferences WHERE actor_id='${actor}')
+      assert.equal(q(`SELECT (SELECT count(*) FROM runtime_session_names WHERE actor_id='${actor}')
         + (SELECT count(*) FROM runtime_sessions WHERE actor_id='${actor}' AND start_payload IS NOT NULL)`), '2');
       for (const name of ['account_erasure_scrub_content', 'account_erasure_scrub_runtime']) {
         const result = JSON.parse(q(`SET ROLE service_role; SELECT ${name}('${actor}')`));
         assert.equal(result.retry, undefined);
       }
-      assert.equal(q(`SELECT (SELECT count(*) FROM agent_confirmed_preferences WHERE actor_id='${actor}')
+      assert.equal(q(`SELECT (SELECT count(*) FROM runtime_session_names WHERE actor_id='${actor}')
         + (SELECT count(*) FROM runtime_sessions WHERE actor_id='${actor}' AND erased_at IS NULL)`), '0');
       assert.equal(q(`SELECT count(*) FROM runtime_sessions WHERE actor_id='${actor}'
         AND erased_at IS NOT NULL AND scope IS NULL AND start_payload IS NULL`), '1');

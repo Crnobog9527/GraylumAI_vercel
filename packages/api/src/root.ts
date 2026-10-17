@@ -9,6 +9,7 @@ import { router } from './trpc';
 import { runtimeRateLimitsRouter } from './routers/runtimeRateLimits';
 import { modelIdentityRouter } from './routers/modelIdentity';
 import { platformSecretsRouter } from './routers/platformSecrets';
+import { paymentNoticesRouter } from './routers/paymentNotices';
 import { researchToolsRouter } from './routers/researchTools';
 import { mentorBudgetRouter } from './routers/mentorBudget';
 import { chatRouter } from './routers/chat';
@@ -58,6 +59,7 @@ export const appRouter = router({
   runtimeRateLimits: runtimeRateLimitsRouter,
   modelIdentity: modelIdentityRouter,
   platformSecrets: platformSecretsRouter,
+  paymentNotices: paymentNoticesRouter,
   researchTools: researchToolsRouter,
   research: researchRouter,
   checkin: checkinRouter,
