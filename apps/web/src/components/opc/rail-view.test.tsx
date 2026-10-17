@@ -70,3 +70,13 @@ it('shows the archive heading and the notices', () => {
   </>);
   for (const text of ['归档记录', '返回最近工作', '名字没有保存', 'role="status"', '已删除']) expect(html).toContain(text);
 });
+
+it('keeps 发布排期 and 数据复盘 unavailable by default and shows them available when the page draws the product as launched', () => {
+  const product = renderToStaticMarkup(<RailView area="chat"><span/></RailView>);
+  expect(product.match(/<button disabled="">/g)).toHaveLength(2);
+  expect(product.match(/<small>待接入<\/small>/g)).toHaveLength(2);
+  const launched = renderToStaticMarkup(<RailView area="chat" launched><span/></RailView>);
+  expect(launched).not.toContain('待接入');
+  expect(launched).not.toContain('disabled');
+  for (const name of ['发布排期', '数据复盘']) expect(launched).toContain(name);
+});

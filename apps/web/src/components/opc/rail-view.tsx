@@ -34,10 +34,12 @@ export function AnnouncementBar({ notice, returnParam = '', onClose }: { notice?
 
 /**
  * The left rail: new conversation, the function links, then `children` (RailHistory, RailNotices, RailBottom).
- * `returnParam` is the "?returnTo=…" the function pages use to come back.
+ * `returnParam` is the "?returnTo=…" the function pages use to come back. `launched` shows 发布排期 and 数据复盘
+ * as available, like the other items, without "待接入": the landing page draws the product as launched (Owner
+ * 2026-10-17); the product itself keeps them unavailable until publishing and the data review ship.
  */
-export function RailView({ area, returnParam = '', onCloseMobile, children }: {
-  area: RailArea; returnParam?: string; onCloseMobile?: () => void; children: ReactNode;
+export function RailView({ area, returnParam = '', onCloseMobile, launched = false, children }: {
+  area: RailArea; returnParam?: string; onCloseMobile?: () => void; launched?: boolean; children: ReactNode;
 }) {
   return <aside className={styles.rail} aria-label="工作区导航">
     <div className={styles.railMobile}><button aria-label="关闭导航" onClick={onCloseMobile}>关闭工作列表</button></div>
@@ -50,10 +52,10 @@ export function RailView({ area, returnParam = '', onCloseMobile, children }: {
         <img className={styles.navIcon} src="/opc-reference/magnifying-glass.svg" alt=""/>搜索</Link>
       <Link href={'/library'+returnParam} aria-current={area==='library'?'page':undefined}>
         <img className={styles.navIcon} src="/opc-reference/books.svg" alt=""/>资料库</Link>
-      <button disabled>
-        <img className={styles.navIcon} src="/opc-reference/calendar-blank.svg" alt=""/>发布排期 <small>待接入</small></button>
-      <button disabled>
-        <img className={styles.navIcon} src="/opc-reference/chart-bar.svg" alt=""/>数据复盘 <small>待接入</small></button>
+      <button disabled={!launched}>
+        <img className={styles.navIcon} src="/opc-reference/calendar-blank.svg" alt=""/>发布排期{launched ? null : <> <small>待接入</small></>}</button>
+      <button disabled={!launched}>
+        <img className={styles.navIcon} src="/opc-reference/chart-bar.svg" alt=""/>数据复盘{launched ? null : <> <small>待接入</small></>}</button>
     </nav>
     {children}
   </aside>;
