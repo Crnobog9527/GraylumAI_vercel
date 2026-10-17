@@ -226,8 +226,8 @@ test.describe('Authentication', () => {
 
     const routeExpectations = [
       { route: '/contact', heading: '需要进一步沟通时，直接找到正确入口' },
-      { route: '/tutorials', heading: '先按场景上手，而不是从空白对话框开始' },
-      { route: '/faq', heading: '在开始之前，先把关键问题说清楚' },
+      { route: '/blog', heading: 'Graylum 教程' },
+      { route: '/faq', heading: 'Graylum 常见问题' },
       { route: '/terms', heading: /使用 .* 前，请先了解基础服务规则/ },
       { route: '/privacy', heading: /了解 .* 如何处理账户与使用数据/ },
       { route: '/acceptable-use', heading: /明确 .* 的允许使用方式与限制/ },
