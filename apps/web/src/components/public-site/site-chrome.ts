@@ -50,6 +50,8 @@ export const SITE_CHROME: Record<SiteLocale, SiteChrome> = {
   'zh-Hans': {
     home: SIMPLIFIED_HOME_HREF,
     nav: [
+      { label: '功能介绍', href: '/features' },
+      { label: '教程', href: '/blog' },
       { label: '价格', href: '/landing/pricing' },
       { label: '关于我们', href: '/about' },
     ],
