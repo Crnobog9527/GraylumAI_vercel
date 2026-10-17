@@ -47,6 +47,8 @@ export type ComposerEditorHandle = {
   focus: () => void;
   /** Replace the typed `@query` with a reference and a trailing space; false when it does not fit the limit. */
   insertReference: (range: ReferenceQuery, reference: LibraryReference) => boolean;
+  /** UI-C: add a reference at the end of the message (an attached file); false when it does not fit the limit. */
+  appendReference: (reference: LibraryReference) => boolean;
 };
 
 /** UI-B: only passed while references are switched on; absent, the box behaves exactly as UI-A. */
@@ -190,6 +192,16 @@ export function ComposerEditor(props: Props) {
         { type: REFERENCE_NODE, attrs: reference }, { type: 'text', text: ' ' },
       ]).run();
       // The length filter drops a transaction silently; an unchanged document means it did not fit.
+      return editor.state.doc !== before;
+    },
+    appendReference: reference => {
+      if (!editor) return false;
+      const before = editor.state.doc;
+      const end = Selection.atEnd(before).from;
+      const last = before.textBetween(Math.max(0, end - 1), end, '\n', '\ufffc');
+      // Separated from typed text by a space, so `@名称` reads as its own word.
+      const lead = last && !/\s/.test(last) ? [{ type: 'text', text: ' ' }] : [];
+      editor.chain().insertContentAt(end, [...lead, { type: REFERENCE_NODE, attrs: reference }, { type: 'text', text: ' ' }]).run();
       return editor.state.doc !== before;
     },
   }), [editor]);
