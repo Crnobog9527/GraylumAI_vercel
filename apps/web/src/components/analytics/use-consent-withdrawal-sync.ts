@@ -2,7 +2,7 @@
 'use client';
 
 import { useEffect } from 'react';
-import type { ConsentSnapshot } from '@/lib/analytics/consent';
+import { analyticsAllowed, type ConsentSnapshot } from '@/lib/analytics/consent';
 import { createClient } from '@/lib/supabase';
 import { trpc } from '@/trpc/client';
 
@@ -36,6 +36,9 @@ export function useConsentWithdrawalSync(consent: ConsentSnapshot, enabled: bool
           // The marker names the account it was sent for: another account in this tab still sends its own.
           try { if (window.sessionStorage.getItem(SENT_KEY) === userId) return; } catch { /* storage unavailable: send */ }
           await utils.client.analytics.withdrawConsent.mutate();
+          // Consent may have come back while the request was in flight: then this notice no longer stands for the
+          // current denial, so the marker must not outlive it (a later withdrawal has to notify again).
+          if (!active || analyticsAllowed()) return;
           try { window.sessionStorage.setItem(SENT_KEY, userId); } catch { /* sent; may repeat next page */ }
         })
         .catch(() => {
