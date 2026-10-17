@@ -151,3 +151,25 @@ MODERATION 检查点：`services/runtime/moderation.ts` 和 RATE-LIMIT 接线里
 
 - `workbench.integration.ts` 只保留 `ADMIN:` 用例和 4 个搜索计费存储用例；旧页面浏览器流程、旧生成、旧工作台搜索、CONSUMPTION 用例删除。后台用例的登录改走 `/positioning`。
 - 本地运行器退役 `--workbench-restart-only` 和不带 `--opc-only` / `--runtime-only` 的 `--serve`（都依赖已删的旧页面用例），去掉重启阶段和对已删文件的源码替换。
+
+## 第四段：旧工作台项目改为只读（2026-10-17）
+
+来源：#1026（CONTENT-CONVERSATION-DRIVEN G）"发现的问题"——旧工作台里已经存在的非定位项目仍能读取，
+并能对已开的轮次做保存、确认、发布；G 只堵了新开轮次。
+
+| 接口 | 现在的行为 |
+| --- | --- |
+| `workbench.read` | 不变，已有内容照常可读。 |
+| `workbench.start` | 一律拒绝：它建出的项目和轮次都属于旧工作台；页面已没有调用方。新的定位草稿走 `opc.start`。 |
+| `workbench.execute` | 项目是旧工作台项目时拒绝，服务端写入前就返回；定位草稿项目照常。 |
+
+拒绝时返回 `FORBIDDEN`，文案"旧工作台的项目已改为只读：已有内容可以查看，不能再新建或修改。新的内容创作请在对话里进行。"
+（内部码 `ARTIFACT_LEGACY_READ_ONLY`）。查不到项目类型时按失败处理，不放行。
+
+"旧工作台项目"按 `artifact_query('projects')` 的结果认定：0107/0134 已经把定位草稿（`positioning`）、
+账号（`account`）、结果（`result`）和选题作品（`opc_items`）排除在外，剩下的就是旧 `/workbench` 建的
+`legacy` / `script` 项目。不加迁移、不改数据库。只在路由层拦：集成测试仍用服务函数直接造旧项目数据，
+验证 Runtime 读取旧作品作为来源（只读）的行为。
+
+不在本段：旧工作台项目没有查看和导出页面（#904 已删除旧页面和导出接口，`/workbench` 跳到 `/positioning`），
+本段不恢复页面；定位流程里的选题页（`/positioning/[draftId]/topics`）属于定位项目，不受影响。
