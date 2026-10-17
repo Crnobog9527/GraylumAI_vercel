@@ -5,7 +5,7 @@
  "budgetUsd": 5,
  "totalCostUsd": 2.535932,
  "method": "Owner 2026-10-17 plan B: real Fusion request shape only. Bodies are staging fusionRequestBody bytes (replayed) or the same bytes with a padded materials field (large band, about 186000 B); output-stress samples cap max_tokens at the testedOutputLimit. callBoundUsd is the openRouterCallBound formula with promptTokensUpper = bytes + 8192 at the route quote price.",
- "note": "Real OpenRouter calls through the local proxy (egress US), authorized test balance. Private receipts stay on the operator machine.",
+ "note": "Real OpenRouter calls through the local proxy (egress US), authorized test balance. Private receipts, including raw generation ids, stay on the operator machine; only their sha256 is published.",
  "models": {
   "anthropic/claude-opus-5.5": {
    "purposes": [
@@ -109,10 +109,10 @@
    "costUsd": 0.432528,
    "callBoundUsd": 1.02632,
    "costWithinBound": true,
-   "generationId": "gen-1792214452-BOPVaDk02MRMH8M9szgh",
    "requestSha256": "a405e00bb098a7621ded2a14f35b396d6e399ae7c4aca515f4c75bd2706c779a",
    "egress": "US",
-   "at": "2026-10-17T05:20:52.280Z"
+   "at": "2026-10-17T05:20:52.280Z",
+   "generationIdSha256": "f3c68fdb268c16db69b5ae1fb8980fa4196b5c460144e28c579e866ce59b13f2"
   },
   {
    "sample": "opus-sum-170",
@@ -138,10 +138,10 @@
    "costUsd": 0.43992,
    "callBoundUsd": 1.031915,
    "costWithinBound": true,
-   "generationId": "gen-1792214716-MmxZcq0wQeKPKOR7gKuv",
    "requestSha256": "38b75c767ae210e44cda32589b8dbbaaa9ccbda8c1c6004f94bbfea70d142a62",
    "egress": "US",
-   "at": "2026-10-17T05:25:15.566Z"
+   "at": "2026-10-17T05:25:15.566Z",
+   "generationIdSha256": "e1523096403357ca32ab3268a5b0416a595ef23f37c55ad65e2ddcb8311d2e56"
   },
   {
    "sample": "gemini-rev1",
@@ -167,10 +167,10 @@
    "costUsd": 0.01429725,
    "callBoundUsd": 0.055088,
    "costWithinBound": true,
-   "generationId": "gen-1792214942-Vm8gX7ALFROLymPY1mD0",
    "requestSha256": "c77d035aae6df8f9edaa9330d6151c63b763695530d255797087c5a13144056d",
    "egress": "US",
-   "at": "2026-10-17T05:29:02.297Z"
+   "at": "2026-10-17T05:29:02.297Z",
+   "generationIdSha256": "db3c5382a8151f62b2e85a453277913ab6443f3bb534aad594b0f65af79a7419"
   },
   {
    "sample": "gemini-debate",
@@ -196,10 +196,10 @@
    "costUsd": 0.01694475,
    "callBoundUsd": 0.069086,
    "costWithinBound": true,
-   "generationId": "gen-1792214974-QpSldu5yYjs6pKGPoSFM",
    "requestSha256": "b970c8b8c7609e8a5b31fb18b1cd020282a2621cf73489b386fe7b3e0e4f542a",
    "egress": "US",
-   "at": "2026-10-17T05:29:33.716Z"
+   "at": "2026-10-17T05:29:33.716Z",
+   "generationIdSha256": "ae5d61972dd1614fd31cfcacfc84456a28e7151e16265405eb31f3966516969a"
   },
   {
    "sample": "gemini-large",
@@ -225,10 +225,10 @@
    "costUsd": 0.0416925,
    "callBoundUsd": 0.169063,
    "costWithinBound": true,
-   "generationId": "gen-1792215001-ot4bROiJXpn8Jg4M0HTU",
    "requestSha256": "17b5c3d231d7135b625f17be919a29818033b2b1f0f8ec71516a776e64c2c038",
    "egress": "US",
-   "at": "2026-10-17T05:30:01.257Z"
+   "at": "2026-10-17T05:30:01.257Z",
+   "generationIdSha256": "6b09e3152cdf681537ae2523a657c9b59e07bc95d2c66c3c96d6703da2bf0468"
   },
   {
    "sample": "gemini-stress-1",
@@ -254,10 +254,10 @@
    "costUsd": 0.00396675,
    "callBoundUsd": 0.041647,
    "costWithinBound": true,
-   "generationId": "gen-1792215029-vYw8OBr5uIJWdqQiOBLt",
    "requestSha256": "ebea92cce6eec2481f69a2db6cfae0defed92bc3ee7fb4adcd9057b619aabbc0",
    "egress": "US",
-   "at": "2026-10-17T05:30:28.768Z"
+   "at": "2026-10-17T05:30:28.768Z",
+   "generationIdSha256": "7ea3eba9847855383a5b284b20c28a63289a514c11405f08d7abcc820506f281"
   },
   {
    "sample": "gemini-stress-2",
@@ -283,10 +283,10 @@
    "costUsd": 0.004265925,
    "callBoundUsd": 0.055646,
    "costWithinBound": true,
-   "generationId": "gen-1792215048-vDuWq4CHSg0vrnPF9CYU",
    "requestSha256": "a05cfd1a0c2de58ec60e06510a64a72546aafd1bc1414e71e27b2b86db28f1af",
    "egress": "US",
-   "at": "2026-10-17T05:30:47.974Z"
+   "at": "2026-10-17T05:30:47.974Z",
+   "generationIdSha256": "4f8cbd1c9e4656d56dc4ad58584cd14e209f4c37e9944baf596956120715e207"
   },
   {
    "sample": "sonnet-rev1",
@@ -312,10 +312,10 @@
    "costUsd": 0.058184,
    "callBoundUsd": 0.166378,
    "costWithinBound": true,
-   "generationId": "gen-1792215079-2Wz2blIXumXvlyuB9zzT",
    "requestSha256": "d0f34862190b41ccb096a81b5872a6d688f87826335be6a4862c258abdd45afa",
    "egress": "US",
-   "at": "2026-10-17T05:31:19.236Z"
+   "at": "2026-10-17T05:31:19.236Z",
+   "generationIdSha256": "9e6ae265e14835c134227eb47dda16ecded697c37756b055c064cfa014c309a5"
   },
   {
    "sample": "sonnet-debate",
@@ -341,10 +341,10 @@
    "costUsd": 0.071668,
    "callBoundUsd": 0.210583,
    "costWithinBound": true,
-   "generationId": "gen-1792215115-mS8MpQRqY6QW1zGVGi2i",
    "requestSha256": "b4cbe7095fcb169089c4ade3f1decc8f18651cfebe12e39d79028d2b7036f320",
    "egress": "US",
-   "at": "2026-10-17T05:31:55.185Z"
+   "at": "2026-10-17T05:31:55.185Z",
+   "generationIdSha256": "610551fd596a6dd7ee9712857e4e333e8d35264284435a5b172d88f5d05f46d0"
   },
   {
    "sample": "sonnet-large",
@@ -370,10 +370,10 @@
    "costUsd": 0.168832,
    "callBoundUsd": 0.526438,
    "costWithinBound": true,
-   "generationId": "gen-1792215150-4g3sItBa7x1YhW1NGBi2",
    "requestSha256": "76cc55fc2786daef70b50931fc85bda6f98a0160b50a21413684bf71c6c9545a",
    "egress": "US",
-   "at": "2026-10-17T05:32:28.359Z"
+   "at": "2026-10-17T05:32:28.359Z",
+   "generationIdSha256": "973c1200a97862e5d7ba8093c675dbc30c32d2cec9547e344c96a9d86dba639f"
   },
   {
    "sample": "sonnet-stress-1",
@@ -399,10 +399,10 @@
    "costUsd": 0.066658,
    "callBoundUsd": 0.190103,
    "costWithinBound": true,
-   "generationId": "gen-1792215180-whRDAIOoT38E0M7NjMlQ",
    "requestSha256": "7cc8456fa0c46e4b7ea0bdde2f11c3741149e8a392719b9bb455ecfa232cdf8b",
    "egress": "US",
-   "at": "2026-10-17T05:33:00.525Z"
+   "at": "2026-10-17T05:33:00.525Z",
+   "generationIdSha256": "31d3ea25871b96ea2f8bf5288fe0c485c9244c43d1988d894fa545ad7b4afaa0"
   },
   {
    "sample": "sonnet-stress-2",
@@ -428,10 +428,10 @@
    "costUsd": 0.050514,
    "callBoundUsd": 0.145898,
    "costWithinBound": true,
-   "generationId": "gen-1792215209-OHbUcC0AKsTrexTJtCay",
    "requestSha256": "c5899d8ee725bca9e1e43be5085a985033c09a927a9c993d1bc56bc174cb1f08",
    "egress": "US",
-   "at": "2026-10-17T05:33:28.782Z"
+   "at": "2026-10-17T05:33:28.782Z",
+   "generationIdSha256": "fa55d7de3beb16219075c434555f5d5a329a42e8471488a776840b2a8ebe3d10"
   },
   {
    "sample": "sonnet-stress-3",
@@ -457,10 +457,10 @@
    "costUsd": 0.066658,
    "callBoundUsd": 0.190103,
    "costWithinBound": true,
-   "generationId": "gen-1792215265-G6dypGaoDScGZwstHYHx",
    "requestSha256": "7cc8456fa0c46e4b7ea0bdde2f11c3741149e8a392719b9bb455ecfa232cdf8b",
    "egress": "US",
-   "at": "2026-10-17T05:34:24.891Z"
+   "at": "2026-10-17T05:34:24.891Z",
+   "generationIdSha256": "c18731d0c041eaf0d41d8debc464411a12e0b598d5e7adcd40ec78c461d449c8"
   },
   {
    "sample": "sol-rev1",
@@ -486,10 +486,10 @@
    "costUsd": 0.0532635,
    "callBoundUsd": 0.166343,
    "costWithinBound": true,
-   "generationId": "gen-1792216152-KMErJowhIyKsGkOTSxz6",
    "requestSha256": "5f29d7aca4a6d2ee107126fdd9bd68a58228888a3e0c1a28c902e4c3e202d629",
    "egress": "US",
-   "at": "2026-10-17T05:49:11.898Z"
+   "at": "2026-10-17T05:49:11.898Z",
+   "generationIdSha256": "0d725779f373670cfa1a6fde38f63401cf68399f43f05e61c6d2ac742cbdc8ac"
   },
   {
    "sample": "sol-debate",
@@ -515,10 +515,10 @@
    "costUsd": 0.0617935,
    "callBoundUsd": 0.210547,
    "costWithinBound": true,
-   "generationId": "gen-1792216219-q2ebxt6satSeoKZUlOOA",
    "requestSha256": "3ad76ad74f19e24b872baf678440d48acee920f0c421d636ddd0702a247788df",
    "egress": "US",
-   "at": "2026-10-17T05:50:19.328Z"
+   "at": "2026-10-17T05:50:19.328Z",
+   "generationIdSha256": "a68e858395b032bafcca1a60595b589921079d028438001a0602126385783c8f"
   },
   {
    "sample": "sol-large-1",
@@ -544,10 +544,10 @@
    "costUsd": 0.1499606,
    "callBoundUsd": 0.526402,
    "costWithinBound": true,
-   "generationId": "gen-1792216277-995iqQQnZg2EGdNm3lbE",
    "requestSha256": "d79f4dc7357b77587597df2950b0f779e2a0d98855d996227b40a8bcc0284505",
    "egress": "US",
-   "at": "2026-10-17T05:51:16.431Z"
+   "at": "2026-10-17T05:51:16.431Z",
+   "generationIdSha256": "3e8ea3e2cd517327be3122de669e90afeb94aeeb529a0825e25f8da484a16b41"
   },
   {
    "sample": "sol-large-2",
@@ -573,10 +573,10 @@
    "costUsd": 0.1486766,
    "callBoundUsd": 0.52644,
    "costWithinBound": true,
-   "generationId": "gen-1792216334-LEXA1maK2URihKVlC7nC",
    "requestSha256": "2c8c2b674d8bf606118213d38c331e5dc39853687c21b1f0906769f43d09ad6d",
    "egress": "US",
-   "at": "2026-10-17T05:52:13.721Z"
+   "at": "2026-10-17T05:52:13.721Z",
+   "generationIdSha256": "3a0069787abc9129e79b8a2d0acf9fefb6c2285f1632ef6a063f77d60e225819"
   },
   {
    "sample": "sol-stress-1",
@@ -602,10 +602,10 @@
    "costUsd": 0.0062695,
    "callBoundUsd": 0.1305,
    "costWithinBound": true,
-   "generationId": "gen-1792216397-jID44P64RrU7zZDv9gYB",
    "requestSha256": "f1b5b25885c5b176246d5803a7fb4ea5bb2723336e80ebf1379e3c0735e59a88",
    "egress": "US",
-   "at": "2026-10-17T05:53:17.329Z"
+   "at": "2026-10-17T05:53:17.329Z",
+   "generationIdSha256": "ba7766cce73fdc9ce98a32033df66b432e087f2bcc47f9e804d13740e96601b5"
   },
   {
    "sample": "sol-stress-2",
@@ -631,10 +631,10 @@
    "costUsd": 0.0067115,
    "callBoundUsd": 0.174705,
    "costWithinBound": true,
-   "generationId": "gen-1792216432-YQ6yV2OT5gKeouW1s2U2",
    "requestSha256": "bdc2678534a25a23a81df6a2310847fb427cf8d72bc75a1357550f6b785ce58f",
    "egress": "US",
-   "at": "2026-10-17T05:53:52.482Z"
+   "at": "2026-10-17T05:53:52.482Z",
+   "generationIdSha256": "71f0bc637386064fb3649137e8853b91698bad54b9fcaa4deaaf4a2e40b9fe17"
   },
   {
    "sample": "opus-large-1",
@@ -660,10 +660,10 @@
    "costUsd": 0.33666,
    "callBoundUsd": 1.01177,
    "costWithinBound": true,
-   "generationId": "gen-1792216486-KvLKEEZBhLw0st9NVCIP",
    "requestSha256": "7ab539577bdaadd9eab88a9ca50ff526cf697e48158b5821ed94c36a78fbb016",
    "egress": "US",
-   "at": "2026-10-17T05:54:27.170Z"
+   "at": "2026-10-17T05:54:27.170Z",
+   "generationIdSha256": "0069236630eddbd19d05bded5576431ab1f420105ddb5bd46fa9fd810651ecdf"
   },
   {
    "sample": "opus-large-2",
@@ -689,10 +689,10 @@
    "costUsd": 0.336468,
    "callBoundUsd": 1.011755,
    "costWithinBound": true,
-   "generationId": "gen-1792216517-pvHDt4SgcDkNL01SkTRq",
    "requestSha256": "546faf3352fc982c29427401e6675f484e9351c8399e3ddb8f66eba861ba0f6e",
    "egress": "US",
-   "at": "2026-10-17T05:55:16.614Z"
+   "at": "2026-10-17T05:55:16.614Z",
+   "generationIdSha256": "e4c568fe1b82d32c931f75b8004ab234f9a73dc6ad050dfa7fda4b820e78066f"
   }
  ]
 }

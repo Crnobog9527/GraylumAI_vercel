@@ -1,6 +1,6 @@
 {
  "note": "Profile entries to append to runtime_payg_staging.profiles (Owner 2026-10-17 plan B). Not written by this PR; the controller applies them.",
- "evidenceSha256": "e0588e1009370a8e69dfbd7b2f7e62c813daea6d8b2473036af057a633e7aa0f",
+ "evidenceSha256": "d80cee10d3b8f6d12a75ecf46d9a8948971291350f5e0d2855fd07638e248864",
  "profiles": [
   {
    "model": "openai/gpt-6.1-sol",
@@ -29,7 +29,7 @@
      "outputLimit": 8192,
      "testedOutputLimit": 512,
      "evidenceReference": "fusion-profile-20261017",
-     "manifestHash": "e0588e1009370a8e69dfbd7b2f7e62c813daea6d8b2473036af057a633e7aa0f",
+     "manifestHash": "d80cee10d3b8f6d12a75ecf46d9a8948971291350f5e0d2855fd07638e248864",
      "outputStressSamples": 2,
      "includesReasoning": true
     }
@@ -39,7 +39,7 @@
    "evidence": {
     "scope": "fusion-request-shape",
     "reference": "fusion-profile-20261017",
-    "manifestHash": "e0588e1009370a8e69dfbd7b2f7e62c813daea6d8b2473036af057a633e7aa0f",
+    "manifestHash": "d80cee10d3b8f6d12a75ecf46d9a8948971291350f5e0d2855fd07638e248864",
     "distinctSamples": 6,
     "sizeBands": 2,
     "maxVerifiedBytes": 186000,
@@ -80,7 +80,7 @@
      "outputLimit": 32768,
      "testedOutputLimit": 2048,
      "evidenceReference": "fusion-profile-20261017",
-     "manifestHash": "e0588e1009370a8e69dfbd7b2f7e62c813daea6d8b2473036af057a633e7aa0f",
+     "manifestHash": "d80cee10d3b8f6d12a75ecf46d9a8948971291350f5e0d2855fd07638e248864",
      "outputStressSamples": 2,
      "includesReasoning": true
     }
@@ -90,7 +90,7 @@
    "evidence": {
     "scope": "fusion-request-shape",
     "reference": "fusion-profile-20261017",
-    "manifestHash": "e0588e1009370a8e69dfbd7b2f7e62c813daea6d8b2473036af057a633e7aa0f",
+    "manifestHash": "d80cee10d3b8f6d12a75ecf46d9a8948971291350f5e0d2855fd07638e248864",
     "distinctSamples": 4,
     "sizeBands": 2,
     "maxVerifiedBytes": 185970,

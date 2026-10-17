@@ -3,7 +3,7 @@
 > 状态：取证完成（2026-10-17），四个模型的证据齐全；staging 写入由总控执行（第 6 节）。
 > 依据：[FUSION-REVIEW](tasks/FUSION-REVIEW.md) 第 6 节 FUSION-PROFILE 一行；采样方法 [#665](https://github.com/Crnobog9527/GraylumAI_vercel/pull/665)
 > （[BILL_PAYG_PROFILE_FINAL](BILL_PAYG_PROFILE_FINAL.md)），按 Owner 方案 B 缩小到评审团实际请求；
-> 证据 [fusion-profile-20261017.json](evidence/fusion-profile-20261017.json)（sha256 `e0588e1009370a8e69dfbd7b2f7e62c813daea6d8b2473036af057a633e7aa0f`）；
+> 证据 [fusion-profile-20261017.json](evidence/fusion-profile-20261017.json)（sha256 `d80cee10d3b8f6d12a75ecf46d9a8948971291350f5e0d2855fd07638e248864`）；
 > Sol / Opus 档案草稿 [fusion-profile-20261017.profiles-draft.json](evidence/fusion-profile-20261017.profiles-draft.json)。
 
 ## 0. Owner 的决定
@@ -88,7 +88,7 @@
 
 真实调用 21 次，合计 **2.5359 美元**（Owner 授权的 OpenRouter 测试余额，本任务上限 5 美元；Owner 2026-10-17 在执行窗口里逐项同意）：
 Opus 4 次 1.5456（汇总对比 2 次 0.8724、大档 2 次 0.6731）；Sonnet 6 次 0.4825；Sol 6 次 0.4267；Gemini 5 次 0.0812。
-经本机代理发出，发送前核对出口地区为 US。私有回执（完整输出）只留在本机，仓库只存数字、请求哈希和 generation id。
+经本机代理发出，发送前核对出口地区为 US。私有回执（完整输出）只留在本机，仓库只存数字、请求哈希和 generation id 的哈希。
 
 ## 6. staging 写入清单（由总控执行，本 PR 不写）
 
