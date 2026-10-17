@@ -35,14 +35,18 @@ export function gaServerConfig(env: Record<string, string | undefined> = process
   return MEASUREMENT_ID.test(measurementId) && apiSecret.length >= 8 ? { measurementId, apiSecret } : null;
 }
 
-/** The moment the ids' consent counts from: the browser's capture time when it is plausible and earlier than the
- * server's own request stamp, else that stamp. A capture time later than the stamp (beyond a few seconds of
- * latency) means the browser clock is ahead and the real capture time is unknown: null, and nothing is stored. */
+/** The moment the ids' consent counts from: the browser's capture time, when it agrees with the server's own request
+ * stamp (not later than a few seconds of latency, not older than 10 minutes), else null and nothing is stored: a
+ * skewed browser clock makes the real capture time unknowable, and moving it forward could revive ids captured
+ * before a withdrawal. A browser that sends no capture time uses the server's stamp. */
 export function effectiveRequestTime(raw: unknown, requestedAt: Date): Date | null {
-  const captured = raw && typeof raw === 'object' ? Date.parse(String((raw as Record<string, unknown>).capturedAt ?? '')) : NaN;
-  if (!Number.isFinite(captured)) return requestedAt;
-  if (captured > requestedAt.getTime() + 5_000) return null;
-  return requestedAt.getTime() - captured <= 10 * 60_000 && captured < requestedAt.getTime() ? new Date(captured) : requestedAt;
+  const sent = raw && typeof raw === 'object' ? (raw as Record<string, unknown>).capturedAt : undefined;
+  if (sent === undefined) return requestedAt;
+  const captured = Date.parse(String(sent));
+  if (!Number.isFinite(captured)) return null;
+  const age = requestedAt.getTime() - captured;
+  if (age < -5_000 || age > 10 * 60_000) return null;
+  return new Date(Math.min(captured, requestedAt.getTime()));
 }
 
 /** Checkout: keep the ids for this buyer's own unpaid order. `requestedAt` is the server's stamp from before the

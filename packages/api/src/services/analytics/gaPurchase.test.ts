@@ -108,20 +108,22 @@ describe('checkoutValue', () => {
 
 describe('effectiveRequestTime', () => {
   const server = new Date('2026-10-17T10:00:00Z');
-  it('counts consent from the earlier plausible browser capture time', () => {
+  it('counts consent from the browser capture time when it agrees with the server clock', () => {
     expect(effectiveRequestTime({ capturedAt: '2026-10-17T09:58:00Z' }, server)?.toISOString()).toBe('2026-10-17T09:58:00.000Z');
-    expect(effectiveRequestTime({ capturedAt: '2026-10-17T08:00:00Z' }, server)).toBe(server);
-    expect(effectiveRequestTime({ capturedAt: 'later' }, server)).toBe(server);
+    expect(effectiveRequestTime({ capturedAt: '2026-10-17T10:00:03Z' }, server)?.toISOString()).toBe('2026-10-17T10:00:00.000Z');
     expect(effectiveRequestTime(null, server)).toBe(server);
+    expect(effectiveRequestTime({ clientId: '1.1' }, server)).toBe(server);
   });
-  it('refuses a capture time ahead of the server (browser clock ahead), allowing a few seconds of latency', () => {
-    expect(effectiveRequestTime({ capturedAt: '2026-10-17T10:05:00Z' }, server)).toBeNull();
-    expect(effectiveRequestTime({ capturedAt: '2026-10-17T10:00:09Z' }, server)).toBeNull();
-    expect(effectiveRequestTime({ capturedAt: '2026-10-17T10:00:03Z' }, server)).toBe(server);
+  it('refuses skewed or unreadable capture times instead of moving them forward', () => {
+    for (const capturedAt of ['2026-10-17T10:05:00Z', '2026-10-17T10:00:09Z', '2026-10-17T09:30:00Z', 'later', 5]) {
+      expect(effectiveRequestTime({ capturedAt }, server), String(capturedAt)).toBeNull();
+    }
   });
-  it('stores nothing for a clock-ahead capture', async () => {
-    const d = db(true);
-    expect(await storeGaCheckoutIds(d.client, 'user', 'order', { ...ids, capturedAt: '2026-10-17T10:30:00Z' }, server)).toBe(false);
-    expect(d.rpc).not.toHaveBeenCalled();
+  it('stores nothing for a skewed capture', async () => {
+    for (const capturedAt of ['2026-10-17T10:30:00Z', '2026-10-17T08:00:00Z']) {
+      const d = db(true);
+      expect(await storeGaCheckoutIds(d.client, 'user', 'order', { ...ids, capturedAt }, server)).toBe(false);
+      expect(d.rpc).not.toHaveBeenCalled();
+    }
   });
 });
