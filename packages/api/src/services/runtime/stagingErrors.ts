@@ -6,6 +6,7 @@ import { DatabaseReadError } from '../../lib/databaseReadError';
 import { RUNTIME_INPUT_TOO_LONG_MESSAGE } from '../../shared/runtimeInputMessages';
 import { RUNTIME_PAYG_PROFILE_REQUIRED_MESSAGE } from '../../shared/runtimeAdmissionMessages';
 import { POSITIONING_REQUIRED_MESSAGE } from '../../shared/positioningGate';
+import { CONTENT_SOURCE_MESSAGES } from '../../shared/contentSourceMessages';
 
 const failures = {
   CONTENT_ERASED: ['PRECONDITION_FAILED', 'CONTENT_ERASED'],
@@ -61,6 +62,10 @@ const failures = {
   LIB_REFERENCE_DISABLED: ['PRECONDITION_FAILED', 'LIB_REFERENCE_DISABLED：引用资料库文档的功能还没有开放；未扣费。'],
   LIB_REFERENCE_CAPACITY: ['PRECONDITION_FAILED', 'LIB_REFERENCE_CAPACITY：本轮内容加上文档读取超过模型容量，请缩短输入或少引用一些；未扣费。'],
   LIB_SOURCE_DELETED: ['PRECONDITION_FAILED', 'LIB_SOURCE_DELETED：本轮引用的文档已删除或已更新，这一轮回答不再显示。'],
+  // A2: a directly chosen derived-content Skill refused before any charge.
+  RUNTIME_CONTENT_SOURCE_MISSING: ['PRECONDITION_FAILED', CONTENT_SOURCE_MESSAGES.RUNTIME_CONTENT_SOURCE_MISSING],
+  RUNTIME_CONTENT_SOURCE_STALE: ['PRECONDITION_FAILED', CONTENT_SOURCE_MESSAGES.RUNTIME_CONTENT_SOURCE_STALE],
+  RUNTIME_CONTENT_SOURCE_TOO_LARGE: ['PRECONDITION_FAILED', CONTENT_SOURCE_MESSAGES.RUNTIME_CONTENT_SOURCE_TOO_LARGE],
 } as const;
 export type StagingFailure = keyof typeof failures;
 export class StagingAccessError extends Error {
