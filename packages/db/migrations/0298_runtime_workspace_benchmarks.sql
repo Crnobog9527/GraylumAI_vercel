@@ -2,20 +2,22 @@
 -- CHAT-AUTO-CONTEXT B1 (Owner 2026-10-17, MASTER_PLAN 2.1; docs/launch/tasks/CHAT-AUTO-CONTEXT.md): free conversations
 -- can read the benchmark table their confirmed positioning was built from, at no tool charge. 0218's
 -- runtime_workspace_source is rebuilt with one more entry kind, 'benchmarks', listed right after the positionings:
--- per confirmed business, the latest positioning session (opc_draft_businesses -> opc_drafts.session_id) that still has
--- benchmark rows from live answers. Its body is 0268's research_benchmark_table rows (numbers computed by code, fetch
+-- per confirmed business, the positioning session of the draft that produced its confirmed version (opc_drafts.project_id
+-- = that version's project; a newer, unconfirmed draft of the same business is never used), when it still has benchmark
+-- rows from live answers. Its body is 0268's research_benchmark_table rows (numbers computed by code, fetch
 -- times, missing fields), capped at 8000 characters; nothing is fetched from a supplier here.
 -- Everything else is 0218 unchanged: owner/free-session gate, opc_source_allowed on the business's positioning version,
 -- 40-entry index (positionings, then benchmarks, then strategies and topics), 4000-character body for the other kinds.
--- Erasure needs no new code: the entry carries sessionId (the positioning session) and sourceVersionId, both keys
--- content_erasure_references matches, and 0218 already scopes read_source tool results; deleting that positioning
--- conversation or the positioning itself clears free-conversation answers that copied the table. Its dependency is the
+-- Erasure needs no new code: the entry carries sessionId (the positioning session) and sourceVersionId, and a read also
+-- returns producedBy: [{executionId}] for every answer whose rows it copied; content_erasure_references matches all three
+-- keys and 0218 already scopes read_source tool results. Deleting that positioning conversation, the positioning itself,
+-- or (internally) one producing answer clears free-conversation answers that copied the table. Its dependency is the
 -- positioning version, so 0218's tool guard still refuses a copy stored after the positioning was revoked or deleted.
 -- Rollback: re-run 0218's definition (no data is written by this migration).
 BEGIN;
 CREATE OR REPLACE FUNCTION runtime_workspace_source(p_actor_id uuid,p_session_id uuid,p_query text DEFAULT '') RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
-DECLARE entries jsonb;entry jsonb;body text;version_id uuid;cap integer:=4000;
+DECLARE entries jsonb;entry jsonb;body text;version_id uuid;cap integer:=4000;produced jsonb;
 BEGIN
  IF NOT runtime_workspace_session(p_actor_id,p_session_id) THEN RAISE EXCEPTION 'RUNTIME_WORKSPACE_DENIED';END IF;
  IF length(coalesce(p_query,''))>2000 THEN RAISE EXCEPTION 'RUNTIME_WORKSPACE_QUERY_DENIED';END IF;
@@ -31,6 +33,7 @@ BEGIN
   FROM opc_businesses b CROSS JOIN LATERAL (
    SELECT d.session_id,count(*)::int accounts,(count(*) FILTER (WHERE rb.qualified))::int qualified,max(rb.fetched_at) fetched_at
    FROM opc_draft_businesses db JOIN opc_drafts d ON d.draft_id=db.draft_id AND d.actor_id=p_actor_id
+    AND d.project_id=(SELECT cv.project_id FROM artifact_versions cv WHERE cv.id=b.current_source_version_id)
    JOIN runtime_sessions rs ON rs.id=d.session_id AND rs.actor_id=p_actor_id AND rs.content_deleted_at IS NULL AND rs.erased_at IS NULL
    JOIN research_benchmarks rb ON rb.session_id=d.session_id AND rb.actor_id=p_actor_id
    JOIN runtime_executions x ON x.id=rb.execution_id AND x.actor_id=p_actor_id AND x.session_id=d.session_id
@@ -56,6 +59,14 @@ BEGIN
  IF entry->>'kind' IN ('strategy','positioning') THEN body:=opc_profile(version_id)::text;
  ELSIF entry->>'kind'='benchmarks' THEN
   body:=(research_benchmark_table(p_actor_id,(entry->>'sessionId')::uuid)->'rows')::text;cap:=8000;
+  -- Same rows as research_benchmark_table (live answers of this session, at most 30): the answers they came from.
+  SELECT coalesce(jsonb_agg(DISTINCT jsonb_build_object('executionId',t.execution_id)),'[]') INTO produced FROM (
+   SELECT rb.execution_id FROM research_benchmarks rb JOIN runtime_executions x ON x.id=rb.execution_id AND x.actor_id=p_actor_id
+    AND x.session_id=rb.session_id WHERE rb.actor_id=p_actor_id AND rb.session_id=(entry->>'sessionId')::uuid
+    AND x.content_deleted_at IS NULL AND x.erased_at IS NULL
+   ORDER BY rb.qualified DESC,rb.followers DESC NULLS LAST,rb.platform,rb.account LIMIT 30) t;
+  RETURN jsonb_build_object('kind','workspace_source','identity',entry,'body',left(body,cap),'truncated',length(body)>cap,
+   'producedBy',produced,'dependencies',jsonb_build_array(version_id));
  ELSE SELECT coalesce((SELECT ed.brief FROM opc_item_edits ed WHERE ed.work_item_id=i.work_item_id),i.brief) INTO body FROM opc_items i WHERE i.work_item_id=(entry->>'id')::uuid;END IF;
  RETURN jsonb_build_object('kind','workspace_source','identity',entry,'body',left(body,cap),'truncated',length(body)>cap,'dependencies',jsonb_build_array(version_id));
 END $$;

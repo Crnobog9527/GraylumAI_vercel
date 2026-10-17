@@ -58,7 +58,19 @@ export async function runCases({db,Client,report,oldDefinition}) {
  assert.deepEqual(rows.map(r=>[r.account,r.qualified,r.followers]),[['BENCH_QUALIFIED_CANARY',true,51234],['BENCH_EXCLUDED_CANARY',false,null]]);
  assert.deepEqual(rows[1].missing,['followers']);assert.equal(body.truncated,false);
  assert.deepEqual(body.dependencies,[main.version]);
+ assert.deepEqual(body.producedBy,[{executionId:produced}]);
  report.checks.push('after fix: the benchmark table is listed after the positioning and readable; missing numbers stay null');
+
+ // A newer, unconfirmed draft of the same business with its own (newer) research is never used.
+ const redo=await one(db,'SELECT ws_test.positioning($1,$2,$3) v',[a,'Redo','REDO_CANARY']);
+ await db.query('UPDATE opc_draft_businesses SET business_id=$2 WHERE draft_id=$1',[redo.draft,main.business]);
+ await db.query('UPDATE opc_businesses SET erased_at=now(),name=NULL WHERE id=$1',[redo.business]);
+ await benchmark(db,a,redo.draftSession,await answer(db,a,redo.draftSession),'UNCONFIRMED_DRAFT_BENCH',{qualified:true});
+ const confirmedOnly=await read(db,a,sid,main.draftSession);
+ assert.ok(confirmedOnly.body.includes('BENCH_QUALIFIED_CANARY'));
+ assert.ok(!JSON.stringify(await index(db,a,sid)).includes(redo.draftSession));
+ assert.equal((await read(db,a,sid,redo.draftSession)).kind,'unavailable');
+ report.checks.push('research of a newer unconfirmed draft of the same business is not listed or readable');
 
  // Unrelated: the positioning read is unchanged.
  assert.ok((await read(db,a,sid,main.business)).body.includes('POSITIONING_CANARY_A'));
@@ -95,7 +107,8 @@ export async function runCases({db,Client,report,oldDefinition}) {
  const d=await one(db,'SELECT ws_test.actor() v');
  const dSid=await one(db,'SELECT ws_test.free_session($1) v',[d]);
  const del=await one(db,'SELECT ws_test.positioning($1,$2,$3) v',[d,'Deleted','DELETED_CANARY']);
- await benchmark(db,d,del.draftSession,await answer(db,d,del.draftSession),'DELETED_BENCH_CANARY',{qualified:true});
+ const producer=await answer(db,d,del.draftSession);
+ await benchmark(db,d,del.draftSession,producer,'DELETED_BENCH_CANARY',{qualified:true});
  const execution=async calls=>{
   const id=randomUUID();
   await db.query(`INSERT INTO runtime_executions(id,actor_id,session_id,request_id,payload,history_revision,state)
@@ -106,6 +119,8 @@ export async function runCases({db,Client,report,oldDefinition}) {
  };
  const copied=await execution([[{query:del.draftSession},await read(db,d,dSid,del.draftSession)]]);
  const unrelated=await execution([]);
+ // Deleting just the producing answer (internal path; users delete whole conversations) also finds the copy.
+ assert.ok((await rpc(db,'content_erasure_scope',d,'answer',producer)).executions.includes(copied));
  const scope=(await rpc(db,'content_erasure_scope',d,'session',del.draftSession)).executions;
  assert.ok(scope.includes(copied));assert.ok(!scope.includes(unrelated));
  await erase(db,{actor:d},'session',del.draftSession);
@@ -113,7 +128,7 @@ export async function runCases({db,Client,report,oldDefinition}) {
  assert.equal(left.rows[0].n,0);
  assert.equal(await one(db,'SELECT content_deleted_at IS NULL AND erased_at IS NULL v FROM runtime_executions WHERE id=$1',[unrelated]),true);
  assert.ok(!(await kinds(db,d,dSid)).includes('benchmarks'));
- report.checks.push('deleting the positioning conversation clears free answers that copied its benchmark table, keeps unrelated ones');
+ report.checks.push('deleting the producing answer or the positioning conversation scopes free answers that copied the table; erasure clears them, keeps unrelated ones');
 
  const closing=await one(db,'SELECT ws_test.actor() v');
  const closingSid=await one(db,'SELECT ws_test.free_session($1) v',[closing]);
