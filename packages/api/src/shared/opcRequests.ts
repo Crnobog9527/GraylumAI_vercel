@@ -56,7 +56,9 @@ export const opcContentFromExecution = z.object({
   workItemId: uuid,
   requestId: uuid,
   expectedVersion: z.number().int().nonnegative(),
-  kind: z.enum(["brief", "script"]),
+  // A2: a storyboard or editing save takes its source from the generating execution's injected source (the database
+  // decides); a supplied sourceContentId must equal it.
+  kind: z.enum(["brief", "script", "storyboard", "editing"]),
   status: z.enum(["draft", "final"]),
   executionId: uuid,
   sourceContentId: uuid.nullable().default(null),

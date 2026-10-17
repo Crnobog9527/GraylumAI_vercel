@@ -75,7 +75,7 @@ const categoryMap: Record<string, string> = {
   technical_support: '技术支持',
   feature_request: '功能建议',
   bug_report: 'Bug反馈',
-  account_issue: '账户问题',
+  account_issue: '账户问题', expert_consult: '专家诊断预约',
   other: '其他'
 };
 

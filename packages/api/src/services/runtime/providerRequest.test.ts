@@ -36,6 +36,14 @@ describe('older formats',()=>{
   expect(()=>body(sdk('ask_question',{...streamed,reasoning_effort:'none'}),{...older('serial-tools-v4-stream'),tools:['ask_question']})).toThrow('RUNTIME_REAL_TOOLS_DISABLED');
   expect(()=>body(sdk('ask_question',{...streamed,reasoning_effort:'none'}),older('serial-tools-v4-stream'))).toThrow('RUNTIME_REAL_TOOLS_DISABLED');
  });
+
+ it('LIB-4b: frozen library references alone permit read_source, with the same bytes as a workspace read',()=>{
+  const library={...older('serial-tools-v6-reasoning'),workspaceContext:undefined};
+  const request=sdk('read_source',{reasoning_effort:'none'});
+  expect(()=>body(request,library)).toThrow('RUNTIME_REAL_TOOLS_DISABLED');
+  expect(()=>body(request,{...library,libraryReferences:[]})).toThrow('RUNTIME_REAL_TOOLS_DISABLED');
+  expect(body(request,{...library,libraryReferences:[{documentId:'d',version:1}]})).toBe(body(request,older('serial-tools-v6-reasoning')));
+ });
 });
 
 describe('real request bytes never carry parallel_tool_calls',()=>{
