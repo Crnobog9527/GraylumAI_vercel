@@ -19,7 +19,11 @@ export function DemoPositioning() {
   return (
     <ProductFrame label="定位分析的产品界面示例" caption="示例界面，内容为虚构的示例数据">
       <PositioningHeader {...positioning.SAMPLE_POSITIONING_HEADER} headingLevel="h2" />
-      <div className="mt-3"><PositioningStepStrip steps={positioning.SAMPLE_POSITIONING_STEPS} selectedId={positioning.SAMPLE_POSITIONING_SELECTED_STEP} onSelect={noop} /></div>
+      <div className="mt-3">
+        <PositioningStepStrip
+          steps={positioning.SAMPLE_POSITIONING_STEPS} selectedId={positioning.SAMPLE_POSITIONING_SELECTED_STEP} onSelect={noop}
+        />
+      </div>
       <div className="mt-4 grid gap-4 lg:grid-cols-[1.1fr_1fr]">
         <div className="space-y-3">
           <MentorChatHeading />
