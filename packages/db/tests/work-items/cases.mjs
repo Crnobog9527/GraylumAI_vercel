@@ -2,7 +2,7 @@
 // CHAT-AUTO-CONTEXT A2b: runtime_work_items, the read-only projection of what the coach read before each answer.
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
-import {rpc} from '../erasure-b2a/cases.mjs';
+import {rpc,closeAccount} from '../erasure-b2a/cases.mjs';
 const one=async(db,text,args=[])=>(await db.query(text,args)).rows[0]?.v;
 const denied=async(promise,code)=>{await assert.rejects(promise,error=>{if(!String(error.message).includes(code))throw error;return true;},code);};
 const doc=(db,a,name,n=3)=>one(db,'SELECT lr_test.doc($1,$2,$3) v',[a,name,n]);
@@ -84,6 +84,15 @@ export async function runCases({db,report}) {
  for(let i=0;i<15;i++)await store(db,e5,'m'+String(i).padStart(2,'0'),'search:苹果派',null);
  assert.equal((await items(db,a,sid))[e5].length,12);
  report.checks.push('at most 12 rows per answer');
+
+ // A closed account is refused too, and the owner's other session never shows these rows.
+ const closing=await one(db,'SELECT ws_test.actor() v');
+ const closingSid=await one(db,'SELECT ws_test.free_session($1) v',[closing]);
+ await closeAccount(db,{actor:closing});
+ await denied(items(db,closing,closingSid),'BILL2_ACTOR_DENIED');
+ const sid2=await one(db,'SELECT ws_test.free_session($1) v',[a]);
+ assert.deepEqual(await items(db,a,sid2),{});
+ report.checks.push('a closed account is refused; rows belong to their own conversation only');
 
  const grants=await db.query(`SELECT r, has_function_privilege(r,'public.runtime_work_items(uuid,uuid)','EXECUTE') ok
   FROM unnest(ARRAY['anon','authenticated','service_role']) r ORDER BY r`);
