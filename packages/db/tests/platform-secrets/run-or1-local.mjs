@@ -60,6 +60,18 @@ try {
   assert.equal((await audits()).length, 1);
   report.checks.push('repeat run with the slot filled: no change, no second audit');
 
+  // An admin clears the slot, the legacy column still holds the old key: a re-run must not bring it back.
+  const clearer = randomUUID();
+  await c.query("INSERT INTO profiles(id,credits,role,status,is_deleted) VALUES($1,0,'admin','active',false)", [clearer]);
+  await c.query('SELECT platform_secret_clear($1,$2,$3)', ['openrouter', await v("SELECT revision::int v FROM platform_secrets WHERE slot='openrouter'"), clearer]);
+  assert.equal(await slot(), null);
+  const auditsBefore = (await audits()).length;
+  await migrate(); await migrate();
+  assert.equal(await slot(), null, 'a cleared slot stays cleared');
+  assert.equal((await audits()).length, auditsBefore, 'no second platform_secret_migrate audit');
+  assert.equal(await v("SELECT count(*)::int v FROM vault.secrets WHERE name='graylum.platform.openrouter'"), 0);
+  report.checks.push('clear then re-run: the cleared slot stays cleared, the legacy key is not restored, no audit');
+
   await reset(); await model(KEY); await model(REPLACED);
   const ambiguous = await failure(migrate());
   assert.match(ambiguous?.message ?? '', /OPENROUTER_KEY_MIGRATION_AMBIGUOUS/);
