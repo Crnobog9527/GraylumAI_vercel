@@ -33,14 +33,18 @@ beforeAll(async () => {
           import {ReportView} from ${JSON.stringify(view)}; import {ReportWithOutline} from ${JSON.stringify(outline)};
           import {useReportOutline} from ${JSON.stringify(useOutline)}; import {parseReportBody} from ${JSON.stringify(reportData)};
           import {SAMPLE_REPORT_BODY_WITH_DATA} from ${JSON.stringify(fixtures)}; import card from ${JSON.stringify(card)};
-          const data = parseReportBody(SAMPLE_REPORT_BODY_WITH_DATA).data;
+          // Real Skill titles carry numbering and writing hints for the model (staging #1109 acceptance).
+          const nums = '一二三四五六七八九十'.split('').concat(['十一','十二','十三','十四']);
+          let i = 0;
+          const BODY = SAMPLE_REPORT_BODY_WITH_DATA.replace(/^## (.+)$/gm, (_, t) => '## ' + nums[i++] + '、' + t + '：从你的情况出发的完整说明' + (i % 2 ? '（约 800 字，3–10 个合格账号）' : '（至少 2000 字，建议约 2400 字）'));
+          const data = parseReportBody(BODY).data;
           data.data.benchmarks.accounts = data.data.benchmarks.accounts.map((a, i) => ({...a,
             metrics: {followers: 18000 - i * 9000, medianViews: 4200 - i * 1500, engagementRate: 0.05, weeklyPosts: 3, capturedAt: null}}));
           function Dialog(){ const ref = React.useRef(null); const o = useReportOutline(ref);
             return React.createElement('div',{style:{position:'fixed',inset:0,display:'flex',alignItems:'center',justifyContent:'center',padding:16}},
               React.createElement('div',{ref,className:card.consentCard,style:{maxWidth:1024}},
                 React.createElement(ReportWithOutline,{bodyRef:o.bodyRef,chapters:o.chapters,activeId:o.activeId,onSelect:o.select},
-                  React.createElement(ReportView,{body:SAMPLE_REPORT_BODY_WITH_DATA,data}))));}
+                  React.createElement(ReportView,{body:BODY,data}))));}
           createRoot(document.getElementById('root')).render(React.createElement(Dialog));`;
       } }],
     build: { write: false, minify: false, cssCodeSplit: false, lib: { entry, name: 'ReportViewTest', formats: ['iife'] } },
@@ -60,7 +64,8 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 375, height: 812 
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
     try {
-      await page.setContent(`<!doctype html><style>body{margin:0;font-family:sans-serif}${css}</style><div id="root"></div>`);
+      // A hostile page-level button rule (fixed height, big font) must not make long outline titles overlap.
+      await page.setContent(`<!doctype html><style>body{margin:0;font-family:sans-serif}button{height:24px;font-size:20px}${css}</style><div id="root"></div>`);
       await page.addScriptTag({ content: code });
       await ui(page.getByText('30 秒看懂')).toBeVisible({ timeout: 5000 });
       // recharts arrives on demand, only because this sample has benchmark numbers.
@@ -68,6 +73,14 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 375, height: 812 
       const nav = page.getByRole('navigation', { name: '报告目录' });
       expect(await nav.locator('li').count()).toBe(14);
       await ui(page.getByText('怎样算过关').first()).toBeVisible();
+      expect(await page.locator('body').innerText()).not.toMatch(/约 800 字|至少 2000 字|建议约 2400 字/);
+      if (viewport.width > 767) {
+        const boxes = await nav.locator('li button').evaluateAll(items => items.map(item => item.getBoundingClientRect())
+          .map(box => ({ top: box.top, bottom: box.bottom })));
+        for (let k = 1; k < boxes.length; k++) expect(boxes[k].top).toBeGreaterThanOrEqual(boxes[k - 1].bottom - 0.5);
+        const text = await nav.locator('li button').evaluateAll(items => items.map(item => item.scrollHeight <= item.clientHeight + 1));
+        expect(text.every(Boolean)).toBe(true);
+      }
       expect(await page.getByText('你的客户会先在小红书搜').count()).toBe(0);
       await page.getByRole('button', { name: '展开理由' }).click();
       await ui(page.getByText('你的客户会先在小红书搜', { exact: false })).toBeVisible();
