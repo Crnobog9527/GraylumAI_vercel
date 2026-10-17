@@ -237,7 +237,10 @@ export async function runFusionFee({db,Client,connectionString,report}) {
   try {
     const raced = await Promise.all([erase(racers[0],rc,'artifact',rc.project).then(r=>r.status,e=>e.message),
       service(racers[1],'fusion_review_fee_settle_due',100).then(()=>'settled',e=>e.message)]);
-    assert.ok(!raced.some(r=>/deadlock/i.test(r)),JSON.stringify(raced));
+    // The daily settlement never fails on the race; a deletion that lost it answers the retryable busy refusal.
+    assert.equal(raced[1],'settled',JSON.stringify(raced));
+    assert.ok(['deleted','review_required'].includes(raced[0])||/CONTENT_ERASURE_BUSY/.test(raced[0]),JSON.stringify(raced));
+    if (/CONTENT_ERASURE_BUSY/.test(raced[0])) await erase(racers[0],rc,'artifact',rc.project);
   } finally { await Promise.all(racers.map(x=>x.end())); }
   assert.equal((await fee(db,rcr.reviewId)).state,'refunded');
   assert.equal(await wallet(db,rc.actor),5000,'refunded once');

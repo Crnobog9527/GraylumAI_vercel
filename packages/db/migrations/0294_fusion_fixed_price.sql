@@ -201,8 +201,13 @@ BEGIN
   FOR due IN SELECT f.review_id FROM fusion_review_fees f LEFT JOIN fusion_reviews rv ON rv.id=f.review_id
     WHERE f.state='held' AND (rv.id IS NULL OR rv.state NOT IN ('running','paused'))
     ORDER BY f.created_at LIMIT least(greatest(coalesce(p_limit,100),1),500) LOOP
-    v:=fusion_review_fee_settle_internal(due);
-    IF v->>'state'<>'held' THEN n:=n+1; END IF;
+    -- A fee whose profile is locked by a deletion that waits on a lock this transaction holds is skipped, not failed: the
+    -- deletion goes first and the next run settles it (or the deletion already refunded it).
+    BEGIN
+      v:=fusion_review_fee_settle_internal(due);
+      IF v->>'state'<>'held' THEN n:=n+1; END IF;
+    EXCEPTION WHEN deadlock_detected OR lock_not_available THEN NULL;
+    END;
   END LOOP;
   RETURN n;
 END $$;

@@ -3133,7 +3133,7 @@
   "fn:fusion_review_close(uuid,uuid,text)": "1e290e4f07e5",
   "fn:fusion_review_fee_hold(fusion_reviews,jsonb,jsonb)": "3eea3b6429bc",
   "fn:fusion_review_fee_settle(uuid,uuid)": "da7d2e052dd1",
-  "fn:fusion_review_fee_settle_due(integer)": "4d3b721e7e0f",
+  "fn:fusion_review_fee_settle_due(integer)": "31c5a5bf48f0",
   "fn:fusion_review_fee_settle_internal(uuid)": "02efdbb57d52",
   "fn:fusion_review_fee_view(uuid)": "15440728c306",
   "fn:fusion_review_gold(uuid)": "13d800dfee90",
