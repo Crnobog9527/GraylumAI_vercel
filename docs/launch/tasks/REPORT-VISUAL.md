@@ -70,15 +70,15 @@ Agent 读取时两份都拿到，各自带来源标签（第 5 节）。
 | `thisWeek[]` | 这周就做的事（现在"第一步"清单，3～8 条），每条 `action`、`why`、`done` 做到什么算完成；第一条是"最先做的一件"，卡片显示它 | 一句话结论、运营手册 |
 | `situation` | `strengths[]` 能用的优势、`resources` 时间人手预算、`limits[]` 限制、`missing[]` 还缺的信息，每条带 `basis` | 现状盘点 |
 | `goal` | `primary` 主要目标、`outcome` 变现背后的结果、`feasibility`（可行 / 有条件 / 暂不建议）、`pros[]`、`cons[]`、`unknowns[]` | 目标和可行性 |
-| `audience[]` | 人群表每一列：`name`、`job` 要完成的事、`pain` 痛点或顾虑、`trigger` 触发时刻、`wallet` 钱包和价格敏感、`whyBuy`、`whyNot`、`contentFit` / `moneyFit`、`basis`（你说的 / AI 推断 / 待验证）、`quote` 代表人物的一句话；另有 `core` 核心人群共同点 | 受众 |
+| `audience` | 对象 `{groups[], core}`：`groups[]` 是人群表每一行，每一列：`name`、`job` 要完成的事、`pain` 痛点或顾虑、`trigger` 触发时刻、`wallet` 钱包和价格敏感、`whyBuy`、`whyNot`、`contentFit` / `moneyFit`、`basis`（你说的 / AI 推断 / 待验证）、`quote` 代表人物的一句话；`core` 是核心人群共同点 | 受众 |
 | `platforms[]` | `platform`、`role` 主 / 辅、`reasons[]` | 平台选择 |
-| `benchmarks[]` | `platform`、`account`（和宿主对标表同名）、`category`、`takeaway`；数字由宿主填 `metrics`（第 3.3 节）；没有合格对标时 `todo`：搜索词和下一步 | 对标账号分析 |
+| `benchmarks` | 对象 `{accounts[], todo}`：`accounts[]` 每个 `platform`、`account`（和宿主对标表同名）、`category`、`takeaway`；数字由宿主填 `metrics`（第 3.3 节）；`todo` 是没有合格对标时的搜索词和下一步（可为空） | 对标账号分析 |
 | `positioning` | `statement`、`value` 核心商业价值、`differentiators[]`（每条带依据）、`notClaims[]` 不能当优势写的、`verdict` | 账号定位 |
 | `accountKit` | `hook` 记忆点、`boundary` 扩展边界、`naming` 命名思路、`name`、`handle`、`rejected[]`（名称 + 淘汰理由）、`avatar`、`bio` | 账号三件套 |
 | `content` | `formats` 主 / 辅形式、`mix[]` 流量 / 信任 / 转化占比、`pillars[]`、`style`、`cadence` | 内容规划 |
 | `topics[]` | 选题清单每一条：`title`、`forWhom`、`pain`、`howToShoot`、`tests` 测什么、`watch` 看什么（最多 12 条） | 内容规划 |
 | `roadmap[]` | 起号路线图每一阶段：`stage`、`when`（以条件为准）、`purpose`、`do`、`watch`、`exitWhen` | 运营手册 |
-| `plan30[]` | 30 天表每一周：`week`、`purpose`、`posts`、`topics`、`watch`、`reviewQuestion` 周末复盘问什么；另有 `day30Questions[]` | 运营手册 |
+| `plan30` | 对象 `{weeks[], day30Questions[]}`：`weeks[]` 是 30 天表每一周：`week`、`purpose`、`posts`、`topics`、`watch`、`reviewQuestion` 周末复盘问什么；`day30Questions[]` 是第 30 天要回答的问题 | 运营手册 |
 | `routine[]` | 每周固定流程：`when`、`task`、`minutes` | 运营手册 |
 | `adjustments[]` | "数据怎么看、怎么调"表：`signal`、`meaning`、`action` | 运营手册 |
 | `funnel[]` | 漏斗表每一层：`layer`、`role`、`forWhom`、`buyPoint`、`offer`、`price`（文字）、`filter`、`whyFilter`、`howToSell`、`watch`、`basis` | 变现路径 |
@@ -97,7 +97,10 @@ Agent 读取时两份都拿到，各自带来源标签（第 5 节）。
 | 内容组 `content` | `summary`、`thisWeek`、`situation`、`positioning`、`audience`、`platforms`、`accountKit`、`content`、`topics`、`plan30`、`routine`、`adjustments`、`redLines`、`compliance` | 选题、写作等内容会话；自由对话 | ≤ 12000 字节 |
 | 经营组 `business` | `goal`、`benchmarks`、`funnel`、`upgrades`、`income`、`roadmap`、`assumptions` | 自由对话（问变现、对标、阶段、假设时） | ≤ 14000 字节 |
 
-两组合计 ≤ 26000 字节，约 8500～9000 个中文字，和第 9 节 B 的"数据另算 9000 字"一致。每组超限时按固定顺序整字段丢弃（内容组：`adjustments` → `routine` → `compliance` → `topics` 末尾条目；
+两组合计 ≤ 26000 字节；**另外整份数据合计 ≤ 9000 个 Unicode 字符**（Owner 定的 B，英文、账号名、公式多的报告靠这一条管住）。三个上限同时生效。
+超限时按固定顺序整字段丢弃，直到所有上限都满足：内容组先丢 `adjustments` → `routine` → `compliance` → `topics`（从末尾一条条丢），
+经营组先丢 `assumptions`（从末尾）→ `roadmap` → `upgrades`；还不够，就按第 3.1 节字段表**从下往上**继续整字段丢，`summary` 和 `thisWeek` 最后丢。
+这个顺序覆盖所有情况（最坏丢到空），丢掉的记进 `dropped`，报告不会失败；正文保底句仍在（第 3.3 节）。
 经营组：`assumptions` 末尾条目 → `roadmap` → `upgrades`），记进 `dropped`，不让报告失败；正文保底句仍在（第 3.3 节）。
 
 刻意不放进数据的：可行性评分、涨粉或收入预测、"多久见效"的时间点（Owner 定过绝不承诺见效时间和收益金额）。
@@ -117,7 +120,7 @@ Agent 读取时两份都拿到，各自带来源标签（第 5 节）。
 {"v":1,"field":"summary","value":"……"}
 {"v":1,"field":"thisWeek","value":[{"action":"……","why":"……","done":"……"}]}
 {"v":1,"field":"funnel","value":[{"layer":"免费内容","role":"……","forWhom":"……","buyPoint":"……","offer":"……","price":"免费","filter":"……","whyFilter":"……","howToSell":"……","watch":"……","basis":"inferred"}]}
-{"v":1,"field":"plan30","value":[……]}
+{"v":1,"field":"plan30","value":{"weeks":[……],"day30Questions":[……]}}
 ```
 ````
 
@@ -147,7 +150,7 @@ Agent 读取时两份都拿到，各自带来源标签（第 5 节）。
   Agent 读不到这个字段，回答时按确认字段和正文所在版本说明"报告里这一项没有结构化数据"。
 - 服务端完整性检查（TS 和 0206）**不改**，不看数据块。
 - 对标数字：定稿时宿主读 `research_benchmark_rows`，**当前表的哈希等于报告冻结的 `benchmarkHash`** 才把粉丝、中位播放、互动率、周更次数、抓取时间填进
-  `benchmarks[].metrics`；对不上（之后刷新过对标）就填 `null`，页面和 Agent 都只看到"可以学什么"，不看到对不上的数字。表里的 `null` 保持 `null`，不当 0。
+  `benchmarks.accounts[].metrics`；对不上（之后刷新过对标）就填 `null`，页面和 Agent 都只看到"可以学什么"，不看到对不上的数字。表里的 `null` 保持 `null`，不当 0。
 - 定稿前在页面上看到的图，用的是读接口按同样规则临时取的数字。
 - 存进版本的是**清洗后**的数据，加上 `dataVersion: 1`、`validatedAt`、`dropped`（被丢掉的字段路径，只有路径没有内容），方便统计合格率。
 
@@ -195,7 +198,7 @@ Agent 读取时两份都拿到，各自带来源标签（第 5 节）。
   测试用一份字段写满上限的样例，断言三处新建材料都 ≤ 24000 字节、会话能建成。
   测试：新建第一周选题会话的材料里有 `strategy`；新建内容条目的材料里有；定位草稿会话的 `businessContext` 里有；旧会话照常继续；删除定位后三处都读不到。
   内容 Skill 读到之后具体怎么用，由各 Skill 后续优化时决定（Owner 10-17 已定平台 Skill 之后逐个优化）；宿主给内容会话的说明加一句"策略数据是已定稿报告的结构化结论，和确认字段冲突时以确认字段为准"。
-- 复盘：现在还没有复盘功能；以后做时按 `sourceVersionId` 读同一份数据，对照 `plan30[].watch`、`reviewQuestion` 和 `adjustments`。
+- 复盘：现在还没有复盘功能；以后做时按 `sourceVersionId` 读同一份数据，对照 `plan30.weeks[].watch`、`reviewQuestion` 和 `adjustments`。
 
 版本：策略数据跟着正式定位版本走——用户回头修改定位、重新出报告并定稿，就是新版本、新数据；旧版本继续可看可导出（沿用 0225），Agent 只读当前版本。
 
@@ -222,7 +225,7 @@ Agent 读取时两份都拿到，各自带来源标签（第 5 节）。
   - 导出：这些字段的"策略要点"附同样的说明。
   - 用户改回原文（该章文字和生成时一致）时自动去掉标记。
 - 不支持在编辑框里改策略数据本身（冻结前不做，记入第 11 节）；想让图表跟着改，可以用评审团修订，或回头修改定位重新出报告。
-- 字数提示继续按服务端口径（含数据块），文案补"含图表数据"。
+- 字数提示只数编辑框里的正文，和服务端校验同一个口径（B 下 12000 字只管正文，不数数据块）；数据块不在编辑框里，不显示也不计数。
 
 ### 6.3 导出
 
