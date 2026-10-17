@@ -317,7 +317,7 @@ export default function AdminTicketsPage() {
               <TableBody>
                 {tickets.map((ticket: Ticket) => {
                   const statusInfo = statusConfig[ticket.status];
-                  const categoryInfo = categoryConfig[ticket.category || 'other'];
+                  const categoryInfo = categoryConfig[ticket.category] ?? categoryConfig.other;
                   const priorityInfo = priorityConfig[ticket.priority || 'medium'];
                   const StatusIcon = statusInfo.icon;
                   const CategoryIcon = categoryInfo.icon;
@@ -524,12 +524,12 @@ export default function AdminTicketsPage() {
                         {selectedTicket.title}
                       </h3>
                       <div className="flex items-center gap-2 mt-2">
-                        <Badge className={`${categoryConfig[selectedTicket.category || 'other'].color} border-0`}>
+                        <Badge className={`${(categoryConfig[selectedTicket.category] ?? categoryConfig.other).color} border-0`}>
                           {(() => {
-                            const CategoryIcon = categoryConfig[selectedTicket.category || 'other'].icon;
+                            const CategoryIcon = (categoryConfig[selectedTicket.category] ?? categoryConfig.other).icon;
                             return <CategoryIcon className="h-3 w-3 mr-1" />;
                           })()}
-                          {categoryConfig[selectedTicket.category || 'other'].label}
+                          {(categoryConfig[selectedTicket.category] ?? categoryConfig.other).label}
                         </Badge>
                         <Badge className={`${priorityConfig[selectedTicket.priority || 'medium'].color} border-0`}>
                           {(() => {

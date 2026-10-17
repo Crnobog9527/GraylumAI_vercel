@@ -128,6 +128,11 @@ try {
   await closeAccount(c, { actor: erased });
   assert.equal(await failure(request(erased)), 'EXPERT_CONSULT_ACCOUNT_CLOSED');
   assert.equal(await failure(state(erased)), 'EXPERT_CONSULT_ACCOUNT_CLOSED');
+  // Rolling back while a closing account still has a request refuses, and changes nothing.
+  assert.equal(await failure(c.query(read('packages/db/tests/expert-consult/rollback.sql'))), 'EXPERT_CONSULT_ROLLBACK_ERASURE_PENDING');
+  await c.query('ROLLBACK');
+  assert.equal(await v("SELECT count(*)::int v FROM pg_proc WHERE proname LIKE 'expert_consult_%'"), 3);
+  assert.equal(await v("SELECT category v FROM tickets WHERE id=$1", [asked.ticketId]), 'consult');
   await recordLibraryProof(c, { actor: erased });
   let cleaned;
   for (let i = 0; i < 5; i++) {
@@ -141,5 +146,16 @@ try {
   assert.deepEqual(cleaned.errors, []);
   assert.equal(await v('SELECT count(*)::int v FROM tickets WHERE user_id=$1', [erased]), 0);
   report.checks.push('deny: suspended, missing and closing accounts; erasure deletes the request, its replies and contact details');
+
+  // Rollback with data: every request is kept as a 'question' ticket an older build can show, nothing is deleted.
+  const kept = Number(await v("SELECT count(*)::int v FROM tickets WHERE category='consult'"));
+  assert.ok(kept >= 3);
+  await c.query(read('packages/db/tests/expert-consult/rollback.sql'));
+  assert.equal(await v("SELECT count(*)::int v FROM tickets WHERE category='consult'"), 0);
+  assert.equal(await v("SELECT count(*)::int v FROM tickets WHERE category='question' AND title='专家诊断预约'"
+    + " AND description LIKE '%联系方式：%'"), kept);
+  assert.equal(await v("SELECT category v FROM tickets WHERE id=$1", [second.ticketId]), 'question');
+  assert.equal(await v("SELECT count(*)::int v FROM pg_proc WHERE proname LIKE 'expert_consult_%'"), 0);
+  report.checks.push('rollback refuses while a closing account has a request; otherwise keeps every request as a question ticket');
 } catch (error) { report.failed = String(error.stack ?? error); process.exitCode = 1; }
 finally { await db.close(); console.log(JSON.stringify(report, null, 2)); }
