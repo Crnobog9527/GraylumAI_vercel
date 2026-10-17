@@ -11,24 +11,44 @@ function stagingDeployment(env: Env) {
   try { stagingRuntimeWindow(env, true); return true; } catch { return false; }
 }
 
-/** Stripe wallet purchases through the new method checkout stay closed in code; opening them is a
- * separate decision and must not follow the card test switch. */
-const WALLET_CHECKOUT_READY = false;
+/** Exact domains of the production Vercel project, same list as the RUNTIME-PROD binding (app today, www after the
+ * PUBLIC-SITE domain merge). Exact match only: a new domain needs a code change. */
+const PRODUCTION_URLS: ReadonlySet<string> = new Set(['app.graylum.com', 'www.graylum.com']);
+const STAGING_KEYS = ['V3_RUNTIME_STAGING_ENABLED', 'V3_RUNTIME_STAGING_PROJECT_ID',
+  'V3_RUNTIME_STAGING_DATABASE_HOST', 'V3_RUNTIME_STAGING_WINDOW_ID'] as const;
 
-/** Stripe card checkout (PAY-STRIPE-MP 3c, "打开银行卡下单"): the code is ready (checkout, first payment, renewals,
- * external refunds, daily Stripe backstop). It still opens on the staging deployment only, and there only while the
- * default-off server switch `payment_method_routes.card.enabled` / `card_cn.enabled` is on (the controller turns it
- * on). Production stays closed in code below until the Owner approves opening it. Waffo takes no new card purchases
- * (Owner 2026-10-12). */
+/** The production deployment itself, bound like RUNTIME-PROD (R5): Vercel production deployment of `main` in this
+ * repository, the configured production project id and database host, an exact domain, and no staging variable at
+ * all. Anything else, including a preview or the staging project, never matches. */
+function productionDeployment(env: Env) {
+  if (!env.V3_RUNTIME_PRODUCTION_PROJECT_ID || !env.V3_RUNTIME_PRODUCTION_DATABASE_HOST) return false;
+  if (STAGING_KEYS.some(key => env[key] !== undefined) || env.VERCEL !== '1' || env.VERCEL_ENV !== 'production'
+    || !PRODUCTION_URLS.has(env.VERCEL_PROJECT_PRODUCTION_URL ?? '') || env.VERCEL_GIT_COMMIT_REF !== 'main'
+    || env.VERCEL_GIT_REPO_OWNER !== 'Crnobog9527' || env.VERCEL_GIT_REPO_SLUG !== 'GraylumAI_vercel'
+    || env.VERCEL_PROJECT_ID !== env.V3_RUNTIME_PRODUCTION_PROJECT_ID) return false;
+  try {
+    const url = new URL(env.NEXT_PUBLIC_SUPABASE_URL ?? '');
+    return url.protocol === 'https:' && /^[a-z0-9]+\.supabase\.co$/.test(url.hostname)
+      && url.hostname === env.V3_RUNTIME_PRODUCTION_DATABASE_HOST && !url.username && !url.password && !url.port
+      && url.pathname === '/' && !url.search && !url.hash;
+  } catch { return false; }
+}
+
+/** Stripe card checkout (PAY-STRIPE-MP 3c): the code is ready (checkout, first payment, renewals, external refunds,
+ * daily Stripe backstop). It opens on the staging deployment, and on the bound production deployment only when the
+ * default-off environment switch `PAYMENT_CARD_CHECKOUT_PRODUCTION_ENABLED=true` is set (Owner approval; the value
+ * only reaches new deployments). Either way the default-off server switch `payment_method_routes.card.enabled` /
+ * `card_cn.enabled` still decides, enforced by assertPaymentMethodRoute together with the route version. Waffo takes
+ * no new card purchases (Owner 2026-10-12). */
 const STRIPE_CARD_CHECKOUT_READY = true;
 
-/** Test-only card admission, checked before any settings, order or provider access: the staging
- * deployment only. Production is closed whatever its configuration says. The default-off server
- * switches are `payment_method_routes.card.enabled` / `card_cn.enabled`, enforced by
- * assertPaymentMethodRoute together with the route version. */
+/** Stripe wallet purchases (WeChat Pay / Alipay) stay closed on staging; they open on the bound production deployment
+ * only with their own switch `PAYMENT_WALLET_CHECKOUT_PRODUCTION_ENABLED=true`, never following the card switch. */
 export function methodCheckoutEnvironmentOpen(env: Env, method: PaymentMethod) {
-  if (method !== 'card' && method !== 'card_cn') return WALLET_CHECKOUT_READY;
-  return STRIPE_CARD_CHECKOUT_READY && stagingDeployment(env);
+  if (method !== 'card' && method !== 'card_cn')
+    return env.PAYMENT_WALLET_CHECKOUT_PRODUCTION_ENABLED === 'true' && productionDeployment(env);
+  return STRIPE_CARD_CHECKOUT_READY && (stagingDeployment(env)
+    || (env.PAYMENT_CARD_CHECKOUT_PRODUCTION_ENABLED === 'true' && productionDeployment(env)));
 }
 
 export function assertMethodCheckoutEnvironment(env: Env, method: PaymentMethod) {

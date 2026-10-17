@@ -48,3 +48,50 @@ describe('PAY-STRIPE-MP checkout gate (3c: card open on staging only, behind the
     }
   });
 });
+
+// Production deployment, bound like the RUNTIME-PROD check (project, database host, main, exact domain, no staging keys).
+const production = { VERCEL: '1', VERCEL_ENV: 'production', VERCEL_PROJECT_PRODUCTION_URL: 'app.graylum.com', VERCEL_GIT_COMMIT_REF: 'main',
+  VERCEL_GIT_REPO_OWNER: 'Crnobog9527', VERCEL_GIT_REPO_SLUG: 'GraylumAI_vercel', VERCEL_PROJECT_ID: 'synthetic-production-project',
+  V3_RUNTIME_PRODUCTION_PROJECT_ID: 'synthetic-production-project', NEXT_PUBLIC_SUPABASE_URL: 'https://prodsynthetic.supabase.co',
+  V3_RUNTIME_PRODUCTION_DATABASE_HOST: 'prodsynthetic.supabase.co' };
+const openCard = { ...production, PAYMENT_CARD_CHECKOUT_PRODUCTION_ENABLED: 'true' };
+const openWallet = { ...production, PAYMENT_WALLET_CHECKOUT_PRODUCTION_ENABLED: 'true' };
+
+describe('R7 production checkout gate (default closed; card and wallet switches are independent)', () => {
+  it('bound production with its own switch opens only that family', () => {
+    for (const method of ['card', 'card_cn'] as const) {
+      expect(methodCheckoutEnvironmentOpen(openCard, method)).toBe(true);
+      expect(methodCheckoutEnvironmentOpen(openWallet, method)).toBe(false);
+    }
+    for (const method of ['wechat_pay', 'alipay'] as const) {
+      expect(methodCheckoutEnvironmentOpen(openWallet, method)).toBe(true);
+      expect(methodCheckoutEnvironmentOpen(openCard, method)).toBe(false);
+    }
+    expect(methodCardCheckoutReady({ ...openCard, VERCEL_PROJECT_PRODUCTION_URL: 'www.graylum.com' }, routes(true))).toBe(true);
+    expect(methodCardCheckoutReady(openCard, routes(false))).toBe(false);
+  });
+  it('default is closed: no switch, or any value other than "true"', () => {
+    for (const extra of [{}, { PAYMENT_CARD_CHECKOUT_PRODUCTION_ENABLED: 'false' }, { PAYMENT_CARD_CHECKOUT_PRODUCTION_ENABLED: '1' },
+      { PAYMENT_WALLET_CHECKOUT_PRODUCTION_ENABLED: 'TRUE' }]) {
+      for (const method of methods) expect(methodCheckoutEnvironmentOpen({ ...production, ...extra }, method)).toBe(false);
+    }
+  });
+  it('any binding mismatch closes it even with both switches on', () => {
+    const on = { ...production, PAYMENT_CARD_CHECKOUT_PRODUCTION_ENABLED: 'true', PAYMENT_WALLET_CHECKOUT_PRODUCTION_ENABLED: 'true' };
+    for (const patch of [{ VERCEL: undefined }, { VERCEL_ENV: 'preview' }, { VERCEL_GIT_COMMIT_REF: 'staging' }, { VERCEL_GIT_COMMIT_REF: 'feature' },
+      { VERCEL_PROJECT_PRODUCTION_URL: 'evil-app.graylum.com' }, { VERCEL_PROJECT_PRODUCTION_URL: 'auth-staging.graylum.com' },
+      { VERCEL_GIT_REPO_OWNER: 'someone-else' }, { VERCEL_GIT_REPO_SLUG: 'other' }, { VERCEL_PROJECT_ID: 'other-project' },
+      { V3_RUNTIME_PRODUCTION_PROJECT_ID: undefined }, { V3_RUNTIME_PRODUCTION_DATABASE_HOST: undefined },
+      { V3_RUNTIME_PRODUCTION_DATABASE_HOST: 'other.supabase.co' }, { NEXT_PUBLIC_SUPABASE_URL: 'https://other.supabase.co' },
+      { NEXT_PUBLIC_SUPABASE_URL: 'https://prodsynthetic.supabase.co:8443' }, { NEXT_PUBLIC_SUPABASE_URL: 'http://prodsynthetic.supabase.co' },
+      { NEXT_PUBLIC_SUPABASE_URL: undefined }, { V3_RUNTIME_STAGING_ENABLED: 'true' }, { V3_RUNTIME_STAGING_PROJECT_ID: 'x' }]) {
+      for (const method of methods) expect(methodCheckoutEnvironmentOpen({ ...on, ...patch }, method)).toBe(false);
+      expect(() => assertMethodCheckoutEnvironment({ ...on, ...patch }, 'card')).toThrow('PAY_WAFFO_STEP2_NOT_READY');
+    }
+  });
+  it('the production switches change nothing on staging', () => {
+    const env = { ...staging, PAYMENT_CARD_CHECKOUT_PRODUCTION_ENABLED: 'true', PAYMENT_WALLET_CHECKOUT_PRODUCTION_ENABLED: 'true' };
+    expect(methodCheckoutEnvironmentOpen(env, 'card')).toBe(true);
+    for (const method of ['wechat_pay', 'alipay'] as const) expect(methodCheckoutEnvironmentOpen(env, method)).toBe(false);
+  });
+});
