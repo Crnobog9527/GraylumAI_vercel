@@ -29,11 +29,11 @@ async function setBalance(db,actor,credits) {
 }
 /** A report execution of the seeded session with a PAYG run, as runtime_admit creates it; the price hold is what the
  * 0299 admission hook runs (the hook itself is exercised end to end by report.integration.ts). */
-async function execution(db,f,billing={limits:{costUsd:'0.1'},rules:{creditsPerUsd:'1000',multiplier:'1'}},link=true) {
+async function execution(db,f,billing={limits:{costUsd:'0.1'},rules:{creditsPerUsd:'1000',multiplier:'1'}},link=true,round=randomUUID()) {
   const run = await createFixture(db,{actor:f.actor});
   const id = randomUUID();
   await db.query(`INSERT INTO runtime_executions(id,actor_id,session_id,request_id,payload,history_revision,state,billing_run_id)
-    VALUES($1,$2,$3,$4,$5,0,'running',$6)`,[id,f.actor,f.session,randomUUID(),{reportGeneration:spec},link?run.run:null]);
+    VALUES($1,$2,$3,$4,$5,0,'running',$6)`,[id,f.actor,f.session,randomUUID(),{reportGeneration:{...spec,projectId:f.project,roundId:round}},link?run.run:null]);
   await db.query('SELECT report_fee_hold(e,$2::jsonb) FROM runtime_executions e WHERE e.id=$1',[id,JSON.stringify(billing)]);
   return {id,run};
 }
@@ -107,6 +107,23 @@ export async function runReportFee({db,Client,connectionString,report}) {
     [cheaper.id,JSON.stringify({limits:{costUsd:'0.1'},rules:{creditsPerUsd:'1000',multiplier:'1'}})]);
   assert.equal(await wallet(db,poor.actor),PRICE+99-300,'a repeated hold holds once');
   report.checks.push('report price: refused (nothing held) below price + the call hold; administrator price used; repeated hold holds once');
+
+  // A second admission for a round whose report is charged, or still going, is refused under the admission lock
+  // (two tabs with different request ids), and nothing is held; one whose report ended without a complete report is not.
+  const dup = await seed(db);
+  await setBalance(db,dup.actor,5000);
+  const sameRound = randomUUID();
+  const firstReport = await execution(db,dup,undefined,false,sameRound);
+  await assert.rejects(execution(db,dup,undefined,false,sameRound),/REPORT_ALREADY_EXISTS/,'a report still going');
+  assert.equal(await wallet(db,dup.actor),5000-PRICE,'nothing more held');
+  await finish(db,firstReport.id,'completed',{body:'## One\nCut off',completeness:'length_limit'});
+  await service(db,'report_fee_settle',dup.actor,firstReport.id);
+  const retry = await execution(db,dup,undefined,false,sameRound);
+  await finish(db,retry.id,'completed',{body:completeBody,completeness:'complete'});
+  await service(db,'report_fee_settle',dup.actor,retry.id);
+  await assert.rejects(execution(db,dup,undefined,false,sameRound),/REPORT_ALREADY_EXISTS/,'a charged complete report');
+  assert.equal(await wallet(db,dup.actor),5000-PRICE,'the retry paid once, nothing more');
+  report.checks.push('report price: a second admission for a round with a going or charged report is refused with nothing held; a retry after a refunded one pays once');
 
   // Concurrent settlements of one finished report: one charge.
   const race = await execution(db,f);

@@ -63,6 +63,15 @@ LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
 DECLARE fee integer:=report_fixed_price(); call_hold numeric:=0; balance integer; quarantine bigint; avail bigint; q record;
 BEGIN
   IF EXISTS(SELECT 1 FROM report_fees WHERE execution_id=e.id) THEN RETURN; END IF;
+  -- One complete report per round, rechecked under the session lock runtime_admit holds: a second tab that passed the
+  -- host-side check before the first report finished cannot be admitted and charged again (#1102 review). A report
+  -- still going counts too; one that ended without a complete report (its price refunded) does not.
+  IF EXISTS(SELECT 1 FROM report_fees f JOIN runtime_executions x ON x.id=f.execution_id
+    WHERE x.session_id=e.session_id AND x.id<>e.id
+      AND x.payload#>>'{reportGeneration,projectId}'=e.payload#>>'{reportGeneration,projectId}'
+      AND x.payload#>>'{reportGeneration,roundId}'=e.payload#>>'{reportGeneration,roundId}'
+      AND (f.state='charged' OR (f.state='held' AND x.state NOT IN ('completed','cancelled')))) THEN
+    RAISE EXCEPTION 'REPORT_ALREADY_EXISTS'; END IF;
   -- The report call's own temporary hold: its frozen cost bound in credits (released at zero charge).
   BEGIN
     call_hold:=ceil(bill2_decimal(billing#>'{limits,costUsd}')*(billing#>>'{rules,creditsPerUsd}')::numeric
