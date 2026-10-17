@@ -6,15 +6,14 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useSyncExternalStore } from 'react';
 import { Analytics } from '@vercel/analytics/react';
 import { SpeedInsights } from '@vercel/speed-insights/react';
-import { isEmailVerified } from '@/lib/auth';
 import { ANALYTICS_CONFIG, gtagScriptUrl, termlyScriptUrl } from '@/lib/analytics/config';
 import { attachTermly, consentSnapshot, serverConsentSnapshot, subscribeConsent } from '@/lib/analytics/consent';
-import { reportSignUpIfNew } from '@/lib/analytics/events';
+import { captureFirstTouch } from '@/lib/analytics/attribution';
 import { enterPage, syncGa } from '@/lib/analytics/ga';
 import { isSensitivePath } from '@/lib/analytics/routes';
 import { cleanVercelEvent } from '@/lib/analytics/vercel';
-import { createClient } from '@/lib/supabase';
 import { useConsentWithdrawalSync } from './use-consent-withdrawal-sync';
+import { useSignupReporting } from './use-signup-reporting';
 
 /**
  * Consent banner and statistics for every page (ANALYTICS plan §3). Termly loads asynchronously and never
@@ -33,24 +32,21 @@ export function SiteAnalytics({ onVercel }: { onVercel: boolean }) {
   useEffect(() => {
     if (!termlyWebsiteUuid) return;
     enterPage(window.location.href, previous.current);
+    if (previous.current === null) captureFirstTouch(window.location.href, document.referrer);
     previous.current = window.location.href;
     syncGa(gaMeasurementId);
   }, [pathname, termlyWebsiteUuid, gaMeasurementId]);
 
   // Consent given, refused or withdrawn on this page.
   useEffect(() => {
-    if (termlyWebsiteUuid) syncGa(gaMeasurementId);
+    if (!termlyWebsiteUuid) return;
+    syncGa(gaMeasurementId);
+    // Consent given on this page: its address is the first touch we may keep.
+    if (consent.analytics) captureFirstTouch(window.location.href, document.referrer);
   }, [consent, termlyWebsiteUuid, gaMeasurementId]);
 
-  // sign_up for an account created moments ago (email verified or Google), once, after consent.
-  useEffect(() => {
-    if (!termlyWebsiteUuid || !gaMeasurementId || !consent.analytics || isSensitivePath(pathname ?? '/')) return;
-    let active = true;
-    createClient().auth.getSession()
-      .then(({ data }) => { if (active) reportSignUpIfNew(data.session?.user, isEmailVerified(data.session?.user)); })
-      .catch(() => undefined);
-    return () => { active = false; };
-  }, [pathname, consent.analytics, termlyWebsiteUuid, gaMeasurementId]);
+  // sign_up and the first source of an account created moments ago, once, after consent.
+  useSignupReporting(Boolean(termlyWebsiteUuid) && consent.analytics && !isSensitivePath(pathname ?? '/'));
 
   if (!termlyWebsiteUuid) return null;
   // Injected scripts outlive this component, so cleanVercelEvent re-checks consent and the page on every event.
