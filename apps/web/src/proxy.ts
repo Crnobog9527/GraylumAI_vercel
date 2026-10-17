@@ -16,7 +16,6 @@ const PUBLIC_SITE_PATHS = [
   '/maintenance',
   '/landing',
   '/contact',
-  '/tutorials',
   '/faq',
   '/terms',
   '/privacy',
