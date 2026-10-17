@@ -59,6 +59,9 @@ beforeAll(async () => {
   // Declares 20,000 × 20,000 pixels (400 MP) with a tiny body: pdf.js must leave it out, not allocate it.
   harness.samples.set('giant.pdf', scannedPdf([jpeg('q33')], () => '/Width 20000 /Height 20000'));
   for (const sample of hostileSamples(harness.outside).slice(0, 3)) harness.samples.set(`hostile-${sample.name}`, sample.bytes);
+  for (const name of ['encrypted-open-password', 'encrypted-permissions-only']) {
+    harness.samples.set(`${name}.pdf`, readFileSync(new URL(`./pdf-fixtures/${name}.pdf`, import.meta.url)));
+  }
   page = await harness.open();
 }, 120_000);
 afterAll(async () => { await harness?.close(); }, 30_000);
@@ -82,6 +85,12 @@ describe('scanned PDF pages (Chromium)', () => {
     expect(accuracy(expected.q12!, second!.text)).toBeGreaterThanOrEqual(0.95);
     expect(harness.outsideRequests).toEqual([]);
   }, 180_000);
+
+  it('refuses every encrypted PDF, like text extraction does', async () => {
+    for (const name of ['encrypted-open-password.pdf', 'encrypted-permissions-only.pdf']) {
+      expect(await call('renderSample', name, [1]), name).toMatchObject({ ok: false, code: 'PDF_ENCRYPTED' });
+    }
+  }, 120_000);
 
   it('leaves out a declared giant image instead of allocating it', async () => {
     const outcome = await call<Array<{ ok: boolean }>>('renderSample', 'giant.pdf', [1]);

@@ -6,6 +6,7 @@ import { PDF_DOCUMENT_OPTIONS } from './document-options';
 import { EmbeddedDataFactory } from './embedded-data';
 import type { PdfGuard } from './guard';
 import { precheckPdf } from './precheck';
+import { isEncrypted } from './extract-pdf';
 
 /**
  * Scanned PDF pages → JPEG images for browser recognition (LIB-2d, LIB_DOCS_PLAN §4.4: long edge 1,600 px,
@@ -109,7 +110,8 @@ export async function renderPdfPages(input: Uint8Array, pages: number[], guard: 
       throw failure(guard, error);
     }
     if (guard.hit) throw new SandboxError(guard.hit);
-    if ((await document.getPermissions()) !== null) throw new SandboxError('PDF_ENCRYPTED');
+    // Same rule as text extraction: permissions or an encryption filter in the metadata both mean encrypted.
+    if (await isEncrypted(document)) throw new SandboxError('PDF_ENCRYPTED');
     if (!Number.isInteger(document.numPages) || document.numPages > PDF_LIMITS.maxPages) throw new SandboxError('PDF_PAGE_COUNT');
     const results: RenderedPage[] = [];
     for (const number of pages) {
