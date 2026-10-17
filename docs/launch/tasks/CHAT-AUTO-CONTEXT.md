@@ -153,13 +153,14 @@ Owner 选的选项（原文）："Agent 在自由对话里自己决定检索资�
   不放开 `propose_keywords`、`benchmark_discover`、`propose_more_candidates`、`benchmark_fetch`（对标流程专用，要选择卡确认）。
 - **"刷新对标"在自由对话里的做法**：先用免费的 `read_source` 对标表条目读对标表；模型判断需要最新作品时，对表里的账号调用 `social_account` 取近期作品。
   结果**不写回对标表**（对标表只认带授权来源的 `benchmark_fetch`），所以不需要刷新授权（`researchRefreshId`）；要正式刷新对标表仍在定位页点"刷新"。
-  `social_account` 只能查：对标表里的账号、或用户在本会话消息里给出主页链接的账号（沿用 `benchmark_fetch` 的 `user_message` 链接解析规则），
+  `social_account` 只能查：对标表里的账号、或用户**在本条消息里**给出主页链接的账号（沿用 `benchmark_fetch` 的 `user_message` 规则：宿主只认当前被回答的这条用户消息；用户在更早的消息里贴过的链接，要请用户在这一条里再贴一次，不做跨回合扫描）（沿用 `benchmark_fetch` 的 `user_message` 链接解析规则），
   模型自己编的账号返回 `not_confirmed`、不发请求、不收费。`social_search` 的关键词不需要卡片确认（RESEARCH_TOOLS_PLAN 第 2.1 节自由对话设计），
   但工具描述要求只写关键词，不写用户个人信息。
 - **补上两个社媒工具的执行路径**：现在 `runtime/researchRuntimeTool.ts` 只给 `web_search` 和 `web_fetch` 写了执行分支，其余工具都会落进 `web_fetch` 分支、参数解析失败。
   PR C 要为 `social_search`（按关键词：TikHub 关键词作品线路，每个关键词一次子调用）和 `social_account`（账号资料 + 近期作品，B 站另加关系接口）
   各写一个执行分支：按规则表选线路、按 `subcallNeed` 折算预检、逐次子调用冻结结算、结果按 RESEARCH_TOOLS_PLAN 第 2.2 节的统一格式返回，
   流事件的 `dataKind` 用已有的 `keyword_posts` / `account_profile` / `account_posts` / `account_relation`。补测试：两个工具各自成功、确认失败、结果未知、超子调用上限。
+- **自由对话专用的研究工具说明**：`researchRuntimeTool.ts` 现在给每个研究工具附带"每条回答最多调用一次，随后直接回答"的说明（导师回合的一次限制）。PR C 要按用途生成说明：导师回合保持一次；自由对话改成"同一条回答最多 3 次，查够就回答"，并增加真实请求断言（两种说明各自出现在对应回合的请求里）。
 - **代码改动**：`runtimeContext.ts:36, 61-67` 现在要求研究工具只配 `agent-turn-v5-stream` 和导师上下文；改为允许自由对话格式
   （`serial-tools-v6-reasoning`）挂通用研究工具，`researchAdmission.ts` 的准入（总开关、供应商开关、已验证平台、冻结价格、启动门槛、staging 窗口批准）原样复用，
   研究工具也要像 A2 的 `library_search` 一样接通 v6 请求校验、`historyToolNames` 和 OpenRouter 适配器白名单（`social_search`、`social_account`、`web_search`、`web_fetch`），并补真实请求格式测试。
@@ -174,7 +175,7 @@ Owner 选的选项（原文）："Agent 在自由对话里自己决定检索资�
   所以模型调用最多 1 + 9 = 10 次。`maxTurns` 冻结为 10、运行单的模型调用额度按 10；`maxToolCalls` 冻结为 9——它不只是消息预算，
   数据库的 `runtime_tool`（0106）按它硬性限制本次执行的工具调用条数，冻结得少会在后面的调用报 `RUNTIME_TOOL_LIMIT`。补数据库测试：第 9 次调用成功、第 10 次被拒。
   现有 `runner.ts` 每次模型请求都带同一组工具，不会因为 `maxToolCalls` 用完就去掉工具；所以 PR C（以及 A2 起的免费工具）要在 runner 里实现：
-  第 9 轮工具结果回来后，第 10 次模型请求**不带任何工具**（`tools` 为空、`tool_choice: none`），模型只能写回答。
+  第 9 轮工具结果回来后，第 10 次模型请求**不带任何工具**（`tools` 为空，**省略 `tool_choice` 字段**——现有 `runner.ts` 和 OpenRouter 适配器的请求校验不允许 `tool_choice`，不碰这条校验），模型只能写回答。
   测试：上面 9 轮完整取数（3 轮研究 + 6 轮免费读取），第 10 次请求里没有工具、写出最终回答并正确结算；模型在第 10 次仍想调工具时请求本身不提供工具，不会出现第 11 次调用。
 - 子调用总数沿用后台 `maxSubcallsPerRound`（默认 12），按最坏情况折算后先检查（`social_account` = 3、`social_search` = 关键词数、`web_*` = 1），
   因为每轮只执行一个调用，不会有并行的研究调用；PR C 仍在第一次 `await` 之前同步预留折算后的子调用数（不够就整次拒绝，结束退回没用掉的额度），
