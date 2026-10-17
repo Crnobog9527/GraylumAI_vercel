@@ -48,7 +48,10 @@ GRANT EXECUTE ON FUNCTION public.runtime_capacity_marker_since() TO service_role
 REVOKE ALL ON FUNCTION public.runtime_interrupt_capacity(uuid,uuid,bigint,text) FROM PUBLIC,anon,authenticated,service_role;
 GRANT EXECUTE ON FUNCTION public.runtime_interrupt_capacity(uuid,uuid,bigint,text) TO service_role;
 
-CREATE OR REPLACE FUNCTION public.runtime_stale_charged_rounds(p_cutoff timestamp with time zone, p_limit integer DEFAULT 100)
+-- Three-argument report: p_created_since (NULL = all) keeps only rounds created at or after it, applied before the
+-- limit. The automatic close passes the marker time so older (ambiguous) rounds cannot crowd eligible ones out of
+-- the page. The two-argument function stays as a thin wrapper, so every existing caller and signature is unchanged.
+CREATE OR REPLACE FUNCTION public.runtime_stale_charged_rounds(p_cutoff timestamp with time zone, p_limit integer, p_created_since timestamptz)
  RETURNS jsonb
  LANGUAGE plpgsql
  STABLE SECURITY DEFINER
@@ -85,6 +88,7 @@ BEGIN
   FROM runtime_executions e JOIN bill2_runs r ON r.id=e.billing_run_id
   -- cost_pending: receipt recovery settled the last unknown call but the round was never closed.
   WHERE e.state IN ('prepared','running','interrupted','cost_pending') AND e.created_at<p_cutoff
+   AND (p_created_since IS NULL OR e.created_at>=p_created_since)
    AND r.contract_version='bill2.v2' AND NOT r.closed AND NOT r.cancel_requested
    -- Any pause (user stop, insufficient credits, a resumable HTTP budget) is user-side or
    -- resumable, never a Graylum failure to refund. Erased accounts belong to erasure recovery.
@@ -110,6 +114,11 @@ BEGIN
    FILTER (WHERE n<=p_limit),'[]'::jsonb)) INTO result FROM found;
  RETURN result;
 END $function$;
+REVOKE ALL ON FUNCTION public.runtime_stale_charged_rounds(timestamptz,integer,timestamptz) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.runtime_stale_charged_rounds(timestamptz,integer,timestamptz) TO service_role;
+CREATE OR REPLACE FUNCTION public.runtime_stale_charged_rounds(p_cutoff timestamp with time zone, p_limit integer DEFAULT 100)
+ RETURNS jsonb LANGUAGE sql STABLE SECURITY DEFINER SET search_path TO 'public', 'pg_temp'
+AS $$ SELECT public.runtime_stale_charged_rounds(p_cutoff,p_limit,NULL::timestamptz) $$;
 REVOKE ALL ON FUNCTION public.runtime_stale_charged_rounds(timestamptz,integer) FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON FUNCTION public.runtime_stale_charged_rounds(timestamptz,integer) TO service_role;
 

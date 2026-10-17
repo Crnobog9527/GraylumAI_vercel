@@ -62,10 +62,16 @@ describe('automatic close', () => {
     executionId: uuid(1, n), actorId: uuid(3, n), executionState: 'cancelled', compensatedCredits: 3 });
   // `since` of every round is 2026-10-11T18:02; the marker became reliable at 2026-10-01 unless stated.
   const database = (rounds: number[], answers: Record<number, { data: unknown; error: unknown }>, markerSince: unknown = '2026-10-01T00:00:00Z') => {
-    const rpc = vi.fn(async (name: string, args: Record<string, unknown>) => name === 'runtime_stale_charged_rounds'
-      ? { data: { total: rounds.length, rounds: rounds.map(round) }, error: null }
-      : name === 'runtime_capacity_marker_since' ? { data: markerSince, error: null }
-      : answers[Number(String(args.p_run_id).slice(-12))] ?? { data: outcome(Number(String(args.p_run_id).slice(-12))), error: null });
+    const rpc = vi.fn(async (name: string, args: Record<string, unknown>) => {
+      if (name === 'runtime_stale_charged_rounds') {
+        // The database applies p_created_since before the limit; the stand-in does the same.
+        const since = args.p_created_since ? Date.parse(String(args.p_created_since)) : -Infinity;
+        const matching = rounds.filter(() => Date.parse(round(1).since) >= since);
+        return { data: { total: matching.length, rounds: matching.slice(0, Number(args.p_limit)).map(round) }, error: null };
+      }
+      if (name === 'runtime_capacity_marker_since') return { data: markerSince, error: null };
+      return answers[Number(String(args.p_run_id).slice(-12))] ?? { data: outcome(Number(String(args.p_run_id).slice(-12))), error: null };
+    });
     return { rpc, database: { rpc } };
   };
   const none = { found: 0, compensated: 0, alreadyCompensated: 0, skipped: 0, failed: 0, credits: 0, manualReview: 0, deferred: 0 };
@@ -73,7 +79,7 @@ describe('automatic close', () => {
   it('refunds every reported round once through the operator function and counts the credits', async () => {
     const f = database([1, 2], {});
     expect(await autoCompensateStaleRounds(f.database, { now })).toEqual({ ...none, found: 2, compensated: 2, credits: 6 });
-    expect(f.rpc).toHaveBeenCalledWith('runtime_stale_charged_rounds', { p_cutoff: cutoff, p_limit: 500 });
+    expect(f.rpc).toHaveBeenCalledWith('runtime_stale_charged_rounds', { p_cutoff: cutoff, p_limit: 500, p_created_since: '2026-10-01T00:00:00.000Z' });
     expect(f.rpc).toHaveBeenCalledWith('runtime_stale_round_compensate', { p_run_id: uuid(2, 1), p_cutoff: cutoff });
     expect(f.rpc).toHaveBeenCalledWith('runtime_stale_round_compensate', { p_run_id: uuid(2, 2), p_cutoff: cutoff });
   });

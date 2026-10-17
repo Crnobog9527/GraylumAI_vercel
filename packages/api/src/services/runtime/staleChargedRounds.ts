@@ -36,8 +36,10 @@ export type StaleChargedRound = z.infer<typeof report>['rounds'][number] & { kin
 export type StaleChargedRoundReport = { success: boolean; findings: StaleChargedRound[]; total: number; truncated: boolean };
 const cutoff = (now: number) => new Date(now - STALE_ROUND_AGE_MS).toISOString();
 
-export async function findStaleChargedRounds(supabase: BillingRpc, now = Date.now(), limit = STALE_ROUND_REPORT_LIMIT): Promise<StaleChargedRoundReport> {
-  const response = await supabase.rpc('runtime_stale_charged_rounds', { p_cutoff: cutoff(now), p_limit: limit });
+export async function findStaleChargedRounds(supabase: BillingRpc, now = Date.now(), limit = STALE_ROUND_REPORT_LIMIT,
+  createdSince?: string): Promise<StaleChargedRoundReport> {
+  const response = await supabase.rpc('runtime_stale_charged_rounds', { p_cutoff: cutoff(now), p_limit: limit,
+    ...(createdSince ? { p_created_since: createdSince } : {}) });
   if (response.error) throw new Error('STALE_ROUND_SCAN_FAILED');
   const parsed = report.safeParse(response.data);
   if (!parsed.success) throw new Error('STALE_ROUND_SCAN_FAILED');
@@ -84,17 +86,19 @@ export async function autoCompensateStaleRounds(supabase: BillingRpc,
   options: { now?: number; canStart?: () => boolean } = {}): Promise<StaleRoundAutoClose> {
   const now = options.now ?? Date.now();
   const summary: StaleRoundAutoClose = { found: 0, compensated: 0, alreadyCompensated: 0, skipped: 0, failed: 0, credits: 0, manualReview: 0, deferred: 0 };
-  let report: StaleChargedRoundReport, markerSince: number | null;
+  let report: StaleChargedRoundReport, all: StaleChargedRoundReport;
   try {
-    report = await findStaleChargedRounds(supabase, now, 500);
     const marker = await supabase.rpc('runtime_capacity_marker_since', {});
     if (marker.error) throw new Error('STALE_ROUND_MARKER_UNREADABLE');
-    markerSince = typeof marker.data === 'string' && Number.isFinite(Date.parse(marker.data)) ? Date.parse(marker.data) : null;
+    const since = typeof marker.data === 'string' && Number.isFinite(Date.parse(marker.data)) ? new Date(marker.data).toISOString() : null;
+    // Eligible rounds are selected in SQL before the page limit, so older ambiguous rounds cannot crowd them out.
+    all = await findStaleChargedRounds(supabase, now, 1);
+    report = since ? await findStaleChargedRounds(supabase, now, 500, since) : { success: true, findings: [], total: 0, truncated: false };
   } catch { summary.failed++; return summary; }
-  summary.found = report.total;
+  summary.found = all.total;
   // A round from before markers existed may be a capacity failure with no trace: never refund it unseen.
-  const eligible = report.findings.filter(round => markerSince !== null && Date.parse(round.since) >= markerSince);
-  summary.manualReview = report.findings.length - eligible.length;
+  summary.manualReview = Math.max(0, all.total - report.total);
+  const eligible = report.findings;
   let attempted = 0;
   for (const round of eligible) {
     if (options.canStart && !options.canStart()) break;
@@ -112,6 +116,6 @@ export async function autoCompensateStaleRounds(supabase: BillingRpc,
     }
   }
   // Known refunds left undone must not look like success: the job alerts until a run finishes them.
-  summary.deferred = Math.max(0, report.total - summary.manualReview - attempted);
+  summary.deferred = Math.max(0, report.total - attempted);
   return summary;
 }

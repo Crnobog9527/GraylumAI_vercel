@@ -290,6 +290,12 @@ it('RUNTIME: the recovery job leaves rounds created before the marker was reliab
   expect((await anon.rpc('runtime_capacity_marker_since', {})).error).toBeTruthy();
   const old = await chargedOpenRound(2 * STALE_ROUND_AGE_MS);
   const before = await ledger(old);
+  // Selected in SQL before the page limit: the old round is not in a page filtered by the marker time.
+  const since = new Date(Date.parse(String(migrated.value)) ).toISOString();
+  const filtered = await rpc('runtime_stale_charged_rounds', { p_cutoff: new Date(Date.now() - STALE_ROUND_AGE_MS).toISOString(),
+    p_limit: 500, p_created_since: since }) as { total: number; rounds: Array<{ runId: string }> };
+  expect(filtered.rounds.map(round => round.runId)).not.toContain(old.runId);
+  expect(ids(await reported(500))).toContain(old.runId);
   const result = await autoCompensateStaleRounds(service);
   expect(result.manualReview).toBeGreaterThanOrEqual(1);
   expect(result.compensated).toBe(0);
