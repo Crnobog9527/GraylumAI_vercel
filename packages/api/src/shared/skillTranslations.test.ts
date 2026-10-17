@@ -97,3 +97,12 @@ it('the largest translation set a valid workflow allows fits the 2 MB database l
   const separators = (json.match(/[:,]/g) ?? []).length;
   expect(Buffer.byteLength(json) + separators).toBeLessThan(2097152);
 });
+
+it('refuses __proto__ as a key instead of dropping it, and shows that label untranslated', () => {
+  expect(skillLocaleTranslations.safeParse(JSON.parse('{"reportSections":{"__proto__":"Odd title"}}')).success).toBe(false);
+  expect(skillLocaleTranslations.safeParse({ steps: { ['__proto__']: { original: 'x', text: 'y' } } }).success).toBe(false);
+  expect(skillLocaleTranslations.safeParse(JSON.parse('{"fields":{"step-1":{"__proto__":{"original":"x","text":"y"}}}}')).success)
+    .toBe(false);
+  expect(localizedSkillLabels({ reportTitle: 'R', steps: [], reportSections: ['__proto__'] },
+    { en: { reportSections: { 定位结论: 'x' } } }, 'en').reportSections).toEqual(['__proto__']);
+});

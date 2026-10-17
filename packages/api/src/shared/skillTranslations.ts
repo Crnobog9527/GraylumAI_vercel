@@ -11,17 +11,23 @@ export const SKILL_DISPLAY_LOCALES = ['en'] as const;
 export type SkillDisplayLocale = typeof SKILL_DISPLAY_LOCALES[number];
 
 const text = z.string().trim().min(1).max(160).regex(/^[^\r\n\x00-\x1f]+$/);
+// `__proto__` can never be an own key of a parsed record, so a label with that exact text is not translatable
+// (it always shows the original) instead of being dropped silently.
+export const UNTRANSLATABLE_KEY = '__proto__';
 const key = z.string().min(1).max(160);
+// zod drops such a key while parsing a record, so refuse the raw input before it gets there.
+const record = <T extends z.ZodType>(value: T) => z.preprocess(
+  raw => (raw && typeof raw === 'object' && Object.hasOwn(raw, UNTRANSLATABLE_KEY) ? null : raw), z.record(key, value));
 // Each translation records the original it translates; when a republished Skill changes that text, it no
 // longer matches and the original shows again instead of a translation of different words.
 const entry = z.object({ original: key, text }).strict();
 export type SkillTranslationEntry = z.infer<typeof entry>;
 export const skillLocaleTranslations = z.object({
   reportTitle: entry.optional(),
-  steps: z.record(key, entry).optional(),
-  fields: z.record(key, z.record(key, entry)).optional(),
+  steps: record(entry).optional(),
+  fields: record(record(entry)).optional(),
   // Report sections have no id; they are keyed by their original title (reportGeneration.sections).
-  reportSections: z.record(key, text).optional(),
+  reportSections: record(text).optional(),
 }).strict();
 export type SkillLocaleTranslations = z.infer<typeof skillLocaleTranslations>;
 export const skillDisplayTranslations = z.object({ en: skillLocaleTranslations.optional() }).strict();

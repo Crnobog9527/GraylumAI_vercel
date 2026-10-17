@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import type { SkillDisplaySource, SkillLocaleTranslations } from '../../../../../packages/api/src/shared/skillTranslations';
+import { UNTRANSLATABLE_KEY, type SkillDisplaySource, type SkillLocaleTranslations }
+  from '../../../../../packages/api/src/shared/skillTranslations';
 
 /** SKILL-I18N-HOOK admin view helpers; the server re-checks every save. */
 const ERRORS: Record<string, string> = {
@@ -20,7 +21,8 @@ export function skillTranslationsErrorText(error: unknown) {
 export type TranslationRow = { key: string; kind: string; original: string };
 export type TranslationDraft = Record<string, string>;
 
-const sectionTitles = (source: SkillDisplaySource) => [...new Set(source.reportSections)];
+// A section titled exactly `__proto__` cannot be stored as a key, so it gets no input and shows its original.
+const sectionTitles = (source: SkillDisplaySource) => [...new Set(source.reportSections)].filter(title => title !== UNTRANSLATABLE_KEY);
 
 export function translationRows(source: SkillDisplaySource): TranslationRow[] {
   return [
@@ -60,7 +62,6 @@ export function translationsFrom(source: SkillDisplaySource, draft: TranslationD
   const value = (key: string) => draft[key]?.trim() || undefined;
   const steps: Record<string, Entry> = {};
   const fields: Record<string, Record<string, Entry>> = {};
-  const reportSections: Record<string, string> = {};
   for (const step of source.steps) {
     const title = value(`step:${step.id}`);
     if (title) steps[step.id] = { original: step.title, text: title };
@@ -72,10 +73,9 @@ export function translationsFrom(source: SkillDisplaySource, draft: TranslationD
       fields[step.id]![field.id] = { original: field.title, text };
     }
   }
-  sectionTitles(source).forEach((title, index) => {
-    const text = value(`section:${index}`);
-    if (text) reportSections[title] = text;
-  });
+  // Sections are keyed by their title, which may be any label (even `__proto__`): fromEntries always makes own keys.
+  const reportSections: Record<string, string> = Object.fromEntries(sectionTitles(source)
+    .map((title, index) => [title, value(`section:${index}`)] as const).filter((entry): entry is [string, string] => !!entry[1]));
   const reportTitle = value('reportTitle');
   return { ...(reportTitle ? { reportTitle: { original: source.reportTitle, text: reportTitle } } : {}),
     ...(Object.keys(steps).length ? { steps } : {}), ...(Object.keys(fields).length ? { fields } : {}),

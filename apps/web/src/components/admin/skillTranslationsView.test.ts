@@ -57,6 +57,14 @@ it('keeps field translations of steps whose ids are names of object members', ()
   expect(draftFrom(special, saved)).toEqual(draft);
 });
 
+it('offers no input for a section titled __proto__, which cannot be stored, and keeps the others', () => {
+  const special = { reportTitle: 'R', steps: [], reportSections: ['__proto__', '定位结论'] };
+  expect(translationRows(special).filter(row => row.kind === '报告章节标题').map(row => row.original)).toEqual(['定位结论']);
+  const saved = translationsFrom(special, { 'section:0': 'Positioning' });
+  expect(saved).toEqual({ reportSections: { 定位结论: 'Positioning' } });
+  expect(draftFrom(special, saved)).toEqual({ 'section:0': 'Positioning' });
+});
+
 it('flags multi-line or over-long inputs before saving', () => {
   const rows = translationRows(source);
   expect(invalidTranslation(rows, { 'step:step-1': 'ok' })).toBeUndefined();
