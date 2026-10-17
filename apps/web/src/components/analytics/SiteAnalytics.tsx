@@ -22,15 +22,20 @@ import { useSignupReporting } from './use-signup-reporting';
  * component that reads nothing on the server, so public pages stay static.
  */
 export function SiteAnalytics({ onVercel }: { onVercel: boolean }) {
-  const { termlyWebsiteUuid, gaMeasurementId, vercelCategory } = ANALYTICS_CONFIG;
+  // Not configured: nothing renders, no hook runs and no request is made.
+  const { termlyWebsiteUuid } = ANALYTICS_CONFIG;
+  return termlyWebsiteUuid ? <ConfiguredAnalytics termlyWebsiteUuid={termlyWebsiteUuid} onVercel={onVercel} /> : null;
+}
+
+function ConfiguredAnalytics({ termlyWebsiteUuid, onVercel }: { termlyWebsiteUuid: string; onVercel: boolean }) {
+  const { gaMeasurementId, vercelCategory } = ANALYTICS_CONFIG;
   const pathname = usePathname();
   const consent = useSyncExternalStore(subscribeConsent, consentSnapshot, serverConsentSnapshot);
   const previous = useRef<string | null>(null);
-  useConsentWithdrawalSync(consent, Boolean(termlyWebsiteUuid));
+  useConsentWithdrawalSync(consent, true);
 
   // A new address: record it (cleaned) and report it if consent allows.
   useEffect(() => {
-    if (!termlyWebsiteUuid) return;
     enterPage(window.location.href, previous.current);
     if (previous.current === null) captureFirstTouch(window.location.href, document.referrer);
     previous.current = window.location.href;
@@ -48,7 +53,6 @@ export function SiteAnalytics({ onVercel }: { onVercel: boolean }) {
   // sign_up and the first source of an account created moments ago, once, after consent.
   useSignupReporting(Boolean(termlyWebsiteUuid) && consent.analytics && !isSensitivePath(pathname ?? '/'));
 
-  if (!termlyWebsiteUuid) return null;
   // Injected scripts outlive this component, so cleanVercelEvent re-checks consent and the page on every event.
   const vercelOn = onVercel && (vercelCategory === 'essential' || consent.analytics) && !isSensitivePath(pathname ?? '/');
   return (

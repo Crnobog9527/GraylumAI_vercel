@@ -129,6 +129,21 @@ try {
   assert.ok(await take(late));
   ok('a checkout request that began before a withdrawal cannot store ids; one begun after (renewed consent) can');
 
+  // A store racing a withdrawal (request started before it): the ids never survive, whichever commits first.
+  for (let i = 0; i < 8; i++) {
+    const racer = await order(buyer);
+    const begun = await v('SELECT clock_timestamp() v');
+    const [x, y] = [await connect(), await connect()];
+    try {
+      await Promise.all([
+        v('SELECT analytics_store_checkout_ids($1,$2,$3,$4,$5) v', [buyer, racer, '123456789.1700000000', '1700000000', begun], x),
+        v('SELECT analytics_withdraw_consent($1) v', [buyer], y)]);
+    } finally { await x.end(); await y.end(); }
+    assert.equal(await rows(buyer), 0, `round ${i}: ids survived a withdrawal that came after the request began`);
+    assert.equal(await take(racer), null);
+  }
+  ok('a store racing a withdrawal that came after the request began never leaves ids behind (8 rounds)');
+
   // The ids are only good while the Stripe checkout can be paid.
   const slow = await order(buyer);
   await store(buyer, slow);
