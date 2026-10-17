@@ -46,11 +46,11 @@ export const METHOD_COPY: Record<CardMethod, { label: string; note: string | nul
 };
 
 /**
- * MASTER_PLAN §2.1 item 51 record W: checkout links both the terms and a separate refund policy. The policy text is the
- * Owner's (not written here); set its page path once it is published. Until then only Stripe test mode may link the
- * FAQ refund answer as an interim, and real-money checkout stays closed (checkoutEntryOpen).
+ * MASTER_PLAN §2.1 item 51 record W: checkout links both the terms and a separate refund policy. The policy page is
+ * /refund (Owner 2026-10-17: "同意把结账处退款政策链接改成 /refund（staging 是测试模式，正式环境开收钱另批）").
+ * Production real-money checkout is still gated separately (methodCheckoutGate, R7).
  */
-export const REFUND_POLICY_PATH: string | null = null;
+export const REFUND_POLICY_PATH: string | null = '/refund';
 const INTERIM_TEST_REFUND_PATH = '/faq';
 
 export const TERMS_LINKS = { terms: '/terms' } as const;

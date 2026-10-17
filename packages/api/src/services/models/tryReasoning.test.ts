@@ -9,7 +9,7 @@ const reasoning = (purposes: Record<string, unknown>, patch: Record<string, unkn
   endpoints: [{ tag: 'deepinfra/fp8', providerName: 'DeepInfra', supportedParameters: ['tools', 'reasoning', 'reasoning_effort'], contextLength: 100000, maxCompletionTokens: 8192 }],
   ...patch } });
 const row = (purposes: Record<string, unknown>, patch: Record<string, unknown> = {}) => ({ id: '11111111-1111-4111-8111-111111111111', name: 'DeepSeek', model_id: model,
-  provider: 'openai', is_active: 'true', max_tokens: 8192, input_limit: 100000, api_key: ' SECRET_CANARY ', api_endpoint: '', config: { reasoning: reasoning(purposes) }, ...patch });
+  provider: 'openai', is_active: 'true', max_tokens: 8192, input_limit: 100000, api_endpoint: '', config: { reasoning: reasoning(purposes) }, ...patch });
 const off = { interactive: { mode: 'off', wire: 'reasoning_effort' } };
 const frame = (value: unknown) => 'data: ' + JSON.stringify(value) + '\n\n';
 function sse(content: string, finish = 'stop', reasoningTokens = 0) {
@@ -21,7 +21,7 @@ function sse(content: string, finish = 'stop', reasoningTokens = 0) {
 
 describe('tryRequest', () => {
   it('builds one fixed request on the configured route with the purpose setting', () => {
-    const { body, maxTokens } = tryRequest(row(off), 'interactive');
+    const { body, maxTokens } = tryRequest(row(off), 'interactive', true);
     expect(body).toEqual({ model, messages: [{ role: 'user', content: '请用一句话介绍你自己。' }], max_tokens: TRY_PLAIN_MAX_TOKENS, stream: true,
       stream_options: { include_usage: true }, provider: { only: ['deepinfra/fp8'], allow_fallbacks: false, require_parameters: true }, reasoning_effort: 'none' });
     expect(maxTokens).toBe(256);
@@ -41,37 +41,43 @@ describe('tryRequest', () => {
     const purposes = { interactive: mode === 'off' ? { mode, wire: 'reasoning' } : { mode } };
     const config = reasoning(purposes);
     config.catalog.endpoints[0]!.maxCompletionTokens = Number(cap);
-    expect(tryRequest(row(purposes, { config: { reasoning: config } }), 'interactive').maxTokens).toBe(cap);
+    expect(tryRequest(row(purposes, { config: { reasoning: config } }), 'interactive', true).maxTokens).toBe(cap);
   });
 
   it('refuses an over-budget try before transport without rewriting the saved setting', async () => {
     const value = row({ interactive: { mode: 'budget', maxTokens: 6000 } });
     const transport = vi.fn();
-    await expect(tryReasoning(value, 'interactive', transport)).rejects.toThrow('4096');
+    await expect(tryReasoning(value, 'SECRET_CANARY', 'interactive', transport)).rejects.toThrow('4096');
     expect(transport).not.toHaveBeenCalled();
     expect(value.config.reasoning.purposes.interactive).toEqual({ mode: 'budget', maxTokens: 6000 });
-    expect(tryRequest(row({ interactive: { mode: 'budget', maxTokens: 3072 } }), 'interactive').body)
+    expect(tryRequest(row({ interactive: { mode: 'budget', maxTokens: 3072 } }), 'interactive', true).body)
       .toMatchObject({ max_tokens: 4096, reasoning: { max_tokens: 3072 } });
   });
 
   it('uses the provider default for an unset organizer and refuses other unset purposes', () => {
-    expect(tryRequest(row(off), 'organize').body).not.toHaveProperty('reasoning');
-    expect(tryRequest(row(off), 'organize').body).not.toHaveProperty('reasoning_effort');
-    expect(() => tryRequest(row(off), 'review')).toThrow(TryRefused);
+    expect(tryRequest(row(off), 'organize', true).body).not.toHaveProperty('reasoning');
+    expect(tryRequest(row(off), 'organize', true).body).not.toHaveProperty('reasoning_effort');
+    expect(() => tryRequest(row(off), 'review', true)).toThrow(TryRefused);
   });
 
   it.each([
     ['an inactive model', row(off, { is_active: 'false' })],
-    ['a missing key', row(off, { api_key: '' })],
     ['a config that fails its checks', row({ interactive: { mode: 'effort', effort: 'medium', wire: 'reasoning_effort' } })],
     ['no route', row(off, { config: { reasoning: { ...reasoning(off), route: null } } })],
   ])('refuses %s before any call', (_name, value) => {
-    expect(() => tryRequest(value, 'interactive')).toThrow(TryRefused);
+    expect(() => tryRequest(value, 'interactive', true)).toThrow(TryRefused);
+  });
+
+  it('refuses before any call while the platform OpenRouter key is not filled in', async () => {
+    expect(() => tryRequest(row(off), 'interactive', false)).toThrow(TryRefused);
+    const transport = vi.fn();
+    await expect(tryReasoning(row(off), undefined, 'interactive', transport)).rejects.toThrow(TryRefused);
+    expect(transport).not.toHaveBeenCalled();
   });
 });
 
 describe('tryReasoning', () => {
-  it('sends once with the stored key and reports measurements only', async () => {
+  it('sends once with the platform key and reports measurements only', async () => {
     let now = 0;
     const transport = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
       expect(String(url)).toBe(TRY_URL);
@@ -79,7 +85,7 @@ describe('tryReasoning', () => {
       now = 700;
       return new Response(sse('我是一个助手。'), { headers: { 'x-generation-id': 'gen-1' } });
     });
-    const result = await tryReasoning(row(off), 'interactive', transport as unknown as typeof fetch, () => now);
+    const result = await tryReasoning(row(off), 'SECRET_CANARY', 'interactive', transport as unknown as typeof fetch, () => now);
     expect(transport).toHaveBeenCalledTimes(1);
     expect(result).toMatchObject({ ok: true, httpStatus: 200, firstTextMs: 700, hasText: true, finishReason: 'stop', truncated: false,
       reasoningTokens: 0, completionTokens: 5, costUsd: 0.00001, error: null });
@@ -88,20 +94,20 @@ describe('tryReasoning', () => {
 
   it('marks a reply cut by the limit with no text', async () => {
     const transport = vi.fn(async () => new Response(sse('', 'length', 4096)));
-    const result = await tryReasoning(row({ interactive: { mode: 'effort', effort: 'high', wire: 'reasoning_effort' } }), 'interactive', transport as unknown as typeof fetch);
+    const result = await tryReasoning(row({ interactive: { mode: 'effort', effort: 'high', wire: 'reasoning_effort' } }), 'SECRET_CANARY', 'interactive', transport as unknown as typeof fetch);
     expect(result).toMatchObject({ ok: true, hasText: false, truncated: true, reasoningTokens: 4096, maxTokens: 4096, firstTextMs: null });
   });
 
   it('reports a provider refusal without exposing raw diagnostics and never retries', async () => {
     const transport = vi.fn(async () => new Response(JSON.stringify({ error: { message: 'SECRET_CANARY provider diagnostic' } }), { status: 404 }));
-    const result = await tryReasoning(row(off), 'interactive', transport as unknown as typeof fetch);
+    const result = await tryReasoning(row(off), 'SECRET_CANARY', 'interactive', transport as unknown as typeof fetch);
     expect(transport).toHaveBeenCalledTimes(1);
     expect(result).toMatchObject({ ok: false, httpStatus: 404, error: 'HTTP_404', providerMessage: null });
   });
 
   it('reports a transport failure without a retry', async () => {
     const transport = vi.fn(async () => { throw new Error('connection reset SECRET_CANARY'); });
-    const result = await tryReasoning(row(off), 'interactive', transport as unknown as typeof fetch);
+    const result = await tryReasoning(row(off), 'SECRET_CANARY', 'interactive', transport as unknown as typeof fetch);
     expect(transport).toHaveBeenCalledTimes(1);
     expect(result).toMatchObject({ ok: false, httpStatus: null, error: 'TRANSPORT_FAILED', providerMessage: null });
     expect(JSON.stringify(result)).not.toContain('SECRET_CANARY');

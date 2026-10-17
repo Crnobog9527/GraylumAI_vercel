@@ -1,5 +1,5 @@
 import { TRPCError } from '@trpc/server';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../services/stripe', () => ({
   isStripeCheckoutConfigured: () => true,
@@ -7,6 +7,7 @@ vi.mock('../services/stripe', () => ({
     balance: { retrieve: async () => ({ livemode: false }) } }),
 }));
 import { getPublicReadClient, settingsRouter } from './settings';
+import { resetPlatformSecretCacheForTests } from '../services/platformSecrets/reader';
 
 describe('settings writer verification', () => {
   it.each(['single', 'bulk'] as const)('fails closed with a safe service error when the %s writer profile cannot be read', async (mode) => {
@@ -718,10 +719,13 @@ describe('PAY-1 positive-amount catalog readiness', () => {
 });
 
 describe('summary model admin endpoint',()=>{
-  const row={id:'11111111-1111-4111-8111-111111111111',name:'Summary',model_id:'openai/gpt-4o-mini-2024-07-18',is_active:'true',max_tokens:2048,input_limit:128000,api_key:'SECRET_CANARY',api_endpoint:'https://openrouter.ai/api/v1',token_counting_supported:'true',tokenizer_family:'openai'};
+  const row={id:'11111111-1111-4111-8111-111111111111',name:'Summary',model_id:'openai/gpt-4o-mini-2024-07-18',is_active:'true',max_tokens:2048,input_limit:128000,api_endpoint:'https://openrouter.ai/api/v1',token_counting_supported:'true',tokenizer_family:'openai'};
+  // ADMIN-SECRETS OR-1: the platform OpenRouter key, as platform_secret_read returns it.
+  let stored:string|null='SECRET_CANARY';
+  beforeEach(()=>{stored='SECRET_CANARY';resetPlatformSecretCacheForTests();});
   function caller(role:'admin'|'user'|null,error=false){
-    const query=vi.fn(()=>createQueryBuilder(Promise.resolve(error?{data:null,error:{message:'SECRET_CANARY'}}:{data:[row,{...row,id:'22222222-2222-4222-8222-222222222222',api_key:''}],error:null})));
-    const client={from(table:string){
+    const query=vi.fn(()=>createQueryBuilder(Promise.resolve(error?{data:null,error:{message:'SECRET_CANARY'}}:{data:[row,{...row,id:'22222222-2222-4222-8222-222222222222',max_tokens:0}],error:null})));
+    const client={rpc:()=>({abortSignal:async()=>({data:stored,error:null})}),from(table:string){
       if(table==='ai_models')return query();
       if(table==='profiles')return {select(){return this;},eq(){return this;},single:async()=>({data:{id:'test-user',role,status:'active',nickname:'Test',email:'test@example.test'},error:null})};
       throw new Error('Unexpected table');
@@ -738,6 +742,11 @@ describe('summary model admin endpoint',()=>{
   });
   it('does not expose database error details',async()=>{
     const t=caller('admin',true);await expect(t.api.getSummaryModels()).rejects.toMatchObject({code:'INTERNAL_SERVER_ERROR',message:'无法读取整理模型列表'});
+  });
+  it('marks every model unavailable while the platform OpenRouter key is not filled in',async()=>{
+    stored=null;
+    const result=await caller('admin').api.getSummaryModels();
+    expect(result.map(x=>[x.available,x.reason])).toEqual([[false,'请先在后台“第三方密钥”页填写 OpenRouter 密钥'],[false,'请先在后台“第三方密钥”页填写 OpenRouter 密钥']]);
   });
 });
 

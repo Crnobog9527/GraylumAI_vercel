@@ -152,13 +152,22 @@ Owner 原话（2026-10-17，总控-8 对话）：
 
 范围：只改用户看得到的文字（例如"导师提问"→"AI 教练提问"、"给导师的回复"→"给 AI 教练的回复"）；不改代码里的变量名、数据库字段、Skill 内部指令和后台管理页面的文字。取代此前产品界面里"导师"的叫法。归属任务 PUBLIC-SITE，实现见本条所在的 PR。资料库引用开关（`NEXT_PUBLIC_COMPOSER_REFERENCES`）的打开时间按本条定在上线前，由上线准备清单承接，本条所在的 PR 不改开关。
 
+**2026-10-17：结账处的退款政策链接指向 /refund**
+
+Owner 原话（2026-10-17，总控-8 对话）：
+
+> 同意把结账处退款政策链接改成 /refund（staging 是测试模式，正式环境开收钱另批）
+
+- 取代此前"退款政策页未发布前，测试模式结账链接退回 /faq、正式模式关闭结账入口"的临时做法：结账处一律链接 /refund。
+- 正式环境能否收钱仍由 R7 入口闸门（#1093）和 Owner 的上线批准控制，本条不放开任何正式收款。实现见 [#1097](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1097)。
+
 **2026-10-17：未登录点开通会员先去注册并记住所选方案；退款说明页 /refund 公开**
 
 Owner 原话（2026-10-17，总控-8 对话）：
 
 > 确认：未登录点开通会员，先去注册并记住所选方案，注册后直接回到该方案付款；退款说明页 /refund 不登录也能看。
 
-归属任务 PUBLIC-SITE / PAYWALL：实现见 [#1054](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1054)（注册后回到原方案付款，首月优惠资格仍以服务端判断为准）和 [#1053](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1053)（/refund 不需要登录）。staging 目前还没有 /refund 页面，退款政策正文由 Owner 准备，发布前未登录访问是 404。价格区的支付安全说明，等支付通道定了再写。
+归属任务 PUBLIC-SITE / PAYWALL：实现见 [#1054](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1054)（注册后回到原方案付款，首月优惠资格仍以服务端判断为准）和 [#1053](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1053)（/refund 不需要登录）。/refund 规则摘要页已由 [#1091](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1091) 上线 staging（完整退款政策正文仍由 Owner 用第三方工具生成）。价格区的支付安全说明，等支付通道定了再写。
 
 **2026-10-17：评审团模型——评审用 Claude Sonnet 5.5、GPT-6.1 Sol、Gemini 3.8 Flash，汇总用 Claude Opus 5.5；评审团专用计费档案按实际请求取证**
 
@@ -2470,6 +2479,12 @@ node scripts/plan-progress.mjs --ref origin/staging
 | 0280 | [#1076](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1076) ANALYTICS 付款上报（合集 #1116） |
 | 0281 | [#1077](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1077) ANALYTICS 首次来源（合集 #1116） |
 | 0282 | [#1083](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1083) RT-5 对标表来源编号（合集 #1116） |
+| 0283 | [#1041](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1041) ADMIN-SECRETS OR-1（已上库合并） |
+| 0284 | [#1061](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1061) RUNTIME-FAILURE-RECONCILE（合集 #1119） |
+| 0285 | [#1069](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1069) PAY-DISPUTE-GUARD 积分包隔离（合集 #1119） |
+| 0286 | [#1042](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1042) LIB-DOCS LIB-2d BILL2 单图计费（合集 #1119） |
+| 0287 | [#1050](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1050) LIB-DOCS LIB-2d 保存识别文字（合集 #1119） |
+| 0288 | [#1075](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1075) PUBLISH-MONITOR 4a（合集 #1119） |
 
 ### 7.2 依赖简图
 
@@ -2546,7 +2561,7 @@ AC-4 + UI-MODEL + UI-B + UI-C + UI-FINISH + 功能对照检查 ─→ LEGACY-CLO
 - `V3-OPC-UI` 的 A / B / C / FINISH：改称 UI-A / UI-B / UI-C / UI-FINISH，UI-C 改为复用 LIB-DOCS。
 - `V3-GOLD`：改名 FUSION，拆成 FUSION-REVIEW 和 FUSION-COMPARE。
 - 新增：AGENT-CORE（含 AC-0）、AGENT-CORE-UI（从 AGENT-CORE 拆出的纯前端部分）、CI-TRUST（含 CI-TRUST-1）、DEBT-QUICK、COST-REPORT、MODEL-REASONING、UI-MODEL（从原 UI-A 拆出的输入框模型位置，上线只显示 Auto）、RUNTIME-PROD、ENTITLEMENTS、SEC-RATELIMIT、PII-REGEX（接手 PR #333）、RESEARCH-0、RESEARCH-TOOLS、DATA-ERASURE、LIB-DOCS、VOICE、LEARN-1、LEARN-2；2026-09-30 新增 MENTOR-BUDGET、REPORT-GEN、FORGOT-PASSWORD；2026-10-01 新增 BILL-PAYG（承接 RUNTIME-PROD ④）、BILL-UNIT（#565，含按模型倍数）、RATE-LIMIT、STG-MENTOR-MODEL（#561）、INVITE-ABUSE；2026-10-01—02 新增 PROMPT-CACHE（上线必做，第 35 项）、STAGING-HOST-CLEANUP（第 37 项）；2026-10-02—03 新增 MODEL-PRICING-SYNC（第 40 项）、MENTOR-PROMPT-V2、RUNTIME-VIEW-PERF、CONVERSATION-DRIVEN-CAPTURE（第 48 项）、PROMPT-CACHE-HISTORY（第 43 项）、CHAT-NATIVE-OUTPUT（第 44 项）、CONTENT-CONVERSATION-DRIVEN（第 45 项）；STG-MENTOR-MODEL 已关闭（第 38 项）；2026-10-03 新增 PAYWALL（第 50 项）；2026-10-04 新增 EXPERT-CONSULT（第 51 项）、PUBLISH-MONITOR、CHARGEBACK；2026-10-05 起"资料库扩展"的规范任务名为 LIB-EXT。
-- 迁移编号在实际实施时由总控分配，本文不预占；已分配的 0268–0282 见第 7.1 节末尾。
+- 迁移编号在实际实施时由总控分配，本文不预占；已分配的 0268–0288 见第 7.1 节末尾。
 
 ### 7.6 Owner 需要提前启动的事项
 

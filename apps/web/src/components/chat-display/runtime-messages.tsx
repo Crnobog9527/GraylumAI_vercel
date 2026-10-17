@@ -5,6 +5,7 @@ import { Bot } from 'lucide-react';
 import { MessageMarkdown } from '@/components/chat/MessageMarkdown';
 import { ChatPendingStatus } from '@/components/chat/ChatInlineNotice';
 import workStyles from '@/app/runtime/runtime-work.module.css';
+import { DisplayHeading } from './display-heading';
 
 /**
  * Display-only pieces of the work conversation (/runtime): header, message list, the "建议稿"
@@ -22,10 +23,9 @@ export function RuntimeHeader({ title, subtitle, meta, action, headingLevel = 'h
   meta?: { platform: string; account: string; infoHref: string; showExpand?: boolean; onExpand?: () => void };
   action?: ReactNode;
 }) {
-  const Heading = headingLevel;
   return (
     <header className={workStyles.workHead}>
-      <div className={workStyles.workTitle}><Heading>{title}</Heading>{subtitle&&<small>{subtitle}</small>}</div>
+      <div className={workStyles.workTitle}><DisplayHeading as={headingLevel}>{title}</DisplayHeading>{subtitle&&<small>{subtitle}</small>}</div>
       {meta?<div className={workStyles.workMeta}><span>{meta.platform} · {meta.account}</span><Link href={meta.infoHref}>工作信息</Link>
         {meta.showExpand&&<button type="button" onClick={meta.onExpand}>展开成果</button>}</div>:action??null}
     </header>
@@ -36,7 +36,7 @@ export function RuntimeHeader({ title, subtitle, meta, action, headingLevel = 'h
 export function RuntimeEmptyState({ text }: { text: string }) {
   return (
     <div className="mx-auto flex min-h-64 max-w-xl flex-col items-center justify-center px-6 py-12 text-center">
-      <Bot className="mb-3 h-7 w-7 text-[var(--color-primary)]"/><h2 className="text-base font-medium">开始一段对话</h2>
+      <Bot className="mb-3 h-7 w-7 text-[var(--color-primary)]"/><DisplayHeading as="h2" className="text-base font-medium">开始一段对话</DisplayHeading>
       <p className="mt-2 text-[13px] text-[var(--text-tertiary)]">{text}</p></div>
   );
 }
@@ -92,7 +92,7 @@ export function RuntimePendingMessage({ text, sending }: { text: string; sending
 
 /** Right column before the topic's content type is confirmed. */
 export function RuntimeTypePendingPanel() {
-  return <div className={workStyles.typePending}><h2>当前成果</h2><p>先在对话中确认这条选题的内容类型，再起草和保存稿件。已确认前不会创建内容版本。</p></div>;
+  return <div className={workStyles.typePending}><DisplayHeading as="h2">当前成果</DisplayHeading><p>先在对话中确认这条选题的内容类型，再起草和保存稿件。已确认前不会创建内容版本。</p></div>;
 }
 
 export type RuntimeResultVersion = { id: string; kind: string; version: number; status: string; body: string | null; sourceContentId: string | null };
@@ -110,7 +110,7 @@ export function RuntimeResultsSection({ isVideo, versions, currentScriptId, save
   if (!isVideo && !saved?.length) return null;
   return (
     <section aria-label={isVideo?'视频派生成果':'其他 Skill 成果'} className={workStyles.videoResults}>
-      {isVideo&&<><h2>分镜与剪辑建议</h2>{versions.filter(version=>version.kind==='storyboard'||version.kind==='editing').map(version=>
+      {isVideo&&<><DisplayHeading as="h2">分镜与剪辑建议</DisplayHeading>{versions.filter(version=>version.kind==='storyboard'||version.kind==='editing').map(version=>
         <details key={version.id}><summary>{version.kind==='storyboard'?'分镜':'剪辑建议'} · 第 {version.version} 版 · {version.status==='final'?'已定稿':'草稿'}
           {version.sourceContentId===currentScriptId?' · 匹配当前口播稿':' · 旧口播稿版本'}</summary><p>{version.body}</p></details>)}</>}
       {saved?.map(artifact=><details key={artifact.artifactId}><summary>其他 Skill 成果 · 第 {artifact.version} 版</summary>

@@ -57,7 +57,7 @@ it('keeps the header title an h1 by default and renders it at the level a page a
   expect(nested).not.toContain('<h1');
   const { readFileSync } = await import('node:fs');
   const css = readFileSync(new URL('../../app/runtime/runtime-work.module.css', import.meta.url), 'utf8');
-  expect(css).toContain('.workTitle :is(h1,h2){');
+  expect(css).toContain('.workTitle :is(h1,h2,:where(');
 });
 
 it('closes an unfinished Markdown mark while a reply is still being written', () => {
