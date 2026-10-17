@@ -5,7 +5,7 @@
  */
 
 import type { ArticleContent } from '../article';
-import { faqAnswerText, LANDING_FAQ } from '@/lib/landing/landing-faq';
+import { landingFaq } from './landing-faq-pick';
 import { SIGNUP_CTA_HREF } from './shared';
 
 // Product feature pages under /features (PUBLIC-SITE; Owner 2026-10-17: the formal landing is built as the full
@@ -30,20 +30,6 @@ export type FeatureEntry = {
 };
 
 const featurePath = (slug: FeatureSlug) => `${FEATURES_PATH}/${slug}`;
-
-/**
- * The landing FAQ's own questions and answers for the feature page they belong to (SEO_GEO_SPEC 7.9: the FAQ page is one
- * page, and its answers also sit in the FAQ section of the related feature pages). Taken by id from landing-faq.ts, never
- * written a second time; the founder answers stay out (they depend on the live seat count).
- */
-function landingFaq(...ids: string[]) {
-  const items = LANDING_FAQ.flatMap(group => group.items);
-  return ids.map(id => {
-    const item = items.find(entry => entry.id === id);
-    if (!item) throw new Error(`landing FAQ ${id} not found`);
-    return { question: item.question, answer: faqAnswerText(item) };
-  });
-}
 
 function cta(description: string, label = '免费和教练聊聊'): ArticleContent['cta'] {
   return { label, description, href: SIGNUP_CTA_HREF };
@@ -267,7 +253,6 @@ const LIBRARY: ArticleContent = {
   faq: [
     { question: '一个文件最大多少？', answer: '页面上传区会写明单个文件的大小上限，目前是不超过 10 MB；太大的文件请拆分后上传。' },
     { question: '删除文件后，空间会马上释放吗？', answer: '删除中的文件会显示“删除中，空间暂未释放”，完成后释放。' },
-    ...landingFaq('faq-14'),
   ],
   related: [
     { label: '定位分析', href: featurePath('positioning'), description: '先弄清做什么、给谁看、靠什么赚钱。' },

@@ -7,6 +7,7 @@
 import { formatUsd, pickPaywallPlans, type PaywallPlanSource } from '@/components/paywall/paywallPlans';
 import type { ArticleContent } from '../article';
 import type { FeatureSlug } from './features';
+import { signupGrantShown } from './landing-faq-pick';
 import { SIGNUP_GRANT_CREDITS } from './shared';
 
 // "Free to start, N credits on sign-up, Pro from $X" in the opening of each feature page (SEO_GEO_SPEC 3.2: who it is for,
@@ -16,7 +17,8 @@ import { SIGNUP_GRANT_CREDITS } from './shared';
 const GOLD_ONLY: readonly (FeatureSlug | 'hub')[] = ['jury'];
 
 export function pricingSentence(slug: FeatureSlug | 'hub', plans: readonly PaywallPlanSource[] = []): string {
-  const free = `免费开始，注册送 ${SIGNUP_GRANT_CREDITS} 积分`;
+  // The grant is named only while the landing page's `signupGrant` switch is on (its amount must match migration 0230).
+  const free = signupGrantShown() ? `免费开始，注册送 ${SIGNUP_GRANT_CREDITS} 积分` : '免费开始';
   const [pro, gold] = ['pro', 'gold'].map(level => pickPaywallPlans(plans).find(plan => plan.level === level));
   const price = (plan?: { price: { monthly: number } }) => (plan ? formatUsd(plan.price.monthly) : null);
   if (GOLD_ONLY.includes(slug)) {
