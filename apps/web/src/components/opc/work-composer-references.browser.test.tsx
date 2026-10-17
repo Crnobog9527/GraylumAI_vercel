@@ -18,7 +18,11 @@ beforeAll(async () => {
   const source = fileURLToPath(new URL('./work-composer.tsx', import.meta.url));
   const bundle = await build({
     configFile: false, logLevel: 'silent', define: { 'process.env.NODE_ENV': JSON.stringify('development'),
-      'process.env.NEXT_PUBLIC_COMPOSER_REFERENCES': JSON.stringify('') },
+      'process.env.NEXT_PUBLIC_COMPOSER_REFERENCES': JSON.stringify(''),
+      // Word and PDF extraction stay closed here, so attachments take TXT and Markdown (UI-C).
+      'process.env.NEXT_PUBLIC_LIBRARY_DOCX_EXTRACTION': JSON.stringify(''),
+      'process.env.NEXT_PUBLIC_LIBRARY_PDF_EXTRACTION': JSON.stringify(''),
+      'process.env.NEXT_PUBLIC_LIBRARY_SCAN_RECOGNITION': JSON.stringify('') },
     oxc: { jsx: { runtime: 'automatic' } },
     resolve: { alias: { '@': fileURLToPath(new URL('../../', import.meta.url)) } },
     plugins: [{ name: 'references-fixture', enforce: 'pre', resolveId(id: string) {
@@ -32,18 +36,34 @@ beforeAll(async () => {
           if(options&&options.enabled&&window.listLoading)return {isLoading:true,error:null,data:undefined,refetch(){}};
           return options&&options.enabled?{isLoading:false,error:null,data,refetch(){}}
             :{isLoading:false,error:null,data:undefined,refetch(){}}};
-        export const trpc={
-        library:{list:{useQuery:(input,options)=>{window.listCalls.push(Boolean(options&&options.enabled));
+        const found=query=>({nextCursor:null,documents:window.listData.documents.filter(d=>d.kind==='document'
+          &&d.status==='ready'&&d.filename.toLowerCase().includes(query.toLowerCase()))});
+        // UI-C: an upload is granted ready at once (a plain text file the server already holds), recorded in window.uploads;
+        // window.uploadMode 'fail' refuses it, 'processing' leaves it out of the ready documents (a scan to recognise).
+        const library={list:{useQuery:(input,options)=>{window.listCalls.push(Boolean(options&&options.enabled));
           return answer(options,window.listData)}},
           search:{useQuery:(input,options)=>{window.listCalls.push(Boolean(options&&options.enabled));
             if(options&&options.enabled)window.searches.push(input.query);
-            return answer(options,{nextCursor:null,documents:window.listData.documents.filter(d=>d.kind==='document'
-              &&d.status==='ready'&&d.filename.toLowerCase().includes(input.query.toLowerCase()))})}}},
+            return answer(options,found(input.query))}},
+          beginUpload:{useMutation:()=>({mutateAsync:async input=>{window.uploads.push(input);
+            if(window.uploadMode==='slow')await new Promise(resolve=>{window.releaseUpload=resolve;});
+            if(window.uploadMode==='fail')throw Object.assign(new Error('LIBRARY_QUOTA'),{data:{code:'BAD_REQUEST'}});
+            const id='u'+window.uploads.length;
+            if(window.uploadMode!=='processing')window.listData.documents.unshift({id,filename:input.filename,kind:'document',
+              status:'ready',content_version:1});
+            return {documentId:id,status:'ready',upload:null}}})}};
+        for(const name of ['completeUpload','abandonUpload','beginWordUpload','beginWordTextUpload','completeWordUpload',
+          'beginPdfUpload','beginPdfTextUpload','completePdfUpload'])library[name]={useMutation:()=>({mutateAsync:async()=>({})})};
+        const utils={library:{invalidate:async()=>{},search:{fetch:async input=>found(input.query)}}};
+        export const trpc={useUtils:()=>utils,
+        library,
         runtime:{choices:{useQuery:()=>({isLoading:false,error:null,data:undefined,refetch(){}})}}};`;
       if (id === LINK) return `import React from 'react'; export default function Link(p){return React.createElement('a',p)}`;
       if (id === entry) return `import React from 'react'; import {createRoot} from 'react-dom/client';
         import {WorkComposer} from ${JSON.stringify(source)};
-        window.sent=[]; window.value=''; window.listCalls=[]; window.searches=[]; window.reported=[]; window.sentReferences=[];
+        // about:blank is not a secure context; the upload flow needs request ids.
+        let uuid=0; if(!crypto.randomUUID)crypto.randomUUID=()=>'00000000-0000-4000-8000-'+String(++uuid).padStart(12,'0');
+        window.sent=[]; window.value=''; window.listCalls=[]; window.searches=[]; window.reported=[]; window.sentReferences=[]; window.uploads=[];
         const doc=(id,filename,extra={})=>({id,filename,kind:'document',status:'ready',content_version:4,format:'md',purpose:'reference',
           original_bytes:1,text_bytes:1,created_at:'2026-10-13T00:00:00Z',...extra});
         window.listData={usedBytes:0,capacityBytes:1,uploadEnabled:false,nextCursor:null,documents:[
@@ -272,6 +292,94 @@ it('refuses a sixth document with a notice, and Enter sends again', () => open(t
   await ui(box(page).locator('[data-library-reference="k0"]')).toHaveCount(1);
   await page.keyboard.press('Enter');
   expect((await read<string[][]>(page, 'sentReferences'))[0]).toHaveLength(5);
+}));
+
+// UI-C: a file added in the box goes into the library (its own upload flow) and joins the message as a reference.
+const attach = (page: Page, files: Array<{ name: string; text: string; mimeType?: string }>) =>
+  page.locator('input[aria-label="选择附件"]').setInputFiles(files.map(file => ({
+    name: file.name, mimeType: file.mimeType ?? 'text/plain', buffer: Buffer.from(file.text),
+  })));
+
+it('uploads an attached document into the library as reference material and adds it as a reference', () => open(true, async page => {
+  await page.keyboard.type('总结一下');
+  await page.getByRole('button', { name: '添加资料' }).click();
+  await ui(page.getByRole('dialog', { name: '添加资料' })).toContainText('文件会存进你的资料库，并作为引用加入本条消息');
+  expect(await page.locator('input[aria-label="选择附件"]').getAttribute('accept')).toMatch(/^\.txt,\.md/);
+  await attach(page, [{ name: '会议纪要.md', text: '# 纪要\n第一条' }]);
+  await ui(box(page).locator('[data-library-reference="u1"]')).toHaveText('@会议纪要.md');
+  expect(await read<Array<{ filename: string; purpose: string }>>(page, 'uploads'))
+    .toMatchObject([{ filename: '会议纪要.md', purpose: 'reference' }]);
+  // The file's text is not pasted into the message; only the reference is.
+  expect(await read<string>(page, 'value')).toBe('总结一下 @会议纪要.md ');
+  await ui(page.getByRole('button', { name: '发送' })).toBeEnabled();
+  await box(page).click();
+  await page.keyboard.press('Enter');
+  expect(await read<string[][]>(page, 'sentReferences')).toEqual([['u1@1']]);
+}));
+
+it('refuses images and other files with a reason and uploads nothing', () => open(true, async page => {
+  await attach(page, [{ name: '截图.png', text: 'x', mimeType: 'image/png' }, { name: '数据.csv', text: 'a,b' }]);
+  await ui(page.getByRole('alert')).toHaveText([
+    '「截图.png」不能作为附件：这里只支持 TXT、Markdown 文档。图片请到资料库上传。',
+    '「数据.csv」不能作为附件：这里只支持 TXT、Markdown 文档。图片请到资料库上传。',
+  ]);
+  expect(await read<unknown[]>(page, 'uploads')).toEqual([]);
+  await ui(box(page).locator('.library-reference')).toHaveCount(0);
+}));
+
+it('shows a failed upload with 重试 and 移除, and adds no reference', () => open(true, async page => {
+  await page.evaluate(() => { (window as unknown as { uploadMode: string }).uploadMode = 'fail'; });
+  await attach(page, [{ name: '计划.txt', text: '计划' }]);
+  const failed = page.getByRole('alert').filter({ hasText: '计划.txt' });
+  await ui(failed).toBeVisible();
+  await ui(failed.getByRole('button', { name: '重试' })).toBeVisible();
+  await failed.getByRole('button', { name: '移除' }).click();
+  await ui(page.getByRole('alert')).toHaveCount(0);
+  await ui(box(page).locator('.library-reference')).toHaveCount(0);
+}));
+
+it('says when a stored file is not ready to reference yet, or would be a sixth document', () => open(true, async page => {
+  await page.evaluate(() => { (window as unknown as { uploadMode: string }).uploadMode = 'processing'; });
+  await attach(page, [{ name: '扫描件.txt', text: '扫描' }]);
+  await ui(page.getByRole('alert')).toHaveText('「扫描件.txt」已存入资料库，文字还在处理（扫描页要先识别），处理好后可以用 @ 引用。');
+  await page.evaluate(() => { (window as unknown as { uploadMode: string }).uploadMode = ''; });
+  await box(page).click();
+  for (const name of ['甲', '乙', '丙', '丁', '戊']) {
+    await page.keyboard.type('@资料' + name);
+    await ui(page.getByRole('option')).toHaveCount(1);
+    await page.keyboard.press('Enter');
+  }
+  await attach(page, [{ name: '第六篇.md', text: '六' }]);
+  await ui(page.getByRole('alert')).toHaveText('「第六篇.md」已存入资料库，但每条消息最多引用 5 篇文档。');
+  await ui(box(page).locator('.library-reference')).toHaveCount(5);
+}));
+
+it('switched off: a file is read into the message as before and nothing is uploaded', () => open(false, async page => {
+  expect(await page.locator('input[aria-label="选择附件"]').getAttribute('accept')).toBe('.txt,.md,.csv,.json,.log');
+  await attach(page, [{ name: '笔记.txt', text: '第一行' }]);
+  await ui.poll(() => read<string>(page, 'value')).toContain('【文件：笔记.txt】');
+  expect(await read<unknown[]>(page, 'uploads')).toEqual([]);
+}));
+
+it('waits for an attachment still uploading: send stays off and Enter does not send without it', () => open(true, async page => {
+  await page.evaluate(() => { (window as unknown as { uploadMode: string }).uploadMode = 'slow'; });
+  await page.keyboard.type('看看这个');
+  await attach(page, [{ name: '慢文件.md', text: '慢' }]);
+  await ui(page.getByRole('status').filter({ hasText: '慢文件.md' })).toContainText('正在存入资料库');
+  await ui(page.getByRole('button', { name: '发送' })).toBeDisabled();
+  await box(page).click();
+  await page.keyboard.press('Enter');
+  expect(await read<string[]>(page, 'sent')).toEqual([]);
+  await page.evaluate(() => (window as unknown as { releaseUpload: () => void }).releaseUpload());
+  await ui(box(page).locator('[data-library-reference="u1"]')).toHaveText('@慢文件.md');
+  await ui(page.getByRole('button', { name: '发送' })).toBeEnabled();
+}));
+
+it('six files chosen together add five references and say so for the sixth', () => open(true, async page => {
+  await attach(page, ['一', '二', '三', '四', '五', '六'].map(name => ({ name: '文件' + name + '.md', text: name })));
+  await ui(page.getByRole('alert')).toHaveText(/已存入资料库，但每条消息最多引用 5 篇文档。/);
+  await ui(box(page).locator('.library-reference')).toHaveCount(5);
+  await ui(page.getByRole('button', { name: '发送' })).toBeEnabled();
 }));
 
 it('choosing a document that is already in the message replaces its older tag with the new version', () => open(true, async page => {

@@ -26,6 +26,8 @@ vi.mock("@/trpc/client", () => {
     },
   } };
 });
+// The jury entry has its own tests; here it only needs to stay out of the way.
+vi.mock("@/components/fusion-review/JuryEntry", () => ({ JuryEntry: () => null }));
 import { ReportEntry } from "./report-panel";
 
 const props = { draftId: "d", sessionId: "s", projectId: "p", roundId: "r", busy: false, onTopics: () => {} };
@@ -91,4 +93,29 @@ it("remounts per project and round, so a revised round never shows the old round
   expect(revised.key).toBe("p:r2");
   expect(revised.type).toBe(first.type);
   expect(ReportEntry({ ...props, projectId: "p2", confirmed: true })).toMatchObject({ key: "p2:r" });
+});
+
+// #1079/#1003: each jury adoption publishes a new round, while the generated report execution stays in the first round.
+const formal = { available: true, id: "v3", report: { generatedReport: { body: "## 结论\n已采用的正文\n## 第一章\n内容" } } };
+it("shows the saved formal report of a published round that has no report execution, never a new paid start", () => {
+  const html = renderToStaticMarkup(<ReportEntry {...props} confirmed published report={formal} />);
+  expect(html).toContain("完整运营策略报告");
+  expect(html).not.toContain("生成完整报告");
+});
+it("shows the saved formal report with the switch off too", () => {
+  state.available = { enabled: false };
+  expect(renderToStaticMarkup(<ReportEntry {...props} confirmed published report={formal} />)).toContain("完整运营策略报告");
+});
+it("still offers a new report in a revision round (draft) even though the old version has a formal report", () => {
+  const html = renderToStaticMarkup(<ReportEntry {...props} confirmed published={false} report={formal} />);
+  expect(html).toContain("生成完整报告");
+});
+it("the dialog shows the saved formal text and no generate button", async () => {
+  const { ReportDialog } = await import("./report-panel");
+  const report = { executionId: null, status: null, live: null, streaming: false, refusal: null, offer: "start", starting: false,
+    payg: { turnNotices: () => [] }, start: () => {}, restart: () => {}, stop: () => {}, stopUnconfirmed: false, retryStop: () => {} };
+  const html = renderToStaticMarkup(<ReportDialog report={report as never} savedBody={formal.report.generatedReport.body}
+    busy={false} onClose={() => {}} onTopics={() => {}} />);
+  expect(html).toContain("已采用的正文");
+  expect(html).not.toContain("生成完整报告");
 });

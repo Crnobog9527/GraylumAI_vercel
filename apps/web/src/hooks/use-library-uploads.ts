@@ -48,8 +48,12 @@ async function extractPdf(file: File): Promise<Extracted<PreparedPdf>> {
   }
 }
 
-/** Sequential upload queue (the server allows at most 4 unfinished uploads per user). */
-export function useLibraryUploads(onSettled: () => void, onDisabled: () => void) {
+/**
+ * Sequential upload queue (the server allows at most 4 unfinished uploads per user).
+ * `onUploaded` (UI-C, the message box) hears each finished file with its document id, to reference it.
+ */
+export function useLibraryUploads(onSettled: () => void, onDisabled: () => void,
+  onUploaded?: (item: UploadItem, documentId: string) => void) {
   const begin = trpc.library.beginUpload.useMutation();
   const complete = trpc.library.completeUpload.useMutation();
   const abandon = trpc.library.abandonUpload.useMutation();
@@ -91,14 +95,16 @@ export function useLibraryUploads(onSettled: () => void, onDisabled: () => void)
   const apiRef = useRef(api);
   apiRef.current = api;
 
-  /** Resolves with the line to show once done (PDF scanned pages), or null when the file was rejected. */
-  const runOne = useCallback(async (item: UploadItem): Promise<{ message?: string } | null> => {
+  const uploaded = useRef(onUploaded);
+  uploaded.current = onUploaded;
+
+  /** Resolves with the document and the line to show once done (PDF scanned pages), or null when the file was rejected. */
+  const runOne = useCallback(async (item: UploadItem): Promise<{ documentId: string; message?: string } | null> => {
     const onStage = (stage: UploadItem['status'], progress?: number) => update(item.key, { status: stage, progress: progress ?? 0 });
     const common = { file: item.file!, filename: item.filename, purpose: item.purpose, attempt: item.attempt!, newId: () => crypto.randomUUID(), onStage };
     const contentType = item.contentType!;
     if (contentType !== WORD_MIME && contentType !== PDF_MIME) {
-      await runLibraryUpload(apiRef.current.plain, { ...common, contentType });
-      return {};
+      return runLibraryUpload(apiRef.current.plain, { ...common, contentType });
     }
     let prepared = item.prepared;
     if (!prepared) {
@@ -113,11 +119,10 @@ export function useLibraryUploads(onSettled: () => void, onDisabled: () => void)
     }
     if (contentType === PDF_MIME) {
       const pdf = prepared as PreparedPdf;
-      await runPdfUpload(apiRef.current.pdf, { ...common, prepared: pdf });
-      return { message: pdfScanSummary(pdf.pages) };
+      const { documentId } = await runPdfUpload(apiRef.current.pdf, { ...common, prepared: pdf });
+      return { documentId, message: pdfScanSummary(pdf.pages) };
     }
-    await runWordUpload(apiRef.current.word, { ...common, prepared: prepared as PreparedWord });
-    return {};
+    return runWordUpload(apiRef.current.word, { ...common, prepared: prepared as PreparedWord });
   }, [update]);
 
   const drain = useCallback(async () => {
@@ -129,7 +134,10 @@ export function useLibraryUploads(onSettled: () => void, onDisabled: () => void)
         if (!item.file || !item.contentType || !item.attempt) continue;
         try {
           const result = await runOne(item);
-          if (result) update(item.key, { status: 'done', progress: 1, file: undefined, prepared: undefined, message: result.message });
+          if (result) {
+            update(item.key, { status: 'done', progress: 1, file: undefined, prepared: undefined, message: result.message });
+            uploaded.current?.(item, result.documentId);
+          }
         } catch (error) {
           const cause = error instanceof UploadFailure ? error.cause : error;
           const retry = error instanceof UploadFailure ? error.retry : { requestId: crypto.randomUUID(), resume: 'begin' as const };
