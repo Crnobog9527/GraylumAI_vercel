@@ -49,7 +49,6 @@ import { type Information, type Item, type StepEnvelope } from "./confirm-envelo
 import { definiteHandoffRejections, handoffIntent, readRetainedHandoff } from "./handoff-envelope";
 import { ResearchCallList } from "@/components/research/research-call-list";
 import { ResearchSessionPanel, useResearchCalls } from "@/components/research/research-session";
-import { researchConfirmedInput } from "@/components/research/research-session-model";
 /** The retained mentor request is either wrapped in `request` or legacy top-level. */
 export default function PositioningDraft({ params }: { params: Promise<{ draftId: string }> }) {
   const { draftId } = use(params);
@@ -644,7 +643,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
    * One user turn on a step. The focus is only the request identity: the server
    * re-derives it, and an answered card keeps the card's own turn.
    */
-  async function ask(step: Step, inputOverride?: string, answerSource?: MentorRequest["answerSource"]) {
+  async function ask(step: Step, inputOverride?: string, answerSource?: MentorRequest["answerSource"], researchRefreshId?: string) {
     if(mentorSendInFlight.current)return;
     const key = "opc-step:" + draftId + ":" + step.id;
     if (sessionStorage.getItem(key)) {
@@ -663,6 +662,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
       answerSource = { executionId: latest.executionId };
     const questionId = focusField(d.information[step.id]);
     const fixed:StepEnvelope={request:summary?stepSummaryRequest(draftId,step.id,crypto.randomUUID()):{...(answerSource ? {answerSource} : {}),
+      ...(researchRefreshId ? {researchRefreshId} : {}),
       draftId,stepId:step.id,purpose:'mentor',requestId:crypto.randomUUID(),input,questionId,organizeAfter:true}};
     sessionStorage.setItem(key,JSON.stringify(fixed));
     mentorSendInFlight.current=true;
@@ -1204,7 +1204,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                   {liveOnly&&(liveOnly.text||!liveOnly.card)&&<MentorLiveReply text={liveOnly.text}/>}
                   {read.data?.sessionId && <ResearchSessionPanel sessionId={read.data.sessionId} settledTurns={settledTurns}
                     disabled={sendLocked || snap.state !== "draft" || mentorTurns.get(mentorExecutions.at(-1)?.executionId ?? "")?.stepId !== step.id}
-                    onConfirmed={confirmed => void ask(step, researchConfirmedInput(confirmed))}/>}
+                    onSend={(text, refreshId) => ask(step, text, undefined, refreshId)}/>}
                   <ChatNoticeList notices={[...payg.blockedNotices(mentorExecutions, busy),
                     nudgeNotice(nudged, () => void ask(step, checklistUpdatedInput(nudged)), sendLocked, hasPendingStepRequest),
                     ...mentorTailNotices({ livePhase: live.phase, stop: live.stopAction,

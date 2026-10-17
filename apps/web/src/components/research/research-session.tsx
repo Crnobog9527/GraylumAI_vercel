@@ -8,7 +8,7 @@ import { CandidateCardView } from "./candidate-card";
 import { KeywordCardView } from "./keyword-card";
 import type { ResearchCall } from "./research-model";
 import {
-  isResearchEvent, REPORT_MIN_QUALIFIED, toBenchmarkRows, toSessionCards, withResearchCall,
+  isResearchEvent, REPORT_MIN_QUALIFIED, researchConfirmedInput, researchRefreshInput, toBenchmarkRows, toSessionCards, withResearchCall,
   type CallsByExecution, type StoredBenchmark, type StoredCard,
 } from "./research-session-model";
 import type { CandidateSubmission, CardConfirmation, KeywordSubmission } from "./selection-card-model";
@@ -76,13 +76,24 @@ export function ResearchSessionCards({ sessionId, disabled, onConfirmed }: {
  * This session's benchmark table (plan §1.4) under the conversation, from `research.benchmarks`; nothing until the
  * first account is fetched. Says how many qualified benchmarks the positioning report still needs.
  */
-export function ResearchSessionBenchmarks({ sessionId }: { sessionId: string }) {
+export function ResearchSessionBenchmarks({ sessionId, disabled = false, onRefresh }: {
+  sessionId: string;
+  /** The conversation cannot take a message now (a reply is running, another step is shown). */
+  disabled?: boolean;
+  /** Called with the granted refresh id and the row once the host issued the one-time grant. */
+  onRefresh?: (grant: { refreshId: string; platform: string; account: string }) => Promise<void>;
+}) {
+  const createRefresh = trpc.research.createRefresh.useMutation();
   const table = trpc.research.benchmarks.useQuery({ sessionId }, { staleTime: 30_000 });
   const { rows, fetchedAt } = toBenchmarkRows((table.data?.items ?? []) as StoredBenchmark[]);
   if (rows.length === 0) return table.error ? <p role="alert" className={styles.problem}>对标表没有读到，请刷新页面再试。</p> : null;
   const qualified = rows.filter(row => row.qualified).length;
   return (
-    <BenchmarkTable rows={rows} fetchedAt={fetchedAt}>
+    <BenchmarkTable rows={rows} fetchedAt={fetchedAt} refreshDisabled={disabled}
+      onRefresh={onRefresh && (async row => {
+        const { refreshId } = await createRefresh.mutateAsync({ sessionId, platform: row.platform, account: row.account });
+        await onRefresh({ refreshId, platform: row.platform, account: row.account });
+      })}>
       {qualified < REPORT_MIN_QUALIFIED && <p className={styles.hint}>
         生成定位报告需要至少 {REPORT_MIN_QUALIFIED} 个合格的对标账号，目前 {qualified} 个。可以换关键词再找，或直接贴对标账号的主页链接。</p>}
     </BenchmarkTable>
@@ -92,8 +103,13 @@ export function ResearchSessionBenchmarks({ sessionId }: { sessionId: string }) 
 /**
  * Cards, then the benchmark table, under the positioning conversation. `settledTurns` counts the session's saved
  * mentor turns: each new one re-reads both, since a turn's account fetches commit their rows only as it finishes.
+ * `onSend` sends one mentor message on the page's behalf: after a card is confirmed, and for a refresh (with the
+ * one-time grant the host issued).
  */
-export function ResearchSessionPanel({ settledTurns, ...props }: Parameters<typeof ResearchSessionCards>[0] & { settledTurns: number }) {
+export function ResearchSessionPanel({ settledTurns, onSend, ...props }: Omit<Parameters<typeof ResearchSessionCards>[0], "onConfirmed"> & {
+  settledTurns: number;
+  onSend: (text: string, researchRefreshId?: string) => void | Promise<void>;
+}) {
   const utils = trpc.useUtils();
   const { sessionId } = props;
   const seen = useRef(settledTurns);
@@ -105,8 +121,9 @@ export function ResearchSessionPanel({ settledTurns, ...props }: Parameters<type
   }, [settledTurns, sessionId, utils]);
   return (
     <>
-      <ResearchSessionCards {...props}/>
-      <ResearchSessionBenchmarks sessionId={props.sessionId}/>
+      <ResearchSessionCards {...props} onConfirmed={confirmation => void onSend(researchConfirmedInput(confirmation))}/>
+      <ResearchSessionBenchmarks sessionId={sessionId} disabled={props.disabled}
+        onRefresh={async grant => void onSend(researchRefreshInput(grant.platform, grant.account), grant.refreshId)}/>
     </>
   );
 }
