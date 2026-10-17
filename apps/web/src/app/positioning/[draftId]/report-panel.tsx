@@ -9,7 +9,7 @@ import { profileTabHref } from "@/lib/profile-tabs";
 import { ReportPaywallDialog } from "@/components/paywall/ReportPaywallDialog";
 import resultStyles from "@/components/opc/positioning-result.module.css";
 import {
-  REPORT_ACTION, REPORT_INTRO, REPORT_TITLE, REPORT_WRITING_NOTICE, reportView,
+  REPORT_ACTION, REPORT_INTRO, REPORT_TITLE, REPORT_WRITING_NOTICE, reportActionLabel, reportFeeText, reportView,
 } from "./report-gen";
 import { useReportGen } from "./use-report-gen";
 import { useReportPaywallMemory } from "./report-paywall-memory";
@@ -21,7 +21,8 @@ import { JuryEntry } from "@/components/fusion-review/JuryEntry";
 import { REPORT_OUTLINE_MIN_CHAPTERS, ReportWithOutline } from "@/components/chat-display/report-outline";
 import { useReportOutline } from "@/components/chat-display/use-report-outline";
 import { ReportView } from "@/components/chat-display/report-view/report-view";
-import { savedFormalReport, type FormalReport } from "./saved-report";
+import { REPORT_VIEW_TEXT } from "@/components/chat-display/report-view/report-text";
+import { savedFormalReport, savedFormalStrategy, type FormalReport } from "./saved-report";
 
 type Props = {
   draftId: string; sessionId: string; projectId: string; roundId: string; confirmed: boolean; busy: boolean;
@@ -47,8 +48,9 @@ function RoundReportEntry(props: Props) {
   const available = trpc.runtime.reportAvailable.useQuery(undefined, { enabled: props.confirmed, staleTime: 60_000 });
   // A published round with a saved formal report (e.g. adopted from the jury) shows it; it never offers a new paid one.
   const saved = savedFormalReport(Boolean(props.published), props.report);
-  const canGenerate = props.confirmed && available.data?.enabled === true && !saved;
-  const report = useReportGen({ ...props, canGenerate: canGenerate });
+  // A new paid start needs the price on the button: without a readable price nothing is offered (and none would be accepted).
+  const canGenerate = props.confirmed && available.data?.enabled === true && typeof available.data.priceCredits === 'number' && !saved;
+  const report = useReportGen({ ...props, canGenerate: canGenerate, price: available.data?.priceCredits });
   const [open, setOpen] = useState(false);
   // A first start refused for membership opens the paywall (design v25 scene 1), also after leaving
   // and coming back in this tab. A saved report of this round keeps its own dialog.
@@ -60,18 +62,21 @@ function RoundReportEntry(props: Props) {
   return (
     <>
       <Button variant="outline" disabled={props.busy} onClick={() => setOpen(true)}>
-        {report.executionId || saved ? REPORT_TITLE : REPORT_ACTION.start}
+        {report.executionId || saved ? REPORT_TITLE : reportActionLabel(REPORT_ACTION.start, available.data?.priceCredits)}
       </Button>
       {jury}
       {open && (paywall ? <ReportPaywallDialog onClose={() => setOpen(false)} />
-        : <ReportDialog report={report} savedBody={report.executionId ? null : saved} busy={props.busy} onClose={() => setOpen(false)}
+        : <ReportDialog report={report} savedBody={report.executionId ? null : saved}
+          savedStrategy={report.executionId ? null : savedFormalStrategy(props.report)} busy={props.busy}
+          price={available.data?.priceCredits} onClose={() => setOpen(false)}
           onTopics={() => { setOpen(false); props.onTopics(); }} />)}
     </>
   );
 }
 
-export function ReportDialog({ report, savedBody, busy, onClose, onTopics }:
-  { report: ReturnType<typeof useReportGen>; savedBody?: string | null; busy: boolean; onClose: () => void; onTopics: () => void }) {
+export function ReportDialog({ report, savedBody, savedStrategy, busy, price, onClose, onTopics }:
+  { report: ReturnType<typeof useReportGen>; savedBody?: string | null; savedStrategy?: ReturnType<typeof savedFormalStrategy>;
+    busy: boolean; price?: number | null; onClose: () => void; onTopics: () => void }) {
   // Unsaved report edits live in the panel: closing asks first instead of dropping them silently.
   const unsaved = useRef(false);
   const [trackUnsaved] = useState(() => (value: boolean) => { unsaved.current = value; });
@@ -93,6 +98,8 @@ export function ReportDialog({ report, savedBody, busy, onClose, onTopics }:
   else if (view?.kind === "progress") notices.push({ id: "report-progress", tone: "status", busy: true, text: view.notice });
   else if (view?.kind === "report") view.notices.forEach((text, index) => notices.push({ id: "report-note-" + index, tone: "warning", text }));
   else if (view?.kind === "empty") notices.push({ id: "report-empty", tone: "warning", text: view.notice });
+  const charge = !report.live && !working ? reportFeeText(status?.fee) : null;
+  if (charge) notices.push({ id: "report-fee", tone: "status", text: charge });
   if (status && view?.kind === "waiting") notices.push(...report.payg.turnNotices(status, busy || working));
   // An existing report still being written already says so; the "opened" line would only repeat it.
   const repeats = report.refusal?.opened && (view?.kind === "progress" || Boolean(report.live));
@@ -117,12 +124,14 @@ export function ReportDialog({ report, savedBody, busy, onClose, onTopics }:
           {view?.kind === "report" && !report.live && report.executionId
             ? <ReportDocumentPanel key={report.executionId} executionId={report.executionId} fallbackBody={view.body}
               generatedComplete={view.candidate} busy={busy || working} onTopics={onTopics} onUnsaved={trackUnsaved} />
-            : body && <ReportView className="mt-4" body={body} streaming={Boolean(report.live && !report.live.stopped)} />}
+            : body && <ReportView className="mt-4" body={body} streaming={Boolean(report.live && !report.live.stopped)}
+              {...(body === savedBody && savedStrategy ? { data: savedStrategy.data, editedFields: savedStrategy.textEdited,
+                notice: savedStrategy.fromSource ? REPORT_VIEW_TEXT.revisionKeepsData : undefined } : {})} />}
           <ChatNoticeList className="mt-4" notices={notices} />
           {report.offer && !savedBody && !report.refusal?.hideEntry && (
             <div className={resultStyles.consentActions}>
               <Button disabled={busy} onClick={report.offer === "start" ? report.start : report.restart}>
-                {report.offer === "start" ? REPORT_ACTION.start : REPORT_ACTION.retry}
+                {reportActionLabel(report.offer === "start" ? REPORT_ACTION.start : REPORT_ACTION.retry, price)}
               </Button>
             </div>
           )}

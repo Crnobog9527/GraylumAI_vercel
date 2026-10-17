@@ -4,6 +4,7 @@ import type {RuntimeTool} from './runner';
 import type {ToolRpc} from './skillFileExecution';
 import type {runtimeContext} from './runtimeContext';
 import {LIBRARY_READ_GUIDE,LIBRARY_SEARCH_GUIDE,libraryQuery,readLibrary} from './libraryReadTool';
+import {WORKSPACE_STRATEGY_GUIDE} from './primaryInstructions';
 /** Fixed tool descriptions; admission sizes them with the executor's own formula. */
 function sourceToolDescription(name: string, workspaceContext?: boolean, library?: boolean, retrieval?: boolean): string {
  const base=name==='search'?'Search current sources through the explicitly enabled local search adapter.':
@@ -31,8 +32,11 @@ export function sourceRuntimeTool(options: {
       if(query!==null)return readLibrary({ownerRpc,executionId:args.p_execution_id,query,saved,toolArgs});
       if(context.workspaceContext){
        if(saved.result!==null)return JSON.stringify(saved.result);
-       const source=await ownerRpc<unknown>('runtime_workspace_source',{
-        p_session_id:execution.sessionId,p_query:typeof arguments_.query==='string'?arguments_.query:''});
+       const query=typeof arguments_.query==='string'?arguments_.query:'';
+       // No strategy guide frozen = no room was reserved for a strategy result: it is not read, nothing is appended.
+       const source=query.startsWith('strategy_report:')&&context.workspaceGuide!==WORKSPACE_STRATEGY_GUIDE
+        ?{kind:'unavailable',dependencies:[]}
+        :await ownerRpc<unknown>('runtime_workspace_source',{p_session_id:execution.sessionId,p_query:query});
        const committed=await ownerRpc<{result:unknown}>('runtime_tool',{...toolArgs,p_action:'complete',p_result:source});
        return JSON.stringify(committed.result);
       }

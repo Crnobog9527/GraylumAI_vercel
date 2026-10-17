@@ -116,7 +116,7 @@ export function ReportDocumentPanel({ executionId, fallbackBody, generatedComple
   if (problem) notices.push({ id: "report-doc-problem", tone: "warning", text: problem });
   const length = draft === null ? 0 : reportLength(draft.text);
   return <>
-    {draft === null ? <ReportView className="mt-4" body={doc.body} />
+    {draft === null ? <ReportView className="mt-4" body={doc.body} data={doc.strategy?.data} editedFields={doc.strategy?.textEdited} />
       : <div className="mt-4 space-y-1">
         <Textarea aria-label="报告正文" rows={18} value={draft.text} disabled={working}
           onChange={event => { const text = event.target.value; setDraft(old => old && { ...old, text }); }} />

@@ -4,7 +4,7 @@
  * R5 report editing and 定稿 (#783 backend), without React so the rules are testable. The server owns
  * versions, completeness and the publish checks; the page keeps the user's text and explains answers.
  */
-import { REPORT_DATA_FENCE, joinReportBody, splitReportBody } from "@repo/api/src/shared/reportData";
+import { REPORT_DATA_FENCE, joinReportBody, splitReportBody, type SanitizedReportData } from "@repo/api/src/shared/reportData";
 
 export const REPORT_MAX_CHARACTERS = 12000;
 
@@ -43,6 +43,8 @@ export type ReportDocument = {
   versionId: string | null;
   version: number | null;
   next: { kind: "first_week_topics"; draftId: string; sourceVersionId: string } | null;
+  /** REPORT-VISUAL: the server-checked strategy data (benchmark numbers included), null without a data block. */
+  strategy?: { data: SanitizedReportData; textEdited: string[]; stored: boolean } | null;
 };
 
 const errors: Record<string, string> = {

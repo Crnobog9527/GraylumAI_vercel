@@ -26,4 +26,10 @@ describe('monthly refund quote card', () => {
     expect(html).toContain('13.80');
     expect(html).toContain('78.66');
   });
+  it('R7: labels a live refund as real money and never claims it is sandbox-only', () => {
+    const live = render({ ...terms, mode: 'live' });
+    expect(live).toContain('正式（真实付款，会退真钱）');
+    expect(live).not.toContain('只在测试模式');
+    expect(render(terms)).toContain('测试（Stripe 沙盒）');
+  });
 });

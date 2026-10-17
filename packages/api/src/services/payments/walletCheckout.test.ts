@@ -67,13 +67,20 @@ describe('durable wallet checkout', () => {
     expect(mocks.dispatch).not.toHaveBeenCalled();
     expect(f.rpc.mock.calls.filter(([name]) => name === 'pay_waffo_abort_before_dispatch')).toHaveLength(dispatch ? 1 : 0);
   });
-  it('does not call the provider after claim failure or live scope', async () => {
+  it('does not call the provider after claim failure', async () => {
     const f = fixture(); f.rpc.mockResolvedValue({ error: { message: 'unavailable' }, data: null });
     await expect(createWalletCheckout(f.input)).rejects.toThrow('CHECKOUT_UNAVAILABLE');
     expect(mocks.dispatch).not.toHaveBeenCalled();
-    mocks.scope.mockResolvedValue({ merchant: 'fixture', mode: 'live' });
-    await expect(createWalletCheckout(f.input)).rejects.toThrow('LIVE_DISABLED');
-    expect(mocks.dispatch).not.toHaveBeenCalled();
+  });
+  it('R7: a live Stripe account prepares, freezes and maps the order in live mode only', async () => {
+    const f = fixture(); mocks.scope.mockResolvedValue({ merchant: 'fixture', mode: 'live' });
+    await createWalletCheckout(f.input);
+    expect(mocks.prepare).toHaveBeenCalledWith(expect.objectContaining({ paymentMode: 'live', merchantNamespace: 'fixture' }));
+    expect(f.rpc).toHaveBeenCalledWith('pay_waffo_claim_checkout', expect.objectContaining({
+      p_request: expect.objectContaining({ mode: 'live' }) }));
+    expect(f.chain.eq).toHaveBeenCalledWith('mode', 'live');
+    expect(f.chain.eq).not.toHaveBeenCalledWith('mode', 'test');
+    expect(mocks.dispatch).toHaveBeenCalledTimes(1);
   });
   it('propagates uncertain results without retrying', async () => {
     const f = fixture(); mocks.dispatch.mockRejectedValue(new Error('timeout'));

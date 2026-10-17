@@ -12,7 +12,8 @@ const review = {enabled:true,reviewerModelIds:[],summaryModelId:null,skillId:nul
   summaryOutputTokens:16384,maxBudgetUsd:'1',dispatchMinutes:10,breaker:{platformUsd:'2',noDeliveryCalls:10}};
 const settings = (db,patch={}) => db.query(`INSERT INTO system_settings(key,value) VALUES('fusion_settings',$1::jsonb)
   ON CONFLICT(key) DO UPDATE SET value=excluded.value`,[JSON.stringify({version:1,review:{...review,...patch},compare:{enabled:false}})]);
-const config = {estimateUsd:'0.5',maxRounds:2};
+// 0294: every start carries the fixed price the page showed (default 1500 credits).
+const config = {estimateUsd:'0.5',maxRounds:2,fixedPrice:{credits:1500,holdCredits:0}};
 const wallet = async (db,actor) => (await db.query('SELECT credits FROM profiles WHERE id=$1',[actor])).rows[0].credits;
 // The service role is the production caller (membership facts are service-role only).
 async function service(db,name,...args) {
@@ -33,9 +34,9 @@ const claim = (db,f,rv,s,round=1,phase='review',attempt=1) =>
 
 export async function runFusionReview({db,Client,connectionString,report}) {
   const f = await seed(db);
-  await db.query("UPDATE profiles SET membership_level='gold',credits=credits+50 WHERE id=$1",[f.actor]);
+  await db.query("UPDATE profiles SET membership_level='gold',credits=credits+20000 WHERE id=$1",[f.actor]);
   await db.query(`INSERT INTO credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,idempotency_key,balance_before,balance_after)
-    SELECT id,50,'addition','grant','opening_grant','system','fusion-review:'||id,credits-50,credits FROM profiles WHERE id=$1`,[f.actor]);
+    SELECT id,20000,'addition','grant','opening_grant','system','fusion-review:'||id,credits-20000,credits FROM profiles WHERE id=$1`,[f.actor]);
   await db.query(`INSERT INTO membership_plans(id,name,level,allow_fusion_review,allow_fusion_compare,library_storage_bytes)
     VALUES($1,'Local fixture','gold',true,true,500000000) ON CONFLICT(level) DO UPDATE SET allow_fusion_review=true`,[randomUUID()]);
 
@@ -326,7 +327,9 @@ export async function runFusionReview({db,Client,connectionString,report}) {
   assert.equal((await erase(db,f,'artifact',f.project)).status,'deleted');
   assert.equal(Number((await db.query('SELECT count(*) v FROM fusion_reviews WHERE actor_id=$1',[f.actor])).rows[0].v),0);
   const g = await seed(db);
-  await db.query("UPDATE profiles SET membership_level='gold' WHERE id=$1",[g.actor]);
+  await db.query("UPDATE profiles SET membership_level='gold',credits=credits+2000 WHERE id=$1",[g.actor]);
+  await db.query(`INSERT INTO credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,idempotency_key,balance_before,balance_after)
+    SELECT id,2000,'addition','grant','opening_grant','system','fusion-review:'||id,credits-2000,credits FROM profiles WHERE id=$1`,[g.actor]);
   await start(db,g);
   await closeAccount(db,g);
   const counts = (await db.query('SELECT account_erasure_scrub_content($1) v',[g.actor])).rows[0].v;

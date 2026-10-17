@@ -26,8 +26,10 @@ export async function checkErasureProof(db, good) {
  for(const field of ['id','approvedBy'])await mutate([field],'invalid-uuid',field);
  for(const field of ['orderId','userId','ticketId','subscriptionId'])await mutate(['terms',field],'invalid-uuid',field);
  for(const [field,value] of [['paidMinor',0],['netMinor',1],['feeMinor',0],['basisMinor',1],['credits',1],
-  ['plan','founder'],['mode','live'],['feePermitted','unknown'],['evidenceRefs',[]],['evidenceRefs',['a','b','c',null]],
+  ['plan','founder'],['mode','other'],['feePermitted','unknown'],['evidenceRefs',[]],['evidenceRefs',['a','b','c',null]],
   ['evidenceRefs',['a','b','c','  ']]])await mutate(['terms',field],value,field);
+ // R7 (0297): a live-mode monthly refund record is erasure-safe like a test-mode one; any other mode is still not.
+ const live=structuredClone(good);live.terms.mode='live';await check(live,true,'terms.mode: live');
  await mutate(['recordedRefund','id'],'  ','blank cash identity');
  await mutate(['terms','snapshot','price'],69,'numeric snapshot price');
  await mutate(['terms','snapshot','billing_cycle'],'yearly','wrong snapshot scope');

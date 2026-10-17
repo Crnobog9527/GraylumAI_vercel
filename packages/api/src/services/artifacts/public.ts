@@ -1,5 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from "zod";
+import { reportBodyText, type ReportData } from "../../shared/reportData";
+import { reportDataLines } from "../../shared/reportDataText";
 const uuid = z.string().uuid();
 export const publicWorkflowSchema = z.object({
   id: z.string(),
@@ -130,11 +132,15 @@ export const reportSchema = z.object({
         z.object({
           executionId: uuid, evidenceId: uuid, revision: z.number().int().nonnegative(),
           body: z.string(), bodyHash: z.string(), manuallyEdited: z.boolean(),
+          /** REPORT-VISUAL (0300): the checked strategy data stored at 定稿. */
+          data: z.unknown().optional(),
         }),
         // R14: an adopted review revision whose field changes the user confirmed.
         z.object({
           source: z.literal('review_revision'), revisionId: uuid, sourceVersionId: uuid,
           body: z.string(), bodyHash: z.string(), manuallyEdited: z.literal(false), fieldsSynced: z.literal(true),
+          /** 0300: the revised version keeps the strategy data of the version it revises (text-only revision). */
+          data: z.unknown().optional(), dataFrom: z.literal('source_version').optional(),
         }),
       ]).optional(),
       sections: z.array(
@@ -161,6 +167,17 @@ export function literalMarkdown(value: string): string {
     .replace(/>/g, "&gt;")
     .replace(/([\\`*_{}\[\]()#+.!|~\-])/g, "\\$1");
 }
+/**
+ * REPORT-VISUAL §6.3: the stored strategy data as "策略要点", every field by the shared definitions (the same
+ * columns as the page), escaped like the body. Never the raw JSON; nothing for a report without data.
+ */
+function strategyMarkdown(report: { data?: unknown }): string[] {
+  const stored = storedData.safeParse(report.data);
+  if (!stored.success) return [];
+  return ['## 策略要点', ...reportDataLines(stored.data.data as ReportData, stored.data.textEdited, literalMarkdown)];
+}
+const storedData = z.object({ data: z.record(z.string(), z.unknown()), textEdited: z.array(z.string()).default([]) }).passthrough();
+
 export function reportMarkdown(value: ArtifactReport): string {
   if (!value.available || !value.report)
     throw new Error("ARTIFACT_EVIDENCE_UNAVAILABLE");
@@ -170,8 +187,8 @@ export function reportMarkdown(value: ArtifactReport): string {
       `# ${literalMarkdown(r.title)}`,
       `版本：${value.version}`,
       ...(r.generatedReport
-        ? [literalMarkdown(r.generatedReport.body), 'source' in r.generatedReport ? '评审修订稿（字段已同步）'
-          : r.generatedReport.manuallyEdited ? '报告已手动修改' : '模型报告定稿']
+        ? [literalMarkdown(reportBodyText(r.generatedReport.body)), 'source' in r.generatedReport ? '评审修订稿（字段已同步）'
+          : r.generatedReport.manuallyEdited ? '报告已手动修改' : '模型报告定稿', ...strategyMarkdown(r.generatedReport)]
         : r.sections.map(
         (s) =>
           `## ${literalMarkdown(s.title)}\n\n${literalMarkdown(s.body)}\n\n来源：${s.evidenceIds.join(", ") || "未提供"}`,

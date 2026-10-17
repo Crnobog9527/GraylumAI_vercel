@@ -131,13 +131,16 @@ function check(spec: Spec, raw: unknown, path: string, dropped: string[]): Check
 }
 
 /** Every string inside a value, for showing a field that did not pass as plain text. */
-function leafTexts(raw: unknown, out: string[] = []): string[] {
-  if (out.length >= 40) return out;
+/** No field nests deeper than this; anything deeper in a broken value is not looked at (no unbounded recursion). */
+const LEAF_DEPTH = 6;
+
+function leafTexts(raw: unknown, out: string[] = [], depth = 0): string[] {
+  if (out.length >= 40 || depth > LEAF_DEPTH) return out;
   if (typeof raw === 'string') {
     const value = plain(raw);
     if (value) out.push([...value].slice(0, 200).join(''));
-  } else if (Array.isArray(raw)) raw.forEach(item => leafTexts(item, out));
-  else if (isRecord(raw)) Object.values(raw).forEach(item => leafTexts(item, out));
+  } else if (Array.isArray(raw)) raw.forEach(item => leafTexts(item, out, depth + 1));
+  else if (isRecord(raw)) Object.values(raw).forEach(item => leafTexts(item, out, depth + 1));
   return out;
 }
 
@@ -147,12 +150,22 @@ export function checkReportDataField(field: ReportDataField, raw: unknown, dropp
   return result.ok ? result.value : undefined;
 }
 
-export type ReportDataOptions = {
-  /** The host's benchmark table (`platform` + `account`); an account not in it is dropped. Omit: not checked. */
-  benchmarkAccounts?: ReadonlyArray<{ platform: string; account: string }>;
+/** One row of the host's benchmark table (research_benchmark_rows, 0268): the only source of benchmark numbers. */
+export type BenchmarkRow = {
+  platform: string; account: string; followers: number | null; medianViews: number | null;
+  engagementRate: number | null; postsPerWeek: number | null; fetchedAt: string | null;
 };
 
-const benchmarkKey = (platform: string, account: string) => `${platform.trim().toLowerCase()}\u0000${account.trim().toLowerCase()}`;
+export type ReportDataOptions = {
+  /**
+   * The host's benchmark table. `current`: it is the table the report was written from (same hash), so an account
+   * not in it is dropped and the others get its numbers. Not current (refreshed since): names stay, numbers are null.
+   * Omitted (the page before the server has checked): accounts are kept without numbers.
+   */
+  benchmarks?: { rows: readonly BenchmarkRow[]; current: boolean };
+};
+
+const accountKey = (value: string) => value.trim().toLowerCase();
 
 /** Validate a data block (as `splitReportBody` returns it). */
 export function parseReportDataBlock(block: string, options: ReportDataOptions = {}): SanitizedReportData {
@@ -181,13 +194,20 @@ export function parseReportDataBlock(block: string, options: ReportDataOptions =
 }
 
 function dropUnknownBenchmarks(data: ReportData, options: ReportDataOptions, dropped: string[]) {
-  if (!data.benchmarks || !options.benchmarkAccounts) return;
-  const known = new Set(options.benchmarkAccounts.map(row => benchmarkKey(row.platform, row.account)));
-  data.benchmarks.accounts = data.benchmarks.accounts.filter((account, index) => {
-    const keep = known.has(benchmarkKey(account.platform, account.account));
-    if (!keep) dropped.push(`benchmarks.accounts[${index}]`);
-    return keep;
+  const table = options.benchmarks;
+  if (!data.benchmarks || !table) return;
+  const accounts: BenchmarkAccount[] = [];
+  data.benchmarks.accounts.forEach((account, index) => {
+    if (!table.current) return void accounts.push({ ...account, metrics: null });
+    const same = table.rows.filter(row => accountKey(row.account) === accountKey(account.account));
+    if (same.length === 0) return void dropped.push(`benchmarks.accounts[${index}]`);
+    // Only an exact platform match gets numbers, never a guess (the report is told to copy platform and account exactly).
+    const row = same.find(item => accountKey(item.platform) === accountKey(account.platform));
+    if (!row) return void accounts.push({ ...account, metrics: null });
+    accounts.push({ ...account, metrics: { followers: row.followers, medianViews: row.medianViews,
+      engagementRate: row.engagementRate, weeklyPosts: row.postsPerWeek, capturedAt: row.fetchedAt } });
   });
+  data.benchmarks.accounts = accounts;
 }
 
 /** Parse a whole report body; `data` is null when there is no complete block. */
