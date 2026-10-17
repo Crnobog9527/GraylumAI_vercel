@@ -112,6 +112,10 @@ export async function recoverFusionFinancials(admin: SupabaseClient, options: { 
   summary.deferred += rows.length - settleable.length;
   const ordered = [...settleable.filter(item => !item.dispatched), ...settleable.filter(item => item.dispatched)];
   await recoverPage(admin, ordered, summary, now, stopAt, options.budget);
+  // Last, once calls have settled: fixed-price fees of ended or deleted reviews (0294), e.g. a stop that waited for
+  // an in-flight call. A failure leaves them held for the next run, never charged twice (the settlement is idempotent).
+  const fees = await bounded(admin.rpc('fusion_review_fee_settle_due', { p_limit: 200 }));
+  if (fees.error) summary.success = false;
   return summary;
 }
 

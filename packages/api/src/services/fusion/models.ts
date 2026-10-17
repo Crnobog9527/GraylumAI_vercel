@@ -7,13 +7,19 @@ import type { frozenCallPolicy } from '../bill2/service';
 import { PURPOSE_OUTPUT_CAP } from '../bill2/responseCapacity';
 import { isPlainOpenRouterModel } from '../openRouterSearch';
 import { readPaygHostPolicies } from '../runtime/paygHostPolicy';
+import { readPaygPolicies } from '../runtime/realHost';
 import { admitReasoning } from '../runtime/reasoningAdmission';
 import type { ReasoningPolicy } from '../runtime/reasoningPolicy';
 import type { StagingPolicy } from '../runtime/stagingPolicy';
 
 /** Fusion review calls: streamed, JSON-schema output, no tools, web plugin explicitly off. */
 export const FUSION_REQUEST_FORMAT = 'fusion-json-v1-stream';
-export type FusionPhase = 'fusion_review' | 'fusion_summary';
+/** Compare columns: streamed plain-text answers (the user's own request, no response schema), no tools, web plugin off. */
+export const FUSION_COMPARE_REQUEST_FORMAT = 'fusion-text-v1-stream';
+export type FusionPhase = 'fusion_review' | 'fusion_summary' | 'fusion_compare';
+export const fusionRequestFormat = (phase: FusionPhase) => phase === 'fusion_compare' ? FUSION_COMPARE_REQUEST_FORMAT : FUSION_REQUEST_FORMAT;
+/** Reasoning purpose of a phase (admin setting per model): compare answers are ordinary conversation answers. */
+const reasoningPurpose = (phase: FusionPhase) => phase === 'fusion_review' ? 'review' : phase === 'fusion_summary' ? 'writing' : 'interactive';
 export type FusionModelRow = RuntimeModelRow & { provider: string; is_active: string; input_limit: number; max_tokens: number };
 /** Includes the endpoint; the OpenRouter key is the platform secret (OR-1), checked here only and never returned. */
 export const FUSION_MODEL_COLUMNS = RUNTIME_MODEL_COLUMNS;
@@ -50,10 +56,9 @@ export async function admitFusionModel(db: SupabaseClient, window: StagingPolicy
     || !Number.isSafeInteger(row.input_limit) || row.input_limit < quote.providerLimits.contextTokens
     || !Number.isSafeInteger(row.max_tokens) || row.max_tokens < 1) throw new Error('FUSION_MODEL_ADMISSION_REQUIRED');
   const outputLimit = Math.min(outputTokens, row.max_tokens, quote.outputLimit, PURPOSE_OUTPUT_CAP);
-  const reasoning = admitReasoning(row, phase === 'fusion_review' ? 'review' : 'writing',
-    quote.providerLimits.providerSlug, outputLimit);
-  const policies = await readPaygHostPolicies(db, window, [quote], [{ modelId: row.id, phase, outputLimit, reasoning,
-    requestFormat: FUSION_REQUEST_FORMAT }], env, deadline);
+  const reasoning = admitReasoning(row, reasoningPurpose(phase), quote.providerLimits.providerSlug, outputLimit);
+  const policies = await readPaygPolicies(window)(db, window, [quote], [{ modelId: row.id, phase, outputLimit, reasoning,
+    requestFormat: fusionRequestFormat(phase) }], env, deadline);
   if (!policies?.[0]) throw new Error('FUSION_PAYG_REQUIRED');
   return { quote, policy: policies[0], outputLimit, reasoning };
 }

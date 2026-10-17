@@ -17,11 +17,14 @@ const settings = (db) => db.query(`INSERT INTO system_settings(key,value) VALUES
 
 export async function runFusionBackground({db,Client,connectionString,report}) {
   const f = await seed(db);
-  await db.query("UPDATE profiles SET membership_level='gold' WHERE id=$1",[f.actor]);
+  await db.query("UPDATE profiles SET membership_level='gold',credits=credits+2000 WHERE id=$1",[f.actor]);
+  await db.query(`INSERT INTO credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,idempotency_key,balance_before,balance_after)
+    SELECT id,2000,'addition','grant','opening_grant','system','fusion-background:'||id,credits-2000,credits FROM profiles WHERE id=$1`,[f.actor]);
   await db.query(`INSERT INTO membership_plans(id,name,level,allow_fusion_review,allow_fusion_compare,library_storage_bytes)
     VALUES($1,'Local fixture','gold',true,true,500000000) ON CONFLICT(level) DO UPDATE SET allow_fusion_review=true`,[randomUUID()]);
   await settings(db);
-  const rv = await service(db,'fusion_review_start',f.actor,randomUUID(),f.draft,f.versionId,{estimateUsd:'0.5',maxRounds:2});
+  const rv = await service(db,'fusion_review_start',f.actor,randomUUID(),f.draft,f.versionId,
+    {estimateUsd:'0.5',maxRounds:2,fixedPrice:{credits:1500,holdCredits:0}});
   const lease = (token,ttl='5 minutes',max=30) => service(db,'fusion_review_advance_lease',rv.reviewId,token,ttl,max);
   const release = (token) => service(db,'fusion_review_advance_release',rv.reviewId,token);
 

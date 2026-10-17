@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { assertCheckoutRateLimit, getStripeAppUrl, getStripeClient } from '../services/stripe';
+import { assertCheckoutRateLimit, getStripeAppUrl, getStripeClient, isStripeCheckoutConfigured } from '../services/stripe';
 import { methodCheckoutInputSchema } from '../services/payments/methodPurchase';
 import { checkoutValue, storeGaCheckoutIds } from '../services/analytics/gaPurchase';
 import { createWalletCheckout } from '../services/payments/walletCheckout';
@@ -12,6 +12,7 @@ import { protectedProcedure, adminProcedure } from '../trpc';
 import { createSafeServiceUnavailableError } from '../lib/publicError';
 import { RateLimitError } from '../lib/rateLimitError';
 import { readMethodMembership } from '../services/payments/methodMembership';
+import { resolveStripeScope } from '../services/payments/stripeCheckoutPersistence';
 import { assertMethodCheckoutEnvironment } from '../services/payments/methodCheckoutGate';
 import { describeWaffoFailure } from '../services/payments/waffoFailure';
 import { hasUnpaidSubscription, mapMethodPurchaseRejection, MethodPurchaseRejected } from '../services/payments/methodPurchaseError';
@@ -55,7 +56,7 @@ export const methodPaymentProcedures = {
       if (!ctx.hasSupabaseAdminPrivileges) throw new Error('PAY_WAFFO_PERSISTENCE_UNAVAILABLE');
       const routes = await readPaymentMethodRoutes(ctx.supabaseAdmin);
       assertPaymentMethodRoute({ routes, expectedVersion: input.routingVersion, method: input.method,
-        annual: input.billingCycle === 'yearly', itemType: input.itemType, paymentMode: 'test' });
+        annual: input.billingCycle === 'yearly', itemType: input.itemType });
       const terms = await ctx.supabaseAdmin.from('system_settings').select('value').eq('key', 'payment_terms_version').maybeSingle();
       if (terms.error || typeof terms.data?.value?.version !== 'string' || input.termsVersion !== terms.data.value.version) {
         throw new Error('PAY_WAFFO_TERMS_UNAVAILABLE');
@@ -84,7 +85,11 @@ export const methodPaymentProcedures = {
     if (!ctx.hasSupabaseAdminPrivileges) throw createSafeServiceUnavailableError(
       new Error('PAY_WAFFO_PERSISTENCE_UNAVAILABLE'), '会员状态暂不可用，请稍后重试',
     );
-    try { return await readMethodMembership(ctx.supabaseAdmin, ctx.profileId); }
+    try {
+      // Without Stripe checkout configured nothing can be bought: keep the local read in test mode, never call Stripe.
+      const mode = isStripeCheckoutConfigured() ? (await resolveStripeScope(getStripeClient())).mode : 'test';
+      return await readMethodMembership(ctx.supabaseAdmin, ctx.profileId, Date.now(), process.env, mode);
+    }
     catch (error) { throw createSafeServiceUnavailableError(error, '会员状态暂不可用，请稍后重试'); }
   }),
 };

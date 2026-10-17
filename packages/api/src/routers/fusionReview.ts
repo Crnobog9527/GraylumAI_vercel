@@ -7,6 +7,7 @@ import { protectedProcedure, router } from '../trpc';
 import { authoritativeBilling, type BillingRpc } from '../services/bill2/service';
 import { createRuntimeBudget } from '../services/runtime/budget';
 import { newWorkGate } from '../services/runtime/newWorkGate';
+import { runtimeGateEnvironment } from '../services/runtime/realHost';
 import { runtimeActor } from '../services/runtime/actor';
 import { loadStagingPolicy } from '../services/runtime/stagingPolicy';
 import { stagingTransport } from '../services/runtime/stagingTransport';
@@ -57,7 +58,8 @@ async function liveFlow(ctx: ProtectedCtx) {
   const budget = ctx.runtimeBudget ?? createRuntimeBudget();
   const actor = runtimeActor(ctx.userScopedSupabase.auth, ctx.user.id, budget, ctx.headers?.get('Authorization'));
   const billing = authoritativeBilling({ admin: admin as unknown as BillingRpc, actor, adapter: stagingTransport(admin, window, budget), budget });
-  const executor = fusionExecutor({ billing, admin, actorId: ctx.user.id, callGate: newWorkGate(admin, 'staging').calls, budget });
+  const executor = fusionExecutor({ billing, admin, actorId: ctx.user.id, callGate: newWorkGate(admin, runtimeGateEnvironment(window)).calls,
+    budget });
   return reviewFlow({ admin, actorId: ctx.user.id, executor, ...revisionHooks(reportRevisionService(ctx.userScopedSupabase, admin)) });
 }
 const unwrap = (cause: unknown, path: string) => reviewError(cause instanceof TRPCError && cause.cause ? cause.cause : cause, path);
@@ -153,10 +155,8 @@ export const fusionReviewRouter = router({
     if (result.error) throw new Error(result.error.message === 'FUSION_REVIEW_DENIED' ? 'FUSION_REVIEW_DENIED' : 'FUSION_REVIEW_UNAVAILABLE');
     return { seen: true };
   }),
-  // Closing only cancels and releases in the database: it must work even after the staging call window is
-  // closed or switched off, so a user can always stop and free the review slot (#962 review).
-  stop: reader.input(review).mutation(({ ctx, input }) => ctx.flow.stop(input.reviewId)),
-  end: reader.input(review).mutation(({ ctx, input }) => ctx.flow.end(input.reviewId)),
+  // No stop or end (Owner 2026-10-17: "评审团功能不提供中途停止的选项，用户只要点了启用，他就必须得用完"): a review only
+  // ends on its own; deleting the content or the account still ends it with a full refund (0294).
   /** Progress events for the animation (FUSION-REVIEW §2.2a); clients play the ids they have not seen. */
   events: reader.input(review).query(({ ctx, input }) => ctx.flow.events(input.reviewId)),
   /** Per-section adoption (Owner 2026-10-14): R14 propose + apply only, no model call, so no staging call window is needed. */

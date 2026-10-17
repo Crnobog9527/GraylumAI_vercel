@@ -14,11 +14,12 @@ export async function readWalletPaymentEvidence(input: {
   onValidatedSession?: (session: Stripe.Checkout.Session) => void;
 }) {
   const { stripe, scope, order } = input;
-  if (scope.mode !== 'test') throw new Error('PAY_WAFFO_LIVE_DISABLED');
+  // R7 (0296): every Stripe object must be in the account's own mode (live in production, test on staging).
+  const live = scope.mode === 'live';
   if (order.payment_channel !== 'stripe' || order.payment_mode !== scope.mode
     || order.merchant_namespace !== scope.merchant) throw new Error('PAY_WAFFO_PAYMENT_CONFLICT');
   const session = await stripe.checkout.sessions.retrieve(input.sessionId);
-  if (session.object !== 'checkout.session' || session.id !== input.sessionId || session.mode !== 'payment' || session.livemode
+  if (session.object !== 'checkout.session' || session.id !== input.sessionId || session.mode !== 'payment' || session.livemode !== live
     || session.client_reference_id !== order.user_id || session.metadata?.userId !== order.user_id
     || session.metadata?.orderId !== order.id || session.payment_method_types.length !== 1
     || session.payment_method_types[0] !== order.payment_method) throw new Error('PAY_WAFFO_PAYMENT_CONFLICT');
@@ -30,13 +31,13 @@ export async function readWalletPaymentEvidence(input: {
   if (!intentId) throw new Error('PAY_WAFFO_PAYMENT_CONFLICT');
   const intent = await stripe.paymentIntents.retrieve(intentId);
   const chargeId = id(intent.latest_charge);
-  if (intent.object !== 'payment_intent' || intent.id !== intentId || intent.livemode || intent.status !== 'succeeded' || !chargeId
+  if (intent.object !== 'payment_intent' || intent.id !== intentId || intent.livemode !== live || intent.status !== 'succeeded' || !chargeId
     || intent.metadata.orderId !== order.id || intent.metadata.userId !== order.user_id
     || id(intent.customer) !== id(session.customer)) throw new Error('PAY_WAFFO_PAYMENT_CONFLICT');
   assertPurchaseReceipt({ snapshot: order.purchase_snapshot, scope, amount: intent.amount_received,
     currency: intent.currency, livemode: intent.livemode });
   const charge = await stripe.charges.retrieve(chargeId);
-  if (charge.object !== 'charge' || charge.id !== chargeId || charge.livemode || !charge.paid || !charge.captured || charge.status !== 'succeeded'
+  if (charge.object !== 'charge' || charge.id !== chargeId || charge.livemode !== live || !charge.paid || !charge.captured || charge.status !== 'succeeded'
     || id(charge.payment_intent) !== intentId || charge.payment_method_details?.type !== order.payment_method
     || charge.refunded || charge.amount_refunded !== 0 || id(charge.customer) !== id(session.customer)) {
     throw new Error('PAY_WAFFO_PAYMENT_CONFLICT');

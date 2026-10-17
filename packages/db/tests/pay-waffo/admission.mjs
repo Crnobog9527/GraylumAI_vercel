@@ -31,7 +31,9 @@ export async function admissionCases({ admin, service, connect }) {
   const routes={version:3,card:{enabled:true},card_cn:{enabled:true},wechat_pay:{enabled:true,annualVerified:false},
     alipay:{enabled:true,annualVerified:true}};
   await admin.query("UPDATE system_settings SET value=$1 WHERE key='payment_method_routes'",[routes]);
-  await assert.rejects(()=>buy(service,buyer,{mode:'live'}),/LIVE_DISABLED/);
+  // 0296: live is a Stripe mode, admitted only against a live catalog (none here); an unknown mode stays refused.
+  await assert.rejects(()=>buy(service,buyer,{mode:'live'}),/PRICE_MAPPING_MISSING/);
+  await assert.rejects(()=>buy(service,buyer,{mode:'sandbox'}),/LIVE_DISABLED/);
   await assert.rejects(()=>buy(service,buyer,{version:2}),/VERSION_CONFLICT/);
   await assert.rejects(()=>buy(service,buyer,{cycle:'yearly',offer:'founder'}),/ANNUAL_UNVERIFIED/);
   await admin.query('UPDATE membership_plans SET monthly_price=3900 WHERE id=$1',[plan]);

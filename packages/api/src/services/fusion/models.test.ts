@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { admitFusionModel, type FusionModelRow } from './models';
+import { admitFusionModel, fusionRequestFormat, FUSION_COMPARE_REQUEST_FORMAT, FUSION_REQUEST_FORMAT, type FusionModelRow } from './models';
 import { resetPlatformSecretCacheForTests } from '../platformSecrets/reader';
 import type { StagingPolicy } from '../runtime/stagingPolicy';
 
@@ -45,3 +45,23 @@ describe('Fusion model admission refuses models that could never be dispatched',
     await expect(admit({ model_id: 'perplexity/sonar' })).rejects.toThrow('FUSION_MODEL_SEARCH_DENIED');
   });
 });
+
+describe('Fusion compare purpose (FUSION-COMPARE §3.3)', () => {
+  it('uses its own streamed plain-text request format; the review phases keep the JSON-schema one', () => {
+    expect(fusionRequestFormat('fusion_compare')).toBe(FUSION_COMPARE_REQUEST_FORMAT);
+    expect(FUSION_COMPARE_REQUEST_FORMAT).toBe('fusion-text-v1-stream');
+    expect(fusionRequestFormat('fusion_review')).toBe(FUSION_REQUEST_FORMAT);
+    expect(fusionRequestFormat('fusion_summary')).toBe(FUSION_REQUEST_FORMAT);
+  });
+  it('refuses a compare model that has no per-call billing profile for the compare purpose, never falling back to another purpose', async () => {
+    // No payg host setting in this fake database: the profile read finds nothing, so admission is refused explicitly.
+    const empty = { ...db, from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: null }) }) }) }) } as unknown as SupabaseClient;
+    await expect(admitFusionModel(empty, window, { ...row, config: null }, 'fusion_compare', 4096, new Date().toISOString()))
+      .rejects.toThrow();
+  });
+  it('refuses built-in search models for compare too', async () => {
+    await expect(admitFusionModel(db, window, { ...row, model_id: 'perplexity/sonar' }, 'fusion_compare', 4096, new Date().toISOString()))
+      .rejects.toThrow('FUSION_MODEL_SEARCH_DENIED');
+  });
+});
+

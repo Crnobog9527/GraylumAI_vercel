@@ -3,6 +3,12 @@ import { describe, expect, it, vi } from 'vitest';
 import { fusionReviewRouter, revisionHooks } from './fusionReview';
 
 describe('fusion review router', () => {
+  it('has no user stop or end (Owner 2026-10-17: once started a review runs to its end)', () => {
+    const procedures = Object.keys(fusionReviewRouter._def.procedures);
+    expect(procedures).not.toContain('stop');
+    expect(procedures).not.toContain('end');
+  });
+
   it('gives the review flow every R14 call it needs, including decline', async () => {
     const revisions = {
       propose: vi.fn(async () => ({ revisionId: 'r', diffHash: 'h', diff: { changes: [], cascade: [] } }) as never),

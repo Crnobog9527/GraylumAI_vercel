@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {describe, expect, it} from 'vitest';
-import {REPLY_LANGUAGE,REPLY_LANGUAGE_INSTRUCTIONS,withPrimaryAddenda} from './primaryInstructions';
+import {REPLY_LANGUAGE,REPLY_LANGUAGE_INSTRUCTIONS,WORKSPACE_STRATEGY_GUIDE,withPrimaryAddenda} from './primaryInstructions';
 import {sourceToolBytes} from './sourceRuntimeTool';
 import {agentTurnInstructions} from '../opc/agentTurnPrompt';
 
@@ -63,3 +63,16 @@ describe('reply language (SKILL-I18N-HOOK)', () => {
     expect(agentTurnInstructions()).not.toContain('Taiwan usage');
   });
 });
+
+describe('REPORT-VISUAL strategy read guide', () => {
+  const plain=withPrimaryAddenda('base',{workspaceContext:true});
+  it('is added only to executions admitted with it, so older executions replay byte-identical', () => {
+    expect(withPrimaryAddenda('base',{workspaceContext:true,workspaceGuide:'strategy-read-v0'})).toBe(plain);
+    expect(withPrimaryAddenda('base',{workspaceGuide:WORKSPACE_STRATEGY_GUIDE})).toBe('base');
+    const guided=withPrimaryAddenda('base',{workspaceContext:true,workspaceGuide:WORKSPACE_STRATEGY_GUIDE});
+    expect(guided.startsWith(plain)).toBe(true);
+    expect(guided).toContain('strategyReport id');
+    expect(guided).toContain('make your one read that id');
+  });
+});
+

@@ -11,7 +11,8 @@ import {
 const FALLBACK = '退款证据不足或状态已变化，请重新核对订单与工单';
 /** Server quote (pay_common_package_refund_quote, 0252): minor units; netMinor = basis - fee + tax. */
 export type PackageRefundQuote = { versionHash: string; currency: string; basisMinor: number; feeMinor: number;
-  taxMinor?: number; netMinor: number; credits: number };
+  taxMinor?: number; netMinor: number; credits: number; treatment?: 'credit_package' | 'wallet_membership';
+  cash?: { mode?: 'test' | 'live' } };
 export type PackageRefundIntent = Record<string, unknown> & { id?: unknown; status?: unknown };
 
 /**
@@ -76,7 +77,7 @@ export function usePackageRefund() {
     loadStatus: () => run('status', async () => {
       const result = await utils.admin.getPackageRefundStatus.fetch({ orderId: request().orderId });
       setIntent((result ?? null) as PackageRefundIntent | null);
-      if (!result) setError('这个订单还没有积分包退款记录');
+      if (!result) setError('这个订单还没有退款记录');
     }),
     reject: () => run('reject', async () => {
       if (!rejectReason) return;

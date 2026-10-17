@@ -2,14 +2,18 @@ import { describe, expect, it } from 'vitest';
 import { affectsRunning, allSkills, countRunning, draftProblems, runningCount, settingsErrorText, toSaved, warningText, type FusionSettingsValue } from './fusionReviewSettingsView';
 
 const M = (n: number) => `40000000-0000-4000-8000-00000000000${n}`;
-const value: FusionSettingsValue = { version: 1, compare: { enabled: false }, review: {
+const value: FusionSettingsValue = { version: 1, compare: { enabled: false, allowedModelIds: [], defaultModelIds: [], minModels: 2, answerOutputTokens: 8192, maxBudgetUsd: null, dispatchMinutes: 10, breaker: { platformUsd: '2', noDeliveryCalls: 10 } }, review: {
   enabled: true, reviewerModelIds: [M(1), M(2), M(3)], summaryModelId: M(4), skillId: M(5), maxRounds: 2, opinionOutputTokens: 4096,
-  summaryOutputTokens: 32768, maxBudgetUsd: '0.5', dispatchMinutes: 10, breaker: { platformUsd: '2', noDeliveryCalls: 10 },
+  summaryOutputTokens: 32768, maxBudgetUsd: '0.5', fixedPriceCredits: 1500, dispatchMinutes: 10, breaker: { platformUsd: '2', noDeliveryCalls: 10 },
   displayNames: { reviewers: ['目标用户', '操盘手', '挑刺审核人'], summary: '主笔' } } };
 
 describe('jury admin form', () => {
   it('accepts a complete panel and says what is missing before turning the jury on', () => {
     expect(draftProblems(value.review)).toEqual([]);
+    // The per-review price (Owner 2026-10-17, 暂定 1500) is a whole number of credits.
+    for (const fixedPriceCredits of [0, 1.5, Number.NaN, 1_000_000]) {
+      expect(draftProblems({ ...value.review, fixedPriceCredits })).toEqual(['每次评审的价格要是 1–999999 之间的整数积分。']);
+    }
     const incomplete = { ...value.review, reviewerModelIds: [M(1), '', ''], summaryModelId: null };
     expect(draftProblems(incomplete).join()).toContain('开启评审团前');
     expect(draftProblems({ ...incomplete, enabled: false })).toEqual([]);

@@ -1,5 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { Spec } from "@repo/api/src/shared/reportDataSpec";
+import { cellText } from "@repo/api/src/shared/reportDataText";
+export { cellText };
 import styles from "./report-view.module.css";
 
 /**
@@ -7,22 +9,6 @@ import styles from "./report-view.module.css";
  * (REPORT-VISUAL §4: the tables the text no longer repeats are still all on the page). Display only;
  * values are plain text (React escapes them), never Markdown, links or HTML.
  */
-
-/** One value as a short line of text: enum codes become their labels, lists are joined. */
-export function cellText(spec: Spec, value: unknown): string {
-  if (value === undefined || value === null) return "";
-  switch (spec.kind) {
-  case "text": return String(value);
-  case "int": return String(value);
-  case "enum": return spec.values[String(value)] ?? "";
-  case "list": return (value as unknown[]).map(item => cellText(spec.of, item)).filter(Boolean).join("；");
-  case "object": return Object.entries(spec.fields)
-    .map(([key, child]) => {
-      const text = cellText(child, (value as Record<string, unknown>)[key]);
-      return text ? `${child.label}：${text}` : "";
-    }).filter(Boolean).join("，");
-  }
-}
 
 function Table({ spec, rows }: { spec: Extract<Spec, { kind: "object" }>; rows: Record<string, unknown>[] }) {
   const columns = Object.entries(spec.fields);
