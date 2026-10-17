@@ -7,6 +7,7 @@ import { score } from './metrics.mjs';
 const cfg = process.argv[2];
 const DESKEW = cfg.includes('+deskew');
 const COLS = cfg.includes('+cols');
+const ORIENT = cfg.includes('+orient');
 const throttle = Number(process.argv[3] || 1);
 const manifest = JSON.parse(fs.readFileSync(process.env.MANIFEST || 'set/manifest.json', 'utf8'));
 const srv = await start();
@@ -53,11 +54,12 @@ if (init.type !== 'ready') {
 const probe = await pg.evaluate((u) => harness.probe(u), extBase);
 const rows = [];
 for (const m of manifest) {
-  const r = await pg.evaluate(([id, dk, c]) => harness.ocr(id, dk, c), [m.id, DESKEW, COLS]);
+  const r = await pg.evaluate(([id, dk, c, o]) => harness.ocr(id, dk, c, o), [m.id, DESKEW, COLS, ORIENT]);
   const text = r.type === 'result' ? r.text : '';
   const s = score(fs.readFileSync(`set/${m.id}.txt`, 'utf8'), text);
   rows.push({ id: m.id, cat: m.cat, ms: Math.round(r.ms || 0), error: r.type === 'error' ? r.msg : undefined, ...s, text });
   rows.at(-1).angle = r.angle;
+  if (r.flipped) rows.at(-1).flipped = true;
   process.stdout.write(
     `${m.id} ${m.cat} ${Math.round(r.ms)}ms a=${r.angle ?? '-'} acc=${(1 - s.edits / s.refLen).toFixed(4)} bag=${(s.bagCommon / s.refLen).toFixed(4)}\n`,
   );
@@ -67,7 +69,7 @@ await new Promise((r) => setTimeout(r, 1000));
 const cspEvents = (await pg.evaluate(() => harness.events())).filter((e) => e.type === 'csp');
 fs.mkdirSync('results', { recursive: true });
 fs.writeFileSync(
-  `results/${process.env.MANIFEST ? 'vocab-' : ''}${cfg}${throttle > 1 ? '-x' + throttle : ''}.json`,
+  `results/${process.env.TAG ? process.env.TAG + '-' : process.env.MANIFEST ? 'vocab-' : ''}${cfg}${throttle > 1 ? '-x' + throttle : ''}.json`,
   JSON.stringify({ cfg, throttle, initMs: init.initMs, probe, cspEvents, leaks, rssBaseline: base, rssPeak: peak, rows }, null, 1),
 );
 console.log('initMs', init.initMs, 'rss base MB', (base / 1e6).toFixed(0), 'peak MB', (peak / 1e6).toFixed(0), 'leaks', leaks.length);

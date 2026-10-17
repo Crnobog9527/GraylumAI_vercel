@@ -4,6 +4,7 @@ import {createHash} from 'node:crypto';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {runtimeAdmissionService} from './admission';
 import {configuredReasoning} from '../__tests__/fixtures/runtimeReasoning';
+import {testPrimaryModel} from '../__tests__/fixtures/runtimeGates';
 import {runtimeContext} from './runtimeContext';
 import {openRouterRequestBody} from './providerRequest';
 import {frozenReasoningFields,type ReasoningPolicy} from './reasoningPolicy';
@@ -29,6 +30,7 @@ const low={mode:'effort',effort:'low',wire:'reasoning_effort'} as const;
 type ModelConfig={pricing:unknown;reasoning?:ReasoningConfig};
 type Admitted={executionId:string;context:Record<string,unknown>;billing:Record<string,unknown>};
 function fixture(real=true,gate=false){
+ testPrimaryModel.id=dialogue;
  const models:Array<{id:string;model_id:string;config:ModelConfig}>=[
   {id:dialogue,model_id:'synthetic/dialogue',config:configuredReasoning('synthetic/dialogue',low)},
   {id:unset,model_id:'synthetic/unset',config:{pricing:configuredReasoning('synthetic/unset').pricing}},
@@ -95,7 +97,9 @@ it('real free chat freezes v6 with the configured interactive reasoning and bind
 
 it('real free chat fails closed before any reservation when interactive reasoning is unset or on another route',async()=>{
  const f=fixture();
+ testPrimaryModel.id=unset;
  await expect(f.service.prepare({...f.input,selection:{kind:'ordinary',modelId:unset}})).rejects.toThrow('RUNTIME_REASONING_NOT_CONFIGURED');
+ testPrimaryModel.id=dialogue;
  f.models[0]!.config.reasoning!.route='synthetic/fp16';
  await expect(f.service.prepare({...f.input,requestId:nextId})).rejects.toThrow('RUNTIME_REASONING_ROUTE_MISMATCH');
  expect(f.rpc.mock.calls.some(([name])=>name==='runtime_admit')).toBe(false);
@@ -145,4 +149,20 @@ it('CHAT-NATIVE-OUTPUT: a free-chat turn under the POSITIONING-GATE fallback rul
   textStream:'plain-text-v1'});
  const open=await fixture().service.prepare(fixture().input);
  expect(open.context).toMatchObject({providerRequestFormat:'serial-tools-v6-reasoning',textStream:'plain-text-v1'});
+});
+
+// UI-MODEL: users cannot switch models, so a crafted request naming another approved model
+// (the organizer, or a model admission would otherwise refuse) still runs and is priced on the primary model.
+it.each(['ordinary','auto'] as const)('real %s turn ignores the requested modelId and admits the primary model',async kind=>{
+ for(const requested of [organizer,unset]){
+  const f=fixture();
+  const admitted=await f.service.prepare({...f.input,selection:{kind,modelId:requested}});
+  expect(admitted.context.model).toBe('synthetic/dialogue');
+  expect(admitted.billing.callPolicy.map((q:{modelId:string})=>q.modelId)).toEqual([dialogue]);
+ }
+});
+it('local fixture hosts keep the requested fixture model',async()=>{
+ const f=fixture(false);testPrimaryModel.id=undefined;
+ const admitted=await f.service.prepare({...f.input,selection:{kind:'ordinary',modelId:organizer}});
+ expect(admitted.context.model).toBe('synthetic/organizer');
 });

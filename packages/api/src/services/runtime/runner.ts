@@ -4,6 +4,8 @@ import OpenAI from 'openai';
 import { z } from 'zod';
 import {OPENROUTER_RESPONSE_TIMEOUT_MS} from '../bill2/openRouterPolicy';
 import {matchesFrozenReasoning,type ReasoningPolicy} from './reasoningPolicy';
+import {POSITIONING_RESEARCH_TOOLS} from '../research/tools/names';
+const RESEARCH_SLOT_TOOLS:ReadonlySet<string>=new Set(POSITIONING_RESEARCH_TOOLS);
 
 export type RuntimeTool = {
   name: string; description: string; execute: (arguments_: Record<string, unknown>, callId: string) => Promise<string>;
@@ -83,8 +85,9 @@ export function emptyTruncatedResponse(decoded:unknown):boolean{
 
 /** One official SDK loop for all roles. No SDK trace, remote Session, fallback or retry. */
 export async function runRuntime(input: RuntimeRunnerInput) {
-  if(input.commitSessionOnSuccess&&(!input.firstToolCallOnly||
-    input.maxTurns!==1&&!(input.maxTurns===2&&input.tools.some(tool=>tool.name==='read_skill_file'))))
+  // A bounded v5 turn: one reply, plus one call per frozen slot (a Skill file read, one research call).
+  const slots=1+(input.tools.some(tool=>tool.name==='read_skill_file')?1:0)+(input.tools.some(tool=>RESEARCH_SLOT_TOOLS.has(tool.name))?1:0);
+  if(input.commitSessionOnSuccess&&(!input.firstToolCallOnly||input.maxTurns!==1&&input.maxTurns!==slots))
     throw new Error('RUNTIME_CONTEXT_INVALID');
   const sessionWrites:AgentInputItem[][]=[];
   // Keep the frozen history objects and the original append batch boundaries.

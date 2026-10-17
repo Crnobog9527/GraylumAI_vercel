@@ -40,7 +40,7 @@ function fixture() {
     tikhub: vi.fn<VendorCalls['tikhub']>(), firecrawl: vi.fn<VendorCalls['firecrawl']>(),
   };
   const context: SubcallContext = {
-    policies: [policy], billing, evidence, nextSequence: vi.fn(() => 1), phase: 'question', runtimeEpoch: '3',
+    policies: [policy], billing, evidence, nextSequence: vi.fn(() => 1), phase: 'question', runtimeEpoch: 3,
     secrets: vi.fn().mockResolvedValue('test-key'), rateCounter: vi.fn().mockResolvedValue(true),
     vendors, newId: vi.fn(() => 'operation-1'), now: () => new Date(result.fetchedAt),
   };
@@ -52,7 +52,7 @@ describe('research subcall safety and accounting', () => {
     const f = fixture();
     expect(await runSubcall(f.context, request)).toEqual({ sent: true, result, operationId: 'operation-1', callId: 'call-1' });
     expect(f.billing.claim).toHaveBeenCalledWith(1, expect.objectContaining({ requestHash: requestIdentity(request),
-      runtimeEpoch: '3', automaticRetry: false, upperUsd: '0.002', phase: 'question' }));
+      runtimeEpoch: 3, automaticRetry: false, upperUsd: '0.002', phase: 'question' }));
     expect(f.evidence.open).toHaveBeenCalledWith('operation-1', requestIdentity(request), 2000);
     expect(f.vendors.parallel).toHaveBeenCalledWith('research', { apiKey: 'test-key', now: f.context.now }, 'fast');
     expect(f.billing.record).toHaveBeenCalledWith('call-1', expect.objectContaining({
@@ -71,10 +71,11 @@ describe('research subcall safety and accounting', () => {
     expect(f.vendors.firecrawl).not.toHaveBeenCalled();
   });
 
-  it.each(['ROUTE_NOT_FROZEN', 'KEY_MISSING', 'VENDOR_RATE_LIMITED'] as const)('does not claim or send after %s', async stop => {
+  it.each(['ROUTE_NOT_FROZEN', 'KEY_MISSING', 'KEY_UNAVAILABLE', 'VENDOR_RATE_LIMITED'] as const)('does not claim or send after %s', async stop => {
     const f = fixture();
     if (stop === 'ROUTE_NOT_FROZEN') f.context.policies = [];
     if (stop === 'KEY_MISSING') f.context.secrets = vi.fn().mockResolvedValue(null);
+    if (stop === 'KEY_UNAVAILABLE') f.context.secrets = vi.fn().mockRejectedValue(new Error('RESEARCH_KEY_UNAVAILABLE'));
     if (stop === 'VENDOR_RATE_LIMITED') f.context.rateCounter = vi.fn().mockResolvedValue(false);
     expect(await runSubcall(f.context, request)).toEqual({ sent: false, stop, budget: stop === 'VENDOR_RATE_LIMITED' });
     expect(f.billing.claim).not.toHaveBeenCalled();

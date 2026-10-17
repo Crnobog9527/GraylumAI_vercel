@@ -102,9 +102,4 @@ export function describeMethodMembership(row: MethodMembershipRow) {
 }
 
 /** Landing-page "buy" link: /profile?tab=subscription&buy=<pro|gold>&cycle=<monthly|yearly>. Anything else is ignored. */
-export function parseBuyDeepLink(params: { get: (key: string) => string | null }) {
-  const level = params.get('buy');
-  const cycle = params.get('cycle');
-  if ((level !== 'pro' && level !== 'gold') || (cycle !== 'monthly' && cycle !== 'yearly')) return null;
-  return { level, cycle } as const;
-}
+export { parseBuyIntent as parseBuyDeepLink } from '@/lib/buyIntent';
