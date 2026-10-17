@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { accountMetrics, type EvidenceItem } from '../benchmark/metrics';
-import { classifyAccount } from '../benchmark/classify';
+import { accountMetrics, suppliedWholeHistory, type EvidenceItem } from '../benchmark/metrics';
+import { classifyAccount, qualifyFetchedAccount } from '../benchmark/classify';
 import { authorizeBenchmarkFetch } from '../tools/authorize';
 import { toolEnvelope } from '../tools/envelope';
 import type { ResearchToolArgs } from '../tools/schemas';
@@ -77,15 +77,18 @@ export async function benchmarkFetch(ctx: ResearchToolContext, args: ResearchToo
           await ctx.store.fetchFinish(claim.fetchId, claim.attempt, unknown ? 'unknown' : charged ? 'failed_charged' : 'failed', null);
         }
         if (profile) {
-          const metrics = accountMetrics({ profile, posts: posts ?? [], followersItem: results[routes.followersFrom]?.[0] }, ctx.now());
+          const metrics = accountMetrics({ profile, posts: posts ?? [], followersItem: results[routes.followersFrom]?.[0],
+            complete: suppliedWholeHistory(results.account_profile?.[0], posts ?? []) }, ctx.now());
           rows.push({ fields: { ...account, evidence: JSON.stringify({ ...account, metrics, partial: true }) }, missing: metrics.missing });
         }
         partial = true;
         if (stopReason) break;
         continue;
       }
-      const metrics = accountMetrics({ profile, posts, followersItem: results[routes.followersFrom]?.[0] }, ctx.now());
-      const classification = classifyAccount(metrics, ctx.config.recentGrowth, ctx.now());
+      // Whole history only when the profile's own post count shows nothing is left (Owner 2026-10-16, A: new accounts).
+      const metrics = accountMetrics({ profile, posts, followersItem: results[routes.followersFrom]?.[0],
+        complete: suppliedWholeHistory(results.account_profile?.[0], posts) }, ctx.now());
+      const classification = qualifyFetchedAccount(metrics, classifyAccount(metrics, ctx.config.recentGrowth, ctx.now()));
       const evidence = { ...account, metrics, classification, fetchedAt: ctx.now().toISOString() };
       await ctx.store.fetchFinish(claim.fetchId, claim.attempt, 'succeeded', evidence);
       rows.push({ fields: { ...account, evidence: JSON.stringify(evidence) }, missing: metrics.missing });

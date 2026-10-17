@@ -1,7 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // Pure helpers for the ADMIN-SECRETS page (write-only third-party keys).
 
-export type PlatformSecretSlot = 'openrouter' | 'postforme' | 'postforme_webhook' | 'tikhub' | 'parallel' | 'firecrawl';
+export type PlatformSecretSlot = 'openrouter' | 'postforme' | 'postforme_webhook' | 'tikhub' | 'parallel' | 'firecrawl'
+  | 'resend';
 export interface PlatformSecretItem {
   slot: PlatformSecretSlot;
   configured: boolean;
@@ -21,6 +22,7 @@ export const SLOT_INFO: Record<PlatformSecretSlot, { name: string; usage: string
   tikhub: { name: 'TikHub', usage: '社媒平台公开数据搜索', hint: '' },
   parallel: { name: 'Parallel', usage: '网页搜索', hint: '' },
   firecrawl: { name: 'Firecrawl', usage: '网页正文读取', hint: '' },
+  resend: { name: 'Resend', usage: '付款相关提醒邮件（续费、到期等）', hint: '以 re_ 开头' },
 };
 
 type ErrorLike = { data?: { code?: string } | null; message?: string } | null | undefined;

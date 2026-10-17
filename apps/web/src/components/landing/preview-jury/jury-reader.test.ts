@@ -77,4 +77,11 @@ describe('endings that are not a revision', () => {
     expect(html).toContain('这次修改没有采用成功');
     expect(html).not.toContain('全部保留原文');
   });
+
+  it('counts the chapters the new version left unchanged instead of calling them kept by choice', () => {
+    const html = renderToStaticMarkup(createElement(Done, { result: { state: 'recorded', versionId: 'v2',
+      adopted: ['第 2 章', '第 3 章'], kept: ['第 1 章', '第 4 章', '第 5 章'] } }));
+    expect(html).toContain('新版本已生成：2 章采用修订版，其余 3 章没有修改。');
+    expect(html).not.toContain('保留原文');
+  });
 });

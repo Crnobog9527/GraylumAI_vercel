@@ -153,6 +153,15 @@ export function workbenchService(
     async projects() {
       return projectSchema.array().parse(await query("projects"));
     },
+    /**
+     * LEGACY-CLOSE: a project the old /workbench created (not a positioning draft or one of its
+     * account, result or topic works). artifact_query 'projects' lists exactly these (0107/0134).
+     */
+    async isLegacyProject(projectId: string) {
+      const id = uuid.parse(projectId);
+      const listed = z.object({ projectId: uuid }).passthrough().array().parse(await query("projects"));
+      return listed.some((p) => p.projectId === id);
+    },
     async rounds(projectId: string) {
       return roundSchema
         .array()

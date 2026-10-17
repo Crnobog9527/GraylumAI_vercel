@@ -15,7 +15,7 @@ const status = (fields: Partial<ReportStatus>): ReportStatus =>
 describe("reportStartRefusal", () => {
   it.each([
     "REPORT_MEMBERSHIP_REQUIRED", "REPORT_ENTITLEMENTS_UNAVAILABLE", "REPORT_SOURCE_CONFLICT", "REPORT_CONFIRMATION_REQUIRED",
-    "REPORT_MANIFEST_REQUIRED", "REPORT_PAYG_REQUIRED", "REPORT_FACTS_TOO_LARGE", "OPC_CAPTURE_PENDING",
+    "REPORT_MANIFEST_REQUIRED", "REPORT_PAYG_REQUIRED", "REPORT_FACTS_TOO_LARGE", "OPC_CAPTURE_PENDING", "REPORT_BENCHMARKS_REQUIRED",
   ])("maps %s to fixed Chinese text without credits, models or admins", code => {
     const { text } = reportStartRefusal(new Error(code));
     expect(text).not.toBe(REPORT_UNCONFIRMED_NOTICE);
