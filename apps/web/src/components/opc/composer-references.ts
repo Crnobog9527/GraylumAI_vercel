@@ -4,15 +4,41 @@ import type { Node as ProseNode } from '@tiptap/pm/model';
 import type { EditorState } from '@tiptap/pm/state';
 
 /**
- * UI-B skeleton: `@` picks a library document and leaves an inline reference in the message box.
- * Off by default. References are kept apart from the text and are NOT sent yet (that needs LIB-4).
+ * UI-B: `@` picks a library document and leaves an inline reference in the message box.
+ * Off by default. References are kept apart from the text and travel in `runtime.prepare`'s own `references`
+ * field (LIB-4b, #1022); the server switch `library_agent_read_enabled` must be on as well.
  */
 // Next inlines NEXT_PUBLIC_* at build time; bundles without `process` (component test fixtures) read it as off.
 export const COMPOSER_REFERENCES_ENABLED =
   typeof process !== 'undefined' && process.env.NEXT_PUBLIC_COMPOSER_REFERENCES === 'on';
 
-/** What LIB-4 is planned to read: one document at one content version. The label is display only. */
+/** What LIB-4b reads: one document at one content version. The label is display only and never sent. */
 export type LibraryReference = { documentId: string; version: number; label: string };
+
+/** Distinct documents one message may reference (LIB-4b `LIBRARY_REFERENCE_LIMIT`). */
+export const REFERENCE_LIMIT = 5;
+
+/** The request field of `runtime.prepare`; absent (not `[]`) when there is nothing to send, so old requests stay byte-identical. */
+export function referenceRequest(references: readonly LibraryReference[]) {
+  return references.map(item => ({ kind: 'library_document' as const, documentId: item.documentId, version: item.version }));
+}
+
+/** Same documents at the same versions in the same order: the server compares the stored field as a whole. */
+export function sameReferences(a: readonly LibraryReference[], b: readonly LibraryReference[]) {
+  return a.length === b.length && a.every((item, index) => item.documentId === b[index].documentId && item.version === b[index].version);
+}
+
+/** References from storage or an older record; anything malformed is dropped rather than sent. */
+export function parseReferences(value: unknown): LibraryReference[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is LibraryReference => Boolean(item) && typeof item.documentId === 'string'
+    && Number.isInteger(item.version) && item.version > 0 && typeof item.label === 'string');
+}
+
+/** `a` first, then whatever of `b` is not in it (a failed send's references come back before newer ones). */
+export function mergeReferences(a: readonly LibraryReference[], b: readonly LibraryReference[]) {
+  return [...a, ...b.filter(item => !a.some(other => other.documentId === item.documentId))];
+}
 
 /** The text typed after `@`, and the range it covers (including the `@`). */
 export type ReferenceQuery = { from: number; to: number; query: string };

@@ -68,6 +68,8 @@ type Props = {
   maxLength: number;
   className?: string;
   references?: ComposerReferenceHooks;
+  /** The parent's references for its `value` (UI-B): a value set from outside gets them back as references. */
+  knownReferences?: readonly LibraryReference[];
   ref?: Ref<ComposerEditorHandle>;
 };
 
@@ -77,14 +79,15 @@ type Props = {
  */
 export function ComposerEditor(props: Props) {
   const { value, onChange, onEnter, onEscape, disabled = false, label, placeholder, maxLength, className, references, ref } = props;
-  const latest = useRef({ onChange, onEnter, onEscape, disabled, label, placeholder, maxLength, references });
-  latest.current = { onChange, onEnter, onEscape, disabled, label, placeholder, maxLength, references };
+  const known = references ? props.knownReferences ?? [] : [];
+  const latest = useRef({ onChange, onEnter, onEscape, disabled, label, placeholder, maxLength, references, known });
+  latest.current = { onChange, onEnter, onEscape, disabled, label, placeholder, maxLength, references, known };
   // The text this editor last reported (or was given); a different `value` prop comes from the parent.
   const emitted = useRef(value);
   const editor = useEditor({
     immediatelyRender: false,
     editable: !disabled,
-    content: textToDoc(value),
+    content: textToDoc(value, known),
     extensions: [
       Document, Paragraph, Text, UndoRedo, LibraryReferenceNode,
       Placeholder.configure({ placeholder: () => latest.current.placeholder }),
@@ -148,7 +151,7 @@ export function ComposerEditor(props: Props) {
     editor.chain().setMeta(EXTERNAL, true).setMeta('addToHistory', false)
       .command(({ tr, state }) => {
         if (appended === null) {
-          tr.replaceWith(0, tr.doc.content.size, state.schema.nodeFromJSON(textToDoc(value)).content);
+          tr.replaceWith(0, tr.doc.content.size, state.schema.nodeFromJSON(textToDoc(value, latest.current.known)).content);
         } else {
           const end = Selection.atEnd(tr.doc).from;
           tr.replace(end, end, textToSlice(state.schema, appended));

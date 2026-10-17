@@ -7,7 +7,7 @@ import { trpc } from '@/trpc/client';
 import styles from './work-composer.module.css';
 import { QueryNotice, workspaceErrorMessage } from './query-notice';
 import { ComposerEditor, type ComposerEditorHandle } from './composer-editor';
-import { COMPOSER_REFERENCES_ENABLED } from './composer-references';
+import { COMPOSER_REFERENCES_ENABLED, parseReferences, type LibraryReference } from './composer-references';
 import { useComposerReferences } from './reference-menu';
 
 /**
@@ -15,17 +15,19 @@ import { useComposerReferences } from './reference-menu';
  * `attachment` is shown inside the same frame, above the text box (the mentor's open question card).
  */
 export function WorkComposer({value,onChange,onSend,disabled=false,sendDisabled=false,label='消息',placeholder='消息',maxLength=20000,sessionId,skillId='',onSkillChange,note,attachment,
- references=COMPOSER_REFERENCES_ENABLED}: {
+ references=COMPOSER_REFERENCES_ENABLED,referenceList,onReferencesChange}: {
  value:string;onChange:(value:string)=>void;onSend:(skillId?:string)=>void;disabled?:boolean;sendDisabled?:boolean;label?:string;placeholder?:string;maxLength?:number;
  sessionId?:string;skillId?:string;onSkillChange?:(id:string)=>void;note?:string;attachment?:ReactNode;
- /** UI-B skeleton (default off): `@` picks library documents; they are kept but not sent yet. */
+ /** UI-B (default off): `@` picks library documents. Pages whose send cannot carry them pass false. */
  references?:boolean;
+ /** The references of `value`, kept by the page with its draft and sent with the message (UI-B). */
+ referenceList?:readonly LibraryReference[];onReferencesChange?:(references:LibraryReference[])=>void;
 }) {
  const [menu,setMenu]=useState<'files'|'skills'|null>(null),[query,setQuery]=useState(''),[localSkill,setLocalSkill]=useState(''),[error,setError]=useState(''),[reading,setReading]=useState(false);
  const root=useRef<HTMLDivElement>(null);
  const fileInput=useRef<HTMLInputElement>(null),current=useRef(value);current.current=value;
  const box=useRef<ComposerEditorHandle>(null);
- const referencePicker=useComposerReferences(references,box);
+ const referencePicker=useComposerReferences(references,box,onReferencesChange);
  // The box stays enabled while a turn runs, so focus is kept after Enter; a click on send returns it.
  const sendAndFocus=()=>sendKeepingFocus(()=>onSend(selected),box.current);
  useEffect(()=>{if(!menu)return;const key=(event:KeyboardEvent)=>{if(event.key==='Escape')setMenu(null);};const outside=(event:PointerEvent)=>{if(!root.current?.contains(event.target as Node))setMenu(null);};document.addEventListener('keydown',key);document.addEventListener('pointerdown',outside);return()=>{document.removeEventListener('keydown',key);document.removeEventListener('pointerdown',outside);};},[menu]);
@@ -57,7 +59,7 @@ export function WorkComposer({value,onChange,onSend,disabled=false,sendDisabled=
   {attachment&&<div className={styles.attachment}>{attachment}</div>}
   <ComposerEditor ref={box} label={label} placeholder={placeholder} value={value} maxLength={maxLength}
    disabled={disabled||reading} onChange={onChange} onEscape={()=>setMenu(null)}
-   onEnter={()=>{if(!cannotSend)onSend(selected);}} className={styles.editor} references={referencePicker.hooks}/>
+   onEnter={()=>{if(!cannotSend)onSend(selected);}} className={styles.editor} references={referencePicker.hooks} knownReferences={referenceList}/>
   {referencePicker.menu}
   <div className={styles.tools}><div className={styles.toolLeft}>
    <div className={styles.menuAnchor}><button type="button" aria-label="添加资料" disabled={disabled||reading} aria-expanded={menu==='files'} onClick={()=>setMenu(menu==='files'?null:'files')}><Plus size={19}/></button>{menu==='files'&&<div className={styles.menu} role="dialog" aria-label="添加资料"><button type="button" onClick={()=>fileInput.current?.click()}><FileText size={16}/> 从文件添加</button><p>支持 TXT、Markdown、CSV、JSON、日志。内容会加入本条消息，发送前可以检查或删除。</p></div>}</div>
@@ -92,11 +94,24 @@ export function sendKeepingFocus(send:()=>void,box:{focus:(options?:FocusOptions
  box?.focus({preventScroll:true});
 }
 
-/** Start an unbound session, then hand the explicit send to its recoverable Runtime. */
-export function useFreeConversation(){
+const NEW_TASK_REFERENCES='opc-new-task-references';
+
+/**
+ * Start an unbound session, then hand the explicit send to its recoverable Runtime.
+ * `withReferences` (UI-B, the new-task page only): the box's library references are kept with its draft in this tab
+ * and handed to the new session's draft, which /runtime sends with the text. Other pages never pick them up.
+ */
+export function useFreeConversation({withReferences=false}:{withReferences?:boolean}={}){
  const start=trpc.runtime.start.useMutation();
  const request=useRef('');
  const [error,setError]=useState('');
+ const [references,setStoredReferences]=useState<LibraryReference[]>([]);
+ useEffect(()=>{if(!withReferences)return;
+  try{setStoredReferences(parseReferences(JSON.parse(sessionStorage.getItem(NEW_TASK_REFERENCES)??'[]')));}catch{/* No saved references. */}
+ },[withReferences]);
+ function setReferences(next:LibraryReference[]){setStoredReferences(next);
+  try{if(next.length)sessionStorage.setItem(NEW_TASK_REFERENCES,JSON.stringify(next));else sessionStorage.removeItem(NEW_TASK_REFERENCES);}
+  catch{/* The box still holds them for this send. */}}
  async function send(input:string,moduleId=''){
   if(!input.trim()||start.isPending)return;setError('');
   request.current ||= crypto.randomUUID();
@@ -104,11 +119,12 @@ export function useFreeConversation(){
    const result=await start.mutateAsync({requestId:request.current,scope:{kind:'positioning_draft'}});
    const sendId=crypto.randomUUID();
    localStorage.setItem('opc-runtime-input:'+result.sessionId,input);
+   if(withReferences&&references.length)localStorage.setItem('opc-runtime-references:'+result.sessionId,JSON.stringify(references));
    if(moduleId)localStorage.setItem('opc-runtime-skill:'+result.sessionId,moduleId);
    sessionStorage.setItem('opc-runtime-send:'+result.sessionId,sendId);
-   sessionStorage.removeItem('opc-new-task-input');
+   sessionStorage.removeItem('opc-new-task-input');sessionStorage.removeItem(NEW_TASK_REFERENCES);
    location.assign('/runtime?session='+result.sessionId+'&request='+sendId);
   }catch(cause){setError(workspaceErrorMessage(cause as Parameters<typeof workspaceErrorMessage>[0])+' 输入已保留；再次发送会恢复同一次开始请求。');}
  }
- return {send,busy:start.isPending,error};
+ return {send,busy:start.isPending,error,references,setReferences};
 }
