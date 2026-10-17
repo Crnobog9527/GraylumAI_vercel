@@ -10,7 +10,7 @@ const execution = randomUUID();
 const session = randomUUID();
 const text = '## 一句话结论\n\n先做小红书。\n\n## 变现路径\n\n三层。';
 const body = `${text}\n\n${sampleReportDataBlock()}`;
-const row = (account: string) => ({ platform: 'xiaohongshu', account, followers: 18000, medianViews: 4200, engagementRate: 0.05,
+const row = (account: string) => ({ platform: '小红书', account, followers: 18000, medianViews: 4200, engagementRate: 0.05,
   postsPerWeek: 3, lastPublishedAt: null, postsAnalyzed: 20, category: 'imitable', qualified: true, excluded: null, missing: [],
   fetchedAt: '2026-10-10T00:00:00Z' });
 
