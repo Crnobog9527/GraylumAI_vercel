@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { Mail } from 'lucide-react';
+import { ConsentPreferenceLinks } from '@/components/analytics/ConsentPreferenceLinks';
 import { buildAuthHref, resolveSiteName, resolveSupportEmail } from '@/lib/site-config';
 
 const footerLinks = {
@@ -89,6 +90,9 @@ export default function LandingFooter({
                     </Link>
                   </li>
                 ))}
+                {key === 'legal' ? (
+                  <ConsentPreferenceLinks className="text-sm text-[#808080] hover:text-[#FFD700] transition-colors" />
+                ) : null}
               </ul>
             </div>
           ))}

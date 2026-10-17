@@ -8,7 +8,7 @@ import { STOPPED_NOTICE } from "./stop-reply";
  * model names are ever shown (MASTER_PLAN §2.1 items 25, 50).
  */
 export const REPORT_TITLE = "完整运营策略报告";
-export const REPORT_INTRO = "所有步骤都已确认。导师会根据你确认的全部信息写一份完整报告，边写边显示。";
+export const REPORT_INTRO = "所有步骤都已确认。AI 教练会根据你确认的全部信息写一份完整报告，边写边显示。";
 export const REPORT_ACTION = { start: "生成完整报告", retry: "重新生成", membership: "查看会员方案" } as const;
 export const REPORT_WRITING_NOTICE = "正在写报告…";
 export const REPORT_RUNNING_NOTICE = "报告正在生成…";

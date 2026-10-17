@@ -9,10 +9,10 @@
 export const REPORT_PAYWALL_COPY = {
   eyebrow: '运营策略报告 · 草稿',
   dossierTitle: '你的运营策略报告，只差最后一步',
-  dossierLede: '你确认过的信息都已保存，免费保留、可以导出。开通会员后，导师会根据这些信息为你写一份完整的运营策略报告。',
+  dossierLede: '你确认过的信息都已保存，免费保留、可以导出。开通会员后，AI 教练会根据这些信息为你写一份完整的运营策略报告。',
   deliverHeading: '报告直接交给你 5 样东西，拿来就能用',
   title: '生成你的完整运营策略报告',
-  lede: '开通会员，导师马上把你确认的信息写成完整报告，之后每一步都可以接着问。',
+  lede: '开通会员，AI 教练马上把你确认的信息写成完整报告，之后每一步都可以接着问。',
   anchorConsultant: '雇佣一位社交媒体顾问',
   anchorConsultantPrice: '$2,000 – $10,000 / 月',
   anchorGraylum: '雇佣 Graylum AI 社交媒体策略师',

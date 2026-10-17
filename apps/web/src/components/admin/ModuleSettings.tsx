@@ -3,6 +3,7 @@
 
 import { ReportModelSetting } from './ReportModelSetting';
 import { SocialMediaFlagSetting } from './SocialMediaFlagSetting';
+import { SkillTranslationsSetting } from './SkillTranslationsSetting';
 import { syncModuleVersion } from '@/app/admin/prompts/module-version-sync';
 
 type Versioned = { id: string; updated_at: string };
@@ -14,10 +15,12 @@ export function ModuleSettings<T extends Versioned>({ editing, setEditing, refet
   refetch: () => Promise<{ data?: Dashboard }>; hasReport: boolean;
 }) {
   const moduleId = editing?.id;
+  const adoptVersion = (updatedAt: string) =>
+    setEditing(current => (current && current.id === moduleId ? { ...current, updated_at: updatedAt } : current));
   return <>
     <ReportModelSetting moduleId={moduleId} hasReport={hasReport}
       onSaved={() => syncModuleVersion<T>(refetch, moduleId, setEditing)} />
-    <SocialMediaFlagSetting moduleId={moduleId} moduleUpdatedAt={editing?.updated_at}
-      onVersion={updatedAt => setEditing(current => (current && current.id === moduleId ? { ...current, updated_at: updatedAt } : current))} />
+    <SocialMediaFlagSetting moduleId={moduleId} moduleUpdatedAt={editing?.updated_at} onVersion={adoptVersion} />
+    <SkillTranslationsSetting moduleId={moduleId} moduleUpdatedAt={editing?.updated_at} onVersion={adoptVersion} />
   </>;
 }
