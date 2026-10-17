@@ -38,6 +38,9 @@ const APP_TEMPLATES = [
   '/positioning/[draftId]/plan',
   '/positioning/[draftId]/review/[reviewId]',
   '/positioning/[draftId]/topics',
+  // Public content pages whose address carries a page name, not a record ID (the pages themselves are in PUBLIC_PAGES).
+  '/features/[slug]',
+  '/blog/[slug]',
   '/workbench/agent-first-preview',
   '/workbench/marketplace',
   '/workbench/search',
