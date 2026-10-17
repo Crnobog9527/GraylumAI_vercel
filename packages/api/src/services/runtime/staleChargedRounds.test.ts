@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { compensateStaleRound, findStaleChargedRounds, STALE_ROUND_AGE_MS, STALE_ROUND_REPORT_LIMIT } from './staleChargedRounds';
+import { autoCompensateStaleRounds, compensateStaleRound, findStaleChargedRounds, STALE_ROUND_AGE_MS, STALE_ROUND_REPORT_LIMIT } from './staleChargedRounds';
 
 // Filtering, locking, permissions and refunds run against the real database in staleChargedRounds.integration.ts.
 const now = Date.parse('2026-10-13T00:00:00.000Z');
@@ -54,4 +54,78 @@ it.each([
   ['STALE_ROUND_COMPENSATION_FAILED', { data: { state: 'refunded' }, error: null }],
 ] as const)('reports %s without guessing an outcome', async (code, result) => {
   await expect(compensateStaleRound(client(result).supabase, uuid(2, 1), now)).rejects.toThrow(code);
+});
+
+// runtime-recovery (Owner 2026-10-12 supplement): the same rule and function as the operator, without a person.
+describe('automatic close', () => {
+  const outcome = (n: number, state: 'compensated' | 'already_compensated' = 'compensated') => ({ state, runId: uuid(2, n),
+    executionId: uuid(1, n), actorId: uuid(3, n), executionState: 'cancelled', compensatedCredits: 3 });
+  // `since` of every round is 2026-10-11T18:02; the marker became reliable at 2026-10-01 unless stated.
+  const database = (rounds: number[], answers: Record<number, { data: unknown; error: unknown }>, markerSince: unknown = '2026-10-01T00:00:00Z') => {
+    const rpc = vi.fn(async (name: string, args: Record<string, unknown>) => {
+      if (name === 'runtime_stale_charged_rounds') {
+        // The database applies p_created_since before the limit; the stand-in does the same.
+        const since = args.p_created_since ? Date.parse(String(args.p_created_since)) : -Infinity;
+        const matching = rounds.filter(() => Date.parse(round(1).since) >= since);
+        return { data: { total: matching.length, rounds: matching.slice(0, Number(args.p_limit)).map(round) }, error: null };
+      }
+      if (name === 'runtime_capacity_marker_since') return { data: markerSince, error: null };
+      return answers[Number(String(args.p_run_id).slice(-12))] ?? { data: outcome(Number(String(args.p_run_id).slice(-12))), error: null };
+    });
+    return { rpc, database: { rpc } };
+  };
+  const none = { found: 0, compensated: 0, alreadyCompensated: 0, skipped: 0, failed: 0, credits: 0, manualReview: 0, deferred: 0 };
+
+  it('refunds every reported round once through the operator function and counts the credits', async () => {
+    const f = database([1, 2], {});
+    expect(await autoCompensateStaleRounds(f.database, { now })).toEqual({ ...none, found: 2, compensated: 2, credits: 6 });
+    expect(f.rpc).toHaveBeenCalledWith('runtime_stale_charged_rounds', { p_cutoff: cutoff, p_limit: 500, p_created_since: '2026-10-01T00:00:00.000Z' });
+    expect(f.rpc).toHaveBeenCalledWith('runtime_stale_round_compensate', { p_run_id: uuid(2, 1), p_cutoff: cutoff });
+    expect(f.rpc).toHaveBeenCalledWith('runtime_stale_round_compensate', { p_run_id: uuid(2, 2), p_cutoff: cutoff });
+  });
+
+  it.each([['created before markers were reliable', '2026-10-12T00:00:00Z'], ['an unreadable marker time', 'garbage']])('leaves a round to the operator when %s, and never refunds it', async (_name, since) => {
+    const f = database([1, 2], {}, since);
+    expect(await autoCompensateStaleRounds(f.database, { now })).toEqual({ ...none, found: 2, manualReview: 2 });
+    expect(f.rpc).not.toHaveBeenCalledWith('runtime_stale_round_compensate', expect.anything());
+  });
+
+  it('the first run arms the marker clock and refunds nothing; later runs never re-arm', async () => {
+    const f = database([1, 2], {}, null);
+    expect(await autoCompensateStaleRounds(f.database, { now })).toEqual({ ...none, found: 2, manualReview: 2 });
+    expect(f.rpc).toHaveBeenCalledWith('runtime_capacity_marker_arm', {});
+    expect(f.rpc).not.toHaveBeenCalledWith('runtime_stale_round_compensate', expect.anything());
+    const armed = database([1], {});
+    await autoCompensateStaleRounds(armed.database, { now });
+    expect(armed.rpc).not.toHaveBeenCalledWith('runtime_capacity_marker_arm', expect.anything());
+  });
+
+  it('an operator refund in between, or a retry that revived the round, is not a failure and refunds nothing more', async () => {
+    const f = database([1, 2, 3], { 1: { data: outcome(1, 'already_compensated'), error: null },
+      2: { data: null, error: { message: 'STALE_ROUND_NOT_ELIGIBLE' } } });
+    expect(await autoCompensateStaleRounds(f.database, { now })).toEqual({ ...none, found: 3, compensated: 1, alreadyCompensated: 1, skipped: 1, credits: 3 });
+  });
+
+  it('an unknown compensation result is a failure and the batch continues', async () => {
+    const f = database([1, 2], { 1: { data: null, error: { message: 'connection reset' } } });
+    expect(await autoCompensateStaleRounds(f.database, { now })).toMatchObject({ found: 2, compensated: 1, failed: 1 });
+  });
+
+  it('an unreadable report or marker time is one failure and compensates nothing', async () => {
+    const rpc = vi.fn(async () => ({ data: null, error: { message: 'permission denied' } }));
+    expect(await autoCompensateStaleRounds({ rpc }, { now })).toEqual({ ...none, failed: 1 });
+    expect(rpc).toHaveBeenCalledTimes(1);
+    const noMarker = vi.fn(async (name: string) => name === 'runtime_capacity_marker_since'
+      ? { data: null, error: { message: 'function does not exist' } } : { data: { total: 1, rounds: [round(1)] }, error: null });
+    expect(await autoCompensateStaleRounds({ rpc: noMarker }, { now })).toMatchObject({ failed: 1, compensated: 0 });
+    expect(noMarker).not.toHaveBeenCalledWith('runtime_stale_round_compensate', expect.anything());
+  });
+
+  it('stops before a round when the job has no time left; the rest is counted as deferred for the next run', async () => {
+    const f = database([1, 2, 3], {});
+    let left = 1;
+    expect(await autoCompensateStaleRounds(f.database, { now, canStart: () => left-- > 0 }))
+      .toMatchObject({ found: 3, compensated: 1, failed: 0, deferred: 2 });
+    expect(f.rpc.mock.calls.filter(([name]) => name === 'runtime_stale_round_compensate')).toHaveLength(1);
+  });
 });

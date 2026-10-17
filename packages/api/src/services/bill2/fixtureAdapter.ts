@@ -12,7 +12,7 @@ const receipt = z.object({
   includedDetails: z.array(z.object({ cost: amount, currency: z.string().regex(/^[A-Z]{3}$/) }).strict()).max(128).default([]),
   usage: z.record(z.string(), z.unknown()).optional(),
 }).strict().refine(v=>v.coverage!=='included_detail'||Boolean(v.detailId));
-export type CallIdentity = { provider: string; account: string; model: string; protocol: 'fixture-cost-v1' | 'openrouter-chat-v1'; providerLimits?:OpenRouterLimits; outputLimit?:number; upperUsd?:string; payg?:PaygCallQuote };
+export type CallIdentity = { provider: string; account: string; model: string; protocol: 'fixture-cost-v1' | 'openrouter-chat-v1'; providerLimits?:OpenRouterLimits; outputLimit?:number; upperUsd?:string; payg?:PaygCallQuote; phase?:string };
 export function fixtureEvidence(raw: string, identity: CallIdentity, source: 'response' | 'lookup') {
   const parsed = receipt.parse(parseExactJson(raw));
   return { ...identity, model: parsed.model, providerId: parsed.id, cost: parsed.cost, currency: parsed.currency,
