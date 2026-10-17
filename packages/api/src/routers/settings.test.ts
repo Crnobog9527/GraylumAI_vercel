@@ -6,7 +6,8 @@ vi.mock('../services/stripe', () => ({
   getStripeClient: () => ({ accounts: { retrieveCurrent: async () => ({ id: 'acct_fixture' }) },
     balance: { retrieve: async () => ({ livemode: false }) } }),
 }));
-import { getPublicReadClient, settingsRouter, validateReportPrice } from './settings';
+import { getPublicReadClient, settingsRouter } from './settings';
+import { validateReportPrice } from '../services/report/fees';
 import { resetPlatformSecretCacheForTests } from '../services/platformSecrets/reader';
 
 describe('settings writer verification', () => {
