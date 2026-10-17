@@ -278,7 +278,8 @@ DO $$ BEGIN
    OR h.operation_type IN ('settle','abort_settle') AND coalesce(nullif(h.metadata->>'difference','')::integer,0)<0))
   OR EXISTS(SELECT 1 FROM credit_transactions c WHERE c.user_id=x.user_id AND c.created_at>=x.since AND c.amount<0
    AND coalesce(c.reason_code,'') NOT IN ('bill2_reserve','bill2_spend')
-   AND NOT (x.kind='credit_package' AND c.source_order_id=(SELECT order_id FROM credit_package_sources WHERE id=x.id)))
+   -- A deduction without an order (e.g. an admin adjustment) also counts; only this pack's own refund is excluded.
+   AND NOT (x.kind='credit_package' AND c.source_order_id IS NOT DISTINCT FROM (SELECT order_id FROM credit_package_sources WHERE id=x.id)))
  ON CONFLICT DO NOTHING;
 END $$;
 

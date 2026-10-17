@@ -106,15 +106,14 @@ WHERE user_id = 'USER_UUID'
 #### Hard Delete Old Soft-Deleted Data
 
 A direct `DELETE FROM conversations` does not guarantee that matching rows are
-removed. The `artifact_chat_delete` and `ordinary_chat_delete` BEFORE DELETE
-triggers can return `NULL`, silently skipping a row: artifact conversations with
-a project row that cannot be locked (busy or missing), or active/uncertain generations, and ordinary
-conversations with nonterminal requests, are protected. A successful SQL command
-alone is not evidence of completed deletion; verify affected rows and retained
-context. Do not disable these guards to force cleanup.
+removed. The `artifact_chat_delete` BEFORE DELETE trigger can return `NULL`,
+silently skipping a row: artifact conversations with a project row that cannot be
+locked (busy or missing), or active/uncertain generations, are protected. A successful
+SQL command alone is not evidence of completed deletion; verify affected rows and
+retained context. Do not disable this guard to force cleanup. (The old
+`ordinary_chat_delete` guard was dropped with `ordinary_chat_requests` in 0271.)
 
-Sources: `packages/db/migrations/0069_v3_chat_skill.sql:43` and
-`packages/db/migrations/0078_ordinary_chat_requests.sql:30`.
+Source: `packages/db/migrations/0069_v3_chat_skill.sql:43`.
 
 ### Analytics Queries
 
