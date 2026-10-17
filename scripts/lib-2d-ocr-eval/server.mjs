@@ -3,7 +3,9 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-const ROOT = path.dirname(new URL(import.meta.url).pathname);
+import { fileURLToPath } from 'node:url';
+// fileURLToPath decodes non-ASCII and spaces in the checkout path.
+const ROOT = path.dirname(fileURLToPath(import.meta.url));
 export const leaks = [];
 const SANDBOX_SCRIPT = `
 const send = (m, t) => parent.postMessage(m, '*', t || []);

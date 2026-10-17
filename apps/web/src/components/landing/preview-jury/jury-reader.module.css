@@ -16,7 +16,12 @@
 @keyframes rise { from { opacity: 0; transform: translateY(12px); } }
 
 /* Contents */
-.toc { position: sticky; top: calc(var(--j-bar, 0px) + 16px); display: grid; gap: 10px; font-size: 14px; line-height: 1.5; }
+/* minmax(0, 1fr): a long chapter title is cut with an ellipsis instead of widening the contents over the reading
+ * column, where the sticky contents would sit on top of "看全文" (staging 2026-10-17). */
+.toc {
+  position: sticky; top: calc(var(--j-bar, 0px) + 16px); display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px;
+  font-size: 14px; line-height: 1.5;
+}
 .nextChange, .primary, .secondary {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 40px; padding: 0 16px;
   border-radius: 8px; font: inherit; font-size: 14.5px; font-weight: 700; cursor: pointer;
@@ -25,7 +30,7 @@
 .nextChange:hover { background: var(--j-desk); }
 .progress { height: 3px; overflow: hidden; border-radius: 3px; background: var(--j-rule); }
 .progress span { display: block; height: 100%; background: var(--j-ink); transform-origin: left; transition: transform .2s; }
-.toc ol { display: grid; gap: 1px; margin: 0; padding: 0; list-style: none; }
+.toc ol { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; margin: 0; padding: 0; list-style: none; }
 .toc li button {
   display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; padding: 6px 8px; border: 0;
   border-radius: 6px; background: none; color: var(--j-muted); font: inherit; text-align: left; cursor: pointer;

@@ -8,13 +8,14 @@ import { handleCardSubscriptionInvoice } from './cardSubscriptionWebhook';
 import { handleCardRefund } from './cardRefundWebhook';
 import { cardStripeSubscription } from './cardUpgrade';
 import { stopRenewalAfterReview } from './cardSubscriptionStop';
+import { settleOpenMethodOrders, type OpenOrderFinding } from './methodOrderSettle';
 import type { StripeScope } from './purchaseFacts';
 
 const id = (value: string | { id: string } | null | undefined) => typeof value === 'string' ? value : value?.id ?? null;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DAY = 86400;
 
-export type StripeCardFinding = {
+export type StripeCardFinding = OpenOrderFinding | {
   kind: 'paid_not_delivered' | 'paid_in_review' | 'renewal_not_recorded' | 'refund_not_recorded' | 'tax_not_recorded'
     | 'repair_failed' | 'stop_unconfirmed'
     | 'scan_incomplete' | 'scan_failed';
@@ -41,7 +42,7 @@ export async function reconcileStripeCardPayments(db: SupabaseClient, stripe: St
   const findings: StripeCardFinding[] = [];
   let repaired = 0, checked = 0, complete = true, outOfTime = false;
 
-  const scan = async <T extends { id: string }>(object: StripeCardFinding['object'],
+  const scan = async <T extends { id: string }>(object: 'checkout' | 'invoice' | 'refund',
     list: (after?: string) => Promise<Listed<T>>, visit: (row: T) => Promise<void>) => {
     let after: string | undefined;
     for (let page = 0; page < maxPages; page++) {
@@ -154,9 +155,9 @@ export async function reconcileStripeCardPayments(db: SupabaseClient, stripe: St
     const rows = pending.data as Array<{ id: string }>;
     for (const row of rows) {
       if (Date.now() > deadline) {
-        complete = false;
+        complete = false; outOfTime = true;
         findings.push({ kind: 'scan_incomplete', object: 'subscription', code: 'TIME_BUDGET' });
-        return { success: false, skipped: false, complete, repaired, checked, findings };
+        break;
       }
       checked++;
       try {
@@ -168,12 +169,23 @@ export async function reconcileStripeCardPayments(db: SupabaseClient, stripe: St
         findings.push({ kind: 'stop_unconfirmed', object: 'subscription', externalId: row.id, code: errorCode(error) });
       }
     }
-    if (rows.length < 100) break;
+    if (outOfTime || rows.length < 100) break;
     after = rows[rows.length - 1]!.id;
     if (page === maxPages - 1) {
       complete = false;
       findings.push({ kind: 'scan_incomplete', object: 'subscription', code: 'PENDING_STOPS_OVER_LIMIT' });
     }
+  }
+
+  // 5. Unpaid orders still open (#961): scan 1 only reads paid sessions, so a session that expired without its webhook,
+  //    or an order that failed before its session was created, would block the buyer's other purchases. Each is read
+  //    at Stripe and closed through its own path's close function; a paid one is delivered instead, never closed.
+  //    Wallet orders share the path and are included.
+  if (!outOfTime) {
+    const open = await settleOpenMethodOrders(db, stripe, scope, { now: Math.floor((options.now ?? new Date()).getTime() / 1000),
+      deadline, maxPages });
+    checked += open.checked; repaired += open.repaired; complete &&= open.complete;
+    findings.push(...open.findings);
   }
 
   return { success: findings.length === 0, skipped: false, complete, repaired, checked, findings };
