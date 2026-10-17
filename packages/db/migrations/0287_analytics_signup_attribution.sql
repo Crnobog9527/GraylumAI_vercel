@@ -79,16 +79,16 @@ BEGIN
  FOR sig,needle,replacement IN SELECT * FROM (VALUES
   ('account_erasure_local_cleanup(uuid,boolean)',
    'UPDATE profiles SET email=NULL,nickname=NULL,avatar_url=NULL,last_ip=NULL,last_login_at=NULL',
-   'UPDATE profiles SET email=NULL,nickname=NULL,avatar_url=NULL,last_ip=NULL,last_login_at=NULL,signup_attribution=NULL'),
+   'UPDATE profiles SET email=NULL,nickname=NULL,avatar_url=NULL,last_ip=NULL,last_login_at=NULL,signup_attribution=NULL /* ANALYTICS signup attribution */'),
   ('account_erasure_identity_guard()',
    'OR NEW.last_ip IS NOT NULL OR NEW.last_login_at IS NOT NULL)',
-   'OR NEW.last_ip IS NOT NULL OR NEW.last_login_at IS NOT NULL OR NEW.signup_attribution IS NOT NULL)')
+   'OR NEW.last_ip IS NOT NULL OR NEW.last_login_at IS NOT NULL OR NEW.signup_attribution IS NOT NULL /* ANALYTICS signup attribution */)')
  ) changes(signature,anchor,patch) LOOP
   source:=pg_get_functiondef(('public.'||sig)::regprocedure);
-  IF position('-- ANALYTICS signup attribution' IN source)=0 THEN
+  IF position('ANALYTICS signup attribution' IN source)=0 THEN
    IF length(source)-length(replace(source,needle,''))<>length(needle) THEN
     RAISE EXCEPTION 'ANALYTICS_ATTRIBUTION_SOURCE_MISMATCH: %',sig; END IF;
-   EXECUTE replace(replace(source,needle,replacement),' AS $function$',E' AS $function$\n -- ANALYTICS signup attribution');
+   EXECUTE replace(source,needle,replacement);
   END IF;
  END LOOP;
 END $$;
