@@ -1,8 +1,7 @@
 # FUSION-COMPARE：输入框里的多模型对比 — 实施方案
 
 > 状态：实施方案（仅方案，2026-10-17）。这份方案只把已经确认的决定写细，不新增产品决定。
-> **第 8 节问题 1–5 Owner 已决定（2026-10-17，原话见第 8 节和 Master Plan 第 2.1 节 2026-10-17 对比条目），正文已按决定写定；
-> 问题 6（对比要不要也改成固定价）还没定**，受影响的地方标"〔待定 Q6〕"，决定前这部分不实施、不合并。
+> **第 8 节 6 个问题 Owner 已全部决定（2026-10-17，原话见第 8 节和 Master Plan 第 2.1 节 2026-10-17 对比条目），正文已按决定写定。**
 > 依据：[Master Plan](../MASTER_PLAN.md) 任务表 FUSION-COMPARE 一行；第 2.1 节第 50 项（默认勾选、用户可改、最少勾选数参数）、
 > 第 51 项（对外叫"多模型专家评审团"、只给 Gold）、2026-10-12"评审团改为自研，复用对比模式的多模型并行能力"、
 > 2026-10-14"各模型各自计费、各自取整"；第 4 节（Fusion）；第 10 节 D2、D3、D4；
@@ -114,8 +113,12 @@
 - **定位前置检查（POSITIONING-GATE）**：普通 Runtime 准入时对没有定位的用户做两层检查（`services/runtime/positioningGate.ts`、`positioningFallback.ts`）：
   选了"与社交媒体相关"的 Skill 直接拒绝；其他请求先由 Decisions 判断，判为拦截就拒绝，判不准时主模型带兜底指令、回答兜底标记时这一轮不收费。
   对比在建运行单之前复用同一套：
-  - **付费的 Decisions 判断只在 `start` 做**：`estimate` 没有请求编号、可以反复调用，只做静态检查（社媒 Skill、退款次数是否已到上限、开关和权限），
-    不调用 Decisions；`start` 按 `requestId` 幂等，在建组前判断一次，同一请求重放不再判断。
+  - **付费的 Decisions 判断只在 `start` 做，并且先落库再判断**：`estimate` 没有请求编号、可以反复调用，只做静态检查（社媒 Skill、退款次数是否已到上限、开关和权限），
+    不调用 Decisions。`start` 第一步在一个事务里按 `UNIQUE(actor_id, request_id)` 插入对比记录（状态 `admitting`，还没有计费组）——
+    只有插入成功的那个请求才去调 Decisions；同一 `requestId` 的重放或并发请求拿到已有记录：判断结果已写入就直接返回同一结果，
+    还在判断就返回"处理中"让前端稍后读，不再判断。判断结果（`clear / allow / block / unavailable`）写进对比记录、只能写一次；
+    判为拦截时记录结束为终态 `refused`、不建组；否则同一记录继续建组和领取。`admitting` 超过 5 分钟没写结果的记录视为失败（`refused`），
+    换新的 `requestId` 才能再发。这样同一请求最多触发一次 Decisions 调用。
   - 静态拒绝和 Decisions 判为拦截：`estimate`（只静态）/ `start` 直接返回同一个拒绝（引导去做定位），不建组、不冻结、不收费；Decisions 这一次判断的费用和普通对话一样由 Graylum 承担。
   - **退款次数到上限**：普通 Runtime 在用户 24 小时内的定位兜底退款已达 `POSITIONING_REFUSAL_CAP`（5 次）时，除了 Decisions 判 `clear` 以外一律拒绝
     （`judgePositioning(..., capped)` 第 150–155 行）。对比复用同一个分支：到上限时只有 `clear` 能继续，其他结果在建组前拒绝、不建运行单、不调用任何对比模型。
@@ -125,7 +128,7 @@
     照搬就会在恢复期限按 `unjudged_saved` 收费。所以带兜底指令的列，执行器像普通 Runtime 一样先缓冲开头、识别兜底标记
     （复用 `positioningFallback.ts` 的 `isPositioningRefusal`）：命中时不转发、不保存正文，直接写 `no_delivery` 结算为零；没命中才开始转发和保存。
     不带兜底指令的列照常边收边转。
-  - PR-2 验收：连续调用 `estimate` 不产生任何 Decisions 调用；同一 `requestId` 重放 `start` 只判断一次；退款次数到上限时判不准或 Decisions 不可用都被拒、不建运行单；没有定位的用户选社媒 Skill 发起对比被拒且余额不变；Decisions 判拦截时被拒且不建运行单；判不准时模拟某列回答兜底标记，该列不收费、其他列照常收费；该列没有 `fusion_call_outputs` 记录、判定是 `no_delivery`，到恢复期限也不会变成 `unjudged_saved`。
+  - PR-2 验收：连续调用 `estimate` 不产生任何 Decisions 调用；同一 `requestId` 重放或并发两个 `start`（含判为拦截的情况）都只调用一次 Decisions；退款次数到上限时判不准或 Decisions 不可用都被拒、不建运行单；没有定位的用户选社媒 Skill 发起对比被拒且余额不变；Decisions 判拦截时被拒且不建运行单；判不准时模拟某列回答兜底标记，该列不收费、其他列照常收费；该列没有 `fusion_call_outputs` 记录、判定是 `no_delivery`，到恢复期限也不会变成 `unjudged_saved`。
 - 上下文容量：按每个模型的窗口分别检查"输入 + 回答上限"，装不下的模型在冻结前拒绝；用户勾选里有装不下的就整次拒绝并告诉用户是哪一个
   （不悄悄去掉，用户可以取消它再发）。复用 `measureCallInput` / `fitNativeRequestOutput`。
 - **模型名称（Q1 已定，Owner 2026-10-17）**：勾选框和每列回答的标题显示后台配置的真实模型名称（`ai_models` 里管理员配置的名称，不另设显示名）。
@@ -166,33 +169,28 @@
 
 - **对比记录表**（新表，理由：对比的产品状态——属于哪个对话、冻结的历史版本 R、用户的问题、勾了哪些模型、每列结局、采用了哪一列——
   不是计费状态，`bill2_runs` 只放钱，`fusion_call_outputs` 只按调用存正文，现有表放不下；和评审团的 `fusion_reviews` 是同样的理由）：
-  `fusion_compares(id, actor_id, session_id, group_id, request_id, history_revision, question, models, state, adoption, created_at)`，
-  `UNIQUE(actor_id, request_id)`；`state` ∈ `running / finished / stopped`；`adoption` 只能写一次（采用的列、写回的版本区间，或"已引用"）。
+  `fusion_compares(id, actor_id, session_id, group_id, request_id, history_revision, question, models, gate_verdict, workspace_dependencies, state, adoption, created_at)`（`group_id` 在 `admitting` 时为空），
+  `UNIQUE(actor_id, request_id)`；`state` ∈ `admitting / refused / running / finished / stopped`（`admitting`、`refused` 见第 3.2 节定位前置检查）；`adoption` 只能写一次（采用的列、采用运行单和执行、写回的版本区间），只在直接写回成功时写，没有"已引用"这种状态。
   正文不重复存，各列回答从 `fusion_call_outputs` 读。
 - **采用写回**：`fusion_compare_adopt(actor, compareId, column, requestId)`，一个事务里：
   1. 锁会话，核对会话没被删、`runtime_sessions.revision = 冻结的 R`、会话当前没有进行中的执行（`active_execution` 为空）、该列判定是 `usable`；
   2. 把"用户问题 + 选中的回答"按普通对话历史条目的格式追加进 `runtime_session_history`，`revision` +2；
   3. 记 `adoption`。同一 `requestId` 重放返回同一结果；已采用过别的列时拒绝（`FUSION_COMPARE_ADOPTED`）。
   - 现有追加路径 `runtime_session_items('append')` 要求一个正在跑的执行和打开的计费运行单，所以采用不能直接用它。
-    而且对话页（`runtime_view`）和"历史能否给下一轮看"（`runtime_history_availability`）都和 `bill2_runs` 内连接，
-    没有计费运行单的执行既不显示、它的历史条目也不会被下一轮读到——所以不能写"没有运行单的采用执行"。
-    做法：**采用执行记录直接指向被采用那一列自己的运行单**（`runtime_executions.billing_run_id` = 该列的 Fusion 运行单；
-    每个运行单只有一列、只能被采用一次，正好满足 `billing_run_id` 唯一），状态 `completed`，`payload` 里放问题、`result.body` 放回答，
-    历史条目挂在它上面。这条执行不新建运行单、不冻结、不收费（该列已经按自己的结局结算过），也不改 `runtime_view` 和
-    `runtime_history_availability`。为了让它和普通执行一样通过这两处的计费和上下文检查（`runtime_direct_billing_allowed`、`runtime_context_allowed`），
-    **对比运行单的顶层不放 Skill 身份**（不写 `moduleId` / `skillId` / `revisionId`）：`runtime_direct_billing_allowed` 对已有执行的运行单会要求
-    `modules.model_id = payload.modelId`，对比里不是 Skill 原配置模型的那几列一采用就会 `RUNTIME_SKILL_MODEL_DENIED`、变成不可用历史。
-    Skill 身份只冻结在对比记录和 `payload.input.fusion.compare` 里（第 3.2 节），Skill 的访问检查在 `start` 时由服务端做完，Skill 指令已经冻结进请求正文。
-    代价：用户之后失去这个 Skill 的权限时，已采用的这一问一答仍然显示（和不带 Skill 的普通历史一样），不影响计费。
-    对比运行单沿用评审团已经通过这两处检查的冻结方式（`runtime_direct_billing_allowed` 对 `positioning_draft` 占位草稿只要求草稿属于本人且未吊销）。
-    **不写 `bill2_runs.session_ref`**：`runtime_binding_guard` 只允许在运行单还是 `prepared`、且对应执行已存在时写它，
-    `frozenPaygRunSchema` 和 `bill2_prepare` 也拒绝非空 `sessionRef`，采用时运行单早已结算，所以不改绑定触发器、不绕开它。
-    这样做不破坏普通执行的不变量，因为：① 只允许采用**已关闭、已结算**的列（判定 `usable`、`bill2_runs.closed`），runtime 的恢复、续跑和停止都不会再碰它；
-    ② 删对话时，采用执行和它的历史条目按 `session_id` 由现有会话清理删除（`content_erasure_confirm` 不读 `session_ref`），运行单本身由 0235 按计费组的
-    `source_session_id` 清洗；③ `runtime_view` 的 `activeExecution` 判断只看 `s.active_execution`，采用不改它。
-    如果 PR-1 核对时发现还有别的路径依赖 `session_ref` 或 Skill 身份，就改用"不复用运行单"的写回（新建一条满足 Runtime Skill 身份约束的零金额采用运行单），
-    不放宽绑定保护和 Skill 模型检查。PR-1 另测：在 Skill 会话里采用一个不是 Skill 原配置模型的列，这一问一答照样显示、下一轮读得到。PR-1 必测：采用后 `runtime_view` 显示这一问一答、下一轮普通对话的历史里读得到它、
-    对话列表和删对话/注销的现有路径都把它当普通执行处理；被采用列的运行单不会被重复结算或重新冻结。
+    而且对话页（`runtime_view`）和"历史能否给下一轮看"（`runtime_history_availability`）都和 `bill2_runs` 内连接，并对每条执行的运行单重查
+    计费、上下文和 Skill 权限（`runtime_direct_billing_allowed`：Skill 运行单要求 `modules.model_id = payload.modelId`，并 `read_skill_package` 重查权限）。
+    没有运行单的执行不显示、不进下一轮；直接复用对比列的运行单也不行（不是 Skill 原配置模型的列会被拒，去掉 Skill 身份又会绕开撤权）。
+  - 做法：**采用时新建一条零金额的"采用运行单"**，和普通对话一轮完全同样的冻结方式：
+    - 运行单的 scope、`modelId`、Skill 身份（`moduleId` / `skillId` / `revisionId`）都和"这个会话用这个 Skill 发一轮普通对话"时一致
+      （用了 Skill 时 `modelId` 就是 Skill 配置的模型，满足 Skill 模型检查；没用 Skill 时按自由对话的冻结方式），所以之后撤销 Skill 权限或版本时，
+      这条采用的一问一答和普通历史一样被隐藏；
+    - 运行单不发任何调用、不冻结、收费 0，建好执行后按现有"派发前取消"的路径关闭结算（`bill2_cancel` + `bill2_finalize`，金额为 0）；
+    - 按普通执行的顺序建：先 `bill2_prepare`、再建执行、在运行单还是 `prepared` 时由现有绑定路径写 `session_ref`（`runtime_binding_guard` 允许的正是这种情况），
+      不改绑定触发器；执行状态 `completed`，`payload` 里放问题和工作区 `dependencies`，`result.body` 放回答，历史条目挂在它上面，`runtime_sessions.revision` +2；
+    - 对比各列的运行单照旧（顶层不带 Skill 身份，因为各列模型不同；它们只用于计费和保存正文，不进主对话历史）。
+    - PR-1 必测：采用后 `runtime_view` 显示这一问一答、下一轮普通对话读得到；在 Skill 会话里采用一个不是 Skill 原配置模型的列也照样显示；
+      之后撤销这个 Skill 的权限，这条采用的回答和同会话的普通 Skill 回答一样被隐藏；采用运行单收费 0、没有调用记录；删对话、注销按普通执行清理；
+      被采用列的运行单不会被重复结算或重新冻结。
   - 主对话已有新内容（`revision ≠ R`）或正在跑执行：返回 `FUSION_COMPARE_STALE` 和引用文本，前端把选中的回答作为引用预填进输入框（FUSION.md 必测项 4）。
     这一步**不改** `adoption`，引用不算终态：用户刷新、关页面、清空输入框，或带引用的消息后来在执行或保存时失败，都可以再点"采用"重新拿到引用文本；
     引用只是把文字预填进输入框，发出后就是一条普通消息，照普通对话收费，不和对比记录绑定。`adoption` 只在第 2 步直接写回成功时记一次。
@@ -218,8 +216,8 @@
 
 ### 3.6 计费（不新增收费口径）
 
-- **〔待定 Q6〕收费口径**：Owner 2026-10-17 已把评审团改为固定价 1500 积分、报告固定价 500 积分。对比要不要跟着改成固定价没定（第 8 节问题 6）。
-  下面按现行规则（按每次调用的名义费用）写；Owner 选固定价时，本节、`estimate` 的预告和 PR-2 的计价改为按决定的口径，PR-1 的结算部分在决定前不合并。
+- **收费口径（Owner 2026-10-17 问题 6 选 A）**：评审团和报告改成固定价之后，对比仍按实际用量收：每个模型各自按名义费用结算取整，
+  开始前显示"最多 X 积分"，结束后显示每列实际扣费。
 - **每个模型一个运行单**，用途 `fusion_compare`，按普通 BILL-PAYG 名义费用规则（第 2.1 节第 41 项）和该模型的倍数各自结算、各自向上取整（Owner 2026-10-14）。
   单个调用的上界照旧 = `输入上限 × 输入单价 + 回答上限 × 输出单价`（`runtimePaygCall`）。
 - **一组的上界** = 勾选的每个模型上界之和（FUSION-REVIEW 第 3.2 节"Fusion 多模型单次上界"的同一定义）；对比只有一组、一次领取。
@@ -367,10 +365,10 @@
 
    即对比请求不加 Graylum 身份说明、不替换模型自报身份，和评审团的例外一致。
 
-6. **对比要不要也改成固定价〔待定〕**（Owner 2026-10-17 定了评审团固定价 1500 积分、报告固定价 500 积分之后新出的问题，已发总控）：
-   - **A（推荐）**：对比照旧按每次调用的名义费用收（每列各自结算取整、开始前显示"最多 X 积分"、结束后显示每列实际扣费）。理由：对比的花费差别很大
-     （2–4 个模型、模型由用户挑、带着整段对话上下文），固定价要么对短问题收太多，要么长对话时平台亏；评审团固定价是因为流程和输入长度都固定。
-   - B：对比改成固定价（例如按勾选的模型数，每个模型固定 N 积分），用户更好理解；但要给"超出部分由平台承担"另设上限，计费底座和熔断要跟着改。
+6. **对比要不要也改成固定价——已定选 A**（评审团固定价 1500 积分、报告固定价 500 积分之后的问题）。Owner 原话（2026-10-17，总控-8 对话）：
+   > 对比计费选 A
+
+   即对比照旧按实际用量收，每个模型各自结算，开始前显示"最多 X 积分"，结束后显示每列实际扣费。
 
 ## 9. 发现的问题（不在本任务范围，交总控）
 
