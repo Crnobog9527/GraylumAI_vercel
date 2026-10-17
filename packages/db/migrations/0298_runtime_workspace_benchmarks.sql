@@ -13,7 +13,7 @@
 -- keys and 0218 already scopes read_source tool results. Deleting that positioning conversation, the positioning itself,
 -- or (internally) one producing answer clears free-conversation answers that copied the table. Its dependency is the
 -- positioning version, so 0218's tool guard still refuses a copy stored after the positioning was revoked or deleted.
--- Rollback: re-run 0218's definition (no data is written by this migration).
+-- Rollback: re-run 0218's definition and drop runtime_workspace_benchmark_guard (no data is written by this migration).
 BEGIN;
 CREATE OR REPLACE FUNCTION runtime_workspace_source(p_actor_id uuid,p_session_id uuid,p_query text DEFAULT '') RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
@@ -72,4 +72,28 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION runtime_workspace_source(uuid,uuid,text) FROM PUBLIC,anon,authenticated,service_role;
 GRANT EXECUTE ON FUNCTION runtime_workspace_source(uuid,uuid,text) TO service_role;
+-- A benchmark read is stored after it was read. Like 0218's tool guard: lock the positioning project in share mode
+-- (erasure locks the actor's projects NOWAIT before computing its scope), then recheck that the positioning session and
+-- every producing answer are still live, so a copy can never be stored after its source answer or session was deleted.
+CREATE OR REPLACE FUNCTION runtime_workspace_benchmark_guard() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE a uuid;s uuid;
+BEGIN
+ IF NEW.name<>'read_source' OR NEW.result IS NULL OR NEW.result->>'kind' IS DISTINCT FROM 'workspace_source'
+  OR NEW.result#>>'{identity,kind}' IS DISTINCT FROM 'benchmarks' THEN RETURN NEW;END IF;
+ SELECT actor_id INTO a FROM runtime_executions WHERE id=NEW.execution_id;
+ s:=(NEW.result#>>'{identity,sessionId}')::uuid;
+ PERFORM p.id FROM artifact_projects p JOIN opc_drafts od ON od.project_id=p.id
+  WHERE od.session_id=s AND p.actor_id=a ORDER BY p.id FOR SHARE OF p;
+ IF NOT EXISTS(SELECT 1 FROM runtime_sessions rs WHERE rs.id=s AND rs.actor_id=a AND rs.content_deleted_at IS NULL AND rs.erased_at IS NULL)
+  OR EXISTS(SELECT 1 FROM jsonb_array_elements(coalesce(NEW.result->'producedBy','[]'::jsonb)) i
+   WHERE NOT EXISTS(SELECT 1 FROM runtime_executions x WHERE x.id=(i->>'executionId')::uuid AND x.actor_id=a
+    AND x.session_id=s AND x.content_deleted_at IS NULL AND x.erased_at IS NULL))
+ THEN RAISE EXCEPTION 'RUNTIME_WORKSPACE_SOURCE_REVOKED';END IF;
+ RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION runtime_workspace_benchmark_guard() FROM PUBLIC,anon,authenticated,service_role;
+DROP TRIGGER IF EXISTS runtime_workspace_benchmark_guard ON runtime_tool_calls;
+CREATE TRIGGER runtime_workspace_benchmark_guard BEFORE INSERT OR UPDATE OF result ON runtime_tool_calls
+ FOR EACH ROW EXECUTE FUNCTION runtime_workspace_benchmark_guard();
 COMMIT;

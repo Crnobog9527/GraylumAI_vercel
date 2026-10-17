@@ -130,6 +130,28 @@ export async function runCases({db,Client,report,oldDefinition}) {
  assert.ok(!(await kinds(db,d,dSid)).includes('benchmarks'));
  report.checks.push('deleting the producing answer or the positioning conversation scopes free answers that copied the table; erasure clears them, keeps unrelated ones');
 
+ // A read in flight when its producing answer is deleted cannot store the deleted rows afterwards.
+ const g=await one(db,'SELECT ws_test.actor() v');
+ const gSid=await one(db,'SELECT ws_test.free_session($1) v',[g]);
+ const gPos=await one(db,'SELECT ws_test.positioning($1,$2,$3) v',[g,'Guarded','GUARD_CANARY']);
+ const gProducer=await answer(db,g,gPos.draftSession);
+ await benchmark(db,g,gPos.draftSession,gProducer,'GUARD_BENCH_CANARY',{qualified:true});
+ const gBody=await read(db,g,gSid,gPos.draftSession);
+ const gExec=randomUUID();
+ await db.query(`INSERT INTO runtime_executions(id,actor_id,session_id,request_id,payload,history_revision,state)
+  VALUES($1,$2,$3,$4,'{}',0,'interrupted')`,[gExec,g,gSid,randomUUID()]);
+ await db.query(`INSERT INTO runtime_tool_calls(execution_id,call_id,name,arguments,result) VALUES($1,'call-0','read_source',$2,NULL)`,
+  [gExec,{query:gPos.draftSession}]);
+ const store=()=>db.query("UPDATE runtime_tool_calls SET result=$2 WHERE execution_id=$1 AND call_id='call-0'",[gExec,gBody]);
+ // Only the producing answer goes (fixture shortcut, its write guard bypassed here only): the positioning stays valid,
+ // so 0218's guard alone would accept the stale copy; only this migration's guard refuses it.
+ await db.query('BEGIN');await db.query('SET LOCAL session_replication_role=replica');
+ await db.query('UPDATE runtime_executions SET content_deleted_at=now() WHERE id=$1',[gProducer]);await db.query('COMMIT');
+ assert.equal(await one(db,'SELECT opc_source_allowed($1,$2) v',[g,gPos.version]),true);
+ await denied(store(),'RUNTIME_WORKSPACE_SOURCE_REVOKED');
+ assert.equal(await one(db,"SELECT result IS NULL v FROM runtime_tool_calls WHERE execution_id=$1 AND call_id='call-0'",[gExec]),true);
+ report.checks.push('a benchmark read completed after its producing answer was deleted cannot store the deleted rows');
+
  const closing=await one(db,'SELECT ws_test.actor() v');
  const closingSid=await one(db,'SELECT ws_test.free_session($1) v',[closing]);
  const kept=await one(db,'SELECT ws_test.positioning($1,$2,$3) v',[closing,'Closing','CLOSING_CANARY']);
