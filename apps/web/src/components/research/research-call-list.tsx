@@ -8,7 +8,7 @@ const ICONS: Record<CallState, typeof Check> = { running: Loader2, success: Chec
 
 /**
  * Every research call of a reply, one compact row each: what was searched, which kind of data, and the result
- * (成功 / 未取到 / 待核) with the credits it settled at, from the stream's `research_call` events. No supplier
+ * (成功 / 这次没查到 / 待核) with the credits it settled at, from the stream's `research_call` events. No supplier
  * names or supplier costs.
  */
 export function ResearchCallList({ calls }: { calls: readonly ResearchCall[] }) {

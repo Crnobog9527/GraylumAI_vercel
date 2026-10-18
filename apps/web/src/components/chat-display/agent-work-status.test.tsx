@@ -40,7 +40,7 @@ describe('AgentWorkStatus', () => {
   it('says plainly when there is nothing to read', () => {
     const html = renderToStaticMarkup(<AgentWorkStatus items={W.SAMPLE_WORK_ITEMS_EMPTY}/>);
     expect(html).toContain('还看不到你发布的作品数据');
-    expect(html).toContain('未取到');
+    expect(html).toContain('这次没查到');
   });
 });
 

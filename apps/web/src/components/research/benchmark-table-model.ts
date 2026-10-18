@@ -16,12 +16,12 @@ export interface BenchmarkRow {
 }
 
 export const CATEGORY_LABELS: Record<BenchmarkCategory, string> = {
-  head_reference: "头部参考", imitable: "同量级可模仿", fast_rising: "近期起号快",
+  head_reference: "头部账号", imitable: "和你体量差不多", fast_rising: "近期起号快",
 };
 
 export const COLUMNS = [
   { key: "followers", label: "粉丝" },
-  { key: "medianViews", label: "播放中位数" },
+  { key: "medianViews", label: "一条一般多少播放" },
   { key: "engagementRate", label: "互动率" },
   { key: "postsPerWeek", label: "更新频率" },
   { key: "lastPublishedAt", label: "最近更新" },
