@@ -2,7 +2,7 @@
 import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
-import { readProviderPrices, resolveProviderPrice } from '../billingProviderPrices';
+import { readProviderPrices, resolveProviderPrice, resolveProviderMultipliers } from '../billingProviderPrices';
 import { decimal } from '../bill2/decimal';
 import type { BillingRpc } from '../bill2/service';
 import { frozenToolPolicy, toolCallPolicy, toolModelId, toolResultEvidence, type ToolCallPolicy } from '../bill2/toolBilling';
@@ -15,7 +15,7 @@ import { checkVendorRateLimit } from '../redisRateLimiter';
 import { readResearchToolsConfig } from '../research/vendors/config';
 import { tikhubRouteId, type TikhubCall } from '../research/vendors/tikhub';
 import type { ResearchCallResult, SocialKind, SocialPlatform } from '../research/vendors/types';
-import { freezeWindowBillingUnit } from '../runtime/billingUnitAdmission';
+import { readMultiplierSnapshot } from '../billingUnit';
 import { loadStagingPolicy } from '../runtime/stagingPolicy';
 import { derivedUuid } from '../fusion/admission';
 
@@ -74,9 +74,12 @@ export async function admitReadRun(admin: Admin, keys: ClaimKeys, routes: string
   const tools = (await readResearchToolsConfig(admin)).config;
   if (!tools.enabled || !tools.vendors.tikhub.enabled) return null;
   const window = await loadStagingPolicy(admin as unknown as BillingRpc, keys.actorId, env);
-  const billingUnit = await freezeWindowBillingUnit(admin, window, []);
   const [prices, thresholds] = await Promise.all([readProviderPrices(admin), admin.from('system_settings').select('value')
     .eq('key', 'billing_payg_start_thresholds').maybeSingle()]);
+  const billingUnit = await readMultiplierSnapshot(admin, [], global => resolveProviderMultipliers(
+    prices.config, routes.map(route => ({ provider: 'tikhub', route })), global, now));
+  if (decimal(billingUnit.creditsPerUsd) !== decimal(window.creditsPerUsd))
+    throw new BilledReadError('PUBLISH_MONITOR_BILLING_UNAVAILABLE');
   const entries = z.object({ thresholds: z.array(z.object({ model: z.string(), purpose: z.string() }).passthrough()) })
     .passthrough().safeParse(thresholds.data?.value);
   if (!entries.success) return null;
