@@ -63,15 +63,18 @@ export async function startCompare(deps: CompareDeps, choice: CompareStartInput)
   assertNoReferences(choice.parts);
   const { admin, actorId } = deps;
   const { requestId } = choice;
-  const settings = await assertCompareAllowed(admin, actorId, choice.modelIds);
   // What identifies this request needs no pricing, so it is built first: a repeat of a request whose group already exists
   // must reach the frozen replay even if prices, the budget or a model's availability have changed since.
   const snapshot = snapshotHash(choice.parts);
   const skill = choice.parts.skill && { moduleId: choice.parts.skill.moduleId, revisionId: choice.parts.skill.revisionId };
   const question = choice.parts.question;
-  const config = { models: choice.modelIds, skill, answerOutputTokens: settings.answerOutputTokens,
-    materialRevision: choice.materialRevision ?? null };
-  const begin = () => compareRpc<RecordView>(admin, 'fusion_compare_begin', { p_actor_id: actorId, p_request_id: requestId,
+  // The answer limit is recorded only with a new request; a repeat of an admitted one is answered from the stored record.
+  const begin = (answerOutputTokens?: number) => {
+    const config = { models: choice.modelIds, skill, ...(answerOutputTokens === undefined ? {} : { answerOutputTokens }),
+      materialRevision: choice.materialRevision ?? null };
+    return beginRecord(config);
+  };
+  const beginRecord = (config: Record<string, unknown>) => compareRpc<RecordView>(admin, 'fusion_compare_begin', { p_actor_id: actorId, p_request_id: requestId,
     p_session_id: choice.sessionId, p_request: { question, questionHash: createHash('sha256').update(question).digest('hex'),
       // Everything that identifies this request: a repeat with anything else is a conflict, never the old result.
       requestHash: sha([choice.sessionId, question, choice.modelIds, skill, choice.parts.references.map(r => [r.documentId, r.version]),
@@ -84,6 +87,8 @@ export async function startCompare(deps: CompareDeps, choice: CompareStartInput)
 
   // A group that already exists is frozen and its holds are taken (the first start's response may have been lost): nothing is
   // repriced, judged or admitted again. The request-hash check still applies, and an ended compare still answers as ended.
+  // The live switch, allowlist, minimum and entitlement are not consulted for it: its holds are already taken and the client
+  // must be able to recover the compare id and the results even if compare was switched off in the meantime.
   const existing = await replayCompareGroup(admin, actorId, requestId, choice.sessionId);
   if (existing) {
     const replayed = await begin();
@@ -92,9 +97,10 @@ export async function startCompare(deps: CompareDeps, choice: CompareStartInput)
     return { state: result.state, compareId: replayed.compareId, group: existing, claim: result };
   }
 
+  const settings = await assertCompareAllowed(admin, actorId, choice.modelIds);
   const gate = await readCompareGate(admin, actorId);
   staticCompareGate(gate, choice.parts.skill, deps.refusePositioning);
-  const record = await begin();
+  const record = await begin(settings.answerOutputTokens);
   const compareId = record.compareId;
   if (record.state === 'refused' || record.state === 'stopped' || record.state === 'finished') {
     if (record.gateVerdict === 'block') deps.refusePositioning();

@@ -264,8 +264,12 @@ describe('compare start: a repeat of an admitted request replays it before anyth
     s.begin = fresh({ created: false, gateVerdict: 'allow', groupId: id(70), state: 'running' });
     await expect(start()).resolves.toMatchObject({ state: 'waiting_credits' });
   });
-  it('the live permissions still apply to a repeat (the switch may have been turned off while the user waited)', async () => {
-    s.existing = frozen;
+  it('answers a repeat of an admitted request even after compare was switched off, so the client can recover its results', async () => {
+    s.existing = frozen; s.begin = fresh({ created: false, gateVerdict: 'allow', groupId: id(70), state: 'running' });
+    s.allowed = new Error('FUSION_COMPARE_DISABLED');
+    await expect(start()).resolves.toMatchObject({ state: 'claimed', compareId: id(90), group: frozen });
+  });
+  it('still applies the live permissions to a request that has no group yet', async () => {
     s.allowed = new Error('FUSION_COMPARE_DISABLED');
     await expect(start()).rejects.toThrow('FUSION_COMPARE_DISABLED');
     expect(names()).toEqual([]);
