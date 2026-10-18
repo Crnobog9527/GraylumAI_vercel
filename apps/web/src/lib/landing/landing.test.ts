@@ -50,8 +50,6 @@ describe('landing FAQ', () => {
 
 describe('landing price cards', () => {
   it('promises the AI coach on the Gold card and the free trial in the notes only while those are on (Owner 2026-10-14)', () => {
-    const noCoach = buildLandingPageData({ ...ALL_ON, coach: false }, []);
-    expect(noCoach.showResult.gold ?? false).toBe(false);
     const noGrant = buildLandingPageData({ ...ALL_ON, signupGrant: false }, []);
     expect(noGrant.heroNote).toBe('无需绑卡');
     expect(noGrant.finalNote).toBe('无需绑卡');
@@ -106,18 +104,15 @@ describe('landing price cards', () => {
 });
 
 describe('landing page data', () => {
-  it('hides every block whose capability is switched off', () => {
+  it('never hides a block for a capability: with every switch off, only the switches\' own facts go (Owner 2026-10-17)', () => {
     const data = buildLandingPageData(CORE_ONLY, CATALOG);
-    expect(data.notes.map(note => note.id)).toEqual(['p2', 'p5']);
-    // FAQ 2, 4, 6; FAQ 11 goes with signupGrant and FAQ 14 (reports kept after expiry) with report.
-    expect(data.faqItems.map(item => item.question)).toEqual([
-      LANDING_FAQ[0].items[1].question, LANDING_FAQ[0].items[3].question, LANDING_FAQ[1].items[1].question,
-    ]);
-    expect(data.compareRows.map(row => row.sourceId)).toEqual(['consultant']);
-    expect(data.promise.map(part => part.text).join('')).not.toContain('不用自己想选题');
-    expect(data.timeline).toHaveLength(1);
-    expect(data.showStack).toBe(false);
-    expect(data.showResult).toEqual({ pro: false, gold: false });
+    expect(data.notes).toHaveLength(7);
+    expect(data.compareRows).toHaveLength(4);
+    expect(data.promise.map(part => part.text).join('')).toContain('不用自己想选题');
+    // FAQ 11 promises the sign-up credits (a switch); the founder answers wait for the server; every other answer stays.
+    const questions = data.faqItems.map(item => item.question);
+    expect(questions).toHaveLength(13);
+    expect(questions).not.toContain(LANDING_FAQ.flatMap(group => group.items).find(item => item.id === 'faq-11')?.question);
   });
 
   it('shows the finished-product page by default, still without invented founder or first-month prices', () => {

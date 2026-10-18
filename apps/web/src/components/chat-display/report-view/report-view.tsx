@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { REPORT_DATA_CHAPTER, REPORT_DATA_FIELDS, type ReportDataField } from "@repo/api/src/shared/reportDataSpec";
 import { parseReportBody, type ReportData, type SanitizedReportData } from "@repo/api/src/shared/reportData";
+import { DisplayHeading } from "@/components/chat-display/display-heading";
 import { MessageMarkdown } from "@/components/chat/MessageMarkdown";
 import { cn } from "@/lib/utils";
 import { AudienceCards, FirstStepCard, FunnelChart, Plan30Timeline, ThisWeekList } from "./report-charts";
@@ -69,7 +70,7 @@ export function ReportView({ body, streaming = false, data, editedFields, notice
         const charted = name ? CHART_FIELDS.some(item => REPORT_DATA_CHAPTER[item] === name) : false;
         return (
           <section key={index} className={styles.chapter}>
-            <h2 className={styles.chapterTitle}>{reportDisplayTitle(chapter.title)}</h2>
+            <DisplayHeading as="h2" className={styles.chapterTitle}>{reportDisplayTitle(chapter.title)}</DisplayHeading>
             {main && <MessageMarkdown text={withDisplayHeadings(main)} streaming={streaming && last && !reasons} />}
             {fields.some(item => edited.has(item)) && <p className={styles.note}>{T.edited}</p>}
             {preparing && charted && <p className={styles.note}>{T.preparing}</p>}
@@ -86,7 +87,7 @@ export function ReportView({ body, streaming = false, data, editedFields, notice
       })}
       {unplaced.length > 0 && (
         <section className={styles.chapter}>
-          <h2 className={styles.chapterTitle}>{T.more}</h2>
+          <DisplayHeading as="h2" className={styles.chapterTitle}>{T.more}</DisplayHeading>
           {unplaced.map(field)}
         </section>
       )}

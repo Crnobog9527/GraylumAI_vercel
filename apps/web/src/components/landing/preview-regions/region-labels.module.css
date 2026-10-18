@@ -1,0 +1,27 @@
+/* Region labels of the style samples: a small dark tag at each module's top-left corner, never taking a click. */
+.overlay {
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 0;
+  height: 0;
+  z-index: 2147483000;
+  pointer-events: none;
+}
+
+.badge {
+  position: absolute;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: #18181b;
+  color: #fff;
+  font: 600 12px/1.4 system-ui, -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  letter-spacing: 0;
+  white-space: nowrap;
+  box-shadow: 0 0 0 1.5px rgb(255 255 255 / 0.85), 0 2px 6px rgb(0 0 0 / 0.18);
+}
+
+.badge[data-level="2"] {
+  padding: 2px 6px;
+  background: #3f3f46;
+  font-size: 11px;
+}

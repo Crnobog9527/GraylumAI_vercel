@@ -1,0 +1,140 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * "AI 教练怎么接手你的运营" (TakeoverJ), sample H's layout: a sidebar of the scenes on the left (the current one lit,
+ * with what it shows), the real workbench in the middle. Locked: a tall section whose stage sticks to the screen
+ * while the scroll plays the story. Static (no JavaScript or reduced motion): every scene stacked, finished.
+ * Phone: the sidebar becomes one row of steps above the window, the current step's note under it.
+ */
+.outer { position: relative; }
+.takeover { position: relative; height: 600svh; }
+@media (max-width: 767px) { .takeover { height: 520svh; } }
+.stage { position: sticky; top: 0; display: grid; grid-template-rows: minmax(0, 1fr); height: 100svh; padding: 76px 0 18px; overflow: hidden; }
+.frame { display: grid; grid-template-rows: auto auto minmax(0, 1fr); gap: 14px; height: 100%; }
+.title { margin: 0; white-space: nowrap; font-size: clamp(24px, 3vw, 44px); font-weight: 600; line-height: 1.08; letter-spacing: -.04em; }
+.head { display: grid; gap: 10px; }
+@media (min-width: 1024px) { .head { grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); align-items: end; gap: 40px; } }
+/* What the current moment shows: outside the product window, so the product's own steps are the only step list. */
+.caption { display: grid; gap: 4px; align-content: end; }
+.caption h3 { margin: 0; font-size: clamp(19px, 1.8vw, 24px); font-weight: 600; letter-spacing: -.02em; }
+.caption p { margin: 0; color: var(--j-body); font-size: 15px; line-height: 1.7; }
+@media (prefers-reduced-motion: no-preference) { .takeover .caption { animation: copyIn .45s var(--j-ease) both; } }
+.bar { height: 3px; overflow: hidden; border-radius: 3px; background: var(--j-line); }
+.bar i { display: block; height: 100%; background: var(--j-ink); transform-origin: 0 50%; }
+.picture { min-width: 0; min-height: 0; height: 100%; overflow: hidden; border: 1px solid var(--j-line); border-radius: 22px; box-shadow: var(--j-shadow-lift); }
+@media (max-width: 1023px) {
+  .stage { padding-top: 66px; }
+  .title { font-size: clamp(24px, 6.5vw, 36px); }
+  .caption p { font-size: 13.5px; line-height: 1.6; }
+}
+
+/* The product workspace: sidebar, workbench, 定位清单 (workspace-frame's own proportions) */
+.app { position: relative; display: grid; grid-template-columns: 220px minmax(0, 1fr) 280px; height: 100%; overflow: hidden; background: #f7f7f5; color: #262626; }
+.static .app { height: 640px; }
+/* The sidebar keeps the product's own rail styles (workspace-frame.module.css); only the picture's grid places it. */
+.rail { overflow: hidden; }
+.rail nav > span { display: flex; align-items: center; gap: 9px; height: 38px; padding: 0 12px; color: #414141; font-size: 14px; }
+.rail summary { padding: 4px 8px; color: #888; font-size: 12px; list-style: none; }
+.center { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; min-width: 0; min-height: 0; margin: 6px 0; padding: 0 18px; border-radius: 12px; background: #fff; }
+.center > header { padding: 14px 0 10px; }
+.appTitle { margin: 0; font-size: 16px; font-weight: 600; }
+.sample { padding: 0 8px; border-radius: 999px; background: var(--gl-accent-tag); color: var(--gl-accent-tag-text); font-size: 11.5px; line-height: 20px; }
+.center > nav { display: grid; gap: 6px; padding-bottom: 10px; border-bottom: 1px solid #eee; }
+.center > nav > * { pointer-events: none; gap: 4px; }
+.footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; padding: 10px 0 12px; border-top: 1px solid #eee; }
+.footer button[data-on] { border-color: var(--j-gold); box-shadow: 0 0 0 3px rgba(255, 187, 23, .3); color: var(--j-ink); }
+.app > .checklist { min-height: 0; margin: 6px 8px 6px 8px; border-radius: 12px; background: #fff; overflow: hidden; }
+@media (max-width: 1279px) { .app { grid-template-columns: 200px minmax(0, 1fr); } .app > .checklist { display: none; } }
+@media (max-width: 860px) { .app { grid-template-columns: minmax(0, 1fr); } .app > .rail { display: none; } .center { margin: 0; padding: 0 12px; border-radius: 0; } }
+
+/* The long report over the workbench: chapter list beside a preview that scrolls through the chapters */
+.reportLayer { position: absolute; inset: 0; z-index: 3; display: grid; place-items: center; padding: 18px; background: rgba(20, 19, 18, .12); }
+.report {
+  display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 12px; width: min(860px, 100%); height: 100%; overflow: hidden;
+  padding: 18px 22px; border-radius: 16px; background: #fff; box-shadow: 0 30px 60px -30px rgba(0, 0, 0, .5);
+}
+.report header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.report header h2 { margin: 0; font-size: 17px; font-weight: 600; }
+.report header > span { color: #888; font-size: 12.5px; }
+.report header small { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; color: #999; font-size: 12px; }
+.reportBody { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 18px; min-height: 0; }
+.toc {
+  display: grid; align-content: start; gap: 2px; min-height: 0; margin: 0; padding: 0 12px 0 0; overflow-y: auto; border-right: 1px solid #eee;
+  list-style: none; font-size: 12.5px; scrollbar-width: thin;
+}
+/* A phone has no room for the list beside the text: only the scrolling preview stays (after .toc, so it wins). */
+@media (max-width: 640px) { .reportBody { grid-template-columns: minmax(0, 1fr); } .toc { display: none; } }
+.toc li { border-radius: 6px; color: #aaa; }
+.toc button { width: 100%; padding: 4px 8px; border: 0; border-radius: 6px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.toc button:not(:disabled):hover { background: #f6f5f1; color: var(--j-ink); }
+.toc button:disabled { cursor: default; }
+.toc button:focus-visible { outline: 2px solid var(--j-ink); outline-offset: 1px; }
+.toc li[data-done] { color: #555; }
+.toc li[data-on] { background: #fff7e0; color: var(--j-ink); font-weight: 600; }
+.preview { position: relative; min-height: 0; overflow-y: auto; padding-right: 6px; scrollbar-width: thin; }
+.preview:focus-visible { outline: 2px solid var(--j-ink); outline-offset: 2px; border-radius: 6px; }
+.preview article { display: grid; gap: 6px; padding-bottom: 18px; }
+.preview article + article { padding-top: 14px; border-top: 1px solid #f0efea; }
+.preview h3 { margin: 0; font-size: 15px; font-weight: 600; }
+.preview table { font-size: 12.5px; }
+.reportIntro { margin: 0; color: #888; font-size: 12.5px; }
+.report footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding-top: 10px; border-top: 1px solid #eee; }
+.juryEntry { gap: 6px; }
+.juryEntry span { padding: 0 6px; border-radius: 999px; background: var(--j-gold); color: #1a1a1a; font-size: 11px; line-height: 18px; }
+.juryEntry[data-on] { box-shadow: 0 0 0 4px rgba(255, 187, 23, .35); }
+.planRows { display: grid; gap: 6px; margin: 6px 0 0; padding: 10px 12px; border-radius: 10px; background: #fafaf8; }
+.planRows div { display: grid; grid-template-columns: 6.5em minmax(0, 1fr); gap: 10px; font-size: 13.5px; }
+.planRows dt { color: #888; }
+.planRows dd { margin: 0; }
+
+/* The jury (#1002's canvas, brief), opened from the report: it fills the layer over the workbench. */
+.juryLayer { position: absolute; z-index: 4; inset: 0; overflow: hidden; background: #fff; }
+@media (prefers-reduced-motion: no-preference) { .juryLayer { animation: copyIn .5s var(--j-ease) both; } }
+
+/* The conversation (rules lost in the round-five rebuild, restored 2026-10-15): one even gap between messages, the
+   latest kept in view at the bottom like the live chat; cards sit a little below their message's text. */
+.log { position: relative; min-height: 0; overflow: hidden; }
+.logInner { display: flex; flex-direction: column; justify-content: flex-end; gap: 12px; min-height: 100%; padding: 14px 2px 16px; }
+.line { display: grid; gap: 12px; }
+@media (prefers-reduced-motion: no-preference) { .takeover .logInner > :last-child { animation: messageIn .4s var(--j-ease) both; } }
+.cardSlot { margin-top: 8px; }
+.cardSlot section { margin: 0; }
+.fetch { display: grid; gap: 6px; margin: 8px 0 0; padding: 10px 12px; border: 1px dashed #ddd; border-radius: 12px; list-style: none; font-size: 13.5px; }
+.fetch li { display: flex; align-items: center; gap: 8px; color: #666; }
+.fetch li span { margin-left: auto; font-size: 12px; }
+.fetch li[data-done] { color: #262626; }
+.fetch li[data-done] svg { color: #1a7f45; }
+@media (prefers-reduced-motion: no-preference) { .fetch li:not([data-done]) svg { animation: spin 1s linear infinite; } }
+.tableCard { display: grid; gap: 6px; margin-top: 8px; padding: 10px 12px; border-radius: 10px; background: #fafaf8; font-size: 13px; overflow-x: auto; }
+.tableCard > p { margin: 0; font-weight: 600; }
+.tableCard table { width: 100%; border-collapse: collapse; }
+.tableCard th, .tableCard td { padding: 5px 8px; border-bottom: 1px solid #ececea; text-align: left; white-space: nowrap; }
+.tableCard thead th { color: #888; font-weight: 500; }
+.tableCard tbody th { font-weight: 500; }
+.tableCard td { color: #1a7f45; }
+.tableCard td[data-missing] { color: #b45309; }
+/* Static (reduced motion): the moments one under another. */
+.static .staticStep { display: grid; gap: 20px; padding-top: 56px; }
+.static .picture { height: auto; }
+.static .caption { align-content: start; }
+
+@keyframes copyIn { from { opacity: 0; translate: 0 12px; } to { opacity: 1; translate: 0 0; } }
+@keyframes messageIn { from { opacity: 0; translate: 0 10px; } to { opacity: 1; translate: 0 0; } }
+@keyframes spin { to { rotate: 1turn; } }
+
+/* The finished review as the real result page (JuryReader), moved up by the scroll so all of it passes by. */
+.result {
+  position: absolute; inset: 0; overflow: hidden auto; padding: 18px 22px 48px; background: var(--j-canvas);
+  scrollbar-width: thin;
+}
+@media (prefers-reduced-motion: no-preference) { .result { animation: copyIn .5s var(--j-ease) both; } }
+
+/* Samples K, M–O (data-calm-windows, distill plan items 15–16): in the still pictures, the product's small grey print is set darker
+   (at least 4.5:1) and at least 12px. Sample J and the product itself are unchanged. */
+[data-calm-windows] .app small, [data-calm-windows] .rail div > span, [data-calm-windows] .app > .checklist header p, [data-calm-windows] .checklist label + span {
+  color: #6b6b6b; font-size: 12px;
+}
+[data-calm-windows] .center > header :is(p, span) { color: #6b6b6b; font-size: 12px; }
+[data-calm-windows] .center > nav button { color: #6b6b6b !important; font-size: 12px; }
+[data-calm-windows] .center > nav button[aria-current='step'] { color: #333 !important; }
+[data-calm-windows] .checklist [data-field-state] label + span, [data-calm-windows] .log [data-message-role] > span, [data-calm-windows] .cardSlot :is(p, span) { color: #6b6b6b; }
+[data-calm-windows] .cardSlot span { font-size: 12px; }

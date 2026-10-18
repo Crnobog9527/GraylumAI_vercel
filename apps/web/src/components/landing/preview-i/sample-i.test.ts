@@ -63,11 +63,9 @@ describe('style sample I', () => {
     expect(html.match(/role="tabpanel"[^>]*hidden=""/g)).toHaveLength(FLOW_STEPS.length - 1);
   });
 
-  it('hides the scenes of switched-off capabilities with their steps', () => {
-    const { html } = render({ ...ALL_ON, publish: false });
-    expect(html).not.toContain('id="i-step-publish-tab"');
-    expect(html).not.toContain('id="i-step-review-tab"');
-    expect(html).toContain('id="i-step-chat-tab"');
+  it('shows every scene with its step: no capability is a switch (Owner 2026-10-17)', () => {
+    const { html } = render(ALL_ON);
+    for (const id of ['publish', 'review', 'chat']) expect(html).toContain(`id="i-step-${id}-tab"`);
   });
 });
 

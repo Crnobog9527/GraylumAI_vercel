@@ -1,0 +1,152 @@
+{
+  "slug": "solo-founder",
+  "persona": {
+    "label": "一人公司创始人 · X",
+    "who": "前产品经理，做自由职业者记账工具，已有 120 个付费用户"
+  },
+  "positioning": "做记账工具的前产品经理，教新自由职业者钱怎么记、怎么留、怎么发工资",
+  "riskAlert": {
+    "headline": "一年月入 5,000 美元不能当成一年的承诺",
+    "why": [
+      "按 6 美元月订阅，要约 830 个付费用户",
+      "约是现在的 7 倍，只写日记还会吸引同行而非客户"
+    ]
+  },
+  "audience": [
+    {
+      "name": "刚全职接单的新自由职业者",
+      "trigger": "第一次报税、第一个空窗月"
+    },
+    {
+      "name": "做了 2–3 年、账一直很乱的人",
+      "trigger": "换会计、被要求补资料时"
+    },
+    {
+      "name": "有工作、副业接单的人",
+      "trigger": "年底报税、副业变多时"
+    }
+  ],
+  "platform": {
+    "main": "X（英文）",
+    "support": [],
+    "why": "现有 1,200 关注，主页能放网站链接，不露脸也能做"
+  },
+  "benchmarks": [
+    {
+      "id": "A",
+      "type": "一人 SaaS 创始人",
+      "followers": "17.4 万关注",
+      "medianViews": null,
+      "engagementRate": null,
+      "updateFreq": null,
+      "learn": "收入写进简介当信任"
+    },
+    {
+      "id": "B",
+      "type": "做多款小 SaaS 的独立创始人",
+      "followers": "16.4 万关注",
+      "medianViews": "约 4,070",
+      "engagementRate": null,
+      "updateFreq": null,
+      "learn": "用“我的工作流”让产品自然出现"
+    },
+    {
+      "id": "C",
+      "type": "从服务转做 SaaS 的创始人",
+      "followers": "1.8 万关注",
+      "medianViews": "约 970",
+      "engagementRate": null,
+      "updateFreq": "仍在日更",
+      "learn": "每周固定发产品进展，节奏稳"
+    }
+  ],
+  "differentiation": "做工具的人教记账，方法直接做成模板，120 个付费用户作证明",
+  "threePiece": {
+    "name": "Ivy · Money for New Freelancers",
+    "bio": "前产品经理，给自由职业者做简单的管钱工具"
+  },
+  "ownAccount": {
+    "platform": "X",
+    "displayName": "Ivy · Money for New Freelancers",
+    "which": "recommended",
+    "bio": "前产品经理，给自由职业者做简单的管钱工具",
+    "followers": "1,200 个关注",
+    "posts": null,
+    "topStat": null
+  },
+  "contentPillars": [
+    {
+      "name": "流量型",
+      "share": "50%"
+    },
+    {
+      "name": "信任型",
+      "share": "35%"
+    },
+    {
+      "name": "转化型",
+      "share": "15%"
+    }
+  ],
+  "funnel": [
+    {
+      "layer": "免费内容",
+      "offer": "X 帖子和录屏",
+      "price": "免费",
+      "why": "让陌生人认识你；收藏的是真在意钱怎么管的人"
+    },
+    {
+      "layer": "免费模板",
+      "offer": "第一年记账模板，留邮箱领取",
+      "price": "免费",
+      "why": "找出真想动手的人；肯留邮箱的才真打算记账"
+    },
+    {
+      "layer": "入门体验",
+      "offer": "工具试用或首月优惠（待定）",
+      "price": null,
+      "why": "低风险试用；真用过一周的已感到比 Excel 省事"
+    },
+    {
+      "layer": "主力订阅",
+      "offer": "记账工具订阅",
+      "price": "6 美元/月",
+      "why": "主要收入；留下每月真在用、离不开的人"
+    },
+    {
+      "layer": "推荐和扩展",
+      "offer": "推荐奖励、中后期中文版",
+      "price": null,
+      "why": "低成本拉新；被介绍来的人最精准"
+    }
+  ],
+  "plan30": [
+    {
+      "week": 1,
+      "focus": "测核心人群在不在：每周五记 3 个数"
+    },
+    {
+      "week": 2,
+      "focus": "测录屏和图解：10 分钟理清一个月"
+    },
+    {
+      "week": 3,
+      "focus": "测免费模板：回复关键词领模板"
+    },
+    {
+      "week": 4,
+      "focus": "复刻最好的一条，看新订阅来源"
+    }
+  ],
+  "metricsToWatch": [
+    "陌生人的收藏和回复",
+    "模板领取和留邮箱数",
+    "带来源标记的新订阅"
+  ],
+  "firstStep": [
+    "导出付费用户的国家和语言分布",
+    "改好显示名、头像、简介和置顶帖",
+    "发第一条：每周五记下这 3 个数"
+  ],
+  "sourceNote": "对标数据观察日期 2026-10-17，来自网络公开信息，真实性待考证，仅供参考"
+}
