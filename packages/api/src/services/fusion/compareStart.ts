@@ -32,6 +32,9 @@ export type CompareEstimate = { credits: number; columns: Array<{ modelId: strin
   /** The columns together would exceed the administrator's single-compare budget: the page offers fewer models. */
   overBudget: boolean };
 
+/** Admission failures after which the compare record stays: unknown/unavailable ones and those about the request's identity. */
+const KEEP_RECORD = new Set(['FUSION_ADMISSION_UNAVAILABLE', 'FUSION_COMPARE_REQUEST_CONFLICT', 'FUSION_GROUP_CONFLICT',
+  'BILL2_REQUEST_CONFLICT', 'FUSION_COMPARE_ENDED', 'FUSION_COMPARE_DENIED', 'FUSION_COMPARE_ACTIVE']);
 const sha = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 /** The estimate is always priced with the positioning fallback rule included: it is the larger of the two possible
  * requests, so what the user sees is never below what a start can hold. */
@@ -159,15 +162,16 @@ export async function startCompare(deps: CompareDeps, choice: CompareStartInput)
   }
 
   const request = compareRequest({ ...choice.parts, positioningFallback: fallback });
-  // The work material may be withdrawn or changed while the judgement ran: the database refuses the admission, and the
-  // record is ended so it does not hold the user's one slot (nothing was admitted or held).
+  // Whatever refuses the admission definitively (the material or conversation changed while the judgement ran, the price,
+  // budget or allowlist changed, the switch went off) ends the record so it does not hold the user's one slot for five
+  // minutes: nothing was admitted or held, and a corrected request starts afresh. Only unknown or request-identity
+  // failures keep it, because a retry of the same request may still succeed or must find the same group.
   const group = await admitCompareGroup({ admin, actorId, requestId, sourceSessionId: choice.sessionId, modelIds: choice.modelIds, request,
     env: deps.env, shown: choice.shown,
     // The limit recorded with the request, not today's setting: a change by an administrator in between must not shorten answers.
     answerTokens: record.config?.answerOutputTokens })
     .catch(async (error: unknown) => {
-      const message = error instanceof Error ? error.message : '';
-      if (/FUSION_COMPARE_STALE|FUSION_COMPARE_SOURCE_REVOKED|FUSION_COMPARE_SESSION_GONE|RUNTIME_MATERIAL_/.test(message)) {
+      if (!KEEP_RECORD.has(error instanceof Error ? error.message : '')) {
         await compareRpc(admin, 'fusion_compare_end', { p_actor_id: actorId, p_compare_id: compareId }).catch(() => undefined);
       }
       throw error;
