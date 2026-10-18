@@ -4,11 +4,16 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const state = vi.hoisted(() => ({ compare: {} as Record<string, unknown>, entitlements: {} as Record<string, unknown>,
-  rows: [] as Array<Record<string, unknown>>, error: false }));
+  rows: [] as Array<Record<string, unknown>>, error: false, notRunnable: new Set<string>(), windowFails: false }));
 vi.mock('./settings', async original => ({ ...(await original<typeof import('./settings')>()),
   readFusionSettings: async () => ({ version: 1, review: {}, compare: state.compare }) }));
 vi.mock('../membershipEntitlements', async original => ({ ...(await original<typeof import('../membershipEntitlements')>()),
   readMembershipEntitlements: async () => state.entitlements }));
+vi.mock('../runtime/stagingPolicy', async original => ({ ...(await original<typeof import('../runtime/stagingPolicy')>()),
+  loadStagingPolicy: async () => { if (state.windowFails) throw new Error('RUNTIME_STAGING_WINDOW_UNAVAILABLE'); return { id: id(900), callPolicies: [] }; } }));
+vi.mock('./settingsAdmin', () => ({
+  fusionModelOptions: async () => ({ models: [id(1), id(2), id(3)].map(modelId => ({ id: modelId, name: 'n', review: true, summary: true,
+    compare: !state.notRunnable.has(modelId) })) }) }));
 import { compareOptions } from './compareOptions';
 
 const admin = { from: () => ({ select: () => ({ in: async () => state.error ? { data: null, error: { code: 'x' } } : { data: state.rows, error: null } }) }) } as unknown as SupabaseClient;
@@ -18,7 +23,7 @@ beforeEach(() => {
   state.rows = [{ id: id(1), name: 'Claude Sonnet 5.5', model_id: 'anthropic/claude-sonnet-5.5', is_active: 'true' },
     { id: id(2), name: 'Gemini 3.8 Flash', model_id: 'google/gemini-3.8-flash', is_active: 'true' },
     { id: id(3), name: 'GPT-6.1 Sol', model_id: 'openai/gpt-6.1-sol', is_active: 'true' }];
-  state.error = false;
+  state.error = false; state.notRunnable = new Set(); state.windowFails = false;
 });
 
 describe('compare picker options', () => {
@@ -47,6 +52,18 @@ describe('compare picker options', () => {
   it('never returns provider routes or internal model ids, and fails closed on a database error', async () => {
     expect(JSON.stringify(await compareOptions(admin, id(50)))).not.toMatch(/anthropic\/|google\/|openai\/|model_id/);
     state.error = true;
+    await expect(compareOptions(admin, id(50))).rejects.toThrow('FUSION_SETTINGS_UNAVAILABLE');
+  });
+  it('leaves out a model that is still active but can no longer run a compare, and never ticks it by default', async () => {
+    state.notRunnable.add(id(1));
+    const options = await compareOptions(admin, id(50)) as { models: Array<{ id: string }>; defaultModelIds: string[]; usable: boolean };
+    expect(options.models.map(model => model.id)).toEqual([id(2), id(3)]);
+    expect(options.defaultModelIds).toEqual([id(2)]);
+    state.notRunnable.add(id(2));
+    expect(await compareOptions(admin, id(50))).toMatchObject({ usable: false });
+  });
+  it('fails closed when the live window cannot be read', async () => {
+    state.windowFails = true;
     await expect(compareOptions(admin, id(50))).rejects.toThrow('FUSION_SETTINGS_UNAVAILABLE');
   });
 });

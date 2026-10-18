@@ -12,7 +12,7 @@
 --  * fusion_compare_end: ends a compare that has no group yet (refused, nothing charged) when that resume finds the
 --    snapshot changed. A compare with a group is stopped (fusion_compare_stop), never ended here.
 -- Rollback (nothing depends on these in stored data, and no route calls them while the compare switch is off):
--- DROP FUNCTION public.fusion_compare_context(uuid,uuid,integer); DROP FUNCTION public.fusion_compare_material_token(uuid,uuid); DROP FUNCTION public.fusion_compare_end(uuid,uuid);
+-- DROP FUNCTION public.fusion_compare_context(uuid,uuid,integer); DROP FUNCTION public.fusion_compare_material_token(uuid,uuid); DROP FUNCTION public.fusion_compare_material_guard(uuid,uuid); DROP FUNCTION public.fusion_compare_end(uuid,uuid);
 -- DROP FUNCTION public.fusion_compare_gate(uuid,uuid,text,boolean); then re-run the fusion_compare_gate and
 -- fusion_compare_view definitions of 0290_fusion_compare.sql (three-argument gate, view without 'snapshotHash' and
 -- 'gateFallback'), and the fusion_compare_begin and fusion_compare_adopt definitions of 0290 (without the work-material checks); ALTER TABLE public.fusion_compares DROP COLUMN gate_fallback. The TypeScript treats a missing
@@ -61,6 +61,17 @@ RETURNS text LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp
   FROM (SELECT runtime_session_context(p_actor_id,p_session_id) c) x
 $$;
 REVOKE ALL ON FUNCTION public.fusion_compare_material_token(uuid,uuid) FROM PUBLIC,anon,authenticated,service_role;
+
+-- The current work material must still be allowed, exactly as an ordinary turn requires (runtime_material_allowed re-checks the
+-- work package, source authorization and evidence it depends on); the token alone only proves the stored content is unchanged.
+CREATE OR REPLACE FUNCTION public.fusion_compare_material_guard(p_actor_id uuid, p_session_id uuid)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE material jsonb;
+BEGIN
+  material:=runtime_session_context(p_actor_id,p_session_id)->'scopeMaterial';
+  IF material IS NOT NULL AND material<>'null'::jsonb THEN PERFORM runtime_material_allowed(p_actor_id,material); END IF;
+END $$;
+REVOKE ALL ON FUNCTION public.fusion_compare_material_guard(uuid,uuid) FROM PUBLIC,anon,authenticated,service_role;
 
 -- The last p_limit usable history items (oldest first) as {revision, item}, the session revision they belong to, whether a
 -- turn is running (the same replaceable-pointer rule as runtime_admit and fusion_compare_adopt), and the current work
@@ -144,6 +155,7 @@ BEGIN
   IF (p_request->'config') ? 'materialRevision'
     AND p_request#>>'{config,materialRevision}' IS DISTINCT FROM fusion_compare_material_token(p_actor_id,s.id)
   THEN RAISE EXCEPTION 'FUSION_COMPARE_STALE'; END IF;
+  PERFORM fusion_compare_material_guard(p_actor_id,s.id);
   models:=p_request#>'{config,models}';
   IF jsonb_typeof(models) IS DISTINCT FROM 'array' THEN RAISE EXCEPTION 'FUSION_COMPARE_INVALID'; END IF;
   n:=jsonb_array_length(models);
@@ -207,6 +219,7 @@ BEGIN
   -- "A turn is running" uses runtime_admit's rule: a stopped turn whose cancelled run only waits for its cost
   -- (cost_pending, closed, cancel requested) is replaceable and does not block.
   -- The work material (brief) is fenced like the history: a change after the compare started makes the answer stale.
+  PERFORM fusion_compare_material_guard(p_actor_id,s.id);
   IF s.revision<>fc.history_revision
     OR fc.config->>'materialRevision' IS DISTINCT FROM fusion_compare_material_token(p_actor_id,s.id) OR (s.active_execution IS NOT NULL AND NOT EXISTS(SELECT 1 FROM runtime_executions old_execution
       JOIN bill2_runs old_run ON old_run.id=old_execution.billing_run_id

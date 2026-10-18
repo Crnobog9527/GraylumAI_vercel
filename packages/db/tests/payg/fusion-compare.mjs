@@ -213,6 +213,12 @@ export async function fusionCompareCases({db,Client,connectionString,report,crea
   const noMaterial = await tokenOf();
   await db.query("INSERT INTO runtime_scope_material(session_id,revision,request_id,request,content,content_hash) VALUES($1,1,$2,'{}','{\"brief\":\"x\"}','h1')",[session,randomUUID()]);
   const withMaterial = await tokenOf();
+  const guard = () => db.query('SELECT fusion_compare_material_guard($1,$2)',[actor,session]);
+  // This brief has no authorized source: an ordinary turn refuses it, so does a compare (begin and adopt), before any record or charge.
+  await assert.rejects(guard(),/RUNTIME_MATERIAL_UNAVAILABLE/);
+  const beforeRecords = await count(db,'SELECT count(*) v FROM fusion_compares WHERE actor_id=$1',[actor]);
+  await assert.rejects(begin({...request(),historyRevision:'2',config:{models:models.slice(0,2),skill:null,materialRevision:withMaterial}}),/RUNTIME_MATERIAL_UNAVAILABLE/);
+  assert.equal(await count(db,'SELECT count(*) v FROM fusion_compares WHERE actor_id=$1',[actor]),beforeRecords,'a refused start records nothing');
   await db.query('UPDATE runtime_scope_material SET revoked=true WHERE session_id=$1',[session]);
   const revoked = await tokenOf();
   assert.notEqual(withMaterial,noMaterial);assert.notEqual(revoked,withMaterial,'a revocation changes the token although the revision stays');
