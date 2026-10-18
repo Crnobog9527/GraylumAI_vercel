@@ -122,6 +122,19 @@ describe('benchmark classification', () => {
       .toEqual({ category: 'imitable', qualified: true, excluded: null });
   });
 
+  it('keeps old keyword hits selectable until benchmark_fetch verifies 30-day activity', () => {
+    const oldHit = metrics(50_000, 45);
+    const pending = classifyAccount(oldHit, growth, now, 'discovery');
+    expect(pending).toEqual({ category: null, qualified: false, excluded: 'ACTIVE_CHECK_PENDING' });
+    expect(selectCandidates([{ key: 'tiktok:active', metrics: oldHit, classification: pending }], true).selectable)
+      .toHaveLength(1);
+
+    const fetched = classifyAccount(oldHit, growth, now, 'fetched');
+    expect(fetched).toMatchObject({ qualified: false, excluded: 'INACTIVE_30_DAYS' });
+    expect(selectCandidates([{ key: 'tiktok:active', metrics: oldHit, classification: fetched }], true).selectable)
+      .toHaveLength(0);
+  });
+
   it('marks fast rising by the earliest obtainable post within N days or views ≥ followers × K', () => {
     const shortN = { ...growth, maxFirstPostAgeDays: 20 };
     expect(classifyAccount(metrics(20_000, 1, { count: 10 }), shortN, now).category).toBe('fast_rising');

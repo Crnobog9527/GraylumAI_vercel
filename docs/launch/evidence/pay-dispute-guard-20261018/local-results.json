@@ -1,7 +1,7 @@
 {
   "capturedAt": "2026-10-19",
-  "migrationFile": "0311_pay_dispute_guard.sql",
-  "migrationSha256": "677f2a889dc94510e63a3bbe9de8ec3ed212975c6cba1a00defcb17695337fe2",
+  "migrationFile": "0308_pay_dispute_guard.sql",
+  "migrationSha256": "3061cf9b7e7399ed3e903803ce295f56501effcd07a7a08167ba743ed75ce9da",
   "disputeSqlChecks": [
     "multiple disputes on one payment share one hold; only the final withdrawal releases it",
     "duplicate-event; other sources stay spendable; failed calls stay attributed; withdrawal exactly once",
