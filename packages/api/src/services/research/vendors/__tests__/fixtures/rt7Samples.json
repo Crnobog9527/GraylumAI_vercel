@@ -1,0 +1,175 @@
+{
+ "xhsProfile": {
+  "code": 200,
+  "data": {
+   "code": 0,
+   "success": true,
+   "data": {
+    "userid": "0123456789abcdef01234567",
+    "nickname": "测试账号A",
+    "red_id": "10000001",
+    "fans": 855,
+    "follows": 22,
+    "note_num_stat": {
+     "liked": 3340,
+     "posted": 15,
+     "collected": 1002
+    },
+    "interactions": [
+     {
+      "type": "follows",
+      "count": 22
+     },
+     {
+      "type": "fans",
+      "count": 855
+     },
+     {
+      "type": "interaction",
+      "count": 4342
+     }
+    ]
+   }
+  }
+ },
+ "xhsNotes": {
+  "code": 200,
+  "data": {
+   "code": 0,
+   "success": true,
+   "data": {
+    "has_more": true,
+    "notes": [
+     {
+      "id": "6a0000000000000000000000",
+      "display_title": "测试笔记0",
+      "title": "测试笔记0",
+      "create_time": 1790478902,
+      "likes": 84,
+      "comments_count": 4,
+      "share_count": 0,
+      "collected_count": 37,
+      "view_count": 0,
+      "type": "video",
+      "user": {
+       "userid": "0123456789abcdef01234567",
+       "nickname": "测试账号A"
+      }
+     },
+     {
+      "id": "6a0000000000000000000001",
+      "display_title": "测试笔记1",
+      "title": "测试笔记1",
+      "create_time": 1789554575,
+      "likes": 41,
+      "comments_count": 6,
+      "share_count": 4,
+      "collected_count": 12,
+      "view_count": 0,
+      "type": "video",
+      "user": {
+       "userid": "0123456789abcdef01234567",
+       "nickname": "测试账号A"
+      }
+     },
+     {
+      "id": "6a0000000000000000000002",
+      "display_title": "测试笔记2",
+      "title": "测试笔记2",
+      "create_time": 1788417661,
+      "likes": 68,
+      "comments_count": 1,
+      "share_count": 6,
+      "collected_count": 17,
+      "view_count": 0,
+      "type": "video",
+      "user": {
+       "userid": "0123456789abcdef01234567",
+       "nickname": "测试账号A"
+      }
+     }
+    ]
+   }
+  }
+ },
+ "douyinProfile": {
+  "code": 200,
+  "data": {
+   "status_code": 0,
+   "user": {
+    "uid": "1",
+    "sec_uid": "MS4wLjABAAAAaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "unique_id": "test_a",
+    "nickname": "测试账号A",
+    "follower_count": 43909,
+    "following_count": 1260,
+    "aweme_count": 333,
+    "total_favorited": 316452
+   }
+  }
+ },
+ "douyinPosts": {
+  "code": 200,
+  "data": {
+   "status_code": 0,
+   "has_more": 1,
+   "max_cursor": 1,
+   "aweme_list": [
+    {
+     "aweme_id": "7400000000000000000",
+     "desc": "测试视频0",
+     "create_time": 1720271493,
+     "author": {
+      "sec_uid": "MS4wLjABAAAAaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "unique_id": "test_a",
+      "nickname": "测试账号A",
+      "uid": "1"
+     },
+     "statistics": {
+      "play_count": 0,
+      "digg_count": 5812,
+      "comment_count": 914,
+      "share_count": 1263,
+      "collect_count": 1993
+     }
+    },
+    {
+     "aweme_id": "7400000000000000001",
+     "desc": "测试视频1",
+     "create_time": 1734531012,
+     "author": {
+      "sec_uid": "MS4wLjABAAAAaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "unique_id": "test_a",
+      "nickname": "测试账号A",
+      "uid": "1"
+     },
+     "statistics": {
+      "play_count": 0,
+      "digg_count": 4980,
+      "comment_count": 629,
+      "share_count": 1627,
+      "collect_count": 3338
+     }
+    },
+    {
+     "aweme_id": "7400000000000000002",
+     "desc": "测试视频2",
+     "create_time": 1720530444,
+     "author": {
+      "sec_uid": "MS4wLjABAAAAaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "unique_id": "test_a",
+      "nickname": "测试账号A",
+      "uid": "1"
+     },
+     "statistics": {
+      "play_count": 0,
+      "digg_count": 8364,
+      "comment_count": 1126,
+      "share_count": 3364,
+      "collect_count": 2424
+     }
+    }
+   ]
+  }
+ }
+}

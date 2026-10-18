@@ -186,6 +186,7 @@ export async function runSubcall(context: SubcallContext, request: SupplierReque
     try { await context.evidence.finish(operationId, opened.token, OPERATION_STATE[result.outcome], {
       vendor: result.vendor, route: result.route, outcome: result.outcome, reason: result.reason, fetchedAt: result.fetchedAt,
       items: result.items, truncated: result.truncated, usage: result.usage,
+      ...(result.nextCursor ? { nextCursor: result.nextCursor } : {}),
       httpStatus: result.httpStatus, supplierMayCharge: result.supplierMayCharge, ...context.metadata,
       cost: { actual: evidence.cost === null ? null : Number(evidence.cost) },
       billing: { runId: context.billing.runId, callId: claim.callId, receipt: evidence },

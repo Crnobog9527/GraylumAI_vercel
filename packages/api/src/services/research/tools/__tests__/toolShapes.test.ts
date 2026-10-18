@@ -64,6 +64,14 @@ describe('round subcall budget', () => {
     expect(subcallNeed('propose_keywords', { keywords: ['a', 'b', 'c'] }, config).subcalls).toBe(0);
   });
 
+  it('gives a benchmark account its route set plus the extra post pages of its platform', () => {
+    const fetch = (accounts: Array<{ platform: string; account: string }>) => subcallNeed('benchmark_fetch',
+      researchToolArgs.benchmark_fetch.parse({ accounts, source: { kind: 'candidate', confirmationId: id } }), config).subcalls;
+    expect(fetch([{ platform: 'tiktok', account: 'alice' }])).toBe(3);
+    expect(fetch([{ platform: 'xiaohongshu', account: '0123456789abcdef01234567' }])).toBe(4);
+    expect(fetch([{ platform: 'xiaohongshu', account: '0123456789abcdef01234567' }, { platform: 'tiktok', account: 'alice' }])).toBe(7);
+  });
+
   it('rejects a general lookup that does not fit and caps benchmark tools', () => {
     expect(admitSubcalls({ mode: 'all_or_nothing', subcalls: 3 }, 2)).toEqual({ allowed: 0, exhausted: true });
     expect(admitSubcalls({ mode: 'all_or_nothing', subcalls: 3 }, 3)).toEqual({ allowed: 3, exhausted: false });

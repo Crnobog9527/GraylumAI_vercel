@@ -23,7 +23,7 @@ export function stableResearchId(...parts: string[]): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
 }
 export function socialRequest(ctx: ResearchToolContext, platform: SocialPlatform, kind: SocialKind,
-  input: { account?: string; keyword?: string; postId?: string }): SupplierRequest | null {
+  input: { account?: string; keyword?: string; postId?: string; cursor?: string }): SupplierRequest | null {
   const route = selectRoute(ctx.config, platform, kind, 'benchmark');
   if (!route.ok || route.vendor !== 'tikhub') return null;
   return { vendor: 'tikhub', route: route.route, call: { platform, kind, ...input, limit: 30 } };
