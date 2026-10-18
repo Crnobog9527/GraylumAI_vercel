@@ -102,7 +102,7 @@ export default function LibraryPage(){
   <nav className={styles.tabs} role="tablist" aria-label="资料库分类">
    <button type="button" role="tab" aria-selected={tab==='topics'} onClick={()=>chooseTab('topics')}>选题与稿件</button>
    <button type="button" role="tab" aria-selected={tab==='documents'} onClick={()=>chooseTab('documents')}>我的文档</button>
-   <button type="button" role="tab" aria-selected={tab==='evidence'} onClick={()=>chooseTab('evidence')}>取数记录</button>
+   <button type="button" role="tab" aria-selected={tab==='evidence'} onClick={()=>chooseTab('evidence')}>搜索记录</button>
   </nav>
   <p className={styles.intro}>{INTRO[tab]}</p>
   {tab==='evidence'&&<div className={styles.evidencePane}><LibraryEvidence/></div>}

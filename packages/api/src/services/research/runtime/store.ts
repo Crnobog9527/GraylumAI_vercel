@@ -184,6 +184,7 @@ export function databaseRuntimeResearchStore(deps: {
     },
     readOperation,
     readPlan: (id: string) => read<RuntimePlan | null>('plan', id),
+    readCard: (id: string) => read<SelectionCard | null>('card', id),
     createCard: (id: string, payload: CardPayload) => rpc<SelectionCard>('research_card_create', { a, p_card: id, s, e, p: payload }),
     async confirmCard(id: string, payload: { selected: string[]; edits?: Record<string, string>; additions?: string[] }) {
       // confirm RPC checks actor ownership, while this fence also enforces the requested session.

@@ -61,6 +61,17 @@
 | 定价与核对 | contract/adapter 版本、模型/工具/线路 ID、冻结兑换率/倍率/报价/上限、usage、覆盖组、最终性、冲突观测、结果/取消事实、查询尝试/来源/时间、收据验证及完整性摘要 | 提示词、原回答、工具参数/结果正文、URL 查询串、Skill 中混入的用户内容、SDK response 的 choices/message/reasoning |
 | 来源保护 | 原始预扣关联、grant/周期、reversed/quarantine/termination 状态、退款和冲正关系、一次终态/一次消费标识 | 与解释本笔收费无关的其他用户数据 |
 
+PAY-DISPUTE-GUARD D1（迁移 0308）追加财务保留字段：
+
+- `payment_disputes`：内部拒付/订单/订阅编号、provider 与商户命名空间和 test/live 模式、规范付款键及 Stripe 原始编号、原付款时间、事件/开启/结案/截止时间、金额/币种、枚举原因/状态/结果、冻结/撤回/退款取代及停止续费事实、动作次数和管理员内部编号（含站外结案操作者及时间 external_resolved_by / external_resolved_at）。
+- `payment_dispute_event_receipts`：商户命名空间/模式/事件编号、拒付内部编号、事件类型、事件和处理时间。
+- `payment_dispute_fund_events`：拒付内部编号、商户命名空间/模式/事件编号、扣回或返还、金额/币种/发生时间和结算交易编号。
+- 来源上的 `dispute_frozen` / `dispute_frozen_credits` / `dispute_refund_due`（退款取代冻结后在途退回的待扣回额）、订单上的规范付款/订阅锁键、`dispute_refund_status` / `dispute_refund_claimed_at` / `dispute_refund_id`（未发放续费的全额退款状态、首次派发时间和唯一退款编号），及积分流水的拒付冻结、在途调整、撤回和被退款取代标记，均只用于来源核对。
+
+三张表不存原始事件、证据正文、联系方式或自由文本，注销时按 `payment_orders` 同样保留。
+保留期从原交易年度结束起算三年；未结案仅暂停删除，结案不重置期限。
+到期先删事件回执和资金流水再删主记录；清理执行器按 2026-10-12 决定在上线后实施，本 PR 不宣称已实现到期删除。
+
 PAY-COMMON PR-1（暂定迁移 `0161_pay_common_contract.sql`）追加如下受限白名单：
 
 - `payment_orders`：`payment_channel`、`merchant_namespace`、`payment_mode`、`purchase_request_id`、

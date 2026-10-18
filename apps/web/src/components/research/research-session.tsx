@@ -117,7 +117,7 @@ export function ResearchSessionBenchmarks({ sessionId, disabled = false, onRefre
         setLock("sent");
       })}>
       {qualified < REPORT_MIN_QUALIFIED && <p className={styles.hint}>
-        生成定位报告需要至少 {REPORT_MIN_QUALIFIED} 个合格的对标账号，目前 {qualified} 个。可以换关键词再找，或直接贴对标账号的主页链接。</p>}
+        生成定位报告需要至少 {REPORT_MIN_QUALIFIED} 个可以照着学的对标账号，目前 {qualified} 个。可以换关键词再找，或直接贴对标账号的主页链接。</p>}
     </BenchmarkTable>
   );
 }

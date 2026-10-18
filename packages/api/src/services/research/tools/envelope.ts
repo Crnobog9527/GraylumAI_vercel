@@ -30,6 +30,10 @@ export interface ToolEnvelope {
   note: string;
   continue?: boolean;
   discoveryId?: string;
+  message?: string;
+  nextStep?: string;
+  availableCandidates?: number;
+  requiredCandidates?: number;
 }
 
 /** Adapter outcome → tool status. A confirmed failure and an unknown result both read as `unavailable`. */
@@ -67,6 +71,10 @@ export interface EnvelopeInput {
   truncated?: boolean;
   continue?: boolean;
   discoveryId?: string;
+  message?: string;
+  nextStep?: string;
+  availableCandidates?: number;
+  requiredCandidates?: number;
 }
 
 /**
@@ -81,6 +89,10 @@ export function toolEnvelope(input: EnvelopeInput, maxBytes = TOOL_RESULT_MAX_BY
     items: [], truncated: input.truncated === true, note: NOTES[input.status],
     ...(input.continue !== undefined ? { continue: input.continue } : {}),
     ...(input.discoveryId ? { discoveryId: input.discoveryId } : {}),
+    ...(input.message ? { message: input.message } : {}),
+    ...(input.nextStep ? { nextStep: input.nextStep } : {}),
+    ...(input.availableCandidates !== undefined ? { availableCandidates: input.availableCandidates } : {}),
+    ...(input.requiredCandidates !== undefined ? { requiredCandidates: input.requiredCandidates } : {}),
   };
   const full = (input.items ?? []).map((item, index) => ({
     ...(input.evidenceId ? { ref: `${input.evidenceId}#${index + 1}` } : {}),

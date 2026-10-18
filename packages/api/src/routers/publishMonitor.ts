@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {publishMonitorReviewRouter} from './publishMonitorReview';
 import { TRPCError } from '@trpc/server';
 import { protectedProcedure, router } from '../trpc';
 import { readMembershipEntitlements } from '../services/membershipEntitlements';
@@ -29,6 +30,7 @@ async function dataWindow(ctx: Ctx): Promise<number> {
 }
 
 export const publishMonitorRouter = router({
+  review: publishMonitorReviewRouter,
   settings: protectedProcedure.query(({ ctx }) =>
     safe(ctx, () => readPublishMonitorSettings(ctx.supabaseAdmin, ctx.profileId))),
   // Weekly automatic review is a Gold entitlement (Master Plan §2.1 item 51); turning it off is always allowed,
