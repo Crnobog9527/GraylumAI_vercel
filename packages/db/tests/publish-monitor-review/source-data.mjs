@@ -20,6 +20,11 @@ export async function sourceDataCases({c,report,gold,pro}){
  assert.deepEqual((await svc('SELECT publish_monitor_review_supplement($1,14) v',[pro])).posts,[]);
  const saved={status:'available',window_days:14,gold_review:true,source_connections:[conn]};
  assert.equal(await svc('SELECT runtime_workspace_posts_visible($1,$2) v',[gold,saved]),true);
+ await c.query("UPDATE membership_plans SET allow_benchmark_monitor=false WHERE level='gold'");
+ assert.equal(await svc('SELECT runtime_workspace_posts_visible($1,$2) v',[gold,saved]),false);
+ assert.deepEqual((await svc('SELECT publish_monitor_review_supplement($1,14) v',[gold])).posts,[]);
+ await c.query("UPDATE membership_plans SET allow_benchmark_monitor=true WHERE level='gold'");
+ report.checks.push('benchmark permission is the current membership flag, including a Gold tier with the flag revoked');
  await c.query("UPDATE profiles SET membership_level='pro' WHERE id=$1",[gold]);
  assert.equal(await svc('SELECT runtime_workspace_posts_visible($1,$2) v',[gold,saved]),false);
  assert.deepEqual((await svc('SELECT publish_monitor_review_supplement($1,14) v',[gold])).posts,[]);

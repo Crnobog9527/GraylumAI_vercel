@@ -173,12 +173,13 @@ END $$;
 -- Stored Gold benchmark posts and own account snapshots. No refresh and no provider calls.
 CREATE OR REPLACE FUNCTION public.publish_monitor_review_supplement(a uuid,p_window_days integer) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
-DECLARE gold boolean;since timestamptz;out jsonb;
+DECLARE gold boolean;since timestamptz;out jsonb;days integer;
 BEGIN
- PERFORM report_membership_check(a);
+ days:=runtime_workspace_post_window(a);
  IF p_window_days NOT BETWEEN 1 AND 90 THEN RAISE EXCEPTION 'PUBLISH_MONITOR_INPUT_INVALID';END IF;
- SELECT membership_level='gold' INTO gold FROM profiles WHERE id=a;
- IF NOT gold AND p_window_days>30 THEN RAISE EXCEPTION 'PUBLISH_MONITOR_ENTITLEMENT_REQUIRED';END IF;
+ SELECT coalesce(bool_or(mp.allow_benchmark_monitor),false) AND p.membership_level='gold' INTO gold
+  FROM profiles p JOIN membership_plans mp ON mp.level=p.membership_level WHERE p.id=a GROUP BY p.membership_level;
+ IF p_window_days>days THEN RAISE EXCEPTION 'PUBLISH_MONITOR_ENTITLEMENT_REQUIRED';END IF;
  since:=clock_timestamp()-make_interval(days=>p_window_days);
  WITH accounts AS (SELECT c.id,c.platform FROM social_connections c WHERE c.actor_id=a AND c.role='benchmark'
   AND c.status='connected' AND c.consent_read AND gold),
@@ -214,7 +215,8 @@ BEGIN
   IF array_length(string_to_array(d,anchor),1)<>2 THEN RAISE EXCEPTION 'PUBLISH_REVIEW_VISIBILITY_MISMATCH';END IF;
   EXECUTE replace(d,anchor,anchor||$p$
  -- PR6 benchmark rights
- IF p_result->>'gold_review'='true' AND NOT coalesce((SELECT membership_level='gold' FROM profiles WHERE id=p_actor_id),false)
+ IF p_result->>'gold_review'='true' AND NOT coalesce((SELECT p.membership_level='gold' AND bool_or(mp.allow_benchmark_monitor)
+  FROM profiles p JOIN membership_plans mp ON mp.level=p.membership_level WHERE p.id=p_actor_id GROUP BY p.membership_level),false)
   THEN RETURN false;END IF;$p$);
  END IF;
 END $$;

@@ -18,7 +18,7 @@ try{
  await c.query(read('packages/db/tests/erasure-b2a/fixture.sql'));
  await c.query(read('packages/db/tests/workspace-positioning/fixture.sql'));
  await c.query(`INSERT INTO membership_plans(name,level,allow_fusion_review,allow_fusion_compare,library_storage_bytes,
-  own_data_window_days,allow_weekly_auto_review) VALUES('PR6 Gold','gold',true,true,0,90,true),('PR6 Pro','pro',false,false,0,30,false)`);
+  own_data_window_days,allow_weekly_auto_review,allow_benchmark_monitor) VALUES('PR6 Gold','gold',true,true,0,90,true,true),('PR6 Pro','pro',false,false,0,30,false,false)`);
  const gold=await one('SELECT ws_test.actor() v'),pro=await one('SELECT ws_test.actor() v');
  await c.query("UPDATE profiles SET membership_level='gold',credits=100 WHERE id=$1",[gold]);
  await c.query("UPDATE profiles SET membership_level='pro',credits=100 WHERE id=$1",[pro]);
