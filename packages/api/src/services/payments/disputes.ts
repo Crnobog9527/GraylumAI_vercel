@@ -145,7 +145,8 @@ export async function reconcilePaymentDisputes(db: SupabaseClient, stripe: Strip
       if (kind === 'stops') query = query.not('order_id', 'is', null)
         .or('renewal_stop_state.eq.pending,and(renewal_stop_state.eq.manual,stop_attempts.lt.3)');
       else if (kind === 'manual-stop-alerts') query = query.not('order_id', 'is', null)
-        .eq('renewal_stop_state', 'manual').gte('stop_attempts', 3).is('stop_alerted_at', null);
+        .eq('renewal_stop_state', 'manual').gte('stop_attempts', 3)
+        .or('stop_alerted_at.is.null,and(freeze_state.eq.frozen,freeze_alerted_at.is.null),and(closed_at.not.is.null,closed_alerted_at.is.null)');
       else if (kind === 'unmatched') query = query.is('order_id', null);
       else query = query.not('order_id', 'is', null).not('renewal_stop_state', 'in', '(pending,manual)')
         .or('alerted_at.is.null,and(freeze_state.eq.frozen,freeze_alerted_at.is.null),and(closed_at.not.is.null,closed_alerted_at.is.null)');
