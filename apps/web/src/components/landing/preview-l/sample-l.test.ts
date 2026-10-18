@@ -450,6 +450,8 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     })));
     expect(html).not.toContain('样稿切换');
     expect(html).not.toContain('/landing/preview/');
+    // One h1 (the first screen's); the product demos' own headings are plain elements there (review on #1088).
+    expect(html.match(/<h1[\s>]/g)).toHaveLength(1);
     for (const href of J_PENDING_PAGES) {
       if (linkReady(href)) continue;
       expect(html).not.toContain(`href="${href}"`);
