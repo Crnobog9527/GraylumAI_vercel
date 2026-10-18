@@ -5,7 +5,7 @@ import { logger } from '../lib/logger';
 
 const ACTOR = '00000000-0000-4000-8000-0000000000aa';
 const ID = '00000000-0000-4000-8000-000000000001';
-function harness(role: 'admin' | 'user' | 'anonymous', error: unknown = null, privileged = true) {
+function harness(role: 'admin' | 'user' | 'anonymous', error: unknown = null, privileged = true, records = [{ id: ID }]) {
   const filters: unknown[] = [], calls: unknown[] = [];
   const profile: Record<string, unknown> = {};
   profile.select = profile.eq = () => profile;
@@ -14,7 +14,10 @@ function harness(role: 'admin' | 'user' | 'anonymous', error: unknown = null, pr
   const query: Record<string, unknown> = {};
   query.select = (fields: string) => { filters.push(['select', fields]); return query; };
   query.eq = (field: string, value: unknown) => { filters.push([field, value]); return query; };
-  query.order = () => query;
+  query.order = (field: string, options: unknown) => { filters.push(['order', field, options]); return query; };
+  query.range = async (from: number, to: number) => {
+    filters.push(['range', from, to]); return { data: records.slice(from, to + 1), error };
+  };
   query.limit = async () => ({ data: [{ id: ID }], error });
   const db = { from: (table: string) => table === 'profiles' ? profile : query,
     rpc: async (name: string, args: unknown) => {
@@ -58,4 +61,14 @@ it('does not expose database errors or run financial operations without privileg
   const denied = harness('admin', null, false);
   await expect(denied.caller.list()).rejects.toMatchObject({ code: 'INTERNAL_SERVER_ERROR' });
   expect(denied.calls).toEqual([]); expect(denied.filters).toEqual([]);
+});
+
+it('keeps an older frozen dispute reachable beyond 100 newer records', async () => {
+  const records = Array.from({ length: 101 }, (_, n) => ({ id: n === 100 ? ID : `newer-${n}` }));
+  const f = harness('admin', null, true, records);
+  expect(await f.caller.list()).toHaveLength(100);
+  expect(await f.caller.list({ offset: 100 })).toEqual([{ id: ID }]);
+  expect(f.filters).toContainEqual(['range', 100, 199]);
+  expect(f.filters).toContainEqual(['order', 'id', { ascending: false }]);
+  await expect(f.caller.list({ offset: -1 })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
 });

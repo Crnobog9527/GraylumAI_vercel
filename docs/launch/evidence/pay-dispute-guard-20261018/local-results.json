@@ -1,7 +1,7 @@
 {
   "capturedAt": "2026-10-19",
   "migrationFile": "0311_pay_dispute_guard.sql",
-  "migrationSha256": "97fcf5b36f0eb0c15ceb734cfd978761db88af1f99da4885ec654dd7d5b9dbc3",
+  "migrationSha256": "548a44e355c16637b87bf334e4136d1c28fb4e8a9395f2ce5ca4f89eb102d5c3",
   "disputeSqlChecks": [
     "multiple disputes on one payment share one hold; only the final withdrawal releases it",
     "duplicate-event; other sources stay spendable; failed calls stay attributed; withdrawal exactly once",
@@ -23,6 +23,8 @@
     "real two-session payment/dispute race: mapping is rechecked under the same canonical payment lock",
     "admin and service-role allow/deny boundaries",
     "withdrawn dispute permits a fresh valid package refund; active holds and unexplained negative adjustments still reject",
+    "conflicting order hint rejected; canonical owner frozen, unrelated owner balance and mapping untouched",
+    "missing subscription derived and locked; conflict rejected; late match, pending claim and later event backfill identity",
     "current paid period loses membership during freeze and regains it on withdrawal",
     "withdrawn current-period dispute permits fresh monthly refund approval and claim without loosening active-hold guard",
     "previous-period dispute preserves an already delivered next period and its credits",
@@ -37,13 +39,13 @@
   "baseline": {
     "image": "postgres@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73",
     "failed": null,
-    "steps": 310,
-    "passed": 310,
+    "steps": 311,
+    "passed": 311,
     "bridges": [
       "0143_ticket_grants_and_own_rls.sql"
     ],
-    "repeated": 241,
-    "groups": 2602,
+    "repeated": 242,
+    "groups": 2622,
     "accountOpenAudit": [],
     "builtFingerprint": "written",
     "convergenceReapply": "unchanged",
@@ -105,7 +107,7 @@
     ]
   },
   "limits": [
-    "BILL2 and runtime suites ran before the final withdrawn-refund eligibility helper; final SQL suite and baseline include that helper. Exact candidate CI remains authoritative.",
-    "API full 7640 passed and 16 skipped before the final wallet-kind fix; targeted wallet/refund tests then passed 21/21. Exact candidate CI must cover the final version."
+    "BILL2 and runtime full suites ran before the final SQL mapping/subscription changes; final dispute SQL and full baseline include them. Exact candidate CI remains authoritative.",
+    "API full 7681 passed and 16 skipped includes wallet-kind and won-dispute refund eligibility; final pagination and staging synchronization followed, with targeted router 5/5 and component 4/4 passing, API/Web typecheck and lint passing. Exact candidate CI remains authoritative."
   ]
 }

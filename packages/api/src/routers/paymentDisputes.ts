@@ -13,12 +13,14 @@ export const paymentDisputesRouter = router({
       return { frozen: rows.data.length > 0 };
     } catch (error) { throw createSafeServiceUnavailableError(error, '付款状态暂时无法读取'); }
   }),
-  list: adminProcedure.query(async ({ ctx }) => {
+  list: adminProcedure.input(z.object({ offset: z.number().int().nonnegative().default(0) }).strict().optional())
+    .query(async ({ ctx, input }) => {
     try {
       if (!ctx.hasSupabaseAdminPrivileges) throw new Error('PAY_DISPUTE_DB_UNAVAILABLE');
       const rows = await ctx.supabaseAdmin.from('payment_disputes')
         .select('id,order_id,amount,currency,status,freeze_state,renewal_stop_state,evidence_due_by,source_review_required')
-        .order('opened_at', { ascending: false }).limit(100);
+        .order('opened_at', { ascending: false }).order('id', { ascending: false })
+        .range(input?.offset ?? 0, (input?.offset ?? 0) + 99);
       if (rows.error || !Array.isArray(rows.data)) throw new Error('PAY_DISPUTE_READ_UNAVAILABLE');
       return rows.data as Array<{ id: string; order_id: string | null; amount: number; currency: string; status: string;
         freeze_state: string; renewal_stop_state: string; evidence_due_by: string | null; source_review_required: boolean }>;

@@ -13,6 +13,8 @@
 - 两个本任务订阅均设置期末停止，随后独立读取确认 `cancel_at_period_end=true`。没有立即取消，没有恢复扣款。
 - 这些合成 Stripe 订单没有 staging 用户映射，不能当作部署后应用全链通过。MP 积分包、钱包年期、站内数据库与 Stripe 效果同时成立的远程验收仍未运行。
 
+Stripe 实际读回：判赢后 `charge.disputed=true`，拒付 `is_charge_refundable=true`。因此 API 退款资格新增本地全部撤回和 provider 完整身份/判赢/可退款验证；5 个相关测试文件 93 项通过，后续全量 API 7681 项通过、16 跳过。
+
 ## 本地数据库
 
 ```sh
@@ -22,9 +24,9 @@ node packages/db/tests/v3/run-workbench.mjs --bill2-core-only --without-app --sc
 ```
 
 拒付专用测试验证真实 PostgreSQL 锁、冻结来源、在途恢复、结算、退款取代、管理员权限和会员事实；PAYG 补偿夹具为合成 run/call 记录。
-完整迁移链 310/310、重复 241、2602 个结构组；收敛 unchanged，回滚 restored，cleanup PASS。
+完整迁移链 311/311、重复 242、2622 个结构组；收敛 unchanged，回滚 restored，cleanup PASS。
 BILL2 修复历史 threshold 重放遗漏后 93/93，0 skipped；运行时 431 passed、5 skipped（不带 Next 应用的配置明确跳过浏览器/应用 HTTP 用例）；私有 canary 没有进入应用日志。
-最终拒付 SQL 专用测试与指纹包含撤回后退款资格修复；BILL2/运行时全套在该最后修复前运行，最终候选以远端 CI 为准。详见 [local-results.json](./local-results.json)。
+最终拒付 SQL 专用测试与指纹包含撤回后退款资格、规范映射、订阅身份推导和回填修复；BILL2/运行时全套在该最后修复前运行，最终候选以远端 CI 为准。详见 [local-results.json](./local-results.json)。
 
 三年到期清理执行器按 Owner 既定决定上线后实施，本次只同步 DATA-ERASURE 白名单，不虚称到期删除测试通过。
 PAY-EVIDENCE 当前尚未建表，专用测试按已确认文档构造最小表，验证根订单保全、清除待删标记和结案延长 90 天；未来证据清理器须使用相同根订单锁。
@@ -33,10 +35,11 @@ PAY-EVIDENCE 当前尚未建表，专用测试按已确认文档构造最小表�
 
 本地浏览器夹具打包了实际 AdminPaymentDisputes、PaymentDisputeNotice 和 Button，只有 tRPC 返回值为合成数据，未连 staging。
 已确认：冻结提示、判赢后仍冻结、二次确认、返回不提交、确认提交一次、成功显示恢复量且续费仍停止、失败保留冻结并给出可读错误。
-截图：[成功](./ui-withdraw-success.png)、[失败](./ui-withdraw-failed.png)。夹具没有正式页面的样式环境，不作为视觉还原或部署验收。
+分页：101 条合成记录，第一页 100 条已撤回记录，第二页旧冻结记录可打开二次确认；API 回归也验证第二页返回。
+截图：[分页](./ui-pagination.png)、[成功](./ui-withdraw-success.png)、[失败](./ui-withdraw-failed.png)。夹具没有正式页面的样式环境，不作为视觉还原或部署验收。
 
 ## 未完成项
 
-- 迁移 0311 是 Owner 指定暂号；远端账本拒绝 0307–0310 空档，总控须按准备顺序最终确认，之后重新生成指纹、CI、审查。不得补空迁移或降低检查。
+- 迁移 0311 是 Owner 指定暂号；远端账本拒绝 0311 前尚未合并的编号空档，总控须按准备顺序最终确认，之后重新生成指纹、CI、审查。不得补空迁移或降低检查。
 - 当前候选完整 CI、机器人当前版本结论、审查线程归零仍须读取 GitHub 实际结果。
 - 迁移未上远程库；部署后的上述应用全链验收需要 Claude 总控安排迁移，再由 Codex 验证。当前不能宣称可合并。

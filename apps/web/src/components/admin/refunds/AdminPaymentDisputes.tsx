@@ -11,7 +11,8 @@ const statusLabel: Record<string, string> = { pending: '等待处理', frozen: '
 const label = (state: string) => statusLabel[state] ?? '待核对';
 
 export function AdminPaymentDisputes() {
-  const rows = trpc.paymentDisputes.list.useQuery();
+  const [offset, setOffset] = useState(0);
+  const rows = trpc.paymentDisputes.list.useQuery({ offset });
   const utils = trpc.useUtils();
   const [selected, setSelected] = useState<string | null>(null);
   const [message, setMessage] = useState('');
@@ -32,6 +33,13 @@ export function AdminPaymentDisputes() {
       {rows.isError ? <p role="alert">拒付记录暂时无法读取。</p> : null}
       {rows.isLoading ? <p>正在读取…</p> : null}
       {!rows.isError && !rows.isLoading && rows.data?.length === 0 ? <p>暂无付款争议。</p> : null}
+      <nav aria-label="付款争议分页" className="flex items-center gap-2">
+        <Button variant="outline" disabled={offset === 0 || rows.isFetching || withdraw.isPending}
+          onClick={() => { setOffset(n => Math.max(0, n - 100)); setSelected(null); }}>上一页</Button>
+        <span>第 {offset / 100 + 1} 页</span>
+        <Button variant="outline" disabled={rows.isError || rows.isFetching || withdraw.isPending || (rows.data?.length ?? 0) < 100}
+          onClick={() => { setOffset(n => n + 100); setSelected(null); }}>下一页</Button>
+      </nav>
       {rows.data?.map(row => (
         <article key={row.id} className="space-y-2 rounded-xl border p-4" style={{ borderColor: 'var(--border-primary)' }}>
           <p className="break-all text-sm">订单：{row.order_id ?? '等待匹配'}</p>
