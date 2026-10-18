@@ -3312,7 +3312,7 @@
   "fn:fusion_compare_adopt(uuid,uuid,integer,uuid,jsonb,jsonb)": "0be496028ac4",
   "fn:fusion_compare_begin(uuid,uuid,uuid,jsonb)": "6903cd59298e",
   "fn:fusion_compare_claim(uuid,uuid,jsonb)": "832c59481431",
-  "fn:fusion_compare_context(uuid,uuid,integer)": "fd21c59a7365",
+  "fn:fusion_compare_context(uuid,uuid,integer)": "47ee0813fa7a",
   "fn:fusion_compare_end(uuid,uuid)": "7e020b79c359",
   "fn:fusion_compare_gate(uuid,uuid,text,boolean)": "c3180aae766d",
   "fn:fusion_compare_limits(jsonb)": "0c67cf24dedd",

@@ -98,7 +98,10 @@ BEGIN
     WHERE a.available
       -- A turn that used library documents (an @ reference or a retrieval) is left out: its answer carries their text, and a
       -- sessionless compare run is not registered for the library-erasure path, so a deleted document would stay behind.
-      AND NOT EXISTS(SELECT 1 FROM runtime_library_references r WHERE r.execution_id=b.execution_id)
+      AND NOT EXISTS(WITH RECURSIVE lineage(id) AS (
+          SELECT b.execution_id
+          UNION SELECT d.dependency_id FROM runtime_history_dependencies d JOIN lineage l ON d.execution_id=l.id)
+        SELECT 1 FROM runtime_library_references r JOIN lineage l ON r.execution_id=l.id)
     ORDER BY b.revision DESC LIMIT p_limit) x;
   busy:=s.active_execution IS NOT NULL AND NOT EXISTS(SELECT 1 FROM runtime_executions old_execution
     JOIN bill2_runs old_run ON old_run.id=old_execution.billing_run_id

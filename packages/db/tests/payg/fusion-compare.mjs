@@ -224,6 +224,17 @@ export async function fusionCompareCases({db,Client,connectionString,report,crea
   await db.query("INSERT INTO runtime_library_references(execution_id,actor_id,document_id,content_version,ordinal) VALUES($1,$2,$3,1,1)",[turnExecution,actor,randomUUID()]);
   assert.deepEqual((await call(db,'fusion_compare_context',actor,session,100)).items,[],'a turn with library references is omitted');
   await db.query('DELETE FROM runtime_library_references WHERE execution_id=$1',[turnExecution]);
+  // ... and so is a turn built on such a turn (its answer is derived from the document), through the dependency lineage.
+  const other = (await db.query('SELECT id FROM runtime_executions WHERE id<>$1 ORDER BY id LIMIT 1',[turnExecution])).rows[0]?.id;
+  if (other) {
+    await db.query('INSERT INTO runtime_library_references(execution_id,actor_id,document_id,content_version,ordinal) SELECT id,actor_id,$2,1,1 FROM runtime_executions WHERE id=$1',[other,randomUUID()]);
+    await db.query('INSERT INTO runtime_history_dependencies(execution_id,dependency_id) VALUES($1,$2)',[turnExecution,other]);
+    assert.deepEqual((await call(db,'fusion_compare_context',actor,session,100)).items,[],'a turn derived from a library turn is omitted');
+    await db.query('DELETE FROM runtime_history_dependencies WHERE execution_id=$1 AND dependency_id=$2',[turnExecution,other]);
+    await db.query('DELETE FROM runtime_library_references WHERE execution_id=$1',[other]);
+    assert.equal((await call(db,'fusion_compare_context',actor,session,100)).items.length,2);
+    report.checks.push('the compare context omits turns that used library documents, directly or through the dependency lineage');
+  }
   assert.deepEqual(context.items.map(x=>x.item.role),['user','assistant']);
   assert.equal(context.items[0].item.content,question);
   assert.equal(context.items[1].item.content[0].text,answer);
