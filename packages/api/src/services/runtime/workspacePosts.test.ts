@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {describe,it,expect,vi} from 'vitest';
-import {admitOwnPosts,filterPostEntries,NO_ENTITLEMENT,ownPostsResult,resolvePostSource} from './workspacePosts';
+import {admitOwnPosts,filterPostEntries,NO_ENTITLEMENT,OWN_POSTS_RESERVE,ownPostsResult,resolvePostSource} from './workspacePosts';
 import type {PublishMonitorData} from '../publishMonitor/data';
 import {executorRpc} from './executorRpc';
 import {postgresJsonbBytes} from './payloadSize';
@@ -47,6 +47,15 @@ describe('my_posts saved data',()=>{
    const result=ownPostsResult({...data(),posts},now);
    expect(result.kind).toBe('my_posts');expect((result.posts as unknown[]).length).toBeGreaterThan(0);
    expect(postgresJsonbBytes(result)).toBeLessThanOrEqual(12000);
+  }
+ });
+ it('fits two escaped SDK tool outputs inside their admission reserve',()=>{
+  for(const char of ['"','\\','\n']){
+   const posts=Array.from({length:30},(_,i)=>({...post(String(i)),titleExcerpt:char.repeat(120)}));
+   const result=ownPostsResult({...data(),posts},now);
+   const outputs=[1,2].map(n=>({type:'function_call_output',call_id:String(n).repeat(256),output:JSON.stringify(result)}));
+   expect(Buffer.byteLength(JSON.stringify(outputs))).toBeLessThanOrEqual(OWN_POSTS_RESERVE);
+   expect((result.posts as unknown[]).length).toBeGreaterThan(0);
   }
  });
  it('free users do not read data, and readData is the only data RPC for paid users; no exchange or billing',async()=>{
