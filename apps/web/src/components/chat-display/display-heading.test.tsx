@@ -1,5 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { renderToStaticMarkup } from 'react-dom/server';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { SpacePanel, UploadPanel } from '@/components/library/my-documents-view';
 import { JuryReader } from '@/components/landing/preview-jury/JuryReader';
@@ -55,5 +57,12 @@ describe('Markdown headings in an example', () => {
     const demo = renderToStaticMarkup(<AsDemo><MessageMarkdown text={text} /></AsDemo>);
     expect(demo).not.toMatch(/<h[1-6][ >]/);
     expect(demo).toContain('<div data-demo-heading="h2">第一章</div>');
+  });
+
+  it('keeps the chapter list\'s offset for example headings too, so a picked chapter is not under the sticky bar', () => {
+    const css = readFileSync(join(__dirname, 'report-outline.module.css'), 'utf8');
+    const rules = css.match(/\.body :is\([^)]*\)\{scroll-margin-top:\d+px\}/g) ?? [];
+    expect(rules).toHaveLength(2);
+    for (const rule of rules) for (const level of ['h1', 'h2', 'h3']) expect(rule).toContain(`[data-demo-heading=${level}]`);
   });
 });
