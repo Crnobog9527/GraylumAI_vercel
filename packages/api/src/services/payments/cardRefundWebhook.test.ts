@@ -39,6 +39,19 @@ describe('R7: external refunds of wallet one-time memberships (0298)', () => {
     mocks.find.mockReset(); mocks.error.mockReset(); mocks.monthly.mockReset().mockResolvedValue({ handled: false });
     mocks.ref.mockReset().mockResolvedValue({ order_id: 'order' });
   });
+  it.each(['wechat_pay', 'alipay'])('leaves an ordinary %s pack refund on its existing path; only converts a dispute hold', async method => {
+    mocks.find.mockResolvedValue({ order: { id: 'order', item_type: 'credit_package', payment_method: method },
+      paymentId: 'pi_1', paymentIntentId: 'pi_1', kind: 'pack' });
+    for (const held of [false, true]) {
+      const f = fixture([refund()]);
+      const chain = { select: () => chain, eq: () => chain,
+        limit: async () => ({ data: held ? [{ id: 'dispute' }] : [], error: null }) };
+      f.db.from.mockImplementation((() => chain) as never);
+      expect(await f.run({ refundId: 're_1' })).toBe(held);
+      if (held) expect(f.db.rpc).toHaveBeenCalledWith('pay_stripe_mp_record_external_refund', expect.any(Object));
+      else expect(f.db.rpc).not.toHaveBeenCalled();
+    }
+  });
   it('looks the order up with wallet memberships included and records the refund against it, in live mode', async () => {
     mocks.find.mockResolvedValue({ order: { id: 'order', item_type: 'membership_plan', payment_method: 'alipay' },
       paymentId: 'pi_1', paymentIntentId: 'pi_1', kind: 'wallet_membership' });
