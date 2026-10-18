@@ -2,7 +2,8 @@
 import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { PositioningClassifier } from '../runtime/positioningGate';
-import { admitCompareGroup, assertCompareAllowed, buildCompareColumns, compareRpc, type CompareAdmitted } from './compareAdmission';
+import { decimal } from '../bill2/decimal';
+import { admitCompareGroup, assertCompareAllowed, assertQuoteCovers, buildCompareColumns, compareRpc, type CompareAdmitted } from './compareAdmission';
 import { judgeCompareGate, readCompareGate, staticCompareGate } from './compareGate';
 import { compareRequest, snapshotHash, workspaceDependencies, type CompareParts } from './compareSnapshot';
 
@@ -14,10 +15,15 @@ export type CompareDeps = { admin: SupabaseClient; actorId: string; env?: Record
   refusePositioning: () => never;
   /** The platform OpenRouter key bound to the window account, for Decisions; undefined means "unavailable". */
   decisionsKey: () => Promise<string | undefined>;
-  classify?: PositioningClassifier };
+  classify?: PositioningClassifier;
+  /** The ordinary per-user message rate limit (newWorkGate.message): throws when the user is over it. Called once per new
+   * request, before the paid judgement, so a refused or blocked request cannot be repeated without bound. */
+  rateLimit: () => Promise<void> };
 export type CompareChoice = { sessionId: string; historyRevision: number; modelIds: string[]; parts: CompareParts };
 export type CompareEstimate = { credits: number; columns: Array<{ modelId: string; credits: number; usd: string }>;
-  tooLarge: string[]; refundCapReached: boolean };
+  tooLarge: string[]; refundCapReached: boolean;
+  /** The columns together would exceed the administrator's single-compare budget: the page offers fewer models. */
+  overBudget: boolean };
 
 const sha = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 /** The estimate is always priced with the positioning fallback rule included: it is the larger of the two possible
@@ -31,7 +37,8 @@ export async function estimateCompare(deps: CompareDeps, choice: CompareChoice):
   const { refundCapReached } = staticCompareGate(gate, choice.parts.skill, deps.refusePositioning);
   const built = await buildCompareColumns({ admin: deps.admin, actorId: deps.actorId, modelIds: choice.modelIds,
     request: upperRequest(choice.parts), answerTokens: settings.answerOutputTokens, dispatchMinutes: settings.dispatchMinutes, env: deps.env });
-  return { credits: built.totalCredits, tooLarge: built.tooLarge, refundCapReached,
+  const overBudget = !settings.maxBudgetUsd || built.totalUsd > decimal(settings.maxBudgetUsd);
+  return { credits: built.totalCredits, tooLarge: built.tooLarge, refundCapReached, overBudget,
     columns: built.columns.map(column => ({ modelId: column.modelId, credits: column.upperCredits, usd: column.upperUsd })) };
 }
 
@@ -39,21 +46,28 @@ export type CompareStarted =
   | { state: 'claimed' | 'waiting_credits'; compareId: string; group: CompareAdmitted; claim: unknown }
   | { state: 'processing'; compareId: string };
 
-type RecordView = { compareId: string; state: string; gateVerdict: string | null; groupId: string | null; created?: boolean; snapshotHash?: string };
+type RecordView = { compareId: string; state: string; gateVerdict: string | null; gateFallback?: boolean | null; groupId: string | null;
+  created?: boolean; snapshotHash?: string };
 
 /** Records the request, judges positioning once, then admits and claims the group. `shown` is the estimate the user agreed
  * to; the group never holds more than it. A repeat of the same request id never judges again and returns the same group. */
-export async function startCompare(deps: CompareDeps, choice: CompareChoice & { requestId: string; shown: CompareEstimate }): Promise<CompareStarted> {
+export type CompareStartInput = CompareChoice & { requestId: string; shown: Pick<CompareEstimate, 'credits' | 'columns'> };
+export async function startCompare(deps: CompareDeps, choice: CompareStartInput): Promise<CompareStarted> {
   const { admin, actorId } = deps;
   const { requestId } = choice;
   const settings = await assertCompareAllowed(admin, actorId, choice.modelIds);
   const gate = await readCompareGate(admin, actorId);
   staticCompareGate(gate, choice.parts.skill, deps.refusePositioning);
-  // Price and size with the worst-case request first: a refusal here costs nothing and records nothing.
-  const upper = await buildCompareColumns({ admin, actorId, modelIds: choice.modelIds, request: upperRequest(choice.parts),
+  // Everything that can refuse a request without a model call is checked here, before the request is recorded and before
+  // the one paid judgement: size, the single-compare budget, and the whole quote the user was shown (count, order, total
+  // and per-column credits and provider cost). The request is sized with the fallback rule only when this user can be
+  // admitted with it; a turn admitted later never carries more than this.
+  const sized = await buildCompareColumns({ admin, actorId, modelIds: choice.modelIds,
+    request: compareRequest({ ...choice.parts, positioningFallback: gate.gated && !gate.capped }),
     answerTokens: settings.answerOutputTokens, dispatchMinutes: settings.dispatchMinutes, env: deps.env });
-  if (upper.tooLarge.length) throw new Error('FUSION_COMPARE_INPUT_TOO_LARGE');
-  if (upper.totalCredits > choice.shown.credits) throw new Error('FUSION_COMPARE_PRICE_CHANGED');
+  if (sized.tooLarge.length) throw new Error('FUSION_COMPARE_INPUT_TOO_LARGE');
+  if (!settings.maxBudgetUsd || sized.totalUsd > decimal(settings.maxBudgetUsd)) throw new Error('FUSION_BUDGET_EXCEEDED');
+  assertQuoteCovers(sized.columns, choice.shown);
 
   const snapshot = snapshotHash(choice.parts);
   const skill = choice.parts.skill && { moduleId: choice.parts.skill.moduleId, revisionId: choice.parts.skill.revisionId };
@@ -77,17 +91,25 @@ export async function startCompare(deps: CompareDeps, choice: CompareChoice & { 
   if (verdict === null) {
     if (record.created === false) return { state: 'processing', compareId }; // another request of this id is judging
     // The only paid call of this start, made after the record exists so a repeat of the id cannot make a second one.
+    // Over the rate limit: end this compare (nothing held, nothing judged) so it does not occupy the user's one slot.
+    try { await deps.rateLimit(); }
+    catch (error) {
+      await compareRpc(admin, 'fusion_compare_end', { p_actor_id: actorId, p_compare_id: compareId }).catch(() => undefined);
+      throw error;
+    }
     const key = await deps.decisionsKey();
     const outcome = await judgeCompareGate(gate, { text: question, apiKey: key }, deps.classify);
-    await compareRpc(admin, 'fusion_compare_gate', { p_actor_id: actorId, p_compare_id: compareId, p_verdict: outcome.verdict });
+    // The fallback rule is part of the outcome: stored with the verdict, replayed as stored if this start is resumed.
+    await compareRpc(admin, 'fusion_compare_gate', { p_actor_id: actorId, p_compare_id: compareId, p_verdict: outcome.verdict,
+      p_fallback: outcome.fallback });
     if (outcome.refused) deps.refusePositioning();
     verdict = outcome.verdict;
     fallback = outcome.fallback;
   } else {
     if (verdict === 'block') deps.refusePositioning();
-    // Resumed after the judgement. The rule the turn is admitted with follows from the stored verdict and today's
-    // gate state (it only differs if a refused turn was refunded in between, which can only lower the count).
-    fallback = gate.gated && !gate.capped;
+    // Resumed after the judgement: the rule the turn is admitted with is the one stored with the verdict, never rebuilt from
+    // today's refund count (it may have changed since). Rows without it (none are written without) fall back to the gate.
+    fallback = record.gateFallback ?? (gate.gated && !gate.capped);
     // Before the group exists the snapshot must be exactly the one first recorded: the user may have changed the
     // conversation or deleted a source since. Once the group exists this is a plain replay of frozen runs.
     if (record.groupId === null && record.snapshotHash && record.snapshotHash !== snapshot) {
@@ -98,8 +120,7 @@ export async function startCompare(deps: CompareDeps, choice: CompareChoice & { 
 
   const request = compareRequest({ ...choice.parts, positioningFallback: fallback });
   const group = await admitCompareGroup({ admin, actorId, requestId, sourceSessionId: choice.sessionId, modelIds: choice.modelIds, request,
-    env: deps.env, shown: { credits: choice.shown.credits,
-      columns: choice.shown.columns.map(column => ({ credits: column.credits, usd: column.usd })) } });
+    env: deps.env, shown: choice.shown });
   const claim = await compareRpc<{ state: 'claimed' | 'waiting_credits' }>(admin, 'fusion_compare_claim', { p_actor_id: actorId,
     p_compare_id: compareId, p_items: group.runs.map(run => ({ runId: run.runId, sequence: 1, payload: run.call })) });
   return { state: claim.state, compareId, group, claim };

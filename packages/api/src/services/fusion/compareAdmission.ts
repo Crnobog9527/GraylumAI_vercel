@@ -86,6 +86,9 @@ export async function buildCompareColumns(input: { admin: SupabaseClient; actorI
   modelIds.forEach((modelId, index) => {
     const policy = priced[index]!;
     try {
+      // Every column gets the one frozen answer limit. A model whose own limit is lower would silently answer shorter
+      // (admission clamps to it), so it cannot take this compare as configured.
+      if (admitted[index]!.outputLimit !== input.answerTokens) throw new Error('FUSION_COMPARE_INPUT_TOO_LARGE');
       const raw = fusionRequestBody(policy, input.request, admitted[index]!.outputLimit, admitted[index]!.reasoning);
       const body = fitNativeRequestOutput(raw, policy);
       // fitNativeRequestOutput lowers the answer limit when the window is too small; every column keeps the same
@@ -125,12 +128,29 @@ export async function replayCompareGroup(admin: SupabaseClient, actorId: string,
   }
 }
 
+/** What the user agreed to, per column in the chosen order. The group may not hold more than this, in credits or provider
+ * cost, in total or in any column, and must have exactly these columns. Checked before anything is recorded and again at
+ * admission, so a forged or stale quote never reaches the paid positioning judgement. */
+export type ShownQuote = { credits: number; columns: Array<{ modelId?: string; credits: number; usd: string }> };
+export function assertQuoteCovers(columns: ReadonlyArray<Pick<CompareColumn, 'index' | 'modelId' | 'upperCredits' | 'upperUsd'>>,
+  shown: ShownQuote) {
+  const shownUsd = shown.columns.reduce((sum, column) => sum + decimal(column.usd), 0n);
+  const credits = columns.reduce((sum, column) => sum + column.upperCredits, 0);
+  const usd = columns.reduce((sum, column) => sum + decimal(column.upperUsd), 0n);
+  if (shown.columns.length !== columns.length || credits > shown.credits || usd > shownUsd
+    || columns.some(column => { const cap = shown.columns[column.index];
+      return !cap || (cap.modelId !== undefined && cap.modelId !== column.modelId)
+        || column.upperCredits > cap.credits || decimal(column.upperUsd) > decimal(cap.usd); })) {
+    throw new Error('FUSION_COMPARE_PRICE_CHANGED');
+  }
+}
+
 /** Compare group admission (FUSION-COMPARE §3.1). The compare record must already exist with its positioning verdict
  * written (fusion_compare_begin / fusion_compare_gate): the database refuses a group otherwise. `shown` is what the user
  * agreed to: the group may not hold more, in credits or in provider cost, and no column more than its own shown bound. */
 export async function admitCompareGroup(input: { admin: SupabaseClient; actorId: string; requestId: string; sourceSessionId: string;
   modelIds: string[]; request: FusionRequest; env?: Record<string, string | undefined>;
-  shown: { credits: number; columns: Array<{ credits: number; usd: string }> } }): Promise<CompareAdmitted> {
+  shown: ShownQuote }): Promise<CompareAdmitted> {
   const { admin, actorId } = input;
   const settings = await assertCompareAllowed(admin, actorId, input.modelIds);
   // A replay first: the transaction answers an existing request before it reads any input.
@@ -140,12 +160,7 @@ export async function admitCompareGroup(input: { admin: SupabaseClient; actorId:
     answerTokens: settings.answerOutputTokens, dispatchMinutes: settings.dispatchMinutes, env: input.env });
   if (built.tooLarge.length) throw new Error('FUSION_COMPARE_INPUT_TOO_LARGE');
   // Prices or multipliers changed since the user saw the estimate: never hold more than the maximum shown.
-  const shownUsd = input.shown.columns.reduce((sum, column) => sum + decimal(column.usd), 0n);
-  if (input.shown.columns.length !== built.columns.length || built.totalCredits > input.shown.credits || built.totalUsd > shownUsd
-    || built.columns.some(column => { const cap = input.shown.columns[column.index];
-      return !cap || column.upperCredits > cap.credits || decimal(column.upperUsd) > decimal(cap.usd); })) {
-    throw new Error('FUSION_COMPARE_PRICE_CHANGED');
-  }
+  assertQuoteCovers(built.columns, input.shown);
   const runs = await Promise.all(built.columns.map(async column => {
     const draftId = await compareRpc<string>(admin, 'bill2_create_draft', { p_actor_id: actorId });
     const context = { version: 'runtime.v1', network: 'deny', tools: [], sources: [],

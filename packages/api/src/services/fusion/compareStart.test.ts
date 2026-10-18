@@ -6,14 +6,14 @@ const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')
 const s = vi.hoisted(() => ({
   gate: { positioned: false, refusals24h: 0 } as { positioned: boolean; refusals24h: number },
   begin: {} as Record<string, unknown>, rpcs: [] as Array<{ name: string; args: Record<string, unknown> }>, claim: { state: 'claimed' } as Record<string, unknown>,
-  tooLarge: [] as string[], credits: 10, requests: [] as Array<{ instructions: string }>, admitCalls: [] as unknown[], replayOnly: false,
+  tooLarge: [] as string[], endFails: false, credits: 10, budget: '1' as string | null, usd: 0n, requests: [] as Array<{ instructions: string }>, admitCalls: [] as unknown[], replayOnly: false,
 }));
-vi.mock('./compareAdmission', () => ({
-  assertCompareAllowed: async () => ({ answerOutputTokens: 4096, dispatchMinutes: 10 }),
+vi.mock('./compareAdmission', async original => ({ ...(await original<typeof import('./compareAdmission')>()),
+  assertCompareAllowed: async () => ({ answerOutputTokens: 4096, dispatchMinutes: 10, maxBudgetUsd: s.budget }),
   buildCompareColumns: async (input: { modelIds: string[]; request: { instructions: string } }) => {
     s.requests.push(input.request);
     return { columns: input.modelIds.map((modelId, index) => ({ index, modelId, upperCredits: s.credits, upperUsd: '0.01' })), tooLarge: s.tooLarge,
-      totalCredits: s.credits * input.modelIds.length, totalUsd: 0n };
+      totalCredits: s.credits * input.modelIds.length, totalUsd: s.usd };
   },
   admitCompareGroup: async (input: { request: { instructions: string }; shown: unknown }) => { s.admitCalls.push(input);
     return { groupId: id(70), replayed: false, runs: [{ runId: id(80), index: 0, body: 'b', call: { phase: 'fusion_compare' } },
@@ -22,6 +22,7 @@ vi.mock('./compareAdmission', () => ({
     s.rpcs.push({ name, args });
     if (name === 'fusion_compare_begin') return s.begin;
     if (name === 'fusion_compare_claim') return s.claim;
+    if (name === 'fusion_compare_end' && s.endFails) throw new Error('end failed');
     return {};
   },
 }));
@@ -30,15 +31,17 @@ vi.mock('../runtime/positioningGate', async original => ({ ...(await original<ty
 import { estimateCompare, startCompare, type CompareDeps } from './compareStart';
 import { POSITIONING_FALLBACK_INSTRUCTIONS } from '../runtime/positioningFallback';
 import { snapshotHash, type CompareParts } from './compareSnapshot';
+import { decimal } from '../bill2/decimal';
 
 const admin = {} as SupabaseClient;
 const classify = vi.fn();
 const refusePositioning = (): never => { throw new Error('POSITIONING_REQUIRED'); };
-const deps = (): CompareDeps => ({ admin, actorId: id(50), refusePositioning, decisionsKey: async () => 'k', classify });
+const rateLimit = vi.fn();
+const deps = (): CompareDeps => ({ admin, actorId: id(50), refusePositioning, decisionsKey: async () => 'k', classify, rateLimit });
 const parts = (patch: Partial<CompareParts> = {}): CompareParts => ({ skill: null, positioningFallback: false, history: [], workspace: [],
   references: [], question: '哪个更好？', ...patch });
 const choice = (patch: Partial<CompareParts> = {}) => ({ sessionId: id(61), historyRevision: 4, modelIds: [id(1), id(2)], parts: parts(patch) });
-const shown = { credits: 20, tooLarge: [], refundCapReached: false, columns: [{ modelId: id(1), credits: 10, usd: '0.01' }, { modelId: id(2), credits: 10, usd: '0.01' }] };
+const shown = { credits: 20, columns: [{ modelId: id(1), credits: 10, usd: '0.01' }, { modelId: id(2), credits: 10, usd: '0.01' }] };
 const start = (patch: Partial<CompareParts> = {}, extra: Record<string, unknown> = {}) =>
   startCompare(deps(), { ...choice(patch), requestId: id(60), shown, ...extra } as Parameters<typeof startCompare>[1]);
 const names = () => s.rpcs.map(call => call.name);
@@ -46,7 +49,8 @@ const fresh = (patch: Record<string, unknown> = {}) => ({ compareId: id(90), sta
 
 beforeEach(() => {
   s.gate = { positioned: false, refusals24h: 0 }; s.begin = fresh(); s.rpcs = []; s.claim = { state: 'claimed' }; s.tooLarge = []; s.credits = 10;
-  s.requests = []; s.admitCalls = []; classify.mockReset(); classify.mockResolvedValue('allow');
+  s.requests = []; s.admitCalls = []; classify.mockReset(); classify.mockResolvedValue('allow'); s.budget = '1'; s.usd = 0n; s.endFails = false;
+  rateLimit.mockReset(); rateLimit.mockResolvedValue(undefined);
 });
 
 describe('compare estimate', () => {
@@ -170,3 +174,65 @@ describe('compare start', () => {
     await expect(start()).resolves.toMatchObject({ state: 'waiting_credits' });
   });
 });
+
+describe('compare start: nothing paid happens for a request that can be refused for free (review findings)', () => {
+  it('refuses a selection over the single-compare budget before recording or judging, and says so in the estimate', async () => {
+    s.usd = decimal('1.5'); // the administrator's budget is $1
+    await expect(start()).rejects.toThrow('FUSION_BUDGET_EXCEEDED');
+    expect(classify).not.toHaveBeenCalled();
+    expect(s.rpcs).toEqual([]);
+    expect(await estimateCompare(deps(), choice())).toMatchObject({ overBudget: true });
+    s.usd = decimal('0.5');
+    expect(await estimateCompare(deps(), choice())).toMatchObject({ overBudget: false });
+    s.budget = null; // enabling requires a budget; a missing one never means "unlimited"
+    await expect(start()).rejects.toThrow('FUSION_BUDGET_EXCEEDED');
+  });
+  it('checks the whole quote the user was shown before anything is recorded: count, order, per-column credits and cost', async () => {
+    const forged: Array<[string, Record<string, unknown>]> = [
+      ['fewer columns than chosen', { shown: { credits: 99, columns: shown.columns.slice(0, 1) } }],
+      ['a column cap below its price', { shown: { credits: 99, columns: [{ ...shown.columns[0]!, credits: 9 }, shown.columns[1]!] } }],
+      ['a column cost cap below its price', { shown: { credits: 99, columns: [{ ...shown.columns[0]!, usd: '0.001' }, shown.columns[1]!] } }],
+      ['columns in another order', { shown: { credits: 99, columns: [shown.columns[1]!, shown.columns[0]!] } }],
+      ['a total below the price', { shown: { ...shown, credits: 19 } }],
+    ];
+    for (const [, patch] of forged) await expect(start({}, patch)).rejects.toThrow('FUSION_COMPARE_PRICE_CHANGED');
+    expect(classify).not.toHaveBeenCalled();
+    expect(s.rpcs).toEqual([]);
+  });
+  it('applies the message rate limit once per new request, before the paid judgement', async () => {
+    await start();
+    expect(rateLimit).toHaveBeenCalledTimes(1);
+    expect(names()).toEqual(['fusion_compare_begin', 'fusion_compare_gate', 'fusion_compare_claim']);
+  });
+  it('a request over the rate limit is ended, so it neither judges nor occupies the user\'s one slot', async () => {
+    rateLimit.mockRejectedValue(new Error('RATE_LIMITED'));
+    await expect(start()).rejects.toThrow('RATE_LIMITED');
+    expect(classify).not.toHaveBeenCalled();
+    expect(names()).toEqual(['fusion_compare_begin', 'fusion_compare_end']);
+    // Even when ending fails, the user still sees the rate limit, not a database error.
+    s.rpcs = []; s.endFails = true;
+    await expect(start()).rejects.toThrow('RATE_LIMITED');
+  });
+  it('does not rate-limit a repeat or a resume (they make no new paid call)', async () => {
+    s.begin = fresh({ created: false, gateVerdict: 'allow', gateFallback: false, groupId: id(70), state: 'running' });
+    await start();
+    s.begin = fresh({ created: false, gateVerdict: null });
+    await start();
+    expect(rateLimit).not.toHaveBeenCalled();
+  });
+  it('stores the fallback decision with the verdict and replays that decision on a resume, not today\'s refund count', async () => {
+    await start(); // below the cap, "allow": the fallback rule applies
+    expect(s.rpcs[1]!.args).toMatchObject({ p_verdict: 'allow', p_fallback: true });
+    // Resume after the cap was reached in between: the stored decision (with the rule) still wins.
+    s.rpcs = []; s.admitCalls = []; s.gate = { positioned: false, refusals24h: 5 };
+    s.begin = fresh({ created: false, gateVerdict: 'unavailable', gateFallback: true, groupId: null, snapshotHash: snapshotHash(parts()) });
+    await start();
+    expect((s.admitCalls[0] as { request: { instructions: string } }).request.instructions).toContain(POSITIONING_FALLBACK_INSTRUCTIONS);
+    // And the other way: a 'clear' stored at the cap carries no rule even when old refusals have since expired.
+    s.admitCalls = []; s.gate = { positioned: false, refusals24h: 0 };
+    s.begin = fresh({ created: false, gateVerdict: 'clear', gateFallback: false, groupId: null, snapshotHash: snapshotHash(parts()) });
+    await start();
+    expect((s.admitCalls[0] as { request: { instructions: string } }).request.instructions).not.toContain(POSITIONING_FALLBACK_INSTRUCTIONS);
+  });
+});
+

@@ -55,7 +55,10 @@ export async function saveFusionSettings(db: SupabaseClient, actorId: string, va
         }
         // Compare: every allowed model must pass, or users would be offered a choice that can never run.
         if (settings.compare.enabled && settings.compare.allowedModelIds.includes(row.id)) {
-          await admitFusionModel(db, window, row, 'fusion_compare', settings.compare.answerOutputTokens, deadline, env, key ?? null);
+          const admitted = await admitFusionModel(db, window, row, 'fusion_compare', settings.compare.answerOutputTokens, deadline, env, key ?? null);
+          // Every column of a compare shares one answer limit. A model that would have to answer shorter (its own limit is
+          // lower) could never run as configured, so it cannot be offered.
+          if (admitted.outputLimit !== settings.compare.answerOutputTokens) throw new Error('FUSION_COMPARE_OUTPUT_LIMIT');
         }
       }
     }

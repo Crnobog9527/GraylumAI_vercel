@@ -7,7 +7,7 @@ const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')
 const state = vi.hoisted(() => ({
   compare: {} as Record<string, unknown>, entitlements: {} as Record<string, unknown>, rpcs: [] as Array<{ name: string; args: Record<string, unknown> }>,
   replies: new Map<string, unknown>(), credits: new Map<string, number>(), tooLarge: new Set<string>(), shrink: new Set<string>(),
-  admitted: [] as string[], exploding: new Set<string>(), groupExists: false,
+  admitted: [] as string[], exploding: new Set<string>(), groupExists: false, clamp: new Map<string, number>(),
 }));
 vi.mock('./settings', async original => ({ ...(await original<typeof import('./settings')>()),
   readFusionSettings: async () => ({ version: 1, review: {}, compare: state.compare }) }));
@@ -25,7 +25,8 @@ vi.mock('../runtime/billingUnitAdmission', async original => ({ ...(await origin
 vi.mock('./models', async original => ({ ...(await original<typeof import('./models')>()),
   admitFusionModel: async (_db: unknown, _w: unknown, row: { id: string }, phase: string, tokens: number) => {
     state.admitted.push(`${row.id}:${phase}:${tokens}`);
-    return { quote: {}, policy: { modelId: row.id, model: `m/${row.id}`, providerLimits: { providerSlug: 's' } }, outputLimit: tokens, reasoning: undefined };
+    return { quote: {}, policy: { modelId: row.id, model: `m/${row.id}`, providerLimits: { providerSlug: 's' } },
+      outputLimit: state.clamp.get(row.id) ?? tokens, reasoning: undefined };
   } }));
 vi.mock('./request', async original => ({ ...(await original<typeof import('./request')>()),
   fusionRequestBody: (policy: { modelId: string }, request: unknown, outputLimit: number) => JSON.stringify({ for: policy.modelId, outputLimit, request }) }));
@@ -38,7 +39,7 @@ vi.mock('../runtime/paygRuntime', async original => ({ ...(await original<typeof
   } }));
 vi.mock('../bill2/service', async original => ({ ...(await original<typeof import('../bill2/service')>()),
   frozenCallSchema: z.any(), frozenPaygRunSchema: { parse: (value: unknown) => value } }));
-import { admitCompareGroup, assertCompareAllowed, buildCompareColumns, replayCompareGroup } from './compareAdmission';
+import { admitCompareGroup, assertCompareAllowed, assertQuoteCovers, buildCompareColumns, replayCompareGroup } from './compareAdmission';
 import { FUSION_INPUT_CAP } from './request';
 
 const models = [id(1), id(2), id(3)];
@@ -65,7 +66,7 @@ beforeEach(() => {
     maxBudgetUsd: '2', dispatchMinutes: 10, breaker: { platformUsd: '2', noDeliveryCalls: 10 } };
   state.entitlements = { allowFusionCompare: true, fusionCompareMaxModels: 4 };
   state.rpcs = []; state.replies = new Map(); state.credits = new Map(); state.tooLarge = new Set(); state.shrink = new Set(); state.admitted = [];
-  state.exploding = new Set(); state.groupExists = false;
+  state.exploding = new Set(); state.groupExists = false; state.clamp = new Map();
 });
 
 describe('compare live rules (FUSION-COMPARE §3.3)', () => {
@@ -104,6 +105,14 @@ describe('compare columns', () => {
     const built = await build();
     expect(built.tooLarge).toEqual([models[1], models[2]]);
     expect(built.columns.map(column => column.modelId)).toEqual([models[0]]);
+  });
+  it('never gives one column a lower answer limit than the others: a model clamped by its own limit cannot take the compare', async () => {
+    state.clamp.set(models[1]!, 2048); // its own max is below the configured 4096; admission silently clamps
+    const built = await build();
+    expect(built.tooLarge).toEqual([models[1]]);
+    expect(built.columns.map(column => column.outputLimit)).toEqual([4096, 4096]);
+    await expect(admitCompareGroup({ admin, actorId: id(50), requestId: id(60), sourceSessionId: id(61), modelIds: models, request, env: {},
+      shown })).rejects.toThrow('FUSION_COMPARE_INPUT_TOO_LARGE');
   });
   it('refuses a snapshot over the interactive cap before pricing anything', async () => {
     await expect(build({ request: { ...request, input: 'x'.repeat(FUSION_INPUT_CAP + 1) } })).rejects.toThrow('FUSION_COMPARE_INPUT_TOO_LARGE');
@@ -172,5 +181,24 @@ describe('compare group admission', () => {
   });
   it('replays by request alone: null when nothing was admitted', async () => {
     await expect(replayCompareGroup(admin, id(50), id(60), id(61))).resolves.toBeNull();
+  });
+});
+
+describe('quote coverage (what the user was shown)', () => {
+  const columns = [{ index: 0, modelId: id(1), upperCredits: 10, upperUsd: '0.01' }, { index: 1, modelId: id(2), upperCredits: 10, upperUsd: '0.01' }];
+  const quote = { credits: 20, columns: [{ modelId: id(1), credits: 10, usd: '0.01' }, { modelId: id(2), credits: 10, usd: '0.01' }] };
+  it('accepts a quote that covers every column, with or without model ids', () => {
+    expect(() => assertQuoteCovers(columns, quote)).not.toThrow();
+    expect(() => assertQuoteCovers(columns, { credits: 25, columns: quote.columns.map(({ credits, usd }) => ({ credits: credits + 1, usd })) })).not.toThrow();
+  });
+  it.each([
+    ['fewer columns', { ...quote, columns: quote.columns.slice(0, 1) }],
+    ['more columns', { ...quote, columns: [...quote.columns, quote.columns[0]!] }],
+    ['a lower total', { ...quote, credits: 19 }],
+    ['a lower column cap', { ...quote, columns: [{ ...quote.columns[0]!, credits: 9 }, quote.columns[1]!] }],
+    ['a lower column cost', { ...quote, columns: [{ ...quote.columns[0]!, usd: '0.009' }, quote.columns[1]!] }],
+    ['another model order', { ...quote, columns: [quote.columns[1]!, quote.columns[0]!] }],
+  ])('refuses %s', (_name, shownQuote) => {
+    expect(() => assertQuoteCovers(columns, shownQuote)).toThrow('FUSION_COMPARE_PRICE_CHANGED');
   });
 });

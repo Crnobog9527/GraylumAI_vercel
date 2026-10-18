@@ -33,6 +33,7 @@ export async function thresholdMigrationCases(db,report,createFixture,claim,rece
     await db.query(read('0268_research_benchmarks.sql'));
     await db.query(read('0285_pay_refunded_pack_hold.sql'));
     await db.query(read('0290_fusion_compare.sql'));
+    await db.query(read('0305_fusion_compare_context.sql')); // replaces 0290's fusion_compare_view
     assert.equal(await definition(),current);
     assert.deepEqual(await acl(),permissions);
     assert.deepEqual(await snapshot(),frozen);
