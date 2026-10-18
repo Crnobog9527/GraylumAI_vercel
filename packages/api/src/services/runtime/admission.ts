@@ -53,7 +53,7 @@ import {readPositioningGate,judgePositioning,windowBoundKey,refusePositioning,PO
  type PositioningGatePolicy} from './positioningGate';
 import {POSITIONING_FALLBACK,POSITIONING_FALLBACK_INSTRUCTIONS} from './positioningFallback';
 import {LIBRARY_RETRIEVAL_CALLS,admitLibraryReferences,admitLibraryRetrieval,candidateToolBytes,libraryReferenceInput} from './libraryAdmission';
-import {libraryReserveBytes,readSourceSlots,throwLibraryRefusal} from './libraryAdmission';
+import {libraryReserveBytes,readSourceSlots,sourceReadFlags,throwLibraryRefusal} from './libraryAdmission';
 import {admitContentSource,isSqlStagingRefusal,type ContentSourceKind} from './contentSource';
 import {attachResearchTurn,fitsCapacity} from './researchAdmission';
 import {organizerSelection} from './organizerSelection';
@@ -396,7 +396,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     // Freeze the purpose ceiling; each selected model keeps its own call-policy limit.
     ...(budgets||policy.reportGeneration?{purposeBudget:{purpose,inputBytes,historyItems}}:{}),
     ...(skillFile?{skillFile,skillFileReserve}:{}),...(libraryReferences.length?{libraryReferences}:{}),
-    ...(libraryRetrieval?{libraryRetrieval:true as const}:{}),
+    ...sourceReadFlags(libraryRetrieval,sourceTools),
     ...(historyRead?{historyRead:{version:MENTOR_HISTORY_VERSION,reserve:MENTOR_HISTORY_RESERVE_BYTES}}:{}),
     tools:mentorStream?(opening?[]:[...(stepSummary?[]:[ASK_QUESTION_TOOL]),...(skillFile?['read_skill_file']:[]),
      ...(historyRead?[READ_HISTORY_TOOL]:[])]):

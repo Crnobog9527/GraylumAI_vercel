@@ -96,3 +96,4 @@ export function libraryReserveBytes(references:LibraryReference[],tools:string[]
  const referenced=references.length>0;
  return sourceToolBytes(tools,workspaceContext,referenced,retrieval)+Buffer.byteLength(libraryAddendum(referenced,retrieval))+LIBRARY_RESULT_BYTES;
 }
+export {sourceReadFlags} from './sourceCalls';
