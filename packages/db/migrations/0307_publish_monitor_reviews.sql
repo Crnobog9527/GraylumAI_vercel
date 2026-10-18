@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
--- PUBLISH-MONITOR PR-6. Number 0308 assigned by the controller through Owner (2026-10-18).
+-- PUBLISH-MONITOR PR-6. Number 0307 reassigned by the controller through Owner (2026-10-18).
 -- Reuse social_review_runs, Runtime sessions/executions/tool journal and BILL2's caps; no new tables or queues.
 -- Current-session Owner instruction: switches default OFF (supersedes the older default-on proposal).
 -- Rollback: turn publish_monitor_review_enabled off; keep this host/recovery until all weeklyReview Runtime/BILL2

@@ -4,7 +4,7 @@ import { classifyAccount, qualifyFetchedAccount } from '../benchmark/classify';
 import { authorizeBenchmarkFetch } from '../tools/authorize';
 import { toolEnvelope } from '../tools/envelope';
 import type { ResearchToolArgs } from '../tools/schemas';
-import { BENCHMARK_ROUTE_KINDS } from '../vendors/config';
+import { BENCHMARK_EXTRA_POST_PAGES, BENCHMARK_ROUTE_KINDS, BENCHMARK_RULES } from '../vendors/config';
 import type { ResearchItem, SocialKind } from '../vendors/types';
 import { ResearchPause, type SubcallOutcome } from './subcall';
 import { executeResearchCall, socialRequest, stableResearchId, type ResearchToolContext, type ToolAllowance } from './toolContext';
@@ -21,7 +21,8 @@ async function savedSubcall(ctx: ResearchToolContext, operationId: string): Prom
     reason: typeof saved.reason === 'string' ? saved.reason : null, httpStatus: null,
     supplierMayCharge: outcome !== 'not_sent' && saved.supplierMayCharge !== false,
     usage: { unit: 'call', units: null }, items: Array.isArray(saved.items) ? saved.items as ResearchItem[] : [],
-    truncated: saved.truncated === true, fetchedAt: String(saved.fetchedAt ?? '') } };
+    truncated: saved.truncated === true, fetchedAt: String(saved.fetchedAt ?? ''),
+    ...(typeof saved.nextCursor === 'string' ? { nextCursor: saved.nextCursor } : {}) } };
 }
 
 export async function benchmarkFetch(ctx: ResearchToolContext, args: ResearchToolArgs<'benchmark_fetch'>,
@@ -54,7 +55,9 @@ export async function benchmarkFetch(ctx: ResearchToolContext, args: ResearchToo
       continue;
     }
     // Cached evidence is free. Only a newly claimed attempt needs a full account allowance.
-    if (budget.left < routes.kinds.length) {
+    // Room for the account's own sub-calls plus the extra post pages its platform may need (Xiaohongshu).
+    const extraPages = BENCHMARK_EXTRA_POST_PAGES[account.platform] ?? 0;
+    if (budget.left < routes.kinds.length + extraPages) {
       partial = true;
       stopReason = 'ROUND_LIMIT';
       stopBudget = true;
@@ -95,6 +98,25 @@ export async function benchmarkFetch(ctx: ResearchToolContext, args: ResearchToo
         unknown ||= outcome.result.outcome === 'unknown';
         if (!['ok', 'partial'].includes(outcome.result.outcome)) { failed = true; break; }
         results[kind] = outcome.result.items.map((item, i) => ({ ...item, ref: `${outcome.operationId}#${i + 1}` }));
+        // One page can fall short of the 20-post rule while the supplier has more: follow its cursor, each page a billed
+        // sub-call with its own stable id (a resumed attempt reads saved pages instead of sending again).
+        let cursor = kind === 'account_posts' ? outcome.result.nextCursor : undefined;
+        for (let page = 2; cursor && page <= 1 + extraPages && (results.account_posts?.length ?? 0) < BENCHMARK_RULES.postsMin; page++) {
+          const pageRequest = socialRequest(ctx, account.platform, kind, { account: account.account, cursor });
+          if (!pageRequest) { failed = true; break; }
+          const pageId = stableResearchId(claim.fetchId, claim.attempt, kind, String(page));
+          const next = (claim.resumed ? await savedSubcall(ctx, pageId) : null)
+            ?? await executeResearchCall(fetchContext, budget, pageRequest, pageId, 'benchmark_fetch', args);
+          if (!next.sent) { failed = true; stopReason = next.stop; stopBudget = next.budget; break; }
+          charged ||= next.result.supplierMayCharge;
+          unknown ||= next.result.outcome === 'unknown';
+          if (!['ok', 'partial'].includes(next.result.outcome)) { failed = true; break; }
+          const known = new Set((results.account_posts ?? []).map(post => post.fields.id));
+          results.account_posts = [...(results.account_posts ?? []), ...next.result.items
+            .map((item, i) => ({ ...item, ref: `${next.operationId}#${i + 1}` })).filter(item => !known.has(item.fields.id))];
+          cursor = next.result.nextCursor;
+        }
+        if (failed) break;
       }
       const profile = results.account_profile?.[0] ?? results.post_detail?.[0];
       const posts = results.account_posts;

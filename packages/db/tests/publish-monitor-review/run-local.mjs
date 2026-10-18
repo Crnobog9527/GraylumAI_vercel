@@ -11,7 +11,7 @@ const svc=async(sql,args=[])=>{
  await c.query('SET ROLE service_role');
  try{return await one(sql,args);}finally{await c.query('RESET ROLE');}
 };
-const migration=read('packages/db/migrations/0308_publish_monitor_reviews.sql');
+const migration=read('packages/db/migrations/0307_publish_monitor_reviews.sql');
 const transactionalMigration=migration.replace(/^BEGIN;$/m,'').replace(/^COMMIT;$/m,'');
 const claim=()=>svc('SELECT publish_monitor_review_claim(20) v');
 const step=(r,action,reason=null)=>svc('SELECT publish_monitor_review_step($1,$2,$3,$4) v',[r.id,r.token,action,reason]);

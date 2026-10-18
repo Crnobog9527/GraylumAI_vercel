@@ -185,7 +185,7 @@ describe('style sample J, the later sections', () => {
     for (const row of PRICE_COMPARE.rows) expect(pricing).toContain(escape(PRICE_COMPARE.sources[row.sourceId]));
     expect(pricing).toContain(J_PRICE.ownPrice('$29'));
     expect(pricing).toContain(J_PRICE.more);
-    expect(pricing).toContain('href="/landing/pricing"');
+    expect(pricing).toContain('href="/pricing"');
     expect(pricing.indexOf(J_PRICE_TOTAL.text)).toBeLessThan(pricing.indexOf(J_PRICE.ownPrice('$29')));
     // Owner 2026-10-15: plan cards, the founder offer and "先聊后买" are off the home page.
     expect(pricing).not.toContain('aria-label="Pro"');

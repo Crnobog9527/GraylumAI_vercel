@@ -54,7 +54,11 @@ function measure(root: HTMLElement): Line | null {
  * reaches it, a light runs down the line (0.8 seconds) and the circuit starts its first round as it arrives; reduced
  * motion: the line still, the circuit finished. Shown with the fusion flag only.
  */
-export function JuryModuleL({ flags }: { flags: LandingFlags }) {
+export function JuryModuleL({ flags, href = L_JURY.href }: {
+  flags: LandingFlags;
+  /** Where "看评审团怎么工作" leads; null on the public home page until a public jury page exists (the demo is a preview page). */
+  href?: string | null;
+}) {
   const root = useRef<HTMLDivElement>(null);
   const [line, setLine] = useState<Line | null>(null);
   const [flow, setFlow] = useState(false);
@@ -116,7 +120,7 @@ export function JuryModuleL({ flags }: { flags: LandingFlags }) {
           <p className={styles.when}><b>{L_JURY.whenLabel}</b>{L_JURY.when}</p>
         </div>
         <div className={styles.circuit}><JuryCircuitL start={started} /></div>
-        <Link href={L_JURY.href} className={styles.link}>{L_JURY.link}<ArrowRight size={16} aria-hidden="true" /></Link>
+        {href ? <Link href={href} className={styles.link}>{L_JURY.link}<ArrowRight size={16} aria-hidden="true" /></Link> : null}
       </div>
     </div>
   );

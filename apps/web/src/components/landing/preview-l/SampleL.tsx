@@ -16,6 +16,7 @@ import own from './l.module.css';
 import { StickyCtaMNO } from '@/components/landing/preview-mno/StickyCtaMNO';
 import { HERO } from '@/lib/landing/landing-copy';
 import { L_NOTE_ANSWERS, L_NOTE_HEADS, L_NOTE_REGIONS, L_OPS, L_PRICE_NOTE, L_VOICE_FOLD } from '@/lib/landing/landing-copy-l';
+import { J_JURY_PAGE, linkReady } from '@/lib/landing/landing-copy-j-chrome';
 import { allOn } from '@/lib/landing/landing-flags';
 import { cn } from '@/lib/utils';
 import { HeroL } from './HeroL';
@@ -43,26 +44,35 @@ const SAMPLES = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l'] as 
  * watched through, steps two and three only once built; the jury larger, after step one; region 6 one scenario at a
  * time. Every capability not built yet is off (landing-flags), so its block does not show.
  */
-export function SampleL({ data, siteName, extras }: { data: LandingData; siteName: string; extras: PageExtras }) {
+export function SampleL({ data, siteName, extras, production = false, supportEmail }: {
+  data: LandingData; siteName: string; extras: PageExtras;
+  /** The support address from the admin settings, in the footer (as the public site's footer shows it). */
+  supportEmail?: string | null;
+  /** The public home page (Owner 2026-10-17: /landing becomes sample L): no sample switcher, only links that lead somewhere. */
+  production?: boolean;
+}) {
   // Under the price button (Owner 2026-10-17, round six): "无需绑卡 · 免费试用"; cancelling and refunds are explained on
   // the price page, not here, and the home page carries no "先聊后买" or Gold line.
   const terms = <p className={k.terms}>{allOn(extras.flags, ['signupGrant']) ? L_PRICE_NOTE.free : L_PRICE_NOTE.noCard}</p>;
   return (
     <MotionJ className={cn(light.light, page.page, k.page, own.lines)}>
-      <nav aria-label="样稿切换" className={page.sampleBar}>
-        <span>不公开的风格样稿（L：K 的第二轮）</span>
-        {SAMPLES.map(id => (
-          <Link key={id} href={`/landing/preview/${id}`} aria-current={id === 'l' ? 'page' : undefined}>{id.toUpperCase()}</Link>
-        ))}
-      </nav>
-      <SiteHeaderJ siteName={siteName} cta={HERO.primaryCta} />
+      {production ? null : (
+        <nav aria-label="样稿切换" className={page.sampleBar}>
+          <span>不公开的风格样稿（L：K 的第二轮）</span>
+          {SAMPLES.map(id => (
+            <Link key={id} href={`/landing/preview/${id}`} aria-current={id === 'l' ? 'page' : undefined}>{id.toUpperCase()}</Link>
+          ))}
+        </nav>
+      )}
+      <SiteHeaderJ siteName={siteName} cta={HERO.primaryCta} onlyBuilt={production} />
       <StickyCtaMNO line={L_OPS.lede} phoneBottom hideHeaderCta />
 
       <main data-calm="">
         <HeroL note={data.heroNote} />
         <VoiceWallJ notes={data.notes} open regions={L_NOTE_REGIONS} compact={L_VOICE_FOLD} after={<CtaK />}
           heads={L_NOTE_HEADS} answers={L_NOTE_ANSWERS} />
-        <StepsL flags={extras.flags} />
+        {/* The home page's jury link goes to the public jury page (Owner 2026-10-18), once it exists; the samples keep the demo. */}
+        <StepsL flags={extras.flags} juryHref={production ? (linkReady(J_JURY_PAGE) ? J_JURY_PAGE : null) : undefined} />
         {extras.showSamples ? <SamplesL /> : null}
         <ScenariosL flags={extras.flags} after={<CtaK />} />
         <PriceJ proMonthly={data.pricing.proMonthly} rows={data.compareRows} calm plainTotal checked={false} quiet
@@ -71,7 +81,7 @@ export function SampleL({ data, siteName, extras }: { data: LandingData; siteNam
         <FinalJ freeTrial={allOn(extras.flags, ['signupGrant'])} />
       </main>
 
-      <SiteFooterJ />
+      <SiteFooterJ onlyBuilt={production} supportEmail={supportEmail} />
     </MotionJ>
   );
 }

@@ -52,6 +52,8 @@ export interface ResearchCallResult {
   items: ResearchItem[];
   truncated: boolean;
   fetchedAt: string;
+  /** Cursor of the next page of an account's posts when the supplier says more exist (Xiaohongshu notes). */
+  nextCursor?: string;
 }
 
 export interface VendorRequest {

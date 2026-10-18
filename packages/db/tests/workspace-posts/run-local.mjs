@@ -9,7 +9,7 @@ import {pendingReceiptCases} from './pending-receipts.mjs';
 import {runCases} from '../workspace-benchmarks/cases.mjs';
 const db=await localDb(),c=db.client,report={build:db.build,checks:[]};
 const one=async(sql,args=[])=>(await c.query(sql,args)).rows[0]?.v;
-const migration=read('packages/db/migrations/0307_runtime_workspace_my_posts.sql');
+const migration=read('packages/db/migrations/0306_runtime_workspace_my_posts.sql');
 const before=read('packages/db/migrations/0301_report_strategy_reads.sql');
 const start=before.indexOf('CREATE OR REPLACE FUNCTION public.runtime_workspace_source(');
 const old=before.slice(start,before.indexOf('END $$;',start)+'END $$;'.length);

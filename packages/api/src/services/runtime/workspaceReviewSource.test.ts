@@ -40,3 +40,28 @@ it.each([['own',8],['benchmark',2],['benchmark',50]] as const)('trims complete %
    ?['publish_monitor_data','publish_monitor_post_history','publish_monitor_review_supplement']:['publish_monitor_data','publish_monitor_review_supplement']));
  }finally{clock.mockRestore();}
 });
+
+it.each(['2026-10-14',null])('keeps freshness consistent when review enrichment clips posts (%s)',async capturedOn=>{
+ const connection={id:own,platform:'youtube',status:'connected',lastSuccessAt:null,refreshDay:null,refreshState:null,
+  refreshError:null,autoTrack:false,delayed:false,manualRefreshAt:null};
+ const posts=Array.from({length:9},(_,i)=>({id:'20000000-0000-4000-8000-'+String(i+1).padStart(12,'0'),
+  connectionId:own,postedAt:i<8?'2026-10-17T00:00:00Z':null,source:'tikhub',titleExcerpt:'title'.repeat(24),
+  url:null,postedAtSource:i<8?'provider':null,firstSeenAt:i<8?'2026-10-17T00:00:00Z':'2026-10-16T00:00:00Z',workItemId:null,
+  latest:i===8||capturedOn?{capturedOn:i===8?'2026-10-18':capturedOn,metrics:{views:i+1},missingFields:[],breakdowns:{}}:null}));
+ const rpc=vi.fn(async(name:string,args?:Record<string,unknown>)=>{
+  if(name==='publish_monitor_data')return {error:null,data:{windowDays:14,connections:[connection],posts}};
+  if(name==='publish_monitor_post_history')return {error:null,data:{postId:args!.p_post_id,snapshots:[]}};
+  if(name==='publish_monitor_review_supplement')return {error:null,data:{connections:[],posts:[],histories:[],
+   followers:[]}};
+  throw new Error('Unexpected RPC or supplier refresh');
+ });
+ const clock=vi.spyOn(Date,'now').mockReturnValue(now);
+ try{
+  const result=await resolvePostSource({rpc},actor,{kind:'workspace_posts_request',entitled:true,windowDays:14,review:true});
+  expect(result).toMatchObject({kind:'my_posts',truncated:true,status:'stale',as_of:capturedOn});
+  expect((result as {posts:Array<{id:string}>}).posts.map(p=>p.id)).toEqual(posts.slice(0,2).map(p=>p.id));
+  expect((result as {platform_medians:unknown}).platform_medians).toEqual(capturedOn?{youtube:{views:{median:1.5,samples:2}}}:{});
+  expect((result as {note:string}).note).toBe(capturedOn?'数据截至 2026-10-14，最近一次快照已超过 3 天。':'还没有取到作品快照，指标未取到。');
+  expect(postResultBytes(result)).toBeLessThanOrEqual(11000);
+ }finally{clock.mockRestore();}
+});

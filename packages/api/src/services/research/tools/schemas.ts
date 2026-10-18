@@ -3,9 +3,8 @@
 // supplier subcalls each call may spend. Not wired into the runtime yet (RT-3 wiring follows #920/#950).
 import { z } from 'zod';
 import { publicHttpUrl } from '../vendors/http';
-import { SOCIAL_PLATFORMS } from '../vendors/types';
-import type { ResearchToolsConfig } from '../vendors/config';
-
+import { SOCIAL_PLATFORMS, type SocialPlatform } from '../vendors/types';
+import { BENCHMARK_EXTRA_POST_PAGES, benchmarkSubcallsPerAccount, type ResearchToolsConfig } from '../vendors/config';
 import type { ResearchToolName } from './names';
 export { GENERAL_RESEARCH_TOOLS, POSITIONING_RESEARCH_TOOLS, RESEARCH_TOOL_NAMES, type ResearchToolName } from './names';
 
@@ -79,6 +78,11 @@ export type SubcallNeed = { mode: 'all_or_nothing'; subcalls: number } | { mode:
 /** Profile + posts, plus Bilibili's separately billed relation lookup. */
 const ACCOUNT_SUBCALLS = 3;
 
+/** What one benchmark account may spend: at least ACCOUNT_SUBCALLS, or its route set plus extra post pages if that is more. */
+export function benchmarkAccountSubcalls(platform: SocialPlatform): number {
+  return Math.max(ACCOUNT_SUBCALLS, benchmarkSubcallsPerAccount(platform) + (BENCHMARK_EXTRA_POST_PAGES[platform] ?? 0));
+}
+
 export function subcallNeed<T extends ResearchToolName>(
   tool: T, args: ResearchToolArgs<T>, config: ResearchToolsConfig,
 ): SubcallNeed {
@@ -94,7 +98,9 @@ export function subcallNeed<T extends ResearchToolName>(
     case 'web_fetch':
       return { mode: 'all_or_nothing', subcalls: 1 };
     case 'benchmark_fetch':
-      return { mode: 'up_to', subcalls: (args as ResearchToolArgs<'benchmark_fetch'>).accounts.length * ACCOUNT_SUBCALLS };
+      // Each account needs its own route set plus the extra post pages its platform may page through (Xiaohongshu).
+      return { mode: 'up_to', subcalls: (args as ResearchToolArgs<'benchmark_fetch'>).accounts
+        .reduce((sum, account) => sum + benchmarkAccountSubcalls(account.platform), 0) };
     case 'benchmark_discover':
       return { mode: 'up_to', subcalls: config.limits.discoverSubcalls };
     default:

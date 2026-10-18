@@ -101,7 +101,7 @@ export const ZH_TW_ZIMEITI_KECHENG: ArticleContent = {
     { label: '如何經營自媒體？', href: '/zh-tw/zimeiti-jingying', description: '從定位到變現，新手經營自媒體的 6 個步驟。' },
     { label: 'IG 經營全攻略', href: '/zh-tw/ig-jingying', description: '新手如何經營 IG：帳號設定、內容形式和數據。' },
     { label: 'Graylum 和 ChatGPT 差在哪？', href: '/zh-tw/graylum-vs-chatgpt', description: '通用 AI 和專屬教練的差別，哪些情況用 ChatGPT 就夠了。' },
-    { label: '價格（簡體）', href: '/landing/pricing', description: '免費開始，以及會員和點數包的說明。' },
+    { label: '價格（簡體）', href: '/pricing', description: '免費開始，以及會員和點數包的說明。' },
   ],
   sources: [
     {
