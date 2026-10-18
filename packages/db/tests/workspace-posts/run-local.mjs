@@ -6,11 +6,15 @@ import {localDb,read} from '../runtime-view-perf/local-db.mjs';
 import {runCases} from '../workspace-benchmarks/cases.mjs';
 const db=await localDb(),c=db.client,report={build:db.build,checks:[]};
 const one=async(sql,args=[])=>(await c.query(sql,args)).rows[0]?.v;
-const migration=read('packages/db/migrations/9998_runtime_workspace_my_posts.sql');
+const migration=read('packages/db/migrations/0307_runtime_workspace_my_posts.sql');
 const before=read('packages/db/migrations/0301_report_strategy_reads.sql');
 const start=before.indexOf('CREATE OR REPLACE FUNCTION public.runtime_workspace_source(');
 const old=before.slice(start,before.indexOf('END $$;',start)+'END $$;'.length);
-const index=(a,s,q='')=>one('SELECT runtime_workspace_source($1,$2,$3) v',[a,s,q]);
+const index=async(a,s,q='')=>{
+ await c.query('SET ROLE service_role');
+ try{return await one('SELECT runtime_workspace_source($1,$2,$3) v',[a,s,q]);}
+ finally{await c.query('RESET ROLE');}
+};
 try{
  await c.query(read('packages/db/tests/erasure-b2a/fixture.sql'));
  await c.query(read('packages/db/tests/workspace-positioning/fixture.sql'));
@@ -21,12 +25,13 @@ try{
  await runCases({db:c,report,oldDefinition:b1.slice(b1start,b1.indexOf('END $$;',b1start)+'END $$;'.length)});
  const a=await one('SELECT ws_test.actor() v'),other=await one('SELECT ws_test.actor() v');
  const s=await one('SELECT ws_test.free_session($1) v',[a]);
- await c.query("UPDATE system_settings SET value='true' WHERE key IN ('publish_monitor_enabled','chat_my_posts_enabled')");
+ await c.query("INSERT INTO system_settings(key,value) VALUES('publish_monitor_enabled','true'),('chat_my_posts_enabled','true') ON CONFLICT(key) DO UPDATE SET value='true'");
  await c.query('BEGIN');
  await c.query(old);
  assert.equal((await index(a,s)).entries.some(e=>e.kind==='my_posts'),false);
  report.checks.push('RED: unpatched 0301 has no my_posts entries with the feature enabled');
  await c.query('ROLLBACK');
+ await c.query("INSERT INTO membership_plans(name,level,allow_fusion_review,allow_fusion_compare,library_storage_bytes,own_data_window_days) VALUES('B2 Pro','pro',false,false,0,30),('B2 Gold','gold',true,true,0,90)");
  assert.deepEqual((await index(a,s)).entries.filter(e=>e.kind==='my_posts').map(e=>e.id),['my_posts:14']);
  assert.equal((await index(a,s,'my_posts:14')).entitled,false);
  assert.equal((await index(a,s,'my_posts:90')).kind,'unavailable');
