@@ -86,22 +86,29 @@ export async function startCompare(deps: CompareDeps, choice: CompareStartInput)
 
   const gate = await readCompareGate(admin, actorId);
   staticCompareGate(gate, choice.parts.skill, deps.refusePositioning);
-  // Everything that can refuse a request without a model call is checked here, before the request is recorded and before
-  // the one paid judgement: size, the single-compare budget, and the whole quote the user was shown (count, order, total
-  // and per-column credits and provider cost). The request is sized with the fallback rule only when this user can be
-  // admitted with it; a turn admitted later never carries more than this.
-  const sized = await buildCompareColumns({ admin, actorId, modelIds: choice.modelIds,
-    request: compareRequest({ ...choice.parts, positioningFallback: gate.gated && !gate.capped }),
-    answerTokens: settings.answerOutputTokens, dispatchMinutes: settings.dispatchMinutes, env: deps.env });
-  if (sized.tooLarge.length) throw new Error('FUSION_COMPARE_INPUT_TOO_LARGE');
-  if (!settings.maxBudgetUsd || sized.totalUsd > decimal(settings.maxBudgetUsd)) throw new Error('FUSION_BUDGET_EXCEEDED');
-  assertQuoteCovers(sized.columns, choice.shown);
-
   const record = await begin();
   const compareId = record.compareId;
   if (record.state === 'refused' || record.state === 'stopped' || record.state === 'finished') {
     if (record.gateVerdict === 'block') deps.refusePositioning();
     throw new Error('FUSION_COMPARE_ENDED');
+  }
+
+  // A request seen for the first time is sized here, before the paid judgement: size, the single-compare budget, and the
+  // whole quote the user was shown (count, order, total and per-column credits and provider cost), with the fallback rule
+  // only when this user can be admitted with it. A refusal ends the record so it does not occupy the user's one slot. A
+  // resumed request is never re-sized with today's settings: it keeps the limit and fallback recorded with it.
+  if (record.created !== false) {
+    try {
+      const sized = await buildCompareColumns({ admin, actorId, modelIds: choice.modelIds,
+        request: compareRequest({ ...choice.parts, positioningFallback: gate.gated && !gate.capped }),
+        answerTokens: settings.answerOutputTokens, dispatchMinutes: settings.dispatchMinutes, env: deps.env });
+      if (sized.tooLarge.length) throw new Error('FUSION_COMPARE_INPUT_TOO_LARGE');
+      if (!settings.maxBudgetUsd || sized.totalUsd > decimal(settings.maxBudgetUsd)) throw new Error('FUSION_BUDGET_EXCEEDED');
+      assertQuoteCovers(sized.columns, choice.shown);
+    } catch (error) {
+      await compareRpc(admin, 'fusion_compare_end', { p_actor_id: actorId, p_compare_id: compareId }).catch(() => undefined);
+      throw error;
+    }
   }
 
   let verdict = record.gateVerdict;

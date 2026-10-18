@@ -131,7 +131,8 @@ describe('compare start', () => {
     s.tooLarge = []; s.credits = 11;
     await expect(start()).rejects.toThrow('FUSION_COMPARE_PRICE_CHANGED');
     expect(classify).not.toHaveBeenCalled();
-    expect(s.rpcs).toEqual([]);
+    expect(names()).not.toContain('fusion_compare_gate'); expect(names()).not.toContain('fusion_compare_claim');
+    expect(names().at(-1)).toBe('fusion_compare_end'); // the record is ended, never left holding the user's slot
   });
   it('a repeat of a judged request never judges again and returns the same group', async () => {
     s.begin = fresh({ created: false, gateVerdict: 'allow', groupId: id(70), state: 'running' });
@@ -181,7 +182,8 @@ describe('compare start: nothing paid happens for a request that can be refused 
     s.usd = decimal('1.5'); // the administrator's budget is $1
     await expect(start()).rejects.toThrow('FUSION_BUDGET_EXCEEDED');
     expect(classify).not.toHaveBeenCalled();
-    expect(s.rpcs).toEqual([]);
+    expect(names()).not.toContain('fusion_compare_gate'); expect(names()).not.toContain('fusion_compare_claim');
+    expect(names().at(-1)).toBe('fusion_compare_end'); // the record is ended, never left holding the user's slot
     expect(await estimateCompare(deps(), choice())).toMatchObject({ overBudget: true });
     s.usd = decimal('0.5');
     expect(await estimateCompare(deps(), choice())).toMatchObject({ overBudget: false });
@@ -198,7 +200,8 @@ describe('compare start: nothing paid happens for a request that can be refused 
     ];
     for (const [, patch] of forged) await expect(start({}, patch)).rejects.toThrow('FUSION_COMPARE_PRICE_CHANGED');
     expect(classify).not.toHaveBeenCalled();
-    expect(s.rpcs).toEqual([]);
+    expect(names()).not.toContain('fusion_compare_gate'); expect(names()).not.toContain('fusion_compare_claim');
+    expect(names().at(-1)).toBe('fusion_compare_end'); // the record is ended, never left holding the user's slot
   });
   it('applies the message rate limit once per new request, before the paid judgement', async () => {
     await start();
@@ -282,3 +285,14 @@ describe('compare start: admission keeps the answer limit recorded with the requ
     expect(s.admitCalls.at(-1)).toMatchObject({ answerTokens: 2048 });
   });
 });
+
+describe('compare start: a resumed request is not re-sized with today\'s settings (review finding)', () => {
+  it('skips the new-request sizing when the record already exists, even if the live limit would now refuse it', async () => {
+    s.begin = fresh({ created: false, gateVerdict: 'allow', gateFallback: false, state: 'admitting', config: { answerOutputTokens: 2048 } });
+    s.tooLarge = [id(1)]; s.usd = decimal('50'); s.credits = 99;
+    await expect(start()).resolves.toMatchObject({ state: 'claimed' });
+    expect(s.requests.length).toBe(0);
+    expect(names()).not.toContain('fusion_compare_end');
+  });
+});
+
