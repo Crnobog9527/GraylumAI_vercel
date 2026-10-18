@@ -118,8 +118,9 @@ describe('the same repair on a streamed response (the staging shape)', () => {
           ? [tool(0, {id: 'call_1', type: 'function', function: {name: 'read_source', arguments: ''}}),
             tool(0, {function: {arguments: '{"query": '}}), tool(0, {function: {arguments: '}'}})]
           : [tool(0, brokenCall)];
-        if (mode === 'retained-parallel') frames.push(tool(1, {id: 'call_2', type: 'function',
-          function: {name: 'read_source', arguments: '{"query":"search:ignored"}'}}));
+        if (mode === 'retained-parallel') frames[0] = chunk({tool_calls: [
+          {index: 0, ...brokenCall}, {index: 1, id: 'call_2', type: 'function',
+            function: {name: 'read_source', arguments: '{"query":"search:ignored"}'}}]});
         for (const frame of [...frames, chunk({content: ''}, 'tool_calls')]) onChunk?.(frame);
         return JSON.stringify({id: 'gen-1', object: 'chat.completion', created: 1, model: 'test/model',
           choices: [{index: 0, finish_reason: 'tool_calls', message: {role: 'assistant', content: null, tool_calls: mode === 'retained-parallel' ? [brokenCall, {...brokenCall, id: 'call_2'}] : [brokenCall]}}]});
