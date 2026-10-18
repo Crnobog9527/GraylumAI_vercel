@@ -37,6 +37,8 @@ export default async function LandingPage() {
         softwareApplicationJsonLd({ description: HOME_DESCRIPTION, offers: data.offerList }),
         ...(data.faqItems.length > 0 ? [faqPageJsonLd(data.faqItems)] : []),
       ]} />
+      {/* The 14 sample reports (lib/landing/sample-reports) are generated and privacy-checked and always show (Owner
+          2026-10-17); flags.sampleReports is the old home page's four demo reports, which are not these. */}
       <SampleL data={data} siteName={siteName} extras={{ flags, showSamples: true }} production supportEmail={supportEmail} />
     </div>
   );

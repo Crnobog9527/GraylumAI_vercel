@@ -95,7 +95,9 @@ export const J_FOOTER = {
  * Pages the header and footer link to that do not exist yet (for the PR's "待建页面" list); /en is not linked at all.
  * /features, its six pages and /blog came with PR #1090 (2026-10-18).
  */
-export const J_PENDING_PAGES = [PLANNED.samples, PLANNED.refund, PLANNED.cookies] as const;
+export const J_PENDING_PAGES = [PLANNED.samples, PLANNED.cookies] as const;
+/** Where the footer's "Cookie 设置" points until Termly's own buttons replace it (SiteFooterJ). */
+export const J_COOKIE_SETTINGS_HREF = PLANNED.cookies;
 
 /**
  * Whether a header or footer link leads to a page that exists. The production home page (sample L on /landing, Owner

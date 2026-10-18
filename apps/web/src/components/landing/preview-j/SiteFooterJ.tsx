@@ -1,6 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import Link from 'next/link';
-import { J_FOOTER, linkReady } from '@/lib/landing/landing-copy-j-chrome';
+import { ConsentPreferenceLinks } from '@/components/analytics/ConsentPreferenceLinks';
+import { ANALYTICS_CONFIG } from '@/lib/analytics/config';
+import { J_COOKIE_SETTINGS_HREF, J_FOOTER, linkReady } from '@/lib/landing/landing-copy-j-chrome';
 import { LanguageMenuJ } from './LanguageMenuJ';
 import styles from './chrome-j.module.css';
 import page from './j.module.css';
@@ -12,8 +14,14 @@ import page from './j.module.css';
  */
 export function SiteFooterJ({ onlyBuilt = false, supportEmail }: { onlyBuilt?: boolean; supportEmail?: string | null } = {}) {
   // The production home page links only pages that exist (linkReady); an emptied column goes.
-  const columns = J_FOOTER.columns.map(column => ({ ...column, links: onlyBuilt ? column.links.filter(link => linkReady(link.href)) : column.links }))
-    .filter(column => column.links.length > 0);
+  // With Termly in place, its own two entries (change or withdraw consent; do not sell or share) take the static
+  // cookie link's place, as the public site's footer has them (ANALYTICS plan section 3.4).
+  const termly = Boolean(ANALYTICS_CONFIG.termlyWebsiteUuid);
+  const columns = J_FOOTER.columns.map(column => {
+    const consent = column.links.some(link => link.href === J_COOKIE_SETTINGS_HREF);
+    const links = column.links.filter(link => (!onlyBuilt || linkReady(link.href)) && !(termly && link.href === J_COOKIE_SETTINGS_HREF));
+    return { ...column, links, consent };
+  }).filter(column => column.links.length > 0 || column.consent);
   return (
     <footer className={styles.footer} data-region="页脚">
       <div className={page.wrap}>
@@ -23,6 +31,7 @@ export function SiteFooterJ({ onlyBuilt = false, supportEmail }: { onlyBuilt?: b
               <p>{column.title}</p>
               <ul>
                 {column.links.map(link => <li key={link.href}><Link href={link.href}>{link.label}</Link></li>)}
+                {column.consent ? <ConsentPreferenceLinks className={styles.consent} /> : null}
               </ul>
             </div>
           ))}
