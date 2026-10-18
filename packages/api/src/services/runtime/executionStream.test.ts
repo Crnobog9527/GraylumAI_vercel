@@ -160,3 +160,14 @@ it('discards buffered output after deletion while original financial work comple
  c.finish({state:'cost_pending'});await rejection;
  expect(checks).toBe(1);expect(c.settled()).toBe(true);
 });
+
+it('keeps a short tool start and finish in order before the following answer',async()=>{
+ const c=controlled();
+ const stream=streamOriginalExecution(c.run,undefined,'runtime.executeStream');
+ const first=stream.next();
+ const start={type:'agent_tool',callId:'c1',tool:'read_source',kind:'library_search',state:'running',label:''} as const;
+ const end={...start,state:'done',label:'在资料库里找到 1 篇相关内容'} as const;
+ c.emit(start);c.emit(end);c.emit({type:'text',text:'回答'});c.finish({state:'completed',body:'回答'});
+ const received=[(await first).value];for await(const event of stream)received.push(event);
+ expect(received).toEqual([start,end,{type:'text',text:'回答'},{type:'result',result:{state:'completed',body:'回答'}}]);
+});

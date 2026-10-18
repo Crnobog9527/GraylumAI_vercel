@@ -162,7 +162,7 @@ export type ExecutionStreamEvent=RuntimeProgress|NativeTextDelta|{type:'result';
  * reply length. The first text is sent at once; the final text always
  * precedes the result. */
 export const TEXT_EVENT_INTERVAL_MS=100;
-/** RT-3b PR-3: research events are discrete and kept in order (a turn sends at most ~60); beyond this they are
+/** RT-3b PR-3 and source-work progress: tool events are discrete and kept in order (a turn sends at most ~60); beyond this they are
  * dropped from display only. Cards and evidence stay readable through the research API. */
 export const RESEARCH_EVENT_LIMIT=128;
 
@@ -184,7 +184,7 @@ export async function* streamOriginalExecution(run:(onProgress:(event:RuntimePro
    else textEvent={type:'text',text:event.text};
   }
   else if(event.type==='card'){if(!cardSeen){cardSeen=true;cardEvent=event;}}
-  else if(event.type==='research_call'||event.type==='research_card'){
+  else if(event.type==='research_call'||event.type==='research_card'||event.type==='agent_tool'){
    if(researchSeen++<RESEARCH_EVENT_LIMIT){
     // Text written before this call is delivered before it: the queue keeps the turn's order.
     if(textEvent){researchEvents.push(nativePending?transport.flush()!:textEvent);nativePending=false;textEvent=undefined;}
@@ -199,7 +199,7 @@ export async function* streamOriginalExecution(run:(onProgress:(event:RuntimePro
  });
  try{
   while(!done||textEvent||researchEvents.length||cardEvent||phaseEvent||resultEvent){
-   // Queued research events (and text written before them) precede any later text: the turn's order (#1029 P2).
+   // Queued tool events (and text written before them) precede any later text: the turn's order (#1029 P2).
    if(researchEvents.length){
     const event=researchEvents.shift()!;
     if((event.type==='text'||event.type==='textDelta')&&event.text){timing?.mark('firstPublicText');lastText=now();}
