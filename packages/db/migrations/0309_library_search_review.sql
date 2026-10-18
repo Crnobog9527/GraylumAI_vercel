@@ -1,4 +1,3 @@
--- DRAFT ONLY: awaiting controller-assigned migration number; move to migrations before ready.
 -- Copyright (c) 2026 Grayscale Luminary LLC.
 -- All rights reserved.
 -- This code is proprietary and confidential.
