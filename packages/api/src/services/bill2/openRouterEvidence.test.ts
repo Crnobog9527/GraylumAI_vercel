@@ -29,6 +29,21 @@ describe('OpenRouter private evidence projection',()=>{
  it('does not infer free usage from missing evidence',()=>expect(openRouterEvidence(observed(raw.replace('"cost":0.000000123456','"tokens":0')),identity,'response')).toMatchObject({cost:null,final:false}));
  it('checks lookup against original generation identity',()=>expect(openRouterEvidence(observed('{"data":{"id":"other","model":"test/model","finish_reason":"stop","total_cost":0}}'),identity,'lookup','gen-local')).toMatchObject({cost:null,final:false}));
  it('does not trust truncated bytes even when prefix looks complete',()=>expect(openRouterEvidence({...observed(raw),complete:false},identity,'response')).toMatchObject({providerId:null,cost:null,final:false}));
+ // Staging 2026-10-18: the official lookup names the dated model (permaslug) and a stream we cancelled has no finish reason.
+ const lookupBody=(model:string,extra='"finish_reason":null,"cancelled":true')=>`{"data":{"id":"gen-local","model":"${model}",${extra},"total_cost":0.00611,"native_tokens_prompt":2955,"native_tokens_completion":20}}`;
+ it('settles a lookup whose model is the requested model plus a date suffix, even for a cancelled generation',()=>{
+  expect(openRouterEvidence(observed(lookupBody('test/model-20260928')),identity,'lookup','gen-local'))
+   .toMatchObject({providerId:'gen-local',cost:'0.00611',final:true,coverage:'request_total'});
+ });
+ it.each(['test/model-2026','test/model-other','test/modelx-20260928','other/model-20260928'])('still treats lookup model %s as another model',model=>{
+  expect(openRouterEvidence(observed(lookupBody(model)),identity,'lookup','gen-local')).toMatchObject({rejectedReason:'identity_or_response_mismatch',cost:null,final:false});
+ });
+ it('keeps a lookup without finish reason that is not cancelled non-final',()=>{
+  expect(openRouterEvidence(observed(lookupBody('test/model','"finish_reason":null')),identity,'lookup','gen-local')).toMatchObject({cost:null,final:false});
+ });
+ it('does not accept a dated model name in a response body',()=>{
+  expect(openRouterEvidence(observed(raw.replace('"test/model"','"test/model-20260928"')),identity,'response')).toMatchObject({rejectedReason:'identity_or_response_mismatch'});
+ });
 });
 
 it.each([false,true])('a generation header is only lookup evidence, never cost (complete=%s)',complete=>{

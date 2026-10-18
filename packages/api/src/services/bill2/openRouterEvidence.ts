@@ -130,12 +130,17 @@ function projectOpenRouterEvidence(observation:TransportObservation, identity:Op
   if(bodyId)base.providerId=bodyId;
   if(observation.httpStatus<200||observation.httpStatus>=300)return diagnostic('http_observation_only');
   if(root.error || data.error || !bodyId || typeof data.model!=='string')return diagnostic('incomplete_response');
-  if((expectedProviderId && expectedProviderId!==base.providerId) || data.model!==identity.model)
+  // The official lookup names the dated model (permaslug, e.g. `-20260928`); a response body never does.
+  const sameModel=data.model===identity.model||(source==='lookup'&&data.model.startsWith(identity.model+'-')
+   &&/^\d{8}$/.test(data.model.slice(identity.model.length+1)));
+  if((expectedProviderId && expectedProviderId!==base.providerId) || !sameModel)
     return mismatch();
   const usage=data.usage as Record<string,unknown>|undefined;
   const cost=source==='lookup'?data.total_cost:usage?.cost;
   const choices=data.choices as Array<{finish_reason?:unknown}>|undefined;
-  const finish=source==='lookup'?data.finish_reason:Array.isArray(choices)&&choices.length===1?choices[0]?.finish_reason:undefined;
+  // A generation we cancelled (stream rejected or stopped) has no finish reason but a final cost.
+  const finish=source==='lookup'?data.finish_reason??(data.cancelled===true?'stop':null)
+   :Array.isArray(choices)&&choices.length===1?choices[0]?.finish_reason:undefined;
   if(!['stop','length','content_filter','tool_calls'].includes(String(finish)))return diagnostic('nonterminal_response');
   // A terminal response can carry a usable answer while cost is unresolved.
   // Keep the original response available to Runtime; only financial finality
