@@ -16,7 +16,7 @@ v12 第 3.7、7、9 节；[BILL2 技术契约](V3-BILL-2-provider-authoritative-
 ## RESEARCH-0：供应商对比测试（已完成）
 
 - **做了什么**：用同一组查询实测了 AIsa、TinyFish、TikHub、SocialCrawl、monid，之后补测了 TikHub（充值后）、Tavily、Firecrawl，最后用 20 条中文查询测了 Parallel。脚本在 `scripts/research0*`；过程、原始指标、花费和条款转述见 #457、#465、#466。
-- **Owner 的最终选择**（2026-09-28，见 Master Plan 第 3.7 节和 D13）：社媒数据 **TikHub**，网页搜索 **Parallel**，网页抓取 **Firecrawl**。其余几家不采用。
+- **Owner 的选择与后续修订**：2026-09-28（见 Master Plan 第 3.7 节和 D13）确定社媒数据 **TikHub**、网页搜索 **Parallel**、网页抓取 **Firecrawl**，当时其余几家不采用。**2026-10-18 Owner 将 monid 加入海外／非中国平台社媒账号数据和网页抓取供应名单，条款已邮件确认可用于 SaaS；中国平台继续 TikHub**（取代原先海外供应名单只用 TikHub、排除 monid 的限制，见 [Master Plan 第 2.1 节](../MASTER_PLAN.md#changes)）。[本次评估](../evidence/monid-supplier-evaluation-20261018.md)只给逐线路建议，不代表已经接入、修改 staging 或自动替换当前供应商；实际接入另开任务。
 
 ### RESEARCH-0 结论（给 RESEARCH-TOOLS 用）
 
