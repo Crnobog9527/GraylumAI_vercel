@@ -19,7 +19,7 @@ export function PlanCardsH({ cards, yearlyBadge, showResult, membershipHref }: {
   const [billing, setBilling] = useState<PaywallBilling>('monthly');
   const hasYearly = cards.some(card => card.quotes.yearly);
   return (
-    <div className={styles.plans}>
+    <div className={styles.plans} data-region="会员方案">
       <div role="radiogroup" aria-label="计费周期" className={cn(styles.billing, styles.glass)} data-cycle={billing}>
         <span className={styles.billingThumb} aria-hidden="true" />
         {(['monthly', 'yearly'] as const).map(cycle => {

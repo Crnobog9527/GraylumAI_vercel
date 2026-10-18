@@ -25,7 +25,7 @@ export function SampleReportsH({ reports }: { reports: readonly SampleReport[] }
   }
 
   return (
-    <div className={styles.reports}>
+    <div className={styles.reports} data-region="样例报告">
       <h3 className={styles.displaySmall}>{SAMPLE_REPORTS_TITLE}</h3>
       <div role="tablist" aria-label={SAMPLE_REPORTS_TITLE} className={styles.reportTabs}>
         {reports.map((item, index) => (

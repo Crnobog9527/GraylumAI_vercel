@@ -1,0 +1,212 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * Style sample O, direction C "路线图" (Owner 2026-10-17): an off-white page (#F6F5F1) with a very faint dot grid in the
+ * content column only, and one route down a left rail from station 0 to 10. Gold is only the route and its stations;
+ * the one function colour (dark green) only marks what is done or works. Cards are white with a 1px edge and a gold
+ * station mark on their left. Headings one size above sample L's minor ones; body text in two columns where it fits.
+ * Sample J's tokens (--j-*) and the light foundation carry everything else; product windows keep their own styles.
+ */
+.page.page {
+  --j-canvas: #f6f5f1;
+  --k-secondary: var(--gl-text-secondary-aa, #6b6b6b);
+  --o-green: #1f6b4a;
+  --o-ahead: #d3cfc3;
+  --o-rail: 30px;
+  --o-line: 13px;
+  --o-title: clamp(28px, 3.2vw, 44px);
+  --o-hero: clamp(38px, 4.6vw, 68px);
+  --o-ease: cubic-bezier(.16, 1, .3, 1);
+  background: var(--j-canvas);
+}
+@media (min-width: 1024px) { .page.page { --o-rail: 76px; --o-line: 22px; } }
+.page header { background: rgba(246, 245, 241, .94); }
+
+/* The track: the dot grid under everything, the route over the sections' backgrounds, the stations over the route. */
+.track { position: relative; isolation: isolate; }
+.dots {
+  position: absolute; top: 0; bottom: 0; left: 50%; z-index: -1; width: min(1240px, 100%); translate: -50% 0; pointer-events: none;
+  background-image: radial-gradient(circle, rgba(20, 19, 18, .14) 1px, transparent 1.6px); background-size: 22px 22px;
+  mask-image: linear-gradient(90deg, transparent, #000 5%, #000 95%, transparent);
+}
+.route { position: absolute; top: 0; left: 0; z-index: 2; overflow: visible; pointer-events: none; }
+.routeAhead { fill: none; stroke: var(--o-ahead); stroke-width: 2; stroke-dasharray: 1 7; stroke-linecap: round; }
+.routeDrawn { fill: none; stroke: var(--j-gold); stroke-width: 3; stroke-linecap: round; }
+
+/* Every module's column leaves the rail clear (sample J's sections included). */
+.wrap { width: 100%; max-width: 1240px; margin: 0 auto; padding: 0 var(--j-gutter) 0 calc(var(--j-gutter) + var(--o-rail)); }
+.track > section > div:first-child { padding-left: calc(var(--j-gutter) + var(--o-rail)); }
+.section, .track > section[data-zone] { padding: 80px 0; scroll-margin-top: 112px; }
+@media (max-width: 767px) { .section, .track > section[data-zone] { padding: 56px 0; } }
+.track > section[data-zone='price'] { padding-bottom: 32px; }
+
+/* Headings: one size for every module, a step above sample L's minor headings. */
+.title, .page :is([id='compare-title'], [id='pricing-title'], [id='faq-title']) {
+  margin: 0; font-size: var(--o-title); font-weight: 700; line-height: 1.2; letter-spacing: -.03em; text-wrap: balance; word-break: keep-all;
+}
+.page [id='compare-title'] { margin-bottom: 32px; }
+.phrase { display: inline-block; }
+.lede { margin: 0; max-width: 42em; color: var(--j-body); font-size: 17px; line-height: 1.7; }
+.hint { margin-left: 12px; color: var(--k-secondary); font-size: 14px; }
+@media (max-width: 767px) { .hint { display: block; margin: 4px 0 0; } }
+.head { position: relative; display: grid; gap: 12px; margin-bottom: 32px; --o-first: calc(var(--o-title) * 1.2); }
+.head:has(.stationLabel) { --o-first: 22px; }
+
+/* Stations: a round mark in the rail, its number in monospace. Finished (server HTML, reduced motion): gold. While the
+   route draws, a station not yet reached is an empty ring; its number appears with an ease-out as the pen arrives. */
+.station {
+  position: absolute; top: calc(var(--o-first, 30px) / 2); left: calc(var(--o-line) - var(--o-rail)); z-index: 3; display: grid;
+  place-items: center; width: 26px; height: 26px; translate: -50% -50%; border: 2px solid var(--j-gold); border-radius: 50%;
+  background: var(--j-gold); color: var(--j-ink); font-family: var(--font-mono); font-size: 12px; font-weight: 700; line-height: 1;
+  transition: background-color .35s var(--o-ease), border-color .35s var(--o-ease);
+}
+@media (min-width: 1024px) { .station { width: 32px; height: 32px; font-size: 13px; } }
+.station b { font-weight: inherit; transition: opacity .45s var(--o-ease), scale .45s var(--o-ease); }
+[data-route='on'] .station:not([data-reached]) { border-color: var(--o-ahead); background: var(--j-canvas); }
+[data-route='on'] .station:not([data-reached]) b { opacity: 0; scale: .5; }
+.stationLabel {
+  margin: 0; color: var(--j-gold-text); font-family: var(--font-mono); font-size: 13px; font-weight: 600; line-height: 22px; letter-spacing: .06em;
+}
+
+/* First screen: station 0 beside the title; the three-step picture beside it on a computer, under it on a phone. */
+.hero { padding: 40px 0 56px; }
+@media (min-width: 1024px) { .hero { display: grid; align-content: center; min-height: min(720px, calc(100svh - 140px)); padding: 32px 0 56px; } }
+.heroGrid { display: grid; gap: 36px; }
+@media (min-width: 1024px) { .heroGrid { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); align-items: center; gap: 56px; } }
+.heroText { position: relative; display: grid; gap: 22px; justify-items: start; --o-first: calc(var(--o-hero) * 1.08); }
+.heroTitle { display: grid; margin: 0; font-size: var(--o-hero); font-weight: 700; line-height: 1.08; letter-spacing: -.04em; word-break: keep-all; }
+.heroTitle span { display: block; }
+.promise { margin: 0; color: var(--j-body); font-size: clamp(17px, 1.45vw, 21px); line-height: 1.6; }
+.promise span { display: inline-block; }
+.heroActions { display: grid; gap: 10px; justify-items: start; }
+.heroActions p { margin: 0; color: var(--k-secondary); font-size: 14px; }
+.flow { display: grid; gap: 8px; width: 100%; max-width: 460px; margin: 0; }
+@media (min-width: 1024px) { .flow { margin-left: auto; } }
+.flowStep, .card, .voice, .reportCard {
+  position: relative; border: 1px solid var(--j-line); border-radius: 14px; background: #fff;
+  box-shadow: 0 1px 2px rgba(20, 19, 18, .04), 0 14px 28px -22px rgba(20, 19, 18, .3);
+}
+/* The gold station mark on a card's left edge. */
+.flowStep::before, .card::before, .voice::before, .reportCard::before {
+  content: ''; position: absolute; top: 16px; bottom: 16px; left: -1px; width: 3px; border-radius: 0 2px 2px 0; background: var(--j-gold);
+}
+.flowStep { display: grid; gap: 8px; padding: 14px 18px 14px 20px; }
+.flowStep[data-result] { border-color: var(--j-ink); }
+.flowTitle { display: flex; align-items: center; gap: 8px; margin: 0; color: #55544f; font-size: 14px; font-weight: 600; }
+.flowTitle img { width: 18px; height: 18px; border-radius: 4px; }
+.bubble { justify-self: end; margin: 0; padding: 8px 14px; border-radius: 16px 16px 4px 16px; background: #f1f0ec; font-size: 16px; line-height: 1.6; }
+.does { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.does li { display: flex; align-items: center; gap: 8px; font-size: 16px; line-height: 1.5; }
+.does svg { flex: none; color: var(--o-green); }
+.result { margin: 0; font-size: 18px; font-weight: 600; line-height: 1.5; }
+.flowArrow { justify-self: center; color: #8a877f; }
+@media (prefers-reduced-motion: no-preference) {
+  .flowStep, .flowArrow { animation: rise .6s var(--o-ease) both; animation-delay: calc(var(--n) * 380ms + 250ms); }
+  .does li { animation: rise .5s var(--o-ease) both; animation-delay: calc(1000ms + var(--i) * 200ms); }
+}
+@keyframes rise { from { opacity: 0; translate: 0 8px; } to { opacity: 1; translate: 0 0; } }
+
+/* Region 2: the voices, pinned like labels on a map. */
+.voices { display: grid; gap: 22px 18px; margin: 0; padding: 0; list-style: none; }
+@media (min-width: 900px) { .voices { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; } }
+.voice { padding: 22px 20px 18px 24px; }
+/* The pin: a dark head where the label is stuck to the map. */
+.voice::after {
+  content: ''; position: absolute; top: -6px; left: 24px; width: 12px; height: 12px; border-radius: 50%; background: var(--j-ink);
+  box-shadow: 0 0 0 3px #fff, 0 3px 6px rgba(20, 19, 18, .3);
+}
+.voice figure { margin: 0; }
+.voice blockquote { margin: 0; color: var(--j-ink); font-size: 17px; line-height: 1.7; }
+.voice figcaption { margin-top: 8px; color: var(--k-secondary); font-size: 13px; }
+.voiceAnswer { margin-top: 14px; padding-top: 12px; border-top: 1px dashed #d6d2c6; }
+.voiceHead { margin: 0 0 4px; font-size: 16px; font-weight: 600; line-height: 1.5; }
+.voiceAnswer p:last-child { margin: 0; color: var(--j-body); font-size: 15.5px; line-height: 1.75; }
+@media (prefers-reduced-motion: no-preference) {
+  [data-route='on'] .voice:not([data-in]) { opacity: 0; translate: 0 14px; }
+  [data-route='on'] .voice { transition: opacity .5s var(--o-ease) var(--stagger, 0ms), translate .6s var(--o-ease) var(--stagger, 0ms); }
+}
+
+/* Region 3: the week. The steps run down the rail as stations; the window in the middle, its numbered notes beside. */
+.opsBody { display: grid; gap: 22px; }
+@media (min-width: 1024px) { .opsBody { grid-template-columns: 196px minmax(0, 1fr); gap: 28px; align-items: start; } }
+.opsSide { display: grid; gap: 12px; justify-items: start; }
+.opsSteps { display: grid; gap: 8px; width: 100%; }
+.opsSteps button {
+  position: relative; display: flex; align-items: center; min-height: 46px; padding: 0 14px; border: 1px solid var(--j-line); border-radius: 12px;
+  background: #fff; color: var(--j-body); font: inherit; font-size: 15.5px; font-weight: 500; text-align: left; cursor: pointer;
+  transition: border-color .2s, color .2s, box-shadow .2s;
+}
+.opsSteps button .station { top: 50%; }
+.opsSteps button[aria-selected='true'] { border-color: var(--j-ink); color: var(--j-ink); font-weight: 600; box-shadow: inset 3px 0 0 var(--j-gold); }
+.opsProgress { position: absolute; right: 12px; bottom: 0; left: 12px; height: 2px; background: var(--j-gold); transform-origin: 0 50%; scale: 0 1; }
+.opsSteps button[aria-selected='true'] .opsProgress { scale: 1 1; }
+@media (prefers-reduced-motion: no-preference) {
+  .opsSteps button[aria-selected='true'] .opsProgress[data-run] { animation: fill var(--ms) linear both; }
+}
+@keyframes fill { from { scale: 0 1; } to { scale: 1 1; } }
+.opsPause {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 14px; border: 1px solid var(--j-line); border-radius: 999px;
+  background: transparent; color: var(--j-body); font: inherit; font-size: 14px; cursor: pointer;
+}
+.opsPanel { min-width: 0; }
+.opsStep { display: grid; gap: 14px; }
+@media (min-width: 1200px) { .opsStep { grid-template-columns: minmax(0, 1fr) 240px; gap: 30px; align-items: start; } }
+/* The window's frame (outside the product window): a dashed sheet, like a cut-out pinned on the map. */
+.opsFrame { position: relative; padding: 10px; border: 1px dashed #cdc8bb; border-radius: 24px; background: rgba(255, 255, 255, .55); }
+.mark, .notes b {
+  display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--j-ink); color: #fff;
+  font-family: var(--font-mono); font-size: 12px; font-weight: 700; line-height: 1;
+}
+.mark { position: absolute; right: -6px; translate: 0 -50%; box-shadow: 0 0 0 3px var(--j-canvas); }
+@media (min-width: 1200px) { .mark { right: -12px; } }
+.notes { position: relative; display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.notes li {
+  display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10px; align-items: start; padding: 12px 14px; border: 1px solid var(--j-line);
+  border-radius: 12px; background: #fff; color: var(--j-ink); font-size: 15px; line-height: 1.6;
+}
+@media (min-width: 1200px) {
+  .notes li { position: absolute; top: var(--y); right: 0; left: 0; }
+  .notes li::before { content: ''; position: absolute; top: 24px; right: 100%; width: 18px; border-top: 1px dashed #a9a497; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .notes li, .mark { animation: rise .5s var(--o-ease) both; animation-delay: calc(var(--m) * 900ms + 450ms); }
+}
+.opsClose { margin: 28px 0 0; color: var(--j-ink); font-size: clamp(18px, 1.6vw, 21px); font-weight: 600; }
+
+/* Region 4: the moving row of report cards, inside the column. */
+.reportCard {
+  display: grid; align-content: start; gap: 8px; width: 290px; min-height: 216px; padding: 18px 18px 18px 22px; color: var(--j-ink);
+  font: inherit; text-align: left; cursor: pointer; transition: border-color .2s, translate .3s var(--o-ease);
+}
+.reportCard:hover { border-color: var(--j-ink); translate: 0 -3px; }
+.cardHead { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; color: var(--k-secondary); font-size: 14px; }
+.cardHead svg { color: var(--j-ink); }
+.cardHead b { color: var(--j-ink); font-size: 17px; }
+.reportCard em {
+  justify-self: start; padding: 0 8px; border-radius: 999px; background: #efede8; color: var(--j-ink); font-size: 12px; font-style: normal;
+  font-weight: 600; line-height: 22px;
+}
+.cardWho { color: var(--j-body); font-size: 14.5px; line-height: 1.6; }
+.cardWhat { color: var(--j-ink); font-size: 15px; font-weight: 500; line-height: 1.6; }
+.cardOpen { align-self: end; color: var(--j-ink); font-size: 14px; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+
+/* Region 5: worries, two columns of cards. */
+.care { display: grid; gap: 14px; margin: 0; padding: 0; list-style: none; }
+@media (min-width: 900px) { .care { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+.card { display: grid; gap: 6px; padding: 16px 18px 16px 22px; }
+.card b { font-size: 17px; font-weight: 600; line-height: 1.5; }
+.card span { color: var(--j-body); font-size: 15.5px; line-height: 1.7; }
+
+/* Station "从这里出发": the plan cards (PlanCardsMNO), Gold lifted the most. */
+.plansSection { padding: 0 0 72px; }
+.plans [data-plan] { position: relative; border-radius: 14px; }
+.plans [data-plan]::before {
+  content: ''; position: absolute; top: 18px; bottom: 18px; left: -1px; width: 3px; border-radius: 0 2px 2px 0; background: var(--j-gold);
+}
+.plans [data-recommended] { box-shadow: 0 0 0 5px rgba(255, 187, 23, .2), 0 28px 50px -30px rgba(138, 90, 0, .55); }
+.plans [data-recommended]::before { display: none; }
+@media (min-width: 720px) { .plans [data-recommended] { translate: 0 -8px; } }
+
+/* The close, the route's end. */
+.final { display: grid; gap: 18px; justify-items: start; }
+.final .head { margin-bottom: 0; }
+.finalNote { margin: 0; color: var(--k-secondary); font-size: 14px; }

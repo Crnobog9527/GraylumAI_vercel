@@ -8,6 +8,7 @@ PUBLIC-SITE 新落地页的文案依据。页面代码在 `apps/web/src/lib/land
 | [offer-one-page-final-2026-10-13.md](offer-one-page-final-2026-10-13.md) | 一页纸：用户会读到的全部内容，按页面顺序。方括号里的字不上页面 |
 | [offer-brief-final-2026-10-13.md](offer-brief-final-2026-10-13.md) | 完整方案（公开版）：出处、合规写法、动画表（第 12 节）、便签墙（第 13 节）、第 3 模块和样例报告做法（第 14b 节）、板块顺序（第 15 节） |
 | [voc-landing-quotes.md](voc-landing-quotes.md) | 便签墙用到的 7 条原话和出处 |
+| [sample-personas.md](sample-personas.md) | 四份样例报告的虚构人物事实卡，给在 staging 跑真实定位 Skill 时扮演用户用（2026-10-15） |
 
 公开版和本机完整版的差别（总控 2026-10-13 确认）：方案去掉了内部估值、创始人线下价格、审计打分和 /about 素材；
 原话表只保留页面用到的 7 条，不放原帖链接、账号名和身份线索；一页纸只把一处创始人线下价格改成泛称。

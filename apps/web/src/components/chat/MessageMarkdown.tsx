@@ -1,6 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import type { ReactNode } from "react";
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { DisplayHeading, type HeadingLevel } from "@/components/chat-display/display-heading";
 import { cn } from "@/lib/utils";
 import { closePartialMarkdown, remarkSoftBreaks, safeMessageHref } from "./message-markdown-source";
 import styles from "./message-markdown.module.css";
@@ -22,6 +24,11 @@ const components: Components = {
       <table>{children}</table>
     </div>
   ),
+  // The same h1–h4 as always; inside a public page's example (<AsDemo>) plain elements that look the same (SEO_GEO_SPEC
+  // section 6), so a report shown as an example adds no headings to the page.
+  ...Object.fromEntries((["h1", "h2", "h3", "h4"] as HeadingLevel[]).map(level => [
+    level, ({ children }: { children?: ReactNode }) => <DisplayHeading as={level}>{children}</DisplayHeading>,
+  ])),
 };
 
 const plugins = [remarkGfm, remarkSoftBreaks];

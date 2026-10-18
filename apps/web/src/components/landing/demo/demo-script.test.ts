@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { FREE_REPLY, demoInformation, demoReducer, initialDemoState, openQuestion, QUESTION_ONE, QUESTION_TWO, REPORT_BODY } from './demo-script';
+import {
+  FREE_REPLY, demoInformation, demoReducer, initialDemoState, openQuestion, QUESTION_ONE, QUESTION_TWO, REPORT_BODY, summaryDemoState,
+} from './demo-script';
 
 describe('landing demo script', () => {
   it('walks the first step: two answers, a summary, then a confirmed step that unlocks the report', () => {
@@ -67,5 +69,15 @@ describe('landing demo script', () => {
     const text = [REPORT_BODY, ...initialDemoState().messages.map(message => message.text),
       ...QUESTION_ONE.options, ...QUESTION_TWO.options].join('\n');
     expect(text).not.toMatch(/粉丝|收入|涨粉|万|\$|%|美元/);
+  });
+
+  it('opens the first-screen demo on the summary, both questions answered with the recommended options', () => {
+    const state = summaryDemoState();
+    expect(state.phase).toBe('summary');
+    expect(state.liveId).not.toBeNull();
+    expect(state.messages.at(-1)?.summary).toBe(true);
+    expect(state.values.experience?.value).toBe(QUESTION_ONE.options[QUESTION_ONE.recommended ?? 0]);
+    expect(state.values.audience?.value).toBe(QUESTION_TWO.options[QUESTION_TWO.recommended ?? 0]);
+    expect(state.valid).toBe(false);
   });
 });

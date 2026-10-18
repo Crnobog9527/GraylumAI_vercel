@@ -10,14 +10,16 @@ describe('landing FAQ reuse follows the landing switches', () => {
     expect(() => landingFaq('faq-99')).toThrow();
   });
 
-  it('leaves an answer out when a capability it promises is switched off, and drops the 500 credits with signupGrant', async () => {
+  // Owner 2026-10-17: the landing page is the full launched version, so a capability is never a switch (landing-flags.ts);
+  // only facts such as the 500 sign-up credits can be off. An answer promising a capability always stays.
+  it('keeps answers that promise a capability, and drops the 500 credits with signupGrant', async () => {
     vi.doMock('@/lib/landing/landing-flags', async importOriginal => {
       const original = await importOriginal<typeof import('@/lib/landing/landing-flags')>();
-      return { ...original, resolveLandingFlags: () => ({ ...original.resolveLandingFlags(), fusion: false, signupGrant: false }) };
+      return { ...original, resolveLandingFlags: () => ({ ...original.resolveLandingFlags(), signupGrant: false }) };
     });
     const { landingFaq, signupGrantShown } = await import('./landing-faq-pick');
     const { pricingSentence } = await import('./feature-pricing');
-    expect(landingFaq('faq-13')).toEqual([]);
+    expect(landingFaq('faq-13')).toHaveLength(1);
     expect(landingFaq('faq-2')).toHaveLength(1);
     expect(signupGrantShown()).toBe(false);
     expect(pricingSentence('content', [])).toBe('免费开始；会员价格见价格页。');

@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { PaywallPlanSource } from '@/components/paywall/paywallPlans';
-import { FINAL_ACTION, HERO, HOW_IT_WORKS, PRICE_COMPARE, RISK_REVERSAL, VOICE_WALL } from './landing-copy';
+import { FINAL_ACTION, HERO, HERO_H, HOW_IT_WORKS, PRICE_COMPARE, RISK_REVERSAL, VOICE_WALL } from './landing-copy';
 import { LANDING_FAQ, faqAnswerText } from './landing-faq';
 import { FLOW_STEPS } from './landing-flow';
 import { SAMPLE_REPORTS } from './landing-samples';
@@ -29,6 +29,8 @@ export function buildLandingPageData(flags: LandingFlags, plans: readonly Paywal
 
   return {
     heroNote: visibleItems(flags, HERO.note).map(part => part.text).join(''),
+    /** Sample H's difference text, gated like the rest (the weekly review only with publishing on). */
+    differenceBody: visibleItems(flags, HERO_H.differenceBody).map(part => part.text).join(''),
     finalNote: visibleItems(flags, FINAL_ACTION.note).map(part => part.text).join(''),
     notes: visibleItems(flags, VOICE_WALL.notes),
     promise: visibleItems(flags, HOW_IT_WORKS.promise),

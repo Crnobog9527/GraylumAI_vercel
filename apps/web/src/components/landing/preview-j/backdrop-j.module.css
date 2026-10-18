@@ -1,0 +1,75 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * Sample J's backdrop (Owner 2026-10-15: "背景从头到尾没有变化，显得很死板" — bring back sample H's layering).
+ * One fixed layer behind the page: a faint grid that drifts slower than the content, and three soft pools of light
+ * (a trace of the brand gold, a cool grey, warm paper). The page root's `data-zone` (the module in the middle of the
+ * screen) moves, scales and fades each pool, so every module sits in its own light. The canvas stays near-white;
+ * with reduced motion the pools still follow the module but jump instead of gliding.
+ */
+.backdrop { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
+.grid {
+  position: absolute; inset: -40vh 0 -40vh; opacity: var(--grid, .9);
+  background:
+    linear-gradient(rgba(20, 19, 18, .045) 1px, transparent 1px) 0 0 / 56px 56px,
+    linear-gradient(90deg, rgba(20, 19, 18, .045) 1px, transparent 1px) 0 0 / 56px 56px;
+  mask-image: radial-gradient(70% 60% at var(--gx, 70%) var(--gy, 40%), #000 10%, transparent 80%);
+  transition: opacity 1.2s;
+}
+.pool {
+  position: absolute; width: 70vmax; height: 70vmax; margin: -35vmax 0 0 -35vmax; border-radius: 50%;
+  opacity: 0; filter: blur(40px);
+  transition: left 1.6s cubic-bezier(.16, 1, .3, 1), top 1.6s cubic-bezier(.16, 1, .3, 1), opacity 1.2s, scale 1.6s cubic-bezier(.16, 1, .3, 1);
+}
+.gold { background: radial-gradient(closest-side, rgba(255, 196, 46, .22), rgba(255, 196, 46, 0)); }
+.cool { background: radial-gradient(closest-side, rgba(140, 146, 160, .16), rgba(140, 146, 160, 0)); }
+.paper { background: radial-gradient(closest-side, rgba(255, 236, 205, .55), rgba(255, 236, 205, 0)); }
+
+/* Each module's light. Defaults (and the first screen): gold behind the product window, grey low on the left. */
+.backdrop .gold { left: 78%; top: 38%; opacity: 1; scale: 1; }
+.backdrop .cool { left: 8%; top: 92%; opacity: .9; scale: 1; }
+.backdrop .paper { left: 40%; top: 10%; opacity: .7; scale: .9; }
+
+[data-zone='voice'] .backdrop { --gx: 30%; --gy: 50%; --grid: .5; }
+[data-zone='voice'] .gold { left: 18%; top: 46%; opacity: .7; scale: .8; }
+[data-zone='voice'] .cool { left: 92%; top: 70%; opacity: .6; }
+[data-zone='voice'] .paper { left: 30%; top: 60%; opacity: 1; scale: 1.1; }
+
+[data-zone='takeover'] .backdrop { --gx: 50%; --gy: 50%; --grid: 1; }
+[data-zone='takeover'] .gold { left: 50%; top: 110%; opacity: .5; scale: 1.2; }
+[data-zone='takeover'] .cool { left: 50%; top: 20%; opacity: 1; scale: 1.3; }
+[data-zone='takeover'] .paper { left: 90%; top: 50%; opacity: .4; }
+
+[data-zone='work'] .backdrop { --gx: 80%; --gy: 60%; --grid: .7; }
+[data-zone='work'] .gold { left: 88%; top: 72%; opacity: .9; scale: 1; }
+[data-zone='work'] .cool { left: 6%; top: 30%; opacity: .8; scale: 1.1; }
+[data-zone='work'] .paper { left: 50%; top: 100%; opacity: .6; }
+
+[data-zone='compare'] .backdrop { --gx: 50%; --gy: 40%; --grid: .6; }
+[data-zone='compare'] .gold { left: 82%; top: 50%; opacity: .8; scale: .9; }
+[data-zone='compare'] .cool { left: 16%; top: 50%; opacity: 1; scale: .9; }
+[data-zone='compare'] .paper { left: 50%; top: 0%; opacity: .5; }
+
+[data-zone='price'] .backdrop { --gx: 50%; --gy: 30%; --grid: .8; }
+[data-zone='price'] .gold { left: 50%; top: 18%; opacity: 1; scale: 1.1; }
+[data-zone='price'] .cool { left: 92%; top: 90%; opacity: .7; }
+[data-zone='price'] .paper { left: 10%; top: 70%; opacity: .8; }
+
+[data-zone='faq'] .backdrop { --gx: 50%; --gy: 50%; --grid: .4; }
+[data-zone='faq'] .gold { left: 100%; top: 0%; opacity: .4; scale: .7; }
+[data-zone='faq'] .cool { left: 0%; top: 100%; opacity: .6; }
+[data-zone='faq'] .paper { left: 50%; top: 50%; opacity: .7; scale: 1.2; }
+
+[data-zone='final'] .backdrop { --gx: 50%; --gy: 60%; --grid: .7; }
+[data-zone='final'] .gold { left: 50%; top: 62%; opacity: 1; scale: 1.25; }
+[data-zone='final'] .cool { left: 4%; top: 10%; opacity: .5; }
+[data-zone='final'] .paper { left: 96%; top: 20%; opacity: .7; }
+
+/* The grid drifts at about a third of the scroll: the page reads as layers, not one flat sheet. */
+@supports (animation-timeline: scroll()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .grid { animation: drift linear both; animation-timeline: scroll(root); }
+  }
+}
+@keyframes drift { to { transform: translate3d(0, -30vh, 0); } }
+@media (max-width: 767px) { .pool { width: 110vmax; height: 110vmax; margin: -55vmax 0 0 -55vmax; } }
+@media (prefers-reduced-motion: reduce) { .pool, .grid { transition: none; } }
