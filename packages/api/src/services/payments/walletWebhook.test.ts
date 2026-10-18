@@ -2,10 +2,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type Stripe from 'stripe';
 import type { SupabaseClient } from '@supabase/supabase-js';
-const mocks = vi.hoisted(() => ({ scope: vi.fn(), cash: vi.fn(), report: vi.fn() }));
+const mocks = vi.hoisted(() => ({ scope: vi.fn(), cash: vi.fn(), report: vi.fn(), stopPrior: vi.fn() }));
 vi.mock('../analytics/gaPurchase', () => ({ reportGaPurchase: mocks.report }));
 vi.mock('./stripeCheckoutPersistence', () => ({ resolveStripeScope: mocks.scope }));
 vi.mock('./walletPaymentEvidence', () => ({ readWalletPaymentEvidence: mocks.cash }));
+vi.mock('./cardUpgrade', () => ({ stopPriorAfterUpgrade: mocks.stopPrior }));
 vi.mock('./disputePayment', () => ({ readDisputePayment: vi.fn(async () => ({ paymentIntentId: 'pi_fixture',
  chargeId: 'ch_fixture', invoiceId: 'in_1', subscriptionId: 'sub_1', paymentAt: '2026-10-18T00:00:00Z' })) }));
 vi.mock('./disputes', () => ({ resumeOrderDisputes: vi.fn(async () => {}) }));
@@ -25,6 +26,8 @@ function fixture(overrides = {}) {
 }
 describe('wallet callback/recovery', () => {
   beforeEach(() => {
+    mocks.report.mockReset();
+    mocks.stopPrior.mockReset().mockResolvedValue(undefined);
     mocks.scope.mockReset().mockResolvedValue({ mode: 'test', merchant: 'fixture' });
     mocks.cash.mockReset().mockResolvedValue({ paymentId: 'pi_1', checkoutId: 'cs_wallet', amount: 6900,
       currency: 'usd', paidAt: '2028-01-31T00:00:00.000Z' });
@@ -46,6 +49,15 @@ describe('wallet callback/recovery', () => {
       await replay.run();
     }
     expect(mocks.report).toHaveBeenCalledTimes(1);
+  });
+  it('keeps the prior plan when fulfillment commits under a dispute freeze', async () => {
+    const f = fixture();
+    f.db.rpc.mockResolvedValue({ data: { state: 'fulfilled', duplicate: false, disputeFrozen: true }, error: null });
+    await expect(f.run()).resolves.toBe(true);
+    const { resumeOrderDisputes } = await import('./disputes');
+    expect(resumeOrderDisputes).toHaveBeenCalled();
+    expect(mocks.stopPrior).not.toHaveBeenCalled();
+    expect(mocks.report).not.toHaveBeenCalled();
   });
   it('does not grant for pending, timeout, live, or unimplemented transitions', async () => {
     const f = fixture(); mocks.cash.mockResolvedValue(null); expect(await f.run()).toBe(true);

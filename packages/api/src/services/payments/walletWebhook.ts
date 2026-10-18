@@ -117,7 +117,10 @@ export async function recoverMethodCheckout(db: SupabaseClient, stripe: Stripe, 
   // a tax bookkeeping failure can never leave the replaced Pro renewing next to the Gold.
   const failures: unknown[] = [];
   const attempt = async (step: () => Promise<unknown>) => { try { await step(); } catch (error) { failures.push(error); } };
-  const delivered = (applied.data as { state?: string }).state === 'fulfilled';
+  const fulfillment = applied.data as { state?: string; disputeFrozen?: boolean; duplicate?: unknown };
+  // Dispute receipt and fulfillment serialize in pay_dispute_fulfill. A payment can therefore be recorded as
+  // fulfilled while its newly granted source is already frozen; that is review, not a delivered upgrade.
+  const delivered = fulfillment.state === 'fulfilled' && fulfillment.disputeFrozen !== true;
   await attempt(() => resumeOrderDisputes(db, stripe, order.id, disputeAlert));
   if (delivered) await attempt(() => stopPriorAfterUpgrade(db, stripe, order));
   // Paid but kept for review (not delivered): its card subscription must not renew; the prior Pro is kept.
