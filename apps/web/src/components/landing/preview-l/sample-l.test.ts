@@ -29,6 +29,7 @@ import { HOW_IT_WORKS as HOW } from '@/lib/landing/landing-copy';
 import { trpc } from '@/trpc/client';
 import { J_PENDING_PAGES, linkReady } from '@/lib/landing/landing-copy-j-chrome';
 import { countOf, OverviewL } from './OverviewL';
+import { numberSources } from '@/components/research/benchmark-table-model';
 import { L_BENCHMARK_ROWS } from './RealPartsL';
 import { scenarioAt } from './ScenariosL';
 import { PositioningPictureL } from './PositioningPictureL';
@@ -408,6 +409,9 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     expect((1310 * 26) / 3600).toBeCloseTo(9.5, 1);
     // Step one's benchmark table: A to G, every cell a figure; the report's chapter 5 says the same, nothing missing.
     for (const row of L_BENCHMARK_ROWS) for (const metric of Object.values(row.metrics)) expect(metric.value).not.toBeNull();
+    // Each account's figures cite its own source record, so the list under the table names every account once (#1150).
+    expect(numberSources(L_BENCHMARK_ROWS).entries.map(entry => `${entry.account} ${entry.evidenceId}`)).toEqual(
+      ['A', 'B', 'C', 'D', 'E', 'F', 'G'].map((letter, index) => `TikTok 对标账号 ${letter} ev${index + 1}`));
     const report = JSON.stringify(OFFICE_WORKER_REPORT);
     expect(report).toContain('约 9.7 万粉；约 2.4 万；约 7%');
     expect(report).toContain('约 2.8 万粉；约 1.1 万；约 9%');

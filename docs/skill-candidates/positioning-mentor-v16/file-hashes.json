@@ -1,0 +1,237 @@
+{
+  "baseVersion": 15,
+  "baseRevisionId": "1ec66964-517f-4709-a9fd-dea7b7f8de63",
+  "expectedVersion": 15,
+  "files": [
+    {
+      "path": "EVALS.md",
+      "mediaType": "text/markdown",
+      "requires": [],
+      "beforeSha256": "60e42395631b6494afa8b590b899d6d9f319e3cf697d9ff41da68a0aaca08291",
+      "beforeBytes": 7636,
+      "sha256": "60e42395631b6494afa8b590b899d6d9f319e3cf697d9ff41da68a0aaca08291",
+      "bytes": 7636,
+      "changed": false
+    },
+    {
+      "path": "README.md",
+      "mediaType": "text/markdown",
+      "requires": [],
+      "beforeSha256": "db90ec973a56cf02324960ada93455f8978a919c8c352870cc29ac693a4135d6",
+      "beforeBytes": 8165,
+      "sha256": "839b2a32a733b2335a8e36b18b3f9b4e80cae2e252d4f016b93ebabcd6860300",
+      "bytes": 8634,
+      "changed": true
+    },
+    {
+      "path": "SKILL.md",
+      "mediaType": "text/markdown",
+      "requires": [],
+      "beforeSha256": "52bb2c3142f00646e7f1cd697642f1b2d20d10ed73f8e99b6158ad83127710b1",
+      "beforeBytes": 14739,
+      "sha256": "fdf9fd9573ac09cc4046fd666d6c6de611afaf6592a8a73aa473f30412e71b83",
+      "bytes": 14739,
+      "changed": true
+    },
+    {
+      "path": "assets/benchmark-table-template.md",
+      "mediaType": "text/markdown",
+      "requires": [],
+      "beforeSha256": "84df806da512c5e7593a885352898f32878824a3f16cc71e0f5a192a43defe58",
+      "beforeBytes": 476,
+      "sha256": "84df806da512c5e7593a885352898f32878824a3f16cc71e0f5a192a43defe58",
+      "bytes": 476,
+      "changed": false
+    },
+    {
+      "path": "assets/content-plan-template.md",
+      "mediaType": "text/markdown",
+      "requires": [],
+      "beforeSha256": "7c6bb98353394a844443d25b6656a86d468e524dd78e62549ce91815ada459fb",
+      "beforeBytes": 920,
+      "sha256": "7c6bb98353394a844443d25b6656a86d468e524dd78e62549ce91815ada459fb",
+      "bytes": 920,
+      "changed": false
+    },
+    {
+      "path": "assets/organizer-template.md",
+      "mediaType": "text/markdown",
+      "requires": [],
+      "beforeSha256": "045c20ae4b8fe2213fc3a60b9ed7ab8db74b9933d05e4058f2ee6ca1c29c9640",
+      "beforeBytes": 750,
+      "sha256": "045c20ae4b8fe2213fc3a60b9ed7ab8db74b9933d05e4058f2ee6ca1c29c9640",
+      "bytes": 750,
+      "changed": false
+    },
+    {
+      "path": "assets/report-template.md",
+      "mediaType": "text/markdown",
+      "requires": [],
+      "beforeSha256": "4db096c462ebfb0c9ef1aabf596ef38b143977e3f12cbfd6e7aacc489710f629",
+      "beforeBytes": 8666,
+      "sha256": "4db096c462ebfb0c9ef1aabf596ef38b143977e3f12cbfd6e7aacc489710f629",
+      "bytes": 8666,
+      "changed": false
+    },
+    {
+      "path": "references/01-discovery.md",
+      "mediaType": "text/markdown",
+      "requires": [],
+      "beforeSha256": "20162f7199705f8a547c7163aa20a64ffaba8523fe1a38dbc26a386d72ec2fd9",
+      "beforeBytes": 10739,
+      "sha256": "20162f7199705f8a547c7163aa20a64ffaba8523fe1a38dbc26a386d72ec2fd9",
+      "bytes": 10739,
+      "changed": false
+    },
+    {
+      "path": "references/02-benchmark-analysis.md",
+      "mediaType": "text/markdown",
+      "requires": [],
+      "beforeSha256": "d10f809d6bd8506313bb695fef1d6ae6783ca19cc50a5c343d84d8db106e36d4",
+      "beforeBytes": 9675,
+      "sha256": "72251edd249636f64ac4cbf9a8f0bfed6833eb7541d9d99fec1cad06565807f0",
+      "bytes": 10081,
+      "changed": true
+    },
+    {
+      "path": "references/03-positioning.md",
+      "mediaType": "text/markdown",
+      "requires": [],
+      "beforeSha256": "dd1b00b620ca2450a3a9e23794dc886817f7131bb80545dfe24a36b5be394064",
+      "beforeBytes": 4223,
+      "sha256": "dd1b00b620ca2450a3a9e23794dc886817f7131bb80545dfe24a36b5be394064",
+      "bytes": 4223,
+      "changed": false
+    },
+    {
+      "path": "references/04-content-planning.md",
+      "mediaType": "text/markdown",
+      "requires": [],
+      "beforeSha256": "7c336b28dee404fd5921c8eb02dd9196f305e13b5564a6f8199a95172c73d193",
+      "beforeBytes": 4893,
+      "sha256": "7c336b28dee404fd5921c8eb02dd9196f305e13b5564a6f8199a95172c73d193",
+      "bytes": 4893,
+      "changed": false
+    },
+    {
+      "path": "references/05-operations.md",
+      "mediaType": "text/markdown",
+      "requires": [],
+      "beforeSha256": "066958eca6f01797382da63be208e1bf6113822e7c20a8c26a5ee90a98059605",
+      "beforeBytes": 7622,
+      "sha256": "066958eca6f01797382da63be208e1bf6113822e7c20a8c26a5ee90a98059605",
+      "bytes": 7622,
+      "changed": false
+    },
+    {
+      "path": "references/06-monetization.md",
+      "mediaType": "text/markdown",
+      "requires": [],
+      "beforeSha256": "21f12b22aa69f8a3ffd00cddd2185068dd19b03958f1b62221987e9c6d9ea7ec",
+      "beforeBytes": 11403,
+      "sha256": "21f12b22aa69f8a3ffd00cddd2185068dd19b03958f1b62221987e9c6d9ea7ec",
+      "bytes": 11403,
+      "changed": false
+    },
+    {
+      "path": "references/07-hypotheses.md",
+      "mediaType": "text/markdown",
+      "requires": [],
+      "beforeSha256": "052d10266b360e5a2569770c625e488765432c985be8238f607be371cedde28e",
+      "beforeBytes": 2617,
+      "sha256": "052d10266b360e5a2569770c625e488765432c985be8238f607be371cedde28e",
+      "bytes": 2617,
+      "changed": false
+    },
+    {
+      "path": "references/audience-analysis.md",
+      "mediaType": "text/markdown",
+      "requires": [],
+      "beforeSha256": "deaa565a473b75ecd832729fea8c17ae99b2456c1e7398648d1c58e235f2e141",
+      "beforeBytes": 6815,
+      "sha256": "deaa565a473b75ecd832729fea8c17ae99b2456c1e7398648d1c58e235f2e141",
+      "bytes": 6815,
+      "changed": false
+    },
+    {
+      "path": "references/compliance.md",
+      "mediaType": "text/markdown",
+      "requires": [],
+      "beforeSha256": "6785752806a0cd9d77ce15c99576ef04a3eab9cc058e7818f5362994b40e8860",
+      "beforeBytes": 2229,
+      "sha256": "6785752806a0cd9d77ce15c99576ef04a3eab9cc058e7818f5362994b40e8860",
+      "bytes": 2229,
+      "changed": false
+    },
+    {
+      "path": "references/metrics.md",
+      "mediaType": "text/markdown",
+      "requires": [],
+      "beforeSha256": "944bdcadfbdde85e86813ac445800b2e288f10ae2de96bdac640d2a6b1894c41",
+      "beforeBytes": 1571,
+      "sha256": "944bdcadfbdde85e86813ac445800b2e288f10ae2de96bdac640d2a6b1894c41",
+      "bytes": 1571,
+      "changed": false
+    },
+    {
+      "path": "references/naming.md",
+      "mediaType": "text/markdown",
+      "requires": [],
+      "beforeSha256": "9d405dccdb3b85c1988ff401a46aad862d7c0d5a733fdd2cdb100742ee5ee3c8",
+      "beforeBytes": 4303,
+      "sha256": "9d405dccdb3b85c1988ff401a46aad862d7c0d5a733fdd2cdb100742ee5ee3c8",
+      "bytes": 4303,
+      "changed": false
+    },
+    {
+      "path": "references/platform-playbook.md",
+      "mediaType": "text/markdown",
+      "requires": [],
+      "beforeSha256": "210169232750b97042421ebb942ba3f112959059c4d46c6dd92020cb4606d703",
+      "beforeBytes": 5981,
+      "sha256": "210169232750b97042421ebb942ba3f112959059c4d46c6dd92020cb4606d703",
+      "bytes": 5981,
+      "changed": false
+    },
+    {
+      "path": "references/reporting.md",
+      "mediaType": "text/markdown",
+      "requires": [],
+      "beforeSha256": "4d98e24876d784d2b54b43719952b7a4b3b70db441722db2f86e4bdf9df53dc9",
+      "beforeBytes": 5639,
+      "sha256": "4d98e24876d784d2b54b43719952b7a4b3b70db441722db2f86e4bdf9df53dc9",
+      "bytes": 5639,
+      "changed": false
+    },
+    {
+      "path": "references/research-policy.md",
+      "mediaType": "text/markdown",
+      "requires": [],
+      "beforeSha256": "0bea2e970604aeb2d1e0f15f64b890b6918d4ba0f0a90a4fa364c4cf9b5602cd",
+      "beforeBytes": 2832,
+      "sha256": "0bea2e970604aeb2d1e0f15f64b890b6918d4ba0f0a90a4fa364c4cf9b5602cd",
+      "bytes": 2832,
+      "changed": false
+    },
+    {
+      "path": "references/review-rubric.md",
+      "mediaType": "text/markdown",
+      "requires": [],
+      "beforeSha256": "9b8bd9aaff88b7af39696f0e184717438dde21050252eb595f2f5e8792d78884",
+      "beforeBytes": 3461,
+      "sha256": "9b8bd9aaff88b7af39696f0e184717438dde21050252eb595f2f5e8792d78884",
+      "bytes": 3461,
+      "changed": false
+    },
+    {
+      "path": "workflow.yaml",
+      "mediaType": "text/yaml",
+      "requires": [],
+      "beforeSha256": "41f568704d87906bd74200db1654df5aa48ba89ed3d64eb0386ea60a99722087",
+      "beforeBytes": 8747,
+      "sha256": "41f568704d87906bd74200db1654df5aa48ba89ed3d64eb0386ea60a99722087",
+      "bytes": 8747,
+      "changed": false
+    }
+  ]
+}
