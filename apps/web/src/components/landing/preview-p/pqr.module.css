@@ -35,7 +35,7 @@
 
 /* The three main colours and their trays (cool, warm, cool), the closing panel in the first. */
 .palette[data-palette='p'] { --p-accent: #2e5bff; --p-accent-text: #1f45d6; --p-tray-1: #dde6ff; --p-tray-2: #fbe8d6; --p-tray-3: #d9f2e6; }
-.palette[data-palette='q'] { --p-accent: #0f8c7a; --p-accent-text: #0b6f61; --p-tray-1: #d3efea; --p-tray-2: #f3ecdd; --p-tray-3: #e5e0fa; }
+.palette[data-palette='q'] { --p-accent: #0d8070; --p-accent-text: #0b6f61; --p-tray-1: #d3efea; --p-tray-2: #f3ecdd; --p-tray-3: #e5e0fa; }
 .palette[data-palette='r'] { --p-accent: #5b3fd9; --p-accent-text: #4a30c0; --p-tray-1: #e6e0ff; --p-tray-2: #fbe3da; --p-tray-3: #dcebfa; }
 .palette { --j-gold: var(--p-accent); --j-gold-text: var(--p-accent-text); background: var(--p-page);
   --p-accent-soft: color-mix(in srgb, var(--p-accent) 10%, #fff); --p-accent-line: color-mix(in srgb, var(--p-accent) 35%, #fff); }
@@ -44,7 +44,7 @@
 .shell > div[aria-hidden='true']:first-child { display: none; }
 
 /* ---- Header: one floating white pill ---- */
-.palette > header { padding-top: 12px; background: transparent; box-shadow: none; border: 0; backdrop-filter: none; }
+.palette > header { z-index: 100; padding-top: 12px; background: var(--p-page); box-shadow: none; border: 0; backdrop-filter: none; }
 .palette > header > div:first-child {
   max-width: 1200px; margin-inline: auto; padding: 8px 10px 8px 20px; border-radius: 999px; background: #fff;
   box-shadow: 0 1px 2px rgba(21, 26, 43, .05), 0 12px 32px -20px rgba(21, 26, 43, .35);
@@ -58,7 +58,7 @@
 }
 
 /* ---- First screen: shorter, so the next region's start shows above the fold (no backdrop, no decoration) ---- */
-.palette [data-region='首屏'] { min-height: min(640px, calc(100svh - 160px)); padding: 72px 0 56px; }
+.palette [data-region='首屏'] { min-height: min(560px, calc(100svh - 200px)); padding: 64px 0 40px; }
 
 /* ---- Open regions: the page's grey, no bands ---- */
 .palette [data-band] { background: transparent; box-shadow: none; border-radius: 0; margin-inline: 0; }
@@ -74,16 +74,19 @@
 .palette [data-region='对比区'] { margin-inline: var(--p-gap); border-radius: var(--p-radius); }
 .palette [data-region='三步'] > div:first-child { padding-bottom: 48px; }
 .palette [data-region='三步'] > div:has(> [data-region='评审团']) + div {
-  max-width: none; margin: 0 var(--p-gap); padding: 0 max(var(--j-gutter), calc((100% - 1200px) / 2)) 48px;
+  width: auto; max-width: none; margin: 0 var(--p-gap); padding: 0 max(var(--j-gutter), calc((100% - 1200px) / 2)) 48px;
   border-radius: 0 0 var(--p-radius) var(--p-radius); background: var(--p-tray-1); }
 .palette [aria-labelledby='step-one-title'] { background: var(--p-tray-1); border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
-.palette [data-region='三步'] > div:has(> [data-region='评审团']) { max-width: none; padding: 0 max(var(--j-gutter), calc((100% - 1200px) / 2)) 24px;
+.palette [data-region='三步'] > div:has(> [data-region='评审团']) { width: auto; max-width: none; padding: 0 max(var(--j-gutter), calc((100% - 1200px) / 2)) 24px;
   background: var(--p-tray-1); border-radius: 0; }
 .palette [data-region='第二步'] { margin-top: var(--p-gap); padding-bottom: 64px; background: var(--p-tray-2); }
 .palette [data-region='第三步'] { margin-top: var(--p-gap); padding-bottom: 64px; background: var(--p-tray-3); }
 .palette [data-region='样例报告'] { margin-top: var(--p-gap); background: var(--p-tray-2); }
 .palette [data-region='对比区'] { margin-top: var(--p-gap); background: var(--p-tray-1); }
 .palette [data-region='对比区'] a[href] { background: var(--p-ink); color: #fff; }
+
+/* A selected tab's number sits on the main colour: white, not ink. */
+.palette main [role='tab'][aria-selected='true'] > span:first-child { color: #fff; }
 
 /* The comparison's selected tab kept the dark band's words: on the ink pill they turn white. */
 .palette [data-region='对比区'] [role='tab'][aria-selected='true'] { color: #fff; }
@@ -93,7 +96,7 @@
 .palette [data-region='价格'] [class*='__versus'] > * { align-content: center; }
 
 /* Our price: a white card with the main colour's edge; no gold box, travelling edge, sheen or glinting figure. */
-.palette [data-region='价格'] [class*='__own'] { background: #fff; border: 1.5px solid var(--p-accent); box-shadow: none; animation: none; }
+.palette [data-region='价格'] [class*='__own'] { background: #fff; border: 2px solid var(--p-accent); box-shadow: none; animation: none; }
 .palette [data-region='价格'] [class*='__own'] [class*='__price'] { background: none; color: var(--p-ink); -webkit-text-fill-color: currentColor; }
 .palette [data-region='价格'] [class*='__cta'] { box-shadow: none; }
 .palette [data-region='价格'] [class*='__cta']::after { display: none; }
@@ -103,7 +106,10 @@
   background: var(--p-accent-soft); color: var(--p-accent-text); }
 
 /* The jury's light, its wires and marks, and the report overview's highlights follow the main colour. */
-.palette [data-region='评审团'] { --spark: var(--p-accent); }
+.palette [data-region='评审团'] { --spark: var(--p-accent); --panel: #fff; }
+/* Cards carry no shadow; the product windows are set off by the tray, with a fine line. */
+.palette main [class*='__picture'], .palette main [class*='samples-l'][class*='__viewer'] { box-shadow: none; }
+.palette main [class*='takeover-j'][class*='__picture'], .palette main [class*='later-l'][class*='__picture'] { border: 1px solid var(--p-line); }
 .palette figure [class*='__spark'] { fill: var(--p-accent); }
 .palette figure [class*='__marks'] i { background: var(--p-accent); }
 .palette figure [class*='__pulse'], .palette figure [class*='__triangle'] circle { stroke: var(--p-accent); }
@@ -111,7 +117,7 @@
 .palette figure [class*='__ring'] [class*='__fill'] { stroke: var(--p-accent-line); }
 .palette figure [class*='__cross'] { background: var(--p-accent-soft); }
 .palette figure [class*='__node']::after { box-shadow: inset 0 0 0 1.5px var(--p-accent), 0 6px 18px -10px var(--p-accent-line); }
-.palette main [class*='__total'] { background: var(--p-accent-soft); }
+.palette main [class*='earnings-l'][class*='__total'] { background: var(--p-accent-soft); }
 .palette main [class*='overview'] [class*='__block'] { box-shadow: none; }
 .palette main [class*='__people'] b, .palette main [class*='__funnel'] li { background: var(--p-accent-soft); }
 /* Only the report overview's and the earnings' bars (not the tab rows, whose class names also end in "bar"). */
@@ -139,10 +145,13 @@
 
 /* ---- Buttons: ink pills, no arrow after the words; a slight lift on hover ---- */
 .palette main a[href*='action=signup'], .palette > header a[href*='action=signup'], .palette [data-phone-bottom] a[href*='action=signup'] {
-  background: var(--p-ink); color: #fff; border-radius: 999px; transition: transform 150ms var(--p-ease), background-color 150ms var(--p-ease);
+  background: var(--p-ink); color: #fff; border-radius: 999px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .palette a[href*='action=signup'] { transition: transform 150ms var(--p-ease), background-color 150ms var(--p-ease); }
 }
 .palette main a[href*='action=signup'] svg, .palette > header a[href*='action=signup'] svg { display: none; }
-@media (hover: hover) { .palette main a[href*='action=signup']:hover { transform: scale(1.02); } }
+@media (hover: hover) and (prefers-reduced-motion: no-preference) { .palette main a[href*='action=signup']:hover { transform: scale(1.02); } }
 
 /* ---- Closing panel and footer ---- */
 /* The page's grey reaches the very bottom (no dark body showing under the footer's margin). */
@@ -159,4 +168,14 @@
 .palette a:focus-visible, .palette button:focus-visible, .palette summary:focus-visible { outline: 2px solid var(--p-ink); outline-offset: 3px; }
 /* On the dark footer the ring is white, or it would vanish into the ink. */
 .palette [data-region='页脚'] a:focus-visible, .palette [data-region='页脚'] button:focus-visible { outline-color: #fff; }
-@media (prefers-reduced-motion: reduce) { .palette main a[href*='action=signup'] { transition: none; } }
+
+
+/* ---- Touch: on a phone, everything the shell styles is at least 44px to tap (the product windows' insides stay) ---- */
+@media (max-width: 767px) {
+  .palette > header a, .palette > header button { min-height: 44px; }
+  .palette > header button { min-width: 44px; }
+  .palette main :is(button, [role='tab'], summary):not([inert] *, dialog *) { min-height: 44px; }
+  .palette main [data-region='价格'] a { display: inline-flex; align-items: center; min-height: 44px; }
+  .palette [data-region='页脚'] a, .palette [data-region='页脚'] button { display: inline-flex; align-items: center; min-width: 44px; min-height: 44px; }
+  .palette [data-region='页脚'] ul { gap: 0; }
+}
