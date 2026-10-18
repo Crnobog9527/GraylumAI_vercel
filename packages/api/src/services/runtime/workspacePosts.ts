@@ -99,7 +99,7 @@ export async function resolvePostSource(db:SessionRpc,actor:string,source:unknow
   ...review.followers.map(f=>f.connectionId)])];
  const enriched:Record<string,unknown>={...result,review,source_connections:sourceConnections,
   ...(review.benchmarks.rows.length?{gold_review:true}:{})};
- while(postgresJsonbBytes(enriched)>11000){
+ while(postResultBytes(enriched)>11000){
   if(Array.isArray(result.posts)&&result.posts.length>2)result.posts.pop();
   else if(review.benchmarks.rows.length){
    review.benchmarks.rows.pop();const kept=new Set(review.benchmarks.rows.map(row=>row.postId));
