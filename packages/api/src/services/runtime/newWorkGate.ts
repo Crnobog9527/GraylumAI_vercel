@@ -15,7 +15,7 @@ export type NewWorkGateResult = { ok: true } | {
   ok: false; reason: GateRejection; retryAfter: number; window?: 'minute' | 'day';
 };
 export type RuntimeCallGate = (actorId: string, maxCalls: number, contractVersion?: 'bill2.v1' | 'bill2.v2',
-  reserve?: boolean) => Promise<NewWorkGateResult>;
+  reserve?: boolean, checkPause?: boolean) => Promise<NewWorkGateResult>;
 /** identityGuard: MODEL-IDENTITY-GUARD switch, read in the same query (absent = on).
  * primaryModelId: the administrator's free-chat model (UI-MODEL), absent when unset or malformed. */
 /** researchEnabled: the research tools master switch (RT-6), true only for a valid stored config that is on. */
@@ -62,10 +62,13 @@ function pauseResult(settings: SettingsRead, bucket: 'admission' | 'calls' | 'le
 /** Identity must come from the authenticated host, never from the request payload. */
 export function newWorkGate(admin: SupabaseClient, environment: 'local' | 'staging' | 'production') {
   async function check(actorId: string, bucket: 'admission' | 'calls', rate: number,
-    read?: Promise<SettingsRead>, contractVersion: 'bill2.v1' | 'bill2.v2' = 'bill2.v1', reserve = true) {
+    read?: Promise<SettingsRead>, contractVersion: 'bill2.v1' | 'bill2.v2' = 'bill2.v1', reserve = true, checkPause = true) {
     const settings = await (read ?? readNewWorkSettings(admin));
-    const pause = pauseResult(settings, bucket);
-    if (!pause.ok || !settings.ok) return pause;
+    if (!settings.ok) return unavailable();
+    if (checkPause) {
+      const pause = pauseResult(settings, bucket);
+      if (!pause.ok) return pause;
+    }
     const result = await checkRuntimeRateLimit(actorId, bucket, settings.config, environment, rate, contractVersion, reserve);
     if (result.success) return { ok: true } as const;
     return { ok: false, reason: result.reason === 'unavailable' ? 'limit_unavailable'
@@ -74,8 +77,8 @@ export function newWorkGate(admin: SupabaseClient, environment: 'local' | 'stagi
   }
   return {
     message: (actorId: string, read?: Promise<SettingsRead>) => check(actorId, 'admission', 1, read),
-    calls: ((actorId, maxCalls, contractVersion = 'bill2.v1', reserve = true) =>
-      check(actorId, 'calls', maxCalls, undefined, contractVersion, reserve)) satisfies RuntimeCallGate,
+    calls: ((actorId, maxCalls, contractVersion = 'bill2.v1', reserve = true, checkPause = true) =>
+      check(actorId, 'calls', maxCalls, undefined, contractVersion, reserve, checkPause)) satisfies RuntimeCallGate,
   };
 }
 

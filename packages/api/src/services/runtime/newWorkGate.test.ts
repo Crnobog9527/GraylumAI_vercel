@@ -29,6 +29,12 @@ it('checks a resumed claim against current limits without reserving it twice', a
   expect(result).toEqual({ ok: true });
   expect(mock.redis).toHaveBeenCalledExactlyOnceWith('actor', 'calls', defaults, 'staging', 1, 'bill2.v2', false);
 });
+it('reserves later calls in the round without reapplying the first-call pause switch', async () => {
+  const gate = newWorkGate(db({ ...defaults, stopNewCalls: true }), 'staging');
+  expect(await gate.calls('actor', 1, 'bill2.v2', true, false)).toEqual({ ok: true });
+  expect(mock.redis).toHaveBeenCalledExactlyOnceWith('actor', 'calls',
+    { ...defaults, stopNewCalls: true }, 'staging', 1, 'bill2.v2', true);
+});
 it('reads each request, pauses before Redis, and covers legacy entry points', async () => {
   const database = db({ ...defaults, stopNewCalls: true });
   const gate = newWorkGate(database, 'local');

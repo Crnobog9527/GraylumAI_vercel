@@ -114,7 +114,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    database:options.database,emit:event=>progress(event),onClosed:()=>{accountClosed=true;},
    onPause:(point,state)=>{if(isPayg)waitPoint={epoch:execution.epoch!,...point,state,gatePassed:state==='waiting_credits'};},
    canSend:()=>{try{budget.assertCanStart(5000);return true;}catch{return false;}},
-   callGate:async()=>{await checkCallGate(!gateChecked);gatePassed=true;gateChecked=false;}});
+   callGate:async()=>{await checkCallGate(!gateChecked,false);gatePassed=true;gateChecked=false;}});
   const checkAgentReply=terminalReplyGuard(agentTurn,context.tools.includes(ASK_QUESTION_TOOL),()=>{terminalReplyFailure=true;},
    Boolean(context.skillFile),Boolean(context.historyRead),research?.tools.map(tool=>tool.name));
   let preflightFailure:string|undefined,transportFailureCode:string|undefined;
@@ -169,7 +169,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
       if(isPayg)call=runtimePaygCall(request,phase,selectedPolicy,execution.billing.rules,execution.epoch!,native).call;
       // Count one actual call before each new BILL2 claim; maxCalls remains only a ceiling.
       if(!gateChecked){
-       await checkCallGate();
+       await checkCallGate(true,sequence===1);
        gatePassed=true;
        gateChecked=true;
       }

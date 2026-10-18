@@ -79,7 +79,7 @@ it('counts each new claim separately, finishes both calls, and checks complete o
   const moderation = vi.spyOn(allowAllModeration, 'checkOutput');
   expect(await runtimeExecutor(f.options).execute(id)).toEqual({ state: 'completed', body: 'body', summary: 'summary' });
   expect(f.gate).toHaveBeenNthCalledWith(1, id, 1, 'bill2.v1');
-  expect(f.gate).toHaveBeenNthCalledWith(2, id, 1, 'bill2.v1');
+  expect(f.gate).toHaveBeenNthCalledWith(2, id, 1, 'bill2.v1', true, false);
   expect(mock.billing.claimCall).toHaveBeenCalledTimes(2); expect(mock.billing.dispatchOnce).toHaveBeenCalledTimes(2);
   expect(moderation).toHaveBeenCalledExactlyOnceWith({ actorId: id, executionId: id, body: 'body', summary: 'summary' });
   expect(f.timing.summary().phases.rateLimit).toBeDefined();

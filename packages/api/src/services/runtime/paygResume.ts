@@ -45,11 +45,19 @@ export async function beginPaygExecution(input: {
         resumedGate:false};
     }
     let resumedGate = false;
+    const checkPause = execution.state !== 'waiting_credits' && execution.gatePassed !== true
+      && execution.remainingCalls === execution.billing.limits.maxCalls;
+    const callGate = async (reserve: boolean) => {
+      const actorId = await input.actor();
+      return checkPause ? reserve ? input.callGate(actorId, 1, 'bill2.v2')
+        : input.callGate(actorId, 1, 'bill2.v2', false)
+        : input.callGate(actorId, 1, 'bill2.v2', reserve, false);
+    };
     // The durable checkpoint records whether this same call already passed its
     // gate before waiting. Recheck without reserving it a second time.
     if (execution.state === 'waiting_credits' || execution.gatePassed === true) {
       try {
-        const verdict = await input.callGate(await input.actor(), 1, 'bill2.v2', false);
+        const verdict = await callGate(false);
         if (!verdict.ok) return { execution, resumedGate: false, wait: wait(verdict.reason) };
         resumedGate = true;
       } catch { return { execution, resumedGate: false, wait: wait('limit_unavailable') }; }
@@ -57,7 +65,7 @@ export async function beginPaygExecution(input: {
     else {
       // A waiting_resume before its first call gate reserves one slot now.
       try {
-        const verdict = await input.callGate(await input.actor(), 1, 'bill2.v2');
+        const verdict = await callGate(true);
         if (!verdict.ok) return { execution, resumedGate: false, wait: wait(verdict.reason) };
         resumedGate = true;
       } catch { return { execution, resumedGate: false, wait: wait('limit_unavailable') }; }
