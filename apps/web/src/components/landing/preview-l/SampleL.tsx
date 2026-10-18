@@ -14,7 +14,7 @@ import { CtaK } from '@/components/landing/preview-k/CtaK';
 import k from '@/components/landing/preview-k/k.module.css';
 import { StickyCtaMNO } from '@/components/landing/preview-mno/StickyCtaMNO';
 import { HERO } from '@/lib/landing/landing-copy';
-import { L_NOTE_REGIONS, L_OPS, L_PRICE_NOTE, L_VOICE_FOLD } from '@/lib/landing/landing-copy-l';
+import { L_NOTE_ANSWERS, L_NOTE_HEADS, L_NOTE_REGIONS, L_OPS, L_PRICE_NOTE, L_VOICE_FOLD } from '@/lib/landing/landing-copy-l';
 import { allOn } from '@/lib/landing/landing-flags';
 import { cn } from '@/lib/utils';
 import { HeroL } from './HeroL';
@@ -60,7 +60,8 @@ export function SampleL({ data, siteName, extras }: { data: LandingData; siteNam
 
       <main data-calm="">
         <HeroL note={data.heroNote} />
-        <VoiceWallJ notes={data.notes} open regions={L_NOTE_REGIONS} compact={L_VOICE_FOLD} after={<CtaK />} />
+        <VoiceWallJ notes={data.notes} open regions={L_NOTE_REGIONS} compact={L_VOICE_FOLD} after={<CtaK />}
+          heads={L_NOTE_HEADS} answers={L_NOTE_ANSWERS} />
         <StepsL flags={extras.flags} />
         <JuryModuleL flags={extras.flags} />
         {extras.showSamples ? <SamplesL /> : null}

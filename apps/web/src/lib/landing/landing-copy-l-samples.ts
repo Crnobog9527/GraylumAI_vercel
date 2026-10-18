@@ -37,6 +37,27 @@ export const L_SAMPLES_REDO = {
     { name: '专业服务', slugs: ['accountant', 'designer', 'trainer', 'realtor'] },
     { name: '创作者', slugs: ['creator', 'course-creator', 'solo-founder'] },
   ] as const,
+  /**
+   * Owner 2026-10-18 (relayed): every person named "职业或行业 · 目的（地区）", after "健身私教 · 本地获客（美国）". The
+   * left list, the overview's title and the full report's title use these; the shared report list (also samples J, M,
+   * N, O) keeps its own names.
+   */
+  names: {
+    'side-hustle': '物流上班族 · 带货副业（美国）',
+    student: '留学生摄影师 · 接毕业照（英国）',
+    mom: '全职宝妈 · 开亲子共读课（中国大陆）',
+    'cross-border': '跨境宠物卖家 · 带货出单（美国）',
+    shop: '社区面包房 · 本地订蛋糕（中国大陆）',
+    restaurant: '湘菜馆老板 · 本地获客（中国大陆）',
+    handmade: '手作银饰主理人 · 接客制订单（台湾）',
+    accountant: '持证会计 · 接报税客户（美国）',
+    designer: '自由设计师 · 接品牌案子（台湾）',
+    trainer: '健身私教 · 本地获客（美国）',
+    realtor: '地产经纪 · 接首置买家（澳洲）',
+    creator: '生活博主 · 粉丝变现（加拿大）',
+    'course-creator': '职场技能讲师 · 卖网课（中国大陆）',
+    'solo-founder': '一人公司创始人 · 拉付费用户（新加坡）',
+  } as Readonly<Record<string, string>>,
   /** The widest group first: a side income next to a day job. */
   defaultSlug: 'side-hustle',
   adjustedLead: '教练建议调整了方向：',

@@ -61,3 +61,7 @@
 .riskLabel { display: flex; align-items: center; gap: 6px; margin: 0; color: #9a3b2e; font-size: 14px; font-weight: 700; }
 .riskText { margin: 0; color: var(--j-ink); font-size: 15.5px; font-weight: 500; line-height: 1.65; }
 .box { flex: none; width: 16px; height: 16px; margin-top: 4px; border: 1.5px solid var(--j-ink); border-radius: 4px; background: #fff; }
+
+/* A person's name ("职业或行业 · 目的（地区）") wraps only between its two halves, never inside one. */
+.group button b { min-width: 0; }
+.group button b .namePart { display: inline-block; font-size: inherit; opacity: 1; white-space: pre; }

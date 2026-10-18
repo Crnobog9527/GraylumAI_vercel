@@ -18,7 +18,10 @@ import { OverviewL } from './OverviewL';
 import own from './samples-l.module.css';
 
 type Report = (typeof L_REPORTS)[number];
-const bySlug = new Map(L_REPORTS.map(report => [report.slug, report]));
+/** A name breaks only at its " · ": the trade on one line, the aim and the place on the next. */
+const nameParts = (name: string) => name.split(' · ');
+// Region 5's own names for the people ("职业或行业 · 目的（地区）"), over the shared list's.
+const bySlug = new Map(L_REPORTS.map(report => [report.slug, { ...report, who: COPY.names[report.slug] ?? report.who }]));
 
 /**
  * Region 5 (Owner 2026-10-17; round eight, U6, 2026-10-18: "用户案例和用户成果对用户来说特别重要，也是增加信任度的地方……
@@ -32,7 +35,7 @@ const bySlug = new Map(L_REPORTS.map(report => [report.slug, report]));
 export function SamplesL() {
   const [slug, setSlug] = useState<string>(COPY.defaultSlug);
   const viewer = useRef<HTMLDivElement>(null);
-  const chosen = bySlug.get(slug) ?? L_REPORTS[0];
+  const chosen = bySlug.get(slug) ?? bySlug.get(COPY.defaultSlug)!;
   const overview = SAMPLE_OVERVIEWS[chosen.slug];
   const pick = (next: string) => { setSlug(next); if (viewer.current) viewer.current.scrollTop = 0; };
   return (
@@ -51,7 +54,10 @@ export function SamplesL() {
                   {group.slugs.map(id => bySlug.get(id)).filter((report): report is Report => Boolean(report)).map(report => (
                     <li key={report.slug}>
                       <button type="button" data-slug={report.slug} aria-pressed={report.slug === chosen.slug} onClick={() => pick(report.slug)}>
-                        <b>{report.who}</b><span>{report.platform}</span>
+                        <b>{nameParts(report.who).map((part, index, all) => (
+                          <span key={part} className={own.namePart}>{index < all.length - 1 ? `${part} · ` : part}</span>
+                        ))}</b>
+                        <span>{report.platform}</span>
                         {report.truth ? <em className={own.adjustedTag}>{COPY.adjusted}</em> : null}
                       </button>
                     </li>

@@ -37,6 +37,30 @@ export const L_NOTE_REGIONS: Readonly<Record<string, string>> = {
 };
 
 /**
+ * 2: the coach's answer under each person's words, sample L's own (Owner 2026-10-18, confirmed wording; sample J keeps
+ * J_NOTE_HEADS / J_NOTE_ANSWERS). Rows 2-1 to 2-7 are p7, p1, p2, p3, p4, p5, p8.
+ */
+export const L_NOTE_HEADS: Readonly<Record<string, string>> = {
+  p7: '先替你做判断，再给你内容',
+  p1: '有问题随时问，马上回，只针对你的账号',
+  p2: '不讲大道理，直接给你能照做的下一步',
+  p3: '普通上班族也有能拍的，AI 教练帮你找出来',
+  p4: '不是你不适合，是没人告诉你差在哪',
+  p5: '不用再一个人对着空白屏幕想下一步',
+  p8: '店照常开，运营交给 AI 教练',
+};
+
+export const L_NOTE_ANSWERS: Readonly<Record<string, string>> = {
+  p7: '拍什么、在哪发、能不能赚钱，AI 教练先查同类账号的真实数据再下判断；方向不对，会直接告诉你，并给出改法。',
+  p1: 'AI 教练 24 小时在线，记得你的定位、你的资料和你上周的数据，回答的是"你这个号该怎么办"，不是通用攻略。',
+  p2: '每次只给一件具体的事：这周拍哪条、标题怎么写、开头怎么拍、哪天发。做完再给下一件。',
+  p3: '聊十几分钟你的工作、生活和能投入的时间，AI 教练从里面找出只有你能拍的方向，配上第一周的 3 条选题。',
+  p4: 'AI 教练把你的每一条和同类账号放在一起比，指出差在开头、标题还是选题；下一条照着改，再看数据有没有变好。',
+  p5: '每周拍什么、怎么写、发完看什么数据，AI 教练都提前替你排好。打开就知道今天该做什么，卡住了随时问。',
+  p8: '选题、标题、文案、发布和复盘都由 AI 教练来做，每周给你一张拍摄清单；你只要在店里抽空拍几段。',
+};
+
+/**
  * 3: one week of operations as one conversation (Owner 2026-10-17: show the coach testing openings and turning a winner
  * into a series in the animation; "只需要你在动画里面去展示"). The page's own person (下班后 15 分钟家常菜). The A/B
  * comparison and the series are what the positioning Skill already guides in conversation (operations: change one or

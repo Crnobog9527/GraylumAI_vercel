@@ -7,9 +7,9 @@ import sitemap from '@/app/sitemap';
 import { metadata } from '@/app/landing/preview/l/page';
 import { SampleJ } from '@/components/landing/preview-j/SampleJ';
 import { SampleK } from '@/components/landing/preview-k/SampleK';
-import { J_PRICE } from '@/lib/landing/landing-copy-j';
+import { J_NOTE_HEADS, J_PRICE } from '@/lib/landing/landing-copy-j';
 import { J_PRICE_TOTAL } from '@/lib/landing/landing-copy-j-price';
-import { L_HERO_FLOW, L_NOTE_REGIONS, L_REPORTS } from '@/lib/landing/landing-copy-l';
+import { L_HERO_FLOW, L_NOTE_ANSWERS, L_NOTE_HEADS, L_NOTE_REGIONS, L_REPORTS } from '@/lib/landing/landing-copy-l';
 import { L_JURY, L_SCENARIOS, L_STEPS } from '@/lib/landing/landing-copy-l-steps';
 import { L_TASKS, L_TASKS_TITLE } from '@/lib/landing/landing-copy-l-compare';
 import { loadSampleReport, SAMPLE_CHAPTERS } from '@/lib/landing/sample-reports';
@@ -78,6 +78,25 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     for (const note of data.notes) expect(wall).toContain(L_NOTE_REGIONS[note.id]);
     expect(wall).not.toContain('看另外');
     for (const note of VOICE_WALL.notes.filter(item => item.source.startsWith('Reddit'))) expect(L_NOTE_REGIONS[note.id]).toBe('英文论坛');
+  });
+
+  it('answers each voice with sample L\'s own wording, in the Owner\'s order, leaving sample J\'s alone (2026-10-18)', () => {
+    const wall = render().slice(0, render().indexOf('id="steps-title"'));
+    const from = wall.indexOf('id="voice-title"');
+    let last = from;
+    for (const id of ['p7', 'p1', 'p2', 'p3', 'p4', 'p5', 'p8']) {
+      const at = wall.indexOf(escape(L_NOTE_HEADS[id]), from);
+      expect(at).toBeGreaterThan(last);
+      expect(wall).toContain(escape(L_NOTE_ANSWERS[id]));
+      last = at;
+    }
+    for (const id of Object.keys(J_NOTE_HEADS)) expect(wall).not.toContain(escape(J_NOTE_HEADS[id]));
+    const extras = { flags: ALL_ON, showSamples: true };
+    for (const sample of [SampleJ, SampleK]) {
+      const html = renderToStaticMarkup(createElement(sample, { data, siteName: 'Graylum', extras }));
+      for (const id of Object.keys(J_NOTE_HEADS)) expect(html).toContain(escape(J_NOTE_HEADS[id]));
+      for (const id of Object.keys(L_NOTE_HEADS)) expect(html).not.toContain(escape(L_NOTE_ANSWERS[id]));
+    }
   });
 
   it('plays step one as sample J\'s whole flow on the real product\'s parts, no lead-in before its notes', () => {
@@ -200,8 +219,11 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     expect([...grouped].sort()).toEqual(L_REPORTS.map(report => report.slug).sort());
     for (const report of L_REPORTS) {
       expect(region).toContain(`data-slug="${report.slug}"`);
-      expect(region).toContain(`<b>${escape(report.who)}</b><span>${escape(report.platform)}</span>`);
+      const [trade, aim] = L_SAMPLES_REDO.names[report.slug].split(' · ');
+      expect(region).toMatch(new RegExp(`<b><span class="[^"]+">${escape(trade)} · </span><span class="[^"]+">${escape(aim).replace(/[()（）]/g, '.')}</span></b><span>${escape(report.platform).replace(/[()（）+]/g, '.')}</span>`));
     }
+    // Owner 2026-10-18: each named "职业或行业 · 目的（地区）".
+    for (const report of L_REPORTS) expect(L_SAMPLES_REDO.names[report.slug]).toMatch(/^[^·（]+ · [^·（]+（[^）]+）$/);
     // 方向已调整 on the people whose direction the coach changed; the chosen one (the widest group) shown with 示例.
     const picker = region.slice(region.indexOf('<nav'), region.indexOf('</nav>'));
     expect(picker.split(`>${L_SAMPLES_REDO.adjusted}<`).length - 1).toBe(L_REPORTS.filter(report => report.truth).length);
@@ -210,7 +232,7 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     expect(region).toContain(escape(SAMPLE_OVERVIEWS[L_SAMPLES_REDO.defaultSlug].positioning));
     // Round nine (V1): the whole report is behind one button, in a dialog of its own (not under the overview).
     expect(region).toContain(`${L_SAMPLES_REDO.fullReportOpen}</button>`);
-    expect(region).toContain(`aria-label="${escape(L_REPORTS.find(report => report.slug === L_SAMPLES_REDO.defaultSlug)!.who)}`);
+    expect(region).toContain(`aria-label="${escape(L_SAMPLES_REDO.names[L_SAMPLES_REDO.defaultSlug])}`);
     expect(region).toContain(escape(L_SAMPLES_REDO.mine));
     expect(html).toContain('<dialog');
     expect(render(ALL_ON, false)).not.toContain('id="samples-title"');
