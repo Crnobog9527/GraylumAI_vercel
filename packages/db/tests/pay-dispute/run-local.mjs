@@ -186,10 +186,14 @@ try {
  const flight=await reserve(ul,30);await receive(pl);await externalRefund(pl,'re_inflight_superseded');
  await refund(ul,flight);assert.equal(await balance(ul),0);
  report.checks.push('refund supersedes a freeze: subsequent in-flight pack return is clawed back once');
- const uw=await profile(40),pw=await pack(uw,100,iso(-hour),true,'alipay');
- await receive(pw);await externalRefund(pw,'re_wallet_dispute');assert.equal(await balance(uw),40);
- assert.equal(await state(pw),'superseded');
- report.checks.push('unexpected wallet-pack dispute uses the same freeze-to-refund conversion without touching other credits');
+ for(const method of ['wechat_pay','alipay']) {
+  const uw=await profile(40),pw=await pack(uw,100,iso(-hour),true,method);
+  await receive(pw);await externalRefund(pw,'re_wallet_'+method);assert.equal(await balance(uw),40);
+  assert.equal(await state(pw),'superseded');
+  const repeated=await externalRefund(pw,'re_wallet_'+method);assert.equal(repeated.duplicate,true);
+  assert.equal(await balance(uw),40);assert.equal(await frozen(pw),0);
+ }
+ report.checks.push('wallet-pack hold conversion and repeated refund after superseding: both wallet methods preserve unrelated balance');
  const u7=await profile(40),p7=await pack(u7,100,iso(-hour));await externalRefund(p7,'re_before_dispute');
  d=await receive(p7);assert.equal(d.freeze_state,'superseded');assert.equal(await balance(u7),140);
  report.checks.push('freeze then external refund; refund then dispute; no duplicate clawback');
