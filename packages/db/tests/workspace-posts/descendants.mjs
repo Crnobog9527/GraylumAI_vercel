@@ -40,6 +40,36 @@ export async function descendantCases({c,report}){
  const business=await one('SELECT business_id v FROM opc_accounts WHERE project_id=$1',[account]);
  const connection=await one(`INSERT INTO social_connections(actor_id,business_id,account_project_id,role,source,platform,status,consent_read)
   VALUES($1,$2,$3,'own','manual','youtube','connected',true) RETURNING id v`,[f.actor,business,account]);
+ // Exercise the actual owner RPC return, not only INSERT RETURNING or an assumed host mock.
+ const held={kind:'my_posts',status:'available',window_days:90,source_connections:[connection],
+  posts:[{views:12345,title:'HELD_PRIVATE_SOURCE'}],dependencies:[]};
+ const race=async()=>{
+  await origin.owner('owner_tool',{action:'claim',callId:'return-race',name:'read_source',arguments:{query:'my_posts:90'}});
+  await c.query('SET ROLE service_role');
+  try{await rpc(c,'publish_monitor_disconnect',f.actor,connection);}finally{await c.query('RESET ROLE');}
+  const returned=await origin.owner('owner_tool',{action:'complete',callId:'return-race',name:'read_source',
+   arguments:{query:'my_posts:90'},result:held});
+  const stored=await one("SELECT result v FROM runtime_tool_calls WHERE execution_id=$1 AND call_id='return-race'",[origin.executionId]);
+  assert.equal(stored.reason,'source_deleted');return {returned,stored};
+ };
+ const guardedTool=await one("SELECT pg_get_functiondef('public.runtime_tool(uuid,uuid,text,text,jsonb,text,jsonb)'::regprocedure) v");
+ const persistedReturn="UPDATE runtime_tool_calls SET result=p_result WHERE execution_id=e.id AND call_id=p_call_id RETURNING * INTO t;\n   RETURN jsonb_build_object('execute',false,'result',t.result);";
+ assert.ok(guardedTool.includes('-- 0262 return guarded tool result'));assert.ok(guardedTool.includes(persistedReturn));
+ const oldReturn="UPDATE runtime_tool_calls SET result=p_result WHERE execution_id=e.id AND call_id=p_call_id;\n   RETURN jsonb_build_object('execute',false,'result',p_result);";
+ await c.query('BEGIN');await c.query(guardedTool.replace(persistedReturn,oldReturn));
+ const beforeReturn=await race();assert.equal(beforeReturn.returned.result.kind,'my_posts');await c.query('ROLLBACK');
+ report.checks.push('RED: reverting the existing 0262 return guard reproduces raw revoked data in owner_tool despite a filtered journal');
+ await c.query('BEGIN');
+ const afterReturn=await race();assert.deepEqual(afterReturn.returned.result,afterReturn.stored);
+ assert.doesNotMatch(JSON.stringify(afterReturn.returned),/12345|HELD_PRIVATE_SOURCE/);await c.query('ROLLBACK');
+ report.checks.push('GREEN: the current full migration chain already returns the trigger-filtered result through the actual owner RPC; no new SQL fix is needed');
+ await c.query('BEGIN');
+ await origin.owner('owner_tool',{action:'claim',callId:'capacity-return',name:'read_source',arguments:{query:'my_posts:90'}});
+ const capacityReturn=await origin.owner('owner_tool',{action:'complete',callId:'capacity-return',name:'read_source',
+  arguments:{query:'my_posts:90'},result:{...held,posts:[{title:'x'.repeat(13000)}]}});
+ assert.equal(capacityReturn.result.reason,'capacity_exhausted');assert.ok(JSON.stringify(capacityReturn).length<200);
+ await c.query('ROLLBACK');
+ report.checks.push('the native owner RPC also returns the persisted capacity refusal instead of the oversized input');
  await c.query(`INSERT INTO runtime_tool_calls(execution_id,call_id,name,arguments)
   VALUES($1,'original-post','read_source','{"query":"my_posts:90"}')`,[origin.executionId]);
  assert.equal((await rpc(c,'runtime_work_items',f.actor,started.sessionId))[origin.executionId][0].state,'running');
