@@ -85,8 +85,11 @@ async function card(ctx: ResearchToolContext, discoveryId: string, accounts: Fou
       selectable: selectable.has(a.key) }));
   const payload = { kind: 'candidates' as const, discoveryId, options: options.map(o => ({ ...o })),
     ...(followUp ? { followUp: true, minSelect: Math.min(options.length, Math.max(1, 3 - keys.size)) } : {}) };
-  const saved = await ctx.store.createCard(stableResearchId(discoveryId, followUp ? callId : 'first-card'), payload);
-  ctx.emit({ type: 'research_card', card: { ...saved, kind: 'candidates', options, ...(followUp ? { followUp: true } : {}) } });
+  const cardId = stableResearchId(discoveryId, followUp ? callId : 'first-card');
+  const saved = await ctx.store.readCard(cardId) ?? await ctx.store.createCard(cardId, payload);
+  const savedOptions = saved.options as unknown as ResearchCandidateOption[];
+  ctx.emit({ type: 'research_card', card: { ...saved, kind: 'candidates', options: savedOptions,
+    ...(followUp ? { followUp: true } : {}) } });
   return true;
 }
 

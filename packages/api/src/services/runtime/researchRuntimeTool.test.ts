@@ -62,6 +62,7 @@ function fixture(limit = 12) {
     evidence: vi.fn<RuntimeResearchStore['evidence']>(() => evidence),
     readOperation: vi.fn<RuntimeResearchStore['readOperation']>(async key => operations.get(key) ?? null),
     readPlan: vi.fn<RuntimeResearchStore['readPlan']>(async key => plans.get(key) ?? null),
+    readCard: vi.fn<RuntimeResearchStore['readCard']>().mockResolvedValue(null),
     cancelUnsentPlan: vi.fn<RuntimeResearchStore['cancelUnsentPlan']>(async key => {
       const plan = plans.get(key);
       if (plan) plans.set(key, { ...plan, cancelled: true });
@@ -583,6 +584,21 @@ describe('durable benchmark discovery and free follow-up', () => {
     const card = f.store.createCard.mock.calls[0]?.[1];
     expect(card?.options.filter(option => option.selectable)).toHaveLength(8);
     expect(card?.options[0]?.label).toContain('活跃度待取数确认');
+  });
+
+  it('reuses the stored first card verbatim when discovery recovery finds its stable card id', async () => {
+    const f = fixture();
+    const cardId = stableResearchId(discoveryId, 'first-card');
+    const saved = { cardId, kind: 'candidates' as const,
+      options: Array.from({ length: 8 }, (_, i) => ({ id: `c${i}`, platform: 'tiktok',
+        account: `author${i}`, evidenceRef: `old#${i + 1}`, label: `author${i}`, selectable: true })),
+      minSelect: 3, maxSelect: 5 };
+    f.store.readCard.mockResolvedValue(saved);
+
+    expect(await f.execute('benchmark_discover', discoveryArgs)).toMatchObject({ status: 'ok' });
+    expect(f.store.readCard).toHaveBeenCalledWith(cardId);
+    expect(f.store.createCard).not.toHaveBeenCalled();
+    expect(f.ctx.emit).toHaveBeenCalledWith({ type: 'research_card', card: saved });
   });
 
   it('refuses a follow-up card before any initial candidate selection was confirmed', async () => {
