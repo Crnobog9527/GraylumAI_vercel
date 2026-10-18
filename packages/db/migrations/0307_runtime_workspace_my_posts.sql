@@ -109,8 +109,9 @@ LANGUAGE sql SECURITY DEFINER SET search_path=public,pg_temp AS $$
  WITH RECURSIVE lineage(id) AS (
   SELECT p_execution_id UNION SELECT d.dependency_id FROM runtime_history_dependencies d JOIN lineage l ON d.execution_id=l.id
  ) SELECT NOT EXISTS(SELECT 1 FROM lineage l JOIN runtime_tool_calls t ON t.execution_id=l.id
-  JOIN runtime_executions ex ON ex.id=l.id WHERE t.result->>'kind'='my_posts'
-   AND NOT runtime_workspace_posts_visible(ex.actor_id,t.result))
+  JOIN runtime_executions ex ON ex.id=l.id WHERE (t.result->>'kind'='my_posts'
+   AND NOT runtime_workspace_posts_visible(ex.actor_id,t.result)) OR (ex.payload->>'ownPosts'='true'
+    AND t.name='read_source' AND t.erased_at IS NOT NULL AND t.result IS NULL))
 $$;
 REVOKE ALL ON FUNCTION public.runtime_workspace_posts_history_visible(uuid) FROM PUBLIC,anon,authenticated,service_role;
 DO $history$ DECLARE sig text;d text;expected integer;
@@ -142,6 +143,37 @@ $p$;
   EXECUTE replace(d,anchor,patch||anchor);
  END IF;
 END $entry$;
+
+-- Final provider permission fence: serialize only used connections with a concurrent disconnect, then recheck.
+-- Receipt recording and financial recovery are intentionally unchanged; only a NEW HTTP grant is denied.
+DO $dispatch$ DECLARE d text;anchor text;fence text;
+BEGIN
+ d:=pg_get_functiondef('public.bill2_dispatch(uuid,uuid,uuid,uuid,boolean,jsonb)'::regprocedure);
+ IF position('-- B2 own-post dispatch fence' IN d)=0 THEN
+  anchor:=$a$ IF r.id IS NOT NULL THEN PERFORM runtime_billing_allowed(p_actor_id,r.payload,r.id);END IF;$a$;
+  fence:=$dispatchFence$ -- B2 own-post dispatch fence
+ BEGIN
+  PERFORM id FROM profiles WHERE id=p_actor_id AND EXISTS(
+   WITH RECURSIVE lineage(id) AS (
+    SELECT ex.id FROM runtime_executions ex WHERE ex.billing_run_id=r.id
+    UNION SELECT hd.dependency_id FROM runtime_history_dependencies hd JOIN lineage l ON hd.execution_id=l.id
+   ) SELECT 1 FROM lineage l JOIN runtime_tool_calls t ON t.execution_id=l.id WHERE t.result->>'kind'='my_posts'
+  ) FOR SHARE NOWAIT;
+  PERFORM sc.id FROM social_connections sc WHERE sc.id::text IN (
+   WITH RECURSIVE lineage(id) AS (
+    SELECT ex.id FROM runtime_executions ex WHERE ex.billing_run_id=r.id
+    UNION SELECT hd.dependency_id FROM runtime_history_dependencies hd JOIN lineage l ON hd.execution_id=l.id
+   ) SELECT jsonb_array_elements_text(coalesce(t.result->'source_connections','[]')) FROM lineage l
+    JOIN runtime_tool_calls t ON t.execution_id=l.id WHERE t.result->>'kind'='my_posts'
+  ) ORDER BY sc.id FOR SHARE NOWAIT;
+ EXCEPTION WHEN lock_not_available THEN RAISE EXCEPTION 'RUNTIME_CONTEXT_REVOKED';END;
+ IF EXISTS(SELECT 1 FROM runtime_executions ex WHERE ex.billing_run_id=r.id
+  AND NOT runtime_workspace_posts_history_visible(ex.id)) THEN RAISE EXCEPTION 'RUNTIME_CONTEXT_REVOKED';END IF;
+$dispatchFence$;
+  IF array_length(string_to_array(d,anchor),1)<>2 THEN RAISE EXCEPTION 'B2_DISPATCH_SOURCE_MISMATCH';END IF;
+  EXECUTE replace(d,anchor,anchor||E'\n'||fence);
+ END IF;
+END $dispatch$;
 
 -- Classify receipt readiness using the existing trusted money projection, without changing evidence.
 CREATE OR REPLACE FUNCTION public.runtime_workspace_posts_receipt_ready(p jsonb,c bill2_calls) RETURNS boolean
