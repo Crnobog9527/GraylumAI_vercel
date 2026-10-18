@@ -31,10 +31,11 @@ export function MentorTurnSteps({ live, reply, execution, calls }: {
   const streaming = Boolean(live) && !live!.finished && !live!.stopped && !["incomplete", "waiting", "stopped"].includes(live!.phase);
   // Not streamed here but still advancing on the server: the reopened notice, or a saved main reply whose organizer is open.
   const organizing = !live && Boolean(execution) && openOrganizer(execution!) && ["prepared", "running"].includes(execution!.state);
+  // The turn's own notice already says "还在后台处理"; the steps then stay quiet so it is shown once.
   const reopened = !live && (reply.notice?.text === REOPENED_HINT || organizing);
   return <>
     <ResearchCallList calls={calls}/>
-    {(streaming || reopened) && <TurnSteps reopened={reopened}
+    {(streaming || reopened) && <TurnSteps reopened={reopened} quiet={!live && reply.notice?.text === REOPENED_HINT}
       progress={{ phase: live?.phase ?? (organizing ? "organizer" : "mentor"), hasText: Boolean(reply.text),
         tools: toolCounts(calls.map(call => call.state)) }}/>}
   </>;
