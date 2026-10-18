@@ -21,7 +21,23 @@ function fixture(overrides = {}) {
     if (name === 'pay_dispute_stop_confirm') row.renewal_stop_state = 'confirmed';
     return { data: null, error: null };
   });
-  const from = vi.fn(() => ({ update: (values: object) => ({ eq: async () => { Object.assign(row, values); return { error: null }; } }) }));
+  const from = vi.fn(() => ({
+    select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { renewal_stop_state: row.renewal_stop_state }, error: null }) }) }),
+    update: (values: object) => {
+      let allowed: string[] | undefined;
+      const query: Record<string, unknown> = {};
+      query.eq = () => query;
+      query.in = (_field: string, states: string[]) => { allowed = states;return query; };
+      query.select = async () => {
+        if (allowed && !allowed.includes(row.renewal_stop_state)) return { data: [], error: null };
+        Object.assign(row, values);return { data: [{ id: row.id }], error: null };
+      };
+      query.then = (resolve: (value: unknown) => unknown) => {
+        Object.assign(row, values);return Promise.resolve({ error: null }).then(resolve);
+      };
+      return query;
+    },
+  }));
   const db = { rpc, from } as unknown as SupabaseClient;
   const event = { id: 'evt_test', type: 'charge.dispute.created', created: 1792300000, livemode: false,
     data: { object: { object: 'dispute', id: 'du_test', charge: 'ch_test', payment_intent: null, livemode: false,
@@ -60,6 +76,16 @@ describe('Stripe dispute effects resume from committed financial state', () => {
     await f.run(); await f.run();
     expect(mocks.stop).toHaveBeenCalledTimes(3); expect(f.row.renewal_stop_state).toBe('manual');
     expect(f.alert.mock.calls.filter(([notice]) => notice.code === 'PAY_DISPUTE_STOP_MANUAL')).toHaveLength(1);
+  });
+  it('does not downgrade a stop confirmed by a concurrent delivery after an active provider read', async () => {
+    const f = fixture();mocks.read.mockResolvedValue({ stopped: false, canceled: false });
+    f.rpc.mockImplementation(async name => {
+      if (name === 'pay_dispute_receive') return { data: { ...f.row }, error: null };
+      if (name === 'pay_dispute_stop_claim') { f.row.renewal_stop_state = 'confirmed';return { data: false, error: null }; }
+      return { data: null, error: null };
+    });
+    await f.run();expect(f.row.renewal_stop_state).toBe('confirmed');expect(mocks.stop).not.toHaveBeenCalled();
+    expect(f.alert.mock.calls.filter(([notice]) => notice.code === 'PAY_DISPUTE_STOP_MANUAL')).toHaveLength(0);
   });
   it('unmatched payments are recorded and alerted, without canceling an unrelated provider subscription', async () => {
     const f = fixture({ order_id: null, subscription_id: null, freeze_state: 'pending',

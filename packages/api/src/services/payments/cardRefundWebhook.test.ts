@@ -44,13 +44,25 @@ describe('R7: external refunds of wallet one-time memberships (0298)', () => {
       paymentId: 'pi_1', paymentIntentId: 'pi_1', kind: 'pack' });
     for (const held of [false, true]) {
       const f = fixture([refund()]);
-      const chain = { select: () => chain, eq: () => chain,
+      const chain = { select: () => chain, eq: () => chain, in: () => chain,
         limit: async () => ({ data: held ? [{ id: 'dispute' }] : [], error: null }) };
       f.db.from.mockImplementation((() => chain) as never);
       expect(await f.run({ refundId: 're_1' })).toBe(held);
       if (held) expect(f.db.rpc).toHaveBeenCalledWith('pay_stripe_mp_record_external_refund', expect.any(Object));
       else expect(f.db.rpc).not.toHaveBeenCalled();
     }
+  });
+  it.each(['wechat_pay', 'alipay'])('keeps %s refund retries on the duplicate-safe path after the hold is superseded', async method => {
+    mocks.find.mockResolvedValue({ order: { id: 'order', item_type: 'credit_package', payment_method: method },
+      paymentId: 'pi_1', paymentIntentId: 'pi_1', kind: 'pack' });
+    const f = fixture([refund()], { state: 'pack_review', duplicate: true });
+    const chain = { select: () => chain, eq: () => chain,
+      in: (field: string, states: string[]) => { expect(field).toBe('freeze_state');expect(states).toContain('superseded');return chain; },
+      limit: async () => ({ data: [{ id: 'converted-dispute' }], error: null }) };
+    f.db.from.mockImplementation((() => chain) as never);
+    expect(await f.run({ refundId: 're_1' })).toBe(true);
+    expect(await f.run({ chargeId: 'ch_1' })).toBe(true);
+    expect(f.db.rpc).toHaveBeenCalledTimes(2);
   });
   it('looks the order up with wallet memberships included and records the refund against it, in live mode', async () => {
     mocks.find.mockResolvedValue({ order: { id: 'order', item_type: 'membership_plan', payment_method: 'alipay' },

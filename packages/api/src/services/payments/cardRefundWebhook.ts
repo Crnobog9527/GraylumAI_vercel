@@ -41,7 +41,7 @@ export async function handleCardRefund(db: SupabaseClient, stripe: RefundStripe,
   if (refunds.some(refund => id(refund.charge) !== chargeId)) throw new Error(PAYMENT_EVIDENCE_CONFLICT);
   const match = await findCardOrderForPayment(db, stripe, scope, { chargeId, paymentIntentId }, { includeWalletMembership: true, includeWalletPacks: true });
   if (match?.kind === 'pack' && ['wechat_pay', 'alipay'].includes(match.order.payment_method)) {
-    const holds = await db.from('payment_disputes').select('id').eq('order_id', match.order.id).eq('freeze_state', 'frozen').limit(1);
+    const holds = await db.from('payment_disputes').select('id').eq('order_id', match.order.id).in('freeze_state', ['frozen', 'superseded']).limit(1);
     if (holds.error || !Array.isArray(holds.data)) throw new Error('PAY_DISPUTE_REFUND_SCOPE_UNAVAILABLE');
     if (!holds.data.length) return false; // Keep the existing wallet-pack refund behavior when no hold needs conversion.
   }

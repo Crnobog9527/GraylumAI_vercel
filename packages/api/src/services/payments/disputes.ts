@@ -80,9 +80,17 @@ export async function resumeDisputeActions(db: SupabaseClient, stripe: Stripe, d
       }
     }
     if (!confirmed) {
-      stopFailed = true;
-      await mark(db, dispute.id, { renewal_stop_state: 'manual' });
-      if (!dispute.stop_alerted_at && alert !== NO_ALERT) {
+      const manual = await db.from('payment_disputes').update({ renewal_stop_state: 'manual' }).eq('id', dispute.id)
+        .in('renewal_stop_state', ['pending', 'manual']).select('id');
+      if (manual.error || !Array.isArray(manual.data)) throw new Error('PAY_DISPUTE_STOP_STATE_UNAVAILABLE');
+      stopFailed = manual.data.length > 0;
+      if (!stopFailed) {
+        const current = await db.from('payment_disputes').select('renewal_stop_state').eq('id', dispute.id).maybeSingle();
+        if (current.error || !['confirmed', 'not_applicable'].includes(current.data?.renewal_stop_state)) {
+          throw new Error('PAY_DISPUTE_STOP_STATE_UNAVAILABLE');
+        }
+      }
+      if (stopFailed && !dispute.stop_alerted_at && alert !== NO_ALERT) {
         alert({ code: 'PAY_DISPUTE_STOP_MANUAL', disputeId: dispute.id, dueBy: dispute.evidence_due_by });
         await mark(db, dispute.id, { stop_alerted_at: new Date().toISOString() });
       }
