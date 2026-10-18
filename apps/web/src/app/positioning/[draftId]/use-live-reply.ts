@@ -39,7 +39,7 @@ export function useLiveReply(draftId: string, history: RecoveryHistory | undefin
   useEffect(() => { observer.current = observe; }, [observe]);
   const live = useMemo(() => liveReplyController({ draftId, storage: tabStorage, show: setReply,
     observe: (executionId, event) => observer.current?.(executionId, event) }), [draftId]);
-  const reopenGraceOver = useReopenGrace();
+  const reopenGraceOver = useReopenGrace(history?.activeExecution);
   const utils = trpc.useUtils();
   const cancel = trpc.runtime.cancel.useMutation();
   useEffect(() => {

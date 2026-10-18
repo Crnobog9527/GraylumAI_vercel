@@ -1182,7 +1182,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                         <MentorTurnGroup key={execution.executionId} executionId={execution.executionId}>
                           {/* The host opens the step itself: no fabricated user message. */}
                           {!openingTurn && <MentorUserMessage stepLabel={turnLabel} text={shownInput(execution.input) ?? "内容暂不可用"}/>}
-                          <MentorTurnSteps live={live} hasText={Boolean(reply.text)} calls={research.of(execution.executionId)} notice={reply.notice}/>
+                          <MentorTurnSteps live={live} reply={reply} execution={execution} calls={research.of(execution.executionId)}/>
                           {reply.text && <MentorReply kind={summaryTurn ? "summary" : openingTurn ? "opening" : "reply"} stepLabel={turnLabel}
                             text={reply.text} live={Boolean(live)} result={execution}
                             summaryHint={Boolean(summaryTurn && !next && !s.valid && turn?.stepId === step.id && summaryShown(execution))}/>}
@@ -1198,7 +1198,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                     {pendingBubble&&!mentorExecutions.some(e=>e.request?.requestId===pendingBubble.requestId)&&<MentorPendingMessage
                       requestId={pendingBubble.requestId} stepTitle={steps.find(candidate => candidate.id === pendingBubble.stepId)?.title}
                       text={shownInput(pendingBubble.input)} sending={running}/>}
-                  {liveOnly && <MentorTurnSteps live={liveOnly} hasText={Boolean(liveOnly.text)} calls={research.of(liveOnly.executionId)}/>}
+                  {liveOnly && <MentorTurnSteps live={liveOnly} reply={liveOnly} calls={research.of(liveOnly.executionId)}/>}
                   {liveOnly&&(liveOnly.text||!liveOnly.card)&&<MentorLiveReply text={liveOnly.text}/>}
                   {read.data?.sessionId && <ResearchSessionPanel sessionId={read.data.sessionId} settledTurns={settledTurns}
                     disabled={sendLocked || snap.state !== "draft" || mentorTurns.get(mentorExecutions.at(-1)?.executionId ?? "")?.stepId !== step.id}
