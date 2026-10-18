@@ -69,6 +69,15 @@ describe('provider price configuration', () => {
     expect(() => parseProviderPrices(config(entry({ ...fx, fxValidUntil: '2026-11-01T00:00:00Z' })))).not.toThrow();
   });
 
+  it('prices a TikHub endpoint path on its own, ahead of the provider-wide entry', () => {
+    const path = '/xiaohongshu/app_v2/get_user_info';
+    const wide = entry({ provider: 'tikhub', route: null, appliesToUnlistedRoutes: true, usageUnit: 'call', unitsPerPrice: '1', price: '0.001' });
+    const own = entry({ provider: 'tikhub', route: path, usageUnit: 'call', unitsPerPrice: '1', price: '0.01' });
+    expect(parseProviderPrices({ version: 1, entries: [wide, own] }).entries).toHaveLength(2);
+    expect(resolveProviderPrice(config(wide, own), { provider: 'tikhub', route: path }, '3', AT).entry.price).toBe('0.01');
+    expect(() => parseProviderPrices({ version: 1, entries: [entry({ route: '//' + 'a'.repeat(120) })] })).toThrow();
+  });
+
   it('rejects duplicate provider/route pairs and oversized lists', () => {
     expect(() => parseProviderPrices(config(entry(), entry()))).toThrow('PROVIDER_PRICES_INVALID');
     const many = Array.from({ length: 65 }, (_, i) => entry({ route: `r${i}` }));

@@ -34,8 +34,9 @@ const multiplierText = z.string().nullable().refine((value) => {
 
 const entrySchema = z.object({
   provider: z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/),
-  // Exact endpoint / SKU / API version; null marks the provider-wide entry.
-  route: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,119}$/).nullable(),
+  // Exact endpoint / SKU / API version; null marks the provider-wide entry. A TikHub endpoint is a path that starts
+  // with "/", so it may be priced on its own (endpoints differ: 0.001 or 0.01 USD per call).
+  route: z.string().regex(/^[A-Za-z0-9/][A-Za-z0-9._:/-]{0,119}$/).nullable(),
   appliesToUnlistedRoutes: z.boolean(),
   currency: z.string().regex(/^[A-Z]{3}$/),
   usageUnit: z.string().regex(/^[a-z0-9][a-z0-9._-]{0,39}$/),
