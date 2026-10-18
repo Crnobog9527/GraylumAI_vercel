@@ -33,3 +33,18 @@ it('reads a strategy report when the strategy guide is frozen, and other ids eit
  await plain.built.execute({query:'44444444-4444-4444-8444-444444444444'},'call-3');
  expect(plain.calls).toContain('runtime_workspace_source');
 });
+
+it.each([true,false])('rechecks saved own-post visibility before replay (%s)',async visible=>{
+ const saved={kind:'my_posts',status:'available',posts:[{views:12345}],source_connections:['connection']};
+ const rpc=vi.fn(async(name:string)=>{
+  if(name==='runtime_tool')return {execute:false,result:saved};
+  if(name==='runtime_workspace_posts_visible')return visible;
+  throw new Error('Replay must not reread sources or suppliers');
+ });
+ const built=sourceRuntimeTool({name:'read_source',context:{workspaceContext:true,ownPosts:true} as never,
+  args:{p_execution_id:'22222222-2222-4222-8222-222222222222'},ownerRpc:rpc as never,
+  budget:{assertCanStart:()=>{}},execution,exchange:async()=>{throw new Error('No provider call');}});
+ expect(JSON.parse(await built.execute({query:'my_posts:14'},'saved-call')))
+  .toEqual(visible?saved:{kind:'unavailable',reason:'source_deleted'});
+ expect(rpc.mock.calls.map(([name])=>name)).toEqual(['runtime_tool','runtime_workspace_posts_visible']);
+});

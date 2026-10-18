@@ -6,6 +6,39 @@
 -- No new tables, no new model tool, no provider request. Service reads reuse PR-3a readData / publish_monitor_data.
 BEGIN;
 INSERT INTO system_settings(key,value) VALUES('chat_my_posts_enabled','false') ON CONFLICT(key) DO NOTHING;
+
+-- One paid-rights projection for the directory, admission budget and saved-result visibility.
+CREATE OR REPLACE FUNCTION public.runtime_workspace_post_window(p_actor_id uuid) RETURNS integer
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE days integer:=0;
+BEGIN
+ PERFORM bill2_actor(p_actor_id);
+ BEGIN
+  PERFORM report_membership_check(p_actor_id);
+  SELECT coalesce(max(mp.own_data_window_days),0) INTO days FROM membership_plans mp
+   JOIN profiles p ON p.membership_level=mp.level WHERE p.id=p_actor_id;
+ EXCEPTION WHEN raise_exception THEN
+  IF SQLERRM NOT IN ('REPORT_MEMBERSHIP_REQUIRED','REPORT_ENTITLEMENTS_UNAVAILABLE') THEN RAISE;END IF;
+  RETURN 0;
+ END;
+ RETURN days;
+END $$;
+REVOKE ALL ON FUNCTION public.runtime_workspace_post_window(uuid) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.runtime_workspace_post_window(uuid) TO service_role;
+
+CREATE OR REPLACE FUNCTION public.runtime_workspace_posts_visible(p_actor_id uuid,p_result jsonb) RETURNS boolean
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+BEGIN
+ PERFORM bill2_actor(p_actor_id);
+ IF p_result->>'status' IS DISTINCT FROM 'no_entitlement'
+  AND runtime_workspace_post_window(p_actor_id)<coalesce((p_result->>'window_days')::int,14) THEN RETURN false;END IF;
+ RETURN NOT EXISTS(SELECT 1 FROM jsonb_array_elements_text(coalesce(p_result->'source_connections','[]')) ids(value)
+  WHERE NOT EXISTS(SELECT 1 FROM social_connections c WHERE c.id::text=ids.value AND c.actor_id=p_actor_id
+   AND c.status NOT IN ('deleting','pending_selection')));
+END $$;
+REVOKE ALL ON FUNCTION public.runtime_workspace_posts_visible(uuid,jsonb) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.runtime_workspace_posts_visible(uuid,jsonb) TO service_role;
+
 DO $migration$
 DECLARE definition text;anchor text;replacement text;
 BEGIN
@@ -17,14 +50,7 @@ BEGIN
  BEGIN
   IF (SELECT value='true'::jsonb FROM system_settings WHERE key='chat_my_posts_enabled')
    AND (SELECT value='true'::jsonb FROM system_settings WHERE key='publish_monitor_enabled') THEN
-   BEGIN
-    PERFORM report_membership_check(p_actor_id);
-    SELECT coalesce(max(mp.own_data_window_days),0) INTO days FROM membership_plans mp
-     JOIN profiles p ON p.membership_level=mp.level WHERE p.id=p_actor_id;
-   EXCEPTION WHEN raise_exception THEN
-    IF SQLERRM NOT IN ('REPORT_MEMBERSHIP_REQUIRED','REPORT_ENTITLEMENTS_UNAVAILABLE') THEN RAISE;END IF;
-    days:=0;
-   END;
+   days:=runtime_workspace_post_window(p_actor_id);
    SELECT jsonb_agg(jsonb_build_object('id','my_posts:'||d,'kind','my_posts','name','我的作品 · '||d||' 天',
     'windowDays',d,'use','Saved own post metrics, free to read. Default 14 days. At most two reads per answer.') ORDER BY d)
     INTO post_entries FROM unnest(ARRAY[14,30,90]) d WHERE d=14 OR d<=days;
@@ -48,10 +74,20 @@ END $migration$;
 -- Serialize with runtime_tool's execution lock. Saved calls replay without consuming another read.
 CREATE OR REPLACE FUNCTION public.runtime_workspace_posts_guard() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
-DECLARE payload jsonb;reads integer;
+DECLARE payload jsonb;reads integer;actor uuid;
 BEGIN
  IF NEW.name<>'read_source' OR NEW.result->>'kind' IS DISTINCT FROM 'my_posts' THEN RETURN NEW;END IF;
- SELECT e.payload INTO payload FROM runtime_executions e WHERE e.id=NEW.execution_id FOR NO KEY UPDATE;
+ SELECT e.payload,e.actor_id INTO payload,actor FROM runtime_executions e WHERE e.id=NEW.execution_id FOR NO KEY UPDATE;
+ -- Never wait behind a disconnect holding the connection and waiting for this tool row: refuse the stale copy.
+ BEGIN
+  PERFORM c.id FROM social_connections c WHERE c.actor_id=actor AND c.id::text IN
+   (SELECT jsonb_array_elements_text(coalesce(NEW.result->'source_connections','[]'))) ORDER BY c.id FOR SHARE NOWAIT;
+ EXCEPTION WHEN lock_not_available THEN
+  NEW.result:=jsonb_build_object('kind','unavailable','reason','source_deleted','dependencies','[]'::jsonb);RETURN NEW;
+ END;
+ IF NOT runtime_workspace_posts_visible(actor,NEW.result) THEN
+  NEW.result:=jsonb_build_object('kind','unavailable','reason','source_deleted','dependencies','[]'::jsonb);RETURN NEW;
+ END IF;
  SELECT count(*) INTO reads FROM runtime_tool_calls t WHERE t.execution_id=NEW.execution_id
   AND t.call_id<>NEW.call_id AND t.result->>'kind'='my_posts';
  IF payload->>'ownPosts' IS DISTINCT FROM 'true' OR reads>=2 OR octet_length(NEW.result::text)>12000 THEN
@@ -64,4 +100,37 @@ REVOKE ALL ON FUNCTION public.runtime_workspace_posts_guard() FROM PUBLIC,anon,a
 DROP TRIGGER IF EXISTS runtime_workspace_posts_guard ON runtime_tool_calls;
 CREATE TRIGGER runtime_workspace_posts_guard BEFORE INSERT OR UPDATE OF result ON runtime_tool_calls
  FOR EACH ROW EXECUTE FUNCTION public.runtime_workspace_posts_guard();
+
+-- Disconnect/delete removes saved tool and history copies too (same answer-retention rule as library deletion).
+-- In-progress work is stopped; closed BILL2 receipts are projected to money-only fields. No amounts are changed.
+CREATE OR REPLACE FUNCTION public.runtime_workspace_posts_deleted() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE e runtime_executions;stamp timestamptz:=clock_timestamp();closed boolean;
+BEGIN
+ IF TG_OP<>'DELETE' AND (NEW.status<>'deleting' OR OLD.status='deleting') THEN RETURN NEW;END IF;
+ FOR e IN SELECT DISTINCT ex.* FROM runtime_executions ex JOIN runtime_tool_calls t ON t.execution_id=ex.id
+  WHERE ex.actor_id=OLD.actor_id AND t.result->>'kind'='my_posts' AND t.result->'source_connections' ? OLD.id::text
+  ORDER BY ex.id LOOP
+  IF e.state NOT IN ('completed','cancelled') THEN
+   UPDATE runtime_executions SET unavailable_reason=coalesce(unavailable_reason,'source_deleted') WHERE id=e.id;
+  END IF;
+  UPDATE runtime_tool_calls SET arguments=NULL,result=NULL,erased_at=stamp WHERE execution_id=e.id AND name='read_source'
+   AND result->>'kind'='my_posts';
+  UPDATE runtime_session_history SET item=NULL,erased_at=stamp
+   WHERE execution_id=e.id AND erased_at IS NULL AND item->>'role' IS DISTINCT FROM 'user';
+  UPDATE runtime_session_batches SET items=NULL,erased_at=stamp WHERE execution_id=e.id AND erased_at IS NULL;
+  IF e.billing_run_id IS NOT NULL THEN
+   UPDATE bill2_runs SET content_deleted_at=coalesce(content_deleted_at,stamp) WHERE id=e.billing_run_id RETURNING bill2_runs.closed INTO closed;
+   IF closed AND content_erasure_financial_allowed(e.actor_id,e.billing_run_id) THEN
+    PERFORM account_erasure_scrub_receipts(e.actor_id,e.billing_run_id,100);
+   END IF;
+  END IF;
+ END LOOP;
+ RETURN CASE WHEN TG_OP='DELETE' THEN OLD ELSE NEW END;
+END $$;
+REVOKE ALL ON FUNCTION public.runtime_workspace_posts_deleted() FROM PUBLIC,anon,authenticated,service_role;
+DROP TRIGGER IF EXISTS runtime_workspace_posts_deleted ON social_connections;
+CREATE TRIGGER runtime_workspace_posts_deleted AFTER DELETE OR UPDATE OF status ON social_connections
+ FOR EACH ROW EXECUTE FUNCTION public.runtime_workspace_posts_deleted();
+
 COMMIT;

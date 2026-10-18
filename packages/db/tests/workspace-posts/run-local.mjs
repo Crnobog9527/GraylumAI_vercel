@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {localDb,read} from '../runtime-view-perf/local-db.mjs';
+import {deletionCases} from './deletion.mjs';
 import {runCases} from '../workspace-benchmarks/cases.mjs';
 const db=await localDb(),c=db.client,report={build:db.build,checks:[]};
 const one=async(sql,args=[])=>(await c.query(sql,args)).rows[0]?.v;
@@ -45,6 +46,7 @@ try{
  assert.equal((await index(a,s,'my_posts:90')).windowDays,90);
  await assert.rejects(index(other,s),/RUNTIME_WORKSPACE_DENIED/);
  report.checks.push('Pro 14/30, Gold 14/30/90; denied other actor and Pro 90-day id');
+ await one("SELECT set_config('request.jwt.claim.sub',$1,false) v",[a]);
  const e=randomUUID();
  await c.query(`INSERT INTO runtime_executions(id,actor_id,session_id,request_id,payload,history_revision,state)
  VALUES($1,$2,$3,$4,'{"ownPosts":true}',0,'running')`,[e,a,s,randomUUID()]);
@@ -57,6 +59,7 @@ try{
  const replay=await one(`UPDATE runtime_tool_calls SET result=$3 WHERE execution_id=$1 AND call_id=$2 RETURNING result v`,[e,'call-1',result]);
  assert.equal(replay.kind,'my_posts');
  report.checks.push('two reads, third unavailable; existing saved call replay does not consume allowance');
+ await deletionCases({c,report});
  await c.query(migration);await c.query(migration);
  assert.equal((await index(a,s,'my_posts:90')).windowDays,90);
  report.checks.push('idempotent apply; no tables or data are dropped; rollback is flag off and code revert');
