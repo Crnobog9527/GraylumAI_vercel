@@ -153,8 +153,8 @@ export async function runCases({db,report}) {
  await rpc(db,'runtime_tool',empty.actor,empty.execution,'idx','read_source',{query:'library'},'claim',null);
  const emptyIndex=await read(db,empty.actor,empty.execution,'');
  assert.equal(emptyIndex.kind,'library_index');
- assert.deepEqual(emptyIndex.documents.map(x=>x.title),['DIR-A.md','DIR-B.md'],'two documents in the library: the listing shows both');
- assert.deepEqual(emptyIndex.documents.map(x=>x.ref),['doc-1','doc-2']);assert.equal(emptyIndex.directoryTotal,2);assert.match(emptyIndex.hint,/search:/);
+ assert.deepEqual(emptyIndex.documents.map(x=>x.title).sort(),['DIR-A.md','DIR-B.md'],'two documents in the library: the listing shows both');
+ assert.deepEqual(emptyIndex.documents.map(x=>x.ref).sort(),['doc-1','doc-2']);assert.equal(emptyIndex.directoryTotal,2);assert.match(emptyIndex.hint,/search:/);
  assert.equal(await one(db,'SELECT count(*)::int v FROM runtime_library_references WHERE execution_id=$1',[empty.execution]),2,'listed documents are ordinary references');
  assert.equal((await read(db,empty.actor,empty.execution,'')).documents.length,2,'listing twice registers nothing new');
  const emptyDone=await rpc(db,'runtime_tool',empty.actor,empty.execution,'idx','read_source',{query:'library'},'complete',emptyIndex);

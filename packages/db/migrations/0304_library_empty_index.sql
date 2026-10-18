@@ -25,11 +25,14 @@ BEGIN
   src:=replace(src,a1,$x$ IF coalesce(p_query,'')='' THEN
   -- 0304 directory: a retrieving free chat lists its first ready documents (10 at most, like search hits: frozen, doc-N).
   IF coalesce(e.payload->>'libraryRetrieval','')='true' THEN
+   -- Pick by file name, lock by id (the order every other path uses), so a bulk delete cannot deadlock with this.
    FOR hit IN SELECT x.id document_id,x.content_version FROM library_documents x
-    WHERE x.actor_id=p_actor_id AND x.kind='document' AND x.deleted_at IS NULL AND x.status='ready'
-     AND NOT EXISTS(SELECT 1 FROM runtime_library_references r WHERE r.execution_id=e.id AND r.document_id=x.id)
-    ORDER BY x.filename,x.id LIMIT greatest(0,10-(SELECT count(*) FROM runtime_library_references r WHERE r.execution_id=e.id))
-    FOR SHARE OF x LOOP
+    WHERE x.id IN (SELECT y.id FROM library_documents y
+      WHERE y.actor_id=p_actor_id AND y.kind='document' AND y.deleted_at IS NULL AND y.status='ready'
+       AND NOT EXISTS(SELECT 1 FROM runtime_library_references r WHERE r.execution_id=e.id AND r.document_id=y.id)
+      ORDER BY y.filename,y.id LIMIT greatest(0,10-(SELECT count(*) FROM runtime_library_references r WHERE r.execution_id=e.id)))
+     AND x.deleted_at IS NULL AND x.status='ready'
+    ORDER BY x.id FOR SHARE OF x LOOP
     SELECT coalesce(max(ordinal),0)+1 INTO next_ordinal FROM runtime_library_references WHERE execution_id=e.id;
     EXIT WHEN next_ordinal>29;
     INSERT INTO runtime_library_references(execution_id,actor_id,document_id,content_version,ordinal,origin)
