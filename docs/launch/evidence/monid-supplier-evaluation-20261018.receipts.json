@@ -1,0 +1,3171 @@
+{
+  "generatedAt": "2026-10-18",
+  "sourceBase": "1c3f3ee17c1b923481666d7516fd283e4b0b5360",
+  "spend": {
+    "returnedCostUsd": "0.015106",
+    "walletDropUsd": "0.015106",
+    "budgetUsd": "1.00",
+    "count": 19,
+    "walletHeldAfterUsd": 0
+  },
+  "definitions": {
+    "bytes": "raw UTF-8 response body bytes before local JSON serialization; initial POST and last GET measured separately",
+    "endToEndMs": "client POST start to final GET body read; includes 4-second polling waits",
+    "serverLifecycleMs": "monid completedAt minus createdAt; server-reported, not independent latency",
+    "rawBodySha256": "SHA256 of JSON parse then ensure_ascii=False compact separators serialization; not wire bytes",
+    "selectedOutput": "allowlisted public numeric and identification fields; avatars, signed links, bios, auth and account balance omitted"
+  },
+  "receipts": [
+    {
+      "name": "tt-profile-1",
+      "provider": "anyapi",
+      "endpoint": "/tiktok.profile",
+      "input": {
+        "body": {
+          "handle": "nasa",
+          "route": "bison"
+        }
+      },
+      "runId": "01M57CEZRXAD2K72SMSV5BP9BY",
+      "initialHttp": 202,
+      "providerHttp": 200,
+      "status": "COMPLETED",
+      "cost": {
+        "value": 0.0004,
+        "currency": "USD"
+      },
+      "initialMs": 1200,
+      "endToEndMs": 5840,
+      "serverLifecycleMs": 2196,
+      "polls": 1,
+      "initialBytes": 1409,
+      "finalBytes": 2513,
+      "createdAt": "2026-10-18T11:30:59.775Z",
+      "completedAt": "2026-10-18T11:31:01.971Z",
+      "rowCount": 0,
+      "coverage": {
+        "createdUtc": 0,
+        "authorFollowers": 0,
+        "views": 0,
+        "viewCount": 0,
+        "likes": 0,
+        "likeCount": 0,
+        "comments": 0,
+        "replies": 0,
+        "replyCount": 0,
+        "shares": 0,
+        "retweets": 0,
+        "retweetCount": 0
+      },
+      "selectedOutput": {
+        "found": true,
+        "data": {
+          "createdUtc": 1784562949,
+          "displayName": "NASA",
+          "followers": 2101385,
+          "following": 23,
+          "handle": "nasa",
+          "likes": 11162105,
+          "videos": 57
+        }
+      },
+      "rawInitialBodySha256": "990c47a94110e79f63df476d91bc69cee1b42e48ea76f328e4026deb7c7b9824",
+      "rawFinalBodySha256": "4d182062843c2cb9ccd303892afaa2de702467871f66fd6ef27fc776e9d89083"
+    },
+    {
+      "name": "tt-profile-2",
+      "provider": "anyapi",
+      "endpoint": "/tiktok.profile",
+      "input": {
+        "body": {
+          "handle": "duolingo",
+          "route": "bison"
+        }
+      },
+      "runId": "01M57CF5DZY6QVEJ8CHDYKAXGP",
+      "initialHttp": 202,
+      "providerHttp": 200,
+      "status": "COMPLETED",
+      "cost": {
+        "value": 0.0004,
+        "currency": "USD"
+      },
+      "initialMs": 1201,
+      "endToEndMs": 5779,
+      "serverLifecycleMs": 1940,
+      "polls": 1,
+      "initialBytes": 1409,
+      "finalBytes": 2458,
+      "createdAt": "2026-10-18T11:31:05.611Z",
+      "completedAt": "2026-10-18T11:31:07.551Z",
+      "rowCount": 0,
+      "coverage": {
+        "createdUtc": 0,
+        "authorFollowers": 0,
+        "views": 0,
+        "viewCount": 0,
+        "likes": 0,
+        "likeCount": 0,
+        "comments": 0,
+        "replies": 0,
+        "replyCount": 0,
+        "shares": 0,
+        "retweets": 0,
+        "retweetCount": 0
+      },
+      "selectedOutput": {
+        "found": true,
+        "data": {
+          "createdUtc": 1610653773,
+          "displayName": "Duolingo",
+          "followers": 18265387,
+          "following": 317,
+          "handle": "duolingo",
+          "likes": 505428833,
+          "videos": 1252
+        }
+      },
+      "rawInitialBodySha256": "fc5a0b0096c7700db0c4dafa00ffcb0fdb58a4b8545c5f9e0c701311f8762f38",
+      "rawFinalBodySha256": "c74b555fbc246e01488643692a18465dd33e4aff778444e3e4311a87caff91ee"
+    },
+    {
+      "name": "tt-posts-1",
+      "provider": "anyapi",
+      "endpoint": "/tiktok.profile_videos",
+      "input": {
+        "body": {
+          "handle": "nasa",
+          "route": "flamingo"
+        }
+      },
+      "runId": "01M57CFB3MXPK4S5D86PWKC7M4",
+      "initialHttp": 202,
+      "providerHttp": 200,
+      "status": "COMPLETED",
+      "cost": {
+        "value": 0,
+        "currency": "USD"
+      },
+      "initialMs": 1210,
+      "endToEndMs": 5801,
+      "serverLifecycleMs": 4157,
+      "polls": 1,
+      "initialBytes": 1258,
+      "finalBytes": 1652,
+      "createdAt": "2026-10-18T11:31:11.383Z",
+      "completedAt": "2026-10-18T11:31:15.540Z",
+      "rowCount": 0,
+      "coverage": {
+        "createdUtc": 0,
+        "authorFollowers": 0,
+        "views": 0,
+        "viewCount": 0,
+        "likes": 0,
+        "likeCount": 0,
+        "comments": 0,
+        "replies": 0,
+        "replyCount": 0,
+        "shares": 0,
+        "retweets": 0,
+        "retweetCount": 0
+      },
+      "selectedOutput": {
+        "found": false,
+        "data": null,
+        "reason": "not_found"
+      },
+      "rawInitialBodySha256": "3a8457eab3b1abbdd595ff64858a3d809bb389274fad519c0ba0bdb61ce2413b",
+      "rawFinalBodySha256": "7e47304d91d3906eb154395b79e0b0316b229bcb910f2e00cb1236048b77a56c"
+    },
+    {
+      "name": "tt-posts-2",
+      "provider": "anyapi",
+      "endpoint": "/tiktok.profile_videos",
+      "input": {
+        "body": {
+          "handle": "duolingo",
+          "route": "flamingo"
+        }
+      },
+      "runId": "01M57CFGPVPVD4CX71J4HB0QQV",
+      "initialHttp": 202,
+      "providerHttp": 200,
+      "status": "COMPLETED",
+      "cost": {
+        "value": 0.0006,
+        "currency": "USD"
+      },
+      "initialMs": 1362,
+      "endToEndMs": 6095,
+      "serverLifecycleMs": 2966,
+      "polls": 1,
+      "initialBytes": 1258,
+      "finalBytes": 35673,
+      "createdAt": "2026-10-18T11:31:17.337Z",
+      "completedAt": "2026-10-18T11:31:20.303Z",
+      "rowCount": 20,
+      "coverage": {
+        "createdUtc": 20,
+        "authorFollowers": 20,
+        "views": 20,
+        "viewCount": 0,
+        "likes": 20,
+        "likeCount": 0,
+        "comments": 20,
+        "replies": 0,
+        "replyCount": 0,
+        "shares": 20,
+        "retweets": 0,
+        "retweetCount": 0
+      },
+      "selectedOutput": {
+        "data": {
+          "videos": [
+            {
+              "authorFollowers": 18266569,
+              "authorHandle": "duolingo",
+              "comments": 19587,
+              "createdUtc": 1749564234,
+              "id": "7514320905909194030",
+              "isPinned": true,
+              "likes": 168570,
+              "shares": 8738,
+              "views": 3750499
+            },
+            {
+              "authorFollowers": 18266569,
+              "authorHandle": "duolingo",
+              "comments": 7069,
+              "createdUtc": 1791913939,
+              "id": "7696211706317409550",
+              "isPinned": false,
+              "likes": 445257,
+              "shares": 81071,
+              "views": 2228621
+            },
+            {
+              "authorFollowers": 18266569,
+              "authorHandle": "duolingo",
+              "comments": 1738,
+              "createdUtc": 1791828189,
+              "id": "7695843389211708702",
+              "isPinned": false,
+              "likes": 99053,
+              "shares": 27402,
+              "views": 639322
+            },
+            {
+              "authorFollowers": 18266569,
+              "authorHandle": "duolingo",
+              "comments": 288,
+              "createdUtc": 1791810221,
+              "id": "7695766121307196686",
+              "isPinned": false,
+              "likes": 4416,
+              "shares": 145,
+              "views": 109987
+            },
+            {
+              "authorFollowers": 18266569,
+              "authorHandle": "duolingo",
+              "comments": 428,
+              "createdUtc": 1791662788,
+              "id": "7695132961343147278",
+              "isPinned": false,
+              "likes": 14294,
+              "shares": 380,
+              "views": 155158
+            },
+            {
+              "authorFollowers": 18266569,
+              "authorHandle": "duolingo",
+              "comments": 1637,
+              "createdUtc": 1791594380,
+              "id": "7694839158510062861",
+              "isPinned": false,
+              "likes": 78485,
+              "shares": 4042,
+              "views": 647958
+            },
+            {
+              "authorFollowers": 18266569,
+              "authorHandle": "duolingo",
+              "comments": 361,
+              "createdUtc": 1791561744,
+              "id": "7694698943971855630",
+              "isPinned": false,
+              "likes": 5632,
+              "shares": 265,
+              "views": 134799
+            },
+            {
+              "authorFollowers": 18266569,
+              "authorHandle": "duolingo",
+              "comments": 811,
+              "createdUtc": 1791511521,
+              "id": "7694483304183090445",
+              "isPinned": false,
+              "likes": 90640,
+              "shares": 4190,
+              "views": 467713
+            },
+            {
+              "authorFollowers": 18266569,
+              "authorHandle": "duolingo",
+              "comments": 4977,
+              "createdUtc": 1791485410,
+              "id": "7694371205087759647",
+              "isPinned": false,
+              "likes": 835797,
+              "shares": 191035,
+              "views": 5897686
+            },
+            {
+              "authorFollowers": 18266569,
+              "authorHandle": "duolingo",
+              "comments": 3703,
+              "createdUtc": 1791395730,
+              "id": "7693985888535186702",
+              "isPinned": false,
+              "likes": 181407,
+              "shares": 59867,
+              "views": 1231694
+            },
+            {
+              "authorFollowers": 18266569,
+              "authorHandle": "duolingo",
+              "comments": 6197,
+              "createdUtc": 1791381662,
+              "id": "7693925412765797645",
+              "isPinned": false,
+              "likes": 417526,
+              "shares": 29441,
+              "views": 2340273
+            },
+            {
+              "authorFollowers": 18266569,
+              "authorHandle": "duolingo",
+              "comments": 1572,
+              "createdUtc": 1791295200,
+              "id": "7693326019259944206",
+              "isPinned": false,
+              "likes": 31621,
+              "shares": 4694,
+              "views": 499854
+            },
+            {
+              "authorFollowers": 18266569,
+              "authorHandle": "duolingo",
+              "comments": 1013,
+              "createdUtc": 1791213008,
+              "id": "7693201188199632159",
+              "isPinned": false,
+              "likes": 23031,
+              "shares": 4126,
+              "views": 360811
+            },
+            {
+              "authorFollowers": 18266569,
+              "authorHandle": "duolingo",
+              "comments": 2472,
+              "createdUtc": 1790963327,
+              "id": "7692128874154429709",
+              "isPinned": false,
+              "likes": 70912,
+              "shares": 18005,
+              "views": 711008
+            },
+            {
+              "authorFollowers": 18266569,
+              "authorHandle": "duolingo",
+              "comments": 498,
+              "createdUtc": 1790950474,
+              "id": "7692073555160272142",
+              "isPinned": false,
+              "likes": 9560,
+              "shares": 562,
+              "views": 191309
+            },
+            {
+              "authorFollowers": 18266569,
+              "authorHandle": "duolingo",
+              "comments": 1512,
+              "createdUtc": 1790872139,
+              "id": "7691737068392811789",
+              "isPinned": false,
+              "likes": 62170,
+              "shares": 10682,
+              "views": 582046
+            },
+            {
+              "authorFollowers": 18266569,
+              "authorHandle": "duolingo",
+              "comments": 431,
+              "createdUtc": 1790864442,
+              "id": "7691704104598375710",
+              "isPinned": false,
+              "likes": 6484,
+              "shares": 331,
+              "views": 173830
+            },
+            {
+              "authorFollowers": 18266569,
+              "authorHandle": "duolingo",
+              "comments": 17322,
+              "createdUtc": 1790793025,
+              "id": "7691397360794029343",
+              "isPinned": false,
+              "likes": 6101,
+              "shares": 733,
+              "views": 258283
+            },
+            {
+              "authorFollowers": 18266569,
+              "authorHandle": "duolingo",
+              "comments": 41704,
+              "createdUtc": 1790706129,
+              "id": "7691024107667836173",
+              "isPinned": false,
+              "likes": 34245,
+              "shares": 3462,
+              "views": 413889
+            },
+            {
+              "authorFollowers": 18266569,
+              "authorHandle": "duolingo",
+              "comments": 8737,
+              "createdUtc": 1790626230,
+              "id": "7690680991387553038",
+              "isPinned": false,
+              "likes": 250528,
+              "shares": 35519,
+              "views": 1483292
+            }
+          ]
+        },
+        "found": true
+      },
+      "rawInitialBodySha256": "ae1f60721d0da0c11a726f587acee03e1953bf9d0da04e78ebeaff19bb120479",
+      "rawFinalBodySha256": "99c3aaa2ad136b9096a885a3911bad74057033231761656389ca16a386498522"
+    },
+    {
+      "name": "tt-search-1",
+      "provider": "anyapi",
+      "endpoint": "/tiktok.search_keyword",
+      "input": {
+        "body": {
+          "query": "space exploration",
+          "route": "bison"
+        }
+      },
+      "runId": "01M57CFPQC58529SH3W8Z71B2A",
+      "initialHttp": 202,
+      "providerHttp": 200,
+      "status": "COMPLETED",
+      "cost": {
+        "value": 0.0006,
+        "currency": "USD"
+      },
+      "initialMs": 1239,
+      "endToEndMs": 6281,
+      "serverLifecycleMs": 2238,
+      "polls": 1,
+      "initialBytes": 1324,
+      "finalBytes": 45461,
+      "createdAt": "2026-10-18T11:31:23.352Z",
+      "completedAt": "2026-10-18T11:31:25.590Z",
+      "rowCount": 20,
+      "coverage": {
+        "createdUtc": 20,
+        "authorFollowers": 0,
+        "views": 20,
+        "viewCount": 0,
+        "likes": 20,
+        "likeCount": 0,
+        "comments": 20,
+        "replies": 0,
+        "replyCount": 0,
+        "shares": 20,
+        "retweets": 0,
+        "retweetCount": 0
+      },
+      "selectedOutput": {
+        "data": {
+          "videos": [
+            {
+              "authorFollowers": null,
+              "comments": 0,
+              "createdUtc": 1780292163,
+              "id": "7646296505384471821",
+              "likes": 3,
+              "shares": 0,
+              "views": 296
+            },
+            {
+              "authorFollowers": null,
+              "comments": 517,
+              "createdUtc": 1775378408,
+              "id": "7625192170189770006",
+              "likes": 7428,
+              "shares": 615,
+              "views": 786541
+            },
+            {
+              "authorFollowers": null,
+              "comments": 661,
+              "createdUtc": 1775208069,
+              "id": "7624460568774167840",
+              "likes": 34205,
+              "shares": 684,
+              "views": 861031
+            },
+            {
+              "authorFollowers": null,
+              "comments": 131,
+              "createdUtc": 1790804463,
+              "id": "7691446571174563104",
+              "likes": 3745,
+              "shares": 282,
+              "views": 107767
+            },
+            {
+              "authorFollowers": null,
+              "comments": 243,
+              "createdUtc": 1791377504,
+              "id": "7693907626219916574",
+              "likes": 68094,
+              "shares": 6038,
+              "views": 253943
+            },
+            {
+              "authorFollowers": null,
+              "comments": 35,
+              "createdUtc": 1791987901,
+              "id": "7696529411037793557",
+              "likes": 476,
+              "shares": 8,
+              "views": 7615
+            },
+            {
+              "authorFollowers": null,
+              "comments": 2,
+              "createdUtc": 1779145089,
+              "id": "7641369919812128013",
+              "likes": 7,
+              "shares": 0,
+              "views": 302
+            },
+            {
+              "authorFollowers": null,
+              "comments": 870,
+              "createdUtc": 1776224910,
+              "id": "7628827841093946637",
+              "likes": 65431,
+              "shares": 4051,
+              "views": 696909
+            },
+            {
+              "authorFollowers": null,
+              "comments": 82,
+              "createdUtc": 1791073090,
+              "id": "7692600291161656606",
+              "likes": 20408,
+              "shares": 1003,
+              "views": 84414
+            },
+            {
+              "authorFollowers": null,
+              "comments": 60,
+              "createdUtc": 1775459726,
+              "id": "7625541408711019796",
+              "likes": 2913,
+              "shares": 180,
+              "views": 130741
+            },
+            {
+              "authorFollowers": null,
+              "comments": 16121,
+              "createdUtc": 1786736733,
+              "id": "7673975807055777046",
+              "likes": 379912,
+              "shares": 17414,
+              "views": 3375593
+            },
+            {
+              "authorFollowers": null,
+              "comments": 12832,
+              "createdUtc": 1775871092,
+              "id": "7627307867057540353",
+              "likes": 532266,
+              "shares": 49050,
+              "views": 7685848
+            },
+            {
+              "authorFollowers": null,
+              "comments": 0,
+              "createdUtc": 1764428429,
+              "id": "7578162182895062286",
+              "likes": 5,
+              "shares": 0,
+              "views": 140
+            },
+            {
+              "authorFollowers": null,
+              "comments": 9,
+              "createdUtc": 1755987710,
+              "id": "7541909753157438727",
+              "likes": 673,
+              "shares": 6,
+              "views": 10055
+            },
+            {
+              "authorFollowers": null,
+              "comments": 1033,
+              "createdUtc": 1760704552,
+              "id": "7562168455093357831",
+              "likes": 91535,
+              "shares": 4564,
+              "views": 5675519
+            },
+            {
+              "authorFollowers": null,
+              "comments": 1,
+              "createdUtc": 1730316852,
+              "id": "7431654261592837422",
+              "likes": 78,
+              "shares": 2,
+              "views": 1893
+            },
+            {
+              "authorFollowers": null,
+              "comments": 592,
+              "createdUtc": 1782428698,
+              "id": "7655472926120086806",
+              "likes": 18710,
+              "shares": 1091,
+              "views": 120015
+            },
+            {
+              "authorFollowers": null,
+              "comments": 766,
+              "createdUtc": 1775499927,
+              "id": "7625713999191067934",
+              "likes": 44899,
+              "shares": 1701,
+              "views": 1832309
+            },
+            {
+              "authorFollowers": null,
+              "comments": 5479,
+              "createdUtc": 1790694011,
+              "id": "7690972194935000352",
+              "likes": 334111,
+              "shares": 13867,
+              "views": 2865899
+            },
+            {
+              "authorFollowers": null,
+              "comments": 372,
+              "createdUtc": 1787845128,
+              "id": "7678736334030114066",
+              "likes": 57522,
+              "shares": 2471,
+              "views": 267336
+            }
+          ]
+        },
+        "found": true
+      },
+      "rawInitialBodySha256": "cba4b220e3b323325934a72fc9743531601a6d15a262ea1a2bcb929f713a9b46",
+      "rawFinalBodySha256": "7c325e23bdc309218351a1d8d4b14a4368f36e4b587787df3e47fb966cb775ce"
+    },
+    {
+      "name": "tt-search-2",
+      "provider": "anyapi",
+      "endpoint": "/tiktok.search_keyword",
+      "input": {
+        "body": {
+          "query": "language learning",
+          "route": "bison"
+        }
+      },
+      "runId": "01M57CFWWHFMBCZQR0166S1YB5",
+      "initialHttp": 202,
+      "providerHttp": 200,
+      "status": "COMPLETED",
+      "cost": {
+        "value": 0.0006,
+        "currency": "USD"
+      },
+      "initialMs": 1351,
+      "endToEndMs": 6072,
+      "serverLifecycleMs": 2318,
+      "polls": 1,
+      "initialBytes": 1324,
+      "finalBytes": 39915,
+      "createdAt": "2026-10-18T11:31:29.706Z",
+      "completedAt": "2026-10-18T11:31:32.024Z",
+      "rowCount": 20,
+      "coverage": {
+        "createdUtc": 20,
+        "authorFollowers": 0,
+        "views": 20,
+        "viewCount": 0,
+        "likes": 20,
+        "likeCount": 0,
+        "comments": 20,
+        "replies": 0,
+        "replyCount": 0,
+        "shares": 20,
+        "retweets": 0,
+        "retweetCount": 0
+      },
+      "selectedOutput": {
+        "data": {
+          "videos": [
+            {
+              "authorFollowers": null,
+              "comments": 16,
+              "createdUtc": 1790191181,
+              "id": "7688812542185000244",
+              "likes": 14693,
+              "shares": 317,
+              "views": 118356
+            },
+            {
+              "authorFollowers": null,
+              "comments": 779,
+              "createdUtc": 1774615055,
+              "id": "7621913606493359368",
+              "likes": 39324,
+              "shares": 4393,
+              "views": 1141835
+            },
+            {
+              "authorFollowers": null,
+              "comments": 3,
+              "createdUtc": 1792290436,
+              "id": "7697828680558480662",
+              "likes": 187,
+              "shares": 36,
+              "views": 8011
+            },
+            {
+              "authorFollowers": null,
+              "comments": 435,
+              "createdUtc": 1788058214,
+              "id": "7679651464414825742",
+              "likes": 10778,
+              "shares": 402,
+              "views": 49047
+            },
+            {
+              "authorFollowers": null,
+              "comments": 0,
+              "createdUtc": 1789386377,
+              "id": "7685355947950083348",
+              "likes": 21,
+              "shares": 0,
+              "views": 956
+            },
+            {
+              "authorFollowers": null,
+              "comments": 4,
+              "createdUtc": 1685630502,
+              "id": "7239727823684963626",
+              "likes": 80,
+              "shares": 1,
+              "views": 1952
+            },
+            {
+              "authorFollowers": null,
+              "comments": 2954,
+              "createdUtc": 1781262261,
+              "id": "7650462938230279454",
+              "likes": 389226,
+              "shares": 16358,
+              "views": 3048325
+            },
+            {
+              "authorFollowers": null,
+              "comments": 455,
+              "createdUtc": 1781535112,
+              "id": "7651635023543569672",
+              "likes": 113172,
+              "shares": 1295,
+              "views": 1189659
+            },
+            {
+              "authorFollowers": null,
+              "comments": 1956,
+              "createdUtc": 1789913413,
+              "id": "7687619554079493409",
+              "likes": 364686,
+              "shares": 64432,
+              "views": 3904927
+            },
+            {
+              "authorFollowers": null,
+              "comments": 109,
+              "createdUtc": 1776259805,
+              "id": "7628977758114172168",
+              "likes": 2329,
+              "shares": 526,
+              "views": 72980
+            },
+            {
+              "authorFollowers": null,
+              "comments": 940,
+              "createdUtc": 1791854582,
+              "id": "7695956759625649421",
+              "likes": 91843,
+              "shares": 77813,
+              "views": 1400187
+            },
+            {
+              "authorFollowers": null,
+              "comments": 185,
+              "createdUtc": 1790251848,
+              "id": "7689073117590867233",
+              "likes": 15366,
+              "shares": 696,
+              "views": 100994
+            },
+            {
+              "authorFollowers": null,
+              "comments": 499,
+              "createdUtc": 1791654735,
+              "id": "7695098398856219918",
+              "likes": 29780,
+              "shares": 946,
+              "views": 150010
+            },
+            {
+              "authorFollowers": null,
+              "comments": 485,
+              "createdUtc": 1779546165,
+              "id": "7643092551288851733",
+              "likes": 43725,
+              "shares": 7277,
+              "views": 746757
+            },
+            {
+              "authorFollowers": null,
+              "comments": 1791,
+              "createdUtc": 1791004157,
+              "id": "7692304255574723860",
+              "likes": 214126,
+              "shares": 32059,
+              "views": 1156100
+            },
+            {
+              "authorFollowers": null,
+              "comments": 23,
+              "createdUtc": 1791508558,
+              "id": "7694470615054470401",
+              "likes": 6033,
+              "shares": 422,
+              "views": 52388
+            },
+            {
+              "authorFollowers": null,
+              "comments": 281,
+              "createdUtc": 1770886262,
+              "id": "7605898547501878548",
+              "likes": 56712,
+              "shares": 1829,
+              "views": 7847327
+            },
+            {
+              "authorFollowers": null,
+              "comments": 115,
+              "createdUtc": 1783432288,
+              "id": "7659783320984636705",
+              "likes": 2434,
+              "shares": 1358,
+              "views": 238292
+            },
+            {
+              "authorFollowers": null,
+              "comments": 121,
+              "createdUtc": 1779272388,
+              "id": "7641916696634232085",
+              "likes": 8418,
+              "shares": 492,
+              "views": 245898
+            },
+            {
+              "authorFollowers": null,
+              "comments": 87,
+              "createdUtc": 1791668545,
+              "id": "7695157741916081439",
+              "likes": 9812,
+              "shares": 1659,
+              "views": 96104
+            }
+          ]
+        },
+        "found": true
+      },
+      "rawInitialBodySha256": "09bb084f4cc5382556baf79719393c7fd74a33f67bdae13f1737e2bd822fa4ce",
+      "rawFinalBodySha256": "d0f1c09ed0bf8fcacb4cab53114c951d7e672cb949c969d7650f84b800c0c662"
+    },
+    {
+      "name": "x-profile-1",
+      "provider": "anyapi",
+      "endpoint": "/twitter.profile",
+      "input": {
+        "body": {
+          "handle": "NASA",
+          "route": "lynx"
+        }
+      },
+      "runId": "01M57CG2MZ0Z2C0C5E0NRBRX8S",
+      "initialHttp": 202,
+      "providerHttp": 200,
+      "status": "COMPLETED",
+      "cost": {
+        "value": 0.00022,
+        "currency": "USD"
+      },
+      "initialMs": 1054,
+      "endToEndMs": 5626,
+      "serverLifecycleMs": 2023,
+      "polls": 1,
+      "initialBytes": 1082,
+      "finalBytes": 1929,
+      "createdAt": "2026-10-18T11:31:35.496Z",
+      "completedAt": "2026-10-18T11:31:37.519Z",
+      "rowCount": 0,
+      "coverage": {
+        "createdUtc": 0,
+        "authorFollowers": 0,
+        "views": 0,
+        "viewCount": 0,
+        "likes": 0,
+        "likeCount": 0,
+        "comments": 0,
+        "replies": 0,
+        "replyCount": 0,
+        "shares": 0,
+        "retweets": 0,
+        "retweetCount": 0
+      },
+      "selectedOutput": {
+        "found": true,
+        "data": {
+          "createdUtc": 1198095632,
+          "displayName": "NASA",
+          "followers": 92323065,
+          "following": 115,
+          "handle": "NASA",
+          "id": "11348282",
+          "tweets": 74438
+        }
+      },
+      "rawInitialBodySha256": "001729b835a7f3d80acb90a6e3399d6236d80f3f413a1c4eabf7de54baf45957",
+      "rawFinalBodySha256": "0752928566b3e41565dad43fc2852789f40b3b079581063324c20a6b158b6b62"
+    },
+    {
+      "name": "x-profile-2",
+      "provider": "anyapi",
+      "endpoint": "/twitter.profile",
+      "input": {
+        "body": {
+          "handle": "duolingo",
+          "route": "lynx"
+        }
+      },
+      "runId": "01M57CG86WH67BWXWK279XHSFR",
+      "initialHttp": 202,
+      "providerHttp": 200,
+      "status": "COMPLETED",
+      "cost": {
+        "value": 0.00022,
+        "currency": "USD"
+      },
+      "initialMs": 1072,
+      "endToEndMs": 5655,
+      "serverLifecycleMs": 1999,
+      "polls": 1,
+      "initialBytes": 1082,
+      "finalBytes": 1910,
+      "createdAt": "2026-10-18T11:31:41.175Z",
+      "completedAt": "2026-10-18T11:31:43.174Z",
+      "rowCount": 0,
+      "coverage": {
+        "createdUtc": 0,
+        "authorFollowers": 0,
+        "views": 0,
+        "viewCount": 0,
+        "likes": 0,
+        "likeCount": 0,
+        "comments": 0,
+        "replies": 0,
+        "replyCount": 0,
+        "shares": 0,
+        "retweets": 0,
+        "retweetCount": 0
+      },
+      "selectedOutput": {
+        "found": true,
+        "data": {
+          "createdUtc": 1264115730,
+          "displayName": "Duolingo",
+          "followers": 1048999,
+          "following": 509,
+          "handle": "duolingo",
+          "id": "107238136",
+          "tweets": 54437
+        }
+      },
+      "rawInitialBodySha256": "80ec231d750b4c07223ec788f422917de5b25482580cd52e84065d6e819d48d1",
+      "rawFinalBodySha256": "ca98a906f9183f2531f3a8d7b84934dd45190ff7525a8119b4d4ab2e71ef4f68"
+    },
+    {
+      "name": "x-posts-1",
+      "provider": "anyapi",
+      "endpoint": "/twitter.user_tweets",
+      "input": {
+        "body": {
+          "handle": "NASA",
+          "limit": 20,
+          "route": "lynx"
+        }
+      },
+      "runId": "01M57CGDNC045KEGSF1T8MM0EF",
+      "initialHttp": 202,
+      "providerHttp": 200,
+      "status": "COMPLETED",
+      "cost": {
+        "value": 0.00045,
+        "currency": "USD"
+      },
+      "initialMs": 1015,
+      "endToEndMs": 5770,
+      "serverLifecycleMs": 2261,
+      "polls": 1,
+      "initialBytes": 931,
+      "finalBytes": 16120,
+      "createdAt": "2026-10-18T11:31:46.780Z",
+      "completedAt": "2026-10-18T11:31:49.041Z",
+      "rowCount": 20,
+      "coverage": {
+        "createdUtc": 20,
+        "authorFollowers": 0,
+        "views": 20,
+        "viewCount": 0,
+        "likes": 20,
+        "likeCount": 0,
+        "comments": 0,
+        "replies": 20,
+        "replyCount": 0,
+        "shares": 0,
+        "retweets": 20,
+        "retweetCount": 0
+      },
+      "selectedOutput": {
+        "data": {
+          "tweets": [
+            {
+              "authorHandle": "NASA",
+              "createdUtc": 1792179740,
+              "id": "2111180963661435219",
+              "isPinned": null,
+              "isReply": false,
+              "likes": 1475,
+              "quotes": 24,
+              "replies": 133,
+              "retweets": 201,
+              "views": 342327
+            },
+            {
+              "authorHandle": "NASA",
+              "createdUtc": 1792179359,
+              "id": "2111179364872466706",
+              "isPinned": null,
+              "isReply": true,
+              "likes": 9,
+              "quotes": 0,
+              "replies": 1,
+              "retweets": 2,
+              "views": 2232
+            },
+            {
+              "authorHandle": "NASA",
+              "createdUtc": 1792158833,
+              "id": "2111093273800356092",
+              "isPinned": null,
+              "isReply": false,
+              "likes": 1938,
+              "quotes": 17,
+              "replies": 146,
+              "retweets": 250,
+              "views": 969481
+            },
+            {
+              "authorHandle": "NASA",
+              "createdUtc": 1792096600,
+              "id": "2110832251126644974",
+              "isPinned": null,
+              "isReply": true,
+              "likes": 13,
+              "quotes": 0,
+              "replies": 1,
+              "retweets": 0,
+              "views": 3187
+            },
+            {
+              "authorHandle": "NASA",
+              "createdUtc": 1792094625,
+              "id": "2110823965954637903",
+              "isPinned": null,
+              "isReply": false,
+              "likes": 1117,
+              "quotes": 10,
+              "replies": 76,
+              "retweets": 156,
+              "views": 379663
+            },
+            {
+              "authorHandle": "NASA",
+              "createdUtc": 1792092647,
+              "id": "2110815671512682509",
+              "isPinned": null,
+              "isReply": false,
+              "likes": 1072,
+              "quotes": 17,
+              "replies": 84,
+              "retweets": 165,
+              "views": 463572
+            },
+            {
+              "authorHandle": "NASA",
+              "createdUtc": 1792088556,
+              "id": "2110798512795377741",
+              "isPinned": null,
+              "isReply": false,
+              "likes": 2113,
+              "quotes": 12,
+              "replies": 92,
+              "retweets": 234,
+              "views": 378540
+            },
+            {
+              "authorHandle": "NASA",
+              "createdUtc": 1792069235,
+              "id": "2110717473372749989",
+              "isPinned": null,
+              "isReply": false,
+              "likes": 2226,
+              "quotes": 62,
+              "replies": 166,
+              "retweets": 384,
+              "views": 1348873
+            },
+            {
+              "authorHandle": "NASA",
+              "createdUtc": 1792015388,
+              "id": "2110491624337760703",
+              "isPinned": null,
+              "isReply": false,
+              "likes": 2665,
+              "quotes": 725,
+              "replies": 167,
+              "retweets": 376,
+              "views": 887741
+            },
+            {
+              "authorHandle": "NASA",
+              "createdUtc": 1792008733,
+              "id": "2110463711463010411",
+              "isPinned": null,
+              "isReply": true,
+              "likes": 16,
+              "quotes": 1,
+              "replies": 4,
+              "retweets": 2,
+              "views": 3050
+            },
+            {
+              "authorHandle": "NASA",
+              "createdUtc": 1791990986,
+              "id": "2110389272024867195",
+              "isPinned": null,
+              "isReply": false,
+              "likes": 1056,
+              "quotes": 15,
+              "replies": 90,
+              "retweets": 137,
+              "views": 354757
+            },
+            {
+              "authorHandle": "NASA",
+              "createdUtc": 1791986821,
+              "id": "2110371804959191288",
+              "isPinned": null,
+              "isReply": false,
+              "likes": 6286,
+              "quotes": 93,
+              "replies": 259,
+              "retweets": 938,
+              "views": 1047902
+            },
+            {
+              "authorHandle": "NASA",
+              "createdUtc": 1791920796,
+              "id": "2110094874024219133",
+              "isPinned": null,
+              "isReply": false,
+              "likes": 1331,
+              "quotes": 13,
+              "replies": 120,
+              "retweets": 198,
+              "views": 1618517
+            },
+            {
+              "authorHandle": "NASA",
+              "createdUtc": 1791909776,
+              "id": "2110048655336247510",
+              "isPinned": null,
+              "isReply": true,
+              "likes": 24,
+              "quotes": 1,
+              "replies": 3,
+              "retweets": 2,
+              "views": 5849
+            },
+            {
+              "authorHandle": "NASA",
+              "createdUtc": 1791886644,
+              "id": "2109951629889798342",
+              "isPinned": null,
+              "isReply": false,
+              "likes": 1946,
+              "quotes": 33,
+              "replies": 144,
+              "retweets": 294,
+              "views": 1065366
+            },
+            {
+              "authorHandle": "NASA",
+              "createdUtc": 1791736200,
+              "id": "2109320622882873464",
+              "isPinned": null,
+              "isReply": false,
+              "likes": 20454,
+              "quotes": 701,
+              "replies": 782,
+              "retweets": 3727,
+              "views": 2144022
+            },
+            {
+              "authorHandle": "NASA",
+              "createdUtc": 1791579761,
+              "id": "2108664469756997737",
+              "isPinned": null,
+              "isReply": true,
+              "likes": 10,
+              "quotes": 0,
+              "replies": 3,
+              "retweets": 2,
+              "views": 4507
+            },
+            {
+              "authorHandle": "NASA",
+              "createdUtc": 1791579274,
+              "id": "2108662426606395572",
+              "isPinned": null,
+              "isReply": false,
+              "likes": 9582,
+              "quotes": 131,
+              "replies": 343,
+              "retweets": 1560,
+              "views": 1222181
+            },
+            {
+              "authorHandle": "NASA",
+              "createdUtc": 1791572721,
+              "id": "2108634944255742173",
+              "isPinned": null,
+              "isReply": false,
+              "likes": 3309,
+              "quotes": 93,
+              "replies": 134,
+              "retweets": 347,
+              "views": 2349415
+            },
+            {
+              "authorHandle": "NASA",
+              "createdUtc": 1791563473,
+              "id": "2108596155164635228",
+              "isPinned": null,
+              "isReply": false,
+              "likes": 1505,
+              "quotes": 18,
+              "replies": 92,
+              "retweets": 255,
+              "views": 990686
+            }
+          ]
+        },
+        "found": true
+      },
+      "rawInitialBodySha256": "e854dbf2b47a6d241c2a098a6cfe75b46b7f7b93255a04a1c827a868262f3359",
+      "rawFinalBodySha256": "f2bdd617ddafba8cb9afe5af5f799e4f1ead28f1de2260ad3006e1f942f410c8"
+    },
+    {
+      "name": "x-posts-2",
+      "provider": "anyapi",
+      "endpoint": "/twitter.user_tweets",
+      "input": {
+        "body": {
+          "handle": "duolingo",
+          "limit": 20,
+          "route": "lynx"
+        }
+      },
+      "runId": "01M57CGKBEZ96J9M8MJKVJM1ZP",
+      "initialHttp": 202,
+      "providerHttp": 200,
+      "status": "COMPLETED",
+      "cost": {
+        "value": 0.00045,
+        "currency": "USD"
+      },
+      "initialMs": 1073,
+      "endToEndMs": 5667,
+      "serverLifecycleMs": 2526,
+      "polls": 1,
+      "initialBytes": 931,
+      "finalBytes": 13260,
+      "createdAt": "2026-10-18T11:31:52.605Z",
+      "completedAt": "2026-10-18T11:31:55.131Z",
+      "rowCount": 20,
+      "coverage": {
+        "createdUtc": 20,
+        "authorFollowers": 0,
+        "views": 20,
+        "viewCount": 0,
+        "likes": 20,
+        "likeCount": 0,
+        "comments": 0,
+        "replies": 20,
+        "replyCount": 0,
+        "shares": 0,
+        "retweets": 20,
+        "retweetCount": 0
+      },
+      "selectedOutput": {
+        "data": {
+          "tweets": [
+            {
+              "authorHandle": "duolingo",
+              "createdUtc": 1792176180,
+              "id": "2111166034741022868",
+              "isPinned": null,
+              "isReply": true,
+              "likes": 29,
+              "quotes": 2,
+              "replies": 3,
+              "retweets": 2,
+              "views": 6657
+            },
+            {
+              "authorHandle": "duolingo",
+              "createdUtc": 1792176178,
+              "id": "2111166022938153065",
+              "isPinned": null,
+              "isReply": false,
+              "likes": 181,
+              "quotes": 1,
+              "replies": 20,
+              "retweets": 14,
+              "views": 23062
+            },
+            {
+              "authorHandle": "duolingo",
+              "createdUtc": 1792170430,
+              "id": "2111141913835229214",
+              "isPinned": null,
+              "isReply": true,
+              "likes": 48,
+              "quotes": 1,
+              "replies": 4,
+              "retweets": 0,
+              "views": 1416
+            },
+            {
+              "authorHandle": "duolingo",
+              "createdUtc": 1792170241,
+              "id": "2111141121544048935",
+              "isPinned": null,
+              "isReply": true,
+              "likes": 45,
+              "quotes": 2,
+              "replies": 2,
+              "retweets": 0,
+              "views": 8653
+            },
+            {
+              "authorHandle": "duolingo",
+              "createdUtc": 1792169653,
+              "id": "2111138655830253970",
+              "isPinned": null,
+              "isReply": true,
+              "likes": 58,
+              "quotes": 0,
+              "replies": 6,
+              "retweets": 0,
+              "views": 4748
+            },
+            {
+              "authorHandle": "duolingo",
+              "createdUtc": 1792168779,
+              "id": "2111134989899137208",
+              "isPinned": null,
+              "isReply": true,
+              "likes": 241,
+              "quotes": 1,
+              "replies": 3,
+              "retweets": 3,
+              "views": 14779
+            },
+            {
+              "authorHandle": "duolingo",
+              "createdUtc": 1792166806,
+              "id": "2111126717574078917",
+              "isPinned": null,
+              "isReply": true,
+              "likes": 383,
+              "quotes": 0,
+              "replies": 3,
+              "retweets": 3,
+              "views": 12106
+            },
+            {
+              "authorHandle": "duolingo",
+              "createdUtc": 1792166077,
+              "id": "2111123655946117331",
+              "isPinned": null,
+              "isReply": true,
+              "likes": 99,
+              "quotes": 0,
+              "replies": 3,
+              "retweets": 0,
+              "views": 7808
+            },
+            {
+              "authorHandle": "duolingo",
+              "createdUtc": 1792165974,
+              "id": "2111123225484910896",
+              "isPinned": null,
+              "isReply": true,
+              "likes": 18,
+              "quotes": 0,
+              "replies": 3,
+              "retweets": 0,
+              "views": 1967
+            },
+            {
+              "authorHandle": "duolingo",
+              "createdUtc": 1792165955,
+              "id": "2111123147189543345",
+              "isPinned": null,
+              "isReply": false,
+              "likes": 2385,
+              "quotes": 26,
+              "replies": 84,
+              "retweets": 154,
+              "views": 161202
+            },
+            {
+              "authorHandle": "duolingo",
+              "createdUtc": 1792104374,
+              "id": "2110864857318949088",
+              "isPinned": null,
+              "isReply": true,
+              "likes": 1,
+              "quotes": 0,
+              "replies": 0,
+              "retweets": 0,
+              "views": 915
+            },
+            {
+              "authorHandle": "duolingo",
+              "createdUtc": 1792097505,
+              "id": "2110836046451916849",
+              "isPinned": null,
+              "isReply": true,
+              "likes": 2,
+              "quotes": 0,
+              "replies": 1,
+              "retweets": 0,
+              "views": 1029
+            },
+            {
+              "authorHandle": "duolingo",
+              "createdUtc": 1792097433,
+              "id": "2110835743572578468",
+              "isPinned": null,
+              "isReply": true,
+              "likes": 6,
+              "quotes": 0,
+              "replies": 2,
+              "retweets": 0,
+              "views": 995
+            },
+            {
+              "authorHandle": "duolingo",
+              "createdUtc": 1792093961,
+              "id": "2110821182408691745",
+              "isPinned": null,
+              "isReply": true,
+              "likes": 66,
+              "quotes": 0,
+              "replies": 3,
+              "retweets": 1,
+              "views": 3049
+            },
+            {
+              "authorHandle": "duolingo",
+              "createdUtc": 1792093224,
+              "id": "2110818090279911590",
+              "isPinned": null,
+              "isReply": true,
+              "likes": 125,
+              "quotes": 3,
+              "replies": 5,
+              "retweets": 10,
+              "views": 17779
+            },
+            {
+              "authorHandle": "duolingo",
+              "createdUtc": 1792041080,
+              "id": "2110599384513548424",
+              "isPinned": null,
+              "isReply": true,
+              "likes": 648,
+              "quotes": 0,
+              "replies": 10,
+              "retweets": 7,
+              "views": 146246
+            },
+            {
+              "authorHandle": "duolingo",
+              "createdUtc": 1792040922,
+              "id": "2110598718835847457",
+              "isPinned": null,
+              "isReply": true,
+              "likes": 5,
+              "quotes": 1,
+              "replies": 1,
+              "retweets": 0,
+              "views": 2376
+            },
+            {
+              "authorHandle": "duolingo",
+              "createdUtc": 1792040839,
+              "id": "2110598369810780404",
+              "isPinned": null,
+              "isReply": true,
+              "likes": 557,
+              "quotes": 16,
+              "replies": 72,
+              "retweets": 8,
+              "views": 1872313
+            },
+            {
+              "authorHandle": "duolingo",
+              "createdUtc": 1792040630,
+              "id": "2110597494539207144",
+              "isPinned": null,
+              "isReply": true,
+              "likes": 5,
+              "quotes": 0,
+              "replies": 2,
+              "retweets": 0,
+              "views": 2204
+            },
+            {
+              "authorHandle": "duolingo",
+              "createdUtc": 1792037421,
+              "id": "2110584037471379546",
+              "isPinned": null,
+              "isReply": true,
+              "likes": 19,
+              "quotes": 1,
+              "replies": 2,
+              "retweets": 1,
+              "views": 27376
+            }
+          ]
+        },
+        "found": true
+      },
+      "rawInitialBodySha256": "dff14506c4482b6f659377827f5a3bd791a07341f5882d0d39a6f60c033d4e01",
+      "rawFinalBodySha256": "ceb46234a0365a567644620e2ee7c77992101e59319c4b6e0ed48a98152ee36e"
+    },
+    {
+      "name": "x-search-1",
+      "provider": "anyapi",
+      "endpoint": "/twitter.search",
+      "input": {
+        "body": {
+          "query": "space exploration",
+          "limit": 20,
+          "route": "lynx"
+        }
+      },
+      "runId": "01M57CGRTGQ553PYMCZYZ19HE3",
+      "initialHttp": 202,
+      "providerHttp": 200,
+      "status": "COMPLETED",
+      "cost": {
+        "value": 0.0006,
+        "currency": "USD"
+      },
+      "initialMs": 1066,
+      "endToEndMs": 5811,
+      "serverLifecycleMs": 2615,
+      "polls": 1,
+      "initialBytes": 1122,
+      "finalBytes": 21570,
+      "createdAt": "2026-10-18T11:31:58.222Z",
+      "completedAt": "2026-10-18T11:32:00.837Z",
+      "rowCount": 20,
+      "coverage": {
+        "createdUtc": 20,
+        "authorFollowers": 20,
+        "views": 0,
+        "viewCount": 20,
+        "likes": 0,
+        "likeCount": 20,
+        "comments": 0,
+        "replies": 0,
+        "replyCount": 20,
+        "shares": 0,
+        "retweets": 0,
+        "retweetCount": 20
+      },
+      "selectedOutput": {
+        "data": {
+          "items": [
+            {
+              "authorFollowers": 22,
+              "authorUsername": "theSpacecyborg",
+              "createdUtc": 1792323005,
+              "id": "2111781860309160167",
+              "isReply": false,
+              "likeCount": 0,
+              "quoteCount": 0,
+              "replyCount": 0,
+              "retweetCount": 0,
+              "viewCount": 2
+            },
+            {
+              "authorFollowers": 181,
+              "authorUsername": "ArvindShuk83",
+              "createdUtc": 1792322745,
+              "id": "2111780769995923541",
+              "isReply": false,
+              "likeCount": 1,
+              "quoteCount": 0,
+              "replyCount": 2,
+              "retweetCount": 0,
+              "viewCount": 6
+            },
+            {
+              "authorFollowers": 6229,
+              "authorUsername": "sdof5257",
+              "createdUtc": 1792322466,
+              "id": "2111779600347131951",
+              "isReply": false,
+              "likeCount": 5,
+              "quoteCount": 0,
+              "replyCount": 3,
+              "retweetCount": 1,
+              "viewCount": 41
+            },
+            {
+              "authorFollowers": 13920,
+              "authorUsername": "soichann0901",
+              "createdUtc": 1792322435,
+              "id": "2111779469908459741",
+              "isReply": true,
+              "likeCount": 0,
+              "quoteCount": 0,
+              "replyCount": 0,
+              "retweetCount": 0,
+              "viewCount": 2
+            },
+            {
+              "authorFollowers": 2201,
+              "authorUsername": "GalvanPero55796",
+              "createdUtc": 1792321697,
+              "id": "2111776376097251511",
+              "isReply": false,
+              "likeCount": 2,
+              "quoteCount": 0,
+              "replyCount": 0,
+              "retweetCount": 1,
+              "viewCount": 23
+            },
+            {
+              "authorFollowers": 42686,
+              "authorUsername": "five_books",
+              "createdUtc": 1792321229,
+              "id": "2111774412080877806",
+              "isReply": false,
+              "likeCount": 0,
+              "quoteCount": 0,
+              "replyCount": 0,
+              "retweetCount": 0,
+              "viewCount": 266
+            },
+            {
+              "authorFollowers": 104,
+              "authorUsername": "domainprimeo",
+              "createdUtc": 1792320220,
+              "id": "2111770182595367394",
+              "isReply": false,
+              "likeCount": 0,
+              "quoteCount": 0,
+              "replyCount": 0,
+              "retweetCount": 0,
+              "viewCount": 11
+            },
+            {
+              "authorFollowers": 13900,
+              "authorUsername": "Indsamachar",
+              "createdUtc": 1792319932,
+              "id": "2111768970609168802",
+              "isReply": false,
+              "likeCount": 0,
+              "quoteCount": 0,
+              "replyCount": 0,
+              "retweetCount": 0,
+              "viewCount": 26
+            },
+            {
+              "authorFollowers": 22973,
+              "authorUsername": "elenalin01",
+              "createdUtc": 1792319676,
+              "id": "2111767897911505048",
+              "isReply": false,
+              "likeCount": 30,
+              "quoteCount": 0,
+              "replyCount": 24,
+              "retweetCount": 0,
+              "viewCount": 358
+            },
+            {
+              "authorFollowers": 658,
+              "authorUsername": "DabbleWithThis",
+              "createdUtc": 1792318603,
+              "id": "2111763399470358643",
+              "isReply": false,
+              "likeCount": 0,
+              "quoteCount": 0,
+              "replyCount": 0,
+              "retweetCount": 0,
+              "viewCount": 19
+            },
+            {
+              "authorFollowers": 14963,
+              "authorUsername": "GbhoyDownUnder",
+              "createdUtc": 1792317918,
+              "id": "2111760524425998354",
+              "isReply": false,
+              "likeCount": 4,
+              "quoteCount": 0,
+              "replyCount": 2,
+              "retweetCount": 1,
+              "viewCount": 196
+            },
+            {
+              "authorFollowers": 7,
+              "authorUsername": "onlanonymous",
+              "createdUtc": 1792317370,
+              "id": "2111758227486527970",
+              "isReply": false,
+              "likeCount": 0,
+              "quoteCount": 0,
+              "replyCount": 0,
+              "retweetCount": 0,
+              "viewCount": 34
+            },
+            {
+              "authorFollowers": 203,
+              "authorUsername": "ForHighNoon",
+              "createdUtc": 1792317287,
+              "id": "2111757877157179902",
+              "isReply": true,
+              "likeCount": 1,
+              "quoteCount": 0,
+              "replyCount": 0,
+              "retweetCount": 0,
+              "viewCount": 7
+            },
+            {
+              "authorFollowers": 115,
+              "authorUsername": "maxnerdlife",
+              "createdUtc": 1792317285,
+              "id": "2111757868877623679",
+              "isReply": false,
+              "likeCount": 0,
+              "quoteCount": 0,
+              "replyCount": 0,
+              "retweetCount": 0,
+              "viewCount": 6
+            },
+            {
+              "authorFollowers": 15104,
+              "authorUsername": "cesispa",
+              "createdUtc": 1792316820,
+              "id": "2111755919251914853",
+              "isReply": false,
+              "likeCount": 2,
+              "quoteCount": 0,
+              "replyCount": 0,
+              "retweetCount": 0,
+              "viewCount": 67
+            },
+            {
+              "authorFollowers": 6612,
+              "authorUsername": "thenameisfedro",
+              "createdUtc": 1792316520,
+              "id": "2111754662139379877",
+              "isReply": false,
+              "likeCount": 0,
+              "quoteCount": 0,
+              "replyCount": 0,
+              "retweetCount": 0,
+              "viewCount": 12
+            },
+            {
+              "authorFollowers": 32514,
+              "authorUsername": "XEthanai",
+              "createdUtc": 1792316229,
+              "id": "2111753441965949272",
+              "isReply": false,
+              "likeCount": 31,
+              "quoteCount": 1,
+              "replyCount": 7,
+              "retweetCount": 6,
+              "viewCount": 845
+            },
+            {
+              "authorFollowers": 1579948,
+              "authorUsername": "SPACEdotcom",
+              "createdUtc": 1792315712,
+              "id": "2111751274031153489",
+              "isReply": false,
+              "likeCount": 8,
+              "quoteCount": 0,
+              "replyCount": 0,
+              "retweetCount": 2,
+              "viewCount": 3206
+            },
+            {
+              "authorFollowers": 22,
+              "authorUsername": "theSpacecyborg",
+              "createdUtc": 1792315359,
+              "id": "2111749791482782080",
+              "isReply": false,
+              "likeCount": 0,
+              "quoteCount": 0,
+              "replyCount": 0,
+              "retweetCount": 0,
+              "viewCount": 13
+            },
+            {
+              "authorFollowers": 17194,
+              "authorUsername": "Krynn__u",
+              "createdUtc": 1792314971,
+              "id": "2111748165951234445",
+              "isReply": true,
+              "likeCount": 0,
+              "quoteCount": 0,
+              "replyCount": 0,
+              "retweetCount": 0,
+              "viewCount": 4
+            }
+          ]
+        },
+        "found": true
+      },
+      "rawInitialBodySha256": "aafa528001de12f5a5f3fce4d3e778650ee061f6e10eb06777ec740b555b28e1",
+      "rawFinalBodySha256": "b8ea181e8f686dee4c3f274217b3f2557d40cf15323fd0f221e6c10f83f43a4e"
+    },
+    {
+      "name": "x-search-2",
+      "provider": "anyapi",
+      "endpoint": "/twitter.search",
+      "input": {
+        "body": {
+          "query": "language learning",
+          "limit": 20,
+          "route": "lynx"
+        }
+      },
+      "runId": "01M57CGYFH7T7VPN8CCGGZN77P",
+      "initialHttp": 202,
+      "providerHttp": 200,
+      "status": "COMPLETED",
+      "cost": {
+        "value": 0.0006,
+        "currency": "USD"
+      },
+      "initialMs": 973,
+      "endToEndMs": 5713,
+      "serverLifecycleMs": 2838,
+      "polls": 1,
+      "initialBytes": 1122,
+      "finalBytes": 19820,
+      "createdAt": "2026-10-18T11:32:03.994Z",
+      "completedAt": "2026-10-18T11:32:06.832Z",
+      "rowCount": 20,
+      "coverage": {
+        "createdUtc": 20,
+        "authorFollowers": 20,
+        "views": 0,
+        "viewCount": 20,
+        "likes": 0,
+        "likeCount": 20,
+        "comments": 0,
+        "replies": 0,
+        "replyCount": 20,
+        "shares": 0,
+        "retweets": 0,
+        "retweetCount": 20
+      },
+      "selectedOutput": {
+        "data": {
+          "items": [
+            {
+              "authorFollowers": 45,
+              "authorUsername": "VistraAI",
+              "createdUtc": 1792323059,
+              "id": "2111782088030433476",
+              "isReply": false,
+              "likeCount": 0,
+              "quoteCount": 0,
+              "replyCount": 0,
+              "retweetCount": 0,
+              "viewCount": 1
+            },
+            {
+              "authorFollowers": 197,
+              "authorUsername": "cielestamour",
+              "createdUtc": 1792322956,
+              "id": "2111781655161778507",
+              "isReply": false,
+              "likeCount": 0,
+              "quoteCount": 0,
+              "replyCount": 0,
+              "retweetCount": 0,
+              "viewCount": 1
+            },
+            {
+              "authorFollowers": 13,
+              "authorUsername": "quiresminecraft",
+              "createdUtc": 1792322502,
+              "id": "2111779751798948132",
+              "isReply": true,
+              "likeCount": 0,
+              "quoteCount": 0,
+              "replyCount": 0,
+              "retweetCount": 0,
+              "viewCount": 8
+            },
+            {
+              "authorFollowers": 723,
+              "authorUsername": "orendev_",
+              "createdUtc": 1792322362,
+              "id": "2111779166697976001",
+              "isReply": false,
+              "likeCount": 2,
+              "quoteCount": 0,
+              "replyCount": 0,
+              "retweetCount": 1,
+              "viewCount": 18
+            },
+            {
+              "authorFollowers": 23,
+              "authorUsername": "yemekhaneayrani",
+              "createdUtc": 1792322176,
+              "id": "2111778384460005724",
+              "isReply": false,
+              "likeCount": 2,
+              "quoteCount": 0,
+              "replyCount": 0,
+              "retweetCount": 0,
+              "viewCount": 23
+            },
+            {
+              "authorFollowers": 1288,
+              "authorUsername": "AnInnes3",
+              "createdUtc": 1792322043,
+              "id": "2111777826600800623",
+              "isReply": true,
+              "likeCount": 0,
+              "quoteCount": 0,
+              "replyCount": 0,
+              "retweetCount": 0,
+              "viewCount": 10
+            },
+            {
+              "authorFollowers": 1657,
+              "authorUsername": "ronaldlangeveld",
+              "createdUtc": 1792322004,
+              "id": "2111777663555883134",
+              "isReply": false,
+              "likeCount": 6,
+              "quoteCount": 0,
+              "replyCount": 2,
+              "retweetCount": 0,
+              "viewCount": 39
+            },
+            {
+              "authorFollowers": 14,
+              "authorUsername": "Purushottam9983",
+              "createdUtc": 1792321887,
+              "id": "2111777173317296622",
+              "isReply": true,
+              "likeCount": 1,
+              "quoteCount": 0,
+              "replyCount": 0,
+              "retweetCount": 0,
+              "viewCount": 3
+            },
+            {
+              "authorFollowers": 14,
+              "authorUsername": "Purushottam9983",
+              "createdUtc": 1792321847,
+              "id": "2111777003384770933",
+              "isReply": true,
+              "likeCount": 0,
+              "quoteCount": 0,
+              "replyCount": 0,
+              "retweetCount": 0,
+              "viewCount": 5
+            },
+            {
+              "authorFollowers": 210,
+              "authorUsername": "BlaqKabir",
+              "createdUtc": 1792321654,
+              "id": "2111776196237119537",
+              "isReply": false,
+              "likeCount": 0,
+              "quoteCount": 0,
+              "replyCount": 0,
+              "retweetCount": 0,
+              "viewCount": 4
+            },
+            {
+              "authorFollowers": 149711,
+              "authorUsername": "deaflibertarian",
+              "createdUtc": 1792321441,
+              "id": "2111775302774874289",
+              "isReply": false,
+              "likeCount": 58,
+              "quoteCount": 0,
+              "replyCount": 1,
+              "retweetCount": 3,
+              "viewCount": 884
+            },
+            {
+              "authorFollowers": 9008,
+              "authorUsername": "KMarazanye",
+              "createdUtc": 1792321410,
+              "id": "2111775172873032171",
+              "isReply": true,
+              "likeCount": 0,
+              "quoteCount": 0,
+              "replyCount": 0,
+              "retweetCount": 0,
+              "viewCount": 12
+            },
+            {
+              "authorFollowers": 173,
+              "authorUsername": "moon11208",
+              "createdUtc": 1792321393,
+              "id": "2111775098998779992",
+              "isReply": false,
+              "likeCount": 0,
+              "quoteCount": 0,
+              "replyCount": 0,
+              "retweetCount": 0,
+              "viewCount": 2
+            },
+            {
+              "authorFollowers": 169,
+              "authorUsername": "JpTrumper",
+              "createdUtc": 1792321301,
+              "id": "2111774714419196036",
+              "isReply": true,
+              "likeCount": 0,
+              "quoteCount": 0,
+              "replyCount": 0,
+              "retweetCount": 0,
+              "viewCount": 237
+            },
+            {
+              "authorFollowers": 962,
+              "authorUsername": "mayaofspring",
+              "createdUtc": 1792320605,
+              "id": "2111771795217154048",
+              "isReply": true,
+              "likeCount": 1,
+              "quoteCount": 0,
+              "replyCount": 0,
+              "retweetCount": 0,
+              "viewCount": 5
+            },
+            {
+              "authorFollowers": 29116,
+              "authorUsername": "rahozel",
+              "createdUtc": 1792320487,
+              "id": "2111771299844428135",
+              "isReply": false,
+              "likeCount": 0,
+              "quoteCount": 0,
+              "replyCount": 1,
+              "retweetCount": 0,
+              "viewCount": 23
+            },
+            {
+              "authorFollowers": 242,
+              "authorUsername": "Sinha12812Akash",
+              "createdUtc": 1792320173,
+              "id": "2111769981574906317",
+              "isReply": true,
+              "likeCount": 1,
+              "quoteCount": 0,
+              "replyCount": 1,
+              "retweetCount": 0,
+              "viewCount": 12
+            },
+            {
+              "authorFollowers": 191,
+              "authorUsername": "ExiledonMoon",
+              "createdUtc": 1792320151,
+              "id": "2111769891762319603",
+              "isReply": true,
+              "likeCount": 0,
+              "quoteCount": 0,
+              "replyCount": 0,
+              "retweetCount": 0,
+              "viewCount": 12
+            },
+            {
+              "authorFollowers": 490,
+              "authorUsername": "ransomredrum",
+              "createdUtc": 1792320125,
+              "id": "2111769781405884458",
+              "isReply": true,
+              "likeCount": 1,
+              "quoteCount": 0,
+              "replyCount": 1,
+              "retweetCount": 0,
+              "viewCount": 12
+            },
+            {
+              "authorFollowers": 10,
+              "authorUsername": "TiliTiliBoo",
+              "createdUtc": 1792319937,
+              "id": "2111768994277720382",
+              "isReply": true,
+              "likeCount": 0,
+              "quoteCount": 0,
+              "replyCount": 0,
+              "retweetCount": 0,
+              "viewCount": 12
+            }
+          ]
+        },
+        "found": true
+      },
+      "rawInitialBodySha256": "4fa1ea6c52b0899d48405be41767829fff8d8c4dd056fb4ff5ee931f05f28f85",
+      "rawFinalBodySha256": "2791f6c4682b9d03e8cdb40063663f8eee0381deecfaae875eaf2a14e5e2b95b"
+    },
+    {
+      "name": "instagram-1",
+      "provider": "anyapi",
+      "endpoint": "/instagram.profile",
+      "input": {
+        "body": {
+          "handle": "nasa",
+          "route": "pangolin"
+        }
+      },
+      "runId": "01M57CH42BZXMWC1RB4R2P3XMH",
+      "initialHttp": 202,
+      "providerHttp": 200,
+      "status": "COMPLETED",
+      "cost": {
+        "value": 0.001,
+        "currency": "USD"
+      },
+      "initialMs": 950,
+      "endToEndMs": 5529,
+      "serverLifecycleMs": 2035,
+      "polls": 1,
+      "initialBytes": 1181,
+      "finalBytes": 2832,
+      "createdAt": "2026-10-18T11:32:09.678Z",
+      "completedAt": "2026-10-18T11:32:11.713Z",
+      "rowCount": 0,
+      "coverage": {
+        "createdUtc": 0,
+        "authorFollowers": 0,
+        "views": 0,
+        "viewCount": 0,
+        "likes": 0,
+        "likeCount": 0,
+        "comments": 0,
+        "replies": 0,
+        "replyCount": 0,
+        "shares": 0,
+        "retweets": 0,
+        "retweetCount": 0
+      },
+      "selectedOutput": {
+        "found": true,
+        "data": {
+          "displayName": "NASA",
+          "followers": 104381644,
+          "following": 90,
+          "handle": "nasa",
+          "posts": null
+        }
+      },
+      "rawInitialBodySha256": "15ffc4bc76086f3530c6c8799cf0e29e38aa629f435c273f0f09b802f35b227d",
+      "rawFinalBodySha256": "a836b87780bc957445273d040e4417aae12183c9d6b9214d875f6abd3c155019"
+    },
+    {
+      "name": "youtube-1",
+      "provider": "anyapi",
+      "endpoint": "/youtube.channel_videos",
+      "input": {
+        "body": {
+          "handle": "@NASA",
+          "sort": "latest",
+          "route": "badger"
+        }
+      },
+      "runId": "01M57CH9FBX2CA5JN841AF2M33",
+      "initialHttp": 202,
+      "providerHttp": 200,
+      "status": "COMPLETED",
+      "cost": {
+        "value": 0.0008,
+        "currency": "USD"
+      },
+      "initialMs": 941,
+      "endToEndMs": 5532,
+      "serverLifecycleMs": 3235,
+      "polls": 1,
+      "initialBytes": 849,
+      "finalBytes": 9550,
+      "createdAt": "2026-10-18T11:32:15.232Z",
+      "completedAt": "2026-10-18T11:32:18.467Z",
+      "rowCount": 30,
+      "coverage": {
+        "createdUtc": 30,
+        "authorFollowers": 0,
+        "views": 30,
+        "viewCount": 0,
+        "likes": 0,
+        "likeCount": 0,
+        "comments": 0,
+        "replies": 0,
+        "replyCount": 0,
+        "shares": 0,
+        "retweets": 0,
+        "retweetCount": 0
+      },
+      "selectedOutput": {
+        "data": {
+          "videos": [
+            {
+              "createdUtc": 1792063937,
+              "id": "5b3n-u_0QAI",
+              "publishedTime": "3 days ago",
+              "title": "Planetary Defenders: This Is Not an Exercise",
+              "views": 557000
+            },
+            {
+              "createdUtc": 1791113537,
+              "id": "ErAqN6gXqZQ",
+              "publishedTime": "2 weeks ago",
+              "title": "NASA's SpaceX Crew-13 Mission (Official NASA Trailer)",
+              "views": 103000
+            },
+            {
+              "createdUtc": 1789731137,
+              "id": "IwZVXmQdX1E",
+              "publishedTime": "1 month ago",
+              "title": "NASA Moon Base: The First Six Months",
+              "views": 523000
+            },
+            {
+              "createdUtc": 1789731137,
+              "id": "90Kgw_SvK4w",
+              "publishedTime": "1 month ago",
+              "title": "What It Takes",
+              "views": 326000
+            },
+            {
+              "createdUtc": 1789731137,
+              "id": "jHKf1eHp3eQ",
+              "publishedTime": "1 month ago",
+              "title": "Artemis III: Our Next Step Back to the Moon",
+              "views": 153000
+            },
+            {
+              "createdUtc": 1789731137,
+              "id": "MVt2139voxk",
+              "publishedTime": "1 month ago",
+              "title": "For Earth, With Love: Artemis II",
+              "views": 438000
+            },
+            {
+              "createdUtc": 1789731137,
+              "id": "_oXt3-YDih4",
+              "publishedTime": "1 month ago",
+              "title": "Artemis Origins: Humanity's Return to the Moon",
+              "views": 91000
+            },
+            {
+              "createdUtc": 1789731137,
+              "id": "6o3m9Bw67Os",
+              "publishedTime": "1 month ago",
+              "title": "NASA's Nancy Grace Roman Space Telescope Launches (Official NASA Recap)",
+              "views": 213000
+            },
+            {
+              "createdUtc": 1789731137,
+              "id": "8NOLpgadWXc",
+              "publishedTime": "1 month ago",
+              "title": "NASA's Artemis II Astronauts Receive the Congressional Space Medal of Honor",
+              "views": 90000
+            },
+            {
+              "createdUtc": 1789731137,
+              "id": "1icdW32gS8A",
+              "publishedTime": "1 month ago",
+              "title": "President Donald J. Trump Calls the International Space Station Crew",
+              "views": 118000
+            },
+            {
+              "createdUtc": 1789731137,
+              "id": "FkgVB19I6xw",
+              "publishedTime": "1 month ago",
+              "title": "NASA's Roman Space Telescope: A New Perspective on the Cosmos (Official NASA Trailer)",
+              "views": 141000
+            },
+            {
+              "createdUtc": 1787052737,
+              "id": "UbAsuvO-164",
+              "publishedTime": "2 months ago",
+              "title": "MAX POWER at NASA's Kennedy Space Center | Nov. 7-8, 2026",
+              "views": 42000
+            },
+            {
+              "createdUtc": 1787052737,
+              "id": "Q5_BtWc-G7Y",
+              "publishedTime": "2 months ago",
+              "title": "How to Photograph a Total Solar Eclipse",
+              "views": 72000
+            },
+            {
+              "createdUtc": 1787052737,
+              "id": "Sempwv5MPMQ",
+              "publishedTime": "2 months ago",
+              "title": "NASA Moon Base: Lunar Landers (August 2026 Update)",
+              "views": 499000
+            },
+            {
+              "createdUtc": 1787052737,
+              "id": "29ixFQIGZaY",
+              "publishedTime": "2 months ago",
+              "title": "2026 Total Solar Eclipse (Official NASA Trailer)",
+              "views": 859000
+            },
+            {
+              "createdUtc": 1784374337,
+              "id": "aRSBZN2UF0Q",
+              "publishedTime": "3 months ago",
+              "title": "Moon Base: June 2026 Update",
+              "views": 212000
+            },
+            {
+              "createdUtc": 1784374337,
+              "id": "75-H-i9ctkE",
+              "publishedTime": "3 months ago",
+              "title": "Independence Day Wishes from the Space Station",
+              "views": 44000
+            },
+            {
+              "createdUtc": 1784374337,
+              "id": "84id2dzpwU0",
+              "publishedTime": "3 months ago",
+              "title": "Astronauts on the Space Station Celebrate the 2026 FIFA World Cup",
+              "views": 50000
+            },
+            {
+              "createdUtc": 1781782337,
+              "id": "G-GD8SQ0AvU",
+              "publishedTime": "4 months ago",
+              "title": "Artemis III Announcement Recap: Crew, Mission Details, and What’s Next",
+              "views": 89000
+            },
+            {
+              "createdUtc": 1781782337,
+              "id": "QONgJurkigk",
+              "publishedTime": "4 months ago",
+              "title": "Introducing Artemis III",
+              "views": 372000
+            },
+            {
+              "createdUtc": 1781782337,
+              "id": "3Yqi3D4b2RQ",
+              "publishedTime": "4 months ago",
+              "title": "NASA’s Artemis III Announcement (Official NASA Trailer)",
+              "views": 735000
+            },
+            {
+              "createdUtc": 1781782337,
+              "id": "tQcNSJc8gEg",
+              "publishedTime": "4 months ago",
+              "title": "Moon Base: Humanity's First Outpost on the Lunar Surface (Official NASA Trailer)",
+              "views": 233000
+            },
+            {
+              "createdUtc": 1781782337,
+              "id": "udEBWcciYiY",
+              "publishedTime": "4 months ago",
+              "title": "NASA's Artemis II Crew Visits the U.S. Capitol",
+              "views": 41000
+            },
+            {
+              "createdUtc": 1779103937,
+              "id": "Rfyr7-dQnAg",
+              "publishedTime": "5 months ago",
+              "title": "NASA YouTube (Official Channel Trailer)",
+              "views": 154000
+            },
+            {
+              "createdUtc": 1779103937,
+              "id": "Lxr-NaO7Who",
+              "publishedTime": "5 months ago",
+              "title": "NASA Celebrates America’s 250th Birthday",
+              "views": 25000
+            },
+            {
+              "createdUtc": 1776511937,
+              "id": "AYSE6QLigik",
+              "publishedTime": "6 months ago",
+              "title": "Welcome Home, Artemis II (Official NASA Recap)",
+              "views": 125000
+            },
+            {
+              "createdUtc": 1776511937,
+              "id": "ttiLcMUQq80",
+              "publishedTime": "6 months ago",
+              "title": "Moonbound Episode 2 | For All Humanity",
+              "views": 215000
+            },
+            {
+              "createdUtc": 1776511937,
+              "id": "bfw4G59j9uw",
+              "publishedTime": "6 months ago",
+              "title": "Moonbound Episode 1 | Charting the Course",
+              "views": 300000
+            },
+            {
+              "createdUtc": 1776511937,
+              "id": "hfoHFnGuVCw",
+              "publishedTime": "6 months ago",
+              "title": "NASA Force: The Next Era of NASA Starts with You",
+              "views": 35000
+            },
+            {
+              "createdUtc": 1776511937,
+              "id": "IfRqrrBbT-Y",
+              "publishedTime": "6 months ago",
+              "title": "Artemis II Moon Mission Complete!",
+              "views": 974000
+            }
+          ]
+        },
+        "found": true
+      },
+      "rawInitialBodySha256": "0ee4ebe80a2b8877b9d84ee3ebe6107dce59cd6afce8fbb53c1b87c84bb97069",
+      "rawFinalBodySha256": "db7a2f19e5e818438498a1d7e49444d8415c35bafbc72fa20b0cdfe91fe7fb52"
+    },
+    {
+      "name": "facebook-1",
+      "provider": "anyapi",
+      "endpoint": "/facebook.profile",
+      "input": {
+        "body": {
+          "url": "https://www.facebook.com/NASA",
+          "route": "giraffe"
+        }
+      },
+      "runId": "01M57CHEYCTFSRAJKW7PZ8CYA7",
+      "initialHttp": 202,
+      "providerHttp": 200,
+      "status": "COMPLETED",
+      "cost": {
+        "value": 0.0012,
+        "currency": "USD"
+      },
+      "initialMs": 1018,
+      "endToEndMs": 9926,
+      "serverLifecycleMs": 4957,
+      "polls": 2,
+      "initialBytes": 728,
+      "finalBytes": 2524,
+      "createdAt": "2026-10-18T11:32:20.829Z",
+      "completedAt": "2026-10-18T11:32:25.786Z",
+      "rowCount": 0,
+      "coverage": {
+        "createdUtc": 0,
+        "authorFollowers": 0,
+        "views": 0,
+        "viewCount": 0,
+        "likes": 0,
+        "likeCount": 0,
+        "comments": 0,
+        "replies": 0,
+        "replyCount": 0,
+        "shares": 0,
+        "retweets": 0,
+        "retweetCount": 0
+      },
+      "selectedOutput": {
+        "found": true,
+        "data": {
+          "createdUtc": 1236124800,
+          "followers": 28000000,
+          "id": "100044561550831",
+          "likes": 28746800,
+          "name": "NASA - National Aeronautics and Space Administration"
+        }
+      },
+      "rawInitialBodySha256": "242a94112b5de10e75bae49ad0e5d2af2aa2ee777cf818b3e4780efd2cb86aba",
+      "rawFinalBodySha256": "467570011cfdea970467d445e3f09ba8ee6d725793e09a9518454183486a6ea2"
+    },
+    {
+      "name": "linkedin-1",
+      "provider": "anyapi",
+      "endpoint": "/linkedin.company",
+      "input": {
+        "body": {
+          "url": "https://www.linkedin.com/company/nasa",
+          "route": "quokka"
+        }
+      },
+      "runId": "01M57CHRJ5NE9FMADRC63XFN2Q",
+      "initialHttp": 202,
+      "providerHttp": 200,
+      "status": "COMPLETED",
+      "cost": {
+        "value": 0.0011,
+        "currency": "USD"
+      },
+      "initialMs": 983,
+      "endToEndMs": 5565,
+      "serverLifecycleMs": 2898,
+      "polls": 1,
+      "initialBytes": 1069,
+      "finalBytes": 4305,
+      "createdAt": "2026-10-18T11:32:30.716Z",
+      "completedAt": "2026-10-18T11:32:33.614Z",
+      "rowCount": 0,
+      "coverage": {
+        "createdUtc": 0,
+        "authorFollowers": 0,
+        "views": 0,
+        "viewCount": 0,
+        "likes": 0,
+        "likeCount": 0,
+        "comments": 0,
+        "replies": 0,
+        "replyCount": 0,
+        "shares": 0,
+        "retweets": 0,
+        "retweetCount": 0
+      },
+      "selectedOutput": {
+        "found": true,
+        "data": {
+          "followerCount": 7140962,
+          "id": "2003",
+          "name": "NASA - National Aeronautics and Space Administration"
+        }
+      },
+      "rawInitialBodySha256": "9a2e11d4d02cc6111570ac3318d7ceb134c2048467811c7130bfd48e7478658a",
+      "rawFinalBodySha256": "167549adfd70b0630fa5bc01fa99b844315faf38afaa289f12563c1a9567e904"
+    },
+    {
+      "name": "web-1",
+      "provider": "context.dev",
+      "endpoint": "/web/scrape/markdown",
+      "input": {
+        "queryParams": {
+          "url": "https://example.com",
+          "useMainContentOnly": true,
+          "includeImages": false,
+          "maxAgeMs": 0,
+          "timeoutMS": 30000
+        }
+      },
+      "runId": "01M57CHY12P8Y86EH0X905RMM4",
+      "initialHttp": 200,
+      "providerHttp": 200,
+      "status": "COMPLETED",
+      "cost": {
+        "value": 0.002533,
+        "currency": "USD"
+      },
+      "initialMs": 3413,
+      "endToEndMs": 3987,
+      "serverLifecycleMs": 2356,
+      "polls": 1,
+      "initialBytes": 3290,
+      "finalBytes": 3524,
+      "createdAt": "2026-10-18T11:32:36.238Z",
+      "completedAt": "2026-10-18T11:32:38.594Z",
+      "rowCount": 0,
+      "coverage": {
+        "createdUtc": 0,
+        "authorFollowers": 0,
+        "views": 0,
+        "viewCount": 0,
+        "likes": 0,
+        "likeCount": 0,
+        "comments": 0,
+        "replies": 0,
+        "replyCount": 0,
+        "shares": 0,
+        "retweets": 0,
+        "retweetCount": 0
+      },
+      "selectedOutput": {
+        "success": true
+      },
+      "rawInitialBodySha256": "7c7b71c40f6e043b2bbc507ae82d23988d8c17cdae25303dbf254d5319a840c7",
+      "rawFinalBodySha256": "a9a14af5770bb65a50dfe55ee4e5e3e88196a83c30404331bfb62257c48abe9f",
+      "markdownBytes": 1342,
+      "metadataKeys": [
+        "sourceUrl",
+        "finalUrl",
+        "title",
+        "language",
+        "favicon",
+        "additionalMeta"
+      ],
+      "pageTitle": "Example Domain",
+      "markdownSha256": "9405b1d765b65f4f2f2197a6fdd12b112c5d27476f6626028a80c4452b288bc2"
+    },
+    {
+      "name": "web-2",
+      "provider": "context.dev",
+      "endpoint": "/web/scrape/markdown",
+      "input": {
+        "queryParams": {
+          "url": "https://www.python.org/about/",
+          "useMainContentOnly": true,
+          "includeImages": false,
+          "maxAgeMs": 0,
+          "timeoutMS": 30000
+        }
+      },
+      "runId": "01M57CJ1VV26BAASKY3TNP7YST",
+      "initialHttp": 200,
+      "providerHttp": 200,
+      "status": "COMPLETED",
+      "cost": {
+        "value": 0.002533,
+        "currency": "USD"
+      },
+      "initialMs": 4015,
+      "endToEndMs": 4604,
+      "serverLifecycleMs": 2987,
+      "polls": 1,
+      "initialBytes": 8875,
+      "finalBytes": 9119,
+      "createdAt": "2026-10-18T11:32:40.182Z",
+      "completedAt": "2026-10-18T11:32:43.169Z",
+      "rowCount": 0,
+      "coverage": {
+        "createdUtc": 0,
+        "authorFollowers": 0,
+        "views": 0,
+        "viewCount": 0,
+        "likes": 0,
+        "likeCount": 0,
+        "comments": 0,
+        "replies": 0,
+        "replyCount": 0,
+        "shares": 0,
+        "retweets": 0,
+        "retweetCount": 0
+      },
+      "selectedOutput": {
+        "success": true
+      },
+      "rawInitialBodySha256": "696bc1ee84f9d4e2a1b186c147ebf2832a8abd09d8d40728537e0363d99c0ac7",
+      "rawFinalBodySha256": "1c307fe3ac2f7dcedf54e57d65186556d1caab92c9ad2b0e4d297adbc769d456",
+      "markdownBytes": 4187,
+      "metadataKeys": [
+        "sourceUrl",
+        "finalUrl",
+        "title",
+        "description",
+        "language",
+        "keywords",
+        "siteName",
+        "image",
+        "favicon",
+        "openGraph",
+        "alternates",
+        "headings",
+        "additionalMeta",
+        "jsonLd"
+      ],
+      "pageTitle": "Welcome to Python.org",
+      "markdownSha256": "7e543b29f50b8be8b9a591e988bad059da1275fe67b5879adc8fa87c401b35ec"
+    },
+    {
+      "name": "tt-posts-3",
+      "provider": "anyapi",
+      "endpoint": "/tiktok.profile_videos",
+      "input": {
+        "body": {
+          "handle": "nasa",
+          "route": "quokka"
+        }
+      },
+      "runId": "01M57CJP8Q4PYWJ2DECH70BDEV",
+      "initialHttp": 202,
+      "providerHttp": 200,
+      "status": "COMPLETED",
+      "cost": {
+        "value": 0.0008,
+        "currency": "USD"
+      },
+      "initialMs": 1181,
+      "endToEndMs": 6124,
+      "serverLifecycleMs": 3398,
+      "polls": 1,
+      "initialBytes": 1258,
+      "finalBytes": 61039,
+      "createdAt": "2026-10-18T11:33:01.107Z",
+      "completedAt": "2026-10-18T11:33:04.505Z",
+      "rowCount": 34,
+      "coverage": {
+        "createdUtc": 34,
+        "authorFollowers": 0,
+        "views": 34,
+        "viewCount": 0,
+        "likes": 34,
+        "likeCount": 0,
+        "comments": 34,
+        "replies": 0,
+        "replyCount": 0,
+        "shares": 34,
+        "retweets": 0,
+        "retweetCount": 0
+      },
+      "selectedOutput": {
+        "data": {
+          "videos": [
+            {
+              "authorFollowers": null,
+              "authorHandle": "nasa",
+              "comments": 301,
+              "createdUtc": 1792167566,
+              "id": "7697300954667994381",
+              "isPinned": false,
+              "likes": 11656,
+              "shares": 360,
+              "views": 127264
+            },
+            {
+              "authorFollowers": null,
+              "authorHandle": "nasa",
+              "comments": 307,
+              "createdUtc": 1791652888,
+              "id": "7695090484124929293",
+              "isPinned": false,
+              "likes": 9003,
+              "shares": 330,
+              "views": 177362
+            },
+            {
+              "authorFollowers": null,
+              "authorHandle": "nasa",
+              "comments": 1929,
+              "createdUtc": 1791646017,
+              "id": "7695060950394703118",
+              "isPinned": false,
+              "likes": 30975,
+              "shares": 1250,
+              "views": 352902
+            },
+            {
+              "authorFollowers": null,
+              "authorHandle": "nasa",
+              "comments": 585,
+              "createdUtc": 1791465142,
+              "id": "7694283957839400206",
+              "isPinned": false,
+              "likes": 79415,
+              "shares": 2754,
+              "views": 564542
+            },
+            {
+              "authorFollowers": null,
+              "authorHandle": "nasa",
+              "comments": 356,
+              "createdUtc": 1790970924,
+              "id": "7692161454694206733",
+              "isPinned": false,
+              "likes": 12798,
+              "shares": 442,
+              "views": 279297
+            },
+            {
+              "authorFollowers": null,
+              "authorHandle": "nasa",
+              "comments": 969,
+              "createdUtc": 1790869952,
+              "id": "7691727731800673549",
+              "isPinned": false,
+              "likes": 62600,
+              "shares": 2341,
+              "views": 611175
+            },
+            {
+              "authorFollowers": null,
+              "authorHandle": "nasa",
+              "comments": 1943,
+              "createdUtc": 1790859588,
+              "id": "7691683140015820046",
+              "isPinned": false,
+              "likes": 167103,
+              "shares": 3842,
+              "views": 1658437
+            },
+            {
+              "authorFollowers": null,
+              "authorHandle": "nasa",
+              "comments": 231,
+              "createdUtc": 1790722800,
+              "id": "7691066504380452110",
+              "isPinned": false,
+              "likes": 10301,
+              "shares": 332,
+              "views": 228879
+            },
+            {
+              "authorFollowers": null,
+              "authorHandle": "nasa",
+              "comments": 263,
+              "createdUtc": 1790609603,
+              "id": "7690609551275494670",
+              "isPinned": false,
+              "likes": 9756,
+              "shares": 80,
+              "views": 245820
+            },
+            {
+              "authorFollowers": null,
+              "authorHandle": "nasa",
+              "comments": 259,
+              "createdUtc": 1790362342,
+              "id": "7689547576265149710",
+              "isPinned": false,
+              "likes": 6470,
+              "shares": 121,
+              "views": 224605
+            },
+            {
+              "authorFollowers": null,
+              "authorHandle": "nasa",
+              "comments": 472,
+              "createdUtc": 1789747200,
+              "id": "7686893699099413773",
+              "isPinned": false,
+              "likes": 15185,
+              "shares": 530,
+              "views": 347577
+            },
+            {
+              "authorFollowers": null,
+              "authorHandle": "nasa",
+              "comments": 353,
+              "createdUtc": 1789664090,
+              "id": "7686548688113503502",
+              "isPinned": false,
+              "likes": 12975,
+              "shares": 552,
+              "views": 255721
+            },
+            {
+              "authorFollowers": null,
+              "authorHandle": "nasa",
+              "comments": 2889,
+              "createdUtc": 1789570841,
+              "id": "7686148096895569165",
+              "isPinned": false,
+              "likes": 158992,
+              "shares": 7713,
+              "views": 1393620
+            },
+            {
+              "authorFollowers": null,
+              "authorHandle": "nasa",
+              "comments": 336,
+              "createdUtc": 1789337087,
+              "id": "7685144199716408589",
+              "isPinned": false,
+              "likes": 10480,
+              "shares": 237,
+              "views": 292167
+            },
+            {
+              "authorFollowers": null,
+              "authorHandle": "nasa",
+              "comments": 225,
+              "createdUtc": 1789330351,
+              "id": "7685115221458930957",
+              "isPinned": false,
+              "likes": 7340,
+              "shares": 114,
+              "views": 224850
+            },
+            {
+              "authorFollowers": null,
+              "authorHandle": "nasa",
+              "comments": 1154,
+              "createdUtc": 1788954818,
+              "id": "7683502372135505165",
+              "isPinned": false,
+              "likes": 67531,
+              "shares": 4912,
+              "views": 722347
+            },
+            {
+              "authorFollowers": null,
+              "authorHandle": "nasa",
+              "comments": 837,
+              "createdUtc": 1788627378,
+              "id": "7682095989578091790",
+              "isPinned": false,
+              "likes": 32716,
+              "shares": 1310,
+              "views": 493991
+            },
+            {
+              "authorFollowers": null,
+              "authorHandle": "nasa",
+              "comments": 278,
+              "createdUtc": 1788540697,
+              "id": "7681723633164717325",
+              "isPinned": false,
+              "likes": 15625,
+              "shares": 420,
+              "views": 331547
+            },
+            {
+              "authorFollowers": null,
+              "authorHandle": "nasa",
+              "comments": 833,
+              "createdUtc": 1788103920,
+              "id": "7679847738871270670",
+              "isPinned": false,
+              "likes": 24526,
+              "shares": 352,
+              "views": 555257
+            },
+            {
+              "authorFollowers": null,
+              "authorHandle": "nasa",
+              "comments": 2424,
+              "createdUtc": 1788093141,
+              "id": "7679801381103865101",
+              "isPinned": false,
+              "likes": 125643,
+              "shares": 6373,
+              "views": 1004138
+            },
+            {
+              "authorFollowers": null,
+              "authorHandle": "nasa",
+              "comments": 384,
+              "createdUtc": 1788033977,
+              "id": "7679547338947448077",
+              "isPinned": false,
+              "likes": 15794,
+              "shares": 334,
+              "views": 326958
+            },
+            {
+              "authorFollowers": null,
+              "authorHandle": "nasa",
+              "comments": 2491,
+              "createdUtc": 1788019217,
+              "id": "7679483952507276558",
+              "isPinned": false,
+              "likes": 177028,
+              "shares": 6109,
+              "views": 952364
+            },
+            {
+              "authorFollowers": null,
+              "authorHandle": "nasa",
+              "comments": 433,
+              "createdUtc": 1787952223,
+              "id": "7679196253401386254",
+              "isPinned": false,
+              "likes": 17167,
+              "shares": 341,
+              "views": 307996
+            },
+            {
+              "authorFollowers": null,
+              "authorHandle": "nasa",
+              "comments": 1082,
+              "createdUtc": 1787689386,
+              "id": "7678067319976905998",
+              "isPinned": false,
+              "likes": 47728,
+              "shares": 1438,
+              "views": 612005
+            },
+            {
+              "authorFollowers": null,
+              "authorHandle": "nasa",
+              "comments": 1954,
+              "createdUtc": 1787410349,
+              "id": "7676868860749827342",
+              "isPinned": false,
+              "likes": 234268,
+              "shares": 10624,
+              "views": 1561585
+            },
+            {
+              "authorFollowers": null,
+              "authorHandle": "nasa",
+              "comments": 442,
+              "createdUtc": 1787338586,
+              "id": "7676560717960465678",
+              "isPinned": false,
+              "likes": 15300,
+              "shares": 361,
+              "views": 419810
+            },
+            {
+              "authorFollowers": null,
+              "authorHandle": "nasa",
+              "comments": 902,
+              "createdUtc": 1787150871,
+              "id": "7675754476598332685",
+              "isPinned": false,
+              "likes": 38952,
+              "shares": 1161,
+              "views": 573911
+            },
+            {
+              "authorFollowers": null,
+              "authorHandle": "nasa",
+              "comments": 29288,
+              "createdUtc": 1787086598,
+              "id": "7675478347278863629",
+              "isPinned": false,
+              "likes": 1013803,
+              "shares": 19535,
+              "views": 10987378
+            },
+            {
+              "authorFollowers": null,
+              "authorHandle": "nasa",
+              "comments": 874,
+              "createdUtc": 1787074754,
+              "id": "7675427485873409293",
+              "isPinned": false,
+              "likes": 73493,
+              "shares": 4775,
+              "views": 704370
+            },
+            {
+              "authorFollowers": null,
+              "authorHandle": "nasa",
+              "comments": 785,
+              "createdUtc": 1786985454,
+              "id": "7675043918240582925",
+              "isPinned": false,
+              "likes": 44728,
+              "shares": 2013,
+              "views": 671464
+            },
+            {
+              "authorFollowers": null,
+              "authorHandle": "nasa",
+              "comments": 297,
+              "createdUtc": 1786820544,
+              "id": "7674335694810123533",
+              "isPinned": false,
+              "likes": 8273,
+              "shares": 256,
+              "views": 434474
+            },
+            {
+              "authorFollowers": null,
+              "authorHandle": "nasa",
+              "comments": 676,
+              "createdUtc": 1786794048,
+              "id": "7674221945767857422",
+              "isPinned": false,
+              "likes": 29995,
+              "shares": 1386,
+              "views": 470158
+            },
+            {
+              "authorFollowers": null,
+              "authorHandle": "nasa",
+              "comments": 1162,
+              "createdUtc": 1786630654,
+              "id": "7673520167820791054",
+              "isPinned": false,
+              "likes": 132380,
+              "shares": 5979,
+              "views": 935928
+            },
+            {
+              "authorFollowers": null,
+              "authorHandle": "nasa",
+              "comments": 3075,
+              "createdUtc": 1784664542,
+              "id": "7665075736742530317",
+              "isPinned": true,
+              "likes": 105310,
+              "shares": 3275,
+              "views": 1630241
+            }
+          ]
+        },
+        "found": true
+      },
+      "rawInitialBodySha256": "b238b988dabec930f788427e101ed807c64161060bd5dde88f473d982053776f",
+      "rawFinalBodySha256": "ac6eeba5605e2a9d2b3a4d0982f2efa62cf85ac4615e1f4a0c9b41d9d8bec9a2"
+    }
+  ]
+}

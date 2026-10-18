@@ -1,19 +1,24 @@
 # RESEARCH-TOOLS：monid 海外数据供应商评估（2026-10-18）
 
-> 状态：**准备完成，实测 BLOCKED（缺少 monid 凭证），尚无最终切换建议**。
-> 本 PR 为 ordinary 文档变更，不修改产品代码、数据库、价格表或 staging 配置。
+> 状态：**19 次实测完成；供应商选择建议，尚未接入产品**。
+> 本 PR 为 ordinary 文档变更，不修改产品代码、数据库、密钥槽、价格表或 staging 配置。
 > Owner 于 2026-10-18 决定将 monid 加入供应名单，并确认已邮件取得用于 SaaS 的条款许可。
-> 上述许可为 Owner 提供的事实，本次不复核邮件，不将其扩大解释为所有平台数据的无限使用权。
-> 范围：海外／非中国平台的账号数据与网页抓取；中国平台继续使用 TikHub。
+> 许可是 Owner 提供的事实，本次未重新查阅邮件；中国平台继续使用 TikHub。
 
-## 1. 当前结论与证据边界
+## 1. 建议结论
 
-- **目前继续使用现有线路**。没有本次真实返回及费用回执，不能宣称 monid 更便宜、字段更全或更稳定。
-- 优先评估补齐 Instagram、YouTube、Facebook、LinkedIn 的能力，再按逐接口证据决定是否替换 TikTok、X 或 Firecrawl。
-- monid 目录同时包含 TikHub 转售和 Apify 等其他上游。转售 TikHub 只能统一付款／入口，不能算新增独立数据来源。
-- 此报告准备阶段不调用现有 TikHub／Firecrawl 付费接口，不占用后续 monid 对比预算。
-- 本轮预算上限 **$1.00**；截至准备提交，付费请求 **0 次，实际花费 $0**。
-- monid 凭证未在已知的本机研究凭证文件或当前进程环境中找到；不尝试创建密钥、充值或借用其他账户。
+| 线路 | 推荐 | 判断依据与限制 |
+| --- | --- | --- |
+| X 资料、作品、关键词 | **后续接入优先改走 monid / AnyAPI**，固定本次 lynx 线路 | 六次均返回数据，资料精确格式粉丝、40 条作品及 40 条搜索的时间／播放互动完整；按公开 $0.001/次参考价，单次费用低 78%、55%、40%。不是同机直连速度胜出结论 |
+| TikTok 资料 | **建议改走 monid / AnyAPI bison** | 2/2 取得粉丝整数，每次 $0.0004；相对 $0.001 参考价低 60%。整数格式不等于独立验证粉丝真实准确 |
+| TikTok 关键词 | **建议改走 monid / AnyAPI bison 的普通检索**；对标仍需资料调用 | 2/2 各 20 条，绝对时间和播放／赞／评／分享均齐，每次 $0.0006；40/40 缺作者粉丝，不能单次完成粉丝筛选 |
+| TikTok 作品 | **继续 TikHub 主线，monid 留作候选** | flamingo 的 NASA 0 条（免费）、Duolingo 20 条；第三次换 quokka 可取 NASA 34 条，但粉丝全缺且两条上游的字段一致性不同。不适合立即统一切换 |
+| 网页 markdown | **继续 Firecrawl 主线；monid / Context.dev 作为后续按次候选** | 两页均成功、每页 $0.002533；是否便宜取决于 Firecrawl 套餐。未做复杂 JS／反爬或两家同 URL 付费对照，不能宣称质量或速度更好 |
+| Instagram | **建议用 monid 补充账号资料能力** | 1 次返回 NASA 资料及粉丝 104,381,644，$0.001；没有测试作品接口，不解锁完整对标 |
+| YouTube | **维持现有受限能力，暂不替换／启用完整对标** | 1 次 30 视频、$0.0008，但只有浏览数，无赞评／粉丝；createdUtc 与相对日期精确回推吻合，不能作为原始绝对发布时间证据 |
+| Facebook、LinkedIn | **建议用 monid 新增基础页面／公司资料查询** | 各 1 次返回资料与粉丝数，$0.0012／$0.0011；还没有作品、搜索或完整对标验证 |
+
+以上都是**实施建议**，不是已批准的切换或已上线能力。保留 TikHub 直连；不能把 monid 转售 TikHub 当独立容灾。
 
 ## 2. 当前线路（源码核对，不等于 staging 配置验收）
 
@@ -40,49 +45,119 @@ TikHub 的当前成本契约是每个成功调用 1 call × 发起时冻结的�
 Firecrawl 使用供应商 usage × 配置单价。这里没有读取在线价格表，**不得把历史单价当成本次报价**。
 具体参考 [RESEARCH-TOOLS 任务说明](../tasks/RESEARCH-TOOLS.md)。
 
-## 3. monid 候选与待测计划
+## 3. 本次实测与价格比较
 
-[官方 API](https://docs.monid.ai/api/overview.html) 的流程为 discover → inspect → run；
-异步响应需保留 runId，再读取该 run 的最终结果。COMPLETED 还需核对 providerResponse.httpStatus 和非空业务数据，不能只看 HTTP 200。
-[官方 run 说明](https://docs.monid.ai/api/run.html)、[运行记录](https://docs.monid.ai/api/runs.html)。
+### 方法与预算
 
-以下仅是官方公开资料中的**候选**，并非本次调用结果，实际接口、参数和价格必须以本账号 inspect 为准。
+2026-10-18 北京时间约 19:31–19:34，使用 Owner 指定 monid 账户。
+免费 discover/inspect 确认实际 schema 后，固定 AnyAPI route，只执行明确 PER_CALL 的分支；
+没有采用顶层最低价直接猜价格（例如 LinkedIn 顶层 amount=0，但 quokka 实际 $0.0011）。
+网页调用固定 Context.dev 的单页 markdown，正文优先、不含图片、maxAgeMs=0、上游超时 30 秒，不 crawl。
+每次先记预算预留 $0.02（19 次累计预留 $0.38），费用未知时不释放；没有重复 POST 或自动付费重试。
+TikTok 第三次是基于 flamingo not_found 的**明确换上游诊断**，不是无依据重试。
 
-| 范围 | 优先检查候选 | 本轮样本／次数 | 状态 |
-| --- | --- | --- | --- |
-| TikTok 资料／作品／搜索 | monid 的 TikHub 同路径；另比较 Apify `/apidojo/tiktok-profile-scraper` 的作品／作者字段 | 公开品牌账号、固定英文关键词；每个用途 2–3 次 | NOT_RUN |
-| X 资料／作品／搜索 | monid 的 TikHub 同路径；discover 比较其他上游 | 公开机构账号、固定英文关键词；每个用途 2–3 次 | NOT_RUN |
-| 网页 markdown | discover 定位 `/web/scrape/markdown` 的真实 provider | 两个公开单页；2–3 次，不 crawl | NOT_RUN |
-| Instagram | 资料接口；必要时 Apify `/apify/instagram-post-scraper` | 1 个接口 1 次，限制结果数 | NOT_RUN |
-| YouTube | Apify `/streamers/youtube-scraper` | 1 个接口 1 次，限制结果数 | NOT_RUN |
-| Facebook | discover 公开页面／资料接口 | 1 个接口 1 次，限制结果数 | NOT_RUN |
-| LinkedIn | discover 公司资料接口优先，避免扩大到员工个人资料抓取 | 1 个接口 1 次，限制结果数 | NOT_RUN |
+**19 次 run 的最终 cost 合计 $0.015106，钱包最终下降 $0.015106，最终 held=$0；低于 $1 上限。**
+其中 18 次返回数据，1 次 HTTP/上游 200 但 found=false、cost=$0。
+末次完成后第一次余额读取落后最后一笔 $0.0008；随后只读余额已追平，没有重新发起业务请求。
+每次最终成本来自 `GET /v1/runs/:runId` 的 `cost.value` USD，未把初始 billing 的 calculated/actual/reported 三字段混作扣款。
 
-候选来源：[monid 官方社媒指南](https://monid.ai/blog/guides/best-social-media-scraping-api-2026)、
-[网页服务说明](https://monid.ai/blog/guides/web-scraping-services-should-you-hire-it-out)。
-公开页面价格和历史目录仅用于选样，不计作实测价格。
+[逐次脱敏回执及字段样本](monid-supplier-evaluation-20261018.receipts.json) 随本报告提交。
+完整响应与测试脚本仅保留本机 `~/.graylum/monid-evaluation-20261018/`；未提交密钥、余额绝对值、个人简介或头像签名链接。
+公开 JSON 摘录仅保留机构／品牌识别和数值字段，包含 runId、请求、测量口径、cost 与可核对的响应摘要哈希。
+哈希用于绑定保留的响应，不能单独证明供应商结果真实；原始 UTF-8 字节大小在读响应时直接测得。
 
-### 逐次必须记录的指标
+### 实际接口、输入与固定上游
 
-每次保留：输入摘要、provider/endpoint、runId、HTTP 与业务状态、monid 返回的最终 cost、
-初始请求耗时、取回最终结果的端到端耗时、轮询次数、返回条数，以及原始响应 UTF-8 字节数。
-异步初始确认大小与最终结果大小分别记录，不把小型 202 确认当完整结果。
+| 样本前缀 | provider / endpoint | 固定 route／输入 |
+| --- | --- | --- |
+| tt-profile | anyapi `/tiktok.profile` | bison；nasa、duolingo |
+| tt-posts | anyapi `/tiktok.profile_videos` | 前两次 flamingo：nasa、duolingo；第三次 quokka：nasa |
+| tt-search | anyapi `/tiktok.search_keyword` | bison；space exploration、language learning；默认 relevance/不限发布日期 |
+| x-profile | anyapi `/twitter.profile` | lynx；NASA、duolingo |
+| x-posts | anyapi `/twitter.user_tweets` | lynx；NASA、duolingo；limit=20 |
+| x-search | anyapi `/twitter.search` | lynx；space exploration、language learning；limit=20 |
+| instagram | anyapi `/instagram.profile` | pangolin；nasa |
+| youtube | anyapi `/youtube.channel_videos` | badger；@NASA，sort=latest |
+| facebook | anyapi `/facebook.profile` | giraffe；facebook.com/NASA |
+| linkedin | anyapi `/linkedin.company` | quokka；linkedin.com/company/nasa |
+| web | context.dev `/web/scrape/markdown` | example.com、www.python.org/about/ |
 
-字段逐项检查：精确粉丝数、绝对发布时间（Unix 秒／毫秒或带时区日期）、播放／浏览、点赞、评论、分享／转发。
-资料接口的作品字段记“不适用”，平台不提供的指标记“缺失”，不能补 0；缩写粉丝和相对日期不算精确值。
-作品应核对真实作者、转发／合作作品、置顶和排序，避免用第一条直接推断最近活跃时间。
+### 每次费用、耗时、响应大小
 
-| 样本 | 实际 USD | 初始／端到端 ms | 初始／最终 bytes | 粉丝／绝对时间／播放互动 | 结果 |
+耗时依次为“初始请求 / 客户端拿到最终结果 / 供应商 reported completedAt−createdAt”，单位 ms。
+社媒初始请求全部是 202；网页两次为同步 200。客户端耗时包含每轮 4 秒主动轮询等待，
+不能拿它当纯供应商处理时间。除 Facebook 2 次 GET，其余各 1 次 GET；不做业务重发。
+字节数是“初始 POST 响应 / 最终 GET 响应”，包括 monid JSON 封装，不是压缩传输大小。
+
+| 样本 | 实际 USD | 初始 / 端到端 / 服务端 ms | 初始 / 最终 bytes | 条数 | 业务结果 |
 | --- | --- | --- | --- | --- | --- |
-| 本轮所有样本 | 未调用 | 未测 | 未测 | 未检查 | BLOCKED：缺少 monid 凭证 |
+| tt-profile-1 | 0.000400 | 1200 / 5840 / 2196 | 1409 / 2513 | 单资料/页面 | 数据返回 |
+| tt-profile-2 | 0.000400 | 1201 / 5779 / 1940 | 1409 / 2458 | 单资料/页面 | 数据返回 |
+| tt-posts-1 | 0.000000 | 1210 / 5801 / 4157 | 1258 / 1652 | 0 | 无数据（not_found） |
+| tt-posts-2 | 0.000600 | 1362 / 6095 / 2966 | 1258 / 35673 | 20 | 数据返回 |
+| tt-search-1 | 0.000600 | 1239 / 6281 / 2238 | 1324 / 45461 | 20 | 数据返回 |
+| tt-search-2 | 0.000600 | 1351 / 6072 / 2318 | 1324 / 39915 | 20 | 数据返回 |
+| x-profile-1 | 0.000220 | 1054 / 5626 / 2023 | 1082 / 1929 | 单资料/页面 | 数据返回 |
+| x-profile-2 | 0.000220 | 1072 / 5655 / 1999 | 1082 / 1910 | 单资料/页面 | 数据返回 |
+| x-posts-1 | 0.000450 | 1015 / 5770 / 2261 | 931 / 16120 | 20 | 数据返回 |
+| x-posts-2 | 0.000450 | 1073 / 5667 / 2526 | 931 / 13260 | 20 | 数据返回 |
+| x-search-1 | 0.000600 | 1066 / 5811 / 2615 | 1122 / 21570 | 20 | 数据返回 |
+| x-search-2 | 0.000600 | 973 / 5713 / 2838 | 1122 / 19820 | 20 | 数据返回 |
+| instagram-1 | 0.001000 | 950 / 5529 / 2035 | 1181 / 2832 | 单资料/页面 | 数据返回 |
+| youtube-1 | 0.000800 | 941 / 5532 / 3235 | 849 / 9550 | 30 | 数据返回 |
+| facebook-1 | 0.001200 | 1018 / 9926 / 4957 | 728 / 2524 | 单资料/页面 | 数据返回 |
+| linkedin-1 | 0.001100 | 983 / 5565 / 2898 | 1069 / 4305 | 单资料/页面 | 数据返回 |
+| web-1 | 0.002533 | 3413 / 3987 / 2356 | 3290 / 3524 | 单资料/页面 | 数据返回 |
+| web-2 | 0.002533 | 4015 / 4604 / 2987 | 8875 / 9119 | 单资料/页面 | 数据返回 |
+| tt-posts-3 | 0.000800 | 1181 / 6124 / 3398 | 1258 / 61039 | 34 | 数据返回 |
 
-### 预算控制
+本轮最大完整响应 61,039 bytes，小于基线 2 MiB 限制；不代表其他账号或关键词也满足。
+网页正文分别 1,342 和 4,187 bytes，标题为 Example Domain、Welcome to Python.org，均为非空可读正文。
+两页没有原始发布时间元数据，记为缺失，不生成日期。没有付费测试其他网页线路。
 
-先免费 discover/inspect 取得本账号单价、固定费、按条计费和可限制结果数的参数，再确定逐次最大预算。
-总预留（含已发出但费用未确认的请求）不得超过 $1；不使用无限结果或无限 crawl。
-每次优先保留最终 `cost`，同步 `billing` 的不同字段分别记录，不自行把最大值解释成实际扣款；
-最终运行记录和前后余额共同核对。账户并发消费会影响余额差，无法归因时必须单独说明。
-超时或扣费不明先查同一 run，禁止盲目重新发起。不能约束最高费用的候选标 BLOCKED，不冒预算风险。
+### 字段完整性与实际语义
+
+| 类别 | 粉丝数 | 发布时间绝对值 | 播放／互动 |
+| --- | --- | --- | --- |
+| TikTok 资料 | 两账号均为整数；2,101,385、18,265,387 | 资料里的 createdUtc 是账号创建时间，**不适用**于作品发布时间 | likes 是账号总获赞，不能当单篇互动 |
+| TikTok 作品 flamingo | 成功 20/20 含 authorFollowers | 成功 20/20 含 Unix 秒 createdUtc | 成功 20/20 含 views/likes/comments/shares；NASA 无数据不可算字段通过 |
+| TikTok 作品 quokka | 34/34 authorFollowers=null，需另取资料 | 34/34 含 Unix 秒 | 34/34 播放／赞／评／分享齐全；34 条超过 Graylum 单次 30 条上限，需要截断 |
+| TikTok 搜索 | 40/40 authorFollowers=null | 40/40 含 Unix 秒 | 40/40 播放／赞／评／分享齐全 |
+| X 资料 | 两账号整数 92,323,065、1,048,999 | 账号创建时间，作品日期不适用 | 作品互动不适用 |
+| X 作品 | 40/40 不带粉丝，按现有 profile+posts 两次取数即可 | 40/40 Unix 秒 | 40/40 views/likes/replies/retweets 齐全 |
+| X 搜索 | 40/40 含 authorFollowers | 40/40 Unix 秒 | 40/40 viewCount/likeCount/replyCount/retweetCount 齐全 |
+| Instagram 资料 | 104,381,644，整数格式 | 作品日期不适用 | 没测作品，不能写成播放／互动通过 |
+| YouTube 视频 | 无频道粉丝 | 30/30 数字 createdUtc，但不能认定原始精确日期 | 30/30 views；likes/comments 缺失，浏览数字精度也未独立核验 |
+| Facebook 页面 | 28,000,000，整数格式但可能来自缩写／取整，精度未核验 | 页面 createdUtc 不能当作品日期 | likes=28,746,800 是页面获赞，作品播放互动未测 |
+| LinkedIn 公司 | followerCount=7,140,962，整数格式 | 本接口无作品日期，记不适用 | 无作品互动，未测 |
+
+TikTok Duolingo 首条 isPinned=true，时间 1749564234（2025 年），不能把置顶当最近一次发布。
+X 作品接口包含 replies，必须按产品口径区分回复与原创；本轮未独立核对所有转推／原作者语义，不把返回条数直接当原创数量。
+Duolingo profile 与 posts 的粉丝分别 18,265,387、18,266,569，说明不同端点／上游快照可能不一致；本次不以任何一项断言真实粉丝准确。
+
+YouTube 首条 `publishedTime="3 days ago"`、`createdUtc=1792063937`；
+其余 4 条 `1 month ago` 均为同一秒 `1789731137`。
+这些分别是基准秒 `1792323137` 减 3 天、30 天；第二条 2 周前也与减 14 天完全吻合。
+**据此推断**标准化时间由相对文本回推；未取得真实源发布时间，不满足精确绝对日期验收。
+不能因字段类型是整数就启用 30 天活跃规则。此限制只针对本次 badger 线路，不泛化为 monid 全部 YouTube 接口。
+
+### 与现有供应商的价格、能力比较
+
+本次未执行 TikHub/Firecrawl 的配对业务请求，因此**无同时段速度、可用率、响应大小的两家排名**。
+TikHub 官方价格目录读取未取得可解析 JSON；不绕过认证、不换用已登录网页，未取得账号专属价格。
+本次也没有读取 staging 价格配置或 Firecrawl 账户套餐，不能把公开价替代当前冻结计费配置。
+
+[TikHub 官方 TikTok 页面](https://tikhub.io/tiktok-api) 与
+[X 页面](https://tikhub.io/twitter-api) 公布起价 $0.001/次。
+以此**参考价**对照，monid TikTok profile=$0.0004、posts=$0.0006/0.0008、search=$0.0006；
+X profile=$0.00022、posts=$0.00045、search=$0.0006。相对降幅只用于采购建议，不代表本账户实际节省已核实。
+两家的资料+作品组合都需要按缺失粉丝情况另取资料；monid 的标准化 JSON 更易解析，但不证明内容更准确。
+
+[Firecrawl 官方现价](https://www.firecrawl.dev/pricing)：单页 basic scrape=1 credit；
+Hobby 年付展示 $16/5,000 credits，折合 $0.0032/页；Standard 年付展示 $83/100,000，折合 $0.00083/页。
+这是套餐满额使用的摊销值，不是本账户的实际账单或固定边际价；未用完额度时意义不同。
+monid Context.dev $0.002533/页比 Hobby 这个摊销值低约 20.8%，却约为 Standard 的 3.05 倍。
+所以不建议统一替换 Firecrawl；按次消费、无需订阅可以作为小流量候选理由，复杂网页能力仍 NOT_RUN。
 
 ## 4. 后续接入需要修改的位置（建议，未实施）
 
@@ -112,21 +187,20 @@ Firecrawl 使用供应商 usage × 配置单价。这里没有读取在线价格
 - [计费 SQL](../../../packages/db/migrations/0255_research_tool_billing.sql)
 - [密钥 SQL](../../../packages/db/migrations/0259_platform_secrets.sql)
 
-## 5. 风险与最终判断条件
+## 5. 风险与尚未验证
 
-1. **单一依赖**：统一 monid 钱包／网关会让多个平台同时受余额、限流和故障影响；继续保留现有直连能力。
-2. **同一上游**：monid→TikHub 与 TikHub 直连不是互相独立的灾备；报价、支持和付款层增加一环。
-3. **加价与单位**：按调用、按结果、固定费叠加差异很大；比较 Graylum 常用 20–30 作品场景，不能只比较 2 条小样本的总价。
-4. **字段和语义**：精确粉丝、绝对时间、真实作者是对标刚需；缺失时不能开启对应对标资格。
-5. **大小和耗时**：基线适配器响应上限 2 MiB；并行 PR #1143 正在评估 8 MiB，未当作已合并能力。
-   monid 封装可能改变大小，异步耗时影响现有 Runtime 的超时和 32-call 预算，需要明确轮询是否算额外执行／费用。
-6. **条款与平台变化**：SaaS 许可按 Owner 已确认事实处理；平台来源、保留／删除、可见字段及供应商价格仍可能变化。
-7. **证据限制**：本轮尚无真实返回，任何供应商切换结论、可用率、速度排名、实际成本和字段通过率均 NOT_RUN。
-   即使各 2–3 次成功，也只支持小样本技术判断，不代表长期 SLA 或全平台覆盖。
+- **单一依赖**：一个 monid 账户／钱包／网关故障会影响多个平台；保留现有供应商，不自动全量切换。
+- **上游与加价**：AnyAPI 动物名不公开证明真实数据源彼此独立；monid 同时转售 TikHub。固定 route，按接口复核最终 cost；不能把目录最低 amount 当所有分支价格。
+- **账务**：本轮只选按次接口，未验证按结果＋固定费、失败退款、超时扣款或长期费率。最终成本回执、钱包余额存在短暂更新时差；产品不能靠单次余额判断一笔费用。
+- **数据精度**：整数格式不等于原始精确数值；YouTube 时间回推、Facebook 粉丝取整可能性、跨端点快照差异均需保留来源／缺失标记。
+- **样本限制**：核心每用途 2–3 次、其他平台各 1 次。没有长期 SLA、复杂反爬、分页、20–30 条完整对标、所有作者／转发语义及所有字段准确性验证；没有其他 AnyAPI 上游自动回退测试。
+- **Runtime 兼容**：当前 HTTP 默认 60 秒、响应上限 2 MiB；本次小响应通过不代表可以取消上限。PR #1143 仍 OPEN，不能当作已有 8 MiB 能力。
+- **现有线路对照限制**：直连配对测速／字段实测 NOT_RUN；本报告不声称 monid 比现有供应商更快或更可靠。所有切换建议以明确通过本次样本和价格优势为基础，实际接入另做回归。
+- **条款**：SaaS 条款按 Owner 已确认；本次没有新增对外承诺或扩大到中国平台，没有测试私有账号数据。
 
-## 6. 交接
+## 6. 验证与交接
 
-已完成：规则与当前线路核对、候选资料、接入改动点和预算／证据口径。
-下一步：取得 Owner 指定账户的本机凭证，inspect 后在 $1 内执行逐次实测，补充原始回执摘要及最终线路建议。
-阻塞：monid 密钥的本机位置待 Owner 提供；没有发起 monid 付费请求。
-验证：文档链接、差异及凭证泄漏检查待提交前执行；CI 与机器人审查以 PR 最新记录为准，不预先记 PASS。
+实测完成：19 次业务 run，18 次有数据、1 次 not_found；monid 成本和最终钱包下降核对 PASS，预算 PASS。
+报告与附带 JSON：19 个唯一 runId、18 次非空返回、美元求和／钱包核对、相对链接及已知密钥／token／签名链接扫描 PASS；git diff --check PASS。CI 和机器人结论记录于 PR。
+不将准备稿 CI 的通过沿用为本次最终版本通过。
+本 PR 只交报告；下一步由总控评估供应商接入任务，按第 1 节优先级推进。没有修改 staging，没有实施供应商切换。
