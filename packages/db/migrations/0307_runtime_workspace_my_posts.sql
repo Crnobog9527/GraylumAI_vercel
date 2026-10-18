@@ -127,6 +127,22 @@ BEGIN
  END LOOP;
 END $history$;
 
+-- Erasure authority is independent of paid access: expiry/downgrade/suspension never delete stored chat context.
+CREATE OR REPLACE FUNCTION public.runtime_workspace_posts_history_erased(p_execution_id uuid) RETURNS boolean
+LANGUAGE sql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+ WITH RECURSIVE lineage(id) AS (
+  SELECT p_execution_id UNION SELECT d.dependency_id FROM runtime_history_dependencies d JOIN lineage l ON d.execution_id=l.id
+ ) SELECT EXISTS(SELECT 1 FROM lineage l JOIN runtime_tool_calls t ON t.execution_id=l.id
+  JOIN runtime_executions ex ON ex.id=l.id WHERE (t.result->>'kind'='my_posts' AND (
+   EXISTS(SELECT 1 FROM profiles p WHERE p.id=ex.actor_id AND p.is_deleted::text='true')
+   OR EXISTS(SELECT 1 FROM account_erasure_requests ar WHERE ar.profile_id=ex.actor_id)
+   OR EXISTS(SELECT 1 FROM jsonb_array_elements_text(coalesce(t.result->'source_connections','[]')) ids(value)
+    WHERE NOT EXISTS(SELECT 1 FROM social_connections sc WHERE sc.id::text=ids.value AND sc.actor_id=ex.actor_id
+     AND sc.status<>'deleting')))) OR (ex.payload->>'ownPosts'='true' AND t.name='read_source'
+      AND t.erased_at IS NOT NULL AND t.result IS NULL))
+$$;
+REVOKE ALL ON FUNCTION public.runtime_workspace_posts_history_erased(uuid) FROM PUBLIC,anon,authenticated,service_role;
+
 -- Connection revocation never scans/locks historical conversations. Check only the current execution on entry;
 -- the existing worker below discovers stale saved sources and removes copies in bounded, retryable batches.
 DO $entry$ DECLARE d text;anchor text;patch text;
@@ -135,7 +151,7 @@ BEGIN
  IF position('-- B2 own-post source deleted' IN d)=0 THEN
   anchor:=$a$ -- 0262 library source deleted$a$;
   patch:=$p$ -- B2 own-post source deleted
- IF e.state NOT IN ('completed','cancelled') AND NOT runtime_workspace_posts_history_visible(e.id) THEN
+ IF e.state NOT IN ('completed','cancelled') AND runtime_workspace_posts_history_erased(e.id) THEN
   UPDATE runtime_executions SET unavailable_reason=coalesce(unavailable_reason,'source_deleted')
    WHERE id=e.id RETURNING * INTO e;
  END IF;
@@ -200,7 +216,7 @@ BEGIN
   anchor:=$a$ RETURN jsonb_build_object('processed',done,'waiting',waiting);$a$;
   work:=$w$ -- B2 pending own-post receipts: separate bounded batches; no connection transaction owns historical cleanup.
  FOR target IN SELECT ex.id execution_id FROM runtime_executions ex JOIN profiles p ON p.id=ex.actor_id
-  WHERE (p_actor_id IS NULL OR ex.actor_id=p_actor_id) AND NOT runtime_workspace_posts_history_visible(ex.id)
+  WHERE (p_actor_id IS NULL OR ex.actor_id=p_actor_id) AND runtime_workspace_posts_history_erased(ex.id)
    AND (EXISTS(SELECT 1 FROM runtime_tool_calls t WHERE t.execution_id=ex.id AND t.result->>'kind'='my_posts')
     OR EXISTS(SELECT 1 FROM runtime_session_history h WHERE h.execution_id=ex.id AND h.erased_at IS NULL
      AND h.item->>'role' IS DISTINCT FROM 'user')
@@ -224,7 +240,7 @@ BEGIN
  -- Readiness and SKIP LOCKED are evaluated before LIMIT: open, untrusted or locked rows cannot starve later runs.
  FOR target IN SELECT ex.id execution_id FROM runtime_executions ex JOIN bill2_runs br ON br.id=ex.billing_run_id
   JOIN profiles p ON p.id=ex.actor_id
-  WHERE br.content_deleted_at IS NOT NULL AND br.closed AND NOT runtime_workspace_posts_history_visible(ex.id)
+  WHERE br.content_deleted_at IS NOT NULL AND br.closed AND runtime_workspace_posts_history_erased(ex.id)
    AND (p_actor_id IS NULL OR ex.actor_id=p_actor_id)
    AND coalesce(content_erasure_financial_allowed(ex.actor_id,coalesce(br.pre_deduct_id,br.id)),false)
    AND EXISTS(SELECT 1 FROM bill2_receipts r JOIN bill2_calls c ON c.id=r.call_id
