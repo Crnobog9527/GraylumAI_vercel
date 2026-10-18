@@ -51,7 +51,11 @@ export async function descendantCases({c,report}){
    VALUES($1,$2,'read_source','{"query":"my_posts:90"}')`,[origin.executionId,'read-limit-'+n]);
   assert.equal((await descriptor()).kind,n===2?'workspace_posts_request':'unavailable');
  }
- assert.equal((await descriptor()).reason,'read_limit');
+ const limited=await descriptor();assert.equal(limited.reason,'read_limit');
+ await c.query(`UPDATE runtime_tool_calls SET result=$2 WHERE execution_id=$1 AND call_id='read-limit-3'`,[origin.executionId,limited]);
+ const limitWork=(await rpc(c,'runtime_work_items',f.actor,started.sessionId))[origin.executionId];
+ assert.deepEqual(limitWork?.find(row=>row.id==='read-limit-3'),
+  {id:'read-limit-3',kind:'my_posts',state:'missing',label:'本条回答的作品读取次数已用完'});
  await c.query('ROLLBACK');
  report.checks.push('the third own-post attempt returns read_limit before producing a data-reader descriptor, including failed reads');
 

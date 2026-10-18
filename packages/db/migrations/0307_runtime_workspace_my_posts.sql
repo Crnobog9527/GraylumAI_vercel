@@ -67,7 +67,7 @@ BEGIN
    IF (SELECT count(*) FROM runtime_sessions active_s JOIN runtime_tool_calls t ON t.execution_id=active_s.active_execution
     WHERE active_s.id=p_session_id AND active_s.actor_id=p_actor_id AND t.name='read_source'
      AND t.arguments->>'query' IN ('my_posts','my_posts:14','my_posts:30','my_posts:90'))>2 THEN
-    RETURN jsonb_build_object('kind','unavailable','reason','read_limit','dependencies','[]'::jsonb);
+    RETURN jsonb_build_object('kind','unavailable','reason','read_limit','dependencies','[]'::jsonb,'note','本条回答的作品读取次数已用完');
    END IF;
    RETURN jsonb_build_object('kind','workspace_posts_request','windowDays',(chosen->>'windowDays')::int,'entitled',days>0);
   END IF;
@@ -276,15 +276,16 @@ BEGIN
   replacement:=anchor||$p$
       -- B2 own-post work projection
       WHEN t.result->>'kind'='my_posts' THEN 5
-      WHEN t.result->>'kind'='unavailable' AND t.result->>'reason'='capacity_exhausted' AND e.payload->>'ownPosts'='true'
+      WHEN t.result->>'kind'='unavailable' AND t.result->>'reason' IN ('capacity_exhausted','read_limit') AND e.payload->>'ownPosts'='true'
        AND t.arguments->>'query' IN ('my_posts','my_posts:14','my_posts:30','my_posts:90') THEN 5
       WHEN t.result IS NULL AND e.state IN ('prepared','running','interrupted','waiting_credits','waiting_resume') AND e.payload->>'ownPosts'='true'
        AND t.arguments->>'query' IN ('my_posts','my_posts:14','my_posts:30','my_posts:90') THEN 5$p$;
   IF array_length(string_to_array(d,anchor),1)<>2 THEN RAISE EXCEPTION 'B2_WORK_RANK_MISMATCH';END IF;
   d:=replace(d,anchor,replacement);
   anchor:=$a$      WHEN t.result->>'kind'='library_search' THEN ($a$;
-  replacement:=$p$      WHEN t.result->>'kind'='unavailable' AND t.result->>'reason'='capacity_exhausted' THEN
-       jsonb_build_object('kind','my_posts','state','missing','label','资料太多放不下，先按已读到的回答')
+  replacement:=$p$      WHEN t.result->>'kind'='unavailable' AND t.result->>'reason' IN ('capacity_exhausted','read_limit') THEN
+       jsonb_build_object('kind','my_posts','state','missing','label',CASE t.result->>'reason'
+        WHEN 'read_limit' THEN '本条回答的作品读取次数已用完' ELSE '资料太多放不下，先按已读到的回答' END)
       WHEN t.result->>'kind'='my_posts' THEN jsonb_build_object('kind','my_posts','state',CASE
        WHEN t.result->>'status'='available' AND jsonb_typeof(t.result->'posts')='array'
         AND t.result->>'window_days' IN ('14','30','90') THEN 'done'

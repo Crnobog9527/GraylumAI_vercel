@@ -68,8 +68,9 @@ export function withSourceWorkProgress(tool: RuntimeTool, emit?: (event: AgentTo
   let summary: ReturnType<typeof sourceWorkSummary>;
   try {
    const parsed = JSON.parse(result);
-   summary = kind === 'my_posts' && parsed?.kind === 'unavailable' && parsed.reason === 'capacity_exhausted'
-    ? {kind, state: 'missing', label: '资料太多放不下，先按已读到的回答'} : sourceWorkSummary(parsed);
+   summary = kind === 'my_posts' && parsed?.kind === 'unavailable' && ['capacity_exhausted', 'read_limit'].includes(parsed.reason)
+    ? {kind, state: 'missing', label: parsed.reason === 'read_limit'
+     ? '本条回答的作品读取次数已用完' : '资料太多放不下，先按已读到的回答'} : sourceWorkSummary(parsed);
   }
   catch {
    if (kind) send({kind, state: 'pending', label: kind === 'my_posts' ? '作品读取待核实' : '资料读取待核实'});
