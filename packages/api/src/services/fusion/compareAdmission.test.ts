@@ -136,6 +136,12 @@ describe('compare group admission', () => {
     modelIds: models, request, env: {}, shown, ...extra });
   const reply = (replayed: boolean) => ({ groupId: id(70), replayed, runs: models.map((model, index) => ({ runId: id(80 + index),
     fusion: { index, phase: 'fusion_compare', body: `b${index}`, call: { phase: 'fusion_compare', model: `m/${model}` } } })) });
+  it('sizes the columns with the answer limit given from the recorded request, not the live setting', async () => {
+    state.replies.set('fusion_group_admit', reply(false));
+    await admit({ answerTokens: 2048 }); // the live setting is 4096
+    expect(state.admitted.length).toBeGreaterThan(0);
+    expect(state.admitted.every(item => item.endsWith(':2048'))).toBe(true);
+  });
   it('admits as kind compare with one run per column: no Skill identity, no session, a draft scope, derived request ids', async () => {
     state.replies.set('fusion_group_admit', reply(false));
     const first = await admit();

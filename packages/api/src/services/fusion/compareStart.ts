@@ -48,7 +48,7 @@ export type CompareStarted =
   | { state: 'processing'; compareId: string };
 
 type RecordView = { compareId: string; state: string; gateVerdict: string | null; gateFallback?: boolean | null; groupId: string | null;
-  created?: boolean; snapshotHash?: string };
+  created?: boolean; snapshotHash?: string; config?: { answerOutputTokens?: number } };
 
 /** Records the request, judges positioning once, then admits and claims the group. `shown` is the estimate the user agreed
  * to; the group never holds more than it. A repeat of the same request id never judges again and returns the same group. */
@@ -138,7 +138,9 @@ export async function startCompare(deps: CompareDeps, choice: CompareStartInput)
 
   const request = compareRequest({ ...choice.parts, positioningFallback: fallback });
   const group = await admitCompareGroup({ admin, actorId, requestId, sourceSessionId: choice.sessionId, modelIds: choice.modelIds, request,
-    env: deps.env, shown: choice.shown });
+    env: deps.env, shown: choice.shown,
+    // The limit recorded with the request, not today's setting: a change by an administrator in between must not shorten answers.
+    answerTokens: record.config?.answerOutputTokens });
   const result = await claim(compareId, group);
   return { state: result.state, compareId, group, claim: result };
 }

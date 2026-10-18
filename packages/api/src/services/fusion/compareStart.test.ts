@@ -274,3 +274,11 @@ describe('compare start: a repeat of an admitted request replays it before anyth
   });
 });
 
+
+describe('compare start: admission keeps the answer limit recorded with the request (review finding)', () => {
+  it('passes the stored limit, not the live setting, to admission after a resume', async () => {
+    s.begin = fresh({ created: false, gateVerdict: 'allow', gateFallback: false, state: 'admitting', config: { answerOutputTokens: 2048 } });
+    await start();
+    expect(s.admitCalls.at(-1)).toMatchObject({ answerTokens: 2048 });
+  });
+});

@@ -153,14 +153,16 @@ export function assertQuoteCovers(columns: ReadonlyArray<Pick<CompareColumn, 'in
  * agreed to: the group may not hold more, in credits or in provider cost, and no column more than its own shown bound. */
 export async function admitCompareGroup(input: { admin: SupabaseClient; actorId: string; requestId: string; sourceSessionId: string;
   modelIds: string[]; request: FusionRequest; env?: Record<string, string | undefined>;
-  shown: ShownQuote }): Promise<CompareAdmitted> {
+  shown: ShownQuote,
+  /** The answer limit recorded when the compare began; the live setting is used only when none is given. */
+  answerTokens?: number }): Promise<CompareAdmitted> {
   const { admin, actorId } = input;
   const settings = await assertCompareAllowed(admin, actorId, input.modelIds);
   // A replay first: the transaction answers an existing request before it reads any input.
   const replay = await replayCompareGroup(admin, actorId, input.requestId, input.sourceSessionId);
   if (replay) return replay;
   const built = await buildCompareColumns({ admin, actorId, modelIds: input.modelIds, request: input.request,
-    answerTokens: settings.answerOutputTokens, dispatchMinutes: settings.dispatchMinutes, env: input.env });
+    answerTokens: input.answerTokens ?? settings.answerOutputTokens, dispatchMinutes: settings.dispatchMinutes, env: input.env });
   if (built.tooLarge.length) throw new Error('FUSION_COMPARE_INPUT_TOO_LARGE');
   // Prices or multipliers changed since the user saw the estimate: never hold more than the maximum shown.
   assertQuoteCovers(built.columns, input.shown);
