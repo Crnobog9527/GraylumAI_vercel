@@ -5,11 +5,12 @@ import { actorId, fixture, subscription } from './__tests__/entitlementsFixture'
 
 describe('new-action membership entitlements', () => {
   it.each([
-    ['free', false, 50_000_000], ['pro', true, 500_000_000], ['gold', true, 2_000_000_000],
-  ] as const)('reads %s defaults and enforces both modes', async (level, allowed, bytes) => {
+    ['free', false, 50_000_000, 1], ['pro', true, 500_000_000, 3], ['gold', true, 2_000_000_000, 6],
+  ] as const)('reads %s defaults and enforces both modes', async (level, allowed, bytes, profileLimit) => {
     const f = fixture(level);
     const result = await readMembershipEntitlements(f.client, actorId);
-    expect(result).toMatchObject({ level, libraryStorageBytes: bytes, fusionCompareMaxModels: 4 });
+    expect(result).toMatchObject({ level, libraryStorageBytes: bytes, positioningProfileLimit: profileLimit,
+      fusionCompareMaxModels: 4 });
     for (const mode of ['review', 'compare'] as const) {
       const run = () => assertFusionEntitlement(result, mode, 4);
       if (allowed) expect(run).not.toThrow();

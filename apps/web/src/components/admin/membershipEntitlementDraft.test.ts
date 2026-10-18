@@ -5,7 +5,8 @@ import {
 } from './membershipEntitlementDraft';
 
 const plan = { id: '00000000-0000-4000-8000-000000000001', name: 'Free', level: 'free', allow_export: 'true',
-  allow_batch_export: 'false', allow_fusion_review: false, allow_fusion_compare: true, library_storage_bytes: 50_000_000 };
+  allow_batch_export: 'false', allow_fusion_review: false, allow_fusion_compare: true, library_storage_bytes: 50_000_000,
+  positioning_profile_limit: 1 };
 
 describe('membership storage in decimal MB', () => {
   it.each([
@@ -32,7 +33,7 @@ describe('plan update input', () => {
     const draft = { ...planDraftFromRow(plan), allowFusionReview: true, storageMb: '1.5' };
     expect(planUpdateInput(plan.id, draft)).toEqual({
       id: plan.id, allowExport: 'true', allowBatchExport: 'false', allowFusionReview: true, allowFusionCompare: true,
-      libraryStorageBytes: 1_500_000,
+      libraryStorageBytes: 1_500_000, positioningProfileLimit: 1,
     });
   });
 

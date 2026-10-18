@@ -26,7 +26,8 @@ function unavailable(): never {
 async function readPlan(client: SupabaseClient, level: MembershipLevel) {
   // is_active is a catalog/checkout switch, not revocation of previously granted membership.
   const { data, error } = await client.from('membership_plans')
-    .select('id,level,allow_fusion_review,allow_fusion_compare,library_storage_bytes').eq('level', level).limit(2);
+    .select('id,level,allow_fusion_review,allow_fusion_compare,library_storage_bytes,positioning_profile_limit')
+    .eq('level', level).limit(2);
   const parsed = z.array(planSchema).length(1).safeParse(data);
   if (error || !parsed.success) unavailable();
   return parsed.data[0]!;
@@ -83,6 +84,7 @@ export async function readMembershipEntitlements(client: SupabaseClient, profile
       allowFusionReview: plan.allow_fusion_review,
       allowFusionCompare: plan.allow_fusion_compare,
       libraryStorageBytes: plan.library_storage_bytes,
+      positioningProfileLimit: plan.positioning_profile_limit,
       fusionCompareMaxModels: limit.data,
       allowPublish: publish.allow_publish,
       ownDataWindowDays: publish.own_data_window_days,
