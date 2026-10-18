@@ -469,8 +469,9 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     }
     for (const href of ['/pricing', '/faq', '/about', '/contact', '/terms', '/privacy', '/refund']) expect(html).toContain(`href="${href}"`);
     expect(html).toContain('mailto:help@example.com');
-    // The jury still says what it is (now under step one); its link waits for a public jury page.
+    // The jury still says what it is (now under step one); its link goes to the public jury page (Owner 2026-10-18).
     for (const part of L_JURY.title.split(/(?<=，)/)) expect(html).toContain(part);
+    expect(html).toContain(`href="/features/jury">${L_JURY.link}`);
     // The samples keep every planned link.
     expect(render()).toContain('href="/landing/preview/jury"');
   });

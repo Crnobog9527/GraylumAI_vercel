@@ -16,6 +16,7 @@ import own from './l.module.css';
 import { StickyCtaMNO } from '@/components/landing/preview-mno/StickyCtaMNO';
 import { HERO } from '@/lib/landing/landing-copy';
 import { L_NOTE_ANSWERS, L_NOTE_HEADS, L_NOTE_REGIONS, L_OPS, L_PRICE_NOTE, L_VOICE_FOLD } from '@/lib/landing/landing-copy-l';
+import { J_JURY_PAGE, linkReady } from '@/lib/landing/landing-copy-j-chrome';
 import { allOn } from '@/lib/landing/landing-flags';
 import { cn } from '@/lib/utils';
 import { HeroL } from './HeroL';
@@ -70,7 +71,8 @@ export function SampleL({ data, siteName, extras, production = false, supportEma
         <HeroL note={data.heroNote} />
         <VoiceWallJ notes={data.notes} open regions={L_NOTE_REGIONS} compact={L_VOICE_FOLD} after={<CtaK />}
           heads={L_NOTE_HEADS} answers={L_NOTE_ANSWERS} />
-        <StepsL flags={extras.flags} juryHref={production ? null : undefined} />
+        {/* The home page's jury link goes to the public jury page (Owner 2026-10-18), once it exists; the samples keep the demo. */}
+        <StepsL flags={extras.flags} juryHref={production ? (linkReady(J_JURY_PAGE) ? J_JURY_PAGE : null) : undefined} />
         {extras.showSamples ? <SamplesL /> : null}
         <ScenariosL flags={extras.flags} after={<CtaK />} />
         <PriceJ proMonthly={data.pricing.proMonthly} rows={data.compareRows} calm plainTotal checked={false} quiet

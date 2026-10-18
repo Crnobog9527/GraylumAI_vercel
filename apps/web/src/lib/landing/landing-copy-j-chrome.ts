@@ -96,6 +96,8 @@ export const J_FOOTER = {
  * /features, its six pages and /blog came with PR #1090 (2026-10-18).
  */
 export const J_PENDING_PAGES = [PLANNED.samples, PLANNED.cookies] as const;
+/** The jury's public page (Owner 2026-10-18: the home page's "看评审团怎么工作" leads here). */
+export const J_JURY_PAGE = PLANNED.jury;
 /** Where the footer's "Cookie 设置" points until Termly's own buttons replace it (SiteFooterJ). */
 export const J_COOKIE_SETTINGS_HREF = PLANNED.cookies;
 
