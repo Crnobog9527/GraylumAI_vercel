@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({ scope: vi.fn(), payment: vi.fn(), record: vi.f
 vi.mock('./stripeCheckoutPersistence', () => ({ resolveStripeScope: mocks.scope }));
 vi.mock('./disputePayment', () => ({ readDisputePayment: mocks.payment }));
 vi.mock('./cardRefundWebhook', () => ({ handleCardRefund: mocks.record }));
-import { refundDisputedRenewal } from './disputeRenewalRefund';
+import { reconcileDisputeRenewalRefunds, refundDisputedRenewal } from './disputeRenewalRefund';
 function fixture() {
   const intent = { status: 'dispatching', claimedAt: new Date().toISOString(), refundId: null as string | null,
     idempotencyKey: 'dispute:renewal-refund:order', paymentKey: 'acct_test:test:pi_test' };
@@ -32,6 +32,39 @@ beforeEach(() => {
   mocks.payment.mockResolvedValue({ paymentIntentId: 'pi_test', chargeId: 'ch_test' }); mocks.record.mockResolvedValue(true);
 });
 describe('full refund of a renewal withheld by an earlier disputed period', () => {
+  it('scans blocked refunds before a persistent manual backlog', async () => {
+    const statuses: string[][] = [];
+    const calls: string[] = [];
+    const db = {
+      from: vi.fn((table: string) => {
+        let state: string[] = [];
+        const chain = {
+          select: vi.fn(() => chain), eq: vi.fn(() => chain), order: vi.fn(() => chain),
+          in: vi.fn((_column: string, values: string[]) => { state = values; statuses.push(values); return chain; }),
+          gt: vi.fn(() => chain),
+          limit: vi.fn(async () => {
+            if (table === 'payment_provider_refs') return { error: null, data: [{ external_id: 'in_blocked' }] };
+            return { error: null, data: state[0] === 'blocked' ? [{ id: 'blocked_order' }]
+              : state[0] === 'manual' ? [{ id: 'manual_order' }] : [] };
+          }),
+        };
+        return chain;
+      }),
+      rpc: vi.fn(async () => ({ error: null, data: { status: 'succeeded', claimedAt: '', refundId: null,
+        idempotencyKey: 'key', paymentKey: 'acct_test:test:pi_test' } })),
+    };
+    let reads = 0;
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => reads++ === 0 ? -1 : 1);
+    try {
+      const result = await reconcileDisputeRenewalRefunds(db as unknown as SupabaseClient, {} as Stripe, undefined, 0);
+      calls.push(...statuses.map(state => state[0]!));
+      expect(result).toEqual({ checked: 1, failed: 0, complete: false });
+      expect(calls).toEqual(['blocked', 'dispatching', 'pending', 'manual']);
+      expect(db.rpc).toHaveBeenCalledTimes(1);
+    } finally {
+      clock.mockRestore();
+    }
+  });
   it('refunds the full charge including tax once, reads it back and records through the existing external-refund handler', async () => {
     const f = fixture(); expect(await f.run()).toBe('succeeded'); expect(await f.run()).toBe('succeeded');
     expect(f.api.refunds.create).toHaveBeenCalledTimes(1);

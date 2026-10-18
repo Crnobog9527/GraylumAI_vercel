@@ -79,26 +79,33 @@ export async function refundDisputedRenewal(db: SupabaseClient, stripe: Stripe, 
 export async function reconcileDisputeRenewalRefunds(db: SupabaseClient, stripe: Stripe, alert?: DisputeAlert,
   deadline = Date.now() + 15_000) {
   const scope = await resolveStripeScope(stripe);
-  let checked = 0, failed = 0, after: string | undefined;
-  for (let page = 0; page < 20; page++) {
-    let query = db.from('payment_orders').select('id').eq('payment_channel', 'stripe')
-      .eq('merchant_namespace', scope.merchant).eq('payment_mode', scope.mode)
-      .in('dispute_refund_status', ['blocked', 'dispatching', 'pending', 'manual']).order('id').limit(50);
-    if (after) query = query.gt('id', after);
-    const rows = await query;
-    if (rows.error || !Array.isArray(rows.data)) throw new Error('PAY_DISPUTE_REFUND_SCAN_UNAVAILABLE');
-    for (const row of rows.data) {
-      if (Date.now() > deadline) return { checked, failed, complete: false };
-      checked++;
-      try {
-        const refs = await db.from('payment_provider_refs').select('external_id').eq('order_id', row.id)
-          .eq('channel', 'stripe').eq('merchant_namespace', scope.merchant).eq('mode', scope.mode).eq('object_type', 'payment').limit(2);
-        evidence(!refs.error && Array.isArray(refs.data) && refs.data.length === 1 && refs.data[0].external_id.startsWith('in_'));
-        if (await refundDisputedRenewal(db, stripe, row.id, refs.data[0].external_id, alert) === 'manual') failed++;
-      } catch { failed++; }
+  let checked = 0, failed = 0;
+  // Manual rows can remain indefinitely. Scan dispatchable refunds first so a permanent manual backlog
+  // cannot consume the page cap before a later undelivered renewal is refunded.
+  const statusGroups = [['blocked'], ['dispatching'], ['pending'], ['manual']] as const;
+  for (const statuses of statusGroups) {
+    let after: string | undefined;
+    for (let page = 0; page < 20; page++) {
+      let query = db.from('payment_orders').select('id').eq('payment_channel', 'stripe')
+        .eq('merchant_namespace', scope.merchant).eq('payment_mode', scope.mode)
+        .in('dispute_refund_status', [...statuses]).order('id').limit(50);
+      if (after) query = query.gt('id', after);
+      const rows = await query;
+      if (rows.error || !Array.isArray(rows.data)) throw new Error('PAY_DISPUTE_REFUND_SCAN_UNAVAILABLE');
+      for (const row of rows.data) {
+        if (Date.now() > deadline) return { checked, failed, complete: false };
+        checked++;
+        try {
+          const refs = await db.from('payment_provider_refs').select('external_id').eq('order_id', row.id)
+            .eq('channel', 'stripe').eq('merchant_namespace', scope.merchant).eq('mode', scope.mode).eq('object_type', 'payment').limit(2);
+          evidence(!refs.error && Array.isArray(refs.data) && refs.data.length === 1 && refs.data[0].external_id.startsWith('in_'));
+          if (await refundDisputedRenewal(db, stripe, row.id, refs.data[0].external_id, alert) === 'manual') failed++;
+        } catch { failed++; }
+      }
+      if (rows.data.length < 50) break;
+      after = rows.data.at(-1)!.id;
+      if (page === 19) return { checked, failed, complete: false };
     }
-    if (rows.data.length < 50) return { checked, failed, complete: true };
-    after = rows.data.at(-1)!.id;
   }
-  return { checked, failed, complete: false };
+  return { checked, failed, complete: true };
 }
