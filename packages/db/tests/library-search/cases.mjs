@@ -104,8 +104,10 @@ export async function runCases({db,report}) {
 
  // The execution without @ references lists what its searches found.
  const listing=await read(db,a,e,'');
- assert.deepEqual(listing.documents.map(d=>[d.ref,d.title]),[['doc-1','Menu.md'],['doc-2','Notes.md']]);
- report.checks.push('library index lists retrieved documents of an execution without @ references');
+ // What its searches found comes first; the listing then adds documents by name up to 10 in total (0304).
+ assert.deepEqual(listing.documents.slice(0,2).map(d=>[d.ref,d.title]),[['doc-1','Menu.md'],['doc-2','Notes.md']]);
+ assert.equal(listing.documents.length,10);assert.ok(listing.directoryTotal>10);
+ report.checks.push('library index lists retrieved documents of an execution without @ references, then fills up to 10 by name');
 
  // The search filters are 'column ILIKE ANY(array)': the trigram indexes serve exactly that shape (index scans are forced
  // so a tiny table cannot hide a missing index; a 1- or 2-character pattern cannot use a trigram index, only 3+ can).
@@ -144,33 +146,41 @@ export async function runCases({db,report}) {
  assert.ok(!JSON.stringify(await one(db,"SELECT result v FROM runtime_tool_calls WHERE execution_id=$1 AND call_id='race'",[f.execution])).includes('RACE_CANARY'));
  report.checks.push('a search result stored after its document was deleted becomes source_deleted without the excerpt');
 
- // Listing the library before any search hit: the real directory (file names only), stored as it is, not source_deleted.
+ // Listing the library before any search hit: the real documents (first 10 by name) as ordinary references.
  const empty=await runtimeFixture(db,{});
- await doc(db,empty.actor,'DIR-A.md',1);await doc(db,empty.actor,'DIR-B.md',1);
+ await doc(db,empty.actor,'DIR-A.md',1);const dirB=await doc(db,empty.actor,'DIR-B.md',1);
  await db.query(`UPDATE runtime_executions SET state='running',payload=payload||'{"tools":["read_source"],"maxToolCalls":8,"libraryRetrieval":true}'::jsonb WHERE id=$1`,[empty.execution]);
  await rpc(db,'runtime_tool',empty.actor,empty.execution,'idx','read_source',{query:'library'},'claim',null);
  const emptyIndex=await read(db,empty.actor,empty.execution,'');
- assert.equal(emptyIndex.kind,'library_index');assert.deepEqual(emptyIndex.documents,[]);
- assert.deepEqual(emptyIndex.directory.map(x=>x.title).sort(),['DIR-A.md','DIR-B.md'],'two documents in the library: the listing shows both');
- assert.equal(emptyIndex.directoryTotal,2);assert.match(emptyIndex.hint,/search:/);
- assert.ok(emptyIndex.directory.every(x=>Object.keys(x).sort().join()==='documentId,title'),'the directory carries only id and file name, no body');
- assert.equal((await one(db,'SELECT count(*)::int v FROM runtime_library_references WHERE execution_id=$1',[empty.execution])),0,'the directory freezes nothing');
+ assert.equal(emptyIndex.kind,'library_index');
+ assert.deepEqual(emptyIndex.documents.map(x=>x.title),['DIR-A.md','DIR-B.md'],'two documents in the library: the listing shows both');
+ assert.deepEqual(emptyIndex.documents.map(x=>x.ref),['doc-1','doc-2']);assert.equal(emptyIndex.directoryTotal,2);assert.match(emptyIndex.hint,/search:/);
+ assert.equal(await one(db,'SELECT count(*)::int v FROM runtime_library_references WHERE execution_id=$1',[empty.execution]),2,'listed documents are ordinary references');
+ assert.equal((await read(db,empty.actor,empty.execution,'')).documents.length,2,'listing twice registers nothing new');
  const emptyDone=await rpc(db,'runtime_tool',empty.actor,empty.execution,'idx','read_source',{query:'library'},'complete',emptyIndex);
- assert.deepEqual(emptyDone.result,emptyIndex,'the directory is stored as it is, not as source_deleted');
+ assert.deepEqual(emptyDone.result,emptyIndex,'the listing is stored as it is, not as source_deleted');
  assert.equal(await rpc(db,'runtime_library_visible',empty.actor,empty.execution,emptyIndex),true);
- // A deleted directory document hides the stored listing (its file name must not survive in a saved answer or replay).
- const dirGone=await doc(db,empty.actor,'DIR-GONE.md',1);
- const withGone=await read(db,empty.actor,empty.execution,'');assert.equal(withGone.directoryTotal,3);
- assert.equal(await rpc(db,'runtime_library_visible',empty.actor,empty.execution,withGone),true);
- await del(db,empty.actor,dirGone);
- assert.equal(await rpc(db,'runtime_library_visible',empty.actor,empty.execution,withGone),false,'a listed file name of a deleted document hides the directory');
+ // Deleting a listed document hides the stored listing (the file name must not stay in answers or replays) and cleanup clears it.
+ await del(db,empty.actor,dirB);
+ assert.equal(await rpc(db,'runtime_library_visible',empty.actor,empty.execution,emptyIndex),false,'a listed file name of a deleted document hides the listing');
+ await db.query(`UPDATE runtime_executions SET state='completed' WHERE id=$1`,[empty.execution]);
+ await rpc(db,'runtime_library_propagate',empty.actor,20);
+ assert.equal(await one(db,"SELECT result IS NULL v FROM runtime_tool_calls WHERE execution_id=$1 AND call_id='idx'",[empty.execution]),true,'the stored listing is cleared after the deletion');
+ // A user with an empty library gets an empty list and the total 0, stored as it is.
+ const none=await runtimeFixture(db,{});
+ await db.query(`UPDATE runtime_executions SET state='running',payload=payload||'{"tools":["read_source"],"maxToolCalls":8,"libraryRetrieval":true}'::jsonb WHERE id=$1`,[none.execution]);
+ const noneIndex=await read(db,none.actor,none.execution,'');
+ assert.deepEqual(noneIndex.documents,[]);assert.equal(noneIndex.directoryTotal,0);
+ assert.equal(await rpc(db,'runtime_library_visible',none.actor,none.execution,noneIndex),true);
  // The same execution after a search hit: the index lists it and goes invisible once that document is gone.
- const found2=await doc(db,empty.actor,'IDX.md',1);await setBody(db,found2,0,'x','idxword content');
- const hitResult=await read(db,empty.actor,empty.execution,'search:idxword');assert.equal(hitResult.hits.length,1);
- const listed=await read(db,empty.actor,empty.execution,'');assert.equal(listed.documents.length,1);
- assert.equal(await rpc(db,'runtime_library_visible',empty.actor,empty.execution,listed),true);
- await del(db,empty.actor,found2);
- assert.equal(await rpc(db,'runtime_library_visible',empty.actor,empty.execution,listed),false,'a listed document that is gone still hides the index');
+ const after=await runtimeFixture(db,{});
+ await db.query(`UPDATE runtime_executions SET state='running',payload=payload||'{"tools":["read_source"],"maxToolCalls":8,"libraryRetrieval":true}'::jsonb WHERE id=$1`,[after.execution]);
+ const found2=await doc(db,after.actor,'IDX.md',1);await setBody(db,found2,0,'x','idxword content');
+ const hitResult=await read(db,after.actor,after.execution,'search:idxword');assert.equal(hitResult.hits.length,1);
+ const listed=await read(db,after.actor,after.execution,'');assert.equal(listed.documents.length,1);
+ assert.equal(await rpc(db,'runtime_library_visible',after.actor,after.execution,listed),true);
+ await del(db,after.actor,found2);
+ assert.equal(await rpc(db,'runtime_library_visible',after.actor,after.execution,listed),false,'a listed document that is gone still hides the index');
  report.checks.push('a retrieving free chat listing its library sees the real directory (2 documents), stored as it is; once a document is listed and then deleted the index is hidden again');
 
  // Cleanup: after the deletion, finished executions lose the stored search result like other library reads.
