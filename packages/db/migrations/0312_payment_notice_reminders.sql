@@ -79,7 +79,8 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
   jsonb_build_object('endDate',e.st->>'endedAt') FROM ended e
  WHERE e.st->>'state'='ended' AND NOT pay_founder_order_frozen((e.st->>'orderId')::uuid)
   AND (e.st->>'endedAt')::timestamptz<=now()
-  AND (e.st->>'endedAt')::timestamptz>now()-interval '24 hours'
+  -- Seven-day catch-up tolerates cron delay/outage and stays shorter than notice retention.
+  AND (e.st->>'endedAt')::timestamptz>now()-interval '7 days'
 $$;
 
 CREATE OR REPLACE FUNCTION public.payment_notice_eligible(n payment_notices) RETURNS boolean

@@ -11,6 +11,7 @@
   "checks": [
     "0312 repeated after full chain leaves catalog identical",
     "only service_role can scan; helpers not directly callable",
+    "red/green: old 24h window misses a 26h-old ending; seven-day catch-up enqueues it",
     "wallet -7d/0d/+5d, ordinary annual, MP/CN annual and founder-ended generated with correct facts",
     "repeat/concurrent scans create no duplicate; two claimants dispatch only once",
     "renewed wallet term and canceled card renewal rechecked at claim and skipped",

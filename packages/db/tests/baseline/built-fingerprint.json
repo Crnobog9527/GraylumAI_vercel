@@ -3475,7 +3475,7 @@
   "fn:pay_waffo_retry_cancel(uuid,uuid,text,text,timestamp with time zone)": "96a7b9b4f828",
   "fn:pay_waffo_routes_guard()": "c65d2fce764d",
   "fn:payment_notice_admin_list(uuid)": "8cb0952f6500",
-  "fn:payment_notice_candidates(uuid)": "ec481ac79c22",
+  "fn:payment_notice_candidates(uuid)": "31b6edf2ffd0",
   "fn:payment_notice_claim(uuid,text,text,uuid)": "60cbd659b26a",
   "fn:payment_notice_eligible(payment_notices)": "bda6ac54b483",
   "fn:payment_notice_enqueue(uuid,text,text,text,jsonb)": "3c9bd4af085c",

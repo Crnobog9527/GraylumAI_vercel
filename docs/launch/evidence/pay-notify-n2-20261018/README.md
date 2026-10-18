@@ -26,13 +26,13 @@ Master Plan 2.1 已记录 2026-10-13 Owner 将 N1–N6 按推荐确认：自己�
 
 已完成：N2 扫描、六类双语模板、现有 cron 接线、发送前业务复核、30 天清理及本机验证。下一步：最终 CI、Codex 机器人审查、由总控确认编号/上库/合并。
 阻断：真实收信需 Owner 完成上述配置；迁移编号最终确认由总控负责。
-验证：本机付款提醒单元 45 项、cron 7 项、API/Web lint 与类型检查通过；数据库 11 组场景通过；最新 staging 上的最终空库回放通过，built-fingerprint 已由命令生成。
+验证：本机付款提醒单元 45 项、cron 7 项、API/Web lint 与类型检查通过；数据库 12 组场景通过；最新 staging 上的最终空库回放通过，built-fingerprint 已由命令生成。
 
 ## 实现与兼容
 
 - 每日 03:00 的 `release-subscription-credits` 并行跑提醒，不新增 cron；本批留 10 秒给原任务和响应，未开始的保留下次处理。
 - 发送前（包括管理员重发、未知结果短重试）在 claim 中复核实时订单、续费、退款、拒付冻结和注销；参数变化也不会套用旧正文。
-- 邮件包含明确 UTC 日期；创始身份结束在结束后的首次每日扫描处理（滚动 24 小时，避免 cron 后才结束而永久漏发）。
+- 邮件包含明确 UTC 日期；创始身份结束在结束后的首次每日扫描处理（滚动 7 天补扫，容忍任务延迟；已发记录继续幂等）。
 - 沿用 N1 表、唯一键、管理员权限和状态机；迁移头写有回滚，撤回发送器不删已发/未知结果记录。
 - 0312 把发送记录加入已有日志清理：每日删超过 29 天的记录，使正常每日执行时不超过 30 天；注销仍立即走已有 prune。
 - 新增两个内部只读函数和一个扫描 RPC 是最小缺口：现有 N1 只有单条入队/发送，不能发现业务到期。订单/订阅、`pay_founder_status`、`pay_common_membership_facts` 保持权威；无新表、状态来源或调度器。
@@ -52,7 +52,7 @@ Master Plan 2.1 已记录 2026-10-13 Owner 将 N1–N6 按推荐确认：自己�
 
 - PASS：`pnpm --filter @repo/api exec vitest run src/services/notify`，45 项（含重复、未知结果同键重试/转人工、重试间邮箱变化、测试白名单、六类模板）。
 - PASS：`pnpm --filter web exec vitest run src/app/api/cron/release-subscription-credits/route.test.ts`，7 项（含未授权拒绝、提醒失败告警、不阻断积分释放、积分失败时仍等待邮件任务收尾）。
-- PASS：`node packages/db/tests/payment-notices/reminders-local.mjs --local-only`，11 组场景，详见 `database-results.json`。测试库独立且清理完成；测试金融事实不代表真实付款。
+- PASS：`node packages/db/tests/payment-notices/reminders-local.mjs --local-only`，12 组场景，详见 `database-results.json`。测试库独立且清理完成；测试金融事实不代表真实付款。
 - PASS：API/Web 的 lint、typecheck；代码大小检查。
 - 说明：一次本机全量 API 测试与同步 staging 重叠，不能当作最终版本证据（7632 通过、4 失败、16 跳过）；其中同步影响的 2 组已经在稳定文件下重跑，11 项通过。最终全量以本 PR 当前版本 CI 为准。
 - NOT_RUN：真实邮件投递、Resend/DNS 配置状态、Stripe 测试时钟/Link 事件、钱包沙盒付款、真实升级退款恢复 Pro、真实拒付冻结；无配置/远程上库授权，不伪造前置条件。
@@ -76,3 +76,8 @@ Validation handoff：总控应用迁移并合并部署后，在 `/admin/payment-
 机器人首轮：审查覆盖 `9de0ae80e87c7e2ea52d8af3632bf774af08aa76`，无 P0/P1，一条 P2：积分释放失败不应提前返回而截断邮件。
 已按建议改为 `Promise.allSettled`，保留积分释放原顺序；两条新增测试在修复前失败（5 通过/2 失败），修复后 7 项通过，Web lint/typecheck 通过。下一轮复审针对该修复及其影响。
 首轮 CI：全量 API/Web 单元与回归、lint/类型和独立安全检查通过；迁移账本/CI 合约因缺号失败，Security Unit Tests 如实随前置失败，未豁免。
+
+
+复审另发现创始身份结束的 24 小时扫描窗口在每日 cron 延迟时可能永久漏发。此项影响必做验收，所以继续做同范围修复：改为 7 天补扫（短于 30 天记录保留，不会在清理后重新发）。数据库回归在同一临时库先恢复旧 24 小时条件，证实 26 小时前结束的身份漏扫，再恢复新条件验证能入队；不改结束时点或权益。
+
+7 天补扫修复后：12 组数据库验证与完整回放（310 步、241 个历史位置重复执行）通过，built-fingerprint 已再次由命令生成，临时库和名额已清理。本轮源代码只改创始身份结束的补扫窗口；前两轮机器人无 P0/P1，两个具体 P2 均修复并有回归证明。

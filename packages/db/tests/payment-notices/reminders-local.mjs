@@ -55,6 +55,19 @@ try {
   const grace = await order(await fx.profile(), { end: now - 5 * day - 3600000 });
   // endedAt today, independent of the host timezone/time of day.
   const ended = await order(await fx.profile(), { end: now - 7 * day - 1000 });
+  const delayedUser = await fx.profile();
+  const delayed = await order(delayedUser, { end: now - 8 * day - 2 * 3600000 });
+  // Red/green on the same actual database: the previous 24h cutoff permanently missed this ending.
+  const candidateBody = await v("SELECT pg_get_functiondef('payment_notice_candidates(uuid)'::regprocedure) v");
+  const newCutoff = "AND (e.st->>'endedAt')::timestamptz>now()-interval '7 days'";
+  assert.ok(candidateBody.includes(newCutoff));
+  await c.query('BEGIN');
+  try {
+    await c.query(candidateBody.replace(newCutoff, "AND (e.st->>'endedAt')::timestamptz>now()-interval '24 hours'"));
+    const oldRows = (await c.query('SELECT * FROM payment_notice_candidates($1)', [delayedUser])).rows;
+    assert.throws(() => assert.ok(oldRows.some(x => x.source_ref === delayed)), /false == true|assert|falsy/i);
+  } finally { await c.query('ROLLBACK'); }
+
   const mp = await order(await fx.profile(), { method: 'card' });
   const cn = await order(await fx.profile(), { method: 'card_cn' });
   const mpSub = (await rowOrder(mp)).subscription_id;
@@ -65,6 +78,8 @@ try {
   assert.ok(await find(due, '0d'));
   assert.ok(await find(grace, '+5d'));
   assert.equal((await find(ended)).kind, 'founder_ended');
+  assert.equal((await find(delayed)).kind, 'founder_ended');
+  report.checks.push('red/green: old 24h window misses a 26h-old ending; seven-day catch-up enqueues it');
   const cardNotice = await find(mpSub);
   assert.equal(cardNotice.kind, 'card_renewal_upcoming');
   assert.equal(cardNotice.template_params.amount, '496.00');
