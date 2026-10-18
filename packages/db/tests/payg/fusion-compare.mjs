@@ -71,6 +71,8 @@ export async function fusionCompareCases({db,Client,connectionString,report,crea
   await assert.rejects(begin(request([models[0],models[0]])),/FUSION_COMPARE_MODEL_NOT_ALLOWED/);
   await assert.rejects(begin(request([models[0],randomUUID()])),/FUSION_COMPARE_MODEL_NOT_ALLOWED/);
   await assert.rejects(begin({...request(),historyRevision:'7'}),/FUSION_COMPARE_STALE/);
+  await assert.rejects(begin({...request(),config:{models:models.slice(0,2),skill:null,materialRevision:'changed-since-read'}}),/FUSION_COMPARE_STALE/,
+    'the work material read with the history must still be current when the compare begins');
   await assert.rejects(begin({...request(),question:'tampered'}),/FUSION_COMPARE_INVALID/,'question hash binds the text');
   await assert.rejects(begin(request(),randomUUID(),randomUUID()),/FUSION_COMPARE_SESSION_GONE/);
   await assert.rejects(begin({...request(),workspaceDependencies:[{sourceVersionId:randomUUID()}]}),/FUSION_COMPARE_SOURCE_REVOKED/,

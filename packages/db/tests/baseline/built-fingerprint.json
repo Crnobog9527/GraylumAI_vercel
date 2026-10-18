@@ -3212,7 +3212,7 @@
   "fn:fusion_call_verdict(uuid,uuid,text)": "0aec31b33411",
   "fn:fusion_compare_active(uuid)": "fb5eb278ed80",
   "fn:fusion_compare_adopt(uuid,uuid,integer,uuid,jsonb,jsonb)": "5e418805f4af",
-  "fn:fusion_compare_begin(uuid,uuid,uuid,jsonb)": "ea9f62fdec3e",
+  "fn:fusion_compare_begin(uuid,uuid,uuid,jsonb)": "5b9a9bc0cf9b",
   "fn:fusion_compare_claim(uuid,uuid,jsonb)": "832c59481431",
   "fn:fusion_compare_context(uuid,uuid,integer)": "aacb83c94298",
   "fn:fusion_compare_end(uuid,uuid)": "7e020b79c359",

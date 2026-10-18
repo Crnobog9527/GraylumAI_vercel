@@ -15,7 +15,7 @@
 -- DROP FUNCTION public.fusion_compare_context(uuid,uuid,integer); DROP FUNCTION public.fusion_compare_end(uuid,uuid);
 -- DROP FUNCTION public.fusion_compare_gate(uuid,uuid,text,boolean); then re-run the fusion_compare_gate and
 -- fusion_compare_view definitions of 0290_fusion_compare.sql (three-argument gate, view without 'snapshotHash' and
--- 'gateFallback'), and the fusion_compare_adopt definition of 0290 (without the work-material condition); ALTER TABLE public.fusion_compares DROP COLUMN gate_fallback. The TypeScript treats a missing
+-- 'gateFallback'), and the fusion_compare_begin and fusion_compare_adopt definitions of 0290 (without the work-material checks); ALTER TABLE public.fusion_compares DROP COLUMN gate_fallback. The TypeScript treats a missing
 -- snapshotHash as "no check" and a missing gateFallback as "derive it from the gate state".
 BEGIN;
 SET LOCAL lock_timeout = '5s';
@@ -99,6 +99,71 @@ BEGIN
     UPDATE fusion_compares SET state='refused',updated_at=clock_timestamp() WHERE id=fc.id RETURNING * INTO fc;
   END IF;
   RETURN fusion_compare_view(fc);
+END $$;
+
+-- fusion_compare_begin: 0290's definition plus the work-material revision check under the session lock (before any record
+-- or paid work), when the request carries config.materialRevision.
+CREATE OR REPLACE FUNCTION public.fusion_compare_begin(p_actor_id uuid, p_request_id uuid, p_session_id uuid, p_request jsonb)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE fc fusion_compares; s runtime_sessions; v jsonb; lim jsonb; models jsonb; usage jsonb; n integer;
+BEGIN
+  PERFORM bill2_actor(p_actor_id);
+  -- The same per-user lock as fusion_review_start: a compare and a review never start at the same time.
+  PERFORM pg_advisory_xact_lock(hashtextextended('fusion-review:'||p_actor_id::text,0));
+  IF jsonb_typeof(p_request) IS DISTINCT FROM 'object' OR coalesce(p_request->>'requestHash','')!~'^[a-f0-9]{64}$'
+    OR coalesce(p_request->>'questionHash','')!~'^[a-f0-9]{64}$' OR jsonb_typeof(p_request->'question') IS DISTINCT FROM 'string'
+    OR p_request->>'questionHash' IS DISTINCT FROM encode(sha256(convert_to(p_request->>'question','UTF8')),'hex')
+    OR jsonb_typeof(p_request->'config') IS DISTINCT FROM 'object' OR coalesce(p_request->>'historyRevision','')!~'^[0-9]+$'
+    OR jsonb_typeof(coalesce(p_request->'workspaceDependencies','[]')) IS DISTINCT FROM 'array'
+    OR coalesce(p_request->>'snapshotHash','')!~'^[a-f0-9]{64}$'
+    OR EXISTS(SELECT 1 FROM jsonb_array_elements(coalesce(p_request->'workspaceDependencies','[]')) d
+      WHERE jsonb_typeof(d) IS DISTINCT FROM 'object' OR coalesce(d->>'sourceVersionId','')
+        !~'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' OR (SELECT count(*) FROM jsonb_object_keys(d))<>1)
+  THEN RAISE EXCEPTION 'FUSION_COMPARE_INVALID'; END IF;
+  SELECT * INTO fc FROM fusion_compares WHERE actor_id=p_actor_id AND request_id=p_request_id;
+  IF fc.id IS NOT NULL THEN
+    IF fc.request_hash<>p_request->>'requestHash' OR fc.session_id<>p_session_id THEN RAISE EXCEPTION 'FUSION_COMPARE_REQUEST_CONFLICT'; END IF;
+    RETURN fusion_compare_view(fc)||jsonb_build_object('created',false);
+  END IF;
+  v:=fusion_compare_settings(p_actor_id);
+  lim:=fusion_compare_limits(v);
+  SELECT * INTO s FROM runtime_sessions WHERE id=p_session_id AND actor_id=p_actor_id FOR SHARE;
+  IF s.id IS NULL OR s.content_deleted_at IS NOT NULL OR s.erased_at IS NOT NULL THEN RAISE EXCEPTION 'FUSION_COMPARE_SESSION_GONE'; END IF;
+  IF s.revision<>(p_request->>'historyRevision')::bigint THEN RAISE EXCEPTION 'FUSION_COMPARE_STALE'; END IF;
+  -- The work material (brief) the caller read with the history must still be the current one: material edits do not move
+  -- the session revision, and a start on an old brief would charge every model for it. TypeScript always sends the key.
+  IF (p_request->'config') ? 'materialRevision'
+    AND p_request#>>'{config,materialRevision}' IS DISTINCT FROM runtime_session_context(p_actor_id,s.id)->>'materialRevision'
+  THEN RAISE EXCEPTION 'FUSION_COMPARE_STALE'; END IF;
+  models:=p_request#>'{config,models}';
+  IF jsonb_typeof(models) IS DISTINCT FROM 'array' THEN RAISE EXCEPTION 'FUSION_COMPARE_INVALID'; END IF;
+  n:=jsonb_array_length(models);
+  IF n<(lim->>'min')::int THEN RAISE EXCEPTION 'FUSION_COMPARE_TOO_FEW'; END IF;
+  IF n>(lim->>'max')::int THEN RAISE EXCEPTION 'FUSION_COMPARE_TOO_MANY'; END IF;
+  IF (SELECT count(DISTINCT x) FROM jsonb_array_elements_text(models) x)<>n
+    OR EXISTS(SELECT 1 FROM jsonb_array_elements_text(models) x WHERE NOT coalesce(v#>'{compare,allowedModelIds}','[]') ? x)
+  THEN RAISE EXCEPTION 'FUSION_COMPARE_MODEL_NOT_ALLOWED'; END IF;
+  -- Frozen workspace sources: like runtime_workspace_tool_guard (0218), take the source projects in share mode
+  -- first, then require each source still allowed. A deletion that committed earlier is refused here; one that
+  -- comes later waits for this record and then finds it (content_erasure_confirm, below).
+  PERFORM p.id FROM artifact_projects p JOIN artifact_versions v ON v.project_id=p.id
+    WHERE p.actor_id=p_actor_id AND v.id::text IN (SELECT d->>'sourceVersionId'
+      FROM jsonb_array_elements(coalesce(p_request->'workspaceDependencies','[]')) d) ORDER BY p.id FOR SHARE OF p;
+  IF EXISTS(SELECT 1 FROM jsonb_array_elements(coalesce(p_request->'workspaceDependencies','[]')) d
+    WHERE NOT coalesce(opc_source_allowed(p_actor_id,(d->>'sourceVersionId')::uuid),false)) THEN
+    RAISE EXCEPTION 'FUSION_COMPARE_SOURCE_REVOKED'; END IF;
+  IF fusion_compare_active(p_actor_id) OR EXISTS(SELECT 1 FROM fusion_reviews WHERE actor_id=p_actor_id AND state IN ('running','paused')) THEN
+    RAISE EXCEPTION 'FUSION_COMPARE_ACTIVE'; END IF;
+  usage:=fusion_review_breaker_usage(p_actor_id);
+  IF (usage->>'noDeliveryCalls')::int>=coalesce((v#>>'{compare,breaker,noDeliveryCalls}')::int,10)
+    OR (usage->>'platformUsd')::numeric>=coalesce((v#>>'{compare,breaker,platformUsd}')::numeric,2) THEN
+    RAISE EXCEPTION 'FUSION_COMPARE_BREAKER'; END IF;
+  INSERT INTO fusion_compares(actor_id,request_id,session_id,history_revision,question,question_hash,request_hash,snapshot_hash,config,
+    workspace_dependencies,state)
+  VALUES(p_actor_id,p_request_id,s.id,s.revision,p_request->>'question',p_request->>'questionHash',p_request->>'requestHash',
+    p_request->>'snapshotHash',p_request->'config',coalesce(p_request->'workspaceDependencies','[]'),'admitting')
+  RETURNING * INTO fc;
+  RETURN fusion_compare_view(fc)||jsonb_build_object('created',true);
 END $$;
 
 -- fusion_compare_adopt: 0290's definition plus one more stale condition, the work-material revision recorded with the
