@@ -1166,7 +1166,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                       const live = liveReply?.executionId === execution.executionId ? liveReply : null;
                       const reply = mentorReplyDisplay({ ...execution, body: execution.body ?? execution.primaryBody,
                         legacyMessage: parsed.message, liveText: live?.text, liveCard: live?.card, stopLocal: stopLocal(execution.executionId),
-                        active: execution.executionId === history.data?.activeExecution, busy: busy || awaitingReply, stale });
+                        active: execution.executionId === history.data?.activeExecution, busy: busy || (awaitingReply && Boolean(liveReply)), stale });
                       const next = mentorExecutions[executionIndex + 1];
                       if (!next) { lastTurnNotice = showsTurnState(reply.notice); lastTurnText = reply.notice?.text ?? ""; }
                       const status = cardStatus({ isLatest: !next, turn, shown: { roundId: d.roundId, stepId: step.id },

@@ -398,7 +398,7 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
     completed={e.skillExecution&&e.state==='completed'&&!e.input?.startsWith('[OPC_WORK_CONTINUE_V1]')&&!e.input?.startsWith('[OPC_VIDEO_PACKAGE_V1]')}>
      <AgentWorkStatus items={runner.sourceDeleted.includes(e.executionId)?[]:streamedWorkItems(e,runner.workItems?.[e.executionId])}/>
      {(()=>{const progress=runtimeTurnProgress({turnState:e.state,reply:runner.reply,executionId:e.executionId,streaming:runner.streaming,
-       items:streamedWorkItems(e,runner.workItems?.[e.executionId])});
+       savedReply:Boolean(e.primaryBody||e.body),items:streamedWorkItems(e,runner.workItems?.[e.executionId])});
       return progress&&<TurnSteps hideTools quiet={progress.reopened} progress={progress.input}/>;})()}
      {workItem&&e.skillExecution&&e.state==='completed'&&!e.input?.startsWith('[OPC_WORK_CONTINUE_V1]')&&!e.input?.startsWith('[OPC_VIDEO_PACKAGE_V1]')&&e.contentAvailable?<RuntimeProposal adopted={versions.some(v=>v.kind===(isVideo?'script':'brief')&&v.executionId===e.executionId)}
       text={displayReply(e.input,e.body??e.primaryBody)}/>:!liveReplyText(runner.reply,e.executionId,e)&&showsReply(e)&&<RuntimeReply available={e.contentAvailable} text={displayReply(e.input,e.body??e.primaryBody)}/>}

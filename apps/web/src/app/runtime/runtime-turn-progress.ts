@@ -9,12 +9,14 @@ import { toolCounts, type TurnProgressInput } from '@/components/chat-display/tu
  */
 export function runtimeTurnProgress(args: {
   turnState: string; reply: LiveReply | null; executionId: string; streaming: boolean; items: readonly WorkItem[];
+  /** The saved execution already holds the primary reply (checkpoint_primary) while the turn is still open. */
+  savedReply?: boolean;
 }): { input: TurnProgressInput; reopened: boolean } | null {
   const live = args.reply?.executionId === args.executionId ? args.reply : null;
   const tools = toolCounts(args.items.map(item => item.state));
   if (live && args.streaming && !live.stopped && !live.finished && !['incomplete', 'waiting', 'stopped'].includes(live.phase))
     return { input: { phase: live.phase, hasText: Boolean(live.text), tools }, reopened: false };
   if (!args.streaming && ['prepared', 'running'].includes(args.turnState))
-    return { input: { phase: 'mentor', hasText: false, tools }, reopened: true };
+    return { input: { phase: args.savedReply ? 'organizer' : 'mentor', hasText: Boolean(args.savedReply), tools }, reopened: true };
   return null;
 }

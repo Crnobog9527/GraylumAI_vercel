@@ -14,6 +14,10 @@ describe('runtimeTurnProgress', () => {
   it('is reopened when the server still runs a turn this page does not stream', () => {
     expect(runtimeTurnProgress({ ...base, reply: null, streaming: false })?.reopened).toBe(true);
   });
+  it('does not pretend the reply is unwritten when the saved answer already exists', () => {
+    expect(runtimeTurnProgress({ ...base, reply: null, streaming: false, savedReply: true })?.input)
+      .toMatchObject({ phase: 'organizer', hasText: true });
+  });
   it('shows nothing for finished or stopped turns', () => {
     expect(runtimeTurnProgress({ ...base, turnState: 'completed', reply: null, streaming: false })).toBeNull();
     expect(runtimeTurnProgress({ ...base, reply: reply({ stopped: true }), streaming: true })).toBeNull();
