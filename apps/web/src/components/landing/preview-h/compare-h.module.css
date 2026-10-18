@@ -1,0 +1,64 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * The comparison (CompareH): per row, the mess in quiet greys on the left, the product piece in full colour on the
+ * right, so the eye moves from one to the other. Phone: each row stacks, the mess above the fix.
+ */
+.compare { display: grid; gap: 20px; }
+/* The Owner's module title reads as the subtitle under the screen's heading (the difference line). */
+.title { margin: 0 0 clamp(8px, 2vw, 16px); max-width: 30em; color: var(--h-body); font-size: var(--h-fs-lede); font-weight: 500; line-height: 1.6; text-wrap: balance; }
+.head { display: none; }
+.rows { display: grid; gap: 14px; margin: 0; padding: 0; list-style: none; }
+.row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.mess, .fix { display: grid; gap: 12px; align-content: start; min-width: 0; padding: var(--h-card-pad); border-radius: 20px; }
+.mess { border: 1px dashed rgba(var(--h-shade), .22); color: var(--h-muted); }
+.fix { border: 1px solid var(--h-line); background: #fff; box-shadow: 0 1px 2px rgba(var(--h-shade), .04), 0 16px 36px -24px rgba(var(--h-shade), .3); }
+.mess p, .fix p { margin: 0; font-size: var(--h-fs-body); line-height: 1.65; text-wrap: pretty; }
+.fix > p { color: var(--h-ink); font-weight: 600; }
+.who { display: block; margin-bottom: 2px; color: var(--h-muted); font-size: var(--h-fs-small); font-weight: 600; }
+.to { display: none; }
+@media (min-width: 900px) {
+  .head {
+    display: grid; grid-template-columns: minmax(0, 5fr) 40px minmax(0, 7fr); padding: 0 var(--h-card-pad);
+    color: var(--h-muted); font-size: var(--h-fs-small); font-weight: 600;
+  }
+  .head span:last-child { grid-column: 3; color: var(--h-ink); }
+  .row { grid-template-columns: minmax(0, 5fr) 40px minmax(0, 7fr); align-items: stretch; gap: 0; }
+  .to { display: grid; place-items: center; color: var(--h-muted); }
+  .who { display: none; }
+  .fix { grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); align-items: center; gap: 20px; }
+}
+
+/* The mess, icons only */
+.scene { position: relative; height: clamp(84px, 9vw, 112px); overflow: hidden; color: rgba(var(--h-shade), .38); }
+.scattered { position: absolute; }
+.pileCard {
+  position: absolute; top: 22px; left: calc(50% - 46px); display: grid; place-items: center; width: 92px; height: 64px;
+  border: 1px solid rgba(var(--h-shade), .14); border-radius: 10px; background: #fff;
+}
+.window {
+  position: absolute; top: 30px; left: calc(50% - 70px); display: flex; align-items: center; gap: 4px; width: 140px; height: 56px;
+  padding: 0 10px; border: 1px solid rgba(var(--h-shade), .16); border-radius: 10px; background: #fff; align-content: start;
+}
+.window i { width: 6px; height: 6px; border-radius: 50%; background: rgba(var(--h-shade), .18); }
+.window b { margin-left: 6px; color: rgba(var(--h-shade), .5); font-size: 12px; font-weight: 500; }
+.unread { position: absolute; top: 30px; left: calc(50% - 22px); }
+.unreadMark { position: absolute; top: -8px; right: -14px; color: rgba(var(--h-shade), .55); }
+
+/* The fix: the product's pieces, at the workbench's own scale */
+.piece { position: relative; min-width: 0; padding: 12px; border: 1px solid #ececec; border-radius: 14px; background: #fff; color: #262626; font-size: 13px; }
+.sample {
+  position: absolute; top: 8px; right: 10px; z-index: 1; padding: 0 7px; border-radius: 999px; background: var(--gl-accent-tag);
+  color: var(--gl-accent-tag-text); font-size: 11px; line-height: 18px;
+}
+.checklist { height: auto; max-height: 220px; overflow: hidden; mask-image: linear-gradient(#000 70%, transparent); }
+.piece section { margin: 0; padding: 12px !important; }
+/* The workbench pieces keep their layout but read at card size here; tall ones fade out at the bottom. */
+.piece section p, .piece section li, .piece section button { font-size: 13px !important; line-height: 1.6 !important; }
+.piece section > p:nth-of-type(n + 2) { display: none; }
+.piece { max-height: 260px; overflow: hidden; }
+.piece:has(section), .piece:has(.checklist) { mask-image: linear-gradient(#000 78%, transparent); }
+.card { display: grid; gap: 6px; }
+.card p { margin: 0; font-size: 13px; line-height: 1.6; }
+.card b { display: block; color: #777; font-size: 11.5px; font-weight: 500; }
+.cardTitle { display: flex; align-items: center; gap: 6px; margin-bottom: 2px !important; font-size: 14px !important; font-weight: 600; }
+.cardTitle svg { color: var(--h-accent); }

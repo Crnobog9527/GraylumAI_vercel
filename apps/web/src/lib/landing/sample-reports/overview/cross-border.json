@@ -1,0 +1,157 @@
+{
+  "slug": "cross-border",
+  "persona": {
+    "label": "跨境宠物卖家 · TikTok",
+    "who": "亚马逊美国站 5 年自有品牌卖家，卖猫砂垫和喂食器，不出镜"
+  },
+  "positioning": "美国养猫达人带货做主力，自有账号讲“你上班时猫在家干什么”，先卖猫砂垫再卖喂食器",
+  "riskAlert": {
+    "headline": "只靠自己店铺号半年做到月销 1 万美元，很难",
+    "why": [
+      "同类 18 万粉品牌号播放中位数也只约 1,169",
+      "白底产品视频在 TikTok 上天生吃亏",
+      "宠物用品是要先审核资质的类目"
+    ]
+  },
+  "audience": [
+    {
+      "name": "倒班、一个人住的养猫人",
+      "trigger": "开始轮班、换工作"
+    },
+    {
+      "name": "要出差、出门过节的人",
+      "trigger": "出差前、感恩节和圣诞出行前"
+    },
+    {
+      "name": "刚领养小猫的新手",
+      "trigger": "领养后一两周"
+    }
+  ],
+  "platform": {
+    "main": "TikTok 美国站",
+    "support": [],
+    "why": "成交、内容和达人结算都在这里"
+  },
+  "benchmarks": [
+    {
+      "id": "A",
+      "type": "智能宠物用品品牌号",
+      "followers": "182,665",
+      "medianViews": "约 1,169",
+      "engagementRate": null,
+      "updateFreq": "每周 1–2 条",
+      "learn": "用主人没意识到的问题开头"
+    },
+    {
+      "id": "B",
+      "type": "美国老牌宠物用品品牌",
+      "followers": "18,253",
+      "medianViews": "约 126",
+      "engagementRate": null,
+      "updateFreq": "新品发布周连发 17 条",
+      "learn": "猫对产品的真实反应能爆"
+    },
+    {
+      "id": "C",
+      "type": "美国天然猫砂品牌",
+      "followers": "11,177",
+      "medianViews": "约 1,149",
+      "engagementRate": null,
+      "updateFreq": "每月约 3 条",
+      "learn": "实用知识图文被收藏"
+    },
+    {
+      "id": "D",
+      "type": "英国猫用品展示号",
+      "followers": "73,565",
+      "medianViews": "约 872",
+      "engagementRate": null,
+      "updateFreq": "每天 1–2 条",
+      "learn": "全程不出镜，只拍猫和产品"
+    }
+  ],
+  "differentiation": "专讲主人不在家时猫怎么了，有 5 年真实评论原话",
+  "threePiece": {
+    "name": "Kittova · While You're at Work",
+    "bio": "你上班时，你的猫在干什么｜真猫实拍、真实测试｜喂食器和猫砂垫"
+  },
+  "ownAccount": {
+    "platform": "TikTok（店铺号）",
+    "displayName": "Kittova · While You're at Work",
+    "which": "recommended",
+    "bio": "你上班时，你的猫在干什么｜真猫实拍、真实测试｜喂食器和猫砂垫",
+    "followers": null,
+    "posts": "15 条白底产品视频，播放几百",
+    "topStat": null
+  },
+  "contentPillars": [
+    {
+      "name": "流量",
+      "share": "50%"
+    },
+    {
+      "name": "信任",
+      "share": "35%"
+    },
+    {
+      "name": "转化",
+      "share": "15%"
+    }
+  ],
+  "funnel": [
+    {
+      "layer": "免费内容",
+      "offer": "自己账号 + 达人视频",
+      "price": null,
+      "why": "让陌生人停下、记住；能看完的多半自己养猫"
+    },
+    {
+      "layer": "入门",
+      "offer": "猫砂垫",
+      "price": "19.99 美元",
+      "why": "第一次付费，最关键的分水岭：真肯为猫花钱"
+    },
+    {
+      "layer": "主力",
+      "offer": "定时喂食器",
+      "price": "49.99 美元",
+      "why": "解决“不在家”；肯花 50 美元的是常不在家的人"
+    },
+    {
+      "layer": "升级与复购",
+      "offer": "摄像头喂食器；新手套装",
+      "price": "89.99 美元",
+      "why": "给最不放心的人；肯多付的最在意“看得见”"
+    }
+  ],
+  "plan30": [
+    {
+      "week": 1,
+      "focus": "跑通拍摄和类目审核，发 4 条视频"
+    },
+    {
+      "week": 2,
+      "focus": "试实验结构，寄出第一批 10 份样品"
+    },
+    {
+      "week": 3,
+      "focus": "试转化内容，看点击、下单、达人出片"
+    },
+    {
+      "week": 4,
+      "focus": "加量好拍法，做 2 条续集"
+    }
+  ],
+  "metricsToWatch": [
+    "看完率",
+    "商品点击",
+    "下单率",
+    "达人出片率"
+  ],
+  "firstStep": [
+    "在卖家中心核对宠物用品类目资质",
+    "改三件套，旧白底视频设为仅自己可见",
+    "在助理家搭一个“美国感”拍摄角"
+  ],
+  "sourceNote": "数据来自公开平台接口，观察日期 2026-10-17，来自网络公开信息，真实性待考证，仅供参考"
+}

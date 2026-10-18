@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {admitOwnPosts,readWorkspaceCapability,ownPostsBudget} from './workspacePosts';
 import {freezeSkillFileBinding,skillFileToolBytes,skillFileContinuationBytes,type SkillFileBinding} from './skillFile';
 import { GENERIC_ORGANIZER_TEMPLATE, loadOrganizerTemplate } from '../skills/organizerTemplate';
 import {activateFreeChatSkill} from '../skills/stepGuide';
@@ -57,7 +58,6 @@ import {libraryReserveBytes,readSourceSlots,sourceReadFlags,throwLibraryRefusal}
 import {admitContentSource,isSqlStagingRefusal,type ContentSourceKind} from './contentSource';
 import {attachResearchTurn,fitsCapacity} from './researchAdmission';
 import {organizerSelection} from './organizerSelection';
-
 const uuid=z.string().uuid();
 export const runtimeMaterialInput=z.object({sessionId:uuid,requestId:uuid,expectedRevision:z.number().int().nonnegative(),
  brief:z.string().max(8000),material:z.string().max(16000),roundId:uuid.nullable().default(null)}).strict();
@@ -116,7 +116,6 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
  function inputCapacity(row:Record<string,unknown>,output:number,bytes=policy.inputBytes){
   return policy.real?Math.min(bytes,realModel(row).inputLimit):fixtureInputCapacity(Number(row.input_limit),output,bytes);
  }
-
  async function actor(){const a=await user.auth.getUser();if(a.error||!a.data.user||!isEmailVerified(a.data.user))throw new Error('RUNTIME_AUTH_REQUIRED');return a.data.user.id;}
  async function query(name:string,args:Record<string,unknown>){
   const r=await admin.rpc(name,{...args,p_actor_id:await actor()});
@@ -192,6 +191,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    const stepStream=Boolean(policy.opcTurnToken&&policy.stepStream);
    const libraryRetrieval=await admitLibraryRetrieval(admin,Boolean(policy.real),input.selection.kind,
     [mentorStream,stepStream,policy.reportGeneration,policy.opcTurnToken]);
+   let ownPosts=await admitOwnPosts(admin,Boolean(policy.real),input.selection.kind,
+    [mentorStream,stepStream,policy.reportGeneration,policy.opcTurnToken,input.sources.length]);
    if(stepStream&&(mentorStream||input.selection.kind!=='skill'||input.network!=='deny'||input.sources.length))
     throw new Error('RUNTIME_CONTEXT_INVALID');
    if(policy.expectedMaterialRevision!==undefined&&session.materialRevision!==policy.expectedMaterialRevision)throw new Error('RUNTIME_MATERIAL_CONFLICT');
@@ -326,25 +327,22 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     historyMarker:!hostTurnContext.opening&&!requestsHistoricalComparison(input.input)&&
      currentInputBytes([{role:'user',content:currentInput}])<=historySelection!.currentReserveBytes});
    const searchAllowed=Boolean(policy.searchEnabled&&input.network!=='deny');
-   let workspaceContext=false;
-   if(policy.workspaceContext&&!policy.opcTurnToken&&!input.sources.length&&input.selection.kind!=='organizer'){
-    const capability=await admin.rpc('runtime_workspace_session',{p_actor_id:await actor(),p_session_id:input.sessionId});
-    // A runtime-only install or rolling migration may lack the OPC reader: no function means ordinary free conversation.
-    if(capability.error&&!['PGRST202','42883'].includes(capability.error.code))throw new Error('RUNTIME_WORKSPACE_UNAVAILABLE');
-    workspaceContext=!capability.error&&capability.data===true;
-   }
-   // All dropped: no paid match; the turn is admitted exactly as an ordinary selection.
+   const workspaceContext=Boolean(policy.workspaceContext&&!policy.opcTurnToken&&!input.sources.length&&
+    input.selection.kind!=='organizer')&&await readWorkspaceCapability(admin,await actor(),input.sessionId);
+   ownPosts=ownPosts&&workspaceContext;
    const libraryRead=libraryReferences.length>0||libraryRetrieval;
    const sourceTools=[...(searchAllowed?['search']:[]),...(input.sources.length||workspaceContext||libraryRead?['read_source']:[])];
    libraryBytes=libraryReserveBytes(libraryReferences,sourceTools,workspaceContext,libraryRetrieval);
    const fitsWith=(extra:number)=>fitsCapacity(()=>requireCapacity(instructions+positioningRule,Boolean(skillFile),
     runtimeScopeInput(input.input,policy.reportGeneration?undefined:session.scopeMaterial,hostTurnContext),historyRead,extra));
+   const postsBudget=await ownPostsBudget(admin,await actor(),ownPosts,maxCalls,fitsWith);
+   ownPosts=postsBudget.on;maxCalls=postsBudget.calls;libraryBytes+=postsBudget.bytes;
    const strategyGuide=workspaceContext&&fitsWith(workspaceStrategyReserve(maxCalls));
    // The executor sizes a selected Skill with these exact tool descriptions plus the same cache/marker overhead.
    if(candidates.length)candidates=await fittingCandidates(candidates,candidate=>activateCandidateWithSource(user,admin,candidate,brandIdentity),
     {input:currentInput,inputBytes,toolBytes:candidateToolBytes(libraryReferences,sourceTools,workspaceContext,libraryRetrieval)+
      (historySelection?.markerReserveBytes??(promptCache?PROMPT_CACHE_OVERHEAD_BYTES:0)),
-     instructions:skill=>withPrimaryAddenda(skill,{...workspaceFrozen(workspaceContext,strategyGuide),network:input.network,
+     instructions:skill=>withPrimaryAddenda(skill,{...workspaceFrozen(workspaceContext,strategyGuide),ownPosts,network:input.network,
       replyLanguage:REPLY_LANGUAGE,libraryReferences,libraryRetrieval,
       ...(positioningFallback?{positioningGate:POSITIONING_FALLBACK}:{})})});
    const primaryTurns=maxCalls-(attachedOrganizer?1:0)-(searchAllowed?1:0)-(candidates.length?1:0);
@@ -391,6 +389,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     role:input.selection.kind==='auto'?'ordinary':input.selection.kind,input:input.input,instructions,model:row.data.model_id,
     ...(policy.opcTurnToken?{opcTurnToken:uuid.parse(policy.opcTurnToken)}:{}),...(candidates.length?{matching:{candidates}}:{}),
     ...(!policy.reportGeneration&&session.scopeMaterial?{scopeMaterial:session.scopeMaterial}:{}),...workspaceFrozen(workspaceContext,strategyGuide),
+    ...(ownPosts?{ownPosts:true as const}:{}),
     ...(positioningFallback?{positioningGate:POSITIONING_FALLBACK}:{}),replyLanguage:REPLY_LANGUAGE,...(sourceContent?{sourceContent}:{}),
     modelId,...(attachedOrganizer?{attachedOrganizer}:{}),maxOutputTokens,maxTurns:primaryTurns,historyItems,network:input.network,
     // Freeze the purpose ceiling; each selected model keeps its own call-policy limit.
@@ -403,7 +402,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
      sourceTools,
     maxToolCalls:mentorStream?(opening||stepSummary&&!skillFile?0:1):
      (searchAllowed?1:0)+readSourceSlots(libraryReferences,primaryTurns,
-      workspaceContext?Math.min(2,primaryTurns-1):input.sources.length,fitsWith,libraryRetrieval),
+      workspaceContext?Math.min(ownPosts?5:2,primaryTurns-1):input.sources.length,fitsWith,libraryRetrieval),
     request,...(policy.answeredCard?{answeredCard:policy.answeredCard}:{}),...(revisionId?{moduleId,skillId,revisionId}:{}),sources:input.sources};
    // CHAT-NATIVE-OUTPUT: free chat and a chosen Skill stream their plain reply; the format and billing profile stay as they were.
    const context:typeof frozen&{textStream?:typeof PLAIN_TEXT_STREAM}=plainTextStreamAllowed(frozen)?{...frozen,textStream:PLAIN_TEXT_STREAM}:frozen;

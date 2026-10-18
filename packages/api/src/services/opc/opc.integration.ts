@@ -2542,7 +2542,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST === "true")(
       await page.waitForURL(url => /^\/positioning\/[a-f0-9-]{36}$/.test(url.pathname));
       const draftPath = new URL(page.url()).pathname;
       await page
-        .getByText("Staging 真实模型测试 · 未开放联网研究", { exact: true })
+        .getByText("Staging 真实模型测试", { exact: true })
         .waitFor();
       // Entry opens the current question once; no second generation is needed.
       await page.getByText(/【导师主动引导，仅验证流程】第 1\.1 题/).waitFor();

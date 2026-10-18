@@ -22,6 +22,8 @@ export const PUBLIC_PATHS = [
   '/features',
   // The tutorial blog (SEO_GEO_SPEC 14): /blog and /blog/<article>, linked from the public header as 教程.
   '/blog',
+  // The public pricing page (moved from /landing/pricing, 2026-10-18).
+  '/pricing',
   '/auth',
   '/landing',
   '/api',

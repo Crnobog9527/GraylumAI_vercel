@@ -64,8 +64,14 @@ export function RuntimeTurnView({ dateLabel, userText, completed = false, childr
 }
 
 /** A plain reply, or the line that its source is gone. */
-export function RuntimeReply({ text, available = true }: { text: string; available?: boolean }) {
-  return available ? <MessageMarkdown className={workStyles.reply} text={text}/> : <p className={workStyles.reply}>来源已不可用，暂不展示此内容。</p>;
+export function RuntimeReply({ text, available = true, streaming = false }: {
+  text: string;
+  available?: boolean;
+  /** Still being written: an unfinished Markdown mark is closed for display, as in the mentor chat. */
+  streaming?: boolean;
+}) {
+  return available ? <MessageMarkdown className={workStyles.reply} text={text} streaming={streaming}/>
+    : <p className={workStyles.reply}>来源已不可用，暂不展示此内容。</p>;
 }
 
 /** The "建议稿" block of a completed Skill reply on a topic. */

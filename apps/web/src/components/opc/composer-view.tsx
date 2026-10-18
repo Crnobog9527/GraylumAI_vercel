@@ -113,11 +113,17 @@ export type ComposerPreviewParagraph=Array<string|{reference:string}>;
 
 /**
  * A read-only picture of the text box with its content, for the landing page: the same classes as the live
- * editor (`.ProseMirror`, the `library-reference` chip), without the editing engine.
+ * editor (`.ProseMirror`, the `library-reference` chip), without the editing engine. With no text it shows
+ * `placeholder` the way the live editor does; `caret` (for a message being typed) follows the last character.
  */
-export function ComposerTextPreview({label='消息',paragraphs}:{label?:string;paragraphs:ComposerPreviewParagraph[]}){
+export function ComposerTextPreview({label='消息',paragraphs,placeholder,caret}:{
+ label?:string;paragraphs:ComposerPreviewParagraph[];placeholder?:string;caret?:ReactNode;
+}){
+ const empty=paragraphs.every(parts=>parts.every(part=>part===''));
  return <div className={styles.editor}><div className="ProseMirror" role="textbox" aria-label={label} aria-multiline="true" aria-readonly="true">
-  {paragraphs.map((parts,index)=><p key={index}>{parts.map((part,at)=>typeof part==='string'?part
-   :<span key={at} className="library-reference" data-library-reference="">{'@'+part.reference}</span>)}</p>)}
+  {empty?<p className="is-editor-empty" data-placeholder={placeholder}>{caret}</p>
+   :paragraphs.map((parts,index)=><p key={index}>{parts.map((part,at)=>typeof part==='string'?part
+   :<span key={at} className="library-reference" data-library-reference="">{'@'+part.reference}</span>)}
+   {index===paragraphs.length-1?caret:null}</p>)}
  </div></div>;
 }

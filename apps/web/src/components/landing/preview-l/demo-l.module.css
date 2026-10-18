@@ -1,0 +1,15 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/* Shared by the demos of steps two and three and region 6.
+ * Round eight (U8, U11): a demo's conversation and side column scroll with their scrollbar always shown, also where the
+ * system hides scrollbars until used. A styled scrollbar is drawn; the page's own thin standard scrollbar (globals.css)
+ * would give the system's hidden one back, so it is reset here, and only browsers without the styled kind get the
+ * standard properties. Doubled to win over the frame's own overflow.
+ */
+.scrollbar.scrollbar { overflow-y: auto; overscroll-behavior: contain; scrollbar-width: auto; scrollbar-color: auto; }
+.scrollbar::-webkit-scrollbar { width: 8px; }
+.scrollbar::-webkit-scrollbar-track { background: transparent; }
+.scrollbar::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 4px; background: #c9c6bf padding-box; }
+@supports not selector(::-webkit-scrollbar) { .scrollbar.scrollbar { scrollbar-width: thin; scrollbar-color: #c9c6bf transparent; } }
+/* Round eight (U9): the thin bar on the next tab that fills before the demo moves on by itself (the tab is its frame). */
+.countdownHost { position: relative; overflow: hidden; }
+.countdown { position: absolute; right: 12px; bottom: 5px; left: 12px; height: 2px; border-radius: 1px; background: currentColor; opacity: .7; transform-origin: 0 50%; }

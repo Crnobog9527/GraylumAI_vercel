@@ -1,0 +1,40 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/* Round seven (T6): "一个月能赚多少？算给你看", in the report overview's money card (overview-l.module.css's palette). */
+.earnings { display: grid; gap: 12px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--j-line); }
+.title { margin: 0; color: var(--j-ink); font-size: 15px; font-weight: 600; }
+.switch { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; color: var(--j-body); font-size: 13px; }
+.switch [role='radiogroup'] { display: inline-flex; padding: 3px; border-radius: 999px; background: #f4f3ef; }
+.switch button {
+  min-height: 32px; padding: 0 14px; border: 0; border-radius: 999px; background: transparent; color: var(--j-body);
+  font: inherit; font-size: 13px; font-weight: 500; cursor: pointer;
+}
+.switch button[aria-checked='true'] { background: var(--j-ink); color: #fff; }
+.switch button:focus-visible { outline: 2px solid var(--j-ink); outline-offset: 2px; }
+.steps { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.steps li { display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px; }
+.count { display: flex; align-items: baseline; gap: 4px; margin: 0; }
+.count b { color: var(--j-ink); font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.count span { color: var(--j-gold-text); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.what { margin: 0; color: var(--j-ink); font-size: 13.5px; }
+.bar { display: block; width: var(--w); height: 6px; border-radius: 3px; background: linear-gradient(90deg, #f2c94c, #e0a82e); }
+@media (prefers-reduced-motion: no-preference) { .bar { transition: width .6s cubic-bezier(.2, .7, .2, 1); } }
+.steps small { color: #8a8a87; font-size: 12px; line-height: 1.5; }
+.total { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: 2px 0 0; padding: 12px 14px; border-radius: 12px; background: #fff7e0; }
+.total span { color: var(--j-ink); font-size: 14px; }
+.total b { color: var(--j-ink); font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.total em { color: var(--j-gold-text); font-size: 13px; font-style: normal; font-weight: 600; }
+.formula, .layers { display: grid; gap: 6px; padding: 12px 14px; border-radius: 12px; background: #f7f6f2; }
+.subtitle { margin: 0; color: var(--j-ink); font-size: 14px; font-weight: 600; }
+.general { margin: 0; color: var(--j-ink); font-size: 13px; line-height: 1.7; }
+.put { display: grid; gap: 2px; margin: 0; color: var(--j-ink); font-size: 13px; font-variant-numeric: tabular-nums; line-height: 1.7; }
+.plain { margin: 0; text-wrap: balance; color: var(--j-body); font-size: 13px; line-height: 1.7; }
+.layers ol { display: grid; gap: 8px; margin: 0; padding-left: 1.4em; color: var(--j-ink); font-size: 13.5px; line-height: 1.7; }
+.layers li b { margin-right: 6px; font-weight: 600; }
+.layers li span { color: var(--j-body); }
+.summary { margin: 0; text-wrap: balance; color: var(--j-ink); font-size: 13.5px; line-height: 1.7; }
+.disclaimer { margin: 0; text-wrap: balance; color: #8a8a87; font-size: 12px; }
+@media (min-width: 640px) {
+  .steps li { grid-template-columns: 9.5em minmax(0, 1fr); column-gap: 14px; align-items: center; }
+  .count { grid-row: span 2; }
+  .steps small { grid-column: 2; }
+}

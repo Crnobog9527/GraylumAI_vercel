@@ -5,3 +5,5 @@ a3bd63213d9860f82f3492b513e1f98d34c40242:packages/api/src/routers/payments.test.
 ccc58c3b70ab50d5b6b260ebb1ad503592b1681f:packages/db/tests/baseline/built-fingerprint.json:generic-api-key:1894
 # Generated catalog MD5 for subscription_credit_grants_user_id_fkey changed to ON DELETE RESTRICT; not a credential.
 7ea582bd4000e1ce364894713d5707e962da3f3f:packages/db/tests/baseline/built-fingerprint.json:generic-api-key:1858
+# SQL prose about entitlement and erasure, not a credential; exact historical false positive approved by Owner.
+417c9fcb94940162a0e33904cf2a5a4769ae6b3f:packages/db/migrations/0307_runtime_workspace_my_posts.sql:generic-api-key:130

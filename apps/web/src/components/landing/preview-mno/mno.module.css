@@ -1,0 +1,75 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * What samples M, N and O share (Owner 2026-10-17's conversion rules): the thin "免费和教练聊聊" bar under the header
+ * once the first screen is past, and the plan cards with "先聊后买" right under them. Neutral, light; each sample
+ * restyles them through its own root class. Colours come from the light foundation (--gl-*) and sample J's tokens.
+ */
+.stickyCta {
+  position: fixed; left: 0; right: 0; z-index: 29; border-bottom: 1px solid var(--j-line, #e7e6e2); background: rgba(255, 255, 255, .96);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); opacity: 0; translate: 0 -8px; pointer-events: none;
+  transition: opacity .25s ease-out, translate .25s ease-out;
+}
+.stickyCta[data-shown] { opacity: 1; translate: 0 0; pointer-events: auto; }
+.stickyInner {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; max-width: 1240px; margin: 0 auto;
+  padding: 7px var(--j-gutter, 16px);
+}
+.stickyInner p { margin: 0; overflow: hidden; color: var(--j-body, #3d3c3a); font-size: 14px; white-space: nowrap; text-overflow: ellipsis; }
+.stickyButton {
+  display: inline-flex; flex: none; align-items: center; gap: 6px; min-height: 36px; padding: 0 16px; border-radius: 999px;
+  background: var(--j-ink, #141312); color: #fff; font-size: 14px; font-weight: 500; text-decoration: none;
+}
+@media (prefers-reduced-motion: reduce) { .stickyCta { transition: none; } }
+
+/* Plan cards */
+.plans { display: grid; gap: 16px; }
+.billing { display: inline-flex; justify-self: center; gap: 4px; padding: 4px; border: 1px solid var(--j-line, #e7e6e2); border-radius: 999px; background: #fff; }
+.billing label {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 16px; border-radius: 999px; color: var(--j-body, #3d3c3a);
+  font-size: 14px; cursor: pointer;
+}
+.billing label[data-on] { background: var(--j-ink, #141312); color: #fff; }
+.billing label[data-disabled] { cursor: not-allowed; opacity: .45; }
+.billing label:focus-within { outline: 2px solid var(--j-ink, #141312); outline-offset: 2px; }
+.saveTag { padding: 0 8px; border-radius: 999px; background: #fff4d6; color: #8a5a00; font-size: 12px; font-weight: 600; line-height: 22px; }
+.cards { display: grid; gap: 14px; }
+@media (min-width: 720px) { .cards { grid-auto-columns: minmax(0, 1fr); grid-auto-flow: column; align-items: stretch; } }
+.plan { display: grid; align-content: start; gap: 12px; padding: 22px; border: 1px solid var(--j-line, #e7e6e2); border-radius: 18px; background: #fff; }
+.plan[data-recommended] { border: 2px solid var(--j-gold, #ffbb17); box-shadow: 0 18px 40px -24px rgba(138, 90, 0, .45); }
+.planHead { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.planName { margin: 0; font-size: 20px; font-weight: 600; }
+.planTag { padding: 0 10px; border-radius: 999px; background: var(--j-gold, #ffbb17); color: #1a1a1a; font-size: 12px; font-weight: 700; line-height: 24px; }
+.planResult { margin: 0; color: var(--j-body, #3d3c3a); font-size: 15px; line-height: 1.6; }
+.planPrice { display: grid; gap: 6px; justify-items: start; }
+.planPrice p { display: flex; align-items: baseline; gap: 6px; margin: 0; }
+.planPrice s { color: #6b6b6b; font-size: 15px; }
+.planPrice b { font-size: 36px; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.planPrice span { color: #6b6b6b; font-size: 14px; }
+.planSaving, .planMissing { margin: 0; color: #6b6b6b; font-size: 13px; }
+.planAction { display: grid; gap: 6px; }
+.planAction p { margin: 0; color: #6b6b6b; font-size: 12.5px; }
+.planButton {
+  display: inline-flex; align-items: center; justify-content: center; min-height: 46px; padding: 0 20px; border-radius: 999px;
+  background: var(--j-ink, #141312); color: #fff; font-size: 15px; font-weight: 500; text-decoration: none;
+}
+.plan:not([data-recommended]) .planButton { border: 1px solid var(--j-ink, #141312); background: #fff; color: var(--j-ink, #141312); }
+.planFit { margin: 0; color: #6b6b6b; font-size: 13.5px; }
+.risk { padding: 18px 20px; border: 1px solid #cfe3d6; border-radius: 16px; background: #f3faf5; }
+.riskTitle { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; font-size: 17px; font-weight: 600; }
+.riskTitle svg { color: #1f6b4a; }
+.risk ul { display: grid; gap: 4px; margin: 0; padding: 0 0 0 18px; color: var(--j-body, #3d3c3a); font-size: 15px; line-height: 1.7; }
+
+/* Sample L (data-phone-bottom): on a phone the bar sits at the foot, in the thumb's reach, the button alone. */
+@media (max-width: 767px) {
+  .stickyCta[data-phone-bottom] {
+    top: auto !important; bottom: 0; border-top: 1px solid var(--j-line, #e7e6e2); border-bottom: 0; translate: 0 8px;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .stickyCta[data-phone-bottom][data-shown] { translate: 0 0; }
+  .stickyCta[data-phone-bottom] .stickyInner p { display: none; }
+  .stickyCta[data-phone-bottom] .stickyButton { flex: 1; justify-content: center; min-height: 46px; font-size: 16px; }
+}
+
+/* Sample L: the one-line 先聊后买 right under the recommended plan's button. */
+.riskLine { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; color: #1f6b4a; font-size: 14px; }
+.riskLine b { font-weight: 600; }

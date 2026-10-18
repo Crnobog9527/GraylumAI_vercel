@@ -12,10 +12,12 @@ const READING_LINE = 96;
  * "show latest" box while editing) do not count. Only reads the page; the report text itself is not changed.
  */
 export function findReportChapters(body: HTMLElement): HTMLElement[] {
-  const visible = Array.from(body.querySelectorAll<HTMLElement>("h1,h2,h3"))
+  // A report shown as a public page's example has its headings as plain elements (display-heading.tsx): same levels.
+  const levelOf = (heading: HTMLElement) => (heading.dataset?.demoHeading ?? heading.tagName).toUpperCase();
+  const visible = Array.from(body.querySelectorAll<HTMLElement>("h1,h2,h3,[data-demo-heading=h1],[data-demo-heading=h2],[data-demo-heading=h3]"))
     .filter(heading => !heading.closest("details:not([open])") && heading.textContent?.trim());
   for (const level of ["H1", "H2", "H3"]) {
-    const found = visible.filter(heading => heading.tagName === level);
+    const found = visible.filter(heading => levelOf(heading) === level);
     if (found.length >= 2) return found;
   }
   return [];

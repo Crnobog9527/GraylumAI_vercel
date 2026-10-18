@@ -3,7 +3,7 @@
 // Douyin search v5 and Instagram posts v2 failed upstream and are deliberately absent. Responses
 // carry no cost: each successful call is one unit at the frozen official price (RT-2).
 import { exchange } from './http';
-import { hasEmptyPostList, normalizeTikhub, tikhubBodyCode } from './tikhubShapes';
+import { hasEmptyPostList, normalizeTikhub, tikhubBodyCode, xhsNextCursor } from './tikhubShapes';
 import type {
   ResearchCallResult, SocialKind, SocialPlatform, VendorDeps, VendorRequest,
 } from './types';
@@ -18,7 +18,7 @@ interface TikhubRoute {
   path: string;
   /** What `account` (or, for post_detail, `postId`) must look like. */
   account?: AccountId;
-  params: (input: { keyword?: string; account?: string; limit: number }) => Record<string, string | number>;
+  params: (input: { keyword?: string; account?: string; limit: number; cursor?: string }) => Record<string, string | number>;
 }
 
 /** `${platform}:${kind}` → verified TikHub endpoint. Absent pairs are not supported. */
@@ -50,7 +50,9 @@ export const TIKHUB_ROUTES: Partial<Record<`${SocialPlatform}:${SocialKind}`, Ti
     method: 'GET', path: '/xiaohongshu/app_v2/get_user_info', account: 'xhs_user', params: ({ account }) => ({ user_id: account! }),
   },
   'xiaohongshu:account_posts': {
-    method: 'GET', path: '/xiaohongshu/app_v2/get_user_posted_notes', account: 'xhs_user', params: ({ account }) => ({ user_id: account! }),
+    // `cursor` is the previous page's last note cursor (TikHub: empty for the first request).
+    method: 'GET', path: '/xiaohongshu/app_v2/get_user_posted_notes', account: 'xhs_user',
+    params: ({ account, cursor }) => ({ user_id: account!, ...(cursor ? { cursor } : {}) }),
   },
   // Bilibili's profile has no follower count; followers come from a second, separately billed
   // relation call. Both paths are from TikHub's OpenAPI spec; RESEARCH-0 tested only the profile, so
@@ -144,6 +146,8 @@ export interface TikhubCall {
   /** The post to read for `post_detail` (a YouTube video id). */
   postId?: string;
   limit?: number;
+  /** Next-page cursor for routes that paginate (Xiaohongshu account_posts); a malformed one sends nothing. */
+  cursor?: string;
 }
 
 /** Account identifier rule for a platform's account routes; null when no account route exists. */
@@ -170,10 +174,11 @@ export function buildTikhubRequest(call: TikhubCall): { request: VendorRequest }
   if (!account || !route.account || !ACCOUNT_PATTERNS[route.account].test(account)) {
     return { reason: call.kind === 'post_detail' ? 'INVALID_POST' : 'INVALID_ACCOUNT' };
   }
-  return { request: requestFor(route, { account, limit }) };
+  if (call.cursor !== undefined && (call.kind !== 'account_posts' || !/^[0-9a-f]{24}$/.test(call.cursor))) return { reason: 'INVALID_CURSOR' };
+  return { request: requestFor(route, { account, limit, ...(call.cursor ? { cursor: call.cursor } : {}) }) };
 }
 
-function requestFor(route: TikhubRoute, input: { keyword?: string; account?: string; limit: number }): VendorRequest {
+function requestFor(route: TikhubRoute, input: { keyword?: string; account?: string; limit: number; cursor?: string }): VendorRequest {
   const params = route.params(input);
   if (route.method === 'POST') return { method: 'POST', url: `${TIKHUB_BASE}${route.path}`, body: params };
   const url = new URL(`${TIKHUB_BASE}${route.path}`);
@@ -228,6 +233,8 @@ export async function callTikhub(call: TikhubCall, deps: VendorDeps): Promise<Re
   }
   const limit = Math.min(Math.max(Math.trunc(call.limit ?? MAX_POSTS), 1), MAX_POSTS);
   const items = all.slice(0, limit);
+  const nextCursor = call.platform === 'xiaohongshu' && call.kind === 'account_posts' ? xhsNextCursor(answer.json) : undefined;
   return { ...base, outcome: all.length > limit ? 'partial' : 'ok', reason: null, httpStatus: 200,
-    supplierMayCharge: true, usage: { unit: 'call', units: '1' }, items, truncated: all.length > limit };
+    supplierMayCharge: true, usage: { unit: 'call', units: '1' }, items, truncated: all.length > limit,
+    ...(nextCursor ? { nextCursor } : {}) };
 }
