@@ -2,7 +2,7 @@
 // TikHub passes each platform's own JSON through under `data` without a published schema, so items are
 // located by their characteristic keys (ported from the RESEARCH-0 comparison tooling).
 // Only whitelisted fields leave this module: no bios, contact details, avatars or commenter data.
-import { SOCIAL_EARLIEST_MS, bool, clip, count, displayCount, findAll, has, idText, text, timestamp } from './fields';
+import { SOCIAL_EARLIEST_MS, bool, clip, count, displayCount, findAll, first, has, idText, text, timestamp } from './fields';
 import { publicHttpUrl } from './http';
 import type { ResearchItem, SocialKind, SocialPlatform } from './types';
 
@@ -48,7 +48,8 @@ function aweme(item: Raw, platform: 'douyin' | 'tiktok') {
     publishedAt: timestamp(item, ['create_time'], SOCIAL_EARLIEST_MS),
     // Douyin account posts hide play counts: recorded real responses carry play_count 0 on posts with thousands of
     // likes (RT-7), so a 0 there is "not provided", never a count. A positive value (search results may carry one) is kept.
-    views: platform === 'douyin' ? positive(count(item, ['statistics.play_count'])) : count(item, ['statistics.play_count']), likes: count(item, ['statistics.digg_count']),
+    views: platform === 'douyin' ? positive(count(item, ['statistics.play_count']))
+      : count(item, ['statistics.play_count']), likes: count(item, ['statistics.digg_count']),
     comments: count(item, ['statistics.comment_count']), shares: count(item, ['statistics.share_count']),
   }, POST_FIELDS, url);
 }
@@ -310,4 +311,17 @@ export function tikhubBodyCode(json: unknown): number | undefined {
   const raw = json as Raw | null;
   const code = raw?.code ?? (raw?.detail as Raw | undefined)?.code;
   return typeof code === 'number' ? code : undefined;
+}
+
+/**
+ * Xiaohongshu note lists are cursor-paginated: when the supplier says `has_more`, the next page starts after the last
+ * note's `cursor` (TikHub: `$.data.data.notes[-1].cursor`, usually that note's id). Anything else means no next page.
+ */
+export function xhsNextCursor(json: unknown): string | undefined {
+  const page = (first(json, ['data.data']) ?? first(json, ['data'])) as Raw | undefined;
+  const notes = page && Array.isArray(page.notes) ? page.notes as Raw[] : [];
+  if (!page || page.has_more !== true || notes.length === 0) return undefined;
+  const last = notes[notes.length - 1]!;
+  const cursor = idText(last, ['cursor', 'id', 'note_id']);
+  return cursor !== undefined && /^[0-9a-f]{24}$/.test(cursor) ? cursor : undefined;
 }

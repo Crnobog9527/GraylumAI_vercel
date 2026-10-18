@@ -39,6 +39,34 @@ describe('Xiaohongshu account routes on real response shapes', () => {
   });
 });
 
+describe('Xiaohongshu notes pagination', () => {
+  const notes = (samples.xhsNotes.data as { data: { notes: Array<{ id: string }> } }).data.notes;
+  const lastId = notes[notes.length - 1]!.id;
+  const page = (hasMore: boolean, extra: Record<string, unknown> = {}) => ({ ...samples.xhsNotes,
+    data: { ...samples.xhsNotes.data, data: { ...(samples.xhsNotes.data as { data: object }).data, has_more: hasMore, ...extra } } });
+
+  it('returns the last note as the next cursor only when the supplier says there is more', async () => {
+    const withCursor = page(true, { notes: notes.map((note, i) => ({ ...note, cursor: i === notes.length - 1 ? '6a00000000000000000000ff' : note.id })) });
+    expect((await call('xiaohongshu', 'account_posts', withCursor)).nextCursor).toBe('6a00000000000000000000ff');
+    expect((await call('xiaohongshu', 'account_posts', page(true))).nextCursor).toBe(lastId);
+    expect((await call('xiaohongshu', 'account_posts', page(false))).nextCursor).toBeUndefined();
+  });
+
+  it('sends the cursor on the next request and refuses a malformed one without calling', async () => {
+    const calls: Array<{ url: string }> = [];
+    await callTikhub({ platform: 'xiaohongshu', kind: 'account_posts', account: XID, cursor: '6a0000000000000000000001' },
+      deps(jsonFetch(200, page(false), calls as never)));
+    expect(new URL(calls[0]!.url).searchParams.get('cursor')).toBe('6a0000000000000000000001');
+    const first: Array<{ url: string }> = [];
+    await callTikhub({ platform: 'xiaohongshu', kind: 'account_posts', account: XID }, deps(jsonFetch(200, page(false), first as never)));
+    expect(new URL(first[0]!.url).searchParams.has('cursor')).toBe(false);
+    const bad: Array<{ url: string }> = [];
+    expect(await callTikhub({ platform: 'xiaohongshu', kind: 'account_posts', account: XID, cursor: '../x' }, deps(jsonFetch(200, {}, bad as never))))
+      .toMatchObject({ outcome: 'not_sent', reason: 'INVALID_CURSOR' });
+    expect(bad).toHaveLength(0);
+  });
+});
+
 describe('Douyin account routes on real response shapes', () => {
   it('reads followers and posts; hidden play counts (always 0 upstream) are missing, not 0', async () => {
     const profile = await call('douyin', 'account_profile', samples.douyinProfile);
