@@ -110,7 +110,8 @@ LANGUAGE sql SECURITY DEFINER SET search_path=public,pg_temp AS $$
   SELECT p_execution_id UNION SELECT d.dependency_id FROM runtime_history_dependencies d JOIN lineage l ON d.execution_id=l.id
  ) SELECT NOT EXISTS(SELECT 1 FROM lineage l JOIN runtime_tool_calls t ON t.execution_id=l.id
   JOIN runtime_executions ex ON ex.id=l.id WHERE (t.result->>'kind'='my_posts'
-   AND NOT runtime_workspace_posts_visible(ex.actor_id,t.result)) OR (ex.payload->>'ownPosts'='true'
+   AND CASE WHEN publish_monitor_actor_open(ex.actor_id) THEN NOT runtime_workspace_posts_visible(ex.actor_id,t.result)
+    ELSE true END) OR (ex.payload->>'ownPosts'='true'
     AND t.name='read_source' AND t.erased_at IS NOT NULL AND t.result IS NULL))
 $$;
 REVOKE ALL ON FUNCTION public.runtime_workspace_posts_history_visible(uuid) FROM PUBLIC,anon,authenticated,service_role;
@@ -199,9 +200,13 @@ BEGIN
   anchor:=$a$ RETURN jsonb_build_object('processed',done,'waiting',waiting);$a$;
   work:=$w$ -- B2 pending own-post receipts: separate bounded batches; no connection transaction owns historical cleanup.
  FOR target IN SELECT ex.id execution_id FROM runtime_executions ex JOIN profiles p ON p.id=ex.actor_id
-  WHERE ex.payload->>'ownPosts'='true' AND (p_actor_id IS NULL OR ex.actor_id=p_actor_id)
-   AND EXISTS(SELECT 1 FROM runtime_tool_calls t WHERE t.execution_id=ex.id AND t.result->>'kind'='my_posts'
-    AND NOT runtime_workspace_posts_visible(ex.actor_id,t.result))
+  WHERE (p_actor_id IS NULL OR ex.actor_id=p_actor_id) AND NOT runtime_workspace_posts_history_visible(ex.id)
+   AND (EXISTS(SELECT 1 FROM runtime_tool_calls t WHERE t.execution_id=ex.id AND t.result->>'kind'='my_posts')
+    OR EXISTS(SELECT 1 FROM runtime_session_history h WHERE h.execution_id=ex.id AND h.erased_at IS NULL
+     AND h.item->>'role' IS DISTINCT FROM 'user')
+    OR EXISTS(SELECT 1 FROM runtime_session_batches sb WHERE sb.execution_id=ex.id AND sb.erased_at IS NULL)
+    OR EXISTS(SELECT 1 FROM bill2_runs br WHERE br.id=ex.billing_run_id AND br.content_deleted_at IS NULL)
+    OR ex.state NOT IN ('completed','cancelled') AND ex.unavailable_reason IS NULL)
    AND (ex.billing_run_id IS NULL OR EXISTS(SELECT 1 FROM bill2_runs br WHERE br.id=ex.billing_run_id FOR UPDATE SKIP LOCKED))
   ORDER BY ex.id LIMIT p_limit FOR UPDATE OF ex,p SKIP LOCKED LOOP
   SELECT * INTO e FROM runtime_executions WHERE id=target.execution_id;
@@ -219,11 +224,9 @@ BEGIN
  -- Readiness and SKIP LOCKED are evaluated before LIMIT: open, untrusted or locked rows cannot starve later runs.
  FOR target IN SELECT ex.id execution_id FROM runtime_executions ex JOIN bill2_runs br ON br.id=ex.billing_run_id
   JOIN profiles p ON p.id=ex.actor_id
-  WHERE br.content_deleted_at IS NOT NULL AND br.closed AND ex.payload->>'ownPosts'='true'
+  WHERE br.content_deleted_at IS NOT NULL AND br.closed AND NOT runtime_workspace_posts_history_visible(ex.id)
    AND (p_actor_id IS NULL OR ex.actor_id=p_actor_id)
    AND coalesce(content_erasure_financial_allowed(ex.actor_id,coalesce(br.pre_deduct_id,br.id)),false)
-   AND EXISTS(SELECT 1 FROM runtime_tool_calls t WHERE t.execution_id=ex.id AND t.erased_at IS NOT NULL
-    AND t.name='read_source' AND t.result IS NULL)
    AND EXISTS(SELECT 1 FROM bill2_receipts r JOIN bill2_calls c ON c.id=r.call_id
     WHERE c.run_id=br.id AND r.financial_projection_version IS NULL AND runtime_workspace_posts_receipt_ready(r.payload,c))
   ORDER BY ex.id LIMIT p_limit FOR UPDATE OF ex,br,p SKIP LOCKED LOOP

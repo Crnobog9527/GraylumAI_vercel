@@ -1,0 +1,29 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * Sample J's first screen: one full screen (buffer.com's measure). The title is set very large and tight in two
+ * lines on the left (sample E's display type); the right half holds the week window (week-j.module.css).
+ */
+.hero { position: relative; display: grid; align-items: center; min-height: calc(100svh - 64px); padding: 32px 0 48px; }
+.grid { display: grid; gap: 40px; align-items: center; }
+/* The demo window sits well clear of the title: a generous gap, and on wide screens it reaches into the right margin. */
+@media (min-width: 1024px) { .grid { grid-template-columns: max-content minmax(0, 1fr); gap: clamp(56px, 6vw, 112px); } .text { max-width: 600px; } }
+.text { display: grid; gap: 28px; justify-items: start; }
+.title {
+  display: grid; margin: 0; font-size: clamp(48px, 5.8vw, 92px); font-weight: 600; line-height: 1.02; letter-spacing: -.04em;
+  word-break: keep-all;
+}
+.title span { display: block; }
+.promise { margin: 0; max-width: 24em; color: var(--j-body); font-size: clamp(18px, 1.6vw, 23px); line-height: 1.6; text-wrap: pretty; }
+.actions { display: grid; justify-items: start; gap: 12px; }
+.note { margin: 0; color: var(--j-muted); font-size: 14px; }
+
+@media (max-width: 1023px) {
+  .hero { min-height: 0; padding-top: 24px; }
+  .title { font-size: clamp(48px, 11vw, 92px); }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .text > * { animation: rise .9s var(--j-ease) both; }
+  .text > :nth-child(2) { animation-delay: .1s; }
+  .text > :nth-child(3) { animation-delay: .2s; }
+}
+@keyframes rise { from { transform: translate3d(0, 16px, 0); } to { transform: none; } }

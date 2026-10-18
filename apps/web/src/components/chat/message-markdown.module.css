@@ -17,20 +17,20 @@
 .body pre,
 .body .tableScroll { margin: 0.6em 0; }
 
-.body h1,
-.body h2,
-.body h3,
-.body h4,
+.body :is(h1, :where([data-demo-heading="h1"])),
+.body :is(h2, :where([data-demo-heading="h2"])),
+.body :is(h3, :where([data-demo-heading="h3"])),
+.body :is(h4, :where([data-demo-heading="h4"])),
 .body h5,
 .body h6 {
   margin: 1em 0 0.4em;
   font-weight: 600;
   line-height: 1.45;
 }
-.body h1 { font-size: 1.25em; }
-.body h2 { font-size: 1.15em; }
-.body h3 { font-size: 1.05em; }
-.body h4,
+.body :is(h1, :where([data-demo-heading="h1"])) { font-size: 1.25em; }
+.body :is(h2, :where([data-demo-heading="h2"])) { font-size: 1.15em; }
+.body :is(h3, :where([data-demo-heading="h3"])) { font-size: 1.05em; }
+.body :is(h4, :where([data-demo-heading="h4"])),
 .body h5,
 .body h6 { font-size: 1em; }
 

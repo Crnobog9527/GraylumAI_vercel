@@ -22,6 +22,52 @@ export const HERO = {
   note: [{ text: '无需绑卡' }, { text: '，免费试用', needs: ['signupGrant'] }] as readonly GatedText[],
 } as const;
 
+/**
+ * Style sample H's first screen, the Owner's final wording of 2026-10-14 (verbatim). H1 and promise stay HERO's.
+ * Only sample H uses this for now; /landing keeps HERO until H replaces it.
+ */
+export const HERO_H = {
+  audience: '手里有专业，想做知识付费？开了店，想引流获客？想把自媒体做成副业，或者转型全职博主？',
+  audienceSummary: '想做自媒体，却没人教过你怎么运营，连第一步都不知道迈向哪？从这里开始。',
+  difference: '通用 AI 给你正确的废话，你需要的是一个带你做的教练。',
+  /** The weekly review needs publishing and real data: like every other `needs: ['publish']` line, it goes with the flag. */
+  differenceBody: [
+    { text: 'Graylum AI 先了解你的情况，帮你判断方向；再告诉你每一步做什么、为什么。' },
+    { text: '内容发出去后，它根据真实数据每周和你复盘：哪里做得好、哪里要改、下一步做什么。', needs: ['publish'] },
+  ] as readonly GatedText[],
+  result: '你只管输出内容，运营交给它。',
+} as const;
+
+/** Sample H's "自己用通用 AI ／ 用 Graylum AI 教练" comparison, the Owner's wording of 2026-10-14 (verbatim). */
+export const H_COMPARE = {
+  title: '你需要的不只是 AI 建议，而是 AI 教练带你一步步做。',
+  generic: '自己用通用 AI',
+  coach: '用 Graylum AI 教练',
+  rows: [
+    { generic: '不知道该问什么，只能东问一句、西问一句', coach: '主动了解你的情况，一步步帮你找到适合的方向' },
+    { generic: '给你一大堆选题和建议，却不知道哪个适合自己', coach: '帮你判断该做什么，告诉你为什么、具体怎么做' },
+    { generic: '换个对话窗口，又得重新解释自己的情况', coach: '记住你的定位、目标和创作进度，接着上次继续做' },
+    { generic: '发了内容没人看，拿着数据也不知道问题在哪', coach: '分析你真实发布的数据，告诉你哪里有问题、下一条怎么改' },
+  ],
+} as const;
+
+/**
+ * The made-up example (示例) inside the comparison's product pieces. NEW WORDING for the Owner to approve; it follows
+ * the landing demo's fictional case (demo-script.ts) and carries no numbers.
+ */
+export const H_COMPARE_SAMPLES = {
+  library: [
+    { label: '定位档案', text: '帮刚到加拿大的新移民，用下班时间一步步转行做牙科助理' },
+    { label: '目标', text: '先做出 30 天能坚持更新的内容' },
+    { label: '创作进度', text: '第 1 周：讲清你自己是怎么入行的' },
+  ],
+  review: [
+    { label: '哪里做得好', text: '开头直接讲你自己的入行经历' },
+    { label: '哪里要改', text: '结尾没有告诉观众下一步做什么' },
+    { label: '下一条怎么改', text: '讲入行要准备的证书，结尾留一个问题' },
+  ],
+} as const;
+
 export type VoiceNote = Gated & {
   id: string;
   quote: string;

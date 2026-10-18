@@ -1,0 +1,171 @@
+{
+  "slug": "student",
+  "persona": {
+    "label": "伦敦留学生 · IG",
+    "who": "伦敦传媒硕士在读，会拍照修图、懂二手穿搭，中英双语"
+  },
+  "positioning": "会搭衣服的伦敦留学生摄影师，用预算穿搭和拍照教程吸引留学生，承接毕业照和人像",
+  "riskAlert": {
+    "headline": "毕业一年靠品牌合作全职养活自己，很难走通",
+    "why": [
+      "纯穿搭号涨得慢，4 万粉也未必靠它生活",
+      "学生签证期间不能自雇",
+      "中文留学生穿搭在 IG 上几乎没有市场"
+    ]
+  },
+  "audience": [
+    {
+      "name": "毕业季的中国硕士女生",
+      "trigger": "拿到典礼日期后"
+    },
+    {
+      "name": "其他国家的留学生",
+      "trigger": "拿到典礼日期后"
+    },
+    {
+      "name": "从国内飞来的家长",
+      "trigger": "订好机票后"
+    }
+  ],
+  "platform": {
+    "main": "Instagram",
+    "support": [],
+    "why": "客人含各国留学生和游客，摄影是视觉生意"
+  },
+  "benchmarks": [
+    {
+      "id": "A",
+      "type": "英国二手店平价穿搭号",
+      "followers": "1.9 万",
+      "medianViews": null,
+      "engagementRate": null,
+      "updateFreq": "还在更新",
+      "learn": "固定栏目，“花多少钱买到什么”标题"
+    },
+    {
+      "id": "B",
+      "type": "穿搭生活号",
+      "followers": "4 万",
+      "medianViews": null,
+      "engagementRate": null,
+      "updateFreq": null,
+      "learn": "把国际生身份变成合作标签"
+    },
+    {
+      "id": "C",
+      "type": "在英留学生信息号",
+      "followers": "2.5 万",
+      "medianViews": null,
+      "engagementRate": null,
+      "updateFreq": null,
+      "learn": "同乡语言 + 实用信息建立信任"
+    },
+    {
+      "id": "D",
+      "type": "英国情侣人像摄影号",
+      "followers": "1.1 万",
+      "medianViews": null,
+      "engagementRate": null,
+      "updateFreq": null,
+      "learn": "地标作品集，主页写明预约"
+    },
+    {
+      "id": "E",
+      "type": "英国旅行氛围摄影号",
+      "followers": "16 万",
+      "medianViews": null,
+      "engagementRate": null,
+      "updateFreq": null,
+      "learn": "可收藏的机位图集"
+    }
+  ],
+  "differentiation": "懂留学生、会搭衣服、中英双语能服务家长",
+  "threePiece": {
+    "name": "Kexin in London · 毕业照与穿搭",
+    "bio": "伦敦留学生摄影师｜毕业照前穿什么、在哪拍，问我就行"
+  },
+  "ownAccount": {
+    "platform": "Instagram",
+    "displayName": "Kexin in London · 毕业照与穿搭",
+    "which": "recommended",
+    "bio": "伦敦留学生摄影师｜毕业照前穿什么、在哪拍，问我就行",
+    "followers": "1,800 个关注",
+    "posts": null,
+    "topStat": null
+  },
+  "contentPillars": [
+    {
+      "name": "流量型",
+      "share": "50%"
+    },
+    {
+      "name": "信任型",
+      "share": "40%"
+    },
+    {
+      "name": "转化型（毕业前只收集预约意向）",
+      "share": "10%"
+    }
+  ],
+  "funnel": [
+    {
+      "layer": "免费内容",
+      "offer": "帖子和 Reels",
+      "price": "免费",
+      "why": "让陌生人认识你；收藏的是真关心毕业照的人"
+    },
+    {
+      "layer": "免费清单 + 预约登记",
+      "offer": "机位穿搭清单，登记毕业后意向",
+      "price": "免费",
+      "why": "找出明年真要拍的人；肯登记学校和月份的才真拍"
+    },
+    {
+      "layer": "迷你毕业照",
+      "offer": "30 分钟、一个机位（换签证后）",
+      "price": null,
+      "why": "第一次付费；付过小钱的人信任已经建立"
+    },
+    {
+      "layer": "完整毕业照 + 家人档",
+      "offer": "穿搭建议 + 两个机位 + 家人合影",
+      "price": null,
+      "why": "主要收入；留下最在意结果、愿为省心付钱的人"
+    },
+    {
+      "layer": "延伸服务和合作",
+      "offer": "情侣照、旅拍、品牌穿搭拍摄",
+      "price": null,
+      "why": "淡季收入和口碑；回头客和被介绍来的最精准"
+    }
+  ],
+  "plan30": [
+    {
+      "week": 1,
+      "focus": "测穿搭能否带来陌生人：发 2 条图集"
+    },
+    {
+      "week": 2,
+      "focus": "测作品能否建立信任：图集 + 前后对比"
+    },
+    {
+      "week": 3,
+      "focus": "测 Reels，复刻前两周最好的一条"
+    },
+    {
+      "week": 4,
+      "focus": "第一次收集预约意向"
+    }
+  ],
+  "metricsToWatch": [
+    "收藏",
+    "陌生人关注",
+    "预约意向留言人数"
+  ],
+  "firstStep": [
+    "换好显示名、头像和简介",
+    "邮件问学校：免费拍照、收寄样算不算自雇",
+    "周末去二手店拍好第 1 条素材"
+  ],
+  "sourceNote": "观察日期 2026-10-15，数据来自 Instagram 公开主页，来自网络公开信息，真实性待考证，仅供参考"
+}

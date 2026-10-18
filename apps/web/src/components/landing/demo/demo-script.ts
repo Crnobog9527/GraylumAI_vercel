@@ -53,7 +53,7 @@ export const QUESTION_TWO: QuestionCard = {
 } as QuestionCard;
 
 /** Free text in the demo: the script cannot follow it, and says so instead of pretending to. */
-export const FREE_REPLY = '这是示例对话，导师只会按写好的脚本回答。真实对话里，导师会接着你说的内容继续问。\n\n你可以先选上面的一个选项，看看接下来会怎样。';
+export const FREE_REPLY = '这是示例对话，AI 教练只会按写好的脚本回答。真实对话里，AI 教练会接着你说的内容继续问。\n\n你可以先选上面的一个选项，看看接下来会怎样。';
 
 const REPLY_RECOMMENDED = '好，这条路是你自己走过的，别人很难替代。我先记到右侧「可以讲的经验」，你随时可以改。\n\n下一个问题：你更想帮谁？';
 const REPLY_TRUTH = '记下了。说句实话：这类话题牙医和品牌都在讲，你作为助理不占优势，也比较难变现。' +
@@ -110,9 +110,9 @@ export function initialDemoState(): DemoState {
   return {
     phase: 'q1',
     messages: [
-      { id: 'm0', role: 'assistant', label: '导师主动引导 · 你是谁', text: OPENING },
+      { id: 'm0', role: 'assistant', label: 'AI 教练主动引导 · 你是谁', text: OPENING },
       { id: 'm1', role: 'user', label: '你 · 你是谁', text: FIRST_USER },
-      { id: 'm2', role: 'assistant', label: '导师 · 你是谁', text: FIRST_REPLY },
+      { id: 'm2', role: 'assistant', label: 'AI 教练 · 你是谁', text: FIRST_REPLY },
     ],
     values: { time: captured('下班后和周末') },
     typed: [],
@@ -123,6 +123,16 @@ export function initialDemoState(): DemoState {
     liveId: null,
     run: 0,
   };
+}
+
+/**
+ * The first screen's starting point: both questions already answered with the recommended options, and the step
+ * summary arriving (live). The conversation before it is the same script, so the full process stays module 3's.
+ */
+export function summaryDemoState(): DemoState {
+  let state = demoReducer(initialDemoState(), { type: 'answer', option: QUESTION_ONE.recommended ?? 0 });
+  state = demoReducer(demoReducer(state, { type: 'settled' }), { type: 'answer', option: QUESTION_TWO.recommended ?? 0 });
+  return { ...state, checklistUpdated: false };
 }
 
 export type DemoAction =
@@ -167,7 +177,7 @@ export function demoReducer(state: DemoState, action: DemoAction): DemoState {
         const reply = action.option === card.recommended ? REPLY_RECOMMENDED : REPLY_TRUTH;
         return { ...state, phase: 'q2', checklistUpdated: state.panel !== 'checklist',
           liveId: id(step + 1), values: { ...state.values, experience: captured(choice) },
-          messages: [...state.messages, user, { id: id(step + 1), role: 'assistant', label: '导师 · 你是谁', text: reply }] };
+          messages: [...state.messages, user, { id: id(step + 1), role: 'assistant', label: 'AI 教练 · 你是谁', text: reply }] };
       }
       const experience = state.values.experience?.value ?? '';
       return { ...state, phase: 'summary', checklistUpdated: state.panel !== 'checklist',
@@ -182,7 +192,7 @@ export function demoReducer(state: DemoState, action: DemoAction): DemoState {
       const id = (n: number) => `${state.run}-m${n}`;
       return { ...state, liveId: id(step + 1), messages: [...state.messages,
         { id: id(step), role: 'user', label: '你 · 你是谁', text },
-        { id: id(step + 1), role: 'assistant', label: '导师 · 你是谁', text: FREE_REPLY }] };
+        { id: id(step + 1), role: 'assistant', label: 'AI 教练 · 你是谁', text: FREE_REPLY }] };
     }
     case 'edit': {
       const previous = state.values[action.fieldId] ?? { value: '', status: 'unknown', nature: 'unknown' };

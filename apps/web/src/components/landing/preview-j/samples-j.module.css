@@ -1,0 +1,82 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * The sample reports (SamplesJ): four tabs, one report at a time, in three layers: the cover, "10 秒看懂" (one warm
+ * card, the coach's warning in its own band when there is one), "15 秒看清概览" (five key chapters lighting up one by
+ * one, a control to pause or replay), and the whole report in a sheet with its chapter list. Reduced motion: all lit.
+ */
+.samples { display: grid; gap: 20px; }
+.head { display: grid; gap: 6px; }
+.head h2 { margin: 0; }
+.head p { margin: 0; color: var(--j-body); font-size: 15.5px; line-height: 1.7; }
+.tabs { display: flex; flex-wrap: wrap; gap: 8px; }
+.tabs button {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 16px; border: 1px solid var(--j-line); border-radius: 999px;
+  background: #fff; color: var(--j-body); font: inherit; font-size: 14.5px; cursor: pointer; transition: border-color .2s, background-color .2s;
+}
+.tabs button span { color: var(--j-muted); font-size: 13px; }
+.tabs button em { padding: 0 7px; border-radius: 999px; background: #fff4d6; color: #8a5a00; font-size: 11.5px; font-style: normal; line-height: 20px; }
+.tabs button[aria-selected='true'] { border-color: var(--j-ink); background: var(--j-ink); color: #fff; }
+.tabs button[aria-selected='true'] span { color: rgba(255, 255, 255, .7); }
+.report { display: grid; gap: 16px; padding: clamp(18px, 2.4vw, 28px); border: 1px solid var(--j-line); border-radius: 24px; background: #fff; box-shadow: var(--j-shadow-lift); }
+.cover { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 14px; align-items: center; padding-bottom: 16px; border-bottom: 1px solid var(--j-line); }
+.cover > svg { color: var(--j-gold-text); }
+.cover h4 { margin: 0; font-size: clamp(20px, 2vw, 26px); font-weight: 600; letter-spacing: -.02em; }
+.coverLabel { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--j-muted); font-size: 13px; }
+.coverLabel em { padding: 0 7px; border-radius: 999px; background: #fff4d6; color: #8a5a00; font-size: 11.5px; font-style: normal; line-height: 20px; }
+.size { margin: 2px 0 0; color: var(--j-body); font-size: 14px; }
+.layerTitle { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: 0 0 10px; color: var(--j-ink); font-size: 16px; font-weight: 600; }
+.layerTitle span { color: var(--j-muted); font-size: 13.5px; font-weight: 400; }
+
+/* 10 秒看懂 */
+.glance { padding: 16px 18px; border-radius: 18px; background: linear-gradient(160deg, #fffdf6, #fff6e2); box-shadow: inset 0 0 0 1px rgba(255, 187, 23, .4); }
+.glance dl { display: grid; gap: 10px; margin: 0; }
+.glance dl div { display: grid; gap: 2px 16px; }
+@media (min-width: 720px) { .glance dl div { grid-template-columns: 9em minmax(0, 1fr); align-items: baseline; } }
+.glance dt { color: var(--j-gold-text); font-size: 13px; font-weight: 600; }
+.glance dd { margin: 0; color: var(--j-ink); font-size: clamp(15.5px, 1.3vw, 17px); font-weight: 500; line-height: 1.6; }
+.glance [data-truth] { margin: 0 -10px; padding: 8px 10px; border-radius: 12px; background: #fff; box-shadow: inset 0 0 0 1px #f0d9a8; }
+.glance [data-truth] dt { color: #9a3b2e; }
+
+/* 15 秒看清概览 */
+.overviewHead { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
+.overviewHead .layerTitle { margin: 0; }
+.control {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 14px; border: 1px solid var(--j-line); border-radius: 999px;
+  background: #fff; color: var(--j-ink); font: inherit; font-size: 13.5px; font-weight: 500; cursor: pointer;
+}
+.control:hover { border-color: rgba(20, 19, 18, .35); }
+.control:focus-visible, .keys button:focus-visible, .fullToc button:focus-visible { outline: 2px solid var(--j-ink); outline-offset: 2px; }
+.keys { display: grid; gap: 8px; margin: 10px 0 0; padding: 0; list-style: none; }
+.keys button {
+  display: grid; gap: 3px; width: 100%; padding: 11px 14px; border: 1px solid #ececea; border-radius: 14px; background: #fcfcfb;
+  color: var(--j-body); font: inherit; text-align: left; cursor: pointer; transition: opacity .5s var(--j-ease), border-color .3s, box-shadow .3s, background-color .3s;
+}
+@media (min-width: 900px) { .keys button { grid-template-columns: 8.5em minmax(0, 1fr); gap: 16px; align-items: baseline; } }
+.keys b { color: var(--j-ink); font-size: 14.5px; }
+.keys span { font-size: 14.5px; line-height: 1.6; }
+.keys li:not([data-lit]) button { opacity: .28; }
+.keys li[data-current] button { border-color: var(--j-gold); background: #fffaf0; box-shadow: 0 0 0 3px rgba(255, 187, 23, .18); }
+.keys li[data-current] span { color: var(--j-ink); }
+
+.more {
+  display: inline-flex; align-items: center; gap: 6px; justify-self: start; min-height: 44px; padding: 0 18px; border: 1px solid var(--j-ink);
+  border-radius: 999px; background: #fff; color: var(--j-ink); font: inherit; font-size: 15px; font-weight: 500; cursor: pointer;
+}
+.more:hover, .more[aria-expanded='true'] { background: var(--j-ink); color: #fff; }
+.more:focus-visible, .fullBody:focus-visible { outline: 2px solid var(--j-ink); outline-offset: 3px; }
+/* The whole report, read in place: a quiet sheet that scrolls on its own. */
+.full { display: grid; gap: 12px; padding: clamp(14px, 2vw, 22px); border: 1px solid var(--j-line); border-radius: 16px; background: #fcfcfb; }
+.full[hidden] { display: none; }
+@media (min-width: 900px) { .full { grid-template-columns: 11em minmax(0, 1fr); } }
+.fullToc { display: flex; flex-wrap: wrap; align-content: start; gap: 4px; }
+@media (min-width: 900px) { .fullToc { display: grid; gap: 2px; } }
+.fullToc button { padding: 5px 9px; border: 0; border-radius: 8px; background: none; color: var(--j-body); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.fullToc button:hover { background: #f1f0ec; color: var(--j-ink); }
+.fullBody { position: relative; max-height: min(70vh, 720px); overflow-y: auto; padding-right: 8px; scrollbar-width: thin; }
+.fullBody section + section { margin-top: 18px; padding-top: 16px; border-top: 1px solid #ececea; }
+.fullBody h5 { margin: 0 0 6px; color: var(--j-ink); font-size: 16px; font-weight: 600; }
+.fullBody table { font-size: 13px; }
+.loading { margin: 0; color: var(--j-muted); font-size: 14px; }
+
+/* Sample K (data-calm): the tags at least 12px. */
+[data-calm] .tabs button em, [data-calm] .coverLabel em { font-size: 12px; }
