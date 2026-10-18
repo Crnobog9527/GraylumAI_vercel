@@ -2,7 +2,7 @@
 /* Region 3's 第二步 and 第三步 (LaterStepsL): the stage tabs, the picture's frame, and step three's planned sheets. */
 .step { padding: clamp(56px, 7vw, 88px) 0 8px; }
 .title { margin: 0; font-size: clamp(24px, 2.6vw, 34px); font-weight: 600; letter-spacing: -.02em; }
-.lede { margin: 10px 0 0; max-width: 42em; color: var(--j-body); font-size: clamp(16px, 1.4vw, 18px); line-height: 1.7; }
+.lede { margin: 10px 0 0; max-width: 42em; text-wrap: balance; color: var(--j-body); font-size: clamp(16px, 1.4vw, 18px); line-height: 1.7; }
 .bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-top: 22px; }
 .tabs { display: flex; flex-wrap: wrap; gap: 8px; }
 .tabs button {
@@ -14,7 +14,9 @@
 .tabs button[aria-selected='true'] span { background: var(--j-gold); }
 .tabs button:focus-visible { outline: 2px solid var(--j-ink); outline-offset: 2px; }
 .panel { display: grid; gap: 14px; margin-top: 18px; }
-.note { margin: 0; max-width: 46em; color: var(--j-ink); font-size: 16.5px; line-height: 1.7; }
+/* Round eleven (X2): a stage's note keeps to one line where the page is wide enough, and wraps into even lines where
+ * it is not, never leaving a word or two alone on the last line. */
+.note { margin: 0; max-width: 64em; text-wrap: balance; color: var(--j-ink); font-size: 16.5px; line-height: 1.7; }
 .picture { position: relative; height: clamp(520px, 64svh, 640px); overflow: hidden; border: 1px solid var(--j-line); border-radius: 22px; box-shadow: var(--j-shadow-lift); }
 @media (max-width: 767px) { .picture { height: 560px; } }
 .chat { flex: 1 1 auto; min-height: 0; overflow: hidden; }

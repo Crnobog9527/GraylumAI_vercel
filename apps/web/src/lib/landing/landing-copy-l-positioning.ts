@@ -60,17 +60,25 @@ const DIRECTION = '前面你说了两件事：下班后只有一小时，周末�
   + '**风险提示**：新账号断更，平台和观众都会忘了你。按你现在的时间，精致大餐当主线很容易断更。\n\n'
   + '我推荐第一种。也可以两样各做一半，或者说说你的想法。';
 
-type Moment = { id: 'know' | 'diagnose' | 'plan'; step: 0 | 1 | 2; lines: readonly (TakeoverLine & { opening?: boolean })[] };
+type Moment = { id: 'know' | 'diagnose' | 'plan'; step: 0 | 1 | 2; lines: readonly (TakeoverLine & { opening?: boolean; pick?: number })[] };
+
+/**
+ * Round eleven (X1, Owner 2026-10-18: "如果你要展示教练提问的弹窗……那么用户就直接去选择这个提问卡，不要再自己去回复"):
+ * a question card is shown only where the person answers by picking one of its options, as the product does (the
+ * option's own words are sent as the message). The goal and camera questions are answered in the person's own words,
+ * so they are asked in the conversation without a card; only the direction question brings one.
+ */
+const DIRECTION_PICK = 0;
 
 export const L_POSITIONING_MOMENTS: readonly Moment[] = [
   {
     id: 'know', step: 0,
     lines: [
-      { role: 'coach', card: 'goal', text: OPENING, opening: true },
+      { role: 'coach', text: OPENING, opening: true },
       { role: 'user', text: '副业收入吧，不想辞职。一年后每个月能多几百美元就行。' },
       J_GOAL_REPLY,
       J_AUDIENCE,
-      J_CAMERA,
+      { ...J_CAMERA, card: undefined },
       { role: 'user', fills: ['resources'], text: RESOURCES },
       { role: 'summary', card: 'confirm', fills: ['track', 'platforms', 'benchmarks', 'assets'], text: STEP_ONE_SUMMARY },
     ],
@@ -79,7 +87,7 @@ export const L_POSITIONING_MOMENTS: readonly Moment[] = [
     id: 'diagnose', step: 1,
     lines: [
       { role: 'coach', card: 'direction', text: DIRECTION },
-      { role: 'user', text: '那就主线做下班后 15 分钟家常菜。' },
+      { role: 'user', pick: DIRECTION_PICK, text: J_PERSONA_DIRECTION.options[DIRECTION_PICK] },
       J_FEASIBILITY,
       J_FETCH,
       J_TABLE,

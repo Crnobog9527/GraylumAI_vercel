@@ -70,7 +70,11 @@ export function PositioningPictureL({ moment, at, reportLocal = 1 }: { moment: n
   const lastWhole = wholeLines[wholeLines.length - 1];
   const asked = isQuestion(lastWhole) ? lastWhole : undefined;
   const question = step < 3 && asked ? QUESTIONS[asked.card as keyof typeof QUESTIONS] : null;
-  const docked = Boolean(question) && (!playing || at.phase === 'compose' || (at.phase === 'hold' && at.share >= 0.4));
+  const docked = Boolean(question) && (!playing || at.phase === 'compose' || at.phase === 'pick' || (at.phase === 'hold' && at.share >= 0.4));
+  // Round eleven (X1): the person answers the card by picking an option, as on the product page (the option's words are
+  // what is sent). The highlight comes onto the option, it is pressed, then the message goes and the card closes.
+  const picking = playing && at.phase === 'pick' && now?.pick !== undefined ? now.pick : undefined;
+  const pickState = picking === undefined || at!.share < 0.25 ? undefined : at!.share < 0.7 ? 'over' : 'pressed';
   const confirming = step < 3 && wholeLines.some(line => line.card === 'confirm');
 
   const log = useRef<HTMLDivElement>(null);
@@ -124,7 +128,11 @@ export function PositioningPictureL({ moment, at, reportLocal = 1 }: { moment: n
           <div className={styles.composer}>
             <ComposerL label="给 AI 教练的回复" placeholder={OTHER_PLACEHOLDER} paragraphs={[[composing]]}
               caret={composing ? <Caret /> : undefined}
-              attachment={question && docked ? <QuestionCardView card={question} disabled docked /> : null} />
+              attachment={question && docked ? (
+                <div className={styles.picking} data-pick={pickState ? picking : undefined} data-state={pickState}>
+                  <QuestionCardView card={question} docked />
+                </div>
+              ) : null} />
           </div>
           <footer className={result.publishBar}>
             <Button size="sm" variant="outline" tabIndex={-1}>{J_REPORT.export}</Button>

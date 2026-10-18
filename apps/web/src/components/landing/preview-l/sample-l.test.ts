@@ -22,7 +22,7 @@ import { L_SAMPLES_REDO } from '@/lib/landing/landing-copy-l-samples';
 import { SAMPLE_OVERVIEWS } from '@/lib/landing/sample-reports/overview';
 import { L_WORKFLOWS, SCRIPT, SHOTS } from '@/lib/landing/landing-copy-l-workflows';
 import { L_LATER, L_LATER_CHAT } from '@/lib/landing/landing-copy-l-later';
-import { L_POSITIONING_MOMENTS, L_SKILL_OPENING } from '@/lib/landing/landing-copy-l-positioning';
+import { L_DIRECTION_CARD, L_POSITIONING_MOMENTS, L_SKILL_OPENING } from '@/lib/landing/landing-copy-l-positioning';
 import { L_PRICE_NOTE } from '@/lib/landing/landing-copy-l';
 import { HOW_IT_WORKS as HOW } from '@/lib/landing/landing-copy';
 import { trpc } from '@/trpc/client';
@@ -98,39 +98,68 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     expect(steps).not.toContain('AB 测试');
   });
 
-  it('plays step one in time: typed out, the question folded then docked, the answer typed into the message box', () => {
-    // Round seven (T2, T8): the clock decides what shows. Phases of the opening line: think, stream, (card), hold.
-    const lines = L_POSITIONING_MOMENTS[0].lines;
+  it('plays step one in time: typed out, the question folded then docked, the option picked on the card and sent', () => {
+    // Round seven (T2, T8): the clock decides what shows. Phases of a coach line: think, stream, (card), hold. Round
+    // eleven (X1): the only card is the direction question, answered by picking its recommended option on the card.
+    const lines = L_POSITIONING_MOMENTS[1].lines;
     const picture = (ms: number | null) => renderToStaticMarkup(withTrpc(createElement(PositioningPictureL,
-      { moment: 0, at: ms === null ? null : momentAt(lines, ms) })));
+      { moment: 1, at: ms === null ? null : momentAt(lines, ms) })));
     const [[, think], [, stream], [, card], [, hold]] = linePhases(lines[0]);
     // At the very start the coach is about to write: nothing in the conversation yet.
     const writing = picture(0);
     expect(writing).not.toContain('data-question-card');
-    expect(writing).not.toContain('data-message-role="assistant"');
-    // Half way through writing, part of the opening shows, not all of it, and no card yet.
+    // Half way through writing, part of the question shows, not all of it, and no card yet.
     const half = picture(think + stream / 2);
-    expect(half).toContain('AI 自媒体陪跑教练 · 主动引导');
-    expect(half).not.toContain('说说你真实的想法就行');
+    expect(half).toContain('前面你说了两件事');
+    expect(half).not.toContain('或者说说你的想法');
     expect(half).not.toContain('data-question-card');
     // Written: first folded into one line while it is read, then docked on the message box.
-    const reading = picture(think + stream + card + hold * 0.1);
-    expect(reading).toContain(escape(L_SKILL_OPENING));
-    expect(reading).toContain('data-question-card="folded"');
+    expect(picture(think + stream + card + hold * 0.1)).toContain('data-question-card="folded"');
     const open = picture(think + stream + card + hold * 0.8);
     expect(open).toContain('data-question-card="open"');
     expect(open.indexOf('data-question-card="open"')).toBeGreaterThan(open.indexOf('role="log"'));
-    expect(open).not.toContain('data-message-role="user"');
-    // The answer is typed into the message box (the card still docked), then sent.
-    const [[, compose]] = linePhases(lines[1]);
-    const typing = picture(think + stream + card + hold + compose / 2);
-    expect(typing).toContain('data-question-card="open"');
-    expect(typing).toContain(escape(lines[1].text.slice(0, 4)));
-    expect(typing).not.toContain('data-message-role="user"');
-    // The stage finished: everything whole, the question answered.
+    // The answer is not typed: the recommended option is highlighted, then pressed, on the docked card.
+    expect(lines[1]).toMatchObject({ role: 'user', pick: 0, text: L_DIRECTION_CARD.options[0] });
+    const [[phase, pick]] = linePhases(lines[1]);
+    expect(phase).toBe('pick');
+    const start = think + stream + card + hold;
+    expect(picture(start + pick * 0.1)).not.toContain('data-pick=');
+    const over = picture(start + pick * 0.5);
+    expect(over).toContain('data-pick="0" data-state="over"');
+    expect(over).not.toContain('data-message-role="user"');
+    const pressed = picture(start + pick * 0.9);
+    expect(pressed).toContain('data-pick="0" data-state="pressed"');
+    expect(pressed).toContain('data-question-card="open"');
+    expect(pressed).not.toContain('data-message-role="user"');
+    // Sent: the card closes and the option's own words are the person's message; the message box stays empty.
+    const sent = picture(start + pick + 10);
+    expect(sent).not.toContain('data-question-card="open"');
+    expect(sent).toContain('data-message-role="user"');
+    expect(sent).toContain(escape(L_DIRECTION_CARD.options[0]));
     const answered = picture(null);
     expect(answered).toContain('data-message-role="user"');
     expect(answered).not.toContain('data-question-card="open"');
+  });
+
+  it('shows a question card only where the person answers by picking it: the next message is one of its options (round eleven, X1)', () => {
+    const cards: Record<string, { options: readonly string[] }> = { direction: L_DIRECTION_CARD };
+    const lines = L_POSITIONING_MOMENTS.flatMap(moment => moment.lines);
+    const asked = lines.flatMap((line, index) => (line.role === 'coach' && line.card && !['fetch', 'table', 'plan'].includes(line.card) ? [index] : []));
+    expect(asked.map(index => lines[index].card)).toEqual(['direction']);
+    for (const index of asked) {
+      const answer = lines[index + 1];
+      const options = cards[lines[index].card!].options;
+      expect(answer.role).toBe('user');
+      expect(options).toContain(answer.text);
+      expect(answer.pick).toBe(options.indexOf(answer.text));
+    }
+    // The goal and camera questions are answered in the person's own words, typed into the message box.
+    const know = L_POSITIONING_MOMENTS[0].lines;
+    expect(know.every(line => line.card === undefined || line.card === 'confirm')).toBe(true);
+    const typed = know.filter(line => line.role === 'user');
+    expect(typed.every(line => line.pick === undefined && linePhases(line)[0][0] === 'compose')).toBe(true);
+    const page = renderToStaticMarkup(withTrpc(createElement(PositioningPictureL, { moment: 0, at: null })));
+    expect(page).not.toContain('data-question-card');
   });
 
   it('orders step two as the creation Skill does: topic, title and cover, material and voice, script (round nine, V2)', () => {
