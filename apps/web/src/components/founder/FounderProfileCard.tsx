@@ -62,6 +62,12 @@ export function FounderProfileCard() {
     }
   }
 
+  if (query.error && !query.data) {
+    return <div className="mt-6 rounded-2xl p-6" style={panel} role="alert" data-testid="founder-profile-error">
+      <p className="text-sm">暂时无法读取你的创始会员信息，请重试。</p>
+      <Button type="button" variant="outline" size="sm" className="mt-2" onClick={() => { void query.refetch(); }}>重新读取</Button>
+    </div>;
+  }
   if (!showsCard(query.data as FounderMemberView | undefined)) return null;
   return <FounderProfileCardView view={query.data as FounderMemberView} pending={pending} error={error}
     onSubmit={value => void run(() => submit.mutateAsync(value as never) as Promise<FounderMemberView>)}
