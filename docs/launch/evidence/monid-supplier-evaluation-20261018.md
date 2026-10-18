@@ -11,12 +11,12 @@
 | --- | --- | --- |
 | X 资料、作品、关键词 | **后续接入优先改走 monid / AnyAPI**，固定本次 lynx 线路 | 六次均返回数据，资料精确格式粉丝、40 条作品及 40 条搜索的时间／播放互动完整；按公开 $0.001/次参考价，单次费用低 78%、55%、40%。不是同机直连速度胜出结论 |
 | TikTok 资料 | **建议改走 monid / AnyAPI bison** | 2/2 取得粉丝整数，每次 $0.0004；相对 $0.001 参考价低 60%。整数格式不等于独立验证粉丝真实准确 |
-| TikTok 关键词 | **建议改走 monid / AnyAPI bison 的普通检索**；对标仍需资料调用 | 2/2 各 20 条，绝对时间和播放／赞／评／分享均齐，每次 $0.0006；40/40 缺作者粉丝，不能单次完成粉丝筛选 |
+| TikTok 关键词 | **建议改走 monid / AnyAPI bison 的普通检索（不要求 US 地区筛选）**；对标仍需资料调用 | 2/2 各 20 条，绝对时间和播放／赞／评／分享均齐，每次 $0.0006；40/40 缺作者粉丝，不能单次完成粉丝筛选 |
 | TikTok 作品 | **继续 TikHub 主线，monid 留作候选** | flamingo 的 NASA 0 条（免费）、Duolingo 20 条；第三次换 quokka 可取 NASA 34 条，但粉丝全缺且两条上游的字段一致性不同。不适合立即统一切换 |
 | 网页 markdown | **继续 Firecrawl 主线；monid / Context.dev 作为后续按次候选** | 两页均成功、每页 $0.002533；是否便宜取决于 Firecrawl 套餐。未做复杂 JS／反爬或两家同 URL 付费对照，不能宣称质量或速度更好 |
 | Instagram | **建议用 monid 补充账号资料能力** | 1 次返回 NASA 资料及粉丝 104,381,644，$0.001；没有测试作品接口，不解锁完整对标 |
 | YouTube | **维持现有受限能力，暂不替换／启用完整对标** | 1 次 30 视频、$0.0008，但只有浏览数，无赞评／粉丝；createdUtc 与相对日期精确回推吻合，不能作为原始绝对发布时间证据 |
-| Facebook、LinkedIn | **建议用 monid 新增基础页面／公司资料查询** | 各 1 次返回资料与粉丝数，$0.0012／$0.0011；还没有作品、搜索或完整对标验证 |
+| Facebook、LinkedIn | **建议用 monid 新增基础页面／公司资料查询** | 各 1 次返回资料与粉丝数，$0.0012／$0.0011；还没有作品、搜索或完整对标验证，Facebook 候选建议不自行取代原 Bright Data 计划 |
 
 以上都是**实施建议**，不是已批准的切换或已上线能力。保留 TikHub 直连；不能把 monid 转售 TikHub 当独立容灾。
 
@@ -39,7 +39,7 @@
 | 网页抓取 | Firecrawl `POST /v1/scrape` | markdown、仅正文、单页、`parsePDF=false`、`proxy=basic`；正文给模型最多 20,000 字节 |
 | Instagram | TikHub 资料 v1、作品 v3 已有适配器 | 有代码不等于有合格的对标线路；基线中未列入可用对标平台 |
 | YouTube | TikHub 搜索、频道资料、频道视频、视频详情 | 频道视频相对时间不可当绝对发布时间；精确粉丝数／绝对日期需要视频详情 |
-| Facebook、LinkedIn | 研究工具平台枚举没有这两个平台 | monid 目录可用也不能只改后台配置启用 |
+| Facebook、LinkedIn | 研究工具平台枚举没有这两个平台 | monid 目录可用也不能只改后台配置启用；Master Plan 另有 Bright Data 海外备用／Facebook 计划，未实施状态不能算现有接口 |
 
 TikHub 的当前成本契约是每个成功调用 1 call × 发起时冻结的官方接口标价，响应不提供美元成本；
 Firecrawl 使用供应商 usage × 配置单价。这里没有读取在线价格表，**不得把历史单价当成本次报价**。
@@ -131,6 +131,8 @@ TikTok 第三次是基于 flamingo not_found 的**明确换上游诊断**，不�
 | Facebook 页面 | 28,000,000，整数格式但可能来自缩写／取整，精度未核验 | 页面 createdUtc 不能当作品日期 | likes=28,746,800 是页面获赞，作品播放互动未测 |
 | LinkedIn 公司 | followerCount=7,140,962，整数格式 | 本接口无作品日期，记不适用 | 无作品互动，未测 |
 
+AnyAPI TikTok 搜索本次 inspect schema 没有 region 参数，现有 TikHub 请求固定 region=US；本轮没有证明区域筛选等价。需要保留 US 限定的用途继续 TikHub，不能静默改变地域口径。X 搜索 inspect 的 queryType 默认 Latest，与现有请求一致。
+
 TikTok Duolingo 首条 isPinned=true，时间 1749564234（2025 年），不能把置顶当最近一次发布。
 X 作品接口包含 replies，必须按产品口径区分回复与原创；本轮未独立核对所有转推／原作者语义，不把返回条数直接当原创数量。
 Duolingo profile 与 posts 的粉丝分别 18,265,387、18,266,569，说明不同端点／上游快照可能不一致；本次不以任何一项断言真实粉丝准确。
@@ -170,7 +172,7 @@ monid Context.dev $0.002533/页比 Hobby 这个摊销值低约 20.8%，却约为
 | `platform_secrets` | `platformSecrets/slots.ts` 和数据库表约束／读取与管理 RPC 增加 monid 槽，通过现有 Vault 读取；不把本机测试密钥写入源码或价格表 |
 | `research_tools_config` | `vendors/types.ts`、`vendors/config.ts`、`toolsSettings.ts`、管理界面及配置 RPC 的供应商白名单增加 monid；逐用途钉住已验证线路，保留中国平台 TikHub |
 | 新平台 | Facebook、LinkedIn 还需平台枚举、账号链接／ID 校验、数据归一化、工具输入和存储校验；单接口成功不代表可以启用完整对标能力 |
-| 价格表 | 复用 `billing_provider_prices`，按 monid + 上游 + endpoint 区分证据和有效期；保留 monid 加价与 Graylum 倍率的区别，不能沿用 TikHub 直连价格 |
+| 价格表 | 复用 `billing_provider_prices`，按 monid + 上游 + endpoint + 固定 route 分支区分证据和有效期；保留 monid 加价与 Graylum 倍率的区别，不能沿用 TikHub 直连价格 |
 | 计费兼容 | `0255_research_tool_billing.sql` 等现有函数只允许三家；需新增迁移更新相关白名单。当前 units 固定上限为 1；按结果数＋固定费必须先解决预算冻结和回执结算映射，不能直接套用单次价格 |
 | 验证 | 单独接入任务做密钥拒绝路径、配置校验、实际价格、重复／超时／异步恢复、字段缺失、响应大小与账务测试，再做 staging 行为验证 |
 
@@ -203,4 +205,4 @@ monid Context.dev $0.002533/页比 Hobby 这个摊销值低约 20.8%，却约为
 实测完成：19 次业务 run，18 次有数据、1 次 not_found；monid 成本和最终钱包下降核对 PASS，预算 PASS。
 报告与附带 JSON：19 个唯一 runId、18 次非空返回、美元求和／钱包核对、相对链接及已知密钥／token／签名链接扫描 PASS；git diff --check PASS。CI 和机器人结论记录于 PR。
 不将准备稿 CI 的通过沿用为本次最终版本通过。
-本 PR 只交报告；下一步由总控评估供应商接入任务，按第 1 节优先级推进。没有修改 staging，没有实施供应商切换。
+本 PR 交付报告、脱敏回执及 Master Plan 中 Owner 已确认决定的同步；下一步由总控评估供应商接入任务，按第 1 节优先级推进。没有修改 staging，没有实施供应商切换。
