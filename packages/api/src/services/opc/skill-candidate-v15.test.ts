@@ -14,9 +14,9 @@ const inventory = JSON.parse(readFileSync(resolve(root, 'file-hashes.json'), 'ut
 }[];
 const files = privateRoot ? inventory.map(file => ({ path: file.path, bytes: readFileSync(resolve(privateRoot, file.path)) })) : [];
 
-function descriptor(side: 'before' | 'after'): PackageDescriptor {
+function descriptor(side: 'before' | 'after', revisionId: string): PackageDescriptor {
   const value: PackageDescriptor = {
-    packageId: '4edbbee8-840b-4322-a01f-c8d49e36e1a8', revisionId: randomUUID(), packageHash: '',
+    packageId: '4edbbee8-840b-4322-a01f-c8d49e36e1a8', revisionId, packageHash: '',
     directoryName: 'social-media-commercial-strategist', tasks: {}, requiredCapabilities: ['documents.read'],
     files: inventory.map(file => ({ path: file.path, mediaType: file.mediaType, requires: file.requires,
       bytes: side === 'before' ? file.beforeBytes : file.bytes,
@@ -33,12 +33,13 @@ describe('positioning Skill v15 candidate', () => {
       .toEqual(['README.md', 'SKILL.md', 'references/02-benchmark-analysis.md']);
     expect(inventory.filter(file => !file.changed).every(file => file.sha256 === file.beforeSha256
       && file.bytes === file.beforeBytes)).toBe(true);
-    expect(descriptor('before').packageHash).not.toBe(descriptor('after').packageHash);
+    const revisionId = randomUUID();
+    expect(descriptor('before', revisionId).packageHash).not.toBe(descriptor('after', revisionId).packageHash);
   });
 
   it.skipIf(!privateRoot)('validates publication and carries the two clarified benchmark rules', async () => {
     for (const file of files) expect(sha256(file.bytes)).toBe(inventory.find(entry => entry.path === file.path)!.sha256);
-    const d = descriptor('after');
+    const d = descriptor('after', randomUUID());
     const publication = {
       id: d.packageId, revisionId: d.revisionId, requestId: randomUUID(), expectedVersion: 14,
       resourcePlanReviewed: true as const, descriptor: d,
