@@ -28,3 +28,13 @@ it('does not use a nearby daily snapshot as day 1; weekly differences need both 
  expect(out.weekly[0]?.totals).toEqual({'c:postforme':{views:40}});
  expect(out.weekly[1]?.status).toBe('data_accumulating');
 });
+it('never adds rates into weekly totals or mixes accounts into the median',()=>{
+ const d={...data,posts:[...data.posts,{...data.posts[0]!,id:'other-account',connectionId:'other'}]};
+ const full=(date:string,n:number)=>({capturedOn:date,metrics:{views:n,likes:n,comments:1,shares:1,completion_rate:50},
+  missingFields:[],source:'postforme'} as const);
+ const h=new Map<string,History>([['older',[full('2026-10-11',10),full('2026-10-18',20)]],
+  ['other-account',[snapshot('2026-10-02',9999)]]]);
+ const out=alignedReview(d,h,Date.parse('2026-10-18T12:00:00Z'));
+ expect(out.weekly[0]?.totals).toEqual({'c:postforme':{views:10,likes:10,comments:0,shares:0}});
+ expect(out.rows.find(r=>r.postId==='other-account'&&r.ageDays===1)?.comparisons).toEqual({});
+});

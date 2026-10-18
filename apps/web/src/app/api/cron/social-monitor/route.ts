@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { NextResponse } from 'next/server';
+import { after, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { finishScheduledJobRun, startScheduledJobRun } from '@repo/api/src/services/scheduledJobRuns';
 import { loadPostForMeDeps } from '@repo/api/src/services/publishMonitor/secrets';
@@ -43,7 +43,7 @@ export async function GET(request: Request) {
   }
   try {
     const report = await runSocialMonitorJob(client, deps, Date.now() + 240_000, entitlementWindow(client), Date.now,
-      { env: process.env, entitlement: tikhubEntitlements(client) });
+      { env: process.env, entitlement: tikhubEntitlements(client) }, { env: process.env, defer: work => after(work) });
     if (keyError) report.failures.push('postforme_key');
     const success = report.failures.length === 0;
     await finish(success ? 'success' : 'error', { ...report, ...(keyError ? { postForMeKeyError: keyError } : {}) },

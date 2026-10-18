@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {REVIEW_SWITCH,REVIEW_MODEL,REVIEW_CAP} from './publishMonitor/reviewSettings';
 import { FUSION_SETTINGS_KEY } from './fusion/settings';
 import { z } from 'zod';
 import { logger } from '../lib/logger';
@@ -17,6 +18,7 @@ import { MODEL_IDENTITY_GUARD_KEY } from './modelIdentity/guardSetting';
 
 // Dedicated readers own these values and their validation, including serialized JSON.
 const dedicatedSettingKeys = new Set([
+  REVIEW_SWITCH,REVIEW_MODEL,REVIEW_CAP,
   PAYMENT_CHANNEL_KEY, PAYG_HOST_SETTING, PAYG_PRODUCTION_SETTING, RUNTIME_ENVIRONMENT_SETTING, REPORT_SETTING, RUNTIME_RATE_LIMIT_KEY, PURPOSE_BUDGET_KEY,
   PROVIDER_PRICES_KEY, ABSORB_CONFIG_KEY, ABSORB_ACK_KEY, PAYG_START_THRESHOLDS_KEY, STOP_LOSS_KEY,
   MODEL_IDENTITY_GUARD_KEY, PAYMENT_METHOD_ROUTES_KEY, FUSION_SETTINGS_KEY,

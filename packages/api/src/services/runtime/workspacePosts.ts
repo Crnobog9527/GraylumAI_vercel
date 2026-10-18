@@ -42,7 +42,9 @@ export function ownPostsResult(data:PublishMonitorData,now=Date.now()):Record<st
   .toSorted((a,b)=>Date.parse(b.postedAt!)-Date.parse(a.postedAt!)||a.id.localeCompare(b.id)).slice(0,30).map(p=>({
    id:p.id,platform:platforms.get(p.connectionId)??'unknown',source:p.source,posted_at:p.postedAt,
    title_excerpt:Array.from(p.titleExcerpt??'').slice(0,120).join(''),
-   captured_on:p.latest?.capturedOn??null,metrics:Object.fromEntries(Object.entries(p.latest?.metrics??{}).filter(([key])=>!p.latest?.missingFields.includes(key))),missing_fields:p.latest?.missingFields??[],
+   captured_on:p.latest?.capturedOn??null,
+   metrics:Object.fromEntries(Object.entries(p.latest?.metrics??{}).filter(([key])=>!p.latest?.missingFields.includes(key))),
+   missing_fields:p.latest?.missingFields??[],
   }));
  const asOf=posts.map(p=>p.captured_on).filter((d):d is string=>d!==null).sort().at(-1)??null;
  const stale=posts.length>0&&(asOf===null||now-Date.parse(asOf+'T00:00:00Z')>3*86400000);
@@ -68,9 +70,29 @@ export function ownPostsResult(data:PublishMonitorData,now=Date.now()):Record<st
 }
 /** The directory authenticates the actor/session and returns only a read descriptor; reuse PR-3a's server reader. */
 export async function resolvePostSource(db:SessionRpc,actor:string,source:unknown):Promise<unknown>{
- const request=source as {kind?:string;windowDays?:number;entitled?:boolean}|null;
+ const request=source as {kind?:string;windowDays?:number;entitled?:boolean;review?:boolean}|null;
  if(request?.kind!=='workspace_posts_request')return source;
  if(!request.entitled)return {kind:'my_posts',status:'no_entitlement',note:NO_ENTITLEMENT,window_days:14,dependencies:[]};
  if(![14,30,90].includes(request.windowDays??0))return unavailable;
- return ownPostsResult(await readData(db as Pick<SupabaseClient,'rpc'>,actor,request.windowDays!,{}));
+ const data=await readData(db as Pick<SupabaseClient,'rpc'>,actor,request.windowDays!,{});
+ const result=ownPostsResult(data);
+ if(!request.review)return result;
+ const {readReviewData}=await import('../publishMonitor/reviewData');
+ const {review}=await readReviewData(db as Pick<SupabaseClient,'rpc'>,actor,request.windowDays!,Date.now(),data);
+ const enriched:Record<string,unknown>={...result,review};
+ while(Buffer.byteLength(JSON.stringify(enriched))>11000){
+  if(Array.isArray(result.posts)&&result.posts.length>2)result.posts.pop();
+  else if(review.benchmarks.rows.length){
+   review.benchmarks.rows.pop();const kept=new Set(review.benchmarks.rows.map(row=>row.postId));
+   for(const [key,ranking] of Object.entries(review.benchmarks.rankings))
+    review.benchmarks.rankings[key]=ranking.filter(row=>kept.has(row.postId));
+  }
+  else if(review.rows.length){review.rows.pop();
+   const kept=new Set(review.rows.map(row=>row.postId));
+   for(const [key,ranking] of Object.entries(review.rankings))review.rankings[key]=ranking.filter(row=>kept.has(row.postId));
+  }else if(Array.isArray(result.posts)&&result.posts.length)result.posts.pop();
+  else return {...unavailable,reason:'capacity_exhausted'};
+  enriched.posts=result.posts;Object.assign(enriched,{truncated:true});
+ }
+ return enriched;
 }
