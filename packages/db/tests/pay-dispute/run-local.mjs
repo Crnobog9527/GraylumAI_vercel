@@ -284,6 +284,14 @@ try {
  assert.equal(await balance(refundUser),40);
  report.checks.push('withdrawn dispute permits a fresh valid package refund; active holds and unexplained negative adjustments still reject');
  }
+ // A stale lookup hint must never steal an already canonical payment from another user.
+ const canonicalUser=await profile(0),hintUser=await profile(0);
+ const canonicalPack=await pack(canonicalUser,100),hintPack=await pack(hintUser,200);
+ await receive(canonicalPack);
+ await assert.rejects(()=>receive(canonicalPack,{orderId:hintPack.order}),/PAY_DISPUTE_MAPPING_CONFLICT/);
+ assert.equal(await balance(canonicalUser),0);assert.equal(await balance(hintUser),200);
+ assert.equal(await v('SELECT dispute_payment_key v FROM payment_orders WHERE id=$1',[hintPack.order]),null);
+ report.checks.push('conflicting order hint rejected; canonical owner frozen, unrelated owner balance and mapping untouched');
  await membershipCases({c,v,profile,receive,withdraw,ops,report});
  // Optional PAY-EVIDENCE integration: model its documented table locally; no personal evidence is created.
  await c.query(`CREATE TABLE payment_order_evidence(order_id uuid PRIMARY KEY,hold_reason text,
