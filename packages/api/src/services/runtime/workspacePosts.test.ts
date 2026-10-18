@@ -3,6 +3,7 @@ import {describe,it,expect,vi} from 'vitest';
 import {admitOwnPosts,filterPostEntries,NO_ENTITLEMENT,ownPostsResult,resolvePostSource} from './workspacePosts';
 import type {PublishMonitorData} from '../publishMonitor/data';
 import {executorRpc} from './executorRpc';
+import {postgresJsonbBytes} from './payloadSize';
 const actor='11111111-1111-4111-8111-111111111111';
 const connection='22222222-2222-4222-8222-222222222222';
 const now=Date.parse('2026-10-18T00:00:00Z');
@@ -34,9 +35,18 @@ describe('my_posts saved data',()=>{
   const posts=Array.from({length:40},(_,i)=>post(String(i)));
   posts.forEach(p=>{p.latest!.metrics=Object.fromEntries(Array.from({length:60},(_,i)=>['metric'+i,i]));});
   const result=ownPostsResult({...data(),posts},now);
-  expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThanOrEqual(12000);
+  expect(postgresJsonbBytes(result)).toBeLessThanOrEqual(12000);
   expect((result.posts as unknown[]).length).toBeLessThanOrEqual(30);
   expect((result.posts as unknown[]).length).toBeGreaterThan(0);
+ });
+ it('fits the persisted JSON bytes for fifty short metrics and exponent-form numbers',()=>{
+  for(const value of [0,1e21,1e-7]){
+   const posts=Array.from({length:30},(_,i)=>post(String(i)));
+   posts.forEach(p=>{p.latest!.metrics=Object.fromEntries(Array.from({length:50},(_,i)=>['m'+i,value]));});
+   const result=ownPostsResult({...data(),posts},now);
+   expect(result.kind).toBe('my_posts');expect((result.posts as unknown[]).length).toBeGreaterThan(0);
+   expect(postgresJsonbBytes(result)).toBeLessThanOrEqual(12000);
+  }
  });
  it('free users do not read data, and readData is the only data RPC for paid users; no exchange or billing',async()=>{
   const db={rpc:vi.fn(async()=>({data:data(),error:null}))};
