@@ -281,6 +281,18 @@ export async function fusionCompareCases({db,Client,connectionString,report,crea
     const stale = await call(db,'fusion_compare_adopt',actor,second.compareId,0,randomUUID(),billing(0),items2);
     assert.equal(stale.state,'stale');assert.equal(stale.quote,'second answer');
   }
+  // A quote never exceeds what the composer can send: 18000 characters plus the notice, for an answer over 20000.
+  await db.query("UPDATE fusion_call_outputs SET body=repeat('x',25000) WHERE call_id=$1",[d0.id]);
+  const longQuote = (await call(db,'fusion_compare_adopt',actor,second.compareId,0,randomUUID(),billing(0),items2)).quote;
+  assert.equal(longQuote.startsWith('x'.repeat(18000)+'\n'),true);assert.equal(longQuote.includes('已截断'),true);
+  assert.equal(longQuote.length<18100,true);
+  await db.query("UPDATE fusion_call_outputs SET body='second answer' WHERE call_id=$1",[d0.id]);
+  // A frozen workspace source withdrawn after admission also makes the answer stale (the revision is unchanged here).
+  await db.query('UPDATE runtime_sessions SET revision=revision-1 WHERE id=$1',[session]);
+  await db.query("UPDATE fusion_compares SET workspace_dependencies=jsonb_build_array(jsonb_build_object('sourceVersionId',$2::text)) WHERE id=$1",[second.compareId,randomUUID()]);
+  assert.equal((await call(db,'fusion_compare_adopt',actor,second.compareId,0,randomUUID(),billing(0),items2)).state,'stale');
+  await db.query("UPDATE fusion_compares SET workspace_dependencies='[]' WHERE id=$1",[second.compareId]);
+  await db.query('UPDATE runtime_sessions SET revision=revision+1 WHERE id=$1',[session]);
   assert.equal((await call(db,'fusion_compare_read',actor,second.compareId)).adoption,null,'a quote is not an adoption');
   report.checks.push('when the conversation moved on, adoption returns the answer as a quote, repeatably, and records nothing');
 

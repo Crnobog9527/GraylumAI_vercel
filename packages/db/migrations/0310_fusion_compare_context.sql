@@ -200,7 +200,7 @@ CREATE OR REPLACE FUNCTION public.fusion_compare_adopt(p_actor_id uuid, p_compar
   p_request_id uuid, p_billing jsonb, p_items jsonb)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE fc fusion_compares; s runtime_sessions; r bill2_runs; o fusion_call_outputs; b jsonb; e runtime_executions;
-  answer text; user_text text;
+  answer text; user_text text; src_bad boolean;
 BEGIN
   PERFORM bill2_actor(p_actor_id);
   -- Lock order as runtime admission and conversation deletion: session, then the compare record.
@@ -227,14 +227,23 @@ BEGIN
   -- (cost_pending, closed, cancel requested) is replaceable and does not block.
   -- The work material (brief) is fenced like the history: a change after the compare started makes the answer stale.
   PERFORM fusion_compare_material_guard(p_actor_id,s.id);
-  IF s.revision<>fc.history_revision
+  -- Frozen workspace sources: same project locks and opc_source_allowed rule as begin and admission. One that stopped being
+  -- allowed makes the answer stale (the quote is handed back, nothing is written).
+  PERFORM p.id FROM artifact_projects p JOIN artifact_versions av ON av.project_id=p.id
+    WHERE p.actor_id=p_actor_id AND av.id::text IN (SELECT d->>'sourceVersionId'
+      FROM jsonb_array_elements(coalesce(fc.workspace_dependencies,'[]')) d) ORDER BY p.id FOR SHARE OF p;
+  src_bad:=EXISTS(SELECT 1 FROM jsonb_array_elements(coalesce(fc.workspace_dependencies,'[]')) d
+    WHERE NOT coalesce(opc_source_allowed(p_actor_id,(d->>'sourceVersionId')::uuid),false));
+  IF src_bad OR s.revision<>fc.history_revision
     OR fc.config->>'materialRevision' IS DISTINCT FROM fusion_compare_material_token(p_actor_id,s.id) OR (s.active_execution IS NOT NULL AND NOT EXISTS(SELECT 1 FROM runtime_executions old_execution
       JOIN bill2_runs old_run ON old_run.id=old_execution.billing_run_id
       WHERE old_execution.id=s.active_execution AND old_execution.session_id=s.id
         AND old_execution.actor_id=p_actor_id AND old_run.actor_id=p_actor_id
         AND old_run.session_ref=s.id AND old_execution.state='cost_pending'
         AND old_run.closed AND old_run.cancel_requested)) THEN
-    RETURN jsonb_build_object('state','stale','quote',o.body);
+    -- The quote is prefilled into the composer (20000 characters): at most 18000 plus the notice, as specified.
+    RETURN jsonb_build_object('state','stale','quote',CASE WHEN char_length(o.body)>18000
+      THEN left(o.body,18000)||E'\n……（已截断，完整回答见上面的对比卡片）' ELSE o.body END);
   END IF;
   -- Two history items: the compare question as the user turn, the chosen answer as the assistant turn.
   IF jsonb_typeof(p_items) IS DISTINCT FROM 'array' OR jsonb_array_length(p_items)<>2 THEN RAISE EXCEPTION 'FUSION_COMPARE_INVALID'; END IF;
