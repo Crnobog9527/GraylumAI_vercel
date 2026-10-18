@@ -11,6 +11,7 @@ beforeEach(()=>vi.clearAllMocks());
 
 it.each([
  ['RUNTIME_PROVIDER_HISTORY_DENIED','provider_history'],['BILL2_PROVIDER_REQUEST_DENIED','preflight'],
+ ['PUBLISH_MONITOR_REVIEW_SOURCE_REQUIRED','preflight'],
  ['RUNTIME_PROVIDER_BINDING_DENIED','preflight'],['RUNTIME_TIME_BUDGET_EXHAUSTED',undefined],
  ['RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY',undefined],[undefined,undefined],
 ] as const)('classifies %s as a Graylum system failure: %s',(code,reason)=>{
@@ -19,11 +20,11 @@ it.each([
 
 // A later call of a round that already charged an earlier call (a resumed PAYG round) hits a
 // history incompatibility: nothing more is dispatched, so the round ends through fail_platform.
-function round(contractVersion:'bill2.v2'|'bill2.v1',platform:'cancelled'|'cost_pending'|'error'){
+function round(contractVersion:'bill2.v2'|'bill2.v1',platform:'cancelled'|'cost_pending'|'error',review=false){
  const bad={role:'assistant',content:[{type:'output_text',text:'Synthetic',providerData:{unknown:'synthetic'}}]};
  const context={version:'runtime.v1',sdkVersion:'0.18.0',role:'ordinary',input:'Current',instructions:'Fixed',model:'fixture',
   maxOutputTokens:100,maxTurns:1,historyItems:32,tools:[],network:'deny',providerRequestFormat:'serial-tools-v6-reasoning',
-  reasoning:{effort:'low'}};
+  reasoning:{effort:'low'},...(review?{weeklyReview:{id,token:id,maxCostUsd:'1'}}:{})};
  const actions:Array<{action:unknown;result:unknown}>=[];
  const database={rpc:vi.fn(async(name:string,args:Record<string,unknown>)=>{
   if(name==='runtime_execution')actions.push({action:args.p_action,result:args.p_result});
@@ -37,6 +38,7 @@ function round(contractVersion:'bill2.v2'|'bill2.v1',platform:'cancelled'|'cost_
   return {data:{state:'running'},error:null};
  })};
  mock.run.mockImplementation(async(o:RuntimeRunnerInput)=>{
+  if(review)throw new Error('PUBLISH_MONITOR_REVIEW_SOURCE_REQUIRED');
   const selected=await o.selectHistory(await o.session.getItems(),[{role:'user',content:o.input}]);
   o.filterModelInput!([...selected,bad] as never,o.instructions);
   return 'unreachable';
@@ -66,4 +68,11 @@ it('leaves pre-PAYG (bill2.v1) rounds on their existing path',async()=>{
  const r=round('bill2.v1','cancelled');
  expect(await r.execute()).toEqual({state:'pending'});
  expect(r.actions.some(a=>a.action==='fail_platform')).toBe(false);
+});
+
+it('a weekly review without the required source ends with native platform compensation, never an ungrounded success',async()=>{
+ const r=round('bill2.v2','cancelled',true);
+ expect(await r.execute()).toEqual({state:'cancelled',unavailable:'preflight'});
+ expect(r.actions.find(a=>a.action==='fail_platform')?.result).toEqual({epoch:3,value:{unavailable_reason:'preflight'}});
+ expect(r.actions.some(a=>a.action==='interrupt')).toBe(false);
 });
