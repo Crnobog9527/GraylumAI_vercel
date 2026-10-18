@@ -22,7 +22,7 @@ export type PublicPage = {
 export const PUBLIC_PAGES: PublicPage[] = [
   // The public host serves the home page at "/" (rewritten to /landing until the single-host move).
   { path: '/', locale: 'zh-Hans', lastModified: '2026-10-13' },
-  { path: '/landing/pricing', locale: 'zh-Hans', lastModified: '2026-10-12' },
+  { path: '/pricing', locale: 'zh-Hans', lastModified: '2026-10-12' },
   { path: '/features', locale: 'zh-Hans', lastModified: '2026-10-17', footerLabel: '功能介绍' },
   { path: '/features/positioning', locale: 'zh-Hans', lastModified: '2026-10-17' },
   { path: '/features/content', locale: 'zh-Hans', lastModified: '2026-10-17' },

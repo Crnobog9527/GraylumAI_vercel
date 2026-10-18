@@ -61,7 +61,7 @@ export const ABOUT_ZH_HANS: ArticleContent = {
   ],
   related: [
     { label: '联系我们', href: '/contact', description: '商务合作、产品咨询和支持反馈的联系方式。' },
-    { label: '价格', href: '/landing/pricing', description: '免费开始，以及会员和积分包的说明。' },
+    { label: '价格', href: '/pricing', description: '免费开始，以及会员和积分包的说明。' },
     { label: '常见问题', href: '/faq', description: '使用前最常被问到的问题。' },
   ],
   updated: '2026-10-13',
@@ -117,7 +117,7 @@ export const ABOUT_ZH_TW: ArticleContent = {
   related: [
     { label: '自媒體是什麼？', href: '/zh-tw', description: '從零開始認識自媒體，以及 AI 能幫你做什麼。' },
     { label: '聯絡我們（簡體）', href: '/contact', description: '商務合作、產品諮詢和支援回饋的聯絡方式。' },
-    { label: '價格（簡體）', href: '/landing/pricing', description: '免費開始，以及會員和點數包的說明。' },
+    { label: '價格（簡體）', href: '/pricing', description: '免費開始，以及會員和點數包的說明。' },
   ],
   updated: '2026-10-13',
 };

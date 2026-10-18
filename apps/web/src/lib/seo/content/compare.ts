@@ -115,7 +115,7 @@ export function compareHans(plans: readonly PaywallPlanSource[] = []): ArticleCo
     related: [
       { label: '定位分析', href: '/features/positioning', description: '三步对话想清楚账号做什么、给谁看。' },
       { label: '评审团', href: '/features/jury', description: '几个不同的大模型分别审报告，有分歧再辩一轮。' },
-      { label: '价格', href: '/landing/pricing', description: '免费开始，以及会员和积分包的说明。' },
+      { label: '价格', href: '/pricing', description: '免费开始，以及会员和积分包的说明。' },
     ],
     sources: CHATGPT_SOURCES,
     updated: COMPARED_ON,

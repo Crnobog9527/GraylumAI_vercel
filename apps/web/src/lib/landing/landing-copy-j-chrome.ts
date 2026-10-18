@@ -42,7 +42,7 @@ const FAQ: ChromeLink = { label: '常见问题', href: '/faq' };
 export const J_NAV = {
   label: '主导航',
   product: { label: '产品', links: PRODUCT },
-  places: [TUTORIALS, { label: '价格', href: '/landing/pricing' }, FAQ, { label: '关于我们', href: '/about' }],
+  places: [TUTORIALS, { label: '价格', href: '/pricing' }, FAQ, { label: '关于我们', href: '/about' }],
   /**
    * OWNER (2026-10-15): one globe button with the current language's short name, opening a menu of full names.
    * English has no pages yet: SEO_GEO_SPEC forbids links and hreflang to /en before it is live, so it shows, unlinked.
@@ -67,7 +67,7 @@ export const J_FOOTER = {
     { title: '产品', links: [
       { label: '功能介绍', href: PLANNED.features },
       { label: '评审团', href: PLANNED.jury },
-      { label: '价格', href: '/landing/pricing' },
+      { label: '价格', href: '/pricing' },
     ] },
     /**
      * No link to the sample reports yet (2026-10-17): /landing/samples is not built (it was a 404 on staging), and the
