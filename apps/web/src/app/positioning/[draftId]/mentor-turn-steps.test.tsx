@@ -16,6 +16,12 @@ describe("MentorTurnSteps", () => {
     const open = { executionId: "e1", state: "running", primaryBody: "x", organizerComplete: null } as never;
     expect(html({ reply: { text: "x" }, execution: open, stale: true })).not.toContain("data-turn-steps");
   });
+  it("treats a same-tab restored waiting prefix as a reopened turn", () => {
+    const live = { executionId: "e1", text: "已写一半", phase: "waiting", card: null, rev: 1, points: 4, stalled: false };
+    const running = { executionId: "e1", state: "running", primaryBody: null, organizerComplete: null } as never;
+    expect(html({ live, reply: { text: "已写一半" }, execution: running })).toContain("正在写回复");
+    expect(html({ live, reply: { text: "已写一半" }, execution: running, stale: true })).not.toContain("data-turn-steps");
+  });
   it("says the background-processing line once when the turn notice already says it", () => {
     const open = { executionId: "e1", state: "running", primaryBody: null, organizerComplete: null } as never;
     const withNotice = html({ reply: { text: "", notice: { tone: "status", text: REOPENED_HINT, busy: true } }, execution: open });

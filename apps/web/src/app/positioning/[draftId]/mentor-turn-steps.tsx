@@ -31,14 +31,17 @@ export function MentorTurnSteps({ live, reply, execution, calls, stale = false }
   stale?: boolean;
 }) {
   const streaming = Boolean(live) && !live!.finished && !live!.stopped && !["incomplete", "waiting", "stopped"].includes(live!.phase);
-  // Not streamed here but still advancing on the server: the reopened notice, or a saved main reply whose organizer is open.
-  const organizing = !live && !stale && Boolean(execution) && openOrganizer(execution!) && ["prepared", "running"].includes(execution!.state);
-  // The turn's own notice already says "还在后台处理"; the steps then stay quiet so it is shown once.
-  const reopened = !live && (reply.notice?.text === REOPENED_HINT || organizing);
+  // A same-tab reload restores the shown text as a "waiting" prefix: the stream is gone, so it counts as reopened.
+  const here = Boolean(live) && live!.phase !== "waiting";
+  const open = Boolean(execution) && ["prepared", "running"].includes(execution!.state);
+  // Not streamed here but still advancing on the server: a restored prefix, the reopened notice, or a saved main reply whose organizer is open.
+  const organizing = !here && !stale && open && openOrganizer(execution!);
+  const noticed = !here && reply.notice?.text === REOPENED_HINT;
+  const reopened = !here && !live?.stopped && (noticed || organizing || (Boolean(live) && !stale && open));
   return <>
     <ResearchCallList calls={calls}/>
-    {(streaming || reopened) && <TurnSteps reopened={reopened} quiet={!live && reply.notice?.text === REOPENED_HINT}
-      progress={{ phase: live?.phase ?? (organizing ? "organizer" : "mentor"), hasText: Boolean(reply.text),
+    {(streaming || reopened) && <TurnSteps reopened={reopened} quiet={noticed}
+      progress={{ phase: here ? live!.phase : organizing ? "organizer" : "mentor", hasText: Boolean(reply.text),
         tools: toolCounts(calls.map(call => call.state)) }}/>}
   </>;
 }
