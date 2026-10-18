@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
 
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { ChevronsDown } from 'lucide-react';
 import { AsDemo } from '@/components/chat-display/display-heading';
 import compare from '@/components/landing/preview-j/compare-j.module.css';
@@ -64,8 +64,8 @@ export function scenarioAt(items: readonly Item[], position: number) {
  * Round nine (V5, Owner 2026-10-18: "我老以为我卡在这个页面了，怎么滚都没用"): while the region holds, the wheel (or a
  * finger) always does something, one step per notch: down finishes the scenario being written, or, written, goes on
  * to the next; up goes back to the one before, shown finished. Over the coach's chat it first scrolls the chat, and
- * only at its end moves the scenarios. With the fourth written, the page goes on. A line under the region says what
- * the next notch does, with the four scenarios as a bar.
+ * only at its end moves the scenarios. With the fourth written, the page goes on. (The line under the region saying
+ * what the next notch does was taken away, Owner 2026-10-18; the scrolling itself is unchanged.)
  * Server HTML, no JavaScript and reduced motion: one scenario at a time with the tabs, each conversation whole.
  */
 export function ScenariosL({ flags, after }: { flags: LandingFlags; after?: ReactNode }) {
@@ -204,7 +204,10 @@ export function ScenariosL({ flags, after }: { flags: LandingFlags; after?: Reac
   const stage = (
     <div className={cn(page.wrap, held && styles.fill)}>
       <h2 id="compare-title" className={cn(compare.title, held && styles.heldTitle)}>
-        {L_TASKS_TITLE.split(/(?<=，)/).map(part => <span key={part} className={compare.phrase}>{part}</span>)}
+        {/* Owner 2026-10-18: always two lines, "同一个任务，" and then the comparison. */}
+        {L_TASKS_TITLE.split(/(?<=，)/).map((part, index) => (
+          <Fragment key={part}>{index ? <br /> : null}<span className={compare.phrase}>{part}</span></Fragment>
+        ))}
       </h2>
       {items.length > 1 ? (
         <div className={styles.bar}>
@@ -238,14 +241,6 @@ export function ScenariosL({ flags, after }: { flags: LandingFlags; after?: Reac
             beat={held && !played.includes(active) ? at.beat : Infinity} /></AsDemo></div>
         </TypingScope>
       </div>
-      {held && items.length > 1 ? (
-        <div className={styles.hint} aria-hidden="true">
-          <span>{at.index < items.length - 1 ? L_SCENARIOS.hintNext(at.index + 2, items.length)
-            : written ? L_SCENARIOS.hintOn : L_SCENARIOS.hintFinish(items.length)}</span>
-          <ol>{items.map((item, index) => <li key={item.copy.tab} data-on={index < at.index || (index === at.index && written) || undefined}
-            data-here={index === at.index || undefined} />)}</ol>
-        </div>
-      ) : null}
     </div>
   );
 

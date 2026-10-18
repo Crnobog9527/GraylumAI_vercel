@@ -19,7 +19,7 @@ export const L_LATER = {
     title: '第二步：每周带你做内容',
     // Round nine (V2, Owner 2026-10-18): the creation Skill's order — topic, then title and cover, then the material and
     // the person's voice, then the script and storyboard.
-    lede: '定位定下来以后，每周在同一个对话里：先选题，再定标题和封面，然后找资料、按你说话的样子写稿、出分镜。',
+    lede: '定位定下来以后，每周在同一个对话里：\n先选题，再定标题和封面，然后找资料、按你的写作风格写稿、出分镜。',
     stages: [
       { id: 'topics', label: '选题', needs: ['content'], source: 'real',
         note: '按你的定位、上周的数据和对标账号的近况，挑出这周最值得拍的几条，每条写清理由。' },
@@ -37,9 +37,9 @@ export const L_LATER = {
     lede: '拍完以后，发出去、盯数据、每周复盘；复盘的结论，就是下一轮的选题。',
     stages: [
       { id: 'publish', label: '一键发到多个平台', needs: ['publish'], source: 'planned',
-        note: '连接你的账号后，一条视频一次发到几个平台；每个平台单独显示结果，没发成的写清原因。' },
+        note: '连接你的账号后，一条视频一键分发到 TikTok、YouTube、Instagram 等 9 个主流平台。（暂不支持中国大陆的社交媒体平台）' },
       { id: 'monitor', label: '替你盯数据', needs: ['publish'], source: 'planned',
-        note: '发出后自动取数：前 7 天每天一次，之后每周一次。平台不给的数，写"平台不提供"，不填 0。' },
+        note: '一键获取你各个平台账号的数据，告别人工手动收集数据变化。' },
       { id: 'review', label: '每周复盘', needs: ['publish'], source: 'planned',
         note: '每周把这周的作品和你自己的中位数比，说清哪条有效、为什么；给出下周三个能直接变成选题的建议。' },
     ] as readonly LaterStage[],

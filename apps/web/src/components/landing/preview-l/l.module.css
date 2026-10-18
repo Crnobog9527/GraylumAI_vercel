@@ -182,3 +182,12 @@
 /* Round three: "先聊后买" right by the price button (no plan cards on the home page). */
 .riskLine { display: flex; flex-wrap: wrap; gap: 4px 8px; margin: 0; color: #1f6b4a; font-size: 14px; }
 p.riskLine b { font-size: 15px; font-weight: 600; letter-spacing: 0; }
+
+/*
+ * Owner 2026-10-18: a line break written into the page's own words (in the edit mode, then carried into the copy files)
+ * shows as one. The product pictures inside keep the product's own rules (dialogs, inert pictures, chat logs and
+ * bubbles are left alone), and any rule of the page's own wins over this one (no specificity).
+ */
+:where(.lines main) :where(h1, h2, h3, p, blockquote, figcaption, dt, dd):not(:where(dialog, [inert], [role='log'], [data-message-role]) *) {
+  white-space: pre-line;
+}
