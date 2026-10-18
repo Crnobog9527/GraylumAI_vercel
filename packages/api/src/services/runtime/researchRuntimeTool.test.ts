@@ -580,10 +580,10 @@ describe('durable benchmark discovery and free follow-up', () => {
     expect(result.status).toBe('ok');
     expect(result.items).toHaveLength(8);
     expect(result.items?.[0]?.fields.category).toBe('activity_pending');
-    expect(result.items?.[0]?.fields.activityStatus).toBe('活跃度待取数确认');
+    expect(result.items?.[0]?.fields.activityStatus).toBe('活跃度待核对');
     const card = f.store.createCard.mock.calls[0]?.[1];
     expect(card?.options.filter(option => option.selectable)).toHaveLength(8);
-    expect(card?.options[0]?.label).toContain('活跃度待取数确认');
+    expect(card?.options[0]?.label).toContain('活跃度待核对');
   });
 
   it('reuses the stored first card verbatim when discovery recovery finds its stable card id', async () => {

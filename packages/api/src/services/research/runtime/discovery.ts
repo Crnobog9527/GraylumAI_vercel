@@ -81,7 +81,7 @@ async function card(ctx: ResearchToolContext, discoveryId: string, accounts: Fou
   const options: ResearchCandidateOption[] = ordered
     .map((a, i) => ({ id: `c${i}`, platform: a.platform, account: a.account, evidenceRef: a.evidenceRef,
       label: a.classification.excluded === 'ACTIVE_CHECK_PENDING'
-        ? `${a.account} · 活跃度待取数确认` : a.account,
+        ? `${a.account} · 活跃度待核对` : a.account,
       selectable: selectable.has(a.key) }));
   const payload = { kind: 'candidates' as const, discoveryId, options: options.map(o => ({ ...o })),
     ...(followUp ? { followUp: true, minSelect: Math.min(options.length, Math.max(1, 3 - keys.size)) } : {}) };
@@ -182,7 +182,7 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
       evidenceRef: a.evidenceRef,
       category: a.classification.excluded === 'ACTIVE_CHECK_PENDING'
         ? 'activity_pending' : a.classification.category ?? 'excluded',
-      ...(a.classification.excluded === 'ACTIVE_CHECK_PENDING' ? { activityStatus: '活跃度待取数确认' } : {}) },
+      ...(a.classification.excluded === 'ACTIVE_CHECK_PENDING' ? { activityStatus: '活跃度待核对' } : {}) },
     missing: a.metrics.missing })) });
 }
 
