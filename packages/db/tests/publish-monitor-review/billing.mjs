@@ -68,4 +68,30 @@ export async function billingCases({c,report}){
  await c.query('RESET ROLE');await closeAccount(c,{actor:f.actor});
  await assert.rejects(rpc(c,'publish_monitor_reviews',f.actor),/PUBLISH_MONITOR_ACCOUNT_CLOSED|BILL2_ACTOR_DENIED/);
  report.checks.push('account closure denies review reads and new calls; settled accounting remains native BILL2');
+ const low=await createFixture(c,{credits:1,threshold:2});
+ await c.query("UPDATE profiles SET membership_level='gold' WHERE id=$1",[low.actor]);
+ await c.query("UPDATE system_settings SET value=$1::jsonb WHERE key='publish_monitor_review_model_id'",[JSON.stringify(low.payload.modelId)]);
+ await rpc(c,'publish_monitor_set_auto_review',low.actor,true);
+ await c.query("UPDATE social_monitor_settings SET auto_review_enabled_at=now()-interval '8 days' WHERE actor_id=$1",[low.actor]);
+ await c.query('SET ROLE service_role');
+ const lowClaim=(await rpc(c,'publish_monitor_review_claim',20)).find(row=>row.actorId===low.actor);
+ const lowSession=await rpc(c,'runtime_session_context',low.actor,lowClaim.sessionId);
+ const lowContext={...context,model:low.claimPayload.model,modelId:low.payload.modelId,
+  request:{...context.request,sessionId:lowClaim.sessionId,requestId:lowClaim.requestId,
+   selection:{kind:'ordinary',modelId:low.payload.modelId}},
+  weeklyReview:{id:lowClaim.id,token:lowClaim.token,maxCostUsd:lowClaim.maxCostUsd}};
+ const lowPayload={...low.payload,scope:lowSession.scope,input:lowContext,
+  limits:{...low.payload.limits,costUsd:'0.009',maxCalls:3}};
+ const lowAdmission=await rpc(c,'runtime_admit',low.actor,lowClaim.sessionId,lowClaim.requestId,lowContext,lowPayload);
+ await rpc(c,'runtime_execution',low.actor,lowAdmission.executionId,'begin',null);
+ const paused=await rpc(c,'bill2_claim',low.actor,lowAdmission.runId,1,{...low.claimPayload,runtimeEpoch:1});
+ assert.equal(paused.state,'waiting_credits');assert.equal(paused.dispatchToken,null);
+ await rpc(c,'runtime_cancel',low.actor,lowAdmission.executionId);
+ await rpc(c,'publish_monitor_review_step',lowClaim.id,lowClaim.token,'skip','BALANCE_LOW');
+ assert.equal(await one('SELECT count(*)::int v FROM bill2_calls WHERE run_id=$1',[lowAdmission.runId]),0);
+ assert.equal(await one('SELECT credits v FROM profiles WHERE id=$1',[low.actor]),1);
+ assert.equal(await one('SELECT skip_reason v FROM social_review_runs WHERE id=$1',[lowClaim.id]),'BALANCE_LOW');
+ report.checks.push('native insufficient-credit claim issues no dispatch token, creates zero calls and skips the period without debit');
+ await c.query('RESET ROLE');
+
 }

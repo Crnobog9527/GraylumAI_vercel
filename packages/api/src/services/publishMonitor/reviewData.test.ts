@@ -38,3 +38,9 @@ it('never adds rates into weekly totals or mixes accounts into the median',()=>{
  expect(out.weekly[0]?.totals).toEqual({'c:postforme':{views:10,likes:10,comments:0,shares:0}});
  expect(out.rows.find(r=>r.postId==='other-account'&&r.ageDays===1)?.comparisons).toEqual({});
 });
+it('calculates week-over-week changes only for the same posts and all three exact endpoints',()=>{
+ const h=new Map<string,History>([['older',[snapshot('2026-10-04',20),snapshot('2026-10-11',80),snapshot('2026-10-18',120)]],
+  ['younger',[snapshot('2026-10-11',1000),snapshot('2026-10-18',2000)]]]);
+ const out=alignedReview(data,h,Date.parse('2026-10-18T12:00:00Z'));
+ expect(out.changes).toEqual({'c:postforme':{views:{current:40,previous:60,change:-20,samples:1}}});
+});

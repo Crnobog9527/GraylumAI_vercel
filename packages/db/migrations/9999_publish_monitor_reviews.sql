@@ -81,7 +81,8 @@ BEGIN
  SELECT * INTO r FROM social_review_runs WHERE id=p_id FOR UPDATE;
  IF r.id IS NULL OR r.lease_token IS DISTINCT FROM p_token OR r.status<>'claimed'
   OR r.lease_expires_at<=clock_timestamp() THEN RAISE EXCEPTION 'PUBLISH_MONITOR_REVIEW_LEASE_LOST';END IF;
- allowed:=publish_monitor_review_allowed(r.actor_id);
+ allowed:=publish_monitor_review_allowed(r.actor_id) AND r.created_at>=(SELECT auto_review_enabled_at
+  FROM social_monitor_settings WHERE actor_id=r.actor_id);
  SELECT * INTO x FROM runtime_executions WHERE actor_id=r.actor_id AND request_id=r.runtime_request_id;
  IF x.id IS NOT NULL THEN
   UPDATE social_review_runs SET runtime_execution_id=x.id,bill2_run_id=x.billing_run_id WHERE id=r.id;
@@ -109,7 +110,8 @@ BEGIN
  SELECT * INTO b FROM bill2_runs WHERE id=NEW.billing_run_id;
  IF r.id IS NULL OR r.actor_id<>NEW.actor_id OR r.status<>'claimed' OR r.lease_token<>(meta->>'token')::uuid
   OR r.lease_expires_at<=clock_timestamp() OR r.runtime_request_id<>NEW.request_id OR r.runtime_session_id<>NEW.session_id
-  OR NOT publish_monitor_review_allowed(NEW.actor_id) OR b.budget_usd>r.max_cost_usd
+  OR NOT publish_monitor_review_allowed(NEW.actor_id) OR r.created_at<(SELECT auto_review_enabled_at
+   FROM social_monitor_settings WHERE actor_id=r.actor_id) OR b.budget_usd>r.max_cost_usd
   OR NEW.payload->>'modelId' IS DISTINCT FROM r.model_id::text OR NEW.payload->>'role'<>'ordinary'
   OR NEW.payload->>'network'<>'deny' OR NEW.payload->'tools'<>'["read_source"]'::jsonb
   OR NEW.payload->>'ownPosts' IS DISTINCT FROM 'true' THEN RAISE EXCEPTION 'PUBLISH_MONITOR_REVIEW_DENIED';END IF;
@@ -126,7 +128,8 @@ DECLARE r social_review_runs;
 BEGIN
  SELECT * INTO r FROM social_review_runs WHERE bill2_run_id=NEW.run_id;
  IF r.id IS NOT NULL AND (TG_OP='INSERT' OR OLD.dispatched_at IS NULL AND NEW.dispatched_at IS NOT NULL)
-  AND NOT publish_monitor_review_allowed(r.actor_id) THEN RAISE EXCEPTION 'PUBLISH_MONITOR_REVIEW_DISABLED';END IF;
+  AND (NOT publish_monitor_review_allowed(r.actor_id) OR r.created_at<(SELECT auto_review_enabled_at
+   FROM social_monitor_settings WHERE actor_id=r.actor_id)) THEN RAISE EXCEPTION 'PUBLISH_MONITOR_REVIEW_DISABLED';END IF;
  RETURN NEW;
 END $$;
 DROP TRIGGER IF EXISTS publish_monitor_review_call_guard ON bill2_calls;
@@ -184,6 +187,20 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION public.publish_monitor_review_supplement(uuid,integer) FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON FUNCTION public.publish_monitor_review_supplement(uuid,integer) TO service_role;
+
+-- A saved 14-day Gold review can contain benchmark data too: downgrade must deny replay of that copy.
+DO $$ DECLARE d text;anchor text;
+BEGIN
+ d:=pg_get_functiondef('public.runtime_workspace_posts_visible(uuid,jsonb)'::regprocedure);
+ IF position('-- PR6 benchmark rights' IN d)=0 THEN
+  anchor:=' PERFORM bill2_actor(p_actor_id);';
+  IF array_length(string_to_array(d,anchor),1)<>2 THEN RAISE EXCEPTION 'PUBLISH_REVIEW_VISIBILITY_MISMATCH';END IF;
+  EXECUTE replace(d,anchor,anchor||$p$
+ -- PR6 benchmark rights
+ IF p_result->>'gold_review'='true' AND NOT coalesce((SELECT membership_level='gold' FROM profiles WHERE id=p_actor_id),false)
+  THEN RETURN false;END IF;$p$);
+ END IF;
+END $$;
 
 -- Add review metadata only to the new my_posts descriptor, preserving all existing directory and read behavior.
 DO $$ DECLARE d text;anchor text;
