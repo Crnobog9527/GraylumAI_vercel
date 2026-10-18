@@ -269,7 +269,7 @@ base64 后仍在上限内，**不改 BILL2 容量**；超过就拒绝这一页�
 单页图片长边不超过 1,600 像素、不超过 600,000 字节；单次输出上限初值 4,096 tokens。发起前按这个输出上限冻结这一次调用的最高费用，
 并按它折算的最大文字字节先占空间；余额或空间不够都不发起，结束后按实际多退少补；复用现有限流（RATE-LIMIT）限制识别请求频率。这些都是技术默认值，以后看实际费用再调。
 
-**上线后的服务器识别后备（Owner 2026-10-18「上线后做服务器识别后备，用 AI 模型、按页扣积分」）**：方案见 [LIB_2D_SERVER_OCR_FALLBACK_PLAN](implementation/LIB_2D_SERVER_OCR_FALLBACK_PLAN.md)，待 Owner 定第 7 节后上线后实施。
+**上线后改为 AI 识别（Owner 2026-10-18，[Master Plan 第 2.1 节](MASTER_PLAN.md)）**：产品正式上线后扫描件改用 AI 视觉识别、按实际花费扣积分，后台开关切换、用户不用选择；方案见 [LIB_2D_AI_RECOGNITION_PLAN](implementation/LIB_2D_AI_RECOGNITION_PLAN.md)。上线前仍按本节浏览器识别。
 
 **前提**：只有 AI 识别会把页面图片发给 OpenRouter 和模型服务商，所以 AI 识别要和 LIB-4 一样等 RUNTIME-PROD「不用于训练」
 设置核对通过后才对用户开放（2026-10-12 起改为：OpenRouter 账号和各 workspace 已关闭训练并在上线前核对，代码不强制，见 Master Plan 第 2.1 节）；浏览器识别不受这个限制。
