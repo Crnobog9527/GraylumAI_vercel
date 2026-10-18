@@ -1,5 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type Stripe from 'stripe';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { disputeAllowsRefund } from './disputeRefundEligibility';
 import type { MonthlyRefundTerms } from './monthlyRefundApproval';
 import type { MonthlyRefundIntent, MonthlyRefundObservation } from './subscriptionRefundExecution';
 import type { SubscriptionRefundStripe } from './subscriptionRefundPreview';
@@ -65,7 +67,7 @@ async function renewalOwnership(stripe: MonthlyStripe, intent: MonthlyRefundInte
 }
 
 /** Full original-channel read before each mutation; no current catalog or client evidence. */
-export async function readMonthlyProvider(stripe: MonthlyStripe, intent: MonthlyRefundIntent) {
+export async function readMonthlyProvider(stripe: MonthlyStripe, intent: MonthlyRefundIntent, db?: Pick<SupabaseClient, 'from'>) {
   const t = intent.terms;
   // A card order (PAY-STRIPE-MP) was charged the pre-tax amount plus its tax.
   const charged = t.paidMinor + (t.taxMinor ?? 0);
@@ -108,7 +110,7 @@ export async function readMonthlyProvider(stripe: MonthlyStripe, intent: Monthly
     && (row.id === t.invoiceId || row.status === 'void' || row.status === 'uncollectible'))
     && invoiceItems.length === 0 && sub.schedule === null && sub.pending_update === null
     && sub.pause_collection === null && sub.pending_setup_intent == null
-    && sub.pending_invoice_item_interval == null && charge.disputed === false
+    && sub.pending_invoice_item_interval == null && await disputeAllowsRefund(db, stripe, scope, t.orderId, charge)
     && charge.amount_refunded <= t.netMinor && sub.collection_method === 'charge_automatically'
     && (sub.cancel_at === null || sub.cancel_at === item.current_period_end);
   return { checkedAt: new Date().toISOString(), merchant: scope.merchant, mode: scope.mode,

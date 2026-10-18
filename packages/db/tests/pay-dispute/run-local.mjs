@@ -95,6 +95,46 @@ try {
  assert.equal((await withdraw(ops,d)).duplicate,true);assert.equal(await balance(u),350);
  await receive(p);assert.equal(await balance(u),350,'replayed updated actions never refreeze a withdrawn hold');
  report.checks.push('duplicate-event; other sources stay spendable; failed calls stay attributed; withdrawal exactly once');
+ // A wallet-pack refund and a dispute receipt share the same canonical lock. If the dispute commits first,
+ // legacy metadata.grantedCredits must never claw back unrelated credits after the source has been frozen.
+ const refundUser=await profile(70),refundPack=await pack(refundUser,100,iso(-hour),true,'alipay');
+ const refundDispute=await receive(refundPack);
+ const refundArgs=[refundPack.order,'stripe:refund:'+refundPack.order,'refund.updated','re_'+refundPack.order.replaceAll('-',''),
+  'succeeded',1000,'usd','ch_'+refundPack.order.replaceAll('-',''),refundPack.payment,null,null,null,iso(0),true,false];
+ const routed=await c.query(`SELECT * FROM atomic_reconcile_stripe_refund($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,refundArgs);
+ assert.equal(Number(routed.rows[0].clawback_amount),0);assert.equal(await balance(refundUser),70);
+ assert.equal(await frozen(refundPack),0);assert.equal(await state(refundPack),'superseded');
+ const replay=await c.query(`SELECT * FROM atomic_reconcile_stripe_refund($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,refundArgs);
+ assert.equal(replay.rows[0].already_reconciled,true);assert.equal(await balance(refundUser),70);
+ const ordinaryUser=await profile(70),ordinaryPack=await pack(ordinaryUser,100,iso(-hour),true,'alipay');
+ await c.query(`SELECT * FROM atomic_reconcile_stripe_refund($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+  [ordinaryPack.order,'stripe:refund:'+ordinaryPack.order,'refund.updated','re_'+ordinaryPack.order.replaceAll('-',''),
+   'succeeded',1000,'usd','ch_'+ordinaryPack.order.replaceAll('-',''),ordinaryPack.payment,null,null,null,iso(0),true,false]);
+ assert.equal(await balance(ordinaryUser),70,'ordinary wallet-pack refunds retain their legacy clawback path');
+ assert.equal(await frozen(refundPack),0);assert.equal(await v('SELECT freeze_state v FROM payment_disputes WHERE id=$1',[refundDispute.id]),'superseded');
+ const raceUser=await profile(70),racePack=await pack(raceUser,100,iso(-hour),true,'alipay'),right=new pg.Client(c.connectionParameters);
+ await c.query('UPDATE payment_orders SET dispute_payment_key=NULL WHERE id=$1',[racePack.order]);
+ await right.connect();let disputeRun;
+ try {
+  await c.query('BEGIN');await v('SELECT pay_dispute_lock($1,NULL) v',['fixture:test:'+racePack.payment]);
+  disputeRun=receive(racePack,{},right);
+  let blocked_=false;
+  for(let i=0;i<100&&!blocked_;i++) {
+   blocked_=await v('SELECT $1=ANY(pg_blocking_pids($2)) v',[c.processID,right.processID]);
+   if(!blocked_)await new Promise(r=>setTimeout(r,5));
+  }
+  assert.equal(blocked_,true,'dispute receipt waits while refund owns the canonical lock');
+  await c.query(`SELECT * FROM atomic_reconcile_stripe_refund($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+   [racePack.order,'stripe:refund:'+racePack.order,'refund.updated','re_'+racePack.order.replaceAll('-',''),
+    'succeeded',1000,'usd','ch_'+racePack.order.replaceAll('-',''),racePack.payment,null,null,null,iso(0),true,false]);
+  await c.query('COMMIT');
+  const afterRace=await disputeRun;
+  assert.equal(afterRace.freeze_state,'superseded');assert.equal(await balance(raceUser),70);assert.equal(await frozen(racePack),0);
+ } finally {
+  if(disputeRun)await c.query('ROLLBACK').catch(()=>{});
+  await right.end();
+ }
+ report.checks.push('wallet-pack dispute/refund serialization: dispute-first converts to review without a second clawback; replay is idempotent; refund-first blocks dispute until commit and refunded source is superseded; no-dispute refund keeps legacy behavior');
  const u2=await profile(0),p2=await pack(u2,100,iso(-hour));
  d=await receive(p2,{type:'charge.dispute.closed',status:'won',created:iso(-100)});
  assert.equal(d.freeze_state,'frozen');assert.equal(d.status,'won');

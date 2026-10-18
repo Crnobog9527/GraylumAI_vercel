@@ -15,7 +15,8 @@ const claimSchema = z.discriminatedUnion('claimed', [
 ]);
 const logRetentionSchema = z.object({
   applicationLogs: z.number().int().nonnegative(), diagnosticResults: z.number().int().nonnegative(),
-  scheduledJobRuns: z.number().int().nonnegative(), more: z.boolean(),
+  scheduledJobRuns: z.number().int().nonnegative(), paymentNotices: z.number().int().nonnegative().optional(),
+  more: z.boolean(),
 }).strict();
 const proofSchema = z.object({ historyComplete: z.boolean(), quiescent: z.boolean() }).strict();
 export type ErasureExecutorSummary = { processed: number; completed: number; pending: number; failed: number };

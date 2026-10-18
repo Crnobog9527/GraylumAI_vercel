@@ -1,3 +1,4 @@
+import { reportPaymentDispute } from '@/lib/payment-dispute-alert.mjs';
 import { NextResponse } from 'next/server';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import {
@@ -95,7 +96,8 @@ async function runStripeCardReconciliation(supabase: SupabaseClient) {
     // an incomplete scan. Work cut off mid-way is safe; every repair is idempotent and is retried the next day.
     let timer: ReturnType<typeof setTimeout> | undefined;
     const result = await Promise.race([
-      reconcileStripeCardPayments(supabase, stripe, { expectedMode, alert: () => reportPaymentEvidenceConflict('billing-reconcile') }),
+      reconcileStripeCardPayments(supabase, stripe, { expectedMode,
+        alert: () => reportPaymentEvidenceConflict('billing-reconcile'), disputeAlert: reportPaymentDispute }),
       new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('STRIPE_CARD_RECONCILIATION_TIMEOUT')), 50_000); }),
     ]).finally(() => clearTimeout(timer));
     reportStripeCardReconciliation(result.findings);

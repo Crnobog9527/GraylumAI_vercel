@@ -10,6 +10,9 @@ import { recordCardPaymentTax } from './cardPaymentEvidence';
 import { readSubscription, stopRenewalAfterReview, stripeStopState, syncState } from './cardSubscriptionStop';
 import { syncMonthlyRefundSubscription } from './monthlyRefundWebhook';
 import { PAYMENT_EVIDENCE_CONFLICT } from './stripeWebhookError';
+import { readDisputePayment } from './disputePayment';
+import { resumeOrderDisputes, type DisputeAlert } from './disputes';
+import { refundDisputedRenewal } from './disputeRenewalRefund';
 import { logger } from '../../lib/logger';
 
 const id = (value: string | { id: string } | null | undefined) => typeof value === 'string' ? value : value?.id ?? null;
@@ -81,7 +84,7 @@ function renewalFacts(invoice: Stripe.Invoice, subscriptionId: string, snapshot:
  * Money kept for review (an unexpected renewal or a charged non-renewal invoice) stops renewal at Stripe and calls
  * `alert` (the webhook passes the payment-evidence alert) once the stop is confirmed. */
 export async function handleCardSubscriptionInvoice(db: SupabaseClient, stripe: Stripe, invoiceId: string, eventType: string,
-  eventCreated?: number, alert: () => void = () => {}) {
+  eventCreated?: number, alert: () => void = () => {}, disputeAlert: DisputeAlert = () => {}) {
   const scope = await resolveStripeScope(stripe);
   const invoice = await stripe.invoices.retrieve(invoiceId);
   if (invoice.object !== 'invoice' || invoice.id !== invoiceId) throw new Error(PAYMENT_EVIDENCE_CONFLICT);
@@ -91,7 +94,7 @@ export async function handleCardSubscriptionInvoice(db: SupabaseClient, stripe: 
   if (!order) return false;
   const paid = eventType === 'invoice.paid' || eventType === 'invoice.payment_succeeded';
   if (paid && invoice.billing_reason === 'subscription_create') {
-    await recoverMethodCheckout(db, stripe, await orderCheckoutSession(db, stripe, scope, order, subscriptionId), eventType);
+    await recoverMethodCheckout(db, stripe, await orderCheckoutSession(db, stripe, scope, order, subscriptionId), eventType, disputeAlert);
     return true;
   }
   if (invoice.billing_reason === 'subscription_cycle' && (paid || eventType === 'invoice.payment_failed')) {
@@ -99,14 +102,20 @@ export async function handleCardSubscriptionInvoice(db: SupabaseClient, stripe: 
     if (!order.localSubscriptionId) throw new Error('PAY_STRIPE_MP_FIRST_PAYMENT_PENDING');
     const target = { p_subscription: order.localSubscriptionId, p_merchant: scope.merchant, p_invoice: invoice.id };
     const facts = paid ? renewalFacts(invoice, subscriptionId, order.purchase_snapshot, scope.mode === 'live') : null;
-    const result = facts
-      ? await db.rpc('pay_stripe_mp_renew_subscription', { ...target, p_amount: facts.amount, p_currency: invoice.currency,
-        p_paid: facts.paidAt, p_start: facts.start, p_end: facts.end })
+    const payment = facts ? await readDisputePayment(stripe, scope, { invoiceId: invoice.id }) : null;
+    const result = facts && payment
+      ? await db.rpc('pay_dispute_renew', { p_facts: { subscription: order.localSubscriptionId, merchant: scope.merchant,
+        mode: scope.mode, subscriptionId, invoiceId: invoice.id, paymentIntentId: payment.paymentIntentId,
+        amount: facts.amount, currency: invoice.currency, paidAt: facts.paidAt, start: facts.start, end: facts.end } })
       : await db.rpc('pay_stripe_mp_record_renewal_failure', { ...target, p_failed_at: iso(eventCreated) });
     if (result.error) throw new Error('PAY_STRIPE_MP_RENEWAL_UNAVAILABLE', { cause: result.error });
     // The renewal's Managed Payments tax is its own fact on the renewal order, as for the first payment.
     if (facts && typeof result.data?.orderId === 'string') {
       await recordCardPaymentTax(db, scope.merchant, result.data.orderId, { paymentId: invoice.id, tax: facts.tax });
+      await resumeOrderDisputes(db, stripe, result.data.orderId, disputeAlert);
+      if (result.data.disputeRefundRequired === true) {
+        await refundDisputedRenewal(db, stripe, result.data.orderId, invoice.id, disputeAlert);
+      }
     }
     if (paid && result.data?.state === 'review') {
       logger.error('billing', 'stripe_mp_renewal_review', { orderId: result.data.orderId, reason: 'unexpected_renewal' });
