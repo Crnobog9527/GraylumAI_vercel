@@ -159,7 +159,7 @@ export const L_LATER_CHAT = {
     /** Round nine (V2): the title picked in 标题和封面 (#1). */
     draftTitle: '15 分钟两菜一汤，只洗 1 口锅',
     versionLine: '账号已保存 v1 · 草稿',
-    editing: '前 3 秒放成品；字幕只写步骤，不写形容词；第 10 镜的计时器要拍清楚',
+    editing: '开头先放成品；字幕只写步骤，不写形容词；第 10 镜的计时器要拍清楚',
   },
 } as const;
 
@@ -172,16 +172,30 @@ export const L_LATER_FLYWHEEL = {
     note: '视频会先交给发布服务，再发到各平台；每个平台单独显示结果。',
     action: '一键发布',
   },
+  /**
+   * Round twelve (D3, Owner 2026-10-18): one card per platform, each with only the fields that platform's connection
+   * really gives (TikTok business or creator account, Instagram professional account, YouTube), all filled. Rates are
+   * the count over the views (TikTok likes 186 / 2,140 = 8.7%, saves 97 / 2,140 = 4.5%; Instagram likes 64 / 860 =
+   * 7.4%, saves 41 / 860 = 4.8%; YouTube likes 72 / 1,310 = 5.5%, 1,310 × 26 s ≈ 9.5 hours). Figures NEW, 示意.
+   */
   monitor: {
     title: '这条视频的数据',
     updated: '最后更新于 今天 09:00 · 发布后第 3 天',
-    columns: ['平台', '播放', '点赞', '收藏', '粉丝变化'] as const,
-    rows: [
-      ['TikTok', '2,140', '186', '97', '+23'],
-      ['Instagram Reels', '860', '64', '41', '平台不提供'],
-      ['YouTube Shorts', '1,310', '72', '未取到', '+5'],
-    ] as const,
-    footnote: '平台不给的数写"平台不提供"，没取到的写"未取到"，不填 0。',
+    connect: '连接 TikTok 企业号或创作者账号、Instagram 专业账号、YouTube 后，这些数据每天自动更新。',
+    cards: [
+      { platform: 'TikTok', account: '企业号', fields: [['播放', '2,140'], ['平均观看', '29 秒'], ['完播率', '39%'], ['点赞率', '8.7%'],
+        ['评论率', '0.8%'], ['收藏率', '4.5%'], ['分享率', '1.1%'], ['新增关注', '+23'], ['主页访问', '54']] },
+      { platform: 'Instagram Reels', account: '专业账号', fields: [['播放', '860'], ['覆盖人数', '790'], ['点赞率', '7.4%'], ['评论率', '0.9%'],
+        ['收藏率', '4.8%'], ['分享率', '1.3%'], ['新增关注', '+6'], ['主页访问', '21']] },
+      { platform: 'YouTube Shorts', account: '', fields: [['播放', '1,310'], ['平均观看', '26 秒'], ['观看总时长', '9.5 小时'], ['点赞率', '5.5%'],
+        ['评论率', '0.6%'], ['分享率', '0.8%'], ['新增订阅', '+5']] },
+    ],
+    insightTitle: 'AI 教练看出来的',
+    insights: [
+      'TikTok 平均观看 29 秒、完播 39%，开头留住了人。',
+      'Instagram 收藏率 4.8%，点赞率比 TikTok 低一点但收藏更高，图文版值得多发。',
+      'YouTube 观看总时长 9.5 小时，适合把几条拼成长合集。',
+    ],
   },
   review: {
     title: '本周复盘',
@@ -194,7 +208,7 @@ export const L_LATER_FLYWHEEL = {
     ] as const,
     why: '先给成品的开头留住了人；评论里又有人问"一个人的量怎么买"。',
     nextTitle: '下周三个建议，确认后变成选题：',
-    next: ['一口锅系列第 2 期：15 分钟一荤一素', '一个人一周买菜清单（回答评论）', '开头一律先给成品，3 秒内'],
+    next: ['一口锅系列第 2 期：15 分钟一荤一素', '一个人一周买菜清单（回答评论）', '开头一律先给成品'],
     action: '设为下周选题',
     loop: '复盘的结论，回到第二步，变成下一轮选题。',
   },

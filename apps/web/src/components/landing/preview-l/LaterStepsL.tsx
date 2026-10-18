@@ -339,16 +339,22 @@ function FlywheelPicture({ id, beat }: { id: string; beat: number }) {
     return (
       <section className={cn(styles.sheet, demo.scrollbar)}>
         <header><b>{m.title}</b><span>{m.updated}</span></header>
-        <div className={styles.tableWrap}>
-          <table className={styles.table}>
-            <thead><tr>{m.columns.map(column => <th key={column} scope="col">{column}</th>)}</tr></thead>
-            <tbody>{m.rows.slice(0, Math.min(m.rows.length, beat + 1)).map(row => (
-              <tr key={row[0]}>{row.map((cell, index) => (index === 0 ? <th key={index} scope="row">{cell}</th>
-                : <td key={index} data-missing={/平台不提供|未取到/.test(cell) || undefined}>{cell}</td>))}</tr>
-            ))}</tbody>
-          </table>
-        </div>
-        {beat >= 3 ? <p className={styles.small}>{m.footnote}</p> : null}
+        <p className={styles.small}>{m.connect}</p>
+        {/* Round twelve (D3): a card per platform, each with only the fields its connection gives, arriving one by one. */}
+        <ul className={styles.metricCards}>
+          {m.cards.slice(0, Math.min(m.cards.length, beat + 1)).map(card => (
+            <li key={card.platform}>
+              <p className={styles.metricHead}><b>{card.platform}</b>{card.account ? <span>{card.account}</span> : null}</p>
+              <dl>{card.fields.map(([name, value]) => <div key={name}><dt>{name}</dt><dd>{value}</dd></div>)}</dl>
+            </li>
+          ))}
+        </ul>
+        {beat >= 3 ? (
+          <div className={styles.insights}>
+            <b>{m.insightTitle}</b>
+            <ul>{m.insights.map(line => <li key={line}>{line}</li>)}</ul>
+          </div>
+        ) : null}
       </section>
     );
   }

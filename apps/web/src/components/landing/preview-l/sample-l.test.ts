@@ -12,6 +12,7 @@ import { J_PRICE_TOTAL } from '@/lib/landing/landing-copy-j-price';
 import { L_HERO_FLOW, L_NOTE_ANSWERS, L_NOTE_HEADS, L_NOTE_REGIONS, L_REPORTS } from '@/lib/landing/landing-copy-l';
 import { L_JURY, L_SCENARIOS, L_STEPS } from '@/lib/landing/landing-copy-l-steps';
 import { L_TASKS, L_TASKS_TITLE } from '@/lib/landing/landing-copy-l-compare';
+import { OFFICE_WORKER_REPORT } from '@/lib/landing/sample-reports/office-worker';
 import { loadSampleReport, SAMPLE_CHAPTERS } from '@/lib/landing/sample-reports';
 import { splitReport } from '@/lib/landing/sample-reports/report-markdown';
 import { VOICE_WALL } from '@/lib/landing/landing-copy';
@@ -21,12 +22,13 @@ import { APP_SEGMENTS } from '@/lib/sentry-scrub';
 import { L_SAMPLES_REDO } from '@/lib/landing/landing-copy-l-samples';
 import { SAMPLE_OVERVIEWS } from '@/lib/landing/sample-reports/overview';
 import { L_WORKFLOWS, SCRIPT, SHOTS } from '@/lib/landing/landing-copy-l-workflows';
-import { L_LATER, L_LATER_CHAT } from '@/lib/landing/landing-copy-l-later';
+import { L_LATER, L_LATER_CHAT, L_LATER_FLYWHEEL } from '@/lib/landing/landing-copy-l-later';
 import { L_DIRECTION_CARD, L_POSITIONING_MOMENTS, L_SKILL_OPENING } from '@/lib/landing/landing-copy-l-positioning';
 import { L_PRICE_NOTE } from '@/lib/landing/landing-copy-l';
 import { HOW_IT_WORKS as HOW } from '@/lib/landing/landing-copy';
 import { trpc } from '@/trpc/client';
 import { countOf, OverviewL } from './OverviewL';
+import { L_BENCHMARK_ROWS } from './RealPartsL';
 import { scenarioAt } from './ScenariosL';
 import { PositioningPictureL } from './PositioningPictureL';
 import { linePhases, momentAt } from '@/lib/landing/step-one-timeline';
@@ -301,11 +303,16 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     expect(seconds).toBeLessThanOrEqual(70);
     expect(SHOTS.map(shot => shot[3]).join('')).toBe(SCRIPT.replace(/\n/g, ''));
     expect(L_WORKFLOWS[2][0].proposal).toBe(SCRIPT);
-    // The same video in two scenarios: 64 saves of 1,870 plays is the 3.4% save rate, 28% watched to the end.
+    // Round twelve (D1, D2): the same video in two scenarios, the TikTok business account's rates (64 saves of 1,870
+    // plays is 3.4%; 17 of 66 seconds watched is 26%; 31 of 62 is 50%).
     expect((64 / 1870) * 100).toBeCloseTo(3.4, 1);
-    expect(L_WORKFLOWS[1][0].reply).toContain('| 冰箱剩菜三种做法 | 1,870 | 28% | 64 |');
-    expect(L_WORKFLOWS[3][0].reply).toContain('| 完播率 | 28% |');
-    expect(L_WORKFLOWS[3][0].reply).toContain('| 收藏率 | 3.4% |');
+    expect((17 / 66) * 100).toBeCloseTo(26, 0);
+    expect((31 / 62) * 100).toBeCloseTo(50, 0);
+    expect(L_WORKFLOWS[1][0].reply).toContain('| 冰箱剩菜三种做法 | 26% | 28% | 1.4% | 3.4% | 0.5% |');
+    expect(L_WORKFLOWS[1][0].reply).toContain('| 你近 30 天平均 | 43% | 37% | 0.8% | 5.1% | 0.9% |');
+    for (const line of ['| 平均观看占时长 | 26% | 43% |', '| 完播率 | 28% | 37% |', '| 评论率 | 1.4% | 0.8% |', '| 收藏率 | 3.4% | 5.1% |',
+      '| 关注率 | 0.5% | 0.9% |']) expect(L_WORKFLOWS[3][0].reply).toContain(line);
+    expect(L_WORKFLOWS[1][0].reply).not.toContain('2.6–2.9');
     expect(L_TASKS[3].question).toBe(L_WORKFLOWS[3][0].user);
     // Round eight (U10): the 小红书 note's four steps run 0–15 minutes without a gap, and the coach says why it is written so.
     const spans = [...(L_WORKFLOWS[0][0].proposal ?? '').matchAll(/(\d+)–(\d+) 分钟/g)].map(m => [Number(m[1]), Number(m[2])]);
@@ -380,6 +387,30 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     const picture = renderToStaticMarkup(withTrpc(createElement(PositioningPictureL, { moment: 0, at: null })));
     expect(picture).toContain(escape(L_SKILL_OPENING));
     expect(picture).not.toContain('<h1');
+  });
+
+  it('shows only figures the connected accounts and public data really give, every cell filled (round twelve, D1–D4)', () => {
+    const html = render();
+    // No interface gives these: nowhere on the page, nor in what the demos type.
+    const copy = JSON.stringify([L_WORKFLOWS, L_LATER_CHAT, L_LATER_FLYWHEEL, L_POSITIONING_MOMENTS, L_TASKS]);
+    for (const word of ['跳出', '3 秒完播', '5 秒完播', '前 3 秒', '平台不提供', '未取到', '缺失']) {
+      expect(html, word).not.toContain(word);
+      expect(copy, word).not.toContain(word);
+    }
+    // Step three: a card per platform, only its own fields, all filled; the rates are the counts over the views.
+    const { cards } = L_LATER_FLYWHEEL.monitor;
+    expect(cards.map(card => card.platform)).toEqual(['TikTok', 'Instagram Reels', 'YouTube Shorts']);
+    for (const card of cards) for (const [, value] of card.fields) expect(value).toMatch(/\d/);
+    expect((186 / 2140) * 100).toBeCloseTo(8.7, 1);
+    expect((97 / 2140) * 100).toBeCloseTo(4.5, 1);
+    expect((41 / 860) * 100).toBeCloseTo(4.8, 1);
+    expect((1310 * 26) / 3600).toBeCloseTo(9.5, 1);
+    // Step one's benchmark table: A to G, every cell a figure; the report's chapter 5 says the same, nothing missing.
+    for (const row of L_BENCHMARK_ROWS) for (const metric of Object.values(row.metrics)) expect(metric.value).not.toBeNull();
+    const report = JSON.stringify(OFFICE_WORKER_REPORT);
+    expect(report).toContain('约 9.7 万粉；约 2.4 万；约 7%');
+    expect(report).toContain('约 2.8 万粉；约 1.1 万；约 9%');
+    for (const item of SAMPLE_OVERVIEWS['office-worker'].benchmarks) expect(item.updateFreq).toMatch(/^每周 \d 条$/);
   });
 
   it('hangs the jury under step one, a level below it (round twelve, Owner 2026-10-18)', () => {

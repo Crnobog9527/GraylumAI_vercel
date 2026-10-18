@@ -90,7 +90,8 @@ export const L_POSITIONING_MOMENTS: readonly Moment[] = [
       { role: 'user', pick: DIRECTION_PICK, text: J_PERSONA_DIRECTION.options[DIRECTION_PICK] },
       J_FEASIBILITY,
       J_FETCH,
-      J_TABLE,
+      // Round twelve (D4): every figure filled, so the line no longer speaks of missing ones (sample J keeps its own).
+      { ...J_TABLE, text: J_TABLE.text.replace('数据已经填进表格，查不到的写"未取到"。', '数据已经填进表格。') },
       J_DIAGNOSE_SUMMARY,
     ],
   },

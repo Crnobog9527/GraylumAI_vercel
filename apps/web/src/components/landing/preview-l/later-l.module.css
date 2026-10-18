@@ -56,12 +56,6 @@
 .platforms svg { color: #1a7f45; }
 .platforms span { margin-left: auto; color: #1a7f45; font-size: 13px; }
 .button { justify-self: start; padding: 8px 16px; border-radius: 8px; background: #262626; color: #fff; font-size: 14px; }
-.tableWrap { overflow-x: auto; border: 1px solid #e8e8e8; border-radius: 10px; background: #fff; }
-.table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
-.table th, .table td { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; text-align: left; white-space: nowrap; }
-.table thead th { color: #8e8e8e; font-weight: 500; }
-.table tbody th { font-weight: 500; }
-.table td[data-missing] { color: #b45309; }
 .notice { padding: 0 8px; border-radius: 999px; background: #e9f6ee; color: #1a7f45; }
 .review { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .review li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 9px 12px; border: 1px solid #e8e8e8; border-radius: 10px; background: #fff; }
@@ -73,3 +67,19 @@
 .next li { padding-left: 2px; line-height: 1.7; }
 .chip { margin-left: 10px; padding: 1px 8px; border: 1px solid #d4d4d4; border-radius: 6px; color: #262626; font-size: 12.5px; white-space: nowrap; }
 .loop { display: flex; align-items: center; gap: 8px; color: var(--j-gold-text, #8a5a00); font-weight: 600; }
+
+/* Round twelve (D3): step three's figures, one card per platform (only the fields its connection gives), then what the
+ * coach reads from them. Three across where the sheet is wide, stacked on a phone. */
+.metricCards { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+@media (min-width: 720px) { .metricCards { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.metricCards li { padding: 12px 14px; border: 1px solid #e8e8e8; border-radius: 10px; background: #fff; }
+.metricHead { display: flex; align-items: baseline; gap: 8px; margin: 0 0 8px; }
+.metricHead b { font-size: 14.5px; }
+.metricHead span { color: #8e8e8e; font-size: 12px; }
+.metricCards dl { display: grid; gap: 4px; margin: 0; }
+.metricCards dl div { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
+.metricCards dt { color: #737373; }
+.metricCards dd { margin: 0; color: #262626; font-variant-numeric: tabular-nums; font-weight: 500; }
+.insights { display: grid; gap: 6px; padding: 12px 14px; border-radius: 10px; background: #fbf6e8; }
+.insights b { font-size: 14px; }
+.insights ul { display: grid; gap: 4px; margin: 0; padding-left: 18px; font-size: 13.5px; line-height: 1.6; }

@@ -11,7 +11,7 @@ import result from '@/components/opc/positioning-result.module.css';
 import { BenchmarkTable } from '@/components/research/benchmark-table';
 import type { BenchmarkRow } from '@/components/research/benchmark-table-model';
 import { ResearchCallList } from '@/components/research/research-call-list';
-import type { ResearchCall } from '@/components/research/research-model';
+import { DATA_SOURCE_NOTE, type ResearchCall } from '@/components/research/research-model';
 import { Button } from '@/components/ui/button';
 import { OFFICE_WORKER_REPORT } from '@/lib/landing/sample-reports/office-worker';
 import { SAMPLE_OVERVIEWS } from '@/lib/landing/sample-reports/overview';
@@ -31,19 +31,25 @@ import picture from './picture-l.module.css';
  */
 const NOW = new Date('2026-10-15T08:00:00Z');
 const metric = (value: number | null, ref: string) => ({ value, refs: value === null ? [] : [ref] });
-const row = (account: string, followers: number, median: number | null, rate: number | null, qualified = true): BenchmarkRow => ({
+const row = (account: string, followers: number, median: number, rate: number, perWeek: number, qualified = true): BenchmarkRow => ({
   platform: 'tiktok', account, category: qualified ? 'imitable' : 'head_reference', qualified,
   metrics: {
     followers: metric(followers, 'ev1#1'), medianViews: metric(median, 'ev2#1'), engagementRate: metric(rate, 'ev2#1'),
-    postsPerWeek: metric(null, ''), lastPublishedAt: { value: '2026-10-14T02:00:00Z', refs: ['ev2#1'] },
+    postsPerWeek: metric(perWeek, 'ev2#1'), lastPublishedAt: { value: '2026-10-14T02:00:00Z', refs: ['ev2#1'] },
   },
 });
-/** The report's chapter 5 (office-worker.json): accounts by label only, figures as published there. */
+/**
+ * The report's chapter 5 (office-worker.json): accounts by label only, figures as published there. Round twelve (D4,
+ * Owner 2026-10-18: "表格信息数据，全部都要填满"): every cell filled, F's and G's views and rate and everyone's posts a
+ * week added (示例数据), only what public data gives.
+ */
 export const L_BENCHMARK_ROWS: BenchmarkRow[] = [
-  row('对标账号 A', 98_000, 12_000, 0.12), row('对标账号 B', 112_000, 7_000, 0.11), row('对标账号 C', 17_000, 37_000, 0.11),
-  row('对标账号 D', 93_000, 22_000, 0.06), row('对标账号 E', 36_000, 13_000, 0.08),
-  row('对标账号 F', 97_000, null, null, false), row('对标账号 G', 28_000, null, null, false),
+  row('对标账号 A', 98_000, 12_000, 0.12, 3), row('对标账号 B', 112_000, 7_000, 0.11, 2), row('对标账号 C', 17_000, 37_000, 0.11, 4),
+  row('对标账号 D', 93_000, 22_000, 0.06, 1), row('对标账号 E', 36_000, 13_000, 0.08, 2),
+  row('对标账号 F', 97_000, 24_000, 0.07, 5, false), row('对标账号 G', 28_000, 11_000, 0.09, 3, false),
 ];
+/** Under the table: the Owner's sentence on where the data comes from, then that it is an example. */
+const BENCHMARK_NOTE = `${DATA_SOURCE_NOTE}（示例数据）`;
 
 /** What the coach looked up for this person, in the product's own call shapes; each finishes as the step plays. */
 const CALLS: readonly Omit<ResearchCall, 'state'>[] = [
@@ -104,7 +110,7 @@ function ReportDialogL({ writing, local }: { writing: boolean; local: number }) 
 export const L_CLIP_PARTS: ClipParts = {
   card: (card, fetchLocal) => {
     if (card === 'fetch') return <ResearchCallList calls={callsAt(fetchLocal)} />;
-    if (card === 'table') return <BenchmarkTable rows={L_BENCHMARK_ROWS} now={NOW} />;
+    if (card === 'table') return <BenchmarkTable rows={L_BENCHMARK_ROWS} now={NOW} note={BENCHMARK_NOTE} />;
     if (card === 'plan') return null;
     return undefined;
   },
