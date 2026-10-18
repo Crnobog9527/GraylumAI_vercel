@@ -5,6 +5,7 @@ import { z } from 'zod';
 import {OPENROUTER_RESPONSE_TIMEOUT_MS} from '../bill2/openRouterPolicy';
 import {matchesFrozenReasoning,type ReasoningPolicy} from './reasoningPolicy';
 import {POSITIONING_RESEARCH_TOOLS} from '../research/tools/names';
+import {newFrameRepairer,repairMessageToolCalls} from './toolArgumentRepair';
 const RESEARCH_SLOT_TOOLS:ReadonlySet<string>=new Set(POSITIONING_RESEARCH_TOOLS);
 
 export type RuntimeTool = {
@@ -51,6 +52,8 @@ export type RuntimeRunnerInput = {
    * and, once `maxToolCalls` calls ran, offers no tool to the next request so that request can only answer. */
   libraryRetrieval?: boolean;
   maxToolCalls?: number;
+  /** The frozen request format of the execution (spread from its context); unmarked older executions have none. */
+  providerRequestFormat?: string;
 };
 type ToolCalls=unknown[]|null|undefined;
 /** One response message, with only its first tool call when that is allowed. */
@@ -89,7 +92,11 @@ export function emptyTruncatedResponse(decoded:unknown):boolean{
 
 /** One official SDK loop for all roles. No SDK trace, remote Session, fallback or retry. */
 export async function runRuntime(input: RuntimeRunnerInput) {
-  if(input.libraryRetrieval&&!input.firstToolCallOnly)input={...input,firstToolCallOnly:true};
+  // One call per response, the first: always for a retrieving free chat, and for any newly admitted (format-marked) execution whose
+  // only tool is the owned-source read, whose responses may carry parallel read_source calls (transport accepts them).
+  // Older unmarked executions keep their exact request bytes, so they are left as they were.
+  const sourceOnly=input.tools.length>0&&input.tools.every(tool=>tool.name==='read_source');
+  if(!input.firstToolCallOnly&&(input.libraryRetrieval||sourceOnly&&input.providerRequestFormat))input={...input,firstToolCallOnly:true};
   // A bounded v5 turn: one reply, plus one call per frozen slot (a Skill file read, one research call).
   const slots=1+(input.tools.some(tool=>tool.name==='read_skill_file')?1:0)+(input.tools.some(tool=>RESEARCH_SLOT_TOOLS.has(tool.name))?1:0);
   if(input.commitSessionOnSuccess&&(!input.firstToolCallOnly||input.maxTurns!==1&&input.maxTurns!==slots))
@@ -116,9 +123,9 @@ export async function runRuntime(input: RuntimeRunnerInput) {
     if(input.stream){
       const encoder=new TextEncoder();
       const stream=new ReadableStream<Uint8Array>({start(controller){
-        let open=true,received=false;
+        let open=true,received=false;const repairFrame=newFrameRepairer();
         const emit=(chunk:string)=>{if(open)try{controller.enqueue(encoder.encode('data: '+chunk+'\n\n'));}catch{open=false;}};
-        void input.exchange(sequence,JSON.stringify(body),chunk=>{received=true;emit(firstCallFrame(chunk,input));}).then(raw=>{
+        void input.exchange(sequence,JSON.stringify(body),chunk=>{received=true;emit(repairFrame(firstCallFrame(chunk,input)));}).then(raw=>{
           const response=JSON.parse(raw);
           const calls=response.choices?.[0]?.message?.tool_calls;
           if(input.allowEmptyResult&&(response.choices?.[0]?.message?.refusal||response.choices?.[0]?.finish_reason==='content_filter'))
@@ -126,7 +133,7 @@ export async function runRuntime(input: RuntimeRunnerInput) {
           if(response.choices?.length!==1||batchDenied(calls,input))throw new Error('RUNTIME_TOOL_BATCH_DENIED');
           if(emptyTruncatedResponse(response)||truncatedToolTurn(response,input)){outputTruncated=true;throw new Error('RUNTIME_OUTPUT_TRUNCATED');}
           // Replay streams only already-persisted output, never redispatches.
-          if(!received){const choice=response.choices[0];emit(JSON.stringify({...response,object:'chat.completion.chunk',choices:[{index:0,delta:keepFirstCall(choice.message,input),finish_reason:choice.finish_reason}]}));}
+          if(!received){const choice=response.choices[0];emit(JSON.stringify({...response,object:'chat.completion.chunk',choices:[{index:0,delta:repairMessageToolCalls(keepFirstCall(choice.message,input)),finish_reason:choice.finish_reason}]}));}
           else if(input.firstToolCallOnly&&Array.isArray(calls)&&calls.length>1)input.onToolCallsDropped?.(calls.length-1);
           // The SDK retries a streamed response with no output items. After a
           // proven successful, empty stop only, a whitespace item lets it finish
@@ -162,8 +169,10 @@ export async function runRuntime(input: RuntimeRunnerInput) {
       decoded.choices[0].message.content='';
       response=JSON.stringify(decoded);
     }
-    const kept=Array.isArray(calls)&&calls.length>1
-      ?JSON.stringify({...decoded,choices:[{...decoded.choices[0],message:keepFirstCall(decoded.choices[0].message,input)}]}):response;
+    // Several calls keep the first; a read_source call with a dropped empty-string value is repaired (toolArgumentRepair.ts).
+    const keptMessage=repairMessageToolCalls(keepFirstCall(decoded.choices[0].message,input));
+    const kept=keptMessage!==decoded.choices[0].message
+      ?JSON.stringify({...decoded,choices:[{...decoded.choices[0],message:keptMessage}]}):response;
     return new Response(kept,{status:200,headers:{'content-type':'application/json'}});
   };
   // Align the SDK wrapper budget with the host's bounded read plus SQL.

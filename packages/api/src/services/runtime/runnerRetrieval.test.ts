@@ -46,3 +46,12 @@ describe('library retrieval turns (CHAT-AUTO-CONTEXT)', () => {
     expect(h.executed).toEqual([]);
   });
 });
+
+describe('read_source-only executions with a frozen request format', () => {
+  it('execute only the first of several parallel calls, even without the retrieval marker', async () => {
+    const h = harness({providerRequestFormat: 'serial-tools-v6-reasoning', maxToolCalls: 2} as never);
+    await expect(h.run()).resolves.toBe('final answer');
+    expect(h.executed[0]).toBe('search:a');
+    expect(h.executed).not.toContain('search:b');
+  });
+});
