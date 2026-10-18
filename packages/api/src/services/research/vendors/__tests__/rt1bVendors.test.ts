@@ -165,12 +165,14 @@ describe('benchmark route sets', () => {
       followersFrom: 'account_relation', verified: false });
     expect(BENCHMARK_ROUTE_KINDS.youtube).toEqual({ kinds: ['account_posts', 'post_detail'], followersFrom: 'post_detail', verified: false });
     expect(BENCHMARK_ROUTE_KINDS.xiaohongshu).toEqual({ kinds: ['account_profile', 'account_posts'],
-      followersFrom: 'account_profile', verified: false });
-    expect(BENCHMARK_CAPABLE_PLATFORMS).toEqual(['tiktok', 'x']);
+      followersFrom: 'account_profile', verified: true });
+    expect(BENCHMARK_ROUTE_KINDS.douyin).toEqual({ kinds: ['account_profile', 'account_posts'],
+      followersFrom: 'account_profile', verified: true });
+    expect(BENCHMARK_CAPABLE_PLATFORMS).toEqual(['tiktok', 'x', 'xiaohongshu', 'douyin']);
     expect(MAX_BENCHMARK_SUBCALLS_PER_ACCOUNT).toBe(3);
     for (const platform of SOCIAL_PLATFORMS) expect(benchmarkSubcallsPerAccount(platform)).toBeLessThanOrEqual(3);
     expect([benchmarkSubcallsPerAccount('bilibili'), benchmarkSubcallsPerAccount('youtube'), benchmarkSubcallsPerAccount('douyin')])
-      .toEqual([3, 2, 0]);
+      .toEqual([3, 2, 2]);
     expect(Object.isFrozen(BENCHMARK_ROUTE_KINDS.youtube!.kinds)).toBe(true);
   });
 
@@ -195,7 +197,7 @@ describe('benchmark route sets', () => {
       recentGrowth: { maxFirstPostAgeDays: 90, minViewsToFollowers: '1' },
     } as unknown as ResearchToolsConfig;
     expect(researchToolsConfigSchema.safeParse(config).success).toBe(true);
-    for (const platform of ['bilibili', 'youtube', 'xiaohongshu'] as const) {
+    for (const platform of ['bilibili', 'youtube'] as const) {
       const parsed = researchToolsConfigSchema.safeParse({ ...config, benchmarkPlatforms: [platform] });
       expect(parsed.success).toBe(false);
       expect(JSON.stringify(parsed.error?.issues)).toContain('cannot supply benchmark fields yet');

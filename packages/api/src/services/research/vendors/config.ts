@@ -33,11 +33,13 @@ export const BENCHMARK_RULES = Object.freeze({
  * Per platform, the query kinds one benchmark account needs (each kind is one billed sub-call) and which of them
  * carries the exact follower count. A benchmark needs exact followers plus an absolute publication time for the
  * 30-day rule. `verified` is set in code only after RT-7 checked the routes against recorded real responses
- * (plan §6.1); an admin setting can never enable an unverified platform. Douyin, Weibo and Instagram have no
- * benchmark route set yet.
+ * (plan §6.1); an admin setting can never enable an unverified platform. Weibo and Instagram have no
+ * benchmark route set yet. RT-7 checked Xiaohongshu and Douyin against real responses (follower counts and absolute
+ * publication times are present; neither platform gives a usable view count, so `views` stays missing).
  *
  * - bilibili: the profile has no followers; they come from the separate relation call.
  * - xiaohongshu: no public view counts, so `views` is always missing.
+ * - douyin: play counts are hidden (always 0 upstream), so `views` is always missing; the profile route needs the sec_user_id.
  * - youtube: channel videos have only relative times and abbreviated subscriber labels; one post_detail of the
  *   newest video gives the exact followers and that video's absolute date. Other videos keep publishedAt missing.
  */
@@ -48,7 +50,8 @@ export const BENCHMARK_ROUTE_KINDS: Readonly<Partial<Record<SocialPlatform, Read
   tiktok: routeSet(['account_profile', 'account_posts'], 'account_profile', true),
   x: routeSet(['account_profile', 'account_posts'], 'account_profile', true),
   bilibili: routeSet(['account_profile', 'account_relation', 'account_posts'], 'account_relation', false),
-  xiaohongshu: routeSet(['account_profile', 'account_posts'], 'account_profile', false),
+  xiaohongshu: routeSet(['account_profile', 'account_posts'], 'account_profile', true),
+  douyin: routeSet(['account_profile', 'account_posts'], 'account_profile', true),
   youtube: routeSet(['account_posts', 'post_detail'], 'post_detail', false),
 });
 

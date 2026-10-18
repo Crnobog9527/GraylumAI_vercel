@@ -34,7 +34,9 @@ describe('Douyin account routes', () => {
         author: { nickname: '露营老王', unique_id: 'laowang' },
         statistics: { play_count: 1200, digg_count: 30, comment_count: 7, share_count: 3 } }], has_more: 1, max_cursor: 1 } })));
     expect(posts).toMatchObject({ outcome: 'ok', items: [{ url: 'https://www.douyin.com/video/7400000000000000001',
-      fields: { views: 1200, likes: 30 } }] });
+      fields: { likes: 30 } }] });
+    // RT-7: real Douyin responses always carry play_count 0 (hidden), so views are never read from it.
+    expect((posts as { items: Array<{ fields: Record<string, unknown> }> }).items[0]!.fields).not.toHaveProperty('views');
     const empty = await callTikhub({ platform: 'douyin', kind: 'account_posts', account: SEC },
       deps(jsonFetch(200, { code: 200, data: { aweme_list: [] } })));
     expect(empty).toMatchObject({ outcome: 'ok', reason: 'NO_RESULTS' });

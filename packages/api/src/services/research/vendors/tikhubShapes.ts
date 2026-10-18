@@ -40,9 +40,13 @@ function aweme(item: Raw, platform: 'douyin' | 'tiktok') {
   return toItem({
     id, title: clip(text(item, ['desc']), TITLE_CHARS),
     author: text(item, ['author.nickname', 'author.unique_id']),
-    authorId: idText(item, ['author.unique_id', 'author.sec_uid', 'author.uid']),
+    // Douyin's profile routes take the sec_user_id, so it is the author id there; TikTok's take the handle.
+    authorId: platform === 'douyin' ? idText(item, ['author.sec_uid', 'author.unique_id', 'author.uid'])
+      : idText(item, ['author.unique_id', 'author.sec_uid', 'author.uid']),
     publishedAt: timestamp(item, ['create_time'], SOCIAL_EARLIEST_MS),
-    views: count(item, ['statistics.play_count']), likes: count(item, ['statistics.digg_count']),
+    // Douyin hides play counts: recorded real responses carry play_count 0 on posts with thousands of likes (RT-7),
+    // so a 0 there is "not provided", never a count.
+    views: platform === 'douyin' ? undefined : count(item, ['statistics.play_count']), likes: count(item, ['statistics.digg_count']),
     comments: count(item, ['statistics.comment_count']), shares: count(item, ['statistics.share_count']),
   }, POST_FIELDS, url);
 }
@@ -93,7 +97,7 @@ function xhsProfile(object: Raw) {
     // Abbreviated labels ("1.2万") are not counts and stay missing.
     followers: count(object, ['fans', 'fans_count', 'follower_count']) ?? xhsInteraction(object, 'fans'),
     following: count(object, ['follows', 'follows_count', 'following_count']) ?? xhsInteraction(object, 'follows'),
-    postsCount: count(object, ['notes_count', 'note_count']), likesTotal: undefined, verified: undefined,
+    postsCount: count(object, ['notes_count', 'note_count', 'note_num_stat.posted']), likesTotal: undefined, verified: undefined,
   }, PROFILE_FIELDS);
 }
 
