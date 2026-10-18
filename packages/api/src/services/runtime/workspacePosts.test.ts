@@ -58,6 +58,12 @@ describe('my_posts saved data',()=>{
    expect((result.posts as unknown[]).length).toBeGreaterThan(0);
   }
  });
+ it('reports capacity exhaustion instead of an available empty result when no whole post fits',()=>{
+  const p=post('huge');
+  p.latest!.metrics=Object.fromEntries(Array.from({length:50},(_,i)=>['metric'+i+'k'.repeat(70),1e21]));
+  expect(ownPostsResult({...data(),posts:[p]},now)).toMatchObject({kind:'unavailable',reason:'capacity_exhausted',
+   note:'资料太多放不下，先按已读到的回答'});
+ });
  it('free users do not read data, and readData is the only data RPC for paid users; no exchange or billing',async()=>{
   const db={rpc:vi.fn(async()=>({data:data(),error:null}))};
   expect(await resolvePostSource(db,actor,{kind:'workspace_posts_request',entitled:false})).toMatchObject({status:'no_entitlement',note:NO_ENTITLEMENT});

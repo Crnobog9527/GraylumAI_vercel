@@ -2,7 +2,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { Suspense,useEffect,useState,useRef,useMemo } from 'react';
 import {AgentWorkStatus} from '@/components/chat-display/agent-work-status';
-import {workItemsOf} from '@/components/chat-display/agent-work-model';
+import {streamedWorkItems} from '@/components/chat-display/agent-work-model';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { classifyErasureError } from '@/lib/content-erasure';
 import { Plus } from 'lucide-react';
@@ -394,7 +394,7 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
      ?transcriptDate(e.createdAt):null}
     userText={e.input&&!e.input.startsWith('[OPC_WORK_CONTINUE_V1]')?shownRuntimeInput(e.input):null}
     completed={e.skillExecution&&e.state==='completed'&&!e.input?.startsWith('[OPC_WORK_CONTINUE_V1]')&&!e.input?.startsWith('[OPC_VIDEO_PACKAGE_V1]')}>
-     <AgentWorkStatus items={workItemsOf(e)}/>
+     <AgentWorkStatus items={runner.sourceDeleted.includes(e.executionId)?[]:streamedWorkItems(e,runner.workItems?.[e.executionId])}/>
      {workItem&&e.skillExecution&&e.state==='completed'&&!e.input?.startsWith('[OPC_WORK_CONTINUE_V1]')&&!e.input?.startsWith('[OPC_VIDEO_PACKAGE_V1]')&&e.contentAvailable?<RuntimeProposal adopted={versions.some(v=>v.kind===(isVideo?'script':'brief')&&v.executionId===e.executionId)}
       text={displayReply(e.input,e.body??e.primaryBody)}/>:!liveReplyText(runner.reply,e.executionId,e)&&showsReply(e)&&<RuntimeReply available={e.contentAvailable} text={displayReply(e.input,e.body??e.primaryBody)}/>}
      {workItem&&contentType!=='unknown'&&e.state==='completed'&&e.skillExecution&&!e.input?.startsWith('[OPC_VIDEO_PACKAGE_V1]')&&!e.input?.startsWith('[OPC_WORK_CONTINUE_V1]')&&<div className="mt-3 flex flex-wrap gap-2">{versions.some(v=>v.kind===(isVideo?'script':'brief')&&v.executionId===e.executionId)?<Link className="underline" href={'/library?item='+workItem.workItemId+'&return='+sessionId}>{isVideo?'这版口播稿已定稿':'已采用为草稿'} · 查看</Link>:<Button disabled={busy} onClick={()=>finalizeScript(e.executionId)}>{isVideo?'将这条回复定稿为口播稿':'采用为当前草稿'}</Button>}</div>}
@@ -406,6 +406,8 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
    {isVideo&&currentScript&&videoPromptEnded&&(!currentStoryboard||!currentEditing)&&<Button variant="outline" onClick={()=>{localStorage.removeItem('opc-video-ended:'+currentScript.id);setVideoUiRevision(v=>v+1);}}>继续这版口播稿的分镜或剪辑</Button>}
    {isVideo&&currentScript&&!videoPromptEnded&&(!currentStoryboard||!currentEditing)&&<section aria-label="口播稿后续选择" className="space-y-3 rounded-xl border border-[var(--border-primary)] bg-[var(--bg-secondary)] p-4"><h2 className="font-medium">{currentStoryboard?'分镜已保存。要基于这版分镜生成剪辑建议吗？':'口播稿已定稿。要先制作分镜脚本吗？'}</h2><p className="text-sm text-[var(--text-secondary)]">本次只绑定口播稿第 {currentScript.version} 版。选择后才会调用 Agent；以后重新定稿口播稿时不会自动生成。</p><div className="flex flex-wrap gap-2">{!currentStoryboard&&<Button disabled={busy||currentEditing} onClick={()=>chooseVideo('both')}>先做分镜，再生成剪辑建议</Button>}{!currentStoryboard&&<Button variant="outline" disabled={busy} onClick={()=>chooseVideo('storyboard')}>只生成分镜</Button>}{currentStoryboard&&<Button variant="outline" disabled={busy||currentEditing} onClick={()=>chooseVideo('editing')}>只生成剪辑建议</Button>}<Button variant="ghost" disabled={busy} onClick={()=>chooseVideo('end')}>暂时结束</Button></div><p className="text-xs text-[var(--text-tertiary)]">也可以在消息框输入同样的选择；提问卡和自然语言只执行同一个业务动作。</p></section>}
 {pendingOutgoing&&<RuntimePendingMessage text={pendingOutgoing.text} sending={busy}/>}
+{pendingOutgoing?.executionId&&!runner.sourceDeleted.includes(pendingOutgoing.executionId)&&
+ <AgentWorkStatus items={runner.workItems?.[pendingOutgoing.executionId]??[]}/>}
 {pendingOutgoing?.executionId&&<PendingLiveReply text={liveReplyText(runner.reply,pendingOutgoing.executionId)}/>}
    <ChatNoticeList notices={[...payg.blockedNotices(executions,busy),...runtimeTailNotices({error,heldGuide,busy,onGuide:()=>void guide(),lastTurn})]}/>
    </section>
