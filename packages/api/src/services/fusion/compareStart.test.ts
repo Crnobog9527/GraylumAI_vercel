@@ -330,3 +330,20 @@ describe('compare start: material withdrawn while the judgement ran (review find
       expect(names()).not.toContain('fusion_compare_end');
     });
 });
+
+describe('compare start: the request identity binds the frozen context (review finding)', () => {
+  const hashOf = async (patch: Record<string, unknown> = {}, parts: Partial<CompareParts> = {}) => {
+    s.rpcs.length = 0; s.begin = fresh();
+    await start(parts, patch);
+    const call = s.rpcs.find(item => item.name === 'fusion_compare_begin')!;
+    return (call.args.p_request as { requestHash: string }).requestHash;
+  };
+  it('changes when the conversation revision, the work material or the workspace sources change, and not otherwise', async () => {
+    const base = await hashOf();
+    expect(await hashOf()).toBe(base);
+    expect(await hashOf({ historyRevision: 5 })).not.toBe(base);
+    expect(await hashOf({ materialRevision: '9:other' })).not.toBe(base);
+    expect(await hashOf({}, { workspace: [{ sourceVersionId: id(77), kind: 'positioning', body: 'b' }] })).not.toBe(base);
+    expect(await hashOf({}, { history: [{ role: 'user', text: 'earlier' }] })).not.toBe(base);
+  });
+});

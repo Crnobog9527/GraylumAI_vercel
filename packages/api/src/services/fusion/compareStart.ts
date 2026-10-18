@@ -82,6 +82,8 @@ export async function startCompare(deps: CompareDeps, choice: CompareStartInput)
     p_session_id: choice.sessionId, p_request: { question, questionHash: createHash('sha256').update(question).digest('hex'),
       // Everything that identifies this request: a repeat with anything else is a conflict, never the old result.
       requestHash: sha([choice.sessionId, question, choice.modelIds, skill, choice.parts.references.map(r => [r.documentId, r.version]),
+        // the frozen context too: a reused request id over a changed conversation, brief or source is a conflict, not the old group
+        snapshot, choice.historyRevision, choice.materialRevision, workspaceDependencies(choice.parts),
         choice.shown.credits, choice.shown.columns.map(c => [c.modelId, c.credits, c.usd])]),
       snapshotHash: snapshot, historyRevision: String(choice.historyRevision), config,
       workspaceDependencies: workspaceDependencies(choice.parts) } });
