@@ -32,9 +32,9 @@ try {
   const fp = read('packages/db/tests/baseline/fingerprint.sql');
   const catalog = fp.slice(0, fp.indexOf('-- FINAL')) + 'SELECT jsonb_object_agg(k,d ORDER BY k) v FROM grouped;';
   const before = await v(catalog);
-  await c.query(read('packages/db/migrations/0313_disable_card_renewal_notices.sql'));
+  await c.query(read('packages/db/migrations/0311_disable_card_renewal_notices.sql'));
   assert.deepEqual(await v(catalog), before);
-  report.checks.push('0313 repeated after full chain leaves catalog identical');
+  report.checks.push('0311 repeated after full chain leaves catalog identical');
   const candidateBodyAfterDisable = await v("SELECT pg_get_functiondef('payment_notice_candidates(uuid)'::regprocedure) v");
   assert.ok(candidateBodyAfterDisable.includes('PAY-NOTIFY card renewal disabled'));
   assert.ok(!candidateBodyAfterDisable.includes('card_renewal_upcoming'));
