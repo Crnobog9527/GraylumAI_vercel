@@ -112,7 +112,7 @@ export async function resolvePostSource(db:SessionRpc,actor:string,source:unknow
    const kept=new Set(review.rows.map(row=>row.postId));
    for(const [key,ranking] of Object.entries(review.rankings))review.rankings[key]=ranking.filter(row=>kept.has(row.postId));
   }else if(Array.isArray(result.posts)&&result.posts.length)result.posts.pop();
-  else return {...unavailable,reason:'capacity_exhausted'};
+  else return capacityUnavailable;
   enriched.posts=result.posts;Object.assign(enriched,{truncated:true});
  }
  return enriched;
