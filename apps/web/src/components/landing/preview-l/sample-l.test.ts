@@ -17,7 +17,7 @@ import { loadSampleReport, SAMPLE_CHAPTERS } from '@/lib/landing/sample-reports'
 import { splitReport } from '@/lib/landing/sample-reports/report-markdown';
 import { VOICE_WALL } from '@/lib/landing/landing-copy';
 import { LANDING_FEATURES, type LandingFlags } from '@/lib/landing/landing-flags';
-import { buildLandingPageData } from '@/lib/landing/landing-page-data';
+import { buildLandingPageData, homePageExtras } from '@/lib/landing/landing-page-data';
 import { APP_SEGMENTS } from '@/lib/sentry-scrub';
 import { L_SAMPLES_REDO } from '@/lib/landing/landing-copy-l-samples';
 import { SAMPLE_OVERVIEWS } from '@/lib/landing/sample-reports/overview';
@@ -431,6 +431,17 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     // True to the real jury: each changed chapter's before and after, the original kept; no brands, no credits.
     expect(L_JURY.points[2].text).toContain('每一章标出改前、改后的句子');
     for (const word of ['GPT', 'Claude', 'Gemini', '积分', '没有分歧', '再辩一轮', '最多两轮']) expect(steps).not.toContain(word);
+  });
+
+  it('shows the 14 sample reports on the home page only while the sampleReports fact switch is on (review on #1088)', () => {
+    const home = (flags: LandingFlags) => renderToStaticMarkup(withTrpc(createElement(SampleL, {
+      data, siteName: 'Graylum', extras: homePageExtras(flags), production: true,
+    })));
+    expect(homePageExtras(ALL_ON).showSamples).toBe(true);
+    expect(home(ALL_ON)).toContain('id="samples-title"');
+    const off = { ...ALL_ON, sampleReports: false };
+    expect(homePageExtras(off).showSamples).toBe(false);
+    expect(home(off)).not.toContain('id="samples-title"');
   });
 
   it('says so when the plan catalog cannot be read, keeping the way to the pricing page (review on #1088)', () => {

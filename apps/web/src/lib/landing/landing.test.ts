@@ -4,6 +4,8 @@ import { LANDING_FEATURES, resolveLandingFlags, type LandingFlags } from './land
 import { buildLandingPageData } from './landing-page-data';
 import { buildLandingPricing, landingOfferList } from './landing-pricing';
 import { allSamplesReady, sampleReady, SAMPLE_REPORTS } from './landing-samples';
+import { loadSampleReport, SAMPLE_REPORT_SLUGS } from './sample-reports';
+import { sampleReportsReady } from './sample-reports/ready';
 
 const plan = (level: string, monthly: number, yearly: number) => ({
   id: `plan-${level}`, name: level, level, price: { monthly, yearly },
@@ -15,18 +17,21 @@ const ALL_ON = Object.fromEntries(Object.keys(LANDING_FEATURES).map(key => [key,
 const CORE_ONLY = Object.fromEntries(Object.keys(LANDING_FEATURES).map(key => [key, key === 'coach'])) as LandingFlags;
 
 describe('landing flags', () => {
-  it('shows the finished product by default, except sample reports that are not generated yet (Owner 2026-10-13)', () => {
+  it('shows the finished product by default: the three facts are true now (Owner 2026-10-17)', () => {
     const flags = resolveLandingFlags({});
     for (const [key, feature] of Object.entries(LANDING_FEATURES)) {
       expect(flags[key as keyof LandingFlags]).toBe(feature.show);
     }
-    expect(Object.entries(flags).filter(([, on]) => !on).map(([key]) => key)).toEqual(['sampleReports']);
+    expect(Object.entries(flags).filter(([, on]) => !on).map(([key]) => key)).toEqual([]);
   });
 
   it('lets staging and previews show blocks that are off, never the indexed production page', () => {
-    expect(resolveLandingFlags({ LANDING_PREVIEW_FEATURES: 'sampleReports' }).sampleReports).toBe(true);
-    expect(resolveLandingFlags({ LANDING_PREVIEW_FEATURES: 'all' }).sampleReports).toBe(true);
-    expect(resolveLandingFlags({ LANDING_PREVIEW_FEATURES: 'all', SITE_INDEXING: 'public' }).sampleReports).toBe(false);
+    // A switch set off (here the sample reports, as when one of them is withdrawn).
+    const off = { ...LANDING_FEATURES, sampleReports: { ...LANDING_FEATURES.sampleReports, show: false } };
+    expect(resolveLandingFlags({}, off).sampleReports).toBe(false);
+    expect(resolveLandingFlags({ LANDING_PREVIEW_FEATURES: 'sampleReports' }, off).sampleReports).toBe(true);
+    expect(resolveLandingFlags({ LANDING_PREVIEW_FEATURES: 'all' }, off).sampleReports).toBe(true);
+    expect(resolveLandingFlags({ LANDING_PREVIEW_FEATURES: 'all', SITE_INDEXING: 'public' }, off).sampleReports).toBe(false);
   });
 });
 
@@ -161,8 +166,19 @@ describe('landing page data', () => {
 
 describe('landing sample reports', () => {
   it('never lets production show the samples before every report is really generated', () => {
-    // Turn `sampleReports` on only after all four demo reports are filled in and one shows the hard truth.
-    expect(!LANDING_FEATURES.sampleReports.show || allSamplesReady()).toBe(true);
+    // `sampleReports` may be on only while all 14 people's reports are generated, with their whole text and overview.
+    expect(!LANDING_FEATURES.sampleReports.show || sampleReportsReady()).toBe(true);
+    expect(sampleReportsReady()).toBe(true);
+  });
+
+  it('keeps every sample report within the privacy rule: no @handles, no links (Owner 2026-10-17)', async () => {
+    expect(SAMPLE_REPORT_SLUGS).toHaveLength(14);
+    for (const slug of SAMPLE_REPORT_SLUGS) {
+      const text = await loadSampleReport(slug);
+      expect(text.length, slug).toBeGreaterThan(1000);
+      expect(text, slug).not.toMatch(/(^|[^\w.])@[A-Za-z0-9_.]{2,}/);
+      expect(text, slug).not.toMatch(/https?:\/\/|www\./i);
+    }
   });
 
   it('keeps the four Owner-chosen audiences in order and invents no report text', () => {
@@ -176,7 +192,8 @@ describe('landing sample reports', () => {
     expect(allSamplesReady()).toBe(false);
   });
 
-  it('is hidden by default', () => {
+  it('keeps the old home page\'s four demo reports hidden until they are ready, whatever the switch says', () => {
+    expect(resolveLandingFlags({}).sampleReports).toBe(true);
     expect(buildLandingPageData(resolveLandingFlags({}), CATALOG).sampleReports).toEqual([]);
   });
 });

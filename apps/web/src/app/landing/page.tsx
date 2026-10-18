@@ -1,7 +1,7 @@
 import { JsonLd } from '@/components/seo/JsonLd';
 import { SampleL } from '@/components/landing/preview-l/SampleL';
 import { resolveLandingFlags } from '@/lib/landing/landing-flags';
-import { buildLandingPageData, HOME_DESCRIPTION, HOME_TITLE } from '@/lib/landing/landing-page-data';
+import { buildLandingPageData, HOME_DESCRIPTION, HOME_TITLE, homePageExtras } from '@/lib/landing/landing-page-data';
 import { getLandingOffers } from '@/lib/landing/landing-offers';
 import { getPublicSiteSettings } from '@/lib/public-site';
 import { buildPageMetadata } from '@/lib/seo/metadata';
@@ -37,9 +37,7 @@ export default async function LandingPage() {
         softwareApplicationJsonLd({ description: HOME_DESCRIPTION, offers: data.offerList }),
         ...(data.faqItems.length > 0 ? [faqPageJsonLd(data.faqItems)] : []),
       ]} />
-      {/* The 14 sample reports (lib/landing/sample-reports) are generated and privacy-checked and always show (Owner
-          2026-10-17); flags.sampleReports is the old home page's four demo reports, which are not these. */}
-      <SampleL data={data} siteName={siteName} extras={{ flags, showSamples: true }} production supportEmail={supportEmail} />
+      <SampleL data={data} siteName={siteName} extras={homePageExtras(flags)} production supportEmail={supportEmail} />
     </div>
   );
 }
