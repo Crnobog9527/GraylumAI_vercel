@@ -17,6 +17,7 @@ import { agentTurnBody } from "../../shared/agentTurn";
 import { OPENING_EXTRACTION_RULE } from "./agentTurnPrompt";
 import type { Page } from "../../../../../apps/web/node_modules/@playwright/test";
 import { seedTestOpenRouterKey } from "../models/openRouterKey.testing";
+import { ensurePositioningProfilePlans } from '../__tests__/fixtures/positioningProfilePlans';
 const connectionString = process.env.V3_LOCAL_DB!;
 if (
   !connectionString?.startsWith("postgres://postgres@127.0.0.1:") ||
@@ -33,8 +34,8 @@ const admin = createClient(
 // upgrade path. Restore the schema after every case and fail the case that
 // leaves anything unrestorable (see schemaSnapshot.ts).
 let restoreSchema = async () => {};
-beforeAll(async () => { await sql.connect(); restoreSchema = await schemaGuard(sql); await ensurePositioningProfilePlans(); }, 120000);
-afterEach(async () => { await restoreSchema(); await ensurePositioningProfilePlans(); }, 120000);
+beforeAll(async () => { await sql.connect(); restoreSchema = await schemaGuard(sql); await ensurePositioningProfilePlans(sql); }, 120000);
+afterEach(async () => { await restoreSchema(); await ensurePositioningProfilePlans(sql); }, 120000);
 afterAll(() => sql.end());
 
 /** The exact business turns in a fixture, not just "one row per request ID". */
@@ -254,21 +255,6 @@ async function mergedPositioningFixture(configure?: (flow: ReturnType<typeof mak
     configure?.(flow);
   },'梳理账号定位 · 六步');
   return result;
-}
-async function ensurePositioningProfilePlans() {
-  for (const [level,limit,bytes,days] of [
-    ['free',1,50_000_000,0],['pro',3,500_000_000,30],['gold',6,2_000_000_000,90],
-  ] as const) {
-    const paid = level !== 'free';
-    const gold = level === 'gold';
-    await sql.query(
-      `insert into membership_plans(id,name,level,allow_fusion_review,allow_fusion_compare,library_storage_bytes,
-        allow_publish,own_data_window_days,allow_benchmark_monitor,allow_weekly_auto_review,positioning_profile_limit)
-       values($1,$2,$2,$3,$3,$4,$3,$5,$6,$6,$7)
-       on conflict(level) do update set positioning_profile_limit=excluded.positioning_profile_limit`,
-      [randomUUID(),level,paid,bytes,days,gold,limit],
-    );
-  }
 }
 it('OPC: PROFILE_LIMIT allows one free profile and blocks the next', async () => {
   const f = await fixture();
