@@ -1,0 +1,145 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * Samples P, Q, R: sample L's page in a new shell (Owner 2026-10-18, the "装修轮"; design plan in the PR). The regions,
+ * words, demos and product windows are sample L's own components, untouched; this sheet only re-dresses what is around
+ * them, keyed on the attributes the page already carries (data-region, data-band, roles), never on L's files.
+ *
+ * - Two layers by lightness: a cool grey page, white cards and product windows; no shadows on cards.
+ * - One ink (deep slate, #151A2B) and its tints for every neutral; text is always ink.
+ * - Colour only as trays (pale panels holding the product's moving proof: step one with the jury, steps two and three,
+ *   the sample reports, the comparison), cool and warm in turn, and as a small accent (selected states, links, key
+ *   figures, the jury's light). The primary button is ink.
+ * - Type in steps that jump at 1024 / 768 (no fluid scaling); open regions 96 / 72 apart; trays 24 from the edges and
+ *   from each other; corners 20 (trays, closing panel, footer) and 12–14 (cards); anything clickable a pill.
+ * - No gradients, glows, light dots, glass, background motion or labels above headings.
+ */
+.shell {
+  --p-page: #f2f3f5;
+  --p-ink: #151a2b;
+  --p-body: #393d4a;
+  --p-muted: #575b67;
+  --p-line: #dfe1e6;
+  --p-gap: 24px;
+  --p-radius: 20px;
+  --p-ease: cubic-bezier(.16, 1, .3, 1);
+  --j-canvas: var(--p-page);
+  --j-ink: var(--p-ink);
+  --j-body: var(--p-body);
+  --j-muted: var(--p-muted);
+  --j-line: var(--p-line);
+  --k-secondary: var(--p-muted);
+  background: var(--p-page);
+  color: var(--p-ink);
+}
+@media (max-width: 767px) { .shell { --p-gap: 12px; } }
+
+/* The three main colours and their trays (cool, warm, cool), the closing panel in the first. */
+.palette[data-palette='p'] { --p-accent: #2e5bff; --p-accent-text: #1f45d6; --p-tray-1: #dde6ff; --p-tray-2: #fbe8d6; --p-tray-3: #d9f2e6; }
+.palette[data-palette='q'] { --p-accent: #0f8c7a; --p-accent-text: #0b6f61; --p-tray-1: #d3efea; --p-tray-2: #f3ecdd; --p-tray-3: #e5e0fa; }
+.palette[data-palette='r'] { --p-accent: #5b3fd9; --p-accent-text: #4a30c0; --p-tray-1: #e6e0ff; --p-tray-2: #fbe3da; --p-tray-3: #dcebfa; }
+.palette { --j-gold: var(--p-accent); --j-gold-text: var(--p-accent-text); background: var(--p-page);
+  --p-accent-soft: color-mix(in srgb, var(--p-accent) 10%, #fff); --p-accent-line: color-mix(in srgb, var(--p-accent) 35%, #fff); }
+
+/* The page's own backdrop (MotionJ: a faint grid and gold, paper and cool pools of light) is not used: no glows here. */
+.shell > div[aria-hidden='true']:first-child { display: none; }
+
+/* ---- Header: one floating white pill ---- */
+.palette > header { padding-top: 12px; background: transparent; box-shadow: none; border: 0; backdrop-filter: none; }
+.palette > header > div:first-child {
+  max-width: 1200px; margin-inline: auto; padding: 8px 10px 8px 20px; border-radius: 999px; background: #fff;
+  box-shadow: 0 1px 2px rgba(21, 26, 43, .05), 0 12px 32px -20px rgba(21, 26, 43, .35);
+}
+@media (max-width: 767px) { .palette > header { padding-inline: var(--p-gap); } }
+
+/* ---- Open regions: the page's grey, no bands ---- */
+.palette [data-band] { background: transparent; box-shadow: none; border-radius: 0; margin-inline: 0; }
+.palette [data-band='ink'] { --j-ink: var(--p-ink); --j-body: var(--p-body); --j-muted: var(--p-muted); --j-gold-text: var(--p-accent-text);
+  --j-line: var(--p-line); color: var(--p-ink); }
+
+/* ---- Trays: the product's moving proof sits on pale panels, 24 from the edges and from each other ---- */
+.palette [aria-labelledby='step-one-title'],
+.palette [data-region='三步'] > div:has(> [data-region='评审团']),
+.palette [data-region='第二步'],
+.palette [data-region='第三步'],
+.palette [data-region='样例报告'],
+.palette [data-region='对比区'] { margin-inline: var(--p-gap); border-radius: var(--p-radius); }
+.palette [aria-labelledby='step-one-title'] { background: var(--p-tray-1); border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.palette [data-region='三步'] > div:has(> [data-region='评审团']) { max-width: none; padding: 0 max(var(--j-gutter), calc((100% - 1200px) / 2)) 64px;
+  background: var(--p-tray-1); border-top-left-radius: 0; border-top-right-radius: 0; }
+.palette [data-region='第二步'] { margin-top: var(--p-gap); padding-bottom: 64px; background: var(--p-tray-2); }
+.palette [data-region='第三步'] { margin-top: var(--p-gap); padding-bottom: 64px; background: var(--p-tray-3); }
+.palette [data-region='样例报告'] { margin-top: var(--p-gap); background: var(--p-tray-2); }
+.palette [data-region='对比区'] { margin-top: var(--p-gap); background: var(--p-tray-1); }
+.palette [data-region='对比区'] a[href] { background: var(--p-ink); color: #fff; }
+
+/* The comparison's selected tab kept the dark band's words: on the ink pill they turn white. */
+.palette [data-region='对比区'] [role='tab'][aria-selected='true'] { color: #fff; }
+
+/* Our price: a white card with the main colour's edge; no gold box, travelling edge, sheen or glinting figure. */
+.palette [data-region='价格'] [class*='__own'] { background: #fff; border: 1.5px solid var(--p-accent); box-shadow: none; animation: none; }
+.palette [data-region='价格'] [class*='__own'] [class*='__price'] { background: none; color: var(--p-ink); -webkit-text-fill-color: currentColor; }
+.palette [data-region='价格'] [class*='__cta'] { box-shadow: none; }
+.palette [data-region='价格'] [class*='__cta']::after { display: none; }
+
+/* Small tags (示例, 示意, 方向已调整): the main colour's words on its pale tint, instead of gold. */
+.palette main [class*='__tag'], .palette main [class*='__badge'], .palette main [class*='__adjustedTag'] {
+  background: var(--p-accent-soft); color: var(--p-accent-text); }
+
+/* The jury's light, its wires and marks, and the report overview's highlights follow the main colour. */
+.palette [data-region='评审团'] { --spark: var(--p-accent); }
+.palette figure [class*='__spark'] { fill: var(--p-accent); }
+.palette figure [class*='__marks'] i { background: var(--p-accent); }
+.palette figure [class*='__pulse'], .palette figure [class*='__triangle'] circle { stroke: var(--p-accent); }
+.palette figure [class*='__arc'] { stroke: var(--p-accent-line); }
+.palette figure [class*='__ring'] [class*='__fill'] { stroke: var(--p-accent-line); }
+.palette figure [class*='__cross'] { background: var(--p-accent-soft); }
+.palette figure [class*='__node']::after { box-shadow: inset 0 0 0 1.5px var(--p-accent), 0 6px 18px -10px var(--p-accent-line); }
+.palette main [class*='__total'] { background: var(--p-accent-soft); }
+.palette main [class*='overview'] [class*='__block'] { box-shadow: none; }
+.palette main [class*='__people'] b, .palette main [class*='__funnel'] li { background: var(--p-accent-soft); }
+/* Only the report overview's and the earnings' bars (not the tab rows, whose class names also end in "bar"). */
+.palette main [class*='overview-l'][class$='__bar'], .palette main [class*='earnings-l'][class$='__bar'] { background: var(--p-accent); }
+.palette main [class*='__avatar'] { background: var(--p-accent-soft); color: var(--p-accent-text); }
+.palette main [data-tone='0'] { --tone: var(--p-accent); }
+.palette main [data-tone='1'] { --tone: var(--p-accent-line); }
+.palette main [data-tone='2'] { --tone: var(--p-accent-text); }
+.palette main [class*='__weeks'] li { border-top-color: var(--p-accent); }
+.palette main [class*='__reportCard'] em { background: var(--p-accent-soft); color: var(--p-accent-text); }
+.palette [data-region='对比区'] [class*='__cell'] { --j-gold-text: var(--p-accent-text); }
+.palette [data-region='对比区'] [class*='__note'][data-side='coach'] b { background: var(--p-accent-soft); color: var(--p-accent-text); }
+
+/* ---- Type: steps that jump at 1024 and 768 ---- */
+.palette main h1 { font-size: 48px; font-weight: 700; line-height: 1.04; letter-spacing: -.03em; }
+.palette main h2:not([inert] h2) { font-size: 32px; font-weight: 700; line-height: 1.12; letter-spacing: -.02em; }
+@media (min-width: 768px) {
+  .palette main h1 { font-size: 64px; }
+  .palette main h2:not([inert] h2) { font-size: 40px; }
+}
+@media (min-width: 1024px) {
+  .palette main h1 { font-size: 80px; }
+  .palette main h2:not([inert] h2) { font-size: 48px; }
+}
+
+/* ---- Buttons: ink pills, no arrow after the words; a slight lift on hover ---- */
+.palette main a[href*='action=signup'], .palette > header a[href*='action=signup'] {
+  background: var(--p-ink); color: #fff; border-radius: 999px; transition: transform 150ms var(--p-ease), background-color 150ms var(--p-ease);
+}
+.palette main a[href*='action=signup'] svg, .palette > header a[href*='action=signup'] svg { display: none; }
+@media (hover: hover) { .palette main a[href*='action=signup']:hover { transform: scale(1.02); } }
+
+/* ---- Closing panel and footer ---- */
+/* The page's grey reaches the very bottom (no dark body showing under the footer's margin). */
+:global(body):has(.shell) { background: var(--p-page, #f2f3f5); }
+/* The jury's Gold tag on the main colour: white words. */
+.palette [data-region='评审团'] [data-jury-bridge] span { color: #fff; }
+/* No dotted corner marks on the coach's answers (decoration). */
+.palette [data-region='用户心声'] [class*='__answer']::before { display: none; }
+.palette [data-region='结尾行动'] > div > div { padding: 72px 24px; border-radius: var(--p-radius); background: var(--p-tray-1); }
+.palette [data-region='页脚'] { margin: var(--p-gap); border-radius: var(--p-radius); background: var(--p-ink);
+  --j-ink: #f4f5f8; --j-body: #d5d8e0; --j-muted: #a9aebb; --j-line: rgba(255, 255, 255, .14); color: #f4f5f8; }
+
+/* ---- Focus and reduced motion ---- */
+.palette a:focus-visible, .palette button:focus-visible, .palette summary:focus-visible { outline: 2px solid var(--p-ink); outline-offset: 3px; }
+/* On the dark footer the ring is white, or it would vanish into the ink. */
+.palette [data-region='页脚'] a:focus-visible, .palette [data-region='页脚'] button:focus-visible { outline-color: #fff; }
+@media (prefers-reduced-motion: reduce) { .palette main a[href*='action=signup'] { transition: none; } }
