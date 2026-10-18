@@ -122,7 +122,7 @@ describe('Stripe dispute effects resume from committed financial state', () => {
     const originalFrom = f.db.from.bind(f.db);
     let scans = 0;
     const query: Record<string, unknown> = {};
-    for (const name of ['select', 'eq', 'neq', 'not', 'is', 'in', 'or', 'order']) query[name] = () => query;
+    for (const name of ['select', 'eq', 'neq', 'not', 'is', 'in', 'or', 'order', 'gte']) query[name] = () => query;
     query.limit = async () => ({ data: scans++ === 0 ? [{ ...f.row }] : [], error: null });
     f.db.from = (() => ({ ...query, update: originalFrom('payment_disputes').update.bind(originalFrom('payment_disputes')) })) as never;
     expect(await reconcilePaymentDisputes(f.db, {} as Stripe, f.alert)).toEqual({ checked: 1, failed: 0, complete: true });
@@ -138,8 +138,9 @@ describe('Stripe dispute effects resume from committed financial state', () => {
     let kind = '';
     const makeQuery = () => {
       const query: Record<string, unknown> = {};
-      for (const name of ['eq', 'neq', 'not', 'is', 'in', 'or', 'order', 'gt']) query[name] = (field: string) => {
+      for (const name of ['eq', 'neq', 'not', 'is', 'in', 'or', 'order', 'gt', 'gte']) query[name] = (field: string, value: unknown) => {
         if (name === 'or' && field.includes('stop_attempts.lt.3')) kind = 'stops';
+        if (name === 'eq' && field === 'renewal_stop_state' && value === 'manual') kind = 'manual-stop-alerts';
         if (name === 'is' && field === 'order_id') kind = 'unmatched';
         if (name === 'not' && field === 'renewal_stop_state') kind = 'matched-alerts';
         return query;
@@ -155,7 +156,28 @@ describe('Stripe dispute effects resume from committed financial state', () => {
       return { select: () => query, update: () => ({ eq: () => ({ in: () => ({ select: async () => ({ data: [{ id: f.row.id }], error: null }) }) }) }) };
     }) as never;
     await expect(reconcilePaymentDisputes(f.db, {} as Stripe, f.alert)).resolves.toEqual({ checked: 1, failed: 0, complete: true });
-    expect(groups).toEqual(['stops', 'unmatched', 'matched-alerts']);
+    expect(groups).toEqual(['stops', 'manual-stop-alerts', 'matched-alerts', 'unmatched']);
     expect(mocks.stop).toHaveBeenCalledTimes(1);
+  });
+  it('replays the stop alert for an exhausted manual row without another Stripe mutation', async () => {
+    const f = fixture({ renewal_stop_state: 'manual', stop_attempts: 3, alerted_at: new Date().toISOString(),
+      freeze_alerted_at: new Date().toISOString(), stop_alerted_at: null });
+    mocks.read.mockResolvedValue({ stopped: false, canceled: false });
+    const query: Record<string, unknown> = {};
+    let kind = '';
+    for (const name of ['eq', 'neq', 'not', 'is', 'in', 'or', 'order', 'gt', 'gte']) query[name] = (field: string, value: unknown) => {
+      if (name === 'eq' && field === 'renewal_stop_state' && value === 'manual') kind = 'manual-stop-alerts';
+      if (name === 'not' && field === 'renewal_stop_state') kind = 'matched-alerts';
+      if (name === 'is' && field === 'order_id') kind = 'unmatched';
+      return query;
+    };
+    query.select = () => query;
+    query.limit = async () => ({ data: kind === 'manual-stop-alerts' ? [{ ...f.row }] : [], error: null });
+    f.db.from = (() => ({ ...query, update: () => ({ eq: () => ({ in: () => ({
+      select: async () => ({ data: [{ id: f.row.id }], error: null }),
+    }) }) }) })) as never;
+    await expect(reconcilePaymentDisputes(f.db, {} as Stripe, f.alert)).resolves.toMatchObject({ checked: 1, failed: 1, complete: true });
+    expect(mocks.stop).not.toHaveBeenCalled();
+    expect(f.alert).toHaveBeenCalledWith(expect.objectContaining({ code: 'PAY_DISPUTE_STOP_MANUAL' }));
   });
 });

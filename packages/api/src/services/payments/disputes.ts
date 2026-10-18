@@ -136,7 +136,7 @@ export async function reconcilePaymentDisputes(db: SupabaseClient, stripe: Strip
   deadline = Date.now() + 15_000) {
   const scope = await resolveStripeScope(stripe);
   let checked = 0, failed = 0;
-  const scan = async (kind: 'stops' | 'unmatched' | 'matched-alerts') => {
+  const scan = async (kind: 'stops' | 'manual-stop-alerts' | 'matched-alerts' | 'unmatched') => {
     let after: string | undefined;
     for (let page = 0; page < 20; page++) {
       if (Date.now() > deadline) return false;
@@ -144,6 +144,8 @@ export async function reconcilePaymentDisputes(db: SupabaseClient, stripe: Strip
         .neq('freeze_state', 'external');
       if (kind === 'stops') query = query.not('order_id', 'is', null)
         .or('renewal_stop_state.eq.pending,and(renewal_stop_state.eq.manual,stop_attempts.lt.3)');
+      else if (kind === 'manual-stop-alerts') query = query.not('order_id', 'is', null)
+        .eq('renewal_stop_state', 'manual').gte('stop_attempts', 3).is('stop_alerted_at', null);
       else if (kind === 'unmatched') query = query.is('order_id', null);
       else query = query.not('order_id', 'is', null).not('renewal_stop_state', 'in', '(pending,manual)')
         .or('alerted_at.is.null,and(freeze_state.eq.frozen,freeze_alerted_at.is.null),and(closed_at.not.is.null,closed_alerted_at.is.null)');
@@ -174,8 +176,8 @@ export async function reconcilePaymentDisputes(db: SupabaseClient, stripe: Strip
     }
     return false;
   };
-  // Always repair matched freezes/stops first: old unmatched rows must not occupy the bounded scan ahead of a renewal stop.
-  for (const kind of ['stops', 'unmatched', 'matched-alerts'] as const) {
+  // Repair every matched stop and alert before unmatched rows can consume the bounded page budget.
+  for (const kind of ['stops', 'manual-stop-alerts', 'matched-alerts', 'unmatched'] as const) {
     if (!await scan(kind)) return { checked, failed, complete: false };
   }
   return { checked, failed, complete: true };
