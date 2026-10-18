@@ -15,8 +15,6 @@ const fields = [
   ['callsPerMinute', '模型调用：每分钟', 180],
   ['callsPer24Hours', '模型调用：24小时窗口', 15000],
 ] as const;
-/** Largest frozen per-round call count today (/runtime); a lower limit refuses every such round. */
-const MAX_CALLS_PER_ROUND = 3;
 type Field = typeof fields[number][0];
 type Draft = Record<Field, string>;
 
@@ -54,7 +52,6 @@ export function RuntimeRateLimitSettings() {
     return Number.isInteger(n) && n >= 1 && n <= max;
   }) && Number(current.admissionPer24Hours) >= Number(current.admissionPerMinute)
     && Number(current.callsPer24Hours) >= Number(current.callsPerMinute);
-  const callsBelowRound = current && Number(current.callsPerMinute) < MAX_CALLS_PER_ROUND;
   return <TabsContent value="runtime-rate-limits">
     <Card>
       <CardHeader>
@@ -66,8 +63,8 @@ export function RuntimeRateLimitSettings() {
           : <p role="status">保护尚未接线：当前只能准备配置，保存不会启用限流或暂停模型调用。</p>}
         <p>新消息：用户每发一条消息（一轮）记 1 次，同一请求重新读取不再计数。</p>
         <p>
-          模型调用：每轮开始时按这一轮最多可用的调用数一次性预扣（导师 1–2 次，/runtime 3 次），
-          实际用得少也不退回。已发生的调用费用不受这些配置改变。
+          模型调用：每次新的模型或研究供应商调用各记 1 次；恢复同一请求不会重复占额。单轮总调用次数仍受本轮上限约束，触及分钟或24小时限额后，后续新调用会被拒绝。
+          已发生的调用费用不受这些配置改变。
         </p>
         {view.error && config && <StaleDataNotice onRetry={() => { void view.refetch(); }} />}
         {view.error && !config ? <div role="alert">
@@ -88,13 +85,6 @@ export function RuntimeRateLimitSettings() {
               <p className="text-xs">可填 1–{max} 次，日限额不能低于分钟限额。</p>
             </div>)}
           </div>
-          <p className="text-sm">
-            模型调用每分钟和24小时窗口都不能低于单轮最多调用数（当前 {MAX_CALLS_PER_ROUND}），
-            否则需要 {MAX_CALLS_PER_ROUND} 次调用的一轮永远无法开始，用户会看到“暂时无法确认使用额度”。
-          </p>
-          {callsBelowRound && <p role="alert">
-            当前“模型调用：每分钟”低于 {MAX_CALLS_PER_ROUND}，/runtime 的每一轮都会被拒绝。
-          </p>}
           {wired ? <p>暂停设置：{config.stopNewCalls ? '已暂停新调用' : '未暂停'}</p>
             : <p>暂停设置：{config.stopNewCalls ? '已保存暂停意向，尚未生效' : '未暂停（保护尚未接线）'}</p>}
           <p className="text-sm">

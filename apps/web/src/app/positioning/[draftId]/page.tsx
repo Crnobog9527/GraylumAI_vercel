@@ -47,7 +47,7 @@ import { clearSavedFields, freeAnswerSource, isHostAction, noteSavedFields, nudg
 type Step = { id: string; title: string; dependsOn?: string[] };
 import { type Information, type Item, type StepEnvelope } from "./confirm-envelope";
 import { definiteHandoffRejections, handoffIntent, readRetainedHandoff } from "./handoff-envelope";
-import { ResearchCallList } from "@/components/research/research-call-list";
+import { MentorTurnSteps } from "./mentor-turn-steps";
 import { ResearchSessionPanel, useResearchCalls } from "@/components/research/research-session";
 /** The retained mentor request is either wrapped in `request` or legacy top-level. */
 export default function PositioningDraft({ params }: { params: Promise<{ draftId: string }> }) {
@@ -123,7 +123,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     { enabled: Boolean(read.data?.sessionId) && !read.data?.conversationDeleted,
       refetchInterval: useHistoryPolling(draftId, read.data?.snapshot?.workflow.steps ?? []) });
   const research = useResearchCalls(read.data?.sessionId);
-  const live = useLiveReply(draftId, history.data, research.observe), liveReply = live.reply, stopLocal = live.stopLocal;
+  const live = useLiveReply(draftId, history.data, research.observe), liveReply = live.reply, stopLocal = live.stopLocal, stale = live.reopenGraceOver;
   const payg = usePaygResume(() => Promise.all([read.refetch(), history.refetch(), utils.credits.getBalance.invalidate()]));
   const [activeStep, setActiveStep] = useState<string | null>(null);
   // State, not a ref: on a client-side return cached history exists before the log mounts.
@@ -1166,7 +1166,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                       const live = liveReply?.executionId === execution.executionId ? liveReply : null;
                       const reply = mentorReplyDisplay({ ...execution, body: execution.body ?? execution.primaryBody,
                         legacyMessage: parsed.message, liveText: live?.text, liveCard: live?.card, stopLocal: stopLocal(execution.executionId),
-                        active: execution.executionId === history.data?.activeExecution, busy: busy || awaitingReply });
+                        active: execution.executionId === history.data?.activeExecution, busy: busy || (awaitingReply && Boolean(liveReply)), stale });
                       const next = mentorExecutions[executionIndex + 1];
                       if (!next) { lastTurnNotice = showsTurnState(reply.notice); lastTurnText = reply.notice?.text ?? ""; }
                       const status = cardStatus({ isLatest: !next, turn, shown: { roundId: d.roundId, stepId: step.id },
@@ -1182,7 +1182,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                         <MentorTurnGroup key={execution.executionId} executionId={execution.executionId}>
                           {/* The host opens the step itself: no fabricated user message. */}
                           {!openingTurn && <MentorUserMessage stepLabel={turnLabel} text={shownInput(execution.input) ?? "内容暂不可用"}/>}
-                          <ResearchCallList calls={research.of(execution.executionId)}/>
+                          <MentorTurnSteps live={live} reply={reply} execution={execution} calls={research.of(execution.executionId)} stale={stale}/>
                           {reply.text && <MentorReply kind={summaryTurn ? "summary" : openingTurn ? "opening" : "reply"} stepLabel={turnLabel}
                             text={reply.text} live={Boolean(live)} result={execution}
                             summaryHint={Boolean(summaryTurn && !next && !s.valid && turn?.stepId === step.id && summaryShown(execution))}/>}
@@ -1190,7 +1190,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                             && <OpenQuestionRecord card={reply.card} onShow={() => setFoldedCard("")}/>}
                           {/* Polling follows a running turn; the retry is for one that stopped advancing. */}
                           <ChatNoticeList notices={[...payg.turnNotices(execution, busy), mentorTurnNotice(execution.executionId, reply.notice,
-                            !busy && execution.executionId === history.data?.activeExecution && turnNeedsRetry(execution)
+                            !busy && execution.executionId === history.data?.activeExecution && turnNeedsRetry(execution, stale)
                             ? { onClick: () => void run(() => execute.mutateAsync({ executionId: execution.executionId })) } : null)]}/>
                         </MentorTurnGroup>
                       );
@@ -1198,7 +1198,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                     {pendingBubble&&!mentorExecutions.some(e=>e.request?.requestId===pendingBubble.requestId)&&<MentorPendingMessage
                       requestId={pendingBubble.requestId} stepTitle={steps.find(candidate => candidate.id === pendingBubble.stepId)?.title}
                       text={shownInput(pendingBubble.input)} sending={running}/>}
-                  {liveOnly && <ResearchCallList calls={research.of(liveOnly.executionId)}/>}
+                  {liveOnly && <MentorTurnSteps live={liveOnly} reply={liveOnly} calls={research.of(liveOnly.executionId)}/>}
                   {liveOnly&&(liveOnly.text||!liveOnly.card)&&<MentorLiveReply text={liveOnly.text}/>}
                   {read.data?.sessionId && <ResearchSessionPanel sessionId={read.data.sessionId} settledTurns={settledTurns}
                     disabled={sendLocked || snap.state !== "draft" || mentorTurns.get(mentorExecutions.at(-1)?.executionId ?? "")?.stepId !== step.id}

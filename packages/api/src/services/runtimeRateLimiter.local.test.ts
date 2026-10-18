@@ -61,6 +61,15 @@ describe.skipIf(!enabled)('Runtime limiter against disposable Redis + SRH', () =
     expect(await checkRuntimeRateLimit(actor, 'calls', config, 'local', 1)).toEqual({ success: true });
     expect(await checkRuntimeRateLimit(actor, 'calls', config, 'local', 1)).toMatchObject({ window: 'minute' });
   });
+  it('lets an already-reserved call resume when the rate window has no unused slot', async () => {
+    const actor = randomUUID();
+    const config = { ...defaults, callsPerMinute: 1, callsPer24Hours: 1 };
+    expect(await checkRuntimeRateLimit(actor, 'calls', config, 'local')).toEqual({ success: true });
+    expect(await checkRuntimeRateLimit(actor, 'calls', config, 'local', 1, 'bill2.v2', false))
+      .toEqual({ success: true });
+    expect(await checkRuntimeRateLimit(actor, 'calls', config, 'local'))
+      .toMatchObject({ success: false, reason: 'rate_limited' });
+  });
   it('preserves counts across configuration edits', async () => {
     const actor = randomUUID();
     const config = { ...defaults, callsPerMinute: 3, callsPer24Hours: 3 };

@@ -70,15 +70,16 @@ it('unexpected gate failure fails closed and ambiguous cancellation stays recove
   const f = fixture(); f.gate.mockRejectedValue(new Error('private'));
   expect(await runtimeExecutor(f.options).execute(id)).toEqual({ state: 'cancelled', unavailable: 'limit_unavailable' });
   f.failBeforeFails();
-  expect(await runtimeExecutor(f.options).execute(id)).toEqual({ state: 'pending' });
+  expect(await runtimeExecutor(f.options).execute(id)).toEqual({ state: 'pending', unavailable: 'limit_unavailable' });
   expect(mock.billing.claimCall).not.toHaveBeenCalled();
 });
-it('precharges the frozen budget once, finishes both calls, and checks complete output once', async () => {
+it('counts each new claim separately, finishes both calls, and checks complete output once', async () => {
   const f = fixture();
-  f.gate.mockResolvedValueOnce({ ok: true }).mockResolvedValue({ ok: false, reason: 'paused', retryAfter: 60 });
+  f.gate.mockResolvedValue({ ok: true });
   const moderation = vi.spyOn(allowAllModeration, 'checkOutput');
   expect(await runtimeExecutor(f.options).execute(id)).toEqual({ state: 'completed', body: 'body', summary: 'summary' });
-  expect(f.gate).toHaveBeenCalledExactlyOnceWith(id, 2, 'bill2.v1');
+  expect(f.gate).toHaveBeenNthCalledWith(1, id, 1, 'bill2.v1');
+  expect(f.gate).toHaveBeenNthCalledWith(2, id, 1, 'bill2.v1', true, false);
   expect(mock.billing.claimCall).toHaveBeenCalledTimes(2); expect(mock.billing.dispatchOnce).toHaveBeenCalledTimes(2);
   expect(moderation).toHaveBeenCalledExactlyOnceWith({ actorId: id, executionId: id, body: 'body', summary: 'summary' });
   expect(f.timing.summary().phases.rateLimit).toBeDefined();

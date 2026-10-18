@@ -44,6 +44,10 @@ export function researchExecution(input: {
   onPause: (point: ResearchPause['point'], state: ResearchPause['state']) => void;
   /** false = the round's time budget cannot cover another supplier request; nothing is sent. */
   canSend: () => boolean;
+  /** Reserves one runtime call slot before each supplier BILL2 claim. */
+  callGate?: () => Promise<void>;
+  /** Clears the per-claim gate marker after a tool finishes without pausing. */
+  onSubcallSettled?: () => void;
   now?: () => Date;
 }): ResearchExecution | null {
   const { research, execution } = input;
@@ -76,6 +80,8 @@ export function researchExecution(input: {
       nextSequence: async () => (await readCalls()).length + 1,
       phase: research.phase, ...(execution.epoch !== undefined ? { runtimeEpoch: execution.epoch } : {}),
       secrets: platformSecretReader(input.database), rateCounter: checkVendorRateLimit,
+      // A recovery replay cannot create a supplier request or BILL2 claim, so it must not consume live quota.
+      ...(execution.live && input.callGate ? { callGate: input.callGate } : {}),
       newId: () => { throw new Error('RESEARCH_OPERATION_ID_REQUIRED'); },
       beforeSend: async () => input.canSend(),
       ...(input.now ? { now: input.now } : {}),
@@ -92,6 +98,7 @@ export function researchExecution(input: {
         throw error;
       }
       if (closed) throw new Error('RUNTIME_ACCOUNT_CLOSED');
+      input.onSubcallSettled?.();
       return result;
     } })),
     definitionBytes: researchToolBytes(names, fastSearchOnly(ctx.config)), reserve: research.reserve,

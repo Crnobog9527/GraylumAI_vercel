@@ -10,9 +10,11 @@ import { createRuntimeBudget } from './budget';
 
 it.each([
   {exhausted:false,native:false,stop:false}, {exhausted:true,native:false,stop:false},
+  // Simulate a pre-0312 host omitting gatePassed while saving an already-gated wait.
+  {exhausted:true,native:false,stop:false,legacyCheckpoint:true},
   {exhausted:false,native:true,stop:false}, {exhausted:true,native:true,stop:false},
   {exhausted:false,native:true,stop:true},
-])('RUNTIME: PAYG SDK crosses HTTP boundaries without duplicate calls/charges ($exhausted, native=$native, stop=$stop)', async ({exhausted,native,stop}) => {
+])('RUNTIME: PAYG SDK crosses HTTP boundaries without duplicate calls/charges ($exhausted, native=$native, stop=$stop, legacy=$legacyCheckpoint)', async ({exhausted,native,stop,legacyCheckpoint=false}) => {
   const connectionString = process.env.V3_LOCAL_DB;
   if (!connectionString?.startsWith('postgres://postgres@127.0.0.1:')
     || !connectionString.endsWith('/v3_disposable')) throw new Error('isolated runner required');
@@ -99,7 +101,10 @@ it.each([
     let elapsed=0,exhaustAfterClaim=false;
     const budget=createRuntimeBudget(()=>elapsed);
     const database={rpc:async(name:string,args:Record<string,unknown>)=>{
-      const result=await admin.rpc(name,args);
+      const legacyArgs=legacyCheckpoint&&name==='runtime_execution'&&args.p_action==='payg_wait'
+        ?{...args,p_result:Object.fromEntries(Object.entries(args.p_result as Record<string,unknown>).filter(([key])=>key!=='gatePassed'))}
+        :args;
+      const result=await admin.rpc(name,legacyArgs);
       if(exhaustAfterClaim&&name==='bill2_claim'&&args.p_sequence===2&&result.data?.id){
         elapsed=budget.workDeadline;exhaustAfterClaim=false;
       }
@@ -113,6 +118,8 @@ it.each([
     const waiting = await host.execute(admitted.executionId);
     expect(waiting).toMatchObject({ state: 'waiting_credits', code: 'RUNTIME_WAITING_CREDITS',
       executionId: admitted.executionId, cursor: 1, epoch: 1, remainingCalls: 1, body: primaryBody });
+    expect(await rpc('runtime_execution', { p_actor_id: actor, p_execution_id: admitted.executionId, p_action: 'read' }))
+      .toMatchObject({ state: 'waiting_credits', gatePassed: true });
     expect(requests.map(r => r.model)).toEqual([model]);
     expect(await host.execute(admitted.executionId)).toEqual(waiting);
     const history = async () => (await db.query(
@@ -167,6 +174,11 @@ it.each([
       exhaustAfterClaim=true;
       expect(await finishWaitingOrganizer(await sessionContext(),nextRequestId,resumeOrganizer))
         .toMatchObject({state:'waiting_resume',admitted:false,remainingCalls:0});
+      if(legacyCheckpoint){
+        await db.query("update bill2_runs set runtime_checkpoint=runtime_checkpoint-'gatePassed' where id=$1",[admitted.runId]);
+      }
+      expect(await rpc('runtime_execution', { p_actor_id: actor, p_execution_id: admitted.executionId, p_action: 'read' }))
+        .toMatchObject({ state: 'waiting_resume', gatePassed: true });
       expect(requests.map(r=>r.model)).toEqual([model]);
       const financial=async()=>(await db.query(`select credits,
         (select sum(amount)::int from credit_transactions where user_id=$1) ledger,
@@ -207,7 +219,7 @@ it.each([
     expect(completedHistory.slice(0, 2)).toEqual(savedHistory.slice(0, 2));
     expect(await host.execute(admitted.executionId)).toEqual(completed);
     expect(requests.map(r => r.model)).toEqual([model, summaryModel]);
-    expect(gate.mock.calls.map(call => call[1])).toEqual([2, 1, 1]);
+    expect(gate.mock.calls.map(call => call[1])).toEqual([1, 1, 1, 1]);
     expect(await history()).toEqual(completedHistory);
     expect((await db.query(`select count(*)::int n,sum(charged_delta)::int charged
       from bill2_calls where run_id=$1`, [admitted.runId])).rows[0]).toEqual({ n: 2, charged: 6 });

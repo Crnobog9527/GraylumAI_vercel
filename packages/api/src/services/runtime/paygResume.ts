@@ -8,6 +8,7 @@ import type { PaygWait, ResumeInput } from './paygRuntime';
 export type RuntimeExecution = {
   executionId: string; sessionId: string; runId: string; live: boolean; cancelRequested: boolean; state: string;
   pausedReason?: string; unavailableReason?: string; historyFrozen?: boolean; historyOmitted?: boolean; context: unknown;
+  gatePassed?: boolean;
   billing: FrozenRun | FrozenPaygRun;
   cursor?: number; epoch?: number; remainingCalls?: number; primaryResult?: { body: string };
   result: { kind: string; evidenceRef: string; evidenceHash: string; body: string; summary?: string;
@@ -43,10 +44,32 @@ export async function beginPaygExecution(input: {
       return {execution:await input.read('payg_resume', {cursor:input.resume.cursor,epoch:input.resume.epoch}),
         resumedGate:false};
     }
-    let verdict;
-    try { verdict = await input.callGate(await input.actor(), execution.remainingCalls!, 'bill2.v2'); }
-    catch { return { execution, resumedGate: false, wait: wait('limit_unavailable') }; }
-    if (!verdict.ok) return { execution, resumedGate: false, wait: wait(verdict.reason) };
+    let resumedGate = false;
+    const checkPause = execution.state !== 'waiting_credits' && execution.gatePassed !== true
+      && execution.remainingCalls === execution.billing.limits.maxCalls;
+    const callGate = async (reserve: boolean) => {
+      const actorId = await input.actor();
+      return checkPause ? reserve ? input.callGate(actorId, 1, 'bill2.v2')
+        : input.callGate(actorId, 1, 'bill2.v2', false)
+        : input.callGate(actorId, 1, 'bill2.v2', reserve, false);
+    };
+    // The durable checkpoint records whether this same call already passed its
+    // gate before waiting. Recheck without reserving it a second time.
+    if (execution.state === 'waiting_credits' || execution.gatePassed === true) {
+      try {
+        const verdict = await callGate(false);
+        if (!verdict.ok) return { execution, resumedGate: false, wait: wait(verdict.reason) };
+        resumedGate = true;
+      } catch { return { execution, resumedGate: false, wait: wait('limit_unavailable') }; }
+    }
+    else {
+      // A waiting_resume before its first call gate reserves one slot now.
+      try {
+        const verdict = await callGate(true);
+        if (!verdict.ok) return { execution, resumedGate: false, wait: wait(verdict.reason) };
+        resumedGate = true;
+      } catch { return { execution, resumedGate: false, wait: wait('limit_unavailable') }; }
+    }
     if (execution.billing.mode === 'staging_test') {
       if (!input.resumePricing) return { execution, resumedGate: false, wait: wait('RUNTIME_PRICE_UNCONFIRMED') };
       // Tool-route prices (RT-3b PR-3) have no model price row; their frozen expiry is checked by each claim (0255).
@@ -55,7 +78,7 @@ export async function beginPaygExecution(input: {
     }
     try {
       return { execution: await input.read('payg_resume', { cursor: input.resume.cursor, epoch: input.resume.epoch }),
-        resumedGate: true };
+        resumedGate };
     } catch (error) {
       if (error instanceof StagingAccessError && error.reason === 'RUNTIME_PRICE_CONFIGURATION_PENDING')
         return { execution, resumedGate: false, wait: wait('RUNTIME_PRICE_CONFIGURATION_PENDING') };
