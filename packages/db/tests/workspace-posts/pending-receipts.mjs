@@ -30,12 +30,27 @@ export async function pendingReceiptCases({c,report}){
  await c.query(`INSERT INTO runtime_tool_calls(execution_id,call_id,name,arguments,result)
   VALUES($1,'pending-source','read_source','{}',$2)`,[execution,{kind:'my_posts',status:'available',window_days:14,
    source_connections:[connection],posts:[{views:12345}],dependencies:[]}]);
+ await c.query(`INSERT INTO runtime_session_history(session_id,execution_id,revision,item)
+  VALUES($1,$2,1,'{"role":"tool","content":"OWN_POST_HISTORY_PRIVATE"}')`,[started.sessionId,execution]);
+ await c.query('UPDATE runtime_executions SET candidate_history=ARRAY[1]::bigint[] WHERE id=$1',[execution]);
+ assert.equal((await rpc(c,'runtime_session_items',f.actor,started.sessionId,execution,'read',null,10,null)).length,1);
+ const child=randomUUID();
+ await c.query(`INSERT INTO runtime_executions(id,actor_id,session_id,request_id,payload,history_revision,state)
+  VALUES($1,$2,$3,$4,'{}',0,'completed')`,[child,f.actor,started.sessionId,randomUUID()]);
+ await c.query('INSERT INTO runtime_history_dependencies(execution_id,dependency_id) VALUES($1,$2)',[child,execution]);
  await c.query('SET ROLE service_role');
  try{await rpc(c,'publish_monitor_disconnect',f.actor,connection);}finally{await c.query('RESET ROLE');}
+ assert.equal(await one('SELECT runtime_workspace_posts_history_visible($1) v',[child]),false);
+ assert.deepEqual(await rpc(c,'runtime_session_items',f.actor,started.sessionId,execution,'read',null,10,null),[]);
+ report.checks.push('before erasure, revoked own-post data is excluded from new model history and transitive dependencies');
  assert.equal(await one('SELECT closed v FROM bill2_runs WHERE id=$1',[f.run]),false);
  const receipts=()=>one('SELECT jsonb_agg(to_jsonb(r)) v FROM bill2_receipts r JOIN bill2_calls bc ON bc.id=r.call_id WHERE bc.run_id=$1',[f.run]);
  assert.match(JSON.stringify(await receipts()),/OWN_POST_PENDING_PRIVATE/);
- const waiting=await rpc(c,'runtime_library_propagate',f.actor,20);assert.ok(waiting.waiting>0);
+ const current=await rpc(c,'runtime_execution',f.actor,execution,'read',{});
+ assert.equal(current.unavailableReason,'source_deleted');
+ report.checks.push('runtime entry detects the revoked source before asynchronous cleanup and stops in-flight work');
+ await rpc(c,'runtime_library_propagate',f.actor,20);
+ assert.equal(await one('SELECT content_deleted_at IS NOT NULL v FROM bill2_runs WHERE id=$1',[f.run]),true);
  await rpc(c,'runtime_cancel',f.actor,execution);
  const money=await one('SELECT jsonb_build_object(\'credits\',p.credits,\'weighted\',r.weighted_nominal_usd) v FROM profiles p,bill2_runs r WHERE p.id=$1 AND r.id=$2',[f.actor,f.run]);
  const old=read('packages/db/migrations/0302_chat_library_search.sql');
@@ -45,9 +60,35 @@ export async function pendingReceiptCases({c,report}){
  assert.match(JSON.stringify(await receipts()),/OWN_POST_PENDING_PRIVATE/);
  report.checks.push('RED: old deletion worker leaves pre-disconnect receipt content after the original open run settles');
  await c.query('ROLLBACK');
- await rpc(c,'runtime_library_propagate',f.actor,20);await rpc(c,'runtime_library_propagate',f.actor,20);
+ // Lowest UUID is deliberately an open/unready run, ahead of the eligible original receipt.
+ const blocked=await createFixture(c,{credits:1000,threshold:1}),blockedCall=await claim(c,blocked);
+ await rpc(c,'bill2_record',blocked.actor,blocked.run,blockedCall.id,{provider:blocked.claimPayload.provider,account:'sandbox',
+  model:blocked.claimPayload.model,protocol:blocked.claimPayload.protocol,providerId:'blocked-'+blockedCall.id,
+  source:'response',sourceHash:'c'.repeat(64),observedAt:new Date().toISOString(),coverage:'request_total',final:true,
+  cost:'0.001',currency:'USD',usage:{inputTokens:1000,outputTokens:0},rawBody:'BLOCKED_PRIVATE'});
+ const blockedSession=await one('SELECT ws_test.free_session($1) v',[blocked.actor]);
+ await c.query(`INSERT INTO runtime_executions(id,actor_id,session_id,request_id,payload,history_revision,state,billing_run_id)
+  VALUES('00000000-0000-4000-8000-000000000001',$1,$2,$3,'{"ownPosts":true}',0,'completed',$4)`,
+  [blocked.actor,blockedSession,randomUUID(),blocked.run]);
+ await c.query(`INSERT INTO runtime_tool_calls(execution_id,call_id,name,erased_at)
+  VALUES('00000000-0000-4000-8000-000000000001','erased-open-source','read_source',now())`);
+ await c.query('UPDATE bill2_runs SET content_deleted_at=now() WHERE id=$1',[blocked.run]);
+ const oldBody=read('packages/db/tests/workspace-posts/before-receipt-worker.txt');
+ const oldDefinition=old.slice(at,old.indexOf('END $$;',at)+7).replace(
+  " RETURN jsonb_build_object('processed',done,'waiting',waiting);",oldBody+" RETURN jsonb_build_object('processed',done,'waiting',waiting);");
+ await c.query('BEGIN');await c.query(oldDefinition);
+ await c.query('SET ROLE service_role');
+ try{await rpc(c,'runtime_library_propagate',null,1);await rpc(c,'runtime_library_propagate',null,1);}
+ finally{await c.query('RESET ROLE');}
+ assert.match(JSON.stringify(await receipts()),/OWN_POST_PENDING_PRIVATE/);
+ report.checks.push('RED: a lower-sorted open run consumes the global limit forever and starves an eligible receipt');
+ await c.query('ROLLBACK');
+ await c.query('SET ROLE service_role');
+ try{await rpc(c,'runtime_library_propagate',null,1);await rpc(c,'runtime_library_propagate',null,1);}
+ finally{await c.query('RESET ROLE');}
+
  assert.doesNotMatch(JSON.stringify(await receipts()),/OWN_POST_PENDING_PRIVATE|rawBody/);
  assert.ok((await receipts()).every(r=>r.financial_projection_version===1));
  assert.deepEqual(await one('SELECT jsonb_build_object(\'credits\',p.credits,\'weighted\',r.weighted_nominal_usd) v FROM profiles p,bill2_runs r WHERE p.id=$1 AND r.id=$2',[f.actor,f.run]),money);
- report.checks.push('GREEN: existing worker retries the persisted pending copy after native settlement, projects receipts once and preserves money');
+ report.checks.push('GREEN: readiness before the global limit skips the open run; existing worker retries the persisted pending copy after native settlement, projects receipts once and preserves money');
 }

@@ -102,37 +102,60 @@ DROP TRIGGER IF EXISTS runtime_workspace_posts_guard ON runtime_tool_calls;
 CREATE TRIGGER runtime_workspace_posts_guard BEFORE INSERT OR UPDATE OF result ON runtime_tool_calls
  FOR EACH ROW EXECUTE FUNCTION public.runtime_workspace_posts_guard();
 
--- Disconnect/delete removes saved tool and history copies too (same answer-retention rule as library deletion).
--- In-progress work is stopped; closed BILL2 receipts are projected to money-only fields. No amounts are changed.
-CREATE OR REPLACE FUNCTION public.runtime_workspace_posts_deleted() RETURNS trigger
-LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
-DECLARE e runtime_executions;stamp timestamptz:=clock_timestamp();closed boolean;
+-- Keep revoked source copies out of future model history while asynchronous erasure is pending.
+-- This filters model context only; runtime_view retains already displayed answers under the existing rule.
+CREATE OR REPLACE FUNCTION public.runtime_workspace_posts_history_visible(p_execution_id uuid) RETURNS boolean
+LANGUAGE sql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+ WITH RECURSIVE lineage(id) AS (
+  SELECT p_execution_id UNION SELECT d.dependency_id FROM runtime_history_dependencies d JOIN lineage l ON d.execution_id=l.id
+ ) SELECT NOT EXISTS(SELECT 1 FROM lineage l JOIN runtime_tool_calls t ON t.execution_id=l.id
+  JOIN runtime_executions ex ON ex.id=l.id WHERE t.result->>'kind'='my_posts'
+   AND NOT runtime_workspace_posts_visible(ex.actor_id,t.result))
+$$;
+REVOKE ALL ON FUNCTION public.runtime_workspace_posts_history_visible(uuid) FROM PUBLIC,anon,authenticated,service_role;
+DO $history$ DECLARE sig text;d text;expected integer;
 BEGIN
- IF TG_OP<>'DELETE' AND (NEW.status<>'deleting' OR OLD.status='deleting') THEN RETURN NEW;END IF;
- FOR e IN SELECT DISTINCT ex.* FROM runtime_executions ex JOIN runtime_tool_calls t ON t.execution_id=ex.id
-  WHERE ex.actor_id=OLD.actor_id AND t.result->>'kind'='my_posts' AND t.result->'source_connections' ? OLD.id::text
-  ORDER BY ex.id LOOP
-  IF e.state NOT IN ('completed','cancelled') THEN
-   UPDATE runtime_executions SET unavailable_reason=coalesce(unavailable_reason,'source_deleted') WHERE id=e.id;
-  END IF;
-  UPDATE runtime_tool_calls SET arguments=NULL,result=NULL,erased_at=stamp WHERE execution_id=e.id AND name='read_source'
-   AND result->>'kind'='my_posts';
-  UPDATE runtime_session_history SET item=NULL,erased_at=stamp
-   WHERE execution_id=e.id AND erased_at IS NULL AND item->>'role' IS DISTINCT FROM 'user';
-  UPDATE runtime_session_batches SET items=NULL,erased_at=stamp WHERE execution_id=e.id AND erased_at IS NULL;
-  IF e.billing_run_id IS NOT NULL THEN
-   UPDATE bill2_runs SET content_deleted_at=coalesce(content_deleted_at,stamp) WHERE id=e.billing_run_id RETURNING bill2_runs.closed INTO closed;
-   IF closed AND content_erasure_financial_allowed(e.actor_id,e.billing_run_id) THEN
-    PERFORM account_erasure_scrub_receipts(e.actor_id,e.billing_run_id,100);
-   END IF;
+ FOR sig,expected IN SELECT * FROM (VALUES ('runtime_admit(uuid,uuid,uuid,jsonb,jsonb)',1),
+  ('runtime_session_items(uuid,uuid,uuid,text,jsonb,integer,integer)',2)) v(sig,n) LOOP
+  d:=pg_get_functiondef(('public.'||sig)::regprocedure);
+  IF position('runtime_workspace_posts_history_visible(' IN d)=0 THEN
+   IF array_length(string_to_array(d,'WHERE available'),1)<>expected+1 THEN RAISE EXCEPTION 'B2_HISTORY_SOURCE_MISMATCH';END IF;
+   EXECUTE replace(d,'WHERE available','WHERE available AND runtime_workspace_posts_history_visible(execution_id)');
   END IF;
  END LOOP;
- RETURN CASE WHEN TG_OP='DELETE' THEN OLD ELSE NEW END;
+END $history$;
+
+-- Connection revocation never scans/locks historical conversations. Check only the current execution on entry;
+-- the existing worker below discovers stale saved sources and removes copies in bounded, retryable batches.
+DO $entry$ DECLARE d text;anchor text;patch text;
+BEGIN
+ d:=pg_get_functiondef('public.runtime_execution(uuid,uuid,text,jsonb)'::regprocedure);
+ IF position('-- B2 own-post source deleted' IN d)=0 THEN
+  anchor:=$a$ -- 0262 library source deleted$a$;
+  patch:=$p$ -- B2 own-post source deleted
+ IF e.state NOT IN ('completed','cancelled') AND NOT runtime_workspace_posts_history_visible(e.id) THEN
+  UPDATE runtime_executions SET unavailable_reason=coalesce(unavailable_reason,'source_deleted')
+   WHERE id=e.id RETURNING * INTO e;
+ END IF;
+$p$;
+  IF array_length(string_to_array(d,anchor),1)<>2 THEN RAISE EXCEPTION 'B2_EXECUTION_SOURCE_MISMATCH';END IF;
+  EXECUTE replace(d,anchor,patch||anchor);
+ END IF;
+END $entry$;
+
+-- Classify receipt readiness using the existing trusted money projection, without changing evidence.
+CREATE OR REPLACE FUNCTION public.runtime_workspace_posts_receipt_ready(p jsonb,c bill2_calls) RETURNS boolean
+LANGUAGE plpgsql STABLE SET search_path=public,pg_temp AS $$
+BEGIN
+ PERFORM bill2_erasure_receipt_projection(p,c);RETURN true;
+EXCEPTION WHEN raise_exception THEN
+ IF SQLERRM NOT IN ('BILL2_UNTRUSTED_RECEIPT','BILL2_INVALID_FINANCIAL_PROJECTION',
+  'BILL2_INVALID_COVERAGE','BILL2_INVALID_DECIMAL') THEN RAISE;END IF;
+ RETURN false;
+WHEN invalid_datetime_format OR datetime_field_overflow OR invalid_time_zone_displacement_value OR invalid_parameter_value THEN
+ RETURN false;
 END $$;
-REVOKE ALL ON FUNCTION public.runtime_workspace_posts_deleted() FROM PUBLIC,anon,authenticated,service_role;
-DROP TRIGGER IF EXISTS runtime_workspace_posts_deleted ON social_connections;
-CREATE TRIGGER runtime_workspace_posts_deleted AFTER DELETE OR UPDATE OF status ON social_connections
- FOR EACH ROW EXECUTE FUNCTION public.runtime_workspace_posts_deleted();
+REVOKE ALL ON FUNCTION public.runtime_workspace_posts_receipt_ready(jsonb,bill2_calls) FROM PUBLIC,anon,authenticated,service_role;
 
 -- Reuse the existing deletion worker, erased source journal and the original run's content marker.
 -- content_deleted_at persists the pending authority while the original BILL2 run is still open. The next worker
@@ -142,24 +165,39 @@ BEGIN
  d:=pg_get_functiondef('public.runtime_library_propagate(uuid,integer)'::regprocedure);
  IF position('-- B2 pending own-post receipts' IN d)=0 THEN
   anchor:=$a$ RETURN jsonb_build_object('processed',done,'waiting',waiting);$a$;
-  work:=$w$ -- B2 pending own-post receipts: separate bounded batch; a library backlog cannot starve these copies.
+  work:=$w$ -- B2 pending own-post receipts: separate bounded batches; no connection transaction owns historical cleanup.
+ FOR target IN SELECT ex.id execution_id FROM runtime_executions ex JOIN profiles p ON p.id=ex.actor_id
+  WHERE ex.payload->>'ownPosts'='true' AND (p_actor_id IS NULL OR ex.actor_id=p_actor_id)
+   AND EXISTS(SELECT 1 FROM runtime_tool_calls t WHERE t.execution_id=ex.id AND t.result->>'kind'='my_posts'
+    AND NOT runtime_workspace_posts_visible(ex.actor_id,t.result))
+   AND (ex.billing_run_id IS NULL OR EXISTS(SELECT 1 FROM bill2_runs br WHERE br.id=ex.billing_run_id FOR UPDATE SKIP LOCKED))
+  ORDER BY ex.id LIMIT p_limit FOR UPDATE OF ex,p SKIP LOCKED LOOP
+  SELECT * INTO e FROM runtime_executions WHERE id=target.execution_id;
+  IF e.state NOT IN ('completed','cancelled') THEN
+   UPDATE runtime_executions SET unavailable_reason=coalesce(unavailable_reason,'source_deleted') WHERE id=e.id;
+  END IF;
+  UPDATE runtime_tool_calls SET arguments=NULL,result=NULL,erased_at=stamp WHERE execution_id=e.id AND name='read_source'
+   AND result->>'kind'='my_posts';
+  UPDATE runtime_session_history SET item=NULL,erased_at=stamp
+   WHERE execution_id=e.id AND erased_at IS NULL AND item->>'role' IS DISTINCT FROM 'user';
+  UPDATE runtime_session_batches SET items=NULL,erased_at=stamp WHERE execution_id=e.id AND erased_at IS NULL;
+  UPDATE bill2_runs SET content_deleted_at=coalesce(content_deleted_at,stamp) WHERE id=e.billing_run_id;
+  done:=done+1;
+ END LOOP;
+ -- Readiness and SKIP LOCKED are evaluated before LIMIT: open, untrusted or locked rows cannot starve later runs.
  FOR target IN SELECT ex.id execution_id FROM runtime_executions ex JOIN bill2_runs br ON br.id=ex.billing_run_id
-  WHERE br.content_deleted_at IS NOT NULL AND ex.payload->>'ownPosts'='true'
+  JOIN profiles p ON p.id=ex.actor_id
+  WHERE br.content_deleted_at IS NOT NULL AND br.closed AND ex.payload->>'ownPosts'='true'
    AND (p_actor_id IS NULL OR ex.actor_id=p_actor_id)
+   AND coalesce(content_erasure_financial_allowed(ex.actor_id,coalesce(br.pre_deduct_id,br.id)),false)
    AND EXISTS(SELECT 1 FROM runtime_tool_calls t WHERE t.execution_id=ex.id AND t.erased_at IS NOT NULL
     AND t.name='read_source' AND t.result IS NULL)
    AND EXISTS(SELECT 1 FROM bill2_receipts r JOIN bill2_calls c ON c.id=r.call_id
-    WHERE c.run_id=br.id AND r.financial_projection_version IS NULL)
-  ORDER BY ex.id LIMIT p_limit LOOP
+    WHERE c.run_id=br.id AND r.financial_projection_version IS NULL AND runtime_workspace_posts_receipt_ready(r.payload,c))
+  ORDER BY ex.id LIMIT p_limit FOR UPDATE OF ex,br,p SKIP LOCKED LOOP
   BEGIN
    SELECT * INTO e FROM runtime_executions WHERE id=target.execution_id;
-   PERFORM id FROM profiles WHERE id=e.actor_id FOR SHARE NOWAIT;
-   SELECT * INTO e FROM runtime_executions WHERE id=target.execution_id FOR UPDATE NOWAIT;
-   SELECT * INTO b FROM bill2_runs WHERE id=e.billing_run_id FOR UPDATE NOWAIT;
-   IF NOT b.closed OR NOT coalesce(content_erasure_financial_allowed(e.actor_id,coalesce(b.pre_deduct_id,b.id)),false) THEN
-    waiting:=waiting+1;CONTINUE;
-   END IF;
-   scrub:=account_erasure_scrub_receipts(e.actor_id,b.id,100);
+   scrub:=account_erasure_scrub_receipts(e.actor_id,e.billing_run_id,100);
    IF (scrub->>'remaining')::bigint>(scrub->>'manualReview')::bigint THEN waiting:=waiting+1;
    ELSE done:=done+1;END IF;
   EXCEPTION WHEN lock_not_available THEN waiting:=waiting+1;

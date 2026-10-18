@@ -21,13 +21,32 @@ export async function deletionCases({c,report}){
  const store=(id,value)=>one(`INSERT INTO runtime_tool_calls(execution_id,call_id,name,arguments,result)
   VALUES($1,$2,'read_source','{"query":"my_posts:14"}',$3) RETURNING result v`,[e,id,value]);
  await store('saved-before-delete',source);
+ // A busy historical execution must never prevent committing source revocation.
+ const busy=new c.constructor({host:'127.0.0.1',port:c.connectionParameters.port,database:c.connectionParameters.database,user:'postgres'});
+ await busy.connect();
+ try{
+  await busy.query('BEGIN');await busy.query('SELECT execution_id FROM runtime_tool_calls WHERE execution_id=$1 FOR UPDATE',[e]);
+  await c.query('BEGIN');await c.query(read('packages/db/tests/workspace-posts/before-bounded-cleanup.sql'));
+  await c.query("SET LOCAL lock_timeout='100ms'");
+  await assert.rejects(c.query('DELETE FROM social_connections WHERE id=$1',[connection]),/lock timeout/);
+  await c.query('ROLLBACK');
+  report.checks.push('RED: synchronous historical cleanup prevents revocation while an old execution is busy');
+  await c.query('BEGIN');await c.query("SET LOCAL lock_timeout='100ms'");
+  await c.query('DELETE FROM social_connections WHERE id=$1',[connection]);
+  assert.equal(await one('SELECT runtime_workspace_posts_visible($1,$2) v',[a,source]),false);
+  await c.query('ROLLBACK');
+  report.checks.push('GREEN: revocation commits without locking historical executions; stale replay is immediately denied');
+ }finally{await busy.query('ROLLBACK');await busy.end();}
+
  await c.query('BEGIN');await c.query(read('packages/db/tests/workspace-posts/before-deletion-guard.sql'));
  await c.query('DELETE FROM social_connections WHERE id=$1',[connection]);
+ await one('SELECT runtime_library_propagate($1,20) v',[a]);
  assert.equal((await store('stale-old-guard',source)).kind,'my_posts');
  report.checks.push('RED: old guard accepts an already-read metric after its connection was deleted');
  await c.query('ROLLBACK');
  // Delete wins: the old saved copy is erased, replay is denied, a later completion cannot save the held result.
  await c.query('DELETE FROM social_connections WHERE id=$1',[connection]);
+ await one('SELECT runtime_library_propagate($1,20) v',[a]);
  assert.equal(await one("SELECT result IS NULL v FROM runtime_tool_calls WHERE execution_id=$1 AND call_id='saved-before-delete'",[e]),true);
  assert.equal(await one('SELECT runtime_workspace_posts_visible($1,$2) v',[a,source]),false);
  assert.deepEqual(await store('stale-after-delete',source),{kind:'unavailable',reason:'source_deleted',dependencies:[]});
@@ -51,6 +70,7 @@ export async function deletionCases({c,report}){
   VALUES($1,'running-read','read_source','{}',$2)`,[running,{...source,status:'no_recent_posts',posts:[],source_connections:[conn2]}]);
  await c.query('SET ROLE service_role');
  try{await c.query('SELECT publish_monitor_disconnect($1,$2)',[a,conn2]);}finally{await c.query('RESET ROLE');}
+ await one('SELECT runtime_library_propagate($1,20) v',[a]);
  assert.equal(await one('SELECT unavailable_reason v FROM runtime_executions WHERE id=$1',[running]),'source_deleted');
  assert.equal(await one("SELECT result IS NULL v FROM runtime_tool_calls WHERE execution_id=$1 AND call_id='running-read'",[running]),true);
  report.checks.push('real disconnect RPC stops unfinished work and clears the no-recent-posts copied result; existing displayed answers are retained');
