@@ -1,5 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
--- CHAT-AUTO-CONTEXT B2. TEMPORARY number: controller assigns the next slot before delivery.
+-- CHAT-AUTO-CONTEXT B2. Number 0307 assigned by the controller through Owner (2026-10-18).
+-- Rollback: set chat_my_posts_enabled=false, then revert the host code. Existing sources, posts, snapshots and
+-- Runtime journals remain intact; no destructive down migration. Saved results keep the normal erasure coverage.
 -- Patch the CURRENT function (0301 or later), preserving benchmarks and strategy reports byte for byte.
 -- No new tables, no new model tool, no provider request. Service reads reuse PR-3a readData / publish_monitor_data.
 BEGIN;
@@ -9,7 +11,7 @@ DECLARE definition text;anchor text;replacement text;
 BEGIN
  definition:=pg_get_functiondef('public.runtime_workspace_source(uuid,uuid,text)'::regprocedure);
  IF position('-- B2 own posts' IN definition)=0 THEN
-  anchor:=' IF coalesce(p_query,)= THEN';
+  anchor:=$anchor$ IF coalesce(p_query,'')='' THEN$anchor$;
   replacement:=$patch$ -- B2 own posts: no changes to the existing directory entries or dependencies.
  DECLARE post_entries jsonb:='[]';days integer:=0;chosen jsonb;
  BEGIN
