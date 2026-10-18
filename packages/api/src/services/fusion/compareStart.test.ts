@@ -41,7 +41,7 @@ const rateLimit = vi.fn();
 const deps = (): CompareDeps => ({ admin, actorId: id(50), refusePositioning, decisionsKey: async () => 'k', classify, rateLimit });
 const parts = (patch: Partial<CompareParts> = {}): CompareParts => ({ skill: null, positioningFallback: false, history: [], workspace: [],
   references: [], question: '哪个更好？', ...patch });
-const choice = (patch: Partial<CompareParts> = {}) => ({ sessionId: id(61), historyRevision: 4, modelIds: [id(1), id(2)], parts: parts(patch) });
+const choice = (patch: Partial<CompareParts> = {}) => ({ sessionId: id(61), historyRevision: 4, modelIds: [id(1), id(2)], parts: parts(patch), materialRevision: '0:none' });
 const shown = { credits: 20, columns: [{ modelId: id(1), credits: 10, usd: '0.01' }, { modelId: id(2), credits: 10, usd: '0.01' }] };
 const start = (patch: Partial<CompareParts> = {}, extra: Record<string, unknown> = {}) =>
   startCompare(deps(), { ...choice(patch), requestId: id(60), shown, ...extra } as Parameters<typeof startCompare>[1]);
@@ -309,9 +309,9 @@ describe('compare start: references and recorded work material (review findings)
     expect(names()).toEqual([]);
   });
   it('records the work-material revision with the request', async () => {
-    await start({}, { materialRevision: 7 });
+    await start({}, { materialRevision: '7:abc' });
     const begin = s.rpcs.find(call => call.name === 'fusion_compare_begin')!;
-    expect((begin.args.p_request as { config: { materialRevision: unknown } }).config.materialRevision).toBe(7);
+    expect((begin.args.p_request as { config: { materialRevision: unknown } }).config.materialRevision).toBe('7:abc');
   });
 });
 

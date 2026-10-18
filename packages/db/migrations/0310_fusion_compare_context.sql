@@ -149,7 +149,14 @@ BEGIN
   lim:=fusion_compare_limits(v);
   SELECT * INTO s FROM runtime_sessions WHERE id=p_session_id AND actor_id=p_actor_id FOR SHARE;
   IF s.id IS NULL OR s.content_deleted_at IS NOT NULL OR s.erased_at IS NOT NULL THEN RAISE EXCEPTION 'FUSION_COMPARE_SESSION_GONE'; END IF;
-  IF s.revision<>(p_request->>'historyRevision')::bigint THEN RAISE EXCEPTION 'FUSION_COMPARE_STALE'; END IF;
+  -- A turn still running (not a replaceable cost-pending one) cannot be compared against: refused here, before the record and
+  -- the platform-paid judgement, with the same rule as the admission and the adoption.
+  IF s.revision<>(p_request->>'historyRevision')::bigint OR (s.active_execution IS NOT NULL AND NOT EXISTS(SELECT 1 FROM runtime_executions old_execution
+      JOIN bill2_runs old_run ON old_run.id=old_execution.billing_run_id
+      WHERE old_execution.id=s.active_execution AND old_execution.session_id=s.id
+        AND old_execution.actor_id=p_actor_id AND old_run.actor_id=p_actor_id
+        AND old_run.session_ref=s.id AND old_execution.state='cost_pending'
+        AND old_run.closed AND old_run.cancel_requested)) THEN RAISE EXCEPTION 'FUSION_COMPARE_STALE'; END IF;
   -- The work material (brief) the caller read with the history must still be the current one: material edits do not move
   -- the session revision, and a start on an old brief would charge every model for it. TypeScript always sends the key.
   IF (p_request->'config') ? 'materialRevision'

@@ -71,6 +71,9 @@ export async function fusionCompareCases({db,Client,connectionString,report,crea
   await assert.rejects(begin(request([models[0],models[0]])),/FUSION_COMPARE_MODEL_NOT_ALLOWED/);
   await assert.rejects(begin(request([models[0],randomUUID()])),/FUSION_COMPARE_MODEL_NOT_ALLOWED/);
   await assert.rejects(begin({...request(),historyRevision:'7'}),/FUSION_COMPARE_STALE/);
+  await db.query('UPDATE runtime_sessions SET active_execution=$2 WHERE id=$1',[session,randomUUID()]);
+  await assert.rejects(begin(request()),/FUSION_COMPARE_STALE/,'a turn still running is refused before the record and the paid judgement');
+  await db.query('UPDATE runtime_sessions SET active_execution=NULL WHERE id=$1',[session]);
   await assert.rejects(begin({...request(),config:{models:models.slice(0,2),skill:null,materialRevision:'changed-since-read'}}),/FUSION_COMPARE_STALE/,
     'the work material read with the history must still be current when the compare begins');
   await assert.rejects(begin({...request(),question:'tampered'}),/FUSION_COMPARE_INVALID/,'question hash binds the text');

@@ -21,8 +21,9 @@ export type CompareDeps = { admin: SupabaseClient; actorId: string; env?: Record
    * request, before the paid judgement, so a refused or blocked request cannot be repeated without bound. */
   rateLimit: () => Promise<void> };
 export type CompareChoice = { sessionId: string; historyRevision: number; modelIds: string[]; parts: CompareParts;
-  /** The session's work-material revision read together with the context; recorded so adoption can fence on it. */
-  materialRevision?: string | number | null };
+  /** The session's work-material token read with the context (fusion_compare_context.materialRevision), never defaulted:
+   * begin, admission and adoption compare against it. */
+  materialRevision: string };
 /** First version: library documents referenced with @ are not offered to a compare. Their text would be frozen into the
  * runs without being registered for the library-erasure path, so a deleted document could stay in a stored payload. */
 const assertNoReferences = (parts: CompareParts) => { if (parts.references.length) throw new Error('FUSION_COMPARE_REFERENCES_UNSUPPORTED'); };
@@ -71,7 +72,7 @@ export async function startCompare(deps: CompareDeps, choice: CompareStartInput)
   // The answer limit is recorded only with a new request; a repeat of an admitted one is answered from the stored record.
   const begin = (answerOutputTokens?: number) => {
     const config = { models: choice.modelIds, skill, ...(answerOutputTokens === undefined ? {} : { answerOutputTokens }),
-      materialRevision: choice.materialRevision ?? null };
+      materialRevision: choice.materialRevision };
     return beginRecord(config);
   };
   const beginRecord = (config: Record<string, unknown>) => compareRpc<RecordView>(admin, 'fusion_compare_begin', { p_actor_id: actorId, p_request_id: requestId,
