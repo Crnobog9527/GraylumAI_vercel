@@ -9,7 +9,7 @@ export interface FounderMemberView {
   entry: {
     displayName: string; socialAccounts: { platform: string; handle: string; url: string }[];
     productName: string | null; productUrl: string | null; intro: string | null;
-    reviewState: 'pending' | 'approved' | 'rejected';
+    reviewState: 'pending' | 'approved' | 'rejected'; updatedAt?: string;
   } | null;
   listed: boolean;
   community: { url: string | null; note: string | null } | null;

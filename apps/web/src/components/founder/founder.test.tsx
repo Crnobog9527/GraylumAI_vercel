@@ -16,7 +16,7 @@ const view = (state: FounderState, over: Partial<FounderMemberView> = {}): Found
   founder: { state, deadline: null, endedReason: null }, consent: { currentVersion: 'fw-v1', granted: false },
   entry: null, listed: false, community: null, ...over,
 });
-const entry = { displayName: 'A', socialAccounts: [], productName: null, productUrl: null, intro: null, reviewState: 'pending' as const };
+const entry = { displayName: 'A', socialAccounts: [], productName: null, productUrl: null, intro: null, reviewState: 'pending' as const, updatedAt: 't1' };
 const render = (v: FounderMemberView) => renderToStaticMarkup(createElement(FounderProfileCardView,
   { view: v, pending: false, error: null, onSubmit: vi.fn(), onWithdraw: vi.fn() }));
 
@@ -60,6 +60,16 @@ describe('profile card', () => {
   });
   it('consented card offers withdraw', () => {
     expect(render(view('active', { entry, consent: { currentVersion: 'fw-v1', granted: true } }))).toContain('founder-wall-withdraw');
+  });
+});
+
+describe('form reset', () => {
+  it('remounts the form (unticked) when the consent or card version changes', () => {
+    const keyOf = (v: FounderMemberView) => `${v.entry?.updatedAt ?? 'new'}-${v.consent.granted}`;
+    const on = view('active', { entry, consent: { currentVersion: 'fw-v1', granted: true } });
+    const off = view('active', { entry, consent: { currentVersion: 'fw-v1', granted: false } });
+    expect(keyOf(on)).not.toBe(keyOf(off));
+    expect(keyOf(on)).not.toBe(keyOf({ ...on, entry: { ...entry, updatedAt: 't2' } }));
   });
 });
 

@@ -33,8 +33,8 @@ export function FounderCommunityEntryForm({ pending, saved, onSave }: {
   </Card>;
 }
 
-export function FounderLivestreamPanel({ items, pending, onRecord }: {
-  items: LivestreamItem[] | undefined; pending: boolean;
+export function FounderLivestreamPanel({ items, failed, onRetry, pending, onRecord }: {
+  items: LivestreamItem[] | undefined; failed?: boolean; onRetry?: () => void; pending: boolean;
   onRecord: (value: { heldOn: string; topic: string; replayUrl: string }) => void;
 }) {
   const [heldOn, setHeldOn] = useState('');
@@ -54,9 +54,12 @@ export function FounderLivestreamPanel({ items, pending, onRecord }: {
         <div className="space-y-1"><Label htmlFor="founder-live-replay">回放链接（可选）</Label>
           <Input id="founder-live-replay" value={replayUrl} onChange={event => setReplayUrl(event.target.value)} maxLength={2048} /></div>
       </div>
-      <Button type="button" disabled={pending || !heldOn || !topic.trim()} data-testid="founder-live-save"
+      <Button type="button" disabled={pending || failed || !heldOn || !topic.trim()} data-testid="founder-live-save"
         onClick={() => { onRecord({ heldOn, topic, replayUrl }); setTopic(''); setReplayUrl(''); }}>记录这一场</Button>
-      {!items ? <p>读取中…</p> : items.length === 0 ? <p data-testid="founder-live-empty">还没有直播记录。</p>
+      {failed && !items ? <div role="alert" className="space-y-2" data-testid="founder-live-error">
+        <p>暂时无法读取已有的直播记录，请重试后再录入，避免重复。</p>
+        <Button type="button" variant="outline" size="sm" onClick={onRetry}>重新读取</Button>
+      </div> : !items ? <p>读取中…</p> : items.length === 0 ? <p data-testid="founder-live-empty">还没有直播记录。</p>
         : <ul className="space-y-1 text-sm">{items.map(item => <li key={item.id}>
           {formatDay(item.heldOn) ?? item.heldOn}：{item.topic}{item.replayUrl ? `（回放 ${item.replayUrl}）` : ''}
         </li>)}</ul>}

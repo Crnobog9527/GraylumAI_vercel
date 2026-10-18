@@ -60,7 +60,8 @@ export function FounderAdmin() {
       onSave={value => void run(async () => {
         setSavedEntry(await setEntry.mutateAsync({ url: value.url, note: value.note }));
       }, '社群入口已保存。')} />
-    <FounderLivestreamPanel items={livestreams.data} pending={busy}
+    <FounderLivestreamPanel items={livestreams.data} failed={Boolean(livestreams.error)}
+      onRetry={() => { void livestreams.refetch(); }} pending={busy}
       onRecord={value => void run(() => record.mutateAsync({ requestId: crypto.randomUUID(), ...value }), '直播记录已保存。')} />
   </div>;
 }
