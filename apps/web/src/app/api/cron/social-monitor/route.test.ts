@@ -70,11 +70,9 @@ it('a failed run-record write fails the response instead of reporting success', 
   expect((await call()).status).toBe(500);
 });
 
-it('is scheduled once a day, apart from the other daily jobs', () => {
+it('is scheduled every 10 minutes (Pro); its 300s max duration is shorter than the interval', () => {
   const config = JSON.parse(readFileSync('vercel.json', 'utf8'));
-  expect(config.crons).toContainEqual({ path: '/api/cron/social-monitor', schedule: '0 7 * * *' });
-  const hours = config.crons.map((c: { schedule: string }) => c.schedule);
-  expect(new Set(hours).size).toBe(hours.length);
+  expect(config.crons).toContainEqual({ path: '/api/cron/social-monitor', schedule: '*/10 * * * *' });
 });
 
 it('records unavailable Vault as an error, never as an unconfigured successful skip, and still runs the key-free steps', async () => {
