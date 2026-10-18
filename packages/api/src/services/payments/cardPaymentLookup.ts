@@ -25,7 +25,7 @@ export async function findCardOrderForPayment(db: Pick<SupabaseClient, 'from'>,
   stripe: Pick<Stripe, 'charges' | 'invoicePayments'>, scope: StripeScope,
   input: { chargeId?: string | null; paymentIntentId?: string | null; invoiceId?: string | null },
   // R7 (0298): external refunds also settle a wallet one-time membership; disputes and the rest still see card orders only.
-  options: { includeWalletMembership?: boolean } = {}): Promise<CardPaymentMatch | null> {
+  options: { includeWalletMembership?: boolean; includeWalletPacks?: boolean } = {}): Promise<CardPaymentMatch | null> {
   let paymentIntentId = input.paymentIntentId ?? null;
   if (!paymentIntentId && input.chargeId) {
     const charge = await stripe.charges.retrieve(input.chargeId);
@@ -52,19 +52,20 @@ export async function findCardOrderForPayment(db: Pick<SupabaseClient, 'from'>,
 }
 
 async function loadMatch(db: Pick<SupabaseClient, 'from'>, scope: StripeScope, orderId: string, paymentId: string,
-  paymentIntentId: string, options: { includeWalletMembership?: boolean }): Promise<CardPaymentMatch | null> {
+  paymentIntentId: string, options: { includeWalletMembership?: boolean; includeWalletPacks?: boolean }): Promise<CardPaymentMatch | null> {
   const result = await db.from('payment_orders').select('id,user_id,item_type,payment_method,payment_channel,merchant_namespace,'
     + 'payment_mode,subscription_id,source_order_id,amount_total,currency,fulfilled_at').eq('id', orderId).maybeSingle();
   if (result.error || !result.data) throw new Error('PAY_WAFFO_PERSISTENCE_UNAVAILABLE', { cause: result.error });
   const order = result.data as unknown as CardPaymentOrder & { payment_channel: string; merchant_namespace: string;
     payment_mode: string };
-  const wallet = options.includeWalletMembership === true && order.item_type === 'membership_plan'
+  const wallet = (options.includeWalletMembership === true && order.item_type === 'membership_plan'
+    || options.includeWalletPacks === true && order.item_type === 'credit_package')
     && (order.payment_method === 'wechat_pay' || order.payment_method === 'alipay');
   if (order.payment_method !== 'card' && order.payment_method !== 'card_cn' && !wallet) return null;
   if (order.payment_channel !== 'stripe' || order.merchant_namespace !== scope.merchant || order.payment_mode !== scope.mode) {
     throw new Error(PAYMENT_EVIDENCE_CONFLICT);
   }
-  const kind = wallet ? 'wallet_membership' : order.item_type === 'credit_package' ? 'pack'
+  const kind = order.item_type === 'credit_package' ? 'pack' : wallet ? 'wallet_membership'
     : order.source_order_id ? 'subscription_renewal' : 'subscription_first';
   return { order, paymentId, paymentIntentId, kind };
 }

@@ -53,7 +53,7 @@ export async function quoteMonthlyRefund(
   if (prepared.status !== 'eligible') throw new Error(monthlyRefundPolicyReason(prepared.reason));
   const provisional: MonthlyRefundIntent = { ...prepared.quote, id: approved?.id ?? '00000000-0000-4000-8000-000000000000',
     claimedAt: null, started: started(), recordedRefund: null };
-  const seen = await readMonthlyProvider(stripe, provisional);
+  const seen = await readMonthlyProvider(stripe, provisional, db);
   evidence(seen.subscription.preflight === 'clear' && seen.refunds.rows.length === 0);
   const local = await rpc(db, 'pay_common_monthly_refund_approve', { p_actor: actor, p_order: input.orderId,
     p_terms: prepared.quote.terms, p_version: prepared.quote.versionHash, p_local_version: null });
@@ -116,7 +116,7 @@ export async function executeMonthlyRefund(db: MonthlyDb, stripe: MonthlyStripe,
         await rpc(db, 'pay_common_monthly_refund_claim', { p_actor: actor, p_order: orderId, p_intent: i.id, p_terms: quote.terms });
         continue;
       }
-      const seen = { ...await readMonthlyProvider(stripe, i), local: await observeLocal(db, actor, i) };
+      const seen = { ...await readMonthlyProvider(stripe, i, db), local: await observeLocal(db, actor, i) };
       await rpc(db, 'pay_common_monthly_refund_observe', { p_actor: actor, p_order: orderId, p_intent: i.id, p_evidence: seen });
       const decision = planMonthlyRefundStep(pureIntent(i), seen, new Date().toISOString());
       if (decision.kind === 'record_refund') {

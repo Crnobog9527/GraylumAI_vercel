@@ -3,9 +3,11 @@ import type Stripe from 'stripe';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { resolveStripeScope } from './stripeCheckoutPersistence';
+import { disputeAllowsRefund } from './disputeRefundEligibility';
 
 type Db = Pick<SupabaseClient, 'from' | 'rpc'>;
-export type RefundStripe = Pick<Stripe, 'accounts' | 'balance' | 'paymentIntents' | 'charges' | 'refunds'>;
+export type RefundStripe = Pick<Stripe, 'accounts' | 'balance' | 'paymentIntents' | 'charges' | 'refunds'>
+  & Partial<Pick<Stripe, 'disputes'>>;
 const approvalSchema = z.object({
   id: z.string().uuid(), orderId: z.string().uuid(), ticketId: z.string().uuid(),
   status: z.enum(['approved', 'rejected', 'dispatching', 'pending', 'succeeded', 'failed', 'review_required']),
@@ -73,7 +75,8 @@ export async function readPackageRefundCash(db: Db, stripe: RefundStripe, orderI
   }
   // Any existing refund (including pending or failed) requires reconciliation, not a new intent.
   const refunds = await stripe.refunds.list({ charge: charge.id, limit: 1 });
-  if (refunds.has_more || refunds.data.length > 0 || charge.amount_refunded !== 0 || charge.disputed) {
+  if (refunds.has_more || refunds.data.length > 0 || charge.amount_refunded !== 0
+    || !await disputeAllowsRefund(db, stripe, scope, order.id, charge)) {
     throw new Error('PAY_REFUND_PRIOR_REFUND_OR_DISPUTE');
   }
   return { orderId: order.id, merchant: scope.merchant, mode: scope.mode, currency: order.currency,

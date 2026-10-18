@@ -1,3 +1,4 @@
+import { paymentDisputesRouter } from './routers/paymentDisputes';
 import { researchRouter } from './routers/research';
 import { libraryRouter } from './routers/library';
 import { reportModelRouter } from './routers/reportModel';
@@ -65,6 +66,7 @@ export const appRouter = router({
   modelIdentity: modelIdentityRouter,
   platformSecrets: platformSecretsRouter,
   paymentNotices: paymentNoticesRouter,
+  paymentDisputes: paymentDisputesRouter,
   researchTools: researchToolsRouter,
   research: researchRouter,
   checkin: checkinRouter,
