@@ -31,22 +31,29 @@ import picture from './picture-l.module.css';
  */
 const NOW = new Date('2026-10-15T08:00:00Z');
 const metric = (value: number | null, ref: string) => ({ value, refs: value === null ? [] : [ref] });
-const row = (account: string, followers: number, median: number, rate: number, perWeek: number, qualified = true): BenchmarkRow => ({
-  platform: 'tiktok', account, category: qualified ? 'imitable' : 'head_reference', qualified,
-  metrics: {
-    followers: metric(followers, 'ev1#1'), medianViews: metric(median, 'ev2#1'), engagementRate: metric(rate, 'ev2#1'),
-    postsPerWeek: metric(perWeek, 'ev2#1'), lastPublishedAt: { value: '2026-10-14T02:00:00Z', refs: ['ev2#1'] },
-  },
-});
+/**
+ * One account's row; its figures all come from that account's own source record (ev1 for A … ev7 for G), so the list
+ * under the table reads "[n] 账号名 的数据来源记录（编号 evX）" once per account, as in the product (#1150).
+ */
+const row = (n: number, followers: number, median: number, rate: number, perWeek: number, qualified = true): BenchmarkRow => {
+  const ref = `ev${n}#1`;
+  return {
+    platform: 'tiktok', account: `对标账号 ${'ABCDEFG'[n - 1]}`, category: qualified ? 'imitable' : 'head_reference', qualified,
+    metrics: {
+      followers: metric(followers, ref), medianViews: metric(median, ref), engagementRate: metric(rate, ref),
+      postsPerWeek: metric(perWeek, ref), lastPublishedAt: { value: '2026-10-14T02:00:00Z', refs: [ref] },
+    },
+  };
+};
 /**
  * The report's chapter 5 (office-worker.json): accounts by label only, figures as published there. Round twelve (D4,
  * Owner 2026-10-18: "表格信息数据，全部都要填满"): every cell filled, F's and G's views and rate and everyone's posts a
  * week added (示例数据), only what public data gives.
  */
 export const L_BENCHMARK_ROWS: BenchmarkRow[] = [
-  row('对标账号 A', 98_000, 12_000, 0.12, 3), row('对标账号 B', 112_000, 7_000, 0.11, 2), row('对标账号 C', 17_000, 37_000, 0.11, 4),
-  row('对标账号 D', 93_000, 22_000, 0.06, 1), row('对标账号 E', 36_000, 13_000, 0.08, 2),
-  row('对标账号 F', 97_000, 24_000, 0.07, 5, false), row('对标账号 G', 28_000, 11_000, 0.09, 3, false),
+  row(1, 98_000, 12_000, 0.12, 3), row(2, 112_000, 7_000, 0.11, 2), row(3, 17_000, 37_000, 0.11, 4),
+  row(4, 93_000, 22_000, 0.06, 1), row(5, 36_000, 13_000, 0.08, 2),
+  row(6, 97_000, 24_000, 0.07, 5, false), row(7, 28_000, 11_000, 0.09, 3, false),
 ];
 /** Under the table: the Owner's sentence on where the data comes from, then that it is an example. */
 const BENCHMARK_NOTE = `${DATA_SOURCE_NOTE}（示例数据）`;
