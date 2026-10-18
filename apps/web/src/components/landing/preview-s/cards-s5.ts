@@ -79,5 +79,5 @@ export function batchPose(batch: BatchS5, t: number, depth = 1): { lift: number;
     return { lift: (1 - eased) * 0.8, fade: Math.min(1, share * 2.5), turn: (1 - eased) * 4 };
   }
   const share = (t - settle) / (batch.to - settle);
-  return { lift: -(share ** 2) * 1.1, fade: share < 0.6 ? 1 : Math.max(0, 1 - (share - 0.6) / 0.4), turn: -(share ** 2) * 3 };
+  return { lift: -(share ** 2) * 1.1, fade: share < 0.3 ? 1 : Math.max(0, 1 - (share - 0.3) / 0.4), turn: -(share ** 2) * 3 };
 }
