@@ -45,12 +45,13 @@ function database(calls: Array<{ id: string; sequence: number; providerId: strin
 const execution = (live: boolean) => ({ sessionId, runId, epoch: 4, live,
   billing: { callPolicy: [{ modelId: actor, model: 'vendor/model', protocol: 'openrouter-chat-v1' }, policy] } } as never);
 function build(live: boolean, db: ReturnType<typeof database>, canSend = () => true,
-  callGate = vi.fn(async () => {})) {
+  callGate = vi.fn(async () => {}), onSubcallSettled = vi.fn()) {
   const events: ResearchTurnEvent[] = [];
   const onPause = vi.fn();
   const built = researchExecution({ research, tools: ['ask_question', 'web_search'], execution: execution(live), executionId,
-    actorId: actor, database: db, emit: event => events.push(event), onClosed: () => {}, onPause, canSend, callGate, now: () => now })!;
-  return { built, events, onPause, callGate };
+    actorId: actor, database: db, emit: event => events.push(event), onClosed: () => {}, onPause, canSend, callGate,
+    onSubcallSettled, now: () => now })!;
+  return { built, events, onPause, callGate, onSubcallSettled };
 }
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); resetPlatformSecretCacheForTests(); });
 
@@ -97,6 +98,13 @@ describe('researchExecution (RT-3b PR-3)', () => {
     expect(callGate).toHaveBeenCalledExactlyOnceWith();
     expect(db.rpc.mock.calls.some(([name]) => name === 'bill2_claim')).toBe(false);
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('clears the per-claim marker after a tool completes without pausing', async () => {
+    vi.stubEnv('PARALLEL_API_KEY', '');
+    const { built, onSubcallSettled } = build(true, database([]));
+    await built.tools[0]!.execute({ query: 'coffee shops', mode: 'fast' }, 'call-1');
+    expect(onSubcallSettled).toHaveBeenCalledExactlyOnceWith();
   });
 
   it('a replay never claims or sends a subcall', async () => {

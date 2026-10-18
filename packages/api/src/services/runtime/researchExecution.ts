@@ -46,6 +46,8 @@ export function researchExecution(input: {
   canSend: () => boolean;
   /** Reserves one runtime call slot before each supplier BILL2 claim. */
   callGate?: () => Promise<void>;
+  /** Clears the per-claim gate marker after a tool finishes without pausing. */
+  onSubcallSettled?: () => void;
   now?: () => Date;
 }): ResearchExecution | null {
   const { research, execution } = input;
@@ -95,6 +97,7 @@ export function researchExecution(input: {
         throw error;
       }
       if (closed) throw new Error('RUNTIME_ACCOUNT_CLOSED');
+      input.onSubcallSettled?.();
       return result;
     } })),
     definitionBytes: researchToolBytes(names, fastSearchOnly(ctx.config)), reserve: research.reserve,

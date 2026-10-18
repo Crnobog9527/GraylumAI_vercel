@@ -113,6 +113,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   const research=researchExecution({research:context.research,tools:context.tools,execution,executionId,actorId:await options.actor(),
    database:options.database,emit:event=>progress(event),onClosed:()=>{accountClosed=true;},
    onPause:(point,state)=>{if(isPayg)waitPoint={epoch:execution.epoch!,...point,state,gatePassed:state==='waiting_credits'};},
+   onSubcallSettled:()=>{gatePassed=false;},
    canSend:()=>{try{budget.assertCanStart(5000);return true;}catch{return false;}},
    callGate:async()=>{await checkCallGate(!gateChecked,false);gatePassed=true;gateChecked=false;}});
   const checkAgentReply=terminalReplyGuard(agentTurn,context.tools.includes(ASK_QUESTION_TOOL),()=>{terminalReplyFailure=true;},
