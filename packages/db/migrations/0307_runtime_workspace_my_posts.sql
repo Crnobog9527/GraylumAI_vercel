@@ -63,6 +63,12 @@ BEGIN
   IF p_query IN ('my_posts','my_posts:14','my_posts:30','my_posts:90') THEN
    SELECT x INTO chosen FROM jsonb_array_elements(post_entries) x WHERE x->>'id'=CASE WHEN p_query='my_posts' THEN 'my_posts:14' ELSE p_query END;
    IF chosen IS NULL THEN RETURN jsonb_build_object('kind','unavailable','dependencies','[]'::jsonb);END IF;
+   -- The current claim is already journaled: a third attempt must stop before the host calls PR-3a's data reader.
+   IF (SELECT count(*) FROM runtime_sessions active_s JOIN runtime_tool_calls t ON t.execution_id=active_s.active_execution
+    WHERE active_s.id=p_session_id AND active_s.actor_id=p_actor_id AND t.name='read_source'
+     AND t.arguments->>'query' IN ('my_posts','my_posts:14','my_posts:30','my_posts:90'))>2 THEN
+    RETURN jsonb_build_object('kind','unavailable','reason','read_limit','dependencies','[]'::jsonb);
+   END IF;
    RETURN jsonb_build_object('kind','workspace_posts_request','windowDays',(chosen->>'windowDays')::int,'entitled',days>0);
   END IF;
  END;
@@ -93,7 +99,8 @@ BEGIN
   AND t.call_id<>NEW.call_id AND t.result->>'kind'='my_posts';
  IF payload->>'ownPosts' IS DISTINCT FROM 'true' OR reads>=2 OR octet_length(NEW.result::text)>12000 THEN
   NEW.result:=jsonb_build_object('kind','unavailable','reason',CASE WHEN reads>=2 THEN 'read_limit' ELSE 'capacity_exhausted' END,
-   'dependencies','[]'::jsonb);
+   'dependencies','[]'::jsonb,'note',CASE WHEN reads>=2 THEN '本条回答的作品读取次数已用完'
+    ELSE '资料太多放不下，先按已读到的回答' END);
  END IF;
  RETURN NEW;
 END $$;
@@ -259,5 +266,53 @@ $w$;
   EXECUTE replace(d,anchor,work||anchor);
  END IF;
 END $patch$;
+
+-- Extend A2b's saved work rows, preserving all existing source summaries and visibility fences.
+DO $work$ DECLARE d text;anchor text;replacement text;
+BEGIN
+ d:=pg_get_functiondef('public.runtime_work_items(uuid,uuid)'::regprocedure);
+ IF position('-- B2 own-post work projection' IN d)=0 THEN
+  anchor:=$a$      WHEN t.result->>'kind'='library_segment' THEN 4$a$;
+  replacement:=anchor||$p$
+      -- B2 own-post work projection
+      WHEN t.result->>'kind'='my_posts' THEN 5
+      WHEN t.result->>'kind'='unavailable' AND t.result->>'reason'='capacity_exhausted' AND e.payload->>'ownPosts'='true'
+       AND t.arguments->>'query' IN ('my_posts','my_posts:14','my_posts:30','my_posts:90') THEN 5
+      WHEN t.result IS NULL AND e.state IN ('prepared','running','interrupted','waiting_credits','waiting_resume') AND e.payload->>'ownPosts'='true'
+       AND t.arguments->>'query' IN ('my_posts','my_posts:14','my_posts:30','my_posts:90') THEN 5$p$;
+  IF array_length(string_to_array(d,anchor),1)<>2 THEN RAISE EXCEPTION 'B2_WORK_RANK_MISMATCH';END IF;
+  d:=replace(d,anchor,replacement);
+  anchor:=$a$      WHEN t.result->>'kind'='library_search' THEN ($a$;
+  replacement:=$p$      WHEN t.result->>'kind'='unavailable' AND t.result->>'reason'='capacity_exhausted' THEN
+       jsonb_build_object('kind','my_posts','state','missing','label','资料太多放不下，先按已读到的回答')
+      WHEN t.result->>'kind'='my_posts' THEN jsonb_build_object('kind','my_posts','state',CASE
+       WHEN t.result->>'status'='available' AND jsonb_typeof(t.result->'posts')='array'
+        AND t.result->>'window_days' IN ('14','30','90') THEN 'done'
+       WHEN t.result->>'status' IN ('not_connected','no_entitlement','no_recent_posts') THEN 'missing' ELSE 'pending' END,
+       'label',CASE t.result->>'status'
+        WHEN 'not_connected' THEN '未取到：还没有连接账号'
+        WHEN 'no_entitlement' THEN '读你的作品数据是 Pro/Gold 会员功能，这次先按定位和资料回答'
+        WHEN 'no_recent_posts' THEN CASE WHEN t.result->>'window_days' IN ('14','30','90')
+         THEN '最近 '||(t.result->>'window_days')||' 天没有新作品' ELSE '作品数据待核实' END
+        WHEN 'stale' THEN CASE WHEN t.result->>'as_of' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+         THEN '数据截至 '||(t.result->>'as_of')||'，最近一次快照已超过 3 天。' ELSE '还没有取到作品快照，指标未取到。' END
+        WHEN 'available' THEN CASE WHEN jsonb_typeof(t.result->'posts')='array' AND t.result->>'window_days' IN ('14','30','90')
+         THEN '读了你最近 '||(t.result->>'window_days')||' 天的 '||jsonb_array_length(t.result->'posts')||' 条作品'
+         ELSE '作品数据待核实' END ELSE '作品数据待核实' END)
+$p$||anchor;
+  IF array_length(string_to_array(d,anchor),1)<>2 THEN RAISE EXCEPTION 'B2_WORK_SUMMARY_MISMATCH';END IF;
+  d:=replace(d,anchor,replacement);
+  anchor:=$a$      WHEN t.result IS NULL AND t.arguments->>'query' LIKE 'search:%' THEN$a$;
+  IF array_length(string_to_array(d,anchor),1)<>2 THEN RAISE EXCEPTION 'B2_WORK_PENDING_MISMATCH';END IF;
+  d:=replace(d,anchor,$p$      WHEN t.result IS NULL AND t.arguments->>'query' IN ('my_posts','my_posts:14','my_posts:30','my_posts:90') THEN
+       jsonb_build_object('kind','my_posts','state',CASE WHEN e.state IN ('prepared','running') THEN 'running' ELSE 'pending' END,
+        'label',CASE WHEN e.state IN ('prepared','running') THEN '' ELSE '作品读取待核实' END)
+$p$||anchor);
+  anchor:=$a$    AND e.unavailable_reason IS NULL$a$;
+  IF array_length(string_to_array(d,anchor),1)<>2 THEN RAISE EXCEPTION 'B2_WORK_VISIBILITY_MISMATCH';END IF;
+  EXECUTE replace(d,anchor,anchor||$p$
+    AND (t.result IS NULL OR t.result->>'kind' IS DISTINCT FROM 'my_posts' OR runtime_workspace_posts_visible(p_actor_id,t.result))$p$);
+ END IF;
+END $work$;
 
 COMMIT;

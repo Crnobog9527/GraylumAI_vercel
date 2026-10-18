@@ -40,10 +40,34 @@ export async function descendantCases({c,report}){
  const business=await one('SELECT business_id v FROM opc_accounts WHERE project_id=$1',[account]);
  const connection=await one(`INSERT INTO social_connections(actor_id,business_id,account_project_id,role,source,platform,status,consent_read)
   VALUES($1,$2,$3,'own','manual','youtube','connected',true) RETURNING id v`,[f.actor,business,account]);
- await c.query(`INSERT INTO runtime_tool_calls(execution_id,call_id,name,arguments,result)
-  VALUES($1,'original-post','read_source','{}',$2)`,[origin.executionId,{kind:'my_posts',status:'available',window_days:90,
+ await c.query(`INSERT INTO runtime_tool_calls(execution_id,call_id,name,arguments)
+  VALUES($1,'original-post','read_source','{"query":"my_posts:90"}')`,[origin.executionId]);
+ assert.equal((await rpc(c,'runtime_work_items',f.actor,started.sessionId))[origin.executionId][0].state,'running');
+ const descriptor=()=>rpc(c,'runtime_workspace_source',f.actor,started.sessionId,'my_posts:90');
+ assert.equal((await descriptor()).kind,'workspace_posts_request');
+ await c.query('BEGIN');
+ for(const n of [2,3]){
+  await c.query(`INSERT INTO runtime_tool_calls(execution_id,call_id,name,arguments)
+   VALUES($1,$2,'read_source','{"query":"my_posts:90"}')`,[origin.executionId,'read-limit-'+n]);
+  assert.equal((await descriptor()).kind,n===2?'workspace_posts_request':'unavailable');
+ }
+ assert.equal((await descriptor()).reason,'read_limit');
+ await c.query('ROLLBACK');
+ report.checks.push('the third own-post attempt returns read_limit before producing a data-reader descriptor, including failed reads');
+
+ await c.query('BEGIN');
+ await c.query(`UPDATE runtime_tool_calls SET result='{"kind":"unavailable","reason":"capacity_exhausted"}' WHERE execution_id=$1`,[origin.executionId]);
+ assert.equal((await rpc(c,'runtime_work_items',f.actor,started.sessionId))[origin.executionId][0].label,'资料太多放不下，先按已读到的回答');
+ await c.query('ROLLBACK');
+
+ await c.query('BEGIN');await c.query("UPDATE runtime_executions SET state='interrupted' WHERE id=$1",[origin.executionId]);
+ assert.equal((await rpc(c,'runtime_work_items',f.actor,started.sessionId))[origin.executionId][0].state,'pending');
+ await c.query('ROLLBACK');
+ await c.query(`UPDATE runtime_tool_calls SET result=$2 WHERE execution_id=$1 AND call_id='original-post'`,
+  [origin.executionId,{kind:'my_posts',status:'available',window_days:90,
    source_connections:[connection],posts:[{views:12345}],dependencies:[]}]);
  await record(origin,'ORIGINAL_PRIVATE');
+ assert.equal((await rpc(c,'runtime_work_items',f.actor,started.sessionId))[origin.executionId][0].label,'读了你最近 90 天的 1 条作品');
  const child=await admit(false);assert.equal(child.history.length,1);
  assert.equal(await one('SELECT count(*)::int v FROM runtime_history_dependencies WHERE execution_id=$1 AND dependency_id=$2',
   [child.executionId,origin.executionId]),1);
@@ -61,12 +85,14 @@ export async function descendantCases({c,report}){
  await c.query('BEGIN');await c.query("UPDATE profiles SET membership_level='pro' WHERE id=$1",[f.actor]);
  assert.equal(await one('SELECT runtime_workspace_posts_history_visible($1) v',[child.executionId]),false);
  assert.equal(await one('SELECT runtime_workspace_posts_history_erased($1) v',[child.executionId]),false);
+ assert.equal((await rpc(c,'runtime_work_items',f.actor,started.sessionId))[origin.executionId],undefined);
  await rpc(c,'runtime_library_propagate',f.actor,20);
  assert.equal(await one('SELECT result IS NOT NULL v FROM runtime_tool_calls WHERE execution_id=$1',[origin.executionId]),true);
  assert.equal(await one('SELECT count(*)::int v FROM runtime_session_history WHERE execution_id=$1 AND erased_at IS NULL',[child.executionId]),1);
  assert.equal(await one('SELECT content_deleted_at IS NULL v FROM bill2_runs WHERE id=$1',[child.runId]),true);
  await c.query("UPDATE profiles SET membership_level='gold' WHERE id=$1",[f.actor]);
  assert.equal(await one('SELECT runtime_workspace_posts_history_visible($1) v',[child.executionId]),true);
+ assert.equal((await rpc(c,'runtime_work_items',f.actor,started.sessionId))[origin.executionId][0].kind,'my_posts');
  await c.query('ROLLBACK');
  report.checks.push('GREEN: downgrade denies replay without erasing context; renewal restores the same history');
 
@@ -97,6 +123,7 @@ export async function descendantCases({c,report}){
 
  await c.query('SET ROLE service_role');
  try{await rpc(c,'publish_monitor_disconnect',f.actor,connection);}finally{await c.query('RESET ROLE');}
+ assert.equal((await rpc(c,'runtime_work_items',f.actor,started.sessionId))[origin.executionId],undefined);
  const receipts=()=>one('SELECT jsonb_agg(to_jsonb(r)) v FROM bill2_receipts r JOIN bill2_calls bc ON bc.id=r.call_id WHERE bc.run_id=$1',[child.runId]);
  const old=read('packages/db/migrations/0302_chat_library_search.sql'),at=old.indexOf('CREATE OR REPLACE FUNCTION public.runtime_library_propagate(');
  const d=old.slice(at,old.indexOf('END $$;',at)+7).replace(" RETURN jsonb_build_object('processed',done,'waiting',waiting);",

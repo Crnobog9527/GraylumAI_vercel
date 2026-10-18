@@ -73,3 +73,30 @@ it('leaves a successful raw tool result untouched when a display summary cannot 
  expect(emit.mock.calls.map(([event])=>event.state)).toEqual(['running','pending']);
  expect(JSON.stringify(emit.mock.calls)).not.toContain(original);
 });
+
+it('summarizes own-post states without publishing metrics, titles, raw notes or supplier details',()=>{
+ const source={kind:'my_posts',status:'available',window_days:14,posts:[{title:'PRIVATE',views:999,source:'SUPPLIER'}],note:'RAW $12'};
+ expect(sourceWorkSummary(source)).toEqual({kind:'my_posts',state:'done',label:'读了你最近 14 天的 1 条作品'});
+ expect(JSON.stringify(sourceWorkSummary(source))).not.toMatch(/PRIVATE|999|SUPPLIER|RAW|\$/);
+ expect(sourceWorkSummary({...source,status:'not_connected'})).toMatchObject({state:'missing',label:'未取到：还没有连接账号'});
+ expect(sourceWorkSummary({...source,status:'no_entitlement'})).toMatchObject({state:'missing',label:'读你的作品数据是 Pro/Gold 会员功能，这次先按定位和资料回答'});
+ expect(sourceWorkSummary({...source,status:'no_recent_posts'})).toMatchObject({state:'missing',label:'最近 14 天没有新作品'});
+ expect(sourceWorkSummary({...source,status:'stale',as_of:'2026-10-10'})).toMatchObject({state:'pending',label:'数据截至 2026-10-10，最近一次快照已超过 3 天。'});
+ expect(sourceWorkSummary({...source,status:'stale',as_of:'PRIVATE'})).toMatchObject({state:'pending',label:'还没有取到作品快照，指标未取到。'});
+ expect(sourceWorkSummary({...source,window_days:null})).toMatchObject({state:'pending',label:'作品数据待核实'});
+});
+
+it('streams own-post progress only for a frozen capability and preserves the exact committed result',async()=>{
+ const emit=vi.fn(),result=JSON.stringify({kind:'my_posts',status:'available',window_days:30,posts:[]});
+ const raw={name:'read_source',description:'read',execute:async()=>result};
+ const tool=withSourceWorkProgress(raw,emit,true);
+ await expect(tool.execute({query:'my_posts:30'},'own')).resolves.toBe(result);
+ expect(emit.mock.calls.map(([event])=>[event.kind,event.state])).toEqual([['my_posts','running'],['my_posts','done']]);
+ const disabled=vi.fn();
+ await withSourceWorkProgress({...raw,execute:async()=>JSON.stringify({kind:'unavailable'})},disabled).execute({query:'my_posts:30'},'off');
+ expect(disabled).not.toHaveBeenCalled();
+ const capacity=vi.fn();
+ await withSourceWorkProgress({...raw,execute:async()=>JSON.stringify({kind:'unavailable',reason:'capacity_exhausted'})},capacity,true)
+  .execute({query:'my_posts:30'},'capacity');
+ expect(capacity.mock.calls.at(-1)?.[0]).toMatchObject({state:'missing',label:'资料太多放不下，先按已读到的回答'});
+});
