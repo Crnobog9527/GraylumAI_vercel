@@ -32,7 +32,11 @@ export function sourceRuntimeTool(options: {
       const query=libraryQuery(arguments_,context);
       if(query!==null)return readLibrary({ownerRpc,executionId:args.p_execution_id,query,saved,toolArgs});
       if(context.workspaceContext){
-       if(saved.result!==null)return JSON.stringify(saved.result);
+       if(saved.result!==null){
+        if((saved.result as {kind?:string}).kind==='my_posts'&&!await ownerRpc<boolean>(
+         'runtime_workspace_posts_visible',{p_result:saved.result}))return JSON.stringify({kind:'unavailable',reason:'source_deleted'});
+        return JSON.stringify(saved.result);
+       }
        const query=typeof arguments_.query==='string'?arguments_.query:'';
        // No strategy guide frozen = no room was reserved for a strategy result: it is not read, nothing is appended.
        const source=query.startsWith('my_posts')&&!context.ownPosts

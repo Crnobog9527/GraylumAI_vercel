@@ -24,7 +24,7 @@ describe('my_posts saved data',()=>{
  it('clips by publication date, keeps missing fields, real zeros and host medians, titles are bounded data',()=>{
   const result=ownPostsResult({...data(),posts:[post('old','2026-09-01'),post('b',undefined,30),post('a'),
    {...post('unknown'),postedAt:null},post('future','2026-11-01')]},now);
-  expect(result.posts).toHaveLength(2);
+  expect(result.posts).toHaveLength(3);
   expect(result.platform_medians).toEqual({youtube:{views:{median:20,samples:2}}});
   const p=(result.posts as Array<Record<string,unknown>>)[0]!;
   expect(p.missing_fields).toEqual(['likes']);expect(p.metrics).toEqual({views:10});

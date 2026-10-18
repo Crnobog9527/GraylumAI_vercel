@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import {admitOwnPosts,readWorkspaceCapability,OWN_POSTS_INSTRUCTIONS,OWN_POSTS_RESERVE} from './workspacePosts';
+import {admitOwnPosts,readWorkspaceCapability,ownPostsBudget} from './workspacePosts';
 import {freezeSkillFileBinding,skillFileToolBytes,skillFileContinuationBytes,type SkillFileBinding} from './skillFile';
 import { GENERIC_ORGANIZER_TEMPLATE, loadOrganizerTemplate } from '../skills/organizerTemplate';
 import {activateFreeChatSkill} from '../skills/stepGuide';
@@ -335,9 +335,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    libraryBytes=libraryReserveBytes(libraryReferences,sourceTools,workspaceContext,libraryRetrieval);
    const fitsWith=(extra:number)=>fitsCapacity(()=>requireCapacity(instructions+positioningRule,Boolean(skillFile),
     runtimeScopeInput(input.input,policy.reportGeneration?undefined:session.scopeMaterial,hostTurnContext),historyRead,extra));
-   if(ownPosts&&!fitsWith(OWN_POSTS_RESERVE+Buffer.byteLength(OWN_POSTS_INSTRUCTIONS)))ownPosts=false;
-   if(ownPosts){maxCalls=Math.max(maxCalls,LIBRARY_RETRIEVAL_CALLS);
-    libraryBytes+=OWN_POSTS_RESERVE+Buffer.byteLength(OWN_POSTS_INSTRUCTIONS);}
+   const postsBudget=await ownPostsBudget(admin,await actor(),ownPosts,maxCalls,fitsWith);
+   ownPosts=postsBudget.on;maxCalls=postsBudget.calls;libraryBytes+=postsBudget.bytes;
    const strategyGuide=workspaceContext&&fitsWith(workspaceStrategyReserve(maxCalls));
    // The executor sizes a selected Skill with these exact tool descriptions plus the same cache/marker overhead.
    if(candidates.length)candidates=await fittingCandidates(candidates,candidate=>activateCandidateWithSource(user,admin,candidate,brandIdentity),
