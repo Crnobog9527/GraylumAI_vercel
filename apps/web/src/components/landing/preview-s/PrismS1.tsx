@@ -2,10 +2,10 @@
 import styles from './s1.module.css';
 
 /** The six colours a prism splits white light into, red at the top. */
-const SPECTRUM = ['#ff6b6b', '#ffa94d', '#ffd43b', '#51cf66', '#4dabf7', '#845ef7'];
+const SPECTRUM = ['#ff8a7a', '#ffc078', '#ffe08a', '#8ce99a', '#74c0fc', '#b197fc'];
 /** Where the light leaves the prism (narrow) and where the fan meets the right edge (wide), in the scene's units. */
 const EXIT = { x: 342, top: 474, bottom: 492 };
-const EDGE = { x: 1500, top: 220, bottom: 910 };
+const EDGE = { x: 1500, top: 300, bottom: 800 };
 
 function band(index: number) {
   const at = (from: number, to: number, part: number) => from + ((to - from) * part) / SPECTRUM.length;

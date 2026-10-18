@@ -24,7 +24,7 @@
 .still[data-part='3'] { opacity: var(--w3, 0); }
 /* Each still's own crop, set from the picture (Owner's note): the cook stands right of centre, so the kitchen is
    enlarged and pinned left, leaving the dark left and middle to the title; the shop front is on the left. */
-.still[data-part='0'] span { background-size: 132% auto; background-position: 8% 42%; transform-origin: 70% 45%; }
+.still[data-part='0'] span { background-size: 132% auto; background-position: 8% 42%; transform-origin: 70% 45%; filter: brightness(1.1) saturate(1.08); }
 .still[data-part='1'] span { background-position: 30% 60%; }
 .still[data-part='2'] span { background-position: 70% 50%; }
 .still[data-part='3'] span { background-position: 20% 60%; }
@@ -43,18 +43,25 @@
 .veil {
   inset: 0;
   background:
-    radial-gradient(48% 46% at 42% 52%, rgba(8, 13, 18, calc(.52 * var(--w0, 1))), transparent 72%),
-    linear-gradient(180deg, rgba(8, 13, 18, .45), rgba(8, 13, 18, .3) 40%, rgba(8, 13, 18, .62)),
-    rgba(8, 13, 18, calc(.42 * (1 - var(--w0, 1))));
+    radial-gradient(48% 46% at 42% 52%, rgba(8, 18, 24, calc(.5 * var(--w0, 1))), transparent 72%),
+    linear-gradient(180deg, rgba(10, 30, 36, .42), rgba(10, 30, 36, .2) 40%, rgba(10, 30, 36, .5)),
+    rgba(12, 38, 44, calc(.3 * (1 - var(--w0, 1))));
 }
 .grain {
-  inset: -50%; opacity: .22; mix-blend-mode: overlay;
+  inset: 0; opacity: .07;
   background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='g'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23g)'/></svg>");
 }
-.mark { right: 18px; bottom: 14px; padding: 4px 9px; border-radius: 6px; background: rgba(8, 13, 18, .55); color: #e9dccb; font-size: 12px; }
+.mark { right: 18px; top: 112px; padding: 4px 9px; border-radius: 6px; background: rgba(8, 13, 18, .55); color: #e9dccb; font-size: 12px; }
 
 /* ---- Words over the stills turn light; product windows keep their own colours ---- */
-.shell > header { background: rgba(250, 246, 240, .9); }
+.shell > header {
+  --j-ink: #fbf4ea; --j-body: #eadfd1; --j-muted: #d3c6b6; --j-line: rgba(251, 244, 234, .2);
+  background: linear-gradient(180deg, rgba(8, 16, 22, .72), rgba(8, 16, 22, .45));
+  -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+}
+.shell > header a[href*='action=signup'] { background: var(--s4-warm); color: #1a1208; }
+.shell > header a img { box-shadow: 0 0 0 1px rgba(251, 244, 234, .35); }
+.shell > header a[href^='/login']:not([href*='action=signup']) { background: transparent; border-color: rgba(251, 244, 234, .4); color: var(--j-ink); }
 .shell [data-region='首屏'],
 .shell [data-region='三步'] > div:first-child,
 .shell [aria-labelledby='step-one-title'] {

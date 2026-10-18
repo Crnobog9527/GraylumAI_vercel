@@ -18,7 +18,7 @@ export function SkyS2() {
     <>
       <div className={styles.sky}><i className={styles.day} /><i className={styles.dusk} /></div>
       <div className={styles.scene}>
-        <i className={styles.sun} />
+        <div className={styles.rise}><i className={styles.sun} /></div>
         <i className={styles.haze} />
         <i className={styles.dark} />
       </div>
