@@ -139,7 +139,7 @@ describe('Stripe dispute effects resume from committed financial state', () => {
     const makeQuery = () => {
       const query: Record<string, unknown> = {};
       for (const name of ['eq', 'neq', 'not', 'is', 'in', 'or', 'order', 'gt']) query[name] = (field: string) => {
-        if (name === 'in' && field === 'renewal_stop_state') kind = 'stops';
+        if (name === 'or' && field.includes('stop_attempts.lt.3')) kind = 'stops';
         if (name === 'is' && field === 'order_id') kind = 'unmatched';
         if (name === 'not' && field === 'renewal_stop_state') kind = 'matched-alerts';
         return query;

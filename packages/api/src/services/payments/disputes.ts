@@ -142,7 +142,8 @@ export async function reconcilePaymentDisputes(db: SupabaseClient, stripe: Strip
       if (Date.now() > deadline) return false;
       let query = db.from('payment_disputes').select('*').eq('merchant_namespace', scope.merchant).eq('mode', scope.mode)
         .neq('freeze_state', 'external');
-      if (kind === 'stops') query = query.not('order_id', 'is', null).in('renewal_stop_state', ['pending', 'manual']);
+      if (kind === 'stops') query = query.not('order_id', 'is', null)
+        .or('renewal_stop_state.eq.pending,and(renewal_stop_state.eq.manual,stop_attempts.lt.3)');
       else if (kind === 'unmatched') query = query.is('order_id', null);
       else query = query.not('order_id', 'is', null).not('renewal_stop_state', 'in', '(pending,manual)')
         .or('alerted_at.is.null,and(freeze_state.eq.frozen,freeze_alerted_at.is.null),and(closed_at.not.is.null,closed_alerted_at.is.null)');
