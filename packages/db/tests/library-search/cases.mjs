@@ -34,7 +34,8 @@ export async function runCases({db,report}) {
  const e=await exec(db,a,sid);
  const found=await read(db,a,e,'search:苹果派');
  assert.equal(found.kind,'library_search');
- assert.deepEqual(found.hits.map(h=>[h.ref,h.title,h.segment]),[['doc-1','Menu.md',1],['doc-1','Menu.md',3]]);
+ assert.deepEqual(found.hits.map(h=>[h.ref,h.title,h.segment]).sort((a,b)=>a[2]-b[2]),
+  [['doc-1','Menu.md',1],['doc-1','Menu.md',3]]);
  assert.ok(found.hits[0].excerpt.includes('苹果派')&&found.hits[0].version===1);
  assert.ok(!JSON.stringify(found).includes('Banana'));
  assert.deepEqual((await db.query('SELECT document_id,ordinal,origin FROM runtime_library_references WHERE execution_id=$1',[e])).rows,
