@@ -60,6 +60,9 @@ const LOADERS: Record<string, () => Promise<{ default: { markdown: string } }>> 
   handmade: () => import('./handmade.json'),
 };
 
+/** The people with a whole report to load (the same 14 as SAMPLE_CHAPTERS). */
+export const SAMPLE_REPORT_SLUGS = Object.keys(LOADERS);
+
 /** The whole report as Markdown (sanitized: no @handles, no links, benchmarks as 对标账号 A/B/C). */
 export async function loadSampleReport(slug: string): Promise<string> {
   const load = LOADERS[slug];

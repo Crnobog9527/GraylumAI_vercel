@@ -42,7 +42,7 @@ const FAQ: ChromeLink = { label: '常见问题', href: '/faq' };
 export const J_NAV = {
   label: '主导航',
   product: { label: '产品', links: PRODUCT },
-  places: [TUTORIALS, { label: '价格', href: '/landing/pricing' }, FAQ, { label: '关于我们', href: '/about' }],
+  places: [TUTORIALS, { label: '价格', href: '/pricing' }, FAQ, { label: '关于我们', href: '/about' }],
   /**
    * OWNER (2026-10-15): one globe button with the current language's short name, opening a menu of full names.
    * English has no pages yet: SEO_GEO_SPEC forbids links and hreflang to /en before it is live, so it shows, unlinked.
@@ -67,7 +67,7 @@ export const J_FOOTER = {
     { title: '产品', links: [
       { label: '功能介绍', href: PLANNED.features },
       { label: '评审团', href: PLANNED.jury },
-      { label: '价格', href: '/landing/pricing' },
+      { label: '价格', href: '/pricing' },
     ] },
     /**
      * No link to the sample reports yet (2026-10-17): /landing/samples is not built (it was a 404 on staging), and the
@@ -95,4 +95,17 @@ export const J_FOOTER = {
  * Pages the header and footer link to that do not exist yet (for the PR's "待建页面" list); /en is not linked at all.
  * /features, its six pages and /blog came with PR #1090 (2026-10-18).
  */
-export const J_PENDING_PAGES = [PLANNED.samples, PLANNED.refund, PLANNED.cookies] as const;
+export const J_PENDING_PAGES = [PLANNED.samples, PLANNED.cookies] as const;
+/** The jury's public page (Owner 2026-10-18: the home page's "看评审团怎么工作" leads here). */
+export const J_JURY_PAGE = PLANNED.jury;
+/** Where the footer's "Cookie 设置" points until Termly's own buttons replace it (SiteFooterJ). */
+export const J_COOKIE_SETTINGS_HREF = PLANNED.cookies;
+
+/**
+ * Whether a header or footer link leads to a page that exists. The production home page (sample L on /landing, Owner
+ * 2026-10-17) links only those; a link comes back by itself once its page is built and taken off J_PENDING_PAGES.
+ * Cookie settings point into the privacy page, which exists, until Termly's button replaces them.
+ */
+export function linkReady(href: string) {
+  return href === PLANNED.cookies || !(J_PENDING_PAGES as readonly string[]).includes(href);
+}

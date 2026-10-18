@@ -49,6 +49,8 @@ const nextConfig: NextConfig = {
       { source: "/workbench", destination: "/positioning", permanent: false },
       // The old /tutorials page (four generic cards) is gone; the tutorials live in the blog (PUBLIC-SITE cleanup).
       { source: "/tutorials", destination: "/blog", permanent: true },
+      // The pricing page moved from /landing/pricing to /pricing (2026-10-18, SEO_GEO_SPEC section 15): 308, query kept.
+      { source: "/landing/pricing", destination: "/pricing", permanent: true },
     ];
   },
   async headers() {

@@ -207,7 +207,7 @@ const JURY: ArticleContent = {
     { label: 'Graylum 和 ChatGPT 有什么不同', href: '/graylum-vs-chatgpt', description: '通用 AI 和专属教练的对比，以及什么情况下用 ChatGPT 就够了。' },
     { label: '定位分析', href: featurePath('positioning'), description: '评审团审的报告就是从这里生成的。' },
     { label: '选题与创作', href: featurePath('content'), description: '定位确认后，每周发什么、怎么写。' },
-    { label: '价格', href: '/landing/pricing', description: '各个会员等级包含的功能和价格。' },
+    { label: '价格', href: '/pricing', description: '各个会员等级包含的功能和价格。' },
   ],
   updated: UPDATED,
   product: true,

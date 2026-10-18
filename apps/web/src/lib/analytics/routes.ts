@@ -12,7 +12,7 @@ import { PUBLIC_PAGES } from '@/lib/seo/public-pages';
 const APP_TEMPLATES = [
   '/',
   '/landing',
-  '/landing/pricing',
+  '/pricing',
   '/landing/preview/[variant]',
   '/landing/preview/d',
   '/landing/preview/e',

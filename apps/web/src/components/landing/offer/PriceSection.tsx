@@ -65,7 +65,7 @@ export function PriceSection({
             showResult={showResult} membershipHref={membershipHref} />
         ) : (
           <p role="status" className="text-center text-sm text-[#9A9A9A]">
-            会员方案暂时读不到，请稍后刷新，或先看<Link href="/landing/pricing" className="text-[#FFD700] underline">价格页</Link>。
+            会员方案暂时读不到，请稍后刷新，或先看<Link href="/pricing" className="text-[#FFD700] underline">价格页</Link>。
           </p>
         )}
 

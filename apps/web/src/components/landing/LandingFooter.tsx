@@ -8,7 +8,7 @@ const footerLinks = {
     title: '产品',
     links: [
       { label: '它怎么工作', href: '/landing#how-it-works' },
-      { label: '定价方案', href: '/landing/pricing' },
+      { label: '定价方案', href: '/pricing' },
     ],
   },
   company: {

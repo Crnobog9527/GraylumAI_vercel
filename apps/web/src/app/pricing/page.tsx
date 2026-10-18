@@ -17,7 +17,7 @@ export function generateMetadata() {
   return buildPageMetadata({
     title: '价格',
     description: '免费开始，Pro 和 Gold 会员价格、积分、积分包和常见问题。',
-    path: '/landing/pricing',
+    path: '/pricing',
   });
 }
 

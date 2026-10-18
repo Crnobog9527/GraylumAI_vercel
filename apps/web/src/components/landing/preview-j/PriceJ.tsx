@@ -12,7 +12,7 @@ import { CountUpJ } from './CountUpJ';
 import styles from './price-j.module.css';
 import page from './j.module.css';
 
-export const PRICING_PAGE = '/landing/pricing';
+export const PRICING_PAGE = '/pricing';
 
 /** How the comparison plays, in milliseconds: each row after the last, the total's count, the pause, the strike. */
 export const PRICE_TIMING = { row: 180, count: 1100, pause: 600, strike: 700 } as const;
@@ -103,7 +103,17 @@ export function PriceJ({ proMonthly, rows, after, calm = false, plainTotal = fal
                 </Link>
                 {after}
               </div>
-            ) : null}
+            ) : (
+              // The server catalog could not be read (getPublicSiteSettings' 'unavailable'): say so, and keep the way to the
+              // pricing page, rather than leaving only the usual ways' cost (review on #1088).
+              <div className={styles.own} data-unavailable="">
+                <p role="status">{J_PRICE.unavailable}</p>
+                <Link href={PRICING_PAGE} className={quiet ? styles.moreLink : `${page.pill} ${styles.cta}`}>
+                  {J_PRICE.more}<ArrowRight size={quiet ? 15 : 18} aria-hidden="true" />
+                </Link>
+                {after}
+              </div>
+            )}
           </div>
           {checked ? <p className={styles.checked}>{J_PRICE.checked}</p> : null}
         </div>

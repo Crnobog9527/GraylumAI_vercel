@@ -86,6 +86,9 @@
 .column ul { display: grid; gap: 9px; margin: 0; padding: 0; list-style: none; }
 .column a { color: var(--j-muted); text-decoration: none; }
 .column a:hover { color: var(--j-ink); }
+/* Termly's consent entries (buttons) read as the column's links. */
+.consent { padding: 0; border: 0; background: none; color: var(--j-muted); font: inherit; text-align: left; cursor: pointer; }
+.consent:hover { color: var(--j-ink); }
 .base { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 24px; margin-top: 44px; padding-top: 22px; border-top: 1px solid var(--j-line); }
 .definition { display: flex; flex: 1 1 420px; align-items: center; gap: 10px; margin: 0; color: var(--j-body); line-height: 1.6; }
 .definition img { flex: none; border-radius: 5px; background: #262626; }

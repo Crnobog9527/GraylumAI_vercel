@@ -35,10 +35,11 @@ const PUBLIC_SITE_PAGE_PATHS = [
   '/blog', // The tutorial blog (/blog and /blog/<article>), linked from the public header as 教程.
   '/zh-tw',
   '/refund',
+  '/pricing', // The public pricing page (moved from /landing/pricing on 2026-10-18; the old address 308s here).
 ];
 
+// Other names people type for the pricing page; they lead to it.
 const PUBLIC_PRICING_ENTRY_PATHS = [
-  '/pricing',
   '/plans',
 ];
 
@@ -103,7 +104,7 @@ function isSentryTunnelPath(pathname: string): boolean {
 
 function createPublicPricingRedirect(request: NextRequest): NextResponse {
   // The public pricing page (PAYWALL); query parameters such as ?domain=www are kept.
-  return NextResponse.redirect(new URL(`/landing/pricing${request.nextUrl.search}`, request.url));
+  return NextResponse.redirect(new URL(`/pricing${request.nextUrl.search}`, request.url));
 }
 
 // A logged-out visitor goes to login and comes back to the page afterwards. A landing-page buy link opens
