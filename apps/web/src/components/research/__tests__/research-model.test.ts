@@ -17,7 +17,7 @@ import { CALLS, CANDIDATE_CARD, CHARGES, FOLLOW_UP_CARD, KEYWORD_CARD, NOW, ROWS
 describe("describeCall", () => {
   const views = CALLS.map(describeCall);
 
-  it("maps the four stream states to 成功 / 未取到 / 待核 and 正在搜", () => {
+  it("maps the four stream states to 成功 / 这次没查到 / 待核 and 正在搜", () => {
     expect(views.map(view => view.state)).toEqual(["success", "success", "pending", "missing", "running"]);
   });
 

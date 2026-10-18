@@ -26,11 +26,11 @@ export const RUNNING_LABELS: Record<WorkKind, string> = {
   library_read: '正在读资料…',
   my_posts: '正在读你最近的作品数据…',
   my_benchmarks: '正在看你的对标账号…',
-  research: '正在取最新数据…',
+  research: '正在查最新数据…',
 };
 
 export const STATE_LABELS: Record<Exclude<WorkState, 'running'>, string> = {
-  done: '完成', missing: '未取到', pending: '待核',
+  done: '完成', missing: '这次没查到', pending: '待核',
 };
 
 /** One research call from the stream (`research_call`) as a work row. */

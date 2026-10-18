@@ -136,11 +136,11 @@ for (const width of [375, 1440]) {
 
       // Benchmark table: missing numbers stay missing, the report's minimum is spelled out.
       const table = page.getByRole("region", { name: "对标表" });
-      await ui(table).toContainText("3 个账号 · 合格 2 个");
-      await ui(table).toContainText("缺失 / 未取到");
-      await ui(table).toContainText("头部参考");
-      await ui(table).toContainText("生成定位报告需要至少 3 个合格的对标账号，目前 2 个");
-      await ui(table).toContainText("取数时间：");
+      await ui(table).toContainText("3 个账号 · 可以照着学 2 个");
+      await ui(table).toContainText("这次没查到");
+      await ui(table).toContainText("头部账号");
+      await ui(table).toContainText("生成定位报告需要至少 3 个可以照着学的对标账号，目前 2 个");
+      await ui(table).toContainText("查询时间：");
       // Each number cites a source number; the missing ones cite none; sources are listed below the table.
       await ui(table.getByRole("list", { name: "数据来源" })).toContainText("[1]");
       await ui(table.locator("tr").filter({ hasText: "sample_2" }).locator("td").nth(1)).not.toContainText("[");
