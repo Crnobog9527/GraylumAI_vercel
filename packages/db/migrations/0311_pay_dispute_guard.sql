@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS public.payment_disputes(
  renewal_stop_state text NOT NULL DEFAULT 'pending' CHECK(renewal_stop_state IN ('pending','confirmed','manual','not_applicable')),
  stop_attempts integer NOT NULL DEFAULT 0 CHECK(stop_attempts BETWEEN 0 AND 3),
  alerted_at timestamptz,freeze_alerted_at timestamptz,stop_alerted_at timestamptz,unmatched_alerted_at timestamptz,closed_alerted_at timestamptz,
- withdrawn_by uuid,withdrawn_at timestamptz,
+ withdrawn_by uuid,withdrawn_at timestamptz,external_resolved_by uuid,external_resolved_at timestamptz,
  CONSTRAINT payment_disputes_identity UNIQUE(merchant_namespace,mode,provider_dispute_id),
  CONSTRAINT payment_disputes_canonical CHECK(payment_key=merchant_namespace||':'||mode||':'||provider_payment_intent_id)
 );
@@ -218,7 +218,9 @@ BEGIN
  IF provider_sub IS DISTINCT FROM locked_sub THEN RAISE EXCEPTION 'PAY_DISPUTE_MAPPING_RETRY' USING ERRCODE='40001'; END IF;
  IF o.id IS NOT NULL THEN
   PERFORM 1 FROM profiles WHERE id=o.user_id FOR UPDATE;
-  UPDATE payment_orders SET dispute_payment_key=pk,dispute_subscription_key=coalesce(dispute_subscription_key,subkey) WHERE id=o.id;
+  UPDATE payment_orders SET dispute_payment_key=pk,dispute_subscription_key=coalesce(dispute_subscription_key,subkey)
+   WHERE id=o.id AND (dispute_payment_key IS NULL OR dispute_payment_key=pk);
+  IF NOT FOUND THEN RAISE EXCEPTION 'PAY_DISPUTE_MAPPING_CONFLICT'; END IF;
  END IF;
  at_:=(p_event->>'created')::timestamptz;
  INSERT INTO payment_disputes(merchant_namespace,mode,provider_dispute_id,payment_key,provider_charge_id,
@@ -260,6 +262,8 @@ BEGIN
   RAISE EXCEPTION 'PAY_DISPUTE_MAPPING_CONFLICT'; END IF;
  UPDATE payment_disputes SET order_id=coalesce(order_id,o.id),subscription_id=coalesce(subscription_id,o.subscription_id),
   provider_subscription_id=coalesce(provider_subscription_id,provider_sub),
+  freeze_state=CASE WHEN freeze_state='external' AND o.id IS NOT NULL THEN 'pending' ELSE freeze_state END,
+  renewal_stop_state=CASE WHEN freeze_state='external' AND o.id IS NOT NULL THEN 'pending' ELSE renewal_stop_state END,
   provider_invoice_id=coalesce(provider_invoice_id,p_event->>'invoiceId') WHERE id=d.id;
  PERFORM pay_dispute_freeze(d.id);
  RETURN (SELECT to_jsonb(x)||jsonb_build_object('duplicate',NOT fresh) FROM payment_disputes x WHERE id=d.id);
@@ -397,7 +401,9 @@ BEGIN
   AND (order_id IS NOT NULL AND order_id<>o.id OR provider_subscription_id IS NOT NULL
    AND provider_sub IS DISTINCT FROM provider_subscription_id)) THEN RAISE EXCEPTION 'PAY_DISPUTE_MAPPING_CONFLICT'; END IF;
  UPDATE payment_disputes SET order_id=o.id,subscription_id=o.subscription_id,
-  provider_subscription_id=coalesce(provider_subscription_id,provider_sub)
+  provider_subscription_id=coalesce(provider_subscription_id,provider_sub),
+  freeze_state=CASE WHEN freeze_state='external' THEN 'pending' ELSE freeze_state END,
+  renewal_stop_state=CASE WHEN freeze_state='external' THEN 'pending' ELSE renewal_stop_state END
   WHERE payment_key=o.dispute_payment_key AND (order_id IS NULL OR order_id=o.id);
  FOR d IN SELECT id FROM payment_disputes WHERE order_id=o.id AND freeze_state IN ('pending','review') ORDER BY id LOOP
   PERFORM pay_dispute_freeze(d.id);
@@ -417,7 +423,9 @@ BEGIN
  PERFORM pay_dispute_lock(pk,sk);
  PERFORM 1 FROM profiles WHERE id=o.user_id FOR UPDATE;
  IF o.dispute_payment_key IS NOT NULL AND o.dispute_payment_key<>pk THEN RAISE EXCEPTION 'PAY_DISPUTE_FULFILL_CONFLICT'; END IF;
- UPDATE payment_orders SET dispute_payment_key=pk,dispute_subscription_key=sk WHERE id=o.id;
+ UPDATE payment_orders SET dispute_payment_key=pk,dispute_subscription_key=sk WHERE id=o.id
+  AND (dispute_payment_key IS NULL OR dispute_payment_key=pk);
+ IF NOT FOUND THEN RAISE EXCEPTION 'PAY_DISPUTE_FULFILL_CONFLICT'; END IF;
  result:=pay_waffo_fulfill_payment(o.id,o.merchant_namespace,p_facts->>'checkoutId',p_facts->>'paymentId',
   (p_facts->>'amount')::integer,p_facts->>'currency',(p_facts->>'paidAt')::timestamptz,p_facts->>'subscriptionId',
   (p_facts->>'start')::timestamptz,(p_facts->>'end')::timestamptz);
@@ -601,7 +609,9 @@ BEGIN
  IF provider_sub IS DISTINCT FROM locked_sub THEN RAISE EXCEPTION 'PAY_DISPUTE_MAPPING_RETRY' USING ERRCODE='40001'; END IF;
  PERFORM 1 FROM profiles WHERE id=o.user_id FOR UPDATE;
  UPDATE payment_orders SET dispute_payment_key=d.payment_key,dispute_subscription_key=CASE WHEN provider_sub IS NOT NULL
-  THEN d.merchant_namespace||':'||d.mode||':'||provider_sub END WHERE id=o.id;
+  THEN d.merchant_namespace||':'||d.mode||':'||provider_sub END WHERE id=o.id
+  AND (dispute_payment_key IS NULL OR dispute_payment_key=d.payment_key);
+ IF NOT FOUND THEN RAISE EXCEPTION 'PAY_DISPUTE_MAPPING_CONFLICT'; END IF;
  PERFORM pay_dispute_evidence(o.id);
  UPDATE payment_disputes SET order_id=o.id,subscription_id=o.subscription_id,
   provider_subscription_id=coalesce(provider_subscription_id,provider_sub) WHERE id=d.id AND (order_id IS NULL OR order_id=o.id);
@@ -609,6 +619,28 @@ BEGIN
  PERFORM pay_dispute_freeze(d.id);
  PERFORM pay_dispute_evidence(o.id);
  RETURN (SELECT to_jsonb(x) FROM payment_disputes x WHERE id=d.id);
+END $$;
+-- Only an active administrator who verified the payment is off-site may retire an unmatched row.
+-- Recheck all known payment references under the same canonical locks; never dismiss a matched payment.
+CREATE OR REPLACE FUNCTION public.pay_dispute_resolve_external(p_actor uuid,p_dispute uuid) RETURNS void
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE d payment_disputes;
+BEGIN
+ IF NOT EXISTS(SELECT 1 FROM profiles WHERE id=p_actor AND role='admin' AND status='active' AND is_deleted='false') THEN
+  RAISE EXCEPTION 'PAY_DISPUTE_ADMIN_REQUIRED'; END IF;
+ SELECT * INTO d FROM payment_disputes WHERE id=p_dispute;
+ PERFORM pay_dispute_lock(d.payment_key,CASE WHEN d.provider_subscription_id IS NOT NULL THEN
+  d.merchant_namespace||':'||d.mode||':'||d.provider_subscription_id END);
+ SELECT * INTO d FROM payment_disputes WHERE id=p_dispute FOR UPDATE;
+ IF d.id IS NULL OR d.order_id IS NOT NULL OR d.freeze_state NOT IN ('pending','review','external')
+  OR EXISTS(SELECT 1 FROM payment_orders WHERE dispute_payment_key=d.payment_key)
+  OR EXISTS(SELECT 1 FROM payment_provider_refs WHERE channel='stripe' AND merchant_namespace=d.merchant_namespace
+   AND mode=d.mode AND object_type='payment' AND order_id IS NOT NULL
+   AND external_id IN (d.provider_payment_intent_id,d.provider_charge_id,d.provider_invoice_id)) THEN
+  RAISE EXCEPTION 'PAY_DISPUTE_EXTERNAL_CONFLICT'; END IF;
+ UPDATE payment_disputes SET freeze_state='external',renewal_stop_state='not_applicable',
+  external_resolved_by=coalesce(external_resolved_by,p_actor),external_resolved_at=coalesce(external_resolved_at,clock_timestamp())
+  WHERE id=d.id;
 END $$;
 CREATE OR REPLACE FUNCTION public.pay_dispute_stop_claim(p_dispute uuid) RETURNS boolean
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
@@ -619,11 +651,15 @@ BEGIN
 END $$;
 CREATE OR REPLACE FUNCTION public.pay_dispute_stop_confirm(p_dispute uuid,p_canceled boolean) RETURNS void
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
-DECLARE d payment_disputes;i jsonb;prior text;
+DECLARE d payment_disputes;i jsonb;prior text;locked_sub text;
 BEGIN
  SELECT * INTO d FROM payment_disputes WHERE id=p_dispute;
+ locked_sub:=d.provider_subscription_id;
  PERFORM pay_dispute_lock(d.payment_key,CASE WHEN d.provider_subscription_id IS NOT NULL THEN
   d.merchant_namespace||':'||d.mode||':'||d.provider_subscription_id END);
+ SELECT * INTO d FROM payment_disputes WHERE id=p_dispute;
+ IF d.provider_subscription_id IS DISTINCT FROM locked_sub THEN
+  RAISE EXCEPTION 'PAY_DISPUTE_MAPPING_RETRY' USING ERRCODE='40001'; END IF;
  IF d.id IS NULL OR d.provider_subscription_id IS NULL THEN RAISE EXCEPTION 'PAY_DISPUTE_STOP_SCOPE'; END IF;
  IF d.subscription_id IS NOT NULL THEN
   PERFORM 1 FROM profiles WHERE id=(SELECT user_id FROM user_subscriptions WHERE id=d.subscription_id) FOR UPDATE;
@@ -887,7 +923,7 @@ DO $$ DECLARE f record;BEGIN
  FOR f IN SELECT oid::regprocedure sig,proname FROM pg_proc WHERE pronamespace='public'::regnamespace
   AND proname LIKE 'pay_dispute_%' LOOP
   EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC,anon,authenticated,service_role',f.sig);
-  IF f.proname IN ('pay_dispute_receive','pay_dispute_withdraw','pay_dispute_fulfill','pay_dispute_renew','pay_dispute_match','pay_dispute_stop_claim','pay_dispute_stop_confirm','pay_dispute_refund_claim','pay_dispute_refund_result') THEN
+  IF f.proname IN ('pay_dispute_receive','pay_dispute_withdraw','pay_dispute_resolve_external','pay_dispute_fulfill','pay_dispute_renew','pay_dispute_match','pay_dispute_stop_claim','pay_dispute_stop_confirm','pay_dispute_refund_claim','pay_dispute_refund_result') THEN
    EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO service_role',f.sig); END IF;
  END LOOP;
 END $$;

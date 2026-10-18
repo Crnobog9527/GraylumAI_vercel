@@ -66,6 +66,24 @@ export async function membershipCases({c,v,profile,receive,withdraw,ops,report})
  await c.query('UPDATE payment_disputes SET provider_subscription_id=NULL WHERE id=$1',[derivedDispute.id]);
  assert.equal((await receive(derived,{subscriptionId:derived.providerSub})).provider_subscription_id,derived.providerSub);
  report.checks.push('missing subscription derived and locked; conflict rejected; late match, pending claim and later event backfill identity');
+ // Stop confirmation must reload the mapping committed while it waited on the advisory lock.
+ const matching=await member(start,end),matcher=new pg.Client(c.connectionParameters);
+ await c.query('UPDATE payment_orders SET dispute_payment_key=NULL,dispute_subscription_key=NULL WHERE id=$1',[matching.order]);
+ const unmapped=await receive(matching,{orderId:null,subscriptionId:matching.providerSub});
+ await matcher.connect();
+ try {
+  await matcher.query('BEGIN');await v('SELECT pay_dispute_match($1,$2) v',[unmapped.id,matching.order],matcher);
+  const confirming=v('SELECT pay_dispute_stop_confirm($1,false) v',[unmapped.id]);
+  let blocked_=false;
+  for(let i=0;i<100&&!blocked_;i++) {
+   blocked_=await v('SELECT pg_backend_pid()=ANY(pg_blocking_pids($1)) v',[c.processID],matcher);
+   if(!blocked_)await new Promise(r=>setTimeout(r,5));
+  }
+  assert.equal(blocked_,true);await matcher.query('COMMIT');await confirming;
+  assert.equal(await v("SELECT cancel_at_period_end='true' v FROM user_subscriptions WHERE id=$1",[matching.sub]),true);
+  assert.equal(await v('SELECT renewal_stop_state v FROM payment_disputes WHERE id=$1',[unmapped.id]),'confirmed');
+ } finally {await matcher.end();}
+ report.checks.push('stop confirmation reloads a mapping committed while waiting and synchronizes internal subscription state');
  const f=await member(start,end);
  assert.equal(await v('SELECT credits v FROM profiles WHERE id=$1',[f.user]),100);
  const d=await receive(f,{subscriptionId:f.providerSub});

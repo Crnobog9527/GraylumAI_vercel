@@ -292,6 +292,50 @@ try {
  assert.equal(await balance(canonicalUser),0);assert.equal(await balance(hintUser),200);
  assert.equal(await v('SELECT dispute_payment_key v FROM payment_orders WHERE id=$1',[hintPack.order]),null);
  report.checks.push('conflicting order hint rejected; canonical owner frozen, unrelated owner balance and mapping untouched');
+ // Distinct payment locks do not serialize a shared order hint: both must wait on the profile,
+ // and the conditional order claim must reject the loser after the first mapping commits.
+ for(const viaMatch of [false,true]) {
+  const actor=await profile(0),payment=await pack(actor,100);
+  const second={...payment,order:randomUUID()};
+  const left=new pg.Client(c.connectionParameters),right=new pg.Client(c.connectionParameters);
+  await left.connect();await right.connect();
+  try {
+   const dl=viaMatch?await receive(payment,{orderId:null}):null;
+   const dr=viaMatch?await receive(second,{orderId:null}):null;
+   await c.query('BEGIN');await c.query('SELECT id FROM profiles WHERE id=$1 FOR UPDATE',[actor]);
+   const one=viaMatch?v('SELECT pay_dispute_match($1,$2) v',[dl.id,payment.order],left):receive(payment,{},left);
+   const two=viaMatch?v('SELECT pay_dispute_match($1,$2) v',[dr.id,payment.order],right):receive(second,{orderId:payment.order},right);
+   const results=Promise.allSettled([one,two]);
+   let blocked_=false;
+   for(let i=0;i<100&&!blocked_;i++) {
+    blocked_=await v('SELECT cardinality(pg_blocking_pids($1))>0 AND cardinality(pg_blocking_pids($2))>0 AND (pg_backend_pid()=ANY(pg_blocking_pids($1)) OR pg_backend_pid()=ANY(pg_blocking_pids($2))) v',
+     [left.processID,right.processID]);
+    if(!blocked_)await new Promise(r=>setTimeout(r,5));
+   }
+   assert.equal(blocked_,true);await c.query('COMMIT');
+   const outcome=await results;
+   assert.equal(outcome.filter(r=>r.status==='fulfilled').length,1);
+   const rejected=outcome.find(r=>r.status==='rejected');assert.match(rejected.reason.message,/PAY_DISPUTE_MAPPING_CONFLICT/);
+   assert.equal(await v('SELECT count(*)::int v FROM payment_disputes WHERE order_id=$1',[payment.order]),1);
+   assert.equal(await balance(actor),0);assert.equal(await frozen(payment),100);
+  } finally {await c.query('ROLLBACK');await left.end();await right.end();}
+ }
+ report.checks.push('two distinct payment keys racing for one order hint: receive and late match each commit exactly one mapping');
+ // Only a verified unmatched off-site payment can be retired by an active administrator.
+ const offsite=await pack(await profile(0),100,iso(0),false);
+ await c.query('DELETE FROM payment_provider_refs WHERE order_id=$1',[offsite.order]);
+ const outside=await receive(offsite,{orderId:null});
+ await assert.rejects(()=>v('SELECT pay_dispute_resolve_external($1,$2) v',[canonicalUser,outside.id]),/PAY_DISPUTE_ADMIN_REQUIRED/);
+ await v('SELECT pay_dispute_resolve_external($1,$2) v',[ops,outside.id]);
+ const resolvedAt=await v('SELECT external_resolved_at v FROM payment_disputes WHERE id=$1',[outside.id]);
+ await v('SELECT pay_dispute_resolve_external($1,$2) v',[ops,outside.id]);
+ assert.equal(String(await v('SELECT external_resolved_at v FROM payment_disputes WHERE id=$1',[outside.id])),String(resolvedAt));
+ assert.equal(await v('SELECT freeze_state v FROM payment_disputes WHERE id=$1',[outside.id]),'external');
+ const known=await pack(await profile(0),100),knownPending=await receive(known,{orderId:null});
+ await assert.rejects(()=>v('SELECT pay_dispute_resolve_external($1,$2) v',[ops,knownPending.id]),/PAY_DISPUTE_EXTERNAL_CONFLICT/);
+ await fulfill(offsite,await v('SELECT user_id v FROM payment_orders WHERE id=$1',[offsite.order]));
+ assert.equal(await v('SELECT freeze_state v FROM payment_disputes WHERE id=$1',[outside.id]),'frozen');
+ report.checks.push('off-site resolution is admin-only, idempotently audited and denied for known payment references; later actual fulfillment reopens and freezes the matching source');
  await membershipCases({c,v,profile,receive,withdraw,ops,report});
  // Optional PAY-EVIDENCE integration: model its documented table locally; no personal evidence is created.
  await c.query(`CREATE TABLE payment_order_evidence(order_id uuid PRIMARY KEY,hold_reason text,
