@@ -44,6 +44,20 @@ export async function reconcileStripeCardPayments(db: SupabaseClient, stripe: St
   const findings: StripeCardFinding[] = [];
   let repaired = 0, checked = 0, complete = true, outOfTime = false;
 
+  // Dispute freezes and renewal stops are the safety-critical backstop. Run them before history scans
+  // that can consume the shared budget, so sustained checkout/refund volume cannot starve them.
+  const disputes = await reconcilePaymentDisputes(db, stripe, options.disputeAlert, deadline);
+  const refunds = await reconcileDisputeRenewalRefunds(db, stripe, options.disputeAlert, deadline);
+  checked += disputes.checked + refunds.checked;
+  complete &&= disputes.complete && refunds.complete;
+  if (disputes.failed || refunds.failed) findings.push({ kind: 'dispute_repair_failed', code: 'PAY_DISPUTE_MANUAL_REVIEW' });
+  if (!disputes.complete || !refunds.complete) findings.push({ kind: 'scan_incomplete', code: 'PAY_DISPUTE_SCAN_INCOMPLETE' });
+  outOfTime = Date.now() > deadline;
+  if (outOfTime && disputes.complete && refunds.complete) {
+    complete = false;
+    findings.push({ kind: 'scan_incomplete', object: 'subscription', code: 'TIME_BUDGET' });
+  }
+
   const scan = async <T extends { id: string }>(object: 'checkout' | 'invoice' | 'refund',
     list: (after?: string) => Promise<Listed<T>>, visit: (row: T) => Promise<void>) => {
     let after: string | undefined;
@@ -188,15 +202,6 @@ export async function reconcileStripeCardPayments(db: SupabaseClient, stripe: St
       deadline, maxPages });
     checked += open.checked; repaired += open.repaired; complete &&= open.complete;
     findings.push(...open.findings);
-  }
-
-  if (!outOfTime) {
-    const disputes = await reconcilePaymentDisputes(db, stripe, options.disputeAlert, deadline);
-    const refunds = await reconcileDisputeRenewalRefunds(db, stripe, options.disputeAlert, deadline);
-    checked += disputes.checked + refunds.checked;
-    complete &&= disputes.complete && refunds.complete;
-    if (disputes.failed || refunds.failed) findings.push({ kind: 'dispute_repair_failed', code: 'PAY_DISPUTE_MANUAL_REVIEW' });
-    if (!disputes.complete || !refunds.complete) findings.push({ kind: 'scan_incomplete', code: 'PAY_DISPUTE_SCAN_INCOMPLETE' });
   }
 
   return { success: findings.length === 0, skipped: false, complete, repaired, checked, findings };
