@@ -53,7 +53,7 @@ export const SITE_CHROME: Record<SiteLocale, SiteChrome> = {
     nav: [
       { label: '功能介绍', href: '/features' },
       { label: '教程', href: '/blog' },
-      { label: '价格', href: '/landing/pricing' },
+      { label: '价格', href: '/pricing' },
       { label: '关于我们', href: '/about' },
     ],
     login: '登录',

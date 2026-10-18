@@ -1,21 +1,13 @@
 import { JsonLd } from '@/components/seo/JsonLd';
-import { FinalAction } from '@/components/landing/offer/FinalAction';
-import { FlowSteps } from '@/components/landing/offer/FlowSteps';
-import { FounderSeatsProvider } from '@/components/landing/offer/LiveFounderSeats';
-import { SampleReports } from '@/components/landing/offer/SampleReports';
-import { HowItWorks } from '@/components/landing/offer/HowItWorks';
-import { OfferFaq } from '@/components/landing/offer/OfferFaq';
-import { OfferHero } from '@/components/landing/offer/OfferHero';
-import { PriceSection } from '@/components/landing/offer/PriceSection';
-import { SiteShell } from '@/components/public-site/SiteShell';
-import { VoiceWall } from '@/components/landing/offer/VoiceWall';
+import { rewordFaq } from '@/components/landing/preview-j/SectionsJ';
+import { SampleL } from '@/components/landing/preview-l/SampleL';
 import { resolveLandingFlags } from '@/lib/landing/landing-flags';
-import { buildLandingPageData, HOME_DESCRIPTION, HOME_TITLE } from '@/lib/landing/landing-page-data';
+import { buildLandingPageData, HOME_DESCRIPTION, HOME_TITLE, homePageExtras } from '@/lib/landing/landing-page-data';
 import { getLandingOffers } from '@/lib/landing/landing-offers';
 import { getPublicSiteSettings } from '@/lib/public-site';
 import { buildPageMetadata } from '@/lib/seo/metadata';
+import { SITE_LOCALES } from '@/lib/seo/site';
 import { faqPageJsonLd, softwareApplicationJsonLd } from '@/lib/seo/structured-data';
-import { buildAuthHref } from '@/lib/site-config';
 
 // Static with hourly refresh (SEO_GEO_SPEC section 9); plan prices come from the server catalog.
 export const revalidate = 3600;
@@ -25,41 +17,31 @@ export function generateMetadata() {
 }
 
 /**
- * The public Simplified home page (offer final 2026-10-13, docs/launch/design/landing/). It lives at
- * /landing until the /app move makes "/" public (SEO_GEO_SPEC section 15); canonical is already "/".
- * Section order is fixed by the Owner: hero, sticky notes, how the coach works, price, FAQ, final action.
+ * The public Simplified home page. It lives at /landing until the /app move makes "/" public (SEO_GEO_SPEC section
+ * 15); canonical is already "/". Owner 2026-10-17: "样稿 L 验收后，正式 /landing 整体换成样稿 L，冻结前完成" — the page
+ * is sample L (components/landing/preview-l) in its production mode: no sample switcher, header and footer link only
+ * pages that exist. Title, description, canonical, robots (buildPageMetadata), the structured data and the hourly
+ * refresh are the home page's as before, and the footer shows the support address from the settings. The founder
+ * offer stays off the home page (Owner 2026-10-15), so its FAQ entries go with it, in the page and in the FAQ
+ * structured data alike.
  */
 export default async function LandingPage() {
   const [{ siteName, supportEmail, membershipPlans, membershipPlansStatus }, offers] =
     await Promise.all([getPublicSiteSettings(), getLandingOffers()]);
   const plans = membershipPlansStatus === 'available' ? membershipPlans : [];
-  // Gold first month and founder seats come from the server rules (settings.getPublicOffers); absent when unavailable.
-  const data = buildLandingPageData(resolveLandingFlags(), plans, offers);
+  const flags = { ...resolveLandingFlags(), founder: false };
+  const data = buildLandingPageData(flags, plans, offers);
+
+  // The structured data says what the page says: the FAQ answers with the same rewording the page shows (FaqJ).
+  const faqItems = data.faqItems.map(item => ({ ...item, answer: rewordFaq(item.answer) }));
 
   return (
-    <SiteShell locale="zh-Hans" supportEmail={supportEmail} siteName={siteName}>
+    <div lang={SITE_LOCALES['zh-Hans'].htmlLang}>
       <JsonLd data={[
         softwareApplicationJsonLd({ description: HOME_DESCRIPTION, offers: data.offerList }),
-        ...(data.faqItems.length > 0 ? [faqPageJsonLd(data.faqItems)] : []),
+        ...(faqItems.length > 0 ? [faqPageJsonLd(faqItems)] : []),
       ]} />
-      <OfferHero note={data.heroNote} />
-      <VoiceWall notes={data.notes} />
-      <HowItWorks promise={data.promise} timeline={data.timeline}>
-        <FlowSteps steps={data.flowSteps} />
-        <SampleReports reports={data.sampleReports} />
-      </HowItWorks>
-      <FounderSeatsProvider initial={data.founderSeats}>
-        <PriceSection
-          pricing={data.pricing}
-          rows={data.compareRows}
-          risk={data.risk}
-          showResult={data.showResult}
-          founderSeats={data.founderSeats}
-          membershipHref={buildAuthHref('/profile?tab=subscription')}
-        />
-        <OfferFaq groups={data.faqGroups} />
-        <FinalAction showStack={data.showStack} founderSeats={data.founderSeats} note={data.finalNote} />
-      </FounderSeatsProvider>
-    </SiteShell>
+      <SampleL data={data} siteName={siteName} extras={homePageExtras(flags)} production supportEmail={supportEmail} />
+    </div>
   );
 }

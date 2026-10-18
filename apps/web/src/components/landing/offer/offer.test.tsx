@@ -2,6 +2,7 @@ import { createElement, Fragment } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { LANDING_FEATURES, resolveLandingFlags, type LandingFlags } from '@/lib/landing/landing-flags';
+import { SAMPLE_REPORTS } from '@/lib/landing/landing-samples';
 import { buildLandingPageData } from '@/lib/landing/landing-page-data';
 import { FinalAction } from './FinalAction';
 import { FlowSteps } from './FlowSteps';
@@ -69,8 +70,9 @@ describe('landing page sections', () => {
     expect(html).not.toContain('不同人群的样例报告');
   });
 
-  it('renders the sample-report tabs with the four audiences and three fixed parts when switched on', () => {
-    const html = renderPage(ALL_ON);
+  it('renders the sample-report tabs with the four audiences and three fixed parts', () => {
+    // The component itself; whether the page passes the four demo reports depends on their own readiness (landing.test).
+    const html = renderToStaticMarkup(createElement(SampleReports, { reports: SAMPLE_REPORTS }));
     expect(html).toContain('不同人群的样例报告');
     expect(html.match(/role="tab"/g)).toHaveLength(4);
     expect(html).toContain('有一门专业、想做知识付费的上班族');

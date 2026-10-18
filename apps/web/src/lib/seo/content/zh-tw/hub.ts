@@ -102,7 +102,7 @@ export const ZH_TW_HUB: ArticleContent = {
     { label: '自媒體課程怎麼選？', href: '/zh-tw/zimeiti-kecheng', description: '上課、真人陪跑和 AI 陪跑的差別與適合對象。' },
     { label: 'Graylum 和 ChatGPT 差在哪？', href: '/zh-tw/graylum-vs-chatgpt', description: '經營自媒體時，通用 AI 和專屬教練的差別與適合對象。' },
     { label: '關於 Graylum', href: '/zh-tw/about', description: '公司資訊、編輯原則和聯絡方式。' },
-    { label: '價格（簡體）', href: '/landing/pricing', description: '免費開始，以及會員和點數包的說明。' },
+    { label: '價格（簡體）', href: '/pricing', description: '免費開始，以及會員和點數包的說明。' },
   ],
   sources: [
     { label: 'Instagram 官方：Instagram Ranking Explained（各版位的排序方式，英文）', href: 'https://about.instagram.com/blog/announcements/instagram-ranking-explained' },

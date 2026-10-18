@@ -17,7 +17,7 @@ import { loadSampleReport, SAMPLE_CHAPTERS } from '@/lib/landing/sample-reports'
 import { splitReport } from '@/lib/landing/sample-reports/report-markdown';
 import { VOICE_WALL } from '@/lib/landing/landing-copy';
 import { LANDING_FEATURES, type LandingFlags } from '@/lib/landing/landing-flags';
-import { buildLandingPageData } from '@/lib/landing/landing-page-data';
+import { buildLandingPageData, homePageExtras } from '@/lib/landing/landing-page-data';
 import { APP_SEGMENTS } from '@/lib/sentry-scrub';
 import { L_SAMPLES_REDO } from '@/lib/landing/landing-copy-l-samples';
 import { SAMPLE_OVERVIEWS } from '@/lib/landing/sample-reports/overview';
@@ -27,6 +27,7 @@ import { L_DIRECTION_CARD, L_POSITIONING_MOMENTS, L_SKILL_OPENING } from '@/lib/
 import { L_PRICE_NOTE } from '@/lib/landing/landing-copy-l';
 import { HOW_IT_WORKS as HOW } from '@/lib/landing/landing-copy';
 import { trpc } from '@/trpc/client';
+import { J_PENDING_PAGES, linkReady } from '@/lib/landing/landing-copy-j-chrome';
 import { countOf, OverviewL } from './OverviewL';
 import { L_BENCHMARK_ROWS } from './RealPartsL';
 import { scenarioAt } from './ScenariosL';
@@ -430,6 +431,49 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     // True to the real jury: each changed chapter's before and after, the original kept; no brands, no credits.
     expect(L_JURY.points[2].text).toContain('每一章标出改前、改后的句子');
     for (const word of ['GPT', 'Claude', 'Gemini', '积分', '没有分歧', '再辩一轮', '最多两轮']) expect(steps).not.toContain(word);
+  });
+
+  it('shows the 14 sample reports on the home page only while the sampleReports fact switch is on (review on #1088)', () => {
+    const home = (flags: LandingFlags) => renderToStaticMarkup(withTrpc(createElement(SampleL, {
+      data, siteName: 'Graylum', extras: homePageExtras(flags), production: true,
+    })));
+    expect(homePageExtras(ALL_ON).showSamples).toBe(true);
+    expect(home(ALL_ON)).toContain('id="samples-title"');
+    const off = { ...ALL_ON, sampleReports: false };
+    expect(homePageExtras(off).showSamples).toBe(false);
+    expect(home(off)).not.toContain('id="samples-title"');
+  });
+
+  it('says so when the plan catalog cannot be read, keeping the way to the pricing page (review on #1088)', () => {
+    const unavailable = { ...data, pricing: { ...data.pricing, proMonthly: null } };
+    const html = renderToStaticMarkup(withTrpc(createElement(SampleL, {
+      data: unavailable, siteName: 'Graylum', extras: { flags: ALL_ON, showSamples: true }, production: true,
+    })));
+    const price = html.slice(html.indexOf('id="pricing-title"'), html.indexOf('id="faq-title"'));
+    expect(price).toContain(J_PRICE.unavailable);
+    expect(price).toContain('href="/pricing"');
+    expect(price).not.toContain('Graylum AI：');
+  });
+
+  it('as the public home page: no sample switcher, links only to pages that exist, the support address in the footer', () => {
+    const html = renderToStaticMarkup(withTrpc(createElement(SampleL, {
+      data, siteName: 'Graylum', extras: { flags: ALL_ON, showSamples: true }, production: true, supportEmail: 'help@example.com',
+    })));
+    expect(html).not.toContain('样稿切换');
+    expect(html).not.toContain('/landing/preview/');
+    // One h1 (the first screen's); the product demos' own headings are plain elements there (review on #1088).
+    expect(html.match(/<h1[\s>]/g)).toHaveLength(1);
+    for (const href of J_PENDING_PAGES) {
+      if (linkReady(href)) continue;
+      expect(html).not.toContain(`href="${href}"`);
+    }
+    for (const href of ['/pricing', '/faq', '/about', '/contact', '/terms', '/privacy', '/refund']) expect(html).toContain(`href="${href}"`);
+    expect(html).toContain('mailto:help@example.com');
+    // The jury still says what it is (now under step one); its link goes to the public jury page (Owner 2026-10-18).
+    for (const part of L_JURY.title.split(/(?<=，)/)) expect(html).toContain(part);
+    expect(html).toContain(`href="/features/jury">${L_JURY.link}`);
+    // The samples keep every planned link.
+    expect(render()).toContain('href="/landing/preview/jury"');
   });
 
   it('keeps one button wording and a button at least every two regions', () => {

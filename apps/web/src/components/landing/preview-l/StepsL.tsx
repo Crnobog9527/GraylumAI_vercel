@@ -36,7 +36,11 @@ const writeSeen = () => { try { window.localStorage.setItem(SEEN_KEY, '1'); } ca
  * before (remembered in this browser) gets a button that jumps past it. Server HTML and reduced motion: the four
  * stages stacked, finished.
  */
-export function StepsL({ flags }: { flags: LandingFlags }) {
+export function StepsL({ flags, juryHref }: {
+  flags: LandingFlags;
+  /** The jury's link (JuryModuleL): null on the public home page until a public jury page exists. */
+  juryHref?: string | null;
+}) {
   const stages = visibleItems(flags, L_STEPS.one.stages);
   const durations = useMemo(() => stages.map(stage => (stage.moment === 3 ? ONE_MS.report : momentMs(stepOneScript(stage.moment)))), [stages]);
   const total = durations.reduce((sum, length) => sum + length, 0);
@@ -120,7 +124,7 @@ export function StepsL({ flags }: { flags: LandingFlags }) {
         </div>
       )}
       {/* Round twelve: the jury hangs under step one's window, its last beat. */}
-      <div className={k.wrap}><JuryModuleL flags={flags} /></div>
+      <div className={k.wrap}><JuryModuleL flags={flags} href={juryHref} /></div>
       <div className={cn(k.wrap, styles.after)}><CtaK /></div>
       <LaterStepsL flags={flags} />
     </section>

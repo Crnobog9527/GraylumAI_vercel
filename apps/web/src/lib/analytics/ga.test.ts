@@ -133,7 +133,7 @@ describe('GA in the browser', () => {
   it('reads checkout ids through gtag get only with live consent, in GA format', async () => {
     expect(await readGaCheckoutIds(ID)).toBeNull();
     consent.analytics = true;
-    enterPage(`${ORIGIN}/landing/pricing`, null);
+    enterPage(`${ORIGIN}/pricing`, null);
     syncGa(ID);
     const answers: Record<string, unknown> = { client_id: '123456789.1700000000', session_id: 1700000000 };
     const gtag = win.gtag as (...args: unknown[]) => void;

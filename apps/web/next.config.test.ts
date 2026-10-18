@@ -85,6 +85,16 @@ describe('security response headers', () => {
   });
 });
 
+describe('moved public pages', () => {
+  it('sends the old pricing address /landing/pricing to /pricing for good (308, the query kept by Next.js)', async () => {
+    const config = (await loadConfig())(PHASE_DEVELOPMENT_SERVER);
+    const rules = await config.redirects!();
+    expect(rules).toContainEqual({ source: '/landing/pricing', destination: '/pricing', permanent: true });
+    // No chain: nothing redirects /pricing itself.
+    expect(rules.some(rule => getPathMatch(rule.source)('/pricing'))).toBe(false);
+  });
+});
+
 describe('Sentry build upload opt-in', () => {
   it.each([
     ['false', true, false],

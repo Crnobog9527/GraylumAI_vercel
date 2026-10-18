@@ -32,8 +32,9 @@ export const LANDING_FEATURES = {
   signupGrant: { task: 'PAYWALL（注册赠送 500 积分）', show: true },
   // The founder card also needs its price and seats from a public server answer; without one it stays away.
   founder: { task: 'PAY-FOUNDER', show: true },
-  // Per-audience sample reports, generated with demo accounts once RESEARCH-TOOLS is live.
-  sampleReports: { task: 'RESEARCH-TOOLS + sample reports', show: false },
+  // The 14 sample reports (lib/landing/sample-reports): on only while sampleReportsReady() holds, i.e. every one is
+  // generated with its whole text and overview (the tests check this and the privacy rule). Off hides them everywhere.
+  sampleReports: { task: 'RESEARCH-TOOLS + sample reports', show: true },
 } as const;
 
 /** A capability a block promises (always shown) or one of the page's few switches. */
@@ -47,11 +48,15 @@ export const PREVIEW_ENV = 'LANDING_PREVIEW_FEATURES';
 const SWITCH_KEYS = Object.keys(LANDING_FEATURES) as LandingSwitch[];
 
 /** The switches as set, plus preview-only extras outside the indexed production environment. */
-export function resolveLandingFlags(env: Record<string, string | undefined> = process.env): LandingFlags {
+export function resolveLandingFlags(
+  env: Record<string, string | undefined> = process.env,
+  /** The switches as set; only tests pass another table. */
+  features: Record<LandingSwitch, { show: boolean }> = LANDING_FEATURES,
+): LandingFlags {
   const preview = isPublicIndexingEnabled(env[SITE_INDEXING_ENV]) ? '' : (env[PREVIEW_ENV] ?? '');
   const extra = new Set(preview.split(',').map(item => item.trim()).filter(Boolean));
   return Object.fromEntries(SWITCH_KEYS.map(key => [
-    key, LANDING_FEATURES[key].show || extra.has('all') || extra.has(key),
+    key, features[key].show || extra.has('all') || extra.has(key),
   ])) as LandingFlags;
 }
 

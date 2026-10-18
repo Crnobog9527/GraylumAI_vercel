@@ -5,7 +5,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import Link from 'next/link';
 import { ChevronDown, Menu, X } from 'lucide-react';
 import { SIGNUP_CTA_HREF } from '@/lib/seo/content/shared';
-import { J_NAV, type ChromeLink } from '@/lib/landing/landing-copy-j-chrome';
+import { J_NAV, linkReady, type ChromeLink } from '@/lib/landing/landing-copy-j-chrome';
 import { cn } from '@/lib/utils';
 import { LanguageMenuJ } from './LanguageMenuJ';
 import styles from './chrome-j.module.css';
@@ -16,7 +16,10 @@ import page from './j.module.css';
  * close it), then 教程, 价格, 常见问题, 关于我们; on the right the language switch, 登录 and 免费试用. Below 1100px
  * everything but the logo and the button folds into a menu.
  */
-export function SiteHeaderJ({ siteName, cta = J_NAV.cta }: { siteName: string; cta?: string }) {
+export function SiteHeaderJ({ siteName, cta = J_NAV.cta, onlyBuilt = false }: { siteName: string; cta?: string; onlyBuilt?: boolean }) {
+  // The production home page links only pages that exist (linkReady); the samples keep every planned link.
+  const product = onlyBuilt ? J_NAV.product.links.filter(link => linkReady(link.href)) : J_NAV.product.links;
+  const places = onlyBuilt ? J_NAV.places.filter(link => linkReady(link.href)) : J_NAV.places;
   const [open, setOpen] = useState<'product' | null>(null);
   const [drawer, setDrawer] = useState(false);
   const ref = useRef<HTMLElement>(null);
@@ -37,8 +40,8 @@ export function SiteHeaderJ({ siteName, cta = J_NAV.cta }: { siteName: string; c
           <img src="/graylum-logo.svg" alt="" aria-hidden="true" width={28} height={28} />{siteName}
         </Link>
         <nav className={styles.desktop} aria-label={J_NAV.label}>
-          <Menu_ id="product" label={J_NAV.product.label} links={J_NAV.product.links} open={open} setOpen={setOpen} wide />
-          {J_NAV.places.map(link => <Link key={link.href} href={link.href} className={styles.item}>{link.label}</Link>)}
+          {product.length ? <Menu_ id="product" label={J_NAV.product.label} links={product} open={open} setOpen={setOpen} wide /> : null}
+          {places.map(link => <Link key={link.href} href={link.href} className={styles.item}>{link.label}</Link>)}
         </nav>
         <div className={styles.end}>
           <LanguageMenuJ className={styles.desktopOnly} />
@@ -52,12 +55,14 @@ export function SiteHeaderJ({ siteName, cta = J_NAV.cta }: { siteName: string; c
       </div>
       <div id={drawerId} className={styles.drawer} hidden={!drawer}>
         <nav className={page.wrap} aria-label={J_NAV.label}>
+          {product.length ? (
+            <div className={styles.drawerGroup}>
+              <p>{J_NAV.product.label}</p>
+              {product.map(link => <Link key={link.href} href={link.href} onClick={() => setDrawer(false)}>{link.label}</Link>)}
+            </div>
+          ) : null}
           <div className={styles.drawerGroup}>
-            <p>{J_NAV.product.label}</p>
-            {J_NAV.product.links.map(link => <Link key={link.href} href={link.href} onClick={() => setDrawer(false)}>{link.label}</Link>)}
-          </div>
-          <div className={styles.drawerGroup}>
-            {[...J_NAV.places, J_NAV.login].map(link => (
+            {[...places, J_NAV.login].map(link => (
               <Link key={link.href} href={link.href} onClick={() => setDrawer(false)}>{link.label}</Link>
             ))}
           </div>
