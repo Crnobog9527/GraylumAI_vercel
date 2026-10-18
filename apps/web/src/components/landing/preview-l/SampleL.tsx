@@ -19,7 +19,6 @@ import { L_NOTE_ANSWERS, L_NOTE_HEADS, L_NOTE_REGIONS, L_OPS, L_PRICE_NOTE, L_VO
 import { allOn } from '@/lib/landing/landing-flags';
 import { cn } from '@/lib/utils';
 import { HeroL } from './HeroL';
-import { JuryModuleL } from './JuryModuleL';
 import { SamplesL } from './SamplesL';
 import { ScenariosL } from './ScenariosL';
 import { StepsL } from './StepsL';
@@ -64,7 +63,6 @@ export function SampleL({ data, siteName, extras }: { data: LandingData; siteNam
         <VoiceWallJ notes={data.notes} open regions={L_NOTE_REGIONS} compact={L_VOICE_FOLD} after={<CtaK />}
           heads={L_NOTE_HEADS} answers={L_NOTE_ANSWERS} />
         <StepsL flags={extras.flags} />
-        <JuryModuleL flags={extras.flags} />
         {extras.showSamples ? <SamplesL /> : null}
         <ScenariosL flags={extras.flags} after={<CtaK />} />
         <PriceJ proMonthly={data.pricing.proMonthly} rows={data.compareRows} calm plainTotal checked={false} quiet

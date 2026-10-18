@@ -201,7 +201,7 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     // The full launched version: no picture says a feature is not there yet.
     for (const word of ['待接入', '即将上线', '未开放', '敬请期待']) expect(on).not.toContain(word);
     expect(renderToStaticMarkup(withTrpc(createElement(PositioningPictureL, { moment: 0, at: null })))).not.toContain('待接入');
-    expect(on).toContain(L_JURY.title);
+    for (const part of L_JURY.title.split(/(?<=，)/)) expect(on).toContain(part);
     expect(on).toContain(`href="${L_JURY.href}"`);
     for (const word of ['世界最强', '没有分歧', '再辩一轮', '最多两轮']) expect(on).not.toContain(word);
   });
@@ -382,6 +382,25 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     expect(picture).not.toContain('<h1');
   });
 
+  it('hangs the jury under step one, a level below it (round twelve, Owner 2026-10-18)', () => {
+    const html = render();
+    const steps = html.slice(html.indexOf('id="how-it-works"'), html.indexOf('id="samples-title"'));
+    // Inside the steps region, after step one's window and before step two; its title an h3, no region or h2 of its own.
+    const jury = steps.indexOf('id="jury-title"');
+    expect(jury).toBeGreaterThan(steps.indexOf('id="step-one-title"'));
+    expect(jury).toBeLessThan(steps.indexOf('aria-label="第二步'));
+    expect(steps).toMatch(/<h3 id="jury-title"/);
+    expect(html).not.toMatch(/<section[^>]*aria-labelledby="jury-title"/);
+    expect(html.match(/<h1[\s>]/g)).toHaveLength(1);
+    // What it does in full: the bridge, four points, one note, when it is worth using, the link; the circuit beside.
+    for (const text of [L_JURY.bridge, L_JURY.tier, ...L_JURY.points.flatMap(point => [point.lead, point.text]),
+      L_JURY.example.where, L_JURY.whenLabel, L_JURY.when, L_JURY.link]) expect(steps).toContain(escape(text));
+    expect(steps).toContain('aria-label="评审团怎么工作"');
+    // True to the real jury: each changed chapter's before and after, the original kept; no brands, no credits.
+    expect(L_JURY.points[2].text).toContain('每一章标出改前、改后的句子');
+    for (const word of ['GPT', 'Claude', 'Gemini', '积分', '没有分歧', '再辩一轮', '最多两轮']) expect(steps).not.toContain(word);
+  });
+
   it('keeps one button wording and a button at least every two regions', () => {
     const html = render();
     const header = html.slice(html.indexOf('<header'), html.indexOf('</header>'));
@@ -389,7 +408,7 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     expect(header).not.toContain('>免费试用<');
     const between = (from: string, to: string) => html.slice(html.indexOf(from), html.indexOf(to)).includes('免费和教练聊聊');
     expect(between('id="voice-title"', 'id="steps-title"')).toBe(true);
-    expect(between('id="steps-title"', 'id="jury-title"')).toBe(true);
+    expect(between('id="jury-title"', 'id="samples-title"')).toBe(true);
     expect(between('id="compare-title"', 'id="pricing-title"')).toBe(true);
   });
 

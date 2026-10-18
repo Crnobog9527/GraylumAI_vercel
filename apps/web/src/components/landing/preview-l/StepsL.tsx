@@ -14,6 +14,7 @@ import { visibleItems, type LandingFlags } from '@/lib/landing/landing-flags';
 import { momentAt, momentMs, ONE_MS, stagesAt } from '@/lib/landing/step-one-timeline';
 import { cn } from '@/lib/utils';
 import { DemoTag } from './DemoTag';
+import { JuryModuleL } from './JuryModuleL';
 import { LaterStepsL } from './LaterStepsL';
 import { PositioningPictureL, stepOneScript } from './PositioningPictureL';
 import styles from './steps-l.module.css';
@@ -118,6 +119,8 @@ export function StepsL({ flags }: { flags: LandingFlags }) {
           </div>
         </div>
       )}
+      {/* Round twelve: the jury hangs under step one's window, its last beat. */}
+      <div className={k.wrap}><JuryModuleL flags={flags} /></div>
       <div className={cn(k.wrap, styles.after)}><CtaK /></div>
       <LaterStepsL flags={flags} />
     </section>

@@ -32,9 +32,29 @@ export const L_STEPS = {
 export const L_JURY = {
   name: '多模型评审团',
   tier: 'Gold 专属',
-  title: '你的报告，交给 3 个顶级大模型一起审。',
-  /** Round eight (U5, Owner 2026-10-18 定): plain words, true to the jury; no "再辩一轮", "最多两轮" or "辩到没有分歧为止". */
-  flow: ['它们先各自挑错', '看法不一样的地方，会互相交叉审一遍，把分歧说清楚', '再由主笔合成一份修订稿。每一章用不用，由你决定。'],
+  /**
+   * Round twelve (Owner 2026-10-18: "把模块 4 评审团的介绍，拼接到模块 3 第一步'完整策略报告'的下方……评审端的功能也要讲
+   * 清楚，不要省略得太多"): the jury hangs under step one's window, a circuit line running from its "生成完整报告" into
+   * the jury's "你的报告". Plain words, true to the jury (FUSION-REVIEW): no model brands, no credits, no "再辩一轮",
+   * "最多两轮" or "辩到没有分歧为止". The third point follows the real result page (each changed chapter shows its
+   * sentences before and after, and why the chapter changed), not "every change beside the original".
+   */
+  bridge: '报告写完了，还可以再加一道关',
+  title: '交给 3 个顶级大模型，再帮你挑一遍错',
+  points: [
+    { lead: '各自独立读完你的报告', text: '三个模型分别站在你的受众和你本人的角度，挑出说不通、说过头、和你情况对不上的地方。' },
+    { lead: '看法不一样的地方，交叉审一遍', text: '一个模型觉得有问题、另一个觉得没问题的地方，会互相交叉审一遍，把分歧说清楚。' },
+    { lead: '主笔合成一份修订稿', text: '把意见汇总成修订稿，每一章标出改前、改后的句子，并写明这一章为什么改。' },
+    { lead: '每一章由你决定', text: '采用评审团的修订，还是保留原来的方向，一章一章选；原报告一直留着。' },
+  ],
+  example: {
+    tag: '示例',
+    where: '第 3 章 受众',
+    note: '你写的是"刚开始一个人住的上班族"，但没说清是华人还是非华人。开头用中文口播，可能挡掉一半人；建议前两周中英字幕两种都测。',
+    result: '你选了"采用修订"',
+  },
+  whenLabel: '什么时候值得用',
+  when: '准备照着报告投入时间和钱之前，比如辞职全职做、花钱投流、开课收费前，先让评审团把一遍关。',
   link: '看评审团怎么工作',
   href: '/landing/preview/jury',
   /**
@@ -63,7 +83,6 @@ export const L_SCENARIOS = {
   label: '选一个场景',
   /** Not a product window: a marketing comparison. */
   badge: '示意',
-  /** Round nine (V5): under the held region, what the next notch of the wheel does. */
   /** By the task's index in L_TASKS. */
   items: [
     { tab: '加做小红书', title: '同样问「小红书也想做起来，该怎么弄」', lede: '一个给你一套通用做法，一个按你已有的 TikTok 数据，告诉你哪些不用变、哪些要改。' },

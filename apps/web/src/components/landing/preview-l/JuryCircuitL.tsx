@@ -38,7 +38,10 @@ function Wire({ start }: { start: number }) {
  * over). Reduced motion: no loop, the parts fade in once in order and stay in their final state.
  * The words are the module's own (L_JURY.anim), unchanged.
  */
-export function JuryCircuitL() {
+export function JuryCircuitL({ start = true }: {
+  /** Round twelve: the loop waits for the light coming down from step one's report (JuryModuleL). */
+  start?: boolean;
+} = {}) {
   const a = L_JURY.anim;
   const ref = useRef<HTMLElement>(null);
   const [play, setPlay] = useState(false);
@@ -58,11 +61,11 @@ export function JuryCircuitL() {
     return () => { observer.disconnect(); document.removeEventListener('visibilitychange', update); };
   }, []);
   return (
-    <figure ref={ref} className={styles.circuit} aria-label={a.label} data-armed={(armed && !editing) || undefined} data-play={play || undefined}>
+    <figure ref={ref} className={styles.circuit} aria-label={a.label} data-armed={(armed && !editing) || undefined} data-play={(play && start) || undefined}>
       {/* Each loop is a fresh mount, so every part starts dim again together; the clock ends the loop (paused with it). */}
       <div key={cycle} className={styles.loop}>
         <span className={styles.clock} aria-hidden="true" onAnimationEnd={() => setCycle(count => count + 1)} />
-        <p className={styles.node} data-lit="" style={at(AT.report, { '--order': 0 } as CSSProperties)}>
+        <p className={styles.node} data-lit="" data-jury-report="" style={at(AT.report, { '--order': 0 } as CSSProperties)}>
           <FileText size={16} aria-hidden="true" />{a.report}
         </p>
         <Wire start={AT.wire1} />
