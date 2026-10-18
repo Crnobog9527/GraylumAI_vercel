@@ -89,7 +89,7 @@ if(withoutApp&&(!withoutAppSuite||serve||legacyRef||casePattern))throw new Error
 // the local fixture; database/API suites and explicitly bounded Runtime cases.
 const schemaFromFiles=args.includes('--schema-from-files')||opcMode;
 const c2StopOffline = casePattern === '^OPC: MENTOR_STREAM C2_STOP_OFFLINE$';
-const fileBuiltOpcMode=opcMode&&!serve&&!legacyRef;
+const fileBuiltOpcMode=opcMode&&!legacyRef;
 if (c2StopOffline && (!opcMode || !stagingHost || !stagingSchema || !schemaFromFiles
   || previewOptions.persistent || serve || legacyRef || withoutApp))
   throw new Error('C2_STOP_OFFLINE requires an isolated file-built OPC staging-host test');

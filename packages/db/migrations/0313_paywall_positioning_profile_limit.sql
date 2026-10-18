@@ -22,6 +22,24 @@ SET positioning_profile_limit = COALESCE(positioning_profile_limit,
   CASE level WHEN 'free' THEN 1 WHEN 'pro' THEN 3 WHEN 'gold' THEN 6 END)
 WHERE positioning_profile_limit IS NULL;
 
+-- During database-first rollout, old application versions may still insert a
+-- plan without the new column. Fill the per-tier default before NOT NULL checks.
+CREATE OR REPLACE FUNCTION public.membership_plans_positioning_profile_limit_default()
+RETURNS trigger
+LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
+BEGIN
+  IF NEW.positioning_profile_limit IS NULL THEN
+    NEW.positioning_profile_limit := CASE NEW.level
+      WHEN 'free' THEN 1 WHEN 'pro' THEN 3 WHEN 'gold' THEN 6 ELSE NULL END;
+  END IF;
+  RETURN NEW;
+END $$;
+
+DROP TRIGGER IF EXISTS trg_membership_plans_positioning_profile_limit_default ON public.membership_plans;
+CREATE TRIGGER trg_membership_plans_positioning_profile_limit_default
+BEFORE INSERT ON public.membership_plans
+FOR EACH ROW EXECUTE FUNCTION public.membership_plans_positioning_profile_limit_default();
+
 ALTER TABLE public.membership_plans
   ALTER COLUMN positioning_profile_limit SET NOT NULL;
 

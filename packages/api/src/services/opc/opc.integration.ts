@@ -281,6 +281,18 @@ it('OPC: PROFILE_LIMIT allows one free profile and blocks the next', async () =>
   )).rows[0].n).toBe(1);
 });
 
+it('OPC: PROFILE_LIMIT keeps old membership-plan inserts compatible', async () => {
+  await sql.query(
+    `insert into membership_plans(id,name,level,allow_fusion_review,allow_fusion_compare,library_storage_bytes,
+      allow_publish,own_data_window_days,allow_benchmark_monitor,allow_weekly_auto_review)
+     values($1,'pro','pro',true,true,500000000,true,30,false,false) on conflict(level) do nothing`,
+    [randomUUID()],
+  );
+  expect((await sql.query(
+    "select positioning_profile_limit from membership_plans where level='pro'",
+  )).rows[0].positioning_profile_limit).toBe(3);
+});
+
 it('OPC: PROFILE_LIMIT uses configured Pro 3 and Gold 6 caps', async () => {
   const f = await fixture();
   await sql.query("update profiles set membership_level='pro' where id=$1", [f.actor]);
