@@ -3177,7 +3177,7 @@
   "fn:erasure_manifest_mark_synced(uuid[])": "631a0cc16114",
   "fn:erasure_manifest_note(text,uuid,uuid,timestamp with time zone)": "fbd71cba8c08",
   "fn:erasure_manifest_pending(integer)": "4e31f05123e3",
-  "fn:erasure_payment_envelope(jsonb,text)": "6400f0078055",
+  "fn:erasure_payment_envelope(jsonb,text)": "8652de3f12ef",
   "fn:erasure_payment_guard()": "af5a28203bfd",
   "fn:erasure_payment_metadata(jsonb,text)": "b6d8925945ab",
   "fn:erasure_payment_terminal(jsonb)": "b6cf94ad7441",
