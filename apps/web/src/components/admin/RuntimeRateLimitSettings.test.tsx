@@ -116,9 +116,7 @@ it('shows wired protection, keeps the pause switch elsewhere and saves limits wi
   try {
     await browserExpect(page.getByText('已接线：保存后，下一条新消息或新一轮的第一次模型调用就按新配置检查。')).toBeVisible();
     await browserExpect(page.getByText('保护尚未接线', {exact:false})).toHaveCount(0);
-    await browserExpect(page.getByText('每轮开始时按这一轮最多可用的调用数一次性预扣（导师 1–2 次，/runtime 3 次）', {exact:false}))
-      .toBeVisible();
-    await browserExpect(page.getByText('都不能低于单轮最多调用数（当前 3）', {exact:false})).toBeVisible();
+    await browserExpect(page.getByText('每次新的模型或研究供应商调用各记 1 次', {exact:false})).toBeVisible();
     await browserExpect(page.getByText('暂停设置：未暂停')).toBeVisible();
     // The switch moved to the stop-loss tab, which has a confirm step.
     await browserExpect(page.getByRole('button', {name:/一键暂停|恢复新调用|停止新调用/})).toHaveCount(0);
@@ -142,7 +140,7 @@ it('shows wired protection, keeps the pause switch elsewhere and saves limits wi
     await browserExpect(page.getByText('配置已保存并回读。', {exact:true})).toBeVisible();
     await browserExpect(minute).toHaveValue('7');
     await page.getByLabel('模型调用：每分钟', {exact:true}).fill('2');
-    await browserExpect(page.getByText('当前“模型调用：每分钟”低于 3，/runtime 的每一轮都会被拒绝。')).toBeVisible();
+    await browserExpect(page.getByText('当前“模型调用：每分钟”低于 3，/runtime 的每一轮都会被拒绝。')).toHaveCount(0);
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 15000);
