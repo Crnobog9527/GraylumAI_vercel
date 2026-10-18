@@ -32,9 +32,9 @@ try {
   const fp = read('packages/db/tests/baseline/fingerprint.sql');
   const catalog = fp.slice(0, fp.indexOf('-- FINAL')) + 'SELECT jsonb_object_agg(k,d ORDER BY k) v FROM grouped;';
   const before = await v(catalog);
-  await c.query(read('packages/db/migrations/0312_payment_notice_reminders.sql'));
+  await c.query(read('packages/db/migrations/0309_payment_notice_reminders.sql'));
   assert.deepEqual(await v(catalog), before);
-  report.checks.push('0312 repeated after full chain leaves catalog identical');
+  report.checks.push('0309 repeated after full chain leaves catalog identical');
   for (const role of ['anon', 'authenticated', 'service_role']) {
     assert.equal(await v("SELECT has_function_privilege($1,'payment_notice_scan(integer)','execute') v", [role]), role === 'service_role');
     for (const fn of ['payment_notice_candidates(uuid)', 'payment_notice_eligible(payment_notices)']) {

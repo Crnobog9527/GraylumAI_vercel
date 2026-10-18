@@ -1,5 +1,5 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
--- PAY-NOTIFY PR-N2. 0312 is provisional; controller confirms before applying.
+-- PAY-NOTIFY PR-N2. 0309 assigned by Owner/controller on 2026-10-19 (core functionality first).
 -- Reuses payment_notices and the existing daily cron; orders/subscriptions/founder facts stay authoritative.
 -- No checkout/refund/renewal mutation. Helpers and scan are service-only, never exposed to clients.
 -- Rollback: stop calling payment_notice_scan and restore 0270's claim body; drop the three new functions
