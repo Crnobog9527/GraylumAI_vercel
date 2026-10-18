@@ -24,7 +24,7 @@ import styles from './picture-l.module.css';
 
 const noop = () => undefined;
 const QUESTIONS = { goal: L_GOAL_CARD, camera: J_PERSONA_ON_CAMERA, direction: J_PERSONA_DIRECTION } as const;
-type Line = TakeoverLine & { opening?: boolean };
+type Line = TakeoverLine & { opening?: boolean; pick?: number };
 
 /** A moment's messages: sample L's own script (round six), opening with the coach. */
 export const stepOneScript = (moment: number): readonly Line[] => L_POSITIONING_MOMENTS[moment]?.lines ?? [];
