@@ -29,6 +29,7 @@ import { UsageHistoryCard } from '@/components/profile/UsageHistoryCard';
 import { SecuritySettingsCard } from '@/components/profile/SecuritySettingsCard';
 import { AccountErasureCard } from '@/components/profile/AccountErasureCard';
 import { DataUseConsentCard } from '@/components/profile/DataUseConsentCard';
+import { FounderProfileCard } from '@/components/founder/FounderProfileCard';
 import { CookieSettingsCard } from '@/components/analytics/CookieSettingsCard';
 import { DATA_USE_CONSENT_VISIBLE } from '@/components/profile/dataUseConsentVisibility';
 import TicketsPanel from '@/components/profile/TicketsPanel';
@@ -237,6 +238,7 @@ function ProfilePageContent() {
             {userProfile && activeTab === 'profile' && (
               <>
                 <UserProfileHeader user={effectiveUser} onUserUpdate={handleUserUpdate} />
+                <FounderProfileCard />
                 <CreditsAndSubscriptionCards
                   user={effectiveUser}
                   onNavigateToSubscription={() => setActiveTab('subscription')}

@@ -7,6 +7,7 @@ import {
 import { logClientDevError } from '@/lib/client-log';
 import { createClient } from '@/lib/supabase';
 import { buildAppHref } from '@/lib/site-config';
+import { FounderBadge } from '@/components/founder/FounderBadge';
 import type { ProfileTab } from '@/lib/profile-tabs';
 
 export type { ProfileTab };
@@ -64,6 +65,7 @@ const ProfileSidebar = memo(function ProfileSidebar({
         >
           个人中心
         </h2>
+        <div className="mb-3 px-2 empty:hidden"><FounderBadge /></div>
         <nav className="space-y-1">
           {menuItems.map((item) => {
             const Icon = item.icon;
