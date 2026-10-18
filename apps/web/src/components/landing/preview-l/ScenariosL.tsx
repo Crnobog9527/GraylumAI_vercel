@@ -29,9 +29,10 @@ const SEEN_KEY = 'graylum-landing-l-scenarios-seen';
 const reducedMotion = () => Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
 const readSeen = () => { try { return window.localStorage.getItem(SEEN_KEY) === '1'; } catch { return false; } };
 const writeSeen = () => { try { window.localStorage.setItem(SEEN_KEY, '1'); } catch { /* private window: not remembered */ } };
-const PLAYED_KEY = 'graylum-landing-l-scenarios-played';
-const readPlayed = (): number[] => { try { return JSON.parse(window.localStorage.getItem(PLAYED_KEY) ?? '[]'); } catch { return []; } };
-const writePlayed = (ids: readonly number[]) => { try { window.localStorage.setItem(PLAYED_KEY, JSON.stringify(ids)); } catch { /* not remembered */ } };
+// Scenarios played are remembered only while the page is open (Owner 2026-10-18: a reload plays them again); the key the
+// page once kept them under, in this browser, is cleared and never read. The skip (SEEN_KEY) stays remembered.
+const OLD_PLAYED_KEY = 'graylum-landing-l-scenarios-played';
+const forgetOldPlayed = () => { try { window.localStorage.removeItem(OLD_PLAYED_KEY); } catch { /* nothing stored */ } };
 
 type Item = { task: (typeof L_TASKS)[number]; copy: (typeof L_SCENARIOS.items)[number]; turns: (typeof L_WORKFLOWS)[number] };
 const spanOf = (item: Item) => workflowBeats(item.turns) + HOLD_BEATS;
@@ -57,7 +58,7 @@ export function scenarioAt(items: readonly Item[], position: number) {
  * - The coach's chat shows its scrollbar and can be scrolled by the visitor (it stops following the newest line until
  *   the next scenario).
  * Round eight (U8, Owner 2026-10-18): no pause, by the pointer or a button; each scenario plays once and, played, is
- * remembered in this browser and shown finished when it comes back. U9: the typing never stops, but the page moves on
+ * shown finished when it comes back while the page stays open (a reload plays it again, Owner 2026-10-18). U9: the typing never stops, but the page moves on
  * to the next scenario by itself only when this one is written, has been on screen 8 seconds since, and the pointer has
  * been out of the chat windows for a second (a finger in them holds it 8 seconds); a thin bar on the next tab fills for
  * 3 seconds first and empties when the pointer comes back. A tab clicked stays until the same holds.
@@ -91,9 +92,7 @@ export function ScenariosL({ flags, after }: { flags: LandingFlags; after?: Reac
   // What one step of the wheel does now (V5); read by the listener below, which stays bound.
   const markPlayed = (index: number) => setPlayed(list => {
     if (list.includes(index)) return list;
-    const next = [...list, index];
-    writePlayed(next);
-    return next;
+    return [...list, index];
   });
   const steps = useRef({ index: 0, written: false, last: false, finish: () => {}, next: () => {}, prev: () => {} });
   // The scroll only tells whether the region is on screen; the wheel and fingers move it (V5).
@@ -183,7 +182,7 @@ export function ScenariosL({ flags, after }: { flags: LandingFlags; after?: Reac
   const active = held ? at.index : staticActive;
   // A scenario played to its end is remembered (round eight, U8): from then on it shows finished.
   const playedOut = held && items[at.index] ? at.beat >= workflowBeats(items[at.index].turns) : false;
-  useEffect(() => { setPlayed(readPlayed()); }, []);
+  useEffect(forgetOldPlayed, []);
   useEffect(() => { if (playedOut) markPlayed(at.index); }, [playedOut, at.index]);
   // On a phone the tabs share a row with the controls and scroll sideways: the current one is kept in view.
   useEffect(() => {

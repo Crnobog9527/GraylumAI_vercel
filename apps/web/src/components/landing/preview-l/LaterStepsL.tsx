@@ -39,16 +39,18 @@ const STAGE_BEATS: Record<string, number> = { topics: 6, cover: 5, material: 8, 
 
 const PUBLISHING = '发布中';
 const reducedMotion = () => Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
-/** Stages already played in this browser (round eight, U4): shown finished from then on. */
-const PLAYED_KEY = 'graylum-landing-l-later-played';
-const readPlayed = (): string[] => { try { return JSON.parse(window.localStorage.getItem(PLAYED_KEY) ?? '[]'); } catch { return []; } };
-const writePlayed = (ids: readonly string[]) => { try { window.localStorage.setItem(PLAYED_KEY, JSON.stringify(ids)); } catch { /* not remembered */ } };
+/**
+ * Stages already played are remembered only while the page is open (Owner 2026-10-18: a reload, or coming back another
+ * day, plays them again). The key the page once kept them under, in this browser, is cleared and never read.
+ */
+const OLD_PLAYED_KEY = 'graylum-landing-l-later-played';
+const forgetOldPlayed = () => { try { window.localStorage.removeItem(OLD_PLAYED_KEY); } catch { /* nothing stored */ } };
 
 /**
  * Region 3's 第二步 and 第三步 (Owner 2026-10-17, round five, R5): each a row of its stages, one shown at a time, moving
  * on by themselves while on screen (no pause button, round seven T7; the pointer does not stop them either, round eight
  * U3; focus holds them), a click picks any. Each stage plays once (round eight, U4: "用户只要看过一次以后……直接给他看
- * 最终结果"): played, it is remembered in this browser and shown finished from then on. Step two is
+ * 最终结果"): played, it shows finished from then on while the page stays open (a reload plays it again). Step two is
  * the work conversation as the product draws it (chat-display's work-chat pieces, the 正文稿件 column, 分镜与剪辑建议);
  * its voice stage, and all of step three (publishing, monitoring, the weekly review), are drawn from the plan because
  * the product has not built them yet (L_LATER marks which). The page is the full launched version (Owner
@@ -78,7 +80,7 @@ function LaterStep({ step, flags }: { step: { title: string; lede: string; stage
     const node = ref.current;
     if (!node || reducedMotion() || typeof IntersectionObserver === 'undefined') return;
     setMoving(true);
-    setPlayed(readPlayed());
+    forgetOldPlayed();
     const observer = new IntersectionObserver(entries => setSeen(entries.some(entry => entry.isIntersecting)), { threshold: 0.35 });
     observer.observe(node);
     return () => observer.disconnect();
@@ -94,7 +96,6 @@ function LaterStep({ step, flags }: { step: { title: string; lede: string; stage
     if (!moving || !current || !finished || played.includes(current.id)) return;
     const next = [...played, current.id];
     setPlayed(next);
-    writePlayed(next);
   }, [moving, current, finished, played]);
   useEffect(() => {
     if (!playing || finished) return;
