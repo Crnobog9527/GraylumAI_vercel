@@ -128,7 +128,7 @@ function StepFields({ props, step }: { props: CaptureChecklistProps; step: Step 
         );
       })}
       {conflict && <div role="alert" className={styles.alert}>
-        <p>其他窗口修改了相同字段。你的输入未提交，请比较后决定。</p>
+        <p>其他窗口修改了同一项内容。你的输入未提交，请比较后决定。</p>
         {conflict.fields.map(id => <p key={id}>{info?.schema.find(f => f.id === id)?.title ?? id}：服务器「{conflict.current[id]?.value ?? ""}」；
           你的输入「{edits?.[id]?.value ?? ""}」</p>)}
         <Button onClick={() => props.onKeepConflict(step.id)}>保留我的这些修改并重新保存</Button>

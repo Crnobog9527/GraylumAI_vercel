@@ -1,0 +1,41 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+ -- B2 pending own-post receipts: separate bounded batches; no connection transaction owns historical cleanup.
+ FOR target IN SELECT ex.id execution_id FROM runtime_executions ex JOIN profiles p ON p.id=ex.actor_id
+  WHERE (p_actor_id IS NULL OR ex.actor_id=p_actor_id) AND NOT runtime_workspace_posts_history_visible(ex.id)
+   AND (EXISTS(SELECT 1 FROM runtime_tool_calls t WHERE t.execution_id=ex.id AND t.result->>'kind'='my_posts')
+    OR EXISTS(SELECT 1 FROM runtime_session_history h WHERE h.execution_id=ex.id AND h.erased_at IS NULL
+     AND h.item->>'role' IS DISTINCT FROM 'user')
+    OR EXISTS(SELECT 1 FROM runtime_session_batches sb WHERE sb.execution_id=ex.id AND sb.erased_at IS NULL)
+    OR EXISTS(SELECT 1 FROM bill2_runs br WHERE br.id=ex.billing_run_id AND br.content_deleted_at IS NULL)
+    OR ex.state NOT IN ('completed','cancelled') AND ex.unavailable_reason IS NULL)
+   AND (ex.billing_run_id IS NULL OR EXISTS(SELECT 1 FROM bill2_runs br WHERE br.id=ex.billing_run_id FOR UPDATE SKIP LOCKED))
+  ORDER BY ex.id LIMIT p_limit FOR UPDATE OF ex,p SKIP LOCKED LOOP
+  SELECT * INTO e FROM runtime_executions WHERE id=target.execution_id;
+  IF e.state NOT IN ('completed','cancelled') THEN
+   UPDATE runtime_executions SET unavailable_reason=coalesce(unavailable_reason,'source_deleted') WHERE id=e.id;
+  END IF;
+  UPDATE runtime_tool_calls SET arguments=NULL,result=NULL,erased_at=stamp WHERE execution_id=e.id AND name='read_source'
+   AND result->>'kind'='my_posts';
+  UPDATE runtime_session_history SET item=NULL,erased_at=stamp
+   WHERE execution_id=e.id AND erased_at IS NULL AND item->>'role' IS DISTINCT FROM 'user';
+  UPDATE runtime_session_batches SET items=NULL,erased_at=stamp WHERE execution_id=e.id AND erased_at IS NULL;
+  UPDATE bill2_runs SET content_deleted_at=coalesce(content_deleted_at,stamp) WHERE id=e.billing_run_id;
+  done:=done+1;
+ END LOOP;
+ -- Readiness and SKIP LOCKED are evaluated before LIMIT: open, untrusted or locked rows cannot starve later runs.
+ FOR target IN SELECT ex.id execution_id FROM runtime_executions ex JOIN bill2_runs br ON br.id=ex.billing_run_id
+  JOIN profiles p ON p.id=ex.actor_id
+  WHERE br.content_deleted_at IS NOT NULL AND br.closed AND NOT runtime_workspace_posts_history_visible(ex.id)
+   AND (p_actor_id IS NULL OR ex.actor_id=p_actor_id)
+   AND coalesce(content_erasure_financial_allowed(ex.actor_id,coalesce(br.pre_deduct_id,br.id)),false)
+   AND EXISTS(SELECT 1 FROM bill2_receipts r JOIN bill2_calls c ON c.id=r.call_id
+    WHERE c.run_id=br.id AND r.financial_projection_version IS NULL AND runtime_workspace_posts_receipt_ready(r.payload,c))
+  ORDER BY ex.id LIMIT p_limit FOR UPDATE OF ex,br,p SKIP LOCKED LOOP
+  BEGIN
+   SELECT * INTO e FROM runtime_executions WHERE id=target.execution_id;
+   scrub:=account_erasure_scrub_receipts(e.actor_id,e.billing_run_id,100);
+   IF (scrub->>'remaining')::bigint>(scrub->>'manualReview')::bigint THEN waiting:=waiting+1;
+   ELSE done:=done+1;END IF;
+  EXCEPTION WHEN lock_not_available THEN waiting:=waiting+1;
+  END;
+ END LOOP;

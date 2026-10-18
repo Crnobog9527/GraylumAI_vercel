@@ -7,7 +7,7 @@
 不做：生产、真钱、读取密钥、自动接受/反驳拒付、判输扣回、自动恢复扣款、Waffo 查询。
 风险 high：计费核心、退款、数据库。迁移暂用 0311，最终由总控确认。
 
-D0 #1038 已合并；起点 staging 9af05d213059271f854b556ef8e6554e142462d4。
+D0 #1038 已合并；起点 staging 9af05d213059271f854b556ef8e6554e142462d4，已同步至 3530e4153e517f6c45161990d656471b41905866。
 决定项 D1–D6：MASTER_PLAN 2.1 2026-10-13 已按推荐确认，按方案执行。
 现有积分来源和来源审计仍是积分的唯一权威；新拒付表只保存拒付及冻结动作，不建立第二本消费账。
 
@@ -23,11 +23,11 @@ PAY-EVIDENCE 尚未存在时适配器无操作；未来证据清理必须复用 
 
 ## 已运行验证
 
-- PASS：本地 PostgreSQL 完整迁移链 309/309；重复执行 240 个；2588 个结构组；收敛 unchanged、回滚 restored、cleanup PASS，指纹由工具生成。
+- PASS：本地 PostgreSQL 完整迁移链 310/310；重复执行 241 个；2600 个结构组；收敛 unchanged、回滚 restored、cleanup PASS，指纹由工具生成。
 - PASS：本地拒付专用 SQL 测试，覆盖重复/乱序、多拒付共用冻结、并发付款和消费、在途结算/恢复、补偿、退款失败恢复、外部退款双向交错、跨期会员、按期发放、管理员拒绝路径、证据保全。
 - PASS：BILL2 本地完整集成 93/93；PAYG 补偿专用夹具为合成 run/call 记录，不声称完整真实模型执行。
 - PASS：D2 工作区 API 全量 7640 passed、16 skipped；该结果用于集成回归，不替代 D1 远端当前 SHA 的 CI。
-- Stripe 已重新连接 test 沙盒；MP 拒付测试卡真实验收正在进行，尚未宣称通过。
+- Stripe test 沙盒 MP 订阅拒付卡已实际产生 created、updated、closed(won)、funds_withdrawn/reinstated；PaymentIntent 与 invoice_payments 关联一致。普通卡及完整应用链验收继续中。
 
 ## Handoff
 

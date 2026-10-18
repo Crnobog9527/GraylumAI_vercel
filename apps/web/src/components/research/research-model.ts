@@ -11,7 +11,7 @@ import type { SocialPlatform } from "../../../../../packages/api/src/services/re
 /** Owner-approved wording (2026-10-15) wherever the page says where benchmark numbers come from. */
 export const DATA_SOURCE_NOTE = "AI 教练通过数据接口，直接抓取对标账号在社交媒体平台上的真实公开数据。";
 /** A number the evidence cannot support. Never shown as 0. */
-export const MISSING_TEXT = "缺失 / 未取到";
+export const MISSING_TEXT = "这次没查到";
 
 export const PLATFORM_LABELS: Record<SocialPlatform, string> = {
   douyin: "抖音", xiaohongshu: "小红书", bilibili: "B 站", weibo: "微博",
@@ -29,7 +29,7 @@ export type ResearchCall = Omit<Extract<ResearchTurnEvent, { type: "research_cal
 
 export type CallState = "running" | "success" | "missing" | "pending";
 export const CALL_STATE_LABELS: Record<CallState, string> = {
-  running: "正在搜", success: "成功", missing: "未取到", pending: "待核",
+  running: "正在搜", success: "成功", missing: "这次没查到", pending: "待核",
 };
 
 export interface CallView {
@@ -115,7 +115,7 @@ export function describeRequest(tool: ResearchToolName, rawArgs: unknown): { que
 
 /**
  * The row a call shows. The host already reduced the result to four states: an unknown supplier result is
- * `待核`, a failure `未取到`. Free card tools never arrive as calls.
+ * `待核`, a failure `这次没查到`. Free card tools never arrive as calls.
  */
 export function describeCall(call: ResearchCall): CallView {
   const kind = DATA_KIND_LABELS[call.dataKind] ?? "数据";

@@ -1,0 +1,319 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+-- CHAT-AUTO-CONTEXT B2. Number 0307 assigned by the controller through Owner (2026-10-18).
+-- Rollback: set chat_my_posts_enabled=false; keep this host/recovery and cleanup worker until in-flight
+-- ownPosts Runtime/BILL2 runs close, then revert the host. Old hosts cannot parse the new frozen context field.
+-- Retain SQL, journals, original posts/snapshots and accounting; no destructive down migration. Erasure still runs.
+-- Patch the CURRENT function (0301 or later), preserving benchmarks and strategy reports byte for byte.
+-- No new tables, no new model tool, no provider request. Service reads reuse PR-3a readData / publish_monitor_data.
+BEGIN;
+INSERT INTO system_settings(key,value) VALUES('chat_my_posts_enabled','false') ON CONFLICT(key) DO NOTHING;
+
+-- One paid-rights projection for the directory, admission budget and saved-result visibility.
+CREATE OR REPLACE FUNCTION public.runtime_workspace_post_window(p_actor_id uuid) RETURNS integer
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE days integer:=0;
+BEGIN
+ PERFORM bill2_actor(p_actor_id);
+ BEGIN
+  PERFORM report_membership_check(p_actor_id);
+  SELECT coalesce(max(mp.own_data_window_days),0) INTO days FROM membership_plans mp
+   JOIN profiles p ON p.membership_level=mp.level WHERE p.id=p_actor_id;
+ EXCEPTION WHEN raise_exception THEN
+  IF SQLERRM NOT IN ('REPORT_MEMBERSHIP_REQUIRED','REPORT_ENTITLEMENTS_UNAVAILABLE') THEN RAISE;END IF;
+  RETURN 0;
+ END;
+ RETURN days;
+END $$;
+REVOKE ALL ON FUNCTION public.runtime_workspace_post_window(uuid) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.runtime_workspace_post_window(uuid) TO service_role;
+
+CREATE OR REPLACE FUNCTION public.runtime_workspace_posts_visible(p_actor_id uuid,p_result jsonb) RETURNS boolean
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+BEGIN
+ PERFORM bill2_actor(p_actor_id);
+ IF p_result->>'status' IS DISTINCT FROM 'no_entitlement'
+  AND runtime_workspace_post_window(p_actor_id)<coalesce((p_result->>'window_days')::int,14) THEN RETURN false;END IF;
+ RETURN NOT EXISTS(SELECT 1 FROM jsonb_array_elements_text(coalesce(p_result->'source_connections','[]')) ids(value)
+  WHERE NOT EXISTS(SELECT 1 FROM social_connections c WHERE c.id::text=ids.value AND c.actor_id=p_actor_id
+   AND c.status NOT IN ('deleting','pending_selection')));
+END $$;
+REVOKE ALL ON FUNCTION public.runtime_workspace_posts_visible(uuid,jsonb) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.runtime_workspace_posts_visible(uuid,jsonb) TO service_role;
+
+DO $migration$
+DECLARE definition text;anchor text;replacement text;
+BEGIN
+ definition:=pg_get_functiondef('public.runtime_workspace_source(uuid,uuid,text)'::regprocedure);
+ IF position('-- B2 own posts' IN definition)=0 THEN
+  anchor:=$anchor$ IF coalesce(p_query,'')='' THEN$anchor$;
+  replacement:=$patch$ -- B2 own posts: no changes to the existing directory entries or dependencies.
+ DECLARE post_entries jsonb:='[]';days integer:=0;chosen jsonb;
+ BEGIN
+  IF (SELECT value='true'::jsonb FROM system_settings WHERE key='chat_my_posts_enabled')
+   AND (SELECT value='true'::jsonb FROM system_settings WHERE key='publish_monitor_enabled') THEN
+   days:=runtime_workspace_post_window(p_actor_id);
+   SELECT jsonb_agg(jsonb_build_object('id','my_posts:'||d,'kind','my_posts','name','我的作品 · '||d||' 天',
+    'windowDays',d,'use','Saved own post metrics, free to read. Default 14 days. At most two reads per answer.') ORDER BY d)
+    INTO post_entries FROM unnest(ARRAY[14,30,90]) d WHERE d=14 OR d<=days;
+  END IF;
+  IF coalesce(p_query,'')='' THEN
+   RETURN jsonb_build_object('kind','workspace_index','entries',entries||post_entries,'limit',40+jsonb_array_length(post_entries),
+    'dependencies',(SELECT coalesce(jsonb_agg(DISTINCT x->>'sourceVersionId'),'[]') FROM jsonb_array_elements(entries) x));
+  END IF;
+  IF p_query IN ('my_posts','my_posts:14','my_posts:30','my_posts:90') THEN
+   SELECT x INTO chosen FROM jsonb_array_elements(post_entries) x WHERE x->>'id'=CASE WHEN p_query='my_posts' THEN 'my_posts:14' ELSE p_query END;
+   IF chosen IS NULL THEN RETURN jsonb_build_object('kind','unavailable','dependencies','[]'::jsonb);END IF;
+   -- The current claim is already journaled: a third attempt must stop before the host calls PR-3a's data reader.
+   IF (SELECT count(*) FROM runtime_sessions active_s JOIN runtime_tool_calls t ON t.execution_id=active_s.active_execution
+    WHERE active_s.id=p_session_id AND active_s.actor_id=p_actor_id AND t.name='read_source'
+     AND t.arguments->>'query' IN ('my_posts','my_posts:14','my_posts:30','my_posts:90'))>2 THEN
+    RETURN jsonb_build_object('kind','unavailable','reason','read_limit','dependencies','[]'::jsonb,'note','本条回答的作品读取次数已用完');
+   END IF;
+   RETURN jsonb_build_object('kind','workspace_posts_request','windowDays',(chosen->>'windowDays')::int,'entitled',days>0);
+  END IF;
+ END;
+ IF coalesce(p_query,'')='' THEN$patch$;
+  IF array_length(string_to_array(definition,anchor),1)<>2 THEN RAISE EXCEPTION 'B2_WORKSPACE_SOURCE_MISMATCH';END IF;
+  EXECUTE replace(definition,anchor,replacement);
+ END IF;
+END $migration$;
+
+-- Serialize with runtime_tool's execution lock. Saved calls replay without consuming another read.
+CREATE OR REPLACE FUNCTION public.runtime_workspace_posts_guard() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE payload jsonb;reads integer;actor uuid;
+BEGIN
+ IF NEW.name<>'read_source' OR NEW.result->>'kind' IS DISTINCT FROM 'my_posts' THEN RETURN NEW;END IF;
+ SELECT e.payload,e.actor_id INTO payload,actor FROM runtime_executions e WHERE e.id=NEW.execution_id FOR NO KEY UPDATE;
+ -- Never wait behind a disconnect holding the connection and waiting for this tool row: refuse the stale copy.
+ BEGIN
+  PERFORM c.id FROM social_connections c WHERE c.actor_id=actor AND c.id::text IN
+   (SELECT jsonb_array_elements_text(coalesce(NEW.result->'source_connections','[]'))) ORDER BY c.id FOR SHARE NOWAIT;
+ EXCEPTION WHEN lock_not_available THEN
+  NEW.result:=jsonb_build_object('kind','unavailable','reason','source_deleted','dependencies','[]'::jsonb);RETURN NEW;
+ END;
+ IF NOT runtime_workspace_posts_visible(actor,NEW.result) THEN
+  NEW.result:=jsonb_build_object('kind','unavailable','reason','source_deleted','dependencies','[]'::jsonb);RETURN NEW;
+ END IF;
+ SELECT count(*) INTO reads FROM runtime_tool_calls t WHERE t.execution_id=NEW.execution_id
+  AND t.call_id<>NEW.call_id AND t.result->>'kind'='my_posts';
+ IF payload->>'ownPosts' IS DISTINCT FROM 'true' OR reads>=2 OR octet_length(NEW.result::text)>12000 THEN
+  NEW.result:=jsonb_build_object('kind','unavailable','reason',CASE WHEN reads>=2 THEN 'read_limit' ELSE 'capacity_exhausted' END,
+   'dependencies','[]'::jsonb,'note',CASE WHEN reads>=2 THEN '本条回答的作品读取次数已用完'
+    ELSE '资料太多放不下，先按已读到的回答' END);
+ END IF;
+ RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION public.runtime_workspace_posts_guard() FROM PUBLIC,anon,authenticated,service_role;
+DROP TRIGGER IF EXISTS runtime_workspace_posts_guard ON runtime_tool_calls;
+CREATE TRIGGER runtime_workspace_posts_guard BEFORE INSERT OR UPDATE OF result ON runtime_tool_calls
+ FOR EACH ROW EXECUTE FUNCTION public.runtime_workspace_posts_guard();
+
+-- Keep revoked source copies out of future model history while asynchronous erasure is pending.
+-- This filters model context only; runtime_view retains already displayed answers under the existing rule.
+CREATE OR REPLACE FUNCTION public.runtime_workspace_posts_history_visible(p_execution_id uuid) RETURNS boolean
+LANGUAGE sql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+ WITH RECURSIVE lineage(id) AS (
+  SELECT p_execution_id UNION SELECT d.dependency_id FROM runtime_history_dependencies d JOIN lineage l ON d.execution_id=l.id
+ ) SELECT NOT EXISTS(SELECT 1 FROM lineage l JOIN runtime_tool_calls t ON t.execution_id=l.id
+  JOIN runtime_executions ex ON ex.id=l.id WHERE (t.result->>'kind'='my_posts'
+   AND CASE WHEN publish_monitor_actor_open(ex.actor_id) THEN NOT runtime_workspace_posts_visible(ex.actor_id,t.result)
+    ELSE true END) OR (ex.payload->>'ownPosts'='true'
+    AND t.name='read_source' AND t.erased_at IS NOT NULL AND t.result IS NULL))
+$$;
+REVOKE ALL ON FUNCTION public.runtime_workspace_posts_history_visible(uuid) FROM PUBLIC,anon,authenticated,service_role;
+DO $history$ DECLARE sig text;d text;expected integer;
+BEGIN
+ FOR sig,expected IN SELECT * FROM (VALUES ('runtime_admit(uuid,uuid,uuid,jsonb,jsonb)',1),
+  ('runtime_session_items(uuid,uuid,uuid,text,jsonb,integer,integer)',2)) v(sig,n) LOOP
+  d:=pg_get_functiondef(('public.'||sig)::regprocedure);
+  IF position('runtime_workspace_posts_history_visible(' IN d)=0 THEN
+   IF array_length(string_to_array(d,'WHERE available'),1)<>expected+1 THEN RAISE EXCEPTION 'B2_HISTORY_SOURCE_MISMATCH';END IF;
+   EXECUTE replace(d,'WHERE available','WHERE available AND runtime_workspace_posts_history_visible(execution_id)');
+  END IF;
+ END LOOP;
+END $history$;
+
+-- Erasure authority is independent of paid access: expiry/downgrade/suspension never delete stored chat context.
+CREATE OR REPLACE FUNCTION public.runtime_workspace_posts_history_erased(p_execution_id uuid) RETURNS boolean
+LANGUAGE sql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+ WITH RECURSIVE lineage(id) AS (
+  SELECT p_execution_id UNION SELECT d.dependency_id FROM runtime_history_dependencies d JOIN lineage l ON d.execution_id=l.id
+ ) SELECT EXISTS(SELECT 1 FROM lineage l JOIN runtime_tool_calls t ON t.execution_id=l.id
+  JOIN runtime_executions ex ON ex.id=l.id WHERE (t.result->>'kind'='my_posts' AND (
+   EXISTS(SELECT 1 FROM profiles p WHERE p.id=ex.actor_id AND p.is_deleted::text='true')
+   OR EXISTS(SELECT 1 FROM account_erasure_requests ar WHERE ar.profile_id=ex.actor_id)
+   OR EXISTS(SELECT 1 FROM jsonb_array_elements_text(coalesce(t.result->'source_connections','[]')) ids(value)
+    WHERE NOT EXISTS(SELECT 1 FROM social_connections sc WHERE sc.id::text=ids.value AND sc.actor_id=ex.actor_id
+     AND sc.status<>'deleting')))) OR (ex.payload->>'ownPosts'='true' AND t.name='read_source'
+      AND t.erased_at IS NOT NULL AND t.result IS NULL))
+$$;
+REVOKE ALL ON FUNCTION public.runtime_workspace_posts_history_erased(uuid) FROM PUBLIC,anon,authenticated,service_role;
+
+-- Connection revocation never scans/locks historical conversations. Check only the current execution on entry;
+-- the existing worker below discovers stale saved sources and removes copies in bounded, retryable batches.
+DO $entry$ DECLARE d text;anchor text;patch text;
+BEGIN
+ d:=pg_get_functiondef('public.runtime_execution(uuid,uuid,text,jsonb)'::regprocedure);
+ IF position('-- B2 own-post source deleted' IN d)=0 THEN
+  anchor:=$a$ -- 0262 library source deleted$a$;
+  patch:=$p$ -- B2 own-post source deleted
+ IF e.state NOT IN ('completed','cancelled') AND runtime_workspace_posts_history_erased(e.id) THEN
+  UPDATE runtime_executions SET unavailable_reason=coalesce(unavailable_reason,'source_deleted')
+   WHERE id=e.id RETURNING * INTO e;
+ END IF;
+$p$;
+  IF array_length(string_to_array(d,anchor),1)<>2 THEN RAISE EXCEPTION 'B2_EXECUTION_SOURCE_MISMATCH';END IF;
+  EXECUTE replace(d,anchor,patch||anchor);
+ END IF;
+END $entry$;
+
+-- Final provider permission fence: serialize only used connections with a concurrent disconnect, then recheck.
+-- Receipt recording and financial recovery are intentionally unchanged; only a NEW HTTP grant is denied.
+DO $dispatch$ DECLARE d text;anchor text;fence text;
+BEGIN
+ d:=pg_get_functiondef('public.bill2_dispatch(uuid,uuid,uuid,uuid,boolean,jsonb)'::regprocedure);
+ IF position('-- B2 own-post dispatch fence' IN d)=0 THEN
+  anchor:=$a$ IF r.id IS NOT NULL THEN PERFORM runtime_billing_allowed(p_actor_id,r.payload,r.id);END IF;$a$;
+  fence:=$dispatchFence$ -- B2 own-post dispatch fence
+ BEGIN
+  PERFORM id FROM profiles WHERE id=p_actor_id AND EXISTS(
+   WITH RECURSIVE lineage(id) AS (
+    SELECT ex.id FROM runtime_executions ex WHERE ex.billing_run_id=r.id
+    UNION SELECT hd.dependency_id FROM runtime_history_dependencies hd JOIN lineage l ON hd.execution_id=l.id
+   ) SELECT 1 FROM lineage l JOIN runtime_tool_calls t ON t.execution_id=l.id WHERE t.result->>'kind'='my_posts'
+  ) FOR SHARE NOWAIT;
+  PERFORM sc.id FROM social_connections sc WHERE sc.id::text IN (
+   WITH RECURSIVE lineage(id) AS (
+    SELECT ex.id FROM runtime_executions ex WHERE ex.billing_run_id=r.id
+    UNION SELECT hd.dependency_id FROM runtime_history_dependencies hd JOIN lineage l ON hd.execution_id=l.id
+   ) SELECT jsonb_array_elements_text(coalesce(t.result->'source_connections','[]')) FROM lineage l
+    JOIN runtime_tool_calls t ON t.execution_id=l.id WHERE t.result->>'kind'='my_posts'
+  ) ORDER BY sc.id FOR SHARE NOWAIT;
+ EXCEPTION WHEN lock_not_available THEN RAISE EXCEPTION 'RUNTIME_CONTEXT_REVOKED';END;
+ IF EXISTS(SELECT 1 FROM runtime_executions ex WHERE ex.billing_run_id=r.id
+  AND NOT runtime_workspace_posts_history_visible(ex.id)) THEN RAISE EXCEPTION 'RUNTIME_CONTEXT_REVOKED';END IF;
+$dispatchFence$;
+  IF array_length(string_to_array(d,anchor),1)<>2 THEN RAISE EXCEPTION 'B2_DISPATCH_SOURCE_MISMATCH';END IF;
+  EXECUTE replace(d,anchor,anchor||E'\n'||fence);
+ END IF;
+END $dispatch$;
+
+-- Classify receipt readiness using the existing trusted money projection, without changing evidence.
+CREATE OR REPLACE FUNCTION public.runtime_workspace_posts_receipt_ready(p jsonb,c bill2_calls) RETURNS boolean
+LANGUAGE plpgsql STABLE SET search_path=public,pg_temp AS $$
+BEGIN
+ PERFORM bill2_erasure_receipt_projection(p,c);RETURN true;
+EXCEPTION WHEN raise_exception THEN
+ IF SQLERRM NOT IN ('BILL2_UNTRUSTED_RECEIPT','BILL2_INVALID_FINANCIAL_PROJECTION',
+  'BILL2_INVALID_COVERAGE','BILL2_INVALID_DECIMAL') THEN RAISE;END IF;
+ RETURN false;
+WHEN invalid_datetime_format OR datetime_field_overflow OR invalid_time_zone_displacement_value OR invalid_parameter_value THEN
+ RETURN false;
+END $$;
+REVOKE ALL ON FUNCTION public.runtime_workspace_posts_receipt_ready(jsonb,bill2_calls) FROM PUBLIC,anon,authenticated,service_role;
+
+-- Reuse the existing deletion worker, erased source journal and the original run's content marker.
+-- content_deleted_at persists the pending authority while the original BILL2 run is still open. The next worker
+-- batch retries after recovery settles it; receipt financial_projection_version is the existing completion marker.
+DO $patch$ DECLARE d text;anchor text;work text;
+BEGIN
+ d:=pg_get_functiondef('public.runtime_library_propagate(uuid,integer)'::regprocedure);
+ IF position('-- B2 pending own-post receipts' IN d)=0 THEN
+  anchor:=$a$ RETURN jsonb_build_object('processed',done,'waiting',waiting);$a$;
+  work:=$w$ -- B2 pending own-post receipts: separate bounded batches; no connection transaction owns historical cleanup.
+ FOR target IN SELECT ex.id execution_id FROM runtime_executions ex JOIN profiles p ON p.id=ex.actor_id
+  WHERE (p_actor_id IS NULL OR ex.actor_id=p_actor_id) AND runtime_workspace_posts_history_erased(ex.id)
+   AND (EXISTS(SELECT 1 FROM runtime_tool_calls t WHERE t.execution_id=ex.id AND t.result->>'kind'='my_posts')
+    OR EXISTS(SELECT 1 FROM runtime_session_history h WHERE h.execution_id=ex.id AND h.erased_at IS NULL
+     AND h.item->>'role' IS DISTINCT FROM 'user')
+    OR EXISTS(SELECT 1 FROM runtime_session_batches sb WHERE sb.execution_id=ex.id AND sb.erased_at IS NULL)
+    OR EXISTS(SELECT 1 FROM bill2_runs br WHERE br.id=ex.billing_run_id AND br.content_deleted_at IS NULL)
+    OR ex.state NOT IN ('completed','cancelled') AND ex.unavailable_reason IS NULL)
+   AND (ex.billing_run_id IS NULL OR EXISTS(SELECT 1 FROM bill2_runs br WHERE br.id=ex.billing_run_id FOR UPDATE SKIP LOCKED))
+  ORDER BY ex.id LIMIT p_limit FOR UPDATE OF ex,p SKIP LOCKED LOOP
+  SELECT * INTO e FROM runtime_executions WHERE id=target.execution_id;
+  IF e.state NOT IN ('completed','cancelled') THEN
+   UPDATE runtime_executions SET unavailable_reason=coalesce(unavailable_reason,'source_deleted') WHERE id=e.id;
+  END IF;
+  UPDATE runtime_tool_calls SET arguments=NULL,result=NULL,erased_at=stamp WHERE execution_id=e.id AND name='read_source'
+   AND result->>'kind'='my_posts';
+  UPDATE runtime_session_history SET item=NULL,erased_at=stamp
+   WHERE execution_id=e.id AND erased_at IS NULL AND item->>'role' IS DISTINCT FROM 'user';
+  UPDATE runtime_session_batches SET items=NULL,erased_at=stamp WHERE execution_id=e.id AND erased_at IS NULL;
+  UPDATE bill2_runs SET content_deleted_at=coalesce(content_deleted_at,stamp) WHERE id=e.billing_run_id;
+  done:=done+1;
+ END LOOP;
+ -- Readiness and SKIP LOCKED are evaluated before LIMIT: open, untrusted or locked rows cannot starve later runs.
+ FOR target IN SELECT ex.id execution_id FROM runtime_executions ex JOIN bill2_runs br ON br.id=ex.billing_run_id
+  JOIN profiles p ON p.id=ex.actor_id
+  WHERE br.content_deleted_at IS NOT NULL AND br.closed AND runtime_workspace_posts_history_erased(ex.id)
+   AND (p_actor_id IS NULL OR ex.actor_id=p_actor_id)
+   AND coalesce(content_erasure_financial_allowed(ex.actor_id,coalesce(br.pre_deduct_id,br.id)),false)
+   AND EXISTS(SELECT 1 FROM bill2_receipts r JOIN bill2_calls c ON c.id=r.call_id
+    WHERE c.run_id=br.id AND r.financial_projection_version IS NULL AND runtime_workspace_posts_receipt_ready(r.payload,c))
+  ORDER BY ex.id LIMIT p_limit FOR UPDATE OF ex,br,p SKIP LOCKED LOOP
+  BEGIN
+   SELECT * INTO e FROM runtime_executions WHERE id=target.execution_id;
+   scrub:=account_erasure_scrub_receipts(e.actor_id,e.billing_run_id,100);
+   IF (scrub->>'remaining')::bigint>(scrub->>'manualReview')::bigint THEN waiting:=waiting+1;
+   ELSE done:=done+1;END IF;
+  EXCEPTION WHEN lock_not_available THEN waiting:=waiting+1;
+  END;
+ END LOOP;
+$w$;
+  IF array_length(string_to_array(d,anchor),1)<>2 THEN RAISE EXCEPTION 'B2_ERASURE_WORKER_MISMATCH';END IF;
+  EXECUTE replace(d,anchor,work||anchor);
+ END IF;
+END $patch$;
+
+-- Extend A2b's saved work rows, preserving all existing source summaries and visibility fences.
+DO $work$ DECLARE d text;anchor text;replacement text;
+BEGIN
+ d:=pg_get_functiondef('public.runtime_work_items(uuid,uuid)'::regprocedure);
+ IF position('-- B2 own-post work projection' IN d)=0 THEN
+  anchor:=$a$      WHEN t.result->>'kind'='library_segment' THEN 4$a$;
+  replacement:=anchor||$p$
+      -- B2 own-post work projection
+      WHEN t.result->>'kind'='my_posts' THEN 5
+      WHEN t.result->>'kind'='unavailable' AND t.result->>'reason' IN ('capacity_exhausted','read_limit') AND e.payload->>'ownPosts'='true'
+       AND t.arguments->>'query' IN ('my_posts','my_posts:14','my_posts:30','my_posts:90') THEN 5
+      WHEN t.result IS NULL AND e.state IN ('prepared','running','interrupted','waiting_credits','waiting_resume') AND e.payload->>'ownPosts'='true'
+       AND t.arguments->>'query' IN ('my_posts','my_posts:14','my_posts:30','my_posts:90') THEN 5$p$;
+  IF array_length(string_to_array(d,anchor),1)<>2 THEN RAISE EXCEPTION 'B2_WORK_RANK_MISMATCH';END IF;
+  d:=replace(d,anchor,replacement);
+  anchor:=$a$      WHEN t.result->>'kind'='library_search' THEN ($a$;
+  replacement:=$p$      WHEN t.result->>'kind'='unavailable' AND t.result->>'reason' IN ('capacity_exhausted','read_limit') THEN
+       jsonb_build_object('kind','my_posts','state','missing','label',CASE t.result->>'reason'
+        WHEN 'read_limit' THEN '本条回答的作品读取次数已用完' ELSE '资料太多放不下，先按已读到的回答' END)
+      WHEN t.result->>'kind'='my_posts' THEN jsonb_build_object('kind','my_posts','state',CASE
+       WHEN t.result->>'status'='available' AND jsonb_typeof(t.result->'posts')='array'
+        AND t.result->>'window_days' IN ('14','30','90') THEN 'done'
+       WHEN t.result->>'status' IN ('not_connected','no_entitlement','no_recent_posts') THEN 'missing' ELSE 'pending' END,
+       'label',CASE t.result->>'status'
+        WHEN 'not_connected' THEN '未取到：还没有连接账号'
+        WHEN 'no_entitlement' THEN '读你的作品数据是 Pro/Gold 会员功能，这次先按定位和资料回答'
+        WHEN 'no_recent_posts' THEN CASE WHEN t.result->>'window_days' IN ('14','30','90')
+         THEN '最近 '||(t.result->>'window_days')||' 天没有新作品' ELSE '作品数据待核实' END
+        WHEN 'stale' THEN CASE WHEN t.result->>'as_of' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+         THEN '数据截至 '||(t.result->>'as_of')||'，最近一次快照已超过 3 天。' ELSE '还没有取到作品快照，指标未取到。' END
+        WHEN 'available' THEN CASE WHEN jsonb_typeof(t.result->'posts')='array' AND t.result->>'window_days' IN ('14','30','90')
+         THEN '读了你最近 '||(t.result->>'window_days')||' 天的 '||jsonb_array_length(t.result->'posts')||' 条作品'
+         ELSE '作品数据待核实' END ELSE '作品数据待核实' END)
+$p$||anchor;
+  IF array_length(string_to_array(d,anchor),1)<>2 THEN RAISE EXCEPTION 'B2_WORK_SUMMARY_MISMATCH';END IF;
+  d:=replace(d,anchor,replacement);
+  anchor:=$a$      WHEN t.result IS NULL AND t.arguments->>'query' LIKE 'search:%' THEN$a$;
+  IF array_length(string_to_array(d,anchor),1)<>2 THEN RAISE EXCEPTION 'B2_WORK_PENDING_MISMATCH';END IF;
+  d:=replace(d,anchor,$p$      WHEN t.result IS NULL AND t.arguments->>'query' IN ('my_posts','my_posts:14','my_posts:30','my_posts:90') THEN
+       jsonb_build_object('kind','my_posts','state',CASE WHEN e.state IN ('prepared','running') THEN 'running' ELSE 'pending' END,
+        'label',CASE WHEN e.state IN ('prepared','running') THEN '' ELSE '作品读取待核实' END)
+$p$||anchor);
+  anchor:=$a$    AND e.unavailable_reason IS NULL$a$;
+  IF array_length(string_to_array(d,anchor),1)<>2 THEN RAISE EXCEPTION 'B2_WORK_VISIBILITY_MISMATCH';END IF;
+  EXECUTE replace(d,anchor,anchor||$p$
+    AND (t.result IS NULL OR t.result->>'kind' IS DISTINCT FROM 'my_posts' OR runtime_workspace_posts_visible(p_actor_id,t.result))$p$);
+ END IF;
+END $work$;
+
+COMMIT;

@@ -55,8 +55,8 @@ export function CandidateCardView({ card, confirmation: saved, disabled = false,
         })}
       </div>
       {references.length > 0 && (
-        <div role="group" aria-label="头部参考账号" className={styles.list}>
-          <p className={styles.subhead}>头部参考</p>
+        <div role="group" aria-label="头部账号" className={styles.list}>
+          <p className={styles.subhead}>头部账号</p>
           {references.map(option => (
             <div key={option.id} className={cn(styles.row, styles.pick, styles.reference)} aria-disabled="true">
               <input type="checkbox" className={styles.check} checked={false} disabled aria-label={`${option.account} 只作参考，不能选`} readOnly />
@@ -64,7 +64,7 @@ export function CandidateCardView({ card, confirmation: saved, disabled = false,
                 <span className={styles.pickName}>{option.label || option.account}</span>
                 <span className={styles.pickMeta}>{accountText(option)}</span>
               </span>
-              <span className={styles.refTag}>只作参考、不计入</span>
+              <span className={styles.refTag}>只作参考</span>
             </div>
           ))}
         </div>
