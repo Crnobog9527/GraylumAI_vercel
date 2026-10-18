@@ -42,7 +42,9 @@ export function ownPostsResult(data:PublishMonitorData,now=Date.now()):Record<st
   .toSorted((a,b)=>Date.parse(b.postedAt!)-Date.parse(a.postedAt!)||a.id.localeCompare(b.id)).slice(0,30).map(p=>({
    id:p.id,platform:platforms.get(p.connectionId)??'unknown',source:p.source,posted_at:p.postedAt,
    title_excerpt:Array.from(p.titleExcerpt??'').slice(0,120).join(''),
-   captured_on:p.latest?.capturedOn??null,metrics:Object.fromEntries(Object.entries(p.latest?.metrics??{}).filter(([key])=>!p.latest?.missingFields.includes(key))),missing_fields:p.latest?.missingFields??[],
+   captured_on:p.latest?.capturedOn??null,
+   metrics:Object.fromEntries(Object.entries(p.latest?.metrics??{}).filter(([key])=>!p.latest?.missingFields.includes(key))),
+   missing_fields:p.latest?.missingFields??[],
   }));
  const asOf=posts.map(p=>p.captured_on).filter((d):d is string=>d!==null).sort().at(-1)??null;
  const stale=posts.length>0&&(asOf===null||now-Date.parse(asOf+'T00:00:00Z')>3*86400000);
