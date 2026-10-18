@@ -12,7 +12,7 @@
 --  * fusion_compare_end: ends a compare that has no group yet (refused, nothing charged) when that resume finds the
 --    snapshot changed. A compare with a group is stopped (fusion_compare_stop), never ended here.
 -- Rollback (nothing depends on these in stored data, and no route calls them while the compare switch is off):
--- DROP FUNCTION public.fusion_compare_context(uuid,uuid,integer); DROP FUNCTION public.fusion_compare_end(uuid,uuid);
+-- DROP FUNCTION public.fusion_compare_context(uuid,uuid,integer); DROP FUNCTION public.fusion_compare_material_token(uuid,uuid); DROP FUNCTION public.fusion_compare_end(uuid,uuid);
 -- DROP FUNCTION public.fusion_compare_gate(uuid,uuid,text,boolean); then re-run the fusion_compare_gate and
 -- fusion_compare_view definitions of 0290_fusion_compare.sql (three-argument gate, view without 'snapshotHash' and
 -- 'gateFallback'), and the fusion_compare_begin and fusion_compare_adopt definitions of 0290 (without the work-material checks); ALTER TABLE public.fusion_compares DROP COLUMN gate_fallback. The TypeScript treats a missing
@@ -53,6 +53,15 @@ BEGIN
   RETURN fusion_compare_view(fc);
 END $$;
 
+-- The work material as one opaque token: its revision AND its active content hash. A revocation only flags the existing
+-- row (the revision stays), so the revision alone cannot tell that the brief a compare was built from has been withdrawn.
+CREATE OR REPLACE FUNCTION public.fusion_compare_material_token(p_actor_id uuid, p_session_id uuid)
+RETURNS text LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
+  SELECT coalesce(c->>'materialRevision','')||':'||coalesce(c#>>'{scopeMaterial,hash}','none')
+  FROM (SELECT runtime_session_context(p_actor_id,p_session_id) c) x
+$$;
+REVOKE ALL ON FUNCTION public.fusion_compare_material_token(uuid,uuid) FROM PUBLIC,anon,authenticated,service_role;
+
 -- The last p_limit usable history items (oldest first) as {revision, item}, the session revision they belong to, whether a
 -- turn is running (the same replaceable-pointer rule as runtime_admit and fusion_compare_adopt), and the current work
 -- material exactly as runtime_session_context reports it. Items an ordinary turn would not be allowed to read (the
@@ -83,7 +92,7 @@ BEGIN
       AND old_run.session_ref=s.id AND old_execution.state='cost_pending'
       AND old_run.closed AND old_run.cancel_requested);
   RETURN jsonb_build_object('revision',s.revision,'busy',busy,'items',items,
-    'scopeMaterial',ctx->'scopeMaterial','materialRevision',ctx->'materialRevision');
+    'scopeMaterial',ctx->'scopeMaterial','materialRevision',to_jsonb(fusion_compare_material_token(p_actor_id,s.id)));
 END $$;
 
 -- Ends a compare that has no group yet: refused, nothing was held, nothing is charged. Idempotent for a compare that is
@@ -133,7 +142,7 @@ BEGIN
   -- The work material (brief) the caller read with the history must still be the current one: material edits do not move
   -- the session revision, and a start on an old brief would charge every model for it. TypeScript always sends the key.
   IF (p_request->'config') ? 'materialRevision'
-    AND p_request#>>'{config,materialRevision}' IS DISTINCT FROM runtime_session_context(p_actor_id,s.id)->>'materialRevision'
+    AND p_request#>>'{config,materialRevision}' IS DISTINCT FROM fusion_compare_material_token(p_actor_id,s.id)
   THEN RAISE EXCEPTION 'FUSION_COMPARE_STALE'; END IF;
   models:=p_request#>'{config,models}';
   IF jsonb_typeof(models) IS DISTINCT FROM 'array' THEN RAISE EXCEPTION 'FUSION_COMPARE_INVALID'; END IF;
@@ -199,7 +208,7 @@ BEGIN
   -- (cost_pending, closed, cancel requested) is replaceable and does not block.
   -- The work material (brief) is fenced like the history: a change after the compare started makes the answer stale.
   IF s.revision<>fc.history_revision
-    OR fc.config->>'materialRevision' IS DISTINCT FROM runtime_session_context(p_actor_id,s.id)->>'materialRevision' OR (s.active_execution IS NOT NULL AND NOT EXISTS(SELECT 1 FROM runtime_executions old_execution
+    OR fc.config->>'materialRevision' IS DISTINCT FROM fusion_compare_material_token(p_actor_id,s.id) OR (s.active_execution IS NOT NULL AND NOT EXISTS(SELECT 1 FROM runtime_executions old_execution
       JOIN bill2_runs old_run ON old_run.id=old_execution.billing_run_id
       WHERE old_execution.id=s.active_execution AND old_execution.session_id=s.id
         AND old_execution.actor_id=p_actor_id AND old_run.actor_id=p_actor_id

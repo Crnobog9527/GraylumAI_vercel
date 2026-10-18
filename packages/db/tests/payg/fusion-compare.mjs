@@ -157,7 +157,7 @@ export async function fusionCompareCases({db,Client,connectionString,report,crea
   report.checks.push('read lists columns in order with saved body, verdict, charged credits and their total; a column stops free before dispatch');
 
   // A real start records the session's work-material revision with the request; adoption fences on it.
-  const material = (await db.query('SELECT runtime_session_context($1,$2)->>\'materialRevision\' v',[actor,session])).rows[0].v;
+  const material = (await db.query('SELECT fusion_compare_material_token($1,$2) v',[actor,session])).rows[0].v;
   await db.query("UPDATE fusion_compares SET config=config||jsonb_build_object('materialRevision',$2::text) WHERE id=$1",[first.compareId,material]);
   // Adoption: column 1 has no usable answer; column 0 is written back with a zero-amount adoption run.
   const items2 = [{role:'user',content:question},{role:'assistant',content:[{type:'output_text',text:answer}]}];
@@ -208,6 +208,16 @@ export async function fusionCompareCases({db,Client,connectionString,report,crea
   assert.equal(context.items[0].item.content,question);
   assert.equal(context.items[1].item.content[0].text,answer);
   assert.equal(context.scopeMaterial,null);
+  // The material token moves on a revocation too (a revocation keeps the revision but withdraws the content).
+  const tokenOf = async () => (await db.query('SELECT fusion_compare_material_token($1,$2) v',[actor,session])).rows[0].v;
+  const noMaterial = await tokenOf();
+  await db.query("INSERT INTO runtime_scope_material(session_id,revision,request_id,request,content,content_hash) VALUES($1,1,$2,'{}','{\"brief\":\"x\"}','h1')",[session,randomUUID()]);
+  const withMaterial = await tokenOf();
+  await db.query('UPDATE runtime_scope_material SET revoked=true WHERE session_id=$1',[session]);
+  const revoked = await tokenOf();
+  assert.notEqual(withMaterial,noMaterial);assert.notEqual(revoked,withMaterial,'a revocation changes the token although the revision stays');
+  await db.query('DELETE FROM runtime_scope_material WHERE session_id=$1',[session]);
+  assert.equal(await tokenOf(),noMaterial);
   assert.deepEqual((await call(db,'fusion_compare_context',actor,session,1)).items.map(x=>x.revision),[2],'the last items only');
   assert.deepEqual((await call(db,'fusion_compare_context',actor,session,0)).items,[]);
   await assert.rejects(call(db,'fusion_compare_context',actor,session,-1),/FUSION_COMPARE_INVALID/);
