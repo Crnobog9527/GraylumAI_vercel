@@ -2,7 +2,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { runtimeExecutor } from './execute';
 import { createRuntimeBudget } from './budget';
-import type { NewWorkGateResult } from './newWorkGate';
+import type { RuntimeCallGate } from './newWorkGate';
 const mock = vi.hoisted(() => ({ run: vi.fn(), billing: {
   claimPaygCall: vi.fn(), dispatchOnce: vi.fn(), finalizeRun: vi.fn(), recoverRun: vi.fn(), recoverReceipts: vi.fn(),
 } }));
@@ -52,8 +52,7 @@ function fixture() {
     catch { throw Error('SDK_WRAPPED_ERROR'); }
     return options.model === 'organizer' ? 'summary' : 'body';
   });
-  const gate = vi.fn(async (_actor: string, _rate: number, _contractVersion?: 'bill2.v1' | 'bill2.v2'):
-    Promise<NewWorkGateResult> => ({ ok: true }));
+  const gate = vi.fn<RuntimeCallGate>(async () => ({ ok: true }));
   return { execution, database, raw, gate, fund: () => { balance = true; },
     options: { database, actor: async () => id, callGate: gate, adapter: { dispatch: vi.fn() } as never } };
 }
