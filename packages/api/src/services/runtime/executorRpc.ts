@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {resolvePostSource} from './workspacePosts';
 import {assertPath} from '../skills/loader';
 import {SKILL_FILE_TRACE_BYTES,skillFileParameters} from './skillFile';
 import {mentorHistoryParameters} from './mentorHistory';
@@ -63,7 +64,8 @@ export function executorRpc(options:{database:SessionRpc;actor:()=>Promise<strin
     'RUNTIME_RESUME_CLOSED','RUNTIME_CHECKPOINT_PENDING','RUNTIME_CALL_LIMIT_REACHED'].includes(message))
     throw new StagingAccessError(message as StagingFailure);
    throw new Error('RUNTIME_DATABASE_UNAVAILABLE');
-  }return result.data as T;
+  }return (name==='runtime_workspace_source'
+   ?await resolvePostSource(options.database,await options.actor(),result.data):result.data) as T;
  }
 }
 
