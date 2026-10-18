@@ -25,12 +25,14 @@ export function useReopenGrace(turnId?: string | null): boolean {
  * The small steps of one running mentor turn: streamed here (`live`), or still advancing on the server after a reload
  * (its `notice` is the reopened one). Always lists the turn's research calls; the steps only while it runs.
  */
-export function MentorTurnSteps({ live, reply, execution, calls }: {
+export function MentorTurnSteps({ live, reply, execution, calls, stale = false }: {
   live: LiveReply | null; reply: { text: string; notice?: ReplyNotice }; execution?: PaygTurn; calls: readonly ResearchCall[];
+  /** The reopen grace period is over: an open organizer is no longer shown as "still in the background". */
+  stale?: boolean;
 }) {
   const streaming = Boolean(live) && !live!.finished && !live!.stopped && !["incomplete", "waiting", "stopped"].includes(live!.phase);
   // Not streamed here but still advancing on the server: the reopened notice, or a saved main reply whose organizer is open.
-  const organizing = !live && Boolean(execution) && openOrganizer(execution!) && ["prepared", "running"].includes(execution!.state);
+  const organizing = !live && !stale && Boolean(execution) && openOrganizer(execution!) && ["prepared", "running"].includes(execution!.state);
   // The turn's own notice already says "还在后台处理"; the steps then stay quiet so it is shown once.
   const reopened = !live && (reply.notice?.text === REOPENED_HINT || organizing);
   return <>

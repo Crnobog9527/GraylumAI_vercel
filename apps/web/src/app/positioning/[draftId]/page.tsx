@@ -1182,7 +1182,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                         <MentorTurnGroup key={execution.executionId} executionId={execution.executionId}>
                           {/* The host opens the step itself: no fabricated user message. */}
                           {!openingTurn && <MentorUserMessage stepLabel={turnLabel} text={shownInput(execution.input) ?? "内容暂不可用"}/>}
-                          <MentorTurnSteps live={live} reply={reply} execution={execution} calls={research.of(execution.executionId)}/>
+                          <MentorTurnSteps live={live} reply={reply} execution={execution} calls={research.of(execution.executionId)} stale={stale}/>
                           {reply.text && <MentorReply kind={summaryTurn ? "summary" : openingTurn ? "opening" : "reply"} stepLabel={turnLabel}
                             text={reply.text} live={Boolean(live)} result={execution}
                             summaryHint={Boolean(summaryTurn && !next && !s.valid && turn?.stepId === step.id && summaryShown(execution))}/>}

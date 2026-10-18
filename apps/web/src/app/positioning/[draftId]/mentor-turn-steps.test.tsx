@@ -12,6 +12,10 @@ describe("MentorTurnSteps", () => {
       execution: { executionId: "e1", state: "running", primaryBody: "x", organizerComplete: null } as never });
     expect(out).toContain("正在整理待核对信息");
   });
+  it("stops showing an open organizer as in progress once the grace period is over", () => {
+    const open = { executionId: "e1", state: "running", primaryBody: "x", organizerComplete: null } as never;
+    expect(html({ reply: { text: "x" }, execution: open, stale: true })).not.toContain("data-turn-steps");
+  });
   it("says the background-processing line once when the turn notice already says it", () => {
     const open = { executionId: "e1", state: "running", primaryBody: null, organizerComplete: null } as never;
     const withNotice = html({ reply: { text: "", notice: { tone: "status", text: REOPENED_HINT, busy: true } }, execution: open });
