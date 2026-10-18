@@ -9,6 +9,8 @@ vi.mock('./cardPaymentEvidence', async importActual => ({ ...await importActual<
 vi.mock('./walletPaymentEvidence', () => ({ readWalletPaymentEvidence: mocks.wallet }));
 vi.mock('./cardUpgrade', () => ({ stopPriorAfterUpgrade: mocks.stopPrior }));
 vi.mock('./cardSubscriptionStop', () => ({ stopUndeliveredSubscription: mocks.stopUndelivered }));
+vi.mock('./disputePayment', () => ({ readDisputePayment: vi.fn(async () => ({ paymentIntentId: 'pi_fixture' })) }));
+vi.mock('./disputes', () => ({ resumeOrderDisputes: vi.fn(async () => {}) }));
 import { recoverMethodCheckout } from './walletWebhook';
 
 function fixture(overrides: Record<string, unknown> = {}) {
@@ -35,9 +37,10 @@ describe('PAY-STRIPE-MP card first payment through the method recovery', () => {
     await expect(f.run()).resolves.toEqual({ orderId: 'order', checkoutStatus: null, paymentStatus: 'paid' });
     expect(mocks.card).toHaveBeenCalledWith(expect.objectContaining({ priceId: 'price_gold_month', sessionId: 'cs_card' }));
     expect(mocks.wallet).not.toHaveBeenCalled();
-    expect(f.db.rpc).toHaveBeenCalledWith('pay_waffo_fulfill_payment', { p_order: 'order', p_merchant: 'fixture', p_checkout: 'cs_card',
-      p_payment: 'in_1', p_amount: 4900, p_currency: 'usd', p_paid_at: '2026-10-12T08:42:40.000Z', p_subscription: 'sub_1',
-      p_start: '2026-10-12T08:42:34.000Z', p_end: '2026-11-12T08:42:34.000Z' });
+    expect(f.db.rpc).toHaveBeenCalledWith('pay_dispute_fulfill', { p_facts: { orderId: 'order', merchant: 'fixture',
+      mode: 'test', checkoutId: 'cs_card', paymentId: 'in_1', paymentIntentId: 'pi_fixture', amount: 4900, currency: 'usd',
+      paidAt: '2026-10-12T08:42:40.000Z', subscriptionId: 'sub_1',
+      start: '2026-10-12T08:42:34.000Z', end: '2026-11-12T08:42:34.000Z' } });
     // The tax Managed Payments added is recorded on the order as its own fact, after the payment itself.
     expect(f.db.rpc).toHaveBeenLastCalledWith('pay_stripe_mp_record_tax', { p_order: 'order', p_merchant: 'fixture',
       p_payment: 'in_1', p_tax: 980 });
@@ -73,8 +76,8 @@ describe('PAY-STRIPE-MP card first payment through the method recovery', () => {
       paidAt: '2026-10-12T08:42:40.000Z', subscription: null });
     const f = fixture({ item_type: 'credit_package' });
     await f.run();
-    expect(f.db.rpc).toHaveBeenCalledWith('pay_waffo_fulfill_payment', expect.objectContaining({ p_payment: 'pi_1', p_amount: 940,
-      p_subscription: null, p_start: null, p_end: null }));
+    expect(f.db.rpc).toHaveBeenCalledWith('pay_dispute_fulfill', expect.objectContaining({ p_facts: expect.objectContaining({ paymentId: 'pi_1', amount: 940,
+      subscriptionId: null, start: null, end: null }) }));
     expect(f.db.rpc).toHaveBeenLastCalledWith('pay_stripe_mp_record_tax', expect.objectContaining({ p_payment: 'pi_1', p_tax: 188 }));
   });
   it('closes an expired or async-failed unpaid card checkout and releases the reservation; an open one is left alone', async () => {
@@ -89,7 +92,7 @@ describe('PAY-STRIPE-MP card first payment through the method recovery', () => {
         expect(f.db.rpc).toHaveBeenCalledWith('pay_waffo_observe_qualification', expect.objectContaining({ p_order: 'order',
           p_checkout: 'cs_card', p_state: 'closed_unpaid', p_amount: 0 }));
       } else expect(f.db.rpc).not.toHaveBeenCalled();
-      expect(f.db.rpc).not.toHaveBeenCalledWith('pay_waffo_fulfill_payment', expect.anything());
+      expect(f.db.rpc).not.toHaveBeenCalledWith('pay_dispute_fulfill', expect.anything());
     }
   });
   it('propagates evidence failures without granting', async () => {

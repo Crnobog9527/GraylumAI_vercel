@@ -1,4 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { reconcilePaymentDisputes, type DisputeAlert } from './disputes';
+import { reconcileDisputeRenewalRefunds } from './disputeRenewalRefund';
 import type Stripe from 'stripe';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { resolveStripeScope } from './stripeCheckoutPersistence';
@@ -18,12 +20,12 @@ const DAY = 86400;
 export type StripeCardFinding = OpenOrderFinding | {
   kind: 'paid_not_delivered' | 'paid_in_review' | 'renewal_not_recorded' | 'refund_not_recorded' | 'tax_not_recorded'
     | 'repair_failed' | 'stop_unconfirmed'
-    | 'scan_incomplete' | 'scan_failed';
+    | 'scan_incomplete' | 'scan_failed' | 'dispute_repair_failed';
   object?: 'checkout' | 'invoice' | 'refund' | 'subscription'; externalId?: string; orderId?: string; code?: string;
 };
 type Listed<T> = { data: T[]; has_more: boolean };
 type Options = { expectedMode: StripeScope['mode']; now?: Date; days?: number; maxPages?: number; budgetMs?: number;
-  alert?: () => void };
+  alert?: () => void; disputeAlert?: DisputeAlert };
 
 /** PAY-STRIPE-MP daily backstop (04:00 billing-reconcile, #847 2.5-5): if a webhook was lost, a paid card order could
  * stay undelivered with nothing noticing. Scans the last `days` of Stripe checkout sessions, paid renewal invoices and
@@ -41,6 +43,21 @@ export async function reconcileStripeCardPayments(db: SupabaseClient, stripe: St
   const deadline = Date.now() + (options.budgetMs ?? 40_000);
   const findings: StripeCardFinding[] = [];
   let repaired = 0, checked = 0, complete = true, outOfTime = false;
+
+  // Give the stop/freeze scan its own cap while reserving at least 10 seconds for mandatory renewal refunds.
+  // Both remain ahead of the ordinary history scans, so neither safety repair can be starved by checkout volume.
+  const disputeDeadline = Math.min(deadline - 10_000, Date.now() + 15_000);
+  const disputes = await reconcilePaymentDisputes(db, stripe, options.disputeAlert, disputeDeadline);
+  const refunds = await reconcileDisputeRenewalRefunds(db, stripe, options.disputeAlert, deadline);
+  checked += disputes.checked + refunds.checked;
+  complete &&= disputes.complete && refunds.complete;
+  if (disputes.failed || refunds.failed) findings.push({ kind: 'dispute_repair_failed', code: 'PAY_DISPUTE_MANUAL_REVIEW' });
+  if (!disputes.complete || !refunds.complete) findings.push({ kind: 'scan_incomplete', code: 'PAY_DISPUTE_SCAN_INCOMPLETE' });
+  outOfTime = Date.now() > deadline;
+  if (outOfTime && disputes.complete && refunds.complete) {
+    complete = false;
+    findings.push({ kind: 'scan_incomplete', object: 'subscription', code: 'TIME_BUDGET' });
+  }
 
   const scan = async <T extends { id: string }>(object: 'checkout' | 'invoice' | 'refund',
     list: (after?: string) => Promise<Listed<T>>, visit: (row: T) => Promise<void>) => {
@@ -103,7 +120,7 @@ export async function reconcileStripeCardPayments(db: SupabaseClient, stripe: St
     if (knownOrder && hasTax(knownOrder) && knownOrder.fulfilled_at && !knownOrder.method_review_reason) return;
     // Missing, recorded without its tax fact, or kept for review: the renewal handler is idempotent; a replay of a
     // review renewal repeats the confirmed stop at Stripe and its alert, which a crash after the tax write may have cut.
-    if (!await handleCardSubscriptionInvoice(db, stripe, invoice.id, 'invoice.paid', undefined, options.alert)) return;
+    if (!await handleCardSubscriptionInvoice(db, stripe, invoice.id, 'invoice.paid', undefined, options.alert, options.disputeAlert)) return;
     const orderId = await recordedOrder(db, scope, 'payment', invoice.id);
     if (knownOrder && hasTax(knownOrder)) return;
     if (orderId && hasTax(await cardOrder(db, orderId))) repaired++;

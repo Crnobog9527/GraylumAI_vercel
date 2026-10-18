@@ -15,8 +15,9 @@ export function stripeStopState(subscription: Stripe.Subscription) {
 }
 
 /** The subscription as Stripe has it, in this account's own mode (R7: live in production, test on staging). */
-export async function readSubscription(stripe: Stripe, subscriptionId: string) {
-  const [scope, subscription] = await Promise.all([resolveStripeScope(stripe), stripe.subscriptions.retrieve(subscriptionId)]);
+export async function readSubscription(stripe: Stripe, subscriptionId: string, options?: Stripe.RequestOptions) {
+  const [scope, subscription] = await Promise.all([resolveStripeScope(stripe),
+    options ? stripe.subscriptions.retrieve(subscriptionId, {}, options) : stripe.subscriptions.retrieve(subscriptionId)]);
   if (subscription.object !== 'subscription' || subscription.id !== subscriptionId
     || subscription.livemode !== (scope.mode === 'live')) {
     throw new Error(PAYMENT_EVIDENCE_CONFLICT);
@@ -39,12 +40,13 @@ export async function syncState(db: SupabaseClient, merchant: string, localSubsc
  * account) has no local subscription row yet, so nothing else would stop it: stop its renewal at Stripe (marked
  * Graylum-initiated) and confirm, so the customer is never charged again for a membership they did not receive. The
  * paid first period is left to the review (refund). A failure throws so the payment webhook is retried. */
-export async function stopUndeliveredSubscription(stripe: Stripe, subscriptionId: string) {
-  let subscription = await readSubscription(stripe, subscriptionId);
+export async function stopUndeliveredSubscription(stripe: Stripe, subscriptionId: string, options?: Stripe.RequestOptions) {
+  let subscription = await readSubscription(stripe, subscriptionId, options);
   if (!stripeStopState(subscription).stop && !stripeStopState(subscription).canceled) {
-    await stripe.subscriptions.update(subscriptionId, { cancel_at_period_end: true,
-      cancellation_details: { comment: GRAYLUM_INITIATED_CANCEL } });
-    subscription = await readSubscription(stripe, subscriptionId);
+    const params = { cancel_at_period_end: true, cancellation_details: { comment: GRAYLUM_INITIATED_CANCEL } };
+    if (options) await stripe.subscriptions.update(subscriptionId, params, options);
+    else await stripe.subscriptions.update(subscriptionId, params);
+    subscription = await readSubscription(stripe, subscriptionId, options);
   }
   const state = stripeStopState(subscription);
   if (!state.stop && !state.canceled) throw new Error('PAY_STRIPE_MP_RENEWAL_STOP_UNCONFIRMED');

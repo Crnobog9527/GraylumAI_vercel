@@ -1,0 +1,118 @@
+{
+  "capturedAt": "2026-10-19",
+  "migrationFile": "0308_pay_dispute_guard.sql",
+  "migrationSha256": "3061cf9b7e7399ed3e903803ce295f56501effcd07a7a08167ba743ed75ce9da",
+  "disputeSqlChecks": [
+    "multiple disputes on one payment share one hold; only the final withdrawal releases it",
+    "duplicate-event; other sources stay spendable; failed calls stay attributed; withdrawal exactly once",
+    "closed first freezes; late update never reopens; fund events append once",
+    "in-flight refund restores original source and increases frozen amount",
+    "in-flight lower settlement freezes returned credits",
+    "same-transaction restore/reserve: pending hold is excluded from both balance admission and source attribution",
+    "excess settlement uses frozen remainder without debiting other sources",
+    "overrun beyond frozen remainder uses other available balance by existing rules and flags manual review",
+    "unknown sources alert-only, no balance deduction",
+    "actual package refund failure after an already claimed refund restores into the dispute hold",
+    "PAYG compensation function with synthetic run/call records increases frozen credits, not spendable balance",
+    "refund supersedes a freeze: subsequent in-flight pack return is clawed back once",
+    "wallet-pack hold conversion and repeated refund after superseding: both wallet methods preserve unrelated balance",
+    "freeze then external refund; refund then dispute; no duplicate clawback",
+    "real two-connection dispute/refund races preserve existing refunded-pack quarantine or convert a prior dispute hold without duplicate debit",
+    "real two-connection consumption/freeze serialization and restoration",
+    "dispute first: first fulfillment atomically claims pending dispute; another equal-price payment remains usable",
+    "real two-session payment/dispute race: mapping is rechecked under the same canonical payment lock",
+    "admin and service-role allow/deny boundaries",
+    "withdrawn dispute permits a fresh valid package refund; active holds and unexplained negative adjustments still reject",
+    "conflicting order hint rejected; canonical owner frozen, unrelated owner balance and mapping untouched",
+    "two distinct payment keys racing for one order hint: receive and late match each commit exactly one mapping",
+    "late match after external resolution reopens, freezes already delivered credits and applies stop state",
+    "off-site resolution is admin-only, idempotently audited and denied for known payment references; later actual fulfillment reopens and freezes the matching source",
+    "missing subscription derived and locked; conflict rejected; late match, pending claim and later event backfill identity",
+    "stop confirmation reloads a mapping committed while waiting and synchronizes internal subscription state",
+    "late match after external resolution freezes delivered membership and reopens subscription stop",
+    "current paid period loses membership during freeze and regains it on withdrawal",
+    "withdrawn current-period dispute permits fresh monthly refund approval and claim without loosening active-hold guard",
+    "previous-period dispute preserves an already delivered next period and its credits",
+    "renewal after frozen previous period is retained without grants and requires full refund",
+    "real two-connection prior-dispute/next-renewal races in both commit orders preserve delivered periods or require refund",
+    "annual monthly release rechecks frozen source under lock",
+    "full subscription refund replaces frozen credits and intercepts later in-flight returns",
+    "monthly refund failure during dispute: source and balance remain frozen; stop survives restore and withdrawal",
+    "documented PAY-EVIDENCE table adapter: root-order hold, pending-delete reset and 90-day extension",
+    "bot regressions: terminal-first clears pending deletion; matched and fulfilled pending disputes refresh root retention"
+  ],
+  "baseline": {
+    "image": "postgres@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73",
+    "failed": null,
+    "steps": 311,
+    "passed": 311,
+    "bridges": [
+      "0143_ticket_grants_and_own_rls.sql"
+    ],
+    "repeated": 242,
+    "groups": 2624,
+    "accountOpenAudit": [],
+    "builtFingerprint": "written",
+    "convergenceReapply": "unchanged",
+    "rollback": {
+      "removed": [
+        "fn:prevent_client_profile_credit_write()",
+        "fnacl:prevent_client_profile_credit_write()",
+        "trg:profiles.trg_prevent_client_profile_credit_write"
+      ],
+      "changedByRollback": [],
+      "restored": true
+    },
+    "cleanup": "PASS"
+  },
+  "bill2": {
+    "suite": "bill2",
+    "passed": 93,
+    "skipped": 0,
+    "perFile": {
+      "src/services/bill2/billing.integration.ts": 93
+    },
+    "excluded": []
+  },
+  "runtime": {
+    "suite": "runtime",
+    "passed": 431,
+    "skipped": 5,
+    "perFile": {
+      "src/services/runtime/runtime.integration.ts": 168,
+      "src/services/runtime/streaming.integration.ts": 112,
+      "src/services/runtime/terminalReply.integration.ts": 20,
+      "src/services/runtime/historyCache.integration.ts": 4,
+      "src/services/opc/capture.integration.ts": 78,
+      "src/services/opc/agentCorePlanB.integration.ts": 3,
+      "src/services/bill2/agentCorePlanB.integration.ts": 14,
+      "src/services/runtime/platformFailure.integration.ts": 4,
+      "src/services/runtime/staleChargedRounds.integration.ts": 12,
+      "src/services/runtime/positioningRefusal.integration.ts": 5,
+      "src/services/fusion/fusion.integration.ts": 3,
+      "src/services/runtime/researchTurn.integration.ts": 2,
+      "src/services/runtime/libraryRead.integration.ts": 6
+    },
+    "excluded": [
+      {
+        "name": "RUNTIME: browser ordinary and document Skill survive refresh, actual process restart and fresh login",
+        "cases": 1,
+        "reason": "launches a desktop Chrome and drives the local Next application, then restarts it"
+      },
+      {
+        "name": "RUNTIME: attached organizer search=",
+        "cases": 3,
+        "reason": "reads the persisted result through the local Next application HTTP route runtime.view"
+      },
+      {
+        "name": "RUNTIME: actual HTTP disconnect keeps late output in original scope and killed process preserves unknown without resend",
+        "cases": 1,
+        "reason": "disconnects from and kills the local Next application process"
+      }
+    ]
+  },
+  "limits": [
+    "BILL2 and runtime full suites ran before the final SQL mapping/subscription changes; final dispute SQL and full baseline include them. Exact candidate CI remains authoritative.",
+    "API full 7681 passed and 16 skipped includes wallet-kind and won-dispute refund eligibility; final pagination and staging synchronization followed, with targeted router 5/5 and component 4/4 passing, API/Web typecheck and lint passing. Exact candidate CI remains authoritative. Later external-resolution router/service regressions passed 14/14, component 5/5; API/Web typecheck and lint passed. Final provider-identity UI/router regressions passed 6/6 each; API/Web typecheck, lint and size checks passed. Wallet refund replay and concurrent stop tests passed 26/26, API/Web typecheck and API lint passed after these changes."
+  ]
+}

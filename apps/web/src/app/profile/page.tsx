@@ -1,5 +1,6 @@
 'use client';
 
+import { PaymentDisputeNotice } from '@/components/profile/PaymentDisputeNotice';
 import { useState, Suspense, useMemo, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { AlertTriangle, Loader2, Menu, RefreshCw } from 'lucide-react';
@@ -253,6 +254,7 @@ function ProfilePageContent() {
 
             {userProfile && activeTab === 'subscription' && (
               <>
+                <PaymentDisputeNotice />
                 <SubscriptionCard user={effectiveUser} />
                 <BillingRecordsCard />
                 <CreditStatsCard user={effectiveUser} />
