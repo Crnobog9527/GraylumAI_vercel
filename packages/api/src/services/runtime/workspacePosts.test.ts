@@ -16,6 +16,7 @@ function post(id:string,date='2026-10-17T00:00:00Z',n=10):PublishMonitorData['po
 }
 describe('my_posts saved data',()=>{
  it('uses the four prescribed states and the actual window',()=>{
+  expect(ownPostsResult(data(),now)).toMatchObject({status:'no_recent_posts',source_connections:[connection]});
   expect(ownPostsResult({...data(),connections:[]},now)).toMatchObject({status:'not_connected',
    note:'我还看不到你发布的作品数据。你可以在『作品数据』里连接账号或导入表格，我就能按真实数据给建议。这次先按你的定位和资料来。'});
   for(const days of [14,30,90])expect(ownPostsResult(data(days),now)).toMatchObject({status:'no_recent_posts',note:`最近 ${days} 天没有新作品`});

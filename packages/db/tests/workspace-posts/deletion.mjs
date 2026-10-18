@@ -48,10 +48,10 @@ export async function deletionCases({c,report}){
  await c.query(`INSERT INTO runtime_executions(id,actor_id,session_id,request_id,payload,history_revision,state)
  VALUES($1,$2,$3,$4,'{"ownPosts":true}',0,'interrupted')`,[running,a,sid,randomUUID()]);
  await c.query(`INSERT INTO runtime_tool_calls(execution_id,call_id,name,arguments,result)
-  VALUES($1,'running-read','read_source','{}',$2)`,[running,{...source,source_connections:[conn2]}]);
+  VALUES($1,'running-read','read_source','{}',$2)`,[running,{...source,status:'no_recent_posts',posts:[],source_connections:[conn2]}]);
  await c.query('SET ROLE service_role');
  try{await c.query('SELECT publish_monitor_disconnect($1,$2)',[a,conn2]);}finally{await c.query('RESET ROLE');}
  assert.equal(await one('SELECT unavailable_reason v FROM runtime_executions WHERE id=$1',[running]),'source_deleted');
  assert.equal(await one("SELECT result IS NULL v FROM runtime_tool_calls WHERE execution_id=$1 AND call_id='running-read'",[running]),true);
- report.checks.push('real disconnect RPC stops unfinished work and clears its copied result; existing displayed answers are retained');
+ report.checks.push('real disconnect RPC stops unfinished work and clears the no-recent-posts copied result; existing displayed answers are retained');
 }

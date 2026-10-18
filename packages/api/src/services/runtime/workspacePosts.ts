@@ -73,7 +73,7 @@ export function ownPostsResult(data:PublishMonitorData,now=Date.now()):Record<st
    const group=groups[p.platform]??=(Object.create(null) as Record<string,number[]>);
    (group[key]??=[]).push(n);
   }
-  result.source_connections=[...new Set(posts.map(p=>p.connection_id))];
+  result.source_connections=[...new Set([...data.connections.map(c=>c.id),...posts.map(p=>p.connection_id)])];
   result.platform_medians=Object.fromEntries(Object.entries(groups).map(([platform,metrics])=>[platform,
    Object.fromEntries(Object.entries(metrics).map(([key,values])=>[key,{median:median(values),samples:values.length}]))]));
   if(postgresJsonbBytes(result)<=11000)return result;
