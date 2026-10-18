@@ -113,6 +113,8 @@ it.each([
     const waiting = await host.execute(admitted.executionId);
     expect(waiting).toMatchObject({ state: 'waiting_credits', code: 'RUNTIME_WAITING_CREDITS',
       executionId: admitted.executionId, cursor: 1, epoch: 1, remainingCalls: 1, body: primaryBody });
+    expect(await rpc('runtime_execution', { p_actor_id: actor, p_execution_id: admitted.executionId, p_action: 'read' }))
+      .toMatchObject({ state: 'waiting_credits', gatePassed: true });
     expect(requests.map(r => r.model)).toEqual([model]);
     expect(await host.execute(admitted.executionId)).toEqual(waiting);
     const history = async () => (await db.query(
@@ -167,6 +169,8 @@ it.each([
       exhaustAfterClaim=true;
       expect(await finishWaitingOrganizer(await sessionContext(),nextRequestId,resumeOrganizer))
         .toMatchObject({state:'waiting_resume',admitted:false,remainingCalls:0});
+      expect(await rpc('runtime_execution', { p_actor_id: actor, p_execution_id: admitted.executionId, p_action: 'read' }))
+        .toMatchObject({ state: 'waiting_resume', gatePassed: true });
       expect(requests.map(r=>r.model)).toEqual([model]);
       const financial=async()=>(await db.query(`select credits,
         (select sum(amount)::int from credit_transactions where user_id=$1) ledger,
