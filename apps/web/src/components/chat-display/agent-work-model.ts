@@ -74,3 +74,15 @@ export function workItemsOf(execution: unknown): WorkItem[] {
   }
   return items;
 }
+
+/** Live rows fill the polling gap only while the saved execution is open. Closed history is authoritative. */
+export function streamedWorkItems(execution: unknown, live?: readonly WorkItem[]): WorkItem[] {
+  const saved = workItemsOf(execution);
+  if (!['prepared', 'running', 'interrupted'].includes((execution as {state?: string})?.state ?? '')) return saved;
+  const rows = new Map(saved.map(item => [item.id, item]));
+  for (const item of live ?? []) {
+    const prior = rows.get(item.id);
+    if (!prior || item.state !== 'running' || prior.state === 'running') rows.set(item.id, item);
+  }
+  return [...rows.values()].slice(0, 12);
+}

@@ -1,0 +1,16 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/* Round seven (T8): the caret of live typing, at the end of the text being written. */
+.caret,
+.typing [data-message-markdown] > :last-child:not(ul, ol, div)::after,
+.typing [data-message-markdown] > :is(ul, ol):last-child > li:last-child::after,
+.typing [data-message-markdown] > div:last-child tbody tr:last-child > :last-child::after {
+  content: ''; display: inline-block; width: 2px; height: 1.05em; margin-left: 2px; border-radius: 1px;
+  background: currentColor; vertical-align: -.16em; opacity: .75;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .caret,
+  .typing [data-message-markdown] > :last-child:not(ul, ol, div)::after,
+  .typing [data-message-markdown] > :is(ul, ol):last-child > li:last-child::after,
+  .typing [data-message-markdown] > div:last-child tbody tr:last-child > :last-child::after { animation: blink 1s steps(1) infinite; }
+}
+@keyframes blink { 50% { opacity: 0; } }

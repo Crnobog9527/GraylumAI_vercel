@@ -1,5 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { renderToStaticMarkup } from 'react-dom/server';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { SpacePanel, UploadPanel } from '@/components/library/my-documents-view';
 import { JuryReader } from '@/components/landing/preview-jury/JuryReader';
@@ -43,5 +45,24 @@ describe.each(FEATURES.map(entry => [entry.slug] as const))('feature page demo %
   it('puts no heading tag (h1–h6) into the page through the embedded product screens', () => {
     const html = renderToStaticMarkup(<AsDemo><FeatureDemo slug={slug} /></AsDemo>);
     expect(html).not.toMatch(HEADING_TAG);
+  });
+});
+
+describe('Markdown headings in an example', () => {
+  it('stay h1–h4 in the product and become plain elements that look the same inside AsDemo', async () => {
+    const { MessageMarkdown } = await import('@/components/chat/MessageMarkdown');
+    const text = '# 报告\n\n## 第一章\n\n### 小节\n\n正文';
+    const product = renderToStaticMarkup(<MessageMarkdown text={text} />);
+    for (const tag of ['<h1>', '<h2>', '<h3>']) expect(product).toContain(tag);
+    const demo = renderToStaticMarkup(<AsDemo><MessageMarkdown text={text} /></AsDemo>);
+    expect(demo).not.toMatch(/<h[1-6][ >]/);
+    expect(demo).toContain('<div data-demo-heading="h2">第一章</div>');
+  });
+
+  it('keeps the chapter list\'s offset for example headings too, so a picked chapter is not under the sticky bar', () => {
+    const css = readFileSync(join(__dirname, 'report-outline.module.css'), 'utf8');
+    const rules = css.match(/\.body :is\([^)]*\)\{scroll-margin-top:\d+px\}/g) ?? [];
+    expect(rules).toHaveLength(2);
+    for (const rule of rules) for (const level of ['h1', 'h2', 'h3']) expect(rule).toContain(`[data-demo-heading=${level}]`);
   });
 });

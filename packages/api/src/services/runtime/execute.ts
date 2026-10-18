@@ -259,7 +259,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    }
    effective.instructions=withPrimaryAddenda(effective.instructions,context);
    const {tools,toolBytes}=executionTools({context,executionId,args,agentTurn,grounded,fiveFields,sources:()=>sources,ownerRpc,budget,
-    execution,research,exchange,onRefused:()=>{terminalReplyFailure=true;}});
+    execution,research,exchange,onProgress:progress,onRefused:()=>{terminalReplyFailure=true;}});
    // A2: a derived-content Skill gets its saved source in this call's instructions, read and recorded in one transaction.
    if(effective.role==='skill'&&effective.contentSource)
     effective.instructions=await injectContentSource(ownerRpc,args,effective.contentSource,effective.instructions,context,primaryPolicy.inputLimit,toolBytes);

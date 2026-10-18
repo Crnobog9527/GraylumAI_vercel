@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { AgentWorkStatus } from './agent-work-status';
-import { RUNNING_LABELS, workItemFromResearchCall, workItemLine, workItemsOf, type WorkItem } from './agent-work-model';
+import { RUNNING_LABELS, workItemFromResearchCall, workItemLine, workItemsOf, streamedWorkItems, type WorkItem } from './agent-work-model';
 import * as W from './fixtures/work-status';
 import type { ResearchCall } from '@/components/research/research-model';
 
@@ -80,4 +80,13 @@ describe('workItemsOf', () => {
   it('keeps at most 12 rows', () => {
     expect(workItemsOf({workItems: Array.from({length: 20}, (_, i) => ({...good, id: 'c' + i}))})).toHaveLength(12);
   });
+});
+
+it('uses the saved projection after completion, and does not regress a finished poll to a live running state',()=>{
+ const done:WorkItem={id:'c',kind:'library_search',state:'done',label:'找到资料'};
+ const running:WorkItem={...done,state:'running',label:''};
+ expect(streamedWorkItems({state:'running',workItems:[done]},[running])[0].state).toBe('done');
+ expect(streamedWorkItems({state:'running',workItems:[]},[done])).toEqual([done]);
+ expect(streamedWorkItems({state:'completed',workItems:[]},[done])).toEqual([]);
+ expect(streamedWorkItems({state:'cancelled',workItems:[]},[done])).toEqual([]);
 });

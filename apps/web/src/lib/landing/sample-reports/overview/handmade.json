@@ -1,0 +1,150 @@
+{
+  "slug": "handmade",
+  "persona": {
+    "label": "手作银饰主理人 · IG",
+    "who": "台中一人银饰工作室，手作三年，Pinkoi 和虾皮各有一家店"
+  },
+  "positioning": "只露手拍“一块银变成一对戒指”和客人故事，专接客制对戒和纪念款",
+  "riskAlert": {
+    "headline": "IG 起步别追品牌曝光，先专接客制对戒",
+    "why": [
+      "认识的人多不等于订单多",
+      "追粉丝会让内容好看但不成交"
+    ]
+  },
+  "audience": [
+    {
+      "name": "交往中的情侣（女生主导）",
+      "trigger": "交往周年、情人节、七夕"
+    },
+    {
+      "name": "送自己人生纪念的女生",
+      "trigger": "离职、升职、30 岁生日"
+    },
+    {
+      "name": "准备求婚或订婚的人",
+      "trigger": "求婚前 1–3 个月"
+    }
+  ],
+  "platform": {
+    "main": "Instagram",
+    "support": [
+      "LINE 官方账号（谈客制、收订金）",
+      "Pinkoi、虾皮（现货）"
+    ],
+    "why": "客人找饰品会点进 IG 看作品和过程，主页能放询价链接"
+  },
+  "benchmarks": [
+    {
+      "id": "A",
+      "type": "一人珠宝创作者",
+      "followers": "IG 1.23 万粉",
+      "medianViews": null,
+      "engagementRate": "约 1.3%–5.1%",
+      "updateFreq": "2026 年 8 月仍在更新",
+      "learn": "用“系列名 + 编号”让作品像收藏品"
+    },
+    {
+      "id": "B",
+      "type": "手工纯银与纪念礼品品牌",
+      "followers": "IG 1.79 万粉",
+      "medianViews": null,
+      "engagementRate": null,
+      "updateFreq": "2026 年 7–10 月每月更新",
+      "learn": "把“纪念礼品”写进显示名"
+    },
+    {
+      "id": "D",
+      "type": "平价纯银饰品（部分合格）",
+      "followers": "IG 4.26 万粉",
+      "medianViews": null,
+      "engagementRate": null,
+      "updateFreq": "2026 年 10 月仍在更新",
+      "learn": "“火和手”的过程画面就能吸引人"
+    }
+  ],
+  "differentiation": "把客人的故事做成固定系列，同类账号没人这样做",
+  "threePiece": {
+    "name": "〔品牌名〕｜手作对戒・纪念银饰",
+    "bio": "台中一人银饰工作室｜从一块银到你们的对戒"
+  },
+  "ownAccount": {
+    "platform": "Instagram",
+    "displayName": "〔品牌名〕｜手作对戒・纪念银饰",
+    "which": "recommended",
+    "bio": "台中一人银饰工作室｜从一块银到你们的对戒",
+    "followers": null,
+    "posts": null,
+    "topStat": null
+  },
+  "contentPillars": [
+    {
+      "name": "流量型",
+      "share": "50%"
+    },
+    {
+      "name": "信任型",
+      "share": "35%"
+    },
+    {
+      "name": "转化型：客制流程和起价",
+      "share": "15%"
+    }
+  ],
+  "funnel": [
+    {
+      "layer": "免费价值",
+      "offer": "过程片、故事系列、戒围指南",
+      "price": "免费",
+      "why": "让陌生人认识你；看完故事的人才对“纪念”有感"
+    },
+    {
+      "layer": "入门",
+      "offer": "设计订金，先看草图",
+      "price": "NT$500，可抵扣（假设）",
+      "why": "第一次付钱确认需求；付订金的真有日子和预算"
+    },
+    {
+      "layer": "主力",
+      "offer": "客制对戒、纪念款",
+      "price": "NT$4,800 起，加宝石约 NT$6,000+",
+      "why": "主要收入；留下的人已信你的手艺和审美"
+    },
+    {
+      "layer": "深度",
+      "offer": "求婚戒、双人手作体验",
+      "price": "双人体验约 NT$3,000–5,000（假设）",
+      "why": "给最信任你的少数人：肯花时间到场的人"
+    }
+  ],
+  "plan30": [
+    {
+      "week": 1,
+      "focus": "测纯过程片能不能留住人"
+    },
+    {
+      "week": 2,
+      "focus": "测故事开头：客人原话对比过程"
+    },
+    {
+      "week": 3,
+      "focus": "第一次讲价格和客制流程"
+    },
+    {
+      "week": 4,
+      "focus": "加量表现好的那类，开始征集故事"
+    }
+  ],
+  "metricsToWatch": [
+    "完播和收藏",
+    "私讯和 LINE 询价数",
+    "询价预算",
+    "订金数"
+  ],
+  "firstStep": [
+    "从三十对客制里挑 5 对，各写一句故事",
+    "改显示名、简介，头像换成手托对戒",
+    "开 LINE 官方账号，链接放到 IG 主页"
+  ],
+  "sourceNote": "对标数据观察日期 2026-10-17，来自网络公开信息，真实性待考证，仅供参考"
+}

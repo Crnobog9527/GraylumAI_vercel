@@ -26,3 +26,10 @@ it('shows the @ picker empty state and reference chips', () => {
   const chip = renderToStaticMarkup(<ComposerTextPreview paragraphs={[['看看 ', { reference: '手册.pdf' }]]}/>);
   expect(chip).toContain('看看 <span class="library-reference" data-library-reference="">@手册.pdf</span>');
 });
+
+it('shows the placeholder when the preview has no text, and the caret after the last character', () => {
+  const empty = renderToStaticMarkup(<ComposerTextPreview paragraphs={[['']]} placeholder="消息"/>);
+  expect(empty).toContain('<p class="is-editor-empty" data-placeholder="消息"></p>');
+  const typing = renderToStaticMarkup(<ComposerTextPreview paragraphs={[['第一行'], ['第二']]} caret={<i data-caret=""/>}/>);
+  expect(typing).toContain('<p>第一行</p><p>第二<i data-caret=""></i></p>');
+});

@@ -1,10 +1,11 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type {NativeTextUpdate} from './nativeProgress';
 import {AGENT_TURN_MESSAGE_LIMIT,type QuestionCard} from '../../shared/agentTurn';
+import type {AgentToolEvent} from '../../shared/agentWork';
 import type {ResearchTurnEvent} from '../../shared/researchTurn';
 /** RT-3b PR-3: research calls and selection cards of a mentor turn travel in order beside the text. */
 export type RuntimeProgress=NativeTextUpdate|{type:'card';card:QuestionCard}|{type:'text';text:string}|{type:'phase';phase:'mentor'|'organizer'|'saving'}
- |ResearchTurnEvent;
+ |ResearchTurnEvent|AgentToolEvent;
 /** Only the leading public message string of the OPC JSON protocol may leave
  * the server. Partial escapes wait for the next provider chunk. Never forward
  * raw JSON, reasoning, provider metadata or later structured fields. */

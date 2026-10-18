@@ -59,3 +59,8 @@ it('keeps the header title an h1 by default and renders it at the level a page a
   const css = readFileSync(new URL('../../app/runtime/runtime-work.module.css', import.meta.url), 'utf8');
   expect(css).toContain('.workTitle :is(h1,h2,:where(');
 });
+
+it('closes an unfinished Markdown mark while a reply is still being written', () => {
+  expect(renderToStaticMarkup(<RuntimeReply text="先拍 **第一" streaming/>)).toContain('<strong>第一</strong>');
+  expect(renderToStaticMarkup(<RuntimeReply text="先拍 **第一"/>)).toContain('**第一');
+});

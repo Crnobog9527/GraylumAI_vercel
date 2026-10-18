@@ -1,0 +1,99 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/* The sample report dialog's 15-second overview (OverviewL): sample L's existing tokens, gold for what matters. */
+.overview { display: grid; gap: 14px; }
+.who { color: var(--k-secondary); font-size: 13.5px; }
+.who b { color: var(--j-gold-text); font-weight: 600; }
+.position { color: var(--j-ink); font-size: clamp(19px, 2vw, 24px); font-weight: 600; line-height: 1.45; letter-spacing: -.01em; }
+.why { display: grid; gap: 2px; margin: 4px 0 0; padding-left: 1.2em; color: var(--j-body); font-size: 14px; line-height: 1.6; }
+
+.pair { display: grid; gap: 14px; }
+@media (min-width: 720px) { .pair { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.block { display: grid; align-content: start; gap: 8px; min-width: 0; padding: 14px 16px; border-radius: 14px; background: #fff; box-shadow: inset 0 0 0 1px var(--j-line); }
+.blockTitle { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--j-gold-text); font-size: 13px; font-weight: 600; }
+/* Round six (S11): the risk in the same card as the rest, marked by its colour only. */
+.block[data-tone='risk'] { background: #fffaf7; box-shadow: inset 0 0 0 1px #efc2ad, inset 3px 0 0 #d0694b; }
+.block[data-tone='risk'] .blockTitle { color: #9a3b2e; }
+.riskHeadline { color: var(--j-ink); font-size: 16px; font-weight: 600; line-height: 1.6; }
+.lede { color: var(--j-body); font-size: 13.5px; line-height: 1.6; }
+.block p { margin: 0; }
+.text { color: var(--j-ink); font-size: 15px; line-height: 1.6; }
+.small { color: var(--j-body); font-size: 13.5px; line-height: 1.6; }
+.main { color: var(--j-ink); font-size: 20px; font-weight: 600; }
+.support { color: var(--j-body); font-size: 14px; }
+
+.people { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.people li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.people b { padding: 2px 10px; border-radius: 999px; background: #fff3d1; color: var(--j-ink); font-size: 14px; font-weight: 600; }
+.people span { color: var(--j-body); font-size: 13.5px; }
+
+/* Benchmarks: one bar per account, its length the share of the largest follower count. */
+.bars { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.bars li { display: grid; gap: 4px; }
+.barName { display: flex; flex-wrap: wrap; gap: 4px 8px; font-size: 14px; }
+.barName b { color: var(--j-ink); }
+.barName span { color: var(--j-body); }
+.barRow { display: flex; align-items: center; gap: 10px; font-size: 13.5px; color: var(--j-ink); }
+.bar { flex: 0 0 auto; width: calc(var(--w) * .62); height: 10px; border-radius: 999px; background: linear-gradient(90deg, #ffcf5a, #f0a500); }
+.facts { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--j-body); font-size: 13px; }
+.source { color: var(--k-secondary); font-size: 12px; line-height: 1.6; }
+
+/* Content mix: one bar split by the report's starting shares. */
+.mix { display: flex; height: 14px; overflow: hidden; border-radius: 999px; }
+.mix i { display: block; min-width: 4px; }
+:is(.mix, .mixLegend) [data-tone='0'] { --tone: #f0a500; }
+:is(.mix, .mixLegend) [data-tone='1'] { --tone: #ffd77a; }
+:is(.mix, .mixLegend) [data-tone='2'] { --tone: #8a5a00; }
+.mix i { background: var(--tone); }
+.mixLegend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; padding: 0; list-style: none; color: var(--j-body); font-size: 13.5px; }
+.mixLegend li { display: flex; align-items: center; gap: 6px; }
+.mixLegend li::before { content: ''; width: 10px; height: 10px; border-radius: 3px; background: var(--tone); }
+.mixLegend b { color: var(--j-ink); font-weight: 600; }
+
+/* The money funnel: each layer a little narrower than the one above. */
+.funnel { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.funnel li {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; width: calc(100% - var(--n) * (36% / var(--of)));
+  margin: 0 auto; padding: 8px 12px; border-radius: 10px; background: #fff7e0; font-size: 13.5px;
+}
+.funnel b { color: var(--j-ink); font-weight: 600; }
+.funnel span { color: var(--j-body); }
+.funnel em { margin-left: auto; color: var(--j-gold-text); font-style: normal; font-weight: 600; }
+
+/* 30 days: four weeks side by side (stacked on a phone). */
+.weeks { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; counter-reset: none; }
+@media (min-width: 720px) { .weeks { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.weeks li { display: grid; align-content: start; gap: 4px; padding: 10px 12px; border-top: 3px solid #ffcf5a; border-radius: 8px; background: #fffdf6; }
+.weeks b { color: var(--j-ink); font-size: 13.5px; }
+.weeks span { color: var(--j-body); font-size: 13.5px; line-height: 1.55; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.chips li { padding: 3px 10px; border-radius: 999px; background: #f4f3ef; color: var(--j-ink); font-size: 13.5px; }
+.todo { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.todo li { display: flex; align-items: flex-start; gap: 8px; color: var(--j-ink); font-size: 14.5px; font-weight: 500; line-height: 1.55; }
+
+/* Round six (S12): where to post. An account card as the report recommends it, or the platforms' names and the reason
+   (round seven, T5: names only, no marks). */
+.badges { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.badges li { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 999px; background: #f4f3ef; color: var(--j-ink); font-size: 14px; }
+.noAccount { color: var(--j-ink); font-size: 15px; font-weight: 600; }
+.account { display: grid; gap: 10px; padding: 12px; border: 1px solid #ececea; border-radius: 12px; background: #fafaf8; }
+.accountPlatform { display: flex; align-items: center; gap: 6px; color: var(--j-body); font-size: 13px; }
+.accountHead { display: flex; align-items: flex-start; gap: 10px; }
+.accountHead b { display: block; color: var(--j-ink); font-size: 15px; }
+.accountHead p { color: var(--j-body); font-size: 13px; line-height: 1.55; }
+.avatar { display: grid; flex: none; place-items: center; width: 44px; height: 44px; border-radius: 50%; background: linear-gradient(140deg, #ffd77a, #f0a500); color: #1a1a1a; font-size: 17px; font-weight: 600; }
+.stats { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 0; }
+.stats div { display: grid; gap: 1px; }
+.stats dt { color: #8e8e8e; font-size: 12px; }
+.stats dd { margin: 0; color: var(--j-ink); font-size: 14px; font-weight: 600; }
+.accountTag { color: #8e8e8e; font-size: 12px; }
+
+/* Round six (S13): each content type and each funnel layer says what it is for. */
+.mixLegend { display: grid; gap: 8px; }
+.mixLegend li { display: grid; grid-template-columns: 10px minmax(0, 1fr); align-items: start; column-gap: 8px; }
+.mixLegend li::before { margin-top: 6px; }
+.mixLegend p { display: flex; flex-wrap: wrap; gap: 4px 8px; color: var(--j-ink); }
+.mixLegend small { grid-column: 2; color: var(--j-body); font-size: 12.5px; line-height: 1.55; }
+.funnel li { flex-direction: column; align-items: stretch; }
+.funnel li p { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; }
+.funnel small { color: var(--j-body); font-size: 12.5px; line-height: 1.5; }
