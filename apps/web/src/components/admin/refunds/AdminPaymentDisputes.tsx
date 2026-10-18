@@ -16,6 +16,14 @@ export function AdminPaymentDisputes() {
   const utils = trpc.useUtils();
   const [selected, setSelected] = useState<string | null>(null);
   const [message, setMessage] = useState('');
+  const [externalSelected, setExternalSelected] = useState<string | null>(null);
+  const resolveExternal = trpc.paymentDisputes.resolveExternal.useMutation({
+    onSuccess: () => {
+      setMessage('已确认站外付款并结案，停止重试匹配。'); setExternalSelected(null);
+      void utils.paymentDisputes.invalidate();
+    },
+    onError: () => setMessage('未能结案，请核实是否已有对应订单。'),
+  });
   const withdraw = trpc.paymentDisputes.withdraw.useMutation({
     onSuccess: result => {
       setMessage(`已撤回冻结，恢复 ${result.restored} 积分。订阅继续保持停止续费；如需补发未发出的分期，请人工核对。`);
@@ -47,12 +55,21 @@ export function AdminPaymentDisputes() {
           <p>冻结：{label(row.freeze_state)} · 停续费：{label(row.renewal_stop_state)}</p>
           {row.evidence_due_by ? <p>举证截止：{new Date(row.evidence_due_by).toLocaleString('zh-CN')}</p> : null}
           {row.source_review_required ? <p role="alert">积分来源无法核实，未扣取无法确认的积分，请人工核对。</p> : null}
+          {!row.order_id && ['pending', 'review'].includes(row.freeze_state) ? (
+            externalSelected === row.id ? <div className="space-y-2">
+              <p>请先在 Stripe 核实这是与 Graylum 订单无关的站外付款。确认后将结案并停止重试匹配。</p>
+              <Button disabled={resolveExternal.isPending}
+                onClick={() => resolveExternal.mutate({ disputeId: row.id })}>确认站外结案</Button>
+              <Button variant="outline" disabled={resolveExternal.isPending} onClick={() => setExternalSelected(null)}>返回</Button>
+            </div> : <Button variant="outline"
+              onClick={() => { setExternalSelected(row.id); setSelected(null); }}>已核实站外付款</Button>
+          ) : null}
           {row.freeze_state === 'frozen' ? (
             selected === row.id ? <div className="space-y-2">
               <p>确认撤回这笔冻结？这会恢复仍属于该付款的权益和积分，自动续费继续保持停止。</p>
               <Button disabled={withdraw.isPending} onClick={() => withdraw.mutate({ disputeId: row.id })}>确认撤回冻结</Button>
               <Button variant="outline" disabled={withdraw.isPending} onClick={() => setSelected(null)}>返回</Button>
-            </div> : <Button variant="outline" onClick={() => setSelected(row.id)}>撤回冻结</Button>
+            </div> : <Button variant="outline" onClick={() => { setSelected(row.id); setExternalSelected(null); }}>撤回冻结</Button>
           ) : null}
         </article>
       ))}

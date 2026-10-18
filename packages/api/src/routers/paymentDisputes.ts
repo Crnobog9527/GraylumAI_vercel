@@ -26,6 +26,14 @@ export const paymentDisputesRouter = router({
         freeze_state: string; renewal_stop_state: string; evidence_due_by: string | null; source_review_required: boolean }>;
     } catch (error) { throw createSafeServiceUnavailableError(error, '拒付记录暂时无法读取'); }
   }),
+  resolveExternal: adminProcedure.input(z.object({ disputeId: z.uuid() }).strict()).mutation(async ({ ctx, input }) => {
+    try {
+      if (!ctx.hasSupabaseAdminPrivileges) throw new Error('PAY_DISPUTE_DB_UNAVAILABLE');
+      const result = await ctx.supabaseAdmin.rpc('pay_dispute_resolve_external', { p_actor: ctx.profileId, p_dispute: input.disputeId });
+      if (result.error) throw new Error('PAY_DISPUTE_EXTERNAL_UNAVAILABLE');
+      return { resolved: true };
+    } catch (error) { throw createSafeServiceUnavailableError(error, '未能结案，请核实是否已有对应订单'); }
+  }),
   withdraw: adminProcedure.input(z.object({ disputeId: z.uuid() }).strict()).mutation(async ({ ctx, input }) => {
     try {
       if (!ctx.hasSupabaseAdminPrivileges) throw new Error('PAY_DISPUTE_DB_UNAVAILABLE');

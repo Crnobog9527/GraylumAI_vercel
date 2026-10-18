@@ -7,6 +7,7 @@ vi.mock('@/trpc/client', () => ({ trpc: {
   paymentDisputes: {
     list: { useQuery: () => ({ data: fixture.rows, isError: fixture.error, isLoading: false }) },
     notice: { useQuery: () => ({ data: { frozen: fixture.frozen } }) },
+    resolveExternal: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) },
     withdraw: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) },
   },
 } }));
@@ -37,4 +38,14 @@ it('reports a failed read without presenting it as an empty successful result', 
   fixture.error = true;
   expect(renderToStaticMarkup(<AdminPaymentDisputes />)).toContain('拒付记录暂时无法读取');
   expect(renderToStaticMarkup(<AdminPaymentDisputes />)).not.toContain('暂无付款争议');
+});
+
+it('offers explicit off-site resolution only for unmatched unresolved records', () => {
+  fixture.rows = [{ id: 'unmatched', order_id: null, amount: 100, currency: 'usd', status: 'won',
+    freeze_state: 'pending', renewal_stop_state: 'pending' }];
+  expect(renderToStaticMarkup(<AdminPaymentDisputes />)).toContain('已核实站外付款');
+  fixture.rows = [{ id: 'resolved', order_id: null, amount: 100, currency: 'usd', status: 'won',
+    freeze_state: 'external', renewal_stop_state: 'not_applicable' }];
+  const html = renderToStaticMarkup(<AdminPaymentDisputes />);
+  expect(html).toContain('已确认站外付款');expect(html).not.toContain('>已核实站外付款</button>');
 });

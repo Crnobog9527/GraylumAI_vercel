@@ -54,6 +54,7 @@ async function mark(db: SupabaseClient, disputeId: string, values: Record<string
 
 export async function resumeDisputeActions(db: SupabaseClient, stripe: Stripe, dispute: DisputeRow,
   alert: DisputeAlert = NO_ALERT) {
+  if (dispute.freeze_state === 'external') return true;
   let stopFailed = false;
   if (dispute.order_id && dispute.provider_subscription_id && dispute.renewal_stop_state !== 'confirmed') {
     let confirmed = false;

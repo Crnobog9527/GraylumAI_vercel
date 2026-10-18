@@ -73,6 +73,12 @@ describe('Stripe dispute effects resume from committed financial state', () => {
     await f.run(); expect(mocks.stop).not.toHaveBeenCalled();
     expect(f.alert).toHaveBeenCalledWith(expect.objectContaining({ code: 'PAY_DISPUTE_REFUNDED_PAYMENT' }));
   });
+  it('a confirmed off-site dispute records later events without re-alerting or touching subscriptions', async () => {
+    const f = fixture({ freeze_state: 'external', order_id: null, subscription_id: null, renewal_stop_state: 'not_applicable',
+      opened_at: new Date(Date.now() - 25 * 3600_000).toISOString() });
+    mocks.find.mockResolvedValue(null);await f.run();await f.run();
+    expect(mocks.read).not.toHaveBeenCalled();expect(mocks.stop).not.toHaveBeenCalled();expect(f.alert).not.toHaveBeenCalled();
+  });
   it('database failure rejects the webhook so Stripe can retry', async () => {
     const f = fixture(); f.rpc.mockResolvedValueOnce({ data: null, error: { code: 'XX000' } } as never);
     await expect(f.run()).rejects.toThrow('PAY_DISPUTE_RECORD_UNAVAILABLE'); expect(mocks.stop).not.toHaveBeenCalled();

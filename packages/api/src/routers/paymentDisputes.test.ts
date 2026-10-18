@@ -39,6 +39,7 @@ it('denies non-admin withdrawal and listing before financial queries', async () 
     const f = harness(role), code = role === 'user' ? 'FORBIDDEN' : 'UNAUTHORIZED';
     await expect(f.caller.list()).rejects.toMatchObject({ code });
     await expect(f.caller.withdraw({ disputeId: ID })).rejects.toMatchObject({ code });
+    await expect(f.caller.resolveExternal({ disputeId: ID })).rejects.toMatchObject({ code });
     expect(f.calls).toEqual([]); expect(f.filters).toEqual([]);
   }
 });
@@ -71,4 +72,12 @@ it('keeps an older frozen dispute reachable beyond 100 newer records', async () 
   expect(f.filters).toContainEqual(['range', 100, 199]);
   expect(f.filters).toContainEqual(['order', 'id', { ascending: false }]);
   await expect(f.caller.list({ offset: -1 })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+});
+
+it('passes admin identity to off-site resolution and safely reports a matched-payment conflict', async () => {
+  const f = harness('admin');
+  expect(await f.caller.resolveExternal({ disputeId: ID })).toEqual({ resolved: true });
+  expect(f.calls).toEqual([['pay_dispute_resolve_external', { p_actor: ACTOR, p_dispute: ID }]]);
+  await expect(harness('admin', { message: 'private details' }).caller.resolveExternal({ disputeId: ID }))
+    .rejects.toMatchObject({ message: '未能结案，请核实是否已有对应订单' });
 });

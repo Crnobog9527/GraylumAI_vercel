@@ -24,7 +24,8 @@ node packages/db/tests/v3/run-workbench.mjs --bill2-core-only --without-app --sc
 ```
 
 拒付专用测试验证真实 PostgreSQL 锁、冻结来源、在途恢复、结算、退款取代、管理员权限和会员事实；PAYG 补偿夹具为合成 run/call 记录。
-完整迁移链 311/311、重复 242、2622 个结构组；收敛 unchanged，回滚 restored，cleanup PASS。
+新增回归：不同规范付款键竞争同一订单只成功一个（receive / late match 各测）；等待中的 stop_confirm 读取晚关联并同步内部订阅；站外结案管理员允许/拒绝、幂等审计、已知关联拒绝，后续实际交付重新冻结。
+完整迁移链 311/311、重复 242、2624 个结构组；收敛 unchanged，回滚 restored，cleanup PASS。
 BILL2 修复历史 threshold 重放遗漏后 93/93，0 skipped；运行时 431 passed、5 skipped（不带 Next 应用的配置明确跳过浏览器/应用 HTTP 用例）；私有 canary 没有进入应用日志。
 最终拒付 SQL 专用测试与指纹包含撤回后退款资格、规范映射、订阅身份推导和回填修复；BILL2/运行时全套在该最后修复前运行，最终候选以远端 CI 为准。详见 [local-results.json](./local-results.json)。
 
@@ -36,7 +37,8 @@ PAY-EVIDENCE 当前尚未建表，专用测试按已确认文档构造最小表�
 本地浏览器夹具打包了实际 AdminPaymentDisputes、PaymentDisputeNotice 和 Button，只有 tRPC 返回值为合成数据，未连 staging。
 已确认：冻结提示、判赢后仍冻结、二次确认、返回不提交、确认提交一次、成功显示恢复量且续费仍停止、失败保留冻结并给出可读错误。
 分页：101 条合成记录，第一页 100 条已撤回记录，第二页旧冻结记录可打开二次确认；API 回归也验证第二页返回。
-截图：[分页](./ui-pagination.png)、[成功](./ui-withdraw-success.png)、[失败](./ui-withdraw-failed.png)。夹具没有正式页面的样式环境，不作为视觉还原或部署验收。
+站外结案：实际组件二次确认，返回不提交、确认只一次，成功显示结案并去掉操作按钮；后端/服务回归 14 项、组件 5 项通过。
+截图：[站外结案](./ui-external-resolved.png)、[分页](./ui-pagination.png)、[成功](./ui-withdraw-success.png)、[失败](./ui-withdraw-failed.png)。夹具没有正式页面的样式环境，不作为视觉还原或部署验收。
 
 ## 未完成项
 
