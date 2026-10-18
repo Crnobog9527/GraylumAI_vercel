@@ -76,7 +76,7 @@ REVOKE ALL ON FUNCTION public.fusion_compare_material_guard(uuid,uuid) FROM PUBL
 -- The last p_limit usable history items (oldest first) as {revision, item}, the session revision they belong to, whether a
 -- turn is running (the same replaceable-pointer rule as runtime_admit and fusion_compare_adopt), and the current work
 -- material exactly as runtime_session_context reports it. Items an ordinary turn would not be allowed to read (the
--- execution behind them is unavailable) are left out, as in runtime admission.
+-- execution behind them is unavailable) are left out, as in runtime admission, and so are turns that used library documents.
 CREATE OR REPLACE FUNCTION public.fusion_compare_context(p_actor_id uuid, p_session_id uuid, p_limit integer)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE s runtime_sessions; ctx jsonb; items jsonb; busy boolean;
@@ -95,7 +95,11 @@ BEGIN
   )
   SELECT coalesce(jsonb_agg(jsonb_build_object('revision',x.revision,'item',x.item) ORDER BY x.revision),'[]') INTO items
   FROM (SELECT b.revision,b.item FROM bounded b JOIN availability a ON a.execution_id=b.execution_id
-    WHERE a.available ORDER BY b.revision DESC LIMIT p_limit) x;
+    WHERE a.available
+      -- A turn that used library documents (an @ reference or a retrieval) is left out: its answer carries their text, and a
+      -- sessionless compare run is not registered for the library-erasure path, so a deleted document would stay behind.
+      AND NOT EXISTS(SELECT 1 FROM runtime_library_references r WHERE r.execution_id=b.execution_id)
+    ORDER BY b.revision DESC LIMIT p_limit) x;
   busy:=s.active_execution IS NOT NULL AND NOT EXISTS(SELECT 1 FROM runtime_executions old_execution
     JOIN bill2_runs old_run ON old_run.id=old_execution.billing_run_id
     WHERE old_execution.id=s.active_execution AND old_execution.session_id=s.id

@@ -219,6 +219,11 @@ export async function fusionCompareCases({db,Client,connectionString,report,crea
   const context = await call(db,'fusion_compare_context',actor,session,100);
   assert.equal(context.revision,2);assert.equal(context.busy,false);
   assert.deepEqual(context.items.map(x=>x.revision),[1,2]);
+  // A turn that used a library document is left out of the compare context (its text is not registered for erasure there).
+  const turnExecution = (await db.query('SELECT execution_id FROM runtime_session_history WHERE session_id=$1 AND revision=2',[session])).rows[0].execution_id;
+  await db.query("INSERT INTO runtime_library_references(execution_id,actor_id,document_id,content_version,ordinal) VALUES($1,$2,$3,1,1)",[turnExecution,actor,randomUUID()]);
+  assert.deepEqual((await call(db,'fusion_compare_context',actor,session,100)).items,[],'a turn with library references is omitted');
+  await db.query('DELETE FROM runtime_library_references WHERE execution_id=$1',[turnExecution]);
   assert.deepEqual(context.items.map(x=>x.item.role),['user','assistant']);
   assert.equal(context.items[0].item.content,question);
   assert.equal(context.items[1].item.content[0].text,answer);
