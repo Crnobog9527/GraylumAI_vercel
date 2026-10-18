@@ -62,6 +62,48 @@ ALTER TABLE public.payment_orders ADD COLUMN IF NOT EXISTS dispute_payment_key t
  ADD COLUMN IF NOT EXISTS dispute_refund_claimed_at timestamptz,
  ADD COLUMN IF NOT EXISTS dispute_refund_id text;
 
+CREATE UNIQUE INDEX IF NOT EXISTS payment_orders_dispute_payment_unique
+ ON public.payment_orders(dispute_payment_key) WHERE dispute_payment_key IS NOT NULL;
+
+-- Canonical payment identity wins. A lookup hint must agree; never choose an arbitrary OR row.
+CREATE OR REPLACE FUNCTION public.pay_dispute_resolve_order(p_key text,p_hint uuid,p_merchant text,p_mode text)
+RETURNS payment_orders LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
+DECLARE o payment_orders;
+BEGIN
+ SELECT * INTO o FROM payment_orders WHERE dispute_payment_key=p_key;
+ IF o.id IS NOT NULL AND p_hint IS NOT NULL AND o.id<>p_hint THEN
+  RAISE EXCEPTION 'PAY_DISPUTE_MAPPING_CONFLICT'; END IF;
+ IF o.id IS NULL THEN SELECT * INTO o FROM payment_orders WHERE id=p_hint; END IF;
+ IF o.id IS NOT NULL AND (o.payment_channel IS DISTINCT FROM 'stripe'
+  OR o.merchant_namespace IS DISTINCT FROM p_merchant OR o.payment_mode IS DISTINCT FROM p_mode
+  OR o.dispute_payment_key IS NOT NULL AND o.dispute_payment_key<>p_key) THEN
+  RAISE EXCEPTION 'PAY_DISPUTE_MAPPING_CONFLICT'; END IF;
+ RETURN o;
+END $$;
+-- Existing scoped provider refs remain authoritative for membership subscriptions.
+CREATE OR REPLACE FUNCTION public.pay_dispute_order_subscription(p_order uuid,p_supplied text DEFAULT NULL)
+RETURNS text LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
+DECLARE o payment_orders;external_ text;count_ integer;
+BEGIN
+ SELECT * INTO o FROM payment_orders WHERE id=p_order;
+ SELECT count(*),min(external_id) INTO count_,external_ FROM payment_provider_refs
+  WHERE subscription_id=o.subscription_id AND channel='stripe' AND object_type='subscription'
+   AND merchant_namespace=o.merchant_namespace AND mode=o.payment_mode;
+ IF count_>1 OR external_ IS NOT NULL AND p_supplied IS NOT NULL AND external_<>p_supplied THEN
+  RAISE EXCEPTION 'PAY_DISPUTE_SUBSCRIPTION_CONFLICT'; END IF;
+ external_:=coalesce(external_,p_supplied);
+ IF o.dispute_subscription_key IS NOT NULL THEN
+  IF external_ IS NULL THEN
+   external_:=substring(o.dispute_subscription_key FROM length(o.merchant_namespace||':'||o.payment_mode||':')+1);
+  END IF;
+  IF o.dispute_subscription_key IS DISTINCT FROM o.merchant_namespace||':'||o.payment_mode||':'||external_ THEN
+   RAISE EXCEPTION 'PAY_DISPUTE_SUBSCRIPTION_CONFLICT'; END IF;
+ END IF;
+ IF external_ IS NOT NULL AND external_ !~ '^sub_[A-Za-z0-9_]{1,160}$' THEN
+  RAISE EXCEPTION 'PAY_DISPUTE_SUBSCRIPTION_CONFLICT'; END IF;
+ RETURN external_;
+END $$;
+
 DO $$ DECLARE t text;BEGIN
  FOREACH t IN ARRAY ARRAY['payment_disputes','payment_dispute_event_receipts','payment_dispute_fund_events'] LOOP
   EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY',t);
@@ -146,7 +188,7 @@ END $$;
 
 CREATE OR REPLACE FUNCTION public.pay_dispute_receive(p_merchant text,p_mode text,p_event jsonb) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
-DECLARE d payment_disputes;o payment_orders;fresh boolean;terminal boolean;at_ timestamptz;subkey text;pk text;
+DECLARE d payment_disputes;o payment_orders;fresh boolean;terminal boolean;at_ timestamptz;subkey text;pk text;provider_sub text;locked_sub text;hint uuid;
 BEGIN
  IF p_mode NOT IN ('test','live') OR p_event->>'id' !~ '^evt_[A-Za-z0-9_]{1,160}$'
   OR p_event->>'disputeId' !~ '^du_[A-Za-z0-9_]{1,160}$' OR p_event->>'paymentIntentId' !~ '^pi_[A-Za-z0-9_]{1,160}$'
@@ -156,12 +198,24 @@ BEGIN
   OR nullif(p_event->>'paymentAt','') IS NULL OR nullif(p_event->>'created','') IS NULL THEN
   RAISE EXCEPTION 'PAY_DISPUTE_EVENT_INVALID'; END IF;
  pk:=p_merchant||':'||p_mode||':'||(p_event->>'paymentIntentId');
- subkey:=CASE WHEN p_event->>'subscriptionId' IS NOT NULL THEN p_merchant||':'||p_mode||':'||(p_event->>'subscriptionId') END;
+ hint:=nullif(p_event->>'orderId','')::uuid;
+ o:=pay_dispute_resolve_order(pk,hint,p_merchant,p_mode);
+ SELECT * INTO d FROM payment_disputes WHERE merchant_namespace=p_merchant AND mode=p_mode
+  AND provider_dispute_id=p_event->>'disputeId';
+ IF d.provider_subscription_id IS NOT NULL AND p_event->>'subscriptionId' IS NOT NULL
+  AND d.provider_subscription_id<>p_event->>'subscriptionId' THEN RAISE EXCEPTION 'PAY_DISPUTE_SUBSCRIPTION_CONFLICT'; END IF;
+ provider_sub:=pay_dispute_order_subscription(o.id,coalesce(p_event->>'subscriptionId',d.provider_subscription_id));
+ locked_sub:=provider_sub;
+ subkey:=CASE WHEN provider_sub IS NOT NULL THEN p_merchant||':'||p_mode||':'||provider_sub END;
  PERFORM pay_dispute_lock(pk,subkey);
- -- Recheck under the shared lock; API lookup is a hint, never the authority for membership, scope or user.
- SELECT * INTO o FROM payment_orders WHERE dispute_payment_key=pk OR id=nullif(p_event->>'orderId','')::uuid;
- IF o.id IS NOT NULL AND (o.payment_channel<>'stripe' OR o.merchant_namespace<>p_merchant OR o.payment_mode<>p_mode
-   OR o.dispute_payment_key IS NOT NULL AND o.dispute_payment_key<>pk) THEN RAISE EXCEPTION 'PAY_DISPUTE_MAPPING_CONFLICT'; END IF;
+ -- Recheck after waiting. A newly mapped subscription requires retry from the correct lock order.
+ o:=pay_dispute_resolve_order(pk,hint,p_merchant,p_mode);
+ SELECT * INTO d FROM payment_disputes WHERE merchant_namespace=p_merchant AND mode=p_mode
+  AND provider_dispute_id=p_event->>'disputeId';
+ IF d.provider_subscription_id IS NOT NULL AND p_event->>'subscriptionId' IS NOT NULL
+  AND d.provider_subscription_id<>p_event->>'subscriptionId' THEN RAISE EXCEPTION 'PAY_DISPUTE_SUBSCRIPTION_CONFLICT'; END IF;
+ provider_sub:=pay_dispute_order_subscription(o.id,coalesce(p_event->>'subscriptionId',d.provider_subscription_id));
+ IF provider_sub IS DISTINCT FROM locked_sub THEN RAISE EXCEPTION 'PAY_DISPUTE_MAPPING_RETRY' USING ERRCODE='40001'; END IF;
  IF o.id IS NOT NULL THEN
   PERFORM 1 FROM profiles WHERE id=o.user_id FOR UPDATE;
   UPDATE payment_orders SET dispute_payment_key=pk,dispute_subscription_key=coalesce(dispute_subscription_key,subkey) WHERE id=o.id;
@@ -171,7 +225,7 @@ BEGIN
   provider_payment_intent_id,provider_invoice_id,provider_subscription_id,original_payment_at,last_event_at,order_id,
   subscription_id,amount,currency,reason,status,evidence_due_by,opened_at)
  VALUES(p_merchant,p_mode,p_event->>'disputeId',pk,p_event->>'chargeId',p_event->>'paymentIntentId',
-  p_event->>'invoiceId',p_event->>'subscriptionId',(p_event->>'paymentAt')::timestamptz,at_,o.id,o.subscription_id,
+  p_event->>'invoiceId',provider_sub,(p_event->>'paymentAt')::timestamptz,at_,o.id,o.subscription_id,
   (p_event->>'amount')::bigint,p_event->>'currency',p_event->>'reason',p_event->>'status',
   (p_event->>'dueBy')::timestamptz,(p_event->>'openedAt')::timestamptz)
  ON CONFLICT ON CONSTRAINT payment_disputes_identity DO NOTHING;
@@ -202,8 +256,11 @@ BEGIN
     ARRAY(SELECT jsonb_array_elements_text(coalesce(p_event->'balanceTransactions','[]')))) ON CONFLICT DO NOTHING;
   END IF;
  END IF;
- UPDATE payment_disputes SET order_id=coalesce(order_id,o.id),subscription_id=coalesce(subscription_id,o.subscription_id)
-  WHERE id=d.id;
+ IF d.order_id IS NOT NULL AND o.id IS NOT NULL AND d.order_id<>o.id THEN
+  RAISE EXCEPTION 'PAY_DISPUTE_MAPPING_CONFLICT'; END IF;
+ UPDATE payment_disputes SET order_id=coalesce(order_id,o.id),subscription_id=coalesce(subscription_id,o.subscription_id),
+  provider_subscription_id=coalesce(provider_subscription_id,provider_sub),
+  provider_invoice_id=coalesce(provider_invoice_id,p_event->>'invoiceId') WHERE id=d.id;
  PERFORM pay_dispute_freeze(d.id);
  RETURN (SELECT to_jsonb(x)||jsonb_build_object('duplicate',NOT fresh) FROM payment_disputes x WHERE id=d.id);
 END $$;
@@ -332,11 +389,16 @@ END $patch$;
 -- Atomic adapters reuse the existing grant routines; canonical Stripe identities have already been verified by the API.
 CREATE OR REPLACE FUNCTION public.pay_dispute_claim_pending(p_order uuid) RETURNS void
 LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
-DECLARE o payment_orders;d record;
+DECLARE o payment_orders;d record;provider_sub text;
 BEGIN
  SELECT * INTO o FROM payment_orders WHERE id=p_order;
- UPDATE payment_disputes SET order_id=o.id,subscription_id=o.subscription_id
-  WHERE payment_key=o.dispute_payment_key AND order_id IS NULL;
+ provider_sub:=pay_dispute_order_subscription(o.id);
+ IF EXISTS(SELECT 1 FROM payment_disputes WHERE payment_key=o.dispute_payment_key
+  AND (order_id IS NOT NULL AND order_id<>o.id OR provider_subscription_id IS NOT NULL
+   AND provider_sub IS DISTINCT FROM provider_subscription_id)) THEN RAISE EXCEPTION 'PAY_DISPUTE_MAPPING_CONFLICT'; END IF;
+ UPDATE payment_disputes SET order_id=o.id,subscription_id=o.subscription_id,
+  provider_subscription_id=coalesce(provider_subscription_id,provider_sub)
+  WHERE payment_key=o.dispute_payment_key AND (order_id IS NULL OR order_id=o.id);
  FOR d IN SELECT id FROM payment_disputes WHERE order_id=o.id AND freeze_state IN ('pending','review') ORDER BY id LOOP
   PERFORM pay_dispute_freeze(d.id);
  END LOOP;
@@ -523,19 +585,26 @@ END $patch$;
 
 CREATE OR REPLACE FUNCTION public.pay_dispute_match(p_dispute uuid,p_order uuid) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
-DECLARE d payment_disputes;o payment_orders;
+DECLARE d payment_disputes;o payment_orders;provider_sub text;locked_sub text;
 BEGIN
  SELECT * INTO d FROM payment_disputes WHERE id=p_dispute;
- PERFORM pay_dispute_lock(d.payment_key,CASE WHEN d.provider_subscription_id IS NOT NULL THEN
-  d.merchant_namespace||':'||d.mode||':'||d.provider_subscription_id END);
- SELECT * INTO o FROM payment_orders WHERE id=p_order;
- IF o.id IS NULL OR o.payment_channel IS DISTINCT FROM 'stripe' OR o.merchant_namespace<>d.merchant_namespace OR o.payment_mode<>d.mode
-  OR o.dispute_payment_key IS NOT NULL AND o.dispute_payment_key<>d.payment_key THEN RAISE EXCEPTION 'PAY_DISPUTE_MATCH_CONFLICT'; END IF;
+ IF d.id IS NULL THEN RAISE EXCEPTION 'PAY_DISPUTE_MATCH_CONFLICT'; END IF;
+ o:=pay_dispute_resolve_order(d.payment_key,p_order,d.merchant_namespace,d.mode);
+ IF o.id IS NULL THEN RAISE EXCEPTION 'PAY_DISPUTE_MATCH_CONFLICT'; END IF;
+ provider_sub:=pay_dispute_order_subscription(o.id,d.provider_subscription_id);
+ locked_sub:=provider_sub;
+ PERFORM pay_dispute_lock(d.payment_key,CASE WHEN provider_sub IS NOT NULL THEN
+  d.merchant_namespace||':'||d.mode||':'||provider_sub END);
+ SELECT * INTO d FROM payment_disputes WHERE id=p_dispute;
+ o:=pay_dispute_resolve_order(d.payment_key,p_order,d.merchant_namespace,d.mode);
+ provider_sub:=pay_dispute_order_subscription(o.id,d.provider_subscription_id);
+ IF provider_sub IS DISTINCT FROM locked_sub THEN RAISE EXCEPTION 'PAY_DISPUTE_MAPPING_RETRY' USING ERRCODE='40001'; END IF;
  PERFORM 1 FROM profiles WHERE id=o.user_id FOR UPDATE;
- UPDATE payment_orders SET dispute_payment_key=d.payment_key,dispute_subscription_key=CASE WHEN d.provider_subscription_id IS NOT NULL
-  THEN d.merchant_namespace||':'||d.mode||':'||d.provider_subscription_id END WHERE id=o.id;
+ UPDATE payment_orders SET dispute_payment_key=d.payment_key,dispute_subscription_key=CASE WHEN provider_sub IS NOT NULL
+  THEN d.merchant_namespace||':'||d.mode||':'||provider_sub END WHERE id=o.id;
  PERFORM pay_dispute_evidence(o.id);
- UPDATE payment_disputes SET order_id=o.id,subscription_id=o.subscription_id WHERE id=d.id AND (order_id IS NULL OR order_id=o.id);
+ UPDATE payment_disputes SET order_id=o.id,subscription_id=o.subscription_id,
+  provider_subscription_id=coalesce(provider_subscription_id,provider_sub) WHERE id=d.id AND (order_id IS NULL OR order_id=o.id);
  IF NOT FOUND THEN RAISE EXCEPTION 'PAY_DISPUTE_MATCH_CONFLICT'; END IF;
  PERFORM pay_dispute_freeze(d.id);
  PERFORM pay_dispute_evidence(o.id);

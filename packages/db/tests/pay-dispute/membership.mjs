@@ -37,6 +37,35 @@ export async function membershipCases({c,v,profile,receive,withdraw,ops,report})
   return {user,order,sub,start,end,providerSub:'sub_'+sub.replaceAll('-','')};
  };
  const start=new Date(Date.now()-60000),end=new Date(start);end.setUTCMonth(end.getUTCMonth()+1);
+ // Missing event subscription identity is derived from the mapped order's scoped provider ref.
+ const derived=await member(start,end);
+ await c.query('UPDATE payment_orders SET dispute_subscription_key=NULL WHERE id=$1',[derived.order]);
+ const derivedDispute=await receive(derived);
+ assert.equal(derivedDispute.provider_subscription_id,derived.providerSub);
+ assert.equal(await v('SELECT dispute_subscription_key v FROM payment_orders WHERE id=$1',[derived.order]),'fixture:test:'+derived.providerSub);
+ await c.query('SET ROLE service_role');
+ assert.equal(await v('SELECT pay_dispute_stop_claim($1) v',[derivedDispute.id]),true);
+ await c.query('RESET ROLE');
+ await assert.rejects(()=>receive(derived,{subscriptionId:'sub_wrong'}),/PAY_DISPUTE_SUBSCRIPTION_CONFLICT/);
+ // An unmatched event can be associated later; both repair and fulfillment claiming persist the identity.
+ for(const viaMatch of [true,false]) {
+  const late=await member(start,end);
+  await c.query('UPDATE payment_orders SET dispute_payment_key=NULL,dispute_subscription_key=NULL WHERE id=$1',[late.order]);
+  const pending=await receive(late,{orderId:null});
+  assert.equal(pending.provider_subscription_id,null);
+  if(viaMatch) {
+   await c.query('SET ROLE service_role');await v('SELECT pay_dispute_match($1,$2) v',[pending.id,late.order]);await c.query('RESET ROLE');
+  } else {
+   await c.query("UPDATE payment_orders SET dispute_payment_key=$2,dispute_subscription_key=$3 WHERE id=$1",
+    [late.order,'fixture:test:pi_'+late.order.replaceAll('-',''),'fixture:test:'+late.providerSub]);
+   await c.query('SELECT pay_dispute_claim_pending($1)',[late.order]);
+  }
+  assert.equal(await v('SELECT provider_subscription_id v FROM payment_disputes WHERE id=$1',[pending.id]),late.providerSub);
+ }
+ // A later event must repair retained legacy rows that already have the order but lack provider identity.
+ await c.query('UPDATE payment_disputes SET provider_subscription_id=NULL WHERE id=$1',[derivedDispute.id]);
+ assert.equal((await receive(derived,{subscriptionId:derived.providerSub})).provider_subscription_id,derived.providerSub);
+ report.checks.push('missing subscription derived and locked; conflict rejected; late match, pending claim and later event backfill identity');
  const f=await member(start,end);
  assert.equal(await v('SELECT credits v FROM profiles WHERE id=$1',[f.user]),100);
  const d=await receive(f,{subscriptionId:f.providerSub});
@@ -100,9 +129,9 @@ export async function membershipCases({c,v,profile,receive,withdraw,ops,report})
    paymentIntentId:'pi_race_'+racing.sub.replaceAll('-',''),amount:1000,currency:'usd',paidAt:start,start,end:nextEnd}],client);
   try {
    await connection.query('BEGIN');
-   if(disputeFirst)await receive(racing,{subscriptionId:racing.providerSub},connection);
+   if(disputeFirst)await receive(racing,{},connection);
    else await renew(connection);
-   const waiting=disputeFirst?renew(c):receive(racing,{subscriptionId:racing.providerSub});
+   const waiting=disputeFirst?renew(c):receive(racing);
    let blocked_=false;
    for(let i=0;i<100&&!blocked_;i++) {
     blocked_=await v('SELECT pg_backend_pid()=ANY(pg_blocking_pids($1)) v',[c.processID],connection);
