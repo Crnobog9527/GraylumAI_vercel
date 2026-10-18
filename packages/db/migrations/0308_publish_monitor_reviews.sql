@@ -1,9 +1,10 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
--- PUBLISH-MONITOR PR-6. Temporary development number; request the final number after B2 is delivered.
+-- PUBLISH-MONITOR PR-6. Number 0308 assigned by the controller through Owner (2026-10-18).
 -- Reuse social_review_runs, Runtime sessions/executions/tool journal and BILL2's caps; no new tables or queues.
 -- Current-session Owner instruction: switches default OFF (supersedes the older default-on proposal).
--- Rollback: turn publish_monitor_review_enabled off, then revert the host code. Keep all existing claims/accounting;
--- pending Runtime calls settle through the existing financial recovery. Never delete unsettled runs to roll back.
+-- Rollback: turn publish_monitor_review_enabled off; keep this host/recovery until all weeklyReview Runtime/BILL2
+-- runs close, then revert the host (old context parsers lack weeklyReview). Keep SQL, claims and accounting;
+-- native financial recovery settles pending calls. Never delete unsettled runs to roll back.
 BEGIN;
 INSERT INTO system_settings(key,value) VALUES('publish_monitor_review_enabled','false'),
  ('publish_monitor_review_model_id','null'),('publish_monitor_review_max_usd','"0"') ON CONFLICT(key) DO NOTHING;
