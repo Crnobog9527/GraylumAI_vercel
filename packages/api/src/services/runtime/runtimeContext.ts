@@ -50,6 +50,7 @@ export const runtimeContext=z.object({
  // SKILL-I18N-HOOK: the primary call carries the reply-language rule (absent on contexts admitted before it).
  replyLanguage:z.literal('reply-language-v1').optional(),
  // REPORT-VISUAL PR-3: free conversations told to read a strategy report directly (absent on contexts admitted before it).
+ weeklyReview:z.object({id:z.string().uuid(),token:z.string().uuid(),maxCostUsd:z.string()}).strict().optional(),
  ownPosts:z.literal(true).optional(),
  workspaceGuide:z.literal('strategy-read-v1').optional(),
  // A2: the saved version a directly chosen derived-content Skill was admitted with (checkpoint_source injects it).

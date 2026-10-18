@@ -1,4 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {runWeeklyReviews,type ReviewStep} from './reviews';
+export {createRuntimeBudget} from '../runtime/budget';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ClientDeps } from './postForMe/client';
 import { reconcilePublishes, type ReconcileReport } from './publish';
@@ -27,6 +29,7 @@ export const ORPHAN_SWEEP_DELETE_SWITCH = 'publish_monitor_orphan_sweep_delete';
 export type SocialMonitorReport = {
   publishes: ReconcileReport | null; providerWork: RunReport | null; attempts: RunReport | null; sweep: SweepReport | null;
   sweepDeleteEnabled: boolean; pruned: number | null; refresh: RefreshReport | null; tikhub: TikhubReport | null;
+  reviews: Awaited<ReturnType<typeof runWeeklyReviews>> | null;
   billedRunsClosed: number | null; billedPruned: number | null; postForMe: boolean; failures: string[];
 };
 
@@ -66,10 +69,10 @@ async function pruneBilledReads(db: Db): Promise<number> {
  * credits never waits for the feature switch; reading data needs it on.
  */
 export async function runSocialMonitorJob(db: Db, client: ClientDeps | null, until: number, windowFor: WindowLookup,
-  now: () => number = Date.now, tikhub?: TikhubStep): Promise<SocialMonitorReport> {
+  now: () => number = Date.now, tikhub?: TikhubStep, reviews?: ReviewStep): Promise<SocialMonitorReport> {
   const report: SocialMonitorReport = { publishes: null, providerWork: null, attempts: null, sweep: null,
     sweepDeleteEnabled: false, pruned: null, refresh: null, tikhub: null, billedRunsClosed: null, billedPruned: null,
-    postForMe: client !== null, failures: [] };
+    postForMe: client !== null, reviews: null, failures: [] };
   try { report.pruned = await pruneSnapshots(db, until, now); } catch { report.failures.push('prune'); }
   try { report.billedPruned = await pruneBilledReads(db); } catch { report.failures.push('billed_prune'); }
   try {
@@ -93,6 +96,10 @@ export async function runSocialMonitorJob(db: Db, client: ClientDeps | null, unt
         report.tikhub = await runTikhubRefresh(db as SupabaseClient, { env: tikhub.env }, tikhub.entitlement, until, now);
       }
     } catch { report.failures.push('tikhub'); }
+  }
+  if (reviews && now() < until) {
+    try { report.reviews = await runWeeklyReviews(db as SupabaseClient, reviews, until, now); }
+    catch { report.failures.push('reviews'); }
   }
   if (client && now() < until) {
     try {

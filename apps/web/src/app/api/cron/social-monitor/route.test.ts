@@ -1,11 +1,11 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
-const mocks = vi.hoisted(() => ({ auth: vi.fn(), create: vi.fn(), deps: vi.fn(), run: vi.fn(), start: vi.fn(), finish: vi.fn() }));
+const mocks = vi.hoisted(() => ({ auth: vi.fn(), create: vi.fn(), deps: vi.fn(), run: vi.fn(), start: vi.fn(), finish: vi.fn(), budget: vi.fn() }));
 vi.mock('@/lib/cron-auth', () => ({ validateCronRequest: mocks.auth }));
 vi.mock('@supabase/supabase-js', () => ({ createClient: mocks.create }));
 vi.mock('@repo/api/src/services/publishMonitor/secrets', () => ({ loadPostForMeDeps: mocks.deps }));
-vi.mock('@repo/api/src/services/publishMonitor/socialMonitorJob', () => ({ runSocialMonitorJob: mocks.run,
+vi.mock('@repo/api/src/services/publishMonitor/socialMonitorJob', () => ({ runSocialMonitorJob: mocks.run, createRuntimeBudget: mocks.budget,
   tikhubEntitlements: () => async () => ({ windowDays: 30, benchmark: false }),
   entitlementWindow: () => async () => 30 }));
 vi.mock('@repo/api/src/services/scheduledJobRuns', () => ({ startScheduledJobRun: mocks.start,
@@ -21,6 +21,7 @@ beforeEach(() => {
   mocks.deps.mockResolvedValue({ synthetic: 'deps' });
   mocks.start.mockResolvedValue('run-1');
   mocks.finish.mockResolvedValue(undefined);
+  mocks.budget.mockReturnValue({ synthetic: 'one-invocation-budget' });
 });
 const call = () => GET(new Request('https://synthetic.test/api/cron/social-monitor'));
 
@@ -84,4 +85,18 @@ it('records unavailable Vault as an error, never as an unconfigured successful s
   expect(mocks.deps).toHaveBeenCalledWith({ synthetic: true });
   expect(mocks.finish).toHaveBeenCalledWith(expect.objectContaining({ status: 'error', error: 'PLATFORM_SECRET_UNAVAILABLE' }));
   expect(mocks.run.mock.calls[0]![1]).toBeNull();
+});
+
+it('shares the entry-time Runtime budget even when setup has already consumed invocation time',async()=>{
+ let time=1_000;const clock=vi.spyOn(Date,'now').mockImplementation(()=>time);
+ mocks.start.mockImplementationOnce(async()=>{time+=20_000;return 'run-1';});
+ mocks.deps.mockImplementationOnce(async()=>{time+=20_000;return null;});
+ mocks.run.mockResolvedValue({failures:[]});
+ try{
+  expect((await call()).status).toBe(200);
+  expect(mocks.run.mock.calls[0]![2]).toBe(241_000);
+  expect(mocks.budget).toHaveBeenCalledOnce();
+  expect(mocks.budget.mock.invocationCallOrder[0]).toBeLessThan(mocks.start.mock.invocationCallOrder[0]!);
+  expect(mocks.run.mock.calls[0]![6].budget).toBe(mocks.budget.mock.results[0]!.value);
+ }finally{clock.mockRestore();}
 });
