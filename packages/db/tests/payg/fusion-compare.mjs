@@ -93,6 +93,10 @@ export async function fusionCompareCases({db,Client,connectionString,report,crea
   await assert.rejects(call(db,'fusion_group_admit',actor,id1,'compare',session,runs),/FUSION_COMPARE_GATE_REQUIRED/);
   assert.equal((await call(db,'fusion_compare_gate',actor,first.compareId,'clear',false)).gateVerdict,'clear');
   assert.equal((await call(db,'fusion_compare_gate',actor,first.compareId,'clear',false)).gateVerdict,'clear');
+  // The work material changed (or was withdrawn) while the judgement ran: the admission refuses before preparing any run.
+  await db.query("UPDATE fusion_compares SET config=config||'{\"materialRevision\":\"older:none\"}' WHERE id=$1",[first.compareId]);
+  await assert.rejects(call(db,'fusion_group_admit',actor,id1,'compare',session,runs),/FUSION_COMPARE_STALE/);
+  await db.query("UPDATE fusion_compares SET config=config-'materialRevision' WHERE id=$1",[first.compareId]);
   await assert.rejects(call(db,'fusion_compare_gate',actor,first.compareId,'block',false),/FUSION_COMPARE_REQUEST_CONFLICT/);
   // The fallback rule rides with the verdict and is replayed as stored, not rebuilt later.
   assert.equal((await call(db,'fusion_compare_read',actor,first.compareId)).gateFallback,false);

@@ -15,7 +15,7 @@
 -- DROP FUNCTION public.fusion_compare_context(uuid,uuid,integer); DROP FUNCTION public.fusion_compare_material_token(uuid,uuid); DROP FUNCTION public.fusion_compare_material_guard(uuid,uuid); DROP FUNCTION public.fusion_compare_end(uuid,uuid);
 -- DROP FUNCTION public.fusion_compare_gate(uuid,uuid,text,boolean); then re-run the fusion_compare_gate and
 -- fusion_compare_view definitions of 0290_fusion_compare.sql (three-argument gate, view without 'snapshotHash' and
--- 'gateFallback'), and the fusion_compare_begin and fusion_compare_adopt definitions of 0290 (without the work-material checks); ALTER TABLE public.fusion_compares DROP COLUMN gate_fallback. The TypeScript treats a missing
+-- 'gateFallback'), and the fusion_group_admit, fusion_compare_begin and fusion_compare_adopt definitions of 0290 (without the work-material checks); ALTER TABLE public.fusion_compares DROP COLUMN gate_fallback. The TypeScript treats a missing
 -- snapshotHash as "no check" and a missing gateFallback as "derive it from the gate state".
 BEGIN;
 SET LOCAL lock_timeout = '5s';
@@ -271,6 +271,105 @@ BEGIN
       'adoptionRunId',e.billing_run_id,'executionId',e.id,'fromRevision',s.revision,'toRevision',s.revision+2),
     updated_at=clock_timestamp() WHERE id=fc.id RETURNING * INTO fc;
   RETURN jsonb_build_object('state','adopted','adoption',fc.adoption);
+END $$;
+
+-- fusion_group_admit: 0290's definition plus, for a compare, the work-material check (token and dependencies) in the
+-- admission transaction, before any run is prepared. The review path is unchanged.
+CREATE OR REPLACE FUNCTION public.fusion_group_admit(p_actor_id uuid, p_request_id uuid, p_kind text,
+  p_source_session_id uuid, p_runs jsonb)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE g fusion_billing_groups; item jsonb; f jsonb; v jsonb; run jsonb; out jsonb:='[]'; member_level text;
+  total numeric:=0; i integer:=0; gid uuid; fc fusion_compares; lim jsonb; budget jsonb; phase text;
+BEGIN
+  PERFORM bill2_actor(p_actor_id);
+  IF p_kind IS NULL OR p_kind NOT IN ('review','compare') THEN RAISE EXCEPTION 'FUSION_GROUP_INVALID'; END IF;
+  PERFORM pg_advisory_xact_lock(hashtextextended('fusion-admit:'||p_actor_id::text||':'||p_request_id::text,0));
+  SELECT * INTO g FROM fusion_billing_groups WHERE actor_id=p_actor_id AND request_id=p_request_id;
+  IF g.id IS NOT NULL THEN
+    IF g.kind<>p_kind OR g.source_session_id IS DISTINCT FROM p_source_session_id THEN RAISE EXCEPTION 'FUSION_GROUP_CONFLICT'; END IF;
+    -- The replay returns frozen private requests: take the conversation's share lock first and refuse
+    -- once it is deleted, so a replay never returns content a committed deletion removed.
+    PERFORM 1 FROM runtime_sessions WHERE id=g.source_session_id AND actor_id=p_actor_id
+      AND content_deleted_at IS NULL AND erased_at IS NULL FOR SHARE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'FUSION_GROUP_DENIED'; END IF;
+    -- A compare whose record a source deletion removed (its runs scrubbed) has nothing left to replay.
+    IF p_kind='compare' AND NOT EXISTS(SELECT 1 FROM fusion_compares WHERE actor_id=p_actor_id AND group_id=g.id) THEN
+      RAISE EXCEPTION 'FUSION_GROUP_DENIED'; END IF;
+    RETURN jsonb_build_object('groupId',g.id,'replayed',true,'runs',coalesce((SELECT jsonb_agg(jsonb_build_object(
+      'runId',r.id,'fusion',r.payload#>'{input,fusion}') ORDER BY (r.payload#>>'{input,fusion,index}')::int)
+      FROM bill2_runs r WHERE r.fusion_group_id=g.id AND r.actor_id=p_actor_id),'[]'));
+  END IF;
+  IF jsonb_typeof(p_runs) IS DISTINCT FROM 'array' OR jsonb_array_length(p_runs) NOT BETWEEN 1 AND 16 THEN
+    RAISE EXCEPTION 'FUSION_GROUP_INVALID'; END IF;
+  IF p_kind='review' THEN
+    SELECT value INTO v FROM system_settings WHERE key='fusion_settings';
+    IF jsonb_typeof(v)='string' THEN v:=(v#>>'{}')::jsonb; END IF;
+    IF v#>>'{review,enabled}' IS DISTINCT FROM 'true' THEN RAISE EXCEPTION 'FUSION_REVIEW_DISABLED'; END IF;
+    -- Paid, consistent, unexpired membership (same facts as reports), then the plan's own Fusion switch.
+    PERFORM report_membership_check(p_actor_id);
+    SELECT membership_level INTO member_level FROM profiles WHERE id=p_actor_id;
+    IF NOT EXISTS(SELECT 1 FROM membership_plans mp WHERE mp.level=member_level AND mp.allow_fusion_review) THEN
+      RAISE EXCEPTION 'FUSION_MEMBERSHIP_REQUIRED'; END IF;
+    budget:=v#>'{review,maxBudgetUsd}';
+  ELSE
+    -- Lock order as begin and adopt: the session first (shared), then the compare record.
+    PERFORM 1 FROM runtime_sessions WHERE id=p_source_session_id AND actor_id=p_actor_id FOR SHARE;
+    SELECT * INTO fc FROM fusion_compares WHERE actor_id=p_actor_id AND request_id=p_request_id FOR UPDATE;
+    IF fc.id IS NULL OR fc.session_id IS DISTINCT FROM p_source_session_id THEN RAISE EXCEPTION 'FUSION_COMPARE_DENIED'; END IF;
+    IF fc.state<>'admitting' OR fc.created_at<=clock_timestamp()-interval '5 minutes' THEN RAISE EXCEPTION 'FUSION_COMPARE_ENDED'; END IF;
+    IF fc.gate_verdict IS NULL OR fc.gate_verdict='block' THEN RAISE EXCEPTION 'FUSION_COMPARE_GATE_REQUIRED'; END IF;
+    -- The work material may have been withdrawn or changed while the paid judgement ran: nothing is admitted, held or sent
+    -- with it. The token covers revision and content, the guard re-checks the dependencies (as an ordinary turn does).
+    IF fc.config ? 'materialRevision' AND fc.config->>'materialRevision' IS DISTINCT FROM fusion_compare_material_token(p_actor_id,fc.session_id)
+    THEN RAISE EXCEPTION 'FUSION_COMPARE_STALE'; END IF;
+    PERFORM fusion_compare_material_guard(p_actor_id,fc.session_id);
+    v:=fusion_compare_settings(p_actor_id);
+    lim:=fusion_compare_limits(v);
+    IF jsonb_array_length(p_runs)<(lim->>'min')::int THEN RAISE EXCEPTION 'FUSION_COMPARE_TOO_FEW'; END IF;
+    IF jsonb_array_length(p_runs)>(lim->>'max')::int THEN RAISE EXCEPTION 'FUSION_COMPARE_TOO_MANY'; END IF;
+    IF jsonb_array_length(p_runs)<>jsonb_array_length(fc.config->'models') THEN RAISE EXCEPTION 'FUSION_GROUP_INVALID'; END IF;
+    budget:=v#>'{compare,maxBudgetUsd}';
+  END IF;
+  FOR item IN SELECT value FROM jsonb_array_elements(p_runs) LOOP
+    f:=item#>'{payload,input,fusion}';
+    phase:=f->>'phase';
+    IF jsonb_typeof(f) IS DISTINCT FROM 'object' OR (f->>'index') IS DISTINCT FROM i::text
+      OR jsonb_typeof(f->'body') IS DISTINCT FROM 'string' OR jsonb_typeof(f->'call') IS DISTINCT FROM 'object'
+      OR (p_kind='review' AND phase NOT IN ('fusion_review','fusion_summary'))
+      OR (p_kind='compare' AND phase IS DISTINCT FROM 'fusion_compare')
+      OR f#>>'{call,phase}' IS DISTINCT FROM phase
+      OR f#>>'{call,requestHash}' IS DISTINCT FROM encode(sha256(convert_to(f->>'body','UTF8')),'hex')
+      OR jsonb_array_length(item#>'{payload,callPolicy}')<>1 OR item#>>'{payload,limits,maxCalls}' IS DISTINCT FROM '1'
+      OR item#>>'{payload,callPolicy,0,modelId}' IS DISTINCT FROM item#>>'{payload,modelId}'
+      OR item#>>'{payload,contractVersion}' IS DISTINCT FROM 'bill2.v2' OR item#>'{payload,sessionRef}' IS NOT NULL
+    THEN RAISE EXCEPTION 'FUSION_GROUP_INVALID'; END IF;
+    IF p_kind='review' THEN
+      -- Administrator allowlist: reviewers for review calls, the summary model for the summary call.
+      IF (phase='fusion_review' AND NOT coalesce(v#>'{review,reviewerModelIds}','[]') ? (item#>>'{payload,modelId}'))
+        OR (phase='fusion_summary' AND v#>>'{review,summaryModelId}' IS DISTINCT FROM item#>>'{payload,modelId}')
+      THEN RAISE EXCEPTION 'FUSION_MODEL_DENIED'; END IF;
+    ELSE
+      -- The compare allowlist, in the order the user chose (frozen at begin). A compare run carries no
+      -- top-level Skill identity (its columns use other models than the Skill's own; FUSION-COMPARE §3.4).
+      IF NOT coalesce(v#>'{compare,allowedModelIds}','[]') ? (item#>>'{payload,modelId}')
+        OR fc.config#>>ARRAY['models',i::text] IS DISTINCT FROM item#>>'{payload,modelId}' THEN
+        RAISE EXCEPTION 'FUSION_COMPARE_MODEL_NOT_ALLOWED'; END IF;
+      IF item->'payload' ?| ARRAY['moduleId','skillId','revisionId'] THEN RAISE EXCEPTION 'FUSION_GROUP_INVALID'; END IF;
+    END IF;
+    total:=total+bill2_decimal(item#>'{payload,limits,costUsd}');
+    i:=i+1;
+  END LOOP;
+  IF coalesce(budget#>>'{}','')='' OR total>bill2_decimal(budget) THEN RAISE EXCEPTION 'FUSION_BUDGET_EXCEEDED'; END IF;
+  gid:=fusion_group_create(p_actor_id,p_request_id,p_kind,p_source_session_id);
+  FOR item IN SELECT value FROM jsonb_array_elements(p_runs) LOOP
+    run:=bill2_prepare(p_actor_id,(item->>'requestId')::uuid,item->'payload');
+    PERFORM fusion_group_attach(p_actor_id,gid,(run->>'id')::uuid);
+    out:=out||jsonb_build_object('runId',run->>'id','fusion',item#>'{payload,input,fusion}');
+  END LOOP;
+  IF p_kind='compare' THEN
+    UPDATE fusion_compares SET group_id=gid,state='running',updated_at=clock_timestamp() WHERE id=fc.id;
+  END IF;
+  RETURN jsonb_build_object('groupId',gid,'replayed',false,'runs',out);
 END $$;
 
 DO $$ DECLARE f text; BEGIN

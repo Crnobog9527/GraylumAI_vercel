@@ -158,10 +158,18 @@ export async function startCompare(deps: CompareDeps, choice: CompareStartInput)
   }
 
   const request = compareRequest({ ...choice.parts, positioningFallback: fallback });
+  // The work material may be withdrawn or changed while the judgement ran: the database refuses the admission, and the
+  // record is ended so it does not hold the user's one slot (nothing was admitted or held).
   const group = await admitCompareGroup({ admin, actorId, requestId, sourceSessionId: choice.sessionId, modelIds: choice.modelIds, request,
     env: deps.env, shown: choice.shown,
     // The limit recorded with the request, not today's setting: a change by an administrator in between must not shorten answers.
-    answerTokens: record.config?.answerOutputTokens });
+    answerTokens: record.config?.answerOutputTokens })
+    .catch(async (error: unknown) => {
+      if (/FUSION_COMPARE_STALE|RUNTIME_MATERIAL_/.test(error instanceof Error ? error.message : '')) {
+        await compareRpc(admin, 'fusion_compare_end', { p_actor_id: actorId, p_compare_id: compareId }).catch(() => undefined);
+      }
+      throw error;
+    });
   const result = await claim(compareId, group);
   return { state: result.state, compareId, group, claim: result };
 }

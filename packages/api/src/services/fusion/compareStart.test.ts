@@ -6,7 +6,7 @@ const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')
 const s = vi.hoisted(() => ({
   gate: { positioned: false, refusals24h: 0 } as { positioned: boolean; refusals24h: number },
   begin: {} as Record<string, unknown>, rpcs: [] as Array<{ name: string; args: Record<string, unknown> }>, claim: { state: 'claimed' } as Record<string, unknown>,
-  tooLarge: [] as string[], allowed: null as Error | null, endFails: false, existing: null as unknown, probes: 0, credits: 10, budget: '1' as string | null, usd: 0n, requests: [] as Array<{ instructions: string }>, admitCalls: [] as unknown[], replayOnly: false,
+  tooLarge: [] as string[], allowed: null as Error | null, endFails: false, existing: null as unknown, probes: 0, admitError: null as Error | null, credits: 10, budget: '1' as string | null, usd: 0n, requests: [] as Array<{ instructions: string }>, admitCalls: [] as unknown[], replayOnly: false,
 }));
 vi.mock('./compareAdmission', async original => ({ ...(await original<typeof import('./compareAdmission')>()),
   assertCompareAllowed: async () => { if (s.allowed) throw s.allowed; return { answerOutputTokens: 4096, dispatchMinutes: 10, maxBudgetUsd: s.budget }; },
@@ -16,7 +16,7 @@ vi.mock('./compareAdmission', async original => ({ ...(await original<typeof imp
       totalCredits: s.credits * input.modelIds.length, totalUsd: s.usd };
   },
   replayCompareGroup: async () => { s.probes += 1; return s.existing; },
-  admitCompareGroup: async (input: { request: { instructions: string }; shown: unknown }) => { s.admitCalls.push(input);
+  admitCompareGroup: async (input: { request: { instructions: string }; shown: unknown }) => { s.admitCalls.push(input); if (s.admitError) throw s.admitError;
     return { groupId: id(70), replayed: false, runs: [{ runId: id(80), index: 0, body: 'b', call: { phase: 'fusion_compare' } },
       { runId: id(81), index: 1, body: 'b', call: { phase: 'fusion_compare' } }] }; },
   compareRpc: async (_a: unknown, name: string, args: Record<string, unknown>) => {
@@ -50,7 +50,7 @@ const fresh = (patch: Record<string, unknown> = {}) => ({ compareId: id(90), sta
 
 beforeEach(() => {
   s.gate = { positioned: false, refusals24h: 0 }; s.begin = fresh(); s.rpcs = []; s.claim = { state: 'claimed' }; s.tooLarge = []; s.credits = 10;
-  s.requests = []; s.admitCalls = []; classify.mockReset(); classify.mockResolvedValue('allow'); s.budget = '1'; s.usd = 0n; s.endFails = false; s.existing = null; s.probes = 0; s.allowed = null;
+  s.requests = []; s.admitCalls = []; classify.mockReset(); classify.mockResolvedValue('allow'); s.budget = '1'; s.usd = 0n; s.endFails = false; s.existing = null; s.probes = 0; s.admitError = null; s.allowed = null;
   rateLimit.mockReset(); rateLimit.mockResolvedValue(undefined);
 });
 
@@ -312,5 +312,19 @@ describe('compare start: references and recorded work material (review findings)
     await start({}, { materialRevision: 7 });
     const begin = s.rpcs.find(call => call.name === 'fusion_compare_begin')!;
     expect((begin.args.p_request as { config: { materialRevision: unknown } }).config.materialRevision).toBe(7);
+  });
+});
+
+describe('compare start: material withdrawn while the judgement ran (review finding)', () => {
+  it.each(['FUSION_COMPARE_STALE', 'RUNTIME_MATERIAL_UNAVAILABLE'])('ends the record when admission refuses with %s, and holds nothing', async code => {
+    s.admitError = new Error(code);
+    await expect(start()).rejects.toThrow(code);
+    expect(names()).not.toContain('fusion_compare_claim');
+    expect(names().at(-1)).toBe('fusion_compare_end');
+  });
+  it('does not end the record for other admission failures (a retry may still succeed)', async () => {
+    s.admitError = new Error('FUSION_ADMISSION_UNAVAILABLE');
+    await expect(start()).rejects.toThrow('FUSION_ADMISSION_UNAVAILABLE');
+    expect(names()).not.toContain('fusion_compare_end');
   });
 });
