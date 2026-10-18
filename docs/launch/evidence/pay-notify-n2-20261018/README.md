@@ -26,7 +26,7 @@ Master Plan 2.1 已记录 2026-10-13 Owner 将 N1–N6 按推荐确认：自己�
 
 已完成：N2 扫描、六类双语模板、现有 cron 接线、发送前业务复核、30 天清理及本机验证。下一步：最终 CI、Codex 机器人审查、由总控确认编号/上库/合并。
 阻断：真实收信需 Owner 完成上述配置；迁移编号最终确认由总控负责。
-验证：本机付款提醒单元 45 项、cron 5 项、API/Web lint 与类型检查通过；数据库 11 组场景通过；最新 staging 上的最终空库回放通过，built-fingerprint 已由命令生成。
+验证：本机付款提醒单元 45 项、cron 7 项、API/Web lint 与类型检查通过；数据库 11 组场景通过；最新 staging 上的最终空库回放通过，built-fingerprint 已由命令生成。
 
 ## 实现与兼容
 
@@ -51,7 +51,7 @@ Master Plan 2.1 已记录 2026-10-13 Owner 将 N1–N6 按推荐确认：自己�
 ## 验证记录
 
 - PASS：`pnpm --filter @repo/api exec vitest run src/services/notify`，45 项（含重复、未知结果同键重试/转人工、重试间邮箱变化、测试白名单、六类模板）。
-- PASS：`pnpm --filter web exec vitest run src/app/api/cron/release-subscription-credits/route.test.ts`，5 项（含未授权拒绝、提醒失败告警及不阻断积分释放）。
+- PASS：`pnpm --filter web exec vitest run src/app/api/cron/release-subscription-credits/route.test.ts`，7 项（含未授权拒绝、提醒失败告警、不阻断积分释放、积分失败时仍等待邮件任务收尾）。
 - PASS：`node packages/db/tests/payment-notices/reminders-local.mjs --local-only`，11 组场景，详见 `database-results.json`。测试库独立且清理完成；测试金融事实不代表真实付款。
 - PASS：API/Web 的 lint、typecheck；代码大小检查。
 - 说明：一次本机全量 API 测试与同步 staging 重叠，不能当作最终版本证据（7632 通过、4 失败、16 跳过）；其中同步影响的 2 组已经在稳定文件下重跑，11 项通过。最终全量以本 PR 当前版本 CI 为准。
@@ -71,3 +71,8 @@ Validation handoff：总控应用迁移并合并部署后，在 `/admin/payment-
 迁移编号阻断：本次按 Owner 要求保留暂定 0312，当前 staging 到 0306，`checkMigrationLedger` 实查缺 0307–0311。总控按最终合并顺序确认编号后，需要同步 staging、改号（如需）、重生成指纹并重新取得当前版本 CI/审查；不能把账本失败算通过。
 
 最终空库命令 PASS：`node packages/db/tests/run-db-baseline-replay.mjs --local-only --write-built`；历史位置双跑和全链结构比对通过，容器已清理。数据库名额已释放。
+
+
+机器人首轮：审查覆盖 `9de0ae80e87c7e2ea52d8af3632bf774af08aa76`，无 P0/P1，一条 P2：积分释放失败不应提前返回而截断邮件。
+已按建议改为 `Promise.allSettled`，保留积分释放原顺序；两条新增测试在修复前失败（5 通过/2 失败），修复后 7 项通过，Web lint/typecheck 通过。下一轮复审针对该修复及其影响。
+首轮 CI：全量 API/Web 单元与回归、lint/类型和独立安全检查通过；迁移账本/CI 合约因缺号失败，Security Unit Tests 如实随前置失败，未豁免。

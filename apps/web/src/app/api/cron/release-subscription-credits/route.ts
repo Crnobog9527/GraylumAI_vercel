@@ -37,13 +37,20 @@ export async function GET(request: Request) {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
     logger.system.cronJob('release-subscription-credits', 'started');
-    const remindersPromise = runPaymentReminders(supabase, { deadline: startedAt + 50_000 })
-      .catch(() => ({ success: false, attention: [{ attention: 'PAYMENT_NOTICE_SEND_FAILED' as const }] }));
-    const result = await releaseDueAnnualSubscriptionCredits(supabase);
-    const methodResult = await releaseMethodMembershipCredits(supabase);
-    reportAnnualReleaseAnomalies(result.anomalies);
-    const reminders = await remindersPromise;
+    const [creditWork, reminderWork] = await Promise.allSettled([
+      (async () => {
+        const result = await releaseDueAnnualSubscriptionCredits(supabase);
+        const methodResult = await releaseMethodMembershipCredits(supabase);
+        return { result, methodResult };
+      })(),
+      runPaymentReminders(supabase, { deadline: startedAt + 50_000 }),
+    ]);
+    const reminders = reminderWork.status === 'fulfilled' ? reminderWork.value
+      : { success: false, attention: [{ attention: 'PAYMENT_NOTICE_SEND_FAILED' as const }] };
     reportPaymentNoticeAttention(reminders.attention);
+    if (creditWork.status === 'rejected') throw creditWork.reason;
+    const { result, methodResult } = creditWork.value;
+    reportAnnualReleaseAnomalies(result.anomalies);
     const summary = {
       methodResult,
       reminders,

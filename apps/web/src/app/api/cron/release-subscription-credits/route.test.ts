@@ -69,3 +69,17 @@ it('isolates reminder failures from credit release and alerts without personal d
   }));
   expect(JSON.stringify(await response.json())).not.toContain('private');
 });
+it.each(['annual', 'method'])('awaits reminder completion before returning a %s credit failure', async failure => {
+  mocks.release.mockResolvedValue({ anomalies: [], releasedGrantCount: 1 });
+  if (failure === 'annual') mocks.release.mockRejectedValue(new Error('credit release failed'));
+  else mocks.rpc.mockResolvedValue({ data: null, error: { message: 'method release failed' } });
+  let resolveReminders!: () => void;
+  const reminderWork = new Promise(resolve => { resolveReminders = () => resolve({ success: true, attention: [], scanned: 1 }); });
+  mocks.reminders.mockReturnValue(reminderWork);
+  let settled = false;
+  const response = GET(new Request('https://fixture.invalid')).then(value => { settled = true; return value; });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(settled).toBe(false);
+  resolveReminders();
+  expect((await response).status).toBe(500);
+});
