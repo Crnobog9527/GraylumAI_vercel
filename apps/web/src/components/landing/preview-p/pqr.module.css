@@ -31,7 +31,7 @@
   background: var(--p-page);
   color: var(--p-ink);
 }
-@media (max-width: 767px) { .shell { --p-gap: 12px; } }
+@media (max-width: 767px) { .shell { --p-gap: 16px; } }
 
 /* The three main colours and their trays (cool, warm, cool), the closing panel in the first. */
 .palette[data-palette='p'] { --p-accent: #2e5bff; --p-accent-text: #1f45d6; --p-tray-1: #dde6ff; --p-tray-2: #fbe8d6; --p-tray-3: #d9f2e6; }
@@ -50,6 +50,15 @@
   box-shadow: 0 1px 2px rgba(21, 26, 43, .05), 0 12px 32px -20px rgba(21, 26, 43, .35);
 }
 @media (max-width: 767px) { .palette > header { padding-inline: var(--p-gap); } }
+/* Sample L's bar after the first screen (StickyCtaMNO) would make a second header under the pill: on wide screens the
+   pill keeps its own button instead; on a phone the bar stays at the foot as in L. */
+@media (min-width: 768px) {
+  .palette [data-phone-bottom] { display: none; }
+  .palette > header [data-header-cta] { visibility: visible !important; }
+}
+
+/* ---- First screen: shorter, so the next region's start shows above the fold (no backdrop, no decoration) ---- */
+.palette [data-region='首屏'] { min-height: min(640px, calc(100svh - 160px)); padding: 72px 0 56px; }
 
 /* ---- Open regions: the page's grey, no bands ---- */
 .palette [data-band] { background: transparent; box-shadow: none; border-radius: 0; margin-inline: 0; }
@@ -63,9 +72,13 @@
 .palette [data-region='第三步'],
 .palette [data-region='样例报告'],
 .palette [data-region='对比区'] { margin-inline: var(--p-gap); border-radius: var(--p-radius); }
+.palette [data-region='三步'] > div:first-child { padding-bottom: 48px; }
+.palette [data-region='三步'] > div:has(> [data-region='评审团']) + div {
+  max-width: none; margin: 0 var(--p-gap); padding: 0 max(var(--j-gutter), calc((100% - 1200px) / 2)) 48px;
+  border-radius: 0 0 var(--p-radius) var(--p-radius); background: var(--p-tray-1); }
 .palette [aria-labelledby='step-one-title'] { background: var(--p-tray-1); border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
-.palette [data-region='三步'] > div:has(> [data-region='评审团']) { max-width: none; padding: 0 max(var(--j-gutter), calc((100% - 1200px) / 2)) 64px;
-  background: var(--p-tray-1); border-top-left-radius: 0; border-top-right-radius: 0; }
+.palette [data-region='三步'] > div:has(> [data-region='评审团']) { max-width: none; padding: 0 max(var(--j-gutter), calc((100% - 1200px) / 2)) 24px;
+  background: var(--p-tray-1); border-radius: 0; }
 .palette [data-region='第二步'] { margin-top: var(--p-gap); padding-bottom: 64px; background: var(--p-tray-2); }
 .palette [data-region='第三步'] { margin-top: var(--p-gap); padding-bottom: 64px; background: var(--p-tray-3); }
 .palette [data-region='样例报告'] { margin-top: var(--p-gap); background: var(--p-tray-2); }
@@ -74,6 +87,10 @@
 
 /* The comparison's selected tab kept the dark band's words: on the ink pill they turn white. */
 .palette [data-region='对比区'] [role='tab'][aria-selected='true'] { color: #fff; }
+
+/* Price: the usual ways' total and our card at the same height, side by side. */
+.palette [data-region='价格'] [class*='__versus'] { align-items: stretch; }
+.palette [data-region='价格'] [class*='__versus'] > * { align-content: center; }
 
 /* Our price: a white card with the main colour's edge; no gold box, travelling edge, sheen or glinting figure. */
 .palette [data-region='价格'] [class*='__own'] { background: #fff; border: 1.5px solid var(--p-accent); box-shadow: none; animation: none; }
@@ -121,7 +138,7 @@
 }
 
 /* ---- Buttons: ink pills, no arrow after the words; a slight lift on hover ---- */
-.palette main a[href*='action=signup'], .palette > header a[href*='action=signup'] {
+.palette main a[href*='action=signup'], .palette > header a[href*='action=signup'], .palette [data-phone-bottom] a[href*='action=signup'] {
   background: var(--p-ink); color: #fff; border-radius: 999px; transition: transform 150ms var(--p-ease), background-color 150ms var(--p-ease);
 }
 .palette main a[href*='action=signup'] svg, .palette > header a[href*='action=signup'] svg { display: none; }
