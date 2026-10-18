@@ -18,7 +18,7 @@ import { OverviewL } from './OverviewL';
 import own from './samples-l.module.css';
 
 type Report = (typeof L_REPORTS)[number];
-/** A name breaks only at its " · ": the trade on one line, the aim and the place on the next. */
+/** A name's two halves ("职业 · 目的（地区）"): on a wide page two lines without the dot, in a phone's chip one line. */
 const nameParts = (name: string) => name.split(' · ');
 // Region 5's own names for the people ("职业或行业 · 目的（地区）"), over the shared list's.
 const bySlug = new Map(L_REPORTS.map(report => [report.slug, { ...report, who: COPY.names[report.slug] ?? report.who }]));
@@ -54,9 +54,9 @@ export function SamplesL() {
                   {group.slugs.map(id => bySlug.get(id)).filter((report): report is Report => Boolean(report)).map(report => (
                     <li key={report.slug}>
                       <button type="button" data-slug={report.slug} aria-pressed={report.slug === chosen.slug} onClick={() => pick(report.slug)}>
-                        <b>{nameParts(report.who).map((part, index, all) => (
-                          <span key={part} className={own.namePart}>{index < all.length - 1 ? `${part} · ` : part}</span>
-                        ))}</b>
+                        <b className={own.name}>
+                          <span>{nameParts(report.who)[0]}</span><span className={own.nameDot}> · </span><span>{nameParts(report.who)[1]}</span>
+                        </b>
                         <span>{report.platform}</span>
                         {report.truth ? <em className={own.adjustedTag}>{COPY.adjusted}</em> : null}
                       </button>

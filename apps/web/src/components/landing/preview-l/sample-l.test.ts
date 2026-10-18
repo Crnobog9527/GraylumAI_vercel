@@ -220,7 +220,8 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     for (const report of L_REPORTS) {
       expect(region).toContain(`data-slug="${report.slug}"`);
       const [trade, aim] = L_SAMPLES_REDO.names[report.slug].split(' · ');
-      expect(region).toMatch(new RegExp(`<b><span class="[^"]+">${escape(trade)} · </span><span class="[^"]+">${escape(aim).replace(/[()（）]/g, '.')}</span></b><span>${escape(report.platform).replace(/[()（）+]/g, '.')}</span>`));
+      const name = `<span>${escape(trade)}</span><span class="[^"]+"> · </span><span>${escape(aim)}</span>`.replace(/[()（）]/g, '.');
+      expect(region).toMatch(new RegExp(`<b class="[^"]+">${name}</b><span>${escape(report.platform).replace(/[()（）+]/g, '.')}</span>`));
     }
     // Owner 2026-10-18: each named "职业或行业 · 目的（地区）".
     for (const report of L_REPORTS) expect(L_SAMPLES_REDO.names[report.slug]).toMatch(/^[^·（]+ · [^·（]+（[^）]+）$/);

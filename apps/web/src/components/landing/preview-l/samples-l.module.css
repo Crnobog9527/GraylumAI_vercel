@@ -62,6 +62,10 @@
 .riskText { margin: 0; color: var(--j-ink); font-size: 15.5px; font-weight: 500; line-height: 1.65; }
 .box { flex: none; width: 16px; height: 16px; margin-top: 4px; border: 1.5px solid var(--j-ink); border-radius: 4px; background: #fff; }
 
-/* A person's name ("职业或行业 · 目的（地区）") wraps only between its two halves, never inside one. */
-.group button b { min-width: 0; }
-.group button b .namePart { display: inline-block; font-size: inherit; opacity: 1; white-space: pre; }
+/* A person's name ("职业或行业 · 目的（地区）", Owner 2026-10-18): beside the overview, always two lines, the trade then
+ * the aim and the place, without the dot, the platform under them; in a phone's chip, one line with the dot. */
+.group button .name span { color: inherit; font-size: inherit; opacity: 1; }
+@media (min-width: 900px) {
+  .group button .name { display: grid; flex-basis: 100%; }
+  .group button .name .nameDot { display: none; }
+}
