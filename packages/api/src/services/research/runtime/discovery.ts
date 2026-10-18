@@ -2,6 +2,7 @@
 import { z } from 'zod';
 import { aggregateAuthors, classifyAccount, selectCandidates, type ScoredAccount } from '../benchmark/classify';
 import { accountMetrics, type EvidenceItem } from '../benchmark/metrics';
+import { BENCHMARK_RULES } from '../vendors/config';
 import { authorizeDiscoverStart } from '../tools/authorize';
 import { canonicalAccount } from '../tools/accountLinks';
 import { toolEnvelope } from '../tools/envelope';
@@ -18,6 +19,16 @@ interface FoundAccount extends ScoredAccount { platform: SocialPlatform; account
 interface StepResult {
   items: ResearchItem[]; operationId: string; complete: boolean; stopped: boolean;
   reason?: string; budget?: boolean;
+}
+
+export function candidateShortage(available: number) {
+  const required = BENCHMARK_RULES.candidatesMin;
+  return {
+    message: `已找到 ${available} 个可选、需要 ${required} 个。`,
+    nextStep: '建议换或补充关键词再找，或让用户贴账号主页链接以便取数核对。',
+    availableCandidates: available,
+    requiredCandidates: required,
+  };
 }
 
 /** The operation is the durable cursor. A crash after dispatch never causes another supplier request. */
@@ -62,14 +73,16 @@ async function card(ctx: ResearchToolContext, discoveryId: string, accounts: Fou
   const chosen = followUp ? await ctx.store.selectedAccounts(discoveryId) : [];
   const keys = new Set(chosen.map(a => `${a.platform}:${a.account}`));
   const remaining = accounts.filter(a => !keys.has(a.key));
-  const selection = selectCandidates(remaining);
+  const selection = selectCandidates(remaining, true);
   if ((!followUp && !selection.enough) || selection.selectable.length === 0) return false;
   const selectable = new Set(selection.selectable.map(a => a.key));
   const references = !followUp ? selection.headReferences.slice(0, 3) : [];
   const ordered = [...selection.selectable.slice(0, 12 - references.length), ...references] as FoundAccount[];
   const options: ResearchCandidateOption[] = ordered
     .map((a, i) => ({ id: `c${i}`, platform: a.platform, account: a.account, evidenceRef: a.evidenceRef,
-      label: a.account, selectable: selectable.has(a.key) }));
+      label: a.classification.excluded === 'ACTIVE_CHECK_PENDING'
+        ? `${a.account} · 活跃度待取数确认` : a.account,
+      selectable: selectable.has(a.key) }));
   const payload = { kind: 'candidates' as const, discoveryId, options: options.map(o => ({ ...o })),
     ...(followUp ? { followUp: true, minSelect: Math.min(options.length, Math.max(1, 3 - keys.size)) } : {}) };
   const saved = await ctx.store.createCard(stableResearchId(discoveryId, followUp ? callId : 'first-card'), payload);
@@ -139,9 +152,10 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
       const metrics = accountMetrics({ profile: { ...profile, ref: `${result.operationId}#1` },
         posts: (posts.get(author.platform) ?? []).filter(p => p.fields.authorId === author.authorId) }, ctx.now());
       found.push({ key: `${author.platform}:${account}`, platform: author.platform, account,
-        evidenceRef: `${result.operationId}#1`, metrics, classification: classifyAccount(metrics, ctx.config.recentGrowth, ctx.now()) });
+        evidenceRef: `${result.operationId}#1`, metrics,
+        classification: classifyAccount(metrics, ctx.config.recentGrowth, ctx.now(), 'discovery') });
     }
-    if (!stopped && !selectCandidates(found).enough && authorLimit < authors.length) {
+    if (!stopped && !selectCandidates(found, true).enough && authorLimit < authors.length) {
       // A later batch only reads old operations and spends this round's allowance on new authors.
       authorLimit = Math.min(authorLimit + 15, authors.length);
       stopped = true;
@@ -151,14 +165,19 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
   // Reconstruct from stable operations each time; the saved candidates support free follow-up cards.
   await ctx.store.discoverySave(d.discoveryId, { accounts: found, attempted: index, authorCursor, authorLimit }, stopped ? 'running' : 'completed');
   const shown = !stopped && await card(ctx, d.discoveryId, found, false, '');
+  const available = selectCandidates(found, true).selectable.length;
+  const insufficient = !stopped && !shown;
   const resumable = stopReason === 'ROUND_LIMIT' || stopReason === 'CANDIDATE_SCAN_INCOMPLETE';
   const blockedWithoutData = stopped && !resumable && found.length === 0;
   return toolEnvelope({ status: blockedWithoutData ? (stopBudget ? 'budget_exhausted' : 'unavailable')
     : complete && shown ? 'ok' : 'partial',
     reason: stopped ? stopReason : shown ? (complete ? null : 'DISCOVERY_PARTIAL') : 'NOT_ENOUGH_CANDIDATES',
+    ...(insufficient ? candidateShortage(available) : {}),
     discoveryId: d.discoveryId, continue: stopped && resumable,
     items: found.map(a => ({ fields: { platform: a.platform, account: a.account,
-      evidenceRef: a.evidenceRef, category: a.classification.category ?? 'excluded' }, missing: a.metrics.missing })) });
+      evidenceRef: a.evidenceRef, category: a.classification.category ?? 'excluded',
+      ...(a.classification.excluded === 'ACTIVE_CHECK_PENDING' ? { activityStatus: '活跃度待取数确认' } : {}) },
+    missing: a.metrics.missing })) });
 }
 
 export async function moreCandidates(ctx: ResearchToolContext, discoveryId: string, callId: string) {

@@ -9,7 +9,8 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 export type BenchmarkCategory = 'head_reference' | 'imitable' | 'fast_rising';
 export type ExclusionReason =
-  | 'FOLLOWERS_MISSING' | 'FOLLOWERS_BELOW_MIN' | 'NO_PUBLISH_TIME' | 'INACTIVE_30_DAYS' | 'NO_POSTS' | 'TOO_FEW_POSTS';
+  | 'FOLLOWERS_MISSING' | 'FOLLOWERS_BELOW_MIN' | 'NO_PUBLISH_TIME' | 'INACTIVE_30_DAYS' | 'NO_POSTS' | 'TOO_FEW_POSTS'
+  | 'ACTIVE_CHECK_PENDING';
 
 export type Classification =
   | { category: BenchmarkCategory; qualified: boolean; excluded: null }
@@ -28,12 +29,16 @@ function ratio(text: string): number | null {
  */
 export function classifyAccount(
   metrics: AccountMetrics, growth: ResearchToolsConfig['recentGrowth'], now: Date,
+  phase: 'discovery' | 'fetched' = 'fetched',
 ): Classification {
   const followers = metrics.followers.value;
   if (followers === null) return { category: null, qualified: false, excluded: 'FOLLOWERS_MISSING' };
   if (followers < BENCHMARK_RULES.followersMin) return { category: null, qualified: false, excluded: 'FOLLOWERS_BELOW_MIN' };
   if (followers > BENCHMARK_RULES.followersMax) return { category: 'head_reference', qualified: false, excluded: null };
   if (metrics.postsAnalyzed === 0) return { category: null, qualified: false, excluded: 'NO_POSTS' };
+  if (phase === 'discovery') {
+    return { category: null, qualified: false, excluded: 'ACTIVE_CHECK_PENDING' };
+  }
   if (metrics.lastPublishedAt.value === null) return { category: null, qualified: false, excluded: 'NO_PUBLISH_TIME' };
   const last = Date.parse(metrics.lastPublishedAt.value);
   if (now.getTime() - last > BENCHMARK_RULES.activeWithinDays * DAY_MS) {
@@ -68,11 +73,12 @@ export interface ScoredAccount {
  * views; at most candidatesMax. Head references are listed separately and are never selectable. With fewer
  * than candidatesMin selectable accounts no card is sent (`enough: false`); the caller returns partial.
  */
-export function selectCandidates(accounts: ScoredAccount[]) {
+export function selectCandidates(accounts: ScoredAccount[], allowPendingActivity = false) {
   const views = (a: ScoredAccount) => a.metrics.medianViews.value ?? -1;
   // One slot per account: the same account found by several keywords or a resumed discovery counts once.
   const distinct = [...new Map(accounts.map(a => [a.key, a] as const)).values()];
-  const selectable = distinct.filter(a => a.classification.qualified)
+  const selectable = distinct.filter(a => a.classification.qualified
+    || (allowPendingActivity && a.classification.excluded === 'ACTIVE_CHECK_PENDING'))
     .sort((a, b) => Number(b.classification.category === 'fast_rising') - Number(a.classification.category === 'fast_rising')
       || views(b) - views(a) || a.key.localeCompare(b.key))
     .slice(0, BENCHMARK_RULES.candidatesMax);

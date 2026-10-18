@@ -553,9 +553,35 @@ describe('durable benchmark discovery and free follow-up', () => {
   it('withholds the initial selection card below eight qualified accounts', async () => {
     const f = fixture();
     f.setAuthors(7);
-    expect(await f.execute('benchmark_discover', discoveryArgs)).toMatchObject({ status: 'partial', reason: 'NOT_ENOUGH_CANDIDATES' });
+    expect(await f.execute('benchmark_discover', discoveryArgs)).toMatchObject({ status: 'partial',
+      reason: 'NOT_ENOUGH_CANDIDATES', message: '已找到 7 个可选、需要 8 个。',
+      nextStep: '建议换或补充关键词再找，或让用户贴账号主页链接以便取数核对。' });
     expect(f.store.createCard).not.toHaveBeenCalled();
     expect(subcall).toHaveBeenCalledTimes(10);
+  });
+
+  it('keeps old keyword-hit accounts selectable and marks activity as pending until benchmark_fetch', async () => {
+    const f = fixture();
+    const original = subcall.getMockImplementation()!;
+    subcall.mockImplementation(async (context, request) => {
+      const outcome = await original(context, request);
+      if (outcome.sent && request.vendor === 'tikhub' && request.call.kind === 'keyword_posts') {
+        const oldPost = (authorId: string) => item({ authorId, id: `old-${authorId}`,
+          publishedAt: new Date(now.getTime() - 45 * 24 * 60 * 60 * 1000).toISOString(), views: 1000 });
+        outcome.result.items = Array.from({ length: 8 }, (_, i) => oldPost(`author${i}`));
+        f.operations.set(context.newId(), { state: 'succeeded', identityHash: requestIdentity(request),
+          result: { ...outcome.result } });
+      }
+      return outcome;
+    });
+
+    const result = await f.execute('benchmark_discover', discoveryArgs);
+    expect(result.status).toBe('ok');
+    expect(result.items).toHaveLength(8);
+    expect(result.items?.[0]?.fields.activityStatus).toBe('活跃度待取数确认');
+    const card = f.store.createCard.mock.calls[0]?.[1];
+    expect(card?.options.filter(option => option.selectable)).toHaveLength(8);
+    expect(card?.options[0]?.label).toContain('活跃度待取数确认');
   });
 
   it('refuses a follow-up card before any initial candidate selection was confirmed', async () => {
