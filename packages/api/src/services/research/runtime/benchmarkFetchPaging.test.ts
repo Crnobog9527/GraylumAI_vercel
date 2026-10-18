@@ -6,7 +6,6 @@ import { DISABLED_RESEARCH_TOOLS, researchToolsConfigSchema } from '../vendors/c
 import { tikhubRouteId } from '../vendors/tikhub';
 import type { ResearchCallResult } from '../vendors/types';
 import { benchmarkFetch } from './benchmarkFetch';
-import { researchRuntimeTools } from '../../runtime/researchRuntimeTool';
 import type { FetchClaim, FetchState, RuntimeResearchStore } from './store';
 import type { EvidencePort, VendorCalls } from './subcall';
 import { stableResearchId, type ResearchToolContext } from './toolContext';
