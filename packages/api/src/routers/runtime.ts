@@ -8,6 +8,7 @@ import {reportEnabled,reportLocate,reportService} from '../services/report/servi
 import {reportPrice} from '../services/report/fees';
 import {reportStart} from '../services/report/contract';
 import {readNativeRuntimeView} from '../services/runtime/nativeView';
+import {readWorkItems,withWorkItems} from '../services/runtime/workItems';
 import {resumeInput} from '../services/runtime/paygRuntime';
 import type {inferProcedureBuilderResolverOptions} from '@trpc/server';
 import type {RuntimeProgress} from '../services/runtime/progress';
@@ -184,6 +185,7 @@ export const runtimeRouter=router({
  }),
  view:maintenanceProcedure.input(z.object({sessionId:z.string().uuid()}).strict()).query(async({ctx,input})=>{
   const view=await readNativeRuntimeView(ctx.supabaseAdmin!,ctx.user.id,input.sessionId);
-  return {...view,mode:ctx.maintenanceEndpoint?'isolated':realHostMode(process.env)};
+  const work=await readWorkItems(ctx.supabaseAdmin!,ctx.user.id,input.sessionId);
+  return {...withWorkItems(view,work),mode:ctx.maintenanceEndpoint?'isolated':realHostMode(process.env)};
  }),
 });
