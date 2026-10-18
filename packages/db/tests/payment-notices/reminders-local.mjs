@@ -35,6 +35,11 @@ try {
   await c.query(read('packages/db/migrations/0309_payment_notice_reminders.sql'));
   assert.deepEqual(await v(catalog), before);
   report.checks.push('0309 repeated after full chain leaves catalog identical');
+  await c.query(read('packages/db/tests/payment-notices/disable-card-renewal.sql'));
+  const candidateBodyAfterDisable = await v("SELECT pg_get_functiondef('payment_notice_candidates(uuid)'::regprocedure) v");
+  assert.ok(candidateBodyAfterDisable.includes('PAY-NOTIFY card renewal disabled'));
+  assert.ok(!candidateBodyAfterDisable.includes('card_renewal_upcoming'));
+  report.checks.push('card renewal candidate path is removed while stored legacy kind remains supported');
   for (const role of ['anon', 'authenticated', 'service_role']) {
     assert.equal(await v("SELECT has_function_privilege($1,'payment_notice_scan(integer)','execute') v", [role]), role === 'service_role');
     for (const fn of ['payment_notice_candidates(uuid)', 'payment_notice_eligible(payment_notices)']) {
@@ -71,8 +76,23 @@ try {
   const mp = await order(await fx.profile(), { method: 'card' });
   const cn = await order(await fx.profile(), { method: 'card_cn' });
   const mpSub = (await rowOrder(mp)).subscription_id;
+  const cnSub = (await rowOrder(cn)).subscription_id;
   async function rowOrder(id) { return (await c.query('SELECT * FROM payment_orders WHERE id=$1', [id])).rows[0]; }
-  await scan();
+  const mpFacts = await rowOrder(mp);
+  const mpPeriod = await c.query('SELECT current_period_end FROM user_subscriptions WHERE id=$1', [mpSub]);
+  const mpEnd = mpPeriod.rows[0].current_period_end;
+  const legacyParams = await v(`SELECT jsonb_build_object('endDate',s.current_period_end,'amount',o.purchase_snapshot->>'price',
+    'plan',o.purchase_membership_level,'managed',o.payment_method='card') v
+    FROM user_subscriptions s JOIN payment_orders o ON o.subscription_id=s.id WHERE s.id=$1`, [mpSub]);
+  const legacyDue = (await v("SELECT to_char($1::timestamptz AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.US')||':-7d' v", [mpEnd]));
+  const legacy = (await service(c, 'SELECT payment_notice_enqueue($1,$2,$3,$4,$5) v',
+    [mpFacts.user_id, 'card_renewal_upcoming', mpSub, legacyDue, legacyParams])).id;
+  await c.query("UPDATE payment_notices SET state='unknown',first_attempt_at=now(),payload_digest=$2,template_version='pay-n2-v1' WHERE id=$1",
+    [legacy, digest]);
+  const admin = await fx.profile();
+  await bypass("UPDATE profiles SET role='admin' WHERE id=$1", [admin]);
+  const initiallyScanned = await scan();
+  assert.equal(initiallyScanned.includes(legacy), false);
   assert.ok((await find(wallet, '-7d')).id);
   assert.equal((await find(ordinary)).kind, 'wallet_plan_expiry');
   assert.ok(await find(due, '0d'));
@@ -80,12 +100,14 @@ try {
   assert.equal((await find(ended)).kind, 'founder_ended');
   assert.equal((await find(delayed)).kind, 'founder_ended');
   report.checks.push('red/green: old 24h window misses a 26h-old ending; seven-day catch-up enqueues it');
-  const cardNotice = await find(mpSub);
-  assert.equal(cardNotice.kind, 'card_renewal_upcoming');
-  assert.equal(cardNotice.template_params.amount, '496.00');
-  assert.equal(cardNotice.template_params.managed, true);
-  assert.equal((await find((await rowOrder(cn)).subscription_id)).template_params.managed, false);
-  report.checks.push('wallet -7d/0d/+5d, ordinary annual, MP/CN annual and founder-ended generated with correct facts');
+  assert.equal(await v("SELECT count(*)::int v FROM payment_notices WHERE kind='card_renewal_upcoming' AND source_ref IN ($1,$2)", [mpSub, cnSub]), 1);
+  assert.equal(await find(cnSub), undefined);
+  assert.equal((await row(legacy)).state, 'unknown');
+  const legacyList = await service(c, 'SELECT payment_notice_admin_list($1) v', [admin]);
+  assert.ok(legacyList.some(n => n.id === legacy && n.kind === 'card_renewal_upcoming' && n.resendable));
+  assert.equal((await claim(legacy, digest, admin)).decision, 'send');
+  assert.ok((await scan()).includes(legacy) === false);
+  report.checks.push('wallet -7d/0d/+5d, ordinary annual and founder-ended still enqueue; card/card_cn do not; legacy card history stays visible and admin-resendable');
 
   const second = new c.constructor({ host: c.host, port: c.port, user: 'postgres', database: c.database });
   await second.connect();
@@ -108,7 +130,6 @@ try {
   await order(renewUser, { offer: 'founder_renewal', start: now + 6 * day, end: now + 371 * day });
   assert.equal((await claim(oldNotice.id)).decision, 'skip');
   await bypass("UPDATE user_subscriptions SET cancel_at_period_end='true' WHERE id=$1", [mpSub]);
-  assert.equal((await claim(cardNotice.id)).decision, 'skip');
   report.checks.push('renewed wallet term and canceled card renewal rechecked at claim and skipped');
 
   const frozenUser = await fx.profile(), frozen = await order(frozenUser);
@@ -136,7 +157,7 @@ try {
   assert.equal(await v('SELECT count(*)::int v FROM payment_notices WHERE user_id=$1', [erasing]), 0);
   report.checks.push('erasure before send skips; prune deletes; rescans cannot recreate notices');
 
-  const unknown = (await find((await rowOrder(cn)).subscription_id)).id;
+  const unknown = (await find(due, '0d')).id;
   assert.equal((await claim(unknown)).decision, 'send');
   await v("SELECT payment_notice_finish($1,1,'unknown') v", [unknown]);
   await c.query("UPDATE payment_notices SET first_attempt_at=now()-interval '25 hours' WHERE id=$1", [unknown]);

@@ -5,7 +5,7 @@
  */
 import { expect, it } from 'vitest';
 import { PAYMENT_NOTICE_TEMPLATES } from './registry';
-import { PAYMENT_NOTICE_KINDS } from './templates';
+import { PAYMENT_NOTICE_CRON_KINDS, PAYMENT_NOTICE_KINDS } from './templates';
 const endDate = '2027-03-01T04:00:00+00:00';
 const params = { endDate, deadline: '2027-03-08T04:00:00+00:00', stage: '-7d', plan: 'gold', amount: '496.00', managed: true };
 it.each(PAYMENT_NOTICE_KINDS)('renders stable bilingual plain text and escaped HTML for %s', kind => {
@@ -17,6 +17,11 @@ it.each(PAYMENT_NOTICE_KINDS)('renders stable bilingual plain text and escaped H
   expect(rendered.text).not.toContain('undefined');
   expect(rendered.html).not.toMatch(/<script|<img|<iframe/);
   expect(template.version).toBe('pay-n2-v1');
+});
+it('keeps the legacy card template renderable while excluding card renewals from cron kinds', () => {
+  expect(PAYMENT_NOTICE_CRON_KINDS).not.toContain('card_renewal_upcoming');
+  expect(PAYMENT_NOTICE_TEMPLATES.card_renewal_upcoming!.render(params).text)
+    .toContain('Your annual subscription is due to renew');
 });
 it('tells managed card users about tax and cancellation, uses the frozen list price', () => {
   const text = PAYMENT_NOTICE_TEMPLATES.card_renewal_upcoming!.render(params).text;
