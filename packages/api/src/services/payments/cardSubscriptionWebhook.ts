@@ -94,7 +94,7 @@ export async function handleCardSubscriptionInvoice(db: SupabaseClient, stripe: 
   if (!order) return false;
   const paid = eventType === 'invoice.paid' || eventType === 'invoice.payment_succeeded';
   if (paid && invoice.billing_reason === 'subscription_create') {
-    await recoverMethodCheckout(db, stripe, await orderCheckoutSession(db, stripe, scope, order, subscriptionId), eventType);
+    await recoverMethodCheckout(db, stripe, await orderCheckoutSession(db, stripe, scope, order, subscriptionId), eventType, disputeAlert);
     return true;
   }
   if (invoice.billing_reason === 'subscription_cycle' && (paid || eventType === 'invoice.payment_failed')) {

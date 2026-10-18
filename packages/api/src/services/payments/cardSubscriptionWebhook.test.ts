@@ -61,17 +61,19 @@ describe('PAY-STRIPE-MP card subscription webhooks', () => {
   });
   it('confirms the first invoice through the same first-payment recovery (mapped checkout)', async () => {
     const f = fixture({ subscriptionRef: { subscription_id: 'local_sub' }, order: cardOrder, checkoutRef: { external_id: 'cs_mapped' } });
+    const disputeAlert = vi.fn();
     for (const type of ['invoice.paid', 'invoice.payment_succeeded']) {
-      await expect(handleCardSubscriptionInvoice(f.db, f.stripe, 'in_1', type)).resolves.toBe(true);
-      expect(mocks.recover).toHaveBeenLastCalledWith(f.db, f.stripe, 'cs_mapped', type);
+      await expect(handleCardSubscriptionInvoice(f.db, f.stripe, 'in_1', type, undefined, undefined, disputeAlert)).resolves.toBe(true);
+      expect(mocks.recover).toHaveBeenLastCalledWith(f.db, f.stripe, 'cs_mapped', type, disputeAlert);
     }
   });
   it('finds the order from the authenticated subscription when the first invoice arrives before checkout completion', async () => {
     const f = fixture({ order: cardOrder });
-    await expect(handleCardSubscriptionInvoice(f.db, f.stripe, 'in_1', 'invoice.paid')).resolves.toBe(true);
+    const disputeAlert = vi.fn();
+    await expect(handleCardSubscriptionInvoice(f.db, f.stripe, 'in_1', 'invoice.paid', undefined, undefined, disputeAlert)).resolves.toBe(true);
     expect(f.raw.subscriptions.retrieve).toHaveBeenCalledWith('sub_1');
     expect(f.raw.checkout.sessions.list).toHaveBeenCalledWith({ subscription: 'sub_1', limit: 10 });
-    expect(mocks.recover).toHaveBeenCalledWith(f.db, f.stripe, 'cs_found', 'invoice.paid');
+    expect(mocks.recover).toHaveBeenCalledWith(f.db, f.stripe, 'cs_found', 'invoice.paid', disputeAlert);
   });
   it('refuses a subscription whose metadata names another owner', async () => {
     const f = fixture({ order: cardOrder }, { orderId, userId: 'someone-else' });
