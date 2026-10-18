@@ -7,6 +7,7 @@ import {
   type QuestionCard,
 } from "@repo/api/src/shared/agentTurn";
 import { OUTPUT_TRUNCATED_NOTICE, PROVIDER_HISTORY_NOTICE, PROVIDER_REJECTED_NOTICE, HISTORY_OMITTED_NOTICE } from "@/lib/runtime-gate-notice";
+import { REOPENED_HINT } from "@/components/chat-display/turn-steps-model";
 import { isPaygWaiting } from "@/lib/payg-wait";
 import { STOP_SAVING_NOTICE, STOP_UNCONFIRMED_NOTICE, STOPPED_EMPTY_NOTICE, stoppedCut, stoppedResultNotice, stopSaving } from "./stop-reply";
 
@@ -129,7 +130,7 @@ export function livePhaseNotice(phase: string) {
   if (phase === "waiting") return "正在回复…";
   if (phase === "stopped") return STOP_SAVING_NOTICE;
   if (phase === "stop_unconfirmed") return STOP_UNCONFIRMED_NOTICE;
-  return "正在生成；部分正文尚未完成，费用尚未结算。";
+  return "这一轮正在进行，进度见上方各步；完成后才结算费用。";
 }
 
 export type MentorReplySource = {
@@ -161,7 +162,14 @@ export type MentorReplySource = {
   /** This execution owns the server execution slot. */
   active: boolean;
   busy: boolean;
+  /** The page has waited longer than the reopened-turn grace period; a still-open turn then asks for a check. */
+  stale?: boolean;
 };
+
+/** The server is still advancing this turn although this page does not stream it (after a reload). */
+export function reopenedTurn(source: Pick<MentorReplySource, "active" | "state" | "busy" | "stale">) {
+  return Boolean(source.active && !source.busy && !source.stale && ["prepared", "running"].includes(source.state));
+}
 
 /** A state notice shown under a mentor turn (inline notice), never as the message body. */
 export type ReplyNotice = { tone: "status" | "warning"; text: string; busy?: boolean };
@@ -179,6 +187,7 @@ function unavailableNotice(source: MentorReplySource): ReplyNotice {
     return { tone: "warning", text: PROVIDER_REJECTED_NOTICE };
   if (source.state === "cancelled")
     return { tone: "warning", text: "本次执行已停止，未取得可用回复。原记录已保留；请查看错误提示或继续讨论，系统不会自动重放这条请求。" };
+  if (reopenedTurn(source)) return { tone: "status", text: REOPENED_HINT, busy: true };
   return source.busy ? { tone: "status", text: "正在回复…", busy: true } : { tone: "warning", text: "回复暂未完成，请继续核对。" };
 }
 

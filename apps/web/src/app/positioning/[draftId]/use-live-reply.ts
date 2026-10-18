@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { AgentTurnEvent } from "@repo/api/src/shared/agentTurn";
 import { trpc } from "@/trpc/client";
 import type { LiveReply } from "./agent-turn-display";
+import { useReopenGrace } from "./mentor-turn-steps";
 import { liveReplyController, type LiveReplyController } from "./live-reply-controller";
 import { readAgentTurn, TEXT_PROTOCOL } from "./mentor-turn";
 import { executionSettled, RecoveryTimers, type RecoveryHistory, type RecoveryExecution } from "./step-recovery";
@@ -28,7 +29,7 @@ function tabStorage() {
 export function useLiveReply(draftId: string, history: RecoveryHistory | undefined,
   observe?: (executionId: string, event: AgentTurnEvent) => void):
   LiveReplyController & {
-    reply: LiveReply | null; phase: string | null; stopAction: { onClick: () => void } | null;
+    reply: LiveReply | null; phase: string | null; reopenGraceOver: boolean; stopAction: { onClick: () => void } | null;
     /** This tab's own knowledge of its stop of `executionId` (MentorReplySource.stopLocal). */
     stopLocal: (executionId: string) => "unconfirmed" | "stopped" | undefined;
   } {
@@ -38,6 +39,7 @@ export function useLiveReply(draftId: string, history: RecoveryHistory | undefin
   useEffect(() => { observer.current = observe; }, [observe]);
   const live = useMemo(() => liveReplyController({ draftId, storage: tabStorage, show: setReply,
     observe: (executionId, event) => observer.current?.(executionId, event) }), [draftId]);
+  const reopenGraceOver = useReopenGrace();
   const utils = trpc.useUtils();
   const cancel = trpc.runtime.cancel.useMutation();
   useEffect(() => {
@@ -107,7 +109,7 @@ export function useLiveReply(draftId: string, history: RecoveryHistory | undefin
     if (outcome) await utils.runtime.view.invalidate();
   };
   return {
-    ...live, reply,
+    ...live, reply, reopenGraceOver,
     phase: reply ? (reply.stopped ? (unconfirmed === reply.executionId ? "stop_unconfirmed" : "stopped") : reply.phase) : null,
     stopLocal: (executionId: string) => unconfirmed === executionId ? "unconfirmed"
       : stoppedHere(tabStorage(), draftId).includes(executionId) ? "stopped" : undefined,
