@@ -133,4 +133,41 @@ DROP TRIGGER IF EXISTS runtime_workspace_posts_deleted ON social_connections;
 CREATE TRIGGER runtime_workspace_posts_deleted AFTER DELETE OR UPDATE OF status ON social_connections
  FOR EACH ROW EXECUTE FUNCTION public.runtime_workspace_posts_deleted();
 
+-- Reuse the existing deletion worker, erased source journal and the original run's content marker.
+-- content_deleted_at persists the pending authority while the original BILL2 run is still open. The next worker
+-- batch retries after recovery settles it; receipt financial_projection_version is the existing completion marker.
+DO $patch$ DECLARE d text;anchor text;work text;
+BEGIN
+ d:=pg_get_functiondef('public.runtime_library_propagate(uuid,integer)'::regprocedure);
+ IF position('-- B2 pending own-post receipts' IN d)=0 THEN
+  anchor:=$a$ RETURN jsonb_build_object('processed',done,'waiting',waiting);$a$;
+  work:=$w$ -- B2 pending own-post receipts: separate bounded batch; a library backlog cannot starve these copies.
+ FOR target IN SELECT ex.id execution_id FROM runtime_executions ex JOIN bill2_runs br ON br.id=ex.billing_run_id
+  WHERE br.content_deleted_at IS NOT NULL AND ex.payload->>'ownPosts'='true'
+   AND (p_actor_id IS NULL OR ex.actor_id=p_actor_id)
+   AND EXISTS(SELECT 1 FROM runtime_tool_calls t WHERE t.execution_id=ex.id AND t.erased_at IS NOT NULL
+    AND t.name='read_source' AND t.result IS NULL)
+   AND EXISTS(SELECT 1 FROM bill2_receipts r JOIN bill2_calls c ON c.id=r.call_id
+    WHERE c.run_id=br.id AND r.financial_projection_version IS NULL)
+  ORDER BY ex.id LIMIT p_limit LOOP
+  BEGIN
+   SELECT * INTO e FROM runtime_executions WHERE id=target.execution_id;
+   PERFORM id FROM profiles WHERE id=e.actor_id FOR SHARE NOWAIT;
+   SELECT * INTO e FROM runtime_executions WHERE id=target.execution_id FOR UPDATE NOWAIT;
+   SELECT * INTO b FROM bill2_runs WHERE id=e.billing_run_id FOR UPDATE NOWAIT;
+   IF NOT b.closed OR NOT coalesce(content_erasure_financial_allowed(e.actor_id,coalesce(b.pre_deduct_id,b.id)),false) THEN
+    waiting:=waiting+1;CONTINUE;
+   END IF;
+   scrub:=account_erasure_scrub_receipts(e.actor_id,b.id,100);
+   IF (scrub->>'remaining')::bigint>(scrub->>'manualReview')::bigint THEN waiting:=waiting+1;
+   ELSE done:=done+1;END IF;
+  EXCEPTION WHEN lock_not_available THEN waiting:=waiting+1;
+  END;
+ END LOOP;
+$w$;
+  IF array_length(string_to_array(d,anchor),1)<>2 THEN RAISE EXCEPTION 'B2_ERASURE_WORKER_MISMATCH';END IF;
+  EXECUTE replace(d,anchor,work||anchor);
+ END IF;
+END $patch$;
+
 COMMIT;
