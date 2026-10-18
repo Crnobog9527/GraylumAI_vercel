@@ -67,6 +67,14 @@ describe('Fusion key reads', () => {
 });
 
 describe('Fusion model choices', () => {
+  it('does not offer a model for compare when its own limit would shorten the answer (a save of it would be refused)', async () => {
+    skill.refuse = new Map(); skill.limits = new Map([[`${id(1)}:fusion_compare`, 1024]]);
+    const window = { callPolicies: models.map(model => ({ modelId: model.id })), expiresAt: '2030-01-01T00:00:00Z' };
+    const result = await fusionModelOptions(db, id(7), {}, window as never);
+    expect(result.models.find(model => model.id === id(1))).toMatchObject({ review: true, summary: true, compare: false });
+    expect(result.models.find(model => model.id === id(2))).toMatchObject({ compare: true });
+    skill.limits = new Map();
+  });
   it('lists the window\'s models with what each may do, by the same Fusion admission a save uses', async () => {
     skill.refuse = new Map([[`${id(2)}:fusion_summary`, 'FUSION_PAYG_REQUIRED'], [`${id(3)}:fusion_review`, 'FUSION_MODEL_SEARCH_DENIED'],
       [`${id(3)}:fusion_summary`, 'FUSION_MODEL_SEARCH_DENIED'], [`${id(4)}:fusion_review`, 'FUSION_MODEL_ADMISSION_REQUIRED'],

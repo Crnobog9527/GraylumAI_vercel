@@ -108,7 +108,11 @@ export async function fusionModelOptions(db: SupabaseClient, actorId: string, en
   // Read-only listing: one read (the 60 s cache is fine for a display) shared by every per-model check.
   const key = await readOpenRouterKey(db).catch(() => null);
   const admits = async (row: FusionModelRow, phase: FusionPhase, tokens: number) => {
-    try { await admitFusionModel(db, window, row, phase, tokens, deadline, env, key ?? null); return true; }
+    try {
+      const admitted = await admitFusionModel(db, window, row, phase, tokens, deadline, env, key ?? null);
+      // Compare columns share one answer limit: a model clamped below it cannot be saved as allowed, so it is not offered.
+      return phase !== 'fusion_compare' || admitted.outputLimit === tokens;
+    }
     catch (error) {
       if (NOT_ELIGIBLE.has(error instanceof Error ? error.message : '')) return false;
       throw new Error('FUSION_SETTINGS_UNAVAILABLE');

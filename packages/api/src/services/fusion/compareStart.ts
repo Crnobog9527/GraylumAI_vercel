@@ -3,7 +3,8 @@ import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { PositioningClassifier } from '../runtime/positioningGate';
 import { decimal } from '../bill2/decimal';
-import { admitCompareGroup, assertCompareAllowed, assertQuoteCovers, buildCompareColumns, compareRpc, type CompareAdmitted } from './compareAdmission';
+import { admitCompareGroup, assertCompareAllowed, assertQuoteCovers, buildCompareColumns, compareRpc, replayCompareGroup,
+  type CompareAdmitted } from './compareAdmission';
 import { judgeCompareGate, readCompareGate, staticCompareGate } from './compareGate';
 import { compareRequest, snapshotHash, workspaceDependencies, type CompareParts } from './compareSnapshot';
 
@@ -56,6 +57,33 @@ export async function startCompare(deps: CompareDeps, choice: CompareStartInput)
   const { admin, actorId } = deps;
   const { requestId } = choice;
   const settings = await assertCompareAllowed(admin, actorId, choice.modelIds);
+  // What identifies this request needs no pricing, so it is built first: a repeat of a request whose group already exists
+  // must reach the frozen replay even if prices, the budget or a model's availability have changed since.
+  const snapshot = snapshotHash(choice.parts);
+  const skill = choice.parts.skill && { moduleId: choice.parts.skill.moduleId, revisionId: choice.parts.skill.revisionId };
+  const question = choice.parts.question;
+  const config = { models: choice.modelIds, skill, answerOutputTokens: settings.answerOutputTokens };
+  const begin = () => compareRpc<RecordView>(admin, 'fusion_compare_begin', { p_actor_id: actorId, p_request_id: requestId,
+    p_session_id: choice.sessionId, p_request: { question, questionHash: createHash('sha256').update(question).digest('hex'),
+      // Everything that identifies this request: a repeat with anything else is a conflict, never the old result.
+      requestHash: sha([choice.sessionId, question, choice.modelIds, skill, choice.parts.references.map(r => [r.documentId, r.version]),
+        choice.shown.credits, choice.shown.columns.map(c => [c.modelId, c.credits, c.usd])]),
+      snapshotHash: snapshot, historyRevision: String(choice.historyRevision), config,
+      workspaceDependencies: workspaceDependencies(choice.parts) } });
+  const claim = (compareId: string, group: CompareAdmitted) => compareRpc<{ state: 'claimed' | 'waiting_credits' }>(admin,
+    'fusion_compare_claim', { p_actor_id: actorId, p_compare_id: compareId,
+      p_items: group.runs.map(run => ({ runId: run.runId, sequence: 1, payload: run.call })) });
+
+  // A group that already exists is frozen and its holds are taken (the first start's response may have been lost): nothing is
+  // repriced, judged or admitted again. The request-hash check still applies, and an ended compare still answers as ended.
+  const existing = await replayCompareGroup(admin, actorId, requestId, choice.sessionId);
+  if (existing) {
+    const replayed = await begin();
+    if (['refused', 'stopped', 'finished'].includes(replayed.state)) throw new Error('FUSION_COMPARE_ENDED');
+    const result = await claim(replayed.compareId, existing);
+    return { state: result.state, compareId: replayed.compareId, group: existing, claim: result };
+  }
+
   const gate = await readCompareGate(admin, actorId);
   staticCompareGate(gate, choice.parts.skill, deps.refusePositioning);
   // Everything that can refuse a request without a model call is checked here, before the request is recorded and before
@@ -69,17 +97,7 @@ export async function startCompare(deps: CompareDeps, choice: CompareStartInput)
   if (!settings.maxBudgetUsd || sized.totalUsd > decimal(settings.maxBudgetUsd)) throw new Error('FUSION_BUDGET_EXCEEDED');
   assertQuoteCovers(sized.columns, choice.shown);
 
-  const snapshot = snapshotHash(choice.parts);
-  const skill = choice.parts.skill && { moduleId: choice.parts.skill.moduleId, revisionId: choice.parts.skill.revisionId };
-  const question = choice.parts.question;
-  const config = { models: choice.modelIds, skill, answerOutputTokens: settings.answerOutputTokens };
-  const record = await compareRpc<RecordView>(admin, 'fusion_compare_begin', { p_actor_id: actorId, p_request_id: requestId,
-    p_session_id: choice.sessionId, p_request: { question, questionHash: createHash('sha256').update(question).digest('hex'),
-      // Everything that identifies this request: a repeat with anything else is a conflict, never the old result.
-      requestHash: sha([choice.sessionId, question, choice.modelIds, skill, choice.parts.references.map(r => [r.documentId, r.version]),
-        choice.shown.credits, choice.shown.columns.map(c => [c.modelId, c.credits, c.usd])]),
-      snapshotHash: snapshot, historyRevision: String(choice.historyRevision), config,
-      workspaceDependencies: workspaceDependencies(choice.parts) } });
+  const record = await begin();
   const compareId = record.compareId;
   if (record.state === 'refused' || record.state === 'stopped' || record.state === 'finished') {
     if (record.gateVerdict === 'block') deps.refusePositioning();
@@ -121,7 +139,6 @@ export async function startCompare(deps: CompareDeps, choice: CompareStartInput)
   const request = compareRequest({ ...choice.parts, positioningFallback: fallback });
   const group = await admitCompareGroup({ admin, actorId, requestId, sourceSessionId: choice.sessionId, modelIds: choice.modelIds, request,
     env: deps.env, shown: choice.shown });
-  const claim = await compareRpc<{ state: 'claimed' | 'waiting_credits' }>(admin, 'fusion_compare_claim', { p_actor_id: actorId,
-    p_compare_id: compareId, p_items: group.runs.map(run => ({ runId: run.runId, sequence: 1, payload: run.call })) });
-  return { state: claim.state, compareId, group, claim };
+  const result = await claim(compareId, group);
+  return { state: result.state, compareId, group, claim: result };
 }

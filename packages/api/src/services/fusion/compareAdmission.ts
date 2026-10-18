@@ -99,7 +99,10 @@ export async function buildCompareColumns(input: { admin: SupabaseClient; actorI
       columns.push({ index, modelId, body, call, upperCredits, upperUsd: call.upperUsd, outputLimit: admitted[index]!.outputLimit, policy });
     } catch (error) {
       const message = error instanceof Error ? error.message : '';
-      if (message === 'FUSION_COMPARE_INPUT_TOO_LARGE' || message === 'BILL2_INPUT_PROFILE_INVALID') tooLarge.push(modelId);
+      // The input is over the model's profile or window, or no answer limit at all leaves room (fitNativeRequestOutput's last resort).
+      if (['FUSION_COMPARE_INPUT_TOO_LARGE', 'BILL2_INPUT_PROFILE_INVALID', 'RUNTIME_COMPLETE_REQUEST_EXCEEDS_CAPACITY'].includes(message)) {
+        tooLarge.push(modelId);
+      }
       else throw error;
     }
   });

@@ -6,15 +6,16 @@ const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')
 const s = vi.hoisted(() => ({
   gate: { positioned: false, refusals24h: 0 } as { positioned: boolean; refusals24h: number },
   begin: {} as Record<string, unknown>, rpcs: [] as Array<{ name: string; args: Record<string, unknown> }>, claim: { state: 'claimed' } as Record<string, unknown>,
-  tooLarge: [] as string[], endFails: false, credits: 10, budget: '1' as string | null, usd: 0n, requests: [] as Array<{ instructions: string }>, admitCalls: [] as unknown[], replayOnly: false,
+  tooLarge: [] as string[], allowed: null as Error | null, endFails: false, existing: null as unknown, probes: 0, credits: 10, budget: '1' as string | null, usd: 0n, requests: [] as Array<{ instructions: string }>, admitCalls: [] as unknown[], replayOnly: false,
 }));
 vi.mock('./compareAdmission', async original => ({ ...(await original<typeof import('./compareAdmission')>()),
-  assertCompareAllowed: async () => ({ answerOutputTokens: 4096, dispatchMinutes: 10, maxBudgetUsd: s.budget }),
+  assertCompareAllowed: async () => { if (s.allowed) throw s.allowed; return { answerOutputTokens: 4096, dispatchMinutes: 10, maxBudgetUsd: s.budget }; },
   buildCompareColumns: async (input: { modelIds: string[]; request: { instructions: string } }) => {
     s.requests.push(input.request);
     return { columns: input.modelIds.map((modelId, index) => ({ index, modelId, upperCredits: s.credits, upperUsd: '0.01' })), tooLarge: s.tooLarge,
       totalCredits: s.credits * input.modelIds.length, totalUsd: s.usd };
   },
+  replayCompareGroup: async () => { s.probes += 1; return s.existing; },
   admitCompareGroup: async (input: { request: { instructions: string }; shown: unknown }) => { s.admitCalls.push(input);
     return { groupId: id(70), replayed: false, runs: [{ runId: id(80), index: 0, body: 'b', call: { phase: 'fusion_compare' } },
       { runId: id(81), index: 1, body: 'b', call: { phase: 'fusion_compare' } }] }; },
@@ -49,7 +50,7 @@ const fresh = (patch: Record<string, unknown> = {}) => ({ compareId: id(90), sta
 
 beforeEach(() => {
   s.gate = { positioned: false, refusals24h: 0 }; s.begin = fresh(); s.rpcs = []; s.claim = { state: 'claimed' }; s.tooLarge = []; s.credits = 10;
-  s.requests = []; s.admitCalls = []; classify.mockReset(); classify.mockResolvedValue('allow'); s.budget = '1'; s.usd = 0n; s.endFails = false;
+  s.requests = []; s.admitCalls = []; classify.mockReset(); classify.mockResolvedValue('allow'); s.budget = '1'; s.usd = 0n; s.endFails = false; s.existing = null; s.probes = 0; s.allowed = null;
   rateLimit.mockReset(); rateLimit.mockResolvedValue(undefined);
 });
 
@@ -233,6 +234,43 @@ describe('compare start: nothing paid happens for a request that can be refused 
     s.begin = fresh({ created: false, gateVerdict: 'clear', gateFallback: false, groupId: null, snapshotHash: snapshotHash(parts()) });
     await start();
     expect((s.admitCalls[0] as { request: { instructions: string } }).request.instructions).not.toContain(POSITIONING_FALLBACK_INSTRUCTIONS);
+  });
+});
+
+describe('compare start: a repeat of an admitted request replays it before anything is repriced (review finding)', () => {
+  const frozen = { groupId: id(70), replayed: true, runs: [{ runId: id(80), index: 0, body: 'b', call: { phase: 'fusion_compare' } }] };
+  it('returns the frozen group even if prices, the budget or a model changed since: no pricing, no gate, no judgement', async () => {
+    s.existing = frozen; s.begin = fresh({ created: false, gateVerdict: 'allow', gateFallback: true, groupId: id(70), state: 'running' });
+    s.credits = 99; s.usd = decimal('50'); s.tooLarge = [id(2)]; // everything a fresh start would refuse
+    const result = await start();
+    expect(result).toMatchObject({ state: 'claimed', compareId: id(90), group: frozen });
+    expect(s.requests).toEqual([]);                       // nothing was priced
+    expect(classify).not.toHaveBeenCalled();
+    expect(rateLimit).not.toHaveBeenCalled();
+    expect(s.admitCalls).toEqual([]);                    // nothing was admitted again
+    expect(names()).toEqual(['fusion_compare_begin', 'fusion_compare_claim']);
+  });
+  it('still checks that the repeat is the same request, and an ended compare still answers as ended', async () => {
+    s.existing = frozen;
+    s.begin = fresh({ created: false, gateVerdict: 'allow', groupId: id(70), state: 'stopped' });
+    await expect(start()).rejects.toThrow('FUSION_COMPARE_ENDED');
+    expect(names()).not.toContain('fusion_compare_claim');
+  });
+  it('reports waiting for credits again when the first claim could not hold every column', async () => {
+    s.existing = frozen; s.claim = { state: 'waiting_credits' };
+    s.begin = fresh({ created: false, gateVerdict: 'allow', groupId: id(70), state: 'running' });
+    await expect(start()).resolves.toMatchObject({ state: 'waiting_credits' });
+  });
+  it('the live permissions still apply to a repeat (the switch may have been turned off while the user waited)', async () => {
+    s.existing = frozen;
+    s.allowed = new Error('FUSION_COMPARE_DISABLED');
+    await expect(start()).rejects.toThrow('FUSION_COMPARE_DISABLED');
+    expect(names()).toEqual([]);
+  });
+  it('a new request (no group yet) is probed once and then priced as before', async () => {
+    await start();
+    expect(s.probes).toBe(1);
+    expect(s.requests.length).toBe(1);
   });
 });
 
