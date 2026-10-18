@@ -4,7 +4,7 @@
 
 export type StepState = 'done' | 'running' | 'waiting';
 export interface TurnStep { id: 'tools' | 'write' | 'organize' | 'save'; state: StepState; label: string }
-export interface ToolCounts { running: number; done: number; failed: number }
+export interface ToolCounts { running: number; done: number; failed: number; pending?: number }
 
 export interface TurnProgressInput {
   /** The live phase: mentor | reading | organizer | saving. Anything else counts as mentor. */
@@ -16,12 +16,13 @@ export interface TurnProgressInput {
 
 const EMPTY: ToolCounts = { running: 0, done: 0, failed: 0 };
 
-/** Counts research calls and work rows by how they ended. `pending`/`unknown` (not settled yet) count as done-for-now. */
+/** Counts research calls and work rows by how they ended. `pending`/`unknown` (result still being verified) are kept apart. */
 export function toolCounts(states: readonly string[]): ToolCounts {
   const counts = { ...EMPTY };
   for (const state of states) {
     if (state === 'running') counts.running++;
     else if (state === 'failed' || state === 'missing') counts.failed++;
+    else if (state === 'pending' || state === 'unknown') counts.pending = (counts.pending ?? 0) + 1;
     else counts.done++;
   }
   return counts;
@@ -30,14 +31,16 @@ export function toolCounts(states: readonly string[]): ToolCounts {
 /** The small steps of one turn, in order. Only steps that apply to this turn are listed. */
 export function turnSteps({ phase, hasText, tools }: TurnProgressInput): TurnStep[] {
   const steps: TurnStep[] = [];
-  const total = tools.running + tools.done + tools.failed;
+  const pending = tools.pending ?? 0;
+  const total = tools.running + tools.done + tools.failed + pending;
   const later = phase === 'organizer' || phase === 'saving';
   if (total > 0) {
-    const finished = tools.done + tools.failed;
+    const finished = tools.done + tools.failed + pending;
     steps.push(tools.running > 0
       ? { id: 'tools', state: 'running', label: `正在查资料和数据（已完成 ${finished}/${total}）…` }
       : { id: 'tools', state: 'done',
-        label: `查资料和数据：完成 ${tools.done} 项` + (tools.failed ? `，${tools.failed} 项这次没查到` : '') });
+        label: `查资料和数据：完成 ${tools.done} 项` + (tools.failed ? `，${tools.failed} 项这次没查到` : '')
+          + (pending ? `，${pending} 项待核对` : '') });
   }
   if (later) steps.push({ id: 'write', state: 'done', label: '回复已写完' });
   else if (hasText) steps.push({ id: 'write', state: 'running', label: '正在写回复…' });

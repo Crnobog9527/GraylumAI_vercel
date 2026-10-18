@@ -28,7 +28,11 @@ describe('turnSteps', () => {
 });
 describe('toolCounts / slowHint', () => {
   it('counts states', () => {
-    expect(toolCounts(['running', 'succeeded', 'failed', 'missing', 'unknown', 'done'])).toEqual({ running: 1, done: 3, failed: 2 });
+    expect(toolCounts(['running', 'succeeded', 'failed', 'missing', 'unknown', 'done'])).toEqual({ running: 1, done: 2, failed: 2, pending: 1 });
+  });
+  it('does not report unsettled lookups as completed', () => {
+    const steps = turnSteps({ phase: 'mentor', hasText: true, tools: { running: 0, done: 2, failed: 0, pending: 1 } });
+    expect(steps[0].label).toBe('查资料和数据：完成 2 项，1 项待核对');
   });
   it('escalates the hint with time', () => {
     expect(slowHint(5000)).toBeNull();
