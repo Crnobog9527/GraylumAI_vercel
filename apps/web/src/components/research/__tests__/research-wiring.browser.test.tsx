@@ -77,7 +77,7 @@ it("loads search details only when opened and pages through the evidence", async
     await page.addStyleTag({ content: css });
     await page.addScriptTag({ content: code });
 
-    const evidence = page.getByRole("region", { name: "取数记录" });
+    const evidence = page.getByRole("region", { name: "搜索记录" });
     await ui(evidence.getByText("查询 3")).toBeVisible({ timeout: 5000 });
     expect(calls.some(call => call.path.endsWith("/research.toolCharges"))).toBe(false);
     await evidence.getByRole("button", { name: "加载更多" }).click();
