@@ -25,8 +25,9 @@ export const L_LATER = {
         note: '按你的定位、上周的数据和对标账号的近况，挑出这周最值得拍的几条，每条写清理由。' },
       { id: 'cover', label: '标题和封面', needs: ['content'], source: 'real',
         note: '围绕选好的题，出 10 个不同钩子的标题和 10 种封面做法，教练标出推荐和理由；选定的写到右边。' },
-      { id: 'material', label: '找资料和文风', needs: ['content', 'library', 'voice'], source: 'planned',
-        note: '先在资料库里找这个选题的资料，读完再写；同时加载你的文风画像，稿子按你说话的样子写。' },
+      // Round ten (W2, Owner 2026-10-18: "你就写【资料库和写作风格】").
+      { id: 'material', label: '资料库和写作风格', needs: ['content', 'library', 'voice'], source: 'planned',
+        note: '先在资料库里找这个选题的资料，再加载你的写作风格，稿子按你平时说话的样子写。' },
       { id: 'script', label: '口播稿和分镜', needs: ['content'], source: 'real',
         note: '稿子出现在对话里的"建议稿"，右边是正文稿件和分镜；你改哪句，它就接着改哪句。' },
     ] as readonly LaterStage[],
@@ -117,20 +118,29 @@ export const L_LATER_CHAT = {
       ['常用表达', '"咋整""搞定""一口锅""还挺香"'],
     ] as const,
     compareTitle: '写出来的，和你原来写的放在一起看',
-    original: { label: '你以前写的', text: '哎今天又七点才到家，冰箱里就剩两根青菜了，那咋整，一口锅搞定呗。先炒菜，炒完别急着刷锅啊，锅底那点油直接加水煮个汤，嘿还挺香。' },
+    /**
+     * Round ten (W2, Owner 2026-10-18: "应该放另外的内容，比如他日常生活或其他选题的文案"): an older post on another subject, so
+     * the side-by-side shows the way of speaking was learned, not an old script on the same dish reused (the plan's text).
+     */
+    original: { label: '你上个月发的一条（别的话题）', text: '哎周末去了趟超市，本来就想买盒鸡蛋，结果推了一车出来，结账一看九十多刀，咋整。'
+      + '回家一样样往冰箱里塞，塞到最后门都关不上了，嘿，这周又得天天对着它们想吃啥了。' },
     draft: { label: '按你的文风写的', text: '哎下班到家都七点了，冰箱里就俩青菜，咋整？一口锅，十五分钟搞定呗。先炒青菜，盛出来；锅底的油别倒啊，加水直接煮汤。嘿，一个人也能吃得挺香。' },
   },
   script: {
     user: '写吧，再给我一个分镜。',
-    reply: '按你的文风写好了，约 300 字，念下来七十秒左右。分镜如下，正文和分镜也同步到右边了：',
+    /**
+     * Round ten (W3, Owner 2026-10-18: "不要用'想看的评论区扣 1'这种方式……用什么样的角度去做互动更高情商"): the ending asks
+     * what everyone has something to say about, so a reply helps others and may be picked for the next video.
+     */
+    reply: '按你的文风写好了，约 300 字，念下来七十秒左右。结尾问大家冰箱里最常剩啥、怎么救回来：人人都有话说，说出来能帮到别人，'
+      + '还可能被挑中上下一期，比"扣 1"更让人想留言。分镜如下，正文和分镜也同步到右边了：',
     /** Round six (Owner: "尽量给一个 300 字左右完整的口播稿，而且要在我们的聊天框里面展示一个完整的分镜脚本表格"). */
     proposal: '哎，下班到家都七点了，累得不想动，外卖一看又是三十多刀。冰箱里就俩青菜、两个番茄、一盒鸡蛋，咋整？今天就一口锅，十五分钟，两菜一汤，搞定给你看。\n\n'
       + '先把米饭热上，早上剩的就行。锅烧热，倒点油，青菜下锅，大火翻一分钟，加点盐，盛出来。青菜别一次全炒啊，一个人一把刚好，剩下的明天还能煮面。锅别刷，留着底油。\n\n'
       + '番茄挑软一点的，出汁快。切块下锅，炒出汁，鸡蛋打散倒进去，划两下，番茄炒蛋就好了，盛一半出来当菜。\n\n'
       + '剩下那一半直接加水，煮开，撒点葱花，番茄蛋汤就有了。你看，一口锅，一个油底，两菜一汤，前后十五分钟，洗的锅都只有一个。\n\n'
-      + '一个人吃，也得好好吃饭。明天拍冰箱剩菜咋整，想看的评论区扣个1呗。',
-    /** 11 shots, 70 seconds in all, matching the script. */
-    /** 11 shots, 70 seconds in all; each line is exactly what is said in that shot, so together they are the script. */
+      + '一个人吃，也得好好吃饭。对了，你家冰箱里最常剩的是啥？你都是咋把它救回来的？评论区说说你的独门做法，我挑几个最绝的，下期照着做给大家看。',
+    /** 11 shots, 73 seconds in all (round ten: the last one 9); each line is exactly what is said in that shot, so together they are the script. */
     shots: [
       ['1', '近景', '成品和计时器', '哎，下班到家都七点了，累得不想动，', '5 秒'],
       ['2', '特写', '外卖页面价格', '外卖一看又是三十多刀。', '4 秒'],
@@ -142,10 +152,10 @@ export const L_LATER_CHAT = {
       ['8', '俯拍', '番茄炒蛋', '番茄挑软一点的，出汁快。切块下锅，炒出汁，鸡蛋打散倒进去，划两下，番茄炒蛋就好了，盛一半出来当菜。', '11 秒'],
       ['9', '俯拍', '加水煮汤', '剩下那一半直接加水，煮开，撒点葱花，番茄蛋汤就有了。', '9 秒'],
       ['10', '近景', '上桌，14:52', '你看，一口锅，一个油底，两菜一汤，前后十五分钟，洗的锅都只有一个。', '7 秒'],
-      ['11', '近景', '一个人开吃', '一个人吃，也得好好吃饭。明天拍冰箱剩菜咋整，想看的评论区扣个1呗。', '6 秒'],
+      ['11', '近景', '一个人开吃，转向镜头', '一个人吃，也得好好吃饭。对了，你家冰箱里最常剩的是啥？你都是咋把它救回来的？评论区说说你的独门做法，我挑几个最绝的，下期照着做给大家看。', '9 秒'],
     ] as const,
     shotHead: ['镜号', '景别', '画面', '口播台词', '时长'] as const,
-    total: '合计约 70 秒',
+    total: '合计约 73 秒',
     /** Round nine (V2): the title picked in 标题和封面 (#1). */
     draftTitle: '15 分钟两菜一汤，只洗 1 口锅',
     versionLine: '账号已保存 v1 · 草稿',

@@ -134,7 +134,7 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
   });
 
   it('orders step two as the creation Skill does: topic, title and cover, material and voice, script (round nine, V2)', () => {
-    expect(L_LATER.two.stages.map(stage => stage.label)).toEqual(['选题', '标题和封面', '找资料和文风', '口播稿和分镜']);
+    expect(L_LATER.two.stages.map(stage => stage.label)).toEqual(['选题', '标题和封面', '资料库和写作风格', '口播稿和分镜']);
     const { titles, covers, pick } = L_LATER_CHAT.cover;
     expect(titles).toHaveLength(10);
     expect(covers).toHaveLength(10);
@@ -341,12 +341,29 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     expect(between('id="compare-title"', 'id="pricing-title"')).toBe(true);
   });
 
-  it('gives a complete storyboard: the 11 shots\' lines are the script word for word, 70 seconds in all (round six)', () => {
-    const { shots, proposal } = L_LATER_CHAT.script;
+  it('gives a complete storyboard: the 11 shots\' lines are the script word for word, 73 seconds in all (round six; ten)', () => {
+    const { shots, proposal, total } = L_LATER_CHAT.script;
     expect(shots).toHaveLength(11);
     expect(shots.map(shot => shot[3]).join('')).toBe(proposal.replace(/\n/g, ''));
-    expect(shots.reduce((sum, shot) => sum + Number.parseInt(shot[4], 10), 0)).toBe(70);
+    expect(shots.reduce((sum, shot) => sum + Number.parseInt(shot[4], 10), 0)).toBe(73);
+    expect(total).toBe('合计约 73 秒');
     expect(proposal.replace(/\n/g, '').length).toBeGreaterThanOrEqual(280);
+    // Round ten (W3): the ending asks the viewers, no "扣 1"; anywhere on the page either.
+    expect(proposal).toContain('你家冰箱里最常剩的是啥？你都是咋把它救回来的？');
+    for (const word of ['扣个1', '扣1', '扣个 1']) expect(render()).not.toContain(word);
+  });
+
+  it('keeps step one strictly one message, one answer: never two from the person in a row, no line twice (round ten, W1)', () => {
+    const lines = L_POSITIONING_MOMENTS.flatMap(moment => moment.lines);
+    lines.forEach((line, index) => { if (line.role === 'user') expect(lines[index + 1]?.role).not.toBe('user'); });
+    const texts = lines.map(line => line.text);
+    expect(new Set(texts).size).toBe(texts.length);
+  });
+
+  it('names step two\'s third stage 资料库和写作风格 and sets the voice beside an older post on another subject (round ten, W2)', () => {
+    expect(L_LATER.two.stages[2].label).toBe('资料库和写作风格');
+    expect(L_LATER_CHAT.voice.original.label).toBe('你上个月发的一条（别的话题）');
+    expect(L_LATER_CHAT.voice.original.text).toContain('超市');
   });
 
   it('draws where to post as the recommended account, or as platform marks for a person with no account yet', () => {

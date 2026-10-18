@@ -16,7 +16,10 @@ import { J_TAKEOVER_MOMENTS, type TakeoverLine } from './landing-copy-j-takeover
  *   what the person said in step one (an hour after work, weekends uncertain), and recommends against it as the main line.
  * Lines kept from sample J are taken from its script by position; the rest are NEW.
  */
-const [, , J_GOAL_REPLY, J_AUDIENCE, J_CAMERA] = J_TAKEOVER_MOMENTS[0].lines;
+// Sample J's 了解你: [0] the person's opening, [1] the goal question, [2] "副业收入", [3] the goal reply, [4] the audience,
+// [5] the camera question, [6] the resources, [7] the summary. Round ten (W1): taken one place off before, which put J's
+// "副业收入" right after this person's own answer (two messages from the person in a row) and dropped the coach's reply.
+const [, , , J_GOAL_REPLY, J_AUDIENCE, J_CAMERA] = J_TAKEOVER_MOMENTS[0].lines;
 const [, , , J_FEASIBILITY, J_FETCH, J_TABLE, J_DIAGNOSE_SUMMARY] = J_TAKEOVER_MOMENTS[1].lines;
 
 /** The Skill's opening sentence (01-discovery.md 「开场」), verbatim. */
