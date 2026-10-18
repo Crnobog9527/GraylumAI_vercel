@@ -15,9 +15,10 @@ vi.mock('../research/vendors/config', async original => ({ ...(await original<ob
 vi.mock('../runtime/stagingPolicy', async original => ({ ...(await original<object>()), loadStagingPolicy: async () => ({ id: '00000000-0000-4000-8000-0000000000aa',
   callPolicies: [], creditsPerUsd: '100', multiplier: '6', expiresAt: '2099-01-01T00:00:00.000Z',
   toolPolicies: [policy(PROFILE), policy(POSTS)] }) }));
-vi.mock('../runtime/billingUnitAdmission', async original => ({ ...(await original<object>()), freezeWindowBillingUnit: async () => ({ version: 'bill-unit-v2',
+vi.mock('../billingUnit', async original => ({ ...(await original<object>()), readMultiplierSnapshot: async () => ({ version: 'bill-unit-v2',
   creditsPerUsd: '100', defaultMultiplier: '6', models: {}, providers: {}, hash: 'f'.repeat(64) }) }));
-vi.mock('../billingProviderPrices', async original => ({ ...(await original<object>()), readProviderPrices: async () => ({ config: { entries: [] } }), resolveProviderPrice: () => ({}) }));
+vi.mock('../billingProviderPrices', async original => ({ ...(await original<object>()), readProviderPrices: async () => ({ config: { entries: [] } }), resolveProviderPrice: () => ({}),
+  resolveProviderMultipliers: () => ({}) }));
 vi.mock('../bill2/toolBilling', async original => ({ ...(await original<object>()),
   toolCallPolicy: (input: { route: string }) => policy(input.route) }));
 import { billedTikhubRead } from './billedRead';
