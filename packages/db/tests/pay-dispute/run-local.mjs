@@ -335,6 +335,15 @@ try {
  await assert.rejects(()=>v('SELECT pay_dispute_resolve_external($1,$2) v',[ops,knownPending.id]),/PAY_DISPUTE_EXTERNAL_CONFLICT/);
  await fulfill(offsite,await v('SELECT user_id v FROM payment_orders WHERE id=$1',[offsite.order]));
  assert.equal(await v('SELECT freeze_state v FROM payment_disputes WHERE id=$1',[outside.id]),'frozen');
+ const deliveredOutside=await pack(await profile(0),100);
+ await c.query('DELETE FROM payment_provider_refs WHERE order_id=$1',[deliveredOutside.order]);
+ const closedOutside=await receive(deliveredOutside,{orderId:null});
+ await v('SELECT pay_dispute_resolve_external($1,$2) v',[ops,closedOutside.id]);
+ await v('SELECT pay_dispute_match($1,$2) v',[closedOutside.id,deliveredOutside.order]);
+ assert.equal(await v('SELECT freeze_state v FROM payment_disputes WHERE id=$1',[closedOutside.id]),'frozen');
+ assert.equal(await v('SELECT renewal_stop_state v FROM payment_disputes WHERE id=$1',[closedOutside.id]),'not_applicable');
+ assert.equal(await v('SELECT dispute_frozen_credits v FROM credit_package_sources WHERE order_id=$1',[deliveredOutside.order]),100);
+ report.checks.push('late match after external resolution reopens, freezes already delivered credits and applies stop state');
  report.checks.push('off-site resolution is admin-only, idempotently audited and denied for known payment references; later actual fulfillment reopens and freezes the matching source');
  await membershipCases({c,v,profile,receive,withdraw,ops,report});
  // Optional PAY-EVIDENCE integration: model its documented table locally; no personal evidence is created.

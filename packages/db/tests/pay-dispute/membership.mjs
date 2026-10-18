@@ -84,6 +84,16 @@ export async function membershipCases({c,v,profile,receive,withdraw,ops,report})
   assert.equal(await v('SELECT renewal_stop_state v FROM payment_disputes WHERE id=$1',[unmapped.id]),'confirmed');
  } finally {await matcher.end();}
  report.checks.push('stop confirmation reloads a mapping committed while waiting and synchronizes internal subscription state');
+ const outsideMember=await member(start,end);
+ await c.query('UPDATE payment_orders SET dispute_payment_key=NULL,dispute_subscription_key=NULL WHERE id=$1',[outsideMember.order]);
+ await c.query("DELETE FROM payment_provider_refs WHERE order_id=$1 AND object_type='payment'",[outsideMember.order]);
+ const outsideDispute=await receive(outsideMember,{orderId:null});
+ await v('SELECT pay_dispute_resolve_external($1,$2) v',[ops,outsideDispute.id]);
+ await v('SELECT pay_dispute_match($1,$2) v',[outsideDispute.id,outsideMember.order]);
+ assert.equal(await v('SELECT freeze_state v FROM payment_disputes WHERE id=$1',[outsideDispute.id]),'frozen');
+ assert.equal(await v('SELECT renewal_stop_state v FROM payment_disputes WHERE id=$1',[outsideDispute.id]),'pending');
+ assert.equal(await v('SELECT credits v FROM profiles WHERE id=$1',[outsideMember.user]),0);
+ report.checks.push('late match after external resolution freezes delivered membership and reopens subscription stop');
  const f=await member(start,end);
  assert.equal(await v('SELECT credits v FROM profiles WHERE id=$1',[f.user]),100);
  const d=await receive(f,{subscriptionId:f.providerSub});
