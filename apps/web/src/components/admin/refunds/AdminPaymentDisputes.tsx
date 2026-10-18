@@ -31,7 +31,7 @@ export function AdminPaymentDisputes() {
       {message ? <p role="status">{message}</p> : null}
       {rows.isError ? <p role="alert">拒付记录暂时无法读取。</p> : null}
       {rows.isLoading ? <p>正在读取…</p> : null}
-      {rows.data?.length === 0 ? <p>暂无付款争议。</p> : null}
+      {!rows.isError && !rows.isLoading && rows.data?.length === 0 ? <p>暂无付款争议。</p> : null}
       {rows.data?.map(row => (
         <article key={row.id} className="space-y-2 rounded-xl border p-4" style={{ borderColor: 'var(--border-primary)' }}>
           <p className="break-all text-sm">订单：{row.order_id ?? '等待匹配'}</p>

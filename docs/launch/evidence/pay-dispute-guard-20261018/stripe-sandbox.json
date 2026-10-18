@@ -1,0 +1,204 @@
+{
+  "capturedAt": "2026-10-18",
+  "account": "Grayscale Luminary LLC 沙盒",
+  "livemode": false,
+  "method": "Stripe connector; MP hosted Checkout; non-MP subscription using official tok_createDispute because background browser reads timed out",
+  "limits": [
+    "Synthetic test orders have no staging user mapping; this proves Stripe event shape, not deployed application end-to-end behavior.",
+    "No raw evidence, customer details, IP, secrets or client secrets retained.",
+    "Winning evidence used only for the documented test simulation; application does not submit dispute responses."
+  ],
+  "mp": {
+    "checkout": "cs_test_a11EuA1Aqs4bpfIZlV4PfPCfCexif2QU3Qy7ArwWKd8Ds4Y86Y9cZCWupe",
+    "subscription": "sub_1URw753i2f0AJbrQNlFQN7Xj",
+    "invoice": "in_1URw703i2f0AJbrQx9TaseKr",
+    "managed_payments": {
+      "enabled": true
+    },
+    "invoicePayments": [
+      {
+        "invoice": "in_1URw703i2f0AJbrQx9TaseKr",
+        "payment": {
+          "payment_intent": "pi_3URw713i2f0AJbrQ1bb7eXJZ",
+          "type": "payment_intent"
+        },
+        "status": "paid",
+        "amount_paid": 100,
+        "livemode": false
+      }
+    ],
+    "stopConfirmed": true
+  },
+  "card_cn": {
+    "subscription": "sub_1URwF33i2f0AJbrQkKbOFhcV",
+    "invoice": "in_1URwF33i2f0AJbrQrepqjmsl",
+    "managed_payments": {
+      "enabled": false
+    },
+    "invoicePayments": [
+      {
+        "invoice": "in_1URwF33i2f0AJbrQrepqjmsl",
+        "payment": {
+          "payment_intent": "pi_3URwF33i2f0AJbrQ0vilFKnK",
+          "type": "payment_intent"
+        },
+        "status": "paid",
+        "amount_paid": 100,
+        "livemode": false
+      }
+    ],
+    "stopConfirmed": true
+  },
+  "events": [
+    {
+      "id": "evt_1URwFw3i2f0AJbrQkvMyMrIN",
+      "type": "charge.dispute.closed",
+      "created": 1792338256,
+      "api_version": "2025-12-15.clover",
+      "livemode": false,
+      "dispute": {
+        "id": "du_1URwF63i2f0AJbrQGMZyrurS",
+        "charge": "ch_3URwF33i2f0AJbrQ0NfWEfdW",
+        "payment_intent": "pi_3URwF33i2f0AJbrQ0vilFKnK",
+        "status": "won",
+        "amount": 100,
+        "currency": "usd"
+      }
+    },
+    {
+      "id": "evt_1URwFw3i2f0AJbrQwSeDrXFn",
+      "type": "charge.dispute.funds_reinstated",
+      "created": 1792338256,
+      "api_version": "2025-12-15.clover",
+      "livemode": false,
+      "dispute": {
+        "id": "du_1URwF63i2f0AJbrQGMZyrurS",
+        "charge": "ch_3URwF33i2f0AJbrQ0NfWEfdW",
+        "payment_intent": "pi_3URwF33i2f0AJbrQ0vilFKnK",
+        "status": "won",
+        "amount": 100,
+        "currency": "usd"
+      }
+    },
+    {
+      "id": "evt_3URwF33i2f0AJbrQ0q0BeYXA",
+      "type": "charge.dispute.updated",
+      "created": 1792338251,
+      "api_version": "2025-12-15.clover",
+      "livemode": false,
+      "dispute": {
+        "id": "du_1URwF63i2f0AJbrQGMZyrurS",
+        "charge": "ch_3URwF33i2f0AJbrQ0NfWEfdW",
+        "payment_intent": "pi_3URwF33i2f0AJbrQ0vilFKnK",
+        "status": "under_review",
+        "amount": 100,
+        "currency": "usd"
+      }
+    },
+    {
+      "id": "evt_1URwF83i2f0AJbrQtoVZpzbT",
+      "type": "charge.dispute.funds_withdrawn",
+      "created": 1792338204,
+      "api_version": "2025-12-15.clover",
+      "livemode": false,
+      "dispute": {
+        "id": "du_1URwF63i2f0AJbrQGMZyrurS",
+        "charge": "ch_3URwF33i2f0AJbrQ0NfWEfdW",
+        "payment_intent": "pi_3URwF33i2f0AJbrQ0vilFKnK",
+        "status": "needs_response",
+        "amount": 100,
+        "currency": "usd"
+      }
+    },
+    {
+      "id": "evt_1URwF73i2f0AJbrQ2TOYQLBN",
+      "type": "charge.dispute.created",
+      "created": 1792338204,
+      "api_version": "2025-12-15.clover",
+      "livemode": false,
+      "dispute": {
+        "id": "du_1URwF63i2f0AJbrQGMZyrurS",
+        "charge": "ch_3URwF33i2f0AJbrQ0NfWEfdW",
+        "payment_intent": "pi_3URwF33i2f0AJbrQ0vilFKnK",
+        "status": "needs_response",
+        "amount": 100,
+        "currency": "usd"
+      }
+    },
+    {
+      "id": "evt_1URw913i2f0AJbrQCmMPfrxj",
+      "type": "charge.dispute.closed",
+      "created": 1792337827,
+      "api_version": "2025-12-15.clover",
+      "livemode": false,
+      "dispute": {
+        "id": "du_1URw733i2f0AJbrQ8qSix5NP",
+        "charge": "ch_3URw713i2f0AJbrQ1UL9wQWK",
+        "payment_intent": "pi_3URw713i2f0AJbrQ1bb7eXJZ",
+        "status": "won",
+        "amount": 100,
+        "currency": "usd"
+      }
+    },
+    {
+      "id": "evt_1URw913i2f0AJbrQqMo2dcoO",
+      "type": "charge.dispute.funds_reinstated",
+      "created": 1792337827,
+      "api_version": "2025-12-15.clover",
+      "livemode": false,
+      "dispute": {
+        "id": "du_1URw733i2f0AJbrQ8qSix5NP",
+        "charge": "ch_3URw713i2f0AJbrQ1UL9wQWK",
+        "payment_intent": "pi_3URw713i2f0AJbrQ1bb7eXJZ",
+        "status": "won",
+        "amount": 100,
+        "currency": "usd"
+      }
+    },
+    {
+      "id": "evt_3URw713i2f0AJbrQ1xocjJIB",
+      "type": "charge.dispute.updated",
+      "created": 1792337822,
+      "api_version": "2025-12-15.clover",
+      "livemode": false,
+      "dispute": {
+        "id": "du_1URw733i2f0AJbrQ8qSix5NP",
+        "charge": "ch_3URw713i2f0AJbrQ1UL9wQWK",
+        "payment_intent": "pi_3URw713i2f0AJbrQ1bb7eXJZ",
+        "status": "under_review",
+        "amount": 100,
+        "currency": "usd"
+      }
+    },
+    {
+      "id": "evt_1URw773i2f0AJbrQQ7RHTTFB",
+      "type": "charge.dispute.funds_withdrawn",
+      "created": 1792337706,
+      "api_version": "2025-12-15.clover",
+      "livemode": false,
+      "dispute": {
+        "id": "du_1URw733i2f0AJbrQ8qSix5NP",
+        "charge": "ch_3URw713i2f0AJbrQ1UL9wQWK",
+        "payment_intent": "pi_3URw713i2f0AJbrQ1bb7eXJZ",
+        "status": "needs_response",
+        "amount": 100,
+        "currency": "usd"
+      }
+    },
+    {
+      "id": "evt_1URw773i2f0AJbrQapDnH7H9",
+      "type": "charge.dispute.created",
+      "created": 1792337706,
+      "api_version": "2025-12-15.clover",
+      "livemode": false,
+      "dispute": {
+        "id": "du_1URw733i2f0AJbrQ8qSix5NP",
+        "charge": "ch_3URw713i2f0AJbrQ1UL9wQWK",
+        "payment_intent": "pi_3URw713i2f0AJbrQ1bb7eXJZ",
+        "status": "needs_response",
+        "amount": 100,
+        "currency": "usd"
+      }
+    }
+  ]
+}

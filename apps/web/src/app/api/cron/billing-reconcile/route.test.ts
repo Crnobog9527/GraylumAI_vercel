@@ -280,7 +280,7 @@ describe('/api/cron/billing-reconcile', () => {
     expect(response.status).toBe(500);
     expect(await response.json()).toMatchObject({ stripeCard: { repaired: 1, findings: [finding] }, summary: {} });
     expect(mocks.stripeCard).toHaveBeenCalledWith({ client: 'service-role' }, { client: 'stripe' },
-      { expectedMode: 'test', alert: expect.any(Function) });
+      { expectedMode: 'test', alert: expect.any(Function), disputeAlert: expect.any(Function) });
     expect(mocks.reportStripeCard).toHaveBeenCalledWith([finding]);
     expect(mocks.cronJob).toHaveBeenCalledWith('billing-reconcile', 'failed', expect.any(Number),
       expect.stringContaining('Stripe card payments need manual review: 1'), expect.objectContaining({ stripeCard: expect.any(Object) }));

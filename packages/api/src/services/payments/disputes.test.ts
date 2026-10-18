@@ -8,7 +8,7 @@ vi.mock('./disputePayment', () => ({ readDisputePayment: mocks.payment }));
 vi.mock('./cardPaymentLookup', () => ({ findCardOrderForPayment: mocks.find }));
 vi.mock('./cardSubscriptionStop', () => ({ readSubscription: mocks.read, stopUndeliveredSubscription: mocks.stop,
   stripeStopState: (s: { stopped: boolean; canceled: boolean }) => ({ stop: s.stopped, canceled: s.canceled }) }));
-import { handlePaymentDispute } from './disputes';
+import { handlePaymentDispute, reconcilePaymentDisputes } from './disputes';
 function fixture(overrides = {}) {
   const row = { id: 'internal-dispute', merchant_namespace: 'acct_test', mode: 'test', provider_dispute_id: 'du_test',
     order_id: 'order', subscription_id: 'local_sub', provider_subscription_id: 'sub_test', freeze_state: 'frozen',
@@ -76,5 +76,18 @@ describe('Stripe dispute effects resume from committed financial state', () => {
   it('database failure rejects the webhook so Stripe can retry', async () => {
     const f = fixture(); f.rpc.mockResolvedValueOnce({ data: null, error: { code: 'XX000' } } as never);
     await expect(f.run()).rejects.toThrow('PAY_DISPUTE_RECORD_UNAVAILABLE'); expect(mocks.stop).not.toHaveBeenCalled();
+  });
+  it('the daily backstop resumes a committed freeze whose process stopped before the Stripe mutation', async () => {
+    const f = fixture(); let stopped = false;
+    mocks.read.mockImplementation(async () => ({ stopped, canceled: false }));
+    mocks.stop.mockImplementation(async () => { stopped = true; });
+    const originalFrom = f.db.from.bind(f.db);
+    const query: Record<string, unknown> = {};
+    for (const name of ['select', 'eq', 'neq', 'or', 'order']) query[name] = () => query;
+    query.limit = async () => ({ data: [{ ...f.row }], error: null });
+    f.db.from = (() => ({ ...query, update: originalFrom('payment_disputes').update.bind(originalFrom('payment_disputes')) })) as never;
+    expect(await reconcilePaymentDisputes(f.db, {} as Stripe, f.alert)).toEqual({ checked: 1, failed: 0, complete: true });
+    expect(mocks.stop).toHaveBeenCalledTimes(1); expect(f.row.renewal_stop_state).toBe('confirmed');
+    expect(mocks.stop).toHaveBeenCalledWith({}, 'sub_test', { timeout: 2000, maxNetworkRetries: 0 });
   });
 });
