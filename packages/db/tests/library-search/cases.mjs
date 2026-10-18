@@ -144,6 +144,24 @@ export async function runCases({db,report}) {
  assert.ok(!JSON.stringify(await one(db,"SELECT result v FROM runtime_tool_calls WHERE execution_id=$1 AND call_id='race'",[f.execution])).includes('RACE_CANARY'));
  report.checks.push('a search result stored after its document was deleted becomes source_deleted without the excerpt');
 
+ // An empty library index (the model lists the library before any search hit): visible, stored as it is, not source_deleted.
+ const empty=await runtimeFixture(db,{});
+ await db.query(`UPDATE runtime_executions SET state='running',payload=payload||'{"tools":["read_source"],"maxToolCalls":8,"libraryRetrieval":true}'::jsonb WHERE id=$1`,[empty.execution]);
+ await rpc(db,'runtime_tool',empty.actor,empty.execution,'idx','read_source',{query:'library'},'claim',null);
+ const emptyIndex=await read(db,empty.actor,empty.execution,'');
+ assert.equal(emptyIndex.kind,'library_index');assert.deepEqual(emptyIndex.documents,[]);
+ const emptyDone=await rpc(db,'runtime_tool',empty.actor,empty.execution,'idx','read_source',{query:'library'},'complete',emptyIndex);
+ assert.deepEqual(emptyDone.result,emptyIndex,'an empty index is stored as it is, not as source_deleted');
+ assert.equal(await rpc(db,'runtime_library_visible',empty.actor,empty.execution,emptyIndex),true);
+ // The same execution after a search hit: the index lists it and goes invisible once that document is gone.
+ const found2=await doc(db,empty.actor,'IDX.md',1);await setBody(db,found2,0,'x','idxword content');
+ const hitResult=await read(db,empty.actor,empty.execution,'search:idxword');assert.equal(hitResult.hits.length,1);
+ const listed=await read(db,empty.actor,empty.execution,'');assert.equal(listed.documents.length,1);
+ assert.equal(await rpc(db,'runtime_library_visible',empty.actor,empty.execution,listed),true);
+ await del(db,empty.actor,found2);
+ assert.equal(await rpc(db,'runtime_library_visible',empty.actor,empty.execution,listed),false,'a listed document that is gone still hides the index');
+ report.checks.push('an empty library index of a retrieving free chat is stored as it is; once a document is listed and then deleted the index is hidden again');
+
  // Cleanup: after the deletion, finished executions lose the stored search result like other library reads.
  const g=await runtimeFixture(db,{settled:true});
  const cleanup=await doc(db,g.actor,'CLEANUP_NAME.md',1);await setBody(db,cleanup,0,'x','cleanupword CLEANUP_CANARY');
