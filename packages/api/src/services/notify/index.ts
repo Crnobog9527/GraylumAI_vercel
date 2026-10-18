@@ -7,7 +7,9 @@ export {
 } from './sender';
 export { enqueuePaymentNotice } from './enqueue';
 export {
-  noticeDigest, noticeLayout, PAYMENT_NOTICE_KINDS, PAYMENT_NOTICE_LOCALE,
-  type PaymentNoticeKind, type PaymentNoticeParams, type PaymentNoticeTemplate, type PaymentNoticeTemplates,
+  noticeDigest, noticeLayout, PAYMENT_NOTICE_KINDS, PAYMENT_NOTICE_CRON_KINDS, PAYMENT_NOTICE_LOCALE,
+  type PaymentNoticeKind, type PaymentNoticeEnqueueKind, type PaymentNoticeCronKind,
+  type PaymentNoticeParams, type PaymentNoticeTemplate,
+  type PaymentNoticeTemplates,
 } from './templates';
 export { PAYMENT_NOTICE_TEMPLATES } from './registry';
