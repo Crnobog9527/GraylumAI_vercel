@@ -867,14 +867,15 @@ DO $patch$ DECLARE src text;anchor text;BEGIN
  END IF;
 END $patch$;
 
--- A wallet pack keeps its original refund path unless a dispute hold must be converted atomically.
+-- A wallet pack keeps its original path unless a dispute owns the refund (first conversion and later replays).
 DO $patch$ DECLARE src text;anchor text;BEGIN
  src:=pg_get_functiondef('public.pay_stripe_mp_record_external_refund(uuid,text,text,text,integer,text,timestamptz)'::regprocedure);
  IF position('-- PAY-D1 wallet-pack-convert' IN src)=0 THEN
   anchor:='OR o.item_type=''membership_plan'' AND o.payment_method IN (''wechat_pay'',''alipay'')';
   IF array_length(string_to_array(src,anchor),1)<>2 THEN RAISE EXCEPTION 'PAY_DISPUTE_WALLET_PATCH'; END IF;
   EXECUTE replace(src,anchor,
-   E'OR (o.item_type=''membership_plan'' OR o.item_type=''credit_package'' AND pay_dispute_order_frozen(o.id))\n'
+   E'OR (o.item_type=''membership_plan'' OR o.item_type=''credit_package'' AND (pay_dispute_order_frozen(o.id)\n'
+   ||E'  OR EXISTS(SELECT 1 FROM payment_disputes WHERE order_id=o.id AND freeze_state=''superseded'')))\n'
    ||E'  AND o.payment_method IN (''wechat_pay'',''alipay'') -- PAY-D1 wallet-pack-convert\n');
  END IF;
 END $patch$;
