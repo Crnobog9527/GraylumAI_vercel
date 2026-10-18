@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import assert from 'node:assert/strict';
-import {createHash} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
+import {read} from '../runtime-view-perf/local-db.mjs';
 import {createFixture,receipt} from '../payg/fixture.mjs';
 import {rpc,closeAccount} from '../erasure-b2a/cases.mjs';
 export async function billingCases({c,report}){
@@ -40,6 +41,21 @@ export async function billingCases({c,report}){
  assert.equal(saved.runtime_execution_id,admitted.executionId);assert.equal(saved.bill2_run_id,admitted.runId);
  assert.equal(await one('SELECT credits v FROM profiles WHERE id=$1',[f.actor]),before);
  report.checks.push('native admission atomically binds one execution/run; repeated admission does not charge');
+ const ordinary=await rpc(c,'runtime_start',f.actor,randomUUID(),{scope:{kind:'positioning_draft'}});
+ await one(`INSERT INTO runtime_executions(id,actor_id,session_id,request_id,payload,history_revision,state)
+  VALUES(gen_random_uuid(),$1,$2,gen_random_uuid(),'{"role":"ordinary","input":"A real free conversation"}',0,'completed') RETURNING id v`,
+  [f.actor,ordinary.sessionId]);
+ await c.query('BEGIN');await c.query('RESET ROLE');
+ await c.query(read('packages/db/migrations/0130_runtime_conversations.sql').replace(/^BEGIN;$/m,'').replace(/^COMMIT;$/m,''));
+ await c.query('SET ROLE service_role');
+ assert.ok((await rpc(c,'opc_free_conversations',f.actor)).some(row=>row.sessionId===r.sessionId));
+ report.checks.push('RED: the old free-chat projection exposes the native weekly-review session and scheduler input');
+ await c.query('ROLLBACK');
+ const chats=await rpc(c,'opc_free_conversations',f.actor);
+ assert.ok(chats.some(row=>row.sessionId===ordinary.sessionId));assert.ok(!chats.some(row=>row.sessionId===r.sessionId));
+ assert.doesNotMatch(JSON.stringify(chats),/Review fixture/);
+ report.checks.push('GREEN: automatic reviews stay out of free chat; a real ordinary chat remains visible');
+
  const live=await rpc(c,'runtime_execution',f.actor,admitted.executionId,'begin',null);assert.equal(live.epoch,1);
  await rpc(c,'runtime_execution',f.actor,admitted.executionId,'owner_session',
   {epoch:1,value:{action:'freeze',items:[]}});

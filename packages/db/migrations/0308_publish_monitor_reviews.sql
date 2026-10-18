@@ -241,6 +241,21 @@ BEGIN
    FROM system_settings WHERE key='publish_monitor_review_enabled'),false)); -- PR6 review descriptor$b$);
  END IF;
 END $$;
+-- Keep automatic runs in the existing review history, preserving chat rename and deletion filters.
+DO $chatlist$ DECLARE d text;anchor text;
+BEGIN
+ d:=pg_get_functiondef('public.opc_free_conversations(uuid)'::regprocedure);
+ IF position('-- PR6 scheduled review list filter' IN d)=0 THEN
+  anchor:=$a$ ) activity
+ ORDER BY activity.last_activity DESC,s.id LIMIT 100$a$;
+  IF array_length(string_to_array(d,anchor),1)<>2 THEN RAISE EXCEPTION 'PUBLISH_REVIEW_CHAT_LIST_MISMATCH';END IF;
+  EXECUTE replace(d,anchor,$b$ ) activity
+ -- PR6 scheduled review list filter
+ WHERE NOT coalesce(first_turn.payload ? 'weeklyReview',false)
+ ORDER BY activity.last_activity DESC,s.id LIMIT 100$b$);
+ END IF;
+END $chatlist$;
+
 DO $$ DECLARE f regprocedure;
 BEGIN
  FOR f IN SELECT p.oid::regprocedure FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public'
