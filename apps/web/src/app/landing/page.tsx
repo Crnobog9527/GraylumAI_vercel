@@ -1,4 +1,5 @@
 import { JsonLd } from '@/components/seo/JsonLd';
+import { rewordFaq } from '@/components/landing/preview-j/SectionsJ';
 import { SampleL } from '@/components/landing/preview-l/SampleL';
 import { resolveLandingFlags } from '@/lib/landing/landing-flags';
 import { buildLandingPageData, HOME_DESCRIPTION, HOME_TITLE, homePageExtras } from '@/lib/landing/landing-page-data';
@@ -31,11 +32,14 @@ export default async function LandingPage() {
   const flags = { ...resolveLandingFlags(), founder: false };
   const data = buildLandingPageData(flags, plans, offers);
 
+  // The structured data says what the page says: the FAQ answers with the same rewording the page shows (FaqJ).
+  const faqItems = data.faqItems.map(item => ({ ...item, answer: rewordFaq(item.answer) }));
+
   return (
     <div lang={SITE_LOCALES['zh-Hans'].htmlLang}>
       <JsonLd data={[
         softwareApplicationJsonLd({ description: HOME_DESCRIPTION, offers: data.offerList }),
-        ...(data.faqItems.length > 0 ? [faqPageJsonLd(data.faqItems)] : []),
+        ...(faqItems.length > 0 ? [faqPageJsonLd(faqItems)] : []),
       ]} />
       <SampleL data={data} siteName={siteName} extras={homePageExtras(flags)} production supportEmail={supportEmail} />
     </div>
