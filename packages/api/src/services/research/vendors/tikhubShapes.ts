@@ -32,6 +32,8 @@ function toItem(values: Values, whitelist: readonly string[], url?: string): Res
   return safeUrl === undefined ? { fields, missing } : { url: safeUrl, fields, missing };
 }
 
+const positive = (value: number | undefined) => (value !== undefined && value > 0 ? value : undefined);
+
 function aweme(item: Raw, platform: 'douyin' | 'tiktok') {
   const id = idText(item, ['aweme_id']);
   const handle = text(item, ['author.unique_id']);
@@ -44,9 +46,9 @@ function aweme(item: Raw, platform: 'douyin' | 'tiktok') {
     authorId: platform === 'douyin' ? idText(item, ['author.sec_uid', 'author.unique_id', 'author.uid'])
       : idText(item, ['author.unique_id', 'author.sec_uid', 'author.uid']),
     publishedAt: timestamp(item, ['create_time'], SOCIAL_EARLIEST_MS),
-    // Douyin hides play counts: recorded real responses carry play_count 0 on posts with thousands of likes (RT-7),
-    // so a 0 there is "not provided", never a count.
-    views: platform === 'douyin' ? undefined : count(item, ['statistics.play_count']), likes: count(item, ['statistics.digg_count']),
+    // Douyin account posts hide play counts: recorded real responses carry play_count 0 on posts with thousands of
+    // likes (RT-7), so a 0 there is "not provided", never a count. A positive value (search results may carry one) is kept.
+    views: platform === 'douyin' ? positive(count(item, ['statistics.play_count'])) : count(item, ['statistics.play_count']), likes: count(item, ['statistics.digg_count']),
     comments: count(item, ['statistics.comment_count']), shares: count(item, ['statistics.share_count']),
   }, POST_FIELDS, url);
 }

@@ -54,6 +54,14 @@ describe('Douyin account routes on real response shapes', () => {
     }
   });
 
+  it('keeps a positive play count (search results may carry one) and still drops a 0', async () => {
+    const aweme = (samples.douyinPosts.data as { aweme_list: Array<Record<string, unknown>> }).aweme_list[0]!;
+    const withViews = { ...aweme, statistics: { ...(aweme.statistics as object), play_count: 5400 } };
+    const result = await callTikhub({ platform: 'douyin', kind: 'keyword_posts', keyword: '露营' },
+      deps(jsonFetch(200, { code: 200, data: { data: [{ aweme_info: withViews }, { aweme_info: aweme }] } })));
+    expect(result.items.map(item => item.fields.views)).toEqual([5400, undefined]);
+  });
+
   it('a search hit keeps the sec_user_id as author id so discovery can fetch the profile', async () => {
     const hit = { code: 200, data: { data: [{ aweme_info: (samples.douyinPosts.data as { aweme_list: unknown[] }).aweme_list[0] }] } };
     const result = await callTikhub({ platform: 'douyin', kind: 'keyword_posts', keyword: '露营' }, deps(jsonFetch(200, hit)));
