@@ -9,14 +9,15 @@
 
 ## 验证
 
-PASS：API 全量 7640 passed、16 skipped（新增路由前）；新路由允许/拒绝和隔离 4 passed；API 与 Web 类型检查、API lint。
-PASS：MP 沙盒订阅官方拒付卡实付 1 USD，实际生成 created/updated/closed(won)、扣回和返还事件，PaymentIntent 与 invoice_payments 一致。普通卡已创建 active 订阅并产生拒付，关闭事件核对中。
+PASS：API 全量 7640 passed、16 skipped（最终钱包修复前）；新路由权限隔离 4 passed、每日修复共 11 passed、钱包分类/退款 21 passed；Web 组件与对账路由 18 passed；API 与 Web 类型检查、API lint。
+本地浏览器已验证实际组件的二次确认、取消不提交、单次提交、成功/失败状态；RPC 为合成数据，不冒充远程全链。详细证据见 VALIDATION.md。
+PASS：MP 沙盒订阅官方拒付卡实付 1 USD，实际生成 created/updated/closed(won)、扣回和返还事件，PaymentIntent 与 invoice_payments 一致。普通卡也已收到 closed(won) 与资金返还；两个沙盒订阅都已实际期末停止并读回确认。
 这些 Stripe 验证是独立合成测试订单，未映射到 staging 用户；不虚称已完成部署后应用全链。
 
 ## Handoff
 
 Done：D2 主要实现与单元测试；D1 迁移已完整本地重放。
-Next：补页面/服务验证，当前候选 CI 和 Codex 机器人审查，修复同范围问题，补真实沙盒材料。
-Blockers：D1 迁移编号暂 0311，CI 拒绝缺少 0307–0310 的编号空档，需要总控按准备好的先后最终确认；不建占号空迁移或放宽检查。D1 首轮 BILL2 历史迁移回放测试需重放新增补丁，正在修复。当前不能合并。
+Next：读取当前候选 CI 和 Codex 机器人复审，处理余下意见；总控确认迁移编号并上沙盒后，完成部署后全链验收。
+Blockers：D1 迁移编号暂 0311，CI 拒绝缺少 0307–0310 的编号空档，需要总控按准备好的先后最终确认；不建占号空迁移或放宽检查。D1 首轮 BILL2 历史迁移回放遗漏已修复、本地 93/93；机器人发现的证据保全、撤回后退款及钱包积分包分类问题已修复，当前版本等待复审。当前不能合并。
 恢复：先停止拒付事件分派，保留冻结财务记录；按 D1 迁移头恢复前置函数并逐单核对撤回，不自动恢复扣款。
 10-25 冻结前清除欠项；若仍未清除，PR 持续保留具体未完成项，不宣称完成。
