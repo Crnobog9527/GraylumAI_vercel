@@ -197,3 +197,15 @@ it('logs codes only: no address, body or key', async () => {
     expect(line).not.toContain('re_fake_key');
   }
 });
+
+it('re-reads the recipient between uncertain attempts and goes manual if the email changed', async () => {
+  const options = { email: EMAIL, claims: [{ decision: 'send', attempt: 1 }, { decision: 'manual', reason: 'digest_mismatch' }] };
+  const h = harness(options);
+  const t = transport([{ kind: 'unknown', code: 'X' }]);
+  const result = await sendPaymentNotice(h.db, ID, deps({ transport: t.fn,
+    sleep: async () => { options.email = 'changed@example.test'; } }));
+  expect(result).toMatchObject({ outcome: 'manual', attention: 'PAYMENT_NOTICE_DIGEST_MISMATCH' });
+  expect(t.fn).toHaveBeenCalledTimes(1);
+  const claims = h.of('payment_notice_claim');
+  expect(claims[0]!.p_digest).not.toBe(claims[1]!.p_digest);
+});

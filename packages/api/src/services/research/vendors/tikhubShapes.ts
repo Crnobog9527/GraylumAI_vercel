@@ -325,3 +325,13 @@ export function xhsNextCursor(json: unknown): string | undefined {
   const cursor = idText(last, ['cursor', 'id', 'note_id']);
   return cursor !== undefined && /^[0-9a-f]{24}$/.test(cursor) ? cursor : undefined;
 }
+
+/** TikHub TikTok/Douyin account videos use `has_more` and `max_cursor`; only a forward numeric cursor can continue. */
+export function videoNextCursor(json: unknown, currentCursor?: string): string | undefined {
+  const page = (first(json, ['data.data']) ?? first(json, ['data'])) as Raw | undefined;
+  if (!page || !(page.has_more === true || page.has_more === 1 || page.has_more === '1')) return undefined;
+  const raw = page.max_cursor;
+  const next = typeof raw === 'number' && Number.isSafeInteger(raw) && raw >= 0 ? String(raw)
+    : typeof raw === 'string' && /^(0|[1-9]\d*)$/.test(raw) && Number.isSafeInteger(Number(raw)) ? raw : undefined;
+  return next !== undefined && next !== (currentCursor ?? '0') ? next : undefined;
+}

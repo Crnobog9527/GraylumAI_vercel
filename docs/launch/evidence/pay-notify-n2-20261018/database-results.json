@@ -1,0 +1,57 @@
+{
+  "build": {
+    "steps": 312,
+    "passed": 312,
+    "bridges": [
+      "0143_ticket_grants_and_own_rls.sql"
+    ],
+    "repeated": 0,
+    "failed": null
+  },
+  "checks": [
+    "0309 repeated after full chain leaves catalog identical",
+    "only service_role can scan; helpers not directly callable",
+    "red/green: old 24h window misses a 26h-old ending; seven-day catch-up enqueues it",
+    "wallet -7d/0d/+5d, ordinary annual, MP/CN annual and founder-ended generated with correct facts",
+    "repeat/concurrent scans create no duplicate; two claimants dispatch only once",
+    "renewed wallet term and canceled card renewal rechecked at claim and skipped",
+    "freeze and refund arriving between scan and send prevent delivery",
+    "erasure before send skips; prune deletes; rescans cannot recreate notices",
+    "unknown after 24h and changed digest go manual without dispatch",
+    "restored Pro requires refunded linked upgrade + authoritative active Pro; no synthetic restoration flag",
+    "dispute function key is idempotent; daily scan never triggers dispute delivery",
+    "existing log cleanup drains notices within 30 days and preserves its accurate counters"
+  ],
+  "postMergeReplay": {
+    "image": "postgres@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73",
+    "failed": null,
+    "steps": 312,
+    "passed": 312,
+    "bridges": [
+      "0143_ticket_grants_and_own_rls.sql"
+    ],
+    "repeated": 243,
+    "groups": 2630,
+    "accountOpenAudit": [],
+    "builtFingerprint": "written",
+    "convergenceReapply": "unchanged",
+    "rollback": {
+      "removed": [
+        "fn:prevent_client_profile_credit_write()",
+        "fnacl:prevent_client_profile_credit_write()",
+        "trg:profiles.trg_prevent_client_profile_credit_write"
+      ],
+      "changedByRollback": [],
+      "restored": true
+    },
+    "after": [
+      {
+        "file": "pay-notify-0309-d1-smoke.sql",
+        "output": [
+          "PASS: actual D1 frozen dispute blocks N2 claim; D1-era erasure prunes and prevents re-enqueue"
+        ]
+      }
+    ],
+    "cleanup": "PASS"
+  }
+}

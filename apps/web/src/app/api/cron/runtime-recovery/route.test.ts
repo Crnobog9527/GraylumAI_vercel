@@ -37,9 +37,9 @@ it('does not query when required configuration is unavailable', async () => {
   expect((await GET(new Request('https://synthetic.test/api/cron/runtime-recovery'))).status).toBe(500);
   expect(mocks.recover).not.toHaveBeenCalled();
 });
-it('keeps the unapproved minute schedule disabled on the current plan', () => {
+it('is scheduled every minute (Pro) so stuck rounds are closed automatically', () => {
   const config = JSON.parse(readFileSync('vercel.json', 'utf8'));
-  expect(config.crons.some((cron: { path: string }) => cron.path === '/api/cron/runtime-recovery')).toBe(false);
+  expect(config.crons).toContainEqual({ path: '/api/cron/runtime-recovery', schedule: '* * * * *' });
   expect(config.crons).toContainEqual({ path: '/api/cron/billing-reconcile', schedule: '0 4 * * *' });
 });
 it('reports the automatic stale-round close and fails while any of its refunds is unconfirmed', async () => {

@@ -62,6 +62,7 @@ function fixture(limit = 12) {
     evidence: vi.fn<RuntimeResearchStore['evidence']>(() => evidence),
     readOperation: vi.fn<RuntimeResearchStore['readOperation']>(async key => operations.get(key) ?? null),
     readPlan: vi.fn<RuntimeResearchStore['readPlan']>(async key => plans.get(key) ?? null),
+    readCard: vi.fn<RuntimeResearchStore['readCard']>().mockResolvedValue(null),
     cancelUnsentPlan: vi.fn<RuntimeResearchStore['cancelUnsentPlan']>(async key => {
       const plan = plans.get(key);
       if (plan) plans.set(key, { ...plan, cancelled: true });
@@ -553,9 +554,51 @@ describe('durable benchmark discovery and free follow-up', () => {
   it('withholds the initial selection card below eight qualified accounts', async () => {
     const f = fixture();
     f.setAuthors(7);
-    expect(await f.execute('benchmark_discover', discoveryArgs)).toMatchObject({ status: 'partial', reason: 'NOT_ENOUGH_CANDIDATES' });
+    expect(await f.execute('benchmark_discover', discoveryArgs)).toMatchObject({ status: 'partial',
+      reason: 'NOT_ENOUGH_CANDIDATES', message: '已找到 7 个可选、需要 8 个。',
+      nextStep: '建议换或补充关键词再找，或让用户贴账号主页链接以便取数核对。' });
     expect(f.store.createCard).not.toHaveBeenCalled();
     expect(subcall).toHaveBeenCalledTimes(10);
+  });
+
+  it('keeps old keyword-hit accounts selectable and marks activity as pending until benchmark_fetch', async () => {
+    const f = fixture();
+    const original = subcall.getMockImplementation()!;
+    subcall.mockImplementation(async (context, request) => {
+      const outcome = await original(context, request);
+      if (outcome.sent && request.vendor === 'tikhub' && request.call.kind === 'keyword_posts') {
+        const oldPost = (authorId: string) => item({ authorId, id: `old-${authorId}`,
+          publishedAt: new Date(now.getTime() - 45 * 24 * 60 * 60 * 1000).toISOString(), views: 1000 });
+        outcome.result.items = Array.from({ length: 8 }, (_, i) => oldPost(`author${i}`));
+        f.operations.set(context.newId(), { state: 'succeeded', identityHash: requestIdentity(request),
+          result: { ...outcome.result } });
+      }
+      return outcome;
+    });
+
+    const result = await f.execute('benchmark_discover', discoveryArgs);
+    expect(result.status).toBe('ok');
+    expect(result.items).toHaveLength(8);
+    expect(result.items?.[0]?.fields.category).toBe('activity_pending');
+    expect(result.items?.[0]?.fields.activityStatus).toBe('活跃度待核对');
+    const card = f.store.createCard.mock.calls[0]?.[1];
+    expect(card?.options.filter(option => option.selectable)).toHaveLength(8);
+    expect(card?.options[0]?.label).toContain('活跃度待核对');
+  });
+
+  it('reuses the stored first card verbatim when discovery recovery finds its stable card id', async () => {
+    const f = fixture();
+    const cardId = stableResearchId(discoveryId, 'first-card');
+    const saved = { cardId, kind: 'candidates' as const,
+      options: Array.from({ length: 8 }, (_, i) => ({ id: `c${i}`, platform: 'tiktok',
+        account: `author${i}`, evidenceRef: `old#${i + 1}`, label: `author${i}`, selectable: true })),
+      minSelect: 3, maxSelect: 5 };
+    f.store.readCard.mockResolvedValue(saved);
+
+    expect(await f.execute('benchmark_discover', discoveryArgs)).toMatchObject({ status: 'ok' });
+    expect(f.store.readCard).toHaveBeenCalledWith(cardId);
+    expect(f.store.createCard).not.toHaveBeenCalled();
+    expect(f.ctx.emit).toHaveBeenCalledWith({ type: 'research_card', card: saved });
   });
 
   it('refuses a follow-up card before any initial candidate selection was confirmed', async () => {
@@ -628,6 +671,7 @@ describe('full 25-subcall benchmark discovery', () => {
     const completed = await f.makeExecute()('benchmark_discover', { discoveryId });
     expect(completed).toMatchObject({ status: unknown ? 'partial' : 'ok',
       reason: unknown ? 'DISCOVERY_PARTIAL' : null, continue: false });
+    if (unknown) expect(completed).not.toHaveProperty('message');
     expect(subcall).toHaveBeenCalledTimes(25);
     expect(f.discoveries.get(discoveryId)).toMatchObject({ state: 'completed', cursor: { attempted: 25 } });
 

@@ -98,7 +98,7 @@ export function subcallNeed<T extends ResearchToolName>(
     case 'web_fetch':
       return { mode: 'all_or_nothing', subcalls: 1 };
     case 'benchmark_fetch':
-      // Each account needs its own route set plus the extra post pages its platform may page through (Xiaohongshu).
+      // Each account needs its own route set plus the extra post pages its platform may page through.
       return { mode: 'up_to', subcalls: (args as ResearchToolArgs<'benchmark_fetch'>).accounts
         .reduce((sum, account) => sum + benchmarkAccountSubcalls(account.platform), 0) };
     case 'benchmark_discover':
