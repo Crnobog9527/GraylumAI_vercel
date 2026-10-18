@@ -107,6 +107,13 @@ describe('PAY-STRIPE-MP daily Stripe card reconciliation', () => {
     expect(result).toMatchObject({ success: false, complete: false, checked: 1,
       findings: [{ kind: 'scan_incomplete', code: 'PAY_DISPUTE_SCAN_INCOMPLETE' }] });
   });
+  it('reserves at least ten seconds of the shared backstop for mandatory renewal refunds', async () => {
+    const f = fixture();
+    await expect(f.run({ budgetMs: 40_000 })).resolves.toMatchObject({ success: true });
+    const disputeDeadline = mocks.disputeRepair.mock.calls[0]?.[3] as number;
+    const refundDeadline = mocks.disputeRefundRepair.mock.calls[0]?.[3] as number;
+    expect(refundDeadline - disputeDeadline).toBeGreaterThanOrEqual(10_000);
+  });
   it('delivers a paid card checkout whose webhook was lost, through the same first-payment recovery', async () => {
     const f = fixture({ orders: { [ORDER]: card() }, sessions: [session()] });
     mocks.recover.mockImplementation(async () => { f.orders[ORDER] = card({ fulfilled_at: '2026-10-14T04:00:01.000Z' }); return { orderId: ORDER }; });

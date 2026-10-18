@@ -44,9 +44,10 @@ export async function reconcileStripeCardPayments(db: SupabaseClient, stripe: St
   const findings: StripeCardFinding[] = [];
   let repaired = 0, checked = 0, complete = true, outOfTime = false;
 
-  // Dispute freezes and renewal stops are the safety-critical backstop. Run them before history scans
-  // that can consume the shared budget, so sustained checkout/refund volume cannot starve them.
-  const disputes = await reconcilePaymentDisputes(db, stripe, options.disputeAlert, deadline);
+  // Give the stop/freeze scan its own cap while reserving at least 10 seconds for mandatory renewal refunds.
+  // Both remain ahead of the ordinary history scans, so neither safety repair can be starved by checkout volume.
+  const disputeDeadline = Math.min(deadline - 10_000, Date.now() + 15_000);
+  const disputes = await reconcilePaymentDisputes(db, stripe, options.disputeAlert, disputeDeadline);
   const refunds = await reconcileDisputeRenewalRefunds(db, stripe, options.disputeAlert, deadline);
   checked += disputes.checked + refunds.checked;
   complete &&= disputes.complete && refunds.complete;
