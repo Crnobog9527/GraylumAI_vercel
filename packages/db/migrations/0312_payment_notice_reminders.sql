@@ -44,7 +44,7 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
   -- renewal, and authoritative current Pro entitlement are all required. Upstream must restore Pro.
   SELECT u.id,u.user_id,p.entitlement_end FROM orders u JOIN paid p ON p.id=u.source_order_id
    JOIN user_subscriptions s ON s.id=p.subscription_id AND s.user_id=p.user_id
-  WHERE u.method_transition='upgrade' AND u.status='refunded' AND p.purchase_membership_level='pro'
+  WHERE u.method_transition='upgrade' AND u.status='refunded' AND NOT pay_founder_order_frozen(u.id) AND p.purchase_membership_level='pro'
    AND u.payment_status IN ('refunded','partially_refunded') AND s.cancel_at_period_end='true'
    AND p.entitlement_end>now() AND p.entitlement_end<=now()+interval '7 days'
    AND pay_common_membership_facts(u.user_id)->'internal_membership'->>'membership_level'='pro'
@@ -77,7 +77,8 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
  SELECT e.user_id,'founder_ended',e.st->>'orderId',
   to_char((e.st->>'endedAt')::timestamptz AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US')||':ended',
   jsonb_build_object('endDate',e.st->>'endedAt') FROM ended e
- WHERE e.st->>'state'='ended' AND (e.st->>'endedAt')::timestamptz<=now()
+ WHERE e.st->>'state'='ended' AND NOT pay_founder_order_frozen((e.st->>'orderId')::uuid)
+  AND (e.st->>'endedAt')::timestamptz<=now()
   AND (e.st->>'endedAt')::timestamptz>now()-interval '24 hours'
 $$;
 

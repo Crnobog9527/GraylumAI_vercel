@@ -13,9 +13,13 @@ const db = await localDb(), c = db.client;
 const report = { build: db.build, checks: [] };
 const v = async (sql, args = [], client = c) => (await client.query(sql, args)).rows[0]?.v;
 const digest = 'a'.repeat(64);
+const service = async (client, sql, args = []) => {
+  await client.query('SET ROLE service_role');
+  try { return await v(sql, args, client); } finally { await client.query('RESET ROLE'); }
+};
 const claim = (id, d = digest, actor = null, client = c) =>
-  v("SELECT payment_notice_claim($1,$2,'pay-n2-v1',$3) v", [id, d, actor], client);
-const scan = (client = c) => v('SELECT payment_notice_scan(100) v', [], client);
+  service(client, "SELECT payment_notice_claim($1,$2,'pay-n2-v1',$3) v", [id, d, actor]);
+const scan = (client = c) => service(client, 'SELECT payment_notice_scan(100) v');
 const row = async id => (await c.query('SELECT * FROM payment_notices WHERE id=$1', [id])).rows[0];
 const find = async (source, suffix = '') => (await c.query('SELECT * FROM payment_notices WHERE source_ref=$1 AND due_key LIKE $2',
   [source, `%${suffix}`])).rows[0];
@@ -132,15 +136,17 @@ try {
   const proUser = await fx.profile(), prior = await order(proUser, { method: 'card_cn', offer: 'standard' });
   const proSub = (await rowOrder(prior)).subscription_id;
   const proPlan = randomUUID();
-  await bypass("INSERT INTO membership_plans(id,name,level) VALUES($1,'Pro fixture','pro')", [proPlan]);
+  await bypass("INSERT INTO membership_plans(id,name,level,allow_fusion_review,allow_fusion_compare,library_storage_bytes) VALUES($1,'Pro fixture','pro',false,false,0)", [proPlan]);
   await bypass("UPDATE user_subscriptions SET membership_plan_id=$2,cancel_at_period_end='true' WHERE id=$1", [proSub, proPlan]);
   await bypass("UPDATE payment_orders SET item_id=$2,purchase_membership_level='pro',merchant_namespace='notice-fixture' WHERE id=$1", [prior, proPlan]);
   await bypass("UPDATE user_subscriptions SET merchant_namespace='notice-fixture' WHERE id=$1", [proSub]);
   await bypass("INSERT INTO payment_provider_refs(channel,merchant_namespace,mode,object_type,external_id,order_id)"
     + " VALUES('stripe','notice-fixture','test','payment',$1,$2)", [`pi_${randomUUID().replaceAll('-', '')}`, prior]);
-  const upgrade = await order(proUser, { method: 'card_cn', start: now - day, end: now + 365 * day, refund: 'refunded' });
+  const upgrade = await order(proUser, { method: 'card_cn', offer: 'standard', start: now - day, end: now + 365 * day, refund: 'refunded' });
   await bypass("UPDATE payment_orders SET method_transition='upgrade',source_order_id=$2,method_prior_subscription=$3 WHERE id=$1", [upgrade, prior, proSub]);
   await c.query('SET ROLE service_role');
+  const proFacts = await v('SELECT pay_common_membership_facts($1) v', [proUser]);
+  assert.equal(proFacts.internal_membership.membership_level, 'pro');
   await scan();
   await c.query('RESET ROLE');
   assert.equal((await find(upgrade)).kind, 'restore_pro_expiry');

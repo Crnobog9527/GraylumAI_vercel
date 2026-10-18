@@ -1,0 +1,24 @@
+{
+  "build": {
+    "steps": 310,
+    "passed": 310,
+    "bridges": [
+      "0143_ticket_grants_and_own_rls.sql"
+    ],
+    "repeated": 0,
+    "failed": null
+  },
+  "checks": [
+    "0312 repeated after full chain leaves catalog identical",
+    "only service_role can scan; helpers not directly callable",
+    "wallet -7d/0d/+5d, ordinary annual, MP/CN annual and founder-ended generated with correct facts",
+    "repeat/concurrent scans create no duplicate; two claimants dispatch only once",
+    "renewed wallet term and canceled card renewal rechecked at claim and skipped",
+    "freeze and refund arriving between scan and send prevent delivery",
+    "erasure before send skips; prune deletes; rescans cannot recreate notices",
+    "unknown after 24h and changed digest go manual without dispatch",
+    "restored Pro requires refunded linked upgrade + authoritative active Pro; no synthetic restoration flag",
+    "dispute function key is idempotent; daily scan never triggers dispute delivery",
+    "existing log cleanup drains notices within 30 days and preserves its accurate counters"
+  ]
+}

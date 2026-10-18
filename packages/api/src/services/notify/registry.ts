@@ -10,7 +10,7 @@ import { noticeLayout, type PaymentNoticeTemplate, type PaymentNoticeTemplates }
 const PRICING = 'https://www.graylum.com/pricing';
 const ACCOUNT = 'https://app.graylum.com/profile?tab=subscription';
 const time = z.iso.datetime({ offset: true });
-const date = (value: string) => new Date(value).toISOString().replace('T', ' ').replace('.000Z', ' UTC');
+const date = (value: string) => new Date(value).toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, ' UTC');
 const expiry = z.object({ endDate: time });
 const wallet = expiry.extend({ deadline: time.nullable(), plan: z.enum(['pro', 'gold']),
   stage: z.enum(['-7d', '0d', '+5d']) });
