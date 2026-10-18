@@ -24,6 +24,8 @@ describe('FoundersWall', () => {
     expect(html.match(/founders-wall-card/g)).toHaveLength(MIN_WALL_ENTRIES);
     expect(html).toContain('rel="nofollow ugc noopener noreferrer"');
     expect(html).toContain('小红书');
+    expect(html.match(/data-testid="founder-badge"/g)).toHaveLength(MIN_WALL_ENTRIES);
+    expect(html).not.toContain('<main');
     expect(html).not.toContain('即将开放');
   });
 });
