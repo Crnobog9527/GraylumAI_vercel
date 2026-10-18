@@ -39,5 +39,5 @@ it('outside production only the test list may receive mail, and an empty list se
 it('production mails any user', async () => {
   const result = await noticeConfig(db('re_fake_key_1234') as never, { VERCEL: '1', VERCEL_ENV: 'production',
     VERCEL_GIT_COMMIT_REF: 'main', VERCEL_PROJECT_PRODUCTION_URL: 'www.graylum.com', PAYMENT_NOTICE_FROM: 'Graylum <notice@graylum.com>' });
-  expect(result).toMatchObject({ ok: true, config: { allowedRecipients: null, from: 'Graylum <notice@graylum.com>', replyTo: null } });
+  expect(result).toMatchObject({ ok: true, config: { allowedRecipients: null, from: 'Graylum <notice@graylum.com>', replyTo: 'support@graylum.com' } });
 });

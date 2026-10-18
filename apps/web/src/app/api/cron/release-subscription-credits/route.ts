@@ -9,7 +9,8 @@ import { createClient } from '@supabase/supabase-js';
 import { releaseDueAnnualSubscriptionCredits } from '@repo/api/src/services/subscriptionCreditGrants';
 import { releaseMethodMembershipCredits } from '@repo/api/src/services/payments/methodMaintenance';
 import { logger } from '@repo/api/src/services';
-import { reportAnnualReleaseAnomalies } from '@/lib/payment-alert.mjs';
+import { runPaymentReminders } from '@repo/api/src/services/notify/reminders';
+import { reportAnnualReleaseAnomalies, reportPaymentNoticeAttention } from '@/lib/payment-alert.mjs';
 import { validateCronRequest } from '@/lib/cron-auth';
 
 export const runtime = 'nodejs';
@@ -36,11 +37,16 @@ export async function GET(request: Request) {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
     logger.system.cronJob('release-subscription-credits', 'started');
+    const remindersPromise = runPaymentReminders(supabase, { deadline: startedAt + 50_000 })
+      .catch(() => ({ success: false, attention: [{ attention: 'PAYMENT_NOTICE_SEND_FAILED' as const }] }));
     const result = await releaseDueAnnualSubscriptionCredits(supabase);
     const methodResult = await releaseMethodMembershipCredits(supabase);
     reportAnnualReleaseAnomalies(result.anomalies);
+    const reminders = await remindersPromise;
+    reportPaymentNoticeAttention(reminders.attention);
     const summary = {
       methodResult,
+      reminders,
       scannedSubscriptions: result.scannedSubscriptions,
       releasedGrantCount: result.releasedGrantCount,
       skippedSubscriptions: result.skippedSubscriptions,
@@ -51,17 +57,17 @@ export async function GET(request: Request) {
 
     logger.system.cronJob(
       'release-subscription-credits',
-      'completed',
+      reminders.success ? 'completed' : 'failed',
       Date.now() - startedAt,
       undefined,
       { summary },
     );
 
     return NextResponse.json({
-      success: true,
+      success: reminders.success,
       summary,
       timestamp: new Date().toISOString(),
-    });
+    }, { status: reminders.success ? 200 : 500 });
   } catch {
     logger.system.cronJob(
       'release-subscription-credits',
