@@ -614,7 +614,9 @@ BEGIN
  IF NOT FOUND THEN RAISE EXCEPTION 'PAY_DISPUTE_MAPPING_CONFLICT'; END IF;
  PERFORM pay_dispute_evidence(o.id);
  UPDATE payment_disputes SET order_id=o.id,subscription_id=o.subscription_id,
-  provider_subscription_id=coalesce(provider_subscription_id,provider_sub) WHERE id=d.id AND (order_id IS NULL OR order_id=o.id);
+  provider_subscription_id=coalesce(provider_subscription_id,provider_sub),
+  freeze_state=CASE WHEN freeze_state='external' THEN 'pending' ELSE freeze_state END,
+  renewal_stop_state=CASE WHEN freeze_state='external' THEN 'pending' ELSE renewal_stop_state END WHERE id=d.id AND (order_id IS NULL OR order_id=o.id);
  IF NOT FOUND THEN RAISE EXCEPTION 'PAY_DISPUTE_MATCH_CONFLICT'; END IF;
  PERFORM pay_dispute_freeze(d.id);
  PERFORM pay_dispute_evidence(o.id);
