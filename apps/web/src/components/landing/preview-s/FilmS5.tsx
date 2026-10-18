@@ -6,6 +6,8 @@ import styles from './s5.module.css';
 
 /** The film and its cover (local preview only, not in the repository: the Owner's AI-generated stills, rendered). */
 const FILM = { webm: '/landing-s/s5-film.webm', mp4: '/landing-s/s5-film.mp4', cover: '/landing-s/s-1.webp' };
+/** Set once the rendered film is in public/landing-s/; until then only the cover shows (no requests for missing files). */
+const FILM_READY = false;
 const reducedMotion = () => Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
 
 /**
@@ -50,7 +52,7 @@ export function FilmS5() {
   }, []);
   return (
     <div ref={frame} className={styles.film}>
-      {still ? <img src={FILM.cover} alt="" /> : (
+      {still || !FILM_READY ? <img src={FILM.cover} alt="" /> : (
         <video ref={video} muted loop playsInline autoPlay preload="auto" poster={FILM.cover}>
           <source src={FILM.webm} type="video/webm" />
           <source src={FILM.mp4} type="video/mp4" />

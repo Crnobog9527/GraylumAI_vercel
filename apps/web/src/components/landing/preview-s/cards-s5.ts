@@ -23,7 +23,7 @@ const PAPER = { tomato: '#ff6b4a', butter: '#ffd84d', sky: '#8ec5ff', mint: '#8f
 
 export const BATCHES_S5: BatchS5[] = [
   {
-    name: '过渡', from: 0.08, settle: 0.4, to: 0.7,
+    name: '过渡', from: 0.2, settle: 0.45, to: 0.7,
     cards: [
       { kind: 'photo', photo: '/landing-s/s-5.webp', text: '下班路上 · 示意', x: 430, y: 30, r: 6, w: 190, h: 224, depth: 2 },
       { kind: 'note', colour: PAPER.butter, text: '每晚 1 小时', x: 560, y: 66, r: -5, w: 160, h: 140, depth: 1 },

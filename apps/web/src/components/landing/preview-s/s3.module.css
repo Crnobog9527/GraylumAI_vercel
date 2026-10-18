@@ -5,11 +5,12 @@
  * moment: the first screen's pieces are pressed onto the board one by one (once). Reduced motion: already pinned.
  *
  * Handwriting: 霞鹜文楷 LXGW WenKai v1.530 (github.com/lxgw/LxgwWenKai), SIL Open Font License 1.1; only the characters
- * this sample writes, subset to WOFF2 for the web (public/fonts/lxgw-wenkai-s3/, with OFL.txt). Owner approved 2026-10-18.
+ * this sample writes, subset to WOFF2 for the web (./fonts/, with OFL-lxgw-wenkai.txt). Owner approved 2026-10-18.
  */
 @font-face {
   font-family: 'LXGW WenKai S3';
-  src: url('/fonts/lxgw-wenkai-s3/lxgw-wenkai-s3.woff2') format('woff2');
+  /* Bundled next to this sheet (served from /_next/static), so it does not pass the site's sign-in check. */
+  src: url('./fonts/lxgw-wenkai-s3.woff2') format('woff2');
   font-display: swap;
 }
 
