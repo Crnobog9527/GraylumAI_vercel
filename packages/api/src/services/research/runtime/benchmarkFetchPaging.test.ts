@@ -6,6 +6,7 @@ import { DISABLED_RESEARCH_TOOLS, researchToolsConfigSchema } from '../vendors/c
 import { tikhubRouteId } from '../vendors/tikhub';
 import type { ResearchCallResult } from '../vendors/types';
 import { benchmarkFetch } from './benchmarkFetch';
+import { researchRuntimeTools } from '../../runtime/researchRuntimeTool';
 import type { FetchClaim, FetchState, RuntimeResearchStore } from './store';
 import type { EvidencePort, VendorCalls } from './subcall';
 import { stableResearchId, type ResearchToolContext } from './toolContext';
@@ -150,5 +151,15 @@ describe('Xiaohongshu notes are paged by cursor until the 20-post rule can be ju
     expect(JSON.parse(await f.run(3))).toMatchObject({ status: 'budget_exhausted', reason: 'ROUND_LIMIT', items: [] });
     expect(f.tikhub).not.toHaveBeenCalled();
     expect(f.billing.claim).not.toHaveBeenCalled();
+  });
+
+  it('through the real tool entry point: one Xiaohongshu account gets room for its extra pages in the default round', async () => {
+    const f = fixture();
+    expect(f.ctx.config.limits.maxSubcallsPerRound).toBe(12);
+    const tool = researchRuntimeTools(f.ctx).find(tool => tool.name === 'benchmark_fetch')!;
+    const result = JSON.parse(await tool.execute(args, 'paging-call'));
+    expect(result).toMatchObject({ status: 'ok', reason: null });
+    expect(f.tikhub).toHaveBeenCalledTimes(4);
+    expect(saved(f).metrics.postsAnalyzed).toBe(24);
   });
 });
