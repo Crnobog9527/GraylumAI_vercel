@@ -94,6 +94,12 @@ describe('Stripe dispute effects resume from committed financial state', () => {
     expect(mocks.read).not.toHaveBeenCalled(); expect(mocks.stop).not.toHaveBeenCalled();
     expect(f.alert.mock.calls.filter(([notice]) => notice.code === 'PAY_DISPUTE_UNMATCHED_24H')).toHaveLength(1);
   });
+  it('acknowledges a verified charge-only dispute with an operational alert instead of retrying forever', async () => {
+    const f = fixture(); mocks.payment.mockRejectedValueOnce(new Error('PAY_DISPUTE_PAYMENT_INTENT_MISSING'));
+    await expect(f.run()).resolves.toBe(true);
+    expect(f.alert).toHaveBeenCalledWith(expect.objectContaining({ code: 'PAY_DISPUTE_PAYMENT_INTENT_MISSING', disputeId: 'du_test' }));
+    expect(f.rpc).not.toHaveBeenCalled();
+  });
   it('refunded or externally canceled payments are reported and already canceled subscriptions need no update', async () => {
     const f = fixture({ freeze_state: 'superseded' }); mocks.read.mockResolvedValue({ stopped: false, canceled: true });
     await f.run(); expect(mocks.stop).not.toHaveBeenCalled();
@@ -114,12 +120,42 @@ describe('Stripe dispute effects resume from committed financial state', () => {
     mocks.read.mockImplementation(async () => ({ stopped, canceled: false }));
     mocks.stop.mockImplementation(async () => { stopped = true; });
     const originalFrom = f.db.from.bind(f.db);
+    let scans = 0;
     const query: Record<string, unknown> = {};
-    for (const name of ['select', 'eq', 'neq', 'or', 'order']) query[name] = () => query;
-    query.limit = async () => ({ data: [{ ...f.row }], error: null });
+    for (const name of ['select', 'eq', 'neq', 'not', 'is', 'in', 'or', 'order']) query[name] = () => query;
+    query.limit = async () => ({ data: scans++ === 0 ? [{ ...f.row }] : [], error: null });
     f.db.from = (() => ({ ...query, update: originalFrom('payment_disputes').update.bind(originalFrom('payment_disputes')) })) as never;
     expect(await reconcilePaymentDisputes(f.db, {} as Stripe, f.alert)).toEqual({ checked: 1, failed: 0, complete: true });
     expect(mocks.stop).toHaveBeenCalledTimes(1); expect(f.row.renewal_stop_state).toBe('confirmed');
     expect(mocks.stop).toHaveBeenCalledWith({}, 'sub_test', { timeout: 2000, maxNetworkRetries: 0 });
+  });
+  it('scans matched pending renewal stops before unmatched dispute history', async () => {
+    const f = fixture();
+    let stopped = false;
+    mocks.read.mockImplementation(async () => ({ stopped, canceled: false }));
+    mocks.stop.mockImplementation(async () => { stopped = true; });
+    const groups: string[] = [];
+    let kind = '';
+    const makeQuery = () => {
+      const query: Record<string, unknown> = {};
+      for (const name of ['eq', 'neq', 'not', 'is', 'in', 'or', 'order', 'gt']) query[name] = (field: string) => {
+        if (name === 'in' && field === 'renewal_stop_state') kind = 'stops';
+        if (name === 'is' && field === 'order_id') kind = 'unmatched';
+        if (name === 'not' && field === 'renewal_stop_state') kind = 'matched-alerts';
+        return query;
+      };
+      query.limit = async () => {
+        groups.push(kind);
+        return { data: groups.length === 1 ? [{ ...f.row }] : [], error: null };
+      };
+      return query;
+    };
+    f.db.from = (() => {
+      const query = makeQuery();
+      return { select: () => query, update: () => ({ eq: () => ({ in: () => ({ select: async () => ({ data: [{ id: f.row.id }], error: null }) }) }) }) };
+    }) as never;
+    await expect(reconcilePaymentDisputes(f.db, {} as Stripe, f.alert)).resolves.toEqual({ checked: 1, failed: 0, complete: true });
+    expect(groups).toEqual(['stops', 'unmatched', 'matched-alerts']);
+    expect(mocks.stop).toHaveBeenCalledTimes(1);
   });
 });

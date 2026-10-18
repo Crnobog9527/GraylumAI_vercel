@@ -23,7 +23,12 @@ export async function readDisputePayment(stripe: Stripe, scope: StripeScope,
   }
   let charge = input.chargeId ? await stripe.charges.retrieve(input.chargeId) : null;
   if (!intentId && charge) intentId = id(charge.payment_intent);
-  if (!intentId) throw new Error('PAY_DISPUTE_PAYMENT_INTENT_MISSING');
+  if (!intentId) {
+    if (!charge) throw new Error(PAYMENT_EVIDENCE_CONFLICT);
+    if (charge.object !== 'charge' || charge.id !== input.chargeId || charge.livemode !== live
+      || !Number.isSafeInteger(charge.created) || charge.created <= 0) throw new Error(PAYMENT_EVIDENCE_CONFLICT);
+    throw new Error('PAY_DISPUTE_PAYMENT_INTENT_MISSING');
+  }
   if (!charge) {
     const intent = await stripe.paymentIntents.retrieve(intentId);
     if (intent.object !== 'payment_intent' || intent.id !== intentId || intent.livemode !== live) {

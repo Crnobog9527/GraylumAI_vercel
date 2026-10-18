@@ -4,7 +4,7 @@ import type Stripe from 'stripe';
 import { readDisputePayment } from './disputePayment';
 const scope = { merchant: 'acct_test', mode: 'test' as const };
 function fixture() {
-  const charge = { object: 'charge', id: 'ch_test', payment_intent: 'pi_test', livemode: false, created: 1792300000 };
+  const charge = { object: 'charge', id: 'ch_test', payment_intent: 'pi_test' as string | null, livemode: false, created: 1792300000 };
   const invoice = { object: 'invoice', id: 'in_test', livemode: false, parent: { subscription_details: { subscription: 'sub_test' } } };
   const rows = { has_more: false, data: [{ invoice: 'in_test', payment: { type: 'payment_intent', payment_intent: 'pi_test' } }] };
   const api = { charges: { retrieve: vi.fn(async () => charge) },
@@ -24,6 +24,13 @@ describe('canonical dispute payment identity', () => {
   it('one-time payment has no invoice or subscription', async () => {
     const f = fixture(); f.rows.data = [];
     await expect(readDisputePayment(f.stripe, scope, { chargeId: 'ch_test' })).resolves.toMatchObject({ invoiceId: null, subscriptionId: null });
+  });
+  it('identifies a verified direct charge without a PaymentIntent for bounded webhook handling', async () => {
+    const f = fixture();
+    f.charge.payment_intent = null;
+    await expect(readDisputePayment(f.stripe, scope, { chargeId: 'ch_test' })).rejects.toThrow('PAY_DISPUTE_PAYMENT_INTENT_MISSING');
+    f.charge.livemode = true;
+    await expect(readDisputePayment(f.stripe, scope, { chargeId: 'ch_test' })).rejects.toThrow('PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT');
   });
   it.each(['charge mode', 'charge identity', 'intent mismatch', 'invoice mode', 'incomplete history'])(
     'refuses unverified %s before any database mutation', async kind => {

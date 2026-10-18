@@ -152,7 +152,7 @@ describe('PAY-STRIPE-MP daily Stripe card reconciliation', () => {
     });
     await expect(f.run()).resolves.toMatchObject({ success: true, repaired: 1 });
     expect(mocks.invoice.mock.calls.map(call => call[2])).toEqual(['in_cycle', 'in_legacy']);
-    expect(mocks.invoice).toHaveBeenCalledWith(f.db, f.stripe, 'in_cycle', 'invoice.paid', undefined, undefined);
+    expect(mocks.invoice).toHaveBeenCalledWith(f.db, f.stripe, 'in_cycle', 'invoice.paid', undefined, undefined, undefined);
     // Recorded but without its tax fact: replayed through the idempotent renewal handler.
     const untaxed = fixture({ orders: { [ORDER]: card({ fulfilled_at: 'x', payment_amount_facts: [{ kind: 'paid' }] }) },
       invoices: [renewal], recorded: new Set(['payment:in_cycle']) });
@@ -163,7 +163,7 @@ describe('PAY-STRIPE-MP daily Stripe card reconciliation', () => {
       recorded: new Set(['payment:in_cycle']) });
     mocks.invoice.mockReset().mockResolvedValue(true);
     await expect(review.run()).resolves.toMatchObject({ success: true, repaired: 0 });
-    expect(mocks.invoice).toHaveBeenCalledWith(review.db, review.stripe, 'in_cycle', 'invoice.paid', undefined, undefined);
+    expect(mocks.invoice).toHaveBeenCalledWith(review.db, review.stripe, 'in_cycle', 'invoice.paid', undefined, undefined, undefined);
   });
   it('records an external refund whose webhook was lost, from the refund events of the window', async () => {
     // re_late was created long before the window and succeeded inside it: its refund.updated event is in the window.

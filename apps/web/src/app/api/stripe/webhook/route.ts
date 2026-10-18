@@ -40,7 +40,7 @@ export async function handleStripeWebhookEvent(
   if (event.type === 'invoice.paid' || event.type === 'invoice.payment_succeeded' || event.type === 'invoice.payment_failed') {
     // Money kept for review on a card subscription (renewal stopped at Stripe) raises the payment-evidence alert.
     if (await handleCardSubscriptionInvoice(supabase, getStripeClient(), event.data.object.id, event.type, event.created,
-      () => reportPaymentEvidenceConflict(event.type))) return;
+      () => reportPaymentEvidenceConflict(event.type), reportPaymentDispute)) return;
   }
   if (event.type === 'customer.subscription.created' || event.type === 'customer.subscription.updated'
     || event.type === 'customer.subscription.deleted') {

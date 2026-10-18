@@ -34,8 +34,18 @@ export async function handlePaymentDispute(db: SupabaseClient, stripe: Stripe, e
   if (dispute.object !== 'dispute' || dispute.livemode !== (scope.mode === 'live') || event.livemode !== dispute.livemode) {
     throw new Error(PAYMENT_EVIDENCE_CONFLICT);
   }
-  const payment = await readDisputePayment(stripe, scope, { chargeId: objectId(dispute.charge),
-    paymentIntentId: objectId(dispute.payment_intent) });
+  let payment;
+  try {
+    payment = await readDisputePayment(stripe, scope, { chargeId: objectId(dispute.charge),
+      paymentIntentId: objectId(dispute.payment_intent) });
+  } catch (error) {
+    if (!(error instanceof Error) || error.message !== 'PAY_DISPUTE_PAYMENT_INTENT_MISSING') throw error;
+    // The schema's canonical payment key requires a PaymentIntent. A verified direct Charge without one
+    // cannot be frozen or matched safely; alert once per dispute fingerprint and acknowledge Stripe delivery.
+    logger.error('billing', 'PAY_DISPUTE_PAYMENT_INTENT_MISSING', { disputeId: dispute.id, chargeId: objectId(dispute.charge) });
+    alert({ code: 'PAY_DISPUTE_PAYMENT_INTENT_MISSING', disputeId: dispute.id, dueBy: iso(dispute.evidence_details?.due_by) });
+    return true;
+  }
   const match = await findCardOrderForPayment(db, stripe, scope, payment, { includeWalletMembership: true, includeWalletPacks: true });
   const saved = await db.rpc('pay_dispute_receive', { p_merchant: scope.merchant, p_mode: scope.mode,
     p_event: { id: event.id, type: event.type, created: iso(event.created), disputeId: dispute.id,
@@ -125,38 +135,49 @@ export async function resumeDisputeActions(db: SupabaseClient, stripe: Stripe, d
 export async function reconcilePaymentDisputes(db: SupabaseClient, stripe: Stripe, alert: DisputeAlert = NO_ALERT,
   deadline = Date.now() + 15_000) {
   const scope = await resolveStripeScope(stripe);
-  let checked = 0, failed = 0, after: string | undefined;
-  for (let page = 0; page < 20; page++) {
-    let query = db.from('payment_disputes').select('*').eq('merchant_namespace', scope.merchant).eq('mode', scope.mode)
-      .neq('freeze_state', 'external')
-      .or('order_id.is.null,renewal_stop_state.in.(pending,manual),alerted_at.is.null,and(freeze_state.eq.frozen,freeze_alerted_at.is.null),'
-        + 'and(closed_at.not.is.null,closed_alerted_at.is.null)')
-      .order('id', { ascending: true }).limit(50);
-    if (after) query = query.gt('id', after);
-    const rows = await query;
-    if (rows.error || !Array.isArray(rows.data)) throw new Error('PAY_DISPUTE_RECONCILE_UNAVAILABLE');
-    for (const row of rows.data as DisputeRow[]) {
-      if (Date.now() > deadline) return { checked, failed, complete: false };
-      checked++;
-      try {
-        let dispute = row;
-        if (!dispute.order_id) {
-          const payment = await readDisputePayment(stripe, scope, { chargeId: dispute.provider_charge_id,
-            paymentIntentId: dispute.provider_payment_intent_id, invoiceId: dispute.provider_invoice_id });
-          const match = await findCardOrderForPayment(db, stripe, scope, payment, { includeWalletMembership: true, includeWalletPacks: true });
-          if (match) {
-            const linked = await db.rpc('pay_dispute_match', { p_dispute: dispute.id, p_order: match.order.id });
-            if (linked.error || !linked.data) throw new Error('PAY_DISPUTE_MATCH_UNAVAILABLE');
-            dispute = linked.data as DisputeRow;
+  let checked = 0, failed = 0;
+  const scan = async (kind: 'stops' | 'unmatched' | 'matched-alerts') => {
+    let after: string | undefined;
+    for (let page = 0; page < 20; page++) {
+      if (Date.now() > deadline) return false;
+      let query = db.from('payment_disputes').select('*').eq('merchant_namespace', scope.merchant).eq('mode', scope.mode)
+        .neq('freeze_state', 'external');
+      if (kind === 'stops') query = query.not('order_id', 'is', null).in('renewal_stop_state', ['pending', 'manual']);
+      else if (kind === 'unmatched') query = query.is('order_id', null);
+      else query = query.not('order_id', 'is', null).not('renewal_stop_state', 'in', '(pending,manual)')
+        .or('alerted_at.is.null,and(freeze_state.eq.frozen,freeze_alerted_at.is.null),and(closed_at.not.is.null,closed_alerted_at.is.null)');
+      query = query.order('id', { ascending: true }).limit(50);
+      if (after) query = query.gt('id', after);
+      const rows = await query;
+      if (rows.error || !Array.isArray(rows.data)) throw new Error('PAY_DISPUTE_RECONCILE_UNAVAILABLE');
+      for (const row of rows.data as DisputeRow[]) {
+        if (Date.now() > deadline) return false;
+        checked++;
+        try {
+          let dispute = row;
+          if (!dispute.order_id) {
+            const payment = await readDisputePayment(stripe, scope, { chargeId: dispute.provider_charge_id,
+              paymentIntentId: dispute.provider_payment_intent_id, invoiceId: dispute.provider_invoice_id });
+            const match = await findCardOrderForPayment(db, stripe, scope, payment, { includeWalletMembership: true, includeWalletPacks: true });
+            if (match) {
+              const linked = await db.rpc('pay_dispute_match', { p_dispute: dispute.id, p_order: match.order.id });
+              if (linked.error || !linked.data) throw new Error('PAY_DISPUTE_MATCH_UNAVAILABLE');
+              dispute = linked.data as DisputeRow;
+            }
           }
-        }
-        if (!await resumeDisputeActions(db, stripe, dispute, alert)) failed++;
-      } catch { failed++; }
+          if (!await resumeDisputeActions(db, stripe, dispute, alert)) failed++;
+        } catch { failed++; }
+      }
+      if (rows.data.length < 50) return true;
+      after = (rows.data.at(-1) as DisputeRow).id;
     }
-    if (rows.data.length < 50) return { checked, failed, complete: true };
-    after = (rows.data.at(-1) as DisputeRow).id;
+    return false;
+  };
+  // Always repair matched freezes/stops first: old unmatched rows must not occupy the bounded scan ahead of a renewal stop.
+  for (const kind of ['stops', 'unmatched', 'matched-alerts'] as const) {
+    if (!await scan(kind)) return { checked, failed, complete: false };
   }
-  return { checked, failed, complete: false };
+  return { checked, failed, complete: true };
 }
 
 /** A payment callback claims pending disputes inside its grant transaction, then resumes provider effects after commit. */

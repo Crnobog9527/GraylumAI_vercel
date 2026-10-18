@@ -2,15 +2,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type Stripe from 'stripe';
 import type { SupabaseClient } from '@supabase/supabase-js';
-const mocks = vi.hoisted(() => ({ scope: vi.fn(), recover: vi.fn(), conflict: vi.fn(), monthly: vi.fn() }));
+const mocks = vi.hoisted(() => ({ scope: vi.fn(), recover: vi.fn(), conflict: vi.fn(), monthly: vi.fn(),
+  resumeDisputes: vi.fn(async () => {}), refundDisputedRenewal: vi.fn(async () => 'succeeded') }));
 vi.mock('./stripeCheckoutPersistence', () => ({ resolveStripeScope: mocks.scope }));
 vi.mock('./walletWebhook', () => ({ recoverMethodCheckout: mocks.recover }));
 vi.mock('./stripeConflictEvidence', () => ({ recordStripeInvoiceConflict: mocks.conflict }));
 vi.mock('./monthlyRefundWebhook', () => ({ syncMonthlyRefundSubscription: mocks.monthly }));
 vi.mock('./disputePayment', () => ({ readDisputePayment: vi.fn(async () => ({ paymentIntentId: 'pi_fixture',
  chargeId: 'ch_fixture', invoiceId: 'in_1', subscriptionId: 'sub_1', paymentAt: '2026-10-18T00:00:00Z' })) }));
-vi.mock('./disputes', () => ({ resumeOrderDisputes: vi.fn(async () => {}) }));
-vi.mock('./disputeRenewalRefund', () => ({ refundDisputedRenewal: vi.fn(async () => 'succeeded') }));
+vi.mock('./disputes', () => ({ resumeOrderDisputes: mocks.resumeDisputes }));
+vi.mock('./disputeRenewalRefund', () => ({ refundDisputedRenewal: mocks.refundDisputedRenewal }));
 import { handleCardSubscriptionInvoice, handleCardSubscriptionState } from './cardSubscriptionWebhook';
 
 const orderId = '00000000-0000-4000-8000-000000000001';
@@ -45,6 +46,8 @@ describe('PAY-STRIPE-MP card subscription webhooks', () => {
     mocks.scope.mockReset().mockResolvedValue({ mode: 'test', merchant: 'fixture' });
     mocks.recover.mockReset().mockResolvedValue({ orderId }); mocks.conflict.mockReset().mockResolvedValue(undefined);
     mocks.monthly.mockReset().mockResolvedValue(false);
+    mocks.resumeDisputes.mockReset().mockResolvedValue(undefined);
+    mocks.refundDisputedRenewal.mockReset().mockResolvedValue('succeeded');
   });
   it('leaves a subscription held by our approved monthly refund to that flow (step 4b-2)', async () => {
     const f = fixture({ subscriptionRef: { subscription_id: 'local_sub' }, order: cardOrder });
@@ -92,6 +95,19 @@ describe('PAY-STRIPE-MP card subscription webhooks', () => {
     expect(f.rpc).toHaveBeenLastCalledWith('pay_stripe_mp_record_tax', { p_order: 'renewal_order', p_merchant: 'fixture',
       p_payment: 'in_1', p_tax: 1380 });
     expect(mocks.recover).not.toHaveBeenCalled();
+  });
+  it('passes structured dispute alerts through renewal freeze and refund recovery', async () => {
+    const f = fixture({ subscriptionRef: { subscription_id: 'local_sub' }, order: { ...cardOrder, purchase_snapshot: firstMonth } });
+    Object.assign(f.invoice, renewal({}));
+    f.rpc.mockImplementation(async (name: string) => ({ error: null,
+      data: name === 'pay_dispute_renew' ? { state: 'fulfilled', orderId: 'renewal_order', disputeRefundRequired: true }
+        : { duplicate: false } }));
+    const genericAlert = vi.fn();
+    const disputeAlert = vi.fn();
+    await expect(handleCardSubscriptionInvoice(f.db, f.stripe, 'in_1', 'invoice.paid', undefined, genericAlert, disputeAlert)).resolves.toBe(true);
+    expect(mocks.resumeDisputes).toHaveBeenCalledWith(f.db, f.stripe, 'renewal_order', disputeAlert);
+    expect(mocks.refundDisputedRenewal).toHaveBeenCalledWith(f.db, f.stripe, 'renewal_order', 'in_1', disputeAlert);
+    expect(genericAlert).not.toHaveBeenCalled();
   });
   it('stops renewal at Stripe and confirms it when a renewal is kept for review', async () => {
     const f = fixture({ subscriptionRef: { subscription_id: 'local_sub' }, order: { ...cardOrder, purchase_snapshot: firstMonth } });

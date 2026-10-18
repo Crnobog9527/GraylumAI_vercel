@@ -11,7 +11,7 @@ import { readSubscription, stopRenewalAfterReview, stripeStopState, syncState } 
 import { syncMonthlyRefundSubscription } from './monthlyRefundWebhook';
 import { PAYMENT_EVIDENCE_CONFLICT } from './stripeWebhookError';
 import { readDisputePayment } from './disputePayment';
-import { resumeOrderDisputes } from './disputes';
+import { resumeOrderDisputes, type DisputeAlert } from './disputes';
 import { refundDisputedRenewal } from './disputeRenewalRefund';
 import { logger } from '../../lib/logger';
 
@@ -84,7 +84,7 @@ function renewalFacts(invoice: Stripe.Invoice, subscriptionId: string, snapshot:
  * Money kept for review (an unexpected renewal or a charged non-renewal invoice) stops renewal at Stripe and calls
  * `alert` (the webhook passes the payment-evidence alert) once the stop is confirmed. */
 export async function handleCardSubscriptionInvoice(db: SupabaseClient, stripe: Stripe, invoiceId: string, eventType: string,
-  eventCreated?: number, alert: () => void = () => {}) {
+  eventCreated?: number, alert: () => void = () => {}, disputeAlert: DisputeAlert = () => {}) {
   const scope = await resolveStripeScope(stripe);
   const invoice = await stripe.invoices.retrieve(invoiceId);
   if (invoice.object !== 'invoice' || invoice.id !== invoiceId) throw new Error(PAYMENT_EVIDENCE_CONFLICT);
@@ -112,9 +112,9 @@ export async function handleCardSubscriptionInvoice(db: SupabaseClient, stripe: 
     // The renewal's Managed Payments tax is its own fact on the renewal order, as for the first payment.
     if (facts && typeof result.data?.orderId === 'string') {
       await recordCardPaymentTax(db, scope.merchant, result.data.orderId, { paymentId: invoice.id, tax: facts.tax });
-      await resumeOrderDisputes(db, stripe, result.data.orderId, () => alert());
+      await resumeOrderDisputes(db, stripe, result.data.orderId, disputeAlert);
       if (result.data.disputeRefundRequired === true) {
-        await refundDisputedRenewal(db, stripe, result.data.orderId, invoice.id, () => alert());
+        await refundDisputedRenewal(db, stripe, result.data.orderId, invoice.id, disputeAlert);
       }
     }
     if (paid && result.data?.state === 'review') {
