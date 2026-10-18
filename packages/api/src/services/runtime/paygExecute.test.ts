@@ -85,7 +85,7 @@ it('checks the next actual call again and denies it before BILL2 can claim or di
   expect(f.gate.mock.calls.map((args: unknown[]) => args[1])).toEqual([1, 1]);
   expect(mock.billing.claimPaygCall).toHaveBeenCalledTimes(1);
   expect(mock.billing.dispatchOnce).toHaveBeenCalledTimes(1);
-  expect(result).toMatchObject({ state: 'pending' });
+  expect(result).toMatchObject({ state: 'pending', unavailable: 'call_limited' });
 });
 it('time exhaustion before the next call is waiting_resume, never cancellation or automatic continuation', async () => {
   const f = fixture();
@@ -150,7 +150,7 @@ it('a suspended epoch-1 owner cannot fail or interrupt the resumed epoch-2 execu
   Object.assign(current, { epoch: 2, hold: 12, session: ['primary', 'new owner input'] });
   const resumed = structuredClone(current);
   releaseGate();
-  expect(await oldRequest).toEqual({ state: 'pending' });
+  expect(await oldRequest).toEqual({ state: 'pending', unavailable: 'limit_unavailable' });
   expect(ownerWrites).toEqual([
     { action: 'fail_before_dispatch', epoch: 1 }, { action: 'interrupt', epoch: 1 },
   ]);

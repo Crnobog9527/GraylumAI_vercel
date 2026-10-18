@@ -70,7 +70,7 @@ it('unexpected gate failure fails closed and ambiguous cancellation stays recove
   const f = fixture(); f.gate.mockRejectedValue(new Error('private'));
   expect(await runtimeExecutor(f.options).execute(id)).toEqual({ state: 'cancelled', unavailable: 'limit_unavailable' });
   f.failBeforeFails();
-  expect(await runtimeExecutor(f.options).execute(id)).toEqual({ state: 'pending' });
+  expect(await runtimeExecutor(f.options).execute(id)).toEqual({ state: 'pending', unavailable: 'limit_unavailable' });
   expect(mock.billing.claimCall).not.toHaveBeenCalled();
 });
 it('counts each new claim separately, finishes both calls, and checks complete output once', async () => {

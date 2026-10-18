@@ -453,10 +453,8 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    }
    if((execution.live||execution.state==='interrupted')&&error instanceof Error&&error.message==='RUNTIME_OUTPUT_TRUNCATED'){
     logger.error('api','runtime_output_truncated',{executionId});
-    // Close the live owner or its already-interrupted replay, never a concurrent
-    // running owner, using the existing cancellation/settlement
-    // path. Retain its response receipt and charges; do not dispatch organizer.
-    // An uncertain cancellation response remains recoverable, never retried here.
+    // Close the original owner, retain receipts/charges and never redispatch organizer.
+    // An uncertain cancellation remains recoverable and is never retried here.
     try{
      const stopped=await ownerRpc<{state:'cancelled'|'cost_pending'}>('runtime_cancel',args);
      return {state:stopped.state,unavailable:'output_truncated' as const};
@@ -494,7 +492,9 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    }
    if(!(capacity&&isPayg&&await interruptForCapacity(rpc,args,error,execution.epoch!)))
     await ownerRpc('runtime_execution',{...args,p_action:'interrupt'}).catch(()=>{});
-   return {state:'pending' as const,...(capacity?{unavailable:'capacity' as const}:{}),...claimNoticeFields(claimNotice)};
+   const unavailable=gateRejection??(capacity?'capacity' as const:undefined);
+   return {state:'pending' as const,...(unavailable?{unavailable}:{}),
+    ...(unavailable==='paused'?{code:'RUNTIME_NEW_CALLS_STOPPED' as const}:{}),...claimNoticeFields(claimNotice)};
   }
  }};
 }
