@@ -31,6 +31,7 @@ const APP_TEMPLATES = [
   '/landing/preview/s2',
   '/landing/preview/s3',
   '/landing/preview/s4',
+  '/landing/preview/s5',
   '/features',
   '/features/[feature]',
   '/maintenance',

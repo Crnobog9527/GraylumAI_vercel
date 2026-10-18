@@ -6,11 +6,12 @@ import { PosterS4 } from './PosterS4';
 import { PrismS1 } from './PrismS1';
 import base from './s-base.module.css';
 import { ScrapS3 } from './ScrapS3';
+import { SceneS5 } from './SceneS5';
 import { SkyS2 } from './SkyS2';
 import { useZoneWeights } from './use-zone-weights';
 
-export type Variant = 's1' | 's2' | 's3' | 's4';
-const SCENES = { s1: PrismS1, s2: SkyS2, s3: ScrapS3, s4: PosterS4 } as const;
+export type Variant = 's1' | 's2' | 's3' | 's4' | 's5';
+const SCENES = { s1: PrismS1, s2: SkyS2, s3: ScrapS3, s4: PosterS4, s5: SceneS5 } as const;
 
 /**
  * A sample S page's backdrop: one layer under the whole page (behind main, the header and the footer), holding the

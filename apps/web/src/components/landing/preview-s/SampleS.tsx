@@ -18,10 +18,11 @@ import s1 from './s1.module.css';
 import s2 from './s2.module.css';
 import s3 from './s3.module.css';
 import s4 from './s4.module.css';
+import s5 from './s5.module.css';
 
-const VARIANTS: readonly Variant[] = ['s1', 's2', 's3', 's4'];
-const SHELLS: Record<Variant, string> = { s1: s1.shell!, s2: s2.shell!, s3: s3.shell!, s4: s4.shell! };
-const NAMES: Record<Variant, string> = { s1: '一束光穿过棱镜', s2: '从清晨到深夜', s3: '创作者的剪贴本', s4: '生活切片拼成的电影海报' };
+const VARIANTS: readonly Variant[] = ['s1', 's2', 's3', 's4', 's5'];
+const SHELLS: Record<Variant, string> = { s1: s1.shell!, s2: s2.shell!, s3: s3.shell!, s4: s4.shell!, s5: s5.shell! };
+const NAMES: Record<Variant, string> = { s1: '一束光穿过棱镜', s2: '从清晨到深夜', s3: '创作者的剪贴本', s4: '生活切片拼成的电影海报', s5: '众生百态首屏 + 视差场景卡片' };
 
 /**
  * Art direction samples S1–S4 (Owner 2026-10-18, after P/Q/R were turned down): three parts of sample L — the first

@@ -1,0 +1,118 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * S5 (Owner 2026-10-18; design plan in the sample notes): ploy's page — a #F4F4F4 page with white cards, a first
+ * screen that is one picture inset 24px with corners of 20 and the words in its middle, a dark rounded footer panel —
+ * and S3's scene cards behind the content, moving with the scroll in batches (CardsS5). The first screen's "众生百态"
+ * film waits for the Owner's choice of tool; a still stands in for it, graded, grained and vignetted as the film will be.
+ *
+ * Handwriting: 霞鹜文楷 LXGW WenKai v1.530 (github.com/lxgw/LxgwWenKai), SIL Open Font License 1.1; only the characters
+ * S5's cards write, subset to WOFF2 for the web (public/fonts/lxgw-wenkai-s5/, with OFL.txt). Owner approved 2026-10-18.
+ */
+@font-face {
+  font-family: 'LXGW WenKai S5';
+  src: url('/fonts/lxgw-wenkai-s5/lxgw-wenkai-s5.woff2') format('woff2');
+  font-display: swap;
+}
+
+.shell {
+  --s5-page: #f4f4f4;
+  --s5-panel: #221e1a;
+  /* The first screen's amber, carried below it: step one's progress and the closing button's arrow. */
+  --s5-accent: #e8a13a;
+  --s5-ink: #23306b;
+  --s5-hand: 'LXGW WenKai S5', 'Kaiti SC', 'STKaiti', serif;
+  --s5-grain: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .5  0 0 0 0 .5  0 0 0 0 .5  0 0 0 .9 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  /* A finer, fainter grain for the first screen's picture. */
+  --s5-film-grain: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='1.1' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .5  0 0 0 0 .5  0 0 0 0 .5  0 0 0 .22 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  --j-canvas: var(--s5-page);
+  overflow-x: clip;
+  padding-bottom: 24px;
+  background: var(--s5-page);
+}
+.shell ::selection { background: #ffe8a8; }
+.shell > header { background: var(--s5-page); -webkit-backdrop-filter: none; backdrop-filter: none; }
+
+/* ---- First screen: one picture, inset 24 with corners of 20, the words in its middle ---- */
+.shell [data-region='首屏'] {
+  --j-ink: #fff; --j-body: rgba(255, 255, 255, .88); --j-muted: rgba(255, 255, 255, .84);
+  isolation: isolate; overflow: hidden; margin: 0 24px; min-height: calc(100svh - 123px); padding: 48px 0;
+  border-radius: 20px; color: #fff;
+  /* The film (FilmS5) lies under this frame, in the page's backdrop. */
+  background: transparent;
+}
+/* The grade every shot of the film will share: a little warmth, a softer contrast, film grain, the corners darkened
+   and a faint shade behind the words so white stays readable. */
+.shell [data-region='首屏']::before {
+  content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background:
+    var(--s5-film-grain),
+    radial-gradient(46% 42% at 50% 52%, rgba(10, 12, 14, .5), rgba(10, 12, 14, 0) 78%),
+    radial-gradient(120% 95% at 50% 50%, rgba(0, 0, 0, 0) 55%, rgba(0, 0, 0, .5)),
+    linear-gradient(rgba(255, 150, 70, .07), rgba(30, 80, 90, .1));
+  background-size: 180px 180px, auto, auto, auto;
+}
+.shell [data-region='首屏']::after {
+  content: '画面为 AI 生成示意'; position: absolute; top: 16px; right: 20px; z-index: 1; padding: 3px 9px; border-radius: 999px;
+  background: rgba(0, 0, 0, .35); color: rgba(255, 255, 255, .88); font-size: 12px;
+}
+.shell [data-region='首屏'] h1 { text-shadow: 0 2px 28px rgba(0, 0, 0, .3); }
+/* ploy's main button on a picture: white, ink words. */
+.shell [data-region='首屏'] a[href*='action=signup'] { background: #fff; color: #141312; }
+.shell [data-region='首屏'] a:focus-visible { outline-color: #fff; }
+
+/* The film under the first screen's frame: same box, same corners (placed by FilmS5). */
+.film { position: absolute; overflow: hidden; border-radius: 20px; background: #1a2024; }
+.film video, .film img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: 72% 42%; }
+
+/* ---- Below: white cards on the page's grey ---- */
+.shell [data-region='评审团'] { --panel: #fff; }
+.shell [data-region='三步'] { padding-top: 24px; }
+.shell [aria-labelledby='step-one-title'] [role='progressbar'] i { background: var(--s5-accent); }
+.shell [data-region='三步'] > div:has(> [data-region='评审团']) + div a[href*='action=signup'] svg { color: var(--s5-accent); }
+
+/* ---- Scene cards: behind everything in main, fixed to the screen while they move (CardsS5) ---- */
+.cards { position: fixed; inset: 0; }
+.cardsStill { position: absolute; inset: 0; }
+.batch { position: absolute; left: 0; right: 0; top: 0; height: 100vh; }
+.cards .batch { visibility: hidden; }
+.cards .card { opacity: var(--fade, 0); }
+.card {
+  position: absolute; will-change: transform;
+  transform: translateY(calc(var(--lift, 0) * 100vh * var(--travel, 1))) rotate(calc(var(--r) + var(--turn, 0deg)))
+    scale(var(--depth-scale, 1));
+  filter: drop-shadow(0 2px 2px rgba(40, 30, 20, calc(.12 * var(--depth-shadow, 1))))
+    drop-shadow(0 calc(10px * var(--depth-shadow, 1)) calc(16px * var(--depth-shadow, 1)) rgba(40, 30, 20, .14));
+}
+.card[data-depth='0'] { --lift: var(--lift-0); --turn: var(--turn-0); --fade: var(--fade-0); }
+.card[data-depth='1'] { --lift: var(--lift-1); --turn: var(--turn-1); --fade: var(--fade-1); }
+.card[data-depth='2'] { --lift: var(--lift-2); --turn: var(--turn-2); --fade: var(--fade-2); }
+/* The far layer reads softer. */
+.card[data-depth='0'] > * { opacity: .88; filter: saturate(.85); }
+/* Margin cards need the margin: where it is too narrow to read them (under 1420px), they stay out. */
+@media (max-width: 1419px) { .card[data-edge] { display: none; } }
+.paper {
+  display: grid; place-items: center; width: 100%; height: 100%; padding: 12px; background: var(--paper);
+  background-image: var(--s5-grain); background-size: 220px 220px; background-blend-mode: soft-light;
+  color: var(--s5-ink); font-family: var(--s5-hand); font-size: 22px; line-height: 1.25; text-align: center;
+}
+.card[data-kind='note'] .paper { box-shadow: inset 0 -16px 16px -16px rgba(60, 40, 20, .25); }
+.card[data-kind='scrap'] .paper { font-size: 19px; }
+/* Short words in the narrow margins beside the jury read large. */
+.card[data-big] .paper { font-size: 34px; }
+.photo { display: grid; grid-template-rows: 1fr auto; width: 100%; height: 100%; margin: 0; padding: 9px 9px 0; background: #fff; }
+.photo span { display: block; background: center / cover no-repeat; }
+.photo figcaption { padding: 6px 0 8px; color: var(--s5-ink); font-family: var(--s5-hand); font-size: 15px; text-align: center; }
+.tape {
+  position: absolute; top: -11px; left: 50%; width: 84px; height: 24px; translate: -50% 0; rotate: -4deg;
+  background: rgba(255, 255, 255, .7); box-shadow: 0 0 0 1px rgba(120, 90, 50, .08), 0 1px 2px rgba(60, 40, 20, .12);
+  clip-path: polygon(2% 0, 98% 4%, 100% 50%, 97% 100%, 1% 96%, 0 50%);
+}
+.card[data-kind='scrap'] .tape { top: 50%; left: -12px; translate: 0 -50%; rotate: 80deg; width: 50px; }
+
+/* ---- Footer: ploy's dark rounded panel, inset 24 ---- */
+.shell > footer {
+  --j-ink: #fff; --j-body: rgba(255, 255, 255, .84); --j-muted: rgba(255, 255, 255, .84); --j-line: rgba(255, 255, 255, .16);
+  margin: 0 24px; padding: 48px 32px 40px; border: 0; border-radius: 20px; background: var(--s5-panel); color: var(--j-muted);
+}
+.shell > footer a:hover { color: #fff; }
+.shell > footer a:focus-visible, .shell > footer button:focus-visible { outline-color: #fff; }

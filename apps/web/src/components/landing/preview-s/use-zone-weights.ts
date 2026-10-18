@@ -3,6 +3,9 @@
 
 import { useEffect, type RefObject } from 'react';
 
+/** The window event carrying `--s-t` after each measure (detail: the number). */
+export const ZONE_EVENT = 's-zone';
+
 /** The four parts of a sample S page, in order: first screen, step one, the jury, the footer. */
 const PARTS = ['[data-region="首屏"]', '[aria-labelledby="step-one-title"]', '[data-region="评审团"]', '[data-region="页脚"]'];
 
@@ -41,6 +44,8 @@ export function useZoneWeights(ref: RefObject<HTMLElement | null>) {
       }
       root.style.setProperty('--s-t', t.toFixed(4));
       for (let part = 0; part < 4; part += 1) root.style.setProperty(`--w${part}`, Math.max(0, 1 - Math.abs(t - part)).toFixed(4));
+      // Scenes that move in JavaScript (S5's cards) listen for the same place.
+      window.dispatchEvent(new CustomEvent<number>(ZONE_EVENT, { detail: t }));
     };
     const onScroll = () => { if (!frame) frame = requestAnimationFrame(measure); };
     measure();
