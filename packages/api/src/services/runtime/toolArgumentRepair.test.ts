@@ -44,6 +44,16 @@ describe('newFrameRepairer', () => {
     const out = pieces('', '', '{"query": ', '}').map(repair);
     expect(assemble(out)).toBe('{"query": ""}');
   });
+  it('repairs a missing value regardless of the argument delta boundary', () => {
+    for (const raw of ['{"query": }', '{"query":}', '{"query":  }  ']) {
+      // Every possible single boundary, including the entire argument in one frame.
+      for (let split = 0; split <= raw.length; split++) {
+        const frames = pieces(raw.slice(0, split), raw.slice(split));
+        expect(JSON.parse(assemble(frames.map(newFrameRepairer())))).toEqual({query: ''});
+      }
+      expect(JSON.parse(assemble(pieces(...raw).map(newFrameRepairer())))).toEqual({query: ''});
+    }
+  });
   it('returns every other frame byte for byte', () => {
     const repair = newFrameRepairer();
     const frames = pieces('', '{"query": "search:定位"', '}');
@@ -99,22 +109,27 @@ describe('the same repair on a streamed response (the staging shape)', () => {
   const chunk = (delta: object, finish: string | null = null) => JSON.stringify({id: 'gen-1', object: 'chat.completion.chunk', created: 1, model: 'test/model',
     choices: [{index: 0, delta: {role: 'assistant', ...delta}, finish_reason: finish}]});
   const tool = (index: number, extra: object) => chunk({tool_calls: [{index, ...extra}]});
-  it('streams a read_source call whose empty string was dropped and runs the tool once with an empty query', async () => {
+  it.each(['split', 'single', 'retained-parallel'] as const)('repairs the %s stream and runs the tool once', async mode => {
     const executed: unknown[] = [];
     const brokenCall = {id: 'call_1', type: 'function', function: {name: 'read_source', arguments: '{"query": }'}};
     const exchange = vi.fn(async (sequence: number, _body: string, onChunk?: (chunk: string) => void) => {
       if (sequence === 1) {
-        for (const frame of [tool(0, {id: 'call_1', type: 'function', function: {name: 'read_source', arguments: ''}}), tool(0, {function: {arguments: ''}}),
-          tool(0, {function: {arguments: '{"query": '}}), tool(0, {function: {arguments: '}'}}), chunk({content: ''}, 'tool_calls')]) onChunk?.(frame);
+        const frames = mode === 'split'
+          ? [tool(0, {id: 'call_1', type: 'function', function: {name: 'read_source', arguments: ''}}),
+            tool(0, {function: {arguments: '{"query": '}}), tool(0, {function: {arguments: '}'}})]
+          : [tool(0, brokenCall)];
+        if (mode === 'retained-parallel') frames.push(tool(1, {id: 'call_2', type: 'function',
+          function: {name: 'read_source', arguments: '{"query":"search:ignored"}'}}));
+        for (const frame of [...frames, chunk({content: ''}, 'tool_calls')]) onChunk?.(frame);
         return JSON.stringify({id: 'gen-1', object: 'chat.completion', created: 1, model: 'test/model',
-          choices: [{index: 0, finish_reason: 'tool_calls', message: {role: 'assistant', content: null, tool_calls: [brokenCall]}}]});
+          choices: [{index: 0, finish_reason: 'tool_calls', message: {role: 'assistant', content: null, tool_calls: mode === 'retained-parallel' ? [brokenCall, {...brokenCall, id: 'call_2'}] : [brokenCall]}}]});
       }
       onChunk?.(chunk({content: '已读取。'}));onChunk?.(chunk({content: ''}, 'stop'));
       return JSON.stringify({id: 'gen-2', object: 'chat.completion', created: 1, model: 'test/model',
         choices: [{index: 0, finish_reason: 'stop', message: {role: 'assistant', content: '已读取。'}}]});
     });
     const output = await runRuntime({model: 'test/model', instructions: 'I', input: 'hi', session: session(), maxOutputTokens: 1000, maxTurns: 3,
-      exchange, stream: true, selectHistory: async (_h, i) => i,
+      exchange, stream: true, libraryRetrieval: true, maxToolCalls: 1, selectHistory: async (_h, i) => i,
       tools: [{name: 'read_source', description: 'd', execute: async arguments_ => { executed.push(arguments_); return '{"kind":"workspace_index"}'; }}]});
     expect(output).toBe('已读取。');
     expect(executed).toEqual([{query: ''}]);
