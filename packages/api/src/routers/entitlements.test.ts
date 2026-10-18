@@ -41,6 +41,7 @@ describe('ENTITLEMENTS APIs with real tRPC authentication middleware', () => {
     expect(result).toMatchObject({
       allow_fusion_review: level !== 'free', allow_fusion_compare: level !== 'free',
       library_storage_bytes: { free: 50_000_000, pro: 500_000_000, gold: 2_000_000_000 }[level],
+      positioning_profile_limit: { free: 1, pro: 3, gold: 6 }[level],
     });
   });
   it('allows a single admin entitlement change, preserves unrelated fields and reads it back', async () => {
@@ -50,6 +51,16 @@ describe('ENTITLEMENTS APIs with real tRPC authentication middleware', () => {
     expect(result).toEqual({ ...before, allow_fusion_review: false, updated_at: expect.any(String) });
     expect(await userRouter.createCaller(f.context).getEntitlements())
       .toMatchObject({ allowFusionReview: false, allowFusionCompare: true, libraryStorageBytes: 500_000_000 });
+  });
+  it('persists a validated positioning profile cap through the admin entitlement API', async () => {
+    const f = fixture(); f.rows.profiles![0]!.role = 'admin';
+    await expect(adminRouter.createCaller(f.context).updateMembershipPlan({
+      id: planIds.pro, positioningProfileLimit: 5,
+    })).resolves.toMatchObject({ positioning_profile_limit: 5 });
+    await expect(adminRouter.createCaller(f.context).updateMembershipPlan({
+      id: planIds.pro, positioningProfileLimit: 0,
+    })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(f.rows.membership_plans![1]!.positioning_profile_limit).toBe(5);
   });
   it('requires explicit entitlements on actual tier change; same-tier legacy edits stay compatible', async () => {
     const f = fixture(); f.rows.profiles![0]!.role = 'admin';

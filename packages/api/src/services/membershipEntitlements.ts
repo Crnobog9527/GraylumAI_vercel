@@ -33,6 +33,48 @@ async function readPlan(client: SupabaseClient, level: MembershipLevel) {
   return parsed.data[0]!;
 }
 
+async function resolveCurrentMembership(client: SupabaseClient, profileId: string) {
+  const [profileResult, facts] = await Promise.all([
+    client.from('profiles').select('membership_level,status,is_deleted').eq('id', profileId).single(),
+    loadLatestMembershipFacts(client, profileId),
+  ]);
+  if (profileResult.error || facts.error) unavailable();
+  const profile = profileSchema.safeParse(profileResult.data);
+  if (!profile.success) {
+    if (profileResult.data && (profileResult.data.status !== 'active' || profileResult.data.is_deleted !== 'false')) {
+      throw new TRPCError({ code: 'FORBIDDEN', message: 'ENTITLEMENTS_ACCOUNT_UNAVAILABLE' });
+    }
+    unavailable();
+  }
+  const snapshot = getState({ profileLevel: profile.data.membership_level, ...facts });
+  let state = snapshot.state;
+  let level: MembershipLevel = ['active', 'cancel_at_period_end', 'admin_override'].includes(state)
+    ? snapshot.level : 'free';
+  let plan = await readPlan(client, level);
+  if (['active', 'cancel_at_period_end'].includes(state) && facts.latestSubscription?.membership_plan_id !== plan.id) {
+    level = 'free';
+    state = 'inconsistent';
+    plan = await readPlan(client, level);
+  }
+  return { profileLevel: profile.data.membership_level, state, level, plan, snapshot };
+}
+
+// Used by OPC before its transaction. The RPC locks the profile and applies the
+// lower of this fresh effective tier and the locked profile tier.
+export async function readPositioningProfileEntitlement(client: SupabaseClient, profileId: string) {
+  try {
+    const current = await resolveCurrentMembership(client, profileId);
+    return Object.freeze({
+      level: current.level,
+      profileLevel: current.profileLevel,
+      positioningProfileLimit: current.plan.positioning_profile_limit,
+    });
+  } catch (error) {
+    if (error instanceof TRPCError) throw error;
+    unavailable();
+  }
+}
+
 // PUBLISH-MONITOR fields (0240) are read separately and fail closed, so a database without 0240 (deployment
 // window) or a bad value only switches these new features off and never blocks the existing entitlements.
 async function readPublishPlan(client: SupabaseClient, planId: string) {
@@ -46,45 +88,27 @@ async function readPublishPlan(client: SupabaseClient, planId: string) {
 // client is server-owned; the public route binds profileId exclusively to authenticated context.
 export async function readMembershipEntitlements(client: SupabaseClient, profileId: string) {
   try {
-    const [profileResult, facts, settingResult] = await Promise.all([
-      client.from('profiles').select('membership_level,status,is_deleted').eq('id', profileId).single(),
-      loadLatestMembershipFacts(client, profileId),
+    const [current, settingResult] = await Promise.all([
+      resolveCurrentMembership(client, profileId),
       client.from('system_settings').select('value').eq('key', FUSION_COMPARE_SETTING).single(),
     ]);
-    if (profileResult.error || facts.error || settingResult.error) unavailable();
-    const profile = profileSchema.safeParse(profileResult.data);
-    if (!profile.success) {
-      if (profileResult.data && (profileResult.data.status !== 'active' || profileResult.data.is_deleted !== 'false')) {
-        throw new TRPCError({ code: 'FORBIDDEN', message: 'ENTITLEMENTS_ACCOUNT_UNAVAILABLE' });
-      }
-      unavailable();
-    }
+    if (settingResult.error) unavailable();
     const limit = fusionCompareLimitSchema.safeParse(settingResult.data?.value);
     if (!limit.success) unavailable();
-    const snapshot = getState({ profileLevel: profile.data.membership_level, ...facts });
-    let state = snapshot.state;
-    let level: MembershipLevel = ['active', 'cancel_at_period_end', 'admin_override'].includes(state)
-      ? snapshot.level : 'free';
-    let plan = await readPlan(client, level);
-    if (['active', 'cancel_at_period_end'].includes(state) && facts.latestSubscription?.membership_plan_id !== plan.id) {
-      level = 'free';
-      state = 'inconsistent';
-      plan = await readPlan(client, level);
-    }
-    const publish = await readPublishPlan(client, plan.id);
+    const publish = await readPublishPlan(client, current.plan.id);
     // Reuse the existing reasons/messages, never the checkout allowed flag as a feature permission.
-    const needsAttention = ['payment_attention', 'refunded_requires_policy', 'inconsistent'].includes(state);
-    const decision = evaluateAction({ ...snapshot, state, action: 'create_membership_checkout',
+    const needsAttention = ['payment_attention', 'refunded_requires_policy', 'inconsistent'].includes(current.state);
+    const decision = evaluateAction({ ...current.snapshot, state: current.state, action: 'create_membership_checkout',
       targetLevel: null, targetBillingCycle: null });
     return Object.freeze({
-      level,
-      state,
+      level: current.level,
+      state: current.state,
       reasonCode: needsAttention ? decision.reasonCode : 'ENTITLEMENTS_RESOLVED',
       safeMessage: needsAttention ? decision.safeMessage : '',
-      allowFusionReview: plan.allow_fusion_review,
-      allowFusionCompare: plan.allow_fusion_compare,
-      libraryStorageBytes: plan.library_storage_bytes,
-      positioningProfileLimit: plan.positioning_profile_limit,
+      allowFusionReview: current.plan.allow_fusion_review,
+      allowFusionCompare: current.plan.allow_fusion_compare,
+      libraryStorageBytes: current.plan.library_storage_bytes,
+      positioningProfileLimit: current.plan.positioning_profile_limit,
       fusionCompareMaxModels: limit.data,
       allowPublish: publish.allow_publish,
       ownDataWindowDays: publish.own_data_window_days,

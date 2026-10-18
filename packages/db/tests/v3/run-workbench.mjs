@@ -86,14 +86,15 @@ if(cdcEval&&(!withoutApp||!runtimeMode||!stagingSchema||!process.env.V3_REAL_SKI
 const withoutAppSuite=!withoutApp?null:cdcEval?'cdc':args.includes('--bill2-core-only')?'bill2':runtimeMode&&stagingSchema&&!opcMode?'runtime':null;
 if(withoutApp&&(!withoutAppSuite||serve||legacyRef||casePattern))throw new Error('--without-app requires --bill2-core-only or --runtime-only --with-staging-schema, without preview, legacy ref or case pattern');
 // DB-BASELINE: build the schema from repository files only (baseline/build-from-files.mjs) instead of
-// the local fixture; database/API suites and explicitly bounded Runtime browser cases.
-const schemaFromFiles=args.includes('--schema-from-files');
+// the local fixture; database/API suites and explicitly bounded Runtime cases.
+const schemaFromFiles=args.includes('--schema-from-files')||opcMode;
 const c2StopOffline = casePattern === '^OPC: MENTOR_STREAM C2_STOP_OFFLINE$';
+const fileBuiltOpcMode=opcMode&&!serve&&!legacyRef;
 if (c2StopOffline && (!opcMode || !stagingHost || !stagingSchema || !schemaFromFiles
   || previewOptions.persistent || serve || legacyRef || withoutApp))
   throw new Error('C2_STOP_OFFLINE requires an isolated file-built OPC staging-host test');
-// A bounded Runtime browser case uses the same canonical schema, never a stale hand-built subset.
-if(schemaFromFiles&&!withoutAppSuite&&!c2StopOffline&&!(runtimeMode&&stagingSchema&&casePattern&&!serve&&!legacyRef))
+// Bounded Runtime and OPC cases use the same canonical schema, never a stale hand-built subset.
+if(schemaFromFiles&&!withoutAppSuite&&!c2StopOffline&&!(runtimeMode&&stagingSchema&&casePattern&&!serve&&!legacyRef)&&!fileBuiltOpcMode)
   throw new Error('--schema-from-files requires a without-app suite or a bounded Runtime browser case');
 if(casePattern){if(casePattern.length>1000)throw new Error('case pattern too long');new RegExp(casePattern);}
 const testPattern=casePattern??(stagingHost?'^OPC: staging host':opcMode?'^OPC:':runtimeUpgrade?'^RUNTIME UPGRADE:':runtimeMode?'^RUNTIME:':upgradeMode?'^UPGRADE:':args.includes('--bill2-compat-only')?'^(AI:|SLICE:|CHAT: (free and document UI|ordinary init persists|provider usage is persisted|HTTP 429|summary HTTP 429|dual model stages|prepared replay|missing summary configuration|summary dispatched|a summary rejected|server-only summary recovery))':args.includes('--bill2-core-only')?'^BILL2:':args.includes('--bill2-only')?'^(BILL2:|AI:)':args.includes('--workbench-restart-only')?'^runs every configured workflow through browser login':args.includes('--ordinary-only')?'^CHAT: (free and document UI|ordinary init persists|provider usage is persisted)':args.includes('--reuse-only')?'^REUSE:':args.includes('--chat-reliability-only')?'^CHAT: (HTTP 429|summary HTTP 429|late initial read)':args.includes('--settings-only')?'^ADMIN: settings save':args.includes('--real-skill-only')?'^REAL SKILL:':args.includes('--usage-only')?'^(ADMIN:|CHAT: (free and document UI|provider usage))':args.includes('--admin-only')?'^ADMIN:':args.includes('--research-only')?'^(AI: research|CHAT: search)':args.includes('--chat-only')?'^CHAT:':'^AI:');
