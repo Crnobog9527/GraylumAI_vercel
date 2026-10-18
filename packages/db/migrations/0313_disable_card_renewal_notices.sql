@@ -1,6 +1,7 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
 -- PAY-NOTIFY follow-up: Stripe/Link owns card_renewal_upcoming delivery.
--- Rollback: restore payment_notice_candidates, payment_notice_eligible, and payment_notice_scan from
+-- Rollback: restore payment_notice_candidates, payment_notice_eligible, payment_notice_claim, and
+-- payment_notice_scan from
 -- the migration immediately before this one. Keep all payment_notices rows and unique keys; never
 -- delete history or replay a delivery as part of rollback.
 BEGIN;
@@ -64,6 +65,22 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
   WHERE c.kind=n.kind AND c.source_ref=n.source_ref AND c.due_key=n.due_key AND c.params=n.template_params)
  END
 $$;
+
+-- A cron may have scanned an old card row immediately before this migration commits. The subsequent
+-- system claim must not dispatch it; an explicit admin resend remains allowed for retained history.
+DO $$ DECLARE source text; anchor text:=' uncertain:=n.state'; patch text;
+ marker text:='-- PAY-NOTIFY card renewal system claim disabled';
+BEGIN
+ source:=pg_get_functiondef('public.payment_notice_claim(uuid,text,text,uuid)'::regprocedure);
+ IF position(marker IN source)=0 THEN
+  IF (length(source)-length(replace(source,anchor,'')))/length(anchor)<>1 THEN
+   RAISE EXCEPTION 'PAYMENT_NOTICE_CARD_CLAIM_PATCH_MISSING'; END IF;
+  patch:=E' -- PAY-NOTIFY card renewal system claim disabled\n'
+   ||E' IF n.kind=''card_renewal_upcoming'' AND p_actor IS NULL THEN\n'
+   ||E'  RETURN jsonb_build_object(''decision'',''skip'',''reason'',''scheduled_card_notice_disabled'');\n END IF;\n';
+  EXECUTE replace(source,anchor,patch||anchor);
+ END IF;
+END $$;
 
 -- Old unresolved card rows remain visible, but no scheduled path dispatches them.
 CREATE OR REPLACE FUNCTION public.payment_notice_scan(p_limit integer DEFAULT 100) RETURNS jsonb

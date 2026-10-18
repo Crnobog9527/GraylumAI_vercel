@@ -104,9 +104,11 @@ try {
   assert.equal((await row(legacy)).state, 'unknown');
   const legacyList = await service(c, 'SELECT payment_notice_admin_list($1) v', [admin]);
   assert.ok(legacyList.some(n => n.id === legacy && n.kind === 'card_renewal_upcoming' && n.resendable));
+  // A stale pre-migration cron scan can still hold this ID; its post-migration system claim must skip.
+  assert.deepEqual(await claim(legacy, digest), { decision: 'skip', reason: 'scheduled_card_notice_disabled' });
   assert.equal((await claim(legacy, digest, admin)).decision, 'send');
   assert.ok((await scan()).includes(legacy) === false);
-  report.checks.push('wallet -7d/0d/+5d, ordinary annual and founder-ended still enqueue; card/card_cn do not; legacy card history stays visible and admin-resendable');
+  report.checks.push('wallet/founder notices remain; card/card_cn do not enqueue; stale system claim skips; legacy card history stays visible and admin-resendable');
 
   const second = new c.constructor({ host: c.host, port: c.port, user: 'postgres', database: c.database });
   await second.connect();
