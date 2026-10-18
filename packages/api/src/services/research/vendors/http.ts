@@ -2,7 +2,8 @@
 import type { VendorDeps, VendorRequest } from './types';
 
 export const DEFAULT_TIMEOUT_MS = 60_000;
-export const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+// Real TikTok keyword searches answer with 1.7-2.3 MB of JSON (RT-7 sampling, 2026-10-18), so the cap is 8 MiB.
+export const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 
 export type VendorExchange =
   | { kind: 'response'; status: number; json: unknown }
