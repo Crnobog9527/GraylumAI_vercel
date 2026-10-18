@@ -50,14 +50,18 @@ export function AdminPaymentDisputes() {
       </nav>
       {rows.data?.map(row => (
         <article key={row.id} className="space-y-2 rounded-xl border p-4" style={{ borderColor: 'var(--border-primary)' }}>
+          <p className="break-all text-sm">Stripe 拒付编号：{row.provider_dispute_id ?? '暂时无法读取'}</p>
+          <p className="break-all text-sm">商户：{row.merchant_namespace ?? '暂时无法读取'} · 环境：
+            {row.mode === 'test' ? '测试' : row.mode === 'live' ? '正式' : '暂时无法读取'}</p>
           <p className="break-all text-sm">订单：{row.order_id ?? '等待匹配'}</p>
           <p>{(Number(row.amount) / 100).toFixed(2)} {row.currency.toUpperCase()} · 拒付：{label(row.status)}</p>
           <p>冻结：{label(row.freeze_state)} · 停续费：{label(row.renewal_stop_state)}</p>
           {row.evidence_due_by ? <p>举证截止：{new Date(row.evidence_due_by).toLocaleString('zh-CN')}</p> : null}
           {row.source_review_required ? <p role="alert">积分来源无法核实，未扣取无法确认的积分，请人工核对。</p> : null}
-          {!row.order_id && ['pending', 'review'].includes(row.freeze_state) ? (
+          {!row.order_id && row.provider_dispute_id && row.merchant_namespace && ['test', 'live'].includes(row.mode)
+            && ['pending', 'review'].includes(row.freeze_state) ? (
             externalSelected === row.id ? <div className="space-y-2">
-              <p>请先在 Stripe 核实这是与 Graylum 订单无关的站外付款。确认后将结案并停止重试匹配。</p>
+              <p>请先在对应商户和环境的 Stripe 中核实拒付 {row.provider_dispute_id} 是与 Graylum 订单无关的站外付款。确认后将结案并停止重试匹配。</p>
               <Button disabled={resolveExternal.isPending}
                 onClick={() => resolveExternal.mutate({ disputeId: row.id })}>确认站外结案</Button>
               <Button variant="outline" disabled={resolveExternal.isPending} onClick={() => setExternalSelected(null)}>返回</Button>

@@ -68,6 +68,7 @@ it('keeps an older frozen dispute reachable beyond 100 newer records', async () 
   const records = Array.from({ length: 101 }, (_, n) => ({ id: n === 100 ? ID : `newer-${n}` }));
   const f = harness('admin', null, true, records);
   expect(await f.caller.list()).toHaveLength(100);
+  expect(f.filters).toContainEqual(['select', expect.stringContaining('provider_dispute_id,merchant_namespace,mode')]);
   expect(await f.caller.list({ offset: 100 })).toEqual([{ id: ID }]);
   expect(f.filters).toContainEqual(['range', 100, 199]);
   expect(f.filters).toContainEqual(['order', 'id', { ascending: false }]);

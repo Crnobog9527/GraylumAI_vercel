@@ -1,7 +1,7 @@
 {
   "capturedAt": "2026-10-19",
   "migrationFile": "0311_pay_dispute_guard.sql",
-  "migrationSha256": "3648ba44fba0d206671129860b687616dda79cdfdb073bc31cba17f50d607c41",
+  "migrationSha256": "68e5bf8ea28027f2c296abb36d26a3aa55dbdd9149155da6400fd0b4e984aa8e",
   "disputeSqlChecks": [
     "multiple disputes on one payment share one hold; only the final withdrawal releases it",
     "duplicate-event; other sources stay spendable; failed calls stay attributed; withdrawal exactly once",
@@ -25,9 +25,11 @@
     "withdrawn dispute permits a fresh valid package refund; active holds and unexplained negative adjustments still reject",
     "conflicting order hint rejected; canonical owner frozen, unrelated owner balance and mapping untouched",
     "two distinct payment keys racing for one order hint: receive and late match each commit exactly one mapping",
+    "late match after external resolution reopens, freezes already delivered credits and applies stop state",
     "off-site resolution is admin-only, idempotently audited and denied for known payment references; later actual fulfillment reopens and freezes the matching source",
     "missing subscription derived and locked; conflict rejected; late match, pending claim and later event backfill identity",
     "stop confirmation reloads a mapping committed while waiting and synchronizes internal subscription state",
+    "late match after external resolution freezes delivered membership and reopens subscription stop",
     "current paid period loses membership during freeze and regains it on withdrawal",
     "withdrawn current-period dispute permits fresh monthly refund approval and claim without loosening active-hold guard",
     "previous-period dispute preserves an already delivered next period and its credits",
@@ -111,6 +113,6 @@
   },
   "limits": [
     "BILL2 and runtime full suites ran before the final SQL mapping/subscription changes; final dispute SQL and full baseline include them. Exact candidate CI remains authoritative.",
-    "API full 7681 passed and 16 skipped includes wallet-kind and won-dispute refund eligibility; final pagination and staging synchronization followed, with targeted router 5/5 and component 4/4 passing, API/Web typecheck and lint passing. Exact candidate CI remains authoritative. Later external-resolution router/service regressions passed 14/14, component 5/5; API/Web typecheck and lint passed."
+    "API full 7681 passed and 16 skipped includes wallet-kind and won-dispute refund eligibility; final pagination and staging synchronization followed, with targeted router 5/5 and component 4/4 passing, API/Web typecheck and lint passing. Exact candidate CI remains authoritative. Later external-resolution router/service regressions passed 14/14, component 5/5; API/Web typecheck and lint passed. Final provider-identity UI/router regressions passed 6/6 each; API/Web typecheck, lint and size checks passed."
   ]
 }

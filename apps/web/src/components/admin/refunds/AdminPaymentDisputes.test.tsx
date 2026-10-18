@@ -41,11 +41,20 @@ it('reports a failed read without presenting it as an empty successful result', 
 });
 
 it('offers explicit off-site resolution only for unmatched unresolved records', () => {
-  fixture.rows = [{ id: 'unmatched', order_id: null, amount: 100, currency: 'usd', status: 'won',
+  fixture.rows = [{ id: 'unmatched', provider_dispute_id: 'du_unmatched', merchant_namespace: 'acct_fixture', mode: 'test', order_id: null, amount: 100, currency: 'usd', status: 'won',
     freeze_state: 'pending', renewal_stop_state: 'pending' }];
   expect(renderToStaticMarkup(<AdminPaymentDisputes />)).toContain('已核实站外付款');
   fixture.rows = [{ id: 'resolved', order_id: null, amount: 100, currency: 'usd', status: 'won',
     freeze_state: 'external', renewal_stop_state: 'not_applicable' }];
   const html = renderToStaticMarkup(<AdminPaymentDisputes />);
   expect(html).toContain('已确认站外付款');expect(html).not.toContain('>已核实站外付款</button>');
+});
+
+it('distinguishes equal-amount unmatched disputes by Stripe identity and merchant environment', () => {
+  fixture.rows = ['du_first', 'du_second'].map(id => ({ id, provider_dispute_id: id, merchant_namespace: 'acct_fixture', mode: 'test',
+    order_id: null, amount: 100, currency: 'usd', status: 'won', freeze_state: 'pending', renewal_stop_state: 'pending' }));
+  const html = renderToStaticMarkup(<AdminPaymentDisputes />);
+  expect(html).toContain('du_first');expect(html).toContain('du_second');expect(html).toContain('acct_fixture');expect(html).toContain('测试');
+  fixture.rows = [{ id: 'missing-id', order_id: null, amount: 100, currency: 'usd', status: 'won', freeze_state: 'pending' }];
+  expect(renderToStaticMarkup(<AdminPaymentDisputes />)).not.toContain('>已核实站外付款</button>');
 });

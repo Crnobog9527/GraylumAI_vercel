@@ -18,11 +18,13 @@ export const paymentDisputesRouter = router({
     try {
       if (!ctx.hasSupabaseAdminPrivileges) throw new Error('PAY_DISPUTE_DB_UNAVAILABLE');
       const rows = await ctx.supabaseAdmin.from('payment_disputes')
-        .select('id,order_id,amount,currency,status,freeze_state,renewal_stop_state,evidence_due_by,source_review_required')
+        .select('id,order_id,provider_dispute_id,merchant_namespace,mode,amount,currency,status,freeze_state,'
+          + 'renewal_stop_state,evidence_due_by,source_review_required')
         .order('opened_at', { ascending: false }).order('id', { ascending: false })
         .range(input?.offset ?? 0, (input?.offset ?? 0) + 99);
       if (rows.error || !Array.isArray(rows.data)) throw new Error('PAY_DISPUTE_READ_UNAVAILABLE');
-      return rows.data as Array<{ id: string; order_id: string | null; amount: number; currency: string; status: string;
+      return rows.data as Array<{ id: string; provider_dispute_id: string; merchant_namespace: string; mode: string;
+        order_id: string | null; amount: number; currency: string; status: string;
         freeze_state: string; renewal_stop_state: string; evidence_due_by: string | null; source_review_required: boolean }>;
     } catch (error) { throw createSafeServiceUnavailableError(error, '拒付记录暂时无法读取'); }
   }),
