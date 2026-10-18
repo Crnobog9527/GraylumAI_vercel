@@ -1,7 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 -- CHAT-AUTO-CONTEXT B2. Number 0307 assigned by the controller through Owner (2026-10-18).
--- Rollback: set chat_my_posts_enabled=false, then revert the host code. Existing sources, posts, snapshots and
--- Runtime journals remain intact; no destructive down migration. Saved results keep the normal erasure coverage.
+-- Rollback: set chat_my_posts_enabled=false; keep this host/recovery and cleanup worker until in-flight
+-- ownPosts Runtime/BILL2 runs close, then revert the host. Old hosts cannot parse the new frozen context field.
+-- Retain SQL, journals, original posts/snapshots and accounting; no destructive down migration. Erasure still runs.
 -- Patch the CURRENT function (0301 or later), preserving benchmarks and strategy reports byte for byte.
 -- No new tables, no new model tool, no provider request. Service reads reuse PR-3a readData / publish_monitor_data.
 BEGIN;
