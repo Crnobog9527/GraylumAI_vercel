@@ -3219,7 +3219,7 @@
   "fn:fusion_compare_settings(uuid)": "f13e54e38d84",
   "fn:fusion_compare_stop(uuid,uuid,uuid)": "910f0e283822",
   "fn:fusion_compare_view(fusion_compares)": "1acec2f82c78",
-  "fn:fusion_group_admit(uuid,uuid,text,uuid,jsonb)": "a0cefc001ebf",
+  "fn:fusion_group_admit(uuid,uuid,text,uuid,jsonb)": "9025d47fb268",
   "fn:fusion_group_attach(uuid,uuid,uuid)": "92457d5b1be8",
   "fn:fusion_group_claim(uuid,uuid,text,integer,jsonb)": "b4754b59797a",
   "fn:fusion_group_create(uuid,uuid,text)": "a548758efeca",

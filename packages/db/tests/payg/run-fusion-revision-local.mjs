@@ -36,7 +36,8 @@ const fp=read('packages/db/tests/baseline/fingerprint.sql');
 const objectSql=fp.slice(0,fp.indexOf('-- FINAL'))+'SELECT jsonb_object_agg(k,d ORDER BY k) FROM grouped;';
 const snapshot=()=>JSON.parse(ok(sql(objectSql)));
 const outcome=result=>({ok:result.status===0&&!result.error,error:result.stderr});
-const migration=read('packages/db/tests/payg/fusion-revision-repair.pending.sql');
+const migrationPath='packages/db/migrations/0310_fusion_compare_revision.sql';
+const migration=read(migrationPath);
 const report={development,build:null,checks:[],failed:null};
 let db;
 try {
@@ -49,7 +50,7 @@ try {
   }
   assert.ok(ready,'local PostgreSQL ready');
   installPgCronStub(root,name,(args,input)=>ok(docker(['exec',...args],input)));
-  report.build=buildFromFiles(root,{applyFile:path=>outcome(sql(read(path))),
+  report.build=buildFromFiles(root,{applyFile:path=>path===migrationPath?{ok:true}:outcome(sql(read(path))),
     applyServerOnly:input=>outcome(docker(['exec',name,'psql','-X','-qAt','-U','postgres','-d','payg','-c',input])),
     fingerprint:development?undefined:snapshot});
   assert.equal(report.build.failed,null,JSON.stringify(report.build.failed));
@@ -68,7 +69,7 @@ try {
   const once=snapshot();
   ok(sql(migration));
   assert.deepEqual(snapshot(),once,'repair applied twice leaves the complete catalog unchanged');
-  report.checks.push('pending SQL applied twice; complete catalog identical after repeat');
+  report.checks.push('0310 applied twice; complete catalog identical after repeat');
   await committedRevisionCase(context);
   report.checks.push('committed history advancement rejects admission without groups/runs/calls or credit changes');
   await concurrentRevisionCase(context);

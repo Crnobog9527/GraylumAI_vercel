@@ -8,8 +8,8 @@
 -- billing group or run is created. New admissions lock session -> compare, as adoption and erasure do.
 -- Existing groups keep frozen replay semantics even when the conversation subsequently advances.
 -- Rollback: restore fusion_group_admit from 0290_fusion_compare.sql; no data or schema changes.
--- Pending controller-assigned migration number; this tests/ file is NOT a migration and is not applied by deployment.
--- After allocation, move unchanged SQL into migrations/ and reapply after 0290 in payg/thresholds-migration.mjs.
+-- Provisional 0310 assigned by the controller; final number confirmed at merge.
+-- Reapply after 0290 in payg/thresholds-migration.mjs after its current writer hands off.
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 
