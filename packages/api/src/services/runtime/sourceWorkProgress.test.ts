@@ -95,6 +95,10 @@ it('streams own-post progress only for a frozen capability and preserves the exa
  const disabled=vi.fn();
  await withSourceWorkProgress({...raw,execute:async()=>JSON.stringify({kind:'unavailable'})},disabled).execute({query:'my_posts:30'},'off');
  expect(disabled).not.toHaveBeenCalled();
+ const limit=vi.fn();
+ await withSourceWorkProgress({...raw,execute:async()=>JSON.stringify({kind:'unavailable',reason:'read_limit'})},limit,true)
+  .execute({query:'my_posts:30'},'limit');
+ expect(limit.mock.calls.at(-1)?.[0]).toMatchObject({state:'missing',label:'本条回答的作品读取次数已用完'});
  const capacity=vi.fn();
  await withSourceWorkProgress({...raw,execute:async()=>JSON.stringify({kind:'unavailable',reason:'capacity_exhausted'})},capacity,true)
   .execute({query:'my_posts:30'},'capacity');
