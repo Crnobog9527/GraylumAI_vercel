@@ -23,8 +23,8 @@ function fixture(refs: Record<string, string>, orders: Record<string, Record<str
     charges: { retrieve: vi.fn(async () => ({ object: 'charge', id: 'ch_1', livemode: false, payment_intent: 'pi_1' })) },
     invoicePayments: { list: vi.fn(async () => ({ data: invoices.map(invoice => ({ invoice })) })) },
   };
-  const find = (input: Parameters<typeof findCardOrderForPayment>[3]) =>
-    findCardOrderForPayment(db as unknown as SupabaseClient, stripe as unknown as Stripe, scope, input);
+  const find = (input: Parameters<typeof findCardOrderForPayment>[3], options = {}) =>
+    findCardOrderForPayment(db as unknown as SupabaseClient, stripe as unknown as Stripe, scope, input, options);
   return { find, stripe };
 }
 
@@ -49,6 +49,12 @@ describe('PAY-STRIPE-MP shared lookup from a Stripe payment to the card order', 
     const wallet = fixture({ pi_1: 'wallet' }, { wallet: { ...base, id: 'wallet', item_type: 'membership_plan', payment_method: 'alipay' } });
     await expect(wallet.find({ chargeId: 'ch_1' })).resolves.toBeNull();
     await expect(fixture({}, {}).find({ chargeId: 'ch_1' })).resolves.toBeNull();
+  });
+  it.each(['wechat_pay', 'alipay'])('keeps explicitly included %s credit packages classified as packs', async method => {
+    const f = fixture({ pi_1: 'pack' }, { pack: { ...base, id: 'pack', item_type: 'credit_package', payment_method: method } });
+    await expect(f.find({ paymentIntentId: 'pi_1' })).resolves.toBeNull();
+    await expect(f.find({ paymentIntentId: 'pi_1' }, { includeWalletPacks: true }))
+      .resolves.toMatchObject({ kind: 'pack', paymentId: 'pi_1' });
   });
   it('refuses a card order of another merchant and a live charge in test mode', async () => {
     const other = fixture({ pi_1: 'pack' }, { pack: { ...base, id: 'pack', item_type: 'credit_package', payment_method: 'card',

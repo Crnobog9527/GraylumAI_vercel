@@ -7,6 +7,7 @@ import { refundTime } from './refundMoney';
 import { evaluateRefundPolicy, type RefundPolicyResult, type RefundPolicyInput } from './refundPolicy';
 import type { RefundRequest, RefundStripe } from './packageRefund';
 import { resolveStripeScope } from './stripeCheckoutPersistence';
+import { disputeAllowsRefund } from './disputeRefundEligibility';
 import {
   readPreviewOrder, readSubscriptionRefundEvidence,
   type PreviewDb, type PreviewOrder, type SubscriptionRefundEvidence,
@@ -114,7 +115,7 @@ async function readInvoiceHistory(stripe: SubscriptionRefundStripe, evidence: Su
   }
   return invoices.sort((a, b) => a.id.localeCompare(b.id));
 }
-async function providerFacts(stripe: SubscriptionRefundStripe, evidence: SubscriptionRefundEvidence, order: PreviewOrder) {
+async function providerFacts(db: PreviewDb, stripe: SubscriptionRefundStripe, evidence: SubscriptionRefundEvidence, order: PreviewOrder) {
   const scope = await resolveStripeScope(stripe);
   requireEvidence(scope.mode === order.payment_mode && scope.merchant === order.merchant_namespace, 'PAY_REFUND_SCOPE_MISMATCH');
   const live = scope.mode === 'live';
@@ -146,7 +147,7 @@ async function providerFacts(stripe: SubscriptionRefundStripe, evidence: Subscri
     && balance && typeof balance !== 'string' && Number.isSafeInteger(balance.created), 'PAY_REFUND_CHARGE_MISMATCH');
   const refunds = await stripe.refunds.list({ charge: chargeId, limit: 1 });
   requireEvidence(refunds.has_more === false && refunds.data.length === 0 && charge.amount_refunded === 0
-    && charge.disputed === false, 'PAY_REFUND_PRIOR_REFUND_OR_DISPUTE');
+    && await disputeAllowsRefund(db, stripe, scope, order.id, charge), 'PAY_REFUND_PRIOR_REFUND_OR_DISPUTE');
   // paidMinor is the pre-tax basis of the refund and its fee; a card order's tax (0 for a mainland card) is refunded in full.
   const cash = { paymentIntentId: intentId, chargeId, paidMinor: order.amount_total!, currency: order.currency,
     paidAt: new Date(balance.created * 1000).toISOString(), ...(isCard(order) ? { taxMinor } : {}) };
@@ -202,8 +203,8 @@ export async function readSubscriptionRefundFacts(
     const first = await readSubscriptionRefundEvidence(db, actorId, order, input.ticketId);
     requireEvidence(hash(first.orders.find(row => row.id === order.id)) === hash(order), 'PAY_REFUND_EVIDENCE_CHANGED');
     verifyGrants(first, order);
-    const provider = await providerFacts(stripe, first, order);
-    const again = await providerFacts(stripe, first, order);
+    const provider = await providerFacts(db, stripe, first, order);
+    const again = await providerFacts(db, stripe, first, order);
     requireEvidence(hash(provider) === hash(again), 'PAY_REFUND_EVIDENCE_CHANGED');
     const last = await readSubscriptionRefundEvidence(db, actorId, order, input.ticketId);
     requireEvidence(hash(first) === hash(last), 'PAY_REFUND_EVIDENCE_CHANGED');

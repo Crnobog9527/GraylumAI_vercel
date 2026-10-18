@@ -39,7 +39,12 @@ export async function readMethodMembership(db: SupabaseClient, userId: string, n
   }
   // auto_renew on the order is what was bought; a confirmed stop (methodCancel) only flips the
   // subscription's cancel_at_period_end, the same flag getEntitlements reads. Report the effective value.
-  const recent = orders.data as unknown as PaidMembership[];
+  const candidates = orders.data as unknown as PaidMembership[];
+  const holds = candidates.length ? await db.from('payment_disputes').select('order_id')
+    .in('order_id', candidates.map(row => row.id)).eq('freeze_state', 'frozen') : { data: [], error: null };
+  if (holds.error || !Array.isArray(holds.data)) throw new Error('PAY_WAFFO_MEMBERSHIP_UNAVAILABLE');
+  const frozen = new Set(holds.data.map(row => row.order_id as string));
+  const recent = candidates.filter(row => !frozen.has(row.id));
   const subscriptionIds = [...new Set(recent.map(row => row.subscription_id).filter(Boolean))];
   const subscriptions = subscriptionIds.length === 0 ? { data: [], error: null }
     : await db.from('user_subscriptions').select('id,status,cancel_at_period_end,method_cancel_requested_at,method_cancel_confirmed_at')

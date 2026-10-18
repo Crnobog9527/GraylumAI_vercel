@@ -14,7 +14,7 @@ export async function syncMonthlyRefundSubscription(db: MonthlyDb, stripe: Month
   evidence(!error && Array.isArray(data) && data.length <= 1);
   if (!data.length) return false;
   const i = await readMonthlyRefundStatus(db, data[0].id);
-  const seen = await readMonthlyProvider(stripe, i);
+  const seen = await readMonthlyProvider(stripe, i, db);
   const observed = await db.rpc('pay_common_monthly_refund_observe', {
     p_actor: null, p_order: data[0].id, p_intent: i.id, p_evidence: seen,
   });
