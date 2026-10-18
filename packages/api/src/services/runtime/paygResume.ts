@@ -8,6 +8,7 @@ import type { PaygWait, ResumeInput } from './paygRuntime';
 export type RuntimeExecution = {
   executionId: string; sessionId: string; runId: string; live: boolean; cancelRequested: boolean; state: string;
   pausedReason?: string; unavailableReason?: string; historyFrozen?: boolean; historyOmitted?: boolean; context: unknown;
+  gatePassed?: boolean;
   billing: FrozenRun | FrozenPaygRun;
   cursor?: number; epoch?: number; remainingCalls?: number; primaryResult?: { body: string };
   result: { kind: string; evidenceRef: string; evidenceHash: string; body: string; summary?: string;
@@ -44,9 +45,9 @@ export async function beginPaygExecution(input: {
         resumedGate:false};
     }
     let resumedGate = false;
-    // waiting_credits is saved only after the pending sequence passed this gate;
-    // retrying that same claim after a top-up must not reserve it twice.
-    if (execution.state === 'waiting_credits') {
+    // The durable checkpoint records whether this same call already passed its
+    // gate before waiting. Recheck without reserving it a second time.
+    if (execution.state === 'waiting_credits' || execution.gatePassed === true) {
       try {
         const verdict = await input.callGate(await input.actor(), 1, 'bill2.v2', false);
         if (!verdict.ok) return { execution, resumedGate: false, wait: wait(verdict.reason) };
@@ -54,7 +55,7 @@ export async function beginPaygExecution(input: {
       } catch { return { execution, resumedGate: false, wait: wait('limit_unavailable') }; }
     }
     else {
-      // A waiting_resume may precede its first call gate, so reserve one next call.
+      // A waiting_resume before its first call gate reserves one slot now.
       try {
         const verdict = await input.callGate(await input.actor(), 1, 'bill2.v2');
         if (!verdict.ok) return { execution, resumedGate: false, wait: wait(verdict.reason) };

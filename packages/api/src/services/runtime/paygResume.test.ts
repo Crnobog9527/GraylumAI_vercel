@@ -72,6 +72,20 @@ it('rechecks limits without consuming a second slot when resuming the same waiti
   expect(f.callGate).toHaveBeenCalledExactlyOnceWith(id, 1, 'bill2.v2', false);
   expect(result).toMatchObject({ resumedGate: true, execution: { live: true, epoch: 3 } });
 });
+it('rechecks a post-claim waiting-resume without consuming a second slot', async () => {
+  const f = fixture('waiting_resume');
+  f.execution.gatePassed = true;
+  const result = await beginPaygExecution(f);
+  expect(f.callGate).toHaveBeenCalledExactlyOnceWith(id, 1, 'bill2.v2', false);
+  expect(result).toMatchObject({ resumedGate: true, execution: { live: true, epoch: 3 } });
+});
+it('reserves on waiting-resume when the checkpoint says its first call gate was not passed', async () => {
+  const f = fixture('waiting_resume');
+  f.execution.gatePassed = false;
+  const result = await beginPaygExecution(f);
+  expect(f.callGate).toHaveBeenCalledExactlyOnceWith(id, 1, 'bill2.v2');
+  expect(result.resumedGate).toBe(true);
+});
 it.each(['waiting_credits', 'waiting_resume'])('keeps %s and its CAS token for quota adjustment', async state => {
   const f = fixture(state);
   const rejected = await beginPaygExecution({ ...f, callGate: async () => ({

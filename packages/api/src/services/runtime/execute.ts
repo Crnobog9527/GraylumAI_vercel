@@ -106,14 +106,15 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   let transportNotStarted=false,providerRejected=false,terminalReplyFailure=false;
   let claimNotice:string|undefined,reportFailure:'REPORT_MEMBERSHIP_REQUIRED'|'REPORT_ENTITLEMENTS_UNAVAILABLE'|'REPORT_SOURCE_CONFLICT'|undefined;
   let gateChecked=resumedGate,moderationBlocked=false,gateRejection:GateRejection|undefined;
-  let waitPoint:{epoch:number;sequence:number;requestHash:string;phase:string;state:PaygWait['state']}|undefined;
+  let gatePassed=execution.gatePassed===true||execution.state==='waiting_credits';
+  let waitPoint:{epoch:number;sequence:number;requestHash:string;phase:string;state:PaygWait['state'];gatePassed:boolean}|undefined;
   const checkCallGate=runtimeCallGate({call:options.callGate,actor:options.actor,version:isPayg?'bill2.v2':'bill2.v1',
    onRejected:reason=>{gateRejection??=reason;},enter:()=>budget.timing?.enter('rateLimit')});
   const research=researchExecution({research:context.research,tools:context.tools,execution,executionId,actorId:await options.actor(),
    database:options.database,emit:event=>progress(event),onClosed:()=>{accountClosed=true;},
-   onPause:(point,state)=>{if(isPayg)waitPoint={epoch:execution.epoch!,...point,state};},
+   onPause:(point,state)=>{if(isPayg)waitPoint={epoch:execution.epoch!,...point,state,gatePassed:state==='waiting_credits'};},
    canSend:()=>{try{budget.assertCanStart(5000);return true;}catch{return false;}},
-   callGate:async()=>{await checkCallGate(!gateChecked);gateChecked=false;}});
+   callGate:async()=>{await checkCallGate(!gateChecked);gatePassed=true;gateChecked=false;}});
   const checkAgentReply=terminalReplyGuard(agentTurn,context.tools.includes(ASK_QUESTION_TOOL),()=>{terminalReplyFailure=true;},
    Boolean(context.skillFile),Boolean(context.historyRead),research?.tools.map(tool=>tool.name));
   let preflightFailure:string|undefined,transportFailureCode:string|undefined;
@@ -141,7 +142,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     assertRuntimeRequestCapacity(request,Math.min(selectedPolicy.inputLimit,configuredInput??Infinity));
      const requestHash=hash(request);
      const pause=(state:PaygWait['state']):never=>{
-      waitPoint={epoch:execution.epoch!,sequence,requestHash,phase,state};
+      waitPoint={epoch:execution.epoch!,sequence,requestHash,phase,state,gatePassed};
       throw new Error(state==='waiting_credits'?'RUNTIME_WAITING_CREDITS':'RUNTIME_WAITING_RESUME');
      };
      let {sequence,existing}=await responseAfterResearch(seq=>ownerRpc<{callId:string;state:string;rawBody:string|null;retryable?:boolean}|null>(
@@ -169,6 +170,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
       // Count one actual call before each new BILL2 claim; maxCalls remains only a ceiling.
       if(!gateChecked){
        await checkCallGate();
+       gatePassed=true;
        gateChecked=true;
       }
       const claim=await (isPayg?billing.claimPaygCall(execution.runId,sequence,call)
@@ -208,6 +210,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
       if(dispatch.providerRejected){providerRejected=true;throw new Error('RUNTIME_PROVIDER_REJECTED');}
       const saved=await ownerRpc<{rawBody:string|null}|null>('runtime_response',{...args,p_sequence:sequence,p_request_hash:requestHash});
       raw=saved?.rawBody;
+     gatePassed=false;
      }
      if(!raw)throw new Error('RUNTIME_RESPONSE_PENDING');
      if(isPayg)await billing.finalizeRun(execution.runId);
