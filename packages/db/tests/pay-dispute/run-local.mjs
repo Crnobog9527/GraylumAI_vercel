@@ -193,6 +193,28 @@ try {
  const u7=await profile(40),p7=await pack(u7,100,iso(-hour));await externalRefund(p7,'re_before_dispute');
  d=await receive(p7);assert.equal(d.freeze_state,'superseded');assert.equal(await balance(u7),140);
  report.checks.push('freeze then external refund; refund then dispute; no duplicate clawback');
+ for(const disputeFirst of [true,false]) {
+  const actor=await profile(40),payment=await pack(actor,100),connection=new pg.Client(c.connectionParameters);
+  await connection.connect();
+  const refundSQL="SELECT pay_stripe_mp_record_external_refund($1,'fixture',$2,$3,1000,'usd',now()) v";
+  const args=[payment.order,payment.payment,'re_race_'+payment.order.replaceAll('-','')];
+  try {
+   await connection.query('BEGIN');
+   if(disputeFirst)await receive(payment,{},connection);else await v(refundSQL,args,connection);
+   const waiting=disputeFirst?v(refundSQL,args):receive(payment);
+   let blocked_=false;
+   for(let i=0;i<100&&!blocked_;i++) {
+    blocked_=await v('SELECT pg_backend_pid()=ANY(pg_blocking_pids($1)) v',[c.processID],connection);
+    if(!blocked_)await new Promise(r=>setTimeout(r,5));
+   }
+   assert.equal(blocked_,true,'second refund/dispute transaction must wait on the first lock');
+   await connection.query('COMMIT');await waiting;
+   assert.equal(await balance(actor),disputeFirst?40:140);assert.equal(await spendable(actor),40);
+   assert.equal(await frozen(payment),0);
+   assert.equal(await state(payment),'superseded');
+  } finally {await connection.end();}
+ }
+ report.checks.push('real two-connection dispute/refund races preserve existing refunded-pack quarantine or convert a prior dispute hold without duplicate debit');
  // Concurrent consumption and freeze serialize on the profile. The final available + frozen + consumed is exact.
  const u8=await profile(0),p8=await pack(u8,100,iso(-hour));
  const peer=new pg.Client(c.connectionParameters);await peer.connect();
@@ -237,6 +259,31 @@ try {
  await assert.rejects(()=>v("SELECT pay_dispute_receive('fixture','test','{}') v"),/permission denied/);
  await c.query('RESET ROLE');
  report.checks.push('admin and service-role allow/deny boundaries');
+ { // A resolved, fully withdrawn dispute must not permanently remove an otherwise valid refund.
+ const refundUser=await profile(40),refundPack=await pack(refundUser,100,iso(-hour));
+ const ticket=randomUUID();
+ await c.query("INSERT INTO tickets(id,user_id,title,category) VALUES($1,$2,'Synthetic refund','billing')",[ticket,refundUser]);
+ const cash={orderId:refundPack.order,merchant:'fixture',mode:'test',currency:'usd',paidMinor:1000,taxMinor:0,
+  refundedMinor:0,refundCount:0,disputed:false,chargeId:'ch_'+refundPack.order.replaceAll('-',''),
+  paymentIntentId:refundPack.payment,paidAt:iso(-hour)};
+ const quoteRefund=()=>v("SELECT pay_common_package_refund_quote($1,$2,$3,$4,'not_permitted','fixture') v",
+  [ops,refundPack.order,ticket,cash]);
+ const approveRefund=async()=>v("SELECT pay_common_package_refund_decide($1,$2,$3,$4,'not_permitted','fixture',$5,'approve') v",
+  [ops,refundPack.order,ticket,cash,(await quoteRefund()).versionHash]);
+ const approved=await approveRefund(),heldRefund=await receive(refundPack);
+ await assert.rejects(()=>v('SELECT pay_common_package_refund_claim($1,$2,$3,$4) v',
+  [ops,refundPack.order,approved.id,cash]),/PAY_DISPUTE_REFUND_FORBIDDEN/);
+ await withdraw(ops,heldRefund);
+ await quoteRefund();
+ await c.query('BEGIN');
+ await c.query(`INSERT INTO credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type)
+  VALUES($1,-1,'deduction','adjustment','unknown_fixture','payment_order')`,[refundUser]);
+ await assert.rejects(quoteRefund,/PAY_REFUND_CONSUMPTION_OR_UNKNOWN/);await c.query('ROLLBACK');
+ const refreshed=await approveRefund();
+ await v('SELECT pay_common_package_refund_claim($1,$2,$3,$4) v',[ops,refundPack.order,refreshed.id,cash]);
+ assert.equal(await balance(refundUser),40);
+ report.checks.push('withdrawn dispute permits a fresh valid package refund; active holds and unexplained negative adjustments still reject');
+ }
  await membershipCases({c,v,profile,receive,withdraw,ops,report});
  // Optional PAY-EVIDENCE integration: model its documented table locally; no personal evidence is created.
  await c.query(`CREATE TABLE payment_order_evidence(order_id uuid PRIMARY KEY,hold_reason text,

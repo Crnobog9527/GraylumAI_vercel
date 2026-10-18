@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {randomUUID} from 'node:crypto';
 import assert from 'node:assert/strict';
+import pg from 'pg';
 export async function membershipCases({c,v,profile,receive,withdraw,ops,report}) {
  const facts=async user=>{await c.query('SET ROLE service_role');try{return await v('SELECT pay_common_membership_facts($1) v',[user]);}finally{await c.query('RESET ROLE');}};
  const member=async(start,end,cycle='monthly')=>{
@@ -44,6 +45,33 @@ export async function membershipCases({c,v,profile,receive,withdraw,ops,report})
  await withdraw(ops,d);
  assert.equal((await facts(f.user)).internal_membership.membership_level,'pro');
  report.checks.push('current paid period loses membership during freeze and regains it on withdrawal');
+ {
+ const refundMember=await member(start,end);
+ const ticket=randomUUID();
+ const submitted=(await c.query("INSERT INTO tickets(id,user_id,title,category) VALUES($1,$2,'Synthetic refund','billing') RETURNING created_at::text created_at",
+  [ticket,refundMember.user])).rows[0].created_at;
+ const snapshot=await v('SELECT purchase_snapshot v FROM payment_orders WHERE id=$1',[refundMember.order]);
+ const terms={kind:'monthly_first_purchase',orderId:refundMember.order,userId:refundMember.user,ticketId:ticket,
+  subscriptionId:refundMember.sub,providerSubscriptionId:refundMember.providerSub,
+  paymentIntentId:'pi_'+refundMember.order.replaceAll('-',''),chargeId:'ch_'+refundMember.order.replaceAll('-',''),
+  invoiceId:'in_'+refundMember.order.replaceAll('-',''),merchant:'fixture',mode:'test',currency:'usd',plan:'pro',
+  paidAt:start.toISOString(),submittedAt:submitted,periodEnd:end.toISOString(),originalCancelAtPeriodEnd:false,
+  paidMinor:1000,basisMinor:1000,feeMinor:0,netMinor:1000,taxMinor:0,credits:100,
+  feePermitted:'not_permitted',feeEvidence:'fixture',evidenceRefs:['cash','history','ticket','ledger'],snapshot};
+ const approve=async()=>{
+  const quote=await v('SELECT pay_common_monthly_refund_approve($1,$2,$3,$4) v',[ops,refundMember.order,terms,'a'.repeat(64)]);
+  return v('SELECT pay_common_monthly_refund_approve($1,$2,$3,$4,$5) v',
+   [ops,refundMember.order,terms,'a'.repeat(64),quote.localVersion]);
+ };
+ const refundDispute=await receive(refundMember,{subscriptionId:refundMember.providerSub});
+ await assert.rejects(()=>v('SELECT pay_common_monthly_refund_claim($1,$2,$3,$4) v',
+  [ops,refundMember.order,randomUUID(),terms]),/PAY_DISPUTE_REFUND_FORBIDDEN/);
+ await withdraw(ops,refundDispute);
+ const refreshed=await approve();
+ await v('SELECT pay_common_monthly_refund_claim($1,$2,$3,$4) v',[ops,refundMember.order,refreshed.id,terms]);
+ assert.equal(await v('SELECT credits v FROM profiles WHERE id=$1',[refundMember.user]),0);
+ report.checks.push('withdrawn current-period dispute permits fresh monthly refund approval and claim without loosening active-hold guard');
+ }
  // A previous period's freeze cannot take a separately paid current period away.
  const priorStart=new Date(start);priorStart.setUTCMonth(priorStart.getUTCMonth()-1);
  const next=await member(priorStart,start);
@@ -63,6 +91,32 @@ export async function membershipCases({c,v,profile,receive,withdraw,ops,report})
  assert.equal(refused.state,'review');assert.equal(refused.disputeRefundRequired,true);
  assert.equal(await v('SELECT credits v FROM profiles WHERE id=$1',[frozen.user]),0);
  report.checks.push('renewal after frozen previous period is retained without grants and requires full refund');
+ // Both real commit orders, with the second connection blocked on the shared subscription lock.
+ for (const disputeFirst of [true,false]) {
+  const racing=await member(priorStart,start),connection=new pg.Client(c.connectionParameters);
+  await connection.connect();
+  const renew=client=>v('SELECT pay_dispute_renew($1) v',[{subscription:racing.sub,subscriptionId:racing.providerSub,
+   merchant:'fixture',mode:'test',invoiceId:'in_race_'+racing.sub.replaceAll('-',''),
+   paymentIntentId:'pi_race_'+racing.sub.replaceAll('-',''),amount:1000,currency:'usd',paidAt:start,start,end:nextEnd}],client);
+  try {
+   await connection.query('BEGIN');
+   if(disputeFirst)await receive(racing,{subscriptionId:racing.providerSub},connection);
+   else await renew(connection);
+   const waiting=disputeFirst?renew(c):receive(racing,{subscriptionId:racing.providerSub});
+   let blocked_=false;
+   for(let i=0;i<100&&!blocked_;i++) {
+    blocked_=await v('SELECT pg_backend_pid()=ANY(pg_blocking_pids($1)) v',[c.processID],connection);
+    if(!blocked_)await new Promise(r=>setTimeout(r,5));
+   }
+   assert.equal(blocked_,true,'second renewal/dispute transaction must wait on the first lock');
+   await connection.query('COMMIT');
+   const result=await waiting;
+   assert.equal(await v('SELECT credits v FROM profiles WHERE id=$1',[racing.user]),disputeFirst?0:100);
+   assert.equal((await facts(racing.user)).internal_membership.membership_level,disputeFirst?'free':'pro');
+   if(disputeFirst)assert.equal(result.disputeRefundRequired,true);
+  } finally {await connection.end();}
+ }
+ report.checks.push('real two-connection prior-dispute/next-renewal races in both commit orders preserve delivered periods or require refund');
  const annualStart=new Date(start);annualStart.setUTCMonth(annualStart.getUTCMonth()-1);
  const annualEnd=new Date(annualStart);annualEnd.setUTCFullYear(annualEnd.getUTCFullYear()+1);
  const annual=await member(annualStart,annualEnd,'yearly');await receive(annual,{subscriptionId:annual.providerSub});

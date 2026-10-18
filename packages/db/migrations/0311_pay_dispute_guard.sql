@@ -426,14 +426,14 @@ DO $patch$ DECLARE p record;src text;BEGIN
   'IF o.item_type=''credit_package'' THEN PERFORM pay_dispute_supersede(o.id);','external-pack'),
  ('public.pay_common_monthly_refund_claim(uuid,uuid,uuid,jsonb)',
   'v:=monthly_refund_validate(p_actor,p_order,p_terms);',
-  'PERFORM pay_dispute_order_lock(p_order); IF EXISTS(SELECT 1 FROM payment_disputes WHERE order_id=p_order) THEN '
+  'PERFORM pay_dispute_order_lock(p_order); IF EXISTS(SELECT 1 FROM payment_disputes WHERE order_id=p_order AND freeze_state IN (''pending'',''frozen'',''review'')) THEN '
    ||'RAISE EXCEPTION ''PAY_DISPUTE_REFUND_FORBIDDEN''; END IF; v:=monthly_refund_validate(p_actor,p_order,p_terms);','monthly-claim'),
  ('public.pay_common_monthly_refund_finish(uuid,uuid,uuid,jsonb)',
   'PERFORM monthly_refund_assert_admin(p_actor);i:=monthly_refund_lock(p_order,p_intent);',
   'PERFORM pay_dispute_order_lock(p_order); PERFORM monthly_refund_assert_admin(p_actor);i:=monthly_refund_lock(p_order,p_intent);','monthly-finish'),
  ('public.pay_common_package_refund_claim(uuid,uuid,uuid,jsonb)',
   'SELECT credits INTO balance FROM profiles WHERE id=owner_id FOR UPDATE;',
-  'PERFORM pay_dispute_order_lock(p_order); IF EXISTS(SELECT 1 FROM payment_disputes WHERE order_id=p_order) THEN '
+  'PERFORM pay_dispute_order_lock(p_order); IF EXISTS(SELECT 1 FROM payment_disputes WHERE order_id=p_order AND freeze_state IN (''pending'',''frozen'',''review'')) THEN '
    ||'RAISE EXCEPTION ''PAY_DISPUTE_REFUND_FORBIDDEN''; END IF; SELECT credits INTO balance FROM profiles WHERE id=owner_id FOR UPDATE;',
   'pack-claim'),
  ('public.pay_common_package_refund_result(uuid,uuid,jsonb)',
@@ -442,7 +442,7 @@ DO $patch$ DECLARE p record;src text;BEGIN
   'pack-result'),
  ('public.pay_common_package_refund_retry(uuid,uuid,uuid,jsonb)',
   'PERFORM 1 FROM profiles WHERE id=(SELECT user_id FROM payment_orders WHERE id=p_order) FOR UPDATE;',
-  'PERFORM pay_dispute_order_lock(p_order); IF EXISTS(SELECT 1 FROM payment_disputes WHERE order_id=p_order) THEN '
+  'PERFORM pay_dispute_order_lock(p_order); IF EXISTS(SELECT 1 FROM payment_disputes WHERE order_id=p_order AND freeze_state IN (''pending'',''frozen'',''review'')) THEN '
    ||'RAISE EXCEPTION ''PAY_DISPUTE_REFUND_FORBIDDEN''; END IF; PERFORM 1 FROM profiles WHERE id=(SELECT user_id FROM payment_orders WHERE id=p_order) FOR UPDATE;',
   'pack-retry')
  ) x(sig,anchor,replacement,marker) LOOP
@@ -787,6 +787,31 @@ DO $patch$ DECLARE src text;anchor text;BEGIN
    ||E'     WHERE e.pre_deduct_id=p_pre AND e.source_kind=''subscription_grant'' AND g.dispute_frozen);\n'
    ||E' END IF;\n RETURN NEXT; -- PAY-D1 overrun-review\n');
  END IF;
+END $patch$;
+
+-- A fully withdrawn hold is an explained, net-zero adjustment, never consumption.
+-- Other negative adjustments and actual spend remain subject to the original refund guards.
+CREATE OR REPLACE FUNCTION public.pay_dispute_neutral_adjustment(p_transaction uuid) RETURNS boolean
+LANGUAGE sql STABLE SET search_path=public,pg_temp AS $$
+ SELECT EXISTS(SELECT 1 FROM credit_transactions c WHERE c.id=p_transaction AND c.ledger_type='adjustment'
+  AND c.counts_as_spend IS DISTINCT FROM true AND c.source_type='payment_order'
+  AND c.reason_code IN ('dispute_freeze','dispute_adjustment','dispute_withdraw')
+  AND EXISTS(SELECT 1 FROM payment_disputes d WHERE d.order_id=c.source_order_id AND d.freeze_state='withdrawn')
+  AND NOT EXISTS(SELECT 1 FROM payment_disputes d WHERE d.order_id=c.source_order_id
+   AND d.freeze_state IN ('pending','frozen','review'))
+  AND (SELECT coalesce(sum(j.amount),0) FROM credit_transactions j WHERE j.user_id=c.user_id
+   AND j.source_order_id=c.source_order_id AND j.source_type='payment_order' AND j.ledger_type='adjustment'
+   AND j.reason_code IN ('dispute_freeze','dispute_adjustment','dispute_withdraw'))=0)
+$$;
+DO $patch$ DECLARE sig text;src text;anchor text;BEGIN
+ FOREACH sig IN ARRAY ARRAY['public.pay_common_package_refund_quote(uuid,uuid,uuid,jsonb,text,text)',
+  'public.monthly_refund_validate(uuid,uuid,jsonb)'] LOOP
+  src:=pg_get_functiondef(sig::regprocedure);
+  IF position('-- PAY-D1 withdrawn-refund' IN src)>0 THEN CONTINUE; END IF;
+  anchor:='coalesce(c.reason_code,'''')<>''bill2_reserve''';
+  IF array_length(string_to_array(src,anchor),1)<>2 THEN RAISE EXCEPTION 'PAY_DISPUTE_REFUND_QUOTE_PATCH: %',sig; END IF;
+  EXECUTE replace(src,anchor,anchor||E' AND NOT pay_dispute_neutral_adjustment(c.id) -- PAY-D1 withdrawn-refund\n');
+ END LOOP;
 END $patch$;
 
 DO $$ DECLARE f record;BEGIN
