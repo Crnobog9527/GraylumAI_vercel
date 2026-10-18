@@ -44,6 +44,8 @@ export function researchExecution(input: {
   onPause: (point: ResearchPause['point'], state: ResearchPause['state']) => void;
   /** false = the round's time budget cannot cover another supplier request; nothing is sent. */
   canSend: () => boolean;
+  /** Reserves one runtime call slot before each supplier BILL2 claim. */
+  callGate?: () => Promise<void>;
   now?: () => Date;
 }): ResearchExecution | null {
   const { research, execution } = input;
@@ -76,6 +78,7 @@ export function researchExecution(input: {
       nextSequence: async () => (await readCalls()).length + 1,
       phase: research.phase, ...(execution.epoch !== undefined ? { runtimeEpoch: execution.epoch } : {}),
       secrets: platformSecretReader(input.database), rateCounter: checkVendorRateLimit,
+      ...(input.callGate ? { callGate: input.callGate } : {}),
       newId: () => { throw new Error('RESEARCH_OPERATION_ID_REQUIRED'); },
       beforeSend: async () => input.canSend(),
       ...(input.now ? { now: input.now } : {}),

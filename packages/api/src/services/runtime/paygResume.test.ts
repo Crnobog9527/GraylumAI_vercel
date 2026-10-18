@@ -30,20 +30,20 @@ describe('explicit original-execution resume', () => {
     expect(f.read).toHaveBeenCalledExactlyOnceWith('begin');
   });
   it('counts only remaining calls and passes the exact CAS token', async () => {
-    const f = fixture();
+    const f = fixture('waiting_resume');
     const result = await beginPaygExecution(f);
     expect(f.callGate).toHaveBeenCalledExactlyOnceWith(id, 1, 'bill2.v2');
     expect(f.read).toHaveBeenLastCalledWith('payg_resume', { cursor: 3, epoch: 2 });
     expect(result).toMatchObject({ resumedGate: true, execution: { live: true, epoch: 3 } });
   });
   it.each(['call_limited', 'paused', 'limit_unavailable'] as const)('keeps the durable wait on %s', async reason => {
-    const f = fixture();
+    const f = fixture('waiting_resume');
     const result = await beginPaygExecution({ ...f, callGate: async () => ({ ok: false, reason, retryAfter: 60 }) });
-    expect(result.wait).toMatchObject({ state: 'waiting_credits', unavailable: reason, epoch: 2 });
+    expect(result.wait).toMatchObject({ state: 'waiting_resume', unavailable: reason, epoch: 2 });
     expect(f.read).toHaveBeenCalledExactlyOnceWith('read');
   });
   it('fails closed when the calls service throws without changing the epoch', async () => {
-    const f = fixture();
+    const f = fixture('waiting_resume');
     expect((await beginPaygExecution({ ...f, callGate: async () => { throw Error('offline'); } })).wait)
       .toMatchObject({ unavailable: 'limit_unavailable' });
     expect(f.read).toHaveBeenCalledTimes(1);
@@ -65,6 +65,12 @@ describe('explicit original-execution resume', () => {
     expect((await beginPaygExecution(fixture('waiting_resume', true))).wait?.unavailable).toBe('RUNTIME_PRICE_UNCONFIRMED');
     await expect(beginPaygExecution(fixture('running'))).rejects.toThrow('RUNTIME_RESUME_CONFLICT');
   });
+});
+it('rechecks limits without consuming a second slot when resuming the same waiting-credit claim', async () => {
+  const f = fixture('waiting_credits');
+  const result = await beginPaygExecution(f);
+  expect(f.callGate).toHaveBeenCalledExactlyOnceWith(id, 1, 'bill2.v2', false);
+  expect(result).toMatchObject({ resumedGate: true, execution: { live: true, epoch: 3 } });
 });
 it.each(['waiting_credits', 'waiting_resume'])('keeps %s and its CAS token for quota adjustment', async state => {
   const f = fixture(state);

@@ -330,6 +330,7 @@ const runtimeLimiters = new Map<string, {
 export async function checkRuntimeRateLimit(
   identifier: string, bucket: RuntimeBucket, config: RuntimeRateLimits, environment: RuntimeEnvironment, rate = 1,
   contractVersion: 'bill2.v1' | 'bill2.v2' = 'bill2.v1',
+  reserve = true,
 ): Promise<RuntimeLimitResult> {
   let backendStarted = false;
   try {
@@ -361,7 +362,7 @@ export async function checkRuntimeRateLimit(
       runtimeLimiters.set(key, pair); // Exactly six possible entries; replace, never append config versions.
     }
     // Read both windows before any multi-call reservation. Concurrent races can only overcount.
-    if (rate > 1) {
+    if (rate > 1 || !reserve) {
       for (const window of ['minute', 'day'] as const) {
         const result = await withDeadline(pair[window].getRemaining(identifier));
         if (!Number.isFinite(result.remaining) || !Number.isFinite(result.reset)) throw new Error('INVALID_REMAINING');
@@ -369,6 +370,7 @@ export async function checkRuntimeRateLimit(
           retryAfter: Math.max(1, Math.ceil((result.reset - Date.now()) / 1000)) };
       }
     }
+    if (!reserve) return { success: true };
     for (const window of ['minute', 'day'] as const) {
       const result = await limitWithDeadline(pair[window], identifier, rate);
       if (!result.success) return { success: false, reason: 'rate_limited', window,

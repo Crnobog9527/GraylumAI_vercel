@@ -207,7 +207,7 @@ it.each([
     expect(completedHistory.slice(0, 2)).toEqual(savedHistory.slice(0, 2));
     expect(await host.execute(admitted.executionId)).toEqual(completed);
     expect(requests.map(r => r.model)).toEqual([model, summaryModel]);
-    expect(gate.mock.calls.map(call => call[1])).toEqual([2, 1, 1]);
+    expect(gate.mock.calls.map(call => call[1])).toEqual([1, 1, 1, 1]);
     expect(await history()).toEqual(completedHistory);
     expect((await db.query(`select count(*)::int n,sum(charged_delta)::int charged
       from bill2_calls where run_id=$1`, [admitted.runId])).rows[0]).toEqual({ n: 2, charged: 6 });

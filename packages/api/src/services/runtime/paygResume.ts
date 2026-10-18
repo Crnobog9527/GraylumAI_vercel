@@ -43,12 +43,24 @@ export async function beginPaygExecution(input: {
       return {execution:await input.read('payg_resume', {cursor:input.resume.cursor,epoch:input.resume.epoch}),
         resumedGate:false};
     }
-    let verdict;
-    // Resuming immediately attempts one next call; the rest of the run budget
-    // remains a ceiling and is counted only if those calls are actually claimed.
-    try { verdict = await input.callGate(await input.actor(), 1, 'bill2.v2'); }
-    catch { return { execution, resumedGate: false, wait: wait('limit_unavailable') }; }
-    if (!verdict.ok) return { execution, resumedGate: false, wait: wait(verdict.reason) };
+    let resumedGate = false;
+    // waiting_credits is saved only after the pending sequence passed this gate;
+    // retrying that same claim after a top-up must not reserve it twice.
+    if (execution.state === 'waiting_credits') {
+      try {
+        const verdict = await input.callGate(await input.actor(), 1, 'bill2.v2', false);
+        if (!verdict.ok) return { execution, resumedGate: false, wait: wait(verdict.reason) };
+        resumedGate = true;
+      } catch { return { execution, resumedGate: false, wait: wait('limit_unavailable') }; }
+    }
+    else {
+      // A waiting_resume may precede its first call gate, so reserve one next call.
+      try {
+        const verdict = await input.callGate(await input.actor(), 1, 'bill2.v2');
+        if (!verdict.ok) return { execution, resumedGate: false, wait: wait(verdict.reason) };
+        resumedGate = true;
+      } catch { return { execution, resumedGate: false, wait: wait('limit_unavailable') }; }
+    }
     if (execution.billing.mode === 'staging_test') {
       if (!input.resumePricing) return { execution, resumedGate: false, wait: wait('RUNTIME_PRICE_UNCONFIRMED') };
       // Tool-route prices (RT-3b PR-3) have no model price row; their frozen expiry is checked by each claim (0255).
@@ -57,7 +69,7 @@ export async function beginPaygExecution(input: {
     }
     try {
       return { execution: await input.read('payg_resume', { cursor: input.resume.cursor, epoch: input.resume.epoch }),
-        resumedGate: true };
+        resumedGate };
     } catch (error) {
       if (error instanceof StagingAccessError && error.reason === 'RUNTIME_PRICE_CONFIGURATION_PENDING')
         return { execution, resumedGate: false, wait: wait('RUNTIME_PRICE_CONFIGURATION_PENDING') };

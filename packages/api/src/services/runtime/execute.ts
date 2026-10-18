@@ -102,17 +102,23 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   if(!policy)throw new Error('RUNTIME_MODEL_DENIED');
   const session=new PostgresSession(ownerDatabase,{actorId:await options.actor(),sessionId:execution.sessionId,executionId});
   const nativeSession=native&&!context.reportGeneration?new NativeSession(session,Boolean(context.mentorText)):undefined;
-  let transportNotStarted=false,providerRejected=false;
-  let claimNotice:string|undefined;
-  let reportFailure:'REPORT_MEMBERSHIP_REQUIRED'|'REPORT_ENTITLEMENTS_UNAVAILABLE'|'REPORT_SOURCE_CONFLICT'|undefined;
-  let terminalReplyFailure=false;
+  let transportNotStarted=false,providerRejected=false,terminalReplyFailure=false;
+  let claimNotice:string|undefined,reportFailure:'REPORT_MEMBERSHIP_REQUIRED'|'REPORT_ENTITLEMENTS_UNAVAILABLE'|'REPORT_SOURCE_CONFLICT'|undefined;
   let gateChecked=resumedGate,moderationBlocked=false;
   let waitPoint:{epoch:number;sequence:number;requestHash:string;phase:string;state:PaygWait['state']}|undefined;
   let gateRejection:GateRejection|undefined;
+  const checkCallGate=async()=>{
+   const leave=budget.timing?.enter('rateLimit');
+   try{
+    const verdict=await options.callGate(await options.actor(),1,isPayg?'bill2.v2':'bill2.v1');
+    if(!verdict.ok){gateRejection=verdict.reason;throw new Error('RUNTIME_NEW_CALL_DENIED');}
+   }
+   catch(error){gateRejection??='limit_unavailable';throw error;}finally{leave?.();}
+  };
   const research=researchExecution({research:context.research,tools:context.tools,execution,executionId,actorId:await options.actor(),
    database:options.database,emit:event=>progress(event),onClosed:()=>{accountClosed=true;},
    onPause:(point,state)=>{if(isPayg)waitPoint={epoch:execution.epoch!,...point,state};},
-   canSend:()=>{try{budget.assertCanStart(5000);return true;}catch{return false;}}});
+   canSend:()=>{try{budget.assertCanStart(5000);return true;}catch{return false;}},callGate:checkCallGate});
   const checkAgentReply=terminalReplyGuard(agentTurn,context.tools.includes(ASK_QUESTION_TOOL),()=>{terminalReplyFailure=true;},
    Boolean(context.skillFile),Boolean(context.historyRead),research?.tools.map(tool=>tool.name));
   let preflightFailure:string|undefined,transportFailureCode:string|undefined;
@@ -167,14 +173,8 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
       if(isPayg)call=runtimePaygCall(request,phase,selectedPolicy,execution.billing.rules,execution.epoch!,native).call;
       // Count one actual call before each new BILL2 claim; maxCalls remains only a ceiling.
       if(!gateChecked){
-       const leaveRateLimit=budget.timing?.enter('rateLimit');
-       try{
-        const verdict=await options.callGate(await options.actor(),1,
-          isPayg?'bill2.v2':'bill2.v1');
-        if(!verdict.ok){gateRejection=verdict.reason;throw new Error('RUNTIME_NEW_CALL_DENIED');}
-        gateChecked=true;
-       }catch(error){gateRejection??='limit_unavailable';throw error;}
-       finally{leaveRateLimit?.();}
+       await checkCallGate();
+       gateChecked=true;
       }
       const claim=await (isPayg?billing.claimPaygCall(execution.runId,sequence,call)
        :billing.claimCall(execution.runId,sequence,call)).catch(error=>{

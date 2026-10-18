@@ -44,12 +44,13 @@ function database(calls: Array<{ id: string; sequence: number; providerId: strin
 }
 const execution = (live: boolean) => ({ sessionId, runId, epoch: 4, live,
   billing: { callPolicy: [{ modelId: actor, model: 'vendor/model', protocol: 'openrouter-chat-v1' }, policy] } } as never);
-function build(live: boolean, db: ReturnType<typeof database>, canSend = () => true) {
+function build(live: boolean, db: ReturnType<typeof database>, canSend = () => true,
+  callGate = vi.fn(async () => {})) {
   const events: ResearchTurnEvent[] = [];
   const onPause = vi.fn();
   const built = researchExecution({ research, tools: ['ask_question', 'web_search'], execution: execution(live), executionId,
-    actorId: actor, database: db, emit: event => events.push(event), onClosed: () => {}, onPause, canSend, now: () => now })!;
-  return { built, events, onPause };
+    actorId: actor, database: db, emit: event => events.push(event), onClosed: () => {}, onPause, canSend, callGate, now: () => now })!;
+  return { built, events, onPause, callGate };
 }
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); resetPlatformSecretCacheForTests(); });
 
@@ -68,12 +69,13 @@ describe('researchExecution (RT-3b PR-3)', () => {
     const fetch = vi.fn();
     vi.stubGlobal('fetch', fetch);
     const db = database([{ id: callId(1), sequence: 1, providerId: 'gen-1' }, { id: callId(2), sequence: 2, providerId: callId(2) }]);
-    const { built, events, onPause } = build(true, db);
+    const { built, events, onPause, callGate } = build(true, db);
     // Waiting for credits: nothing held or sent; the turn pauses at this slot instead of telling the model to go on without it.
     await expect(built.tools[0]!.execute({ query: 'coffee shops', mode: 'fast' }, 'call-1')).rejects.toThrow('RUNTIME_WAITING_CREDITS');
     const claim = db.rpc.mock.calls.find(([name]) => name === 'bill2_claim')!;
     expect(claim[1]).toMatchObject({ p_run_id: runId, p_actor_id: actor, p_sequence: 3,
       p_payload: { runtimeEpoch: 4, phase: RESEARCH_PHASE, protocol: 'research-tool-v1', model: policy.model } });
+    expect(callGate).toHaveBeenCalledExactlyOnceWith();
     expect(typeof (claim[1].p_payload as { runtimeEpoch: unknown }).runtimeEpoch).toBe('number');
     expect(fetch).not.toHaveBeenCalled();
     // The host saves this exact slot as the pause point (payg_wait); the resumed turn claims it with the same request.
@@ -82,6 +84,19 @@ describe('researchExecution (RT-3b PR-3)', () => {
     expect((claim[1].p_payload as { requestHash: string }).requestHash).toMatch(/^[a-f0-9]{64}$/);
     // Started, never reported as failed: it runs again after the top-up.
     expect(events.map(event => event.type === 'research_call' && event.state)).toEqual(['running']);
+  });
+
+  it('denies a supplier subcall before its BILL2 claim when the runtime call limit is full', async () => {
+    vi.stubEnv('PARALLEL_API_KEY', 'test-key');
+    const fetch = vi.fn(); vi.stubGlobal('fetch', fetch);
+    const db = database([{ id: callId(1), sequence: 1, providerId: 'gen-1' }]);
+    const callGate = vi.fn(async () => { throw new Error('RUNTIME_NEW_CALL_DENIED'); });
+    const { built } = build(true, db, () => true, callGate);
+    await expect(built.tools[0]!.execute({ query: 'coffee shops', mode: 'fast' }, 'call-1'))
+      .rejects.toThrow('RUNTIME_NEW_CALL_DENIED');
+    expect(callGate).toHaveBeenCalledExactlyOnceWith();
+    expect(db.rpc.mock.calls.some(([name]) => name === 'bill2_claim')).toBe(false);
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it('a replay never claims or sends a subcall', async () => {

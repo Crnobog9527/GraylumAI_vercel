@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({ limit: vi.fn(), options: vi.fn() }));
+const mocks = vi.hoisted(() => ({ limit: vi.fn(), getRemaining: vi.fn(), options: vi.fn() }));
 vi.mock('@upstash/redis', () => ({ Redis: class {} }));
 vi.mock('@upstash/ratelimit', () => ({
   Ratelimit: class {
     static slidingWindow = vi.fn(() => 'window');
     constructor(options: unknown) { mocks.options(options); }
     limit = mocks.limit;
+    getRemaining = mocks.getRemaining;
   },
 }));
 vi.mock('../../lib/logger', () => ({ logger: { error: vi.fn() } }));
@@ -25,6 +26,7 @@ for (const [name, load] of loaders) {
       vi.stubEnv('UPSTASH_REDIS_REST_TOKEN', 'synthetic');
       vi.stubEnv('RATE_LIMIT_FAIL_CLOSED', 'false');
       mocks.limit.mockResolvedValue({ success: true, limit: 20, remaining: 19, reset: Date.now() + 60000 });
+      mocks.getRemaining.mockResolvedValue({ remaining: 20, reset: Date.now() + 60000 });
     });
     afterEach(() => { vi.unstubAllEnvs(); vi.useRealTimers(); });
 
@@ -79,6 +81,16 @@ for (const [name, load] of loaders) {
       const { checkRateLimit } = await load();
       expect(await checkRateLimit('user')).toMatchObject({ success: false, reason: 'unavailable' });
     });
+    if (name === 'API') {
+      it('rechecks runtime limits without reserving another slot for a waiting credit claim', async () => {
+        const { checkRuntimeRateLimit } = await load();
+        const { DEFAULT_RUNTIME_RATE_LIMITS } = await import('../runtime/rateLimitSettings');
+        expect(await checkRuntimeRateLimit('user', 'calls', DEFAULT_RUNTIME_RATE_LIMITS, 'staging', 1, 'bill2.v2', false))
+          .toEqual({ success: true });
+        expect(mocks.getRemaining).toHaveBeenCalledTimes(2);
+        expect(mocks.limit).not.toHaveBeenCalled();
+      });
+    }
   });
 }
 
