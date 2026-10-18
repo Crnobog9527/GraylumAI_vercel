@@ -35,7 +35,8 @@ export function FounderProfileCardView({ view, pending, error, onSubmit, onWithd
         愿意的话，可以把你的账号放到公开的创始会员墙上。默认不公开，只有你勾选同意并通过审核后才会展示。
       </p>
       {status && <p className="mt-2 text-sm" role="status" data-testid="founder-wall-status">{status}</p>}
-      {editable && <FounderWallForm key={`${view.entry?.updatedAt ?? 'new'}-${view.consent.granted}`} view={view} pending={pending} serverError={error} onSubmit={onSubmit} />}
+      {editable && <FounderWallForm key={`${view.entry?.updatedAt ?? 'new'}-${view.consent.granted}`} view={view}
+        pending={pending} serverError={error} onSubmit={onSubmit} />}
       {editable && view.entry && view.consent.granted && <Button type="button" variant="outline" size="sm" className="mt-3"
         disabled={pending} onClick={onWithdraw} data-testid="founder-wall-withdraw">撤回公开并下架</Button>}
     </div>}
