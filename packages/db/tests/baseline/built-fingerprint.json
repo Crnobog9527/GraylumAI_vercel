@@ -3211,7 +3211,7 @@
   "fn:fusion_call_output_save(uuid,uuid,text)": "4afa78b897ef",
   "fn:fusion_call_verdict(uuid,uuid,text)": "0aec31b33411",
   "fn:fusion_compare_active(uuid)": "fb5eb278ed80",
-  "fn:fusion_compare_adopt(uuid,uuid,integer,uuid,jsonb,jsonb)": "e8dd65b1d3c2",
+  "fn:fusion_compare_adopt(uuid,uuid,integer,uuid,jsonb,jsonb)": "5e418805f4af",
   "fn:fusion_compare_begin(uuid,uuid,uuid,jsonb)": "ea9f62fdec3e",
   "fn:fusion_compare_claim(uuid,uuid,jsonb)": "832c59481431",
   "fn:fusion_compare_context(uuid,uuid,integer)": "aacb83c94298",

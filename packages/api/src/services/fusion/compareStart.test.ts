@@ -296,3 +296,17 @@ describe('compare start: a resumed request is not re-sized with today\'s setting
   });
 });
 
+
+describe('compare start: references and recorded work material (review findings)', () => {
+  const withRef = { parts: { ...choice().parts, references: [{ documentId: id(5), version: '1', hash: 'h', title: 't', text: 'x' }] } };
+  it('refuses @ library documents in this version, before pricing or recording anything', async () => {
+    await expect(start({}, withRef)).rejects.toThrow('FUSION_COMPARE_REFERENCES_UNSUPPORTED');
+    await expect(estimateCompare(deps(), { ...choice(), ...withRef })).rejects.toThrow('FUSION_COMPARE_REFERENCES_UNSUPPORTED');
+    expect(names()).toEqual([]);
+  });
+  it('records the work-material revision with the request', async () => {
+    await start({}, { materialRevision: 7 });
+    const begin = s.rpcs.find(call => call.name === 'fusion_compare_begin')!;
+    expect((begin.args.p_request as { config: { materialRevision: unknown } }).config.materialRevision).toBe(7);
+  });
+});

@@ -154,6 +154,9 @@ export async function fusionCompareCases({db,Client,connectionString,report,crea
   await assert.rejects(call(db,'fusion_compare_claim',actor,first.compareId,items),/FUSION_COMPARE_ENDED/);
   report.checks.push('read lists columns in order with saved body, verdict, charged credits and their total; a column stops free before dispatch');
 
+  // A real start records the session's work-material revision with the request; adoption fences on it.
+  const material = (await db.query('SELECT runtime_session_context($1,$2)->>\'materialRevision\' v',[actor,session])).rows[0].v;
+  await db.query("UPDATE fusion_compares SET config=config||jsonb_build_object('materialRevision',$2::text) WHERE id=$1",[first.compareId,material]);
   // Adoption: column 1 has no usable answer; column 0 is written back with a zero-amount adoption run.
   const items2 = [{role:'user',content:question},{role:'assistant',content:[{type:'output_text',text:answer}]}];
   const billing = (columnIndex,patch={}) => ({...a.payload,input:{...a.payload.input,input:question,dependencies:[],
@@ -167,6 +170,11 @@ export async function fusionCompareCases({db,Client,connectionString,report,crea
   await assert.rejects(call(db,'fusion_compare_adopt',actor,first.compareId,0,randomUUID(),
     billing(0,{moduleId:randomUUID(),skillId:randomUUID(),revisionId:randomUUID()}),items2),/FUSION_COMPARE_SKILL_MISMATCH/,
     'a compare without a Skill adopts without one');
+  // The work material changed after the compare started: the answer is stale, nothing is written.
+  await db.query("UPDATE fusion_compares SET config=config||'{\"materialRevision\":\"changed-since\"}' WHERE id=$1",[first.compareId]);
+  assert.equal((await call(db,'fusion_compare_adopt',actor,first.compareId,0,randomUUID(),billing(0),items2)).state,'stale');
+  assert.equal(await count(db,'SELECT revision v FROM runtime_sessions WHERE id=$1',[session]),0,'a stale adoption writes nothing');
+  await db.query("UPDATE fusion_compares SET config=config||jsonb_build_object('materialRevision',$2::text) WHERE id=$1",[first.compareId,material]);
   const adoptRequest = randomUUID();
   const funds = await wallet(db,actor);
   const adopted = await call(db,'fusion_compare_adopt',actor,first.compareId,0,adoptRequest,billing(0),items2);

@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { realContract } from '../runtime/realHost';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -79,7 +80,8 @@ export async function buildCompareColumns(input: { admin: SupabaseClient; actorI
   }));
   const priced = await freezeStagingPaygPricing(admin, admitted.map(model => model.policy));
   const billingUnit = await freezeWindowBillingUnit(admin, window, admitted.map(model => model.quote));
-  const rules: FrozenPaygRun['rules'] = { version: 'runtime-staging-v1', quoteVersion: window.id,
+  // RUNTIME-PROD: a staging window or the production host; realContract keeps them apart.
+  const rules: FrozenPaygRun['rules'] = { ...realContract(window).rules,
     creditsPerUsd: window.creditsPerUsd, multiplier: window.multiplier, fx: {}, billingUnit };
   const columns: CompareColumn[] = [];
   const tooLarge: string[] = [];
@@ -172,7 +174,7 @@ export async function admitCompareGroup(input: { admin: SupabaseClient; actorId:
       fusion: { index: column.index, phase: PHASE, body: column.body, call: column.call } };
     // No Skill identity and no session on the run: the columns use different models than a Skill's own, and
     // adoption writes through its own zero-amount run (FUSION-COMPARE §3.4).
-    const payload = frozenPaygRunSchema.parse({ contractVersion: 'bill2.v2', mode: 'staging_test', testWindowId: built.window.id,
+    const payload = frozenPaygRunSchema.parse({ contractVersion: 'bill2.v2', ...realContract(built.window).host,
       scope: { kind: 'positioning_draft', draftId: uuid.parse(draftId) }, operation: 'question', modelId: column.modelId,
       sourceHash: createHash('sha256').update(JSON.stringify(context)).digest('hex'), input: context, callPolicy: [column.policy],
       rules: built.rules,

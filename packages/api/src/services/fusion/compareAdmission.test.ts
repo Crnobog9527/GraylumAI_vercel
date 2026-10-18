@@ -7,14 +7,14 @@ const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')
 const state = vi.hoisted(() => ({
   compare: {} as Record<string, unknown>, entitlements: {} as Record<string, unknown>, rpcs: [] as Array<{ name: string; args: Record<string, unknown> }>,
   replies: new Map<string, unknown>(), credits: new Map<string, number>(), tooLarge: new Set<string>(), shrink: new Set<string>(),
-  admitted: [] as string[], exploding: new Set<string>(), noRoom: new Set<string>(), groupExists: false, clamp: new Map<string, number>(),
+  admitted: [] as string[], exploding: new Set<string>(), noRoom: new Set<string>(), production: false, groupExists: false, clamp: new Map<string, number>(),
 }));
 vi.mock('./settings', async original => ({ ...(await original<typeof import('./settings')>()),
   readFusionSettings: async () => ({ version: 1, review: {}, compare: state.compare }) }));
 vi.mock('../membershipEntitlements', async original => ({ ...(await original<typeof import('../membershipEntitlements')>()),
   readMembershipEntitlements: async () => state.entitlements, assertFusionEntitlement: () => undefined }));
 vi.mock('../runtime/stagingPolicy', async original => ({ ...(await original<typeof import('../runtime/stagingPolicy')>()),
-  loadStagingPolicy: async () => ({ id: id(900), creditsPerUsd: '100', multiplier: '3',
+  loadStagingPolicy: async () => ({ ...(state.production ? { mode: 'production' } : {}), id: id(900), creditsPerUsd: '100', multiplier: '3',
     expiresAt: new Date(Date.now() + 3_600_000).toISOString(), callPolicies: [] }) }));
 vi.mock('../runtime/admissionLimits', async original => ({ ...(await original<typeof import('../runtime/admissionLimits')>()),
   admissionDeadline: (at: string) => at }));
@@ -67,7 +67,7 @@ beforeEach(() => {
     maxBudgetUsd: '2', dispatchMinutes: 10, breaker: { platformUsd: '2', noDeliveryCalls: 10 } };
   state.entitlements = { allowFusionCompare: true, fusionCompareMaxModels: 4 };
   state.rpcs = []; state.replies = new Map(); state.credits = new Map(); state.tooLarge = new Set(); state.shrink = new Set(); state.admitted = [];
-  state.exploding = new Set(); state.noRoom = new Set(); state.groupExists = false; state.clamp = new Map();
+  state.exploding = new Set(); state.noRoom = new Set(); state.production = false; state.groupExists = false; state.clamp = new Map();
 });
 
 describe('compare live rules (FUSION-COMPARE §3.3)', () => {
@@ -136,6 +136,14 @@ describe('compare group admission', () => {
     modelIds: models, request, env: {}, shown, ...extra });
   const reply = (replayed: boolean) => ({ groupId: id(70), replayed, runs: models.map((model, index) => ({ runId: id(80 + index),
     fusion: { index, phase: 'fusion_compare', body: `b${index}`, call: { phase: 'fusion_compare', model: `m/${model}` } } })) });
+  it('uses the production host contract (no test window) when the active policy is production', async () => {
+    state.production = true; state.replies.set('fusion_group_admit', reply(false));
+    await admit();
+    const call = state.rpcs.filter(item => item.name === 'fusion_group_admit').at(-1)!;
+    const payload = (call.args.p_runs as Array<{ payload: Record<string, unknown> }>)[0]!.payload;
+    expect(payload).toMatchObject({ mode: 'production', rules: { version: 'runtime-production-v1' } });
+    expect(payload).not.toHaveProperty('testWindowId');
+  });
   it('sizes the columns with the answer limit given from the recorded request, not the live setting', async () => {
     state.replies.set('fusion_group_admit', reply(false));
     await admit({ answerTokens: 2048 }); // the live setting is 4096

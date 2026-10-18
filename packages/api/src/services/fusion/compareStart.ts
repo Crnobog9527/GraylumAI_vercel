@@ -20,7 +20,12 @@ export type CompareDeps = { admin: SupabaseClient; actorId: string; env?: Record
   /** The ordinary per-user message rate limit (newWorkGate.message): throws when the user is over it. Called once per new
    * request, before the paid judgement, so a refused or blocked request cannot be repeated without bound. */
   rateLimit: () => Promise<void> };
-export type CompareChoice = { sessionId: string; historyRevision: number; modelIds: string[]; parts: CompareParts };
+export type CompareChoice = { sessionId: string; historyRevision: number; modelIds: string[]; parts: CompareParts;
+  /** The session's work-material revision read together with the context; recorded so adoption can fence on it. */
+  materialRevision?: string | number | null };
+/** First version: library documents referenced with @ are not offered to a compare. Their text would be frozen into the
+ * runs without being registered for the library-erasure path, so a deleted document could stay in a stored payload. */
+const assertNoReferences = (parts: CompareParts) => { if (parts.references.length) throw new Error('FUSION_COMPARE_REFERENCES_UNSUPPORTED'); };
 export type CompareEstimate = { credits: number; columns: Array<{ modelId: string; credits: number; usd: string }>;
   tooLarge: string[]; refundCapReached: boolean;
   /** The columns together would exceed the administrator's single-compare budget: the page offers fewer models. */
@@ -32,6 +37,7 @@ const sha = (value: unknown) => createHash('sha256').update(JSON.stringify(value
 const upperRequest = (parts: CompareParts) => compareRequest({ ...parts, positioningFallback: true });
 
 export async function estimateCompare(deps: CompareDeps, choice: CompareChoice): Promise<CompareEstimate> {
+  assertNoReferences(choice.parts);
   const settings = await assertCompareAllowed(deps.admin, deps.actorId, choice.modelIds);
   // Free checks only: the paid judgement happens once, at start (a request id can repeat it never).
   const gate = await readCompareGate(deps.admin, deps.actorId);
@@ -54,6 +60,7 @@ type RecordView = { compareId: string; state: string; gateVerdict: string | null
  * to; the group never holds more than it. A repeat of the same request id never judges again and returns the same group. */
 export type CompareStartInput = CompareChoice & { requestId: string; shown: Pick<CompareEstimate, 'credits' | 'columns'> };
 export async function startCompare(deps: CompareDeps, choice: CompareStartInput): Promise<CompareStarted> {
+  assertNoReferences(choice.parts);
   const { admin, actorId } = deps;
   const { requestId } = choice;
   const settings = await assertCompareAllowed(admin, actorId, choice.modelIds);
@@ -62,7 +69,8 @@ export async function startCompare(deps: CompareDeps, choice: CompareStartInput)
   const snapshot = snapshotHash(choice.parts);
   const skill = choice.parts.skill && { moduleId: choice.parts.skill.moduleId, revisionId: choice.parts.skill.revisionId };
   const question = choice.parts.question;
-  const config = { models: choice.modelIds, skill, answerOutputTokens: settings.answerOutputTokens };
+  const config = { models: choice.modelIds, skill, answerOutputTokens: settings.answerOutputTokens,
+    materialRevision: choice.materialRevision ?? null };
   const begin = () => compareRpc<RecordView>(admin, 'fusion_compare_begin', { p_actor_id: actorId, p_request_id: requestId,
     p_session_id: choice.sessionId, p_request: { question, questionHash: createHash('sha256').update(question).digest('hex'),
       // Everything that identifies this request: a repeat with anything else is a conflict, never the old result.
