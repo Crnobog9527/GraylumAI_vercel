@@ -56,10 +56,14 @@ export const BENCHMARK_ROUTE_KINDS: Readonly<Partial<Record<SocialPlatform, Read
 });
 
 /**
- * Extra `account_posts` pages a platform may need to reach the 20-post rule when one page falls short (Xiaohongshu
- * pages by cursor). Each extra page is a billed sub-call of the same fetch and counts against the round allowance.
+ * Extra `account_posts` pages a platform may need to reach the 20-post rule when one page falls short. Each extra
+ * page is a billed sub-call of the same fetch and counts against the round allowance.
  */
-export const BENCHMARK_EXTRA_POST_PAGES: Readonly<Partial<Record<SocialPlatform, number>>> = Object.freeze({ xiaohongshu: 2 });
+export const BENCHMARK_EXTRA_POST_PAGES: Readonly<Partial<Record<SocialPlatform, number>>> = Object.freeze({
+  xiaohongshu: 2,
+  tiktok: 1,
+  douyin: 1,
+});
 
 /** RT-3a budgets at most this many sub-calls per benchmark account inside the run's 32-call ceiling. */
 export const MAX_BENCHMARK_SUBCALLS_PER_ACCOUNT = 3;

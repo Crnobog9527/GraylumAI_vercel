@@ -82,6 +82,40 @@ describe('Douyin account routes on real response shapes', () => {
     }
   });
 
+  it.each(['tiktok', 'douyin'] as const)('%s follows the recorded TikHub max_cursor fields and sends the next cursor', async platform => {
+    // TikTok RESEARCH-0 sample and RT-7 Douyin sample both expose data.has_more, data.max_cursor and data.aweme_list.
+    // This fixture keeps only the verified field names and sanitized post payload.
+    const data = samples.douyinPosts.data as Record<string, unknown>;
+    const body = { ...samples.douyinPosts, data: { ...data, has_more: 1, max_cursor: 1790600000000 } };
+    const account = platform === 'tiktok' ? 'alice' : SEC;
+    const firstCalls: Array<{ url: string }> = [];
+    const first = await callTikhub({ platform, kind: 'account_posts', account }, deps(jsonFetch(200, body, firstCalls as never)));
+    expect(first.nextCursor).toBe('1790600000000');
+    expect(first.items.length).toBeGreaterThan(0);
+    const path = platform === 'tiktok' ? '/api/v1/tiktok/app/v3/fetch_user_post_videos'
+      : '/api/v1/douyin/app/v3/fetch_user_post_videos';
+    expect(new URL(firstCalls[0]!.url).pathname).toBe(path);
+    expect(new URL(firstCalls[0]!.url).searchParams.get('max_cursor')).toBe('0');
+
+    const nextCalls: Array<{ url: string }> = [];
+    await callTikhub({ platform, kind: 'account_posts', account, cursor: first.nextCursor },
+      deps(jsonFetch(200, { ...body, data: { ...data, has_more: 0, max_cursor: 1790600000000 } }, nextCalls as never)));
+    expect(new URL(nextCalls[0]!.url).searchParams.get('max_cursor')).toBe('1790600000000');
+  });
+
+  it('does not return a TikTok or Douyin cursor when the upstream has no next page or the cursor does not advance', async () => {
+    const data = samples.douyinPosts.data as Record<string, unknown>;
+    const noMore = { ...samples.douyinPosts, data: { ...data, has_more: 0, max_cursor: 1790600000000 } };
+    const sameCursor = { ...samples.douyinPosts, data: { ...data, has_more: 1, max_cursor: 0 } };
+    for (const platform of ['tiktok', 'douyin'] as const) {
+      const account = platform === 'tiktok' ? 'alice' : SEC;
+      expect((await callTikhub({ platform, kind: 'account_posts', account }, deps(jsonFetch(200, noMore)))).nextCursor)
+        .toBeUndefined();
+      expect((await callTikhub({ platform, kind: 'account_posts', account }, deps(jsonFetch(200, sameCursor)))).nextCursor)
+        .toBeUndefined();
+    }
+  });
+
   it('keeps a positive play count (search results may carry one) and still drops a 0', async () => {
     const aweme = (samples.douyinPosts.data as { aweme_list: Array<Record<string, unknown>> }).aweme_list[0]!;
     const withViews = { ...aweme, statistics: { ...(aweme.statistics as object), play_count: 5400 } };

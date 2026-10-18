@@ -55,7 +55,7 @@ export async function benchmarkFetch(ctx: ResearchToolContext, args: ResearchToo
       continue;
     }
     // Cached evidence is free. Only a newly claimed attempt needs a full account allowance.
-    // Room for the account's own sub-calls plus the extra post pages its platform may need (Xiaohongshu).
+    // Room for the account's own sub-calls plus any extra post pages its platform may need.
     const extraPages = BENCHMARK_EXTRA_POST_PAGES[account.platform] ?? 0;
     if (budget.left < routes.kinds.length + extraPages) {
       partial = true;
