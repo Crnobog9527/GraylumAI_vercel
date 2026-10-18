@@ -165,7 +165,8 @@ export async function startCompare(deps: CompareDeps, choice: CompareStartInput)
     // The limit recorded with the request, not today's setting: a change by an administrator in between must not shorten answers.
     answerTokens: record.config?.answerOutputTokens })
     .catch(async (error: unknown) => {
-      if (/FUSION_COMPARE_STALE|FUSION_COMPARE_SOURCE_REVOKED|FUSION_COMPARE_SESSION_GONE|RUNTIME_MATERIAL_/.test(error instanceof Error ? error.message : '')) {
+      const message = error instanceof Error ? error.message : '';
+      if (/FUSION_COMPARE_STALE|FUSION_COMPARE_SOURCE_REVOKED|FUSION_COMPARE_SESSION_GONE|RUNTIME_MATERIAL_/.test(message)) {
         await compareRpc(admin, 'fusion_compare_end', { p_actor_id: actorId, p_compare_id: compareId }).catch(() => undefined);
       }
       throw error;
