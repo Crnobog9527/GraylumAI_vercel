@@ -6,6 +6,8 @@ import {postgresJsonbBytes} from './payloadSize';
 
 export const OWN_POSTS_SWITCH='chat_my_posts_enabled';
 export const OWN_POSTS_RESERVE=24000;
+/** The tool result becomes a JSON string inside the SDK request; bound both persisted and escaped wire bytes. */
+export const postResultBytes=(result:unknown)=>Math.max(postgresJsonbBytes(result),postgresJsonbBytes(JSON.stringify(result)));
 export const OWN_POSTS_INSTRUCTIONS='\nWhen advice needs the user\'s own published performance, read a my_posts entry from '
  +'the owned-source index (default 14 days; 30 or 90 only when listed). At most two reads per answer. Read saved data only; '
  +'never claim a refresh. Repeat the returned note for missing access or data, and the date for stale data. Missing metrics '
@@ -76,7 +78,7 @@ export function ownPostsResult(data:PublishMonitorData,now=Date.now()):Record<st
   result.source_connections=[...new Set([...data.connections.map(c=>c.id),...posts.map(p=>p.connection_id)])];
   result.platform_medians=Object.fromEntries(Object.entries(groups).map(([platform,metrics])=>[platform,
    Object.fromEntries(Object.entries(metrics).map(([key,values])=>[key,{median:median(values),samples:values.length}]))]));
-  if(postgresJsonbBytes(result)<=11000)return result;
+  if(postResultBytes(result)<=11000)return result;
   if(!posts.length)return {...unavailable,reason:'capacity_exhausted'};
   posts.pop();result.truncated=true;
  }
