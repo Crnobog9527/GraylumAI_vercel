@@ -1,5 +1,5 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
--- PAY-DISPUTE-GUARD D1. Provisional 0311; controller confirms number before staging apply.
+-- PAY-DISPUTE-GUARD D1. Migration 0308; controller selected 2026-10-19.
 -- Rollback: disable dispute dispatch first, restore predecessor function bodies, and forward-fix.
 -- Keep ALL financial rows and frozen balances; an active admin must explicitly withdraw each hold.
 -- Never drop these tables or simply restore balances from a database backup.

@@ -61,7 +61,7 @@
 | 定价与核对 | contract/adapter 版本、模型/工具/线路 ID、冻结兑换率/倍率/报价/上限、usage、覆盖组、最终性、冲突观测、结果/取消事实、查询尝试/来源/时间、收据验证及完整性摘要 | 提示词、原回答、工具参数/结果正文、URL 查询串、Skill 中混入的用户内容、SDK response 的 choices/message/reasoning |
 | 来源保护 | 原始预扣关联、grant/周期、reversed/quarantine/termination 状态、退款和冲正关系、一次终态/一次消费标识 | 与解释本笔收费无关的其他用户数据 |
 
-PAY-DISPUTE-GUARD D1（迁移暂定 0311）追加财务保留字段：
+PAY-DISPUTE-GUARD D1（迁移 0308）追加财务保留字段：
 
 - `payment_disputes`：内部拒付/订单/订阅编号、provider 与商户命名空间和 test/live 模式、规范付款键及 Stripe 原始编号、原付款时间、事件/开启/结案/截止时间、金额/币种、枚举原因/状态/结果、冻结/撤回/退款取代及停止续费事实、动作次数和管理员内部编号（含站外结案操作者及时间 external_resolved_by / external_resolved_at）。
 - `payment_dispute_event_receipts`：商户命名空间/模式/事件编号、拒付内部编号、事件类型、事件和处理时间。
