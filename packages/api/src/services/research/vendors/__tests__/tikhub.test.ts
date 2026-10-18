@@ -50,12 +50,14 @@ describe('TikHub routes', () => {
     expect(calls).toHaveLength(0);
   });
 
-  it('builds the tested Douyin v2 POST body and caps the post count at 30', () => {
+  it('builds the tested Douyin v2 POST body and caps TikTok and Douyin account pages at 20', () => {
     const built = buildTikhubRequest({ platform: 'douyin', kind: 'keyword_posts', keyword: ' 露营装备 ' });
     expect(built).toEqual({ request: { method: 'POST', url: 'https://api.tikhub.io/api/v1/douyin/search/fetch_video_search_v2',
       body: expect.objectContaining({ keyword: '露营装备', cursor: 0 }) } });
     const tiktok = buildTikhubRequest({ platform: 'tiktok', kind: 'account_posts', account: 'natgeo', limit: 99 });
-    expect('request' in tiktok && new URL(tiktok.request.url).searchParams.get('count')).toBe('30');
+    expect('request' in tiktok && new URL(tiktok.request.url).searchParams.get('count')).toBe('20');
+    const douyin = buildTikhubRequest({ platform: 'douyin', kind: 'account_posts', account: 'MS4wLjABAAAA' + 'a'.repeat(40), limit: 99 });
+    expect('request' in douyin && new URL(douyin.request.url).searchParams.get('count')).toBe('20');
   });
 });
 

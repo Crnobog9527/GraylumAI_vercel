@@ -63,7 +63,7 @@ export async function noticeConfig(admin: Pick<SupabaseClient, 'rpc'>, env: Env 
   return { ok: true, config: {
     apiKey,
     from: env.PAYMENT_NOTICE_FROM?.trim() || DEFAULT_NOTICE_FROM,
-    replyTo: normalizeMailbox(env.PAYMENT_NOTICE_REPLY_TO),
+    replyTo: normalizeMailbox(env.PAYMENT_NOTICE_REPLY_TO) ?? 'support@graylum.com',
     allowedRecipients,
   } };
 }

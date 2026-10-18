@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
-const mocks = vi.hoisted(() => ({ cron: vi.fn(), release: vi.fn(), capture: vi.fn(), auth: vi.fn(), create: vi.fn(), rpc: vi.fn() }));
+const mocks = vi.hoisted(() => ({ cron: vi.fn(), release: vi.fn(), capture: vi.fn(), auth: vi.fn(), create: vi.fn(), rpc: vi.fn(), reminders: vi.fn() }));
+vi.mock('@repo/api/src/services/notify/reminders', () => ({ runPaymentReminders: mocks.reminders }));
 vi.mock('@repo/api/src/services/subscriptionCreditGrants', () => ({ releaseDueAnnualSubscriptionCredits: mocks.release }));
 vi.mock('@repo/api/src/services', () => ({ logger: { system: { cronJob: mocks.cron } } }));
 vi.mock('@supabase/supabase-js', () => ({ createClient: mocks.create }));
@@ -9,6 +10,7 @@ vi.mock('@/lib/cron-auth', () => ({ validateCronRequest: mocks.auth }));
 import { GET } from './route';
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.reminders.mockResolvedValue({ success: true, attention: [], scanned: 0 });
   mocks.auth.mockReturnValue(null);
   mocks.rpc.mockReset().mockResolvedValue({ data: 8970, error: null });
   mocks.create.mockReturnValue({ rpc: mocks.rpc });
@@ -54,4 +56,30 @@ it('does not run or expose a summary without cron authorization', async () => {
   expect((await GET(new Request('https://fixture.invalid'))).status).toBe(401);
   expect(mocks.release).not.toHaveBeenCalled();
   expect(mocks.rpc).not.toHaveBeenCalled();
+});
+
+it('isolates reminder failures from credit release and alerts without personal data', async () => {
+  mocks.release.mockResolvedValue({ anomalies: [], releasedGrantCount: 1 });
+  mocks.reminders.mockRejectedValue(new Error('private address and provider details'));
+  const response = await GET(new Request('https://fixture.invalid'));
+  expect(response.status).toBe(500);
+  expect(mocks.rpc).toHaveBeenCalledWith('pay_waffo_release_due', { p_limit: 100 });
+  expect(mocks.capture).toHaveBeenCalledWith('PAY_NOTIFY_REVIEW_REQUIRED', expect.objectContaining({
+    extra: { count: 1, reasons: ['PAYMENT_NOTICE_SEND_FAILED'] },
+  }));
+  expect(JSON.stringify(await response.json())).not.toContain('private');
+});
+it.each(['annual', 'method'])('awaits reminder completion before returning a %s credit failure', async failure => {
+  mocks.release.mockResolvedValue({ anomalies: [], releasedGrantCount: 1 });
+  if (failure === 'annual') mocks.release.mockRejectedValue(new Error('credit release failed'));
+  else mocks.rpc.mockResolvedValue({ data: null, error: { message: 'method release failed' } });
+  let resolveReminders!: () => void;
+  const reminderWork = new Promise(resolve => { resolveReminders = () => resolve({ success: true, attention: [], scanned: 1 }); });
+  mocks.reminders.mockReturnValue(reminderWork);
+  let settled = false;
+  const response = GET(new Request('https://fixture.invalid')).then(value => { settled = true; return value; });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(settled).toBe(false);
+  resolveReminders();
+  expect((await response).status).toBe(500);
 });

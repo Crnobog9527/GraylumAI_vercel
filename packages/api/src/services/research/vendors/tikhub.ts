@@ -3,7 +3,7 @@
 // Douyin search v5 and Instagram posts v2 failed upstream and are deliberately absent. Responses
 // carry no cost: each successful call is one unit at the frozen official price (RT-2).
 import { exchange } from './http';
-import { hasEmptyPostList, normalizeTikhub, tikhubBodyCode, xhsNextCursor } from './tikhubShapes';
+import { hasEmptyPostList, normalizeTikhub, tikhubBodyCode, videoNextCursor, xhsNextCursor } from './tikhubShapes';
 import type {
   ResearchCallResult, SocialKind, SocialPlatform, VendorDeps, VendorRequest,
 } from './types';
@@ -38,7 +38,8 @@ export const TIKHUB_ROUTES: Partial<Record<`${SocialPlatform}:${SocialKind}`, Ti
   'douyin:account_posts': {
     method: 'GET', path: '/douyin/app/v3/fetch_user_post_videos', account: 'douyin_sec_uid',
     // TikHub documents count <= 20 for this endpoint, whatever the shared default is.
-    params: ({ account, limit }) => ({ sec_user_id: account!, max_cursor: 0, count: Math.min(limit, 20) }),
+    params: ({ account, limit, cursor }) => ({ sec_user_id: account!, max_cursor: cursor === undefined ? 0 : Number(cursor),
+      count: Math.min(limit, 20) }),
   },
   'xiaohongshu:keyword_posts': {
     method: 'GET', path: '/xiaohongshu/app_v2/search_notes',
@@ -82,7 +83,8 @@ export const TIKHUB_ROUTES: Partial<Record<`${SocialPlatform}:${SocialKind}`, Ti
   },
   'tiktok:account_posts': {
     method: 'GET', path: '/tiktok/app/v3/fetch_user_post_videos', account: 'tiktok_handle',
-    params: ({ account, limit }) => ({ unique_id: account!, max_cursor: 0, count: limit, sort_type: 0 }),
+    params: ({ account, limit, cursor }) => ({ unique_id: account!, max_cursor: cursor === undefined ? 0 : Number(cursor),
+      count: Math.min(limit, 20), sort_type: 0 }),
   },
   'youtube:keyword_posts': {
     method: 'GET', path: '/youtube/web_v2/get_general_search_v2', params: ({ keyword }) => ({ keyword: keyword!, type: 'video' }),
@@ -146,7 +148,7 @@ export interface TikhubCall {
   /** The post to read for `post_detail` (a YouTube video id). */
   postId?: string;
   limit?: number;
-  /** Next-page cursor for routes that paginate (Xiaohongshu account_posts); a malformed one sends nothing. */
+  /** Next-page cursor for account_posts routes; malformed cursors are rejected before sending. */
   cursor?: string;
 }
 
@@ -174,7 +176,12 @@ export function buildTikhubRequest(call: TikhubCall): { request: VendorRequest }
   if (!account || !route.account || !ACCOUNT_PATTERNS[route.account].test(account)) {
     return { reason: call.kind === 'post_detail' ? 'INVALID_POST' : 'INVALID_ACCOUNT' };
   }
-  if (call.cursor !== undefined && (call.kind !== 'account_posts' || !/^[0-9a-f]{24}$/.test(call.cursor))) return { reason: 'INVALID_CURSOR' };
+  if (call.cursor !== undefined) {
+    const xhsCursor = call.platform === 'xiaohongshu' && /^[0-9a-f]{24}$/.test(call.cursor);
+    const videoCursor = (call.platform === 'tiktok' || call.platform === 'douyin')
+      && /^(0|[1-9]\d*)$/.test(call.cursor) && Number.isSafeInteger(Number(call.cursor));
+    if (call.kind !== 'account_posts' || (!xhsCursor && !videoCursor)) return { reason: 'INVALID_CURSOR' };
+  }
   return { request: requestFor(route, { account, limit, ...(call.cursor ? { cursor: call.cursor } : {}) }) };
 }
 
@@ -233,7 +240,9 @@ export async function callTikhub(call: TikhubCall, deps: VendorDeps): Promise<Re
   }
   const limit = Math.min(Math.max(Math.trunc(call.limit ?? MAX_POSTS), 1), MAX_POSTS);
   const items = all.slice(0, limit);
-  const nextCursor = call.platform === 'xiaohongshu' && call.kind === 'account_posts' ? xhsNextCursor(answer.json) : undefined;
+  const nextCursor = call.kind !== 'account_posts' ? undefined
+    : call.platform === 'xiaohongshu' ? xhsNextCursor(answer.json)
+      : call.platform === 'tiktok' || call.platform === 'douyin' ? videoNextCursor(answer.json, call.cursor) : undefined;
   return { ...base, outcome: all.length > limit ? 'partial' : 'ok', reason: null, httpStatus: 200,
     supplierMayCharge: true, usage: { unit: 'call', units: '1' }, items, truncated: all.length > limit,
     ...(nextCursor ? { nextCursor } : {}) };
