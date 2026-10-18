@@ -50,6 +50,8 @@ export const BATCHES_S5: BatchS5[] = [
       { kind: 'note', colour: PAPER.mint, text: '改后', x: 572, y: 22, r: 5, w: 138, h: 116, depth: 1, big: true, edge: true },
       { kind: 'photo', photo: '/landing-s/s-3.webp', text: '出租屋一角 · 示意', x: -704, y: 56, r: 4, w: 132, h: 160, depth: 0, edge: true },
       { kind: 'scrap', colour: PAPER.tomato, x: 572, y: 66, r: -7, w: 130, h: 50, depth: 1, edge: true },
+      // Above the jury's panel, right of its label: the one card narrower screens keep beside the jury.
+      { kind: 'scrap', colour: PAPER.sky, text: '三个模型一起挑错', x: 240, y: 9, r: -3, w: 206, h: 60, depth: 1 },
     ],
   },
 ];

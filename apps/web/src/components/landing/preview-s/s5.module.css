@@ -6,11 +6,12 @@
  * film waits for the Owner's choice of tool; a still stands in for it, graded, grained and vignetted as the film will be.
  *
  * Handwriting: 霞鹜文楷 LXGW WenKai v1.530 (github.com/lxgw/LxgwWenKai), SIL Open Font License 1.1; only the characters
- * S5's cards write, subset to WOFF2 for the web (public/fonts/lxgw-wenkai-s5/, with OFL.txt). Owner approved 2026-10-18.
+ * S5's cards write, subset to WOFF2 for the web (./fonts/, with OFL-lxgw-wenkai.txt). Owner approved 2026-10-18.
  */
 @font-face {
   font-family: 'LXGW WenKai S5';
-  src: url('/fonts/lxgw-wenkai-s5/lxgw-wenkai-s5.woff2') format('woff2');
+  /* Bundled next to this sheet (served from /_next/static), so it does not pass the site's sign-in check. */
+  src: url('./fonts/lxgw-wenkai-s5.woff2') format('woff2');
   font-display: swap;
 }
 
