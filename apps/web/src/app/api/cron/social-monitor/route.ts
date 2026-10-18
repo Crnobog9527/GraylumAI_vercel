@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import { finishScheduledJobRun, startScheduledJobRun } from '@repo/api/src/services/scheduledJobRuns';
 import { loadPostForMeDeps } from '@repo/api/src/services/publishMonitor/secrets';
 import {
-  entitlementWindow, runSocialMonitorJob, tikhubEntitlements,
+  createRuntimeBudget, entitlementWindow, runSocialMonitorJob, tikhubEntitlements,
 } from '@repo/api/src/services/publishMonitor/socialMonitorJob';
 import { validateCronRequest } from '@/lib/cron-auth';
 
@@ -14,6 +14,7 @@ export const maxDuration = 300;
 const SOCIAL_MONITOR_JOB = 'social_monitor';
 
 export async function GET(request: Request) {
+  const startedAt = Date.now(), budget = createRuntimeBudget();
   const unauthorized = validateCronRequest(request, 'social-monitor');
   if (unauthorized) return unauthorized;
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -42,8 +43,8 @@ export async function GET(request: Request) {
       ? 'POSTFORME_KEY_INVALID' : 'PLATFORM_SECRET_UNAVAILABLE';
   }
   try {
-    const report = await runSocialMonitorJob(client, deps, Date.now() + 240_000, entitlementWindow(client), Date.now,
-      { env: process.env, entitlement: tikhubEntitlements(client) }, { env: process.env, defer: work => after(work) });
+    const report = await runSocialMonitorJob(client, deps, startedAt + 240_000, entitlementWindow(client), Date.now,
+      { env: process.env, entitlement: tikhubEntitlements(client) }, { env: process.env, defer: work => after(work), budget });
     if (keyError) report.failures.push('postforme_key');
     const success = report.failures.length === 0;
     await finish(success ? 'success' : 'error', { ...report, ...(keyError ? { postForMeKeyError: keyError } : {}) },
