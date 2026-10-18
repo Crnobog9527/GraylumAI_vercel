@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { AgentWorkStatus } from './agent-work-status';
-import { RUNNING_LABELS, workItemFromResearchCall, workItemLine, type WorkItem } from './agent-work-model';
+import { RUNNING_LABELS, workItemFromResearchCall, workItemLine, workItemsOf, type WorkItem } from './agent-work-model';
 import * as W from './fixtures/work-status';
 import type { ResearchCall } from '@/components/research/research-model';
 
@@ -62,5 +62,22 @@ describe('work rows', () => {
 
   it('keeps only live features for the landing page', () => {
     expect(W.sampleWorkItems(['positioning', 'library_search']).map(item => item.kind)).toEqual(['positioning', 'library_search']);
+  });
+});
+
+describe('workItemsOf', () => {
+  const good = {id: 'c1', kind: 'library_search', state: 'done', label: '在资料库里找到 2 篇相关内容', detail: 'Menu.md、Notes.md'};
+  it('reads the rows a view attached to an answer', () => {
+    expect(workItemsOf({executionId: 'a', workItems: [good]})).toEqual([{...good, credits: null}]);
+  });
+  it('drops malformed rows and anything that is not a list', () => {
+    expect(workItemsOf(null)).toEqual([]);
+    expect(workItemsOf({})).toEqual([]);
+    expect(workItemsOf({workItems: 'x'})).toEqual([]);
+    expect(workItemsOf({workItems: [null, 3, {...good, kind: 'secret'}, {...good, state: 'odd'}, {...good, id: ''}, {...good, label: 4}, good]}))
+      .toEqual([{...good, credits: null}]);
+  });
+  it('keeps at most 12 rows', () => {
+    expect(workItemsOf({workItems: Array.from({length: 20}, (_, i) => ({...good, id: 'c' + i}))})).toHaveLength(12);
   });
 });

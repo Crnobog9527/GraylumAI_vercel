@@ -85,10 +85,9 @@ export async function loadCurrentStripePrices(input: {
   return refs;
 }
 
-export async function loadConfiguredStripePrices(input: Omit<Parameters<typeof loadCurrentStripePrices>[0], 'scope'> & { testOnly?: boolean }) {
+export async function loadConfiguredStripePrices(input: Omit<Parameters<typeof loadCurrentStripePrices>[0], 'scope'>) {
   try {
     const scope = await resolveStripeScope(getStripeClient());
-    if (input.testOnly && scope.mode !== 'test') return new Map<string, string>();
     return await loadCurrentStripePrices({ ...input, scope });
   } catch (error) {
     throw createSafeServiceUnavailableError(error, '支付价格暂时无法读取，请稍后重试');
@@ -103,15 +102,14 @@ export function isSellableMemberPack(pack: { price: number; credits_amount: numb
 
 /**
  * Pro/Gold pack prices (0211 tiers) that card checkout charges: 0222 admission picks exactly one current
- * `package` price of the buyer's tier in the connected test account. Key `${packageId}:${tier}` → chargeable.
- * Two current prices for one tier make admission refuse, so they count as not chargeable. Test mode only,
- * like method checkout; display only, the admission still decides.
+ * `package` price of the buyer's tier in the connected account. Key `${packageId}:${tier}` → chargeable.
+ * Two current prices for one tier make admission refuse, so they count as not chargeable. In the connected account's
+ * own mode (R7: live in production), like method checkout; display only, the admission still decides.
  */
 export async function loadMemberPackReadiness(input: { db: Pick<SupabaseClient, 'from'>; ids: string[] }) {
   const ready = new Map<string, boolean>();
   if (!input.ids.length) return ready;
   const scope = await resolveStripeScope(getStripeClient());
-  if (scope.mode !== 'test') return ready;
   const result = await input.db.from('payment_provider_refs').select('external_id, credit_package_id, package_tier')
     .eq('channel', 'stripe').eq('merchant_namespace', scope.merchant).eq('mode', scope.mode)
     .eq('object_type', 'price').eq('offer_kind', 'standard').eq('is_current', true)

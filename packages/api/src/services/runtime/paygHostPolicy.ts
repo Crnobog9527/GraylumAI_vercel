@@ -23,9 +23,13 @@ const admittedRoutes: Readonly<Record<string,string>> = {
   'openai/gpt-6.1-sol':'openai',
   'anthropic/claude-opus-5.5':'anthropic',
 };
+/** The model/route pairs whose request shape and output semantics were approved (staging and production alike). */
+export const isAdmittedRoute = (model: string, endpointTag: string) => admittedRoutes[model] === endpointTag;
 // fusion_review / fusion_summary: FUSION-REVIEW per-model calls, claimed only as a billing group (0234).
+// fusion_compare: FUSION-COMPARE columns (0290), one plain-text streamed answer per model; its profile entry and
+// evidence come with FUSION-COMPARE PR-4.
 const phase = z.enum(['ordinary', 'skill', 'organizer', 'skill_matching', 'attached_organizer', 'report',
-  'fusion_review', 'fusion_summary']);
+  'fusion_review', 'fusion_summary', 'fusion_compare']);
 const sharedEvidence = {
   maxPromptToBytes: z.number().positive().max(0.7), maxPromptToUpper: z.number().positive().max(0.7),
   outputLimit: z.number().int().positive().max(PURPOSE_OUTPUT_CAP),
@@ -49,7 +53,7 @@ const fusionShapeEvidence = z.object({
  * must identify independently checked real samples; fixture results are not evidence. */
 // Small-cap probes establish truncation semantics; outputLimit is the separately authorized profile cap.
 // Direct variants need two length receipts. The approved Sonnet low exception references same-route none evidence.
-export const paygHostProfile = z.object({
+const profileFields = {
   model: reference, endpointTag: reference, protocol: z.literal('openrouter-chat-v1'),
   profileVersion: reference, evidenceVersion: reference,
   admissionPath: z.literal('empirical'),
@@ -59,7 +63,7 @@ export const paygHostProfile = z.object({
   maxTools: z.number().int().min(2).max(PAYG_MAX_TOOLS), maxSchemaBytes: z.literal(16384),
   purposes: z.array(phase).min(1).max(8),
   requestFormats: z.array(z.enum(['serial-tools-v2', 'serial-tools-v4-stream',
-    'agent-turn-v5-stream', 'serial-tools-v6-reasoning', 'fusion-json-v1-stream'])).min(1).max(5),
+    'agent-turn-v5-stream', 'serial-tools-v6-reasoning', 'fusion-json-v1-stream', 'fusion-text-v1-stream'])).min(1).max(6),
   reasoningVariants: z.array(z.object({
     reasoning: reasoningPolicy,
     outputLimit: z.number().int().positive().max(PURPOSE_OUTPUT_CAP),
@@ -69,19 +73,20 @@ export const paygHostProfile = z.object({
     outputSemanticsEvidence: z.literal('same-route-none').optional(),
   }).strict()).min(1).max(16),
   outputLimit: z.number().int().min(1).max(PURPOSE_OUTPUT_CAP),
-  expiresAt: z.string().datetime(),
   evidence: z.union([z.object({
     reference, manifestHash: z.string().regex(/^[a-f0-9]{64}$/),
     distinctSamples: z.literal(60), messageStressSamples: z.literal(12), maxVerifiedMessages: z.literal(128),
     completeCells: z.literal(15), variantsPerCell: z.literal(4),
     ...sharedEvidence,
   }).strict(), fusionShapeEvidence]),
-}).strict().refine(p => !('scope' in p.evidence) || (p.purposes.every(purpose => FUSION_PURPOSES.has(purpose))
-  && p.requestFormats.length === 1 && p.requestFormats[0] === 'fusion-json-v1-stream'),
-{ message: 'PAYG_FUSION_EVIDENCE_SCOPE' }).refine(p => p.outputLimit <= p.evidence.outputLimit
+};
+export type ProfileCore = z.infer<z.ZodObject<typeof profileFields>>;
+const fusionScope = (p: ProfileCore) => !('scope' in p.evidence) || (p.purposes.every(purpose => FUSION_PURPOSES.has(purpose))
+  && p.requestFormats.length === 1 && p.requestFormats[0] === 'fusion-json-v1-stream');
+const outputEvidence = (p: ProfileCore) => p.outputLimit <= p.evidence.outputLimit
   && p.reasoningVariants.every(v => v.outputLimit <= p.evidence.outputLimit
-    && v.testedOutputLimit === p.evidence.testedOutputLimit),
-{ message: 'PAYG_OUTPUT_EVIDENCE_REQUIRED' }).refine(p => p.reasoningVariants.every(v => {
+    && v.testedOutputLimit === p.evidence.testedOutputLimit);
+const sameRouteEvidence = (p: ProfileCore) => p.reasoningVariants.every(v => {
   if (!v.outputSemanticsEvidence) return v.outputStressSamples >= 2;
   return p.model === 'anthropic/claude-sonnet-5.5' && p.endpointTag === 'anthropic'
     && isDeepStrictEqual(v.reasoning, {effort:'low'}) && v.outputStressSamples === 0 && v.testedOutputLimit === 2048
@@ -89,15 +94,34 @@ export const paygHostProfile = z.object({
       && isDeepStrictEqual(source.reasoning, {parameter:'none'}) && source.outputStressSamples >= 2
       && source.testedOutputLimit === 2048 && source.outputLimit >= v.outputLimit
       && source.evidenceReference === v.evidenceReference && source.manifestHash === v.manifestHash);
-}), { message: 'PAYG_SAME_ROUTE_NONE_EVIDENCE_REQUIRED' });
+});
+export const paygHostProfile = z.object({ ...profileFields, expiresAt: z.string().datetime() }).strict()
+  .refine(fusionScope, { message: 'PAYG_FUSION_EVIDENCE_SCOPE' })
+  .refine(outputEvidence, { message: 'PAYG_OUTPUT_EVIDENCE_REQUIRED' })
+  .refine(sameRouteEvidence, { message: 'PAYG_SAME_ROUTE_NONE_EVIDENCE_REQUIRED' });
+/** RUNTIME-PROD: the same evidence rules without a calendar expiry (Owner 2026-10-07: production admission has no
+ * fixed end date; it is resampled only when the model, route or live metering changes). */
+export const paygProductionProfile = z.object(profileFields).strict()
+  .refine(fusionScope, { message: 'PAYG_FUSION_EVIDENCE_SCOPE' })
+  .refine(outputEvidence, { message: 'PAYG_OUTPUT_EVIDENCE_REQUIRED' })
+  .refine(sameRouteEvidence, { message: 'PAYG_SAME_ROUTE_NONE_EVIDENCE_REQUIRED' });
 export const paygHostSettings = z.object({
   version: z.literal(1), enabled: z.boolean(), windowId: z.string().uuid(),
   profiles: z.array(paygHostProfile).max(16),
 }).strict();
+/** RUNTIME-PROD production profiles (productionPolicy.ts): no window binding, a version every new run freezes. */
+export const PAYG_PRODUCTION_SETTING = 'runtime_payg_production';
+export const paygProductionSettings = z.object({
+  version: z.literal(1), enabled: z.boolean(), policyVersion: reference,
+  profiles: z.array(paygProductionProfile).min(1).max(16),
+}).strict();
+export const paygProductionSettingWrite = z.union([z.object({ enabled: z.literal(false) }).strict(), paygProductionSettings]);
+/** Production database marker (SQL runtime_production_database). Written only by the approved release SQL. */
+export const RUNTIME_ENVIRONMENT_SETTING = 'runtime_environment';
 // A minimal object can always disable new admissions, regardless of stale evidence.
 export const paygHostSettingWrite = z.union([z.object({enabled:z.literal(false)}).strict(), paygHostSettings]);
 export type PaygHostProfile = z.infer<typeof paygHostProfile>;
-type Requirement = { modelId: string; phase: z.infer<typeof phase>; outputLimit: number; requestFormat: string; reasoning?: ReasoningPolicy };
+export type Requirement = { modelId: string; phase: z.infer<typeof phase>; outputLimit: number; requestFormat: string; reasoning?: ReasoningPolicy };
 
 /** Called only for NEW real admissions, after admission replay and pending organizer recovery.
  * Off/missing -> v1. An enabled but invalid configuration refuses admission, never silently bills v1.
@@ -119,25 +143,40 @@ export async function readPaygHostPolicies(admin: SupabaseClient, window: Stagin
   const config = parsed.data;
   if (!config.enabled) return undefined;
   return policies.map(policy => {
-    const matches = config.profiles.filter(p => p.model === policy.model && p.endpointTag === policy.providerLimits?.providerSlug);
-    const profile = matches.length === 1 ? matches[0] : undefined;
-    const uses = requirements.filter(r => r.modelId === policy.modelId);
-    if (!profile || admittedRoutes[profile.model] !== profile.endpointTag || policy.protocol !== profile.protocol || !policy.providerLimits || !uses.length
-      || Date.parse(profile.expiresAt) <= Date.now() || Date.parse(profile.expiresAt) < Date.parse(deadline)
-      || profile.maxBytes + profile.templateTokens + profile.marginTokens + profile.outputLimit > policy.providerLimits.contextTokens
-      || uses.some(r => !profile.purposes.includes(r.phase) || !profile.requestFormats.some(format => format === r.requestFormat)
-        || !profile.reasoningVariants.some(v => isDeepStrictEqual(frozenReasoningFields(v.reasoning), frozenReasoningFields(r.reasoning))
-          && v.outputLimit >= r.outputLimit && v.outputLimit <= profile.evidence.outputLimit)
-        || r.outputLimit > profile.outputLimit)) throw new StagingAccessError('RUNTIME_PAYG_PROFILE_REQUIRED');
+    const profile = matchedProfile(config.profiles, policy, requirements, deadline);
+    if (!profile || admittedRoutes[profile.model] !== profile.endpointTag) throw new StagingAccessError('RUNTIME_PAYG_PROFILE_REQUIRED');
     // Retain the window's exact quote (SQL compares entry-minus-payg). Actual request O
     // is already capped by admission and is remeasured before every claim.
-    return { ...policy, payg: {
-      version: 'staging-host-v1', policyId: window.id, profileVersion: profile.profileVersion,
-      evidenceVersion: profile.evidenceVersion, admissionPath: profile.admissionPath,
-      templateTokens: profile.templateTokens, marginTokens: profile.marginTokens,
-      maxBytes: profile.maxBytes, maxMessages: profile.maxMessages,
-      maxTools: profile.maxTools, maxSchemaBytes: profile.maxSchemaBytes,
-      purposes: profile.purposes, expiresAt: profile.expiresAt,
-    } };
+    return { ...policy, payg: paygTemplate(profile, 'staging-host-v1', window.id, profile.expiresAt) };
   });
+}
+
+type CallPolicy = FrozenRun['callPolicy'][number];
+type AnyProfile = ProfileCore & { expiresAt?: string };
+/** The one profile of this exact model and route that covers every use; deadline is checked only for staging profiles. */
+export function matchedProfile<P extends AnyProfile>(profiles: readonly P[], policy: CallPolicy, requirements: Requirement[],
+  deadline?: string): P | undefined {
+  const matches = profiles.filter(p => p.model === policy.model && p.endpointTag === policy.providerLimits?.providerSlug);
+  const profile = matches.length === 1 ? matches[0] : undefined;
+  const uses = requirements.filter(r => r.modelId === policy.modelId);
+  if (!profile || policy.protocol !== profile.protocol || !policy.providerLimits || !uses.length
+    || (profile.expiresAt !== undefined && (Date.parse(profile.expiresAt) <= Date.now()
+      || Date.parse(profile.expiresAt) < Date.parse(deadline ?? '')))
+    || profile.maxBytes + profile.templateTokens + profile.marginTokens + profile.outputLimit > policy.providerLimits.contextTokens
+    || uses.some(r => !profile.purposes.includes(r.phase) || !profile.requestFormats.some(format => format === r.requestFormat)
+      || !profile.reasoningVariants.some(v => isDeepStrictEqual(frozenReasoningFields(v.reasoning), frozenReasoningFields(r.reasoning))
+        && v.outputLimit >= r.outputLimit && v.outputLimit <= profile.evidence.outputLimit)
+      || r.outputLimit > profile.outputLimit)) return undefined;
+  return profile;
+}
+
+export function paygTemplate(profile: ProfileCore, version: string, policyId: string, expiresAt: string) {
+  return {
+    version, policyId, profileVersion: profile.profileVersion,
+    evidenceVersion: profile.evidenceVersion, admissionPath: profile.admissionPath,
+    templateTokens: profile.templateTokens, marginTokens: profile.marginTokens,
+    maxBytes: profile.maxBytes, maxMessages: profile.maxMessages,
+    maxTools: profile.maxTools, maxSchemaBytes: profile.maxSchemaBytes,
+    purposes: profile.purposes, expiresAt,
+  };
 }

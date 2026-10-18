@@ -36,7 +36,7 @@ const existing = () => {
   state.status = { executionId: saved, state: "completed", body: "## A\nx", completeness: "complete", candidate: true };
 };
 beforeEach(() => {
-  state.available = { enabled: true };
+  state.available = { enabled: true, priceCredits: 500 };
   state.availableInput = [];
   state.statusInput = [];
   state.latest = { isSuccess: true, isError: false, data: { executionId: null } };
@@ -61,10 +61,17 @@ it("keeps the entry while the saved-report read is unknown; the paid start insid
   state.latest = { isSuccess: false, isError: true, data: undefined };
   expect(renderToStaticMarkup(<ReportEntry {...props} confirmed />)).toContain("生成完整报告");
 });
-it("shows the entry once confirmed and enabled, without cost or model wording", () => {
+it("shows the entry once confirmed and enabled, naming the fixed price and no model", () => {
   const html = renderToStaticMarkup(<ReportEntry {...props} confirmed />);
   expect(html).toContain("生成完整报告");
-  expect(html).not.toMatch(/积分|模型/);
+  expect(html).toContain("500");
+  expect(html).not.toMatch(/模型/);
+});
+// Review P1 (#1129): a price that cannot be read offers no paid start at all.
+it("offers no new report while the fixed price cannot be read", () => {
+  state.available = { enabled: true, priceCredits: null };
+  const html = renderToStaticMarkup(<ReportEntry {...props} confirmed />);
+  expect(html).not.toContain("生成完整报告");
 });
 it("keeps a saved report readable with the switch off (rollback)", () => {
   existing();

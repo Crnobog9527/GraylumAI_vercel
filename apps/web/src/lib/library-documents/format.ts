@@ -113,6 +113,7 @@ const MESSAGES: Record<string, string> = {
   LIBRARY_VERSION_CHANGED: '文件内容已更新，请重新打开。',
   LIBRARY_ACCOUNT_CLOSED: '账号当前不可用，不能使用资料库。',
   LIBRARY_FORBIDDEN: '没有权限访问这个文件。',
+  LIBRARY_NO_TEXT: '这个 Word 文件里没有可以读取的文字。',
   LIBRARY_HEADINGS: 'Word 文件的标题结构无法识别，已拒绝。请另存为普通 Word 文档后再上传。',
   LIBRARY_PAGES: 'PDF 的页面信息和读取到的文字对不上，已拒绝。请重新上传，或用其他软件另存为 PDF 后再试。',
   LIBRARY_UPLOAD_INCOMPLETE: '文件还没有传完整，请重试。',

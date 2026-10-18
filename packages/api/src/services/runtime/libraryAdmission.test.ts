@@ -3,9 +3,9 @@ import {it,expect,vi} from 'vitest';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {runtimeAdmissionService,runtimeAdmission} from './admission';
 import {stagingProcedureError} from './stagingErrors';
-import {LIBRARY_AGENT_READ_KEY,LIBRARY_RESULT_BYTES,candidateToolBytes,libraryReserveBytes,normalizeLibraryReferences,readSourceSlots} from './libraryAdmission';
+import {LIBRARY_AGENT_READ_KEY,LIBRARY_RESULT_BYTES,LIBRARY_RETRIEVAL_KEY,admitLibraryRetrieval,candidateToolBytes,libraryReserveBytes,normalizeLibraryReferences,readSourceSlots} from './libraryAdmission';
 import {sourceToolBytes} from './sourceRuntimeTool';
-import {LIBRARY_INSTRUCTIONS,withPrimaryAddenda} from './primaryInstructions';
+import {LIBRARY_INSTRUCTIONS,LIBRARY_RETRIEVAL_INSTRUCTIONS,libraryAddendum,withPrimaryAddenda} from './primaryInstructions';
 
 // LIB-4b admission: the separate `references` field, the server switch, refusals before any charge and the frozen shape.
 vi.mock('./newWorkGate', async importOriginal => ({
@@ -151,4 +151,37 @@ it('limits library read slots to the results that still fit, never below one rea
  expect(readSourceSlots(refs,10,2,()=>false)).toBe(1);
  expect(readSourceSlots(refs,3,0,()=>true)).toBe(2);
  expect(readSourceSlots([],10,2,()=>false)).toBe(2);
+});
+
+// CHAT-AUTO-CONTEXT A2: library retrieval of a plain free conversation.
+it('retrieval sizing and slots: no references needed, the search guide and instructions are counted',()=>{
+ expect(readSourceSlots([],10,0,()=>true,true)).toBe(8);
+ expect(readSourceSlots([],10,0,()=>false,true)).toBe(1);
+ expect(readSourceSlots([],10,2,()=>false,false)).toBe(2);
+ expect(candidateToolBytes([],['read_source'],true,true)).toBe(sourceToolBytes(['read_source'],true,false,true)+LIBRARY_RESULT_BYTES);
+ expect(candidateToolBytes([],['read_source'],true)).toBe(sourceToolBytes(['read_source'],true));
+ expect(libraryReserveBytes([],['read_source'],true,true)-candidateToolBytes([],['read_source'],true,true))
+  .toBe(Buffer.byteLength(LIBRARY_RETRIEVAL_INSTRUCTIONS));
+ expect(libraryReserveBytes([],['read_source'],true)).toBe(0);
+ // Both: the @ paragraph first, then the search paragraph; each alone is exactly its own text.
+ expect(libraryAddendum(true,true)).toBe(LIBRARY_INSTRUCTIONS+LIBRARY_RETRIEVAL_INSTRUCTIONS);
+ expect(libraryAddendum(false,true)).toBe(LIBRARY_RETRIEVAL_INSTRUCTIONS);
+ expect(withPrimaryAddenda('base',{libraryRetrieval:true})).toBe('base'+LIBRARY_RETRIEVAL_INSTRUCTIONS);
+});
+
+it.each([
+ ['both on',[true,'true'],true],['read off',[false,true],false],['search off',[true,false],false],['unset',[null,null],false],
+])('retrieval switch: %s',async(_name,[read,search],expected)=>{
+ const rows=[{key:LIBRARY_AGENT_READ_KEY,value:read},{key:LIBRARY_RETRIEVAL_KEY,value:search}].filter(row=>row.value!==null);
+ const admin={from:()=>({select:()=>({in:async()=>({data:rows,error:null})})})} as unknown as SupabaseClient;
+ expect(await admitLibraryRetrieval(admin,true,'ordinary',[])).toBe(expected);
+});
+
+it('retrieval is never offered to non-free-chat turns and does not read the switches for them',async()=>{
+ const read=vi.fn();
+ const admin={from:()=>({select:()=>({in:read})})} as unknown as SupabaseClient;
+ expect(await admitLibraryRetrieval(admin,false,'ordinary',[])).toBe(false);
+ expect(await admitLibraryRetrieval(admin,true,'skill',[])).toBe(false);
+ expect(await admitLibraryRetrieval(admin,true,'ordinary',[false,true])).toBe(false);
+ expect(read).not.toHaveBeenCalled();
 });

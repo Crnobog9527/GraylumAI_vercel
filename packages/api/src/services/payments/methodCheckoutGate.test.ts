@@ -108,18 +108,22 @@ describe('R7 production checkout gate: bound deployment plus a separate default-
   });
 });
 
-describe('R7 hard guard: production stays closed until the live payment pipeline is wired (PR-B flips the marker)', () => {
-  it('the marker is false for now', () => expect(LIVE_PAYMENT_PIPELINE_READY).toBe(false));
-  it('a fully bound production deployment with both switches true is still refused', () => {
+describe('R7 hard guard: the live payment pipeline is wired (PR-B1/B2/B3), so the marker is on', () => {
+  it('the marker is on', () => expect(LIVE_PAYMENT_PIPELINE_READY).toBe(true));
+  it('a fully bound production deployment with both switches true opens by default; the marker off still refuses', () => {
     const env = { ...production, ...cardOn, ...walletOn };
     for (const method of methods) {
-      expect(methodCheckoutEnvironmentOpen(env, method)).toBe(false);
-      expect(() => assertMethodCheckoutEnvironment(env, method)).toThrow('PAY_WAFFO_STEP2_NOT_READY');
+      expect(methodCheckoutEnvironmentOpen(env, method)).toBe(true);
+      expect(() => assertMethodCheckoutEnvironment(env, method)).not.toThrow();
+      expect(methodCheckoutEnvironmentOpen(env, method, false)).toBe(false);
+      expect(() => assertMethodCheckoutEnvironment(env, method, false)).toThrow('PAY_WAFFO_STEP2_NOT_READY');
     }
-    expect(methodCardCheckoutReady(env, routes(true))).toBe(false);
+    expect(methodCardCheckoutReady(env, routes(true))).toBe(true);
+    expect(methodCardCheckoutReady(env, routes(true), false)).toBe(false);
   });
   it('staging is not affected by the marker', () => {
     expect(methodCheckoutEnvironmentOpen(staging, 'card')).toBe(true);
+    expect(methodCheckoutEnvironmentOpen(staging, 'card', false)).toBe(true);
     expect(methodCardCheckoutReady(staging, routes(true))).toBe(true);
   });
 });

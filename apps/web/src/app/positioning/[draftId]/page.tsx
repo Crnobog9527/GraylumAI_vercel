@@ -1120,7 +1120,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
       loading={review.loading} loadError={review.loadError} onConfirm={() => confirmation.submit(info)} onClose={confirmation.close}/>;
   }
   return (
-    <WorkspaceFrame area="chat" notice={d?.runtimeMode==='staging_test'?'Staging 真实模型测试 · 未开放联网研究':'本地模拟 · 回复、保存与交接均为演示'} revealRight={reveal} rightOpen={resultOpen} onToggleRight={()=>setResultOpen(value=>!value)} right={<PositioningResultPanel
+    <WorkspaceFrame area="chat" notice={d?.runtimeMode==='staging_test'?'Staging 真实模型测试 · 未开放联网研究':d?.runtimeMode==='production'?undefined:'本地模拟 · 回复、保存与交接均为演示'} revealRight={reveal} rightOpen={resultOpen} onToggleRight={()=>setResultOpen(value=>!value)} right={<PositioningResultPanel
       subtitle={snap.state==='draft'?'跟着对话自动记录；每一步核对后确认一次':'已确认的定位'} bodyRef={setResultBodyNode}><CaptureChecklist {...checklistProps()}/></PositioningResultPanel>}>
     <main className={`${resultStyles.workspaceMain} ${!planView ? resultStyles.conversationPage : ""} h-full w-full overflow-y-auto text-[var(--text-primary)]`}><div className={resultStyles.workspaceContent}>
       <PositioningHeader
@@ -1224,7 +1224,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                   </div>}
                   <WorkComposer references={false} value={mentorInput} onChange={setMentorInput} label="给 AI 教练的回复" placeholder={OTHER_PLACEHOLDER} attachment={dock} maxLength={8000} disabled={snap.state!=="draft"} sendDisabled={sendLocked} onSend={skill=>{if(skill)void free.send(mentorInput,skill);else void ask(step);}}/>
                   <p className="text-xs text-[var(--text-secondary)]">
-                    同一账号的步骤共用这条对话，未确认内容保留在草稿中。{d?.runtimeMode==='staging_test'?'当前使用真实模型，仅处理你提供的资料。':'当前为隔离模拟，不调用真实模型。'}
+                    同一账号的步骤共用这条对话，未确认内容保留在草稿中。{d?.runtimeMode==='staging_test'||d?.runtimeMode==='production'?'当前使用真实模型，仅处理你提供的资料。':'当前为隔离模拟，不调用真实模型。'}
                   </p>
                 </aside>
               </div>

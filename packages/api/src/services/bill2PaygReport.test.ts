@@ -71,6 +71,16 @@ it.each(['', ' ', '1.5', '1e2', '-1', '9007199254740992', null, undefined])(
   },
 );
 
+describe('PAYG report: fixed-price review calls (0294)', () => {
+  it('reports a call settled at zero charge as platform-absorbed with its real cost, and stays complete', () => {
+    const report = buildPaygReport([{ ...call, nominal_source: 'fixed_fee', charged_delta: 0, theoretical_delta: 9,
+      platform_absorbed_cap_credits: 0, platform_absorbed_bound_credits: 9, platform_margin_cache_read_usd: null,
+      platform_margin_cache_write_usd: null, platform_margin_other_usd: null }]);
+    expect(report).toMatchObject({ invalidCalls: 0, complete: true, netChargedCredits: 0, platformAbsorbedCredits: 9,
+      calls: [{ nominalSource: 'fixed_fee', marginBreakdownAvailable: false }] });
+  });
+});
+
 describe('PAYG report: research tool calls (0255)', () => {
   const tool = { ...call, call_id: 't', provider: 'tikhub', model: 'tikhub:/tiktok/app/v3/handler_user_profile',
     call_kind: 'tool', call_multiplier: '6', platform_absorbed_cap_credits: 0, platform_margin_cache_read_usd: null,

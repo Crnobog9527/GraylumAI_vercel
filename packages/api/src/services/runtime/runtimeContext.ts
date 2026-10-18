@@ -49,6 +49,8 @@ export const runtimeContext=z.object({
  positioningGate:z.literal('fallback-v1').optional(),
  // SKILL-I18N-HOOK: the primary call carries the reply-language rule (absent on contexts admitted before it).
  replyLanguage:z.literal('reply-language-v1').optional(),
+ // REPORT-VISUAL PR-3: free conversations told to read a strategy report directly (absent on contexts admitted before it).
+ workspaceGuide:z.literal('strategy-read-v1').optional(),
  // A2: the saved version a directly chosen derived-content Skill was admitted with (checkpoint_source injects it).
  sourceContent:frozenSourceContent.optional(),
  workspaceContext:z.boolean().optional(),opcTurnToken:z.string().uuid().optional(),matching:matchingPlan.optional(),scopeMaterial:z.unknown().optional(),
@@ -56,11 +58,15 @@ export const runtimeContext=z.object({
  moduleId:z.string().uuid().optional(),skillId:z.string().uuid().optional(),revisionId:z.string().uuid().optional(),sources:z.array(z.unknown()).optional(),
  // LIB-4: frozen with the execution by runtime_library_references_freeze (0262); read through read_source.
  libraryReferences:libraryReferences.optional(),
+ // CHAT-AUTO-CONTEXT A1/A2: free chat may search the user's own library with read_source query 'search:<words>'.
+ libraryRetrieval:z.literal(true).optional(),
+ // New executions that offer read_source: only the first of several parallel calls runs (sourceCalls.ts).
+ sourceCalls:z.literal('first-call-v1').optional(),
 }).strict().superRefine((context, ctx) => {
  if (context.reportGeneration && (context.role !== 'skill' || context.historyItems !== 0 || context.maxTurns !== 1
    || context.tools.length || context.maxToolCalls || context.network !== 'deny' || context.attachedOrganizer
    || context.scopeMaterial || context.workspaceContext || context.promptCache || context.hostTurnContext
-   || context.historySelection || context.sources?.length || context.libraryReferences
+   || context.historySelection || context.sources?.length || context.libraryReferences || context.libraryRetrieval
    || context.purposeBudget?.purpose !== 'report'))
   ctx.addIssue({code:'custom',message:'REPORT_CONTEXT_INVALID'});
  // A research slot adds one tool call and the model call that reads its result (a card turn already has one tool call).

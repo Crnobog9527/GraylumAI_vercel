@@ -17,7 +17,7 @@ import { AdminPackageRefunds } from './AdminPackageRefunds';
 describe('admin credit-pack refund section (PAY-STRIPE-MP 4b-1)', () => {
   it('asks for the order, the billing ticket, the fee decision and its evidence before any quote', () => {
     const html = renderToStaticMarkup(createElement(AdminPackageRefunds));
-    expect(html).toContain('积分包退款');
+    expect(html).toContain('积分包和钱包会员退款');
     for (const id of ['package-refund-orderId', 'package-refund-ticketId', 'package-refund-feePermitted', 'package-refund-feeEvidence']) {
       expect(html).toContain(`id="${id}"`);
     }

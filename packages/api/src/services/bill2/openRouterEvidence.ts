@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import {OPENROUTER_RESPONSE_BYTE_LIMIT,OPENROUTER_RECEIPT_BYTE_LIMIT} from './responseCapacity';
 import {gunzipSync} from 'node:zlib';
 import { decimal, parseExactJson } from './decimal';
-import {openRouterStream,OPENROUTER_STREAM_BYTE_LIMIT} from './openRouterStream';
+import {openRouterStream,OPENROUTER_STREAM_BYTE_LIMIT,SOURCE_STREAM_TOOLS} from './openRouterStream';
 import type { TransportObservation } from './fixtureAdapter';
 import {AGENT_STREAM_TOOLS} from '../runtime/agentTools';
 // A lookup identity only, never a cost receipt. Exclude whitespace, delimiters
@@ -97,7 +97,8 @@ function projectOpenRouterEvidence(observation:TransportObservation, identity:Op
    let wire:string;
    try{wire=new TextDecoder('utf-8',{fatal:true}).decode(decodeOpenRouterStreamObservation(observation));}catch{return diagnostic('invalid_stream_encoding');}
    // An Agent turn response (AC-1) keeps its own tool rules; older bytes carry no flag.
-   const stream=openRouterStream(identity.model,base.providerId??undefined,undefined,observation.agentTools?AGENT_STREAM_TOOLS:undefined);
+   const stream=openRouterStream(identity.model,base.providerId??undefined,undefined,
+    observation.agentTools?AGENT_STREAM_TOOLS:observation.sourceTools?SOURCE_STREAM_TOOLS:undefined);
    stream.push(wire);const result=stream.result();
    if(result.identityConflict)return mismatch();
    if(result.providerId)base.providerId=result.providerId;
@@ -129,12 +130,17 @@ function projectOpenRouterEvidence(observation:TransportObservation, identity:Op
   if(bodyId)base.providerId=bodyId;
   if(observation.httpStatus<200||observation.httpStatus>=300)return diagnostic('http_observation_only');
   if(root.error || data.error || !bodyId || typeof data.model!=='string')return diagnostic('incomplete_response');
-  if((expectedProviderId && expectedProviderId!==base.providerId) || data.model!==identity.model)
+  // The official lookup names the dated model (permaslug, e.g. `-20260928`); a response body never does.
+  const sameModel=data.model===identity.model||(source==='lookup'&&data.model.startsWith(identity.model+'-')
+   &&/^\d{8}$/.test(data.model.slice(identity.model.length+1)));
+  if((expectedProviderId && expectedProviderId!==base.providerId) || !sameModel)
     return mismatch();
   const usage=data.usage as Record<string,unknown>|undefined;
   const cost=source==='lookup'?data.total_cost:usage?.cost;
   const choices=data.choices as Array<{finish_reason?:unknown}>|undefined;
-  const finish=source==='lookup'?data.finish_reason:Array.isArray(choices)&&choices.length===1?choices[0]?.finish_reason:undefined;
+  // A generation we cancelled (stream rejected or stopped) has no finish reason but a final cost.
+  const finish=source==='lookup'?data.finish_reason??(data.cancelled===true?'stop':null)
+   :Array.isArray(choices)&&choices.length===1?choices[0]?.finish_reason:undefined;
   if(!['stop','length','content_filter','tool_calls'].includes(String(finish)))return diagnostic('nonterminal_response');
   // A terminal response can carry a usable answer while cost is unresolved.
   // Keep the original response available to Runtime; only financial finality

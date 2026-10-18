@@ -57,6 +57,14 @@ describe('wallet one-time evidence', () => {
       expect(f.stripe.checkout.sessions.retrieve).not.toHaveBeenCalled();
     },
   );
+  it('R7: a live account accepts only live objects for a live order', async () => {
+    const f = fixture();
+    for (const value of [f.session, f.intent, f.charge]) value.livemode = true;
+    const live = () => readWalletPaymentEvidence({ stripe: f.stripe as unknown as Stripe, scope: { merchant: 'fixture', mode: 'live' },
+      order: { ...order, payment_mode: 'live' }, sessionId: 'cs_1' });
+    expect((await live())?.paymentId).toBe('pi_1');
+    f.charge.livemode = false; await expect(live()).rejects.toThrow();
+  });
   it('propagates lookup timeout without interpreting it as unpaid', async () => {
     const f = fixture(); f.stripe.charges.retrieve.mockRejectedValue(new Error('timeout'));
     await expect(f.run()).rejects.toThrow('timeout');

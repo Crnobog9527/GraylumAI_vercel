@@ -15,8 +15,12 @@ export type ArticleBlock = {
   list?: string[];
 };
 
+export type ArticleTable = { caption: string; head: string[]; rows: string[][] };
+
 export type ArticleSection = ArticleBlock & {
   h2: string;
+  // A comparison table under the section's text (the comparison pages).
+  table?: ArticleTable;
   subsections?: (ArticleBlock & { h3: string })[];
 };
 

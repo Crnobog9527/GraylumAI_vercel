@@ -32,20 +32,22 @@ type Props = {
   data?: SanitizedReportData | null;
   /** Fields whose chapter text the user changed after it was written: their charts say so. */
   editedFields?: readonly string[];
+  /** A note above the charts (e.g. a jury revision kept the original report's data). */
+  notice?: string;
   className?: string;
 };
 
 /** Chapters that get a chart: while the data is still being written they say "整理中". */
 const CHART_FIELDS: ReportDataField[] = ["thisWeek", "audience", "benchmarks", "funnel", "plan30"];
 
-export function ReportView({ body, streaming = false, data, editedFields, className }: Props) {
+export function ReportView({ body, streaming = false, data, editedFields, notice, className }: Props) {
   const parsed = useMemo(() => parseReportBody(body), [body]);
   const checked = data === undefined ? parsed.data : data;
   const { preamble, chapters } = useMemo(() => splitChapters(parsed.text), [parsed.text]);
   // A block that never closed (stopped or cut off) is not being prepared any more: the text alone, as before.
   const preparing = parsed.pending && streaming;
   if ((!checked && !preparing) || chapters.length === 0)
-    return <MessageMarkdown className={className} text={withDisplayHeadings(parsed.text)} streaming={streaming} />;
+    return <MessageMarkdown className={cn(className, styles.tables)} text={withDisplayHeadings(parsed.text)} streaming={streaming} />;
 
   const values = checked?.data ?? {};
   const fallback = checked?.fallback ?? {};
@@ -56,7 +58,8 @@ export function ReportView({ body, streaming = false, data, editedFields, classN
   const field = (name: ReportDataField) => <ReportField key={name} name={name} data={values} fallback={fallback[name]} />;
   const edited = new Set(editedFields);
   return (
-    <div className={cn(styles.view, className)}>
+    <div className={cn(styles.view, styles.tables, className)}>
+      {notice && <p className={styles.note}>{notice}</p>}
       <QuickLook data={values} />
       {preamble && <MessageMarkdown text={withDisplayHeadings(preamble)} />}
       {chapters.map((chapter, index) => {

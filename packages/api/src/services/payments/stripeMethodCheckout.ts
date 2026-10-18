@@ -18,9 +18,9 @@ type Order = { id: string; item_id: string; price_ref_id: string; purchase_snaps
   method_dispatched_at?: string | null; checkout_request?: { providerRequest?: Stripe.Checkout.SessionCreateParams } | null };
 
 /** The plan's current first-month coupon, read from the same mapping 0222 admission required. */
-async function currentFirstMonthCoupon(db: SupabaseClient, merchant: string, order: Order) {
+async function currentFirstMonthCoupon(db: SupabaseClient, scope: { merchant: string; mode: 'test' | 'live' }, order: Order) {
   const coupon = await db.from('payment_provider_refs').select('external_id').eq('channel', 'stripe')
-    .eq('merchant_namespace', merchant).eq('mode', 'test').eq('object_type', 'coupon').eq('offer_kind', 'gold_first30')
+    .eq('merchant_namespace', scope.merchant).eq('mode', scope.mode).eq('object_type', 'coupon').eq('offer_kind', 'gold_first30')
     .eq('membership_plan_id', order.item_id).eq('billing_cycle', 'monthly').eq('is_current', true).maybeSingle();
   if (coupon.error || !coupon.data) throw new Error('PAY_WAFFO_PRICE_UNAVAILABLE');
   return coupon.data.external_id as string;
@@ -49,8 +49,8 @@ function assertSessionMethod(session: Stripe.Checkout.Session, purchase: Input['
  * precede the provider call; a retry recovers the frozen request instead of rebuilding it. */
 export async function createStripeMethodCheckout(input: Input) {
   const { db, stripe, userId, purchase } = input;
+  // R7 (0296): the Stripe account decides test or live; every mapping, frozen request and reference below stays in it.
   const scope = await resolveStripeScope(stripe);
-  if (scope.mode !== 'test') throw new Error('PAY_WAFFO_LIVE_DISABLED');
   const prepare = () => prepareMethodPurchase({ admin: db, userId, purchase,
     merchantNamespace: scope.merchant, paymentMode: scope.mode, termsVersion: input.termsVersion }) as Promise<Order>;
   const order = await prepare().catch(async (error: unknown) => {
@@ -71,7 +71,8 @@ export async function createStripeMethodCheckout(input: Input) {
     throw error;
   };
   const price = await db.from('payment_provider_refs').select('external_id').eq('id', order.price_ref_id)
-    .eq('channel', 'stripe').eq('merchant_namespace', scope.merchant).eq('mode', 'test').eq('object_type', 'price').maybeSingle();
+    .eq('channel', 'stripe').eq('merchant_namespace', scope.merchant).eq('mode', scope.mode).eq('object_type', 'price')
+    .maybeSingle();
   if (price.error || !price.data) return releaseUnclaimed(new Error('PAY_WAFFO_PRICE_UNAVAILABLE'));
   const isCard = purchase.method === 'card' || purchase.method === 'card_cn';
   const walletMethod = isCard ? undefined : purchase.method as 'wechat_pay' | 'alipay';
@@ -81,7 +82,7 @@ export async function createStripeMethodCheckout(input: Input) {
   const snapshot = isCard && !dispatched ? freezePurchaseSnapshot(order.purchase_snapshot) : null;
   // Only a card subscription can be discounted (0222 first month); the request builder refuses anything else.
   const couponId = snapshot?.item_type === 'membership_plan' && majorToCents(snapshot.discount) !== 0
-    ? await currentFirstMonthCoupon(db, scope.merchant, order).catch(releaseUnclaimed) : undefined;
+    ? await currentFirstMonthCoupon(db, scope, order).catch(releaseUnclaimed) : undefined;
   const cardFor = (coupon: string | undefined): StripeCardCheckout | undefined => isCard
     ? { managedPayments: purchase.method === 'card', ...(coupon ? { couponId: coupon } : {}) } : undefined;
   // Stripe requires 30 minutes after creation: reserve one minute for dispatch.
@@ -92,7 +93,7 @@ export async function createStripeMethodCheckout(input: Input) {
     card: cardFor(couponId) });
   const claimed = await db.rpc('pay_waffo_claim_checkout', { p_user: userId, p_order: order.id, p_merchant: scope.merchant,
     p_expires: new Date(expiresAt * 1000).toISOString(), p_request: { orderId: order.id, userId, method: purchase.method,
-      merchant: scope.merchant, mode: 'test', providerRequest: proposed } });
+      merchant: scope.merchant, mode: scope.mode, providerRequest: proposed } });
   if (claimed.error || typeof claimed.data?.dispatch !== 'boolean' || !claimed.data?.request?.providerRequest) {
     throw new Error('PAY_WAFFO_CHECKOUT_UNAVAILABLE');
   }
@@ -107,7 +108,7 @@ export async function createStripeMethodCheckout(input: Input) {
     if (closed.error) throw new Error('PAY_WAFFO_CHECKOUT_UNAVAILABLE');
   } : undefined;
   const mapped = await db.from('payment_provider_refs').select('external_id').eq('order_id', order.id).eq('object_type', 'checkout')
-    .eq('channel', 'stripe').eq('merchant_namespace', scope.merchant).eq('mode', 'test').maybeSingle().then(
+    .eq('channel', 'stripe').eq('merchant_namespace', scope.merchant).eq('mode', scope.mode).maybeSingle().then(
       result => result, () => ({ data: null, error: new Error('PAY_WAFFO_PERSISTENCE_UNAVAILABLE') }));
   if (mapped.error) {
     if (closeBeforeDispatch) await closeBeforeDispatch();

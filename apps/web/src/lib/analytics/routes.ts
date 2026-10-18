@@ -36,6 +36,7 @@ const APP_TEMPLATES = [
   '/forgot-password',
   '/marketplace',
   '/library',
+  '/library/scan-check',
   '/profile',
   '/expert-consult',
   '/runtime',

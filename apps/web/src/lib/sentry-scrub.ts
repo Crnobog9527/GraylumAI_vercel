@@ -27,11 +27,11 @@ export function scrubText(value: string): string {
 export const APP_SEGMENTS = new Set(['about', 'acceptable-use', 'access-denied', 'account-erasure', 'admin',
   'agent-first-preview', 'ai', 'announcements', 'api', 'auth', 'auto-close', 'billing-reconcile', 'blog', 'callback', 'chat',
   'advance', 'fusion', 'connect', 'contact', 'costs', 'cron', 'diagnostics', 'expert-consult', 'f', 'faq', 'features', 'finance',
-  'forgot-password', 'ig-jingying', 'landing',
+  'forgot-password', 'graylum-vs-chatgpt', 'ig-jingying', 'landing',
   'library', 'library-cleanup', 'login', 'maintenance', 'marketplace', 'models', 'orders', 'packages', 'payment-notices', 'performance',
   'plan', 'positioning', 'postforme', 'preview', 'publish-monitor', 'pricing', 'privacy', 'profile', 'prompts', 'refund', 'refunds',
   'register', 'release-subscription-credits',
-  'requests', 'reset-password', 'review', 'runtime', 'runtime-recovery', 'search', 'secrets', 'settings', 'shequn-jingying', 'shequn-xingxiao',
+  'requests', 'reset-password', 'review', 'runtime', 'runtime-recovery', 'scan-check', 'search', 'secrets', 'settings', 'shequn-jingying', 'shequn-xingxiao',
   'skills', 'social-monitor', 'start', 'stream', 'stripe', 'terms', 'tickets', 'topics', 'transactions', 'trpc', 'upload', 'users',
   'verify-email', 'waffo', 'webhook', 'workbench', 'zh-tw', 'zimeiti-jingying', 'zimeiti-kecheng',
   // Style samples D, E, G to O (PUBLIC-SITE, /landing/preview/d … /o), removed with the samples.

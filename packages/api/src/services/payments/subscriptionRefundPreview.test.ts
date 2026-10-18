@@ -11,6 +11,26 @@ async function unresolved(f: ReturnType<typeof fixture>) {
   expect(f.write).not.toHaveBeenCalled();
 }
 describe('subscription refund read-only preview', () => {
+  it('R7: a live account previews a live order from live records and live Stripe objects only', async () => {
+    const live = async (mixed = false) => {
+      const f = fixture();
+      f.order.payment_mode = 'live';
+      for (const row of f.tables.user_subscriptions) row.payment_mode = 'live';
+      for (const row of f.tables.payment_provider_refs) row.mode = 'live';
+      for (const invoice of f.invoices) invoice.livemode = true;
+      f.stripe.balance.retrieve.mockResolvedValue({ livemode: true });
+      const intent = await f.stripe.paymentIntents.retrieve(); intent.livemode = true;
+      f.stripe.paymentIntents.retrieve.mockResolvedValue(intent);
+      const charge = await f.stripe.charges.retrieve(); charge.livemode = !mixed;
+      f.stripe.charges.retrieve.mockResolvedValue(charge);
+      const payments = await f.stripe.invoicePayments.list(); payments.data[0].livemode = true;
+      f.stripe.invoicePayments.list.mockResolvedValue(payments);
+      return f;
+    };
+    expect(await run(await live())).toMatchObject({ status: 'eligible', treatment: 'first_purchase',
+      quote: { basisMinor: 6900, feeMinor: 414, netMinor: 6486 } });
+    await unresolved(await live(true));
+  });
   it.each(['monthly', 'yearly'])('assembles complete %s first-purchase evidence', async cycle => {
     const f = fixture();
     f.snapshot.billing_cycle = f.order.billing_cycle = cycle === 'monthly' ? 'monthly' : 'yearly';

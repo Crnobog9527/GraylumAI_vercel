@@ -5,7 +5,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { REPORT_REQUEST_INPUT, reportBenchmarks, reportEnabled, reportService, reportError } from './service';
 import { runtimeAdmissionService } from '../runtime/admission';
 const id = randomUUID();
-const input = { sessionId: id, projectId: id, roundId: id, requestId: id };
+const input = { sessionId: id, projectId: id, roundId: id, requestId: id, acceptedCredits: 500 };
 const user = { auth: { getUser: async () => ({ data: { user: { id, email_confirmed_at: '2026-01-01T00:00:00Z' } } }) } };
 const policy = { account: 'synthetic', costPerCall: '0.1', creditsPerUsd: '100', multiplier: '6',
   maxCalls: 1, maxOutputTokens: 8192, inputBytes: 196608, historyItems: 0 };
@@ -31,7 +31,10 @@ it('free member is rejected before creating a report run or reading facts', asyn
       get snapshot() { throw new Error('FACTS_READ_BEFORE_MEMBERSHIP'); } }, error: null };
     return { data: null, error: { message: 'REPORT_MEMBERSHIP_REQUIRED' } };
   });
-  const query = { select: () => query, eq: () => query, maybeSingle: async () => ({ data: { value: { enabled: true } }, error: null }) };
+  // The report switch is on; the fixed price row is absent, so the default price applies.
+  let key = '';
+  const query = { select: () => query, eq: (_c: string, value: string) => { key = value; return query; },
+    maybeSingle: async () => ({ data: key === 'report_fixed_price_credits' ? null : { value: { enabled: true } }, error: null }) };
   const admin = { from: () => query, rpc } as unknown as SupabaseClient;
   await expect(reportService(user as unknown as SupabaseClient, admin, policy).start(input)).rejects.toMatchObject({
     code: 'FORBIDDEN', message: 'REPORT_MEMBERSHIP_REQUIRED',
@@ -46,7 +49,10 @@ it.each([false, true])('missing report manifest precedes membership for paid=%s'
     if (name === 'report_membership_check') return { data: null, error: paid ? null : { message: 'REPORT_MEMBERSHIP_REQUIRED' } };
     throw new Error('UNEXPECTED_ADMISSION_OR_BILLING');
   });
-  const query = { select: () => query, eq: () => query, maybeSingle: async () => ({ data: { value: { enabled: true } }, error: null }) };
+  // The report switch is on; the fixed price row is absent, so the default price applies.
+  let key = '';
+  const query = { select: () => query, eq: (_c: string, value: string) => { key = value; return query; },
+    maybeSingle: async () => ({ data: key === 'report_fixed_price_credits' ? null : { value: { enabled: true } }, error: null }) };
   const admin = { from: () => query, rpc } as unknown as SupabaseClient;
   await expect(reportService(user as unknown as SupabaseClient, admin, policy).start(input)).rejects.toMatchObject({
     code: 'BAD_REQUEST', message: 'REPORT_MANIFEST_REQUIRED',
@@ -54,14 +60,29 @@ it.each([false, true])('missing report manifest precedes membership for paid=%s'
   expect(rpc.mock.calls.map(call => call[0])).toEqual(['runtime_admission_replay', 'report_source']);
 });
 it('saved reports remain readable without a flag or membership read', async () => {
-  const rpc = vi.fn(async () => ({ error: null, data: { state: 'completed', result: { body: '## One\nSaved', completeness: 'complete' },
+  const rpc = vi.fn(async (name: string) => name === 'report_fee_settle' ? { error: null, data: null }
+    : ({ error: null, data: { state: 'completed', result: { body: '## One\nSaved', completeness: 'complete' },
     context: { reportGeneration: { version: 1, projectId: id, roundId: id, snapshotHash: 'a'.repeat(64),
       packageHash: 'b'.repeat(64), workflowHash: 'c'.repeat(64), templateHash: 'd'.repeat(64), sections: ['One'], maxCharacters: 12000 } } } }));
   const from = vi.fn(() => { throw new Error('UNEXPECTED_MEMBERSHIP_READ'); });
   const service = reportService(user as unknown as SupabaseClient, { rpc, from } as unknown as SupabaseClient, policy);
-  expect(await service.status(id)).toMatchObject({ state: 'completed', body: '## One\nSaved', candidate: true });
+  expect(await service.status(id)).toMatchObject({ state: 'completed', body: '## One\nSaved', candidate: true, fee: null });
   expect(from).not.toHaveBeenCalled();
   expect((rpc.mock.calls as unknown[][])[0]![0]).toBe('runtime_execution');
+});
+
+it('status settles and returns the fixed price (0295); before 0295 it shows none', async () => {
+  const saved = { state: 'completed', result: { body: '## One\nSaved', completeness: 'complete' },
+    context: { reportGeneration: { version: 1, projectId: id, roundId: id, snapshotHash: 'a'.repeat(64),
+      packageHash: 'b'.repeat(64), workflowHash: 'c'.repeat(64), templateHash: 'd'.repeat(64), sections: ['One'], maxCharacters: 12000 } } };
+  const fee = { credits: 500, state: 'charged', chargedCredits: 500, reason: 'complete', settledAt: '2026-10-17T00:00:00Z' };
+  const admin = (settle: unknown) => ({ rpc: vi.fn(async (name: string, args: Record<string, unknown>) => name === 'report_fee_settle'
+    ? (expect(args).toEqual({ p_actor_id: id, p_execution_id: id }), settle) : { error: null, data: saved }) }) as unknown as SupabaseClient;
+  expect(await reportService(user as unknown as SupabaseClient, admin({ error: null, data: fee }), policy).status(id)).toMatchObject({ fee });
+  expect(await reportService(user as unknown as SupabaseClient, admin({ error: { code: 'PGRST202', message: 'x' }, data: null }), policy)
+    .status(id)).toMatchObject({ fee: null });
+  await expect(reportService(user as unknown as SupabaseClient, admin({ error: { code: 'P0001', message: 'x' }, data: null }), policy)
+    .status(id)).rejects.toMatchObject({ message: 'REPORT_UNAVAILABLE' });
 });
 
 it('non-report execution returns a stable 400 error', async () => {
@@ -76,7 +97,8 @@ it('existing request replay precedes settings, membership and source reads', asy
   const admin = { rpc, from } as unknown as SupabaseClient;
   expect(await reportService(user as unknown as SupabaseClient, admin, policy).start(input)).toEqual(data);
   expect(rpc).toHaveBeenCalledWith('runtime_admission_replay', {
-    p_actor_id: id, p_request_id: id, p_request: { reportStart: input },
+    // The accepted price is not part of the stored request identity.
+    p_actor_id: id, p_request_id: id, p_request: { reportStart: { sessionId: id, projectId: id, roundId: id, requestId: id } },
   });
   expect(from).not.toHaveBeenCalled();
 });
@@ -159,14 +181,15 @@ function startAdmin(executions: unknown[], saved: Record<string, { state: string
     if (name === 'report_source') return { data: { workflow: workflow(), get snapshot() { past.reached = true; return null; } }, error: null };
     return { data: null, error: { message: 'UNEXPECTED_RPC' } };
   });
-  const query = { select: () => query, eq: () => query, maybeSingle: async () => ({ data: { value: { enabled: true } }, error: null }) };
+  // The report switch is on; the fixed price row is absent, so the default price applies.
+  let key = '';
+  const query = { select: () => query, eq: (_c: string, value: string) => { key = value; return query; },
+    maybeSingle: async () => ({ data: key === 'report_fixed_price_credits' ? null : { value: { enabled: true } }, error: null }) };
   return { admin: { rpc, from: () => query } as unknown as SupabaseClient, rpc, past };
 }
-const startInput = { ...locate, requestId: randomUUID() };
+const startInput = { ...locate, requestId: randomUUID(), acceptedCredits: 500 };
 it.each([
   ['a complete report', 'completed', { body: '## One\nx', completeness: 'complete' }],
-  ['a truncated report', 'completed', { body: '## One\nx', completeness: 'length_limit' }],
-  ['a stopped report with text', 'completed', { body: 'x', completeness: 'stopped' }],
   ['a running report', 'running', null], ['a report waiting for credits', 'waiting_credits', null],
   ['a report waiting to resume', 'waiting_resume', null], ['a report settling its cost', 'cost_pending', null],
 ])('a stale tab with a new requestId is refused when the round has %s', async (_name, state, result) => {
@@ -176,13 +199,53 @@ it.each([
     .rejects.toMatchObject({ code: 'BAD_REQUEST', message: 'REPORT_ALREADY_EXISTS' });
   expect(past.reached).toBe(false);
 });
-it.each([['cancelled', null], ['completed', { body: '', completeness: 'complete' }], ['completed', null]])(
-  'a round whose last report ended %s without text still allows a new start', async (state, result) => {
+// A report that ended without a complete report had its fixed price refunded (0295): a new start pays it again
+// (Owner 2026-10-17 "重新生成照收全价"), also when the incomplete one has text (cut off, stopped).
+it.each([['cancelled', null], ['completed', { body: '', completeness: 'complete' }], ['completed', null],
+  ['completed', { body: '## One\nx', completeness: 'length_limit' }], ['completed', { body: 'x', completeness: 'stopped' }],
+  // Marked complete but a required section is missing or empty: refunded too, so the same structural check (#1102 review).
+  ['completed', { body: 'No headings at all', completeness: 'complete' }], ['completed', { body: '## One\n', completeness: 'complete' }]])(
+  'a round whose last report ended %s without a complete report allows a new start', async (state, result) => {
     const existing = run(REPORT_REQUEST_INPUT, '2026-10-02T00:00:00Z');
     const { admin, past } = startAdmin([existing], { [existing.executionId]: { state, result, context: frozen(locate.projectId, locate.roundId) } });
     await expect(reportService(user as unknown as SupabaseClient, admin, policy).start(startInput)).rejects.toMatchObject({ message: 'REPORT_UNAVAILABLE' });
     expect(past.reached).toBe(true);
   });
+it('a start at another price than the button showed is refused before any admission (0295)', async () => {
+  const { admin, past } = startAdmin([], {});
+  const settings: Record<string, unknown> = { runtime_report_generation: { enabled: true }, report_fixed_price_credits: 500 };
+  let key = '';
+  const query = { select: () => query, eq: (_c: string, value: string) => { key = value; return query; },
+    maybeSingle: async () => ({ data: { value: settings[key] }, error: null }) };
+  const priced = { ...admin, from: () => query } as unknown as SupabaseClient;
+  await expect(reportService(user as unknown as SupabaseClient, priced, policy).start({ ...startInput, requestId: randomUUID(), acceptedCredits: 400 }))
+    .rejects.toMatchObject({ message: 'REPORT_PRICE_CHANGED' });
+  expect(past.reached).toBe(false);
+  // The shown price matches: the start goes on (to the next refusal of this mock).
+  await expect(reportService(user as unknown as SupabaseClient, priced, policy).start({ ...startInput, requestId: randomUUID(), acceptedCredits: 500 }))
+    .rejects.toMatchObject({ message: 'REPORT_UNAVAILABLE' });
+  expect(past.reached).toBe(true);
+});
+// Review P1 (#1129): when the price cannot be read the button shows none, and a start without acceptedCredits must not
+// be charged the database's fixed price anyway: it is refused before any admission.
+it('a start without an accepted price is refused when the fixed price cannot be read (0295)', async () => {
+  const { admin, past } = startAdmin([], {});
+  const settings: Record<string, unknown> = { runtime_report_generation: { enabled: true }, report_fixed_price_credits: 'abc' };
+  let key = '';
+  const query = { select: () => query, eq: (_c: string, value: string) => { key = value; return query; },
+    maybeSingle: async () => ({ data: { value: settings[key] }, error: null }) };
+  const unreadable = { ...admin, from: () => query } as unknown as SupabaseClient;
+  await expect(reportService(user as unknown as SupabaseClient, unreadable, policy).start({ ...startInput, requestId: randomUUID() }))
+    .rejects.toMatchObject({ message: 'REPORT_UNAVAILABLE' });
+  expect(past.reached).toBe(false);
+});
+it('a new start without the accepted price is refused before any admission (0295)', async () => {
+  const { admin, past } = startAdmin([], {});
+  const withoutPrice = { sessionId: startInput.sessionId, projectId: startInput.projectId, roundId: startInput.roundId };
+  await expect(reportService(user as unknown as SupabaseClient, admin, policy).start({ ...withoutPrice, requestId: randomUUID() }))
+    .rejects.toMatchObject({ message: 'REPORT_PRICE_REQUIRED' });
+  expect(past.reached).toBe(false);
+});
 it('a report of another round or project does not block this round', async () => {
   const otherRound = run(REPORT_REQUEST_INPUT, '2026-10-02T00:00:00Z'), otherProject = run(REPORT_REQUEST_INPUT, '2026-10-03T00:00:00Z');
   const done = { state: 'completed', result: { body: 'x', completeness: 'complete' } };

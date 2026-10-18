@@ -6,6 +6,7 @@ import { logger } from '../../lib/logger';
 import { authoritativeBilling, type BillingRpc } from '../bill2/service';
 import { createRuntimeBudget, type RuntimeBudget } from '../runtime/budget';
 import { newWorkGate } from '../runtime/newWorkGate';
+import { runtimeGateEnvironment } from '../runtime/realHost';
 import { loadStagingPolicy } from '../runtime/stagingPolicy';
 import { stagingTransport } from '../runtime/stagingTransport';
 import { fusionExecutor } from './executor';
@@ -37,7 +38,8 @@ export function serviceReviewFlow(admin: SupabaseClient, actorId: string, budget
       const window = await loadStagingPolicy(admin as unknown as BillingRpc, actorId, env);
       const billing = authoritativeBilling({ admin: admin as unknown as BillingRpc, actor: async () => actorId,
         adapter: stagingTransport(admin, window, budget), budget });
-      return fusionExecutor({ billing, admin, actorId, callGate: newWorkGate(admin, 'staging').calls, budget }).run(...args);
+      return fusionExecutor({ billing, admin, actorId, callGate: newWorkGate(admin, runtimeGateEnvironment(window)).calls, budget })
+        .run(...args);
     },
   };
   return reviewFlow({ admin, actorId, env, executor: executor as ReturnType<typeof fusionExecutor> });
