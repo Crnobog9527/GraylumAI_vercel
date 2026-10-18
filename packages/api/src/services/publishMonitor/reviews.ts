@@ -29,6 +29,8 @@ async function step(db:SupabaseClient,c:ReviewClaim,action:string,reason?:string
  return r.data as {allowed:boolean;actorId:string;executionId:string|null;state:string|null};
 }
 const BALANCE_CODES=['BILL2_INSUFFICIENT_CREDITS','RUNTIME_WAITING_CREDITS','PUBLISH_MONITOR_BALANCE_LOW'];
+const CONFIGURATION_CODES=['PUBLISH_MONITOR_REVIEW_CAP_TOO_LOW','PUBLISH_MONITOR_REVIEW_UNAVAILABLE',
+ 'RUNTIME_STAGING_MODEL_DENIED','RUNTIME_STAGING_MODEL_NOT_APPROVED'];
 /** Prepare a stable request, or find the original one after a killed invocation; never invent a replacement id. */
 export async function prepareReview(db:SupabaseClient,c:ReviewClaim,env:Record<string,string|undefined>){
  const observed=await step(db,c,'observe');
@@ -52,9 +54,10 @@ export async function prepareReview(db:SupabaseClient,c:ReviewClaim,env:Record<s
   await step(db,c,'observe');return executionId;
  }catch(error){
   const code=error instanceof Error?error.message:'';
-  if(!BALANCE_CODES.some(value=>code.includes(value)))throw error;
-  // Only a definite balance refusal ends this period. An outage/ambiguous admission keeps its original id for observation.
-  await step(db,c,'skip','BALANCE_LOW');return null;
+  const balance=BALANCE_CODES.some(value=>code.includes(value));
+  if(!balance&&!CONFIGURATION_CODES.includes(code))throw error;
+  // Definite pre-admission refusals end the period; an outage/ambiguous response retains its original id and accounting.
+  await step(db,c,'skip',balance?'BALANCE_LOW':'CONFIGURATION_REQUIRED');return null;
  }
 }
 /** Runs outside the cron response under Runtime's original quote, journal, epoch and BILL2 recovery. */

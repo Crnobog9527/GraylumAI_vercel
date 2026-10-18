@@ -8,6 +8,7 @@ vi.mock('../runtime/stagingTransport',()=>({stagingTransport:()=>({})}));
 vi.mock('../runtime/newWorkGate',()=>({newWorkGate:()=>({calls:vi.fn()})}));
 vi.mock('./reviewSettings',()=>({readReviewSettings:m.settings}));
 import {createRuntimeBudget} from '../runtime/budget';
+import {capReviewAdmission} from './reviewAdmission';
 import {advanceReview,prepareReview,runWeeklyReviews,type ReviewClaim} from './reviews';
 const c:ReviewClaim={id:'11111111-1111-4111-8111-111111111111',actorId:'22222222-2222-4222-8222-222222222222',
  token:'33333333-3333-4333-8333-333333333333',requestId:'44444444-4444-4444-8444-444444444444',
@@ -94,4 +95,43 @@ it('an ambiguous admission response is observed by its original id without a rep
  await expect(prepareReview(d as never,c,{})).rejects.toThrow('AMBIGUOUS_ADMISSION_RESPONSE');
  expect(await prepareReview(d as never,c,{})).toBe('original');expect(m.prepare).toHaveBeenCalledOnce();
  expect(d.rpc.mock.calls).toHaveLength(2);expect(m.execute).not.toHaveBeenCalled();
+});
+
+it('terminal cap errors free a five-claim batch for later users without dispatching models',async()=>{
+ const claims=Array.from({length:6},(_,i)=>({...c,
+  id:'10000000-0000-4000-8000-'+String(i+1).padStart(12,'0'),
+  requestId:'20000000-0000-4000-8000-'+String(i+1).padStart(12,'0'),
+  actorId:'30000000-0000-4000-8000-'+String(i+1).padStart(12,'0'),
+  sessionId:'40000000-0000-4000-8000-'+String(i+1).padStart(12,'0'),
+  maxCostUsd:i===5?'0.3':'0.1'}));
+ let pending=[...claims];
+ const d={rpc:vi.fn(async(name:string,args:Record<string,unknown>)=>{
+  if(name==='publish_monitor_review_claim')return {data:pending.slice(0,Number(args.p_limit)),error:null};
+  if(args.p_action==='skip')pending=pending.filter(row=>row.id!==args.p_id);
+  return {data:{allowed:true,executionId:null,state:null},error:null};
+ })};
+ m.prepare.mockImplementation(async(input:{requestId:string})=>{
+  const claim=claims.find(row=>row.requestId===input.requestId)!;
+  // Actual admission validator: a positive frozen cap cannot buy the required two calls.
+  capReviewAdmission({maxTurns:6,maxToolCalls:5,ownPosts:true},{contractVersion:'bill2.v2',
+   sourceHash:'original',rules:{creditsPerUsd:'100',multiplier:'6'},
+   callPolicy:[{upperUsd:'0.1'}],limits:{maxCalls:6}} as never,{id:claim.id,token:claim.token,maxCostUsd:claim.maxCostUsd});
+  return {executionId:'later-user'};
+ });
+ const defer=vi.fn(),options={env:{},defer,budget:createRuntimeBudget(()=>0)};
+ expect(await runWeeklyReviews(d as never,options,100,()=>0)).toMatchObject({claimed:5,skipped:5,failed:0,scheduled:0});
+ expect(pending.map(row=>row.id)).toEqual([claims[5]!.id]);
+ expect(d.rpc.mock.calls.filter(([,args])=>args.p_action==='skip').map(([,args])=>args.p_reason))
+  .toEqual(Array(5).fill('CONFIGURATION_REQUIRED'));
+ expect(await runWeeklyReviews(d as never,options,100,()=>0)).toMatchObject({claimed:1,scheduled:1,failed:0});
+ expect(defer).toHaveBeenCalledOnce();expect(m.execute).not.toHaveBeenCalled();
+});
+it.each(['PUBLISH_MONITOR_REVIEW_UNAVAILABLE','RUNTIME_STAGING_MODEL_DENIED','RUNTIME_STAGING_MODEL_NOT_APPROVED'])(
+ 'an explicit review/model configuration refusal is skipped (%s)',async code=>{
+ const d=db({allowed:true,executionId:null,state:null});
+ m.prepare.mockRejectedValueOnce(new Error(code));
+ expect(await prepareReview(d as never,c,{})).toBe(null);
+ expect(d.rpc).toHaveBeenLastCalledWith('publish_monitor_review_step',expect.objectContaining({
+  p_action:'skip',p_reason:'CONFIGURATION_REQUIRED'}));
+ expect(m.execute).not.toHaveBeenCalled();
 });
