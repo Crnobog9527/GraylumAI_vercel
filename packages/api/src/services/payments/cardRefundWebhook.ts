@@ -39,7 +39,12 @@ export async function handleCardRefund(db: SupabaseClient, stripe: RefundStripe,
   const chargeId = input.chargeId ?? id(refunds[0]!.charge);
   const paymentIntentId = id(refunds[0]!.payment_intent);
   if (refunds.some(refund => id(refund.charge) !== chargeId)) throw new Error(PAYMENT_EVIDENCE_CONFLICT);
-  const match = await findCardOrderForPayment(db, stripe, scope, { chargeId, paymentIntentId }, { includeWalletMembership: true });
+  const match = await findCardOrderForPayment(db, stripe, scope, { chargeId, paymentIntentId }, { includeWalletMembership: true, includeWalletPacks: true });
+  if (match?.kind === 'pack' && ['wechat_pay', 'alipay'].includes(match.order.payment_method)) {
+    const holds = await db.from('payment_disputes').select('id').eq('order_id', match.order.id).eq('freeze_state', 'frozen').limit(1);
+    if (holds.error || !Array.isArray(holds.data)) throw new Error('PAY_DISPUTE_REFUND_SCOPE_UNAVAILABLE');
+    if (!holds.data.length) return false; // Keep the existing wallet-pack refund behavior when no hold needs conversion.
+  }
   let oursHandled = 0;
   for (const refund of match ? ours : []) {
     if (refund.metadata?.orderId !== match!.order.id) throw new Error(PAYMENT_EVIDENCE_CONFLICT);
@@ -170,3 +175,6 @@ async function cardOrderAwaitingPayment(db: Pick<SupabaseClient, 'from'>, stripe
     || order.data.item_type === 'membership_plan' && ['wechat_pay', 'alipay'].includes(order.data.payment_method));
 }
 
+
+// Stripe financial webhook entry: disputes share this module's original payment lookup.
+export { handlePaymentDispute } from './disputes';

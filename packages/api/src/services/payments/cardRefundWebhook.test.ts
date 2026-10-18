@@ -45,7 +45,7 @@ describe('R7: external refunds of wallet one-time memberships (0298)', () => {
     const f = fixture([refund({ id: 're_dash', amount: 49600 })], { state: 'refunded', duplicate: false, renewing: false });
     await expect(f.run({ refundId: 're_dash' })).resolves.toBe(true);
     expect(mocks.find).toHaveBeenCalledWith(f.db, f.stripe, { mode: 'live', merchant: 'fixture' },
-      expect.objectContaining({ paymentIntentId: 'pi_1' }), { includeWalletMembership: true });
+      expect.objectContaining({ paymentIntentId: 'pi_1' }), { includeWalletMembership: true, includeWalletPacks: true });
     expect(f.db.rpc).toHaveBeenCalledWith('pay_stripe_mp_record_external_refund', expect.objectContaining({
       p_order: 'order', p_payment: 'pi_1', p_refund: 're_dash', p_amount: 49600 }));
     expect(f.alert).not.toHaveBeenCalled();
@@ -129,7 +129,7 @@ describe('PAY-STRIPE-MP external refunds of card orders', () => {
       refund({ id: 're_pending', status: 'pending' })]);
     await expect(f.run({ chargeId: 'ch_1' })).resolves.toBe(true);
     expect(mocks.find).toHaveBeenCalledWith(f.db, f.stripe, { mode: 'test', merchant: 'fixture' },
-      { chargeId: 'ch_1', paymentIntentId: 'pi_1' }, { includeWalletMembership: true });
+      { chargeId: 'ch_1', paymentIntentId: 'pi_1' }, { includeWalletMembership: true, includeWalletPacks: true });
     expect(f.db.rpc.mock.calls.map(call => (call as unknown as [string, { p_refund: string }])[1].p_refund)).toEqual(['re_1', 're_2']);
     expect(f.db.rpc).toHaveBeenCalledWith('pay_stripe_mp_record_external_refund', { p_order: 'order', p_merchant: 'fixture',
       p_payment: 'in_1', p_refund: 're_1', p_amount: 4900, p_currency: 'usd', p_refunded_at: '2026-10-14T17:46:40.000Z' });

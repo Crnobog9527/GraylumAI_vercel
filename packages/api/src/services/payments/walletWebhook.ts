@@ -8,6 +8,8 @@ import { logger } from '../../lib/logger';
 import { readCardPaymentEvidence, recordCardPaymentTax, type CardOrder, type CardPaymentEvidence } from './cardPaymentEvidence';
 import { stopPriorAfterUpgrade } from './cardUpgrade';
 import { stopUndeliveredSubscription } from './cardSubscriptionStop';
+import { readDisputePayment } from './disputePayment';
+import { resumeOrderDisputes, type DisputeAlert } from './disputes';
 import { reportGaPurchase } from '../analytics/gaPurchase';
 
 const isCard = (method: string) => method === 'card' || method === 'card_cn';
@@ -31,8 +33,8 @@ function foreignSession(session: Stripe.Checkout.Session, reason: string) {
 }
 
 export async function recoverWalletCheckout(db: SupabaseClient, stripe: Stripe, sessionId: string,
-  verifiedEventType?: string) {
-  return Boolean(await recoverMethodCheckout(db, stripe, sessionId, verifiedEventType));
+  verifiedEventType?: string, disputeAlert?: DisputeAlert) {
+  return Boolean(await recoverMethodCheckout(db, stripe, sessionId, verifiedEventType, disputeAlert));
 }
 
 /** New-method orders (wallet one-time, PAY-STRIPE-MP card / card_cn): resolve ownership from the original
@@ -40,7 +42,7 @@ export async function recoverWalletCheckout(db: SupabaseClient, stripe: Stripe, 
  * recovery after a timeout. Returns null for orders of the legacy path, and { orderId: null } for an unpaid
  * session that is not ours (acknowledged, nothing to do). */
 export async function recoverMethodCheckout(db: SupabaseClient, stripe: Stripe, sessionId: string,
-  verifiedEventType?: string): Promise<{ orderId: string | null; checkoutStatus?: Stripe.Checkout.Session['status'];
+  verifiedEventType?: string, disputeAlert?: DisputeAlert): Promise<{ orderId: string | null; checkoutStatus?: Stripe.Checkout.Session['status'];
     paymentStatus?: Stripe.Checkout.Session['payment_status'] | null } | null> {
   const scope = await resolveStripeScope(stripe);
   const refs = await db.from('payment_provider_refs').select('order_id').eq('channel', 'stripe')
@@ -102,11 +104,13 @@ export async function recoverMethodCheckout(db: SupabaseClient, stripe: Stripe, 
   const card = 'subscription' in cash ? cash.subscription : null;
   const term = card ? { start: card.start, end: card.end } : order.item_type === 'membership_plan'
     ? walletMembershipTerm({ paidAt: cash.paidAt, term: order.entitlement_term, founderRenewal: renewal }) : null;
-  const applied = await db.rpc('pay_waffo_fulfill_payment', {
-    p_order: order.id, p_merchant: scope.merchant, p_checkout: cash.checkoutId, p_payment: cash.paymentId,
-    p_amount: cash.amount, p_currency: cash.currency, p_paid_at: cash.paidAt, p_subscription: card?.id ?? null,
-    p_start: term?.start ?? null, p_end: term?.end ?? null,
-  });
+  const payment = await readDisputePayment(stripe, scope, { paymentIntentId: cash.paymentId.startsWith('pi_') ? cash.paymentId : null,
+    invoiceId: cash.paymentId.startsWith('in_') ? cash.paymentId : null });
+  const applied = await db.rpc('pay_dispute_fulfill', { p_facts: {
+    orderId: order.id, merchant: scope.merchant, mode: scope.mode, checkoutId: cash.checkoutId, paymentId: cash.paymentId,
+    paymentIntentId: payment.paymentIntentId, amount: cash.amount, currency: cash.currency, paidAt: cash.paidAt,
+    subscriptionId: card?.id ?? null, start: term?.start ?? null, end: term?.end ?? null,
+  } });
   if (applied.error || !applied.data) throw new Error('PAY_WAFFO_FULFILLMENT_UNAVAILABLE');
   // A delivered Pro -> Gold upgrade stops the prior card subscription at period end (PAY-STRIPE-MP step 4a). Every
   // replay of a delivered payment comes back 'fulfilled' and repeats both steps; neither failure skips the other, so
@@ -114,6 +118,7 @@ export async function recoverMethodCheckout(db: SupabaseClient, stripe: Stripe, 
   const failures: unknown[] = [];
   const attempt = async (step: () => Promise<unknown>) => { try { await step(); } catch (error) { failures.push(error); } };
   const delivered = (applied.data as { state?: string }).state === 'fulfilled';
+  await attempt(() => resumeOrderDisputes(db, stripe, order.id, disputeAlert));
   if (delivered) await attempt(() => stopPriorAfterUpgrade(db, stripe, order));
   // Paid but kept for review (not delivered): its card subscription must not renew; the prior Pro is kept.
   else if (card) await attempt(() => stopUndeliveredSubscription(stripe, card.id));

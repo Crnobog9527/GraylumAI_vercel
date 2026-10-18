@@ -1,0 +1,80 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type Stripe from 'stripe';
+import type { SupabaseClient } from '@supabase/supabase-js';
+const mocks = vi.hoisted(() => ({ scope: vi.fn(), payment: vi.fn(), find: vi.fn(), read: vi.fn(), stop: vi.fn() }));
+vi.mock('./stripeCheckoutPersistence', () => ({ resolveStripeScope: mocks.scope }));
+vi.mock('./disputePayment', () => ({ readDisputePayment: mocks.payment }));
+vi.mock('./cardPaymentLookup', () => ({ findCardOrderForPayment: mocks.find }));
+vi.mock('./cardSubscriptionStop', () => ({ readSubscription: mocks.read, stopUndeliveredSubscription: mocks.stop,
+  stripeStopState: (s: { stopped: boolean; canceled: boolean }) => ({ stop: s.stopped, canceled: s.canceled }) }));
+import { handlePaymentDispute } from './disputes';
+function fixture(overrides = {}) {
+  const row = { id: 'internal-dispute', merchant_namespace: 'acct_test', mode: 'test', provider_dispute_id: 'du_test',
+    order_id: 'order', subscription_id: 'local_sub', provider_subscription_id: 'sub_test', freeze_state: 'frozen',
+    renewal_stop_state: 'pending', stop_attempts: 0, source_review_required: false, evidence_due_by: '2026-10-25T00:00:00Z',
+    opened_at: new Date().toISOString(), closed_at: null, alerted_at: null, freeze_alerted_at: null, stop_alerted_at: null,
+    unmatched_alerted_at: null, closed_alerted_at: null, ...overrides };
+  const rpc = vi.fn(async (name: string) => {
+    if (name === 'pay_dispute_receive') return { data: { ...row }, error: null };
+    if (name === 'pay_dispute_stop_claim') return { data: row.stop_attempts++ < 3, error: null };
+    if (name === 'pay_dispute_stop_confirm') row.renewal_stop_state = 'confirmed';
+    return { data: null, error: null };
+  });
+  const from = vi.fn(() => ({ update: (values: object) => ({ eq: async () => { Object.assign(row, values); return { error: null }; } }) }));
+  const db = { rpc, from } as unknown as SupabaseClient;
+  const event = { id: 'evt_test', type: 'charge.dispute.created', created: 1792300000, livemode: false,
+    data: { object: { object: 'dispute', id: 'du_test', charge: 'ch_test', payment_intent: null, livemode: false,
+      created: 1792300000, amount: 1000, currency: 'usd', reason: 'fraudulent', status: 'needs_response',
+      evidence_details: { due_by: 1792886400 }, balance_transactions: [] } } } as unknown as Stripe.Event;
+  const alert = vi.fn();
+  return { row, rpc, db, event, alert, run: () => handlePaymentDispute(db, {} as Stripe, event, alert) };
+}
+beforeEach(() => {
+  vi.resetAllMocks();
+  mocks.scope.mockResolvedValue({ merchant: 'acct_test', mode: 'test' });
+  mocks.payment.mockResolvedValue({ chargeId: 'ch_test', paymentIntentId: 'pi_test', invoiceId: 'in_test',
+    subscriptionId: 'sub_test', paymentAt: '2026-10-18T01:00:00Z' });
+  mocks.find.mockResolvedValue({ order: { id: 'order' } });
+  mocks.read.mockResolvedValue({ stopped: true, canceled: false });
+  mocks.stop.mockResolvedValue(undefined);
+});
+describe('Stripe dispute effects resume from committed financial state', () => {
+  it('reuses the order lookup, records original payment time and resumes a persisted freeze on replay', async () => {
+    const f = fixture(); await f.run(); await f.run();
+    expect(mocks.find).toHaveBeenCalledWith(f.db, {}, { merchant: 'acct_test', mode: 'test' }, expect.anything(),
+      { includeWalletMembership: true, includeWalletPacks: true });
+    expect(f.rpc).toHaveBeenCalledWith('pay_dispute_receive', expect.objectContaining({ p_event: expect.objectContaining({
+      paymentAt: '2026-10-18T01:00:00Z', id: 'evt_test' }) }));
+    expect(f.rpc.mock.calls.filter(([name]) => name === 'pay_dispute_stop_confirm')).toHaveLength(1);
+    expect(f.alert.mock.calls.filter(([notice]) => notice.code === 'PAY_DISPUTE_PAYMENT_FROZEN')).toHaveLength(1);
+  });
+  it('after an update times out, observes the actual stop before deciding whether to mutate again', async () => {
+    const f = fixture(); let stopped = false;
+    mocks.read.mockImplementation(async () => ({ stopped, canceled: false }));
+    mocks.stop.mockImplementation(async () => { stopped = true; throw new Error('uncertain'); });
+    await f.run(); expect(mocks.stop).toHaveBeenCalledTimes(1); expect(f.row.renewal_stop_state).toBe('confirmed');
+  });
+  it('caps mutations at three and persists manual attention without repeated alerts on delivery retry', async () => {
+    const f = fixture(); mocks.read.mockResolvedValue({ stopped: false, canceled: false }); mocks.stop.mockRejectedValue(new Error('offline'));
+    await f.run(); await f.run();
+    expect(mocks.stop).toHaveBeenCalledTimes(3); expect(f.row.renewal_stop_state).toBe('manual');
+    expect(f.alert.mock.calls.filter(([notice]) => notice.code === 'PAY_DISPUTE_STOP_MANUAL')).toHaveLength(1);
+  });
+  it('unmatched payments are recorded and alerted, without canceling an unrelated provider subscription', async () => {
+    const f = fixture({ order_id: null, subscription_id: null, freeze_state: 'pending',
+      opened_at: new Date(Date.now() - 25 * 3600_000).toISOString() });
+    mocks.find.mockResolvedValue(null); await f.run(); await f.run();
+    expect(mocks.read).not.toHaveBeenCalled(); expect(mocks.stop).not.toHaveBeenCalled();
+    expect(f.alert.mock.calls.filter(([notice]) => notice.code === 'PAY_DISPUTE_UNMATCHED_24H')).toHaveLength(1);
+  });
+  it('refunded or externally canceled payments are reported and already canceled subscriptions need no update', async () => {
+    const f = fixture({ freeze_state: 'superseded' }); mocks.read.mockResolvedValue({ stopped: false, canceled: true });
+    await f.run(); expect(mocks.stop).not.toHaveBeenCalled();
+    expect(f.alert).toHaveBeenCalledWith(expect.objectContaining({ code: 'PAY_DISPUTE_REFUNDED_PAYMENT' }));
+  });
+  it('database failure rejects the webhook so Stripe can retry', async () => {
+    const f = fixture(); f.rpc.mockResolvedValueOnce({ data: null, error: { code: 'XX000' } } as never);
+    await expect(f.run()).rejects.toThrow('PAY_DISPUTE_RECORD_UNAVAILABLE'); expect(mocks.stop).not.toHaveBeenCalled();
+  });
+});

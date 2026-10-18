@@ -1,4 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { reconcilePaymentDisputes, type DisputeAlert } from './disputes';
+import { reconcileDisputeRenewalRefunds } from './disputeRenewalRefund';
 import type Stripe from 'stripe';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { resolveStripeScope } from './stripeCheckoutPersistence';
@@ -18,12 +20,12 @@ const DAY = 86400;
 export type StripeCardFinding = OpenOrderFinding | {
   kind: 'paid_not_delivered' | 'paid_in_review' | 'renewal_not_recorded' | 'refund_not_recorded' | 'tax_not_recorded'
     | 'repair_failed' | 'stop_unconfirmed'
-    | 'scan_incomplete' | 'scan_failed';
+    | 'scan_incomplete' | 'scan_failed' | 'dispute_repair_failed';
   object?: 'checkout' | 'invoice' | 'refund' | 'subscription'; externalId?: string; orderId?: string; code?: string;
 };
 type Listed<T> = { data: T[]; has_more: boolean };
 type Options = { expectedMode: StripeScope['mode']; now?: Date; days?: number; maxPages?: number; budgetMs?: number;
-  alert?: () => void };
+  alert?: () => void; disputeAlert?: DisputeAlert };
 
 /** PAY-STRIPE-MP daily backstop (04:00 billing-reconcile, #847 2.5-5): if a webhook was lost, a paid card order could
  * stay undelivered with nothing noticing. Scans the last `days` of Stripe checkout sessions, paid renewal invoices and
@@ -186,6 +188,15 @@ export async function reconcileStripeCardPayments(db: SupabaseClient, stripe: St
       deadline, maxPages });
     checked += open.checked; repaired += open.repaired; complete &&= open.complete;
     findings.push(...open.findings);
+  }
+
+  if (!outOfTime) {
+    const disputes = await reconcilePaymentDisputes(db, stripe, options.disputeAlert, deadline);
+    const refunds = await reconcileDisputeRenewalRefunds(db, stripe, options.disputeAlert, deadline);
+    checked += disputes.checked + refunds.checked;
+    complete &&= disputes.complete && refunds.complete;
+    if (disputes.failed || refunds.failed) findings.push({ kind: 'dispute_repair_failed', code: 'PAY_DISPUTE_MANUAL_REVIEW' });
+    if (!disputes.complete || !refunds.complete) findings.push({ kind: 'scan_incomplete', code: 'PAY_DISPUTE_SCAN_INCOMPLETE' });
   }
 
   return { success: findings.length === 0, skipped: false, complete, repaired, checked, findings };

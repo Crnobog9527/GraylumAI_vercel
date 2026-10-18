@@ -1,0 +1,35 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { z } from 'zod';
+import { router, adminProcedure, protectedProcedure } from '../trpc';
+import { createSafeServiceUnavailableError } from '../lib/publicError';
+
+export const paymentDisputesRouter = router({
+  notice: protectedProcedure.query(async ({ ctx }) => {
+    try {
+      if (!ctx.hasSupabaseAdminPrivileges) throw new Error('PAY_DISPUTE_DB_UNAVAILABLE');
+      const rows = await ctx.supabaseAdmin.from('payment_disputes').select('id,payment_orders!inner(user_id)')
+        .eq('payment_orders.user_id', ctx.profileId).eq('freeze_state', 'frozen').limit(1);
+      if (rows.error || !Array.isArray(rows.data)) throw new Error('PAY_DISPUTE_READ_UNAVAILABLE');
+      return { frozen: rows.data.length > 0 };
+    } catch (error) { throw createSafeServiceUnavailableError(error, '付款状态暂时无法读取'); }
+  }),
+  list: adminProcedure.query(async ({ ctx }) => {
+    try {
+      if (!ctx.hasSupabaseAdminPrivileges) throw new Error('PAY_DISPUTE_DB_UNAVAILABLE');
+      const rows = await ctx.supabaseAdmin.from('payment_disputes')
+        .select('id,order_id,amount,currency,status,freeze_state,renewal_stop_state,evidence_due_by,source_review_required')
+        .order('opened_at', { ascending: false }).limit(100);
+      if (rows.error || !Array.isArray(rows.data)) throw new Error('PAY_DISPUTE_READ_UNAVAILABLE');
+      return rows.data as Array<{ id: string; order_id: string | null; amount: number; currency: string; status: string;
+        freeze_state: string; renewal_stop_state: string; evidence_due_by: string | null; source_review_required: boolean }>;
+    } catch (error) { throw createSafeServiceUnavailableError(error, '拒付记录暂时无法读取'); }
+  }),
+  withdraw: adminProcedure.input(z.object({ disputeId: z.uuid() }).strict()).mutation(async ({ ctx, input }) => {
+    try {
+      if (!ctx.hasSupabaseAdminPrivileges) throw new Error('PAY_DISPUTE_DB_UNAVAILABLE');
+      const result = await ctx.supabaseAdmin.rpc('pay_dispute_withdraw', { p_actor: ctx.profileId, p_dispute: input.disputeId });
+      if (result.error || !result.data) throw new Error('PAY_DISPUTE_WITHDRAW_UNAVAILABLE');
+      return result.data as { restored: number; duplicate: boolean };
+    } catch (error) { throw createSafeServiceUnavailableError(error, '冻结未撤回，请核对付款和拒付状态后重试'); }
+  }),
+});

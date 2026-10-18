@@ -12,6 +12,8 @@ vi.mock('./cardSubscriptionWebhook', () => ({ handleCardSubscriptionInvoice: moc
 vi.mock('./cardRefundWebhook', () => ({ handleCardRefund: mocks.refund }));
 vi.mock('./cardUpgrade', () => ({ cardStripeSubscription: mocks.stripeId }));
 vi.mock('./cardSubscriptionStop', () => ({ stopRenewalAfterReview: mocks.stop }));
+vi.mock('./disputes', () => ({ reconcilePaymentDisputes: vi.fn(async () => ({ checked: 0, failed: 0, complete: true })) }));
+vi.mock('./disputeRenewalRefund', () => ({ reconcileDisputeRenewalRefunds: vi.fn(async () => ({ checked: 0, failed: 0, complete: true })) }));
 import { reconcileStripeCardPayments } from './stripeCardReconciliation';
 
 const ORDER = '00000000-0000-4000-8000-000000000001';

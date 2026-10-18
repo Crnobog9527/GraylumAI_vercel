@@ -7,11 +7,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Stripe from 'stripe';
 
-const walletMocks = vi.hoisted(() => ({ recover: vi.fn(), invoice: vi.fn(), subscription: vi.fn(), refund: vi.fn() }));
+const walletMocks = vi.hoisted(() => ({ recover: vi.fn(), invoice: vi.fn(), subscription: vi.fn(), refund: vi.fn(), dispute: vi.fn() }));
 vi.mock('@repo/api/src/services/payments/walletWebhook', () => ({ recoverMethodCheckout: walletMocks.recover }));
 vi.mock('@repo/api/src/services/payments/cardSubscriptionWebhook', () => ({
   handleCardSubscriptionInvoice: walletMocks.invoice, handleCardSubscriptionState: walletMocks.subscription }));
-vi.mock('@repo/api/src/services/payments/cardRefundWebhook', () => ({ handleCardRefund: walletMocks.refund }));
+vi.mock('@repo/api/src/services/payments/cardRefundWebhook', () => ({ handleCardRefund: walletMocks.refund, handlePaymentDispute: walletMocks.dispute }));
 
 const alertMocks = vi.hoisted(() => ({ captureMessage: vi.fn(), logServerError: vi.fn() }));
 vi.mock('../../../../../apps/web/node_modules/@sentry/nextjs', () => ({ captureMessage: alertMocks.captureMessage }));
@@ -46,6 +46,7 @@ describe('stripe webhook route', () => {
     walletMocks.invoice.mockReset().mockResolvedValue(false);
     walletMocks.subscription.mockReset().mockResolvedValue(false);
     walletMocks.refund.mockReset().mockResolvedValue(false);
+    walletMocks.dispute.mockReset().mockResolvedValue(true);
     Object.values(alertMocks).forEach((mock) => mock.mockReset());
     Object.values(stripeServiceMocks).forEach((mock) => mock.mockReset());
     Object.values(stripeFulfillmentMocks).forEach((mock) => mock.mockReset());
@@ -76,10 +77,11 @@ describe('stripe webhook route', () => {
       expect(stripeFulfillmentMocks.reconcileSubscriptionRefundFromStripeWebhook).not.toHaveBeenCalled();
     });
   it.each(['charge.dispute.created', 'charge.dispute.updated', 'charge.dispute.closed', 'charge.dispute.funds_withdrawn'])(
-    'acknowledges %s without touching any payment path (freezing belongs to PAY-DISPUTE-GUARD)', async (type) => {
+    'dispatches %s to PAY-DISPUTE-GUARD without entering a refund path', async (type) => {
       await expect(handleStripeWebhookEvent({} as never, { type, data: { object: { id: 'dp_1' } } } as Stripe.Event))
         .resolves.toBeUndefined();
-      expect(alertMocks.logServerError).toHaveBeenCalledWith('billing', 'stripe_dispute_received', { eventType: type });
+      expect(walletMocks.dispute).toHaveBeenCalledWith({}, undefined,
+        expect.objectContaining({ type }), expect.any(Function));
       expect(walletMocks.refund).not.toHaveBeenCalled();
       expect(stripeFulfillmentMocks.reconcileSubscriptionRefundFromStripeWebhook).not.toHaveBeenCalled();
     });
@@ -118,7 +120,7 @@ describe('stripe webhook route', () => {
     const event = { type: 'checkout.session.async_payment_failed', data: { object: { id: 'cs_failed' } } } as Stripe.Event;
     walletMocks.recover.mockResolvedValue(true);
     await handleStripeWebhookEvent({} as never, event);
-    expect(walletMocks.recover).toHaveBeenCalledWith({}, undefined, 'cs_failed', 'checkout.session.async_payment_failed');
+    expect(walletMocks.recover).toHaveBeenCalledWith({}, undefined, 'cs_failed', 'checkout.session.async_payment_failed', expect.any(Function));
     expect(stripeFulfillmentMocks.upsertPaymentOrderBySession).not.toHaveBeenCalled();
   });
 
