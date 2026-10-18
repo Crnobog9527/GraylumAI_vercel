@@ -2,6 +2,7 @@
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {readData,type PublishMonitorData} from '../publishMonitor/data';
 import type {SessionRpc} from './session';
+import {postgresJsonbBytes} from './payloadSize';
 
 export const OWN_POSTS_SWITCH='chat_my_posts_enabled';
 export const OWN_POSTS_RESERVE=24000;
@@ -75,7 +76,7 @@ export function ownPostsResult(data:PublishMonitorData,now=Date.now()):Record<st
   result.source_connections=[...new Set(posts.map(p=>p.connection_id))];
   result.platform_medians=Object.fromEntries(Object.entries(groups).map(([platform,metrics])=>[platform,
    Object.fromEntries(Object.entries(metrics).map(([key,values])=>[key,{median:median(values),samples:values.length}]))]));
-  if(Buffer.byteLength(JSON.stringify(result))<=11000)return result;
+  if(postgresJsonbBytes(result)<=11000)return result;
   if(!posts.length)return {...unavailable,reason:'capacity_exhausted'};
   posts.pop();result.truncated=true;
  }
