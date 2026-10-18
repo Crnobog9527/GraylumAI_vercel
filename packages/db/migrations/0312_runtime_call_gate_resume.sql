@@ -17,7 +17,8 @@ BEGIN
  anchor:=$anchor$'phase',pending_call.payload->>'phase','sessionRevision',s.revision,
       'materialRevision',coalesce((SELECT max(revision) FROM runtime_scope_material WHERE session_id=s.id),0)))$anchor$;
  replacement:=$patch$'phase',pending_call.payload->>'phase','sessionRevision',s.revision,
-      'materialRevision',coalesce((SELECT max(revision) FROM runtime_scope_material WHERE session_id=s.id),0),'gatePassed',true))$patch$;
+      'materialRevision',coalesce((SELECT max(revision) FROM runtime_scope_material WHERE session_id=s.id),0),
+      'gatePassed',pending_call.id IS NOT NULL))$patch$;
  IF array_length(string_to_array(definition,anchor),1)<>2 THEN RAISE EXCEPTION 'RATE_LIMIT_WAIT_DEADLINE_MISMATCH';END IF;
  definition:=replace(definition,anchor,replacement);
  anchor:=$anchor$'phase',p_result->>'phase','sessionRevision',s.revision,
