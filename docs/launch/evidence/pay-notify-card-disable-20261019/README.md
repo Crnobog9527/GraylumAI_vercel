@@ -2,6 +2,8 @@
 
 候选目标：#1160，base `staging`。本次只把已通过付款提醒场景验证的卡类停用 SQL 从测试夹具迁入正式追加迁移 `packages/db/migrations/0313_disable_card_renewal_notices.sql`，并更新测试引用。迁移回滚说明位于 SQL 文件头；不删除历史通知行或防重键。
 
+为落实 Owner 2026-10-19 决定并关闭机器人首轮 P1，已在 `docs/launch/MASTER_PLAN.md` 第 2.1 节记录新决定及其取代的旧安排，并同步更新 PAY-NOTIFY 方案的卡类渠道表、范围、PR-N2 内容、验收和 N1 决定。
+
 ## 验证结果
 
 - PASS：`pnpm --filter @repo/api exec vitest run src/services/notify/registry.test.ts src/services/notify/sender.test.ts src/routers/paymentNotices.test.ts`，3 个文件、34 项通过。
