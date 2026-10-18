@@ -35,8 +35,8 @@ it('does not start when configuration is absent',async()=>{
  expect((await GET(new Request('https://synthetic.test/api/cron/library-cleanup'))).status).toBe(500);
  expect(mocks.cleanup).not.toHaveBeenCalled();
 });
-it('retains daily staging schedule without changing account-erasure timing',()=>{
+it('runs library cleanup and account erasure every 5 minutes (Pro)',()=>{
  const config=JSON.parse(readFileSync('vercel.json','utf8'));
- expect(config.crons).toContainEqual({path:'/api/cron/library-cleanup',schedule:'0 6 * * *'});
- expect(config.crons).toContainEqual({path:'/api/cron/account-erasure',schedule:'0 5 * * *'});
+ expect(config.crons).toContainEqual({path:'/api/cron/library-cleanup',schedule:'*/5 * * * *'});
+ expect(config.crons).toContainEqual({path:'/api/cron/account-erasure',schedule:'*/5 * * * *'});
 });
