@@ -1,0 +1,59 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * S1 "一束光穿过棱镜" (design plan in the sample notes): a cool white page; the only colour is light — the spectrum on
+ * the first screen, a faint light at the screen's edges further down (blue by step one, violet by the jury), and the
+ * footer as the spectrum gathered back into one deep indigo. One authored moment: the beam comes in, the spectrum
+ * opens, then breathes (7 s). Reduced motion: drawn, still.
+ */
+.shell {
+  --s1-page: #f7f8fd;
+  --s1-night: #1c1a3a;
+  --j-canvas: var(--s1-page);
+  background: var(--s1-page);
+}
+.shell ::selection { background: #dcd3ff; }
+.shell > header { background: color-mix(in srgb, var(--s1-page) 88%, transparent); }
+
+/* ---- First screen: the beam, the prism, the spectrum ---- */
+.scene { position: absolute; top: 0; left: 0; width: 100%; height: 940px; }
+.spectrum { opacity: .62; }
+.breath { transform-box: view-box; transform-origin: 342px 483px; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .beam line { stroke-dasharray: 1; animation: s1-draw 1.1s cubic-bezier(.22, 1, .36, 1) .2s both; }
+  .prism { animation: s1-in .7s ease-out both; }
+  .spectrum { animation: s1-open 1.5s cubic-bezier(.16, 1, .3, 1) 1.1s both; }
+  .breath { animation: s1-breathe 7s ease-in-out 2.6s infinite alternate; }
+}
+@keyframes s1-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+@keyframes s1-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes s1-open { from { clip-path: inset(0 100% 0 0); opacity: .2; } to { clip-path: inset(0 0 0 0); opacity: .62; } }
+@keyframes s1-breathe { from { opacity: 1; transform: scaleY(1); } to { opacity: .8; transform: scaleY(1.025); } }
+
+/* ---- Further down: light at the screen's edges, never a fill ---- */
+.edges { position: fixed; inset: 0; }
+.edges i { position: absolute; inset: 0; display: block; }
+.blue {
+  opacity: calc(var(--w1, 0) * .9);
+  background:
+    radial-gradient(14vw 60vh at 0 50%, rgba(77, 171, 247, .30), transparent 70%),
+    radial-gradient(14vw 60vh at 100% 50%, rgba(77, 171, 247, .30), transparent 70%);
+}
+.violet {
+  opacity: calc(var(--w2, 0) * .9);
+  background:
+    radial-gradient(14vw 60vh at 0 55%, rgba(132, 94, 247, .30), transparent 70%),
+    radial-gradient(14vw 60vh at 100% 45%, rgba(132, 94, 247, .30), transparent 70%);
+}
+
+/* ---- Footer: the spectrum gathered back into one deep colour ---- */
+.shell > footer {
+  --j-ink: #f4f2ff; --j-body: #d6d3f0; --j-muted: #b8b4dc; --j-line: rgba(255, 255, 255, .12);
+  margin-top: 0; padding-top: 88px; background: var(--s1-night); color: var(--j-muted);
+}
+.shell > footer::before {
+  content: ''; position: absolute; top: 0; left: 50%; width: 420px; height: 56px; translate: -50% 0;
+  background: linear-gradient(90deg, #ff6b6b, #ffa94d, #ffd43b, #51cf66, #4dabf7, #845ef7);
+  clip-path: polygon(0 0, 100% 0, 50.6% 100%, 49.4% 100%); opacity: .75; filter: blur(1.5px);
+}
+.shell > footer a:focus-visible, .shell > footer button:focus-visible { outline-color: #fff; }

@@ -1,0 +1,49 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * S2 "从清晨到深夜" (design plan in the sample notes): one continuous sky. Dawn is the base; day and dusk lie over it
+ * and fade in with the reader's place (`--w1`, `--w2` + `--w3`), so the colour moves with the scroll and has no seam.
+ * The night is at the foot of the page, under the footer, with a few still stars. One authored moment: the sun rises
+ * a little as the first screen's sky brightens (2.6 s, once). Reduced motion: risen, bright.
+ */
+.shell {
+  --s2-night: #141b46;
+  --j-canvas: #fff1e8;
+  /* Product windows stay white and float on long, soft, slightly blue shadows. */
+  --j-shadow: 0 1px 2px rgba(40, 52, 110, .06), 0 24px 48px -28px rgba(40, 52, 110, .35);
+  --j-shadow-lift: 0 2px 4px rgba(40, 52, 110, .06), 0 48px 96px -40px rgba(40, 52, 110, .45);
+  background: #fff1e8;
+}
+.shell ::selection { background: #ffd2b8; }
+.shell > header { background: rgba(255, 255, 255, .5); }
+
+/* ---- The sky: fixed to the screen, its colour set by the reader's place ---- */
+.sky { position: fixed; inset: 0; background: linear-gradient(180deg, #ffcfb8 0%, #ffe4d4 55%, #fff3ea 100%); }
+.sky i { position: absolute; inset: 0; display: block; }
+.day { opacity: var(--w1, 0); background: linear-gradient(180deg, #b6d9ff 0%, #d9ecff 55%, #f0f7ff 100%); }
+.dusk { opacity: calc(var(--w2, 0) + var(--w3, 0)); background: linear-gradient(180deg, #ffbd95 0%, #f6c4bc 48%, #d5c5f1 100%); }
+
+/* ---- First screen: the sun rising behind the haze of the horizon ---- */
+.scene { position: absolute; top: 0; left: 0; width: 100%; height: 940px; overflow: clip; }
+.scene i { position: absolute; display: block; }
+.sun {
+  left: 76%; bottom: -60px; width: 520px; height: 520px; margin-left: -260px; border-radius: 50%;
+  background: radial-gradient(circle, #fff8ea 0%, #ffe2b4 18%, #ffbe86 30%, rgba(255, 170, 120, .45) 44%, rgba(255, 170, 120, 0) 70%);
+}
+.haze { inset: auto 0 0; height: 260px; background: linear-gradient(180deg, rgba(255, 214, 186, 0), rgba(255, 205, 172, .7) 55%, #ffeadc 100%); }
+.dark { inset: 0; opacity: 0; background: linear-gradient(180deg, #4b4f8f, #b1849e 80%); }
+@media (prefers-reduced-motion: no-preference) {
+  .sun { animation: s2-rise 2.6s cubic-bezier(.22, 1, .36, 1) .2s both; }
+  .dark { animation: s2-dawn 2.6s cubic-bezier(.22, 1, .36, 1) .2s both; }
+}
+@keyframes s2-rise { from { translate: 0 22vh; opacity: .7; } to { translate: 0 0; opacity: 1; } }
+@keyframes s2-dawn { from { opacity: .42; } to { opacity: 0; } }
+
+/* ---- Night at the foot of the page, under the footer ---- */
+.stars { position: absolute; left: 0; right: 0; bottom: 0; height: 640px;
+  background: linear-gradient(180deg, rgba(20, 27, 70, 0), #232c63 34%, var(--s2-night) 60%); }
+.stars i { position: absolute; display: block; margin-top: 240px; border-radius: 50%; background: #fff6dc; opacity: .8; }
+.shell > footer {
+  --j-ink: #f6f3ff; --j-body: #d8d6f2; --j-muted: #b9b7e0; --j-line: rgba(255, 255, 255, .14);
+  padding-top: 72px; border-top: 0; color: var(--j-muted);
+}
+.shell > footer a:focus-visible, .shell > footer button:focus-visible { outline-color: #fff; }

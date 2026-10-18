@@ -1,0 +1,78 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * S4 "生活切片拼成的电影海报" (design plan in the sample notes): full-screen stills in a warm orange and teal grade,
+ * fixed behind the page, crossing into one another with the reader's place; words outside the product windows turn
+ * light, the windows stay white. One authored moment: the first still pushes in (14 s, once). Reduced motion: the
+ * stills still cross (colour only), without the push-in or the zoom.
+ */
+.shell {
+  --s4-deep: #0d161d;
+  --s4-warm: #f29a4a;
+  --j-canvas: var(--s4-deep);
+  background: var(--s4-deep);
+}
+.shell ::selection { background: var(--s4-warm); color: #1a1208; }
+
+/* ---- The stills ---- */
+.stills { position: fixed; inset: 0; }
+.stills > i, .stills > span { position: absolute; display: block; }
+.still { inset: 0; overflow: hidden; }
+.still span { position: absolute; inset: 0; background: center / cover no-repeat; }
+.still[data-part='0'] { opacity: var(--w0, 1); }
+.still[data-part='1'] { opacity: var(--w1, 0); }
+.still[data-part='2'] { opacity: var(--w2, 0); }
+.still[data-part='3'] { opacity: var(--w3, 0); }
+/* Each still's own crop, set from the picture (Owner's note): the cook stands right of centre, so the kitchen is
+   enlarged and pinned left, leaving the dark left and middle to the title; the shop front is on the left. */
+.still[data-part='0'] span { background-size: 132% auto; background-position: 8% 42%; transform-origin: 70% 45%; }
+.still[data-part='1'] span { background-position: 30% 60%; }
+.still[data-part='2'] span { background-position: 70% 50%; }
+.still[data-part='3'] span { background-position: 20% 60%; }
+
+@media (prefers-reduced-motion: no-preference) {
+  /* Each still settles from a slight zoom as its part arrives. */
+  .still[data-part='1'], .still[data-part='2'], .still[data-part='3'] { scale: calc(1.05 - .05 * var(--w, 0)); }
+  .still[data-part='1'] { --w: var(--w1, 0); }
+  .still[data-part='2'] { --w: var(--w2, 0); }
+  .still[data-part='3'] { --w: var(--w3, 0); }
+  .still[data-part='0'] span { animation: s4-push 14s cubic-bezier(.25, .1, .25, 1) .2s both; }
+}
+@keyframes s4-push { from { scale: 1; } to { scale: 1.08; } }
+
+/* A veil that keeps every word readable: lighter on the first screen (darkest behind the title), deeper further down. */
+.veil {
+  inset: 0;
+  background:
+    radial-gradient(48% 46% at 42% 52%, rgba(8, 13, 18, calc(.52 * var(--w0, 1))), transparent 72%),
+    linear-gradient(180deg, rgba(8, 13, 18, .45), rgba(8, 13, 18, .3) 40%, rgba(8, 13, 18, .62)),
+    rgba(8, 13, 18, calc(.42 * (1 - var(--w0, 1))));
+}
+.grain {
+  inset: -50%; opacity: .22; mix-blend-mode: overlay;
+  background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='g'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23g)'/></svg>");
+}
+.mark { right: 18px; bottom: 14px; padding: 4px 9px; border-radius: 6px; background: rgba(8, 13, 18, .55); color: #e9dccb; font-size: 12px; }
+
+/* ---- Words over the stills turn light; product windows keep their own colours ---- */
+.shell > header { background: rgba(250, 246, 240, .9); }
+.shell [data-region='首屏'],
+.shell [data-region='三步'] > div:first-child,
+.shell [aria-labelledby='step-one-title'] {
+  --j-ink: #fbf4ea; --j-body: #eadfd1; --j-muted: #d3c6b6; --j-line: rgba(251, 244, 234, .28);
+  color: var(--j-ink);
+}
+.shell [aria-labelledby='step-one-title'] [class*='takeover-j-module'][class*='__picture'] {
+  --j-ink: #141312; --j-body: #3d3c3a; --j-muted: #63625f; --j-line: #e7e6e2;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, .2), 0 40px 80px -30px rgba(0, 0, 0, .6);
+}
+.shell [data-region='首屏'] h1 { text-shadow: 0 2px 24px rgba(8, 13, 18, .35); }
+/* The main button: the grade's warm orange, dark words, so it holds on a dark still. */
+.shell [data-region='首屏'] a[href*='action=signup'],
+.shell [data-region='三步'] > div:has(> [data-region='评审团']) + div a[href*='action=signup'] { background: var(--s4-warm); color: #1a1208; }
+
+/* ---- Footer: over the shop at night ---- */
+.shell > footer {
+  --j-ink: #fbf4ea; --j-body: #e6dacb; --j-muted: #cdbfae; --j-line: rgba(251, 244, 234, .18);
+  border-top: 0; color: var(--j-muted); background: linear-gradient(180deg, rgba(8, 13, 18, .25), rgba(8, 13, 18, .8) 32%);
+}
+.shell > footer a:focus-visible, .shell > footer button:focus-visible { outline-color: #fff; }

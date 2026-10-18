@@ -1,0 +1,16 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * What samples S1–S4 share: sample L's page cut to three parts, its own backdrop (a faint grid and pools of light,
+ * both turned down by the Owner) replaced by the sample's art layer. Each sample's look is in s1…s4.module.css.
+ */
+.shell { position: relative; isolation: isolate; }
+
+/* Sample L's backdrop (MotionJ's first child) gives way to the sample's art. */
+.shell > div[aria-hidden='true']:first-child { display: none; }
+
+/* Only the first screen, step one with the jury, and the footer: steps two and three stay out. */
+.shell [data-region='第二步'], .shell [data-region='第三步'] { display: none; }
+.shell [data-region='三步'] { padding-bottom: 96px; }
+
+/* The art layer: under everything on the page, as tall as the page; scenes place their own fixed or scrolling parts. */
+.art { position: absolute; inset: 0; z-index: 0; overflow: clip; pointer-events: none; }

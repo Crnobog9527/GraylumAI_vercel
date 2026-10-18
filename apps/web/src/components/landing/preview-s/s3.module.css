@@ -1,0 +1,97 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * S3 "创作者的剪贴本" (design plan in the sample notes): a kraft-paper board with a little print grain; four paper
+ * colours (tomato, butter, sky, mint), translucent tape, notes in one handwriting face, small photos. One authored
+ * moment: the first screen's pieces are pressed onto the board one by one (once). Reduced motion: already pinned.
+ *
+ * Handwriting: 霞鹜文楷 LXGW WenKai v1.530 (github.com/lxgw/LxgwWenKai), SIL Open Font License 1.1; only the characters
+ * this sample writes, subset to WOFF2 for the web (public/fonts/lxgw-wenkai-s3/, with OFL.txt). Owner approved 2026-10-18.
+ */
+@font-face {
+  font-family: 'LXGW WenKai S3';
+  src: url('/fonts/lxgw-wenkai-s3/lxgw-wenkai-s3.woff2') format('woff2');
+  font-display: swap;
+}
+
+.shell {
+  --s3-board: #e9d7bb;
+  --s3-ink: #23306b;
+  --s3-hand: 'LXGW WenKai S3', 'Kaiti SC', 'STKaiti', serif;
+  --s3-grain: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .32  0 0 0 0 .22  0 0 0 0 .12  0 0 0 .55 0'/></filter><rect width='100%' height='100%' filter='url(%23n)' opacity='.32'/></svg>");
+  --j-canvas: var(--s3-board);
+  overflow-x: clip;
+  background: var(--s3-grain), var(--s3-board);
+}
+.shell ::selection { background: #ffd84d; }
+.shell > header { background: color-mix(in srgb, var(--s3-board) 90%, transparent); }
+
+/* ---- First screen: the pieces around the title ---- */
+.scene { position: absolute; top: 0; left: 0; width: 100%; height: 940px; }
+.piece { position: absolute; rotate: var(--r); filter: drop-shadow(0 2px 2px rgba(60, 40, 20, .18)) drop-shadow(0 10px 14px rgba(60, 40, 20, .16)); }
+.paper {
+  display: grid; place-items: center; width: 100%; height: 100%; padding: 14px; background: var(--paper);
+  background-image: var(--s3-grain); background-blend-mode: multiply;
+  color: var(--s3-ink); font-family: var(--s3-hand); font-size: 26px; line-height: 1.25; text-align: center;
+}
+.piece[data-kind='note'] .paper { box-shadow: inset 0 -18px 18px -18px rgba(60, 40, 20, .25); }
+.photo { display: grid; grid-template-rows: 1fr auto; width: 100%; height: 100%; margin: 0; padding: 10px 10px 0; background: #fffdf8; }
+.photo span { display: block; background: center / cover no-repeat; }
+.photo figcaption { padding: 7px 0 9px; color: var(--s3-ink); font-family: var(--s3-hand); font-size: 17px; text-align: center; }
+.tape {
+  position: absolute; top: -12px; left: 50%; width: 92px; height: 26px; translate: -50% 0; rotate: -4deg;
+  background: rgba(255, 255, 255, .55); box-shadow: 0 1px 1px rgba(60, 40, 20, .08);
+  clip-path: polygon(2% 0, 98% 4%, 100% 50%, 97% 100%, 1% 96%, 0 50%);
+}
+.piece[data-kind='scrap'] .tape { top: 50%; left: -14px; translate: 0 -50%; rotate: 80deg; width: 54px; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .piece { animation: s3-press .5s cubic-bezier(.2, .9, .3, 1.15) calc(.3s + var(--i) * .14s) both; }
+}
+@keyframes s3-press {
+  from { opacity: 0; translate: -6px -16px; scale: 1.12; rotate: calc(var(--r) + 5deg);
+    filter: drop-shadow(0 18px 18px rgba(60, 40, 20, .22)) drop-shadow(0 30px 40px rgba(60, 40, 20, .2)); }
+  60% { opacity: 1; }
+  to { opacity: 1; translate: 0 0; scale: 1; rotate: var(--r);
+    filter: drop-shadow(0 2px 2px rgba(60, 40, 20, .18)) drop-shadow(0 10px 14px rgba(60, 40, 20, .16)); }
+}
+
+/* ---- Step one's window and the jury, taped to the board ---- */
+.shell [aria-labelledby='step-one-title'] [class*='takeover-j-module'][class*='__frame'] { position: relative; isolation: isolate; }
+/* A photo tucked behind the title row's empty right side (behind the progress line, never over the window). */
+.shell [aria-labelledby='step-one-title'] [class*='takeover-j-module'][class*='__frame']::before {
+  content: '选题便签 · 示意'; position: absolute; z-index: -1; top: -60px; right: 36px; width: 150px; height: 178px; rotate: 7deg;
+  display: grid; align-content: end; padding: 9px 9px 7px; border-top: 0;
+  background: url('/landing-s/s-6.webp') center 9px / 132px 132px no-repeat, #fffdf8;
+  color: var(--s3-ink); font: 15px/1.2 var(--s3-hand); text-align: center;
+  filter: drop-shadow(0 8px 12px rgba(60, 40, 20, .2));
+}
+/* Tape holding the window's lower left corner to the board. */
+.shell [aria-labelledby='step-one-title'] [class*='takeover-j-module'][class*='__frame']::after {
+  content: ''; position: absolute; bottom: -12px; left: 28px; width: 104px; height: 28px; rotate: -10deg;
+  background: rgba(255, 252, 240, .62); box-shadow: 0 1px 1px rgba(60, 40, 20, .1);
+  clip-path: polygon(2% 0, 98% 4%, 100% 50%, 97% 100%, 1% 96%, 0 50%);
+}
+.shell [data-region='评审团']::before {
+  content: ''; position: absolute; z-index: -1; top: 70px; left: -34px; width: 230px; height: 120px; rotate: -6deg;
+  background: var(--s3-grain), #ff6b4a; background-blend-mode: multiply;
+  clip-path: polygon(0 6%, 8% 0, 17% 5%, 26% 1%, 36% 6%, 47% 2%, 58% 6%, 69% 1%, 80% 5%, 90% 0, 100% 5%, 100% 95%, 91% 100%, 81% 95%, 70% 99%, 59% 94%, 48% 99%, 37% 95%, 26% 100%, 15% 95%, 6% 100%, 0 94%);
+}
+.shell [data-region='评审团']::after {
+  content: ''; position: absolute; top: 96px; right: -18px; width: 112px; height: 28px; rotate: 34deg;
+  background: rgba(255, 252, 240, .62); box-shadow: 0 1px 1px rgba(60, 40, 20, .1);
+  clip-path: polygon(2% 0, 98% 4%, 100% 50%, 97% 100%, 1% 96%, 0 50%);
+}
+
+/* ---- Footer: a sheet of deep card pinned at the foot of the board ---- */
+.shell > footer {
+  --j-ink: #fff8ec; --j-body: #e4ddd0; --j-muted: #cfc7d8; --j-line: rgba(255, 255, 255, .14);
+  margin: 0 24px 24px; padding-inline: 0; border: 0; border-radius: 6px; color: var(--j-muted);
+  background: var(--s3-grain), #2b2a4a; box-shadow: 0 2px 3px rgba(60, 40, 20, .2), 0 18px 30px -14px rgba(60, 40, 20, .35);
+}
+.shell > footer::before, .shell > footer::after {
+  content: ''; position: absolute; top: -12px; width: 110px; height: 28px; background: rgba(255, 252, 240, .62);
+  clip-path: polygon(2% 0, 98% 4%, 100% 50%, 97% 100%, 1% 96%, 0 50%);
+}
+.shell > footer::before { left: 40px; rotate: -6deg; }
+.shell > footer::after { right: 40px; rotate: 5deg; }
+.shell > footer a:focus-visible, .shell > footer button:focus-visible { outline-color: #fff; }
