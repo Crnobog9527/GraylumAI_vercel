@@ -34,6 +34,10 @@ describe('toolCounts / slowHint', () => {
     const steps = turnSteps({ phase: 'mentor', hasText: true, tools: { running: 0, done: 2, failed: 0, pending: 1 } });
     expect(steps[0].label).toBe('查资料和数据：完成 2 项，1 项待核对');
   });
+  it('keeps unsettled lookups out of the running numerator', () => {
+    const steps = turnSteps({ phase: 'mentor', hasText: false, tools: { running: 1, done: 2, failed: 0, pending: 1 } });
+    expect(steps[0].label).toBe('正在查资料和数据（已完成 2/4）…，1 项待核对');
+  });
   it('escalates the hint with time', () => {
     expect(slowHint(5000)).toBeNull();
     expect(slowHint(30000)).toContain('请先别刷新');

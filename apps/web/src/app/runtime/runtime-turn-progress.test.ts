@@ -21,6 +21,7 @@ describe('runtimeTurnProgress', () => {
   it('shows nothing for finished or stopped turns', () => {
     expect(runtimeTurnProgress({ ...base, turnState: 'completed', reply: null, streaming: false })).toBeNull();
     expect(runtimeTurnProgress({ ...base, reply: reply({ stopped: true }), streaming: true })).toBeNull();
+    expect(runtimeTurnProgress({ ...base, reply: reply({ stopped: true }), streaming: false })).toBeNull();
     expect(runtimeTurnProgress({ ...base, reply: reply({ phase: 'incomplete' }), streaming: true })).toBeNull();
   });
 });

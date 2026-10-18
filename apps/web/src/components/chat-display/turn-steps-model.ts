@@ -35,9 +35,9 @@ export function turnSteps({ phase, hasText, tools }: TurnProgressInput): TurnSte
   const total = tools.running + tools.done + tools.failed + pending;
   const later = phase === 'organizer' || phase === 'saving';
   if (total > 0) {
-    const finished = tools.done + tools.failed + pending;
+    const finished = tools.done + tools.failed;
     steps.push(tools.running > 0
-      ? { id: 'tools', state: 'running', label: `正在查资料和数据（已完成 ${finished}/${total}）…` }
+      ? { id: 'tools', state: 'running', label: `正在查资料和数据（已完成 ${finished}/${total}）…` + (pending ? `，${pending} 项待核对` : '') }
       : { id: 'tools', state: 'done',
         label: `查资料和数据：完成 ${tools.done} 项` + (tools.failed ? `，${tools.failed} 项这次没查到` : '')
           + (pending ? `，${pending} 项待核对` : '') });

@@ -16,7 +16,7 @@ export function runtimeTurnProgress(args: {
   const tools = toolCounts(args.items.map(item => item.state));
   if (live && args.streaming && !live.stopped && !live.finished && !['incomplete', 'waiting', 'stopped'].includes(live.phase))
     return { input: { phase: live.phase, hasText: Boolean(live.text), tools }, reopened: false };
-  if (!args.streaming && ['prepared', 'running'].includes(args.turnState))
+  if (!args.streaming && !live?.stopped && !live?.finished && ['prepared', 'running'].includes(args.turnState))
     return { input: { phase: args.savedReply ? 'organizer' : 'mentor', hasText: Boolean(args.savedReply), tools }, reopened: true };
   return null;
 }
