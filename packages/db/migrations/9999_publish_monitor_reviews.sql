@@ -137,6 +137,22 @@ DROP TRIGGER IF EXISTS publish_monitor_review_call_guard ON bill2_calls;
 CREATE TRIGGER publish_monitor_review_call_guard BEFORE INSERT OR UPDATE OF dispatched_at ON bill2_calls
  FOR EACH ROW EXECUTE FUNCTION public.publish_monitor_review_call_guard();
 
+-- A prompt alone cannot require grounding: the host journal must contain the real Gold source before delivery.
+CREATE OR REPLACE FUNCTION public.publish_monitor_review_result_guard() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+BEGIN
+ IF NEW.payload ? 'weeklyReview' AND NEW.result IS NOT NULL AND NEW.result IS DISTINCT FROM OLD.result AND NOT EXISTS(
+  SELECT 1 FROM runtime_tool_calls t WHERE t.execution_id=NEW.id AND t.name='read_source'
+   AND t.result->>'kind'='my_posts' AND t.result->>'window_days'='90'
+   AND t.result->>'status' IN ('available','stale','no_recent_posts','not_connected')
+   AND jsonb_typeof(t.result->'review')='object' AND runtime_workspace_posts_visible(NEW.actor_id,t.result))
+  THEN RAISE EXCEPTION 'PUBLISH_MONITOR_REVIEW_SOURCE_REQUIRED';END IF;
+ RETURN NEW;
+END $$;
+DROP TRIGGER IF EXISTS publish_monitor_review_result_guard ON runtime_executions;
+CREATE TRIGGER publish_monitor_review_result_guard BEFORE UPDATE OF state,result ON runtime_executions
+ FOR EACH ROW EXECUTE FUNCTION public.publish_monitor_review_result_guard();
+
 CREATE OR REPLACE FUNCTION public.publish_monitor_reviews(a uuid) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 BEGIN
@@ -144,11 +160,11 @@ BEGIN
  RETURN coalesce((SELECT jsonb_agg(v ORDER BY v->>'createdAt' DESC) FROM (
   SELECT jsonb_build_object('id',r.id,'periodStart',r.period_start,'status',r.status,'skipReason',r.skip_reason,
    'createdAt',r.created_at,'sessionId',r.runtime_session_id,'executionId',r.runtime_execution_id,
-   'body',CASE WHEN x.content_deleted_at IS NULL AND x.erased_at IS NULL THEN x.result->>'body' END,
+   'body',CASE WHEN r.status='completed' AND x.content_deleted_at IS NULL AND x.erased_at IS NULL THEN x.result->>'body' END,
    -- The numeric table comes only from the host's tool journal. Model text is never parsed into these columns.
-   'tables',CASE WHEN x.content_deleted_at IS NULL AND x.erased_at IS NULL THEN
+   'tables',CASE WHEN r.status='completed' AND x.content_deleted_at IS NULL AND x.erased_at IS NULL THEN
     (SELECT t.result->'review' FROM runtime_tool_calls t WHERE t.execution_id=x.id AND t.result->>'kind'='my_posts'
-     ORDER BY (t.result->>'window_days')::int DESC,t.call_id DESC LIMIT 1) END,
+     AND t.result->>'window_days'='90' AND runtime_workspace_posts_visible(a,t.result) ORDER BY (t.result->>'window_days')::int DESC,t.call_id DESC LIMIT 1) END,
    'notice',CASE WHEN r.status='completed' THEN '本周复盘已生成' WHEN r.skip_reason='BALANCE_LOW' THEN '余额不足，未复盘' END) v
   FROM social_review_runs r LEFT JOIN runtime_executions x ON x.id=r.runtime_execution_id AND x.actor_id=a
   WHERE r.actor_id=a ORDER BY r.created_at DESC LIMIT 52) q),'[]'::jsonb);
@@ -218,7 +234,7 @@ DO $$ DECLARE f regprocedure;
 BEGIN
  FOR f IN SELECT p.oid::regprocedure FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public'
   AND p.proname IN ('publish_monitor_review_allowed','publish_monitor_review_claim','publish_monitor_review_step',
-   'publish_monitor_review_admit_guard','publish_monitor_review_call_guard','publish_monitor_reviews') LOOP
+   'publish_monitor_review_admit_guard','publish_monitor_review_call_guard','publish_monitor_review_result_guard','publish_monitor_reviews') LOOP
   EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC,anon,authenticated,service_role',f);
   IF split_part(f::text,'(',1) IN ('publish_monitor_review_claim','publish_monitor_review_step','publish_monitor_reviews')
    THEN EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO service_role',f);END IF;

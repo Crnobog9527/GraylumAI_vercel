@@ -55,19 +55,45 @@ export async function billingCases({c,report}){
  assert.equal(await one('SELECT count(*)::int v FROM bill2_calls WHERE run_id=$1',[linked.run]),1);
  assert.equal(await one('SELECT credits v FROM profiles WHERE id=$1',[f.actor]),balance);
  report.checks.push('BILL2 fixture dispatch/receipt charges once; repeated receipt and over-cap next call cannot debit again');
- const tool=(action,result=null)=>rpc(c,'runtime_execution',f.actor,admitted.executionId,'owner_tool',
-  {epoch:1,value:{callId:'review-data',name:'read_source',arguments:{query:'my_posts:90'},action,result}});
- await tool('claim');await tool('complete',{kind:'my_posts',status:'available',window_days:90,dependencies:[],review:{rows:[{views:12}]}});
  await rpc(c,'runtime_execution',f.actor,admitted.executionId,'owner_session',
   {epoch:1,value:{action:'append',items:[{role:'assistant',content:'Model says 999'}],batch:0}});
- // Native completion: model text and host table occupy separate slots. A forged number in prose cannot update the table.
- await rpc(c,'runtime_execution',f.actor,admitted.executionId,'complete',
+ const complete=()=>rpc(c,'runtime_execution',f.actor,admitted.executionId,'complete',
   {epoch:1,value:{kind:'usable_result',body:'Model says 999',evidenceRef:admitted.executionId,
    evidenceHash:createHash('sha256').update(JSON.stringify({body:'Model says 999'})).digest('hex')}});
+ // A missing required source is a platform failure: native compensation restores user charges, not supplier cost.
+ await c.query('BEGIN');await c.query('RESET ROLE');
+ await c.query('DROP TRIGGER publish_monitor_review_result_guard ON runtime_executions');await c.query('SET ROLE service_role');
+ assert.equal((await complete()).state,'completed');
+ report.checks.push('RED: without the host result guard, a model answer with no source is marked completed and charged');
+ await c.query('ROLLBACK');
+ await c.query('BEGIN');
+ await assert.rejects(complete(),/PUBLISH_MONITOR_REVIEW_SOURCE_REQUIRED/);
+ await c.query('ROLLBACK');
+ await c.query('BEGIN');
+ const failed=await rpc(c,'runtime_execution',f.actor,admitted.executionId,'fail_platform',
+  {epoch:1,value:{unavailable_reason:'preflight'}});
+ assert.equal(failed.state,'cancelled');
+ assert.equal(await one('SELECT credits v FROM profiles WHERE id=$1',[f.actor]),before);
+ await c.query('ROLLBACK');
+ const tool=(action,result=null,days=90)=>rpc(c,'runtime_execution',f.actor,admitted.executionId,'owner_tool',
+  {epoch:1,value:{callId:'review-data-'+days,name:'read_source',arguments:{query:'my_posts:'+days},action,result}});
+ await tool('claim',null,14);await tool('complete',{kind:'my_posts',status:'available',window_days:14,
+  dependencies:[],review:{rows:[{views:333}]}},14);
+ await assert.rejects(complete(),/PUBLISH_MONITOR_REVIEW_SOURCE_REQUIRED/);
+ assert.equal(await one('SELECT credits v FROM profiles WHERE id=$1',[f.actor]),balance);
+ report.checks.push('no source and wrong 14-day source cannot complete; native platform-failure compensation restores charged credits');
+ await tool('claim');await tool('complete',{kind:'my_posts',status:'available',window_days:90,dependencies:[],review:{rows:[{views:12}]}});
+ await complete();
  await rpc(c,'publish_monitor_review_step',r.id,r.token,'observe',null);
  const history=await rpc(c,'publish_monitor_reviews',f.actor);
  assert.deepEqual(history.find(x=>x.id===r.id).tables,{rows:[{views:12}]});
  report.checks.push('model prose/completion cannot write the host numeric table');
+ await c.query('RESET ROLE');await c.query("UPDATE profiles SET membership_level='pro' WHERE id=$1",[f.actor]);
+ await c.query('SET ROLE service_role');
+ assert.equal((await rpc(c,'publish_monitor_reviews',f.actor)).find(x=>x.id===r.id).tables,null);
+ await c.query('RESET ROLE');await c.query("UPDATE profiles SET membership_level='gold' WHERE id=$1",[f.actor]);
+ await c.query('SET ROLE service_role');
+ report.checks.push('history/export projection rechecks visibility: Pro cannot receive the saved Gold 90-day table');
  await rpc(c,'runtime_cancel',f.actor,admitted.executionId);
  await c.query('RESET ROLE');await closeAccount(c,{actor:f.actor});
  await assert.rejects(rpc(c,'publish_monitor_reviews',f.actor),/PUBLISH_MONITOR_ACCOUNT_CLOSED|BILL2_ACTOR_DENIED/);
