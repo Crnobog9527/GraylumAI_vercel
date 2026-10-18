@@ -1,4 +1,3 @@
-import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -10,7 +9,7 @@ const footer = async (termlyWebsiteUuid: string | null) => {
     return { ...original, ANALYTICS_CONFIG: { ...original.ANALYTICS_CONFIG, termlyWebsiteUuid } };
   });
   const { SiteFooterJ } = await import('./SiteFooterJ');
-  return renderToStaticMarkup(createElement(SiteFooterJ, { onlyBuilt: true }));
+  return renderToStaticMarkup(<SiteFooterJ onlyBuilt />);
 };
 
 describe('the landing footer\'s consent entries (review on #1088)', () => {
