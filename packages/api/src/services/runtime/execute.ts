@@ -425,6 +425,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    const completed=await ownerRpc<{state:'completed'|'cost_pending'}>('runtime_execution',{...args,p_action:'complete',p_result:result});
    return {...nativeMetadata(result),body,...(summary!==undefined?{summary}:{}),state:completed.state};
   }catch(error){
+   if(context.weeklyReview&&error instanceof Error&&error.message==='PUBLISH_MONITOR_REVIEW_SOURCE_REQUIRED')preflightFailure=error.message;
    claimNotice??=billingClaimNotice(error);
    if(error instanceof Error&&error.message===POSITIONING_REFUSED)return endPositioningRefusal(ownerRpc,args,isPayg);
    if(error instanceof ContentSourceRefusal)return {...await cancelRound(ownerRpc,args),code:error.code,notice:CONTENT_SOURCE_MESSAGES[error.code]};

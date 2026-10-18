@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {resolvePostSource} from './workspacePosts';
 import {assertPath} from '../skills/loader';
 import {SKILL_FILE_TRACE_BYTES,skillFileParameters} from './skillFile';
 import {mentorHistoryParameters} from './mentorHistory';
@@ -42,6 +43,7 @@ export function executorRpc(options:{database:SessionRpc;actor:()=>Promise<strin
    if(name==='runtime_response'&&typeof result.error==='object'&&'message' in result.error
     &&result.error.message==='RUNTIME_RESPONSE_CONFLICT')throw new Error('RUNTIME_RESPONSE_CONFLICT');
    const message=typeof result.error==='object'&&'message' in result.error?result.error.message:undefined;
+   if(message==='PUBLISH_MONITOR_REVIEW_SOURCE_REQUIRED')throw new Error(message);
    if((name==='runtime_tool'&&args.p_name==='read_skill_file'||name==='read_skill_package')&&
     typeof message==='string'&&['Skill unavailable','resource unavailable','RUNTIME_SKILL_FILE_DENIED',
      'RUNTIME_SKILL_FILE_TOO_LARGE','RUNTIME_SKILL_FILE_CONFLICT','RUNTIME_TOOL_DENIED','RUNTIME_TOOL_CLOSED',
@@ -63,7 +65,8 @@ export function executorRpc(options:{database:SessionRpc;actor:()=>Promise<strin
     'RUNTIME_RESUME_CLOSED','RUNTIME_CHECKPOINT_PENDING','RUNTIME_CALL_LIMIT_REACHED'].includes(message))
     throw new StagingAccessError(message as StagingFailure);
    throw new Error('RUNTIME_DATABASE_UNAVAILABLE');
-  }return result.data as T;
+  }return (name==='runtime_workspace_source'
+   ?await resolvePostSource(options.database,await options.actor(),result.data):result.data) as T;
  }
 }
 
@@ -113,7 +116,8 @@ export const preflightCodes=new Set([
  'BILL2_PROVIDER_IDENTITY_DENIED',
  'BILL2_PROVIDER_MODEL_DENIED',
  'BILL2_PROVIDER_QUOTE_REQUIRED',
- 'BILL2_PROVIDER_QUOTE_CONFLICT']);
+ 'BILL2_PROVIDER_QUOTE_CONFLICT',
+ 'PUBLISH_MONITOR_REVIEW_SOURCE_REQUIRED']);
 /** Graylum-side request failures that end the round with its charges restored (Owner 2026-10-12).
  * Time-budget exhaustion is excluded: that round resumes on the next request. */
 export function platformFailureReason(code:string|undefined):'provider_history'|'preflight'|undefined{

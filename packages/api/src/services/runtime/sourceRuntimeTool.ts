@@ -4,6 +4,7 @@ import type {RuntimeTool} from './runner';
 import type {ToolRpc} from './skillFileExecution';
 import type {runtimeContext} from './runtimeContext';
 import {LIBRARY_READ_GUIDE,LIBRARY_SEARCH_GUIDE,libraryQuery,readLibrary} from './libraryReadTool';
+import {filterPostEntries} from './workspacePosts';
 import {WORKSPACE_STRATEGY_GUIDE} from './primaryInstructions';
 /** Fixed tool descriptions; admission sizes them with the executor's own formula. */
 function sourceToolDescription(name: string, workspaceContext?: boolean, library?: boolean, retrieval?: boolean): string {
@@ -31,13 +32,20 @@ export function sourceRuntimeTool(options: {
       const query=libraryQuery(arguments_,context);
       if(query!==null)return readLibrary({ownerRpc,executionId:args.p_execution_id,query,saved,toolArgs});
       if(context.workspaceContext){
-       if(saved.result!==null)return JSON.stringify(saved.result);
+       if(saved.result!==null){
+        if((saved.result as {kind?:string}).kind==='my_posts'&&!await ownerRpc<boolean>(
+         'runtime_workspace_posts_visible',{p_result:saved.result}))return JSON.stringify({kind:'unavailable',reason:'source_deleted'});
+        return JSON.stringify(saved.result);
+       }
        const query=typeof arguments_.query==='string'?arguments_.query:'';
        // No strategy guide frozen = no room was reserved for a strategy result: it is not read, nothing is appended.
-       const source=query.startsWith('strategy_report:')&&context.workspaceGuide!==WORKSPACE_STRATEGY_GUIDE
+       const source=query.startsWith('my_posts')&&!context.ownPosts
+        ?{kind:'unavailable',dependencies:[]}
+        :query.startsWith('strategy_report:')&&context.workspaceGuide!==WORKSPACE_STRATEGY_GUIDE
         ?{kind:'unavailable',dependencies:[]}
         :await ownerRpc<unknown>('runtime_workspace_source',{p_session_id:execution.sessionId,p_query:query});
-       const committed=await ownerRpc<{result:unknown}>('runtime_tool',{...toolArgs,p_action:'complete',p_result:source});
+       const committed=await ownerRpc<{result:unknown}>('runtime_tool',{...toolArgs,p_action:'complete',
+        p_result:filterPostEntries(source,Boolean(context.ownPosts))});
        return JSON.stringify(committed.result);
       }
       if(!context.sources?.length||Object.keys(arguments_).length)throw new Error('RUNTIME_SOURCE_ARGUMENT_DENIED');
@@ -46,7 +54,7 @@ export function sourceRuntimeTool(options: {
        if(JSON.stringify(saved.result)!==JSON.stringify(source))throw new Error('RUNTIME_SOURCE_CHANGED');
        return JSON.stringify(source);
       }
-      await ownerRpc('runtime_tool',{...toolArgs,p_action:'complete',p_result:source});
+      await ownerRpc('runtime_tool',{...toolArgs,p_action:'complete',p_result:filterPostEntries(source,Boolean(context.ownPosts))});
       return JSON.stringify(source);
      }
      // Increment/replay the original billed tool phase even when the result was saved.
