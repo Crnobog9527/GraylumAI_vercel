@@ -38,6 +38,18 @@ export async function pendingReceiptCases({c,report}){
  await c.query(`INSERT INTO runtime_executions(id,actor_id,session_id,request_id,payload,history_revision,state)
   VALUES($1,$2,$3,$4,'{}',0,'completed')`,[child,f.actor,started.sessionId,randomUUID()]);
  await c.query('INSERT INTO runtime_history_dependencies(execution_id,dependency_id) VALUES($1,$2)',[child,execution]);
+ const next=await claim(c,f,2,false);
+ const peer=new c.constructor({host:'127.0.0.1',port:c.connectionParameters.port,database:c.connectionParameters.database,user:'postgres'});
+ await peer.connect();
+ try{
+  for(const [table,id] of [['profiles',f.actor],['social_connections',connection]]){
+   await peer.query('BEGIN');await peer.query(`SELECT id FROM ${table} WHERE id=$1 FOR UPDATE`,[id]);
+   await assert.rejects(rpc(c,'bill2_dispatch',f.actor,f.run,next.id,next.dispatchToken),/RUNTIME_CONTEXT_REVOKED/);
+   await peer.query('ROLLBACK');
+  }
+  report.checks.push('final dispatch never waits behind disconnect profile/connection locks and issues no HTTP grant');
+ }finally{await peer.query('ROLLBACK');await peer.end();}
+
  await c.query('SET ROLE service_role');
  try{await rpc(c,'publish_monitor_disconnect',f.actor,connection);}finally{await c.query('RESET ROLE');}
  assert.equal(await one('SELECT runtime_workspace_posts_history_visible($1) v',[child]),false);
@@ -46,13 +58,27 @@ export async function pendingReceiptCases({c,report}){
  assert.equal(await one('SELECT closed v FROM bill2_runs WHERE id=$1',[f.run]),false);
  const receipts=()=>one('SELECT jsonb_agg(to_jsonb(r)) v FROM bill2_receipts r JOIN bill2_calls bc ON bc.id=r.call_id WHERE bc.run_id=$1',[f.run]);
  assert.match(JSON.stringify(await receipts()),/OWN_POST_PENDING_PRIVATE/);
+ const migration=read('packages/db/migrations/0307_runtime_workspace_my_posts.sql');
+ const fence=migration.split('$dispatchFence$')[1];
+ const dispatch=await one("SELECT pg_get_functiondef('public.bill2_dispatch(uuid,uuid,uuid,uuid,boolean,jsonb)'::regprocedure) v");
+ assert.ok(dispatch.includes(fence));
+ await c.query('BEGIN');await c.query(dispatch.replace(fence,''));
+ assert.equal((await rpc(c,'bill2_dispatch',f.actor,f.run,next.id,next.dispatchToken)).dispatch,true);
+ report.checks.push('RED: after a committed read and disconnect, old dispatch still grants a second provider request');
+ await c.query('ROLLBACK');
+ await assert.rejects(rpc(c,'bill2_dispatch',f.actor,f.run,next.id,next.dispatchToken),/RUNTIME_CONTEXT_REVOKED/);
+ assert.equal(await one('SELECT dispatched_at IS NULL v FROM bill2_calls WHERE id=$1',[next.id]),true);
+ report.checks.push('GREEN: final native provider fence denies a revoked committed read before dispatch or new charge');
  const current=await rpc(c,'runtime_execution',f.actor,execution,'read',{});
  assert.equal(current.unavailableReason,'source_deleted');
  report.checks.push('runtime entry detects the revoked source before asynchronous cleanup and stops in-flight work');
  await rpc(c,'runtime_library_propagate',f.actor,20);
+ assert.equal(await one('SELECT runtime_workspace_posts_history_visible($1) v',[child]),false);
+ report.checks.push('erased source journal is a permanent tombstone for already-admitted descendant history');
  assert.equal(await one('SELECT content_deleted_at IS NOT NULL v FROM bill2_runs WHERE id=$1',[f.run]),true);
  await rpc(c,'runtime_cancel',f.actor,execution);
  const money=await one('SELECT jsonb_build_object(\'credits\',p.credits,\'weighted\',r.weighted_nominal_usd) v FROM profiles p,bill2_runs r WHERE p.id=$1 AND r.id=$2',[f.actor,f.run]);
+ assert.equal(money.credits,999); // Exactly the first known 0.001 USD call; cancelled second call's hold is released.
  const old=read('packages/db/migrations/0302_chat_library_search.sql');
  const at=old.indexOf('CREATE OR REPLACE FUNCTION public.runtime_library_propagate(');
  await c.query('BEGIN');await c.query(old.slice(at,old.indexOf('END $$;',at)+7));
