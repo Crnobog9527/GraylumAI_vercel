@@ -6,9 +6,17 @@
 -- runs close, then revert the host (old context parsers lack weeklyReview). Keep SQL, claims and accounting;
 -- native financial recovery settles pending calls. Never delete unsettled runs to roll back.
 BEGIN;
+-- Take the settings-table lock before resetting legacy implicit opt-ins (0246 created rows using the old default).
+-- The new lease column is an atomic schema-version marker; reapply must preserve post-change explicit opt-ins.
+ALTER TABLE social_monitor_settings ALTER COLUMN auto_review_enabled SET DEFAULT false;
+DO $$ BEGIN
+ IF NOT EXISTS(SELECT 1 FROM pg_attribute WHERE attrelid='public.social_review_runs'::regclass
+  AND attname='lease_token' AND NOT attisdropped) THEN
+  UPDATE social_monitor_settings SET auto_review_enabled=false WHERE auto_review_enabled;
+ END IF;
+END $$;
 INSERT INTO system_settings(key,value) VALUES('publish_monitor_review_enabled','false'),
  ('publish_monitor_review_model_id','null'),('publish_monitor_review_max_usd','"0"') ON CONFLICT(key) DO NOTHING;
-ALTER TABLE social_monitor_settings ALTER COLUMN auto_review_enabled SET DEFAULT false;
 ALTER TABLE social_review_runs ADD COLUMN IF NOT EXISTS lease_token uuid,
  ADD COLUMN IF NOT EXISTS runtime_session_id uuid,ADD COLUMN IF NOT EXISTS model_id uuid,
  ADD COLUMN IF NOT EXISTS max_cost_usd numeric(18,12);

@@ -55,3 +55,12 @@ it('an expired native owner resumes its exact saved epoch/cursor once',async()=>
  expect(m.execute).toHaveBeenCalledTimes(2);
  expect(m.execute).toHaveBeenLastCalledWith('original',undefined,{executionId:'original',cursor:2,epoch:1});
 });
+
+it.each([false,true])('before the review migration, a missing RPC is safe only with the feature off (%s)',async enabled=>{
+ m.settings.mockResolvedValue({enabled});
+ const d={rpc:vi.fn(async()=>({data:null,error:{code:'PGRST202'}}))};
+ const pending=runWeeklyReviews(d as never,{env:{},defer:vi.fn()},100,()=>0);
+ if(enabled)await expect(pending).rejects.toThrow('PUBLISH_MONITOR_REVIEW_CLAIM_FAILED');
+ else expect(await pending).toMatchObject({claimed:0,scheduled:0,failed:0,enabled:false});
+ expect(m.prepare).not.toHaveBeenCalled();expect(m.execute).not.toHaveBeenCalled();
+});

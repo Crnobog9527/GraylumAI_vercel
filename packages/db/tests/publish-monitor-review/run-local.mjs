@@ -12,6 +12,7 @@ const svc=async(sql,args=[])=>{
  try{return await one(sql,args);}finally{await c.query('RESET ROLE');}
 };
 const migration=read('packages/db/migrations/0308_publish_monitor_reviews.sql');
+const transactionalMigration=migration.replace(/^BEGIN;$/m,'').replace(/^COMMIT;$/m,'');
 const claim=()=>svc('SELECT publish_monitor_review_claim(20) v');
 const step=(r,action,reason=null)=>svc('SELECT publish_monitor_review_step($1,$2,$3,$4) v',[r.id,r.token,action,reason]);
 try{
@@ -33,6 +34,21 @@ try{
  assert.equal((await svc('SELECT publish_monitor_settings($1) v',[gold])).autoReviewEnabled,false);
  assert.deepEqual(await claim(),[]);
  report.checks.push('GREEN: default OFF, absent settings never opt Gold in or create a paid run');
+ await c.query('BEGIN');
+ await c.query('ALTER TABLE social_review_runs DROP COLUMN lease_token');
+ await c.query("INSERT INTO social_monitor_settings(actor_id,auto_review_enabled,auto_review_enabled_at) VALUES($1,true,now()-interval '8 days')",[gold]);
+ await c.query('ALTER TABLE social_monitor_settings ALTER COLUMN auto_review_enabled SET DEFAULT false');
+ assert.equal((await svc('SELECT publish_monitor_settings($1) v',[gold])).autoReviewEnabled,true);
+ report.checks.push('RED: changing the default leaves a legacy implicit opt-in enabled');
+ await c.query(transactionalMigration);
+ assert.equal((await svc('SELECT publish_monitor_settings($1) v',[gold])).autoReviewEnabled,false);
+ await svc('SELECT publish_monitor_set_auto_review($1,true) v',[gold]);
+ const explicit=await svc('SELECT publish_monitor_settings($1) v',[gold]);
+ await c.query(transactionalMigration);
+ assert.deepEqual(await svc('SELECT publish_monitor_settings($1) v',[gold]),explicit);
+ report.checks.push('GREEN: first upgrade resets old opt-ins; reapply preserves a new explicit opt-in and its start time');
+ await c.query('ROLLBACK');
+
  await c.query(`INSERT INTO system_settings(key,value) VALUES('publish_monitor_enabled','true'),
   ('publish_monitor_review_enabled','true'),('chat_my_posts_enabled','true') ON CONFLICT(key) DO UPDATE SET value='true'`);
  await svc('SELECT publish_monitor_set_auto_review($1,true) v',[gold]);

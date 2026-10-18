@@ -84,7 +84,10 @@ export async function runWeeklyReviews(db:SupabaseClient,options:ReviewStep,unti
  // Existing claims still need cancellation/recovery after the global switch is turned off.
  const settings=await readReviewSettings(db);
  const r=await db.rpc('publish_monitor_review_claim',{p_limit:5});
- if(r.error)throw new Error('PUBLISH_MONITOR_REVIEW_CLAIM_FAILED');
+ if(r.error){
+  if(!settings.enabled&&['PGRST202','42883'].includes(r.error.code))return {...result,enabled:false};
+  throw new Error('PUBLISH_MONITOR_REVIEW_CLAIM_FAILED');
+ }
  const claims=z.array(claimSchema).parse(r.data);
  result.claimed=claims.length;
  for(const c of claims){
