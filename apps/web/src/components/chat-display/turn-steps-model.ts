@@ -57,7 +57,7 @@ export const VERY_SLOW_AFTER_MS = 120_000;
 export function slowHint(elapsedMs: number): string | null {
   if (elapsedMs < SLOW_AFTER_MS) return null;
   if (elapsedMs < VERY_SLOW_AFTER_MS) return '这一轮需要一点时间，还在正常处理。请先别刷新页面，写完会自动显示。';
-  return '比平时久一些，仍在处理。刷新页面会打断这一轮，请再等一会儿。';
+  return '比平时久一些，仍在处理。刷新页面会暂时看不到实时进度，请再等一会儿，写完会自动显示。';
 }
 
 export const REOPENED_HINT = '这一轮还在后台处理，写完会自动显示在这里，不用重发。';

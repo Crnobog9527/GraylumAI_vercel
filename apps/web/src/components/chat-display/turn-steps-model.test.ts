@@ -33,6 +33,6 @@ describe('toolCounts / slowHint', () => {
   it('escalates the hint with time', () => {
     expect(slowHint(5000)).toBeNull();
     expect(slowHint(30000)).toContain('请先别刷新');
-    expect(slowHint(130000)).toContain('刷新页面会打断');
+    expect(slowHint(130000)).toContain('刷新页面会暂时看不到实时进度');
   });
 });
