@@ -58,7 +58,7 @@ export async function pendingReceiptCases({c,report}){
  assert.equal(await one('SELECT closed v FROM bill2_runs WHERE id=$1',[f.run]),false);
  const receipts=()=>one('SELECT jsonb_agg(to_jsonb(r)) v FROM bill2_receipts r JOIN bill2_calls bc ON bc.id=r.call_id WHERE bc.run_id=$1',[f.run]);
  assert.match(JSON.stringify(await receipts()),/OWN_POST_PENDING_PRIVATE/);
- const migration=read('packages/db/migrations/0307_runtime_workspace_my_posts.sql');
+ const migration=read('packages/db/migrations/0306_runtime_workspace_my_posts.sql');
  const fence=migration.split('$dispatchFence$')[1];
  const dispatch=await one("SELECT pg_get_functiondef('public.bill2_dispatch(uuid,uuid,uuid,uuid,boolean,jsonb)'::regprocedure) v");
  assert.ok(dispatch.includes(fence));
