@@ -27,7 +27,7 @@ export function useReopenGrace(): boolean {
 export function MentorTurnSteps({ live, notice, hasText, calls }: {
   live: LiveReply | null; notice?: ReplyNotice; hasText: boolean; calls: readonly ResearchCall[];
 }) {
-  const streaming = Boolean(live) && !live!.finished && !["incomplete", "waiting", "stopped"].includes(live!.phase);
+  const streaming = Boolean(live) && !live!.finished && !live!.stopped && !["incomplete", "waiting", "stopped"].includes(live!.phase);
   // The turn's own notice says "reopened" (reopenedTurn in agent-turn-display.ts): the server still advances it.
   const reopened = !live && notice?.text === REOPENED_HINT;
   return <>
