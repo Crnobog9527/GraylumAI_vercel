@@ -251,5 +251,30 @@ try {
  assert.equal(await v('SELECT hold_reason v FROM payment_order_evidence WHERE order_id=$1',[pe.order]),null);
  assert.equal(await v("SELECT expires_at>now()+interval '89 days' v FROM payment_order_evidence WHERE order_id=$1",[pe.order]),true);
  report.checks.push('documented PAY-EVIDENCE table adapter: root-order hold, pending-delete reset and 90-day extension');
+ // Bot review regressions: terminal first, association after an unmatched event,
+ // and closed-before-payment must all refresh the root evidence after linking.
+ const terminalPack=await pack(await profile(0),100);
+ await c.query("INSERT INTO payment_order_evidence VALUES($1,NULL,now()-interval '25 hours',now()-interval '1 day')",[terminalPack.order]);
+ await receive(terminalPack,{type:'charge.dispute.closed',status:'won'});
+ assert.equal(await v('SELECT pending_delete_at v FROM payment_order_evidence WHERE order_id=$1',[terminalPack.order]),null);
+ assert.equal(await v("SELECT expires_at>now()+interval '89 days' v FROM payment_order_evidence WHERE order_id=$1",[terminalPack.order]),true);
+ const matchedPack=await pack(await profile(0),100);
+ await c.query('DELETE FROM payment_provider_refs WHERE order_id=$1',[matchedPack.order]);
+ const unmatched=await receive(matchedPack,{orderId:null});
+ assert.equal(unmatched.order_id,null);
+ await c.query("INSERT INTO payment_order_evidence VALUES($1,NULL,now()-interval '25 hours',now()-interval '1 day')",[matchedPack.order]);
+ await c.query('SET ROLE service_role');
+ await v('SELECT pay_dispute_match($1,$2) v',[unmatched.id,matchedPack.order]);
+ await c.query('RESET ROLE');
+ assert.equal(await v('SELECT hold_reason v FROM payment_order_evidence WHERE order_id=$1',[matchedPack.order]),'payment_dispute');
+ assert.equal(await v('SELECT pending_delete_at v FROM payment_order_evidence WHERE order_id=$1',[matchedPack.order]),null);
+ const pendingUser=await profile(0),pendingPack=await pack(pendingUser,100,iso(0),false);
+ await c.query('DELETE FROM payment_provider_refs WHERE order_id=$1',[pendingPack.order]);
+ await receive(pendingPack,{orderId:null,type:'charge.dispute.closed',status:'won'});
+ await c.query("INSERT INTO payment_order_evidence VALUES($1,NULL,now()-interval '25 hours',now()-interval '1 day')",[pendingPack.order]);
+ await fulfill(pendingPack,pendingUser);
+ assert.equal(await v('SELECT pending_delete_at v FROM payment_order_evidence WHERE order_id=$1',[pendingPack.order]),null);
+ assert.equal(await v("SELECT expires_at>now()+interval '89 days' v FROM payment_order_evidence WHERE order_id=$1",[pendingPack.order]),true);
+ report.checks.push('bot regressions: terminal-first clears pending deletion; matched and fulfilled pending disputes refresh root retention');
  console.log(JSON.stringify(report,null,2));
 } finally {await db.close();}

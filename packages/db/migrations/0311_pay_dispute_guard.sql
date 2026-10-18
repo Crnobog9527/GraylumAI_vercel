@@ -538,6 +538,7 @@ BEGIN
  UPDATE payment_disputes SET order_id=o.id,subscription_id=o.subscription_id WHERE id=d.id AND (order_id IS NULL OR order_id=o.id);
  IF NOT FOUND THEN RAISE EXCEPTION 'PAY_DISPUTE_MATCH_CONFLICT'; END IF;
  PERFORM pay_dispute_freeze(d.id);
+ PERFORM pay_dispute_evidence(o.id);
  RETURN (SELECT to_jsonb(x) FROM payment_disputes x WHERE id=d.id);
 END $$;
 CREATE OR REPLACE FUNCTION public.pay_dispute_stop_claim(p_dispute uuid) RETURNS boolean
@@ -626,7 +627,7 @@ END $patch$;
 -- no evidence content is read or retained here. The evidence cleaner must use this exact root-order lock.
 CREATE OR REPLACE FUNCTION public.pay_dispute_evidence(p_order uuid,p_closed_at timestamptz DEFAULT NULL) RETURNS void
 LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
-DECLARE root uuid;next_ uuid;seen uuid[]:='{}';open_ boolean;
+DECLARE root uuid;next_ uuid;seen uuid[]:='{}';open_ boolean;closed_ timestamptz;
 BEGIN
  IF p_order IS NULL OR to_regclass('public.payment_order_evidence') IS NULL THEN RETURN; END IF;
  root:=p_order;
@@ -640,12 +641,13 @@ BEGIN
  WITH RECURSIVE orders AS (
   SELECT id FROM payment_orders WHERE id=root
   UNION SELECT o.id FROM payment_orders o JOIN orders prior ON o.source_order_id=prior.id)
- SELECT EXISTS(SELECT 1 FROM payment_disputes d JOIN orders o ON o.id=d.order_id
-  WHERE d.closed_at IS NULL AND d.freeze_state NOT IN ('superseded','external')) INTO open_;
+ SELECT coalesce(bool_or(d.closed_at IS NULL AND d.freeze_state NOT IN ('superseded','external')),false),max(d.closed_at)
+  INTO open_,closed_ FROM payment_disputes d JOIN orders o ON o.id=d.order_id;
+ closed_:=greatest(closed_,p_closed_at);
  EXECUTE 'UPDATE public.payment_order_evidence SET hold_reason=CASE WHEN $2 THEN ''payment_dispute'' END,
-  pending_delete_at=CASE WHEN $2 THEN NULL ELSE pending_delete_at END,
+  pending_delete_at=CASE WHEN $2 OR $3 IS NOT NULL THEN NULL ELSE pending_delete_at END,
   expires_at=CASE WHEN $3 IS NULL THEN expires_at ELSE greatest(expires_at,$3+interval ''90 days'') END WHERE order_id=$1'
- USING root,open_,p_closed_at;
+ USING root,open_,closed_;
 END $$;
 DO $patch$ DECLARE p record;src text;BEGIN
  FOR p IN SELECT * FROM (VALUES
