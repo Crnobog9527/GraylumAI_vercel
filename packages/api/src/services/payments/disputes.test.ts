@@ -187,8 +187,10 @@ describe('Stripe dispute effects resume from committed financial state', () => {
     mocks.read.mockResolvedValue({ stopped: false, canceled: false });
     const query: Record<string, unknown> = {};
     let kind = '';
+    let manualAlertFilter = '';
     for (const name of ['eq', 'neq', 'not', 'is', 'in', 'or', 'order', 'gt', 'gte']) query[name] = (field: string, value: unknown) => {
       if (name === 'eq' && field === 'renewal_stop_state' && value === 'manual') kind = 'manual-stop-alerts';
+      if (name === 'or' && field.includes('stop_alerted_at.is.null')) manualAlertFilter = field;
       if (name === 'not' && field === 'renewal_stop_state') kind = 'matched-alerts';
       if (name === 'is' && field === 'order_id') kind = 'unmatched';
       return query;
@@ -201,5 +203,6 @@ describe('Stripe dispute effects resume from committed financial state', () => {
     await expect(reconcilePaymentDisputes(f.db, {} as Stripe, f.alert)).resolves.toMatchObject({ checked: 1, failed: 1, complete: true });
     expect(mocks.stop).not.toHaveBeenCalled();
     expect(f.alert).toHaveBeenCalledWith(expect.objectContaining({ code: 'PAY_DISPUTE_SOURCE_REVIEW' }));
+    expect(manualAlertFilter).toContain('and(freeze_state.eq.frozen,freeze_alerted_at.is.null)');
   });
 });
