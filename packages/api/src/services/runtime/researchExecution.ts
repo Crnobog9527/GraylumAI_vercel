@@ -80,7 +80,8 @@ export function researchExecution(input: {
       nextSequence: async () => (await readCalls()).length + 1,
       phase: research.phase, ...(execution.epoch !== undefined ? { runtimeEpoch: execution.epoch } : {}),
       secrets: platformSecretReader(input.database), rateCounter: checkVendorRateLimit,
-      ...(input.callGate ? { callGate: input.callGate } : {}),
+      // A recovery replay cannot create a supplier request or BILL2 claim, so it must not consume live quota.
+      ...(execution.live && input.callGate ? { callGate: input.callGate } : {}),
       newId: () => { throw new Error('RESEARCH_OPERATION_ID_REQUIRED'); },
       beforeSend: async () => input.canSend(),
       ...(input.now ? { now: input.now } : {}),

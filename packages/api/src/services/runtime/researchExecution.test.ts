@@ -112,8 +112,9 @@ describe('researchExecution (RT-3b PR-3)', () => {
     const fetch = vi.fn();
     vi.stubGlobal('fetch', fetch);
     const db = database([]);
-    const { built } = build(false, db);
+    const { built, callGate } = build(false, db);
     await expect(built.tools[0]!.execute({ query: 'coffee shops', mode: 'fast' }, 'call-1')).rejects.toThrow('RUNTIME_RESPONSE_PENDING');
+    expect(callGate).not.toHaveBeenCalled();
     expect(db.rpc.mock.calls.some(([name]) => name === 'bill2_claim')).toBe(false);
     expect(fetch).not.toHaveBeenCalled();
   });
