@@ -45,7 +45,6 @@ export function turnSteps({ phase, hasText, tools }: TurnProgressInput): TurnSte
   else steps.push({ id: 'write', state: 'running', label: total > 0 ? '正在根据查到的内容写回复…' : '正在想怎么回复…' });
   if (phase === 'organizer') steps.push({ id: 'organize', state: 'running', label: '正在整理待核对信息…' });
   if (phase === 'saving') {
-    steps.push({ id: 'organize', state: 'done', label: '待核对信息已整理' });
     steps.push({ id: 'save', state: 'running', label: '正在保存结果、核对费用…' });
   }
   return steps;

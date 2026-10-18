@@ -23,7 +23,7 @@ describe('turnSteps', () => {
     expect(turnSteps({ phase: 'organizer', hasText: true, tools: none }).map(s => [s.id, s.state]))
       .toEqual([['write', 'done'], ['organize', 'running']]);
     expect(turnSteps({ phase: 'saving', hasText: true, tools: none }).map(s => [s.id, s.state]))
-      .toEqual([['write', 'done'], ['organize', 'done'], ['save', 'running']]);
+      .toEqual([['write', 'done'], ['save', 'running']]);
   });
 });
 describe('toolCounts / slowHint', () => {

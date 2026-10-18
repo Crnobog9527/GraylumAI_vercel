@@ -399,7 +399,7 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
      <AgentWorkStatus items={runner.sourceDeleted.includes(e.executionId)?[]:streamedWorkItems(e,runner.workItems?.[e.executionId])}/>
      {(()=>{const progress=runtimeTurnProgress({turnState:e.state,reply:runner.reply,executionId:e.executionId,streaming:runner.streaming,
        items:streamedWorkItems(e,runner.workItems?.[e.executionId])});
-      return progress&&<TurnSteps hideTools progress={progress.input}/>;})()}
+      return progress&&<TurnSteps hideTools quiet={progress.reopened} progress={progress.input}/>;})()}
      {workItem&&e.skillExecution&&e.state==='completed'&&!e.input?.startsWith('[OPC_WORK_CONTINUE_V1]')&&!e.input?.startsWith('[OPC_VIDEO_PACKAGE_V1]')&&e.contentAvailable?<RuntimeProposal adopted={versions.some(v=>v.kind===(isVideo?'script':'brief')&&v.executionId===e.executionId)}
       text={displayReply(e.input,e.body??e.primaryBody)}/>:!liveReplyText(runner.reply,e.executionId,e)&&showsReply(e)&&<RuntimeReply available={e.contentAvailable} text={displayReply(e.input,e.body??e.primaryBody)}/>}
      {workItem&&contentType!=='unknown'&&e.state==='completed'&&e.skillExecution&&!e.input?.startsWith('[OPC_VIDEO_PACKAGE_V1]')&&!e.input?.startsWith('[OPC_WORK_CONTINUE_V1]')&&<div className="mt-3 flex flex-wrap gap-2">{versions.some(v=>v.kind===(isVideo?'script':'brief')&&v.executionId===e.executionId)?<Link className="underline" href={'/library?item='+workItem.workItemId+'&return='+sessionId}>{isVideo?'这版口播稿已定稿':'已采用为草稿'} · 查看</Link>:<Button disabled={busy} onClick={()=>finalizeScript(e.executionId)}>{isVideo?'将这条回复定稿为口播稿':'采用为当前草稿'}</Button>}</div>}
