@@ -36,7 +36,7 @@ export async function thresholdMigrationCases(db,report,createFixture,claim,rece
     // D1 also patches claim quarantine. Historical threshold replay must restore
     // that current behavior before comparing the complete function and its ACL.
     await db.query(read('0308_pay_dispute_guard.sql'));
-    await db.query(read('0312_fusion_compare_context.sql')); // replaces 0290's fusion_compare_view
+    await db.query(read('0313_fusion_compare_context.sql')); // replaces 0290's fusion_compare_view
     assert.equal(await definition(),current);
     assert.deepEqual(await acl(),permissions);
     assert.deepEqual(await snapshot(),frozen);
