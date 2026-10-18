@@ -166,16 +166,19 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
   await ctx.store.discoverySave(d.discoveryId, { accounts: found, attempted: index, authorCursor, authorLimit }, stopped ? 'running' : 'completed');
   const shown = !stopped && await card(ctx, d.discoveryId, found, false, '');
   const available = selectCandidates(found, true).selectable.length;
-  const insufficient = !stopped && !shown;
+  const insufficient = !stopped && complete && !shown;
   const resumable = stopReason === 'ROUND_LIMIT' || stopReason === 'CANDIDATE_SCAN_INCOMPLETE';
   const blockedWithoutData = stopped && !resumable && found.length === 0;
   return toolEnvelope({ status: blockedWithoutData ? (stopBudget ? 'budget_exhausted' : 'unavailable')
     : complete && shown ? 'ok' : 'partial',
-    reason: stopped ? stopReason : shown ? (complete ? null : 'DISCOVERY_PARTIAL') : 'NOT_ENOUGH_CANDIDATES',
+    reason: stopped ? stopReason : shown ? (complete ? null : 'DISCOVERY_PARTIAL')
+      : complete ? 'NOT_ENOUGH_CANDIDATES' : 'DISCOVERY_PARTIAL',
     ...(insufficient ? candidateShortage(available) : {}),
     discoveryId: d.discoveryId, continue: stopped && resumable,
     items: found.map(a => ({ fields: { platform: a.platform, account: a.account,
-      evidenceRef: a.evidenceRef, category: a.classification.category ?? 'excluded',
+      evidenceRef: a.evidenceRef,
+      category: a.classification.excluded === 'ACTIVE_CHECK_PENDING'
+        ? 'activity_pending' : a.classification.category ?? 'excluded',
       ...(a.classification.excluded === 'ACTIVE_CHECK_PENDING' ? { activityStatus: '活跃度待取数确认' } : {}) },
     missing: a.metrics.missing })) });
 }

@@ -578,6 +578,7 @@ describe('durable benchmark discovery and free follow-up', () => {
     const result = await f.execute('benchmark_discover', discoveryArgs);
     expect(result.status).toBe('ok');
     expect(result.items).toHaveLength(8);
+    expect(result.items?.[0]?.fields.category).toBe('activity_pending');
     expect(result.items?.[0]?.fields.activityStatus).toBe('活跃度待取数确认');
     const card = f.store.createCard.mock.calls[0]?.[1];
     expect(card?.options.filter(option => option.selectable)).toHaveLength(8);
@@ -654,6 +655,7 @@ describe('full 25-subcall benchmark discovery', () => {
     const completed = await f.makeExecute()('benchmark_discover', { discoveryId });
     expect(completed).toMatchObject({ status: unknown ? 'partial' : 'ok',
       reason: unknown ? 'DISCOVERY_PARTIAL' : null, continue: false });
+    if (unknown) expect(completed).not.toHaveProperty('message');
     expect(subcall).toHaveBeenCalledTimes(25);
     expect(f.discoveries.get(discoveryId)).toMatchObject({ state: 'completed', cursor: { attempted: 25 } });
 
