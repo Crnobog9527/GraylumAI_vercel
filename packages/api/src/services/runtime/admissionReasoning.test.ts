@@ -353,8 +353,9 @@ it('CHAT-NATIVE-OUTPUT: a chosen Skill without an organizer freezes the evidence
 it('real free chat freezes library retrieval, read_source and extra calls only with both switches on',async()=>{
  const freeChat=(f:ReturnType<typeof fixture>)=>{
   // Free chat is an ordinary selection without an OPC turn token (the fixture default is a mentor turn).
-  const {opcTurnToken:_token,mentorStream:_mentor,...free}=f.policy as typeof f.policy&{opcTurnToken?:string;mentorStream?:boolean};
-  return runtimeAdmissionService(f.user,f.admin,free);
+  const free:Record<string,unknown>={...f.policy};
+  delete free.opcTurnToken;delete free.mentorStream;
+  return runtimeAdmissionService(f.user,f.admin,free as typeof f.policy);
  };
  for(const rows of [[],[{key:'library_agent_read_enabled',value:true}],[{key:'chat_library_retrieval_enabled',value:true}]]){
   const f=fixture();f.settings.push(...rows);
