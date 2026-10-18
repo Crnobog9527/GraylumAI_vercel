@@ -6,6 +6,7 @@ import {OPENROUTER_RESPONSE_TIMEOUT_MS} from '../bill2/openRouterPolicy';
 import {matchesFrozenReasoning,type ReasoningPolicy} from './reasoningPolicy';
 import {POSITIONING_RESEARCH_TOOLS} from '../research/tools/names';
 import {newFrameRepairer,repairMessageToolCalls} from './toolArgumentRepair';
+import {SOURCE_CALLS_FIRST} from './sourceCalls';
 const RESEARCH_SLOT_TOOLS:ReadonlySet<string>=new Set(POSITIONING_RESEARCH_TOOLS);
 
 export type RuntimeTool = {
@@ -52,8 +53,8 @@ export type RuntimeRunnerInput = {
    * and, once `maxToolCalls` calls ran, offers no tool to the next request so that request can only answer. */
   libraryRetrieval?: boolean;
   maxToolCalls?: number;
-  /** The frozen request format of the execution (spread from its context); unmarked older executions have none. */
-  providerRequestFormat?: string;
+  /** Frozen at admission for new executions that offer the owned-source read: execute only the first parallel call. */
+  sourceCalls?: string;
 };
 type ToolCalls=unknown[]|null|undefined;
 /** One response message, with only its first tool call when that is allowed. */
@@ -92,11 +93,9 @@ export function emptyTruncatedResponse(decoded:unknown):boolean{
 
 /** One official SDK loop for all roles. No SDK trace, remote Session, fallback or retry. */
 export async function runRuntime(input: RuntimeRunnerInput) {
-  // One call per response, the first: always for a retrieving free chat, and for any newly admitted (format-marked) execution whose
-  // only tool is the owned-source read, whose responses may carry parallel read_source calls (transport accepts them).
-  // Older unmarked executions keep their exact request bytes, so they are left as they were.
-  const sourceOnly=input.tools.length>0&&input.tools.every(tool=>tool.name==='read_source');
-  if(!input.firstToolCallOnly&&(input.libraryRetrieval||sourceOnly&&input.providerRequestFormat))input={...input,firstToolCallOnly:true};
+  // One call per response, the first: for a retrieving free chat and for an execution admitted with the dedicated marker
+  // (`sourceCalls`, frozen only for new admissions that offer the owned-source read; older executions keep their request bytes).
+  if(!input.firstToolCallOnly&&(input.libraryRetrieval||input.sourceCalls===SOURCE_CALLS_FIRST))input={...input,firstToolCallOnly:true};
   // A bounded v5 turn: one reply, plus one call per frozen slot (a Skill file read, one research call).
   const slots=1+(input.tools.some(tool=>tool.name==='read_skill_file')?1:0)+(input.tools.some(tool=>RESEARCH_SLOT_TOOLS.has(tool.name))?1:0);
   if(input.commitSessionOnSuccess&&(!input.firstToolCallOnly||input.maxTurns!==1&&input.maxTurns!==slots))

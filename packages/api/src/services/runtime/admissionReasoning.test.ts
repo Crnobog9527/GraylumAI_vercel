@@ -362,12 +362,15 @@ it('real free chat freezes library retrieval, read_source and extra calls only w
   const admitted=await freeChat(f).prepare({...f.input,organizeAfter:false});
   expect(runtimeContext.parse(admitted.context)).not.toHaveProperty('libraryRetrieval');
   expect(admitted.context.tools).toEqual([]);expect(admitted.context.maxTurns).toBe(2);
+  expect(admitted.context).not.toHaveProperty('sourceCalls');
  }
  const on=fixture();
  on.settings.push({key:'library_agent_read_enabled',value:true},{key:'chat_library_retrieval_enabled',value:'true'});
  const admitted=await freeChat(on).prepare({...on.input,organizeAfter:false});
  const context=runtimeContext.parse(admitted.context);
  expect(context).toMatchObject({libraryRetrieval:true,tools:['read_source'],providerRequestFormat:'serial-tools-v6-reasoning'});
+ // New executions that offer read_source freeze the first-call-only marker; executions admitted before it have none.
+ expect(context.sourceCalls).toBe('first-call-v1');
  // Six model calls; this fixture's 32 KB input limit leaves room for one 16 KB read result, so one tool call (the slot
  // arithmetic itself is covered in libraryAdmission.test.ts).
  expect(context.maxTurns).toBe(6);expect(context.maxToolCalls).toBe(1);

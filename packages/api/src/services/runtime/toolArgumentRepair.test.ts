@@ -52,6 +52,17 @@ describe('newFrameRepairer', () => {
     expect(repair(plain)).toBe(plain);
     expect(repair('not json')).toBe('not json');
   });
+  it('never inserts anything while the arguments are inside a string, however the provider splits the deltas', () => {
+    const repair = newFrameRepairer();
+    // The query value itself ends with a colon and the next delta starts with a closing brace: this is text, not a gap.
+    const frames = pieces('', '{"query": "search:', '}x"}');
+    expect(frames.map(repair)).toEqual(frames);
+    expect(assemble(frames.map(newFrameRepairer()))).toBe('{"query": "search:}x"}');
+    // An escaped quote does not end the string either.
+    const escaped = pieces('', '{"query": "a\\":', '} b"}');
+    const out = escaped.map(newFrameRepairer());
+    expect(out).toEqual(escaped);
+  });
   it('does not repair other tools and keeps calls apart by index', () => {
     const repair = newFrameRepairer();
     const other = [frame([{index: 0, id: 'c', function: {name: 'ask_question', arguments: '{"q": '}}]), frame([{index: 0, function: {arguments: '}'}}])];

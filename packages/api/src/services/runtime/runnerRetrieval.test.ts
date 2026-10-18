@@ -47,11 +47,16 @@ describe('library retrieval turns (CHAT-AUTO-CONTEXT)', () => {
   });
 });
 
-describe('read_source-only executions with a frozen request format', () => {
+describe('executions admitted with the sourceCalls marker', () => {
   it('execute only the first of several parallel calls, even without the retrieval marker', async () => {
-    const h = harness({providerRequestFormat: 'serial-tools-v6-reasoning', maxToolCalls: 2} as never);
+    const h = harness({sourceCalls: 'first-call-v1', maxToolCalls: 2} as never);
     await expect(h.run()).resolves.toBe('final answer');
     expect(h.executed[0]).toBe('search:a');
     expect(h.executed).not.toContain('search:b');
+  });
+  it('an execution without the marker keeps its old rule even when it carries a frozen request format', async () => {
+    const h = harness({providerRequestFormat: 'serial-tools-v6-reasoning', maxToolCalls: 2} as never);
+    await expect(h.run()).rejects.toThrow('RUNTIME_EXECUTION_PENDING');
+    expect(h.executed).toEqual([]);
   });
 });

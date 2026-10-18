@@ -60,6 +60,8 @@ export const runtimeContext=z.object({
  libraryReferences:libraryReferences.optional(),
  // CHAT-AUTO-CONTEXT A1/A2: free chat may search the user's own library with read_source query 'search:<words>'.
  libraryRetrieval:z.literal(true).optional(),
+ // New executions that offer read_source: only the first of several parallel calls runs (sourceCalls.ts).
+ sourceCalls:z.literal('first-call-v1').optional(),
 }).strict().superRefine((context, ctx) => {
  if (context.reportGeneration && (context.role !== 'skill' || context.historyItems !== 0 || context.maxTurns !== 1
    || context.tools.length || context.maxToolCalls || context.network !== 'deny' || context.attachedOrganizer
