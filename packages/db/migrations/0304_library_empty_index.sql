@@ -1,11 +1,36 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
 -- CHAT-AUTO-CONTEXT: staging acceptance found that a retrieving free chat which listed the library ("library") before any
--- search hit got {"kind":"unavailable","reason":"source_deleted"}: runtime_library_read('') answers an index with no documents,
--- and runtime_library_visible (0302) required at least one reference for any library_index, so the tool guard replaced the
--- result with source_deleted and the model told the user it could not read the library.
--- Fix: an execution frozen with libraryRetrieval may have an empty index; every existing reference must still be live.
--- Repeatable (CREATE OR REPLACE), no table, no data. Rollback: re-run 0302's definition of runtime_library_visible.
+-- search hit got {"kind":"unavailable","reason":"source_deleted"}, and an index with no documents would make the model say
+-- "the library is empty" although the user has documents (0302 listed only @ references and retrieved hits).
+-- Fix, two parts:
+--  (1) runtime_library_read('') in a retrieving execution (payload libraryRetrieval=true) adds the real directory of the
+--      caller's ready documents that are not yet referenced: file names only (<=20, 160 characters each), directoryTotal and a
+--      hint to use search:<words>. It freezes nothing, reads no body, and is not counted as a reference.
+--  (2) runtime_library_visible: an execution frozen with libraryRetrieval may have an index with no references; every
+--      existing reference must still be live. The directory is a point-in-time listing of file names, like a title copied
+--      into an @ reference snapshot; erasure of a deleted document's file name from a stored listing is not tracked.
+-- Repeatable, no table, no data. Rollback: re-run 0302's definitions of runtime_library_read and runtime_library_visible.
 BEGIN;
+DO $$ DECLARE src text;anchor text;
+BEGIN
+ src:=pg_get_functiondef('public.runtime_library_read(uuid,uuid,text)'::regprocedure);
+ IF position('-- 0304 directory' IN src)=0 THEN
+  anchor:=$x$  IF octet_length(to_jsonb(result::text)::text)>16384
+   OR used+octet_length(to_jsonb(result::text)::text)>65536 THEN$x$;
+  IF array_length(string_to_array(src,anchor),1)<>2 THEN RAISE EXCEPTION 'LIB_SOURCE_MISMATCH: runtime_library_read 0304'; END IF;
+  src:=replace(src,anchor,$x$  -- 0304 directory: a retrieving free chat sees the real list of its ready documents (names only, nothing frozen).
+  IF coalesce(e.payload->>'libraryRetrieval','')='true' THEN
+   SELECT result||jsonb_build_object('directory',coalesce(jsonb_agg(jsonb_build_object('title',left(q.filename,160)) ORDER BY q.filename,q.id)
+     FILTER (WHERE q.n<=20),'[]'::jsonb),'directoryTotal',count(*),
+    'hint','Only these file names are listed. Use search:<words> to find and read a document; this list has no content.')
+   INTO result FROM (SELECT x.id,x.filename,row_number() OVER (ORDER BY x.filename,x.id) n FROM library_documents x
+    WHERE x.actor_id=p_actor_id AND x.deleted_at IS NULL AND x.status='ready'
+     AND NOT EXISTS(SELECT 1 FROM runtime_library_references r WHERE r.execution_id=e.id AND r.document_id=x.id)) q;
+  END IF;
+$x$||anchor);
+  EXECUTE src;
+ END IF;
+END $$;
 CREATE OR REPLACE FUNCTION public.runtime_library_visible(p_actor_id uuid,p_execution_id uuid,p_result jsonb)
 RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 BEGIN
