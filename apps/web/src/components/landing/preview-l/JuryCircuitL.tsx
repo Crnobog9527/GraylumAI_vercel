@@ -3,6 +3,7 @@
 
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { FileText, MessagesSquare, PenLine } from 'lucide-react';
+import { useOwnerEditing } from '@/components/landing/preview-j/use-owner-editing';
 import { L_JURY } from '@/lib/landing/landing-copy-l-steps';
 import styles from './jury-circuit-l.module.css';
 
@@ -43,6 +44,8 @@ export function JuryCircuitL() {
   const [play, setPlay] = useState(false);
   const [armed, setArmed] = useState(false);
   const [cycle, setCycle] = useState(0);
+  // The Owner's local edit mode holds it still, in its final state (no loop).
+  const editing = useOwnerEditing();
   useEffect(() => {
     const node = ref.current;
     setArmed(true);
@@ -55,7 +58,7 @@ export function JuryCircuitL() {
     return () => { observer.disconnect(); document.removeEventListener('visibilitychange', update); };
   }, []);
   return (
-    <figure ref={ref} className={styles.circuit} aria-label={a.label} data-armed={armed || undefined} data-play={play || undefined}>
+    <figure ref={ref} className={styles.circuit} aria-label={a.label} data-armed={(armed && !editing) || undefined} data-play={play || undefined}>
       {/* Each loop is a fresh mount, so every part starts dim again together; the clock ends the loop (paused with it). */}
       <div key={cycle} className={styles.loop}>
         <span className={styles.clock} aria-hidden="true" onAnimationEnd={() => setCycle(count => count + 1)} />

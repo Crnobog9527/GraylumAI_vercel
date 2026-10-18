@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { POST } from '@/app/api/dev/owner-edits/route';
+import { GET, POST } from '@/app/api/dev/owner-edits/route';
 import { ownerEditsTarget } from './owner-edits';
 
 describe('owner edit mode (local preview only)', () => {
@@ -16,5 +16,6 @@ describe('owner edit mode (local preview only)', () => {
       method: 'POST', body: JSON.stringify({ page: '/', edits: [{ module: 'm', original: 'a', edited: 'b' }] }),
     });
     expect((await POST(request)).status).toBe(404);
+    expect((await GET(new Request('http://localhost/api/dev/owner-edits?page=/landing/preview/l'))).status).toBe(404);
   });
 });
