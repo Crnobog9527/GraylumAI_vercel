@@ -103,7 +103,16 @@ export async function startCompare(deps: CompareDeps, choice: CompareStartInput)
     return { state: result.state, compareId: replayed.compareId, group: existing, claim: result };
   }
 
-  const settings = await assertCompareAllowed(admin, actorId, choice.modelIds);
+  const settings = await assertCompareAllowed(admin, actorId, choice.modelIds).catch(async (error: unknown) => {
+    // This request may already be recorded (judged, no group yet) by an earlier attempt: the live rules now refuse it, so
+    // the record is ended instead of holding the user's one slot for five minutes. The database applies the same rules,
+    // so a request that was never recorded is refused there without creating anything.
+    const recorded = await begin().catch(() => null);
+    if (recorded && recorded.groupId === null && recorded.state === 'admitting') {
+      await compareRpc(admin, 'fusion_compare_end', { p_actor_id: actorId, p_compare_id: recorded.compareId }).catch(() => undefined);
+    }
+    throw error;
+  });
   const gate = await readCompareGate(admin, actorId);
   staticCompareGate(gate, choice.parts.skill, deps.refusePositioning);
   const record = await begin(settings.answerOutputTokens);

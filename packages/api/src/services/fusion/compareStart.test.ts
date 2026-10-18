@@ -21,7 +21,7 @@ vi.mock('./compareAdmission', async original => ({ ...(await original<typeof imp
       { runId: id(81), index: 1, body: 'b', call: { phase: 'fusion_compare' } }] }; },
   compareRpc: async (_a: unknown, name: string, args: Record<string, unknown>) => {
     s.rpcs.push({ name, args });
-    if (name === 'fusion_compare_begin') return s.begin;
+    if (name === 'fusion_compare_begin') { if ((s.begin as { __throw?: boolean }).__throw) throw s.begin as unknown as Error; return s.begin; }
     if (name === 'fusion_compare_claim') return s.claim;
     if (name === 'fusion_compare_end' && s.endFails) throw new Error('end failed');
     return {};
@@ -271,8 +271,16 @@ describe('compare start: a repeat of an admitted request replays it before anyth
   });
   it('still applies the live permissions to a request that has no group yet', async () => {
     s.allowed = new Error('FUSION_COMPARE_DISABLED');
+    s.begin = Object.assign(new Error('FUSION_COMPARE_DISABLED'), { __throw: true }) as never;
     await expect(start()).rejects.toThrow('FUSION_COMPARE_DISABLED');
-    expect(names()).toEqual([]);
+    expect(names()).not.toContain('fusion_compare_claim');
+  });
+  it('ends a recorded, judged, group-less request that the live rules now refuse, and still reports the refusal', async () => {
+    s.allowed = new Error('FUSION_COMPARE_DISABLED');
+    s.begin = fresh({ created: false, gateVerdict: 'allow', state: 'admitting' });
+    await expect(start()).rejects.toThrow('FUSION_COMPARE_DISABLED');
+    expect(names().at(-1)).toBe('fusion_compare_end');
+    expect(names()).not.toContain('fusion_compare_gate');
   });
   it('a new request (no group yet) is probed once and then priced as before', async () => {
     await start();
