@@ -153,10 +153,17 @@ export async function runCases({db,report}) {
  assert.equal(emptyIndex.kind,'library_index');assert.deepEqual(emptyIndex.documents,[]);
  assert.deepEqual(emptyIndex.directory.map(x=>x.title).sort(),['DIR-A.md','DIR-B.md'],'two documents in the library: the listing shows both');
  assert.equal(emptyIndex.directoryTotal,2);assert.match(emptyIndex.hint,/search:/);
- assert.ok(!JSON.stringify(emptyIndex).includes('"documentId"'),'the directory freezes nothing and carries no body');
+ assert.ok(emptyIndex.directory.every(x=>Object.keys(x).sort().join()==='documentId,title'),'the directory carries only id and file name, no body');
+ assert.equal((await one(db,'SELECT count(*)::int v FROM runtime_library_references WHERE execution_id=$1',[empty.execution])),0,'the directory freezes nothing');
  const emptyDone=await rpc(db,'runtime_tool',empty.actor,empty.execution,'idx','read_source',{query:'library'},'complete',emptyIndex);
  assert.deepEqual(emptyDone.result,emptyIndex,'the directory is stored as it is, not as source_deleted');
  assert.equal(await rpc(db,'runtime_library_visible',empty.actor,empty.execution,emptyIndex),true);
+ // A deleted directory document hides the stored listing (its file name must not survive in a saved answer or replay).
+ const dirGone=await doc(db,empty.actor,'DIR-GONE.md',1);
+ const withGone=await read(db,empty.actor,empty.execution,'');assert.equal(withGone.directoryTotal,3);
+ assert.equal(await rpc(db,'runtime_library_visible',empty.actor,empty.execution,withGone),true);
+ await del(db,empty.actor,dirGone);
+ assert.equal(await rpc(db,'runtime_library_visible',empty.actor,empty.execution,withGone),false,'a listed file name of a deleted document hides the directory');
  // The same execution after a search hit: the index lists it and goes invisible once that document is gone.
  const found2=await doc(db,empty.actor,'IDX.md',1);await setBody(db,found2,0,'x','idxword content');
  const hitResult=await read(db,empty.actor,empty.execution,'search:idxword');assert.equal(hitResult.hits.length,1);

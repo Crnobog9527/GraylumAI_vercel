@@ -7,8 +7,8 @@
 --      caller's ready documents that are not yet referenced: file names only (<=20, 160 characters each), directoryTotal and a
 --      hint to use search:<words>. It freezes nothing, reads no body, and is not counted as a reference.
 --  (2) runtime_library_visible: an execution frozen with libraryRetrieval may have an index with no references; every
---      existing reference must still be live. The directory is a point-in-time listing of file names, like a title copied
---      into an @ reference snapshot; erasure of a deleted document's file name from a stored listing is not tracked.
+--      existing reference must still be live. Each directory entry carries its documentId and the index is
+--      invisible once any listed document is deleted, like an @ reference.
 -- Repeatable, no table, no data. Rollback: re-run 0302's definitions of runtime_library_read and runtime_library_visible.
 BEGIN;
 DO $$ DECLARE src text;anchor text;
@@ -20,11 +20,11 @@ BEGIN
   IF array_length(string_to_array(src,anchor),1)<>2 THEN RAISE EXCEPTION 'LIB_SOURCE_MISMATCH: runtime_library_read 0304'; END IF;
   src:=replace(src,anchor,$x$  -- 0304 directory: a retrieving free chat sees the real list of its ready documents (names only, nothing frozen).
   IF coalesce(e.payload->>'libraryRetrieval','')='true' THEN
-   SELECT result||jsonb_build_object('directory',coalesce(jsonb_agg(jsonb_build_object('title',left(q.filename,160)) ORDER BY q.filename,q.id)
+   SELECT result||jsonb_build_object('directory',coalesce(jsonb_agg(jsonb_build_object('documentId',q.id,'title',left(q.filename,160)) ORDER BY q.filename,q.id)
      FILTER (WHERE q.n<=20),'[]'::jsonb),'directoryTotal',count(*),
     'hint','Only these file names are listed. Use search:<words> to find and read a document; this list has no content.')
    INTO result FROM (SELECT x.id,x.filename,row_number() OVER (ORDER BY x.filename,x.id) n FROM library_documents x
-    WHERE x.actor_id=p_actor_id AND x.deleted_at IS NULL AND x.status='ready'
+    WHERE x.actor_id=p_actor_id AND x.kind='document' AND x.deleted_at IS NULL AND x.status='ready'
      AND NOT EXISTS(SELECT 1 FROM runtime_library_references r WHERE r.execution_id=e.id AND r.document_id=x.id)) q;
   END IF;
 $x$||anchor);
@@ -40,6 +40,10 @@ BEGIN
    AND e.erased_at IS NULL AND e.content_deleted_at IS NULL)
    -- A retrieving free chat that has found nothing yet has no reference: its (empty) index is still visible (this was a bug:
    -- the empty index of 0302 was stored as source_deleted). An @-referencing execution still needs at least one reference.
+   -- Every document named in a directory must still be live, so a deleted file name leaves stored answers and replays.
+   AND NOT EXISTS(SELECT 1 FROM jsonb_array_elements(coalesce(p_result->'directory','[]'::jsonb)) h
+    WHERE NOT EXISTS(SELECT 1 FROM library_documents d WHERE d.id::text=h->>'documentId' AND d.actor_id=p_actor_id
+     AND d.kind='document' AND d.deleted_at IS NULL AND d.status='ready'))
    AND (EXISTS(SELECT 1 FROM runtime_library_references r WHERE r.execution_id=p_execution_id AND r.actor_id=p_actor_id)
     OR EXISTS(SELECT 1 FROM runtime_executions rx WHERE rx.id=p_execution_id AND rx.actor_id=p_actor_id
      AND coalesce(rx.payload->>'libraryRetrieval','')='true'))
