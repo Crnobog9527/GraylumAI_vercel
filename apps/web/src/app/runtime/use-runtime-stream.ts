@@ -6,6 +6,7 @@ import type { LiveReply } from '@/app/positioning/[draftId]/agent-turn-display';
 import { liveReplyController, type LiveReplyController } from '@/app/positioning/[draftId]/live-reply-controller';
 import { TEXT_PROTOCOL } from '@/app/positioning/[draftId]/mentor-turn';
 import type { StopRequest } from '@/app/positioning/[draftId]/stop-reply';
+import { workItemsOf, type WorkItem } from '@/components/chat-display/agent-work-model';
 import { isLibrarySourceDeleted } from './gate-notices';
 
 type OpenStream = (executionId: string) => Promise<AsyncIterable<AgentTurnEvent>>;
@@ -55,9 +56,21 @@ export function useRuntimeStream(sessionId: string, onResult: (executionId: stri
   const [reply, setReply] = useState<LiveReply | null>(null);
   const [active, setActive] = useState(0);
   const [last, setLast] = useState<{ executionId: string; result: AgentTurnOutcome } | null>(null);
+  const [work, setWork] = useState<{sessionId: string; items: Record<string, WorkItem[]>}>({sessionId, items: {}});
   const [sourceDeleted, setSourceDeleted] = useState<string[]>([]);
   // No same-tab prefix storage here: a reload shows the saved history, as before.
-  const live = useMemo(() => liveReplyController({ draftId: 'runtime:' + sessionId, storage: () => null, show: setReply }),
+  const live = useMemo(() => liveReplyController({ draftId: 'runtime:' + sessionId, storage: () => null, show: setReply,
+    observe: (executionId, event) => {
+      if (event.type !== 'agent_tool') return;
+      const [item] = workItemsOf({workItems: [{...event, id: event.callId}]});
+      if (!item) return;
+      setWork(old => {
+        const items = old.sessionId === sessionId ? old.items : {};
+        const rows = new Map((items[executionId] ?? []).map(row => [row.id, row]));
+        if (rows.size < 12 || rows.has(item.id)) rows.set(item.id, item);
+        return {sessionId, items: {...items, [executionId]: [...rows.values()]}};
+      });
+    } }),
     [sessionId]);
   async function stream(executionId: string, open: OpenStream) {
     setActive(count => count + 1);
@@ -80,6 +93,7 @@ export function useRuntimeStream(sessionId: string, onResult: (executionId: stri
   const call: StreamCall = last ? { isSuccess: true, data: last.result, variables: { executionId: last.executionId } }
     : { isSuccess: false };
   return {
+    workItems: work.sessionId === sessionId ? work.items : {},
     reply, run, resume, call, streaming: active > 0,
     /** Executions whose stream here ended because a referenced library document was deleted. */
     sourceDeleted,

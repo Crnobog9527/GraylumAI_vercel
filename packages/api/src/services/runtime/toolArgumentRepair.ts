@@ -35,21 +35,10 @@ export function repairMessageToolCalls<T extends {tool_calls?: unknown}>(message
   return changed ? {...message, tool_calls: fixed} : message;
 }
 
-/** True when `text` ends inside an unfinished JSON string (counts unescaped quotes). */
-function endsInsideString(text: string): boolean {
-  let inside = false;
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (inside && ch === '\\') i++;
-    else if (ch === '"') inside = !inside;
-  }
-  return inside;
-}
-
 /**
- * Stream frames of one response, in order: when a read_source argument delta starts with a closing brace while the
- * arguments so far end with `:` (the empty string was dropped), the missing `""` is put in front of it. Frames that
- * need no repair are returned byte for byte.
+ * Stream frames of one response, in order. Repair the accumulated argument once it is complete, then emit only the
+ * current delta's suffix. This is independent of where the provider split the missing value and closing brace.
+ * Previously emitted bytes and the stored provider evidence stay unchanged.
  */
 export function newFrameRepairer(): (chunk: string) => string {
   const names = new Map<number, string>();
@@ -66,7 +55,12 @@ export function newFrameRepairer(): (chunk: string) => string {
       if (typeof fn.name === 'string' && fn.name) names.set(index, (names.get(index) ?? '') + fn.name);
       if (typeof fn.arguments !== 'string' || !REPAIRED_TOOLS.has(names.get(index) ?? '')) continue;
       const before = so_far.get(index) ?? '';
-      if (/^\s*\}/.test(fn.arguments) && /:\s*$/.test(before) && !endsInsideString(before)) { fn.arguments = '""' + fn.arguments; changed = true; }
+      const combined = before + fn.arguments;
+      const repaired = repairArguments(combined);
+      if (repaired !== combined && repaired.startsWith(before)) {
+        fn.arguments = repaired.slice(before.length);
+        changed = true;
+      }
       so_far.set(index, before + fn.arguments);
     }
     return changed ? JSON.stringify(frame) : chunk;
