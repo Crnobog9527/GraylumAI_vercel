@@ -2,7 +2,7 @@
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { PaymentNoticeError } from './sender';
-import type { PaymentNoticeKind, PaymentNoticeParams } from './templates';
+import type { PaymentNoticeEnqueueKind, PaymentNoticeParams } from './templates';
 
 // id null: the account is being erased and gets no new notices.
 const enqueued = z.object({ id: z.string().uuid().nullable(), state: z.string(), created: z.boolean() }).strict();
@@ -13,7 +13,7 @@ const enqueued = z.object({ id: z.string().uuid().nullable(), state: z.string(),
  * sendPaymentNotice. Params must be non-personal (dates, amounts, plan ids).
  */
 export async function enqueuePaymentNotice(db: Pick<SupabaseClient, 'rpc'>, input: {
-  userId: string; kind: PaymentNoticeKind; sourceRef: string; dueKey: string; params?: PaymentNoticeParams;
+  userId: string; kind: PaymentNoticeEnqueueKind; sourceRef: string; dueKey: string; params?: PaymentNoticeParams;
 }) {
   const { data, error } = await db.rpc('payment_notice_enqueue', {
     p_user_id: input.userId, p_kind: input.kind, p_source_ref: input.sourceRef, p_due_key: input.dueKey,
