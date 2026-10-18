@@ -1,11 +1,14 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 -- RATE-LIMIT: retain whether the current BILL2 call already consumed its rate slot across explicit resumes.
 -- No schema change. A missing field from an older host defaults to false (reserve on resume).
+-- Reapplying this migration is a no-op after the returned checkpoint field is installed.
+-- Recovery: leave the additive field in place; older hosts ignore it, and do not remove it while this host is active.
 BEGIN;
 DO $migration$
 DECLARE definition text;anchor text;replacement text;
 BEGIN
  definition:=pg_get_functiondef('public.runtime_execution(uuid,uuid,text,jsonb)'::regprocedure);
+ IF position('gatePassed' IN definition)=0 THEN
  anchor:=$anchor$OR EXISTS(SELECT 1 FROM jsonb_object_keys(p_result) k WHERE k NOT IN ('epoch','state','sequence','requestHash','phase'))$anchor$;
  replacement:=$patch$OR (p_result ? 'gatePassed' AND coalesce(jsonb_typeof(p_result->'gatePassed')<>'boolean',true))
     OR EXISTS(SELECT 1 FROM jsonb_object_keys(p_result) k WHERE k NOT IN ('epoch','state','sequence','requestHash','phase','gatePassed'))$patch$;
@@ -29,5 +32,6 @@ BEGIN
   'gatePassed',CASE WHEN e.state='waiting_credits' THEN true ELSE coalesce((b.runtime_checkpoint->>'gatePassed')::boolean,false) END,$patch$;
  IF array_length(string_to_array(definition,anchor),1)<>2 THEN RAISE EXCEPTION 'RATE_LIMIT_WAIT_READ_MISMATCH';END IF;
  EXECUTE replace(definition,anchor,replacement);
+ END IF;
 END $migration$;
 COMMIT;
