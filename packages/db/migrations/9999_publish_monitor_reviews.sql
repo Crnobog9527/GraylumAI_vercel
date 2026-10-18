@@ -108,12 +108,13 @@ BEGIN
  IF meta IS NULL THEN RETURN NEW;END IF;
  SELECT * INTO r FROM social_review_runs WHERE id=(meta->>'id')::uuid FOR UPDATE;
  SELECT * INTO b FROM bill2_runs WHERE id=NEW.billing_run_id;
- IF r.id IS NULL OR r.actor_id<>NEW.actor_id OR r.status<>'claimed' OR r.lease_token<>(meta->>'token')::uuid
-  OR r.lease_expires_at<=clock_timestamp() OR r.runtime_request_id<>NEW.request_id OR r.runtime_session_id<>NEW.session_id
+ IF r.id IS NULL OR r.actor_id IS DISTINCT FROM NEW.actor_id OR r.status IS DISTINCT FROM 'claimed'
+  OR r.lease_token IS DISTINCT FROM (meta->>'token')::uuid
+  OR r.lease_expires_at<=clock_timestamp() OR r.runtime_request_id IS DISTINCT FROM NEW.request_id OR r.runtime_session_id IS DISTINCT FROM NEW.session_id
   OR NOT publish_monitor_review_allowed(NEW.actor_id) OR r.created_at<(SELECT auto_review_enabled_at
-   FROM social_monitor_settings WHERE actor_id=r.actor_id) OR b.budget_usd>r.max_cost_usd
-  OR NEW.payload->>'modelId' IS DISTINCT FROM r.model_id::text OR NEW.payload->>'role'<>'ordinary'
-  OR NEW.payload->>'network'<>'deny' OR NEW.payload->'tools'<>'["read_source"]'::jsonb
+   FROM social_monitor_settings WHERE actor_id=r.actor_id) OR r.max_cost_usd IS NULL OR b.budget_usd IS NULL OR b.budget_usd>r.max_cost_usd
+  OR NEW.payload->>'modelId' IS DISTINCT FROM r.model_id::text OR NEW.payload->>'role' IS DISTINCT FROM 'ordinary'
+  OR NEW.payload->>'network' IS DISTINCT FROM 'deny' OR NEW.payload->'tools' IS DISTINCT FROM '["read_source"]'::jsonb
   OR NEW.payload->>'ownPosts' IS DISTINCT FROM 'true' THEN RAISE EXCEPTION 'PUBLISH_MONITOR_REVIEW_DENIED';END IF;
  UPDATE social_review_runs SET runtime_execution_id=NEW.id,bill2_run_id=NEW.billing_run_id WHERE id=r.id;
  RETURN NEW;

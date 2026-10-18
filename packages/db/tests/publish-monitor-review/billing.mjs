@@ -29,6 +29,10 @@ export async function billingCases({c,report}){
   weeklyReview:{id:r.id,token:r.token,maxCostUsd:r.maxCostUsd}};
  const payload={...f.payload,scope:session.scope,input:context,limits:{...f.payload.limits,costUsd:'0.009',maxCalls:3}};
  const before=await one('SELECT credits v FROM profiles WHERE id=$1',[f.actor]);
+ const missingToken={...context,weeklyReview:{id:r.id,maxCostUsd:r.maxCostUsd}};
+ await assert.rejects(rpc(c,'runtime_admit',f.actor,r.sessionId,r.requestId,missingToken,
+  {...payload,input:missingToken}),/PUBLISH_MONITOR_REVIEW_DENIED/);
+ report.checks.push('missing private lease token is denied atomically, without creating an execution or charge');
  const admitted=await rpc(c,'runtime_admit',f.actor,r.sessionId,r.requestId,context,payload);
  const repeated=await rpc(c,'runtime_admit',f.actor,r.sessionId,r.requestId,context,payload);
  assert.equal(repeated.executionId,admitted.executionId);
