@@ -25,7 +25,7 @@ node packages/db/tests/v3/run-workbench.mjs --bill2-core-only --without-app --sc
 
 拒付专用测试验证真实 PostgreSQL 锁、冻结来源、在途恢复、结算、退款取代、管理员权限和会员事实；PAYG 补偿夹具为合成 run/call 记录。
 新增回归：不同规范付款键竞争同一订单只成功一个（receive / late match 各测）；等待中的 stop_confirm 读取晚关联并同步内部订阅；站外结案管理员允许/拒绝、幂等审计、已知关联拒绝，后续实际交付或晚匹配对已交付积分包/会员重新冻结。
-完整迁移链 311/311、重复 242、2624 个结构组；收敛 unchanged，回滚 restored，cleanup PASS。
+现有迁移文件重放 311/311、重复 242、2624 个结构组；收敛 unchanged，回滚 restored，cleanup PASS。
 BILL2 修复历史 threshold 重放遗漏后 93/93，0 skipped；运行时 431 passed、5 skipped（不带 Next 应用的配置明确跳过浏览器/应用 HTTP 用例）；私有 canary 没有进入应用日志。
 最终拒付 SQL 专用测试与指纹包含撤回后退款资格、规范映射、订阅身份推导和回填修复；BILL2/运行时全套在该最后修复前运行，最终候选以远端 CI 为准。详见 [local-results.json](./local-results.json)。
 
@@ -46,3 +46,5 @@ PAY-EVIDENCE 当前尚未建表，专用测试按已确认文档构造最小表�
 - 迁移 0311 是 Owner 指定暂号；远端账本拒绝 0311 前尚未合并的编号空档，总控须按准备顺序最终确认，之后重新生成指纹、CI、审查。不得补空迁移或降低检查。
 - 当前候选完整 CI、机器人当前版本结论、审查线程归零仍须读取 GitHub 实际结果。
 - 迁移未上远程库；部署后的上述应用全链验收需要 Claude 总控安排迁移，再由 Codex 验证。当前不能宣称可合并。
+
+钱包退款重送回归：微信/支付宝冻结转退款后，同一退款再次进入外部退款 SQL，duplicate=true，未再次扣取其他 40 积分。停续费并发回归：读到旧活动状态后另一任务先确认，当前任务不降级为 manual、不发失败告警；相关接口回归 26 项通过。

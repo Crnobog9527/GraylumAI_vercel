@@ -1,7 +1,7 @@
 {
   "capturedAt": "2026-10-19",
   "migrationFile": "0311_pay_dispute_guard.sql",
-  "migrationSha256": "68e5bf8ea28027f2c296abb36d26a3aa55dbdd9149155da6400fd0b4e984aa8e",
+  "migrationSha256": "677f2a889dc94510e63a3bbe9de8ec3ed212975c6cba1a00defcb17695337fe2",
   "disputeSqlChecks": [
     "multiple disputes on one payment share one hold; only the final withdrawal releases it",
     "duplicate-event; other sources stay spendable; failed calls stay attributed; withdrawal exactly once",
@@ -15,7 +15,7 @@
     "actual package refund failure after an already claimed refund restores into the dispute hold",
     "PAYG compensation function with synthetic run/call records increases frozen credits, not spendable balance",
     "refund supersedes a freeze: subsequent in-flight pack return is clawed back once",
-    "unexpected wallet-pack dispute uses the same freeze-to-refund conversion without touching other credits",
+    "wallet-pack hold conversion and repeated refund after superseding: both wallet methods preserve unrelated balance",
     "freeze then external refund; refund then dispute; no duplicate clawback",
     "real two-connection dispute/refund races preserve existing refunded-pack quarantine or convert a prior dispute hold without duplicate debit",
     "real two-connection consumption/freeze serialization and restoration",
@@ -113,6 +113,6 @@
   },
   "limits": [
     "BILL2 and runtime full suites ran before the final SQL mapping/subscription changes; final dispute SQL and full baseline include them. Exact candidate CI remains authoritative.",
-    "API full 7681 passed and 16 skipped includes wallet-kind and won-dispute refund eligibility; final pagination and staging synchronization followed, with targeted router 5/5 and component 4/4 passing, API/Web typecheck and lint passing. Exact candidate CI remains authoritative. Later external-resolution router/service regressions passed 14/14, component 5/5; API/Web typecheck and lint passed. Final provider-identity UI/router regressions passed 6/6 each; API/Web typecheck, lint and size checks passed."
+    "API full 7681 passed and 16 skipped includes wallet-kind and won-dispute refund eligibility; final pagination and staging synchronization followed, with targeted router 5/5 and component 4/4 passing, API/Web typecheck and lint passing. Exact candidate CI remains authoritative. Later external-resolution router/service regressions passed 14/14, component 5/5; API/Web typecheck and lint passed. Final provider-identity UI/router regressions passed 6/6 each; API/Web typecheck, lint and size checks passed. Wallet refund replay and concurrent stop tests passed 26/26, API/Web typecheck and API lint passed after these changes."
   ]
 }
