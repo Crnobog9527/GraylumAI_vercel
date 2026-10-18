@@ -3228,7 +3228,7 @@
   "fn:fusion_compare_settings(uuid)": "f13e54e38d84",
   "fn:fusion_compare_stop(uuid,uuid,uuid)": "910f0e283822",
   "fn:fusion_compare_view(fusion_compares)": "0b2a6aed6ed7",
-  "fn:fusion_group_admit(uuid,uuid,text,uuid,jsonb)": "134b04715b41",
+  "fn:fusion_group_admit(uuid,uuid,text,uuid,jsonb)": "60b31a71db0e",
   "fn:fusion_group_attach(uuid,uuid,uuid)": "92457d5b1be8",
   "fn:fusion_group_claim(uuid,uuid,text,integer,jsonb)": "b4754b59797a",
   "fn:fusion_group_create(uuid,uuid,text)": "a548758efeca",

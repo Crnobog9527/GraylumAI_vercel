@@ -279,7 +279,7 @@ CREATE OR REPLACE FUNCTION public.fusion_group_admit(p_actor_id uuid, p_request_
   p_source_session_id uuid, p_runs jsonb)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE g fusion_billing_groups; item jsonb; f jsonb; v jsonb; run jsonb; out jsonb:='[]'; member_level text;
-  total numeric:=0; i integer:=0; gid uuid; fc fusion_compares; lim jsonb; budget jsonb; phase text;
+  total numeric:=0; i integer:=0; gid uuid; fc fusion_compares; sess runtime_sessions; lim jsonb; budget jsonb; phase text;
 BEGIN
   PERFORM bill2_actor(p_actor_id);
   IF p_kind IS NULL OR p_kind NOT IN ('review','compare') THEN RAISE EXCEPTION 'FUSION_GROUP_INVALID'; END IF;
@@ -313,7 +313,7 @@ BEGIN
     budget:=v#>'{review,maxBudgetUsd}';
   ELSE
     -- Lock order as begin and adopt: the session first (shared), then the compare record.
-    PERFORM 1 FROM runtime_sessions WHERE id=p_source_session_id AND actor_id=p_actor_id FOR SHARE;
+    SELECT * INTO sess FROM runtime_sessions WHERE id=p_source_session_id AND actor_id=p_actor_id FOR SHARE;
     SELECT * INTO fc FROM fusion_compares WHERE actor_id=p_actor_id AND request_id=p_request_id FOR UPDATE;
     IF fc.id IS NULL OR fc.session_id IS DISTINCT FROM p_source_session_id THEN RAISE EXCEPTION 'FUSION_COMPARE_DENIED'; END IF;
     IF fc.state<>'admitting' OR fc.created_at<=clock_timestamp()-interval '5 minutes' THEN RAISE EXCEPTION 'FUSION_COMPARE_ENDED'; END IF;
@@ -323,6 +323,23 @@ BEGIN
     IF fc.config ? 'materialRevision' AND fc.config->>'materialRevision' IS DISTINCT FROM fusion_compare_material_token(p_actor_id,fc.session_id)
     THEN RAISE EXCEPTION 'FUSION_COMPARE_STALE'; END IF;
     PERFORM fusion_compare_material_guard(p_actor_id,fc.session_id);
+    -- The conversation must be exactly the one the snapshot was built from: no turn appended or running since begin
+    -- (the same two fences as begin and adopt).
+    IF sess.id IS NULL OR sess.content_deleted_at IS NOT NULL OR sess.erased_at IS NOT NULL THEN RAISE EXCEPTION 'FUSION_COMPARE_SESSION_GONE'; END IF;
+    IF sess.revision<>fc.history_revision OR (sess.active_execution IS NOT NULL AND NOT EXISTS(SELECT 1 FROM runtime_executions old_execution
+        JOIN bill2_runs old_run ON old_run.id=old_execution.billing_run_id
+        WHERE old_execution.id=sess.active_execution AND old_execution.session_id=sess.id
+          AND old_execution.actor_id=p_actor_id AND old_run.actor_id=p_actor_id
+          AND old_run.session_ref=sess.id AND old_execution.state='cost_pending'
+          AND old_run.closed AND old_run.cancel_requested)) THEN
+      RAISE EXCEPTION 'FUSION_COMPARE_STALE'; END IF;
+    -- Frozen workspace sources, as begin does: project locks first, then each source must still be allowed.
+    PERFORM p.id FROM artifact_projects p JOIN artifact_versions av ON av.project_id=p.id
+      WHERE p.actor_id=p_actor_id AND av.id::text IN (SELECT d->>'sourceVersionId'
+        FROM jsonb_array_elements(coalesce(fc.workspace_dependencies,'[]')) d) ORDER BY p.id FOR SHARE OF p;
+    IF EXISTS(SELECT 1 FROM jsonb_array_elements(coalesce(fc.workspace_dependencies,'[]')) d
+      WHERE NOT coalesce(opc_source_allowed(p_actor_id,(d->>'sourceVersionId')::uuid),false)) THEN
+      RAISE EXCEPTION 'FUSION_COMPARE_SOURCE_REVOKED'; END IF;
     v:=fusion_compare_settings(p_actor_id);
     lim:=fusion_compare_limits(v);
     IF jsonb_array_length(p_runs)<(lim->>'min')::int THEN RAISE EXCEPTION 'FUSION_COMPARE_TOO_FEW'; END IF;

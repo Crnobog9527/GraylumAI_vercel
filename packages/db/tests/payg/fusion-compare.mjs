@@ -97,6 +97,14 @@ export async function fusionCompareCases({db,Client,connectionString,report,crea
   await db.query("UPDATE fusion_compares SET config=config||'{\"materialRevision\":\"older:none\"}' WHERE id=$1",[first.compareId]);
   await assert.rejects(call(db,'fusion_group_admit',actor,id1,'compare',session,runs),/FUSION_COMPARE_STALE/);
   await db.query("UPDATE fusion_compares SET config=config-'materialRevision' WHERE id=$1",[first.compareId]);
+  // A turn appended after begin (while the judgement ran): the snapshot omits it, so the admission refuses before any run.
+  await db.query('UPDATE runtime_sessions SET revision=revision+1 WHERE id=$1',[session]);
+  await assert.rejects(call(db,'fusion_group_admit',actor,id1,'compare',session,runs),/FUSION_COMPARE_STALE/);
+  await db.query('UPDATE runtime_sessions SET revision=revision-1 WHERE id=$1',[session]);
+  // A frozen workspace source that stopped being allowed after begin is refused again at admission.
+  await db.query("UPDATE fusion_compares SET workspace_dependencies=jsonb_build_array(jsonb_build_object('sourceVersionId',$2::text)) WHERE id=$1",[first.compareId,randomUUID()]);
+  await assert.rejects(call(db,'fusion_group_admit',actor,id1,'compare',session,runs),/FUSION_COMPARE_SOURCE_REVOKED/);
+  await db.query("UPDATE fusion_compares SET workspace_dependencies='[]' WHERE id=$1",[first.compareId]);
   await assert.rejects(call(db,'fusion_compare_gate',actor,first.compareId,'block',false),/FUSION_COMPARE_REQUEST_CONFLICT/);
   // The fallback rule rides with the verdict and is replayed as stored, not rebuilt later.
   assert.equal((await call(db,'fusion_compare_read',actor,first.compareId)).gateFallback,false);

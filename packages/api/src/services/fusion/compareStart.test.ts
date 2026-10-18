@@ -316,7 +316,7 @@ describe('compare start: references and recorded work material (review findings)
 });
 
 describe('compare start: material withdrawn while the judgement ran (review finding)', () => {
-  it.each(['FUSION_COMPARE_STALE', 'RUNTIME_MATERIAL_UNAVAILABLE'])('ends the record when admission refuses with %s, and holds nothing', async code => {
+  it.each(['FUSION_COMPARE_STALE', 'RUNTIME_MATERIAL_UNAVAILABLE', 'FUSION_COMPARE_SOURCE_REVOKED', 'FUSION_COMPARE_SESSION_GONE'])('ends the record when admission refuses with %s, and holds nothing', async code => {
     s.admitError = new Error(code);
     await expect(start()).rejects.toThrow(code);
     expect(names()).not.toContain('fusion_compare_claim');
