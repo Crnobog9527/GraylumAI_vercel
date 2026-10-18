@@ -3,6 +3,7 @@
 
 import { BellRing, Clock3, LayoutGrid, Loader2 } from 'lucide-react';
 import styles from './jury-layout.module.css';
+import { DisplayHeading } from '@/components/chat-display/display-heading';
 
 /**
  * The card over the canvas when a review starts. Today the review only moves while this page is open (the browser
@@ -16,7 +17,7 @@ export function JuryIntro({ total, background, onStay, onLeave }: {
     <div className={styles.introLayer}>
       <section className={styles.intro} role="dialog" aria-labelledby="jury-intro-title" aria-modal="false">
         <Clock3 size={22} aria-hidden="true" className={styles.introIcon} />
-        <h2 id="jury-intro-title">{background ? `评审在后台进行，${total}` : `评审进行中，大约 ${total.replace(/^约 /, '')}`}</h2>
+        <DisplayHeading as="h2" id="jury-intro-title">{background ? `评审在后台进行，${total}` : `评审进行中，大约 ${total.replace(/^约 /, '')}`}</DisplayHeading>
         <p>
           {background
             ? '你可以先去忙别的，做完会在工作台提醒你；也可以留在这里看。'
@@ -44,7 +45,7 @@ export function JuryAway({ step, ended, onBack }: { step: string; ended: boolean
     <div className={styles.away}>
       <div className={styles.workbench}>
         <LayoutGrid size={22} aria-hidden="true" />
-        <h2>工作台</h2>
+        <DisplayHeading as="h2">工作台</DisplayHeading>
         <p>原型示意：这里是你平时的工作台，可以继续写选题、改草稿。评审在后台照常进行。</p>
       </div>
       <button type="button" className={styles.statusTag} data-done={ended} onClick={onBack}>

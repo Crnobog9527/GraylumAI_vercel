@@ -2,13 +2,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type Stripe from 'stripe';
 import type { SupabaseClient } from '@supabase/supabase-js';
-const mocks = vi.hoisted(() => ({ scope: vi.fn(), cash: vi.fn() }));
+const mocks = vi.hoisted(() => ({ scope: vi.fn(), cash: vi.fn(), report: vi.fn() }));
+vi.mock('../analytics/gaPurchase', () => ({ reportGaPurchase: mocks.report }));
 vi.mock('./stripeCheckoutPersistence', () => ({ resolveStripeScope: mocks.scope }));
 vi.mock('./walletPaymentEvidence', () => ({ readWalletPaymentEvidence: mocks.cash }));
 import { recoverWalletCheckout } from './walletWebhook';
 function fixture(overrides = {}) {
   const order = { referenceMissing: false, orderMissing: false, id: 'order', user_id: 'user', payment_method: 'alipay', item_type: 'membership_plan',
-    entitlement_term: 'month', ...overrides };
+    entitlement_term: 'month', payment_mode: 'test', ...overrides };
   const db = { rpc: vi.fn().mockResolvedValue({ data: { state: 'fulfilled' }, error: null }),
     from: vi.fn((table: string) => {
       const chain = { select: vi.fn(() => chain), eq: vi.fn(() => chain),
@@ -30,12 +31,34 @@ describe('wallet callback/recovery', () => {
       p_order: 'order', p_start: '2028-01-31T00:00:00.000Z', p_end: '2028-02-29T00:00:00.000Z', p_payment: 'pi_1',
     }));
   });
+  it('reports the GA purchase only from the call that newly delivered the order (ANALYTICS 0280)', async () => {
+    mocks.report.mockReset().mockResolvedValue(true);
+    const first = fixture(); first.db.rpc.mockResolvedValue({ data: { state: 'fulfilled', duplicate: false }, error: null });
+    expect(await first.run()).toBe(true);
+    expect(mocks.report).toHaveBeenCalledTimes(1);
+    expect(mocks.report).toHaveBeenCalledWith(first.db, expect.objectContaining({ id: 'order' }));
+    for (const data of [{ state: 'fulfilled', duplicate: true }, { state: 'fulfilled' }, { state: 'review', reason: 'account_closed' }]) {
+      const replay = fixture(); replay.db.rpc.mockResolvedValue({ data, error: null });
+      await replay.run();
+    }
+    expect(mocks.report).toHaveBeenCalledTimes(1);
+  });
   it('does not grant for pending, timeout, live, or unimplemented transitions', async () => {
     const f = fixture(); mocks.cash.mockResolvedValue(null); expect(await f.run()).toBe(true);
     expect(f.db.rpc).not.toHaveBeenCalled();
     mocks.cash.mockRejectedValue(new Error('timeout')); await expect(f.run()).rejects.toThrow('timeout');
     expect(f.db.rpc).not.toHaveBeenCalled();
+    // R7: a test order never settles through the live account, and the reverse.
     mocks.scope.mockResolvedValue({ mode: 'live', merchant: 'fixture' }); await expect(f.run()).rejects.toThrow('PAY_WAFFO_PAYMENT_CONFLICT');
+    mocks.scope.mockResolvedValue({ mode: 'test', merchant: 'fixture' });
+    await expect(fixture({ payment_mode: 'live' }).run()).rejects.toThrow('PAY_WAFFO_PAYMENT_CONFLICT');
+    expect(f.db.rpc).not.toHaveBeenCalled();
+  });
+  it('R7: a live order settles through the live account in live mode', async () => {
+    mocks.scope.mockResolvedValue({ mode: 'live', merchant: 'fixture' });
+    const f = fixture({ payment_mode: 'live' }); expect(await f.run()).toBe(true);
+    expect(mocks.cash).toHaveBeenCalledWith(expect.objectContaining({ scope: { mode: 'live', merchant: 'fixture' } }));
+    expect(f.db.rpc).toHaveBeenCalledWith('pay_waffo_fulfill_payment', expect.objectContaining({ p_order: 'order' }));
   });
   it('recovers a successful provider session when the original mapping write was lost', async () => {
     const originalId = '00000000-0000-4000-8000-000000000001';

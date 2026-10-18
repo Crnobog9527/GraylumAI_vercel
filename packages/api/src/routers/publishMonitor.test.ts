@@ -1,7 +1,10 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from 'vitest';
-const mocks = vi.hoisted(() => ({ entitlements: vi.fn() }));
+const mocks = vi.hoisted(() => ({ entitlements: vi.fn(), uploads: vi.fn(), limit: vi.fn() }));
 vi.mock('../services/membershipEntitlements', () => ({ readMembershipEntitlements: mocks.entitlements }));
+vi.mock('../services/publishMonitor/postForMe/config', async importOriginal => ({
+  ...(await importOriginal<object>()), takeUploadSlots: mocks.uploads }));
+vi.mock('../services/redisRateLimiter', () => ({ checkRateLimitOrThrow: mocks.limit }));
 import { publishMonitorRouter } from './publishMonitor';
 
 const actor = '00000000-0000-4000-8000-0000000f0001';
@@ -37,5 +40,88 @@ describe('publish-monitor automatic review switch', () => {
     const foreign = vi.fn().mockResolvedValue({ data: null, error: { message: 'PUBLISH_MONITOR_CONNECTION_NOT_FOUND' } });
     await expect(caller(foreign, true).disconnect({ connectionId: id }))
       .rejects.toMatchObject({ code: 'NOT_FOUND', message: 'PUBLISH_MONITOR_CONNECTION_NOT_FOUND' });
+  });
+});
+
+describe('publish-monitor one-click publishing', () => {
+  const biz = '00000000-0000-4000-8000-0000000f0003';
+  const conn = '00000000-0000-4000-8000-0000000f0004';
+  const submit = { idempotencyKey: 'key-00000001', businessId: biz, workItemId: null, connectionIds: [conn], caption: 'Hi',
+    media: [] };
+  it('refuses publishing without the entitlement before any database or provider work, and while paused', async () => {
+    mocks.entitlements.mockResolvedValue({ allowPublish: false });
+    const rpc = vi.fn();
+    await expect(caller(rpc, true).publish.submit(submit))
+      .rejects.toMatchObject({ code: 'FORBIDDEN', message: 'PUBLISH_MONITOR_ENTITLEMENT_REQUIRED' });
+    await expect(caller(rpc, true).publish.uploadUrl({ disclosureAccepted: true, count: 1 }))
+      .rejects.toMatchObject({ code: 'FORBIDDEN', message: 'PUBLISH_MONITOR_ENTITLEMENT_REQUIRED' });
+    mocks.entitlements.mockResolvedValue({ allowPublish: true });
+    await expect(caller(rpc, false).publish.submit(submit))
+      .rejects.toMatchObject({ code: 'FORBIDDEN', message: 'PUBLISH_MONITOR_DISABLED' });
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('upload slots are counted one by one against the per-user allowance before any provider call', async () => {
+    mocks.entitlements.mockResolvedValue({ allowPublish: true });
+    mocks.limit.mockResolvedValue({ success: true });
+    mocks.uploads.mockResolvedValue({ ok: false, retryAfterSeconds: 120 });
+    const rpc = vi.fn();
+    await expect(caller(rpc, true).publish.uploadUrl({ disclosureAccepted: true, count: 7 }))
+      .rejects.toMatchObject({ code: 'TOO_MANY_REQUESTS' });
+    expect(mocks.uploads).toHaveBeenCalledWith(actor, 7);
+  });
+
+  it('an upload slot needs the confirmed disclosure; a job is readable only through the owner-scoped lookup', async () => {
+    await expect(caller(vi.fn(), true).publish.uploadUrl({ disclosureAccepted: false, count: 1 } as never))
+      .rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(caller(vi.fn(), true).publish.uploadUrl({ disclosureAccepted: true, count: 11 }))
+      .rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    const job = '00000000-0000-4000-8000-0000000f0005';
+    const rpc = vi.fn().mockResolvedValue({ data: null, error: { message: 'PUBLISH_MONITOR_JOB_NOT_FOUND' } });
+    await expect(caller(rpc, false).publish.job({ jobId: job }))
+      .rejects.toMatchObject({ code: 'NOT_FOUND', message: 'PUBLISH_MONITOR_JOB_NOT_FOUND' });
+    expect(rpc).toHaveBeenCalledWith('publish_monitor_publish_job', { a: actor, p_job: job });
+  });
+});
+
+describe('publish-monitor own data (PR-3a)', () => {
+  const empty = { windowDays: 30, connections: [], posts: [] };
+  it('the window comes from the entitlement; a plan without one is refused before any read', async () => {
+    mocks.entitlements.mockResolvedValue({ ownDataWindowDays: 0 });
+    const none = vi.fn();
+    await expect(caller(none, true).data({})).rejects.toMatchObject({ code: 'FORBIDDEN',
+      message: 'PUBLISH_MONITOR_ENTITLEMENT_REQUIRED' });
+    await expect(caller(none, true).refresh({ connectionId: actor })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    expect(none).not.toHaveBeenCalled();
+    mocks.entitlements.mockResolvedValue({ ownDataWindowDays: 90 });
+    const rpc = vi.fn().mockResolvedValue({ data: { ...empty, windowDays: 90 }, error: null });
+    await caller(rpc, true).data({});
+    expect(rpc).toHaveBeenCalledWith('publish_monitor_data', { a: actor, p_window_days: 90, p_connection_id: null });
+  });
+
+  it('reading needs the feature switch; a refresh within the hour is a rate limit; a foreign item is refused', async () => {
+    mocks.entitlements.mockResolvedValue({ ownDataWindowDays: 30 });
+    await expect(caller(vi.fn(), false).data({})).rejects.toMatchObject({ message: 'PUBLISH_MONITOR_DISABLED' });
+    const soon = vi.fn().mockResolvedValue({ data: null, error: { message: 'PUBLISH_MONITOR_REFRESH_TOO_SOON' } });
+    await expect(caller(soon, true).linkPost({ postId: actor, workItemId: actor }))
+      .rejects.toMatchObject({ code: 'TOO_MANY_REQUESTS' });
+    const foreign = vi.fn().mockResolvedValue({ data: null, error: { message: 'PUBLISH_MONITOR_WORK_ITEM_MISMATCH' } });
+    await expect(caller(foreign, true).linkPost({ postId: actor, workItemId: actor }))
+      .rejects.toMatchObject({ code: 'FORBIDDEN', message: 'PUBLISH_MONITOR_WORK_ITEM_MISMATCH' });
+  });
+});
+
+describe('publish-monitor manual import (PR-3b)', () => {
+  it('needs a data window and the feature switch; invalid rows are a bad request', async () => {
+    const input = { accountProjectId: actor, origin: 'table' as const, rows: [{ postKey: 'p', url: null, postedAt: null,
+      titleExcerpt: null, metrics: { likes: 1 } }] };
+    mocks.entitlements.mockResolvedValue({ ownDataWindowDays: 0 });
+    await expect(caller(vi.fn(), true).manualImport(input)).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    mocks.entitlements.mockResolvedValue({ ownDataWindowDays: 30 });
+    await expect(caller(vi.fn(), false).manualImport(input)).rejects.toMatchObject({ message: 'PUBLISH_MONITOR_DISABLED' });
+    const rpc = vi.fn().mockResolvedValue({ data: { connectionId: actor, inserted: 1, updated: 0 }, error: null });
+    await expect(caller(rpc, true).manualImport(input)).resolves.toEqual({ connectionId: actor, inserted: 1, updated: 0 });
+    await expect(caller(vi.fn(), true).manualImport({ ...input, rows: [{ ...input.rows[0]!, metrics: { likes: -1 } }] }))
+      .rejects.toMatchObject({ code: 'BAD_REQUEST' });
   });
 });

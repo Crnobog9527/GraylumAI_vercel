@@ -28,3 +28,14 @@ describe('isPublicPathname: product feature pages', () => {
     }
   });
 });
+
+describe('isPublicPathname: tutorial blog', () => {
+  it('opens /blog and the articles below it, by whole segment only', () => {
+    for (const path of ['/blog', '/blog/', '/blog/first-positioning-conversation']) {
+      expect(isPublicPathname(path)).toBe(true);
+    }
+    for (const path of ['/blogs', '/blog-admin', '/admin/blog']) {
+      expect(isPublicPathname(path)).toBe(false);
+    }
+  });
+});

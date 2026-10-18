@@ -12,19 +12,16 @@ import { VoiceWallJ } from '@/components/landing/preview-j/VoiceWallJ';
 import page from '@/components/landing/preview-j/j.module.css';
 import { CtaK } from '@/components/landing/preview-k/CtaK';
 import k from '@/components/landing/preview-k/k.module.css';
+import own from './l.module.css';
 import { StickyCtaMNO } from '@/components/landing/preview-mno/StickyCtaMNO';
-import { HERO, RISK_REVERSAL } from '@/lib/landing/landing-copy';
-import { J_FINAL } from '@/lib/landing/landing-copy-j';
-import { K_GOLD_LINE, K_PRICE_TERMS } from '@/lib/landing/landing-copy-k';
-import { L_NOTE_REGIONS, L_OPS, L_VOICE_FOLD } from '@/lib/landing/landing-copy-l';
+import { HERO } from '@/lib/landing/landing-copy';
+import { L_NOTE_ANSWERS, L_NOTE_HEADS, L_NOTE_REGIONS, L_OPS, L_PRICE_NOTE, L_VOICE_FOLD } from '@/lib/landing/landing-copy-l';
 import { allOn } from '@/lib/landing/landing-flags';
 import { cn } from '@/lib/utils';
 import { HeroL } from './HeroL';
-import { JuryModuleL } from './JuryModuleL';
 import { SamplesL } from './SamplesL';
 import { ScenariosL } from './ScenariosL';
 import { StepsL } from './StepsL';
-import styles from './l.module.css';
 
 const SAMPLES = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l'] as const;
 
@@ -53,19 +50,11 @@ export function SampleL({ data, siteName, extras, production = false, supportEma
   /** The public home page (Owner 2026-10-17: /landing becomes sample L): no sample switcher, only links that lead somewhere. */
   production?: boolean;
 }) {
-  const faqIds = new Set(data.faqGroups.flatMap(group => group.items.map(item => item.id)));
-  const terms = faqIds.has(K_PRICE_TERMS.faqId) ? (
-    <p className={k.terms}>
-      <a href={`#${K_PRICE_TERMS.faqId}`}>{K_PRICE_TERMS.cancel}</a> · <a href={`#${K_PRICE_TERMS.faqId}`}>{K_PRICE_TERMS.refund}</a>
-    </p>
-  ) : null;
-  // The price area as before round three (Owner 2026-10-17: "区域 7 的价格对比照旧"), with its Gold line.
-  const gold = allOn(extras.flags, K_GOLD_LINE.needs) ? <p className={k.gold}>{K_GOLD_LINE.text}</p> : null;
-  // "先聊后买" right by the price button (Owner 2026-10-17, round three: no plan cards on the home page).
-  const riskLine = allOn(extras.flags, ['signupGrant'])
-    ? <p className={styles.riskLine}><b>{RISK_REVERSAL.title}</b>{J_FINAL.note}</p> : null;
+  // Under the price button (Owner 2026-10-17, round six): "无需绑卡 · 免费试用"; cancelling and refunds are explained on
+  // the price page, not here, and the home page carries no "先聊后买" or Gold line.
+  const terms = <p className={k.terms}>{allOn(extras.flags, ['signupGrant']) ? L_PRICE_NOTE.free : L_PRICE_NOTE.noCard}</p>;
   return (
-    <MotionJ className={cn(light.light, page.page, k.page)}>
+    <MotionJ className={cn(light.light, page.page, k.page, own.lines)}>
       {production ? null : (
         <nav aria-label="样稿切换" className={page.sampleBar}>
           <span>不公开的风格样稿（L：K 的第二轮）</span>
@@ -79,13 +68,13 @@ export function SampleL({ data, siteName, extras, production = false, supportEma
 
       <main data-calm="">
         <HeroL note={data.heroNote} />
-        <VoiceWallJ notes={data.notes} open regions={L_NOTE_REGIONS} compact={L_VOICE_FOLD} after={<CtaK />} />
-        <StepsL flags={extras.flags} />
-        <JuryModuleL flags={extras.flags} href={production ? null : undefined} />
+        <VoiceWallJ notes={data.notes} open regions={L_NOTE_REGIONS} compact={L_VOICE_FOLD} after={<CtaK />}
+          heads={L_NOTE_HEADS} answers={L_NOTE_ANSWERS} />
+        <StepsL flags={extras.flags} juryHref={production ? null : undefined} />
         {extras.showSamples ? <SamplesL /> : null}
         <ScenariosL flags={extras.flags} after={<CtaK />} />
         <PriceJ proMonthly={data.pricing.proMonthly} rows={data.compareRows} calm plainTotal checked={false} quiet
-          after={terms || gold || riskLine ? <>{riskLine}{terms}{gold}</> : undefined} />
+          after={terms} />
         <FaqJ groups={data.faqGroups} />
         <FinalJ freeTrial={allOn(extras.flags, ['signupGrant'])} />
       </main>

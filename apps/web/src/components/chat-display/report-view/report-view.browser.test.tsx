@@ -1,0 +1,119 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { existsSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { chromium, expect as ui, type Browser } from '@playwright/test';
+import { afterAll, beforeAll, expect, it } from 'vitest';
+
+// The report page (REPORT-VISUAL PR-1) in a real browser: the dialog card, its chapter list and the new view,
+// on a wide screen and a 375px phone. Shot files are written only when REPORT_VIEW_SHOTS names a folder.
+let browser: Browser;
+let code: string;
+let css: string;
+const entry = fileURLToPath(new URL('./__report_view_fixture__.js', import.meta.url));
+
+beforeAll(async () => {
+  const require = createRequire(import.meta.url);
+  const { build } = await import(pathToFileURL(createRequire(require.resolve('vitest/package.json')).resolve('vite')).href);
+  const view = fileURLToPath(new URL('./report-view.tsx', import.meta.url));
+  const outline = fileURLToPath(new URL('../report-outline.tsx', import.meta.url));
+  const useOutline = fileURLToPath(new URL('../use-report-outline.ts', import.meta.url));
+  const fixtures = fileURLToPath(new URL('../fixtures/report.ts', import.meta.url));
+  const reportData = fileURLToPath(new URL('../../../../../../packages/api/src/shared/reportData.ts', import.meta.url));
+  const card = fileURLToPath(new URL('../../opc/positioning-result.module.css', import.meta.url));
+  const bundle = await build({ configFile: false, logLevel: 'silent',
+    define: { 'process.env.NODE_ENV': JSON.stringify('development') },
+    oxc: { jsx: { runtime: 'automatic' } },
+    resolve: { alias: { '@': fileURLToPath(new URL('../../../', import.meta.url)) } },
+    plugins: [{ name: 'report-view-fixture', enforce: 'pre',
+      resolveId(id: string) { if (id === entry) return id; },
+      load(id: string) {
+        if (id !== entry) return;
+        return `import React from 'react'; import {createRoot} from 'react-dom/client';
+          import {ReportView} from ${JSON.stringify(view)}; import {ReportWithOutline} from ${JSON.stringify(outline)};
+          import {useReportOutline} from ${JSON.stringify(useOutline)}; import {parseReportBody} from ${JSON.stringify(reportData)};
+          import {SAMPLE_REPORT_BODY_WITH_DATA} from ${JSON.stringify(fixtures)}; import card from ${JSON.stringify(card)};
+          // Real Skill titles carry numbering and writing hints for the model (staging #1109 acceptance).
+          const nums = '一二三四五六七八九十'.split('').concat(['十一','十二','十三','十四']);
+          let i = 0;
+          const WIDE = '\\n\\n| 人群 | 他们在做什么 | 痛点 | 触发时刻 | 愿意付多少 | 为什么现在买 |\\n| --- | --- | --- | --- | --- | --- |\\n' + [1,2].map(n => '| 人群' + n + ' | 每天下班后还要照顾孩子和家里 | 担心时间不够又怕买贵 | 孩子生日前两周才开始找 | 愿意为省心多付一点 | 活动日期固定没有退路 |').join('\\n') + '\\n';
+          const BODY0 = SAMPLE_REPORT_BODY_WITH_DATA.replace(/^(## .+)$/m, (h) => h + WIDE);
+          const BODY = BODY0.replace(/^## (.+)$/gm, (_, t) => '## ' + nums[i++] + '、' + t + '：从你的情况出发的完整说明' + (i % 2 ? '（约 800 字，3–10 个合格账号）' : '（至少 2000 字，建议约 2400 字）'));
+          const data = parseReportBody(BODY).data;
+          data.data.benchmarks.accounts = data.data.benchmarks.accounts.map((a, i) => ({...a,
+            metrics: {followers: 18000 - i * 9000, medianViews: 4200 - i * 1500, engagementRate: 0.05, weeklyPosts: 3, capturedAt: null}}));
+          function Dialog(){ const ref = React.useRef(null); const o = useReportOutline(ref);
+            return React.createElement('div',{style:{position:'fixed',inset:0,display:'flex',alignItems:'center',justifyContent:'center',padding:16}},
+              React.createElement('div',{ref,className:card.consentCard,style:{maxWidth:1024}},
+                React.createElement(ReportWithOutline,{bodyRef:o.bodyRef,chapters:o.chapters,activeId:o.activeId,onSelect:o.select},
+                  React.createElement(ReportView,{body:BODY,data})),
+                // A report without a data block (older reports) renders as plain text and must get the same tables.
+                React.createElement('div',{style:{marginTop:16}},React.createElement(ReportView,{body:BODY.slice(0, BODY.indexOf('graylum-report-data') - 3)}))));}
+          createRoot(document.getElementById('root')).render(React.createElement(Dialog));`;
+      } }],
+    build: { write: false, minify: false, cssCodeSplit: false, lib: { entry, name: 'ReportViewTest', formats: ['iife'] } },
+  });
+  const output = Array.isArray(bundle) ? bundle[0].output : bundle.output;
+  code = output.find((item: { type: string }) => item.type === 'chunk').code;
+  css = output.filter((item: { type: string; fileName: string }) => item.type === 'asset' && item.fileName.endsWith('.css'))
+    .map((item: { source: string | Uint8Array }) => String(item.source)).join('\n');
+  const chrome = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+  browser = await chromium.launch({ executablePath: existsSync(chrome) ? chrome : undefined, headless: true });
+}, 60000);
+afterAll(async () => { await browser?.close(); }, 30000);
+
+for (const viewport of [{ width: 1440, height: 900 }, { width: 1280, height: 900 }, { width: 1024, height: 800 }, { width: 375, height: 812 }]) {
+  it(`shows the chapters, the charts and folded reasons at ${viewport.width}px without sideways scrolling`, async () => {
+    const page = await browser.newPage({ viewport });
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    try {
+      // A hostile page-level button rule (fixed height, big font) must not make long outline titles overlap.
+      await page.setContent(`<!doctype html><style>body{margin:0;font-family:sans-serif}button{height:24px;font-size:20px}${css}</style><div id="root"></div>`);
+      await page.addScriptTag({ content: code });
+      await ui(page.getByText('30 秒看懂')).toBeVisible({ timeout: 5000 });
+      // recharts arrives on demand, only because this sample has benchmark numbers.
+      await ui(page.locator('.recharts-surface').first()).toBeVisible({ timeout: 10000 });
+      const nav = page.getByRole('navigation', { name: '报告目录' });
+      expect(await nav.locator('li').count()).toBe(14);
+      await ui(page.getByText('怎样算过关').first()).toBeVisible();
+      expect(await page.locator('body').innerText()).not.toMatch(/约 800 字|至少 2000 字|建议约 2400 字/);
+      if (viewport.width > 767) {
+        const boxes = await nav.locator('li button').evaluateAll(items => items.map(item => item.getBoundingClientRect())
+          .map(box => ({ top: box.top, bottom: box.bottom })));
+        for (let k = 1; k < boxes.length; k++) expect(boxes[k].top).toBeGreaterThanOrEqual(boxes[k - 1].bottom - 0.5);
+        const text = await nav.locator('li button').evaluateAll(items => items.map(item => item.scrollHeight <= item.clientHeight + 1));
+        expect(text.every(Boolean)).toBe(true);
+      }
+      const view = page.locator('[class*="_view_"]');
+      expect(await view.getByText('你的客户会先在小红书搜').count()).toBe(0);
+      await page.getByRole('button', { name: '展开理由' }).click();
+      await ui(view.getByText('你的客户会先在小红书搜', { exact: false })).toBeVisible();
+      await ui(page.getByText('平台怎么推荐内容（大白话）')).toBeVisible();
+      const overflow = await page.evaluate(() => [...document.querySelectorAll('section, figure, ol, dl')]
+        .filter(element => !element.closest('[class*="tableScroll"], [class*="timeline"]'))
+        .filter(element => element.scrollWidth > element.clientWidth + 1)
+        .map(element => `${element.tagName}.${element.className} ${element.scrollWidth}>${element.clientWidth}`));
+      expect(overflow).toEqual([]);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      // Tables (markdown and data): wide screens wrap them to the width, nothing is cut off; phones scroll and say so.
+      const tables = await page.evaluate(() => [...document.querySelectorAll('table')].map(table => {
+        const box = table.parentElement!, lastCell = table.querySelector('tr:last-child td:last-child, tr:first-child th:last-child')!;
+        return { scroll: box.scrollWidth - box.clientWidth, lastRight: lastCell.getBoundingClientRect().right, boxRight: box.getBoundingClientRect().right };
+      }));
+      expect(tables.length).toBeGreaterThan(3);
+      if (viewport.width >= 768) for (const table of tables) {
+        expect(table.scroll).toBeLessThanOrEqual(1);
+        expect(table.lastRight).toBeLessThanOrEqual(table.boxRight + 1);
+      }
+      else expect(await page.evaluate(() => getComputedStyle(document.querySelector('table')!.parentElement!, '::before').content)).toContain('左右滑动');
+      if (process.env.REPORT_VIEW_SHOTS) {
+        const card = page.locator('[class*="consentCard"]');
+        await card.evaluate(element => { element.style.maxHeight = 'none'; element.style.overflow = 'visible'; });
+        await page.setViewportSize({ width: viewport.width, height: Math.ceil(await card.evaluate(element => element.scrollHeight)) + 40 });
+        await card.screenshot({ path: `${process.env.REPORT_VIEW_SHOTS}/report-view-${viewport.width}.png` });
+      }
+      expect(errors).toEqual([]);
+    } finally { await page.close(); }
+  }, 40000);
+}

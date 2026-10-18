@@ -1,0 +1,114 @@
+/* Report page (REPORT-VISUAL §4). Colors follow the surface (currentColor), like message-markdown, so it fits the
+   light report dialog and a dark surface alike. Narrow screens (≤767px) stack the cards and scroll the timeline. */
+.view{--rv-rule:color-mix(in srgb,currentColor 14%,transparent);--rv-fill:color-mix(in srgb,currentColor 5%,transparent);
+  --rv-strong:color-mix(in srgb,currentColor 9%,transparent);--rv-quiet:color-mix(in srgb,currentColor 62%,transparent);
+  min-width:0;font-size:14px;line-height:1.75;overflow-wrap:anywhere}
+.view *,.view *::before{box-sizing:border-box}
+.chapter{margin-top:28px}
+.chapter:first-of-type{margin-top:20px}
+.chapterTitle{margin:0 0 8px;font-size:17px;font-weight:600;line-height:1.45}
+
+.quickLook{margin-top:16px;padding:18px 20px;border:1px solid var(--rv-rule);border-radius:14px;background:var(--rv-fill)}
+.quickTitle{margin:0 0 6px;color:var(--rv-quiet);font-size:12px;font-weight:500;letter-spacing:.04em}
+.summary{margin:0 0 14px;font-size:16px;font-weight:600;line-height:1.6}
+
+.firstStep{margin:0 0 14px;padding:14px 16px;border:1px solid color-mix(in srgb,currentColor 30%,transparent);border-radius:12px;
+  background:color-mix(in srgb,currentColor 3%,transparent)}
+.firstStepTitle{margin:0;color:var(--rv-quiet);font-size:12px;font-weight:500}
+.firstStepAction{margin:4px 0 8px;font-size:15px;font-weight:600;line-height:1.6}
+.firstStepPairs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 16px;margin:0}
+.firstStepPairs dt,.pairs dt{color:var(--rv-quiet);font-size:12px;line-height:1.5}
+.firstStepPairs dd,.pairs dd{margin:0}
+
+.block{margin:14px 0 0}
+.blockTitle{margin:0 0 6px;font-size:13px;font-weight:600;line-height:1.5}
+.plain{margin:0}
+.note{margin:10px 0 0;color:var(--rv-quiet);font-size:12px;line-height:1.6}
+.list{margin:0;padding-left:1.3em;list-style:disc}
+.list li{margin:.15em 0}
+.pairs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 18px;margin:0}
+.pairWide{grid-column:1/-1}
+
+.tableScroll{max-width:100%;overflow-x:auto;border:1px solid var(--rv-rule);border-radius:10px}
+.table{width:100%;min-width:520px;border-collapse:collapse;font-size:13px;line-height:1.6}
+.table th{background:var(--rv-fill);font-weight:500;text-align:left;white-space:nowrap}
+.table th,.table td{padding:8px 10px;border-bottom:1px solid var(--rv-rule);vertical-align:top}
+.table tr:last-child td{border-bottom:0}
+
+.steps{display:grid;gap:8px;margin:0;padding:0;list-style:none;counter-reset:step}
+.steps li{position:relative;padding:10px 14px 10px 40px;border:1px solid var(--rv-rule);border-radius:10px;counter-increment:step}
+.steps li::before{content:counter(step);position:absolute;left:12px;top:10px;width:20px;height:20px;border-radius:50%;
+  background:var(--rv-strong);font-size:12px;line-height:20px;text-align:center}
+.stepFirst{background:var(--rv-fill)}
+.stepAction{margin:0;font-weight:600}
+.stepMeta{margin:0;color:var(--rv-quiet);font-size:13px}
+
+.cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:10px 0 0;padding:0;list-style:none}
+.card{padding:14px 16px;border:1px solid var(--rv-rule);border-radius:12px}
+.cardTitle{margin:0 0 6px;font-weight:600}
+.cardLine{margin:2px 0 0;font-size:13px}
+.cardLine>span{display:block;color:var(--rv-quiet);font-size:12px;line-height:1.5}
+.tags{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px}
+.tag{padding:1px 8px;border-radius:999px;background:var(--rv-strong);font-size:12px;line-height:20px}
+.tagQuiet{background:transparent;border:1px solid var(--rv-rule);color:var(--rv-quiet)}
+.quote{margin:8px 0 0;padding-left:10px;border-left:2px solid var(--rv-rule);color:var(--rv-quiet);font-size:13px}
+.more{margin-top:8px;font-size:13px}
+.more summary{color:var(--rv-quiet);cursor:pointer}
+.more[open] summary{margin-bottom:6px}
+
+.funnel{display:grid;gap:6px;margin:8px 0 0;padding:0;list-style:none}
+.funnel>li{display:flex;flex-direction:column;align-items:center}
+.funnelBar{min-width:min(100%,240px);padding:10px 14px;border-radius:10px;background:var(--rv-strong);text-align:center}
+.funnel>li:first-child .funnelBar{background:color-mix(in srgb,currentColor 13%,transparent)}
+.funnelName{margin:0;font-weight:600}
+.funnelName span{margin-left:8px;font-weight:400;color:var(--rv-quiet)}
+.funnelOffer,.funnelRole{margin:0;font-size:13px}
+.funnelRole{color:var(--rv-quiet)}
+.funnel .more{width:100%;max-width:560px}
+
+.timeline{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin:8px 0 0;padding:0;list-style:none}
+.week{padding:12px 14px;border:1px solid var(--rv-rule);border-top:3px solid color-mix(in srgb,currentColor 35%,transparent);border-radius:10px}
+.weekNumber{margin:0;color:var(--rv-quiet);font-size:12px}
+.weekPurpose{margin:2px 0 6px;font-weight:600}
+.passIf{margin-top:6px;padding:6px 8px;border-radius:8px;background:var(--rv-fill)}
+.metrics{margin-top:12px}
+.metrics .list+.blockTitle{margin-top:10px}
+.srOnly{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+
+.bars{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:6px 0 10px}
+.barChart{min-width:0;font-size:12px}
+
+.reasons{margin-top:10px}
+.reasonsToggle{min-height:32px;padding:4px 12px;border:1px solid var(--rv-rule);border-radius:8px;background:transparent;color:inherit;
+  font:inherit;font-size:12px;cursor:pointer}
+.reasonsToggle:hover{background:var(--rv-fill)}
+.reasonsToggle:focus-visible,.more summary:focus-visible{outline:2px solid currentColor;outline-offset:2px}
+.reasonsBody{margin-top:8px;padding:10px 14px;border-left:2px solid var(--rv-rule)}
+.fixedNote{margin-top:14px;padding:12px 14px;border-radius:10px;background:var(--rv-fill);font-size:13px}
+
+/* Wide screens: tables take the dialog's width and wrap their cells, so no column is cut off. Phones scroll sideways and say so.
+   `.tables` is on the report view and on the plain-text fallback (reports without data), so both get the same tables. */
+@media(min-width:768px){
+  :is(.tables [data-message-markdown],.tables[data-message-markdown]) table{width:100%;max-width:100%}
+  :is(.tables [data-message-markdown],.tables[data-message-markdown]) :is(th,td){max-width:none;min-width:0;overflow-wrap:anywhere}
+  .table{min-width:0}
+  .table th{white-space:normal}
+}
+@media(max-width:767px){
+  :is(.tables [data-message-markdown],.tables[data-message-markdown]) div:has(>table),.tableScroll{
+    background:linear-gradient(90deg,var(--rv-fade-bg,#fff) 30%,transparent) left center/24px 100% no-repeat local,
+      linear-gradient(270deg,var(--rv-fade-bg,#fff) 30%,transparent) right center/24px 100% no-repeat local,
+      linear-gradient(90deg,var(--rv-rule,#0002),transparent) left center/10px 100% no-repeat scroll,
+      linear-gradient(270deg,var(--rv-rule,#0002),transparent) right center/10px 100% no-repeat scroll}
+  :is(.tables [data-message-markdown],.tables[data-message-markdown]) div:has(>table)::before,.tableScroll::before{
+    content:"← 左右滑动查看完整表格 →";display:block;position:sticky;left:0;width:max-content;padding:4px 10px;
+    color:var(--rv-quiet,#777);font-size:11px;line-height:16px}
+  :is(.tables [data-message-markdown],.tables[data-message-markdown]) table{min-width:560px}
+}
+@media(max-width:767px){
+  .cards,.bars,.pairs,.firstStepPairs{grid-template-columns:minmax(0,1fr)}
+  .timeline{grid-auto-flow:column;grid-template-columns:none;grid-auto-columns:minmax(200px,80%);overflow-x:auto;scroll-snap-type:x mandatory;padding-bottom:4px}
+  .week{scroll-snap-align:start}
+  .quickLook{padding:14px 16px}
+  .reasonsToggle{min-height:44px}
+}

@@ -17,12 +17,15 @@ const uuid = z.string().uuid();
 const scope = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('positioning_draft'), draftId: uuid }).strict(),
   z.object({ kind: z.literal('work_item'), projectId: uuid, workItemId: uuid }).strict(),
+  // LIB-2d (0286): one of the actor's own PDF or Word documents in the library.
+  z.object({ kind: z.literal('library_document'), documentId: uuid }).strict(),
 ]);
 export const frozenCallPolicy = z.object({
   payg: paygStablePolicy.optional(), multiplier: z.string().regex(MULTIPLIER_PATTERN).optional(),
    modelId: uuid, provider:z.string().min(1),account:z.string().min(1),model:z.string().min(1),protocol:z.enum(['fixture-cost-v1','openrouter-chat-v1']),providerLimits:openRouterLimits.optional(),upperUsd:z.string(),inputLimit:z.number().int().positive().max(1_000_000),outputLimit:z.number().int().positive().max(1_000_000),automaticRetry:z.literal(false),hiddenTools:z.literal(false),lookupSupported:z.boolean() }).strict();
 const frozen = z.object({
-  contractVersion: z.literal('bill2.v1'), mode: z.enum(['isolated','staging_test']), testWindowId:uuid.optional(), sessionRef: z.null().optional(), scope,
+  contractVersion: z.literal('bill2.v1'), mode: z.enum(['isolated','staging_test','production']), testWindowId:uuid.optional(),
+  sessionRef: z.null().optional(), scope,
   moduleId: uuid.optional(), skillId: uuid.optional(),
   callPolicy: z.array(frozenCallPolicy).min(1).max(32),
   operation: z.enum(['question', 'research', 'organize', 'plan', 'work']), modelId: uuid, revisionId: uuid.optional(),

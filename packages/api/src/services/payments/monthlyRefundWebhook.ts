@@ -44,7 +44,7 @@ export async function reconcileMonthlyRefundForOrder(
   const i = await readMonthlyRefundStatus(db, orderId);
   const scope = await resolveStripeScope(stripe);
   const charge = await stripe.charges.retrieve(i.terms.chargeId);
-  evidence(scope.mode === 'test' && scope.merchant === i.terms.merchant && charge.livemode === false
+  evidence(scope.mode === i.terms.mode && scope.merchant === i.terms.merchant && charge.livemode === (i.terms.mode === 'live')
     && charge.id === i.terms.chargeId && objectId(charge.payment_intent) === i.terms.paymentIntentId
     && charge.currency === i.terms.currency);
   const result = await db.rpc('pay_common_monthly_refund_conflict', { p_order: orderId, p_intent: i.id,

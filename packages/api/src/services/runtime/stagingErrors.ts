@@ -6,6 +6,7 @@ import { DatabaseReadError } from '../../lib/databaseReadError';
 import { RUNTIME_INPUT_TOO_LONG_MESSAGE } from '../../shared/runtimeInputMessages';
 import { RUNTIME_PAYG_PROFILE_REQUIRED_MESSAGE } from '../../shared/runtimeAdmissionMessages';
 import { POSITIONING_REQUIRED_MESSAGE } from '../../shared/positioningGate';
+import { CONTENT_SOURCE_MESSAGES } from '../../shared/contentSourceMessages';
 
 const failures = {
   CONTENT_ERASED: ['PRECONDITION_FAILED', 'CONTENT_ERASED'],
@@ -42,6 +43,12 @@ const failures = {
   RUNTIME_STAGING_MODEL_DENIED: ['SERVICE_UNAVAILABLE', '当前测试模型配置暂不可用，请联系管理员。'],
   RUNTIME_STAGING_QUOTE_CONFLICT: ['SERVICE_UNAVAILABLE', '当前测试模型配置暂不可用，请联系管理员。'],
   RUNTIME_STAGING_POLICY_INVALID: ['SERVICE_UNAVAILABLE', '当前测试窗口配置暂不可用，请联系管理员。'],
+  // RUNTIME-PROD: production host. Wording never mentions test windows; codes stay stable for the client.
+  RUNTIME_PRODUCTION_NOT_CONFIGURED: ['SERVICE_UNAVAILABLE', 'AI 服务尚未开放，请稍后再试。'],
+  RUNTIME_PRODUCTION_DISABLED: ['SERVICE_UNAVAILABLE', 'AI 服务暂时关闭，请稍后再试。'],
+  RUNTIME_PRODUCTION_TARGET_DENIED: ['FORBIDDEN', '当前环境不允许访问此工作空间。'],
+  RUNTIME_PRODUCTION_CONFIG_INVALID: ['SERVICE_UNAVAILABLE', 'AI 服务配置暂不可用，请稍后再试。'],
+  RUNTIME_PRODUCTION_FEATURE_UNAVAILABLE: ['PRECONDITION_FAILED', '这个功能暂未开放。'],
   RUNTIME_BILLING_UNIT_UNAVAILABLE: ['SERVICE_UNAVAILABLE', '计费配置暂不可用，新的收费已暂停，请稍后重试。'],
   RUNTIME_BILLING_UNIT_MISMATCH: ['PRECONDITION_FAILED', '测试窗口的每美元积分数或模型加价倍数与后台配置不一致，请管理员核对。'],
   RUNTIME_BILLING_UNIT_WINDOW_OUTDATED: ['PRECONDITION_FAILED', '当前测试窗口还没有按模型的加价倍数，需要管理员按新计费重新建立窗口。'],
@@ -51,6 +58,20 @@ const failures = {
   RUNTIME_PRICE_UNKNOWN_FIELD: ['PRECONDITION_FAILED', '供应商价格里出现了系统还不认识的收费项，这个模型暂停使用，等待系统更新。'],
   // POSITIONING-GATE: stable code first; the front end shows its guide card for it.
   POSITIONING_REQUIRED: ['PRECONDITION_FAILED', POSITIONING_REQUIRED_MESSAGE],
+  // LIB-4b (LIB_DOCS_PLAN 6.1): stable code before the colon; every refusal happens before any charge.
+  LIB_REFERENCE_INVALID: ['BAD_REQUEST', 'LIB_REFERENCE_INVALID：引用的文档格式不对，请重新选择；未扣费。'],
+  LIB_REFERENCE_LIMIT: ['BAD_REQUEST', 'LIB_REFERENCE_LIMIT：每条消息最多引用 5 篇文档；未扣费。'],
+  LIB_REFERENCE_NOT_FOUND: ['PRECONDITION_FAILED', 'LIB_REFERENCE_NOT_FOUND：引用的文档不存在或已删除，请重新选择；未扣费。'],
+  LIB_REFERENCE_NOT_READY: ['PRECONDITION_FAILED', 'LIB_REFERENCE_NOT_READY：引用的文档还没处理好，请稍后再发；未扣费。'],
+  LIB_REFERENCE_STALE: ['PRECONDITION_FAILED', 'LIB_REFERENCE_STALE：引用的文档已经更新，请重新选择；未扣费。'],
+  LIB_REFERENCE_UNSUPPORTED: ['PRECONDITION_FAILED', 'LIB_REFERENCE_UNSUPPORTED：这里不能引用资料库文档；未扣费。'],
+  LIB_REFERENCE_DISABLED: ['PRECONDITION_FAILED', 'LIB_REFERENCE_DISABLED：引用资料库文档的功能还没有开放；未扣费。'],
+  LIB_REFERENCE_CAPACITY: ['PRECONDITION_FAILED', 'LIB_REFERENCE_CAPACITY：本轮内容加上文档读取超过模型容量，请缩短输入或少引用一些；未扣费。'],
+  LIB_SOURCE_DELETED: ['PRECONDITION_FAILED', 'LIB_SOURCE_DELETED：本轮引用的文档已删除或已更新，这一轮回答不再显示。'],
+  // A2: a directly chosen derived-content Skill refused before any charge.
+  RUNTIME_CONTENT_SOURCE_MISSING: ['PRECONDITION_FAILED', CONTENT_SOURCE_MESSAGES.RUNTIME_CONTENT_SOURCE_MISSING],
+  RUNTIME_CONTENT_SOURCE_STALE: ['PRECONDITION_FAILED', CONTENT_SOURCE_MESSAGES.RUNTIME_CONTENT_SOURCE_STALE],
+  RUNTIME_CONTENT_SOURCE_TOO_LARGE: ['PRECONDITION_FAILED', CONTENT_SOURCE_MESSAGES.RUNTIME_CONTENT_SOURCE_TOO_LARGE],
 } as const;
 export type StagingFailure = keyof typeof failures;
 export class StagingAccessError extends Error {

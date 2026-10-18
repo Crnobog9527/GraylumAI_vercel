@@ -15,9 +15,11 @@ import { reconcileStripeCardPayments } from '@repo/api/src/services/payments/str
 import { getStripeClient } from '@repo/api/src/services/stripe';
 import { reportPaymentEvidenceConflict, reportStripeCardReconciliation } from '@/lib/payment-alert.mjs';
 import { recoverFusionFinancials } from '@repo/api/src/services/fusion/recovery';
+import { settleDueReportFees } from '@repo/api/src/services/report/fees';
 import { findStuckPaygCalls } from '@repo/api/src/services/bill2/stuckCalls';
 import { kickStalledReviews } from '@repo/api/src/services/fusion/background';
 import { validateCronRequest } from '@/lib/cron-auth';
+import { pruneGaCheckoutIds } from '@repo/api/src/services/analytics/gaPurchase';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -35,6 +37,12 @@ async function runStaleRoundReconciliation(supabase: SupabaseClient) {
 async function runFusionRecovery(supabase: SupabaseClient) {
   try { return await recoverFusionFinancials(supabase); }
   catch { return { success: false, scanned: 0, cancelled: 0, recovered: 0, scrubbed: 0, failed: 1 }; }
+}
+
+/** REPORT fixed price (0295): settle held prices of report executions that have ended. */
+async function runReportFeeSettlement(supabase: SupabaseClient) {
+  try { return await settleDueReportFees(supabase); }
+  catch { return { success: false, settled: 0 }; }
 }
 
 /** FUSION-BACKGROUND daily backstop: reviews that stopped moving get one fresh step each (each at most once a day).
@@ -119,7 +127,9 @@ export async function GET(request: Request) {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
     logger.system.cronJob('billing-reconcile', 'started');
-    const [result, readinessAudit, erasureFinancial, waffo, staleRounds, stripeCard, { fusion, fusionKick }, stuckCalls] = await Promise.all([
+    // ANALYTICS 0280: GA checkout ids never taken (long past their 45-minute window) are deleted (statistics only, never fails the job).
+    const analyticsIds = pruneGaCheckoutIds(supabase);
+    const [result, readinessAudit, erasureFinancial, waffo, staleRounds, stripeCard, { fusion, fusionKick }, stuckCalls, reportFees] = await Promise.all([
       runDailyBillingReconciliation(supabase),
       runBillingEngineV15ReadinessAudit(supabase),
       runErasureFinancialReconciliation(supabase),
@@ -132,9 +142,11 @@ export async function GET(request: Request) {
         return { fusionKick, fusion: await runFusionRecovery(supabase) };
       })(),
       runStuckCallScan(supabase),
+      runReportFeeSettlement(supabase),
     ]);
     const success = result.success && readinessAudit.success && erasureFinancial.success && waffo.success
-      && staleRounds.success && stripeCard.success && fusion.success && fusionKick.success && stuckCalls.success;
+      && staleRounds.success && stripeCard.success && fusion.success && fusionKick.success && stuckCalls.success
+      && reportFees.success;
 
     if (!success) {
       logger.system.cronJob(
@@ -149,7 +161,8 @@ export async function GET(request: Request) {
 
           ...(fusion.success ? [] : [`Fusion calls pending recovery: ${fusion.failed}`]),
           ...(stuckCalls.success ? [] : [`PAYG calls with unknown cost need manual settlement: ${stuckCalls.total}`]),
-          ...(fusionKick.success ? [] : ['Fusion review kick failed'])].join(' | '),
+          ...(fusionKick.success ? [] : ['Fusion review kick failed']),
+          ...(reportFees.success ? [] : ['Report price settlement failed'])].join(' | '),
         {
           erasureFinancial,
           waffo,
@@ -158,6 +171,7 @@ export async function GET(request: Request) {
           fusion,
           stuckCalls,
           fusionKick,
+          reportFees,
           mismatches: result.mismatches,
           summary: result.summary,
           readinessAudit: {
@@ -186,6 +200,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       success,
+      analyticsIds: await analyticsIds,
       periodStart: result.periodStart,
       periodEnd: result.periodEnd,
       mismatches: result.mismatches,
@@ -198,6 +213,7 @@ export async function GET(request: Request) {
       fusion,
       stuckCalls,
       fusionKick,
+      reportFees,
       timestamp: new Date().toISOString(),
     }, { status: success ? 200 : 500 });
   } catch (error) {

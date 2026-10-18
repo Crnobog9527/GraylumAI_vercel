@@ -49,3 +49,18 @@ it('renders the storyboard column and saved Skill results', () => {
 it('shows nothing for a non-video topic without saved results', () => {
   expect(renderToStaticMarkup(<RuntimeResultsSection isVideo={false} versions={versions} libraryHref="/library" saved={[]}/>)).toBe('');
 });
+
+it('keeps the header title an h1 by default and renders it at the level a page asks for, styled the same', async () => {
+  expect(renderToStaticMarkup(<RuntimeHeader title="工作对话"/>)).toContain('<h1>工作对话</h1>');
+  const nested = renderToStaticMarkup(<RuntimeHeader title="工作对话" headingLevel="h2"/>);
+  expect(nested).toContain('<h2>工作对话</h2>');
+  expect(nested).not.toContain('<h1');
+  const { readFileSync } = await import('node:fs');
+  const css = readFileSync(new URL('../../app/runtime/runtime-work.module.css', import.meta.url), 'utf8');
+  expect(css).toContain('.workTitle :is(h1,h2,:where(');
+});
+
+it('closes an unfinished Markdown mark while a reply is still being written', () => {
+  expect(renderToStaticMarkup(<RuntimeReply text="先拍 **第一" streaming/>)).toContain('<strong>第一</strong>');
+  expect(renderToStaticMarkup(<RuntimeReply text="先拍 **第一"/>)).toContain('**第一');
+});

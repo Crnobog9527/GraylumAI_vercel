@@ -3,7 +3,12 @@ import { describe, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { DEFAULT_FUSION_SETTINGS } from './settings';
 
-const skill = vi.hoisted(() => ({ available: true, writes: 0, refuse: new Map<string, string>() }));
+const skill = vi.hoisted(() => ({ available: true, writes: 0, refuse: new Map<string, string>(),
+  keyReads: [] as Array<{ fresh: boolean }>, admitKeys: [] as unknown[] }));
+// ADMIN-SECRETS OR-1: the platform OpenRouter key is read once per listing or save and shared by every per-model check.
+vi.mock('../models/openRouterKey', () => ({
+  readOpenRouterKey: async (_db: unknown, options?: { fresh?: boolean }) => { skill.keyReads.push({ fresh: options?.fresh === true }); return 'SYNTHETIC_KEY'; },
+}));
 vi.mock('./reviewPrompts', async original => ({ ...(await original<typeof import('./reviewPrompts')>()),
   resolveReviewSkill: async () => {
     if (!skill.available) throw new Error('FUSION_REVIEW_SKILL_UNAVAILABLE');
@@ -12,7 +17,9 @@ vi.mock('./reviewPrompts', async original => ({ ...(await original<typeof import
   readReviewSkill: async () => ({ reviewer: 'r', summary: 's', rubric: 'b' }) }));
 vi.mock('./models', async original => ({ ...(await original<typeof import('./models')>()),
   // A model refused for one purpose: key "<id>:<phase>" → the refusal (an Error with that message).
-  admitFusionModel: async (_db: unknown, _window: unknown, row: { id: string }, phase: string) => {
+  admitFusionModel: async (_db: unknown, _window: unknown, row: { id: string }, phase: string, _t: unknown, _d: unknown, _e: unknown,
+    knownKey?: string | null) => {
+    skill.admitKeys.push(knownKey);
     const code = skill.refuse.get(`${row.id}:${phase}`);
     if (code) throw new Error(code);
     return {};
@@ -43,18 +50,36 @@ describe('Fusion settings save', () => {
   });
 });
 
+describe('Fusion key reads', () => {
+  it('a save reads the key once, fresh, for all its checks; the read-only listing reads once from the cache', async () => {
+    skill.refuse = new Map(); skill.keyReads = []; skill.admitKeys = [];
+    await saveFusionSettings(db, id(7), enabled);
+    expect(skill.keyReads).toEqual([{ fresh: true }]);
+    expect(skill.admitKeys).toHaveLength(4);
+    expect(skill.admitKeys.every(key => key === 'SYNTHETIC_KEY')).toBe(true);
+    skill.keyReads = []; skill.admitKeys = [];
+    const window = { callPolicies: models.map(model => ({ modelId: model.id })), expiresAt: '2030-01-01T00:00:00Z' };
+    await fusionModelOptions(db, id(7), {}, window as never);
+    expect(skill.keyReads).toEqual([{ fresh: false }]); // 5 models × 2 purposes, one read
+    expect(skill.admitKeys).toHaveLength(15); // 5 models × (review, summary, compare)
+    expect(skill.admitKeys.every(key => key === 'SYNTHETIC_KEY')).toBe(true);
+  });
+});
+
 describe('Fusion model choices', () => {
   it('lists the window\'s models with what each may do, by the same Fusion admission a save uses', async () => {
     skill.refuse = new Map([[`${id(2)}:fusion_summary`, 'FUSION_PAYG_REQUIRED'], [`${id(3)}:fusion_review`, 'FUSION_MODEL_SEARCH_DENIED'],
       [`${id(3)}:fusion_summary`, 'FUSION_MODEL_SEARCH_DENIED'], [`${id(4)}:fusion_review`, 'FUSION_MODEL_ADMISSION_REQUIRED'],
       // An ordinary-only model (no Fusion profile entry) is left out; it never blanks the list (#1044 review).
-      [`${id(5)}:fusion_review`, 'RUNTIME_PAYG_PROFILE_REQUIRED'], [`${id(5)}:fusion_summary`, 'RUNTIME_PAYG_PROFILE_REQUIRED']]);
+      [`${id(5)}:fusion_review`, 'RUNTIME_PAYG_PROFILE_REQUIRED'], [`${id(5)}:fusion_summary`, 'RUNTIME_PAYG_PROFILE_REQUIRED'],
+      [`${id(5)}:fusion_compare`, 'RUNTIME_PAYG_PROFILE_REQUIRED'], [`${id(3)}:fusion_compare`, 'FUSION_MODEL_SEARCH_DENIED'],
+      [`${id(2)}:fusion_compare`, 'FUSION_PAYG_REQUIRED']]);
     const window = { callPolicies: models.map(model => ({ modelId: model.id })), expiresAt: '2030-01-01T00:00:00Z' };
     const result = await fusionModelOptions(db, id(7), {}, window as never);
     expect(result.models).toEqual([
-      { id: id(1), name: '模型 1', review: true, summary: true },
-      { id: id(2), name: '模型 2', review: true, summary: false },
-      { id: id(4), name: '模型 4', review: false, summary: true },
+      { id: id(1), name: '模型 1', review: true, summary: true, compare: true },
+      { id: id(2), name: '模型 2', review: true, summary: false, compare: false },
+      { id: id(4), name: '模型 4', review: false, summary: true, compare: true },
     ]);
     // An unexpected failure is an outage, never an empty or partial list.
     skill.refuse = new Map([[`${id(1)}:fusion_review`, 'database exploded']]);
@@ -62,3 +87,37 @@ describe('Fusion model choices', () => {
     skill.refuse = new Map();
   });
 });
+
+describe('Fusion compare save (FUSION-COMPARE §3.3)', () => {
+  const compareOn = { ...enabled, review: DEFAULT_FUSION_SETTINGS.review, compare: { ...DEFAULT_FUSION_SETTINGS.compare, enabled: true,
+    allowedModelIds: [id(1), id(2), id(3)], defaultModelIds: [id(1), id(2)], minModels: 2, maxBudgetUsd: '2' } };
+  it('admits every allowed model for compare when enabling, and refuses the save if one fails', async () => {
+    skill.refuse = new Map(); skill.writes = 0; skill.admitKeys = [];
+    await expect(saveFusionSettings(db, id(7), compareOn)).resolves.toMatchObject({ warnings: [] });
+    expect(skill.writes).toBe(1);
+    expect(skill.admitKeys).toHaveLength(3);
+    skill.refuse = new Map([[`${id(2)}:fusion_compare`, 'RUNTIME_PAYG_PROFILE_REQUIRED']]);
+    await expect(saveFusionSettings(db, id(7), compareOn)).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
+    expect(skill.writes).toBe(1);
+    skill.refuse = new Map();
+  });
+  it('saves a disabled compare without admitting its models, but still refuses a built-in search model', async () => {
+    skill.admitKeys = []; skill.writes = 0;
+    await saveFusionSettings(db, id(7), { ...compareOn, compare: { ...compareOn.compare, enabled: false } });
+    expect(skill.admitKeys).toHaveLength(0);
+    expect(skill.writes).toBe(1);
+  });
+  it('holds the minimum and the default ticks to the stored D3', async () => {
+    skill.writes = 0;
+    const withD3 = (value: unknown) => ({ ...db, from: (table: string) => table === 'system_settings'
+      ? { select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { value }, error: null }) }) }) } : db.from(table) }) as unknown as SupabaseClient;
+    const three = { ...compareOn, compare: { ...compareOn.compare, minModels: 3, defaultModelIds: [id(1), id(2), id(3)] } };
+    await expect(saveFusionSettings(withD3(2), id(7), three)).rejects.toThrow('FUSION_COMPARE_LIMIT_EXCEEDED'); // min 3 > D3 2
+    await expect(saveFusionSettings(withD3(2), id(7), { ...compareOn, compare: { ...compareOn.compare,
+      defaultModelIds: [id(1), id(2), id(3)] } })).rejects.toThrow('FUSION_COMPARE_LIMIT_EXCEEDED'); // 3 default ticks > D3 2
+    expect(skill.writes).toBe(0);
+    await expect(saveFusionSettings(withD3(2), id(7), compareOn)).resolves.toBeDefined(); // 2 ticks and min 2 fit D3 = 2
+    expect(skill.writes).toBe(1);
+  });
+});
+

@@ -1,40 +1,56 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 /*
- * Sample L's region 4 (Owner 2026-10-17, redone): the head, the report cards of one size in the moving row
- * (l.module.css keeps the row itself, which samples N and O share) and the dialog's 10-second card read top to bottom.
+ * Sample L's region 5 (round eight, U6): the head with its strip of figures, the people to pick on the left, the chosen
+ * report's overview on the right, and the dialog's cover. The tags are shared with the overview and the dialog.
  */
 
-.lede { margin: 0; color: var(--j-body); font-size: clamp(16px, 1.4vw, 18px); line-height: 1.7; }
-/* "14 种人" and the other parts of the lede break only between them, never inside one. */
-.keep { display: inline-block; }
-.keep + .keep:not(:last-child) { margin-left: .3em; }
+.head { display: grid; gap: 14px; margin-bottom: clamp(24px, 3vw, 36px); }
+.stats { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.stats li { white-space: nowrap; padding: 6px 14px; border-radius: 999px; background: #fff; box-shadow: inset 0 0 0 1px var(--j-line); color: var(--j-ink); font-size: 15px; font-weight: 500; }
+.stats li:first-child { background: var(--j-ink); box-shadow: none; color: #fff; }
 
-/* Every card the same size and order: who · platform, the conclusion (3 lines at most), the tags, the way in. */
-.card {
-  display: grid; grid-template-rows: auto 1fr auto auto; gap: 10px; width: 288px; height: 228px; padding: 18px 20px;
-  border: 1px solid var(--j-line); border-radius: 18px; background: #fff; color: var(--j-ink); font: inherit; text-align: left;
-  cursor: pointer; box-shadow: var(--j-shadow); transition: border-color .2s, translate .3s var(--j-ease);
+/* Two columns on a computer: the people (a column of their own) and the report, at least 640px tall, scrolling inside. */
+.browser { display: grid; gap: 16px; }
+@media (min-width: 900px) { .browser { grid-template-columns: 260px minmax(0, 1fr); align-items: start; } }
+.picker { display: grid; gap: 14px; }
+@media (min-width: 900px) { .picker { position: sticky; top: 132px; max-height: clamp(640px, 74svh, 780px); padding-right: 4px; } }
+.group ul { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.groupName { margin: 0 0 6px; color: var(--k-secondary); font-size: 13px; font-weight: 600; }
+.group button {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; width: 100%; min-height: 44px; padding: 8px 12px;
+  border: 1px solid var(--j-line); border-radius: 12px; background: #fff; color: var(--j-ink); font: inherit; text-align: left; cursor: pointer;
+  transition: border-color .2s, background-color .2s;
 }
-.card:hover { border-color: var(--j-ink); translate: 0 -3px; }
-.card:focus-visible { outline: 2px solid var(--j-ink); outline-offset: 3px; }
-@media (max-width: 480px) { .card { width: min(272px, calc(100vw - 72px)); } }
-.cardHead { display: flex; align-items: flex-start; gap: 8px; min-width: 0; color: var(--k-secondary); font-size: 13.5px; line-height: 1.5; }
-.cardHead svg { flex: none; margin-top: 2px; color: var(--j-gold-text); }
-.cardHead > span { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 1; line-clamp: 1; }
-.cardHead b { color: var(--j-ink); font-size: 15px; font-weight: 600; }
-/* The separator is drawn, so the markup stays <b>人群</b>平台 (samples L and M check it). */
-.cardHead b::after { content: ' · '; color: var(--k-secondary); font-weight: 400; }
-.cardWhat {
-  display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3;
-  align-self: start; color: var(--j-ink); font-size: 16px; font-weight: 500; line-height: 1.6;
+.group button:hover { border-color: var(--j-ink); }
+.group button[aria-pressed='true'] { border-color: var(--j-ink); background: var(--j-ink); color: #fff; }
+.group button:focus-visible { outline: 2px solid var(--j-ink); outline-offset: 2px; }
+.group button b { font-size: 14.5px; font-weight: 600; }
+.group button span { color: inherit; font-size: 12.5px; opacity: .7; }
+.group button em { margin-left: auto; }
+/* On a phone the people are one row of chips that scrolls sideways, each group's name before its chips. */
+@media (max-width: 899px) {
+  .picker { display: flex; gap: 14px; overflow-x: auto; overflow-y: hidden; padding-bottom: 6px; }
+  .group { display: flex; flex: none; align-items: center; gap: 8px; }
+  .groupName { margin: 0; white-space: nowrap; }
+  .group ul { display: flex; gap: 6px; }
+  .group button { flex-wrap: nowrap; width: auto; white-space: nowrap; }
 }
+.viewer { display: grid; gap: 14px; padding: clamp(16px, 2.4vw, 28px); border: 1px solid var(--j-line); border-radius: 22px; background: #fff; box-shadow: var(--j-shadow-lift); }
+@media (min-width: 900px) { .viewer { height: clamp(640px, 74svh, 780px); align-content: start; } }
+.viewerHead { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.viewerHead svg { flex: none; color: var(--j-gold-text); }
+.viewerHead p { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin: 0; }
+.viewerHead b { color: var(--j-ink); font-size: 18px; font-weight: 600; }
+.viewerHead p span { color: var(--k-secondary); font-size: 14px; }
+.adjustedNote { margin: 0; padding: 12px 14px; border-radius: 12px; background: #fff4d6; color: #5c3d00; font-size: 15px; line-height: 1.6; }
+.adjustedNote b { font-weight: 700; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding-top: 4px; }
 .tags { display: flex; flex-wrap: wrap; gap: 6px; min-height: 22px; }
 .sampleTag, .adjustedTag {
   display: inline-block; padding: 0 8px; border-radius: 999px; font-size: 12px; font-style: normal; font-weight: 500; line-height: 22px;
 }
 .sampleTag { background: #f0efec; color: #5f5e5a; }
 .adjustedTag { background: #fff4d6; color: #8a5a00; }
-.cardOpen { color: var(--j-gold-text); font-size: 14px; font-weight: 600; }
 
 /* The dialog's cover: room for the close button; the grey 示例 tag beside the label. */
 .coverText { min-width: 0; padding-right: 44px; }
@@ -45,3 +61,11 @@
 .riskLabel { display: flex; align-items: center; gap: 6px; margin: 0; color: #9a3b2e; font-size: 14px; font-weight: 700; }
 .riskText { margin: 0; color: var(--j-ink); font-size: 15.5px; font-weight: 500; line-height: 1.65; }
 .box { flex: none; width: 16px; height: 16px; margin-top: 4px; border: 1.5px solid var(--j-ink); border-radius: 4px; background: #fff; }
+
+/* A person's name ("职业或行业 · 目的（地区）", Owner 2026-10-18): beside the overview, always two lines, the trade then
+ * the aim and the place, without the dot, the platform under them; in a phone's chip, one line with the dot. */
+.group button .name span { color: inherit; font-size: inherit; opacity: 1; }
+@media (min-width: 900px) {
+  .group button .name { display: grid; flex-basis: 100%; }
+  .group button .name .nameDot { display: none; }
+}

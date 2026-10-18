@@ -43,7 +43,7 @@ function fixture(){
  const admin={rpc,from:(table:string)=>{
   const query={select:()=>query,eq:()=>query,in:async()=>({data:[],error:null}),single:async()=>({error:null,data:
    table==='modules'?{id:module,active:true,skill_id:module,model_id:model}:
-    {id:model,model_id:'fixture',provider:'fixture',is_active:'true',max_tokens:1000,input_limit:64000}})};
+    {id:model,model_id:'fixture',provider:'fixture',is_active:'true',max_tokens:1000,input_limit:300000}})};
   return query;
  }} as unknown as SupabaseClient;
  const user={auth:{getUser:async()=>({data:{user:{id:actor,email_confirmed_at:'2026-01-01'}},error:null})}} as unknown as SupabaseClient;
@@ -133,10 +133,13 @@ it('drops a candidate whose Skill is too large for its own model instead of fail
 it('sizes candidates with the workspace read_source description the executor will send, to the exact byte',async()=>{
  skill.instructions='S'.repeat(9000);const input='x'.repeat(3000);
  const admit=async(limit:number)=>{const f=fixture();skill.instructions='S'.repeat(9000);matching.candidates=[autoCandidate(0,limit)];
-  return runtimeAdmissionService(f.user,f.admin,{...f.policy,...autoPolicy,workspaceContext:true,maxCalls:3}).prepare({...f.input,...autoInput,input});};
+  return runtimeAdmissionService(f.user,f.admin,{...f.policy,...autoPolicy,inputBytes:196608,workspaceContext:true,maxCalls:3}).prepare({...f.input,...autoInput,input});};
  const probe=await admit(31000);
  expect(probe.context.tools).toEqual(['read_source']);expect(probe.context.matching.candidates).toHaveLength(1);
- const instructions=withPrimaryAddenda(withBrandIdentity(skill.instructions,true),{workspaceContext:true,network:'deny'});
+ const instructions=withPrimaryAddenda(withBrandIdentity(skill.instructions,true),{workspaceContext:true,network:'deny',
+  replyLanguage:probe.context.replyLanguage,workspaceGuide:probe.context.workspaceGuide});
+ expect(probe.context.workspaceGuide).toBe('strategy-read-v1');
+ expect(probe.context.replyLanguage).toBe('reply-language-v1');
  const required=Buffer.byteLength(JSON.stringify({instructions,messages:[{role:'user',content:input}]}))+1024+
   sourceToolBytes(['read_source'],true)+(probe.context.promptCache?PROMPT_CACHE_OVERHEAD_BYTES:0);
  expect((await admit(required)).context.matching.candidates).toHaveLength(1);
@@ -211,6 +214,22 @@ it('R4: drops only the history read when its larger reserve does not fit, keepin
  expect(context.instructions).not.toContain('read_history');expect(context.maxTurns).toBe(2);
 });
 
+it('R4: the history-read probe counts the same execution-time rules as the final check (SKILL-I18N-HOOK)',async()=>{
+ // Smallest input budget that keeps the optional history read...
+ const admit=async(inputBytes:number)=>{
+  const f=fixture();skill.instructions='S'.repeat(13000);
+  try{return runtimeContext.parse((await runtimeAdmissionService(f.user,f.admin,{...f.policy,inputBytes,
+   hostTurnContext:{stepId:'first',opening:false,checklist:[]}}).prepare(f.input)).context);}
+  catch(error){expect(error).toMatchObject({message:'RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY'});return null;}
+ };
+ let low=32000,high=90000;
+ while(low<high){const mid=Math.floor((low+high)/2);if((await admit(mid))?.historyRead)high=mid;else low=mid+1;}
+ expect((await admit(low))?.historyRead).toBeDefined();
+ // ...and one byte less (inside the reply-language rule's size) drops only that read instead of refusing the turn.
+ const below=await admit(low-1);
+ expect(below).not.toBeNull();expect(below!.historyRead).toBeUndefined();expect(below!.tools).toEqual(['ask_question','read_skill_file']);
+});
+
 const hash='a'.repeat(64);
 const paygPolicy={modelId:model,model:'fixture',provider:'fixture',account:'local',protocol:'fixture-cost-v1' as const,
  multiplier:'1',upperUsd:'0.1',inputLimit:64000,outputLimit:1000,automaticRetry:false as const,hiddenTools:false as const,
@@ -238,4 +257,16 @@ it('a PAYG-capable host that resolves to v1 billing keeps the history read',asyn
  const admitted=await runtimeAdmissionService(f.user,f.admin,{...f.policy,inputBytes:64000,paygHost:true,hostTurnContext:host}).prepare(f.input);
  expect(admitted.billing.contractVersion).toBe('bill2.v1');
  expect(runtimeContext.parse(admitted.context).tools).toEqual(['ask_question','read_skill_file','read_history']);
+});
+
+// Review P1 (#1129): a strategy read appends up to ~50 KB to the dialogue and cannot be discarded afterwards, so the
+// strategy guide (and with it the strategy read) is only frozen when the model capacity holds those results.
+it('freezes the strategy-read guide only when the capacity holds the largest strategy results',async()=>{
+ const admit=async(inputBytes:number)=>{const f=fixture();
+  return runtimeAdmissionService(f.user,f.admin,{...f.policy,mentorStream:false,skillFileRead:false,opcTurnToken:undefined,workspaceContext:true,maxCalls:3,inputBytes}).prepare({...f.input,input:'x'.repeat(3000)});};
+ const roomy=await admit(196608);
+ expect(roomy.context.workspaceContext).toBe(true);expect(roomy.context.workspaceGuide).toBe('strategy-read-v1');
+ const tight=await admit(60000);
+ expect(tight.context.workspaceContext).toBe(true);expect(tight.context.workspaceGuide).toBeUndefined();
+ expect(tight.context.tools).toEqual(['read_source']);
 });

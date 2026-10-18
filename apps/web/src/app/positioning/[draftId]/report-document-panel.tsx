@@ -5,10 +5,14 @@ import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { MessageMarkdown } from "@/components/chat/MessageMarkdown";
+import { ReportView } from "@/components/chat-display/report-view/report-view";
 import { ChatNoticeList, type ChatNotice } from "@/components/chat/ChatInlineNotice";
 import resultStyles from "@/components/opc/positioning-result.module.css";
+import { ExpertConsultCard } from "@/components/expert-consult/ExpertConsultCard";
+import { expertConsultPath } from "@/components/expert-consult/expertConsultCopy";
 import {
-  askedVersion, canFinalize, canSave, savedAs, finalizedNotice, REPORT_DOC_TEXT, REPORT_MAX_CHARACTERS, reportDocumentError, reportLength, requestFor,
+  askedVersion, bodyFromEditor, canFinalize, canSave, editorChanged, editorText, hasDataFence, savedAs, finalizedNotice, REPORT_DOC_TEXT, REPORT_MAX_CHARACTERS,
+  reportDocumentError, reportLength, requestFor,
   type PendingRequest, type ReportDocument,
 } from "./report-document";
 
@@ -48,12 +52,12 @@ export function ReportDocumentPanel({ executionId, fallbackBody, generatedComple
   const pending = useRef<PendingRequest | null>(null);
   const doc = read.data as ReportDocument | undefined;
   const working = save.isPending || finalize.isPending;
-  const unsaved = working || (draft !== null && draft.text !== doc?.body);
+  const unsaved = working || (draft !== null && (!doc || editorChanged(doc, draft.text)));
   useEffect(() => { onUnsaved?.(unsaved); }, [unsaved, onUnsaved]);
   useEffect(() => () => onUnsaved?.(false), [onUnsaved]);
 
   if (!doc) return <>
-    <MessageMarkdown className="mt-4" text={fallbackBody} />
+    <ReportView className="mt-4" body={fallbackBody} />
     {read.isError && <ChatNoticeList className="mt-4" notices={[{ id: "report-doc-load", tone: "warning", text: REPORT_DOC_TEXT.loadFailed }]} />}
   </>;
 
@@ -75,7 +79,8 @@ export function ReportDocumentPanel({ executionId, fallbackBody, generatedComple
   };
   const submitSave = async () => {
     if (draft === null || !canSave(doc, draft.text) || working) return;
-    const { text, revision } = draft;
+    const { revision } = draft;
+    const text = bodyFromEditor(doc, draft.text);
     const request = pending.current = requestFor(pending.current, [executionId, "save", revision, text], () => crypto.randomUUID());
     try {
       const saved = await save.mutateAsync({ executionId, requestId: request.requestId, expectedRevision: revision, body: text }) as ReportDocument;
@@ -111,17 +116,19 @@ export function ReportDocumentPanel({ executionId, fallbackBody, generatedComple
   if (problem) notices.push({ id: "report-doc-problem", tone: "warning", text: problem });
   const length = draft === null ? 0 : reportLength(draft.text);
   return <>
-    {draft === null ? <MessageMarkdown className="mt-4" text={doc.body} />
+    {draft === null ? <ReportView className="mt-4" body={doc.body} data={doc.strategy?.data} editedFields={doc.strategy?.textEdited} />
       : <div className="mt-4 space-y-1">
         <Textarea aria-label="报告正文" rows={18} value={draft.text} disabled={working}
           onChange={event => { const text = event.target.value; setDraft(old => old && { ...old, text }); }} />
         <p className="text-xs text-[var(--text-secondary)]" aria-live="polite">
           {length} / {REPORT_MAX_CHARACTERS} 字{length > REPORT_MAX_CHARACTERS ? "，超出上限，删减后才能保存" : ""}</p>
+        {hasDataFence(draft.text) && <p className="text-xs" role="alert">{REPORT_DOC_TEXT.dataFence}</p>}
         {doc.revision !== draft.revision && <p className="text-xs">{REPORT_DOC_TEXT.newerElsewhere}</p>}
         {draft.rebased && doc.revision === draft.revision && <details>
-          <summary className="text-xs">{REPORT_DOC_TEXT.showLatest}</summary><MessageMarkdown className="mt-2" text={doc.body} /></details>}
+          <summary className="text-xs">{REPORT_DOC_TEXT.showLatest}</summary><MessageMarkdown className="mt-2" text={editorText(doc.body)} /></details>}
       </div>}
     <ChatNoticeList className="mt-4" notices={notices} />
+    {doc.finalized && <ExpertConsultCard className="mt-4" href={expertConsultPath("report")} />}
     {!doc.finalized && <div className={resultStyles.consentActions}>
       {askingNow ? <>
         <p>{REPORT_DOC_TEXT.finalizeAsk}</p>
@@ -134,7 +141,8 @@ export function ReportDocumentPanel({ executionId, fallbackBody, generatedComple
         <Button disabled={busy || working || !canFinalize(doc, false)}
           onClick={() => { setProblem(null); setAsking({ revision: doc.revision, bodyHash: doc.bodyHash }); }}>
           {REPORT_DOC_TEXT.finalize}</Button>
-        <Button variant="outline" disabled={busy || working} onClick={() => { setProblem(null); setDraft({ text: doc.body, revision: doc.revision }); }}>
+        <Button variant="outline" disabled={busy || working}
+          onClick={() => { setProblem(null); setDraft({ text: editorText(doc.body), revision: doc.revision }); }}>
           {REPORT_DOC_TEXT.edit}</Button>
       </>}
     </div>}

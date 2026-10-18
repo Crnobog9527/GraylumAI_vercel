@@ -6,6 +6,8 @@ import type { LiveReply } from '@/app/positioning/[draftId]/agent-turn-display';
 import { liveReplyController, type LiveReplyController } from '@/app/positioning/[draftId]/live-reply-controller';
 import { TEXT_PROTOCOL } from '@/app/positioning/[draftId]/mentor-turn';
 import type { StopRequest } from '@/app/positioning/[draftId]/stop-reply';
+import { workItemsOf, type WorkItem } from '@/components/chat-display/agent-work-model';
+import { isLibrarySourceDeleted } from './gate-notices';
 
 type OpenStream = (executionId: string) => Promise<AsyncIterable<AgentTurnEvent>>;
 
@@ -23,11 +25,26 @@ export type StreamCall = { isSuccess: boolean; data?: AgentTurnOutcome; variable
  */
 export async function runStreamedExecution(live: LiveReplyController, open: OpenStream, executionId: string, handlers: {
   onResult: (executionId: string, result: AgentTurnOutcome) => void; refreshBalance: () => void;
+  /** LIB-4b: the stream ended with LIB_SOURCE_DELETED; the text shown so far is already gone. */
+  onSourceDeleted?: (executionId: string) => void;
 }): Promise<AgentTurnOutcome> {
   try {
-    return await live.stream(() => open(executionId), {
+    const outcome = await live.stream(() => open(executionId), {
       executionId, onResult: result => handlers.onResult(executionId, result),
     });
+    // The server may also end the turn with a result instead of an error: cancelled, source deleted (LIB-4b).
+    if ((outcome as { unavailable?: string }).unavailable === 'source_deleted') {
+      live.clear();
+      handlers.onSourceDeleted?.(executionId);
+    }
+    return outcome;
+  } catch (cause) {
+    // A referenced document was deleted mid-turn: drop the half answer at once, never keep it as "waiting".
+    if (isLibrarySourceDeleted(cause)) {
+      live.clear();
+      handlers.onSourceDeleted?.(executionId);
+    }
+    throw cause;
   } finally {
     handlers.refreshBalance();
   }
@@ -39,8 +56,21 @@ export function useRuntimeStream(sessionId: string, onResult: (executionId: stri
   const [reply, setReply] = useState<LiveReply | null>(null);
   const [active, setActive] = useState(0);
   const [last, setLast] = useState<{ executionId: string; result: AgentTurnOutcome } | null>(null);
+  const [work, setWork] = useState<{sessionId: string; items: Record<string, WorkItem[]>}>({sessionId, items: {}});
+  const [sourceDeleted, setSourceDeleted] = useState<string[]>([]);
   // No same-tab prefix storage here: a reload shows the saved history, as before.
-  const live = useMemo(() => liveReplyController({ draftId: 'runtime:' + sessionId, storage: () => null, show: setReply }),
+  const live = useMemo(() => liveReplyController({ draftId: 'runtime:' + sessionId, storage: () => null, show: setReply,
+    observe: (executionId, event) => {
+      if (event.type !== 'agent_tool') return;
+      const [item] = workItemsOf({workItems: [{...event, id: event.callId}]});
+      if (!item) return;
+      setWork(old => {
+        const items = old.sessionId === sessionId ? old.items : {};
+        const rows = new Map((items[executionId] ?? []).map(row => [row.id, row]));
+        if (rows.size < 12 || rows.has(item.id)) rows.set(item.id, item);
+        return {sessionId, items: {...items, [executionId]: [...rows.values()]}};
+      });
+    } }),
     [sessionId]);
   async function stream(executionId: string, open: OpenStream) {
     setActive(count => count + 1);
@@ -49,6 +79,7 @@ export function useRuntimeStream(sessionId: string, onResult: (executionId: stri
       return await runStreamedExecution(live, open, executionId, {
         onResult: (id, result) => { setLast({ executionId: id, result }); onResult(id, result); },
         refreshBalance: () => void utils.credits.getBalance.invalidate(),
+        onSourceDeleted: id => setSourceDeleted(ids => ids.includes(id) ? ids : [...ids, id]),
       });
     } finally {
       setActive(count => count - 1);
@@ -62,7 +93,10 @@ export function useRuntimeStream(sessionId: string, onResult: (executionId: stri
   const call: StreamCall = last ? { isSuccess: true, data: last.result, variables: { executionId: last.executionId } }
     : { isSuccess: false };
   return {
+    workItems: work.sessionId === sessionId ? work.items : {},
     reply, run, resume, call, streaming: active > 0,
+    /** Executions whose stream here ended because a referenced library document was deleted. */
+    sourceDeleted,
     /**
      * 停止 freezes the shown text and returns the stop request that keeps exactly it (stopAt/source), or
      * null when nothing streams here; the page then sends a plain cancel, as before.

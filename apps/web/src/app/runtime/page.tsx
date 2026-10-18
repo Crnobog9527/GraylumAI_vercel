@@ -1,6 +1,8 @@
 'use client';
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { Suspense,useEffect,useState,useRef,useMemo } from 'react';
+import {AgentWorkStatus} from '@/components/chat-display/agent-work-status';
+import {streamedWorkItems} from '@/components/chat-display/agent-work-model';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { classifyErasureError } from '@/lib/content-erasure';
 import { Plus } from 'lucide-react';
@@ -18,12 +20,17 @@ import { ContentEditor } from '@/components/opc/content-editor';
 import composerStyles from '@/components/opc/work-composer.module.css';
 import workStyles from './runtime-work.module.css';
 import {
- clearForSend, forgetPending, markPendingRestored, openingDraft, readPending, rememberPending, requestIdFor,
+ clearForSend, forgetPending, markPendingRestored, openingDraftWithReferences, readPending, rememberPending, requestIdFor,
+ saveDraftReferences,
 } from './send-input';
+import {
+ COMPOSER_REFERENCES_ENABLED, mergeReferences, referenceRequest, referencesNamedIn, type LibraryReference,
+} from '@/components/opc/composer-references';
 import { QueryNotice } from '@/components/opc/query-notice';
 import { trpc } from '@/trpc/client';
 import {
  OUTPUT_TRUNCATED_NOTICE, definiteRefusal, definiteRefusalNotice, gateStopNotices, rememberGateStop, userStopIds,
+ isLibrarySourceDeleted, libraryReferenceRefusal,
  runtimeAdmissionNotice, runtimeExecutionNotice, showsReply,
  videoGateError, videoGateNotice,
 } from './gate-notices';
@@ -84,7 +91,14 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  const requestedModule=routeModule;
  const alive=useRef(true);
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
- useEffect(()=>{if(sessionId)setInput(openingDraft(localStorage,sessionId));},[sessionId]);
+ // UI-B: the draft's library references come back with its text (both from this browser's storage). With the switch
+ // off the box shows no tags that could remove them, so stored references are never loaded or sent.
+ const [references,setReferences]=useState<LibraryReference[]>([]);
+ useEffect(()=>{if(!sessionId)return;const draft=openingDraftWithReferences(localStorage,sessionId);
+  // Switch off: forget the stored list. Switch on: keep only references the restored text still names.
+  if(!COMPOSER_REFERENCES_ENABLED)saveDraftReferences(localStorage,sessionId,[]);
+  setReferences(COMPOSER_REFERENCES_ENABLED?referencesNamedIn(draft.text,draft.references):[]);setInput(draft.text);},[sessionId]);
+ function updateReferences(next:LibraryReference[]){setReferences(next);if(sessionId)saveDraftReferences(localStorage,sessionId,next);}
  useEffect(()=>{setStoredModule(sessionId?localStorage.getItem('opc-runtime-skill:'+sessionId)??'':'');},[sessionId]);
  function updateInput(value:string){setInput(value);if(sessionId)localStorage.setItem('opc-runtime-input:'+sessionId,value);}
  const choices=trpc.runtime.choices.useQuery(sessionId?{sessionId}:undefined);
@@ -169,16 +183,22 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
   try{
   const chosen=choices.data?.skills.find(s=>'skill:'+s.moduleId===activeSelection);
   const selected=chosen?{kind:'skill' as const,moduleId:chosen.moduleId,revisionId:chosen.revisionId}:activeSelection.startsWith('auto:')?{kind:'auto' as const,modelId:activeSelection.slice(5)}:{kind:'ordinary' as const,modelId:activeSelection};
-  const submitted=input;
+  const submitted=input,sent=COMPOSER_REFERENCES_ENABLED?referencesNamedIn(input,references):[];
   const requestInput=scriptRequest?'[OPC_SCRIPT_V1] 请基于当前选题简报讨论并给出可修改的口播稿。'+(submitted.trim()||'先给我一版口播稿。'):submitted;
   // An unconfirmed earlier send of the same input keeps its request id, so the server replays instead of charging twice.
-  const url=new URL(location.href),requestId=requestIdFor(url.searchParams.get('request'),readPending(localStorage,sessionId),requestInput);
+  const url=new URL(location.href),requestId=requestIdFor(url.searchParams.get('request'),readPending(localStorage,sessionId),requestInput,undefined,sent);
   url.searchParams.set('request',requestId);history.replaceState(null,'',url);
   if(!scriptRequest)setOutgoing({text:submitted});
   // The box and the saved draft empty now; the sent text is kept in its own record until the server settles it.
-  rememberPending(localStorage,sessionId,{requestId,text:submitted,input:requestInput});
-  restoreInput=clearForSend(setInput,submitted,text=>{localStorage.setItem('opc-runtime-input:'+sessionId,text);markPendingRestored(localStorage,sessionId);});
-  const admitted=await prepare.mutateAsync({sessionId,requestId,input:requestInput,selection:selected,network:'deny',sources:[]});
+  rememberPending(localStorage,sessionId,{requestId,text:submitted,input:requestInput,references:sent});
+  const restoreText=clearForSend(setInput,submitted,text=>{localStorage.setItem('opc-runtime-input:'+sessionId,text);
+   markPendingRestored(localStorage,sessionId);});
+  setReferences([]);
+  // The sent references come back with the text, before any added since.
+  restoreInput=()=>{restoreText();setReferences(current=>{const next=mergeReferences(sent,current);
+   saveDraftReferences(localStorage,sessionId,next);return next;});};
+  const admitted=await prepare.mutateAsync({sessionId,requestId,input:requestInput,selection:selected,network:'deny',sources:[],
+   ...(sent.length?{references:referenceRequest(sent)}:{})});
   if(!alive.current)return;
   // Q1: the previous organizer answered instead; this message was not stored. Input and request id stay.
   // A definite refusal: nothing was stored, so the record can go.
@@ -194,6 +214,10 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
   setOutgoing(old=>old?.executionId?old:null); // Not confirmed: the text goes back into the box.
   // The outcome may be unknown (reply lost), so the record and request id stay for a replaying resend.
   if(!stored)restoreInput();
+  // A referenced document was deleted mid-turn: the turn says so itself (runtimeTurnNotices).
+  if(isLibrarySourceDeleted(cause)){await view.refetch();return;}
+  // A stale, missing or unready reference: re-read the picker's lists so choosing again offers the current version.
+  if(libraryReferenceRefusal(cause))void utils.library.invalidate();
   if(isOrganizerPendingError(cause)){payg.block();await view.refetch();return;}
   // A definite refusal of an unstored send says so; the same text keeps its request id and can be sent again.
   setError(gate??(stored?null:definiteRefusalNotice(cause,['runtime.prepare']))??'请求状态待核实。请读取原任务状态，不要重新发送相同内容。');await view.refetch();}}
@@ -287,7 +311,8 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
   const request=runner.freeze(executionId);const at={storage:browserSession(),sessionId,executionId};
   if(await stopWithRecord(at,()=>cancel.mutateAsync(request??{executionId}),()=>view.refetch())){setError('取消状态待核实，请读取原任务。');
    setUserStops(userStopIds(at.storage,sessionId,executions??[]));}}
- async function recover(executionId:string){setError('');try{const executed=await runner.run(executionId);if('unavailable' in executed&&executed.unavailable==='capacity'){markCapacity(executionId);setError('原请求的必要材料超过模型输入容量，无法继续发送。已有内容已保留；请点“停止”后缩短材料再发送。');}await view.refetch();}catch{setError('暂时无法恢复，请保留原任务。');}}
+ async function recover(executionId:string){setError('');try{const executed=await runner.run(executionId);if('unavailable' in executed&&executed.unavailable==='capacity'){markCapacity(executionId);setError('原请求的必要材料超过模型输入容量，无法继续发送。已有内容已保留；请点“停止”后缩短材料再发送。');}await view.refetch();}
+  catch(cause){if(isLibrarySourceDeleted(cause)){await view.refetch();return;}setError('暂时无法恢复，请保留原任务。');}}
  const executions=view.data?.executions as Array<{executionId:string;createdAt?:string;state:string;input:string|null;body:string|null;primaryBody:string|null;organizerComplete:boolean|null;skillExecution:boolean;needsTask:boolean;unavailableReason:string|null;historyOmitted?:boolean;contentAvailable:boolean;userStopPending?:boolean;stopped?:boolean;
   billing?:{pausedReason?:string|null;cancelRequested?:boolean}|null;cursor?:number|null;epoch?:number|null;remainingCalls?:number|null}>|undefined;
  const capacitySignature=executions?.map(e=>e.executionId+':'+e.state).join('|');
@@ -340,6 +365,7 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  },[workItem,view.data,choices.data,contentType,videoBusy]);
  const turnNotices=(e:RuntimeTurn)=>runtimeTurnNotices(e,{busy,capacity:capacityIds.includes(e.executionId),gateStop:gateStops[e.executionId],
   userStopped:userStops.includes(e.executionId),finished:finishedExecution(runner.call,view)===e.executionId,
+  sourceDeleted:runner.sourceDeleted.includes(e.executionId),
   stopping:cancel.isPending,onRetry:()=>void recover(e.executionId),onStop:()=>void stop(e.executionId)});
  const lastExecution=executions?.at(-1);
  const lastTurn=lastExecution&&{open:isOpenTurn(lastExecution.state),texts:turnNotices(lastExecution).map(notice=>String(notice.text))};
@@ -349,7 +375,8 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  return <WorkspaceFrame area="chat" activeWorkItemId={workItem?.workItemId} notice={choices.data?.mode==='staging_test'?'Staging 真实对话测试 · 消耗测试预算':choices.data?.mode==='isolated'?'本地隔离 · 模型回复为模拟，保存写入本地测试服务':undefined} rightOpen={panelOpen} onToggleRight={()=>setPanelOpen(value=>!value)} right={workItem?(contentType==='unknown'?<RuntimeTypePendingPanel/>:<ContentEditor key={workItem.workItemId+':'+contentType} item={workItem} onSaved={()=>library.refetch()}><RuntimeResultsSection isVideo={isVideo} versions={versions}
   currentScriptId={currentScript?.id} saved={saved.data} libraryHref={'/library?item='+workItem.workItemId+'&return='+sessionId}/></ContentEditor>):undefined}><main className={`${workStyles.conversation} flex h-full min-h-0 flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]`}>
   <RuntimeHeader title={workItem?.title??'工作对话'}
-   subtitle={workItem?undefined:(choices.data?.mode??view.data?.mode)==='staging_test'?'Staging 真实对话测试':'本地模拟体验'}
+   subtitle={workItem?undefined:(choices.data?.mode??view.data?.mode)==='staging_test'?'Staging 真实对话测试'
+    :(choices.data?.mode??view.data?.mode)==='production'?undefined:'本地模拟体验'}
    meta={workItem?{platform:workItem.platform,account:workItem.account,infoHref:'/library?item='+workItem.workItemId+'&return='+sessionId,
     showExpand:!panelOpen,onExpand:()=>setPanelOpen(true)}:undefined}
    action={!sessionId&&requestedModule?<Button variant="outline" disabled={busy||!choices.data||Boolean(input.trim())||Boolean(requestedModule&&!chosenModule)}
@@ -367,6 +394,7 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
      ?transcriptDate(e.createdAt):null}
     userText={e.input&&!e.input.startsWith('[OPC_WORK_CONTINUE_V1]')?shownRuntimeInput(e.input):null}
     completed={e.skillExecution&&e.state==='completed'&&!e.input?.startsWith('[OPC_WORK_CONTINUE_V1]')&&!e.input?.startsWith('[OPC_VIDEO_PACKAGE_V1]')}>
+     <AgentWorkStatus items={runner.sourceDeleted.includes(e.executionId)?[]:streamedWorkItems(e,runner.workItems?.[e.executionId])}/>
      {workItem&&e.skillExecution&&e.state==='completed'&&!e.input?.startsWith('[OPC_WORK_CONTINUE_V1]')&&!e.input?.startsWith('[OPC_VIDEO_PACKAGE_V1]')&&e.contentAvailable?<RuntimeProposal adopted={versions.some(v=>v.kind===(isVideo?'script':'brief')&&v.executionId===e.executionId)}
       text={displayReply(e.input,e.body??e.primaryBody)}/>:!liveReplyText(runner.reply,e.executionId,e)&&showsReply(e)&&<RuntimeReply available={e.contentAvailable} text={displayReply(e.input,e.body??e.primaryBody)}/>}
      {workItem&&contentType!=='unknown'&&e.state==='completed'&&e.skillExecution&&!e.input?.startsWith('[OPC_VIDEO_PACKAGE_V1]')&&!e.input?.startsWith('[OPC_WORK_CONTINUE_V1]')&&<div className="mt-3 flex flex-wrap gap-2">{versions.some(v=>v.kind===(isVideo?'script':'brief')&&v.executionId===e.executionId)?<Link className="underline" href={'/library?item='+workItem.workItemId+'&return='+sessionId}>{isVideo?'这版口播稿已定稿':'已采用为草稿'} · 查看</Link>:<Button disabled={busy} onClick={()=>finalizeScript(e.executionId)}>{isVideo?'将这条回复定稿为口播稿':'采用为当前草稿'}</Button>}</div>}
@@ -378,6 +406,8 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
    {isVideo&&currentScript&&videoPromptEnded&&(!currentStoryboard||!currentEditing)&&<Button variant="outline" onClick={()=>{localStorage.removeItem('opc-video-ended:'+currentScript.id);setVideoUiRevision(v=>v+1);}}>继续这版口播稿的分镜或剪辑</Button>}
    {isVideo&&currentScript&&!videoPromptEnded&&(!currentStoryboard||!currentEditing)&&<section aria-label="口播稿后续选择" className="space-y-3 rounded-xl border border-[var(--border-primary)] bg-[var(--bg-secondary)] p-4"><h2 className="font-medium">{currentStoryboard?'分镜已保存。要基于这版分镜生成剪辑建议吗？':'口播稿已定稿。要先制作分镜脚本吗？'}</h2><p className="text-sm text-[var(--text-secondary)]">本次只绑定口播稿第 {currentScript.version} 版。选择后才会调用 Agent；以后重新定稿口播稿时不会自动生成。</p><div className="flex flex-wrap gap-2">{!currentStoryboard&&<Button disabled={busy||currentEditing} onClick={()=>chooseVideo('both')}>先做分镜，再生成剪辑建议</Button>}{!currentStoryboard&&<Button variant="outline" disabled={busy} onClick={()=>chooseVideo('storyboard')}>只生成分镜</Button>}{currentStoryboard&&<Button variant="outline" disabled={busy||currentEditing} onClick={()=>chooseVideo('editing')}>只生成剪辑建议</Button>}<Button variant="ghost" disabled={busy} onClick={()=>chooseVideo('end')}>暂时结束</Button></div><p className="text-xs text-[var(--text-tertiary)]">也可以在消息框输入同样的选择；提问卡和自然语言只执行同一个业务动作。</p></section>}
 {pendingOutgoing&&<RuntimePendingMessage text={pendingOutgoing.text} sending={busy}/>}
+{pendingOutgoing?.executionId&&!runner.sourceDeleted.includes(pendingOutgoing.executionId)&&
+ <AgentWorkStatus items={runner.workItems?.[pendingOutgoing.executionId]??[]}/>}
 {pendingOutgoing?.executionId&&<PendingLiveReply text={liveReplyText(runner.reply,pendingOutgoing.executionId)}/>}
    <ChatNoticeList notices={[...payg.blockedNotices(executions,busy),...runtimeTailNotices({error,heldGuide,busy,onGuide:()=>void guide(),lastTurn})]}/>
    </section>
@@ -385,6 +415,7 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
   {sessionId&&<footer className={`${composerStyles.zone} ${workStyles.composerZone}`}><div className={composerStyles.wrap}>
    {workItem&&isVideo&&<Button variant="outline" disabled={busy||Boolean(view.data?.activeExecution)||!choices.data?.defaultSkill} onClick={()=>send(true)}>{currentScript?'修改口播稿':'起草口播稿'}</Button>}
    <WorkComposer value={input} onChange={updateInput} onSend={()=>void send()}
+    referenceList={references} onReferencesChange={updateReferences}
     sendDisabled={busy||Boolean(view.data?.activeExecution)||!workContextReady||!choices.data||!activeSelection} sessionId={sessionId} skillId={activeSelection.startsWith('skill:')?activeSelection.slice(6):''} onSkillChange={id=>{setSelection(id?'skill:'+id:ordinary);if(id)localStorage.setItem('opc-runtime-skill:'+sessionId,id);else localStorage.removeItem('opc-runtime-skill:'+sessionId);}} note={workItem?'本次讨论参考当前工作的最新成果。Enter 发送，Shift + Enter 换行。':'可以自由提问；Agent 按需查阅相关资料。Enter 发送，Shift + Enter 换行。'}/>
   </div></footer>}
  </main></WorkspaceFrame>;

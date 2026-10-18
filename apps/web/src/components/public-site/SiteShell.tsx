@@ -6,6 +6,7 @@
 
 import type { ReactNode } from 'react';
 import Link from 'next/link';
+import { ConsentPreferenceLinks } from '@/components/analytics/ConsentPreferenceLinks';
 import { PUBLIC_PAGES } from '@/lib/seo/public-pages';
 import { SITE_LOCALES, type SiteLocale } from '@/lib/seo/site';
 import { LANGUAGE_NAMES, LOGIN_HREF, SIGNUP_HREF, SITE_CHROME, visibleHref } from './site-chrome';
@@ -13,7 +14,7 @@ import { LANGUAGE_NAMES, LOGIN_HREF, SIGNUP_HREF, SITE_CHROME, visibleHref } fro
 const LINK_CLASS = 'text-sm text-[#9A9A9A] transition-colors hover:text-[#FFD700]';
 const LOCALES: SiteLocale[] = ['zh-Hans', 'zh-TW'];
 
-function FooterColumn({ title, links }: { title: string; links: { label: string; href: string }[] }) {
+function FooterColumn({ title, links, extra }: { title: string; links: { label: string; href: string }[]; extra?: ReactNode }) {
   if (links.length === 0) {
     return null;
   }
@@ -26,6 +27,7 @@ function FooterColumn({ title, links }: { title: string; links: { label: string;
             <Link href={link.href} className={LINK_CLASS}>{link.label}</Link>
           </li>
         ))}
+        {extra}
       </ul>
     </div>
   );
@@ -83,13 +85,19 @@ export function SiteShell({
             </Link>
           </nav>
         </div>
+        <nav aria-label={chrome.mobileNavLabel} className="flex gap-5 overflow-x-auto border-t border-[#1C1C1C] px-4 py-2 sm:hidden">
+          {chrome.nav.map(link => (
+            <Link key={link.href} href={link.href} className="shrink-0 text-sm text-[#B0B0B0] hover:text-white">{link.label}</Link>
+          ))}
+        </nav>
       </header>
       <main>{children}</main>
       <footer className="border-t border-[#262626]">
         <div className="mx-auto grid max-w-6xl gap-10 px-4 py-12 sm:grid-cols-2 sm:px-6 lg:grid-cols-4 lg:px-8">
           <FooterColumn title={chrome.pagesTitle} links={pageLinks} />
           <FooterColumn title={chrome.companyTitle} links={chrome.company} />
-          <FooterColumn title={chrome.legalTitle} links={chrome.legal} />
+          <FooterColumn title={chrome.legalTitle} links={chrome.legal}
+            extra={<ConsentPreferenceLinks locale={locale} className={LINK_CLASS} />} />
           <FooterColumn title={chrome.languageTitle} links={languageLinks} />
         </div>
         <div className="mx-auto max-w-6xl px-4 pb-10 text-xs text-[#6F6F6F] sm:px-6 lg:px-8">

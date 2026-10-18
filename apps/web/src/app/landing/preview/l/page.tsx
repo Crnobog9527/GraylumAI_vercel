@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { Metadata } from 'next';
+import dynamic from 'next/dynamic';
 import { notFound } from 'next/navigation';
 import { SampleL } from '@/components/landing/preview-l/SampleL';
 import { resolveLandingFlags } from '@/lib/landing/landing-flags';
@@ -14,6 +15,12 @@ import { NOINDEX_ROBOTS } from '@/lib/seo/metadata';
 // samples of #893: static like the landing page, never indexed, not in the sitemap or any navigation, and gone once the
 // public site is indexable.
 export const revalidate = 3600;
+
+// The Owner's "改字模式" (Owner 2026-10-18): a local development server only; a production build drops it, and only this
+// preview page mounts it (never SampleL, so /landing cannot carry it).
+const OwnerEditL = process.env.NODE_ENV === 'development'
+  ? dynamic(() => import('@/components/landing/preview-l/OwnerEditL').then(module => module.OwnerEditL))
+  : null;
 
 export const metadata: Metadata = { title: 'Graylum 风格样稿 L', robots: NOINDEX_ROBOTS };
 
@@ -30,5 +37,10 @@ export default async function LandingPreviewL() {
   // Region 4's 14 sample reports are generated and privacy-checked (lib/landing/sample-reports): the page is the full
   // launched version (Owner 2026-10-17), so they always show, on staging and production alike.
   const extras = { flags: flagsUsed, showSamples: true };
-  return <SampleL data={data} siteName={siteName} extras={extras} />;
+  return (
+    <>
+      <SampleL data={data} siteName={siteName} extras={extras} />
+      {OwnerEditL ? <OwnerEditL /> : null}
+    </>
+  );
 }

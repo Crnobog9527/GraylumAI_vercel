@@ -44,6 +44,7 @@ export const AGENT_TURN_REQUEST_FORMAT='agent-turn-v5-stream';
 type FrozenCallPolicy=z.infer<typeof frozenCallPolicy>;
 /** Only the frozen context fields that decide the provider bytes. */
 export type RequestContext={providerRequestFormat?:ProviderRequestFormat;textStream?:string;tools:readonly string[];workspaceContext?:boolean;
+ libraryReferences?:readonly unknown[];libraryRetrieval?:boolean;
  promptCache?:PromptCachePolicy;network?:string;reasoning?:ReasoningPolicy;attachedOrganizer?:{reasoning?:ReasoningPolicy}};
 
 /** Fail closed for reasoning attached to an older, unmarked request format. */
@@ -69,12 +70,14 @@ export function openRouterRequestBody(request:string,options:{context:RequestCon
  const format=context.providerRequestFormat,streaming=streamsPrimary(context);
  const requested:Array<{type?:string;function?:{name?:string}}>=original.tools??[];
  // Agent turns may use only the interactive tools their context lists; every
- // older format may use only the owned-source read of a workspace context.
+ // older format may use only the owned-source read of a workspace context
+ // or of frozen library references (LIB-4b).
+ const ownedRead=Boolean(context.workspaceContext||context.libraryReferences?.length||context.libraryRetrieval);
  const toolsDenied=format===AGENT_TURN_REQUEST_FORMAT
   ?context.tools.some(name=>!AGENT_TOOL_NAMES.has(name))||Boolean(context.workspaceContext)||
    requested.some(tool=>tool.type!=='function'||!context.tools.includes(String(tool.function?.name)))
-  :context.tools.some(name=>name!=='read_source'||!context.workspaceContext)||
-   requested.some(tool=>tool.type!=='function'||tool.function?.name!=='read_source'||!context.workspaceContext);
+  :context.tools.some(name=>name!=='read_source'||!ownedRead)||
+   requested.some(tool=>tool.type!=='function'||tool.function?.name!=='read_source'||!ownedRead);
  if(toolsDenied||context.network!=='deny'||original.model!==policy.model)throw new Error('RUNTIME_REAL_TOOLS_DISABLED');
  if(!policy.providerLimits)throw new Error('RUNTIME_REAL_QUOTE_REQUIRED');
  // Matching carries no reasoning; the attached organizer has its own frozen value.

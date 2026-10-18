@@ -6,6 +6,9 @@ import { SIMPLIFIED_HOME_HREF, SITE_CHROME } from '@/components/public-site/site
 import type { ArticleContent } from '../article';
 import { PUBLIC_PAGES } from '../public-pages';
 import { ABOUT_ZH_HANS, ABOUT_ZH_TW } from './about';
+import { BLOG_INDEX, BLOG_POSTS } from './blog';
+import { COMPARED_ON, compareHans, compareTw } from './compare';
+import { FEATURES, FEATURES_HUB } from './features';
 import { SIGNUP_CTA_HREF } from './shared';
 import { ZH_TW_GLOSSARY } from './zh-tw/glossary';
 import { ZH_TW_HUB } from './zh-tw/hub';
@@ -29,6 +32,11 @@ const ARTICLES: ArticleContent[] = [
   ZH_TW_SHEQUN_JINGYING,
   ZH_TW_IG_JINGYING,
   ZH_TW_ZIMEITI_KECHENG,
+  FEATURES_HUB,
+  ...FEATURES.map(entry => entry.content),
+  ...BLOG_POSTS,
+  compareHans(),
+  compareTw(),
 ];
 
 // Login entry pages are not in the sitemap but are real pages every visitor can open.
@@ -91,8 +99,10 @@ describe.each(ARTICLES.map(content => [content.path, content] as const))('public
     const data = JSON.parse(html.match(/<script type="application\/ld\+json">(.*?)<\/script>/)![1]);
     const faq = data.find((item: { '@type': string }) => item['@type'] === 'FAQPage');
     expect(faq?.mainEntity.map((item: { name: string }) => item.name)).toEqual(content.faq?.map(item => item.question));
+    // The visible text, with the HTML escapes of quotation marks and the like undone (landing answers carry quotation marks).
+    const text = html.replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
     for (const item of content.faq ?? []) {
-      expect(html).toContain(item.answer);
+      expect(text).toContain(item.answer);
     }
     expect(html.match(/<h[1-6][\s>]/g)!.length).toBe(html.match(/<h[1-6][\s>]/g)!.filter(tag => !tag.startsWith('<h4')).length);
   });
@@ -135,5 +145,40 @@ describe.each(ARTICLES.map(content => [content.path, content] as const))('public
         expect(text.includes(word), `${word} → ${entry.taiwan}`).toBe(false);
       }
     }
+  });
+});
+
+describe('blog index page metadata', () => {
+  it('keeps the title and description within the spec limits', () => {
+    const cjk = (text: string) => (text.match(/[㐀-鿿]/g) ?? []).length;
+    expect(cjk(BLOG_INDEX.metaTitle)).toBeLessThanOrEqual(30);
+    expect(cjk(BLOG_INDEX.metaDescription)).toBeGreaterThanOrEqual(60);
+    expect(cjk(BLOG_INDEX.metaDescription)).toBeLessThanOrEqual(80);
+    expect(BLOG_INDEX.lead.length).toBeLessThanOrEqual(100);
+  });
+});
+
+describe('comparison pages', () => {
+  it('are each other\'s translations, dated, and list their sources', () => {
+    const [hans, tw] = [compareHans(), compareTw()];
+    expect(hans.alternates).toEqual({ 'zh-Hans': hans.path, 'zh-TW': tw.path });
+    expect(tw.alternates).toEqual(hans.alternates);
+    for (const page of [hans, tw]) {
+      expect(page.published).toBe(COMPARED_ON);
+      expect(page.sources?.every(source => source.href.startsWith('https://'))).toBe(true);
+      // Every statement about ChatGPT in the table carries the day it was checked.
+      const row = page.sections[1].table!.rows.filter(cells => cells[1].includes('OpenAI'));
+      expect(row.length).toBeGreaterThanOrEqual(2);
+      for (const cells of row) expect(cells[1]).toContain(COMPARED_ON);
+    }
+  });
+
+  it('read Graylum\'s price from the plan catalog and never type it', () => {
+    const plans = [{ id: 'p', name: 'Pro', level: 'pro', price: { monthly: 31, yearly: 300 }, credits: { monthly: 1, monthlyBonus: 0 },
+      discount: 1, checkoutReady: { monthly: true, yearly: true } }];
+    expect(JSON.stringify(compareHans(plans))).toContain('会员 Pro 每月 $31 起');
+    expect(JSON.stringify(compareTw(plans))).toContain('會員 Pro 每月 $31 起');
+    expect(JSON.stringify(compareHans())).toContain('会员价格见价格页');
+    expect(JSON.stringify(compareTw())).toContain('會員價格見價格頁');
   });
 });

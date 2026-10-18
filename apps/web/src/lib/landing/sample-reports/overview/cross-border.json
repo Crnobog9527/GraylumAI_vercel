@@ -75,6 +75,15 @@
     "name": "Kittova · While You're at Work",
     "bio": "你上班时，你的猫在干什么｜真猫实拍、真实测试｜喂食器和猫砂垫"
   },
+  "ownAccount": {
+    "platform": "TikTok（店铺号）",
+    "displayName": "Kittova · While You're at Work",
+    "which": "recommended",
+    "bio": "你上班时，你的猫在干什么｜真猫实拍、真实测试｜喂食器和猫砂垫",
+    "followers": null,
+    "posts": "15 条白底产品视频，播放几百",
+    "topStat": null
+  },
   "contentPillars": [
     {
       "name": "流量",
@@ -93,22 +102,26 @@
     {
       "layer": "免费内容",
       "offer": "自己账号 + 达人视频",
-      "price": null
+      "price": null,
+      "why": "让陌生人停下、记住；能看完的多半自己养猫"
     },
     {
       "layer": "入门",
       "offer": "猫砂垫",
-      "price": "19.99 美元"
+      "price": "19.99 美元",
+      "why": "第一次付费，最关键的分水岭：真肯为猫花钱"
     },
     {
       "layer": "主力",
       "offer": "定时喂食器",
-      "price": "49.99 美元"
+      "price": "49.99 美元",
+      "why": "解决“不在家”；肯花 50 美元的是常不在家的人"
     },
     {
       "layer": "升级与复购",
       "offer": "摄像头喂食器；新手套装",
-      "price": "89.99"
+      "price": "89.99 美元",
+      "why": "给最不放心的人；肯多付的最在意“看得见”"
     }
   ],
   "plan30": [

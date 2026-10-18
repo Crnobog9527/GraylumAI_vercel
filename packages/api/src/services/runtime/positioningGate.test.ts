@@ -6,7 +6,7 @@ import { DECISIONS_MODEL, DECISIONS_URL, decide, decisionsClassifier, readPositi
   windowBoundKey }
   from './positioningGate';
 import { isPositioningRefusal, POSITIONING_MARKER, POSITIONING_FALLBACK_INSTRUCTIONS } from './positioningFallback';
-import { withPrimaryAddenda } from './primaryInstructions';
+import { REPLY_LANGUAGE, REPLY_LANGUAGE_INSTRUCTIONS, withPrimaryAddenda } from './primaryInstructions';
 import { stagingProcedureError, StagingAccessError } from './stagingErrors';
 import { isPositioningRequired, POSITIONING_REQUIRED } from '../../shared/positioningGate';
 
@@ -56,12 +56,12 @@ it.each([
   expect(await decide('KEY', 'x', vi.fn(transport) as never)).toBe('unavailable');
 });
 
-it('reuses the admitted model row OpenRouter key and never calls without one', async () => {
-  expect(openRouterKey({ provider: 'openai', api_endpoint: '', api_key: ' K1 ' })).toBe('K1');
-  for (const row of [null, { provider: 'fixture', api_endpoint: null, api_key: 'K' },
-    { provider: 'openai', api_endpoint: 'https://example.com/v1/chat/completions', api_key: 'K' },
-    { provider: 'openai', api_endpoint: '', api_key: ' ' }, { provider: 'openai', api_endpoint: '' }])
-    expect(openRouterKey(row)).toBeUndefined();
+it('reuses the platform OpenRouter key for an OpenRouter model and never calls without one', async () => {
+  expect(openRouterKey({ provider: 'openai', api_endpoint: '' }, ' K1 ')).toBe('K1');
+  for (const [row, key] of [[null, 'K'], [{ provider: 'fixture', api_endpoint: null }, 'K'],
+    [{ provider: 'openai', api_endpoint: 'https://example.com/v1/chat/completions' }, 'K'],
+    [{ provider: 'openai', api_endpoint: '' }, ' '], [{ provider: 'openai', api_endpoint: '' }, undefined]] as const)
+    expect(openRouterKey(row, key)).toBeUndefined();
   const transport = vi.fn(async () => answer(0.1));
   expect(await decisionsClassifier(transport as never)({ text: 'x', apiKey: 'K1' })).toBe('clear');
   expect((transport.mock.calls[0] as unknown as [string, RequestInit])[1].headers).toMatchObject({ Authorization: 'Bearer K1' });
@@ -116,6 +116,8 @@ it('maps the refusal to a stable code the front end can recognize', () => {
 it('adds the fallback rule only to a turn frozen with it', () => {
   expect(withPrimaryAddenda('base', {})).toBe('base');
   expect(withPrimaryAddenda('base', { positioningGate: 'fallback-v1' })).toBe('base' + POSITIONING_FALLBACK_INSTRUCTIONS);
+  expect(withPrimaryAddenda('base', { positioningGate: 'fallback-v1', replyLanguage: REPLY_LANGUAGE }))
+    .toBe('base' + REPLY_LANGUAGE_INSTRUCTIONS + POSITIONING_FALLBACK_INSTRUCTIONS);
   expect(POSITIONING_FALLBACK_INSTRUCTIONS).toContain(POSITIONING_MARKER);
   expect(withPrimaryAddenda('base', { workspaceContext: true })).toContain('first read the confirmed entry whose kind is positioning');
 });
@@ -151,9 +153,10 @@ it('ends a refused PAYG round through fail_platform with positioning_required', 
 it('uses only the credential the approved staging window quoted for this model', async () => {
   const { createHash } = await import('node:crypto');
   const account = (key: string) => 'openrouter-key:' + createHash('sha256').update(key).digest('hex');
-  const row = { provider: 'openai', api_endpoint: '', api_key: 'APPROVED' };
-  expect(windowBoundKey(row, account('APPROVED'))).toBe('APPROVED');
-  expect(windowBoundKey({ ...row, api_key: 'ROTATED' }, account('APPROVED'))).toBeUndefined();
-  expect(windowBoundKey(row, undefined)).toBeUndefined();
-  expect(windowBoundKey({ ...row, api_endpoint: 'https://example.com/v1/chat/completions' }, account('APPROVED'))).toBeUndefined();
+  const row = { provider: 'openai', api_endpoint: '' };
+  expect(windowBoundKey(row, 'APPROVED', account('APPROVED'))).toBe('APPROVED');
+  expect(windowBoundKey(row, 'ROTATED', account('APPROVED'))).toBeUndefined();
+  expect(windowBoundKey(row, undefined, account('APPROVED'))).toBeUndefined();
+  expect(windowBoundKey(row, 'APPROVED', undefined)).toBeUndefined();
+  expect(windowBoundKey({ ...row, api_endpoint: 'https://example.com/v1/chat/completions' }, 'APPROVED', account('APPROVED'))).toBeUndefined();
 });

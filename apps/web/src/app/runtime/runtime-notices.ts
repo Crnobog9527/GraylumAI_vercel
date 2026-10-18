@@ -3,7 +3,7 @@ import { CHAT_ACTION, type ChatNotice } from '@/components/chat/ChatInlineNotice
 import { OUTPUT_TRUNCATED_NOTICE, PLATFORM_FAILURE_NOTICE, PROVIDER_HISTORY_NOTICE, PROVIDER_REJECTED_NOTICE,
   HISTORY_OMITTED_NOTICE } from '@/lib/runtime-gate-notice';
 import { isPaygWaiting, organizerSkipped, type PaygViewFields } from '@/lib/payg-wait';
-import { POSITIONING_REQUIRED_NOTICE, forgetUserStop, rememberUserStop } from './gate-notices';
+import { POSITIONING_REQUIRED_NOTICE, SOURCE_DELETED_NOTICE, forgetUserStop, rememberUserStop } from './gate-notices';
 import { positioningRequiredNotice } from './positioning-required';
 
 /** A frozen guidance request without its execution, waiting for the user's explicit retry. */
@@ -85,11 +85,16 @@ export function runtimeTurnNotices(turn: RuntimeTurn, ctx: {
   busy: boolean; capacity: boolean; gateStop?: string; userStopped?: boolean; stopping: boolean;
   /** The execute call for this turn already returned a final state; the view has not caught up yet. */
   finished?: boolean;
+  /** UI-B: this page's stream of the turn ended because a referenced document was deleted (LIB_SOURCE_DELETED). */
+  sourceDeleted?: boolean;
   onRetry: () => void; onStop: () => void;
   /** Guide-card navigation; tests replace it. */
   navigate?: (href: string) => void;
 }): ChatNotice[] {
   const id = (suffix: string) => turn.executionId + ':' + suffix;
+  // LIB-4b: the server cancels the turn and shows none of it; no 重试 (it would read the deleted document again).
+  if (turn.unavailableReason === 'source_deleted' || ctx.sourceDeleted)
+    return [{ id: id('source-deleted'), tone: 'warning', text: SOURCE_DELETED_NOTICE }];
   const notices: ChatNotice[] = [];
   const skipped = organizerSkipped(turn);
   const stopped = stoppedByUser(turn, ctx.userStopped);

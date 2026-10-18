@@ -4,7 +4,7 @@ import { ArrowRight } from 'lucide-react';
 import hero from '@/components/landing/preview-j/hero-j.module.css';
 import page from '@/components/landing/preview-j/j.module.css';
 import { HERO } from '@/lib/landing/landing-copy';
-import { J_HERO_PROMISE } from '@/lib/landing/landing-copy-j';
+import { L_HERO_PROMISE } from '@/lib/landing/landing-copy-l';
 import { SIGNUP_CTA_HREF } from '@/lib/seo/content/shared';
 import { cn } from '@/lib/utils';
 import styles from './l.module.css';
@@ -24,7 +24,7 @@ export function HeroL({ note }: { note: string }) {
             <span>{HERO.title.slice(HERO.title.lastIndexOf(' ') + 1)}</span>
           </h1>
           <p className={cn(hero.promise, styles.promise)}>
-            {J_HERO_PROMISE.split(/(?<=，)/).map(part => <span key={part}>{part}</span>)}
+            {L_HERO_PROMISE.split(/(?<=，)/).map(part => <span key={part}>{part}</span>)}
           </p>
           <div className={hero.actions}>
             <Link href={SIGNUP_CTA_HREF} className={page.pill}>{HERO.primaryCta}<ArrowRight size={18} aria-hidden="true" /></Link>

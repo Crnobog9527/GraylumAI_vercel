@@ -71,7 +71,7 @@ for (const state of ['draft', 'published'] as const) for (const reportGeneration
         if (path === '/') return route.fulfill({ contentType: 'text/html', body: '<div id="root"></div>' });
         const result = path.endsWith('/opc.read') ? read(state, reportGeneration) : path.endsWith('/runtime.view') ? { executions: [] }
           : path.endsWith('/opc.list') ? { drafts: [] } : path.endsWith('/opc.library') ? { businesses: [] }
-            : path.endsWith('/opc.capturePending') ? { processed: [] } : path.endsWith('/runtime.reportAvailable') ? { enabled: true } : {};
+            : path.endsWith('/opc.capturePending') ? { processed: [] } : path.endsWith('/runtime.reportAvailable') ? { enabled: true, priceCredits: 500 } : {};
         await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ result: { data: result } }) });
       });
       await page.goto('http://report.test/');
@@ -84,3 +84,31 @@ for (const state of ['draft', 'published'] as const) for (const reportGeneration
     } finally { await page.close(); }
   }, 20000);
 }
+
+// #1079/#1003: a jury adoption published a new round; the report execution stays in the first round (reportLatest: none).
+it('opens the saved formal report of an adopted version with its chapter list, never 「生成完整报告」', async () => {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  const adopted = { ...read('published', true), report: { available: true, version: 3, id: '370a4dae-6ebd-4e45-8a27-dbb2db6b0e4f',
+    report: { generatedReport: { body: '## 结论\n采用后的结论正文\n\n## 第一章 定位\n定位内容\n\n## 第二章 内容\n内容规划' } } } };
+  try {
+    await page.route('**/*', async route => {
+      const path = new URL(route.request().url()).pathname;
+      if (path === '/') return route.fulfill({ contentType: 'text/html', body: '<div id="root"></div>' });
+      const result = path.endsWith('/opc.read') ? adopted : path.endsWith('/runtime.view') ? { executions: [] }
+        : path.endsWith('/runtime.reportLatest') ? { executionId: null } : path.endsWith('/runtime.reportAvailable') ? { enabled: true, priceCredits: 500 }
+          : path.endsWith('/opc.list') ? { drafts: [] } : path.endsWith('/opc.library') ? { businesses: [] }
+            : path.endsWith('/opc.capturePending') ? { processed: [] } : {};
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ result: { data: result } }) });
+    });
+    await page.goto('http://report.test/');
+    await page.addScriptTag({ content: code });
+    await page.getByRole('button', { name: '完整运营策略报告' }).click({ timeout: 5000 });
+    const dialog = page.getByRole('dialog', { name: '完整运营策略报告' });
+    await ui(dialog.getByText('采用后的结论正文')).toBeVisible();
+    await ui(dialog.getByRole('navigation')).toContainText('第二章 内容');
+    expect(await page.getByRole('button', { name: '生成完整报告' }).count()).toBe(0);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 20000);

@@ -205,6 +205,42 @@ export async function runCases({db,Client,connectionString,report}) {
       await db.query('SET LOCAL ROLE service_role');
       assert.equal((await db.query('SELECT research_benchmark_rows($1,$2) v',[f.actor,f.session])).rows[0].v.rows.length,18);
     } finally {await db.query('ROLLBACK');}
+    // RT-5 research.benchmarks reads through research_benchmark_rows: the owner only. Another user, or the owner
+    // naming another user's session, is refused; client roles cannot call it at all.
+    await assert.rejects(rpc(db,'research_benchmark_rows',other.actor,f.session),/RESEARCH_SCOPE_DENIED/);
+    await assert.rejects(rpc(db,'research_benchmark_rows',f.actor,other.session),/RESEARCH_SCOPE_DENIED/);
+    for (const role of ['anon','authenticated']) {
+      await db.query('BEGIN');
+      try {
+        await db.query(`SET LOCAL ROLE ${role}`);
+        await assert.rejects(db.query('SELECT research_benchmark_rows($1,$2)',[f.actor,f.session]),/permission denied/,role);
+      } finally {await db.query('ROLLBACK');}
+    }
+    // 0282 research_user_benchmarks: the same rows for the owner, now with the refs of every displayed number.
+    const mine = await rpc(db,'research_user_benchmarks',f.actor,f.session);
+    assert.equal(mine.length,18);
+    const stored = await rows(db,'session_id=$1',[f.session]);
+    assert.ok(stored.some(x=>x.excluded==='EVIDENCE_UNVERIFIED'&&JSON.stringify(x.refs).includes('model-said-so')),'the textRef case is in the table');
+    for (const row of mine) {
+      const source = stored.find(x=>x.platform===row.platform&&x.account===row.account);
+      for (const key of ['followers','medianViews','engagementRate','postsPerWeek','lastPublishedAt']) {
+        // A quarantined row (EVIDENCE_UNVERIFIED) keeps its unverified raw refs in the table (the textRef case stores
+        // 'model-said-so'); the user never gets them, nor refs of a number that is null.
+        const none = source.excluded==='EVIDENCE_UNVERIFIED' || row[key]===null;
+        assert.deepEqual(row.refs[key],none?[]:(source.refs[key]??[]),row.account+' '+key);
+        for (const ref of row.refs[key]) assert.match(ref,/^[0-9a-f-]{36}#\d{1,3}$/,row.account+' '+key);
+      }
+      assert.ok(!JSON.stringify(row).match(/cost|operation_ids|execution_id|fetch_id/));
+    }
+    await assert.rejects(rpc(db,'research_user_benchmarks',other.actor,f.session),/RESEARCH_SCOPE_DENIED/);
+    await assert.rejects(rpc(db,'research_user_benchmarks',f.actor,other.session),/RESEARCH_SCOPE_DENIED/);
+    for (const role of ['anon','authenticated']) {
+      await db.query('BEGIN');
+      try {
+        await db.query(`SET LOCAL ROLE ${role}`);
+        await assert.rejects(db.query('SELECT research_user_benchmarks($1,$2)',[f.actor,f.session]),/permission denied/,role);
+      } finally {await db.query('ROLLBACK');}
+    }
     await assert.rejects(db.query(`UPDATE research_benchmarks SET qualified=true,category='imitable',excluded=NULL,followers=5000,
       last_published_at=now(),posts_analyzed=1 WHERE fetch_id=$1`,[got.fetchId]),/check constraint/);
   });

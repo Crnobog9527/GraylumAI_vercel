@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { inferRouterContext } from '@trpc/server';
 import { router as createTRPCRouter } from '../trpc';
 import { methodPaymentProcedures } from './methodPayments';
@@ -7,7 +7,10 @@ import { logger } from '../lib/logger';
 import { WaffoFailure } from '../services/payments/waffoFailure';
 import { RateLimitError } from '../lib/rateLimitError';
 import { assertCheckoutRateLimit } from '../services/stripe';
-const mocks = vi.hoisted(() => ({ cancel: vi.fn(), provider: vi.fn(), wallet: vi.fn(), card: vi.fn(), gateOpen: { value: false } }));
+const mocks = vi.hoisted(() => ({ cancel: vi.fn(), provider: vi.fn(), wallet: vi.fn(), card: vi.fn(), gateOpen: { value: false },
+  membership: vi.fn(), scope: vi.fn(), stripeConfigured: { value: false } }));
+vi.mock('../services/payments/methodMembership', () => ({ readMethodMembership: mocks.membership }));
+vi.mock('../services/payments/stripeCheckoutPersistence', () => ({ resolveStripeScope: mocks.scope }));
 vi.mock('../services/payments/waffoTestOperationsClient', () => ({ getWaffoTestOperationsClient: mocks.provider }));
 // Every new checkout is closed in code during PR-1; the error-mapping tests open the gate explicitly.
 vi.mock('../services/payments/methodCheckoutGate', async (load) => {
@@ -19,7 +22,7 @@ vi.mock('../services/payments/methodCheckoutGate', async (load) => {
 vi.mock('../services/payments/walletCheckout', () => ({ createWalletCheckout: mocks.wallet }));
 vi.mock('../services/payments/stripeMethodCheckout', () => ({ createStripeCardCheckout: mocks.card }));
 vi.mock('../services/stripe', () => ({ assertCheckoutRateLimit: vi.fn(), getStripeAppUrl: () => 'https://auth-staging.graylum.com',
-  getStripeClient: vi.fn() }));
+  getStripeClient: vi.fn(), isStripeCheckoutConfigured: () => mocks.stripeConfigured.value }));
 const router = createTRPCRouter(methodPaymentProcedures);
 const userId = '00000000-0000-4000-8000-000000000001';
 const subscriptionId = '00000000-0000-4000-8000-000000000002';
@@ -113,12 +116,38 @@ it('sends card purchases past the environment gate to the Stripe card checkout, 
   stubStaging(); mocks.gateOpen.value = true;
   for (const method of ['card', 'card_cn'] as const) {
     await expect(fixture('user', settings(true)).caller.methodCheckout({ ...card, method }))
-      .resolves.toEqual({ orderId: 'card-order', state: 'open', url: 'https://checkout.stripe.com/c/pay/card' });
+      .resolves.toEqual({ orderId: 'card-order', state: 'open', url: 'https://checkout.stripe.com/c/pay/card', checkoutValue: null });
     expect(mocks.card).toHaveBeenLastCalledWith(expect.objectContaining({ purchase: { ...card, method } }));
   }
   await expect(fixture('user', settings(false)).caller.methodCheckout(card)).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
   expect(mocks.card).toHaveBeenCalledTimes(2);
   expect(mocks.wallet).not.toHaveBeenCalled(); expect(mocks.provider).not.toHaveBeenCalled();
+});
+it('keeps GA ids out of the purchase and stores only well-formed ones beside the opened order (ANALYTICS 0280)', async () => {
+  stubStaging(); mocks.gateOpen.value = true;
+  const f = fixture('user', settings(true));
+  const analytics = { clientId: '123456789.1700000000', sessionId: '1700000000' };
+  await expect(f.caller.methodCheckout({ ...card, analytics })).resolves.toMatchObject({ orderId: 'card-order', state: 'open' });
+  expect(mocks.card).toHaveBeenLastCalledWith(expect.objectContaining({ purchase: card }));
+  expect(JSON.stringify(mocks.card.mock.lastCall)).not.toContain('1700000000');
+  expect(f.rpc).toHaveBeenCalledWith('analytics_store_checkout_ids', { p_user: userId, p_order: 'card-order',
+    p_client: analytics.clientId, p_session: analytics.sessionId, p_requested_at: expect.stringMatching(/^\d{4}-\d\d-\d\dT/) });
+  // Forged values never refuse the purchase and are never stored.
+  const forged = fixture('user', settings(true));
+  await expect(forged.caller.methodCheckout({ ...card, analytics: { clientId: 'someone@example.com', sessionId: 'x' } }))
+    .resolves.toMatchObject({ state: 'open' });
+  expect(forged.rpc).not.toHaveBeenCalledWith('analytics_store_checkout_ids', expect.anything());
+  // A failed store is statistics only: the checkout still opens.
+  const failing = fixture('user', settings(true));
+  failing.rpc.mockResolvedValueOnce({ data: null, error: { message: 'down' } });
+  await expect(failing.caller.methodCheckout({ ...card, analytics })).resolves.toMatchObject({ state: 'open' });
+  // Without ids, or when the checkout did not open, nothing is stored.
+  const none = fixture('user', settings(true));
+  await none.caller.methodCheckout(card);
+  mocks.card.mockResolvedValueOnce({ orderId: 'card-order', state: 'recovery_required', url: null });
+  await none.caller.methodCheckout({ ...card, analytics });
+  expect(none.rpc).not.toHaveBeenCalledWith('analytics_store_checkout_ids', expect.anything());
+  await expect(none.caller.methodCheckout({ ...card, extra: 1 } as typeof card)).rejects.toMatchObject({ code: 'BAD_REQUEST' });
 });
 it('checks the route switch and version before the wallet checkout', async () => {
   stubStaging(); mocks.gateOpen.value = true;
@@ -127,7 +156,7 @@ it('checks the route switch and version before the wallet checkout', async () =>
     .rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
   expect(mocks.wallet).not.toHaveBeenCalled();
   await expect(fixture('user', settings(true)).caller.methodCheckout(wallet))
-    .resolves.toEqual({ orderId: 'order', state: 'open', url: 'https://checkout.stripe.com/c/pay/x' });
+    .resolves.toEqual({ orderId: 'order', state: 'open', url: 'https://checkout.stripe.com/c/pay/x', checkoutValue: null });
   expect(mocks.wallet).toHaveBeenCalledWith(expect.objectContaining({ userId, termsVersion: 'terms-test', purchase: wallet }));
 });
 it('does not open Stripe wallets while the code gate is closed', async () => {
@@ -174,4 +203,18 @@ it('answers an expected admission refusal with a typed error and plain message, 
   expect(warn).toHaveBeenCalledWith('billing', 'pay_waffo_method_failed', expect.objectContaining({
     operation: 'method_checkout', code: 'PAY_WAFFO_MEMBERSHIP_TRANSITION_REQUIRED' }));
   warn.mockRestore();
+});
+
+describe('R7: member page reads in the connected Stripe account mode', () => {
+  it('reads local membership in test mode without calling Stripe when checkout is not configured; live when it is', async () => {
+    mocks.membership.mockResolvedValue({ mode: 'test' });
+    mocks.stripeConfigured.value = false;
+    await fixture().caller.methodMembership();
+    expect(mocks.scope).not.toHaveBeenCalled();
+    expect(mocks.membership).toHaveBeenLastCalledWith(expect.anything(), userId, expect.any(Number), process.env, 'test');
+    mocks.stripeConfigured.value = true; mocks.scope.mockResolvedValue({ merchant: 'acct_live', mode: 'live' });
+    await fixture().caller.methodMembership();
+    expect(mocks.membership).toHaveBeenLastCalledWith(expect.anything(), userId, expect.any(Number), process.env, 'live');
+    mocks.stripeConfigured.value = false;
+  });
 });

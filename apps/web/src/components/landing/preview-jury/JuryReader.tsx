@@ -14,6 +14,7 @@ import { useReadingProgress } from './use-reading-progress';
 import { ChoiceBar, Done, Review } from './JuryReaderActions';
 import { JuryReaderChapter } from './JuryReaderChapter';
 import styles from './jury-reader.module.css';
+import { DisplayHeading } from '@/components/chat-display/display-heading';
 
 type Mode = 'changes' | 'all';
 
@@ -101,8 +102,8 @@ function Glance({ detail, chapters, source, adoption, failed, onJump }: {
   const lines = summaryLines(detail, source);
   return (
     <section className={styles.glance} aria-labelledby="jury-glance-title">
-      <h2 id="jury-glance-title">{!failed ? '30 秒看懂' : keptAsIs(detail) ? '评审团认为这份报告不需要修改'
-        : '修订稿没有生成成功，原文没有任何改动'}</h2>
+      <DisplayHeading as="h2" id="jury-glance-title">{!failed ? '30 秒看懂' : keptAsIs(detail) ? '评审团认为这份报告不需要修改'
+        : '修订稿没有生成成功，原文没有任何改动'}</DisplayHeading>
       {lines.length > 0 ? <dl className={styles.onePage}>
         {lines.map(line => (
           <div key={line.label}>
@@ -112,7 +113,7 @@ function Glance({ detail, chapters, source, adoption, failed, onJump }: {
         ))}
       </dl> : null}
       {points.length > 0 ? <div className={styles.top3}>
-        <h3>{failed ? `评审对 ${flagged} 章提了意见，最要紧的 ${points.length} 条` : `评审改了 ${flagged} 章，最重要的 ${points.length} 条`}</h3>
+        <DisplayHeading as="h3">{failed ? `评审对 ${flagged} 章提了意见，最要紧的 ${points.length} 条` : `评审改了 ${flagged} 章，最重要的 ${points.length} 条`}</DisplayHeading>
         <ol>
           {points.map(point => (
             <li key={point.text}>

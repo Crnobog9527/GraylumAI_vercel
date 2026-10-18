@@ -1,4 +1,4 @@
-import {contentVisibilityFence} from '../services/accountErasure/content';
+import {executionVisibility} from '../services/runtime/libraryVisibility';
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { AgentTurnEvent } from "../shared/agentTurn";
 import { capturePendingInput, captureResolveInput } from "../services/opc/capture";
@@ -9,6 +9,7 @@ import {executeOriginalExecution,runtimeLocalEndpoint,streamOriginalExecution} f
 import {StagingAccessError,stagingProcedureError,stagingRpcFailure} from '../services/runtime/stagingErrors';
 import {briefAdoption, contentReaction, topicAdoptionWithSource} from "../services/opc/dataFoundation";
 import { dedupeHandoffResults } from "../services/opc/handoff-view";
+import { realHostMode } from "../services/runtime/productionEnvironment";
 import { conversationRename, renameConversation } from "../services/opc/conversationName";
 import {
   opcService,
@@ -112,11 +113,11 @@ export const opcRouter = router({
           throw isOpcRefusal(cause) ? cause : stagingProcedureError(cause, path);
         }
         yield { type: "admitted" as const, executionId: admitted.executionId };
+        const visibility = executionVisibility(ctx.supabaseAdmin, ctx.user.id, admitted.executionId);
         yield* streamOriginalExecution((onProgress) => executeOriginalExecution({
           admin: ctx.supabaseAdmin, user: ctx.userScopedSupabase, actorId: ctx.user.id, budget: ctx.runtimeBudget,
-          authorization: ctx.headers?.get("Authorization"), maintenanceEndpoint,
-        }, admitted.executionId, onProgress), timing, path, undefined, input.textProtocol,
-          contentVisibilityFence(ctx.supabaseAdmin, ctx.user.id, admitted.executionId));
+          authorization: ctx.headers?.get("Authorization"), maintenanceEndpoint, visibility,
+        }, admitted.executionId, onProgress), timing, path, undefined, input.textProtocol, visibility.visible);
       } finally {
         timing?.release();
       }
@@ -266,7 +267,8 @@ export const opcRouter = router({
     .mutation(({ ctx, input }) => ctx.opc.videoMaterialPrepare(input)),
   read: readProcedure
     .input(z.object({ draftId: z.string().uuid() }).strict())
-    .query(async({ ctx, input }) => dedupeHandoffResults({...await ctx.opc.read(input.draftId),runtimeMode:ctx.stagingRead?"staging_test":"isolated"})),
+    .query(async({ ctx, input }) => dedupeHandoffResults({...await ctx.opc.read(input.draftId),
+      runtimeMode:ctx.stagingRead?realHostMode(process.env):"isolated"})),
   start: procedure
     .input(opcStart)
     .mutation(({ ctx, input }) => ctx.opc.start(input)),

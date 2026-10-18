@@ -33,5 +33,9 @@ export async function planReview(input: { admin: SupabaseClient; actorId: string
     opinionTokens: settings.review.opinionOutputTokens, summaryTokens: settings.review.summaryOutputTokens, fieldCount: preview.fieldCount,
     snapshotBytes: preview.reportSentBytes + preview.materialsSentBytes,
     instructionBytes: { reviewer: sent(`${text.reviewer}\n\n${text.rubric}`), summary: sent(`${text.summary}\n\n${text.rubric}`) } });
-  return { settings, skill, text, ...estimate };
+  // Fixed price (0294): the user pays settings.review.fixedPriceCredits; each step still holds its calls' own bounds for
+  // a moment (released at zero charge), so a start needs the price plus the largest step's hold.
+  const sum = (caps: Record<string, { credits: number }>) => Object.values(caps).reduce((total, cap) => total + cap.credits, 0);
+  const holdCredits = Math.max(sum(estimate.callCaps.review), sum(estimate.callCaps.debate), sum(estimate.callCaps.summary));
+  return { settings, skill, text, ...estimate, priceCredits: settings.review.fixedPriceCredits, holdCredits };
 }

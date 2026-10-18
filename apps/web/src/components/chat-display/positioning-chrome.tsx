@@ -3,6 +3,7 @@ import type { ReactNode, Ref } from "react";
 import { PanelRightOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import resultStyles from "@/components/opc/positioning-result.module.css";
+import { DisplayHeading } from './display-heading';
 
 /**
  * Display-only pieces of the positioning workspace: page header, step strip and the right-hand
@@ -11,8 +12,10 @@ import resultStyles from "@/components/opc/positioning-result.module.css";
  */
 
 /** Title row of the positioning page: title, platform and state, work info, and reopening the right column. */
-export function PositioningHeader({ title, status, onWorkInfo, showExpand, onExpand }: {
+export function PositioningHeader({ title, status, onWorkInfo, showExpand, onExpand, headingLevel = 'h1' }: {
   title: string;
+  /** The title's heading level: the page's own title (h1) by default; a page showing it inside its own content, h2. */
+  headingLevel?: 'h1' | 'h2';
   /** For example "整体规划 · 进行中". */
   status: string;
   onWorkInfo?: () => void;
@@ -22,7 +25,7 @@ export function PositioningHeader({ title, status, onWorkInfo, showExpand, onExp
 }) {
   return (
     <header className={resultStyles.positionTop}>
-      <h1>{title}</h1>
+      <DisplayHeading as={headingLevel}>{title}</DisplayHeading>
       <div className={resultStyles.positionActions}>
         <span>{status}</span>
         <button type="button" onClick={onWorkInfo}>工作信息</button>
@@ -64,7 +67,7 @@ export function PositioningResultPanel({ subtitle, bodyRef, children }: {
   children: ReactNode;
 }) {
   return (
-    <div className={resultStyles.panel}><header><h2>定位清单</h2><p>{subtitle}</p></header>
+    <div className={resultStyles.panel}><header><DisplayHeading as="h2">定位清单</DisplayHeading><p>{subtitle}</p></header>
       <div className={resultStyles.body} ref={bodyRef}>{children}</div></div>
   );
 }

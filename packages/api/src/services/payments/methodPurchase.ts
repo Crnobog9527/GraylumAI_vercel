@@ -5,7 +5,7 @@ import { loadOpeningGrantDigests } from '../accountErasure/openingGrantIdentity'
 import { paymentMethodSchema } from './methodRouting';
 import { admissionError } from './methodPurchaseError';
 
-export const methodPurchaseInputSchema = z.object({
+const methodPurchaseShape = {
   itemType: z.enum(['membership_plan', 'credit_package']),
   itemId: z.string().uuid(),
   billingCycle: z.enum(['monthly', 'yearly', 'one_time']),
@@ -16,7 +16,17 @@ export const methodPurchaseInputSchema = z.object({
   termsVersion: z.string().regex(/^[A-Za-z0-9_.:-]{1,80}$/).optional(),
   transition: z.enum(['upgrade', 'founder_renewal']).optional(),
   priorSubscriptionId: z.uuid().optional(),
-}).strict().refine(value => Boolean(value.transition) === Boolean(value.priorSubscriptionId), 'Transition requires original subscription');
+};
+const transitionPaired = (value: { transition?: unknown; priorSubscriptionId?: unknown }) =>
+  Boolean(value.transition) === Boolean(value.priorSubscriptionId);
+
+export const methodPurchaseInputSchema = z.object(methodPurchaseShape).strict()
+  .refine(transitionPaired, 'Transition requires original subscription');
+
+/** The checkout request: the purchase plus the browser's optional GA ids (ANALYTICS §3.1). The ids are checked
+ * separately and dropped when malformed, never refusing the purchase; they never reach the purchase itself. */
+export const methodCheckoutInputSchema = z.object({ ...methodPurchaseShape, analytics: z.unknown().optional() }).strict()
+  .refine(transitionPaired, 'Transition requires original subscription');
 
 /** Server-only preparation, no provider dispatch. PR-2 supplies the authenticated route and
  * authoritative published terms version; caller input cannot set prices or provider scope. */
@@ -25,7 +35,8 @@ export async function prepareMethodPurchase(input: {
   merchantNamespace: string; paymentMode: 'test' | 'live'; termsVersion: string;
 }) {
   const purchase = methodPurchaseInputSchema.parse(input.purchase);
-  if (input.paymentMode !== 'test') throw new Error('PAY_WAFFO_LIVE_DISABLED');
+  // The mode is the server Stripe scope's (R7): admission accepts live for Stripe only (0296); Waffo passes 'test'.
+  if (input.paymentMode !== 'test' && input.paymentMode !== 'live') throw new Error('PAY_WAFFO_LIVE_DISABLED');
   if (!/^[A-Za-z0-9_.:-]{1,80}$/.test(input.termsVersion)) throw new Error('PAY_WAFFO_TERMS_UNAVAILABLE');
   const digests = await loadOpeningGrantDigests(input.admin, input.userId);
   const args = {
@@ -38,7 +49,7 @@ export async function prepareMethodPurchase(input: {
     ? await input.admin.rpc('pay_waffo_create_transition', { p_user: args.p_user, p_item: args.p_item,
       p_cycle: args.p_cycle, p_method: args.p_method, p_offer: args.p_offer, p_merchant: args.p_merchant,
       p_version: args.p_version, p_terms: args.p_terms, p_digests: args.p_digests,
-      p_transition: purchase.transition, p_prior: purchase.priorSubscriptionId })
+      p_transition: purchase.transition, p_prior: purchase.priorSubscriptionId, p_mode: args.p_mode })
     : await input.admin.rpc('pay_waffo_create_purchase', args);
   // Keep the database's own refusal code so expected business answers are not reported as outages.
   if (result.error) throw admissionError(result.error.message, result.error);

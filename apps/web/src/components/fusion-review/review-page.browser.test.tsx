@@ -137,7 +137,8 @@ it('plays a running review with the administrator\'s seat names, hands it to the
     await ui(page.getByRole('heading', { name: '评审团正在审阅你的定位报告' })).toBeVisible({ timeout: 8000 });
     await ui(page.getByText(/评审在后台进行/)).toBeVisible();
     await ui(page.getByText('挑刺审核人').first()).toBeVisible();
-    await ui(page.getByRole('button', { name: '停止评审' })).toBeVisible();
+    // Owner 2026-10-17: once started, a review cannot be stopped or ended by the user.
+    expect(await page.getByRole('button', { name: /停止评审|结束评审/ }).count()).toBe(0);
     expect(calls['fusionReview.continue']).toBeGreaterThanOrEqual(1);
     await page.getByRole('button', { name: '先去忙别的' }).click();
     expect(await page.evaluate(() => (window as unknown as { __pushed?: string }).__pushed)).toBe(`/positioning/${DRAFT}`);
@@ -149,6 +150,8 @@ it('keeps 看全文 clickable at computer width when chapter titles are long (st
   const { page, errors } = await open('completed', { long: true });
   try {
     await ui(page.getByRole('heading', { name: '评审团的结果' })).toBeVisible({ timeout: 8000 });
+    // The heading shows as soon as the review is read; the chapters only once the events are too, so wait for them.
+    await ui(page.locator('#jury-reader-chapters')).toBeVisible({ timeout: 8000 });
     // The contents stay inside their column: nothing of them lies over the reading column.
     const overlap = await page.evaluate(() => {
       const toc = document.querySelector('nav[aria-label="报告目录"]')!;
@@ -166,6 +169,7 @@ it('works at phone width without sideways scrolling', async () => {
   const { page, errors } = await open('completed', { width: 390 });
   try {
     await ui(page.getByRole('heading', { name: '评审团的结果' })).toBeVisible({ timeout: 8000 });
+    await ui(page.locator('#jury-reader-chapters')).toBeVisible({ timeout: 8000 }); // measure the loaded report, not the loading note
     expect(await noSideScroll(page)).toBe(true);
     expect(errors).toEqual([]);
   } finally { await page.close(); }
@@ -203,7 +207,7 @@ async function openEntry(answers: { enabled: boolean; mine?: unknown[]; refuse?:
     }
     const result = name === 'fusionReview.available' ? { enabled: answers.enabled } : name === 'fusionReview.mine' ? answers.mine ?? []
       : name === 'fusionReview.panel' ? PANEL : name === 'fusionReview.start' ? { reviewId: REVIEW, state: 'running' }
-        : name === 'fusionReview.estimate' ? { estimateCredits: 1280, maxRounds: 2, reviewers: 3 } : {};
+        : name === 'fusionReview.estimate' ? { estimateCredits: 1500, holdCredits: 320, requiredCredits: 1820, maxRounds: 2, reviewers: 3 } : {};
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ result: { data: result } }) });
   });
   await page.goto('http://localhost/#entry');
@@ -232,12 +236,13 @@ it('starts one review with the panel\'s names and opens its page; a running one 
     await page.getByRole('button', { name: '请评审团审阅报告' }).click();
     await ui(page.getByText(/3 位评审（目标用户、操盘手、挑刺审核人）/)).toBeVisible();
     // The maximum is shown before the user agrees, and start carries exactly that maximum.
-    await ui(page.getByText('这次评审最多消耗 1,280 积分，实际用多少扣多少。')).toBeVisible();
+    await ui(page.getByText('本次评审 1,500 积分。生成修订稿才扣，没有生成修订稿全额退回。')).toBeVisible();
+    await ui(page.getByText(/开始时可用积分需要至少 1,820/)).toBeVisible();
     await page.getByRole('button', { name: '开始评审' }).dblclick();
     await page.waitForFunction(() => Boolean((window as unknown as { __pushed?: string }).__pushed));
     expect(await page.evaluate(() => (window as unknown as { __pushed?: string }).__pushed)).toBe(`/positioning/${DRAFT}/review/${REVIEW}`);
     expect(calls['fusionReview.start']).toBe(1);
-    expect(starts).toEqual([expect.objectContaining({ draftId: DRAFT, sourceVersionId: REVIEW, acceptedCredits: 1280 })]);
+    expect(starts).toEqual([expect.objectContaining({ draftId: DRAFT, sourceVersionId: REVIEW, acceptedCredits: 1500 })]);
     expect(errors).toEqual([]);
   } finally { await page.close(); }
   const running = await openEntry({ enabled: true, mine: [mineItem('running')] });
@@ -253,7 +258,7 @@ it('explains a refused start in plain words and keeps the page usable', async ()
     await ui(page.getByRole('link', { name: '评审完成，去逐章选择 →' })).toBeVisible();
     await page.getByRole('button', { name: '请评审团审阅报告' }).click();
     await page.getByRole('button', { name: '开始评审' }).click();
-    await ui(page.getByRole('alert')).toHaveText('评审团是会员功能，开通会员后可以使用。');
+    await ui(page.getByRole('alert')).toHaveText('评审团仅限 Gold 会员使用，升级到 Gold 后可以使用。');
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 30000);

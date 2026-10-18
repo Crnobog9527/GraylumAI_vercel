@@ -8,7 +8,7 @@ import type { LandingFeature } from './landing-flags';
  * (sample J's takeover script and week, sample L's week), cut with "……", ending on what to do next. The verdicts are NEW.
  * Round four (Owner 2026-10-17): a marketing comparison, not a product window, so no product step head on the coach's side.
  */
-export const L_TASKS_TITLE = '同一个任务，通用 AI 和 AI 教练交出来的东西不一样';
+export const L_TASKS_TITLE = '同一个任务，通用 AI VS Graylum AI 教练';
 const SOURCE = '下班后 15 分钟家常菜';
 
 export const L_TASKS: readonly {
@@ -16,14 +16,13 @@ export const L_TASKS: readonly {
   verdict: string; needs?: readonly LandingFeature[];
 }[] = [
   {
-    question: '我想做美食号，该怎么定位？',
-    generic: ['可以先想清楚三件事：拍什么类型的美食、给谁看、和别人有什么不同。',
-      '常见方向有家常菜、探店、烘焙、减脂餐。选一个你喜欢的，保持更新，慢慢找到自己的风格。'],
-    coach: '好，做饭是个好起点。先不急着定拍什么，我先把你的情况弄清楚，一次只问一个问题。先问第一件：'
-      + '你做这个账号，最希望它最后给你带来什么？……同样是做饭账号，想记录生活和想赚钱，拍法、选平台、找对标完全不一样。'
-      + '\n\n接下来你做：回答这一个问题就行，记录、零花钱、慢慢做成主业，还是先试试。',
-    genericNote: '给你一套框架，自己去套', coachNote: '先问清你，再下判断', source: SOURCE,
-    verdict: '一个给你方法，一个先把你弄清楚', needs: ['coach'],
+    // Round eight (U7, Owner 2026-10-18): the positioning was just shown in step one, so this scenario adds a platform.
+    question: '我在 TikTok 做了两个月，想把小红书也做起来，该怎么弄？',
+    generic: ['小红书的常见做法：', '多发图文笔记，标题里加关键词，封面做得好看一点，保持稳定更新，多和评论区互动。'],
+    coach: '定位不用变，要变的是内容的样子和别人找到你的方式：每条视频在小红书发原视频加一篇图文笔记，标题写搜索词，'
+      + '"免费一周菜单"放到置顶笔记。\n\n接下来你做：这周日把"一口锅两菜一汤"那条改成图文发出去。',
+    genericNote: '一套通用建议', coachNote: '按你已有的 TikTok 数据适配', source: SOURCE,
+    verdict: '根据你已有平台的定位和数据，适配新平台的分发策略和内容形式。', needs: ['coach'],
   },
   {
     question: '这周拍什么？',
@@ -32,22 +31,22 @@ export const L_TASKS: readonly {
       + '冰箱剩菜三种做法（接上你说的"青菜三天吃不完"）；超市半成品改造（最省事，适合累的那几天）。'
       + '\n\n接下来你做：先拍第一个，下班后十五分钟就够。',
     genericNote: '一份谁都能拍的清单', coachNote: '按你的定位和数据挑', source: SOURCE,
-    verdict: '一个给你清单，一个替你挑好这周拍什么', needs: ['content'],
+    verdict: '根据真实数据反馈，得出优化方向和值得放大的选题。', needs: ['content'],
   },
   {
     question: '帮我写一条口播稿',
     generic: ['好的，这是一条美食口播稿：', '"大家好，今天给大家分享一道超级简单又好吃的家常菜，学会了再也不用点外卖！……喜欢的话记得点赞关注哦！"'],
     coach: '按你平时说话的习惯写好了，句子短：下班到家七点，这顿饭我十五分钟搞定。一口锅，先炒菜，再借锅底的油煮汤。'
-      + '分镜：成品 → 备菜 → 下锅 → 装盘，只拍手和锅。\n\n接下来你做：照着分镜拍，拍完上传，字幕我来配。',
+      + '分镜：先拍成品，再拍备菜、下锅、装盘，只拍手和锅。\n\n接下来你做：照着分镜拍，拍完上传，字幕我来配。',
     genericNote: '一套通用模板', coachNote: '按你的定位和说话习惯写', source: SOURCE,
-    verdict: '一个给你模板，一个写的是你自己的稿子', needs: ['content'],
+    verdict: '根据你上传到资料库的写作样稿，AI 教练从此都用你的写作风格写稿。', needs: ['content'],
   },
   {
-    question: '这条为什么没火？',
-    generic: ['可能的原因有很多：发布时间、封面不够吸引人、前 3 秒没抓住观众、话题不够热。', '建议多分析数据，持续优化，保持更新。'],
+    question: '冰箱剩菜那条为什么没火？',
+    generic: ['可能的原因有很多：发布时间、封面不够吸引人、开头没抓住观众、话题不够热。', '建议多分析数据，持续优化，保持更新。'],
     coach: '我读了你这周三个平台的数据：前半周持平，"冰箱剩菜"那条发出后明显上升。"省事"的题最受欢迎；YouTube 开头太长，留不住人。'
       + '\n\n接下来你做：下周多做两条省事菜，YouTube 开头直接给成品。',
     genericNote: '列出所有可能', coachNote: '看你自己的数据下结论', source: SOURCE,
-    verdict: '一个列出所有可能，一个告诉你问题在哪、下周怎么改', needs: ['publish'],
+    verdict: '通过真实反馈诊断出数据不好的原因，并且直接告诉你怎么优化。', needs: ['publish'],
   },
 ];

@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
 import { MiSansFont } from "@/components/misans-font";
-import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
 import Provider from "@/trpc/provider";
 import { getPublicSiteSettings } from "@/lib/public-site";
 import { Toaster } from "@/components/ui/sonner";
 import { JsonLd } from "@/components/seo/JsonLd";
+import { SiteAnalytics } from "@/components/analytics/SiteAnalytics";
 import { NOINDEX_ROBOTS } from "@/lib/seo/metadata";
 import { DEFAULT_LOCALE, SITE_LOCALES } from "@/lib/seo/site";
 import { organizationJsonLd, websiteJsonLd } from "@/lib/seo/structured-data";
@@ -38,7 +38,8 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const shouldRenderSpeedInsights =
+  // Vercel Web Analytics and Speed Insights only report from Vercel production-mode deployments.
+  const onVercel =
     process.env.NODE_ENV === 'production' &&
     (process.env.VERCEL === '1' || Boolean(process.env.VERCEL_URL));
 
@@ -49,9 +50,12 @@ export default function RootLayout({
       <body className="antialiased">
         <JsonLd data={[organizationJsonLd({ supportEmail: publicSupportEmail() }), websiteJsonLd()]} />
         <MiSansFont />
-        <Provider>{children}</Provider>
+        <Provider>
+          {children}
+          {/* Termly consent, GA4 and Vercel statistics; loads nothing until configured (ANALYTICS plan §3). */}
+          <SiteAnalytics onVercel={onVercel} />
+        </Provider>
         <Toaster />
-        {shouldRenderSpeedInsights ? <SpeedInsights /> : null}
       </body>
     </html>
   );

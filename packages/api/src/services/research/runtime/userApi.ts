@@ -131,3 +131,20 @@ const card = z.discriminatedUnion('kind', [
 export async function researchCards(db: Db | null, actor: string, sessionId: string) {
   return { items: parse(z.array(card), await rpc(db, 'research_user_cards', { a: actor, s: id.parse(sessionId) })) };
 }
+
+// RT-5: the session's benchmark table for the conversation (0282 `research_user_benchmarks`, ownership checked in
+// SQL). Numbers only as the host computed them, each with the evidence refs it came from; null stays null.
+const count = z.number().finite().min(0).nullable();
+const refList = z.array(z.string().regex(/^[0-9a-f-]{36}#\d{1,3}$/)).max(40);
+const benchmark = z.object({
+  platform: z.string(), account: z.string(), followers: count, medianViews: count, engagementRate: count,
+  postsPerWeek: count, lastPublishedAt: z.string().nullable(), postsAnalyzed: z.number().int().min(0),
+  category: z.enum(['head_reference', 'imitable', 'fast_rising']).nullable(), qualified: z.boolean(),
+  excluded: z.string().nullable(), fetchedAt: z.string(),
+  refs: z.object({ followers: refList, medianViews: refList, engagementRate: refList, postsPerWeek: refList,
+    lastPublishedAt: refList }),
+});
+export async function researchBenchmarks(db: Db | null, actor: string, sessionId: string) {
+  const rows = parse(z.array(benchmark), await rpc(db, 'research_user_benchmarks', { a: actor, s: id.parse(sessionId) }));
+  return { items: rows };
+}

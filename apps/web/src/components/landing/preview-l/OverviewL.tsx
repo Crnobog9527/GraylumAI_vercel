@@ -1,6 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import type { CSSProperties, ReactNode } from 'react';
-import { TriangleAlert } from 'lucide-react';
+import { Children, type CSSProperties, type ReactElement, type ReactNode } from 'react';
+import {
+  CalendarDays, ChartNoAxesColumn, Filter, Gauge, IdCard, ListChecks, PieChart, Send, Sparkles, Target, TriangleAlert, UserRound,
+  UsersRound, type LucideIcon,
+} from 'lucide-react';
 import { L_SAMPLES_REDO } from '@/lib/landing/landing-copy-l-samples';
 import type { SampleOverview } from '@/lib/landing/sample-reports/overview';
 import own from './samples-l.module.css';
@@ -22,42 +25,58 @@ const shareOf = (text: string | null) => { const found = text?.match(/(\d+(?:\.\
  * the numbers to watch and this week's first steps. Every figure is the report's own text; a missing one is not drawn.
  * A summary drawn for the page, not a product screen: it carries 示意.
  */
-export function OverviewL({ data }: { data: SampleOverview }) {
+export function OverviewL({ data, reveal, money }: {
+  data: SampleOverview;
+  /** How much of it has been written so far, 0 → 1 (step one's report being written); absent, all of it. */
+  reveal?: number;
+  /** Shown at the end of the money card (round seven, T6: step one's report only, EarningsL). */
+  money?: ReactNode;
+}) {
   const copy = L_SAMPLES_REDO.overview;
   const counts = data.benchmarks.map(item => countOf(item.followers));
   const most = Math.max(1, ...counts.map(count => count ?? 0));
   const pillars = data.contentPillars.map(item => ({ ...item, value: shareOf(item.share) }));
-  return (
-    <section className={styles.overview} aria-label={copy.title}>
-      <header className={styles.head}>
-        <p className={styles.who}><b>{data.persona.label}</b><span className={own.sketch}>{copy.sketch}</span></p>
-        <p className={styles.whoLine}>{data.persona.who}</p>
-        <p className={styles.position}>{data.positioning}</p>
-      </header>
+  const body: ReactElement<{ children: ReactNode }> = (
+    <>
+      <div className={styles.pair}>
+        <Block title={copy.person} icon={UserRound}>
+          <p className={styles.who}><b>{data.persona.label}</b><span className={own.sketch}>{copy.sketch}</span></p>
+          <p className={styles.text}>{data.persona.who}</p>
+        </Block>
+        <Block title={copy.position} icon={Target}>
+          <p className={styles.position}>{data.positioning}</p>
+        </Block>
+      </div>
 
       {data.riskAlert ? (
-        <div className={own.risk} role="note">
-          <p className={own.riskLabel}><TriangleAlert size={16} aria-hidden="true" />{copy.risk}</p>
-          <p className={own.riskText}>{data.riskAlert.headline}</p>
+        <Block title={copy.risk} icon={TriangleAlert} tone="risk" note>
+          <p className={styles.riskHeadline}>{data.riskAlert.headline}</p>
           {data.riskAlert.why.length ? <ul className={styles.why}>{data.riskAlert.why.map(item => <li key={item}>{item}</li>)}</ul> : null}
-        </div>
+        </Block>
       ) : null}
 
       <div className={styles.pair}>
-        <Block title={copy.audience}>
+        <Block title={copy.audience} icon={UsersRound}>
           <ul className={styles.people}>
             {data.audience.map(item => <li key={item.name}><b>{item.name}</b><span>{item.trigger}</span></li>)}
           </ul>
         </Block>
-        <Block title={copy.platform}>
-          <p className={styles.main}>{data.platform.main}</p>
-          {data.platform.support.length ? <p className={styles.support}>{copy.support}：{data.platform.support.join('、')}</p> : null}
+        <Block title={copy.platform} icon={Send}>
+          {data.ownAccount ? <AccountCard account={data.ownAccount} /> : (
+            <>
+              <p className={styles.noAccount}>{copy.noAccount}</p>
+              <ul className={styles.badges}>
+                {[data.platform.main, ...data.platform.support].map(name => <li key={name}>{name}</li>)}
+              </ul>
+            </>
+          )}
+          {data.ownAccount && data.platform.support.length ? <p className={styles.support}>{copy.support}：{data.platform.support.join('、')}</p> : null}
           <p className={styles.small}>{data.platform.why}</p>
         </Block>
       </div>
 
       {data.benchmarks.length ? (
-        <Block title={copy.benchmarks}>
+        <Block title={copy.benchmarks} icon={ChartNoAxesColumn}>
           <ul className={styles.bars}>
             {data.benchmarks.map((item, index) => {
               const count = counts[index];
@@ -84,61 +103,100 @@ export function OverviewL({ data }: { data: SampleOverview }) {
       ) : null}
 
       <div className={styles.pair}>
-        <Block title={copy.differentiation}><p className={styles.text}>{data.differentiation}</p></Block>
-        <Block title={copy.threePiece}>
+        <Block title={copy.differentiation} icon={Sparkles}><p className={styles.text}>{data.differentiation}</p></Block>
+        <Block title={copy.threePiece} icon={IdCard}>
           <p className={styles.text}><b>{data.threePiece.name}</b></p>
           <p className={styles.small}>{data.threePiece.bio}</p>
         </Block>
       </div>
 
       {pillars.some(item => item.value !== null) ? (
-        <Block title={copy.pillars}>
+        <Block title={copy.pillars} icon={PieChart}>
+          <p className={styles.lede}>{copy.pillarsLede}</p>
           <div className={styles.mix} role="img" aria-label={pillars.map(item => `${item.name} ${item.share ?? ''}`).join('，')}>
             {pillars.filter(item => item.value !== null).map((item, index) => (
               <i key={item.name} data-tone={index} style={{ flexGrow: item.value ?? 0 } as CSSProperties} />
             ))}
           </div>
           <ul className={styles.mixLegend}>
-            {pillars.map((item, index) => <li key={item.name} data-tone={index}>{item.name}{item.share ? <b>{item.share}</b> : null}</li>)}
+            {pillars.map((item, index) => {
+              const help = copy.pillarHelp.find(entry => item.name.startsWith(entry.key));
+              return (
+                <li key={item.name} data-tone={index}>
+                  <p><span>{item.name}</span>{item.share ? <b>{item.share}</b> : null}</p>
+                  {help ? <small>{help.what}。{help.example}。</small> : null}
+                </li>
+              );
+            })}
           </ul>
         </Block>
       ) : null}
 
-      <Block title={copy.funnel}>
+      <Block title={copy.funnel} icon={Filter}>
+        <p className={styles.lede}>{copy.funnelLede}</p>
         <ol className={styles.funnel}>
           {data.funnel.map((item, index) => (
             <li key={item.layer} style={{ '--n': index, '--of': data.funnel.length } as CSSProperties}>
-              <b>{item.layer}</b><span>{item.offer}</span>{item.price ? <em>{item.price}</em> : null}
+              <p><b>{item.layer}</b><span>{item.offer}</span>{item.price ? <em>{item.price}</em> : null}</p>
+              {item.why ? <small>{item.why}</small> : null}
             </li>
           ))}
         </ol>
+        {money}
       </Block>
 
-      <Block title={copy.plan30}>
+      <Block title={copy.plan30} icon={CalendarDays}>
         <ol className={styles.weeks}>
           {data.plan30.map(item => <li key={item.week}><b>{copy.week(item.week)}</b><span>{item.focus}</span></li>)}
         </ol>
       </Block>
 
       <div className={styles.pair}>
-        <Block title={copy.metrics}>
+        <Block title={copy.metrics} icon={Gauge}>
           <ul className={styles.chips}>{data.metricsToWatch.map(item => <li key={item}>{item}</li>)}</ul>
         </Block>
-        <Block title={copy.first} todo>
+        <Block title={copy.first} icon={ListChecks} todo>
           <ul className={styles.todo}>
             {data.firstStep.map(item => <li key={item}><span className={own.box} aria-hidden="true" />{item}</li>)}
           </ul>
         </Block>
       </div>
+    </>
+  );
+  // Written block by block: the blocks so far, in order.
+  const parts = Children.toArray(body.props.children);
+  const shown = reveal === undefined ? parts : parts.slice(0, Math.max(1, Math.ceil(parts.length * Math.min(1, reveal))));
+  return <section className={styles.overview} aria-label={copy.title}>{shown}</section>;
+}
+
+function Block({ title, icon: Icon, tone, note = false, todo = false, children }: {
+  title: string; icon?: LucideIcon; tone?: 'risk'; note?: boolean; todo?: boolean; children: ReactNode;
+}) {
+  return (
+    <section className={styles.block} data-todo={todo || undefined} data-tone={tone} role={note ? 'note' : undefined}>
+      {/* A card's title, not a page heading (SEO_GEO_SPEC section 6). */}
+      <p className={styles.blockTitle}>{Icon ? <Icon size={15} aria-hidden="true" /> : null}{title}</p>
+      {children}
     </section>
   );
 }
 
-function Block({ title, todo = false, children }: { title: string; todo?: boolean; children: ReactNode }) {
+
+type Account = NonNullable<SampleOverview['ownAccount']>;
+/** The person's account as the report recommends it (round six, S12): name and bio from the report, figures where it gives them. */
+function AccountCard({ account }: { account: Account }) {
+  const copy = L_SAMPLES_REDO.overview;
+  const stats = [[copy.accountFollowers, account.followers], [copy.accountPosts, account.posts], [copy.accountTop, account.topStat]]
+    .filter((stat): stat is [string, string] => Boolean(stat[1]));
   return (
-    <section className={styles.block} data-todo={todo || undefined}>
-      <h4>{title}</h4>
-      {children}
-    </section>
+    <div className={styles.account}>
+      <p className={styles.accountPlatform}>{account.platform}</p>
+      <div className={styles.accountHead}>
+        <span className={styles.avatar} aria-hidden="true">{Array.from(account.displayName.replace(/[〔〕·｜|]/g, ''))[0]}</span>
+        <div><b>{account.displayName}</b><p>{account.bio}</p></div>
+      </div>
+      {stats.length ? <dl className={styles.stats}>{stats.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl> : null}
+      <small className={styles.accountTag}>{copy.accountTag}</small>
+    </div>
   );
 }

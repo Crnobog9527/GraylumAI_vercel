@@ -8,13 +8,14 @@ import { logger } from '../../lib/logger';
 import { readCardPaymentEvidence, recordCardPaymentTax, type CardOrder, type CardPaymentEvidence } from './cardPaymentEvidence';
 import { stopPriorAfterUpgrade } from './cardUpgrade';
 import { stopUndeliveredSubscription } from './cardSubscriptionStop';
+import { reportGaPurchase } from '../analytics/gaPurchase';
 
 const isCard = (method: string) => method === 'card' || method === 'card_cn';
 
 /** The price this order was admitted with, from the same mapping admission used. */
-async function orderPriceId(db: SupabaseClient, order: { price_ref_id: string; merchant_namespace: string }) {
+async function orderPriceId(db: SupabaseClient, order: { price_ref_id: string; merchant_namespace: string; payment_mode: string }) {
   const price = await db.from('payment_provider_refs').select('external_id').eq('id', order.price_ref_id).eq('channel', 'stripe')
-    .eq('merchant_namespace', order.merchant_namespace).eq('mode', 'test').eq('object_type', 'price').maybeSingle();
+    .eq('merchant_namespace', order.merchant_namespace).eq('mode', order.payment_mode).eq('object_type', 'price').maybeSingle();
   if (price.error || !price.data?.external_id) throw new Error('PAY_WAFFO_PERSISTENCE_UNAVAILABLE');
   return price.data.external_id as string;
 }
@@ -61,7 +62,8 @@ export async function recoverMethodCheckout(db: SupabaseClient, stripe: Stripe, 
   if (result.error || !result.data) throw new Error('PAY_WAFFO_PERSISTENCE_UNAVAILABLE');
   const order = result.data;
   if (!order.payment_method) return null;
-  if (scope.mode !== 'test' || !['wechat_pay', 'alipay', 'card', 'card_cn'].includes(order.payment_method)) {
+  // R7 (0296): the order was admitted in this Stripe account's mode; a test order never settles in live, or the reverse.
+  if (order.payment_mode !== scope.mode || !['wechat_pay', 'alipay', 'card', 'card_cn'].includes(order.payment_method)) {
     throw new Error('PAY_WAFFO_PAYMENT_CONFLICT');
   }
   let observed: Pick<Stripe.Checkout.Session, 'status' | 'payment_status'> | null = null;
@@ -80,7 +82,7 @@ export async function recoverMethodCheckout(db: SupabaseClient, stripe: Stripe, 
     if (validated?.payment_status === 'unpaid' && (validated.status === 'expired'
       || validated.status === 'complete' && verifiedEventType === 'checkout.session.async_payment_failed')) {
       const closed = await db.rpc('pay_waffo_observe_qualification', { p_order: order.id, p_merchant: scope.merchant,
-        p_mode: 'test', p_checkout: sessionId, p_state: 'closed_unpaid', p_payment: null, p_amount: 0, p_currency: 'usd', p_paid_at: null });
+        p_mode: scope.mode, p_checkout: sessionId, p_state: 'closed_unpaid', p_payment: null, p_amount: 0, p_currency: 'usd', p_paid_at: null });
       if (closed.error) throw new Error('PAY_WAFFO_CHECKOUT_UNAVAILABLE');
     }
     // The session as this recovery validated it (newer than the caller's copy): a browser return reports it.
@@ -116,6 +118,9 @@ export async function recoverMethodCheckout(db: SupabaseClient, stripe: Stripe, 
   // Paid but kept for review (not delivered): its card subscription must not renew; the prior Pro is kept.
   else if (card) await attempt(() => stopUndeliveredSubscription(stripe, card.id));
   if ('tax' in cash) await attempt(() => recordCardPaymentTax(db, scope.merchant, order.id, cash));
+  // ANALYTICS: only the call that newly delivered the order (duplicate false) reports, whichever caller wins
+  // (webhook, browser return, reconciliation). Statistics only: it never throws and never blocks delivery.
+  if (delivered && (applied.data as { duplicate?: unknown }).duplicate === false) await reportGaPurchase(db, order);
   if (failures.length) throw failures[0];
   return { orderId: order.id, checkoutStatus: validated?.status ?? null, paymentStatus: 'paid' as const };
 }

@@ -19,6 +19,7 @@ export const SANDBOX_WORKERS = {
   'docx-worker': 'src/lib/library-sandbox/docx/worker-entry.ts',
   'pdf-worker': 'src/lib/library-sandbox/pdf/worker-entry.ts',
   'ocr-worker': 'src/lib/library-sandbox/ocr/worker-entry.ts',
+  'pdf-render-worker': 'src/lib/library-sandbox/pdf/render-entry.ts',
 };
 
 /** Extra license files for data bundled from a package (pdf.js ships Adobe's CMaps under their own terms). */
@@ -90,6 +91,10 @@ async function writeOcrAssets(outdir) {
     await mkdir(path.join(outdir, 'ocr'), { recursive: true });
     for (const [name, bytes] of Object.entries(files)) await writeFile(path.join(outdir, 'ocr', name), bytes);
     await writeFile(path.join(outdir, 'ocr', 'MODELS-LICENSE.txt'), notice);
+    // Speed-check samples for /library/scan-check (synthetic pages from scripts/lib-2d-ocr-eval, no user data).
+    const samples = path.join(webRoot, 'assets/library-ocr/samples');
+    await mkdir(path.join(outdir, 'ocr', 'samples'), { recursive: true });
+    for (const name of await readdir(samples)) await writeFile(path.join(outdir, 'ocr', 'samples', name), await readFile(path.join(samples, name)));
   }
   return files;
 }

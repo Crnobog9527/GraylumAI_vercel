@@ -61,10 +61,10 @@ async function orderCheckoutSession(db: SupabaseClient, stripe: Stripe, scope: {
 }
 
 /** A paid renewal invoice: one line, the next period, pre-tax amount (Managed Payments adds tax on top). */
-function renewalFacts(invoice: Stripe.Invoice, subscriptionId: string, snapshot: unknown) {
+function renewalFacts(invoice: Stripe.Invoice, subscriptionId: string, snapshot: unknown, live: boolean) {
   const line = invoice.lines?.data?.length === 1 && !invoice.lines.has_more ? invoice.lines.data[0] : null;
   const taxes = (invoice.total_taxes ?? []).reduce((sum, row) => sum + (row.amount ?? 0), 0);
-  if (invoice.livemode || invoice.status !== 'paid' || invoice.currency !== 'usd' || invoice.amount_paid !== invoice.amount_due
+  if (invoice.livemode !== live || invoice.status !== 'paid' || invoice.currency !== 'usd' || invoice.amount_paid !== invoice.amount_due
     || !line || id(invoice.parent?.subscription_details?.subscription) !== subscriptionId) {
     throw new Error(PAYMENT_EVIDENCE_CONFLICT);
   }
@@ -98,7 +98,7 @@ export async function handleCardSubscriptionInvoice(db: SupabaseClient, stripe: 
     // A renewal can only follow a recorded first payment; until then Stripe retries.
     if (!order.localSubscriptionId) throw new Error('PAY_STRIPE_MP_FIRST_PAYMENT_PENDING');
     const target = { p_subscription: order.localSubscriptionId, p_merchant: scope.merchant, p_invoice: invoice.id };
-    const facts = paid ? renewalFacts(invoice, subscriptionId, order.purchase_snapshot) : null;
+    const facts = paid ? renewalFacts(invoice, subscriptionId, order.purchase_snapshot, scope.mode === 'live') : null;
     const result = facts
       ? await db.rpc('pay_stripe_mp_renew_subscription', { ...target, p_amount: facts.amount, p_currency: invoice.currency,
         p_paid: facts.paidAt, p_start: facts.start, p_end: facts.end })

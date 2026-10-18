@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import {contentVisibilityFence} from '../accountErasure/content';
+import {executionVisibility,type ExecutionVisibility} from './libraryVisibility';
 import {withClaimNotice} from './claimNotice';
 import {NativeTextTransport,type NativeTextDelta} from './nativeProgress';
 import type {ResumeInput} from './paygRuntime';
@@ -10,6 +10,7 @@ import type {RuntimeProgress} from './progress';
 import type {AgentTurnOutcome} from '../../shared/agentTurn';
 import type {RuntimeBudget} from './budget';
 import {loadStagingPolicy,loadStagingRecoveryPolicy} from './stagingPolicy';
+import {realRuntimeClosed,realRuntimeEnvironment} from './productionEnvironment';
 import {StagingAccessError,stagingProcedureError,stagingRpcFailure} from './stagingErrors';
 import {stagingTransport} from './stagingTransport';
 import {retainedOutputReason} from './view';
@@ -37,6 +38,8 @@ export function runtimeLocalEndpoint(){
 export type OriginalExecutionHost={
  admin:SupabaseClient;user:SupabaseClient;actorId:string;budget:RuntimeBudget;
  authorization?:string|null;maintenanceEndpoint?:string;
+ /** A streaming route shares one fence between its yields and the executor (libraryVisibility.ts). */
+ visibility?:ExecutionVisibility;
 };
 
 /** Runs or recovers one admitted execution under its original frozen policy.
@@ -49,7 +52,7 @@ export async function executeOriginalExecution(host:OriginalExecutionHost,execut
   const actor=runtimeActor(host.user.auth,host.actorId,host.budget,host.authorization);
   const activateSkill=(candidate:Parameters<typeof activateRuntimeCandidate>[2])=>activateRuntimeCandidate(host.user,host.admin,candidate);
   let erasedWaitingClosed=false;
-  const visible=contentVisibilityFence(host.admin,host.actorId,executionId);
+  const fence=host.visibility??executionVisibility(host.admin,host.actorId,executionId),visible=fence.visible;
   const outcome=async<T extends {state:AgentTurnOutcome['state']}>(result:T)=>{
    if(erasedWaitingClosed)return {state:result.state};
    await visible();
@@ -65,7 +68,7 @@ export async function executeOriginalExecution(host:OriginalExecutionHost,execut
    return retained?{...result,...(reason?{unavailable:reason}:{})}:withClaimNotice(result);
   };
   const financial=inflightFinancialHost({database:host.admin,actorId:host.actorId,executionId,actor,budget:host.budget});
-  const base={database:financial.database,budget:host.budget,actor};
+  const base={database:financial.database,budget:host.budget,actor,onContext:fence.observe};
   const publicProgress=(event:RuntimeProgress)=>{if(!financial.isAccountClosed())onProgress?.(event);};
   const closeWaiting=async()=>{
    const closed=await finishErasedWaiting({database:host.admin,actorId:host.actorId,executionId,budget:host.budget});
@@ -93,7 +96,9 @@ export async function executeOriginalExecution(host:OriginalExecutionHost,execut
    return outcome(await run(localFixtureAdapter(host.maintenanceEndpoint),()=>runtimeExecutor({
     ...base,endpoint:host.maintenanceEndpoint,activateSkill,
     callGate:replayOnly?denyNewCalls:newWorkGate(host.admin,'local').calls}).execute(executionId,publicProgress,resume)));
-  try{await loadStagingPolicy(host.admin,host.actorId,process.env);}catch{
+  let policyFailure:unknown;
+  try{await loadStagingPolicy(host.admin,host.actorId,process.env);}catch(cause){
+   policyFailure=cause;
    const closed=await closeWaiting();if(closed)return closed;
    const observed=await host.admin.rpc('runtime_execution',{
     p_actor_id:host.actorId,p_execution_id:executionId,p_action:'read',
@@ -104,6 +109,7 @@ export async function executeOriginalExecution(host:OriginalExecutionHost,execut
     const disabled={dispatch:async()=>{throw new Error('RUNTIME_DISPATCH_DISABLED');},
      lookup:async()=>{throw new Error('RUNTIME_DISPATCH_DISABLED');}};
     const waiting=await runtimeExecutor({...base,adapter:disabled,callGate:denyNewCalls}).execute(executionId);
+    await visible();// a waiting round may carry its saved primary body
     return ['waiting_credits','waiting_resume'].includes(waiting.state)
      ?{...waiting,unavailable:'RUNTIME_PRICE_CONFIGURATION_PENDING'}:waiting;
    }
@@ -117,7 +123,7 @@ export async function executeOriginalExecution(host:OriginalExecutionHost,execut
    }
    // This branch never constructs/runs an SDK request. It only looks up the
    // persisted original provider ID and finishes existing financial state.
-   const runtimeDisabled=process.env.V3_RUNTIME_STAGING_ENABLED!=='true';
+   const runtimeDisabled=realRuntimeClosed(process.env,policyFailure);
    if(runtimeDisabled){
     // An explicit host stop also closes this original execution. A failed or
     // lost cancellation response is inspected by financial recovery below;
@@ -146,7 +152,7 @@ export async function executeOriginalExecution(host:OriginalExecutionHost,execut
   const adapter=stagingTransport(host.admin,original,host.budget);
   return outcome(await run(adapter,()=>runtimeExecutor({...base,adapter,activateSkill,
    resumePricing:policies=>admitPricing(host.admin,policies),
-   callGate:replayOnly?denyNewCalls:newWorkGate(host.admin,'staging').calls}).execute(executionId,publicProgress,resume)));
+   callGate:replayOnly?denyNewCalls:newWorkGate(host.admin,realRuntimeEnvironment(process.env)).calls}).execute(executionId,publicProgress,resume)));
 }
 export type OriginalExecutionOutcome=AgentTurnOutcome;
 export type ExecutionStreamEvent=RuntimeProgress|NativeTextDelta|{type:'result';result:OriginalExecutionOutcome};
@@ -156,7 +162,7 @@ export type ExecutionStreamEvent=RuntimeProgress|NativeTextDelta|{type:'result';
  * reply length. The first text is sent at once; the final text always
  * precedes the result. */
 export const TEXT_EVENT_INTERVAL_MS=100;
-/** RT-3b PR-3: research events are discrete and kept in order (a turn sends at most ~60); beyond this they are
+/** RT-3b PR-3 and source-work progress: tool events are discrete and kept in order (a turn sends at most ~60); beyond this they are
  * dropped from display only. Cards and evidence stay readable through the research API. */
 export const RESEARCH_EVENT_LIMIT=128;
 
@@ -178,7 +184,7 @@ export async function* streamOriginalExecution(run:(onProgress:(event:RuntimePro
    else textEvent={type:'text',text:event.text};
   }
   else if(event.type==='card'){if(!cardSeen){cardSeen=true;cardEvent=event;}}
-  else if(event.type==='research_call'||event.type==='research_card'){
+  else if(event.type==='research_call'||event.type==='research_card'||event.type==='agent_tool'){
    if(researchSeen++<RESEARCH_EVENT_LIMIT){
     // Text written before this call is delivered before it: the queue keeps the turn's order.
     if(textEvent){researchEvents.push(nativePending?transport.flush()!:textEvent);nativePending=false;textEvent=undefined;}
@@ -193,7 +199,7 @@ export async function* streamOriginalExecution(run:(onProgress:(event:RuntimePro
  });
  try{
   while(!done||textEvent||researchEvents.length||cardEvent||phaseEvent||resultEvent){
-   // Queued research events (and text written before them) precede any later text: the turn's order (#1029 P2).
+   // Queued tool events (and text written before them) precede any later text: the turn's order (#1029 P2).
    if(researchEvents.length){
     const event=researchEvents.shift()!;
     if((event.type==='text'||event.type==='textDelta')&&event.text){timing?.mark('firstPublicText');lastText=now();}

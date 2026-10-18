@@ -2,6 +2,7 @@ import { researchRouter } from './routers/research';
 import { libraryRouter } from './routers/library';
 import { reportModelRouter } from './routers/reportModel';
 import { socialMediaFlagRouter } from './routers/socialMediaFlag';
+import { skillTranslationsRouter } from './routers/skillTranslations';
 import { opcRouter } from './routers/opc';
 import { runtimeRouter } from './routers/runtime';
 import { workbenchRouter } from './routers/workbench';
@@ -30,7 +31,9 @@ import { paymentsRouter } from './routers/payments';
 import { skillsRouter } from './routers/skills';
 import { accountRouter } from './routers/account';
 import { dataUseRouter } from './routers/dataUse';
+import { analyticsRouter } from './routers/analytics';
 import { founderRouter } from './routers/founder';
+import { expertConsultRouter } from './routers/expertConsult';
 import { publishMonitorRouter } from './routers/publishMonitor';
 import { adminStaleRoundsRouter } from './routers/adminStaleRounds';
 import { fusionSettingsRouter } from './routers/fusionSettings';
@@ -44,6 +47,7 @@ import { fusionReviewRouter } from './routers/fusionReview';
 export const appRouter = router({
   chat: chatRouter,
   user: userRouter,
+  analytics: analyticsRouter,
   credits: creditsRouter,
   ticket: ticketRouter,
   settings: settingsRouter,
@@ -56,6 +60,7 @@ export const appRouter = router({
   fusionSettings: fusionSettingsRouter,
   fusionReview: fusionReviewRouter,
   socialMediaFlag: socialMediaFlagRouter,
+  skillTranslations: skillTranslationsRouter,
   runtimeRateLimits: runtimeRateLimitsRouter,
   modelIdentity: modelIdentityRouter,
   platformSecrets: platformSecretsRouter,
@@ -76,6 +81,7 @@ export const appRouter = router({
   account: accountRouter,
   dataUse: dataUseRouter,
   founder: founderRouter,
+  expertConsult: expertConsultRouter,
   publishMonitor: publishMonitorRouter,
   library: libraryRouter,
 });

@@ -26,6 +26,8 @@ vi.mock("@/trpc/client", () => {
     },
   } };
 });
+// The jury entry has its own tests; here it only needs to stay out of the way.
+vi.mock("@/components/fusion-review/JuryEntry", () => ({ JuryEntry: () => null }));
 import { ReportEntry } from "./report-panel";
 
 const props = { draftId: "d", sessionId: "s", projectId: "p", roundId: "r", busy: false, onTopics: () => {} };
@@ -34,7 +36,7 @@ const existing = () => {
   state.status = { executionId: saved, state: "completed", body: "## A\nx", completeness: "complete", candidate: true };
 };
 beforeEach(() => {
-  state.available = { enabled: true };
+  state.available = { enabled: true, priceCredits: 500 };
   state.availableInput = [];
   state.statusInput = [];
   state.latest = { isSuccess: true, isError: false, data: { executionId: null } };
@@ -59,10 +61,17 @@ it("keeps the entry while the saved-report read is unknown; the paid start insid
   state.latest = { isSuccess: false, isError: true, data: undefined };
   expect(renderToStaticMarkup(<ReportEntry {...props} confirmed />)).toContain("生成完整报告");
 });
-it("shows the entry once confirmed and enabled, without cost or model wording", () => {
+it("shows the entry once confirmed and enabled, naming the fixed price and no model", () => {
   const html = renderToStaticMarkup(<ReportEntry {...props} confirmed />);
   expect(html).toContain("生成完整报告");
-  expect(html).not.toMatch(/积分|模型/);
+  expect(html).toContain("500");
+  expect(html).not.toMatch(/模型/);
+});
+// Review P1 (#1129): a price that cannot be read offers no paid start at all.
+it("offers no new report while the fixed price cannot be read", () => {
+  state.available = { enabled: true, priceCredits: null };
+  const html = renderToStaticMarkup(<ReportEntry {...props} confirmed />);
+  expect(html).not.toContain("生成完整报告");
 });
 it("keeps a saved report readable with the switch off (rollback)", () => {
   existing();
@@ -91,4 +100,29 @@ it("remounts per project and round, so a revised round never shows the old round
   expect(revised.key).toBe("p:r2");
   expect(revised.type).toBe(first.type);
   expect(ReportEntry({ ...props, projectId: "p2", confirmed: true })).toMatchObject({ key: "p2:r" });
+});
+
+// #1079/#1003: each jury adoption publishes a new round, while the generated report execution stays in the first round.
+const formal = { available: true, id: "v3", report: { generatedReport: { body: "## 结论\n已采用的正文\n## 第一章\n内容" } } };
+it("shows the saved formal report of a published round that has no report execution, never a new paid start", () => {
+  const html = renderToStaticMarkup(<ReportEntry {...props} confirmed published report={formal} />);
+  expect(html).toContain("完整运营策略报告");
+  expect(html).not.toContain("生成完整报告");
+});
+it("shows the saved formal report with the switch off too", () => {
+  state.available = { enabled: false };
+  expect(renderToStaticMarkup(<ReportEntry {...props} confirmed published report={formal} />)).toContain("完整运营策略报告");
+});
+it("still offers a new report in a revision round (draft) even though the old version has a formal report", () => {
+  const html = renderToStaticMarkup(<ReportEntry {...props} confirmed published={false} report={formal} />);
+  expect(html).toContain("生成完整报告");
+});
+it("the dialog shows the saved formal text and no generate button", async () => {
+  const { ReportDialog } = await import("./report-panel");
+  const report = { executionId: null, status: null, live: null, streaming: false, refusal: null, offer: "start", starting: false,
+    payg: { turnNotices: () => [] }, start: () => {}, restart: () => {}, stop: () => {}, stopUnconfirmed: false, retryStop: () => {} };
+  const html = renderToStaticMarkup(<ReportDialog report={report as never} savedBody={formal.report.generatedReport.body}
+    busy={false} onClose={() => {}} onTopics={() => {}} />);
+  expect(html).toContain("已采用的正文");
+  expect(html).not.toContain("生成完整报告");
 });

@@ -11,11 +11,11 @@ export async function runPaymentWrappers(db,report,{fresh,close,cleanup,begin,fi
    purchase_payload_hash,purchase_snapshot,checkout_request,payment_method,auto_renew,entitlement_term,
    routing_version,terms_version,terms_accepted_at,offer_kind,qualification_state,stripe_managed_payments,price_ref_id)
    VALUES($1,$2,'membership_plan',$3,'monthly',$4,'completed','paid',$15,'usd',clock_timestamp(),$5,
-    'synthetic','test',$6,$7,$8,$9,$10,$11,'month',1,'fixture',clock_timestamp(),$14,'sold',$12,$13)`,
+    'synthetic',$16,$6,$7,$8,$9,$10,$11,'month',1,'fixture',clock_timestamp(),$14,'sold',$12,$13)`,
    [o.id,f.actor,o.snapshot.item_id,o.mode,o.channel,randomUUID(),'a'.repeat(64),o.snapshot,o.checkout,o.method,
-    o.mode==='subscription',o.channel==='stripe'&&['card','card_cn'].includes(o.method)?o.method==='card':null,o.priceRef,o.offer,o.offer==='gold_first30'?4900:1999]);
+    o.mode==='subscription',o.channel==='stripe'&&['card','card_cn'].includes(o.method)?o.method==='card':null,o.priceRef,o.offer,o.offer==='gold_first30'?4900:1999,o.paymentMode]);
  };
- const fixture=async(kind='card')=>{
+ const fixture=async(kind='card',paymentMode='test')=>{
   const f=await fresh(db),id=randomUUID();
   const method=['waffo','card_coupon'].includes(kind)?'card':kind;
   const offer=kind==='card_coupon'?'gold_first30':'standard',level=kind==='card_coupon'?'gold':'pro';
@@ -24,14 +24,14 @@ export async function runPaymentWrappers(db,report,{fresh,close,cleanup,begin,fi
    VALUES('erasure fixture',$1,false,false,100) ON CONFLICT(level) DO NOTHING`,[level]);
   const itemId=(await db.query("SELECT id FROM membership_plans WHERE level=$1",[level])).rows[0].id;
   await db.query(`INSERT INTO payment_provider_refs(id,channel,merchant_namespace,mode,object_type,external_id,
-   membership_plan_id,billing_cycle,price_usage) VALUES($1,$2,'synthetic','test','price',$3,$4,'monthly',$5)`,
-   [priceRef,kind==='waffo'?'waffo':'stripe',external,itemId,['wechat_pay','alipay'].includes(kind)?'one_time':'subscription']);
+   membership_plan_id,billing_cycle,price_usage) VALUES($1,$2,'synthetic',$6,'price',$3,$4,'monthly',$5)`,
+   [priceRef,kind==='waffo'?'waffo':'stripe',external,itemId,['wechat_pay','alipay'].includes(kind)?'one_time':'subscription',paymentMode]);
   const metadata={orderId:id,userId:f.actor,itemId,itemType:'membership_plan',billingCycle:'monthly',priceId:external};
   const recurring=['card','card_cn','waffo','card_coupon'].includes(kind);
   const coupon='coupon_'+randomUUID().replaceAll('-','');
   if(kind==='card_coupon')await db.query(`INSERT INTO payment_provider_refs(channel,merchant_namespace,mode,
    object_type,external_id,membership_plan_id,billing_cycle,price_usage,offer_kind)
-   VALUES('stripe','synthetic','test','coupon',$1,$2,'monthly','subscription','gold_first30')`,[coupon,itemId]);
+   VALUES('stripe','synthetic',$3,'coupon',$1,$2,'monthly','subscription','gold_first30')`,[coupon,itemId,paymentMode]);
   const provider=kind==='waffo'
    ? {productId:external,currency:'USD',withTrial:false,expiresInSeconds:1800,
     includePaymentMethods:['card'],orderMerchantExternalId:id,metadata:{orderId:id}}
@@ -43,16 +43,19 @@ export async function runPaymentWrappers(db,report,{fresh,close,cleanup,begin,fi
     ...(kind==='card_cn'?{billing_address_collection:'required'}:{}),
     ...(kind==='wechat_pay'?{payment_method_options:{wechat_pay:{client:'web'}}}:{}),
     ...(!recurring?{customer_creation:'always'}:{})};
-  const safe={orderId:id,userId:f.actor,method,merchant:'synthetic',mode:'test',providerRequest:provider};
+  const safe={orderId:id,userId:f.actor,method,merchant:'synthetic',mode:paymentMode,providerRequest:provider};
   const snapshot={version:1,item_type:'membership_plan',item_id:itemId,item_updated_at:'2026-10-07T00:00:00Z',
    billing_cycle:'monthly',currency:'usd',unit:'major',price:kind==='card_coupon'?'69.00':'19.99',discount:kind==='card_coupon'?'20.00':'0.00',tax_behavior:'unspecified',
    credits:100,bonus_credits:20};
-  const options={id,priceRef,offer,snapshot,channel:kind==='waffo'?'waffo':'stripe',mode:recurring?'subscription':'payment',method};
+  const options={id,priceRef,offer,snapshot,channel:kind==='waffo'?'waffo':'stripe',mode:recurring?'subscription':'payment',method,paymentMode};
   assert.deepEqual(await rpc(db,'erasure_payment_envelope',safe,'checkout'),safe,'fresh fixture independently valid');
   return {f,id,safe,options};
  };
- for(const kind of ['waffo','card','card_coupon','card_cn','wechat_pay','alipay']){
-  const {f,id,safe,options}=await fixture(kind),provider=safe.providerRequest;
+ // 0296: Stripe orders also run in the live account's mode; Waffo stays test-only.
+ const valid=[...['waffo','card','card_coupon','card_cn','wechat_pay','alipay'].map(kind=>[kind,'test']),
+  ...['card','card_coupon','card_cn','wechat_pay','alipay'].map(kind=>[kind,'live'])];
+ for(const [kind,paymentMode] of valid){
+  const {f,id,safe,options}=await fixture(kind,paymentMode),provider=safe.providerRequest;
   const dirty={...safe,body:'PRIVATE',providerRequest:{...provider,buyerIdentity:'PRIVATE',successUrl:'PRIVATE',
    success_url:'PRIVATE',customer_email:'PRIVATE',metadata:{...provider.metadata,private:'PRIVATE'}}};
   await order(db,f,{}, {...options,checkout:dirty});
@@ -63,7 +66,7 @@ export async function runPaymentWrappers(db,report,{fresh,close,cleanup,begin,fi
   const reference=async()=>(await db.query('SELECT * FROM payment_provider_refs WHERE id=$1',[options.priceRef])).rows[0];
   const beforeReference=await reference();
   await recordLibraryProof(db,f);
-  assert.deepEqual(await cleanup(db,f),{remaining:0,manualReview:0,errors:[]},kind+' wrapper completes cleanup');
+  assert.deepEqual(await cleanup(db,f),{remaining:0,manualReview:0,errors:[]},kind+' '+paymentMode+' wrapper completes cleanup');
   const after=await row();
   assert.deepEqual(after.checkout_request,safe);
   assert.equal(after.price_ref_id,options.priceRef);
@@ -92,7 +95,8 @@ export async function runPaymentWrappers(db,report,{fresh,close,cleanup,begin,fi
   if(key==='userId')p.client_reference_id=value;
  };
  const malformed=[
-  ['mode','card',w=>{w.mode='live';}],
+  ['mode','card',w=>{w.mode='sandbox';}],
+  ['Waffo live','waffo',w=>{w.mode='live';}],
   ['incomplete','card',w=>{w.providerRequest={mode:'payment'};}],
   ['contradictory method','card',w=>{w.method='wechat_pay';}],
   ['expiry','card',w=>{w.providerRequest.expires_at=null;}],
@@ -111,6 +115,7 @@ export async function runPaymentWrappers(db,report,{fresh,close,cleanup,begin,fi
   ['other user','card',w=>rebind(w,'userId',randomUUID())],
   ['other item','card',w=>rebind(w,'itemId',randomUUID())],
   ['other merchant','card',w=>{w.merchant='other';}],
+  ['live request on test order','card',w=>{w.mode='live';}],
   ['row method','card',(_w,o)=>{o.method='card_cn';}],
   ['unrelated Gold coupon','card_coupon',w=>{w.providerRequest.discounts=[{coupon:'coupon_other'}];}],
   ['inline amount mismatch','wechat_pay',w=>{w.providerRequest.line_items=[{quantity:1,price_data:{currency:'usd',unit_amount:1}}];}],
@@ -142,5 +147,5 @@ export async function runPaymentWrappers(db,report,{fresh,close,cleanup,begin,fi
   assert.equal(saved.request_erased_at,null);
   assert.equal((await begin(db,f,requestId)).ready,false);
  }
- report.checks.push('payment wrappers: six valid channel/method/offer shapes complete; independent malformed and cross-row evidence stays blocked; privacy removed, finances unchanged');
+ report.checks.push('payment wrappers: six valid test and five live Stripe channel/method/offer shapes complete; Waffo live refused; independent malformed and cross-row evidence stays blocked; privacy removed, finances unchanged');
 }

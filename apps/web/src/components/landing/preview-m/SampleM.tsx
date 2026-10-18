@@ -13,7 +13,7 @@ import page from '@/components/landing/preview-j/j.module.css';
 import { CtaK } from '@/components/landing/preview-k/CtaK';
 import k from '@/components/landing/preview-k/k.module.css';
 import { CareL } from '@/components/landing/preview-l/CareL';
-import { SamplesL } from '@/components/landing/preview-l/SamplesL';
+import { SamplesMarqueeM } from './SamplesMarqueeM';
 import { PlanCardsMNO } from '@/components/landing/preview-mno/PlanCardsMNO';
 import { StickyCtaMNO } from '@/components/landing/preview-mno/StickyCtaMNO';
 import { K_GOLD_LINE, K_PRICE_TERMS } from '@/lib/landing/landing-copy-k';
@@ -61,7 +61,7 @@ export function SampleM({ data, siteName, extras, membershipHref }: {
         <div className={styles.lane} data-scene="ask"><HeroM note={data.heroNote} flags={extras.flags} /></div>
         <div className={styles.lane} data-scene="ask"><VoiceWallJ notes={data.notes} open regions={L_NOTE_REGIONS} /></div>
         <div className={styles.lane} data-scene="ops"><OpsM steps={visibleItems(extras.flags, L_OPS.steps)} flags={extras.flags} /></div>
-        {extras.showSamples ? <div className={styles.lane} data-scene="report"><SamplesL /></div> : null}
+        {extras.showSamples ? <div className={styles.lane} data-scene="report"><SamplesMarqueeM /></div> : null}
         <div className={styles.lane} data-scene="report"><CareL flags={extras.flags} /></div>
         <div data-scene="none">
           <CompareJ title={L_COMPARE_TITLE} picks={L_COMPARE_PICKS} next={L_COMPARE_NEXT} band="tint" />

@@ -59,7 +59,7 @@ export function registerReportTests(db: pg.Client, fixture: () => Promise<Fixtur
     expect(grants).toEqual({ can_update: false, can_read: false, can_execute: false });
     await db.query('update modules set active=false where id=(select module_id from artifact_workflows where id=$1)', [f.registration]);
   });
-  it.each(['complete', 'length', 'waiting', 'expired', 'free', 'disabled', 'changed', 'equal', 'cancelled', 'off_after', 'missing', 'string_flag', 'foreign', 'waiting_expired',
+  it.each(['complete', 'length', 'no_price', 'poor', 'waiting', 'expired', 'free', 'disabled', 'changed', 'equal', 'cancelled', 'off_after', 'missing', 'string_flag', 'foreign', 'waiting_expired',
     'sonnet_low', 'sonnet_missing_config', 'sonnet_missing_purpose',
     'override', 'override_changed', 'legacy_changed', 'override_disabled', 'override_no_quote', 'override_waiting', 'override_race', 'sonnet_override', 'sonnet_override_denied'] as const)(
     'RUNTIME: REPORT-GEN real SQL and SDK %s', async scenario => {
@@ -156,7 +156,7 @@ export function registerReportTests(db: pg.Client, fixture: () => Promise<Fixtur
             [windowId, [f.actor], JSON.stringify([quote])]);
         }
         for (const [key, value] of Object.entries({ runtime_report_generation: scenario === 'string_flag' ? '{"enabled":true}' : { enabled: scenario !== 'disabled' },
-          billing_payg_start_thresholds: { version: 'fixture', thresholds: [{ model, purpose: 'report', credits: waiting ? 1001 : scenario === 'equal' ? 1000 : 1 }] } })) {
+          billing_payg_start_thresholds: { version: 'fixture', thresholds: [{ model, purpose: 'report', credits: waiting ? 1001 : scenario === 'equal' ? 500 : 1 }] } })) {
           await db.query('insert into system_settings(key,value) values($1,$2) on conflict(key) do update set value=excluded.value',
             [key, JSON.stringify(value)]);
         }
@@ -164,7 +164,25 @@ export function registerReportTests(db: pg.Client, fixture: () => Promise<Fixtur
         const service = reportService(f.user, f.admin, { ...(real ? { real: { id: windowId, creditsPerUsd: '100',
           multiplier: '6', expiresAt: new Date(Date.now() + 7200000).toISOString(), callPolicies: scenario === 'sonnet_override_denied' ? [] : [policy] } } : {}), payg: { callPolicies: scenario === 'override_no_quote' ? [] : [policy], billingUnit }, account: 'report-fixture',
           costPerCall: '0.3', creditsPerUsd: '100', multiplier: '6', maxCalls: 1, maxOutputTokens: 1000, inputBytes: 196608, historyItems: 0 });
-        const input = { sessionId: detail.sessionId, projectId: detail.projectId, roundId: detail.roundId, requestId: randomUUID() };
+        const input = { sessionId: detail.sessionId, projectId: detail.projectId, roundId: detail.roundId, requestId: randomUUID(),
+          acceptedCredits: 500 };
+        if (scenario === 'no_price') {
+          // A start must carry the price the button showed: refused before any execution, charge or model call.
+          const withoutPrice = { sessionId: input.sessionId, projectId: input.projectId, roundId: input.roundId, requestId: input.requestId };
+          await expect(service.start(withoutPrice)).rejects.toThrow('REPORT_PRICE_REQUIRED');
+          expect((await db.query('select count(*)::int n from runtime_executions where request_id=$1', [input.requestId])).rows[0].n).toBe(0);
+          expect(calls).toBe(0); return;
+        }
+        if (scenario === 'poor') {
+          // Fixed price (0295): admission needs the 500 price plus the call's own hold (0.3 USD x 100 x 6 = 180).
+          await db.query(`insert into credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,idempotency_key,balance_before,balance_after)
+            values($1,-321,'adjustment','adjustment','admin_adjustment','admin',$2,1000,679)`, [f.actor, 'report-poor:' + f.actor]);
+          await db.query('update profiles set credits=679 where id=$1', [f.actor]);
+          await expect(service.start(input)).rejects.toThrow('REPORT_CREDITS');
+          expect((await db.query('select count(*)::int n from runtime_executions where request_id=$1', [input.requestId])).rows[0].n).toBe(0);
+          expect((await db.query('select credits from profiles where id=$1', [f.actor])).rows[0].credits).toBe(679);
+          expect(calls).toBe(0); return;
+        }
         if (scenario === 'override_disabled' || scenario === 'override_no_quote' || scenario === 'sonnet_override_denied') {
           await expect(service.start(input)).rejects.toThrow(scenario === 'override_disabled'
             ? 'REPORT_MODEL_UNAVAILABLE' : 'REPORT_MODEL_ADMISSION_REQUIRED');
@@ -223,6 +241,9 @@ export function registerReportTests(db: pg.Client, fixture: () => Promise<Fixtur
         expect(frozen).not.toHaveProperty('promptCache'); expect(frozen).not.toHaveProperty('scopeMaterial');
         expect(frozen.instructions.match(/Synthetic confirmed fact/g)).toHaveLength(3);
         expect(frozen.request.input).toBe('Generate the confirmed report.');
+        // SKILL-I18N-HOOK: that placeholder never decides the report language; the user's words in the facts do.
+        expect(frozen.instructions).toContain('is written by the host, not the user, and never sets the report language');
+        expect(frozen.replyLanguage).toBe('reply-language-v1');
         if (scenario === 'cancelled') {
           // A stale tab with a new requestId cannot start a second paid report while the first is admitted.
           await expect(service.start({ ...input, requestId: randomUUID() })).rejects.toThrow('REPORT_ALREADY_EXISTS');
@@ -306,11 +327,16 @@ export function registerReportTests(db: pg.Client, fixture: () => Promise<Fixtur
           expect(billed.model).toBe(model);
           expect(Number(billed.upper_usd)).toBeGreaterThan(0);
           expect(billed.reserved_credits).toBe(Math.ceil(Number(billed.upper_usd) * 100 * 6));
-          expect(billed.charged_delta).toBe(4); // ceil((3000*2 + 10)/1e6 * 100 * 6)
+          // Fixed price (0295): the call is recorded at its would-be charge but charges nothing.
+          expect(billed.charged_delta).toBe(0);
+          expect((await db.query('select theoretical_delta from bill2_calls where run_id=$1', [admitted.runId])).rows[0].theoretical_delta)
+            .toBe('4'); // ceil((3000*2 + 10)/1e6 * 100 * 6)
         }
         if (scenario === 'length') {
-          expect((await db.query('select charged_delta from bill2_calls where run_id=$1', [admitted.runId])).rows[0].charged_delta).toBe(2);
-          expect((await db.query('select credits from profiles where id=$1', [f.actor])).rows[0].credits).toBe(998);
+          const call = (await db.query('select charged_delta,theoretical_delta,nominal_source from bill2_calls where run_id=$1', [admitted.runId])).rows[0];
+          expect(call).toEqual({ charged_delta: 0, theoretical_delta: '2', nominal_source: 'fixed_fee' });
+          // The 500 price is still held until the page reads the ended report (or the daily job runs).
+          expect((await db.query('select credits from profiles where id=$1', [f.actor])).rows[0].credits).toBe(500);
         }
         await run().execute(admitted.executionId); expect(real ? requests.length : calls).toBe(1);
         const counts = (await db.query(`select (select count(*)::int from runtime_session_history where execution_id=$1) history,
@@ -319,14 +345,20 @@ export function registerReportTests(db: pg.Client, fixture: () => Promise<Fixtur
         expect(counts).toEqual({ history: 0, batches: 1, calls: 1 });
         expect((await db.query('select revision from runtime_sessions where id=$1', [detail.sessionId])).rows[0].revision).toBe(historyBefore);
         // One paid report per round: a stale tab's new requestId is refused, the same one replays.
-        // (With the switch off, REPORT_DISABLED answers first; off_after covers that.)
-        if (scenario !== 'off_after')
+        // (With the switch off, REPORT_DISABLED answers first; off_after covers that.) A cut-off report was refunded,
+        // so a new start is allowed there (it would hold the price again; service.test covers the rule).
+        if (scenario !== 'off_after' && scenario !== 'length')
           await expect(service.start({ ...input, requestId: randomUUID() })).rejects.toThrow('REPORT_ALREADY_EXISTS');
         expect(await service.start(input)).toMatchObject({ executionId: admitted.executionId });
         expect(real ? requests.length : calls).toBe(1);
         await db.query("update profiles set membership_level='free' where id=$1", [f.actor]);
         const read = await service.status(admitted.executionId);
         expect(read.body).toContain('Report body'); expect(read.candidate).toBe(scenario !== 'length');
+        // Fixed price (0295): reading the ended report settles it once: a complete report pays 500, a cut-off one is refunded.
+        expect(read.fee).toMatchObject(scenario === 'length' ? { state: 'refunded', chargedCredits: 0 } : { state: 'charged', chargedCredits: 500 });
+        if (!waiting) expect((await db.query('select credits from profiles where id=$1', [f.actor])).rows[0].credits)
+          .toBe(scenario === 'length' ? 1000 : 500);
+        expect((await service.status(admitted.executionId)).fee).toEqual(read.fee);
         // A saved report is found from the server with the switch off and the membership lapsed.
         await db.query("delete from system_settings where key='runtime_report_generation'");
         const locate = { sessionId: input.sessionId, projectId: input.projectId, roundId: input.roundId };

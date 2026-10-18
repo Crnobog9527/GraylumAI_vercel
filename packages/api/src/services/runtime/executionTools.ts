@@ -5,6 +5,8 @@ import {executionSkillFileTool} from './skillFileExecution';
 import {skillFileToolBytes} from './skillFile';
 import {executionMentorHistoryTool,mentorHistoryToolBytes} from './mentorHistory';
 import {sourceRuntimeTool} from './sourceRuntimeTool';
+import {withSourceWorkProgress} from './sourceWorkProgress';
+import type {AgentToolEvent} from '../../shared/agentWork';
 import {PROMPT_CACHE_OVERHEAD_BYTES} from './promptCache';
 import {groundedCardTool,groundedCardToolBytes,type cardSources} from './groundedCard';
 import {askQuestionTool,askQuestionToolBytes,READ_HISTORY_TOOL} from './agentTools';
@@ -20,6 +22,7 @@ export function executionTools(input:{
  agentTurn:boolean;grounded:boolean;fiveFields:boolean;sources:()=>ReturnType<typeof cardSources>;
  ownerRpc:ToolRpc;budget:{assertCanStart:(ms?:number)=>void;timing?:RequestTiming};
  execution:{live?:boolean;sessionId:string};research:ResearchExecution|null;onRefused:()=>void;
+ onProgress?:(event:AgentToolEvent)=>void;
  exchange:Parameters<typeof sourceRuntimeTool>[0]['exchange'];
 }):{tools:RuntimeTool[];toolBytes:number}{
  const {context,executionId,ownerRpc,budget,research}=input;
@@ -30,7 +33,8 @@ export function executionTools(input:{
    rpc:ownerRpc,assertCanStart:()=>budget.assertCanStart(),timing:budget.timing,onRefused:input.onRefused}):
   name===READ_HISTORY_TOOL?executionMentorHistoryTool({executionId,rpc:ownerRpc,assertCanStart:()=>budget.assertCanStart(),
    onRefused:input.onRefused}):
-  sourceRuntimeTool({name,context,args:input.args,ownerRpc,budget,execution:input.execution,exchange:input.exchange})));
+  withSourceWorkProgress(sourceRuntimeTool({name,context,args:input.args,ownerRpc,budget,
+   execution:input.execution,exchange:input.exchange}),input.onProgress)));
  const toolBytes=(input.agentTurn?(input.grounded?groundedCardToolBytes():askQuestionToolBytes(input.fiveFields)):
   Buffer.byteLength(JSON.stringify(tools.map(t=>({name:t.name,description:t.description})))))+
   (context.skillFile?skillFileToolBytes():0)+(context.historyRead?mentorHistoryToolBytes():0)+(research?.definitionBytes??0)+

@@ -38,7 +38,8 @@ it.each(['local', 'staging', 'recovery'])('wires the %s host gate explicitly', a
 });
 it('router constructor wires its authenticated admin and resolved environment', () => {
   const source = readFileSync(new URL('../../routers/runtime.ts', import.meta.url), 'utf8');
-  expect(source).toContain("callGate:newWorkGate(ctx.supabaseAdmin,endpoint?'local':'staging').calls");
+  // RUNTIME-PROD: the namespace follows the loaded policy (local, staging window or production).
+  expect(source).toContain('callGate:newWorkGate(ctx.supabaseAdmin,runtimeGateEnvironment(real)).calls');
 });
 it('no production source imports the test-only allowing gate', () => {
   // pathname keeps percent-encoding, which breaks checkouts under non-ASCII or spaced paths.
@@ -61,12 +62,15 @@ it.each(['waiting_credits','waiting_resume'])('keeps %s when the original stagin
  mock.policy.mockRejectedValue(Error('window unavailable'));
  const execute=vi.fn(async()=>({state,code:state==='waiting_credits'?'RUNTIME_WAITING_CREDITS':'RUNTIME_WAITING_RESUME'}));
  mock.factory.mockReturnValue({execute,recoverFinancial:mock.recover});
- const rpc=vi.fn(async()=>({data:{state,billing:{contractVersion:'bill2.v2'}},error:null}));
+ const rpc=vi.fn(async(name:string)=>name==='content_erasure_visible'?{data:true,error:null}
+  :{data:{state,billing:{contractVersion:'bill2.v2'}},error:null});
  const result=await executeOriginalExecution({admin:{rpc} as never,user:{auth:{}} as never,
   actorId:'actor',budget:createRuntimeBudget()},'execution');
  expect(result).toMatchObject({state,unavailable:'RUNTIME_PRICE_CONFIGURATION_PENDING'});
  expect(mock.recover).not.toHaveBeenCalled();
- expect(rpc.mock.calls).toHaveLength(2);
+ // LIB-4b: the waiting round (which may carry its saved primary body) is rechecked before it is returned.
+ expect(rpc.mock.calls.filter(([name])=>name!=='content_erasure_visible')).toHaveLength(2);
+ expect(rpc.mock.calls.at(-1)?.[0]).toBe('content_erasure_visible');
  expect(execute).toHaveBeenCalledExactlyOnceWith('execution');
 });
 it.each(['auth', 'waiting', 'window'])('finishes erased waiting v2 when %s expires without new generation', async mode => {

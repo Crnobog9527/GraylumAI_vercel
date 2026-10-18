@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { trpc } from '@/trpc/client';
 import { useLibraryDocuments, type LibraryDocument } from '@/hooks/use-library-documents';
 import { useLibraryUploads } from '@/hooks/use-library-uploads';
+import type { ScanRecognition } from '@/hooks/use-scan-recognition';
 import { libraryErrorMessage } from '@/lib/library-documents/format';
 import { isSignedStorageUrl, startDownload } from '@/lib/library-documents/signed-url';
 import { DocumentList, SpacePanel, UploadPanel } from './my-documents-view';
@@ -12,15 +13,24 @@ import { DeleteConfirmDialog, DocumentDetailDialog } from './document-dialogs';
 import styles from './my-documents.module.css';
 
 /** 资料库「我的文档」(LIB-3). Upload stays hidden until the server's upload switch is on. */
-export function MyDocuments() {
+export function MyDocuments({ scan }: { scan: ScanRecognition }) {
   const library = useLibraryDocuments();
-  const { reload, markDisabled } = library;
-  const uploads = useLibraryUploads(useCallback(() => { void reload(); }, [reload]), markDisabled);
+  const { reload, refresh, patchVersion, markDisabled } = library;
+  const { start: startScan, listen } = scan;
+  useEffect(() => listen({ onDocumentChanged: () => { void refresh(); }, onSaved: patchVersion }), [listen, refresh, patchVersion]);
+  const uploads = useLibraryUploads(useCallback(() => { void reload(); startScan(); }, [reload, startScan]), markDisabled);
   const download = trpc.library.download.useMutation();
   const [opened, setOpened] = useState<LibraryDocument | null>(null);
   const [confirming, setConfirming] = useState<LibraryDocument | null>(null);
   const [deleteState, setDeleteState] = useState({ pending: false, error: '' });
   const [busyId, setBusyId] = useState<string | null>(null);
+
+  // Recognition saves new text while a document may be open; show the refreshed version, not the stale one.
+  useEffect(() => {
+    if (!opened) return;
+    const fresh = library.documents.find((doc) => doc.id === opened.id);
+    if (fresh && fresh.content_version !== opened.content_version) setOpened(fresh);
+  }, [library.documents, opened]);
 
   useEffect(() => {
     if (!uploads.busy) return;
@@ -63,7 +73,7 @@ export function MyDocuments() {
   const ready = library.ready;
   return <div className={styles.root}>
     <div className={styles.topRow}>
-      <UploadPanel uploadEnabled={ready && library.uploadEnabled} spaceKnown={ready}
+      <UploadPanel uploadEnabled={ready && library.uploadEnabled} scanServerEnabled={scan.serverEnabled} spaceKnown={ready}
         usedBytes={library.usedBytes} capacityBytes={library.capacityBytes}
         uploads={uploads.items}
         onAdd={(files, purpose) => uploads.add(files, purpose, ready && library.capacityBytes !== undefined && library.usedBytes !== undefined
@@ -75,7 +85,7 @@ export function MyDocuments() {
       <button type="button" className={styles.linkButton} onClick={() => { void library.reload(); }}>重试</button>
     </p>}
     {library.pending && <p role="status" className={styles.hint}>正在读取我的文档…</p>}
-    <DocumentList documents={library.documents} ready={ready} busyId={busyId}
+    <DocumentList documents={library.documents} ready={ready} busyId={busyId} scan={scan.progress}
       onOpen={setOpened} onDownload={onDownload} onPurpose={onPurpose}
       onDelete={(doc) => { setDeleteState({ pending: false, error: '' }); setConfirming(doc); }}/>
     {(library.hasMore || library.moreState.error) && ready && <div className={styles.more}>

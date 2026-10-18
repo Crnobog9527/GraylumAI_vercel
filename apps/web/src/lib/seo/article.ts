@@ -15,8 +15,12 @@ export type ArticleBlock = {
   list?: string[];
 };
 
+export type ArticleTable = { caption: string; head: string[]; rows: string[][] };
+
 export type ArticleSection = ArticleBlock & {
   h2: string;
+  // A comparison table under the section's text (the comparison pages).
+  table?: ArticleTable;
   subsections?: (ArticleBlock & { h3: string })[];
 };
 
@@ -43,6 +47,10 @@ export type ArticleContent = {
   // Official or public sources behind platform facts on the page (spec 12.4); shown as a visible list.
   sources?: { label: string; href: string }[];
   updated: string;
+  // Set on blog articles (SEO_GEO_SPEC 14): the first publication date. Turns the page's JSON-LD into BlogPosting and og:type into article.
+  published?: string;
+  // Set on product feature pages (spec section 10): adds SoftwareApplication data next to the page's WebPage data.
+  product?: boolean;
 };
 
 export function articleMetadata(content: ArticleContent): Metadata {
@@ -52,5 +60,6 @@ export function articleMetadata(content: ArticleContent): Metadata {
     path: content.path,
     locale: content.locale,
     alternates: content.alternates,
+    type: content.published ? 'article' : 'website',
   });
 }

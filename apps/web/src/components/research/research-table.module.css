@@ -5,14 +5,15 @@
 .top{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
 .head{margin:0;color:#8a8a8a;font-size:12px;line-height:18px}
 .summary{margin:0;color:#777;font-size:12px}
+.scroll{overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:thin}
 .table{width:100%;border-collapse:collapse;font-size:13px;line-height:1.5}
 .table th,.table td{padding:8px 10px;border-bottom:1px solid #f0f0f0;text-align:left;vertical-align:top}
 .table thead th{color:#8a8a8a;font-size:12px;font-weight:400;white-space:nowrap}
 .table td{font-variant-numeric:tabular-nums;white-space:nowrap}
 .table tbody tr:last-child th,.table tbody tr:last-child td{border-bottom:0}
-.account{display:grid;gap:2px;font-weight:400}
-.accountName{font-weight:500;overflow-wrap:anywhere}
-.accountMeta{display:flex;flex-wrap:wrap;align-items:center;gap:6px;color:#8a8a8a;font-size:12px}
+.account{display:grid;gap:2px;font-weight:400;white-space:nowrap}
+.accountName{font-weight:500}
+.accountMeta{display:flex;flex-wrap:nowrap;align-items:center;gap:6px;color:#8a8a8a;font-size:12px}
 .category{color:#555}
 .badge{padding:0 6px;border-radius:999px;font-size:11px;line-height:18px}
 .ok{background:#eaf4ec;color:#2f6b3a}
@@ -28,7 +29,9 @@
   .table tr{padding:10px 0;border-bottom:1px solid #f0f0f0}
   .table tbody tr:last-child{border-bottom:0}
   .table th,.table td{padding:2px 0;border:0}
-  .table th{padding-bottom:6px}
+  .table th{padding-bottom:6px;white-space:normal}
+  .accountName{overflow-wrap:anywhere}
+  .accountMeta{flex-wrap:wrap}
   .table td{display:flex;justify-content:space-between;gap:12px;white-space:normal}
   .table td::before{content:attr(data-label);color:#8a8a8a;font-size:12px}
   .table td>span{margin-left:auto;text-align:right}

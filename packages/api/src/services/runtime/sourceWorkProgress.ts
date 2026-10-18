@@ -1,0 +1,63 @@
+/*
+ * Copyright (c) 2026 Grayscale Luminary LLC.
+ * All rights reserved.
+ * This code is proprietary and confidential.
+ */
+import type {AgentToolEvent} from '../../shared/agentWork';
+import type {RuntimeTool} from './runner';
+
+const record = (value: unknown): Record<string, unknown> =>
+ value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+const text = (value: unknown, limit: number): string => typeof value === 'string' ? value.slice(0, limit) : '';
+
+/** Only host labels and names of the user's own files leave the server, never source text or model arguments. */
+export function sourceWorkSummary(result: unknown): Pick<AgentToolEvent, 'kind' | 'state' | 'label' | 'detail'> | null {
+ const value = record(result), identity = record(value.identity);
+ if (value.kind === 'workspace_source' && identity.kind === 'positioning')
+  return {kind: 'positioning', state: 'done', label: '读了你确认的定位', detail: text(identity.name, 80)};
+ if (value.kind === 'workspace_source' && identity.kind === 'benchmarks')
+  return {kind: 'my_benchmarks', state: 'done', label: '看了你的对标账号数据'};
+ if (value.kind === 'library_segment')
+  return {kind: 'library_read', state: 'done', label: '读了一段资料', detail: text(value.title, 80)};
+ if (value.kind === 'library_search') {
+  const docs = new Map<string, string>();
+  for (const hit of Array.isArray(value.hits) ? value.hits : []) {
+   const row = record(hit);
+   if (typeof row.documentId === 'string') docs.set(row.documentId, text(row.title, 60) || '（未命名）');
+  }
+  return docs.size ? {kind: 'library_search', state: 'done', label: `在资料库里找到 ${docs.size} 篇相关内容`,
+   detail: [...docs.values()].sort().join('、').slice(0, 120)}
+   : {kind: 'library_search', state: 'missing', label: '资料库里没找到相关内容',
+    detail: ('搜索词：' + (Array.isArray(value.terms) ? value.terms.filter(v => typeof v === 'string').join(' ') : '')).slice(0, 120)};
+ }
+ return null;
+}
+
+/** The journal and its visibility fences run unchanged; progress never changes execution or billing. */
+export function withSourceWorkProgress(tool: RuntimeTool, emit?: (event: AgentToolEvent) => void): RuntimeTool {
+ if (tool.name !== 'read_source' || !emit) return tool;
+ return {...tool, execute: async (args, callId) => {
+  const query = typeof args.query === 'string' ? args.query.trim() : '';
+  const kind = query.startsWith('search:') ? 'library_search' : /^doc-\d+\/segment-\d+$/.test(query) ? 'library_read' : null;
+  const event = {type: 'agent_tool' as const, callId, tool: 'read_source' as const};
+  const send = (summary: Omit<AgentToolEvent, 'type' | 'callId' | 'tool'>) => {
+   try {emit({...event, ...summary});} catch { /* Display disconnect never interrupts source persistence. */ }
+  };
+  if (kind) send({kind, state: 'running', label: ''});
+  let result: string;
+  try {result = await tool.execute(args, callId);}
+  catch (error) {
+   if (kind) send({kind, state: 'pending', label: '资料读取待核实'});
+   throw error;
+  }
+  let summary: ReturnType<typeof sourceWorkSummary>;
+  try {summary = sourceWorkSummary(JSON.parse(result));}
+  catch {
+   if (kind) send({kind, state: 'pending', label: '资料读取待核实'});
+   return result;
+  }
+  if (summary) send(summary);
+  else if (kind) send({kind, state: 'missing', label: '未取到相关资料'});
+  return result;
+ }};
+}

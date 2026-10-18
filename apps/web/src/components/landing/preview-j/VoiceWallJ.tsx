@@ -22,11 +22,12 @@ const FIRST = 'p7';
 /**
  * Sample L (Owner 2026-10-17): `open` shows every row on every screen, no fold; `regions` adds where each note is from
  * (by note id) to its caption; `compact` (Owner 2026-10-17) sets the rows tighter on a phone, each answer folded to its
- * heading behind `compact`'s button label; `after` sits under the wall.
+ * heading behind `compact`'s button label; `after` sits under the wall. `heads` and `answers` (sample L, Owner
+ * 2026-10-18) replace the coach's answers by note id; without them, sample J's.
  */
-export function VoiceWallJ({ notes, four = false, open = false, regions, compact, after }: {
+export function VoiceWallJ({ notes, four = false, open = false, regions, compact, after, heads = J_NOTE_HEADS, answers = J_NOTE_ANSWERS }: {
   notes: readonly VoiceNote[]; four?: boolean; open?: boolean; regions?: Readonly<Record<string, string>>;
-  compact?: string; after?: ReactNode;
+  compact?: string; after?: ReactNode; heads?: Readonly<Record<string, string>>; answers?: Readonly<Record<string, string>>;
 }) {
   if (notes.length === 0) return null;
   const ordered = [...notes.filter(note => note.id === FIRST), ...notes.filter(note => note.id !== FIRST)];
@@ -48,10 +49,10 @@ export function VoiceWallJ({ notes, four = false, open = false, regions, compact
               </figure>
               <MoveRight className={styles.arrow} size={28} aria-hidden="true" />
               <div className={styles.answer}>
-                <p className={styles.answerHead}><i aria-hidden="true" />{J_NOTE_HEADS[note.id] ?? '教练怎么做'}</p>
+                <p className={styles.answerHead}><i aria-hidden="true" />{heads[note.id] ?? '教练怎么做'}</p>
                 {compact
-                  ? <FoldOnPhoneJ label={compact}><p>{J_NOTE_ANSWERS[note.id] ?? note.answer}</p></FoldOnPhoneJ>
-                  : <p>{J_NOTE_ANSWERS[note.id] ?? note.answer}</p>}
+                  ? <FoldOnPhoneJ label={compact}><p>{answers[note.id] ?? note.answer}</p></FoldOnPhoneJ>
+                  : <p>{answers[note.id] ?? note.answer}</p>}
               </div>
             </li>
           ))}

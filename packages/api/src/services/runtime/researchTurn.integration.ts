@@ -13,6 +13,7 @@ import { freezeHistorySelection } from './hostTurn';
 import { frozenResearchTurn, RESEARCH_PHASE, RESEARCH_RESULT_RESERVE_BYTES, RESEARCH_TURN_VERSION } from './researchTurn';
 import { toolCallPolicy } from '../bill2/toolBilling';
 import type { RuntimeProgress } from './progress';
+import type { PaygWait } from './paygRuntime';
 
 const supplier = vi.hoisted(() => ({ calls: 0 }));
 vi.mock('../redisRateLimiter', () => ({ checkVendorRateLimit: async () => true }));
@@ -40,7 +41,7 @@ const toolPolicy = toolCallPolicy({ vendor: 'parallel', account: 'research-local
       validUntil: new Date(Date.now() + 7 * 86_400_000).toISOString(), chargeCondition: 'per search', includedInReceipt: false,
       priceMultiplier: null } } });
 
-async function researchRound() {
+async function researchRound(toolThreshold = 1) {
   if (!connectionString?.startsWith('postgres://postgres@127.0.0.1:') || !connectionString.endsWith('/v3_disposable'))
     throw new Error('isolated runner required');
   const db = new pg.Client({ connectionString });
@@ -92,7 +93,7 @@ async function researchRound() {
   // One threshold entry per tool route and purpose (0180); an earlier run of this file may have added it.
   await db.query(`update system_settings set value=jsonb_set(value,'{thresholds}',(select coalesce(jsonb_agg(t),'[]')
     from jsonb_array_elements(value->'thresholds') t where t->>'model'<>$1)||$2::jsonb) where key='billing_payg_start_thresholds'`,
-  [toolPolicy.model, JSON.stringify([{ model: toolPolicy.model, purpose: RESEARCH_PHASE, credits: 1 }])]);
+  [toolPolicy.model, JSON.stringify([{ model: toolPolicy.model, purpose: RESEARCH_PHASE, credits: toolThreshold }])]);
   const session = await rpc('runtime_start', { p_actor_id: actor, p_request_id: randomUUID(),
     p_payload: { scope: { kind: 'positioning_draft' } } });
   const requestId = randomUUID();
@@ -163,5 +164,53 @@ it('RUNTIME: a research mentor turn claims the subcall between its model calls, 
       [f.admitted.runId, f.actor])).rows[0];
     // (0.003 + 0.005 + 0.003) × 1000 × 1 = 11 credits, rounded once for the whole turn.
     expect(run).toEqual({ charged: 11, credits: 1000 - 11 });
+  } finally { await f.close(); }
+}, 60000);
+
+it('RUNTIME: a subcall the balance cannot start pauses the turn at its slot; after a top-up it resumes there and charges once', async () => {
+  process.env.PARALLEL_API_KEY = 'synthetic-local-only';
+  supplier.calls = 0;
+  // The tool route needs 999 credits to start; after the first model call (3 credits) only 997 are left.
+  const f = await researchRound(999);
+  try {
+    const host = () => runtimeExecutor({ database: f.admin, actor: async () => f.actor, callGate: async () => ({ ok: true as const }),
+      endpoint: f.endpoint });
+    const calls = async () => (await f.db.query(`select sequence,call_kind,state,settled_at is not null settled
+      from bill2_calls where run_id=$1 order by sequence`, [f.admitted.runId])).rows;
+    const credits = async () => (await f.db.query('select credits from profiles where id=$1', [f.actor])).rows[0].credits;
+    const events: RuntimeProgress[] = [];
+    const waiting = await host().execute(f.admitted.executionId, event => events.push(event));
+    // Paused between two steps (BILL-PAYG), not skipped: no supplier request, no tool row, no reply from the model without it.
+    expect(waiting).toMatchObject({ state: 'waiting_credits', code: 'RUNTIME_WAITING_CREDITS', executionId: f.admitted.executionId });
+    expect(supplier.calls).toBe(0);
+    expect(f.requests).toHaveLength(1);
+    expect(await calls()).toEqual([{ sequence: 1, call_kind: 'model', state: 'responded', settled: true }]);
+    expect(await credits()).toBe(997);
+    expect(events.filter(event => event.type === 'research_call').map(event => event.type === 'research_call' && event.state))
+      .toEqual(['running']);
+    const run = await f.db.query(`select r.paused_reason,r.runtime_checkpoint->>'sequence' seq,e.state from bill2_runs r
+      join runtime_executions e on e.billing_run_id=r.id where r.id=$1`, [f.admitted.runId]);
+    expect(run.rows[0]).toEqual({ paused_reason: 'insufficient_credits', seq: '2', state: 'waiting_credits' });
+    // Still short: resuming keeps waiting instead of sending.
+    expect(await host().execute(f.admitted.executionId)).toEqual(waiting);
+
+    // Synthetic local grant keeps the fixture ledger balanced; no payment provider is involved.
+    await f.db.query(`insert into credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,
+      idempotency_key,balance_before,balance_after) values($1,100,'addition','grant','opening_grant','system',$2,997,1097)`,
+    [f.actor, 'research-turn-topup:' + f.actor]);
+    await f.db.query('update profiles set credits=1097 where id=$1', [f.actor]);
+    const resumed = await host().execute(f.admitted.executionId, undefined,
+      { executionId: f.admitted.executionId, cursor: (waiting as PaygWait).cursor, epoch: (waiting as PaygWait).epoch });
+    expect(resumed).toMatchObject({ state: 'completed' });
+    // The saved first reply is replayed; the subcall claims the paused slot with the same request, then the reply after it.
+    expect((await calls()).map(c => [c.sequence, c.call_kind, c.settled])).toEqual([[1, 'model', true], [2, 'tool', true], [3, 'model', true]]);
+    expect(supplier.calls).toBe(1);
+    expect(f.requests).toHaveLength(2);
+    const charged = (await f.db.query('select charged from bill2_runs where id=$1', [f.admitted.runId])).rows[0].charged;
+    expect(charged).toBe(11);
+    // Granted 1000 + 100 in total; the whole turn costs 11 once (3 of them were already taken before the pause).
+    expect(await credits()).toBe(1000 + 100 - 11);
+    const ledger = await f.db.query('select sum(amount)::int n from credit_transactions where user_id=$1', [f.actor]);
+    expect(ledger.rows[0].n).toBe(1000 + 100 - 11);
   } finally { await f.close(); }
 }, 60000);

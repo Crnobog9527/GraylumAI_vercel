@@ -31,7 +31,7 @@ function checkGuard(guard: PdfGuard) {
 }
 
 /** Encrypted with or without an open password: pdf.js parsed an encryption dictionary from the trailer. */
-async function isEncrypted(document: PDFDocumentProxy): Promise<boolean> {
+export async function isEncrypted(document: PDFDocumentProxy): Promise<boolean> {
   if ((await document.getPermissions()) !== null) return true;
   const { info } = await document.getMetadata();
   return Boolean((info as { EncryptFilterName?: unknown } | null)?.EncryptFilterName);

@@ -84,6 +84,29 @@ export async function runCases({db,Client,connectionString,report}) {
   await rpc(db,'bill2_cancel',s.actor,s.run);await rpc(db,'bill2_finalize',s.actor,s.run);
   return {s,sc,before,hold};
  }
+ // The retry path of a cancelled stream (staging 2026-10-18): the official lookup (dated model, cancelled generation) arrives as a
+ // final request_total receipt; it settles at its real cost, releases the rest of the hold, is idempotent and sets no conflict.
+ const w=await stuck();
+ assert.equal((await run(db,w.s)).state,'cost_pending');
+ const finalLookup={provider:'openrouter',account:'sandbox',model:w.s.claimPayload.model,protocol:'openrouter-chat-v1',
+  expectedProviderId:'gen-stuck-'+w.sc.id,providerId:'gen-stuck-'+w.sc.id,cost:'0.00611',final:true,currency:'USD',source:'lookup',
+  coverage:'request_total',observedAt:new Date().toISOString(),sourceHash:'f'.repeat(64),
+  usage:{inputTokens:2955,outputTokens:20},transport:{httpStatus:200,complete:true,transportIssue:null,sourceHash:'f'.repeat(64)}};
+ await record(db,w.s,w.sc,finalLookup);
+ await rpc(db,'bill2_finalize',w.s.actor,w.s.run);
+ const wr=await run(db,w.s),wc=await call(db,w.sc);
+ assert.equal(wr.conflict,false,'a final lookup receipt never marks a conflict');
+ assert.ok(wc.settled_at,'the call settles');assert.equal(Number(wc.selected_cost_usd),0.00611);
+ assert.equal(wr.state,'settled');
+ const after=await balance(db,w.s);
+ const ledger=async()=>(await db.query('SELECT count(*)::int n FROM credit_transactions WHERE bill2_run_id=$1',[w.s.run])).rows[0].n;
+ const rows=await ledger();assert.ok(rows>0,'the ledger records the settlement');
+ assert.ok(after>w.hold&&after<=w.before,'the hold is released except the real cost');
+ await record(db,w.s,w.sc,finalLookup);await rpc(db,'bill2_finalize',w.s.actor,w.s.run);
+ assert.equal(await balance(db,w.s),after,'a repeated submission changes nothing');
+ assert.equal(await ledger(),rows,'no second ledger entry');
+ report.checks.push('a cancelled call settles from a final lookup receipt at its real cost, releases the hold, is idempotent and sets no conflict');
+
  const z=await stuck();
  assert.equal((await run(db,z.s)).state,'cost_pending');
  const settle=(id,cost,reason='供应商后台确认没有生成记录',request=randomUUID(),who=admin)=>

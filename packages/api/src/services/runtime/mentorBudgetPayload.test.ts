@@ -7,6 +7,7 @@ import { testIdentityGuard } from '../__tests__/fixtures/runtimeGates';
 import { postgresJsonbBytes } from './payloadSize';
 import { PURPOSE_INPUT_CAPS, PURPOSE_OUTPUT_CAP, type PurposeBudgets } from './purposeBudgets';
 import { packageHash, sha256, type SkillSource } from '../skills/loader';
+import { REPLY_LANGUAGE_INSTRUCTIONS } from './primaryInstructions';
 
 const source = vi.hoisted(() => ({ current: undefined as SkillSource | undefined }));
 vi.mock('../skills/databaseSource', () => ({ databaseSkillSource: () => source.current }));
@@ -79,8 +80,10 @@ const config: PurposeBudgets = { version: 1,
   interactive: { inputBytes: PURPOSE_INPUT_CAPS.interactive, maxOutputTokens: PURPOSE_OUTPUT_CAP, historyItems: 1000 },
   organize: { inputBytes: PURPOSE_INPUT_CAPS.organize, historyItems: 1000 },
   report: { inputBytes: PURPOSE_INPUT_CAPS.report, maxOutputTokens: PURPOSE_OUTPUT_CAP, historyItems: 1000 } };
-function sizedInput(context: Record<string, unknown>) {
-  return Buffer.byteLength(JSON.stringify({ instructions: context.instructions,
+// The primary call also carries the execution-time reply-language rule (SKILL-I18N-HOOK), which admission sizes;
+// an attached organizer does not.
+function sizedInput(context: Record<string, unknown>, primary = true) {
+  return Buffer.byteLength(JSON.stringify({ instructions: context.instructions + (primary ? REPLY_LANGUAGE_INSTRUCTIONS : ''),
     messages: [{ role: 'user', content: context.input }] })) + 1024;
 }
 it('46KB resource fits configured input; overflowing frozen payload is rejected before the SQL admission', async () => {
@@ -88,9 +91,10 @@ it('46KB resource fits configured input; overflowing frozen payload is rejected 
   await normal.run();
   expect(postgresJsonbBytes(normal.captured().p_billing)).toBeLessThan(262144 - 8192);
   // This fixture sits exactly between the input and payload limits; the identity prefix (on by default)
-  // would trip the input limit first, so it is switched off to keep testing the payload guard.
+  // would trip the input limit first, so it is switched off to keep testing the payload guard. The resource is
+  // 400 bytes smaller than before SKILL-I18N-HOOK, whose reply-language rule admission also sizes.
   testIdentityGuard.enabled = false;
-  const oversized = await fixture(162000);
+  const oversized = await fixture(161600);
   try { await expect(oversized.run()).rejects.toThrow('RUNTIME_FROZEN_PAYLOAD_TOO_LARGE'); }
   finally { testIdentityGuard.enabled = true; }
   expect(oversized.writes).toEqual([]);
@@ -104,7 +108,7 @@ it('worst allowed composition fits at the exact input hard cap with 8KiB storage
   await exact.run();
   const captured = exact.captured();
   const organizer = captured.p_payload.attachedOrganizer as Record<string, unknown>;
-  expect(sizedInput(organizer)).toBe(PURPOSE_INPUT_CAPS.organize);
+  expect(sizedInput(organizer, false)).toBe(PURPOSE_INPUT_CAPS.organize);
   expect(sizedInput(captured.p_payload)).toBe(PURPOSE_INPUT_CAPS.interactive);
   expect(postgresJsonbBytes(captured.p_payload)).toBeLessThanOrEqual(262144 - 8192);
   expect(postgresJsonbBytes(captured.p_billing)).toBeLessThanOrEqual(262144 - 8192);

@@ -2,6 +2,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { usePathname } from 'next/navigation';
 import { createPortal } from 'react-dom';
 import { numberRegions, pickSpot, shortName, type Box, type RegionItem } from './region-numbers';
 import styles from './region-labels.module.css';
@@ -103,7 +104,16 @@ function measure(spots: Map<string, Spot>, full: boolean, skip: Element | null):
  * untouched, and the labels never take a click. Mounted only by app/landing/preview/layout.tsx, so /landing never
  * loads this code. The labels follow the page as it scrolls, resizes or changes (a tab picked, a panel opened).
  */
+/**
+ * The labels on the lettered style samples only: the jury prototype (/landing/preview/jury) shares the preview layout
+ * but is not a sample, so it gets none (review on #992).
+ */
 export function RegionLabels() {
+  const path = usePathname();
+  return path?.startsWith('/landing/preview/jury') ? null : <SampleRegionLabels />;
+}
+
+function SampleRegionLabels() {
   const [badges, setBadges] = useState<Badge[]>([]);
   const [host, setHost] = useState<HTMLElement | null>(null);
   const overlay = useRef<HTMLDivElement>(null);

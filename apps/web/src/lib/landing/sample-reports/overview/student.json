@@ -84,6 +84,15 @@
     "name": "Kexin in London · 毕业照与穿搭",
     "bio": "伦敦留学生摄影师｜毕业照前穿什么、在哪拍，问我就行"
   },
+  "ownAccount": {
+    "platform": "Instagram",
+    "displayName": "Kexin in London · 毕业照与穿搭",
+    "which": "recommended",
+    "bio": "伦敦留学生摄影师｜毕业照前穿什么、在哪拍，问我就行",
+    "followers": "1,800 个关注",
+    "posts": null,
+    "topStat": null
+  },
   "contentPillars": [
     {
       "name": "流量型",
@@ -102,27 +111,32 @@
     {
       "layer": "免费内容",
       "offer": "帖子和 Reels",
-      "price": "免费"
+      "price": "免费",
+      "why": "让陌生人认识你；收藏的是真关心毕业照的人"
     },
     {
       "layer": "免费清单 + 预约登记",
       "offer": "机位穿搭清单，登记毕业后意向",
-      "price": "免费"
+      "price": "免费",
+      "why": "找出明年真要拍的人；肯登记学校和月份的才真拍"
     },
     {
       "layer": "迷你毕业照",
       "offer": "30 分钟、一个机位（换签证后）",
-      "price": null
+      "price": null,
+      "why": "第一次付费；付过小钱的人信任已经建立"
     },
     {
       "layer": "完整毕业照 + 家人档",
       "offer": "穿搭建议 + 两个机位 + 家人合影",
-      "price": null
+      "price": null,
+      "why": "主要收入；留下最在意结果、愿为省心付钱的人"
     },
     {
       "layer": "延伸服务和合作",
       "offer": "情侣照、旅拍、品牌穿搭拍摄",
-      "price": null
+      "price": null,
+      "why": "淡季收入和口碑；回头客和被介绍来的最精准"
     }
   ],
   "plan30": [

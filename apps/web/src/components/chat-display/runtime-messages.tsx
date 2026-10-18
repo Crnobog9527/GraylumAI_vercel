@@ -5,6 +5,7 @@ import { Bot } from 'lucide-react';
 import { MessageMarkdown } from '@/components/chat/MessageMarkdown';
 import { ChatPendingStatus } from '@/components/chat/ChatInlineNotice';
 import workStyles from '@/app/runtime/runtime-work.module.css';
+import { DisplayHeading } from './display-heading';
 
 /**
  * Display-only pieces of the work conversation (/runtime): header, message list, the "建议稿"
@@ -13,8 +14,10 @@ import workStyles from '@/app/runtime/runtime-work.module.css';
  */
 
 /** Title row. With `meta` it shows the topic's platform, account and work info; otherwise `action`. */
-export function RuntimeHeader({ title, subtitle, meta, action }: {
+export function RuntimeHeader({ title, subtitle, meta, action, headingLevel = 'h1' }: {
   title: string;
+  /** The title's heading level: the page's own title (h1) by default; a page showing it inside its own content, h2. */
+  headingLevel?: 'h1' | 'h2';
   /** Small line under the title (only shown without a topic). */
   subtitle?: string;
   meta?: { platform: string; account: string; infoHref: string; showExpand?: boolean; onExpand?: () => void };
@@ -22,7 +25,7 @@ export function RuntimeHeader({ title, subtitle, meta, action }: {
 }) {
   return (
     <header className={workStyles.workHead}>
-      <div className={workStyles.workTitle}><h1>{title}</h1>{subtitle&&<small>{subtitle}</small>}</div>
+      <div className={workStyles.workTitle}><DisplayHeading as={headingLevel}>{title}</DisplayHeading>{subtitle&&<small>{subtitle}</small>}</div>
       {meta?<div className={workStyles.workMeta}><span>{meta.platform} · {meta.account}</span><Link href={meta.infoHref}>工作信息</Link>
         {meta.showExpand&&<button type="button" onClick={meta.onExpand}>展开成果</button>}</div>:action??null}
     </header>
@@ -33,7 +36,7 @@ export function RuntimeHeader({ title, subtitle, meta, action }: {
 export function RuntimeEmptyState({ text }: { text: string }) {
   return (
     <div className="mx-auto flex min-h-64 max-w-xl flex-col items-center justify-center px-6 py-12 text-center">
-      <Bot className="mb-3 h-7 w-7 text-[var(--color-primary)]"/><h2 className="text-base font-medium">开始一段对话</h2>
+      <Bot className="mb-3 h-7 w-7 text-[var(--color-primary)]"/><DisplayHeading as="h2" className="text-base font-medium">开始一段对话</DisplayHeading>
       <p className="mt-2 text-[13px] text-[var(--text-tertiary)]">{text}</p></div>
   );
 }
@@ -61,8 +64,14 @@ export function RuntimeTurnView({ dateLabel, userText, completed = false, childr
 }
 
 /** A plain reply, or the line that its source is gone. */
-export function RuntimeReply({ text, available = true }: { text: string; available?: boolean }) {
-  return available ? <MessageMarkdown className={workStyles.reply} text={text}/> : <p className={workStyles.reply}>来源已不可用，暂不展示此内容。</p>;
+export function RuntimeReply({ text, available = true, streaming = false }: {
+  text: string;
+  available?: boolean;
+  /** Still being written: an unfinished Markdown mark is closed for display, as in the mentor chat. */
+  streaming?: boolean;
+}) {
+  return available ? <MessageMarkdown className={workStyles.reply} text={text} streaming={streaming}/>
+    : <p className={workStyles.reply}>来源已不可用，暂不展示此内容。</p>;
 }
 
 /** The "建议稿" block of a completed Skill reply on a topic. */
@@ -83,7 +92,7 @@ export function RuntimePendingMessage({ text, sending }: { text: string; sending
 
 /** Right column before the topic's content type is confirmed. */
 export function RuntimeTypePendingPanel() {
-  return <div className={workStyles.typePending}><h2>当前成果</h2><p>先在对话中确认这条选题的内容类型，再起草和保存稿件。已确认前不会创建内容版本。</p></div>;
+  return <div className={workStyles.typePending}><DisplayHeading as="h2">当前成果</DisplayHeading><p>先在对话中确认这条选题的内容类型，再起草和保存稿件。已确认前不会创建内容版本。</p></div>;
 }
 
 export type RuntimeResultVersion = { id: string; kind: string; version: number; status: string; body: string | null; sourceContentId: string | null };
@@ -101,7 +110,7 @@ export function RuntimeResultsSection({ isVideo, versions, currentScriptId, save
   if (!isVideo && !saved?.length) return null;
   return (
     <section aria-label={isVideo?'视频派生成果':'其他 Skill 成果'} className={workStyles.videoResults}>
-      {isVideo&&<><h2>分镜与剪辑建议</h2>{versions.filter(version=>version.kind==='storyboard'||version.kind==='editing').map(version=>
+      {isVideo&&<><DisplayHeading as="h2">分镜与剪辑建议</DisplayHeading>{versions.filter(version=>version.kind==='storyboard'||version.kind==='editing').map(version=>
         <details key={version.id}><summary>{version.kind==='storyboard'?'分镜':'剪辑建议'} · 第 {version.version} 版 · {version.status==='final'?'已定稿':'草稿'}
           {version.sourceContentId===currentScriptId?' · 匹配当前口播稿':' · 旧口播稿版本'}</summary><p>{version.body}</p></details>)}</>}
       {saved?.map(artifact=><details key={artifact.artifactId}><summary>其他 Skill 成果 · 第 {artifact.version} 版</summary>
