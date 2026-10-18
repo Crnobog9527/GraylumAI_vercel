@@ -64,6 +64,16 @@ describe('my_posts saved data',()=>{
   expect(ownPostsResult({...data(),posts:[p]},now)).toMatchObject({kind:'unavailable',reason:'capacity_exhausted',
    note:'资料太多放不下，先按已读到的回答'});
  });
+ it.each(['2026-10-14',null])('recomputes freshness and date notes from retained posts (%s)',capturedOn=>{
+  const retained=post('retained');
+  if(capturedOn===null)retained.latest=null;else retained.latest!.capturedOn=capturedOn;
+  const dropped={...post('dropped','2026-10-16T00:00:00Z'),postedAt:null};
+  dropped.latest!.metrics=Object.fromEntries(Array.from({length:50},(_,i)=>['metric'+i+'k'.repeat(200),1e21]));
+  const result=ownPostsResult({...data(),posts:[retained,dropped]},now);
+  expect(result).toMatchObject({kind:'my_posts',truncated:true,status:'stale',as_of:capturedOn});
+  expect((result.posts as Array<{id:string}>).map(p=>p.id)).toEqual(['retained']);
+  expect(result.note).toBe(capturedOn?'数据截至 2026-10-14，最近一次快照已超过 3 天。':'还没有取到作品快照，指标未取到。');
+ });
  it('free users do not read data, and readData is the only data RPC for paid users; no exchange or billing',async()=>{
   const db={rpc:vi.fn(async()=>({data:data(),error:null}))};
   expect(await resolvePostSource(db,actor,{kind:'workspace_posts_request',entitled:false})).toMatchObject({status:'no_entitlement',note:NO_ENTITLEMENT});
