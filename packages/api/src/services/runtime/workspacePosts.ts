@@ -90,14 +90,14 @@ export async function resolvePostSource(db:SessionRpc,actor:string,source:unknow
  if(![14,30,90].includes(request.windowDays??0))return unavailable;
  const data=await readData(db as Pick<SupabaseClient,'rpc'>,actor,request.windowDays!,{});
  const result=ownPostsResult(data);
- if(!request.review)return result;
+ if(!request.review||result.kind!=='my_posts')return result;
  const {readReviewData}=await import('../publishMonitor/reviewData');
  const {review}=await readReviewData(db as Pick<SupabaseClient,'rpc'>,actor,request.windowDays!,Date.now(),data);
  const sourceConnections=[...new Set([...data.connections.map(c=>c.id),...review.benchmarks.rows.map(r=>r.connectionId),
   ...review.followers.map(f=>f.connectionId)])];
  const enriched:Record<string,unknown>={...result,review,source_connections:sourceConnections,
   ...(review.benchmarks.rows.length?{gold_review:true}:{})};
- while(Buffer.byteLength(JSON.stringify(enriched))>11000){
+ while(postgresJsonbBytes(enriched)>11000){
   if(Array.isArray(result.posts)&&result.posts.length>2)result.posts.pop();
   else if(review.benchmarks.rows.length){
    review.benchmarks.rows.pop();const kept=new Set(review.benchmarks.rows.map(row=>row.postId));
