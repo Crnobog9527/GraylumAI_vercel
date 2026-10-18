@@ -104,13 +104,14 @@ export async function resolvePostSource(db:SessionRpc,actor:string,source:unknow
  while(postResultBytes(enriched)>11000){
   if(Array.isArray(result.posts)&&result.posts.length>2)result.posts.pop();
   else if(review.benchmarks.rows.length){
-   review.benchmarks.rows.pop();const kept=new Set(review.benchmarks.rows.map(row=>row.postId));
+   const removed=review.benchmarks.rows.at(-1)!.postId;
+   review.benchmarks.rows=review.benchmarks.rows.filter(row=>row.postId!==removed);
    for(const [key,ranking] of Object.entries(review.benchmarks.rankings))
-    review.benchmarks.rankings[key]=ranking.filter(row=>kept.has(row.postId));
+    review.benchmarks.rankings[key]=ranking.filter(row=>row.postId!==removed);
   }
-  else if(review.rows.length){review.rows.pop();
-   const kept=new Set(review.rows.map(row=>row.postId));
-   for(const [key,ranking] of Object.entries(review.rankings))review.rankings[key]=ranking.filter(row=>kept.has(row.postId));
+  else if(review.rows.length){
+   const removed=review.rows.at(-1)!.postId;review.rows=review.rows.filter(row=>row.postId!==removed);
+   for(const [key,ranking] of Object.entries(review.rankings))review.rankings[key]=ranking.filter(row=>row.postId!==removed);
   }else if(Array.isArray(result.posts)&&result.posts.length)result.posts.pop();
   else return capacityUnavailable;
   enriched.posts=result.posts;Object.assign(enriched,{truncated:true});
