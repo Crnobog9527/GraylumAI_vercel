@@ -310,7 +310,7 @@ describe('style sample L (sample K, second round, Owner 2026-10-17)', () => {
     expect((31 / 62) * 100).toBeCloseTo(50, 0);
     expect(L_WORKFLOWS[1][0].reply).toContain('| 冰箱剩菜三种做法 | 26% | 28% | 1.4% | 3.4% | 0.5% |');
     expect(L_WORKFLOWS[1][0].reply).toContain('| 你近 30 天平均 | 43% | 37% | 0.8% | 5.1% | 0.9% |');
-    for (const line of ['| 平均观看占时长 | 26% | 43% |', '| 完播率 | 28% | 37% |', '| 评论率 | 1.4% | 0.8% |', '| 收藏率 | 3.4% | 5.1% |',
+    for (const line of ['| 平均看完比例 | 26% | 43% |', '| 完播率 | 28% | 37% |', '| 评论率 | 1.4% | 0.8% |', '| 收藏率 | 3.4% | 5.1% |',
       '| 关注率 | 0.5% | 0.9% |']) expect(L_WORKFLOWS[3][0].reply).toContain(line);
     expect(L_WORKFLOWS[1][0].reply).not.toContain('2.6–2.9');
     expect(L_TASKS[3].question).toBe(L_WORKFLOWS[3][0].user);

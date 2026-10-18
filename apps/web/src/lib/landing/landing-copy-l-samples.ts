@@ -91,7 +91,7 @@ export const L_SAMPLES_REDO = {
     benchmarks: '对标账号',
     benchmark: (id: string) => `对标账号 ${id}`,
     followers: '粉丝',
-    medianViews: '播放中位数',
+    medianViews: '一条一般多少播放',
     engagementRate: '互动',
     updateFreq: '更新',
     learn: '学它',

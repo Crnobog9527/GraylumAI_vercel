@@ -22,6 +22,30 @@ import { J_TAKEOVER_MOMENTS, type TakeoverLine } from './landing-copy-j-takeover
 const [, , , J_GOAL_REPLY, J_AUDIENCE, J_CAMERA] = J_TAKEOVER_MOMENTS[0].lines;
 const [, , , J_FEASIBILITY, J_FETCH, J_TABLE, J_DIAGNOSE_SUMMARY] = J_TAKEOVER_MOMENTS[1].lines;
 
+/**
+ * Round thirteen (Owner 2026-10-18: "AI 教练的说法太别扭，要改成大白话"): sample L's own wording of the lines it borrows
+ * from sample J, inside words swapped for everyday ones, the meaning and the figures unchanged (sample J keeps its own).
+ * Each pair is [J's words, L's words]; the tests check every one is found and replaced.
+ */
+export const L_PLAIN_SWAPS: readonly (readonly [string, string])[] = [
+  ['受众决定变现能力', '看的人是谁，决定了以后能怎么赚钱'],
+  ['也是你和泛做饭号不一样的地方', '也是你和一般做饭号不一样的地方'],
+  ['做饭是高频刚需，锅具、调料、食材都有现成的联盟带货和品牌合作', '做饭是天天都要做的事，锅具、调料、食材都有现成的带货分佣和品牌合作'],
+  ['做饭赛道很挤', '做饭的账号很多'],
+  ['带货要信任和一定的数据基础', '带货要先让人信你，也要有一定的播放量'],
+  ['- 降难度：', '- 怎么降低难度：'],
+  ['第一个月只测内容，不急着变现', '第一个月先试哪类内容受欢迎，不急着赚钱'],
+  ['5 个合格，2 个只作参考', '5 个和你最像、可以照着学，2 个只作参考'],
+  ['这是推断，样本有限，但值得你去占', '这是我的判断，看过的账号有限，但值得你去占'],
+  ['数据来自网络公开信息，观察日期 2026-10-15，真实性待考证，仅供参考', '数据来自平台上的公开信息，查于 2026-10-15，仅供参考'],
+  ['难在赛道挤、带货要信任', '难在做饭的账号很多、带货要先让人信你'],
+  ['对标：5 个合格（A–E），2 个参考', '对标：5 个可以照着学（A–E），2 个只作参考'],
+  ['③中式家常 × 一人份 × 下班，样本里没人同时占住', '③中式家常、一人份、下班后做，这三点在我看过的账号里没人同时做到'],
+  ['第一个月是测试期：测哪类题有人收藏、有人问，流量不是第一指标，数据平淡很正常', '第一个月先试：看哪类题有人收藏、有人问，播放多少不是最要紧的，数据平淡很正常'],
+];
+const plain = <T extends { text: string }>(line: T): T =>
+  ({ ...line, text: L_PLAIN_SWAPS.reduce((text, [from, to]) => text.split(from).join(to), line.text) });
+
 /** The Skill's opening sentence (01-discovery.md 「开场」), verbatim. */
 export const L_SKILL_OPENING = '我先花十几分钟了解你的情况，一次只问一个问题，你想到什么说什么。你说得越具体，最后给你的方案就越准。';
 
@@ -76,9 +100,9 @@ export const L_POSITIONING_MOMENTS: readonly Moment[] = [
     lines: [
       { role: 'coach', text: OPENING, opening: true },
       { role: 'user', text: '副业收入吧，不想辞职。一年后每个月能多几百美元就行。' },
-      J_GOAL_REPLY,
-      J_AUDIENCE,
-      { ...J_CAMERA, card: undefined },
+      plain(J_GOAL_REPLY),
+      plain(J_AUDIENCE),
+      plain({ ...J_CAMERA, card: undefined }),
       { role: 'user', fills: ['resources'], text: RESOURCES },
       { role: 'summary', card: 'confirm', fills: ['track', 'platforms', 'benchmarks', 'assets'], text: STEP_ONE_SUMMARY },
     ],
@@ -88,14 +112,14 @@ export const L_POSITIONING_MOMENTS: readonly Moment[] = [
     lines: [
       { role: 'coach', card: 'direction', text: DIRECTION },
       { role: 'user', pick: DIRECTION_PICK, text: J_PERSONA_DIRECTION.options[DIRECTION_PICK] },
-      J_FEASIBILITY,
-      J_FETCH,
+      plain(J_FEASIBILITY),
+      plain(J_FETCH),
       // Round twelve (D4): every figure filled, so the line no longer speaks of missing ones (sample J keeps its own).
-      { ...J_TABLE, text: J_TABLE.text.replace('数据已经填进表格，查不到的写"未取到"。', '数据已经填进表格。') },
-      J_DIAGNOSE_SUMMARY,
+      plain({ ...J_TABLE, text: J_TABLE.text.replace('数据已经填进表格，查不到的写"未取到"。', '数据已经填进表格。') }),
+      plain(J_DIAGNOSE_SUMMARY),
     ],
   },
-  { id: 'plan', step: 2, lines: J_TAKEOVER_MOMENTS[2].lines },
+  { id: 'plan', step: 2, lines: J_TAKEOVER_MOMENTS[2].lines.map(plain) },
 ];
 
 /** The direction card is sample J's; its options are the coach's two main lines and "两样各做一半". */
