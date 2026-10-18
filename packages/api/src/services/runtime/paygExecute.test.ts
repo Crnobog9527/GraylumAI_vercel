@@ -2,6 +2,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { runtimeExecutor } from './execute';
 import { createRuntimeBudget } from './budget';
+import type { NewWorkGateResult } from './newWorkGate';
 const mock = vi.hoisted(() => ({ run: vi.fn(), billing: {
   claimPaygCall: vi.fn(), dispatchOnce: vi.fn(), finalizeRun: vi.fn(), recoverRun: vi.fn(), recoverReceipts: vi.fn(),
 } }));
@@ -51,7 +52,8 @@ function fixture() {
     catch { throw Error('SDK_WRAPPED_ERROR'); }
     return options.model === 'organizer' ? 'summary' : 'body';
   });
-  const gate = vi.fn(async () => ({ ok: true as const }));
+  const gate = vi.fn(async (_actor: string, _rate: number, _contractVersion?: 'bill2.v1' | 'bill2.v2'):
+    Promise<NewWorkGateResult> => ({ ok: true }));
   return { execution, database, raw, gate, fund: () => { balance = true; },
     options: { database, actor: async () => id, callGate: gate, adapter: { dispatch: vi.fn() } as never } };
 }
@@ -67,11 +69,24 @@ it('persists organizer waiting despite SDK wrapping; resume replays the saved pr
   const result = await runtimeExecutor(f.options).execute(id, undefined, { executionId: id, cursor: 1, epoch: 1 });
   expect(result).toMatchObject({ state: 'completed', body: 'body', summary: 'summary' });
   expect(mock.billing.dispatchOnce.mock.calls.map(([id]) => id)).toEqual(['1', '2']);
-  expect(f.gate.mock.calls.map((args: unknown[]) => args[1])).toEqual([2, 1]);
+  expect(f.gate.mock.calls.map((args: unknown[]) => args[1])).toEqual([1, 1, 1]);
   expect(f.database.rpc.mock.calls.filter(([, a]) => a.p_action === 'checkpoint_primary')
     .map(([, a]) => (a.p_result as {epoch:number}).epoch)).toEqual([1, 2]);
   expect(f.database.rpc.mock.calls.find(([, a]) => a.p_action === 'complete')?.[1].p_result)
     .toMatchObject({epoch:2,value:{body:'body',summary:'summary'}});
+});
+it('checks the next actual call again and denies it before BILL2 can claim or dispatch', async () => {
+  const f = fixture(); f.fund();
+  f.gate.mockImplementationOnce(async () => ({ ok: true as const }))
+    .mockImplementationOnce(async () => ({ ok: false as const, reason: 'call_limited' as const,
+      retryAfter: 60, window: 'minute' as const }));
+
+  const result = await runtimeExecutor(f.options).execute(id);
+
+  expect(f.gate.mock.calls.map((args: unknown[]) => args[1])).toEqual([1, 1]);
+  expect(mock.billing.claimPaygCall).toHaveBeenCalledTimes(1);
+  expect(mock.billing.dispatchOnce).toHaveBeenCalledTimes(1);
+  expect(result).toMatchObject({ state: 'pending' });
 });
 it('time exhaustion before the next call is waiting_resume, never cancellation or automatic continuation', async () => {
   const f = fixture();

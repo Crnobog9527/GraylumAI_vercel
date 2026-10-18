@@ -44,7 +44,9 @@ export async function beginPaygExecution(input: {
         resumedGate:false};
     }
     let verdict;
-    try { verdict = await input.callGate(await input.actor(), execution.remainingCalls!, 'bill2.v2'); }
+    // Resuming immediately attempts one next call; the rest of the run budget
+    // remains a ceiling and is counted only if those calls are actually claimed.
+    try { verdict = await input.callGate(await input.actor(), 1, 'bill2.v2'); }
     catch { return { execution, resumedGate: false, wait: wait('limit_unavailable') }; }
     if (!verdict.ok) return { execution, resumedGate: false, wait: wait(verdict.reason) };
     if (execution.billing.mode === 'staging_test') {

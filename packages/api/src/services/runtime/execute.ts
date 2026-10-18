@@ -165,11 +165,11 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
        automaticRetry:false,hiddenTools:false,lookupSupported:selectedPolicy.lookupSupported,
        ...callBillingUnit(execution.billing.rules,selectedPolicy)};
       if(isPayg)call=runtimePaygCall(request,phase,selectedPolicy,execution.billing.rules,execution.epoch!,native).call;
-      // Every new claim path must pass this once-per-round gate before BILL2.
+      // Count one actual call before each new BILL2 claim; maxCalls remains only a ceiling.
       if(!gateChecked){
        const leaveRateLimit=budget.timing?.enter('rateLimit');
        try{
-        const verdict=await options.callGate(await options.actor(),isPayg?execution.remainingCalls!:execution.billing.limits.maxCalls,
+        const verdict=await options.callGate(await options.actor(),1,
           isPayg?'bill2.v2':'bill2.v1');
         if(!verdict.ok){gateRejection=verdict.reason;throw new Error('RUNTIME_NEW_CALL_DENIED');}
         gateChecked=true;
@@ -185,6 +185,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
         throw error;
        });
       if(claim.id===null)pause('waiting_credits');
+      gateChecked=false;
       try{
        if(selectedPolicy.protocol==='openrouter-chat-v1')budget.modelCallTimeout(OPENROUTER_RESPONSE_TIMEOUT_MS);
        else budget.assertCanStart(5000);
