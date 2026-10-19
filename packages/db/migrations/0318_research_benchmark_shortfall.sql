@@ -10,7 +10,8 @@
 --     the user answers it once (research_benchmark_shortfall_choose): who (actor), when (chosen_at) and how many
 --     qualified accounts and rounds there were at that moment are frozen with the choice and never rewritten.
 --   * report_admission_check: below the required count a report is admitted only when the session still has at
---     least 1 qualified account, at least 2 rounds, and a live "generate" choice. 0 qualified is always refused.
+--     least 1 qualified account, at least 2 rounds, and a live "generate" choice whose card was offered for at least
+--     the workflow's requirement (a Skill asking for more than 3 is never bypassed). 0 qualified is always refused.
 -- Erasure: deleting the answer or conversation that holds the card, and account erasure, delete it. Rows hold no
 -- money and no content (ids, counts, times).
 -- Compatibility: a new table and functions; old code never offers a card, so admission behaves as before (the extra
@@ -64,14 +65,16 @@ LANGUAGE sql STABLE SET search_path=public,pg_temp AS $$
   ORDER BY b.created_at DESC,b.id DESC LIMIT 1
 $$;
 
--- Whether a report below the required count is allowed: the user chose "generate" on a live card, and the session
+-- Whether a report below the required count `req` is allowed: the user chose "generate" on a live card offered for
+-- at least that requirement (a workflow asking for more than the card's minimum is never bypassed), and the session
 -- still has at least 1 qualified account and at least 2 rounds. Re-read at every admission, never cached.
-CREATE OR REPLACE FUNCTION public.research_benchmark_shortfall_accepted(a uuid, s uuid) RETURNS boolean
+CREATE OR REPLACE FUNCTION public.research_benchmark_shortfall_accepted(a uuid, s uuid, req integer) RETURNS boolean
 LANGUAGE sql STABLE SET search_path=public,pg_temp AS $$
   SELECT research_benchmark_qualified(a,s)>=1 AND research_benchmark_rounds(a,s)>=2
     AND EXISTS(SELECT 1 FROM research_benchmark_shortfalls b
       JOIN runtime_executions x ON x.id=b.execution_id AND x.actor_id=a AND x.session_id=s
-      WHERE b.actor_id=a AND b.session_id=s AND b.choice='generate' AND x.content_deleted_at IS NULL AND x.erased_at IS NULL)
+      WHERE b.actor_id=a AND b.session_id=s AND b.choice='generate' AND b.required>=req
+        AND x.content_deleted_at IS NULL AND x.erased_at IS NULL)
 $$;
 
 -- The tool's card (host-owned, free). Returns the session's open or "generate" card when there is one; otherwise
@@ -140,7 +143,7 @@ DO $$ DECLARE definition text; t text; BEGIN
       RAISE EXCEPTION 'RESEARCH_SHORTFALL_SOURCE_MISMATCH: report_admission_check';END IF;
     EXECUTE replace(definition,t,$x$ IF research_benchmark_qualified(a,sid)<research_benchmark_required((SELECT scope FROM runtime_sessions WHERE id=sid),spec)
   -- 0318 shortfall: the user's frozen "generate" choice, with at least 1 qualified account and 2 rounds.
-  AND NOT research_benchmark_shortfall_accepted(a,sid) THEN$x$);
+  AND NOT research_benchmark_shortfall_accepted(a,sid,research_benchmark_required((SELECT scope FROM runtime_sessions WHERE id=sid),spec)) THEN$x$);
   END IF;
 END $$;
 
@@ -172,7 +175,7 @@ END $$;
 
 REVOKE ALL ON FUNCTION public.research_benchmark_rounds(uuid,uuid),
   public.research_benchmark_shortfall_view(research_benchmark_shortfalls),
-  public.research_benchmark_shortfall_latest(uuid,uuid),public.research_benchmark_shortfall_accepted(uuid,uuid)
+  public.research_benchmark_shortfall_latest(uuid,uuid),public.research_benchmark_shortfall_accepted(uuid,uuid,integer)
   FROM PUBLIC,anon,authenticated,service_role;
 REVOKE ALL ON FUNCTION public.research_benchmark_shortfall_offer(uuid,uuid,uuid,uuid),
   public.research_benchmark_shortfall_choose(uuid,uuid,text),public.research_user_shortfall(uuid,uuid) FROM PUBLIC,anon,authenticated;

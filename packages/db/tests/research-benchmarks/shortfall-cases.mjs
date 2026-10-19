@@ -72,6 +72,16 @@ export async function shortfallCases({db,check,rpc,seed,answer,erase,fetchAccoun
     }
   });
 
+  await check('SHORTFALL a workflow requiring more than 3 is never bypassed by the 3-account card', async () => {
+    const f = await seed(db,'complete',0,{minQualifiedBenchmarks:5}), e = await answer(db,f);
+    for (const account of ['m1','m2']) await fetchAccount(f,e,`${account}-${randomUUID().slice(0,6)}`,imitable);
+    await round(f,e);await round(f,e);
+    const card = await offer(f,e);
+    assert.equal(card.required,3);
+    await choose(f,card.cardId,'generate');
+    await refused(gate(f));
+  });
+
   await check('SHORTFALL 0 qualified is refused even with a "generate" choice', async () => {
     const f = await seed(db), fetcher = await answer(db,f), e = await answer(db,f);
     await fetchAccount(f,fetcher,'only',imitable);
