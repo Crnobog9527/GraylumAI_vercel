@@ -34,7 +34,7 @@ export function executionTools(input:{
   name===READ_HISTORY_TOOL?executionMentorHistoryTool({executionId,rpc:ownerRpc,assertCanStart:()=>budget.assertCanStart(),
    onRefused:input.onRefused}):
   withSourceWorkProgress(sourceRuntimeTool({name,context,args:input.args,ownerRpc,budget,
-   execution:input.execution,exchange:input.exchange}),input.onProgress,Boolean(context.ownPosts))));
+   execution:input.execution,exchange:input.exchange}),input.onProgress,Boolean(context.ownPosts),context)));
  const toolBytes=(input.agentTurn?(input.grounded?groundedCardToolBytes():askQuestionToolBytes(input.fiveFields)):
   Buffer.byteLength(JSON.stringify(tools.map(t=>({name:t.name,description:t.description})))))+
   (context.skillFile?skillFileToolBytes():0)+(context.historyRead?mentorHistoryToolBytes():0)+(research?.definitionBytes??0)+
