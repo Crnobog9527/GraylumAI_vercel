@@ -63,8 +63,8 @@ async function finishWithObservation(client: SupabaseClient, args: {
 }
 
 /** Called by the existing authenticated cron. Each RPC is a fresh transaction.
- * Claims never expire: after a crashed/unfinished worker, verify its external I/O
- * before releasing the original token. No retry identity or second queue is created. */
+ * An unfinished claim is released by its own worker once I/O settles; a claim whose worker was killed
+ * (route maxDuration 60 s) is taken over by SQL after 15 minutes (0318). No second queue is created. */
 async function runOne(client: SupabaseClient, deadline: number, drainDeadline: number) {
   const summary: ErasureExecutorSummary = { processed: 0, completed: 0, pending: 0, failed: 0 };
   // One subject per claim cannot starve later subjects:
