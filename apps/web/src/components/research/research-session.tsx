@@ -127,7 +127,7 @@ export function ResearchSessionBenchmarks({ sessionId, disabled = false, onRefre
 }
 
 /**
- * The shortfall choice card (0318), once the host offered it. The choice is stored once; `onChosen` then lets the
+ * The shortfall choice card (0320), once the host offered it. The choice is stored once; `onChosen` then lets the
  * page tell the coach what the user picked.
  */
 export function ResearchShortfallCard({ sessionId, disabled, onChosen }: {

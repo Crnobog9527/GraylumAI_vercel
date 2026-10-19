@@ -152,7 +152,7 @@ export async function benchmarkFetch(ctx: ResearchToolContext, args: ResearchToo
     }
   }
   // The fetch went through every selected account (none left for a later reply): the qualified count is final for this
-  // selection, so the host may now offer the shortfall choice (0318 decides). A stop (round limit, balance) is not the end.
+  // selection, so the host may now offer the shortfall choice (0320 decides). A stop (round limit, balance) is not the end.
   const shortfall = stopReason ? undefined : await shortfallNotice(ctx);
   return toolEnvelope({ status: stopReason && rows.length === 0 ? (stopBudget ? 'budget_exhausted' : 'unavailable')
     : partial ? 'partial' : 'ok', reason: stopReason ?? (partial ? 'ACCOUNT_DATA_INCOMPLETE' : null), items: rows,

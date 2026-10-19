@@ -137,12 +137,12 @@ END $$;
 -- Report gate (0268): below the required count, only with an accepted shortfall choice.
 DO $$ DECLARE definition text; t text; BEGIN
   definition:=pg_get_functiondef('public.report_admission_check(uuid,uuid,jsonb,jsonb)'::regprocedure);
-  IF position('-- 0318 shortfall' IN definition)=0 THEN
+  IF position('-- 0320 shortfall' IN definition)=0 THEN
     t:=$x$ IF research_benchmark_qualified(a,sid)<research_benchmark_required((SELECT scope FROM runtime_sessions WHERE id=sid),spec) THEN$x$;
     IF array_length(string_to_array(definition,t),1)<>2 THEN
       RAISE EXCEPTION 'RESEARCH_SHORTFALL_SOURCE_MISMATCH: report_admission_check';END IF;
     EXECUTE replace(definition,t,$x$ IF research_benchmark_qualified(a,sid)<research_benchmark_required((SELECT scope FROM runtime_sessions WHERE id=sid),spec)
-  -- 0318 shortfall: the user's frozen "generate" choice, with at least 1 qualified account and 2 rounds.
+  -- 0320 shortfall: the user's frozen "generate" choice, with at least 1 qualified account and 2 rounds.
   AND NOT research_benchmark_shortfall_accepted(a,sid,research_benchmark_required((SELECT scope FROM runtime_sessions WHERE id=sid),spec)) THEN$x$);
   END IF;
 END $$;
@@ -150,11 +150,11 @@ END $$;
 -- Content erasure: the card goes with its answer or conversation.
 DO $$ DECLARE definition text; d text; BEGIN
   definition:=pg_get_functiondef('public.content_erasure_confirm(uuid,text,uuid,text)'::regprocedure);
-  IF position('-- 0318 shortfall' IN definition)=0 THEN
+  IF position('-- 0320 shortfall' IN definition)=0 THEN
     d:=$x$ -- 0268 benchmarks: derived numbers go with their answer, conversation or evidence.$x$;
     IF array_length(string_to_array(definition,d),1)<>2 THEN
       RAISE EXCEPTION 'RESEARCH_SHORTFALL_SOURCE_MISMATCH: content_erasure_confirm';END IF;
-    EXECUTE replace(definition,d,$x$ -- 0318 shortfall: the choice card goes with its answer or conversation.
+    EXECUTE replace(definition,d,$x$ -- 0320 shortfall: the choice card goes with its answer or conversation.
  DELETE FROM research_benchmark_shortfalls WHERE actor_id=a AND (session_id=ANY(sessions) OR execution_id=ANY(ids));
 $x$||d);
   END IF;
@@ -162,11 +162,11 @@ END $$;
 
 DO $$ DECLARE definition text; r text; BEGIN
   definition:=pg_get_functiondef('public.account_erasure_scrub_content(uuid)'::regprocedure);
-  IF position('-- 0318 shortfall' IN definition)=0 THEN
+  IF position('-- 0320 shortfall' IN definition)=0 THEN
     r:=$x$  -- 0268 benchmarks$x$;
     IF array_length(string_to_array(definition,r),1)<>2 THEN
       RAISE EXCEPTION 'RESEARCH_SHORTFALL_SOURCE_MISMATCH: account_erasure_scrub_content';END IF;
-    EXECUTE replace(definition,r,$x$  -- 0318 shortfall
+    EXECUTE replace(definition,r,$x$  -- 0320 shortfall
   DELETE FROM research_benchmark_shortfalls WHERE actor_id=p_profile_id;
   GET DIAGNOSTICS n=ROW_COUNT;counts:=counts||jsonb_build_object('research_benchmark_shortfalls_deleted',n);
 $x$||r);

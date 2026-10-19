@@ -35,7 +35,7 @@ export interface ToolEnvelope {
   nextStep?: string;
   availableCandidates?: number;
   requiredCandidates?: number;
-  /** BENCHMARK-SHORTFALL (0318): the host's choice card the coach presents now. */
+  /** BENCHMARK-SHORTFALL (0320): the host's choice card the coach presents now. */
   shortfall?: ShortfallNotice;
 }
 

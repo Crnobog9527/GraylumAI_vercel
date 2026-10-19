@@ -20,7 +20,7 @@ export interface CardPayload {
 export interface CardConfirmation {
   cardId: string; confirmationId: string; kind: 'keywords' | 'candidates'; items: unknown[];
 }
-/** 0318 `research_benchmark_shortfall_view`. */
+/** 0320 `research_benchmark_shortfall_view`. */
 export interface ShortfallCard {
   cardId: string; required: number; offeredQualified: number; offeredRounds: number;
   choice: 'continue' | 'generate' | null; confirmationId: string | null;
@@ -198,7 +198,7 @@ export function databaseRuntimeResearchStore(deps: {
       return rpc<CardConfirmation>('research_card_confirm', { a, p_card: id, p: payload });
     },
     /**
-     * BENCHMARK-SHORTFALL (0318): the session's choice card, or null when it is not due (fewer than 2 completed
+     * BENCHMARK-SHORTFALL (0320): the session's choice card, or null when it is not due (fewer than 2 completed
      * searches, no qualified account yet, or already enough). Free; the host decides, the model only asks.
      */
     async offerShortfall(cardId: string): Promise<ShortfallCard | null> {

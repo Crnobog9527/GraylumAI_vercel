@@ -191,7 +191,7 @@ for (const width of [375, 1440]) {
   }, 30000);
 }
 
-// BENCHMARK-SHORTFALL (0318, Owner 2026-10-20 choice B): after two searches with 1–2 qualified benchmarks the host's
+// BENCHMARK-SHORTFALL (0320, Owner 2026-10-20 choice B): after two searches with 1–2 qualified benchmarks the host's
 // choice card is shown; the user answers once, the answer is sent on, and the table says the report notes the short sample.
 const SHORTFALL_CARD = "55555555-5555-4555-8555-555555555555";
 for (const width of [375, 1440]) {

@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// BENCHMARK-SHORTFALL (0318, Owner 2026-10-20 choice B): a positioning report with 1 to required-1 qualified
+// BENCHMARK-SHORTFALL (0320, Owner 2026-10-20 choice B): a positioning report with 1 to required-1 qualified
 // benchmarks only after 2 completed searches and the user's frozen "generate" choice. Synthetic fixtures only.
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';

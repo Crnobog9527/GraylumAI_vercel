@@ -77,7 +77,7 @@ describe('RT-6 research host context', () => {
     expect(hostTurnContextSchema.parse(withResearchContext(base, research)).research).toEqual(research);
   });
 
-  it('BENCHMARK-SHORTFALL: before 0318 (or on a read failure) the turn goes on without the shortfall block', async () => {
+  it('BENCHMARK-SHORTFALL: before 0320 (or on a read failure) the turn goes on without the shortfall block', async () => {
     failing = 'research_user_shortfall';
     const research = await researchHostContext(admin, actor, session);
     expect(research?.benchmarks.required).toBe(3);

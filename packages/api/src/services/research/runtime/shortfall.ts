@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// BENCHMARK-SHORTFALL (0318, Owner 2026-10-20 choice B). The positioning turn's tool slots are full (PAYG maxTools),
+// BENCHMARK-SHORTFALL (0320, Owner 2026-10-20 choice B). The positioning turn's tool slots are full (PAYG maxTools),
 // so the choice card is not a tool of its own: when a benchmark search round ends without new candidates, or an
 // account fetch finishes, the host asks SQL for the card (research_benchmark_shortfall_offer decides whether it is
 // due) and the tool result tells the coach to present it. Free: no supplier request, no charge.

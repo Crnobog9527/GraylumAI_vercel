@@ -173,7 +173,7 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
   const insufficient = !stopped && complete && !shown;
   const resumable = stopReason === 'ROUND_LIMIT' || stopReason === 'CANDIDATE_SCAN_INCOMPLETE';
   const blockedWithoutData = stopped && !resumable && found.length === 0;
-  // A completed round without new candidates: the host may now offer the shortfall choice (0318 decides).
+  // A completed round without new candidates: the host may now offer the shortfall choice (0320 decides).
   const shortfall = insufficient ? await shortfallNotice(ctx) : undefined;
   return toolEnvelope({ ...(shortfall ? { shortfall } : {}), status: blockedWithoutData ? (stopBudget ? 'budget_exhausted' : 'unavailable')
     : complete && shown ? 'ok' : 'partial',

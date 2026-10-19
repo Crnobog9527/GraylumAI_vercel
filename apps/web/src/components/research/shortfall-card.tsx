@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // BENCHMARK-SHORTFALL (Owner 2026-10-20, choice B): after at least two searches the session still has fewer
-// qualified benchmarks than the report needs. The host offers this card (0318); the user answers it once, and only
+// qualified benchmarks than the report needs. The host offers this card (0320); the user answers it once, and only
 // "generate" lets the report start with the benchmarks found so far. The text is fixed here, never model-written.
 import { useState } from "react";
 import { cn } from "@/lib/utils";

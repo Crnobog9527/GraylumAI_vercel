@@ -149,7 +149,7 @@ export async function researchBenchmarks(db: Db | null, actor: string, sessionId
   return { items: rows };
 }
 
-// BENCHMARK-SHORTFALL (0318, Owner 2026-10-20 choice B): the session's choice card and the user's one answer.
+// BENCHMARK-SHORTFALL (0320, Owner 2026-10-20 choice B): the session's choice card and the user's one answer.
 const shortfallCard = z.object({
   cardId: id, required: z.number().int(), offeredQualified: z.number().int(), offeredRounds: z.number().int(),
   choice: z.enum(['continue', 'generate']).nullable(), confirmationId: id.nullable(),
