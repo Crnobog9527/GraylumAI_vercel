@@ -21,7 +21,8 @@ const mock = `
   import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
   const plan = (level, review, compare, bytes) => ({ id: '00000000-0000-4000-8000-00000000000' + ['free', 'pro', 'gold'].indexOf(level),
     name: level.toUpperCase() + ' 会员', level, allow_export: 'false', allow_batch_export: 'false', allow_fusion_review: review,
-    allow_fusion_compare: compare, library_storage_bytes: bytes, monthly_price: 0, sort_order: 0 });
+    allow_fusion_compare: compare, library_storage_bytes: bytes, positioning_profile_limit: { free: 1, pro: 3, gold: 6 }[level],
+    monthly_price: 0, sort_order: 0 });
   const srv = window.__srv = {
     plans: [plan('free', false, false, 50000000), plan('pro', true, true, 500000000), plan('gold', true, true, 2000000000)],
     settings: { fusion_compare_max_models: 4 }, planCalls: [], settingCalls: [], failNextSave: null, failNextRead: false,
@@ -33,7 +34,9 @@ const mock = `
   const badRequest = (message) => ({ message: JSON.stringify([{ code: 'custom', path: ['value'], message }]), data: { code: 'BAD_REQUEST' } });
   // Same limits as admin.updateMembershipPlan and settings.updateSystemSettings (PR-1).
   const checkPlan = (input) => Number.isSafeInteger(input.libraryStorageBytes) && input.libraryStorageBytes >= 0
-    && typeof input.allowFusionReview === 'boolean' && typeof input.allowFusionCompare === 'boolean' ? null : badRequest('Too small');
+    && typeof input.allowFusionReview === 'boolean' && typeof input.allowFusionCompare === 'boolean'
+    && Number.isSafeInteger(input.positioningProfileLimit) && input.positioningProfileLimit >= 1
+    && input.positioningProfileLimit <= 1000 ? null : badRequest('Too small');
   const checkSetting = (input) => input.key === 'fusion_compare_max_models' && Number.isInteger(input.value) && input.value >= 2
     && input.value <= 8 ? null : badRequest('对比模型上限须为 2 至 8 的整数');
   const mutation = (calls, check, apply) => (options) => {
@@ -68,7 +71,7 @@ const mock = `
         const row = srv.plans.find((p) => p.id === input.id);
         Object.assign(row, { allow_export: input.allowExport, allow_batch_export: input.allowBatchExport,
           allow_fusion_review: input.allowFusionReview, allow_fusion_compare: input.allowFusionCompare,
-          library_storage_bytes: input.libraryStorageBytes });
+          library_storage_bytes: input.libraryStorageBytes, positioning_profile_limit: input.positioningProfileLimit });
       }) },
     }, { get: (target, key) => target[key] ?? generic[key] }),
     settings: new Proxy({
@@ -156,7 +159,8 @@ describe('admin membership permissions in Chromium', () => {
       await page.getByTestId('membership-plan-save-free').click();
       await browserExpect(page.getByTestId(free)).toContainText('已保存并读回');
       expect(await srv(page, 'planCalls')).toEqual([{ id: '00000000-0000-4000-8000-000000000000', allowExport: 'false',
-        allowBatchExport: 'false', allowFusionReview: true, allowFusionCompare: false, libraryStorageBytes: 1_500_000 }]);
+        allowBatchExport: 'false', allowFusionReview: true, allowFusionCompare: false,
+        libraryStorageBytes: 1_500_000, positioningProfileLimit: 1 }]);
       expect(await srv(page, 'plans[0].library_storage_bytes')).toBe(1_500_000);
       // Only the edited switch changed; compare stays independent.
       await page.getByTestId(`${free}-allow-fusion-compare`).click();

@@ -12,7 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { getSafeErrorMessage } from '@/lib/safe-error-message';
 import {
-  describeBytes, mbTextToBytes, planDraftFromRow, planUpdateInput, storageProblem,
+  describeBytes, mbTextToBytes, planDraftFromRow, planUpdateInput, profileLimitProblem, storageProblem,
   type MembershipPlanRow, type PlanDraft,
 } from './membershipEntitlementDraft';
 
@@ -53,7 +53,7 @@ export function MembershipPlanPermissions({ plans, onSaved }: { plans: Membershi
           会员等级权限配置
         </CardTitle>
         <CardDescription style={{ color: 'var(--text-tertiary)' }}>
-          配置各会员等级的导出权限、Fusion 模式和资料库总空间
+          配置各会员等级的导出权限、Fusion 模式、定位档案数量和资料库总空间
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -103,7 +103,7 @@ function PlanPermissionRow({ plan, onSaved }: { plan: MembershipPlanRow; onSaved
   };
   const locked = update.isPending || unread || rereading;
   const view = draft ?? planDraftFromRow(plan);
-  const problem = storageProblem(view);
+  const problem = storageProblem(view) ?? profileLimitProblem(view);
   const bytes = mbTextToBytes(view.storageMb);
   const edit = (next: Partial<PlanDraft>) => {
     setSaved(false);
@@ -166,6 +166,20 @@ function PlanPermissionRow({ plan, onSaved }: { plan: MembershipPlanRow; onSaved
           <p className="text-xs" role={problem ? 'alert' : undefined} style={{ color: problem ? 'var(--error)' : 'var(--text-tertiary)' }}>
             {problem ?? `= ${describeBytes(bytes ?? 0)}`}
           </p>
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor={`${id}-profiles`} className="text-sm" style={{ color: 'var(--text-secondary)' }}>定位档案上限（个）</Label>
+          <Input
+            id={`${id}-profiles`}
+            data-testid={`${id}-profiles`}
+            inputMode="numeric"
+            value={view.positioningProfileLimit}
+            disabled={locked}
+            aria-invalid={Boolean(profileLimitProblem(view))}
+            onChange={event => edit({ positioningProfileLimit: event.target.value })}
+            className="w-full md:max-w-xs"
+          />
+          {profileLimitProblem(view) && <p className="text-xs" role="alert" style={{ color: 'var(--error)' }}>{profileLimitProblem(view)}</p>}
         </div>
       </div>
       <div className="mt-3 text-xs" aria-live="polite">

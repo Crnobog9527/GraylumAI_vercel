@@ -1,15 +1,30 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
-import { readMembershipEntitlements, assertFusionEntitlement } from './membershipEntitlements';
+import {
+  readMembershipEntitlements, readPositioningProfileEntitlement, assertFusionEntitlement,
+} from './membershipEntitlements';
 import { actorId, fixture, subscription } from './__tests__/entitlementsFixture';
 
 describe('new-action membership entitlements', () => {
+  it('resolves current positioning profile caps, including an expired paid tier', async () => {
+    const paid = fixture('pro');
+    paid.rows.user_subscriptions = [subscription()];
+    expect(await readPositioningProfileEntitlement(paid.client, actorId))
+      .toMatchObject({ level: 'pro', profileLevel: 'pro', positioningProfileLimit: 3 });
+
+    const expired = fixture('pro');
+    expired.rows.user_subscriptions = [subscription('active', '2000-01-01T00:00:00Z')];
+    expired.rows.user_subscriptions[0]!.cancel_at_period_end = true;
+    expect(await readPositioningProfileEntitlement(expired.client, actorId))
+      .toMatchObject({ level: 'free', profileLevel: 'pro', positioningProfileLimit: 1 });
+  });
   it.each([
-    ['free', false, 50_000_000], ['pro', true, 500_000_000], ['gold', true, 2_000_000_000],
-  ] as const)('reads %s defaults and enforces both modes', async (level, allowed, bytes) => {
+    ['free', false, 50_000_000, 1], ['pro', true, 500_000_000, 3], ['gold', true, 2_000_000_000, 6],
+  ] as const)('reads %s defaults and enforces both modes', async (level, allowed, bytes, profileLimit) => {
     const f = fixture(level);
     const result = await readMembershipEntitlements(f.client, actorId);
-    expect(result).toMatchObject({ level, libraryStorageBytes: bytes, fusionCompareMaxModels: 4 });
+    expect(result).toMatchObject({ level, libraryStorageBytes: bytes, positioningProfileLimit: profileLimit,
+      fusionCompareMaxModels: 4 });
     for (const mode of ['review', 'compare'] as const) {
       const run = () => assertFusionEntitlement(result, mode, 4);
       if (allowed) expect(run).not.toThrow();

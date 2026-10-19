@@ -30,17 +30,17 @@ export { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTop
 import { opcGenerate, ANSWER_CARD_RULE, resolveAnswerCard, } from "./answerCard";
 export { opcGenerate } from "./answerCard";
 const uuid = z.string().uuid();
-import {opcStart, opcTopicBind} from './start';
+import {opcTopicBind, startWithPositioningProfileLimit} from './start';
 import {isPositioningWorkflow} from './positioningWorkflow';
 import {researchRefreshContext, withResearchRefresh} from './researchRefresh';
 export {opcStart, opcTopicBind} from './start';
 export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:StagingPolicy, resumeWaitingOrganizer?:ResumeWaitingOrganizer) {
-  async function rpc(name: string, args: Record<string, unknown>) {
-    const a = await user.auth.getUser();
-    if (a.error || !a.data.user || !isEmailVerified(a.data.user))
+  async function rpc(name: string, args: Record<string, unknown>, actorId?: string) {
+    const a = actorId ? null : await user.auth.getUser();
+    if (!actorId && (a?.error || !a?.data.user || !isEmailVerified(a.data.user)))
       throw new Error("OPC_AUTH_REQUIRED");
     const r = await admin
-      .rpc(name, { ...args, p_actor_id: a.data.user.id })
+      .rpc(name, { ...args, p_actor_id: actorId ?? a!.data.user!.id })
       .abortSignal(AbortSignal.timeout(10000));
     if (r.error?.message === "RUNTIME_ORGANIZER_PENDING") throw new StagingAccessError('RUNTIME_ORGANIZER_PENDING');
     if (r.error) throwOpcRpcError(r.error);
@@ -395,16 +395,7 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
     },
     read: async (draftId: string) => ({...await draftReadResponse(await rpc("opc_query", {p_draft_id: uuid.parse(draftId)}), rpc),
       runtimeMode:real?(real.mode==="production"?"production":"staging_test"):"isolated"}),
-    start: async (value: unknown) => {
-      const v = opcStart.parse(value);
-      return rpc("opc_start_b1", {
-        p_request_id: v.requestId,
-        p_registration: v.registration,
-        p_mode: v.mode,
-        p_business_id: v.businessId ?? null,
-        p_business_name: v.businessName ?? null,
-      });
-    },
+    start: (value: unknown) => startWithPositioningProfileLimit(value,user,admin,rpc),
     topicDraftRead: (draftId: string) => rpc("opc_topic_draft_read", { p_draft_id: uuid.parse(draftId) }),
     library: (value: unknown) => {
       const v = z.object({

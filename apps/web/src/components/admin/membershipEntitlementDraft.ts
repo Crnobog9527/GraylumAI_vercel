@@ -14,6 +14,7 @@ export type MembershipPlanRow = {
   allow_fusion_review: boolean;
   allow_fusion_compare: boolean;
   library_storage_bytes: number;
+  positioning_profile_limit: number;
 };
 
 export type PlanDraft = {
@@ -23,6 +24,7 @@ export type PlanDraft = {
   allowFusionCompare: boolean;
   /** Decimal MB as typed. */
   storageMb: string;
+  positioningProfileLimit: string;
 };
 
 export const BYTES_PER_MB = 1_000_000;
@@ -62,6 +64,7 @@ export function planDraftFromRow(plan: MembershipPlanRow): PlanDraft {
     allowFusionReview: plan.allow_fusion_review,
     allowFusionCompare: plan.allow_fusion_compare,
     storageMb: bytesToMbText(plan.library_storage_bytes),
+    positioningProfileLimit: String(plan.positioning_profile_limit),
   };
 }
 
@@ -69,10 +72,16 @@ export function storageProblem(draft: PlanDraft): string | null {
   return mbTextToBytes(draft.storageMb) === null ? '请填写不小于 0 的数字（单位 MB，最多 6 位小数）' : null;
 }
 
+export function profileLimitProblem(draft: PlanDraft): string | null {
+  return /^[1-9][0-9]{0,2}$/.test(draft.positioningProfileLimit)
+    ? null : '请填写 1 到 1000 之间的整数';
+}
+
 /** The `admin.updateMembershipPlan` input for a valid draft; every permission field is sent explicitly. */
 export function planUpdateInput(id: string, draft: PlanDraft) {
   const bytes = mbTextToBytes(draft.storageMb);
-  if (bytes === null) return null;
+  const profileLimit = Number(draft.positioningProfileLimit);
+  if (bytes === null || profileLimitProblem(draft)) return null;
   return {
     id,
     allowExport: draft.allowExport ? 'true' as const : 'false' as const,
@@ -80,6 +89,7 @@ export function planUpdateInput(id: string, draft: PlanDraft) {
     allowFusionReview: draft.allowFusionReview,
     allowFusionCompare: draft.allowFusionCompare,
     libraryStorageBytes: bytes,
+    positioningProfileLimit: profileLimit,
   };
 }
 

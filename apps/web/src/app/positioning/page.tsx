@@ -50,7 +50,16 @@ export default function PositioningHome() {
     try {
       const {actorId:_,...request}=op;void _;const d=await start.mutateAsync(request);
       sessionStorage.removeItem(key);setPendingStart(null);location.href="/positioning/"+d.draftId;
-    } catch { setError("未能建立定位草稿。完整的原开始请求已保留，请恢复该请求。"); } finally {startLock.current=false;}
+    } catch (cause) {
+      const code = cause instanceof Error ? cause.message : '';
+      if (code.includes('OPC_PROFILE_LIMIT')) {
+        sessionStorage.removeItem(key);
+        setPendingStart(null);
+        setError('已达到当前会员可创建的定位档案上限。升级会员后可创建更多档案。');
+      } else {
+        setError("未能建立定位草稿。完整的原开始请求已保留，请恢复该请求。");
+      }
+    } finally {startLock.current=false;}
   }
   async function begin(mode:StartMode) {
     if(pendingStart){setError("请先恢复上次开始请求；恢复完成后再选择其他业务。");return;}
@@ -109,6 +118,7 @@ export default function PositioningHome() {
       {pendingStart&&!start.isPending&&<section className={styles.selection} aria-label="待恢复的开始请求"><p>上次开始定位的结果尚未确认。先恢复同一请求，避免把草稿绑定到另一个业务。</p><Button onClick={()=>runStart(pendingStart)}>恢复上次开始请求</Button></section>}
       {methodDialog&&<div className={styles.modalScrim} role="presentation"><section className={styles.methodDialog} role="dialog" aria-modal="true" aria-label="梳理账号定位"><header><h2>梳理账号定位</h2><button autoFocus aria-label="关闭窗口" onClick={()=>setMethodDialog(false)}><X size={17}/></button></header><p>开始新账号的定位分析；已经有定位的，选「我已有定位」，把它粘贴或描述给 AI 教练，再逐步核对确认。</p><div className={styles.methodActions}><button disabled={!actorId||!catalog.data?.length||start.isPending||Boolean(pendingStart)} onClick={()=>{setMethodDialog(false);void begin('mentor');}}>{START_TEXT.mentor.action}</button><button disabled={!actorId||!catalog.data?.length||start.isPending||Boolean(pendingStart)} onClick={()=>{setMethodDialog(false);void begin('manual');}}>{START_TEXT.manual.action}</button></div></section></div>}
       {error && <p role="alert">{error}</p>}
+      {error.includes('定位档案上限') && <Link href="/pricing">查看会员方案 →</Link>}
     </div></main></WorkspaceFrame>
   );
 }

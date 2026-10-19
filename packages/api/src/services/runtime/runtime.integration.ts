@@ -43,13 +43,14 @@ import {opcRouter} from '../../routers/opc';
 import {agentTurnBody} from '../../shared/agentTurn';
 import {OPENING_INPUT,openingRequestId} from '../../shared/opcQuestions';
 import {createTRPCContext} from '../../trpc';
+import {ensurePositioningProfilePlans} from '../__tests__/fixtures/positioningProfilePlans';
 const connectionString=process.env.V3_LOCAL_DB!;
 if(!connectionString?.startsWith('postgres://postgres@127.0.0.1:')||!connectionString.endsWith('/v3_disposable')) throw new Error('isolated runner required');
 const db=new pg.Client({connectionString});
 const admin=createClient(process.env.V3_LOCAL_REST!,process.env.V3_LOCAL_SERVICE_JWT!,{auth:{persistSession:false}});
 const modelId=randomUUID();
 async function rpc(name:string,args:Record<string,unknown>){const r=await admin.rpc(name,args);if(r.error)throw new Error(r.error.message);return r.data;}
-beforeAll(async()=>{await db.connect();await db.query("insert into ai_models(id,name,model_id,provider,is_active) values($1,'Runtime local','runtime-m','fixture','true')",[modelId]);});
+beforeAll(async()=>{await db.connect();await ensurePositioningProfilePlans(db);await db.query("insert into ai_models(id,name,model_id,provider,is_active) values($1,'Runtime local','runtime-m','fixture','true')",[modelId]);});
 afterAll(async()=>{await db.end();});
 
 it('RUNTIME: 100-execution history stays below one second and still excludes revoked ancestors',async()=>{
@@ -1170,6 +1171,7 @@ async function requestEffects(requestId:string){
 }
 it('RUNTIME: AC-1 opc.mentorTurnStream admits and streams a mentor turn in one invocation with the same effects as prepareStep then executeStream',async()=>{
  const f=await mentorTurnFixture(),provider=await heldProvider();
+ await db.query("update profiles set membership_level='pro' where id=$1",[f.actor]);
  const phases=(s:{phases:Record<string,{rt:number}>})=>Object.fromEntries(Object.entries(s.phases).map(([phase,v])=>[phase,v.rt]));
  async function measured<T>(call:(ctx:Awaited<ReturnType<typeof f.context>>)=>Promise<T>){
   const budget=createRuntimeBudget();

@@ -41,6 +41,7 @@ describe('ENTITLEMENTS APIs with real tRPC authentication middleware', () => {
     expect(result).toMatchObject({
       allow_fusion_review: level !== 'free', allow_fusion_compare: level !== 'free',
       library_storage_bytes: { free: 50_000_000, pro: 500_000_000, gold: 2_000_000_000 }[level],
+      positioning_profile_limit: { free: 1, pro: 3, gold: 6 }[level],
     });
   });
   it('allows a single admin entitlement change, preserves unrelated fields and reads it back', async () => {
@@ -51,17 +52,32 @@ describe('ENTITLEMENTS APIs with real tRPC authentication middleware', () => {
     expect(await userRouter.createCaller(f.context).getEntitlements())
       .toMatchObject({ allowFusionReview: false, allowFusionCompare: true, libraryStorageBytes: 500_000_000 });
   });
+  it('persists a validated positioning profile cap through the admin entitlement API', async () => {
+    const f = fixture(); f.rows.profiles![0]!.role = 'admin';
+    await expect(adminRouter.createCaller(f.context).updateMembershipPlan({
+      id: planIds.pro, positioningProfileLimit: 5,
+    })).resolves.toMatchObject({ positioning_profile_limit: 5 });
+    await expect(adminRouter.createCaller(f.context).updateMembershipPlan({
+      id: planIds.pro, positioningProfileLimit: 0,
+    })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(f.rows.membership_plans![1]!.positioning_profile_limit).toBe(5);
+  });
   it('requires explicit entitlements on actual tier change; same-tier legacy edits stay compatible', async () => {
     const f = fixture(); f.rows.profiles![0]!.role = 'admin';
     const caller = adminRouter.createCaller(f.context);
     await expect(caller.updateMembershipPlan({ id: planIds.pro, level: 'gold' })).rejects.toMatchObject({ code: 'BAD_REQUEST' });
     expect(f.writes).toEqual([]);
+    await expect(caller.updateMembershipPlan({ id: planIds.pro, level: 'gold',
+      allowFusionReview: true, allowFusionCompare: true, libraryStorageBytes: 2_000_000_000 }))
+      .rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    expect(f.writes).toEqual([]);
     await expect(caller.updateMembershipPlan({ id: planIds.pro, level: 'pro', name: 'New name' }))
       .resolves.toMatchObject({ name: 'New name', library_storage_bytes: 500_000_000 });
     f.rows.membership_plans = f.rows.membership_plans!.filter(row => row.level !== 'gold');
     await expect(caller.updateMembershipPlan({ id: planIds.pro, level: 'gold',
-      allowFusionReview: true, allowFusionCompare: false, libraryStorageBytes: 100 }))
-      .resolves.toMatchObject({ level: 'gold', allow_fusion_compare: false, library_storage_bytes: 100 });
+      allowFusionReview: true, allowFusionCompare: false, libraryStorageBytes: 100, positioningProfileLimit: 6 }))
+      .resolves.toMatchObject({ level: 'gold', allow_fusion_compare: false, library_storage_bytes: 100,
+        positioning_profile_limit: 6 });
   });
   it.each(['create', 'move'] as const)('reports a clear conflict for duplicate tier %s', async action => {
     const f = fixture(); f.rows.profiles![0]!.role = 'admin';
@@ -69,7 +85,8 @@ describe('ENTITLEMENTS APIs with real tRPC authentication middleware', () => {
     const result = action === 'create'
       ? caller.createMembershipPlan({ ...createPlanInput, level: 'pro' })
       : caller.updateMembershipPlan({ id: planIds.pro, level: 'gold',
-        allowFusionReview: true, allowFusionCompare: true, libraryStorageBytes: 2_000_000_000 });
+        allowFusionReview: true, allowFusionCompare: true, libraryStorageBytes: 2_000_000_000,
+        positioningProfileLimit: 6 });
     await expect(result).rejects.toMatchObject({ code: 'CONFLICT', message: '该会员等级已存在方案，请编辑现有方案。' });
     expect(f.writes).toEqual([]);
   });
