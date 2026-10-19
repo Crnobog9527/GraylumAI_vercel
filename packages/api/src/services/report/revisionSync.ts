@@ -3,6 +3,7 @@ import { TRPCError } from '@trpc/server';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { isEmailVerified } from '../../lib/auth';
+import { reportBodyText } from '../../shared/reportData';
 
 /*
  * AGENT-CORE R14: sync an adopted review revision back to the confirmed fields (Master Plan 3.3).
@@ -17,7 +18,9 @@ const revisionFields = z.record(z.string().min(1).max(128), z.record(z.string().
 export const revisionProposeInput = draft.extend({
   requestId: uuid,
   sourceVersionId: uuid,
-  body: z.string().min(1).refine(body => [...body].length <= 12000),
+  // REPORT-VISUAL (0300): the 12000-character limit counts the report text; the strategy data block is not part of it
+  // (the database counts the same way). A review adoption brings the original block back, so the whole body may be longer.
+  body: z.string().min(1).refine(body => [...reportBodyText(body)].length <= 12000),
   fields: revisionFields,
 }).strict();
 export const revisionReadInput = draft.extend({ revisionId: uuid }).strict();
