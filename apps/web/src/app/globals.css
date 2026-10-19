@@ -769,6 +769,19 @@ pre {
   }
 }
 
+/* Reduced motion for the whole app (WCAG 2.3.3): transitions and animations end almost at once and do not
+   repeat, so the ui/ components (button press, dialog and sheet entrance, spinners) stay still. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 @media (max-width: 767px) {
   .landing-fade-in-up,
   .landing-scroll-down {

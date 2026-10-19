@@ -1,13 +1,19 @@
 'use client';
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import light from '@/components/design/light-tokens.module.css';
 import { Button } from '@/components/ui/button';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
 import { CONVERSATION_ERASURE_WARNING } from '@/lib/conversation-erasure';
 
-const panelStyle = { background: 'var(--bg-secondary)', borderColor: 'var(--border-primary)', color: 'var(--text-primary)' };
-const ghostStyle = { background: 'transparent', borderColor: 'var(--border-primary)', color: 'var(--text-secondary)' };
+// The dialog is portalled to <body>, outside the workbench's scope, so it carries its own `.light` tokens
+// (DESIGN.md Base components: white, 18px radius, dialog shadow).
+const panelStyle = {
+  background: 'var(--gl-surface)', borderColor: 'var(--gl-border)', color: 'var(--gl-text)',
+  borderRadius: 'var(--gl-radius-dialog)', boxShadow: 'var(--gl-shadow-dialog)',
+};
+const ghostStyle = { background: 'transparent', borderColor: 'var(--gl-border-control)', color: 'var(--gl-text-body)' };
 const dangerStyle = { background: '#dc2626', color: '#fff' };
 
 /**
@@ -20,7 +26,7 @@ export function ConversationDeleteDialog({ name, onConfirm, onCancel }: {
   onCancel: () => void;
 }) {
   return <Dialog open onOpenChange={(open) => { if (!open) onCancel(); }}>
-    <DialogContent className="sm:max-w-md" style={panelStyle}>
+    <DialogContent className={`${light.light} sm:max-w-md`} style={panelStyle}>
       <DialogHeader>
         <DialogTitle style={{ color: 'var(--text-primary)' }}>删除对话？</DialogTitle>
         <DialogDescription style={{ color: 'var(--text-secondary)' }}>
