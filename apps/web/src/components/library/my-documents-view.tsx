@@ -164,6 +164,7 @@ function DocumentRow({ doc, ...props }: DocumentListProps & { doc: LibraryDocume
       <div style={{ minWidth: 0 }}>
         <span title={name}>{name}</span>
         <small>{doc.status === 'deleting' ? '—' : new Date(doc.created_at).toLocaleDateString('sv-SE')}</small>
+        {doc.status === 'uploading' && <small>如果上传已经中断，点「删除」即可清掉并释放这部分空间。</small>}
         {ready && scanProgressText(props.scan?.[doc.id]) && <small role="status">{scanProgressText(props.scan?.[doc.id])}</small>}
       </div>
     </div>
