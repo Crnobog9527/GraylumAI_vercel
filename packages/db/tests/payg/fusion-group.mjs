@@ -4,15 +4,16 @@ import assert from 'node:assert/strict';
 import {randomUUID,createHash} from 'node:crypto';
 import {rpc,closeAccount} from '../erasure-b2a/cases.mjs';
 import {conserved} from './core.mjs';
+import {proof} from './provider-rejection.mjs';
 
 const wallet = async (db,actor) => (await db.query('SELECT credits FROM profiles WHERE id=$1',[actor])).rows[0].credits;
 const calls = async (db,runs) => (await db.query('SELECT * FROM bill2_calls WHERE run_id=ANY($1::uuid[]) ORDER BY run_id',[runs])).rows;
 const charged = async (db,runs) => Number((await db.query('SELECT coalesce(sum(charged),0) v FROM bill2_runs WHERE id=ANY($1::uuid[])',[runs])).rows[0].v);
 
-async function group(db,createFixture,{n=3,credits=100,phase='fusion_review',threshold=1}={}) {
-  const first = await createFixture(db,{credits,phase,threshold});
+async function group(db,createFixture,{n=3,credits=100,phase='fusion_review',threshold=1,...extra}={}) {
+  const first = await createFixture(db,{credits,phase,threshold,...extra});
   const members = [first];
-  for (let i=1;i<n;i++) members.push(await createFixture(db,{actor:first.actor,phase,threshold}));
+  for (let i=1;i<n;i++) members.push(await createFixture(db,{actor:first.actor,phase,threshold,...extra}));
   // 0235: a group is bound to its source conversation, where saved Fusion outputs live.
   const session = randomUUID();
   await db.query("INSERT INTO runtime_sessions(id,actor_id,scope,start_request_id,start_payload) VALUES($1,$2,$3,$4,'{}')",
@@ -263,6 +264,23 @@ export async function fusionGroupCases({db,Client,connectionString,report,create
   await rpc(db,'bill2_finalize',race.actor,race.runs[0]);
   assert.equal(await charged(db,race.runs),0);
   report.checks.push('verdict racing with account closure waits on the profile row and is refused once closure commits');
+
+  // 0319: a provider refusal (402 pending its lookup, then confirmed) is no_delivery at zero charge, never user_stopped,
+  // although 0164 cancels the run before the lookup confirms it (staging 2026-10-19).
+  const refused = await group(db,createFixture,{n:1,credits:100,phase:'fusion_summary',empirical:true,bytes:2000,lookupSupported:true});
+  const fc = await claimGroup(db,refused,'summary:1');
+  await dispatchAll(db,refused,fc);
+  const f0 = refused.members[0], c0 = fc.calls[0], providerId = 'gen-synthetic-'+c0.id;
+  const e0 = proof(f0);
+  await rpc(db,'bill2_record',refused.actor,f0.run,c0.id,{...e0,evidenceKind:'provider_rejection_pending',providerId,
+    transport:{...e0.transport,generationId:providerId}});
+  const [rc0] = await calls(db,refused.runs);
+  assert.equal(rc0.provider_rejected,false,'the refusal is still pending its lookup');
+  assert.equal(rc0.fusion_verdict,'no_delivery','a pending refusal with nothing saved is no_delivery, not user_stopped');
+  assert.equal(await charged(db,refused.runs),0);
+  assert.equal(await wallet(db,refused.actor),100,'the call hold is released at zero charge');
+  await assert.rejects(rpc(db,'fusion_call_verdict',refused.actor,c0.id,'usable'),/FUSION_VERDICT/);
+  report.checks.push('0319: a pending provider refusal of a Fusion call records no_delivery at zero charge (a real stop stays user_stopped, above)');
 
   // Membership is immutable once a call exists.
   const other = await rpc(db,'fusion_group_create',exact.actor,randomUUID(),'review');
