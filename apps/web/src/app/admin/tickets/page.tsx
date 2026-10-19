@@ -154,11 +154,11 @@ export default function AdminTicketsPage() {
   const [searchQuery, setSearchQuery] = useState('');
 
   const filters = {
-    status: statusFilter === 'all' ? undefined : statusFilter,
-    category: categoryFilter === 'all' ? undefined : categoryFilter,
+    status: statusFilter === 'all' ? undefined : statusFilter, category: categoryFilter === 'all' ? undefined : categoryFilter,
   };
   const debouncedSearch = useDebouncedValue(searchQuery.trim(), 300);
-  const { data, isLoading, error, refetch } = trpc.admin.getAllTickets.useQuery({ ...filters, search: debouncedSearch || undefined, limit: 100 }, { placeholderData: (previous) => previous });
+  const { data, isLoading, error, refetch } = trpc.admin.getAllTickets.useQuery(
+    { ...filters, search: debouncedSearch || undefined, limit: 100 }, { placeholderData: (previous) => previous });
   const tickets = (data?.tickets ?? []) as Ticket[];
 
   const updateStatus = trpc.admin.updateTicketStatus.useMutation({
