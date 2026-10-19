@@ -34,6 +34,7 @@ export const PUBLIC_PAGES: PublicPage[] = [
   { path: '/blog/first-positioning-conversation', locale: 'zh-Hans', lastModified: '2026-10-17' },
   { path: '/blog/before-you-start-posting', locale: 'zh-Hans', lastModified: '2026-10-17' },
   { path: '/refund', locale: 'zh-Hans', lastModified: '2026-10-17' },
+  { path: '/founders', locale: 'zh-Hans', lastModified: '2026-10-19' },
   { path: '/graylum-vs-chatgpt', locale: 'zh-Hans', lastModified: '2026-10-18', alternates: { 'zh-TW': '/zh-tw/graylum-vs-chatgpt' } },
   { path: '/faq', locale: 'zh-Hans', lastModified: '2026-10-18' },
   { path: '/contact', locale: 'zh-Hans', lastModified: '2026-10-12' },

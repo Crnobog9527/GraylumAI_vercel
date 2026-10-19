@@ -71,6 +71,24 @@ describe('research subcall safety and accounting', () => {
     expect(f.vendors.firecrawl).not.toHaveBeenCalled();
   });
 
+  it('checks the runtime call limit before a supplier BILL2 claim', async () => {
+    const f = fixture(), order: string[] = [];
+    f.context.callGate = vi.fn(async () => { order.push('gate'); });
+    f.billing.claim.mockImplementation(async () => { order.push('claim'); return { callId: 'call-1', token: 'claim-token', state: 'claimed' }; });
+    await runSubcall(f.context, request);
+    expect(order).toEqual(['gate', 'claim']);
+    expect(f.context.callGate).toHaveBeenCalledExactlyOnceWith();
+  });
+
+  it('denies a supplier call before claiming or sending when the runtime limit is full', async () => {
+    const f = fixture();
+    f.context.callGate = vi.fn(async () => { throw new Error('RUNTIME_NEW_CALL_DENIED'); });
+    await expect(runSubcall(f.context, request)).rejects.toThrow('RUNTIME_NEW_CALL_DENIED');
+    expect(f.billing.claim).not.toHaveBeenCalled();
+    expect(f.evidence.open).not.toHaveBeenCalled();
+    expect(f.vendors.parallel).not.toHaveBeenCalled();
+  });
+
   it.each(['ROUTE_NOT_FROZEN', 'KEY_MISSING'] as const)('does not claim or send after %s', async stop => {
     const f = fixture();
     if (stop === 'ROUTE_NOT_FROZEN') f.context.policies = [];

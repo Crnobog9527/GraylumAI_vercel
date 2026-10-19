@@ -53,6 +53,8 @@ export interface SubcallContext {
   runtimeEpoch?: number;
   secrets: SecretReader;
   rateCounter: VendorCounter;
+  /** Reserves one runtime call slot before this supplier call's BILL2 claim. */
+  callGate?: () => Promise<void>;
   vendors?: VendorCalls;
   newId: () => string;
   now?: () => Date;
@@ -130,6 +132,7 @@ export async function runSubcall(context: SubcallContext, request: SupplierReque
 
   let claim;
   const sequence = await context.nextSequence();
+  await context.callGate?.();
   try {
     claim = await context.billing.claim(sequence, toolClaimPayload(policy, {
       phase: context.phase, requestHash: identity, ...(context.runtimeEpoch !== undefined ? { runtimeEpoch: context.runtimeEpoch } : {}),

@@ -45,6 +45,7 @@ vi.mock('@/components/profile/AccountErasureCard', () => ({ AccountErasureCard: 
 vi.mock('@/components/profile/DataUseConsentCard', () => ({ DataUseConsentCard: () => <p>data-use-consent-card</p> }));
 const consent = vi.hoisted(() => ({ visible: false }));
 vi.mock('@/components/profile/dataUseConsentVisibility', () => ({ get DATA_USE_CONSENT_VISIBLE() { return consent.visible; } }));
+vi.mock('@/components/founder/FounderProfileCard', () => ({ FounderProfileCard: () => null }));
 vi.mock('@/components/profile/TicketsPanel', () => ({ default: () => null }));
 
 import ProfilePage from './page';

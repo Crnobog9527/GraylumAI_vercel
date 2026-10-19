@@ -24,6 +24,8 @@ export const PUBLIC_PATHS = [
   '/blog',
   // The public pricing page (moved from /landing/pricing, 2026-10-18).
   '/pricing',
+  // The founder members' wall: read-only, shows only cards the member agreed to publish and an admin approved.
+  '/founders',
   '/auth',
   '/landing',
   '/api',
