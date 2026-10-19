@@ -224,6 +224,38 @@ export async function runExecutor({db,Client,connectionString,require,runAccount
   assert.equal((await locked.row()).executor_recovery_evidence.token,token);
   assert.equal((await runAccountErasureExecutor(locked.client)).completed,1);
 
+  // 0318: a worker killed before finish (route maxDuration 60 s) after opening the Auth intent.
+  // Its claim is taken over after 15 minutes; a 14-minute-old claim is still left alone.
+  const stale=await fixture();await stale.close();const dead=randomUUID();
+  await db.query(`update account_erasure_requests set executor_token=$2,executor_started_at=clock_timestamp()-interval '16 minutes',
+   executor_attempted_at=clock_timestamp()-interval '16 minutes',executor_error_codes=array['ERASURE_EXECUTOR_RUNNING'],
+   auth_delete_started_at=clock_timestamp()-interval '16 minutes',auth_delete_claim_token=$2,auth_delete_dispatch_ready=false
+   where profile_id=$1`,[stale.actor,dead]);
+  const young=await fixture();await young.close();const alive=randomUUID();
+  await db.query(`update account_erasure_requests set executor_token=$2,executor_started_at=clock_timestamp()-interval '14 minutes',
+   executor_attempted_at=clock_timestamp()-interval '14 minutes',executor_error_codes=array['ERASURE_EXECUTOR_RUNNING'] where profile_id=$1`,
+  [young.actor,alive]);
+  const staleCredits=(await db.query('select credits from profiles where id=$1',[stale.actor])).rows[0].credits;
+  assert.ok((await runAccountErasureExecutor(stale.client)).completed>=1);
+  const taken=await stale.row();
+  assert.equal(taken.stage,'completed');assert.equal(taken.executor_token,null);
+  assert.deepEqual(taken.executor_recovery_evidence.token,dead);assert.equal(taken.executor_recovery_evidence.evidence.staleClaim,true);
+  assert.equal(stale.sdk.authDeletes(),1);assert.equal(stale.sdk.objects.size,0);
+  assert.equal((await db.query('select credits from profiles where id=$1',[stale.actor])).rows[0].credits,staleCredits,'balance untouched');
+  const late={p_profile_id:stale.actor,p_request_id:stale.request,p_token:dead,p_codes:[],p_release:true};
+  assert.equal((await base.rpc('account_erasure_executor_finish',late)).data.recorded,false,'dead worker finish no longer matches');
+  assert.ok((await base.rpc('account_erasure_executor_proof',{p_profile_id:stale.actor,p_request_id:stale.request,p_token:dead})).error);
+  await stale.retry();await runAccountErasureExecutor(stale.client);
+  assert.equal(stale.sdk.authDeletes(),1,'completed subject is not deleted again');
+  const kept=await young.row();
+  assert.equal(kept.executor_token,alive,'claim younger than 15 minutes is not taken over');
+  assert.deepEqual(kept.executor_error_codes,['ERASURE_EXECUTOR_RUNNING']);assert.equal(young.sdk.authDeletes(),0);
+  assert.equal((await base.rpc('account_erasure_executor_finish',{p_profile_id:young.actor,p_request_id:young.request,
+   p_token:alive,p_codes:[],p_release:true})).data.recorded,true);
+  // Finish the released subject with its own synthetic SDK so later cases never see it pending.
+  await young.retry();await runAccountErasureExecutor(young.client);assert.equal((await young.row()).stage,'completed');
+  report.checks.push('0318 stale claim (>15 min) taken over: erasure completes once, Auth intent reopened once, old token refused, younger claim kept');
+
   const shared=await fixture();
   await db.query("insert into tickets(user_id,title,description,attachments) values($1,'unrelated','keep',$2)",
    [unrelated,JSON.stringify([shared.actor+'/a.png'])]);
