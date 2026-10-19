@@ -41,6 +41,10 @@ it('only publishes whitelisted summaries for positioning, benchmarks, segments a
   .toEqual({kind:'library_read',state:'done',label:'读了一段资料',detail:'第一段'});
  expect(sourceWorkSummary({kind:'library_search',hits:[],terms:['选题','摄影']}))
   .toEqual({kind:'library_search',state:'missing',label:'资料库里没找到相关内容',detail:'搜索词：选题 摄影'});
+ expect(sourceWorkSummary({kind:'library_index',documents:[{title:'PRIVATE'},{title:'PRIVATE'}]}))
+  .toEqual({kind:'library_search',state:'done',label:'看了你的资料库（2 篇）'});
+ expect(sourceWorkSummary({kind:'library_directory',documentId:'PRIVATE',entries:[{title:'PRIVATE'}]}))
+  .toEqual({kind:'library_search',state:'done',label:'看了你的资料库（1 篇）'});
  expect(sourceWorkSummary({kind:'workspace_index',entries:[{body:'PRIVATE'}]})).toBeNull();
 });
 
@@ -52,17 +56,38 @@ it('does not turn a failed read into success or leak its raw error',async()=>{
  expect(JSON.stringify(emit.mock.calls)).not.toContain('PRIVATE');
 });
 
-it('keeps index browsing and other tools out of the source work stream, and ignores a disconnected viewer',async()=>{
+it('streams library index and directory progress as safe library-search events',async()=>{
  const emit=vi.fn();
- const tool=withSourceWorkProgress({name:'read_source',description:'read',
-  execute:async()=>JSON.stringify({kind:'library_directory'})},emit);
- await tool.execute({query:'doc-1'},'c3');
- expect(emit).not.toHaveBeenCalled();
+ for (const [query,result,count] of [
+  ['',{kind:'library_index',documents:[{title:'PRIVATE'}]},1],
+  ['library',{kind:'library_index',documents:[]},0],
+  ['doc-1',{kind:'library_directory',documentId:'PRIVATE',entries:[]},1],
+  ['doc-1/page-2',{kind:'library_directory',documentId:'PRIVATE',entries:[]},1],
+ ] as const) {
+  emit.mockClear();
+  const tool=withSourceWorkProgress({name:'read_source',description:'read',execute:async()=>JSON.stringify(result)},emit);
+  await tool.execute({query},'c3');
+  expect(emit.mock.calls.map(([event])=>[event.kind,event.state])).toEqual([
+   ['library_search','running'],['library_search','done'],
+  ]);
+  expect(emit.mock.calls.at(-1)?.[0]).toMatchObject({label:`看了你的资料库（${count} 篇）`});
+  expect(JSON.stringify(emit.mock.calls)).not.toContain('PRIVATE');
+ }
  const other={name:'other',description:'other',execute:async()=>''};
  expect(withSourceWorkProgress(other,emit)).toBe(other);
  const disconnected=withSourceWorkProgress({...other,name:'read_source',
   execute:async()=>JSON.stringify({kind:'library_segment',title:'片段'})},()=>{throw new Error('disconnect');});
  await expect(disconnected.execute({query:'doc-1/segment-1'},'c4')).resolves.toContain('library_segment');
+});
+
+it('keeps unrelated reads out of the source work stream and ignores a disconnected viewer',async()=>{
+ const emit=vi.fn();
+ const tool=withSourceWorkProgress({name:'read_source',description:'read',
+  execute:async()=>JSON.stringify({kind:'unavailable',reason:'unknown_query'})},emit);
+ await tool.execute({query:'other'},'c3');
+ expect(emit).not.toHaveBeenCalled();
+ const other={name:'other',description:'other',execute:async()=>''};
+ expect(withSourceWorkProgress(other,emit)).toBe(other);
 });
 
 it('leaves a successful raw tool result untouched when a display summary cannot parse it',async()=>{

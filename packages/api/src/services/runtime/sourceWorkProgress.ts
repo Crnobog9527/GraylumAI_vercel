@@ -33,6 +33,12 @@ export function sourceWorkSummary(result: unknown): Pick<AgentToolEvent, 'kind' 
   return {kind: 'my_benchmarks', state: 'done', label: '看了你的对标账号数据'};
  if (value.kind === 'library_segment')
   return {kind: 'library_read', state: 'done', label: '读了一段资料', detail: text(value.title, 80)};
+ if (value.kind === 'library_index' || value.kind === 'library_directory') {
+  const count = value.kind === 'library_index'
+   ? (Array.isArray(value.documents) ? value.documents.length : 0)
+   : (typeof value.documentId === 'string' ? 1 : 0);
+  return {kind: 'library_search', state: 'done', label: `看了你的资料库（${count} 篇）`};
+ }
  if (value.kind === 'library_search') {
   const docs = new Map<string, string>();
   for (const hit of Array.isArray(value.hits) ? value.hits : []) {
@@ -53,7 +59,8 @@ export function withSourceWorkProgress(tool: RuntimeTool, emit?: (event: AgentTo
  return {...tool, execute: async (args, callId) => {
   const query = typeof args.query === 'string' ? args.query.trim() : '';
   const kind = ownPosts && ['my_posts', 'my_posts:14', 'my_posts:30', 'my_posts:90'].includes(query) ? 'my_posts'
-   : query.startsWith('search:') ? 'library_search' : /^doc-\d+\/segment-\d+$/.test(query) ? 'library_read' : null;
+   : query.startsWith('search:') || query === '' || query === 'library' || /^doc-\d+(?:\/page-\d+)?$/.test(query)
+    ? 'library_search' : /^doc-\d+\/segment-\d+$/.test(query) ? 'library_read' : null;
   const event = {type: 'agent_tool' as const, callId, tool: 'read_source' as const};
   const send = (summary: Omit<AgentToolEvent, 'type' | 'callId' | 'tool'>) => {
    try {emit({...event, ...summary});} catch { /* Display disconnect never interrupts source persistence. */ }
