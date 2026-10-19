@@ -129,7 +129,7 @@ const categoryConfig: Record<TicketCategory, { label: string; icon: React.Elemen
   feature: { label: '功能建议', icon: Lightbulb, color: 'text-purple-400 bg-purple-500/10' },
   question: { label: '咨询', icon: HelpCircle, color: 'text-blue-400 bg-blue-500/10' },
   account: { label: '账户问题', icon: UserCircle, color: 'text-orange-400 bg-orange-500/10' },
-  billing: { label: '账单问题', icon: CreditCard, color: 'text-green-400 bg-green-500/10' },
+  billing: { label: '账单/退款', icon: CreditCard, color: 'text-green-400 bg-green-500/10' },
   consult: { label: '专家诊断预约', icon: UserCircle, color: 'text-amber-400 bg-amber-500/10' },
   other: { label: '其他', icon: MoreHorizontal, color: 'text-gray-400 bg-gray-500/10' },
 };
@@ -454,8 +454,8 @@ export default function AdminTicketsPage() {
                 {/* Ticket ID and Meta */}
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <Badge variant="outline" className="font-mono text-[var(--text-tertiary)] border-[var(--border-primary)]">
-                      #{formatShortId(selectedTicket.id)}
+                    <Badge data-testid="admin-ticket-full-id" variant="outline" className="break-all font-mono text-xs text-[var(--text-tertiary)]">
+                      {selectedTicket.id}
                     </Badge>
                     <button
                       onClick={() => copyTicketId(selectedTicket.id)}

@@ -53,7 +53,7 @@ const categoryOptions = [
   { value: 'technical_support', label: '技术支持' },
   { value: 'feature_request', label: '功能建议' },
   { value: 'bug_report', label: 'Bug反馈' },
-  { value: 'account_issue', label: '账户问题' },
+  { value: 'account_issue', label: '账户问题' }, { value: 'billing', label: '账单/退款' },
   { value: 'other', label: '其他' },
 ];
 
@@ -75,7 +75,7 @@ const categoryMap: Record<string, string> = {
   technical_support: '技术支持',
   feature_request: '功能建议',
   bug_report: 'Bug反馈',
-  account_issue: '账户问题', expert_consult: '专家诊断预约',
+  account_issue: '账户问题', billing: '账单/退款', expert_consult: '专家诊断预约',
   other: '其他'
 };
 
