@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
-import { callFounderRpc } from './member';
+import { callFounderRpc, FounderError } from './member';
 import { founderStatusSchema, founderWallEntrySchema, founderWallLink } from './schemas';
 
 /**
@@ -9,6 +9,7 @@ import { founderStatusSchema, founderWallEntrySchema, founderWallLink } from './
  * entry and livestream records. Every RPC re-checks the admin role in the database (founder_admin_check).
  */
 type Rpc = Pick<SupabaseClient, 'rpc'>;
+type SettingsReader = Pick<SupabaseClient, 'from'>;
 const uuid = z.string().uuid();
 const timestamp = z.string().min(1);
 const CONTROL = /[\u0000-\u001f\u007f]/;
@@ -59,6 +60,15 @@ const livestreamsSchema = z.array(z.object({
 
 export function founderAdminOverview(db: Rpc, actorId: string) {
   return callFounderRpc(db, 'founder_admin_overview', { p_actor: uuid.parse(actorId) }, overviewSchema);
+}
+
+export async function getFounderCommunityEntry(db: SettingsReader) {
+  const { data, error } = await db.from('system_settings').select('value')
+    .eq('key', 'founder_community_entry').maybeSingle();
+  if (error) throw new FounderError('FOUNDER_UNAVAILABLE');
+  const parsed = entrySchema.safeParse(data?.value ?? null);
+  if (!parsed.success) throw new FounderError('FOUNDER_UNAVAILABLE');
+  return parsed.data;
 }
 
 export function reviewFounderWall(db: Rpc, actorId: string, input: z.input<typeof founderWallReviewInput>) {

@@ -10,19 +10,24 @@ const member = { founder: status, consent: { purpose: 'founder_wall', currentVer
   version: 'fw-v1', grantedAt: '2026-10-02T00:00:00Z', revokedAt: null }, entry: null, listed: false, community: null };
 const entry = { displayName: '小灰', socialAccounts: [], productName: null, productUrl: null, intro: null };
 
-function fixture(options: { user?: boolean; role?: string; error?: string; data?: unknown } = {}) {
+function fixture(options: { user?: boolean; role?: string; error?: string; data?: unknown; setting?: unknown } = {}) {
   const rpc = vi.fn((name: string) => Promise.resolve(options.error ? { data: null, error: { message: options.error } }
     : { data: options.data ?? (name.startsWith('founder_member') || name.startsWith('founder_wall_') ? member : []), error: null }));
   const profile = { id: id(1), role: options.role ?? 'user', status: 'active', credits: 0, nickname: 'n' };
-  const q = { select: () => q, eq: () => q, maybeSingle: async () => ({ data: profile, error: null }),
+  let table = '';
+  const reads: string[] = [];
+  const q = { select: () => q, eq: () => q, maybeSingle: async () => ({
+    data: table === 'system_settings' ? options.setting === undefined ? null : { value: options.setting } : profile,
+    error: null,
+  }),
     single: async () => ({ data: profile, error: null }) };
-  const db = { rpc, from: () => q };
+  const db = { rpc, from: (name: string) => { table = name; reads.push(name); return q; } };
   const caller = founderRouter.createCaller({ headers: new Headers(),
     user: options.user === false ? null : { id: id(1), app_metadata: { provider: 'email' }, user_metadata: { email_verified: true } },
     isEmailVerified: true, authProvider: 'email', supabase: db, supabaseAuth: db, supabasePublic: {},
     supabaseAdmin: db, hasSupabaseAdminPrivileges: true } as never);
   const calls = () => rpc.mock.calls.filter(([name]) => /founder/.test(String(name)));
-  return { caller, rpc, calls };
+  return { caller, rpc, calls, reads };
 }
 
 it('members read, submit and withdraw only their own card', async () => {
@@ -62,6 +67,27 @@ it('admin actions pass the admin id from the session and the card version the ad
   await f.caller.admin.reviewWall({ userId: id(2), decision: 'approved', seenUpdatedAt: '2026-10-16 01:02:03.123456+00' });
   expect(f.calls()).toEqual([['founder_wall_review', { p_actor: id(1), p_user: id(2), p_decision: 'approved',
     p_seen_updated_at: '2026-10-16 01:02:03.123456+00' }]]);
+});
+
+it('admins can read the current community entry from the settings row', async () => {
+  const current = { url: 'https://example.com/community', note: '申请时注明创始会员',
+    updatedBy: id(1), updatedAt: '2026-10-18T12:00:00Z' };
+  const f = fixture({ role: 'admin', setting: current });
+  await expect(f.caller.admin.communityEntry()).resolves.toEqual(current);
+  expect(f.reads).toContain('system_settings');
+  expect(f.calls()).toEqual([]);
+});
+
+it('admins receive null when no community entry has been configured', async () => {
+  const f = fixture({ role: 'admin' });
+  await expect(f.caller.admin.communityEntry()).resolves.toBeNull();
+});
+
+it('non-admins cannot read the current community entry', async () => {
+  const f = fixture();
+  await expect(f.caller.admin.communityEntry()).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  expect(f.reads).not.toContain('system_settings');
+  expect(f.calls()).toEqual([]);
 });
 
 it.each([

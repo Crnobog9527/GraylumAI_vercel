@@ -3,6 +3,7 @@ import { TRPCError } from '@trpc/server';
 import { adminProcedure, protectedProcedure, router } from '../trpc';
 import {
   founderAdminOverview, founderCommunityEntryInput, founderCommunityMarkInput, founderLivestreamInput, founderWallReviewInput,
+  getFounderCommunityEntry,
   listFounderLivestreams, markFounderCommunity, recordFounderLivestream, reviewFounderWall, setFounderCommunityEntry,
 } from '../services/founder/admin';
 import { FounderError, readFounderMember, submitFounderWall, withdrawFounderWall } from '../services/founder/member';
@@ -34,6 +35,8 @@ function trpcCode(code: string) {
 const founderAdminRouter = router({
   overview: adminProcedure.query(({ ctx }) =>
     safe(ctx.hasSupabaseAdminPrivileges, () => founderAdminOverview(ctx.supabaseAdmin, ctx.user.id))),
+  communityEntry: adminProcedure.query(({ ctx }) =>
+    safe(ctx.hasSupabaseAdminPrivileges, () => getFounderCommunityEntry(ctx.supabaseAdmin))),
   reviewWall: adminProcedure.input(founderWallReviewInput).mutation(({ ctx, input }) =>
     safe(ctx.hasSupabaseAdminPrivileges, () => reviewFounderWall(ctx.supabaseAdmin, ctx.user.id, input))),
   markCommunity: adminProcedure.input(founderCommunityMarkInput).mutation(({ ctx, input }) =>
