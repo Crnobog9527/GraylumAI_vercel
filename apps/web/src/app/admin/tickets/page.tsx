@@ -3,8 +3,8 @@
 import { useState } from 'react';
 import { trpc } from '@/trpc/client';
 import { TicketSearchInput } from './TicketSearchInput';
-import { TICKET_PAGE_SIZE, useTicketSearchPool } from './useTicketSearchPool';
-import { formatTicketNumber, ticketMatchesQuery } from '@/lib/ticket-number';
+import { useDebouncedValue } from './useDebouncedValue';
+import { formatTicketNumber } from '@/lib/ticket-number';
 import {
   Headphones, MessageSquare, Clock, CheckCircle,
   AlertCircle, Send, ChevronRight, User, Shield, Bug,
@@ -157,10 +157,9 @@ export default function AdminTicketsPage() {
     status: statusFilter === 'all' ? undefined : statusFilter,
     category: categoryFilter === 'all' ? undefined : categoryFilter,
   };
-  const { data, isLoading, error, refetch } = trpc.admin.getAllTickets.useQuery({ ...filters, limit: TICKET_PAGE_SIZE });
-  const firstPage = (data?.tickets ?? []) as Ticket[];
-  const pool = useTicketSearchPool<Ticket>(!!searchQuery.trim(), filters, firstPage.length, data?.total ?? 0);
-  const tickets = [...firstPage, ...pool].filter((t) => ticketMatchesQuery(t.id, searchQuery));
+  const debouncedSearch = useDebouncedValue(searchQuery.trim(), 300);
+  const { data, isLoading, error, refetch } = trpc.admin.getAllTickets.useQuery({ ...filters, search: debouncedSearch || undefined, limit: 100 });
+  const tickets = (data?.tickets ?? []) as Ticket[];
 
   const updateStatus = trpc.admin.updateTicketStatus.useMutation({
     onSuccess: async () => {
@@ -329,7 +328,7 @@ export default function AdminTicketsPage() {
                               className="flex items-center gap-1 px-2 py-1 rounded text-xs font-mono hover:bg-[var(--bg-tertiary)] transition-colors"
                               style={{ color: 'var(--text-tertiary)' }}
                             >
-                              {formatTicketNumber(ticket.id)}
+                              {formatTicketNumber(ticket.id, ticket.created_at)}
                               {copiedId === ticket.id ? (
                                 <CheckCheck className="h-3 w-3 text-emerald-400" />
                               ) : (
@@ -449,7 +448,7 @@ export default function AdminTicketsPage() {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Badge data-testid="admin-ticket-number" variant="outline" className="font-mono text-sm text-[var(--text-primary)]">
-                      {formatTicketNumber(selectedTicket.id)}
+                      {formatTicketNumber(selectedTicket.id, selectedTicket.created_at)}
                     </Badge>
                     <span data-testid="admin-ticket-full-id" className="break-all font-mono text-xs text-[var(--text-tertiary)]">{selectedTicket.id}</span>
                     <button

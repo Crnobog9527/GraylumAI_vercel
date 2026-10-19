@@ -2,6 +2,7 @@ import { router, protectedProcedure } from '../trpc';
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { logger } from '../lib/logger';
+import { formatTicketNumber } from '../lib/ticketNumber';
 import { createSafeInternalError } from '../lib/publicError';
 import {
   filterOwnedTicketAttachmentPaths,
@@ -43,14 +44,6 @@ const dbToStatusMap: Record<string, string> = {
   closed: 'closed',
 };
 
-// 生成工单号 (TK-年月日-序号)
-const generateTicketNumber = (id: string): string => {
-  const now = new Date();
-  const dateStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
-  const shortId = id.substring(0, 6).toUpperCase();
-  return `TK-${dateStr}-${shortId}`;
-};
-
 async function serializeTicketsWithSignedAttachments(
   supabaseAdmin: any,
   tickets: any[],
@@ -73,7 +66,7 @@ async function serializeTicketsWithSignedAttachments(
 
   return tickets.map((ticket) => ({
     id: ticket.id,
-    ticket_number: generateTicketNumber(ticket.id),
+    ticket_number: formatTicketNumber(ticket.id, ticket.created_at),
     title: ticket.title,
     description: ticket.description || '',
     category: dbToCategoryMap[ticket.category] || 'other',

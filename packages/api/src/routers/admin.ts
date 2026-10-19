@@ -12,6 +12,7 @@ import { hydrateStripeCatalogPrices, saveStripeCatalog } from '../services/payme
 import { TRPCError } from '@trpc/server';
 import { createSafeInternalError } from '../lib/publicError';
 import { logger } from '../lib/logger';
+import { applyTicketIdSearch } from '../lib/ticketNumber';
 import { readAllReportRows } from '../services/reportRows';
 import {
   buildPerformanceCostStats,
@@ -696,6 +697,7 @@ export const adminRouter = router({
       status: z.enum(['open', 'in_progress', 'closed']).optional(),
       category: z.enum(['bug', 'feature', 'question', 'account', 'billing', 'consult', 'other']).optional(),
       priority: z.enum(['low', 'medium', 'high', 'urgent']).optional(),
+      search: z.string().max(64).optional(),
       limit: z.number().min(1).max(100).default(20),
       offset: z.number().min(0).default(0),
     }))
@@ -709,15 +711,10 @@ export const adminRouter = router({
         .order('created_at', { ascending: false })
         .range(input.offset, input.offset + input.limit - 1);
 
-      if (input.status) {
-        query = query.eq('status', input.status);
-      }
-      if (input.category) {
-        query = query.eq('category', input.category);
-      }
-      if (input.priority) {
-        query = query.eq('priority', input.priority);
-      }
+      if (input.status) query = query.eq('status', input.status);
+      if (input.category) query = query.eq('category', input.category);
+      if (input.priority) query = query.eq('priority', input.priority);
+      query = applyTicketIdSearch(query, input.search);
 
       const { data: ticketsData, error, count } = await query;
 
