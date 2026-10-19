@@ -99,6 +99,21 @@ export async function shortfallCases({db,check,rpc,seed,answer,erase,fetchAccoun
     await assert.rejects(offer(g,ge),/RESEARCH_SHORTFALL_NOT_DUE/);
   });
 
+  await check('SHORTFALL a stale open card cannot record "generate" once the conditions no longer hold', async () => {
+    const f = await seed(db), fetcher = await answer(db,f), e = await answer(db,f);
+    await fetchAccount(f,fetcher,`stale-${randomUUID().slice(0,6)}`,imitable);
+    await round(f,e);await round(f,e);
+    const card = await offer(f,e);
+    await erase(db,f,'answer',fetcher);
+    await assert.rejects(choose(f,card.cardId,'generate'),/RESEARCH_SHORTFALL_NOT_DUE/);
+    assert.equal((await state(f)).card.choice,null,'the card stays open');
+    // Restored later: the user chooses again with the conditions holding together.
+    await fetchAccount(f,await answer(db,f),`back-${randomUUID().slice(0,6)}`,imitable);
+    await refused(gate(f));
+    assert.equal((await choose(f,card.cardId,'generate')).chosenQualified,1);
+    await gate(f);
+  });
+
   await check('SHORTFALL "continue": refused; a new card only after another completed round', async () => {
     const {f,e} = await session(2);
     await round(f,e);await round(f,e);

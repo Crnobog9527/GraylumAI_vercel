@@ -100,10 +100,12 @@ BEGIN
 END $$;
 
 -- The user's answer, once. A repeat of the same answer returns the stored record; another answer is refused. The
--- qualified count and rounds at this moment are frozen with it.
+-- qualified count and rounds at this moment are frozen with it. "generate" is recorded only while the conditions
+-- hold now (at least 1 qualified account and 2 rounds; the card may have gone stale since it was offered):
+-- otherwise RESEARCH_SHORTFALL_NOT_DUE and the card stays open.
 CREATE OR REPLACE FUNCTION public.research_benchmark_shortfall_choose(a uuid, p_card uuid, p_choice text) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
-DECLARE b research_benchmark_shortfalls;
+DECLARE b research_benchmark_shortfalls; q integer; r integer;
 BEGIN
   SELECT * INTO b FROM research_benchmark_shortfalls WHERE id=p_card;
   IF b.id IS NULL OR b.actor_id<>a THEN RAISE EXCEPTION 'RESEARCH_SCOPE_DENIED' USING ERRCODE='42501';END IF;
@@ -116,9 +118,11 @@ BEGIN
     IF b.choice<>p_choice THEN RAISE EXCEPTION 'RESEARCH_CARD_ALREADY_CONFIRMED';END IF;
     RETURN research_benchmark_shortfall_view(b);
   END IF;
+  q:=research_benchmark_qualified(a,b.session_id);
+  r:=research_benchmark_rounds(a,b.session_id);
+  IF p_choice='generate' AND (q<1 OR r<2) THEN RAISE EXCEPTION 'RESEARCH_SHORTFALL_NOT_DUE';END IF;
   UPDATE research_benchmark_shortfalls SET choice=p_choice,confirmation_id=gen_random_uuid(),
-    chosen_qualified=research_benchmark_qualified(a,b.session_id),chosen_rounds=research_benchmark_rounds(a,b.session_id),
-    chosen_at=clock_timestamp()
+    chosen_qualified=q,chosen_rounds=r,chosen_at=clock_timestamp()
   WHERE id=b.id RETURNING * INTO b;
   RETURN research_benchmark_shortfall_view(b);
 END $$;

@@ -34,7 +34,7 @@ const confirmationResult = z.discriminatedUnion('kind', [
 ]);
 const knownErrors = new Set([
   'RESEARCH_SCOPE_DENIED', 'RESEARCH_CARD_INVALID', 'RESEARCH_CARD_ALREADY_CONFIRMED',
-  'RESEARCH_REFRESH_INVALID',
+  'RESEARCH_REFRESH_INVALID', 'RESEARCH_SHORTFALL_NOT_DUE',
 ]);
 async function rpc(db: Db | null, name: string, args: Record<string, unknown>) {
   if (!db) throw new TRPCError({ code: 'SERVICE_UNAVAILABLE', message: 'RESEARCH_UNAVAILABLE' });
