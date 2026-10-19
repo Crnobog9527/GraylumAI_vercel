@@ -18,6 +18,7 @@ export { PublishFootnote, PublishNext, reportPublishes } from "./report-publish"
 import { ReportDocumentPanel } from "./report-document-panel";
 import { REPORT_DOC_TEXT } from "./report-document";
 import { JuryEntry } from "@/components/fusion-review/JuryEntry";
+import { SavedReportEditor } from "./saved-report-editor";
 import { REPORT_OUTLINE_MIN_CHAPTERS, ReportWithOutline } from "@/components/chat-display/report-outline";
 import { useReportOutline } from "@/components/chat-display/use-report-outline";
 import { ReportView } from "@/components/chat-display/report-view/report-view";
@@ -68,14 +69,17 @@ function RoundReportEntry(props: Props) {
       {open && (paywall ? <ReportPaywallDialog onClose={() => setOpen(false)} />
         : <ReportDialog report={report} savedBody={report.executionId ? null : saved}
           savedStrategy={report.executionId ? null : savedFormalStrategy(props.report)} busy={props.busy}
+          edit={saved && !report.executionId && props.report?.id ? { draftId: props.draftId, projectId: props.projectId, versionId: props.report.id } : undefined}
           price={available.data?.priceCredits} onClose={() => setOpen(false)}
           onTopics={() => { setOpen(false); props.onTopics(); }} />)}
     </>
   );
 }
 
-export function ReportDialog({ report, savedBody, savedStrategy, busy, price, onClose, onTopics }:
+export function ReportDialog({ report, savedBody, savedStrategy, edit, busy, price, onClose, onTopics }:
   { report: ReturnType<typeof useReportGen>; savedBody?: string | null; savedStrategy?: ReturnType<typeof savedFormalStrategy>;
+    /** A saved formal version with no generation behind it (a jury adoption): it can be edited and 定稿 again (R14). */
+    edit?: { draftId: string; projectId: string; versionId: string };
     busy: boolean; price?: number | null; onClose: () => void; onTopics: () => void }) {
   // Unsaved report edits live in the panel: closing asks first instead of dropping them silently.
   const unsaved = useRef(false);
@@ -124,9 +128,14 @@ export function ReportDialog({ report, savedBody, savedStrategy, busy, price, on
           {view?.kind === "report" && !report.live && report.executionId
             ? <ReportDocumentPanel key={report.executionId} executionId={report.executionId} fallbackBody={view.body}
               generatedComplete={view.candidate} busy={busy || working} onTopics={onTopics} onUnsaved={trackUnsaved} />
-            : body && <ReportView className="mt-4" body={body} streaming={Boolean(report.live && !report.live.stopped)}
-              {...(body === savedBody && savedStrategy ? { data: savedStrategy.data, editedFields: savedStrategy.textEdited,
-                notice: savedStrategy.fromSource ? REPORT_VIEW_TEXT.revisionKeepsData : undefined } : {})} />}
+            : body && (() => {
+              const shown = <ReportView className="mt-4" body={body} streaming={Boolean(report.live && !report.live.stopped)}
+                {...(body === savedBody && savedStrategy ? { data: savedStrategy.data, editedFields: savedStrategy.textEdited,
+                  notice: savedStrategy.fromSource ? REPORT_VIEW_TEXT.revisionKeepsData : undefined } : {})} />;
+              return edit && savedBody && body === savedBody
+                ? <SavedReportEditor key={edit.versionId} {...edit} body={savedBody} view={shown} busy={busy || working} onUnsaved={trackUnsaved} />
+                : shown;
+            })()}
           <ChatNoticeList className="mt-4" notices={notices} />
           {report.offer && !savedBody && !report.refusal?.hideEntry && (
             <div className={resultStyles.consentActions}>
