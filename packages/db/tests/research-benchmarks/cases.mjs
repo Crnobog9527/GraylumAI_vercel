@@ -47,7 +47,8 @@ export async function runCases({db,Client,connectionString,report}) {
   /** Supplier evidence → benchmark_fetch's own computation → the fetch cache, exactly as the tool does it. */
   async function fetchAccount(f,e,account,{followers,posts,tamper,refresh,profileOp,deferFinish,complete=true,pages,pageId}) {
     // As benchmark_fetch: claim and mark sent, then one subcall per kind under its stable operation id.
-    if (pages) posts = pages.flat();
+    // As benchmark_fetch: a later page's repeat of an earlier page's post is dropped (the profile counts distinct posts).
+    if (pages) posts = pages.reduce((all,page)=>[...all,...page.filter(item=>!all.some(seen=>seen.id===item.id))],[]);
     const claim = await rpc(db,'research_account_fetch_claim',f.actor,f.session,e,'tiktok',account,refresh??null);
     assert.equal(claim.claimed,true);
     assert.equal(await rpc(db,'research_account_fetch_dispatch',f.actor,claim.fetchId,claim.attempt),true);
@@ -122,6 +123,11 @@ export async function runCases({db,Client,connectionString,report}) {
     const three = await fetchAccount(f,e,'threepages',{followers:50000,complete:false,
       pages:[twenty.slice(0,8),[twenty[0],...twenty.slice(8,15)],twenty.slice(15)]});
     assert.deepEqual([(await get(three)).qualified,(await get(three)).posts_analyzed],[true,20]);
+    // A whole history spread over pages that overlap counts the distinct posts, as benchmark_fetch does.
+    const few = [post(1,9000),post(2,10000),post(3,11000)];
+    const wholePaged = await fetchAccount(f,e,'wholepaged',{followers:50000,complete:true,pages:[few.slice(0,2),[few[0],few[2]]]});
+    assert.equal(wholePaged.evidence.metrics.wholeHistory,true);
+    assert.deepEqual([(await get(wholePaged)).qualified,(await get(wholePaged)).whole_history,(await get(wholePaged)).posts_analyzed],[true,true,3]);
     // A page that is not a subcall of this attempt (another attempt's id) is still refused.
     const foreign = await fetchAccount(f,e,'foreignpage',{followers:50000,pages:[twenty.slice(0,10),twenty.slice(10)],complete:false,
       pageId:(claim,n)=>stableId(claim.fetchId,randomUUID(),'account_posts',String(n))});
@@ -130,7 +136,7 @@ export async function runCases({db,Client,connectionString,report}) {
     const four = await fetchAccount(f,e,'fourpages',{followers:50000,complete:false,
       pages:[twenty.slice(0,5),twenty.slice(5,10),twenty.slice(10,15),twenty.slice(15)]});
     assert.deepEqual([(await get(four)).excluded,(await get(four)).qualified],['EVIDENCE_UNVERIFIED',false]);
-    assert.equal(await qualified(db,f),2);
+    assert.equal(await qualified(db,f),3);
   });
 
   await check('RT-4b fewer than 20 analyzed posts qualify only as the whole history (Owner 2026-10-16, A)', async () => {

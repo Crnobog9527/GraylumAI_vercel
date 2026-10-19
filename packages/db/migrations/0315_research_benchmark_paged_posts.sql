@@ -48,8 +48,15 @@ DO $migration$ DECLARE definition text; t text; BEGIN
           AND p.session_id=f.session_id AND o.state='succeeded' AND o.erased_at IS NULL),false);$p$;
     IF array_length(string_to_array(definition,t),1)<>2 THEN
       RAISE EXCEPTION 'RESEARCH_BENCHMARK_SOURCE_MISMATCH: research_benchmark_project';END IF;
-    definition:=replace(definition,t,$p$        WHERE o.id=ANY(research_benchmark_post_operations(f.id,f.last_success_attempt)) AND p.actor_id=f.actor_id
-          AND p.session_id=f.session_id AND o.state='succeeded' AND o.erased_at IS NULL),false);$p$);
+    definition:=replace(definition,t,$p$        JOIN unnest(research_benchmark_post_operations(f.id,f.last_success_attempt)) WITH ORDINALITY pg(op,page) ON pg.op=o.id
+        WHERE p.actor_id=f.actor_id
+          AND p.session_id=f.session_id AND o.state='succeeded' AND o.erased_at IS NULL
+          -- As benchmark_fetch: a later page's repeat of an earlier page's post is dropped before counting.
+          AND NOT EXISTS(SELECT 1 FROM research_operations o2 JOIN research_plans p2 ON p2.id=o2.plan_id
+            JOIN unnest(research_benchmark_post_operations(f.id,f.last_success_attempt)) WITH ORDINALITY pg2(op,page) ON pg2.op=o2.id
+            CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(o2.result->'items')='array' THEN o2.result->'items' ELSE '[]' END) x2
+            WHERE pg2.page<pg.page AND p2.actor_id=f.actor_id AND p2.session_id=f.session_id AND o2.state='succeeded'
+              AND o2.erased_at IS NULL AND x2->'fields'->>'id'=x->'fields'->>'id')),false);$p$);
     t:=$p$      WHERE o.id=research_benchmark_operation_id(f.id,f.last_success_attempt,'account_posts') AND p.actor_id=f.actor_id
         AND p.session_id=f.session_id AND o.state='succeeded' AND o.erased_at IS NULL
     ), items AS (SELECT DISTINCT ON (post_key) * FROM entries ORDER BY post_key,i),
