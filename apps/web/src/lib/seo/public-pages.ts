@@ -42,7 +42,6 @@ export const PUBLIC_PAGES: PublicPage[] = [
   { path: '/privacy', locale: 'zh-Hans', lastModified: '2026-10-19' },
   { path: '/cookies', locale: 'zh-Hans', lastModified: '2026-10-19' },
   { path: '/refund-policy', locale: 'zh-Hans', lastModified: '2026-10-19' },
-  { path: '/acceptable-use', locale: 'zh-Hans', lastModified: '2026-10-12' },
   { path: '/about', locale: 'zh-Hans', lastModified: '2026-10-13', alternates: { 'zh-TW': '/zh-tw/about' } },
   // Traditional Chinese (Taiwan), SEO_GEO_SPEC 3.2 and appendix B.
   { path: '/zh-tw', locale: 'zh-TW', lastModified: '2026-10-12', footerLabel: '自媒體是什麼？' },

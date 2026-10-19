@@ -18,7 +18,7 @@ describe('legal documents', () => {
   it('terms: Wyoming courts, 6 month liability cap, subscriptions and refunds are written down', () => {
     const html = readLegalDoc('terms');
     for (const text of ['Sheridan County, Wyoming', 'SIX (6) MONTH PERIOD', 'automatically renew', 'at least 18 years old',
-      'https://www.graylum.com/refund-policy', 'Data Use Consent', 'YOUR CONTENT AND AI OUTPUTS']) {
+      'https://www.graylum.com/refund-policy', 'Data Use Consent', 'YOUR CONTENT AND AI OUTPUTS', '<h2 id="sec-7">7. PROHIBITED ACTIVITIES</h2>']) {
       expect(html).toContain(text);
     }
   });

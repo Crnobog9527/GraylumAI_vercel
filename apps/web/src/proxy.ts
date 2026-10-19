@@ -19,7 +19,6 @@ const PUBLIC_SITE_PATHS = [
   '/faq',
   '/terms',
   '/privacy',
-  '/acceptable-use',
   '/api',
   '/_next',
   '/_vercel',

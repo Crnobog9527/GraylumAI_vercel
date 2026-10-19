@@ -93,6 +93,12 @@ describe('moved public pages', () => {
     // No chain: nothing redirects /pricing itself.
     expect(rules.some(rule => getPathMatch(rule.source)('/pricing'))).toBe(false);
   });
+
+  it('sends the removed acceptable-use placeholder page to the terms section on prohibited activities', async () => {
+    const config = (await loadConfig())(PHASE_DEVELOPMENT_SERVER);
+    const rules = await config.redirects!();
+    expect(rules).toContainEqual({ source: '/acceptable-use', destination: '/terms#sec-7', permanent: true });
+  });
 });
 
 describe('Sentry build upload opt-in', () => {

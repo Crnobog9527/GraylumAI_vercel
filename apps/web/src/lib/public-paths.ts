@@ -12,7 +12,6 @@ export const PUBLIC_PATHS = [
   '/faq',
   '/terms',
   '/privacy',
-  '/acceptable-use',
   // The refund policy is public like the terms (Owner 2026-10-17); its page is published separately.
   '/refund',
   // The formal refund policy and the cookie policy: public legal texts, like the terms and the privacy policy.

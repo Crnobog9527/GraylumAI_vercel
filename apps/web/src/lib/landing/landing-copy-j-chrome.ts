@@ -81,8 +81,8 @@ export const J_FOOTER = {
     { title: '法律', links: [
       { label: '服务条款', href: '/terms' },
       { label: '隐私政策', href: '/privacy' },
-      { label: '可接受使用政策', href: '/acceptable-use' },
       { label: '退款政策', href: PLANNED.refund },
+      { label: 'Cookie 政策', href: '/cookies' },
       { label: 'Cookie 设置', href: PLANNED.cookies },
     ] },
   ],
