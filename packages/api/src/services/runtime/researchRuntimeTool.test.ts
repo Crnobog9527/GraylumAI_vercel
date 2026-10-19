@@ -574,6 +574,15 @@ describe('durable benchmark discovery and free follow-up', () => {
     expect(await next('benchmark_fetch', fetchArgs)).not.toHaveProperty('shortfall');
   });
 
+  it('a fetch stopped before its last account (round limit) never asks for the shortfall card', async () => {
+    const f = fixture(2);
+    const two = { accounts: [account, { platform: 'tiktok', account: 'bob' }], source: { kind: 'candidate', confirmationId: id } };
+    f.store.authorization.candidateConfirmation.mockResolvedValue([account, { platform: 'tiktok', account: 'bob' }]);
+    const result = await f.execute('benchmark_fetch', two);
+    expect(result.reason).toBe('ROUND_LIMIT');
+    expect(f.store.offerShortfall).not.toHaveBeenCalled();
+  });
+
   it('a discovery that shows a candidate card never asks for the shortfall card', async () => {
     const f = fixture();
     expect(await f.execute('benchmark_discover', discoveryArgs)).toMatchObject({ status: 'ok' });
