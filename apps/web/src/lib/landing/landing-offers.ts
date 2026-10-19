@@ -17,7 +17,16 @@ export const LANDING_PROMO_OFFERS_ENV = 'LANDING_PROMO_OFFERS';
  * directly, so it does not use the rate-limited HTTP route. Any failure hides the offers ({}), never guesses them.
  */
 export const getLandingOffers = cache(async (): Promise<LandingOffers> => {
-  if (process.env[LANDING_PROMO_OFFERS_ENV] !== 'on' || process.env.SECURITY_E2E_LOCAL_ONLY === 'true') return {};
+  if (process.env[LANDING_PROMO_OFFERS_ENV] !== 'on') return {};
+  return getPublicPageOffers();
+});
+
+/**
+ * The same read without the landing switch: the /pricing page shows the founder price and seats left by the Owner's
+ * decision of 2026-10-19; the purchase flow carries both offers (#961).
+ */
+export const getPublicPageOffers = cache(async (): Promise<LandingOffers> => {
+  if (process.env.SECURITY_E2E_LOCAL_ONLY === 'true') return {};
   try {
     const ctx = await createTRPCContext({ headers: new Headers() });
     const db = ctx.hasSupabaseAdminPrivileges && ctx.supabaseAdmin ? ctx.supabaseAdmin : null;

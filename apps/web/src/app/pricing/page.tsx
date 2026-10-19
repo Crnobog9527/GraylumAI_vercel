@@ -8,6 +8,7 @@ import { PRICING_COPY as COPY } from '@/components/pricing/pricingContent';
 import { getPublicSiteSettings } from '@/lib/public-site';
 import { buildPageMetadata } from '@/lib/seo/metadata';
 import { getPublicCreditPackages } from '@/lib/public-pricing';
+import { getPublicPageOffers } from '@/lib/landing/landing-offers';
 import { buildAuthHref } from '@/lib/site-config';
 
 // Static with hourly refresh (SEO_GEO_SPEC section 9); plan and credit-pack prices come from the server catalog.
@@ -23,8 +24,8 @@ export function generateMetadata() {
 
 /** Public pricing page (PAYWALL design v25 scene 5); every price comes from the server catalog. */
 export default async function PricingPage() {
-  const [{ membershipPlans, membershipPlansStatus }, packs] = await Promise.all([
-    getPublicSiteSettings(), getPublicCreditPackages(),
+  const [{ membershipPlans, membershipPlansStatus }, packs, offers] = await Promise.all([
+    getPublicSiteSettings(), getPublicCreditPackages(), getPublicPageOffers(),
   ]);
   const plans = membershipPlansStatus === 'available' ? membershipPlans : [];
   return (
@@ -35,7 +36,7 @@ export default async function PricingPage() {
           <p className="mx-auto max-w-2xl text-base" style={{ color: 'var(--text-secondary)' }}>{COPY.lede}</p>
         </header>
         <PricingPlans plans={plans} links={{ signup: buildAuthHref('/login?action=signup'),
-          membership: buildAuthHref('/profile?tab=subscription') }} />
+          membership: buildAuthHref('/profile?tab=subscription') }} offers={offers} />
         <PricingCreditPacks packages={packs.packages} plans={plans} failed={packs.failed} />
         <PricingStudio />
         <ExpertConsultCard href={buildAuthHref(expertConsultPath('pricing'))} />

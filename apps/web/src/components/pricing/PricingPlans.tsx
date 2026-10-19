@@ -11,6 +11,7 @@ import {
   type PaywallBilling, type PaywallPlan, type PaywallPlanSource,
 } from '@/components/paywall/paywallPlans';
 import { PRICING_COPY as COPY } from './pricingContent';
+import { PricingFounderSeats, PricingOffersProvider, useFounderPrice, type PricingOffers } from './PricingFounder';
 
 const LABEL = { pro: 'Pro', gold: 'Gold' } as const;
 const card = { background: 'var(--bg-secondary)', borderColor: 'var(--border-primary)' };
@@ -19,10 +20,19 @@ const card = { background: 'var(--bg-secondary)', borderColor: 'var(--border-pri
 export type PricingLinks = { signup: string; membership: string };
 
 /** Free / Pro / Gold with a monthly-yearly switch; monthly is the default (MASTER_PLAN §2.1 item 51). */
-export function PricingPlans({ plans: source, links }: { plans: readonly PaywallPlanSource[]; links: PricingLinks }) {
+export function PricingPlans({ plans: source, links, offers }: {
+  plans: readonly PaywallPlanSource[]; links: PricingLinks; offers?: PricingOffers;
+}) {
+  return <PricingOffersProvider offers={offers}><PricingPlansInner plans={source} links={links} offers={offers} /></PricingOffersProvider>;
+}
+
+function PricingPlansInner({ plans: source, links, offers }: {
+  plans: readonly PaywallPlanSource[]; links: PricingLinks; offers?: PricingOffers;
+}) {
   const plans = pickPaywallPlans(source);
   const [billing, setBilling] = useState<PaywallBilling>('monthly');
-  const badge = yearlyBadge(plans);
+  const founderUsd = useFounderPrice(offers?.founder);
+  const badge = yearlyBadge(plans, founderUsd);
   const yearly = plans.some(plan => paywallQuote(plan, 'yearly'));
   if (plans.length === 0) {
     return <p role="status" className="text-center text-sm" style={{ color: 'var(--text-tertiary)' }}>{COPY.catalogUnavailable}</p>;
@@ -54,7 +64,8 @@ export function PricingPlans({ plans: source, links }: { plans: readonly Paywall
           <Link className="mt-2 rounded-lg border px-4 py-2 text-center text-sm font-medium" style={{ borderColor: 'var(--border-primary)',
             color: 'var(--text-primary)' }} href={links.signup}>{COPY.freeCta}</Link>
         </section>
-        {plans.map(plan => <PaidPlanCard key={plan.id} plan={plan} billing={billing} membershipHref={links.membership} />)}
+        {plans.map(plan => <PaidPlanCard key={plan.id} plan={plan} billing={billing} membershipHref={links.membership} offers={offers}
+          founderUsd={founderUsd} />)}
       </div>
 
       <div className="rounded-2xl border p-4" style={card}>
@@ -64,8 +75,10 @@ export function PricingPlans({ plans: source, links }: { plans: readonly Paywall
   );
 }
 
-function PaidPlanCard({ plan, billing, membershipHref }: { plan: PaywallPlan; billing: PaywallBilling; membershipHref: string }) {
-  const quote = paywallQuote(plan, billing);
+function PaidPlanCard({ plan, billing, membershipHref, offers, founderUsd }: {
+  plan: PaywallPlan; billing: PaywallBilling; membershipHref: string; offers?: PricingOffers; founderUsd: number | null;
+}) {
+  const quote = paywallQuote(plan, billing, { goldFirstMonthUsd: offers?.goldFirstMonth, founderUsd });
   const ready = quote?.checkoutReady === true;
   return (
     <section data-testid={`pricing-plan-${plan.level}`} className="grid content-start gap-3 rounded-2xl border p-5"
@@ -84,6 +97,7 @@ function PaidPlanCard({ plan, billing, membershipHref }: { plan: PaywallPlan; bi
           </p>
           {quote.monthlyEquivalent ? <span className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{quote.monthlyEquivalent}</span> : null}
           {quote.saving ? <span className="text-sm" style={{ color: 'var(--success)' }}>{quote.saving}</span> : null}
+          {quote.founder ? <PricingFounderSeats founder={offers?.founder} /> : null}
         </div>
       ) : <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>暂不提供年付</p>}
       <PointList points={[`每月 ${monthlyCredits(plan).toLocaleString('en-US')} 积分`, '可以生成完整运营策略报告', '可以购买积分包，享会员折扣']} />

@@ -1,9 +1,14 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+const useQueryMock = vi.hoisted(() => vi.fn(() => ({ data: undefined, isError: false })));
+vi.mock('@/trpc/client', () => ({ trpc: { settings: { getPublicOffers: { useQuery: useQueryMock } } } }));
 import { faqItems } from '@/lib/landing-content';
 import { PricingPlans } from './PricingPlans';
+import { PricingFounderSeats, PricingOffersProvider } from './PricingFounder';
+import { paywallQuote } from '@/components/paywall/paywallPlans';
 import { PricingCreditPacks, PricingFaq, PricingStudio } from './PricingExtras';
 import { pricingFaqItems, refundFaqItem } from './pricingContent';
 
@@ -48,6 +53,27 @@ describe('pricing plans', () => {
     const packs = renderToStaticMarkup(createElement(PricingCreditPacks, { plans: PLANS, failed: false,
       packages: [{ id: 'a', credits: 990, bonus_credits: 0, price: 9.9 }] }));
     expect(packs).toContain('积分包用国际银行卡付款，税另计，结账时按所在地计算。');
+  });
+
+  it('shows the Gold first month and, once yearly is picked, the founder price and seats left', () => {
+    const offers = { goldFirstMonth: 49, founder: { price: 496, total: 50, available: 37 } };
+    const html = renderToStaticMarkup(createElement(PricingPlans, { plans: PLANS, links: LINKS, offers }));
+    expect(html).toContain('$49');
+    expect(html).toContain('之后每月 $69');
+    const none = renderToStaticMarkup(createElement(PricingPlans, { plans: PLANS, links: LINKS, offers: { ...offers, goldFirstMonth: null } }));
+    expect(none).not.toContain('首月');
+    expect(paywallQuote(PLANS[2] as never, 'yearly', { founderUsd: 496 })).toMatchObject({ amount: 496, founder: true });
+    const seats = renderToStaticMarkup(createElement(PricingOffersProvider, { offers, children: createElement(PricingFounderSeats, { founder: offers.founder }) }));
+    expect(text(seats)).toContain('还剩 37 个名额');
+    expect(text(html)).not.toContain('预计消耗');
+  });
+
+  it('shows no founder price when the server sends none or no seat is left', () => {
+    for (const offers of [undefined, { founder: null }, { founder: { price: 496, total: 50, available: 0 } }]) {
+      const html = renderToStaticMarkup(createElement(PricingPlans, { plans: PLANS, links: LINKS, offers }));
+      expect(html).not.toContain('$496');
+      expect(html).not.toContain('pricing-founder-seats');
+    }
   });
 
   it('points to contact instead of a buy link when checkout is not ready', () => {
