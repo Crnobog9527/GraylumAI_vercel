@@ -93,7 +93,7 @@ function PaidPlanCard({ plan, billing, membershipHref, offers, founderUsd }: {
         <div className="grid gap-0.5">
           <p className="flex flex-wrap items-baseline gap-x-2">
             <b className="text-3xl" style={{ color: 'var(--text-primary)' }}>{formatUsd(quote.amount)}</b>
-            <span className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{quote.perLabel}</span>
+            <span className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{quote.perLabel === '首月' ? '新用户首月' : quote.perLabel}</span>
           </p>
           {quote.monthlyEquivalent ? <span className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{quote.monthlyEquivalent}</span> : null}
           {quote.saving ? <span className="text-sm" style={{ color: 'var(--success)' }}>{quote.saving}</span> : null}
@@ -102,7 +102,7 @@ function PaidPlanCard({ plan, billing, membershipHref, offers, founderUsd }: {
       ) : <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>暂不提供年付</p>}
       <PointList points={[`每月 ${monthlyCredits(plan).toLocaleString('en-US')} 积分`, '可以生成完整运营策略报告', '可以购买积分包，享会员折扣']} />
       {quote ? <p data-testid={`pricing-renewal-${plan.level}`} className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-        {quote.renewal}</p> : null}
+        {quote.founder ? founderRenewal(quote.amount) : quote.renewal}</p> : null}
       {quote ? <p data-testid={`pricing-tax-${plan.level}`} className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
         {COPY.planTaxNote}</p> : null}
       {ready ? (
@@ -133,4 +133,10 @@ function PointList({ points }: { points: readonly string[] }) {
       ))}
     </ul>
   );
+}
+
+/** The approved founder promise (MASTER_PLAN §2.1): same wording as the landing card. */
+function founderRenewal(amount: number) {
+  const price = formatUsd(amount);
+  return `首年 ${price}；只要连续续费，一直按 Gold 价格的 6 折，目前每年 ${price}，可随时取消`;
 }

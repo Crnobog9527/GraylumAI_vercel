@@ -59,6 +59,7 @@ describe('pricing plans', () => {
     const offers = { goldFirstMonth: 49, founder: { price: 496, total: 50, available: 37 } };
     const html = renderToStaticMarkup(createElement(PricingPlans, { plans: PLANS, links: LINKS, offers }));
     expect(html).toContain('$49');
+    expect(html).toContain('新用户首月');
     expect(html).toContain('之后每月 $69');
     const none = renderToStaticMarkup(createElement(PricingPlans, { plans: PLANS, links: LINKS, offers: { ...offers, goldFirstMonth: null } }));
     expect(none).not.toContain('首月');
