@@ -574,6 +574,23 @@ describe('durable benchmark discovery and free follow-up', () => {
     expect(await next('benchmark_fetch', fetchArgs)).not.toHaveProperty('shortfall');
   });
 
+  it('a completed round whose searches partly failed still asks for the shortfall card', async () => {
+    const f = fixture();
+    const original = subcall.getMockImplementation()!;
+    subcall.mockImplementation(async (context, request) => {
+      const outcome = await original(context, request);
+      if (outcome.sent && request.vendor === 'tikhub' && request.call.kind === 'keyword_posts') {
+        outcome.result.outcome = 'failed';
+        outcome.result.items = [];
+      }
+      return outcome;
+    });
+    const result = await f.execute('benchmark_discover', discoveryArgs);
+    expect(result.continue).toBe(false);
+    expect(f.store.discoverySave).toHaveBeenLastCalledWith(expect.any(String), expect.anything(), 'completed');
+    expect(f.store.offerShortfall).toHaveBeenCalledTimes(1);
+  });
+
   it('a fetch stopped before its last account (round limit) never asks for the shortfall card', async () => {
     const f = fixture(2);
     const two = { accounts: [account, { platform: 'tiktok', account: 'bob' }], source: { kind: 'candidate', confirmationId: id } };
