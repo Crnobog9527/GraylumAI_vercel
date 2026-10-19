@@ -99,7 +99,8 @@ export function reviewEvents(input: { view: ReviewView; reviewers: string[]; sec
     if (view.state === 'completed' && summary && USABLE.has(String(summary.verdict))) {
       const check = checkRevision(outputs.get(summary.callId)?.body ?? '', input.revision);
       // The revision now waits for the user's per-section choice (Owner 2026-10-14).
-      if (check.ok) add(view.endedAt, { id: 'revision_ready_for_choice', type: 'revision_ready_for_choice',
+      // A summary that changed no section ended as no_change (0319): nothing to choose.
+      if (check.ok && check.changedSections.length) add(view.endedAt, { id: 'revision_ready_for_choice', type: 'revision_ready_for_choice',
         changedSections: check.changedSections.length, changedSectionTitles: check.changedSections,
         changedFields: Object.values(check.r14Fields).reduce((n, fields) => n + Object.keys(fields).length, 0) });
     }

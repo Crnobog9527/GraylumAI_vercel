@@ -517,6 +517,9 @@ describe('review flow', () => {
     await t.runAll();
     expect((await t.flow.continue(String(db.review!.reviewId))).review).toMatchObject({ state: 'completed', outcome: { kind: 'no_change' } });
     expect(t.proposals).toEqual([]);
+    const { events, ended } = await t.flow.events(String(db.review!.reviewId));
+    expect(events.some(e => e.type === 'revision_ready_for_choice')).toBe(false);
+    expect(ended).toBe(true);
   });
 
   it('ends incomplete without a summary when no reviewer gave a usable opinion', async () => {
@@ -555,6 +558,9 @@ describe('review flow', () => {
     expect(db.calls.find(c => c.phase === 'fusion_summary')?.verdict).toBe('usable');
     expect((await t.flow.continue(String(db.review!.reviewId))).review).toMatchObject({ state: 'completed', outcome: { kind: 'no_change' } });
     expect(t.proposals).toEqual([]);
+    const { events, ended } = await t.flow.events(String(db.review!.reviewId));
+    expect(events.some(e => e.type === 'revision_ready_for_choice')).toBe(false);
+    expect(ended).toBe(true);
   });
 
   it('tells the summary model the exact length limit and the verbatim-copy rule the host check enforces (staging runs)', () => {
