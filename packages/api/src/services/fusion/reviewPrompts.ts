@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { DEBATE_RESPONSE_FORMAT, MIN_REASON_CHARACTERS, OPINION_RESPONSE_FORMAT, REVISION_RESPONSE_FORMAT, type Opinion,
   type StepValues } from './hostChecks';
 import type { FusionRequest } from './request';
+import { reportBodyText } from '../../shared/reportData';
 
 /** Files of the review Skill package (FUSION-REVIEW §4.3). Their text is private and published through the
  * existing Skill upload; this repository only knows the paths. */
@@ -104,8 +105,10 @@ export function summaryRequest(skill: ReviewSkillText, context: ReviewContext, o
   declared: Array<{ stepId: string; fieldIds: string[] }>, current: StepValues): FusionRequest {
   const steps = declared.map(step => ({ stepId: step.stepId, fields: step.fieldIds.map(fieldId =>
     ({ fieldId, currentValue: current[step.stepId]?.[fieldId] ?? '' })) }));
+  // REPORT-VISUAL: the summary rewrites only the report text. The strategy data block is not sent: adoption always keeps
+  // the original block (0300), and a model that edited it wrote change notes for sections whose text never changed.
   return { instructions: `${skill.summary}\n\n${skill.rubric}\n\n${SUMMARY_FORMAT}\n${lengthRule(context.maxCharacters)}`,
-    input: JSON.stringify({ report: context.report, materials: context.materials, sections: context.sections, steps,
+    input: JSON.stringify({ report: reportBodyText(context.report), materials: context.materials, sections: context.sections, steps,
       opinions: opinions.map(item => ({ reviewer: item.reviewer, ...shown(item.opinion) })) }),
     responseFormat: REVISION_RESPONSE_FORMAT as unknown as Record<string, unknown> };
 }
