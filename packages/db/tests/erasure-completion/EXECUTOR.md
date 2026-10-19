@@ -39,7 +39,15 @@ write guard use that same ownership rule; the parent owner's body/history surviv
 The deployed upload path must be the existing intent-based implementation from
 0190/#741; old outstanding external uploads cannot be certified by this migration.
 
-The durable claim has **no expiry or automatic takeover**. It prevents a second
+**0318 update:** a claim whose executor started more than 15 minutes ago is taken over by the next
+claim. The route's `maxDuration` is 60 seconds, so that worker has been terminated and every request it
+sent is at least 14 minutes old; later steps re-read state and are idempotent. The takeover records the
+old token in `executor_recovery_evidence` and reopens that token's Auth intent (deleting an Auth user by
+id is idempotent and the processor deletes only a user it reads as present). A staging request stayed
+claimed forever after a slow database made the route time out on 2026-10-19. The text below describes
+the original design; the manual recovery path still exists for claims younger than 15 minutes.
+
+The durable claim originally had **no expiry or automatic takeover**. It prevents a second
 worker from deleting concurrently while the first may still have external I/O.
 When actual I/O has settled, only the original subject/request/token can release
 it. After a request timeout the invocation waits within its remaining budget for

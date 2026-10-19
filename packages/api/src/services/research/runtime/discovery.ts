@@ -12,6 +12,7 @@ import type { ResearchItem, SocialPlatform } from '../vendors/types';
 import { executeResearchCall, socialRequest, stableResearchId, type ResearchToolContext, type ToolAllowance } from './toolContext';
 import type { DiscoveryRecord } from './store';
 import { requestIdentity, type SupplierRequest } from './subcall';
+import { shortfallNotice } from './shortfall';
 
 const itemSchema = z.object({ url: z.string().optional(), fields: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])),
   missing: z.array(z.string()) });
@@ -172,7 +173,10 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
   const insufficient = !stopped && complete && !shown;
   const resumable = stopReason === 'ROUND_LIMIT' || stopReason === 'CANDIDATE_SCAN_INCOMPLETE';
   const blockedWithoutData = stopped && !resumable && found.length === 0;
-  return toolEnvelope({ status: blockedWithoutData ? (stopBudget ? 'budget_exhausted' : 'unavailable')
+  // A round saved as completed (the same state 0320 counts as a round, partial supplier failures included) without a
+  // candidate card: the host may now offer the shortfall choice (0320 decides).
+  const shortfall = !stopped && !shown ? await shortfallNotice(ctx) : undefined;
+  return toolEnvelope({ ...(shortfall ? { shortfall } : {}), status: blockedWithoutData ? (stopBudget ? 'budget_exhausted' : 'unavailable')
     : complete && shown ? 'ok' : 'partial',
     reason: stopped ? stopReason : shown ? (complete ? null : 'DISCOVERY_PARTIAL')
       : complete ? 'NOT_ENOUGH_CANDIDATES' : 'DISCOVERY_PARTIAL',
@@ -195,5 +199,7 @@ export async function moreCandidates(ctx: ResearchToolContext, discoveryId: stri
   }
   const accounts = (d.cursor.accounts ?? []) as FoundAccount[];
   const shown = await card(ctx, discoveryId, accounts, true, callId);
-  return toolEnvelope({ status: shown ? 'ok' : 'partial', reason: shown ? null : 'NOT_ENOUGH_CANDIDATES', discoveryId });
+  const shortfall = shown ? undefined : await shortfallNotice(ctx);
+  return toolEnvelope({ status: shown ? 'ok' : 'partial', reason: shown ? null : 'NOT_ENOUGH_CANDIDATES', discoveryId,
+    ...(shortfall ? { shortfall } : {}) });
 }

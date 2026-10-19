@@ -264,6 +264,28 @@ export async function runFusionFee({db,Client,connectionString,report}) {
   assert.deepEqual({state:lateFee.state,charged:lateFee.charged_credits},{state:'charged',charged:FEE},'a delivered revision pays the full price');
   report.checks.push('fixed price: once a summary is judged usable, the full price is charged however the review ends');
 
+  // 0319 (bot review of #1193): a usable summary that changed no section ends completed/no_change and refunds the fee.
+  const noop = await member(db,5000);
+  const nr = await start(db,noop);
+  const ns = await step(db,noop);
+  const nsItems = JSON.parse(ns.items);
+  nsItems[0].payload = {...nsItems[0].payload,phase:'fusion_summary'};
+  await db.query(`UPDATE bill2_runs SET payload=jsonb_set(payload,'{callPolicy,0,payg,purposes}','["fusion_summary"]') WHERE id=$1`,[ns.run.run]);
+  const nc = (await service(db,'fusion_review_claim',noop.actor,nr.reviewId,1,'review',1,ns.group,JSON.stringify(nsItems))).calls[0];
+  await rpc(db,'bill2_dispatch',noop.actor,ns.run.run,nc.id,nc.dispatchToken);
+  await record(db,noop,ns,nc);
+  await rpc(db,'fusion_call_output_save',noop.actor,nc.id,'{"body":"unchanged"}');
+  await rpc(db,'fusion_call_verdict',noop.actor,nc.id,'usable');
+  await rpc(db,'bill2_finalize',noop.actor,ns.run.run);
+  const before = await wallet(db,noop.actor);
+  await end(db,noop,nr,{state:'completed',outcome:{kind:'no_change'}});
+  const noopFee = await fee(db,nr.reviewId);
+  assert.deepEqual({state:noopFee.state,charged:noopFee.charged_credits,reason:noopFee.settle_reason},
+    {state:'refunded',charged:0,reason:'no_change'},'a usable summary that changed nothing delivers no revision');
+  assert.equal(await wallet(db,noop.actor),before+FEE,'the whole fixed price comes back');
+  await balanced(db,noop.actor,'no-change summary');
+  report.checks.push('fixed price (0319): a usable summary that changed no section ends no_change and refunds the whole fee');
+
   // Review P1 (#1129): a summary only provisionally saved (unjudged_saved, recovery deadline) is not a delivered revision
   // when the review then ends as revision_failed: the whole fee is refunded, the platform keeps the call cost.
   const prov = await member(db,5000);

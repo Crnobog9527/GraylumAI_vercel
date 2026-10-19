@@ -101,6 +101,7 @@ export function cardErrorText(code: string | undefined): string {
     case "RESEARCH_CARD_ALREADY_CONFIRMED": return "这张卡已经确认过了，不能再改。";
     case "RESEARCH_CARD_INVALID": return "提交的内容不符合要求，请检查后再确认。";
     case "RESEARCH_SCOPE_DENIED": return "这张卡不属于当前对话。";
+    case "RESEARCH_SHORTFALL_NOT_DUE": return "对标账号有变化，现在不能选择先生成，请继续找对标。";
     default: return "确认没有成功，请稍后再试。";
   }
 }

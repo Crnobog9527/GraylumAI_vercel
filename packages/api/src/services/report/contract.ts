@@ -69,6 +69,25 @@ export function benchmarkReportFacts(table: unknown): { serialized: string | nul
 }
 
 /**
+ * BENCHMARK-SHORTFALL (Owner 2026-10-20, choice B): the report instruction when the session has fewer qualified
+ * benchmarks than required (at least 1). SQL admission lets such a report through only with the user's frozen
+ * "generate" choice, so the text never decides anything; it makes the report say the sample is short.
+ */
+export function benchmarkShortfallNote(serialized: string | null, required: number): string | null {
+  if (!serialized) return null;
+  const rows = z.array(z.object({ platform: z.string(), account: z.string(), qualified: z.boolean() }).passthrough())
+    .parse(JSON.parse(serialized));
+  const qualified = new Set(rows.filter(row => row.qualified).map(row => `${row.platform}:${row.account}`)).size;
+  if (qualified < 1 || qualified >= required) return null;
+  return `Benchmark sample is short: only ${qualified} qualified benchmark account(s) in the table (the product asks for `
+    + `${required}); after at least two searches the user chose to generate the report now. In the one-sentence conclusion `
+    + 'or at the start of the benchmark chapter, add a clearly labelled note "对标样本不足" (in the report language): the plan '
+    + `rests on only ${qualified} account(s) the user can learn from, its conclusions have limited reference value, and the `
+    + 'user should look for more benchmarks later and recheck. Never invent accounts or numbers to fill the gap. Keep every '
+    + 'required heading.';
+}
+
+/**
  * Structure validation only; never guesses user intent or supplies missing sections. The strategy data block is
  * left out first: the limit counts the report text only (Owner's choice B, REPORT-VISUAL; same as SQL 0300).
  */
