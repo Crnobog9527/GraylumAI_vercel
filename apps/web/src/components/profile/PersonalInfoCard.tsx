@@ -186,7 +186,8 @@ export const UserProfileHeader = memo(function UserProfileHeader({
             <button
               onClick={() => fileInputRef.current?.click()}
               disabled={uploading}
-              className="absolute inset-0 flex items-center justify-center rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+              aria-label="更换头像"
+              className="absolute inset-0 flex items-center justify-center rounded-full opacity-0 focus-visible:opacity-100 group-hover:opacity-100 transition-opacity"
               style={{ background: 'rgba(0,0,0,0.6)' }}
             >
               {uploading ? (
@@ -244,6 +245,7 @@ export const UserProfileHeader = memo(function UserProfileHeader({
                       setNickname(user?.nickname || user?.full_name || '');
                       setEditingNickname(true);
                     }}
+                    aria-label="编辑昵称"
                     className="p-1 rounded-lg transition-colors opacity-60 hover:opacity-100"
                     style={{ color: 'var(--text-tertiary)' }}
                   >

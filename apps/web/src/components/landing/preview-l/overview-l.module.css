@@ -84,9 +84,9 @@
 .avatar { display: grid; flex: none; place-items: center; width: 44px; height: 44px; border-radius: 50%; background: linear-gradient(140deg, #ffd77a, #f0a500); color: #1a1a1a; font-size: 17px; font-weight: 600; }
 .stats { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 0; }
 .stats div { display: grid; gap: 1px; }
-.stats dt { color: #8e8e8e; font-size: 12px; }
+.stats dt { color: #6b6b6b; font-size: 12px; }
 .stats dd { margin: 0; color: var(--j-ink); font-size: 14px; font-weight: 600; }
-.accountTag { color: #8e8e8e; font-size: 12px; }
+.accountTag { color: #6b6b6b; font-size: 12px; }
 
 /* Round six (S13): each content type and each funnel layer says what it is for. */
 .mixLegend { display: grid; gap: 8px; }

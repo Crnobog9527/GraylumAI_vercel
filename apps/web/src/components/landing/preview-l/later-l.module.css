@@ -31,16 +31,16 @@
 .voice { display: grid; gap: 12px; margin: 0 0 24px; }
 .card { display: grid; gap: 10px; padding: 14px 16px; border: 1px solid #e8e8e8; border-radius: 14px; background: #fff; font-size: 14px; }
 .card header { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; }
-.card header span { color: #8e8e8e; font-size: 12.5px; }
+.card header span { color: #6b6b6b; font-size: 12.5px; }
 .card dl { display: grid; gap: 6px; margin: 0; }
 .card dl div { display: grid; grid-template-columns: 7em minmax(0, 1fr); gap: 8px; }
-.card dt { color: #8e8e8e; }
+.card dt { color: #6b6b6b; }
 .card dd { margin: 0; color: #262626; }
 .side { display: grid; gap: 10px; }
 @media (min-width: 720px) { .side { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .side figure { margin: 0; padding: 10px 12px; border-radius: 10px; background: #f7f7f5; }
 .side figure[data-new] { background: #fff7e0; }
-.side figcaption { margin-bottom: 4px; color: #8e8e8e; font-size: 12.5px; }
+.side figcaption { margin-bottom: 4px; color: #6b6b6b; font-size: 12.5px; }
 .side p { margin: 0; color: #262626; line-height: 1.65; }
 
 /* Planned (not built yet): publishing, monitoring and the weekly review, as PUBLISH-MONITOR.md §1 and §5 describe them. */
@@ -48,9 +48,9 @@
 .sheet > * { max-width: 760px; }
 .sheet header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; }
 .sheet header b { font-size: 18px; }
-.sheet header span { color: #737373; font-size: 13px; }
+.sheet header span { color: #6b6b6b; font-size: 13px; }
 .sheet p { margin: 0; }
-.small { color: #737373; font-size: 13px; line-height: 1.6; }
+.small { color: #6b6b6b; font-size: 13px; line-height: 1.6; }
 .platforms { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .platforms li { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border: 1px solid #e8e8e8; border-radius: 10px; background: #fff; }
 .platforms svg { color: #1a7f45; }
@@ -59,7 +59,7 @@
 .notice { padding: 0 8px; border-radius: 999px; background: #e9f6ee; color: #1a7f45; }
 .review { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .review li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 9px 12px; border: 1px solid #e8e8e8; border-radius: 10px; background: #fff; }
-.review span { color: #737373; font-size: 13px; }
+.review span { color: #6b6b6b; font-size: 13px; }
 .review em { margin-left: auto; padding: 0 8px; border-radius: 999px; background: #f0efeb; color: #55544f; font-size: 12.5px; font-style: normal; }
 .review em[data-verdict='有效'] { background: #e9f6ee; color: #1a7f45; }
 .why { color: #262626; line-height: 1.65; }
@@ -75,10 +75,10 @@
 .metricCards li { padding: 12px 14px; border: 1px solid #e8e8e8; border-radius: 10px; background: #fff; }
 .metricHead { display: flex; align-items: baseline; gap: 8px; margin: 0 0 8px; }
 .metricHead b { font-size: 14.5px; }
-.metricHead span { color: #8e8e8e; font-size: 12px; }
+.metricHead span { color: #6b6b6b; font-size: 12px; }
 .metricCards dl { display: grid; gap: 4px; margin: 0; }
 .metricCards dl div { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
-.metricCards dt { color: #737373; }
+.metricCards dt { color: #6b6b6b; }
 .metricCards dd { margin: 0; color: #262626; font-variant-numeric: tabular-nums; font-weight: 500; }
 .insights { display: grid; gap: 6px; padding: 12px 14px; border-radius: 10px; background: #fbf6e8; }
 .insights b { font-size: 14px; }

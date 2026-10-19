@@ -96,7 +96,7 @@ function PriceCard({ card, billing, showResult, membershipHref }: {
             <span className="w-fit rounded-full bg-[#22C55E]/15 px-2 py-0.5 text-xs font-semibold text-[#4ADE80]">{quote.tag}</span>
           ) : null}
           <p className="flex flex-wrap items-baseline gap-x-2">
-            {quote.strike ? <s className="text-lg text-[#6F6F6F]">{quote.strike}</s> : null}
+            {quote.strike ? <s className="text-lg text-[#7d7d7d]">{quote.strike}</s> : null}
             <b className="text-4xl text-white">{quote.price}</b>
             <span className="text-sm text-[#9A9A9A]">{quote.per}</span>
           </p>

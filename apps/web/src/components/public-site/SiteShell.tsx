@@ -100,7 +100,7 @@ export function SiteShell({
             extra={<ConsentPreferenceLinks locale={locale} className={LINK_CLASS} />} />
           <FooterColumn title={chrome.languageTitle} links={languageLinks} />
         </div>
-        <div className="mx-auto max-w-6xl px-4 pb-10 text-xs text-[#6F6F6F] sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-6xl px-4 pb-10 text-xs text-[#7d7d7d] sm:px-6 lg:px-8">
           <p>© 2026 Grayscale Luminary LLC · {chrome.rights}</p>
           {supportEmail ? (
             <p className="mt-2">

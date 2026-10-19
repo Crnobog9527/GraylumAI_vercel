@@ -4,7 +4,7 @@
 .body :is(h1,h2,h3,[data-demo-heading=h1],[data-demo-heading=h2],[data-demo-heading=h3]){scroll-margin-top:16px}
 
 .outline{position:sticky;top:0;align-self:start;max-height:calc(100dvh - 120px);overflow-y:auto;padding:16px 0}
-.heading{margin:0 0 8px;padding:0 10px;color:#999;font-size:12px;line-height:18px}
+.heading{margin:0 0 8px;padding:0 10px;color:#6b6b6b;font-size:12px;line-height:18px}
 .list{margin:0;padding:0;list-style:none;counter-reset:chapter}
 .list li{margin:0}
 /* Page-level button rules (fixed heights, larger fonts) must never squeeze a long chapter title onto the next item. */
@@ -21,9 +21,9 @@ nav.outline .list button{height:auto;min-height:0;white-space:normal;overflow-wr
   .outline{z-index:1;top:-20px;max-height:none;overflow:visible;margin:0 -20px;padding:8px 20px;border-bottom:1px solid #eee;background:#fff}
   .heading{display:none}
   .toggle{display:flex;align-items:center;gap:8px;width:100%;min-height:44px;padding:0 4px;border:0;background:transparent;color:#262626;font:inherit;font-size:13px;line-height:20px;text-align:left;cursor:pointer}
-  .toggleLabel{flex:none;color:#999}
+  .toggleLabel{flex:none;color:#6b6b6b}
   .toggleCurrent{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
-  .chevron{flex:none;color:#777;transition:transform .15s}
+  .chevron{flex:none;color:#6b6b6b;transition:transform .15s}
   .chevronOpen{transform:rotate(180deg)}
   .list{display:none;position:absolute;left:12px;right:12px;top:100%;max-height:min(60dvh,420px);overflow-y:auto;padding:6px;border:1px solid #e8e8e8;border-radius:12px;background:#fff;box-shadow:0 12px 32px #00000014}
   .list[data-open]{display:block}

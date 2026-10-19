@@ -35,6 +35,7 @@ const PUBLIC_SITE_PAGE_PATHS = [
   '/blog', // The tutorial blog (/blog and /blog/<article>), linked from the public header as 教程.
   '/zh-tw',
   '/refund',
+  '/accessibility', // The public accessibility statement, linked from every public footer.
   '/founders', // The founder members' wall: read-only, shows only approved cards the member agreed to publish.
   '/pricing', // The public pricing page (moved from /landing/pricing on 2026-10-18; the old address 308s here).
 ];
