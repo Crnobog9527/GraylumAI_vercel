@@ -16,18 +16,20 @@ function fixture(options: { user?: boolean; role?: string; error?: string; data?
   const profile = { id: id(1), role: options.role ?? 'user', status: 'active', credits: 0, nickname: 'n' };
   let table = '';
   const reads: string[] = [];
+  const adminReads: string[] = [];
   const q = { select: () => q, eq: () => q, maybeSingle: async () => ({
     data: table === 'system_settings' ? options.setting === undefined ? null : { value: options.setting } : profile,
     error: null,
   }),
     single: async () => ({ data: profile, error: null }) };
-  const db = { rpc, from: (name: string) => { table = name; reads.push(name); return q; } };
+  const userDb = { rpc, from: (name: string) => { table = name; reads.push(name); return q; } };
+  const adminDb = { rpc, from: (name: string) => { adminReads.push(name); return q; } };
   const caller = founderRouter.createCaller({ headers: new Headers(),
     user: options.user === false ? null : { id: id(1), app_metadata: { provider: 'email' }, user_metadata: { email_verified: true } },
-    isEmailVerified: true, authProvider: 'email', supabase: db, supabaseAuth: db, supabasePublic: {},
-    supabaseAdmin: db, hasSupabaseAdminPrivileges: true } as never);
+    isEmailVerified: true, authProvider: 'email', supabase: userDb, supabaseAuth: userDb, supabasePublic: {},
+    supabaseAdmin: adminDb, hasSupabaseAdminPrivileges: true } as never);
   const calls = () => rpc.mock.calls.filter(([name]) => /founder/.test(String(name)));
-  return { caller, rpc, calls, reads };
+  return { caller, rpc, calls, reads, adminReads };
 }
 
 it('members read, submit and withdraw only their own card', async () => {
@@ -75,6 +77,7 @@ it('admins can read the current community entry from the settings row', async ()
   const f = fixture({ role: 'admin', setting: current });
   await expect(f.caller.admin.communityEntry()).resolves.toEqual(current);
   expect(f.reads).toContain('system_settings');
+  expect(f.adminReads).not.toContain('system_settings');
   expect(f.calls()).toEqual([]);
 });
 
