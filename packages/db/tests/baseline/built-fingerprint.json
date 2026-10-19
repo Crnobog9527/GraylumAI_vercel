@@ -5018,6 +5018,7 @@
   "idx:runtime_executions.runtime_executions_billing_run_id_key": "864178af1151",
   "idx:runtime_executions.runtime_executions_pkey": "748049fdb9d3",
   "idx:runtime_executions.runtime_executions_positioning_refusals": "f9ed0dbf9d3a",
+  "idx:runtime_executions.runtime_executions_session_created_idx": "8e7031a5b9cc",
   "idx:runtime_history_dependencies.runtime_history_dependencies_pkey": "684a2e733e31",
   "idx:runtime_library_references.runtime_library_references_document": "0c7c08774fc5",
   "idx:runtime_library_references.runtime_library_references_execution_id_ordinal_key": "f254aa3498ab",
