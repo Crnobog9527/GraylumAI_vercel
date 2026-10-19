@@ -32,6 +32,7 @@ const footerLinks = {
       { label: '隐私政策', href: '/privacy' },
       { label: '使用协议', href: '/acceptable-use' },
       { label: '退款政策', href: '/refund' },
+      { label: 'Cookie 政策', href: '/cookies' },
     ],
   },
 };

@@ -38,8 +38,10 @@ export const PUBLIC_PAGES: PublicPage[] = [
   { path: '/graylum-vs-chatgpt', locale: 'zh-Hans', lastModified: '2026-10-18', alternates: { 'zh-TW': '/zh-tw/graylum-vs-chatgpt' } },
   { path: '/faq', locale: 'zh-Hans', lastModified: '2026-10-18' },
   { path: '/contact', locale: 'zh-Hans', lastModified: '2026-10-12' },
-  { path: '/terms', locale: 'zh-Hans', lastModified: '2026-10-12' },
-  { path: '/privacy', locale: 'zh-Hans', lastModified: '2026-10-12' },
+  { path: '/terms', locale: 'zh-Hans', lastModified: '2026-10-19' },
+  { path: '/privacy', locale: 'zh-Hans', lastModified: '2026-10-19' },
+  { path: '/cookies', locale: 'zh-Hans', lastModified: '2026-10-19' },
+  { path: '/refund-policy', locale: 'zh-Hans', lastModified: '2026-10-19' },
   { path: '/acceptable-use', locale: 'zh-Hans', lastModified: '2026-10-12' },
   { path: '/about', locale: 'zh-Hans', lastModified: '2026-10-13', alternates: { 'zh-TW': '/zh-tw/about' } },
   // Traditional Chinese (Taiwan), SEO_GEO_SPEC 3.2 and appendix B.

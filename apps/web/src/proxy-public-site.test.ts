@@ -18,8 +18,8 @@ async function get(url: string) {
 
 // PUBLIC-SITE pages (SEO_GEO_SPEC 3.2): About and the Taiwan section open without login, matched by whole
 // path segment; everything else keeps its existing protection. The refund policy is public too (Owner 2026-10-17).
-const OPEN = ['/about', '/zh-tw', '/zh-tw/', '/zh-tw/ig-jingying', '/zh-tw/about', '/refund', '/founders'];
-const LOOKALIKES = ['/zh-twx', '/zh-tw-admin', '/aboutx', '/about-us', '/refunds', '/refund-policy', '/founders-x'];
+const OPEN = ['/about', '/zh-tw', '/zh-tw/', '/zh-tw/ig-jingying', '/zh-tw/about', '/refund', '/refund-policy', '/cookies', '/founders'];
+const LOOKALIKES = ['/zh-twx', '/zh-tw-admin', '/aboutx', '/about-us', '/refunds', '/refund-policy-x', '/founders-x'];
 const LOGGED_IN = ['/profile', '/positioning', '/library'];
 
 describe('PUBLIC-SITE pages without login', () => {
