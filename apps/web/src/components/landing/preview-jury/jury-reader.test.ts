@@ -54,6 +54,9 @@ describe('result page on a real report', () => {
       names: DEFAULT_SEAT_NAMES, source }));
     expect(html).toContain('跳到下一处改动');
     expect(html).toContain('已选 0/1');
+    // Owner 2026-10-20: remind the user to judge each suggestion; no credits are quoted here.
+    expect(html).toContain('请注意甄别是否采纳修订意见');
+    expect(html).not.toContain('积分');
   });
 });
 
