@@ -121,7 +121,7 @@ export function ArticlePage({ content, supportEmail, demo }: {
             <h2 className="text-2xl font-semibold">{section.h2}</h2>
             <Block block={section} />
             {section.table ? (
-              <div className="mt-6 overflow-x-auto rounded-xl border border-[#262626]">
+              <div className="mt-6 overflow-x-auto rounded-xl border border-[#262626]" role="region" aria-label="对比表格" tabIndex={0}>
                 <table className="w-full min-w-[34rem] border-collapse text-left text-sm leading-7 text-[#C8C8C8]">
                   <caption className="sr-only">{section.table.caption}</caption>
                   <thead className="bg-[#141414] text-white">
@@ -165,7 +165,7 @@ export function ArticlePage({ content, supportEmail, demo }: {
           <ul className="mt-4 space-y-4">
             {content.related.map(link => (
               <li key={link.href}>
-                <Link href={visibleHref(link.href)} className="font-semibold text-[#FFD700] hover:underline">{link.label}</Link>
+                <Link href={visibleHref(link.href)} className="font-semibold text-[#FFD700] underline underline-offset-2">{link.label}</Link>
                 <p className="mt-1 text-sm leading-7 text-[#9A9A9A]">{link.description}</p>
               </li>
             ))}

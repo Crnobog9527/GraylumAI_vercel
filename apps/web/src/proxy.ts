@@ -36,6 +36,7 @@ const PUBLIC_SITE_PAGE_PATHS = [
   '/refund',
   '/refund-policy', // The formal refund policy text; /refund stays the plain-language summary.
   '/cookies', // The cookie policy text.
+  '/accessibility', // The public accessibility statement, linked from every public footer.
   '/founders', // The founder members' wall: read-only, shows only approved cards the member agreed to publish.
   '/graylum-vs-chatgpt', // The Graylum vs ChatGPT comparison page (the Taiwan version is under /zh-tw).
   '/pricing', // The public pricing page (moved from /landing/pricing on 2026-10-18; the old address 308s here).

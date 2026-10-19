@@ -17,6 +17,8 @@ export const PUBLIC_PATHS = [
   // The formal refund policy and the cookie policy: public legal texts, like the terms and the privacy policy.
   '/refund-policy',
   '/cookies',
+  // The accessibility statement (WCAG 2.1 AA goal, known limits, feedback email).
+  '/accessibility',
   // Public site pages (PUBLIC-SITE, SEO_GEO_SPEC 3.2): About and the Traditional Chinese (Taiwan) section.
   '/about',
   '/zh-tw',

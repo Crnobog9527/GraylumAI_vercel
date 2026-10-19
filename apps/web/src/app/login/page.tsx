@@ -349,7 +349,7 @@ export function LoginPageContent() {
                       </span>
                       <ArrowRight className="h-4 w-4 opacity-70" />
                     </Button>
-                    <div className="flex items-center gap-3 text-xs uppercase tracking-[0.2em] text-[#6f6f6f]">
+                    <div className="flex items-center gap-3 text-xs uppercase tracking-[0.2em] text-[#7d7d7d]">
                       <div className="h-px flex-1 bg-[#2e2e2e]" />
                       或使用邮箱
                       <div className="h-px flex-1 bg-[#2e2e2e]" />

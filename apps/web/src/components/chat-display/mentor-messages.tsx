@@ -27,7 +27,7 @@ export function MentorChatLog({ logRef, onScroll, children }: {
   children: ReactNode;
 }) {
   return (
-    <div ref={logRef} onScroll={onScroll} role="log" aria-label="完整 AI 教练消息" aria-live="polite"
+    <div ref={logRef} onScroll={onScroll} role="log" aria-label="完整 AI 教练消息" aria-live="polite" tabIndex={0}
       className="max-h-[55vh] min-h-56 space-y-3 overflow-y-auto overscroll-contain pr-2">
       {children}
     </div>

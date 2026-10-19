@@ -32,6 +32,7 @@ const footerLinks = {
       { label: '隐私政策', href: '/privacy' },
       { label: '退款政策', href: '/refund' },
       { label: 'Cookie 政策', href: '/cookies' },
+      { label: '无障碍声明', href: '/accessibility' },
     ],
   },
 };
@@ -62,7 +63,7 @@ export default function LandingFooter({
               </div>
               <span className="text-xl font-bold text-white">{siteName}</span>
             </Link>
-            <p className="mb-6 max-w-xs text-sm text-[#808080]">
+            <p className="mb-6 max-w-xs text-sm text-[#949494]">
               AI 驱动的社媒增长专家，帮助创作者和品牌实现指数级增长。
             </p>
             <div className="flex items-center gap-4">
@@ -85,14 +86,14 @@ export default function LandingFooter({
                   <li key={link.label}>
                     <Link
                       href={link.href}
-                      className="text-sm text-[#808080] hover:text-[#FFD700] transition-colors"
+                      className="text-sm text-[#949494] hover:text-[#FFD700] transition-colors"
                     >
                       {link.label}
                     </Link>
                   </li>
                 ))}
                 {key === 'legal' ? (
-                  <ConsentPreferenceLinks className="text-sm text-[#808080] hover:text-[#FFD700] transition-colors" />
+                  <ConsentPreferenceLinks className="text-sm text-[#949494] hover:text-[#FFD700] transition-colors" />
                 ) : null}
               </ul>
             </div>
@@ -102,10 +103,10 @@ export default function LandingFooter({
         {/* Bottom Bar */}
         <div className="py-6 border-t border-[#333333] flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="space-y-2 text-center sm:text-left">
-            <p className="text-sm text-[#808080]">
+            <p className="text-sm text-[#949494]">
               &copy; {new Date().getFullYear()} {siteName}. All rights reserved.
             </p>
-            <p className="text-xs text-[#808080]">
+            <p className="text-xs text-[#949494]">
               本网站使用 MiSans 字体，版权归小米所有。{' '}
               <a href="/fonts/misans/LICENSE.pdf" className="underline underline-offset-4 hover:text-[#B0B0B0]">
                 字体许可协议
