@@ -29,7 +29,7 @@
   .cell { border-radius: 14px; }
   .cell[data-side='coach'] { box-shadow: 0 0 0 1.5px rgba(255, 187, 23, .6); }
 }
-.mobileName { display: flex; align-items: center; gap: 5px; margin: 0; color: #6a6965; font-size: 12px; font-weight: 600; }
+.mobileName { display: flex; align-items: center; gap: 5px; margin: 0; color: #5f5e5a; font-size: 12px; font-weight: 600; }
 @media (min-width: 900px) {
   .heads, .pair { grid-template-columns: var(--cols); column-gap: var(--gap); }
   .heads { display: grid; }
@@ -43,7 +43,7 @@
 
 /* The window bars, once above each column */
 .bar { display: flex; align-items: center; gap: 7px; margin: 0; padding: 8px 14px; border-radius: 16px 16px 0 0; font-size: 12.5px; font-weight: 600; }
-.bar[data-generic] { background: #e8e7e3; color: #6a6965; }
+.bar[data-generic] { background: #e8e7e3; color: #5f5e5a; }
 .bar:not([data-generic]) { background: #fff; color: #262626; box-shadow: 0 0 0 1.5px rgba(255, 187, 23, .6); border-bottom: 1px solid #efefed; }
 .bar img { width: 16px; height: 16px; border-radius: 4px; }
 .dots { display: flex; gap: 4px; margin-right: 4px; }
@@ -62,8 +62,8 @@
 .cell > .foot { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 12px; }
 .note { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; margin: 2px 0 0; font-size: 13.5px; font-weight: 600; }
 .note b { padding: 0 7px; border-radius: 999px; font-size: 11.5px; font-weight: 600; line-height: 19px; }
-.note[data-side='generic'] { color: #6a6965; }
-.note[data-side='generic'] b { background: #e3e2de; color: #6a6965; }
+.note[data-side='generic'] { color: #5f5e5a; }
+.note[data-side='generic'] b { background: #e3e2de; color: #5f5e5a; }
 .note[data-side='coach'] { color: var(--j-ink); }
 .note[data-side='coach'] b { background: #fff1c9; color: #8a5a00; }
 .typed { white-space: pre-wrap; }
