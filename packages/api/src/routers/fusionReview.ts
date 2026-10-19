@@ -19,9 +19,11 @@ import { advanceReview, kickAdvance, withAdvanceLease } from '../services/fusion
 import { ENDED_STATES, reviewState } from '../services/fusion/reviewRecord';
 import { adoptionChoices } from '../services/fusion/reviewAdoption';
 import { readFusionSettings, PANEL_SEATS } from '../services/fusion/settings';
+import { loadVersionMarks } from '../services/fusion/versionMarks';
 
 const uuid = z.string().uuid();
-const forbidden = new Set(['FUSION_REVIEW_DISABLED', 'FUSION_MEMBERSHIP_REQUIRED', 'REPORT_MEMBERSHIP_REQUIRED', 'FUSION_REVIEW_BREAKER']);
+const forbidden = new Set(['FUSION_REVIEW_DISABLED', 'FUSION_MEMBERSHIP_REQUIRED', 'REPORT_MEMBERSHIP_REQUIRED', 'FUSION_REVIEW_BREAKER',
+  'FUSION_VERSION_MARKS_DENIED']);
 const conflict = new Set(['FUSION_REVIEW_ACTIVE', 'FUSION_REVIEW_ENDED', 'FUSION_REVIEW_STEP_CONFLICT', 'FUSION_REVIEW_STALE',
   'FUSION_REVIEW_ADOPTED', 'FUSION_ADOPTION_STALE', 'REPORT_REVISION_STALE', 'REPORT_SOURCE_CONFLICT', 'REPORT_REVISION_DECIDED',
   'FUSION_REVIEW_VERSION_BLOCKED', 'FUSION_REVIEW_CONFLICT', 'FUSION_REVIEW_ESTIMATE_CHANGED']);
@@ -150,6 +152,10 @@ export const fusionReviewRouter = router({
     if (result.error) throw new Error('FUSION_REVIEW_UNAVAILABLE');
     return mineOutput.parse(result.data);
   }),
+  /** Report version marks (Owner 2026-10-20): "已评审" / "衍生" per version id for the given analyses, in one call for a whole
+   * library. Every analysis must be the caller's own: another user's (or an unknown) one is refused, never answered empty. */
+  versionMarks: reader.input(z.object({ draftIds: z.array(uuid).min(1).max(50) }).strict())
+    .query(({ ctx, input }) => loadVersionMarks(ctx.admin, ctx.user.id, input.draftIds)),
   markSeen: reader.input(review).mutation(async ({ ctx, input }) => {
     const result = await ctx.admin.rpc('fusion_review_mark_seen', { p_actor_id: ctx.user.id, p_review_id: input.reviewId });
     if (result.error) throw new Error(result.error.message === 'FUSION_REVIEW_DENIED' ? 'FUSION_REVIEW_DENIED' : 'FUSION_REVIEW_UNAVAILABLE');

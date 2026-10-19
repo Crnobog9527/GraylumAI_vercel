@@ -1,0 +1,19 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/* The 已评审 / 衍生 marks of a report version: the app's own tokens (Owner 2026-10-20). */
+
+.wrap { position: relative; display: inline-flex; vertical-align: middle; }
+.badge {
+  display: inline-flex; align-items: center; gap: 4px; min-height: 22px; padding: 0 8px; border-radius: 999px;
+  font-size: 12px; font-weight: 600; line-height: 1; white-space: nowrap;
+}
+/* 已评审: solid and eye-catching. */
+.reviewed { border: 1px solid var(--color-foreground); background: var(--color-foreground); color: var(--bg-primary); cursor: pointer; }
+/* 衍生: outlined and light. */
+.derived { border: 1px solid var(--border-primary); background: transparent; color: var(--text-secondary); font-weight: 500; }
+.panel {
+  position: absolute; z-index: 20; top: calc(100% + 6px); left: 0; display: grid; gap: 6px; min-width: 220px; padding: 10px 12px;
+  border: 1px solid var(--border-primary); border-radius: 10px; background: var(--bg-primary); color: var(--color-foreground);
+  font-size: 13px; font-weight: 400; line-height: 1.6; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12); text-align: left;
+}
+.panel p { margin: 0; }
+.panel a { color: var(--color-foreground); text-decoration: underline; text-underline-offset: 3px; }

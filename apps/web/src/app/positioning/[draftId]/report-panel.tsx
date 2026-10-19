@@ -19,6 +19,7 @@ import { ReportDocumentPanel } from "./report-document-panel";
 import { REPORT_DOC_TEXT } from "./report-document";
 import { JuryEntry } from "@/components/fusion-review/JuryEntry";
 import { SavedReportEditor } from "./saved-report-editor";
+import { useVersionMarks, VersionMark } from "@/components/fusion-review/VersionMark";
 import { REPORT_OUTLINE_MIN_CHAPTERS, ReportWithOutline } from "@/components/chat-display/report-outline";
 import { useReportOutline } from "@/components/chat-display/use-report-outline";
 import { ReportView } from "@/components/chat-display/report-view/report-view";
@@ -69,6 +70,7 @@ function RoundReportEntry(props: Props) {
       {open && (paywall ? <ReportPaywallDialog onClose={() => setOpen(false)} />
         : <ReportDialog report={report} savedBody={report.executionId ? null : saved}
           savedStrategy={report.executionId ? null : savedFormalStrategy(props.report)} busy={props.busy}
+          markOf={props.published && props.report?.available && props.report.id ? { draftId: props.draftId, versionId: props.report.id } : undefined}
           edit={saved && !report.executionId && savedFormalEditable(props.report) && props.report?.id
             ? { draftId: props.draftId, projectId: props.projectId, versionId: props.report.id } : undefined}
           price={available.data?.priceCredits} onClose={() => setOpen(false)}
@@ -77,10 +79,12 @@ function RoundReportEntry(props: Props) {
   );
 }
 
-export function ReportDialog({ report, savedBody, savedStrategy, edit, busy, price, onClose, onTopics }:
+export function ReportDialog({ report, savedBody, savedStrategy, edit, markOf, busy, price, onClose, onTopics }:
   { report: ReturnType<typeof useReportGen>; savedBody?: string | null; savedStrategy?: ReturnType<typeof savedFormalStrategy>;
     /** A saved formal version with no generation behind it (a jury adoption): it can be edited and 定稿 again (R14). */
     edit?: { draftId: string; projectId: string; versionId: string };
+    /** The published formal version the dialog shows, for its 已评审 / 衍生 mark next to the title (Owner 2026-10-20). */
+    markOf?: { draftId: string; versionId: string };
     busy: boolean; price?: number | null; onClose: () => void; onTopics: () => void }) {
   // Unsaved report edits live in the panel: closing asks first instead of dropping them silently.
   const unsaved = useRef(false);
@@ -89,6 +93,7 @@ export function ReportDialog({ report, savedBody, savedStrategy, edit, busy, pri
   const card = useRef<HTMLDivElement>(null);
   const outline = useReportOutline(card);
   const close = () => { if (!unsaved.current || window.confirm(REPORT_DOC_TEXT.closeUnsaved)) onClose(); };
+  const marks = useVersionMarks([markOf?.draftId]);
   const status = report.status;
   const view = status ? reportView(status) : null;
   const working = report.starting || report.streaming;
@@ -118,7 +123,7 @@ export function ReportDialog({ report, savedBody, savedStrategy, edit, busy, pri
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div ref={card} className={`${resultStyles.consentCard} ${outline.chapters.length >= REPORT_OUTLINE_MIN_CHAPTERS ? "!max-w-5xl" : "!max-w-3xl"}`}>
         <header>
-          <h2>{REPORT_TITLE}</h2>
+          <h2>{REPORT_TITLE} <VersionMark mark={markOf ? marks[markOf.versionId] : null} /></h2>
           <Button className={resultStyles.consentClose} variant="ghost" aria-label={"关闭" + REPORT_TITLE} onClick={close}>
             <X size={18} aria-hidden="true" />
           </Button>
