@@ -11,6 +11,7 @@ import { FounderCommunityEntryForm, FounderLivestreamPanel } from './FounderSett
 export function FounderAdmin() {
   const overview = trpc.founder.admin.overview.useQuery(undefined, { refetchOnWindowFocus: true });
   const livestreams = trpc.founder.admin.livestreams.useQuery();
+  const entry = trpc.founder.admin.communityEntry.useQuery();
   const mark = trpc.founder.admin.markCommunity.useMutation();
   const review = trpc.founder.admin.reviewWall.useMutation();
   const setEntry = trpc.founder.admin.setCommunityEntry.useMutation();
@@ -18,7 +19,6 @@ export function FounderAdmin() {
   const running = useRef(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ notice?: string; failure?: string }>({});
-  const [savedEntry, setSavedEntry] = useState<{ url: string | null; note: string | null } | null>();
 
   async function run(work: () => Promise<unknown>, notice: string) {
     if (running.current) return;
@@ -56,9 +56,11 @@ export function FounderAdmin() {
       <FounderMembersPanel rows={overview.data} pending={busy} onMark={onMark} />
       <FounderWallReviewPanel rows={overview.data} pending={busy} onReview={onReview} />
     </>}
-    <FounderCommunityEntryForm pending={busy} saved={savedEntry}
+    <FounderCommunityEntryForm pending={busy} current={entry.data} failed={Boolean(entry.error)}
+      onRetry={() => { void entry.refetch(); }}
       onSave={value => void run(async () => {
-        setSavedEntry(await setEntry.mutateAsync({ url: value.url, note: value.note }));
+        await setEntry.mutateAsync({ url: value.url, note: value.note });
+        await entry.refetch();
       }, '社群入口已保存。')} />
     <FounderLivestreamPanel items={livestreams.data} failed={Boolean(livestreams.error)}
       onRetry={() => { void livestreams.refetch(); }} pending={busy}

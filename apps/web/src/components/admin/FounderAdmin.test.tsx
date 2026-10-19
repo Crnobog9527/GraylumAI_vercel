@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
 const h = vi.hoisted(() => {
-  const state = { overview: undefined as unknown, error: null as unknown };
+  const state = { overview: undefined as unknown, error: null as unknown, entry: undefined as unknown, entryError: null as unknown };
   const query = (data: () => unknown, error: () => unknown = () => null) => ({
     useQuery: () => ({ data: data(), error: error(), refetch: () => undefined }),
   });
@@ -13,6 +13,7 @@ const h = vi.hoisted(() => {
 });
 vi.mock('@/trpc/client', () => ({
   trpc: { founder: { admin: {
+    communityEntry: h.query(() => h.state.entry, () => h.state.entryError),
     overview: h.query(() => h.state.overview, () => h.state.error), livestreams: h.query(() => []),
     markCommunity: h.mutation, reviewWall: h.mutation, setCommunityEntry: h.mutation, recordLivestream: h.mutation,
   } } },
@@ -50,6 +51,25 @@ describe('founder admin view helpers', () => {
 });
 
 describe('FounderAdmin', () => {
+  it('prefills the saved community entry and does not warn about overwriting', () => {
+    h.state.overview = [];
+    h.state.entry = { url: 'https://example.test/g', note: '扫码入群', updatedAt: 't' };
+    const html = renderToStaticMarkup(createElement(FounderAdmin));
+    expect(html).toContain('value="https://example.test/g"');
+    expect(html).toContain('value="扫码入群"');
+    expect(html).not.toContain('保存会覆盖');
+  });
+  it('shows an empty form when no entry is configured, and an error with retry when the read fails', () => {
+    h.state.overview = [];
+    h.state.entry = null;
+    expect(renderToStaticMarkup(createElement(FounderAdmin))).toContain('founder-entry-save');
+    h.state.entry = undefined;
+    h.state.entryError = { message: 'x' };
+    const failed = renderToStaticMarkup(createElement(FounderAdmin));
+    expect(failed).toContain('founder-entry-error');
+    expect(failed).not.toContain('founder-entry-save');
+    h.state.entryError = null;
+  });
   it('renders empty states and the member list', () => {
     h.state.overview = [];
     const empty = renderToStaticMarkup(createElement(FounderAdmin));
