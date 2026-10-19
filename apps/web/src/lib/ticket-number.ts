@@ -1,7 +1,7 @@
 // 后台显示的工单编号，规则与 packages/api/src/routers/ticket.ts 的 generateTicketNumber 一致：
-// TK-<当天日期>-<工单 ID 前 6 位大写>。其中日期是用户查看当天的日期，只有后 6 位是稳定的。
+// TK-<当天日期>-<工单 ID 前 6 位大写>。其中日期是用户查看当天的日期（服务器按 UTC，这里也按 UTC，保证与用户侧一致），只有后 6 位是稳定的。
 export function formatTicketNumber(id: string, now: Date = new Date()): string {
-  const dateStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+  const dateStr = `${now.getUTCFullYear()}${String(now.getUTCMonth() + 1).padStart(2, '0')}${String(now.getUTCDate()).padStart(2, '0')}`;
   return `TK-${dateStr}-${id.substring(0, 6).toUpperCase()}`;
 }
 

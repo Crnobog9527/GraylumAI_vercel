@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { trpc } from '@/trpc/client';
 import { TicketSearchInput } from './TicketSearchInput';
+import { TICKET_PAGE_SIZE, useTicketSearchPool } from './useTicketSearchPool';
 import { formatTicketNumber, ticketMatchesQuery } from '@/lib/ticket-number';
 import {
   Headphones, MessageSquare, Clock, CheckCircle,
@@ -152,11 +153,14 @@ export default function AdminTicketsPage() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
-  const { data, isLoading, error, refetch } = trpc.admin.getAllTickets.useQuery({
+  const filters = {
     status: statusFilter === 'all' ? undefined : statusFilter,
     category: categoryFilter === 'all' ? undefined : categoryFilter,
-  });
-  const tickets = ((data?.tickets ?? []) as Ticket[]).filter((t) => ticketMatchesQuery(t.id, searchQuery));
+  };
+  const { data, isLoading, error, refetch } = trpc.admin.getAllTickets.useQuery({ ...filters, limit: TICKET_PAGE_SIZE });
+  const firstPage = (data?.tickets ?? []) as Ticket[];
+  const pool = useTicketSearchPool(!!searchQuery.trim(), filters, firstPage.length, data?.total ?? 0) as Ticket[];
+  const tickets = [...firstPage, ...pool].filter((t) => ticketMatchesQuery(t.id, searchQuery));
 
   const updateStatus = trpc.admin.updateTicketStatus.useMutation({
     onSuccess: async () => {
@@ -191,20 +195,12 @@ export default function AdminTicketsPage() {
     });
   };
 
-  const handleMarkResolved = () => {
-    if (!selectedTicket) return;
-    handleStatusChange(selectedTicket.id, 'closed');
-  };
+  const handleMarkResolved = () => selectedTicket && handleStatusChange(selectedTicket.id, 'closed');
 
-  const openTicketDetail = (ticket: Ticket) => {
-    setSelectedTicket(ticket);
-    setSheetOpen(true);
-  };
+  const openTicketDetail = (ticket: Ticket) => { setSelectedTicket(ticket); setSheetOpen(true); };
 
   const copyTicketId = (id: string) => {
-    navigator.clipboard.writeText(id);
-    setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 2000);
+    navigator.clipboard.writeText(id); setCopiedId(id); setTimeout(() => setCopiedId(null), 2000);
   };
 
   const getUserDisplayName = (user?: UserProfile | null) => {
