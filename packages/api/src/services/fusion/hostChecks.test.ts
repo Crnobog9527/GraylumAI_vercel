@@ -139,6 +139,21 @@ describe('revision host check', () => {
     expect(checkRevision(revision({ body: '前言\n' + report('新定位') }), withPreamble).ok).toBe(true);
   });
 
+  it('drops a wording-only note on a section whose text did not change; any other mismatch still fails', () => {
+    const extra = { section: '结语', wordingOnly: true, note: '数据块同步修改', fields: [] };
+    const noted = revision({ changeNotes: [...JSON.parse(revision()).changeNotes, extra] });
+    const result = checkRevision(noted, base);
+    expect(result).toMatchObject({ ok: true, changedSections: ['定位'] });
+    expect(result.ok && result.changeNotes.map(note => note.section)).toEqual(['定位']);
+    // A note claiming a fact change on an unchanged section, or a changed section without its note, still fails.
+    expect(checkRevision(revision({ changeNotes: [...JSON.parse(revision()).changeNotes,
+      { ...extra, wordingOnly: false, fields: [{ stepId: 's1', fieldId: 'goal' }] }] }), base)).toEqual({ ok: false, reason: 'REVISION_NOTES' });
+    expect(checkRevision(revision({ changeNotes: [extra] }), base)).toEqual({ ok: false, reason: 'REVISION_NOTES' });
+  });
+  it('fails a cut-off revision (output ended mid-JSON) as a format error', () => {
+    expect(checkRevision(revision().slice(0, -40), base)).toEqual({ ok: false, reason: 'REVISION_FORMAT' });
+  });
+
   it('counts a spacing-only change in a section as a change that must be declared', () => {
     const spaced = revision({ body: report('新定位', '原受众\n') });
     expect(checkRevision(spaced, base)).toEqual({ ok: false, reason: 'REVISION_NOTES' });
