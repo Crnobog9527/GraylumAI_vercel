@@ -15,16 +15,15 @@ const draft = z.object({ draftId: uuid });
 /** stepId -> fieldId -> proposed value, at most 400 characters (code points, as the database counts). */
 const revisionFields = z.record(z.string().min(1).max(128), z.record(z.string().min(1).max(128),
   z.string().min(1).refine(value => [...value].length <= 400)));
-/** Text limit plus the data block limit of 0300, plus slack. */
-const REVISION_BODY_TOTAL_MAX = 12000 + 65536 + 1000;
+/** The whole body, as for a saved report (reportEditInput): the data block rides along with the text. */
+const REVISION_BODY_TOTAL_MAX = 120000;
 export const revisionProposeInput = draft.extend({
   requestId: uuid,
   sourceVersionId: uuid,
   // REPORT-VISUAL (0300): the 12000-character limit counts the report text; the strategy data block is not part of it
   // (the database counts the same way). A review adoption brings the original block back, so the whole body may be longer.
   body: z.string().min(1).refine(body => [...reportBodyText(body)].length <= 12000)
-    // The whole body keeps a cap too: the text (12000) plus the largest data block the database accepts (65536 bytes, 0300,
-    // so at most that many characters) and some room for the fence lines.
+    // The whole body keeps a cap too, the same as a saved report's (reportEditInput).
     .refine(body => [...body].length <= REVISION_BODY_TOTAL_MAX),
   fields: revisionFields,
 }).strict();
