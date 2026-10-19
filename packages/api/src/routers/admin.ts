@@ -697,7 +697,7 @@ export const adminRouter = router({
       status: z.enum(['open', 'in_progress', 'closed']).optional(),
       category: z.enum(['bug', 'feature', 'question', 'account', 'billing', 'consult', 'other']).optional(),
       priority: z.enum(['low', 'medium', 'high', 'urgent']).optional(),
-      search: z.string().max(64).optional(),
+      search: z.string().transform((s) => s.slice(0, 64)).optional(),
       limit: z.number().min(1).max(100).default(20),
       offset: z.number().min(0).default(0),
     }))
