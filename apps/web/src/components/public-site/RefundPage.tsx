@@ -47,7 +47,7 @@ export function RefundPage({ supportEmail }: { supportEmail?: string | null }) {
           </section>
         ))}
         <p className={`mt-12 border-t border-[#262626] pt-6 ${TEXT}`}>
-          {REFUND_PAGE.footnote}<Link href="/terms" className="ml-1 text-[#FFD700] hover:underline">查看服务条款</Link>
+          {REFUND_PAGE.footnote}<Link href="/terms" className="ml-1 text-[#FFD700] underline underline-offset-2">查看服务条款</Link>
         </p>
       </article>
     </SiteShell>

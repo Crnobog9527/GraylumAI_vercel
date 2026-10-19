@@ -15,6 +15,8 @@ export const PUBLIC_PATHS = [
   '/acceptable-use',
   // The refund policy is public like the terms (Owner 2026-10-17); its page is published separately.
   '/refund',
+  // The accessibility statement (WCAG 2.1 AA goal, known limits, feedback email).
+  '/accessibility',
   // Public site pages (PUBLIC-SITE, SEO_GEO_SPEC 3.2): About and the Traditional Chinese (Taiwan) section.
   '/about',
   '/zh-tw',

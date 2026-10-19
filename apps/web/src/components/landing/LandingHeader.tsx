@@ -106,6 +106,8 @@ export default function LandingHeader({ siteName = resolveSiteName() }: { siteNa
           <button
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
             className="md:hidden p-2 text-white"
+            aria-label={isMobileMenuOpen ? '关闭菜单' : '打开菜单'}
+            aria-expanded={isMobileMenuOpen}
           >
             {isMobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
           </button>

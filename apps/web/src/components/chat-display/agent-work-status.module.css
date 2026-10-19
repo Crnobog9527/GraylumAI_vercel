@@ -1,14 +1,14 @@
 /* CHAT-AUTO-CONTEXT §4: the coach's work rows above a free-chat reply; same palette as the research call rows. */
 .list{display:grid;gap:2px;margin:0 0 8px;padding:0;list-style:none;font-family:var(--font-primary)}
 .row{display:flex;align-items:flex-start;gap:8px;padding:6px 10px;border-radius:8px;background:#fafafa}
-.icon{flex:none;margin-top:4px;color:#8a8a8a}
+.icon{flex:none;margin-top:4px;color:#6b6b6b}
 .spin{animation:spin 1s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){.spin{animation:none}}
 .body{display:grid;gap:1px;min-width:0}
 .line{margin:0;font-size:13px;line-height:1.6;color:#262626;overflow-wrap:anywhere}
-.row[data-work-state="running"] .line{color:#8a8a8a}
-.meta{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0;font-size:12px;line-height:18px;color:#8a8a8a}
+.row[data-work-state="running"] .line{color:#6b6b6b}
+.meta{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0;font-size:12px;line-height:18px;color:#6b6b6b}
 .detail{min-width:0;overflow-wrap:anywhere}
 .credits{font-size:11px;line-height:18px;white-space:nowrap;color:#555}
 .chip{display:inline-flex;align-items:center;gap:3px;padding:0 6px;border-radius:999px;font-size:11px;line-height:18px;white-space:nowrap}

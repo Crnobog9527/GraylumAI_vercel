@@ -156,9 +156,9 @@ export function AppHeader() {
         <div className="flex items-center gap-4">
           {/* Credits badge with warning styles */}
           {creditsRechargeAction.available ? (
-          <Link href={creditsRechargeAction.href}>
+          <Link href={creditsRechargeAction.href} className="hidden sm:block">
             <div
-              className="hidden cursor-pointer items-center gap-2 rounded-xl px-4 py-2 transition-opacity duration-200 hover:opacity-90 sm:flex"
+              className="flex cursor-pointer items-center gap-2 rounded-xl px-4 py-2 transition-opacity duration-200 hover:opacity-90"
               style={{
                 background: warningBgColor,
                 border: `1px solid ${warningBorderColor}`

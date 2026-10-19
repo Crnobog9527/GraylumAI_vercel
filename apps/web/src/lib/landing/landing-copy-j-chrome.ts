@@ -83,6 +83,7 @@ export const J_FOOTER = {
       { label: '隐私政策', href: '/privacy' },
       { label: '使用协议', href: '/acceptable-use' },
       { label: '退款政策', href: PLANNED.refund },
+      { label: '无障碍声明', href: '/accessibility' },
       { label: 'Cookie 设置', href: PLANNED.cookies },
     ] },
   ],

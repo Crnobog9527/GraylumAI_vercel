@@ -5,7 +5,7 @@ import { PUBLIC_PAGES } from './seo/public-pages';
 describe('isPublicPathname', () => {
   it('opens listed paths and the pages below them', () => {
     for (const path of ['/login', '/forgot-password', '/reset-password', '/reset-password/', '/auth/callback', '/api/trpc/x',
-      '/about', '/zh-tw', '/zh-tw/', '/zh-tw/ig-jingying', '/zh-tw/about', '/refund', '/refund/']) {
+      '/about', '/zh-tw', '/zh-tw/', '/zh-tw/ig-jingying', '/zh-tw/about', '/refund', '/refund/', '/accessibility']) {
       expect(isPublicPathname(path)).toBe(true);
     }
   });

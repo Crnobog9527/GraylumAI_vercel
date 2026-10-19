@@ -2,11 +2,11 @@
 .list{display:grid;gap:2px;margin:0 0 8px;padding:0;list-style:none;font-family:var(--font-primary)}
 .row{display:flex;align-items:center;gap:8px;padding:5px 10px;border-radius:8px;background:#fafafa;font-size:13px;line-height:1.6;color:#262626}
 .row[data-step-state="running"]{color:#262626}
-.row[data-step-state="waiting"]{color:#8a8a8a}
+.row[data-step-state="waiting"]{color:#6b6b6b}
 .row[data-step-state="done"]{color:#555}
-.icon{flex:none;color:#8a8a8a}
+.icon{flex:none;color:#6b6b6b}
 .done{color:#3f7d4f}
 .spin{animation:spin 1s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){.spin{animation:none}}
-.hint{margin:2px 0 0;padding:0 10px;font-size:12px;line-height:18px;color:#8a8a8a}
+.hint{margin:2px 0 0;padding:0 10px;font-size:12px;line-height:18px;color:#6b6b6b}

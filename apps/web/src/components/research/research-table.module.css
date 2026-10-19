@@ -3,25 +3,25 @@
 .wrap{display:flex;flex-direction:column;gap:8px;padding:12px 14px;border:1px solid #ececec;border-radius:12px;background:#fff;
   font-family:var(--font-primary);color:#262626}
 .top{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
-.head{margin:0;color:#8a8a8a;font-size:12px;line-height:18px}
-.summary{margin:0;color:#777;font-size:12px}
+.head{margin:0;color:#6b6b6b;font-size:12px;line-height:18px}
+.summary{margin:0;color:#6b6b6b;font-size:12px}
 .scroll{overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:thin}
 .table{width:100%;border-collapse:collapse;font-size:13px;line-height:1.5}
 .table th,.table td{padding:8px 10px;border-bottom:1px solid #f0f0f0;text-align:left;vertical-align:top}
-.table thead th{color:#8a8a8a;font-size:12px;font-weight:400;white-space:nowrap}
+.table thead th{color:#6b6b6b;font-size:12px;font-weight:400;white-space:nowrap}
 .table td{font-variant-numeric:tabular-nums;white-space:nowrap}
 .table tbody tr:last-child th,.table tbody tr:last-child td{border-bottom:0}
 .account{display:grid;gap:2px;font-weight:400;white-space:nowrap}
 .accountName{font-weight:500}
-.accountMeta{display:flex;flex-wrap:nowrap;align-items:center;gap:6px;color:#8a8a8a;font-size:12px}
+.accountMeta{display:flex;flex-wrap:nowrap;align-items:center;gap:6px;color:#6b6b6b;font-size:12px}
 .category{color:#555}
 .badge{padding:0 6px;border-radius:999px;font-size:11px;line-height:18px}
 .ok{background:#eaf4ec;color:#2f6b3a}
-.off{background:#f4f4f5;color:#777}
-.missing{color:#aaa}
-.ref{margin-left:2px;color:#8a8a8a;font-size:10px}
-.sources{display:grid;gap:2px;margin:0;padding:0;list-style:none;color:#8a8a8a;font-size:12px;line-height:18px;overflow-wrap:anywhere}
-.note{margin:0;color:#8a8a8a;font-size:12px;line-height:18px}
+.off{background:#f4f4f5;color:#6b6b6b}
+.missing{color:#6b6b6b}
+.ref{margin-left:2px;color:#6b6b6b;font-size:10px}
+.sources{display:grid;gap:2px;margin:0;padding:0;list-style:none;color:#6b6b6b;font-size:12px;line-height:18px;overflow-wrap:anywhere}
+.note{margin:0;color:#6b6b6b;font-size:12px;line-height:18px}
 
 @media(max-width:640px){
   .table thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
@@ -33,13 +33,13 @@
   .accountName{overflow-wrap:anywhere}
   .accountMeta{flex-wrap:wrap}
   .table td{display:flex;justify-content:space-between;gap:12px;white-space:normal}
-  .table td::before{content:attr(data-label);color:#8a8a8a;font-size:12px}
+  .table td::before{content:attr(data-label);color:#6b6b6b;font-size:12px}
   .table td>span{margin-left:auto;text-align:right}
 }
 .refresh{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:4px}
 .refreshButton{display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 8px;border:1px solid #ececec;border-radius:999px;
   background:#fff;color:#555;font:inherit;font-size:12px;cursor:pointer}
 .refreshButton:hover:not(:disabled){background:#f4f4f5;color:#262626}
-.refreshButton:disabled{color:#aaa;cursor:not-allowed}
+.refreshButton:disabled{color:#6b6b6b;cursor:not-allowed}
 .refreshError{color:#9a3b2e;font-size:12px;font-weight:400}
 @media(max-width:480px){.refreshButton{height:32px;padding:0 12px}}
