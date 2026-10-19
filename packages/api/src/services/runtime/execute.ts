@@ -24,7 +24,7 @@ import {recoverOpenRouterHistory,latestHistoryTurn,assertLatestHistoryRetained} 
 import {projectOpenRouterItemsForSizing} from './openRouterHistory';
 import {AGENT_TURN_REQUEST_FORMAT,validReasoningFormat,
  PLAIN_TEXT_STREAM,streamsPrimary,historyToolNames,openRouterRequestBody} from './providerRequest';
-import {cardSources, rejectSeparateCardProse} from './groundedCard';
+import {cardSources, groundedCardFallback, rejectSeparateCardProse} from './groundedCard';
 import {agentTurnResult} from './agentTurnResult';
 import {questionMessageFromArguments,QUESTION_CONTRACT,READ_HISTORY_TOOL} from './agentTools';
 import {ASK_QUESTION_TOOL,INVALID_REPLY_NOTICE} from '../../shared/agentTurn';
@@ -347,8 +347,8 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
      primaryLength=response.choices[0]?.finish_reason==='length';
      if(agentTurn)agentToolCalled=Boolean(response.choices[0]?.message?.tool_calls?.length);
      const firstCall=response.choices[0]?.message?.tool_calls?.[0];
-     if(context.questionContract===QUESTION_CONTRACT&&firstCall?.function?.name===ASK_QUESTION_TOOL)
-      agentCardMessage=questionMessageFromArguments(firstCall.function.arguments);
+     if(firstCall?.function?.name===ASK_QUESTION_TOOL&&(grounded||context.questionContract===QUESTION_CONTRACT))
+      agentCardMessage=(grounded?groundedCardFallback:questionMessageFromArguments)(firstCall.function.arguments);
      return JSON.stringify(response);
     }});
    };
@@ -366,7 +366,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     if(latest.unavailable)return {state:latest.state,unavailable:'latest' as const};
    }
    budget.timing?.mark('fullModelReply');
-   let turn=agentTurn&&!context.reportGeneration?agentTurnResult(agentText,body,agentToolCalled,grounded?undefined:agentCardMessage,native,
+   let turn=agentTurn&&!context.reportGeneration?agentTurnResult(agentText,body,agentToolCalled,grounded&&agentText.trim()?undefined:agentCardMessage,native,
     !grounded&&Boolean(context.mentorText)):null;
    if(grounded&&turn)turn=rejectSeparateCardProse(agentText,turn);
    if(turn){

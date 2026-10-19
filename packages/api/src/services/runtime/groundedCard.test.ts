@@ -1,8 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {expect,it} from 'vitest';
-import {cardSources,groundedCardResult,groundedCardTool,groundedCardToolBytes,rejectSeparateCardProse} from './groundedCard';
+import {cardSources,groundedCardFallback,groundedCardResult,groundedCardTool,groundedCardToolBytes,rejectSeparateCardProse} from './groundedCard';
 import {INVALID_CARD_RESULT,questionCardFromResult,askQuestionTool} from './agentTools';
 import {agentTurnResult} from './agentTurnResult';
+import {INVALID_REPLY_NOTICE} from '../../shared/agentTurn';
 import {hostTurnContextSchema} from './hostTurn';
 const sources={current:'我考虑甲或乙，还不确定，帮我比较。',user:['每周共四小时。']};
 const choice={intent:'grounded_comparison',requestQuote:'甲或乙',basisQuotes:['每周共四小时。'],
@@ -60,4 +61,25 @@ it('invalid guarded card keeps paid separate prose and conflicting oversized pro
  const valid=agentTurnResult('',groundedCardResult(choice,sources),true,undefined,true,false);
  const bounded=rejectSeparateCardProse('x'.repeat(262145),valid);
  expect(bounded.message.length).toBe(262144);expect(bounded.truncated).toBe(true);expect(bounded.card).toBeNull();
+});
+
+// Staging 2026-10-19: the card quoted organizer field text, not user speech, so the host refused it. The
+// contract forbids separate prose, so the paid turn used to end on the invalid-format notice.
+it('a refused guarded card without prose falls back to host-rendered prose instead of the invalid notice',()=>{
+ const refused={...choice,basisQuotes:['计划每周集中制作四小时']};
+ expect(groundedCardResult(refused,sources)).toBe(INVALID_CARD_RESULT);
+ const prose=groundedCardFallback(JSON.stringify(refused))!;
+ expect(prose).toContain('先选哪种安排？');
+ for(const option of choice.options){expect(prose).toContain(option.text);expect(prose).toContain('推测，待你确认：'+option.reason);}
+ expect(prose).not.toContain('建议选择');
+ const turn=agentTurnResult('',INVALID_CARD_RESULT,true,prose,true,false);
+ expect(turn).toMatchObject({card:null,message:prose});expect(JSON.parse(turn.body)).toMatchObject({card:null,message:prose});
+ expect(rejectSeparateCardProse('',turn)).toEqual(turn);
+ const neutral=groundedCardFallback(JSON.stringify({...choice,recommended:null,options:[{text:'少量',reason:null},{text:'较多',reason:null}]}))!;
+ expect(neutral).toContain('1. 少量');expect(neutral).not.toContain('推测');
+});
+it('malformed guarded card arguments keep the invalid notice',()=>{
+ for(const bad of ['{"question":"q"',JSON.stringify({question:'q',options:['a','b'],recommended:0}),null])
+  expect(groundedCardFallback(bad)).toBeNull();
+ expect(agentTurnResult('',INVALID_CARD_RESULT,true,null,true,false).message).toBe(INVALID_REPLY_NOTICE);
 });
