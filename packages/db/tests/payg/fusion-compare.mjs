@@ -71,6 +71,11 @@ export async function fusionCompareCases({db,Client,connectionString,report,crea
   await assert.rejects(begin(request([models[0],models[0]])),/FUSION_COMPARE_MODEL_NOT_ALLOWED/);
   await assert.rejects(begin(request([models[0],randomUUID()])),/FUSION_COMPARE_MODEL_NOT_ALLOWED/);
   await assert.rejects(begin({...request(),historyRevision:'7'}),/FUSION_COMPARE_STALE/);
+  await db.query('UPDATE runtime_sessions SET active_execution=$2 WHERE id=$1',[session,randomUUID()]);
+  await assert.rejects(begin(request()),/FUSION_COMPARE_STALE/,'a turn still running is refused before the record and the paid judgement');
+  await db.query('UPDATE runtime_sessions SET active_execution=NULL WHERE id=$1',[session]);
+  await assert.rejects(begin({...request(),config:{models:models.slice(0,2),skill:null,materialRevision:'changed-since-read'}}),/FUSION_COMPARE_STALE/,
+    'the work material read with the history must still be current when the compare begins');
   await assert.rejects(begin({...request(),question:'tampered'}),/FUSION_COMPARE_INVALID/,'question hash binds the text');
   await assert.rejects(begin(request(),randomUUID(),randomUUID()),/FUSION_COMPARE_SESSION_GONE/);
   await assert.rejects(begin({...request(),workspaceDependencies:[{sourceVersionId:randomUUID()}]}),/FUSION_COMPARE_SOURCE_REVOKED/,
@@ -89,9 +94,28 @@ export async function fusionCompareCases({db,Client,connectionString,report,crea
   await assert.rejects(begin(request(),randomUUID()),/FUSION_COMPARE_ACTIVE/,'one compare in progress per user');
   const runs = [column(a,0),column(b,1)];
   await assert.rejects(call(db,'fusion_group_admit',actor,id1,'compare',session,runs),/FUSION_COMPARE_GATE_REQUIRED/);
-  assert.equal((await call(db,'fusion_compare_gate',actor,first.compareId,'clear')).gateVerdict,'clear');
-  assert.equal((await call(db,'fusion_compare_gate',actor,first.compareId,'clear')).gateVerdict,'clear');
-  await assert.rejects(call(db,'fusion_compare_gate',actor,first.compareId,'block'),/FUSION_COMPARE_REQUEST_CONFLICT/);
+  assert.equal((await call(db,'fusion_compare_gate',actor,first.compareId,'clear',false)).gateVerdict,'clear');
+  assert.equal((await call(db,'fusion_compare_gate',actor,first.compareId,'clear',false)).gateVerdict,'clear');
+  // The work material changed (or was withdrawn) while the judgement ran: the admission refuses before preparing any run.
+  await db.query("UPDATE fusion_compares SET config=config||'{\"materialRevision\":\"older:none\"}' WHERE id=$1",[first.compareId]);
+  await assert.rejects(call(db,'fusion_group_admit',actor,id1,'compare',session,runs),/FUSION_COMPARE_STALE/);
+  await db.query("UPDATE fusion_compares SET config=config-'materialRevision' WHERE id=$1",[first.compareId]);
+  // A turn appended after begin (while the judgement ran): the snapshot omits it, so the admission refuses before any run.
+  await db.query('UPDATE runtime_sessions SET revision=revision+1 WHERE id=$1',[session]);
+  await assert.rejects(call(db,'fusion_group_admit',actor,id1,'compare',session,runs),/FUSION_COMPARE_STALE/);
+  await db.query('UPDATE runtime_sessions SET revision=revision-1 WHERE id=$1',[session]);
+  // A frozen workspace source that stopped being allowed after begin is refused again at admission.
+  await db.query("UPDATE fusion_compares SET workspace_dependencies=jsonb_build_array(jsonb_build_object('sourceVersionId',$2::text)) WHERE id=$1",[first.compareId,randomUUID()]);
+  await assert.rejects(call(db,'fusion_group_admit',actor,id1,'compare',session,runs),/FUSION_COMPARE_SOURCE_REVOKED/);
+  await db.query("UPDATE fusion_compares SET workspace_dependencies='[]' WHERE id=$1",[first.compareId]);
+  await assert.rejects(call(db,'fusion_compare_gate',actor,first.compareId,'block',false),/FUSION_COMPARE_REQUEST_CONFLICT/);
+  // The fallback rule rides with the verdict and is replayed as stored, not rebuilt later.
+  assert.equal((await call(db,'fusion_compare_read',actor,first.compareId)).gateFallback,false);
+  await assert.rejects(call(db,'fusion_compare_gate',actor,first.compareId,'clear',true),/FUSION_COMPARE_REQUEST_CONFLICT/,
+    'the same verdict with another fallback decision is a conflict');
+  await assert.rejects(call(db,'fusion_compare_gate',actor,first.compareId,'clear',null),/FUSION_COMPARE_INVALID/);
+  await assert.rejects(call(db,'fusion_compare_gate',actor,first.compareId,'block',true),/FUSION_COMPARE_INVALID/,'a blocked turn has no fallback rule');
+  await assert.rejects(call(db,'fusion_compare_gate',actor,first.compareId,'maybe',false),/FUSION_COMPARE_INVALID/);
   report.checks.push('begin is idempotent with a request-hash conflict check; the positioning verdict is written once; no admission before it');
 
   // Compare admission: allowlist in the frozen order, no Skill identity on column runs, budget; then success.
@@ -147,6 +171,9 @@ export async function fusionCompareCases({db,Client,connectionString,report,crea
   await assert.rejects(call(db,'fusion_compare_claim',actor,first.compareId,items),/FUSION_COMPARE_ENDED/);
   report.checks.push('read lists columns in order with saved body, verdict, charged credits and their total; a column stops free before dispatch');
 
+  // A real start records the session's work-material revision with the request; adoption fences on it.
+  const material = (await db.query('SELECT fusion_compare_material_token($1,$2) v',[actor,session])).rows[0].v;
+  await db.query("UPDATE fusion_compares SET config=config||jsonb_build_object('materialRevision',$2::text) WHERE id=$1",[first.compareId,material]);
   // Adoption: column 1 has no usable answer; column 0 is written back with a zero-amount adoption run.
   const items2 = [{role:'user',content:question},{role:'assistant',content:[{type:'output_text',text:answer}]}];
   const billing = (columnIndex,patch={}) => ({...a.payload,input:{...a.payload.input,input:question,dependencies:[],
@@ -160,6 +187,11 @@ export async function fusionCompareCases({db,Client,connectionString,report,crea
   await assert.rejects(call(db,'fusion_compare_adopt',actor,first.compareId,0,randomUUID(),
     billing(0,{moduleId:randomUUID(),skillId:randomUUID(),revisionId:randomUUID()}),items2),/FUSION_COMPARE_SKILL_MISMATCH/,
     'a compare without a Skill adopts without one');
+  // The work material changed after the compare started: the answer is stale, nothing is written.
+  await db.query("UPDATE fusion_compares SET config=config||'{\"materialRevision\":\"changed-since\"}' WHERE id=$1",[first.compareId]);
+  assert.equal((await call(db,'fusion_compare_adopt',actor,first.compareId,0,randomUUID(),billing(0),items2)).state,'stale');
+  assert.equal(await count(db,'SELECT revision v FROM runtime_sessions WHERE id=$1',[session]),0,'a stale adoption writes nothing');
+  await db.query("UPDATE fusion_compares SET config=config||jsonb_build_object('materialRevision',$2::text) WHERE id=$1",[first.compareId,material]);
   const adoptRequest = randomUUID();
   const funds = await wallet(db,actor);
   const adopted = await call(db,'fusion_compare_adopt',actor,first.compareId,0,adoptRequest,billing(0),items2);
@@ -183,10 +215,67 @@ export async function fusionCompareCases({db,Client,connectionString,report,crea
   report.checks.push('adoption writes the question and chosen answer through a zero-amount adoption run bound like an ordinary turn; '+
     'the execution ends cancelled, the conversation shows it, the next turn can read it; written once, replayable');
 
+  // The conversation as the next compare would read it: revision and history from the same transaction.
+  const context = await call(db,'fusion_compare_context',actor,session,100);
+  assert.equal(context.revision,2);assert.equal(context.busy,false);
+  assert.deepEqual(context.items.map(x=>x.revision),[1,2]);
+  // A turn that used a library document is left out of the compare context (its text is not registered for erasure there).
+  const turnExecution = (await db.query('SELECT execution_id FROM runtime_session_history WHERE session_id=$1 AND revision=2',[session])).rows[0].execution_id;
+  await db.query("INSERT INTO runtime_library_references(execution_id,actor_id,document_id,content_version,ordinal) VALUES($1,$2,$3,1,1)",[turnExecution,actor,randomUUID()]);
+  assert.deepEqual((await call(db,'fusion_compare_context',actor,session,100)).items,[],'a turn with library references is omitted');
+  await db.query('DELETE FROM runtime_library_references WHERE execution_id=$1',[turnExecution]);
+  // ... and so is a turn built on such a turn (its answer is derived from the document), through the dependency lineage.
+  const other = (await db.query('SELECT id FROM runtime_executions WHERE id<>$1 ORDER BY id LIMIT 1',[turnExecution])).rows[0]?.id;
+  if (other) {
+    await db.query('INSERT INTO runtime_library_references(execution_id,actor_id,document_id,content_version,ordinal) SELECT id,actor_id,$2,1,1 FROM runtime_executions WHERE id=$1',[other,randomUUID()]);
+    await db.query('INSERT INTO runtime_history_dependencies(execution_id,dependency_id) VALUES($1,$2)',[turnExecution,other]);
+    assert.deepEqual((await call(db,'fusion_compare_context',actor,session,100)).items,[],'a turn derived from a library turn is omitted');
+    await db.query('DELETE FROM runtime_history_dependencies WHERE execution_id=$1 AND dependency_id=$2',[turnExecution,other]);
+    await db.query('DELETE FROM runtime_library_references WHERE execution_id=$1',[other]);
+    assert.equal((await call(db,'fusion_compare_context',actor,session,100)).items.length,2);
+    report.checks.push('the compare context omits turns that used library documents, directly or through the dependency lineage');
+  }
+  assert.deepEqual(context.items.map(x=>x.item.role),['user','assistant']);
+  assert.equal(context.items[0].item.content,question);
+  assert.equal(context.items[1].item.content[0].text,answer);
+  assert.equal(context.scopeMaterial,null);
+  // The material token moves on a revocation too (a revocation keeps the revision but withdraws the content).
+  const tokenOf = async () => (await db.query('SELECT fusion_compare_material_token($1,$2) v',[actor,session])).rows[0].v;
+  const noMaterial = await tokenOf();
+  await db.query("INSERT INTO runtime_scope_material(session_id,revision,request_id,request,content,content_hash) VALUES($1,1,$2,'{}','{\"brief\":\"x\"}','h1')",[session,randomUUID()]);
+  const withMaterial = await tokenOf();
+  const guard = () => db.query('SELECT fusion_compare_material_guard($1,$2)',[actor,session]);
+  // This brief has no authorized source: an ordinary turn refuses it, so does a compare (begin and adopt), before any record or charge.
+  await assert.rejects(guard(),/RUNTIME_MATERIAL_UNAVAILABLE/);
+  const beforeRecords = await count(db,'SELECT count(*) v FROM fusion_compares WHERE actor_id=$1',[actor]);
+  await assert.rejects(begin({...request(),historyRevision:'2',config:{models:models.slice(0,2),skill:null,materialRevision:withMaterial}}),/RUNTIME_MATERIAL_UNAVAILABLE/);
+  assert.equal(await count(db,'SELECT count(*) v FROM fusion_compares WHERE actor_id=$1',[actor]),beforeRecords,'a refused start records nothing');
+  await db.query('UPDATE runtime_scope_material SET revoked=true WHERE session_id=$1',[session]);
+  const revoked = await tokenOf();
+  assert.notEqual(withMaterial,noMaterial);assert.notEqual(revoked,withMaterial,'a revocation changes the token although the revision stays');
+  await db.query('DELETE FROM runtime_scope_material WHERE session_id=$1',[session]);
+  assert.equal(await tokenOf(),noMaterial);
+  assert.deepEqual((await call(db,'fusion_compare_context',actor,session,1)).items.map(x=>x.revision),[2],'the last items only');
+  assert.deepEqual((await call(db,'fusion_compare_context',actor,session,0)).items,[]);
+  await assert.rejects(call(db,'fusion_compare_context',actor,session,-1),/FUSION_COMPARE_INVALID/);
+  await assert.rejects(call(db,'fusion_compare_context',actor,session,1001),/FUSION_COMPARE_INVALID/);
+  await assert.rejects(call(db,'fusion_compare_context',actor,randomUUID(),10),/FUSION_COMPARE_SESSION_GONE/);
+  await assert.rejects(call(db,'fusion_compare_context',randomUUID(),session,10),/./,'another user cannot read this conversation');
+  // An execution the ordinary turn could not read leaves its items out, as in runtime admission.
+  await db.query("UPDATE runtime_executions SET unavailable_reason='content_deleted' WHERE id=$1",[adopted.adoption.executionId]);
+  assert.deepEqual((await call(db,'fusion_compare_context',actor,session,100)).items,[]);
+  await db.query('UPDATE runtime_executions SET unavailable_reason=NULL WHERE id=$1',[adopted.adoption.executionId]);
+  // A turn in progress makes the session busy; a stopped turn that only waits for its cost does not (runtime_admit's rule).
+  await db.query("UPDATE runtime_sessions SET active_execution=$2 WHERE id=$1",[session,adopted.adoption.executionId]);
+  assert.equal((await call(db,'fusion_compare_context',actor,session,100)).busy,true);
+  await db.query("UPDATE runtime_sessions SET active_execution=NULL WHERE id=$1",[session]);
+  report.checks.push('fusion_compare_context returns the usable history with the session revision and busy flag from one transaction; '+
+    'limits, bad limits, a missing or foreign conversation and unavailable executions are handled');
+
   // A compare whose conversation moved on returns a quote and changes nothing (repeatably).
   const id2 = randomUUID();
   const second = await begin({...request(),historyRevision:'2',requestHash:sha('second')},id2);
-  await call(db,'fusion_compare_gate',actor,second.compareId,'allow');
+  await call(db,'fusion_compare_gate',actor,second.compareId,'allow',false);
   const admitted2 = await call(db,'fusion_group_admit',actor,id2,'compare',session,[column(a,0),column(b,1)]);
   const claimed2 = await call(db,'fusion_compare_claim',actor,second.compareId,
     admitted2.runs.map(r=>({runId:r.runId,sequence:1,payload:r.fusion.call})));
@@ -208,19 +297,45 @@ export async function fusionCompareCases({db,Client,connectionString,report,crea
     const stale = await call(db,'fusion_compare_adopt',actor,second.compareId,0,randomUUID(),billing(0),items2);
     assert.equal(stale.state,'stale');assert.equal(stale.quote,'second answer');
   }
+  // A quote never exceeds what the composer can send: 18000 characters plus the notice, for an answer over 20000.
+  await db.query("UPDATE fusion_call_outputs SET body=repeat('x',25000) WHERE call_id=$1",[d0.id]);
+  const longQuote = (await call(db,'fusion_compare_adopt',actor,second.compareId,0,randomUUID(),billing(0),items2)).quote;
+  assert.equal(longQuote.startsWith('x'.repeat(18000)+'\n'),true);assert.equal(longQuote.includes('已截断'),true);
+  assert.equal(longQuote.length<18100,true);
+  await db.query("UPDATE fusion_call_outputs SET body='second answer' WHERE call_id=$1",[d0.id]);
+  // A frozen workspace source withdrawn after admission also makes the answer stale (the revision is unchanged here).
+  await db.query('UPDATE runtime_sessions SET revision=revision-1 WHERE id=$1',[session]);
+  await db.query("UPDATE fusion_compares SET workspace_dependencies=jsonb_build_array(jsonb_build_object('sourceVersionId',$2::text)) WHERE id=$1",[second.compareId,randomUUID()]);
+  assert.equal((await call(db,'fusion_compare_adopt',actor,second.compareId,0,randomUUID(),billing(0),items2)).state,'stale');
+  await db.query("UPDATE fusion_compares SET workspace_dependencies='[]' WHERE id=$1",[second.compareId]);
+  await db.query('UPDATE runtime_sessions SET revision=revision+1 WHERE id=$1',[session]);
   assert.equal((await call(db,'fusion_compare_read',actor,second.compareId)).adoption,null,'a quote is not an adoption');
   report.checks.push('when the conversation moved on, adoption returns the answer as a quote, repeatably, and records nothing');
+
+  // The view carries the snapshot hash recorded at begin; end closes a compare that has no group, idempotently.
+  const idEnd = randomUUID();
+  const toEnd = await begin({...request(),historyRevision:'3',requestHash:sha('end')},idEnd);
+  assert.equal(toEnd.snapshotHash,sha('snapshot'));
+  await call(db,'fusion_compare_gate',actor,toEnd.compareId,'clear',false);
+  assert.equal((await call(db,'fusion_compare_end',actor,toEnd.compareId)).state,'refused');
+  assert.equal((await call(db,'fusion_compare_end',actor,toEnd.compareId)).state,'refused','ending twice is the same answer');
+  await assert.rejects(call(db,'fusion_group_admit',actor,idEnd,'compare',session,[column(a,0),column(b,1)]),/FUSION_COMPARE_ENDED/);
+  await assert.rejects(call(db,'fusion_compare_end',actor,first.compareId),/FUSION_COMPARE_DENIED/,'a compare with a group is stopped, not ended');
+  await assert.rejects(call(db,'fusion_compare_end',actor,randomUUID()),/FUSION_COMPARE_DENIED/);
+  await assert.rejects(call(db,'fusion_compare_end',randomUUID(),toEnd.compareId),/./);
+  report.checks.push('fusion_compare_end closes a compare that has no group and answers the same again; a compare with a group, an unknown '+
+    'one or another user is refused; the view returns the recorded snapshot hash');
 
   // A blocked judgement ends the compare without a group; an expired admitting record is refused.
   const id3 = randomUUID();
   const third = await begin({...request(),historyRevision:'3',requestHash:sha('third')},id3);
-  assert.equal((await call(db,'fusion_compare_gate',actor,third.compareId,'block')).state,'refused');
+  assert.equal((await call(db,'fusion_compare_gate',actor,third.compareId,'block',false)).state,'refused');
   await assert.rejects(call(db,'fusion_group_admit',actor,id3,'compare',session,[column(a,0),column(b,1)]),/FUSION_COMPARE_ENDED/);
   const id4 = randomUUID();
   const fourth = await begin({...request(),historyRevision:'3',requestHash:sha('fourth')},id4);
   await db.query("UPDATE fusion_compares SET created_at=now()-interval '6 minutes' WHERE id=$1",[fourth.compareId]);
   assert.equal((await call(db,'fusion_compare_read',actor,fourth.compareId)).state,'refused');
-  await assert.rejects(call(db,'fusion_compare_gate',actor,fourth.compareId,'clear'),/FUSION_COMPARE_ENDED/);
+  await assert.rejects(call(db,'fusion_compare_gate',actor,fourth.compareId,'clear',false),/FUSION_COMPARE_ENDED/);
   report.checks.push('a blocked judgement refuses the compare with no group; an admitting record older than 5 minutes is refused');
 
   // Recovery closes a running compare's runs (the page was closed before dispatch): the user can start again at
@@ -228,7 +343,7 @@ export async function fusionCompareCases({db,Client,connectionString,report,crea
   await db.query("UPDATE fusion_compares SET state='refused' WHERE id=$1",[fourth.compareId]);
   const id5 = randomUUID();
   const fifth = await begin({...request(),historyRevision:'3',requestHash:sha('fifth')},id5);
-  await call(db,'fusion_compare_gate',actor,fifth.compareId,'clear');
+  await call(db,'fusion_compare_gate',actor,fifth.compareId,'clear',false);
   const admitted5 = await call(db,'fusion_group_admit',actor,id5,'compare',session,[column(a,0),column(b,1)]);
   await call(db,'fusion_compare_claim',actor,fifth.compareId,admitted5.runs.map(r=>({runId:r.runId,sequence:1,payload:r.fusion.call})));
   await assert.rejects(begin({...request(),historyRevision:'3',requestHash:sha('sixth')}),/FUSION_COMPARE_ACTIVE/);
@@ -248,7 +363,8 @@ export async function fusionCompareCases({db,Client,connectionString,report,crea
 
   // Privileges: only service_role executes the entry points; clients cannot read the table.
   for (const role of ['anon','authenticated'])
-    for (const fn of ['fusion_compare_begin(uuid,uuid,uuid,jsonb)','fusion_compare_adopt(uuid,uuid,integer,uuid,jsonb,jsonb)'])
+    for (const fn of ['fusion_compare_begin(uuid,uuid,uuid,jsonb)','fusion_compare_adopt(uuid,uuid,integer,uuid,jsonb,jsonb)',
+      'fusion_compare_context(uuid,uuid,integer)','fusion_compare_end(uuid,uuid)'])
       assert.equal((await db.query('SELECT has_function_privilege($1,$2,\'execute\') v',[role,fn])).rows[0].v,false);
   assert.equal((await db.query("SELECT has_table_privilege('authenticated','public.fusion_compares','SELECT') v")).rows[0].v,false);
   report.checks.push('compare functions are service-role only; clients cannot read compare records');
