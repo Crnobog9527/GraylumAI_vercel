@@ -3037,7 +3037,7 @@
   "fn:account_erasure_confirm(uuid,uuid)": "55bb89ab9b01",
   "fn:account_erasure_confirm_with_digests(uuid,uuid,jsonb)": "bff87ddd9102",
   "fn:account_erasure_detach_runtime(uuid,uuid)": "9dd938797193",
-  "fn:account_erasure_executor_claim(uuid)": "f6d36a3f90c4",
+  "fn:account_erasure_executor_claim(uuid)": "eaed1ffc5f1d",
   "fn:account_erasure_executor_finish(uuid,uuid,uuid,text[],boolean,boolean)": "228face2601e",
   "fn:account_erasure_executor_pending()": "8528dbf84c01",
   "fn:account_erasure_executor_proof(uuid,uuid,uuid)": "3b78fcec4539",
