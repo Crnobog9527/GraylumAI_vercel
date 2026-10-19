@@ -7,7 +7,8 @@ type ToasterProps = React.ComponentProps<typeof Sonner>;
 
 // The toaster is mounted once in the root layout, outside every `.light` scope, so the --gl-* tokens are
 // not defined here. A white toast with the light-foundation values (DESIGN.md) reads on the white workbench
-// and public pages and stays readable on the older dark pages.
+// and public pages and stays readable on the older dark pages. `richColors` makes Sonner apply the status
+// variables to success/error/warning/info toasts.
 const toastVars = {
   '--normal-bg': '#fff',
   '--normal-text': '#262626',
@@ -30,6 +31,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
   return (
     <Sonner
       theme="light"
+      richColors
       className="toaster group"
       style={toastVars}
       toastOptions={{
