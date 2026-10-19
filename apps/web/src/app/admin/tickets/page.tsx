@@ -159,7 +159,7 @@ export default function AdminTicketsPage() {
   };
   const { data, isLoading, error, refetch } = trpc.admin.getAllTickets.useQuery({ ...filters, limit: TICKET_PAGE_SIZE });
   const firstPage = (data?.tickets ?? []) as Ticket[];
-  const pool = useTicketSearchPool(!!searchQuery.trim(), filters, firstPage.length, data?.total ?? 0) as Ticket[];
+  const pool = useTicketSearchPool<Ticket>(!!searchQuery.trim(), filters, firstPage.length, data?.total ?? 0);
   const tickets = [...firstPage, ...pool].filter((t) => ticketMatchesQuery(t.id, searchQuery));
 
   const updateStatus = trpc.admin.updateTicketStatus.useMutation({
