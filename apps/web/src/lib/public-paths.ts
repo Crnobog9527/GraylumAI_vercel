@@ -28,6 +28,8 @@ export const PUBLIC_PATHS = [
   '/pricing',
   // The founder members' wall: read-only, shows only cards the member agreed to publish and an admin approved.
   '/founders',
+  // The Graylum vs ChatGPT comparison page (/graylum-vs-chatgpt); its Taiwan version lives under /zh-tw.
+  '/graylum-vs-chatgpt',
   '/auth',
   '/landing',
   '/api',

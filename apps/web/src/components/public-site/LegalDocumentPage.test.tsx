@@ -13,4 +13,6 @@ it('shows the document inside the public site chrome with the English-text notic
   expect(html).toContain('<h1>Terms of Service</h1>');
   expect(html).toContain('本页是英文法律文本');
   expect(html).toContain('Sheridan County, Wyoming');
+  // The English text sits inside the Chinese page chrome, so it carries its own language.
+  expect(html).toContain('<div lang="en"');
 });

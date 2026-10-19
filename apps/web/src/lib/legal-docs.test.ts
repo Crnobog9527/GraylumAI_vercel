@@ -48,6 +48,16 @@ describe('legal documents', () => {
     expect(html).toMatch(/C\. Protected classification[^<]*<\/td><td>[^<]+<\/td><td>NO/);
   });
 
+  it.each(['privacy', 'terms'] as const)('%s: the table of contents links to every section and section ids are unique', name => {
+    const html = readLegalDoc(name);
+    const ids = [...html.matchAll(/<h2 id="sec-(\d+)">/g)].map(match => match[1]);
+    const toc = html.match(/<ol class="toc">([\s\S]*?)<\/ol>/)?.[1] ?? '';
+    const links = [...toc.matchAll(/href="#sec-(\d+)"/g)].map(match => match[1]);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(links.length).toBeGreaterThan(15);
+    expect(links.every(link => ids.includes(link))).toBe(true);
+  });
+
   it('cookies: lists the first-touch storage under analytics', () => {
     expect(readLegalDoc('cookies')).toContain('graylum.analytics.first-touch');
   });

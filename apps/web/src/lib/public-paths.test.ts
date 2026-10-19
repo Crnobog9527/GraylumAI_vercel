@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { isPublicPathname } from './public-paths';
+import { PUBLIC_PAGES } from './seo/public-pages';
 
 describe('isPublicPathname', () => {
   it('opens listed paths and the pages below them', () => {
@@ -37,5 +38,18 @@ describe('isPublicPathname: tutorial blog', () => {
     for (const path of ['/blogs', '/blog-admin', '/admin/blog']) {
       expect(isPublicPathname(path)).toBe(false);
     }
+  });
+});
+
+describe('isPublicPathname: every indexable page in the sitemap list', () => {
+  it('lets a logged-out visitor open each of them', () => {
+    // '/' is served by the public host rewrite, not by this list.
+    const closed = PUBLIC_PAGES.map(page => page.path).filter(path => path !== '/' && !isPublicPathname(path));
+    expect(closed).toEqual([]);
+  });
+  it('opens the comparison page in both languages', () => {
+    expect(isPublicPathname('/graylum-vs-chatgpt')).toBe(true);
+    expect(isPublicPathname('/zh-tw/graylum-vs-chatgpt')).toBe(true);
+    expect(isPublicPathname('/graylum-vs-chatgptx')).toBe(false);
   });
 });
