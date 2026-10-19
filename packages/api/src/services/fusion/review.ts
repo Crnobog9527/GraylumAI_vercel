@@ -371,10 +371,11 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
           continue;
         }
         const passed = await passedRevision(view, src);
-        // The revision is never re-reviewed by the panel (§8.1, Owner 2026-10-13 选 A): the user now chooses section by section
-        // (Owner 2026-10-14); nothing reaches R14 until then. A revision that changes no section is no revision (refunded, 0294).
-        view = passed?.changedSections.length ? await finish(view, 'completed', { kind: 'revised', debated: at.round > 1, reviewedByPanel: false,
-          awaitingChoice: true }) : await finish(view, passed ? 'completed' : 'revision_failed', { kind: passed ? 'no_change' : 'revision_failed' });
+        // The revision is never re-reviewed by the panel (§8.1, Owner 2026-10-13 选 A): the user now chooses section by
+        // section (Owner 2026-10-14); nothing reaches R14 until then.
+        view = passed
+          ? await finish(view, 'completed', { kind: 'revised', debated: at.round > 1, reviewedByPanel: false, awaitingChoice: true })
+          : await finish(view, 'revision_failed', { kind: 'revision_failed' });
       }
       return { review: view, calls: [] };
     },
