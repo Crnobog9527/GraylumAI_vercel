@@ -75,8 +75,18 @@ it('a refused guarded card without prose falls back to host-rendered prose inste
  const turn=agentTurnResult('',INVALID_CARD_RESULT,true,prose,true,false);
  expect(turn).toMatchObject({card:null,message:prose});expect(JSON.parse(turn.body)).toMatchObject({card:null,message:prose});
  expect(rejectSeparateCardProse('',turn)).toEqual(turn);
- const neutral=groundedCardFallback(JSON.stringify({...choice,recommended:null,options:[{text:'少量',reason:null},{text:'较多',reason:null}]}))!;
+ const neutral=groundedCardFallback(JSON.stringify({...choice,intent:'requested_neutral_categories',recommended:null,
+  options:[{text:'少量',reason:null},{text:'较多',reason:null}]}))!;
  expect(neutral).toContain('1. 少量');expect(neutral).not.toContain('推测');
+});
+it('only a quotation refusal falls back; declared no-card intents and rule-breaking cards keep the invalid notice',()=>{
+ for(const intent of ['open_personal','insufficient_information','already_answered'])
+  expect(groundedCardFallback(JSON.stringify({...choice,intent}))).toBeNull();
+ expect(groundedCardFallback(JSON.stringify({...choice,recommended:null}))).toBeNull();
+ expect(groundedCardFallback(JSON.stringify({...choice,recommended:9}))).toBeNull();
+ expect(groundedCardFallback(JSON.stringify({...choice,options:[choice.options[0],choice.options[0]]}))).toBeNull();
+ expect(groundedCardFallback(JSON.stringify({...choice,options:[{text:'甲',reason:'理由'},{text:'乙',reason:null}]}))).toBeNull();
+ expect(groundedCardFallback(JSON.stringify({...choice,intent:'requested_neutral_categories',recommended:null}))).toBeNull();
 });
 it('malformed guarded card arguments keep the invalid notice',()=>{
  for(const bad of ['{"question":"q"',JSON.stringify({question:'q',options:['a','b'],recommended:0}),null])
