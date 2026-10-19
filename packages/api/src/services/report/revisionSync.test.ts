@@ -61,6 +61,11 @@ it('validates sizes and forbids a forged actor', () => {
   const block = '```graylum-report-data\n' + JSON.stringify({ v: 1, field: 'summary', value: '数'.repeat(11000) }) + '\n```';
   expect(revisionProposeInput.safeParse({ ...proposal, body: `${'😀'.repeat(5000)}\n\n${block}` }).success).toBe(true);
   expect(revisionProposeInput.safeParse({ ...proposal, body: `${'😀'.repeat(12001)}\n\n${block}` }).success).toBe(false);
+  // The whole body is capped as well (text 12000 + a data block of at most 65536, 0300): a huge block is refused here.
+  const huge = '```graylum-report-data\n' + JSON.stringify({ v: 1, field: 'summary', value: '数'.repeat(100000) }) + '\n```';
+  expect(revisionProposeInput.safeParse({ ...proposal, body: `修订稿\n\n${huge}` }).success).toBe(false);
+  const largest = '```graylum-report-data\n' + '数'.repeat(65000) + '\n```';
+  expect(revisionProposeInput.safeParse({ ...proposal, body: `${'😀'.repeat(12000)}\n\n${largest}` }).success).toBe(true);
   expect(revisionProposeInput.safeParse({ ...proposal, fields: { a: { who: '😀'.repeat(400) } } }).success).toBe(true);
   for (const change of [{ body: '😀'.repeat(12001) }, { actorId: randomUUID() }, { fields: { a: { who: 'x'.repeat(401) } } },
     { fields: { a: { who: '' } } }, { fields: { a: { who: 1 } } }]) {
