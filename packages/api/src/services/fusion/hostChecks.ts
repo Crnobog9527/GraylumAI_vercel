@@ -196,9 +196,12 @@ export function checkRevision(raw: string, input: RevisionInput): RevisionResult
   if (seen.size !== expected || Object.keys(steps).length !== declared.size) return { ok: false, reason: 'REVISION_FIELDS' };
   // 第 1 层: changed sections and changed fields must be declared consistently.
   const changedSections = input.sections.filter(title => now.get(title) !== before.get(title));
+  // A wording-only note on a section whose text did not change describes nothing the user could adopt (e.g. an edit
+  // of the strategy data block, which adoption never takes): it is dropped, not failed. Every other mismatch still fails.
+  const notes = changeNotes.filter(note => changedSections.includes(note.section) || !note.wordingOnly || note.fields.length > 0);
   const noted = new Set<string>();
   const notedFields = new Set<string>();
-  for (const note of changeNotes) {
+  for (const note of notes) {
     if (!changedSections.includes(note.section) || noted.has(note.section)) return { ok: false, reason: 'REVISION_NOTES' };
     noted.add(note.section);
     if (note.wordingOnly ? note.fields.length > 0 : note.fields.length === 0) return { ok: false, reason: 'REVISION_NOTES' };
@@ -218,5 +221,5 @@ export function checkRevision(raw: string, input: RevisionInput): RevisionResult
       (r14Fields[stepId] ??= {})[fieldId] = value;
     }
   }
-  return { ok: true, body, steps, changedSections, changeNotes, adjudication, r14Fields };
+  return { ok: true, body, steps, changedSections, changeNotes: notes, adjudication, r14Fields };
 }
