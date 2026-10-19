@@ -3,7 +3,8 @@ import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { admitFusionGroup, derivedUuid, replayFusionGroup, type FusionMember } from './admission';
 import { fusionExecutor, type FusionBodyVerdict } from './executor';
-import { checkRevision, DECISIONS, disputedDecisions, hasDisagreement, parseOpinion, type DeclaredStep, type Opinion, type StepValues } from './hostChecks';
+import { DECISIONS, disputedDecisions, hasDisagreement, parseOpinion, type DeclaredStep, type Opinion, type StepValues } from './hostChecks';
+import { checkRevision } from './revisionCheck';
 import { assertSnapshotSize, fusionRequestBytes, type FusionRequest } from './request';
 import { PAYG_PROFILE_MAX_BYTES } from '../runtime/paygHostPolicy';
 import { debateRequest, readReviewSkill, reviewerLabel, reviewerRequest, summaryRequest, type ReviewContext,
@@ -13,6 +14,7 @@ import { adoptionChoices, adoptionSections, applyChoices, sectionTexts, type Ado
 import { ENDED_STATES, reviewRecord, type ReviewPosition, type ReviewView } from './reviewRecord';
 import { claimOutcome, memberCaps, PERMANENT_REFUSALS } from './reviewLimits';
 import { planReview } from './reviewPlan';
+import { mayRetrySummary } from './reviewRetry';
 
 type Executor = ReturnType<typeof fusionExecutor>;
 const config = z.object({ estimateUsd: z.string(), maxRounds: z.number().int().min(1), reviewers: z.array(z.string().uuid()).min(1),
@@ -83,6 +85,10 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
   const revisionInput = (view: ReviewView, src: Source) => ({
     previousBody: src.body, previousSteps: frozenValues(view), frozenSteps: frozenValues(view),
     declared: src.declared as DeclaredStep[], sections: src.sections, maxCharacters: src.maxCharacters });
+  /** Why earlier summaries of this round were refused, recomputed from their saved text (the retry hint). */
+  const summaryProblems = async (view: ReviewView, src: Source, round: number) => (await Promise.all(callsAt(view, round, 'summary')
+    .filter(call => call.verdict === 'revision_invalid').map(call => outputOf(call.callId)))).flatMap(text => {
+    const result = text ? checkRevision(text, revisionInput(view, src)) : null; return result && !result.ok ? [result.detail ?? result.reason] : []; });
   /** Rules for one reviewer's answer: in the debate round it must answer every other reviewer with a usable
    * round-1 opinion on every disputed decision, exactly once (derived from the saved round-1 opinions only). */
   async function opinionRules(view: ReviewView, src: Source, round: number, modelId: string | null) {
@@ -118,9 +124,8 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
     if (call.phase === 'fusion_review') return parseOpinion(text, await opinionRules(view, src, round, call.modelId ?? null)) ? 'usable' : 'format_invalid';
     return checkRevision(text, revisionInput(view, src)).ok ? 'usable' : 'revision_invalid';
   }
-  /** Saved but never judged (a crash between save and verdict): judge again with the frozen check. */
-  /** Judges every saved, unjudged call of the review; returns every call of it that now has a verdict, so the daily
-   * recovery can settle all of them, not only those on its listing page (#962 review). */
+  /** Saved but never judged (a crash between save and verdict): judges every such call again with the frozen check and returns
+   * every call that now has a verdict, so the daily recovery can settle all of them, not only those on its page (#962 review). */
   async function rejudge(view: ReviewView, src: Source): Promise<string[]> {
     const judged = view.calls.filter(c => c.verdict !== null).map(c => c.callId);
     for (const call of view.calls.filter(c => c.verdict === null && c.dispatched)) {
@@ -186,8 +191,10 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
       });
     } else {
       const opinions = await finalOpinions(view, src);
+      const problems = await summaryProblems(view, src, at.round);
       members = [{ modelId: cfg.summary, phase: 'fusion_summary', request: fitted(level => summaryRequest(skill, context,
-        opinions.map(o => ({ ...o, opinion: trimmed(o.opinion, level)! })), src.declared, frozenValues(view)), phaseLimit(view, 'summary')) }];
+        opinions.map(o => ({ ...o, opinion: trimmed(o.opinion, level)! })), src.declared, frozenValues(view), problems),
+        phaseLimit(view, 'summary')) }];
     }
     // Every request must fit the per-call billing byte cap as actually serialized (#962 review); a step that cannot fit
     // even fully trimmed is never claimed.
@@ -252,7 +259,6 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
     }
     return outputs;
   }
-
   const plan = (input: { draftId: string; sourceVersionId: string }) => planReview({ admin, actorId, env, ...input });
   /** An ended review whose fee is still held (a stop waiting for in-flight calls) gets another settlement try. */
   async function settled(view: ReviewView | null): Promise<ReviewView> {
@@ -371,11 +377,15 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
           continue;
         }
         const passed = await passedRevision(view, src);
-        // The revision is never re-reviewed by the panel (§8.1, Owner 2026-10-13 选 A): the user now chooses section by
-        // section (Owner 2026-10-14); nothing reaches R14 until then.
-        view = passed
-          ? await finish(view, 'completed', { kind: 'revised', debated: at.round > 1, reviewedByPanel: false, awaitingChoice: true })
-          : await finish(view, 'revision_failed', { kind: 'revision_failed' });
+        // A refused revision is written once more with the host's exact problems (Owner 2026-10-20), within the budget line.
+        if (!passed && at.attempt < ATTEMPTS && await mayRetrySummary(admin, cfg, here.map(call => call.verdict))) {
+          view = await record.advance(reviewId, at, { state: 'running', round: at.round, phase: 'summary', attempt: at.attempt + 1 });
+          continue;
+        }
+        // The revision is never re-reviewed by the panel (§8.1, Owner 2026-10-13 选 A): the user now chooses section by section
+        // (Owner 2026-10-14); nothing reaches R14 until then. A revision that changes no section is no revision (refunded, 0294).
+        view = passed?.changedSections.length ? await finish(view, 'completed', { kind: 'revised', debated: at.round > 1, reviewedByPanel: false,
+          awaitingChoice: true }) : await finish(view, passed ? 'completed' : 'revision_failed', { kind: passed ? 'no_change' : 'revision_failed' });
       }
       return { review: view, calls: [] };
     },
@@ -391,8 +401,7 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
       if (!run) throw new Error('FUSION_REVIEW_STEP_CONFLICT');
       const src = await readSource(reviewId);
       const rules = await opinionRules(view, src, step.round, call.modelId ?? null);
-      const judge = (text: string): FusionBodyVerdict => run.phase === 'fusion_review'
-        ? (parseOpinion(text, rules) ? 'usable' : 'format_invalid')
+      const judge = (text: string): FusionBodyVerdict => run.phase === 'fusion_review' ? (parseOpinion(text, rules) ? 'usable' : 'format_invalid')
         : (checkRevision(text, revisionInput(view, src)).ok ? 'usable' : 'revision_invalid');
       if (!deps.executor) throw new Error('FUSION_REVIEW_UNAVAILABLE');
       return deps.executor.run(run, { runId: call.runId, id: callId, state: call.state, fresh: false }, judge, onChunk);
