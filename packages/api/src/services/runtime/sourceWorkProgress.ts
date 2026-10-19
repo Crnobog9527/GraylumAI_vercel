@@ -9,6 +9,10 @@ import type {RuntimeTool} from './runner';
 const record = (value: unknown): Record<string, unknown> =>
  value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 const text = (value: unknown, limit: number): string => typeof value === 'string' ? value.slice(0, limit) : '';
+type LibraryProgressContext = {
+ workspaceContext?: boolean; sources?: readonly unknown[];
+ libraryReferences?: readonly unknown[]; libraryRetrieval?: boolean;
+};
 
 /** Only host labels and names of the user's own files leave the server, never source text or model arguments. */
 export function sourceWorkSummary(result: unknown): Pick<AgentToolEvent, 'kind' | 'state' | 'label' | 'detail'> | null {
@@ -54,13 +58,20 @@ export function sourceWorkSummary(result: unknown): Pick<AgentToolEvent, 'kind' 
 }
 
 /** The journal and its visibility fences run unchanged; progress never changes execution or billing. */
-export function withSourceWorkProgress(tool: RuntimeTool, emit?: (event: AgentToolEvent) => void, ownPosts = false): RuntimeTool {
+export function withSourceWorkProgress(
+ tool: RuntimeTool, emit?: (event: AgentToolEvent) => void, ownPosts = false,
+ libraryContext?: LibraryProgressContext,
+): RuntimeTool {
  if (tool.name !== 'read_source' || !emit) return tool;
  return {...tool, execute: async (args, callId) => {
   const query = typeof args.query === 'string' ? args.query.trim() : '';
+  const libraryEnabled = Boolean(libraryContext?.libraryReferences?.length || libraryContext?.libraryRetrieval);
+  const libraryIndex = libraryEnabled && !libraryContext?.workspaceContext && !libraryContext?.sources?.length;
+  const libraryListing = libraryEnabled && (query === 'library' || libraryIndex && query === '' ||
+   /^doc-\d+(?:\/page-\d+)?$/.test(query));
   const kind = ownPosts && ['my_posts', 'my_posts:14', 'my_posts:30', 'my_posts:90'].includes(query) ? 'my_posts'
-   : query.startsWith('search:') || query === '' || query === 'library' || /^doc-\d+(?:\/page-\d+)?$/.test(query)
-    ? 'library_search' : /^doc-\d+\/segment-\d+$/.test(query) ? 'library_read' : null;
+   : query.startsWith('search:') || libraryListing ? 'library_search'
+    : /^doc-\d+\/segment-\d+$/.test(query) ? 'library_read' : null;
   const event = {type: 'agent_tool' as const, callId, tool: 'read_source' as const};
   const send = (summary: Omit<AgentToolEvent, 'type' | 'callId' | 'tool'>) => {
    try {emit({...event, ...summary});} catch { /* Display disconnect never interrupts source persistence. */ }

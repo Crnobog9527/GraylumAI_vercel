@@ -65,7 +65,8 @@ it('streams library index and directory progress as safe library-search events',
   ['doc-1/page-2',{kind:'library_directory',documentId:'PRIVATE',entries:[]},1],
  ] as const) {
   emit.mockClear();
-  const tool=withSourceWorkProgress({name:'read_source',description:'read',execute:async()=>JSON.stringify(result)},emit);
+  const tool=withSourceWorkProgress({name:'read_source',description:'read',execute:async()=>JSON.stringify(result)},
+   emit,false,{libraryRetrieval:true});
   await tool.execute({query},'c3');
   expect(emit.mock.calls.map(([event])=>[event.kind,event.state])).toEqual([
    ['library_search','running'],['library_search','done'],
@@ -73,6 +74,12 @@ it('streams library index and directory progress as safe library-search events',
   expect(emit.mock.calls.at(-1)?.[0]).toMatchObject({label:`看了你的资料库（${count} 篇）`});
   expect(JSON.stringify(emit.mock.calls)).not.toContain('PRIVATE');
  }
+ const workspaceOnly=withSourceWorkProgress({name:'read_source',description:'read',
+  execute:async()=>JSON.stringify({kind:'workspace_index',entries:[]})},emit,false,
+  {workspaceContext:true,libraryRetrieval:true});
+ emit.mockClear();
+ await workspaceOnly.execute({query:''},'workspace-index');
+ expect(emit).not.toHaveBeenCalled();
  const other={name:'other',description:'other',execute:async()=>''};
  expect(withSourceWorkProgress(other,emit)).toBe(other);
  const disconnected=withSourceWorkProgress({...other,name:'read_source',
