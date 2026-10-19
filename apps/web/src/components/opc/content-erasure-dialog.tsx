@@ -1,17 +1,23 @@
 'use client';
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { Loader2 } from 'lucide-react';
+import light from '@/components/design/light-tokens.module.css';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useContentErasure, type ContentErasureState } from '@/hooks/use-content-erasure';
 import { ERASURE_TITLE, buildContentErasureLines, type ContentErasureTarget, type ErasureLine } from '@/lib/content-erasure';
 
-const panelStyle = { background: 'var(--bg-secondary)', borderColor: 'var(--border-primary)', color: 'var(--text-primary)' };
-const ghostStyle = { background: 'transparent', borderColor: 'var(--border-primary)', color: 'var(--text-secondary)' };
+// The dialog is portalled to <body>, outside the workbench's scope, so it carries its own `.light` tokens
+// (DESIGN.md Base components: white, 18px radius, dialog shadow).
+const panelStyle = {
+  background: 'var(--gl-surface)', borderColor: 'var(--gl-border)', color: 'var(--gl-text)',
+  borderRadius: 'var(--gl-radius-dialog)', boxShadow: 'var(--gl-shadow-dialog)',
+};
+const ghostStyle = { background: 'transparent', borderColor: 'var(--gl-border-control)', color: 'var(--gl-text-body)' };
 const dangerStyle = { background: '#dc2626', color: '#fff' };
 const TONE_COLOR: Record<ErasureLine['tone'], string> = { warn: 'var(--color-primary)', info: 'var(--text-secondary)' };
 const MESSAGE_COLOR: Record<ContentErasureState['messageTone'], string> = {
-  error: '#fca5a5', notice: 'var(--color-primary)', done: 'var(--text-secondary)',
+  error: 'var(--gl-error)', notice: 'var(--color-primary)', done: 'var(--text-secondary)',
 };
 
 type ViewProps = {
@@ -66,7 +72,7 @@ export function ContentErasureDialog({ target, name, relatedIds, onClose }: {
     onClose(erasure.state.finished);
   };
   return <Dialog open onOpenChange={(open) => { if (!open) close(); }}>
-    <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg" style={panelStyle}>
+    <DialogContent className={`${light.light} max-h-[90dvh] overflow-y-auto sm:max-w-lg`} style={panelStyle}>
       <DialogHeader>
         <DialogTitle style={{ color: 'var(--text-primary)' }}>{ERASURE_TITLE[target.kind]}</DialogTitle>
         <DialogDescription style={{ color: 'var(--text-secondary)' }}>
