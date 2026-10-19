@@ -1,10 +1,10 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// 0319: per-session execution reads use the new index. Run: node packages/db/tests/runtime-session-index/run-local.mjs --local-only
+// 0321: per-session execution reads use the new index. Run: node packages/db/tests/runtime-session-index/run-local.mjs --local-only
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {localDb,read} from '../runtime-view-perf/local-db.mjs';
 const database=await localDb(),db=database.client;
-const migration=read('packages/db/migrations/0319_runtime_executions_session_index.sql');
+const migration=read('packages/db/migrations/0321_runtime_executions_session_index.sql');
 const report={checks:[],failed:null};
 try{
  const plan=async sql=>(await db.query('EXPLAIN (FORMAT JSON) '+sql,[randomUUID()])).rows[0]['QUERY PLAN'][0].Plan;
