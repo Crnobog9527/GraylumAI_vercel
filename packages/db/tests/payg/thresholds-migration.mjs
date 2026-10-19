@@ -31,6 +31,7 @@ export async function thresholdMigrationCases(db,report,createFixture,claim,rece
     await db.query(read('0235_fusion_sessionless_storage.sql'));
     await db.query(read('0255_research_tool_billing.sql'));
     await db.query(read('0268_research_benchmarks.sql'));
+    await db.query(read('0315_research_benchmark_paged_posts.sql')); // patches 0268's research_benchmark_project
     await db.query(read('0285_pay_refunded_pack_hold.sql'));
     await db.query(read('0290_fusion_compare.sql'));
     // D1 also patches claim quarantine. Historical threshold replay must restore
