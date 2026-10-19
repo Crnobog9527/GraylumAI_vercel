@@ -143,13 +143,13 @@ export default function AdminUsersPage() {
   // 主操作成功后刷新；操作日志没写上时单独提示，不重做主操作。
   const onUserChanged = (result: { auditRecorded?: boolean }) => {
     if (result.auditRecorded === false) toast.warning('操作已生效，但操作日志未记录');
-    utils.admin.getAllUsers.invalidate();
-    utils.admin.getUserDetails.invalidate();
+    // 返回 Promise，等列表和详情真正刷新完再结束
+    return Promise.all([utils.admin.getAllUsers.invalidate(), utils.admin.getUserDetails.invalidate()]);
   };
 
   const updateCredits = trpc.admin.adjustUserCredits.useMutation({
-    onSuccess: (result) => {
-      onUserChanged(result);
+    onSuccess: async (result) => {
+      await onUserChanged(result);
       setCreditDialogOpen(false);
       setCreditAdjustment({ amount: 0, reason: '' });
       setSelectedUser(null);

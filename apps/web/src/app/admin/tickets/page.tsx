@@ -2,6 +2,8 @@
 
 import { useState } from 'react';
 import { trpc } from '@/trpc/client';
+import { TicketSearchInput } from './TicketSearchInput';
+import { formatTicketNumber, ticketMatchesQuery } from '@/lib/ticket-number';
 import {
   Headphones, MessageSquare, Clock, CheckCircle,
   AlertCircle, Send, ChevronRight, User, Shield, Bug,
@@ -148,12 +150,13 @@ export default function AdminTicketsPage() {
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [replyContent, setReplyContent] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const { data, isLoading, error, refetch } = trpc.admin.getAllTickets.useQuery({
     status: statusFilter === 'all' ? undefined : statusFilter,
     category: categoryFilter === 'all' ? undefined : categoryFilter,
   });
-  const tickets = (data?.tickets ?? []) as Ticket[];
+  const tickets = ((data?.tickets ?? []) as Ticket[]).filter((t) => ticketMatchesQuery(t.id, searchQuery));
 
   const updateStatus = trpc.admin.updateTicketStatus.useMutation({
     onSuccess: async () => {
@@ -166,13 +169,13 @@ export default function AdminTicketsPage() {
   });
 
   const replyMutation = trpc.admin.replyToTicket.useMutation({
-    onSuccess: async () => {
-      const refreshed = await refetch();
+    // 不等整张工单列表重新拉取：先清空输入框，列表在后台刷新并更新详情
+    onSuccess: () => {
       setReplyContent('');
-      if (selectedTicket) {
-        const updated = refreshed.data?.tickets?.find(t => t.id === selectedTicket.id);
+      void refetch().then((r) => {
+        const updated = r.data?.tickets?.find(t => t.id === selectedTicket?.id);
         if (updated) setSelectedTicket(updated);
-      }
+      });
     }
   });
 
@@ -202,10 +205,6 @@ export default function AdminTicketsPage() {
     navigator.clipboard.writeText(id);
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);
-  };
-
-  const formatShortId = (id: string) => {
-    return id.slice(0, 8).toUpperCase();
   };
 
   const getUserDisplayName = (user?: UserProfile | null) => {
@@ -252,6 +251,7 @@ export default function AdminTicketsPage() {
             </p>
           </div>
           <div className="flex items-center gap-3">
+            <TicketSearchInput value={searchQuery} onChange={setSearchQuery} />
             {/* Category Filter */}
             <Select value={categoryFilter} onValueChange={(v) => setCategoryFilter(v as typeof categoryFilter)}>
               <SelectTrigger className="w-[140px] bg-[var(--bg-secondary)] border-[var(--border-primary)] text-[var(--text-primary)]">
@@ -303,7 +303,7 @@ export default function AdminTicketsPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[100px]">工单ID</TableHead>
+                  <TableHead className="w-[170px]">工单编号</TableHead>
                   <TableHead>工单标题</TableHead>
                   <TableHead>提交用户</TableHead>
                   <TableHead>分类</TableHead>
@@ -333,7 +333,7 @@ export default function AdminTicketsPage() {
                               className="flex items-center gap-1 px-2 py-1 rounded text-xs font-mono hover:bg-[var(--bg-tertiary)] transition-colors"
                               style={{ color: 'var(--text-tertiary)' }}
                             >
-                              #{formatShortId(ticket.id)}
+                              {formatTicketNumber(ticket.id)}
                               {copiedId === ticket.id ? (
                                 <CheckCheck className="h-3 w-3 text-emerald-400" />
                               ) : (
@@ -342,7 +342,7 @@ export default function AdminTicketsPage() {
                             </button>
                           </TooltipTrigger>
                           <TooltipContent>
-                            <p>点击复制完整ID</p>
+                            <p>点击复制完整ID（用于退款表单）</p>
                           </TooltipContent>
                         </Tooltip>
                       </TableCell>
@@ -445,18 +445,17 @@ export default function AdminTicketsPage() {
           className="w-[600px] sm:max-w-[600px] overflow-y-auto"
           style={{ background: 'var(--bg-primary)', border: '1px solid var(--border-primary)' }}
         >
-            <SheetHeader>
-              <SheetTitle style={{ color: 'var(--text-primary)' }}>工单详情</SheetTitle>
-            </SheetHeader>
+            <SheetHeader><SheetTitle style={{ color: 'var(--text-primary)' }}>工单详情</SheetTitle></SheetHeader>
 
             {selectedTicket && (
               <div className="mt-6 space-y-6">
                 {/* Ticket ID and Meta */}
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <Badge data-testid="admin-ticket-full-id" variant="outline" className="break-all font-mono text-xs text-[var(--text-tertiary)]">
-                      {selectedTicket.id}
+                    <Badge data-testid="admin-ticket-number" variant="outline" className="font-mono text-sm text-[var(--text-primary)]">
+                      {formatTicketNumber(selectedTicket.id)}
                     </Badge>
+                    <span data-testid="admin-ticket-full-id" className="break-all font-mono text-xs text-[var(--text-tertiary)]">{selectedTicket.id}</span>
                     <button
                       onClick={() => copyTicketId(selectedTicket.id)}
                       className="p-1 hover:bg-[var(--bg-tertiary)] rounded"

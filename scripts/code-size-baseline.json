@@ -12,7 +12,7 @@
   "apps/web/src/app/admin/settings/page.tsx": {"longLines":1},
   "apps/web/src/app/admin/skills/page.tsx": {"longLines":8},
   "apps/web/src/app/admin/skills/skills.browser.mjs": {"longLines":1},
-  "apps/web/src/app/admin/tickets/page.tsx": {"lines":728,"longLines":5},
+  "apps/web/src/app/admin/tickets/page.tsx": {"lines":727,"longLines":5},
   "apps/web/src/app/admin/transactions/page.tsx": {"lines":705,"longLines":1},
   "apps/web/src/app/admin/users/page.tsx": {"lines":846,"longLines":2},
   "apps/web/src/app/library/page.tsx": {"longLines":34},
