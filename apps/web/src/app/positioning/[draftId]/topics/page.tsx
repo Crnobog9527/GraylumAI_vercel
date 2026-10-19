@@ -34,6 +34,7 @@ import { stopWithRecord, type StopSignals } from '@/app/runtime/runtime-notices'
 import { finishedExecution } from '@/lib/finished-execution';
 import { isOrganizerPendingError, type PaygViewFields } from '@/lib/payg-wait';
 import { usePaygResume } from '@/lib/use-payg-resume';
+import { useRuntimeViewPolling } from '@/lib/runtime-view-poll';
 import { useTopicInput } from './topic-input';
 type PlanItem = {
   id: string;
@@ -145,10 +146,8 @@ export default function TopicWorkspacePage() {
   const workspace = trpc.opc.topicWorkspace.useQuery({ draftId },
     { enabled: Boolean(draftId && read.data && !read.data.conversationDeleted), refetchInterval: 30000 });
   const sessionId = read.data && !read.data.conversationDeleted && workspace.data?.bound ? workspace.data.sessionId : '';
-  const view = trpc.runtime.view.useQuery(
-    { sessionId },
-    { enabled: Boolean(sessionId), refetchInterval: 5000 },
-  );
+  const viewPolling = useRuntimeViewPolling();
+  const view = trpc.runtime.view.useQuery({ sessionId }, { enabled: Boolean(sessionId), ...viewPolling.options });
   const bind = trpc.opc.consentTopicWorkspace.useMutation();
   const turn = trpc.opc.topicTurn.useMutation();
   const execute = trpc.runtime.execute.useMutation();
@@ -162,6 +161,7 @@ export default function TopicWorkspacePage() {
   const topicDraft = trpc.opc.topicDraft.useQuery({ draftId }, { enabled: Boolean(draftId && sessionId) });
 
   const busy = working || turn.isPending || execute.isPending || bind.isPending || savePlan.isPending || handoff.isPending || saveDraft.isPending || adoptTopics.isPending || payg.busy;
+  useEffect(() => { viewPolling.busy.current = busy; }, [busy, viewPolling.busy]);
   const storageKey = sessionId ? 'opc-topic-operation:' + sessionId : '';
   const candidateKey = sessionId ? 'opc-topic-candidate:' + sessionId : '';
   useEffect(() => {

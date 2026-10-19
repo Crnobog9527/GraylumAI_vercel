@@ -40,6 +40,7 @@ import { GUIDE_HELD_NOTICE, isOpenTurn, runtimeTailNotices, runtimeTurnNotices, 
 import { finishedExecution } from '@/lib/finished-execution';
 import { isOrganizerPendingError } from '@/lib/payg-wait';
 import { usePaygResume } from '@/lib/use-payg-resume';
+import { useRuntimeViewPolling } from '@/lib/runtime-view-poll';
 import { useRuntimeStream } from './use-runtime-stream';
 import { LiveReplyText, PendingLiveReply, liveReplyText, liveScrollSignature, withResumeStop } from './runtime-live-reply';
 
@@ -104,7 +105,8 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  useEffect(()=>{setStoredModule(sessionId?localStorage.getItem('opc-runtime-skill:'+sessionId)??'':'');},[sessionId]);
  function updateInput(value:string){setInput(value);if(sessionId)localStorage.setItem('opc-runtime-input:'+sessionId,value);}
  const choices=trpc.runtime.choices.useQuery(sessionId?{sessionId}:undefined);
- const view=trpc.runtime.view.useQuery({sessionId},{enabled:Boolean(sessionId),refetchInterval:5000});
+ const viewPolling=useRuntimeViewPolling();
+ const view=trpc.runtime.view.useQuery({sessionId},{enabled:Boolean(sessionId),...viewPolling.options});
  const router=useRouter();
  // A deleted conversation (here, in another tab, or just before a reload) never stays open: start a new one.
  const erased=Boolean(view.error)&&classifyErasureError(view.error,'preview').type==='gone';
@@ -128,6 +130,9 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  });
  const [videoBusy,setVideoBusy]=useState(false),[,setVideoUiRevision]=useState(0);
  const busy=start.isPending||prepare.isPending||runner.streaming||videoBusy||guiding||payg.busy;
+ // A sent message whose execution is not in the view yet also keeps the view polling quickly.
+ const outgoingUnseen=Boolean(outgoing&&!(view.data?.executions as Array<{executionId:string}>|undefined)?.some(e=>e.executionId===outgoing.executionId));
+ useEffect(()=>{viewPolling.busy.current=busy||outgoingUnseen;},[busy,outgoingUnseen,viewPolling.busy]);
  const ordinary=choices.data?.models[0]?.id??'';
  const moduleSelection=requestedModule||storedModule;
  const chosenModule=choices.data?.skills.find(skill=>skill.moduleId===moduleSelection);
