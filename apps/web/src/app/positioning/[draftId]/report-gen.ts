@@ -47,7 +47,7 @@ const startRefusals: Record<string, string> = {
   REPORT_PAYG_REQUIRED: "报告生成暂时不可用，报告没有开始生成。请稍后再试。",
   REPORT_FACTS_TOO_LARGE: "确认的信息太长，暂时无法一次写成报告。",
   OPC_CAPTURE_PENDING: "右侧信息还在整理，请等整理完成后再生成。",
-  REPORT_BENCHMARKS_REQUIRED: "合格的对标账号还不到 3 个，报告没有开始生成。请回到对话里补充对标账号（换关键词或贴主页链接）后再生成。",
+  REPORT_BENCHMARKS_REQUIRED: "合格的对标账号还不到 3 个，报告没有开始生成。请回到对话里补充对标账号（换关键词或贴主页链接）；找过两轮仍不够时，可以在对话里选择用现有对标先生成。",
   REPORT_ALREADY_EXISTS: REPORT_ALREADY_EXISTS_NOTICE,
   REPORT_CREDITS: REPORT_CREDITS_NOTICE,
   REPORT_PRICE_CHANGED: "报告价格刚刚调整了，报告没有开始生成。请刷新页面看一下新的价格再生成。",

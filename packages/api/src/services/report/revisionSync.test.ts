@@ -56,6 +56,16 @@ it('does not expose internal database errors', async () => {
 });
 it('validates sizes and forbids a forged actor', () => {
   expect(revisionProposeInput.safeParse({ ...proposal, body: '😀'.repeat(12000) }).success).toBe(true);
+  // The strategy data block is not report text (REPORT-VISUAL): a body whose text fits is accepted with a long block, and the
+  // limit still applies to the text itself (staging 2026-10-19: adopting a review revision failed with a 500 on this).
+  const block = '```graylum-report-data\n' + JSON.stringify({ v: 1, field: 'summary', value: '数'.repeat(11000) }) + '\n```';
+  expect(revisionProposeInput.safeParse({ ...proposal, body: `${'😀'.repeat(5000)}\n\n${block}` }).success).toBe(true);
+  expect(revisionProposeInput.safeParse({ ...proposal, body: `${'😀'.repeat(12001)}\n\n${block}` }).success).toBe(false);
+  // The whole body is capped as well, like a saved report (120000): a huge block is refused, a large legal one accepted (the metric is the saved report's: UTF-16 units).
+  const huge = '```graylum-report-data\n' + JSON.stringify({ v: 1, field: 'summary', value: '数'.repeat(130000) }) + '\n```';
+  expect(revisionProposeInput.safeParse({ ...proposal, body: `修订稿\n\n${huge}` }).success).toBe(false);
+  const largest = '```graylum-report-data\n' + '数'.repeat(90000) + '\n```';
+  expect(revisionProposeInput.safeParse({ ...proposal, body: `${'😀'.repeat(12000)}\n\n${largest}` }).success).toBe(true);
   expect(revisionProposeInput.safeParse({ ...proposal, fields: { a: { who: '😀'.repeat(400) } } }).success).toBe(true);
   for (const change of [{ body: '😀'.repeat(12001) }, { actorId: randomUUID() }, { fields: { a: { who: 'x'.repeat(401) } } },
     { fields: { a: { who: '' } } }, { fields: { a: { who: 1 } } }]) {

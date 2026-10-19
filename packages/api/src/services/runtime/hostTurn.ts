@@ -16,6 +16,13 @@ export const RESEARCH_REFRESH_NOTE = 'The user pressed Refresh for this benchmar
 /** RT-6: fixed host text for the session's selection cards and benchmark table; never model-written. */
 export const RESEARCH_CARDS_NOTE = 'Host records of this session, newest last. A card with confirmationId null still waits for the ' +
   'user: do not search for it. Use ids only from here. benchmarks counts host-verified qualified accounts; numbers are host data.';
+/**
+ * BENCHMARK-SHORTFALL (Owner 2026-10-20, choice B): fixed host text for the shortfall choice; never model-written.
+ * rounds counts completed benchmark searches of this session; the host itself shows the card when it is due.
+ */
+export const RESEARCH_SHORTFALL_NOTE = 'card: the host\'s choice card for too few qualified benchmarks after two searches. choice ' +
+  'null: it waits for the user, recommend keeping on searching. "generate": the user chose to generate the report with the ' +
+  'current qualified benchmarks (frozen); the report will say the sample is short. "continue": keep searching.';
 const researchAccount = z.object({platform: z.enum(SOCIAL_PLATFORMS), account: z.string().min(1).max(200)}).strict();
 const researchCard = z.discriminatedUnion('kind', [
   z.object({kind: z.literal('keywords'), cardId: z.string().uuid(), confirmationId: z.string().uuid().nullable(),
@@ -32,6 +39,9 @@ export const researchContextSchema = z.object({
       qualified: z.boolean(), excluded: z.string().max(64).nullable(), followers: benchmarkNumber,
       medianViews: benchmarkNumber, engagementRate: benchmarkNumber, lastPublishedAt: z.string().max(40).nullable()}).strict()).max(12),
   }).strict(),
+  shortfall: z.object({note: z.literal(RESEARCH_SHORTFALL_NOTE), rounds: z.number().int().min(0).max(1000),
+    card: z.object({cardId: z.string().uuid(), choice: z.enum(['continue', 'generate']).nullable(),
+      qualifiedAtChoice: z.number().int().min(0).max(30).nullable()}).strict().nullable()}).strict().optional(),
 }).strict();
 // Values are per-turn data and never part of the stable instruction prefix.
 export const hostTurnContextSchema = z.object({

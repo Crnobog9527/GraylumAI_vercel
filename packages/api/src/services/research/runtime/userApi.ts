@@ -34,7 +34,7 @@ const confirmationResult = z.discriminatedUnion('kind', [
 ]);
 const knownErrors = new Set([
   'RESEARCH_SCOPE_DENIED', 'RESEARCH_CARD_INVALID', 'RESEARCH_CARD_ALREADY_CONFIRMED',
-  'RESEARCH_REFRESH_INVALID',
+  'RESEARCH_REFRESH_INVALID', 'RESEARCH_SHORTFALL_NOT_DUE',
 ]);
 async function rpc(db: Db | null, name: string, args: Record<string, unknown>) {
   if (!db) throw new TRPCError({ code: 'SERVICE_UNAVAILABLE', message: 'RESEARCH_UNAVAILABLE' });
@@ -147,4 +147,22 @@ const benchmark = z.object({
 export async function researchBenchmarks(db: Db | null, actor: string, sessionId: string) {
   const rows = parse(z.array(benchmark), await rpc(db, 'research_user_benchmarks', { a: actor, s: id.parse(sessionId) }));
   return { items: rows };
+}
+
+// BENCHMARK-SHORTFALL (0320, Owner 2026-10-20 choice B): the session's choice card and the user's one answer.
+const shortfallCard = z.object({
+  cardId: id, required: z.number().int(), offeredQualified: z.number().int(), offeredRounds: z.number().int(),
+  choice: z.enum(['continue', 'generate']).nullable(), confirmationId: id.nullable(),
+  chosenQualified: z.number().int().nullable(), chosenRounds: z.number().int().nullable(), chosenAt: z.string().nullable(),
+});
+export const shortfallChoiceInput = z.object({ cardId: id, choice: z.enum(['continue', 'generate']) }).strict();
+export async function researchShortfall(db: Db | null, actor: string, sessionId: string) {
+  return parse(z.object({ rounds: z.number().int(), qualified: z.number().int(), card: shortfallCard.nullable() }),
+    await rpc(db, 'research_user_shortfall', { a: actor, s: id.parse(sessionId) }));
+}
+export async function chooseShortfall(db: Db | null, actor: string, input: z.infer<typeof shortfallChoiceInput>) {
+  const value = shortfallChoiceInput.parse(input);
+  return parse(shortfallCard, await rpc(db, 'research_benchmark_shortfall_choose', {
+    a: actor, p_card: value.cardId, p_choice: value.choice,
+  }));
 }
