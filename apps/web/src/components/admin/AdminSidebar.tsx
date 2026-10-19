@@ -9,7 +9,7 @@ import { trpc } from '@/trpc/client';
 import {
   LayoutDashboard, Bot, Wand2, Package, Users,
   CreditCard, Settings, ChevronLeft, Shield, DollarSign,
-  Megaphone, Headphones, Activity, Stethoscope, BarChart3, Receipt, RotateCcw, KeyRound, Mail, BadgeCheck
+  Megaphone, Headphones, Activity, Stethoscope, BarChart3, Receipt, RotateCcw, KeyRound, Mail, BadgeCheck, ShieldAlert
 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 
@@ -29,6 +29,7 @@ const menuItems: MenuItem[] = [
   { name: '交易记录', icon: CreditCard, href: '/admin/transactions' },
   { name: '支付订单', icon: Receipt, href: '/admin/orders' },
   { name: '月付退款', icon: RotateCcw, href: '/admin/refunds' },
+  { name: '付款争议', icon: ShieldAlert, href: '/admin/refunds#payment-disputes' },
   { name: '付款提醒邮件', icon: Mail, href: '/admin/payment-notices' },
   { name: '创始会员', icon: BadgeCheck, href: '/admin/founders' },
   { name: '财务统计', icon: DollarSign, href: '/admin/finance' },
@@ -93,8 +94,9 @@ export default function AdminSidebar({
       <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
         {menuItems.map((item) => {
           const Icon = item.icon;
-          const isActive = pathname === item.href ||
-            (item.href !== '/admin' && pathname?.startsWith(item.href));
+          // 带 # 的入口只是页内定位，高亮留给所在页面的主入口
+          const isActive = !item.href.includes('#') && (pathname === item.href ||
+            (item.href !== '/admin' && pathname?.startsWith(item.href)));
 
           return (
             <Link key={item.href} href={item.href} onClick={onNavigate}>
