@@ -129,7 +129,7 @@ const START_ERROR: Record<string, string> = {
   REPORT_MEMBERSHIP_REQUIRED: '评审团仅限 Gold 会员使用，升级到 Gold 后可以使用。',
   FUSION_REVIEW_ACTIVE: '你还有一个评审正在进行，等它结束后再开新的。',
   FUSION_REVIEW_BREAKER: '评审最近多次没有完成，暂时停用了，请稍后再试或联系客服。',
-  FUSION_REVIEW_VERSION_BLOCKED: '这份报告连续 3 次评审没有完成，已暂停对它评审，请联系客服。',
+  FUSION_REVIEW_VERSION_BLOCKED: '暂时无法评审这份报告。可以修改报告后再试，或联系客服。',
   FUSION_REVIEW_STALE: '报告有更新，或者还没有生成定位报告。请刷新页面，生成报告后再试。',
   FUSION_REVIEW_CONFLICT: '没能开始评审，请刷新页面后再试。',
   FUSION_REVIEW_ESTIMATE_CHANGED: '评审团的价格刚刚有调整。请看一下新的积分数，再决定要不要开始。',
