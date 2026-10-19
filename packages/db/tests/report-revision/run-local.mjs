@@ -29,8 +29,10 @@ const sql=input=>docker(['exec','-i',name,'psql','-X','-qAt','-U','postgres','-d
 const fp=read('packages/db/tests/baseline/fingerprint.sql');
 const objectSql=fp.slice(0,fp.indexOf('-- FINAL'))+'SELECT jsonb_object_agg(k,d ORDER BY k) FROM grouped;';
 const snapshot=()=>JSON.parse(ok(sql(objectSql)));
-// 0223 (R14), 0294 (Fusion fixed price) and 0295 (report fixed price) are each re-applied twice after the full build.
-const migrations=['packages/db/migrations/0223_report_revision_sync.sql','packages/db/migrations/0294_fusion_fixed_price.sql','packages/db/migrations/0295_report_fixed_price.sql'];
+// 0223 (R14), 0294 (Fusion fixed price) and 0295 (report fixed price) are each re-applied twice after the full build;
+// 0319 patches 0294's settlement, so it is re-applied after it (a bare 0294 replay would put the old settlement back).
+const migrations=['packages/db/migrations/0223_report_revision_sync.sql','packages/db/migrations/0294_fusion_fixed_price.sql','packages/db/migrations/0295_report_fixed_price.sql',
+  'packages/db/migrations/0319_fusion_provider_refusal_verdict.sql'];
 const report={development,build:null,checks:[],failed:null};
 let client;
 try {

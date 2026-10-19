@@ -34,7 +34,7 @@ export function AdminPaymentDisputes() {
     onError: () => setMessage('冻结未撤回，请核对付款和拒付状态后重试。'),
   });
   return (
-    <section className="space-y-4 p-4 md:p-8" data-testid="payment-disputes">
+    <section id="payment-disputes" className="scroll-mt-4 space-y-4 p-4 md:p-8" data-testid="payment-disputes">
       <h2 className="text-xl font-bold">付款争议</h2>
       <p className="text-sm">收到拒付后会暂停相关权益和积分，并停止续费。结案不会自动解冻，请先在 Stripe 核对。</p>
       {message ? <p role="status">{message}</p> : null}

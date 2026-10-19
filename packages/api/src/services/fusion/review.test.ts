@@ -517,6 +517,9 @@ describe('review flow', () => {
     await t.runAll();
     expect((await t.flow.continue(String(db.review!.reviewId))).review).toMatchObject({ state: 'completed', outcome: { kind: 'no_change' } });
     expect(t.proposals).toEqual([]);
+    const { events, ended } = await t.flow.events(String(db.review!.reviewId));
+    expect(events.some(e => e.type === 'revision_ready_for_choice')).toBe(false);
+    expect(ended).toBe(true);
   });
 
   it('ends incomplete without a summary when no reviewer gave a usable opinion', async () => {
@@ -545,6 +548,53 @@ describe('review flow', () => {
     await t.flow.continue(String(db.review!.reviewId));
     expect(db.calls.map(c => c.verdict)).toEqual(['format_invalid', 'format_invalid', 'format_invalid']);
     expect(db.review).toMatchObject({ state: 'incomplete' });
+  });
+
+  it('a summary that changes no section ends as no change (refunded, 0294), never as a revision to choose and pay for', async () => {
+    const t = setup(call => call.phase === 'fusion_summary' ? JSON.stringify({ adjudication: [], body: original,
+      steps: [{ stepId: 's1', fields: [{ fieldId: 'goal', value: '旧目标', changed: false }] }], changeNotes: [] }) : opinion('major'));
+    await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
+    await t.runAll(); await t.runAll();
+    expect(db.calls.find(c => c.phase === 'fusion_summary')?.verdict).toBe('usable');
+    expect((await t.flow.continue(String(db.review!.reviewId))).review).toMatchObject({ state: 'completed', outcome: { kind: 'no_change' } });
+    expect(t.proposals).toEqual([]);
+    const { events, ended } = await t.flow.events(String(db.review!.reviewId));
+    expect(events.some(e => e.type === 'revision_ready_for_choice')).toBe(false);
+    expect(ended).toBe(true);
+  });
+
+  it('ends revision_failed on a cut-off summary (no closing JSON), and charges it nothing', async () => {
+    const t = setup(call => call.phase === 'fusion_summary' ? revision('新目标').slice(0, -40) : opinion('major'));
+    await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
+    await t.runAll(); await t.runAll();
+    expect(db.calls.find(c => c.phase === 'fusion_summary')?.verdict).toBe('revision_invalid');
+    expect((await t.flow.continue(String(db.review!.reviewId))).review).toMatchObject({ state: 'revision_failed' });
+    expect(t.proposals).toEqual([]);
+  });
+
+  it('REPORT-VISUAL: the summary never sees the strategy data block; a no-op note about it does not fail a good revision (staging 10-19)', async () => {
+    const block = '```graylum-report-data\n{"v":1,"field":"summary","value":"原数据"}\n```';
+    sourceBody.value = `${original}\n\n${block}`;
+    try {
+      // The model still edits a data block of its own and notes the last section, whose text it left as it was.
+      const t = setup(call => call.phase === 'fusion_summary' ? JSON.stringify({ ...JSON.parse(revision('新目标')),
+        body: '## 定位\n新目标\n## 结语\n原结语\n\n```graylum-report-data\n{"v":1,"field":"summary","value":"改过的数据"}\n```',
+        changeNotes: [...JSON.parse(revision('新目标')).changeNotes, { section: '结语', wordingOnly: true, note: '数据块同步修改', fields: [] }] })
+        : opinion('major'));
+      await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
+      await t.runAll(); await t.runAll();
+      const summary = JSON.parse(requests.find(r => r.phase === 'fusion_summary')!.input);
+      expect(summary.report).toBe(original);
+      expect(db.calls.find(c => c.phase === 'fusion_summary')?.verdict).toBe('usable');
+      expect((await t.flow.continue(String(db.review!.reviewId))).review).toMatchObject({ state: 'completed',
+        outcome: { kind: 'revised', awaitingChoice: true } });
+      // Only the section whose text changed is offered; the original data block goes back unchanged.
+      const detail = await t.flow.detail(String(db.review!.reviewId));
+      expect(detail.summary.sections.filter(s => s.changed).map(s => s.section)).toEqual(['定位']);
+      await t.flow.adopt({ reviewId: String(db.review!.reviewId), requestId: '00000000-0000-4000-8000-0000000000f2',
+        choices: [{ section: '定位', use: 'revised' }] });
+      expect(t.proposals[0]).toEqual(expect.objectContaining({ body: `## 定位\n新目标\n## 结语\n原结语\n\n${block}` }));
+    } finally { sourceBody.value = null; }
   });
 
   it('tells the summary model the exact length limit and the verbatim-copy rule the host check enforces (staging runs)', () => {
