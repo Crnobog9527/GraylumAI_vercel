@@ -45,12 +45,17 @@ try {
   fingerprint:development?undefined:snapshot});
  assert.equal(report.build.failed,null);
  const finalCatalog=snapshot();
- ok(sql(migration));
- assert.deepEqual(snapshot(),finalCatalog,'repeat 0268 preserves complete catalog');
+ // 0268 recreates research_benchmark_project; its later text-marker patch (0315) is replayed after it, as the tail.
+ const paged=read('packages/db/migrations/0315_research_benchmark_paged_posts.sql');
+ ok(sql(migration));ok(sql(paged));
+ assert.deepEqual(snapshot(),finalCatalog,'repeat 0268 (then its 0315 patch) preserves complete catalog');
  const interrupted=sql(migration.replace(/COMMIT;\s*$/,"DO $$ BEGIN RAISE EXCEPTION 'RT4B_TEST_ROLLBACK'; END $$; COMMIT;"));
  assert.notEqual(interrupted.status,0);assert.match(interrupted.stderr,/RT4B_TEST_ROLLBACK/);
  assert.deepEqual(snapshot(),finalCatalog,'failed 0268 leaves the catalog untouched');
  report.checks.push('0268 applied again on the full file-built catalog: unchanged; failure before COMMIT rolls back');
+ ok(sql(paged));
+ assert.deepEqual(snapshot(),finalCatalog,'repeat 0315 preserves complete catalog');
+ report.checks.push('0315 applied again on the full file-built catalog: unchanged');
  const require=createRequire(resolve(root,'packages/api/package.json'));
  const {Client}=require('pg');
  const address=ok(docker(['port',name,'5432/tcp']));assert.match(address,/^127\.0\.0\.1:\d+$/);

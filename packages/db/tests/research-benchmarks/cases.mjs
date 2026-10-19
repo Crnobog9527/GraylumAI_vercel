@@ -45,17 +45,28 @@ const post = (days,views,extra={}) => ({id:randomUUID(),publishedAt:new Date(Dat
 export async function runCases({db,Client,connectionString,report}) {
   const {accountMetrics,classifyAccount,qualifyFetchedAccount,suppliedWholeHistory} = await benchmarkCode();
   /** Supplier evidence → benchmark_fetch's own computation → the fetch cache, exactly as the tool does it. */
-  async function fetchAccount(f,e,account,{followers,posts,tamper,refresh,profileOp,deferFinish,complete=true}) {
+  async function fetchAccount(f,e,account,{followers,posts,tamper,refresh,profileOp,deferFinish,complete=true,pages,pageId}) {
     // As benchmark_fetch: claim and mark sent, then one subcall per kind under its stable operation id.
+    // As benchmark_fetch: a later page's repeat of an earlier page's post is dropped (the profile counts distinct posts).
+    if (pages) posts = pages.reduce((all,page)=>[...all,...page.filter(item=>!all.some(seen=>seen.id===item.id))],[]);
     const claim = await rpc(db,'research_account_fetch_claim',f.actor,f.session,e,'tiktok',account,refresh??null);
     assert.equal(claim.claimed,true);
     assert.equal(await rpc(db,'research_account_fetch_dispatch',f.actor,claim.fetchId,claim.attempt),true);
     // The profile's own post count decides "whole history", as in production (complete: it reports exactly these).
     const fields = {...(followers===null?{}:{followers}),postsCount:complete?posts.length:posts.length+50};
     const profile = profileOp ?? await operation(db,f,e,[fields],stableId(claim.fetchId,claim.attempt,'account_profile'));
-    const postOp = await operation(db,f,e,posts,stableId(claim.fetchId,claim.attempt,'account_posts'));
+    // `pages`: the posts list split over supplier pages, each its own subcall (0315; benchmark_fetch drops a later
+    // page's repeats of earlier posts). `pageId` overrides a later page's operation id.
+    const lists = pages ?? [posts];
+    const postOp = await operation(db,f,e,lists[0],stableId(claim.fetchId,claim.attempt,'account_posts'));
+    let items = lists[0].map((fields,i)=>({ref:`${postOp}#${i+1}`,fields,missing:[]}));
+    for (let n = 2; n <= lists.length; n++) {
+      const op = await operation(db,f,e,lists[n-1],pageId?.(claim,n) ?? stableId(claim.fetchId,claim.attempt,'account_posts',String(n)));
+      const known = new Set(items.map(item=>item.fields.id));
+      items = [...items,...lists[n-1].map((fields,i)=>({ref:`${op}#${i+1}`,fields,missing:[]})).filter(item=>!known.has(item.fields.id))];
+    }
+    posts = items.map(item=>item.fields);
     const now = new Date();
-    const items = posts.map((fields,i)=>({ref:`${postOp}#${i+1}`,fields,missing:[]}));
     const profileItem = {ref:profile+'#1',fields,missing:[]};
     const metrics = accountMetrics({profile:profileItem,posts:items,complete:suppliedWholeHistory(profileItem,items)},now);
     let evidence = {platform:'tiktok',account,metrics,fetchedAt:now.toISOString(),
@@ -96,6 +107,36 @@ export async function runCases({db,Client,connectionString,report}) {
     const reused = await rpc(db,'research_account_fetch_claim',f.actor,f.session,await answer(db,f),'tiktok','alpha',null);
     assert.equal(reused.claimed,false);
     assert.equal((await rows(db,'session_id=$1',[f.session])).length,5);
+  });
+
+  await check('0315 a posts list paged over several subcalls of the same fetch attempt verifies and qualifies', async () => {
+    const f = await seed(db), e = await answer(db,f);
+    const twenty = Array.from({length:20},(_,i)=>post(i+1,10000+i));
+    const get = async x => (await rows(db,'fetch_id=$1',[x.fetchId]))[0];
+    // Production shape (#1159): 10 posts on page 1, the next 10 on page 2.
+    const two = await fetchAccount(f,e,'twopages',{followers:50000,pages:[twenty.slice(0,10),twenty.slice(10)],complete:false});
+    const row = await get(two);
+    assert.deepEqual([row.excluded,row.qualified,row.posts_analyzed,Number(row.followers)],[null,true,20,50000]);
+    assert.equal(Number(row.median_views),two.evidence.metrics.medianViews.value);
+    assert.equal(row.operation_ids.length,3,'profile, page 1 and page 2 subcalls');
+    // Three pages (Xiaohongshu), with page 2 repeating a page-1 post the fetch dropped.
+    const three = await fetchAccount(f,e,'threepages',{followers:50000,complete:false,
+      pages:[twenty.slice(0,8),[twenty[0],...twenty.slice(8,15)],twenty.slice(15)]});
+    assert.deepEqual([(await get(three)).qualified,(await get(three)).posts_analyzed],[true,20]);
+    // A whole history spread over pages that overlap counts the distinct posts, as benchmark_fetch does.
+    const few = [post(1,9000),post(2,10000),post(3,11000)];
+    const wholePaged = await fetchAccount(f,e,'wholepaged',{followers:50000,complete:true,pages:[few.slice(0,2),[few[0],few[2]]]});
+    assert.equal(wholePaged.evidence.metrics.wholeHistory,true);
+    assert.deepEqual([(await get(wholePaged)).qualified,(await get(wholePaged)).whole_history,(await get(wholePaged)).posts_analyzed],[true,true,3]);
+    // A page that is not a subcall of this attempt (another attempt's id) is still refused.
+    const foreign = await fetchAccount(f,e,'foreignpage',{followers:50000,pages:[twenty.slice(0,10),twenty.slice(10)],complete:false,
+      pageId:(claim,n)=>stableId(claim.fetchId,randomUUID(),'account_posts',String(n))});
+    assert.deepEqual([(await get(foreign)).excluded,(await get(foreign)).qualified],['EVIDENCE_UNVERIFIED',false]);
+    // Page 4 is beyond the largest supported paging (1 + BENCHMARK_EXTRA_POST_PAGES).
+    const four = await fetchAccount(f,e,'fourpages',{followers:50000,complete:false,
+      pages:[twenty.slice(0,5),twenty.slice(5,10),twenty.slice(10,15),twenty.slice(15)]});
+    assert.deepEqual([(await get(four)).excluded,(await get(four)).qualified],['EVIDENCE_UNVERIFIED',false]);
+    assert.equal(await qualified(db,f),3);
   });
 
   await check('RT-4b fewer than 20 analyzed posts qualify only as the whole history (Owner 2026-10-16, A)', async () => {
