@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
-import { benchmarkReportFacts, confirmedReportFacts, completeReportCandidate, frozenReport, reportManifest, REPORT_FACT_BYTES } from './contract';
+import { benchmarkReportFacts, benchmarkShortfallNote, confirmedReportFacts, completeReportCandidate, frozenReport, reportManifest, REPORT_FACT_BYTES } from './contract';
 import { frozenPurposeBudget, PURPOSE_INPUT_CAPS, PURPOSE_OUTPUT_CAP } from '../runtime/purposeBudgets';
 import { runRuntime } from '../runtime/runner';
 import type { ArtifactSnapshot } from '../artifacts/public';
@@ -93,4 +93,19 @@ it('a Skill may declare a benchmark minimum for its report; the host raises it t
   expect(reportManifest.safeParse(base).success).toBe(true);
   expect(reportManifest.parse({ ...base, minQualifiedBenchmarks: 3 }).minQualifiedBenchmarks).toBe(3);
   for (const value of [0, 13, 2.5, '3']) expect(reportManifest.safeParse({ ...base, minQualifiedBenchmarks: value }).success).toBe(false);
+});
+
+it('BENCHMARK-SHORTFALL: the report is told the sample is short only with 1 to required-1 qualified accounts', () => {
+  const row = (account: string, qualified: boolean) => ({ platform: 'tiktok', account, qualified });
+  const table = (...rows: unknown[]) => JSON.stringify(rows);
+  expect(benchmarkShortfallNote(null, 3)).toBeNull();
+  expect(benchmarkShortfallNote(table(row('a', false)), 3)).toBeNull();
+  expect(benchmarkShortfallNote(table(row('a', true), row('b', true), row('c', true)), 3)).toBeNull();
+  const note = benchmarkShortfallNote(table(row('a', true), row('a', true), row('b', true), row('big', false)), 3)!;
+  expect(note).toContain('only 2 qualified benchmark account(s)');
+  expect(note).toContain('对标样本不足');
+  expect(note).toContain('limited reference value');
+  expect(note).toContain('look for more benchmarks later');
+  expect(note).not.toMatch(/credit|积分/);
+  expect(benchmarkShortfallNote(table(row('a', true)), 5)).toContain('asks for 5');
 });

@@ -2,6 +2,7 @@
 import { accountMetrics, suppliedWholeHistory, type EvidenceItem } from '../benchmark/metrics';
 import { classifyAccount, qualifyFetchedAccount } from '../benchmark/classify';
 import { authorizeBenchmarkFetch } from '../tools/authorize';
+import { shortfallNotice } from './shortfall';
 import { toolEnvelope } from '../tools/envelope';
 import type { ResearchToolArgs } from '../tools/schemas';
 import { BENCHMARK_EXTRA_POST_PAGES, BENCHMARK_ROUTE_KINDS, BENCHMARK_RULES } from '../vendors/config';
@@ -150,6 +151,9 @@ export async function benchmarkFetch(ctx: ResearchToolContext, args: ResearchToo
       throw error;
     }
   }
+  // Fetched rows change the qualified count: the host may now offer the shortfall choice (0318 decides).
+  const shortfall = rows.length ? await shortfallNotice(ctx) : undefined;
   return toolEnvelope({ status: stopReason && rows.length === 0 ? (stopBudget ? 'budget_exhausted' : 'unavailable')
-    : partial ? 'partial' : 'ok', reason: stopReason ?? (partial ? 'ACCOUNT_DATA_INCOMPLETE' : null), items: rows });
+    : partial ? 'partial' : 'ok', reason: stopReason ?? (partial ? 'ACCOUNT_DATA_INCOMPLETE' : null), items: rows,
+    ...(shortfall ? { shortfall } : {}) });
 }

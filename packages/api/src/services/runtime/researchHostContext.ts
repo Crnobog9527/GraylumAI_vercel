@@ -9,7 +9,7 @@ import type { SettingsRead } from './newWorkGate';
 import { logger } from '../../lib/logger';
 import { SOCIAL_PLATFORMS } from '../research/vendors/types';
 import { benchmarkReportFacts } from '../report/contract';
-import { HOST_TURN_MAX_BYTES, RESEARCH_CARDS_NOTE, researchContextSchema, type HostTurnContext } from './hostTurn';
+import { HOST_TURN_MAX_BYTES, RESEARCH_CARDS_NOTE, RESEARCH_SHORTFALL_NOTE, researchContextSchema, type HostTurnContext } from './hostTurn';
 
 type Research = NonNullable<HostTurnContext['research']>;
 /** The product rule (Master Plan 3.7, R11): a positioning report needs at least this many qualified benchmarks. */
@@ -24,6 +24,17 @@ const row = z.object({ platform: z.enum(SOCIAL_PLATFORMS), account: z.string(),
   category: z.enum(['head_reference', 'imitable', 'fast_rising']).nullable(), qualified: z.boolean(),
   excluded: z.string().nullable(), followers: z.number().nullable(), medianViews: z.number().nullable(),
   engagementRate: z.number().nullable(), lastPublishedAt: z.string().nullable() }).passthrough();
+
+const shortfallRead = z.object({ rounds: z.number().int().min(0), qualified: z.number().int().min(0),
+  card: z.object({ cardId: z.string().uuid(), choice: z.enum(['continue', 'generate']).nullable(),
+    chosenQualified: z.number().int().min(0).nullable(), chosenRounds: z.number().int().nullable() }).passthrough().nullable() }).passthrough();
+
+/** BENCHMARK-SHORTFALL (0318): the session's completed searches and its newest choice card, for the coach. */
+export function shortfallContext(value: z.infer<typeof shortfallRead>) {
+  const { rounds, card } = value;
+  return { note: RESEARCH_SHORTFALL_NOTE, rounds: Math.min(rounds, 1000),
+    card: card ? { cardId: card.cardId, choice: card.choice, qualifiedAtChoice: card.chosenQualified } : null };
+}
 
 async function read(admin: SupabaseClient, name: string, args: Record<string, unknown>): Promise<unknown> {
   const result = await admin.rpc(name, args);
@@ -55,8 +66,12 @@ export async function researchHostContext(admin: SupabaseClient, actorId: string
     const shown = [...rows.filter(r => r.qualified), ...rows.filter(r => !r.qualified)].slice(0, MAX_ROWS).map(r => ({
       platform: r.platform, account: r.account, category: r.category, qualified: r.qualified, excluded: r.excluded,
       followers: r.followers, medianViews: r.medianViews, engagementRate: r.engagementRate, lastPublishedAt: r.lastPublishedAt }));
+    // Before 0318 the function does not exist: the turn goes on without the shortfall block, as before.
+    const shortfall = await admin.rpc('research_user_shortfall', { a: actorId, s: sessionId }).then(r => r, () => null);
+    const parsed = !shortfall || shortfall.error ? null : shortfallRead.safeParse(shortfall.data);
     return researchContextSchema.parse({ note: RESEARCH_CARDS_NOTE, cards: out,
-      benchmarks: { required: POSITIONING_QUALIFIED_BENCHMARKS, qualified, rows: shown } });
+      benchmarks: { required: POSITIONING_QUALIFIED_BENCHMARKS, qualified, rows: shown },
+      ...(parsed?.success ? { shortfall: shortfallContext(parsed.data) } : {}) });
   } catch (error) {
     logger.warn('api', 'OPC research context unavailable', { error: error instanceof Error ? error.message : 'unknown' });
     return undefined;

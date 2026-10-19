@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { protectedProcedure, router } from '../trpc';
 import {
   confirmationInput, refreshInput, evidenceInput, confirmResearchCard, createResearchRefresh,
-  researchToolCharges, researchEvidence, researchCards, researchBenchmarks,
+  researchToolCharges, researchEvidence, researchCards, researchBenchmarks, researchShortfall, chooseShortfall, shortfallChoiceInput,
 } from '../services/research/runtime/userApi';
 
 export const researchRouter = router({
@@ -11,6 +11,10 @@ export const researchRouter = router({
     researchCards(ctx.supabaseAdmin, ctx.profileId, input.sessionId)),
   benchmarks: protectedProcedure.input(z.object({ sessionId: z.string().uuid() }).strict()).query(({ ctx, input }) =>
     researchBenchmarks(ctx.supabaseAdmin, ctx.profileId, input.sessionId)),
+  shortfall: protectedProcedure.input(z.object({ sessionId: z.string().uuid() }).strict()).query(({ ctx, input }) =>
+    researchShortfall(ctx.supabaseAdmin, ctx.profileId, input.sessionId)),
+  chooseShortfall: protectedProcedure.input(shortfallChoiceInput).mutation(({ ctx, input }) =>
+    chooseShortfall(ctx.supabaseAdmin, ctx.profileId, input)),
   confirmCard: protectedProcedure.input(confirmationInput).mutation(({ ctx, input }) =>
     confirmResearchCard(ctx.supabaseAdmin, ctx.profileId, input)),
   createRefresh: protectedProcedure.input(refreshInput).mutation(({ ctx, input }) =>

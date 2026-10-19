@@ -190,3 +190,66 @@ for (const width of [375, 1440]) {
     }
   }, 30000);
 }
+
+// BENCHMARK-SHORTFALL (0318, Owner 2026-10-20 choice B): after two searches with 1–2 qualified benchmarks the host's
+// choice card is shown; the user answers once, the answer is sent on, and the table says the report notes the short sample.
+const SHORTFALL_CARD = "55555555-5555-4555-8555-555555555555";
+for (const width of [375, 1440]) {
+  it(`answers the shortfall choice card once and says the report will note it at ${width}px`, async () => {
+    const page = await browser.newPage({ viewport: { width, height: 1000 } });
+    const errors: string[] = [];
+    const calls: Array<{ path: string; input: unknown }> = [];
+    let chosen: string | null = null;
+    page.on("pageerror", error => errors.push(error.message));
+    try {
+      await page.route("**/*", async route => {
+        const request = route.request();
+        const url = new URL(request.url());
+        if (url.pathname === "/") return route.fulfill({ contentType: "text/html", body: '<div id="root"></div>' });
+        const raw = request.method() === "POST" ? request.postData() : url.searchParams.get("input");
+        calls.push({ path: url.pathname, input: raw ? JSON.parse(raw) : null });
+        const card = { cardId: SHORTFALL_CARD, required: 3, offeredQualified: 2, offeredRounds: 2, choice: chosen,
+          confirmationId: chosen ? CONFIRMATION : null, chosenQualified: chosen ? 2 : null, chosenRounds: chosen ? 2 : null,
+          chosenAt: chosen ? "2026-10-20T08:00:00Z" : null };
+        let data: unknown = {};
+        if (url.pathname.endsWith("/research.cards")) data = { items: [] };
+        else if (url.pathname.endsWith("/research.benchmarks")) data = { items: [benchmark("sample_1"), benchmark("sample_2")] };
+        else if (url.pathname.endsWith("/research.shortfall")) data = { rounds: 2, qualified: 2, card };
+        else if (url.pathname.endsWith("/research.chooseShortfall")) {
+          chosen = (JSON.parse(raw!) as { choice: string }).choice;
+          data = { ...card, choice: chosen, confirmationId: CONFIRMATION, chosenQualified: 2, chosenRounds: 2,
+            chosenAt: "2026-10-20T08:00:00Z" };
+        }
+        await route.fulfill({ contentType: "application/json", body: JSON.stringify({ result: { data } }) });
+      });
+      await page.goto("http://research.test/");
+      await page.addStyleTag({ content: css });
+      await page.addScriptTag({ content: code });
+
+      const card = page.getByRole("region", { name: "对标不足时怎么办" });
+      await ui(card).toBeVisible({ timeout: 5000 });
+      await ui(card).toContainText("已经找了 2 轮，目前有 2 个可以照着学的对标账号");
+      // "Keep searching" is the recommended default; the other option names its limits, never a credit estimate.
+      await ui(card.getByRole("radio", { name: /继续找对标（推荐）/ })).toBeChecked();
+      await ui(card).toContainText("报告会注明对标样本不足");
+      expect(await card.innerText()).not.toContain("积分");
+      const table = page.getByRole("region", { name: "对标表" });
+      await ui(table).toContainText("生成定位报告需要至少 3 个可以照着学的对标账号，目前 2 个");
+      await card.getByRole("radio", { name: /用现有 2 个对标先生成报告/ }).check();
+      await card.getByRole("button", { name: "确认选择" }).click();
+      await ui(page.getByRole("button", { name: "确认选择" })).toHaveCount(0);
+      expect(calls.filter(call => call.path.endsWith("/research.chooseShortfall")).map(call => call.input))
+        .toEqual([{ cardId: SHORTFALL_CARD, choice: "generate" }]);
+      await ui.poll(() => page.evaluate(() => (window as unknown as { sent: string[] }).sent))
+        .toEqual(["我选择先用现有的 2 个对标账号生成报告"]);
+      await ui(page.getByRole("region", { name: "对标不足时怎么办" })).toContainText("用现有 2 个对标先生成报告");
+      await ui(table).toContainText("你已选择用现有 2 个对标先生成报告，报告里会注明对标样本不足");
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
+      if (process.env.RESEARCH_SESSION_SHOTS)
+        await page.screenshot({ path: `${process.env.RESEARCH_SESSION_SHOTS}/research-shortfall-${width}.png`, fullPage: true });
+      expect(errors).toEqual([]);
+    } finally {
+      await page.close();
+    }
+  }, 30000);
+}

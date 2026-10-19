@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { researchRuntimeTools } from './researchRuntimeTool';
 import { requestIdentity, ResearchPause, runSubcall, type SubcallContext } from '../research/runtime/subcall';
 import { socialRequest, stableResearchId, type ResearchToolContext } from '../research/runtime/toolContext';
+import { SHORTFALL_MESSAGE } from '../research/runtime/shortfall';
 import type { DiscoveryRecord, FetchClaim, RuntimeOperation, RuntimePlan, RuntimeResearchStore } from '../research/runtime/store';
 import type { ToolEnvelope } from '../research/tools/envelope';
 import { DISABLED_RESEARCH_TOOLS, researchToolsConfigSchema } from '../research/vendors/config';
@@ -96,6 +97,7 @@ function fixture(limit = 12) {
     }),
     refreshCreate: vi.fn<RuntimeResearchStore['refreshCreate']>().mockResolvedValue(refreshId),
     callCharge: vi.fn<RuntimeResearchStore['callCharge']>().mockResolvedValue('1.25'),
+    offerShortfall: vi.fn<RuntimeResearchStore['offerShortfall']>().mockResolvedValue(null),
   } satisfies RuntimeResearchStore;
   const dummySubcall: SubcallContext = {
     policies: [], billing: { runId: id, claim: vi.fn(), dispatch: vi.fn(), record: vi.fn() }, evidence,
@@ -549,6 +551,33 @@ describe('durable benchmark discovery and free follow-up', () => {
     f.store.cancelUnsentPlan.mockResolvedValue(undefined);
     await f.execute('benchmark_discover', { discoveryId });
     expect(subcall).not.toHaveBeenCalled();
+  });
+
+  it('BENCHMARK-SHORTFALL: a search round without new candidates, or a finished fetch, carries the host\'s open card', async () => {
+    const f = fixture();
+    f.setAuthors(7);
+    const open = { cardId: discoveryId, required: 3, offeredQualified: 2, offeredRounds: 2, choice: null, confirmationId: null };
+    f.store.offerShortfall.mockResolvedValueOnce(open);
+    const short = await f.execute('benchmark_discover', discoveryArgs);
+    expect(short).toMatchObject({ reason: 'NOT_ENOUGH_CANDIDATES',
+      shortfall: { cardId: discoveryId, qualified: 2, required: 3, rounds: 2, message: SHORTFALL_MESSAGE } });
+    expect(f.store.offerShortfall).toHaveBeenCalledWith(stableResearchId(id, 'benchmark-shortfall'));
+    expect(SHORTFALL_MESSAGE).not.toMatch(/\d+ credits?/);
+    // A fetch (next reply): the card is asked for again (SQL decides); an answered card, a refusal or a failure adds nothing.
+    const next = f.makeExecute();
+    f.store.offerShortfall.mockResolvedValueOnce(open);
+    expect(await next('benchmark_fetch', fetchArgs)).toMatchObject({ status: 'ok', shortfall: { cardId: discoveryId } });
+    f.store.offerShortfall.mockResolvedValueOnce({ ...open, choice: 'generate', confirmationId: id });
+    expect(await next('benchmark_fetch', fetchArgs)).not.toHaveProperty('shortfall');
+    f.store.offerShortfall.mockRejectedValueOnce(new Error('RESEARCH_STATE_UNAVAILABLE'));
+    expect(await next('benchmark_fetch', fetchArgs)).toMatchObject({ status: 'ok' });
+    expect(await next('benchmark_fetch', fetchArgs)).not.toHaveProperty('shortfall');
+  });
+
+  it('a discovery that shows a candidate card never asks for the shortfall card', async () => {
+    const f = fixture();
+    expect(await f.execute('benchmark_discover', discoveryArgs)).toMatchObject({ status: 'ok' });
+    expect(f.store.offerShortfall).not.toHaveBeenCalled();
   });
 
   it('withholds the initial selection card below eight qualified accounts', async () => {

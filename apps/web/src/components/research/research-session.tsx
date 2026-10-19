@@ -6,6 +6,7 @@ import { trpc } from "@/trpc/client";
 import { BenchmarkTable } from "./benchmark-table";
 import { CandidateCardView } from "./candidate-card";
 import { KeywordCardView } from "./keyword-card";
+import { shortfallChoiceInput, ShortfallCardView, type ShortfallCard, type ShortfallChoice } from "./shortfall-card";
 import type { ResearchCall } from "./research-model";
 import {
   isResearchEvent, REPORT_MIN_QUALIFIED, researchConfirmedInput, researchRefreshInput, toBenchmarkRows, toSessionCards, withResearchCall,
@@ -98,6 +99,7 @@ export function ResearchSessionBenchmarks({ sessionId, disabled = false, onRefre
     const timer = setTimeout(() => setLock("idle"), REFRESH_LOCK_MS);
     return () => clearTimeout(timer);
   }, [lock, disabled]);
+  const shortfall = trpc.research.shortfall.useQuery({ sessionId }, { staleTime: 30_000 });
   const { rows, fetchedAt } = toBenchmarkRows((table.data?.items ?? []) as StoredBenchmark[]);
   if (rows.length === 0) return table.error ? <p role="alert" className={styles.problem}>对标表没有读到，请刷新页面再试。</p> : null;
   const qualified = rows.filter(row => row.qualified).length;
@@ -116,9 +118,34 @@ export function ResearchSessionBenchmarks({ sessionId, disabled = false, onRefre
         turnSeen.current = false;
         setLock("sent");
       })}>
-      {qualified < REPORT_MIN_QUALIFIED && <p className={styles.hint}>
-        生成定位报告需要至少 {REPORT_MIN_QUALIFIED} 个可以照着学的对标账号，目前 {qualified} 个。可以换关键词再找，或直接贴对标账号的主页链接。</p>}
+      {qualified < REPORT_MIN_QUALIFIED && (qualified > 0 && shortfall.data?.card?.choice === "generate"
+        ? <p className={styles.hint}>你已选择用现有 {qualified} 个对标先生成报告，报告里会注明对标样本不足。</p>
+        : <p className={styles.hint}>
+          生成定位报告需要至少 {REPORT_MIN_QUALIFIED} 个可以照着学的对标账号，目前 {qualified} 个。可以换关键词再找，或直接贴对标账号的主页链接。</p>)}
     </BenchmarkTable>
+  );
+}
+
+/**
+ * The shortfall choice card (0318), once the host offered it. The choice is stored once; `onChosen` then lets the
+ * page tell the coach what the user picked.
+ */
+export function ResearchShortfallCard({ sessionId, disabled, onChosen }: {
+  sessionId: string;
+  disabled: boolean;
+  onChosen?: (choice: ShortfallChoice, qualified: number) => void;
+}) {
+  const utils = trpc.useUtils();
+  const shortfall = trpc.research.shortfall.useQuery({ sessionId }, { staleTime: 30_000 });
+  const choose = trpc.research.chooseShortfall.useMutation();
+  const card = shortfall.data?.card as ShortfallCard | null | undefined;
+  if (!card) return null;
+  return (
+    <ShortfallCardView card={card} disabled={disabled} onChoose={async choice => {
+      const saved = await choose.mutateAsync({ cardId: card.cardId, choice });
+      await utils.research.shortfall.invalidate({ sessionId });
+      onChosen?.(choice, saved.chosenQualified ?? card.offeredQualified);
+    }}/>
   );
 }
 
@@ -140,10 +167,13 @@ export function ResearchSessionPanel({ settledTurns, onSend, ...props }: Omit<Pa
     seen.current = settledTurns;
     void utils.research.cards.invalidate({ sessionId });
     void utils.research.benchmarks.invalidate({ sessionId });
+    void utils.research.shortfall.invalidate({ sessionId });
   }, [settledTurns, sessionId, utils]);
   return (
     <>
       <ResearchSessionCards {...props} onConfirmed={confirmation => void onSend(researchConfirmedInput(confirmation))}/>
+      <ResearchShortfallCard sessionId={sessionId} disabled={props.disabled}
+        onChosen={(choice, qualified) => void onSend(shortfallChoiceInput(choice, qualified))}/>
       <ResearchSessionBenchmarks sessionId={sessionId} disabled={props.disabled}
         onRefresh={async grant => void onSend(researchRefreshInput(grant.platform, grant.account), grant.refreshId)}/>
     </>

@@ -20,6 +20,11 @@ export interface CardPayload {
 export interface CardConfirmation {
   cardId: string; confirmationId: string; kind: 'keywords' | 'candidates'; items: unknown[];
 }
+/** 0318 `research_benchmark_shortfall_view`. */
+export interface ShortfallCard {
+  cardId: string; required: number; offeredQualified: number; offeredRounds: number;
+  choice: 'continue' | 'generate' | null; confirmationId: string | null;
+}
 export interface DiscoveryRecord {
   discoveryId: string; keywords: string[]; platforms: SocialPlatform[];
   cursor: Record<string, unknown>; state: 'running' | 'completed';
@@ -191,6 +196,16 @@ export function databaseRuntimeResearchStore(deps: {
       const card = await read<SelectionCard | null>('card', id);
       if (!card) throw new Error('RESEARCH_SCOPE_DENIED');
       return rpc<CardConfirmation>('research_card_confirm', { a, p_card: id, p: payload });
+    },
+    /**
+     * BENCHMARK-SHORTFALL (0318): the session's choice card, or null when it is not due (fewer than 2 completed
+     * searches, no qualified account yet, or already enough). Free; the host decides, the model only asks.
+     */
+    async offerShortfall(cardId: string): Promise<ShortfallCard | null> {
+      const { data, error } = await admin.rpc('research_benchmark_shortfall_offer', { a, s, e, p_card: cardId });
+      if (error && (error as { message?: string }).message === 'RESEARCH_SHORTFALL_NOT_DUE') return null;
+      check(error);
+      return data as ShortfallCard;
     },
     discoveryStart: (confirmationId: string, platforms: SocialPlatform[]) => rpc<DiscoveryRecord>('research_discovery_start', {
       a, s, e, p_confirmation: confirmationId, p_platforms: platforms,

@@ -1,8 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { HOST_TURN_MAX_BYTES, hostTurnContextSchema, RESEARCH_CARDS_NOTE, type HostTurnContext } from './hostTurn';
-import { researchHost, researchHostContext, withResearchContext } from './researchHostContext';
+import { HOST_TURN_MAX_BYTES, hostTurnContextSchema, RESEARCH_CARDS_NOTE, RESEARCH_SHORTFALL_NOTE, type HostTurnContext } from './hostTurn';
+import { researchHost, researchHostContext, shortfallContext, withResearchContext } from './researchHostContext';
 import { DEFAULT_RUNTIME_RATE_LIMITS } from './rateLimitSettings';
 import type { SettingsRead } from './newWorkGate';
 
@@ -20,8 +20,10 @@ const cards = [
 ];
 let rows: unknown[] = [];
 let failing: string | null = null;
+let shortfall: unknown = { rounds: 2, qualified: 2, card: null };
 const rpc = vi.fn(async (name: string, args: Record<string, unknown>) => {
   if (name === failing) return { data: null, error: { message: 'boom' } };
+  if (name === 'research_user_shortfall') return { data: shortfall, error: null };
   if (name === 'research_user_cards') return { data: cards, error: null };
   if (name === 'research_confirmation_read') return { data: { kind: 'candidates', discoveryId: uuid(99), items: [] }, error: null };
   if (name === 'research_benchmark_rows') return { data: { rows, hash: 'a'.repeat(64) }, error: null };
@@ -32,7 +34,7 @@ const settings = (researchEnabled?: boolean): Promise<SettingsRead> => Promise.r
   ...(researchEnabled === undefined ? {} : { researchEnabled }) });
 const base: HostTurnContext = { stepId: 'step-2', opening: false, checklist: [] };
 
-beforeEach(() => { failing = null; rows = []; rpc.mockClear(); });
+beforeEach(() => { failing = null; rows = []; shortfall = { rounds: 2, qualified: 2, card: null }; rpc.mockClear(); });
 
 describe('RT-6 research host context', () => {
   it('hands over the newest three cards with their confirmation ids, and counts host-qualified benchmarks', async () => {
@@ -43,7 +45,8 @@ describe('RT-6 research host context', () => {
       { kind: 'candidates', cardId: uuid(3), confirmationId: uuid(13), discoveryId: uuid(99),
         accounts: [{ platform: 'tiktok', account: 'homeideas' }] },
       { kind: 'candidates', cardId: uuid(4), confirmationId: null, discoveryId: null, accounts: [] },
-    ], benchmarks: { required: 3, qualified: 2, rows: expect.any(Array) } });
+    ], benchmarks: { required: 3, qualified: 2, rows: expect.any(Array) },
+    shortfall: { note: RESEARCH_SHORTFALL_NOTE, rounds: 2, card: null } });
     // Qualified first; numbers are copied from the host table, not computed here.
     expect(research!.benchmarks.rows.map((r: { account: string }) => r.account)).toEqual(['a', 'b', 'a', 'big']);
     expect(rpc).toHaveBeenCalledWith('research_confirmation_read', { a: actor, s: session, p_confirmation: uuid(13) });
@@ -62,6 +65,26 @@ describe('RT-6 research host context', () => {
     const on = await researchHost(base, admin, actor, session, settings(true));
     expect(on.research?.note).toBe(RESEARCH_CARDS_NOTE);
     expect(rpc).toHaveBeenCalledWith('research_user_cards', { a: actor, s: session });
+  });
+
+  it('BENCHMARK-SHORTFALL: hands over the completed searches and the newest choice card', async () => {
+    shortfall = { rounds: 3, qualified: 2, card: { cardId: uuid(7), required: 3, offeredQualified: 2, offeredRounds: 2,
+      choice: 'generate', confirmationId: uuid(8), chosenQualified: 2, chosenRounds: 2, chosenAt: '2026-10-20T00:00:00Z' } };
+    const research = await researchHostContext(admin, actor, session);
+    expect(research?.shortfall).toEqual({ note: RESEARCH_SHORTFALL_NOTE, rounds: 3,
+      card: { cardId: uuid(7), choice: 'generate', qualifiedAtChoice: 2 } });
+    expect(shortfallContext({ rounds: 1, qualified: 0, card: null })).toEqual({ note: RESEARCH_SHORTFALL_NOTE, rounds: 1, card: null });
+    expect(hostTurnContextSchema.parse(withResearchContext(base, research)).research).toEqual(research);
+  });
+
+  it('BENCHMARK-SHORTFALL: before 0318 (or on a read failure) the turn goes on without the shortfall block', async () => {
+    failing = 'research_user_shortfall';
+    const research = await researchHostContext(admin, actor, session);
+    expect(research?.benchmarks.required).toBe(3);
+    expect(research).not.toHaveProperty('shortfall');
+    shortfall = { rounds: 'x' };
+    failing = null;
+    expect(await researchHostContext(admin, actor, session)).not.toHaveProperty('shortfall');
   });
 
   it('a read failure leaves it out instead of failing the turn', async () => {
