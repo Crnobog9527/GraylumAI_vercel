@@ -39,6 +39,7 @@ import { publishMonitorRouter } from './routers/publishMonitor';
 import { adminStaleRoundsRouter } from './routers/adminStaleRounds';
 import { fusionSettingsRouter } from './routers/fusionSettings';
 import { fusionReviewRouter } from './routers/fusionReview';
+import { fusionCompareRouter } from './routers/fusionCompare';
 
 /**
  * 主路由器
@@ -60,6 +61,7 @@ export const appRouter = router({
   reportModel: reportModelRouter,
   fusionSettings: fusionSettingsRouter,
   fusionReview: fusionReviewRouter,
+  fusionCompare: fusionCompareRouter,
   socialMediaFlag: socialMediaFlagRouter,
   skillTranslations: skillTranslationsRouter,
   runtimeRateLimits: runtimeRateLimitsRouter,

@@ -4,7 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { DEFAULT_FUSION_SETTINGS } from './settings';
 
 const skill = vi.hoisted(() => ({ available: true, writes: 0, refuse: new Map<string, string>(),
-  keyReads: [] as Array<{ fresh: boolean }>, admitKeys: [] as unknown[] }));
+  keyReads: [] as Array<{ fresh: boolean }>, admitKeys: [] as unknown[], limits: new Map<string, number>() }));
 // ADMIN-SECRETS OR-1: the platform OpenRouter key is read once per listing or save and shared by every per-model check.
 vi.mock('../models/openRouterKey', () => ({
   readOpenRouterKey: async (_db: unknown, options?: { fresh?: boolean }) => { skill.keyReads.push({ fresh: options?.fresh === true }); return 'SYNTHETIC_KEY'; },
@@ -22,7 +22,7 @@ vi.mock('./models', async original => ({ ...(await original<typeof import('./mod
     skill.admitKeys.push(knownKey);
     const code = skill.refuse.get(`${row.id}:${phase}`);
     if (code) throw new Error(code);
-    return {};
+    return { outputLimit: skill.limits.get(`${row.id}:${phase}`) ?? _t };
   } }));
 vi.mock('../runtime/stagingPolicy', () => ({ parseStagingPolicy: () => ({ expiresAt: '2030-01-01T00:00:00Z' }) }));
 vi.mock('../runtime/stagingEnvironment', () => ({ stagingRuntimeWindow: () => id(9) }));
@@ -67,6 +67,14 @@ describe('Fusion key reads', () => {
 });
 
 describe('Fusion model choices', () => {
+  it('does not offer a model for compare when its own limit would shorten the answer (a save of it would be refused)', async () => {
+    skill.refuse = new Map(); skill.limits = new Map([[`${id(1)}:fusion_compare`, 1024]]);
+    const window = { callPolicies: models.map(model => ({ modelId: model.id })), expiresAt: '2030-01-01T00:00:00Z' };
+    const result = await fusionModelOptions(db, id(7), {}, window as never);
+    expect(result.models.find(model => model.id === id(1))).toMatchObject({ review: true, summary: true, compare: false });
+    expect(result.models.find(model => model.id === id(2))).toMatchObject({ compare: true });
+    skill.limits = new Map();
+  });
   it('lists the window\'s models with what each may do, by the same Fusion admission a save uses', async () => {
     skill.refuse = new Map([[`${id(2)}:fusion_summary`, 'FUSION_PAYG_REQUIRED'], [`${id(3)}:fusion_review`, 'FUSION_MODEL_SEARCH_DENIED'],
       [`${id(3)}:fusion_summary`, 'FUSION_MODEL_SEARCH_DENIED'], [`${id(4)}:fusion_review`, 'FUSION_MODEL_ADMISSION_REQUIRED'],
@@ -100,6 +108,12 @@ describe('Fusion compare save (FUSION-COMPARE §3.3)', () => {
     await expect(saveFusionSettings(db, id(7), compareOn)).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
     expect(skill.writes).toBe(1);
     skill.refuse = new Map();
+  });
+  it('refuses a model that would have to answer shorter than the shared limit, so no column ever differs from another', async () => {
+    skill.refuse = new Map(); skill.limits = new Map([[`${id(3)}:fusion_compare`, 2048]]); skill.writes = 0;
+    await expect(saveFusionSettings(db, id(7), compareOn)).rejects.toThrow('FUSION_COMPARE_OUTPUT_LIMIT');
+    expect(skill.writes).toBe(0);
+    skill.limits = new Map();
   });
   it('saves a disabled compare without admitting its models, but still refuses a built-in search model', async () => {
     skill.admitKeys = []; skill.writes = 0;
