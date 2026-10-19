@@ -57,10 +57,10 @@ export function EvidenceList({ entries, children }: { entries: EvidenceEntry[]; 
     return request ? [{ entry, request }] : [];
   });
   return (
-    <section aria-label="取数记录" className={styles.card}>
-      <p className={styles.head}>取数记录</p>
+    <section aria-label="搜索记录" className={styles.card}>
+      <p className={styles.head}>搜索记录</p>
       <p className={styles.hint}>AI 教练在对话里查过的公开数据都留在这里，方便核对来源。删除对话后，对应的记录会一起删除。</p>
-      {rows.length === 0 ? <p className={styles.hint}>还没有取数记录。</p> : (
+      {rows.length === 0 ? <p className={styles.hint}>还没有搜索记录。</p> : (
         <ul className={styles.evidenceList}>
           {rows.map(({ entry, request }) => {
             const state = STATE[entry.state];
@@ -73,7 +73,7 @@ export function EvidenceList({ entries, children }: { entries: EvidenceEntry[]; 
                 </div>
                 <p className={styles.callMeta}>
                   <span>{request.line}</span>
-                  <span>取数时间 {formatEvidenceTime(entry.fetchedAt)}</span>
+                  <span>查询时间 {formatEvidenceTime(entry.fetchedAt)}</span>
                   {entry.itemCount !== null && <span>{entry.itemCount} 条{entry.truncated ? "（已截取）" : ""}</span>}
                   <span>编号 {entry.evidenceId}</span>
                 </p>

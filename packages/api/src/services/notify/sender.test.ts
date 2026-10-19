@@ -5,6 +5,7 @@ import type { NoticeConfigResult } from './config';
 import type { NoticeMail, NoticeTransportResult } from './resend';
 import { PaymentNoticeError, sendPaymentNotice, type SendNoticeDeps } from './sender';
 import { noticeLayout, type PaymentNoticeTemplates } from './templates';
+import { PAYMENT_NOTICE_TEMPLATES } from './registry';
 
 const ID = '00000000-0000-4000-8000-000000000001';
 const USER = '00000000-0000-4000-8000-000000000002';
@@ -20,15 +21,16 @@ const config: NoticeConfigResult = { ok: true, config: {
 } };
 
 type Claim = { decision: string; attempt?: number; reason?: string };
-function harness(options: { email?: string | null; erasing?: boolean; claims?: Claim[]; attemptsAfterFail?: number } = {}) {
+function harness(options: { email?: string | null; erasing?: boolean; claims?: Claim[]; attemptsAfterFail?: number;
+  kind?: string; templateParams?: Record<string, string | number | boolean | null> } = {}) {
   const calls: Array<[string, Record<string, unknown>]> = [];
   const claims = [...(options.claims ?? [{ decision: 'send', attempt: 1 }])];
   const db = {
     rpc: async (fn: string, args: Record<string, unknown>) => {
       calls.push([fn, args]);
       if (fn === 'payment_notice_prepare') {
-        return { data: { id: ID, userId: USER, kind: 'wallet_founder_expiry', sourceRef: 'order-1', dueKey: '2027-03-01:-7d',
-          templateParams: { endDate: '2027-03-01' }, state: 'pending', attempts: 0,
+        return { data: { id: ID, userId: USER, kind: options.kind ?? 'wallet_founder_expiry', sourceRef: 'order-1', dueKey: '2027-03-01:-7d',
+          templateParams: options.templateParams ?? { endDate: '2027-03-01' }, state: 'pending', attempts: 0,
           email: options.email === undefined ? EMAIL : options.email, erasing: options.erasing ?? false }, error: null };
       }
       if (fn === 'payment_notice_claim') return { data: claims.shift() ?? { decision: 'done' }, error: null };
@@ -63,6 +65,18 @@ it('sends once with the notice id as idempotency key and records the provider id
   expect(h.of('payment_notice_claim')[0]!.p_digest).toMatch(/^[0-9a-f]{64}$/);
   expect(h.of('payment_notice_finish')).toEqual([{ p_id: ID, p_attempt: 1, p_outcome: 'sent',
     p_provider_message_id: 'msg_1', p_error_code: null }]);
+});
+
+it('allows an admin to resend an existing card renewal row with its retained template', async () => {
+  const h = harness({ kind: 'card_renewal_upcoming', templateParams: {
+    endDate: '2027-03-01T04:00:00+00:00', amount: '496.00', plan: 'gold', managed: true,
+  } });
+  const t = transport([{ kind: 'sent', providerMessageId: 'msg_legacy_card' }]);
+  expect(await sendPaymentNotice(h.db, ID, deps({ transport: t.fn, templates: PAYMENT_NOTICE_TEMPLATES, actor: ACTOR })))
+    .toEqual({ outcome: 'sent' });
+  expect(t.mails).toHaveLength(1);
+  expect(t.mails[0]!.text).toContain('Your annual subscription is due to renew');
+  expect(h.of('payment_notice_claim')[0]).toMatchObject({ p_id: ID, p_actor: ACTOR, p_template_version: 'pay-n2-v1' });
 });
 
 it('without a configured key nothing is sent and the row stays pending with the reason recorded', async () => {
@@ -196,4 +210,16 @@ it('logs codes only: no address, body or key', async () => {
     expect(line).not.toContain(BODY_CANARY);
     expect(line).not.toContain('re_fake_key');
   }
+});
+
+it('re-reads the recipient between uncertain attempts and goes manual if the email changed', async () => {
+  const options = { email: EMAIL, claims: [{ decision: 'send', attempt: 1 }, { decision: 'manual', reason: 'digest_mismatch' }] };
+  const h = harness(options);
+  const t = transport([{ kind: 'unknown', code: 'X' }]);
+  const result = await sendPaymentNotice(h.db, ID, deps({ transport: t.fn,
+    sleep: async () => { options.email = 'changed@example.test'; } }));
+  expect(result).toMatchObject({ outcome: 'manual', attention: 'PAYMENT_NOTICE_DIGEST_MISMATCH' });
+  expect(t.fn).toHaveBeenCalledTimes(1);
+  const claims = h.of('payment_notice_claim');
+  expect(claims[0]!.p_digest).not.toBe(claims[1]!.p_digest);
 });

@@ -26,11 +26,11 @@ export const RUNNING_LABELS: Record<WorkKind, string> = {
   library_read: '正在读资料…',
   my_posts: '正在读你最近的作品数据…',
   my_benchmarks: '正在看你的对标账号…',
-  research: '正在取最新数据…',
+  research: '正在查最新数据…',
 };
 
 export const STATE_LABELS: Record<Exclude<WorkState, 'running'>, string> = {
-  done: '完成', missing: '未取到', pending: '待核',
+  done: '完成', missing: '这次没查到', pending: '待核',
 };
 
 /** One research call from the stream (`research_call`) as a work row. */
@@ -73,4 +73,16 @@ export function workItemsOf(execution: unknown): WorkItem[] {
       detail: text(value.detail, 200), credits: text(value.credits, 40)});
   }
   return items;
+}
+
+/** Live rows fill the polling gap only while the saved execution is open. Closed history is authoritative. */
+export function streamedWorkItems(execution: unknown, live?: readonly WorkItem[]): WorkItem[] {
+  const saved = workItemsOf(execution);
+  if (!['prepared', 'running', 'interrupted'].includes((execution as {state?: string})?.state ?? '')) return saved;
+  const rows = new Map(saved.map(item => [item.id, item]));
+  for (const item of live ?? []) {
+    const prior = rows.get(item.id);
+    if (!prior || item.state !== 'running' || prior.state === 'running') rows.set(item.id, item);
+  }
+  return [...rows.values()].slice(0, 12);
 }

@@ -55,6 +55,12 @@ it('admin list passes the actor so the database checks the admin again', async (
   await expect(denied.caller.list()).rejects.toMatchObject({ code: 'FORBIDDEN' });
 });
 
+it('accepts and displays legacy card renewal rows returned by the admin list', async () => {
+  const legacy = { ...ITEM, kind: 'card_renewal_upcoming' };
+  const f = harness('admin', { payment_notice_admin_list: { data: [legacy], error: null } });
+  expect(await f.caller.list()).toEqual({ items: [legacy] });
+});
+
 it('resend refuses clearly when sending is not configured, without claiming the row', async () => {
   const f = harness('admin', {
     payment_notice_prepare: { data: { id: ID, userId: ACTOR, kind: 'wallet_founder_expiry', templateParams: {},

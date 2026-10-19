@@ -1,0 +1,113 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * Style sample M, direction H「产品主导」: a white page with faint neutral bands (#fafafa / #f4f4f5), no texture and no
+ * light effects; the product's own type and the light foundation (--gl-*, sample J's --j-* tokens); gold only for the
+ * recommended plan and key marks. On a wide screen with motion welcome, one real product window stays fixed on the
+ * right and the regions beside it ("lanes") leave room for it; everywhere else each region shows its own window in
+ * place. Product windows are never restyled inside: only their outer frame, size and place are set here.
+ */
+.root {
+  --j-canvas: #fff;
+  --m-band: #f4f4f5;
+  --m-soft: #fafafa;
+  --m-stage-w: clamp(420px, 34vw, 520px);
+  --m-edge: max(var(--j-gutter), calc((100vw - 1240px) / 2 + var(--j-gutter)));
+  --m-stage-top: 136px;
+}
+.root [data-band='tint'] { background: var(--m-band); box-shadow: none; }
+
+/* First screen */
+.hero { padding: 40px 0 64px; }
+.heroText { display: grid; gap: 18px; justify-items: start; }
+.heroTitle { margin: 0; font-size: clamp(40px, 5.6vw, 68px); font-weight: 600; line-height: 1.06; letter-spacing: -.04em; }
+.heroTitle span { display: block; }
+.promise { margin: 0; color: var(--j-body); font-size: clamp(18px, 1.6vw, 22px); line-height: 1.6; }
+.promise span { display: inline-block; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin-top: 6px; }
+.note { margin: 0; color: var(--k-secondary); font-size: 14px; }
+.flow { display: grid; gap: 12px; margin: 32px 0 0; }
+@media (min-width: 720px) { .flow { grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 1fr); align-items: stretch; } }
+.flowStep { display: grid; align-content: start; gap: 10px; padding: 16px 18px; border: 1px solid var(--j-line); border-radius: 16px; background: #fff; }
+.flowStep[data-result] { border-color: var(--j-gold); background: #fffaf0; }
+.flowTitle { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--j-ink); font-size: 14px; font-weight: 600; }
+.flowTitle svg { color: var(--j-gold-text); }
+.flowTitle img { width: 18px; height: 18px; border-radius: 4px; }
+.bubble { margin: 0; padding: 10px 14px; border-radius: 16px 16px 4px 16px; background: var(--m-band); font-size: 15px; line-height: 1.6; }
+.does { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.does li { display: flex; align-items: flex-start; gap: 8px; font-size: 15px; line-height: 1.5; }
+.does svg { flex: none; margin-top: 3px; color: #1a7f45; }
+.result { margin: 0; font-size: 17px; font-weight: 600; line-height: 1.5; }
+
+/* A region's head: the result as the heading, the region's name above it, what you get under it */
+.head { display: grid; gap: 14px; }
+.headline {
+  display: grid; gap: 10px; margin: 0; font-size: clamp(30px, 3.4vw, 46px); font-weight: 600; line-height: 1.14; letter-spacing: -.035em;
+  text-wrap: balance;
+}
+.kicker { color: var(--k-secondary); font-size: 15px; font-weight: 600; letter-spacing: 0; }
+.lede { margin: 0; max-width: 40em; color: var(--j-body); font-size: clamp(17px, 1.4vw, 19px); line-height: 1.7; }
+.gets { display: grid; gap: 8px; margin: 4px 0 0; padding: 0; list-style: none; }
+.gets li { display: flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 500; }
+.gets svg { flex: none; color: #1a7f45; }
+
+/* Each region's own window, in place (phones, narrower screens, reduced motion) */
+.shot { min-width: 0; margin-top: 28px; }
+.hero .shot figure { margin: 0 auto; padding: 0; }
+.hero .shot figure::before, .stageWindow figure::before { display: none; }
+/* The positioning conversation keeps its first messages; the rest runs off under a soft fade on the outer frame. */
+.shot[data-fade], .stageWindow[data-scene-shown='ask'] {
+  -webkit-mask-image: linear-gradient(#000 78%, transparent); mask-image: linear-gradient(#000 78%, transparent);
+}
+
+.afterCompare { padding-bottom: 8px; }
+
+/* Price: the usual ways' cost, then the plan cards with Gold first and "先聊后买" under them */
+.plans { width: 100%; max-width: 1240px; margin: 0 auto; padding: 0 var(--j-gutter) 88px; }
+.plans [data-plan] { box-shadow: none; }
+.plans [data-recommended] { order: -1; border-width: 2px; background: #fffaf0; box-shadow: 0 18px 40px -28px rgba(138, 90, 0, .4); }
+
+/* The fixed product window: only on a wide screen with motion welcome */
+.stage { display: none; }
+.stageMarks { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.stageMarks li {
+  display: inline-flex; align-items: center; gap: 8px; padding: 3px 12px 3px 3px; border: 1px solid var(--j-line); border-radius: 999px;
+  background: #fff; color: var(--k-secondary); font-size: 13px; font-weight: 500; transition: color .3s, border-color .3s;
+}
+.stageMarks span {
+  display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--m-band); color: var(--j-ink);
+  font-size: 12px; font-weight: 600;
+}
+.stageMarks li[data-on] { border-color: var(--j-ink); color: var(--j-ink); }
+.stageMarks li[data-on] span { background: var(--j-gold); }
+.stageWindow { min-height: 0; overflow: hidden; }
+/* As tall as the window it holds, so the fade sits on the window's foot. */
+.stageWindow[data-scene-shown='ask'] { align-self: start; }
+.stageWindow > * { max-height: 100%; }
+.stageWindow figure { width: 100%; max-width: none; margin: 0; padding: 0; }
+.reportShot { overflow: hidden; border: 1px solid var(--j-line); border-radius: 18px; background: #fff; box-shadow: var(--j-shadow-lift); }
+
+@media (min-width: 1180px) and (prefers-reduced-motion: no-preference) {
+  .stage {
+    position: fixed; z-index: 20; top: var(--m-stage-top); right: var(--m-edge); bottom: 24px; display: grid; grid-template-rows: auto minmax(0, 1fr);
+    gap: 12px; width: var(--m-stage-w); transition: opacity .35s ease-out, translate .35s ease-out;
+  }
+  .stage[data-off] { opacity: 0; translate: 0 16px; visibility: hidden; transition: opacity .3s, translate .3s, visibility 0s .3s; }
+  .stageWindow { animation: windowIn .45s var(--j-ease) both; }
+  .shot { display: none; }
+  /* A lane: the region keeps the right side free for the fixed window. */
+  .lane > section {
+    padding-left: calc(var(--m-edge) - var(--j-gutter));
+    padding-right: calc(var(--m-edge) - var(--j-gutter) + var(--m-stage-w) + 56px);
+  }
+  .lane > section[data-band] { padding-left: calc(var(--m-edge) - var(--j-gutter) - 20px); }
+  .hero { padding-top: 56px; min-height: calc(100svh - 100px); }
+  /* By the price, the plan cards stand where the window was. */
+  .price {
+    display: grid; grid-template-columns: minmax(0, 1fr) var(--m-stage-w); gap: 0 calc(56px - var(--j-gutter));
+    padding: 0 var(--m-edge) 0 calc(var(--m-edge) - var(--j-gutter));
+  }
+  .price > section > div { padding-right: 0; }
+  .plans { align-self: start; padding: 112px 0 88px; }
+  .plans div:has(> [data-plan]) { grid-auto-flow: row; }
+}
+@keyframes windowIn { from { opacity: 0; translate: 0 10px; } to { opacity: 1; translate: 0 0; } }

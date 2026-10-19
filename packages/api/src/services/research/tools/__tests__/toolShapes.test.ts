@@ -1,10 +1,10 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from 'vitest';
-import { DISABLED_RESEARCH_TOOLS } from '../../vendors/config';
+import { BENCHMARK_EXTRA_POST_PAGES, DISABLED_RESEARCH_TOOLS } from '../../vendors/config';
 import { statusForOutcome, toolEnvelope, TOOL_RESULT_MAX_BYTES } from '../envelope';
 import {
-  admitSubcalls, GENERAL_RESEARCH_TOOLS, POSITIONING_RESEARCH_TOOLS, RESEARCH_TOOL_DESCRIPTIONS, RESEARCH_TOOL_NAMES,
-  researchToolArgs, subcallNeed,
+  admitSubcalls, benchmarkAccountSubcalls, GENERAL_RESEARCH_TOOLS, POSITIONING_RESEARCH_TOOLS, RESEARCH_TOOL_DESCRIPTIONS,
+  RESEARCH_TOOL_NAMES, researchToolArgs, subcallNeed,
 } from '../schemas';
 import { admitVendorCall, VENDOR_RATE_LIMITS } from '../vendorRateLimit';
 
@@ -62,6 +62,19 @@ describe('round subcall budget', () => {
     expect(subcallNeed('social_account', researchToolArgs.social_account.parse({ platform: 'x', account: 'a' }), config).subcalls).toBe(3);
     expect(subcallNeed('benchmark_discover', { discoveryId: id }, config)).toEqual({ mode: 'up_to', subcalls: 25 });
     expect(subcallNeed('propose_keywords', { keywords: ['a', 'b', 'c'] }, config).subcalls).toBe(0);
+  });
+
+  it('gives a benchmark account its route set plus the extra post pages of its platform', () => {
+    const fetch = (accounts: Array<{ platform: string; account: string }>) => subcallNeed('benchmark_fetch',
+      researchToolArgs.benchmark_fetch.parse({ accounts, source: { kind: 'candidate', confirmationId: id } }), config).subcalls;
+    expect(fetch([{ platform: 'tiktok', account: 'alice' }])).toBe(3);
+    expect(fetch([{ platform: 'xiaohongshu', account: '0123456789abcdef01234567' }])).toBe(4);
+    expect(fetch([{ platform: 'xiaohongshu', account: '0123456789abcdef01234567' }, { platform: 'tiktok', account: 'alice' }])).toBe(7);
+    expect(BENCHMARK_EXTRA_POST_PAGES).toMatchObject({ tiktok: 1, douyin: 1 });
+    expect(benchmarkAccountSubcalls('tiktok')).toBe(3); // profile + up to two post pages
+    expect(benchmarkAccountSubcalls('douyin')).toBe(3);
+    expect(fetch([{ platform: 'tiktok', account: 'alice' }, { platform: 'douyin', account: 'MS4wLjABAAAA' + 'a'.repeat(40) }]))
+      .toBe(6);
   });
 
   it('rejects a general lookup that does not fit and caps benchmark tools', () => {

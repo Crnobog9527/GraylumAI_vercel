@@ -55,7 +55,10 @@ export async function saveFusionSettings(db: SupabaseClient, actorId: string, va
         }
         // Compare: every allowed model must pass, or users would be offered a choice that can never run.
         if (settings.compare.enabled && settings.compare.allowedModelIds.includes(row.id)) {
-          await admitFusionModel(db, window, row, 'fusion_compare', settings.compare.answerOutputTokens, deadline, env, key ?? null);
+          const admitted = await admitFusionModel(db, window, row, 'fusion_compare', settings.compare.answerOutputTokens, deadline, env, key ?? null);
+          // Every column of a compare shares one answer limit. A model that would have to answer shorter (its own limit is
+          // lower) could never run as configured, so it cannot be offered.
+          if (admitted.outputLimit !== settings.compare.answerOutputTokens) throw new Error('FUSION_COMPARE_OUTPUT_LIMIT');
         }
       }
     }
@@ -105,7 +108,11 @@ export async function fusionModelOptions(db: SupabaseClient, actorId: string, en
   // Read-only listing: one read (the 60 s cache is fine for a display) shared by every per-model check.
   const key = await readOpenRouterKey(db).catch(() => null);
   const admits = async (row: FusionModelRow, phase: FusionPhase, tokens: number) => {
-    try { await admitFusionModel(db, window, row, phase, tokens, deadline, env, key ?? null); return true; }
+    try {
+      const admitted = await admitFusionModel(db, window, row, phase, tokens, deadline, env, key ?? null);
+      // Compare columns share one answer limit: a model clamped below it cannot be saved as allowed, so it is not offered.
+      return phase !== 'fusion_compare' || admitted.outputLimit === tokens;
+    }
     catch (error) {
       if (NOT_ELIGIBLE.has(error instanceof Error ? error.message : '')) return false;
       throw new Error('FUSION_SETTINGS_UNAVAILABLE');

@@ -47,9 +47,9 @@ describe('style sample E', () => {
     expect(html).toContain('id="how-it-works"');
   });
 
-  it('hides blocks whose capability is off', () => {
-    const { html } = render({ ...ALL_ON, publish: false });
-    expect(html).not.toContain('看复盘');
-    expect(html).not.toContain('TikTok');
+  it('shows every capability\'s blocks: no capability is a switch (Owner 2026-10-17)', () => {
+    const { html } = render(ALL_ON);
+    expect(html).toContain('看复盘');
+    expect(html).toContain('TikTok');
   });
 });

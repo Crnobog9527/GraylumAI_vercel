@@ -68,6 +68,23 @@ export function groundedCardResult(value: unknown, sources: CardSources): string
     message, recommendationReason: reason});
   return card.success ? JSON.stringify({card: 'question', ...card.data}) : INVALID_CARD_RESULT;
 }
+/** A guarded card refused ONLY for its quotations is never shown as a card, and its tool contract
+ * forbids separate prose. Rather than ending a paid turn on the invalid-format notice, the host renders
+ * the same arguments as plain prose (every reason labelled as a hypothesis, no recommendation) for the
+ * user to answer freely. Every other refusal (a declared no-card intent, a bad card shape, reasons that
+ * break the comparison/neutral rules) keeps the notice: the check below is groundedCardResult with the
+ * evidence requirement alone satisfied by the card's own quotations. */
+export function groundedCardFallback(arguments_: unknown): string | null {
+  let value: unknown;
+  try { value = typeof arguments_ === 'string' ? JSON.parse(arguments_) : null; } catch { return null; }
+  const parsed = groundedCardParameters.safeParse(value);
+  if (!parsed.success) return null;
+  const v = parsed.data;
+  if (groundedCardResult(v, {current: v.requestQuote, user: v.basisQuotes}) === INVALID_CARD_RESULT) return null;
+  const options = v.options.map((option, index) => `${index + 1}. ${option.text}` +
+    (option.reason?.trim() ? `\n推测，待你确认：${option.reason.trim()}` : '')).join('\n\n');
+  return `${v.question.trim()}\n\n${options}\n\n可以直接回复你的选择，或用自己的话补充。`;
+}
 export function groundedCardTool(sources: () => CardSources): RuntimeTool {
   return {name: ASK_QUESTION_TOOL, parameters: groundedCardParameters,
     description: 'Show a choice card ONLY for a grounded comparison of actual user-supplied alternatives or plans '+

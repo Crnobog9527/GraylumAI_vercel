@@ -108,6 +108,9 @@ export async function afterRepair({db,report}) {
  assert.equal((await items(db,provenance))[provenance.execution],undefined,'revoked reference hides historical facts');
  report.checks.push('GREEN: ordinary revisions preserve facts; source replay remains version-strict; unreadable/revoked sources hide rows');
 
+ const workDef=(await db.query("SELECT pg_get_functiondef('public.runtime_work_items(uuid,uuid)'::regprocedure) d")).rows[0].d;
+ assert.ok(workDef.includes('B2 own-post work projection')&&workDef.includes('revision-stable library work rows'),'repair patches the current work projection and keeps my_posts rows');
+
  const greenPlans=await queryPlans(db,plans);
  report.explainAfter=greenPlans;
  assert.ok(greenPlans.every(hasIndexes),'complete initial and post-lock queries use all three trigram indexes');

@@ -14,7 +14,7 @@ function fixture(counts: Array<number | null> = [40, 3, 2], route: unknown = nul
     { data: memberships, error: null },
     { data: counts.some(n => n === null) ? null : counts.flatMap((n, i) =>
       Array.from({ length: n! }, () => ({ qualification_state: ['sold', 'reserved', 'review'][i] }))), error: null }];
-  if (memberships.length) results.push({ data: subscriptions, error: null });
+  if (memberships.length) results.push({ data: [], error: null }, { data: subscriptions, error: null });
   results.push({ data: { value: { version: 'terms-2026-10' } }, error: null }, { data: [{ id: 'plan-gold' }], error: null },
     { data: goldOrders, error: null });
   const queries: Array<{ eq: ReturnType<typeof vi.fn>; not: ReturnType<typeof vi.fn>; or: ReturnType<typeof vi.fn>; gt: ReturnType<typeof vi.fn> }> = [];
@@ -82,7 +82,7 @@ describe('method membership read projection', () => {
     const result = await readMethodMembership(f.db, 'actor', 0, staging);
     expect(result.memberships.map(m => [m.id, m.auto_renew, m.cancel_at_period_end]))
       .toEqual([['o1', false, true], ['o2', true, false]]);
-    expect(f.queries[3]?.eq).toHaveBeenCalledWith('user_id', 'actor');
+    expect(f.queries[4]?.eq).toHaveBeenCalledWith('user_id', 'actor');
   });
   it('returns a still-renewing card subscription in its 24-hour renewal grace, marked inGrace (same rule as entitlements)', async () => {
     const now = Date.parse('2026-10-14T12:00:00.000Z');

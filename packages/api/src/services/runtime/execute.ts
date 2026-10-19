@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {executionTools} from './executionTools';
 import {researchExecution,responseAfterResearch} from './researchExecution';
+import {runtimeCallGate} from './callGate';
 import {billingClaimNotice,claimNoticeFields} from './claimNotice';
 import {stoppedCompletion} from './stoppedCompletion';
 import {NativeSession} from './nativeSession';
@@ -23,7 +24,7 @@ import {recoverOpenRouterHistory,latestHistoryTurn,assertLatestHistoryRetained} 
 import {projectOpenRouterItemsForSizing} from './openRouterHistory';
 import {AGENT_TURN_REQUEST_FORMAT,validReasoningFormat,
  PLAIN_TEXT_STREAM,streamsPrimary,historyToolNames,openRouterRequestBody} from './providerRequest';
-import {cardSources, rejectSeparateCardProse} from './groundedCard';
+import {cardSources, groundedCardFallback, rejectSeparateCardProse} from './groundedCard';
 import {agentTurnResult} from './agentTurnResult';
 import {questionMessageFromArguments,QUESTION_CONTRACT,READ_HISTORY_TOOL} from './agentTools';
 import {ASK_QUESTION_TOOL,INVALID_REPLY_NOTICE} from '../../shared/agentTurn';
@@ -102,17 +103,19 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   if(!policy)throw new Error('RUNTIME_MODEL_DENIED');
   const session=new PostgresSession(ownerDatabase,{actorId:await options.actor(),sessionId:execution.sessionId,executionId});
   const nativeSession=native&&!context.reportGeneration?new NativeSession(session,Boolean(context.mentorText)):undefined;
-  let transportNotStarted=false,providerRejected=false;
-  let claimNotice:string|undefined;
-  let reportFailure:'REPORT_MEMBERSHIP_REQUIRED'|'REPORT_ENTITLEMENTS_UNAVAILABLE'|'REPORT_SOURCE_CONFLICT'|undefined;
-  let terminalReplyFailure=false;
-  let gateChecked=resumedGate,moderationBlocked=false;
-  let waitPoint:{epoch:number;sequence:number;requestHash:string;phase:string;state:PaygWait['state']}|undefined;
-  let gateRejection:GateRejection|undefined;
+  let transportNotStarted=false,providerRejected=false,terminalReplyFailure=false;
+  let claimNotice:string|undefined,reportFailure:'REPORT_MEMBERSHIP_REQUIRED'|'REPORT_ENTITLEMENTS_UNAVAILABLE'|'REPORT_SOURCE_CONFLICT'|undefined;
+  let gateChecked=resumedGate,moderationBlocked=false,gateRejection:GateRejection|undefined;
+  let gatePassed=execution.gatePassed===true||execution.state==='waiting_credits';
+  let waitPoint:{epoch:number;sequence:number;requestHash:string;phase:string;state:PaygWait['state'];gatePassed:boolean}|undefined;
+  const checkCallGate=runtimeCallGate({call:options.callGate,actor:options.actor,version:isPayg?'bill2.v2':'bill2.v1',
+   onRejected:reason=>{gateRejection??=reason;},enter:()=>budget.timing?.enter('rateLimit')});
   const research=researchExecution({research:context.research,tools:context.tools,execution,executionId,actorId:await options.actor(),
    database:options.database,emit:event=>progress(event),onClosed:()=>{accountClosed=true;},
-   onPause:(point,state)=>{if(isPayg)waitPoint={epoch:execution.epoch!,...point,state};},
-   canSend:()=>{try{budget.assertCanStart(5000);return true;}catch{return false;}}});
+   onPause:(point,state)=>{if(isPayg)waitPoint={epoch:execution.epoch!,...point,state,gatePassed:state==='waiting_credits'};},
+   onSubcallSettled:()=>{gatePassed=false;},
+   canSend:()=>{try{budget.assertCanStart(5000);return true;}catch{return false;}},
+   callGate:async()=>{await checkCallGate(!gateChecked,false);gatePassed=true;gateChecked=false;}});
   const checkAgentReply=terminalReplyGuard(agentTurn,context.tools.includes(ASK_QUESTION_TOOL),()=>{terminalReplyFailure=true;},
    Boolean(context.skillFile),Boolean(context.historyRead),research?.tools.map(tool=>tool.name));
   let preflightFailure:string|undefined,transportFailureCode:string|undefined;
@@ -140,7 +143,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     assertRuntimeRequestCapacity(request,Math.min(selectedPolicy.inputLimit,configuredInput??Infinity));
      const requestHash=hash(request);
      const pause=(state:PaygWait['state']):never=>{
-      waitPoint={epoch:execution.epoch!,sequence,requestHash,phase,state};
+      waitPoint={epoch:execution.epoch!,sequence,requestHash,phase,state,gatePassed};
       throw new Error(state==='waiting_credits'?'RUNTIME_WAITING_CREDITS':'RUNTIME_WAITING_RESUME');
      };
      let {sequence,existing}=await responseAfterResearch(seq=>ownerRpc<{callId:string;state:string;rawBody:string|null;retryable?:boolean}|null>(
@@ -165,16 +168,11 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
        automaticRetry:false,hiddenTools:false,lookupSupported:selectedPolicy.lookupSupported,
        ...callBillingUnit(execution.billing.rules,selectedPolicy)};
       if(isPayg)call=runtimePaygCall(request,phase,selectedPolicy,execution.billing.rules,execution.epoch!,native).call;
-      // Every new claim path must pass this once-per-round gate before BILL2.
+      // Count one actual call before each new BILL2 claim; maxCalls remains only a ceiling.
       if(!gateChecked){
-       const leaveRateLimit=budget.timing?.enter('rateLimit');
-       try{
-        const verdict=await options.callGate(await options.actor(),isPayg?execution.remainingCalls!:execution.billing.limits.maxCalls,
-          isPayg?'bill2.v2':'bill2.v1');
-        if(!verdict.ok){gateRejection=verdict.reason;throw new Error('RUNTIME_NEW_CALL_DENIED');}
-        gateChecked=true;
-       }catch(error){gateRejection??='limit_unavailable';throw error;}
-       finally{leaveRateLimit?.();}
+       await checkCallGate(true,sequence===1);
+       gatePassed=true;
+       gateChecked=true;
       }
       const claim=await (isPayg?billing.claimPaygCall(execution.runId,sequence,call)
        :billing.claimCall(execution.runId,sequence,call)).catch(error=>{
@@ -185,6 +183,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
         throw error;
        });
       if(claim.id===null)pause('waiting_credits');
+      gateChecked=false;
       try{
        if(selectedPolicy.protocol==='openrouter-chat-v1')budget.modelCallTimeout(OPENROUTER_RESPONSE_TIMEOUT_MS);
        else budget.assertCanStart(5000);
@@ -212,6 +211,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
       if(dispatch.providerRejected){providerRejected=true;throw new Error('RUNTIME_PROVIDER_REJECTED');}
       const saved=await ownerRpc<{rawBody:string|null}|null>('runtime_response',{...args,p_sequence:sequence,p_request_hash:requestHash});
       raw=saved?.rawBody;
+     gatePassed=false;
      }
      if(!raw)throw new Error('RUNTIME_RESPONSE_PENDING');
      if(isPayg)await billing.finalizeRun(execution.runId);
@@ -259,7 +259,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    }
    effective.instructions=withPrimaryAddenda(effective.instructions,context);
    const {tools,toolBytes}=executionTools({context,executionId,args,agentTurn,grounded,fiveFields,sources:()=>sources,ownerRpc,budget,
-    execution,research,exchange,onRefused:()=>{terminalReplyFailure=true;}});
+    execution,research,exchange,onProgress:progress,onRefused:()=>{terminalReplyFailure=true;}});
    // A2: a derived-content Skill gets its saved source in this call's instructions, read and recorded in one transaction.
    if(effective.role==='skill'&&effective.contentSource)
     effective.instructions=await injectContentSource(ownerRpc,args,effective.contentSource,effective.instructions,context,primaryPolicy.inputLimit,toolBytes);
@@ -347,8 +347,8 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
      primaryLength=response.choices[0]?.finish_reason==='length';
      if(agentTurn)agentToolCalled=Boolean(response.choices[0]?.message?.tool_calls?.length);
      const firstCall=response.choices[0]?.message?.tool_calls?.[0];
-     if(context.questionContract===QUESTION_CONTRACT&&firstCall?.function?.name===ASK_QUESTION_TOOL)
-      agentCardMessage=questionMessageFromArguments(firstCall.function.arguments);
+     if(firstCall?.function?.name===ASK_QUESTION_TOOL&&(grounded||context.questionContract===QUESTION_CONTRACT))
+      agentCardMessage=(grounded?groundedCardFallback:questionMessageFromArguments)(firstCall.function.arguments);
      return JSON.stringify(response);
     }});
    };
@@ -366,7 +366,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     if(latest.unavailable)return {state:latest.state,unavailable:'latest' as const};
    }
    budget.timing?.mark('fullModelReply');
-   let turn=agentTurn&&!context.reportGeneration?agentTurnResult(agentText,body,agentToolCalled,grounded?undefined:agentCardMessage,native,
+   let turn=agentTurn&&!context.reportGeneration?agentTurnResult(agentText,body,agentToolCalled,grounded&&agentText.trim()?undefined:agentCardMessage,native,
     !grounded&&Boolean(context.mentorText)):null;
    if(grounded&&turn)turn=rejectSeparateCardProse(agentText,turn);
    if(turn){
@@ -425,6 +425,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    const completed=await ownerRpc<{state:'completed'|'cost_pending'}>('runtime_execution',{...args,p_action:'complete',p_result:result});
    return {...nativeMetadata(result),body,...(summary!==undefined?{summary}:{}),state:completed.state};
   }catch(error){
+   if(context.weeklyReview&&error instanceof Error&&error.message==='PUBLISH_MONITOR_REVIEW_SOURCE_REQUIRED')preflightFailure=error.message;
    claimNotice??=billingClaimNotice(error);
    if(error instanceof Error&&error.message===POSITIONING_REFUSED)return endPositioningRefusal(ownerRpc,args,isPayg);
    if(error instanceof ContentSourceRefusal)return {...await cancelRound(ownerRpc,args),code:error.code,notice:CONTENT_SOURCE_MESSAGES[error.code]};
@@ -451,10 +452,8 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    }
    if((execution.live||execution.state==='interrupted')&&error instanceof Error&&error.message==='RUNTIME_OUTPUT_TRUNCATED'){
     logger.error('api','runtime_output_truncated',{executionId});
-    // Close the live owner or its already-interrupted replay, never a concurrent
-    // running owner, using the existing cancellation/settlement
-    // path. Retain its response receipt and charges; do not dispatch organizer.
-    // An uncertain cancellation response remains recoverable, never retried here.
+    // Close the original owner, retain receipts/charges and never redispatch organizer.
+    // An uncertain cancellation remains recoverable and is never retried here.
     try{
      const stopped=await ownerRpc<{state:'cancelled'|'cost_pending'}>('runtime_cancel',args);
      return {state:stopped.state,unavailable:'output_truncated' as const};
@@ -492,7 +491,9 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    }
    if(!(capacity&&isPayg&&await interruptForCapacity(rpc,args,error,execution.epoch!)))
     await ownerRpc('runtime_execution',{...args,p_action:'interrupt'}).catch(()=>{});
-   return {state:'pending' as const,...(capacity?{unavailable:'capacity' as const}:{}),...claimNoticeFields(claimNotice)};
+   const unavailable=gateRejection??(capacity?'capacity' as const:undefined);
+   return {state:'pending' as const,...(unavailable?{unavailable}:{}),
+    ...(unavailable==='paused'?{code:'RUNTIME_NEW_CALLS_STOPPED' as const}:{}),...claimNoticeFields(claimNotice)};
   }
  }};
 }

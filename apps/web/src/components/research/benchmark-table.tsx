@@ -13,10 +13,11 @@ const formatFetchedAt = (value: string) => new Date(value).toLocaleString("zh-CN
 
 /**
  * Benchmark table (plan §1.4): followers, median views, engagement rate, posting frequency and last update per
- * account. Every number cites its source number; a number the evidence cannot support reads "缺失 / 未取到".
- * On a phone each account becomes a stacked block with the column names inline.
+ * account. Every number cites its source number; a number the evidence cannot support reads "这次没查到".
+ * In a narrow column (a chat) the table scrolls sideways and the account column stays on one line; on a phone each
+ * account becomes a stacked block with the column names inline.
  */
-export function BenchmarkTable({ rows, now = new Date(), onRefresh, refreshDisabled = false, fetchedAt, children }: {
+export function BenchmarkTable({ rows, now = new Date(), onRefresh, refreshDisabled = false, fetchedAt, children, note }: {
   rows: BenchmarkRow[];
   now?: Date;
   /** When the newest row was fetched (ISO time), shown in the viewer's own time. */
@@ -27,6 +28,8 @@ export function BenchmarkTable({ rows, now = new Date(), onRefresh, refreshDisab
   onRefresh?: (row: BenchmarkRow) => Promise<void>;
   /** The conversation cannot take a message now: the refresh buttons stay visible but locked. */
   refreshDisabled?: boolean;
+  /** The line under the table; absent = where the data comes from and how a missing figure shows (the product's). */
+  note?: string;
 }) {
   const { entries, numberOf } = numberSources(rows);
   const qualified = rows.filter(row => row.qualified).length;
@@ -34,8 +37,9 @@ export function BenchmarkTable({ rows, now = new Date(), onRefresh, refreshDisab
     <section aria-label="对标表" className={styles.wrap}>
       <div className={styles.top}>
         <p className={styles.head}>对标表</p>
-        <p className={styles.summary}>{rows.length} 个账号 · 合格 {qualified} 个</p>
+        <p className={styles.summary}>{rows.length} 个账号 · 可以照着学 {qualified} 个</p>
       </div>
+      <div className={styles.scroll}>
       <table className={styles.table}>
         <thead>
           <tr>
@@ -52,7 +56,7 @@ export function BenchmarkTable({ rows, now = new Date(), onRefresh, refreshDisab
                   {platformLabel(row.platform)}
                   {row.category && <span className={styles.category}>{CATEGORY_LABELS[row.category]}</span>}
                   <span className={cn(styles.badge, row.qualified ? styles.ok : styles.off)}>
-                    {row.qualified ? "合格" : "不计入"}
+                    {row.qualified ? "可以照着学" : "只作参考"}
                   </span>
                 </span>
                 {onRefresh && <RefreshButton account={row.account} disabled={refreshDisabled} onRefresh={() => onRefresh(row)} />}
@@ -74,17 +78,18 @@ export function BenchmarkTable({ rows, now = new Date(), onRefresh, refreshDisab
           ))}
         </tbody>
       </table>
+      </div>
       {entries.length > 0 && (
         <ol aria-label="数据来源" className={styles.sources}>
           {entries.map(entry => (
-            <li key={entry.evidenceId}>[{entry.number}] {entry.account} 的取数记录（编号 {entry.evidenceId}）</li>
+            <li key={entry.evidenceId}>[{entry.number}] {entry.account} 的数据来源记录（编号 {entry.evidenceId}）</li>
           ))}
         </ol>
       )}
-      {fetchedAt && <p className={styles.note}>取数时间：{formatFetchedAt(fetchedAt)}</p>}
+      {fetchedAt && <p className={styles.note}>查询时间：{formatFetchedAt(fetchedAt)}</p>}
       {children}
       {onRefresh && <p className={styles.note}>点“刷新”会重新读取这个账号的最新数据，算一次新的查询。</p>}
-      <p className={styles.note}>{DATA_SOURCE_NOTE}缺失的数字标为“{MISSING_TEXT}”，不按 0 计算。</p>
+      <p className={styles.note}>{note ?? `${DATA_SOURCE_NOTE}缺失的数字标为“${MISSING_TEXT}”，不按 0 计算。`}</p>
     </section>
   );
 }

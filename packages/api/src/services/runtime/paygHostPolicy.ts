@@ -59,7 +59,8 @@ const profileFields = {
   admissionPath: z.literal('empirical'),
   templateTokens: z.literal(4096), marginTokens: z.literal(4096),
   maxBytes: z.literal(PAYG_PROFILE_MAX_BYTES), maxMessages: z.literal(128),
-  // 2 until the staging profiles are updated (0250, 0267); a smaller profile leaves the optional tools out.
+  // Up to 9 (0267). The positioning mentor profiles need at least 9: the research tools are offered all or nothing, so a
+  // smaller profile (2 or 3) leaves them out entirely. A profile that is too small only loses the optional tools.
   maxTools: z.number().int().min(2).max(PAYG_MAX_TOOLS), maxSchemaBytes: z.literal(16384),
   purposes: z.array(phase).min(1).max(8),
   requestFormats: z.array(z.enum(['serial-tools-v2', 'serial-tools-v4-stream',

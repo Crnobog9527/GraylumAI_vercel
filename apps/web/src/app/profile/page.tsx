@@ -1,5 +1,6 @@
 'use client';
 
+import { PaymentDisputeNotice } from '@/components/profile/PaymentDisputeNotice';
 import { useState, Suspense, useMemo, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { AlertTriangle, Loader2, Menu, RefreshCw } from 'lucide-react';
@@ -29,6 +30,7 @@ import { UsageHistoryCard } from '@/components/profile/UsageHistoryCard';
 import { SecuritySettingsCard } from '@/components/profile/SecuritySettingsCard';
 import { AccountErasureCard } from '@/components/profile/AccountErasureCard';
 import { DataUseConsentCard } from '@/components/profile/DataUseConsentCard';
+import { FounderProfileCard } from '@/components/founder/FounderProfileCard';
 import { CookieSettingsCard } from '@/components/analytics/CookieSettingsCard';
 import { DATA_USE_CONSENT_VISIBLE } from '@/components/profile/dataUseConsentVisibility';
 import TicketsPanel from '@/components/profile/TicketsPanel';
@@ -237,6 +239,7 @@ function ProfilePageContent() {
             {userProfile && activeTab === 'profile' && (
               <>
                 <UserProfileHeader user={effectiveUser} onUserUpdate={handleUserUpdate} />
+                <FounderProfileCard />
                 <CreditsAndSubscriptionCards
                   user={effectiveUser}
                   onNavigateToSubscription={() => setActiveTab('subscription')}
@@ -253,6 +256,7 @@ function ProfilePageContent() {
 
             {userProfile && activeTab === 'subscription' && (
               <>
+                <PaymentDisputeNotice />
                 <SubscriptionCard user={effectiveUser} />
                 <BillingRecordsCard />
                 <CreditStatsCard user={effectiveUser} />

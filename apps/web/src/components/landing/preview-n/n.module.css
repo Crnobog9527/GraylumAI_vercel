@@ -1,0 +1,176 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/*
+ * Style sample N, direction E "便当格" (Owner 2026-10-17): a warm neutral canvas (#F4F3F0) of white cells, 14px apart,
+ * charcoal type, short bold cell titles, tabular figures. Gold only for the moving selection frame and the
+ * recommended tag; dark green only for "有效"-type states (the shared 先聊后买 box). Sample J's tokens (--j-*)
+ * underneath; product windows keep their own look, a cell is at most their outer frame.
+ */
+.root.root { --j-canvas: #f4f3f0; --n-gap: 14px; --n-radius: 20px; position: relative; background: var(--j-canvas); }
+.root header { background: rgba(244, 243, 240, .94); }
+.wrap { width: 100%; max-width: 1240px; margin: 0 auto; padding: 0 var(--j-gutter); }
+
+/* Sections: tighter than sample L so each screen carries more. The shared ones (comparison, FAQ, close) too. */
+.section { padding: 48px 0; scroll-margin-top: 112px; }
+@media (min-width: 1024px) { .section { padding: 64px 0; } }
+.root main > section[data-zone='compare'], .root main > section[data-zone='faq'], .root main > section[data-zone='final'] {
+  padding-block: 56px;
+}
+/* The light bands become one large white cell on the warm canvas. */
+.root main > [data-band] { border: 1px solid var(--j-line); background: #fff; box-shadow: none; }
+.head { display: grid; gap: 10px; margin-bottom: 22px; }
+.h2 {
+  margin: 0; font-size: clamp(26px, 3vw, 40px); font-weight: 600; line-height: 1.15; letter-spacing: -.03em;
+  text-wrap: balance; word-break: keep-all;
+}
+.phrase { display: inline-block; }
+.lede { margin: 0; max-width: 40em; color: var(--j-body); font-size: 17px; line-height: 1.7; }
+.bridge { margin: 0; color: var(--j-body); font-size: 16px; font-weight: 600; }
+.hint { margin: 0; color: var(--k-secondary); font-size: 14px; }
+
+/* The grid: one column on a phone, six on a tablet, twelve on a computer. */
+.grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--n-gap); margin: 0; padding: 0; list-style: none; }
+@media (min-width: 768px) { .grid { grid-template-columns: repeat(6, minmax(0, 1fr)); } .grid > * { grid-column: span 6; } }
+@media (min-width: 1024px) { .grid { grid-template-columns: repeat(12, minmax(0, 1fr)); } }
+.cell { min-width: 0; margin: 0; padding: 20px; border: 1px solid var(--j-line); border-radius: var(--n-radius); background: #fff; }
+@media (min-width: 1024px) { .cell { padding: 24px; } }
+.contents { display: contents; }
+
+/* Cells fade in as they arrive, 40ms apart (RootN); the first screen never waits. */
+@media (prefers-reduced-motion: no-preference) {
+  .root[data-motion='on'] [data-cell] {
+    transition: opacity .5s ease-out var(--cell-at, 0ms), translate .5s cubic-bezier(.22, 1, .36, 1) var(--cell-at, 0ms);
+  }
+  .root[data-motion='on'] [data-cell]:not([data-in]) { opacity: 0; translate: 0 12px; }
+}
+
+/* The selection frame: four gold corners that glide to the key cell (transform only), and a fine ring on that cell. */
+.frame { position: absolute; top: 0; left: 0; z-index: 2; pointer-events: none; opacity: 0; transition: opacity .3s ease-out; }
+.frame[data-on] { opacity: 1; }
+.frame i {
+  --s: 24px; position: absolute; top: 0; left: 0; width: var(--s); height: var(--s); border: 0 solid var(--j-gold);
+  transition: transform .75s cubic-bezier(.22, 1, .36, 1);
+}
+.frame i[data-c='tl'] { border-width: 3px 0 0 3px; border-top-left-radius: 12px; transform: translate(var(--x), var(--y)); }
+.frame i[data-c='tr'] {
+  border-width: 3px 3px 0 0; border-top-right-radius: 12px; transform: translate(calc(var(--x) + var(--w) - var(--s)), var(--y));
+}
+.frame i[data-c='bl'] {
+  border-width: 0 0 3px 3px; border-bottom-left-radius: 12px; transform: translate(var(--x), calc(var(--y) + var(--h) - var(--s)));
+}
+.frame i[data-c='br'] {
+  border-width: 0 3px 3px 0; border-bottom-right-radius: 12px;
+  transform: translate(calc(var(--x) + var(--w) - var(--s)), calc(var(--y) + var(--h) - var(--s)));
+}
+.root [data-picked] { outline: 1px solid rgba(232, 165, 0, .55); outline-offset: 6px; transition: outline-color .4s ease-out .45s; }
+@media (prefers-reduced-motion: reduce) { .frame, .frame i, .root [data-picked] { transition: none; } }
+
+/* Region 1: the first screen */
+.hero { padding: 20px 0 40px; }
+@media (min-width: 1024px) { .hero { padding: 24px 0 48px; } }
+@media (max-width: 767px) {
+  .heroGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .heroGrid > :not(.fact), .heroGrid .contents > * { grid-column: span 2; }
+}
+@media (min-width: 768px) {
+  .heroGrid .heroSay, .heroGrid .heroDoes { grid-column: span 3; }
+  .heroGrid .heroGet { grid-column: span 6; }
+  .heroGrid .fact { grid-column: span 3; }
+}
+@media (min-width: 1024px) {
+  .heroGrid .heroMain { grid-column: 1 / span 7; grid-row: 1 / span 2; }
+  .heroGrid .heroSay, .heroGrid .heroDoes { grid-column: 8 / span 5; }
+  .heroGrid .heroGet { grid-column: span 6; }
+}
+.heroMain { display: grid; align-content: center; gap: 22px; padding: clamp(24px, 3.4vw, 44px); }
+.heroTitle {
+  display: grid; margin: 0; font-size: clamp(40px, 4.6vw, 68px); font-weight: 600; line-height: 1.05; letter-spacing: -.04em;
+  word-break: keep-all;
+}
+.heroTitle span { display: block; }
+.promise { margin: 0; color: var(--j-body); font-size: clamp(17px, 1.45vw, 21px); line-height: 1.6; }
+.promise span { display: inline-block; }
+.heroActions { display: grid; justify-items: start; gap: 10px; }
+.heroActions p { margin: 0; color: var(--j-muted); font-size: 14px; }
+.cellLabel { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; color: var(--j-muted); font-size: 14px; font-weight: 600; }
+.cellLabel img { width: 18px; height: 18px; border-radius: 4px; }
+.bubble {
+  width: fit-content; margin: 0 0 0 auto; padding: 10px 14px; border-radius: 16px 16px 4px 16px; background: #f3f3f1; font-size: 16px;
+  line-height: 1.6;
+}
+.does { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.does li { display: flex; align-items: center; gap: 8px; font-size: 16px; line-height: 1.5; }
+.does svg { flex: none; color: var(--j-ink); }
+.result { margin: 0; font-size: clamp(18px, 1.6vw, 22px); font-weight: 600; line-height: 1.45; }
+.fact { display: grid; align-content: center; gap: 2px; color: var(--j-ink); text-decoration: none; }
+.fact span { color: var(--j-muted); font-size: 14px; }
+.fact b { font-size: clamp(20px, 1.8vw, 26px); font-weight: 600; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.fact .factNumber { font-size: clamp(30px, 2.8vw, 40px); line-height: 1.1; }
+.factLink { transition: border-color .2s; }
+.factLink:hover { border-color: var(--j-ink); }
+
+/* Region 2: the wall of message cells, columns of their own height */
+.wall { margin: 0; padding: 0; list-style: none; columns: 1; column-gap: var(--n-gap); }
+@media (min-width: 768px) { .wall { columns: 2; } }
+@media (min-width: 1024px) { .wall { columns: 3; } }
+.wall > li { display: grid; gap: 14px; margin-bottom: var(--n-gap); break-inside: avoid; }
+.noteCell figure { margin: 0; }
+.noteCell blockquote { margin: 0; color: var(--j-ink); font-size: 16.5px; font-weight: 500; line-height: 1.7; }
+.noteCell[data-first] blockquote { font-size: clamp(19px, 1.7vw, 22px); line-height: 1.6; }
+.noteCell figcaption { margin-top: 8px; color: var(--j-muted); font-size: 13px; line-height: 1.5; }
+.noteAnswer { padding-top: 12px; border-top: 1px solid var(--j-line); }
+.noteAnswer p { margin: 0; color: var(--j-body); font-size: 15px; line-height: 1.7; }
+.noteAnswer .noteHead { margin-bottom: 4px; color: var(--j-ink); font-size: 16px; font-weight: 600; line-height: 1.45; }
+
+/* Region 3: the carousel's big cell (L's step buttons and one OpsChatL window, unchanged) and two cells beside it */
+@media (min-width: 1024px) {
+  .opsGrid > .opsMain { grid-column: span 8; }
+  .opsGrid > .opsSide { grid-column: span 4; }
+}
+.opsMain { display: grid; align-content: start; gap: 16px; }
+.opsBar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+.opsSide { display: grid; grid-template-rows: auto 1fr; gap: var(--n-gap); min-width: 0; }
+.opsLine { display: grid; gap: 6px; color: var(--j-body); font-size: 16px; line-height: 1.7; }
+.opsLine b { color: var(--j-ink); font-size: 18px; font-weight: 600; }
+.opsClose { display: grid; align-content: center; gap: 18px; }
+.opsClose > p:first-child { margin: 0; font-size: clamp(19px, 1.7vw, 23px); font-weight: 600; line-height: 1.5; }
+.opsClose > p:last-child, .ctaCell > p { margin: 0; }
+
+/* Region 4: the moving row of report cells, inside the page's width */
+.marquee.marquee { margin: 0 0 8px; padding: 6px 0 12px; }
+.marqueeList.marqueeList { gap: var(--n-gap); }
+.report.report { border-radius: var(--n-radius); box-shadow: none; }
+
+/* Region 5: one cell per worry; the first (your own voice) is the big one */
+@media (min-width: 1024px) {
+  .careGrid > * { grid-column: span 4; }
+  .careGrid > :first-child { grid-column: span 8; }
+}
+.careCell { display: grid; align-content: start; gap: 8px; }
+.careCell b { font-size: 18px; font-weight: 600; line-height: 1.45; }
+.careCell:first-child b { font-size: clamp(20px, 1.9vw, 26px); }
+.careCell span { color: var(--j-body); font-size: 15.5px; line-height: 1.7; }
+.ctaCell { align-content: center; justify-items: start; }
+
+/* Region 7: price, then the plan cards */
+@media (min-width: 1024px) {
+  .priceGrid > * { grid-column: span 5; }
+  .priceGrid > .costCell { grid-column: span 7; }
+}
+.costCell h3 { margin: 0 0 8px; font-size: 20px; font-weight: 600; letter-spacing: -.02em; }
+.costCell ul { display: grid; margin: 0; padding: 0; list-style: none; }
+.costCell li { display: grid; gap: 2px 16px; padding: 12px 0; border-top: 1px solid var(--j-line); }
+@media (min-width: 768px) { .costCell li { grid-template-columns: minmax(0, 4fr) minmax(0, 3fr); align-items: baseline; } }
+.costCell li > span { color: var(--j-body); font-size: 15px; }
+.costCell li > b { font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.costCell li > small { grid-column: 1 / -1; color: var(--j-muted); font-size: 12.5px; line-height: 1.55; }
+.ownCell { display: grid; align-content: center; justify-items: start; gap: 14px; }
+.total { display: grid; gap: 2px; margin: 0; }
+.total span { color: var(--j-muted); font-size: 14px; }
+.total b { font-size: clamp(26px, 2.6vw, 36px); font-weight: 600; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.own { margin: 0; padding-top: 14px; border-top: 1px solid var(--j-line); font-size: clamp(24px, 2.4vw, 32px); font-weight: 600; letter-spacing: -.02em; }
+.ownCell .own { width: 100%; }
+.plansSection { padding: 0 0 56px; }
+/* The shared plan cards in this sample's cells: white, the same radius; Gold keeps its gold edge, tag and lift. */
+.plans [data-plan] { border-radius: var(--n-radius); box-shadow: none; }
+.plans [data-plan][data-recommended] { box-shadow: 0 18px 40px -28px rgba(138, 90, 0, .4); }
+.plans [data-region='先聊后买'] { border-radius: var(--n-radius); }

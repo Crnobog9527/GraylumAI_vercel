@@ -16,7 +16,7 @@ v12 第 3.7、7、9 节；[BILL2 技术契约](V3-BILL-2-provider-authoritative-
 ## RESEARCH-0：供应商对比测试（已完成）
 
 - **做了什么**：用同一组查询实测了 AIsa、TinyFish、TikHub、SocialCrawl、monid，之后补测了 TikHub（充值后）、Tavily、Firecrawl，最后用 20 条中文查询测了 Parallel。脚本在 `scripts/research0*`；过程、原始指标、花费和条款转述见 #457、#465、#466。
-- **Owner 的最终选择**（2026-09-28，见 Master Plan 第 3.7 节和 D13）：社媒数据 **TikHub**，网页搜索 **Parallel**，网页抓取 **Firecrawl**。其余几家不采用。
+- **Owner 的选择与后续修订**：2026-09-28（见 Master Plan 第 3.7 节和 D13）确定社媒数据 **TikHub**、网页搜索 **Parallel**、网页抓取 **Firecrawl**，当时其余几家不采用。**2026-10-18 Owner 将 monid 加入海外／非中国平台社媒账号数据和网页抓取供应名单，条款已邮件确认可用于 SaaS；中国平台继续 TikHub**（取代原先海外供应名单只用 TikHub、排除 monid 的限制，见 [Master Plan 第 2.1 节](../MASTER_PLAN.md#changes)）。[本次评估](../evidence/monid-supplier-evaluation-20261018.md)只给逐线路建议，不代表已经接入、修改 staging 或自动替换当前供应商；实际接入另开任务。
 
 ### RESEARCH-0 结论（给 RESEARCH-TOOLS 用）
 
@@ -28,12 +28,17 @@ v12 第 3.7、7、9 节；[BILL2 技术契约](V3-BILL-2-provider-authoritative-
 - 并发：默认每个接口每秒 10 次，可以付费购买更高的每秒次数。
 - **对标流程需要发布时间**：剔除 30 天未更新的账号、计算更新频率，都要用到作品的发布时间（D15）。目前 **Instagram**（作品 v3 没有发布时间）和 **YouTube**（只有"2周前"这类相对时间）都拿不到可靠的发布时间。RESEARCH-TOOLS 要先测出能返回发布时间的接口（候选：TikHub 的 Instagram v1 作品接口 `/instagram/v1/fetch_user_posts`，需要数字用户 ID；YouTube 单个视频详情 `/youtube/web_v2/get_video_info_v2`），测通之前，这两个平台不列入对标流程的"已验证可用平台"清单，按清单外平台如实告知暂不支持，不推算或编造时间。账号资料、关键词搜索等不依赖发布时间的用法不受影响。
 
+**RT-7 小红书、抖音对标线路核对（2026-10-18）**
+- 用真实响应核对：小红书 `get_user_info`、`get_user_posted_notes`，抖音 `handler_user_profile`、`fetch_user_post_videos`，各取 2 个公开账号（约 0.08 美元，按官方标价 0.01 美元/次，文档标价、未用接口核对）。
+- 结论：两个平台都有精确粉丝数和绝对发布时间，小红书改为"已验证"，抖音补上对标线路集（资料 + 作品，2 次子调用）。两个平台都没有可用的播放量：小红书不返回，抖音的 `play_count` 在真实响应里恒为 0，按"未提供"处理，不当 0。抖音账号资料要用 `sec_user_id`，所以抖音搜索结果的作者编号用 `sec_uid`。
+- 测试样本在 `vendors/__tests__/fixtures/rt7Samples.json`：保留真实字段结构和数值，账号名、编号、标题、链接都换成假的。
+
 **Parallel（网页搜索）**
 - `POST https://api.parallel.ai/v1/search`，鉴权头 `x-api-key`，高级模式每千次 5 美元，快速模式每千次 1 美元。
 - 中文实测（14 条）：中文标题占比 99%，中国网站占比 64%，人工相关性平均 1.79/2，只有 40% 的结果带发布日期，响应时间中位数约 3.6 秒。
 - 计费：响应里带官方用量 `usage`（例如 `sku_search=1`），不带金额。按 D14（2026-09-28 补充）视为返回了成本："用量 × 后台配置的单价"算出美元成本，再套 D16 公式；不用保底积分。
 - 条款：明确允许提供给客户的最终用户；但一次查询的结果主要给一位用户用，**不能缓存后给其他用户**。
-- 它也有网页抓取接口（Extract，每千个结果 1 美元），但 RESEARCH-0 **没有测试**它，也不是 Owner 批准的线路。网页抓取按 D13 只用 Firecrawl；如果以后 Firecrawl 需要更换（例如申请企业定制授权没有结果），要由 Owner 另行决定（修订 D13），不能在实现里自动改用别家。
+- 它也有网页抓取接口（Extract，每千个结果 1 美元），但 RESEARCH-0 **没有测试**它，也不是 Owner 批准的线路。当前网页抓取仍由 Firecrawl 承载；**2026-10-18 Owner 已修订 D13，将 monid 加入海外网页抓取供应名单**（见上文及 Master Plan 第 2.1 节），不再适用“候选只能是 Firecrawl、加入 monid 前需再次修订 D13”的旧限制。monid 尚待单独接入与线路验证，本次没有切换配置；该批准不扩展到 Parallel Extract 或其他未批准供应商，也不批准自动故障切换。
 
 **Firecrawl（网页抓取）**
 - 抓取公开网页的响应里带官方点数 `creditsUsed`（每页 1 点）；它的搜索接口这次没有返回点数，我们也不用它的搜索。每点的价格取决于套餐，要在后台配置。按 D14（2026-09-28 补充）视为返回了成本："点数 × 后台配置的每点单价"算出美元成本，再套 D16 公式；不用保底积分。

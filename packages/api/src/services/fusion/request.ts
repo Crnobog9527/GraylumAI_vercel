@@ -14,7 +14,11 @@ export function assertSnapshotSize(report: string, materials: unknown) {
     throw new Error('FUSION_INPUT_TOO_LARGE');
   }
 }
-export type FusionRequest = { instructions: string; input: string; responseFormat?: Record<string, unknown> };
+/** `history`: earlier turns of the conversation as plain messages (compare columns, FUSION-COMPARE §3.2); reviews send none. */
+export type FusionRequest = { instructions: string; input: string; history?: Array<{ role: 'user' | 'assistant'; content: string }>;
+  responseFormat?: Record<string, unknown> };
+const messagesOf = (request: FusionRequest) => [{ role: 'system', content: request.instructions },
+  ...(request.history ?? []), { role: 'user', content: request.input }];
 
 /** Exact provider bytes for one Fusion call. The host writes every message: no brand identity
  * statement is added (Fusion shows the real model name), no history, no tools and no tool_choice;
@@ -23,9 +27,8 @@ export type FusionRequest = { instructions: string; input: string; responseForma
  * the model, routing, limits and reasoning fields. Used to keep every review step within the per-call byte cap. */
 export const REQUEST_FIELDS_ALLOWANCE = 8192;
 export function fusionRequestBytes(request: FusionRequest): number {
-  return Buffer.byteLength(JSON.stringify({ messages: [{ role: 'system', content: request.instructions },
-    { role: 'user', content: request.input }], ...(request.responseFormat ? { response_format: request.responseFormat } : {}) }))
-    + REQUEST_FIELDS_ALLOWANCE;
+  return Buffer.byteLength(JSON.stringify({ messages: messagesOf(request),
+    ...(request.responseFormat ? { response_format: request.responseFormat } : {}) })) + REQUEST_FIELDS_ALLOWANCE;
 }
 
 export function fusionRequestBody(policy: z.infer<typeof frozenCallPolicy>, request: FusionRequest,
@@ -35,7 +38,7 @@ export function fusionRequestBody(policy: z.infer<typeof frozenCallPolicy>, requ
   const { plugins } = openRouterSearchParameters(policy.model, false);
   return JSON.stringify({
     model: policy.model, stream: true, stream_options: { include_usage: true }, store: false,
-    messages: [{ role: 'system', content: request.instructions }, { role: 'user', content: request.input }],
+    messages: messagesOf(request),
     provider: openRouterBound(policy.providerLimits, policy.outputLimit).routing, max_tokens: outputLimit,
     ...frozenReasoningFields(reasoning),
     ...(request.responseFormat ? { response_format: request.responseFormat } : {}),

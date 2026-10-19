@@ -45,7 +45,7 @@ export type SiteChrome = {
   rights: string;
 };
 
-const LEGAL_PATHS = { terms: '/terms', privacy: '/privacy', acceptableUse: '/acceptable-use' };
+const LEGAL_PATHS = { terms: '/terms', privacy: '/privacy', acceptableUse: '/acceptable-use', refund: '/refund' };
 
 export const SITE_CHROME: Record<SiteLocale, SiteChrome> = {
   'zh-Hans': {
@@ -53,7 +53,7 @@ export const SITE_CHROME: Record<SiteLocale, SiteChrome> = {
     nav: [
       { label: '功能介绍', href: '/features' },
       { label: '教程', href: '/blog' },
-      { label: '价格', href: '/landing/pricing' },
+      { label: '价格', href: '/pricing' },
       { label: '关于我们', href: '/about' },
     ],
     login: '登录',
@@ -70,6 +70,7 @@ export const SITE_CHROME: Record<SiteLocale, SiteChrome> = {
       { label: '服务条款', href: LEGAL_PATHS.terms },
       { label: '隐私政策', href: LEGAL_PATHS.privacy },
       { label: '使用协议', href: LEGAL_PATHS.acceptableUse },
+      { label: '退款政策', href: LEGAL_PATHS.refund },
     ],
     languageTitle: '语言',
     updatedLabel: '更新于',
@@ -101,6 +102,7 @@ export const SITE_CHROME: Record<SiteLocale, SiteChrome> = {
       { label: '服務條款', href: LEGAL_PATHS.terms },
       { label: '隱私權政策', href: LEGAL_PATHS.privacy },
       { label: '使用規範', href: LEGAL_PATHS.acceptableUse },
+      { label: '退款政策', href: LEGAL_PATHS.refund },
     ],
     languageTitle: '語言',
     updatedLabel: '更新於',

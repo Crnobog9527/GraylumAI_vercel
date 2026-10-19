@@ -21,8 +21,8 @@ export type PublicPage = {
 
 export const PUBLIC_PAGES: PublicPage[] = [
   // The public host serves the home page at "/" (rewritten to /landing until the single-host move).
-  { path: '/', locale: 'zh-Hans', lastModified: '2026-10-13' },
-  { path: '/landing/pricing', locale: 'zh-Hans', lastModified: '2026-10-12' },
+  { path: '/', locale: 'zh-Hans', lastModified: '2026-10-18' },
+  { path: '/pricing', locale: 'zh-Hans', lastModified: '2026-10-12' },
   { path: '/features', locale: 'zh-Hans', lastModified: '2026-10-17', footerLabel: '功能介绍' },
   { path: '/features/positioning', locale: 'zh-Hans', lastModified: '2026-10-17' },
   { path: '/features/content', locale: 'zh-Hans', lastModified: '2026-10-17' },
@@ -34,6 +34,7 @@ export const PUBLIC_PAGES: PublicPage[] = [
   { path: '/blog/first-positioning-conversation', locale: 'zh-Hans', lastModified: '2026-10-17' },
   { path: '/blog/before-you-start-posting', locale: 'zh-Hans', lastModified: '2026-10-17' },
   { path: '/refund', locale: 'zh-Hans', lastModified: '2026-10-17' },
+  { path: '/founders', locale: 'zh-Hans', lastModified: '2026-10-19' },
   { path: '/graylum-vs-chatgpt', locale: 'zh-Hans', lastModified: '2026-10-18', alternates: { 'zh-TW': '/zh-tw/graylum-vs-chatgpt' } },
   { path: '/faq', locale: 'zh-Hans', lastModified: '2026-10-18' },
   { path: '/contact', locale: 'zh-Hans', lastModified: '2026-10-12' },

@@ -26,7 +26,7 @@ export function scrubText(value: string): string {
  */
 export const APP_SEGMENTS = new Set(['about', 'acceptable-use', 'access-denied', 'account-erasure', 'admin',
   'agent-first-preview', 'ai', 'announcements', 'api', 'auth', 'auto-close', 'billing-reconcile', 'blog', 'callback', 'chat',
-  'advance', 'fusion', 'connect', 'contact', 'costs', 'cron', 'diagnostics', 'expert-consult', 'f', 'faq', 'features', 'finance',
+  'advance', 'fusion', 'connect', 'contact', 'costs', 'cron', 'diagnostics', 'expert-consult', 'f', 'faq', 'features', 'finance', 'founders',
   'forgot-password', 'graylum-vs-chatgpt', 'ig-jingying', 'landing',
   'library', 'library-cleanup', 'login', 'maintenance', 'marketplace', 'models', 'orders', 'packages', 'payment-notices', 'performance',
   'plan', 'positioning', 'postforme', 'preview', 'publish-monitor', 'pricing', 'privacy', 'profile', 'prompts', 'refund', 'refunds',
@@ -34,10 +34,12 @@ export const APP_SEGMENTS = new Set(['about', 'acceptable-use', 'access-denied',
   'requests', 'reset-password', 'review', 'runtime', 'runtime-recovery', 'scan-check', 'search', 'secrets', 'settings', 'shequn-jingying', 'shequn-xingxiao',
   'skills', 'social-monitor', 'start', 'stream', 'stripe', 'terms', 'tickets', 'topics', 'transactions', 'trpc', 'upload', 'users',
   'verify-email', 'waffo', 'webhook', 'workbench', 'zh-tw', 'zimeiti-jingying', 'zimeiti-kecheng',
-  // Style samples D, E, G, H and I (PUBLIC-SITE, /landing/preview/d, /e, /g, /h and /i), removed with the samples.
-  'd', 'e', 'g', 'h', 'i',
+  // Style samples D, E, G to O (PUBLIC-SITE, /landing/preview/d … /o), removed with the samples.
+  'd', 'e', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o',
   // FUSION-REVIEW animation prototype (/landing/preview/jury), removed with the prototype.
   'jury',
+  // The landing samples' local edit mode (/api/dev/owner-edits; answers 404 outside a local dev server).
+  'dev', 'owner-edits',
   '_next', 'static', 'chunks', 'app', 'pages', 'css', 'media']);
 const OWN_HOST = /(^|\.)graylum\.com$|\.vercel\.app$|^localhost$|^127\.0\.0\.1$/;
 

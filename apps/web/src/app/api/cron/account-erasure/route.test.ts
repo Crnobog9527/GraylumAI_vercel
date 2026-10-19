@@ -78,9 +78,7 @@ it('reports cleanup retry as pending rather than success', async () => {
   expect(await response.json()).toEqual({ success: false, processed: 1, completed: 0, pending: 1, failed: 0,
     conversations: { cleaned: 2, pending: 0, failed: 0, more: false } });
 });
-it('uses daily 05:00 UTC cleanup without overlapping existing cron schedules', () => {
+it('runs every 5 minutes (Pro) so deletion finishes within the 24-hour promise', () => {
   const config = JSON.parse(readFileSync('vercel.json', 'utf8'));
-  expect(config.crons).toContainEqual({ path: '/api/cron/account-erasure', schedule: '0 5 * * *' });
-  expect(config.crons.filter((cron: { path: string }) => cron.path !== '/api/cron/account-erasure')
-    .map((cron: { schedule: string }) => cron.schedule)).toEqual(['0 2 * * *', '0 3 * * *', '0 4 * * *', '0 10 * * *', '0 6 * * *', '0 7 * * *']);
+  expect(config.crons).toContainEqual({ path: '/api/cron/account-erasure', schedule: '*/5 * * * *' });
 });

@@ -17,6 +17,7 @@ import { agentTurnBody } from "../../shared/agentTurn";
 import { OPENING_EXTRACTION_RULE } from "./agentTurnPrompt";
 import type { Page } from "../../../../../apps/web/node_modules/@playwright/test";
 import { seedTestOpenRouterKey } from "../models/openRouterKey.testing";
+import { ensurePositioningProfilePlans } from '../__tests__/fixtures/positioningProfilePlans';
 const connectionString = process.env.V3_LOCAL_DB!;
 if (
   !connectionString?.startsWith("postgres://postgres@127.0.0.1:") ||
@@ -33,8 +34,8 @@ const admin = createClient(
 // upgrade path. Restore the schema after every case and fail the case that
 // leaves anything unrestorable (see schemaSnapshot.ts).
 let restoreSchema = async () => {};
-beforeAll(async () => { await sql.connect(); restoreSchema = await schemaGuard(sql); }, 120000);
-afterEach(() => restoreSchema(), 120000);
+beforeAll(async () => { await sql.connect(); restoreSchema = await schemaGuard(sql); await ensurePositioningProfilePlans(sql); }, 120000);
+afterEach(async () => { await restoreSchema(); await ensurePositioningProfilePlans(sql); }, 120000);
 afterAll(() => sql.end());
 
 /** The exact business turns in a fixture, not just "one row per request ID". */
@@ -154,7 +155,9 @@ async function fixture(
   if (made.error) throw made.error;
   const actor = made.data.user.id;
   await sql.query(
-    "insert into profiles(id,email,role,credits) values($1,$2,'user',1000)",
+    // Most OPC cases exercise unrelated workflows; use the maximum plan so
+    // the new per-tier profile limit does not constrain their setup helpers.
+    "insert into profiles(id,email,role,credits,membership_level) values($1,$2,'user',1000,'gold')",
     [actor, email],
   );
   await sql.query(
@@ -253,6 +256,97 @@ async function mergedPositioningFixture(configure?: (flow: ReturnType<typeof mak
   },'梳理账号定位 · 六步');
   return result;
 }
+it('OPC: PROFILE_LIMIT allows one free profile and blocks the next', async () => {
+  const f = await fixture();
+  await sql.query("update profiles set membership_level='free' where id=$1", [f.actor]);
+  const start = () => f.service.start({requestId:randomUUID(),registration:f.registration,mode:'manual'});
+  await start();
+  await expect(start()).rejects.toThrow('OPC_PROFILE_LIMIT');
+  expect((await sql.query(
+    'select count(*)::int n from opc_businesses where actor_id=$1 and erased_at is null', [f.actor],
+  )).rows[0].n).toBe(1);
+});
+
+it('OPC: PROFILE_LIMIT keeps old membership-plan inserts compatible', async () => {
+  await sql.query(
+    `insert into membership_plans(id,name,level,allow_fusion_review,allow_fusion_compare,library_storage_bytes,
+      allow_publish,own_data_window_days,allow_benchmark_monitor,allow_weekly_auto_review)
+     values($1,'pro','pro',true,true,500000000,true,30,false,false) on conflict(level) do nothing`,
+    [randomUUID()],
+  );
+  expect((await sql.query(
+    "select positioning_profile_limit from membership_plans where level='pro'",
+  )).rows[0].positioning_profile_limit).toBe(3);
+});
+
+it('OPC: PROFILE_LIMIT uses configured Pro 3 and Gold 6 caps', async () => {
+  const f = await fixture();
+  await sql.query("update profiles set membership_level='pro' where id=$1", [f.actor]);
+  const limits = (await sql.query(
+    "select level,positioning_profile_limit from membership_plans where level in ('pro','gold') order by level",
+  )).rows;
+  expect(limits).toEqual([
+    {level:'gold',positioning_profile_limit:6},
+    {level:'pro',positioning_profile_limit:3},
+  ]);
+  const start = () => f.service.start({requestId:randomUUID(),registration:f.registration,mode:'manual'});
+  const existing = [await start(),await start(),await start()];
+  await expect(start()).rejects.toThrow('OPC_PROFILE_LIMIT');
+  await sql.query("update profiles set membership_level='gold' where id=$1", [f.actor]);
+  existing.push(await start(),await start(),await start());
+  expect((await sql.query(
+    'select count(*)::int n from opc_businesses where actor_id=$1 and erased_at is null', [f.actor],
+  )).rows[0].n).toBe(6);
+  await expect(start()).rejects.toThrow('OPC_PROFILE_LIMIT');
+});
+
+it('OPC: PROFILE_LIMIT keeps existing drafts readable but denies new profiles after Pro expiry', async () => {
+  const f = await fixture();
+  await sql.query("update profiles set membership_level='pro' where id=$1", [f.actor]);
+  const start = () => f.service.start({requestId:randomUUID(),registration:f.registration,mode:'manual'});
+  const existing = [await start(),await start(),await start()];
+  const plan = (await sql.query("select id from membership_plans where level='pro'")).rows[0];
+  const subscriptionId = randomUUID();
+  const externalId = 'sub_' + randomUUID();
+  const contract = {
+    version:1,item_type:'membership_plan',item_id:plan.id,item_updated_at:'2026-01-01T00:00:00Z',
+    billing_cycle:'monthly',currency:'usd',unit:'major',price:'10',discount:'0',
+    tax_behavior:'unspecified',credits:0,bonus_credits:0,
+  };
+  await sql.query(
+    `insert into user_subscriptions(id,user_id,membership_plan_id,stripe_subscription_id,billing_cycle,status,
+      cancel_at_period_end,current_period_start,current_period_end,payment_channel,merchant_namespace,payment_mode,contract_snapshot)
+     values($1,$2,$3,$4,'monthly','active','true',now()-interval '1 month',now()-interval '1 hour',
+      'stripe','paywall-test','test',$5::jsonb)`,
+    [subscriptionId,f.actor,plan.id,externalId,JSON.stringify(contract)],
+  );
+  await sql.query(
+    `insert into payment_provider_refs(channel,merchant_namespace,mode,object_type,external_id,subscription_id)
+     values('stripe','paywall-test','test','subscription',$1,$2)`,
+    [externalId,subscriptionId],
+  );
+  await expect(f.service.read(existing[0]!.draftId)).resolves.toMatchObject({draftId:existing[0]!.draftId});
+  await expect(start()).rejects.toThrow('OPC_PROFILE_LIMIT');
+  expect((await sql.query('select membership_level from profiles where id=$1',[f.actor])).rows[0].membership_level)
+    .toBe('pro');
+});
+
+it('OPC: PROFILE_LIMIT serializes concurrent free profile starts', async () => {
+  const f = await fixture();
+  await sql.query("update profiles set membership_level='free' where id=$1", [f.actor]);
+  const start = () => f.service.start({requestId:randomUUID(),registration:f.registration,mode:'manual'});
+  const attempts = await Promise.allSettled([start(),start()]);
+  const created = attempts.filter(result => result.status === 'fulfilled');
+  const rejected = attempts.filter(result => result.status === 'rejected');
+  expect(created).toHaveLength(1);
+  expect(rejected).toHaveLength(1);
+  expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({message:'OPC_PROFILE_LIMIT'});
+  expect((await sql.query('select count(*)::int n from opc_businesses where actor_id=$1 and erased_at is null',[f.actor])).rows[0].n)
+    .toBe(1);
+  expect((await sql.query('select count(*)::int n from opc_drafts where actor_id=$1',[f.actor])).rows[0].n)
+    .toBe(1);
+});
+
 it("OPC: an edited six-stage Skill gives new drafts new steps and questions while old drafts stay pinned", async () => {
   const f = await mergedPositioningFixture();
   const oldDraft = await f.service.start({requestId:randomUUID(),registration:f.registration,mode:"manual"});

@@ -2,7 +2,7 @@
 // TikHub passes each platform's own JSON through under `data` without a published schema, so items are
 // located by their characteristic keys (ported from the RESEARCH-0 comparison tooling).
 // Only whitelisted fields leave this module: no bios, contact details, avatars or commenter data.
-import { SOCIAL_EARLIEST_MS, bool, clip, count, displayCount, findAll, has, idText, text, timestamp } from './fields';
+import { SOCIAL_EARLIEST_MS, bool, clip, count, displayCount, findAll, first, has, idText, text, timestamp } from './fields';
 import { publicHttpUrl } from './http';
 import type { ResearchItem, SocialKind, SocialPlatform } from './types';
 
@@ -32,6 +32,8 @@ function toItem(values: Values, whitelist: readonly string[], url?: string): Res
   return safeUrl === undefined ? { fields, missing } : { url: safeUrl, fields, missing };
 }
 
+const positive = (value: number | undefined) => (value !== undefined && value > 0 ? value : undefined);
+
 function aweme(item: Raw, platform: 'douyin' | 'tiktok') {
   const id = idText(item, ['aweme_id']);
   const handle = text(item, ['author.unique_id']);
@@ -40,9 +42,14 @@ function aweme(item: Raw, platform: 'douyin' | 'tiktok') {
   return toItem({
     id, title: clip(text(item, ['desc']), TITLE_CHARS),
     author: text(item, ['author.nickname', 'author.unique_id']),
-    authorId: idText(item, ['author.unique_id', 'author.sec_uid', 'author.uid']),
+    // Douyin's profile routes take the sec_user_id, so it is the author id there; TikTok's take the handle.
+    authorId: platform === 'douyin' ? idText(item, ['author.sec_uid', 'author.unique_id', 'author.uid'])
+      : idText(item, ['author.unique_id', 'author.sec_uid', 'author.uid']),
     publishedAt: timestamp(item, ['create_time'], SOCIAL_EARLIEST_MS),
-    views: count(item, ['statistics.play_count']), likes: count(item, ['statistics.digg_count']),
+    // Douyin account posts hide play counts: recorded real responses carry play_count 0 on posts with thousands of
+    // likes (RT-7), so a 0 there is "not provided", never a count. A positive value (search results may carry one) is kept.
+    views: platform === 'douyin' ? positive(count(item, ['statistics.play_count']))
+      : count(item, ['statistics.play_count']), likes: count(item, ['statistics.digg_count']),
     comments: count(item, ['statistics.comment_count']), shares: count(item, ['statistics.share_count']),
   }, POST_FIELDS, url);
 }
@@ -93,7 +100,7 @@ function xhsProfile(object: Raw) {
     // Abbreviated labels ("1.2万") are not counts and stay missing.
     followers: count(object, ['fans', 'fans_count', 'follower_count']) ?? xhsInteraction(object, 'fans'),
     following: count(object, ['follows', 'follows_count', 'following_count']) ?? xhsInteraction(object, 'follows'),
-    postsCount: count(object, ['notes_count', 'note_count']), likesTotal: undefined, verified: undefined,
+    postsCount: count(object, ['notes_count', 'note_count', 'note_num_stat.posted']), likesTotal: undefined, verified: undefined,
   }, PROFILE_FIELDS);
 }
 
@@ -304,4 +311,27 @@ export function tikhubBodyCode(json: unknown): number | undefined {
   const raw = json as Raw | null;
   const code = raw?.code ?? (raw?.detail as Raw | undefined)?.code;
   return typeof code === 'number' ? code : undefined;
+}
+
+/**
+ * Xiaohongshu note lists are cursor-paginated: when the supplier says `has_more`, the next page starts after the last
+ * note's `cursor` (TikHub: `$.data.data.notes[-1].cursor`, usually that note's id). Anything else means no next page.
+ */
+export function xhsNextCursor(json: unknown): string | undefined {
+  const page = (first(json, ['data.data']) ?? first(json, ['data'])) as Raw | undefined;
+  const notes = page && Array.isArray(page.notes) ? page.notes as Raw[] : [];
+  if (!page || page.has_more !== true || notes.length === 0) return undefined;
+  const last = notes[notes.length - 1]!;
+  const cursor = idText(last, ['cursor', 'id', 'note_id']);
+  return cursor !== undefined && /^[0-9a-f]{24}$/.test(cursor) ? cursor : undefined;
+}
+
+/** TikHub TikTok/Douyin account videos use `has_more` and `max_cursor`; only a forward numeric cursor can continue. */
+export function videoNextCursor(json: unknown, currentCursor?: string): string | undefined {
+  const page = (first(json, ['data.data']) ?? first(json, ['data'])) as Raw | undefined;
+  if (!page || !(page.has_more === true || page.has_more === 1 || page.has_more === '1')) return undefined;
+  const raw = page.max_cursor;
+  const next = typeof raw === 'number' && Number.isSafeInteger(raw) && raw >= 0 ? String(raw)
+    : typeof raw === 'string' && /^(0|[1-9]\d*)$/.test(raw) && Number.isSafeInteger(Number(raw)) ? raw : undefined;
+  return next !== undefined && next !== (currentCursor ?? '0') ? next : undefined;
 }

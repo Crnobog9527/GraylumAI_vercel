@@ -23,7 +23,7 @@ export interface NoticeResult {
   code?: string;
   /** Set when a person has to look (Sentry at the cron boundary, the admin list otherwise). */
   attention?: 'PAYMENT_NOTICE_RETRIES_EXHAUSTED' | 'PAYMENT_NOTICE_UNKNOWN_UNRESOLVED'
-    | 'PAYMENT_NOTICE_DIGEST_MISMATCH' | 'PAYMENT_NOTICE_TEMPLATE_MISSING' | 'PAYMENT_NOTICE_UNKNOWN_EXPIRED';
+    | 'PAYMENT_NOTICE_SEND_FAILED' | 'PAYMENT_NOTICE_DIGEST_MISMATCH' | 'PAYMENT_NOTICE_TEMPLATE_MISSING' | 'PAYMENT_NOTICE_UNKNOWN_EXPIRED';
 }
 
 export interface SendNoticeDeps {
@@ -151,6 +151,21 @@ export async function sendPaymentNotice(db: Rpc, noticeId: string, deps: SendNot
     await finish(db, notice.id, attempt, 'unknown', null, last.code);
     retries += 1;
     await sleep(delay);
+    const refreshed = await db.rpc('payment_notice_prepare', { p_id: notice.id });
+    if (refreshed.error) throw new PaymentNoticeError('PAYMENT_NOTICE_UNAVAILABLE');
+    if (refreshed.data === null) return { outcome: 'done' };
+    const live = prepared.parse(refreshed.data);
+    if (live.erasing) {
+      decision = await claim(); // SQL skips the erased account, including uncertain rows.
+      break;
+    }
+    const liveDigest = noticeDigest({ to: normalizeMailbox(live.email) ?? '', locale: PAYMENT_NOTICE_LOCALE,
+      version: template.version, rendered: template.render(live.templateParams) });
+    if (liveDigest !== digest) {
+      decision = await rpc(db, 'payment_notice_claim',
+        { p_id: notice.id, p_digest: liveDigest, p_template_version: template.version, p_actor: actor }, claimed);
+      break;
+    }
     decision = await claim();
   }
   switch (decision.decision) {

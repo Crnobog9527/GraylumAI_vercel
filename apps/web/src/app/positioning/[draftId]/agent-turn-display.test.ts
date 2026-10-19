@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from "vitest";
+import { REOPENED_HINT } from "@/components/chat-display/turn-steps-model";
 import {
   AGENT_TURN_BODY_LIMIT,
   INVALID_REPLY_NOTICE,
@@ -100,6 +101,11 @@ describe("mentorReplyDisplay: every other body kind", () => {
     const notice = (extra: Partial<MentorReplySource>) => mentorReplyDisplay(source(null, extra));
     expect(notice({})).toEqual({ text: "", card: null, notice: { tone: "warning", text: "回复暂未完成，请继续核对。" } });
     expect(notice({ busy: true }).notice).toEqual({ tone: "status", text: "正在回复…", busy: true });
+    // After a reload the server may still be advancing the turn: say so until the grace period is over, then ask for a check.
+    expect(notice({ active: true, state: "running" }).notice).toEqual({ tone: "status", text: REOPENED_HINT, busy: true });
+    expect(notice({ active: true, state: "prepared" }).notice?.busy).toBe(true);
+    expect(notice({ active: true, state: "running", stale: true }).notice?.text).toBe("回复暂未完成，请继续核对。");
+    expect(notice({ active: false, state: "running" }).notice?.text).toBe("回复暂未完成，请继续核对。");
     expect(notice({ state: "cancelled" }).notice?.text).toContain("本次执行已停止，未取得可用回复");
     expect(notice({ state: "cost_pending" }).notice?.text).toContain("费用仍待核实");
     expect(notice({ unavailableReason: "output_truncated" }).notice?.text).toBe(OUTPUT_TRUNCATED_NOTICE);

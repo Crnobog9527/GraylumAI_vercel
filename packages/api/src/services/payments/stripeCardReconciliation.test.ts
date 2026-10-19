@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type Stripe from 'stripe';
 import type { SupabaseClient } from '@supabase/supabase-js';
 const mocks = vi.hoisted(() => ({ scope: vi.fn(), ref: vi.fn(), recover: vi.fn(), invoice: vi.fn(), refund: vi.fn(),
-  stripeId: vi.fn(), stop: vi.fn(), settle: vi.fn() }));
+  stripeId: vi.fn(), stop: vi.fn(), settle: vi.fn(), disputeRepair: vi.fn(), disputeRefundRepair: vi.fn() }));
 vi.mock('./methodOrderSettle', () => ({ settleOpenMethodOrders: mocks.settle }));
 vi.mock('./stripeCheckoutPersistence', () => ({ resolveStripeScope: mocks.scope }));
 vi.mock('./stripeReferences', () => ({ findStripeReference: mocks.ref }));
@@ -12,6 +12,8 @@ vi.mock('./cardSubscriptionWebhook', () => ({ handleCardSubscriptionInvoice: moc
 vi.mock('./cardRefundWebhook', () => ({ handleCardRefund: mocks.refund }));
 vi.mock('./cardUpgrade', () => ({ cardStripeSubscription: mocks.stripeId }));
 vi.mock('./cardSubscriptionStop', () => ({ stopRenewalAfterReview: mocks.stop }));
+vi.mock('./disputes', () => ({ reconcilePaymentDisputes: mocks.disputeRepair }));
+vi.mock('./disputeRenewalRefund', () => ({ reconcileDisputeRenewalRefunds: mocks.disputeRefundRepair }));
 import { reconcileStripeCardPayments } from './stripeCardReconciliation';
 
 const ORDER = '00000000-0000-4000-8000-000000000001';
@@ -56,6 +58,8 @@ describe('PAY-STRIPE-MP daily Stripe card reconciliation', () => {
     mocks.scope.mockReset().mockResolvedValue({ mode: 'test', merchant: 'fixture' });
     for (const mock of [mocks.recover, mocks.invoice, mocks.refund, mocks.stop]) mock.mockReset();
     mocks.settle.mockReset().mockResolvedValue({ checked: 0, repaired: 0, complete: true, findings: [] });
+    mocks.disputeRepair.mockReset().mockResolvedValue({ checked: 0, failed: 0, complete: true });
+    mocks.disputeRefundRepair.mockReset().mockResolvedValue({ checked: 0, failed: 0, complete: true });
     mocks.stripeId.mockReset().mockImplementation(async (_db: unknown, _scope: unknown, local: string) => `sub_${local}`);
   });
   it('retries a requested stop Stripe has not confirmed (an upgrade-replaced Pro) and reports one that still fails', async () => {
@@ -92,6 +96,23 @@ describe('PAY-STRIPE-MP daily Stripe card reconciliation', () => {
     expect(f.stripe.checkout.sessions.list).toHaveBeenCalled();
     mocks.scope.mockResolvedValue({ mode: 'test', merchant: 'fixture' });
     await expect(f.run({ expectedMode: 'live' })).rejects.toThrow('MODE_MISMATCH');
+  });
+  it('runs dispute repair before budget-consuming history scans and skips them when the dispute budget is exhausted', async () => {
+    const f = fixture({ sessions: [session()] });
+    mocks.disputeRepair.mockImplementation(async () => ({ checked: 1, failed: 0, complete: false }));
+    const result = await f.run({ budgetMs: -1 });
+    expect(mocks.disputeRepair.mock.invocationCallOrder[0]).toBeLessThan(f.stripe.checkout.sessions.list.mock.invocationCallOrder[0] ?? Infinity);
+    expect(mocks.disputeRefundRepair.mock.invocationCallOrder[0]).toBeLessThan(f.stripe.checkout.sessions.list.mock.invocationCallOrder[0] ?? Infinity);
+    expect(f.stripe.checkout.sessions.list).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ success: false, complete: false, checked: 1,
+      findings: [{ kind: 'scan_incomplete', code: 'PAY_DISPUTE_SCAN_INCOMPLETE' }] });
+  });
+  it('reserves at least ten seconds of the shared backstop for mandatory renewal refunds', async () => {
+    const f = fixture();
+    await expect(f.run({ budgetMs: 40_000 })).resolves.toMatchObject({ success: true });
+    const disputeDeadline = mocks.disputeRepair.mock.calls[0]?.[3] as number;
+    const refundDeadline = mocks.disputeRefundRepair.mock.calls[0]?.[3] as number;
+    expect(refundDeadline - disputeDeadline).toBeGreaterThanOrEqual(10_000);
   });
   it('delivers a paid card checkout whose webhook was lost, through the same first-payment recovery', async () => {
     const f = fixture({ orders: { [ORDER]: card() }, sessions: [session()] });
@@ -138,7 +159,7 @@ describe('PAY-STRIPE-MP daily Stripe card reconciliation', () => {
     });
     await expect(f.run()).resolves.toMatchObject({ success: true, repaired: 1 });
     expect(mocks.invoice.mock.calls.map(call => call[2])).toEqual(['in_cycle', 'in_legacy']);
-    expect(mocks.invoice).toHaveBeenCalledWith(f.db, f.stripe, 'in_cycle', 'invoice.paid', undefined, undefined);
+    expect(mocks.invoice).toHaveBeenCalledWith(f.db, f.stripe, 'in_cycle', 'invoice.paid', undefined, undefined, undefined);
     // Recorded but without its tax fact: replayed through the idempotent renewal handler.
     const untaxed = fixture({ orders: { [ORDER]: card({ fulfilled_at: 'x', payment_amount_facts: [{ kind: 'paid' }] }) },
       invoices: [renewal], recorded: new Set(['payment:in_cycle']) });
@@ -149,7 +170,7 @@ describe('PAY-STRIPE-MP daily Stripe card reconciliation', () => {
       recorded: new Set(['payment:in_cycle']) });
     mocks.invoice.mockReset().mockResolvedValue(true);
     await expect(review.run()).resolves.toMatchObject({ success: true, repaired: 0 });
-    expect(mocks.invoice).toHaveBeenCalledWith(review.db, review.stripe, 'in_cycle', 'invoice.paid', undefined, undefined);
+    expect(mocks.invoice).toHaveBeenCalledWith(review.db, review.stripe, 'in_cycle', 'invoice.paid', undefined, undefined, undefined);
   });
   it('records an external refund whose webhook was lost, from the refund events of the window', async () => {
     // re_late was created long before the window and succeeded inside it: its refund.updated event is in the window.
@@ -186,7 +207,7 @@ describe('PAY-STRIPE-MP daily Stripe card reconciliation', () => {
     // Past the time budget the scan stops (the cron must still return) and reports an incomplete scan.
     const slow = fixture({ sessions: [session(), session({ id: 'cs_2' })], invoices: [{ id: 'in_1' }] });
     await expect(slow.run({ budgetMs: -1 })).resolves.toMatchObject({ complete: false, checked: 0,
-      findings: [{ kind: 'scan_incomplete', object: 'checkout', code: 'TIME_BUDGET' }] });
+      findings: [{ kind: 'scan_incomplete', object: 'subscription', code: 'TIME_BUDGET' }] });
     expect(slow.stripe.invoices.list).not.toHaveBeenCalled();
     f.stripe.invoices.list = vi.fn(async () => { throw new Error('stripe down'); });
     await expect(f.run()).rejects.toThrow('stripe down');

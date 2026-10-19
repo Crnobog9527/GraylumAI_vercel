@@ -172,6 +172,11 @@ describe("a stopped turn while it saves", () => {
       expect(turnNeedsRetry({ state, billing: stopBilling })).toBe(false);
     }
     expect(turnNeedsRetry({ state: "interrupted", billing: null })).toBe(true);
+    // A reloaded page: no retry during the grace period, and a still-"running" turn may retry once it is over.
+    expect(turnNeedsRetry({ state: "prepared", billing: null }, false)).toBe(false);
+    expect(turnNeedsRetry({ state: "running", billing: null }, false)).toBe(false);
+    expect(turnNeedsRetry({ state: "running", billing: null }, true)).toBe(true);
+    expect(turnNeedsRetry({ state: "running", billing: null })).toBe(false);
     expect(stopSaving({ state: "completed", billing: stopBilling })).toBe(false);
     // An ordinary cancellation owns the turn instead.
     expect(userStopped({ state: "cost_pending", billing: { pausedReason: "user_stop", cancelRequested: true } })).toBe(false);

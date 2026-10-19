@@ -88,7 +88,7 @@ for (const width of [1440, 375]) {
       const calls = page.getByRole("list", { name: "搜索记录" }).getByRole("listitem");
       await ui(calls).toHaveCount(5);
       await ui(calls.nth(2)).toContainText("待核");
-      await ui(calls.nth(3)).toContainText("未取到");
+      await ui(calls.nth(3)).toContainText("这次没查到");
       await ui(calls.nth(4)).toContainText("正在搜");
       await shot(page, `research-${width}-before`);
 
@@ -105,10 +105,10 @@ for (const width of [1440, 375]) {
 
       const candidates = page.getByRole("region", { name: "对标候选账号" });
       await ui(candidates.getByRole("group", { name: "候选账号" }).getByRole("checkbox")).toHaveCount(10);
-      for (const box of await candidates.getByRole("group", { name: "头部参考账号" }).getByRole("checkbox").all()) {
+      for (const box of await candidates.getByRole("group", { name: "头部账号" }).getByRole("checkbox").all()) {
         await ui(box).toBeDisabled();
       }
-      await ui(candidates.getByText("只作参考、不计入").first()).toBeVisible();
+      await ui(candidates.getByText("只作参考").first()).toBeVisible();
       await ui(candidates.getByText("AI 教练通过数据接口，直接抓取对标账号在社交媒体平台上的真实公开数据。")).toBeVisible();
       const confirmPick = candidates.getByRole("button", { name: "确认选择" });
       await candidates.getByText("通勤衣橱研究所").click();
@@ -123,8 +123,8 @@ for (const width of [1440, 375]) {
       await ui(followUp.getByText("至少选 1 个，最多 2 个", { exact: false })).toBeVisible();
 
       const table = page.getByRole("region", { name: "对标表" });
-      await ui(table.getByText("缺失 / 未取到").first()).toBeVisible();
-      await ui(table).toContainText("合格 3 个");
+      await ui(table.getByText("这次没查到").first()).toBeVisible();
+      await ui(table).toContainText("可以照着学 3 个");
       await table.getByRole("button", { name: "刷新 sample_1 的数据" }).click();
       await ui(table.getByRole("button", { name: "刷新 sample_1 的数据" })).toHaveText("已申请刷新");
       await ui(table.getByRole("button", { name: "刷新 sample_1 的数据" })).toBeDisabled();
@@ -136,7 +136,7 @@ for (const width of [1440, 375]) {
       await ui(charges.getByRole("listitem")).toHaveCount(5);
       await ui(charges).toContainText("0.3 积分");
       await ui(charges).toContainText("结果待核，不收费");
-      const evidence = page.getByRole("region", { name: "取数记录" });
+      const evidence = page.getByRole("region", { name: "搜索记录" });
       await ui(evidence.locator("li[class*=evidence]")).toHaveCount(3);
       await ui(evidence.getByRole("link", { name: /javascript/ })).toHaveCount(0);
       await ui(evidence).toContainText("另有 1 个来源");

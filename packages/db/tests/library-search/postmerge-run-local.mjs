@@ -31,8 +31,8 @@ const sql=input=>docker(['exec','-i',name,'psql','-X','-qAt','-U','postgres','-d
 const fp=read('packages/db/tests/baseline/fingerprint.sql');
 const objectSql=fp.slice(0,fp.indexOf('-- FINAL'))+'SELECT jsonb_object_agg(k,d ORDER BY k) FROM grouped;';
 const snapshot=()=>JSON.parse(ok(sql(objectSql)));
-// Controller assigned 0309 for this repair; final queue order is confirmed before merge.
-const migrationPath='packages/db/migrations/0309_library_search_review.sql';
+// Migration 0316 assigned by the controller (2026-10-19).
+const migrationPath='packages/db/migrations/0316_library_search_review.sql';
 const migration=read(migrationPath);
 const report={development,build:null,checks:[],failed:null};
 let client;

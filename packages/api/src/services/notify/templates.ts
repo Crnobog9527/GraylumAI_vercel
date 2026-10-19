@@ -4,12 +4,22 @@ import { createHash } from 'node:crypto';
 /**
  * PAY-NOTIFY payment notices. The kinds must match the CHECK on public.payment_notices. Templates
  * are registered per kind by PR-N2 (scans) and CHARGEBACK; PR-N1 only ships the sending machinery.
+ * card_renewal_upcoming is retained for existing records and administrator resend; cron no longer
+ * creates or dispatches it because Stripe/Link owns card renewal reminders.
  */
 export const PAYMENT_NOTICE_KINDS = [
   'card_renewal_upcoming', 'wallet_founder_expiry', 'wallet_plan_expiry',
   'restore_pro_expiry', 'dispute_won_resubscribe', 'founder_ended',
 ] as const;
 export type PaymentNoticeKind = typeof PAYMENT_NOTICE_KINDS[number];
+/** Enqueue-capable kinds exclude the legacy card type; persisted history and resend still accept it. */
+export type PaymentNoticeEnqueueKind = Exclude<PaymentNoticeKind, 'card_renewal_upcoming'>;
+
+/** Kinds that the daily scanner may enqueue; card renewal remains a persisted legacy kind. */
+export const PAYMENT_NOTICE_CRON_KINDS = [
+  'wallet_founder_expiry', 'wallet_plan_expiry', 'restore_pro_expiry', 'founder_ended',
+] as const satisfies readonly PaymentNoticeKind[];
+export type PaymentNoticeCronKind = typeof PAYMENT_NOTICE_CRON_KINDS[number];
 
 /** N4 (Owner 2026-10-13): one language until the interface has more; mails are Chinese + English. */
 export const PAYMENT_NOTICE_LOCALE = 'zh-CN+en';

@@ -1978,6 +1978,7 @@ describe('adminRouter lightweight admin dashboards', () => {
         allow_fusion_review: true,
         allow_fusion_compare: true,
         library_storage_bytes: 500_000_000,
+        positioning_profile_limit: 3,
               }],
               error: null,
             };
@@ -2026,6 +2027,7 @@ describe('adminRouter lightweight admin dashboards', () => {
         allow_fusion_review: true,
         allow_fusion_compare: true,
         library_storage_bytes: 500_000_000,
+        positioning_profile_limit: 3,
       }],
     });
     expect(adminQueries).toEqual(['system_settings', 'membership_plans']);

@@ -2,10 +2,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type Stripe from 'stripe';
 import type { SupabaseClient } from '@supabase/supabase-js';
-const mocks = vi.hoisted(() => ({ scope: vi.fn(), cash: vi.fn(), report: vi.fn() }));
+const mocks = vi.hoisted(() => ({ scope: vi.fn(), cash: vi.fn(), report: vi.fn(), stopPrior: vi.fn() }));
 vi.mock('../analytics/gaPurchase', () => ({ reportGaPurchase: mocks.report }));
 vi.mock('./stripeCheckoutPersistence', () => ({ resolveStripeScope: mocks.scope }));
 vi.mock('./walletPaymentEvidence', () => ({ readWalletPaymentEvidence: mocks.cash }));
+vi.mock('./cardUpgrade', () => ({ stopPriorAfterUpgrade: mocks.stopPrior }));
+vi.mock('./disputePayment', () => ({ readDisputePayment: vi.fn(async () => ({ paymentIntentId: 'pi_fixture',
+ chargeId: 'ch_fixture', invoiceId: 'in_1', subscriptionId: 'sub_1', paymentAt: '2026-10-18T00:00:00Z' })) }));
+vi.mock('./disputes', () => ({ resumeOrderDisputes: vi.fn(async () => {}) }));
+vi.mock('./disputeRenewalRefund', () => ({ refundDisputedRenewal: vi.fn(async () => 'succeeded') }));
 import { recoverWalletCheckout } from './walletWebhook';
 function fixture(overrides = {}) {
   const order = { referenceMissing: false, orderMissing: false, id: 'order', user_id: 'user', payment_method: 'alipay', item_type: 'membership_plan',
@@ -21,15 +26,17 @@ function fixture(overrides = {}) {
 }
 describe('wallet callback/recovery', () => {
   beforeEach(() => {
+    mocks.report.mockReset();
+    mocks.stopPrior.mockReset().mockResolvedValue(undefined);
     mocks.scope.mockReset().mockResolvedValue({ mode: 'test', merchant: 'fixture' });
     mocks.cash.mockReset().mockResolvedValue({ paymentId: 'pi_1', checkoutId: 'cs_wallet', amount: 6900,
       currency: 'usd', paidAt: '2028-01-31T00:00:00.000Z' });
   });
   it('uses verified payment time with leap-year month clamping', async () => {
     const f = fixture(); expect(await f.run()).toBe(true);
-    expect(f.db.rpc).toHaveBeenCalledWith('pay_waffo_fulfill_payment', expect.objectContaining({
-      p_order: 'order', p_start: '2028-01-31T00:00:00.000Z', p_end: '2028-02-29T00:00:00.000Z', p_payment: 'pi_1',
-    }));
+    expect(f.db.rpc).toHaveBeenCalledWith('pay_dispute_fulfill', expect.objectContaining({ p_facts: expect.objectContaining({
+      orderId: 'order', start: '2028-01-31T00:00:00.000Z', end: '2028-02-29T00:00:00.000Z', paymentId: 'pi_1',
+    }) }));
   });
   it('reports the GA purchase only from the call that newly delivered the order (ANALYTICS 0280)', async () => {
     mocks.report.mockReset().mockResolvedValue(true);
@@ -42,6 +49,15 @@ describe('wallet callback/recovery', () => {
       await replay.run();
     }
     expect(mocks.report).toHaveBeenCalledTimes(1);
+  });
+  it('keeps the prior plan when fulfillment commits under a dispute freeze', async () => {
+    const f = fixture();
+    f.db.rpc.mockResolvedValue({ data: { state: 'fulfilled', duplicate: false, disputeFrozen: true }, error: null });
+    await expect(f.run()).resolves.toBe(true);
+    const { resumeOrderDisputes } = await import('./disputes');
+    expect(resumeOrderDisputes).toHaveBeenCalled();
+    expect(mocks.stopPrior).not.toHaveBeenCalled();
+    expect(mocks.report).not.toHaveBeenCalled();
   });
   it('does not grant for pending, timeout, live, or unimplemented transitions', async () => {
     const f = fixture(); mocks.cash.mockResolvedValue(null); expect(await f.run()).toBe(true);
@@ -58,7 +74,7 @@ describe('wallet callback/recovery', () => {
     mocks.scope.mockResolvedValue({ mode: 'live', merchant: 'fixture' });
     const f = fixture({ payment_mode: 'live' }); expect(await f.run()).toBe(true);
     expect(mocks.cash).toHaveBeenCalledWith(expect.objectContaining({ scope: { mode: 'live', merchant: 'fixture' } }));
-    expect(f.db.rpc).toHaveBeenCalledWith('pay_waffo_fulfill_payment', expect.objectContaining({ p_order: 'order' }));
+    expect(f.db.rpc).toHaveBeenCalledWith('pay_dispute_fulfill', expect.objectContaining({ p_facts: expect.objectContaining({ orderId: 'order' }) }));
   });
   it('recovers a successful provider session when the original mapping write was lost', async () => {
     const originalId = '00000000-0000-4000-8000-000000000001';
@@ -67,7 +83,7 @@ describe('wallet callback/recovery', () => {
       metadata: { orderId: originalId }, expires_at: 2000000000 }) } } } as unknown as Stripe;
     expect(await f.run(stripe)).toBe(true);
     expect(f.db.rpc.mock.calls[0]).toEqual(['pay_waffo_bind_checkout', expect.objectContaining({ p_order: originalId, p_checkout: 'cs_wallet' })]);
-    expect(f.db.rpc.mock.calls[1]?.[0]).toBe('pay_waffo_fulfill_payment');
+    expect(f.db.rpc.mock.calls[1]?.[0]).toBe('pay_dispute_fulfill');
   });
   it('acknowledges an unpaid session that is not ours (no order, or an order this database never had)', async () => {
     const session = (metadata: Record<string, string>, payment_status = 'unpaid') => ({ checkout: { sessions: { retrieve: vi.fn()
@@ -104,7 +120,7 @@ describe('wallet callback/recovery', () => {
   });
   it('does not let a late failure event undo a verified successful payment', async () => {
     const f = fixture(); await f.run({} as Stripe, 'checkout.session.async_payment_failed');
-    expect(f.db.rpc).toHaveBeenCalledWith('pay_waffo_fulfill_payment', expect.anything());
+    expect(f.db.rpc).toHaveBeenCalledWith('pay_dispute_fulfill', expect.anything());
     expect(f.db.rpc).not.toHaveBeenCalledWith('pay_waffo_observe_qualification', expect.anything());
   });
   it('leaves legacy orders to their existing handler', async () => {
