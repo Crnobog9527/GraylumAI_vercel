@@ -47,7 +47,7 @@ export const ERASURE_CONTENT_TABLES: ReadonlySet<string> = new Set([
   'agent_confirmed_preferences_deleted', 'agent_preference_requests_deleted', 'artifact_accounts_deleted',
   'opc_data_events', 'runtime_session_names_deleted', 'fusion_call_outputs', 'fusion_reviews', 'fusion_compares',
   'research_selection_cards_deleted', 'research_account_fetches_deleted', 'research_refresh_grants_deleted',
-  'research_discoveries_deleted', 'research_benchmarks_deleted',
+  'research_discoveries_deleted', 'research_benchmarks_deleted', 'research_benchmark_shortfalls_deleted',
 ]);
 
 /** B1 returns table counts, or a transaction-barrier refusal; neither an empty object nor unknown keys prove cleanup. */

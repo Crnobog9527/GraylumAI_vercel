@@ -2,6 +2,7 @@
 // The one JSON shape every research tool returns to the model (plan §2.2, §2.3). Supplier text is data
 // inside fields, never instructions; failures are explicit states, never an empty list posing as "no results".
 import type { ResearchCallResult, ResearchItem } from '../vendors/types';
+import type { ShortfallNotice } from '../runtime/shortfall';
 
 export const TOOL_STATUSES = ['ok', 'partial', 'unavailable', 'not_supported', 'not_confirmed', 'budget_exhausted'] as const;
 export type ToolStatus = typeof TOOL_STATUSES[number];
@@ -34,6 +35,8 @@ export interface ToolEnvelope {
   nextStep?: string;
   availableCandidates?: number;
   requiredCandidates?: number;
+  /** BENCHMARK-SHORTFALL (0320): the host's choice card the coach presents now. */
+  shortfall?: ShortfallNotice;
 }
 
 /** Adapter outcome → tool status. A confirmed failure and an unknown result both read as `unavailable`. */
@@ -75,6 +78,7 @@ export interface EnvelopeInput {
   nextStep?: string;
   availableCandidates?: number;
   requiredCandidates?: number;
+  shortfall?: ShortfallNotice;
 }
 
 /**
@@ -93,6 +97,7 @@ export function toolEnvelope(input: EnvelopeInput, maxBytes = TOOL_RESULT_MAX_BY
     ...(input.nextStep ? { nextStep: input.nextStep } : {}),
     ...(input.availableCandidates !== undefined ? { availableCandidates: input.availableCandidates } : {}),
     ...(input.requiredCandidates !== undefined ? { requiredCandidates: input.requiredCandidates } : {}),
+    ...(input.shortfall ? { shortfall: input.shortfall } : {}),
   };
   const full = (input.items ?? []).map((item, index) => ({
     ...(input.evidenceId ? { ref: `${input.evidenceId}#${index + 1}` } : {}),

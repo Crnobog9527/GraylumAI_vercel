@@ -2,6 +2,7 @@
 import { accountMetrics, suppliedWholeHistory, type EvidenceItem } from '../benchmark/metrics';
 import { classifyAccount, qualifyFetchedAccount } from '../benchmark/classify';
 import { authorizeBenchmarkFetch } from '../tools/authorize';
+import { shortfallNotice } from './shortfall';
 import { toolEnvelope } from '../tools/envelope';
 import type { ResearchToolArgs } from '../tools/schemas';
 import { BENCHMARK_EXTRA_POST_PAGES, BENCHMARK_ROUTE_KINDS, BENCHMARK_RULES } from '../vendors/config';
@@ -150,6 +151,10 @@ export async function benchmarkFetch(ctx: ResearchToolContext, args: ResearchToo
       throw error;
     }
   }
+  // The fetch went through every selected account (none left for a later reply): the qualified count is final for this
+  // selection, so the host may now offer the shortfall choice (0320 decides). A stop (round limit, balance) is not the end.
+  const shortfall = stopReason ? undefined : await shortfallNotice(ctx);
   return toolEnvelope({ status: stopReason && rows.length === 0 ? (stopBudget ? 'budget_exhausted' : 'unavailable')
-    : partial ? 'partial' : 'ok', reason: stopReason ?? (partial ? 'ACCOUNT_DATA_INCOMPLETE' : null), items: rows });
+    : partial ? 'partial' : 'ok', reason: stopReason ?? (partial ? 'ACCOUNT_DATA_INCOMPLETE' : null), items: rows,
+    ...(shortfall ? { shortfall } : {}) });
 }
