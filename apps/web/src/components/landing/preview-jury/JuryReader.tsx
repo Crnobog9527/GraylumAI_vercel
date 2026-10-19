@@ -130,7 +130,7 @@ function Glance({ detail, chapters, source, adoption, failed, onJump }: {
           {failed && keptAsIs(detail) ? (flagged ? `下面标亮的 ${flagged} 章有评审的小意见，供你参考；报告保持原样。` : '报告保持原样。')
             : failed ? `下面标亮的 ${flagged} 章有评审意见，你可以照着自己修改，或者重新发起一次评审。`
             : adoption?.result ? `这次评审已经选过了，下面标亮的 ${flagged} 章显示的是最后用的版本。`
-            : adoption ? `看完标亮的 ${flagged} 章，逐章选择采用或保留，选完点「确认」。`
+            : adoption ? `看完标亮的 ${flagged} 章，逐章选择采用或保留，选完点「确认」。请注意甄别是否采纳修订意见：评审的意见不一定都对。`
               : '评审团认为这份报告不需要修改，下面是他们对各章的意见。'}
         </span>
         <span className={styles.nextFacts}>

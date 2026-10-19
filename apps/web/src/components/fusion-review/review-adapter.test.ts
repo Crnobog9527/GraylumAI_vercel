@@ -59,6 +59,8 @@ describe('review page data', () => {
     expect(endedNotice('stopped', '')).toContain('已经结束');
     expect(startErrorText('FUSION_REVIEW_ACTIVE')).toContain('正在进行');
     expect(startErrorText('SOMETHING_ELSE')).toBe('没能开始评审，请稍后再试。');
+    // Three unfinished reviews of one report version stop reviews of that version (0236); a new version counts afresh (Owner 2026-10-20).
+    expect(startErrorText('FUSION_REVIEW_VERSION_BLOCKED')).toBe('暂时无法评审这份报告。可以修改报告后再试，或联系客服。');
   });
 });
 
