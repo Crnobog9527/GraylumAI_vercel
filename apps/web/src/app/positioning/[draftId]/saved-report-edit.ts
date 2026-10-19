@@ -37,17 +37,6 @@ export function writeDraft(projectId: string, versionId: string, text: string, s
 export function clearDraft(projectId: string, versionId: string, storage: Store | null = store()): void {
   try { storage?.removeItem(draftKey(projectId, versionId)); } catch { /* nothing to clear */ }
 }
-/** A draft of an older source version can never be finalized: remove every draft of this project but the current one's. */
-export function clearStaleDrafts(projectId: string, currentVersionId: string, storage: Store | null = store()): void {
-  try {
-    if (!storage) return;
-    const keep = draftKey(projectId, currentVersionId), own = `${PREFIX}${projectId}:`;
-    const stale: string[] = [];
-    for (let i = 0; i < storage.length; i++) { const key = storage.key(i); if (key && key.startsWith(own) && key !== keep) stale.push(key); }
-    for (const key of stale) storage.removeItem(key);
-  } catch { /* storage unavailable */ }
-}
-
 const errors: Record<string, string> = {
   REPORT_AUTH_REQUIRED: "登录状态需要重新验证，请重新登录后再试。你的修改仍保留在编辑框里。",
   REPORT_REVISION_DENIED: "这份报告现在不能修改。",

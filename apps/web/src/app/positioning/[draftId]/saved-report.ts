@@ -4,7 +4,7 @@ import type { ReportData, SanitizedReportData } from "@repo/api/src/shared/repor
 /** The formal version's report as `opc.read` returns it (only what the report entry needs). */
 export type FormalReport = {
   available?: boolean; id?: string | null;
-  report?: { generatedReport?: { body?: string; data?: unknown; dataFrom?: string } | null } | null;
+  report?: { generatedReport?: { body?: string; data?: unknown; dataFrom?: string; source?: string } | null } | null;
 } | null | undefined;
 
 /**
@@ -33,3 +33,11 @@ export function savedFormalStrategy(report: FormalReport):
   return { data: { v: 1, data: stored.data as ReportData, dropped: list(stored.dropped), fallback: {} },
     textEdited: list(stored.textEdited), fromSource: saved?.dataFrom === "source_version" };
 }
+
+/**
+ * Only a version made by a jury adoption (R14, `source: "review_revision"`) has no generated report behind it, so only it
+ * is edited through R14 (Owner 2026-10-20). An ordinary finalized report carries its `executionId` instead and stays as it is,
+ * whatever the separate execution lookup says at the moment.
+ */
+export const savedFormalEditable = (report: FormalReport) =>
+  Boolean(report?.available && report.id && report.report?.generatedReport?.source === "review_revision");

@@ -10,7 +10,7 @@ import {
   bodyFromEditor, editorChanged, editorText, hasDataFence, REPORT_DOC_TEXT, REPORT_MAX_CHARACTERS, reportLength, requestFor,
   type PendingRequest,
 } from "./report-document";
-import { clearDraft, clearStaleDrafts, readDraft, SAVED_EDIT_TEXT, savedEditError, writeDraft } from "./saved-report-edit";
+import { clearDraft, readDraft, SAVED_EDIT_TEXT, savedEditError, writeDraft } from "./saved-report-edit";
 
 type Props = {
   draftId: string; projectId: string;
@@ -44,9 +44,9 @@ export function SavedReportEditor({ draftId, projectId, versionId, body, view, b
   const unsaved = working || (draft !== null && draft !== original);
   useEffect(() => { onUnsaved?.(unsaved); }, [unsaved, onUnsaved]);
   useEffect(() => () => onUnsaved?.(false), [onUnsaved]);
-  // A draft of an older version can never be finalized; one of this version is offered back after a closed page.
+  // A draft of this version is offered back after a closed page. Nothing is deleted here: a stale or cached view must not erase
+  // another tab's newer draft; a draft is removed only once the server says its own source is stale (below) or it is finalized.
   useEffect(() => {
-    clearStaleDrafts(projectId, versionId);
     const kept = readDraft(projectId, versionId);
     if (kept !== null && kept !== original) { setDraft(kept); setRestored(true); }
   }, [projectId, versionId, original]);

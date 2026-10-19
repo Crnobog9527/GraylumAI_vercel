@@ -1,7 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { clearDraft, clearStaleDrafts, draftKey, readDraft, SAVED_EDIT_TEXT, savedEditError, writeDraft } from "./saved-report-edit";
+import { savedFormalEditable } from "./saved-report";
+import { clearDraft, readDraft, SAVED_EDIT_TEXT, savedEditError, writeDraft } from "./saved-report-edit";
 
 vi.mock("@/trpc/client", () => {
   const mutation = () => ({ mutateAsync: vi.fn(), isPending: false });
@@ -29,19 +30,11 @@ it("keeps the draft per project and per source version, and clears it", () => {
   expect(readDraft("q", "v1", s)).toBe("别的项目");
 });
 
-it("clears the drafts of older source versions of this project only (the source version is no longer current)", () => {
-  const s = memory();
-  writeDraft("p", "old", "旧", s); writeDraft("p", "now", "新", s); writeDraft("q", "old", "别的项目", s);
-  s.setItem("unrelated", "x");
-  clearStaleDrafts("p", "now", s);
-  expect([...s.data.keys()].sort()).toEqual([draftKey("p", "now"), draftKey("q", "old"), "unrelated"].sort());
-});
-
 it("never throws when the browser storage is blocked, full or missing", () => {
-  expect(() => { writeDraft("p", "v", "x", broken); clearDraft("p", "v", broken); clearStaleDrafts("p", "v", broken); }).not.toThrow();
+  expect(() => { writeDraft("p", "v", "x", broken); clearDraft("p", "v", broken); }).not.toThrow();
   expect(readDraft("p", "v", broken)).toBeNull();
   expect(readDraft("p", "v", null)).toBeNull();
-  expect(() => { writeDraft("p", "v", "x", null); clearStaleDrafts("p", "v", null); }).not.toThrow();
+  expect(() => { writeDraft("p", "v", "x", null); }).not.toThrow();
 });
 
 it("explains each refusal in fixed words, and marks a stale source version so the draft is dropped", () => {
@@ -59,4 +52,14 @@ it("shows the saved report and an edit button first, with no editor until the us
   expect(html).toContain("已保存的报告");
   expect(html).toContain(SAVED_EDIT_TEXT.edit);
   expect(html).not.toContain("<textarea");
+});
+
+it("edits only a version made by a jury adoption, never an ordinary finalized report (whatever the execution lookup says)", () => {
+  const adopted = { available: true, id: "v2", report: { generatedReport: { body: "## A\nx", source: "review_revision" } } };
+  const ordinary = { available: true, id: "v1", report: { generatedReport: { body: "## A\nx" } } };
+  expect(savedFormalEditable(adopted)).toBe(true);
+  expect(savedFormalEditable(ordinary)).toBe(false);
+  expect(savedFormalEditable({ ...adopted, available: false })).toBe(false);
+  expect(savedFormalEditable({ ...adopted, id: null })).toBe(false);
+  expect(savedFormalEditable(null)).toBe(false);
 });

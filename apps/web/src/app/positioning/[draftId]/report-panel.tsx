@@ -23,7 +23,7 @@ import { REPORT_OUTLINE_MIN_CHAPTERS, ReportWithOutline } from "@/components/cha
 import { useReportOutline } from "@/components/chat-display/use-report-outline";
 import { ReportView } from "@/components/chat-display/report-view/report-view";
 import { REPORT_VIEW_TEXT } from "@/components/chat-display/report-view/report-text";
-import { savedFormalReport, savedFormalStrategy, type FormalReport } from "./saved-report";
+import { savedFormalEditable, savedFormalReport, savedFormalStrategy, type FormalReport } from "./saved-report";
 
 type Props = {
   draftId: string; sessionId: string; projectId: string; roundId: string; confirmed: boolean; busy: boolean;
@@ -69,7 +69,7 @@ function RoundReportEntry(props: Props) {
       {open && (paywall ? <ReportPaywallDialog onClose={() => setOpen(false)} />
         : <ReportDialog report={report} savedBody={report.executionId ? null : saved}
           savedStrategy={report.executionId ? null : savedFormalStrategy(props.report)} busy={props.busy}
-          edit={saved && !report.executionId && props.report?.id
+          edit={saved && !report.executionId && savedFormalEditable(props.report) && props.report?.id
             ? { draftId: props.draftId, projectId: props.projectId, versionId: props.report.id } : undefined}
           price={available.data?.priceCredits} onClose={() => setOpen(false)}
           onTopics={() => { setOpen(false); props.onTopics(); }} />)}
