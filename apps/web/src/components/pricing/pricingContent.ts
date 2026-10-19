@@ -4,7 +4,7 @@ import { faqItems } from '@/lib/landing-content';
 /**
  * Copy of the public pricing page (PAYWALL design v25 scene 5, MASTER_PLAN §2.1 items 50–51).
  * Rules: prices only from the server catalog; no predicted credit cost, no model names, no 7-day
- * refund on cards (only in the FAQ), no founder/first-month offers until PAY-WAFFO serves them,
+ * refund on cards (only in the FAQ), founder price and first month only from the server's public offers,
  * no features the backend does not have (studio team features, Fusion, profile limits).
  */
 export const PRICING_COPY = {
