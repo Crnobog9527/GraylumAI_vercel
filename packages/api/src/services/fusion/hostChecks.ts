@@ -47,12 +47,25 @@ export const DEBATE_RESPONSE_FORMAT = { type: 'json_schema', json_schema: { name
 /** One ruling per merged issue, filed under a template section (or 全文 for the whole report) so the result can be
  * shown section by section: the panel's final view, why, how to change it, who raised it and whether they split. */
 export const WHOLE_REPORT = '全文';
-export const ADJUDICATION_FORMAT = { type: 'object', additionalProperties: false,
+const adjudicationFormat = { type: 'object', additionalProperties: false,
   required: ['section', 'issue', 'reviewers', 'single', 'disputed', 'adopted', 'opinion', 'reason', 'fix'],
   properties: { section: str, issue: str, reviewers: { type: 'array', items: str }, single: { type: 'boolean' }, disputed: { type: 'boolean' },
     adopted: { type: 'boolean' }, opinion: str, reason: str, fix: str } } as const;
+export const REVISION_RESPONSE_FORMAT = { type: 'json_schema', json_schema: { name: 'review_revision', strict: true, schema: {
+  type: 'object', additionalProperties: false, required: ['adjudication', 'body', 'steps', 'changeNotes'], properties: {
+    adjudication: { type: 'array', items: adjudicationFormat },
+    body: { type: 'string' },
+    steps: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['stepId', 'fields'], properties: {
+      stepId: { type: 'string' }, fields: { type: 'array', items: { type: 'object', additionalProperties: false,
+        required: ['fieldId', 'value', 'changed'], properties: { fieldId: { type: 'string' }, value: { type: 'string' },
+          changed: { type: 'boolean' } } } } } } },
+    changeNotes: { type: 'array', items: { type: 'object', additionalProperties: false,
+      required: ['section', 'wordingOnly', 'fields', 'note'], properties: { section: { type: 'string' }, wordingOnly: { type: 'boolean' },
+        note: { type: 'string' }, fields: { type: 'array', items: { type: 'object', additionalProperties: false,
+          required: ['stepId', 'fieldId'], properties: { stepId: { type: 'string' }, fieldId: { type: 'string' } } } } } } } } } } } as const;
+
 /** Lenient parse: the JSON object itself, or the first fenced/embedded object. */
-export function looseJson(raw: string): unknown {
+function looseJson(raw: string): unknown {
   const candidates = [raw.trim(), /```(?:json)?\s*([\s\S]*?)```/i.exec(raw)?.[1]?.trim(),
     raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1)].filter((value): value is string => Boolean(value));
   for (const candidate of candidates) { try { return JSON.parse(candidate); } catch { /* next */ } }
@@ -110,9 +123,7 @@ export type RevisionResult =
   | { ok: true; body: string; steps: StepValues; changedSections: string[]; changeNotes: ChangeNote[]; adjudication: Adjudication[];
       /** Field changes relative to the formal version, grouped for R14 (values 1–400 characters). */
       r14Fields: StepValues }
-  | { ok: false; reason: string;
-      /** What exactly failed (section, rule, characters over), for the retry hint and the record. */
-      detail?: string };
+  | { ok: false; reason: string };
 type ChangeNote = { section: string; wordingOnly: boolean; note: string; fields: Array<{ stepId: string; fieldId: string }> };
 export const adjudicationSchema = z.object({ section: z.string(), issue: z.string(), reviewers: z.array(z.string()),
   single: z.boolean(), disputed: z.boolean(), adopted: z.boolean(), opinion: z.string(), reason: z.string(), fix: z.string() }).strip();
@@ -126,7 +137,7 @@ const revisionSchema = z.object({
   changeNotes: z.array(z.object({ section: z.string(), wordingOnly: z.boolean(), note: z.string().default(''),
     fields: z.array(z.object({ stepId: z.string(), fieldId: z.string() }).strip()).default([]) }).strip()),
 }).strip();
-export const FIELD_LIMIT = 400;
+const FIELD_LIMIT = 400;
 
 /** "## Title" sections in order; null when the body does not have exactly the template sections. */
 export function reportSections(raw: string, sections: string[], maxCharacters: number): Map<string, string> | null {
@@ -144,10 +155,9 @@ export function reportSections(raw: string, sections: string[], maxCharacters: n
   return [...map.values()].every(content => content.trim().length > 0) ? map : null;
 }
 
-/** The summary's revision in the old full-body format (§2.2 第 1 层; reviews saved before the section format, see
- * revisionCheck.ts): template sections, every declared step and field exactly once, `changed` against the previous
- * version, and every changed section declared consistently in changeNotes. */
-export function checkFullRevision(raw: string, input: RevisionInput): RevisionResult {
+/** The summary's revision (§2.2 第 1 层): template sections, every declared step and field exactly once,
+ * `changed` against the previous version, and every changed section declared consistently in changeNotes. */
+export function checkRevision(raw: string, input: RevisionInput): RevisionResult {
   const parsed = revisionSchema.safeParse(looseJson(raw));
   if (!parsed.success) return { ok: false, reason: 'REVISION_FORMAT' };
   const { body, changeNotes, adjudication } = parsed.data;

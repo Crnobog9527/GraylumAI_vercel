@@ -1,9 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
-import { DEBATE_RESPONSE_FORMAT, DECISIONS, MIN_REASON_CHARACTERS, OPINION_RESPONSE_FORMAT, type Opinion,
+import { DEBATE_RESPONSE_FORMAT, MIN_REASON_CHARACTERS, OPINION_RESPONSE_FORMAT, REVISION_RESPONSE_FORMAT, type Opinion,
   type StepValues } from './hostChecks';
-import { SECTION_REVISION_FORMAT } from './revisionCheck';
 import type { FusionRequest } from './request';
 import { reportBodyText } from '../../shared/reportData';
 
@@ -61,23 +60,21 @@ const DEBATE_FORMAT = [
 ].join('\n');
 const SUMMARY_FORMAT = [
   NO_SELF_IDENTITY,
-  '输出要求（以下格式优先于前文的任何格式说明）：只输出一个 JSON 对象 {"adjudication","revisions","fieldChanges"}，不要输出完整报告。',
+  '输出要求：只输出一个 JSON 对象 {"adjudication","body","steps","changeNotes"}。',
   'adjudication 是裁决记录：去重后的每个问题一条，section 写它属于哪个章节（给出的章节标题原样照抄；涉及全文的写"全文"），issue 写问题概要，'
     + 'reviewers 写哪些评审提出（代号 A/B/C），single 标是否只有一位评审提出，disputed 标评审之间对它是否有分歧，'
     + 'opinion 写评审团对这一处的最终意见，reason 写理由（回原文核实的结果；有冲突时双方的最强理由和裁决），fix 写建议怎么改，'
     + 'adopted 写修订稿里是否采纳（批评没压过原文的最强理由就不采纳、保留原文）。最终是否接受修订由用户决定。'
-    + 'issue、opinion、reason、fix 各写一两句、不超过 60 字。',
-  'revisions 只列出你要修改的章节，每章一条：section 写给出的章节标题（原样照抄），text 写这一章替换后的完整正文，不要写 "## " 标题行，'
-    + '正文里也不要出现 "## " 开头的行（需要小标题用 "### "）。没有意见或不采纳意见的章节不要列出，宿主会原样保留原文。',
-  'fieldChanges 只列出改动过的定位字段（input.steps 里的 currentValue 是现值）：stepId、fieldId 照抄，value 写新值（非空、不超过 400 字、和现值不同），'
-    + 'sections 写这个改动体现在 revisions 里的哪几章（必须是你列出并确实改过的章节）。只改措辞、不改定位事实时 fieldChanges 为空数组。',
-  'input.issuesBySection 是三位评审按章节归好的问题，input.decisions 是他们对 4 个关键决定的判断和互相的回应。',
+    + 'issue、opinion、reason、fix 各写一两句、不超过 60 字：完整正文已经在 body 里，裁决记录只写要点，否则会超出输出上限。',
+  'body 是修订后的完整报告，必须保留给出的全部 "## " 章节标题，顺序不变，每节都有内容。',
+  'steps 必须列出给出的每一个步骤和每一个字段：没改的字段照抄 currentValue、changed=false；改了的字段 changed=true，值非空、不超过 400 字。',
+  'changeNotes 对每个改动过的章节写一条：改了定位事实就在 fields 里列出对应的 stepId 和 fieldId（这些字段必须 changed=true），只改表述就 wordingOnly=true、fields 为空。',
+  '不打算修改的章节必须逐字照抄原文（标点、空格、换行都不变）。宿主会逐字比较每一章：哪怕只改了一个字或一个标点，也必须为这一章写一条 changeNotes，漏写任何一章都算修订失败。',
 ].join('\n');
 
-/** Host-written length rule: counted in characters (as the host check counts), headings included. The host knows the
- * original length, so the model gets the exact room it has instead of guessing. */
-const lengthRule = (max: number, current: number) =>
-  `原报告正文（含章节标题）现有 ${current} 个字符，替换后的全文不能超过 ${max} 个字符，超过就算修订失败；改写要精简，不要扩写。`;
+/** Host-written length rule: counted in characters (as the host check counts), headings included. */
+const lengthRule = (max: number) =>
+  `body 全文（含章节标题）不能超过 ${max} 个字符，超过就算修订失败；原报告已经接近上限时，改写要精简，不要扩写。`;
 
 export type ReviewContext = { report: string; materials: unknown; sections: string[];
   /** The template's length limit in characters; the host check refuses a longer body, so the model is told the number. */
@@ -104,34 +101,14 @@ export function debateRequest(skill: ReviewSkillText, context: ReviewContext, mi
     responseFormat: DEBATE_RESPONSE_FORMAT as unknown as Record<string, unknown> };
 }
 
-/** Issues grouped by section and key decisions with each reviewer's verdict, so the summary reads one place at a time. */
-function grouped(sections: string[], opinions: Array<{ reviewer: string; opinion: Opinion }>) {
-  const title = (value: string) => value.replace(/^#+\s*/, '').trim();
-  return {
-    issuesBySection: sections.map(section => ({ section, issues: opinions.flatMap(({ reviewer, opinion }) => opinion.issues
-      .filter(issue => title(issue.location) === section)
-      .map(issue => ({ reviewer, severity: issue.severity, perspective: issue.perspective, problem: issue.problem, suggestion: issue.suggestion }))) }))
-      .filter(group => group.issues.length),
-    decisions: DECISIONS.map(decision => ({ decision,
-      views: opinions.flatMap(({ reviewer, opinion }) => opinion.decisions.filter(d => d.decision === decision)
-        .map(d => ({ reviewer, verdict: d.verdict, strongestCase: d.strongestCase, strongestAlternative: d.strongestAlternative, basis: d.basis }))),
-      responses: opinions.flatMap(({ reviewer, opinion }) => (opinion.responses ?? []).filter(r => r.decision === decision)
-        .map(r => ({ from: reviewer, to: r.reviewer, stance: r.stance, strongestView: r.strongestView, reason: r.reason }))) })),
-  };
-}
-
-/** The summary request. A retry carries the exact problems of the previous attempt (host-computed) so it can avoid them. */
 export function summaryRequest(skill: ReviewSkillText, context: ReviewContext, opinions: Array<{ reviewer: string; opinion: Opinion }>,
-  declared: Array<{ stepId: string; fieldIds: string[] }>, current: StepValues, previousProblems: string[] = []): FusionRequest {
+  declared: Array<{ stepId: string; fieldIds: string[] }>, current: StepValues): FusionRequest {
   const steps = declared.map(step => ({ stepId: step.stepId, fields: step.fieldIds.map(fieldId =>
     ({ fieldId, currentValue: current[step.stepId]?.[fieldId] ?? '' })) }));
   // REPORT-VISUAL: the summary rewrites only the report text. The strategy data block is not sent: adoption always keeps
   // the original block (0300), and a model that edited it wrote change notes for sections whose text never changed.
-  const report = reportBodyText(context.report);
-  const retry = previousProblems.length
-    ? '\n这是第 2 次修订：input.previousProblems 是上一次没通过宿主检查的具体原因，这次必须避开。' : '';
-  return { instructions: `${skill.summary}\n\n${skill.rubric}\n\n${SUMMARY_FORMAT}\n${lengthRule(context.maxCharacters, [...report].length)}${retry}`,
-    input: JSON.stringify({ report, materials: context.materials, sections: context.sections, steps, ...grouped(context.sections, opinions),
-      ...(previousProblems.length ? { previousProblems } : {}) }),
-    responseFormat: SECTION_REVISION_FORMAT as unknown as Record<string, unknown> };
+  return { instructions: `${skill.summary}\n\n${skill.rubric}\n\n${SUMMARY_FORMAT}\n${lengthRule(context.maxCharacters)}`,
+    input: JSON.stringify({ report: reportBodyText(context.report), materials: context.materials, sections: context.sections, steps,
+      opinions: opinions.map(item => ({ reviewer: item.reviewer, ...shown(item.opinion) })) }),
+    responseFormat: REVISION_RESPONSE_FORMAT as unknown as Record<string, unknown> };
 }

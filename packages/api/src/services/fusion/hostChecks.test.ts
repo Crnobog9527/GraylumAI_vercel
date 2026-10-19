@@ -1,7 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
-import { DECISIONS, hasDisagreement, parseOpinion, reportSections, type RevisionInput } from './hostChecks';
-import { checkRevision } from './revisionCheck';
+import { checkRevision, DECISIONS, hasDisagreement, parseOpinion, reportSections, type RevisionInput } from './hostChecks';
 
 const sections = ['定位', '受众', '结语'];
 const report = (a = '原定位', b = '原受众', c = '原结语') => `## 定位\n${a}\n## 受众\n${b}\n## 结语\n${c}`;

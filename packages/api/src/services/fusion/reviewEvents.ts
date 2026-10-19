@@ -1,6 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { DECISIONS, adjudicationSchema, parseOpinion, type Adjudication, type Opinion, type RevisionInput } from './hostChecks';
-import { checkRevision } from './revisionCheck';
+import { DECISIONS, adjudicationSchema, checkRevision, parseOpinion, type Adjudication, type Opinion, type RevisionInput } from './hostChecks';
 import { reviewerLabel } from './reviewPrompts';
 import type { AdoptionSection } from './reviewAdoption';
 import type { ReviewView } from './reviewRecord';
@@ -38,8 +37,7 @@ export function reviewEvents(input: { view: ReviewView; reviewers: string[]; sec
     if (!step) continue;
     const round = step.round;
     if (call.phase === 'fusion_summary') {
-      // A retried summary (Owner 2026-10-20) is its own event: the id carries the attempt after the first.
-      add(call.dispatchedAt, { id: `summary_started:${round}${step.attempt > 1 ? `:${step.attempt}` : ''}`, type: 'summary_started', round });
+      add(call.dispatchedAt, { id: `summary_started:${round}`, type: 'summary_started', round });
       const saved = call.verdict && USABLE.has(call.verdict) ? outputs.get(call.callId) : undefined;
       const adjudication = saved ? adjudicationOf(saved.body) : [];
       // Results are shown once judged, from the save time: financial settlement may come much later or never.

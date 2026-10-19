@@ -14,7 +14,6 @@ const caps = vi.hoisted(() => [] as Array<{ opinion: number; summary: number }>)
 const creditCaps = vi.hoisted(() => [] as Array<number | undefined>);
 const usdCaps = vi.hoisted(() => [] as Array<string | undefined>);
 const memberCapsSeen = vi.hoisted(() => [] as unknown[]);
-const budget = vi.hoisted(() => ({ usd: '5' }));
 const priceRise = vi.hoisted(() => ({ phase: '', code: 'FUSION_ESTIMATE_EXCEEDED' }));
 const requests = vi.hoisted(() => [] as Array<{ modelId: string; phase: string; input: string }>);
 const clock = vi.hoisted(() => ({ t: Date.parse('2026-10-14T00:00:00Z'), next() { this.t += 1000; return new Date(this.t).toISOString(); } }));
@@ -25,7 +24,7 @@ const ids = { reviewers: ['00000000-0000-4000-8000-0000000000a1', '00000000-0000
   summary: '00000000-0000-4000-8000-0000000000b1' };
 vi.mock('./settings', () => ({ readFusionSettings: async () => ({ version: 1, compare: { enabled: false }, review: { enabled: true,
   reviewerModelIds: ids.reviewers, summaryModelId: ids.summary, skillId: '00000000-0000-4000-8000-0000000000c1', maxRounds: 2,
-  opinionOutputTokens: 1000, summaryOutputTokens: 2000, maxBudgetUsd: budget.usd, fixedPriceCredits: 1500, dispatchMinutes: 10,
+  opinionOutputTokens: 1000, summaryOutputTokens: 2000, maxBudgetUsd: '5', fixedPriceCredits: 1500, dispatchMinutes: 10,
   breaker: { platformUsd: '2', noDeliveryCalls: 10 } } }) }));
 vi.mock('../runtime/stagingPolicy', () => ({ loadStagingPolicy: async () => ({ creditsPerUsd: '100', callPolicies: [...ids.reviewers, ids.summary].map(modelId => ({ modelId,
   multiplier: '3', outputLimit: 8192, providerLimits: { providerSlug: 'x', contextTokens: 400000, promptUsdPerMillion: '0.1', completionUsdPerMillion: '0.1', requestUsd: '0' } })) }) }));
@@ -108,12 +107,12 @@ const opinion = (severity: string | null, verdict: 'keep' | 'change' = 'keep', d
     ({ reviewer: seat, decision, strongestView: `${seat} 在这个决定上的最强观点`, stance: 'agree', reason: '有道理' }))) } : {}) });
 const seatOf = (modelId: string) => String.fromCharCode(65 + ids.reviewers.indexOf(modelId));
 const othersOf = (modelId: string) => ['A', 'B', 'C'].filter(seat => seat !== seatOf(modelId));
-// The section format (Owner 2026-10-20): only the replaced sections and the changed fields; the host builds the rest.
 const revision = (value: string) => JSON.stringify({
   adjudication: [{ section: '定位', issue: '定位太泛', reviewers: ['A', 'B'], single: false, disputed: false, adopted: true,
     opinion: '定位要写清人群', reason: '原文确实没写清', fix: '点明给上班族省时间' }],
-  revisions: [{ section: '定位', text: value }],
-  fieldChanges: [{ stepId: 's1', fieldId: 'goal', value, sections: ['定位'] }] });
+  body: `## 定位\n${value}\n## 结语\n原结语`,
+  steps: [{ stepId: 's1', fields: [{ fieldId: 'goal', value, changed: true }] }],
+  changeNotes: [{ section: '定位', wordingOnly: false, note: '更具体', fields: [{ stepId: 's1', fieldId: 'goal' }] }] });
 function setup(script: (call: Call) => string | null, refuse?: string) {
   const proposals: unknown[] = [];
   const applied: unknown[] = [];
@@ -192,9 +191,7 @@ describe('review flow', () => {
     expect(after.events.at(-1)).toMatchObject({ type: 'adoption_done', adoptedSections: ['定位'] });
     // The summary saw the opinions as reviewers A, B, C, never model names.
     const summary = JSON.parse(requests.find(r => r.phase === 'fusion_summary')!.input);
-    // Grouped by key decision and by section, each view under its seat.
-    expect(summary.decisions[0].views.map((o: { reviewer: string }) => o.reviewer)).toEqual(['A', 'B', 'C']);
-    expect(summary.issuesBySection.map((g: { section: string; issues: unknown[] }) => [g.section, g.issues.length])).toEqual([['定位', 3]]);
+    expect(summary.opinions.map((o: { reviewer: string }) => o.reviewer)).toEqual(['A', 'B', 'C']);
     expect(requests.find(r => r.phase === 'fusion_summary')!.input).not.toContain(ids.reviewers[0]);
     expect((await t.flow.continue(String(db.review!.reviewId))).calls).toEqual([]);
   });
@@ -449,9 +446,9 @@ describe('review flow', () => {
     await t.runAll(); await t.runAll();
     const summary = requests.find(r => r.phase === 'fusion_summary')!;
     const input = JSON.parse(summary.input);
-    expect(input.decisions[0].views).toHaveLength(3);
-    expect(input.issuesBySection).toEqual([]);
-    expect(input.decisions[0].views[0].strongestCase).toBe('');
+    expect(input.opinions).toHaveLength(3);
+    expect(input.opinions[0].issues).toEqual([]);
+    expect(input.opinions[0].decisions[0].strongestCase).toBe('');
   });
 
   it('a partial panel never ends as no change: one usable reviewer that finds nothing still goes to the summary', async () => {
@@ -530,14 +527,12 @@ describe('review flow', () => {
     expect(db.calls.some(c => c.phase === 'fusion_summary')).toBe(false);
   });
 
-  it('ends revision_failed when the summary fails the host check twice (one retry), and charges it nothing', async () => {
-    const t = setup(call => call.phase === 'fusion_summary' ? JSON.stringify({ adjudication: [], revisions: [{ section: '第九章', text: 'x' }],
-      fieldChanges: [] }) : opinion('major'));
+  it('ends revision_failed when the summary fails the host check, and charges it nothing', async () => {
+    const t = setup(call => call.phase === 'fusion_summary' ? JSON.stringify({ adjudication: [], body: '## 定位\nx', steps: [], changeNotes: [] })
+      : opinion('major'));
     await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
-    await t.runAll(); await t.runAll(); await t.runAll();
-    expect(db.calls.filter(c => c.phase === 'fusion_summary').map(c => c.verdict)).toEqual(['revision_invalid', 'revision_invalid']);
-    // The retry carried the host's exact problem.
-    expect(JSON.parse(requests.filter(r => r.phase === 'fusion_summary')[1]!.input).previousProblems).toEqual(['「第九章」不是给出的章节标题']);
+    await t.runAll(); await t.runAll();
+    expect(db.calls.find(c => c.phase === 'fusion_summary')?.verdict).toBe('revision_invalid');
     expect((await t.flow.continue(String(db.review!.reviewId))).review).toMatchObject({ state: 'revision_failed' });
     expect(t.proposals).toEqual([]);
   });
@@ -555,22 +550,29 @@ describe('review flow', () => {
   it('ends revision_failed on a cut-off summary (no closing JSON), and charges it nothing', async () => {
     const t = setup(call => call.phase === 'fusion_summary' ? revision('新目标').slice(0, -40) : opinion('major'));
     await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
-    await t.runAll(); await t.runAll(); await t.runAll();
-    expect(db.calls.filter(c => c.phase === 'fusion_summary').map(c => c.verdict)).toEqual(['revision_invalid', 'revision_invalid']);
+    await t.runAll(); await t.runAll();
+    expect(db.calls.find(c => c.phase === 'fusion_summary')?.verdict).toBe('revision_invalid');
     expect((await t.flow.continue(String(db.review!.reviewId))).review).toMatchObject({ state: 'revision_failed' });
     expect(t.proposals).toEqual([]);
   });
 
-  it('REPORT-VISUAL: the summary never sees the strategy data block; adoption puts the original block back (staging 10-19)', async () => {
+  it('REPORT-VISUAL: the summary never sees the strategy data block; a no-op note about it does not fail a good revision (staging 10-19)', async () => {
     const block = '```graylum-report-data\n{"v":1,"field":"summary","value":"原数据"}\n```';
     sourceBody.value = `${original}\n\n${block}`;
     try {
-      const t = setup(call => call.phase === 'fusion_summary' ? revision('新目标') : opinion('major'));
+      // The model still edits a data block of its own and notes the last section, whose text it left as it was.
+      const t = setup(call => call.phase === 'fusion_summary' ? JSON.stringify({ ...JSON.parse(revision('新目标')),
+        body: '## 定位\n新目标\n## 结语\n原结语\n\n```graylum-report-data\n{"v":1,"field":"summary","value":"改过的数据"}\n```',
+        changeNotes: [...JSON.parse(revision('新目标')).changeNotes, { section: '结语', wordingOnly: true, note: '数据块同步修改', fields: [] }] })
+        : opinion('major'));
       await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
       await t.runAll(); await t.runAll();
-      expect(JSON.parse(requests.find(r => r.phase === 'fusion_summary')!.input).report).toBe(original);
+      const summary = JSON.parse(requests.find(r => r.phase === 'fusion_summary')!.input);
+      expect(summary.report).toBe(original);
+      expect(db.calls.find(c => c.phase === 'fusion_summary')?.verdict).toBe('usable');
       expect((await t.flow.continue(String(db.review!.reviewId))).review).toMatchObject({ state: 'completed',
         outcome: { kind: 'revised', awaitingChoice: true } });
+      // Only the section whose text changed is offered; the original data block goes back unchanged.
       const detail = await t.flow.detail(String(db.review!.reviewId));
       expect(detail.summary.sections.filter(s => s.changed).map(s => s.section)).toEqual(['定位']);
       await t.flow.adopt({ reviewId: String(db.review!.reviewId), requestId: '00000000-0000-4000-8000-0000000000f2',
@@ -579,46 +581,11 @@ describe('review flow', () => {
     } finally { sourceBody.value = null; }
   });
 
-  it('retries a refused summary once with its exact problem; the passing retry ends revised like a first-time pass', async () => {
-    let summaries = 0;
-    const t = setup(call => call.phase === 'fusion_summary' ? (summaries++ ? revision('新目标') : revision('长'.repeat(13000))) : opinion('major'));
-    await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
-    await t.runAll(); await t.runAll(); await t.runAll();
-    expect(db.calls.filter(c => c.phase === 'fusion_summary').map(c => c.verdict)).toEqual(['revision_invalid', 'usable']);
-    expect(JSON.parse(requests.filter(r => r.phase === 'fusion_summary')[1]!.input).previousProblems[0]).toMatch(/超过上限 12000 字/);
-    expect((await t.flow.continue(String(db.review!.reviewId))).review).toMatchObject({ state: 'completed',
-      outcome: { kind: 'revised', awaitingChoice: true } });
-    // Still one review (one fixed price); the retried summary is its own event.
-    expect((await t.flow.events(String(db.review!.reviewId))).events.filter(e => e.type === 'summary_started')).toHaveLength(2);
-  });
-
-  it('does not retry a refused summary past the single-review budget line', async () => {
-    budget.usd = '0.000001';
-    try {
-      const t = setup(call => call.phase === 'fusion_summary' ? revision('长'.repeat(13000)) : opinion('major'));
-      // Started under the normal line; the line is lowered before the summary is judged.
-      budget.usd = '5';
-      await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
-      await t.runAll(); budget.usd = '0.000001'; await t.runAll();
-      expect((await t.flow.continue(String(db.review!.reviewId))).review).toMatchObject({ state: 'revision_failed' });
-      expect(db.calls.filter(c => c.phase === 'fusion_summary')).toHaveLength(1);
-    } finally { budget.usd = '5'; }
-  });
-
-  it('a summary that replaces no section ends as no change (refunded), not as a revision to choose from', async () => {
-    const t = setup(call => call.phase === 'fusion_summary' ? JSON.stringify({ adjudication: [], revisions: [], fieldChanges: [] }) : opinion('major'));
-    await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
-    await t.runAll(); await t.runAll();
-    expect((await t.flow.continue(String(db.review!.reviewId))).review).toMatchObject({ state: 'completed', outcome: { kind: 'no_change' } });
-    expect(db.calls.filter(c => c.phase === 'fusion_summary')).toHaveLength(1);
-  });
-
   it('tells the summary model the exact length limit and the verbatim-copy rule the host check enforces (staging runs)', () => {
     const request = summaryRequest({ reviewer: 'r', summary: 's', rubric: 'b' },
       { report: original, materials: {}, sections, maxCharacters: 12000 }, [], [{ stepId: 's1', fieldIds: ['goal'] }], { s1: { goal: '旧目标' } });
     expect(request.instructions).toContain('不能超过 12000 个字符');
-    expect(request.instructions).toContain(`现有 ${[...original].length} 个字符`);
-    expect(request.instructions).toContain('宿主会原样保留原文');
+    expect(request.instructions).toContain('逐字照抄原文');
     expect(request.instructions).toContain('不要提到你是哪个模型');
   });
 
