@@ -43,7 +43,7 @@ describe('runtime.view polling', () => {
     const options = runtimeViewPollOptions({ current: null }, busy);
     const interval = options.refetchInterval;
     expect(options.refetchIntervalInBackground).toBe(false);
-    expect(options.refetchOnWindowFocus).toBe(true);
+    expect(options.refetchOnWindowFocus).toBe('always');
     expect(interval(query(running))).toBe(5000);
     vi.setSystemTime(130_000);
     expect(interval(query(running))).toBe(12_000);

@@ -6,7 +6,7 @@ import { useRef } from 'react';
  * While the server is advancing a turn the page did not stream itself, it re-reads quickly and
  * backs off the longer the turn runs. With no turn in progress it only checks occasionally (another
  * tab may start one). React Query skips interval reads while the tab is hidden, and the page reads
- * once more when it is shown again, so a background tab costs nothing.
+ * once more when it is shown again (even within the 30 s staleTime), so a background tab costs nothing.
  */
 export const RUNTIME_VIEW_ACTIVE_POLL_MS = [5000, 8000, 12000] as const;
 /** The active interval moves to the next step after this long (ms) on the same execution. */
@@ -57,6 +57,7 @@ export function runtimeViewPollOptions(since: { current: { key: string; at: numb
       return runtimeViewPollInterval(view, busy.current, Date.now() - since.current.at);
     },
     refetchIntervalInBackground: false,
-    refetchOnWindowFocus: true,
+    // 'always': the shared 30 s staleTime would otherwise skip the read on a quick return.
+    refetchOnWindowFocus: 'always',
   } as const;
 }
