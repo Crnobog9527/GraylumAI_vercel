@@ -517,6 +517,9 @@ describe('review flow', () => {
     await t.runAll();
     expect((await t.flow.continue(String(db.review!.reviewId))).review).toMatchObject({ state: 'completed', outcome: { kind: 'no_change' } });
     expect(t.proposals).toEqual([]);
+    const { events, ended } = await t.flow.events(String(db.review!.reviewId));
+    expect(events.some(e => e.type === 'revision_ready_for_choice')).toBe(false);
+    expect(ended).toBe(true);
   });
 
   it('ends incomplete without a summary when no reviewer gave a usable opinion', async () => {
@@ -545,6 +548,19 @@ describe('review flow', () => {
     await t.flow.continue(String(db.review!.reviewId));
     expect(db.calls.map(c => c.verdict)).toEqual(['format_invalid', 'format_invalid', 'format_invalid']);
     expect(db.review).toMatchObject({ state: 'incomplete' });
+  });
+
+  it('a summary that changes no section ends as no change (refunded, 0294), never as a revision to choose and pay for', async () => {
+    const t = setup(call => call.phase === 'fusion_summary' ? JSON.stringify({ adjudication: [], body: original,
+      steps: [{ stepId: 's1', fields: [{ fieldId: 'goal', value: '旧目标', changed: false }] }], changeNotes: [] }) : opinion('major'));
+    await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
+    await t.runAll(); await t.runAll();
+    expect(db.calls.find(c => c.phase === 'fusion_summary')?.verdict).toBe('usable');
+    expect((await t.flow.continue(String(db.review!.reviewId))).review).toMatchObject({ state: 'completed', outcome: { kind: 'no_change' } });
+    expect(t.proposals).toEqual([]);
+    const { events, ended } = await t.flow.events(String(db.review!.reviewId));
+    expect(events.some(e => e.type === 'revision_ready_for_choice')).toBe(false);
+    expect(ended).toBe(true);
   });
 
   it('ends revision_failed on a cut-off summary (no closing JSON), and charges it nothing', async () => {
