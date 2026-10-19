@@ -69,7 +69,8 @@ function RoundReportEntry(props: Props) {
       {open && (paywall ? <ReportPaywallDialog onClose={() => setOpen(false)} />
         : <ReportDialog report={report} savedBody={report.executionId ? null : saved}
           savedStrategy={report.executionId ? null : savedFormalStrategy(props.report)} busy={props.busy}
-          edit={saved && !report.executionId && props.report?.id ? { draftId: props.draftId, projectId: props.projectId, versionId: props.report.id } : undefined}
+          edit={saved && !report.executionId && props.report?.id
+            ? { draftId: props.draftId, projectId: props.projectId, versionId: props.report.id } : undefined}
           price={available.data?.priceCredits} onClose={() => setOpen(false)}
           onTopics={() => { setOpen(false); props.onTopics(); }} />)}
     </>
