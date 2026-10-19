@@ -34,7 +34,7 @@ import { stopWithRecord, type StopSignals } from '@/app/runtime/runtime-notices'
 import { finishedExecution } from '@/lib/finished-execution';
 import { isOrganizerPendingError, type PaygViewFields } from '@/lib/payg-wait';
 import { usePaygResume } from '@/lib/use-payg-resume';
-import { useRuntimeViewPolling } from '@/lib/runtime-view-poll';
+import { useRuntimeViewBusy, useRuntimeViewPolling } from '@/lib/runtime-view-poll';
 import { useTopicInput } from './topic-input';
 type PlanItem = {
   id: string;
@@ -161,7 +161,7 @@ export default function TopicWorkspacePage() {
   const topicDraft = trpc.opc.topicDraft.useQuery({ draftId }, { enabled: Boolean(draftId && sessionId) });
 
   const busy = working || turn.isPending || execute.isPending || bind.isPending || savePlan.isPending || handoff.isPending || saveDraft.isPending || adoptTopics.isPending || payg.busy;
-  useEffect(() => { viewPolling.busy.current = busy; }, [busy, viewPolling.busy]);
+  useRuntimeViewBusy(viewPolling, busy, view.refetch, Boolean(sessionId));
   const storageKey = sessionId ? 'opc-topic-operation:' + sessionId : '';
   const candidateKey = sessionId ? 'opc-topic-candidate:' + sessionId : '';
   useEffect(() => {

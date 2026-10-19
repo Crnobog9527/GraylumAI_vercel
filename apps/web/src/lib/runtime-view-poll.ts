@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { useRef } from 'react';
+import { useEffect, useRef } from 'react';
 
 /**
  * How often a page re-reads runtime.view (each read is one runtime_view database call).
@@ -38,7 +38,7 @@ export function runtimeViewPollInterval(view: RuntimeViewPollData, pageBusy: boo
 /**
  * Query options for runtime.view; the backoff restarts for each new busy period or execution.
  * `busy` is a ref because pages know whether they are sending only after the view query is declared;
- * set `busy.current` during render and the next interval uses it.
+ * pages report it with useRuntimeViewBusy, which also re-reads at once when an idle page starts sending.
  */
 export function useRuntimeViewPolling() {
   const since = useRef<{ key: string; at: number } | null>(null);
@@ -60,4 +60,21 @@ export function runtimeViewPollOptions(since: { current: { key: string; at: numb
     // 'always': the shared 30 s staleTime would otherwise skip the read on a quick return.
     refetchOnWindowFocus: 'always',
   } as const;
+}
+
+/**
+ * Records whether the page is sending. Changing a ref does not reschedule an interval TanStack Query
+ * already computed, so an idle page (60 s timer) that starts sending re-reads now; that read schedules
+ * the next one with the busy interval.
+ */
+export function markRuntimeViewBusy(busy: { current: boolean }, next: boolean, refetch: () => unknown) {
+  const was = busy.current;
+  busy.current = next;
+  if (next && !was) void refetch();
+}
+
+export function useRuntimeViewBusy(polling: { busy: { current: boolean } }, busy: boolean, refetch: () => unknown, enabled: boolean) {
+  const latest = useRef(refetch);
+  useEffect(() => { latest.current = refetch; });
+  useEffect(() => { markRuntimeViewBusy(polling.busy, busy, () => enabled && latest.current()); }, [busy, enabled, polling.busy]);
 }

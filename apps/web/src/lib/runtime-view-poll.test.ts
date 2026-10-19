@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   RUNTIME_VIEW_IDLE_POLL_MS,
+  markRuntimeViewBusy,
   progressingExecution,
   runtimeViewPollInterval,
   runtimeViewPollOptions,
@@ -52,5 +53,17 @@ describe('runtime.view polling', () => {
     expect(interval(query({ activeExecution: null, executions: [] }))).toBe(60_000);
     busy.current = true;
     expect(interval(query({ activeExecution: null, executions: [] }))).toBe(5000);
+  });
+
+  it('re-reads at once when an idle page starts sending, not on every busy render', () => {
+    const busy = { current: false };
+    const refetch = vi.fn();
+    markRuntimeViewBusy(busy, true, refetch);
+    expect(busy.current).toBe(true);
+    expect(refetch).toHaveBeenCalledTimes(1);
+    markRuntimeViewBusy(busy, true, refetch);
+    markRuntimeViewBusy(busy, false, refetch);
+    expect(busy.current).toBe(false);
+    expect(refetch).toHaveBeenCalledTimes(1);
   });
 });
