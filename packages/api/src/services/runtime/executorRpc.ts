@@ -16,6 +16,7 @@ import type {RuntimeCallGate} from './newWorkGate';
 import type {FrozenRun,BillingTransport} from '../bill2/service';
 import type {MatchCandidate} from './matching';
 import type {SessionRpc} from './session';
+import {readBillingRpc} from '../bill2/readRetry';
 /** Trusted server host only. The public admission layer must construct this context.
  * The default transport is local-only; the Staging host must explicitly supply
  * its allowlisted official adapter and frozen price policy.
@@ -33,9 +34,10 @@ export function observeContext(options:RuntimeExecutorOptions,execution:{state:s
  const references=frozen?.libraryReferences;
  options.onContext?.({libraryReferences:Array.isArray(references)?references:undefined,libraryRetrieval:frozen?.libraryRetrieval===true});
 }
-export function executorRpc(options:{database:SessionRpc;actor:()=>Promise<string>}) {
+export function executorRpc(options:{database:SessionRpc;actor:()=>Promise<string>;budget?:RuntimeBudget}) {
  return async function rpc<T>(name:string,args:Record<string,unknown>,database=options.database):Promise<T>{
-  const result=await database.rpc(name,{...args,p_actor_id:z.string().uuid().parse(await options.actor())});
+  const bound={...args,p_actor_id:z.string().uuid().parse(await options.actor())};
+  const result=await (name==='runtime_receipt_saved'?readBillingRpc(database,name,bound,options.budget):database.rpc(name,bound));
   if(result.error){
    throwIfContentErased(result.error);
    // A private, exact identity mismatch permits only the bounded legacy replay

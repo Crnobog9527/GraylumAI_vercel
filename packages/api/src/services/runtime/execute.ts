@@ -44,7 +44,7 @@ import type {GateRejection} from './newWorkGate';
 import {allowedOutput} from './moderation';
 import {runtimeIdentityGuard} from '../modelIdentity/runtimeGuard';
 import {POSITIONING_REFUSED,positioningRefused,endPositioningRefusal,roundEmitter} from './positioningFallback';
-import {cancelledOutcome,finishCancelRequested,cancelRound} from './executorOutcome';
+import {cancelledOutcome,finishCancelRequested,cancelRound,finishExhaustedReplay} from './executorOutcome';
 import {injectContentSource,ContentSourceRefusal} from './contentSource';
 import {CONTENT_SOURCE_MESSAGES} from '../../shared/contentSourceMessages';
 import {frozenBrandIdentity,withBrandIdentity} from '../modelIdentity/brandIdentity';
@@ -53,7 +53,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
  const budget=options.budget??createRuntimeBudget();
  const adapter=expiringAuthAfterProvider(options.adapter ?? localFixtureAdapter(options.endpoint??''),budget.auth);
  const billing=authoritativeBilling({admin:options.database,actor:options.actor,adapter,budget});
- const rpc=executorRpc(options);
+ const rpc=executorRpc({...options,budget});
  const finishStop=stoppedCompletion(options,billing);
  return {
   cancel:(executionId:string)=>rpc<{state:string}>('runtime_cancel',{p_execution_id:z.string().uuid().parse(executionId)}),
@@ -87,7 +87,6 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   const grounded=Boolean(context.hostTurnContext?.cardContract);
   let sources=cardSources(context.input,[]);
   const native=Boolean(context.nativeOutput);
-  // A plain-text stream (CHAT-NATIVE-OUTPUT) projects assistant text like an Agent turn, without cards.
   const plainStream=context.textStream===PLAIN_TEXT_STREAM;
   const nativeProgress=native&&(agentTurn||Boolean(context.envelopeOrder)||plainStream);
   const projectionOptions={mode:agentTurn||plainStream?'agent' as const:'message-first' as const,
@@ -95,7 +94,6 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   let projection=new NativeProgressProjection(projectionOptions);
   let primaryLength=false;
   if(fiveFields&&!agentTurn)throw new Error('RUNTIME_CONTEXT_INVALID');
-  // RT-3b PR-3: research tools only with their frozen research context (runtimeContext checks the pairing).
   if(agentTurn&&(context.matching||context.workspaceContext||context.tools.some(name=>name!==ASK_QUESTION_TOOL&&
    name!=='read_skill_file'&&name!==READ_HISTORY_TOOL&&!context.research)))throw new Error('RUNTIME_CONTEXT_INVALID');
   if(!agentTurn&&context.tools.includes(ASK_QUESTION_TOOL))throw new Error('RUNTIME_CONTEXT_INVALID');
@@ -113,12 +111,14 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   const research=researchExecution({research:context.research,tools:context.tools,execution,executionId,actorId:await options.actor(),
    database:options.database,emit:event=>progress(event),onClosed:()=>{accountClosed=true;},
    onPause:(point,state)=>{if(isPayg)waitPoint={epoch:execution.epoch!,...point,state,gatePassed:state==='waiting_credits'};},
-   onSubcallSettled:()=>{gatePassed=false;},
+   budget,onSubcallSettled:()=>{gatePassed=false;},
    canSend:()=>{try{budget.assertCanStart(5000);return true;}catch{return false;}},
    callGate:async()=>{await checkCallGate(!gateChecked,false);gatePassed=true;gateChecked=false;}});
-  const checkAgentReply=terminalReplyGuard(agentTurn,context.tools.includes(ASK_QUESTION_TOOL),()=>{terminalReplyFailure=true;},
+  const invalidResponse=():never=>{replayFailureCode='RUNTIME_RESPONSE_INVALID';throw new Error(replayFailureCode);};
+  const checkAgentReply=terminalReplyGuard(agentTurn,context.tools.includes(ASK_QUESTION_TOOL),()=>{
+   terminalReplyFailure=true;replayFailureCode='RUNTIME_TERMINAL_REPLY';},
    Boolean(context.skillFile),Boolean(context.historyRead),research?.tools.map(tool=>tool.name));
-  let preflightFailure:string|undefined,transportFailureCode:string|undefined;
+  let preflightFailure:string|undefined,transportFailureCode:string|undefined,replayFailureCode:string|undefined;
   const streaming=streamsPrimary(context);
   // B2a: once BILL2 reports a confirmed erasure, nothing more reaches the client.
   let accountClosed=false;
@@ -134,7 +134,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    let responseConflict=false;
    let primaryPolicy=policy;
    const exchange=async(request:string,phase:string,selectedPolicy=primaryPolicy,onChunk?: (chunk:string)=>void)=>{
-    try{
+    try{replayFailureCode=undefined;
     if(selectedPolicy.protocol==='openrouter-chat-v1')
      request=openRouterRequestBody(request,{context,policy:selectedPolicy,phase,
       primaryDialogue:phase===(context.reportGeneration?'report':effective.role)&&selectedPolicy===primaryPolicy});
@@ -219,7 +219,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
      return selectedPolicy.protocol==='openrouter-chat-v1' ? {usage:{sdkResponse:decoded}} : decoded;
     }catch(error){
      claimNotice??=billingClaimNotice(error);
-     transportFailureCode??=diagnosticCode(error);// first original code: the SDK wraps transport errors
+     replayFailureCode=diagnosticCode(error);transportFailureCode??=replayFailureCode; // The SDK wraps transport errors.
      // Retain exact pre-dispatch diagnostics outside SDK wrapping, without private data.
      if(selectedPolicy.protocol==='openrouter-chat-v1'&&error instanceof Error&&preflightCodes.has(error.message))
       {preflightFailure=error.message;logger.error('api','runtime_provider_preflight_failed',{executionId,code:error.message});}
@@ -241,7 +241,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
      selectHistory:async(_history,incoming)=>selectRuntimeHistory([],incoming,{instructions:MATCH_INSTRUCTIONS,inputBytes:policy.inputLimit,historyItems:0,toolBytes:0}),
      exchange:async(_sequence,request)=>{
       const envelope=await exchange(request,'skill_matching',policy),response=envelope.usage?.sdkResponse;
-      if(!response||response.model!==context.model||response.choices?.length!==1)throw new Error('RUNTIME_RESPONSE_INVALID');
+      if(!response||response.model!==context.model||response.choices?.length!==1)invalidResponse();
       return JSON.stringify(response);
      }});
     const selected=parseMatch(matched,plan.candidates);
@@ -342,7 +342,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
       try{project(chunk);}catch{logger.warn('api','runtime_native_projection_failed',{executionId});}
      }:onChunk);
      const response=envelope.usage?.sdkResponse;
-     if(!response||response.model!==effective.model||response.choices?.length!==1)throw new Error('RUNTIME_RESPONSE_INVALID');
+     if(!response||response.model!==effective.model||response.choices?.length!==1)invalidResponse();
      checkAgentReply(response);
      primaryLength=response.choices[0]?.finish_reason==='length';
      if(agentTurn)agentToolCalled=Boolean(response.choices[0]?.message?.tool_calls?.length);
@@ -407,7 +407,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
       historyItems:organizer.historyItems??0,toolBytes:0}),
      exchange:async(_sequence,request)=>{
       const envelope=await exchange(request,'attached_organizer',organizerPolicy),response=envelope.usage?.sdkResponse;
-      if(!response||response.model!==organizer.model||response.choices?.length!==1)throw new Error('RUNTIME_RESPONSE_INVALID');
+      if(!response||response.model!==organizer.model||response.choices?.length!==1)invalidResponse();
       checkAgentReply(response,true);
       return JSON.stringify(response);
      }});}
@@ -430,6 +430,8 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    if(error instanceof Error&&error.message===POSITIONING_REFUSED)return endPositioningRefusal(ownerRpc,args,isPayg);
    if(error instanceof ContentSourceRefusal)return {...await cancelRound(ownerRpc,args),code:error.code,notice:CONTENT_SOURCE_MESSAGES[error.code]};
    if(nativeProgress&&!accountClosed&&!moderationBlocked){const done=await finishStop(executionId,onProgress,undefined,execution.live);if(done)return done;}
+   const exhausted=isPayg&&await finishExhaustedReplay(ownerRpc,args,execution,replayFailureCode??diagnosticCode(error));
+   if(exhausted)return exhausted;
    if(nativeProgress&&execution.live&&projection.text&&!waitPoint){const correction=projection.finish(INVALID_REPLY_NOTICE);if(correction)progress(correction);}
    if(waitPoint){
     const saved=await ownerRpc<PaygPosition & {state:PaygWait['state'];primaryResult?:{body:string}}>(
@@ -479,8 +481,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     return {state:'cancelled' as const,...(unavailable?{unavailable}:{}),...claimNoticeFields(claimNotice),
      ...(unavailable==='paused'?{code:'RUNTIME_NEW_CALLS_STOPPED' as const}:{})};
    }
-   // Owner 2026-10-12: a Graylum-side failure after a dispatch ends the round and restores its
-   // charged credits (bill2 confirmed_failure compensation). Unknown calls keep normal recovery.
+   // Confirmed platform failures restore charges; unknown calls keep normal recovery (Owner 2026-10-12).
    const platformReason=platformFailureReason(preflightFailure);
    if(isPayg&&platformReason){
     const ended=await ownerRpc<{state:string}>('runtime_execution',{...args,p_action:'fail_platform',
