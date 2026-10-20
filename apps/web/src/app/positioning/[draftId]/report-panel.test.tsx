@@ -26,6 +26,7 @@ vi.mock("@/trpc/client", () => {
       reportDocument: { useQuery: () => ({ data: undefined, isError: false }) },
       reportSave: { useMutation: mutation }, reportFinalize: { useMutation: mutation },
     },
+    fusionReview: { versionMarks: { useQuery: () => ({ data: undefined }) } },
   } };
 });
 // The jury entry has its own tests; here it only needs to stay out of the way.

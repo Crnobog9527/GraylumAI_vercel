@@ -33,7 +33,12 @@ function queueLabel(item: UploadItem): string {
 }
 
 export type UploadPanelProps = {
-  uploadEnabled: boolean; spaceKnown: boolean;
+  /**
+   * The server's upload switch; null while the list is still loading or failed to load. Unknown is not "closed": the
+   * page shows its own loading or retry line, so this panel only keeps the entry hidden (fail closed) without
+   * telling the user that upload is not open.
+   */
+  uploadEnabled: boolean | null; spaceKnown: boolean;
   /** The server's recognition switch; the scan sentence needs it as well as the build flag. */
   scanServerEnabled?: boolean; usedBytes?: number; capacityBytes?: number;
   uploads: UploadItem[]; onAdd: (files: File[], purpose: LibraryPurpose) => void;
@@ -60,7 +65,7 @@ export function UploadPanel(props: UploadPanelProps) {
       <p className={styles.hint}>{isWordUploadReady() && isPdfUploadReady() ? 'Word 和 PDF' : isWordUploadReady() ? 'Word' : 'PDF'} 的文字在你自己的浏览器里读取，不扣积分。</p>
       <p className={styles.hint}>{SCAN_NOTICE}</p>
     </>}
-    {!props.uploadEnabled && <p className={styles.closed} role="status">
+    {props.uploadEnabled === false && <p className={styles.closed} role="status">
       上传暂未开放。已上传的文件仍可查看、下载和删除。
     </p>}
     {props.uploadEnabled && space === 'over' && <p className={styles.warn} role="status">
