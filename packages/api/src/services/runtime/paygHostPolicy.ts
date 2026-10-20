@@ -17,6 +17,8 @@ const reference = z.string().trim().min(1).max(128);
 const admittedRoutes: Readonly<Record<string,string>> = {
   'anthropic/claude-sonnet-5.5':'anthropic',
   'google/gemini-3.8-flash':'google-ai-studio',
+  // FUSION-REVIEW (Owner 2026-10-21): execution reviewer, with its own evidenced profile and window quote.
+  'google/gemini-4-argon':'google-ai-studio',
   'openai/gpt-6-luna':'openai',
   // FUSION-REVIEW panel (Owner 2026-10-17): Sol as a reviewer, Opus as the summary. A route here only allows
   // a profile; admission still needs a profile entry with evidence for the purpose, format and reasoning.

@@ -257,3 +257,18 @@ it('Fusion-shape evidence keeps its own bounds',()=>{
  const g=fusionOnly();g.profile.reasoningVariants[0]!.testedOutputLimit=512;
  expect(paygHostProfile.safeParse(g.profile).success).toBe(false);
 });
+
+
+it('Argon admits evidenced review low only on google-ai-studio; alternatives and other purposes stay denied', async () => {
+ const f=fusionOnly('google/gemini-4-argon','google-ai-studio');
+ f.profile.purposes=['fusion_review'];
+ expect(await f.read('fusion_review')).toHaveLength(1);
+ for(const purpose of ['ordinary','fusion_summary','fusion_compare'] as const)
+  await expect(f.read(purpose)).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
+ for(const route of ['google-vertex/global','google-ai-studio/flex','google-ai-studio/priority']){
+  const other=fusionOnly('google/gemini-4-argon',route);other.profile.purposes=['fusion_review'];
+  await expect(other.read('fusion_review')).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
+ }
+ f.profile.reasoningVariants[0]!.outputStressSamples=1;
+ await expect(f.read('fusion_review')).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
+});
