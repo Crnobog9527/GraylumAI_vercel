@@ -2830,7 +2830,7 @@
   "con:runtime_sessions.runtime_sessions_pkey": "4c6419b37043",
   "con:runtime_sessions.runtime_sessions_start_payload_check": "c59cc534db5b",
   "con:runtime_test_windows.runtime_test_windows_actor_ids_check": "fd731a9bd730",
-  "con:runtime_test_windows.runtime_test_windows_call_policies_check": "a11c1c9f4573",
+  "con:runtime_test_windows.runtime_test_windows_call_policies_check": "62e435a4a347",
   "con:runtime_test_windows.runtime_test_windows_credits_per_usd_check": "d791f6de9ed8",
   "con:runtime_test_windows.runtime_test_windows_max_calls_check": "a2f4bc3cd850",
   "con:runtime_test_windows.runtime_test_windows_max_cost_usd_check": "1b82719406e9",
