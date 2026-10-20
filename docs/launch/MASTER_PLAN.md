@@ -84,6 +84,19 @@
 
 ### 2.1 Owner 的新决定（2026-09-27 起，2026-10-20 更新）
 
+**2026-10-21：评审团执行约束席改用 Gemini 4 Argon**
+
+Owner 原话（2026-10-21，经总控在 FUSION-REVIEW 执行任务中转达）：
+
+> 停止 Gemini 3.8 Flash 的测试，替换成 Gemini 4 Argon
+
+> 继续接入 Argon：代码改动加一轮抽样，抽样预算 3 美元以内，评测等 Argon 好了再继续跑。
+
+执行约束席由 `google/gemini-3.8-flash` 换为 `google/gemini-4-argon`，线路 `google-ai-studio`；
+取代 2026-10-17 评审模型决定中 Gemini 3.8 Flash 这一席，GPT 算账、Sonnet 证据、Opus 汇总保持原决定。
+按已有 FUSION-PROFILE 方案 B 取证，不扩大用途；三处 staging 配置由总控审计并执行。
+配置就绪后 founder 只做一次真实评审，另有 1 美元预算，结果记入 #716；不部署分支、不操作正式环境。
+
 **2026-10-20：报告版本在资料库里显示"已评审"和"衍生"标识**
 
 Owner 原话（2026-10-20，经总控转达，记录于 REPORT-VERSION-MARKS 的 PR）：
