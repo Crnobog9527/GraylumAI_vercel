@@ -70,7 +70,8 @@ function fixture(enabled:boolean,budgets=true){
  const row={id:modelId,model_id:'fixture/mentor',is_active:'true',provider:'fixture',max_tokens:1000,input_limit:400000};
  const admin={rpc,from:(table:string)=>{
   let key='';
-  const query={select:()=>query,eq:(_column:string,value:string)=>{key=value;return query;},in:async()=>({data:[],error:null}),
+  const query={select:()=>query,eq:(_column:string,value:string)=>{key=value;return query;},in:async(_column:string,keys:string[])=>({data:table==='system_settings'
+    ?keys.filter(key=>settings[key]!==undefined).map(key=>({key,value:settings[key]})):[],error:null}),
    maybeSingle:async()=>({error:null,data:settings[key]===undefined?null:{key,value:settings[key],revision:'2'}}),
    single:async()=>({data:table==='modules'?{id:moduleId,active:true,skill_id:moduleId,model_id:modelId}:row,error:null})};
   return query;

@@ -149,9 +149,9 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    if(input.network==='require_latest'&&!policy.searchEnabled)throw new Error('RUNTIME_SEARCH_UNAVAILABLE');
    let session=await query('runtime_session_context',{p_session_id:input.sessionId});
    // Resolve replay before model or revision freshness changes produce another budget.
-   const configuration=readAdmissionConfiguration(admin),settings=readAdmissionSettings(admin,configuration);
    const replay=await query('runtime_admission_replay',{p_request_id:input.requestId,p_request:request});
    if(replay)return replay;
+   const configuration=readAdmissionConfiguration(admin),settings=readAdmissionSettings(admin,configuration);
    // LIB-4b: shape and switch before any paid work; runtime_admit checks and freezes each document (0262).
    const libraryReferences=await admitLibraryReferences(admin,request,policy);
    // POSITIONING-GATE: the read overlaps the checks below; OPC turns, reports and organizing are never gated.

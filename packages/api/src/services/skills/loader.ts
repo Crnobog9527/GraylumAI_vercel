@@ -206,8 +206,11 @@ export async function activateSkill(source: SkillSource, selection: PackageIdent
   // A small bounded batch avoids serial network waits without flooding the database.
   // readVerified still checks current access before each uncached private read;
   // the fresh check below covers the whole assembled context, including cache hits.
-  const sections = await readResourceBatch([...paths], async path => ({path, content: await readVerified(source, p, path)}));
-  const metadata = metadataFor(sections.find(section => section.path === 'SKILL.md')!.content, p);
+  const entry = await readVerified(source, p, 'SKILL.md');
+  const metadata = metadataFor(entry, p);
+  const methods = await readResourceBatch([...paths].filter(path => path !== 'SKILL.md'),
+    async path => ({path, content: await readVerified(source, p, path)}));
+  const sections = [{path: 'SKILL.md', content: entry}, ...methods];
   // JSON encoding gives explicit boundaries without trusting markup in private files.
   const context = JSON.stringify({ skill: identityOf(p), resources: sections });
   if (Buffer.byteLength(context, 'utf8') > options.maxContextBytes) fail('CAPACITY_EXCEEDED');

@@ -61,6 +61,7 @@ async function fixture(resourceBytes: number, worst = false, budgets?: PurposeBu
             provider: 'fixture', is_active: 'true', max_tokens: 131072, input_limit: 1000000 }, error: null }),
         in: async () => ({ data: [
           { key: 'v3_summary_model_id', value: id(8) }, { key: 'v3_summary_max_tokens', value: '2048' },
+          ...(budgets ? [{key: 'runtime_purpose_budgets', value: JSON.stringify(budgets)}] : []),
         ], error: null }),
       };
       return query;
