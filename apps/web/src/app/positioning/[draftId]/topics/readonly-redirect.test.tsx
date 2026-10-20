@@ -6,6 +6,8 @@ import { describe, expect, it, vi } from 'vitest';
 // and the topic workspace, which (from an earlier cache) still names a bound topic conversation.
 const enabled: Record<string, boolean> = {};
 let readData: unknown = { conversationDeleted: true, draftId: 'draft' };
+// PAYWALL profile archive: the drafts list names the draft's profile, and opc.businesses says whether it is archived.
+let archived = false;
 const idle = { data: undefined, isLoading: false, isFetching: false, error: null, refetch: async () => ({}) };
 const deep = (): unknown => new Proxy(() => undefined, { get: (_, key) => key === 'then' ? undefined : deep(), apply: () => undefined });
 vi.mock('@/trpc/client', () => ({
@@ -14,13 +16,17 @@ vi.mock('@/trpc/client', () => ({
       enabled[`${String(area)}.${String(procedure)}`] = options?.enabled !== false;
       if (area === 'opc' && procedure === 'read') return { ...idle, data: readData };
       if (area === 'opc' && procedure === 'topicWorkspace') return { ...idle, data: { bound: true, sessionId: 'topic-session' } };
+      if (area === 'opc' && procedure === 'list') return { ...idle, data: { drafts: [{ draftId: 'draft', businessId: 'b' }] } };
+      if (area === 'opc' && procedure === 'businesses')
+        return { ...idle, isSuccess: true, data: [{ businessId: 'b', name: '账号', archivedAt: null, isArchived: archived }] };
       return idle;
     },
     useMutation: () => ({ mutate: () => undefined, mutateAsync: async () => ({}), isPending: false }),
   }) }) }),
 }));
 vi.mock('next/navigation', () => ({ useParams: () => ({ draftId: 'draft' }), useRouter: () => ({ push() {}, replace() {} }) }));
-vi.mock('../readonly-draft-view', () => ({ ReadonlyDraftView: () => <p>READONLY_VIEW</p> }));
+vi.mock('../readonly-draft-view', async original => ({ ...await original<object>(),
+  ReadonlyDraftView: ({ archived: shown }: { archived?: boolean }) => <p>{shown ? 'ARCHIVED_VIEW' : 'READONLY_VIEW'}</p> }));
 vi.mock('@/components/opc/workspace-frame', () => ({ WorkspaceFrame: () => <p>TOPICS_WORKSPACE</p> }));
 
 describe('topics page of a draft whose conversation was deleted', () => {
@@ -32,6 +38,17 @@ describe('topics page of a draft whose conversation was deleted', () => {
     // Nothing of the topic conversation is fetched or polled behind the read-only view.
     expect(enabled).toMatchObject({ 'opc.topicWorkspace': false, 'runtime.view': false, 'opc.topicDraft': false });
   }, 60_000); // The page module is large; its first import alone can take several seconds.
+
+  it('shows the archived read-only view for a draft whose profile was archived', async () => {
+    readData = { draftId: 'draft', sessionId: 'session' };
+    archived = true;
+    const { default: Page } = await import('./page');
+    const html = renderToStaticMarkup(<Page/>);
+    expect(html).toContain('ARCHIVED_VIEW');
+    expect(html).not.toContain('TOPICS_WORKSPACE');
+    archived = false;
+    expect(renderToStaticMarkup(<Page/>)).not.toContain('ARCHIVED_VIEW');
+  }, 60_000);
 
   it('starts no topic query while the draft read is still loading', async () => {
     readData = undefined;
