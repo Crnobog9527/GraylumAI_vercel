@@ -162,6 +162,10 @@ export function matchedProfile<P extends AnyProfile>(profiles: readonly P[], pol
   const matches = profiles.filter(p => p.model === policy.model && p.endpointTag === policy.providerLimits?.providerSlug);
   const profile = matches.length === 1 ? matches[0] : undefined;
   const uses = requirements.filter(r => r.modelId === policy.modelId);
+  // The 2026-10-21 Argon approval covers only the execution reviewer. A broader mutable profile must not
+  // turn this route into permission for summary, compare, chat or Skill calls, even with full-matrix evidence.
+  if (profile?.model === 'google/gemini-4-argon'
+    && (profile.purposes.length !== 1 || profile.purposes[0] !== 'fusion_review')) return undefined;
   if (!profile || policy.protocol !== profile.protocol || !policy.providerLimits || !uses.length
     || (profile.expiresAt !== undefined && (Date.parse(profile.expiresAt) <= Date.now()
       || Date.parse(profile.expiresAt) < Date.parse(deadline ?? '')))

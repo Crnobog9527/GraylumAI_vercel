@@ -3,7 +3,7 @@
 ## 1. 范围与状态
 
 Owner 2026-10-21 决定：执行约束席改用 `google/gemini-4-argon` / `google-ai-studio`，代码改动加一轮 ≤3 美元抽样。
-代码仅补模型与线路配对；证据门槛、计费规则和候选校验不变。
+代码补模型与线路配对，并在共享档案匹配处限定Argon只能有fusion_review用途；证据门槛、计费规则和候选校验不变。
 抽样在派发前被线路状态阻塞：OpenRouter 指定线路 `status=-2`，现有取证流程要求 `status=0`。
 **实际调用 0、费用 0、profile 尚未生成**；[预检记录](evidence/fusion-argon-20261021-preflight.json)。
 本轮未执行 staging 配置变更；founder 真实评审也未启动。
@@ -14,7 +14,7 @@ Owner 2026-10-21 决定：执行约束席改用 `google/gemini-4-argon` / `googl
 模型有效且可派发、平台密钥匹配、报价、该用途的思考设置、精确线路和有证据的 PAYG 档案。
 Argon 原来缺窗口报价、档案和 `paygHostPolicy.ts` 路线条目，因而不能出现在候选中。
 
-本 PR 新增唯一配对 `google/gemini-4-argon → google-ai-studio`。
+本 PR 新增唯一配对 `google/gemini-4-argon → google-ai-studio`；Argon即使被配置其他用途的完整矩阵档案，也会被拒绝。
 其他带 Flash 名字的清单属于外部搜索证据识别或旧 AC-0 探针，不参与评审团准入，不应加入 Argon。
 后台页没有另一张模型名白名单；总控补齐配置后，同一准入函数会把 Argon 列为可评审。
 回归测试调用真实的候选函数和准入链，覆盖配置齐全、缺报价、缺档案、错误线路；不使用准入函数替身。
@@ -36,7 +36,7 @@ system+user 两条消息、严格 JSON schema、low、无工具、禁用 web 插
 计划输出上限 4096、截断上限512；新档案保持 `maxBytes=196608`、template/margin各4096、maxMessages128、maxTools2、maxSchemaBytes16384，
 用途仅 `fusion_review`，格式仅 `fusion-json-v1-stream`，思考仅low，过期时间与窗口一致为2027-12-31T00:00:00Z。
 真实抽样成功后才能写入 reference、manifestHash、实际样本数、比值、最大请求和费用检查结论，并用正式 `paygHostProfile` 校验。
-**本 PR 当前没有可应用的 Argon profile；不提供伪造或套用 Flash 的档案。**
+**本 PR 当前没有可应用的 Argon profile；不提供伪造或套用 Flash 的档案。真实证据未补齐前保持Draft，不请求合并或配置应用。**
 
 ## 4. 三处 staging 配置（由总控审计后执行，无 SQL）
 

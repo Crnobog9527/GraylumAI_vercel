@@ -272,3 +272,15 @@ it('Argon admits evidenced review low only on google-ai-studio; alternatives and
  f.profile.reasoningVariants[0]!.outputStressSamples=1;
  await expect(f.read('fusion_review')).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
 });
+
+
+it('Argon purpose approval cannot be widened by changing the trusted profile, even with full-matrix evidence', async () => {
+ const summary=fusionOnly('google/gemini-4-argon','google-ai-studio');
+ await expect(summary.read('fusion_summary')).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
+ const mixed=fusionOnly('google/gemini-4-argon','google-ai-studio');
+ mixed.profile.purposes=['fusion_review','fusion_summary'];
+ await expect(mixed.read('fusion_review')).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
+ const full=fixture();full.profile.model=full.policy.model='google/gemini-4-argon';
+ full.profile.endpointTag=full.policy.providerLimits!.providerSlug='google-ai-studio';
+ await expect(full.run('ordinary')).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
+});

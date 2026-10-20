@@ -1,6 +1,4 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { openRouterAccount } from '../models/openRouterKey';
@@ -21,11 +19,18 @@ const env = { VERCEL: '1', VERCEL_PROJECT_PRODUCTION_URL: 'auth-staging.graylum.
   V3_RUNTIME_STAGING_WINDOW_ID: windowId, V3_RUNTIME_STAGING_ENABLED: 'true' };
 
 function fixture() {
-  // Synthetic profile: exercise the existing evidence rules, never present this as real Argon evidence.
-  const draft = JSON.parse(readFileSync(resolve(__dirname,
-    '../../../../../docs/launch/evidence/fusion-profile-20261017.profiles-draft.json'), 'utf8'));
-  const profile = { ...draft.profiles[0], model, endpointTag: 'google-ai-studio', expiresAt: '2099-01-01T00:00:00Z',
-    profileVersion: 'synthetic-only', evidenceVersion: 'synthetic-only' };
+  // Entirely synthetic configuration for a local database double, not real model evidence or a deployable profile.
+  const evidence = { scope: 'fusion-request-shape', reference: 'synthetic-only', manifestHash: 'a'.repeat(64),
+    distinctSamples: 6, sizeBands: 2, maxVerifiedBytes: 186000, maxPromptToBytes: 0.4, maxPromptToUpper: 0.38,
+    outputLimit: 4096, testedOutputLimit: 512, outputSemantics: 'max-tokens-includes-reasoning',
+    includesReasoning: true, cacheCovered: true, costBoundPassed: true };
+  const profile = { model, endpointTag: 'google-ai-studio', protocol: 'openrouter-chat-v1',
+    profileVersion: 'synthetic-only', evidenceVersion: 'synthetic-only', admissionPath: 'empirical',
+    templateTokens: 4096, marginTokens: 4096, maxBytes: 196608, maxMessages: 128, maxTools: 2, maxSchemaBytes: 16384,
+    purposes: ['fusion_review'], requestFormats: ['fusion-json-v1-stream'], outputLimit: 4096,
+    reasoningVariants: [{ reasoning: { effort: 'low' }, outputLimit: 4096, testedOutputLimit: 512,
+      evidenceReference: 'synthetic-only', manifestHash: 'a'.repeat(64), outputStressSamples: 2, includesReasoning: true }],
+    evidence, expiresAt: '2099-01-01T00:00:00Z' };
   const profiles = [profile];
   const row = { id, name: 'Gemini 4 Argon', model_id: model, provider: 'openai', is_active: 'true',
     api_endpoint: 'https://openrouter.ai/api/v1', input_limit: 1048576, max_tokens: 943718,
@@ -51,7 +56,7 @@ function fixture() {
   return { row, profile, profiles, window, read: () => fusionModelOptions(db, id, env, window) };
 }
 
-it('lists Argon for review through real admission once both its quote and evidenced profile exist', async () => {
+it('lists Argon for review through real admission with an entirely synthetic quote and review-only profile', async () => {
   const f = fixture();
   expect((await f.read()).models).toEqual([{ id, name: 'Gemini 4 Argon', review: true, summary: false, compare: false }]);
 });
