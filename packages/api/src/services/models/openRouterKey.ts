@@ -10,7 +10,8 @@ type RpcClient = Pick<SupabaseClient, 'rpc'>;
  * Supabase Vault (slot `openrouter`, no environment fallback).
  * Undefined when the admin has not filled it; a failed database read throws PLATFORM_SECRET_UNAVAILABLE
  * (never a silent switch to another key). `fresh`: bypass the 60 s per-instance cache; every path that authorizes a
- * paid provider call uses it (a cleared or replaced key must stop working at once on every instance).
+ * paid provider call uses it. One scoped request shares its fresh snapshot; the next request reads again,
+ * so a cleared or replaced key applies immediately to the next admission/execution.
  */
 export async function readOpenRouterKey(admin: RpcClient, options: { fresh?: boolean } = {}): Promise<string | undefined> {
   try {
