@@ -36,12 +36,19 @@ import {
   getCreditsRechargeAction,
 } from '@/components/credits/balancePresentation';
 
-// Navigation items configuration
-const navItems = [
-  { href: '/', label: '首页', icon: Home },
+// Navigation items configuration. The logged-in home is /app since the single-host move (E1); "/" is the public home.
+export const navItems = [
+  { href: '/app', label: '首页', icon: Home },
   { href: '/app/positioning', label: '对话', icon: MessageSquare },
   { href: '/app/profile', label: '个人中心', icon: User },
 ];
+
+/** The home entry is active on the logged-in home only; the others also on the pages below them. */
+export function isNavItemActive(pathname: string | null, href: string) {
+  if (!pathname) return false;
+  if (pathname === href) return true;
+  return href !== '/app' && pathname.startsWith(`${href}/`);
+}
 
 export function AppHeader() {
   const pathname = usePathname();
@@ -129,8 +136,7 @@ export function AppHeader() {
         {/* Navigation */}
         <nav className="hidden md:flex items-center gap-1">
           {navItems.map((item) => {
-            const isActive = pathname === item.href ||
-              (item.href !== '/' && pathname?.startsWith(item.href));
+            const isActive = isNavItemActive(pathname, item.href);
             const Icon = item.icon;
 
             return (
