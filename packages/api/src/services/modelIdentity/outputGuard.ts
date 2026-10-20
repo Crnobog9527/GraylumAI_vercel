@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { BRAND_REPLY_EN, BRAND_REPLY_ZH, BRAND_REPLY_ZH_HANT } from './brandIdentity';
 import { questionCardSchema, questionToolCardSchema } from '../../shared/agentTurn';
+import { META_RESERVE, RESULT_BYTE_LIMIT } from '../runtime/resultCapacity';
 
 /**
  * MODEL-IDENTITY-GUARD layer 3: replace a model's first-person self-identification
@@ -24,7 +25,7 @@ const VERSION = String.raw`(?:[-\s]?\d[\w.]*|\s+(?:opus|sonnet|haiku|flash|pro|u
 const EN_END = String.raw`(?=\s*(?:[,.!?;:]|$)|\s+(?:an?\s+|the\s+)?(?:[\w-]+\s+){0,2}?(?:model|AI|assistant|chatbot|LLM)\b`
   + String.raw`|\s+(?:by|from|developed|trained|made|created|built)\b)`;
 // Simplified and Traditional forms of the same words (review: 我由 Anthropic 開發 / 我的底層模型是 / 我基於).
-const MADE = '(?:[训訓][练練]|[开開][发發]|打造|[研][发發]|[创創]建|推出|[设設][计計])(?:出来)?(?=$|[。！？!?.，,；;：:、\\s]|的|了)';
+const MADE = '(?:[训訓][练練]|[开開][发發]|打造|[研][发發]|[创創]建|推出|[设設][计計])(?:出来|而成|完成)?(?=$|[。！？!?.，,；;：:、\\s]|的|了)';
 const FROM = '(?:由|[来來]自)';
 const ZH_END = `(?=\\s*(?:[，,。.！!？?；;：:、]|$)|\\s*(?:大?模型|助手|AI|[语語]言模型|${FROM}|${MADE}))`;
 const PATTERNS = [
@@ -104,8 +105,14 @@ function brandReplyFor(sentence: string) {
 
 /** Replace every self-identifying sentence; the brand reply appears at most once. */
 export function redactModelIdentity(text: string) {
+  return redactModelIdentityWithState(text);
+}
+
+type SharedReplyState = { replied: boolean; firstLeak?: string };
+
+function redactModelIdentityWithState(text: string, state?: SharedReplyState) {
   if (!leaksModelIdentity(text)) return text;
-  let out = '', replied = false;
+  let out = '', replied = state?.replied ?? false;
   for (const [start, end] of sentences(text)) {
     const sentence = text.slice(start, end);
     if (!leaksModelIdentity(sentence)) { out += sentence; continue; }
@@ -114,6 +121,10 @@ export function redactModelIdentity(text: string) {
       out += lead + brandReplyFor(sentence) + trail;
       replied = true;
     } else if (/\n$/u.test(sentence)) out += '\n';
+  }
+  if (state) {
+    state.replied = replied;
+    state.firstLeak ??= text;
   }
   return out;
 }
@@ -146,7 +157,15 @@ export function redactIdentityBody(body: string) {
   if (Array.isArray(value)) {
     const redacted = redactIdentityStringsResult(value);
     if (!redacted.changed) return body;
-    try { return stringifyJsonIterative(redacted.value); } catch { return body; }
+    try {
+      const output = stringifyJsonIterative(redacted.value);
+      if (Buffer.byteLength(JSON.stringify(output), 'utf8') <= RESULT_BYTE_LIMIT - META_RESERVE) return output;
+      // If full replies amplify a large array past the completion limit, keep safe text and one brand reply.
+      const sharedReply: SharedReplyState = { replied: false };
+      const compact = stringifyJsonIterative(redactIdentityStringsResult(value, sharedReply).value);
+      if (Buffer.byteLength(JSON.stringify(compact), 'utf8') <= RESULT_BYTE_LIMIT - META_RESERVE) return compact;
+      return JSON.stringify([brandReplyFor(sharedReply.firstLeak ?? '')]);
+    } catch { return body; }
   }
   if (!value || typeof value !== 'object') return body;
   const record = value as Record<string, unknown>;
@@ -173,11 +192,11 @@ export function redactIdentityCard<T>(card: T): T | null {
 }
 
 /** Every string inside a JSON value; other values and keys unchanged. */
-function redactIdentityStringsResult<T>(value: T) {
+function redactIdentityStringsResult<T>(value: T, sharedReply?: SharedReplyState) {
   let changed = false;
   const clone = (source: unknown): unknown => {
     if (typeof source === 'string') {
-      const redacted = redactModelIdentity(source);
+      const redacted = sharedReply ? redactModelIdentityWithState(source, sharedReply) : redactModelIdentity(source);
       changed ||= redacted !== source;
       return redacted;
     }

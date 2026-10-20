@@ -1,11 +1,14 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
 import { BRAND_REPLY_EN, BRAND_REPLY_ZH, BRAND_REPLY_ZH_HANT } from './brandIdentity';
+import { META_RESERVE, RESULT_BYTE_LIMIT } from '../runtime/resultCapacity';
 import { leaksModelIdentity, redactIdentityBody, redactIdentityCard, redactIdentitySummary, redactModelIdentity, streamingRedaction } from './outputGuard';
 
 // Leaks: what a model may say about itself after a direct question or a jailbreak.
 const LEAKS_ZH = [
   '我是由 Google 训练的大型语言模型。',
+  '我是由 Google 训练而成的大型语言模型。',
+  '我是由 Anthropic 开发完成的 AI 助手。',
   '我是由 Google 精心训练的大型语言模型。',
   '我是由 Google\n训练的大型语言模型。',
   '我是 Claude，由 Anthropic 开发的 AI 助手。',
@@ -211,6 +214,16 @@ it('redacts identity strings inside a bare JSON array while preserving ordinary 
     { title: BRAND_REPLY_ZH, brief: 'Claude 和 GPT-4 的差异要按用途比较。' },
     '我在讨论 Claude 和 GPT，想比较它们的写作风格。',
   ]);
+});
+
+it('keeps an amplified bare array within the completion persistence limit', () => {
+  const body = JSON.stringify(Array.from({ length: 1_500 }, () => 'I am Claude.'));
+  const output = redactIdentityBody(body);
+  const result: unknown = JSON.parse(output);
+  expect(Buffer.byteLength(JSON.stringify(output), 'utf8')).toBeLessThanOrEqual(RESULT_BYTE_LIMIT - META_RESERVE);
+  expect(result).toHaveLength(1_500);
+  expect(result).toEqual([BRAND_REPLY_EN, ...Array.from({ length: 1_499 }, () => '')]);
+  expect((result as string[]).some(leaksModelIdentity)).toBe(false);
 });
 
 it('redacts deeply nested bare JSON arrays without recursive traversal', () => {
