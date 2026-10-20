@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  appendArrival, draftMark, endedNotice, feeText, latestByDraft, playableEvents, startErrorText, toJuryDetail, toReaderSource, type MineItem, type RawDetail,
+  appendArrival, draftMark, endedNotice, evidenceText, feeText, latestByDraft, playableEvents, startErrorText, toJuryDetail, toReaderSource, type MineItem, type RawDetail,
   type RawEvents,
 } from './review-adapter';
 
@@ -76,5 +76,18 @@ describe('fixed-price charge line (0294)', () => {
   it('shows nothing for a review started before the fixed price', () => {
     expect(feeText(null)).toBeNull();
     expect(feeText(undefined)).toBeNull();
+  });
+});
+
+describe('evidence note', () => {
+  it('counts "缺引文" and "引文不在原文" apart, and says nothing when nothing was held back or the check was off', () => {
+    const text = evidenceText({ checked: true, raised: 9, dropped: { missingQuote: 2, quoteNotInReport: 3, anchorMissing: 1 } });
+    expect(text).toContain('缺引文 2 条');
+    expect(text).toContain('引文不在原文 3 条');
+    expect(text).toContain('补充建议没有对上报告章节 1 条');
+    expect(evidenceText({ checked: true, raised: 4, dropped: { missingQuote: 0, quoteNotInReport: 0, anchorMissing: 0 } })).toBeNull();
+    expect(evidenceText({ checked: false })).toBeNull();
+    expect(evidenceText(undefined)).toBeNull();
+    expect(evidenceText({ checked: true, raised: 2, nothingPassed: true, dropped: { missingQuote: 2, quoteNotInReport: 0, anchorMissing: 0 } })).toContain('不会有修订');
   });
 });

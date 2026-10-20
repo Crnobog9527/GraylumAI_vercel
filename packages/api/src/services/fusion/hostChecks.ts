@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { reportBodyText } from '../../shared/reportData';
 import { z } from 'zod';
+import { evidenceOf, type Evidence, type EvidenceReason } from './reviewEvidence';
 
 /** Host checks of FUSION-REVIEW §2.2: pure, deterministic functions over the saved text and the frozen
  * inputs, so recovery can redo them with the same result. They never call a model or the database. */
@@ -14,15 +15,22 @@ const length = (value: string) => [...value].length;
 const decisionSchema = z.object({ decision: z.enum(DECISIONS), strongestCase: text(2000), strongestAlternative: text(2000),
   verdict: z.enum(VERDICTS), basis: text(2000) }).strip();
 const issueSchema = z.object({ location: text(200), perspective: text(200), problem: text(2000), suggestion: text(2000),
-  severity: z.enum(SEVERITIES) }).strip();
+  severity: z.enum(SEVERITIES),
+  /** content: about what the report says (quote it); omission: about what it leaves out (anchor = the chapter it belongs in). */
+  kind: z.enum(['content', 'omission']).default('content'), quote: z.string().max(1500).default(''), anchor: z.string().max(200).default(''),
+}).strip();
 const responseSchema = z.object({ reviewer: text(8), decision: z.enum(DECISIONS), strongestView: text(2000), stance: z.enum(['agree', 'disagree']),
   reason: text(2000) }).strip();
 const rawOpinion = z.object({ decisions: z.array(decisionSchema).max(8), issues: z.array(issueSchema).max(50),
   responses: z.array(responseSchema).max(16).optional() }).strip();
-export type Opinion = { decisions: Array<z.infer<typeof decisionSchema>>; issues: Array<z.infer<typeof issueSchema>>;
+export type Opinion = { decisions: Array<z.infer<typeof decisionSchema>>;
+  /** `evidence` is set only when the report was given to check against (reviews started with the evidence check). */
+  issues: Array<z.infer<typeof issueSchema> & { evidence?: Evidence }>;
   responses?: Array<z.infer<typeof responseSchema>>;
   /** Vague issues the host dropped (wrong section, too short, or "why" equal to "how"). */
-  dropped: number };
+  dropped: number;
+  /** Severe issues dropped for lacking checkable evidence, by reason (the evidence check only). */
+  droppedBy?: Record<EvidenceReason, number> };
 
 /** JSON response formats sent with each request (strict schema mode). */
 const str = { type: 'string' } as const;
@@ -31,8 +39,9 @@ const decisionFormat = { type: 'object', additionalProperties: false,
     decision: { type: 'string', enum: [...DECISIONS] }, strongestCase: str, strongestAlternative: str,
     verdict: { type: 'string', enum: [...VERDICTS] }, basis: str } } as const;
 const issueFormat = { type: 'object', additionalProperties: false,
-  required: ['location', 'perspective', 'problem', 'suggestion', 'severity'], properties: {
-    location: str, perspective: str, problem: str, suggestion: str, severity: { type: 'string', enum: [...SEVERITIES] } } } as const;
+  required: ['location', 'perspective', 'problem', 'suggestion', 'severity', 'kind', 'quote', 'anchor'], properties: {
+    location: str, perspective: str, problem: str, suggestion: str, severity: { type: 'string', enum: [...SEVERITIES] },
+    kind: { type: 'string', enum: ['content', 'omission'] }, quote: str, anchor: str } } as const;
 const responseFormat = { type: 'object', additionalProperties: false, required: ['reviewer', 'decision', 'strongestView', 'stance', 'reason'],
   properties: { reviewer: str, decision: { type: 'string', enum: [...DECISIONS] }, strongestView: str,
     stance: { type: 'string', enum: ['agree', 'disagree'] }, reason: str } } as const;
@@ -82,7 +91,10 @@ const squash = (value: string) => value.replace(/[\s\p{P}]/gu, '');
  * MIN_REASON_CHARACTERS, or a "how" that only repeats the "why". */
 export function parseOpinion(raw: string, rules: { sections: string[]; debate?: boolean;
   /** Debate round: every other reviewer × every disputed decision, each answered exactly once (#962 review). */
-  responses?: Array<{ reviewer: string; decision: string }> }): Opinion | null {
+  responses?: Array<{ reviewer: string; decision: string }>;
+  /** The reviewed report's text: when given, each issue's quote or anchor is checked against it and a severe issue without
+   * checkable evidence is dropped (Owner 2026-10-20). Absent: the plain check of reviews started before it. */
+  report?: string }): Opinion | null {
   const parsed = rawOpinion.safeParse(looseJson(raw));
   if (!parsed.success) return null;
   const { decisions, issues, responses } = parsed.data;
@@ -96,7 +108,14 @@ export function parseOpinion(raw: string, rules: { sections: string[]; debate?: 
   const kept = issues.filter(issue => rules.sections.includes(issue.location.replace(/^#+\s*/, '').trim())
     && length(issue.problem) >= MIN_REASON_CHARACTERS && length(issue.suggestion) >= MIN_REASON_CHARACTERS
     && squash(issue.problem) !== squash(issue.suggestion));
-  return { decisions, issues: kept, ...(rules.debate ? { responses } : {}), dropped: issues.length - kept.length };
+  if (rules.report === undefined) return { decisions, issues: kept, ...(rules.debate ? { responses } : {}), dropped: issues.length - kept.length };
+  const droppedBy: Record<EvidenceReason, number> = { missing_quote: 0, quote_not_in_report: 0, anchor_missing: 0 };
+  const checked = kept.flatMap(issue => {
+    const { evidence, reason } = evidenceOf(issue, rules.report!, rules.sections);
+    if (issue.severity === 'critical' && reason) { droppedBy[reason]++; return []; }
+    return [{ ...issue, evidence }];
+  });
+  return { decisions, issues: checked, ...(rules.debate ? { responses } : {}), dropped: issues.length - kept.length, droppedBy };
 }
 
 /** The key decisions reviewers split over (some keep, some change). */

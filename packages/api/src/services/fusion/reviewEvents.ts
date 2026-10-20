@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { DECISIONS, adjudicationSchema, checkRevision, parseOpinion, type Adjudication, type Opinion, type RevisionInput } from './hostChecks';
-import { reviewerLabel } from './reviewPrompts';
+import { reviewerLabel, thinReason } from './reviewPrompts';
 import type { AdoptionSection } from './reviewAdoption';
 import type { ReviewView } from './reviewRecord';
 
@@ -136,7 +136,9 @@ function adjudicationOf(text: string): Adjudication[] {
 export function reviewDetail(input: { view: ReviewView; reviewers: string[]; sections: string[];
   outputs: Map<string, { body: string; savedAt: string }>; revision: RevisionInput;
   /** Per-section original/revised text, fields and links (null when no revision passed). */
-  adoption: AdoptionSection[] | null }) {
+  adoption: AdoptionSection[] | null;
+  /** Started with the evidence check: the report opinions are checked against, and the code's own account of what it held back. */
+  report?: string; evidence?: unknown; roles?: Array<string | null> }) {
   const { view, reviewers, sections, outputs } = input;
   const stepOf = (groupId: string) => view.steps.find(step => step.groupId === groupId);
   const seats = reviewers.map((modelId, index) => {
@@ -144,13 +146,14 @@ export function reviewDetail(input: { view: ReviewView; reviewers: string[]; sec
       const calls = view.calls.filter(call => call.phase === 'fusion_review' && call.modelId === modelId && stepOf(call.groupId)?.round === round);
       if (!calls.length) return [];
       const usable = calls.find(call => USABLE.has(String(call.verdict)));
-      const opinion = usable ? parseOpinion(outputs.get(usable.callId)?.body ?? '', { sections, debate: round > 1 }) : null;
+      const opinion = usable ? parseOpinion(outputs.get(usable.callId)?.body ?? '', { sections, debate: round > 1,
+        ...(input.report === undefined ? {} : { report: input.report }) }) : null;
       const last = calls[calls.length - 1]!;
       const status = opinion ? 'usable' : last.verdict ? 'failed' : 'pending';
       return [{ round, status, ...(opinion ? { decisions: opinion.decisions, issues: opinion.issues,
         ...(opinion.responses ? { responses: opinion.responses } : {}) } : {}) }];
     });
-    return { seat: reviewerLabel(index), rounds };
+    return { seat: reviewerLabel(index), role: input.roles?.[index] ?? null, rounds };
   });
   const judged = view.calls.filter(call => call.phase === 'fusion_summary' && call.verdict);
   const summaryCall = judged.find(call => USABLE.has(String(call.verdict))) ?? judged[judged.length - 1];
@@ -163,12 +166,13 @@ export function reviewDetail(input: { view: ReviewView; reviewers: string[]; sec
     const plan = input.adoption?.find(item => item.section === section);
     return { section, changed: plan?.changed ?? false, wordingOnly: plan?.wordingOnly ?? false,
       ...(plan?.changed ? { original: plan.original, revised: plan.revised } : {}), fields: plan?.fields ?? [],
-      linkedSections: plan?.linkedSections ?? [], rulings: rulings.filter(item => item.section === section) };
+      linkedSections: plan?.linkedSections ?? [],
+      rulings: rulings.filter(item => item.section === section).map(item => ({ ...item, thinReason: thinReason(item.reason) })) };
   }).filter(group => group.rulings.length || group.changed);
   const awaiting = view.state === 'completed' && (view.outcome as { kind?: string } | null)?.kind === 'revised' && !choiceRecorded(view);
   return { reviewId: view.reviewId, draftId: view.draftId, state: view.state, outcome: view.outcome, seats,
     summary: { status: check?.ok ? 'usable' : summaryCall ? 'failed' : 'none', sections: bySection },
     /** The user's choice once made; until then the review waits for it (no lock: the draft stays editable, and a choice
      * against a version that is no longer current is refused by R14). */
-    adoption: view.adoption ?? null, awaitingChoice: awaiting };
+    adoption: view.adoption ?? null, awaitingChoice: awaiting, evidence: input.evidence ?? { checked: false } };
 }

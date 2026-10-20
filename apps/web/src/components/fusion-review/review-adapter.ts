@@ -31,7 +31,19 @@ export function toJuryDetail(raw: RawDetail): JuryDetail {
     summary: raw.summary as JuryDetail['summary'],
     adoption: recordedChoice(raw.adoption),
     awaitingChoice: raw.awaitingChoice,
+    evidence: raw.evidence as JuryDetail['evidence'],
   };
+}
+
+/** One plain line about the issues reviewers raised that the host did not hand on, each reason counted apart (Owner 2026-10-20). */
+export function evidenceText(evidence: JuryDetail['evidence']): string | null {
+  const dropped = evidence?.dropped;
+  if (!evidence?.checked || !dropped) return null;
+  const parts = [dropped.missingQuote ? `缺引文 ${dropped.missingQuote} 条` : '', dropped.quoteNotInReport ? `引文不在原文 ${dropped.quoteNotInReport} 条` : '',
+    dropped.anchorMissing ? `补充建议没有对上报告章节 ${dropped.anchorMissing} 条` : ''].filter(Boolean);
+  if (!parts.length) return null;
+  return `评审共提了 ${evidence.raised ?? 0} 条意见，有 ${parts.length ? parts.join('、') : ''}没有核对上原文，没有交给汇总。`
+    + (evidence.nothingPassed ? '这次没有一条能核对上原文的意见，所以不会有修订。' : '');
 }
 
 /** The reviewed report by chapter, as the result page reads it. Real reports have no reading aids yet. */

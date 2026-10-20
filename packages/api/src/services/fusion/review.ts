@@ -6,16 +6,21 @@ import { fusionExecutor, type FusionBodyVerdict } from './executor';
 import { checkRevision, DECISIONS, disputedDecisions, hasDisagreement, parseOpinion, type DeclaredStep, type Opinion, type StepValues } from './hostChecks';
 import { assertSnapshotSize, fusionRequestBytes, type FusionRequest } from './request';
 import { PAYG_PROFILE_MAX_BYTES } from '../runtime/paygHostPolicy';
-import { debateRequest, readReviewSkill, reviewerLabel, reviewerRequest, summaryRequest, type ReviewContext,
+import { debateRequest, readReviewSkill, reviewerLabel, reviewerRequest, summaryRequest, summaryRequestMerged, type ReviewContext,
   type ReviewSkill } from './reviewPrompts';
 import { reviewDetail, reviewEvents } from './reviewEvents';
 import { adoptionChoices, adoptionSections, applyChoices, sectionTexts, type AdoptionChoice } from './reviewAdoption';
 import { ENDED_STATES, reviewRecord, type ReviewPosition, type ReviewView } from './reviewRecord';
 import { claimOutcome, memberCaps, PERMANENT_REFUSALS } from './reviewLimits';
 import { planReview } from './reviewPlan';
+import { reportBodyText } from '../../shared/reportData';
+import { evidenceDetail, evidenceRules, roleOf } from './reviewEvidenceFlow';
+import { mergeOpinions } from './reviewMerge';
+import { REVIEWER_ROLES } from './reviewEvidence';
 
 type Executor = ReturnType<typeof fusionExecutor>;
 const config = z.object({ estimateUsd: z.string(), maxRounds: z.number().int().min(1), reviewers: z.array(z.string().uuid()).min(1),
+  evidence: z.boolean().optional(), roles: z.array(z.enum(REVIEWER_ROLES).nullable()).optional(),
   /** "最多消耗 X 积分" (§3.2), shown before the user agrees; absent on reviews started before it was recorded. */
   estimateCredits: z.number().int().positive().optional(),
   /** Each call's credit and dollar bounds by phase and model, frozen with that maximum (absent on older reviews: no cap). */
@@ -86,14 +91,14 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
   /** Rules for one reviewer's answer: in the debate round it must answer every other reviewer with a usable
    * round-1 opinion on every disputed decision, exactly once (derived from the saved round-1 opinions only). */
   async function opinionRules(view: ReviewView, src: Source, round: number, modelId: string | null) {
-    if (round === 1) return { sections: src.sections };
     const cfg = config.parse(view.config);
+    if (round === 1) return { sections: src.sections, ...evidenceRules(cfg, src.body) };
     const first = await opinionsOf(view, src, 1);
     const self = cfg.reviewers.indexOf(modelId ?? '');
     const disputed = disputedDecisions([...first.values()]);
     const responses = [...first.keys()].filter(index => index !== self)
       .flatMap(index => disputed.map(decision => ({ reviewer: reviewerLabel(index), decision })));
-    return { sections: src.sections, debate: true, responses };
+    return { sections: src.sections, debate: true, responses, ...evidenceRules(cfg, src.body) };
   }
   /** Usable opinions of one review round, keyed by the reviewer's position in the frozen panel. */
   async function opinionsOf(view: ReviewView, src: Source, round: number): Promise<Map<number, Opinion>> {
@@ -135,7 +140,7 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
     return judged;
   }
   const contextOf = (view: ReviewView, src: Source): ReviewContext => ({ report: src.body, materials: view.materials,
-    sections: src.sections, maxCharacters: src.maxCharacters });
+    sections: src.sections, maxCharacters: src.maxCharacters, evidence: Boolean(config.parse(view.config).evidence) });
   /** Round 1 as sent, and the summary at its deepest trimming (verdicts only, which claimStep can always fall back to). */
   function fitsWhenSent(view: ReviewView, src: Source, skill: Awaited<ReturnType<typeof readReviewSkill>>) {
     const context = contextOf(view, src);
@@ -174,7 +179,7 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
     assertSnapshotSize(context.report, context.materials);
     let members: FusionMember[];
     if (at.phase === 'review' && at.round === 1) {
-      members = models.map(modelId => ({ modelId, phase: 'fusion_review', request: reviewerRequest(skill, context) }));
+      members = models.map(modelId => ({ modelId, phase: 'fusion_review', request: reviewerRequest(skill, context, roleOf(cfg, modelId)) }));
     } else if (at.phase === 'review') {
       const first = await opinionsOf(view, src, 1);
       members = models.map(modelId => {
@@ -186,8 +191,12 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
       });
     } else {
       const opinions = await finalOpinions(view, src);
-      members = [{ modelId: cfg.summary, phase: 'fusion_summary', request: fitted(level => summaryRequest(skill, context,
-        opinions.map(o => ({ ...o, opinion: trimmed(o.opinion, level)! })), src.declared, frozenValues(view)), phaseLimit(view, 'summary')) }];
+      // Started with the evidence check: the summary gets the issues merged and checked by code (one level of trimming at a time).
+      const request = (level: number) => cfg.evidence
+        ? summaryRequestMerged(skill, context, mergeOpinions(opinions, { report: reportBodyText(src.body), sections: src.sections }),
+          opinions, src.declared, frozenValues(view), level)
+        : summaryRequest(skill, context, opinions.map(o => ({ ...o, opinion: trimmed(o.opinion, level)! })), src.declared, frozenValues(view));
+      members = [{ modelId: cfg.summary, phase: 'fusion_summary', request: fitted(request, phaseLimit(view, 'summary')) }];
     }
     // Every request must fit the per-call billing byte cap as actually serialized (#962 review); a step that cannot fit
     // even fully trimmed is never claimed.
@@ -282,8 +291,8 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
       if (input.acceptedCredits !== undefined && priceCredits !== input.acceptedCredits) throw new Error('FUSION_REVIEW_ESTIMATE_CHANGED');
       const view = await record.start({ requestId: input.requestId, draftId: input.draftId, sourceVersionId: input.sourceVersionId,
         config: { estimateUsd, estimateCredits: priceCredits, fixedPrice: { credits: priceCredits, holdCredits }, callCaps,
-          maxRounds: rounds, reviewers: settings.review.reviewerModelIds,
-          summary: settings.review.summaryModelId,
+          maxRounds: rounds, reviewers: settings.review.reviewerModelIds, evidence: true,
+          roles: settings.review.reviewerModelIds.map(id => settings.review.reviewerRoles[id] ?? null), summary: settings.review.summaryModelId,
           opinionTokens: settings.review.opinionOutputTokens, summaryTokens: settings.review.summaryOutputTokens, skill, requestBytes } });
       // Before anything is claimed: round 1 and the most trimmed summary, measured exactly as they will be sent, must fit
       // the per-call byte cap; otherwise the review ends here with nothing charged (#962 review).
@@ -466,8 +475,10 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
     async detail(reviewId: string) {
       const view = await settled(await record.read(reviewId));
       const src = await readSource(reviewId);
-      const detail = reviewDetail({ view, reviewers: config.parse(view.config).reviewers, sections: src.sections,
-        outputs: await savedOutputs(view), revision: revisionInput(view, src), adoption: (await adoptionPlan(view, src))?.sections ?? null });
+      const cfg = config.parse(view.config);
+      const outputs = await savedOutputs(view);
+      const detail = reviewDetail({ view, reviewers: cfg.reviewers, sections: src.sections, outputs, revision: revisionInput(view, src),
+        adoption: (await adoptionPlan(view, src))?.sections ?? null, roles: cfg.roles ?? [], ...evidenceDetail(cfg, view, src, outputs) });
       // The reviewed (frozen) report by chapter: the result page shows the whole report, not only the changed chapters.
       const text = sectionTexts(src.body, src.sections);
       return { ...detail, chapters: text.chapters, preamble: text.preamble, fee: view.fee ?? null };

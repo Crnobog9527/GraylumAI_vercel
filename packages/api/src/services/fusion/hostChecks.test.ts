@@ -28,8 +28,9 @@ const rules = { sections };
 describe('review opinions', () => {
   it('parses plain, fenced and embedded JSON; refuses malformed, out-of-schema or incomplete steelman output', () => {
     const opinion = { decisions: decisions(), issues: [issue] };
-    expect(parseOpinion(JSON.stringify(opinion), rules)).toEqual({ ...opinion, dropped: 0 });
-    expect(parseOpinion('意见如下：\n```json\n' + JSON.stringify(opinion) + '\n```', rules)).toEqual({ ...opinion, dropped: 0 });
+    const parsed = { ...opinion, issues: [{ ...issue, kind: 'content', quote: '', anchor: '' }], dropped: 0 };
+    expect(parseOpinion(JSON.stringify(opinion), rules)).toEqual(parsed);
+    expect(parseOpinion('意见如下：\n```json\n' + JSON.stringify(opinion) + '\n```', rules)).toEqual(parsed);
     expect(parseOpinion('前言 ' + JSON.stringify({ decisions: decisions(), issues: [] }) + ' 结尾', rules)?.issues).toEqual([]);
     expect(parseOpinion('not json', rules)).toBeNull();
     expect(parseOpinion(JSON.stringify({ ...opinion, issues: [{ ...issue, severity: 'blocker' }] }), rules)).toBeNull();
