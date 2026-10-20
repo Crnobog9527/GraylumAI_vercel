@@ -16,8 +16,6 @@
   "apps/web/src/app/admin/transactions/page.tsx": {"lines":705,"longLines":1},
   "apps/web/src/app/admin/users/page.tsx": {"lines":846,"longLines":2},
   "apps/web/src/app/app/library/page.tsx": {"longLines":34},
-  "apps/web/src/app/login/page.tsx": {"lines":521,"longLines":2},
-  "apps/web/src/app/maintenance/page.tsx": {"longLines":3},
   "apps/web/src/app/app/marketplace/page.tsx": {"lines":526,"longLines":7},
   "apps/web/src/app/app/page.tsx": {"longLines":4},
   "apps/web/src/app/app/positioning/[draftId]/page.tsx": {"lines":1704,"longLines":15},
@@ -28,6 +26,8 @@
   "apps/web/src/app/app/workbench/agent-first-preview/agent-first-workspace-sample.tsx": {"lines":537,"longLines":21},
   "apps/web/src/app/app/workbench/marketplace/page.tsx": {"longLines":4},
   "apps/web/src/app/app/workbench/search/page.tsx": {"longLines":9},
+  "apps/web/src/app/login/page.tsx": {"lines":521,"longLines":2},
+  "apps/web/src/app/maintenance/page.tsx": {"longLines":3},
   "apps/web/src/components/admin/AdminSidebar.tsx": {"longLines":2},
   "apps/web/src/components/admin/StatsCard.tsx": {"longLines":1},
   "apps/web/src/components/landing/LandingHeader.tsx": {"longLines":1},
@@ -102,6 +102,6 @@
   "packages/api/src/services/stripeFulfillment.ts": {"lines":2392},
   "packages/api/src/services/subscriptionCreditGrants.ts": {"lines":2842,"longLines":6},
   "packages/db/schema.ts": {"lines":593},
-  "scripts/check-staging-db-readiness.mjs": {"lines":786},
-  "scripts/check-stripe-readiness.mjs": {"lines":678}
+  "scripts/check-staging-db-readiness.mjs": {"lines":778},
+  "scripts/check-stripe-readiness.mjs": {"lines":671}
 }

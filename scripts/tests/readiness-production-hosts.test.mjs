@@ -32,3 +32,14 @@ test('the staging host itself carries no production-host signal', () => {
     assert.doesNotMatch(run(script, 'https://auth-staging.graylum.com').output, /production-like host/, script);
   }
 });
+
+test('the shared host check keeps the old substring match and adds www and the bare domain', async () => {
+  const { hostHasProductionSignal } = await import('../staging-db-host.mjs');
+  for (const host of ['app.graylum.com', 'www.graylum.com', 'graylum.com', 'app.graylum.com.attacker.test',
+    'x.www.graylum.com', 'prod.example.test', 'production-db.example.test']) {
+    assert.equal(hostHasProductionSignal(host), true, host);
+  }
+  for (const host of ['auth-staging.graylum.com', 'staging.example.test', 'evilgraylum.com', 'product.example.test']) {
+    assert.equal(hostHasProductionSignal(host), false, host);
+  }
+});
