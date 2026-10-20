@@ -54,13 +54,18 @@ function ReportJury({ draftId, sourceVersionId, busy }: { draftId: string; sourc
   // The panel as the server has it: how many reviewers and what they are called are set by administrators.
   const seats = toPanel(panel.data)?.reviewers.map(item => item.seat) ?? SEATS;
 
-  if (goldOnly) {
-    return <Button variant="outline" disabled={busy} onClick={() => void window.open(profileTabHref('subscription'), '_blank', 'noopener')}>
-      请评审团审阅报告<span className={styles.gold}>Gold 专享</span></Button>;
-  }
   if (latest && ACTIVE.has(latest.state)) {
     return <Link className={styles.link} href={reviewHref(draftId, latest.reviewId)}>
       {latest.state === 'paused' ? '评审团已暂停，去看看 →' : '评审团正在审阅，去看看 →'}</Link>;
+  }
+  if (goldOnly) {
+    // A review already paid for stays reachable after a downgrade; only starting a new one is Gold-only.
+    return <>
+      <Button variant="outline" disabled={busy} onClick={() => void window.open(profileTabHref('subscription'), '_blank', 'noopener')}>
+        请评审团审阅报告<span className={styles.gold}>Gold 专享</span></Button>
+      {latest ? <Link className={styles.link} href={reviewHref(draftId, latest.reviewId)}>
+        {ACTIVE.has(latest.state) ? '评审团正在审阅，去看看 →' : latest.awaitingChoice ? '评审完成，去逐章选择 →' : '查看上次评审 →'}</Link> : null}
+    </>;
   }
   const begin = async () => {
     if (start.isPending) return;
