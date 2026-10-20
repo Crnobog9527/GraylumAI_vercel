@@ -20,3 +20,68 @@ user6 独占，使用 staging-login 生成的 storageState，不读取或记录�
 - 下一步：提交无迁移优化、测试与独立审查；满足四项后交总控合并，再由包含改动的staging执行20轮。
 - 未验证：改后真实性能、正式环境。
 - 并行边界：#1216正在修改execute.ts、executorRpc.ts、paygResume.ts、researchExecution.ts、bill2/service.ts、Runtime集成文件与0325；本任务避开这些文件。总控预留0326，仅确需新RPC时使用。
+
+## 原始日志分解与限制
+
+日志已从 Vercel API 只读重新取得。定位样本 `rv8nb-1792496648852-bf7ad044e203`：总耗时42402ms，首次dispatch完成13209ms，firstModelText14176ms，原firstPublicText14175ms，fullModelReply19096ms。旧firstPublicText在可见性检查前打点，本PR修正至实际投递前，故浏览器首字仍是最终门槛。
+
+**下表是整条请求的累计次数和外部往返耗时，不是全部发生在调用前，更不是纯SQL时间。**旧phases只有全请求累计，不能把host的6250ms全归首字前，也不能相加出准确串行关键路径。新增segments正是补齐这个证据缺口。
+
+| 阶段 | 次数 | 外部累计ms | 墙钟ms | 必要性/处理 |
+|---|---:|---:|---:|---|
+| prelude | 3 | 164 | 172 | 认证、服务开关 |
+| policy | 3 | 297 | 309 | 测试/恢复策略 |
+| host | 11 | 6232 | 6250 | 档案/材料/清单应用（包含回复后收尾） |
+| admission | 49 | 4941 | 4744 | 模型、Skill、预算与准入 |
+| execute | 9 | 3083 | 3091 | 原执行和调用前冻结/发送 |
+| rateLimit | 1 | 33 | 323 | 使用额度/暂停 |
+| provider | 56 | 21374 | 27513 | 包含模型及主回复后数据库和整理，不等于纯模型 |
+
+| 调用 | 次数 | 累计ms | 为什么需要/本次处理 |
+|---|---:|---:|---|
+| auth/v1/user | 3 | 176 | 验证当前身份；保留 |
+| rest/system_settings | 11 | 601 | 宿主开关、准入/用量/整理/研究/计费设置；准入内部分合并，调用前暂停仍新读 |
+| rest/profiles | 1 | 84 | 账户状态与权限；保留 |
+| rpc/runtime_test_policy | 2 | 258 | 当前测试窗口/模型许可；保留 |
+| rpc/opc_query | 1 | 1003 | 本人定位档案与字段状态；保留 |
+| rpc/artifact_query | 2 | 333 | 读取工作快照与解析版本；本PR并行两次独立读取 |
+| rpc/runtime_admission_replay | 2 | 478 | 重放原请求，不再次冻结；保留 |
+| rpc/runtime_session_context | 3 | 2813 | 等待整理检查、冻结材料核对、准入会话检查；跨写入边界保留 |
+| rpc/opc_capture_apply | 2 | 1267 | 准入前积压处理与完成后确定性应用；保留 |
+| rpc/opc_step_material | 1 | 1691 | 冻结材料、版本及宿主令牌；保留 |
+| rest/modules | 2 | 113 | 服务端绑定与用户RLS准入；保留 |
+| rpc/read_skill_package | 28 | 1385 | 目录/文件/当前发布撤销检查；冷文件最多4并行，已验证不可变文件继续复用既有缓存 |
+| rest/ai_models | 6 | 300 | 真实模型、能力、报价/整理配置；保留 |
+| rpc/platform_secret_read | 3 | 234 | 实际发送校验及可选Decisions；本PR省掉非gated回合未使用的Decisions读取 |
+| rpc/research_user_cards | 1 | 52 | 用户已确认搜索卡；保留 |
+| rpc/research_benchmark_rows | 1 | 84 | 本会话已核实对标；保留 |
+| rpc/research_user_shortfall | 1 | 76 | 样本不足选择卡；保留 |
+| rpc/runtime_admit | 1 | 448 | 准入CAS、冻结请求和账务身份；保留 |
+| rpc/runtime_test_recovery_policy | 1 | 39 | 原执行恢复许可；保留 |
+| rpc/runtime_execution | 7 | 7182 | 执行领取/上下文/主结果检查点/完成等；属于#1216共享执行链，本PR不改 |
+| rpc/content_erasure_visible | 36 | 4953 | 每次输出前及应用前后新查删除状态；不把跨时间的36次检查缓存成1次 |
+| rpc/runtime_session_items | 1 | 247 | 会话历史读取与原样写入；整理已不读历史 |
+| rpc/runtime_response | 4 | 2651 | 原响应身份、防重与持久化；保留 |
+| rpc/bill2_claim | 2 | 1104 | 每次调用前冻结及预算/并发保护；保留 |
+| rpc/bill2_dispatch | 2 | 561 | 发送前授权/幂等与身份保护；保留 |
+| provider | 2 | 1440 | 外部模型传输，非纯SQL耗时 |
+| rpc/bill2_record | 4 | 1898 | 供应商收据与实际用量入账；保留 |
+| rpc/bill2_finalize | 2 | 4653 | 结算与多余冻结释放；保留 |
+
+另一条 `s8rjb-1792506582544-62648935f05e` 是 `runtime.executeStream` 的资料库自由对话，非定位。总21445ms，providerPost8674ms；其中bill2_dispatch单次3319ms、record两次6735ms，不能承诺仅前端/读取优化就能在NANO上稳定<3秒。它的资料库可见性7次/2038ms和内容删除7次/4230ms应单列，不混进定位20轮统计。日志region字段hkg1不足以推翻部署pdx1；不重复用它判断跨区。
+
+## 清单整理链路
+
+正常路径是同一次mentorTurnStream里的第二次模型调用；不经后台队列。等待积分、截止时间或中断恢复才会等下一次请求。主回复后依次进行Session写入/停止检查/primary checkpoint → 整理原响应防重/暂停额度/claim冻结/dispatch → 整理模型与账务/Session写入 → 身份和输出校验/complete → opc_capture_apply → 最后可见性检查/结果投递 → 页面并行读opc.read/runtime.view。
+
+整理输入依赖完整主回复，不能提前发送。已有historyItems:0、readSessionHistory:false，不能重复算本次收益。字段验证、冲突判断、保护字段、版本和应用继续由SQL确定性完成，不增加模型工作。
+
+新增organizerStart/Post/Ready、captureStart/Done、resultReady/Public及各段固定标签次数/耗时；organizerModel包含模型和账务/Session，不能称纯模型时间。captureDone表示应用尝试结束，成功与否以原业务结果为准。所有正文、工具卡、阶段和最终结果仍逐次验证可见性；仅合并检查等待期间的最新正文，工具顺序不变，不正缓存删除或权限。
+
+## 本批改动与下一步
+
+- 一次新准入的限流/身份/研究开关、用途预算、附加整理模型设置由3次合成1次读取。设置只属于当前prepare调用，重放沿原冻结信息返回；每次实际调用前的暂停/额度读仍新读。
+- 未触发定位准入判定（Decisions）的回合省掉1次未使用的Vault读取；实际发送时的凭证身份检查不改。
+- 只读档案快照与版本解析并行；写材料后仍重新核对冻结会话，不复用写前状态。
+- Skill激活和续写容量的冷文件最多4个并行；每次私有读及最终交付前的启停/撤销与完整性检查保留。
+- 不新增迁移。把连续输出时跨时间的删除检查整体合成一次会漏掉中途删除，不采用。待改后segments指出同一时点存在多个独立executionId，再考虑0326批量RPC；不用未实测收益冒充达标。

@@ -85,17 +85,20 @@ it('logs only labels, counts, milliseconds and internal identifiers',async()=>{
  await database(base+'/rest/v1/rpc/bill2_dispatch',{method:'POST',...auth});
  await provider('https://openrouter.ai/api/v1/chat/completions',{method:'POST',headers:{Authorization:'Bearer '+secrets[2]},body:secrets[4]});
  budget.timing.mark('firstModelText');budget.timing.mark('firstPublicText');
+ budget.timing.mark('organizerStart');budget.timing.mark('organizerPost');budget.timing.mark('organizerReady');
+ budget.timing.mark('captureStart');budget.timing.mark('captureDone');budget.timing.mark('resultReady');budget.timing.mark('resultPublic');
  budget.timing.release();
  expect(info).toHaveBeenCalledTimes(1);
  const line=JSON.stringify(info.mock.calls[0]);
  for(const secret of secrets)expect(line).not.toContain(secret);
  expect(line).not.toMatch(/https?:|supabase\.co|openrouter\.ai|[?&=@]/);
  const record=info.mock.calls[0]![2] as Record<string,unknown>;
- expect(Object.keys(record).sort()).toEqual(['executionIds','labels','marks','phases','procedures','rt','rtMs','totalMs']);
+ expect(Object.keys(record).sort()).toEqual(['executionIds','labels','marks','phases','procedures','rt','rtMs','segments','totalMs']);
  expect(record.procedures).toEqual(['opc.prepareStep']);
  expect(record.executionIds).toEqual([execution]);
  expect(Object.keys(record.labels as object).sort()).toEqual(['auth/v1/token','provider','rest/profiles','rpc/bill2_dispatch','rpc/runtime_admit']);
  expect(Object.keys(record.phases as object)).toEqual(['prelude','host','admission','provider']);
+ expect(Object.keys(record.segments as object)).toEqual(['organizerPrepare','organizerModel','saving','capture','delivery']);
  // Every leaf is a number or an allowlisted identifier.
  const leaves=(value:unknown):unknown[]=>value&&typeof value==='object'?Object.values(value).flatMap(leaves):[value];
  for(const leaf of leaves(record))expect(typeof leaf==='number'||/^([a-z]+\.[a-zA-Z]+|[0-9a-f-]{36})$/.test(String(leaf))).toBe(true);
@@ -137,4 +140,39 @@ it('ends provider timing at durable completion before the bounded capture RPC',(
  const capture=timing.begin('rpc/opc_capture_apply');c.advance(1000);capture();
  expect(timing.summary().phases.provider).toEqual({rt:0,rtMs:0,ms:100});
  expect(timing.summary().phases.host).toEqual({rt:1,rtMs:1000,ms:1000});
+});
+
+it('separates organizer preparation, model and persistence without changing the original provider POST',()=>{
+ const c=clock(),timing=createRequestTiming(c.now);
+ const trip=(label:string,ms:number)=>{const done=timing.begin(label);c.advance(ms);done();};
+ timing.enter('execute');trip('rpc/bill2_dispatch',5);c.advance(95);
+ timing.mark('organizerStart');trip('rpc/runtime_execution',2);trip('rpc/runtime_response',3);
+ trip('rpc/bill2_dispatch',5);trip('provider',6);trip('rpc/bill2_record',4);
+ timing.mark('organizerReady');trip('rpc/runtime_execution',3);
+ timing.mark('captureStart');trip('rpc/opc_capture_apply',8);timing.mark('captureDone');
+ trip('rpc/content_erasure_visible',2);timing.mark('resultReady');
+ trip('rpc/content_erasure_visible',1);timing.mark('resultPublic');c.advance(50);
+ expect(timing.summary().marks).toEqual({providerPostMs:5,organizerStartMs:100,organizerPostMs:110,
+  organizerReadyMs:120,captureStartMs:123,captureDoneMs:131,resultReadyMs:133,resultPublicMs:134});
+ expect(timing.summary().segments).toEqual({
+  organizerPrepare:{rt:3,rtMs:10,ms:10,labels:{'rpc/runtime_execution':{rt:1,rtMs:2},
+   'rpc/runtime_response':{rt:1,rtMs:3},'rpc/bill2_dispatch':{rt:1,rtMs:5}}},
+  organizerModel:{rt:2,rtMs:10,ms:10,labels:{provider:{rt:1,rtMs:6},'rpc/bill2_record':{rt:1,rtMs:4}}},
+  saving:{rt:1,rtMs:3,ms:3,labels:{'rpc/runtime_execution':{rt:1,rtMs:3}}},
+  capture:{rt:1,rtMs:8,ms:8,labels:{'rpc/opc_capture_apply':{rt:1,rtMs:8}}},
+  delivery:{rt:2,rtMs:3,ms:3,labels:{'rpc/content_erasure_visible':{rt:2,rtMs:3}}},
+ });
+});
+
+it('attributes overlapping transport calls to their starting segment and ignores repeated marks',()=>{
+ const c=clock(),timing=createRequestTiming(c.now);
+ timing.mark('organizerReady');expect(timing.summary()).not.toHaveProperty('segments');
+ timing.mark('organizerStart');const pending=timing.begin('rpc/runtime_execution');c.advance(4);
+ const dispatch=timing.begin('rpc/bill2_dispatch');c.advance(3);dispatch();c.advance(2);
+ pending();timing.mark('organizerStart');timing.mark('organizerPost');
+ expect(timing.summary().segments).toMatchObject({
+  organizerPrepare:{rt:2,rtMs:12,ms:7,labels:{'rpc/runtime_execution':{rt:1,rtMs:9}}},
+  organizerModel:{rt:0,rtMs:0,ms:2,labels:{}},
+ });
+ expect(timing.summary().marks).toEqual({providerPostMs:7,organizerStartMs:0,organizerPostMs:7});
 });

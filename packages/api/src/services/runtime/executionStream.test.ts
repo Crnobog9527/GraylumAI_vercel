@@ -171,3 +171,49 @@ it('keeps a short tool start and finish in order before the following answer',as
  const received=[(await first).value];for await(const event of stream)received.push(event);
  expect(received).toEqual([start,end,{type:'text',text:'回答'},{type:'result',result:{state:'completed',body:'回答'}}]);
 });
+
+it('marks actual public delivery after visibility and merges native text received during that check',async()=>{
+ const c=controlled();let clock=0,checks=0,release:()=>void=()=>{};
+ const timing=createRequestTiming(()=>clock);
+ const visible=async()=>{if(++checks===1)await new Promise<void>(resolve=>{release=resolve;});};
+ const stream=streamOriginalExecution(c.run,timing,'opc.mentorTurnStream',()=>clock,'textDelta-v1',visible);
+ const first=stream.next();c.emit({type:'text',text:'一',delta:'一',replace:true});await tick();
+ expect(timing.summary().marks).not.toHaveProperty('firstPublicTextMs');
+ c.emit({type:'text',text:'一二',delta:'二',replace:false});
+ c.emit({type:'text',text:'一二三',delta:'三',replace:false});
+ clock=80;release();
+ expect((await first).value).toEqual({type:'textDelta',offset:0,rev:0,text:'一二三'});
+ expect(timing.summary().marks.firstPublicTextMs).toBe(80);expect(checks).toBe(1);
+ clock=90;c.emit({type:'phase',phase:'organizer'});
+ clock=120;c.emit({type:'phase',phase:'saving'});c.finish({state:'completed'});
+ const rest=[];for await(const event of stream)rest.push(event);
+ expect(rest).toEqual([{type:'phase',phase:'saving'},{type:'result',result:{state:'completed'}}]);
+ expect(checks).toBe(3); // Every phase/result still receives its own fresh visibility check.
+ expect(timing.summary().marks).toMatchObject({organizerStartMs:90,organizerReadyMs:120,resultReadyMs:120,resultPublicMs:120});
+});
+
+it('keeps text and tools ordered when they arrive during a pending visibility check',async()=>{
+ const c=controlled();let checks=0,release:()=>void=()=>{};
+ const stream=streamOriginalExecution(c.run,undefined,'opc.mentorTurnStream',undefined,'textDelta-v1',async()=>{
+  if(++checks===1)await new Promise<void>(resolve=>{release=resolve;});
+ });
+ const first=stream.next();c.emit({type:'text',text:'前',delta:'前',replace:true});await tick();
+ const start={type:'agent_tool',callId:'c1',tool:'read_source',kind:'library_search',state:'running',label:''} as const;
+ c.emit(start);c.emit({type:'text',text:'前后',delta:'后',replace:false});c.finish({state:'completed'});release();
+ const received=[(await first).value];for await(const event of stream)received.push(event);
+ expect(received).toEqual([{type:'textDelta',offset:0,rev:0,text:'前'},start,
+  {type:'textDelta',offset:1,rev:0,text:'后'},{type:'result',result:{state:'completed'}}]);
+ expect(checks).toBe(5); // One superseded text check plus one per delivered event; no positive cache.
+});
+
+it('never marks refused text as public or publishes a result after a later visibility refusal',async()=>{
+ const c=controlled(),timing=createRequestTiming();let deleted=false,checks=0;
+ const stream=streamOriginalExecution(c.run,timing,'runtime.executeStream',()=>0,undefined,async()=>{
+  checks++;if(deleted)throw new TRPCError({code:'PRECONDITION_FAILED',message:'CONTENT_ERASED'});
+ });
+ const first=stream.next();c.emit({type:'phase',phase:'mentor'});await first;
+ deleted=true;c.emit({type:'text',text:'PRIVATE'});c.finish({state:'completed',body:'PRIVATE'});
+ await expect(stream.next()).rejects.toMatchObject({message:'CONTENT_ERASED'});
+ expect(checks).toBe(2);expect(timing.summary().marks).not.toHaveProperty('firstPublicTextMs');
+ expect(timing.summary().marks).not.toHaveProperty('resultPublicMs');
+});

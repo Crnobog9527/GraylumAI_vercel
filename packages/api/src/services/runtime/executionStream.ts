@@ -59,7 +59,9 @@ export async function executeOriginalExecution(host:OriginalExecutionHost,execut
    if(result.state==='completed'&&'summary' in result){
     host.budget?.timing?.finishProvider();
     const leave=host.budget?.timing?.enter('host');
-    try{await captureCompleted(host.admin,host.actorId,executionId);}finally{leave?.();}
+    host.budget?.timing?.mark('captureStart');
+    try{await captureCompleted(host.admin,host.actorId,executionId);}
+    finally{host.budget?.timing?.mark('captureDone');leave?.();}
    }
    const retained=['cancelled','cost_pending'].includes(result.state);
    const reason=retained?await retainedOutputReason(host.admin,host.actorId,executionId):null;
@@ -191,8 +193,14 @@ export async function* streamOriginalExecution(run:(onProgress:(event:RuntimePro
     researchEvents.push(event);
    }
   }
-  else phaseEvent=event;wake();})
-  .then(result=>{resultEvent={type:'result',result};},error=>{failure=error;}).finally(()=>{done=true;wake();});
+  else {
+   if(event.type==='phase'&&event.phase==='organizer')timing?.mark('organizerStart');
+   if(event.type==='phase'&&event.phase==='saving')timing?.mark('organizerReady');
+   phaseEvent=event;
+  }
+  wake();})
+  .then(result=>{timing?.mark('resultReady');resultEvent={type:'result',result};},error=>{failure=error;})
+  .finally(()=>{done=true;wake();});
  const idle=(ms?:number)=>new Promise<void>(resolve=>{
   const timer=ms===undefined?undefined:setTimeout(resolve,ms);
   wake=()=>{if(timer!==undefined)clearTimeout(timer);resolve();};
@@ -202,19 +210,24 @@ export async function* streamOriginalExecution(run:(onProgress:(event:RuntimePro
    // Queued tool events (and text written before them) precede any later text: the turn's order (#1029 P2).
    if(researchEvents.length){
     const event=researchEvents.shift()!;
+    await visible?.();
     if((event.type==='text'||event.type==='textDelta')&&event.text){timing?.mark('firstPublicText');lastText=now();}
-    await visible?.();yield event;
+    yield event;
    }
    else if(textEvent){
     const wait=(done&&!nativePending)||lastText===undefined?0:lastText+TEXT_EVENT_INTERVAL_MS-now();
     if(wait>0){await idle(wait);continue;}
+    await visible?.();
+    // Merge text received while visibility was checked. A new tool event may
+    // have moved that text into its ordered queue; deliver that queue first.
+    if(researchEvents.length||!textEvent)continue;
     const event=nativePending?transport.flush()!:textEvent;nativePending=false;textEvent=undefined;lastText=now();
     if((event.type==='text'||event.type==='textDelta')&&event.text)timing?.mark('firstPublicText');
-    await visible?.();yield event;
+    yield event;
    }
    else if(cardEvent){const event=cardEvent;cardEvent=undefined;await visible?.();yield event;}
    else if(phaseEvent){const event=phaseEvent;phaseEvent=undefined;await visible?.();yield event;}
-   else if(resultEvent){const event=resultEvent;resultEvent=undefined;await visible?.();yield event;}
+   else if(resultEvent){const event=resultEvent;resultEvent=undefined;await visible?.();timing?.mark('resultPublic');yield event;}
    else await idle();
   }
   if(failure)throw stagingProcedureError(failure,path);

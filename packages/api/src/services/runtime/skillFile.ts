@@ -2,7 +2,7 @@
 import {z} from 'zod';
 import {
   assertPath, identityOf, readSkillResource, sameIdentity, validateDescriptor,
-  sha256, type SkillSource, type PackageDescriptor,
+  readResourceBatch, sha256, type SkillSource, type PackageDescriptor,
 } from '../skills/loader';
 import type {RuntimeTool} from './runner';
 
@@ -17,14 +17,13 @@ export async function skillFileContinuationBytes(source: SkillSource, descriptor
   // is exposed to a model here. Every underlying private read also rechecks.
   const measuredSource: SkillSource={list:async()=>[descriptor],state:async()=> 'enabled',
     read:(identity,maxBytes)=>source.read(identity,maxBytes)};
-  let largest = 0;
-  for (const file of descriptor.files.filter(file => file.bytes <= SKILL_FILE_MAX_BYTES)) {
+  const sizes = await readResourceBatch(descriptor.files.filter(file => file.bytes <= SKILL_FILE_MAX_BYTES), async file => {
     const content = await readSkillResource(measuredSource, binding, file.path, SKILL_FILE_MAX_BYTES);
     const result = {...binding, path: file.path, sha256: file.sha256, content};
-    largest = Math.max(largest, Buffer.byteLength(JSON.stringify(JSON.stringify(result))));
-  }
+    return Buffer.byteLength(JSON.stringify(JSON.stringify(result)));
+  });
   if(await source.state(binding)!=='enabled')throw new Error('RUNTIME_SKILL_FILE_DENIED');
-  return largest + 4096 + SKILL_FILE_TRACE_BYTES;
+  return Math.max(0, ...sizes) + 4096 + SKILL_FILE_TRACE_BYTES;
 }
 export const skillFileBinding = z.object({
   packageId: z.string().uuid(), revisionId: z.string().uuid(),

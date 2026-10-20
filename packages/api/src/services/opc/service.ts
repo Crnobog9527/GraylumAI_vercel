@@ -74,20 +74,15 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
       if (updatedFieldIds && (v.purpose !== "mentor" || v.answerSource)) throw new Error("OPC_STEP_DENIED");
       if (v.researchRefreshId && v.purpose !== "mentor") throw new Error("OPC_RESEARCH_REFRESH_INVALID");
       let d = await rpc("opc_query", { p_draft_id: v.draftId });
-      let snapshot = await workbenchService(user, admin).read(d.projectId, d.roundId);
-      if (
-        (v.purpose !== "plan"
-          ? snapshot.state !== "draft"
-          : snapshot.state !== "published") ||
-        !snapshot.workflow.steps.some((s) => s.id === v.stepId)
-      )
-        throw new Error("OPC_STEP_DENIED");
-      const resolved = await admin.rpc("artifact_query", {
-        p_actor_id: (await user.auth.getUser()).data.user!.id,
-        p_action: "resolve",
-        p_project_id: d.projectId,
-        p_round_id: d.roundId,
-      });
+      // Both reads enforce their own actor/round access; neither depends on the other's projection.
+      const [initialSnapshot, resolved] = await Promise.all([
+        workbenchService(user, admin).read(d.projectId, d.roundId),
+        (async () => admin.rpc("artifact_query", {p_actor_id: (await user.auth.getUser()).data.user!.id,
+          p_action: "resolve", p_project_id: d.projectId, p_round_id: d.roundId}))(),
+      ]);
+      let snapshot = initialSnapshot;
+      if ((v.purpose !== "plan" ? snapshot.state !== "draft" : snapshot.state !== "published") ||
+          !snapshot.workflow.steps.some((s) => s.id === v.stepId)) throw new Error("OPC_STEP_DENIED");
       if (resolved.error) throw new Error("OPC_DENIED");
       // Host openings share the ordinary Session, recovery and billing path.
       const opening = v.purpose === "mentor" && isOpeningInput(v.input);
