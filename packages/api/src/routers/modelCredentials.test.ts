@@ -9,11 +9,12 @@ import { resetPlatformSecretCacheForTests } from '../services/platformSecrets/re
 beforeEach(() => resetPlatformSecretCacheForTests());
 
 const id = '11111111-1111-4111-8111-111111111111';
+const legacyModelKey = 'synthetic-legacy-model-column-key';
 function fixture(role: 'admin' | 'user' = 'admin') {
   const secret = randomUUID() + randomUUID();
   const row = { id, name: 'Synthetic model', model_id: 'synthetic/model', provider: 'openai',
     api_endpoint: '', config: {}, is_active: 'true', max_tokens: 1024,
-    input_limit: 8192, input_token_cost: 1000000, output_token_cost: 1000000 };
+    input_limit: 8192, input_token_cost: 1000000, output_token_cost: 1000000, api_key: legacyModelKey };
   const calls: { admin: boolean; columns: string }[] = [];
   const secretReads: boolean[] = [];
   function client(admin: boolean) {
@@ -62,6 +63,7 @@ function fixture(role: 'admin' | 'user' = 'admin') {
     const json = JSON.stringify(value);
     expect(json).not.toContain(secret.slice(0, 20));
     expect(json).not.toContain(secret.slice(-20));
+    expect(json).not.toContain(legacyModelKey);
   }
   return { context, user, admin, row, secret, calls, secretReads, noSecret };
 }
@@ -86,7 +88,7 @@ describe('B01 model credential boundary', () => {
     expect(f.secretReads.every(Boolean)).toBe(true);
   });
 
-  it('create, update and legacy config responses omit credentials, including failed provider checks', async () => {
+  it('create, update and legacy config responses omit Vault and pre-OR-2 model credentials', async () => {
     const f = fixture();
     const caller = modelRouter.createCaller(f.context);
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(f.secret, { status: 401 }));

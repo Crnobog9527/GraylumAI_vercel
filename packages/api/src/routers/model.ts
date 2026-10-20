@@ -44,10 +44,11 @@ type AdminModelRow = Omit<PersistedModel, 'config'> & {
   config?: Record<string, unknown> | null;
 };
 
-// Keep prices and token-cost internals out of the model administration payload.
-function stripInternalPriceFields<T extends object>(model: T): T {
+// Keep legacy credentials and prices out of model administration payloads. `api_key` is still
+// present in databases that have not applied OR-2, so never rely on the migration to sanitize `.select()` responses.
+function stripInternalModelFields<T extends object>(model: T): T {
   const safeModel = { ...model };
-  for (const key of ['input_token_cost', 'output_token_cost', 'input_token_cost_above_200k',
+  for (const key of ['api_key', 'input_token_cost', 'output_token_cost', 'input_token_cost_above_200k',
     'output_token_cost_above_200k', 'web_search_cost']) Reflect.deleteProperty(safeModel, key);
   return safeModel;
 }
@@ -210,7 +211,7 @@ export const modelRouter = router({
     if (error) {
       throw createModelOperationError('读取模型列表', error);
     }
-    return (data ?? []).map((model) => stripInternalPriceFields(withTokenCountingMetadata(model)));
+    return (data ?? []).map((model) => stripInternalModelFields(withTokenCountingMetadata(model)));
   }),
 
   // Admin only: Get models page bootstrap data
@@ -227,7 +228,7 @@ export const modelRouter = router({
 
     const models = (data ?? []) as AdminModelRow[];
     const result = {
-      models: models.map((model) => stripInternalPriceFields(withTokenCountingMetadata(model))),
+      models: models.map((model) => stripInternalModelFields(withTokenCountingMetadata(model))),
       connectionStatus: buildConnectionStatusFromModels(models, await platformKeyConfigured(ctx.supabase)),
     };
 
@@ -279,7 +280,7 @@ export const modelRouter = router({
 
       const connectionCheck = await verifyAndPersistConnection(ctx.supabase, data as PersistedModel);
       return {
-        ...stripInternalPriceFields(data),
+        ...stripInternalModelFields(data),
         connectionCheck,
       };
     }),
@@ -352,7 +353,7 @@ export const modelRouter = router({
         : null;
 
       return {
-        ...stripInternalPriceFields(data),
+        ...stripInternalModelFields(data),
         connectionCheck,
       };
     }),
@@ -387,7 +388,7 @@ export const modelRouter = router({
         .select();
       if (error) throw createModelOperationError('更新模型配置', error);
       if (!data?.length) throw new TRPCError({ code: 'CONFLICT', message: '模型配置刚被修改或已删除，请刷新后再保存' });
-      return data?.map(stripInternalPriceFields) ?? data;
+      return data?.map(stripInternalModelFields) ?? data;
     }),
 
   // Admin only: Test API connection for a model
