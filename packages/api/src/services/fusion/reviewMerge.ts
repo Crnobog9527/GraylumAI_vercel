@@ -19,6 +19,8 @@ export type MergeResult = { issues: MergedIssue[]; dropped: Dropped[]; raised: n
   /** Severe issues already dropped when each opinion was judged (no checkable evidence), by reason. */
   droppedEarlier: Record<EvidenceReason, number> };
 
+/** A chapter written as `定位` or `## 定位` is the same chapter. */
+const name = (value: string) => value.replace(/^#+\s*/, '').trim();
 const RANK = { critical: 0, major: 1, minor: 2 } as const;
 
 export function mergeOpinions(opinions: Array<{ reviewer: string; opinion: Opinion }>, context: { report: string; sections: string[] }): MergeResult {
@@ -31,7 +33,7 @@ export function mergeOpinions(opinions: Array<{ reviewer: string; opinion: Opini
   const groups: Item[][] = [];
   for (const item of items) {
     const verified = (item.issue.evidence ?? evidenceOf(item.issue, context.report, context.sections).evidence) === 'quoted' && item.issue.kind !== 'omission';
-    const home = verified ? groups.find(group => group[0]!.issue.location === item.issue.location && group.some(other =>
+    const home = verified ? groups.find(group => name(group[0]!.issue.location) === name(item.issue.location) && group.some(other =>
       other.issue.kind !== 'omission' && other.issue.evidence === 'quoted' && quotesOverlap(other.issue.quote, item.issue.quote))) : undefined;
     if (home) home.push(item); else groups.push([item]);
   }
@@ -43,8 +45,8 @@ export function mergeOpinions(opinions: Array<{ reviewer: string; opinion: Opini
     const evidence = group.map(item => item.issue.evidence ?? evidenceOf(item.issue, context.report, context.sections).evidence)
       .find(value => value === 'quoted' || value === 'anchored') ?? 'none';
     // Another seat raising something in the same chapter of the same kind (same anchor for omissions) corroborates it.
-    const same = (other: Item) => other.issue.location === first.location && other.issue.kind === first.kind
-      && (first.kind !== 'omission' || other.issue.anchor === first.anchor);
+    const same = (other: Item) => name(other.issue.location) === name(first.location) && other.issue.kind === first.kind
+      && (first.kind !== 'omission' || name(other.issue.anchor) === name(first.anchor));
     const corroborated = items.some(other => other.reviewer !== reviewers[0] && same(other));
     if (reviewers.length === 1 && !corroborated && evidence !== 'quoted' && evidence !== 'anchored') {
       const { reason } = evidenceOf(first, context.report, context.sections);

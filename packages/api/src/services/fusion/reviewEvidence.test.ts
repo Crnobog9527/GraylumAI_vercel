@@ -88,6 +88,14 @@ describe('merging round-1 issues by code', () => {
     expect(merged.issues).toHaveLength(2);
     expect(merged.dropped).toEqual([]);
   });
+  it('treats "定位" and "## 定位" as the same chapter when looking for corroboration', () => {
+    const merged = mergeOpinions([
+      { reviewer: 'A', opinion: opinionOf({ ...base, severity: 'major', location: '## 定位' }) },
+      { reviewer: 'B', opinion: opinionOf({ ...base, severity: 'minor', location: '定位' }) },
+    ], context);
+    expect(merged.issues).toHaveLength(2);
+    expect(merged.dropped).toEqual([]);
+  });
   it('counts the severe issues already dropped while each opinion was checked', () => {
     const merged = mergeOpinions([{ reviewer: 'A', opinion: opinionOf({ ...base }, { ...base, kind: 'omission', anchor: '没有' }) }], context);
     expect(merged.raised).toBe(2);
