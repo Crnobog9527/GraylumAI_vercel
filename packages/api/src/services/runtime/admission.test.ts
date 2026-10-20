@@ -61,6 +61,8 @@ it.each([false,true].flatMap(real=>[false,true].map(mentorStream=>({real,mentorS
  // Real admissions freeze the BILL-UNIT snapshot into rules; local fixture admissions stay on the old contract.
  if(real)expect(billing.rules.billingUnit).toMatchObject({version:'bill-unit-v2',creditsPerUsd:'1000'});
  else expect(billing.rules.billingUnit).toBeUndefined();
+ // No Decisions call is possible in these ungated turns; avoid its unused credential read.
+ expect(rpc.mock.calls.some(([name])=>name==='platform_secret_read')).toBe(false);
  frozen.attachedOrganizer.instructions='LEGACY_FROZEN_ORGANIZER_BYTES';
  replay={executionId:requestId};const reads=modelReads;models[0]!.max_tokens=512;
  expect(await service.prepare(input)).toEqual(replay);expect(modelReads).toBe(reads);expect(frozen.maxOutputTokens).toBe(real?4096:1000);

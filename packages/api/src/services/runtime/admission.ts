@@ -58,6 +58,7 @@ import {libraryReserveBytes,readSourceSlots,sourceReadFlags,throwLibraryRefusal}
 import {admitContentSource,isSqlStagingRefusal,type ContentSourceKind} from './contentSource';
 import {attachResearchTurn,fitsCapacity} from './researchAdmission';
 import {organizerSelection} from './organizerSelection';
+import {readAdmissionConfiguration} from './admissionConfiguration';
 const uuid=z.string().uuid();
 export const runtimeMaterialInput=z.object({sessionId:uuid,requestId:uuid,expectedRevision:z.number().int().nonnegative(),
  brief:z.string().max(8000),material:z.string().max(16000),roundId:uuid.nullable().default(null)}).strict();
@@ -107,8 +108,6 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    throw unavailableModel();
   return quote;
  }
- // Only new admissions use current limits. Replays return their frozen context above.
- // The local fixture default is not an additional ceiling on an approved real quote.
  function outputCapacity(row:Record<string,unknown>,organizerLimit=Infinity,configuredOutput?:number){
   return admittedOutputLimit(policy.real?realModel(row).outputLimit:configuredOutput??policy.maxOutputTokens,
    row.max_tokens,organizerLimit);
@@ -150,9 +149,9 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    if(input.network==='require_latest'&&!policy.searchEnabled)throw new Error('RUNTIME_SEARCH_UNAVAILABLE');
    let session=await query('runtime_session_context',{p_session_id:input.sessionId});
    // Resolve replay before model or revision freshness changes produce another budget.
-   const settings=readAdmissionSettings(admin);
    const replay=await query('runtime_admission_replay',{p_request_id:input.requestId,p_request:request});
    if(replay)return replay;
+   const configuration=readAdmissionConfiguration(admin),settings=readAdmissionSettings(admin,configuration);
    // LIB-4b: shape and switch before any paid work; runtime_admit checks and freezes each document (0262).
    const libraryReferences=await admitLibraryReferences(admin,request,policy);
    // POSITIONING-GATE: the read overlaps the checks below; OPC turns, reports and organizing are never gated.
@@ -183,7 +182,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    const organizeAfter=input.organizeAfter||Boolean(policy.organizeOpening);
    if(mentorStream&&(input.network!=='deny'||input.sources.length||input.selection.kind==='auto'||policy.workspaceContext))
     throw new Error('RUNTIME_CONTEXT_INVALID');
-   const budgets=policy.purposeBudgets?await readPurposeBudgets(admin):null;
+   const budgets=policy.purposeBudgets?await readPurposeBudgets(admin,configuration):null;
    const purpose=policy.reportGeneration?'report':input.selection.kind==='organizer'?'organize':'interactive';
    const selectedBudget=budgets?.[purpose];
    const inputBytes=selectedBudget?.inputBytes??policy.inputBytes;
@@ -248,7 +247,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    if(policy.real&&row.error){if(row.error.code==='PGRST116')throw unavailableModel();stagingRpcFailure(row.error);}
    if(row.error||row.data?.is_active!=='true'||(!policy.real&&row.data.provider!=='fixture'))throw unavailableModel();
    // The window-bound platform OpenRouter key serves Decisions only; unreadable means Decisions unavailable, never another key.
-   const apiKey=policy.real?windowBoundKey(row.data,await readOpenRouterKey(admin,{fresh:true}).catch(()=>undefined),realModel(row.data).account):undefined;
+   const apiKey=policy.real&&gated?windowBoundKey(row.data,
+    await readOpenRouterKey(admin,{fresh:true}).catch(()=>undefined),realModel(row.data).account):undefined;
    if(policy.real)realModel(row.data);
    // Decisions judges every other gated message, including a non-social Skill turning to social media; an admitted
    // gated turn always keeps the fallback rule, since Decisions does not see earlier turns ("好的，那帮我写三条").
@@ -262,9 +262,9 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    let attachedInputLimit:number|undefined;
    if(organizeAfter){
     if(input.selection.kind==='organizer'||policy.maxCalls<2)throw new Error('RUNTIME_ORGANIZER_BUDGET');
-    const settings=await admin.from('system_settings').select('key,value').in('key',['v3_summary_model_id','v3_summary_max_tokens']);
-    if(settings.error){if(policy.real)stagingRpcFailure(settings.error);throw new Error('RUNTIME_ORGANIZER_DENIED');}
-    const summary=modelConfiguration(()=>summaryPolicy(Object.fromEntries(settings.data.map(r=>[r.key,r.value])),modelId));
+    const settings=await configuration;
+    if(settings.error)throw new Error('RUNTIME_ORGANIZER_DENIED');
+    const summary=modelConfiguration(()=>summaryPolicy(Object.fromEntries((settings.data??[]).map(r=>[r.key,r.value])),modelId));
     const model=await admin.from('ai_models').select('id,model_id,provider,is_active,max_tokens,input_limit,config').eq('id',summary.modelId).single();
     if(policy.real&&model.error){if(model.error.code==='PGRST116')throw unavailableModel();stagingRpcFailure(model.error);}
     if(model.error||model.data?.is_active!=='true'||(!policy.real&&model.data.provider!=='fixture'))throw unavailableModel();

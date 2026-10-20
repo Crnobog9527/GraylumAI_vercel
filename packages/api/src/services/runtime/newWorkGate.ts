@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
+import type {ConfigurationRows} from './admissionConfiguration';
 import { StagingAccessError } from './stagingErrors';
 import { logger } from '../../lib/logger';
 import { RateLimitError } from '../../lib/rateLimitError';
@@ -37,10 +38,12 @@ export async function readNewWorkSettings(admin: SupabaseClient): Promise<Settin
 }
 
 /** Admission's read: the same rate limits plus the MODEL-IDENTITY-GUARD switch, primary model and research switch, in one round trip. */
-export async function readAdmissionSettings(admin: SupabaseClient): Promise<SettingsRead> {
+export async function readAdmissionSettings(admin: SupabaseClient,
+  configuration?: Promise<ConfigurationRows>): Promise<SettingsRead> {
   try {
-    const rows = await admin.from('system_settings').select('key,value').in('key', [RUNTIME_RATE_LIMIT_KEY, MODEL_IDENTITY_GUARD_KEY, PRIMARY_MODEL_KEY,
-      RESEARCH_TOOLS_KEY]);
+    const rows = await (configuration ?? admin.from('system_settings').select('key,value').in('key', [
+      RUNTIME_RATE_LIMIT_KEY, MODEL_IDENTITY_GUARD_KEY, PRIMARY_MODEL_KEY,
+      RESEARCH_TOOLS_KEY]));
     if (rows.error || !Array.isArray(rows.data)) return { ok: false };
     const value = (key: string) => (rows.data as Array<{ key: string; value: unknown }>).find(row => row.key === key)?.value;
     const limits = value(RUNTIME_RATE_LIMIT_KEY);
