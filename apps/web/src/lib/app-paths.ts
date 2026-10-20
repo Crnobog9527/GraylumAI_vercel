@@ -42,7 +42,8 @@ export function toAppPath(target: string): string {
   if (path === '/') {
     return `${APP_PREFIX}${rest}`;
   }
-  if ((RETIRED_APP_PATHS as readonly string[]).includes(path)) {
+  // "/workbench/" is the retired page too; /app/workbench itself has no page.
+  if ((RETIRED_APP_PATHS as readonly string[]).includes(path.replace(/\/+$/, ''))) {
     return `${RETIRED_APP_DESTINATION}${rest}`;
   }
   const segment = path.split('/')[1];

@@ -17,6 +17,10 @@ describe('sanitizeRedirectTarget', () => {
     ['/publish-monitor/connect?request=r', '/app/publish-monitor/connect?request=r'],
     ['/chat?conversation=old', '/app/positioning?conversation=old'],
     ['/workbench', '/app/positioning'],
+    ['/workbench/', '/app/positioning'],
+    ['/workbench//?project=old', '/app/positioning?project=old'],
+    ['/chat/?conversation=old', '/app/positioning?conversation=old'],
+    ['/workbench/search/', '/app/workbench/search/'],
   ])('moves the old address %s to %s', (value, expected) => expect(sanitizeRedirectTarget(value)).toBe(expected));
   it.each(['/profiles', '/positioning-x', '/apps', '/admin/users', '/login', '/chatroom'])
     ('leaves %s alone, matching whole segments only', value => expect(sanitizeRedirectTarget(value)).toBe(value));

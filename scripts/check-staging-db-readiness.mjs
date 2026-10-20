@@ -18,7 +18,10 @@ const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const requiredEnvKeys = ['DATABASE_URL', 'NEXT_PUBLIC_SUPABASE_URL', 'NEXT_PUBLIC_APP_URL'];
 const optionalEnvKeys = ['EXPECTED_SUPABASE_PROJECT_REF', 'EXPECTED_APP_HOST'];
 const defaultExpectedAppHost = 'auth-staging.graylum.com';
-const knownProductionHostFragments = ['app.graylum.com'];
+// Production hosts: the old app host and the single www host (E1). The bare domain is matched exactly, since every
+// graylum.com subdomain, staging included, contains it.
+const knownProductionHostFragments = ['app.graylum.com', 'www.graylum.com'];
+const knownProductionHosts = new Set(['graylum.com']);
 const productionWordPattern = /(^|[-_.])prod(uction)?($|[-_.])/i;
 
 const requiredFunctionTargets = [
@@ -167,7 +170,8 @@ function parseUrl(value, label) {
 
 function hostHasProductionSignal(hostname) {
   const normalized = hostname.toLowerCase();
-  return knownProductionHostFragments.some((fragment) => normalized.includes(fragment))
+  return knownProductionHosts.has(normalized)
+    || knownProductionHostFragments.some((fragment) => normalized.includes(fragment))
     || productionWordPattern.test(normalized);
 }
 
