@@ -228,9 +228,10 @@ test.describe('Authentication', () => {
       { route: '/contact', heading: '需要进一步沟通时，直接找到正确入口' },
       { route: '/blog', heading: 'Graylum 教程' },
       { route: '/faq', heading: 'Graylum 常见问题' },
-      { route: '/terms', heading: /使用 .* 前，请先了解基础服务规则/ },
-      { route: '/privacy', heading: /了解 .* 如何处理账户与使用数据/ },
-      { route: '/acceptable-use', heading: /明确 .* 的允许使用方式与限制/ },
+      { route: '/terms', heading: 'Terms of Service' },
+      { route: '/privacy', heading: 'Privacy Policy' },
+      { route: '/cookies', heading: 'Cookie Policy' },
+      { route: '/refund-policy', heading: 'Refund Policy' },
     ] as const;
 
     try {

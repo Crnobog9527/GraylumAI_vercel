@@ -28,12 +28,12 @@ const HOSTS = ['www.graylum.com', 'auth-staging.graylum.com', 'example-preview.v
 
 // PUBLIC-SITE pages (SEO_GEO_SPEC 3.2) open without login, matched by whole path segment. The refund policy is
 // public too (Owner 2026-10-17); so are the feature pages and the tutorial blog linked from the public header.
-const OPEN = ['/about', '/zh-tw', '/zh-tw/', '/zh-tw/ig-jingying', '/zh-tw/about', '/refund', '/founders',
+const OPEN = ['/about', '/zh-tw', '/zh-tw/', '/zh-tw/ig-jingying', '/zh-tw/about', '/refund', '/refund-policy', '/cookies', '/founders',
   '/graylum-vs-chatgpt', '/features', '/features/', '/features/positioning', '/features/jury', '/blog', '/blog/',
   '/blog/first-positioning-conversation', '/pricing', '/faq', '/terms', '/privacy', '/landing/preview/l'];
 // Login entry pages stay at the root and open without a session, so email links work (SEO_GEO_SPEC section 2).
 const LOGIN_ENTRY = ['/login', '/register', '/verify-email', '/forgot-password', '/reset-password', '/auth/callback'];
-const LOOKALIKES = ['/zh-twx', '/zh-tw-admin', '/aboutx', '/about-us', '/refunds', '/refund-policy', '/founders-x',
+const LOOKALIKES = ['/zh-twx', '/zh-tw-admin', '/aboutx', '/about-us', '/refunds', '/refund-policy-x', '/founders-x',
   '/graylum-vs-chatgptx', '/featuresx', '/features-admin', '/feature', '/blogs', '/blog-admin', '/apps', '/application'];
 const LOGGED_IN = ['/app', '/app/', '/app/profile', '/app/positioning', '/app/positioning/draft-1/topics', '/app/library',
   '/app/runtime', '/app/workbench/search', '/app/publish-monitor/connect', '/app/expert-consult', '/admin', '/admin/users'];

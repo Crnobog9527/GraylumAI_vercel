@@ -1504,7 +1504,7 @@ it.skipIf(!process.env.V3_REAL_SKILL_INPUT)(
     input.expectedUpdatedAt = null;
     input.module.model_id = model;
     await sql.query(
-      "insert into ai_models(id,name,model_id,provider,is_active,api_key,api_endpoint,max_tokens,input_limit,token_counting_supported,tokenizer_family) values($1,'Runtime local','qwen/qwen3.8-27b','openai','true','LOCAL_ONLY','',4096,128000,'false','openai')",
+      "insert into ai_models(id,name,model_id,provider,is_active,api_endpoint,max_tokens,input_limit,token_counting_supported,tokenizer_family) values($1,'Runtime local','qwen/qwen3.8-27b','openai','true','',4096,128000,'false','openai')",
       [model],
     );
     await seedTestOpenRouterKey(sql, "LOCAL_ONLY");
@@ -2569,8 +2569,8 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST === "true")(
         quote.providerLimits.promptUsdPerMillion, quote.providerLimits.completionUsdPerMillion,
       ).pricing};
       await sql.query(
-        "insert into ai_models(id,name,model_id,provider,is_active,api_endpoint,api_key,max_tokens,input_limit,config,price_multiplier) values($1,'Synthetic Staging OPC',$2,'openai','true','https://openrouter.ai/api/v1',$3,1000,10000,$4,1)",
-        [quote.modelId, quote.model, key, JSON.stringify(config)],
+        "insert into ai_models(id,name,model_id,provider,is_active,api_endpoint,max_tokens,input_limit,config,price_multiplier) values($1,'Synthetic Staging OPC',$2,'openai','true','https://openrouter.ai/api/v1',1000,10000,$3,1)",
+        [quote.modelId, quote.model, JSON.stringify(config)],
       );
     }
     await seedTestOpenRouterKey(sql, key);
@@ -3813,7 +3813,7 @@ it("OPC: a published revision's per-field elicitation reaches the read schema an
     // admission below needs the same row switched to the fixture protocol.
     // MR-1: a Skill model must carry a checked interactive reasoning setting.
     await sql.query(
-      "insert into ai_models(id,name,model_id,provider,is_active,api_key,api_endpoint,max_tokens,input_limit,token_counting_supported,tokenizer_family,config) values($1,'Stage B local','qwen/qwen3.8-27b','openai','true','LOCAL_ONLY','',4096,128000,'false','openai',$2)",
+      "insert into ai_models(id,name,model_id,provider,is_active,api_endpoint,max_tokens,input_limit,token_counting_supported,tokenizer_family,config) values($1,'Stage B local','qwen/qwen3.8-27b','openai','true','',4096,128000,'false','openai',$2)",
       [model, JSON.stringify(configuredReasoning("qwen/qwen3.8-27b"))],
     );
     await seedTestOpenRouterKey(sql, "LOCAL_ONLY");

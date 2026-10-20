@@ -12,4 +12,5 @@ it('links the refund policy from the legal column, like the other public footers
   const html = renderToStaticMarkup(<LandingFooter siteName="Graylum" supportEmail="support@example.com" />);
   expect(html).toContain('href="/refund"');
   expect(html).toContain('退款政策');
+  expect(html).toContain('href="/cookies"');
 });

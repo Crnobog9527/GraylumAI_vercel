@@ -755,10 +755,15 @@ describe('full 25-subcall benchmark discovery', () => {
     expect(candidates.filter(option => option.selectable).length).toBeGreaterThanOrEqual(8);
     expect(f.store.createCard.mock.calls[0]?.[0]).toBe(stableResearchId(discoveryId, 'first-card'));
 
-    // A further recovery reads the same completed evidence, including unknown, without buying any more calls.
+    // A further recovery still validates every saved operation, including unknown. Its store read
+    // already recovered the receipt/plan binding, so discovery must not fetch all 25 plans again.
+    f.store.readPlan.mockClear();
+    f.store.readOperation.mockClear();
     expect(await f.makeExecute()('benchmark_discover', { discoveryId })).toMatchObject({
       status: unknown ? 'partial' : 'ok', continue: false,
     });
+    expect(f.store.readOperation).toHaveBeenCalledTimes(25);
+    expect(f.store.readPlan).not.toHaveBeenCalled();
     expect(subcall).toHaveBeenCalledTimes(25);
     expect(f.store.discoveryStart).toHaveBeenCalledTimes(1);
   });

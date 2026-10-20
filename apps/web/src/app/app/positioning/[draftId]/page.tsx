@@ -1197,7 +1197,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                     })}
                     {pendingBubble&&!mentorExecutions.some(e=>e.request?.requestId===pendingBubble.requestId)&&<MentorPendingMessage
                       requestId={pendingBubble.requestId} stepTitle={steps.find(candidate => candidate.id === pendingBubble.stepId)?.title}
-                      text={shownInput(pendingBubble.input)} sending={running}/>}
+                      text={shownInput(pendingBubble.input)} sending={running} accepted={Boolean(stepEnvelopeFor(pendingBubble.stepId)?.parsed?.executionId)}/>}
                   {liveOnly && <MentorTurnSteps live={liveOnly} reply={liveOnly} calls={research.of(liveOnly.executionId)}/>}
                   {liveOnly&&(liveOnly.text||!liveOnly.card)&&<MentorLiveReply text={liveOnly.text}/>}
                   {read.data?.sessionId && <ResearchSessionPanel sessionId={read.data.sessionId} settledTurns={settledTurns}

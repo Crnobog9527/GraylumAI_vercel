@@ -10,6 +10,27 @@ const statusLabel: Record<string, string> = { pending: '等待处理', frozen: '
   warning_under_review: '预警审核中', warning_closed: '预警已结束', won: '已判赢', lost: '已判输', prevented: '已阻止' };
 const label = (state: string) => statusLabel[state] ?? '待核对';
 
+// 只有已判赢或预警已结束，撤回才没有钱被扣回的风险；其余状态（含未知）都要二次确认。
+const safeToWithdraw = new Set(['won', 'warning_closed']);
+
+export function WithdrawConfirm({ status, pending, onConfirm, onCancel }:
+  { status: string; pending: boolean; onConfirm: () => void; onCancel: () => void }) {
+  const risky = !safeToWithdraw.has(status);
+  const [understood, setUnderstood] = useState(false);
+  return <div className="space-y-2">
+    <p>确认撤回这笔冻结？这会恢复仍属于该付款的权益和积分，自动续费继续保持停止。</p>
+    {risky ? <div role="alert" className="space-y-2 rounded-lg border p-3 font-bold text-red-600" data-testid="withdraw-risk">
+      <p>注意：这笔拒付{status === 'lost' ? '已判输' : '还没判赢'}（当前：{label(status)}）。撤回后用户可以继续使用这些积分和会员权益，钱可能已被银行扣回。</p>
+      <label className="flex items-center gap-2 font-normal">
+        <input type="checkbox" checked={understood} onChange={e => setUnderstood(e.target.checked)} />
+        我已在 Stripe 核对，仍要撤回
+      </label>
+    </div> : null}
+    <Button disabled={pending || (risky && !understood)} onClick={onConfirm}>确认撤回冻结</Button>
+    <Button variant="outline" disabled={pending} onClick={onCancel}>返回</Button>
+  </div>;
+}
+
 export function AdminPaymentDisputes() {
   const [offset, setOffset] = useState(0);
   const rows = trpc.paymentDisputes.list.useQuery({ offset });
@@ -69,11 +90,9 @@ export function AdminPaymentDisputes() {
               onClick={() => { setExternalSelected(row.id); setSelected(null); }}>已核实站外付款</Button>
           ) : null}
           {row.freeze_state === 'frozen' ? (
-            selected === row.id ? <div className="space-y-2">
-              <p>确认撤回这笔冻结？这会恢复仍属于该付款的权益和积分，自动续费继续保持停止。</p>
-              <Button disabled={withdraw.isPending} onClick={() => withdraw.mutate({ disputeId: row.id })}>确认撤回冻结</Button>
-              <Button variant="outline" disabled={withdraw.isPending} onClick={() => setSelected(null)}>返回</Button>
-            </div> : <Button variant="outline" onClick={() => { setSelected(row.id); setExternalSelected(null); }}>撤回冻结</Button>
+            selected === row.id ? <WithdrawConfirm status={row.status} pending={withdraw.isPending}
+              onConfirm={() => withdraw.mutate({ disputeId: row.id })} onCancel={() => setSelected(null)} />
+            : <Button variant="outline" onClick={() => { setSelected(row.id); setExternalSelected(null); }}>撤回冻结</Button>
           ) : null}
         </article>
       ))}

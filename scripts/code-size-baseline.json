@@ -101,7 +101,7 @@
   "packages/api/src/services/skills/modulePublication.ts": {"longLines":2},
   "packages/api/src/services/stripeFulfillment.ts": {"lines":2392},
   "packages/api/src/services/subscriptionCreditGrants.ts": {"lines":2842,"longLines":6},
-  "packages/db/schema.ts": {"lines":594},
+  "packages/db/schema.ts": {"lines":593},
   "scripts/check-staging-db-readiness.mjs": {"lines":786},
   "scripts/check-stripe-readiness.mjs": {"lines":678}
 }

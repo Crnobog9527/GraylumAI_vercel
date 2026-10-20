@@ -30,8 +30,8 @@ const footerLinks = {
     links: [
       { label: '服务条款', href: '/terms' },
       { label: '隐私政策', href: '/privacy' },
-      { label: '使用协议', href: '/acceptable-use' },
       { label: '退款政策', href: '/refund' },
+      { label: 'Cookie 政策', href: '/cookies' },
       { label: '无障碍声明', href: '/accessibility' },
     ],
   },

@@ -30,7 +30,7 @@
 - `NEXT_PUBLIC_SITE_NAME`
 - `NEXT_PUBLIC_SUPPORT_EMAIL`
 - `NEXT_PUBLIC_SENTRY_DSN`
-- `OPENROUTER_API_KEY`（Claude 与 OpenAI-compatible 模型统一入口）
+- OpenRouter 等第三方密钥由 Owner 在后台“第三方密钥”页填写并核对，不从 Vercel 环境变量读取
 
 不再配置：
 

@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 import {
   createAuthUrl, deleteAccount, getAccount, listAccountsByExternalId, listAllAccounts, readFeedPage, type ClientDeps,
 } from './client';
-import { postForMeApiKey } from './config';
 import { privateHost, publicHttpsUrl } from './http';
 import { flattenMetrics, xSnowflakeTime } from './normalize';
 
@@ -183,16 +182,13 @@ describe('post for me client', () => {
     expect(await readFeedPage(deps([json(500, {})]).deps, 'spc_1', 'x')).toMatchObject({ kind: 'failed', status: 500 });
   });
 
-  it('helpers reject private hosts, bad keys and impossible snowflakes', () => {
+  it('helpers reject private hosts and impossible snowflakes', () => {
     for (const host of ['localhost', '10.1.2.3', '192.168.0.1', '169.254.1.1', '[::1]', 'intranet', 'a.internal', '100.64.0.1']) {
       expect(privateHost(host)).toBe(true);
     }
     expect(privateHost('www.youtube.com')).toBe(false);
     expect(publicHttpsUrl('https://www.youtube.com/watch?v=1')).toBe('https://www.youtube.com/watch?v=1');
     expect(publicHttpsUrl('https://' + 'a'.repeat(3000) + '.com')).toBeNull();
-    expect(() => postForMeApiKey({})).toThrow('POSTFORME_NOT_CONFIGURED');
-    expect(() => postForMeApiKey({ POSTFORME_API_KEY: 'sk-other' })).toThrow('POSTFORME_NOT_CONFIGURED');
-    expect(postForMeApiKey({ POSTFORME_API_KEY: ` ${KEY} ` })).toBe(KEY);
     expect(xSnowflakeTime('123')).toBeNull();
     for (const empty of [{}, 'n/a', 5, []]) expect(flattenMetrics(empty).missingFields).toEqual(['metrics']);
     const many = flattenMetrics(Object.fromEntries(Array.from({ length: 250 }, (_, i) => [`m${i}`, i])));

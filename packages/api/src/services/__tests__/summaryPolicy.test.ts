@@ -23,12 +23,11 @@ describe('separate summary model policy', () => {
 
 
 describe('admin and runtime use one OpenRouter configuration policy', () => {
-  const row={id:summary,name:'Configured secondary',model_id:'openai/gpt-5.6-luna',provider:'openai',is_active:'true',max_tokens:4096,input_limit:800000,api_key:'SECRET_CANARY',api_endpoint:'',token_counting_supported:'false',tokenizer_family:'openai'};
+  const row={id:summary,name:'Configured secondary',model_id:'openai/gpt-5.6-luna',provider:'openai',is_active:'true',max_tokens:4096,input_limit:800000,api_endpoint:'',token_counting_supported:'false',tokenizer_family:'openai'};
   it.each(['qwen/qwen3.8-27b','openai/gpt-5.6-luna','anthropic/claude-opus-4.5'])('accepts configured %s using derived usage and the default endpoint without rewriting storage',async model_id=>{
     const {summaryModelOption,workbenchModelSchema,providerInputReservation}=await import('../artifacts/modelPolicy');
     const input={...row,model_id},before=JSON.stringify(input),option=summaryModelOption(input),model=workbenchModelSchema.parse(input);
     expect(option).toEqual({id:summary,name:row.name,model_id,available:true,reason:null});
-    expect(JSON.stringify(option)).not.toContain('SECRET_CANARY');
     expect(JSON.stringify(input)).toBe(before);
     expect(model.api_endpoint).toBe('https://openrouter.ai/api/v1/chat/completions');
     expect(model.token_counting_supported).toBe('true');
@@ -39,7 +38,7 @@ describe('admin and runtime use one OpenRouter configuration policy', () => {
   it.each([{model_id:''},{model_id:'openrouter/auto'},{model_id:'@preset/test'},{is_active:'false'},{api_endpoint:'https://example.test'},{input_limit:0},{max_tokens:0}])('gives an actionable reason for unavailable configuration: %j',async patch=>{
     const {summaryModelOption}=await import('../artifacts/modelPolicy');
     const option=summaryModelOption({...row,...patch});
-    expect(option.available).toBe(false);expect(option.reason).toBeTruthy();expect(JSON.stringify(option)).not.toContain('SECRET_CANARY');
+    expect(option.available).toBe(false);expect(option.reason).toBeTruthy();
   });
   it('bounds the task independently of advertised context and rejects oversize without truncation',async()=>{
     const {workbenchModelSchema,providerInputReservation}=await import('../artifacts/modelPolicy');

@@ -344,7 +344,7 @@ function adminModuleInput(): ModuleSkillInput {
 }
 it('ADMIN: atomic package, YAML template, workflow and module publication with replay, rollback and stale-write protection', async () => {
   const input = adminModuleInput();
-  await sql.query("insert into ai_models(id,model_id,name,provider,api_key,max_tokens,input_limit,config) values($1,'qwen/qwen3.8-27b','Admin fixture model','openai','LOCAL_ONLY',4096,800000,$2)", [input.module.model_id, configuredReasoning('qwen/qwen3.8-27b')]);
+  await sql.query("insert into ai_models(id,model_id,name,provider,max_tokens,input_limit,config) values($1,'qwen/qwen3.8-27b','Admin fixture model','openai',4096,800000,$2)", [input.module.model_id, configuredReasoning('qwen/qwen3.8-27b')]);
   await seedTestOpenRouterKey(sql, 'LOCAL_ONLY');
   const result = await saveModuleSkill(db, owner, input);
   expect(result.version).toBe(1);
@@ -396,7 +396,7 @@ it('ADMIN: browser imports a Skill folder, configures steps, publishes the confi
   await sql.query("update profiles set role='admin' where id=$1", [admin.id]);
   writeFileSync(output + '/admin-preview.json', JSON.stringify({ url: app, email: admin.email, password: admin.password }), { mode: 0o600 });
   const input = adminModuleInput();
-  await sql.query("insert into ai_models(id,model_id,name,provider,api_key,max_tokens,input_limit,config) values($1,'qwen/qwen3.8-27b','Browser admin model','openai','LOCAL_ONLY',4096,800000,$2)", [input.module.model_id, configuredReasoning('qwen/qwen3.8-27b')]);
+  await sql.query("insert into ai_models(id,model_id,name,provider,max_tokens,input_limit,config) values($1,'qwen/qwen3.8-27b','Browser admin model','openai',4096,800000,$2)", [input.module.model_id, configuredReasoning('qwen/qwen3.8-27b')]);
   await seedTestOpenRouterKey(sql, 'LOCAL_ONLY');
   const directory = output + '/synthetic-method'; mkdirSync(directory, { recursive: true });
   for (const f of input.files) {
@@ -566,10 +566,10 @@ it('ADMIN: model edits and unused-module deletion work through authenticated HTT
   };
   const previousSummarySetting = (await sql.query("select value from system_settings where key='v3_summary_model_id'")).rows;
   const model = randomUUID(), module = randomUUID();
-  await sql.query("insert into ai_models(id,model_id,name,api_key) values($1,'local-synthetic','Before','LOCAL_ONLY')", [model]);
+  await sql.query("insert into ai_models(id,model_id,name) values($1,'local-synthetic','Before')", [model]);
   const response = await call('model.updateModel', { id: model, name: 'After', description: 'Saved without provider call' });
   expect(response.status).toBe(200);
-  expect((await sql.query('select name,api_key from ai_models where id=$1',[model])).rows[0]).toEqual({name:'After',api_key:'LOCAL_ONLY'});
+  expect((await sql.query('select name from ai_models where id=$1',[model])).rows[0]).toEqual({name:'After'});
   expect((await client.from('ai_models').update({name:'Denied'}).eq('id',model)).error).not.toBeNull();
   await sql.query("insert into modules(id,title,active) values($1,'Unused test module',false)",[module]);
   const card = randomUUID();
@@ -639,7 +639,7 @@ it('ADMIN: re-uploading a declared Skill updates the active steps and questions 
   const administrator=await newUser();
   await sql.query("update profiles set role='admin' where id=$1",[administrator.id]);
   const input=adminModuleInput();
-  await sql.query("insert into ai_models(id,model_id,name,provider,api_key,max_tokens,input_limit,config) values($1,'qwen/qwen3.8-27b','Workflow upload fixture','openai','LOCAL_ONLY',4096,800000,$2)",[input.module.model_id, configuredReasoning('qwen/qwen3.8-27b')]);
+  await sql.query("insert into ai_models(id,model_id,name,provider,max_tokens,input_limit,config) values($1,'qwen/qwen3.8-27b','Workflow upload fixture','openai',4096,800000,$2)",[input.module.model_id, configuredReasoning('qwen/qwen3.8-27b')]);
   await seedTestOpenRouterKey(sql, 'LOCAL_ONLY');
   const directory=output+'/synthetic-method';mkdirSync(directory,{recursive:true});
   for(const file of input.files){
@@ -823,7 +823,7 @@ it('ADMIN: settings save submits the complete form with selected model records a
   await sql.query("create table if not exists membership_plans(id uuid primary key,sort_order integer); grant select on membership_plans to service_role; notify pgrst,'reload schema'");
   const primary=randomUUID(),assistant=randomUUID();
   for(const [id,name,model] of [[primary,'Settings Qwen','qwen/qwen3.8-27b'],[assistant,'Settings Luna','openai/gpt-5.6-luna']]) {
-    await sql.query("insert into ai_models(id,name,model_id,provider,api_key,api_endpoint,max_tokens,input_limit,token_counting_supported,tokenizer_family,input_token_cost,output_token_cost) values($1,$2,$3,'openai','SETTINGS_PRIVATE_CANARY','',4096,800000,'false','openai',150000,2000000)",[id,name,model]);
+    await sql.query("insert into ai_models(id,name,model_id,provider,api_endpoint,max_tokens,input_limit,token_counting_supported,tokenizer_family,input_token_cost,output_token_cost) values($1,$2,$3,'openai','',4096,800000,'false','openai',150000,2000000)",[id,name,model]);
   }
   await seedTestOpenRouterKey(sql, 'SETTINGS_PRIVATE_CANARY');
   const snapshot=()=>sql.query('select key,value from system_settings order by key').then(r=>r.rows);

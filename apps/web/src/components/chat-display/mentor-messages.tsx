@@ -91,18 +91,23 @@ export function MentorReply({ kind, stepLabel, text, live = false, result, summa
   );
 }
 
-/** A message sent but not yet listed by the server. */
-export function MentorPendingMessage({ requestId, stepTitle, text, sending }: {
+/**
+ * A message sent but not yet listed by the server. Once the server has admitted
+ * it (`accepted`), the turn's own steps show its progress: a long turn must not
+ * keep saying it waits for the server.
+ */
+export function MentorPendingMessage({ requestId, stepTitle, text, sending, accepted = false }: {
   requestId?: string;
   stepTitle?: string;
   text?: string | null;
   sending: boolean;
+  accepted?: boolean;
 }) {
   return (
     <div data-message-role="user" data-request-id={requestId} className="ml-8 rounded-xl bg-[var(--bg-tertiary)] p-3">
       <span>你 · {stepTitle}</span>
       <p className={`whitespace-pre-wrap ${resultStyles.messageBody}`}>
-        {text}</p><ChatPendingStatus sending={sending}/></div>
+        {text}</p>{!accepted && <ChatPendingStatus sending={sending}/>}</div>
   );
 }
 
