@@ -63,12 +63,26 @@ const PATTERNS = [
 
 const TERMINATOR = /[。！？!?\n]|\.(?=\s|$)/gu;
 
+/** Identity patterns may span a line break, so that newline is not a sentence boundary. */
+function identityMatchRanges(text: string): Array<[number, number]> {
+  return PATTERNS.flatMap(pattern => {
+    const global = new RegExp(pattern.source, `${pattern.flags}g`);
+    return [...text.matchAll(global)].map(match => [match.index!, match.index! + match[0].length] as [number, number]);
+  }).sort((left, right) => left[0] - right[0]);
+}
+
 /** Sentence spans [start, end) of text, each ending after its terminator (or at the end). */
 function sentences(text: string) {
   const spans: Array<[number, number]> = [];
+  const identityRanges = text.includes('\n') && leaksModelIdentity(text) ? identityMatchRanges(text) : [];
+  let rangeIndex = 0;
   let start = 0;
   for (const match of text.matchAll(TERMINATOR)) {
-    const end = match.index! + match[0].length;
+    const index = match.index!;
+    while (rangeIndex < identityRanges.length && identityRanges[rangeIndex][1] <= index) rangeIndex++;
+    const insideIdentity = identityRanges[rangeIndex]?.[0] <= index && index < identityRanges[rangeIndex]?.[1];
+    if (match[0] === '\n' && insideIdentity) continue;
+    const end = index + match[0].length;
     spans.push([start, end]);
     start = end;
   }
@@ -129,7 +143,11 @@ export function redactIdentityBody(body: string) {
   try { value = JSON.parse(body); } catch { return redactModelIdentity(body); }
   // A bare JSON string is shown as plain reply text after reload (review P1).
   if (typeof value === 'string') { const text = redactModelIdentity(value); return text === value ? body : JSON.stringify(text); }
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return body;
+  if (Array.isArray(value)) {
+    const redacted = redactIdentityStrings(value);
+    return JSON.stringify(redacted) === JSON.stringify(value) ? body : JSON.stringify(redacted);
+  }
+  if (!value || typeof value !== 'object') return body;
   const record = value as Record<string, unknown>;
   const message = typeof record.message === 'string' ? redactModelIdentity(record.message) : record.message;
   // Card messages are redacted on their own: an appended card's text differs from the combined message,

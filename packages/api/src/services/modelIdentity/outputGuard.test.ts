@@ -68,7 +68,10 @@ const SAFE = [
   '我建议你先看看 OpenAI 最近发布的视频工具对创作者的影响。',
   '我是根据 Google Trends 的公开数据整理的这份清单。',
   '很多创作者用 Gemini 生成脚本初稿，再人工修改。',
+  '我在讨论 Claude 和 GPT-4，想比较它们的写作风格。',
+  '用户问：Claude 和 GPT 哪个更适合长文？',
   'I recommend comparing ChatGPT and Claude for long captions.',
+  'I use Claude and GPT to compare drafts.',
   "I'm going to compare Gemini and GPT-4 for your scripts.",
   'I am not able to see your Google Analytics data directly.',
   'My suggestion is to post on Meta platforms twice a week.',
@@ -141,6 +144,12 @@ it('replaces only the leaking sentence, keeps the rest, and says the brand reply
   expect(redactModelIdentity(text)).toBe(`你好！${BRAND_REPLY_ZH}下面是你要的三个选题：\n1. 开箱\n2. 对比`);
 });
 
+it('recognizes identity sentences split by a line break without consuming surrounding text', () => {
+  const text = '正常说明。\n我是\nClaude。\nClaude 和 GPT-4 的差异要按用途比较。';
+  expect(leaksModelIdentity(text)).toBe(true);
+  expect(redactModelIdentity(text)).toBe(`正常说明。\n${BRAND_REPLY_ZH}\nClaude 和 GPT-4 的差异要按用途比较。`);
+});
+
 it('streaming holds back only an unfinished first-person sentence', () => {
   expect(streamingRedaction('先说结论。我是由 Goo')).toBe('先说结论。');
   expect(streamingRedaction('先说结论。我是由 Google 训练的。')).toBe(`先说结论。${BRAND_REPLY_ZH}`);
@@ -181,6 +190,17 @@ it('redacts the public message of stored bodies and keeps other fields', () => {
   const clean = JSON.stringify({ message: '继续第二步。', card: null });
   expect(redactIdentityBody(clean)).toBe(clean);
   expect(redactIdentityBody('[1,2]')).toBe('[1,2]');
+});
+
+it('redacts identity strings inside a bare JSON array while preserving ordinary model discussion', () => {
+  const body = JSON.stringify([
+    { title: '我是\nClaude。', brief: 'Claude 和 GPT-4 的差异要按用途比较。' },
+    '我在讨论 Claude 和 GPT，想比较它们的写作风格。',
+  ]);
+  expect(JSON.parse(redactIdentityBody(body))).toEqual([
+    { title: BRAND_REPLY_ZH, brief: 'Claude 和 GPT-4 的差异要按用途比较。' },
+    '我在讨论 Claude 和 GPT，想比较它们的写作风格。',
+  ]);
 });
 
 it('organizer summaries: plain prose is redacted; structured extraction values are kept (review P1)', () => {
