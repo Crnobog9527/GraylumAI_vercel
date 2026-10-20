@@ -26,6 +26,7 @@ Argon 原来缺窗口报价、档案和 `paygHostPolicy.ts` 路线条目，因�
 low 的截断证据引用 `pr665-r7-results-a24d1839b5e5`，512 token 两条。
 Flash 多用途证据不能移植给新模型；Argon 只开放 `fusion_review`，沿用 Owner 已批准的 FUSION-PROFILE 方案 B。
 
+[已生成的抽样计划](evidence/fusion-argon-20261021-plan.json)逐条保守费用上限合计1.532850000000美元（低于3美元）。
 准备的单轮为 6 个互不相同请求：中档 50,000 B×2、大档 186,000 B×2、512 输出截断×2（中档）。
 请求用正式 `reviewerRequest` / `fusionRequestBody` 生成：已发布评审 Skill、公开合成咖啡报告、execution 视角、引文规则、
 system+user 两条消息、严格 JSON schema、low、无工具、禁用 web 插件、仅指定完整线路且不回退。

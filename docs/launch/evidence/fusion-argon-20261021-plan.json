@@ -1,0 +1,68 @@
+{
+  "reference": "fusion-argon-20261021-plan",
+  "status": "PLANNED_NOT_DISPATCHED",
+  "recordedAt": "2026-10-20T16:37:01.672153+00:00",
+  "model": "google/gemini-4-argon",
+  "endpointTag": "google-ai-studio",
+  "routeStatus": -2,
+  "samplingBudgetUsd": "3",
+  "totalUpperUsd": "1.532850000000",
+  "actualSamples": 0,
+  "actualCostUsd": "0",
+  "samples": [
+    {
+      "id": "medium-1",
+      "band": "medium",
+      "output": 4096,
+      "bytes": 50000,
+      "promptUpper": 58192,
+      "upper": "0.168255000000",
+      "requestHash": "9e71980993f0ae3530a4fc3512aecede71dcdc81b58d117fab5870ebb15cee2b"
+    },
+    {
+      "id": "medium-2",
+      "band": "medium",
+      "output": 4096,
+      "bytes": 50000,
+      "promptUpper": 58192,
+      "upper": "0.168255000000",
+      "requestHash": "7a4aaf3c1c784da2a5b03a61a28f479d1d4571759b709e01f15e3d44dca14fc0"
+    },
+    {
+      "id": "large-1",
+      "band": "large",
+      "output": 4096,
+      "bytes": 186000,
+      "promptUpper": 194192,
+      "upper": "0.465755000000",
+      "requestHash": "d63810d000c46ad7631a4d76e569eaaff9a7d73d372b2ed066f0a58f15b34dbc"
+    },
+    {
+      "id": "large-2",
+      "band": "large",
+      "output": 4096,
+      "bytes": 186000,
+      "promptUpper": 194192,
+      "upper": "0.465755000000",
+      "requestHash": "8172827a3bb0a70429b5e97180992602dce852e11f9f1a1d2bbcea2e475b52b3"
+    },
+    {
+      "id": "stress-1",
+      "band": "medium",
+      "output": 512,
+      "bytes": 50000,
+      "promptUpper": 58192,
+      "upper": "0.132415000000",
+      "requestHash": "34ac7aecf41bde91f2b694fb636684b99e53c02c3e736ad7c9508cd4ae348a65"
+    },
+    {
+      "id": "stress-2",
+      "band": "medium",
+      "output": 512,
+      "bytes": 50000,
+      "promptUpper": 58192,
+      "upper": "0.132415000000",
+      "requestHash": "91b80698c9642341ea46c340ee460740ad7568ae65140af6a17c5aa879281444"
+    }
+  ]
+}

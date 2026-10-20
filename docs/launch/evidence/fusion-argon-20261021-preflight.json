@@ -1,7 +1,6 @@
 {
   "task": "FUSION-REVIEW",
   "reference": "fusion-argon-20261021-preflight",
-  "observedAt": "2026-10-20T16:33:54Z",
   "source": "https://openrouter.ai/api/v1/models/google/gemini-4-argon/endpoints",
   "model": "google/gemini-4-argon",
   "endpointTag": "google-ai-studio",
@@ -17,5 +16,7 @@
   "actualSamples": 0,
   "actualCostUsd": "0",
   "status": "BLOCKED_BEFORE_DISPATCH",
-  "profileGenerated": false
+  "profileGenerated": false,
+  "observedDateLocal": "2026-10-21",
+  "timezone": "Asia/Shanghai"
 }
