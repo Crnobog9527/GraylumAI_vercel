@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 vi.mock('next/font/local', () => ({ default: () => ({ variable: 'display-font', className: 'display-font' }) }));
 
 import sitemap from '@/app/sitemap';
-import { metadata } from '@/app/landing/preview/d/page';
+import { metadata } from '@/app/(zh-hans)/landing/preview/d/page';
 import { FINAL_ACTION, HERO, HOW_IT_WORKS, PRICE_COMPARE, VOICE_WALL } from '@/lib/landing/landing-copy';
 import { LANDING_FAQ_TITLE } from '@/lib/landing/landing-faq';
 import { FLOW_STEPS } from '@/lib/landing/landing-flow';

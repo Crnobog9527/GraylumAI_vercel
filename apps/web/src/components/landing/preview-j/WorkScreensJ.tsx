@@ -3,7 +3,7 @@
 
 import type { CSSProperties } from 'react';
 import { Check, Minus, Sparkles } from 'lucide-react';
-import library from '@/app/app/library/library.module.css';
+import library from '@/app/(zh-hans)/app/library/library.module.css';
 import result from '@/components/opc/positioning-result.module.css';
 import { UploadPanel } from '@/components/library/my-documents-view';
 import { Button } from '@/components/ui/button';

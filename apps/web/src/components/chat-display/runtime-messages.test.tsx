@@ -56,7 +56,7 @@ it('keeps the header title an h1 by default and renders it at the level a page a
   expect(nested).toContain('<h2>工作对话</h2>');
   expect(nested).not.toContain('<h1');
   const { readFileSync } = await import('node:fs');
-  const css = readFileSync(new URL('../../app/app/runtime/runtime-work.module.css', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('../../app/(zh-hans)/app/runtime/runtime-work.module.css', import.meta.url), 'utf8');
   expect(css).toContain('.workTitle :is(h1,h2,:where(');
 });
 

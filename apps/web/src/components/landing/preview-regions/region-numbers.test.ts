@@ -67,7 +67,7 @@ describe('region numbers of the style samples', () => {
   });
 
   it('only the preview layout mounts the labels; /landing never loads them', () => {
-    const app = join(__dirname, '../../../app/landing');
+    const app = join(__dirname, '../../../app/(zh-hans)/landing');
     expect(readFileSync(join(app, 'preview/layout.tsx'), 'utf8')).toContain('<RegionLabels />');
     for (const file of ['layout.tsx', 'page.tsx']) expect(readFileSync(join(app, file), 'utf8')).not.toContain('RegionLabels');
   });

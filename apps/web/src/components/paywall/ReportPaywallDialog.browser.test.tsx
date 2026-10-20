@@ -13,7 +13,7 @@ beforeAll(async () => {
   const require = createRequire(import.meta.url);
   const vite = createRequire(require.resolve('vitest/package.json')).resolve('vite');
   const { build } = await import(pathToFileURL(vite).href);
-  const source = fileURLToPath(new URL('../../app/app/positioning/[draftId]/report-panel.tsx', import.meta.url));
+  const source = fileURLToPath(new URL('../../app/(zh-hans)/app/positioning/[draftId]/report-panel.tsx', import.meta.url));
   // Server double. window.plans is the catalog, window.membership the methodMembership answer;
   // window.report is what the report hook reports; window.checkouts records methodCheckout inputs.
   // window.checkoutMode: 'open' (default, window.checkoutUrl), 'hang', 'recovery' or 'error' (window.checkoutError).

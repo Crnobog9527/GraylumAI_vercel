@@ -2,7 +2,7 @@
 import type { ReactNode, Ref, UIEventHandler } from "react";
 import { ChatPendingStatus } from "@/components/chat/ChatInlineNotice";
 import resultStyles from "@/components/opc/positioning-result.module.css";
-import { MentorMarkdown } from "@/app/app/positioning/[draftId]/MentorMarkdown";
+import { MentorMarkdown } from "@/app/(zh-hans)/app/positioning/[draftId]/MentorMarkdown";
 import { DisplayHeading } from './display-heading';
 
 /**

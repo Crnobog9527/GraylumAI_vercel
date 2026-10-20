@@ -8,7 +8,7 @@ import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { ConsentPreferenceLinks } from '@/components/analytics/ConsentPreferenceLinks';
 import { PUBLIC_PAGES } from '@/lib/seo/public-pages';
-import { SITE_LOCALES, type SiteLocale } from '@/lib/seo/site';
+import type { SiteLocale } from '@/lib/seo/site';
 import { LANGUAGE_NAMES, LOGIN_HREF, SIGNUP_HREF, SITE_CHROME, visibleHref } from './site-chrome';
 
 const LINK_CLASS = 'text-sm text-[#9A9A9A] transition-colors hover:text-[#FFD700]';
@@ -34,8 +34,8 @@ function FooterColumn({ title, links, extra }: { title: string; links: { label: 
 }
 
 /**
- * Header and footer for public content pages in one language, server-rendered without client JS. The
- * wrapper carries the page language until the /app move splits the root layout per language (SEO_GEO_SPEC 15).
+ * Header and footer for public content pages in one language, server-rendered without client JS. The page
+ * language is set on the document by that language's root layout (SEO_GEO_SPEC 15).
  * `alternates` are this page in other languages; the language switch falls back to that language's home.
  */
 export function SiteShell({
@@ -63,7 +63,7 @@ export function SiteShell({
   })).filter(link => link.href);
 
   return (
-    <div lang={SITE_LOCALES[locale].htmlLang} className="min-h-screen bg-[#0A0A0A] text-white">
+    <div className="min-h-screen bg-[#0A0A0A] text-white">
       <header className="border-b border-[#262626]">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
           <Link href={chrome.home} className="flex items-center gap-2">

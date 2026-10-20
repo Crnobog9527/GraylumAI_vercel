@@ -4,7 +4,7 @@
 import { ReportModelSetting } from './ReportModelSetting';
 import { SocialMediaFlagSetting } from './SocialMediaFlagSetting';
 import { SkillTranslationsSetting } from './SkillTranslationsSetting';
-import { syncModuleVersion } from '@/app/admin/prompts/module-version-sync';
+import { syncModuleVersion } from '@/app/(zh-hans)/admin/prompts/module-version-sync';
 
 type Versioned = { id: string; updated_at: string };
 type Dashboard = { modules?: Versioned[] | null; prompts?: Versioned[] | null } | undefined;

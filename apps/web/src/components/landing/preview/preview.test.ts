@@ -2,7 +2,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import sitemap from '@/app/sitemap';
-import { metadata, generateStaticParams } from '@/app/landing/preview/[variant]/page';
+import { metadata, generateStaticParams } from '@/app/(zh-hans)/landing/preview/[variant]/page';
 import { HERO, HOW_IT_WORKS, PRICE_COMPARE } from '@/lib/landing/landing-copy';
 import { LANDING_FEATURES, type LandingFlags } from '@/lib/landing/landing-flags';
 import { buildLandingPageData } from '@/lib/landing/landing-page-data';

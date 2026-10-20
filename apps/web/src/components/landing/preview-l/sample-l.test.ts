@@ -4,7 +4,7 @@ import { httpLink } from '@trpc/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import sitemap from '@/app/sitemap';
-import { metadata } from '@/app/landing/preview/l/page';
+import { metadata } from '@/app/(zh-hans)/landing/preview/l/page';
 import { SampleJ } from '@/components/landing/preview-j/SampleJ';
 import { SampleK } from '@/components/landing/preview-k/SampleK';
 import { J_NOTE_HEADS, J_PRICE } from '@/lib/landing/landing-copy-j';

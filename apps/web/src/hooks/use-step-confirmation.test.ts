@@ -2,7 +2,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { confirmKey, executeConfirmation, prepareConfirmation, refreshedDeferrals, reviewedStep, upstreamVersions, type ConfirmationIo, type ConfirmRead } from "./use-step-confirmation";
 import { stepConfirmationValues, visibleStep, type FieldValue, type VisibleStep } from "@/components/opc/capture-state";
-import type { ConfirmStepEnvelope } from "@/app/app/positioning/[draftId]/confirm-envelope";
+import type { ConfirmStepEnvelope } from "@/app/(zh-hans)/app/positioning/[draftId]/confirm-envelope";
 
 const positioningComplete = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/analytics/events", () => ({ reportPositioningComplete: positioningComplete }));

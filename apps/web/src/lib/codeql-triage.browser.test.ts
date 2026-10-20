@@ -55,10 +55,10 @@ it('checks return links, maintenance recovery and escaped ticket previews in Chr
       if (id.startsWith('\0c6b:')) return mocks[id.slice('\0c6b:'.length)];
       if (id === fixtureId) return `
         import React from 'react'; import {createRoot} from 'react-dom/client';
-        import Library from '@/app/app/library/page';
-        import Search from '@/app/app/workbench/search/page';
-        import Marketplace from '@/app/app/workbench/marketplace/page';
-        import Maintenance from '@/app/maintenance/page';
+        import Library from '@/app/(zh-hans)/app/library/page';
+        import Search from '@/app/(zh-hans)/app/workbench/search/page';
+        import Marketplace from '@/app/(zh-hans)/app/workbench/marketplace/page';
+        import Maintenance from '@/app/(zh-hans)/maintenance/page';
         import Tickets from '@/components/profile/TicketsPanel';
         const pages = {'/app/library': Library, '/app/workbench/search': Search,
           '/app/workbench/marketplace': Marketplace, '/maintenance': Maintenance};

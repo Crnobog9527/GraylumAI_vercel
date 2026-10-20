@@ -42,6 +42,9 @@ const reportOnlyCsp = [
 
 const nextConfig: NextConfig = {
   devIndicators: false,
+  // One root layout per language (app/(zh-hans), app/zh-tw): an address that matches no route is answered by
+  // app/global-not-found.tsx, since no single layout covers it.
+  experimental: { globalNotFound: true },
   // Single host (E1): old addresses and, once switched on, the old hosts. The rules and why are in
   // src/lib/single-host-redirects; the host rules come first so an old host goes to www in one step.
   async redirects() {

@@ -4,37 +4,37 @@
       "count": 1
     }
   },
-  "src/app/admin/announcements/page.tsx": {
+  "src/app/(zh-hans)/admin/announcements/page.tsx": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "src/app/admin/costs/page.tsx": {
+  "src/app/(zh-hans)/admin/costs/page.tsx": {
     "@typescript-eslint/no-unused-vars": {
       "count": 5
     }
   },
-  "src/app/admin/diagnostics/page.tsx": {
+  "src/app/(zh-hans)/admin/diagnostics/page.tsx": {
     "@typescript-eslint/no-unused-vars": {
       "count": 3
     }
   },
-  "src/app/admin/page.tsx": {
+  "src/app/(zh-hans)/admin/page.tsx": {
     "@typescript-eslint/no-unused-vars": {
       "count": 3
     }
   },
-  "src/app/admin/performance/page.tsx": {
+  "src/app/(zh-hans)/admin/performance/page.tsx": {
     "@typescript-eslint/no-unused-vars": {
       "count": 2
     }
   },
-  "src/app/admin/skills/page.test.tsx": {
+  "src/app/(zh-hans)/admin/skills/page.test.tsx": {
     "@typescript-eslint/no-explicit-any": {
       "count": 2
     }
   },
-  "src/app/admin/transactions/page.tsx": {
+  "src/app/(zh-hans)/admin/transactions/page.tsx": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
@@ -49,17 +49,17 @@
       "count": 1
     }
   },
-  "src/app/auth/callback/route.ts": {
+  "src/app/(zh-hans)/auth/callback/route.ts": {
     "prefer-const": {
       "count": 1
     }
   },
-  "src/app/login/page.tsx": {
+  "src/app/(zh-hans)/login/page.tsx": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     }
   },
-  "src/app/app/marketplace/page.tsx": {
+  "src/app/(zh-hans)/app/marketplace/page.tsx": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     },
@@ -67,7 +67,7 @@
       "count": 1
     }
   },
-  "src/app/app/positioning/[draftId]/page.tsx": {
+  "src/app/(zh-hans)/app/positioning/[draftId]/page.tsx": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     },
@@ -78,22 +78,22 @@
       "count": 4
     }
   },
-  "src/app/app/positioning/[draftId]/topics/page.tsx": {
+  "src/app/(zh-hans)/app/positioning/[draftId]/topics/page.tsx": {
     "react-hooks/exhaustive-deps": {
       "count": 1
     }
   },
-  "src/app/app/positioning/page.tsx": {
+  "src/app/(zh-hans)/app/positioning/page.tsx": {
     "react-hooks/exhaustive-deps": {
       "count": 1
     }
   },
-  "src/app/app/profile/page.tsx": {
+  "src/app/(zh-hans)/app/profile/page.tsx": {
     "@typescript-eslint/no-explicit-any": {
       "count": 3
     }
   },
-  "src/app/app/runtime/page.tsx": {
+  "src/app/(zh-hans)/app/runtime/page.tsx": {
     "react-hooks/exhaustive-deps": {
       "count": 2
     }
