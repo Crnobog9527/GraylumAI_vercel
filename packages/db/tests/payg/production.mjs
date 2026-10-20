@@ -28,10 +28,11 @@ async function productionFixture(db,profiles,options={}) {
   if (!options.actor) await db.query(`INSERT INTO credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,
     idempotency_key,balance_before,balance_after) VALUES($1,$2::int,'addition','grant','opening_grant','system',$3,0,$2::int)`,
   [actor,credits,'opening_grant:'+actor]);
-  const modelId=randomUUID(),model='prod-local/'+modelId.slice(0,8),key='sk-local-'+modelId,pricingHash='a'.repeat(64);
-  await db.query(`INSERT INTO ai_models(id,model_id,name,provider,is_active,api_key,config,price_multiplier)
-    VALUES($1,$2,'Production local','openrouter',true,$3,$4,$5)`,
-  [modelId,model,key,{pricing:{pricingHash}},options.modelMultiplier??null]);
+  const modelId=randomUUID(),model='prod-local/'+modelId.slice(0,8),pricingHash='a'.repeat(64);
+  const key='local-only-synthetic-openrouter-key';
+  await db.query(`INSERT INTO ai_models(id,model_id,name,provider,is_active,config,price_multiplier)
+    VALUES($1,$2,'Production local','openrouter',true,$3,$4)`,
+  [modelId,model,{pricing:{pricingHash}},options.modelMultiplier??null]);
   profiles.push({model,endpointTag:TAG});
   const draft=await rpc(db,'bill2_create_draft',actor);
   const nominalPricing={version:'nominal-v1',pricingHash,endpointTag:TAG,

@@ -199,7 +199,7 @@ See [admin operations](runbooks/ADMIN_OPERATIONS.md) for API inputs, failure han
 | `NEXT_PUBLIC_SUPABASE_URL` | Yes | Supabase project URL |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Yes | Supabase anonymous key |
 | `SUPABASE_SERVICE_ROLE_KEY` | Yes | Supabase service role key |
-| `OPENROUTER_API_KEY` | For OpenRouter models | Server-side provider credential; official Anthropic key is retired |
+| Supabase Vault | For provider integrations | Admin-managed credentials, read server-side through platform secret slots |
 | `NEXT_PUBLIC_SENTRY_DSN` | No | Sentry error tracking |
 
 ## Monitoring & Observability

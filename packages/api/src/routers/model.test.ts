@@ -418,7 +418,7 @@ describe('modelRouter error sanitization', () => {
     });
   });
 
-  it('does not expose api_key values in admin model payloads', async () => {
+  it('keeps internal model prices out of admin model payloads', async () => {
     const supabase = {
       from(table: string) {
         if (table === 'profiles') {
@@ -449,7 +449,6 @@ describe('modelRouter error sanitization', () => {
                     name: 'Model 1', provider: 'openai', model_id: 'qwen/qwen3.8-27b', api_endpoint: '', token_counting_supported: 'false',
                     model_id: 'gpt-4o',
                     provider: 'openai',
-                    api_key: 'sk-test',
                     api_endpoint: 'https://openrouter.ai/api/v1/chat/completions',
                     description: '',
                     max_tokens: 4096,
@@ -483,7 +482,6 @@ describe('modelRouter error sanitization', () => {
     const result = await caller.getAvailableModels();
 
     expect(result).toHaveLength(1);
-    expect(result[0]).not.toHaveProperty('api_key');
     for (const field of ['input_token_cost', 'output_token_cost', 'input_token_cost_above_200k',
       'output_token_cost_above_200k', 'web_search_cost']) expect(result[0]).not.toHaveProperty(field);
   });
@@ -617,8 +615,6 @@ describe('modelRouter error sanitization', () => {
 
     expect(result.models).toHaveLength(2);
     expect(result.models.every(model => model.token_counting_supported === 'true' && model.token_counting_method === 'provider_usage')).toBe(true);
-    expect(result.models[0]).not.toHaveProperty('api_key');
-    expect(result.models[1]).not.toHaveProperty('api_key');
     expect(result.connectionStatus).toEqual([
       expect.objectContaining({
         id: 'model-1',

@@ -409,9 +409,9 @@ const readinessCountsQuery = `
         or key ilike '%price%'
         or key ilike '%token%'
     ) as billing_related_system_settings,
-    (select count(*)::int from public.ai_models where api_key is not null) as ai_models_with_api_key
+    (select count(*)::int from jsonb_array_elements(coalesce(public.platform_secret_status(), '[]'::jsonb)) as status(value)
+      where status.value->>'configured' = 'true') as platform_secrets_configured
 `;
-
 function summarizeFunctions(rows) {
   return rows.map((row) => ({
     name: row.target,
@@ -668,7 +668,7 @@ function printHumanReport(report) {
   writeStdout(`- active credit_packages: ${report.database.counts.active_credit_packages}`);
   writeStdout(`- system_settings: ${report.database.counts.system_settings}`);
   writeStdout(`- billing-related system_settings: ${report.database.counts.billing_related_system_settings}`);
-  writeStdout(`- ai_models rows with api_key non-null: ${report.database.counts.ai_models_with_api_key}`);
+  writeStdout(`- configured platform secrets: ${report.database.counts.platform_secrets_configured}`);
   writeStdout('');
   writeStdout('Readiness result');
   writeStdout(`- ${report.ready ? 'PASS' : 'GAPS_FOUND'}`);

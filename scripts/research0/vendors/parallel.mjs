@@ -11,7 +11,7 @@ const LIST_USD = 0.005;
 export const parallel = {
   id: 'parallel',
   label: 'Parallel',
-  keyEnv: 'PARALLEL_API_KEY',
+  keyEnv: 'RESEARCH0_PARALLEL_KEY',
   // 20 rejected calls (401), 5 more (402 no credit) before the stop rule; 15 queries remain to test.
   maxCalls: 40,
   maxUsd: 1,

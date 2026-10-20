@@ -21,7 +21,7 @@ beforeAll(async () => {
         if (id.endsWith('/trpc/client')) return `
           import {useState} from 'react';
           const slots=['firecrawl','tikhub'].map(slot=>({slot,configured:false,last4:null,revision:0,
-            updatedAt:null,updatedByEmail:null,envFallback:null,source:'none'}));
+            updatedAt:null,updatedByEmail:null,source:'none'}));
           window.calls=[];
           const mutateAsync=input=>new Promise((resolve,reject)=>{
             window.calls.push(input.slot);

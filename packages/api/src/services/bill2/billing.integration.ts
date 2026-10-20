@@ -698,15 +698,16 @@ it('BILL2: production mode bills a v2 run only on a database marked production, 
   const actor=randomUUID();await q('insert into profiles(id,credits) values($1,100)',[actor]);
   await q(`insert into credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,idempotency_key,balance_before,balance_after)
    values($1,100,'addition','grant','opening_grant','system',$2,0,100)`,[actor,'opening_grant:'+actor]);
-  const id=randomUUID(),model='prod-ci/'+id.slice(0,8),key='sk-ci-'+id,pricingHash='a'.repeat(64),tag='ci/route',policy='prod-ci-v1';
-  await q(`insert into ai_models(id,model_id,name,provider,is_active,api_key,config) values($1,$2,'CI','openrouter','true',$3,$4)`,
-   [id,model,key,{pricing:{pricingHash}}]);
+  const id=randomUUID(),model='prod-ci/'+id.slice(0,8),pricingHash='a'.repeat(64),tag='ci/route',policy='prod-ci-v1';
+  await q(`insert into ai_models(id,model_id,name,provider,is_active,config) values($1,$2,'CI','openrouter','true',$3)`,
+   [id,model,{pricing:{pricingHash}}]);
   await set('runtime_payg_production',{version:1,enabled:true,policyVersion:policy,profiles:[{model,endpointTag:tag}]});
   await set('billing_credits_per_usd','100');await set('billing_token_price_multiplier','6');
   await set('billing_payg_start_thresholds',{version:'ci',thresholds:[{model,purpose:'question',credits:1}]});
   const draft=(await q('select public.bill2_create_draft($1) v',[actor])).rows[0].v;
   const nominalPricing={version:'nominal-v1',pricingHash,endpointTag:tag,tiers:[{minPromptTokens:0,prompt:'1',completion:'0',request:'0'}],timeOfDay:[]};
   const identity={policyId:policy,profileVersion:'ci',evidenceVersion:'ci',pricingHash,endpointTag:tag,nominalPricing,templateTokens:4096,marginTokens:4096};
+  const key='synthetic-openrouter-key-for-ci';
   const deadline=new Date(Date.now()+3600000).toISOString();
   const base={provider:'openrouter',account:'openrouter-key:'+hash(key),model,protocol:'openrouter-chat-v1' as const,upperUsd:'0.008292000000',
    inputLimit:8292,outputLimit:1000,automaticRetry:false as const,hiddenTools:false as const,lookupSupported:false,

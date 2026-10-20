@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { logger } from '../../lib/logger';
-import { PLATFORM_SECRET_ENV_FALLBACK, type PlatformSecretSlot } from './slots';
+import type { PlatformSecretSlot } from './slots';
 
 export const PLATFORM_SECRET_CACHE_MS = 60_000;
 export const PLATFORM_SECRET_READ_TIMEOUT_MS = 1_000;
@@ -16,10 +16,9 @@ export class PlatformSecretError extends Error {
 
 export interface PlatformSecret {
   value: string;
-  source: 'admin' | 'env';
+  source: 'admin';
 }
 export interface PlatformSecretDeps {
-  env?: Record<string, string | undefined>;
   now?: () => number;
   timeoutMs?: number;
   /** Read the database now, ignoring and not touching the per-instance cache. For paths that authorize a paid
@@ -89,20 +88,12 @@ async function storedValue(admin: RpcClient, slot: PlatformSecretSlot, deps: Pla
 }
 
 /**
- * The key a server-side caller should use. Admin value first; during the transition, an allowed
- * environment variable when the admin has not filled the slot. A database failure is an error,
- * never a silent switch to another key. The value must not be logged, returned or persisted.
+ * The key a server-side caller should use. The admin Vault is the only source. A database failure
+ * is an error, never a silent switch to another key. The value must not be logged, returned or persisted.
  */
 export async function getPlatformSecret(admin: RpcClient, slot: PlatformSecretSlot,
   deps: PlatformSecretDeps = {}): Promise<PlatformSecret> {
   const stored = await storedValue(admin, slot, deps);
   if (stored) return { value: stored, source: 'admin' };
-  const fromEnv = envFallbackValue(slot, deps.env ?? process.env);
-  if (fromEnv) return { value: fromEnv, source: 'env' };
   throw new PlatformSecretError('PLATFORM_SECRET_NOT_CONFIGURED', slot);
-}
-
-export function envFallbackValue(slot: PlatformSecretSlot, env: Record<string, string | undefined>) {
-  const name = PLATFORM_SECRET_ENV_FALLBACK[slot];
-  return name ? env[name]?.trim() || null : null;
 }

@@ -31,6 +31,8 @@ export interface ResearchExecution {
   reserve: number;
   /** Whether a BILL2 slot holds a research subcall of this answer (0267 call_kind='tool'), with or without a receipt. */
   isSubcall(sequence: number): Promise<boolean>;
+  /** Only this invocation's successful tool claims; replay still consults the database. */
+  claimedSubcall?(sequence: number): boolean;
 }
 
 export function researchExecution(input: {
@@ -61,8 +63,19 @@ export function researchExecution(input: {
   const scope = { userId: input.actorId, sessionId: execution.sessionId, executionId: input.executionId };
   const store = databaseRuntimeResearchStore({ admin: input.database, scope });
   const recorded = toolSubcallBilling({ admin: input.database, actorId: input.actorId, runId: execution.runId });
+  const claimedSubcalls = new Set<number>();
+  // Tools/subcalls are serial under the runtime owner epoch. Refresh at each tool boundary, because
+  // model calls share this sequence. SQL still checks every claim, budget, epoch and unsettled call.
+  let nextSequence: number | undefined;
   let closed = false;
-  const billing: typeof recorded = { ...recorded, async record(callId, evidence) {
+  const billing: typeof recorded = { ...recorded, async claim(sequence, payload) {
+    const claimed = await recorded.claim(sequence, payload);
+    if (claimed.state === 'claimed') {
+      claimedSubcalls.add(sequence);
+      nextSequence = sequence + 1;
+    }
+    return claimed;
+  }, async record(callId, evidence) {
     const saved = await recorded.record(callId, evidence);
     if (saved.accountClosed || saved.contentDeleted) { closed = true; input.onClosed(); }
     return saved;
@@ -77,7 +90,7 @@ export function researchExecution(input: {
       billing: execution.live ? billing : { ...billing, claim: async () => { throw new Error('RUNTIME_RESPONSE_PENDING'); } },
       evidence: store.evidence(),
       // Claims on a run are serial (one owner, no unsettled call), so the next free slot is the count plus one.
-      nextSequence: async () => (await readCalls()).length + 1,
+      nextSequence: async () => nextSequence ??= (await readCalls()).length + 1,
       phase: research.phase, ...(execution.epoch !== undefined ? { runtimeEpoch: execution.epoch } : {}),
       secrets: platformSecretReader(input.database), rateCounter: checkVendorRateLimit,
       // A recovery replay cannot create a supplier request or BILL2 claim, so it must not consume live quota.
@@ -97,11 +110,13 @@ export function researchExecution(input: {
         if (error instanceof ResearchPause && !closed) input.onPause(error.point, error.state);
         throw error;
       }
+      finally { nextSequence = undefined; }
       if (closed) throw new Error('RUNTIME_ACCOUNT_CLOSED');
       input.onSubcallSettled?.();
       return result;
     } })),
     definitionBytes: researchToolBytes(names, fastSearchOnly(ctx.config)), reserve: research.reserve,
+    claimedSubcall: sequence => claimedSubcalls.has(sequence),
     async isSubcall(sequence) {
       const call = (await readCalls()).find(item => item.sequence === sequence);
       if (!call) return false;
@@ -121,8 +136,11 @@ export function researchExecution(input: {
  * response, and SQL still refuses a new claim while any call is unsettled. Any other conflict still fails.
  */
 export async function responseAfterResearch<T>(respond: (sequence: number) => Promise<T>, start: number,
-  research: Pick<ResearchExecution, 'isSubcall'> | null, maxCalls: number): Promise<{ sequence: number; existing: T }> {
+  research: Pick<ResearchExecution, 'isSubcall' | 'claimedSubcall'> | null, maxCalls: number): Promise<{ sequence: number; existing: T }> {
   for (let sequence = start; ; sequence++) {
+    // Avoid manufacturing a response conflict for a tool slot we just claimed ourselves. A new
+    // invocation has no such knowledge and follows the original scoped database recovery below.
+    if (sequence < maxCalls && research?.claimedSubcall?.(sequence)) continue;
     try { return { sequence, existing: await respond(sequence) }; }
     catch (error) {
       if (!research || sequence >= maxCalls || !(error instanceof Error) || error.message !== 'RUNTIME_RESPONSE_CONFLICT'

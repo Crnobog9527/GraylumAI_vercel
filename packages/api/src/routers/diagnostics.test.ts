@@ -8,7 +8,7 @@ const diagnosticsServiceState = vi.hoisted(() => ({
   getSummaryStats: vi.fn(),
 }));
 
-// ADMIN-SECRETS OR-1: the health check asks whether the platform OpenRouter key is filled in.
+// ADMIN-SECRETS OR-1: the health check asks whether the platform OpenRouter Vault slot is filled in.
 const platformKey = vi.hoisted(() => ({ state: 'configured' as 'configured' | 'missing' | 'unavailable' }));
 vi.mock('../services/models/openRouterKey', () => ({
   openRouterKeyConfigured: async () => {
@@ -86,7 +86,7 @@ function createRecentRunsQueryBuilder(result: Promise<unknown>) {
 function createHealthQueryBuilder(result: Promise<unknown>, admin = false) {
   return {
     select(columns: string) {
-      if (!admin && (columns.includes('api_key') || columns === '*')) throw new Error('42501');
+      if (!admin && columns === '*') throw new Error('42501');
       return this;
     },
     eq() {
@@ -113,9 +113,7 @@ function createAdminCaller(options?: {
   cleanupResult?: { count: number | null; error: unknown };
   profilesResult?: { data: unknown; error: unknown };
   aiModelsResult?: { data: unknown; error: unknown };
-  aiModelsKeyResult?: { data: unknown; error: unknown };
 }) {
-  let aiModelsCallCount = 0;
   let profileCallCount = 0;
   const userScopedSupabase = {
     from(table: string) {
@@ -139,10 +137,7 @@ function createAdminCaller(options?: {
       }
 
       if (table === 'ai_models') {
-        aiModelsCallCount += 1;
-        const result = aiModelsCallCount === 1
-          ? (options?.aiModelsResult ?? { data: [{ id: 'model-1' }], error: null })
-          : (options?.aiModelsKeyResult ?? { data: [{ api_key: 'secret' }], error: null });
+        const result = options?.aiModelsResult ?? { data: [{ id: 'model-1' }], error: null };
         return createHealthQueryBuilder(Promise.resolve(result));
       }
 
@@ -152,8 +147,6 @@ function createAdminCaller(options?: {
 
   const adminSupabase = {
     from(table: string) {
-      if (table === 'ai_models') return createHealthQueryBuilder(Promise.resolve(
-        options?.aiModelsKeyResult ?? { data: [{ api_key: 'synthetic' }], error: null }), true);
       if (table === 'diagnostic_results') {
         // cleanupOldResults deletes directly; the 0005 cleanup RPC is absent on staging.
         const result = options?.cleanupResult ?? { count: 0, error: null };
@@ -197,9 +190,7 @@ function createAdminCaller(options?: {
 function createAdminHealthCaller(options?: {
   profilesResult?: { data: unknown; error: unknown };
   aiModelsResult?: { data: unknown; error: unknown };
-  aiModelsKeyResult?: { data: unknown; error: unknown };
 }) {
-  let aiModelsCallCount = 0;
   let profileCallCount = 0;
   const authSupabase = {
     from(table: string) {
@@ -223,10 +214,7 @@ function createAdminHealthCaller(options?: {
       }
 
       if (table === 'ai_models') {
-        aiModelsCallCount += 1;
-        const result = aiModelsCallCount === 1
-          ? (options?.aiModelsResult ?? { data: [{ id: 'model-1' }], error: null })
-          : (options?.aiModelsKeyResult ?? { data: [{ api_key: 'secret' }], error: null });
+        const result = options?.aiModelsResult ?? { data: [{ id: 'model-1' }], error: null };
         return createHealthQueryBuilder(Promise.resolve(result));
       }
 
@@ -236,8 +224,6 @@ function createAdminHealthCaller(options?: {
 
   const adminSupabase = {
     from(table: string) {
-      if (table === 'ai_models') return createHealthQueryBuilder(Promise.resolve(
-        options?.aiModelsKeyResult ?? { data: [{ api_key: 'synthetic' }], error: null }), true);
       throw new Error(`Unexpected admin table ${table}`);
     },
   };
