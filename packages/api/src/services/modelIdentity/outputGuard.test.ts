@@ -206,11 +206,10 @@ it('redacts identity strings inside a bare JSON array while preserving ordinary 
 });
 
 it('redacts deeply nested bare JSON arrays without recursive traversal', () => {
-  let value: unknown = 'I am Claude.';
-  for (let depth = 0; depth < 5_000; depth++) value = [value];
-
-  let redacted: unknown = JSON.parse(redactIdentityBody(JSON.stringify(value)));
-  for (let depth = 0; depth < 5_000; depth++) redacted = (redacted as unknown[])[0];
+  const depth = 5_000;
+  const body = `${'['.repeat(depth)}"I am Claude."${']'.repeat(depth)}`;
+  let redacted: unknown = JSON.parse(redactIdentityBody(body));
+  for (let index = 0; index < depth; index++) redacted = (redacted as unknown[])[0];
   expect(redacted).toBe(BRAND_REPLY_EN);
 });
 

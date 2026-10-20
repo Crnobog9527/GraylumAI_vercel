@@ -146,7 +146,7 @@ export function redactIdentityBody(body: string) {
   if (Array.isArray(value)) {
     const redacted = redactIdentityStringsResult(value);
     if (!redacted.changed) return body;
-    try { return JSON.stringify(redacted.value) ?? body; } catch { return body; }
+    try { return stringifyJsonIterative(redacted.value); } catch { return body; }
   }
   if (!value || typeof value !== 'object') return body;
   const record = value as Record<string, unknown>;
@@ -207,6 +207,39 @@ function redactIdentityStringsResult<T>(value: T) {
     }
   }
   return { value: result as T, changed };
+}
+
+/** Serialize JSON trees with an explicit stack so deep model arrays do not overflow the JS call stack. */
+function stringifyJsonIterative(value: unknown) {
+  const output: string[] = [];
+  const pending: Array<string | { value: unknown }> = [{ value }];
+  while (pending.length) {
+    const item = pending.pop()!;
+    if (typeof item === 'string') { output.push(item); continue; }
+    const current = item.value;
+    if (Array.isArray(current)) {
+      output.push('[');
+      pending.push(']');
+      for (let index = current.length - 1; index >= 0; index--) {
+        pending.push({ value: current[index] });
+        if (index > 0) pending.push(',');
+      }
+    } else if (current && typeof current === 'object') {
+      const entries = Object.entries(current);
+      output.push('{');
+      pending.push('}');
+      for (let index = entries.length - 1; index >= 0; index--) {
+        const [key, entryValue] = entries[index];
+        pending.push({ value: entryValue }, ':', JSON.stringify(key));
+        if (index > 0) pending.push(',');
+      }
+    } else {
+      const serialized = JSON.stringify(current);
+      if (serialized === undefined) throw new TypeError('Value is not JSON serializable');
+      output.push(serialized);
+    }
+  }
+  return output.join('');
 }
 
 export function redactIdentityStrings<T>(value: T): T {
