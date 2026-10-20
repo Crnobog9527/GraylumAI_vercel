@@ -12,7 +12,8 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { modelLabel } from './reportModelView';
 import {
-  affectsRunning, allSkills, countRunning, draftProblems, PRICE_LIMITS, REVIEW_PAGE, SEAT_CODES, settingsErrorText, TOKEN_LIMITS, toSaved,
+  affectsRunning, allSkills, countRunning, draftProblems, PRICE_LIMITS, REVIEW_PAGE, ROLE_CODES, ROLE_LABELS, SEAT_CODES,
+  settingsErrorText, TOKEN_LIMITS, toSaved,
   warningText,
   type FusionSettingsValue, type ReviewSettings,
 } from './fusionReviewSettingsView';
@@ -132,6 +133,17 @@ function ReviewForm({ saved, onSaved, notice, setNotice }: {
             <Label htmlFor={`fusion-model-${seat}`}>模型</Label>
             {modelSelect(`fusion-model-${seat}`, review.reviewerModelIds[index] ?? '', id => set({
               reviewerModelIds: review.reviewerModelIds.map((item, at) => (at === index ? id : item)) }), reviewers)}
+            <Label htmlFor={`fusion-role-${seat}`}>视角（跟着模型走）</Label>
+            <select id={`fusion-role-${seat}`} className={selectClass} style={selectStyle} disabled={!review.reviewerModelIds[index]}
+              value={review.reviewerRoles[review.reviewerModelIds[index] ?? ''] ?? ''} onChange={event => {
+                const id = review.reviewerModelIds[index] ?? '';
+                const rest = Object.fromEntries(Object.entries(review.reviewerRoles).filter(([key]) => key !== id));
+                const role = event.target.value as (typeof ROLE_CODES)[number] | '';
+                set({ reviewerRoles: role ? { ...rest, [id]: role } : rest });
+              }}>
+              <option value="">不指定</option>
+              {ROLE_CODES.map(code => <option key={code} value={code}>{ROLE_LABELS[code]}</option>)}
+            </select>
           </div>
         ))}
         <div className="space-y-1.5 rounded-md border p-3" style={{ borderColor: 'var(--border-primary)' }}>

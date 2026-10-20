@@ -12,7 +12,12 @@ export const NAME_MAX = 20;
 export const PRICE_LIMITS = { min: 1, max: 999999 } as const;
 export const TOKEN_LIMITS = { opinion: { min: 512, max: 32768 }, summary: { min: 1024, max: 32768 } } as const;
 
+/** The fixed seat angles (Owner 2026-10-20), in plain words; stored by model id so an angle follows its model. */
+export const ROLE_LABELS = { finance: '算账（数字算不算得通）', evidence: '证据和对标（事实有没有来源）', execution: '用户做不做得到（时间、出镜、预算）' } as const;
+export const ROLE_CODES = Object.keys(ROLE_LABELS) as Array<keyof typeof ROLE_LABELS>;
+
 const ERRORS: Record<string, string> = {
+  FUSION_REVIEWER_ROLES_INVALID: '三位评审的视角要么都不选，要么各选一个不同的。',
   FUSION_REVIEW_INCOMPLETE: '开启评审团前，要选好 3 位评审的模型、汇总模型、评审 Skill，并填写单次评审平台成本保护线。',
   FUSION_REVIEWERS_DUPLICATE: '3 位评审要用 3 个不同的模型。',
   FUSION_REVIEW_CALLS_EXCEEDED: '轮数和评审人数加起来超过单次评审的调用上限。',
@@ -44,6 +49,9 @@ export function draftProblems(review: ReviewSettings): string[] {
   if (names.some(name => { const length = [...name.trim()].length; return length < 1 || length > NAME_MAX; })) problems.push(ERRORS.FUSION_PANEL_NAME_INVALID);
   const picked = review.reviewerModelIds.filter(Boolean);
   if (new Set(picked).size !== picked.length) problems.push(ERRORS.FUSION_REVIEWERS_DUPLICATE);
+  const chosen = picked.map(id => review.reviewerRoles[id]).filter(Boolean);
+  const badRoles = chosen.length !== picked.length || new Set(chosen).size !== chosen.length;
+  if (Object.keys(review.reviewerRoles).length && badRoles) problems.push(ERRORS.FUSION_REVIEWER_ROLES_INVALID);
   const tokens = (value: number, limit: { min: number; max: number }) => Number.isInteger(value) && value >= limit.min && value <= limit.max;
   if (!tokens(review.opinionOutputTokens, TOKEN_LIMITS.opinion)) {
     problems.push(`每位评审的意见长度要在 ${TOKEN_LIMITS.opinion.min}–${TOKEN_LIMITS.opinion.max} 之间。`);
@@ -67,7 +75,9 @@ export function draftProblems(review: ReviewSettings): string[] {
 
 /** The saved value with the form's text trimmed and empty seats dropped, as the server expects. */
 export function toSaved(value: FusionSettingsValue, review: ReviewSettings): FusionSettingsValue {
-  return { ...value, review: { ...review, reviewerModelIds: review.reviewerModelIds.filter(Boolean),
+  const ids = review.reviewerModelIds.filter(Boolean);
+  return { ...value, review: { ...review, reviewerModelIds: ids,
+    reviewerRoles: Object.fromEntries(Object.entries(review.reviewerRoles).filter(([id]) => ids.includes(id))),
     maxBudgetUsd: review.maxBudgetUsd?.trim() ? review.maxBudgetUsd.trim() : null,
     displayNames: { reviewers: review.displayNames.reviewers.map(name => name.trim()), summary: review.displayNames.summary.trim() } } };
 }

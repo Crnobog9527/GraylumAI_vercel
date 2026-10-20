@@ -2,6 +2,7 @@
 import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { adminProcedure, router } from '../trpc';
+import { adminEvidence } from '../services/fusion/reviewEvidenceFlow';
 import { fusionSettings } from '../services/fusion/settings';
 import { fusionModelOptions, fusionSettingsView, saveFusionSettings } from '../services/fusion/settingsAdmin';
 
@@ -35,7 +36,12 @@ export const fusionSettingsRouter = router({
     const result = await ctx.supabase.rpc('fusion_review_admin_read', { p_review_id: input.reviewId });
     if (result.error) throw new Error('FUSION_SETTINGS_UNAVAILABLE');
     if (!result.data) throw new Error('FUSION_REVIEW_NOT_FOUND');
-    return result.data as Record<string, unknown>;
+    const raw = result.data as Record<string, unknown>;
+    // Reviews started with the evidence check also show what the host held back (by reason) and the thin rulings.
+    if ((raw.config as { evidence?: boolean } | null)?.evidence !== true) return raw;
+    const source = await ctx.supabase.rpc('fusion_review_source', { p_actor_id: String(raw.actorId), p_review_id: input.reviewId });
+    const parsed = z.object({ body: z.string(), sections: z.array(z.string()) }).safeParse(source.data);
+    return source.error || !parsed.success ? raw : adminEvidence(raw, parsed.data);
   })),
   /** Unblocks a version stopped by "3 failures in a row": marks its counted failures as not counting, with a
    * reason; nothing is deleted and the marking (who, when, why, which reviews) stays on the records. */
