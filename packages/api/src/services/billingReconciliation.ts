@@ -9,6 +9,7 @@ import {
   normalizePaymentOrderStatus,
 } from './paymentOrderStatus';
 import { getDueAnnualGrantPeriods } from './subscriptionCreditGrants';
+import { readDailyBillingCreditSources } from './dailyBillingCreditSources';
 
 export interface BillingReconciliationSummary {
   successfulAiRequests: number;
@@ -22,6 +23,8 @@ export interface BillingReconciliationSummary {
   webSearchCount: number;
   researchSettledCredits?: number;
   researchSettledCount?: number;
+  reportFixedPriceCredits?: number;
+  fusionReviewFixedPriceCredits?: number;
 }
 
 export interface BillingReconciliationResult {
@@ -1790,8 +1793,7 @@ export async function runDailyBillingReconciliation(
     Date.parse(end),
   )).toISOString();
 
-  const [tokenStatsResult, aiUsageResult, billingHistoryResult, creditTransactionsResult, paymentOrdersResult, researchResult] =
-    await Promise.all([
+  const [tokenStatsResult, aiUsageResult, paymentOrdersResult, creditSources] = await Promise.all([
       supabase
         .from('token_stats')
         .select('total_credits, web_search_count, created_at')
@@ -1804,43 +1806,27 @@ export async function runDailyBillingReconciliation(
         .gte('created_at', enforcementStart)
         .lt('created_at', end),
       supabase
-        .from('billing_history')
-        .select('operation_type, amount, created_at')
-        .gte('created_at', enforcementStart)
-        .lt('created_at', end),
-      supabase
-        .from('credit_transactions')
-        .select('amount, type, ledger_type, reason_code, counts_as_spend, source_type, description, idempotency_key, created_at')
-        .gte('created_at', enforcementStart)
-        .lt('created_at', end),
-      supabase
         .from('payment_orders')
         .select('status, amount_total, created_at')
         .gte('created_at', enforcementStart)
         .lt('created_at', end),
-      supabase.rpc('research_billing_summary',{p_start:enforcementStart,p_end:end}),
+      readDailyBillingCreditSources(supabase, enforcementStart, end),
     ]);
 
-  if (researchResult.error) throw researchResult.error;
-  const research = researchResult.data as {count:number;credits:number}|null;
-  if (!research || !Number.isSafeInteger(research.count) || research.count<0 || !Number.isSafeInteger(research.credits) || research.credits<0) throw new Error('Invalid research reconciliation totals');
   if (tokenStatsResult.error) throw tokenStatsResult.error;
   if (aiUsageResult.error) throw aiUsageResult.error;
-  if (billingHistoryResult.error) throw billingHistoryResult.error;
-  if (creditTransactionsResult.error) throw creditTransactionsResult.error;
   if (paymentOrdersResult.error) throw paymentOrdersResult.error;
 
   const tokenStats = tokenStatsResult.data ?? [];
   const aiUsageLogs = aiUsageResult.data ?? [];
-  const billingHistory = billingHistoryResult.data ?? [];
-  const creditTransactions = creditTransactionsResult.data ?? [];
+  const { billingHistory, creditTransactions, research, reportFixedPriceCredits, fusionReviewFixedPriceCredits } = creditSources;
   const paymentOrders = paymentOrdersResult.data ?? [];
 
   const successfulAiRequests = aiUsageLogs.length;
   const tokenStatsCount = tokenStats.length;
   const tokenStatsCredits = sumInteger(tokenStats.map((row) => row.total_credits ?? 0));
   const webSearchCount = sumInteger(tokenStats.map((row) => row.web_search_count ?? 0)) + research.count;
-  const accountedCredits=tokenStatsCredits+research.credits;
+  const accountedCredits=tokenStatsCredits+research.credits+reportFixedPriceCredits+fusionReviewFixedPriceCredits;
 
   const settledCredits = Math.abs(sumInteger(
     billingHistory
@@ -1873,6 +1859,8 @@ export async function runDailyBillingReconciliation(
     webSearchCount,
     researchSettledCount:research.count,
     researchSettledCredits:research.credits,
+    reportFixedPriceCredits,
+    fusionReviewFixedPriceCredits,
   };
 
   const mismatches: string[] = [];
@@ -1880,10 +1868,10 @@ export async function runDailyBillingReconciliation(
     mismatches.push(`AI success logs (${successfulAiRequests}) do not match token stats rows (${tokenStatsCount})`);
   }
   if (settledCredits !== accountedCredits) {
-    mismatches.push(`Billing settle credits (${settledCredits}) do not match token stats and research credits (${accountedCredits})`);
+    mismatches.push(`Billing settle credits (${settledCredits}) do not match token stats, research, and fixed price credits (${accountedCredits})`);
   }
   if (deductionCredits < accountedCredits) {
-    mismatches.push(`Credit deductions (${deductionCredits}) are lower than token stats and research credits (${accountedCredits})`);
+    mismatches.push(`Credit deductions (${deductionCredits}) are lower than token stats, research, and fixed price credits (${accountedCredits})`);
   }
   if (completedPaymentOrders.length > 0 && purchaseCredits <= 0) {
     mismatches.push(`Completed payment orders (${completedPaymentOrders.length}) have no matching purchase credits`);
