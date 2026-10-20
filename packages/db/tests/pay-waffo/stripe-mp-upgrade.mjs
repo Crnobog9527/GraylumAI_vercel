@@ -1,18 +1,19 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import {overlapCases} from '../stripe-upgrade-overlap/cases.mjs';
 
 /** PAY-STRIPE-MP step 4a (0251): Pro -> Gold upgrade of a renewing card subscription. */
-export async function stripeMpUpgradeCases({admin,service}) {
+export async function stripeMpUpgradeCases({admin,service,connect,proCycle='monthly'}) {
   const gold=(await admin.query("SELECT id FROM membership_plans WHERE level='gold'")).rows[0].id;
   const pro=(await admin.query(`INSERT INTO membership_plans(name,level,monthly_price,yearly_price,monthly_credits,yearly_credits,
     allow_fusion_review,allow_fusion_compare,library_storage_bytes) VALUES('Pro','pro',2900,27900,3480,41760,false,false,0)
     ON CONFLICT(level) DO UPDATE SET monthly_price=2900,yearly_price=27900,monthly_credits=3480,yearly_credits=41760 RETURNING id`)).rows[0].id;
   if(!(await admin.query(`SELECT 1 FROM payment_provider_refs WHERE channel='stripe' AND merchant_namespace='fixture' AND mode='test'
-    AND object_type='price' AND membership_plan_id=$1 AND billing_cycle='monthly' AND offer_kind='standard' AND price_usage='subscription'
-    AND is_current`,[pro])).rowCount) await admin.query(`INSERT INTO payment_provider_refs(channel,merchant_namespace,mode,object_type,
+    AND object_type='price' AND membership_plan_id=$1 AND billing_cycle=$2 AND offer_kind='standard' AND price_usage='subscription'
+    AND is_current`,[pro,proCycle])).rowCount) await admin.query(`INSERT INTO payment_provider_refs(channel,merchant_namespace,mode,object_type,
     external_id,membership_plan_id,billing_cycle,is_current,offer_kind,price_usage) VALUES('stripe','fixture','test','price',
-    'price_upgrade_pro_card',$1,'monthly',true,'standard','subscription')`,[pro]);
+    $3,$1,$2,true,'standard','subscription')`,[pro,proCycle,'price_upgrade_pro_card_'+proCycle]);
   const current=(await admin.query("SELECT value FROM system_settings WHERE key='payment_method_routes'")).rows[0].value;
   const version=current.version+1;
   await admin.query("UPDATE system_settings SET value=$1 WHERE key='payment_method_routes'",
@@ -29,9 +30,10 @@ export async function stripeMpUpgradeCases({admin,service}) {
     [o.id,'fixture',await bind(user,o,method),`in_${o.id}`,o.amount_total,'usd',new Date(),`sub_${o.id}`,start,end])).rows[0].v;
   // A renewing card Pro, paid a day ago for a calendar month: far from the 48-hour renewal cutoff.
   const user=randomUUID(); await admin.query('INSERT INTO profiles(id,credits) VALUES($1,0)',[user]);
-  const proOrder=(await service.query(`SELECT o.* FROM pay_waffo_create_purchase($1,'membership_plan',$2,'monthly','card','standard',
-    'fixture','test',$3,'terms-v1',$4) o`,[user,pro,version,terms('b1'.repeat(32))])).rows[0];
-  const start=new Date(Math.floor(Date.now()/1000)*1000-86400000),end=new Date(start);end.setUTCMonth(end.getUTCMonth()+1);
+  const proOrder=(await service.query(`SELECT o.* FROM pay_waffo_create_purchase($1,'membership_plan',$2,$5,'card','standard',
+    'fixture','test',$3,'terms-v1',$4) o`,[user,pro,version,terms('b1'.repeat(32)),proCycle])).rows[0];
+  const start=new Date(Math.floor(Date.now()/1000)*1000-86400000),end=new Date(start);
+  if(proCycle==='yearly') end.setUTCFullYear(end.getUTCFullYear()+1); else end.setUTCMonth(end.getUTCMonth()+1);
   await admin.query('UPDATE payment_orders SET created_at=$2 WHERE id=$1',[proOrder.id,new Date(start.getTime()-60000)]);
   const proPaid=await pay(user,proOrder,'card',start,end);
   assert.equal(proPaid.state,'fulfilled',JSON.stringify(proPaid));
@@ -52,6 +54,8 @@ export async function stripeMpUpgradeCases({admin,service}) {
   assert.ok((await admin.query('SELECT method_cancel_requested_at FROM user_subscriptions WHERE id=$1',[proSub])).rows[0].method_cancel_requested_at);
   // A Pro our record shows stopping is not observed as renewing, whatever Stripe said a moment ago.
   assert.equal((await observe()).rows[0].v,null);
+
+  const overlap=await overlapCases({admin,service,connect,user,proSub,goldSub:goldPaid.subscriptionId,goldOrder,proOrder,proCycle});
   await service.query(`SELECT pay_stripe_mp_sync_subscription($1,'fixture',true,false,false)`,[proSub]);
   assert.equal((await observe()).rows[0].v,null);
 
@@ -66,5 +70,5 @@ export async function stripeMpUpgradeCases({admin,service}) {
   await admin.query("UPDATE system_settings SET value=$1 WHERE key='payment_method_routes'",
     [{...current,card:{enabled:false},card_cn:{enabled:false},version:version+1}]);
   return ['stripe-mp-upgrade-needs-observation','stripe-mp-upgrade-observed-admitted','stripe-mp-upgrade-links-prior',
-    'stripe-mp-upgrade-marks-pro-stop','stripe-mp-upgrade-stopping-not-observed','stripe-mp-upgrade-observe-scope'];
+    'stripe-mp-upgrade-marks-pro-stop','stripe-mp-upgrade-stopping-not-observed','stripe-mp-upgrade-observe-scope',...overlap];
 }
