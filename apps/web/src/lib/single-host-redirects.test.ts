@@ -8,7 +8,7 @@ vi.mock('@sentry/nextjs', () => ({
     typeof config === 'function' ? config('phase-development-server', { defaultConfig: {} }) : config,
 }));
 import config from '../../next.config';
-import { SINGLE_HOST_REDIRECTS_ENV } from './single-host-redirects';
+import { buildLegacyHostRedirects, buildPathRedirects, SINGLE_HOST_REDIRECTS_ENV } from './single-host-redirects';
 
 // Next.js redirect rules do not depend on the request method; a 308 tells the client to repeat the same method
 // and body at the new address (RFC 9110 15.4.9), which is why the permanent rules use it.
@@ -69,6 +69,25 @@ describe('old addresses of the logged-in pages on every host (E1)', () => {
       expect((await visit(`https://www.graylum.com${path}`)).to).toBeNull();
     },
   );
+});
+
+// Vercel compiles these rules into its own router, where an empty ":path*" leaves a trailing slash and costs a
+// second 308 (#1206 validation, step 6). No rule may end its destination in a wildcard that can be empty.
+describe('redirect rules without empty wildcards', () => {
+  it('never uses ":path*" in a destination, so a folder address goes to its final page in one step', async () => {
+    vi.stubEnv(SINGLE_HOST_REDIRECTS_ENV, 'true');
+    const rules = [...buildLegacyHostRedirects('true'), ...buildPathRedirects()];
+    expect(rules.filter(rule => rule.destination.includes(':path*'))).toEqual([]);
+    for (const rule of rules) {
+      expect(rule.destination.endsWith('/') && rule.destination !== '/' && !rule.destination.endsWith('graylum.com/'),
+        rule.destination).toBe(false);
+    }
+  });
+
+  it.each(['/profile', '/positioning', '/library', '/workbench/search'])('has an exact rule for %s', path => {
+    const exact = buildPathRedirects().find(rule => rule.source === path || rule.source === `/${path.split('/')[1]}`);
+    expect(exact, path).toBeDefined();
+  });
 });
 
 describe('old production hosts', () => {
