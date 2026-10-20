@@ -36,10 +36,11 @@ const shown = (value: number | null | undefined, format: (value: number) => stri
 function benchmarkTable(data: SanitizedReportData["data"]): string[] {
   const accounts = (data.benchmarks?.accounts ?? []) as BenchmarkAccount[];
   if (!accounts.some(account => account.metrics)) return [];
-  return ["### 对标账号数据", "| 账号 | 平台 | 粉丝 | 中位播放 | 互动率 | 每周更新 |", "| --- | --- | --- | --- | --- | --- |",
+  // The table's rows stay on consecutive lines (the document joins its parts with blank lines).
+  return ["### 对标账号数据", ["| 账号 | 平台 | 粉丝 | 中位播放 | 互动率 | 每周更新 |", "| --- | --- | --- | --- | --- | --- |",
     ...accounts.map(account => "| " + [literal(account.account), literal(account.platform), shown(account.metrics?.followers),
       shown(account.metrics?.medianViews), shown(account.metrics?.engagementRate, value => `${number.format(value * 100)}%`),
-      shown(account.metrics?.weeklyPosts, value => `${number.format(value)} 次`)].join(" | ") + " |")];
+      shown(account.metrics?.weeklyPosts, value => `${number.format(value)} 次`)].join(" | ") + " |")].join("\n")];
 }
 
 export type ReportExportSource = {

@@ -41,6 +41,8 @@ describe("reportExportMarkdown", () => {
     expect(text).toContain("| 咖啡\\_店 | 抖音 | 1.2万 | 没查到 | 5.2% | 3 次 |".replace("1.2万", new Intl.NumberFormat("zh-CN",
       { maximumFractionDigits: 1 }).format(12345)));
     expect(text).toContain("报告文字被手动改过");
+    // A GFM table: header, delimiter and rows on consecutive lines (review P2, #1213).
+    expect(text).toMatch(/\| 账号 \| 平台 .*\|\n\| --- .*\|\n\| 咖啡/);
   });
   it("says the notes once under the title", () => {
     const text = reportExportMarkdown({ body, notes: ["这份报告的结构不完整，不能作为正式报告。"] });
