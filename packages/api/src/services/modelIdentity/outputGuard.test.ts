@@ -100,6 +100,7 @@ const SAFE = [
   'As a Google AI researcher, I share notes weekly.',
   // Review P2: a nearby source is not the maker
   'I am an AI assistant helping you analyze data from Google.',
+  'I am an AI assistant helping with your campaign\nData provided by Google shows growth.',
   'As an AI assistant, I pulled these recommendations from Google Trends.',
   BRAND_REPLY_ZH,
   BRAND_REPLY_ZH_HANT,

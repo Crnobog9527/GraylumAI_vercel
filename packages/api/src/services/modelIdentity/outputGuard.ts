@@ -14,7 +14,7 @@ const BRAND = String.raw`(?:claude|anthropic|chat\s?gpt|gpt(?:[-\s]?\d[\w.]*)?|o
 const ZH_GAP = '[^。！？!?.，,；;]';
 // Who made the speaker: maker wording ("trained by"), or "from" right after the model noun. A nearby
 // source ("analyze data from Google") is ordinary copy (review P2).
-const MAKER = String.raw`(?:[^.!?]{0,40}?\b(?:built|developed|trained|made|created|designed|powered|provided)\s+by|\s+from)`;
+const MAKER = String.raw`(?:[^.!?\n]{0,40}?\s*\b(?:built|developed|trained|made|created|designed|powered|provided)\s+by|\s+from)`;
 // The model noun must name the speaker: it ends the clause or continues with identity wording, so
 // "I am a Google AI researcher" or "a model photographer" stay ordinary copy (review P2).
 const ROLE_END = String.raw`\b(?=\s*(?:[,.!?;:]|$)|\s+(?:by|from|developed|trained|made|created|built|that|which|and|here)\b)`;
