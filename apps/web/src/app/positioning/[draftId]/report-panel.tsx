@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 "use client";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
@@ -9,8 +9,10 @@ import { profileTabHref } from "@/lib/profile-tabs";
 import { ReportPaywallDialog } from "@/components/paywall/ReportPaywallDialog";
 import resultStyles from "@/components/opc/positioning-result.module.css";
 import {
-  REPORT_ACTION, REPORT_INTRO, REPORT_TITLE, REPORT_WRITING_NOTICE, reportActionLabel, reportFeeText, reportView,
+  AUTO_OPEN_START, REPORT_ACTION, REPORT_ENTRY_RUNNING, REPORT_INTRO, REPORT_REOPENED_NOTICE, REPORT_TITLE, REPORT_WRITING_NOTICE,
+  reportActionLabel, reportAutoOpen, reportFeeText, reportUnfinished, reportView,
 } from "./report-gen";
+import { ReportExport } from "./report-export-button";
 import { useReportGen } from "./use-report-gen";
 import { useReportPaywallMemory } from "./report-paywall-memory";
 import { STOP_SAVING_NOTICE, STOP_UNCONFIRMED_NOTICE } from "./stop-reply";
@@ -57,13 +59,21 @@ function RoundReportEntry(props: Props) {
   // and coming back in this tab. A saved report of this round keeps its own dialog.
   const paywall = useReportPaywallMemory({ draftId: props.draftId, roundId: props.roundId,
     refusedForMembership: Boolean(report.refusal?.membership), hasReport: Boolean(report.executionId || saved) });
+  // A reload while the report is written: open it again by itself, and show it when it is done (#716 2026-10-20).
+  const autoOpen = useRef(AUTO_OPEN_START);
+  useEffect(() => {
+    const next = reportAutoOpen(autoOpen.current, report.status);
+    autoOpen.current = next.memory;
+    if (next.open) setOpen(true);
+  }, [report.status]);
   // The jury (FUSION-REVIEW) sits next to it: it reviews the report of the formal version, whatever this entry shows.
   const jury = <JuryEntry draftId={props.draftId} report={props.report} busy={props.busy} />;
   if (!report.executionId && !saved && (!canGenerate || report.refusal?.hideEntry)) return jury;
   return (
     <>
       <Button variant="outline" disabled={props.busy} onClick={() => setOpen(true)}>
-        {report.executionId || saved ? REPORT_TITLE : reportActionLabel(REPORT_ACTION.start, available.data?.priceCredits)}
+        {reportUnfinished(report.status) ? REPORT_ENTRY_RUNNING
+          : report.executionId || saved ? REPORT_TITLE : reportActionLabel(REPORT_ACTION.start, available.data?.priceCredits)}
       </Button>
       {jury}
       {open && (paywall ? <ReportPaywallDialog onClose={() => setOpen(false)} />
@@ -97,10 +107,12 @@ export function ReportDialog({ report, savedBody, savedStrategy, edit, busy, pri
   if (report.stopUnconfirmed) notices.push({ id: "report-stop-unconfirmed", tone: "warning", text: STOP_UNCONFIRMED_NOTICE,
     actions: [{ label: CHAT_ACTION.stop, onClick: report.retryStop }] });
   else if (report.live?.stopped) notices.push({ id: "report-stopping", tone: "status", busy: true, text: STOP_SAVING_NOTICE });
-  else if (report.live) notices.push({ id: "report-live", tone: "status", busy: true, text: REPORT_WRITING_NOTICE,
+  else if (report.live) notices.push({ id: "report-live", tone: "status", busy: true,
+    text: report.reopened && !report.live.text ? REPORT_REOPENED_NOTICE : REPORT_WRITING_NOTICE,
     actions: [{ label: CHAT_ACTION.stop, onClick: report.stop }] });
   else if (report.starting) notices.push({ id: "report-starting", tone: "status", busy: true, text: REPORT_WRITING_NOTICE });
-  else if (view?.kind === "progress") notices.push({ id: "report-progress", tone: "status", busy: true, text: view.notice });
+  else if (view?.kind === "progress") notices.push({ id: "report-progress", tone: "status", busy: true,
+    text: report.reopened && !view.body && status?.state !== "cost_pending" ? REPORT_REOPENED_NOTICE : view.notice });
   else if (view?.kind === "report") view.notices.forEach((text, index) => notices.push({ id: "report-note-" + index, tone: "warning", text }));
   else if (view?.kind === "empty") notices.push({ id: "report-empty", tone: "warning", text: view.notice });
   const charge = !report.live && !working ? reportFeeText(status?.fee) : null;
@@ -138,6 +150,11 @@ export function ReportDialog({ report, savedBody, savedStrategy, edit, busy, pri
                 : shown;
             })()}
           <ChatNoticeList className="mt-4" notices={notices} />
+          {/* 导出报告: a finished report (complete or not, its notes say which) or a saved formal version. */}
+          {!working && !report.live && (view?.kind === "report" && report.executionId
+            ? <ReportExport key={report.executionId} executionId={report.executionId} notes={view.notices} />
+            : !report.executionId && savedBody
+              ? <ReportExport saved={{ body: savedBody, strategy: savedStrategy }} /> : null)}
           {report.offer && !savedBody && !report.refusal?.hideEntry && (
             <div className={resultStyles.consentActions}>
               <Button disabled={busy} onClick={report.offer === "start" ? report.start : report.restart}>

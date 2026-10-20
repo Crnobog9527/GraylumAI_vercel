@@ -100,6 +100,9 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
     });
   };
 
+  // The execution this page attached to without starting it (a reload, another tab): the server streams no text
+  // already written, so the dialog says the report is still being written in the background.
+  const [reopened, setReopened] = useState<string | null>(null);
   const stream = async (id: string) => {
     setStreaming(true);
     setLive(startLiveReply(id));
@@ -129,6 +132,7 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
     const id = shown?.executionId;
     if (streaming || !id || !reportAttachable(shown) || attached.current.has(id)) return;
     attached.current.add(id);
+    setReopened(id);
     void latestStream.current(id);
   }, [streaming, shown, retryRound]);
 
@@ -147,6 +151,7 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
       if (!id) throw new Error("REPORT_UNAVAILABLE");
       save({ requestId, executionId: id });
       setPinned({ executionId: id, generation: ++generation.current });
+      setReopened(null);
       void readLatest();
       attached.current.add(id);
       await stream(id);
@@ -177,6 +182,8 @@ export function useReportGen(input: { draftId: string; sessionId: string; projec
 
   return {
     executionId, status: shown, live, streaming, refusal, payg, offer,
+    /** This page reattached to the shown execution instead of starting it. */
+    reopened: reopened !== null && reopened === executionId,
     starting: start.isPending,
     start: () => void run("start"),
     restart: () => void run("restart"),
