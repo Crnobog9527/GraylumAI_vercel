@@ -84,7 +84,7 @@ export default function ModuleDetailDialog({
     }
 
     // Use the same published positioning catalog as the new entry.
-    router.push('/positioning');
+    router.push('/app/positioning');
     onOpenChange(false);
   };
 

@@ -17,7 +17,7 @@ const plan = (level: string, monthly: number, yearly: number) => ({
 const ALL_ON = Object.fromEntries(Object.keys(LANDING_FEATURES).map(key => [key, true])) as LandingFlags;
 
 const render = () => renderToStaticMarkup(createElement(SampleF, {
-  data: buildLandingPageData(ALL_ON, [plan('pro', 29, 279), plan('gold', 69, 621)]), siteName: 'Graylum', membershipHref: '/profile',
+  data: buildLandingPageData(ALL_ON, [plan('pro', 29, 279), plan('gold', 69, 621)]), siteName: 'Graylum', membershipHref: '/app/profile',
 }));
 
 describe('style sample F', () => {

@@ -22,16 +22,16 @@ describe('landing-page buy intent', () => {
   });
 
   it('rebuilds the membership link from the allowed values only', () => {
-    expect(buyIntentPath({ level: 'gold', cycle: 'monthly' })).toBe('/profile?tab=subscription&buy=gold&cycle=monthly');
+    expect(buyIntentPath({ level: 'gold', cycle: 'monthly' })).toBe('/app/profile?tab=subscription&buy=gold&cycle=monthly');
     expect(buyIntentPath({ level: 'pro', cycle: 'yearly', offer: 'founder' }))
-      .toBe('/profile?tab=subscription&buy=pro&cycle=yearly&offer=founder');
+      .toBe('/app/profile?tab=subscription&buy=pro&cycle=yearly&offer=founder');
   });
 
   it('finds the intent only in a membership-page return path', () => {
-    expect(buyIntentFromTarget('/profile?tab=subscription&buy=gold&cycle=monthly')).toEqual({ level: 'gold', cycle: 'monthly' });
-    expect(buyIntentFromTarget('/profile?buy=pro&cycle=yearly#plans')).toEqual({ level: 'pro', cycle: 'yearly' });
-    for (const target of ['/profile', '/profilex?buy=gold&cycle=monthly', '/admin?buy=gold&cycle=monthly',
-      '/profile/x?buy=gold&cycle=monthly', '/profile?buy=gold', '/profile#?buy=gold&cycle=monthly']) {
+    expect(buyIntentFromTarget('/app/profile?tab=subscription&buy=gold&cycle=monthly')).toEqual({ level: 'gold', cycle: 'monthly' });
+    expect(buyIntentFromTarget('/app/profile?buy=pro&cycle=yearly#plans')).toEqual({ level: 'pro', cycle: 'yearly' });
+    for (const target of ['/app/profile', '/profilex?buy=gold&cycle=monthly', '/admin?buy=gold&cycle=monthly',
+      '/app/profile/x?buy=gold&cycle=monthly', '/app/profile?buy=gold', '/app/profile#?buy=gold&cycle=monthly']) {
       expect(buyIntentFromTarget(target), target).toBeNull();
     }
   });

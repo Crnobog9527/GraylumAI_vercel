@@ -17,18 +17,18 @@ type Click = (event: SyntheticEvent<HTMLElement>) => void;
 /** Top bar: logo, "首页 / 对话 / 个人中心", and the phone menu button. */
 export function GlobalHeader({ area, onOpenNav }: { area: RailArea; onOpenNav?: () => void }) {
   return <header className={styles.global}>
-    <Link href="/" className={styles.brand}><img src="/graylum-logo.png" alt="" />Graylum</Link>
+    <Link href="/app" className={styles.brand}><img src="/graylum-logo.png" alt="" />Graylum</Link>
     <button type="button" className={styles.mobileGlobalMenu} aria-label="打开导航" onClick={onOpenNav}><Grid2X2 size={17}/></button>
-    <nav aria-label="全局导航"><Link href="/">首页</Link>
-      <Link href="/positioning" aria-current={area==='chat'||area==='topics'||area==='start'?'page':undefined}>对话</Link>
-      <Link href="/profile">个人中心</Link></nav>
+    <nav aria-label="全局导航"><Link href="/app">首页</Link>
+      <Link href="/app/positioning" aria-current={area==='chat'||area==='topics'||area==='start'?'page':undefined}>对话</Link>
+      <Link href="/app/profile">个人中心</Link></nav>
   </header>;
 }
 
 /** The line under the top bar. `notice` is an environment note shown before the slogan. */
 export function AnnouncementBar({ notice, returnParam = '', onClose }: { notice?: string; returnParam?: string; onClose?: () => void }) {
   return <div className={styles.announcement}>{notice&&<span>{notice}</span>}<Sparkles size={15}/><strong>让好想法，继续向前。</strong>
-    <Link href={'/workbench/marketplace'+returnParam}>探索创作功能</Link>
+    <Link href={'/app/workbench/marketplace'+returnParam}>探索创作功能</Link>
     <button aria-label="关闭公告" onClick={onClose}><X size={15}/></button></div>;
 }
 
@@ -43,14 +43,14 @@ export function RailView({ area, returnParam = '', onCloseMobile, launched = fal
 }) {
   return <aside className={styles.rail} aria-label="工作区导航">
     <div className={styles.railMobile}><button aria-label="关闭导航" onClick={onCloseMobile}>关闭工作列表</button></div>
-    <Link className={styles.newConversation} href="/positioning">
+    <Link className={styles.newConversation} href="/app/positioning">
       <img className={styles.newConversationIcon} src="/opc-reference/new-chat.svg" alt=""/>新对话</Link>
     <nav className={styles.railNav} aria-label="工作区功能">
-      <Link href={'/workbench/marketplace'+returnParam} aria-current={area==='marketplace'?'page':undefined}>
+      <Link href={'/app/workbench/marketplace'+returnParam} aria-current={area==='marketplace'?'page':undefined}>
         <img className={styles.navIcon} src="/opc-reference/squares-four.svg" alt=""/>功能广场</Link>
-      <Link href={'/workbench/search'+returnParam} aria-current={area==='search'?'page':undefined}>
+      <Link href={'/app/workbench/search'+returnParam} aria-current={area==='search'?'page':undefined}>
         <img className={styles.navIcon} src="/opc-reference/magnifying-glass.svg" alt=""/>搜索</Link>
-      <Link href={'/library'+returnParam} aria-current={area==='library'?'page':undefined}>
+      <Link href={'/app/library'+returnParam} aria-current={area==='library'?'page':undefined}>
         <img className={styles.navIcon} src="/opc-reference/books.svg" alt=""/>资料库</Link>
       {launched ? <>
         {/* Shown as available, like the other items, but not controls: there is nothing to open yet (no href, not focusable). */}
@@ -124,7 +124,7 @@ export function RailStrategyRow({ draftId, accountName, confirmed, statusLabel, 
   draftId: string; accountName: string; confirmed: boolean; statusLabel?: string; reviewNote?: string; onOpen?: () => void;
   menuOpen: boolean; menuPosition: CSSProperties; onOpenMenu?: Click; onView?: () => void; opening?: boolean; onBackToDiscussion?: () => void;
 }) {
-  const draftHref = '/positioning/' + draftId;
+  const draftHref = '/app/positioning/' + draftId;
   return <div className={styles.strategyRow}>
     {confirmed
       ?<button type="button" className={styles.strategy} onClick={onOpen}>
@@ -169,7 +169,7 @@ export function RailWorkThread({ sessionId, name, pinned = false, dateLabel, act
       ?<div className={styles.renameThread}>
         <input className={styles.inlineRename} autoFocus aria-label="重命名对话" maxLength={160} value={renameValue}
           onChange={event=>onRenameValue?.(event.target.value)} onKeyDown={key}/><small>{dateLabel} · 工作对话</small></div>
-      :<Link className={styles.thread} aria-current={active?'page':undefined} href={'/runtime?session='+sessionId}>
+      :<Link className={styles.thread} aria-current={active?'page':undefined} href={'/app/runtime?session='+sessionId}>
         <span>{pinned&&<Pin size={12} aria-label="已置顶"/>}{name}</span><small>{dateLabel} · 工作对话</small></Link>}
     <button className={styles.more} aria-label={name+'的更多操作'} aria-expanded={menuOpen} onClick={onOpenMenu}><Ellipsis size={17}/></button>
     {menuOpen&&<div className={styles.workMenu} style={menuPosition} role="menu">

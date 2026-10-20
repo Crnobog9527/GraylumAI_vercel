@@ -44,7 +44,7 @@ it('OPC: CONFIRM_DIALOG delayed cross-tab read and editing in the complete local
   await context.route('**/*', route => ['127.0.0.1', 'localhost'].includes(new URL(route.request().url()).hostname)
     ? route.continue() : route.abort());
   const page = await context.newPage(); page.setDefaultTimeout(60000);
-  const path = '/positioning/' + draft.draftId, read = () => service.read(draft.draftId);
+  const path = '/app/positioning/' + draft.draftId, read = () => service.read(draft.draftId);
   let release = () => {};
   const counts = { information: 0, transition: 0, delayedReads: 0 };
   try {

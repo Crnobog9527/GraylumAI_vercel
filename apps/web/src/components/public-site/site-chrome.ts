@@ -7,17 +7,15 @@
 import type { SiteLocale } from '@/lib/seo/site';
 
 // Header and footer wording per language. Login and sign-up stay at the root (SEO_GEO_SPEC section 2);
-// on the public host the proxy forwards them to the app.
+// every host serves them.
 export { SIGNUP_CTA_HREF as SIGNUP_HREF } from '@/lib/seo/content/shared';
 export const LOGIN_HREF = '/login';
 
-// Until the /app move makes "/" the public home page (SEO_GEO_SPEC section 15), "/" on staging and the app
-// host is the logged-in home and sends visitors to login. Visible links to the Simplified home therefore go
-// to the public /landing page; canonical, hreflang, sitemap and JSON-LD keep the production root "/".
-// Change back to "/" in the /app move.
-export const SIMPLIFIED_HOME_HREF = '/landing';
+// Since the /app move (E1, SEO_GEO_SPEC section 15) "/" is the public home page on every host, so visible
+// links to the Simplified home use it directly, like canonical, hreflang, sitemap and JSON-LD.
+export const SIMPLIFIED_HOME_HREF = '/';
 
-/** The address a visible link should use for a page path; only the Simplified home differs for now. */
+/** The address a visible link should use for a page path. */
 export function visibleHref(path: string): string {
   return path === '/' ? SIMPLIFIED_HOME_HREF : path;
 }

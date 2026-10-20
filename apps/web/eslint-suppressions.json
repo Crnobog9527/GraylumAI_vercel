@@ -59,7 +59,7 @@
       "count": 1
     }
   },
-  "src/app/marketplace/page.tsx": {
+  "src/app/app/marketplace/page.tsx": {
     "@typescript-eslint/no-unused-vars": {
       "count": 1
     },
@@ -67,7 +67,7 @@
       "count": 1
     }
   },
-  "src/app/positioning/[draftId]/page.tsx": {
+  "src/app/app/positioning/[draftId]/page.tsx": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
     },
@@ -78,22 +78,22 @@
       "count": 4
     }
   },
-  "src/app/positioning/[draftId]/topics/page.tsx": {
+  "src/app/app/positioning/[draftId]/topics/page.tsx": {
     "react-hooks/exhaustive-deps": {
       "count": 1
     }
   },
-  "src/app/positioning/page.tsx": {
+  "src/app/app/positioning/page.tsx": {
     "react-hooks/exhaustive-deps": {
       "count": 1
     }
   },
-  "src/app/profile/page.tsx": {
+  "src/app/app/profile/page.tsx": {
     "@typescript-eslint/no-explicit-any": {
       "count": 3
     }
   },
-  "src/app/runtime/page.tsx": {
+  "src/app/app/runtime/page.tsx": {
     "react-hooks/exhaustive-deps": {
       "count": 2
     }

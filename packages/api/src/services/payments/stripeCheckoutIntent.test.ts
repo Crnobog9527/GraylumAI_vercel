@@ -8,6 +8,7 @@ const snapshot = { version: 1, item_type: 'credit_package', item_id: '11111111-1
   item_updated_at: '2026-10-05T00:00:00.000Z', billing_cycle: 'one_time', currency: 'usd', unit: 'major',
   price: '19.99', discount: '2.00', tax_behavior: 'unspecified', credits: 100, bonus_credits: 20 };
 const orderId = '22222222-2222-4222-8222-222222222222';
+const clockCustomerId = 'cus_clockcustomer123';
 function fixture() {
   const request = buildStripeCheckoutRequest({ orderId, userId: 'fixture_user', snapshot,
     priceId: 'price_fixture', productName: 'Fixture product', appUrl: 'https://example.test', expiresAt: 5000 });
@@ -26,6 +27,29 @@ function fixture() {
 }
 
 describe('durable Stripe checkout dispatch', () => {
+  it('uses the verified test-clock customer only on a recurring card Checkout and preserves it on return', () => {
+    const recurring = { ...snapshot, item_type: 'membership_plan', item_id: orderId, billing_cycle: 'monthly',
+      price: '19.99', discount: '0.00', tax_behavior: 'exclusive', credits: 3000 };
+    const request = buildStripeCheckoutRequest({ orderId, userId: 'fixture_user', snapshot: recurring,
+      priceId: 'price_month', productName: 'Pro monthly', appUrl: 'https://example.test', expiresAt: 5000,
+      card: { managedPayments: true, testClockCustomerId: clockCustomerId }, testClockCustomerId: clockCustomerId });
+    expect(request.customer).toBe(clockCustomerId);
+    expect(request.success_url).toContain(`stripe_test_clock_customer=${clockCustomerId}`);
+    expect(request.cancel_url).toContain(`stripe_test_clock_customer=${clockCustomerId}`);
+    expect(request.customer_creation).toBeUndefined();
+  });
+
+  it('rejects a test-clock customer for a one-time purchase or without a card request', () => {
+    expect(() => buildStripeCheckoutRequest({ orderId, userId: 'fixture_user', snapshot,
+      priceId: 'price_fixture', productName: 'Fixture product', appUrl: 'https://example.test', expiresAt: 5000,
+      testClockCustomerId: clockCustomerId })).toThrow('PAY_COMMON_CHECKOUT_REQUEST_INVALID');
+    const recurring = { ...snapshot, item_type: 'membership_plan', item_id: orderId, billing_cycle: 'monthly',
+      price: '19.99', discount: '0.00', tax_behavior: 'exclusive', credits: 3000 };
+    expect(() => buildStripeCheckoutRequest({ orderId, userId: 'fixture_user', snapshot: recurring,
+      priceId: 'price_month', productName: 'Pro monthly', appUrl: 'https://example.test', expiresAt: 5000,
+      testClockCustomerId: clockCustomerId })).toThrow('PAY_COMMON_CHECKOUT_REQUEST_INVALID');
+  });
+
   it.each([8, 45, 60, 90, 299])('checks the minimum expiry after %s seconds of pre-create work', async (delay) => {
     vi.useFakeTimers(); vi.setSystemTime(new Date(1000 * 1000));
     try {

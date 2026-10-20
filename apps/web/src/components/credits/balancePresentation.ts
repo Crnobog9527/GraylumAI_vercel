@@ -9,11 +9,11 @@ export function getCreditsAvailabilityLabel(status: CreditsBalanceStatus): strin
 }
 
 export type CreditsRechargeAction =
-  | { available: true; href: '/profile?tab=subscription' }
+  | { available: true; href: '/app/profile?tab=subscription' }
   | { available: false; href: null };
 
 export function getCreditsRechargeAction(status: CreditsBalanceStatus): CreditsRechargeAction {
   return status === 'ready'
-    ? { available: true, href: '/profile?tab=subscription' }
+    ? { available: true, href: '/app/profile?tab=subscription' }
     : { available: false, href: null };
 }

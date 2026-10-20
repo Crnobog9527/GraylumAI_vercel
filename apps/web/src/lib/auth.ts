@@ -1,3 +1,4 @@
+import { toAppPath } from './app-paths';
 import { isSafeRelativePath } from './safe-url';
 import type { User } from '@supabase/supabase-js';
 
@@ -40,7 +41,7 @@ export function isEmailVerified(user: User | null | undefined): boolean {
   });
 }
 
-const DEFAULT_REDIRECT_TARGET = '/profile';
+const DEFAULT_REDIRECT_TARGET = '/app/profile';
 
 // Parameters GoTrue adds to the page it sends an email or OAuth link back to. They belong to that
 // one landing, never to where the visitor should end up, so they are dropped from redirect targets.
@@ -73,11 +74,13 @@ function stripAuthLandingParams(target: string) {
   return rebuilt === '/' ? DEFAULT_REDIRECT_TARGET : rebuilt;
 }
 
+// Old root addresses (a return target saved before the /app move, or an email link sent before it) are
+// moved to their /app address here, so login never ends on a redirect or on the public home page.
 export function sanitizeRedirectTarget(redirect: string | null | undefined) {
   if (!redirect || !isSafeRelativePath(redirect)) {
     return DEFAULT_REDIRECT_TARGET;
   }
 
   const target = stripAuthLandingParams(redirect);
-  return isSafeRelativePath(target) ? target : DEFAULT_REDIRECT_TARGET;
+  return isSafeRelativePath(target) ? toAppPath(target) : DEFAULT_REDIRECT_TARGET;
 }

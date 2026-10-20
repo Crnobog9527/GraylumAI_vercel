@@ -3,7 +3,7 @@
 
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { Check, Loader2, RotateCw } from 'lucide-react';
-import work from '@/app/runtime/runtime-work.module.css';
+import work from '@/app/app/runtime/runtime-work.module.css';
 import {
   RuntimeHeader, RuntimeProposal, RuntimeReply, RuntimeResultsSection, RuntimeTurnView, RuntimeTypePendingPanel,
 } from '@/components/chat-display/runtime-messages';

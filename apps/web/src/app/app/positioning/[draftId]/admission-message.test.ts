@@ -1,0 +1,68 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import {expect,it} from 'vitest';
+import {admissionMessage} from './admission-message';
+import {releaseRejectedAnswer} from './mentor-turn';
+import {DEFINITE_REFUSAL_NOTICE} from '@/app/app/runtime/gate-notices';
+import {RUNTIME_INPUT_TOO_LONG_MESSAGE} from '../../../../../../../packages/api/src/shared/runtimeInputMessages';
+const message='本次操作所需模型尚未获准用于当前测试窗口，请联系管理员。';
+it.each(['PRECONDITION_FAILED','FORBIDDEN'].flatMap(code=>['opc.prepareStep','opc.mentorTurnStream'].map(path=>[code,path])))('presents a structured %s admission refusal from %s while retaining the same request',(code,path)=>{
+ const result=admissionMessage(Object.assign(new Error(message),{data:{code,path}}));
+ expect(result).toContain(message);expect(result).toContain('原请求与输入已保留');expect(result).toContain('同一请求');expect(result).not.toMatch(/版本已变化|结果未知|结果暂未确认/);
+});
+it.each([
+ new Error(message),Object.assign(new Error(message),{data:{code:'INTERNAL_SERVER_ERROR',path:'opc.prepareStep'}}),
+ Object.assign(new Error(message),{data:{code:'INTERNAL_SERVER_ERROR',path:'opc.mentorTurnStream'}}),
+ Object.assign(new Error(message),{data:{code:'SERVICE_UNAVAILABLE',path:'runtime.execute'}}),
+ Object.assign(new Error(message),{data:{code:'CONFLICT',path:'workbench.execute'}}),new Error('network timeout'),
+])('does not reinterpret a missing response, execution or conflict as a known admission refusal %#',cause=>{
+ expect(admissionMessage(cause)).toBeNull();
+});
+
+it('uses fixed expired-card wording without claiming the rejected envelope was retained',()=>{
+ expect(admissionMessage(new Error('OPC_ANSWER_SOURCE_DENIED'))).toBe('这张卡已经过期，请看最新的回复。');
+ expect(admissionMessage(new Error('OPC_ANSWER_SOURCE_DENIED: private details'))).toBeNull();
+});
+
+const gateNotices={
+ minute:'操作过于频繁，请稍后再试。本次被拦截的调用不扣积分。',
+ day:'近24小时使用次数已达上限，请稍后再试。本次被拦截的调用不扣积分。',
+ paused:'AI服务暂时暂停新调用，请稍后再试。本次被拦截的调用不扣积分。',
+ unavailable:'暂时无法确认使用额度，请稍后再试。本次被拦截的调用不扣积分。',
+};
+it.each(['opc.prepareStep','opc.mentorTurnStream','runtime.prepare'].flatMap(path=>[
+ [path,'TOO_MANY_REQUESTS',gateNotices.minute,gateNotices.minute],
+ [path,'TOO_MANY_REQUESTS','请求过于频繁，请在 30 秒后重试',gateNotices.minute],
+ [path,'TOO_MANY_REQUESTS',gateNotices.day,gateNotices.day],
+ [path,'SERVICE_UNAVAILABLE',gateNotices.paused,gateNotices.paused],
+ [path,'SERVICE_UNAVAILABLE',gateNotices.unavailable,gateNotices.unavailable],
+]))('shows only the fixed new-work gate notice for %s %s',(path,code,serverText,notice)=>{
+ expect(admissionMessage(Object.assign(new Error(serverText),{data:{code,path,retryAfter:30}}))).toBe(notice);
+});
+it.each(['工作空间服务暂不可用，请稍后重试。（诊断编号：1f0c）','internal diagnostic: relation runtime_x does not exist'])(
+ 'shows one fixed notice for any other 503, never its server text and never a rate-limit notice (%s)',text=>{
+ for(const path of ['opc.prepareStep','opc.mentorTurnStream','runtime.prepare']){
+  const result=admissionMessage(Object.assign(new Error(text),{data:{code:'SERVICE_UNAVAILABLE',path}}));
+  expect(result).toBe('服务暂时不可用，请稍后再试。 原请求与输入已保留；条件恢复后可继续核对同一请求。');
+  expect(result).not.toContain(text);
+  expect(Object.values(gateNotices)).not.toContain(result);
+ }
+});
+it('ignores 429 from other procedures',()=>{
+ expect(admissionMessage(Object.assign(new Error(gateNotices.minute),{data:{code:'TOO_MANY_REQUESTS',path:'runtime.execute'}}))).toBeNull();
+});
+
+it.each(['opc.prepareStep','opc.mentorTurnStream','runtime.prepare'])('asks to split too-long input without the retained-request suffix (%s)',path=>{
+ const result=admissionMessage(Object.assign(new Error(RUNTIME_INPUT_TOO_LONG_MESSAGE),{data:{code:'PRECONDITION_FAILED',path}}));
+ expect(result).toBe(RUNTIME_INPUT_TOO_LONG_MESSAGE);expect(result).toContain('请分几次发送');expect(result).toContain('没有扣费');
+ expect(result).not.toContain('原请求与输入已保留');expect(result).not.toContain('诊断编号');
+});
+
+it('a refusal released before admission says why and never claims the request is kept',()=>{
+ const values=new Map([['key',JSON.stringify({request:{draftId:'d',stepId:'s',requestId:'a',input:'回答'}})]]);
+ const storage={getItem:(key:string)=>values.get(key)??null,setItem:()=>{},removeItem:(key:string)=>{values.delete(key);}};
+ const release=(cause:Error)=>{values.set('key',JSON.stringify({request:{draftId:'d',stepId:'s',requestId:'a',input:'回答'}}));
+  expect(releaseRejectedAnswer(storage,'key','a',cause,undefined,false)).toBe(true);return admissionMessage(cause);};
+ expect(release(Object.assign(new Error(message),{data:{httpStatus:412,code:'PRECONDITION_FAILED',path:'opc.mentorTurnStream'}}))).toBe(message);
+ expect(release(Object.assign(new Error('{"issues":[]}'),{data:{httpStatus:400,code:'BAD_REQUEST',path:'opc.mentorTurnStream'}}))).toBe(DEFINITE_REFUSAL_NOTICE);
+ expect(release(Object.assign(new Error(RUNTIME_INPUT_TOO_LONG_MESSAGE),{data:{httpStatus:412,code:'PRECONDITION_FAILED',path:'opc.prepareStep'}}))).toBe(RUNTIME_INPUT_TOO_LONG_MESSAGE);
+});

@@ -9,10 +9,17 @@ import {logger} from '../../lib/logger';
  * Every method swallows its own failure: timing never changes a request. */
 export const TIMING_PHASES=['prelude','policy','host','admission','execute','rateLimit','provider'] as const;
 export type TimingPhase=typeof TIMING_PHASES[number];
-export const TIMING_MARKS=['providerPost','firstModelText','firstPublicText','fullModelReply','firstValidContent'] as const;
+export const TIMING_MARKS=['providerPost','firstModelText','firstPublicText','fullModelReply','firstValidContent',
+ 'organizerStart','organizerPost','organizerReady','captureStart','captureDone','resultReady','resultPublic'] as const;
 export type TimingMark=typeof TIMING_MARKS[number];
 type Tally={rt:number;rtMs:number};
 type PhaseTally=Tally&{ms:number};
+type PreProvider={rt:number;rtMs:number;labels:Record<string,Tally>;phases:Record<string,PhaseTally>};
+// organizerModel includes the provider call and its receipt/Session writes;
+// provider fetch completion can be response headers, so it is not a model-end mark.
+const SEGMENTS=['organizerPrepare','organizerModel','saving','capture','delivery'] as const;
+type Segment=typeof SEGMENTS[number];
+type SegmentTally=PhaseTally&{labels:Map<string,Tally>};
 
 const NAME=/^[a-z][a-z0-9_]{0,62}$/;
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -41,15 +48,35 @@ function databaseLabel(path:string){
 export function createRequestTiming(now:()=>number=()=>performance.now()){
  const origin=now();
  const phases=new Map<TimingPhase,PhaseTally>(),labels=new Map<string,Tally>();
+ const segments=new Map<Segment,SegmentTally>();
  const marks:Partial<Record<TimingMark,number>>={},executions=new Set<string>();
  let skillFileRead=false;
  const afterSkillFile:Partial<Record<TimingMark,number>>={};
  let procedures:string[]=[],phase:TimingPhase='prelude',since=origin,holds=1,emitted=false;
+ let segment:Segment|undefined,segmentSince=origin;
+ let preProvider:PreProvider|undefined;
  const slot=(p:TimingPhase)=>{let s=phases.get(p);if(!s){s={rt:0,rtMs:0,ms:0};phases.set(p,s);}return s;};
  const safe=(fn:()=>void)=>{try{fn();}catch{/* measurement only */}};
  const switchTo=(next:TimingPhase)=>{const t=now();slot(phase).ms+=t-since;since=t;phase=next;};
+ const segmentSlot=(name:Segment)=>{
+  let s=segments.get(name);if(!s){s={rt:0,rtMs:0,ms:0,labels:new Map()};segments.set(name,s);}return s;
+ };
+ const switchSegment=(next:Segment|undefined)=>{
+  if(segment===next)return;
+  const t=now();if(segment)segmentSlot(segment).ms+=t-segmentSince;
+  segment=next;segmentSince=t;if(next)segmentSlot(next);
+ };
  const mark=(name:TimingMark)=>safe(()=>{
-  if(marks[name]===undefined)marks[name]=now()-origin;
+  if(name==='organizerReady'&&marks.organizerStart===undefined)return;
+  if(marks[name]===undefined){
+   marks[name]=now()-origin;
+   if(name==='organizerStart')switchSegment('organizerPrepare');
+   if(name==='organizerPost')switchSegment('organizerModel');
+   if(name==='organizerReady')switchSegment('saving');
+   if(name==='captureStart')switchSegment('capture');
+   if(name==='captureDone'||name==='resultReady')switchSegment('delivery');
+   if(name==='resultPublic')switchSegment(undefined);
+  }
   if(skillFileRead&&afterSkillFile[name]===undefined)afterSkillFile[name]=now()-origin;
  });
  const ms=(value:number)=>Math.max(0,Math.round(value));
@@ -64,6 +91,11 @@ export function createRequestTiming(now:()=>number=()=>performance.now()){
    ...(skillFileRead?{skillFileRead:true,afterSkillFileMarks:Object.fromEntries(
     TIMING_MARKS.filter(m=>afterSkillFile[m]!==undefined).map(m=>[m+'Ms',ms(afterSkillFile[m]!)]))}:{}),
    labels:Object.fromEntries([...labels].map(([label,s])=>[label,{rt:s.rt,rtMs:ms(s.rtMs)}])),
+   ...(preProvider?{preProvider:structuredClone(preProvider)}:{}),
+   ...(segments.size?{segments:Object.fromEntries(SEGMENTS.filter(name=>segments.has(name)).map(name=>{
+    const s=segments.get(name)!;return [name,{rt:s.rt,rtMs:ms(s.rtMs),ms:ms(s.ms+(segment===name?end-segmentSince:0)),
+     labels:Object.fromEntries([...s.labels].map(([label,t])=>[label,{rt:t.rt,rtMs:ms(t.rtMs)}]))}];
+   }))}:{}),
    marks:Object.fromEntries(TIMING_MARKS.filter(m=>marks[m]!==undefined).map(m=>[m+'Ms',ms(marks[m]!)])),
   };
  }
@@ -75,13 +107,24 @@ export function createRequestTiming(now:()=>number=()=>performance.now()){
  const recorder={
   /** Returns the completion callback for one transport call started now. */
   begin(label:string){
-   let started=0,at:TimingPhase='prelude';
-   safe(()=>{started=now();at=phase;});
+   let started=0,at:TimingPhase='prelude',inSegment:Segment|undefined;
+   safe(()=>{started=now();at=phase;inSegment=segment;});
    return ()=>safe(()=>{
     const elapsed=now()-started,known=labels.has(label)||labels.size<MAX_LABELS?label:'other';
     const s=slot(at);s.rt++;s.rtMs+=elapsed;
     const l=labels.get(known)??{rt:0,rtMs:0};l.rt++;l.rtMs+=elapsed;labels.set(known,l);
-    if(label===DISPATCH_LABEL&&marks.providerPost===undefined){mark('providerPost');switchTo('provider');}
+    if(inSegment){
+     const s=segmentSlot(inSegment);s.rt++;s.rtMs+=elapsed;
+     const l=s.labels.get(known)??{rt:0,rtMs:0};l.rt++;l.rtMs+=elapsed;s.labels.set(known,l);
+    }
+    if(label===DISPATCH_LABEL&&marks.providerPost===undefined){
+     // Only round trips completed by this boundary count. A request still in
+     // flight belongs to the whole-invocation totals when it later completes.
+     const snapshot=summary();
+     preProvider={rt:snapshot.rt,rtMs:snapshot.rtMs,labels:snapshot.labels,phases:snapshot.phases};
+     mark('providerPost');switchTo('provider');
+    }
+    if(label===DISPATCH_LABEL&&inSegment==='organizerPrepare')mark('organizerPost');
    });
   },
   /** Enters a phase; the returned callback restores the previous one. */

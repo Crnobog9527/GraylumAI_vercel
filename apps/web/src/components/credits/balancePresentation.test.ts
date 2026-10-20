@@ -30,7 +30,7 @@ describe('balance presentation', () => {
   it('exposes the recharge destination only for a verified ready balance', () => {
     expect(getCreditsRechargeAction('ready')).toEqual({
       available: true,
-      href: '/profile?tab=subscription',
+      href: '/app/profile?tab=subscription',
     });
   });
 });

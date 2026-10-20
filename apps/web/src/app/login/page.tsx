@@ -56,7 +56,7 @@ export function LoginPageContent() {
   const [nickname, setNickname] = useState('');
   const [selectedPlan, setSelectedPlan] = useState('');
   const [pendingAction, setPendingAction] = useState<'login' | 'signup' | 'google' | null>(null);
-  const [redirectTarget, setRedirectTarget] = useState('/profile');
+  const [redirectTarget, setRedirectTarget] = useState('/app/profile');
   const [status, setStatus] = useState<AuthStatus | null>(null);
 
   useEffect(() => {

@@ -3,6 +3,7 @@ import { withSentryConfig } from "@sentry/nextjs";
 import { PHASE_PRODUCTION_BUILD } from "next/constants";
 import { validateRedisEnvForBuild } from "../../packages/api/src/lib/envValidator";
 import { buildRobotsHeaderRules, SITE_INDEXING_ENV } from "./src/lib/robots-policy";
+import { buildLegacyHostRedirects, buildPathRedirects, SINGLE_HOST_REDIRECTS_ENV } from "./src/lib/single-host-redirects";
 
 const sentryBuildUploadEnabled =
   process.env.ENABLE_SENTRY_BUILD_UPLOAD === "true" &&
@@ -41,18 +42,12 @@ const reportOnlyCsp = [
 
 const nextConfig: NextConfig = {
   devIndicators: false,
-  // LEGACY-CLOSE: the old /chat and /workbench pages are deleted; their links land on positioning
-  // before authentication. /workbench/marketplace and /workbench/search stay as they are.
+  // Single host (E1): old addresses and, once switched on, the old hosts. The rules and why are in
+  // src/lib/single-host-redirects; the host rules come first so an old host goes to www in one step.
   async redirects() {
     return [
-      { source: "/chat", destination: "/positioning", permanent: false },
-      { source: "/workbench", destination: "/positioning", permanent: false },
-      // The old /tutorials page (four generic cards) is gone; the tutorials live in the blog (PUBLIC-SITE cleanup).
-      { source: "/tutorials", destination: "/blog", permanent: true },
-      // The pricing page moved from /landing/pricing to /pricing (2026-10-18, SEO_GEO_SPEC section 15): 308, query kept.
-      { source: "/landing/pricing", destination: "/pricing", permanent: true },
-      // The old placeholder acceptable-use page is gone: the formal terms cover it (section 7, PROHIBITED ACTIVITIES).
-      { source: "/acceptable-use", destination: "/terms#sec-7", permanent: true },
+      ...buildLegacyHostRedirects(process.env[SINGLE_HOST_REDIRECTS_ENV]),
+      ...buildPathRedirects(),
     ];
   },
   async headers() {

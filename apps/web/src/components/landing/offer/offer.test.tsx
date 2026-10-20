@@ -29,7 +29,7 @@ function renderPage(flags: LandingFlags) {
     createElement(HowItWorks, { promise: data.promise, timeline: data.timeline },
       createElement(FlowSteps, { steps: data.flowSteps }), createElement(SampleReports, { reports: data.sampleReports })),
     createElement(PriceSection, { pricing: data.pricing, rows: data.compareRows, risk: data.risk, showResult: data.showResult,
-      founderSeats: data.founderSeats, membershipHref: '/profile?tab=subscription' }),
+      founderSeats: data.founderSeats, membershipHref: '/app/profile?tab=subscription' }),
     createElement(OfferFaq, { groups: data.faqGroups }),
     createElement(FinalAction, { showStack: data.showStack, founderSeats: data.founderSeats, note: data.finalNote }),
   ));

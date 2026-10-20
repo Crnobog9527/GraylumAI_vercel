@@ -19,8 +19,8 @@ describe('cleanVercelEvent', () => {
 
   it('replaces IDs with the template and drops sensitive pages', () => {
     withConsent(true);
-    expect(cleanVercelEvent({ type: 'vital', url: `${ORIGIN}/positioning/abc/plan`, route: '/positioning/abc/plan' }, 'analytics'))
-      .toEqual({ type: 'vital', url: `${ORIGIN}/positioning/[draftId]/plan`, route: '/positioning/[draftId]/plan' });
+    expect(cleanVercelEvent({ type: 'vital', url: `${ORIGIN}/app/positioning/abc/plan`, route: '/app/positioning/abc/plan' }, 'analytics'))
+      .toEqual({ type: 'vital', url: `${ORIGIN}/app/positioning/[draftId]/plan`, route: '/app/positioning/[draftId]/plan' });
     expect(cleanVercelEvent({ type: 'pageview', url: `${ORIGIN}/auth/callback?code=x` }, 'analytics')).toBeNull();
     expect(cleanVercelEvent({ type: 'pageview', url: `${ORIGIN}/verify-email?email=a@b.c` }, 'essential')).toBeNull();
   });

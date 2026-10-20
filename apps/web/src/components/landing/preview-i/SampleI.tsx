@@ -41,7 +41,7 @@ export function SampleI({ data, siteName, membershipHref }: { data: LandingData;
 
       <header className={styles.header}>
         <div className={styles.headerBar}>
-          <Link href="/landing" className={styles.brand}>
+          <Link href="/" className={styles.brand}>
             <img src="/graylum-logo.svg" alt="" aria-hidden="true" width={24} height={24} />{siteName}
           </Link>
           <nav className={styles.nav} aria-label="主导航">

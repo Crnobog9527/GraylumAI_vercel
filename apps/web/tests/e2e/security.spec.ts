@@ -152,7 +152,7 @@ test.describe('Security', () => {
       await clearBrowserAuthState(page);
 
       // Try to access protected route
-      await gotoWithBypass(page, '/positioning');
+      await gotoWithBypass(page, '/app/positioning');
 
       // Should redirect to login or landing
       await page.waitForURL(/\/(login|landing)/, { timeout: 5000 });
@@ -162,7 +162,7 @@ test.describe('Security', () => {
       await gotoWithBypass(page, '/login');
       await clearBrowserAuthState(page);
 
-      await gotoWithBypass(page, '/profile');
+      await gotoWithBypass(page, '/app/profile');
 
       // Should redirect to login or landing
       await page.waitForURL(/\/(login|landing)/, { timeout: 5000 });
@@ -516,7 +516,7 @@ test.describe('Authenticated Security', () => {
     let createdTicketId: string | null = null;
 
     try {
-      await gotoWithBypass(page, '/profile?tab=tickets');
+      await gotoWithBypass(page, '/app/profile?tab=tickets');
       await page.getByTestId('ticket-create-button').click();
       await expect(page.getByText('创建新工单')).toBeVisible({ timeout: 10000 });
 

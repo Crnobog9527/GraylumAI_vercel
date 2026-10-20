@@ -122,12 +122,12 @@ describe('cache and local copy invalidation', () => {
       getItem: (key: string) => data.get(key) ?? null,
       removeItem: (key: string) => { data.delete(key); },
     } as unknown as Storage;
-    data.set('opc-work-return', `/runtime?session=${other}`);
+    data.set('opc-work-return', `/app/runtime?session=${other}`);
     forgetWorkReturn([id], store);
-    expect(data.get('opc-work-return')).toBe(`/runtime?session=${other}`);
+    expect(data.get('opc-work-return')).toBe(`/app/runtime?session=${other}`);
     forgetWorkReturn(['', id, other], store);
     expect(data.has('opc-work-return')).toBe(false);
-    data.set('opc-work-return', `/positioning/${other}/topics`);
+    data.set('opc-work-return', `/app/positioning/${other}/topics`);
     forgetWorkReturn([id, other], store);
     expect(data.has('opc-work-return')).toBe(false);
     const broken = { getItem: () => { throw new Error('denied'); } } as unknown as Storage;

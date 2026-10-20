@@ -29,9 +29,9 @@ describe('route templates', () => {
   });
 
   it('reports record pages by their template, never the ID', () => {
-    expect(routeTemplate('/positioning/3f2a9c1e-0000-4000-8000-000000000001')).toBe('/positioning/[draftId]');
-    expect(routeTemplate('/positioning/abc/review/def')).toBe('/positioning/[draftId]/review/[reviewId]');
-    expect(routeTemplate('/positioning/abc/topics/')).toBe('/positioning/[draftId]/topics');
+    expect(routeTemplate('/app/positioning/3f2a9c1e-0000-4000-8000-000000000001')).toBe('/app/positioning/[draftId]');
+    expect(routeTemplate('/app/positioning/abc/review/def')).toBe('/app/positioning/[draftId]/review/[reviewId]');
+    expect(routeTemplate('/app/positioning/abc/topics/')).toBe('/app/positioning/[draftId]/topics');
     expect(routeTemplate('/landing/preview/d')).toBe('/landing/preview/d');
     expect(routeTemplate('/landing/preview/zz')).toBe('/landing/preview/[variant]');
     expect(routeTemplate('/zh-tw/ig-jingying')).toBe('/zh-tw/ig-jingying');
@@ -39,9 +39,9 @@ describe('route templates', () => {
   });
 
   it('drops unknown and sensitive pages', () => {
-    expect(routeTemplate('/positioning/a/b/c/d')).toBeNull();
+    expect(routeTemplate('/app/positioning/a/b/c/d')).toBeNull();
     expect(routeTemplate('/someone@example.com')).toBeNull();
-    for (const path of ['/auth/callback', '/verify-email', '/reset-password', '/publish-monitor/connect', '/auth']) {
+    for (const path of ['/auth/callback', '/verify-email', '/reset-password', '/app/publish-monitor/connect', '/auth']) {
       expect(isSensitivePath(path)).toBe(true);
       expect(routeTemplate(path)).toBeNull();
     }

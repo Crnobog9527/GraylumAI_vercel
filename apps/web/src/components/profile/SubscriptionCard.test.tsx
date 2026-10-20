@@ -158,7 +158,7 @@ describe('SubscriptionCard catalog availability', () => {
       reasonCode: 'PAYMENT_ATTENTION_REQUIRED', allowed: false }] }, isLoading: false };
     const markup = renderSubscription();
     expect(markup).toContain('data-testid="profile-unpaid-subscription-notice"');
-    expect(markup).toContain('href="/profile?tab=tickets"');
+    expect(markup).toContain('href="/app/profile?tab=tickets"');
     expect(markup).toContain('请先处理旧订阅');
     expect(markup).not.toContain('>开通<');
     componentState.eligibilityQuery = { data: { entries: [] }, isLoading: false };

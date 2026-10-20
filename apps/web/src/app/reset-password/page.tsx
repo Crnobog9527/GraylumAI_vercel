@@ -128,7 +128,7 @@ export default function ResetPasswordPage() {
           </button>
         )}
         {phase.kind === 'not-recovery' && (
-          <Link href="/profile?tab=security" className={AUTH_LINK_CLASS}>
+          <Link href="/app/profile?tab=security" className={AUTH_LINK_CLASS}>
             前往账户安全
           </Link>
         )}

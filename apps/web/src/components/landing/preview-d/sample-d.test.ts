@@ -30,7 +30,7 @@ describe('style sample D', () => {
 
   it('keeps the final copy, the six sections in order and one H1', () => {
     const data = buildLandingPageData(ALL_ON, [plan('pro', 29, 279), plan('gold', 69, 621)]);
-    const html = renderToStaticMarkup(createElement(SampleD, { data, siteName: 'Graylum', membershipHref: '/profile' }));
+    const html = renderToStaticMarkup(createElement(SampleD, { data, siteName: 'Graylum', membershipHref: '/app/profile' }));
     expect(html.match(/<h1[\s>]/g)).toHaveLength(1);
     // Heading phrases are split into spans; compare the visible text with the tags removed.
     const text = html.slice(html.indexOf('<main')).replace(/<[^>]+>/g, '');

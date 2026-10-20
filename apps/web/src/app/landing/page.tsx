@@ -1,3 +1,4 @@
+import { AuthFragmentForward } from '@/components/auth/AuthFragmentForward';
 import { JsonLd } from '@/components/seo/JsonLd';
 import { rewordFaq } from '@/components/landing/preview-j/SectionsJ';
 import { SampleL } from '@/components/landing/preview-l/SampleL';
@@ -17,8 +18,8 @@ export function generateMetadata() {
 }
 
 /**
- * The public Simplified home page. It lives at /landing until the /app move makes "/" public (SEO_GEO_SPEC section
- * 15); canonical is already "/". Owner 2026-10-17: "样稿 L 验收后，正式 /landing 整体换成样稿 L，冻结前完成" — the page
+ * The public Simplified home page, served at "/" (the proxy rewrites the root here and /landing 308s to "/" since the
+ * /app move, SEO_GEO_SPEC section 15); canonical is "/". Owner 2026-10-17: "样稿 L 验收后，正式 /landing 整体换成样稿 L，冻结前完成" — the page
  * is sample L (components/landing/preview-l) in its production mode: no sample switcher, header and footer link only
  * pages that exist. Title, description, canonical, robots (buildPageMetadata), the structured data and the hourly
  * refresh are the home page's as before, and the footer shows the support address from the settings. The founder
@@ -41,6 +42,7 @@ export default async function LandingPage() {
         softwareApplicationJsonLd({ description: HOME_DESCRIPTION, offers: data.offerList }),
         ...(faqItems.length > 0 ? [faqPageJsonLd(faqItems)] : []),
       ]} />
+      <AuthFragmentForward />
       <SampleL data={data} siteName={siteName} extras={homePageExtras(flags)} production supportEmail={supportEmail} />
     </div>
   );

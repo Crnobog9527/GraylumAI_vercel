@@ -49,7 +49,7 @@ const stubs: Array<[(id: string) => boolean, string]> = [
       fusionReview:{mine:{useQuery:()=>q([])}}};`],
   [id => id.endsWith('/hooks/use-credits'), 'export const useCreditsBalance=()=>({data:undefined});'],
   [id => id.endsWith('/lib/supabase'), 'export const createClient=()=>({auth:{signOut:async()=>{}}});'],
-  [id => id === 'next/navigation', `export const usePathname=()=>'/runtime';export const useRouter=()=>({push(){},replace(url){window.replaced.push(url)}});`],
+  [id => id === 'next/navigation', `export const usePathname=()=>'/app/runtime';export const useRouter=()=>({push(){},replace(url){window.replaced.push(url)}});`],
   [id => id === 'next/link', `import React from 'react';export default function Link(p){return React.createElement('a',p)}`],
   [id => id.endsWith('/strategy-overview-dialog'), 'export function StrategyOverviewDialog(){return null}'],
   [id => id.endsWith('/use-account-discussion'), 'export const useAccountDiscussion=()=>({opening:false,open(){}});'],
@@ -160,7 +160,7 @@ it.each([1280, 375])('removes the row and closes the dialog at once, before the 
   }));
 
 it('drops the "返回当前工作" link to the deleted conversation before the page leaves', () => open(1280, async page => {
-  await page.evaluate(id => sessionStorage.setItem('opc-work-return', '/runtime?session=' + id), SESSION);
+  await page.evaluate(id => sessionStorage.setItem('opc-work-return', '/app/runtime?session=' + id), SESSION);
   await confirmDelete(page);
   // Already gone while the server call is still pending: the start page it lands on never links back.
   expect(await held(page)).toEqual([{ sessionId: SESSION }]);
@@ -169,11 +169,11 @@ it('drops the "返回当前工作" link to the deleted conversation before the p
 }));
 
 it('keeps the "返回当前工作" link when it points at other work', () => open(1280, async page => {
-  await page.evaluate(() => sessionStorage.setItem('opc-work-return', '/positioning/00000000-0000-4000-8000-0000000000ff'));
+  await page.evaluate(() => sessionStorage.setItem('opc-work-return', '/app/positioning/00000000-0000-4000-8000-0000000000ff'));
   await confirmDelete(page);
   await answer(page, true);
   await ui.poll(() => page.evaluate(() => (window as unknown as Win).cleanups)).toEqual([{ sessionId: SESSION }]);
-  expect(await page.evaluate(() => sessionStorage.getItem('opc-work-return'))).toBe('/positioning/00000000-0000-4000-8000-0000000000ff');
+  expect(await page.evaluate(() => sessionStorage.getItem('opc-work-return'))).toBe('/app/positioning/00000000-0000-4000-8000-0000000000ff');
 }));
 
 it('puts the row back with a plain reason when the server refuses, and never reports success', () => open(1280, async page => {

@@ -39,7 +39,7 @@ export function buildWaffoCheckoutRequest(input: {
     buyerIdentity: createHash('sha256').update(`waffo:test:${input.merchantNamespace}:${order.user_id}`).digest('hex'),
     includePaymentMethods: ['card'], orderMerchantExternalId: order.id,
     metadata: { orderId: order.id }, expiresInSeconds: WAFFO_CHECKOUT_TTL_SECONDS,
-    successUrl: `${origin.origin}/profile?tab=subscription&order_id=${encodeURIComponent(order.id)}`,
+    successUrl: `${origin.origin}/app/profile?tab=subscription&order_id=${encodeURIComponent(order.id)}`,
   };
 }
 

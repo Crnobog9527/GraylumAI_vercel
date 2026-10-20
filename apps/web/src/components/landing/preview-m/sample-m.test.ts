@@ -21,7 +21,7 @@ const plan = (level: string, monthly: number, yearly: number) => ({
 });
 const data = buildLandingPageData(ALL_ON, [plan('pro', 29, 279), plan('gold', 69, 621)]);
 const render = (flags: LandingFlags = ALL_ON, showSamples = true) => renderToStaticMarkup(createElement(SampleM, {
-  data, siteName: 'Graylum', extras: { flags, showSamples }, membershipHref: '/profile?tab=subscription',
+  data, siteName: 'Graylum', extras: { flags, showSamples }, membershipHref: '/app/profile?tab=subscription',
 }));
 const between = (html: string, from: string, to: string) => html.slice(html.indexOf(from), html.indexOf(to));
 
@@ -94,7 +94,7 @@ describe('style sample M (direction H, product-led, Owner 2026-10-17)', () => {
     expect(plans).not.toMatch(/data-plan="pro" data-recommended/);
     expect(plans).toContain(RISK_REVERSAL.title);
     for (const point of data.risk) expect(plans).toContain(point.text);
-    expect(plans).toContain('href="/profile?tab=subscription"');
+    expect(plans).toContain('href="/app/profile?tab=subscription"');
   });
 
   it('has the thin sticky button bar and a button at least every two regions', () => {

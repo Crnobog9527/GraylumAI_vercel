@@ -18,6 +18,9 @@ export const DEFAULT_PANEL_NAMES = { reviewers: ['评审 A', '评审 B', '评审
 const panelName = z.string().transform(value => value.replace(/[\p{Cc}\p{Cf}]/gu, '').trim())
   .refine(value => [...value].length >= 1 && [...value].length <= 20, { message: 'FUSION_PANEL_NAME_INVALID' });
 const panelNames = z.object({ reviewers: z.array(panelName).length(PANEL_SEATS.length), summary: panelName }).strict();
+/** The fixed angle of each reviewer seat (Owner 2026-10-20), bound to the model: changing the model means choosing its angle. */
+import { REVIEWER_ROLES, type ReviewerRole } from './reviewEvidence';
+export { REVIEWER_ROLES, type ReviewerRole };
 const review = z.object({
   enabled: z.boolean(),
   /** Exactly three seats (A, B, C) when enabled (Owner 2026-10-14: "三家最强的模型"). */
@@ -41,9 +44,16 @@ const review = z.object({
   /** Platform-borne cost breaker per user over 7 days (§3.3); used by review admission (PR-4). */
   breaker: z.object({ platformUsd: usd, noDeliveryCalls: z.number().int().min(1).max(1000) }).strict(),
   displayNames: panelNames.default(DEFAULT_PANEL_NAMES),
+  /** Reviewer angle by model id (finance / evidence / execution). Empty: reviewers keep the plain prompt. When any is set,
+   * every reviewer needs its own angle (one each). Frozen into the review at start. */
+  reviewerRoles: z.record(z.string().uuid(), z.enum(REVIEWER_ROLES)).default({}),
 }).strict().superRefine((value, context) => {
   const issue = (message: string) => context.addIssue({ code: 'custom', message });
   if (new Set(value.reviewerModelIds).size !== value.reviewerModelIds.length) issue('FUSION_REVIEWERS_DUPLICATE');
+  if (Object.keys(value.reviewerRoles).length > 0) {
+    const chosen = value.reviewerModelIds.map(id => value.reviewerRoles[id]);
+    if (chosen.some(role => !role) || new Set(chosen).size !== chosen.length) issue('FUSION_REVIEWER_ROLES_INVALID');
+  }
   if (value.maxRounds * (value.reviewerModelIds.length + 1) > FUSION_MAX_REVIEW_CALLS) issue('FUSION_REVIEW_CALLS_EXCEEDED');
   if (value.enabled && (value.reviewerModelIds.length !== PANEL_SEATS.length || !value.summaryModelId || !value.maxBudgetUsd
     || !value.skillId)) {
@@ -82,14 +92,15 @@ const compare = z.object({
 export const fusionSettings = z.object({ version: z.literal(1), review, compare }).strict();
 export type FusionSettings = z.infer<typeof fusionSettings>;
 
-/** Both modes off by default (Master Plan §4.2). 3 reviewers + 1 summary, at most 2 rounds (Owner 2026-10-13). */
+/** Both modes off by default (Master Plan §4.2). 3 reviewers + 1 summary; one round by default, the debate round stays in the code
+ * for a later return (Owner 2026-10-20: no debate). */
 export const DEFAULT_FUSION_SETTINGS: FusionSettings = {
   version: 1,
-  review: { enabled: false, reviewerModelIds: [], summaryModelId: null, skillId: null, maxRounds: 2,
+  review: { enabled: false, reviewerModelIds: [], summaryModelId: null, skillId: null, maxRounds: 1,
     opinionOutputTokens: 4096,
     // The summary writes the whole report plus a ruling per issue: 16384 was cut off in a staging run (#962).
     summaryOutputTokens: PURPOSE_OUTPUT_CAP, maxBudgetUsd: null, fixedPriceCredits: 1500,
-    dispatchMinutes: 10, breaker: { platformUsd: '2', noDeliveryCalls: 10 }, displayNames: DEFAULT_PANEL_NAMES },
+    dispatchMinutes: 10, breaker: { platformUsd: '2', noDeliveryCalls: 10 }, displayNames: DEFAULT_PANEL_NAMES, reviewerRoles: {} },
   compare: { enabled: false, allowedModelIds: [], defaultModelIds: [], minModels: 2, answerOutputTokens: 8192, maxBudgetUsd: null,
     dispatchMinutes: 10, breaker: { platformUsd: '2', noDeliveryCalls: 10 } },
 };

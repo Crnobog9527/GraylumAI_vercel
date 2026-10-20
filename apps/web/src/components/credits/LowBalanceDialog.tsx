@@ -32,7 +32,7 @@ export function LowBalanceDialog({
 
   const handleRecharge = () => {
     onOpenChange(false);
-    router.push('/profile?tab=subscription');
+    router.push('/app/profile?tab=subscription');
   };
 
   const getTitle = () => {

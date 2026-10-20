@@ -22,7 +22,7 @@ export function useAccountDiscussion(){
    const result=await begin.mutateAsync({accountProjectId,requestId}) as {draftId:string};
    const draftId=result.draftId;sessionStorage.removeItem(key);
    await utils.opc.library.invalidate();
-   router.push('/positioning/'+draftId);
+   router.push('/app/positioning/'+draftId);
    onOpened?.();
   }catch(cause){
    const code=cause instanceof Error?cause.message:'';

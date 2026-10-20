@@ -3,6 +3,7 @@ import { PURPOSE_OUTPUT_CAP } from '../bill2/responseCapacity';
 import { StagingAccessError } from './stagingErrors';
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import type {ConfigurationRows} from './admissionConfiguration';
 export const PURPOSE_BUDGET_KEY = 'runtime_purpose_budgets';
 // Derived from full frozen payload measurements, including duplicated input,
 // attached organization and JSON escaping. See MENTOR-BUDGET.md.
@@ -49,8 +50,10 @@ export const frozenPurposeBudget = z.object({
   historyItems: z.number().int().min(0).max(PURPOSE_HISTORY_CAP),
 }).strict().refine(value => value.inputBytes <= (value.purpose === 'report' ? 196608 : 112000),
   { message: 'RUNTIME_PURPOSE_INPUT_LIMIT' });
-export async function readPurposeBudgets(db: SupabaseClient): Promise<PurposeBudgetsV2 | null> {
-  const result = await db.from('system_settings').select('key,value').eq('key', PURPOSE_BUDGET_KEY).maybeSingle();
+export async function readPurposeBudgets(db: SupabaseClient, configuration?: Promise<ConfigurationRows>): Promise<PurposeBudgetsV2 | null> {
+  const rows = configuration ? await configuration : undefined;
+  const result = rows ? {error: rows.error, data: rows.data?.find(row => row.key === PURPOSE_BUDGET_KEY)}
+    : await db.from('system_settings').select('key,value').eq('key', PURPOSE_BUDGET_KEY).maybeSingle();
   if (result.error) throw new StagingAccessError('RUNTIME_BUDGET_CONFIG_UNAVAILABLE');
   if (!result.data) return null;
   try {

@@ -53,7 +53,7 @@ describe('return URL', () => {
   it('follows only an https checkout.stripe.com page', () => {
     expect(isStripeCheckoutUrl('https://checkout.stripe.com/c/pay/cs_test_a1#frag')).toBe(true);
     for (const url of ['http://checkout.stripe.com/c/pay/cs', 'https://checkout.stripe.com.evil.test/c', 'https://evil.test/?checkout.stripe.com',
-      'https://user@checkout.stripe.com/c', 'https://checkout.stripe.com:8443/c', 'javascript:alert(1)', '/profile', '', null, 42]) {
+      'https://user@checkout.stripe.com/c', 'https://checkout.stripe.com:8443/c', 'javascript:alert(1)', '/app/profile', '', null, 42]) {
       expect(isStripeCheckoutUrl(url)).toBe(false);
     }
   });

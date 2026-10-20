@@ -33,13 +33,13 @@ describe('auth callback origin', () => {
     );
   });
 
-  it('normalizes production public-domain requests to the app auth origin', () => {
+  it('keeps production requests on the single www host (E1)', () => {
     // Isolated from the caller's environment: a configured app URL would correctly win here.
     vi.stubEnv('NEXT_PUBLIC_AUTH_APP_URL', '');
     vi.stubEnv('NEXT_PUBLIC_APP_URL', '');
     try {
       expect(resolveAuthCallbackOrigin(new URL('https://www.graylum.com/auth/callback'))).toBe(
-        'https://app.graylum.com',
+        'https://www.graylum.com',
       );
     } finally {
       vi.unstubAllEnvs();
@@ -57,21 +57,22 @@ describe('auth callback link errors', () => {
     const to = await callback('error=access_denied&error_code=otp_expired'
       + '&error_description=%E8%AF%B7%E8%81%94%E7%B3%BB%E5%AE%A2%E6%9C%8D&next=%2Fprofile');
     expect(to.pathname).toBe('/verify-email');
-    expect(Object.fromEntries(to.searchParams)).toEqual({ redirect: '/profile', reason: 'expired' });
+    expect(Object.fromEntries(to.searchParams)).toEqual({ redirect: '/app/profile', reason: 'expired' });
     expect(auth.exchangeCodeForSession).not.toHaveBeenCalled();
   });
 
   it('sends other link errors to the login page with a code, never the provider text', async () => {
     const to = await callback('error=access_denied&error_description=Pay+here&next=%2Fworkbench%3Ftab%3Da');
     expect(to.pathname).toBe('/login');
-    expect(Object.fromEntries(to.searchParams)).toEqual({ error: 'callback_failed', redirect: '/workbench?tab=a' });
+    // An old address in `next` is moved: /workbench itself now opens positioning (E1).
+    expect(Object.fromEntries(to.searchParams)).toEqual({ error: 'callback_failed', redirect: '/app/positioning?tab=a' });
   });
 
   it('uses the same login error code when the code exchange fails', async () => {
     auth.exchangeCodeForSession.mockResolvedValue({ error: new Error('bad code') });
     const to = await callback('code=abc&next=%2F');
     expect(to.pathname).toBe('/login');
-    expect(Object.fromEntries(to.searchParams)).toEqual({ error: 'callback_failed', redirect: '/' });
+    expect(Object.fromEntries(to.searchParams)).toEqual({ error: 'callback_failed', redirect: '/app' });
   });
 
   it.each(['//evil.example', 'https://evil.example/x', '/\\evil.example', 'javascript:alert(1)'])(
@@ -80,14 +81,14 @@ describe('auth callback link errors', () => {
       const to = await callback(`error=access_denied&next=${encodeURIComponent(unsafe)}`);
       expect(to.hostname).not.toContain('evil');
       expect(to.pathname).toBe('/login');
-      expect(Object.fromEntries(to.searchParams)).toEqual({ error: 'callback_failed', redirect: '/profile' });
+      expect(Object.fromEntries(to.searchParams)).toEqual({ error: 'callback_failed', redirect: '/app/profile' });
     },
   );
 
   it('sends a visit without session to the login page, where a fragment error is read', async () => {
     const to = await callback('next=%2Fprofile');
     expect(to.pathname).toBe('/login');
-    expect(Object.fromEntries(to.searchParams)).toEqual({ redirect: '/profile' });
+    expect(Object.fromEntries(to.searchParams)).toEqual({ redirect: '/app/profile' });
   });
 
   it('still sends a signed-in unverified user to the verify page, without the email in the URL', async () => {
@@ -95,7 +96,7 @@ describe('auth callback link errors', () => {
     auth.getUser.mockResolvedValue({ data: { user: { email: 'a@example.test', email_confirmed_at: null } } });
     const to = await callback('code=abc&next=%2Fprofile');
     expect(to.pathname).toBe('/verify-email');
-    expect(Object.fromEntries(to.searchParams)).toEqual({ redirect: '/profile' });
+    expect(Object.fromEntries(to.searchParams)).toEqual({ redirect: '/app/profile' });
     expect(decodeURIComponent(to.toString())).not.toContain('a@example.test');
   });
 });
@@ -112,16 +113,16 @@ describe('auth callback after a failed code exchange', () => {
       auth.exchangeCodeForSession.mockResolvedValue({ error: Object.assign(new Error('x'), { code }) });
       const to = await callback('code=abc&next=%2Fprofile');
       expect(to.pathname).toBe('/login');
-      expect(Object.fromEntries(to.searchParams)).toEqual({ error: 'link_needs_login', redirect: '/profile' });
+      expect(Object.fromEntries(to.searchParams)).toEqual({ error: 'link_needs_login', redirect: '/app/profile' });
     },
   );
 
   it('drops GoTrue landing parameters from next before redirecting', async () => {
     auth.exchangeCodeForSession.mockResolvedValue({ error: null });
     auth.getUser.mockResolvedValue({ data: { user: { email: 'a@example.test', email_confirmed_at: '2026-09-30T00:00:00Z' } } });
-    const next = encodeURIComponent('/library?item=1&error_code=otp_expired&code=old');
+    const next = encodeURIComponent('/app/library?item=1&error_code=otp_expired&code=old');
     const to = await callback(`code=abc&next=${next}`);
-    expect(`${to.pathname}${to.search}`).toBe('/library?item=1');
+    expect(`${to.pathname}${to.search}`).toBe('/app/library?item=1');
   });
 
   it('ignores an invite code left in old signup metadata and signs the user in normally', async () => {
@@ -130,7 +131,7 @@ describe('auth callback after a failed code exchange', () => {
     auth.getUser.mockResolvedValue({ data: { user: { email: 'a@example.test', email_confirmed_at: '2026-09-30T00:00:00Z',
       user_metadata: { invite_code: 'OLDCODE' } } } });
     const to = await callback('code=abc&next=%2Fprofile');
-    expect(`${to.pathname}${to.search}`).toBe('/profile');
+    expect(`${to.pathname}${to.search}`).toBe('/app/profile');
     expect(logServerError).not.toHaveBeenCalled();
   });
 });
@@ -144,12 +145,12 @@ describe('auth callback failure message by flow', () => {
 
   it('asks a Google sign-in to retry Google, not to use a password', async () => {
     const to = await callback('code=abc&next=%2Fprofile&flow=oauth');
-    expect(Object.fromEntries(to.searchParams)).toEqual({ error: 'oauth_incomplete', redirect: '/profile' });
+    expect(Object.fromEntries(to.searchParams)).toEqual({ error: 'oauth_incomplete', redirect: '/app/profile' });
   });
 
   it('keeps the email-link guidance without the Google marker', async () => {
     const to = await callback('code=abc&next=%2Fprofile&flow=anything');
-    expect(Object.fromEntries(to.searchParams)).toEqual({ error: 'link_needs_login', redirect: '/profile' });
+    expect(Object.fromEntries(to.searchParams)).toEqual({ error: 'link_needs_login', redirect: '/app/profile' });
   });
 });
 

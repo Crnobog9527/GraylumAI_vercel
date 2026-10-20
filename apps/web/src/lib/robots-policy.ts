@@ -67,8 +67,8 @@ export function buildRobots(indexingValue: string | undefined): MetadataRoute.Ro
   };
 }
 
-// Paths that never get indexed, whatever the switch says (spec 2 and 15). Logged-in pages that still live
-// at the root until the /app move are listed too, so turning the switch on early cannot expose them.
+// Paths that never get indexed, whatever the switch says (spec 2 and 15). The old root addresses of the
+// logged-in pages now 308 to /app (E1); they stay listed so a crawler that still reaches one reads noindex.
 export const ALWAYS_NOINDEX_PATHS = [
   '/app',
   '/admin',

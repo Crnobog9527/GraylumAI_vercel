@@ -7,7 +7,7 @@
  * dialog opens. A logged-out visitor is sent to sign-up with the rebuilt link as the return path
  * (Owner 2026-10-17), so nothing from the original query other than these values rides along.
  */
-export const BUY_INTENT_PATH = '/profile';
+export const BUY_INTENT_PATH = '/app/profile';
 
 const LEVELS = ['pro', 'gold'] as const;
 const CYCLES = ['monthly', 'yearly'] as const;

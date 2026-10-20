@@ -36,12 +36,19 @@ import {
   getCreditsRechargeAction,
 } from '@/components/credits/balancePresentation';
 
-// Navigation items configuration
-const navItems = [
-  { href: '/', label: '首页', icon: Home },
-  { href: '/positioning', label: '对话', icon: MessageSquare },
-  { href: '/profile', label: '个人中心', icon: User },
+// Navigation items configuration. The logged-in home is /app since the single-host move (E1); "/" is the public home.
+export const navItems = [
+  { href: '/app', label: '首页', icon: Home },
+  { href: '/app/positioning', label: '对话', icon: MessageSquare },
+  { href: '/app/profile', label: '个人中心', icon: User },
 ];
+
+/** The home entry is active on the logged-in home only; the others also on the pages below them. */
+export function isNavItemActive(pathname: string | null, href: string) {
+  if (!pathname) return false;
+  if (pathname === href) return true;
+  return href !== '/app' && pathname.startsWith(`${href}/`);
+}
 
 export function AppHeader() {
   const pathname = usePathname();
@@ -80,7 +87,7 @@ export function AppHeader() {
       await supabase.auth.signOut();
 
       // 根据环境跳转到不同的着陆页
-      window.location.href = buildAppHref('/landing');
+      window.location.href = buildAppHref('/');
     } catch {
       logClientDevError('Logout failed');
     } finally {
@@ -107,7 +114,7 @@ export function AppHeader() {
 
       <div className="h-full max-w-[1400px] mx-auto px-6 flex items-center justify-between">
         {/* Logo */}
-        <Link href="/" className="flex items-center gap-3 group">
+        <Link href="/app" className="flex items-center gap-3 group">
           <img
             src="/graylum-logo.svg"
             alt=""
@@ -129,8 +136,7 @@ export function AppHeader() {
         {/* Navigation */}
         <nav className="hidden md:flex items-center gap-1">
           {navItems.map((item) => {
-            const isActive = pathname === item.href ||
-              (item.href !== '/' && pathname?.startsWith(item.href));
+            const isActive = isNavItemActive(pathname, item.href);
             const Icon = item.icon;
 
             return (
@@ -243,7 +249,7 @@ export function AppHeader() {
                 border: '1px solid var(--border-primary)'
               }}
             >
-              <Link href="/profile">
+              <Link href="/app/profile">
                 <DropdownMenuItem
                   className="gap-2 rounded-lg cursor-pointer"
                   style={{ color: 'var(--text-secondary)' }}

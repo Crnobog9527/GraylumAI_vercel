@@ -27,7 +27,7 @@ it('tells managed card users about tax and cancellation, uses the frozen list pr
   const text = PAYMENT_NOTICE_TEMPLATES.card_renewal_upcoming!.render(params).text;
   expect(text).toContain('USD 496.00 before tax');
   expect(text).toContain('Applicable taxes are added');
-  expect(text).toContain('https://app.graylum.com/profile?tab=subscription');
+  expect(text).toContain('https://www.graylum.com/app/profile?tab=subscription');
   const domestic = PAYMENT_NOTICE_TEMPLATES.card_renewal_upcoming!.render({ ...params, managed: false }).text;
   expect(domestic).not.toContain('Link');
 });

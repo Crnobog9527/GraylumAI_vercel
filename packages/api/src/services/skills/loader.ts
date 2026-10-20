@@ -203,10 +203,14 @@ export async function activateSkill(source: SkillSource, selection: PackageIdent
   ['SKILL.md', ...roots].forEach(visit);
   // Fail before reading methods when even the raw method bytes cannot fit.
   if ([...paths].reduce((sum, path) => sum + p.files.find(f => f.path === path)!.bytes, 0) > options.maxContextBytes) fail('CAPACITY_EXCEEDED');
+  // A small bounded batch avoids serial network waits without flooding the database.
+  // readVerified still checks current access before each uncached private read;
+  // the fresh check below covers the whole assembled context, including cache hits.
   const entry = await readVerified(source, p, 'SKILL.md');
   const metadata = metadataFor(entry, p);
-  const sections: { path: string; content: string }[] = [];
-  for (const path of paths) sections.push({ path, content: path === 'SKILL.md' ? entry : await readVerified(source, p, path) });
+  const methods = await readResourceBatch([...paths].filter(path => path !== 'SKILL.md'),
+    async path => ({path, content: await readVerified(source, p, path)}));
+  const sections = [{path: 'SKILL.md', content: entry}, ...methods];
   // JSON encoding gives explicit boundaries without trusting markup in private files.
   const context = JSON.stringify({ skill: identityOf(p), resources: sections });
   if (Buffer.byteLength(context, 'utf8') > options.maxContextBytes) fail('CAPACITY_EXCEEDED');
@@ -229,4 +233,17 @@ export async function readSkillResource(source: SkillSource, selection: PackageI
   const text = await readVerified(source, p, path);
   await enabled(source, p);
   return text;
+}
+
+/** At most four concurrent reads; preserve descriptor order and wait for the
+ * whole batch even on refusal, so no private work outlives admission. */
+export async function readResourceBatch<T, R>(items: readonly T[], read: (item: T) => Promise<R>): Promise<R[]> {
+  const result: R[] = [];
+  for (let offset = 0; offset < items.length; offset += 4) {
+    const batch = await Promise.allSettled(items.slice(offset, offset + 4).map(read));
+    const failure = batch.find(row => row.status === 'rejected');
+    if (failure?.status === 'rejected') throw failure.reason;
+    for (const row of batch) if (row.status === 'fulfilled') result.push(row.value);
+  }
+  return result;
 }

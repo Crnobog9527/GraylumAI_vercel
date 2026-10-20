@@ -23,16 +23,16 @@ describe('proxy handling of GoTrue landings', () => {
   });
 
   it('forwards a code on the Site URL root to the server callback', async () => {
-    expect(await get(`${APP}/?code=abc`)).toEqual({ status: 307, to: `${APP}/auth/callback?code=abc&next=/profile` });
+    expect(await get(`${APP}/?code=abc`)).toEqual({ status: 307, to: `${APP}/auth/callback?code=abc&next=/app/profile` });
   });
 
   it('keeps a code on any other page for that page, as before', async () => {
-    expect(await get(`${APP}/library?item=1&code=abc`)).toEqual({
+    expect(await get(`${APP}/app/library?item=1&code=abc`)).toEqual({
       status: 307,
-      to: `${APP}/login?redirect=/library?item=1&code=abc`,
+      to: `${APP}/login?redirect=/app/library?item=1&code=abc`,
     });
     getUser.mockResolvedValue({ data: { user: { email: 'a@example.test', email_confirmed_at: '2026-09-30T00:00:00Z' } } });
-    expect(await get(`${APP}/profile?code=abc`)).toEqual({ status: 200, to: null });
+    expect(await get(`${APP}/app/profile?code=abc`)).toEqual({ status: 200, to: null });
   });
 
   it('leaves the callback itself and API routes alone', async () => {
@@ -40,23 +40,20 @@ describe('proxy handling of GoTrue landings', () => {
     expect((await get(`${APP}/api/health?code=abc`)).to).toBeNull();
   });
 
-  it('forwards a code on the public site root to the app callback without losing it', async () => {
+  it('forwards a code on the production root to its own callback without losing it', async () => {
     expect(await get('https://www.graylum.com/?code=abc')).toEqual({
       status: 307,
-      to: 'https://www.graylum.com/auth/callback?code=abc&next=/profile',
+      to: 'https://www.graylum.com/auth/callback?code=abc&next=/app/profile',
     });
-    // The public site then sends its /auth/callback, query included, to the app domain.
-    expect(await get('https://www.graylum.com/auth/callback?code=abc&next=%2Fprofile')).toEqual({
-      status: 307,
-      to: 'https://app.graylum.com/auth/callback?code=abc&next=/profile',
-    });
+    // The callback is served on the same host; nothing forwards it to another domain any more (E1).
+    expect((await get('https://www.graylum.com/auth/callback?code=abc&next=%2Fapp%2Fprofile')).status).toBe(200);
   });
 
   it('sends an expired-link landing on the root straight to the resend page', async () => {
     const landing = `${APP}/?error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid`;
-    expect(await get(landing)).toEqual({ status: 307, to: `${APP}/verify-email?redirect=/profile&reason=expired` });
+    expect(await get(landing)).toEqual({ status: 307, to: `${APP}/verify-email?redirect=/app/profile&reason=expired` });
     // The resend page itself carries no error parameters, so it cannot loop back here.
-    expect((await get(`${APP}/verify-email?redirect=%2Fprofile&reason=expired`)).status).toBe(200);
+    expect((await get(`${APP}/verify-email?redirect=%2Fapp%2Fprofile&reason=expired`)).status).toBe(200);
   });
 
   it('keeps the existing handling for other errors on the root', async () => {
@@ -69,6 +66,6 @@ describe('proxy handling of GoTrue landings', () => {
   it('never sends a signed-in user from login to a target that still carries GoTrue errors', async () => {
     getUser.mockResolvedValue({ data: { user: { email: 'a@example.test', email_confirmed_at: '2026-09-30T00:00:00Z' } } });
     const redirect = encodeURIComponent('/?error=access_denied&error_code=otp_expired');
-    expect(await get(`${APP}/login?redirect=${redirect}`)).toEqual({ status: 307, to: `${APP}/profile` });
+    expect(await get(`${APP}/login?redirect=${redirect}`)).toEqual({ status: 307, to: `${APP}/app/profile` });
   });
 });

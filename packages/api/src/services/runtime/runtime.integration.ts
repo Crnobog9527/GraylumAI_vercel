@@ -1214,17 +1214,20 @@ it('RUNTIME: AC-1 opc.mentorTurnStream admits and streams a mentor turn in one i
    // Attached organizers skip one Session history read in each execution.
    // C2 adds one read-only stop-intent check after the provider response, before completion.
    // The first prepare of this new package misses the Skill file cache (AC-0c).
-   oldPrepareOpening:{prelude:2,policy:0,host:9,admission:16,rateLimit:0},
+   oldPrepareOpening:{prelude:2,policy:0,host:9,admission:15,rateLimit:0},
    oldStreamOpening:{prelude:2,policy:0,host:3,execute:7,provider:18,rateLimit:0},
    // R1 sizes all readable files: seven cold resources plus two permission checks; warm turns add only two checks.
-   oldPrepareAnswer:{prelude:2,policy:0,host:8,admission:21,rateLimit:0},
+   oldPrepareAnswer:{prelude:2,policy:0,host:8,admission:20,rateLimit:0},
    oldStreamAnswer:{prelude:2,policy:0,host:3,execute:7,provider:18,rateLimit:0},
    // One invocation: one prelude instead of two; admission and execution unchanged.
-   opening:{prelude:2,policy:0,host:12,admission:12,execute:7,provider:18,rateLimit:0},
-   answer:{prelude:2,policy:0,host:11,admission:14,execute:7,provider:18,rateLimit:0},
+   opening:{prelude:2,policy:0,host:12,admission:11,execute:7,provider:18,rateLimit:0},
+   answer:{prelude:2,policy:0,host:11,admission:13,execute:7,provider:18,rateLimit:0},
   });
   // Empty backlog: exactly one pre-admission RPC and one completion capture RPC.
   const label=(name:string)=>Object.fromEntries(Object.entries(all).map(([key,m])=>[key,m.summary.labels[name]?.rt??0]));
+  // Measured after staging/#1216 sync: one combined admission settings read; execution gates remain independent.
+  expect(label('rest/system_settings')).toEqual({oldPrepareOpening:1,oldStreamOpening:0,oldPrepareAnswer:1,
+   oldStreamAnswer:0,opening:1,answer:1});
   // D7's seven visibility checks are additional reads, not replacement auth/package checks.
   expect(label('rpc/content_erasure_visible')).toEqual({oldPrepareOpening:0,oldStreamOpening:7,oldPrepareAnswer:0,oldStreamAnswer:7,opening:7,answer:7});
   expect(label('rpc/opc_capture_apply')).toEqual({oldPrepareOpening:1,oldStreamOpening:1,oldPrepareAnswer:1,oldStreamAnswer:1,opening:2,answer:2});
@@ -1476,7 +1479,7 @@ it('RUNTIME: browser ordinary and document Skill survive refresh, actual process
   await page.goto(app+'/login?redirect=/runtime');await hydrated;
   await page.getByPlaceholder('name@example.com').fill(email);await page.getByPlaceholder('输入你的密码').fill(password);
   const choicesResponse=page.waitForResponse(r=>r.url().includes('runtime.choices'));
-  await page.getByRole('button',{name:'登录',exact:true}).last().click();await page.waitForURL(u=>u.pathname==='/runtime');
+  await page.getByRole('button',{name:'登录',exact:true}).last().click();await page.waitForURL(u=>u.pathname==='/app/runtime');
   expect((await choicesResponse).status()).toBe(200);
   expect(await page.getByRole('button',{name:'新建对话',exact:true}).count()).toBe(0);
   await page.getByRole('link',{name:'新对话',exact:true}).click();
@@ -1494,7 +1497,7 @@ it('RUNTIME: browser ordinary and document Skill survive refresh, actual process
   // Close the old development page so its HMR reload cannot race recovery navigation.
   await page.close();
   const restarted=await fetch(process.env.V3_LOCAL_REST!+'/__restart_app',{method:'POST',headers:{'x-local-control':process.env.V3_LOCAL_CONTROL!}});expect(restarted.ok).toBe(true);
-  await expect.poll(async()=>{try{return (await fetch(app+'/runtime')).status;}catch{return 0;}},{timeout:30000}).toBe(200);
+  await expect.poll(async()=>{try{return (await fetch(app+'/app/runtime')).status;}catch{return 0;}},{timeout:30000}).toBe(200);
   const restored=await context.newPage();await restored.goto(url);await restored.getByText('Saved runtime answer 1',{exact:true}).waitFor({timeout:60000});expect(await getCount()).toBe(2);
   await restored.getByText('Saved runtime answer 2',{exact:true}).waitFor();
   await context.close();
