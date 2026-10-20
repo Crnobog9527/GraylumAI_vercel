@@ -119,6 +119,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
  const actor=()=>admissionActor(user,admin,policy.weeklyReview);
  async function query(name:string,args:Record<string,unknown>){
   const r=await admin.rpc(name,{...args,p_actor_id:await actor()});
+  if(r.error?.code==='P0001'&&r.error.message==='OPC_BUSINESS_ARCHIVED')throw new StagingAccessError('OPC_BUSINESS_ARCHIVED');
   if(r.error)throwIfContentBindingRefused(r.error);
   if(name==='runtime_admit')throwLibraryRefusal(r.error);
   if(name==='runtime_admit'&&r.error&&['P0001','PT400'].includes(r.error.code)&&

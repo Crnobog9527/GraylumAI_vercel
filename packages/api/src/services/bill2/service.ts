@@ -13,6 +13,7 @@ import { openRouterNotFound, type RejectionRecovery } from './openRouterNotFound
 import { openRouterEvidence } from './openRouterEvidence';
 import {consumeOpenRouterNotStarted} from './openRouterAdapter';
 import { aggregateCredits } from './decimal';
+import { isBillingRead, readBillingRpc, BillingDatabaseUnavailable, transientDatabaseFailure } from './readRetry';
 const uuid = z.string().uuid();
 const scope = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('positioning_draft'), draftId: uuid }).strict(),
@@ -92,17 +93,21 @@ export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: Billi
     return rpcAs<T>(name,args,actor);
   }
   async function rpcAs<T>(name:string,args:Record<string,unknown>,actor:string):Promise<T> {
-    const query=deps.admin.rpc(name,{...args,p_actor_id:actor});
+    const bound={...args,p_actor_id:actor};
     // Native cancellation bounds the owned early write and ambiguous-result readback.
     // Supabase supports abortSignal; test doubles can return already-bounded promises.
     const remaining=Math.max(1,Math.floor(deps.budget?.remainingPersistence()??10_000));
-    const result=await (financialNames.has(name)&&query.abortSignal ? query.abortSignal(AbortSignal.timeout(Math.min(10_000,remaining))) : query);
+    const send=()=>{
+      const query=deps.admin.rpc(name,bound);
+      return financialNames.has(name)&&query.abortSignal ? query.abortSignal(AbortSignal.timeout(Math.min(10_000,remaining))) : query;
+    };
+    const result=await (isBillingRead(name)?readBillingRpc(deps.admin,name,bound,deps.budget):send());
     if (result.error) {
       if (name === 'bill2_claim' || name === 'bill2_dispatch' || name === 'fusion_group_claim') throw claimFailure(result.error);
       // Before 0261 the database refuses a non-402 pending refusal; dispatch then records the plain observation.
       if (name === 'bill2_record' && (result.error as { message?: unknown }).message === 'BILL2_REJECTION_PROOF_DENIED')
         throw new Error('BILL2_REJECTION_PROOF_DENIED');
-      throw new Error('BILL2_DATABASE_UNAVAILABLE');
+      throw new BillingDatabaseUnavailable(result.error);
     }
     return result.data as T;
   }
@@ -124,7 +129,18 @@ export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: Billi
     catch (error) {
       // Ambiguous transaction result: inspect original identity; never redispatch or retry blindly.
       state = await readRun(runId);
-      if (!['settled', 'refunded'].includes(state.state)) throw error;
+      if(state.id!==runId)throw error;
+      if (['settled', 'refunded'].includes(state.state)) return state;
+      const transient=error instanceof BillingDatabaseUnavailable?error.transient:transientDatabaseFailure(error);
+      if(!transient||state.contractVersion!=='bill2.v2'||state.conflict)throw error;
+      // An open v2 run can have settled calls without a terminal run state. Reenter only
+      // this inspected run's idempotent SQL settlement, once; no claim or provider work.
+      deps.budget?.assertCanPersist();
+      try{return await rpc<RunView>('bill2_finalize',{p_run_id:uuid.parse(runId)});}
+      catch(retryError){
+        state=await readRun(runId);
+        if(state.id!==runId||!['settled','refunded'].includes(state.state))throw retryError;
+      }
     }
     return state;
   }

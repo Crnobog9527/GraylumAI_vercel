@@ -18,6 +18,9 @@ export function throwIfProfileLimitRefused(error: { code?: string; message?: str
 }
 
 export function throwOpcRpcError(error: { code?: string; message: string }): never {
+  if (error.code === 'P0001' && error.message === 'OPC_BUSINESS_ARCHIVED') {
+    throw new TRPCError({ code: 'FORBIDDEN', message: 'OPC_BUSINESS_ARCHIVED' });
+  }
   throwIfContentErased(error);
   throwIfContentBindingRefused(error);
   throwIfProfileLimitRefused(error);
