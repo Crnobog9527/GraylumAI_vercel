@@ -110,6 +110,7 @@ try {
   sql(read('packages/db/migrations/0322_pay_stripe_mp_upgrade_overlap.sql'));
   // 0324 extends the post-0322 cap and paid-entry definitions; preserve it in this historical recovery exercise.
   sql(read('packages/db/migrations/0324_paywall_profile_archive.sql'));
+  sql(read('packages/db/migrations/0327_paywall_fusion_archive_fence.sql'));
   assert.deepEqual(objects(),finalCatalog,'reapplying after rollback restores the complete final catalog');
   cases.push('migration-interruption-rolls-back','migration-repeat-unchanged','rollback-preserves-financial-data','reapply-converges');
   console.log(JSON.stringify({result:'PASS',build,cases}));
