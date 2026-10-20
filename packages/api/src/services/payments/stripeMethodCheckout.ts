@@ -43,7 +43,12 @@ async function assertTestClockCustomer(input: Input, mode: 'test' | 'live') {
   if (!customerId) return;
   if (mode !== 'test' || !stripeTestClockPreviewOpen(process.env)
     || input.purchase.itemType !== 'membership_plan' || input.purchase.method !== 'card'
-    || input.purchase.billingCycle === 'one_time') throw new Error('PAY_WAFFO_STEP2_NOT_READY');
+    || input.purchase.billingCycle !== 'monthly') throw new Error('PAY_WAFFO_STEP2_NOT_READY');
+  const plan = await input.db.from('membership_plans').select('id, level')
+    .eq('id', input.purchase.itemId).maybeSingle();
+  if (plan.error || plan.data?.id !== input.purchase.itemId || plan.data?.level !== 'pro') {
+    throw new Error('PAY_WAFFO_TEST_CLOCK_PLAN_DENIED');
+  }
   const customer = await input.stripe.customers.retrieve(customerId);
   if ('deleted' in customer && customer.deleted) throw new Error('PAY_WAFFO_TEST_CLOCK_CUSTOMER_DENIED');
   const testClockId = typeof customer.test_clock === 'string' ? customer.test_clock : customer.test_clock?.id;
