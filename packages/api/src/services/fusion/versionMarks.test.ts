@@ -88,9 +88,22 @@ describe('loading version marks', () => {
     expect(marks.root).toMatchObject({ mark: 'reviewed' });
     expect(seen.some(call => call.column === 'id' && JSON.stringify(call.values) === '["root"]')).toBe(true);
   });
-  it('asks for more than 50 analyses in one call', async () => {
+  it('splits a large library into short id lists so no request URL grows too long', async () => {
     const many = Array.from({ length: 80 }, (_, i) => `10000000-0000-4000-8000-${String(i).padStart(12, '0')}`);
-    const rowsOf = many.map(id => ({ draft_id: id, project_id: `p${id}`, actor_id: mine }));
-    expect(Object.keys(await loadVersionMarks(admin(rowsOf), mine, many))).toEqual(['a']);
+    const sizes: number[] = [];
+    const node = (data: unknown): never => { const n: Record<string, unknown> = {};
+      for (const name of ['select', 'is', 'eq', 'order']) n[name] = () => n;
+      n.in = (_column: string, values: unknown[]) => { sizes.push(values.length); return n; };
+      n.limit = () => Promise.resolve({ data, error: null });
+      n.then = (resolve: (value: unknown) => void) => resolve({ data, error: null });
+      return n as never; };
+    const db = { from: (table: string) => table === 'opc_drafts'
+      ? { select: () => ({ in: (_c: string, values: string[]) => { sizes.push(values.length);
+        return Promise.resolve({ data: values.map(id => ({ draft_id: id, project_id: `p${id}`, actor_id: mine })), error: null }); } }) }
+      : table === 'artifact_versions' ? node([{ id: 'a', source: null, from: null }]) : node([done('r', 'a')]) } as never;
+    expect((await loadVersionMarks(db, mine, many)).a).toMatchObject({ mark: 'reviewed' });
+    expect(Math.max(...sizes)).toBeLessThanOrEqual(40);
+    expect(sizes.length).toBeGreaterThan(4);
   });
+
 });
