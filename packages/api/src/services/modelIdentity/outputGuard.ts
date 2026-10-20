@@ -33,7 +33,7 @@ const PATTERNS = [
   `我(?:是|叫|就是)\\s*(?:一[个個]|一款|名叫)?\\s*${BRAND}${VERSION}${ZH_END}`,
   // 我是由 Google 训练的大型语言模型 / 我是来自 OpenAI 的语言模型
   // 由/来自 must follow 我是 directly (optionally 一个/一款): "我是想看看来自 Google 的开发工具" is ordinary copy (review P2).
-  `我(?:是|叫)\\s*(?:一[个個]|一款)?\\s*${FROM}\\s*${BRAND}\\s*(?:公司)?\\s*(?:${MADE}|的\\s*${ZH_GAP}{0,6}?(?:模型|助手|AI))`,
+  `我(?:是|叫)\\s*(?:一[个個]|一款)?\\s*${FROM}\\s*${BRAND}\\s*(?:公司)?\\s*(?:${MADE}|${ZH_GAP}{1,8}?[\\t ]*${MADE}|的\\s*${ZH_GAP}{0,6}?(?:模型|助手|AI))`,
   // 我由 Anthropic 开发 / 我是被 OpenAI 训练出来的
   `我(?:是)?(?:由|被)\\s*${BRAND}\\s*(?:公司)?(?:\\s*${MADE}|${ZH_GAP}{1,8}?[\\t ]*${MADE})`,
   // 我的底层模型是 GPT-4 / 我背后的技术来自 Google
@@ -44,7 +44,7 @@ const PATTERNS = [
   `作[为為]\\s*(?:一[个個]|一款)?\\s*${BRAND}\\s*[，,]\\s*我`,
   `作[为為]\\s*(?:一[个個]|一款)?\\s*${FROM}\\s*${BRAND}\\s*(?:公司)?\\s*(?:${MADE}|${ZH_GAP}{1,8}?[\\t ]*${MADE}|的\\s*${ZH_GAP}{0,6}?(?:模型|助手|AI))`,
   // As ChatGPT, I can help / As an AI assistant developed by OpenAI / As a GPT-4 based model (review P1)
-  String.raw`\bAs\s+${BRAND}\b[^.!?]{0,6}?,\s*(?:I|my)\b`,
+  String.raw`\bAs\s+${BRAND}\b[ \t]*,[ \t\r\n]*(?:I|my)\b`,
   String.raw`\bAs\s+(?:an?|the)\s+(?:[\w-]+\s+){0,4}(?:model|AI|assistant|chatbot|LLM)\b${MAKER}\s+${BRAND}`,
   String.raw`\bAs\s+(?:an?|the)\s+${BRAND}[\w.-]*(?:\s+[\w-]+){0,2}?\s+(?:model|AI|assistant|chatbot|LLM)${ROLE_END}`,
   // I am Claude / I'm ChatGPT / I am called Gemini

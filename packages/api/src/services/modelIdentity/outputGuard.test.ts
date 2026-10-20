@@ -11,6 +11,7 @@ const LEAKS_ZH = [
   '我是由 Anthropic 开发完成的 AI 助手。',
   '作为一个由 Google 精心训练的 AI 助手，我可以帮你。',
   '我是由 Google 精心训练的大型语言模型。',
+  '我是一个由 Google 精心训练的大型语言模型。',
   '我是由 Google\n训练的大型语言模型。',
   '我是 Claude，由 Anthropic 开发的 AI 助手。',
   '我是ChatGPT。',
@@ -102,6 +103,8 @@ const SAFE = [
   '我是由 Google\n开发者社区推荐的作者。',
   '作为想了解来自 OpenAI 的新工具的创作者，你可以先试用。',
   'As discussed, Gemini is good for long scripts.',
+  'As ChatGPT says, I prefer Claude.',
+  'As ChatGPT says,\nI prefer Claude.',
   // Review P1: a user's own product built on an AI model
   '我基于 Claude 开发了一个写作工具，想推广它。',
   '我基于 Claude 二次开发了一个工具。',
