@@ -1041,7 +1041,7 @@ try {
       env.V3_VERIFY_DELIVERED_PREVIEW='true';
       await childExit(runTests('^OPC: delivered preview'));
     }
-    console.log("PERSISTENT_PREVIEW_READY " + JSON.stringify({ id: previewState.id, url: env.V3_LOCAL_APP + (opcMode ? "/positioning" : runtimeMode ? "/runtime" : ""), action: previewOptions.action, volume: previewState.names.volume, bootstrap: lifecycle.bootstrap }));
+    console.log("PERSISTENT_PREVIEW_READY " + JSON.stringify({ id: previewState.id, url: env.V3_LOCAL_APP + (opcMode ? "/app/positioning" : runtimeMode ? "/app/runtime" : ""), action: previewOptions.action, volume: previewState.names.volume, bootstrap: lifecycle.bootstrap }));
     await servingEnded;
   }
 } catch (error) {

@@ -48,7 +48,7 @@ it('start: refusals come back as fixed codes', async () => {
 
 it('callback: without this browser\'s cookie nothing is recorded', async () => {
   const res = await GET(new NextRequest(`${origin}/api/publish-monitor/connect/callback?accountIds=spc_1&isSuccess=true`));
-  expect(res.headers.get('location')).toBe(`${origin}/publish-monitor/connect?error=PUBLISH_MONITOR_REQUEST_INVALID`);
+  expect(res.headers.get('location')).toBe(`${origin}/app/publish-monitor/connect?error=PUBLISH_MONITOR_REQUEST_INVALID`);
   expect(mocks.callback).not.toHaveBeenCalled();
 });
 
@@ -58,18 +58,18 @@ it('callback: records the cookie\'s attempt with sanitized hints, even when the 
     `${origin}/api/publish-monitor/connect/callback?accountIds=spc_1,../x,spc_2&accountIds=spc_3&isSuccess=false&requestId=forged`,
     { headers: { cookie: `graylum_pm_connect=${request}` } }));
   expect(mocks.callback).toHaveBeenCalledWith({ requestId: request, accountIds: ['spc_1', 'spc_2', 'spc_3'] });
-  expect(res.headers.get('location')).toBe(`${origin}/publish-monitor/connect?request=${request}&provider=failed`);
+  expect(res.headers.get('location')).toBe(`${origin}/app/publish-monitor/connect?request=${request}&provider=failed`);
 });
 
 it('callback: only someone else\'s account came back -> the owned-elsewhere explanation, not an empty page', async () => {
   mocks.callback.mockResolvedValue({ requestId: request, offered: 0, takenOver: 1 });
   const res = await GET(new NextRequest(`${origin}/api/publish-monitor/connect/callback?accountIds=spc_1`,
     { headers: { cookie: `graylum_pm_connect=${request}` } }));
-  expect(res.headers.get('location')).toBe(`${origin}/publish-monitor/connect?error=PUBLISH_MONITOR_ACCOUNT_OWNED_ELSEWHERE`);
+  expect(res.headers.get('location')).toBe(`${origin}/app/publish-monitor/connect?error=PUBLISH_MONITOR_ACCOUNT_OWNED_ELSEWHERE`);
   mocks.callback.mockResolvedValue({ requestId: request, offered: 1, takenOver: 1 });
   const mixed = await GET(new NextRequest(`${origin}/api/publish-monitor/connect/callback?accountIds=spc_1,spc_2`,
     { headers: { cookie: `graylum_pm_connect=${request}` } }));
-  expect(mixed.headers.get('location')).toBe(`${origin}/publish-monitor/connect?ownedElsewhere=1&request=${request}`);
+  expect(mixed.headers.get('location')).toBe(`${origin}/app/publish-monitor/connect?ownedElsewhere=1&request=${request}`);
 });
 
 it('callback: an expired login goes to login and comes back to the same callback', async () => {

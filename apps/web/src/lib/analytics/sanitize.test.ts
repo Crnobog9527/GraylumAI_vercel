@@ -6,8 +6,8 @@ const ORIGIN = 'https://auth-staging.graylum.com';
 
 describe('sanitizePageUrl', () => {
   it('keeps only the template and registered UTM values', () => {
-    expect(sanitizePageUrl(`${ORIGIN}/positioning/draft-123?tab=x&utm_source=YouTube&utm_medium=video#frag`))
-      .toBe(`${ORIGIN}/positioning/[draftId]?utm_source=youtube&utm_medium=video`);
+    expect(sanitizePageUrl(`${ORIGIN}/app/positioning/draft-123?tab=x&utm_source=YouTube&utm_medium=video#frag`))
+      .toBe(`${ORIGIN}/app/positioning/[draftId]?utm_source=youtube&utm_medium=video`);
   });
 
   it('drops unregistered UTM values that may name a person', () => {
@@ -35,7 +35,7 @@ describe('sanitizeReferrer', () => {
   });
 
   it('turns this site into a template, or its origin when the page is not reportable', () => {
-    expect(sanitizeReferrer(`${ORIGIN}/positioning/draft-1?x=1`, ORIGIN)).toBe(`${ORIGIN}/positioning/[draftId]`);
+    expect(sanitizeReferrer(`${ORIGIN}/app/positioning/draft-1?x=1`, ORIGIN)).toBe(`${ORIGIN}/app/positioning/[draftId]`);
     expect(sanitizeReferrer(`${ORIGIN}/verify-email?email=a@b.c`, ORIGIN)).toBe(ORIGIN);
     expect(sanitizeReferrer(`${ORIGIN}/auth/callback?code=x`, ORIGIN)).toBe(ORIGIN);
   });
@@ -48,6 +48,6 @@ describe('sanitizeReferrer', () => {
 
 describe('pageTitleFor', () => {
   it('is the template path', () => {
-    expect(pageTitleFor(`${ORIGIN}/positioning/[draftId]?utm_source=youtube`)).toBe('/positioning/[draftId]');
+    expect(pageTitleFor(`${ORIGIN}/app/positioning/[draftId]?utm_source=youtube`)).toBe('/app/positioning/[draftId]');
   });
 });

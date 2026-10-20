@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 
 const getUser = vi.fn();
@@ -16,35 +16,42 @@ async function get(url: string) {
   return { status: response.status, location: response.headers.get('location') };
 }
 
-describe('proxy login requirement by host', () => {
+describe('proxy login requirement on every host', () => {
   beforeEach(() => {
     getUser.mockResolvedValue({ data: { user: null } });
   });
 
-  it('sends anonymous visitors on every app host to login', async () => {
-    for (const host of ['auth-staging.graylum.com', 'example-preview.vercel.app', 'app.graylum.com', 'new.example.com']) {
-      expect(await get(`https://${host}/profile`)).toEqual({
+  it('sends anonymous visitors on every host to login on that host', async () => {
+    for (const host of ['www.graylum.com', 'auth-staging.graylum.com', 'example-preview.vercel.app', 'app.graylum.com',
+      'new.example.com']) {
+      expect(await get(`https://${host}/app/profile`)).toEqual({
         status: 307,
-        location: `https://${host}/login?redirect=%2Fprofile`,
+        location: `https://${host}/login?redirect=%2Fapp%2Fprofile`,
       });
     }
   });
 
   it('sends a verified user away from login on the staging domain', async () => {
     getUser.mockResolvedValue({ data: { user: { email: 'a@example.com', email_confirmed_at: '2026-09-30T00:00:00Z' } } });
-    expect(await get('https://auth-staging.graylum.com/login?redirect=%2Fprofile')).toEqual({
+    expect(await get('https://auth-staging.graylum.com/login?redirect=%2Fapp%2Fprofile')).toEqual({
       status: 307,
-      location: 'https://auth-staging.graylum.com/profile',
+      location: 'https://auth-staging.graylum.com/app/profile',
+    });
+    // A return target saved before the /app move still lands on the moved page.
+    expect(await get('https://www.graylum.com/login?redirect=%2Fprofile%3Ftab%3Dx')).toEqual({
+      status: 307,
+      location: 'https://www.graylum.com/app/profile?tab=x',
     });
   });
 
   it('sends an unverified user to the verify page without the email in the URL', async () => {
     getUser.mockResolvedValue({ data: { user: { email: 'a+b@example.com', email_confirmed_at: null } } });
     const cases = [
-      ['https://auth-staging.graylum.com/profile?tab=x', 'https://auth-staging.graylum.com/verify-email?redirect=%2Fprofile%3Ftab%3Dx'],
-      ['https://auth-staging.graylum.com/login?redirect=%2Fchat', 'https://auth-staging.graylum.com/verify-email?redirect=%2Fchat'],
-      ['http://localhost:3000/profile', 'http://localhost:3000/verify-email?redirect=%2Fprofile'],
-      ['http://localhost:3000/login?redirect=%2Fchat', 'http://localhost:3000/verify-email?redirect=%2Fchat'],
+      ['https://auth-staging.graylum.com/app/profile?tab=x', 'https://auth-staging.graylum.com/verify-email?redirect=%2Fapp%2Fprofile%3Ftab%3Dx'],
+      // An old return target is moved under /app before it is passed on.
+      ['https://auth-staging.graylum.com/login?redirect=%2Fchat', 'https://auth-staging.graylum.com/verify-email?redirect=%2Fapp%2Fpositioning'],
+      ['http://localhost:3000/app/profile', 'http://localhost:3000/verify-email?redirect=%2Fapp%2Fprofile'],
+      ['https://www.graylum.com/login?redirect=%2Fprofile', 'https://www.graylum.com/verify-email?redirect=%2Fapp%2Fprofile'],
     ];
     for (const [from, location] of cases) {
       expect(await get(from)).toEqual({ status: 307, location });
@@ -64,40 +71,19 @@ describe('proxy login requirement by host', () => {
     }
   });
 
-  it('keeps the public site public without treating look-alike hosts as it', async () => {
-    expect((await get('https://www.graylum.com/landing')).status).toBe(200);
-    expect(await get('https://evilgraylum.com/landing')).toEqual({ status: 200, location: null });
-    expect(await get('https://evilgraylum.com/profile')).toEqual({
-      status: 307,
-      location: 'https://evilgraylum.com/login?redirect=%2Fprofile',
-    });
+  it('treats every host alike, look-alike hosts included', async () => {
+    for (const host of ['www.graylum.com', 'evilgraylum.com']) {
+      expect(await get(`https://${host}/landing/preview/l`)).toEqual({ status: 200, location: null });
+      expect(await get(`https://${host}/app/profile`)).toEqual({
+        status: 307,
+        location: `https://${host}/login?redirect=%2Fapp%2Fprofile`,
+      });
+    }
   });
 
-  describe('relative auth links on the public site', () => {
-    afterEach(() => {
-      vi.unstubAllEnvs();
-    });
-
-    it('go to the app domain with their query when no app URL is configured', async () => {
-      vi.stubEnv('NEXT_PUBLIC_AUTH_APP_URL', '');
-      vi.stubEnv('NEXT_PUBLIC_APP_URL', '');
-      expect(await get('https://www.graylum.com/login?action=signup')).toEqual({
-        status: 307,
-        location: 'https://app.graylum.com/login?action=signup',
-      });
-      expect(await get('https://www.graylum.com/register')).toEqual({
-        status: 307,
-        location: 'https://app.graylum.com/register',
-      });
-    });
-
-    it('go to the configured app URL, such as the staging domain', async () => {
-      vi.stubEnv('NEXT_PUBLIC_AUTH_APP_URL', '');
-      vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://auth-staging.graylum.com');
-      expect(await get('https://www.graylum.com/login?action=signup')).toEqual({
-        status: 307,
-        location: 'https://auth-staging.graylum.com/login?action=signup',
-      });
-    });
+  it('serves login and sign-up on the production host itself instead of forwarding them', async () => {
+    for (const path of ['/login?action=signup', '/register', '/verify-email', '/forgot-password']) {
+      expect(await get(`https://www.graylum.com${path}`), path).toEqual({ status: 200, location: null });
+    }
   });
 });

@@ -11,15 +11,13 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { config as loadDotenv } from 'dotenv';
 import { Client as PgClient } from 'pg';
-import { isSupabaseLikeHost } from './staging-db-host.mjs';
+import { hostHasProductionSignal, isSupabaseLikeHost } from './staging-db-host.mjs';
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 const requiredEnvKeys = ['DATABASE_URL', 'NEXT_PUBLIC_SUPABASE_URL', 'NEXT_PUBLIC_APP_URL'];
 const optionalEnvKeys = ['EXPECTED_SUPABASE_PROJECT_REF', 'EXPECTED_APP_HOST'];
 const defaultExpectedAppHost = 'auth-staging.graylum.com';
-const knownProductionHostFragments = ['app.graylum.com'];
-const productionWordPattern = /(^|[-_.])prod(uction)?($|[-_.])/i;
 
 const requiredFunctionTargets = [
   'atomic_pre_deduct',
@@ -163,12 +161,6 @@ function parseUrl(value, label) {
   } catch {
     throw new SafetyError(`${label} is not a valid URL`);
   }
-}
-
-function hostHasProductionSignal(hostname) {
-  const normalized = hostname.toLowerCase();
-  return knownProductionHostFragments.some((fragment) => normalized.includes(fragment))
-    || productionWordPattern.test(normalized);
 }
 
 function getSupabaseProjectRef(supabaseUrl) {

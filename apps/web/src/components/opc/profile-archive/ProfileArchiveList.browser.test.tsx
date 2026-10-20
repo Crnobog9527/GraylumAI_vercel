@@ -86,7 +86,7 @@ it('lists profiles with the allowance, archives one after confirming, and moves 
     await ui(page.getByText('已用 2/3 个名额')).toBeVisible();
     await ui(page.getByText('名额用完了，可以把不再更新的档案归档。')).toBeVisible();
     await page.getByText('已归档（1）').click();
-    await ui(page.getByRole('link', { name: '查看' })).toHaveAttribute('href', '/positioning/33333333-3333-4333-8333-333333333333');
+    await ui(page.getByRole('link', { name: '查看' })).toHaveAttribute('href', '/app/positioning/33333333-3333-4333-8333-333333333333');
     // Cancelling sends nothing.
     await page.getByRole('button', { name: '归档' }).first().click();
     const dialog = page.getByRole('alertdialog', { name: '归档这个定位档案？' });

@@ -1,5 +1,7 @@
 // Paths anyone may open without logging in. Shared by the proxy (server) and the client-side
-// 401 recovery, which must never send a visitor on one of these pages to the login page.
+// 401 recovery, which must never send a visitor on one of these pages to the login page. Since the /app
+// move (E1) the root "/" is the public home page too; logged-in pages live under /app, admin under /admin,
+// and every path not listed here still needs login, so a page added without a listing stays closed.
 export const PUBLIC_PATHS = [
   '/login',
   '/register',
@@ -42,5 +44,5 @@ export const PUBLIC_PATHS = [
 
 export function isPublicPathname(pathname: string): boolean {
   // Whole path segments only, so /login-anything is not public just because /login is.
-  return PUBLIC_PATHS.some(path => pathname === path || pathname.startsWith(`${path}/`));
+  return pathname === '/' || PUBLIC_PATHS.some(path => pathname === path || pathname.startsWith(`${path}/`));
 }

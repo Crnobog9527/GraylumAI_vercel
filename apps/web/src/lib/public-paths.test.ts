@@ -5,14 +5,14 @@ import { PUBLIC_PAGES } from './seo/public-pages';
 describe('isPublicPathname', () => {
   it('opens listed paths and the pages below them', () => {
     for (const path of ['/login', '/forgot-password', '/reset-password', '/reset-password/', '/auth/callback', '/api/trpc/x',
-      '/about', '/zh-tw', '/zh-tw/', '/zh-tw/ig-jingying', '/zh-tw/about', '/refund', '/refund/', '/refund-policy', '/cookies', '/accessibility']) {
+      '/', '/about', '/zh-tw', '/zh-tw/', '/zh-tw/ig-jingying', '/zh-tw/about', '/refund', '/refund/', '/refund-policy', '/cookies', '/accessibility']) {
       expect(isPublicPathname(path)).toBe(true);
     }
   });
 
   it('matches whole path segments only', () => {
-    for (const path of ['/reset-password-admin', '/loginx', '/authority', '/apix', '/profile', '/',
-      '/zh-twx', '/zh-tw-admin', '/aboutx', '/about-us', '/positioning', '/admin',
+    for (const path of ['/reset-password-admin', '/loginx', '/authority', '/apix', '/app/profile', '/app', '/app/',
+      '/zh-twx', '/zh-tw-admin', '/aboutx', '/about-us', '/app/positioning', '/admin',
       '/refunds', '/admin/refunds']) {
       expect(isPublicPathname(path)).toBe(false);
     }
@@ -43,8 +43,7 @@ describe('isPublicPathname: tutorial blog', () => {
 
 describe('isPublicPathname: every indexable page in the sitemap list', () => {
   it('lets a logged-out visitor open each of them', () => {
-    // '/' is served by the public host rewrite, not by this list.
-    const closed = PUBLIC_PAGES.map(page => page.path).filter(path => path !== '/' && !isPublicPathname(path));
+    const closed = PUBLIC_PAGES.map(page => page.path).filter(path => !isPublicPathname(path));
     expect(closed).toEqual([]);
   });
   it('opens the comparison page in both languages', () => {

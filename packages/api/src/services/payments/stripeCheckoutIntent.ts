@@ -86,8 +86,8 @@ export function buildStripeCheckoutRequest(input: {
     ...(coupon ? { discounts: [{ coupon }] } : {}),
     ...(testClockCustomerId ? { customer: testClockCustomerId } : {}),
     expires_at: input.expiresAt,
-    success_url: `${origin.origin}/profile?tab=subscription&checkout=success&session_id={CHECKOUT_SESSION_ID}${testClockReturn}`,
-    cancel_url: `${origin.origin}/profile?tab=subscription&checkout=canceled&session_id={CHECKOUT_SESSION_ID}${testClockReturn}`,
+    success_url: `${origin.origin}/app/profile?tab=subscription&checkout=success&session_id={CHECKOUT_SESSION_ID}${testClockReturn}`,
+    cancel_url: `${origin.origin}/app/profile?tab=subscription&checkout=canceled&session_id={CHECKOUT_SESSION_ID}${testClockReturn}`,
     metadata,
     ...(recurring ? { subscription_data: { metadata } } : { payment_intent_data: { metadata } }),
   };

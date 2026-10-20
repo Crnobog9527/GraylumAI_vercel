@@ -19,5 +19,5 @@ export default async function LandingPreviewF() {
   if (isPublicIndexingEnabled(process.env[SITE_INDEXING_ENV])) notFound();
   const { siteName, membershipPlans, membershipPlansStatus } = await getPublicSiteSettings();
   const data = buildLandingPageData(resolveLandingFlags(), membershipPlansStatus === 'available' ? membershipPlans : []);
-  return <SampleF data={data} siteName={siteName} membershipHref={buildAuthHref('/profile?tab=subscription')} />;
+  return <SampleF data={data} siteName={siteName} membershipHref={buildAuthHref('/app/profile?tab=subscription')} />;
 }

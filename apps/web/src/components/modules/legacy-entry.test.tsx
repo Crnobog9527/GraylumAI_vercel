@@ -24,16 +24,16 @@ function action(node: ReactNode): ReactElement<any> | undefined {
 beforeEach(() => { vi.clearAllMocks(); mocks.catalog = { data: [], isError: false }; });
 describe('legacy entry replacements', () => {
   it.each([
-    ['components/profile/UsageHistoryCard.tsx', '/positioning'],
-    ['components/admin/AdminSidebar.tsx', '/'],
+    ['components/profile/UsageHistoryCard.tsx', '/app/positioning'],
+    ['components/admin/AdminSidebar.tsx', '/app'],
   ])('%s links to %s', (file, destination) => {
     const source = readFileSync(new URL(`../../${file}`, import.meta.url), 'utf8');
     expect(source).toContain(`href="${destination}"`);
     expect(source).not.toMatch(/['"`]\/chat(?:[?'"`])/);
   });
-  it('admin guard returns to the homepage', () => {
+  it('admin guard returns to the logged-in home', () => {
     const source = readFileSync(new URL('../admin/AdminGuard.tsx', import.meta.url), 'utf8');
-    expect(source).toContain("router.push('/')");
+    expect(source).toContain("router.push('/app')");
     expect(source).not.toContain("router.push('/chat')");
   });
   it('opens positioning only for a module in the published positioning catalog', () => {
@@ -42,7 +42,7 @@ describe('legacy entry replacements', () => {
     const button = action(tree)!;
     expect(button.props.disabled).toBe(false);
     button.props.onClick();
-    expect(mocks.push).toHaveBeenCalledExactlyOnceWith('/positioning');
+    expect(mocks.push).toHaveBeenCalledExactlyOnceWith('/app/positioning');
   });
   it.each([false, true])('disables other skills, including when catalog lookup fails (%s)', isError => {
     mocks.catalog.isError = isError;

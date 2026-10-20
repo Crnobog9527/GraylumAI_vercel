@@ -8,7 +8,7 @@ import { noticeLayout, type PaymentNoticeTemplate, type PaymentNoticeTemplates }
 
 // Fixed, first-party links: never render arbitrary URLs from persisted parameters.
 const PRICING = 'https://www.graylum.com/pricing';
-const ACCOUNT = 'https://app.graylum.com/profile?tab=subscription';
+const ACCOUNT = 'https://www.graylum.com/app/profile?tab=subscription';
 const time = z.iso.datetime({ offset: true });
 const date = (value: string) => new Date(value).toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, ' UTC');
 const expiry = z.object({ endDate: time });

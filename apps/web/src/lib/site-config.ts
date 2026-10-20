@@ -7,16 +7,17 @@
 const DEFAULT_SITE_NAME = 'GraylumAI';
 const DEFAULT_SUPPORT_EMAIL = 'support@example.com';
 const DEFAULT_APP_URL = 'http://localhost:3000';
-const DEFAULT_AUTH_APP_URL = 'https://app.graylum.com';
+const DEFAULT_AUTH_APP_URL = 'https://www.graylum.com';
+// The parent domain the production hosts used to share the session cookie on, before the single host.
 const SHARED_COOKIE_DOMAIN = '.graylum.com';
 
-// Production hosts. Only these share the parent-domain session cookie; every other host, including
-// a staging domain under graylum.com, keeps a host-only cookie so sessions never cross environments.
-const PUBLIC_SITE_HOSTS = new Set(['graylum.com', 'www.graylum.com']);
-const SHARED_COOKIE_HOSTS = new Set([...PUBLIC_SITE_HOSTS, 'app.graylum.com']);
-// App hosts whose own origin serves login, the auth callback and the verify page. Matched exactly so a
+// The single production host (E1, SEO_GEO_SPEC section 2). The bare domain and the old app host only
+// redirect to it, so a configured URL naming either of them is read as this host.
+const PRODUCTION_HOST = 'www.graylum.com';
+const LEGACY_PRODUCTION_HOSTS = new Set(['graylum.com', 'app.graylum.com']);
+// Hosts whose own origin serves login, the auth callback and the verify page. Matched exactly so a
 // request's Host header alone never chooses where auth redirects go.
-const STAGING_APP_HOSTS = new Set(['auth-staging.graylum.com']);
+const APP_HOSTS = new Set([PRODUCTION_HOST, 'auth-staging.graylum.com']);
 
 function resolveTrimmedValue(value?: string | null) {
   const trimmed = value?.trim();
@@ -32,7 +33,7 @@ function normalizeAppOrigin(value: string | null, fallback: string) {
     const url = new URL(value);
     const normalizedHost = url.hostname.toLowerCase();
 
-    if (normalizedHost === 'graylum.com' || normalizedHost === 'www.graylum.com') {
+    if (LEGACY_PRODUCTION_HOSTS.has(normalizedHost)) {
       return DEFAULT_AUTH_APP_URL;
     }
 
@@ -54,13 +55,9 @@ function resolveHostname(hostname?: string | null) {
   return '';
 }
 
-export function isPublicSiteHost(hostname: string) {
-  return PUBLIC_SITE_HOSTS.has(hostname);
-}
-
 function isRuntimeAuthHost(hostname: string) {
   return (
-    STAGING_APP_HOSTS.has(hostname) ||
+    APP_HOSTS.has(hostname) ||
     hostname === 'localhost' ||
     hostname === '127.0.0.1' ||
     hostname.endsWith('.localhost') ||
@@ -128,23 +125,30 @@ export function resolveAuthCallbackOrigin(requestOrigin: string | URL) {
   return resolveAuthAppUrl(requestOrigin);
 }
 
+function isGraylumHost(hostname: string) {
+  return hostname === SHARED_COOKIE_DOMAIN.slice(1) || hostname.endsWith(SHARED_COOKIE_DOMAIN);
+}
+
+// Every host keeps a host-only session cookie (no Domain attribute), so sessions never cross hosts or
+// environments; production stopped sharing .graylum.com when the app moved onto the single host.
 export function resolveSupabaseCookieOptions(hostname?: string | null) {
   const normalizedHostname = resolveHostname(hostname);
-  const useSharedDomain = SHARED_COOKIE_HOSTS.has(normalizedHostname);
 
   return {
-    domain: useSharedDomain ? SHARED_COOKIE_DOMAIN : undefined,
+    domain: undefined,
     path: '/',
     sameSite: 'lax' as const,
-    secure: useSharedDomain || normalizedHostname.endsWith(SHARED_COOKIE_DOMAIN),
+    secure: isGraylumHost(normalizedHostname),
   };
 }
 
-// Before host-only cookies, a staging host under graylum.com wrote its session to .graylum.com.
-// Returns this project's cookie names that may still sit there; production hosts return none.
+// Before host-only cookies, the production hosts and a staging host under graylum.com wrote the session
+// to .graylum.com. Returns this project's cookie names that may still sit there, on any graylum.com host.
+// Next to a host-only cookie of the same name the browser may send the stale parent copy first, which can
+// sign the visitor out or loop through login (SEO_GEO_SPEC section 2), so the browser client expires them.
 export function legacyParentCookieNames(cookieNames: string[], hostname?: string | null) {
   const normalizedHostname = resolveHostname(hostname);
-  if (SHARED_COOKIE_HOSTS.has(normalizedHostname) || !normalizedHostname.endsWith(SHARED_COOKIE_DOMAIN)) {
+  if (!isGraylumHost(normalizedHostname)) {
     return [];
   }
 
@@ -163,8 +167,7 @@ function supabaseAuthCookiePrefix() {
 }
 
 // Links for moving around the site. In the browser they point at the app or auth origin. On the
-// server there is no request origin here, so they stay relative: the current host serves them, and on
-// the public site the proxy forwards non-public paths such as /login to the app domain. URLs that
+// server there is no request origin here, so they stay relative and the current host serves them. URLs that
 // must be absolute (email and OAuth redirects, payment return URLs) do not use these helpers; they
 // pass an explicit origin to resolveAuthAppUrl or build from the request.
 export function buildAppHref(path: string) {

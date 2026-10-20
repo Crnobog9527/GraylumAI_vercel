@@ -59,7 +59,7 @@ describe('sentry allowlist scrub', () => {
         stacktrace: { frames: [{ filename: 'app:///_next/static/chunks/a.js?v=1', function: 'save', lineno: 3, vars: { input: 'secret' } }] } }] },
       debug_meta: { images: [{ type: 'sourcemap', code_file: 'app:///_next/static/chunks/a.js?v=1', debug_id: 'd-1', extra: 'x' }] },
       breadcrumbs: [{ category: 'console', message: 'user typed: secret' },
-        { category: 'fetch', level: 'info', data: { method: 'GET', url: '/positioning/LiLeiPrivatePlan?q=1', status_code: 200, body: 'x' } }],
+        { category: 'fetch', level: 'info', data: { method: 'GET', url: '/app/positioning/LiLeiPrivatePlan?q=1', status_code: 200, body: 'x' } }],
     } as unknown as ErrorEvent;
     const out = scrubErrorEvent(event);
     expect(JSON.stringify(out)).not.toMatch(PRIVATE);
@@ -68,7 +68,7 @@ describe('sentry allowlist scrub', () => {
       request: { method: 'POST', url: 'https://x.graylum.com/api/:param/:param' },
       message: '[text]', logentry: { message: '[text]' }, tags: { runtime: 'node' },
       contexts: { trace: { trace_id: 't', span_id: 's' }, os: { name: 'macOS', version: '15' } },
-      breadcrumbs: [{ category: 'fetch', level: 'info', data: { method: 'GET', status_code: 200, url: '/positioning/:param' } }],
+      breadcrumbs: [{ category: 'fetch', level: 'info', data: { method: 'GET', status_code: 200, url: '/app/positioning/:param' } }],
       debug_meta: { images: [{ type: 'sourcemap', debug_id: 'd-1', code_file: 'app:///_next/static/chunks/a.js' }] },
       exception: { values: [{ type: 'Error', value: '[text]', mechanism: { type: 'generic', handled: true },
         stacktrace: { frames: [{ function: 'save', lineno: 3, filename: 'app:///_next/static/chunks/a.js', abs_path: undefined }] } }] },

@@ -1276,7 +1276,7 @@ export const paymentsRouter = router({
         if (session.payment_status === 'paid') {
           await fulfillRecoveredPaidCheckout(ctx.supabaseAdmin, stripe, session, ctx.profileId, () => session.mode === 'payment'
             ? fulfillCreditPackageOrder(ctx.supabaseAdmin, session) : fulfillPaidMembershipCheckoutSession(ctx.supabaseAdmin, stripe, session));
-          return { checkoutUrl: `${appUrl}/profile?tab=subscription&checkout=success&session_id=${encodeURIComponent(session.id)}`,
+          return { checkoutUrl: `${appUrl}/app/profile?tab=subscription&checkout=success&session_id=${encodeURIComponent(session.id)}`,
             sessionId: session.id };
         }
         if (!session.url) throw new Error('Stripe checkout URL missing');

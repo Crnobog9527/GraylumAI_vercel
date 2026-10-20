@@ -11,7 +11,7 @@ const LOGIN_HREF = '/login';
 const SIGNUP_HREF = '/login?action=signup';
 
 const NAV_LINKS = [
-  { label: '它怎么工作', href: '/landing#how-it-works' },
+  { label: '它怎么工作', href: '/#how-it-works' },
   { label: '定价', href: '/pricing' },
   { label: '关于', href: '/about' },
 ] as const;
@@ -60,7 +60,7 @@ export default function LandingHeader({ siteName = resolveSiteName() }: { siteNa
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16 md:h-20">
           {/* Logo */}
-          <Link href="/landing" className="flex items-center gap-2 group">
+          <Link href="/" className="flex items-center gap-2 group">
             <div className="relative">
               <img
                 src="/graylum-logo.svg"

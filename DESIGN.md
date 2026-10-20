@@ -51,10 +51,10 @@ uses white conversation and result surfaces, a `#f7f7f7` surrounding canvas,
 The small warm selection accent is reserved for the active work. The current
 component source is `apps/web/src/components/opc/workspace-frame.module.css`,
 `work-composer.module.css`, `content-editor.module.css`,
-`version-compare.module.css`, `apps/web/src/app/runtime/runtime-work.module.css`,
+`version-compare.module.css`, `apps/web/src/app/app/runtime/runtime-work.module.css`,
 and the library's `library.module.css`, adapted
 from the accepted local high-fidelity reference. The new-task surface is in
-`apps/web/src/app/positioning/start-work.module.css`.
+`apps/web/src/app/app/positioning/start-work.module.css`.
 These styles are scoped to the OPC workbench.
 
 On desktop the shell uses a 264px platform/account/work rail, a flexible

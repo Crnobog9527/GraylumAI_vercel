@@ -29,7 +29,7 @@ export function ReviewPage({ draftId, reviewId }: { draftId: string; reviewId: s
   const drafts = trpc.opc.list.useQuery(undefined, { staleTime: 60_000 });
   const account = (drafts.data?.drafts as { draftId: string; businessName?: string }[] | undefined)
     ?.find(item => item.draftId === draftId)?.businessName ?? '';
-  const back = `/positioning/${draftId}`;
+  const back = `/app/positioning/${draftId}`;
   const raw = detail.data;
   const names = useMemo(() => resolveSeatNames(toPanel(panel.data)), [panel.data]);
   const jury = useMemo(() => (raw ? toJuryDetail(raw) : null), [raw]);

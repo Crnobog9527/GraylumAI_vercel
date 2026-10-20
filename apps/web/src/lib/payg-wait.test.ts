@@ -258,7 +258,7 @@ describe("去充值", () => {
     vi.stubGlobal("window", { open });
     openTopUp();
     expect(open).toHaveBeenCalledWith(TOP_UP_HREF, "_blank", "noopener");
-    expect(TOP_UP_HREF).toBe("/profile?tab=subscription");
+    expect(TOP_UP_HREF).toBe("/app/profile?tab=subscription");
   });
 });
 

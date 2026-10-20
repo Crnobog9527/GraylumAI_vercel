@@ -17,7 +17,7 @@ const plan = (level: string, monthly: number, yearly: number, ready = true) => (
   discount: level === 'pro' ? 0.05 : 0.1, checkoutReady: { monthly: ready, yearly: ready },
 });
 const PLANS = [plan('free', 0, 0), plan('pro', 29, 279), plan('gold', 69, 621)];
-const LINKS = { signup: '/login?action=signup', membership: '/profile?tab=subscription' };
+const LINKS = { signup: '/login?action=signup', membership: '/app/profile?tab=subscription' };
 const text = (html: string) => html.replace(/<[^>]+>/g, ' ');
 
 describe('pricing FAQ', () => {
@@ -42,8 +42,8 @@ describe('pricing plans', () => {
     expect(html).toContain('最高省 25%');
     const inputs = html.match(/<input[^>]*name="pricing-billing"[^>]*>/g) ?? [];
     expect(inputs.find(input => input.includes('checked'))).toContain('value="monthly"');
-    expect(html).toContain('/profile?tab=subscription&amp;buy=pro&amp;cycle=monthly');
-    expect(html).toContain('/profile?tab=subscription&amp;buy=gold&amp;cycle=monthly');
+    expect(html).toContain('/app/profile?tab=subscription&amp;buy=pro&amp;cycle=monthly');
+    expect(html).toContain('/app/profile?tab=subscription&amp;buy=gold&amp;cycle=monthly');
   });
 
   it('states the tax rule next to member prices without any tax amount', () => {
@@ -80,7 +80,7 @@ describe('pricing plans', () => {
   it('points to contact instead of a buy link when checkout is not ready', () => {
     const html = renderToStaticMarkup(createElement(PricingPlans, { plans: [plan('pro', 29, 279, false)], links: LINKS }));
     expect(html).toContain('href="/contact"');
-    expect(html).not.toContain('/profile?tab=subscription');
+    expect(html).not.toContain('/app/profile?tab=subscription');
   });
 
   it('says the catalog is unavailable instead of inventing prices', () => {

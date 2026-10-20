@@ -41,7 +41,7 @@ const ARTICLES: ArticleContent[] = [
 
 // Login entry pages are not in the sitemap but are real pages every visitor can open.
 const LOGIN_LINKS = new Set(['/login', SIGNUP_CTA_HREF]);
-// The public Simplified home page until the /app move (site-chrome SIMPLIFIED_HOME_HREF).
+// The public Simplified home page, "/" since the /app move (site-chrome SIMPLIFIED_HOME_HREF).
 const TEMPORARY_PUBLIC_LINKS = new Set([SIMPLIFIED_HOME_HREF]);
 const PAGE_PATHS = new Set(PUBLIC_PAGES.map(page => page.path));
 
@@ -67,7 +67,7 @@ describe.each(ARTICLES.map(content => [content.path, content] as const))('public
     const url = new URL(content.cta.href, 'https://www.graylum.com');
     expect(url.pathname).toBe('/login');
     expect(url.searchParams.get('action')).toBe('signup');
-    expect(sanitizeRedirectTarget(url.searchParams.get('redirect'))).toBe('/positioning');
+    expect(sanitizeRedirectTarget(url.searchParams.get('redirect'))).toBe('/app/positioning');
   });
 
   it('is in the sitemap and every internal link points at an existing public page', () => {
@@ -113,11 +113,11 @@ describe.each(ARTICLES.map(content => [content.path, content] as const))('public
     expect(content.related.filter(link => link.href.startsWith('/zh-tw/')).length).toBeGreaterThanOrEqual(2);
   });
 
-  it('never links visitors to "/", which is still the logged-in home before the /app move', () => {
+  it('links the Simplified home as "/", the public home page since the /app move (E1)', () => {
     const html = renderToStaticMarkup(<ArticlePage content={content} />);
-    expect(html).not.toContain('href="/"');
-    expect(html).not.toContain('href="/?');
-    // Search engines still see the production root as the home page.
+    expect(SIMPLIFIED_HOME_HREF).toBe('/');
+    expect(html).not.toContain('href="/landing"');
+    // Search engines see the production root as the home page too.
     if (content.breadcrumb[0].path === '/') {
       expect(html).toContain('"item":"https://www.graylum.com/"');
       expect(html).toContain(`href="${SIMPLIFIED_HOME_HREF}"`);

@@ -103,7 +103,7 @@ export default function AccessDeniedPage() {
               返回上一页
             </Button>
             <Button
-              onClick={() => router.push('/')}
+              onClick={() => router.push('/app')}
               className="gap-2"
               style={{
                 background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',

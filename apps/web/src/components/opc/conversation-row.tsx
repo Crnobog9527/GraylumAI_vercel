@@ -31,7 +31,7 @@ export function ConversationRow({ conversation, menuOpen, menuPosition, onOpenMe
           if (event.key === 'Escape') { event.stopPropagation(); rename.cancel(); }
           if (event.key === 'Enter') event.currentTarget.blur();
         }}/>
-    </div> : <Link className={styles.thread} href={'/runtime?session=' + conversation.sessionId}>
+    </div> : <Link className={styles.thread} href={'/app/runtime?session=' + conversation.sessionId}>
       <span>{title}</span>
       <small>{new Date(conversation.lastActivityAt).toLocaleDateString('zh-CN')} · 对话</small>
     </Link>}

@@ -157,7 +157,7 @@ async function pageFor(c = credentials, requests?: string[]) {
   await page.getByPlaceholder("输入你的密码").fill(c.password);
   await page.getByRole("button", { name: "登录", exact: true }).last().click();
   // A suffix glob also matches /login?redirect=/positioning before login succeeds.
-  await page.waitForURL((url) => url.pathname === "/positioning", { timeout: 90000 });
+  await page.waitForURL((url) => url.pathname === "/app/positioning", { timeout: 90000 });
   return { page, context };
 }
 beforeAll(async () => {
@@ -444,7 +444,7 @@ it('ADMIN: browser imports a Skill folder, configures steps, publishes the confi
     const configured = (await sql.query('select workflow from artifact_workflows where module_id=$1 and enabled',[module.id])).rows[0].workflow;
     expect(configured.steps.map((step: any) => step.title)).toEqual(['需求确认', '定位成果']);
     await page.goto(app + '/chat?module=' + module.id);
-    await page.waitForURL(u => u.pathname === '/positioning', { timeout: 30000 });
+    await page.waitForURL(u => u.pathname === '/app/positioning', { timeout: 30000 });
     await page.screenshot({ path: output + '/admin-skill-legacy-entry.png' });
     configured.planResources=['SKILL.md'];
     configured.steps.forEach((step: any,i:number)=>{step.information=[{id:'goal',title:'Goal '+i,required:true,profileKey:'goal_'+i}];});

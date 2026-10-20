@@ -2,13 +2,13 @@
 import type { RuntimeResultVersion, RuntimeSavedResult } from '../runtime-messages';
 
 /**
- * Sample data for the work conversation display components (/runtime), shared by the landing
+ * Sample data for the work conversation display components (/app/runtime), shared by the landing
  * page and the component tests. Made-up example content only.
  */
 
 export const SAMPLE_RUNTIME_HEADER = {
   title: '三分钟学会做司康',
-  meta: { platform: '小红书', account: '烘焙小店', infoHref: '/library' },
+  meta: { platform: '小红书', account: '烘焙小店', infoHref: '/app/library' },
 };
 
 export type SampleRuntimeTurn = {

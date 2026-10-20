@@ -351,8 +351,8 @@ describe('PAY-1 payment boundaries', () => {
   });
   it('allows only the exact server-configured Profile return URL', async () => {
     const { getStripePortalReturnUrl } = await import('../stripe');
-    expect(getStripePortalReturnUrl()).toBe('https://app.example.com/profile?tab=subscription');
-    expect(getStripePortalReturnUrl('https://app.example.com/profile?tab=subscription')).toBe('https://app.example.com/profile?tab=subscription');
+    expect(getStripePortalReturnUrl()).toBe('https://app.example.com/app/profile?tab=subscription');
+    expect(getStripePortalReturnUrl('https://app.example.com/app/profile?tab=subscription')).toBe('https://app.example.com/app/profile?tab=subscription');
   });
   it.each([
     'https://evil.example/profile?tab=subscription', '//evil.example',
@@ -360,7 +360,7 @@ describe('PAY-1 payment boundaries', () => {
     'https://app.example.com@evil.example/profile?tab=subscription',
     'https://app.example.com/profile?tab=subscription&next=https://evil.example',
     'https://app.example.com/profile?tab=subscription#evil',
-    'http://app.example.com/profile?tab=subscription', '/profile?tab=subscription',
+    'http://app.example.com/profile?tab=subscription', '/app/profile?tab=subscription',
     'https://app.example.com:444/profile?tab=subscription',
   ])('rejects Portal return URL abuse %s', async (url) => {
     const { getStripePortalReturnUrl } = await import('../stripe');

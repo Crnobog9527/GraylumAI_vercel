@@ -20,14 +20,14 @@ describe('profile tabs', () => {
   });
 
   it('builds links to a tab', () => {
-    expect(profileTabHref('security')).toBe('/profile?tab=security');
-    expect(profileTabHref('profile')).toBe('/profile');
+    expect(profileTabHref('security')).toBe('/app/profile?tab=security');
+    expect(profileTabHref('profile')).toBe('/app/profile');
   });
 
   it('switches tab while keeping other query parameters', () => {
-    const href = 'https://x.test/profile?tab=subscription&checkout=success#top';
-    expect(withProfileTab(href, 'security')).toBe('/profile?tab=security&checkout=success#top');
-    expect(withProfileTab(href, 'profile')).toBe('/profile?checkout=success#top');
+    const href = 'https://x.test/app/profile?tab=subscription&checkout=success#top';
+    expect(withProfileTab(href, 'security')).toBe('/app/profile?tab=security&checkout=success#top');
+    expect(withProfileTab(href, 'profile')).toBe('/app/profile?checkout=success#top');
   });
 
   it('has no hard-coded /profile?tab= link pointing at a missing tab', () => {

@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { CARD_SETTLE_MS, confirmCardModel, readStepSignal, shownLongEnough, StepConfirmCard, type StepConfirmCardProps } from "./step-confirm-card";
 import { stepConfirmation } from "../../../../../packages/api/src/shared/opcStepConfirmation";
-import { savedRead } from "@/app/positioning/[draftId]/information-autosave";
+import { savedRead } from "@/app/app/positioning/[draftId]/information-autosave";
 import { fieldOrigin, fieldStateLabel, needsLook, sameVisibleStep, visibleStep, type FieldValue, type StepInformation } from "./capture-state";
 
 const v = (value: string, status: FieldValue["status"] = "provisional"): FieldValue => ({ value, status, nature: "decision" });

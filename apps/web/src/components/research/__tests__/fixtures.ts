@@ -74,10 +74,10 @@ export const EVIDENCE: EvidenceEntry[] = [
     fetchedAt: "2026-10-14T09:30:00Z", itemCount: 28, truncated: false,
     sourceUrls: ["https://www.douyin.com/user/sample_1", "https://www.douyin.com/video/1", "https://www.douyin.com/video/2",
       "https://www.douyin.com/video/3", "javascript:alert(1)"],
-    conversationTitle: "职场穿搭账号定位", conversationHref: "/positioning/draft-1" },
+    conversationTitle: "职场穿搭账号定位", conversationHref: "/app/positioning/draft-1" },
   { evidenceId: "ev9", tool: "web_search", args: { query: "通勤穿搭 趋势" }, state: "unknown", fetchedAt: null, itemCount: null,
-    truncated: false, sourceUrls: [], conversationTitle: "职场穿搭账号定位", conversationHref: "/positioning/draft-1" },
+    truncated: false, sourceUrls: [], conversationTitle: "职场穿搭账号定位", conversationHref: "/app/positioning/draft-1" },
   { evidenceId: "ev10", tool: "web_fetch", args: { url: "https://example.com/a/very/long/path/that/keeps/going/and/going/for/the/phone/width" },
     state: "failed", fetchedAt: "2026-10-14T09:31:00Z", itemCount: null, truncated: false, sourceUrls: [],
-    conversationTitle: "自由对话", conversationHref: "/runtime?session=s1" },
+    conversationTitle: "自由对话", conversationHref: "/app/runtime?session=s1" },
 ];

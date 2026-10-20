@@ -3,8 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import {
   isConfirmStepEnvelope, type ConfirmEnvelopeState, type ConfirmStepEnvelope, type Information,
-} from "@/app/positioning/[draftId]/confirm-envelope";
-import { isDefiniteConfirmConflict } from "@/app/positioning/[draftId]/confirm-conflict";
+} from "@/app/app/positioning/[draftId]/confirm-envelope";
+import { isDefiniteConfirmConflict } from "@/app/app/positioning/[draftId]/confirm-conflict";
 import { reportPositioningComplete } from "@/lib/analytics/events";
 import {
   sameVisibleStep, stepBody, stepConfirmationValues, visibleStep, withEdits,

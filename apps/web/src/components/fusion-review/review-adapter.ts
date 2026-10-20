@@ -165,4 +165,4 @@ export function draftMark(item: MineItem | undefined): { label: string; reviewId
   return null;
 }
 
-export const reviewHref = (draftId: string, reviewId: string) => `/positioning/${draftId}/review/${reviewId}`;
+export const reviewHref = (draftId: string, reviewId: string) => `/app/positioning/${draftId}/review/${reviewId}`;

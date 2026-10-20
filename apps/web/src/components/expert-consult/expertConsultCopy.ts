@@ -7,7 +7,7 @@ export const EXPERT_CONSULT_SOURCES = ['report', 'pricing', 'studio'] as const;
 export type ExpertConsultSource = (typeof EXPERT_CONSULT_SOURCES)[number];
 export const isExpertConsultSource = (value: string | null | undefined): value is ExpertConsultSource =>
   EXPERT_CONSULT_SOURCES.includes(value as ExpertConsultSource);
-export const expertConsultPath = (source: ExpertConsultSource) => `/expert-consult?from=${source}`;
+export const expertConsultPath = (source: ExpertConsultSource) => `/app/expert-consult?from=${source}`;
 
 export const NEED_MIN = 10;
 export const NEED_MAX = 2000;

@@ -141,7 +141,7 @@ it('plays a running review with the administrator\'s seat names, hands it to the
     expect(await page.getByRole('button', { name: /停止评审|结束评审/ }).count()).toBe(0);
     expect(calls['fusionReview.continue']).toBeGreaterThanOrEqual(1);
     await page.getByRole('button', { name: '先去忙别的' }).click();
-    expect(await page.evaluate(() => (window as unknown as { __pushed?: string }).__pushed)).toBe(`/positioning/${DRAFT}`);
+    expect(await page.evaluate(() => (window as unknown as { __pushed?: string }).__pushed)).toBe(`/app/positioning/${DRAFT}`);
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 30000);
@@ -240,14 +240,14 @@ it('starts one review with the panel\'s names and opens its page; a running one 
     await ui(page.getByText(/开始时可用积分需要至少 1,820/)).toBeVisible();
     await page.getByRole('button', { name: '开始评审' }).dblclick();
     await page.waitForFunction(() => Boolean((window as unknown as { __pushed?: string }).__pushed));
-    expect(await page.evaluate(() => (window as unknown as { __pushed?: string }).__pushed)).toBe(`/positioning/${DRAFT}/review/${REVIEW}`);
+    expect(await page.evaluate(() => (window as unknown as { __pushed?: string }).__pushed)).toBe(`/app/positioning/${DRAFT}/review/${REVIEW}`);
     expect(calls['fusionReview.start']).toBe(1);
     expect(starts).toEqual([expect.objectContaining({ draftId: DRAFT, sourceVersionId: REVIEW, acceptedCredits: 1500 })]);
     expect(errors).toEqual([]);
   } finally { await page.close(); }
   const running = await openEntry({ enabled: true, mine: [mineItem('running')] });
   try {
-    await ui(running.page.getByRole('link', { name: '评审团正在审阅，去看看 →' })).toHaveAttribute('href', `/positioning/${DRAFT}/review/${REVIEW}`);
+    await ui(running.page.getByRole('link', { name: '评审团正在审阅，去看看 →' })).toHaveAttribute('href', `/app/positioning/${DRAFT}/review/${REVIEW}`);
     expect(await running.page.getByRole('button', { name: '请评审团审阅报告' }).count()).toBe(0);
   } finally { await running.page.close(); }
 }, 40000);

@@ -46,7 +46,7 @@ describe('GA in the browser', () => {
 
   it('after consent: cleaned global fields before config, no automatic page view, one manual page view', () => {
     consent.analytics = true;
-    enterPage(`${ORIGIN}/positioning/draft-9?utm_source=youtube&email=a@b.c`, null);
+    enterPage(`${ORIGIN}/app/positioning/draft-9?utm_source=youtube&email=a@b.c`, null);
     syncGa(ID);
     syncGa(ID);
     const all = calls();
@@ -55,8 +55,8 @@ describe('GA in the browser', () => {
     expect(set).toBeGreaterThan(-1);
     expect(set).toBeLessThan(config);
     expect(all[set]![1]).toEqual({
-      page_location: `${ORIGIN}/positioning/[draftId]?utm_source=youtube`,
-      page_referrer: 'https://chatgpt.com', page_title: '/positioning/[draftId]',
+      page_location: `${ORIGIN}/app/positioning/[draftId]?utm_source=youtube`,
+      page_referrer: 'https://chatgpt.com', page_title: '/app/positioning/[draftId]',
     });
     expect(all[config]).toEqual(['config', ID,
       { send_page_view: false, allow_google_signals: false, allow_ad_personalization_signals: false }]);
@@ -95,12 +95,12 @@ describe('GA in the browser', () => {
     syncGa(ID);
     expect(win[`ga-disable-${ID}`]).toBe(true);
     expect(sendGaEvent(ID, 'sign_up', { method: 'email' })).toBe(false);
-    enterPage(`${ORIGIN}/positioning`, `${ORIGIN}/auth/callback?code=one-time`);
+    enterPage(`${ORIGIN}/app/positioning`, `${ORIGIN}/auth/callback?code=one-time`);
     syncGa(ID);
     expect(win[`ga-disable-${ID}`]).toBe(false);
     const views = events('page_view');
     expect(views).toHaveLength(2);
-    expect(views[1]![2]).toMatchObject({ page_location: `${ORIGIN}/positioning`, page_referrer: ORIGIN });
+    expect(views[1]![2]).toMatchObject({ page_location: `${ORIGIN}/app/positioning`, page_referrer: ORIGIN });
     expect(JSON.stringify(calls())).not.toContain('one-time');
   });
 
@@ -114,11 +114,11 @@ describe('GA in the browser', () => {
 
   it('key events carry the cleaned page and only the given parameters', () => {
     consent.analytics = true;
-    enterPage(`${ORIGIN}/positioning/draft-1`, null);
+    enterPage(`${ORIGIN}/app/positioning/draft-1`, null);
     syncGa(ID);
     expect(sendGaEvent(ID, 'sign_up', { method: 'google' })).toBe(true);
     expect(events('sign_up')[0]![2]).toEqual({
-      method: 'google', page_location: `${ORIGIN}/positioning/[draftId]`, page_title: '/positioning/[draftId]',
+      method: 'google', page_location: `${ORIGIN}/app/positioning/[draftId]`, page_title: '/app/positioning/[draftId]',
     });
   });
 

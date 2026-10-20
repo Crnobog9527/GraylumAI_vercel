@@ -24,7 +24,7 @@ export function PreviewE({ data, siteName, membershipHref }: { data: Data; siteN
       <p className={styles.sampleBar}>不公开的风格样稿 E（frontend-design，参考 ploy.ai 的视觉语言），文案为定稿原文</p>
       <header className={styles.header}>
         <div className={cn(styles.wrap, styles.headerInner)}>
-          <Link href="/landing" className={styles.brand}>
+          <Link href="/" className={styles.brand}>
             <img src="/graylum-logo.svg" alt="" aria-hidden="true" width={28} height={28} />{siteName}
           </Link>
           <nav className={styles.nav} aria-label="主导航">

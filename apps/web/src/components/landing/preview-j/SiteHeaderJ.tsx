@@ -36,7 +36,7 @@ export function SiteHeaderJ({ siteName, cta = J_NAV.cta, onlyBuilt = false }: { 
   return (
     <header ref={ref} className={page.header}>
       <div className={cn(page.wrap, styles.bar)}>
-        <Link href="/landing" className={page.brand}>
+        <Link href="/" className={page.brand}>
           <img src="/graylum-logo.svg" alt="" aria-hidden="true" width={28} height={28} />{siteName}
         </Link>
         <nav className={styles.desktop} aria-label={J_NAV.label}>

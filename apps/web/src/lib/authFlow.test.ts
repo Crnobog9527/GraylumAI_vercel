@@ -62,10 +62,10 @@ describe('verify page reason', () => {
   });
 
   it('builds encoded paths that never carry the email', () => {
-    expect(buildVerifyEmailPath('/profile?x=1', 'signup')).toBe('/verify-email?redirect=%2Fprofile%3Fx%3D1&reason=signup');
-    expect(buildVerifyEmailPath('/profile', 'expired')).toBe('/verify-email?redirect=%2Fprofile&reason=expired');
+    expect(buildVerifyEmailPath('/app/profile?x=1', 'signup')).toBe('/verify-email?redirect=%2Fapp%2Fprofile%3Fx%3D1&reason=signup');
+    expect(buildVerifyEmailPath('/app/profile', 'expired')).toBe('/verify-email?redirect=%2Fapp%2Fprofile&reason=expired');
     expect(buildVerifyEmailPath('/')).toBe('/verify-email?redirect=%2F');
-    expect(buildVerifyEmailPath('/profile?tab=security')).not.toMatch(/email=|@/);
+    expect(buildVerifyEmailPath('/app/profile?tab=security')).not.toMatch(/email=|@/);
   });
 });
 
@@ -123,9 +123,9 @@ describe('buildAuthCallbackUrl', () => {
   it('sanitizes next the same way the callback does', () => {
     const url = new URL(buildAuthCallbackUrl('https://auth-staging.graylum.com', '/?error=access_denied&error_code=otp_expired'));
     expect(url.origin + url.pathname).toBe('https://auth-staging.graylum.com/auth/callback');
-    expect(url.searchParams.get('next')).toBe('/profile');
-    expect(new URL(buildAuthCallbackUrl('https://a.example', '/profile?tab=a')).searchParams.get('next')).toBe('/profile?tab=a');
-    expect(new URL(buildAuthCallbackUrl('https://a.example', '//evil.example')).searchParams.get('next')).toBe('/profile');
+    expect(url.searchParams.get('next')).toBe('/app/profile');
+    expect(new URL(buildAuthCallbackUrl('https://a.example', '/app/profile?tab=a')).searchParams.get('next')).toBe('/app/profile?tab=a');
+    expect(new URL(buildAuthCallbackUrl('https://a.example', '//evil.example')).searchParams.get('next')).toBe('/app/profile');
   });
 });
 
@@ -165,9 +165,9 @@ describe('resendErrorMessage', () => {
 
 describe('Google sign-in callback marker', () => {
   it('adds flow=oauth only for Google, and the marker only changes the fixed message', () => {
-    const google = new URL(buildAuthCallbackUrl('https://a.example', '/profile', 'oauth'));
-    expect(Object.fromEntries(google.searchParams)).toEqual({ next: '/profile', flow: 'oauth' });
-    expect(new URL(buildAuthCallbackUrl('https://a.example', '/profile')).searchParams.has('flow')).toBe(false);
+    const google = new URL(buildAuthCallbackUrl('https://a.example', '/app/profile', 'oauth'));
+    expect(Object.fromEntries(google.searchParams)).toEqual({ next: '/app/profile', flow: 'oauth' });
+    expect(new URL(buildAuthCallbackUrl('https://a.example', '/app/profile')).searchParams.has('flow')).toBe(false);
     const mismatch = authError('bad_code_verifier', 'x');
     expect(classifyCodeExchangeError(mismatch, 'oauth')).toBe('oauth_incomplete');
     expect(classifyCodeExchangeError(mismatch, 'email')).toBe('link_needs_login');

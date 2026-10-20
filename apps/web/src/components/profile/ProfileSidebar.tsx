@@ -41,7 +41,7 @@ const ProfileSidebar = memo(function ProfileSidebar({
       await supabase.auth.signOut();
 
       // 根据环境跳转到不同的着陆页
-      window.location.href = buildAppHref('/landing');
+      window.location.href = buildAppHref('/');
     } catch {
       logClientDevError('Logout failed');
     } finally {

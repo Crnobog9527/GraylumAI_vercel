@@ -55,7 +55,7 @@ export function getStripePortalReturnUrl(requestedUrl?: string): string {
   if (appUrl.username || appUrl.password || !['http:', 'https:'].includes(appUrl.protocol)) {
     throw new Error('Invalid portal application URL');
   }
-  const allowedUrl = new URL('/profile?tab=subscription', appUrl.origin).href;
+  const allowedUrl = new URL('/app/profile?tab=subscription', appUrl.origin).href;
   if (requestedUrl !== undefined && requestedUrl !== allowedUrl) {
     throw new TRPCError({ code: 'BAD_REQUEST', message: '无效的返回地址' });
   }

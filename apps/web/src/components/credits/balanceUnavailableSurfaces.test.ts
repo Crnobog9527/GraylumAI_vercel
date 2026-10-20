@@ -7,7 +7,7 @@ function readSource(relativePath: string): string {
 
 describe('unavailable balance surface wiring', () => {
   it('uses credits.getBalance state as Profile canonical balance without profile fallback', () => {
-    const source = readSource('../../app/profile/page.tsx');
+    const source = readSource('../../app/app/profile/page.tsx');
 
     expect(source).toContain('useCreditsBalance()');
     expect(source).toContain("creditsStatus === 'ready' && credits !== null ? credits : undefined");

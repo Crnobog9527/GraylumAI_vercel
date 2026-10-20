@@ -12,28 +12,11 @@ function isMaintenanceModeEnabled(value: unknown) {
 
 function resolveMaintenanceReturnTarget() {
   if (typeof window === 'undefined') {
-    return '/profile';
+    return '/app/profile';
   }
 
   const searchParams = new URLSearchParams(window.location.search);
   return sanitizeRedirectTarget(searchParams.get('from'));
-}
-
-function resolvePublicSiteLandingUrl() {
-  if (typeof window === 'undefined') {
-    return 'https://graylum.com/landing';
-  }
-
-  const url = new URL(window.location.href);
-
-  if (url.hostname.startsWith('app.')) {
-    url.hostname = url.hostname.slice(4);
-  }
-
-  url.pathname = '/landing';
-  url.search = '';
-  url.hash = '';
-  return url.toString();
 }
 
 export default function MaintenancePage() {
@@ -55,7 +38,8 @@ export default function MaintenancePage() {
   const maintenanceModeEnabled = isMaintenanceModeEnabled(systemSettings?.maintenance_mode);
 
   const handleReturnHome = () => {
-    window.location.assign(resolvePublicSiteLandingUrl());
+    // The public home page is the root of this same host (single host, SEO_GEO_SPEC section 2).
+    window.location.assign('/');
   };
 
   const handleRefreshStatus = async () => {

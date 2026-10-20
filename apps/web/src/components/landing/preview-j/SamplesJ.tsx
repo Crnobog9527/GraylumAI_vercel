@@ -3,7 +3,7 @@
 
 import { useEffect, useId, useRef, useState, type CSSProperties } from 'react';
 import { ChevronDown, ChevronUp, FileText, Pause, Play, RotateCcw } from 'lucide-react';
-import { MentorMarkdown } from '@/app/positioning/[draftId]/MentorMarkdown';
+import { MentorMarkdown } from '@/app/app/positioning/[draftId]/MentorMarkdown';
 import result from '@/components/opc/positioning-result.module.css';
 import { J_SAMPLES } from '@/lib/landing/landing-copy-j-samples';
 import { loadSampleReport, SAMPLE_CHAPTERS, type SampleData } from '@/lib/landing/sample-reports';

@@ -37,7 +37,7 @@ it('renders the work conversation from the shared fixtures', () => {
     <RuntimePendingMessage text={R.SAMPLE_RUNTIME_PENDING} sending/>
     <ContentDraftView {...R.SAMPLE_CONTENT_DRAFT}>
       <RuntimeResultsSection isVideo versions={R.SAMPLE_RESULT_VERSIONS} currentScriptId={R.SAMPLE_CURRENT_SCRIPT_ID}
-        saved={R.SAMPLE_SAVED_RESULTS} libraryHref="/library"/>
+        saved={R.SAMPLE_SAVED_RESULTS} libraryHref="/app/library"/>
     </ContentDraftView>
   </>);
   for (const text of [R.SAMPLE_RUNTIME_HEADER.title, '建议稿', '今天 10:30', R.SAMPLE_RUNTIME_PENDING, '正文稿件', '分镜与剪辑建议',
