@@ -68,7 +68,7 @@ try {
  },applyServerOnly:apply});
  assert.equal(build.failed,null,JSON.stringify(build.failed));
  assert.equal(snapshots.size,2,'0324 and 0326 verified at their historical positions');
- finalCatalog=objects();
+ finalCatalog=objects(); // Include the 0325 catalog, not only the archive migration's historical snapshot.
  assert.equal(sql(`SELECT archived_at IS NULL FROM opc_businesses WHERE id='${legacyBusiness}'`),'t');
  report.build=build;
  report.checks.push('migration interruption rolls back every catalog object','migration repeat preserves structure and ACL');
@@ -89,7 +89,7 @@ try {
  sql(read('packages/db/migrations/0326_paywall_fusion_archive_fence.sql'));
  assert.equal(sql('SELECT jsonb_agg(to_jsonb(b) ORDER BY id) FROM opc_businesses b'),preserved,
   'forward recovery/reapply retains every archive, source and revision');
- assert.deepEqual(objects(),finalCatalog);
+ assert.deepEqual(objects(),finalCatalog,'archive recovery preserves the final catalog including 0325');
  assert.equal(sql(read('packages/db/tests/account-open-policy-audit.sql')),'');
  report.checks.push('reapply retains archived content and releases no additional slots','account-open policy audit PASS');
  console.log(JSON.stringify({result:'PASS',...report}));

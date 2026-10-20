@@ -19,6 +19,8 @@ import { fastSearchOnly, researchRuntimeTools } from './researchRuntimeTool';
 import { frozenResearchConfig, type FrozenResearchTurn } from './researchTurn';
 import type { RuntimeTool } from './runner';
 import type { SessionRpc } from './session';
+import { readBillingRpc } from '../bill2/readRetry';
+import type { RuntimeBudget } from './budget';
 
 const runCalls = z.object({ calls: z.array(z.object({ id: z.string().uuid(), sequence: z.number().int().positive(),
   providerId: z.string().nullable() }).passthrough()) }).passthrough();
@@ -38,7 +40,7 @@ export interface ResearchExecution {
 export function researchExecution(input: {
   research: FrozenResearchTurn | undefined; tools: readonly string[];
   execution: Pick<RuntimeExecution, 'sessionId' | 'runId' | 'epoch' | 'billing' | 'live'>;
-  executionId: string; actorId: string; database: SessionRpc;
+  executionId: string; actorId: string; database: SessionRpc; budget?: RuntimeBudget;
   emit: (event: ResearchTurnEvent) => void;
   /** BILL2 confirmed account or content erasure while recording a subcall: nothing more may reach the client. */
   onClosed: () => void;
@@ -56,7 +58,8 @@ export function researchExecution(input: {
   if (!research) return null;
   const names = POSITIONING_RESEARCH_TOOLS.filter(name => input.tools.includes(name)) as ResearchToolName[];
   const readCalls = async () => {
-    const result = await input.database.rpc('bill2_read', { p_actor_id: input.actorId, p_run_id: execution.runId });
+    const result = await readBillingRpc(input.database,'bill2_read',
+      { p_actor_id: input.actorId, p_run_id: execution.runId },input.budget);
     if (result.error) throw new Error('BILL2_DATABASE_UNAVAILABLE');
     return runCalls.parse(result.data).calls;
   };
