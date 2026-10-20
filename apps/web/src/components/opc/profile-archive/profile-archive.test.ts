@@ -1,19 +1,18 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
-import { isArchivedBusiness, isProfileArchivedError, PROFILE_ARCHIVE_TEXT, profileName, splitProfiles } from './profile-archive';
-import { readBusinesses } from './profile-archive-api';
+import { isDraftArchived, isProfileArchivedError, PROFILE_ARCHIVE_TEXT, profileName, splitProfiles } from './profile-archive';
 import { gateAdmissionNotice } from '@/lib/runtime-gate-notice';
 
 const businesses = [
-  { businessId: 'a', name: '账号 A', archivedAt: null, isArchived: false },
-  { businessId: 'b', name: ' ', archivedAt: '2026-10-19T00:00:00Z', isArchived: true },
-  { businessId: 'c', name: '账号 C', archivedAt: '2026-10-20T00:00:00Z', isArchived: true },
+  { businessId: 'a', name: '账号 A', archivedAt: null, isArchived: false, drafts: [{ draftId: 'a-old' }, { draftId: 'a-new' }] },
+  { businessId: 'b', name: ' ', archivedAt: '2026-10-19T00:00:00Z', isArchived: true, drafts: [] },
+  { businessId: 'c', name: '账号 C', archivedAt: '2026-10-20T00:00:00Z', isArchived: true, drafts: [{ draftId: 'c-1' }] },
 ];
 const drafts = [
-  { draftId: 'a-old', businessId: 'a', createdAt: '2026-10-01' },
-  { draftId: 'a-new', businessId: 'a', createdAt: '2026-10-05' },
-  { draftId: 'c-1', businessId: 'c', createdAt: '2026-10-02' },
-  { draftId: 'orphan', businessId: null, createdAt: '2026-10-09' },
+  { draftId: 'a-old', createdAt: '2026-10-01' },
+  { draftId: 'a-new', createdAt: '2026-10-05' },
+  { draftId: 'c-1', createdAt: '2026-10-02' },
+  { draftId: 'orphan', createdAt: '2026-10-09' },
 ];
 
 describe('profile archive helpers', () => {
@@ -23,6 +22,8 @@ describe('profile archive helpers', () => {
     // Most recently archived first; a profile with no draft has nothing to open.
     expect(archived.map(row => [row.businessId, row.draftId])).toEqual([['c', 'c-1'], ['b', null]]);
     expect(splitProfiles(undefined, undefined)).toEqual({ active: [], archived: [] });
+    // Without the drafts list the profile still opens one of its own drafts.
+    expect(splitProfiles(businesses, undefined).active[0]?.draftId).toBe('a-old');
   });
 
   it('names an unnamed profile', () => {
@@ -31,11 +32,11 @@ describe('profile archive helpers', () => {
     expect(profileName({ name: '账号 A' })).toBe('账号 A');
   });
 
-  it('treats a draft as archived only when its profile is known to be archived', () => {
-    expect(isArchivedBusiness(businesses, 'c')).toBe(true);
-    expect(isArchivedBusiness(businesses, 'a')).toBe(false);
-    expect(isArchivedBusiness(undefined, 'c')).toBe(false);
-    expect(isArchivedBusiness(businesses, null)).toBe(false);
+  it('treats a draft as archived only when an archived profile lists it', () => {
+    expect(isDraftArchived(businesses, 'c-1')).toBe(true);
+    expect(isDraftArchived(businesses, 'a-new')).toBe(false);
+    expect(isDraftArchived(businesses, 'orphan')).toBe(false);
+    expect(isDraftArchived(undefined, 'c-1')).toBe(false);
   });
 
   it('recognises the server refusal by message or code', () => {
@@ -43,12 +44,6 @@ describe('profile archive helpers', () => {
     expect(isProfileArchivedError(Object.assign(new Error('refused'), { code: 'OPC_BUSINESS_ARCHIVED' }))).toBe(true);
     expect(isProfileArchivedError(new Error('OPC_PROFILE_LIMIT'))).toBe(false);
     expect(isProfileArchivedError('OPC_BUSINESS_ARCHIVED')).toBe(false);
-  });
-
-  it('reads either response shape and drops rows that are not profiles', () => {
-    expect(readBusinesses(businesses)).toHaveLength(3);
-    expect(readBusinesses({ businesses: [businesses[0], { businessId: 'x' }, null] })).toEqual([businesses[0]]);
-    expect(readBusinesses(null)).toEqual([]);
   });
 
   it('shows the friendly notice for an archived refusal on any admission path', () => {

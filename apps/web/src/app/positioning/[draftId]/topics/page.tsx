@@ -233,7 +233,7 @@ export default function TopicWorkspacePage() {
    * from there silently produced a null expected revision for every existing
    * account. The list carries the authoritative current revision.
    */
-  const accountList = trpc.opc.list.useQuery(); const archivedDraft = useDraftArchived(draftId, accountList.data) && !read.data?.conversationDeleted;
+  const accountList = trpc.opc.list.useQuery(); const archivedDraft = useDraftArchived(draftId) && !read.data?.conversationDeleted;
   const accounts = (accountList.data?.accounts ?? []) as Array<{
     platform: string; account: string; revision: number;
   }>;

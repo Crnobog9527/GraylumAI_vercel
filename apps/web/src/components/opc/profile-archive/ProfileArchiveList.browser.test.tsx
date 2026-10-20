@@ -9,13 +9,15 @@ let browser: Browser;
 let code: string;
 const entry = fileURLToPath(new URL('./__profile_archive_fixture__.js', import.meta.url));
 const profiles = () => [
-  { businessId: 'b-1', name: '小红书 · 健身', archivedAt: null, isArchived: false },
-  { businessId: 'b-2', name: '抖音 · 读书', archivedAt: null, isArchived: false },
-  { businessId: 'b-3', name: '旧账号', archivedAt: '2026-10-19T00:00:00Z', isArchived: true },
+  { businessId: 'b-1', name: '小红书 · 健身', archivedAt: null, isArchived: false,
+    drafts: [{ draftId: '11111111-1111-4111-8111-111111111111' }] },
+  { businessId: 'b-2', name: '抖音 · 读书', archivedAt: null, isArchived: false, drafts: [] },
+  { businessId: 'b-3', name: '旧账号', archivedAt: '2026-10-19T00:00:00Z', isArchived: true,
+    drafts: [{ draftId: '33333333-3333-4333-8333-333333333333' }] },
 ];
 const drafts = { drafts: [
-  { draftId: '11111111-1111-4111-8111-111111111111', businessId: 'b-1', createdAt: '2026-10-01' },
-  { draftId: '33333333-3333-4333-8333-333333333333', businessId: 'b-3', createdAt: '2026-10-02' },
+  { draftId: '11111111-1111-4111-8111-111111111111', createdAt: '2026-10-01' },
+  { draftId: '33333333-3333-4333-8333-333333333333', createdAt: '2026-10-02' },
 ] };
 
 beforeAll(async () => {
@@ -51,7 +53,7 @@ beforeAll(async () => {
 afterAll(async () => { await browser?.close(); });
 
 /** Serves the three reads; `archive` answers the archive call and returns what the next profile read shows. */
-async function open(page: Page, archive: (body: unknown) => { ok: boolean }) {
+async function open(page: Page, archive: (body: unknown) => { ok: boolean; code?: string }) {
   const state = { rows: profiles(), archives: [] as unknown[] };
   await page.route('**/api/trpc/**', async route => {
     const path = new URL(route.request().url()).pathname.split('/').pop();
@@ -62,8 +64,10 @@ async function open(page: Page, archive: (body: unknown) => { ok: boolean }) {
     if (path === 'opc.archiveBusiness') {
       const body = route.request().postDataJSON();
       state.archives.push(body);
-      if (!archive(body).ok) return route.fulfill({ status: 500, contentType: 'application/json',
-        body: JSON.stringify({ error: { message: 'INTERNAL', code: -32603, data: { code: 'INTERNAL_SERVER_ERROR' } } }) });
+      const answer = archive(body);
+      if (!answer.ok) return route.fulfill({ status: answer.code ? 409 : 500, contentType: 'application/json',
+        body: JSON.stringify({ error: { message: answer.code ?? 'INTERNAL', code: -32603,
+          data: { code: answer.code ? 'CONFLICT' : 'INTERNAL_SERVER_ERROR' } } }) });
       state.rows = state.rows.map(row => row.businessId === (body as { businessId: string }).businessId
         ? { ...row, isArchived: true, archivedAt: '2026-10-20T00:00:00Z' } : row);
       return reply(state.rows.find(row => row.businessId === (body as { businessId: string }).businessId));
@@ -110,5 +114,15 @@ it('keeps the dialog open with a plain notice when archiving fails', async () =>
     await ui(page.getByRole('alertdialog').getByRole('alert')).toHaveText('归档没成功，请稍后再试。');
     expect(state.archives).toHaveLength(1);
     await ui(page.getByText('已用 2/3 个名额')).toBeVisible();
+  } finally { await page.close(); }
+}, 30000);
+
+it('asks to wait when the profile still has a call settling', async () => {
+  const page = await browser.newPage();
+  try {
+    await open(page, () => ({ ok: false, code: 'OPC_BUSINESS_BUSY：这个定位档案正在处理，请稍后归档。' }));
+    await page.getByRole('button', { name: '归档' }).first().click();
+    await page.getByRole('button', { name: '确认归档' }).click();
+    await ui(page.getByRole('alertdialog').getByRole('alert')).toHaveText('这个档案还有操作在进行，等它完成后再归档。');
   } finally { await page.close(); }
 }, 30000);

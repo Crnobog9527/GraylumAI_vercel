@@ -13,6 +13,8 @@ vi.mock('@/trpc/client', () => ({
   }) }) }),
 }));
 vi.mock('@/components/opc/workspace-frame', () => ({ WorkspaceFrame: ({ children }: { children: React.ReactNode }) => <div>{children}</div> }));
+vi.mock('./report-export-button', () => ({ ReportExport: ({ saved }: { saved?: { body: string } }) =>
+  <button data-saved={saved?.body}>导出报告</button> }));
 vi.mock('./InformationExport', () => ({ InformationExport: () => <button>导出已确认资料</button> }));
 vi.mock('@/components/chat-display/report-view/report-view', () => ({ ReportView: ({ body }: { body: string }) => <article>{body}</article> }));
 
@@ -34,8 +36,9 @@ describe('read-only view of an archived profile', () => {
     expect(html).toContain('导出报告');
     expect(html).toContain('导出已确认资料');
     expect(html).not.toMatch(/这段定位对话已删除|整份删除|<textarea|发送|生成报告<\/button>|评审/);
-    // The finalized report is already in the draft read: no report lookup is made for it.
-    expect(queried).toEqual([]);
+    expect(html).toContain('data-saved="# 定位报告正文"');
+    // Only the existing report reads: this round's generated report is looked up, nothing is started.
+    expect(queried).toEqual(['runtime.reportLatest']);
   });
 
   it('keeps the deleted-conversation wording when not archived', async () => {

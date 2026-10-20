@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { trpc } from '@/trpc/client';
 import { Button } from '@/components/ui/button';
 import { PROFILE_ARCHIVE_TEXT as T, profileName, splitProfiles, type ProfileDraft, type ProfileRow } from './profile-archive';
-import { useArchiveBusiness, useProfileBusinesses } from './profile-archive-api';
+import { useProfileBusinesses } from './profile-archive-api';
 
 /**
  * The caller's positioning profiles with an archive action (PAYWALL, Owner 2026-10-20). Archived ones sit in their
@@ -15,7 +15,7 @@ export function ProfileArchiveList({ limitReached = false }: { limitReached?: bo
   const profiles = useProfileBusinesses();
   const drafts = trpc.opc.list.useQuery(undefined, { retry: false });
   const entitlements = trpc.user.getEntitlements.useQuery(undefined, { retry: false, staleTime: 60_000 });
-  const archive = useArchiveBusiness();
+  const archive = trpc.opc.archiveBusiness.useMutation();
   const [confirming, setConfirming] = useState<ProfileRow | null>(null);
   const [notice, setNotice] = useState<{ text: string; tone: 'status' | 'alert' } | null>(null);
   const { active, archived } = splitProfiles(profiles.businesses, (drafts.data?.drafts ?? []) as ProfileDraft[]);
@@ -29,8 +29,13 @@ export function ProfileArchiveList({ limitReached = false }: { limitReached?: bo
       await archive.mutateAsync({ businessId: confirming.businessId });
       setConfirming(null);
       setNotice({ text: T.archived, tone: 'status' });
-    } catch {
-      setNotice({ text: T.archiveFailed, tone: 'alert' });
+    } catch (cause) {
+      const code = cause instanceof Error ? cause.message : '';
+      // BUSY: a call on this profile is still settling; DENIED: it is gone (erased) or not the caller's.
+      // The staging mapping may append its own wording after the code ("OPC_BUSINESS_BUSY：…").
+      const busy = code.includes('OPC_BUSINESS_BUSY'), gone = code.includes('OPC_BUSINESS_DENIED');
+      if (gone) setConfirming(null);
+      setNotice({ text: busy ? T.archiveBusy : gone ? T.archiveGone : T.archiveFailed, tone: 'alert' });
     }
     await profiles.refetch();
   }
@@ -63,7 +68,7 @@ export function ProfileArchiveList({ limitReached = false }: { limitReached?: bo
         </li>)}
       </ul>
     </details>}
-    {notice && <p role={notice.tone} className="text-xs">{notice.text}</p>}
+    {notice && !confirming && <p role={notice.tone} className="text-xs">{notice.text}</p>}
     {confirming && <div role="presentation" className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4">
       <section role="alertdialog" aria-modal="true" aria-label={T.confirmTitle}
         onKeyDown={event => { if (event.key === 'Escape' && !archive.isPending) setConfirming(null); }}

@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 // and the topic workspace, which (from an earlier cache) still names a bound topic conversation.
 const enabled: Record<string, boolean> = {};
 let readData: unknown = { conversationDeleted: true, draftId: 'draft' };
-// PAYWALL profile archive: the drafts list names the draft's profile, and opc.businesses says whether it is archived.
+// PAYWALL profile archive: opc.businesses lists each profile's drafts and whether it is archived.
 let archived = false;
 const idle = { data: undefined, isLoading: false, isFetching: false, error: null, refetch: async () => ({}) };
 const deep = (): unknown => new Proxy(() => undefined, { get: (_, key) => key === 'then' ? undefined : deep(), apply: () => undefined });
@@ -16,9 +16,8 @@ vi.mock('@/trpc/client', () => ({
       enabled[`${String(area)}.${String(procedure)}`] = options?.enabled !== false;
       if (area === 'opc' && procedure === 'read') return { ...idle, data: readData };
       if (area === 'opc' && procedure === 'topicWorkspace') return { ...idle, data: { bound: true, sessionId: 'topic-session' } };
-      if (area === 'opc' && procedure === 'list') return { ...idle, data: { drafts: [{ draftId: 'draft', businessId: 'b' }] } };
-      if (area === 'opc' && procedure === 'businesses')
-        return { ...idle, isSuccess: true, data: [{ businessId: 'b', name: '账号', archivedAt: null, isArchived: archived }] };
+      if (area === 'opc' && procedure === 'businesses') return { ...idle,
+        data: [{ businessId: 'b', name: '账号', archivedAt: null, isArchived: archived, drafts: [{ draftId: 'draft' }] }] };
       return idle;
     },
     useMutation: () => ({ mutate: () => undefined, mutateAsync: async () => ({}), isPending: false }),
