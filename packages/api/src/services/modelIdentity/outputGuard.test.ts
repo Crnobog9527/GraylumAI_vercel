@@ -6,6 +6,7 @@ import { leaksModelIdentity, redactIdentityBody, redactIdentityCard, redactIdent
 // Leaks: what a model may say about itself after a direct question or a jailbreak.
 const LEAKS_ZH = [
   '我是由 Google 训练的大型语言模型。',
+  '我是由 Google\n训练的大型语言模型。',
   '我是 Claude，由 Anthropic 开发的 AI 助手。',
   '我是ChatGPT。',
   '我叫 Gemini。',
@@ -30,6 +31,7 @@ const LEAKS_EN = [
   'I am Claude, an AI assistant made by Anthropic.',
   "I'm ChatGPT.",
   'I am a large language model, trained by Google.',
+  'I am a large language model\ntrained by Google.',
   "I'm an AI assistant built by Anthropic.",
   'I was trained by OpenAI.',
   "I've been developed by Google DeepMind.",
@@ -201,6 +203,15 @@ it('redacts identity strings inside a bare JSON array while preserving ordinary 
     { title: BRAND_REPLY_ZH, brief: 'Claude 和 GPT-4 的差异要按用途比较。' },
     '我在讨论 Claude 和 GPT，想比较它们的写作风格。',
   ]);
+});
+
+it('redacts deeply nested bare JSON arrays without recursive traversal', () => {
+  let value: unknown = 'I am Claude.';
+  for (let depth = 0; depth < 5_000; depth++) value = [value];
+
+  let redacted: unknown = JSON.parse(redactIdentityBody(JSON.stringify(value)));
+  for (let depth = 0; depth < 5_000; depth++) redacted = (redacted as unknown[])[0];
+  expect(redacted).toBe(BRAND_REPLY_EN);
 });
 
 it('organizer summaries: plain prose is redacted; structured extraction values are kept (review P1)', () => {

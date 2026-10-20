@@ -11,10 +11,10 @@ import { questionCardSchema, questionToolCardSchema } from '../../shared/agentTu
 const BRAND = String.raw`(?:claude|anthropic|chat\s?gpt|gpt(?:[-\s]?\d[\w.]*)?|openai|gemini|google|deepmind|bard|qwen|通[义義]千[问問]?|阿里(?:巴巴|云)|`
   + String.raw`deepseek|深度求索|llama|meta\s?ai|mistral|grok|x\.?ai|文心一言|百度|kimi|月之暗面|豆包|字[节節]跳[动動]|位元組跳動|智[谱譜]|chatglm|glm|混元|[腾騰][讯訊]|`
   + String.raw`谷歌|微软|microsoft|copilot)`;
-const ZH_GAP = '[^。！？!?.\\n，,；;]';
+const ZH_GAP = '[^。！？!?.，,；;]';
 // Who made the speaker: maker wording ("trained by"), or "from" right after the model noun. A nearby
 // source ("analyze data from Google") is ordinary copy (review P2).
-const MAKER = String.raw`(?:[^.!?\n]{0,40}?\b(?:built|developed|trained|made|created|designed|powered|provided)\s+by|\s+from)`;
+const MAKER = String.raw`(?:[^.!?]{0,40}?\b(?:built|developed|trained|made|created|designed|powered|provided)\s+by|\s+from)`;
 // The model noun must name the speaker: it ends the clause or continues with identity wording, so
 // "I am a Google AI researcher" or "a model photographer" stay ordinary copy (review P2).
 const ROLE_END = String.raw`\b(?=\s*(?:[,.!?;:]|$)|\s+(?:by|from|developed|trained|made|created|built|that|which|and|here)\b)`;
@@ -43,7 +43,7 @@ const PATTERNS = [
   `作[为為]\\s*(?:一[个個]|一款)?\\s*${BRAND}\\s*[，,]\\s*我`,
   `作[为為]\\s*(?:一[个個]|一款)?\\s*${FROM}\\s*${BRAND}\\s*(?:公司)?${ZH_GAP}{0,10}?(?:${MADE}|的${ZH_GAP}{0,6}?(?:模型|助手|AI))`,
   // As ChatGPT, I can help / As an AI assistant developed by OpenAI / As a GPT-4 based model (review P1)
-  String.raw`\bAs\s+${BRAND}\b[^.!?\n]{0,6}?,\s*(?:I|my)\b`,
+  String.raw`\bAs\s+${BRAND}\b[^.!?]{0,6}?,\s*(?:I|my)\b`,
   String.raw`\bAs\s+(?:an?|the)\s+(?:[\w-]+\s+){0,4}(?:model|AI|assistant|chatbot|LLM)\b${MAKER}\s+${BRAND}`,
   String.raw`\bAs\s+(?:an?|the)\s+${BRAND}[\w.-]*(?:\s+[\w-]+){0,2}?\s+(?:model|AI|assistant|chatbot|LLM)${ROLE_END}`,
   // I am Claude / I'm ChatGPT / I am called Gemini
@@ -144,8 +144,9 @@ export function redactIdentityBody(body: string) {
   // A bare JSON string is shown as plain reply text after reload (review P1).
   if (typeof value === 'string') { const text = redactModelIdentity(value); return text === value ? body : JSON.stringify(text); }
   if (Array.isArray(value)) {
-    const redacted = redactIdentityStrings(value);
-    return JSON.stringify(redacted) === JSON.stringify(value) ? body : JSON.stringify(redacted);
+    const redacted = redactIdentityStringsResult(value);
+    if (!redacted.changed) return body;
+    try { return JSON.stringify(redacted.value) ?? body; } catch { return body; }
   }
   if (!value || typeof value !== 'object') return body;
   const record = value as Record<string, unknown>;
@@ -172,11 +173,44 @@ export function redactIdentityCard<T>(card: T): T | null {
 }
 
 /** Every string inside a JSON value; other values and keys unchanged. */
+function redactIdentityStringsResult<T>(value: T) {
+  let changed = false;
+  const clone = (source: unknown): unknown => {
+    if (typeof source === 'string') {
+      const redacted = redactModelIdentity(source);
+      changed ||= redacted !== source;
+      return redacted;
+    }
+    return Array.isArray(source) ? new Array(source.length)
+      : source && typeof source === 'object' ? {} : source;
+  };
+  const result = clone(value);
+  if (!value || typeof value !== 'object') return { value: result as T, changed };
+  const pending: Array<{ source: object; target: unknown[] | Record<string, unknown> }> = [
+    { source: value, target: result as unknown[] | Record<string, unknown> },
+  ];
+  while (pending.length) {
+    const { source, target } = pending.pop()!;
+    if (Array.isArray(source) && Array.isArray(target)) {
+      for (let index = 0; index < source.length; index++) {
+        if (!(index in source)) continue;
+        const child = source[index];
+        target[index] = clone(child);
+        if (child && typeof child === 'object') pending.push({ source: child, target: target[index] as unknown[] | Record<string, unknown> });
+      }
+    } else {
+      for (const [key, child] of Object.entries(source)) {
+        const copied = clone(child);
+        Object.defineProperty(target, key, { value: copied, enumerable: true, writable: true, configurable: true });
+        if (child && typeof child === 'object') pending.push({ source: child, target: copied as unknown[] | Record<string, unknown> });
+      }
+    }
+  }
+  return { value: result as T, changed };
+}
+
 export function redactIdentityStrings<T>(value: T): T {
-  const walk = (v: unknown): unknown => typeof v === 'string' ? redactModelIdentity(v)
-    : Array.isArray(v) ? v.map(walk)
-      : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x)])) : v;
-  return walk(value) as T;
+  return redactIdentityStringsResult(value).value;
 }
 
 /**
