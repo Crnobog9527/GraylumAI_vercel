@@ -3080,7 +3080,7 @@ for (const sample of [
   const { runtimeExecutor } = await import("../runtime/execute");
   const { createServer } = await import("node:http");
   const { readWorkflowMentorExecution, applyMentorTurnRules } =
-    await import("../../../../../apps/web/src/app/app/positioning/[draftId]/mentor-response");
+    await import("../../../../../apps/web/src/app/(zh-hans)/app/positioning/[draftId]/mentor-response");
   const f = await fixture(2, false, 0, flow => {
     flow.steps[0].information = [
       { id: sample.field, title: sample.title, required: true, profileKey: sample.field, elicitation: "user_fact" },
@@ -10556,7 +10556,7 @@ for (const sample of [
   const { runtimeExecutor } = await import("../runtime/execute");
   const { createServer } = await import("node:http");
   const { readWorkflowMentorExecution, applyMentorTurnRules } =
-    await import("../../../../../apps/web/src/app/app/positioning/[draftId]/mentor-response");
+    await import("../../../../../apps/web/src/app/(zh-hans)/app/positioning/[draftId]/mentor-response");
   const f = await fixture(2, false, 0, flow => {
     flow.steps[0].information = [
       { id: sample.field, title: sample.title, required: true, profileKey: sample.field, elicitation: "user_fact" },

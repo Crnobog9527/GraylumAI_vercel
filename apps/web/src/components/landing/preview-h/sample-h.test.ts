@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 vi.mock('next/font/local', () => ({ default: () => ({ variable: 'display-font', className: 'display-font' }) }));
 
 import sitemap from '@/app/sitemap';
-import { metadata } from '@/app/landing/preview/h/page';
+import { metadata } from '@/app/(zh-hans)/landing/preview/h/page';
 import { SCENES } from '@/components/landing/preview-g/scenes';
 import { TILT_MAX, tiltFor } from '@/components/public-site/motion/DepthStage';
 import { DigitRoll, splitUnits } from '@/components/public-site/motion/depth-text';

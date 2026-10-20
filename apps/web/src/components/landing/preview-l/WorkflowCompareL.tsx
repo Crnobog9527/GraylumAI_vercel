@@ -3,7 +3,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Bot } from 'lucide-react';
-import work from '@/app/app/runtime/runtime-work.module.css';
+import work from '@/app/(zh-hans)/app/runtime/runtime-work.module.css';
 import { RuntimeProposal, RuntimeReply, RuntimeTurnView } from '@/components/chat-display/runtime-messages';
 import { ChatNoticeList } from '@/components/chat/ChatInlineNotice';
 import compare from '@/components/landing/preview-j/compare-j.module.css';

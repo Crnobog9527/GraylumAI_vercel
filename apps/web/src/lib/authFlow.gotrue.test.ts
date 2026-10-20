@@ -91,7 +91,7 @@ describe.skipIf(!authUrl || !mailUrl)('unconfirmed email sign-in against local G
     };
     process.env.NEXT_PUBLIC_SUPABASE_URL ??= 'http://gotrue.local';
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ??= 'local-anon';
-    const { GET } = await import('@/app/auth/callback/route');
+    const { GET } = await import('@/app/(zh-hans)/auth/callback/route');
     const route = async (landing: URL) => new URL((await GET(new NextRequest(landing.toString()))).headers.get('location')!);
 
     // Sign-up link (PKCE): the error arrives as query parameters and the server routes it.
@@ -130,7 +130,7 @@ describe.skipIf(!authUrl || !mailUrl)('unconfirmed email sign-in against local G
 
     process.env.NEXT_PUBLIC_SUPABASE_URL ??= 'http://gotrue.local';
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ??= 'local-anon';
-    const { GET } = await import('@/app/auth/callback/route');
+    const { GET } = await import('@/app/(zh-hans)/auth/callback/route');
     const to = new URL((await GET(new NextRequest(landing.toString()))).headers.get('location')!);
     expect(to.pathname).toBe('/login');
     expect(Object.fromEntries(to.searchParams)).toEqual({ redirect: '/app/profile' });

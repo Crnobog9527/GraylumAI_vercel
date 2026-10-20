@@ -573,7 +573,7 @@ test.describe('Authenticated Security', () => {
 // login and signup forms, never ask for or validate a code, and never reach a removed endpoint.
 test.describe('Retired invitation links', () => {
   // Like the other login checks, the login form needs a live Supabase runtime; the secretless CI run is
-  // covered by src/app/login/page.test.tsx, which renders the same two URLs.
+  // covered by src/app/(zh-hans)/login/page.test.tsx, which renders the same two URLs.
   test.skip(!hasAuthRuntime, 'Login form checks require a live Supabase runtime');
   for (const query of ['invite=OLDCODE', 'action=signup&invite=OLDCODE']) {
     test(`opens the normal auth form for /login?${query}`, async ({ page }) => {

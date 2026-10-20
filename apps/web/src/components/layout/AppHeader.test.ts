@@ -32,8 +32,8 @@ describe('home links in logged-in screens (E1)', () => {
     'components/opc/rail-view.tsx',
     'components/admin/AdminSidebar.tsx',
     'components/admin/AdminGuard.tsx',
-    'app/access-denied/page.tsx',
-    'app/app/page.tsx',
+    'app/(zh-hans)/access-denied/page.tsx',
+    'app/(zh-hans)/app/page.tsx',
   ])('%s never sends a signed-in user to the public home page "/"', async file => {
     const { readFileSync } = await import('node:fs');
     const source = readFileSync(new URL(`../../${file}`, import.meta.url), 'utf8');

@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
 import sitemap from '@/app/sitemap';
-import { metadata } from '@/app/landing/preview/jury/page';
+import { metadata } from '@/app/(zh-hans)/landing/preview/jury/page';
 import {
   ADOPT_ERROR_LABEL, choosable, firstSentence, isComplete, keyPoints, linkedGroup, mockConfirm, mockPropose, needsConfirm, setConfirmed, setUse, toChoices, type ChoiceState,
 } from './jury-adopt';
