@@ -24,7 +24,7 @@ const VERSION = String.raw`(?:[-\s]?\d[\w.]*|\s+(?:opus|sonnet|haiku|flash|pro|u
 const EN_END = String.raw`(?=\s*(?:[,.!?;:]|$)|\s+(?:an?\s+|the\s+)?(?:[\w-]+\s+){0,2}?(?:model|AI|assistant|chatbot|LLM)\b`
   + String.raw`|\s+(?:by|from|developed|trained|made|created|built)\b)`;
 // Simplified and Traditional forms of the same words (review: 我由 Anthropic 開發 / 我的底層模型是 / 我基於).
-const MADE = '(?:[训訓][练練]|[开開][发發]|打造|[研][发發]|[创創]建|推出|[设設][计計])';
+const MADE = '(?:[训訓][练練]|[开開][发發]|打造|[研][发發]|[创創]建|推出|[设設][计計])(?:出来)?(?=$|[。！？!?.，,；;：:、\\s]|的|了)';
 const FROM = '(?:由|[来來]自)';
 const ZH_END = `(?=\\s*(?:[，,。.！!？?；;：:、]|$)|\\s*(?:大?模型|助手|AI|[语語]言模型|${FROM}|${MADE}))`;
 const PATTERNS = [
@@ -36,9 +36,9 @@ const PATTERNS = [
   // 我由 Anthropic 开发 / 我是被 OpenAI 训练出来的
   `我(?:是)?(?:由|被)\\s*${BRAND}\\s*(?:公司)?\\s*${MADE}`,
   // 我的底层模型是 GPT-4 / 我背后的技术来自 Google
-  `我(?:的|背[后後]的)(?:底[层層]|基[础礎]|背[后後])?(?:模型|大模型|架[构構]|技[术術])\\s*(?:是|基[于於]|${FROM}|用的是)\\s*${BRAND}`,
+  `我(?:的|背[后後]的)(?:底[层層]|基[础礎]|背[后後])?(?:模型|大模型|架[构構]|技[术術])${ZH_GAP}{0,8}?\\s*(?:是|基[于於]|${FROM}|用的是)\\s*${BRAND}`,
   // 我基于 Claude / 我用的是 GPT — but not a user's product ("我基于 Claude 开发了一个写作工具", review P1)
-  `我(?:基[于於]|背[后後]是|使用的是|用的是|底[层層]是)\\s*${BRAND}(?!\\s*(?:[开開][发發]了|做了|搭建|[构構]建了|打造了|写了|[写寫]了))`,
+  `我(?:基[于於]|背[后後]是|使用的是|用的是|底[层層]是)\\s*${BRAND}(?!${ZH_GAP}{0,8}?\\s*(?:[开開][发發]了|做了|搭建|[构構]建了|打造了|写了|[写寫]了))`,
   // 作为 ChatGPT，我… / 作为一个由 OpenAI 开发的 AI 助手… (review P1: role-prefaced)
   `作[为為]\\s*(?:一[个個]|一款)?\\s*${BRAND}\\s*[，,]\\s*我`,
   `作[为為]\\s*(?:一[个個]|一款)?\\s*${FROM}\\s*${BRAND}\\s*(?:公司)?\\s*(?:${MADE}|的\\s*${ZH_GAP}{0,6}?(?:模型|助手|AI))`,

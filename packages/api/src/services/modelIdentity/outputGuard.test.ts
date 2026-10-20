@@ -23,6 +23,8 @@ const LEAKS_ZH = [
   '我是谷歌开发的模型吗？是的，我是由谷歌训练的。',
   '我是豆包。',
   '我的基础模型是 Llama 3。',
+  // Review P1: bounded same-line filler before the identity marker.
+  '我的底层模型其实是 GPT-4。',
   // Review P1: role-prefaced
   '作为 ChatGPT，我可以帮你。',
   '作为一个由 OpenAI 开发的 AI 助手，我无法上网。',
@@ -89,10 +91,13 @@ const SAFE = [
   // Review P2: 来自 + brand + 开发 elsewhere in an ordinary clause
   '我是想看看来自 Google 的哪些开发工具值得用。',
   '我是由 Google 推荐的作者\n开发建议如下。',
+  // Review P2: a complete noun compound is not the maker verb.
+  '我是由 Google\n开发者社区推荐的作者。',
   '作为想了解来自 OpenAI 的新工具的创作者，你可以先试用。',
   'As discussed, Gemini is good for long scripts.',
   // Review P1: a user's own product built on an AI model
   '我基于 Claude 开发了一个写作工具，想推广它。',
+  '我基于 Claude 二次开发了一个工具。',
   '作为 Google 广告投放老手，我建议你先测两版素材。',
   "I'm an Anthropic fan, but let's focus on your channel.",
   // Review P2: occupational continuations after the model noun
