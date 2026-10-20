@@ -24,7 +24,8 @@ function installCookieJar(hostname: string) {
     },
     set cookie(line: string) {
       const [pair, ...attributes] = line.split(';').map(part => part.trim());
-      const [name, value] = pair.split('=');
+      const [name, ...rest] = pair.split('=');
+      const value = rest.join('=');
       const domainAttribute = attributes.find(a => a.toLowerCase().startsWith('domain='));
       const domain = domainAttribute ? domainAttribute.slice('domain='.length) : null;
       const index = jar.findIndex(c => c.name === name && c.domain === domain);
@@ -78,8 +79,8 @@ describe('legacy parent-domain session cookies on graylum.com hosts', () => {
     expect(await readCookie(document.cookie, VERIFIER)).toBe('NEW_FLOW');
   });
 
-  // E1: production moved to host-only cookies on www, so its old shared copies are expired the same way. A visitor
-  // whose only session sat on .graylum.com logs in once again; nothing is left for the browser to read first.
+  // E1: production moved to host-only cookies on www, so its old shared copies are expired the same way; nothing is
+  // left for the browser to read first.
   it.each(['www.graylum.com', 'app.graylum.com'])('expires the old .graylum.com copies on %s too', async host => {
     const { document, jar } = installCookieJar(host);
     document.cookie = `${VERIFIER}=SHARED; Domain=.graylum.com; Path=/`;
@@ -90,6 +91,23 @@ describe('legacy parent-domain session cookies on graylum.com hosts', () => {
 
     expect(await readCookie(document.cookie, VERIFIER)).toBe('HOST');
     expect(jar.map(c => `${c.name}@${c.domain ?? 'host'}`)).toEqual([`${VERIFIER}@host`]);
+  });
+
+  it.each(['www.graylum.com', 'app.graylum.com'])('keeps a visitor signed in whose only session was shared, on %s', async host => {
+    const { document, jar } = installCookieJar(host);
+    const token = 'sb-stagingref-auth-token.0';
+    document.cookie = `${token}=base64-SESSION=PART; Domain=.graylum.com; Path=/`;
+    document.cookie = 'sb-otherref-auth-token=OTHER; Domain=.graylum.com; Path=/';
+
+    const { createClient } = await import('./supabase');
+    createClient();
+
+    // The value moves to a host-only cookie unchanged (including "=" inside it); other projects' cookies stay.
+    expect(await readCookie(document.cookie, token)).toBe('base64-SESSION=PART');
+    expect(jar.map(c => `${c.name}@${c.domain ?? 'host'}`).sort()).toEqual([
+      'sb-otherref-auth-token@.graylum.com',
+      `${token}@host`,
+    ]);
   });
 
   it('leaves cookies alone on a host outside graylum.com', async () => {
