@@ -80,6 +80,12 @@ describe('upload panel', () => {
     expect(text).toContain('Word 的文字在你自己的浏览器里读取，不扣积分。');
     expect(text).not.toContain('暂不识别');
   });
+  it('hides the upload entry without calling it closed while the switch is unknown', () => {
+    const { html, text } = panel({ uploadEnabled: null });
+    expect(text).not.toContain('上传暂未开放');
+    expect(html).not.toContain('type="file"');
+    expect(html).not.toContain('radiogroup');
+  });
   it('has no upload entry while the server switch is off', () => {
     const { html, text } = panel({ uploadEnabled: false });
     expect(text).toContain('上传暂未开放');
@@ -236,6 +242,16 @@ describe('my documents container', () => {
     expect(text).toContain('账号当前不可用');
     expect(text).not.toContain('还没有文件');
     expect(text).toContain('已用 — / 共 —');
+    // #716 2026-10-20: an unread switch is not a closed one.
+    expect(text).not.toContain('上传暂未开放');
+  });
+  it('says it is still reading, not that upload is closed, while the list loads', () => {
+    state.list = { isSuccess: false, isPending: true, error: null, data: undefined, refetch: vi.fn() };
+    const { html, text } = render(<MyDocuments scan={scanStub}/>);
+    expect(text).toContain('正在读取我的文档…');
+    expect(text).not.toContain('上传暂未开放');
+    expect(text).not.toContain('还没有文件');
+    expect(html).not.toContain('type="file"');
   });
 });
 
