@@ -142,6 +142,33 @@ export async function reviewArchiveCases({admin:db,connect,report,read}) {
  assert.deepEqual(await state(delivered),settled);
  report.checks.push('legacy repair preserves delivered Review output, charges its fixed fee once and never double-refunds');
 
+ for(const verdict of [null,'revision_invalid']) {
+ const saved=await seed();
+ await rpc(db,'fusion_review_advance',saved.actor,saved.review,{round:1,phase:'review',attempt:1},
+  {state:'running',round:1,phase:'summary',attempt:1});
+ const savedRun=await createFixture(db,{actor:saved.actor,phase:'fusion_summary'});
+ const savedGroup=await rpc(db,'fusion_group_create',saved.actor,randomUUID(),'review',saved.source.sessionId);
+ await rpc(db,'fusion_group_attach',saved.actor,savedGroup,savedRun.run);
+ const savedBatch=await rpc(db,'fusion_review_claim',saved.actor,saved.review,1,'summary',1,savedGroup,
+  JSON.stringify([{runId:savedRun.run,sequence:1,payload:savedRun.claimPayload}]));
+ const savedCall=savedBatch.calls[0];
+ await rpc(db,'bill2_dispatch',saved.actor,savedRun.run,savedCall.id,savedCall.dispatchToken);
+ await receipt(db,savedRun,savedCall,'0.0004',{inputTokens:400,outputTokens:0});
+ await rpc(db,'fusion_call_output_save',saved.actor,savedCall.id,'Saved revision before host verdict');
+ if(verdict)await rpc(db,'fusion_call_verdict',saved.actor,savedCall.id,verdict);
+ await legacy(saved);
+ const savedView=await rpc(db,'fusion_review_read',saved.actor,saved.review);
+ assert.equal(savedView.calls.find(call=>call.callId===savedCall.id).verdict,verdict??'unjudged_saved',
+  'a saved body interrupted before verdict uses the existing saved-output recovery policy');
+ assert.equal(savedView.fee.state,verdict?'refunded':'charged');assert.equal(savedView.fee.chargedCredits,verdict?0:50);
+ assert.equal(await wallet(db,saved.actor),verdict?1000:950);
+ assert.equal((await rpc(db,'fusion_call_output_read',saved.actor,savedCall.id)).body,'Saved revision before host verdict');
+ assert.equal(Number((await db.query('SELECT count(*) n FROM bill2_calls c JOIN bill2_runs br ON br.id=c.run_id WHERE br.actor_id=$1 AND c.settled_at IS NULL',[saved.actor])).rows[0].n),0);
+ const savedState=await state(saved);await rpc(db,'fusion_review_read',saved.actor,saved.review);
+ assert.deepEqual(await state(saved),savedState,'saved summary cleanup never repeats its fixed charge');
+ }
+ report.checks.push('legacy saved/unjudged summary retains recovery verdict/output/fixed fee; judged invalid still refunds, no stranded holds or duplicate charges');
+
  const migrating=await prepare(await seed());await legacy(migrating);
  const frozen=await state(migrating),migration=read('packages/db/migrations/0326_paywall_fusion_archive_fence.sql');
  await assert.rejects(db.query(migration.replace(/COMMIT;\s*$/,

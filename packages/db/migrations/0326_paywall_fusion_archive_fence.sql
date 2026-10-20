@@ -154,6 +154,19 @@ BEGIN
   AND opc_target_business(p_actor_id,jsonb_build_object('runId',br.id))=business ORDER BY 1 LOOP
   PERFORM pg_advisory_xact_lock(model_key);
  END LOOP;
+ -- A crash can leave a saved body without its host verdict. Serialize with
+ -- output-save/verdict and keep the existing unjudged_saved recovery meaning;
+ -- cancellation must not hide that output or turn a delivered summary into a refund.
+ PERFORM c.id FROM bill2_calls c JOIN bill2_runs br ON br.id=c.run_id
+  JOIN fusion_billing_groups g ON g.id=br.fusion_group_id
+  WHERE br.actor_id=p_actor_id AND g.actor_id=p_actor_id AND g.kind='review' AND c.settled_at IS NULL
+  AND opc_target_business(p_actor_id,jsonb_build_object('runId',br.id))=business ORDER BY c.id FOR UPDATE OF c;
+ UPDATE bill2_calls c SET fusion_verdict='unjudged_saved' FROM bill2_runs br,fusion_billing_groups g
+  WHERE c.run_id=br.id AND br.fusion_group_id=g.id AND br.actor_id=p_actor_id AND g.actor_id=p_actor_id AND g.kind='review'
+  AND c.fusion_verdict IS NULL AND c.settled_at IS NULL AND c.dispatched_at IS NOT NULL AND NOT c.provider_rejected
+  AND NOT(br.closed AND br.outcome='confirmed_failure') AND br.content_deleted_at IS NULL
+  AND EXISTS(SELECT 1 FROM fusion_call_outputs o WHERE o.call_id=c.id AND o.actor_id=p_actor_id)
+  AND opc_target_business(p_actor_id,jsonb_build_object('runId',br.id))=business;
  FOR item IN SELECT br.id FROM bill2_runs br JOIN fusion_billing_groups g ON g.id=br.fusion_group_id
   WHERE br.actor_id=p_actor_id AND g.kind='review' AND (NOT br.closed OR EXISTS(
    SELECT 1 FROM bill2_calls c WHERE c.run_id=br.id AND c.settled_at IS NULL))
