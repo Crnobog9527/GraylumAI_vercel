@@ -40,6 +40,9 @@ async function step(ctx: ResearchToolContext, d: DiscoveryRecord, budget: ToolAl
   // A prior answer's unsent plan cannot be rebound to this answer's billing run. Cancel under the
   // existing plan lock, verify it really stayed unsent, then contend for one stable successor id.
   for (let recovery = 0; recovery < 20; recovery += 1) {
+    // readOperation already validates the original plan/link and recovers its receipt before returning
+    // a result. Only prepared, cancelled or missing operations need the unsent-plan recovery below.
+    if (prior && prior.state !== 'prepared' && prior.state !== 'cancelled') break;
     let plan = await ctx.store.readPlan(operationId);
     if (plan && plan.executionId !== ctx.executionId && (!prior || prior.state === 'prepared')) {
       await ctx.store.cancelUnsentPlan(operationId);
