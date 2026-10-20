@@ -11,6 +11,9 @@ import { UnauthorizedNotice } from '@/components/auth/UnauthorizedNotice';
 import { createSessionRefresher } from '@/lib/session-refresh';
 import { sessionRefreshLink } from '@/trpc/session-refresh-link';
 import { trpcLinkKind } from '@/trpc/link-routing';
+import { toast } from 'sonner';
+import { isProfileArchivedError, PROFILE_ARCHIVE_TEXT } from '@/components/opc/profile-archive/profile-archive';
+import { PROFILE_BUSINESSES_KEY } from '@/components/opc/profile-archive/profile-archive-api';
 
 export default function Provider({ children }: { children: React.ReactNode }) {
   // The query client is created once; it reaches the latest recovery handler through this ref.
@@ -18,8 +21,13 @@ export default function Provider({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(() => {
     const onError = (error: unknown) => {
       if (isUnauthorizedError(error)) onUnauthorizedRef.current();
+      // PAYWALL: a write on a profile archived elsewhere says why once, and the re-read turns its pages read-only.
+      if (isProfileArchivedError(error)) {
+        toast.info(PROFILE_ARCHIVE_TEXT.archivedRefusal, { id: 'profile-archived' });
+        void client.invalidateQueries({ queryKey: PROFILE_BUSINESSES_KEY });
+      }
     };
-    return new QueryClient({
+    const client = new QueryClient({
       queryCache: new QueryCache({ onError }),
       mutationCache: new MutationCache({ onError }),
       defaultOptions: {
@@ -32,6 +40,7 @@ export default function Provider({ children }: { children: React.ReactNode }) {
         },
       },
     });
+    return client;
   });
   const [supabase] = useState(() => createClient());
   const recovery = useUnauthorizedRecovery(supabase, queryClient);

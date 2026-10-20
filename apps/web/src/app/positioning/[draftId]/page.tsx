@@ -34,7 +34,7 @@ import { useAutoStepRecovery, useHistoryPolling } from "./use-step-recovery";
 import { executionSettled } from "./step-recovery";
 import { useLiveReply } from "./use-live-reply";
 import { PublishFootnote, PublishNext, ReportEntry, reportPublishes } from "./report-panel";
-import { ReadonlyDraftView } from './readonly-draft-view';
+import { DraftArchiveGate, ReadonlyDraftView } from './readonly-draft-view';
 import { InformationExport } from "./InformationExport";
 import { EXISTING_WELCOME } from "../start-entry";
 import { isStepSummaryInput, offersStepSummary, STEP_SUMMARY_INPUT, STEP_SUMMARY_LABEL, stepSummaryRequest, summaryRefusal,
@@ -52,7 +52,7 @@ import { ResearchSessionPanel, useResearchCalls } from "@/components/research/re
 /** The retained mentor request is either wrapped in `request` or legacy top-level. */
 export default function PositioningDraft({ params }: { params: Promise<{ draftId: string }> }) {
   const { draftId } = use(params);
-  return <PositioningDraftContent key={draftId} draftId={draftId}/>;
+  return <DraftArchiveGate key={draftId} draftId={draftId}><PositioningDraftContent key={draftId} draftId={draftId}/></DraftArchiveGate>;
 }
 function PositioningDraftContent({draftId}:{draftId:string}){
   const router = useRouter();
