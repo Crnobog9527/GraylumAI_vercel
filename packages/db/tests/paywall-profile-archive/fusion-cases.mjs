@@ -95,9 +95,8 @@ export async function fusionArchiveCases({admin:db,connect,report}) {
  await rpc(db,'bill2_finalize',fourth.actor,delivered.runId);
  await rpc(db,'bill2_cancel',fourth.actor,delivered.runId);await rpc(db,'bill2_finalize',fourth.actor,delivered.runId);
  await archive(fourth);
- await assert.rejects(rpc(db,'bill2_dispatch',fourth.actor,pending.runId,pending.id,pending.dispatchToken),archived);
- await rpc(db,'fusion_compare_stop',fourth.actor,fourth.compareId,pending.runId);
- await rpc(db,'fusion_compare_stop',fourth.actor,fourth.compareId,pending.runId);
+ assert.deepEqual(await rpc(db,'bill2_dispatch',fourth.actor,pending.runId,pending.id,pending.dispatchToken),
+  {dispatch:false,archived:true},'dispatch refusal commits whole-compare cleanup without a manual stop');
  const view=await rpc(db,'fusion_compare_read',fourth.actor,fourth.compareId);
  assert.equal(view.chargedCredits,1,'delivered column charged once');
  assert.equal(view.columns[0].body,'Saved answer before archive');
@@ -105,5 +104,23 @@ export async function fusionArchiveCases({admin:db,connect,report}) {
  assert.equal(await wallet(db,fourth.actor),initial-1,'all unspent holds released, delivered fee retained');
  await rpc(db,'bill2_finalize',fourth.actor,pending.runId);
  assert.equal(await wallet(db,fourth.actor),initial-1,'repeat cleanup never double-refunds');
- report.checks.push('temporary Fusion in-flight call blocks archive; settled charge/result retained; archived pending dispatch denied and hold refunded once');
+ assert.equal(await rpc(db,'fusion_compare_active',fourth.actor),false,'no lingering active compare slot');
+ report.checks.push('temporary Fusion in-flight call blocks archive; archived dispatch automatically releases holds, preserves delivered fee/result and frees active slot');
+
+ const fifth=await seed();await gate(fifth);const waiting=await admit(fifth),balance=await wallet(db,fifth.actor);
+ const reserved=await rpc(db,'fusion_compare_claim',fifth.actor,fifth.compareId,JSON.stringify(
+  waiting.runs.map(r=>({runId:r.runId,sequence:1,payload:r.fusion.call}))));
+ await archive(fifth);
+ const [a,b]=await Promise.all([connect(),connect()]);
+ const [one,two]=reserved.calls;
+ const refusals=await Promise.all([
+  rpc(a,'bill2_dispatch',fifth.actor,one.runId,one.id,one.dispatchToken),
+  rpc(b,'bill2_dispatch',fifth.actor,two.runId,two.id,null,true,waiting.runs.find(r=>r.runId===two.runId).fusion.call),
+ ]);
+ assert.deepEqual(refusals,[{dispatch:false,archived:true},{dispatch:false,archived:true}]);
+ assert.equal(await wallet(db,fifth.actor),balance,'concurrent dispatch/rotation refunds every undispatched column once');
+ assert.equal(await rpc(db,'fusion_compare_active',fifth.actor),false);
+ const finished=await rpc(db,'fusion_compare_read',fifth.actor,fifth.compareId);
+ assert.ok(finished.columns.every(c=>c.billing.closed),'all runs close without a manual stop or recovery job');
+ report.checks.push('concurrent archived dispatch/rotation automatically closes every prepared column and refunds once, no active compare slot');
 }

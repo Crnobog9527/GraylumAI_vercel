@@ -57,10 +57,10 @@ DO $$ DECLARE spec record;src text;guard text;fn regprocedure; BEGIN
  ) changes(signature,target) LOOP
   fn:=('public.'||spec.signature)::regprocedure;
   src:=pg_get_functiondef(fn);
-  IF position('-- 0327 Fusion source archive guard' IN src)=0 THEN
+  IF position('-- 0326 Fusion source archive guard' IN src)=0 THEN
    IF position('BEGIN' IN src)=0 THEN RAISE EXCEPTION 'OPC_FUSION_ARCHIVE_SOURCE_MISMATCH: %',fn; END IF;
    guard:=E'
- -- 0327 Fusion source archive guard
+ -- 0326 Fusion source archive guard
  PERFORM opc_assert_business_writable(p_actor_id,'||spec.target||E');
 ';
    EXECUTE regexp_replace(src,'\mBEGIN\M','BEGIN'||guard);
@@ -88,14 +88,38 @@ DO $$ DECLARE spec record;src text;fn regprocedure; BEGIN
  ) changes(signature,anchor,replacement) LOOP
   fn:=('public.'||spec.signature)::regprocedure;
   src:=pg_get_functiondef(fn);
-  IF position('-- 0327 Fusion run archive guard' IN src)=0 THEN
+  IF position('-- 0326 Fusion run archive guard' IN src)=0 THEN
    IF array_length(string_to_array(src,spec.anchor),1)<>2 THEN
     RAISE EXCEPTION 'OPC_FUSION_ARCHIVE_RUN_MISMATCH: %',fn; END IF;
    src:=replace(src,spec.anchor,spec.replacement);
    EXECUTE regexp_replace(src,'\mBEGIN\M',E'BEGIN
- -- 0327 Fusion run archive guard');
+ -- 0326 Fusion run archive guard');
   END IF;
  END LOOP;
+END $$;
+-- A refused dispatch/rotation must also release the *whole* claimed compare.
+-- Catch only the archive refusal before dispatch takes its run/financial locks;
+-- stop uses its existing compare -> run -> financial order in this transaction.
+-- Returning a refusal commits cleanup; re-raising would roll the refunds back.
+DO $$ DECLARE src text;anchor text; BEGIN
+ src:=pg_get_functiondef('public.bill2_dispatch(uuid,uuid,uuid,uuid,boolean,jsonb)'::regprocedure);
+ IF position('-- 0326 archived compare cleanup' IN src)=0 THEN
+  anchor:='PERFORM opc_assert_business_writable(p_actor_id,jsonb_build_object(''runId'',p_run_id));';
+  IF array_length(string_to_array(src,anchor),1)<>2 THEN RAISE EXCEPTION 'OPC_FUSION_ARCHIVE_CLEANUP_MISMATCH'; END IF;
+  src:=replace(src,anchor,$guard$BEGIN
+  PERFORM opc_assert_business_writable(p_actor_id,jsonb_build_object('runId',p_run_id));
+ EXCEPTION WHEN raise_exception THEN
+  -- 0326 archived compare cleanup
+  IF SQLERRM<>'OPC_BUSINESS_ARCHIVED' THEN RAISE; END IF;
+  IF NOT EXISTS(SELECT 1 FROM fusion_compares fc JOIN bill2_runs source_run ON source_run.fusion_group_id=fc.group_id
+   WHERE source_run.id=p_run_id AND source_run.actor_id=p_actor_id AND fc.actor_id=p_actor_id) THEN RAISE; END IF;
+  PERFORM fusion_compare_stop(p_actor_id,(SELECT fc.id FROM fusion_compares fc
+   JOIN bill2_runs source_run ON source_run.fusion_group_id=fc.group_id
+   WHERE source_run.id=p_run_id AND source_run.actor_id=p_actor_id AND fc.actor_id=p_actor_id),NULL);
+  RETURN jsonb_build_object('dispatch',false,'archived',true);
+ END;$guard$);
+  EXECUTE src;
+ END IF;
 END $$;
 -- Read, stop/cancel, provider receipts, verdicts and settlement deliberately retain
 -- their original permissions and behavior. Already spent money can still reconcile.

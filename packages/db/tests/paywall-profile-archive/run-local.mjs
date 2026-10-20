@@ -47,7 +47,7 @@ try {
  const legacyActor=randomUUID(),legacyBusiness=randomUUID();
  const build=buildFromFiles(root,{applyFile:path=>{
   const migration=read(path);
-  if(!/\/(0324_paywall_profile_archive|0327_paywall_fusion_archive_fence)\.sql$/.test(path)) return apply(migration);
+  if(!/\/(0324_paywall_profile_archive|0326_paywall_fusion_archive_fence)\.sql$/.test(path)) return apply(migration);
   if(path.includes('/0324_')) {
   sql(`INSERT INTO profiles(id) VALUES('${legacyActor}');
    INSERT INTO opc_businesses(id,actor_id,name) VALUES('${legacyBusiness}','${legacyActor}','Pre-0324 archive fixture');`);
@@ -67,7 +67,7 @@ try {
   return applied;
  },applyServerOnly:apply});
  assert.equal(build.failed,null,JSON.stringify(build.failed));
- assert.equal(snapshots.size,2,'0324 and 0327 verified at their historical positions');
+ assert.equal(snapshots.size,2,'0324 and 0326 verified at their historical positions');
  finalCatalog=objects();
  assert.equal(sql(`SELECT archived_at IS NULL FROM opc_businesses WHERE id='${legacyBusiness}'`),'t');
  report.build=build;
@@ -86,7 +86,7 @@ try {
  await runCases({admin,connect,report,read});
  await fusionArchiveCases({admin,connect,report});
  const preserved=sql('SELECT jsonb_agg(to_jsonb(b) ORDER BY id) FROM opc_businesses b');
- sql(read('packages/db/migrations/0327_paywall_fusion_archive_fence.sql'));
+ sql(read('packages/db/migrations/0326_paywall_fusion_archive_fence.sql'));
  assert.equal(sql('SELECT jsonb_agg(to_jsonb(b) ORDER BY id) FROM opc_businesses b'),preserved,
   'forward recovery/reapply retains every archive, source and revision');
  assert.deepEqual(objects(),finalCatalog);
