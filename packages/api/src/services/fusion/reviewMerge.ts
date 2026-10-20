@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { Opinion } from './hostChecks';
-import { evidenceOf, quotesOverlap, type Evidence, type EvidenceReason, type IssueKind } from './reviewEvidence';
+import { evidenceOf, quotesOverlap, similarProblems, type Evidence, type EvidenceReason, type IssueKind } from './reviewEvidence';
 
 /**
  * Round 1's issues, merged by code before the summary sees them (Owner 2026-10-20: "用代码合并去重第 1 轮意见，再交给汇总").
@@ -44,9 +44,11 @@ export function mergeOpinions(opinions: Array<{ reviewer: string; opinion: Opini
     const first = group[0]!.issue;
     const evidence = group.map(item => item.issue.evidence ?? evidenceOf(item.issue, context.report, context.sections).evidence)
       .find(value => value === 'quoted' || value === 'anchored') ?? 'none';
-    // Another seat raising something in the same chapter of the same kind (same anchor for omissions) corroborates it.
+    // Corroboration: another seat raised the same problem (same chapter and kind, same anchor for omissions, and a problem
+    // text that is the same by the deterministic similarity rule). An unrelated issue in the same chapter proves nothing.
     const same = (other: Item) => name(other.issue.location) === name(first.location) && other.issue.kind === first.kind
-      && (first.kind !== 'omission' || name(other.issue.anchor) === name(first.anchor));
+      && (first.kind !== 'omission' || name(other.issue.anchor) === name(first.anchor))
+      && similarProblems(other.issue.problem, first.problem);
     const corroborated = items.some(other => other.reviewer !== reviewers[0] && same(other));
     if (reviewers.length === 1 && !corroborated && evidence !== 'quoted' && evidence !== 'anchored') {
       const { reason } = evidenceOf(first, context.report, context.sections);

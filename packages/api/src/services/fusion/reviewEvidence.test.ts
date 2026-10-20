@@ -88,6 +88,22 @@ describe('merging round-1 issues by code', () => {
     expect(merged.issues).toHaveLength(2);
     expect(merged.dropped).toEqual([]);
   });
+  it('an unrelated issue in the same chapter and of the same kind does not corroborate (it still needs its own quote)', () => {
+    const merged = mergeOpinions([
+      { reviewer: 'A', opinion: opinionOf({ ...base, severity: 'major' }) },
+      { reviewer: 'B', opinion: opinionOf({ ...base, severity: 'major', problem: '标题没有写清楚适合哪一类人群阅读，也没有说明账号带来的具体好处和差异', suggestion: '把标题改成包含人群与好处的一句话，并在首屏放一个具体例子来说明' }) },
+    ], context);
+    expect(merged.issues).toEqual([]);
+    expect(merged.dropped).toHaveLength(2);
+  });
+  it('a paraphrase of the same problem from another seat does corroborate', () => {
+    const merged = mergeOpinions([
+      { reviewer: 'A', opinion: opinionOf({ ...base, severity: 'major' }) },
+      { reviewer: 'B', opinion: opinionOf({ ...base, severity: 'major', problem: '这一章没有写清楚具体怎么赚钱，每月收入和成本都没有数字，账算不通', suggestion: '补上每月预计收入和每月成本的对照表，让账能算得过来' }) },
+    ], context);
+    expect(merged.dropped).toEqual([]);
+    expect(merged.issues).toHaveLength(2);
+  });
   it('treats "定位" and "## 定位" as the same chapter when looking for corroboration', () => {
     const merged = mergeOpinions([
       { reviewer: 'A', opinion: opinionOf({ ...base, severity: 'major', location: '## 定位' }) },
