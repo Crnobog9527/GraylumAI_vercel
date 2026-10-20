@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 "use client";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { trpc } from "@/trpc/client";
 import { Button } from "@/components/ui/button";
@@ -9,8 +9,10 @@ import { profileTabHref } from "@/lib/profile-tabs";
 import { ReportPaywallDialog } from "@/components/paywall/ReportPaywallDialog";
 import resultStyles from "@/components/opc/positioning-result.module.css";
 import {
-  REPORT_ACTION, REPORT_INTRO, REPORT_TITLE, REPORT_WRITING_NOTICE, reportActionLabel, reportFeeText, reportView,
+  AUTO_OPEN_START, REPORT_ACTION, REPORT_ENTRY_RUNNING, REPORT_INTRO, REPORT_REOPENED_NOTICE, REPORT_TITLE, REPORT_WRITING_NOTICE,
+  reportActionLabel, reportAutoOpen, reportFeeText, reportUnfinished, reportView,
 } from "./report-gen";
+import { ReportExport } from "./report-export-button";
 import { useReportGen } from "./use-report-gen";
 import { useReportPaywallMemory } from "./report-paywall-memory";
 import { STOP_SAVING_NOTICE, STOP_UNCONFIRMED_NOTICE } from "./stop-reply";
@@ -19,6 +21,7 @@ import { ReportDocumentPanel } from "./report-document-panel";
 import { REPORT_DOC_TEXT } from "./report-document";
 import { JuryEntry } from "@/components/fusion-review/JuryEntry";
 import { SavedReportEditor } from "./saved-report-editor";
+import { useVersionMarks, VersionMark } from "@/components/fusion-review/VersionMark";
 import { REPORT_OUTLINE_MIN_CHAPTERS, ReportWithOutline } from "@/components/chat-display/report-outline";
 import { useReportOutline } from "@/components/chat-display/use-report-outline";
 import { ReportView } from "@/components/chat-display/report-view/report-view";
@@ -57,18 +60,27 @@ function RoundReportEntry(props: Props) {
   // and coming back in this tab. A saved report of this round keeps its own dialog.
   const paywall = useReportPaywallMemory({ draftId: props.draftId, roundId: props.roundId,
     refusedForMembership: Boolean(report.refusal?.membership), hasReport: Boolean(report.executionId || saved) });
+  // A reload while the report is written: open it again by itself, and show it when it is done (#716 2026-10-20).
+  const autoOpen = useRef(AUTO_OPEN_START);
+  useEffect(() => {
+    const next = reportAutoOpen(autoOpen.current, report.status);
+    autoOpen.current = next.memory;
+    if (next.open) setOpen(true);
+  }, [report.status]);
   // The jury (FUSION-REVIEW) sits next to it: it reviews the report of the formal version, whatever this entry shows.
   const jury = <JuryEntry draftId={props.draftId} report={props.report} busy={props.busy} />;
   if (!report.executionId && !saved && (!canGenerate || report.refusal?.hideEntry)) return jury;
   return (
     <>
       <Button variant="outline" disabled={props.busy} onClick={() => setOpen(true)}>
-        {report.executionId || saved ? REPORT_TITLE : reportActionLabel(REPORT_ACTION.start, available.data?.priceCredits)}
+        {reportUnfinished(report.status) ? REPORT_ENTRY_RUNNING
+          : report.executionId || saved ? REPORT_TITLE : reportActionLabel(REPORT_ACTION.start, available.data?.priceCredits)}
       </Button>
       {jury}
       {open && (paywall ? <ReportPaywallDialog onClose={() => setOpen(false)} />
         : <ReportDialog report={report} savedBody={report.executionId ? null : saved}
           savedStrategy={report.executionId ? null : savedFormalStrategy(props.report)} busy={props.busy}
+          markOf={props.published && props.report?.available && props.report.id ? { draftId: props.draftId, versionId: props.report.id } : undefined}
           edit={saved && !report.executionId && savedFormalEditable(props.report) && props.report?.id
             ? { draftId: props.draftId, projectId: props.projectId, versionId: props.report.id } : undefined}
           price={available.data?.priceCredits} onClose={() => setOpen(false)}
@@ -77,10 +89,12 @@ function RoundReportEntry(props: Props) {
   );
 }
 
-export function ReportDialog({ report, savedBody, savedStrategy, edit, busy, price, onClose, onTopics }:
+export function ReportDialog({ report, savedBody, savedStrategy, edit, markOf, busy, price, onClose, onTopics }:
   { report: ReturnType<typeof useReportGen>; savedBody?: string | null; savedStrategy?: ReturnType<typeof savedFormalStrategy>;
     /** A saved formal version with no generation behind it (a jury adoption): it can be edited and 定稿 again (R14). */
     edit?: { draftId: string; projectId: string; versionId: string };
+    /** The published formal version the dialog shows, for its 已评审 / 衍生 mark next to the title (Owner 2026-10-20). */
+    markOf?: { draftId: string; versionId: string };
     busy: boolean; price?: number | null; onClose: () => void; onTopics: () => void }) {
   // Unsaved report edits live in the panel: closing asks first instead of dropping them silently.
   const unsaved = useRef(false);
@@ -89,6 +103,7 @@ export function ReportDialog({ report, savedBody, savedStrategy, edit, busy, pri
   const card = useRef<HTMLDivElement>(null);
   const outline = useReportOutline(card);
   const close = () => { if (!unsaved.current || window.confirm(REPORT_DOC_TEXT.closeUnsaved)) onClose(); };
+  const marks = useVersionMarks([markOf?.draftId]);
   const status = report.status;
   const view = status ? reportView(status) : null;
   const working = report.starting || report.streaming;
@@ -97,10 +112,12 @@ export function ReportDialog({ report, savedBody, savedStrategy, edit, busy, pri
   if (report.stopUnconfirmed) notices.push({ id: "report-stop-unconfirmed", tone: "warning", text: STOP_UNCONFIRMED_NOTICE,
     actions: [{ label: CHAT_ACTION.stop, onClick: report.retryStop }] });
   else if (report.live?.stopped) notices.push({ id: "report-stopping", tone: "status", busy: true, text: STOP_SAVING_NOTICE });
-  else if (report.live) notices.push({ id: "report-live", tone: "status", busy: true, text: REPORT_WRITING_NOTICE,
+  else if (report.live) notices.push({ id: "report-live", tone: "status", busy: true,
+    text: report.reopened && !report.live.text ? REPORT_REOPENED_NOTICE : REPORT_WRITING_NOTICE,
     actions: [{ label: CHAT_ACTION.stop, onClick: report.stop }] });
   else if (report.starting) notices.push({ id: "report-starting", tone: "status", busy: true, text: REPORT_WRITING_NOTICE });
-  else if (view?.kind === "progress") notices.push({ id: "report-progress", tone: "status", busy: true, text: view.notice });
+  else if (view?.kind === "progress") notices.push({ id: "report-progress", tone: "status", busy: true,
+    text: report.reopened && !view.body && status?.state !== "cost_pending" ? REPORT_REOPENED_NOTICE : view.notice });
   else if (view?.kind === "report") view.notices.forEach((text, index) => notices.push({ id: "report-note-" + index, tone: "warning", text }));
   else if (view?.kind === "empty") notices.push({ id: "report-empty", tone: "warning", text: view.notice });
   const charge = !report.live && !working ? reportFeeText(status?.fee) : null;
@@ -118,7 +135,7 @@ export function ReportDialog({ report, savedBody, savedStrategy, edit, busy, pri
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div ref={card} className={`${resultStyles.consentCard} ${outline.chapters.length >= REPORT_OUTLINE_MIN_CHAPTERS ? "!max-w-5xl" : "!max-w-3xl"}`}>
         <header>
-          <h2>{REPORT_TITLE}</h2>
+          <h2>{REPORT_TITLE} <VersionMark mark={markOf ? marks[markOf.versionId] : null} /></h2>
           <Button className={resultStyles.consentClose} variant="ghost" aria-label={"关闭" + REPORT_TITLE} onClick={close}>
             <X size={18} aria-hidden="true" />
           </Button>
@@ -138,6 +155,11 @@ export function ReportDialog({ report, savedBody, savedStrategy, edit, busy, pri
                 : shown;
             })()}
           <ChatNoticeList className="mt-4" notices={notices} />
+          {/* 导出报告: a finished report (complete or not, its notes say which) or a saved formal version. */}
+          {!working && !report.live && (view?.kind === "report" && report.executionId
+            ? <ReportExport key={report.executionId} executionId={report.executionId} notes={view.notices} />
+            : !report.executionId && savedBody
+              ? <ReportExport saved={{ body: savedBody, strategy: savedStrategy }} /> : null)}
           {report.offer && !savedBody && !report.refusal?.hideEntry && (
             <div className={resultStyles.consentActions}>
               <Button disabled={busy} onClick={report.offer === "start" ? report.start : report.restart}>

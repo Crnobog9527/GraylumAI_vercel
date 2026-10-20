@@ -231,3 +231,31 @@ describe("one report per round", () => {
     expect(nextRequestId(null, mint)).toBe(mint());
   });
 });
+
+// #716 2026-10-20: a reload while the report was written left it behind a closed dialog until the page was reopened.
+describe("reportAutoOpen", async () => {
+  const { AUTO_OPEN_START, reportAutoOpen, reportUnfinished } = await import("./report-gen");
+  const walk = (states: Array<ReportStatus | null>) => {
+    let memory = AUTO_OPEN_START;
+    return states.map(next => { const step = reportAutoOpen(memory, next); memory = step.memory; return step.open; });
+  };
+  it("counts writing, settling and waiting for credits as unfinished", () => {
+    for (const state of ["prepared", "running", "interrupted", "stopping", "cost_pending", "waiting_credits", "waiting_resume"])
+      expect(reportUnfinished(status({ state, body: null }))).toBe(true);
+    for (const state of ["completed", "cancelled"]) expect(reportUnfinished(status({ state }))).toBe(false);
+    expect(reportUnfinished(null)).toBe(false);
+  });
+  it("opens once when the page finds the report still being written, then once more when it ends with text", () => {
+    const running = status({ state: "running", body: null, completeness: null });
+    expect(walk([null, running, running, status({ state: "cost_pending", body: null }), status({}), status({})]))
+      .toEqual([false, true, false, false, true, false]);
+  });
+  it("never opens by itself for a report that was already finished when the page loaded", () => {
+    expect(walk([status({}), status({}), status({ completeness: "length_limit", candidate: false })])).toEqual([false, false, false]);
+  });
+  it("opens for a report that ended incomplete with text (its notices explain), not for one that ended empty", () => {
+    const running = status({ state: "running", body: null });
+    expect(walk([running, status({ state: "cancelled", completeness: "stopped", candidate: false })])).toEqual([true, true]);
+    expect(walk([running, status({ state: "cancelled", body: null, completeness: null, candidate: false })])).toEqual([true, false]);
+  });
+});
