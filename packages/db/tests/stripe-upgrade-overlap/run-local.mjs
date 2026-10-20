@@ -39,11 +39,22 @@ try {
   const signatures=['public.atomic_pre_deduct(uuid,integer,text,uuid)',
     'public.bill2_payg_compensate(bill2_runs,bill2_calls)','public.opc_start_b1(uuid,uuid,text,text,uuid,text,text)'];
   const objects=()=>JSON.parse(sql(read('packages/db/tests/baseline/fingerprint.sql')));
-  let before,after,originals;
+  const functionCatalogKeys=catalog=>signatures.flatMap(signature=>{
+    const identity=signature.replace(/^public\./,'').replace(/\s/g,'');
+    return ['fn','fnacl'].map(prefix=>{
+      const matches=Object.keys(catalog).filter(key=>key.startsWith(`${prefix}:`)
+        &&key.slice(prefix.length+1).replace(/^public\./,'').replace(/\s/g,'')===identity);
+      assert.equal(matches.length,1,`fingerprint contains exactly one ${prefix} entry for ${signature}`);
+      return matches[0];
+    });
+  });
+  let before,after,originals,originalFunctionKeys,originalFunctionEntries;
   const build=buildFromFiles(root,{applyFile:path=>{
     const migration=read(path);
     if(!path.endsWith('_pay_stripe_mp_upgrade_overlap.sql')) return apply(migration);
     before=objects();
+    originalFunctionKeys=functionCatalogKeys(before);
+    originalFunctionEntries=Object.fromEntries(originalFunctionKeys.map(key=>[key,before[key]]));
     originals=signatures.map(sig=>sql(`SELECT pg_get_functiondef('${sig}'::regprocedure);`));
     const failed=apply(migration.replace(/COMMIT;\s*$/,"DO $$ BEGIN RAISE EXCEPTION 'UPGRADE_ROLLBACK_PROBE'; END $$; COMMIT;"));
     assert.equal(failed.ok,false);
@@ -57,7 +68,9 @@ try {
     return applied;
   },applyServerOnly:apply});
   assert.equal(build.failed,null,JSON.stringify(build.failed));
-  assert.ok(before&&after&&originals,'upgrade migration was tested at its actual historical position');
+  assert.ok(before&&after&&originals&&originalFunctionKeys&&originalFunctionEntries,
+    'upgrade migration was tested at its actual historical position');
+  const finalCatalog=objects();
   const port=Number(docker(['port',name,'5432/tcp']).split(':').at(-1));
   const connect=async()=>{
     const db=new pg.Client({host:'127.0.0.1',port,database:'upgrade',user:'postgres',statement_timeout:15000});
@@ -86,10 +99,16 @@ try {
     'sources',(SELECT jsonb_agg(to_jsonb(e) ORDER BY id) FROM credit_source_entries e)) v`);
   const preserved=(await data()).rows[0].v;
   sql('BEGIN;\n'+originals.map(src=>src+';').join('\n')+'\nCOMMIT;');
-  assert.deepEqual(objects(),before,'original function definitions restore the exact original catalog');
+  const restoredCatalog=objects();
+  assert.deepEqual(Object.fromEntries(originalFunctionKeys.map(key=>[key,restoredCatalog[key]])),
+    originalFunctionEntries,'original function definitions and ACL restore exactly');
+  const withoutTargetFunctions=catalog=>Object.fromEntries(Object.entries(catalog)
+    .filter(([key])=>!originalFunctionKeys.includes(key)));
+  assert.deepEqual(withoutTargetFunctions(restoredCatalog),withoutTargetFunctions(finalCatalog),
+    'rollback preserves later migrations and every non-target catalog object');
   assert.deepEqual((await data()).rows[0].v,preserved,'code rollback preserves balances, grants and source attribution');
   sql(read('packages/db/migrations/0322_pay_stripe_mp_upgrade_overlap.sql'));
-  assert.deepEqual(objects(),after,'reapplying after rollback restores the repaired catalog');
+  assert.deepEqual(objects(),finalCatalog,'reapplying after rollback restores the complete final catalog');
   cases.push('migration-interruption-rolls-back','migration-repeat-unchanged','rollback-preserves-financial-data','reapply-converges');
   console.log(JSON.stringify({result:'PASS',build,cases}));
 } finally {
