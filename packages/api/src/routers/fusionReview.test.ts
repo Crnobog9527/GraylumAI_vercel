@@ -68,3 +68,30 @@ it('available tells a signed-in user whether the review is switched on, and fail
   await expect(mineFixture(false).caller.available()).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
   read.mockRestore();
 });
+
+function marksCaller(draftOwner: string, signedIn = true) {
+  const draft = id(3);
+  const table = (rows: unknown): never => { const q: Record<string, unknown> = {}; for (const key of ['select', 'in', 'is', 'eq', 'order']) q[key] = () => q;
+    q.limit = async () => ({ data: rows, error: null }); q.then = (resolve: (value: unknown) => void) => resolve({ data: rows, error: null }); return q as never; };
+  const profile = { id: id(1), role: 'user', status: 'active', credits: 0, nickname: 'fixture' };
+  const from = (name: string) => name === 'opc_drafts' ? table([{ draft_id: draft, project_id: id(5), actor_id: draftOwner }])
+    : name === 'artifact_versions' ? table([{ id: id(4), source: null, from: null }])
+    : name === 'fusion_reviews' ? table([{ id: id(2), draft_id: id(3), source_version_id: id(4), state: 'completed', ended_at: '2026-10-19T10:00:00Z', adoption: null }])
+    : (() => { const q: Record<string, unknown> = {}; q.select = () => q; q.eq = () => q; q.maybeSingle = async () => ({ data: profile, error: null });
+      q.single = q.maybeSingle; return q as never; })();
+  const db = { rpc: vi.fn(), from };
+  const caller = fusionReviewRouter.createCaller({ headers: new Headers(),
+    user: signedIn ? { id: id(1), app_metadata: { provider: 'email' }, user_metadata: { email_verified: true } } : null,
+    isEmailVerified: true, authProvider: 'email', supabase: db, supabaseAuth: db, supabasePublic: {},
+    supabaseAdmin: db, hasSupabaseAdminPrivileges: true, scheduleAfter: vi.fn() } as never);
+  return { caller, draft };
+}
+it('versionMarks answers for the caller\'s own analyses and refuses another user\'s with FORBIDDEN, never an empty answer', async () => {
+  const own = marksCaller(id(1));
+  expect(await own.caller.versionMarks({ draftIds: [own.draft] })).toMatchObject({ [id(4)]: { mark: 'reviewed', reviewId: id(2), draftId: id(3), adoptedCount: 0 } });
+  const foreign = marksCaller(id(99));
+  await expect(foreign.caller.versionMarks({ draftIds: [foreign.draft] })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  await expect(marksCaller(id(1), false).caller.versionMarks({ draftIds: [id(3)] })).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+  await expect(own.caller.versionMarks({ draftIds: [] })).rejects.toThrow();
+  await expect(own.caller.versionMarks({ draftIds: Array.from({ length: 51 }, (_, i) => id(100 + i)) })).rejects.toThrow();
+});

@@ -24,6 +24,7 @@ it('checks return links, maintenance recovery and escaped ticket previews in Chr
       opc: { library: endpoint({businesses: []}), list: endpoint({drafts: []}),
         editLibrary: mutation, saveContentManual: mutation, publicationUiChange: mutation,
         workUiChange: mutation },
+      fusionReview: { versionMarks: endpoint({}) },
       modules: { getModules: endpoint({modules: []}), getModuleById: endpoint(null) },
       runtime: { choices: endpoint({skills: []}) },
       user: { getUserProfile: endpoint({id: 'synthetic'}) },
