@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { restoredDraft } from '@/app/runtime/send-input';
+import { restoredDraft } from '@/app/app/runtime/send-input';
 
 /** Text this page put back is removed again only from where it put it: alone, or in front of a newer draft. */
 export function withoutPutBack(current: string, text: string) {

@@ -15,7 +15,7 @@ function memory() {
 
 describe("这一步先到这里 (R16)", () => {
   it("uses the same marker as the server", () => {
-    const server = readFileSync(new URL("../../../../../../packages/api/src/shared/opcStepSummary.ts", import.meta.url), "utf8");
+    const server = readFileSync(new URL("../../../../../../../packages/api/src/shared/opcStepSummary.ts", import.meta.url), "utf8");
     expect(server).toContain(`export const STEP_SUMMARY_INPUT = '${STEP_SUMMARY_INPUT}';`);
   });
 

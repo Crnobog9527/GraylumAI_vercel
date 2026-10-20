@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
-import { runtimeGateMessages } from '../../../../../packages/api/src/shared/runtimeGateMessages';
-import { RUNTIME_INPUT_TOO_LONG_MESSAGE } from '../../../../../packages/api/src/shared/runtimeInputMessages';
+import { runtimeGateMessages } from '../../../../../../packages/api/src/shared/runtimeGateMessages';
+import { RUNTIME_INPUT_TOO_LONG_MESSAGE } from '../../../../../../packages/api/src/shared/runtimeInputMessages';
 import {
   OUTPUT_TRUNCATED_NOTICE, rememberUserStop, runtimeAdmissionNotice, runtimeExecutionNotice, userStopIds, videoGateError, videoGateNotice,
 } from './gate-notices';
@@ -87,7 +87,7 @@ it('shows no "verifying" reply for a cancelled round without a body, and keeps e
 });
 
 import { DEFINITE_REFUSAL_NOTICE, definiteRefusal, definiteRefusalNotice } from './gate-notices';
-import { RUNTIME_PAYG_PROFILE_REQUIRED_MESSAGE } from '../../../../../packages/api/src/shared/runtimeAdmissionMessages';
+import { RUNTIME_PAYG_PROFILE_REQUIRED_MESSAGE } from '../../../../../../packages/api/src/shared/runtimeAdmissionMessages';
 
 const structured = (httpStatus: number, code: string, path = 'runtime.prepare') =>
   Object.assign(new Error('fixed refusal'), { data: { httpStatus, code, path } });

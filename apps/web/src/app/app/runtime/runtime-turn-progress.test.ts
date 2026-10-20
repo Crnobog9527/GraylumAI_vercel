@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
-import type { LiveReply } from '@/app/positioning/[draftId]/agent-turn-display';
+import type { LiveReply } from '@/app/app/positioning/[draftId]/agent-turn-display';
 import { runtimeTurnProgress } from './runtime-turn-progress';
 
 const reply = (over: Partial<LiveReply> = {}): LiveReply =>

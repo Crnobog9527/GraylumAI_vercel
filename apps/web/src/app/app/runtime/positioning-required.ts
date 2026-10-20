@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { ChatNotice } from '@/components/chat/ChatInlineNotice';
-import { startEntryHref, type StartMode } from '@/app/positioning/start-entry';
+import { startEntryHref, type StartMode } from '@/app/app/positioning/start-entry';
 import { POSITIONING_REQUIRED_NOTICE } from './gate-notices';
 
 /** The guide card's two entries (POSITIONING-GATE step 3); the same one-click starts as the home page. */

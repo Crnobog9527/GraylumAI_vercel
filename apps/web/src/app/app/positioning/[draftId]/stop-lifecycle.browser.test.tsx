@@ -45,7 +45,7 @@ beforeAll(async () => {
   const bundle = await build({
     configFile: false, logLevel: 'silent', define: { 'process.env.NODE_ENV': JSON.stringify('development') },
     oxc: { jsx: { runtime: 'automatic' } },
-    resolve: { alias: { '@/trpc/client': '\0stop-test-transport', '@': fileURLToPath(new URL('../../../', import.meta.url)) } },
+    resolve: { alias: { '@/trpc/client': '\0stop-test-transport', '@': fileURLToPath(new URL('../../../../', import.meta.url)) } },
     plugins: [{ name: 'stop-lifecycle-fixture', enforce: 'pre',
       resolveId(id: string) {
         if (id === entry) return id;

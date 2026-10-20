@@ -2,10 +2,10 @@
 import { useMemo, useState } from 'react';
 import type { AgentTurnEvent, AgentTurnOutcome } from '@repo/api/src/shared/agentTurn';
 import { trpc } from '@/trpc/client';
-import type { LiveReply } from '@/app/positioning/[draftId]/agent-turn-display';
-import { liveReplyController, type LiveReplyController } from '@/app/positioning/[draftId]/live-reply-controller';
-import { TEXT_PROTOCOL } from '@/app/positioning/[draftId]/mentor-turn';
-import type { StopRequest } from '@/app/positioning/[draftId]/stop-reply';
+import type { LiveReply } from '@/app/app/positioning/[draftId]/agent-turn-display';
+import { liveReplyController, type LiveReplyController } from '@/app/app/positioning/[draftId]/live-reply-controller';
+import { TEXT_PROTOCOL } from '@/app/app/positioning/[draftId]/mentor-turn';
+import type { StopRequest } from '@/app/app/positioning/[draftId]/stop-reply';
 import { workItemsOf, type WorkItem } from '@/components/chat-display/agent-work-model';
 import { isLibrarySourceDeleted } from './gate-notices';
 

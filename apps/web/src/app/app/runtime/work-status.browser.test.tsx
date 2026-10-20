@@ -13,14 +13,14 @@ let browser: Browser;
 let code: string;
 let css: string;
 const entry = fileURLToPath(new URL('./__work_status_fixture__.jsx', import.meta.url));
-const trpcClient = fileURLToPath(new URL('../../trpc/client.ts', import.meta.url));
+const trpcClient = fileURLToPath(new URL('../../../trpc/client.ts', import.meta.url));
 beforeAll(async () => {
   const require = createRequire(import.meta.url);
   const {build} = await import(pathToFileURL(createRequire(require.resolve('vitest/package.json')).resolve('vite')).href);
   const bundle = await build({
     configFile: false, logLevel: 'silent', define: {'process.env.NODE_ENV': JSON.stringify('development')},
     oxc: {jsx: {runtime: 'automatic'}},
-    resolve: {alias: {'@': fileURLToPath(new URL('../../', import.meta.url))}},
+    resolve: {alias: {'@': fileURLToPath(new URL('../../../', import.meta.url))}},
     plugins: [{name: 'work-status-fixture', resolveId(id: string) {
       if (id === entry || id === '@/trpc/client') return id === entry ? entry : trpcClient;
     }, load(id: string) {
@@ -34,7 +34,7 @@ beforeAll(async () => {
           })()}}}};
         export const trpc={useUtils:()=>utils};`;
       if (id === entry) return `import React from 'react';import {createRoot} from 'react-dom/client';
-        import {useRuntimeStream} from '@/app/runtime/use-runtime-stream';
+        import {useRuntimeStream} from '@/app/app/runtime/use-runtime-stream';
         import {AgentWorkStatus} from '@/components/chat-display/agent-work-status';
         import {streamedWorkItems} from '@/components/chat-display/agent-work-model';
         const saved={id:'c1',kind:'library_search',state:'done',label:'在资料库里找到 1 篇相关内容',detail:'定位资料'};

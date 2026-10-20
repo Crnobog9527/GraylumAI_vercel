@@ -1,8 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from 'vitest';
 import type { AgentTurnEvent, AgentTurnOutcome } from '@repo/api/src/shared/agentTurn';
-import { liveReplyController } from '@/app/positioning/[draftId]/live-reply-controller';
-import type { LiveReply } from '@/app/positioning/[draftId]/agent-turn-display';
+import { liveReplyController } from '@/app/app/positioning/[draftId]/live-reply-controller';
+import type { LiveReply } from '@/app/app/positioning/[draftId]/agent-turn-display';
 import { definiteRefusalNotice, isLibrarySourceDeleted, libraryReferenceRefusal, runtimeAdmissionNotice, SOURCE_DELETED_NOTICE } from './gate-notices';
 import { runtimeTurnNotices, type RuntimeTurn } from './runtime-notices';
 import {

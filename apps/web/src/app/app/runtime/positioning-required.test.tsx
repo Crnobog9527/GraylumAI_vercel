@@ -3,7 +3,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { ChatNoticeList, type ChatNotice } from '@/components/chat/ChatInlineNotice';
-import { readStartEntry } from '@/app/positioning/start-entry';
+import { readStartEntry } from '@/app/app/positioning/start-entry';
 import { POSITIONING_REQUIRED_NOTICE, runtimeAdmissionNotice, runtimeExecutionNotice } from './gate-notices';
 import { POSITIONING_ACTIONS, POSITIONING_CARD_LABEL, positioningEntryHref } from './positioning-required';
 import { ENDED_NOTICE, runtimeTailNotices, runtimeTurnNotices, type RuntimeTurn } from './runtime-notices';

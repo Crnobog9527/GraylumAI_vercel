@@ -310,7 +310,7 @@ describe("turnResultNotice", () => {
 });
 
 import {sameRequest,releaseRejectedAnswer,isInputTooLong,isRefusedBeforeAdmission,isReleasedRefusal} from './mentor-turn';
-import {RUNTIME_INPUT_TOO_LONG_MESSAGE} from '../../../../../../packages/api/src/shared/runtimeInputMessages';
+import {RUNTIME_INPUT_TOO_LONG_MESSAGE} from '../../../../../../../packages/api/src/shared/runtimeInputMessages';
 it('matches a stopped request structurally including nested answerSource, retaining all identity differences',()=>{
  const request={requestId:'a',input:'乙',answerSource:{executionId:'source',optionIndex:1}};
  expect(sameRequest(request,JSON.parse(JSON.stringify(request)))).toBe(true);

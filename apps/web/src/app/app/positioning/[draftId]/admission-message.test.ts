@@ -2,8 +2,8 @@
 import {expect,it} from 'vitest';
 import {admissionMessage} from './admission-message';
 import {releaseRejectedAnswer} from './mentor-turn';
-import {DEFINITE_REFUSAL_NOTICE} from '@/app/runtime/gate-notices';
-import {RUNTIME_INPUT_TOO_LONG_MESSAGE} from '../../../../../../packages/api/src/shared/runtimeInputMessages';
+import {DEFINITE_REFUSAL_NOTICE} from '@/app/app/runtime/gate-notices';
+import {RUNTIME_INPUT_TOO_LONG_MESSAGE} from '../../../../../../../packages/api/src/shared/runtimeInputMessages';
 const message='本次操作所需模型尚未获准用于当前测试窗口，请联系管理员。';
 it.each(['PRECONDITION_FAILED','FORBIDDEN'].flatMap(code=>['opc.prepareStep','opc.mentorTurnStream'].map(path=>[code,path])))('presents a structured %s admission refusal from %s while retaining the same request',(code,path)=>{
  const result=admissionMessage(Object.assign(new Error(message),{data:{code,path}}));

@@ -1,9 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from 'vitest';
 import type { AgentTurnEvent, AgentTurnOutcome } from '@repo/api/src/shared/agentTurn';
-import type { LiveReply } from '@/app/positioning/[draftId]/agent-turn-display';
-import { liveReplyController } from '@/app/positioning/[draftId]/live-reply-controller';
-import { STREAM_INTERRUPTED } from '@/app/positioning/[draftId]/mentor-turn';
+import type { LiveReply } from '@/app/app/positioning/[draftId]/agent-turn-display';
+import { liveReplyController } from '@/app/app/positioning/[draftId]/live-reply-controller';
+import { STREAM_INTERRUPTED } from '@/app/app/positioning/[draftId]/mentor-turn';
 import { runStreamedExecution } from './use-runtime-stream';
 import { liveReplyText, liveScrollSignature, withResumeStop } from './runtime-live-reply';
 

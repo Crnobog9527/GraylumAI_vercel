@@ -2,9 +2,9 @@
 import { OUTPUT_TRUNCATED_NOTICE, PLATFORM_FAILURE_NOTICE, PROVIDER_HISTORY_NOTICE, gateAdmissionNotice, gateResultNotice,
   isRuntimeGateReason } from '@/lib/runtime-gate-notice';
 import { hostNotice } from '@/lib/payg-wait';
-import { RUNTIME_INPUT_TOO_LONG_MESSAGE } from '../../../../../packages/api/src/shared/runtimeInputMessages';
-import { RUNTIME_PAYG_PROFILE_REQUIRED_MESSAGE } from '../../../../../packages/api/src/shared/runtimeAdmissionMessages';
-import { isPositioningRequired, POSITIONING_REQUIRED_REASON } from '../../../../../packages/api/src/shared/positioningGate';
+import { RUNTIME_INPUT_TOO_LONG_MESSAGE } from '../../../../../../packages/api/src/shared/runtimeInputMessages';
+import { RUNTIME_PAYG_PROFILE_REQUIRED_MESSAGE } from '../../../../../../packages/api/src/shared/runtimeAdmissionMessages';
+import { isPositioningRequired, POSITIONING_REQUIRED_REASON } from '../../../../../../packages/api/src/shared/positioningGate';
 
 export { OUTPUT_TRUNCATED_NOTICE };
 /** POSITIONING-GATE step 2 interim text; the guide card (start positioning / import) is step 3. */

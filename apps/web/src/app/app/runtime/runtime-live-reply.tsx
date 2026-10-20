@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { MessageMarkdown } from '@/components/chat/MessageMarkdown';
 import { CHAT_ACTION, type ChatNotice } from '@/components/chat/ChatInlineNotice';
-import type { LiveReply } from '@/app/positioning/[draftId]/agent-turn-display';
+import type { LiveReply } from '@/app/app/positioning/[draftId]/agent-turn-display';
 import { isOpenTurn } from './runtime-notices';
 import workStyles from './runtime-work.module.css';
 

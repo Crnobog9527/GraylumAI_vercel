@@ -1,10 +1,10 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {isAnswerSourceDenied,isInputTooLong,isReleasedRefusal} from "./mentor-turn";
-import {DEFINITE_REFUSAL_NOTICE} from "@/app/runtime/gate-notices";
+import {DEFINITE_REFUSAL_NOTICE} from "@/app/app/runtime/gate-notices";
 import {STEP_SUMMARY_REFUSED} from "./step-summary";
 import {gateAdmissionNotice} from "@/lib/runtime-gate-notice";
 import {isOrganizerPendingError,ORGANIZER_PENDING_NOTICE} from "@/lib/payg-wait";
-import {RUNTIME_INPUT_TOO_LONG_MESSAGE} from "../../../../../../packages/api/src/shared/runtimeInputMessages";
+import {RUNTIME_INPUT_TOO_LONG_MESSAGE} from "../../../../../../../packages/api/src/shared/runtimeInputMessages";
 const admissionPaths=['opc.prepareStep','opc.mentorTurnStream','runtime.prepare'];
 const retained=' 原请求与输入已保留；条件恢复后可继续核对同一请求。';
 /** Only an explicit admission response can replace the unknown-outcome notice.

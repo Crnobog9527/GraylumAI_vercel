@@ -1,11 +1,11 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { expect, it, vi } from 'vitest';
-import { runtimeGateMessages } from '../../../../../../../packages/api/src/shared/runtimeGateMessages';
+import { runtimeGateMessages } from '../../../../../../../../packages/api/src/shared/runtimeGateMessages';
 import { topicExecutionNotice, topicExplained, topicFailureMessage, topicReplyText, topicTurnOutcome, topicOpenTurnNotice, topicRejectedTurn, topicTurnRefused, topicTurnShows } from './topic-notices';
 import { PROVIDER_REJECTED_NOTICE } from '@/lib/runtime-gate-notice';
-import { DEFINITE_REFUSAL_NOTICE } from '@/app/runtime/gate-notices';
-import { ENDED_NOTICE, USER_STOP_NOTICE } from '@/app/runtime/runtime-notices';
-import { RUNTIME_PAYG_PROFILE_REQUIRED_MESSAGE } from '../../../../../../../packages/api/src/shared/runtimeAdmissionMessages';
+import { DEFINITE_REFUSAL_NOTICE } from '@/app/app/runtime/gate-notices';
+import { ENDED_NOTICE, USER_STOP_NOTICE } from '@/app/app/runtime/runtime-notices';
+import { RUNTIME_PAYG_PROFILE_REQUIRED_MESSAGE } from '../../../../../../../../packages/api/src/shared/runtimeAdmissionMessages';
 
 const turnRefusal = (code: string, message: string) =>
   Object.assign(new Error(message), { data: { code, path: 'opc.topicTurn', retryAfter: 60 } });

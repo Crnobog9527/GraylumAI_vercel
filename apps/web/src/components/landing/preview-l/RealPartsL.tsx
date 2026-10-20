@@ -3,7 +3,7 @@
 
 import { useLayoutEffect, useRef } from 'react';
 import { X } from 'lucide-react';
-import { REPORT_TITLE, REPORT_WRITING_NOTICE } from '@/app/positioning/[draftId]/report-gen';
+import { REPORT_TITLE, REPORT_WRITING_NOTICE } from '@/app/app/positioning/[draftId]/report-gen';
 import { DisplayHeading } from '@/components/chat-display/display-heading';
 import { CHAT_ACTION, ChatNoticeList } from '@/components/chat/ChatInlineNotice';
 import type { ClipParts } from '@/components/landing/preview-j/PositioningClipJ';

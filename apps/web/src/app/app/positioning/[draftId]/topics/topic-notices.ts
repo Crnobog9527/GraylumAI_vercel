@@ -1,8 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { CHAT_ACTION, type ChatNotice } from '@/components/chat/ChatInlineNotice';
 import { PROVIDER_REJECTED_NOTICE, gateAdmissionNotice, gateResultNotice } from '@/lib/runtime-gate-notice';
-import { ENDED_NOTICE, USER_STOP_NOTICE, inFlight, stopRecovery, stoppedByUser, type StopSignals } from '@/app/runtime/runtime-notices';
-import { definiteRefusal, definiteRefusalNotice, showsReply } from '@/app/runtime/gate-notices';
+import { ENDED_NOTICE, USER_STOP_NOTICE, inFlight, stopRecovery, stoppedByUser, type StopSignals } from '@/app/app/runtime/runtime-notices';
+import { definiteRefusal, definiteRefusalNotice, showsReply } from '@/app/app/runtime/gate-notices';
 import { hostNotice, isOrganizerPendingError, isPaygWaiting, organizerSkipped, type PaygViewFields } from '@/lib/payg-wait';
 
 /** This tab's sessionStorage, where the page remembers the stops its user asked for (display only). */

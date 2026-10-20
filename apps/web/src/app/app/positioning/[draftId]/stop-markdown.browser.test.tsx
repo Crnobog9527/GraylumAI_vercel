@@ -20,7 +20,7 @@ beforeAll(async () => {
   const bundle = await build({
     configFile: false, logLevel: 'silent', define: { 'process.env.NODE_ENV': JSON.stringify('development') },
     oxc: { jsx: { runtime: 'automatic' } },
-    resolve: { alias: { '@': fileURLToPath(new URL('../../../', import.meta.url)) } },
+    resolve: { alias: { '@': fileURLToPath(new URL('../../../../', import.meta.url)) } },
     plugins: [{ name: 'stop-markdown-fixture', resolveId(id: string) { if (id === entry) return id; }, load(id: string) {
       if (id === entry) return `import React from 'react'; import {createRoot} from 'react-dom/client';
         import {flushSync} from 'react-dom';

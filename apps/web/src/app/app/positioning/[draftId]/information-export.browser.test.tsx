@@ -22,11 +22,11 @@ beforeAll(async () => {
   const { build } = await import(pathToFileURL(createRequire(require.resolve('vitest/package.json')).resolve('vite')).href);
   const component = fileURLToPath(new URL('./InformationExport.tsx', import.meta.url));
   const positioning = fileURLToPath(new URL('./page.tsx', import.meta.url));
-  const client = fileURLToPath(new URL('../../../trpc/client.ts', import.meta.url));
+  const client = fileURLToPath(new URL('../../../../trpc/client.ts', import.meta.url));
   const bundle = await build({ configFile: false, logLevel: 'silent',
     define: { 'process.env.NODE_ENV': JSON.stringify('development') },
     oxc: { jsx: { runtime: 'automatic' } },
-    resolve: { alias: { '@': fileURLToPath(new URL('../../../', import.meta.url)) } },
+    resolve: { alias: { '@': fileURLToPath(new URL('../../../../', import.meta.url)) } },
     plugins: [{ name: 'export-fixture', enforce: 'pre',
       resolveId(id: string) { if (id === entry || id.endsWith('/lib/supabase') || id === 'next/navigation' || id === 'next/link' ||
           id.endsWith('/components/opc/workspace-frame')) return id; },

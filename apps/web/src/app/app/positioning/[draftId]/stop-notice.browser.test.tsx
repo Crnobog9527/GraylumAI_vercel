@@ -14,13 +14,13 @@ const shots = process.env.C2_NOTICE_SCREENSHOTS;
 beforeAll(async () => {
   const require = createRequire(import.meta.url);
   const { build } = await import(pathToFileURL(createRequire(require.resolve('vitest/package.json')).resolve('vite')).href);
-  const notice = fileURLToPath(new URL('../../../components/chat/ChatInlineNotice.tsx', import.meta.url));
+  const notice = fileURLToPath(new URL('../../../../components/chat/ChatInlineNotice.tsx', import.meta.url));
   const mentor = fileURLToPath(new URL('./mentor-notices.ts', import.meta.url));
   const stop = fileURLToPath(new URL('./stop-reply.ts', import.meta.url));
   const bundle = await build({
     configFile: false, logLevel: 'silent', define: { 'process.env.NODE_ENV': JSON.stringify('development') },
     oxc: { jsx: { runtime: 'automatic' } },
-    resolve: { alias: { '@': fileURLToPath(new URL('../../../', import.meta.url)) } },
+    resolve: { alias: { '@': fileURLToPath(new URL('../../../../', import.meta.url)) } },
     plugins: [{ name: 'stop-notice-fixture', resolveId(id: string) { if (id === entry) return id; }, load(id: string) {
       if (id === entry) return `import React from 'react'; import {createRoot} from 'react-dom/client';
         import {ChatNoticeList} from ${JSON.stringify(notice)};

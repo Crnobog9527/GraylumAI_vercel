@@ -1,11 +1,11 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { AgentTurnEvent, AgentTurnOutcome, QuestionAnswerSource } from "@repo/api/src/shared/agentTurn";
 import { OPENING_INPUT, openingRequestId } from "@repo/api/src/shared/opcQuestions";
-import { RUNTIME_INPUT_TOO_LONG_MESSAGE } from "../../../../../../packages/api/src/shared/runtimeInputMessages";
+import { RUNTIME_INPUT_TOO_LONG_MESSAGE } from "../../../../../../../packages/api/src/shared/runtimeInputMessages";
 import { STEP_SUMMARY_PREFIX, SUMMARY_REFUSALS } from "./step-summary";
 import { gateResultNotice, PROVIDER_HISTORY_NOTICE } from "@/lib/runtime-gate-notice";
 import { blockedAdmission, hostNotice, isOrganizerPendingError, type PaygViewFields } from "@/lib/payg-wait";
-import { definiteRefusal } from "@/app/runtime/gate-notices";
+import { definiteRefusal } from "@/app/app/runtime/gate-notices";
 
 /** One mentor turn as sent to `opc.mentorTurnStream` (same input as `opc.prepareStep`). */
 export type MentorRequest = {

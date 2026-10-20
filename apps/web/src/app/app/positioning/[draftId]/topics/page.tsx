@@ -29,8 +29,8 @@ import { consentedTopicIds } from './adoption-consent';
 import { useTopicOpening } from './use-topic-opening';
 import { tabSession, topicExplained, topicFailureMessage, topicReplyText, topicTurnOutcome, topicOpenTurnNotice, topicTurnRefused,
   topicTurnShows } from './topic-notices';
-import { userStopIds } from '@/app/runtime/gate-notices';
-import { stopWithRecord, type StopSignals } from '@/app/runtime/runtime-notices';
+import { userStopIds } from '@/app/app/runtime/gate-notices';
+import { stopWithRecord, type StopSignals } from '@/app/app/runtime/runtime-notices';
 import { finishedExecution } from '@/lib/finished-execution';
 import { isOrganizerPendingError, type PaygViewFields } from '@/lib/payg-wait';
 import { usePaygResume } from '@/lib/use-payg-resume';

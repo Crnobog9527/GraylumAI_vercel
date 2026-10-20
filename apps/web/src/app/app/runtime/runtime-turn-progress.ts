@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import type { LiveReply } from '@/app/positioning/[draftId]/agent-turn-display';
+import type { LiveReply } from '@/app/app/positioning/[draftId]/agent-turn-display';
 import type { WorkItem } from '@/components/chat-display/agent-work-model';
 import { toolCounts, type TurnProgressInput } from '@/components/chat-display/turn-steps-model';
 

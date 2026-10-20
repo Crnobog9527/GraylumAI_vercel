@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { Bot } from 'lucide-react';
 import { MessageMarkdown } from '@/components/chat/MessageMarkdown';
 import { ChatPendingStatus } from '@/components/chat/ChatInlineNotice';
-import workStyles from '@/app/runtime/runtime-work.module.css';
+import workStyles from '@/app/app/runtime/runtime-work.module.css';
 import { DisplayHeading } from './display-heading';
 
 /**

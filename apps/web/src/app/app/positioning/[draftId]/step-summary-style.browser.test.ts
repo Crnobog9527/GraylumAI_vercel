@@ -4,7 +4,7 @@ import { chromium, type Browser } from '@playwright/test';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 
 // The workspace stylesheet as written: its class names are used verbatim here, without CSS-module hashing.
-const css = readFileSync(new URL('../../../components/opc/positioning-result.module.css', import.meta.url), 'utf8');
+const css = readFileSync(new URL('../../../../components/opc/positioning-result.module.css', import.meta.url), 'utf8');
 let browser: Browser;
 
 beforeAll(async () => {
