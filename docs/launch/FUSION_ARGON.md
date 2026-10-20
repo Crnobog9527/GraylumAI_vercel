@@ -1,70 +1,82 @@
 # FUSION-REVIEW：Gemini 4 Argon 接入与配置交接
 
-## 1. 范围与状态
+## 1. 结果
 
-Owner 2026-10-21 决定：执行约束席改用 `google/gemini-4-argon` / `google-ai-studio`，代码改动加一轮 ≤3 美元抽样。
-代码补模型与线路配对，并在共享档案匹配处限定Argon只能有fusion_review用途；证据门槛、计费规则和候选校验不变。
-抽样在派发前被线路状态阻塞：OpenRouter 指定线路 `status=-2`，现有取证流程要求 `status=0`。
-**实际调用 0、费用 0、profile 尚未生成**；[预检记录](evidence/fusion-argon-20261021-preflight.json)。
-本轮未执行 staging 配置变更；founder 真实评审也未启动。
+Owner 2026-10-21 决定执行约束席改用 `google/gemini-4-argon` / `google-ai-studio`，本轮抽样预算3美元。
+**6次真实调用合计0.371400000000美元**；4条正常意见均通过正式 `parseOpinion`，2条截断均在512 token触顶。
+原始预检的线路status=-2于2026-10-20 17:00:30 UTC恢复为0后才发送；没有改用其他线路。
+本PR新增精确路线配对，并在共享 `matchedProfile` 限定Argon档案只能包含 `fusion_review`，防止修改档案扩大用途。
 
-## 2. 候选列表为何缺 Argon
+- [脱敏证据](evidence/fusion-argon-20261021.json)：每条用量、费用、上限、请求和回执哈希；没有报告原文或密钥。
+- [可供总控追加的完整profile](evidence/fusion-argon-20261021.profiles-draft.json)：用正式 `paygHostProfile` 校验。
+- 证据sha256：`1e32adfbabce00f19df97537aff7d4d3358355efd51f0751bb35e011d690989d`。
+- [初始预检](evidence/fusion-argon-20261021-preflight.json)、[未发送时的计划](evidence/fusion-argon-20261021-plan.json)只作历史记录；实际结果以上面两份文件为准。
 
-`fusionModelOptions` 先从当前测试窗口的 `callPolicies` 取得模型 ID，再逐个按 `admitFusionModel` 检查：
-模型有效且可派发、平台密钥匹配、报价、该用途的思考设置、精确线路和有证据的 PAYG 档案。
-Argon 原来缺窗口报价、档案和 `paygHostPolicy.ts` 路线条目，因而不能出现在候选中。
+## 2. 候选列表与其他清单
 
-本 PR 新增唯一配对 `google/gemini-4-argon → google-ai-studio`；Argon即使被配置其他用途的完整矩阵档案，也会被拒绝。
-其他带 Flash 名字的清单属于外部搜索证据识别或旧 AC-0 探针，不参与评审团准入，不应加入 Argon。
-后台页没有另一张模型名白名单；总控补齐配置后，同一准入函数会把 Argon 列为可评审。
-回归测试调用真实的候选函数和准入链，覆盖配置齐全、缺报价、缺档案、错误线路；不使用准入函数替身。
+`fusionModelOptions` 从窗口 `callPolicies` 取模型ID，再由 `admitFusionModel` 验证有效模型、OpenRouter接口/平台密钥绑定、
+报价、该用途的思考设置、精确线路和PAYG档案。Argon原来缺报价、档案及代码路线条目，故不会列出。
+后台没有另一张需要同步的静态模型名表；其他Flash清单属于外部搜索证据识别或旧AC-0探针，不参与评审团。
+总控补齐下方配置后，候选函数会显示Argon可评审；汇总、对比、普通对话和Skill仍不允许。
+真实候选链回归不替换准入函数，覆盖齐全、缺报价、缺档案、错线路和扩大档案用途的拒绝。
 
-## 3. 抽样方法和未完成项
+## 3. 方法、数据和限制
 
-已只读核对 Flash 当前档案：`profileVersion=pr665-r9+fusion-20261017-a`，
-`evidence.reference=pr665-r9-results-a1d98dde80b4`，完整矩阵 60 样本、15 单元×4、历史压力 12 条、上限128条；
-low 的截断证据引用 `pr665-r7-results-a24d1839b5e5`，512 token 两条。
-Flash 多用途证据不能移植给新模型；Argon 只开放 `fusion_review`，沿用 Owner 已批准的 FUSION-PROFILE 方案 B。
+已只读核对现有Flash：`profileVersion=pr665-r9+fusion-20261017-a`，
+`evidence.reference=pr665-r9-results-a1d98dde80b4`，60样本/15单元×4、历史压力12条、128消息；
+low截断证据 `pr665-r7-results-a24d1839b5e5`，512 token两条。
+不移植Flash证据：Argon只做fusion_review，按已有FUSION-PROFILE方案B（实际Fusion形状、至少4样本/两档、最大≥180000 B）重新取证。
 
-[已生成的抽样计划](evidence/fusion-argon-20261021-plan.json)逐条保守费用上限合计1.532850000000美元（低于3美元）。
-准备的单轮为 6 个互不相同请求：中档 50,000 B×2、大档 186,000 B×2、512 输出截断×2（中档）。
-请求用正式 `reviewerRequest` / `fusionRequestBody` 生成：已发布评审 Skill、公开合成咖啡报告、execution 视角、引文规则、
-system+user 两条消息、严格 JSON schema、low、无工具、禁用 web 插件、仅指定完整线路且不回退。
-逐条核对正式回执和 generation 查询的身份、费用、线路、缓存、输出含思考、输入比值≤0.7，以及 `openRouterCallBound`。
-每次发送前重核目录和剩余预算，超预算或回执未知即停；稳定单轮锁防重复派发，不自动重试。
+用正式 `reviewerRequest` / `fusionRequestBody`、staging已发布评审Skill、仓库公开合成咖啡报告，
+execution视角和引文规则、system+user两条消息、严格JSON schema、low，无工具、web插件关闭、指定完整线路且不回退。
+两档50,000/186,000 B，各2条正常样本；另2条中档把输出压到512测试截断。
+请求、generation及官方回执均有哈希；6个generation互不相同。首条账单查询短暂404时暂停后续付费请求，只补查既有generation，未重发模型请求。
+逐条核对官方响应和generation查询的最终费用、身份、Google AI Studio提供商、用量，以及产品同一 `openRouterCallBound`。
 
-计划输出上限 4096、截断上限512；新档案保持 `maxBytes=196608`、template/margin各4096、maxMessages128、maxTools2、maxSchemaBytes16384，
-用途仅 `fusion_review`，格式仅 `fusion-json-v1-stream`，思考仅low，过期时间与窗口一致为2027-12-31T00:00:00Z。
-真实抽样成功后才能写入 reference、manifestHash、实际样本数、比值、最大请求和费用检查结论，并用正式 `paygHostProfile` 校验。
-**本 PR 当前没有可应用的 Argon profile；不提供伪造或套用 Flash 的档案。真实证据未补齐前保持Draft，不请求合并或配置应用。**
+| 样本 | 请求B | 输入token | 输出token | 结束 | 实际美元 | 正式上限美元 |
+| --- | ---: | ---: | ---: | --- | ---: | ---: |
+| medium-1 | 50000 | 11974 | 2185 | stop | 0.045798 | 0.168255000000 |
+| medium-2 | 50000 | 11974 | 2453 | stop | 0.048478 | 0.168255000000 |
+| large-1 | 186000 | 44032 | 2205 | stop | 0.110114 | 0.465755000000 |
+| large-2 | 186000 | 44032 | 2081 | stop | 0.108874 | 0.465755000000 |
+| stress-1 | 50000 | 11974 | 512 | length | 0.029068 | 0.132415000000 |
+| stress-2 | 50000 | 11974 | 512 | length | 0.029068 | 0.132415000000 |
 
-## 4. 三处 staging 配置（由总控审计后执行，无 SQL）
+总费用0.3714 ≤3；逐条保守上限合计1.53285 ≤3。最大输入token/字节0.23948，输入token/上限0.22674466507374144，均≤0.7。
+正常意见4/4可用；截断输出2/2为length/512（它们故意不构成完整意见）。
+low在本轮回执里的reasoning_tokens均为0，缓存命中/写入token也均为0；不宣称观察到了非零思考或缓存命中。
+缓存费用按目录输入2+写入附加费0.1875的保守冻结价覆盖。每条缓存token均不超过输入，输出均不超过配置上限。
+这是计费形状和可解析性取证，不替代founder真实评审的扣费、修订稿和结算验收。
+私有完整回执与单轮锁保留在本机 `~/.graylum/fusion-argon-20261021/`，不进入公开仓库；不自动重复抽样。
 
-共同前提：代码已合入 staging 且包含本次代码的环境已可用、指定线路恢复、抽样成功并提交正式校验通过的profile。
-每次改前保存完整原值与摘要，核对当前内容未被其他任务改动；改后读回逐项比对。先profile和报价，最后切席位。
+## 4. 总控执行的三处staging配置（文字，无SQL）
 
-1. **`system_settings.runtime_payg_staging`**：只追加 Argon 的真实抽样档案；保留当前 `version/enabled/windowId`、五条原档案及其内容。
-   Argon model=`google/gemini-4-argon`，endpointTag=`google-ai-studio`，purposes仅fusion_review，reasoning仅low，outputLimit4096。
-   证据成功后将完整 JSON 放入本 PR；整份设置须通过 `paygHostSettings`，不能把未完成取证字段写为true。
-2. **`runtime_test_windows` 的 `call_policies`**：仅在 `897525f9-66f1-4504-8d91-a52d2c0f0e60` 追加模型ID
-   `7169edbf-aaa2-414e-ad6d-f79d0751dc16` 的报价；复制现有Flash条目的OpenRouter account绑定，不读取或输出密钥。
-   provider=openrouter、protocol=openrouter-chat-v1、inputLimit196608、outputLimit4096、multiplier3；
-   providerLimits的providerSlug=`google-ai-studio`、contextTokens1048576；按当前正式 `deriveFrozenPrices` 算得
-   prompt和cacheWrite均2.1875、completion10、request0（美元/百万token，request为每次美元），
-   对应 `openRouterBound` 上限2.334720000000美元。Google缓存写入0.1875是输入2的附加费，不能只填输入2。
-   保持automaticRetry=false、hiddenTools=false、lookupSupported=true；写前重新核价，价格变化先重算；原报价逐条保留。
-3. **`system_settings.fusion_settings.review`**：仅把reviewerModelIds中的
-   `da9e7046-fddc-4b97-bf65-a275b05d6cf0` 原位置替换为 `7169edbf-aaa2-414e-ad6d-f79d0751dc16`；
-   reviewerRoles移除旧Flash键、为Argon添加execution，保留GPT `8122be92-88c7-4be9-9629-14a75c459219`=finance、
+共同前提：本PR合入staging、包含本次代码的环境可用，再执行配置。每步改前保存完整原值和摘要，
+核对没有其他任务改动，改后读回逐项比对；先profile和报价，最后改席位。保留所有原设置与旧档案；本任务不执行远端写入。
+
+1. **`system_settings.runtime_payg_staging`**：只追加 `fusion-argon-20261021.profiles-draft.json` 的唯一profile。
+   model=`google/gemini-4-argon`、endpointTag=`google-ai-studio`、仅fusion_review/low、输出4096；
+   maxBytes196608、template/margin各4096、maxMessages128、maxTools2、maxSchemaBytes16384、过期2027-12-31T00:00:00Z。
+   reference、实际样本数、比值和manifestHash必须照完整文件，不能复制旧模型证据。保留version/enabled/windowId和全部原profiles，
+   禁止出现重复的Argon模型/线路档案；写前用正式 `paygHostSettings` 校验整份value。
+2. **测试窗口 `call_policies`**：先备份完整原数组，更新须断言只影响目标窗口恰好1行，不符即撤销。
+   仅在 `897525f9-66f1-4504-8d91-a52d2c0f0e60` 新增模型ID `7169edbf-aaa2-414e-ad6d-f79d0751dc16`；
+   model=`google/gemini-4-argon`，provider=openrouter、protocol=openrouter-chat-v1，account沿用现有Flash的相同平台绑定，不读取或输出密钥。
+   inputLimit196608、outputLimit4096、multiplier3；providerLimits的providerSlug=`google-ai-studio`、contextTokens1048576；
+   按正式 `deriveFrozenPrices` 计算，当前prompt和cacheWrite均2.1875、completion10、request0（美元/百万token，request为每次美元），
+   `openRouterBound` 为2.334720000000美元。缓存写入0.1875是附加费，不可只填输入2。
+   automaticRetry=false、hiddenTools=false、lookupSupported=true。写前重新核价，价格变化先重算；原条目逐项保留。
+3. **`system_settings.fusion_settings.review`**：将reviewerModelIds中的旧Flash
+   `da9e7046-fddc-4b97-bf65-a275b05d6cf0` 原位替换为Argon `7169edbf-aaa2-414e-ad6d-f79d0751dc16`；
+   reviewerRoles移除旧Flash键，新增Argon=execution；保留GPT `8122be92-88c7-4be9-9629-14a75c459219`=finance、
    Sonnet `d04a4800-2d3a-43b3-8af9-cb960572e34f`=evidence。
-   用后台保存校验，保留汇总Opus、Skill、1轮、意见4096、汇总32768、固定1500积分及其他配置。
+   走后台保存校验，保留Opus汇总、Skill、1轮、意见4096、汇总32768、固定1500积分和其他配置。
 
-恢复：还未发起新评审时按原值恢复席位、删除本次追加的报价和profile；已经冻结的运行单不可改写。
+恢复：尚未发起新评审时按备份恢复席位、移除本次追加的报价和profile；已冻结运行单、回执和账本不可改写。
 
-## 5. 验证与后续
+## 5. 验证与下一步
 
-新增路线测试先红后绿；真实候选准入测试通过。类型检查和相关ESLint通过；Runtime/Fusion全套、CI、机器人审查另见PR实时记录。
-三处配置尚未执行；新Argon真实抽样与计费证据BLOCKED，founder真实评审NOT_RUN。
-总控完成三处配置并确认指定线路可调用后，使用已批准founder只做一次真实评审（另限1美元），
-核对Argon实际调用、可用修订稿才扣1500、失败退回，并把实际结果写入#716。
-本PR不执行合并或部署，不操作正式环境。
+新增路线测试先红后绿；当前82项相关测试（含证据/费用/profile校验）、类型、ESLint、代码大小检查通过。
+前一代码版本完整CI和机器人复审通过；加入本次真实证据后的最终CI与机器人结果以PR为准。
+总控完成三处配置后，用已批准founder只做1次真实评审（另限1美元），核对Argon实际调用、可用修订稿才扣1500、失败退回，结果写#716。
+真实评审尚未执行，不能把本轮抽样当作扣费结算验收。没有部署任何分支，没有操作正式环境。

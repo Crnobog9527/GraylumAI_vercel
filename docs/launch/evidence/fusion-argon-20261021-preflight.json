@@ -18,5 +18,9 @@
   "status": "BLOCKED_BEFORE_DISPATCH",
   "profileGenerated": false,
   "observedDateLocal": "2026-10-21",
-  "timezone": "Asia/Shanghai"
+  "timezone": "Asia/Shanghai",
+  "recordKind": "historical-preflight",
+  "recoveryCheckedAt": "2026-10-20T17:00:30.550Z",
+  "recoveredRouteStatus": 0,
+  "supersededBy": "fusion-argon-20261021.json"
 }
