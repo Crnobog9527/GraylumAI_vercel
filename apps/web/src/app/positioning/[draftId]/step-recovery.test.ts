@@ -239,3 +239,19 @@ describe("RecoveryTimers", () => {
     expect(secondCallback).toHaveBeenCalledOnce();
   });
 });
+
+// #716 2026-10-20: a step-2 benchmark turn ran 124 s on staging; the page was reloaded at 90 s while it still ran.
+describe("a long turn reloaded while it still runs", () => {
+  const envelopes = envelopesOf(admitted), longAfterOpen = 125_000;
+
+  it("keeps polling and never asks for a retry while the server advances it", () => {
+    expect(historyPollInterval(history("running", executionId), envelopes, longAfterOpen)).toBe(HISTORY_POLL_MS);
+    expect(envelopeNeedsUser(history("running", executionId), envelopes[0]!, new Map(), longAfterOpen)).toBe(false);
+    expect(autoRecoveryTarget(history("running", executionId), envelopes, new Map(), longAfterOpen, 0)).toBeNull();
+  });
+
+  it("finishes by itself once history shows the turn completed", () => {
+    expect(autoRecoveryTarget(history("completed"), envelopes, new Map(), longAfterOpen, 0)).toBe(envelopes[0]);
+    expect(envelopeNeedsUser(history("completed"), envelopes[0]!, new Map(), longAfterOpen)).toBe(false);
+  });
+});
