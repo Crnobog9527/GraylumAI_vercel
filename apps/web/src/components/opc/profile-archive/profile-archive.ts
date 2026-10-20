@@ -36,6 +36,7 @@ export const PROFILE_ARCHIVE_TEXT = {
   archiveBusy: '这个档案还有操作在进行，等它完成后再归档。',
   archiveGone: '这个档案已经不在了，列表已刷新。',
   loadFailed: '定位档案暂时读不出来，请稍后再试。',
+  checking: '正在读取定位档案…',
   limitReached: '定位档案名额用完了。把不再更新的档案归档，就能空出名额；也可以升级会员。',
   limitHint: '名额用完了，可以把不再更新的档案归档。',
   readonlyTitle: '定位分析（已归档）',

@@ -34,7 +34,7 @@ import { useAutoStepRecovery, useHistoryPolling } from "./use-step-recovery";
 import { executionSettled } from "./step-recovery";
 import { useLiveReply } from "./use-live-reply";
 import { PublishFootnote, PublishNext, ReportEntry, reportPublishes } from "./report-panel";
-import { ReadonlyDraftView, useDraftArchived } from './readonly-draft-view';
+import { DraftArchiveGate, ReadonlyDraftView } from './readonly-draft-view';
 import { InformationExport } from "./InformationExport";
 import { EXISTING_WELCOME } from "../start-entry";
 import { isStepSummaryInput, offersStepSummary, STEP_SUMMARY_INPUT, STEP_SUMMARY_LABEL, stepSummaryRequest, summaryRefusal,
@@ -52,7 +52,7 @@ import { ResearchSessionPanel, useResearchCalls } from "@/components/research/re
 /** The retained mentor request is either wrapped in `request` or legacy top-level. */
 export default function PositioningDraft({ params }: { params: Promise<{ draftId: string }> }) {
   const { draftId } = use(params);
-  return <PositioningDraftContent key={draftId} draftId={draftId}/>;
+  return <DraftArchiveGate key={draftId} draftId={draftId}><PositioningDraftContent key={draftId} draftId={draftId}/></DraftArchiveGate>;
 }
 function PositioningDraftContent({draftId}:{draftId:string}){
   const router = useRouter();
@@ -62,7 +62,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const library = trpc.opc.library.useQuery({search:'',from:null,to:null});
   const discussionAccounts = ((library.data?.businesses??[]) as Array<{accounts:Array<{strategyDraftId?:string;pendingStrategyDraftId?:string|null;displayName?:string;account:string;platform:string}>}>).flatMap(business=>business.accounts).filter(account=>account.pendingStrategyDraftId===draftId||account.strategyDraftId===draftId);
   const discussionAccount = discussionAccounts.length===1?discussionAccounts[0]:undefined;
-  const list = trpc.opc.list.useQuery(); const archived = useDraftArchived(draftId); // PAYWALL: archived profiles are read-only.
+  const list = trpc.opc.list.useQuery();
   const prepareStep = trpc.opc.prepareStep.useMutation();
   const [pendingBubble,setPendingBubble]=useState<MentorRequest|null>(null);
   const [foldedCard,setFoldedCard]=useState(''); // Execution whose docked question card the user folded away.
@@ -967,7 +967,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   if (read.isLoading || hydratedDraft !== draftId) return <main className="p-6">正在恢复定位…</main>;
   if (read.error || !d)
     return <main className="p-6" role="alert">无法读取这份定位，请检查登录和访问权限。<Link href="/positioning">返回定位列表</Link></main>;
-  if (d.conversationDeleted || archived) return <ReadonlyDraftView draftId={draftId} draft={d} archived={!d.conversationDeleted}/>; // read-only
+  if (d.conversationDeleted) return <ReadonlyDraftView draftId={draftId} draft={d}/>; // Owner 2026-10-14: read-only after deletion.
   if (planView) return <main className="mx-auto max-w-3xl space-y-4 p-6">
     <Link href={`/positioning/${draftId}/topics`}>进入当前选题工作</Link>
     <h1>旧计划请求恢复</h1>

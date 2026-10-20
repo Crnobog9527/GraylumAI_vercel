@@ -22,7 +22,7 @@ import { WorkComposer, useFreeConversation } from '@/components/opc/work-compose
 import { WorkspaceFrame } from '@/components/opc/workspace-frame';
 import composerStyles from '@/components/opc/work-composer.module.css';
 import topicStyles from './topic-candidates.module.css';
-import { ReadonlyDraftView, useDraftArchived } from '../readonly-draft-view';
+import { ReadonlyDraftView, RouteDraftArchiveGate } from '../readonly-draft-view';
 import { trpc } from '@/trpc/client';
 import { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics } from '@repo/api/src/shared/opcRequests';
 import { consentedTopicIds } from './adoption-consent';
@@ -113,8 +113,7 @@ function parseAdoption(text: string | null | undefined): string[] | null {
   }
   return null;
 }
-
-export default function TopicWorkspacePage() {
+function TopicWorkspaceContent() {
   const params = useParams<{ draftId: string }>();
   const draftId = params?.draftId ?? '';
   const profile=trpc.user.getUserProfile.useQuery();
@@ -233,7 +232,7 @@ export default function TopicWorkspacePage() {
    * from there silently produced a null expected revision for every existing
    * account. The list carries the authoritative current revision.
    */
-  const accountList = trpc.opc.list.useQuery(); const archivedDraft = useDraftArchived(draftId) && !read.data?.conversationDeleted;
+  const accountList = trpc.opc.list.useQuery();
   const accounts = (accountList.data?.accounts ?? []) as Array<{
     platform: string; account: string; revision: number;
   }>;
@@ -461,7 +460,7 @@ export default function TopicWorkspacePage() {
   }, [executions, candidate, pending, busy, read.data?.handoffs, accountList.data, accountList.isFetching, accountList.error]);
 
   if (read.isLoading || workspace.isLoading) return <main className="p-6">正在读取选题工作空间…</main>;
-  if (read.data && (read.data.conversationDeleted || archivedDraft)) return <ReadonlyDraftView draftId={draftId} draft={read.data} archived={archivedDraft}/>;
+  if (read.data?.conversationDeleted) return <ReadonlyDraftView draftId={draftId} draft={read.data}/>;
   if (read.error || workspace.error)
     return (
       <main className="p-6">
@@ -606,3 +605,4 @@ export default function TopicWorkspacePage() {
     </main>{infoOpen&&<div className={topicStyles.infoBackdrop} onMouseDown={event=>{if(event.target===event.currentTarget)setInfoOpen(false);}}><section role="dialog" aria-modal="true" aria-label="工作信息" className={topicStyles.infoDialog}><header><h2>工作信息</h2><button type="button" aria-label="关闭工作信息" onClick={()=>setInfoOpen(false)}>×</button></header><p>本工作绑定正式定位 v{workspace.data?.sourceVersion??'—'} 与原选题方法修订。查看不会生成或采用。</p><div><Link href={`/positioning/${draftId}`}>查看原定位</Link><Link href={'/library?returnTo='+encodeURIComponent('/positioning/'+draftId+'/topics')}>打开资料库</Link></div></section></div>}</WorkspaceFrame>
   );
 }
+export default function TopicWorkspacePage() { return <RouteDraftArchiveGate><TopicWorkspaceContent/></RouteDraftArchiveGate>; }

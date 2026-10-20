@@ -5,7 +5,8 @@ import { WorkspaceFrame } from '@/components/opc/workspace-frame';
 import { InformationExport } from './InformationExport';
 import { confirmedSections } from './information-export';
 import { ArchivedReport } from './archived-report';
-export { useDraftArchived } from '@/components/opc/profile-archive/profile-archive-api';
+// The gate imports this view; re-exported here so the pages keep one import line.
+export { DraftArchiveGate, RouteDraftArchiveGate } from './draft-archive-gate';
 import { PROFILE_ARCHIVE_TEXT } from '@/components/opc/profile-archive/profile-archive';
 
 /**

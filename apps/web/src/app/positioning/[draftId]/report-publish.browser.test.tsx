@@ -32,7 +32,7 @@ beforeAll(async () => {
       resolveId(id: string) { if (id === entry || id.endsWith('/lib/supabase') || id === 'next/navigation' || id === 'next/link' ||
           id.endsWith('/components/opc/workspace-frame')) return id; },
       load(id: string) {
-        if (id === 'next/navigation') return `export const useRouter=()=>({replace:()=>{},push:()=>{}});
+        if (id === 'next/navigation') return `export const useRouter=()=>({replace:()=>{},push:()=>{}}); export const useParams=()=>({draftId:'draft'});
           export const usePathname=()=>'/positioning/draft'; export const useSearchParams=()=>new URLSearchParams();`;
         if (id === 'next/link') return `import React from 'react'; export default function Link(p){return React.createElement('a',p)}`;
         if (id.endsWith('/components/opc/workspace-frame')) return `import React from 'react';
@@ -70,7 +70,7 @@ for (const state of ['draft', 'published'] as const) for (const reportGeneration
         const path = new URL(route.request().url()).pathname;
         if (path === '/') return route.fulfill({ contentType: 'text/html', body: '<div id="root"></div>' });
         const result = path.endsWith('/opc.read') ? read(state, reportGeneration) : path.endsWith('/runtime.view') ? { executions: [] }
-          : path.endsWith('/opc.list') ? { drafts: [] } : path.endsWith('/opc.library') ? { businesses: [] }
+          : path.endsWith('/opc.businesses') ? [] : path.endsWith('/opc.list') ? { drafts: [] } : path.endsWith('/opc.library') ? { businesses: [] }
             : path.endsWith('/opc.capturePending') ? { processed: [] } : path.endsWith('/runtime.reportAvailable') ? { enabled: true, priceCredits: 500 } : {};
         await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ result: { data: result } }) });
       });
@@ -98,7 +98,7 @@ it('opens the saved formal report of an adopted version with its chapter list, n
       if (path === '/') return route.fulfill({ contentType: 'text/html', body: '<div id="root"></div>' });
       const result = path.endsWith('/opc.read') ? adopted : path.endsWith('/runtime.view') ? { executions: [] }
         : path.endsWith('/runtime.reportLatest') ? { executionId: null } : path.endsWith('/runtime.reportAvailable') ? { enabled: true, priceCredits: 500 }
-          : path.endsWith('/opc.list') ? { drafts: [] } : path.endsWith('/opc.library') ? { businesses: [] }
+          : path.endsWith('/opc.businesses') ? [] : path.endsWith('/opc.list') ? { drafts: [] } : path.endsWith('/opc.library') ? { businesses: [] }
             : path.endsWith('/opc.capturePending') ? { processed: [] } : {};
       await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ result: { data: result } }) });
     });
