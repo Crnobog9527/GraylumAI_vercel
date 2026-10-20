@@ -11,7 +11,7 @@ vi.mock('@/trpc/client', () => ({ trpc: {
     withdraw: { useMutation: () => ({ mutate: vi.fn(), isPending: false }) },
   },
 } }));
-import { AdminPaymentDisputes } from './AdminPaymentDisputes';
+import { AdminPaymentDisputes, WithdrawConfirm } from './AdminPaymentDisputes';
 import { PaymentDisputeNotice } from '@/components/profile/PaymentDisputeNotice';
 beforeEach(() => { fixture.rows = []; fixture.frozen = false; fixture.error = false; });
 it('shows the approved neutral notice only while the account has a frozen payment', () => {
@@ -57,4 +57,21 @@ it('distinguishes equal-amount unmatched disputes by Stripe identity and merchan
   expect(html).toContain('du_first');expect(html).toContain('du_second');expect(html).toContain('acct_fixture');expect(html).toContain('测试');
   fixture.rows = [{ id: 'missing-id', order_id: null, amount: 100, currency: 'usd', status: 'won', freeze_state: 'pending' }];
   expect(renderToStaticMarkup(<AdminPaymentDisputes />)).not.toContain('>已核实站外付款</button>');
+});
+
+const confirmHtml = (status: string) => renderToStaticMarkup(
+  <WithdrawConfirm status={status} pending={false} onConfirm={vi.fn()} onCancel={vi.fn()} />);
+it.each(['won', 'warning_closed'])('withdraws a %s dispute with no extra warning', status => {
+  const html = confirmHtml(status);
+  expect(html).not.toContain('withdraw-risk'); expect(html).not.toContain('type="checkbox"');
+  expect(html).not.toMatch(/<button[^>]*disabled=""[^>]*>确认撤回冻结/);
+});
+it.each(['needs_response', 'under_review', 'warning_needs_response', 'warning_under_review', 'lost', 'prevented', 'unexpected'])(
+  'warns and needs a second confirmation before withdrawing a %s dispute', status => {
+    const html = confirmHtml(status);
+    expect(html).toContain('withdraw-risk'); expect(html).toContain('钱可能已被银行扣回');
+    expect(html).toContain('type="checkbox"'); expect(html).toMatch(/<button[^>]*disabled=""[^>]*>确认撤回冻结/);
+  });
+it('says a lost dispute is already lost', () => {
+  expect(confirmHtml('lost')).toContain('已判输'); expect(confirmHtml('needs_response')).toContain('还没判赢');
 });
