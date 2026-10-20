@@ -21,7 +21,7 @@
 
 ## 数据库变更、兼容与恢复
 
-暂定迁移 `0325_runtime_exhausted_replay.sql` 只修改 `runtime_execution`，原/目标定义均有精确摘要和替换锚点校验；重复执行是空操作，不改表或历史账目。最终编号由总控按队列确认，当前 0324 预留给 #1215。
+迁移 `0325_runtime_exhausted_replay.sql` 只修改 `runtime_execution`，原/目标定义均有精确摘要和替换锚点校验；重复执行是空操作，不改表或历史账目。总控已确认本任务使用 0325；前序 #1215/0324 已合入 staging 并由总控上库。
 
 新主机配旧库的正常流程及 finalize 查证已在真实 PostgreSQL/PostgREST 验证；耗尽恢复在旧库上的两项失败构成反证。新库保持原响应结构及 `live=false` 语义，旧主机能回放已保存收据，不允许新增调用。旧主机对无法回放的运行仍依赖既有清理路径；新主机使用确定失败补偿及时收尾。数据库回归覆盖耗尽并发恢复只产生一个新 owner、旧 epoch 拒绝及重复完成不重复计费。
 
@@ -31,14 +31,14 @@
 
 最终版本、CI、审查回执及数据库结果统一记录在 [PR #1216 的交接节](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1216)。验证均使用一次性本地 PostgreSQL 17、PostgREST 和模拟供应商，不连接正式库，不产生付费模型/搜索调用。
 
-已完成的反证与检查：
+同步前已完成的反证与检查（新版本的最终结果见 PR 交接节）：
 
 - 修复前纯读/结算故障回归：12 项失败；实现后相关 87 项单测通过。
 - 旧 schema 的全套 Runtime：437 通过、2 项预期失败、5 项按既有清单排除；失败项分别为已保存双回复被取消、缺整理回复未平台补偿。
 - 全 API 单测：7987 通过、19 项既有跳过；类型、lint、代码长度检查通过。
 - 空库文件建库：327 步通过，258 个迁移连续执行两次结构不变；结构指纹只改变 `runtime_execution`，账户开放策略审计通过。
 
-必须完成的真实数据库矩阵：正常；finalize 已提交丢响应、未提交、查证失败；重复/并发结算；结算重入与取消竞争；耗尽双收据回放、未发送整理回复、无效主回复/整理回复/拒答；重复补偿；旧 epoch 拒绝及并发恢复。完整结果在 PR 交接节更新，未完成不标通过。
+已通过的真实数据库矩阵：正常；finalize 已提交丢响应、未提交、查证失败；重复/并发结算；结算重入与取消竞争；耗尽双收据回放、未发送整理回复、无效主回复/整理回复/拒答；重复补偿；旧 epoch 拒绝及并发恢复。上一版本 Runtime 443 通过、5 项既有排除，BILL2 93/93，函数恢复与两次重放通过；同步后的版本继续由实际 CI 数据库套件核验，完整结果在 PR 交接节更新，未完成不标通过。
 
 复现命令：
 
@@ -51,6 +51,12 @@ node packages/db/tests/run-db-baseline-replay.mjs --local-only
 node packages/db/tests/v3/run-workbench.mjs --bill2-core-only --without-app --schema-from-files
 node packages/db/tests/v3/run-workbench.mjs --runtime-only --with-staging-schema --without-app --schema-from-files
 ```
+
+## 同步最新 staging 后的核验
+
+已 merge 同步包含 #1215 的 staging（`e5211a7c3c34112c29b198e1162c3fba1b004947`），未改动 0324。重新生成 built-fingerprint 后与合并结果一致，相对 staging 仍只改变 `runtime_execution`；新旧函数摘要保持预期。
+
+本地 PASS：文件建库 328/328 步，259 个迁移连续重复执行结构不变；账户开放策略审计为空；旧函数恢复后再次应用 0325 两次，运行单与账本不变，容器清理通过。迁移账本核验通过；CI 工作流合约 10 项/1853 断言全通过、无跳过，代码长度检查通过。最终 CI 和新版本机器人回执另见 PR 交接节。
 
 ## 发现的问题
 

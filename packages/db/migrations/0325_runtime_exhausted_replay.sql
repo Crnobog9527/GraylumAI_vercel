@@ -1,7 +1,7 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
 -- AGENT-CORE: an exhausted PAYG resume acquires a fresh owner epoch for replay only.
 -- No claim, dispatch, accounting lock or call limit changes. Old hosts already honor live=false.
--- Provisional migration number; controller confirms the final slot before application.
+-- Migration 0325 confirmed by controller; controller applies it after final validation.
 BEGIN;
 SET LOCAL lock_timeout='5s';
 DO $migration$
