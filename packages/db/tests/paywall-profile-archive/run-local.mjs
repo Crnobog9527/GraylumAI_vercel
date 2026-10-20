@@ -13,6 +13,7 @@ import {POSTGRES_IMAGE} from '../v3/images.mjs';
 import {buildFromFiles,installPgCronStub} from '../baseline/build-from-files.mjs';
 import {runCases} from './cases.mjs';
 import {fusionArchiveCases} from './fusion-cases.mjs';
+import {reviewArchiveCases} from './review-cases.mjs';
 assert.ok(process.argv[2]==='--local-only'&&!process.env.CI || process.argv[2]==='--ci'&&process.env.CI,
   'use --local-only locally or --ci in CI; only an isolated local database is supported');
 const root=resolve(import.meta.dirname,'../../../..');
@@ -54,7 +55,7 @@ try {
   }
   const before=objects();
   const failed=apply(migration.replace(/COMMIT;\s*$/,
-   "DO $$ BEGIN RAISE EXCEPTION 'ARCHIVE_ROLLBACK_PROBE'; END $$; COMMIT;"));
+   ()=>"DO $$ BEGIN RAISE EXCEPTION 'ARCHIVE_ROLLBACK_PROBE'; END $$; COMMIT;"));
   assert.equal(failed.ok,false);
   assert.match(failed.error,/ARCHIVE_ROLLBACK_PROBE/);
   assert.deepEqual(objects(),before,'interrupted migration leaves original definitions, data shape and ACL unchanged');
@@ -85,6 +86,7 @@ try {
  }
  await runCases({admin,connect,report,read});
  await fusionArchiveCases({admin,connect,report});
+ await reviewArchiveCases({admin,connect,report,read});
  const preserved=sql('SELECT jsonb_agg(to_jsonb(b) ORDER BY id) FROM opc_businesses b');
  sql(read('packages/db/migrations/0326_paywall_fusion_archive_fence.sql'));
  assert.equal(sql('SELECT jsonb_agg(to_jsonb(b) ORDER BY id) FROM opc_businesses b'),preserved,

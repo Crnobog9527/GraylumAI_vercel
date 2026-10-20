@@ -1,7 +1,7 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC.
 -- All rights reserved. This code is proprietary and confidential.
 -- PAYWALL: fence every Fusion transaction against its persisted source business.
--- 0324 is already applied to staging and must stay immutable. No stored data is rewritten.
+-- 0324 stays immutable. Reports/history stay intact; legacy held fees reconcile transactionally.
 BEGIN;
 SET LOCAL lock_timeout='5s';
 
@@ -97,6 +97,111 @@ DO $$ DECLARE spec record;src text;fn regprocedure; BEGIN
   END IF;
  END LOOP;
 END $$;
+-- Owner: a review, once enabled, must finish (MASTER_PLAN 2026-10-17).
+-- Archive must not become a new Stop button. Existing busy semantics cover the
+-- whole active review/fixed fee, including between its individual model calls.
+-- A table transition trigger also protects an already-running 0324 RPC during
+-- rollout. Clients have no table UPDATE grant; archive already holds the actor
+-- and business locks. Installing the trigger waits for older table writers.
+CREATE OR REPLACE FUNCTION public.opc_review_archive_guard()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+BEGIN
+ IF OLD.archived_at IS NULL AND NEW.archived_at IS NOT NULL AND (
+  EXISTS(SELECT 1 FROM fusion_reviews rv WHERE rv.actor_id=NEW.actor_id
+   AND (rv.state IN ('running','paused') OR EXISTS(SELECT 1 FROM fusion_review_fees f
+    WHERE f.review_id=rv.id AND f.state='held'))
+   AND opc_target_business(NEW.actor_id,jsonb_build_object('draftId',rv.draft_id))=NEW.id)
+  OR EXISTS(SELECT 1 FROM bill2_runs br JOIN fusion_billing_groups g ON g.id=br.fusion_group_id
+   JOIN bill2_calls c ON c.run_id=br.id WHERE br.actor_id=NEW.actor_id AND g.actor_id=NEW.actor_id
+   AND g.kind='review' AND c.settled_at IS NULL
+   AND opc_target_business(NEW.actor_id,jsonb_build_object('runId',br.id))=NEW.id)
+ ) THEN RAISE EXCEPTION 'OPC_BUSINESS_BUSY'; END IF;
+ RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION public.opc_review_archive_guard() FROM PUBLIC,anon,authenticated,service_role;
+DROP TRIGGER IF EXISTS opc_review_archive_guard ON public.opc_businesses;
+CREATE TRIGGER opc_review_archive_guard BEFORE UPDATE OF archived_at ON public.opc_businesses
+ FOR EACH ROW EXECUTE FUNCTION public.opc_review_archive_guard();
+
+-- Repair pre-0326 inconsistent data, not a voluntary review stop: an already
+-- archived source cannot complete its review. Reuse the fixed-price failure
+-- policy (0294): unfulfilled review refunds, delivered revisions stay charged.
+-- Review -> ALL runs -> sorted model locks -> financial locks, before any refund.
+CREATE OR REPLACE FUNCTION public.fusion_review_archive_reconcile(p_actor_id uuid,p_target jsonb)
+RETURNS boolean LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
+DECLARE target jsonb:=p_target;business uuid;item record;model_key bigint;
+BEGIN
+ PERFORM bill2_actor(p_actor_id);
+ IF target->>'reviewId' IS NOT NULL THEN
+  target:=jsonb_build_object('draftId',(SELECT draft_id FROM fusion_reviews
+   WHERE id=(target->>'reviewId')::uuid AND actor_id=p_actor_id));
+ END IF;
+ SELECT b.id INTO business FROM opc_businesses b WHERE b.actor_id=p_actor_id AND b.archived_at IS NOT NULL
+  AND b.id=opc_target_business(p_actor_id,target);
+ IF business IS NULL THEN RETURN false; END IF;
+ PERFORM rv.id FROM fusion_reviews rv WHERE rv.actor_id=p_actor_id
+  AND (rv.state IN ('running','paused') OR EXISTS(SELECT 1 FROM fusion_review_fees f WHERE f.review_id=rv.id AND f.state='held'))
+  AND opc_target_business(p_actor_id,jsonb_build_object('draftId',rv.draft_id))=business ORDER BY rv.id FOR UPDATE;
+ PERFORM br.id FROM bill2_runs br JOIN fusion_billing_groups g ON g.id=br.fusion_group_id
+  WHERE br.actor_id=p_actor_id AND g.actor_id=p_actor_id AND g.kind='review' AND (NOT br.closed OR EXISTS(
+   SELECT 1 FROM bill2_calls c WHERE c.run_id=br.id AND c.settled_at IS NULL))
+  AND opc_target_business(p_actor_id,jsonb_build_object('runId',br.id))=business ORDER BY br.id FOR UPDATE OF br;
+ FOR model_key IN SELECT DISTINCT hashtextextended('bill2-payg:'||(x->>'model'),0)
+  FROM bill2_runs br JOIN fusion_billing_groups g ON g.id=br.fusion_group_id,
+   jsonb_array_elements(br.payload->'callPolicy') x
+  WHERE br.actor_id=p_actor_id AND g.kind='review' AND (NOT br.closed OR EXISTS(
+   SELECT 1 FROM bill2_calls c WHERE c.run_id=br.id AND c.settled_at IS NULL))
+  AND opc_target_business(p_actor_id,jsonb_build_object('runId',br.id))=business ORDER BY 1 LOOP
+  PERFORM pg_advisory_xact_lock(model_key);
+ END LOOP;
+ FOR item IN SELECT br.id FROM bill2_runs br JOIN fusion_billing_groups g ON g.id=br.fusion_group_id
+  WHERE br.actor_id=p_actor_id AND g.kind='review' AND (NOT br.closed OR EXISTS(
+   SELECT 1 FROM bill2_calls c WHERE c.run_id=br.id AND c.settled_at IS NULL))
+  AND opc_target_business(p_actor_id,jsonb_build_object('runId',br.id))=business ORDER BY br.id LOOP
+  PERFORM bill2_cancel(p_actor_id,item.id);PERFORM bill2_finalize(p_actor_id,item.id);
+ END LOOP;
+ FOR item IN SELECT rv.* FROM fusion_reviews rv WHERE rv.actor_id=p_actor_id
+  AND (rv.state IN ('running','paused') OR EXISTS(SELECT 1 FROM fusion_review_fees f WHERE f.review_id=rv.id AND f.state='held'))
+  AND opc_target_business(p_actor_id,jsonb_build_object('draftId',rv.draft_id))=business ORDER BY rv.id LOOP
+  IF item.state IN ('running','paused') THEN
+   PERFORM fusion_review_advance(p_actor_id,item.id,jsonb_build_object('round',item.round,'phase',item.phase,'attempt',item.attempt),
+    jsonb_build_object('state','incomplete','outcome',jsonb_build_object('kind','source_archived')));
+  END IF;
+  PERFORM fusion_review_fee_settle(p_actor_id,item.id);
+ END LOOP;
+ RETURN true;
+END $$;
+REVOKE ALL ON FUNCTION public.fusion_review_archive_reconcile(uuid,jsonb) FROM PUBLIC,anon,authenticated,service_role;
+
+-- Review reads already perform lifecycle/fee maintenance in the host. Do it
+-- inside the same RPC for legacy archived rows, including old callers/replays.
+ALTER FUNCTION public.fusion_review_read(uuid,uuid) VOLATILE;
+DO $$ DECLARE src text;anchor text; BEGIN
+ src:=pg_get_functiondef('public.fusion_review_read(uuid,uuid)'::regprocedure);
+ IF position('-- 0326 archived review read repair' IN src)=0 THEN
+  EXECUTE regexp_replace(src,'\mBEGIN\M',$guard$BEGIN
+  -- 0326 archived review read repair
+  PERFORM fusion_review_archive_reconcile(p_actor_id,jsonb_build_object('reviewId',p_review_id));$guard$);
+ END IF;
+ src:=pg_get_functiondef('public.fusion_review_start(uuid,uuid,uuid,uuid,jsonb)'::regprocedure);
+ IF position('-- 0326 archived review replay repair' IN src)=0 THEN
+  anchor:='PERFORM opc_assert_business_writable(p_actor_id,jsonb_build_object(''draftId'',p_draft_id));';
+  IF array_length(string_to_array(src,anchor),1)<>2 THEN RAISE EXCEPTION 'OPC_REVIEW_REPLAY_SOURCE_MISMATCH'; END IF;
+  EXECUTE replace(src,anchor,$guard$BEGIN
+   PERFORM opc_assert_business_writable(p_actor_id,jsonb_build_object('draftId',p_draft_id));
+  EXCEPTION WHEN raise_exception THEN
+   -- 0326 archived review replay repair
+   IF SQLERRM<>'OPC_BUSINESS_ARCHIVED' THEN RAISE; END IF;
+   PERFORM fusion_review_archive_reconcile(p_actor_id,jsonb_build_object('draftId',p_draft_id));
+   IF EXISTS(SELECT 1 FROM fusion_reviews existing WHERE existing.actor_id=p_actor_id
+    AND existing.request_id=p_request_id AND existing.draft_id=p_draft_id AND existing.source_version_id=p_source_version_id) THEN
+    RETURN fusion_review_view((SELECT existing FROM fusion_reviews existing
+     WHERE existing.actor_id=p_actor_id AND existing.request_id=p_request_id));
+   END IF;
+   RAISE;
+  END;$guard$);
+ END IF;
+END $$;
 -- A refused dispatch/rotation must also release the *whole* claimed compare.
 -- Catch only the archive refusal before dispatch takes its run/financial locks;
 -- stop uses its existing compare -> run -> financial order in this transaction.
@@ -111,18 +216,22 @@ DO $$ DECLARE src text;anchor text; BEGIN
  EXCEPTION WHEN raise_exception THEN
   -- 0326 archived compare cleanup
   IF SQLERRM<>'OPC_BUSINESS_ARCHIVED' THEN RAISE; END IF;
-  IF NOT EXISTS(SELECT 1 FROM fusion_compares fc JOIN bill2_runs source_run ON source_run.fusion_group_id=fc.group_id
-   WHERE source_run.id=p_run_id AND source_run.actor_id=p_actor_id AND fc.actor_id=p_actor_id) THEN RAISE; END IF;
-  PERFORM fusion_compare_stop(p_actor_id,(SELECT fc.id FROM fusion_compares fc
-   JOIN bill2_runs source_run ON source_run.fusion_group_id=fc.group_id
-   WHERE source_run.id=p_run_id AND source_run.actor_id=p_actor_id AND fc.actor_id=p_actor_id),NULL);
+  IF EXISTS(SELECT 1 FROM fusion_compares fc JOIN bill2_runs source_run ON source_run.fusion_group_id=fc.group_id
+   WHERE source_run.id=p_run_id AND source_run.actor_id=p_actor_id AND fc.actor_id=p_actor_id) THEN
+   PERFORM fusion_compare_stop(p_actor_id,(SELECT fc.id FROM fusion_compares fc
+    JOIN bill2_runs source_run ON source_run.fusion_group_id=fc.group_id
+    WHERE source_run.id=p_run_id AND source_run.actor_id=p_actor_id AND fc.actor_id=p_actor_id),NULL);
+  ELSIF EXISTS(SELECT 1 FROM bill2_runs source_run JOIN fusion_billing_groups g ON g.id=source_run.fusion_group_id
+   WHERE source_run.id=p_run_id AND source_run.actor_id=p_actor_id AND g.actor_id=p_actor_id AND g.kind='review') THEN
+   PERFORM fusion_review_archive_reconcile(p_actor_id,jsonb_build_object('runId',p_run_id));
+  ELSE RAISE; END IF;
   RETURN jsonb_build_object('dispatch',false,'archived',true);
  END;$guard$);
   EXECUTE src;
  END IF;
 END $$;
--- Read, stop/cancel, provider receipts, verdicts and settlement deliberately retain
--- their original permissions and behavior. Already spent money can still reconcile.
+-- Stop/cancel, provider receipts, verdicts and settlement retain their permissions.
+-- Already spent money can still reconcile; legacy Review reads repair holds above.
 
 -- startCompare invokes this in a fresh transaction after an archive refusal.
 -- Request identity also works when begin/replay refused before returning a compare id.
@@ -144,4 +253,12 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION public.fusion_compare_stop_archived(uuid,uuid) FROM PUBLIC,anon,authenticated,service_role;
 GRANT EXECUTE ON FUNCTION public.fusion_compare_stop_archived(uuid,uuid) TO service_role;
+-- Repair existing inconsistent rows at upgrade time too. No model/provider work;
+-- all original reports and financial rows remain, release entries are appended.
+DO $$ DECLARE business record; BEGIN
+ FOR business IN SELECT b.id,b.actor_id FROM opc_businesses b JOIN profiles p ON p.id=b.actor_id
+  WHERE b.archived_at IS NOT NULL AND p.status='active' AND p.is_deleted='false' ORDER BY b.actor_id,b.id LOOP
+  PERFORM fusion_review_archive_reconcile(business.actor_id,jsonb_build_object('businessId',business.id));
+ END LOOP;
+END $$;
 COMMIT;
