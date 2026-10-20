@@ -12,9 +12,46 @@
 
 完成条件：最终版本 CI/安全全通过，实际数据库正常/重复/并发/失败验证通过，迁移兼容/重复执行/恢复验证通过，独立审查覆盖最终版本且无阻断和未解决线程；随后交总控合并，本窗口不合并。
 
-## 验证与交接
+## 实现与账务边界
 
-- 已完成：前置排查、范围确认；本机原有文件保留。
-- 下一步：先写失败回归，再实现纯读取/结算查证及耗尽恢复，运行实际数据库和独立审查。
-- 未验证：本次所有实现、数据库回归、CI/安全、独立审查均 NOT_RUN。
-- 发现的问题：数据库 NANO 资源压力仍存在；本次按 Owner 决定不升级。历史 76 分记录保持不动。
+- 纯读白名单仅 `bill2_read`、`runtime_receipt_saved`。两次请求使用同一 AbortSignal，合计最多 10 秒，并受原调用持久化截止时间约束；完整超时已耗尽截止时间时不重试。`runtime_response` 的授权链持有材料行锁，不加入白名单。权限、身份、领域错误不重试。
+- `bill2_finalize` 丢响应先读回原 run；已终结直接使用原结果，读回失败则停止。仅瞬时失败且查到同一个无冲突的 v2 run 才重入一次，二次丢响应再查一次。调用既有 SQL 结算锁和幂等键，不再次调用模型或搜索。
+- 耗尽恢复仍执行原 cursor/epoch CAS、来源版本、未结算调用检查和 Session/execution/run 锁，只授予 `live=false` 的回放权。确定缺失/不合法的回复复用既有 `fail_platform`；数据库、身份、容量、撤销及未知错误不作为确定交付失败补偿。
+- 补偿成功前不对用户报告“未扣费”。补偿本身失败保留 pending，由既有恢复机制继续处理，不能落到普通取消而丢失退款责任。
+
+## 数据库变更、兼容与恢复
+
+暂定迁移 `0325_runtime_exhausted_replay.sql` 只修改 `runtime_execution`，原/目标定义均有精确摘要和替换锚点校验；重复执行是空操作，不改表或历史账目。最终编号由总控按队列确认，当前 0324 预留给 #1215。
+
+新主机配旧库的正常流程及 finalize 查证已在真实 PostgreSQL/PostgREST 验证；耗尽恢复在旧库上的两项失败构成反证。新库保持原响应结构及 `live=false` 语义，旧主机能回放已保存收据，不允许新增调用。旧主机对无法回放的运行仍依赖既有清理路径；新主机使用确定失败补偿及时收尾。数据库回归覆盖耗尽并发恢复只产生一个新 owner、旧 epoch 拒绝及重复完成不重复计费。
+
+恢复时先停止受影响恢复请求并等待正在执行的调用结束，再在受控迁移事务中恢复变更前的函数定义；保留运行单、收据与账本，不做数据逆写。修复后重新应用迁移。原函数和本地恢复演练 SQL 保存在本任务验证目录（不含凭证）。本窗口不执行远程迁移或部署。
+
+## 验证记录与复现
+
+最终版本、CI、审查回执及数据库结果统一记录在 [PR #1216 的交接节](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1216)。验证均使用一次性本地 PostgreSQL 17、PostgREST 和模拟供应商，不连接正式库，不产生付费模型/搜索调用。
+
+已完成的反证与检查：
+
+- 修复前纯读/结算故障回归：12 项失败；实现后相关 87 项单测通过。
+- 旧 schema 的全套 Runtime：437 通过、2 项预期失败、5 项按既有清单排除；失败项分别为已保存双回复被取消、缺整理回复未平台补偿。
+- 全 API 单测：7987 通过、19 项既有跳过；类型、lint、代码长度检查通过。
+- 空库文件建库：327 步通过，258 个迁移连续执行两次结构不变；结构指纹只改变 `runtime_execution`，账户开放策略审计通过。
+
+必须完成的真实数据库矩阵：正常；finalize 已提交丢响应、未提交、查证失败；重复/并发结算；结算重入与取消竞争；耗尽双收据回放、未发送整理回复、无效主回复/整理回复/拒答；重复补偿；旧 epoch 拒绝及并发恢复。完整结果在 PR 交接节更新，未完成不标通过。
+
+复现命令：
+
+```sh
+pnpm test:api
+pnpm --filter @repo/api typecheck
+pnpm --filter @repo/api lint
+node scripts/check-code-size.mjs
+node packages/db/tests/run-db-baseline-replay.mjs --local-only
+node packages/db/tests/v3/run-workbench.mjs --bill2-core-only --without-app --schema-from-files
+node packages/db/tests/v3/run-workbench.mjs --runtime-only --with-staging-schema --without-app --schema-from-files
+```
+
+## 发现的问题
+
+NANO 资源压力仍存在，本次按 Owner 决定不升级。本改动减少可安全恢复的中断，不宣称消除数据库资源瓶颈；历史 76 分记录保持不动。

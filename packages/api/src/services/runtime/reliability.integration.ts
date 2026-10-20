@@ -48,7 +48,7 @@ async function fixture(invalid?: 'primary' | 'organizer' | 'terminal') {
   };
   const session = await rpc('runtime_start', { p_actor_id: actor, p_request_id: randomUUID(), p_payload: { scope: { kind: 'positioning_draft' } } });
   const requestId = randomUUID();
-  const context = { ...(invalid === 'terminal' ? { providerRequestFormat: 'agent-turn-v5-stream' } : {}),
+  const context = { ...(invalid === 'terminal' ? { providerRequestFormat: 'agent-turn-v5-stream', reasoning: { effort: 'none' } } : {}),
     version: 'runtime.v1', sdkVersion: '0.18.0', role: 'ordinary', input: 'Answer and organize',
     instructions: 'Synthetic reliability test', model, maxOutputTokens: 1000, maxTurns: 1,
     historyItems: 0, tools: [], sources: [], network: 'deny', request: { sessionId: session.sessionId, requestId },
@@ -175,6 +175,27 @@ it('RUNTIME: reliability exhausted unsent organizer compensates the platform fai
     await Promise.all([runtimeExecutor(f.options).execute(token.executionId), runtimeExecutor(f.options).execute(token.executionId)]);
     await f.rpc('bill2_finalize', { p_actor_id: f.actor, p_run_id: f.admitted.runId });
     expect(await f.snapshot()).toEqual(before); expect(f.requests).toHaveLength(1);
+  } finally { await f.close(); }
+}, 30000);
+
+it('RUNTIME: reliability exhausted resume keeps the old read contract and one concurrent owner', async () => {
+  const f = await fixture();
+  try {
+    await f.interrupted(); const token = await f.pause();
+    const resume = () => f.rpc('runtime_execution', { p_actor_id: f.actor, p_execution_id: token.executionId,
+      p_action: 'payg_resume', p_result: { cursor: token.cursor, epoch: token.epoch } });
+    const results = await Promise.allSettled([resume(), resume()]);
+    const won = results.filter(r => r.status === 'fulfilled');
+    expect(won).toHaveLength(1);
+    expect(won[0]).toMatchObject({ value: { executionId: token.executionId, runId: f.admitted.runId,
+      live: false, state: 'running', remainingCalls: 0, epoch: token.epoch + 1 } });
+    expect(results.filter(r => r.status === 'rejected')[0]).toMatchObject({ reason: new Error('RUNTIME_RESUME_CONFLICT') });
+    await expect(f.rpc('runtime_execution', { p_actor_id: f.actor, p_execution_id: token.executionId,
+      p_action: 'fail_platform', p_result: { epoch: token.epoch, value: { unavailable_reason: 'preflight' } } }))
+      .rejects.toThrow('RUNTIME_RESUME_CONFLICT');
+    expect(await runtimeExecutor(f.options).execute(token.executionId)).toMatchObject({ state: 'completed' });
+    expect(await f.snapshot()).toMatchObject({ calls: 2, credits: 94, ledger: 94, refunds: 0, reserved: 0 });
+    expect(f.requests).toHaveLength(2);
   } finally { await f.close(); }
 }, 30000);
 
