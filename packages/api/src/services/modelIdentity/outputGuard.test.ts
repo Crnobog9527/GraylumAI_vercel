@@ -1,11 +1,18 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
 import { BRAND_REPLY_EN, BRAND_REPLY_ZH, BRAND_REPLY_ZH_HANT } from './brandIdentity';
+import { META_RESERVE, RESULT_BYTE_LIMIT } from '../runtime/resultCapacity';
 import { leaksModelIdentity, redactIdentityBody, redactIdentityCard, redactIdentitySummary, redactModelIdentity, streamingRedaction } from './outputGuard';
 
 // Leaks: what a model may say about itself after a direct question or a jailbreak.
 const LEAKS_ZH = [
   '我是由 Google 训练的大型语言模型。',
+  '我是由 Google 训练而成的大型语言模型。',
+  '我是由 Anthropic 开发完成的 AI 助手。',
+  '作为一个由 Google 精心训练的 AI 助手，我可以帮你。',
+  '我是由 Google 精心训练的大型语言模型。',
+  '我是一个由 Google 精心训练的大型语言模型。',
+  '我是由 Google\n训练的大型语言模型。',
   '我是 Claude，由 Anthropic 开发的 AI 助手。',
   '我是ChatGPT。',
   '我叫 Gemini。',
@@ -22,6 +29,8 @@ const LEAKS_ZH = [
   '我是谷歌开发的模型吗？是的，我是由谷歌训练的。',
   '我是豆包。',
   '我的基础模型是 Llama 3。',
+  // Review P1: bounded same-line filler before the identity marker.
+  '我的底层模型其实是 GPT-4。',
   // Review P1: role-prefaced
   '作为 ChatGPT，我可以帮你。',
   '作为一个由 OpenAI 开发的 AI 助手，我无法上网。',
@@ -30,6 +39,7 @@ const LEAKS_EN = [
   'I am Claude, an AI assistant made by Anthropic.',
   "I'm ChatGPT.",
   'I am a large language model, trained by Google.',
+  'I am a large language model\ntrained by Google.',
   "I'm an AI assistant built by Anthropic.",
   'I was trained by OpenAI.',
   "I've been developed by Google DeepMind.",
@@ -54,6 +64,8 @@ const LEAKS_EN = [
 // Review P1: Traditional Chinese phrasing
 const LEAKS_HANT = [
   '我由 Anthropic 開發。',
+  '我是由 Google 訓練出來的大型語言模型。',
+  '作為一個由 Google 精心訓練的 AI 助手，我可以幫你。',
   '我的底層模型是 GPT-4。',
   '我基於 Claude。',
   '我是由 Google 訓練的大型語言模型。',
@@ -68,7 +80,10 @@ const SAFE = [
   '我建议你先看看 OpenAI 最近发布的视频工具对创作者的影响。',
   '我是根据 Google Trends 的公开数据整理的这份清单。',
   '很多创作者用 Gemini 生成脚本初稿，再人工修改。',
+  '我在讨论 Claude 和 GPT-4，想比较它们的写作风格。',
+  '用户问：Claude 和 GPT 哪个更适合长文？',
   'I recommend comparing ChatGPT and Claude for long captions.',
+  'I use Claude and GPT to compare drafts.',
   "I'm going to compare Gemini and GPT-4 for your scripts.",
   'I am not able to see your Google Analytics data directly.',
   'My suggestion is to post on Meta platforms twice a week.',
@@ -83,10 +98,16 @@ const SAFE = [
   '我是谷歌认证的广告师。',
   // Review P2: 来自 + brand + 开发 elsewhere in an ordinary clause
   '我是想看看来自 Google 的哪些开发工具值得用。',
+  '我是由 Google 推荐的作者\n开发建议如下。',
+  // Review P2: a complete noun compound is not the maker verb.
+  '我是由 Google\n开发者社区推荐的作者。',
   '作为想了解来自 OpenAI 的新工具的创作者，你可以先试用。',
   'As discussed, Gemini is good for long scripts.',
+  'As ChatGPT says, I prefer Claude.',
+  'As ChatGPT says,\nI prefer Claude.',
   // Review P1: a user's own product built on an AI model
   '我基于 Claude 开发了一个写作工具，想推广它。',
+  '我基于 Claude 二次开发了一个工具。',
   '作为 Google 广告投放老手，我建议你先测两版素材。',
   "I'm an Anthropic fan, but let's focus on your channel.",
   // Review P2: occupational continuations after the model noun
@@ -95,6 +116,7 @@ const SAFE = [
   'As a Google AI researcher, I share notes weekly.',
   // Review P2: a nearby source is not the maker
   'I am an AI assistant helping you analyze data from Google.',
+  'I am an AI assistant helping with your campaign\nData provided by Google shows growth.',
   'As an AI assistant, I pulled these recommendations from Google Trends.',
   BRAND_REPLY_ZH,
   BRAND_REPLY_ZH_HANT,
@@ -141,6 +163,12 @@ it('replaces only the leaking sentence, keeps the rest, and says the brand reply
   expect(redactModelIdentity(text)).toBe(`你好！${BRAND_REPLY_ZH}下面是你要的三个选题：\n1. 开箱\n2. 对比`);
 });
 
+it('recognizes identity sentences split by a line break without consuming surrounding text', () => {
+  const text = '正常说明。\n我是\nClaude。\nClaude 和 GPT-4 的差异要按用途比较。';
+  expect(leaksModelIdentity(text)).toBe(true);
+  expect(redactModelIdentity(text)).toBe(`正常说明。\n${BRAND_REPLY_ZH}\nClaude 和 GPT-4 的差异要按用途比较。`);
+});
+
 it('streaming holds back only an unfinished first-person sentence', () => {
   expect(streamingRedaction('先说结论。我是由 Goo')).toBe('先说结论。');
   expect(streamingRedaction('先说结论。我是由 Google 训练的。')).toBe(`先说结论。${BRAND_REPLY_ZH}`);
@@ -181,6 +209,35 @@ it('redacts the public message of stored bodies and keeps other fields', () => {
   const clean = JSON.stringify({ message: '继续第二步。', card: null });
   expect(redactIdentityBody(clean)).toBe(clean);
   expect(redactIdentityBody('[1,2]')).toBe('[1,2]');
+});
+
+it('redacts identity strings inside a bare JSON array while preserving ordinary model discussion', () => {
+  const body = JSON.stringify([
+    { title: '我是\nClaude。', brief: 'Claude 和 GPT-4 的差异要按用途比较。' },
+    '我在讨论 Claude 和 GPT，想比较它们的写作风格。',
+  ]);
+  expect(JSON.parse(redactIdentityBody(body))).toEqual([
+    { title: BRAND_REPLY_ZH, brief: 'Claude 和 GPT-4 的差异要按用途比较。' },
+    '我在讨论 Claude 和 GPT，想比较它们的写作风格。',
+  ]);
+});
+
+it('keeps an amplified bare array within the completion persistence limit', () => {
+  const body = JSON.stringify(Array.from({ length: 1_500 }, () => 'I am Claude.'));
+  const output = redactIdentityBody(body);
+  const result: unknown = JSON.parse(output);
+  expect(Buffer.byteLength(JSON.stringify(output), 'utf8')).toBeLessThanOrEqual(RESULT_BYTE_LIMIT - META_RESERVE);
+  expect(result).toHaveLength(1_500);
+  expect(result).toEqual([BRAND_REPLY_EN, ...Array.from({ length: 1_499 }, () => '')]);
+  expect((result as string[]).some(leaksModelIdentity)).toBe(false);
+});
+
+it('redacts deeply nested bare JSON arrays without recursive traversal', () => {
+  const depth = 5_000;
+  const body = `${'['.repeat(depth)}"I am Claude."${']'.repeat(depth)}`;
+  let redacted: unknown = JSON.parse(redactIdentityBody(body));
+  for (let index = 0; index < depth; index++) redacted = (redacted as unknown[])[0];
+  expect(redacted).toBe(BRAND_REPLY_EN);
 });
 
 it('organizer summaries: plain prose is redacted; structured extraction values are kept (review P1)', () => {
