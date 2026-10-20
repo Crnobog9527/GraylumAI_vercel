@@ -6,7 +6,7 @@ import { assertStripePurchasePrice } from './stripePurchaseEvidence';
 
 /** PAY-STRIPE-MP card checkout: `card` uses Managed Payments, `card_cn` plain Stripe. A discounted
  * subscription is only ever the server-selected first-month coupon on the plan's standard price. */
-export type StripeCardCheckout = Readonly<{ managedPayments: boolean; couponId?: string }>;
+export type StripeCardCheckout = Readonly<{ managedPayments: boolean; couponId?: string; testClockCustomerId?: string }>;
 
 export type StripeCheckoutIntent = {
   id: string;
@@ -47,13 +47,19 @@ export function buildStripeCheckoutRequest(input: {
   expiresAt: number;
   walletMethod?: 'wechat_pay' | 'alipay';
   card?: StripeCardCheckout;
+  testClockCustomerId?: string;
 }): Stripe.Checkout.SessionCreateParams {
   const snapshot = freezePurchaseSnapshot(input.snapshot);
   const amount = snapshotAmountDue(snapshot);
   const recurring = snapshot.item_type === 'membership_plan' && !input.walletMethod;
   const discounted = majorToCents(snapshot.discount) !== 0;
   const coupon = input.card?.couponId;
+  const testClockCustomerId = input.testClockCustomerId;
   if (input.card && input.walletMethod) throw new Error('PAY_COMMON_CHECKOUT_REQUEST_INVALID');
+  if (testClockCustomerId !== undefined && (!input.card || !recurring
+    || !/^cus_[A-Za-z0-9]{6,128}$/.test(testClockCustomerId))) {
+    throw new Error('PAY_COMMON_CHECKOUT_REQUEST_INVALID');
+  }
   if (recurring && discounted && !coupon) throw new Error('PAY_COMMON_SUBSCRIPTION_DISCOUNT_UNSUPPORTED');
   if (coupon !== undefined && (!recurring || !discounted || !/^[A-Za-z0-9_-]{1,200}$/.test(coupon))) {
     throw new Error('PAY_COMMON_CHECKOUT_REQUEST_INVALID');
@@ -65,6 +71,8 @@ export function buildStripeCheckoutRequest(input: {
     orderId: input.orderId, userId: input.userId, itemId: snapshot.item_id,
     itemType: snapshot.item_type, billingCycle: snapshot.billing_cycle, priceId: input.priceId,
   };
+  const testClockReturn = testClockCustomerId
+    ? `&stripe_test_clock_customer=${encodeURIComponent(testClockCustomerId)}` : '';
   const lineItem: NonNullable<Stripe.Checkout.SessionCreateParams['line_items']>[number] = !discounted || coupon
     ? { price: input.priceId, quantity: 1 }
     : { price_data: { currency: snapshot.currency, unit_amount: amount,
@@ -76,9 +84,10 @@ export function buildStripeCheckoutRequest(input: {
     client_reference_id: input.userId,
     line_items: [lineItem],
     ...(coupon ? { discounts: [{ coupon }] } : {}),
+    ...(testClockCustomerId ? { customer: testClockCustomerId } : {}),
     expires_at: input.expiresAt,
-    success_url: `${origin.origin}/app/profile?tab=subscription&checkout=success&session_id={CHECKOUT_SESSION_ID}`,
-    cancel_url: `${origin.origin}/app/profile?tab=subscription&checkout=canceled&session_id={CHECKOUT_SESSION_ID}`,
+    success_url: `${origin.origin}/app/profile?tab=subscription&checkout=success&session_id={CHECKOUT_SESSION_ID}${testClockReturn}`,
+    cancel_url: `${origin.origin}/app/profile?tab=subscription&checkout=canceled&session_id={CHECKOUT_SESSION_ID}${testClockReturn}`,
     metadata,
     ...(recurring ? { subscription_data: { metadata } } : { payment_intent_data: { metadata } }),
   };
@@ -164,7 +173,11 @@ export async function dispatchStripeCheckoutIntent(input: {
     const discounted = majorToCents(snapshot.discount) !== 0;
     const recurring = snapshot.item_type === 'membership_plan' && !intent.walletMethod;
     const coupon = intent.card?.couponId;
+    const testClockCustomerId = intent.card?.testClockCustomerId;
     if ((intent.card && intent.walletMethod) || (coupon !== undefined && (!recurring || !discounted))
+      || (testClockCustomerId !== undefined && (!intent.card || !recurring
+        || intent.request.customer !== testClockCustomerId))
+      || (testClockCustomerId === undefined && intent.request.customer !== undefined)
       || !sameMethodParams(intent.request, paymentMethodParams({ recurring, walletMethod: intent.walletMethod, card: intent.card }))
       || JSON.stringify(intent.request.discounts ?? null) !== JSON.stringify(coupon ? [{ coupon }] : null)) {
       throw new Error('PAY_COMMON_CHECKOUT_REQUEST_INVALID');
@@ -223,6 +236,10 @@ export async function dispatchStripeCheckoutIntent(input: {
     if (session.object !== 'checkout.session' || session.livemode !== (scope.mode === 'live')
       || session.metadata?.orderId !== intent.id || session.metadata?.userId !== intent.userId
       || session.client_reference_id !== intent.userId || (intent.sessionId && session.id !== intent.sessionId)) {
+      throw new Error('PAY_COMMON_ATTEMPT_IDENTITY_MISMATCH');
+    }
+    const sessionCustomerId = typeof session.customer === 'string' ? session.customer : session.customer?.id;
+    if (intent.card?.testClockCustomerId && sessionCustomerId !== intent.card.testClockCustomerId) {
       throw new Error('PAY_COMMON_ATTEMPT_IDENTITY_MISMATCH');
     }
     assertPurchaseReceipt({ snapshot, amount: session.amount_total, tax: session.total_details?.amount_tax,

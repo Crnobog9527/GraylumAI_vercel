@@ -15,6 +15,14 @@ function stagingDeployment(env: Env) {
 const PRODUCTION_URLS: ReadonlySet<string> = new Set(['app.graylum.com', 'www.graylum.com']);
 const STAGING_KEYS = ['V3_RUNTIME_STAGING_ENABLED', 'V3_RUNTIME_STAGING_PROJECT_ID',
   'V3_RUNTIME_STAGING_DATABASE_HOST', 'V3_RUNTIME_STAGING_WINDOW_ID'] as const;
+const STAGING_VERCEL_PROJECT_ID = 'prj_N9BO48YSAYBQ5Nrvzd3WA9wrQEpC';
+/** Narrow test-only path for the staging project's production deployment. The exact staging project, domain, branch,
+ * repo and database are required so the public production project can never enable this entry. */
+export function stripeTestClockStagingOpen(env: Env) {
+  if (env.STRIPE_TEST_CLOCK_CHECKOUT_ENABLED !== 'true' || env.VERCEL_ENV !== 'production'
+    || env.VERCEL_PROJECT_ID !== STAGING_VERCEL_PROJECT_ID || env.V3_RUNTIME_STAGING_ENABLED !== 'true') return false;
+  return stagingDeployment(env);
+}
 
 /** The production deployment itself, bound with the R5 variables: the production project id, a Vercel production
  * build of `main` in this repository on an exact domain, the production database host, and no staging variable at all
@@ -61,12 +69,18 @@ export function methodCheckoutEnvironmentOpen(env: Env, method: PaymentMethod, l
   return method === 'card' || method === 'card_cn' ? cardCheckoutEnvironmentOpen(env, liveReady) : walletCheckoutEnvironmentOpen(env, liveReady);
 }
 
-export function assertMethodCheckoutEnvironment(env: Env, method: PaymentMethod, liveReady = LIVE_PAYMENT_PIPELINE_READY) {
-  if (!methodCheckoutEnvironmentOpen(env, method, liveReady)) throw new Error('PAY_WAFFO_STEP2_NOT_READY');
+export function assertMethodCheckoutEnvironment(env: Env, method: PaymentMethod, liveReady = LIVE_PAYMENT_PIPELINE_READY,
+  testClockCustomerRequested = false) {
+  const testClockStaging = testClockCustomerRequested && method === 'card' && stripeTestClockStagingOpen(env);
+  if (!testClockStaging && !methodCheckoutEnvironmentOpen(env, method, liveReady)) throw new Error('PAY_WAFFO_STEP2_NOT_READY');
 }
 
 /** Member-page projection: open when either card route is on (`routes` tells which one); the checkout mutation
  * re-checks the same conditions for the method actually chosen. */
-export function methodCardCheckoutReady(env: Env, routes: PaymentMethodRoutes | null, liveReady = LIVE_PAYMENT_PIPELINE_READY) {
-  return methodCheckoutEnvironmentOpen(env, 'card', liveReady) && (routes?.card.enabled === true || routes?.card_cn?.enabled === true);
+export function methodCardCheckoutReady(env: Env, routes: PaymentMethodRoutes | null, liveReady = LIVE_PAYMENT_PIPELINE_READY,
+  testMode?: string) {
+  const regular = methodCheckoutEnvironmentOpen(env, 'card', liveReady);
+  const testClockStaging = testMode === 'test' && stripeTestClockStagingOpen(env);
+  return (regular && (routes?.card.enabled === true || routes?.card_cn?.enabled === true))
+    || (testClockStaging && routes?.card.enabled === true);
 }

@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
-import { LIVE_PAYMENT_PIPELINE_READY, assertMethodCheckoutEnvironment, methodCardCheckoutReady, methodCheckoutEnvironmentOpen } from './methodCheckoutGate';
+import { LIVE_PAYMENT_PIPELINE_READY, assertMethodCheckoutEnvironment, methodCardCheckoutReady, methodCheckoutEnvironmentOpen,
+  stripeTestClockStagingOpen } from './methodCheckoutGate';
 
 // The staging deployment, bound like the runtime staging check (project, branch, repository, database).
 const staging = { VERCEL: '1', VERCEL_PROJECT_PRODUCTION_URL: 'auth-staging.graylum.com', VERCEL_GIT_COMMIT_REF: 'staging',
@@ -46,6 +47,47 @@ describe('PAY-STRIPE-MP checkout gate (3c: card open on staging only, behind the
       expect(methodCheckoutEnvironmentOpen({ ...staging, ...patch }, 'card')).toBe(false);
       expect(methodCardCheckoutReady({ ...staging, ...patch }, routes(true))).toBe(false);
     }
+  });
+});
+
+const testClockStaging = { VERCEL: '1', VERCEL_ENV: 'production',
+  VERCEL_PROJECT_ID: 'prj_N9BO48YSAYBQ5Nrvzd3WA9wrQEpC', VERCEL_PROJECT_PRODUCTION_URL: 'auth-staging.graylum.com',
+  VERCEL_GIT_COMMIT_REF: 'staging', VERCEL_GIT_REPO_OWNER: 'Crnobog9527',
+  VERCEL_GIT_REPO_SLUG: 'GraylumAI_vercel', STRIPE_TEST_CLOCK_CHECKOUT_ENABLED: 'true',
+  V3_RUNTIME_STAGING_PROJECT_ID: 'prj_N9BO48YSAYBQ5Nrvzd3WA9wrQEpC',
+  V3_RUNTIME_STAGING_ENABLED: 'true', V3_RUNTIME_STAGING_WINDOW_ID: '00000000-0000-4000-8000-000000000001',
+  V3_RUNTIME_STAGING_DATABASE_HOST: 'staging.supabase.co', NEXT_PUBLIC_SUPABASE_URL: 'https://staging.supabase.co' };
+
+describe('Stripe test-clock customer checkout staging gate', () => {
+  it('opens only for the exact staging deployment, Stripe test mode, and enabled card route', () => {
+    expect(stripeTestClockStagingOpen(testClockStaging)).toBe(true);
+    expect(methodCardCheckoutReady(testClockStaging, routes(true), undefined, 'test')).toBe(true);
+    expect(methodCardCheckoutReady(testClockStaging, routes(false), undefined, 'test')).toBe(false);
+    // Staging's normal card checkout remains open; the service separately refuses test-clock Customers unless Stripe is in test mode.
+    expect(methodCardCheckoutReady(testClockStaging, routes(true), undefined, 'live')).toBe(true);
+    expect(methodCheckoutEnvironmentOpen(testClockStaging, 'card')).toBe(true);
+    expect(() => assertMethodCheckoutEnvironment(testClockStaging, 'card', undefined, true)).not.toThrow();
+  });
+
+  it('does not open on the public production deployment, even with the test switch enabled', () => {
+    const publicProduction = { ...production, STRIPE_TEST_CLOCK_CHECKOUT_ENABLED: 'true' };
+    expect(stripeTestClockStagingOpen(publicProduction)).toBe(false);
+    expect(() => assertMethodCheckoutEnvironment(publicProduction, 'card', undefined, true))
+      .toThrow('PAY_WAFFO_STEP2_NOT_READY');
+    expect(methodCardCheckoutReady(publicProduction, routes(true), undefined, 'test')).toBe(false);
+  });
+
+  it.each([
+    { VERCEL_ENV: 'preview' },
+    { VERCEL_PROJECT_ID: 'other-project' },
+    { VERCEL_GIT_COMMIT_REF: 'feature' },
+    { V3_RUNTIME_STAGING_PROJECT_ID: 'other-project' },
+    { V3_RUNTIME_STAGING_ENABLED: 'false' },
+    { NEXT_PUBLIC_SUPABASE_URL: 'https://other.supabase.co' },
+    { VERCEL_PROJECT_PRODUCTION_URL: 'app.graylum.com' },
+    { STRIPE_TEST_CLOCK_CHECKOUT_ENABLED: 'false' },
+  ])('fails closed when the staging binding changes: %o', patch => {
+    expect(stripeTestClockStagingOpen({ ...testClockStaging, ...patch })).toBe(false);
   });
 });
 

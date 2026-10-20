@@ -46,7 +46,8 @@ function fixture(budgetConfig?:unknown){
    maybeSingle:async()=>({data:budgetConfig?{value:JSON.stringify(budgetConfig)}:null,error:null}),
    single:async()=>{reads++;return {data:table==='modules'
     ?{id,active:true,skill_id:skillId,model_id:first}:models.find(m=>m.id===id),error:null};},
-   in:async()=>({data:table==='ai_models'?models:settings,error:null})};return q;
+   in:async()=>({data:table==='ai_models'?models:[...settings,
+    ...(budgetConfig?[{key:'runtime_purpose_budgets',value:JSON.stringify(budgetConfig)}]:[])],error:null})};return q;
  }} as unknown as SupabaseClient;
  const user={auth:{getUser:async()=>({data:{user:{id:actor,email_confirmed_at:'2026-01-01'}},error:null})}} as unknown as SupabaseClient;
  const quotes=models.map(m=>({modelId:m.id,provider:'openrouter',account:'synthetic',model:m.model_id,protocol:'openrouter-chat-v1' as const,providerLimits:{providerSlug:'synthetic/fp8',contextTokens:32000,promptUsdPerMillion:'0.1',completionUsdPerMillion:'0.1',requestUsd:'0'},upperUsd:'0.004',inputLimit:32000,outputLimit:8192,automaticRetry:false as const,hiddenTools:false as const,lookupSupported:true}));
