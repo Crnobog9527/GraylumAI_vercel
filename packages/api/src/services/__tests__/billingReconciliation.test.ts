@@ -34,11 +34,17 @@ function createMockSupabase(data: {
     gte: () => builder,
     lt: async () => ({ data: tables[currentTable] ?? [], error: null }),
   };
+  const totalCharged = (rows: Array<Record<string, unknown>> = []) => rows
+    .filter((row) => row.state === 'charged')
+    .reduce((total, row) => total + Number(row.charged_credits ?? 0), 0);
 
   let currentTable = '';
 
   return {
-    rpc: async () => ({data:data.researchTotals??{count:0,credits:0},error:null}),
+    rpc: async (name: string) => name === 'research_billing_summary'
+      ? { data: data.researchTotals ?? { count: 0, credits: 0 }, error: null }
+      : { data: { reportFixedPriceCredits: totalCharged(data.reportFees),
+        fusionReviewFixedPriceCredits: totalCharged(data.fusionReviewFees) }, error: null },
     from: (table: string) => {
       if (table === 'system_settings') {
         const settingsBuilder = {
