@@ -9,7 +9,7 @@ Pro 年付剩余期继续发放；Gold 单独计费。升级退款恢复 Pro 原
 
 ## 修复
 
-迁移 `0323_pay_stripe_mp_upgrade_overlap.sql`（总控 2026-10-20 分配）只替换三个函数：
+迁移 `0322_pay_stripe_mp_upgrade_overlap.sql`（总控 2026-10-20 按先就绪顺序改号，#1208 改用 0323）只替换三个函数：
 
 - `atomic_pre_deduct`：保留全部来源校验，仅允许已付款升级订单指向的 Pro/Gold 两窗口重叠。
   会员权威投影选出的 Gold 是当前主窗口，旧 Pro 积分仍由原有来源账本分配、消费和退回。

@@ -88,7 +88,7 @@ try {
   sql('BEGIN;\n'+originals.map(src=>src+';').join('\n')+'\nCOMMIT;');
   assert.deepEqual(objects(),before,'original function definitions restore the exact original catalog');
   assert.deepEqual((await data()).rows[0].v,preserved,'code rollback preserves balances, grants and source attribution');
-  sql(read('packages/db/migrations/0323_pay_stripe_mp_upgrade_overlap.sql'));
+  sql(read('packages/db/migrations/0322_pay_stripe_mp_upgrade_overlap.sql'));
   assert.deepEqual(objects(),after,'reapplying after rollback restores the repaired catalog');
   cases.push('migration-interruption-rolls-back','migration-repeat-unchanged','rollback-preserves-financial-data','reapply-converges');
   console.log(JSON.stringify({result:'PASS',build,cases}));
