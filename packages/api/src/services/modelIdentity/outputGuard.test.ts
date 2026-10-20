@@ -9,6 +9,7 @@ const LEAKS_ZH = [
   '我是由 Google 训练的大型语言模型。',
   '我是由 Google 训练而成的大型语言模型。',
   '我是由 Anthropic 开发完成的 AI 助手。',
+  '作为一个由 Google 精心训练的 AI 助手，我可以帮你。',
   '我是由 Google 精心训练的大型语言模型。',
   '我是由 Google\n训练的大型语言模型。',
   '我是 Claude，由 Anthropic 开发的 AI 助手。',
@@ -62,6 +63,8 @@ const LEAKS_EN = [
 // Review P1: Traditional Chinese phrasing
 const LEAKS_HANT = [
   '我由 Anthropic 開發。',
+  '我是由 Google 訓練出來的大型語言模型。',
+  '作為一個由 Google 精心訓練的 AI 助手，我可以幫你。',
   '我的底層模型是 GPT-4。',
   '我基於 Claude。',
   '我是由 Google 訓練的大型語言模型。',

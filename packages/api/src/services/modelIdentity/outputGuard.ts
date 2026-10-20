@@ -25,7 +25,7 @@ const VERSION = String.raw`(?:[-\s]?\d[\w.]*|\s+(?:opus|sonnet|haiku|flash|pro|u
 const EN_END = String.raw`(?=\s*(?:[,.!?;:]|$)|\s+(?:an?\s+|the\s+)?(?:[\w-]+\s+){0,2}?(?:model|AI|assistant|chatbot|LLM)\b`
   + String.raw`|\s+(?:by|from|developed|trained|made|created|built)\b)`;
 // Simplified and Traditional forms of the same words (review: 我由 Anthropic 開發 / 我的底層模型是 / 我基於).
-const MADE = '(?:[训訓][练練]|[开開][发發]|打造|[研][发發]|[创創]建|推出|[设設][计計])(?:出来|而成|完成)?(?=$|[。！？!?.，,；;：:、\\s]|的|了)';
+const MADE = '(?:[训訓][练練]|[开開][发發]|打造|[研][发發]|[创創]建|推出|[设設][计計])(?:出[来來]|而成|完成)?(?=$|[。！？!?.，,；;：:、\\s]|的|了)';
 const FROM = '(?:由|[来來]自)';
 const ZH_END = `(?=\\s*(?:[，,。.！!？?；;：:、]|$)|\\s*(?:大?模型|助手|AI|[语語]言模型|${FROM}|${MADE}))`;
 const PATTERNS = [
@@ -42,7 +42,7 @@ const PATTERNS = [
   `我(?:基[于於]|背[后後]是|使用的是|用的是|底[层層]是)\\s*${BRAND}(?!${ZH_GAP}{0,8}?\\s*(?:[开開][发發]了|做了|搭建|[构構]建了|打造了|写了|[写寫]了))`,
   // 作为 ChatGPT，我… / 作为一个由 OpenAI 开发的 AI 助手… (review P1: role-prefaced)
   `作[为為]\\s*(?:一[个個]|一款)?\\s*${BRAND}\\s*[，,]\\s*我`,
-  `作[为為]\\s*(?:一[个個]|一款)?\\s*${FROM}\\s*${BRAND}\\s*(?:公司)?\\s*(?:${MADE}|的\\s*${ZH_GAP}{0,6}?(?:模型|助手|AI))`,
+  `作[为為]\\s*(?:一[个個]|一款)?\\s*${FROM}\\s*${BRAND}\\s*(?:公司)?\\s*(?:${MADE}|${ZH_GAP}{1,8}?[\\t ]*${MADE}|的\\s*${ZH_GAP}{0,6}?(?:模型|助手|AI))`,
   // As ChatGPT, I can help / As an AI assistant developed by OpenAI / As a GPT-4 based model (review P1)
   String.raw`\bAs\s+${BRAND}\b[^.!?]{0,6}?,\s*(?:I|my)\b`,
   String.raw`\bAs\s+(?:an?|the)\s+(?:[\w-]+\s+){0,4}(?:model|AI|assistant|chatbot|LLM)\b${MAKER}\s+${BRAND}`,
