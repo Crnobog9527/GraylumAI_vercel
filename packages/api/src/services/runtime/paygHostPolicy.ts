@@ -17,6 +17,8 @@ const reference = z.string().trim().min(1).max(128);
 const admittedRoutes: Readonly<Record<string,string>> = {
   'anthropic/claude-sonnet-5.5':'anthropic',
   'google/gemini-3.8-flash':'google-ai-studio',
+  // FUSION-REVIEW (Owner 2026-10-21): execution reviewer, with its own evidenced profile and window quote.
+  'google/gemini-4-argon':'google-ai-studio',
   'openai/gpt-6-luna':'openai',
   // FUSION-REVIEW panel (Owner 2026-10-17): Sol as a reviewer, Opus as the summary. A route here only allows
   // a profile; admission still needs a profile entry with evidence for the purpose, format and reasoning.
@@ -160,6 +162,10 @@ export function matchedProfile<P extends AnyProfile>(profiles: readonly P[], pol
   const matches = profiles.filter(p => p.model === policy.model && p.endpointTag === policy.providerLimits?.providerSlug);
   const profile = matches.length === 1 ? matches[0] : undefined;
   const uses = requirements.filter(r => r.modelId === policy.modelId);
+  // The 2026-10-21 Argon approval covers only the execution reviewer. A broader mutable profile must not
+  // turn this route into permission for summary, compare, chat or Skill calls, even with full-matrix evidence.
+  if (profile?.model === 'google/gemini-4-argon'
+    && (profile.purposes.length !== 1 || profile.purposes[0] !== 'fusion_review')) return undefined;
   if (!profile || policy.protocol !== profile.protocol || !policy.providerLimits || !uses.length
     || (profile.expiresAt !== undefined && (Date.parse(profile.expiresAt) <= Date.now()
       || Date.parse(profile.expiresAt) < Date.parse(deadline ?? '')))

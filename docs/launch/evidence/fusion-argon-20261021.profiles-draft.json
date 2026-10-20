@@ -1,0 +1,57 @@
+{
+  "note": "Append only this real Argon profile to runtime_payg_staging.profiles after controller review; no remote configuration was written.",
+  "evidenceSha256": "1e32adfbabce00f19df97537aff7d4d3358355efd51f0751bb35e011d690989d",
+  "profiles": [
+    {
+      "model": "google/gemini-4-argon",
+      "endpointTag": "google-ai-studio",
+      "protocol": "openrouter-chat-v1",
+      "profileVersion": "fusion-argon-20261021",
+      "evidenceVersion": "fusion-argon-20261021",
+      "admissionPath": "empirical",
+      "templateTokens": 4096,
+      "marginTokens": 4096,
+      "maxBytes": 196608,
+      "maxMessages": 128,
+      "maxTools": 2,
+      "maxSchemaBytes": 16384,
+      "purposes": [
+        "fusion_review"
+      ],
+      "requestFormats": [
+        "fusion-json-v1-stream"
+      ],
+      "reasoningVariants": [
+        {
+          "reasoning": {
+            "effort": "low"
+          },
+          "outputLimit": 4096,
+          "testedOutputLimit": 512,
+          "evidenceReference": "fusion-argon-20261021",
+          "manifestHash": "1e32adfbabce00f19df97537aff7d4d3358355efd51f0751bb35e011d690989d",
+          "outputStressSamples": 2,
+          "includesReasoning": true
+        }
+      ],
+      "outputLimit": 4096,
+      "expiresAt": "2027-12-31T00:00:00Z",
+      "evidence": {
+        "scope": "fusion-request-shape",
+        "reference": "fusion-argon-20261021",
+        "manifestHash": "1e32adfbabce00f19df97537aff7d4d3358355efd51f0751bb35e011d690989d",
+        "distinctSamples": 6,
+        "sizeBands": 2,
+        "maxVerifiedBytes": 186000,
+        "maxPromptToBytes": 0.23948,
+        "maxPromptToUpper": 0.22674466507374144,
+        "outputLimit": 4096,
+        "testedOutputLimit": 512,
+        "outputSemantics": "max-tokens-includes-reasoning",
+        "includesReasoning": true,
+        "cacheCovered": true,
+        "costBoundPassed": true
+      }
+    }
+  ]
+}
