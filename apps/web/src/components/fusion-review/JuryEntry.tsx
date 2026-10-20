@@ -5,6 +5,7 @@ import { useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
+import { profileTabHref } from '@/lib/profile-tabs';
 import { trpc } from '@/trpc/client';
 import { resolveSeatNames, SEATS } from '@/components/landing/preview-jury/jury-events';
 import { ACTIVE, reviewHref, startErrorText, toPanel } from './review-adapter';
@@ -32,6 +33,10 @@ function ReportJury({ draftId, sourceVersionId, busy }: { draftId: string; sourc
   const router = useRouter();
   const available = trpc.fusionReview.available.useQuery(undefined, { staleTime: 60_000, retry: false });
   const enabled = available.data?.enabled === true;
+  // The server's own membership answer (the same one a start is refused by): a plan without the jury sees the entry as
+  // Gold-only and goes straight to the upgrade page instead of being told only after pressing 开始评审 (Owner 2026-10-20).
+  const entitlements = trpc.user.getEntitlements.useQuery(undefined, { enabled, staleTime: 60_000, retry: false });
+  const goldOnly = entitlements.data?.allowFusionReview === false;
   const mine = trpc.fusionReview.mine.useQuery({ draftId, limit: 1 }, { enabled, retry: false, staleTime: 15_000 });
   const panel = trpc.fusionReview.panel.useQuery(undefined, { enabled, staleTime: Infinity, retry: false });
   const start = trpc.fusionReview.start.useMutation();
@@ -49,6 +54,10 @@ function ReportJury({ draftId, sourceVersionId, busy }: { draftId: string; sourc
   // The panel as the server has it: how many reviewers and what they are called are set by administrators.
   const seats = toPanel(panel.data)?.reviewers.map(item => item.seat) ?? SEATS;
 
+  if (goldOnly) {
+    return <Button variant="outline" disabled={busy} onClick={() => void window.open(profileTabHref('subscription'), '_blank', 'noopener')}>
+      请评审团审阅报告<span className={styles.gold}>Gold 专享</span></Button>;
+  }
   if (latest && ACTIVE.has(latest.state)) {
     return <Link className={styles.link} href={reviewHref(draftId, latest.reviewId)}>
       {latest.state === 'paused' ? '评审团已暂停，去看看 →' : '评审团正在审阅，去看看 →'}</Link>;

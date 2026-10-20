@@ -14,3 +14,8 @@
 .actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .error { color: var(--color-destructive); }
 .cap b { font-variant-numeric: tabular-nums; }
+
+/* The jury entry of a plan without it: the same button, tagged so nobody has to press it to find out. */
+.gold {
+  margin-left: 8px; padding: 1px 8px; border: 1px solid var(--border-primary); border-radius: 999px; font-size: 12px; font-weight: 600;
+}
