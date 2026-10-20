@@ -12,12 +12,13 @@ import { MethodPurchaseRejected } from './methodPurchaseError';
 
 const id = '00000000-0000-4000-8000-000000000001';
 const plan = '00000000-0000-4000-8000-000000000002';
-function allowTestClockPreview() {
-  for (const [key, value] of Object.entries({ VERCEL: '1', VERCEL_ENV: 'preview',
+function allowTestClockStaging() {
+  for (const [key, value] of Object.entries({ VERCEL: '1', VERCEL_ENV: 'production',
     VERCEL_PROJECT_ID: 'prj_N9BO48YSAYBQ5Nrvzd3WA9wrQEpC', VERCEL_PROJECT_PRODUCTION_URL: 'auth-staging.graylum.com',
-    VERCEL_GIT_COMMIT_REF: 'codex/stripe-test-clock-checkout', VERCEL_GIT_REPO_OWNER: 'Crnobog9527',
+    VERCEL_GIT_COMMIT_REF: 'staging', VERCEL_GIT_REPO_OWNER: 'Crnobog9527',
     VERCEL_GIT_REPO_SLUG: 'GraylumAI_vercel', STRIPE_TEST_CLOCK_CHECKOUT_ENABLED: 'true',
     V3_RUNTIME_STAGING_PROJECT_ID: 'prj_N9BO48YSAYBQ5Nrvzd3WA9wrQEpC',
+    V3_RUNTIME_STAGING_ENABLED: 'true', V3_RUNTIME_STAGING_WINDOW_ID: '00000000-0000-4000-8000-000000000001',
     V3_RUNTIME_STAGING_DATABASE_HOST: 'staging.supabase.co', NEXT_PUBLIC_SUPABASE_URL: 'https://staging.supabase.co' })) {
     vi.stubEnv(key, value);
   }
@@ -65,8 +66,8 @@ describe('PAY-STRIPE-MP card checkout adapter', () => {
       expect(f.eq).toHaveBeenCalledWith('is_current', true);
     }
   });
-  it('accepts only a user-owned, test-clock Stripe customer on the exact staging preview', async () => {
-    allowTestClockPreview();
+  it('accepts only a user-owned, test-clock Stripe customer on the exact staging deployment', async () => {
+    allowTestClockStaging();
     const f = fixture('card');
     const customerId = 'cus_clockcustomer123';
     const retrieve = vi.fn().mockResolvedValue({ id: customerId, object: 'customer', livemode: false,
@@ -82,7 +83,7 @@ describe('PAY-STRIPE-MP card checkout adapter', () => {
       card: expect.objectContaining({ testClockCustomerId: customerId }) }));
   });
   it('refuses a Stripe test customer owned by another account before reserving an order', async () => {
-    allowTestClockPreview();
+    allowTestClockStaging();
     const f = fixture('card');
     const retrieve = vi.fn().mockResolvedValue({ id: 'cus_clockcustomer123', object: 'customer', livemode: false,
       metadata: { graylum_user_id: 'another-user' }, test_clock: 'clock_fixture' });
@@ -93,8 +94,40 @@ describe('PAY-STRIPE-MP card checkout adapter', () => {
     expect(mocks.prepare).not.toHaveBeenCalled();
     expect(f.rpc).not.toHaveBeenCalled();
   });
+  it.each([
+    { VERCEL_ENV: 'preview' },
+    { VERCEL_PROJECT_ID: 'other-project' },
+    { VERCEL_GIT_COMMIT_REF: 'feature' },
+    { V3_RUNTIME_STAGING_ENABLED: 'false' },
+    { STRIPE_TEST_CLOCK_CHECKOUT_ENABLED: 'false' },
+  ])('rejects a test-clock customer before touching orders when staging binding is closed: %o', async patch => {
+    allowTestClockStaging();
+    for (const [key, value] of Object.entries(patch)) vi.stubEnv(key, value);
+    const f = fixture('card');
+    const retrieve = vi.fn();
+    const checkoutInput = { ...f.input, stripeTestClockCustomerId: 'cus_clockcustomer123' };
+    checkoutInput.stripe = { customers: { retrieve } } as unknown as Stripe;
+
+    await expect(createStripeCardCheckout(checkoutInput)).rejects.toThrow('PAY_WAFFO_STEP2_NOT_READY');
+    expect(retrieve).not.toHaveBeenCalled();
+    expect(mocks.prepare).not.toHaveBeenCalled();
+    expect(f.rpc).not.toHaveBeenCalled();
+  });
+  it('refuses a test-clock customer when Stripe resolves to live mode', async () => {
+    allowTestClockStaging();
+    mocks.scope.mockResolvedValue({ merchant: 'fixture', mode: 'live' });
+    const f = fixture('card');
+    const retrieve = vi.fn();
+    const checkoutInput = { ...f.input, stripeTestClockCustomerId: 'cus_clockcustomer123' };
+    checkoutInput.stripe = { customers: { retrieve } } as unknown as Stripe;
+
+    await expect(createStripeCardCheckout(checkoutInput)).rejects.toThrow('PAY_WAFFO_STEP2_NOT_READY');
+    expect(retrieve).not.toHaveBeenCalled();
+    expect(mocks.prepare).not.toHaveBeenCalled();
+    expect(f.rpc).not.toHaveBeenCalled();
+  });
   it('restricts the test-clock entry to monthly Pro and denies Gold or yearly plans', async () => {
-    allowTestClockPreview();
+    allowTestClockStaging();
     const annual = fixture('card');
     const annualInput = { ...annual.input, stripeTestClockCustomerId: 'cus_clockcustomer123',
       purchase: { ...annual.input.purchase, billingCycle: 'yearly' as const } };

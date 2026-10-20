@@ -16,21 +16,12 @@ const PRODUCTION_URLS: ReadonlySet<string> = new Set(['app.graylum.com', 'www.gr
 const STAGING_KEYS = ['V3_RUNTIME_STAGING_ENABLED', 'V3_RUNTIME_STAGING_PROJECT_ID',
   'V3_RUNTIME_STAGING_DATABASE_HOST', 'V3_RUNTIME_STAGING_WINDOW_ID'] as const;
 const STAGING_VERCEL_PROJECT_ID = 'prj_N9BO48YSAYBQ5Nrvzd3WA9wrQEpC';
-const TEST_CLOCK_PREVIEW_BRANCH = 'codex/stripe-test-clock-checkout';
-
-/** Narrow test-only path for the one PR preview used by the renewal test. It cannot match either production or the
- * staging production deployment. Platform variables must explicitly bind the preview to staging before it opens. */
-export function stripeTestClockPreviewOpen(env: Env) {
-  if (env.STRIPE_TEST_CLOCK_CHECKOUT_ENABLED !== 'true' || env.VERCEL !== '1' || env.VERCEL_ENV !== 'preview'
-    || env.VERCEL_PROJECT_ID !== STAGING_VERCEL_PROJECT_ID || env.VERCEL_PROJECT_PRODUCTION_URL !== 'auth-staging.graylum.com'
-    || env.VERCEL_GIT_COMMIT_REF !== TEST_CLOCK_PREVIEW_BRANCH || env.VERCEL_GIT_REPO_OWNER !== 'Crnobog9527'
-    || env.VERCEL_GIT_REPO_SLUG !== 'GraylumAI_vercel' || env.V3_RUNTIME_STAGING_PROJECT_ID !== STAGING_VERCEL_PROJECT_ID) {
-    return false;
-  }
-  let url: URL;
-  try { url = new URL(env.NEXT_PUBLIC_SUPABASE_URL ?? ''); } catch { return false; }
-  return /^[a-z0-9]+\.supabase\.co$/.test(url.hostname) && url.hostname === env.V3_RUNTIME_STAGING_DATABASE_HOST
-    && url.protocol === 'https:' && !url.username && !url.password && !url.port && url.pathname === '/' && !url.search && !url.hash;
+/** Narrow test-only path for the staging project's production deployment. The exact staging project, domain, branch,
+ * repo and database are required so the public production project can never enable this entry. */
+export function stripeTestClockStagingOpen(env: Env) {
+  if (env.STRIPE_TEST_CLOCK_CHECKOUT_ENABLED !== 'true' || env.VERCEL_ENV !== 'production'
+    || env.VERCEL_PROJECT_ID !== STAGING_VERCEL_PROJECT_ID || env.V3_RUNTIME_STAGING_ENABLED !== 'true') return false;
+  return stagingDeployment(env);
 }
 
 /** The production deployment itself, bound with the R5 variables: the production project id, a Vercel production
@@ -80,8 +71,8 @@ export function methodCheckoutEnvironmentOpen(env: Env, method: PaymentMethod, l
 
 export function assertMethodCheckoutEnvironment(env: Env, method: PaymentMethod, liveReady = LIVE_PAYMENT_PIPELINE_READY,
   testClockCustomerRequested = false) {
-  const testClockPreview = testClockCustomerRequested && method === 'card' && stripeTestClockPreviewOpen(env);
-  if (!testClockPreview && !methodCheckoutEnvironmentOpen(env, method, liveReady)) throw new Error('PAY_WAFFO_STEP2_NOT_READY');
+  const testClockStaging = testClockCustomerRequested && method === 'card' && stripeTestClockStagingOpen(env);
+  if (!testClockStaging && !methodCheckoutEnvironmentOpen(env, method, liveReady)) throw new Error('PAY_WAFFO_STEP2_NOT_READY');
 }
 
 /** Member-page projection: open when either card route is on (`routes` tells which one); the checkout mutation
@@ -89,7 +80,7 @@ export function assertMethodCheckoutEnvironment(env: Env, method: PaymentMethod,
 export function methodCardCheckoutReady(env: Env, routes: PaymentMethodRoutes | null, liveReady = LIVE_PAYMENT_PIPELINE_READY,
   testMode?: string) {
   const regular = methodCheckoutEnvironmentOpen(env, 'card', liveReady);
-  const testClockPreview = testMode === 'test' && stripeTestClockPreviewOpen(env);
+  const testClockStaging = testMode === 'test' && stripeTestClockStagingOpen(env);
   return (regular && (routes?.card.enabled === true || routes?.card_cn?.enabled === true))
-    || (testClockPreview && routes?.card.enabled === true);
+    || (testClockStaging && routes?.card.enabled === true);
 }

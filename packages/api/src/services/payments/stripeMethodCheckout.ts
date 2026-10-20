@@ -9,7 +9,7 @@ import { resolveStripeScope } from './stripeCheckoutPersistence';
 import { buildStripeCheckoutRequest, dispatchStripeCheckoutIntent, type StripeCardCheckout } from './stripeCheckoutIntent';
 import { observeUpgradePrior } from './cardUpgrade';
 import { settleBuyerOrders } from './methodOrderSettle';
-import { stripeTestClockPreviewOpen } from './methodCheckoutGate';
+import { stripeTestClockStagingOpen } from './methodCheckoutGate';
 
 type Input = {
   db: SupabaseClient; stripe: Stripe; userId: string; appUrl: string; termsVersion: string;
@@ -41,7 +41,7 @@ function frozenCoupon(request: Stripe.Checkout.SessionCreateParams) {
 async function assertTestClockCustomer(input: Input, mode: 'test' | 'live') {
   const customerId = input.stripeTestClockCustomerId;
   if (!customerId) return;
-  if (mode !== 'test' || !stripeTestClockPreviewOpen(process.env)
+  if (mode !== 'test' || !stripeTestClockStagingOpen(process.env)
     || input.purchase.itemType !== 'membership_plan' || input.purchase.method !== 'card'
     || input.purchase.billingCycle !== 'monthly') throw new Error('PAY_WAFFO_STEP2_NOT_READY');
   const plan = await input.db.from('membership_plans').select('id, level')
