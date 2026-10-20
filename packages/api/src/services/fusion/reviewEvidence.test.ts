@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { DECISIONS, parseOpinion } from './hostChecks';
 import { evidenceOf, quotesOverlap } from './reviewEvidence';
 import { mergeOpinions } from './reviewMerge';
+import { adminEvidence } from './reviewEvidenceFlow';
 import { debateRequest, reviewerRequest, ROLE_BLOCKS } from './reviewPrompts';
 
 const sections = ['定位', '受众', '变现'];
@@ -112,5 +113,22 @@ describe('seat prompts', () => {
   it('a review with the evidence check asks for kind, quote and anchor; an older one does not', () => {
     expect(reviewerRequest(skill, { ...context, evidence: true }).instructions).toContain('anchor');
     expect(reviewerRequest(skill, context).instructions).not.toContain('anchor');
+  });
+});
+
+describe('the administrator look-back', () => {
+  it('adds what the host held back, by reason, and counts the thin rulings', () => {
+    const A = '00000000-0000-4000-8000-0000000000a1';
+    const opinionBody = JSON.stringify({ decisions, issues: [{ ...base }, { ...base, quote: '先涨粉，后面接广告', location: '变现', severity: 'major' }] });
+    const summary = JSON.stringify({ adjudication: [{ reason: '没有依据' }, { reason: '原文把变现放在涨粉之后，没有给出每月收入和成本，按算账角度这一章的商业理由站不住，必须补数字' }] });
+    const result = adminEvidence({ config: { evidence: true, reviewers: [A] }, steps: [{ round: 1, groupId: 'g1' }, { round: 1, groupId: 'g2' }],
+      calls: [{ callId: 'c1', phase: 'fusion_review', modelId: A, groupId: 'g1', verdict: 'usable' },
+        { callId: 'c2', phase: 'fusion_summary', groupId: 'g2', verdict: 'usable' }],
+      outputs: [{ callId: 'c1', body: opinionBody }, { callId: 'c2', body: summary }] }, { body: report, sections });
+    expect(result.evidence).toMatchObject({ checked: true, raised: 2, handedOver: 1, dropped: { missingQuote: 1, quoteNotInReport: 0, anchorMissing: 0 } });
+    expect(result.thinReasonRulings).toBe(1);
+  });
+  it('a review started before the evidence check is returned as it is, marked unchecked', () => {
+    expect(adminEvidence({ config: {}, calls: [], outputs: [] }, { body: report, sections }).evidence).toEqual({ checked: false });
   });
 });

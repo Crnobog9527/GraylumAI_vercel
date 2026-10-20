@@ -88,6 +88,6 @@ describe('evidence note', () => {
     expect(evidenceText({ checked: true, raised: 4, dropped: { missingQuote: 0, quoteNotInReport: 0, anchorMissing: 0 } })).toBeNull();
     expect(evidenceText({ checked: false })).toBeNull();
     expect(evidenceText(undefined)).toBeNull();
-    expect(evidenceText({ checked: true, raised: 2, nothingPassed: true, dropped: { missingQuote: 2, quoteNotInReport: 0, anchorMissing: 0 } })).toContain('不会有修订');
+    expect(evidenceText({ checked: true, raised: 2, nothingPassed: true, dropped: { missingQuote: 2, quoteNotInReport: 0, anchorMissing: 0 } })).not.toContain('不会有修订');
   });
 });

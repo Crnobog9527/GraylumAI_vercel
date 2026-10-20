@@ -42,8 +42,7 @@ export function evidenceText(evidence: JuryDetail['evidence']): string | null {
   const parts = [dropped.missingQuote ? `缺引文 ${dropped.missingQuote} 条` : '', dropped.quoteNotInReport ? `引文不在原文 ${dropped.quoteNotInReport} 条` : '',
     dropped.anchorMissing ? `补充建议没有对上报告章节 ${dropped.anchorMissing} 条` : ''].filter(Boolean);
   if (!parts.length) return null;
-  return `评审共提了 ${evidence.raised ?? 0} 条意见，有 ${parts.length ? parts.join('、') : ''}没有核对上原文，没有交给汇总。`
-    + (evidence.nothingPassed ? '这次没有一条能核对上原文的意见，所以不会有修订。' : '');
+  return `评审共提了 ${evidence.raised ?? 0} 条意见，有 ${parts.join('、')}没有核对上原文，没有交给汇总。`;
 }
 
 /** The reviewed report by chapter, as the result page reads it. Real reports have no reading aids yet. */

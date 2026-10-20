@@ -4,7 +4,7 @@ import { parseOpinion, type Opinion } from './hostChecks';
 import type { ReviewView } from './reviewRecord';
 import type { EvidenceReason } from './reviewEvidence';
 import { mergeOpinions } from './reviewMerge';
-import { reviewerLabel } from './reviewPrompts';
+import { reviewerLabel, thinReason } from './reviewPrompts';
 import type { ReviewerRole } from './reviewEvidence';
 
 /** The frozen parts of a review's config this module reads (absent on reviews started before the evidence check). */
@@ -44,4 +44,23 @@ export function evidenceDetail(cfg: EvidenceConfig, view: ReviewView, src: { bod
     dropped: { missingQuote: reasons.missing_quote, quoteNotInReport: reasons.quote_not_in_report, anchorMissing: reasons.anchor_missing },
     singleSeatIssues: merge.issues.filter(issue => issue.reviewers.length === 1).length,
     nothingPassed: merge.raised > 0 && merge.issues.length === 0 } };
+}
+
+/**
+ * The same account for the administrator's look-back: the raw record of one review (as `fusion_review_admin_read` returns it)
+ * plus the evidence the host held back and which rulings gave a thin reason. Reads only; recomputed from the saved outputs.
+ */
+export function adminEvidence(raw: Record<string, unknown>, src: { body: string; sections: string[] }) {
+  const view = raw as unknown as ReviewView;
+  const config = (view.config ?? {}) as EvidenceConfig;
+  const outputs = new Map((Array.isArray(raw.outputs) ? raw.outputs as Array<{ callId: string; body: string | null }> : [])
+    .map(output => [output.callId, { body: output.body ?? '' }]));
+  const summaryCall = view.calls?.find(call => call.phase === 'fusion_summary' && ['usable', 'unjudged_saved'].includes(String(call.verdict)));
+  let thin = 0;
+  try {
+    const rulings = (JSON.parse(outputs.get(summaryCall?.callId ?? '')?.body ?? '{}') as { adjudication?: Array<{ reason?: unknown }> }).adjudication;
+    thin = (rulings ?? []).filter(item => typeof item.reason === 'string' && thinReason(item.reason)).length;
+  } catch { thin = 0; }
+  const { evidence } = evidenceDetail(config, view, src, outputs);
+  return { ...raw, evidence: evidence ?? { checked: false }, thinReasonRulings: thin };
 }
