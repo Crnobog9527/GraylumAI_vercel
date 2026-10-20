@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {describe,expect,it} from 'vitest';
-import {agentTurnInstructions,OPENING_EXTRACTION_RULE} from './agentTurnPrompt';
+import {agentTurnInstructions,OPENING_EXTRACTION_RULE,researchOpeningInstructions} from './agentTurnPrompt';
 
 const prompt = agentTurnInstructions();
 describe('conversation checklist mentor prompt',()=>{
@@ -46,9 +46,12 @@ describe('conversation checklist mentor prompt',()=>{
   expect(prompt).toContain('When hostTurnContext.opening is true');
   expect(prompt).toContain('the user has not spoken and no question card is available');
   expect(prompt).toContain('ask one useful question in prose');
-  expect(prompt).toContain('When opening step-2 (diagnosis and platform benchmarking)');
-  expect(prompt).toContain('ask the user to resend them in their next message');
-  expect(prompt).toContain('Do not claim the accounts were searched or verified');
+  expect(prompt).not.toContain('For this step-2 opening only');
+  const stepTwoOpening = researchOpeningInstructions({opening: true, stepId: 'step-2'});
+  expect(stepTwoOpening).toContain('full profile URLs');
+  expect(stepTwoOpening).toContain('availability will be checked when the user replies');
+  expect(researchOpeningInstructions({opening: false, stepId: 'step-2'})).toBe('');
+  expect(researchOpeningInstructions({opening: true, stepId: 'step-6'})).toBe('');
   expect(OPENING_EXTRACTION_RULE).toContain('any user_fact field as an answer');
   expect(OPENING_EXTRACTION_RULE).toContain('patches: []');
  });

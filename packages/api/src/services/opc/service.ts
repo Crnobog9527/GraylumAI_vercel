@@ -19,7 +19,7 @@ import { runtimeAdmissionService } from "../runtime/admission";
 import { workbenchService } from "../artifacts/workbench";
 import type {StagingPolicy} from '../runtime/stagingPolicy';
 import { isOpeningInput, openingRequestId, questionTask } from "./questions";
-import { agentTurnInstructions, OPENING_EXTRACTION_RULE } from "./agentTurnPrompt";
+import { agentTurnInstructions, OPENING_EXTRACTION_RULE, researchOpeningInstructions } from "./agentTurnPrompt";
 import { ORGANIZER_INSTRUCTIONS } from "./organizerPrompt";
 import {captureHostContext, captureFocus, captureOrganizerInput, captureFrozenInformation} from './captureContext';
 import {readStepSummaryRequest,STEP_SUMMARY_INSTRUCTIONS} from './stepSummary';
@@ -208,7 +208,7 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
         : undefined;
       const additionalInstructions = v.purpose === "mentor"
         // R15: mode comes from the actor-scoped draft; the whole string stays the stable cache prefix.
-        ? agentTurnInstructions() + existingPositioningInstructions(d.mode, hostTurnContext!) +
+        ? agentTurnInstructions() + researchOpeningInstructions(hostTurnContext!) + existingPositioningInstructions(d.mode, hostTurnContext!) +
           (stepSummary ? "\n" + STEP_SUMMARY_INSTRUCTIONS : "")
         : (v.purpose === "step" ? STEP_ENVELOPE_INSTRUCTION : "") + instruction +
           (v.purpose !== "plan" ? directive : "") + "Current workflow step: " + v.stepId +
