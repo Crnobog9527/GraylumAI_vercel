@@ -15,6 +15,7 @@ import NotFound from './not-found';
 import RootLayout from './layout';
 import TaiwanRootLayout from '../zh-tw/layout';
 import TaiwanNotFound from '../zh-tw/not-found';
+import TaiwanRouteError from '../zh-tw/error';
 import GlobalNotFound from '../global-not-found';
 import { StatusScreen } from '@/components/layout/StatusScreen';
 
@@ -83,8 +84,18 @@ describe('root layout', () => {
     expect(html).toContain('"@type":"Organization"');
   });
 
+  it('catches a /zh-tw page error inside that section, in Traditional Chinese', () => {
+    const html = renderToStaticMarkup(<TaiwanRouteError error={Object.assign(new Error('x'), { digest: 'abc123' })} retry={() => {}} />);
+    for (const text of ['這個頁面暫時無法顯示', '重試', '返回首頁', '錯誤編號：abc123', 'href="/zh-tw"', 'role="alert"']) {
+      expect(html).toContain(text);
+    }
+    expect(html).not.toContain('返回首页');
+  });
+
   it('answers a missing /zh-tw page in Traditional Chinese and an unmatched address with its own document', () => {
-    expect(renderToStaticMarkup(<TaiwanNotFound />)).toContain('頁面不存在');
+    const taiwan = renderToStaticMarkup(<TaiwanNotFound />);
+    expect(taiwan).toContain('頁面不存在');
+    expect(taiwan).toContain('返回首頁');
     const html = renderToStaticMarkup(<GlobalNotFound />);
     expect(html).toMatch(/^<html lang="zh-Hans">/);
     expect(html).toContain('页面不存在');

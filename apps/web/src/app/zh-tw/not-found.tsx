@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { SearchX } from 'lucide-react';
-import { StatusScreen } from '@/components/layout/StatusScreen';
+import { StatusScreen, TAIWAN_LABELS } from '@/components/layout/StatusScreen';
 
 export const metadata: Metadata = {
   title: '頁面不存在',
@@ -14,6 +14,7 @@ export default function TaiwanNotFound() {
       title="頁面不存在"
       description="你造訪的頁面不存在，或連結已經失效。"
       icon={<SearchX className="w-8 h-8" style={{ color: 'var(--color-primary)' }} />}
+      labels={TAIWAN_LABELS}
     />
   );
 }
