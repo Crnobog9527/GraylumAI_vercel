@@ -108,7 +108,6 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    throw unavailableModel();
   return quote;
  }
- // New admissions use current limits; fixture defaults do not cap approved real quotes. Replays retain frozen limits.
  function outputCapacity(row:Record<string,unknown>,organizerLimit=Infinity,configuredOutput?:number){
   return admittedOutputLimit(policy.real?realModel(row).outputLimit:configuredOutput??policy.maxOutputTokens,
    row.max_tokens,organizerLimit);
