@@ -76,7 +76,7 @@ user6 独占，使用 staging-login 生成的 storageState，不读取或记录�
 
 整理输入依赖完整主回复，不能提前发送。已有historyItems:0、readSessionHistory:false，不能重复算本次收益。字段验证、冲突判断、保护字段、版本和应用继续由SQL确定性完成，不增加模型工作。
 
-新增organizerStart/Post/Ready、captureStart/Done、resultReady/Public及各段固定标签次数/耗时；organizerModel包含模型和账务/Session，不能称纯模型时间。captureDone表示应用尝试结束，成功与否以原业务结果为准。所有正文、工具卡、阶段和最终结果仍逐次验证可见性；仅合并检查等待期间的最新正文，工具顺序不变，不正缓存删除或权限。
+新增preProvider快照（首次dispatch完成前已完成往返的标签/次数/耗时/阶段，后续和在途后完成的查询不污染），以及organizerStart/Post/Ready、captureStart/Done、resultReady/Public及各段固定标签次数/耗时；organizerModel包含模型和账务/Session，不能称纯模型时间。captureDone表示应用尝试结束，成功与否以原业务结果为准。所有正文、工具卡、阶段和最终结果仍逐次验证可见性；仅合并检查等待期间的最新正文，工具顺序不变，不正缓存删除或权限。
 
 ## 本批改动与下一步
 

@@ -14,6 +14,7 @@ export const TIMING_MARKS=['providerPost','firstModelText','firstPublicText','fu
 export type TimingMark=typeof TIMING_MARKS[number];
 type Tally={rt:number;rtMs:number};
 type PhaseTally=Tally&{ms:number};
+type PreProvider={rt:number;rtMs:number;labels:Record<string,Tally>;phases:Record<string,PhaseTally>};
 // organizerModel includes the provider call and its receipt/Session writes;
 // provider fetch completion can be response headers, so it is not a model-end mark.
 const SEGMENTS=['organizerPrepare','organizerModel','saving','capture','delivery'] as const;
@@ -53,6 +54,7 @@ export function createRequestTiming(now:()=>number=()=>performance.now()){
  const afterSkillFile:Partial<Record<TimingMark,number>>={};
  let procedures:string[]=[],phase:TimingPhase='prelude',since=origin,holds=1,emitted=false;
  let segment:Segment|undefined,segmentSince=origin;
+ let preProvider:PreProvider|undefined;
  const slot=(p:TimingPhase)=>{let s=phases.get(p);if(!s){s={rt:0,rtMs:0,ms:0};phases.set(p,s);}return s;};
  const safe=(fn:()=>void)=>{try{fn();}catch{/* measurement only */}};
  const switchTo=(next:TimingPhase)=>{const t=now();slot(phase).ms+=t-since;since=t;phase=next;};
@@ -89,6 +91,7 @@ export function createRequestTiming(now:()=>number=()=>performance.now()){
    ...(skillFileRead?{skillFileRead:true,afterSkillFileMarks:Object.fromEntries(
     TIMING_MARKS.filter(m=>afterSkillFile[m]!==undefined).map(m=>[m+'Ms',ms(afterSkillFile[m]!)]))}:{}),
    labels:Object.fromEntries([...labels].map(([label,s])=>[label,{rt:s.rt,rtMs:ms(s.rtMs)}])),
+   ...(preProvider?{preProvider:structuredClone(preProvider)}:{}),
    ...(segments.size?{segments:Object.fromEntries(SEGMENTS.filter(name=>segments.has(name)).map(name=>{
     const s=segments.get(name)!;return [name,{rt:s.rt,rtMs:ms(s.rtMs),ms:ms(s.ms+(segment===name?end-segmentSince:0)),
      labels:Object.fromEntries([...s.labels].map(([label,t])=>[label,{rt:t.rt,rtMs:ms(t.rtMs)}]))}];
@@ -114,7 +117,13 @@ export function createRequestTiming(now:()=>number=()=>performance.now()){
      const s=segmentSlot(inSegment);s.rt++;s.rtMs+=elapsed;
      const l=s.labels.get(known)??{rt:0,rtMs:0};l.rt++;l.rtMs+=elapsed;s.labels.set(known,l);
     }
-    if(label===DISPATCH_LABEL&&marks.providerPost===undefined){mark('providerPost');switchTo('provider');}
+    if(label===DISPATCH_LABEL&&marks.providerPost===undefined){
+     // Only round trips completed by this boundary count. A request still in
+     // flight belongs to the whole-invocation totals when it later completes.
+     const snapshot=summary();
+     preProvider={rt:snapshot.rt,rtMs:snapshot.rtMs,labels:snapshot.labels,phases:snapshot.phases};
+     mark('providerPost');switchTo('provider');
+    }
     if(label===DISPATCH_LABEL&&inSegment==='organizerPrepare')mark('organizerPost');
    });
   },

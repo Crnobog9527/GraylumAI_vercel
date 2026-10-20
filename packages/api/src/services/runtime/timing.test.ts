@@ -93,12 +93,13 @@ it('logs only labels, counts, milliseconds and internal identifiers',async()=>{
  for(const secret of secrets)expect(line).not.toContain(secret);
  expect(line).not.toMatch(/https?:|supabase\.co|openrouter\.ai|[?&=@]/);
  const record=info.mock.calls[0]![2] as Record<string,unknown>;
- expect(Object.keys(record).sort()).toEqual(['executionIds','labels','marks','phases','procedures','rt','rtMs','segments','totalMs']);
+ expect(Object.keys(record).sort()).toEqual(['executionIds','labels','marks','phases','preProvider','procedures','rt','rtMs','segments','totalMs']);
  expect(record.procedures).toEqual(['opc.prepareStep']);
  expect(record.executionIds).toEqual([execution]);
  expect(Object.keys(record.labels as object).sort()).toEqual(['auth/v1/token','provider','rest/profiles','rpc/bill2_dispatch','rpc/runtime_admit']);
  expect(Object.keys(record.phases as object)).toEqual(['prelude','host','admission','provider']);
  expect(Object.keys(record.segments as object)).toEqual(['organizerPrepare','organizerModel','saving','capture','delivery']);
+ expect(Object.keys(record.preProvider as object).sort()).toEqual(['labels','phases','rt','rtMs']);
  // Every leaf is a number or an allowlisted identifier.
  const leaves=(value:unknown):unknown[]=>value&&typeof value==='object'?Object.values(value).flatMap(leaves):[value];
  for(const leaf of leaves(record))expect(typeof leaf==='number'||/^([a-z]+\.[a-zA-Z]+|[0-9a-f-]{36})$/.test(String(leaf))).toBe(true);
@@ -175,4 +176,31 @@ it('attributes overlapping transport calls to their starting segment and ignores
   organizerModel:{rt:0,rtMs:0,ms:2,labels:{}},
  });
  expect(timing.summary().marks).toEqual({providerPostMs:7,organizerStartMs:0,organizerPostMs:7});
+});
+
+it('freezes completed pre-provider round trips before later same-label reads and organizer calls',()=>{
+ const c=clock(),timing=createRequestTiming(c.now);
+ const trip=(label:string,ms:number)=>{const done=timing.begin(label);c.advance(ms);done();};
+ timing.enter('host');trip('rpc/runtime_execution',3);
+ const inFlight=timing.begin('rpc/runtime_execution');c.advance(2);
+ timing.enter('execute');trip('rpc/bill2_dispatch',5);
+ const expected={rt:2,rtMs:8,labels:{'rpc/runtime_execution':{rt:1,rtMs:3},'rpc/bill2_dispatch':{rt:1,rtMs:5}},
+  phases:{prelude:{rt:0,rtMs:0,ms:0},host:{rt:1,rtMs:3,ms:5},execute:{rt:1,rtMs:5,ms:5}}};
+ expect(timing.summary().preProvider).toEqual(expected);
+ c.advance(4);inFlight();trip('rpc/runtime_execution',6);
+ timing.mark('organizerStart');trip('rpc/bill2_dispatch',2);trip('rpc/runtime_execution',7);
+ expect(timing.summary()).toMatchObject({rt:6,rtMs:34,marks:{providerPostMs:10,organizerPostMs:22},preProvider:expected});
+ // A caller cannot mutate the retained snapshot through an earlier summary.
+ const external=timing.summary().preProvider!;external.labels['rpc/runtime_execution']!.rt=100;
+ external.phases.host!.ms=100;
+ expect(timing.summary().preProvider).toEqual(expected);
+});
+
+it('omits pre-provider data until a dispatch actually completes',()=>{
+ const c=clock(),timing=createRequestTiming(c.now);
+ timing.enter('execute');const pending=timing.begin('rpc/bill2_dispatch');c.advance(5);
+ expect(timing.summary()).not.toHaveProperty('preProvider');
+ expect(timing.summary().marks).not.toHaveProperty('providerPostMs');
+ pending();expect(timing.summary().preProvider).toMatchObject({rt:1,rtMs:5});
+ expect(timing.summary().marks.providerPostMs).toBe(5);
 });
