@@ -154,19 +154,21 @@ BEGIN
   AND opc_target_business(p_actor_id,jsonb_build_object('runId',br.id))=business ORDER BY 1 LOOP
   PERFORM pg_advisory_xact_lock(model_key);
  END LOOP;
- -- A crash can leave a saved body without its host verdict. Serialize with
- -- output-save/verdict and keep the existing unjudged_saved recovery meaning;
- -- cancellation must not hide that output or turn a delivered summary into a refund.
+ -- SQL cannot run the frozen host check. Keep saved/unjudged bodies recoverable:
+ -- do not synthesize a verdict, end the review, or settle its fee before rejudge.
  PERFORM c.id FROM bill2_calls c JOIN bill2_runs br ON br.id=c.run_id
   JOIN fusion_billing_groups g ON g.id=br.fusion_group_id
   WHERE br.actor_id=p_actor_id AND g.actor_id=p_actor_id AND g.kind='review' AND c.settled_at IS NULL
   AND opc_target_business(p_actor_id,jsonb_build_object('runId',br.id))=business ORDER BY c.id FOR UPDATE OF c;
- UPDATE bill2_calls c SET fusion_verdict='unjudged_saved' FROM bill2_runs br,fusion_billing_groups g
-  WHERE c.run_id=br.id AND br.fusion_group_id=g.id AND br.actor_id=p_actor_id AND g.actor_id=p_actor_id AND g.kind='review'
-  AND c.fusion_verdict IS NULL AND c.settled_at IS NULL AND c.dispatched_at IS NOT NULL AND NOT c.provider_rejected
-  AND NOT(br.closed AND br.outcome='confirmed_failure') AND br.content_deleted_at IS NULL
+ IF EXISTS(SELECT 1 FROM bill2_calls c JOIN bill2_runs br ON br.id=c.run_id
+  JOIN fusion_billing_groups g ON g.id=br.fusion_group_id
+  WHERE br.actor_id=p_actor_id AND g.actor_id=p_actor_id AND g.kind='review'
+  AND (c.fusion_verdict IS NULL OR c.fusion_verdict='unjudged_saved')
   AND EXISTS(SELECT 1 FROM fusion_call_outputs o WHERE o.call_id=c.id AND o.actor_id=p_actor_id)
-  AND opc_target_business(p_actor_id,jsonb_build_object('runId',br.id))=business;
+  AND (c.settled_at IS NULL OR EXISTS(SELECT 1 FROM fusion_reviews rv WHERE rv.actor_id=p_actor_id
+   AND (g.fee_review_id=rv.id OR EXISTS(SELECT 1 FROM jsonb_array_elements(rv.steps) x WHERE x->>'groupId'=g.id::text))
+   AND (rv.state IN ('running','paused') OR EXISTS(SELECT 1 FROM fusion_review_fees f WHERE f.review_id=rv.id AND f.state='held'))))
+  AND opc_target_business(p_actor_id,jsonb_build_object('runId',br.id))=business) THEN RETURN false; END IF;
  FOR item IN SELECT br.id FROM bill2_runs br JOIN fusion_billing_groups g ON g.id=br.fusion_group_id
   WHERE br.actor_id=p_actor_id AND g.kind='review' AND (NOT br.closed OR EXISTS(
    SELECT 1 FROM bill2_calls c WHERE c.run_id=br.id AND c.settled_at IS NULL))
@@ -271,7 +273,9 @@ GRANT EXECUTE ON FUNCTION public.fusion_compare_stop_archived(uuid,uuid) TO serv
 DO $$ DECLARE business record; BEGIN
  FOR business IN SELECT b.id,b.actor_id FROM opc_businesses b JOIN profiles p ON p.id=b.actor_id
   WHERE b.archived_at IS NOT NULL AND p.status='active' AND p.is_deleted='false' ORDER BY b.actor_id,b.id LOOP
-  PERFORM fusion_review_archive_reconcile(business.actor_id,jsonb_build_object('businessId',business.id));
+  IF NOT fusion_review_archive_reconcile(business.actor_id,jsonb_build_object('businessId',business.id)) THEN
+   RAISE EXCEPTION 'OPC_ARCHIVE_REJUDGE_REQUIRED';
+  END IF;
  END LOOP;
 END $$;
 COMMIT;

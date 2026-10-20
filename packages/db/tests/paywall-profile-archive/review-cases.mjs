@@ -142,7 +142,7 @@ export async function reviewArchiveCases({admin:db,connect,report,read}) {
  assert.deepEqual(await state(delivered),settled);
  report.checks.push('legacy repair preserves delivered Review output, charges its fixed fee once and never double-refunds');
 
- for(const verdict of [null,'revision_invalid']) {
+ for(const verdict of ['usable','revision_invalid']) {
  const saved=await seed();
  await rpc(db,'fusion_review_advance',saved.actor,saved.review,{round:1,phase:'review',attempt:1},
   {state:'running',round:1,phase:'summary',attempt:1});
@@ -155,19 +155,35 @@ export async function reviewArchiveCases({admin:db,connect,report,read}) {
  await rpc(db,'bill2_dispatch',saved.actor,savedRun.run,savedCall.id,savedCall.dispatchToken);
  await receipt(db,savedRun,savedCall,'0.0004',{inputTokens:400,outputTokens:0});
  await rpc(db,'fusion_call_output_save',saved.actor,savedCall.id,'Saved revision before host verdict');
- if(verdict)await rpc(db,'fusion_call_verdict',saved.actor,savedCall.id,verdict);
  await legacy(saved);
+ const beforeJudge=await state(saved),migrationBeforeJudge=read('packages/db/migrations/0326_paywall_fusion_archive_fence.sql');
+ const waiting=await rpc(db,'fusion_review_read',saved.actor,saved.review);
+ assert.equal(waiting.state,'running');assert.equal(waiting.fee.state,'held');
+ assert.equal(waiting.calls.find(call=>call.callId===savedCall.id).verdict,null);
+ assert.deepEqual(await state(saved),beforeJudge,'read leaves an unjudged body available for the frozen host check');
+ await assert.rejects(db.query(migrationBeforeJudge),/OPC_ARCHIVE_REJUDGE_REQUIRED/);
+ await db.query('ROLLBACK');assert.deepEqual(await state(saved),beforeJudge,'migration refuses before changing money or outcomes');
+ await db.query('BEGIN');
+ try {
+  await db.query("UPDATE bill2_calls SET fusion_verdict='unjudged_saved' WHERE id=$1",[savedCall.id]);
+  const provisional=await rpc(db,'fusion_review_read',saved.actor,saved.review);
+  assert.equal(provisional.state,'running');assert.equal(provisional.fee.state,'held');
+  assert.equal(provisional.calls.find(call=>call.callId===savedCall.id).verdict,'unjudged_saved');
+ } finally {await db.query('ROLLBACK');}
+ assert.deepEqual(await state(saved),beforeJudge,'a provisional deadline marker alone cannot authorize the fixed price');
+ // The host validator is exercised by review.test.ts; SQL only accepts its real verdict.
+ await rpc(db,'fusion_call_verdict',saved.actor,savedCall.id,verdict);
  const savedView=await rpc(db,'fusion_review_read',saved.actor,saved.review);
- assert.equal(savedView.calls.find(call=>call.callId===savedCall.id).verdict,verdict??'unjudged_saved',
-  'a saved body interrupted before verdict uses the existing saved-output recovery policy');
- assert.equal(savedView.fee.state,verdict?'refunded':'charged');assert.equal(savedView.fee.chargedCredits,verdict?0:50);
- assert.equal(await wallet(db,saved.actor),verdict?1000:950);
+ assert.equal(savedView.calls.find(call=>call.callId===savedCall.id).verdict,verdict);
+ assert.equal(savedView.fee.state,verdict==='usable'?'charged':'refunded');
+ assert.equal(savedView.fee.chargedCredits,verdict==='usable'?50:0);
+ assert.equal(await wallet(db,saved.actor),verdict==='usable'?950:1000);
  assert.equal((await rpc(db,'fusion_call_output_read',saved.actor,savedCall.id)).body,'Saved revision before host verdict');
  assert.equal(Number((await db.query('SELECT count(*) n FROM bill2_calls c JOIN bill2_runs br ON br.id=c.run_id WHERE br.actor_id=$1 AND c.settled_at IS NULL',[saved.actor])).rows[0].n),0);
  const savedState=await state(saved);await rpc(db,'fusion_review_read',saved.actor,saved.review);
  assert.deepEqual(await state(saved),savedState,'saved summary cleanup never repeats its fixed charge');
  }
- report.checks.push('legacy saved/unjudged summary retains recovery verdict/output/fixed fee; judged invalid still refunds, no stranded holds or duplicate charges');
+ report.checks.push('unjudged saved bodies block migration without writes and stay recoverable; host-validated usable charges, invalid refunds, no duplicate settlement');
 
  const migrating=await prepare(await seed());await legacy(migrating);
  const frozen=await state(migrating),migration=read('packages/db/migrations/0326_paywall_fusion_archive_fence.sql');

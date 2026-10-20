@@ -550,6 +550,22 @@ describe('review flow', () => {
     expect(db.review).toMatchObject({ state: 'incomplete' });
   });
 
+  it.each(['usable', 'revision_invalid'])('rejudges an archived legacy summary as %s without claiming or dispatching', async verdict => {
+    const t = setup(() => opinion('major'));
+    const started = await t.flow.start({ requestId: randomUUID(), draftId: randomUUID(), sourceVersionId: randomUUID() });
+    await t.runAll();
+    await t.flow.continue(started.reviewId);
+    const summary = db.calls.find(call => call.phase === 'fusion_summary')!;
+    summary.dispatched = true;
+    db.outputs.set(summary.callId, verdict === 'usable' ? revision('新目标') : revision('新目标').slice(0, -40));
+    db.review!.state = 'paused'; // The SQL archive repair leaves unjudged records recoverable, never ended or charged.
+    const before = { calls: db.calls.length, groups: db.groups.size, requests: requests.length };
+    expect(await t.flow.rejudge(started.reviewId)).toContain(summary.callId);
+    expect(summary.verdict).toBe(verdict);
+    expect(db.review!.state).toBe('paused');
+    expect({ calls: db.calls.length, groups: db.groups.size, requests: requests.length }).toEqual(before);
+  });
+
   it('a summary that changes no section ends as no change (refunded, 0294), never as a revision to choose and pay for', async () => {
     const t = setup(call => call.phase === 'fusion_summary' ? JSON.stringify({ adjudication: [], body: original,
       steps: [{ stepId: 's1', fields: [{ fieldId: 'goal', value: '旧目标', changed: false }] }], changeNotes: [] }) : opinion('major'));
