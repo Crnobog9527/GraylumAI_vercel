@@ -120,7 +120,7 @@ describe('the administrator look-back', () => {
   it('adds what the host held back, by reason, and counts the thin rulings', () => {
     const A = '00000000-0000-4000-8000-0000000000a1';
     const opinionBody = JSON.stringify({ decisions, issues: [{ ...base }, { ...base, quote: '先涨粉，后面接广告', location: '变现', severity: 'major' }] });
-    const summary = JSON.stringify({ adjudication: [{ reason: '没有依据' }, { reason: '原文把变现放在涨粉之后，没有给出每月收入和成本，按算账角度这一章的商业理由站不住，必须补数字' }] });
+    const summary = '```json\n' + JSON.stringify({ adjudication: [{ reason: '没有依据' }, { reason: '原文把变现放在涨粉之后，没有给出每月收入和成本，按算账角度这一章的商业理由站不住，必须补数字' }] }) + '\n```';
     const result = adminEvidence({ config: { evidence: true, reviewers: [A] }, steps: [{ round: 1, groupId: 'g1' }, { round: 1, groupId: 'g2' }],
       calls: [{ callId: 'c1', phase: 'fusion_review', modelId: A, groupId: 'g1', verdict: 'usable' },
         { callId: 'c2', phase: 'fusion_summary', groupId: 'g2', verdict: 'usable' }],

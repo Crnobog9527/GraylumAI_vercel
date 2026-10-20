@@ -74,7 +74,7 @@ export const REVISION_RESPONSE_FORMAT = { type: 'json_schema', json_schema: { na
           required: ['stepId', 'fieldId'], properties: { stepId: { type: 'string' }, fieldId: { type: 'string' } } } } } } } } } } } as const;
 
 /** Lenient parse: the JSON object itself, or the first fenced/embedded object. */
-function looseJson(raw: string): unknown {
+export function looseJson(raw: string): unknown {
   const candidates = [raw.trim(), /```(?:json)?\s*([\s\S]*?)```/i.exec(raw)?.[1]?.trim(),
     raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1)].filter((value): value is string => Boolean(value));
   for (const candidate of candidates) { try { return JSON.parse(candidate); } catch { /* next */ } }

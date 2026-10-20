@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { reportBodyText } from '../../shared/reportData';
-import { parseOpinion, type Opinion } from './hostChecks';
+import { looseJson, parseOpinion, type Opinion } from './hostChecks';
 import type { ReviewView } from './reviewRecord';
 import type { EvidenceReason } from './reviewEvidence';
 import { mergeOpinions } from './reviewMerge';
@@ -56,11 +56,9 @@ export function adminEvidence(raw: Record<string, unknown>, src: { body: string;
   const outputs = new Map((Array.isArray(raw.outputs) ? raw.outputs as Array<{ callId: string; body: string | null }> : [])
     .map(output => [output.callId, { body: output.body ?? '' }]));
   const summaryCall = view.calls?.find(call => call.phase === 'fusion_summary' && ['usable', 'unjudged_saved'].includes(String(call.verdict)));
-  let thin = 0;
-  try {
-    const rulings = (JSON.parse(outputs.get(summaryCall?.callId ?? '')?.body ?? '{}') as { adjudication?: Array<{ reason?: unknown }> }).adjudication;
-    thin = (rulings ?? []).filter(item => typeof item.reason === 'string' && thinReason(item.reason)).length;
-  } catch { thin = 0; }
+  const body = outputs.get(summaryCall?.callId ?? '')?.body ?? '';
+  const rulings = (looseJson(body) as { adjudication?: Array<{ reason?: unknown }> } | null)?.adjudication;
+  const thin = (Array.isArray(rulings) ? rulings : []).filter(item => typeof item?.reason === 'string' && thinReason(item.reason)).length;
   const { evidence } = evidenceDetail(config, view, src, outputs);
   return { ...raw, evidence: evidence ?? { checked: false }, thinReasonRulings: thin };
 }
