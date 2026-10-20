@@ -28,13 +28,16 @@ function createMockSupabase(data: {
     select: () => builder,
     eq: () => builder,
     gte: () => builder,
-    lt: async () => ({ data: tables[currentTable] ?? [], error: null }),
+    range: (from: number, to: number) => { currentRange = [from, to]; return builder; },
+    order: () => builder,
+    lt: async () => ({ data: currentRange ? (tables[currentTable] ?? []).slice(currentRange[0], currentRange[1] + 1)
+      : tables[currentTable] ?? [], count: (tables[currentTable] ?? []).length, error: null }),
   };
-
   let currentTable = '';
+  let currentRange: [number, number] | null = null;
 
   return {
-    rpc: async () => ({data:data.researchTotals??{count:0,credits:0},error:null}),
+    rpc: async () => ({ data: data.researchTotals ?? { count: 0, credits: 0 }, error: null }),
     from: (table: string) => {
       if (table === 'system_settings') {
         const settingsBuilder = {
@@ -50,6 +53,7 @@ function createMockSupabase(data: {
         return settingsBuilder;
       }
       currentTable = table;
+      currentRange = null;
       return builder;
     },
   } as any;
@@ -126,11 +130,58 @@ describe('runDailyBillingReconciliation', () => {
     const result = await runDailyBillingReconciliation(supabase, new Date('2026-03-10T00:00:00Z'));
 
     expect(result.success).toBe(true);
-    expect(result.mismatches).toHaveLength(0);
+    expect(result.mismatches).toEqual([]);
     expect(result.summary.successfulAiRequests).toBe(2);
     expect(result.summary.tokenStatsCredits).toBe(200);
     expect(result.summary.deductionCredits).toBe(200);
     expect(result.summary.webSearchCount).toBe(1);
+  });
+
+  it('includes charged report and jury fixed prices in the settlement total', async () => {
+    const result = await runDailyBillingReconciliation(createMockSupabase({
+      tokenStats: [{ total_credits: 1000, web_search_count: 0 }],
+      aiUsageLogs: [{ status: 'success' }],
+      researchTotals: { count: 1, credits: 359 },
+      billingHistory: [{ operation_type: 'settle', amount: -9859 }],
+      creditTransactions: [
+        { type: 'consumption', ledger_type: 'spend', reason_code: 'bill2_spend', counts_as_spend: true,
+          source_type: 'ai_task', idempotency_key: 'bill2:00000000-0000-4000-8000-000000000001:spend', amount: -1359 },
+        { type: 'consumption', ledger_type: 'spend', reason_code: 'bill2_spend', counts_as_spend: true,
+          source_type: 'ai_task', idempotency_key: 'report:00000000-0000-4000-8000-000000000010:spend', amount: -500 },
+        { type: 'consumption', ledger_type: 'spend', reason_code: 'bill2_spend', counts_as_spend: true,
+          source_type: 'ai_task', idempotency_key: 'report:00000000-0000-4000-8000-000000000011:spend', amount: -500 },
+        ...Array.from({ length: 5 }, (_, index) => ({ type: 'consumption', ledger_type: 'spend',
+          reason_code: 'bill2_spend', counts_as_spend: true, source_type: 'ai_task',
+          idempotency_key: `fusion-review:00000000-0000-4000-8000-00000000002${index}:spend`, amount: -1500 })),
+        { type: 'adjustment', ledger_type: 'adjustment', reason_code: 'bill2_release', source_type: 'ai_task',
+          idempotency_key: 'report:00000000-0000-4000-8000-000000000012:release', amount: 500 },
+      ],
+    }), new Date('2026-03-10T00:00:00Z'));
+
+    expect(result.mismatches).toEqual([]);
+    expect(result.success).toBe(true);
+    expect(result.summary).toMatchObject({ tokenStatsCredits: 1000, researchSettledCredits: 359,
+      reportFixedPriceCredits: 1000, fusionReviewFixedPriceCredits: 7500, settledCredits: 9859 });
+  });
+
+  it('fails closed when a fixed-price spend key has inconsistent ledger facts', async () => {
+    await expect(runDailyBillingReconciliation(createMockSupabase({
+      creditTransactions: [{ type: 'consumption', ledger_type: 'spend', amount: -500,
+        source_type: 'ai_task', idempotency_key: 'report:00000000-0000-4000-8000-000000000010:spend' }],
+    }), new Date('2026-03-10T00:00:00Z'))).rejects.toThrow('Invalid fixed price reconciliation ledger');
+  });
+
+  it('reads every daily credit transaction when the ledger spans multiple API pages', async () => {
+    const rows = Array.from({ length: 1001 }, (_, index) => ({ type: 'consumption', ledger_type: 'spend',
+      reason_code: 'bill2_spend', counts_as_spend: true, source_type: 'ai_task',
+      idempotency_key: `report:00000000-0000-4000-8000-${String(index).padStart(12, '0')}:spend`, amount: -500 }));
+    const result = await runDailyBillingReconciliation(createMockSupabase({
+      billingHistory: [{ operation_type: 'settle', amount: -500500 }], creditTransactions: rows,
+    }), new Date('2026-03-10T00:00:00Z'));
+
+    expect(result.success).toBe(true);
+    expect(result.summary.reportFixedPriceCredits).toBe(500500);
+    expect(result.summary.settledCredits).toBe(500500);
   });
 
   it('reports mismatches when payment fulfillment or credit settlement drift', async () => {

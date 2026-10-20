@@ -73,7 +73,7 @@ export function MyDocuments({ scan }: { scan: ScanRecognition }) {
   const ready = library.ready;
   return <div className={styles.root}>
     <div className={styles.topRow}>
-      <UploadPanel uploadEnabled={ready && library.uploadEnabled} scanServerEnabled={scan.serverEnabled} spaceKnown={ready}
+      <UploadPanel uploadEnabled={ready ? library.uploadEnabled : null} scanServerEnabled={scan.serverEnabled} spaceKnown={ready}
         usedBytes={library.usedBytes} capacityBytes={library.capacityBytes}
         uploads={uploads.items}
         onAdd={(files, purpose) => uploads.add(files, purpose, ready && library.capacityBytes !== undefined && library.usedBytes !== undefined
