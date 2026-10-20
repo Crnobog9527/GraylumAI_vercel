@@ -4,7 +4,7 @@ import { DECISIONS, parseOpinion } from './hostChecks';
 import { evidenceOf, quotesOverlap } from './reviewEvidence';
 import { mergeOpinions } from './reviewMerge';
 import { adminEvidence } from './reviewEvidenceFlow';
-import { debateRequest, reviewerRequest, ROLE_BLOCKS } from './reviewPrompts';
+import { debateRequest, reviewerRequest, ROLE_BLOCKS, summaryRequestMerged } from './reviewPrompts';
 
 const sections = ['定位', '受众', '变现'];
 const report = '## 定位\n我想做一个分享生活的账号，每天更新一条视频。\n## 受众\n主要是 25 到 35 岁的上班族女性。\n## 变现\n先涨粉，后面接广告。';
@@ -138,5 +138,22 @@ describe('the administrator look-back', () => {
   });
   it('a review started before the evidence check is returned as it is, marked unchecked', () => {
     expect(adminEvidence({ config: {}, calls: [], outputs: [] }, { body: report, sections }).evidence).toEqual({ checked: false });
+  });
+});
+
+describe('trimming the summary request', () => {
+  it('never drops a verified critical or major issue, only minor ones and extra views', () => {
+    const skill = { reviewer: 'r', summary: 's', rubric: 'b' };
+    const one = (severity: string, quote: string, extra = {}) => parse({ ...base, severity, quote, ...extra });
+    const list = [{ reviewer: 'A', opinion: one('critical', '我想做一个分享生活的账号') },
+      { reviewer: 'B', opinion: one('major', '先涨粉，后面接广告', { location: '变现' }) }, { reviewer: 'C', opinion: one('minor', '25 到 35 岁的上班族女性', { location: '受众' }) }];
+    const merge = mergeOpinions(list, { report, sections });
+    for (const level of [0, 1, 2, 3]) {
+      const input = JSON.parse(summaryRequestMerged(skill, { report, materials: [], sections, maxCharacters: 12000 }, merge, list, [], {}, level).input);
+      const severities = input.issues.map((issue: { severity: string }) => issue.severity);
+      expect(severities).toContain('critical');
+      expect(severities).toContain('major');
+      expect(severities.includes('minor')).toBe(level < 2);
+    }
   });
 });

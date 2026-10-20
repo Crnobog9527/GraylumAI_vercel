@@ -149,8 +149,11 @@ export function summaryRequestMerged(skill: ReviewSkillText, context: ReviewCont
   const steps = declared.map(step => ({ stepId: step.stepId, fields: step.fieldIds.map(fieldId =>
     ({ fieldId, currentValue: current[step.stepId]?.[fieldId] ?? '' })) }));
   const report = reportBodyText(context.report);
-  const kept = merge.issues.filter(issue => level >= 3 ? false : level >= 2 ? issue.severity !== 'minor' : true);
+  // Trimming never drops a verified critical or major issue: level 2 drops minor ones, level 3 also keeps only one view per issue.
+  const kept = merge.issues.filter(issue => level >= 2 ? issue.severity !== 'minor' : true)
+    .map(issue => level >= 3 ? { ...issue, views: issue.views.slice(0, 1) } : issue);
   const held = merge.dropped.length + Object.values(merge.droppedEarlier).reduce((total, count) => total + count, 0);
+  const cut = merge.issues.length - kept.length;
   const decisions = DECISIONS.map(decision => ({ decision, views: opinions.flatMap(({ reviewer, opinion }) =>
     opinion.decisions.filter(d => d.decision === decision).map(d => ({ reviewer, verdict: d.verdict,
       ...(level >= 1 ? {} : { strongestCase: d.strongestCase, strongestAlternative: d.strongestAlternative, basis: d.basis }) }))) }));
@@ -159,7 +162,7 @@ export function summaryRequestMerged(skill: ReviewSkillText, context: ReviewCont
       // Already merged by code: one entry per issue, with the seats that raised it. Quotes were checked against the report.
       issues: kept.map(issue => ({ section: issue.section, severity: issue.severity, kind: issue.kind, raisedBy: issue.reviewers,
         quotes: issue.quotes, anchor: issue.anchor, views: issue.views })),
-      note: held === 0 ? '三位评审提出的意见都已按章节合并，没有被拦下的。'
+      note: cut > 0 ? `为了放得下，另有 ${cut} 条次要意见没有交给你。` : held === 0 ? '三位评审提出的意见都已按章节合并，没有被拦下的。'
         : `评审另外提了 ${held} 条意见，因为没有核对得上的原文引用，没有交给你。${kept.length ? '' : '下面没有可用的意见清单，只按关键决定判断。'}` }),
     responseFormat: REVISION_RESPONSE_FORMAT as unknown as Record<string, unknown> };
 }
