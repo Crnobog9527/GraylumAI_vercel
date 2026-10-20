@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {HOST_TURN_DATA_NOTICE_V1} from '../runtime/hostTurn';
+import type {HostTurnContext} from '../runtime/hostTurn';
 
 const HOST_RULES = [
   "Act as the single continuous mentor for the supplied workflow. Follow its pinned Skill and keep continuity across s",
@@ -96,6 +97,17 @@ export const AGENT_TURN_STABLE_PREFIX_CHARS = AGENT_TURN_STABLE_PREFIX.length;
 export function agentTurnInstructions(): string {
   return AGENT_TURN_STABLE_PREFIX;
 }
+
+/** Keep step-2 opening guidance out of the shared frozen prefix and final-step budget. */
+export function researchOpeningInstructions(host: Pick<HostTurnContext, 'opening' | 'stepId'>): string {
+  if (!host.opening || host.stepId !== 'step-2') return '';
+  return [
+    'For this step-2 opening only: do not claim research ran or that the product lacks research tools.',
+    'If saved benchmark names lack links, ask for full profile URLs; otherwise ask for keywords or profile URLs.',
+    'Say availability will be checked when the user replies; do not promise a search or verification.',
+  ].join(' ');
+}
+
 export const OPENING_EXTRACTION_RULE = [
   'This is a host-opened turn: the user has not spoken. Never treat the host marker as user speech.',
   'Extract only a concrete draft recommendation explicitly supplied by the mentor for an agent_proposal field',
