@@ -19,11 +19,9 @@ import { PlatformSecretRow, PlatformSecretsSettings } from './PlatformSecretsSet
 import { clearWarning, platformSecretError, sourceLabel, type PlatformSecretItem } from './platformSecretsView';
 
 const base: PlatformSecretItem = { slot: 'postforme', configured: false, last4: null, revision: 0, updatedAt: null,
-  updatedByEmail: null, envFallback: { name: 'POSTFORME_API_KEY', present: false, last4: null }, source: 'none' };
+  updatedByEmail: null, source: 'none' };
 const filled: PlatformSecretItem = { ...base, configured: true, last4: 'a1b2', revision: 3,
   updatedAt: '2026-10-14T08:00:00.000000Z', updatedByEmail: 'admin@example.test', source: 'admin' };
-const fromEnv: PlatformSecretItem = { ...base, envFallback: { name: 'POSTFORME_API_KEY', present: true, last4: 'z9y8' },
-  source: 'env' };
 
 function row(item: PlatformSecretItem, extra: Partial<Parameters<typeof PlatformSecretRow>[0]> = {}) {
   return renderToStaticMarkup(createElement(PlatformSecretRow, { item, draft: '', pending: false, notice: null,
@@ -48,21 +46,16 @@ describe('PlatformSecretRow', () => {
     expect(markup).toMatch(/<button[^>]*type="submit"[^>]*disabled/);
   });
 
-  it('names the environment fallback while the admin slot is empty', () => {
-    expect(row(fromEnv)).toContain('正在使用 Vercel 环境变量 POSTFORME_API_KEY（末 4 位 z9y8）');
-  });
-
   it('warns about test windows when replacing OpenRouter', () => {
-    const markup = row({ ...filled, slot: 'openrouter', envFallback: null });
+    const markup = row({ ...filled, slot: 'openrouter' });
     expect(markup).toContain('测试窗口要同步更新');
   });
 });
 
 describe('platformSecretsView helpers', () => {
-  it('explains what clearing does with and without a fallback', () => {
-    expect(clearWarning(fromEnv)).toContain('改用 Vercel 环境变量 POSTFORME_API_KEY');
-    expect(clearWarning(filled)).toContain('相关功能会停止');
-    expect(sourceLabel({ ...base, slot: 'openrouter', envFallback: null })).toContain('未配置');
+  it('explains what clearing does when the Vault slot is empty', () => {
+    expect(clearWarning()).toContain('相关功能会停止');
+    expect(sourceLabel({ ...base, slot: 'openrouter' })).toContain('未配置');
   });
 
   it('maps server errors to plain messages without raw details', () => {
@@ -77,7 +70,7 @@ describe('platformSecretsView helpers', () => {
 
 describe('PlatformSecretsSettings', () => {
   it('lists every key from the server read-back', () => {
-    trpcState.data = { slots: [filled, { ...base, slot: 'tikhub', envFallback: null }] };
+    trpcState.data = { slots: [filled, { ...base, slot: 'tikhub' }] };
     const markup = renderToStaticMarkup(createElement(PlatformSecretsSettings));
     expect(markup).toContain('第三方密钥');
     expect(markup).toContain('platform-secret-postforme');

@@ -1,7 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetPlatformSecretCacheForTests } from '../platformSecrets/reader';
+import { createPost } from './postForMe/posts';
 import { loadPostForMeDeps, readPostForMeApiKey, readPostForMeWebhookSecret, requirePostForMeDeps } from './secrets';
+import { handlePostForMeWebhook, WEBHOOK_SECRET_HEADER } from './webhook';
 
 const KEY = 'pfm_test_FAKEKEY000000000000';
 const WEBHOOK = 'fake-webhook-test-00000000';
@@ -10,59 +12,68 @@ function database(value: string | null = null, error: { code: string } | null = 
   return { rpc } as unknown as Parameters<typeof readPostForMeApiKey>[0];
 }
 beforeEach(resetPlatformSecretCacheForTests);
+afterEach(() => vi.unstubAllEnvs());
 
-describe('Post for Me unified Vault reader', () => {
-  it('uses admin API and webhook values in production even with competing environment values', async () => {
-    const env = { VERCEL: '1', VERCEL_ENV: 'production', POSTFORME_API_KEY: 'pfm_test_OTHER00000000',
-      POSTFORME_WEBHOOK_SECRET: 'other-webhook-test-000000' };
+function removeLegacyCredentialEnvironment() {
+  for (const name of ['POSTFORME_API_KEY', 'POSTFORME_WEBHOOK_SECRET', 'TIKHUB_API_KEY', 'PARALLEL_API_KEY', 'FIRECRAWL_API_KEY']) {
+    vi.stubEnv(name, undefined);
+  }
+}
+
+describe('Post for Me Vault reader', () => {
+  it('reads API and webhook credentials from their separate admin slots', async () => {
     const api = database(KEY);
-    expect(await readPostForMeApiKey(api, env)).toBe(KEY);
+    expect(await readPostForMeApiKey(api)).toBe(KEY);
     expect(api.rpc).toHaveBeenCalledWith('platform_secret_read', { p_slot: 'postforme' });
     const hook = database(WEBHOOK);
-    expect(await readPostForMeWebhookSecret(hook, env)).toBe(WEBHOOK);
+    expect(await readPostForMeWebhookSecret(hook)).toBe(WEBHOOK);
     expect(hook.rpc).toHaveBeenCalledWith('platform_secret_read', { p_slot: 'postforme_webhook' });
   });
 
-  it('allows fallback only on local, preview, or the exact staging project and branch', async () => {
+  it('reports an empty slot as missing and Vault errors as unavailable', async () => {
     const empty = database();
-    const env = { POSTFORME_API_KEY: KEY, POSTFORME_WEBHOOK_SECRET: WEBHOOK };
-    const staging = { ...env, VERCEL: '1', VERCEL_ENV: 'production',
-      VERCEL_PROJECT_PRODUCTION_URL: 'auth-staging.graylum.com', VERCEL_GIT_COMMIT_REF: 'staging' };
-    for (const allowed of [env, { ...env, VERCEL: '1', VERCEL_ENV: 'preview' }, staging]) {
-      expect(await readPostForMeApiKey(empty, allowed)).toBe(KEY);
-      expect(await readPostForMeWebhookSecret(empty, allowed)).toBe(WEBHOOK);
-    }
-    for (const blocked of [{ ...env, VERCEL_ENV: 'production' },
-      { ...staging, VERCEL_PROJECT_PRODUCTION_URL: 'app.graylum.com' },
-      { ...staging, VERCEL_GIT_COMMIT_REF: 'main' }]) {
-      expect(await readPostForMeApiKey(empty, blocked)).toBeNull();
-      expect(await readPostForMeWebhookSecret(empty, blocked)).toBeNull();
-    }
-  });
-
-  it('never falls back or reports unconfigured when Vault fails', async () => {
+    expect(await loadPostForMeDeps(empty)).toBeNull();
+    expect(await readPostForMeWebhookSecret(empty)).toBeNull();
+    resetPlatformSecretCacheForTests();
     const broken = database(null, { code: 'TEST_FAILURE' });
-    const env = { POSTFORME_API_KEY: KEY, POSTFORME_WEBHOOK_SECRET: WEBHOOK };
-    await expect(readPostForMeApiKey(broken, env)).rejects.toMatchObject({ code: 'PLATFORM_SECRET_UNAVAILABLE' });
-    await expect(readPostForMeWebhookSecret(broken, env)).rejects.toMatchObject({ code: 'PLATFORM_SECRET_UNAVAILABLE' });
-    await expect(loadPostForMeDeps(broken, env)).rejects.toThrow('PLATFORM_SECRET_UNAVAILABLE');
+    await expect(readPostForMeApiKey(broken)).rejects.toMatchObject({ code: 'PLATFORM_SECRET_UNAVAILABLE' });
+    await expect(readPostForMeWebhookSecret(broken)).rejects.toMatchObject({ code: 'PLATFORM_SECRET_UNAVAILABLE' });
+    await expect(loadPostForMeDeps(broken)).rejects.toThrow('PLATFORM_SECRET_UNAVAILABLE');
   });
 
-  it('rejects malformed keys, and returns null only for missing configuration', async () => {
-    const empty = database();
-    await expect(readPostForMeApiKey(empty, { POSTFORME_API_KEY: 'invalid' })).rejects.toThrow('POSTFORME_KEY_INVALID');
-    await expect(readPostForMeWebhookSecret(empty, { POSTFORME_WEBHOOK_SECRET: 'short' }))
-      .rejects.toThrow('POSTFORME_KEY_INVALID');
-    expect(await loadPostForMeDeps(empty, {})).toBeNull();
-    expect(await readPostForMeWebhookSecret(empty, {})).toBeNull();
+  it('rejects malformed values stored in the Vault', async () => {
+    await expect(readPostForMeApiKey(database('invalid'))).rejects.toThrow('POSTFORME_KEY_INVALID');
+    await expect(readPostForMeWebhookSecret(database('short'))).rejects.toThrow('POSTFORME_KEY_INVALID');
   });
 
-  it('does not switch to an environment key when the stored key is malformed', async () => {
-    await expect(readPostForMeApiKey(database('invalid'), { POSTFORME_API_KEY: KEY }))
-      .rejects.toThrow('POSTFORME_KEY_INVALID');
+  it('publishes with the Vault API key after the legacy provider variables are deleted', async () => {
+    removeLegacyCredentialEnvironment();
+    const deps = await requirePostForMeDeps(database(KEY));
+    const fetchImpl = vi.fn(async (input: string, init: RequestInit) => {
+      expect(input).toBe('https://api.postforme.dev/v1/social-posts');
+      expect(init.method).toBe('POST');
+      return new Response(JSON.stringify({ id: 'sp_1' }), { status: 201, headers: { 'content-type': 'application/json' } });
+    });
+    const outcome = await createPost({ ...deps, limiter: { acquire: async () => ({ ok: true as const }) }, fetchImpl }, {
+      externalId: '11111111-1111-4111-8111-111111111111', caption: 'synthetic publish',
+      socialAccountIds: ['spc_1'], mediaUrls: [],
+    });
+    expect(outcome).toEqual({ kind: 'created', providerPostId: 'sp_1' });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(fetchImpl.mock.calls[0]?.[1].headers).toMatchObject({ Authorization: `Bearer ${KEY}` });
   });
 
-  it('builds connect dependencies from Vault without exposing the key through a fallback', async () => {
-    expect(await requirePostForMeDeps(database(KEY))).toMatchObject({ apiKey: KEY, limiter: { acquire: expect.any(Function) } });
+  it('accepts a webhook using the Vault shared secret after the legacy provider variables are deleted', async () => {
+    removeLegacyCredentialEnvironment();
+    const secret = await readPostForMeWebhookSecret(database(WEBHOOK));
+    const writes = vi.fn(() => ({ abortSignal: async () => ({ data: true, error: null }) }));
+    const request = new Request('https://synthetic.test/api/postforme/webhook', {
+      method: 'POST',
+      body: JSON.stringify({ event_type: 'social.account.updated', data: { id: 'spc_1', status: 'disconnected' } }),
+      headers: { [WEBHOOK_SECRET_HEADER]: WEBHOOK },
+    });
+    const result = await handlePostForMeWebhook(request, secret ?? undefined, () => ({ rpc: writes }) as never);
+    expect(result).toEqual({ status: 200, body: { ok: true } });
+    expect(writes).toHaveBeenCalledWith('publish_monitor_provider_account_disconnected', { p_provider_account_id: 'spc_1' });
   });
 });

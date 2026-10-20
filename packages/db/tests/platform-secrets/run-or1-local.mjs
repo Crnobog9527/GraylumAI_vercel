@@ -16,6 +16,9 @@ const db = await localDb(), c = db.client;
 const report = { build: db.build, migration: migrationPath.split('/').at(-1), checks: [] };
 const v = async (sql, args = []) => (await c.query(sql, args)).rows[0]?.v;
 const failure = promise => promise.then(() => null, error => error);
+// The full-chain fixture already includes OR-2. Recreate the legacy schema locally so this historical
+// migration test can continue covering OR-1's data-move behavior with synthetic rows only.
+await c.query('ALTER TABLE public.ai_models ADD COLUMN IF NOT EXISTS api_key text');
 // Fake values only.
 const CANARY = 'OR1CANARY', fake = tail => `sk-or-v1-${CANARY}-fake-${tail}`;
 const KEY = fake('original-a1b2'), REPLACED = fake('replaced-c3d4');

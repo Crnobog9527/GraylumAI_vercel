@@ -12,8 +12,7 @@ const SEARCHES = { Q01: 'zh', Q07: 'en' };
 export const firecrawl = {
   id: 'firecrawl',
   label: 'Firecrawl',
-  keyEnv: 'FIRECRAWL_API_KEY',
-  keyEnvAliases: ['firecrawl_API_KEY'],
+  keyEnv: 'RESEARCH0_FIRECRAWL_KEY',
   maxCalls: 8,
   maxUsd: 1,
   timeoutMs: 90_000,

@@ -30,11 +30,10 @@ const policy = toolCallPolicy({ vendor: 'parallel', account: 'research-local', r
       validUntil: '2026-11-01T00:00:00Z', chargeCondition: 'per call', includedInReceipt: false, priceMultiplier: null } } });
 
 function database(calls: Array<{ id: string; sequence: number; providerId: string | null }>, claim: unknown = { state: 'waiting_credits' },
-  toolCalls: string[] = []) {
+  toolCalls: string[] = [], parallelSecret: string | null = 'parallel-admin-test-key-0001') {
   const rpc = vi.fn(async (name: string, ...rest: [Record<string, unknown>]) => {
     if (name === 'bill2_read') return { data: { id: runId, calls }, error: null };
-    // The admin slot is not filled: the transition fallback (PARALLEL_API_KEY) applies.
-    if (name === 'platform_secret_read') return { data: null, error: null };
+    if (name === 'platform_secret_read') return { data: rest[0].p_slot === 'parallel' ? parallelSecret : null, error: null };
     if (name === 'research_runtime_read') return { data: null, error: null };
     if (name === 'bill2_claim') return { data: claim, error: null };
     if (name === 'research_runtime_call_charge') return { data: toolCalls.includes(String(rest[0].p_call)) ? { source: null, credits: null } : null, error: null };
@@ -66,7 +65,6 @@ describe('researchExecution (RT-3b PR-3)', () => {
   });
 
   it('claims the run\'s next free sequence with the owner epoch as an integer and the research phase', async () => {
-    vi.stubEnv('PARALLEL_API_KEY', 'test-key');
     const fetch = vi.fn();
     vi.stubGlobal('fetch', fetch);
     const db = database([{ id: callId(1), sequence: 1, providerId: 'gen-1' }, { id: callId(2), sequence: 2, providerId: callId(2) }]);
@@ -88,7 +86,6 @@ describe('researchExecution (RT-3b PR-3)', () => {
   });
 
   it('denies a supplier subcall before its BILL2 claim when the runtime call limit is full', async () => {
-    vi.stubEnv('PARALLEL_API_KEY', 'test-key');
     const fetch = vi.fn(); vi.stubGlobal('fetch', fetch);
     const db = database([{ id: callId(1), sequence: 1, providerId: 'gen-1' }]);
     const callGate = vi.fn(async () => { throw new Error('RUNTIME_NEW_CALL_DENIED'); });
@@ -101,14 +98,12 @@ describe('researchExecution (RT-3b PR-3)', () => {
   });
 
   it('clears the per-claim marker after a tool completes without pausing', async () => {
-    vi.stubEnv('PARALLEL_API_KEY', '');
-    const { built, onSubcallSettled } = build(true, database([]));
+    const { built, onSubcallSettled } = build(true, database([], undefined, [], null));
     await built.tools[0]!.execute({ query: 'coffee shops', mode: 'fast' }, 'call-1');
     expect(onSubcallSettled).toHaveBeenCalledExactlyOnceWith();
   });
 
   it('a replay never claims or sends a subcall', async () => {
-    vi.stubEnv('PARALLEL_API_KEY', 'test-key');
     const fetch = vi.fn();
     vi.stubGlobal('fetch', fetch);
     const db = database([]);

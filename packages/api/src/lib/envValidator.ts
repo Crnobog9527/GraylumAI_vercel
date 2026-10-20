@@ -12,7 +12,6 @@ import { openingGrantKeyringIsValid } from './openingGrantKeyring';
 // 环境变量 Schema
 // ============================================
 
-const apiKeySchema = z.string().min(10);
 const hasDuplicatedEnvPrefix = (value: string, key: string) =>
   value.startsWith(`${key}=`) ||
   value.startsWith(`"${key}=`) ||
@@ -71,13 +70,6 @@ const envSchema = z.object({
       'DATABASE_URL 必须是有效的 PostgreSQL 连接字符串'
     )
     .optional(),
-
-  // PUBLISH-MONITOR: Post for Me (optional; the feature switch stays off without it)
-  POSTFORME_API_KEY: apiKeySchema
-    .regex(/^pfm_(live|test)_/, 'POSTFORME_API_KEY 必须以 pfm_live_ 或 pfm_test_ 开头')
-    .optional(),
-  // Post for Me webhook secret: staging/local fallback only until ADMIN-SECRETS #975 (production reads the admin)
-  POSTFORME_WEBHOOK_SECRET: z.string().min(16, 'POSTFORME_WEBHOOK_SECRET 至少 16 个字符').optional(),
 
   // Sentry (可选但推荐)
   NEXT_PUBLIC_SENTRY_DSN: z

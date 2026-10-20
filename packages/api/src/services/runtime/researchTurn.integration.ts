@@ -12,6 +12,7 @@ import { runtimeExecutor } from './execute';
 import { freezeHistorySelection } from './hostTurn';
 import { frozenResearchTurn, RESEARCH_PHASE, RESEARCH_RESULT_RESERVE_BYTES, RESEARCH_TURN_VERSION } from './researchTurn';
 import { toolCallPolicy } from '../bill2/toolBilling';
+import { seedTestPlatformSecret } from '../models/openRouterKey.testing';
 import type { RuntimeProgress } from './progress';
 import type { PaygWait } from './paygRuntime';
 
@@ -71,6 +72,7 @@ async function researchRound(toolThreshold = 1) {
         usage: { prompt_tokens: 3000, completion_tokens: 20, total_tokens: 3020 } } } }));
   });
   await db.connect();
+  await seedTestPlatformSecret({ query: (sql, params) => db.query(sql, params) }, 'parallel', 'parallel-synthetic-local-0001');
   await db.query('insert into profiles(id,credits) values($1,1000)', [actor]);
   await db.query(`insert into credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,
     idempotency_key,balance_before,balance_after) values($1,1000,'addition','grant','opening_grant','system',$2,0,1000)`,
@@ -122,7 +124,6 @@ async function researchRound(toolThreshold = 1) {
 }
 
 it('RUNTIME: a research mentor turn claims the subcall between its model calls, rounds once and replays without resending', async () => {
-  process.env.PARALLEL_API_KEY = 'synthetic-local-only';
   supplier.calls = 0;
   const f = await researchRound();
   try {
@@ -168,7 +169,6 @@ it('RUNTIME: a research mentor turn claims the subcall between its model calls, 
 }, 60000);
 
 it('RUNTIME: a subcall the balance cannot start pauses the turn at its slot; after a top-up it resumes there and charges once', async () => {
-  process.env.PARALLEL_API_KEY = 'synthetic-local-only';
   supplier.calls = 0;
   // The tool route needs 999 credits to start; after the first model call (3 credits) only 997 are left.
   const f = await researchRound(999);

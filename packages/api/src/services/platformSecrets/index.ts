@@ -3,4 +3,4 @@ export {
   getPlatformSecret, invalidatePlatformSecret, PlatformSecretError, PLATFORM_SECRET_CACHE_MS,
   type PlatformSecret, type PlatformSecretErrorCode,
 } from './reader';
-export { PLATFORM_SECRET_SLOTS, PLATFORM_SECRET_ENV_FALLBACK, type PlatformSecretSlot } from './slots';
+export { PLATFORM_SECRET_SLOTS, type PlatformSecretSlot } from './slots';

@@ -20,11 +20,9 @@
 -- Safety boundaries:
 -- - No real provider keys, Supabase keys, connection strings, auth material, or
 --   production billing identifiers are stored here.
--- - ai_models.api_key is intentionally NULL.
 -- - This seed does not create accounts, assign admin access, run chat, run
 --   billing, or change RLS/grants/functions.
--- - OPENROUTER_API_KEY and all other secrets remain owner-provided outside the
---   repository.
+-- - Provider secrets remain in the admin Vault and are never set by this seed.
 
 BEGIN;
 
@@ -289,7 +287,6 @@ INSERT INTO public.ai_models (
   name,
   model_id,
   provider,
-  api_key,
   api_endpoint,
   description,
   max_tokens,
@@ -314,7 +311,6 @@ VALUES
     'staging-baseline-primary',
     'builtin',
     NULL,
-    NULL,
     'Non-secret staging readiness row. Configure provider routing outside this seed before real smoke.',
     4096,
     180000,
@@ -337,7 +333,6 @@ VALUES
     'staging-baseline-assistant',
     'builtin',
     NULL,
-    NULL,
     'Non-secret staging readiness row for low-cost routing placeholders.',
     2048,
     64000,
@@ -359,7 +354,6 @@ SET
   name = EXCLUDED.name,
   model_id = EXCLUDED.model_id,
   provider = EXCLUDED.provider,
-  api_key = NULL,
   api_endpoint = EXCLUDED.api_endpoint,
   description = EXCLUDED.description,
   max_tokens = EXCLUDED.max_tokens,

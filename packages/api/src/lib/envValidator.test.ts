@@ -115,14 +115,13 @@ describe('validateEnv', () => {
     expect(result.errors).toContain('启用 Stripe 时必须配置 NEXT_PUBLIC_APP_URL');
   });
 
-  it('no longer requires an OpenRouter environment key (admin third-party keys page, OR-1) and still flags ANTHROPIC', () => {
-    delete process.env.OPENROUTER_API_KEY;
+  it('allows provider credentials to be absent and still flags ANTHROPIC', () => {
     process.env.ANTHROPIC_API_KEY = `sk-ant-${'a'.repeat(40)}`;
 
     const result = validateEnv();
 
     expect(result.valid).toBe(true);
-    expect(result.errors.join('\n')).not.toContain('OPENROUTER');
+    expect(result.errors.join('\n')).not.toContain('provider credential');
     expect(result.warnings).toContain('ANTHROPIC_API_KEY 已退役；Claude 模型通过 OpenRouter 调用（密钥在后台“第三方密钥”页填写）');
   });
 

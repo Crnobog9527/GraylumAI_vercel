@@ -27,8 +27,8 @@ try {
     ...['unknown', 'free'].map(level => `DO $probe$ BEGIN
       ALTER TABLE public.membership_plans DROP CONSTRAINT membership_plans_level_key;
       INSERT INTO public.membership_plans
-        (name,level,allow_fusion_review,allow_fusion_compare,library_storage_bytes)
-        VALUES ('invalid local fixture','${level}',false,false,0);
+        (name,level,allow_fusion_review,allow_fusion_compare,library_storage_bytes,positioning_profile_limit)
+        VALUES ('invalid local fixture','${level}',false,false,0,1);
       EXECUTE $migration$${migrationBody}$migration$;
       RAISE EXCEPTION 'migration accepted unknown or duplicate tier';
     EXCEPTION WHEN raise_exception THEN
