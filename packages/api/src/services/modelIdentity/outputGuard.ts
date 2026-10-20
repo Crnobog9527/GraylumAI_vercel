@@ -11,7 +11,7 @@ import { questionCardSchema, questionToolCardSchema } from '../../shared/agentTu
 const BRAND = String.raw`(?:claude|anthropic|chat\s?gpt|gpt(?:[-\s]?\d[\w.]*)?|openai|gemini|google|deepmind|bard|qwen|通[义義]千[问問]?|阿里(?:巴巴|云)|`
   + String.raw`deepseek|深度求索|llama|meta\s?ai|mistral|grok|x\.?ai|文心一言|百度|kimi|月之暗面|豆包|字[节節]跳[动動]|位元組跳動|智[谱譜]|chatglm|glm|混元|[腾騰][讯訊]|`
   + String.raw`谷歌|微软|microsoft|copilot)`;
-const ZH_GAP = '[^。！？!?.，,；;]';
+const ZH_GAP = '[^。！？!?.，,；;\\n]';
 // Who made the speaker: maker wording ("trained by"), or "from" right after the model noun. A nearby
 // source ("analyze data from Google") is ordinary copy (review P2).
 const MAKER = String.raw`(?:[^.!?\n]{0,40}?\s*\b(?:built|developed|trained|made|created|designed|powered|provided)\s+by|\s+from)`;
@@ -32,16 +32,16 @@ const PATTERNS = [
   `我(?:是|叫|就是)\\s*(?:一[个個]|一款|名叫)?\\s*${BRAND}${VERSION}${ZH_END}`,
   // 我是由 Google 训练的大型语言模型 / 我是来自 OpenAI 的语言模型
   // 由/来自 must follow 我是 directly (optionally 一个/一款): "我是想看看来自 Google 的开发工具" is ordinary copy (review P2).
-  `我(?:是|叫)\\s*(?:一[个個]|一款)?\\s*${FROM}\\s*${BRAND}\\s*(?:公司)?${ZH_GAP}{0,10}?(?:${MADE}|的${ZH_GAP}{0,6}?(?:模型|助手|AI))`,
+  `我(?:是|叫)\\s*(?:一[个個]|一款)?\\s*${FROM}\\s*${BRAND}\\s*(?:公司)?\\s*(?:${MADE}|的\\s*${ZH_GAP}{0,6}?(?:模型|助手|AI))`,
   // 我由 Anthropic 开发 / 我是被 OpenAI 训练出来的
-  `我(?:是)?(?:由|被)\\s*${BRAND}\\s*(?:公司)?${ZH_GAP}{0,6}${MADE}`,
+  `我(?:是)?(?:由|被)\\s*${BRAND}\\s*(?:公司)?\\s*${MADE}`,
   // 我的底层模型是 GPT-4 / 我背后的技术来自 Google
-  `我(?:的|背[后後]的)(?:底[层層]|基[础礎]|背[后後])?(?:模型|大模型|架[构構]|技[术術])${ZH_GAP}{0,8}?(?:是|基[于於]|${FROM}|用的是)\\s*${BRAND}`,
+  `我(?:的|背[后後]的)(?:底[层層]|基[础礎]|背[后後])?(?:模型|大模型|架[构構]|技[术術])\\s*(?:是|基[于於]|${FROM}|用的是)\\s*${BRAND}`,
   // 我基于 Claude / 我用的是 GPT — but not a user's product ("我基于 Claude 开发了一个写作工具", review P1)
-  `我(?:基[于於]|背[后後]是|使用的是|用的是|底[层層]是)\\s*${BRAND}(?!${ZH_GAP}{0,8}?(?:[开開][发發]了|做了|搭建|[构構]建了|打造了|写了|[写寫]了))`,
+  `我(?:基[于於]|背[后後]是|使用的是|用的是|底[层層]是)\\s*${BRAND}(?!\\s*(?:[开開][发發]了|做了|搭建|[构構]建了|打造了|写了|[写寫]了))`,
   // 作为 ChatGPT，我… / 作为一个由 OpenAI 开发的 AI 助手… (review P1: role-prefaced)
   `作[为為]\\s*(?:一[个個]|一款)?\\s*${BRAND}\\s*[，,]\\s*我`,
-  `作[为為]\\s*(?:一[个個]|一款)?\\s*${FROM}\\s*${BRAND}\\s*(?:公司)?${ZH_GAP}{0,10}?(?:${MADE}|的${ZH_GAP}{0,6}?(?:模型|助手|AI))`,
+  `作[为為]\\s*(?:一[个個]|一款)?\\s*${FROM}\\s*${BRAND}\\s*(?:公司)?\\s*(?:${MADE}|的\\s*${ZH_GAP}{0,6}?(?:模型|助手|AI))`,
   // As ChatGPT, I can help / As an AI assistant developed by OpenAI / As a GPT-4 based model (review P1)
   String.raw`\bAs\s+${BRAND}\b[^.!?]{0,6}?,\s*(?:I|my)\b`,
   String.raw`\bAs\s+(?:an?|the)\s+(?:[\w-]+\s+){0,4}(?:model|AI|assistant|chatbot|LLM)\b${MAKER}\s+${BRAND}`,

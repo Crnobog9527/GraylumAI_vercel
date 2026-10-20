@@ -88,6 +88,7 @@ const SAFE = [
   '我是谷歌认证的广告师。',
   // Review P2: 来自 + brand + 开发 elsewhere in an ordinary clause
   '我是想看看来自 Google 的哪些开发工具值得用。',
+  '我是由 Google 推荐的作者\n开发建议如下。',
   '作为想了解来自 OpenAI 的新工具的创作者，你可以先试用。',
   'As discussed, Gemini is good for long scripts.',
   // Review P1: a user's own product built on an AI model
