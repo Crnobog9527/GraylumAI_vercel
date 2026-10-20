@@ -196,8 +196,15 @@ it.each([
       expect(await finishWaitingOrganizer(await sessionContext(),nextRequestId,
         value=>freshHost.execute(value.executionId,undefined,value))).toBeNull();
       expect(gate.mock.calls).toHaveLength(callsBefore);
-      expect(await freshHost.execute(admitted.executionId)).toMatchObject({state:'cancelled'});
-      expect(await financial()).toEqual(before);
+      expect(await freshHost.execute(admitted.executionId)).toMatchObject({state:'cancelled',unavailable:'preflight'});
+      // The final slot was retired before dispatch; the known primary cannot be fully
+      // delivered with its missing organizer. Restore that platform failure exactly once.
+      const compensated=await financial();
+      expect(compensated).toEqual({...before,credits:200,ledger:200});
+      await freshHost.execute(admitted.executionId);
+      expect(await financial()).toEqual(compensated);
+      expect((await db.query('select compensation_credits,outcome from bill2_runs where id=$1',
+        [admitted.runId])).rows[0]).toEqual({compensation_credits:3,outcome:'confirmed_failure'});
       expect((await sessionContext()).waitingOrganizer).toBeNull();
       expect((await db.query('select primary_result from runtime_executions where id=$1',
         [admitted.executionId])).rows[0].primary_result.body).toBe(primaryBody);

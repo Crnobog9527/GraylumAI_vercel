@@ -26,3 +26,21 @@ export async function cancelRound(rpc: Rpc, args: { p_execution_id: string }) {
   const stopped = await rpc<{ state: 'cancelled' | 'cost_pending' }>('runtime_cancel', args);
   return { state: stopped.state };
 }
+
+/** An exhausted replay has no authority to send any missing response. Only a definite
+ * missing/incompatible result is a platform failure; database/Auth/capacity faults remain recoverable.
+ * SQL still verifies the owner epoch, original run, known costs and existing cancellation/erasure fences. */
+export async function finishExhaustedReplay(rpc: Rpc, args: { p_execution_id: string },
+  execution: { live: boolean; remainingCalls?: number; state: string }, code: string) {
+  if (execution.live || execution.remainingCalls !== 0 || !['running', 'interrupted'].includes(execution.state)
+    || !['RUNTIME_RESPONSE_PENDING', 'RUNTIME_RESPONSE_CONFLICT', 'RUNTIME_RESPONSE_INVALID',
+      'RUNTIME_TERMINAL_REPLY', 'RUNTIME_CALL_LIMIT_REACHED'].includes(code)) return undefined;
+  try {
+    const result = await rpc<{ state: string }>('runtime_execution', {
+      ...args, p_action: 'fail_platform', p_result: { unavailable_reason: 'preflight' },
+    });
+    if (result.state === 'cancelled') return { state: 'cancelled' as const, unavailable: 'preflight' as const };
+    if (result.state === 'cost_pending') return { state: 'cost_pending' as const };
+  } catch { /* Never fall through to ordinary cancellation and lose the pending compensation. */ }
+  return { state: 'pending' as const };
+}
