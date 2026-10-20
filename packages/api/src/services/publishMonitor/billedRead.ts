@@ -260,7 +260,7 @@ export async function billedTikhubRead(deps: BilledReadDeps, keys: ClaimKeys, pl
         billing: toolSubcallBilling({ admin: admin as unknown as BillingRpc, actorId: keys.actorId, runId: admitted.runId }),
         evidence: ledgerPort(admin, keys, requestIdentity(item.request), `tikhub:${item.request.route}`),
         nextSequence: () => ++sequence,
-        secrets: deps.secrets ?? platformSecretReader(admin as unknown as BillingRpc, deps.env),
+        secrets: deps.secrets ?? platformSecretReader(admin as unknown as BillingRpc),
         rateCounter: deps.rateCounter ?? checkVendorRateLimit, newId: () => crypto.randomUUID(),
         ...(deps.vendors ? { vendors: deps.vendors } : {}), ...(deps.now ? { now: deps.now } : {}) };
       let outcome: Awaited<ReturnType<typeof runSubcall>>;

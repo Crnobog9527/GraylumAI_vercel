@@ -56,7 +56,7 @@ const LISTED = { Q02: [0.01, 5], Q03: [0.01, 3], Q04: [0.001, 3], Q05: [0.001, 3
 export const tikhub = {
   id: 'tikhub',
   label: 'TikHub',
-  keyEnv: 'TIKHUB_API_KEY',
+  keyEnv: 'RESEARCH0_TIKHUB_KEY',
   // 9 + 2 balance reads in the first round; the supplemental round adds up to 9 + 5 retries + 2 balance reads.
   maxCalls: 30,
   maxUsd: 1,

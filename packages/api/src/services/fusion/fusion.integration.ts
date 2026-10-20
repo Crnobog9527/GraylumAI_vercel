@@ -79,8 +79,8 @@ beforeAll(async () => {
       defaultEffort: null, supportsMaxTokens: false } };
     const reasoning = { ...config.reasoning, catalog, purposes: { interactive: { mode: 'effort', effort: 'low', wire: 'reasoning_effort' },
       review: { mode: 'effort', effort: 'low', wire: 'reasoning_effort' }, writing: { mode: 'provider_default' } } };
-    await db.query(`insert into ai_models(id,name,model_id,provider,is_active,input_limit,max_tokens,config,api_key,api_endpoint)
-      values($1,$2,$2,'openrouter','true',250000,8192,$3,$4,'https://openrouter.ai/api/v1')`, [models[i], model, { ...config, reasoning }, syntheticKey]);
+    await db.query(`insert into ai_models(id,name,model_id,provider,is_active,input_limit,max_tokens,config,api_endpoint)
+      values($1,$2,$2,'openrouter','true',250000,8192,$3,'https://openrouter.ai/api/v1')`, [models[i], model, { ...config, reasoning }]);
   }
   await seedTestOpenRouterKey(db, syntheticKey);
   const profiles = pairs.map(([model, endpointTag]) => ({ model, endpointTag, protocol: 'openrouter-chat-v1', profileVersion: 'synthetic-only',

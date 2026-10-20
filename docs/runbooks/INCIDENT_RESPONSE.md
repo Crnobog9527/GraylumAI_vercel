@@ -125,13 +125,12 @@ ORDER BY minute DESC;
 
 **Common Causes**:
 1. Provider API issues → Identify the failed request path and selected model's actual provider/endpoint, then check that provider's service status. OpenRouter applies to the unified Runtime; legacy `/api/ai/stream` may use a configured OpenAI-compatible endpoint or Gemini directly.
-2. Invalid API key → Verify presence and validity at the actual credential source without exposing the value. OpenRouter requests can use the model's database key or `OPENROUTER_API_KEY`; legacy direct requests must be checked against their selected provider and model configuration, not assumed to use that environment variable.
+2. Invalid API key → Verify presence and validity in the backend “第三方密钥” page without exposing the value. OpenRouter and connected provider calls read the server-side Vault slot; legacy direct requests must be checked against their selected provider and model configuration.
 3. Rate limiting → Check rate limiter logs
 
 Code: `apps/web/src/app/api/ai/stream/route.ts:192` (model configuration),
-`:254` (legacy direct credential fallback), `:616`–`:620` (provider/key/endpoint
-selection), `:953` (Gemini branch); `packages/api/src/services/providerUtils.ts:36`
-(model key / OpenRouter key selection).
+`:254` (legacy direct credential lookup), `:616`–`:620` (provider/key/endpoint
+selection), `:953` (Gemini branch); OpenRouter credentials are read from its platform Vault slot.
 
 **Resolution**:
 - If API issue: Wait for upstream fix

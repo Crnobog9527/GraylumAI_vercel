@@ -7,7 +7,7 @@ type RpcClient = Pick<SupabaseClient, 'rpc'>;
 
 /**
  * ADMIN-SECRETS OR-1: the one OpenRouter key, entered in the admin's third-party keys page and kept in
- * Supabase Vault (slot `openrouter`, no environment fallback). Replaces the per-model `ai_models.api_key`.
+ * Supabase Vault (slot `openrouter`, no environment fallback).
  * Undefined when the admin has not filled it; a failed database read throws PLATFORM_SECRET_UNAVAILABLE
  * (never a silent switch to another key). `fresh`: bypass the 60 s per-instance cache; every path that authorizes a
  * paid provider call uses it (a cleared or replaced key must stop working at once on every instance).

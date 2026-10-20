@@ -98,12 +98,12 @@ Opus 4 次 1.5456（汇总对比 2 次 0.8724、大档 2 次 0.6731）；Sonnet 
    Sonnet、Gemini、Sol 加"评审" = low（线路分别 anthropic、google-ai-studio、openai）；Opus 加"写作" = low（线路 anthropic）。
    **Sonnet、Gemini 的"评审"已完成**（总控 2026-10-17 第一批写入，记录在 #1056 评论）；Sol 的"评审"、Opus 的"写作"待做。
    等价的数据是 `config.reasoning.purposes.review` / `.writing` = `{"mode":"effort","effort":"low","wire":"reasoning_effort"}`。
-2. **新增 Opus 模型行**：只在库内用 SQL 从 Sonnet 行（`d04a4800-…`，它的密钥就是测试窗口报价绑定的那把）复制密钥和接口，不读出、不打印：
+2. **新增 Opus 模型行**：只在库内用 SQL 从 Sonnet 行（`d04a4800-…`）复制提供商和接口；API 密钥是平台级配置，从后台 Vault 读取，不放进模型行：
    ```sql
-   INSERT INTO ai_models (name, model_id, provider, api_key, api_endpoint, description, max_tokens, input_limit, enable_web_search,
+   INSERT INTO ai_models (name, model_id, provider, api_endpoint, description, max_tokens, input_limit, enable_web_search,
      input_token_cost, output_token_cost, input_token_cost_above_200k, output_token_cost_above_200k, web_search_cost,
      token_counting_supported, token_counting_method, tokenizer_family, is_active, config, price_multiplier)
-   SELECT 'claude-opus-5.5', 'anthropic/claude-opus-5.5', provider, api_key, api_endpoint, 'FUSION-REVIEW 汇总（Owner 2026-10-17）',
+   SELECT 'claude-opus-5.5', 'anthropic/claude-opus-5.5', provider, api_endpoint, 'FUSION-REVIEW 汇总（Owner 2026-10-17）',
      128000, 1000000, 'false', 4000000, 20000000, 4000000, 20000000, 0,
      token_counting_supported, token_counting_method, tokenizer_family, 'true', NULL, NULL
    FROM ai_models WHERE id = 'd04a4800-2d3a-43b3-8af9-cb960572e34f'

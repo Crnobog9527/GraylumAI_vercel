@@ -10,8 +10,7 @@ export interface PlatformSecretItem {
   revision: number;
   updatedAt: string | null;
   updatedByEmail: string | null;
-  envFallback: { name: string; present: boolean; last4: string | null } | null;
-  source: 'admin' | 'env' | 'none';
+  source: 'admin' | 'none';
 }
 
 export const SLOT_INFO: Record<PlatformSecretSlot, { name: string; usage: string; hint: string }> = {
@@ -40,16 +39,10 @@ export function platformSecretError(error: ErrorLike, action: 'read' | 'save' | 
 /** What the system uses right now, in plain words. */
 export function sourceLabel(item: PlatformSecretItem) {
   if (item.source === 'admin') return `正在使用后台填写的密钥（末 4 位 ${item.last4}）`;
-  if (item.source === 'env' && item.envFallback) {
-    return `后台未填写，正在使用 Vercel 环境变量 ${item.envFallback.name}（末 4 位 ${item.envFallback.last4}），建议在这里填写`;
-  }
   return '未配置，相关功能会提示"未配置"';
 }
 
-export function clearWarning(item: PlatformSecretItem) {
-  if (item.envFallback?.present) {
-    return `清除后会改用 Vercel 环境变量 ${item.envFallback.name}（末 4 位 ${item.envFallback.last4}）。`;
-  }
+export function clearWarning() {
   return '清除后没有可用的密钥，相关功能会停止并提示"未配置"。';
 }
 

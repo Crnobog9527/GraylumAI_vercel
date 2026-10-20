@@ -1,13 +1,12 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  getPlatformSecret, invalidatePlatformSecret, PLATFORM_SECRET_CACHE_MS, PlatformSecretError,
+  getPlatformSecret, invalidatePlatformSecret, PLATFORM_SECRET_CACHE_MS,
   resetPlatformSecretCacheForTests,
 } from './reader';
 
 // Fake values only.
 const STORED = 'or-test-stored-0000aaaa';
-const ENV_KEY = 'pfm_test_fakeenvvalue1234';
 
 function client(reply: () => { data: unknown; error: { code?: string } | null } | Promise<never>) {
   const calls: unknown[] = [];
@@ -23,49 +22,30 @@ function client(reply: () => { data: unknown; error: { code?: string } | null } 
 beforeEach(() => resetPlatformSecretCacheForTests());
 
 describe('getPlatformSecret', () => {
-  it('uses the admin value and ignores the environment when the admin filled the slot', async () => {
+  it('uses the admin Vault value', async () => {
     const { db, calls } = client(() => ({ data: STORED, error: null }));
-    const result = await getPlatformSecret(db, 'postforme', { env: { POSTFORME_API_KEY: ENV_KEY } });
+    const result = await getPlatformSecret(db, 'postforme');
     expect(result).toEqual({ value: STORED, source: 'admin' });
     expect(calls).toEqual([['platform_secret_read', { p_slot: 'postforme' }]]);
   });
 
-  it('falls back to the allowed environment variable while the admin slot is empty', async () => {
+  it('reports an empty Vault slot as not configured', async () => {
     const { db } = client(() => ({ data: null, error: null }));
-    expect(await getPlatformSecret(db, 'postforme', { env: { POSTFORME_API_KEY: ` ${ENV_KEY} ` } }))
-      .toEqual({ value: ENV_KEY, source: 'env' });
-    for (const [slot, name] of [['postforme_webhook', 'POSTFORME_WEBHOOK_SECRET'], ['tikhub', 'TIKHUB_API_KEY'],
-      ['parallel', 'PARALLEL_API_KEY'], ['firecrawl', 'FIRECRAWL_API_KEY']] as const) {
-      expect((await getPlatformSecret(db, slot, { env: { [name]: ENV_KEY } })).source).toBe('env');
-    }
-  });
-
-  it('never falls back to an environment key for OpenRouter', async () => {
-    const { db } = client(() => ({ data: null, error: null }));
-    const error = await getPlatformSecret(db, 'openrouter', { env: { OPENROUTER_API_KEY: 'sk-or-v1-fake-env-1234' } })
-      .catch(e => e);
-    expect(error).toBeInstanceOf(PlatformSecretError);
-    expect(error).toMatchObject({ code: 'PLATFORM_SECRET_NOT_CONFIGURED', slot: 'openrouter' });
-  });
-
-  it('reports not configured when neither the admin nor the environment has a value', async () => {
-    const { db } = client(() => ({ data: null, error: null }));
-    await expect(getPlatformSecret(db, 'tikhub', { env: { TIKHUB_API_KEY: '  ' } }))
-      .rejects.toMatchObject({ code: 'PLATFORM_SECRET_NOT_CONFIGURED' });
+    await expect(getPlatformSecret(db, 'tikhub')).rejects.toMatchObject({ code: 'PLATFORM_SECRET_NOT_CONFIGURED' });
   });
 
   it.each([
     ['an rpc error', () => ({ data: null, error: { code: '42501' } })],
     ['a timeout', () => Promise.reject(new DOMException('timed out', 'TimeoutError'))],
     ['a malformed reply', () => ({ data: 42, error: null })],
-  ])('fails on %s instead of using the environment or a stale value', async (_label, reply) => {
+  ])('fails on %s instead of serving a stale value', async (_label, reply) => {
     let now = 0;
     let fail = false;
     const { db } = client(() => fail ? reply() : { data: STORED, error: null });
     expect((await getPlatformSecret(db, 'postforme', { now: () => now })).value).toBe(STORED);
     now = PLATFORM_SECRET_CACHE_MS;
     fail = true;
-    await expect(getPlatformSecret(db, 'postforme', { now: () => now, env: { POSTFORME_API_KEY: ENV_KEY } }))
+    await expect(getPlatformSecret(db, 'postforme', { now: () => now }))
       .rejects.toMatchObject({ code: 'PLATFORM_SECRET_UNAVAILABLE' });
   });
 
@@ -108,15 +88,13 @@ describe('getPlatformSecret', () => {
     expect(broken.calls).toHaveLength(1);
   });
 
-  it('after a clear, the cached "not filled" result falls back to the environment', async () => {
+  it('after a clear, the slot remains not configured', async () => {
     let value: string | null = STORED;
     const { db } = client(() => ({ data: value, error: null }));
-    const env = { FIRECRAWL_API_KEY: 'fc-fake-environment-value-01' };
-    expect((await getPlatformSecret(db, 'firecrawl', { env })).source).toBe('admin');
+    expect((await getPlatformSecret(db, 'firecrawl')).source).toBe('admin');
     value = null;
     invalidatePlatformSecret('firecrawl');
-    expect(await getPlatformSecret(db, 'firecrawl', { env })).toEqual({ value: env.FIRECRAWL_API_KEY, source: 'env' });
-    await expect(getPlatformSecret(db, 'firecrawl', { env: {} })).rejects.toMatchObject({ code: 'PLATFORM_SECRET_NOT_CONFIGURED' });
+    await expect(getPlatformSecret(db, 'firecrawl')).rejects.toMatchObject({ code: 'PLATFORM_SECRET_NOT_CONFIGURED' });
   });
 
   it('a read that started before a save cannot put the retired key back into the cache', async () => {

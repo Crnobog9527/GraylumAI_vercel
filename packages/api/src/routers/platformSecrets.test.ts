@@ -70,7 +70,7 @@ it('admin saves a key; every answer shows only the last four characters', async 
   expect(before.slots.map(s => s.slot)).toEqual([...PLATFORM_SECRET_SLOTS]);
   const after = await f.caller.set({ slot: 'openrouter', value: `  ${OPENROUTER}\n`, expectedRevision: 0 });
   expect(after.slots[0]).toMatchObject({ slot: 'openrouter', configured: true, last4: 'c3d4', revision: 1,
-    updatedByEmail: 'admin@example.test', source: 'admin', envFallback: null });
+    updatedByEmail: 'admin@example.test', source: 'admin' });
   expect(f.calls).toContainEqual(['platform_secret_set',
     { p_slot: 'openrouter', p_value: OPENROUTER, p_expected_revision: 0, p_actor: ACTOR }]);
   for (const answer of [before, after, await f.caller.status()]) expect(JSON.stringify(answer)).not.toContain(CANARY);
@@ -81,19 +81,18 @@ it('admin saves a key; every answer shows only the last four characters', async 
 it('save and clear invalidate this instance cache at once', async () => {
   const f = harness('admin');
   await f.caller.set({ slot: 'tikhub', value: `tikhub-${CANARY}-fake-first`, expectedRevision: 0 });
-  expect((await getPlatformSecret(f.db as never, 'tikhub', { env: {} })).value).toBe(`tikhub-${CANARY}-fake-first`);
+  expect((await getPlatformSecret(f.db as never, 'tikhub')).value).toBe(`tikhub-${CANARY}-fake-first`);
   await f.caller.set({ slot: 'tikhub', value: `tikhub-${CANARY}-fake-second`, expectedRevision: 1 });
-  expect((await getPlatformSecret(f.db as never, 'tikhub', { env: {} })).value).toBe(`tikhub-${CANARY}-fake-second`);
+  expect((await getPlatformSecret(f.db as never, 'tikhub')).value).toBe(`tikhub-${CANARY}-fake-second`);
   const cleared = await f.caller.clear({ slot: 'tikhub', expectedRevision: 2 });
   expect(cleared.slots.find(s => s.slot === 'tikhub')).toMatchObject({ configured: false, last4: null, revision: 3 });
-  await expect(getPlatformSecret(f.db as never, 'tikhub', { env: {} })).rejects.toMatchObject({ code: 'PLATFORM_SECRET_NOT_CONFIGURED' });
+  await expect(getPlatformSecret(f.db as never, 'tikhub')).rejects.toMatchObject({ code: 'PLATFORM_SECRET_NOT_CONFIGURED' });
 });
 
 it('saves the Post for Me webhook secret in its own slot', async () => {
   const f = harness('admin');
   const after = await f.caller.set({ slot: 'postforme_webhook', value: `whsecret-${CANARY}-fake-m3n4`, expectedRevision: 0 });
-  expect(after.slots.find(s => s.slot === 'postforme_webhook')).toMatchObject({ configured: true, last4: 'm3n4',
-    envFallback: { name: 'POSTFORME_WEBHOOK_SECRET' } });
+  expect(after.slots.find(s => s.slot === 'postforme_webhook')).toMatchObject({ configured: true, last4: 'm3n4' });
   expect(after.slots.find(s => s.slot === 'postforme')).toMatchObject({ configured: false });
   expect(JSON.stringify(after)).not.toContain(CANARY);
   await expect(f.caller.set({ slot: 'postforme_webhook', value: 'too-short', expectedRevision: 1 }))
@@ -140,18 +139,6 @@ it.each([
   expect(JSON.stringify(error)).not.toContain(CANARY);
   expect(logged.join('\n')).not.toContain(CANARY);
 });
-
-it('shows the transition fallback: environment present with its last four characters', async () => {
-  vi.stubEnv('POSTFORME_API_KEY', 'pfm_test_fakeenvironment9z8y');
-  try {
-    const { slots } = await harness('admin').caller.status();
-    expect(slots.find(s => s.slot === 'postforme')).toMatchObject({ configured: false, source: 'env',
-      envFallback: { name: 'POSTFORME_API_KEY', present: true, last4: '9z8y' } });
-    expect(slots.find(s => s.slot === 'openrouter')).toMatchObject({ source: 'none', envFallback: null });
-    expect(JSON.stringify(slots)).not.toContain('fakeenvironment');
-  } finally { vi.unstubAllEnvs(); }
-});
-
 
 it('uses committed writer metadata without a second status RPC', async () => {
   const f = harness('admin', { failStatus: true });
