@@ -34,3 +34,12 @@ it('labels the host-started opening and omits the summary line elsewhere', () =>
   expect(html).not.toContain('本步小结');
   expect(renderToStaticMarkup(<MentorLiveReply text="正在写"/>)).toContain('正在写');
 });
+
+it('stops saying it waits for the server once the server admitted the message', () => {
+  const waiting = renderToStaticMarkup(<MentorPendingMessage requestId="r1" stepTitle="诊断与平台对标" text="继续" sending/>);
+  expect(waiting).toContain('发送中 · 等待服务器确认');
+  const admitted = renderToStaticMarkup(<MentorPendingMessage requestId="r1" stepTitle="诊断与平台对标" text="继续" sending accepted/>);
+  expect(admitted).toContain('继续');
+  expect(admitted).not.toContain('等待服务器确认');
+  expect(admitted).not.toContain('尚未确认保存');
+});
