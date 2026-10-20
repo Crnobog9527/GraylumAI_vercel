@@ -63,6 +63,7 @@ try {
  },applyServerOnly:apply});
  assert.equal(build.failed,null,JSON.stringify(build.failed));
  assert.ok(before&&after,'migration verified at its historical position');
+ const built=objects(); // Final catalog includes later migrations such as 0325.
  assert.equal(sql(`SELECT archived_at IS NULL FROM opc_businesses WHERE id='${legacyBusiness}'`),'t');
  report.build=build;
  report.checks.push('migration interruption rolls back every catalog object','migration repeat preserves structure and ACL');
@@ -82,7 +83,7 @@ try {
  sql(read('packages/db/migrations/0324_paywall_profile_archive.sql'));
  assert.equal(sql('SELECT jsonb_agg(to_jsonb(b) ORDER BY id) FROM opc_businesses b'),preserved,
   'forward recovery/reapply retains every archive, source and revision');
- assert.deepEqual(objects(),after);
+ assert.deepEqual(objects(),built,'archive recovery preserves the final catalog including later migrations');
  assert.equal(sql(read('packages/db/tests/account-open-policy-audit.sql')),'');
  report.checks.push('reapply retains archived content and releases no additional slots','account-open policy audit PASS');
  console.log(JSON.stringify({result:'PASS',...report}));
