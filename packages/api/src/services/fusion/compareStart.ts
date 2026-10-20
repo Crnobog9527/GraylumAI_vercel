@@ -64,6 +64,19 @@ type RecordView = { compareId: string; state: string; gateVerdict: string | null
  * to; the group never holds more than it. A repeat of the same request id never judges again and returns the same group. */
 export type CompareStartInput = CompareChoice & { requestId: string; shown: Pick<CompareEstimate, 'credits' | 'columns'> };
 export async function startCompare(deps: CompareDeps, choice: CompareStartInput): Promise<CompareStarted> {
+  try { return await beginCompare(deps, choice); }
+  catch (error) {
+    if (error instanceof Error && error.message === 'OPC_BUSINESS_ARCHIVED') {
+      // Separate RPC: raising the refusal in the claim transaction rolls its writes back.
+      // Resolve by request id so a replay can retry cleanup even if begin returns no compare id.
+      await compareRpc(deps.admin, 'fusion_compare_stop_archived', {
+        p_actor_id: deps.actorId, p_request_id: choice.requestId,
+      });
+    }
+    throw error;
+  }
+}
+async function beginCompare(deps: CompareDeps, choice: CompareStartInput): Promise<CompareStarted> {
   assertNoReferences(choice.parts);
   const { admin, actorId } = deps;
   const { requestId } = choice;

@@ -60,14 +60,21 @@ export async function fusionArchiveCases({admin:db,connect,report}) {
  await assert.rejects(admit(first),archived);
  assert.deepEqual(await snapshot(first),frozen,'no gate write, group, run, hold or fee after archive');
  report.checks.push('Fusion begin -> concurrent archive -> gate and group admission denied, no writes or charge');
+ assert.equal(await rpc(db,'fusion_compare_stop_archived',first.actor,first.request),true);
+ assert.equal(await rpc(db,'fusion_compare_active',first.actor),false,'post-refusal production cleanup also ends group-less requests');
 
  const second=await seed();await gate(second);await archive(second);
  const afterGate=await snapshot(second);
  await assert.rejects(admit(second),archived);
  assert.deepEqual(await snapshot(second),afterGate,'archiving between gate and admission writes nothing');
+ assert.equal(await rpc(db,'fusion_compare_stop_archived',second.actor,second.request),true);
+ assert.equal(await rpc(db,'fusion_compare_active',second.actor),false);
  report.checks.push('Fusion gate -> archive -> group admission denied');
 
  const third=await seed();await gate(third);const group=await admit(third);
+ const open=await snapshot(third);
+ assert.equal(await rpc(db,'fusion_compare_stop_archived',third.actor,third.request),false);
+ assert.deepEqual(await snapshot(third),open,'cleanup cannot stop an unarchived request');
  const items=group.runs.map(r=>({runId:r.runId,sequence:1,payload:r.fusion.call}));
  assert.notEqual(third.runs[0].payload.scope.draftId,third.source.draftId,'column billing really uses a temporary draft');
  await archive(third);const beforeClaim=await snapshot(third);
@@ -76,8 +83,28 @@ export async function fusionArchiveCases({admin:db,connect,report}) {
  await assert.rejects(rpc(db,'bill2_claim',third.actor,items[0].runId,1,items[0].payload),archived);
  await assert.rejects(rpc(db,'bill2_payg_claim',third.actor,items[0].runId,1,items[0].payload),archived);
  assert.deepEqual(await snapshot(third),beforeClaim,'existing temporary-draft group cannot reserve after archive');
- await rpc(db,'fusion_compare_stop',third.actor,third.compareId,null);
- report.checks.push('Fusion admission -> archive -> compare/group/direct BILL2 claim denied; stop remains available');
+ const stranger=await seedActor(db);
+ assert.equal(await rpc(db,'fusion_compare_stop_archived',stranger,third.request),false);
+ assert.deepEqual(await snapshot(third),beforeClaim,'another actor cannot clean up this request');
+ const authorized=await connect();await authorized.query('SET ROLE service_role');
+ await authorized.query("SELECT set_config('request.jwt.claims',$1,false)",[
+  JSON.stringify({sub:third.actor,role:'service_role'})]);
+ assert.equal(await rpc(authorized,'fusion_compare_stop_archived',third.actor,third.request),true,
+  'same privileged RPC invoked by startCompare after a refusal; no manual stop');
+ assert.equal(await rpc(db,'fusion_compare_active',third.actor),false);
+ const ended=await rpc(db,'fusion_compare_read',third.actor,third.compareId);
+ assert.ok(ended.columns.every(c=>c.billing.closed),'runs with no bill2_calls close, without receipt recovery');
+ const cleaned=await snapshot(third);
+ assert.equal(await rpc(db,'fusion_compare_stop_archived',third.actor,third.request),true);
+ assert.deepEqual(await snapshot(third),cleaned,'cleanup replay is idempotent');
+ const denied=await connect();await denied.query('SET ROLE authenticated');
+ await assert.rejects(rpc(denied,'fusion_compare_stop_archived',third.actor,third.request),/permission denied for function/);
+ await denied.query('RESET ROLE');
+ const acl=(await db.query(`SELECT has_function_privilege('anon','fusion_compare_stop_archived(uuid,uuid)','execute') anon,
+  has_function_privilege('authenticated','fusion_compare_stop_archived(uuid,uuid)','execute') authenticated,
+  has_function_privilege('service_role','fusion_compare_stop_archived(uuid,uuid)','execute') service`)).rows[0];
+ assert.deepEqual(acl,{anon:false,authenticated:false,service:true});
+ report.checks.push('post-claim-refusal production cleanup closes call-less runs, frees active slot, retries safely; foreign/unarchived/privilege refusals');
 
  // One column delivered/charged; the other only has a hold. Archive must identify
  // the source of the temporary run, wait for dispatched obligations, then stop any new dispatch.

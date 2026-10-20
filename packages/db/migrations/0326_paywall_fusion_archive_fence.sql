@@ -123,4 +123,25 @@ DO $$ DECLARE src text;anchor text; BEGIN
 END $$;
 -- Read, stop/cancel, provider receipts, verdicts and settlement deliberately retain
 -- their original permissions and behavior. Already spent money can still reconcile.
+
+-- startCompare invokes this in a fresh transaction after an archive refusal.
+-- Request identity also works when begin/replay refused before returning a compare id.
+-- It closes admitted runs with *no calls*, which receipt-based recovery cannot find.
+CREATE OR REPLACE FUNCTION public.fusion_compare_stop_archived(p_actor_id uuid,p_request_id uuid)
+RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE source_compare fusion_compares;
+BEGIN
+ PERFORM bill2_actor(p_actor_id);
+ SELECT * INTO source_compare FROM fusion_compares
+  WHERE actor_id=p_actor_id AND request_id=p_request_id FOR UPDATE;
+ IF source_compare.id IS NULL THEN RETURN false; END IF;
+ IF NOT EXISTS(SELECT 1 FROM opc_businesses b WHERE b.actor_id=p_actor_id AND b.archived_at IS NOT NULL
+  AND b.id=opc_target_business(p_actor_id,jsonb_build_object('sessionId',source_compare.session_id))) THEN
+  RETURN false;
+ END IF;
+ PERFORM fusion_compare_stop(p_actor_id,source_compare.id,NULL);
+ RETURN true;
+END $$;
+REVOKE ALL ON FUNCTION public.fusion_compare_stop_archived(uuid,uuid) FROM PUBLIC,anon,authenticated,service_role;
+GRANT EXECUTE ON FUNCTION public.fusion_compare_stop_archived(uuid,uuid) TO service_role;
 COMMIT;
