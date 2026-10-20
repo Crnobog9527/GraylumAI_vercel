@@ -26,10 +26,10 @@ export function scrubText(value: string): string {
  */
 export const APP_SEGMENTS = new Set(['about', 'acceptable-use', 'accessibility', 'access-denied', 'account-erasure', 'admin',
   'agent-first-preview', 'ai', 'announcements', 'api', 'auth', 'auto-close', 'billing-reconcile', 'blog', 'callback', 'chat',
-  'advance', 'fusion', 'connect', 'contact', 'costs', 'cron', 'diagnostics', 'expert-consult', 'f', 'faq', 'features', 'finance', 'founders',
+  'advance', 'fusion', 'connect', 'contact', 'cookies', 'costs', 'cron', 'diagnostics', 'expert-consult', 'f', 'faq', 'features', 'finance', 'founders',
   'forgot-password', 'graylum-vs-chatgpt', 'ig-jingying', 'landing',
   'library', 'library-cleanup', 'login', 'maintenance', 'marketplace', 'models', 'orders', 'packages', 'payment-notices', 'performance',
-  'plan', 'positioning', 'postforme', 'preview', 'publish-monitor', 'pricing', 'privacy', 'profile', 'prompts', 'refund', 'refunds',
+  'plan', 'positioning', 'postforme', 'preview', 'publish-monitor', 'pricing', 'privacy', 'profile', 'prompts', 'refund', 'refund-policy', 'refunds',
   'register', 'release-subscription-credits',
   'requests', 'reset-password', 'review', 'runtime', 'runtime-recovery', 'scan-check', 'search', 'secrets', 'settings', 'shequn-jingying', 'shequn-xingxiao',
   'skills', 'social-monitor', 'start', 'stream', 'stripe', 'terms', 'tickets', 'topics', 'transactions', 'trpc', 'upload', 'users',
