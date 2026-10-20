@@ -187,7 +187,7 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
         const others = [...first].filter(([other]) => other !== index).map(([other, opinion]) => ({ reviewer: reviewerLabel(other), opinion }));
         return { modelId, phase: 'fusion_review' as const, request: fitted(level => debateRequest(skill, context,
           trimmed(first.get(index) ?? null, level), others.map(o => ({ ...o, opinion: trimmed(o.opinion, level)! })),
-          disputedDecisions([...first.values()])), phaseLimit(view, 'debate')) };
+          disputedDecisions([...first.values()]), roleOf(cfg, modelId)), phaseLimit(view, 'debate')) };
       });
     } else {
       const opinions = await finalOpinions(view, src);

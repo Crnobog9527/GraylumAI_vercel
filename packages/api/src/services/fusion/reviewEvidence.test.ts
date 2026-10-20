@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { DECISIONS, parseOpinion } from './hostChecks';
 import { evidenceOf, quotesOverlap } from './reviewEvidence';
 import { mergeOpinions } from './reviewMerge';
-import { reviewerRequest, ROLE_BLOCKS } from './reviewPrompts';
+import { debateRequest, reviewerRequest, ROLE_BLOCKS } from './reviewPrompts';
 
 const sections = ['定位', '受众', '变现'];
 const report = '## 定位\n我想做一个分享生活的账号，每天更新一条视频。\n## 受众\n主要是 25 到 35 岁的上班族女性。\n## 变现\n先涨粉，后面接广告。';
@@ -79,6 +79,14 @@ describe('merging round-1 issues by code', () => {
     expect(merged.issues).toHaveLength(1);
     expect(merged.dropped.map(item => item.reason).sort()).toEqual(['missing_quote', 'quote_not_in_report']);
   });
+  it('keeps a quote-less issue when another seat raised one of the same kind in the same chapter (corroborated)', () => {
+    const merged = mergeOpinions([
+      { reviewer: 'A', opinion: opinionOf({ ...base, severity: 'major' }) },
+      { reviewer: 'B', opinion: opinionOf({ ...base, severity: 'minor' }) },
+    ], context);
+    expect(merged.issues).toHaveLength(2);
+    expect(merged.dropped).toEqual([]);
+  });
   it('counts the severe issues already dropped while each opinion was checked', () => {
     const merged = mergeOpinions([{ reviewer: 'A', opinion: opinionOf({ ...base }, { ...base, kind: 'omission', anchor: '没有' }) }], context);
     expect(merged.raised).toBe(2);
@@ -88,6 +96,12 @@ describe('merging round-1 issues by code', () => {
 });
 
 describe('seat prompts', () => {
+  it('the debate round keeps the seat angle and the quote rules', () => {
+    const skill = { reviewer: '评审说明', summary: '汇总说明', rubric: '评分标准' };
+    const request = debateRequest(skill, { report, materials: [], sections, maxCharacters: 12000, evidence: true }, null, [], [], 'finance');
+    expect(request.instructions).toContain(ROLE_BLOCKS.finance);
+    expect(request.instructions).toContain('anchor');
+  });
   const skill = { reviewer: '评审说明', summary: '汇总说明', rubric: '评分标准' };
   const context = { report, materials: [], sections, maxCharacters: 12000 };
   it('a seat with an angle gets its own block; one without it keeps the plain prompt', () => {

@@ -42,7 +42,11 @@ export function mergeOpinions(opinions: Array<{ reviewer: string; opinion: Opini
     const first = group[0]!.issue;
     const evidence = group.map(item => item.issue.evidence ?? evidenceOf(item.issue, context.report, context.sections).evidence)
       .find(value => value === 'quoted' || value === 'anchored') ?? 'none';
-    if (reviewers.length === 1 && evidence !== 'quoted' && evidence !== 'anchored') {
+    // Another seat raising something in the same chapter of the same kind (same anchor for omissions) corroborates it.
+    const same = (other: Item) => other.issue.location === first.location && other.issue.kind === first.kind
+      && (first.kind !== 'omission' || other.issue.anchor === first.anchor);
+    const corroborated = items.some(other => other.reviewer !== reviewers[0] && same(other));
+    if (reviewers.length === 1 && !corroborated && evidence !== 'quoted' && evidence !== 'anchored') {
       const { reason } = evidenceOf(first, context.report, context.sections);
       dropped.push({ reviewer: reviewers[0]!, section: first.location.replace(/^#+\s*/, '').trim(),
         reason: reason ?? 'missing_quote', severity: first.severity, why: 'single' });

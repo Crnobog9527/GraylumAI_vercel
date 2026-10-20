@@ -113,8 +113,10 @@ export function reviewerRequest(skill: ReviewSkillText, context: ReviewContext, 
 
 /** Round 2, only on disagreement: each reviewer sees the others' round-1 opinions and answers them. */
 export function debateRequest(skill: ReviewSkillText, context: ReviewContext, mine: Opinion | null,
-  others: Array<{ reviewer: string; opinion: Opinion }>, disputed: string[]): FusionRequest {
-  return { instructions: `${skill.reviewer}\n\n${skill.rubric}\n\n${REVIEWER_FORMAT}\n${DEBATE_FORMAT}`,
+  others: Array<{ reviewer: string; opinion: Opinion }>, disputed: string[], role?: ReviewerRole | null): FusionRequest {
+  // The seat keeps its angle and the quote/anchor rules in the debate round (reviews started with the evidence check).
+  const extras = [...(role ? [ROLE_BLOCKS[role]] : []), ...(context.evidence ? [EVIDENCE_FORMAT] : [])].join('\n');
+  return { instructions: `${skill.reviewer}\n\n${skill.rubric}\n\n${REVIEWER_FORMAT}${extras ? `\n${extras}` : ''}\n${DEBATE_FORMAT}`,
     input: JSON.stringify({ report: context.report, materials: context.materials, sections: context.sections,
       mine: mine ? shown(mine) : null, others: others.map(item => ({ reviewer: item.reviewer, ...shown(item.opinion) })),
       // Exactly these pairs must be answered, each once: every other reviewer on every disputed decision.

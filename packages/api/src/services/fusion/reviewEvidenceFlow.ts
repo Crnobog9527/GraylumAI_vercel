@@ -26,13 +26,16 @@ export function evidenceDetail(cfg: EvidenceConfig, view: ReviewView, src: { bod
   outputs: Map<string, { body: string }>): { report?: string; evidence?: unknown } {
   if (!cfg.evidence) return {};
   const report = reportBodyText(src.body);
-  const list: Array<{ reviewer: string; opinion: Opinion }> = [];
+  // The opinions the summary got: each seat's debate answer when it gave one, else its round-1 opinion.
+  const byRound = new Map<number, { round: number; opinion: Opinion }>();
   for (const call of view.calls.filter(c => c.phase === 'fusion_review' && ['usable', 'unjudged_saved'].includes(String(c.verdict)))) {
-    const step = view.steps.find(s => s.groupId === call.groupId);
+    const round = view.steps.find(s => s.groupId === call.groupId)?.round ?? 1;
     const index = cfg.reviewers.indexOf(call.modelId ?? '');
-    const opinion = step?.round === 1 && index >= 0 ? parseOpinion(outputs.get(call.callId)?.body ?? '', { sections: src.sections, report }) : null;
-    if (opinion && !list.some(item => item.reviewer === reviewerLabel(index))) list.push({ reviewer: reviewerLabel(index), opinion });
+    const rules = { sections: src.sections, report, ...(round > 1 ? { debate: true } : {}) };
+    const opinion = index >= 0 ? parseOpinion(outputs.get(call.callId)?.body ?? '', rules) : null;
+    if (opinion && round > (byRound.get(index)?.round ?? 0)) byRound.set(index, { round, opinion });
   }
+  const list = [...byRound].map(([index, item]) => ({ reviewer: reviewerLabel(index), opinion: item.opinion }));
   list.sort((a, b) => a.reviewer.localeCompare(b.reviewer));
   const merge = mergeOpinions(list, { report, sections: src.sections });
   const reasons: Record<EvidenceReason, number> = { ...merge.droppedEarlier };
