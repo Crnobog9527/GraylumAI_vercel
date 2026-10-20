@@ -29,6 +29,7 @@ async function productionFixture(db,profiles,options={}) {
     idempotency_key,balance_before,balance_after) VALUES($1,$2::int,'addition','grant','opening_grant','system',$3,0,$2::int)`,
   [actor,credits,'opening_grant:'+actor]);
   const modelId=randomUUID(),model='prod-local/'+modelId.slice(0,8),pricingHash='a'.repeat(64);
+  const key='local-only-synthetic-openrouter-key';
   await db.query(`INSERT INTO ai_models(id,model_id,name,provider,is_active,config,price_multiplier)
     VALUES($1,$2,'Production local','openrouter',true,$3,$4)`,
   [modelId,model,{pricing:{pricingHash}},options.modelMultiplier??null]);
