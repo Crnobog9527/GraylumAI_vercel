@@ -337,6 +337,10 @@ export async function proxy(request: NextRequest) {
     return withSessionCookies(NextResponse.rewrite(url, { request }), supabaseResponse);
   }
 
+  if (maintenanceModeEnabled && isAdminUser && pathname === '/maintenance') {
+    return NextResponse.redirect(new URL('/admin', request.url));
+  }
+
   // Public site pages stay open, also during maintenance.
   if (isPublicSitePath(pathname)) {
     return supabaseResponse;
@@ -346,10 +350,6 @@ export async function proxy(request: NextRequest) {
     const maintenanceUrl = new URL('/maintenance', request.url);
     maintenanceUrl.searchParams.set('from', `${pathname}${request.nextUrl.search}`);
     return NextResponse.redirect(maintenanceUrl);
-  }
-
-  if (maintenanceModeEnabled && isAdminUser && pathname === '/maintenance') {
-    return NextResponse.redirect(new URL('/admin', request.url));
   }
 
   // Login entry pages and the other public paths open without a session.
