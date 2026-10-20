@@ -72,7 +72,7 @@
   "packages/api/src/services/bill2/openRouterEvidence.ts": {"longLines":2},
   "packages/api/src/services/bill2/openRouterStream.ts": {"longLines":2},
   "packages/api/src/services/bill2/service.ts": {"longLines":6},
-  "packages/api/src/services/billingReconciliation.ts": {"lines":1902,"longLines":5},
+  "packages/api/src/services/billingReconciliation.ts": {"lines":1890,"longLines":4},
   "packages/api/src/services/diagnostics.ts": {"lines":613},
   "packages/api/src/services/membershipEligibility.ts": {"lines":727},
   "packages/api/src/services/opc/service.ts": {"lines":527,"longLines":12},

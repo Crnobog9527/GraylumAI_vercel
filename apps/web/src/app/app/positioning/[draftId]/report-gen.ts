@@ -13,6 +13,10 @@ export const REPORT_ACTION = { start: "生成完整报告", retry: "重新生成
 export const REPORT_WRITING_NOTICE = "正在写报告…";
 export const REPORT_RUNNING_NOTICE = "报告正在生成…";
 export const REPORT_COST_PENDING_NOTICE = "报告已写完，正在核对费用…";
+/** A report this page did not start streaming (a reload, another tab): the server keeps writing it on its own. */
+export const REPORT_REOPENED_NOTICE = "报告还在后台写，刷新后暂时看不到已经写出的部分。写完会自动显示在这里，不会重复扣费。";
+/** The footer entry while the round's report is still being written or waits for credits. */
+export const REPORT_ENTRY_RUNNING = "完整运营策略报告（生成中）";
 export const REPORT_TRUNCATED_NOTICE = "这份报告写到了单次长度上限，在这里截断了，后面的部分没有写出来。截断的报告不能作为正式报告。";
 export const REPORT_INCOMPLETE_NOTICE = "这份报告的结构不完整，不能作为正式报告。";
 export const REPORT_STOPPED_NOTICE = "停止的报告不能作为正式报告。";
@@ -96,6 +100,28 @@ export function reportProgressing(status: Pick<ReportStatus, "state"> | null | u
 }
 export function reportAttachable(status: Pick<ReportStatus, "state"> | null | undefined) {
   return Boolean(status && ATTACHABLE.includes(status.state));
+}
+/** Not finished yet: still written or settled by the server, or paused for credits (BILL-PAYG). */
+export function reportUnfinished(status: Pick<ReportStatus, "state"> | null | undefined) {
+  return Boolean(status && (reportProgressing(status) || ["waiting_credits", "waiting_resume"].includes(status.state)));
+}
+
+/**
+ * When the report dialog opens by itself (REPORT-GEN #716 2026-10-20: a reload during writing lost sight of the
+ * report). Once when the page finds the round's report unfinished, and once when one it saw unfinished ends with
+ * text, so a paid report is never left behind a closed dialog. Never twice for the same reason.
+ */
+export type AutoOpen = { sawUnfinished: boolean; openedUnfinished: boolean; openedFinished: boolean };
+export const AUTO_OPEN_START: AutoOpen = { sawUnfinished: false, openedUnfinished: false, openedFinished: false };
+export function reportAutoOpen(memory: AutoOpen, status: ReportStatus | null | undefined): { memory: AutoOpen; open: boolean } {
+  if (!status) return { memory, open: false };
+  if (reportUnfinished(status)) {
+    const open = !memory.openedUnfinished;
+    return { memory: { ...memory, sawUnfinished: true, openedUnfinished: true }, open };
+  }
+  if (memory.sawUnfinished && !memory.openedFinished && reportView(status).kind === "report")
+    return { memory: { ...memory, openedFinished: true }, open: true };
+  return { memory, open: false };
 }
 
 export type ReportView =

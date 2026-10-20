@@ -91,6 +91,8 @@ function permissionScopedClient(rows: Record<string, Record<string, unknown>[]> 
         },
         eq: () => builder,
         gte: () => builder,
+        range: () => builder,
+        order: () => builder,
         lt: async () => result(),
         limit: async () => result(),
         maybeSingle: async () => ({ data: { value: '2026-01-01T00:00:00.000Z' }, error: null }),
@@ -146,7 +148,7 @@ describe('BILL-1 column SELECT permission contract', () => {
       expect([...used].sort()).toEqual([...columns].sort());
     }
     expect(selections.find((selection) => selection.table === 'credit_transactions')?.columns).toEqual([
-      'amount', 'type', 'ledger_type', 'reason_code', 'counts_as_spend', 'source_type',
+      'id', 'amount', 'type', 'ledger_type', 'reason_code', 'counts_as_spend', 'source_type',
       'description', 'idempotency_key', 'created_at',
     ]);
     const profileColumns = selections.find((selection) => selection.table === 'profiles')?.columns;
