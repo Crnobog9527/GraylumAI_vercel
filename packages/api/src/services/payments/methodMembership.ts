@@ -89,8 +89,8 @@ export async function readMethodMembership(db: SupabaseClient, userId: string, n
   const sold = founderOrders.data.filter(row => row.qualification_state === 'sold').length;
   if (occupied > 50) throw new Error('PAY_WAFFO_FOUNDER_CAPACITY_CONFLICT');
   return { mode, routes,
-    // Card only: the code gate (staging deployment, or R7 bound production with its switch) plus the route switch.
-    checkoutReady: methodCardCheckoutReady(env, routes),
+    // Card only: staging, a test-only exact staging PR preview, or R7 bound production with its switch plus route.
+    checkoutReady: methodCardCheckoutReady(env, routes, undefined, mode),
     founder: { total: 50, sold, reserved: occupied - sold, available: 50 - occupied },
     memberships,
     termsVersion: typeof version === 'string' ? version : null,

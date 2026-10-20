@@ -9,10 +9,12 @@ import { resolveStripeScope } from './stripeCheckoutPersistence';
 import { buildStripeCheckoutRequest, dispatchStripeCheckoutIntent, type StripeCardCheckout } from './stripeCheckoutIntent';
 import { observeUpgradePrior } from './cardUpgrade';
 import { settleBuyerOrders } from './methodOrderSettle';
+import { stripeTestClockPreviewOpen } from './methodCheckoutGate';
 
 type Input = {
   db: SupabaseClient; stripe: Stripe; userId: string; appUrl: string; termsVersion: string;
   purchase: z.infer<typeof methodPurchaseInputSchema>;
+  stripeTestClockCustomerId?: string;
 };
 type Order = { id: string; item_id: string; price_ref_id: string; purchase_snapshot: unknown;
   method_dispatched_at?: string | null; checkout_request?: { providerRequest?: Stripe.Checkout.SessionCreateParams } | null };
@@ -36,6 +38,21 @@ function frozenCoupon(request: Stripe.Checkout.SessionCreateParams) {
   return discounts[0].coupon;
 }
 
+async function assertTestClockCustomer(input: Input, mode: 'test' | 'live') {
+  const customerId = input.stripeTestClockCustomerId;
+  if (!customerId) return;
+  if (mode !== 'test' || !stripeTestClockPreviewOpen(process.env)
+    || input.purchase.itemType !== 'membership_plan' || input.purchase.method !== 'card'
+    || input.purchase.billingCycle === 'one_time') throw new Error('PAY_WAFFO_STEP2_NOT_READY');
+  const customer = await input.stripe.customers.retrieve(customerId);
+  if ('deleted' in customer && customer.deleted) throw new Error('PAY_WAFFO_TEST_CLOCK_CUSTOMER_DENIED');
+  const testClockId = typeof customer.test_clock === 'string' ? customer.test_clock : customer.test_clock?.id;
+  if (customer.id !== customerId || customer.livemode !== false
+    || customer.metadata?.graylum_user_id !== input.userId || !testClockId) {
+    throw new Error('PAY_WAFFO_TEST_CLOCK_CUSTOMER_DENIED');
+  }
+}
+
 function assertSessionMethod(session: Stripe.Checkout.Session, purchase: Input['purchase']) {
   const types = session.payment_method_types;
   const managed = session.managed_payments?.enabled === true;
@@ -51,6 +68,7 @@ export async function createStripeMethodCheckout(input: Input) {
   const { db, stripe, userId, purchase } = input;
   // R7 (0296): the Stripe account decides test or live; every mapping, frozen request and reference below stays in it.
   const scope = await resolveStripeScope(stripe);
+  await assertTestClockCustomer(input, scope.mode);
   const prepare = () => prepareMethodPurchase({ admin: db, userId, purchase,
     merchantNamespace: scope.merchant, paymentMode: scope.mode, termsVersion: input.termsVersion }) as Promise<Order>;
   const order = await prepare().catch(async (error: unknown) => {
@@ -79,18 +97,21 @@ export async function createStripeMethodCheckout(input: Input) {
   // An already dispatched order is recovered from its frozen request, never from the current catalog: the
   // coupon mapping may have rotated or been rolled back since. Only a fresh claim reads the current coupon.
   const dispatched = order.method_dispatched_at ? order.checkout_request?.providerRequest : undefined;
+  const frozenCustomerId = typeof dispatched?.customer === 'string' ? dispatched.customer : undefined;
+  if (dispatched && frozenCustomerId !== input.stripeTestClockCustomerId) throw new Error('PAY_WAFFO_CHECKOUT_UNAVAILABLE');
   const snapshot = isCard && !dispatched ? freezePurchaseSnapshot(order.purchase_snapshot) : null;
   // Only a card subscription can be discounted (0222 first month); the request builder refuses anything else.
   const couponId = snapshot?.item_type === 'membership_plan' && majorToCents(snapshot.discount) !== 0
     ? await currentFirstMonthCoupon(db, scope, order).catch(releaseUnclaimed) : undefined;
   const cardFor = (coupon: string | undefined): StripeCardCheckout | undefined => isCard
-    ? { managedPayments: purchase.method === 'card', ...(coupon ? { couponId: coupon } : {}) } : undefined;
+    ? { managedPayments: purchase.method === 'card', ...(coupon ? { couponId: coupon } : {}),
+      ...(input.stripeTestClockCustomerId ? { testClockCustomerId: input.stripeTestClockCustomerId } : {}) } : undefined;
   // Stripe requires 30 minutes after creation: reserve one minute for dispatch.
   // The database includes all 31 minutes in the frozen upgrade safety cutoff.
   const expiresAt = Math.floor(Date.now() / 1000) + 31 * 60;
   const proposed = dispatched ?? buildStripeCheckoutRequest({ orderId: order.id, userId, snapshot: order.purchase_snapshot,
     priceId: price.data.external_id, productName: 'Membership / Credits', appUrl: input.appUrl, expiresAt, walletMethod,
-    card: cardFor(couponId) });
+    card: cardFor(couponId), testClockCustomerId: input.stripeTestClockCustomerId });
   const claimed = await db.rpc('pay_waffo_claim_checkout', { p_user: userId, p_order: order.id, p_merchant: scope.merchant,
     p_expires: new Date(expiresAt * 1000).toISOString(), p_request: { orderId: order.id, userId, method: purchase.method,
       merchant: scope.merchant, mode: scope.mode, providerRequest: proposed } });

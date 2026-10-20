@@ -25,7 +25,9 @@ export const methodPurchaseInputSchema = z.object(methodPurchaseShape).strict()
 
 /** The checkout request: the purchase plus the browser's optional GA ids (ANALYTICS §3.1). The ids are checked
  * separately and dropped when malformed, never refusing the purchase; they never reach the purchase itself. */
-export const methodCheckoutInputSchema = z.object({ ...methodPurchaseShape, analytics: z.unknown().optional() }).strict()
+export const methodCheckoutInputSchema = z.object({ ...methodPurchaseShape,
+  stripeTestClockCustomerId: z.string().regex(/^cus_[A-Za-z0-9]{6,128}$/).optional(),
+  analytics: z.unknown().optional() }).strict()
   .refine(transitionPaired, 'Transition requires original subscription');
 
 /** Server-only preparation, no provider dispatch. PR-2 supplies the authenticated route and

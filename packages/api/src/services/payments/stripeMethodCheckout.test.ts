@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type Stripe from 'stripe';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ scope: vi.fn(), prepare: vi.fn(), build: vi.fn(), dispatch: vi.fn(), settle: vi.fn() }));
 vi.mock('./methodOrderSettle', () => ({ settleBuyerOrders: mocks.settle }));
 vi.mock('./methodPurchase', () => ({ prepareMethodPurchase: mocks.prepare }));
@@ -32,6 +32,7 @@ function fixture(method: 'card' | 'card_cn', coupon: { external_id: string } | n
   return { input, rpc, eq };
 }
 describe('PAY-STRIPE-MP card checkout adapter', () => {
+  afterEach(() => vi.unstubAllEnvs());
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.scope.mockResolvedValue({ merchant: 'fixture', mode: 'test' });
@@ -51,6 +52,48 @@ describe('PAY-STRIPE-MP card checkout adapter', () => {
       expect(f.eq).toHaveBeenCalledWith('membership_plan_id', plan);
       expect(f.eq).toHaveBeenCalledWith('is_current', true);
     }
+  });
+  it('accepts only a user-owned, test-clock Stripe customer on the exact staging preview', async () => {
+    for (const [key, value] of Object.entries({ VERCEL: '1', VERCEL_ENV: 'preview',
+      VERCEL_PROJECT_ID: 'prj_N9BO48YSAYBQ5Nrvzd3WA9wrQEpC', VERCEL_PROJECT_PRODUCTION_URL: 'auth-staging.graylum.com',
+      VERCEL_GIT_COMMIT_REF: 'codex/stripe-test-clock-checkout', VERCEL_GIT_REPO_OWNER: 'Crnobog9527',
+      VERCEL_GIT_REPO_SLUG: 'GraylumAI_vercel', STRIPE_TEST_CLOCK_CHECKOUT_ENABLED: 'true',
+      V3_RUNTIME_STAGING_PROJECT_ID: 'prj_N9BO48YSAYBQ5Nrvzd3WA9wrQEpC',
+      V3_RUNTIME_STAGING_DATABASE_HOST: 'staging.supabase.co', NEXT_PUBLIC_SUPABASE_URL: 'https://staging.supabase.co' })) {
+      vi.stubEnv(key, value);
+    }
+    const f = fixture('card');
+    const customerId = 'cus_clockcustomer123';
+    const retrieve = vi.fn().mockResolvedValue({ id: customerId, object: 'customer', livemode: false,
+      metadata: { graylum_user_id: id }, test_clock: 'clock_fixture' });
+    const checkoutInput = { ...f.input, stripeTestClockCustomerId: customerId };
+    checkoutInput.stripe = { customers: { retrieve } } as unknown as Stripe;
+    f.rpc.mockResolvedValue({ data: { dispatch: true, request: { providerRequest: { expires_at: 9999999999,
+      discounts: [{ coupon: 'coupon_first' }], customer: customerId } } }, error: null });
+
+    await expect(createStripeCardCheckout(checkoutInput)).resolves.toMatchObject({ state: 'open' });
+    expect(retrieve).toHaveBeenCalledWith(customerId);
+    expect(mocks.build).toHaveBeenCalledWith(expect.objectContaining({ testClockCustomerId: customerId,
+      card: expect.objectContaining({ testClockCustomerId: customerId }) }));
+  });
+  it('refuses a Stripe test customer owned by another account before reserving an order', async () => {
+    for (const [key, value] of Object.entries({ VERCEL: '1', VERCEL_ENV: 'preview',
+      VERCEL_PROJECT_ID: 'prj_N9BO48YSAYBQ5Nrvzd3WA9wrQEpC', VERCEL_PROJECT_PRODUCTION_URL: 'auth-staging.graylum.com',
+      VERCEL_GIT_COMMIT_REF: 'codex/stripe-test-clock-checkout', VERCEL_GIT_REPO_OWNER: 'Crnobog9527',
+      VERCEL_GIT_REPO_SLUG: 'GraylumAI_vercel', STRIPE_TEST_CLOCK_CHECKOUT_ENABLED: 'true',
+      V3_RUNTIME_STAGING_PROJECT_ID: 'prj_N9BO48YSAYBQ5Nrvzd3WA9wrQEpC',
+      V3_RUNTIME_STAGING_DATABASE_HOST: 'staging.supabase.co', NEXT_PUBLIC_SUPABASE_URL: 'https://staging.supabase.co' })) {
+      vi.stubEnv(key, value);
+    }
+    const f = fixture('card');
+    const retrieve = vi.fn().mockResolvedValue({ id: 'cus_clockcustomer123', object: 'customer', livemode: false,
+      metadata: { graylum_user_id: 'another-user' }, test_clock: 'clock_fixture' });
+    const checkoutInput = { ...f.input, stripeTestClockCustomerId: 'cus_clockcustomer123' };
+    checkoutInput.stripe = { customers: { retrieve } } as unknown as Stripe;
+
+    await expect(createStripeCardCheckout(checkoutInput)).rejects.toThrow('PAY_WAFFO_TEST_CLOCK_CUSTOMER_DENIED');
+    expect(mocks.prepare).not.toHaveBeenCalled();
+    expect(f.rpc).not.toHaveBeenCalled();
   });
   it('refuses without a current coupon before claiming or calling Stripe, releasing the never-claimed order', async () => {
     const f = fixture('card', null);

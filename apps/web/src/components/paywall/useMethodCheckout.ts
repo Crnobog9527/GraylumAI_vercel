@@ -42,8 +42,11 @@ export function useMethodCheckout() {
     try {
       // GA ids only with statistics consent (ANALYTICS §3.1); the server keeps them beside the order, never in it.
       const analytics = await checkoutAnalyticsIds();
+      const customerId = new URLSearchParams(window.location.search).get('stripe_test_clock_customer');
+      const stripeTestClockCustomerId = customerId && /^cus_[A-Za-z0-9]{6,128}$/.test(customerId) ? customerId : undefined;
       const result = await mutation.mutateAsync({ ...purchase, method, routingVersion: entry.routes.version,
-        acceptedTerms: true, termsVersion: acceptedTermsVersion, ...(analytics ? { analytics } : {}) });
+        acceptedTerms: true, termsVersion: acceptedTermsVersion,
+        ...(stripeTestClockCustomerId ? { stripeTestClockCustomerId } : {}), ...(analytics ? { analytics } : {}) });
       if (result.state === 'open' && isStripeCheckoutUrl(result.url)) {
         setRedirecting(true);
         // Statistics only (catalog item and pre-tax value, no order ID); a no-op without consent.
