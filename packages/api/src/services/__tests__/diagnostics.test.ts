@@ -219,9 +219,11 @@ describe('billing diagnostic service uses only real read paths', () => {
     const from = vi.fn((table: string) => {
       if (table === 'diagnostic_results') return { insert: async () => { writes.push(table); return { error: null }; } };
       const response = { data: mode === 'mismatch' && table === 'ai_usage_logs' ? [{ status: 'success' }] : [],
+        count: 0,
         error: mode === 'query failure' && table === 'billing_history' ? { message: 'synthetic read failure' } : null };
       const builder = {
         select() { return this; }, eq() { return this; }, gte() { return this; }, lt() { return this; },
+        range() { return this; }, order() { return this; },
         limit() { return Promise.resolve(response); },
         maybeSingle() { return Promise.resolve({ data: { value: '2026-01-01T00:00:00Z' }, error: null }); },
         then(resolve: (value: unknown) => unknown) { return Promise.resolve(response).then(resolve); },
