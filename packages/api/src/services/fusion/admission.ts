@@ -25,7 +25,7 @@ const admitted = z.object({ groupId: uuid, replayed: z.boolean(), runs: z.array(
   fusion: z.object({ index: z.number().int().min(0), phase: z.enum(['fusion_review', 'fusion_summary']),
     body: z.string().min(1), call: frozenCallSchema }).strict() }).strict()).min(1).max(16) }).strict();
 /** Exact SQL refusals only; anything else is reported as unavailable, never with database detail. */
-const refusals = new Set(['FUSION_REVIEW_DISABLED', 'FUSION_MEMBERSHIP_REQUIRED', 'REPORT_MEMBERSHIP_REQUIRED',
+const refusals = new Set(['OPC_BUSINESS_ARCHIVED', 'FUSION_REVIEW_DISABLED', 'FUSION_MEMBERSHIP_REQUIRED', 'REPORT_MEMBERSHIP_REQUIRED',
   'REPORT_ENTITLEMENTS_UNAVAILABLE', 'FUSION_MODEL_DENIED', 'FUSION_BUDGET_EXCEEDED', 'FUSION_GROUP_INVALID',
   'FUSION_GROUP_CONFLICT', 'FUSION_GROUP_DENIED', 'BILL2_REQUEST_CONFLICT', 'RUNTIME_TEST_WINDOW_DENIED',
   'RUNTIME_TEST_MODEL_DENIED', 'RUNTIME_PRODUCTION_DENIED', 'RUNTIME_PRODUCTION_MODEL_DENIED']);

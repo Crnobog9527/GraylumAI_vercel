@@ -20,7 +20,9 @@ vi.mock('@/trpc/client', () => ({
   }) }) }),
 }));
 vi.mock('next/navigation', () => ({ useParams: () => ({ draftId: 'draft' }), useRouter: () => ({ push() {}, replace() {} }) }));
-vi.mock('../readonly-draft-view', () => ({ ReadonlyDraftView: () => <p>READONLY_VIEW</p> }));
+// The archive gate is tested on its own (draft-archive-gate.test.tsx); here it only marks that it wraps the page.
+vi.mock('../readonly-draft-view', () => ({ ReadonlyDraftView: () => <p>READONLY_VIEW</p>,
+  RouteDraftArchiveGate: ({ children }: { children: React.ReactNode }) => <section data-archive-gate="">{children}</section> }));
 vi.mock('@/components/opc/workspace-frame', () => ({ WorkspaceFrame: () => <p>TOPICS_WORKSPACE</p> }));
 
 describe('topics page of a draft whose conversation was deleted', () => {
@@ -29,6 +31,8 @@ describe('topics page of a draft whose conversation was deleted', () => {
     const html = renderToStaticMarkup(<Page/>);
     expect(html).toContain('READONLY_VIEW');
     expect(html).not.toContain('TOPICS_WORKSPACE');
+    // PAYWALL: the whole topics page sits behind the profile-archive gate.
+    expect(html).toMatch(/^<section data-archive-gate="">/);
     // Nothing of the topic conversation is fetched or polled behind the read-only view.
     expect(enabled).toMatchObject({ 'opc.topicWorkspace': false, 'runtime.view': false, 'opc.topicDraft': false });
   }, 60_000); // The page module is large; its first import alone can take several seconds.

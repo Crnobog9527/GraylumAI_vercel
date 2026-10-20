@@ -38,8 +38,8 @@ export async function beginPaygExecution(input: {
     if (input.resume.executionId !== input.executionId || input.resume.cursor !== execution.cursor
       || input.resume.epoch !== execution.epoch) throw new StagingAccessError('RUNTIME_RESUME_CONFLICT');
     if (execution.remainingCalls === 0) {
-      // Exhaustion is terminal maintenance, not another model attempt. SQL
-      // checks cursor/epoch and settled calls before using existing cancellation.
+      // Exhaustion grants replay only. SQL checks cursor/epoch, source revisions and
+      // settled calls; live=false can finish saved receipts, never mint another call.
       await input.actor();
       return {execution:await input.read('payg_resume', {cursor:input.resume.cursor,epoch:input.resume.epoch}),
         resumedGate:false};

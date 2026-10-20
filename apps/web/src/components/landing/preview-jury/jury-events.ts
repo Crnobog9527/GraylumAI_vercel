@@ -93,6 +93,9 @@ export type JuryDetail = {
   adoption: AdoptRecorded | null;
   /** The review has ended and waits for the chapter choices; the draft is not locked meanwhile. */
   awaitingChoice: boolean;
+  /** What the server's evidence check held back (reviews started with it); absent on the demo and older reviews. */
+  evidence?: { checked: boolean; raised?: number; handedOver?: number; nothingPassed?: boolean;
+    dropped?: { missingQuote: number; quoteNotInReport: number; anchorMissing: number } };
 };
 
 /* ---- fusionReview.panel(): display names set by an admin, unrelated to the models behind the seats ---- */

@@ -16,6 +16,7 @@ import {readNativeRuntimeView} from './nativeView';
 import { runtimeExecutor } from './execute';
 import './promptCache.integration';
 import './payg.integration';
+import './reliability.integration';
 import './nativeStopView.integration';
 import {registerReportTests} from '../report/report.integration';
 import {registerPaygHostTests} from './paygHost.integration';

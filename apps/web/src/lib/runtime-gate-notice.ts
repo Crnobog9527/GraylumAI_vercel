@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { runtimeGateMessages } from '../../../../packages/api/src/shared/runtimeGateMessages';
+import { isProfileArchivedError, PROFILE_ARCHIVE_TEXT } from '@/components/opc/profile-archive/profile-archive';
 
 /**
  * Fixed notices for the Runtime new-work gate (RATE-LIMIT). Only these four
@@ -45,6 +46,8 @@ export function gateResultNotice(unavailable: unknown): string | null {
  * match to the admission procedures of the calling page.
  */
 export function gateAdmissionNotice(cause: unknown, paths: readonly string[]): string | null {
+  // PAYWALL: an archived positioning profile refuses every new turn, on any page (Owner 2026-10-20).
+  if (isProfileArchivedError(cause)) return PROFILE_ARCHIVE_TEXT.archivedRefusal;
   if (!(cause instanceof Error) || !('data' in cause) || !cause.data || typeof cause.data !== 'object') return null;
   const data = cause.data as { code?: unknown; path?: unknown };
   if (!paths.includes(String(data.path))) return null;

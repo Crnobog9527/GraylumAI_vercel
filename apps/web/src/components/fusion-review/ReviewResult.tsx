@@ -10,7 +10,7 @@ import type { AdoptActions } from '@/components/landing/preview-jury/use-adoptio
 import { JuryReader } from '@/components/landing/preview-jury/JuryReader';
 import { JuryRecords } from '@/components/landing/preview-jury/JuryRecords';
 import layout from '@/components/landing/preview-jury/jury-layout.module.css';
-import { endedNotice, feeText, type ReviewFee } from './review-adapter';
+import { endedNotice, evidenceText, feeText, type ReviewFee } from './review-adapter';
 import styles from './review-page.module.css';
 
 /**
@@ -52,10 +52,12 @@ export function ReviewResult({ draftId, detail, source, names, fee, onChanged }:
   };
   const notice = endedNotice(detail.state, detail.outcome);
   const charge = feeText(fee);
+  const held = evidenceText(detail.evidence);
   return (
     <>
       {notice ? <p className={styles.notice} role="status">{notice}</p> : null}
       {charge ? <p className={styles.notice} role="status">{charge}</p> : null}
+      {held ? <p className={styles.notice} role="status">{held}</p> : null}
       <div className={layout.results}>
         <JuryReader detail={detail} names={names} source={source} actions={actions} />
         <JuryRecords detail={detail} names={names} arrived={arrived} live={false} following="S" picked={picked}

@@ -9,6 +9,8 @@ import { POSITIONING_REQUIRED_MESSAGE } from '../../shared/positioningGate';
 import { CONTENT_SOURCE_MESSAGES } from '../../shared/contentSourceMessages';
 
 const failures = {
+  OPC_BUSINESS_ARCHIVED: ['FORBIDDEN', 'OPC_BUSINESS_ARCHIVED：这个定位档案已归档，只能查看和导出。'],
+  OPC_BUSINESS_BUSY: ['CONFLICT', 'OPC_BUSINESS_BUSY：这个定位档案正在处理，请稍后归档。'],
   CONTENT_ERASED: ['PRECONDITION_FAILED', 'CONTENT_ERASED'],
   RUNTIME_PAYG_CONFIG_UNAVAILABLE: ['SERVICE_UNAVAILABLE', '计费准入设置暂不可用，请稍后重试。'],
   RUNTIME_PAYG_PROFILE_REQUIRED: ['PRECONDITION_FAILED', RUNTIME_PAYG_PROFILE_REQUIRED_MESSAGE],
@@ -88,6 +90,8 @@ function databaseFailure(error: {code?: string}): StagingAccessError {
   return new StagingAccessError(unavailable ? 'RUNTIME_STAGING_SERVICE_UNAVAILABLE' : 'RUNTIME_STAGING_INTERNAL_ERROR', code);
 }
 export function stagingRpcFailure(error: { code?: string; message?: string }, denial?: string, reason?: StagingFailure): never {
+  if (error.code === 'P0001' && error.message === 'OPC_BUSINESS_ARCHIVED')
+    throw new StagingAccessError('OPC_BUSINESS_ARCHIVED');
   if (error.code === '42501' && error.message === 'CONTENT_ERASED') throw new StagingAccessError('CONTENT_ERASED');
   if (reason && denial && error.code === '42501' && error.message === denial) throw new StagingAccessError(reason);
   throw databaseFailure(error);
@@ -97,6 +101,7 @@ export function stagingRpcFailure(error: { code?: string; message?: string }, de
 export function stagingProcedureError(cause: unknown, path: string): TRPCError {
   const original = cause instanceof TRPCError ? cause.cause : cause;
   const failure = original instanceof StagingAccessError ? original
+    : original instanceof Error && original.message === 'OPC_BUSINESS_ARCHIVED' ? new StagingAccessError('OPC_BUSINESS_ARCHIVED')
     : original instanceof DatabaseReadError ? databaseFailure({code: original.databaseCode}) : null;
   if (!failure && cause instanceof TRPCError && cause.code !== 'INTERNAL_SERVER_ERROR') return cause;
   const diagnosticId = randomUUID();

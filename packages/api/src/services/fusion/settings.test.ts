@@ -10,9 +10,9 @@ const db = (value: unknown, error: unknown = null) => ({ from: () => ({ select: 
   maybeSingle: async () => ({ data: value === undefined ? null : { value }, error }) }) }) }) }) as unknown as SupabaseClient;
 
 describe('Fusion settings', () => {
-  it('defaults to both modes off, 3 reviewers + 1 summary, at most 2 rounds', async () => {
+  it('defaults to both modes off, 3 reviewers + 1 summary, one round by default', async () => {
     expect(await readFusionSettings(db(undefined))).toEqual(DEFAULT_FUSION_SETTINGS);
-    expect(DEFAULT_FUSION_SETTINGS.review).toMatchObject({ enabled: false, maxRounds: 2, dispatchMinutes: 10, maxBudgetUsd: null });
+    expect(DEFAULT_FUSION_SETTINGS.review).toMatchObject({ enabled: false, maxRounds: 1, dispatchMinutes: 10, maxBudgetUsd: null });
     expect(DEFAULT_FUSION_SETTINGS.compare.enabled).toBe(false);
   });
   it('fixed price per review: 1500 credits by default, also for a stored row saved before the field existed (0294)', async () => {
@@ -83,6 +83,14 @@ describe('Fusion compare settings (FUSION-COMPARE §3.3)', () => {
     // Disabled keeps its structure rules but needs no models.
     expect(fusionSettings.safeParse({ ...on, compare: { ...on.compare, enabled: false, allowedModelIds: [], defaultModelIds: [] } }).success).toBe(true);
     expect(fusionSettings.safeParse({ ...on, compare: { ...on.compare, answerOutputTokens: 100 } }).success).toBe(false);
+  });
+  it('seat angles: all or none, one each, bound to the reviewers actually configured', () => {
+    const ids = enabled.review.reviewerModelIds;
+    const roles = { [ids[0]!]: 'finance', [ids[1]!]: 'evidence', [ids[2]!]: 'execution' };
+    expect(fusionSettings.parse({ ...enabled, review: { ...enabled.review, reviewerRoles: roles } }).review.reviewerRoles).toEqual(roles);
+    expect(fusionSettings.parse(enabled).review.reviewerRoles).toEqual({});
+    expect(fusionSettings.safeParse({ ...enabled, review: { ...enabled.review, reviewerRoles: { [ids[0]!]: 'finance' } } }).success).toBe(false);
+    expect(fusionSettings.safeParse({ ...enabled, review: { ...enabled.review, reviewerRoles: { ...roles, [ids[2]!]: 'finance' } } }).success).toBe(false);
   });
 });
 

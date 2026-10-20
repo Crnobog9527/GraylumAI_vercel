@@ -22,7 +22,7 @@ import { WorkComposer, useFreeConversation } from '@/components/opc/work-compose
 import { WorkspaceFrame } from '@/components/opc/workspace-frame';
 import composerStyles from '@/components/opc/work-composer.module.css';
 import topicStyles from './topic-candidates.module.css';
-import { ReadonlyDraftView } from '../readonly-draft-view';
+import { ReadonlyDraftView, RouteDraftArchiveGate } from '../readonly-draft-view';
 import { trpc } from '@/trpc/client';
 import { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics } from '@repo/api/src/shared/opcRequests';
 import { consentedTopicIds } from './adoption-consent';
@@ -113,8 +113,7 @@ function parseAdoption(text: string | null | undefined): string[] | null {
   }
   return null;
 }
-
-export default function TopicWorkspacePage() {
+function TopicWorkspaceContent() {
   const params = useParams<{ draftId: string }>();
   const draftId = params?.draftId ?? '';
   const profile=trpc.user.getUserProfile.useQuery();
@@ -606,3 +605,4 @@ export default function TopicWorkspacePage() {
     </main>{infoOpen&&<div className={topicStyles.infoBackdrop} onMouseDown={event=>{if(event.target===event.currentTarget)setInfoOpen(false);}}><section role="dialog" aria-modal="true" aria-label="工作信息" className={topicStyles.infoDialog}><header><h2>工作信息</h2><button type="button" aria-label="关闭工作信息" onClick={()=>setInfoOpen(false)}>×</button></header><p>本工作绑定正式定位 v{workspace.data?.sourceVersion??'—'} 与原选题方法修订。查看不会生成或采用。</p><div><Link href={`/app/positioning/${draftId}`}>查看原定位</Link><Link href={'/app/library?returnTo='+encodeURIComponent('/app/positioning/'+draftId+'/topics')}>打开资料库</Link></div></section></div>}</WorkspaceFrame>
   );
 }
+export default function TopicWorkspacePage() { return <RouteDraftArchiveGate><TopicWorkspaceContent/></RouteDraftArchiveGate>; }
