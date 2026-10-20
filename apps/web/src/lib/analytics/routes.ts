@@ -50,6 +50,8 @@ const APP_TEMPLATES = [
   // Public content pages whose address carries a page name, not a record ID (the pages themselves are in PUBLIC_PAGES).
   '/features/[slug]',
   '/blog/[slug]',
+  // A missing /zh-tw page answered by the Taiwan 404 (the address is never reported, only this template).
+  '/zh-tw/[...missing]',
   '/app/workbench/agent-first-preview',
   '/app/workbench/marketplace',
   '/app/workbench/search',
