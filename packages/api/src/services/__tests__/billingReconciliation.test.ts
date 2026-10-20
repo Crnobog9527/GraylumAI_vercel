@@ -13,8 +13,6 @@ function createMockSupabase(data: {
   billingHistory?: Array<Record<string, unknown>>;
   creditTransactions?: Array<Record<string, unknown>>;
   paymentOrders?: Array<Record<string, unknown>>;
-  reportFees?: Array<Record<string, unknown>>;
-  fusionReviewFees?: Array<Record<string, unknown>>;
   launchBaselineAt?: unknown;
   researchTotals?: {count:number;credits:number};
 }) {
@@ -24,27 +22,22 @@ function createMockSupabase(data: {
     billing_history: data.billingHistory ?? [],
     credit_transactions: data.creditTransactions ?? [],
     payment_orders: data.paymentOrders ?? [],
-    report_fees: data.reportFees ?? [],
-    fusion_review_fees: data.fusionReviewFees ?? [],
   };
 
   const builder = {
     select: () => builder,
     eq: () => builder,
     gte: () => builder,
-    lt: async () => ({ data: tables[currentTable] ?? [], error: null }),
+    range: (from: number, to: number) => { currentRange = [from, to]; return builder; },
+    order: () => builder,
+    lt: async () => ({ data: currentRange ? (tables[currentTable] ?? []).slice(currentRange[0], currentRange[1] + 1)
+      : tables[currentTable] ?? [], count: (tables[currentTable] ?? []).length, error: null }),
   };
-  const totalCharged = (rows: Array<Record<string, unknown>> = []) => rows
-    .filter((row) => row.state === 'charged')
-    .reduce((total, row) => total + Number(row.charged_credits ?? 0), 0);
-
   let currentTable = '';
+  let currentRange: [number, number] | null = null;
 
   return {
-    rpc: async (name: string) => name === 'research_billing_summary'
-      ? { data: data.researchTotals ?? { count: 0, credits: 0 }, error: null }
-      : { data: { reportFixedPriceCredits: totalCharged(data.reportFees),
-        fusionReviewFixedPriceCredits: totalCharged(data.fusionReviewFees) }, error: null },
+    rpc: async () => ({ data: data.researchTotals ?? { count: 0, credits: 0 }, error: null }),
     from: (table: string) => {
       if (table === 'system_settings') {
         const settingsBuilder = {
@@ -60,6 +53,7 @@ function createMockSupabase(data: {
         return settingsBuilder;
       }
       currentTable = table;
+      currentRange = null;
       return builder;
     },
   } as any;
@@ -149,17 +143,18 @@ describe('runDailyBillingReconciliation', () => {
       aiUsageLogs: [{ status: 'success' }],
       researchTotals: { count: 1, credits: 359 },
       billingHistory: [{ operation_type: 'settle', amount: -9859 }],
-      creditTransactions: [{ type: 'consumption', ledger_type: 'spend', counts_as_spend: true, amount: -9859,
-        description: 'AI call consumption' }],
-      reportFees: [
-        { state: 'charged', charged_credits: 500 },
-        { state: 'charged', charged_credits: 500 },
-        { state: 'refunded', charged_credits: 0 },
-        { state: 'held', charged_credits: null },
-      ],
-      fusionReviewFees: [
-        ...Array.from({ length: 5 }, () => ({ state: 'charged', charged_credits: 1500 })),
-        { state: 'refunded', charged_credits: 0 },
+      creditTransactions: [
+        { type: 'consumption', ledger_type: 'spend', reason_code: 'bill2_spend', counts_as_spend: true,
+          source_type: 'ai_task', idempotency_key: 'bill2:00000000-0000-4000-8000-000000000001:spend', amount: -1359 },
+        { type: 'consumption', ledger_type: 'spend', reason_code: 'bill2_spend', counts_as_spend: true,
+          source_type: 'ai_task', idempotency_key: 'report:00000000-0000-4000-8000-000000000010:spend', amount: -500 },
+        { type: 'consumption', ledger_type: 'spend', reason_code: 'bill2_spend', counts_as_spend: true,
+          source_type: 'ai_task', idempotency_key: 'report:00000000-0000-4000-8000-000000000011:spend', amount: -500 },
+        ...Array.from({ length: 5 }, (_, index) => ({ type: 'consumption', ledger_type: 'spend',
+          reason_code: 'bill2_spend', counts_as_spend: true, source_type: 'ai_task',
+          idempotency_key: `fusion-review:00000000-0000-4000-8000-00000000002${index}:spend`, amount: -1500 })),
+        { type: 'adjustment', ledger_type: 'adjustment', reason_code: 'bill2_release', source_type: 'ai_task',
+          idempotency_key: 'report:00000000-0000-4000-8000-000000000012:release', amount: 500 },
       ],
     }), new Date('2026-03-10T00:00:00Z'));
 
@@ -167,6 +162,26 @@ describe('runDailyBillingReconciliation', () => {
     expect(result.success).toBe(true);
     expect(result.summary).toMatchObject({ tokenStatsCredits: 1000, researchSettledCredits: 359,
       reportFixedPriceCredits: 1000, fusionReviewFixedPriceCredits: 7500, settledCredits: 9859 });
+  });
+
+  it('fails closed when a fixed-price spend key has inconsistent ledger facts', async () => {
+    await expect(runDailyBillingReconciliation(createMockSupabase({
+      creditTransactions: [{ type: 'consumption', ledger_type: 'spend', amount: -500,
+        source_type: 'ai_task', idempotency_key: 'report:00000000-0000-4000-8000-000000000010:spend' }],
+    }), new Date('2026-03-10T00:00:00Z'))).rejects.toThrow('Invalid fixed price reconciliation ledger');
+  });
+
+  it('reads every daily credit transaction when the ledger spans multiple API pages', async () => {
+    const rows = Array.from({ length: 1001 }, (_, index) => ({ type: 'consumption', ledger_type: 'spend',
+      reason_code: 'bill2_spend', counts_as_spend: true, source_type: 'ai_task',
+      idempotency_key: `report:00000000-0000-4000-8000-${String(index).padStart(12, '0')}:spend`, amount: -500 }));
+    const result = await runDailyBillingReconciliation(createMockSupabase({
+      billingHistory: [{ operation_type: 'settle', amount: -500500 }], creditTransactions: rows,
+    }), new Date('2026-03-10T00:00:00Z'));
+
+    expect(result.success).toBe(true);
+    expect(result.summary.reportFixedPriceCredits).toBe(500500);
+    expect(result.summary.settledCredits).toBe(500500);
   });
 
   it('reports mismatches when payment fulfillment or credit settlement drift', async () => {
