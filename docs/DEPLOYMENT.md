@@ -38,7 +38,7 @@
 | `NEXT_PUBLIC_SENTRY_DSN` | Sentry 错误上报；`apps/web/sentry.server.config.ts` 等 |
 | `SENTRY_ENVIRONMENT`、`APP_ENV`、`NEXT_PUBLIC_APP_ENV` | Sentry 环境标签依次回退；`apps/web/sentry.server.config.ts`、`sentry.edge.config.ts`、`src/instrumentation-client.ts` |
 | `LOG_LEVEL` | 服务端日志级别；`packages/api/src/lib/logger.ts` |
-| `OPENROUTER_API_KEY` | 当前模型提供商密钥入口；`packages/api/src/services/providerUtils.ts` |
+| 后台第三方密钥 | OpenRouter、Post for Me、TikHub、Parallel、Firecrawl 与 Resend 密钥由管理员在后台维护，并存入 Supabase Vault |
 | `V3_RUNTIME_STAGING_ENABLED` | Runtime staging 入口开关之一；`packages/api/src/services/runtime/stagingEnvironment.ts`。设为 `true` 仍须通过项目、数据库和窗口校验；不代表生产配置或调用授权 |
 
 限流实现没有读取 `KV_*`。`UPSTASH_REDIS_REST_URL` 和 `UPSTASH_REDIS_REST_TOKEN` 必须配对配置：

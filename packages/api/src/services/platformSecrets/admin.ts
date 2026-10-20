@@ -3,8 +3,8 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { logger } from '../../lib/logger';
-import { envFallbackValue, invalidatePlatformSecret } from './reader';
-import { lastFour, PLATFORM_SECRET_ENV_FALLBACK, PLATFORM_SECRET_SLOTS, validPlatformSecret } from './slots';
+import { invalidatePlatformSecret } from './reader';
+import { PLATFORM_SECRET_SLOTS, validPlatformSecret } from './slots';
 
 /**
  * Admin side of ADMIN-SECRETS: write-only. Nothing here reads or returns a stored value; the
@@ -47,10 +47,8 @@ function mapWriteError(code: string | undefined, action: string): never {
   return unavailable();
 }
 
-/** Admin view: per slot, whether it is filled, its last four characters, who and when, and the
- * transition fallback (whether the environment variable exists and its last four characters). */
-export async function platformSecretsView(db: SupabaseClient,
-  env: Record<string, string | undefined> = process.env, committedStatus?: unknown) {
+/** Admin view: per slot, whether it is filled, its last four characters, who and when. */
+export async function platformSecretsView(db: SupabaseClient, committedStatus?: unknown) {
   let rows: z.infer<typeof statusSchema>;
   try {
     const { data, error } = committedStatus === undefined
@@ -78,8 +76,6 @@ export async function platformSecretsView(db: SupabaseClient,
   return {
     statusRefreshFailed,
     slots: rows.map(row => {
-      const envName = PLATFORM_SECRET_ENV_FALLBACK[row.slot];
-      const envValue = envFallbackValue(row.slot, env);
       return {
         slot: row.slot,
         configured: row.configured,
@@ -87,9 +83,7 @@ export async function platformSecretsView(db: SupabaseClient,
         revision: row.revision,
         updatedAt: row.updatedAt,
         updatedByEmail: row.updatedBy ? emails.get(row.updatedBy) ?? null : null,
-        envFallback: envName ? { name: envName, present: envValue !== null,
-          last4: envValue ? lastFour(envValue) : null } : null,
-        source: row.configured ? 'admin' as const : envValue ? 'env' as const : 'none' as const,
+        source: row.configured ? 'admin' as const : 'none' as const,
       };
     }),
   };
@@ -106,7 +100,7 @@ export async function setPlatformSecret(db: SupabaseClient, actorId: string,
   if (result.error) return mapWriteError(result.error.code, 'set');
   invalidatePlatformSecret(slot);
   logger.info('security', 'platform_secret_saved', { slot, actorId });
-  return platformSecretsView(db, process.env, result.data);
+  return platformSecretsView(db, result.data);
 }
 
 export async function clearPlatformSecret(db: SupabaseClient, actorId: string,
@@ -119,5 +113,5 @@ export async function clearPlatformSecret(db: SupabaseClient, actorId: string,
   if (result.error) return mapWriteError(result.error.code, 'clear');
   invalidatePlatformSecret(slot);
   logger.info('security', 'platform_secret_cleared', { slot, actorId });
-  return platformSecretsView(db, process.env, result.data);
+  return platformSecretsView(db, result.data);
 }

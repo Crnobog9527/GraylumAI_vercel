@@ -118,7 +118,7 @@ try {
   cases.push(...await stripeMpRenewalCases({admin,service,connect}));
   cases.push(...await membershipExpiryStripeCases({admin,service}));
   cases.push(...await stripeMpExternalRefundCases({admin,service,connect}));
-  cases.push(...await stripeMpUpgradeCases({admin,service}));
+  cases.push(...await stripeMpUpgradeCases({admin,service,connect}));
   cases.push(...await stripeMpPackRefundCases({admin,service}));
   cases.push(...await stripeMpSubscriptionRefundCases({admin,service}));
   cases.push(...await stripeMpLiveCases({admin,service}));

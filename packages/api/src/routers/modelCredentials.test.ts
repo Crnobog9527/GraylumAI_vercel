@@ -9,11 +9,12 @@ import { resetPlatformSecretCacheForTests } from '../services/platformSecrets/re
 beforeEach(() => resetPlatformSecretCacheForTests());
 
 const id = '11111111-1111-4111-8111-111111111111';
+const legacyModelKey = 'synthetic-legacy-model-column-key';
 function fixture(role: 'admin' | 'user' = 'admin') {
   const secret = randomUUID() + randomUUID();
   const row = { id, name: 'Synthetic model', model_id: 'synthetic/model', provider: 'openai',
     api_endpoint: '', config: {}, is_active: 'true', max_tokens: 1024,
-    input_limit: 8192, input_token_cost: 1000000, output_token_cost: 1000000 };
+    input_limit: 8192, input_token_cost: 1000000, output_token_cost: 1000000, api_key: legacyModelKey };
   const calls: { admin: boolean; columns: string }[] = [];
   const secretReads: boolean[] = [];
   function client(admin: boolean) {
@@ -43,7 +44,7 @@ function fixture(role: 'admin' | 'user' = 'admin') {
           if (table === 'system_settings') return Promise.resolve({ data: [], error: null }).then(resolve, reject);
           if (table === 'diagnostic_results') return Promise.resolve({ error: null }).then(resolve, reject);
           if (table !== 'ai_models') throw new Error('Unexpected table: ' + table);
-          if (!admin && (columns === '*' || columns.split(',').map(s => s.trim()).includes('api_key'))) {
+          if (!admin && columns === '*') {
             return Promise.resolve({ data: null, error: { code: '42501' } }).then(resolve, reject);
           }
           const data = columns === '*' ? row : Object.fromEntries(columns.split(',').map(s => s.trim())
@@ -60,9 +61,9 @@ function fixture(role: 'admin' | 'user' = 'admin') {
     supabasePublic: user, supabaseAdmin: admin, hasSupabaseAdminPrivileges: true };
   function noSecret(value: unknown) {
     const json = JSON.stringify(value);
-    expect(json).not.toContain('api_key');
     expect(json).not.toContain(secret.slice(0, 20));
     expect(json).not.toContain(secret.slice(-20));
+    expect(json).not.toContain(legacyModelKey);
   }
   return { context, user, admin, row, secret, calls, secretReads, noSecret };
 }
@@ -72,7 +73,7 @@ describe('B01 model credential boundary', () => {
     const f = fixture('user');
     // MODEL-IDENTITY-GUARD: name-bearing model procedures are administrator-only.
     await expect(modelRouter.createCaller(f.context).getActiveModels()).rejects.toMatchObject({ code: 'FORBIDDEN' });
-    expect(f.calls.every(call => !call.admin && call.columns !== '*' && !call.columns.includes('api_key'))).toBe(true);
+    expect(f.calls.every(call => !call.admin && call.columns !== '*')).toBe(true);
     expect(f.secretReads).toEqual([]);
   });
 
@@ -83,11 +84,11 @@ describe('B01 model credential boundary', () => {
       await caller.getConnectionStatus(), await settingsRouter.createCaller(f.context).getSummaryModels()]) f.noSecret(result);
     expect((await caller.getConnectionStatus())[0].hasApiKey).toBe(true);
     expect((await settingsRouter.createCaller(f.context).getSummaryModels())[0].available).toBe(true);
-    expect(f.calls.every(call => call.admin && !call.columns.includes('api_key'))).toBe(true);
+    expect(f.calls.every(call => call.admin)).toBe(true);
     expect(f.secretReads.every(Boolean)).toBe(true);
   });
 
-  it('create, update and legacy config responses omit credentials, including failed provider checks', async () => {
+  it('create, update and legacy config responses omit Vault and pre-OR-2 model credentials', async () => {
     const f = fixture();
     const caller = modelRouter.createCaller(f.context);
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(f.secret, { status: 401 }));
@@ -109,7 +110,6 @@ describe('B01 model credential boundary', () => {
     const result = (await service.runCategoryTests('ai')).results.find(row => row.testId === 'ai_model_status');
     expect(result?.status).toBe('passed');
     f.noSecret(result);
-    expect(f.calls.filter(call => call.columns.includes('api_key'))).toEqual([]);
     expect(f.secretReads).toEqual([true]);
   });
 

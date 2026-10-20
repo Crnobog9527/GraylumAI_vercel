@@ -1,7 +1,7 @@
 'use client';
 
 import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { httpBatchLink, httpBatchStreamLink, splitLink } from '@trpc/client';
+import { httpBatchLink, httpBatchStreamLink, httpLink, splitLink } from '@trpc/client';
 import React, { useEffect, useRef, useState } from 'react';
 import { trpc } from '@/trpc/client';
 import { createClient } from '@/lib/supabase';
@@ -10,6 +10,7 @@ import { useUnauthorizedRecovery } from '@/hooks/use-unauthorized-recovery';
 import { UnauthorizedNotice } from '@/components/auth/UnauthorizedNotice';
 import { createSessionRefresher } from '@/lib/session-refresh';
 import { sessionRefreshLink } from '@/trpc/session-refresh-link';
+import { trpcLinkKind } from '@/trpc/link-routing';
 
 export default function Provider({ children }: { children: React.ReactNode }) {
   // The query client is created once; it reaches the latest recovery handler through this ref.
@@ -101,9 +102,13 @@ export default function Provider({ children }: { children: React.ReactNode }) {
       onToken: token => { accessTokenRef.current = token; sessionPromiseRef.current = Promise.resolve(token); },
     });
     return trpc.createClient({ links: [sessionRefreshLink(session), splitLink({
-      condition: op => op.path === 'runtime.executeStream' || op.path === 'runtime.resumeStream' || op.path === 'opc.mentorTurnStream',
+      condition: op => trpcLinkKind(op.path) === 'stream',
       true: httpBatchStreamLink(options),
-      false: httpBatchLink(options),
+      false: splitLink({
+        condition: op => trpcLinkKind(op.path) === 'single',
+        true: httpLink(options),
+        false: httpBatchLink(options),
+      }),
     })] });
   });
 

@@ -773,7 +773,7 @@ describe('routing model settings', () => {
     const models = vi.fn(() => ({
       select() { return this; }, eq() { return this; },
       maybeSingle: async()=>({ data:options.model === undefined ? {id:modelId,is_active:'true'} : options.model,error:options.modelError ?? null }),
-      order: async()=>({data:[{id:modelId,name:'Luna',model_id:'openai/gpt-5.6-luna',api_key:'SECRET_CANARY'}],error:options.modelError ?? null}),
+      order: async()=>({data:[{id:modelId,name:'Luna',model_id:'openai/gpt-5.6-luna'}],error:options.modelError ?? null}),
     }));
     const client = {from(table: string) {
       if(table==='profiles')return {select(){return this;},eq(){return this;},single:async()=>({data:profile,error:null})};

@@ -10,22 +10,6 @@ export const PLATFORM_SECRET_SLOTS = [
 ] as const;
 export type PlatformSecretSlot = typeof PLATFORM_SECRET_SLOTS[number];
 
-/**
- * Transition-period fallback: when the admin has not filled a slot, read this server environment
- * variable instead. OpenRouter has none on purpose: the Runtime binds every call to the exact
- * key fingerprint a test window quoted, and has never read an environment key.
- */
-export const PLATFORM_SECRET_ENV_FALLBACK: Record<PlatformSecretSlot, string | null> = {
-  openrouter: null,
-  postforme: 'POSTFORME_API_KEY',
-  postforme_webhook: 'POSTFORME_WEBHOOK_SECRET',
-  tikhub: 'TIKHUB_API_KEY',
-  parallel: 'PARALLEL_API_KEY',
-  firecrawl: 'FIRECRAWL_API_KEY',
-  // PAY-NOTIFY: new slot, never read from Vercel.
-  resend: null,
-};
-
 // Printable ASCII without spaces, 16-1024 characters (the database enforces the same).
 const BASE = /^[!-~]{16,1024}$/;
 const FORMAT: Record<PlatformSecretSlot, RegExp> = {

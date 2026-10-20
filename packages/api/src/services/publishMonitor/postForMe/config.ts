@@ -2,24 +2,15 @@
 import { Ratelimit } from '@upstash/ratelimit';
 import { Redis } from '@upstash/redis';
 import { redisEnvironment } from '../../redisEnvironment';
-import type { ClientDeps, Limiter } from './client';
+import type { Limiter } from './client';
 
 // The provider allows 40 requests/minute and 5/second per key (measured 2026-10-13), shared by every
 // user, page, cron batch and publish. Stay under both with headroom; fail closed when Redis is down.
 export const SHARED_PER_MINUTE = 36;
 export const SHARED_PER_SECOND = 4;
 const DEADLINE_MS = 500;
-const API_KEY = /^pfm_(live|test)_[A-Za-z0-9]{8,128}$/;
-
 export class PostForMeNotConfigured extends Error {
   constructor() { super('POSTFORME_NOT_CONFIGURED'); }
-}
-
-/** Reads the key at call time from the server environment; it is never logged, returned or persisted. */
-export function postForMeApiKey(env: NodeJS.ProcessEnv = process.env): string {
-  const key = env.POSTFORME_API_KEY?.trim();
-  if (!key || !API_KEY.test(key)) throw new PostForMeNotConfigured();
-  return key;
 }
 
 async function deadline<T>(operation: Promise<T>): Promise<T> {
@@ -88,8 +79,4 @@ export async function takeUploadSlots(userId: string, count: number,
   } catch {
     return { ok: false, retryAfterSeconds: 5 };
   }
-}
-
-export function postForMeDeps(env: NodeJS.ProcessEnv = process.env): ClientDeps {
-  return { apiKey: postForMeApiKey(env), limiter: sharedLimiter(env) };
 }

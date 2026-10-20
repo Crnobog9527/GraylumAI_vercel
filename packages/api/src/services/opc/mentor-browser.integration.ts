@@ -23,7 +23,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST==='true').each(['normal','refresh','p
   const config={...configuredReasoning(p.model),pricing:pricingConfig(
    p.model,limits.providerSlug,limits.promptUsdPerMillion,limits.completionUsdPerMillion,
   ).pricing};
-  await sql.query("insert into ai_models(id,name,model_id,provider,is_active,api_endpoint,api_key,max_tokens,input_limit,config) values($1,'Synthetic browser streaming',$2,'openai','true','https://openrouter.ai/api/v1',$3,1000,10000,$4)",[p.modelId,p.model,key,JSON.stringify(config)]);
+  await sql.query("insert into ai_models(id,name,model_id,provider,is_active,api_endpoint,max_tokens,input_limit,config) values($1,'Synthetic browser streaming',$2,'openai','true','https://openrouter.ai/api/v1',1000,10000,$3)",[p.modelId,p.model,JSON.stringify(config)]);
  }
  await seedTestOpenRouterKey(sql,key);
  await sql.query('update modules set model_id=$1 where id=$2',[mentorId,f.moduleId]);

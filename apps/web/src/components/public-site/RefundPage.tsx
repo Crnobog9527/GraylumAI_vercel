@@ -48,6 +48,7 @@ export function RefundPage({ supportEmail }: { supportEmail?: string | null }) {
         ))}
         <p className={`mt-12 border-t border-[#262626] pt-6 ${TEXT}`}>
           {REFUND_PAGE.footnote}<Link href="/terms" className="ml-1 text-[#FFD700] underline underline-offset-2">查看服务条款</Link>
+          <Link href="/refund-policy" className="ml-3 text-[#FFD700] underline underline-offset-2">查看完整退款政策（英文）</Link>
         </p>
       </article>
     </SiteShell>

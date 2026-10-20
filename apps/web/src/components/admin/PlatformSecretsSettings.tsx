@@ -114,7 +114,7 @@ export function PlatformSecretsSettings() {
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>确认清除 {confirmClear ? SLOT_INFO[confirmClear.slot].name : ''} 密钥？</AlertDialogTitle>
-          <AlertDialogDescription>{confirmClear ? clearWarning(confirmClear) : ''}</AlertDialogDescription>
+          <AlertDialogDescription>{confirmClear ? clearWarning() : ''}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>取消</AlertDialogCancel>

@@ -19,7 +19,6 @@ const PUBLIC_SITE_PATHS = [
   '/faq',
   '/terms',
   '/privacy',
-  '/acceptable-use',
   '/api',
   '/_next',
   '/_vercel',
@@ -35,6 +34,8 @@ const PUBLIC_SITE_PAGE_PATHS = [
   '/blog', // The tutorial blog (/blog and /blog/<article>), linked from the public header as 教程.
   '/zh-tw',
   '/refund',
+  '/refund-policy', // The formal refund policy text; /refund stays the plain-language summary.
+  '/cookies', // The cookie policy text.
   '/accessibility', // The public accessibility statement, linked from every public footer.
   '/founders', // The founder members' wall: read-only, shows only approved cards the member agreed to publish.
   '/graylum-vs-chatgpt', // The Graylum vs ChatGPT comparison page (the Taiwan version is under /zh-tw).

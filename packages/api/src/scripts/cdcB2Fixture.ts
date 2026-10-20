@@ -28,8 +28,8 @@ export async function fixture(input:ModuleSkillInput,organizerOutput?:number){
   config.reasoning.catalog.reasoning={mandatory:false,defaultEnabled:true,supportedEfforts:['low'],defaultEffort:'low',supportsMaxTokens:false};
   config.reasoning.catalog.endpoints[0]!.supportedParameters=['tools','reasoning_effort'];
   config.reasoning.purposes=role==='mentor'?{interactive:{mode:'effort',effort:'low',wire:'reasoning_effort'}}:{organize:{mode:'provider_default'}};
-  await db.query(`insert into ai_models(id,name,model_id,provider,is_active,api_key,api_endpoint,max_tokens,input_limit,config)
-   values($1,'CDC local model',$2,'openai','true','LOCAL_BOUNDARY_ONLY','https://openrouter.ai/api/v1',$3,$4,$5)`,
+  await db.query(`insert into ai_models(id,name,model_id,provider,is_active,api_endpoint,max_tokens,input_limit,config)
+   values($1,'CDC local model',$2,'openai','true','https://openrouter.ai/api/v1',$3,$4,$5)`,
    [ids[role],p.model,outputCap(role,organizerOutput),p.context,config]);
  }
  await seedTestOpenRouterKey(db,'LOCAL_BOUNDARY_ONLY');

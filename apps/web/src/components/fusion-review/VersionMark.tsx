@@ -22,7 +22,7 @@ const day = (value: string | null) => { const at = value ? new Date(value) : nul
 export function useVersionMarks(draftIds: Array<string | null | undefined>, versionIds: string[] = []):
   Record<string, VersionMarkData> {
   const ids = [...new Set(draftIds.filter((id): id is string => typeof id === 'string' && id.length > 0))].sort().slice(0, 500);
-  const shown = [...new Set(versionIds)].sort().slice(0, 200);
+  const shown = [...new Set(versionIds)].sort().slice(0, 2000);
   const input = { draftIds: ids, ...(shown.length ? { versionIds: shown } : {}) };
   const marks = trpc.fusionReview.versionMarks.useQuery(input, { enabled: ids.length > 0, retry: false, staleTime: 60_000,
     refetchOnWindowFocus: false });

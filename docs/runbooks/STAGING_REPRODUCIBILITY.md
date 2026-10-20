@@ -260,7 +260,7 @@ Required categories:
 - `system_settings`
 - `membership_plans`
 - `credit_packages`
-- `ai_models` with `api_key` set to NULL
+- active `ai_models` rows; provider credentials stay in the backend platform-secret Vault slots
 - Test profiles or credits only when owner-created and explicitly approved
 
 Do not store:
@@ -298,8 +298,8 @@ The seed covers:
 Security boundaries:
 
 - Secrets remain owner-provided and outside the repo.
-- `OPENROUTER_API_KEY` remains outside the repo.
-- `ai_models.api_key` remains `NULL`.
+- Provider credentials are entered by an administrator in the backend “第三方密钥” page and remain outside the repo.
+- `ai_models` has no credential column.
 - Stripe price identifiers remain `NULL` unless the owner supplies
   staging-only values separately.
 - Test accounts, account credits, and admin access are outside this baseline
@@ -321,7 +321,6 @@ seed data, schema changes, RLS changes, grants, or platform configuration.
 These values must remain owner-managed and must never be committed, pasted into
 issues, or printed in logs:
 
-- `OPENROUTER_API_KEY`
 - Supabase service role key
 - `DATABASE_URL`
 - E2E passwords
@@ -476,7 +475,7 @@ The script checks:
 - RLS enablement, policy names, and role grant summaries for key tables.
 - Active `ai_models`, `membership_plans`, and `credit_packages` counts.
 - `system_settings` and billing-related `system_settings` counts.
-- `ai_models` rows with non-null `api_key` as a count only.
+- configured platform-secret Vault slots as a count only.
 - Drift categories such as missing functions, disabled RLS, missing policies,
   client-role grants to review, and missing readiness seed counts.
 

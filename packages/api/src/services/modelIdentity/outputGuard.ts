@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { BRAND_REPLY_EN, BRAND_REPLY_ZH, BRAND_REPLY_ZH_HANT } from './brandIdentity';
 import { questionCardSchema, questionToolCardSchema } from '../../shared/agentTurn';
+import { META_RESERVE, RESULT_BYTE_LIMIT } from '../runtime/resultCapacity';
 
 /**
  * MODEL-IDENTITY-GUARD layer 3: replace a model's first-person self-identification
@@ -11,10 +12,10 @@ import { questionCardSchema, questionToolCardSchema } from '../../shared/agentTu
 const BRAND = String.raw`(?:claude|anthropic|chat\s?gpt|gpt(?:[-\s]?\d[\w.]*)?|openai|gemini|google|deepmind|bard|qwen|通[义義]千[问問]?|阿里(?:巴巴|云)|`
   + String.raw`deepseek|深度求索|llama|meta\s?ai|mistral|grok|x\.?ai|文心一言|百度|kimi|月之暗面|豆包|字[节節]跳[动動]|位元組跳動|智[谱譜]|chatglm|glm|混元|[腾騰][讯訊]|`
   + String.raw`谷歌|微软|microsoft|copilot)`;
-const ZH_GAP = '[^。！？!?.\\n，,；;]';
+const ZH_GAP = '[^。！？!?.，,；;\\n]';
 // Who made the speaker: maker wording ("trained by"), or "from" right after the model noun. A nearby
 // source ("analyze data from Google") is ordinary copy (review P2).
-const MAKER = String.raw`(?:[^.!?\n]{0,40}?\b(?:built|developed|trained|made|created|designed|powered|provided)\s+by|\s+from)`;
+const MAKER = String.raw`(?:[^.!?\n]{0,40}?\s*\b(?:built|developed|trained|made|created|designed|powered|provided)\s+by|\s+from)`;
 // The model noun must name the speaker: it ends the clause or continues with identity wording, so
 // "I am a Google AI researcher" or "a model photographer" stay ordinary copy (review P2).
 const ROLE_END = String.raw`\b(?=\s*(?:[,.!?;:]|$)|\s+(?:by|from|developed|trained|made|created|built|that|which|and|here)\b)`;
@@ -24,7 +25,7 @@ const VERSION = String.raw`(?:[-\s]?\d[\w.]*|\s+(?:opus|sonnet|haiku|flash|pro|u
 const EN_END = String.raw`(?=\s*(?:[,.!?;:]|$)|\s+(?:an?\s+|the\s+)?(?:[\w-]+\s+){0,2}?(?:model|AI|assistant|chatbot|LLM)\b`
   + String.raw`|\s+(?:by|from|developed|trained|made|created|built)\b)`;
 // Simplified and Traditional forms of the same words (review: 我由 Anthropic 開發 / 我的底層模型是 / 我基於).
-const MADE = '(?:[训訓][练練]|[开開][发發]|打造|[研][发發]|[创創]建|推出|[设設][计計])';
+const MADE = '(?:[训訓][练練]|[开開][发發]|打造|[研][发發]|[创創]建|推出|[设設][计計])(?:出[来來]|而成|完成)?(?=$|[。！？!?.，,；;：:、\\s]|的|了)';
 const FROM = '(?:由|[来來]自)';
 const ZH_END = `(?=\\s*(?:[，,。.！!？?；;：:、]|$)|\\s*(?:大?模型|助手|AI|[语語]言模型|${FROM}|${MADE}))`;
 const PATTERNS = [
@@ -32,18 +33,18 @@ const PATTERNS = [
   `我(?:是|叫|就是)\\s*(?:一[个個]|一款|名叫)?\\s*${BRAND}${VERSION}${ZH_END}`,
   // 我是由 Google 训练的大型语言模型 / 我是来自 OpenAI 的语言模型
   // 由/来自 must follow 我是 directly (optionally 一个/一款): "我是想看看来自 Google 的开发工具" is ordinary copy (review P2).
-  `我(?:是|叫)\\s*(?:一[个個]|一款)?\\s*${FROM}\\s*${BRAND}\\s*(?:公司)?${ZH_GAP}{0,10}?(?:${MADE}|的${ZH_GAP}{0,6}?(?:模型|助手|AI))`,
+  `我(?:是|叫)\\s*(?:一[个個]|一款)?\\s*${FROM}\\s*${BRAND}\\s*(?:公司)?\\s*(?:${MADE}|${ZH_GAP}{1,8}?[\\t ]*${MADE}|的\\s*${ZH_GAP}{0,6}?(?:模型|助手|AI))`,
   // 我由 Anthropic 开发 / 我是被 OpenAI 训练出来的
-  `我(?:是)?(?:由|被)\\s*${BRAND}\\s*(?:公司)?${ZH_GAP}{0,6}${MADE}`,
+  `我(?:是)?(?:由|被)\\s*${BRAND}\\s*(?:公司)?(?:\\s*${MADE}|${ZH_GAP}{1,8}?[\\t ]*${MADE})`,
   // 我的底层模型是 GPT-4 / 我背后的技术来自 Google
-  `我(?:的|背[后後]的)(?:底[层層]|基[础礎]|背[后後])?(?:模型|大模型|架[构構]|技[术術])${ZH_GAP}{0,8}?(?:是|基[于於]|${FROM}|用的是)\\s*${BRAND}`,
+  `我(?:的|背[后後]的)(?:底[层層]|基[础礎]|背[后後])?(?:模型|大模型|架[构構]|技[术術])${ZH_GAP}{0,8}?\\s*(?:是|基[于於]|${FROM}|用的是)\\s*${BRAND}`,
   // 我基于 Claude / 我用的是 GPT — but not a user's product ("我基于 Claude 开发了一个写作工具", review P1)
-  `我(?:基[于於]|背[后後]是|使用的是|用的是|底[层層]是)\\s*${BRAND}(?!${ZH_GAP}{0,8}?(?:[开開][发發]了|做了|搭建|[构構]建了|打造了|写了|[写寫]了))`,
+  `我(?:基[于於]|背[后後]是|使用的是|用的是|底[层層]是)\\s*${BRAND}(?!${ZH_GAP}{0,8}?\\s*(?:[开開][发發]了|做了|搭建|[构構]建了|打造了|写了|[写寫]了))`,
   // 作为 ChatGPT，我… / 作为一个由 OpenAI 开发的 AI 助手… (review P1: role-prefaced)
   `作[为為]\\s*(?:一[个個]|一款)?\\s*${BRAND}\\s*[，,]\\s*我`,
-  `作[为為]\\s*(?:一[个個]|一款)?\\s*${FROM}\\s*${BRAND}\\s*(?:公司)?${ZH_GAP}{0,10}?(?:${MADE}|的${ZH_GAP}{0,6}?(?:模型|助手|AI))`,
+  `作[为為]\\s*(?:一[个個]|一款)?\\s*${FROM}\\s*${BRAND}\\s*(?:公司)?\\s*(?:${MADE}|${ZH_GAP}{1,8}?[\\t ]*${MADE}|的\\s*${ZH_GAP}{0,6}?(?:模型|助手|AI))`,
   // As ChatGPT, I can help / As an AI assistant developed by OpenAI / As a GPT-4 based model (review P1)
-  String.raw`\bAs\s+${BRAND}\b[^.!?\n]{0,6}?,\s*(?:I|my)\b`,
+  String.raw`\bAs\s+${BRAND}\b[ \t]*,[ \t\r\n]*(?:I|my)\b`,
   String.raw`\bAs\s+(?:an?|the)\s+(?:[\w-]+\s+){0,4}(?:model|AI|assistant|chatbot|LLM)\b${MAKER}\s+${BRAND}`,
   String.raw`\bAs\s+(?:an?|the)\s+${BRAND}[\w.-]*(?:\s+[\w-]+){0,2}?\s+(?:model|AI|assistant|chatbot|LLM)${ROLE_END}`,
   // I am Claude / I'm ChatGPT / I am called Gemini
@@ -63,12 +64,26 @@ const PATTERNS = [
 
 const TERMINATOR = /[。！？!?\n]|\.(?=\s|$)/gu;
 
+/** Identity patterns may span a line break, so that newline is not a sentence boundary. */
+function identityMatchRanges(text: string): Array<[number, number]> {
+  return PATTERNS.flatMap(pattern => {
+    const global = new RegExp(pattern.source, `${pattern.flags}g`);
+    return [...text.matchAll(global)].map(match => [match.index!, match.index! + match[0].length] as [number, number]);
+  }).sort((left, right) => left[0] - right[0]);
+}
+
 /** Sentence spans [start, end) of text, each ending after its terminator (or at the end). */
 function sentences(text: string) {
   const spans: Array<[number, number]> = [];
+  const identityRanges = text.includes('\n') && leaksModelIdentity(text) ? identityMatchRanges(text) : [];
+  let rangeIndex = 0;
   let start = 0;
   for (const match of text.matchAll(TERMINATOR)) {
-    const end = match.index! + match[0].length;
+    const index = match.index!;
+    while (rangeIndex < identityRanges.length && identityRanges[rangeIndex][1] <= index) rangeIndex++;
+    const insideIdentity = identityRanges[rangeIndex]?.[0] <= index && index < identityRanges[rangeIndex]?.[1];
+    if (match[0] === '\n' && insideIdentity) continue;
+    const end = index + match[0].length;
     spans.push([start, end]);
     start = end;
   }
@@ -90,8 +105,14 @@ function brandReplyFor(sentence: string) {
 
 /** Replace every self-identifying sentence; the brand reply appears at most once. */
 export function redactModelIdentity(text: string) {
+  return redactModelIdentityWithState(text);
+}
+
+type SharedReplyState = { replied: boolean; firstLeak?: string };
+
+function redactModelIdentityWithState(text: string, state?: SharedReplyState) {
   if (!leaksModelIdentity(text)) return text;
-  let out = '', replied = false;
+  let out = '', replied = state?.replied ?? false;
   for (const [start, end] of sentences(text)) {
     const sentence = text.slice(start, end);
     if (!leaksModelIdentity(sentence)) { out += sentence; continue; }
@@ -100,6 +121,10 @@ export function redactModelIdentity(text: string) {
       out += lead + brandReplyFor(sentence) + trail;
       replied = true;
     } else if (/\n$/u.test(sentence)) out += '\n';
+  }
+  if (state) {
+    state.replied = replied;
+    state.firstLeak ??= text;
   }
   return out;
 }
@@ -129,7 +154,20 @@ export function redactIdentityBody(body: string) {
   try { value = JSON.parse(body); } catch { return redactModelIdentity(body); }
   // A bare JSON string is shown as plain reply text after reload (review P1).
   if (typeof value === 'string') { const text = redactModelIdentity(value); return text === value ? body : JSON.stringify(text); }
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return body;
+  if (Array.isArray(value)) {
+    const redacted = redactIdentityStringsResult(value);
+    if (!redacted.changed) return body;
+    try {
+      const output = stringifyJsonIterative(redacted.value);
+      if (Buffer.byteLength(JSON.stringify(output), 'utf8') <= RESULT_BYTE_LIMIT - META_RESERVE) return output;
+      // If full replies amplify a large array past the completion limit, keep safe text and one brand reply.
+      const sharedReply: SharedReplyState = { replied: false };
+      const compact = stringifyJsonIterative(redactIdentityStringsResult(value, sharedReply).value);
+      if (Buffer.byteLength(JSON.stringify(compact), 'utf8') <= RESULT_BYTE_LIMIT - META_RESERVE) return compact;
+      return JSON.stringify([brandReplyFor(sharedReply.firstLeak ?? '')]);
+    } catch { return body; }
+  }
+  if (!value || typeof value !== 'object') return body;
   const record = value as Record<string, unknown>;
   const message = typeof record.message === 'string' ? redactModelIdentity(record.message) : record.message;
   // Card messages are redacted on their own: an appended card's text differs from the combined message,
@@ -154,11 +192,77 @@ export function redactIdentityCard<T>(card: T): T | null {
 }
 
 /** Every string inside a JSON value; other values and keys unchanged. */
+function redactIdentityStringsResult<T>(value: T, sharedReply?: SharedReplyState) {
+  let changed = false;
+  const clone = (source: unknown): unknown => {
+    if (typeof source === 'string') {
+      const redacted = sharedReply ? redactModelIdentityWithState(source, sharedReply) : redactModelIdentity(source);
+      changed ||= redacted !== source;
+      return redacted;
+    }
+    return Array.isArray(source) ? new Array(source.length)
+      : source && typeof source === 'object' ? {} : source;
+  };
+  const result = clone(value);
+  if (!value || typeof value !== 'object') return { value: result as T, changed };
+  const pending: Array<{ source: object; target: unknown[] | Record<string, unknown> }> = [
+    { source: value, target: result as unknown[] | Record<string, unknown> },
+  ];
+  while (pending.length) {
+    const { source, target } = pending.pop()!;
+    if (Array.isArray(source) && Array.isArray(target)) {
+      for (let index = 0; index < source.length; index++) {
+        if (!(index in source)) continue;
+        const child = source[index];
+        target[index] = clone(child);
+        if (child && typeof child === 'object') pending.push({ source: child, target: target[index] as unknown[] | Record<string, unknown> });
+      }
+    } else {
+      for (const [key, child] of Object.entries(source)) {
+        const copied = clone(child);
+        Object.defineProperty(target, key, { value: copied, enumerable: true, writable: true, configurable: true });
+        if (child && typeof child === 'object') pending.push({ source: child, target: copied as unknown[] | Record<string, unknown> });
+      }
+    }
+  }
+  return { value: result as T, changed };
+}
+
+/** Serialize JSON trees with an explicit stack so deep model arrays do not overflow the JS call stack. */
+function stringifyJsonIterative(value: unknown) {
+  const output: string[] = [];
+  const pending: Array<string | { value: unknown }> = [{ value }];
+  while (pending.length) {
+    const item = pending.pop()!;
+    if (typeof item === 'string') { output.push(item); continue; }
+    const current = item.value;
+    if (Array.isArray(current)) {
+      output.push('[');
+      pending.push(']');
+      for (let index = current.length - 1; index >= 0; index--) {
+        pending.push({ value: current[index] });
+        if (index > 0) pending.push(',');
+      }
+    } else if (current && typeof current === 'object') {
+      const entries = Object.entries(current);
+      output.push('{');
+      pending.push('}');
+      for (let index = entries.length - 1; index >= 0; index--) {
+        const [key, entryValue] = entries[index];
+        pending.push({ value: entryValue }, ':', JSON.stringify(key));
+        if (index > 0) pending.push(',');
+      }
+    } else {
+      const serialized = JSON.stringify(current);
+      if (serialized === undefined) throw new TypeError('Value is not JSON serializable');
+      output.push(serialized);
+    }
+  }
+  return output.join('');
+}
+
 export function redactIdentityStrings<T>(value: T): T {
-  const walk = (v: unknown): unknown => typeof v === 'string' ? redactModelIdentity(v)
-    : Array.isArray(v) ? v.map(walk)
-      : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x)])) : v;
-  return walk(value) as T;
+  return redactIdentityStringsResult(value).value;
 }
 
 /**

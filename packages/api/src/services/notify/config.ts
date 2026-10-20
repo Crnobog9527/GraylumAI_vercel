@@ -51,7 +51,7 @@ export function testRecipients(env: Env): ReadonlySet<string> {
 export async function noticeConfig(admin: Pick<SupabaseClient, 'rpc'>, env: Env = process.env): Promise<NoticeConfigResult> {
   let apiKey: string;
   try {
-    apiKey = (await getPlatformSecret(admin, 'resend', { env })).value;
+    apiKey = (await getPlatformSecret(admin, 'resend')).value;
   } catch (error) {
     if (error instanceof PlatformSecretError && error.code === 'PLATFORM_SECRET_NOT_CONFIGURED') {
       return { ok: false, code: 'PAYMENT_NOTICE_NOT_CONFIGURED' };
