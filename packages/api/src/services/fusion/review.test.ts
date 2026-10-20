@@ -23,7 +23,7 @@ const db = vi.hoisted(() => ({ review: null as Record<string, unknown> | null, c
 const ids = { reviewers: ['00000000-0000-4000-8000-0000000000a1', '00000000-0000-4000-8000-0000000000a2', '00000000-0000-4000-8000-0000000000a3'],
   summary: '00000000-0000-4000-8000-0000000000b1' };
 vi.mock('./settings', () => ({ readFusionSettings: async () => ({ version: 1, compare: { enabled: false }, review: { enabled: true,
-  reviewerModelIds: ids.reviewers, summaryModelId: ids.summary, skillId: '00000000-0000-4000-8000-0000000000c1', maxRounds: 2,
+  reviewerModelIds: ids.reviewers, summaryModelId: ids.summary, skillId: '00000000-0000-4000-8000-0000000000c1', maxRounds: 2, reviewerRoles: {},
   opinionOutputTokens: 1000, summaryOutputTokens: 2000, maxBudgetUsd: '5', fixedPriceCredits: 1500, dispatchMinutes: 10,
   breaker: { platformUsd: '2', noDeliveryCalls: 10 } } }) }));
 vi.mock('../runtime/stagingPolicy', () => ({ loadStagingPolicy: async () => ({ creditsPerUsd: '100', callPolicies: [...ids.reviewers, ids.summary].map(modelId => ({ modelId,
@@ -191,7 +191,7 @@ describe('review flow', () => {
     expect(after.events.at(-1)).toMatchObject({ type: 'adoption_done', adoptedSections: ['定位'] });
     // The summary saw the opinions as reviewers A, B, C, never model names.
     const summary = JSON.parse(requests.find(r => r.phase === 'fusion_summary')!.input);
-    expect(summary.opinions.map((o: { reviewer: string }) => o.reviewer)).toEqual(['A', 'B', 'C']);
+    expect(summary.decisions[0].views.map((v: { reviewer: string }) => v.reviewer)).toEqual(['A', 'B', 'C']);
     expect(requests.find(r => r.phase === 'fusion_summary')!.input).not.toContain(ids.reviewers[0]);
     expect((await t.flow.continue(String(db.review!.reviewId))).calls).toEqual([]);
   });
@@ -446,9 +446,9 @@ describe('review flow', () => {
     await t.runAll(); await t.runAll();
     const summary = requests.find(r => r.phase === 'fusion_summary')!;
     const input = JSON.parse(summary.input);
-    expect(input.opinions).toHaveLength(3);
-    expect(input.opinions[0].issues).toEqual([]);
-    expect(input.opinions[0].decisions[0].strongestCase).toBe('');
+    expect(input.decisions[0].views).toHaveLength(3);
+    expect(input.issues).toEqual([]);
+    expect(input.decisions[0].views[0].strongestCase).toBeUndefined();
   });
 
   it('a partial panel never ends as no change: one usable reviewer that finds nothing still goes to the summary', async () => {

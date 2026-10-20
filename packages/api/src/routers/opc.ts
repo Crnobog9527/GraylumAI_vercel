@@ -1,3 +1,4 @@
+import { archiveBusinessInput, archiveBusiness, listBusinesses } from '../services/opc/businessArchive';
 import {executionVisibility} from '../services/runtime/libraryVisibility';
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { AgentTurnEvent } from "../shared/agentTurn";
@@ -72,6 +73,9 @@ const readProcedure = protectedProcedure.use(async ({ ctx, next, path }) => {
   return result;
 });
 export const opcRouter = router({
+  businesses: readProcedure.query(({ ctx }) => listBusinesses(ctx.supabaseAdmin, ctx.user.id)),
+  archiveBusiness: readProcedure.input(archiveBusinessInput)
+    .mutation(({ ctx, input }) => archiveBusiness(ctx.supabaseAdmin, ctx.user.id, input.businessId)),
   capturePending: readProcedure.input(capturePendingInput).mutation(({ ctx, input }) => ctx.opc.capturePending(input)),
   captureResolve: procedure.input(captureResolveInput).mutation(({ ctx, input }) => ctx.opc.captureResolve(input)),
   information: procedure

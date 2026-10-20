@@ -33,6 +33,7 @@ export const revisionApplyInput = revisionReadInput.extend({
 export const revisionDeclineInput = revisionReadInput.extend({ requestId: uuid }).strict();
 
 const errors: Record<string, 'FORBIDDEN' | 'CONFLICT' | 'BAD_REQUEST'> = {
+  OPC_BUSINESS_ARCHIVED: 'FORBIDDEN',
   REPORT_AUTH_REQUIRED: 'FORBIDDEN',
   REPORT_REVISION_DENIED: 'FORBIDDEN',
   CONTENT_ERASED: 'FORBIDDEN',
