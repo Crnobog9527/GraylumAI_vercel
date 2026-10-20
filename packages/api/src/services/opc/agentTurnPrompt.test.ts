@@ -46,6 +46,9 @@ describe('conversation checklist mentor prompt',()=>{
   expect(prompt).toContain('When hostTurnContext.opening is true');
   expect(prompt).toContain('the user has not spoken and no question card is available');
   expect(prompt).toContain('ask one useful question in prose');
+  expect(prompt).toContain('When opening step-2 (diagnosis and platform benchmarking)');
+  expect(prompt).toContain('ask the user to resend them in their next message');
+  expect(prompt).toContain('Do not claim the accounts were searched or verified');
   expect(OPENING_EXTRACTION_RULE).toContain('any user_fact field as an answer');
   expect(OPENING_EXTRACTION_RULE).toContain('patches: []');
  });
