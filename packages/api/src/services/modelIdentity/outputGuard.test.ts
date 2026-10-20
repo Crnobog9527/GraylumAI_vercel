@@ -6,6 +6,7 @@ import { leaksModelIdentity, redactIdentityBody, redactIdentityCard, redactIdent
 // Leaks: what a model may say about itself after a direct question or a jailbreak.
 const LEAKS_ZH = [
   '我是由 Google 训练的大型语言模型。',
+  '我是由 Google 精心训练的大型语言模型。',
   '我是由 Google\n训练的大型语言模型。',
   '我是 Claude，由 Anthropic 开发的 AI 助手。',
   '我是ChatGPT。',

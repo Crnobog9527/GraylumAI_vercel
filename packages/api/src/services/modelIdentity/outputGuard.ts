@@ -34,7 +34,7 @@ const PATTERNS = [
   // 由/来自 must follow 我是 directly (optionally 一个/一款): "我是想看看来自 Google 的开发工具" is ordinary copy (review P2).
   `我(?:是|叫)\\s*(?:一[个個]|一款)?\\s*${FROM}\\s*${BRAND}\\s*(?:公司)?\\s*(?:${MADE}|的\\s*${ZH_GAP}{0,6}?(?:模型|助手|AI))`,
   // 我由 Anthropic 开发 / 我是被 OpenAI 训练出来的
-  `我(?:是)?(?:由|被)\\s*${BRAND}\\s*(?:公司)?\\s*${MADE}`,
+  `我(?:是)?(?:由|被)\\s*${BRAND}\\s*(?:公司)?(?:\\s*${MADE}|${ZH_GAP}{1,8}?[\\t ]*${MADE})`,
   // 我的底层模型是 GPT-4 / 我背后的技术来自 Google
   `我(?:的|背[后後]的)(?:底[层層]|基[础礎]|背[后後])?(?:模型|大模型|架[构構]|技[术術])${ZH_GAP}{0,8}?\\s*(?:是|基[于於]|${FROM}|用的是)\\s*${BRAND}`,
   // 我基于 Claude / 我用的是 GPT — but not a user's product ("我基于 Claude 开发了一个写作工具", review P1)
