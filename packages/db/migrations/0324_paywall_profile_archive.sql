@@ -132,6 +132,8 @@ DO $$ DECLARE spec record;fn record;src text;guard text; BEGIN
   ('opc_topic_material', $g$jsonb_build_object('draftId',p_draft_id)$g$, 'true'),
   ('opc_topic_draft_save', $g$jsonb_build_object('draftId',p_draft_id)$g$, 'true'),
   ('opc_topic_draft_from_execution', $g$jsonb_build_object('draftId',p_draft_id)$g$, 'true'),
+  ('fusion_review_adoption_record', $g$jsonb_build_object('draftId',
+    (SELECT draft_id FROM fusion_reviews WHERE id=p_review_id AND actor_id=p_actor_id))$g$, 'true'),
   ('fusion_review_start', $g$jsonb_build_object('draftId',p_draft_id)$g$, 'true'),
   ('opc_account_strategy_begin', $g$jsonb_build_object('projectId',p_account_project_id)$g$, 'true'),
   ('opc_account_strategy_save_checked', $g$jsonb_build_object('projectId',p_account_project_id)$g$, 'true'),

@@ -19,10 +19,24 @@ export async function runCases({admin:db,connect,report,read}) {
  await assert.rejects(start(db,actor,method),/^error: OPC_PROFILE_LIMIT$/);
  await assert.rejects(rpc(db,'opc_business_archive',foreign,first.businessId),/^error: OPC_BUSINESS_DENIED$/);
  await assert.rejects(rpc(db,'opc_business_archive',actor,randomUUID()),/^error: OPC_BUSINESS_DENIED$/);
+ const review=randomUUID(),decidedReview=randomUUID();
+ for(const reviewId of [review,decidedReview]) await db.query(`INSERT INTO fusion_reviews(id,actor_id,request_id,
+  draft_id,project_id,source_session_id,source_version_id,version_hash,materials,materials_hash,config,
+  state,round,phase,attempt,outcome) VALUES($1,$2,$3,$4,$5,$6,$7,repeat('a',64),'{}',repeat('b',64),'{}',
+  'completed',1,'summary',1,'{"kind":"revised"}')`,
+ [reviewId,actor,randomUUID(),first.draftId,first.projectId,first.sessionId,randomUUID()]);
+ const keepOriginal={requestId:randomUUID(),choices:[{section:'Facts',use:'original'}],state:'recorded',decision:'kept'};
+ assert.ok((await rpc(db,'fusion_review_adoption_record',actor,decidedReview,keepOriginal)).adoption,
+  'active business can keep original sections and record its decision');
+ const reviewBefore=await rpc(db,'fusion_review_read',actor,review);
  const saved=await rpc(db,'opc_business_archive',actor,first.businessId);
  assert.equal(saved.isArchived,true);
  assert.ok(saved.archivedAt);
  assert.deepEqual(await rpc(db,'opc_business_archive',actor,first.businessId),saved,'archive retry is idempotent');
+ await assert.rejects(rpc(db,'fusion_review_adoption_record',actor,review,keepOriginal),archived);
+ assert.equal((await db.query('SELECT adoption FROM fusion_reviews WHERE id=$1',[review])).rows[0].adoption,null);
+ assert.deepEqual(await rpc(db,'fusion_review_read',actor,review),reviewBefore,'saved review remains readable and unchanged');
+ report.checks.push('completed Fusion keep-original adoption allowed before archive and refused after archive without writes');
  const second=await start(db,actor,method);
  assert.notEqual(first.businessId,second.businessId,'archive immediately releases one slot');
  await assert.rejects(start(db,actor,method),/^error: OPC_PROFILE_LIMIT$/);
