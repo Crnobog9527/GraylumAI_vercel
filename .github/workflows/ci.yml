@@ -387,6 +387,9 @@ jobs:
       - name: Integration — PAY-STRIPE-MP upgrade overlap and retained credits
         run: node packages/db/tests/stripe-upgrade-overlap/run-local.mjs --ci
 
+      - name: Integration — PAYWALL profile archive and slot release
+        run: node packages/db/tests/paywall-profile-archive/run-local.mjs --ci
+
       - name: Integration — Runtime recovery and streaming
         run: node packages/db/tests/v3/run-workbench.mjs --runtime-only --with-staging-schema --without-app --schema-from-files
 

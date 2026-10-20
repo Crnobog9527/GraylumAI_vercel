@@ -21,6 +21,7 @@ export const reportFinalizeInput = reportDocumentInput.extend({
 }).strict();
 
 const errors: Record<string, 'FORBIDDEN' | 'CONFLICT' | 'BAD_REQUEST'> = {
+  OPC_BUSINESS_ARCHIVED: 'FORBIDDEN',
   REPORT_SOURCE_CONFLICT: 'CONFLICT',
   REPORT_CONFIRMATION_REQUIRED: 'CONFLICT',
   REPORT_EXECUTION_REQUIRED: 'BAD_REQUEST',

@@ -18,7 +18,7 @@ export const reportLocate = reportStart.omit({ requestId: true });
 export const REPORT_REQUEST_INPUT = 'Generate the confirmed report.';
 /** At most this many newest candidates are confirmed by their frozen identity. */
 const REPORT_LATEST_CANDIDATES = 20;
-export const reportCodes = new Set(['REPORT_DISABLED', 'REPORT_MEMBERSHIP_REQUIRED', 'REPORT_ENTITLEMENTS_UNAVAILABLE',
+export const reportCodes = new Set(['OPC_BUSINESS_ARCHIVED', 'REPORT_DISABLED', 'REPORT_MEMBERSHIP_REQUIRED', 'REPORT_ENTITLEMENTS_UNAVAILABLE',
   'REPORT_SOURCE_CONFLICT', 'REPORT_CONFIRMATION_REQUIRED', 'REPORT_FACTS_TOO_LARGE', 'REPORT_MANIFEST_REQUIRED',
   'REPORT_PAYG_REQUIRED', 'OPC_CAPTURE_PENDING', 'REPORT_EXECUTION_REQUIRED', 'REPORT_REQUEST_CONFLICT', 'REPORT_ALREADY_EXISTS',
   'REPORT_BENCHMARKS_REQUIRED',
@@ -40,7 +40,7 @@ export function reportBlocksNewStart(saved: { state?: string; result?: { body?: 
 export function reportError(error: unknown): never {
   const message = error instanceof Error ? error.message : typeof error === 'object' && error && 'message' in error ? error.message : null;
   const modelCode = reportModelErrorCode(message);
-  throw new TRPCError({ code: message === 'REPORT_MEMBERSHIP_REQUIRED' ? 'FORBIDDEN' : 'BAD_REQUEST',
+  throw new TRPCError({ code: ['REPORT_MEMBERSHIP_REQUIRED', 'OPC_BUSINESS_ARCHIVED'].includes(String(message)) ? 'FORBIDDEN' : 'BAD_REQUEST',
     cause: error, message: modelCode ?? (typeof message === 'string' && reportCodes.has(message) ? message : 'REPORT_UNAVAILABLE') });
 }
 /** The server switch: only a strict `{enabled:true}` setting enables NEW report admission. */

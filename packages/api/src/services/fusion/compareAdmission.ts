@@ -26,7 +26,7 @@ export type CompareColumn = { index: number; modelId: string; body: string; call
 export type CompareAdmitted = { groupId: string; replayed: boolean; runs: Array<{ runId: string; index: number; body: string; call: FrozenCall }> };
 
 /** Exact SQL refusals only; anything else is reported as unavailable, never with database detail. */
-const refusals = new Set(['FUSION_COMPARE_DISABLED', 'FUSION_COMPARE_FORBIDDEN', 'FUSION_COMPARE_TOO_FEW', 'FUSION_COMPARE_TOO_MANY',
+const refusals = new Set(['OPC_BUSINESS_ARCHIVED', 'FUSION_COMPARE_DISABLED', 'FUSION_COMPARE_FORBIDDEN', 'FUSION_COMPARE_TOO_FEW', 'FUSION_COMPARE_TOO_MANY',
   'FUSION_COMPARE_MODEL_NOT_ALLOWED', 'FUSION_COMPARE_DENIED', 'FUSION_COMPARE_ENDED', 'FUSION_COMPARE_GATE_REQUIRED',
   'RUNTIME_MATERIAL_UNAVAILABLE', 'FUSION_COMPARE_ACTIVE', 'FUSION_COMPARE_BREAKER', 'FUSION_COMPARE_STALE', 'FUSION_COMPARE_SESSION_GONE',
   'FUSION_COMPARE_REQUEST_CONFLICT', 'FUSION_COMPARE_INVALID', 'FUSION_COMPARE_SOURCE_REVOKED', 'FUSION_COMPARE_SETTINGS_INVALID',
