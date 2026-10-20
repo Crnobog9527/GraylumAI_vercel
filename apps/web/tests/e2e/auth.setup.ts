@@ -124,7 +124,7 @@ async function authenticateRole(page: Page, role: E2ERole) {
     await expect(page).toHaveURL(/\/admin/);
   } else {
     await gotoWithBypass(page, protectedPath);
-    await expect(page).toHaveURL(/\/profile/);
+    await expect(page).toHaveURL(/\/app\/profile/);
   }
 
   await page.context().storageState({ path: authStatePaths[role] });

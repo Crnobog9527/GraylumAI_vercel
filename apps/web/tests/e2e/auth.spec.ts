@@ -103,7 +103,7 @@ test.describe('Authentication', () => {
       await page.locator('form').getByRole('button', { name: /^登录$|^Login$/i }).click();
 
       steps.push('Verify the browser returns to the original protected tab');
-      await expect(page).toHaveURL(/\/profile\?tab=security/, { timeout: 15000 });
+      await expect(page).toHaveURL(/\/app\/profile\?tab=security/, { timeout: 15000 });
       await expect(page.locator('h3').filter({ hasText: '账户安全' })).toBeVisible({ timeout: 30000 });
 
       monitor.removeIssues((issue) =>
@@ -324,13 +324,13 @@ test.describe('Authentication', () => {
       try {
         steps.push('Open /profile and verify the default profile content renders');
         await gotoWithBypass(page, '/app/profile');
-        await expect(page).toHaveURL(/\/profile/);
+        await expect(page).toHaveURL(/\/app\/profile/);
         await expect(page.getByRole('heading', { name: '个人中心' })).toBeVisible({ timeout: 30000 });
         await expect(page.getByRole('button', { name: '账户安全' })).toBeVisible({ timeout: 30000 });
 
         steps.push('Open the subscription tab route and verify yearly pricing copy and highlight tone');
         await gotoWithBypass(page, '/app/profile?tab=subscription');
-        await expect(page).toHaveURL(/\/profile\?tab=subscription/, { timeout: 15000 });
+        await expect(page).toHaveURL(/\/app\/profile\?tab=subscription/, { timeout: 15000 });
         const yearlyCycleButton = page.getByRole('button', { name: /按年|年付/ });
         await expect(yearlyCycleButton).toBeVisible({ timeout: 30000 });
         await yearlyCycleButton.click();

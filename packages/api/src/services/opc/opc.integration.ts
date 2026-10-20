@@ -2485,9 +2485,9 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST === "true")(
     }
     try {
       const ready=page.waitForResponse(r=>r.url().includes('settings.getSystemSettings')&&r.ok());
-      await page.goto(process.env.V3_LOCAL_APP+'/login?redirect=/');await ready;
+      await page.goto(process.env.V3_LOCAL_APP+'/login?redirect=/app');await ready;
       await page.getByPlaceholder('name@example.com').fill(f.email);await page.getByPlaceholder('输入你的密码').fill(f.password);
-      await page.getByRole('button',{name:'登录',exact:true}).last().click();await page.waitForURL(url=>url.pathname==='/');
+      await page.getByRole('button',{name:'登录',exact:true}).last().click();await page.waitForURL(url=>url.pathname==='/app');
       await page.getByRole('heading',{name:'目标与资源盘点'}).waitFor();
       await page.getByRole('alert').filter({hasText:'账号与资料'}).waitFor();
       expect(await page.getByText('开始新手引导',{exact:true}).count()).toBe(0);
@@ -2504,7 +2504,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST === "true")(
       // The method cards are static. Wait for the line the home page renders only after the library
       // query succeeded (not just its response headers), then assert that no QueryNotice is shown.
       const libraryLoaded=()=>page.locator('main').getByText(/已有定位和工作会保留|先一起确认定位，再开展选题和内容创作/).waitFor();
-      await page.goto(process.env.V3_LOCAL_APP+'/');await libraryLoaded();await page.getByRole('heading',{name:'目标与资源盘点'}).waitFor();
+      await page.goto(process.env.V3_LOCAL_APP+'/app');await libraryLoaded();await page.getByRole('heading',{name:'目标与资源盘点'}).waitFor();
       await capture('staging-allowed-directory');
       await sql.query('update artifact_workflows set enabled=false where id=$1',[f.registration]);
       await page.reload();await libraryLoaded();await page.getByRole('heading',{name:'目标与资源盘点'}).waitFor();
@@ -2633,7 +2633,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST === "true")(
       await page.getByRole('button',{name:'梳理账号定位',exact:true}).click();
       // Choosing a new positioning starts the mentor draft directly; there is no business-name form.
       await page.getByRole('button',{name:'从头分析新定位',exact:true}).click();
-      await page.waitForURL(url => /^\/positioning\/[a-f0-9-]{36}$/.test(url.pathname));
+      await page.waitForURL(url => /^\/app\/positioning\/[a-f0-9-]{36}$/.test(url.pathname));
       const draftPath = new URL(page.url()).pathname;
       await page
         .getByText("Staging 真实模型测试", { exact: true })
@@ -7087,7 +7087,7 @@ it("OPC: B1 browser auto-saves discussion, adopts one topic across a lost reply 
   let lostAdoption = 0;
   try {
     const homeLibrary = page.waitForResponse(response => response.url().includes('opc.library'));
-    await page.goto(process.env.V3_LOCAL_APP + '/'); await homeLibrary;
+    await page.goto(process.env.V3_LOCAL_APP+'/app'); await homeLibrary;
     expect(await page.getByRole('heading', { name: '先完成正式定位', exact: true }).count()).toBe(0);
     await page.goto(process.env.V3_LOCAL_APP + path);
     await page.getByRole('button', { name: '开始选题工作对话', exact: true }).click();
@@ -7527,7 +7527,7 @@ it("OPC: new business start restores the complete frozen request before another 
     await page.getByRole('button',{name:'恢复上次开始请求',exact:true}).waitFor();
     await page.unroute('**/api/trpc/opc.start*');
     await page.getByRole('button',{name:'恢复上次开始请求',exact:true}).click();
-    await page.waitForURL(url=>/^\/positioning\/[0-9a-f-]+$/.test(url.pathname),{timeout:60000});
+    await page.waitForURL(url=>/^\/app\/positioning\/[0-9a-f-]+$/.test(url.pathname),{timeout:60000});
     const restoredDraft=page.url().split('/').at(-1)!;
     const restoredBusiness=(await sql.query('select business_id::text id from opc_draft_businesses where draft_id=$1',[restoredDraft])).rows[0].id;
     expect(restoredBusiness).not.toBe(originalBusiness);
@@ -7634,7 +7634,7 @@ it("OPC: account strategy dialog returns to a complete revision and explicit off
   await page.getByRole('navigation',{name:'资料库平台与账号'}).getByRole('button',{name:/revision-a/}).click();
   await page.getByRole('button',{name:/x · revision-a.*查看详情/}).click();
   await page.getByRole('dialog',{name:'定位详情'}).getByRole('button',{name:'回到策略讨论',exact:true}).click();
-  await page.waitForURL(url=>/^\/positioning\/[^/]+$/.test(url.pathname));
+  await page.waitForURL(url=>/^\/app\/positioning\/[^/]+$/.test(url.pathname));
   const draftId=page.url().split('/app/positioning/')[1];
   const draft=await f.service.read(draftId);
   await page.getByRole('navigation',{name:'定位步骤'}).waitFor();
@@ -7704,7 +7704,7 @@ it("OPC: account strategy dialog returns to a complete revision and explicit off
   await page.getByRole('navigation',{name:'资料库平台与账号'}).getByRole('button',{name:/revision-b/}).click();
   await page.getByRole('button',{name:/x · revision-b.*查看详情/}).click();
   await page.getByRole('dialog',{name:'定位详情'}).getByRole('button',{name:'回到策略讨论',exact:true}).click();
-  await page.waitForURL(url=>/^\/positioning\/[^/]+$/.test(url.pathname));
+  await page.waitForURL(url=>/^\/app\/positioning\/[^/]+$/.test(url.pathname));
   const bDraft=await f.service.read(page.url().split('/app/positioning/')[1]);
   expect(bDraft.sessionId).not.toBe(draft.sessionId);
   for(const step of f.flow.steps)expect(bDraft.information[step.id].values).toEqual(source.information[step.id].values);
@@ -7738,7 +7738,7 @@ it("OPC: account revision confirms only edited information before official final
   await page.getByRole('navigation',{name:'资料库平台与账号'}).getByRole('button',{name:/review-revision/}).click();
   await page.getByRole('button',{name:/x · review-revision.*查看详情/}).click();
   await page.getByRole('dialog',{name:'定位详情'}).getByRole('button',{name:'回到策略讨论',exact:true}).click();
-  await page.waitForURL(url=>/^\/positioning\/[^/]+$/.test(url.pathname));
+  await page.waitForURL(url=>/^\/app\/positioning\/[^/]+$/.test(url.pathname));
   const draftId=page.url().split('/app/positioning/')[1];
   const phases=page.getByRole('navigation',{name:'定位步骤'}).getByRole('button');
   const initial=await f.service.read(draftId);
@@ -9159,11 +9159,11 @@ it.skipIf(process.env.V3_VERIFY_DELIVERED_PREVIEW !== 'true')("OPC: delivered pr
   const page=await context.newPage();page.setDefaultTimeout(60000);
   try {
     await page.setViewportSize({width:1600,height:900});
-    await page.goto(process.env.V3_LOCAL_APP+'/login?redirect=/');
+    await page.goto(process.env.V3_LOCAL_APP+'/login?redirect=/app');
     await page.getByPlaceholder('name@example.com').fill(saved.credentials.email);
     await page.getByPlaceholder('输入你的密码').fill(saved.credentials.password);
     await page.getByRole('button',{name:'登录',exact:true}).last().click();
-    await page.waitForURL(url=>url.pathname==='/');
+    await page.waitForURL(url=>url.pathname==='/app');
     await page.getByRole('link',{name:'对话',exact:true}).click();
     await page.waitForURL(url=>url.pathname==='/app/positioning');
     await page.getByRole('heading',{name:'今天，想推进什么？',exact:true}).waitFor();
@@ -9185,7 +9185,7 @@ it.skipIf(process.env.V3_VERIFY_DELIVERED_PREVIEW !== 'true')("OPC: delivered pr
     expect(await page.getByRole('combobox',{name:'定位方法'}).count()).toBe(0);
     expect(await page.getByRole('combobox',{name:'所属业务'}).count()).toBe(0);
     // The choice itself starts the mentor draft; there is no business-name form.
-    await page.waitForURL(url=>/^\/positioning\/[0-9a-f-]+$/.test(url.pathname));
+    await page.waitForURL(url=>/^\/app\/positioning\/[0-9a-f-]+$/.test(url.pathname));
     const mentorUrl=page.url();
     const draftId=page.url().split('/app/positioning/')[1]?.split('?')[0]??'';
     const steps=page.getByRole('navigation',{name:'定位步骤'}).getByRole('button');
@@ -9661,7 +9661,7 @@ it("OPC: library finalization closes only on success and account discussion swit
  await f.service.contentManualSave({workItemId:work.workItemId,requestId:randomUUID(),expectedVersion:0,sourceContentId:null,kind:'brief',status:'draft',title:'独立正文标题',body:'需要定稿的正文'});
  const {browser,page}=await planBrowser(f);
  try{
-  await page.goto(process.env.V3_LOCAL_APP+'/');
+  await page.goto(process.env.V3_LOCAL_APP+'/app');
   expect(await page.getByRole('link',{name:'继续上次工作',exact:true}).count()).toBe(0);
   await page.goto(process.env.V3_LOCAL_APP+'/app/library');
   const rail=page.getByRole('complementary',{name:'工作区导航'});
@@ -9845,7 +9845,7 @@ it('OPC: positioning entry creates a new business or edits only the selected exi
   expect(await page.getByRole('combobox').count()).toBe(0);
   expect(await page.getByLabel('业务名称',{exact:true}).count()).toBe(0);
   expect(await page.getByRole('button',{name:'开始 Agent 引导',exact:true}).count()).toBe(0);
-  await page.waitForURL(url=>/^\/positioning\/[0-9a-f-]+$/.test(url.pathname));
+  await page.waitForURL(url=>/^\/app\/positioning\/[0-9a-f-]+$/.test(url.pathname));
   const createdDraft=new URL(page.url()).pathname.split('/').at(-1)!;
   expect(createdDraft).not.toBe(f.d.draftId);
   const created=(await sql.query('select b.id,b.name from opc_draft_businesses d join opc_businesses b on b.id=d.business_id where d.draft_id=$1',[createdDraft])).rows[0];
@@ -9858,7 +9858,7 @@ it('OPC: positioning entry creates a new business or edits only the selected exi
   await page.getByRole('dialog',{name:'梳理账号定位',exact:true}).getByRole('button',{name:'我已有定位',exact:true}).click();
   expect(await page.getByLabel('业务名称',{exact:true}).count()).toBe(0);
   expect(await page.getByLabel('定位方法',{exact:true}).count()).toBe(0);
-  await page.waitForURL(url=>/^\/positioning\/[0-9a-f-]+$/.test(url.pathname));
+  await page.waitForURL(url=>/^\/app\/positioning\/[0-9a-f-]+$/.test(url.pathname));
   const existingDraft=new URL(page.url()).pathname.split('/').at(-1)!;
   expect((await sql.query('select mode from opc_drafts where draft_id=$1',[existingDraft])).rows[0].mode).toBe('manual');
   const afterExisting=Number((await sql.query('select count(*)::int n from opc_drafts where actor_id=$1',[f.actor])).rows[0].n);
@@ -10382,11 +10382,11 @@ it("OPC: homepage guide starts one unnamed mentor task and replays its exact int
  page.on('request',request=>{const u=new URL(request.url());if(u.pathname==='/app/positioning'&&u.searchParams.get('start')==='mentor')intentUrl=u.href;});
  const counts=async()=>(await sql.query('select (select count(*)::int from opc_drafts where actor_id=$1) drafts,(select count(*)::int from runtime_executions where actor_id=$1) executions,(select count(*)::int from bill2_calls c join bill2_runs r on r.id=c.run_id where r.actor_id=$1) calls',[f.actor])).rows[0];
  try{
-  await page.goto(process.env.V3_LOCAL_APP+'/login?redirect=/');await page.getByPlaceholder('name@example.com').fill(f.email);await page.getByPlaceholder('输入你的密码').fill(f.password);await page.getByRole('button',{name:'登录',exact:true}).last().click();await page.waitForURL(u=>u.pathname==='/');
+  await page.goto(process.env.V3_LOCAL_APP+'/login?redirect=/app');await page.getByPlaceholder('name@example.com').fill(f.email);await page.getByPlaceholder('输入你的密码').fill(f.password);await page.getByRole('button',{name:'登录',exact:true}).last().click();await page.waitForURL(u=>u.pathname==='/app');
   const guide=page.getByRole('link',{name:'开始新手引导',exact:true});await guide.waitFor();await guide.hover();
   expect(await counts()).toEqual({drafts:0,executions:0,calls:0});
   await guide.evaluate(node=>{(node as HTMLElement).click();(node as HTMLElement).click();});
-  await page.waitForURL(u=>/^\/positioning\/[^/]+$/.test(u.pathname));
+  await page.waitForURL(u=>/^\/app\/positioning\/[^/]+$/.test(u.pathname));
   const draftId=new URL(page.url()).pathname.split('/')[2];
   expect((await f.service.read(draftId)).snapshot.workflow.steps).toHaveLength(6);
   await page.getByRole('textbox',{name:'给 AI 教练的回复',exact:true}).waitFor();

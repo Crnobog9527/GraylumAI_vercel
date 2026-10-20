@@ -55,7 +55,7 @@ test.describe('User Extended Flows', () => {
     try {
       steps.push('Open /profile and verify the profile shell');
       await gotoWithBypass(page, '/app/profile');
-      await expect(page).toHaveURL(/\/profile/);
+      await expect(page).toHaveURL(/\/app\/profile/);
       await expect(page.getByRole('heading', { name: '个人中心' })).toBeVisible();
 
       steps.push('Open subscription management and verify subscription cards');

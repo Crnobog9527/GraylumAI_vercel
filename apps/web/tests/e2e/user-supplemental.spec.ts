@@ -161,7 +161,7 @@ test.describe('User Supplemental Flows', () => {
         if (await dialogUseButton.isEnabled()) {
           steps.push('Use the selected module and confirm routing into the positioning workspace');
           await dialogUseButton.click();
-          await expect(page).toHaveURL(/\/positioning/, { timeout: 10000 });
+          await expect(page).toHaveURL(/\/app\/positioning/, { timeout: 10000 });
         } else {
           steps.push('Record that the selected module is not in the published positioning catalog');
           await expect(detailDialog.getByText('该技能将在新工作区上线后开放')).toBeVisible();
