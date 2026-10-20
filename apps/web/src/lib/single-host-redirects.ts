@@ -29,12 +29,12 @@ export function buildPathRedirects(): ConfigRedirect[] {
   return [
     // LEGACY-CLOSE: the old /chat and /workbench pages are deleted; their links land on positioning, reversibly.
     ...RETIRED_APP_PATHS.map(source => ({ source, destination: RETIRED_APP_DESTINATION, permanent: false })),
-    // Logged-in pages moved under /app; ":path*" also matches the folder itself.
-    ...MOVED_APP_SEGMENTS.map(segment => ({
-      source: `/${segment}/:path*`,
-      destination: `${APP_PREFIX}/${segment}/:path*`,
-      permanent: true,
-    })),
+    // Logged-in pages moved under /app. The folder itself has its own rule and subpaths use ":path+": on Vercel an
+    // empty ":path*" leaves a trailing slash ("/app/profile/"), which costs a second 308 to strip it.
+    ...MOVED_APP_SEGMENTS.flatMap(segment => [
+      { source: `/${segment}`, destination: `${APP_PREFIX}/${segment}`, permanent: true },
+      { source: `/${segment}/:path+`, destination: `${APP_PREFIX}/${segment}/:path+`, permanent: true },
+    ]),
     // The public home page is served at "/" (the proxy rewrites it to this page), so its own address goes there.
     { source: '/landing', destination: '/', permanent: true },
     // The old /tutorials page (four generic cards) is gone; the tutorials live in the blog (PUBLIC-SITE cleanup).
@@ -84,7 +84,9 @@ export function buildLegacyHostRedirects(switchValue: string | undefined): Confi
         destination: `${PRODUCTION_ORIGIN}${rule.destination}`,
         permanent: true,
       })),
-      { source: '/:path*', has: [onHost], destination: `${PRODUCTION_ORIGIN}/:path*`, permanent: true },
+      // The bare root and every other path; split for the same trailing-slash reason as the folder rules.
+      { source: '/', has: [onHost], destination: `${PRODUCTION_ORIGIN}/`, permanent: true },
+      { source: '/:path+', has: [onHost], destination: `${PRODUCTION_ORIGIN}/:path+`, permanent: true },
     ];
   });
 }
