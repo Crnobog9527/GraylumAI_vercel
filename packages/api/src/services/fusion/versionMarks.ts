@@ -52,7 +52,10 @@ export function computeVersionMarks(versions: VersionRow[], reviews: ReviewRow[]
     let current = version.from;
     for (let depth = 0; current && depth < TRACE_LIMIT && !seen.has(current); depth++) {
       seen.add(current);
-      if (reviewed(current)) { marks[version.id] = { mark: 'derived', reviewId: null, draftId: null, reviewedAt: null, adoptedCount: 0, derivedFrom: current }; break; }
+      if (reviewed(current)) {
+        marks[version.id] = { mark: 'derived', reviewId: null, draftId: null, reviewedAt: null, adoptedCount: 0, derivedFrom: current };
+        break;
+      }
       const next = byId.get(current);
       current = next && next.source === 'review_revision' ? next.from : null;
     }
@@ -62,20 +65,29 @@ export function computeVersionMarks(versions: VersionRow[], reviews: ReviewRow[]
 
 export class VersionMarksDenied extends Error { constructor() { super('FUSION_VERSION_MARKS_DENIED'); } }
 
-/** Marks of every version of the given analyses' projects. Another user's analysis (or an unknown one) is refused, never empty. */
-export async function loadVersionMarks(admin: SupabaseClient, actorId: string, draftIds: string[]): Promise<Record<string, VersionMark>> {
+/**
+ * Marks of every version of the given analyses' projects, plus the extra version ids the page shows (an account's history also
+ * lists versions of its inherited root and earlier draft projects). Another user's analysis (or an unknown one) is refused, never
+ * empty. Reviews are only the caller's own, so an extra id of someone else's version can never come back marked.
+ */
+export async function loadVersionMarks(admin: SupabaseClient, actorId: string, draftIds: string[], versionIds: string[] = []):
+  Promise<Record<string, VersionMark>> {
   const ids = [...new Set(draftIds)];
   const drafts = await admin.from('opc_drafts').select('draft_id,project_id,actor_id').in('draft_id', ids);
   if (drafts.error) throw new Error('FUSION_REVIEW_UNAVAILABLE');
   const own = (drafts.data ?? []) as Array<{ draft_id: string; project_id: string; actor_id: string }>;
   if (own.length !== ids.length || own.some(draft => draft.actor_id !== actorId)) throw new VersionMarksDenied();
   const projects = [...new Set(own.map(draft => draft.project_id))];
-  const [versions, reviews] = await Promise.all([
-    admin.from('artifact_versions').select('id,source:report->generatedReport->>source,from:report->generatedReport->>sourceVersionId')
-      .in('project_id', projects).is('erased_at', null).limit(1000),
+  const columns = 'id,source:report->generatedReport->>source,from:report->generatedReport->>sourceVersionId' as const;
+  const extra = [...new Set(versionIds)];
+  const [versions, shown, reviews] = await Promise.all([
+    admin.from('artifact_versions').select(columns).in('project_id', projects).is('erased_at', null).limit(1000),
+    extra.length ? admin.from('artifact_versions').select(columns).in('id', extra).is('erased_at', null).limit(1000)
+      : Promise.resolve({ data: [], error: null }),
     admin.from('fusion_reviews').select('id,draft_id,source_version_id,state,ended_at,adoption').eq('actor_id', actorId)
-      .in('project_id', projects).order('created_at', { ascending: false }).limit(1000),
+      .order('created_at', { ascending: false }).limit(1000),
   ]);
-  if (versions.error || reviews.error) throw new Error('FUSION_REVIEW_UNAVAILABLE');
-  return computeVersionMarks((versions.data ?? []) as unknown as VersionRow[], (reviews.data ?? []) as unknown as ReviewRow[]);
+  if (versions.error || shown.error || reviews.error) throw new Error('FUSION_REVIEW_UNAVAILABLE');
+  const all = new Map([...(versions.data ?? []), ...(shown.data ?? [])].map(row => [(row as { id: string }).id, row]));
+  return computeVersionMarks([...all.values()] as unknown as VersionRow[], (reviews.data ?? []) as unknown as ReviewRow[]);
 }

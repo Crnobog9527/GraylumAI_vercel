@@ -73,4 +73,24 @@ describe('loading version marks', () => {
     await expect(loadVersionMarks(admin([{ draft_id: draft, project_id: 'p', actor_id: mine }]), mine,
       [draft, '10000000-0000-4000-8000-000000000002'])).rejects.toBeInstanceOf(VersionMarksDenied);
   });
+
+  it('marks a displayed version of another project of the account (inherited root, earlier draft) by its id', async () => {
+    const seen: Array<{ column: string; values: unknown }> = [];
+    const spy = (data: unknown): never => { const node: Record<string, unknown> = {};
+      for (const name of ['select', 'is', 'eq', 'order']) node[name] = () => node;
+      node.in = (column: string, values: unknown) => { seen.push({ column, values }); return node; };
+      node.limit = () => Promise.resolve({ data, error: null });
+      node.then = (resolve: (value: unknown) => void) => resolve({ data, error: null });
+      return node as never; };
+    const db = { from: (table: string) => table === 'opc_drafts' ? spy([{ draft_id: draft, project_id: 'p', actor_id: mine }])
+      : table === 'artifact_versions' ? spy([{ id: 'root', source: null, from: null }]) : spy([done('r', 'root')]) } as never;
+    const marks = await loadVersionMarks(db, mine, [draft], ['root']);
+    expect(marks.root).toMatchObject({ mark: 'reviewed' });
+    expect(seen.some(call => call.column === 'id' && JSON.stringify(call.values) === '["root"]')).toBe(true);
+  });
+  it('asks for more than 50 analyses in one call', async () => {
+    const many = Array.from({ length: 80 }, (_, i) => `10000000-0000-4000-8000-${String(i).padStart(12, '0')}`);
+    const rowsOf = many.map(id => ({ draft_id: id, project_id: `p${id}`, actor_id: mine }));
+    expect(Object.keys(await loadVersionMarks(admin(rowsOf), mine, many))).toEqual(['a']);
+  });
 });

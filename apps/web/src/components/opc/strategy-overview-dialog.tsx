@@ -33,7 +33,7 @@ export function StrategyOverviewDialog({account,onClose,onSaved}:{account:Accoun
  const viewedInformation=account.pendingStrategyDraftId?data?.information:(latestSchema.data as Schema|undefined)?.information;
  const viewedEntries=Object.entries((viewedInformation??{}) as Record<string,Information>);
  const versions=(positionHistory.data??[]) as HistoryVersion[];
- const versionMarks=useVersionMarks([account.strategyDraftId]);
+ const versionMarks=useVersionMarks([account.strategyDraftId],versions.map(version=>version.id));
  const viewedVersion=versions.find(version=>version.id===(historyVersion??versions[0]?.id));
  const officialVersion=account.currentVersion??account.sourceVersion;
  const entries=editing&&editSchema?editSchema.workflow.steps.map(step=>[step.id,{schema:step.information??[],values:(viewedInformation as Record<string,{values:Record<string,Value>|null}>|undefined)?.[step.id]?.values??null}] as const):viewedEntries;

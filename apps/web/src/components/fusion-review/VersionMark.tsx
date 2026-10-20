@@ -19,9 +19,12 @@ const day = (value: string | null) => { const at = value ? new Date(value) : nul
  * One call for every analysis on the page (a whole library at once): the marks by version id. A failed read shows no
  * mark and no error: a mark only tells apart reports that used the jury, it never blocks anything.
  */
-export function useVersionMarks(draftIds: Array<string | null | undefined>): Record<string, VersionMarkData> {
-  const ids = [...new Set(draftIds.filter((id): id is string => typeof id === 'string' && id.length > 0))].sort().slice(0, 50);
-  const marks = trpc.fusionReview.versionMarks.useQuery({ draftIds: ids }, { enabled: ids.length > 0, retry: false, staleTime: 60_000,
+export function useVersionMarks(draftIds: Array<string | null | undefined>, versionIds: string[] = []):
+  Record<string, VersionMarkData> {
+  const ids = [...new Set(draftIds.filter((id): id is string => typeof id === 'string' && id.length > 0))].sort().slice(0, 500);
+  const shown = [...new Set(versionIds)].sort().slice(0, 200);
+  const input = { draftIds: ids, ...(shown.length ? { versionIds: shown } : {}) };
+  const marks = trpc.fusionReview.versionMarks.useQuery(input, { enabled: ids.length > 0, retry: false, staleTime: 60_000,
     refetchOnWindowFocus: false });
   return (marks.data ?? {}) as Record<string, VersionMarkData>;
 }

@@ -154,8 +154,8 @@ export const fusionReviewRouter = router({
   }),
   /** Report version marks (Owner 2026-10-20): "已评审" / "衍生" per version id for the given analyses, in one call for a whole
    * library. Every analysis must be the caller's own: another user's (or an unknown) one is refused, never answered empty. */
-  versionMarks: reader.input(z.object({ draftIds: z.array(uuid).min(1).max(50) }).strict())
-    .query(({ ctx, input }) => loadVersionMarks(ctx.admin, ctx.user.id, input.draftIds)),
+  versionMarks: reader.input(z.object({ draftIds: z.array(uuid).min(1).max(500), versionIds: z.array(uuid).max(200).optional() }).strict())
+    .query(({ ctx, input }) => loadVersionMarks(ctx.admin, ctx.user.id, input.draftIds, input.versionIds)),
   markSeen: reader.input(review).mutation(async ({ ctx, input }) => {
     const result = await ctx.admin.rpc('fusion_review_mark_seen', { p_actor_id: ctx.user.id, p_review_id: input.reviewId });
     if (result.error) throw new Error(result.error.message === 'FUSION_REVIEW_DENIED' ? 'FUSION_REVIEW_DENIED' : 'FUSION_REVIEW_UNAVAILABLE');
