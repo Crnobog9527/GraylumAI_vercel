@@ -22,7 +22,7 @@ const ALL_ON = Object.fromEntries(Object.keys(LANDING_FEATURES).map(key => [key,
 
 function render(flags: LandingFlags) {
   const data = buildLandingPageData(flags, [plan('pro', 29, 279), plan('gold', 69, 621)]);
-  return { data, html: renderToStaticMarkup(createElement(SampleI, { data, siteName: 'Graylum', membershipHref: '/profile' })) };
+  return { data, html: renderToStaticMarkup(createElement(SampleI, { data, siteName: 'Graylum', membershipHref: '/app/profile' })) };
 }
 
 describe('style sample I', () => {

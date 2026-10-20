@@ -94,7 +94,7 @@ describe.skipIf(!authUrl || !mailUrl).sequential('confirmation link that cannot 
     browser.current = browserClient(); // no verifier: a different browser or device
     const to = await callback(landing);
     expect(to.pathname).toBe('/login');
-    expect(Object.fromEntries(to.searchParams)).toEqual({ error: 'link_needs_login', redirect: '/profile' });
+    expect(Object.fromEntries(to.searchParams)).toEqual({ error: 'link_needs_login', redirect: '/app/profile' });
     expect(await signsIn(email, password)).toBe(true);
   });
 
@@ -136,6 +136,6 @@ describe.skipIf(!authUrl || !mailUrl).sequential('confirmation link that cannot 
     const forwarded = await proxy(new NextRequest(landing.toString()));
     const to = new URL(forwarded.headers.get('location')!);
     expect(to.pathname).toBe('/auth/callback');
-    expect(Object.fromEntries(to.searchParams)).toEqual({ code, next: '/profile' });
+    expect(Object.fromEntries(to.searchParams)).toEqual({ code, next: '/app/profile' });
   });
 });

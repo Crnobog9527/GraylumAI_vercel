@@ -46,7 +46,7 @@ function VerifyEmailPageContent() {
   // The URL never carries the email: it comes from the session (read-only) or this tab's storage
   // (editable prefill); with neither (another device, an expired link) the visitor types it.
   const [emailEditable, setEmailEditable] = useState(false);
-  const [redirectTarget, setRedirectTarget] = useState('/profile');
+  const [redirectTarget, setRedirectTarget] = useState('/app/profile');
   const [checking, setChecking] = useState(true);
   const [resending, setResending] = useState(false);
   const [refreshing, setRefreshing] = useState(false);

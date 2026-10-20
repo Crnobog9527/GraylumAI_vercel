@@ -18,8 +18,8 @@ it('shows loading without claiming an empty directory or a new user',()=>{
 });
 it('starts 我已有定位 in the Agent workspace, not the library (R15)',()=>{
  const html=renderToStaticMarkup(<HomePage/>);
- expect(html).toMatch(/<a href="\/positioning">我已有定位<\/a>/);
- expect(html).not.toMatch(/<a href="\/library">我已有定位/);
+ expect(html).toMatch(/<a href="\/app\/positioning">我已有定位<\/a>/);
+ expect(html).not.toMatch(/<a href="\/app\/library">我已有定位/);
 });
 it('offers onboarding to a new user without any alert',()=>{
  const html=renderToStaticMarkup(<HomePage/>);

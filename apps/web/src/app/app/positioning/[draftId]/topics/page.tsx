@@ -226,7 +226,7 @@ export default function TopicWorkspacePage() {
     return ids;
   }, [read.data?.handoffs, adopted]);
   const handoffItems = [...new Map([...((read.data?.handoffs??[]).flatMap((h:{result?:Array<{itemId:string;workItemId:string;sessionId:string}>})=>h.result??[])),...adopted].map(item=>[item.itemId,item])).values()];
-  function topicLink(item:PlanItem){const saved=handoffItems.find((h:{itemId:string;sessionId:string})=>h.itemId===item.id);return saved?'/runtime?session='+saved.sessionId+'&continue=1':undefined;}
+  function topicLink(item:PlanItem){const saved=handoffItems.find((h:{itemId:string;sessionId:string})=>h.itemId===item.id);return saved?'/app/runtime?session='+saved.sessionId+'&continue=1':undefined;}
   /**
    * Account identities come from the owned account list, not from the draft
    * read: `opc.read` for one draft has no accounts projection, so reading them
@@ -466,7 +466,7 @@ export default function TopicWorkspacePage() {
     return (
       <main className="p-6">
         <p role="alert">当前工作空间不可用，或你无权访问此定位草稿。</p>
-        <Link className="underline" href={`/positioning/${draftId}`}>
+        <Link className="underline" href={`/app/positioning/${draftId}`}>
           返回定位
         </Link>
       </main>
@@ -603,6 +603,6 @@ export default function TopicWorkspacePage() {
       )}
 
       {!(bound && sourceAvailable) && <ChatNoticeList className="mx-auto w-full max-w-2xl shrink-0 px-6 pb-4" notices={tailNotices} />}
-    </main>{infoOpen&&<div className={topicStyles.infoBackdrop} onMouseDown={event=>{if(event.target===event.currentTarget)setInfoOpen(false);}}><section role="dialog" aria-modal="true" aria-label="工作信息" className={topicStyles.infoDialog}><header><h2>工作信息</h2><button type="button" aria-label="关闭工作信息" onClick={()=>setInfoOpen(false)}>×</button></header><p>本工作绑定正式定位 v{workspace.data?.sourceVersion??'—'} 与原选题方法修订。查看不会生成或采用。</p><div><Link href={`/positioning/${draftId}`}>查看原定位</Link><Link href={'/library?returnTo='+encodeURIComponent('/positioning/'+draftId+'/topics')}>打开资料库</Link></div></section></div>}</WorkspaceFrame>
+    </main>{infoOpen&&<div className={topicStyles.infoBackdrop} onMouseDown={event=>{if(event.target===event.currentTarget)setInfoOpen(false);}}><section role="dialog" aria-modal="true" aria-label="工作信息" className={topicStyles.infoDialog}><header><h2>工作信息</h2><button type="button" aria-label="关闭工作信息" onClick={()=>setInfoOpen(false)}>×</button></header><p>本工作绑定正式定位 v{workspace.data?.sourceVersion??'—'} 与原选题方法修订。查看不会生成或采用。</p><div><Link href={`/app/positioning/${draftId}`}>查看原定位</Link><Link href={'/app/library?returnTo='+encodeURIComponent('/app/positioning/'+draftId+'/topics')}>打开资料库</Link></div></section></div>}</WorkspaceFrame>
   );
 }

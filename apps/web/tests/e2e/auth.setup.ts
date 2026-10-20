@@ -22,7 +22,7 @@ async function saveEmptyState(page: Page, authFile: string) {
 }
 
 function getProtectedPath(role: E2ERole) {
-  return role === 'admin' ? '/admin' : '/profile';
+  return role === 'admin' ? '/admin' : '/app/profile';
 }
 
 async function hasSupabaseAuthCookie(page: Page) {
@@ -50,7 +50,7 @@ async function canReachProtectedPath(page: Page, role: E2ERole) {
     return hasAuthCookie && currentPath.startsWith('/admin');
   }
 
-  return hasAuthCookie && currentPath.startsWith('/profile');
+  return hasAuthCookie && currentPath.startsWith('/app/profile');
 }
 
 async function waitForAuthenticatedNavigation(page: Page, role: E2ERole) {

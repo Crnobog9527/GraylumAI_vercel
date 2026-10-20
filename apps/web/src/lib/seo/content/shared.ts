@@ -6,8 +6,8 @@
 
 // The product entry used by public pages until the logged-out trial exists (SEO_GEO_SPEC 7.2: paused).
 // After sign-up or login the visitor lands on the positioning diagnosis the pages promise, not the profile.
-// The /app move rewrites this target to /app/positioning (SEO_GEO_SPEC section 15).
-export const SIGNUP_CTA_HREF = '/login?action=signup&redirect=%2Fpositioning';
+// Since the /app move (E1) positioning lives at /app/positioning (SEO_GEO_SPEC section 15).
+export const SIGNUP_CTA_HREF = '/login?action=signup&redirect=%2Fapp%2Fpositioning';
 
 // What a new account is given on sign-up, for public pages that say "免费开始，注册送 N 积分". The grant itself is made by the
 // database (migration 0230) and shown in admin settings as `new_user_credits`; the landing page says only "免费试用", so this

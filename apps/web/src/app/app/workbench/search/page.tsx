@@ -19,7 +19,7 @@ export default function WorkspaceSearch(){
  const modules=trpc.modules.getModules.useQuery({limit:100,offset:0,sortBy:'newest'});
  const changeWorkUi=trpc.opc.workUiChange.useMutation();
  useEffect(()=>{const params=new URL(location.href).searchParams;setReturnTo(params.get('returnTo')??sessionStorage.getItem('opc-work-return')??'');},[]);
- const back=/^\/(runtime\?session=[0-9a-f-]{36}|positioning\/[0-9a-f-]{36}(\/topics)?)([&#?].*)?$/i.test(returnTo)?returnTo:'/positioning';
+ const back=/^\/app\/(runtime\?session=[0-9a-f-]{36}|positioning\/[0-9a-f-]{36}(\/topics)?)([&#?].*)?$/i.test(returnTo)?returnTo:'/app/positioning';
  const profile=trpc.user.getUserProfile.useQuery();
  const scrollProps=useScrollPosition(profile.data?.id?'opc-search-scroll:'+profile.data.id+':'+(query):null,library.isSuccess&&drafts.isSuccess&&modules.isSuccess);
  const normalized=query.trim().toLocaleLowerCase();
@@ -49,12 +49,12 @@ export default function WorkspaceSearch(){
   {error&&<p role="alert" className={styles.error}>{error}</p>}
   <div className={styles.results}>
    <section aria-label="工作记录"><h2>工作记录</h2>
-    {strategies.map(account=><Link className={styles.row} href={'/positioning/'+account.strategyDraftId} key={'strategy-'+account.projectId}><strong>定位策略</strong><small>{account.platform} · {account.displayName??account.account}</small></Link>)}
-    {works.map(({account,item})=><div className={styles.workRow} key={item.workItemId}><Link className={styles.row} href={'/runtime?session='+encodeURIComponent(item.sessionId)}><strong>{item.chatName??item.title}</strong><small>{account.platform} · {account.displayName??account.account}{item.archived?' · 已归档':''}</small></Link>{item.archived&&<button type="button" disabled={Boolean(restoring)} onClick={()=>void restore(item)}>{restoring===item.workItemId?'恢复中…':'恢复'}</button>}</div>)}
-    {unassigned.map(draft=><Link className={styles.row} href={'/positioning/'+draft.draftId} key={draft.draftId}><strong>{draft.businessName??'新账号'} · 定位分析</strong><small>{draft.state==='published'?'已确认':'进行中'}</small></Link>)}
+    {strategies.map(account=><Link className={styles.row} href={'/app/positioning/'+account.strategyDraftId} key={'strategy-'+account.projectId}><strong>定位策略</strong><small>{account.platform} · {account.displayName??account.account}</small></Link>)}
+    {works.map(({account,item})=><div className={styles.workRow} key={item.workItemId}><Link className={styles.row} href={'/app/runtime?session='+encodeURIComponent(item.sessionId)}><strong>{item.chatName??item.title}</strong><small>{account.platform} · {account.displayName??account.account}{item.archived?' · 已归档':''}</small></Link>{item.archived&&<button type="button" disabled={Boolean(restoring)} onClick={()=>void restore(item)}>{restoring===item.workItemId?'恢复中…':'恢复'}</button>}</div>)}
+    {unassigned.map(draft=><Link className={styles.row} href={'/app/positioning/'+draft.draftId} key={draft.draftId}><strong>{draft.businessName??'新账号'} · 定位分析</strong><small>{draft.state==='published'?'已确认':'进行中'}</small></Link>)}
     {!library.isLoading&&!drafts.isLoading&&!strategies.length&&!works.length&&!unassigned.length&&<p className={styles.empty}>没有匹配的工作。</p>}
    </section>
-   <section aria-label="功能"><h2>功能</h2>{modules.isLoading&&<p className={styles.empty}>正在读取功能…</p>}{modules.error&&<p role="alert">功能目录暂不可用。</p>}{skills.map(module=><Link className={styles.row} href={'/workbench/marketplace?module='+encodeURIComponent(module.id)+'&returnTo='+encodeURIComponent(back)} key={module.id}><strong>{module.title}</strong><small>{module.description}</small></Link>)}{!modules.isLoading&&!skills.length&&<p className={styles.empty}>没有匹配的功能。</p>}{modules.data?.hasMore&&<Link className={styles.more} href={'/workbench/marketplace?returnTo='+encodeURIComponent(back)}>在功能广场浏览更多 →</Link>}</section>
+   <section aria-label="功能"><h2>功能</h2>{modules.isLoading&&<p className={styles.empty}>正在读取功能…</p>}{modules.error&&<p role="alert">功能目录暂不可用。</p>}{skills.map(module=><Link className={styles.row} href={'/app/workbench/marketplace?module='+encodeURIComponent(module.id)+'&returnTo='+encodeURIComponent(back)} key={module.id}><strong>{module.title}</strong><small>{module.description}</small></Link>)}{!modules.isLoading&&!skills.length&&<p className={styles.empty}>没有匹配的功能。</p>}{modules.data?.hasMore&&<Link className={styles.more} href={'/app/workbench/marketplace?returnTo='+encodeURIComponent(back)}>在功能广场浏览更多 →</Link>}</section>
   </div>
  </main></WorkspaceFrame>;
 }

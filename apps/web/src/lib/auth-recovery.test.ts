@@ -6,7 +6,7 @@ import {
 } from './auth-recovery';
 
 const base = {
-  pathname: '/profile',
+  pathname: '/app/profile',
   search: '?tab=security',
   hasSession: false,
   sessionRefreshUsed: false,
@@ -28,15 +28,15 @@ describe('decideUnauthorizedAction', () => {
   it('sends a visitor without a session to login once, keeping the page as redirect target', () => {
     expect(decideUnauthorizedAction(base)).toEqual({
       kind: 'redirect',
-      to: '/login?redirect=%2Fprofile%3Ftab%3Dsecurity',
+      to: '/login?redirect=%2Fapp%2Fprofile%3Ftab%3Dsecurity',
     });
   });
 
   it('sends a verified account with no session in this browser to login instead of spinning', () => {
     // The verify link was opened in another browser: the email is confirmed but no session exists here,
-    // so every API call on /profile is rejected. The first 401 must lead to login, not to more retries.
+    // so every API call on /app/profile is rejected. The first 401 must lead to login, not to more retries.
     const action = decideUnauthorizedAction({ ...base, search: '', hasSession: false });
-    expect(action).toEqual({ kind: 'redirect', to: '/login?redirect=%2Fprofile' });
+    expect(action).toEqual({ kind: 'redirect', to: '/login?redirect=%2Fapp%2Fprofile' });
   });
 
   it('shows a notice instead of redirecting again within the cooldown', () => {
@@ -55,13 +55,13 @@ describe('decideUnauthorizedAction', () => {
   });
 
   it('never acts on public pages such as login or verify-email', () => {
-    for (const pathname of ['/login', '/verify-email', '/landing', '/auth/callback']) {
+    for (const pathname of ['/', '/login', '/verify-email', '/landing', '/auth/callback', '/pricing']) {
       expect(decideUnauthorizedAction({ ...base, pathname })).toEqual({ kind: 'ignore' });
     }
   });
 
   it('falls back to the default target when the current path is not a safe redirect', () => {
     const action = decideUnauthorizedAction({ ...base, pathname: '//evil.example', search: '' });
-    expect(action).toEqual({ kind: 'redirect', to: '/login?redirect=%2Fprofile' });
+    expect(action).toEqual({ kind: 'redirect', to: '/login?redirect=%2Fapp%2Fprofile' });
   });
 });

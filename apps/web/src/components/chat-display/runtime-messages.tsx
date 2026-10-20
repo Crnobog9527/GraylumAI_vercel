@@ -8,7 +8,7 @@ import workStyles from '@/app/app/runtime/runtime-work.module.css';
 import { DisplayHeading } from './display-heading';
 
 /**
- * Display-only pieces of the work conversation (/runtime): header, message list, the "建议稿"
+ * Display-only pieces of the work conversation (/app/runtime): header, message list, the "建议稿"
  * block and the right-hand results column. Text and flags come in as props; requests, storage
  * and protocol parsing stay with the page.
  */

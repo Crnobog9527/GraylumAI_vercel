@@ -44,7 +44,7 @@ it('OPC: UI_COVERAGE long card scroll and mobile edit in complete local page', a
   await context.route('**/*', route => ['127.0.0.1', 'localhost'].includes(new URL(route.request().url()).hostname)
     ? route.continue() : route.abort());
   const page = await context.newPage(); page.setDefaultTimeout(60000);
-  const path = '/positioning/' + draft.draftId, read = () => service.read(draft.draftId);
+  const path = '/app/positioning/' + draft.draftId, read = () => service.read(draft.draftId);
   try {
     await page.goto(process.env.V3_LOCAL_APP + '/login?redirect=' + encodeURIComponent(path));
     await page.getByPlaceholder('name@example.com').fill(email);

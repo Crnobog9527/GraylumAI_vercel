@@ -40,7 +40,7 @@ export function ReadonlyDraftView({ draftId, draft }: { draftId: string; draft: 
       </p>}
       <footer className="flex flex-wrap items-center gap-3">
         <InformationExport draftId={draftId} current={draft}/>
-        <Link href="/positioning" className="text-sm underline">开始新的定位</Link>
+        <Link href="/app/positioning" className="text-sm underline">开始新的定位</Link>
       </footer>
     </main>
   </WorkspaceFrame>;

@@ -77,5 +77,5 @@ it("ends a finalized report with the expert booking entry, and only a finalized 
   state.read = { data: { ...doc, finalized: true, versionId: "v", version: 2 }, isError: false };
   const html = render();
   expect(html).toContain("预约咨询，免费询价");
-  expect(html).toContain('href="/expert-consult?from=report"');
+  expect(html).toContain('href="/app/expert-consult?from=report"');
 });

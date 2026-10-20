@@ -133,7 +133,7 @@ export function useFreeConversation(options:{withReferences?:boolean}={}){
    if(moduleId)localStorage.setItem('opc-runtime-skill:'+result.sessionId,moduleId);
    sessionStorage.setItem('opc-runtime-send:'+result.sessionId,sendId);
    sessionStorage.removeItem('opc-new-task-input');sessionStorage.removeItem(NEW_TASK_REFERENCES);
-   location.assign('/runtime?session='+result.sessionId+'&request='+sendId);
+   location.assign('/app/runtime?session='+result.sessionId+'&request='+sendId);
   }catch(cause){setError(workspaceErrorMessage(cause as Parameters<typeof workspaceErrorMessage>[0])+' 输入已保留；再次发送会恢复同一次开始请求。');}
  }
  return {send,busy:start.isPending,error,references,setReferences};

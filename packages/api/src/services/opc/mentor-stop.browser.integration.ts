@@ -163,7 +163,7 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST === 'true')('OPC: MENTOR_STREAM C2_ST
     win.finishStopTrace = () => { observer.disconnect(); cancelAnimationFrame(frame); observe(); return trace; };
   });
   try {
-    const path = '/positioning/' + draft.draftId;
+    const path = '/app/positioning/' + draft.draftId;
     await page.goto(process.env.V3_LOCAL_APP + '/login?redirect=' + encodeURIComponent(path));
     await page.getByPlaceholder('name@example.com').fill(f.email);
     await page.getByPlaceholder('输入你的密码').fill(f.password);

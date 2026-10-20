@@ -7,7 +7,7 @@ import {
 
 let legacyCookiesCleared = false;
 
-// A staging host used to write its session to .graylum.com. Expire only this project's copies there;
+// The production and staging hosts used to write the session to .graylum.com. Expire only this project's copies there;
 // the host-only session cookie (no Domain attribute) is a different cookie and stays.
 export function clearLegacyParentSessionCookies() {
   if (legacyCookiesCleared || typeof document === 'undefined') {

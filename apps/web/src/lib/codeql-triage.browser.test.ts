@@ -59,11 +59,11 @@ it('checks return links, maintenance recovery and escaped ticket previews in Chr
         import Marketplace from '@/app/app/workbench/marketplace/page';
         import Maintenance from '@/app/maintenance/page';
         import Tickets from '@/components/profile/TicketsPanel';
-        const pages = {'/library': Library, '/workbench/search': Search,
-          '/workbench/marketplace': Marketplace, '/maintenance': Maintenance};
+        const pages = {'/app/library': Library, '/app/workbench/search': Search,
+          '/app/workbench/marketplace': Marketplace, '/maintenance': Maintenance};
         const Page = pages[location.pathname];
         if (Page) createRoot(document.getElementById('root')).render(React.createElement(Page));
-        else if (location.pathname === '/profile') createRoot(document.getElementById('root'))
+        else if (location.pathname === '/app/profile') createRoot(document.getElementById('root'))
           .render(React.createElement(Tickets, {user: {}, initialView: 'create'}));
       `;
     } }], build: { write: false, minify: false,
@@ -87,27 +87,27 @@ it('checks return links, maintenance recovery and escaped ticket previews in Chr
         '<div id="root"></div><script src="/fixture.js"></script>'});
     });
     const session = '11111111-1111-4111-8111-111111111111';
-    const valid = '/runtime?session=' + session;
+    const valid = '/app/runtime?session=' + session;
     const unsafe = ['javascript:window.__xss=1', '//evil.example', '/\\evil.example',
       '/\n/evil.example', 'https://evil.example'];
-    for (const path of ['/library', '/workbench/search', '/workbench/marketplace']) {
+    for (const path of ['/app/library', '/app/workbench/search', '/app/workbench/marketplace']) {
       for (const target of [valid, ...unsafe]) {
         await page.goto('https://c6b.example.test' + path + '?returnTo=' + encodeURIComponent(target));
         const link = page.getByRole('link', {name: /返回.*工作/});
         await link.waitFor({timeout: 5000}).catch(error => {
           throw new Error(path + ': ' + errors.join('; ') + '; ' + String(error));
         });
-        await expect.poll(() => link.getAttribute('href')).toBe(target === valid ? valid : '/positioning');
+        await expect.poll(() => link.getAttribute('href')).toBe(target === valid ? valid : '/app/positioning');
         await link.click();
-        await page.waitForURL('https://c6b.example.test' + (target === valid ? valid : '/positioning'));
+        await page.waitForURL('https://c6b.example.test' + (target === valid ? valid : '/app/positioning'));
       }
     }
-    for (const target of ['/library', ...unsafe, '/\r/evil.example', '/\t/evil.example']) {
+    for (const target of ['/app/library', ...unsafe, '/\r/evil.example', '/\t/evil.example']) {
       await page.goto('https://c6b.example.test/maintenance?from=' + encodeURIComponent(target));
       await page.getByRole('button', {name: '重新检查状态'}).click();
-      await page.waitForURL('https://c6b.example.test' + (target === '/library' ? '/library' : '/profile'));
+      await page.waitForURL('https://c6b.example.test' + (target === '/app/library' ? '/app/library' : '/app/profile'));
     }
-    await page.goto('https://c6b.example.test/profile');
+    await page.goto('https://c6b.example.test/app/profile');
     const filename = '<img src=x onerror=window.__xss=1>.png';
     await page.locator('#ticket-attachment').setInputFiles({name: filename, mimeType: 'image/png',
       buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64')});

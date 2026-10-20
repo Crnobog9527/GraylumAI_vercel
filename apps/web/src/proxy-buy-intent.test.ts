@@ -16,7 +16,7 @@ async function get(url: string) {
   return { status: response.status, to: location ? new URL(location) : null };
 }
 
-const GOLD_MONTHLY = '/profile?tab=subscription&buy=gold&cycle=monthly';
+const GOLD_MONTHLY = '/app/profile?tab=subscription&buy=gold&cycle=monthly';
 const VERIFIED = { email: 'a@example.com', email_confirmed_at: '2026-10-01T00:00:00Z' };
 
 // Owner 2026-10-17: a logged-out visitor who picks a plan on the landing page goes to sign-up (login is one click
@@ -32,8 +32,9 @@ describe('landing-page buy links for logged-out visitors', () => {
     vi.unstubAllEnvs();
   });
 
-  it('opens sign-up and keeps the plan on app hosts and local dev', async () => {
-    for (const origin of ['https://auth-staging.graylum.com', 'https://app.graylum.com', 'http://localhost:3000']) {
+  it('opens sign-up and keeps the plan on every host', async () => {
+    for (const origin of ['https://www.graylum.com', 'https://auth-staging.graylum.com', 'https://app.graylum.com',
+      'http://localhost:3000']) {
       const { status, to } = await get(`${origin}${GOLD_MONTHLY}`);
       expect(status, origin).toBe(307);
       expect(to?.origin, origin).toBe(origin);
@@ -44,12 +45,12 @@ describe('landing-page buy links for logged-out visitors', () => {
   });
 
   it('keeps a listed offer and the yearly cycle', async () => {
-    const { to } = await get('https://auth-staging.graylum.com/profile?buy=pro&cycle=yearly&offer=founder');
-    expect(to?.searchParams.get('redirect')).toBe('/profile?tab=subscription&buy=pro&cycle=yearly&offer=founder');
+    const { to } = await get('https://auth-staging.graylum.com/app/profile?buy=pro&cycle=yearly&offer=founder');
+    expect(to?.searchParams.get('redirect')).toBe('/app/profile?tab=subscription&buy=pro&cycle=yearly&offer=founder');
   });
 
   it('rebuilds the return path so nothing else from the link rides along', async () => {
-    const { to } = await get('https://auth-staging.graylum.com/profile?tab=subscription&buy=gold&cycle=monthly'
+    const { to } = await get('https://auth-staging.graylum.com/app/profile?tab=subscription&buy=gold&cycle=monthly'
       + '&offer=free99&next=https%3A%2F%2Fevil.example&redirect=%2F%2Fevil.example&tab=admin#x');
     expect(to?.searchParams.get('action')).toBe('signup');
     expect(to?.searchParams.get('redirect')).toBe(GOLD_MONTHLY);
@@ -58,8 +59,8 @@ describe('landing-page buy links for logged-out visitors', () => {
   });
 
   it('treats malformed or off-page buy params as an ordinary login', async () => {
-    const cases = ['/profile?tab=subscription&buy=platinum&cycle=monthly', '/profile?buy=gold&cycle=weekly',
-      '/profile?buy=gold', '/positioning?buy=gold&cycle=monthly', '/profile/settings?buy=gold&cycle=monthly'];
+    const cases = ['/app/profile?tab=subscription&buy=platinum&cycle=monthly', '/app/profile?buy=gold&cycle=weekly',
+      '/app/profile?buy=gold', '/app/positioning?buy=gold&cycle=monthly', '/app/profile/settings?buy=gold&cycle=monthly'];
     for (const path of cases) {
       const { status, to } = await get(`https://auth-staging.graylum.com${path}`);
       expect(status, path).toBe(307);
@@ -67,13 +68,6 @@ describe('landing-page buy links for logged-out visitors', () => {
       expect(to?.searchParams.has('action'), path).toBe(false);
       expect(to?.searchParams.get('redirect'), path).toBe(path);
     }
-  });
-
-  it('forwards a buy link on the public site to the app host with the same path', async () => {
-    const { status, to } = await get(`https://www.graylum.com${GOLD_MONTHLY}`);
-    expect(status).toBe(307);
-    expect(to?.hostname).toBe('app.graylum.com');
-    expect(`${to?.pathname}${to?.search}`).toBe(GOLD_MONTHLY);
   });
 
   it('leaves the signed-in direct link (#961) untouched', async () => {
@@ -94,6 +88,6 @@ describe('landing-page buy links for logged-out visitors', () => {
     expect(`${to?.pathname}${to?.search}`).toBe(GOLD_MONTHLY);
     const evil = await get('https://auth-staging.graylum.com/login?action=signup&redirect=%2F%2Fevil.example');
     expect(evil.to?.origin).toBe('https://auth-staging.graylum.com');
-    expect(evil.to?.pathname).toBe('/profile');
+    expect(evil.to?.pathname).toBe('/app/profile');
   });
 });

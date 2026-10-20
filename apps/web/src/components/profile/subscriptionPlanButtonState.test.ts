@@ -18,7 +18,7 @@ it('turns a subscription with an unsuccessful payment into a plain message and a
   // Portal cancellation only ends at period end, so the copy must not promise self-service stop then repurchase.
   expect(UNPAID_SUBSCRIPTION_BLOCKS_PURCHASE).toContain('提交工单');
   expect(UNPAID_SUBSCRIPTION_BLOCKS_PURCHASE).not.toContain('管理订阅');
-  expect(SUPPORT_TICKET_HREF).toBe('/profile?tab=tickets');
+  expect(SUPPORT_TICKET_HREF).toBe('/app/profile?tab=tickets');
 });
 
 it('keeps the server message and no support link for other refusals', () => {

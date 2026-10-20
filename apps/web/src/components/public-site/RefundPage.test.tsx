@@ -15,6 +15,6 @@ it('renders the refund summary with one H1, the 7-day and 6% rules, and the poin
   for (const text of ['7 天', '6% 手续费', '客服工单', '账单/退款', '续费', '以《服务条款》和正式的退款政策为准']) expect(html).toContain(text);
   expect(html).toContain('href="/terms"');
   expect(html).toContain('<a href="/about" rel="author"');
-  expect(html).not.toContain('href="/"');
+  expect(html).not.toContain('href="/landing"');
   expect(PUBLIC_PAGES.some(page => page.path === REFUND_PAGE.path)).toBe(true);
 });

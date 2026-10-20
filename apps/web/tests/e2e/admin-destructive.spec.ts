@@ -158,7 +158,7 @@ test.describe('Admin Destructive Flows', () => {
       expect(packageId).not.toBe('');
 
       steps.push('Open /profile?tab=subscription as the user and verify the credit package appears');
-      await gotoWithBypass(userPage, '/profile?tab=subscription');
+      await gotoWithBypass(userPage, '/app/profile?tab=subscription');
       await expect(userPage).toHaveURL(/\/profile\?tab=subscription/);
       const userPackage = userPage.getByTestId(`profile-credit-package-${packageId}`);
       await expect(userPackage).toBeVisible({ timeout: 15000 });
@@ -280,7 +280,7 @@ test.describe('Admin Destructive Flows', () => {
       expect(targetPlanLevel).not.toBe('free');
 
       steps.push('Open /profile?tab=subscription as the user and verify the target plan is visible');
-      await gotoWithBypass(userPage, '/profile?tab=subscription');
+      await gotoWithBypass(userPage, '/app/profile?tab=subscription');
       await expect(userPage).toHaveURL(/\/profile\?tab=subscription/);
       const userPlan = userPage.locator(`[data-plan-id="${targetPlanId}"]`);
       await expect(userPlan).toBeVisible({ timeout: 15000 });

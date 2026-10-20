@@ -18,7 +18,7 @@ test.describe('User Supplemental Flows', () => {
 
     try {
       steps.push('Open /profile without authenticated storage state');
-      await gotoWithBypass(page, '/profile');
+      await gotoWithBypass(page, '/app/profile');
 
       steps.push('Wait for the route guard to redirect to /login');
       await page.waitForURL(/\/login/, { timeout: 15000 });
@@ -36,7 +36,7 @@ test.describe('User Supplemental Flows', () => {
         {
           title: 'unauthenticated-profile-redirect',
           role: 'public',
-          route: '/profile',
+          route: '/app/profile',
           expected: 'Unauthenticated visitors attempting to open protected profile routes are redirected to the login page.',
         },
         actual,
@@ -57,7 +57,7 @@ test.describe('User Supplemental Flows', () => {
 
       try {
         steps.push('Open /profile?tab=security and verify the security shell');
-        await gotoWithBypass(page, '/profile?tab=security');
+        await gotoWithBypass(page, '/app/profile?tab=security');
         await expect(page.locator('h3').filter({ hasText: '账户安全' })).toBeVisible({ timeout: 10000 });
         await expect(page.getByText(getCredentials('user').email)).toBeVisible({ timeout: 10000 });
         await expect(page.getByText('登录方式')).toBeVisible({ timeout: 10000 });
@@ -95,7 +95,7 @@ test.describe('User Supplemental Flows', () => {
           {
             title: 'profile-security-settings',
             role: 'user',
-            route: '/profile?tab=security',
+            route: '/app/profile?tab=security',
             expected: 'Authenticated users can inspect real security-state details, see verification status, and invalid password changes are rejected without depending on fake success dialogs.',
           },
           actual,
@@ -112,7 +112,7 @@ test.describe('User Supplemental Flows', () => {
 
       try {
         steps.push('Open /marketplace and verify the page shell');
-        await gotoWithBypass(page, '/marketplace');
+        await gotoWithBypass(page, '/app/marketplace');
         await expect(page.getByRole('heading', { name: '功能广场' })).toBeVisible({ timeout: 10000 });
         await expect(page.getByText('AI TOOLS MARKETPLACE')).toBeVisible({ timeout: 10000 });
 
@@ -180,7 +180,7 @@ test.describe('User Supplemental Flows', () => {
           {
             title: 'marketplace-filter-detail-use',
             role: 'user',
-            route: '/marketplace',
+            route: '/app/marketplace',
             expected: 'Authenticated users can filter marketplace modules, change sort order, inspect module detail, and route into the positioning workspace when the module is published.',
           },
           actual,

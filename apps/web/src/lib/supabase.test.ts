@@ -37,7 +37,7 @@ function installCookieJar(hostname: string) {
   return { document, jar };
 }
 
-describe('legacy parent-domain session cookies on a staging host', () => {
+describe('legacy parent-domain session cookies on graylum.com hosts', () => {
   beforeEach(() => {
     vi.resetModules();
     vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://stagingref.supabase.co');
@@ -78,13 +78,27 @@ describe('legacy parent-domain session cookies on a staging host', () => {
     expect(await readCookie(document.cookie, VERIFIER)).toBe('NEW_FLOW');
   });
 
-  it('leaves production parent-domain cookies alone on app.graylum.com', async () => {
-    const { document } = installCookieJar('app.graylum.com');
+  // E1: production moved to host-only cookies on www, so its old shared copies are expired the same way. A visitor
+  // whose only session sat on .graylum.com logs in once again; nothing is left for the browser to read first.
+  it.each(['www.graylum.com', 'app.graylum.com'])('expires the old .graylum.com copies on %s too', async host => {
+    const { document, jar } = installCookieJar(host);
     document.cookie = `${VERIFIER}=SHARED; Domain=.graylum.com; Path=/`;
+    document.cookie = `${VERIFIER}=HOST; Path=/`;
 
     const { createClient } = await import('./supabase');
     createClient();
 
-    expect(await readCookie(document.cookie, VERIFIER)).toBe('SHARED');
+    expect(await readCookie(document.cookie, VERIFIER)).toBe('HOST');
+    expect(jar.map(c => `${c.name}@${c.domain ?? 'host'}`)).toEqual([`${VERIFIER}@host`]);
+  });
+
+  it('leaves cookies alone on a host outside graylum.com', async () => {
+    const { document } = installCookieJar('example-alias.vercel.app');
+    document.cookie = `${VERIFIER}=HOST; Path=/`;
+
+    const { createClient } = await import('./supabase');
+    createClient();
+
+    expect(await readCookie(document.cookie, VERIFIER)).toBe('HOST');
   });
 });

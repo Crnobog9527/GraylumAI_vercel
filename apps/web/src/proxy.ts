@@ -7,11 +7,12 @@ import { buildVerifyEmailPath, routeCallbackError } from '@/lib/authFlow';
 import { logServerError } from '@/lib/server-log';
 import { isPublicPathname } from '@/lib/public-paths';
 import { BUY_INTENT_PATH, buyIntentPath, parseBuyIntent } from '@/lib/buyIntent';
-import { isPublicSiteHost, resolveAuthAppUrl, resolveSupabaseCookieOptions } from '@/lib/site-config';
+import { resolveSupabaseCookieOptions } from '@/lib/site-config';
 
 const SENTRY_TUNNEL_PATH = '/monitoring';
 
-// 公开站点路径 - 仅允许公共内容留在 public 域
+// Public site content: open to everyone and still served while maintenance mode is on, like the public
+// host was before the single-host move (E1). Login entry pages are public too but not in this list.
 const PUBLIC_SITE_PATHS = [
   '/maintenance',
   '/landing',
@@ -27,8 +28,8 @@ const PUBLIC_SITE_PATHS = [
 ];
 
 // Public site pages added by PUBLIC-SITE. Unlike the prefix list above, these match whole path segments
-// only: /zh-tw and /zh-tw/... are public on the public host, /zh-twx is not. /refund is the public refund
-// policy (Owner 2026-10-17), matched by segment so /refunds and /refund-x stay on the app host.
+// only: /zh-tw and /zh-tw/... are public, /zh-twx is not. /refund is the public refund policy
+// (Owner 2026-10-17), matched by segment so /refunds and /refund-x still need login.
 const PUBLIC_SITE_PAGE_PATHS = [
   '/about',
   '/features', // Product feature pages (/features and /features/<name>) linked from the public header and footer.
@@ -55,28 +56,6 @@ export function normalizeHostname(hostname: string): string {
   return hostname.split(':')[0].toLowerCase().replace(/\.$/, '');
 }
 
-export function isPreviewDeployment(hostname: string): boolean {
-  return hostname.endsWith('.vercel.app');
-}
-
-export function isLocalhost(hostname: string): boolean {
-  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname.endsWith('.localhost');
-}
-
-export function isDevEnvironment(hostname: string): boolean {
-  return isLocalhost(hostname) || hostname.endsWith('.github.dev') || hostname.endsWith('.gitpod.io');
-}
-
-export function isPublicSiteDomain(hostname: string): boolean {
-  return isPublicSiteHost(hostname);
-}
-
-// Every host that is not the public site or a local/dev host is an app host and requires login,
-// so a newly added domain (for example a staging domain) is protected without a code change.
-export function requiresAppAuth(hostname: string): boolean {
-  return !isPublicSiteDomain(hostname) && !isDevEnvironment(hostname);
-}
-
 // 判断是否为公开路径
 function isPublicPath(pathname: string): boolean {
   if (isSentryTunnelPath(pathname)) {
@@ -87,7 +66,7 @@ function isPublicPath(pathname: string): boolean {
 }
 
 function isPublicSitePath(pathname: string): boolean {
-  if (isSentryTunnelPath(pathname)) {
+  if (pathname === '/' || isSentryTunnelPath(pathname)) {
     return true;
   }
 
@@ -103,6 +82,12 @@ function isPublicPricingEntryPath(pathname: string): boolean {
 
 function isSentryTunnelPath(pathname: string): boolean {
   return pathname === SENTRY_TUNNEL_PATH || pathname.startsWith(`${SENTRY_TUNNEL_PATH}/`);
+}
+
+// A response other than the session response keeps the cookies a session refresh just wrote.
+function withSessionCookies(response: NextResponse, sessionResponse: NextResponse): NextResponse {
+  sessionResponse.cookies.getAll().forEach(cookie => response.cookies.set(cookie));
+  return response;
 }
 
 function createPublicPricingRedirect(request: NextRequest): NextResponse {
@@ -158,9 +143,8 @@ function getClientIP(request: NextRequest): string {
 // GoTrue sends email and OAuth links to /auth/callback. Only when it does not accept the requested
 // redirect does it fall back to the Site URL root, so only the root is handled here: a code goes to
 // the server callback, which exchanges it with the verifier cookie this request carries (with
-// duplicate cookie names the browser client reads the older one first), and the expired-link error
-// code goes to the resend page. Other errors, and codes on any other page, keep their handling.
-// This also runs on the public site: its /auth/callback is forwarded to the app domain as usual.
+// duplicate cookie names the browser client reads the older one first), the expired-link error
+// code goes to the resend page and other errors go to login. Codes on any other page keep their handling.
 export function routeAuthLanding(request: NextRequest): NextResponse | null {
   const { pathname, searchParams } = request.nextUrl;
   if (pathname !== '/') {
@@ -175,8 +159,15 @@ export function routeAuthLanding(request: NextRequest): NextResponse | null {
     return NextResponse.redirect(callbackUrl);
   }
 
-  if (routeCallbackError(searchParams)?.to === 'verify-expired') {
-    return NextResponse.redirect(new URL(buildVerifyEmailPath('/profile', 'expired'), request.url));
+  const callbackError = routeCallbackError(searchParams)?.to;
+  if (callbackError === 'verify-expired') {
+    return NextResponse.redirect(new URL(buildVerifyEmailPath('/app/profile', 'expired'), request.url));
+  }
+
+  // Any other error goes to the login page, which shows it, as when the root still needed login; the root
+  // itself is now the public home page and would drop it.
+  if (callbackError === 'login-error') {
+    return createLoginRedirect(request);
   }
 
   return null;
@@ -289,15 +280,6 @@ export async function proxy(request: NextRequest) {
     return authLandingRedirect;
   }
 
-  // 判断域名类型
-  const requiresAppAuthMatch = requiresAppAuth(normalizedHostname);
-  const isPublicSiteDomainMatch = isPublicSiteDomain(normalizedHostname);
-  const isPreviewDeploymentMatch = isPreviewDeployment(normalizedHostname);
-  const isDevEnvironmentMatch = isDevEnvironment(normalizedHostname);
-  const domainParam = request.nextUrl.searchParams.get('domain');
-  const isPreviewPublicSitePricingEntry =
-    isPreviewDeploymentMatch && domainParam === 'www' && isPublicPricingEntryPath(pathname);
-
   let supabaseResponse = NextResponse.next({
     request,
   });
@@ -341,32 +323,23 @@ export async function proxy(request: NextRequest) {
   }
 
   // ========================================
-  // 认证与路由逻辑
+  // 认证与路由逻辑：所有主机按路径判断（E1 单主机，SEO_GEO_SPEC 第 2、15 节）
   // ========================================
 
-  if (isPreviewPublicSitePricingEntry) {
+  if (isPublicPricingEntryPath(pathname)) {
     return createPublicPricingRedirect(request);
   }
 
-  // 公开站点域名: 展示着陆页 (公开访问)
-  if (isPublicSiteDomainMatch) {
-    // 根路径重写到着陆页
-    if (pathname === '/') {
-      const url = request.nextUrl.clone();
-      url.pathname = '/landing';
-      return NextResponse.rewrite(url);
-    }
+  // The root is the public home page, served from /landing (whose own address 308s back to "/").
+  if (pathname === '/') {
+    const url = request.nextUrl.clone();
+    url.pathname = '/landing';
+    return withSessionCookies(NextResponse.rewrite(url, { request }), supabaseResponse);
+  }
 
-    if (isPublicPricingEntryPath(pathname)) {
-      return createPublicPricingRedirect(request);
-    }
-
-    if (isPublicSitePath(pathname)) {
-      return supabaseResponse;
-    }
-
-    const appUrl = new URL(`${pathname}${request.nextUrl.search}`, resolveAuthAppUrl());
-    return NextResponse.redirect(appUrl);
+  // Public site pages stay open, also during maintenance.
+  if (isPublicSitePath(pathname)) {
+    return supabaseResponse;
   }
 
   if (maintenanceModeEnabled && !isAdminUser && !isMaintenanceBypassPath(pathname)) {
@@ -379,82 +352,9 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL('/admin', request.url));
   }
 
-  // www 域名允许所有访问，不需要认证
-  if (isPublicSitePath(pathname)) {
-    return supabaseResponse;
-  }
-
-  // 应用域名（app、staging、预览及任何未单独列出的域名）: 需要认证
-  if (requiresAppAuthMatch) {
-    // 公开路径允许访问
-    if (isPublicPath(pathname)) {
-      // 已登录用户访问登录页时重定向到首页
-      if ((pathname === '/login' || pathname === '/register') && user) {
-        const requestedRedirect = sanitizeRedirectTarget(request.nextUrl.searchParams.get('redirect'));
-        if (!userIsVerified) {
-          const verifyUrl = new URL('/verify-email', request.url);
-          verifyUrl.searchParams.set('redirect', requestedRedirect);
-          return NextResponse.redirect(verifyUrl);
-        }
-        return NextResponse.redirect(new URL(requestedRedirect, request.url));
-      }
-      return supabaseResponse;
-    }
-
-    // 非公开路径需要登录
-    if (!user) {
-      return createLoginRedirect(request);
-    }
-
-    if (!userIsVerified) {
-      const verifyUrl = new URL('/verify-email', request.url);
-      verifyUrl.searchParams.set('redirect', `${pathname}${request.nextUrl.search}`);
-      return NextResponse.redirect(verifyUrl);
-    }
-
-    return supabaseResponse;
-  }
-
-  // 开发环境 (localhost / GitHub Codespaces / Gitpod): 根据查询参数判断
-  if (isDevEnvironmentMatch) {
-    // 开发环境使用查询参数 ?domain=www 模拟 www 域名
-    if (domainParam === 'www') {
-      if (isPublicPricingEntryPath(pathname)) {
-        return createPublicPricingRedirect(request);
-      }
-
-      // 根路径重写到着陆页
-      if (pathname === '/' || pathname === '') {
-        // 使用 redirect 而非 rewrite 确保页面正确加载
-        const landingUrl = new URL('/landing', request.url);
-        landingUrl.searchParams.set('domain', 'www');
-        return NextResponse.redirect(landingUrl);
-      }
-      // /landing 路径直接访问，允许公开访问
-      if (pathname === '/landing') {
-        return supabaseResponse;
-      }
-      // 模拟 www 域名，公开访问
-      return supabaseResponse;
-    }
-
-    // 默认行为: 模拟 app 域名逻辑
-    // /landing 路径在开发环境始终允许访问
-    if (pathname === '/landing') {
-      return supabaseResponse;
-    }
-
-    if (!isPublicPath(pathname) && !user) {
-      return createLoginRedirect(request);
-    }
-
-    if (!isPublicPath(pathname) && user && !userIsVerified) {
-      const verifyUrl = new URL('/verify-email', request.url);
-      verifyUrl.searchParams.set('redirect', `${pathname}${request.nextUrl.search}`);
-      return NextResponse.redirect(verifyUrl);
-    }
-
-    // 已登录用户访问登录页时重定向到首页
+  // Login entry pages and the other public paths open without a session.
+  if (isPublicPath(pathname)) {
+    // 已登录用户访问登录页时重定向到回跳目标
     if ((pathname === '/login' || pathname === '/register') && user) {
       const requestedRedirect = sanitizeRedirectTarget(request.nextUrl.searchParams.get('redirect'));
       if (!userIsVerified) {
@@ -464,6 +364,18 @@ export async function proxy(request: NextRequest) {
       }
       return NextResponse.redirect(new URL(requestedRedirect, request.url));
     }
+    return supabaseResponse;
+  }
+
+  // Everything else (/app/*, /admin/* and any page not listed as public) needs a verified login.
+  if (!user) {
+    return createLoginRedirect(request);
+  }
+
+  if (!userIsVerified) {
+    const verifyUrl = new URL('/verify-email', request.url);
+    verifyUrl.searchParams.set('redirect', `${pathname}${request.nextUrl.search}`);
+    return NextResponse.redirect(verifyUrl);
   }
 
   return supabaseResponse;

@@ -77,7 +77,7 @@ export function SkillMenuView({query,onQuery,onClose,status,skills,hint,onPick}:
   <div className={styles.skillList}>{status??<>{skills.map(skill=><button type="button" key={skill.moduleId} onClick={()=>onPick?.(skill.moduleId)}>
    <span className={styles.skillGlyph}><Box size={16}/></span><span><strong>{skill.name}</strong><small>{hint}</small></span></button>)}
    {!skills.length&&<p>没有匹配的可用技能</p>}</>}</div>
-  <div className={styles.skillFoot}><Link href="/workbench/marketplace">浏览功能广场</Link></div></div>;
+  <div className={styles.skillFoot}><Link href="/app/workbench/marketplace">浏览功能广场</Link></div></div>;
 }
 
 /**

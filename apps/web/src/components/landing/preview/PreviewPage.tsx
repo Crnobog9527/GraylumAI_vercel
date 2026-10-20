@@ -42,7 +42,7 @@ export function PreviewPage({ variant, data, siteName, membershipHref }: {
       </nav>
       <header className={styles.header}>
         <div className={cn(styles.wrap, styles.headerInner)}>
-          <Link href="/landing" className={styles.brand}>
+          <Link href="/" className={styles.brand}>
             <img src="/graylum-logo.svg" alt="" aria-hidden="true" width={28} height={28} />{siteName}
           </Link>
           <nav className={styles.nav} aria-label="主导航">

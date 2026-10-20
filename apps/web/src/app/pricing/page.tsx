@@ -36,7 +36,7 @@ export default async function PricingPage() {
           <p className="mx-auto max-w-2xl text-base" style={{ color: 'var(--text-secondary)' }}>{COPY.lede}</p>
         </header>
         <PricingPlans plans={plans} links={{ signup: buildAuthHref('/login?action=signup'),
-          membership: buildAuthHref('/profile?tab=subscription') }} offers={offers} />
+          membership: buildAuthHref('/app/profile?tab=subscription') }} offers={offers} />
         <PricingCreditPacks packages={packs.packages} plans={plans} failed={packs.failed} />
         <PricingStudio />
         <ExpertConsultCard href={buildAuthHref(expertConsultPath('pricing'))} />

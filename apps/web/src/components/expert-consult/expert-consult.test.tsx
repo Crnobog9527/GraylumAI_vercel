@@ -24,7 +24,7 @@ describe('expert consult entry card', () => {
   it('says "预约咨询，免费询价", links to the booking page and never shows a price', () => {
     const html = renderToStaticMarkup(createElement(ExpertConsultCard, { href: expertConsultPath('pricing') }));
     expect(html).toContain('预约咨询，免费询价');
-    expect(html).toContain('href="/expert-consult?from=pricing"');
+    expect(html).toContain('href="/app/expert-consult?from=pricing"');
     expect(html).not.toMatch(/\$|美元|\d+\s*元|每小时|\/小时/);
   });
 
@@ -47,7 +47,7 @@ describe('expert consult booking form', () => {
     hooks.state.data = { eligible: false, pending: null };
     const html = render();
     expect(html).toContain(COPY.notEligibleTitle);
-    expect(html).toContain('href="/positioning"');
+    expect(html).toContain('href="/app/positioning"');
     expect(html).not.toContain(COPY.needLabel);
   });
 
@@ -58,7 +58,7 @@ describe('expert consult booking form', () => {
     hooks.send.data = { ticketId: 'x', createdAt: '2026-10-17T00:00:00Z', created: true };
     const html = render();
     expect(html).toContain(COPY.sentTitle);
-    expect(html).toContain('href="/profile?tab=tickets"');
+    expect(html).toContain('href="/app/profile?tab=tickets"');
   });
 
   it('maps only known server codes and never shows raw errors', () => {

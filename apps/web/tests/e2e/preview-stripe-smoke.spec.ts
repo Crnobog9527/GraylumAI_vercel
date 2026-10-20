@@ -36,7 +36,7 @@ test.describe('preview-only stripe smoke', () => {
     test.use({ storageState: authStatePaths.user });
 
     test('credit package purchase redirects to Stripe Checkout for a normal user', async ({ page }) => {
-      await gotoWithBypass(page, '/profile?tab=subscription');
+      await gotoWithBypass(page, '/app/profile?tab=subscription');
 
       await expect(page.getByRole('heading', { name: '积分加油包' })).toBeVisible();
 

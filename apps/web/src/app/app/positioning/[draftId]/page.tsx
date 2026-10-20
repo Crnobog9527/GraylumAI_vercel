@@ -372,7 +372,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   useEffect(() => {
     if (!planView || hydratedDraft !== draftId || !d) return;
     const retained = readRetainedPlan();
-    if (!retained) { router.replace(`/positioning/${draftId}/topics`); return; }
+    if (!retained) { router.replace(`/app/positioning/${draftId}/topics`); return; }
     if (retained.kind === "invalid") {
       setNotice("本机旧请求无法读取，原记录已保留；没有开始新的生成。");
       return;
@@ -766,7 +766,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
         await runPlanRequest(retainedRequest, sourceRoundId);
         setRetainedPlan(null);
       });
-      else router.push(`/positioning/${draftId}/topics`);
+      else router.push(`/app/positioning/${draftId}/topics`);
       return;
     }
     if (hasUnsavedInformation) return;
@@ -784,7 +784,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
         if (!accepted.bound || accepted.sourceVersionId !== d.report?.id)
           throw new Error("OPC_TOPIC_SOURCE_CHANGED");
         setConsentOpen(false);
-        router.push(`/positioning/${draftId}/topics`);
+        router.push(`/app/positioning/${draftId}/topics`);
       } catch (cause) {
         const message = cause instanceof Error ? cause.message : "";
         setConsentOpen(false);
@@ -966,10 +966,10 @@ function PositioningDraftContent({draftId}:{draftId:string}){
     | undefined;
   if (read.isLoading || hydratedDraft !== draftId) return <main className="p-6">正在恢复定位…</main>;
   if (read.error || !d)
-    return <main className="p-6" role="alert">无法读取这份定位，请检查登录和访问权限。<Link href="/positioning">返回定位列表</Link></main>;
+    return <main className="p-6" role="alert">无法读取这份定位，请检查登录和访问权限。<Link href="/app/positioning">返回定位列表</Link></main>;
   if (d.conversationDeleted) return <ReadonlyDraftView draftId={draftId} draft={d}/>; // Owner 2026-10-14: read-only after deletion.
   if (planView) return <main className="mx-auto max-w-3xl space-y-4 p-6">
-    <Link href={`/positioning/${draftId}/topics`}>进入当前选题工作</Link>
+    <Link href={`/app/positioning/${draftId}/topics`}>进入当前选题工作</Link>
     <h1>旧计划请求恢复</h1>
     {error && <ChatInlineNotice tone="error">{error}</ChatInlineNotice>}
     <p>这里只恢复原请求及其结果，不创建新请求，不替换当前工作。</p>
@@ -1128,7 +1128,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
           : existingEntry ? "核对已有定位" : "我的定位分析"}
         status={(discussionAccount?discussionAccount.platform:'整体规划')+(snap.state==='published'?' · 已确认':' · 进行中')}
         onWorkInfo={()=>setWorkInfoOpen(true)} showExpand={!resultOpen} onExpand={()=>setResultOpen(true)}/>
-      {workInfoOpen&&<div className={resultStyles.infoBackdrop} onMouseDown={event=>{if(event.target===event.currentTarget)setWorkInfoOpen(false);}}><section role="dialog" aria-modal="true" aria-label="工作信息" className={resultStyles.infoDialog}><header><h2>工作信息</h2><button type="button" aria-label="关闭工作信息" onClick={()=>setWorkInfoOpen(false)}>×</button></header><p>当前工作：{existingEntry?'已有定位核对':'定位分析'}</p><p>状态：{snap.state==='published'?'定位已确认':'定位进行中'}</p><p>定位讨论、待确认修改与历史版本留在原工作；查看不会确认或保存。</p><footer><button type="button" onClick={()=>{void read.refetch();setWorkInfoOpen(false);}}>重新读取状态</button><Link href="/positioning">新任务与账号</Link></footer></section></div>}
+      {workInfoOpen&&<div className={resultStyles.infoBackdrop} onMouseDown={event=>{if(event.target===event.currentTarget)setWorkInfoOpen(false);}}><section role="dialog" aria-modal="true" aria-label="工作信息" className={resultStyles.infoDialog}><header><h2>工作信息</h2><button type="button" aria-label="关闭工作信息" onClick={()=>setWorkInfoOpen(false)}>×</button></header><p>当前工作：{existingEntry?'已有定位核对':'定位分析'}</p><p>状态：{snap.state==='published'?'定位已确认':'定位进行中'}</p><p>定位讨论、待确认修改与历史版本留在原工作；查看不会确认或保存。</p><footer><button type="button" onClick={()=>{void read.refetch();setWorkInfoOpen(false);}}>重新读取状态</button><Link href="/app/positioning">新任务与账号</Link></footer></section></div>}
       {!planView && <>
       {d.accountRevision?.methodConflict&&<ChatInlineNotice tone="warning" alert>此修改草稿使用的方法与原正式版本不同，未自动合并或覆盖任何答案。请对照原正式内容核对当前草稿。
           <details><summary>查看原正式版本完整内容</summary>{Object.entries(d.accountRevision.sourceInformation as Record<string,{title:string;schema:Array<{id:string;title:string}>;values:Record<string,Information>}>).map(([id,part])=><section key={id}><h4>{part.title}</h4>{part.schema.map(field=><p key={field.id}>{field.title}：{part.values?.[field.id]?.value}</p>)}</section>)}</details>
@@ -1330,7 +1330,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
           .then(failure => { if (!failure) setConsentOpen(true); })} // Only with the finalized version read back.
         confirmed={!hasUnconfirmedRequired && !hasPendingConfirmation && !(d.accountRevision ? nextReviewStep : steps.some(x => !snap.steps[x.id].valid))} />}
       </div><p><PublishFootnote workflow={snap.workflow}/></p>
-      {d.report?.available && <Link href={`/positioning/${draftId}/topics`}>进入选题工作对话 →</Link>}
+      {d.report?.available && <Link href={`/app/positioning/${draftId}/topics`}>进入选题工作对话 →</Link>}
       </footer>}
       {consentOpen && (
         <div
@@ -1370,7 +1370,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
           </div>
         </div>
       )}
-      {planView && <Link className="block underline" href={`/positioning/${draftId}`}>返回定位与 AI 教练对话</Link>}
+      {planView && <Link className="block underline" href={`/app/positioning/${draftId}`}>返回定位与 AI 教练对话</Link>}
       {planView && !d.report?.available && <p role="status">请先确认正式定位，再制定第一周计划。原定位和对话仍保留。</p>}
           {planView && retainedPlan && (
             <div className="space-y-3 rounded-xl border border-[var(--border-primary)] p-4">
@@ -1689,7 +1689,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
               <div key={i.workItemId}>
                 <Link
                   className="underline"
-                  href={"/runtime?session=" + i.sessionId}
+                  href={"/app/runtime?session=" + i.sessionId}
                 >
                   进入选题工作空间
                 </Link>

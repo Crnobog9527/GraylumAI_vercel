@@ -105,12 +105,12 @@ describe('web proxy monitoring tunnel routing', () => {
   });
 
   it('keeps marketplace and chat protected for unauthenticated app users', async () => {
-    const marketplaceResponse = await runProxy('https://app.graylum.com/marketplace');
+    const marketplaceResponse = await runProxy('https://app.graylum.com/app/marketplace');
     const chatResponse = await runProxy('https://app.graylum.com/chat');
 
     expect(marketplaceResponse.status).toBe(307);
     expect(marketplaceResponse.headers.get('location')).toBe(
-      'https://app.graylum.com/login?redirect=%2Fmarketplace',
+      'https://app.graylum.com/login?redirect=%2Fapp%2Fmarketplace',
     );
     expect(chatResponse.status).toBe(307);
     expect(chatResponse.headers.get('location')).toBe(
@@ -131,8 +131,9 @@ describe('web proxy monitoring tunnel routing', () => {
     expect(termsResponse.headers.get('location')).toBeNull();
     expect(privacyResponse.headers.get('location')).toBeNull();
     expect(appLoginResponse.headers.get('location')).toBeNull();
-    expect(wwwLoginResponse.status).toBe(307);
-    expect(wwwLoginResponse.headers.get('location')).toBe('https://app.graylum.com/login');
+    // Single host (E1): www serves login itself instead of forwarding it to the app domain.
+    expect(wwwLoginResponse.status).toBe(200);
+    expect(wwwLoginResponse.headers.get('location')).toBeNull();
   });
 
   it('bypasses maintenance redirects for the monitoring tunnel', async () => {

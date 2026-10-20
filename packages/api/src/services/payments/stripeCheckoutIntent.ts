@@ -77,8 +77,8 @@ export function buildStripeCheckoutRequest(input: {
     line_items: [lineItem],
     ...(coupon ? { discounts: [{ coupon }] } : {}),
     expires_at: input.expiresAt,
-    success_url: `${origin.origin}/profile?tab=subscription&checkout=success&session_id={CHECKOUT_SESSION_ID}`,
-    cancel_url: `${origin.origin}/profile?tab=subscription&checkout=canceled&session_id={CHECKOUT_SESSION_ID}`,
+    success_url: `${origin.origin}/app/profile?tab=subscription&checkout=success&session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${origin.origin}/app/profile?tab=subscription&checkout=canceled&session_id={CHECKOUT_SESSION_ID}`,
     metadata,
     ...(recurring ? { subscription_data: { metadata } } : { payment_intent_data: { metadata } }),
   };

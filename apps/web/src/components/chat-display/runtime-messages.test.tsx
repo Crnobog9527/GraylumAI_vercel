@@ -14,7 +14,7 @@ const versions = [
 
 it('renders a work conversation from sample data', () => {
   const html = renderToStaticMarkup(<>
-    <RuntimeHeader title="三分钟学会做司康" meta={{ platform: '小红书', account: '烘焙小店', infoHref: '/library', showExpand: true }}/>
+    <RuntimeHeader title="三分钟学会做司康" meta={{ platform: '小红书', account: '烘焙小店', infoHref: '/app/library', showExpand: true }}/>
     <RuntimeTurnView dateLabel="今天 10:30" userText="帮我想一版开头" completed>
       <RuntimeProposal adopted={false} text="**开头**：你做的司康总是不起层？"/>
     </RuntimeTurnView>
@@ -38,7 +38,7 @@ it('renders the header action and the empty state without a topic', () => {
 it('renders the storyboard column and saved Skill results', () => {
   const html = renderToStaticMarkup(<>
     <RuntimeTypePendingPanel/>
-    <RuntimeResultsSection isVideo versions={versions} currentScriptId="script-1" libraryHref="/library?item=w1"
+    <RuntimeResultsSection isVideo versions={versions} currentScriptId="script-1" libraryHref="/app/library?item=w1"
       saved={[{ artifactId: 'a1', version: 3, body: null }]}/>
   </>);
   for (const text of ['当前成果', '分镜与剪辑建议', '分镜 · 第 1 版 · 草稿', ' · 匹配当前口播稿', '镜头 1：开箱', '剪辑建议 · 第 2 版 · 已定稿',
@@ -47,7 +47,7 @@ it('renders the storyboard column and saved Skill results', () => {
 });
 
 it('shows nothing for a non-video topic without saved results', () => {
-  expect(renderToStaticMarkup(<RuntimeResultsSection isVideo={false} versions={versions} libraryHref="/library" saved={[]}/>)).toBe('');
+  expect(renderToStaticMarkup(<RuntimeResultsSection isVideo={false} versions={versions} libraryHref="/app/library" saved={[]}/>)).toBe('');
 });
 
 it('keeps the header title an h1 by default and renders it at the level a page asks for, styled the same', async () => {
@@ -56,7 +56,7 @@ it('keeps the header title an h1 by default and renders it at the level a page a
   expect(nested).toContain('<h2>工作对话</h2>');
   expect(nested).not.toContain('<h1');
   const { readFileSync } = await import('node:fs');
-  const css = readFileSync(new URL('../../app/runtime/runtime-work.module.css', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('../../app/app/runtime/runtime-work.module.css', import.meta.url), 'utf8');
   expect(css).toContain('.workTitle :is(h1,h2,:where(');
 });
 

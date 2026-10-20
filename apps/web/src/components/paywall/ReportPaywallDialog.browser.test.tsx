@@ -13,7 +13,7 @@ beforeAll(async () => {
   const require = createRequire(import.meta.url);
   const vite = createRequire(require.resolve('vitest/package.json')).resolve('vite');
   const { build } = await import(pathToFileURL(vite).href);
-  const source = fileURLToPath(new URL('../../app/positioning/[draftId]/report-panel.tsx', import.meta.url));
+  const source = fileURLToPath(new URL('../../app/app/positioning/[draftId]/report-panel.tsx', import.meta.url));
   // Server double. window.plans is the catalog, window.membership the methodMembership answer;
   // window.report is what the report hook reports; window.checkouts records methodCheckout inputs.
   // window.checkoutMode: 'open' (default, window.checkoutUrl), 'hang', 'recovery' or 'error' (window.checkoutError).
@@ -503,7 +503,7 @@ it('explains a subscription with an unsuccessful payment, and points to a suppor
     await browserExpect(page.getByText(/你还有一个付款没有成功的订阅/)).toBeVisible();
     const ticket = page.getByTestId('report-paywall-support-ticket');
     await browserExpect(ticket).toHaveText('提交工单');
-    await browserExpect(ticket).toHaveAttribute('href', '/profile?tab=tickets');
+    await browserExpect(ticket).toHaveAttribute('href', '/app/profile?tab=tickets');
     expect(await checkouts(page)).toEqual([]);
     expect(errors).toEqual([]);
   } finally { await page.close(); }

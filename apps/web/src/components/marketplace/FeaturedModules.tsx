@@ -60,11 +60,11 @@ export default function FeaturedModules({ featuredModules = [], onModuleClick }:
     }
 
     if (featured.link_module_id) {
-      router.push(`/marketplace?module=${featured.link_module_id}`);
+      router.push(`/app/marketplace?module=${featured.link_module_id}`);
       return;
     }
 
-    router.push('/marketplace');
+    router.push('/app/marketplace');
   };
 
   return (

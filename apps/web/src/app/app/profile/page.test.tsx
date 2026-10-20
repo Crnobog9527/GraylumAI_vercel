@@ -113,7 +113,7 @@ describe('profile page', () => {
     renderToStaticMarkup(<ProfilePage />);
     const replaceState = vi.fn();
     vi.stubGlobal('window', {
-      location: { href: 'https://x.test/profile?tab=subscription&checkout=success' },
+      location: { href: 'https://x.test/app/profile?tab=subscription&checkout=success' },
       history: { state: { __NA: true }, replaceState },
     });
     try {
@@ -122,6 +122,6 @@ describe('profile page', () => {
       vi.unstubAllGlobals();
     }
     // Passing Next's own state (with __NA) makes its patched replaceState skip the useSearchParams sync.
-    expect(replaceState).toHaveBeenCalledWith(null, '', '/profile?tab=security&checkout=success');
+    expect(replaceState).toHaveBeenCalledWith(null, '', '/app/profile?tab=security&checkout=success');
   });
 });

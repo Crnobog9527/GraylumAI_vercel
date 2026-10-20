@@ -11,7 +11,7 @@ import { resolveSupabaseCookieOptions } from '@/lib/site-config';
  * PUBLISH-MONITOR PR-2b-2: shared pieces of the start and callback routes. Both run the same tRPC procedures as the
  * app (same login, entitlement and switch checks); the routes only add the browser cookie and the redirects.
  */
-export const CONFIRM_PAGE = '/publish-monitor/connect';
+export const CONFIRM_PAGE = '/app/publish-monitor/connect';
 
 export function connectCookie(requestId: string, secure: boolean) {
   return { name: CONNECT_COOKIE, value: requestId, httpOnly: true, secure, sameSite: 'lax' as const, path: '/',

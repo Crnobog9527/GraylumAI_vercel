@@ -39,8 +39,8 @@ import {
 // Navigation items configuration
 const navItems = [
   { href: '/', label: '首页', icon: Home },
-  { href: '/positioning', label: '对话', icon: MessageSquare },
-  { href: '/profile', label: '个人中心', icon: User },
+  { href: '/app/positioning', label: '对话', icon: MessageSquare },
+  { href: '/app/profile', label: '个人中心', icon: User },
 ];
 
 export function AppHeader() {
@@ -80,7 +80,7 @@ export function AppHeader() {
       await supabase.auth.signOut();
 
       // 根据环境跳转到不同的着陆页
-      window.location.href = buildAppHref('/landing');
+      window.location.href = buildAppHref('/');
     } catch {
       logClientDevError('Logout failed');
     } finally {
@@ -107,7 +107,7 @@ export function AppHeader() {
 
       <div className="h-full max-w-[1400px] mx-auto px-6 flex items-center justify-between">
         {/* Logo */}
-        <Link href="/" className="flex items-center gap-3 group">
+        <Link href="/app" className="flex items-center gap-3 group">
           <img
             src="/graylum-logo.svg"
             alt=""
@@ -243,7 +243,7 @@ export function AppHeader() {
                 border: '1px solid var(--border-primary)'
               }}
             >
-              <Link href="/profile">
+              <Link href="/app/profile">
                 <DropdownMenuItem
                   className="gap-2 rounded-lg cursor-pointer"
                   style={{ color: 'var(--text-secondary)' }}

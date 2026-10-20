@@ -162,7 +162,7 @@ export const SecuritySettingsCard = memo(function SecuritySettingsCard({ user }:
                     size="sm"
                     onClick={() =>
                       router.push(
-                        buildAuthHref(buildVerifyEmailPath('/profile?tab=security'))
+                        buildAuthHref(buildVerifyEmailPath('/app/profile?tab=security'))
                       )
                     }
                     style={{

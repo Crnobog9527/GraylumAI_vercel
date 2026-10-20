@@ -28,5 +28,5 @@ export default async function LandingPreviewPage({ params }: { params: Promise<{
   if (!variant || isPublicIndexingEnabled(process.env[SITE_INDEXING_ENV])) notFound();
   const { siteName, membershipPlans, membershipPlansStatus } = await getPublicSiteSettings();
   const data = buildLandingPageData(resolveLandingFlags(), membershipPlansStatus === 'available' ? membershipPlans : []);
-  return <PreviewPage variant={variant.id} data={data} siteName={siteName} membershipHref={buildAuthHref('/profile?tab=subscription')} />;
+  return <PreviewPage variant={variant.id} data={data} siteName={siteName} membershipHref={buildAuthHref('/app/profile?tab=subscription')} />;
 }

@@ -29,14 +29,14 @@ export function ExpertConsultForm({ source }: { source: ExpertConsultSource }) {
   const send = trpc.expertConsult.request.useMutation();
   const [need, setNeed] = useState('');
   const [contact, setContact] = useState('');
-  const tickets = { label: COPY.tickets, href: '/profile?tab=tickets' };
+  const tickets = { label: COPY.tickets, href: '/app/profile?tab=tickets' };
 
   if (send.data || state.data?.pending) return <Message title={COPY.sentTitle} text={COPY.sentText} action={tickets} />;
   if (state.isLoading) return <div className="flex justify-center p-8"><Loader2 className="h-5 w-5 animate-spin" /></div>;
   if (state.error || !state.data) return <Message title={COPY.pageTitle} text={COPY.loadFailed} />;
   if (!state.data.eligible || send.error?.message === 'EXPERT_CONSULT_NOT_ELIGIBLE') {
     return <Message title={COPY.notEligibleTitle} text={COPY.notEligibleText}
-      action={{ label: COPY.startPositioning, href: '/positioning' }} />;
+      action={{ label: COPY.startPositioning, href: '/app/positioning' }} />;
   }
   const needLength = need.trim().length, contactLength = contact.trim().length;
   const ready = needLength >= NEED_MIN && needLength <= NEED_MAX && contactLength >= CONTACT_MIN && contactLength <= CONTACT_MAX;

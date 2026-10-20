@@ -367,7 +367,7 @@ test.describe('Admin Config Flows', () => {
       await saveAllSettings(page);
 
       steps.push('Verify the profile check-in dialog reflects the new reward ladder and monthly bonus');
-      await gotoWithBypass(userPage, '/profile');
+      await gotoWithBypass(userPage, '/app/profile');
       await userPage.getByTestId('profile-checkin-card').click();
       const checkinDialog = userPage.getByTestId('profile-checkin-dialog');
       await expect(checkinDialog).toBeVisible({ timeout: 10000 });

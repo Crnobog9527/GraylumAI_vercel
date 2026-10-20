@@ -52,7 +52,7 @@ describe('positioning guide card', () => {
     expect([start!.label, existing!.label]).toEqual([POSITIONING_ACTIONS.mentor, POSITIONING_ACTIONS.manual]);
     start!.onClick(); existing!.onClick(); start!.onClick();
     const entries = navigate.mock.calls.map(([href]) => { const url = new URL(href, 'https://x'); return { path: url.pathname, ...readStartEntry(url.search) }; });
-    expect(entries.map(e => [e.path, e.mode])).toEqual([['/positioning', 'mentor'], ['/positioning', 'manual'], ['/positioning', 'mentor']]);
+    expect(entries.map(e => [e.path, e.mode])).toEqual([['/app/positioning', 'mentor'], ['/app/positioning', 'manual'], ['/app/positioning', 'mentor']]);
     expect(entries.every(e => e.intent)).toBe(true);
     expect(new Set(entries.map(e => e.intent)).size).toBe(3);
   });
@@ -60,6 +60,6 @@ describe('positioning guide card', () => {
   it('keeps other notices unchanged', () => {
     expect(tail('请求状态待核实。', vi.fn())).toEqual([{ id: 'error', tone: 'error', text: '请求状态待核实。' }]);
     expect(positioningEntryHref('manual', '11111111-1111-4111-8111-111111111111'))
-      .toBe('/positioning?start=manual&intent=11111111-1111-4111-8111-111111111111');
+      .toBe('/app/positioning?start=manual&intent=11111111-1111-4111-8111-111111111111');
   });
 });

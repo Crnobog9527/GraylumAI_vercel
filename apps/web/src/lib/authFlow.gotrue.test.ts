@@ -102,7 +102,7 @@ describe.skipIf(!authUrl || !mailUrl)('unconfirmed email sign-in against local G
     expect(pkceLanding.searchParams.get('error_code')).toBe('otp_expired');
     const pkceTo = await route(pkceLanding);
     expect(pkceTo.pathname).toBe('/verify-email');
-    expect(Object.fromEntries(pkceTo.searchParams)).toEqual({ redirect: '/profile', reason: 'expired' });
+    expect(Object.fromEntries(pkceTo.searchParams)).toEqual({ redirect: '/app/profile', reason: 'expired' });
 
     // Resent link (no PKCE): the error is only in the fragment. The server sends the visit to the
     // login page (the browser carries the fragment along) and the page routes it by the same list.
@@ -112,7 +112,7 @@ describe.skipIf(!authUrl || !mailUrl)('unconfirmed email sign-in against local G
     expect(resentLanding.searchParams.get('error_code')).toBeNull();
     const resentTo = await route(resentLanding);
     expect(resentTo.pathname).toBe('/login');
-    expect(Object.fromEntries(resentTo.searchParams)).toEqual({ redirect: '/profile' });
+    expect(Object.fromEntries(resentTo.searchParams)).toEqual({ redirect: '/app/profile' });
     expect(readAuthFragment(resentLanding.hash)).toEqual({ to: 'verify-expired' });
   }, 30_000);
 
@@ -133,7 +133,7 @@ describe.skipIf(!authUrl || !mailUrl)('unconfirmed email sign-in against local G
     const { GET } = await import('@/app/auth/callback/route');
     const to = new URL((await GET(new NextRequest(landing.toString()))).headers.get('location')!);
     expect(to.pathname).toBe('/login');
-    expect(Object.fromEntries(to.searchParams)).toEqual({ redirect: '/profile' });
+    expect(Object.fromEntries(to.searchParams)).toEqual({ redirect: '/app/profile' });
     expect(readAuthFragment(landing.hash)).toEqual({ to: 'verified' });
 
     // Opening the same link again (how staging checks the expired landing without waiting a day)

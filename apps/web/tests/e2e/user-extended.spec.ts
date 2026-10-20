@@ -54,7 +54,7 @@ test.describe('User Extended Flows', () => {
 
     try {
       steps.push('Open /profile and verify the profile shell');
-      await gotoWithBypass(page, '/profile');
+      await gotoWithBypass(page, '/app/profile');
       await expect(page).toHaveURL(/\/profile/);
       await expect(page.getByRole('heading', { name: '个人中心' })).toBeVisible();
 
@@ -84,7 +84,7 @@ test.describe('User Extended Flows', () => {
         {
           title: 'profile-high-value-tabs',
           role: 'user',
-          route: '/profile',
+          route: '/app/profile',
           expected: 'Authenticated users can open subscription, credits, and usage history tabs without blocking runtime issues.',
         },
         actual,
@@ -101,7 +101,7 @@ test.describe('User Extended Flows', () => {
 
     try {
       steps.push('Open the subscription tab in profile');
-      await gotoWithBypass(page, '/profile?tab=subscription');
+      await gotoWithBypass(page, '/app/profile?tab=subscription');
       await expect(page.getByText('会员订阅')).toBeVisible({ timeout: 10000 });
 
       steps.push('Trigger a package purchase action');
@@ -151,7 +151,7 @@ test.describe('User Extended Flows', () => {
         {
           title: 'subscription-purchase-next-step',
           role: 'user',
-          route: '/profile?tab=subscription',
+          route: '/app/profile?tab=subscription',
           expected: 'Subscription and credit package actions either open the support dialog when checkout is disabled or redirect into Stripe Checkout when checkout is enabled.',
         },
         actual,
@@ -168,7 +168,7 @@ test.describe('User Extended Flows', () => {
 
     try {
       steps.push('Open /profile and locate the daily check-in quick action');
-      await gotoWithBypass(page, '/profile');
+      await gotoWithBypass(page, '/app/profile');
       const checkinCard = page.getByTestId('profile-checkin-card');
       await expect(checkinCard).toBeVisible({ timeout: 10000 });
 
@@ -211,7 +211,7 @@ test.describe('User Extended Flows', () => {
         {
           title: 'profile-daily-checkin',
           role: 'user',
-          route: '/profile',
+          route: '/app/profile',
           expected: 'Authenticated users can open the daily check-in dialog and either claim today’s reward or see that it has already been claimed.',
         },
         actual,
@@ -231,7 +231,7 @@ test.describe('User Extended Flows', () => {
 
     try {
       steps.push('Open the tickets tab in profile');
-      await gotoWithBypass(page, '/profile?tab=tickets');
+      await gotoWithBypass(page, '/app/profile?tab=tickets');
       await expect(page.getByText('我的工单')).toBeVisible({ timeout: 10000 });
 
       steps.push('Open the ticket creation form');
@@ -304,7 +304,7 @@ test.describe('User Extended Flows', () => {
         {
           title: 'profile-ticket-lifecycle',
           role: 'user',
-          route: '/profile?tab=tickets',
+          route: '/app/profile?tab=tickets',
           expected: 'Authenticated users can create a support ticket with an uploaded screenshot, reply to it, and close it without blocking issues.',
         },
         actual,

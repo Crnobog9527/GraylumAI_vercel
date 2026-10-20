@@ -8,7 +8,7 @@ export function isProfileTab(value: string | null | undefined): value is Profile
 }
 
 export function profileTabHref(tab: ProfileTab): string {
-  return tab === 'profile' ? '/profile' : `/profile?tab=${tab}`;
+  return tab === 'profile' ? '/app/profile' : `/app/profile?tab=${tab}`;
 }
 
 // 切换分页时只改 tab 参数，保留地址里的其它参数（例如支付回跳的 checkout）。

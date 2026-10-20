@@ -11,7 +11,7 @@ const INTENT = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]
 
 /** A one-click entry from another page. The intent id becomes the start request id, so a reload never starts twice. */
 export function startEntryHref(mode: StartMode, intent: string) {
-  return `/positioning?start=${mode}&intent=${intent}`;
+  return `/app/positioning?start=${mode}&intent=${intent}`;
 }
 
 /** The entry named by the URL, or null. `intent` is null when the URL carries none or an unusable one. */

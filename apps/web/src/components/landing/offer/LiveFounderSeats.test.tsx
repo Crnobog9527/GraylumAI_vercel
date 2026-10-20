@@ -24,7 +24,7 @@ const data = buildLandingPageData(ALL_ON, [plan('pro', 29, 279), plan('gold', 69
 function render() {
   return renderToStaticMarkup(createElement(FounderSeatsProvider, { initial: data.founderSeats, children: createElement(Fragment, null,
     createElement(PriceSection, { pricing: data.pricing, rows: data.compareRows, risk: data.risk, showResult: data.showResult,
-      founderSeats: data.founderSeats, membershipHref: '/profile?tab=subscription' }),
+      founderSeats: data.founderSeats, membershipHref: '/app/profile?tab=subscription' }),
     createElement(OfferFaq, { groups: data.faqGroups }),
     createElement(FinalAction, { showStack: data.showStack, founderSeats: data.founderSeats, note: data.finalNote })) }));
 }
@@ -58,8 +58,8 @@ describe('live founder seats on the hourly pre-rendered landing page', () => {
     expect(html).toContain('data-testid="landing-plan-founder"');
     expect(html).toContain('最高省 40%');
     // Monthly is the default tab: each card links to its own plan and cycle on the membership page.
-    expect(html).toContain('href="/profile?tab=subscription&amp;buy=gold&amp;cycle=monthly"');
-    expect(html).toContain('href="/profile?tab=subscription&amp;buy=pro&amp;cycle=monthly"');
+    expect(html).toContain('href="/app/profile?tab=subscription&amp;buy=gold&amp;cycle=monthly"');
+    expect(html).toContain('href="/app/profile?tab=subscription&amp;buy=pro&amp;cycle=monthly"');
     expect(html).toContain('创始会员和普通 Gold 年付差在哪？');
   });
 
@@ -81,9 +81,9 @@ describe('live founder seats on the hourly pre-rendered landing page', () => {
 
 describe('purchase links from the landing cards', () => {
   it('names the plan and cycle, with founder as Gold yearly', () => {
-    expect(purchaseHref('/profile?tab=subscription', 'gold', 'monthly')).toBe('/profile?tab=subscription&buy=gold&cycle=monthly');
-    expect(purchaseHref('/profile?tab=subscription', 'pro', 'yearly')).toBe('/profile?tab=subscription&buy=pro&cycle=yearly');
-    expect(purchaseHref('/profile?tab=subscription', 'founder', 'yearly')).toBe('/profile?tab=subscription&buy=gold&cycle=yearly');
-    expect(purchaseHref('/profile', 'pro', 'monthly')).toBe('/profile?buy=pro&cycle=monthly');
+    expect(purchaseHref('/app/profile?tab=subscription', 'gold', 'monthly')).toBe('/app/profile?tab=subscription&buy=gold&cycle=monthly');
+    expect(purchaseHref('/app/profile?tab=subscription', 'pro', 'yearly')).toBe('/app/profile?tab=subscription&buy=pro&cycle=yearly');
+    expect(purchaseHref('/app/profile?tab=subscription', 'founder', 'yearly')).toBe('/app/profile?tab=subscription&buy=gold&cycle=yearly');
+    expect(purchaseHref('/app/profile', 'pro', 'monthly')).toBe('/app/profile?buy=pro&cycle=monthly');
   });
 });

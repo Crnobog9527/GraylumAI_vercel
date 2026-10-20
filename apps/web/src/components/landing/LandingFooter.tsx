@@ -7,7 +7,7 @@ const footerLinks = {
   product: {
     title: '产品',
     links: [
-      { label: '它怎么工作', href: '/landing#how-it-works' },
+      { label: '它怎么工作', href: '/#how-it-works' },
       { label: '定价方案', href: '/pricing' },
     ],
   },
@@ -51,7 +51,7 @@ export default function LandingFooter({
         <div className="grid grid-cols-1 gap-10 py-16 md:grid-cols-2 xl:grid-cols-[1.4fr,1fr,1fr,1fr,1fr]">
           {/* Brand Column */}
           <div>
-            <Link href="/landing" className="mb-4 flex items-center gap-2">
+            <Link href="/" className="mb-4 flex items-center gap-2">
               <div className="relative">
                 <img
                   src="/graylum-logo.svg"

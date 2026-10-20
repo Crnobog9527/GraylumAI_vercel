@@ -30,7 +30,7 @@ export type MembershipPlanButtonState = {
 };
 
 /** Where an account opens a support ticket (个人中心 · 工单). */
-export const SUPPORT_TICKET_HREF = '/profile?tab=tickets';
+export const SUPPORT_TICKET_HREF = '/app/profile?tab=tickets';
 
 /**
  * The server refuses a new purchase while a subscription still has an unsuccessful payment (`resolvePaymentIssue`:

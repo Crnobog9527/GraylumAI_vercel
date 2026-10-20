@@ -91,11 +91,11 @@ test.describe('Authentication', () => {
       steps.push('Open a protected route with query parameters while unauthenticated');
       await gotoWithBypass(page, '/login');
       await clearBrowserAuthState(page);
-      await gotoWithBypass(page, '/profile?tab=security');
+      await gotoWithBypass(page, '/app/profile?tab=security');
 
       steps.push('Verify login redirect preserves the original destination');
-      await expect(page).toHaveURL(/\/login\?redirect=%2Fprofile%3Ftab%3Dsecurity/);
-      await expect(page.getByText('/profile?tab=security')).toBeVisible({ timeout: 10000 });
+      await expect(page).toHaveURL(/\/login\?redirect=%2Fapp%2Fprofile%3Ftab%3Dsecurity/);
+      await expect(page.getByText('/app/profile?tab=security')).toBeVisible({ timeout: 10000 });
 
       steps.push('Authenticate with the normal E2E user');
       await page.fill('#email, input[type="email"], input[name="email"]', getCredentials('user').email);
@@ -110,7 +110,7 @@ test.describe('Authentication', () => {
         issue.source === 'requestfailed' &&
         issue.message === 'net::ERR_ABORTED' &&
         issue.resourceType === 'document' &&
-        (issue.url?.includes('/login?redirect=%2Fprofile%3Ftab%3Dsecurity') ?? false)
+        (issue.url?.includes('/login?redirect=%2Fapp%2Fprofile%3Ftab%3Dsecurity') ?? false)
       );
 
       const blockingIssues = monitor.getIssues('P1');
@@ -125,7 +125,7 @@ test.describe('Authentication', () => {
         {
           title: 'login-redirect-return',
           role: 'public',
-          route: '/profile?tab=security',
+          route: '/app/profile?tab=security',
           expected: 'Unauthenticated users keep the original protected destination through /login and land back on that route after successful authentication.',
         },
         actual,
@@ -322,13 +322,13 @@ test.describe('Authentication', () => {
 
       try {
         steps.push('Open /profile and verify the default profile content renders');
-        await gotoWithBypass(page, '/profile');
+        await gotoWithBypass(page, '/app/profile');
         await expect(page).toHaveURL(/\/profile/);
         await expect(page.getByRole('heading', { name: '个人中心' })).toBeVisible({ timeout: 30000 });
         await expect(page.getByRole('button', { name: '账户安全' })).toBeVisible({ timeout: 30000 });
 
         steps.push('Open the subscription tab route and verify yearly pricing copy and highlight tone');
-        await gotoWithBypass(page, '/profile?tab=subscription');
+        await gotoWithBypass(page, '/app/profile?tab=subscription');
         await expect(page).toHaveURL(/\/profile\?tab=subscription/, { timeout: 15000 });
         const yearlyCycleButton = page.getByRole('button', { name: /按年|年付/ });
         await expect(yearlyCycleButton).toBeVisible({ timeout: 30000 });
@@ -355,7 +355,7 @@ test.describe('Authentication', () => {
           {
             title: 'profile-page-smoke',
             role: 'user',
-            route: '/profile',
+            route: '/app/profile',
             expected: 'Authenticated users can load profile tabs without blocking page or data-loading errors.',
           },
           actual,

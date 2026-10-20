@@ -74,6 +74,6 @@ export default function ScanCheckPage() {
       <textarea readOnly value={report} rows={10} style={{ width: '100%', fontFamily: 'monospace', fontSize: 13 }}
         aria-label="测速结果"/>
     </>}
-    <p style={{ marginTop: 24 }}><Link href="/library">返回资料库</Link></p>
+    <p style={{ marginTop: 24 }}><Link href="/app/library">返回资料库</Link></p>
   </main>;
 }

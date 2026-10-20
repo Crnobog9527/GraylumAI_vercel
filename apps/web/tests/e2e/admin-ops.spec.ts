@@ -290,7 +290,7 @@ test.describe('Admin Operations Flows', () => {
 
     try {
       steps.push('Open the user tickets tab and create a fresh ticket');
-      await gotoWithBypass(userPage, '/profile?tab=tickets', {
+      await gotoWithBypass(userPage, '/app/profile?tab=tickets', {
         waitUntil: 'networkidle',
       });
       await expect(userPage.getByText('我的工单')).toBeVisible({ timeout: 15000 });

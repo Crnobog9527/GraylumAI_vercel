@@ -38,7 +38,7 @@ export function SampleD({ data, siteName, membershipHref }: { data: LandingData;
 
       <AutoHideHeader className={styles.header}>
         <div className={styles.headerPill}>
-          <Link href="/landing" className={styles.brand}>
+          <Link href="/" className={styles.brand}>
             <img src="/graylum-logo.svg" alt="" aria-hidden="true" width={26} height={26} />{siteName}
           </Link>
           <nav className={styles.nav} aria-label="主导航">

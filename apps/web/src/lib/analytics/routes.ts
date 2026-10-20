@@ -11,6 +11,7 @@ import { PUBLIC_PAGES } from '@/lib/seo/public-pages';
  */
 const APP_TEMPLATES = [
   '/',
+  '/app',
   '/landing',
   '/pricing',
   '/founders',
@@ -35,23 +36,23 @@ const APP_TEMPLATES = [
   '/login',
   '/register',
   '/forgot-password',
-  '/marketplace',
-  '/library',
-  '/library/scan-check',
-  '/profile',
-  '/expert-consult',
-  '/runtime',
-  '/positioning',
-  '/positioning/[draftId]',
-  '/positioning/[draftId]/plan',
-  '/positioning/[draftId]/review/[reviewId]',
-  '/positioning/[draftId]/topics',
+  '/app/marketplace',
+  '/app/library',
+  '/app/library/scan-check',
+  '/app/profile',
+  '/app/expert-consult',
+  '/app/runtime',
+  '/app/positioning',
+  '/app/positioning/[draftId]',
+  '/app/positioning/[draftId]/plan',
+  '/app/positioning/[draftId]/review/[reviewId]',
+  '/app/positioning/[draftId]/topics',
   // Public content pages whose address carries a page name, not a record ID (the pages themselves are in PUBLIC_PAGES).
   '/features/[slug]',
   '/blog/[slug]',
-  '/workbench/agent-first-preview',
-  '/workbench/marketplace',
-  '/workbench/search',
+  '/app/workbench/agent-first-preview',
+  '/app/workbench/marketplace',
+  '/app/workbench/search',
   '/admin',
   '/admin/announcements',
   '/admin/costs',
@@ -75,7 +76,7 @@ const APP_TEMPLATES = [
 
 /** Address prefixes that carry a one-time key or personal data (auth callback, email verification, password
  * reset, a social-account connection return): no GA, Vercel Analytics or Speed Insights request while open. */
-export const SENSITIVE_PREFIXES = ['/auth', '/verify-email', '/reset-password', '/publish-monitor'];
+export const SENSITIVE_PREFIXES = ['/auth', '/verify-email', '/reset-password', '/app/publish-monitor'];
 
 export const ROUTE_TEMPLATES: readonly string[] = [...new Set([...PUBLIC_PAGES.map(page => page.path), ...APP_TEMPLATES])];
 

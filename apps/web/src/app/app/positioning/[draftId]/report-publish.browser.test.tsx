@@ -33,7 +33,7 @@ beforeAll(async () => {
           id.endsWith('/components/opc/workspace-frame')) return id; },
       load(id: string) {
         if (id === 'next/navigation') return `export const useRouter=()=>({replace:()=>{},push:()=>{}});
-          export const usePathname=()=>'/positioning/draft'; export const useSearchParams=()=>new URLSearchParams();`;
+          export const usePathname=()=>'/app/positioning/draft'; export const useSearchParams=()=>new URLSearchParams();`;
         if (id === 'next/link') return `import React from 'react'; export default function Link(p){return React.createElement('a',p)}`;
         if (id.endsWith('/components/opc/workspace-frame')) return `import React from 'react';
           export function WorkspaceFrame(p){return React.createElement('div',null,p.children,p.right)}`;

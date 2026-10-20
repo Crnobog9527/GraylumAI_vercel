@@ -18,8 +18,8 @@ describe('GlobalBanner link rendering', () => {
   });
 
   it('renders a site path without opening a new tab', () => {
-    const html = render('/marketplace');
-    expect(html).toContain('href="/marketplace"');
+    const html = render('/app/marketplace');
+    expect(html).toContain('href="/app/marketplace"');
     expect(html).not.toContain('target="_blank"');
   });
 

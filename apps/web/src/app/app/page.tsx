@@ -26,9 +26,9 @@ export default function HomePage(){
  const hasStrategy=accounts.some(account=>account.strategyDraftId);
  const name=accountDisplayName(profile);
  return <div className={styles.home}>
-  <header className={styles.header}><Link href="/" className={styles.brand}><img src="/graylum-logo.png" alt=""/>Graylum</Link><nav aria-label="全局导航"><Link href="/" aria-current="page">首页</Link><Link href="/positioning">对话</Link><Link href="/profile">个人中心</Link></nav><div className={styles.headerEnd}><Link href="/profile?tab=subscription">{credits.status==='ready'?credits.credits:'—'} 积分</Link><Link href="/profile" aria-label="个人中心" className={styles.avatar}>{(name??'我').slice(0,1)}</Link></div></header>
+  <header className={styles.header}><Link href="/app" className={styles.brand}><img src="/graylum-logo.png" alt=""/>Graylum</Link><nav aria-label="全局导航"><Link href="/app" aria-current="page">首页</Link><Link href="/app/positioning">对话</Link><Link href="/app/profile">个人中心</Link></nav><div className={styles.headerEnd}><Link href="/app/profile?tab=subscription">{credits.status==='ready'?credits.credits:'—'} 积分</Link><Link href="/app/profile" aria-label="个人中心" className={styles.avatar}>{(name??'我').slice(0,1)}</Link></div></header>
   <main className={styles.page}>
-   <section className={styles.account}><div><strong>{name?`欢迎回来，${name}`:'欢迎回来'}</strong><span>{membershipText(profile)}</span></div><Link href="/profile?tab=subscription">账户与积分 →</Link></section>
+   <section className={styles.account}><div><strong>{name?`欢迎回来，${name}`:'欢迎回来'}</strong><span>{membershipText(profile)}</span></div><Link href="/app/profile?tab=subscription">账户与积分 →</Link></section>
    <section className={styles.value}><h1>让你的业务，<br/>拥有清楚的内容方向</h1><p>从找到自己的位置，到持续做出有价值的内容。<br/>Graylum 和你一起分析、判断和创作，让每一步都有依据。</p></section>
    {/* Owner-approved promotional method introduction; not the executed /positioning workflow. */}
    <section className={styles.method} aria-label="我们怎样帮你做定位">
@@ -40,7 +40,7 @@ export default function HomePage(){
      </li>)}
     </ol>
    </section>
-   <section className={styles.entry}><div><Link className={styles.primary} href="/positioning" onClick={event=>{if(libraryReady&&!hasStrategy)startOnce(event,'mentor');}}>{!libraryReady||hasStrategy?'进入对话':'开始新手引导'}</Link><Link href={!libraryReady||hasStrategy?'/library':'/positioning'} onClick={event=>{if(libraryReady&&!hasStrategy)startOnce(event,'manual');}}>{!libraryReady?'查看资料库':hasStrategy?'查看正式定位':'我已有定位'}</Link></div><QueryNotice error={library.error} loading={library.isPending} label="账号与资料" retry={()=>library.refetch()}/>{libraryReady&&<p>{hasStrategy?'已有定位和工作会保留；你可以继续原对话。':'先一起确认定位，再开展选题和内容创作。已有资料可以直接带入。'}</p>}</section>
+   <section className={styles.entry}><div><Link className={styles.primary} href="/app/positioning" onClick={event=>{if(libraryReady&&!hasStrategy)startOnce(event,'mentor');}}>{!libraryReady||hasStrategy?'进入对话':'开始新手引导'}</Link><Link href={!libraryReady||hasStrategy?'/app/library':'/app/positioning'} onClick={event=>{if(libraryReady&&!hasStrategy)startOnce(event,'manual');}}>{!libraryReady?'查看资料库':hasStrategy?'查看正式定位':'我已有定位'}</Link></div><QueryNotice error={library.error} loading={library.isPending} label="账号与资料" retry={()=>library.refetch()}/>{libraryReady&&<p>{hasStrategy?'已有定位和工作会保留；你可以继续原对话。':'先一起确认定位，再开展选题和内容创作。已有资料可以直接带入。'}</p>}</section>
    <section className={styles.capabilities}><h2>从策略，继续走向实际创作</h2><div>{[['AI 对话','持续讨论，获得建议'],['内容创作','选题、起草、修改与定稿'],['功能广场','探索工具与方法'],['个人成长','回看自己的创作历程']].map(([title,description])=><article key={title}><h3>{title}</h3><p>{description}</p></article>)}</div></section>
   </main>
  </div>;

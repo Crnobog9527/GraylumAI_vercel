@@ -1475,7 +1475,7 @@ it('RUNTIME: browser ordinary and document Skill survive refresh, actual process
   await page.goto(app+'/login?redirect=/runtime');await hydrated;
   await page.getByPlaceholder('name@example.com').fill(email);await page.getByPlaceholder('输入你的密码').fill(password);
   const choicesResponse=page.waitForResponse(r=>r.url().includes('runtime.choices'));
-  await page.getByRole('button',{name:'登录',exact:true}).last().click();await page.waitForURL(u=>u.pathname==='/runtime');
+  await page.getByRole('button',{name:'登录',exact:true}).last().click();await page.waitForURL(u=>u.pathname==='/app/runtime');
   expect((await choicesResponse).status()).toBe(200);
   expect(await page.getByRole('button',{name:'新建对话',exact:true}).count()).toBe(0);
   await page.getByRole('link',{name:'新对话',exact:true}).click();
@@ -1493,7 +1493,7 @@ it('RUNTIME: browser ordinary and document Skill survive refresh, actual process
   // Close the old development page so its HMR reload cannot race recovery navigation.
   await page.close();
   const restarted=await fetch(process.env.V3_LOCAL_REST!+'/__restart_app',{method:'POST',headers:{'x-local-control':process.env.V3_LOCAL_CONTROL!}});expect(restarted.ok).toBe(true);
-  await expect.poll(async()=>{try{return (await fetch(app+'/runtime')).status;}catch{return 0;}},{timeout:30000}).toBe(200);
+  await expect.poll(async()=>{try{return (await fetch(app+'/app/runtime')).status;}catch{return 0;}},{timeout:30000}).toBe(200);
   const restored=await context.newPage();await restored.goto(url);await restored.getByText('Saved runtime answer 1',{exact:true}).waitFor({timeout:60000});expect(await getCount()).toBe(2);
   await restored.getByText('Saved runtime answer 2',{exact:true}).waitFor();
   await context.close();

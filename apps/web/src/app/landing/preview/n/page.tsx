@@ -31,5 +31,5 @@ export default async function LandingPreviewN() {
   // The sample reports are not generated yet: their placeholder shows only in a local development preview, or once the
   // landing flag is turned on (off on staging and production by default).
   const extras = { flags: flagsUsed, showSamples: flags.sampleReports || process.env.NODE_ENV === 'development' };
-  return <SampleN data={data} siteName={siteName} extras={extras} membershipHref={buildAuthHref('/profile?tab=subscription')} />;
+  return <SampleN data={data} siteName={siteName} extras={extras} membershipHref={buildAuthHref('/app/profile?tab=subscription')} />;
 }
