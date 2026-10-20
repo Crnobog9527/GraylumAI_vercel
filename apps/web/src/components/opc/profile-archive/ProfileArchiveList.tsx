@@ -51,7 +51,7 @@ export function ProfileArchiveList({ limitReached = false }: { limitReached?: bo
     {!active.length && !archived.length && <p className="text-xs text-[var(--text-secondary)]">{T.empty}</p>}
     {active.length > 0 && <ul className="divide-y divide-[var(--border-primary)] rounded-lg border border-[var(--border-primary)]">
       {active.map(row => <li key={row.businessId} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
-        {row.draftId ? <Link href={`/positioning/${row.draftId}`} className="min-w-0 truncate">{profileName(row)}</Link>
+        {row.draftId ? <Link href={`/app/positioning/${row.draftId}`} className="min-w-0 truncate">{profileName(row)}</Link>
           : <span className="min-w-0 truncate">{profileName(row)}</span>}
         <Button type="button" variant="outline" size="sm" disabled={archive.isPending}
           onClick={() => { setNotice(null); setConfirming(row); }}>{T.archive}</Button>
@@ -63,7 +63,7 @@ export function ProfileArchiveList({ limitReached = false }: { limitReached?: bo
         {archived.map(row => <li key={row.businessId} className="flex items-center justify-between gap-3 px-3 py-2">
           <span className="min-w-0 truncate text-[var(--text-secondary)]">{profileName(row)}
             <span className="ml-2 text-xs">{T.archivedTag}</span></span>
-          {row.draftId ? <Link href={`/positioning/${row.draftId}`} className="text-xs underline">{T.view}</Link>
+          {row.draftId ? <Link href={`/app/positioning/${row.draftId}`} className="text-xs underline">{T.view}</Link>
             : <span className="text-xs text-[var(--text-secondary)]">{T.noDraft}</span>}
         </li>)}
       </ul>
