@@ -23,7 +23,10 @@ vi.mock("@/trpc/client", () => {
         return { data: options.enabled ? state.status : undefined, refetch: vi.fn() };
       } },
       reportStart: { useMutation: mutation }, cancel: { useMutation: mutation }, resume: { useMutation: mutation },
+      reportDocument: { useQuery: () => ({ data: undefined, isError: false }) },
+      reportSave: { useMutation: mutation }, reportFinalize: { useMutation: mutation },
     },
+    fusionReview: { versionMarks: { useQuery: () => ({ data: undefined }) } },
   } };
 });
 // The jury entry has its own tests; here it only needs to stay out of the way.
@@ -125,4 +128,38 @@ it("the dialog shows the saved formal text and no generate button", async () => 
     busy={false} onClose={() => {}} onTopics={() => {}} />);
   expect(html).toContain("已采用的正文");
   expect(html).not.toContain("生成完整报告");
+});
+
+// #716 2026-10-20: after a reload the footer says the report is still being written, and the dialog says why no text shows.
+it("names a report that is still being written on the footer entry", () => {
+  existing();
+  state.status = { executionId: saved, state: "running", body: null, completeness: null, candidate: false };
+  const html = renderToStaticMarkup(<ReportEntry {...props} confirmed />);
+  expect(html).toContain("完整运营策略报告（生成中）");
+});
+const dialogReport = (fields: Record<string, unknown>) => ({ executionId: saved, status: null, live: null, streaming: false, refusal: null,
+  offer: null, starting: false, reopened: false, payg: { turnNotices: () => [] }, start: () => {}, restart: () => {}, stop: () => {},
+  stopUnconfirmed: false, retryStop: () => {}, ...fields });
+it("says a reattached report is written in the background, with no text yet, and offers no export while it runs", async () => {
+  const { ReportDialog } = await import("./report-panel");
+  const { REPORT_REOPENED_NOTICE, REPORT_WRITING_NOTICE } = await import("./report-gen");
+  const running = { executionId: saved, state: "running", body: null, completeness: null, candidate: false };
+  const live = { executionId: saved, text: "", stopped: false };
+  const render = (fields: Record<string, unknown>) => renderToStaticMarkup(<ReportDialog report={dialogReport(fields) as never}
+    busy={false} onClose={() => {}} onTopics={() => {}} />);
+  expect(render({ status: running, reopened: true })).toContain(REPORT_REOPENED_NOTICE);
+  expect(render({ status: running, reopened: true, live, streaming: true })).toContain(REPORT_REOPENED_NOTICE);
+  // This page's own start streams the text, so it says it is writing.
+  const own = render({ status: running, live: { ...live, text: "## 一" }, streaming: true });
+  expect(own).toContain(REPORT_WRITING_NOTICE);
+  expect(own).not.toContain(REPORT_REOPENED_NOTICE);
+  expect(render({ status: running, reopened: true })).not.toContain("导出报告");
+});
+it("offers 导出报告 for a finished report and for a saved formal version", async () => {
+  const { ReportDialog } = await import("./report-panel");
+  const done = { executionId: saved, state: "completed", body: "## A\nx", completeness: "complete", candidate: true };
+  expect(renderToStaticMarkup(<ReportDialog report={dialogReport({ status: done }) as never}
+    busy={false} onClose={() => {}} onTopics={() => {}} />)).toContain("导出报告");
+  expect(renderToStaticMarkup(<ReportDialog report={dialogReport({ executionId: null }) as never}
+    savedBody={formal.report.generatedReport.body} busy={false} onClose={() => {}} onTopics={() => {}} />)).toContain("导出报告");
 });
