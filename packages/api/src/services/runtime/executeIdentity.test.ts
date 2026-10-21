@@ -14,13 +14,13 @@ const id = '10000000-0000-4000-8000-000000000001';
 const LEAK = '我是由 Google 训练的大型语言模型。下面是三个选题建议。';
 
 // MODEL-IDENTITY-GUARD layer 3 through the real executor: streamed and stored text agree.
-function fixture(enabled: boolean) {
+function fixture(enabled: boolean, input = '你是谁', reply = LEAK) {
   const raw = new Map<number, string>();
   const policy = { modelId: id, provider: 'fixture', account: 'synthetic', model: 'primary', protocol: 'fixture-cost-v1',
     upperUsd: '0.02', inputLimit: 32000, outputLimit: 1000, automaticRetry: false, hiddenTools: false, lookupSupported: true };
   const execution = { state: 'running', live: true, cancelRequested: false, runId: id, sessionId: id,
     // The decision is the one frozen at admission: the identity leads the instructions when on.
-    context: { version: 'runtime.v1', sdkVersion: '0.18.0', role: 'ordinary', input: '你是谁', instructions: withBrandIdentity('Answer', enabled),
+    context: { version: 'runtime.v1', sdkVersion: '0.18.0', role: 'ordinary', input, instructions: withBrandIdentity('Answer', enabled),
       model: 'primary', maxOutputTokens: 1000, maxTurns: 1, historyItems: 0, tools: [], network: 'deny' },
     billing: { callPolicy: [policy], rules: {}, limits: { maxCalls: 1 } }, result: null };
   const completed: unknown[] = [];
@@ -33,12 +33,12 @@ function fixture(enabled: boolean) {
   mock.billing.claimCall.mockImplementation(async (_runId, sequence) => ({ id: String(sequence) }));
   mock.billing.dispatchOnce.mockImplementation(async (callId, request) => {
     raw.set(Number(callId), JSON.stringify({ usage: { sdkResponse: { model: JSON.parse(request).model,
-      choices: [{ message: { content: LEAK } }] } } }));
+      choices: [{ message: { content: reply } }] } } }));
     return { dispatched: true };
   });
   mock.run.mockImplementation(async options => {
     await options.exchange(1, JSON.stringify({ model: options.model }));
-    return LEAK;
+    return reply;
   });
   const options = { database, actor: async () => id, adapter: { dispatch: vi.fn() } as never,
     callGate: vi.fn().mockResolvedValue({ ok: true }), budget: createRuntimeBudget() };
@@ -63,4 +63,18 @@ it('switch on at admission: the stored and returned reply carry the brand reply,
 it('switch off: the reply is stored as the model wrote it', async () => {
   const f = fixture(false);
   expect(await runtimeExecutor(f.options).execute(id)).toMatchObject({ state: 'completed', body: LEAK });
+});
+
+it.each([
+  ['你是 Claude 吗？', '我是 Claude，由 Anthropic 开发的 AI 助手。'],
+  ['你用的是什么模型？', '我用的是 GPT-4。'],
+])('keeps the requested free-chat identity question on the model path: %s', async (input, reply) => {
+  const f = fixture(true, input, reply), events: RuntimeProgress[] = [];
+  const result = await runtimeExecutor(f.options).execute(id, event => events.push(event));
+  expect(mock.run).toHaveBeenCalledOnce();
+  expect(mock.run.mock.calls[0]![0].input).toBe(input);
+  expect(mock.run.mock.calls[0]![0].instructions).toContain(BRAND_REPLY_ZH);
+  expect(result).toMatchObject({ state: 'completed', body: BRAND_REPLY_ZH });
+  expect(f.completed).toEqual([expect.objectContaining({ body: BRAND_REPLY_ZH })]);
+  expect(JSON.stringify(events)).not.toMatch(/Claude|Anthropic|GPT-4/);
 });
