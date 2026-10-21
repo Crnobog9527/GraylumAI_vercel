@@ -86,9 +86,10 @@ try {
       assert.deepEqual(objects(),previous,'0332 interruption preserves schema and ACL');
       const applied=apply(migration);if(!applied.ok)return applied;
       const current=objects(),changed=Object.keys(current).filter(key=>current[key]!==previous[key]);
-      assert.equal(changed.length,2,'0332 changes exactly two function bodies');
+      assert.equal(changed.length,3,'0332 changes two time predicates and preserves MP-only close explicitly');
       assert.ok(changed.every(key=>key.startsWith('fn:pay_stripe_test_clock_time(')
-        ||key.startsWith('fn:pay_stripe_test_clock_observe(')),'0332 preserves all ACL and other functions');
+        ||key.startsWith('fn:pay_stripe_test_clock_observe(')
+        ||key.startsWith('fn:pay_stripe_test_clock_close_refunded(')),'0332 preserves all ACL and other functions');
       sql(migration);assert.deepEqual(objects(),current,'0332 repeat preserves definitions and ACL');
       return applied;
     }

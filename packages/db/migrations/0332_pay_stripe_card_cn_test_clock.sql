@@ -19,7 +19,11 @@ BEGIN
    'o.stripe_managed_payments IS DISTINCT FROM root.stripe_managed_payments'),
   ('pay_stripe_test_clock_observe(uuid,text,text,timestamp with time zone,jsonb)',
    E'o.payment_method IS DISTINCT FROM ''card''\n  OR o.stripe_managed_payments IS DISTINCT FROM true',
-   'NOT coalesce(o.payment_method IN (''card'',''card_cn'') AND o.stripe_managed_payments=(o.payment_method=''card''),false)')
+   'NOT coalesce(o.payment_method IN (''card'',''card_cn'') AND o.stripe_managed_payments=(o.payment_method=''card''),false)'),
+  -- This RPC previously inherited MP-only scope from the shared time helper. Keep that old boundary explicit.
+  ('pay_stripe_test_clock_close_refunded(jsonb)',
+   'IF o.id IS NULL OR pay_stripe_test_clock_time(o.id) IS NULL OR o.source_order_id IS NOT NULL',
+   E'IF o.id IS NULL OR o.payment_method IS DISTINCT FROM ''card'' OR o.stripe_managed_payments IS DISTINCT FROM true\n  OR pay_stripe_test_clock_time(o.id) IS NULL OR o.source_order_id IS NOT NULL')
  ) AS patches(signature,old_,new_) LOOP
   source:=pg_get_functiondef(('public.'||row_.signature)::regprocedure);
   IF position(row_.old_ IN source)>0 THEN
