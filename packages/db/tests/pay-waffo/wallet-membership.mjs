@@ -173,24 +173,44 @@ export async function walletMembershipCases({ admin, service, connect }) {
     assert.equal(state.credit_release_terminated_at === null, status === 'failed');
   }
   // A real wall-clock boundary proves the existing cron releases future monthly/yearly terms exactly once.
-  // Only local fixture created_at is backdated to model the previous paid 30-day term; no clock/guard is bypassed.
+  // Backdate only local fixture created_at. Calendar months are not fixed 30-day intervals.
+  const priorPeriod = end => {
+    let paid = new Date(end);
+    paid.setUTCMonth(paid.getUTCMonth() - 1);
+    // A month cannot end on October 31 if it started in September. An annual source can;
+    // February 29 always has a January 29 monthly source, so the annual fallback never loses leap day.
+    const cycle = paid.getUTCDate() === end.getUTCDate() ? 'monthly' : 'yearly';
+    if (cycle === 'yearly') { paid = new Date(end); paid.setUTCFullYear(paid.getUTCFullYear() - 1); }
+    return { paid, cycle };
+  };
+  for (const value of ['2026-10-31T08:00:00Z', '2026-11-21T08:00:00Z', '2028-02-29T08:00:00Z']) {
+    const end = new Date(value), prior = priorPeriod(end);
+    const actual = (await one(admin, `SELECT (($1::timestamptz AT TIME ZONE 'UTC')+make_interval(months=>$2))
+      AT TIME ZONE 'UTC' v`, [prior.paid, prior.cycle === 'yearly' ? 12 : 1])).v;
+    assert.equal(actual.toISOString(), end.toISOString(), 'calendar fixture round-trips at month ends and leap day');
+  }
   for (const cycle of ['monthly', 'yearly']) {
-    const user = await actor(), initial = await buy(user, 'alipay', gold, 'monthly', 'gold_first30');
-    const originalPaid = new Date(Date.now() - 30 * 86400000 + 5000);
+    const expectedEnd = new Date(Date.now() + 5000), prior = priorPeriod(expectedEnd);
+    const user = await actor(), initial = await buy(user, 'alipay', gold, prior.cycle);
+    const originalPaid = prior.paid;
     await admin.query('UPDATE payment_orders SET created_at=$2 WHERE id=$1', [initial.id, new Date(originalPaid.getTime() - 60000)]);
     await bind(initial);
     const first = (await pay(service, initial, originalPaid, originalPaid)).v;
+    const originalBalance = await profile(user);
     const source = await one(admin, 'SELECT entitlement_end FROM payment_orders WHERE id=$1', [initial.id]);
+    assert.equal(source.entitlement_end.toISOString(), expectedEnd.toISOString(), 'source ends at the intended short boundary');
     const renewal = await renew(user, 'wechat_pay', gold, cycle, first.subscriptionId);
     await bind(renewal); await pay(service, renewal, source.entitlement_end);
     const count = () => one(admin, 'SELECT count(*)::int n FROM subscription_credit_grants WHERE source_order_id=$1', [renewal.id]);
     await service.query('SELECT pay_waffo_release_due(500)');
     assert.equal((await count()).n, 0, 'cron cannot release before original expiry');
-    await new Promise(resolve => setTimeout(resolve, Math.max(0, source.entitlement_end.getTime() - Date.now() + 50)));
+    const delay = source.entitlement_end.getTime() - Date.now() + 50;
+    assert.ok(delay >= 0 && delay <= 5500, 'wall-clock boundary cannot turn into a days-long wait');
+    await new Promise(resolve => setTimeout(resolve, delay));
     await Promise.all([a.query('SELECT pay_waffo_release_due(500)'), b.query('SELECT pay_waffo_release_due(500)')]);
     await service.query('SELECT pay_waffo_release_due(500)');
     assert.equal((await count()).n, 1, 'new period gets one due grant, no annual months prepaid');
-    assert.deepEqual(await profile(user), { credits: 17940, membership_level: 'gold' });
+    assert.deepEqual(await profile(user), { credits: originalBalance.credits + 8970, membership_level: 'gold' });
     const facts = (await one(service, 'SELECT pay_common_membership_facts($1) v', [user])).v.internal_membership;
     assert.equal(facts.id, (await one(admin, 'SELECT subscription_id FROM payment_orders WHERE id=$1', [renewal.id])).subscription_id);
   }

@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
-import {readFileSync} from 'node:fs';
+import {readFileSync,readdirSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import pg from 'pg';
@@ -15,6 +15,8 @@ assert.ok(process.argv[2]==='--local-only'&&!process.env.CI || process.argv[2]==
   'use --local-only locally or --ci in CI; only an isolated local database is supported');
 const root=resolve(import.meta.dirname,'../../../..');
 const read=path=>readFileSync(resolve(root,path),'utf8');
+const laterMigrations=number=>readdirSync(resolve(root,'packages/db/migrations'))
+  .filter(file=>/^\d{4}_.*\.sql$/.test(file)&&Number(file.slice(0,4))>number).sort();
 const run=(args,input)=>{
   const r=spawnSync('docker',args,{input,encoding:'utf8',timeout:300000,maxBuffer:32*1024*1024});
   if(r.status!==0||r.error) throw Error(r.stderr||String(r.error));
@@ -55,16 +57,6 @@ try {
   const walletMigration='packages/db/migrations/0330_pay_wallet_membership_projection.sql';
   const build=buildFromFiles(root,{applyFile:path=>{
     const migration=read(path);
-    if(path.endsWith('0329_pay_stripe_test_clock.sql')) {
-      const beforeClock=objects();
-      const failed=apply(migration.replace(/COMMIT;\s*$/,"DO $$ BEGIN RAISE EXCEPTION 'CLOCK_ROLLBACK_PROBE'; END $$; COMMIT;"));
-      assert.equal(failed.ok,false);assert.match(failed.error,/CLOCK_ROLLBACK_PROBE/);
-      assert.deepEqual(objects(),beforeClock,'0329 interruption leaves the old schema and ACL intact');
-      const applied=apply(migration);if(!applied.ok)return applied;
-      const afterClock=objects();sql(migration);
-      assert.deepEqual(objects(),afterClock,'0329 repeat preserves definitions and ACL');
-      return applied;
-    }
     if(path===walletMigration) {
       walletBefore=objects();
       walletOriginals=['public.pay_common_membership_facts(uuid)',
@@ -87,6 +79,16 @@ try {
         'wallet migration never changes ACL or other schema');
       sql(migration);
       assert.deepEqual(objects(),current,'wallet second application preserves schema and ACL');
+      return applied;
+    }
+    if(path.endsWith('0329_pay_stripe_test_clock.sql')) {
+      const beforeClock=objects();
+      const failed=apply(migration.replace(/COMMIT;\s*$/,"DO $$ BEGIN RAISE EXCEPTION 'CLOCK_ROLLBACK_PROBE'; END $$; COMMIT;"));
+      assert.equal(failed.ok,false);assert.match(failed.error,/CLOCK_ROLLBACK_PROBE/);
+      assert.deepEqual(objects(),beforeClock,'0329 interruption leaves the old schema and ACL intact');
+      const applied=apply(migration);if(!applied.ok)return applied;
+      const afterClock=objects();sql(migration);
+      assert.deepEqual(objects(),afterClock,'0329 repeat preserves definitions and ACL');
       return applied;
     }
     if(!path.endsWith('_pay_stripe_mp_upgrade_overlap.sql')) return apply(migration);
@@ -131,11 +133,8 @@ try {
     FROM membership_plans WHERE level='gold'`);
   const cases=await stripeMpUpgradeCases({admin,service,connect});
   cases.push(...(await stripeMpUpgradeCases({admin,service,connect,proCycle:'yearly'})).map(c=>'annual-'+c));
-<<<<<<< HEAD
-  cases.push(...await stripeTestClockCases({admin,service,connect}));
-=======
   cases.push(...await walletMembershipCases({admin,service,connect}));
->>>>>>> origin/pay-failover-wallet-dependency
+  cases.push(...await stripeTestClockCases({admin,service,connect}));
   const data=()=>admin.query(`SELECT jsonb_build_object(
     'profiles',(SELECT jsonb_agg(to_jsonb(p) ORDER BY id) FROM profiles p),
     'grants',(SELECT jsonb_agg(to_jsonb(g) ORDER BY id) FROM subscription_credit_grants g),
@@ -151,6 +150,8 @@ try {
     finalCatalog['con:payment_orders'],'recovery retains the constraint for paid renewal rows');
   assert.deepEqual((await data()).rows[0].v,preserved,'wallet recovery preserves paid balances and retained credit sources');
   sql(read(walletMigration));
+  // Forward-fix every later extension too; 0331 intentionally extends the same wallet functions.
+  for(const file of laterMigrations(330))sql(read('packages/db/migrations/'+file));
   assert.deepEqual(objects(),finalCatalog,'wallet reapply restores complete final catalog');
   cases.push('wallet-migration-interruption-atomic','wallet-migration-repeat-acl-unchanged','wallet-recovery-preserves-paid-data');
   sql('BEGIN;\n'+originals.map(src=>src+';').join('\n')+'\nCOMMIT;');
@@ -163,9 +164,8 @@ try {
     'rollback preserves later migrations and every non-target catalog object');
   assert.deepEqual((await data()).rows[0].v,preserved,'code rollback preserves balances, grants and source attribution');
   sql(read('packages/db/migrations/0322_pay_stripe_mp_upgrade_overlap.sql'));
-  // 0324 extends the post-0322 cap and paid-entry definitions; preserve it in this historical recovery exercise.
-  sql(read('packages/db/migrations/0324_paywall_profile_archive.sql'));
-  sql(read('packages/db/migrations/0326_paywall_fusion_archive_fence.sql'));
+  // Historical code rollback keeps paid rows; replay the complete later chain to restore today's contract.
+  for(const file of laterMigrations(322))sql(read('packages/db/migrations/'+file));
   assert.deepEqual(objects(),finalCatalog,'reapplying after rollback restores the complete final catalog');
   cases.push('migration-interruption-rolls-back','migration-repeat-unchanged','rollback-preserves-financial-data','reapply-converges');
   console.log(JSON.stringify({result:'PASS',build,cases}));
