@@ -312,4 +312,53 @@ BEGIN
   PERFORM pg_temp.assert_true((SELECT count(*)=1 FROM payment_orders WHERE user_id=buyer),'no replacement for disabled product');
   RESET ROLE;
 END $$;
+-- 0328: run in the existing CI database replay, including contradictory state/termination fixtures.
+DO $$
+DECLARE buyer uuid; plan uuid; state text; terminated boolean; version bigint; admission text;
+  initial payment_orders; replay payment_orders;
+BEGIN
+  INSERT INTO membership_plans(name,level,monthly_price,yearly_price,monthly_credits,yearly_credits,
+    allow_fusion_review,allow_fusion_compare,library_storage_bytes,is_active)
+    VALUES('Refund repurchase Pro','pro',2900,27900,3480,41760,false,false,0,'true')
+    ON CONFLICT(level) DO UPDATE SET monthly_price=2900,yearly_price=27900,monthly_credits=3480,
+      yearly_credits=41760,is_active='true' RETURNING id INTO plan;
+  INSERT INTO system_settings(key,value) VALUES('payment_method_routes',
+    '{"version":1,"card":{"enabled":true},"card_cn":{"enabled":false},
+      "wechat_pay":{"enabled":false,"annualVerified":false},"alipay":{"enabled":false,"annualVerified":false}}')
+    ON CONFLICT(key) DO UPDATE SET value=system_settings.value||jsonb_build_object(
+      'version',(system_settings.value->>'version')::bigint+1,'card',jsonb_build_object('enabled',true))
+    RETURNING (value->>'version')::bigint INTO version;
+  INSERT INTO payment_provider_refs(channel,merchant_namespace,mode,object_type,external_id,
+    membership_plan_id,billing_cycle,is_current,offer_kind,price_usage)
+    VALUES('stripe','refund_repurchase_fixture','test','price','price_refund_repurchase',plan,
+      'monthly',true,'standard','subscription');
+  FOR state,terminated IN
+    SELECT s,t FROM unnest(ARRAY['canceled','active','trialing','past_due','incomplete','unpaid']) s
+      CROSS JOIN unnest(ARRAY[false,true]) t
+  LOOP
+    buyer:=gen_random_uuid();
+    INSERT INTO profiles(id,membership_level) VALUES(buyer,'free');
+    INSERT INTO user_subscriptions(id,user_id,membership_plan_id,billing_cycle,status,current_period_start,
+      current_period_end,cancel_at_period_end,credit_release_terminated_at,credit_release_terminated_reason,
+      stripe_subscription_id)
+      VALUES(gen_random_uuid(),buyer,plan,'monthly',state,now(),now()+interval '29 days','true',
+        CASE WHEN terminated THEN now() END,CASE WHEN NOT terminated THEN 'approved_monthly_refund' END,
+        'sub_refund_guard_'||buyer::text);
+    admission:=format('SELECT o.* FROM pay_waffo_create_purchase(%L,''membership_plan'',%L,''monthly'',''card'',
+      ''standard'',''refund_repurchase_fixture'',''test'',%L,''terms-v1'',''[]''::jsonb) o',buyer,plan,version);
+    SET LOCAL ROLE service_role;
+    IF state='canceled' AND terminated THEN
+      EXECUTE admission INTO initial;
+      EXECUTE admission INTO replay;
+      PERFORM pg_temp.assert_true(initial.id=replay.id,'refunded repeat returns the same order');
+      PERFORM pg_temp.assert_true((SELECT count(*)=1 FROM payment_orders WHERE user_id=buyer),
+        'refunded repeat creates exactly one order');
+    ELSE
+      PERFORM pg_temp.denied(admission,'23514','PAY_WAFFO_MEMBERSHIP_TRANSITION_REQUIRED');
+      PERFORM pg_temp.assert_true(NOT EXISTS(SELECT 1 FROM payment_orders WHERE user_id=buyer),
+        'protected subscription creates no order');
+    END IF;
+    RESET ROLE;
+  END LOOP;
+END $$;
 ROLLBACK;

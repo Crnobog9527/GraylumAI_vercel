@@ -3603,7 +3603,7 @@
   "fn:pay_stripe_mp_renew_subscription(uuid,text,text,integer,text,timestamp with time zone,timestamp with time zone,timestamp with time zone)": "7b23e0cd6ab3",
   "fn:pay_stripe_mp_sync_subscription(uuid,text,boolean,boolean,boolean)": "47b00f6b4887",
   "fn:pay_waffo_abort_before_dispatch(uuid,uuid,text,timestamp with time zone)": "3b55d833c893",
-  "fn:pay_waffo_admit_purchase(uuid,text,uuid,text,text,text,text,text,bigint,text,jsonb,text,uuid)": "ee50eaadf868",
+  "fn:pay_waffo_admit_purchase(uuid,text,uuid,text,text,text,text,text,bigint,text,jsonb,text,uuid)": "93be6ecfa8ee",
   "fn:pay_waffo_assert_actor(uuid)": "54ddb30dbe59",
   "fn:pay_waffo_atomic_refund_termination_clawback(uuid,uuid,text,text,text,text,text,boolean,text,timestamp with time zone)": "fd1e786132b8",
   "fn:pay_waffo_atomic_refund_termination_clawback_fresh(uuid,uuid,text,text,timestamp with time zone,text,text,text,timestamp with time zone)": "9419b54b3d87",
