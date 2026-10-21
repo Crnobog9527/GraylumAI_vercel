@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { withPlatformSecretRequest } from '../platformSecrets/request';
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { logger } from '../../lib/logger';
@@ -76,34 +77,36 @@ export async function withAdvanceLease<T>(admin: SupabaseClient, reviewId: strin
 /** One step of one review. Never throws for an expected stop; the caller relays only when next is true. */
 export async function advanceReview(input: { admin: SupabaseClient; reviewId: string; env?: Record<string, string | undefined>;
   budget?: RuntimeBudget; flow?: (actorId: string, budget: RuntimeBudget) => ReturnType<typeof reviewFlow> }): Promise<AdvanceResult> {
-  const { admin, reviewId } = input;
-  const outcome = await withAdvanceLease(admin, reviewId, async lease => {
-    const budget = input.budget ?? createRuntimeBudget();
-    const flow = input.flow ? input.flow(lease.actorId!, budget) : serviceReviewFlow(admin, lease.actorId!, budget, input.env);
-    try {
-      const step = await flow.continue(reviewId);
-      if (ENDED_STATES.has(step.review.state)) return { next: false, reason: 'ended' };
-      if (step.waiting === 'credits') return { next: false, reason: 'waiting_credits' };
-      // Calls already dispatched elsewhere (an invocation that was cut off) settle through the recovery, never twice.
-      const calls = step.calls.filter(call => !call.dispatched);
-      if (!calls.length) return { next: false, reason: step.waiting === 'calls' ? 'in_flight' : 'idle' };
-      const results = await Promise.allSettled(calls.map(call => flow.dispatch(reviewId, call.callId)));
-      const failed = results.filter(result => result.status === 'rejected').length;
-      if (failed) logger.warn('billing', 'fusion_review_dispatch_failed', { reviewId, failed });
-      const dispatched = results.filter(result => result.status === 'fulfilled'
-        && (result.value.state === 'judged'
-          || !['not_started', 'not_dispatched'].includes(result.value.reason))).length;
-      // No accepted dispatch: stop this chain and refund the attempt so a later retry can recover from an outage.
-      if (!dispatched) return { next: false, reason: 'failed', dispatched: 0 };
-      // Partial progress may continue; dispatchOnce still prevents resending accepted calls.
-      return { next: true, reason: 'advanced', dispatched };
-    } catch (error) {
-      const code = error instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(error.message) ? error.message : 'UNEXPECTED';
-      logger.warn('billing', 'fusion_review_advance_failed', { reviewId, code });
-      return { next: false, reason: 'failed' };
-    }
-  }, value => ['waiting_credits', 'in_flight', 'idle', 'ended', 'failed'].includes(value.reason));
-  return outcome.ran ? outcome.value : { next: false, reason: outcome.reason };
+  return withPlatformSecretRequest(async () => {
+    const { admin, reviewId } = input;
+    const outcome = await withAdvanceLease(admin, reviewId, async lease => {
+      const budget = input.budget ?? createRuntimeBudget();
+      const flow = input.flow ? input.flow(lease.actorId!, budget) : serviceReviewFlow(admin, lease.actorId!, budget, input.env);
+      try {
+        const step = await flow.continue(reviewId);
+        if (ENDED_STATES.has(step.review.state)) return { next: false, reason: 'ended' };
+        if (step.waiting === 'credits') return { next: false, reason: 'waiting_credits' };
+        // Calls already dispatched elsewhere (an invocation that was cut off) settle through the recovery, never twice.
+        const calls = step.calls.filter(call => !call.dispatched);
+        if (!calls.length) return { next: false, reason: step.waiting === 'calls' ? 'in_flight' : 'idle' };
+        const results = await Promise.allSettled(calls.map(call => flow.dispatch(reviewId, call.callId)));
+        const failed = results.filter(result => result.status === 'rejected').length;
+        if (failed) logger.warn('billing', 'fusion_review_dispatch_failed', { reviewId, failed });
+        const dispatched = results.filter(result => result.status === 'fulfilled'
+          && (result.value.state === 'judged'
+            || !['not_started', 'not_dispatched'].includes(result.value.reason))).length;
+        // No accepted dispatch: stop this chain and refund the attempt so a later retry can recover from an outage.
+        if (!dispatched) return { next: false, reason: 'failed', dispatched: 0 };
+        // Partial progress may continue; dispatchOnce still prevents resending accepted calls.
+        return { next: true, reason: 'advanced', dispatched };
+      } catch (error) {
+        const code = error instanceof Error && /^[A-Z][A-Z0-9_]{2,80}$/.test(error.message) ? error.message : 'UNEXPECTED';
+        logger.warn('billing', 'fusion_review_advance_failed', { reviewId, code });
+        return { next: false, reason: 'failed' };
+      }
+    }, value => ['waiting_credits', 'in_flight', 'idle', 'ended', 'failed'].includes(value.reason));
+    return outcome.ran ? outcome.value : { next: false, reason: outcome.reason };
+  });
 }
 
 const uuid = z.string().uuid();

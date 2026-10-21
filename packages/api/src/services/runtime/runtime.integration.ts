@@ -18,6 +18,7 @@ import './promptCache.integration';
 import './payg.integration';
 import './reliability.integration';
 import './nativeStopView.integration';
+import '../platformSecrets/reader.integration';
 import {registerReportTests} from '../report/report.integration';
 import {registerPaygHostTests} from './paygHost.integration';
 import './gateWiring.integration';
