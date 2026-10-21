@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { readPaymentMethodRoutes } from './methodRouting';
-import { methodCardCheckoutReady } from './methodCheckoutGate';
+import { methodCheckoutReady } from './methodCheckoutGate';
 
 type PaidMembership = { id: string; subscription_id: string; purchase_membership_level: string; payment_method: string;
   payment_channel: string; auto_renew: boolean | null; entitlement_start: string; entitlement_end: string; offer_kind: string;
@@ -89,8 +89,8 @@ export async function readMethodMembership(db: SupabaseClient, userId: string, n
   const sold = founderOrders.data.filter(row => row.qualification_state === 'sold').length;
   if (occupied > 50) throw new Error('PAY_WAFFO_FOUNDER_CAPACITY_CONFLICT');
   return { mode, routes,
-    // Card only: staging, a test-only exact staging PR preview, or R7 bound production with its switch plus route.
-    checkoutReady: methodCardCheckoutReady(env, routes, undefined, mode),
+    // Staging wallet routes can also expose the entry; production readiness stays on the card path.
+    checkoutReady: methodCheckoutReady(env, routes, undefined, mode),
     founder: { total: 50, sold, reserved: occupied - sold, available: 50 - occupied },
     memberships,
     termsVersion: typeof version === 'string' ? version : null,

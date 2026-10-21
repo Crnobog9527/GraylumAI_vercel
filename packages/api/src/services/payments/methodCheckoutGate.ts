@@ -56,10 +56,11 @@ function cardCheckoutEnvironmentOpen(env: Env, liveReady: boolean) {
   return liveReady && productionDeployment(env) && env.PAY_PRODUCTION_CARD_CHECKOUT_ENABLED === 'true';
 }
 
-/** Stripe wallet purchases (WeChat Pay, Alipay) through the method checkout. Staging stays closed as before; they
- * never follow the card switch. Production (R7): only the bound production deployment, behind its own default-off
- * switch PAY_PRODUCTION_WALLET_CHECKOUT_ENABLED (set only after the Owner approves). */
+/** Stripe wallet purchases (WeChat Pay, Alipay) through the method checkout. Staging opens only on the exact bound
+ * staging deployment; `payment_method_routes.<method>.enabled` remains the server-side switch. Production (R7): only
+ * the bound production deployment, behind its own default-off PAY_PRODUCTION_WALLET_CHECKOUT_ENABLED switch. */
 function walletCheckoutEnvironmentOpen(env: Env, liveReady: boolean) {
+  if (stagingDeployment(env)) return true;
   return liveReady && productionDeployment(env) && env.PAY_PRODUCTION_WALLET_CHECKOUT_ENABLED === 'true';
 }
 
@@ -75,12 +76,13 @@ export function assertMethodCheckoutEnvironment(env: Env, method: PaymentMethod,
   if (!testClockStaging && !methodCheckoutEnvironmentOpen(env, method, liveReady)) throw new Error('PAY_WAFFO_STEP2_NOT_READY');
 }
 
-/** Member-page projection: open when either card route is on (`routes` tells which one); the checkout mutation
- * re-checks the same conditions for the method actually chosen. */
-export function methodCardCheckoutReady(env: Env, routes: PaymentMethodRoutes | null, liveReady = LIVE_PAYMENT_PIPELINE_READY,
+/** Member-page projection: card routes behave as before; on staging, either wallet route also exposes the entry.
+ * The checkout mutation re-checks the environment and selected route before creating an order. */
+export function methodCheckoutReady(env: Env, routes: PaymentMethodRoutes | null, liveReady = LIVE_PAYMENT_PIPELINE_READY,
   testMode?: string) {
   const regular = methodCheckoutEnvironmentOpen(env, 'card', liveReady);
+  const stagingWallet = stagingDeployment(env) && (routes?.wechat_pay.enabled === true || routes?.alipay.enabled === true);
   const testClockStaging = testMode === 'test' && stripeTestClockStagingOpen(env);
-  return (regular && (routes?.card.enabled === true || routes?.card_cn?.enabled === true))
+  return stagingWallet || (regular && (routes?.card.enabled === true || routes?.card_cn?.enabled === true))
     || (testClockStaging && routes?.card.enabled === true);
 }

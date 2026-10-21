@@ -7,7 +7,7 @@ const staging = { VERCEL: '1', VERCEL_PROJECT_PRODUCTION_URL: 'auth-staging.gray
   V3_RUNTIME_STAGING_PROJECT_ID: 'synthetic-staging-project', NEXT_PUBLIC_SUPABASE_URL: 'https://synthetic.supabase.co',
   V3_RUNTIME_STAGING_DATABASE_HOST: 'synthetic.supabase.co', V3_RUNTIME_STAGING_WINDOW_ID: '00000000-0000-4000-8000-000000000001', WAFFO_TEST_OPERATIONS_ENABLED: 'true' };
 const routes = (card: boolean) => ({ version: 2, card: { enabled: card },
-  wechat_pay: { enabled: true, annualVerified: true }, alipay: { enabled: true, annualVerified: true } });
+  wechat_pay: { enabled: card, annualVerified: true }, alipay: { enabled: card, annualVerified: true } });
 function fixture(counts: Array<number | null> = [40, 3, 2], route: unknown = null,
   memberships: unknown[] = [], subscriptions: unknown[] | null = [], goldOrders: unknown[] = []) {
   const results: Array<{ data: unknown; error: null }> = [{ data: route === null ? null : { value: route }, error: null },
@@ -50,13 +50,19 @@ describe('method membership read projection', () => {
       expect(q.eq).not.toHaveBeenCalledWith('payment_status', expect.anything());
     }
   });
-  it('reports card checkout ready only on staging with the server switch on (PAY-STRIPE-MP 3c)', async () => {
-    const ready = async (env: typeof staging, enabled: boolean) =>
-      (await readMethodMembership(fixture(undefined, routes(enabled)).db, 'actor', 0, env)).checkoutReady;
-    expect(await ready(staging, true)).toBe(true);
-    expect(await ready(staging, false)).toBe(false);
+  it('projects enabled staging wallet routes as ready while leaving production unchanged', async () => {
+    const ready = async (env: typeof staging, route: ReturnType<typeof routes>) =>
+      (await readMethodMembership(fixture(undefined, route).db, 'actor', 0, env)).checkoutReady;
+    const walletsOff = { ...routes(false), wechat_pay: { enabled: false, annualVerified: false },
+      alipay: { enabled: false, annualVerified: false } };
+    const wechatOn = { ...walletsOff, wechat_pay: { enabled: true, annualVerified: false } };
+    const alipayOn = { ...walletsOff, alipay: { enabled: true, annualVerified: false } };
+    expect(await ready(staging, wechatOn)).toBe(true);
+    expect(await ready(staging, alipayOn)).toBe(true);
+    expect(await ready(staging, walletsOff)).toBe(false);
     for (const enabled of [true, false]) {
-      expect(await ready({ ...staging, VERCEL_PROJECT_PRODUCTION_URL: 'app.graylum.com' }, enabled)).toBe(false);
+      expect(await ready({ ...staging, VERCEL_PROJECT_PRODUCTION_URL: 'app.graylum.com' },
+        enabled ? routes(true) : walletsOff)).toBe(false);
     }
   });
   it('tells the purchase entry the terms version and whether the Gold first-month offer applies (display only)', async () => {
