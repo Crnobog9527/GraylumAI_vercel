@@ -47,19 +47,21 @@ describe('PAY-STRIPE-MP card first-payment evidence', () => {
     const t = fixture();
     await expect(t.read()).resolves.toMatchObject({ paymentId: 'in_1', amount: 4900 });
   });
-  it('checks the admitted frozen customer and clock on every first-payment object', async () => {
-    const t = fixture(); t.subscription.test_clock = 'clock_fixture'; t.invoice.test_clock = 'clock_fixture';
+  it.each(['card', 'card_cn'] as const)('checks the admitted frozen customer and clock on every %s first-payment object', async method => {
+    const t = fixture(method); t.subscription.test_clock = 'clock_fixture'; t.invoice.test_clock = 'clock_fixture';
     await expect(t.read({ customerId: 'cus_1', clockId: 'clock_fixture' }))
       .resolves.toMatchObject({ paymentId: 'in_1', amount: 4900 });
   });
   it.each(['frozen-customer', 'subscription-clock', 'invoice-clock', 'invoice-customer'])(
     'rejects admitted clock evidence with wrong %s', async reason => {
-      const t = fixture(); t.subscription.test_clock = 'clock_fixture'; t.invoice.test_clock = 'clock_fixture';
+      for (const method of ['card', 'card_cn'] as const) {
+      const t = fixture(method); t.subscription.test_clock = 'clock_fixture'; t.invoice.test_clock = 'clock_fixture';
       if (reason === 'subscription-clock') t.subscription.test_clock = 'clock_other';
       if (reason === 'invoice-clock') t.invoice.test_clock = 'clock_other';
       if (reason === 'invoice-customer') t.invoice.customer = 'cus_other';
       const clock = { customerId: reason === 'frozen-customer' ? 'cus_other' : 'cus_1', clockId: 'clock_fixture' };
       await expect(t.read(clock)).rejects.toThrow('PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT');
+      }
     });
   it('reads a paid first month from the subscription\'s first invoice and the Stripe period', async () => {
     await expect(fixture().read()).resolves.toEqual({ paymentId: 'in_1', checkoutId: 'cs_1', amount: 4900, tax: 0, currency: 'usd',

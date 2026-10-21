@@ -77,7 +77,7 @@ describe('unfulfilled first payment closes only from authoritative full-refund e
       canceledAt: new Date((PAID + 60) * 1000).toISOString(), refunds: [{ id: 're_fixture', amount: 2900 + tax,
         createdAt: new Date((PAID + 120) * 1000).toISOString() }] } });
   });
-  it.each(['environment', 'live', 'customer-missing', 'fulfilled', 'mapped-subscription'])(
+  it.each(['environment', 'live', 'customer-missing', 'fulfilled', 'mapped-subscription', 'mainland'])(
     'leaves the old path untouched and makes no provider/database calls when %s', async reason => {
       const f = fixture();
       if (reason === 'environment') vi.stubEnv('VERCEL_ENV', 'preview');
@@ -85,6 +85,7 @@ describe('unfulfilled first payment closes only from authoritative full-refund e
       if (reason === 'customer-missing') f.order.checkout_request.providerRequest.customer = '';
       if (reason === 'fulfilled') f.order.fulfilled_at = '2026-10-21T12:00:00Z';
       if (reason === 'mapped-subscription') f.order.subscription_id = 'local-subscription';
+      if (reason === 'mainland') Object.assign(f.order, { payment_method: 'card_cn', stripe_managed_payments: false });
       await expect(f.close()).resolves.toBe(false);
       expect(f.stripe.checkout.sessions.retrieve).not.toHaveBeenCalled(); expect(f.rpc).not.toHaveBeenCalled();
     });

@@ -84,7 +84,7 @@ export function methodCheckoutMethods(env: Env, routes: PaymentMethodRoutes | nu
 
 export function assertMethodCheckoutEnvironment(env: Env, method: PaymentMethod, liveReady = LIVE_PAYMENT_PIPELINE_READY,
   testClockCustomerRequested = false) {
-  const testClockStaging = testClockCustomerRequested && method === 'card' && stripeTestClockStagingOpen(env);
+  const testClockStaging = testClockCustomerRequested && ['card', 'card_cn'].includes(method) && stripeTestClockStagingOpen(env);
   if (!testClockStaging && !methodCheckoutEnvironmentOpen(env, method, liveReady)) throw new Error('PAY_WAFFO_STEP2_NOT_READY');
 }
 

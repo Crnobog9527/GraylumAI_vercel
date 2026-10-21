@@ -79,6 +79,20 @@ try {
       assert.deepEqual(objects(),current,'wallet second application preserves schema and ACL');
       return applied;
     }
+    if(path.endsWith('0331_pay_stripe_card_cn_test_clock.sql')) {
+      const previous=objects();
+      const interrupted=apply(migration.replace(/COMMIT;\s*$/,"DO $$ BEGIN RAISE EXCEPTION 'CN_CLOCK_ROLLBACK_PROBE'; END $$; COMMIT;"));
+      assert.equal(interrupted.ok,false);assert.match(interrupted.error,/CN_CLOCK_ROLLBACK_PROBE/);
+      assert.deepEqual(objects(),previous,'0331 interruption preserves schema and ACL');
+      const applied=apply(migration);if(!applied.ok)return applied;
+      const current=objects(),changed=Object.keys(current).filter(key=>current[key]!==previous[key]);
+      assert.equal(changed.length,3,'0331 changes two time predicates and preserves MP-only close explicitly');
+      assert.ok(changed.every(key=>key.startsWith('fn:pay_stripe_test_clock_time(')
+        ||key.startsWith('fn:pay_stripe_test_clock_observe(')
+        ||key.startsWith('fn:pay_stripe_test_clock_close_refunded(')),'0331 preserves all ACL and other functions');
+      sql(migration);assert.deepEqual(objects(),current,'0331 repeat preserves definitions and ACL');
+      return applied;
+    }
     if(path.endsWith('0329_pay_stripe_test_clock.sql')) {
       const beforeClock=objects();
       const failed=apply(migration.replace(/COMMIT;\s*$/,"DO $$ BEGIN RAISE EXCEPTION 'CLOCK_ROLLBACK_PROBE'; END $$; COMMIT;"));
@@ -133,6 +147,7 @@ try {
   cases.push(...(await stripeMpUpgradeCases({admin,service,connect,proCycle:'yearly'})).map(c=>'annual-'+c));
   cases.push(...await walletMembershipCases({admin,service,connect}));
   cases.push(...await stripeTestClockCases({admin,service,connect}));
+  cases.push(...await stripeTestClockCases({admin,service,connect},'card_cn'));
   const data=()=>admin.query(`SELECT jsonb_build_object(
     'profiles',(SELECT jsonb_agg(to_jsonb(p) ORDER BY id) FROM profiles p),
     'grants',(SELECT jsonb_agg(to_jsonb(g) ORDER BY id) FROM subscription_credit_grants g),

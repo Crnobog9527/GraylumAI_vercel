@@ -22,7 +22,8 @@ export function stripeTestClockRuntimeOpen(env: Env = process.env) {
 export function testClockCustomerForOrder(order: TestClockOrder, scope: StripeScope, env: Env = process.env) {
   if (!stripeTestClockRuntimeOpen(env) || scope.mode !== 'test' || order.payment_mode !== 'test'
     || order.payment_channel !== 'stripe' || order.merchant_namespace !== scope.merchant
-    || order.payment_method !== 'card' || order.stripe_managed_payments !== true
+    || !['card', 'card_cn'].includes(order.payment_method ?? '')
+    || order.stripe_managed_payments !== (order.payment_method === 'card')
     || order.purchase_membership_level !== 'pro' || order.billing_cycle !== 'monthly' || order.item_type !== 'membership_plan') return null;
   const customer = order.checkout_request?.providerRequest?.customer;
   return typeof customer === 'string' && /^cus_[A-Za-z0-9]{6,128}$/.test(customer) ? customer : null;
@@ -70,7 +71,7 @@ export async function refreshStripeTestClockUser(db: SupabaseClient, userId: str
   const times = new Map<string, number>();
   if (!stripeTestClockRuntimeOpen(env)) return times;
   const sources = await db.from('payment_orders').select('*').eq('user_id', userId).eq('payment_mode', 'test')
-    .eq('payment_channel', 'stripe').eq('payment_method', 'card').eq('purchase_membership_level', 'pro')
+    .eq('payment_channel', 'stripe').in('payment_method', ['card', 'card_cn']).eq('purchase_membership_level', 'pro')
     .eq('billing_cycle', 'monthly').eq('purchase_action', 'checkout').not('checkout_request->providerRequest->>customer', 'is', null).limit(101);
   if (sources.error || !Array.isArray(sources.data)) throw new Error('PAY_STRIPE_TEST_CLOCK_UNAVAILABLE');
   if (sources.data.length > 100) throw new Error('PAY_STRIPE_TEST_CLOCK_SOURCE_LIMIT');
