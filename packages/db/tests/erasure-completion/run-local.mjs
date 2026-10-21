@@ -14,6 +14,7 @@ import {runFusionExecutor} from './fusion.mjs';
 import {runExecutor} from './executor.mjs';
 import {runProcessor} from './processor.mjs';
 import {runLeaves} from './leaves.mjs';
+import {runOwnedRuntimePrune} from './owned-runtime-prune.mjs';
 import {runConcurrency} from './concurrency.mjs';
 import {startRedisDouble} from './redis-double.mjs';
 
@@ -72,6 +73,10 @@ try {
   applyServerOnly:input=>outcome(docker(['exec',name,'psql','-X','-qAt','-U','postgres','-d','b2a','-c',input])),
   fingerprint:development?undefined:snapshot});
  assert.equal(report.build.failed,null);
+ // Pending numbering is explicit: exercise the exact proposed SQL only in this disposable database.
+ const optimization=read('docs/launch/evidence/data-erasure-user9-prune/migration.sql');
+ ok(sql(optimization));const optimized=snapshot();ok(sql(optimization));
+ assert.deepEqual(snapshot(),optimized,'runtime owner optimization repeats without catalog drift');
  const require=createRequire(resolve(root,'packages/api/package.json'));
  const {Client}=require('pg');
  const address=ok(docker(['port',name,'5432/tcp']));assert.match(address,/^127\.0\.0\.1:\d+$/);
@@ -109,6 +114,7 @@ try {
  report.checks.push('executor syncs the off-database manifest: ids and times only, nothing left unsynced');
  await runCases(client,report);
  await runLeaves(client,report);
+ await runOwnedRuntimePrune(client,report);
  await runConcurrency({db:client,Client,connectionString,report});
  const {processAccountErasure}=await import(module('processor'));
  await runProcessor(client,processAccountErasure,report);
