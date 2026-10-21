@@ -2,13 +2,13 @@
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 
-export async function stripeTestClockCases({admin,service,connect}) {
+export async function stripeTestClockCases({admin,service,connect},method='card') {
   const binding={projectId:'prj_N9BO48YSAYBQ5Nrvzd3WA9wrQEpC',domain:'auth-staging.graylum.com',
     databaseHost:'gvcpmcunmfrbxuwimxfa.supabase.co',branch:'staging',repo:'Crnobog9527/GraylumAI_vercel'};
   const plan=(await admin.query("SELECT id FROM membership_plans WHERE level='pro'")).rows[0].id;
   const current=(await admin.query("SELECT value FROM system_settings WHERE key='payment_method_routes'")).rows[0].value;
   const version=current.version+1;
-  await admin.query("UPDATE system_settings SET value=$1 WHERE key='payment_method_routes'",[{...current,version,card:{enabled:true}}]);
+  await admin.query("UPDATE system_settings SET value=$1 WHERE key='payment_method_routes'",[{...current,version,[method]:{enabled:true}}]);
   await admin.query(`INSERT INTO payment_provider_refs(channel,merchant_namespace,mode,object_type,external_id,
     membership_plan_id,billing_cycle,is_current,offer_kind,price_usage)
     VALUES('stripe','fixture','test','price','price_clock_pro',$1,'monthly',true,'standard','subscription')
@@ -18,12 +18,12 @@ export async function stripeTestClockCases({admin,service,connect}) {
   const fixture=async()=>{
     const user=randomUUID();await admin.query('INSERT INTO profiles(id,credits) VALUES($1,0)',[user]);
     const digest=JSON.stringify([{kind:'email',key_version:'test-v1',digest:user.replaceAll('-','').repeat(2)}]);
-    const o=(await service.query(`SELECT o.* FROM pay_waffo_create_purchase($1,'membership_plan',$2,'monthly','card','standard',
-      'fixture','test',$3,'terms-v1',$4) o`,[user,plan,version,digest])).rows[0];
+    const o=(await service.query(`SELECT o.* FROM pay_waffo_create_purchase($1,'membership_plan',$2,'monthly',$5,'standard',
+      'fixture','test',$3,'terms-v1',$4) o`,[user,plan,version,digest,method])).rows[0];
     const customer='cus_'+o.id.replaceAll('-',''),clock='clock_'+o.id.replaceAll('-',''),checkout='cs_'+o.id;
     const expiry=new Date(Date.now()+1800000);
     await service.query('SELECT pay_waffo_claim_checkout($1,$2,$3,$4,$5)',[user,o.id,'fixture',
-      {orderId:o.id,userId:user,method:'card',merchant:'fixture',mode:'test',providerRequest:{customer}},expiry]);
+      {orderId:o.id,userId:user,method,merchant:'fixture',mode:'test',providerRequest:{customer}},expiry]);
     await service.query('SELECT pay_waffo_bind_checkout($1,$2,$3,$4,$5)',[user,o.id,'fixture',checkout,expiry]);
     return {o,user,customer,clock,checkout,digest};
   };
@@ -66,8 +66,8 @@ export async function stripeTestClockCases({admin,service,connect}) {
   assert.notEqual((await facts(f)).mapping_state,'internal_paid','grace ended at source+24h');
   await service.query("SELECT pay_stripe_mp_sync_subscription($1,'fixture',false,true,false)",[f.sub]);
   assert.equal((await balance(f)).membership_level,'free','cancel settles from source time');
-  const again=(await service.query(`SELECT o.* FROM pay_waffo_create_purchase($1,'membership_plan',$2,'monthly','card','standard',
-    'fixture','test',$3,'terms-v1',$4) o`,[f.user,plan,version,f.digest])).rows[0];
+  const again=(await service.query(`SELECT o.* FROM pay_waffo_create_purchase($1,'membership_plan',$2,'monthly',$5,'standard',
+    'fixture','test',$3,'terms-v1',$4) o`,[f.user,plan,version,f.digest,method])).rows[0];
   assert.equal(again.payment_status,'unpaid','ended clock subscription can buy again');
   const renewalInvoice='in_renew_'+f.o.id.replaceAll('-','');
   await service.query("SELECT pay_stripe_mp_record_tax($1,'fixture',$2,0)",[renewed.orderId,renewalInvoice]);
@@ -80,7 +80,8 @@ export async function stripeTestClockCases({admin,service,connect}) {
   assert.equal((await balance(f)).credits,3480,'only the refunded renewal source is taken back');
 
   // Each independent missing DB gate, including live mode, falls back to the existing real clock.
-  for(const [key,value] of [['payment_mode','live'],['purchase_membership_level','gold']]) {
+  for(const [key,value] of [['payment_mode','live'],['purchase_membership_level','gold'],
+    ['stripe_managed_payments',method!=='card']]) {
     // Invalid historical fixtures in this isolated DB only; production frozen-field guard remains installed.
     await assert.rejects(()=>admin.query(`UPDATE payment_orders SET ${key}=$2 WHERE id=$1`,[f.o.id,value]),/FROZEN_FIELD/);
     await admin.query('BEGIN');await admin.query("SET LOCAL session_replication_role='replica'");
@@ -102,6 +103,19 @@ export async function stripeTestClockCases({admin,service,connect}) {
     paidMinor:3190,taxMinor:290,currency:'usd',paidAt:new Date(start.getTime()-3600000).toISOString(),canceledAt:start.toISOString(),
     refunds:[{id:'re_close_'+close.o.id.replaceAll('-',''),amount:3190,createdAt:start.toISOString()}]};
   const finish=(db=service,p=closeFacts)=>db.query('SELECT pay_stripe_test_clock_close_refunded($1) v',[p]);
+  if(method==='card_cn') {
+    await assert.rejects(()=>finish(),/TEST_CLOCK_CLOSE/,'0332 does not extend MP first-payment cash close');
+    for(const role of ['anon','authenticated']) {
+      await service.query(`SET ROLE ${role}`);
+      await assert.rejects(()=>observe(close,future),/permission denied/);
+    }
+    await service.query('SET ROLE service_role');
+    return ['cn-clock-renewal-concurrent-once','cn-clock-real-upper-bound-unchanged','cn-clock-binding-and-customer-scope',
+      'cn-clock-monotonic-no-rebind','cn-clock-per-source-credits-and-entitlement','cn-clock-grace-24h-cancel-repurchase',
+      'cn-clock-renewal-refund-source-only-once','cn-clock-refund-real-time-guard-preserved',
+      'cn-clock-missing-gates-live-and-mp-pair-unchanged','cn-clock-first-early-paid-guard',
+      'cn-clock-does-not-extend-mp-cash-close','cn-clock-rpc-service-only'];
+  }
   for(const patch of [{paidMinor:2900},{currency:'eur'},{taxMinor:-1},{refunds:[{...closeFacts.refunds[0],amount:2900}]},
     {customer:'cus_wrongcustomer'},{clock:'clock_wrongclock'},{refunds:[closeFacts.refunds[0],closeFacts.refunds[0]]}]) {
     await assert.rejects(()=>finish(service,{...closeFacts,...patch}),/TEST_CLOCK_CLOSE/);

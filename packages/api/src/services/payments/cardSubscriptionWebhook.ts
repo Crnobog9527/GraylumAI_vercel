@@ -100,7 +100,8 @@ export async function handleCardSubscriptionInvoice(db: SupabaseClient, stripe: 
     if (invoice.livemode !== false || id(invoice.test_clock) !== clock.clockId || id(subscription.test_clock) !== clock.clockId
       || id(invoice.customer) !== clock.customerId
       || id(subscription.customer) !== clock.customerId || subscription.metadata?.orderId !== order.id
-      || subscription.metadata?.userId !== order.user_id || subscription.managed_payments?.enabled !== true) {
+      || subscription.metadata?.userId !== order.user_id
+      || (subscription.managed_payments?.enabled === true) !== (order.payment_method === 'card')) {
       throw new Error(PAYMENT_EVIDENCE_CONFLICT);
     }
   }
@@ -159,7 +160,8 @@ export async function handleCardSubscriptionState(db: SupabaseClient, stripe: St
   const subscription = await readSubscription(stripe, subscriptionId);
   const clock = await observeStripeTestClock(db, stripe, scope, order);
   if (clock && (id(subscription.test_clock) !== clock.clockId || id(subscription.customer) !== clock.customerId || subscription.metadata?.orderId !== order.id
-    || subscription.metadata?.userId !== order.user_id || subscription.managed_payments?.enabled !== true)) {
+    || subscription.metadata?.userId !== order.user_id
+    || (subscription.managed_payments?.enabled === true) !== (order.payment_method === 'card'))) {
     throw new Error(PAYMENT_EVIDENCE_CONFLICT);
   }
   if (!order.localSubscriptionId) {
