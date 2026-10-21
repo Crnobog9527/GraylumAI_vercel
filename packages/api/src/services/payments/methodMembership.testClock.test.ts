@@ -23,7 +23,7 @@ function fixture(orders: unknown[], subscriptions: unknown[], holds: unknown[] =
   const visible = (orders as ReturnType<typeof paid>[]).filter(row => !frozen.has(row.id));
   const latestTerms = [...new Set(visible.map(row => row.subscription_id))].map(id => ({ entitlement_end:
     visible.filter(row => row.subscription_id === id).map(row => row.entitlement_end).sort().at(-1) }));
-  const responses: unknown[] = [null, orders, [], ...(orders.length ? [holds,
+  const responses: unknown[] = [null, orders, [], [], ...(orders.length ? [holds,
     ...(visible.length ? [subscriptions, ...latestTerms] : [])] : []),
     { value: { version: 'terms' } }, [{ id: 'gold-plan' }], []];
   const from = vi.fn(() => {

@@ -125,7 +125,7 @@ export function MembershipPlanCard({ plan, billingCycle, action, taxNote, firstM
       </div>
 
       {action ? (
-        <Button onClick={onSelect} className="w-full" disabled={action.disabled}
+        <Button onClick={onSelect} className="h-auto min-h-10 w-full whitespace-normal px-3 py-2 text-center" disabled={action.disabled}
           style={{ background: action.disabled ? 'var(--bg-tertiary)'
             : 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',
           color: action.disabled ? 'var(--text-tertiary)' : 'var(--bg-primary)', cursor: action.disabled ? 'default' : 'pointer' }}>
