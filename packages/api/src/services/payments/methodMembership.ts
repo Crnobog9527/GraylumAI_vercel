@@ -104,7 +104,7 @@ export async function readMethodMembership(db: SupabaseClient, userId: string, n
       if (source.error) throw new Error('PAY_WAFFO_MEMBERSHIP_UNAVAILABLE');
       const order = source.data as { item_id?: unknown; subscription_id?: unknown; payment_method?: unknown;
         payment_channel?: unknown; offer_kind?: unknown } | null;
-      if (order && ['wechat_pay', 'alipay'].includes(String(order.payment_method)) && order.payment_channel === 'waffo'
+      if (order && ['wechat_pay', 'alipay'].includes(String(order.payment_method)) && order.payment_channel === 'stripe'
         && ['founder', 'founder_renewal'].includes(String(order.offer_kind))
         && typeof order.item_id === 'string' && typeof order.subscription_id === 'string') {
         const deadline = await db.rpc('pay_waffo_founder_deadline', { p_order: status.orderId });

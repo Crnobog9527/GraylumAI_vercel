@@ -78,21 +78,24 @@ describe('method membership read projection', () => {
       expect(productionProjection.checkoutMethods).toEqual([]);
     }
   });
-  it('projects the manual founder-wallet renewal only for an eligible staging founder', async () => {
+  it.each([
+    ['wechat_pay', 'stripe', true], ['alipay', 'stripe', true], ['wechat_pay', 'waffo', false],
+  ])('projects eligible staging founder renewal for %s / %s: %s', async (method, channel, eligible) => {
     const orderId = '00000000-0000-4000-8000-000000000031';
     const f = fixture(undefined, routes(true), [], [], [], {
       founderStatus: { state: 'active', orderId, foundedAt: '2026-01-01T00:00:00Z', periodEnd: '2027-01-01T00:00:00Z',
         deadline: null, endedAt: null, endedReason: null },
       renewalOrder: { item_id: 'plan-gold', subscription_id: '00000000-0000-4000-8000-000000000032',
-        payment_method: 'wechat_pay', payment_channel: 'waffo', offer_kind: 'founder' },
+        payment_method: method, payment_channel: channel, offer_kind: 'founder' },
       deadline: '2027-01-08T00:00:00Z',
     });
     const userId = '00000000-0000-4000-8000-000000000099';
     const result = await readMethodMembership(f.db, userId, Date.parse('2026-12-25T00:00:00Z'), staging);
-    expect(result.founderRenewal).toEqual({ itemId: 'plan-gold', subscriptionId: '00000000-0000-4000-8000-000000000032',
-      eligibleUntil: '2027-01-08T00:00:00.000Z' });
+    expect(result.founderRenewal).toEqual(eligible ? { itemId: 'plan-gold', subscriptionId: '00000000-0000-4000-8000-000000000032',
+      eligibleUntil: '2027-01-08T00:00:00.000Z' } : null);
     expect(f.rpc).toHaveBeenCalledWith('pay_founder_status', { p_user: userId });
-    expect(f.rpc).toHaveBeenCalledWith('pay_waffo_founder_deadline', { p_order: orderId });
+    if (eligible) expect(f.rpc).toHaveBeenCalledWith('pay_waffo_founder_deadline', { p_order: orderId });
+    else expect(f.rpc).not.toHaveBeenCalledWith('pay_waffo_founder_deadline', { p_order: orderId });
     expect(f.queries.at(-1)?.eq).toHaveBeenCalledWith('payment_mode', 'test');
   });
   it('does not project the founder wallet renewal on a production deployment', async () => {
