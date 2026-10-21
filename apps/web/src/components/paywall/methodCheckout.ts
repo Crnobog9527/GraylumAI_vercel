@@ -95,14 +95,15 @@ export function checkoutEntryOpen(entry: MethodMembershipEntry | null | undefine
     && entry.termsVersion.length > 0 && entry.routes && refundPolicyHref(entry) !== null);
 }
 
-/** Methods allowed by the server projection and route switches; the mainland card only sells memberships. */
+/** Methods allowed by the server projection and route switches, with restrictions of the selected channel. */
 export function checkoutMethods(entry: MethodMembershipEntry | null | undefined, itemType: MethodPurchase['itemType'],
   billingCycle?: MethodPurchase['billingCycle']): CheckoutMethod[] {
   if (!checkoutEntryOpen(entry)) return [];
+  const stripe = (entry.purchaseChannel ?? entry.routes.newPurchaseChannel ?? 'stripe') === 'stripe';
   return entry.checkoutMethods.filter(method => {
     if (entry.routes?.[method]?.enabled !== true) return false;
-    if (method === 'card_cn' && itemType !== 'membership_plan') return false;
-    if ((method === 'wechat_pay' || method === 'alipay') && billingCycle === 'yearly'
+    if (stripe && method === 'card_cn' && itemType !== 'membership_plan') return false;
+    if (stripe && (method === 'wechat_pay' || method === 'alipay') && billingCycle === 'yearly'
       && entry.routes[method]?.annualVerified !== true) return false;
     return true;
   });

@@ -7,7 +7,7 @@
 
 1. 先完成 #1237 前置同步，再按最终版本应用 `0332_pay_failover.sql`。本脚本检查两个 PAY-FAILOVER RPC 存在；执行者仍须核对实际迁移记录及对应版本。
 2. 执行连接必须为 staging Supabase 项目 `gvcpmcunmfrbxuwimxfa`。普通 PostgreSQL 连接内无法可靠推断项目编号，须在执行端核对，不能把 SQL 内的 namespace 检查当作项目识别。
-3. 商品依据为 [12 个测试商品回读 manifest](../evidence/pay-failover-products-20261022/products.json)。Owner 已授权建立这 12 个测试一次性 USD 商品；真实供应商商品创建、回读与密钥由主窗口单独处理。
+3. 商品依据为 [12 个测试商品回读 manifest](../evidence/pay-failover-products-20261022/products.json)。Owner 已授权建立这 12 个测试一次性 USD 商品，主窗口已完成创建及逐个回读核对；本脚本不读取供应商密钥。
 
 ## 写入范围与拒绝条件
 
@@ -33,4 +33,4 @@
 
 2026-10-22本地真实数据库验证11项PASS，证据见[验证结果](../evidence/pay-failover-products-20261022/mapping-validation.json)。验证包括 12 条完整维度关联、同 ID 幂等、冲突整批回滚、inactive 不自动启用、namespace/live/旧订阅冲突拒绝、基础目录价格变化拒绝，以及原六条订阅、Stripe/live 哨兵记录与路由设置不变。此测试按当前真实文件构建 schema；不代替前置同步后的最终完整 replay/指纹验收。
 
-2026-10-22 本地结果：**PASS，11 项**；当前文件 schema 构建 334/334，未重复迁移、未刷新指纹。执行日志保留于 `/tmp/pay-failover-test-mapping.log`。脚本语法检查与仓库代码长度检查通过。远程应用及 staging 浏览器付款验收均 **NOT_RUN**。
+2026-10-22 本地结果：**PASS，11 项**；已同步 #1237 后的最终 schema 构建 335/335，未重复迁移、未刷新指纹。执行日志保留于 `/tmp/pay-failover-0332-final-mapping.log`。脚本语法检查与仓库代码长度检查通过。远程应用及 staging 浏览器付款验收均 **NOT_RUN**。

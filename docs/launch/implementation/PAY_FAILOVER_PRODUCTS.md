@@ -19,9 +19,9 @@
 
 总计 12 个一次性商品；创始续买复用同一 founder 商品。映射使用现有 `payment_provider_refs`，channel=waffo，mode=test，准确的测试 merchant_namespace / membership_plan_id / credit_package_id / 外部 PROD 商品 ID；每个维度只能有一个 is_current=true 的价格映射。不能把原订阅 PROD ID 填进一次性映射，也不能复制 test ID 到 live。正式商品与映射须 Owner 后续单独准备。
 
-最低 staging 验收先准备 Pro 月付和 990 积分包 Pro 价；全部商品可用声明仍需完整映射与逐项检查。测试模式 Waffo 不显示支付宝、微信，不能因此改开关或伪造实测 PASS。支付宝只用模拟付款事实覆盖；上线后最小金额真实支付宝付款及退款必须再获 Owner 单独批准。
+最低 staging 验收先使用已建的 Pro 月付和 990 积分包 Pro 价，前置是总控核对并应用映射；全部商品可用声明仍需完整映射与逐项检查。测试模式 Waffo 不显示支付宝、微信，不能因此改开关或伪造实测 PASS。支付宝只用模拟付款事实覆盖；上线后最小金额真实支付宝付款及退款必须再获 Owner 单独批准。
 
-验证次序：总控确认0330/0331/0332依赖与迁移、包含本改动的 staging 已通过正常合并部署 → 准备一次性商品和映射 → 占用经批准的测试账号 → 后台版本锁切 Waffo → 测试卡会员/积分包现金与权益分别核对 → 原渠道退款完成/积分权益收口 → 切回 Stripe → Stripe 新购正常且 Waffo 原单和退款继续回收。未知付款先核对，不换渠道重扣。
+验证次序：总控确认0330/0331/0332依赖与迁移、核对已建一次性商品并应用映射 → 包含本改动的 staging 通过正常合并部署 → 占用经批准的测试账号 → 后台版本锁切 Waffo → 测试卡会员/积分包现金与权益分别核对 → 原渠道退款完成/积分权益收口 → 切回 Stripe → Stripe 新购正常且 Waffo 原单和退款继续回收。未知付款先核对，不换渠道重扣。
 
 创建证据见[公开脱敏清单](../evidence/pay-failover-products-20261022/products.json)和[只读原商品核对](../evidence/pay-failover-products-20261022/preflight.json)。初查一次性商品为0；每次创建前查同名、创建后查回，最终12个均active、无正式版本，未遇结果不明或重试。
 

@@ -1,8 +1,8 @@
 {
   "result": "PASS",
   "build": {
-    "steps": 334,
-    "passed": 334,
+    "steps": 335,
+    "passed": 335,
     "bridges": [
       "0143_ticket_grants_and_own_rls.sql"
     ],
@@ -82,6 +82,18 @@
     "clock-close-late-paid-no-grant",
     "clock-close-repurchase-concurrent-once",
     "clock-rpc-service-only",
+    "cn-clock-renewal-concurrent-once",
+    "cn-clock-real-upper-bound-unchanged",
+    "cn-clock-binding-and-customer-scope",
+    "cn-clock-monotonic-no-rebind",
+    "cn-clock-per-source-credits-and-entitlement",
+    "cn-clock-grace-24h-cancel-repurchase",
+    "cn-clock-renewal-refund-source-only-once",
+    "cn-clock-refund-real-time-guard-preserved",
+    "cn-clock-missing-gates-live-and-mp-pair-unchanged",
+    "cn-clock-first-early-paid-guard",
+    "cn-clock-does-not-extend-mp-cash-close",
+    "cn-clock-rpc-service-only",
     "wallet-migration-interruption-atomic",
     "wallet-migration-repeat-acl-unchanged",
     "wallet-recovery-preserves-paid-data",
