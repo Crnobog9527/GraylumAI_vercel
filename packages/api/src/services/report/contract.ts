@@ -82,9 +82,11 @@ export function benchmarkShortfallNote(serialized: string | null, required: numb
   return `Benchmark sample is short: only ${qualified} qualified benchmark account(s) in the table (the product asks for `
     + `${required}); after at least two searches the user chose to generate the report now. In the one-sentence conclusion `
     + 'or at the start of the benchmark chapter, add a clearly labelled note "对标样本不足" (in the report language): the plan '
-    + `rests on only ${qualified} account(s) the user can learn from, its conclusions have limited reference value, and the `
+    + `rests on only ${qualified} account(s) meeting the follower, activity and post-count data criteria, `
+    + 'its conclusions have limited reference value, and the '
     + 'user should look for more benchmarks later and recheck. Never invent accounts or numbers to fill the gap. Keep every '
-    + 'required heading.';
+    + 'required heading. Data qualification does not verify content/topic fit or suitability to imitate. '
+    + 'Without specific post-content evidence, mark topic fit as unverified; never call an account suitable to learn from.';
 }
 
 /**

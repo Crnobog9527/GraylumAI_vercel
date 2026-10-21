@@ -136,10 +136,14 @@ for (const width of [375, 1440]) {
 
       // Benchmark table: missing numbers stay missing, the report's minimum is spelled out.
       const table = page.getByRole("region", { name: "对标表" });
-      await ui(table).toContainText("3 个账号 · 可以照着学 2 个");
+      await ui(table).toContainText("3 个账号 · 数据条件达标 2 个");
       await ui(table).toContainText("这次没查到");
+      // #716: numeric eligibility is not a claim that the account's content suits this creator.
+      await ui(table).not.toContainText("可以照着学");
+      await ui(table).toContainText("内容主题是否适合你，仍需结合具体作品判断");
+      await ui(table.locator("tr").filter({ hasText: "sample_2" })).toContainText("数据条件达标");
       await ui(table).toContainText("头部账号");
-      await ui(table).toContainText("生成定位报告需要至少 3 个可以照着学的对标账号，目前 2 个");
+      await ui(table).toContainText("生成定位报告需要至少 3 个数据条件达标的对标账号，目前 2 个");
       await ui(table).toContainText("查询时间：");
       // Each number cites a source number; the missing ones cite none; sources are listed below the table.
       await ui(table.getByRole("list", { name: "数据来源" })).toContainText("[1]");
@@ -228,13 +232,13 @@ for (const width of [375, 1440]) {
 
       const card = page.getByRole("region", { name: "对标不足时怎么办" });
       await ui(card).toBeVisible({ timeout: 5000 });
-      await ui(card).toContainText("已经找了 2 轮，目前有 2 个可以照着学的对标账号");
+      await ui(card).toContainText("已经找了 2 轮，目前有 2 个数据条件达标的对标账号");
       // "Keep searching" is the recommended default; the other option names its limits, never a credit estimate.
       await ui(card.getByRole("radio", { name: /继续找对标（推荐）/ })).toBeChecked();
       await ui(card).toContainText("报告会注明对标样本不足");
       expect(await card.innerText()).not.toContain("积分");
       const table = page.getByRole("region", { name: "对标表" });
-      await ui(table).toContainText("生成定位报告需要至少 3 个可以照着学的对标账号，目前 2 个");
+      await ui(table).toContainText("生成定位报告需要至少 3 个数据条件达标的对标账号，目前 2 个");
       await card.getByRole("radio", { name: /用现有 2 个对标先生成报告/ }).check();
       await card.getByRole("button", { name: "确认选择" }).click();
       await ui(page.getByRole("button", { name: "确认选择" })).toHaveCount(0);

@@ -3864,7 +3864,7 @@
   "fn:runtime_mentor_history_guard()": "c6081a655abc",
   "fn:runtime_mentor_messages(uuid,runtime_executions)": "81ca8a37c06a",
   "fn:runtime_pending_financial_batch(uuid,integer)": "66974c3c5c06",
-  "fn:runtime_positioning_gate(uuid)": "96ee9b81bcd9",
+  "fn:runtime_positioning_gate(uuid)": "0ec9bbd15cec",
   "fn:runtime_production_access(uuid)": "c9711ad70d32",
   "fn:runtime_production_allowed(uuid,jsonb,boolean)": "93eb569de3f5",
   "fn:runtime_production_database()": "79714495fc44",
