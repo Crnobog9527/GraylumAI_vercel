@@ -8,7 +8,7 @@ import {randomUUID} from 'node:crypto';
 import {localDb, read} from '../runtime-view-perf/local-db.mjs';
 
 const db = await localDb(), c = db.client;
-const migration = read('packages/db/migrations/0333_runtime_positioning_gate_transaction.sql');
+const migration = read('packages/db/migrations/0332_runtime_positioning_gate_transaction.sql');
 const report = {checks: [], failed: null};
 const one = async (sql, args = []) => (await c.query(sql, args)).rows[0]?.v;
 const signature = 'public.runtime_positioning_gate(uuid)';

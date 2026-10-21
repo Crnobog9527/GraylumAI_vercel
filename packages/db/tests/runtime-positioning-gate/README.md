@@ -15,4 +15,5 @@
 如必须撤回该声明，可执行 `ALTER FUNCTION public.runtime_positioning_gate(uuid) STABLE;`，
 但会恢复有报告来源的自由对话准入故障；不应将回退代码视为已经修复该故障。
 
-迁移编号暂为 0333，最终由总控分配；未在 staging 应用。
+迁移编号 0332 已由总控于 2026-10-22 分配；原暂用 0333 作废，PAY-FAILOVER 改用 0333。
+上库与合并由总控执行；本任务未在 staging 应用。
