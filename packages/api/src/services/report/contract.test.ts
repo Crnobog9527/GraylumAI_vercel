@@ -108,4 +108,8 @@ it('BENCHMARK-SHORTFALL: the report is told the sample is short only with 1 to r
   expect(note).toContain('look for more benchmarks later');
   expect(note).not.toMatch(/credit|积分/);
   expect(benchmarkShortfallNote(table(row('a', true)), 5)).toContain('asks for 5');
+  expect(note).toContain('meeting the follower, activity and post-count data criteria');
+  expect(note).toContain('Data qualification does not verify content/topic fit or suitability to imitate');
+  expect(note).toContain('mark topic fit as unverified');
+  expect(note).not.toContain('account(s) the user can learn from');
 });
