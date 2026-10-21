@@ -29,10 +29,10 @@
 
 ## 本地验证
 
-Owner再次改号为0335；#1240/#1239已合并同步，映射引用已改0335。以下机器结果仍是旧0333版本历史验证，等待本轮最终前置重验，不作为0335最终验收。
+Owner再次改号为0335；#1240/#1239已合并同步，映射引用已改0335。以下已在最终0335及全部前置的338步schema上重验，旧0333结果不作为本轮证据。
 
 独立测试命令：`node packages/db/tests/pay-failover-mapping/run-local.mjs --local-only`。只使用临时本地 PostgreSQL，不加载远程密钥，不调用供应商 API，不刷新迁移指纹。
 
 2026-10-22本地真实数据库验证11项PASS，证据见[验证结果](../evidence/pay-failover-products-20261022/mapping-validation.json)。验证包括 12 条完整维度关联、同 ID 幂等、冲突整批回滚、inactive 不自动启用、namespace/live/旧订阅冲突拒绝、基础目录价格变化拒绝，以及原六条订阅、Stripe/live 哨兵记录与路由设置不变。此测试按当前真实文件构建 schema；不代替前置同步后的最终完整 replay/指纹验收。
 
-2026-10-22 本地结果：**PASS，11 项**；已同步 #1237/#1238 后的最终 schema 构建 336/336，未重复迁移、未刷新指纹。执行日志保留于 `/tmp/pay-failover-0333-final-mapping.log`。脚本语法检查与仓库代码长度检查通过。远程应用及 staging 浏览器付款验收均 **NOT_RUN**。
+2026-10-22 本地结果：**PASS，11 项**；已同步 #1237/#1238/#1240/#1239 后的最终 schema 构建 338/338，未重复迁移、未刷新指纹。执行日志保留于 `/tmp/pay-failover-0335-final-mapping.log`。脚本语法检查与仓库代码长度检查通过。远程应用及 staging 浏览器付款验收均 **NOT_RUN**。
