@@ -8,6 +8,7 @@ import pg from 'pg';
 import {POSTGRES_IMAGE} from '../v3/images.mjs';
 import {buildFromFiles,installPgCronStub} from '../baseline/build-from-files.mjs';
 import {stripeMpUpgradeCases} from '../pay-waffo/stripe-mp-upgrade.mjs';
+import {stripeTestClockCases} from '../pay-waffo/stripe-test-clock.mjs';
 
 assert.ok(process.argv[2]==='--local-only'&&!process.env.CI || process.argv[2]==='--ci'&&process.env.CI,
   'use --local-only locally or --ci in CI; only an isolated local database is supported');
@@ -51,6 +52,16 @@ try {
   let before,after,originals,originalFunctionKeys,originalFunctionEntries;
   const build=buildFromFiles(root,{applyFile:path=>{
     const migration=read(path);
+    if(path.endsWith('0329_pay_stripe_test_clock.sql')) {
+      const beforeClock=objects();
+      const failed=apply(migration.replace(/COMMIT;\s*$/,"DO $$ BEGIN RAISE EXCEPTION 'CLOCK_ROLLBACK_PROBE'; END $$; COMMIT;"));
+      assert.equal(failed.ok,false);assert.match(failed.error,/CLOCK_ROLLBACK_PROBE/);
+      assert.deepEqual(objects(),beforeClock,'0329 interruption leaves the old schema and ACL intact');
+      const applied=apply(migration);if(!applied.ok)return applied;
+      const afterClock=objects();sql(migration);
+      assert.deepEqual(objects(),afterClock,'0329 repeat preserves definitions and ACL');
+      return applied;
+    }
     if(!path.endsWith('_pay_stripe_mp_upgrade_overlap.sql')) return apply(migration);
     before=objects();
     originalFunctionKeys=functionCatalogKeys(before);
@@ -93,6 +104,7 @@ try {
     FROM membership_plans WHERE level='gold'`);
   const cases=await stripeMpUpgradeCases({admin,service,connect});
   cases.push(...(await stripeMpUpgradeCases({admin,service,connect,proCycle:'yearly'})).map(c=>'annual-'+c));
+  cases.push(...await stripeTestClockCases({admin,service,connect}));
   const data=()=>admin.query(`SELECT jsonb_build_object(
     'profiles',(SELECT jsonb_agg(to_jsonb(p) ORDER BY id) FROM profiles p),
     'grants',(SELECT jsonb_agg(to_jsonb(g) ORDER BY id) FROM subscription_credit_grants g),
