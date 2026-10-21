@@ -56,17 +56,23 @@ describe('PAY-STRIPE-MP card subscription webhooks', () => {
     const f = fixture({ subscriptionRef: { subscription_id: 'local_sub' },
       order: { ...cardOrder, payment_method: method, purchase_snapshot: firstMonth } });
     mocks.clock.mockResolvedValue({ customerId: 'cus_clockfixture', clockId: 'clock_fixture', asOf: '2026-11-12T12:00:00Z' });
-    Object.assign(f.invoice, renewal({ customer: 'cus_clockfixture', test_clock: 'clock_fixture' }));
+    Object.assign(f.invoice, renewal({ customer: 'cus_clockfixture', test_clock: 'clock_fixture',
+      amount_paid: 8280, amount_due: 8280, total_taxes: [{ amount: 1380 }] }));
     const subscription = { object: 'subscription', id: 'sub_1', livemode: false, status: 'active',
       metadata: { orderId, userId: 'user' }, customer: 'cus_clockfixture', test_clock: 'clock_fixture',
       managed_payments: { enabled: method === 'card' }, cancel_at: null, cancel_at_period_end: false,
       items: { data: [{ current_period_end: 1797064954 }] } };
     f.raw.subscriptions.retrieve.mockResolvedValue(subscription);
     await expect(handleCardSubscriptionInvoice(f.db, f.stripe, 'in_1', 'invoice.paid')).resolves.toBe(true);
-    expect(f.rpc).toHaveBeenCalledWith('pay_dispute_renew', expect.anything());
+    expect(f.rpc).toHaveBeenCalledWith('pay_dispute_renew', { p_facts: expect.objectContaining({ amount: 6900 }) });
     f.rpc.mockClear();
     await expect(handleCardSubscriptionState(f.db, f.stripe, 'sub_1')).resolves.toBe(true);
     expect(f.rpc).toHaveBeenCalledWith('pay_stripe_mp_sync_subscription', expect.anything());
+    f.rpc.mockClear();
+    await expect(handleCardSubscriptionInvoice(f.db, f.stripe, 'in_1', 'invoice.payment_failed', 1792600000)).resolves.toBe(true);
+    expect(f.rpc).toHaveBeenCalledExactlyOnceWith('pay_stripe_mp_record_renewal_failure', {
+      p_subscription: 'local_sub', p_merchant: 'fixture', p_invoice: 'in_1',
+      p_failed_at: new Date(1792600000 * 1000).toISOString() });
     f.rpc.mockClear();
     for (const patch of [{ customer: 'cus_other' }, { test_clock: 'clock_other' }, { metadata: { orderId, userId: 'other' } },
       { managed_payments: { enabled: method !== 'card' } }, { livemode: true }]) {

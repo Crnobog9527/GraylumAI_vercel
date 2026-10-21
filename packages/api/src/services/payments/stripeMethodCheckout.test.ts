@@ -101,9 +101,9 @@ describe('PAY-STRIPE-MP card checkout adapter', () => {
     expect(mocks.dispatch).not.toHaveBeenCalled();
     }
   });
-  it('refuses a Stripe test customer owned by another account before reserving an order', async () => {
+  it.each(['card', 'card_cn'] as const)('refuses another account’s %s test customer before reserving an order', async method => {
     allowTestClockStaging();
-    const f = fixture('card');
+    const f = fixture(method);
     const retrieve = vi.fn().mockResolvedValue({ id: 'cus_clockcustomer123', object: 'customer', livemode: false,
       metadata: { graylum_user_id: 'another-user' }, test_clock: 'clock_fixture' });
     const checkoutInput = { ...f.input, stripeTestClockCustomerId: 'cus_clockcustomer123' };
@@ -136,10 +136,10 @@ describe('PAY-STRIPE-MP card checkout adapter', () => {
     expect(mocks.prepare).not.toHaveBeenCalled();
     expect(f.rpc).not.toHaveBeenCalled();
   });
-  it('refuses a test-clock customer when Stripe resolves to live mode', async () => {
+  it.each(['card', 'card_cn'] as const)('refuses a %s test-clock customer when Stripe resolves to live mode', async method => {
     allowTestClockStaging();
     mocks.scope.mockResolvedValue({ merchant: 'fixture', mode: 'live' });
-    const f = fixture('card');
+    const f = fixture(method);
     const retrieve = vi.fn();
     const checkoutInput = { ...f.input, stripeTestClockCustomerId: 'cus_clockcustomer123' };
     checkoutInput.stripe = { customers: { retrieve }, testHelpers: { testClocks: { retrieve: vi.fn().mockResolvedValue({
