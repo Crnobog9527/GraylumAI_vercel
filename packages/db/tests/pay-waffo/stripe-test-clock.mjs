@@ -73,8 +73,8 @@ export async function stripeTestClockCases({admin,service,connect},method='card'
   await service.query("SELECT pay_stripe_mp_record_tax($1,'fixture',$2,0)",[renewed.orderId,renewalInvoice]);
   await assert.rejects(()=>service.query("SELECT pay_stripe_mp_record_external_refund($1,'fixture',$2,'re_clock_future',2900,'usd',$3)",
     [renewed.orderId,renewalInvoice,future]),/REFUND_SCOPE/,'refund.created upper bound stays wall time');
-  const refundRenewal=()=>service.query("SELECT pay_stripe_mp_record_external_refund($1,'fixture',$2,'re_clock_renewal',2900,'usd',$3) v",
-    [renewed.orderId,renewalInvoice,start]);
+  const refundRenewal=()=>service.query("SELECT pay_stripe_mp_record_external_refund($1,'fixture',$2,$4,2900,'usd',$3) v",
+    [renewed.orderId,renewalInvoice,start,'re_clock_renewal_'+f.o.id.replaceAll('-','')]);
   assert.equal((await refundRenewal()).rows[0].v.creditsTakenBack,3480);
   assert.equal((await refundRenewal()).rows[0].v.duplicate,true);
   assert.equal((await balance(f)).credits,3480,'only the refunded renewal source is taken back');
@@ -85,6 +85,11 @@ export async function stripeTestClockCases({admin,service,connect},method='card'
     // Invalid historical fixtures in this isolated DB only; production frozen-field guard remains installed.
     await assert.rejects(()=>admin.query(`UPDATE payment_orders SET ${key}=$2 WHERE id=$1`,[f.o.id,value]),/FROZEN_FIELD/);
     await admin.query('BEGIN');await admin.query("SET LOCAL session_replication_role='replica'");
+    if(key==='stripe_managed_payments') {
+      await assert.rejects(()=>admin.query(`UPDATE payment_orders SET ${key}=$2 WHERE id=$1`,[f.o.id,value]),
+        /pay_waffo_method_contract/,'method/MP mismatch remains forbidden by the existing table constraint');
+      await admin.query('ROLLBACK');continue;
+    }
     await admin.query(`UPDATE payment_orders SET ${key}=$2 WHERE id=$1`,[f.o.id,value]);
     assert.equal((await admin.query('SELECT pay_stripe_test_clock_time($1) v',[f.o.id])).rows[0].v,null,key);
     await assert.rejects(()=>admin.query('SELECT pay_stripe_test_clock_observe($1,$2,$3,$4,$5)',
