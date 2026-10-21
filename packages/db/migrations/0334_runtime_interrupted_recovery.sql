@@ -1,11 +1,11 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
--- Service-only inventory and locked final check. Reuses the existing epoch owner and BILL2 ledger.
+-- Service-only inventory and locked final check. Keeps unknown-failure refund eligibility.
 BEGIN;
 SET LOCAL lock_timeout='5s';
 CREATE OR REPLACE FUNCTION public.runtime_interrupted_recovery(
  p_actor_id uuid DEFAULT NULL,p_execution_id uuid DEFAULT NULL,p_epoch bigint DEFAULT NULL,p_limit integer DEFAULT 20)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
-DECLARE e runtime_executions;s runtime_sessions;r bill2_runs;items jsonb;
+DECLARE e runtime_executions;s runtime_sessions;r bill2_runs;items jsonb;ended jsonb;
  stamp timestamptz:=clock_timestamp();cutoff timestamptz:=stamp-interval '300 seconds';
 BEGIN
  IF p_limit IS NULL OR p_limit NOT BETWEEN 1 AND 20 THEN
@@ -55,10 +55,32 @@ BEGIN
    (c.dispatched_at IS NOT NULL AND (c.dispatched_at>cutoff OR c.settled_at IS NULL OR c.selected_cost_usd IS NULL))
    OR (c.dispatched_at IS NULL AND c.state<>'cancelled')))
  THEN RETURN jsonb_build_object('state','skipped');END IF;
- -- Existing epoch, access, cancellation, report-price and financial protections remain authoritative.
- -- The result, primary checkpoint, research evidence and all call/receipt records are retained.
- RETURN runtime_execution(p_actor_id,e.id,'owner_cancel',jsonb_build_object('epoch',p_epoch,'value',NULL));
+ -- An unknown failure is not a user cancellation. Keep charged PAYG runs open for
+ -- the existing 24-hour stale-round refund; free its Session now and fence the old owner.
+ IF r.charged>0 THEN
+  UPDATE bill2_runs SET runtime_epoch=runtime_epoch+1,runtime_dispatch_deadline=NULL WHERE id=r.id;
+  UPDATE runtime_executions SET failure_code='RUNTIME_INTERRUPTED_RELEASED' WHERE id=e.id;
+  UPDATE runtime_sessions SET active_execution=NULL WHERE id=s.id AND active_execution=e.id;
+  RETURN jsonb_build_object('state','released');
+ END IF;
+ -- No charged PAYG spend to compensate. Existing cancellation also refunds incomplete report fees.
+ ended:=runtime_execution(p_actor_id,e.id,'owner_cancel',jsonb_build_object('epoch',p_epoch,'value',NULL));
+ PERFORM report_fee_settle_internal(e.id,false);
+ RETURN ended;
 END $$;
 REVOKE ALL ON FUNCTION public.runtime_interrupted_recovery(uuid,uuid,bigint,integer) FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON FUNCTION public.runtime_interrupted_recovery(uuid,uuid,bigint,integer) TO service_role;
+-- A released, fenced failure no longer blocks a new turn's attached organizer.
+-- Keep all other pending-organizer gates and the original 24-hour refund eligibility.
+DO $patch$ DECLARE signature text;src text;old_gate text:='AND NOT pr.cancel_requested) THEN RAISE EXCEPTION ''RUNTIME_ORGANIZER_PENDING'';';
+ new_gate text:='AND NOT pr.cancel_requested AND pending.failure_code IS DISTINCT FROM ''RUNTIME_INTERRUPTED_RELEASED'') THEN RAISE EXCEPTION ''RUNTIME_ORGANIZER_PENDING'';';
+BEGIN
+ FOREACH signature IN ARRAY ARRAY['public.runtime_admit(uuid,uuid,uuid,jsonb,jsonb)',
+  'public.opc_step_material(uuid,uuid,uuid,text,text,text)'] LOOP
+  SELECT pg_get_functiondef(signature::regprocedure) INTO src;
+  IF position(new_gate IN src)>0 THEN CONTINUE;END IF;
+  IF position(old_gate IN src)=0 THEN RAISE EXCEPTION 'RUNTIME_INTERRUPTED_GATE_PATCH_MISSING';END IF;
+  EXECUTE replace(src,old_gate,new_gate);
+ END LOOP;
+END $patch$;
 COMMIT;

@@ -28,6 +28,10 @@ it('records a lost race as skipped, never successful cancellation', async () => 
   const f = fixture(); f.finish.mockResolvedValue({ data: { state: 'skipped' }, error: null });
   expect(await recoverInterruptedExecutions(f.input)).toMatchObject({ processed: 1, settled: 0, pending: 1, failed: 0 });
 });
+it('reports released occupancy as financially pending, not settled', async () => {
+  const f = fixture(); f.finish.mockResolvedValue({ data: { state: 'released' }, error: null });
+  expect(await recoverInterruptedExecutions(f.input)).toMatchObject({ processed: 1, settled: 0, pending: 1, failed: 0 });
+});
 it('never retries an ambiguous mutation or claims it settled', async () => {
   const f = fixture(); f.finish.mockRejectedValue(new Error('synthetic response loss'));
   expect(await recoverInterruptedExecutions(f.input)).toMatchObject({ settled: 0, failed: 1 });

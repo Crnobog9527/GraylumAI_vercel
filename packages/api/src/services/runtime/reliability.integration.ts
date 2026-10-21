@@ -13,6 +13,7 @@ import { createRuntimeBudget } from './budget';
 import { authoritativeBilling } from '../bill2/service';
 import { recoverInterruptedExecutions } from './interruptedRecovery';
 import { erasureFinancialBudget } from '../accountErasure/financialRecovery';
+import { compensateStaleRound } from './staleChargedRounds';
 
 async function fixture(invalid?: 'primary' | 'organizer' | 'terminal') {
   const connectionString = process.env.V3_LOCAL_DB;
@@ -105,7 +106,7 @@ async function fixture(invalid?: 'primary' | 'organizer' | 'terminal') {
     close: async () => { await new Promise<void>((resolve, reject) => server.close(e => e ? reject(e) : resolve())); await db.end(); } };
 }
 
-it.each(['normal', 'concurrent', 'new-epoch', 'live-window', 'unknown-cost', 'capacity'] as const)
+it.each(['normal', 'concurrent', 'new-epoch', 'live-window', 'unknown-cost', 'capacity', 'eventual-refund'] as const)
 ('RUNTIME: interrupted automatic recovery closes only its expired original epoch (%s)', async mode => {
   const f = await fixture();
   try {
@@ -152,9 +153,12 @@ it.each(['normal', 'concurrent', 'new-epoch', 'live-window', 'unknown-cost', 'ca
       expect(result[0]).toMatchObject({ settled: 0, pending: 1, failed: 0 });
       expect(await f.snapshot()).toMatchObject({ closed: false, execution_state: 'interrupted' });
     } else {
-      expect(result.some(row => row.settled === 1)).toBe(true);
-      expect(await f.snapshot()).toMatchObject({ closed: true, execution_state: 'cancelled', active_execution: null,
+      expect(result.some(row => row.processed === 1 && row.pending === 1)).toBe(true);
+      expect(await f.snapshot()).toMatchObject({ closed: false, execution_state: 'interrupted', active_execution: null,
         credits: 94, ledger: 94, calls: 2, spends: 2, reserved: 0 });
+      const obsolete = await f.admin.rpc('runtime_execution', { p_actor_id: f.actor,
+        p_execution_id: f.admitted.executionId, p_action: 'complete', p_result: { epoch: 1, value: null } });
+      expect(obsolete.error?.message).toContain('RUNTIME_RESUME_CONFLICT');
       const terminal = await f.snapshot();
       expect(await recover()).toMatchObject({ selected: 0, failed: 0 });
       expect(await f.snapshot()).toEqual(terminal);
@@ -165,6 +169,17 @@ it.each(['normal', 'concurrent', 'new-epoch', 'live-window', 'unknown-cost', 'ca
       const admitted = await f.rpc('runtime_admit', { p_actor_id: f.actor, p_session_id: next.session_id,
         p_request_id: requestId, p_payload: context, p_billing: { ...billing, input: context } });
       expect(admitted.executionId).not.toBe(f.admitted.executionId);
+      if (mode === 'eventual-refund') {
+        await f.db.query("update runtime_executions set created_at=now()-interval '25 hours' where id=$1", [f.admitted.executionId]);
+        await f.db.query(`update bill2_calls set created_at=now()-interval '25 hours',
+          dispatched_at=now()-interval '25 hours',settled_at=now()-interval '25 hours' where run_id=$1`, [f.admitted.runId]);
+        expect(await compensateStaleRound(f.admin, f.admitted.runId)).toMatchObject({ state: 'compensated', compensatedCredits: 6 });
+        expect(await f.snapshot()).toMatchObject({ closed: true, execution_state: 'cancelled', credits: 100, ledger: 100, reserved: 0, active_execution: admitted.executionId });
+        const refunded = await f.snapshot();
+        expect(await compensateStaleRound(f.admin, f.admitted.runId)).toMatchObject({ state: 'already_compensated', compensatedCredits: 6 });
+        expect(await f.snapshot()).toEqual(refunded);
+      }
+
     }
     expect((await f.db.query('select primary_result from runtime_executions where id=$1',
       [f.admitted.executionId])).rows[0].primary_result).toEqual(primary);

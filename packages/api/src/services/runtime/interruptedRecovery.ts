@@ -13,7 +13,7 @@ const itemsSchema = z.array(z.object({
   executionId: z.string().uuid(), actorId: z.string().uuid(), runId: z.string().uuid(), epoch: z.number().int().positive(),
 })).max(20);
 
-/** SQL owns timeout, known-cost and Session checks, including a fresh locked check before cancellation.
+/** SQL owns timeout, known-cost and Session checks, including a fresh locked check before releasing the original owner.
  * This host has no SDK, provider transport, credential or direct-table authority. */
 export async function recoverInterruptedExecutions(input: {
   database: BillingRpc; budget: RuntimeBudget; actorId?: string;
@@ -36,9 +36,9 @@ export async function recoverInterruptedExecutions(input: {
           p_actor_id: item.actorId, p_execution_id: item.executionId, p_epoch: item.epoch,
         });
         if (ended.error) throw new Error('RUNTIME_INTERRUPTED_FINISH_FAILED');
-        const result = z.object({ state: z.enum(['completed', 'cancelled', 'cost_pending', 'skipped']) }).parse(ended.data);
+        const result = z.object({ state: z.enum(['completed', 'cancelled', 'cost_pending', 'skipped', 'released']) }).parse(ended.data);
         summary.processed++;
-        if (result.state === 'cost_pending' || result.state === 'skipped') summary.pending++;
+        if (['cost_pending', 'skipped', 'released'].includes(result.state)) summary.pending++;
         else summary.settled++;
         logger.info('api', 'runtime_interrupted_recovery', {
           executionId: item.executionId, runId: item.runId, epoch: item.epoch, state: result.state,
