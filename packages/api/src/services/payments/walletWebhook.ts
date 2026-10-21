@@ -72,11 +72,6 @@ export async function recoverMethodCheckout(db: SupabaseClient, stripe: Stripe, 
   }
   const priceId = isCard(order.payment_method) ? await orderPriceId(db, order) : null;
   const clock = isCard(order.payment_method) ? await observeStripeTestClock(db, stripe, scope, order) : null;
-  if (isCard(order.payment_method)) {
-    if (await closeRefundedTestClockCheckout(db, stripe, scope, order, sessionId, priceId!)) {
-      return { orderId: order.id, checkoutStatus: 'complete', paymentStatus: 'paid' };
-    }
-  }
   let observed: Pick<Stripe.Checkout.Session, 'status' | 'payment_status'> | null = null;
   const onValidatedSession = (value: Stripe.Checkout.Session) => { observed = value; };
   const cash: CardPaymentEvidence | Awaited<ReturnType<typeof readWalletPaymentEvidence>> = isCard(order.payment_method)
@@ -89,6 +84,12 @@ export async function recoverMethodCheckout(db: SupabaseClient, stripe: Stripe, 
     if (bound.error) throw new Error('PAY_WAFFO_CHECKOUT_UNAVAILABLE');
   }
   const validated = observed as Pick<Stripe.Checkout.Session, 'status' | 'payment_status'> | null;
+  // A timed-out original bind is repaired only after the same authoritative payment evidence as normal recovery.
+  if (isCard(order.payment_method)) {
+    if (await closeRefundedTestClockCheckout(db, stripe, scope, order, sessionId, priceId!)) {
+      return { orderId: order.id, checkoutStatus: 'complete', paymentStatus: 'paid' };
+    }
+  }
   if (!cash) {
     if (validated?.payment_status === 'unpaid' && (validated.status === 'expired'
       || validated.status === 'complete' && verifiedEventType === 'checkout.session.async_payment_failed')) {

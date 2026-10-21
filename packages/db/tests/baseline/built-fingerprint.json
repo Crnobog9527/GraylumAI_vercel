@@ -3603,7 +3603,7 @@
   "fn:pay_stripe_mp_renew_subscription(uuid,text,text,integer,text,timestamp with time zone,timestamp with time zone,timestamp with time zone)": "ca5526a11356",
   "fn:pay_stripe_mp_sync_subscription(uuid,text,boolean,boolean,boolean)": "47b00f6b4887",
   "fn:pay_stripe_test_clock_binding()": "61927994ae21",
-  "fn:pay_stripe_test_clock_close_refunded(jsonb)": "8e5fbb0eae30",
+  "fn:pay_stripe_test_clock_close_refunded(jsonb)": "36c6a5764833",
   "fn:pay_stripe_test_clock_now(uuid)": "4de908ff36d3",
   "fn:pay_stripe_test_clock_observe(uuid,text,text,timestamp with time zone,jsonb)": "b0654d122684",
   "fn:pay_stripe_test_clock_time(uuid)": "3e631abf074d",

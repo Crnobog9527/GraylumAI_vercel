@@ -116,6 +116,14 @@ BEGIN
    OR (f->>'createdAt')::timestamptz>clock_timestamp()+interval '5 minutes' THEN
    RAISE EXCEPTION 'PAY_STRIPE_TEST_CLOCK_CLOSE_REFUND'; END IF;
  END LOOP;
+ -- Exact persisted cash-close replays make no mutation, even after suspension/erasure/dispute.
+ IF o.metadata->'stripeTestClockClose' IS NOT NULL THEN
+  IF o.metadata->'stripeTestClockClose' IS DISTINCT FROM p_facts OR o.status IS DISTINCT FROM 'refunded'
+   OR o.payment_status IS DISTINCT FROM 'refunded' OR o.qualification_state IS DISTINCT FROM 'released'
+   OR o.fulfilled_at IS NOT NULL OR o.subscription_id IS NOT NULL OR o.purchase_closed_at IS NULL THEN
+   RAISE EXCEPTION 'PAY_STRIPE_TEST_CLOCK_CLOSE_CONFLICT'; END IF;
+  RETURN jsonb_build_object('state','refunded','orderId',o.id,'duplicate',true,'credits',0);
+ END IF;
  IF actor.id IS NULL OR actor.status IS DISTINCT FROM 'active' OR actor.is_deleted::text IS DISTINCT FROM 'false'
   OR EXISTS(SELECT 1 FROM account_erasure_requests WHERE profile_id=actor.id)
   OR o.fulfilled_at IS NOT NULL OR o.subscription_id IS NOT NULL
@@ -125,12 +133,6 @@ BEGIN
   OR EXISTS(SELECT 1 FROM payment_disputes WHERE order_id=o.id OR payment_key=payment_key_
     OR merchant_namespace=o.merchant_namespace AND mode='test' AND provider_subscription_id=p_facts->>'subscription') THEN
   RAISE EXCEPTION 'PAY_STRIPE_TEST_CLOCK_CLOSE_PROTECTED'; END IF;
- IF o.metadata->'stripeTestClockClose' IS NOT NULL THEN
-  IF o.metadata->'stripeTestClockClose' IS DISTINCT FROM p_facts OR o.status IS DISTINCT FROM 'refunded'
-   OR o.payment_status IS DISTINCT FROM 'refunded' OR o.qualification_state IS DISTINCT FROM 'released' THEN
-   RAISE EXCEPTION 'PAY_STRIPE_TEST_CLOCK_CLOSE_CONFLICT'; END IF;
-  RETURN jsonb_build_object('state','refunded','orderId',o.id,'duplicate',true,'credits',0);
- END IF;
  IF o.status IS DISTINCT FROM 'pending' OR o.payment_status IS DISTINCT FROM 'unpaid'
   OR o.qualification_state IS DISTINCT FROM 'reserved' OR o.purchase_closed_at IS NOT NULL
   OR coalesce(o.payment_amount_facts,'[]'::jsonb)<>'[]'::jsonb

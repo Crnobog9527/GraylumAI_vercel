@@ -147,6 +147,25 @@ export async function stripeTestClockCases({admin,service,connect}) {
   assert.deepEqual([closed.status,closed.payment_status,closed.qualification_state,closed.fulfilled_at,closed.subscription_id],
     ['refunded','refunded','released',null,null]);
   assert.equal(closed.payment_amount_facts.length,3);
+  // A completed cash close is a read-only replay after mutable account state changes.
+  await admin.query("UPDATE profiles SET status='suspended' WHERE id=$1",[close.user]);
+  assert.equal((await finish()).rows[0].v.duplicate,true,'suspension must not turn a completed close into an endless retry');
+  await admin.query("UPDATE profiles SET status='active' WHERE id=$1",[close.user]);
+  await admin.query('BEGIN');
+  await admin.query('INSERT INTO account_erasure_requests(profile_id,request_id) VALUES($1,$2)',[close.user,randomUUID()]);
+  assert.equal((await finish(admin)).rows[0].v.duplicate,true,'erasure replay changes no financial or account state');
+  await admin.query('ROLLBACK');
+  await admin.query('BEGIN');
+  await admin.query(`INSERT INTO payment_disputes SELECT (jsonb_populate_record(NULL::payment_disputes,
+    to_jsonb(d)||jsonb_build_object('id',gen_random_uuid(),'provider_dispute_id','du_closed_replay',
+      'order_id',$1::uuid,'payment_key',$2::text,'provider_payment_intent_id',$3::text,
+      'provider_charge_id',$4::text,'provider_subscription_id',$5::text))).*
+    FROM payment_disputes d WHERE order_id=$6`,[close.o.id,'fixture:test:'+closeFacts.paymentIntent,
+      closeFacts.paymentIntent,closeFacts.charge,closeFacts.subscription,protectedSource.o.id]);
+  assert.equal((await finish(admin)).rows[0].v.duplicate,true,'new dispute after the completed close is a read-only replay');
+  await admin.query('ROLLBACK');
+  assert.equal((await admin.query('SELECT jsonb_array_length(payment_amount_facts) n FROM payment_orders WHERE id=$1',
+    [close.o.id])).rows[0].n,3,'no cash fact is appended on mutable-state replays');
   assert.equal((await first(close)).rows[0].v.reason,'refund_observed','late paid event grants nothing');
   await observe(close,future);
   const repurchase=(db)=>db.query(`SELECT o.* FROM pay_waffo_create_purchase($1,'membership_plan',$2,'monthly','card','standard',
@@ -164,6 +183,6 @@ export async function stripeTestClockCases({admin,service,connect}) {
     'clock-renewal-refund-source-only-once','clock-refund-real-time-guard-preserved',
     'clock-missing-gates-live-unchanged','clock-first-early-paid-guard','clock-full-refund-cash-no-delivery',
     'clock-close-amount-tax-currency-protected','clock-close-account-erasure-refund-hold-protected',
-    'clock-close-dispute-concurrent-protected','clock-close-concurrent-once',
+    'clock-close-dispute-concurrent-protected','clock-close-concurrent-once','clock-close-replay-after-suspension-erasure-dispute',
     'clock-close-late-paid-no-grant','clock-close-repurchase-concurrent-once','clock-rpc-service-only'];
 }

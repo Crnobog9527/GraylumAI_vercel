@@ -162,6 +162,32 @@ describe('unfulfilled first payment closes only from authoritative full-refund e
       : { data: [], has_more: reason === 'incomplete' });
     await expect(f.close()).rejects.toThrow('PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT'); expect(f.rpc).not.toHaveBeenCalled();
   });
+  it.each(['failed', 'canceled'])('ignores historical %s refund cash when a later successful refund fully repaid the charge', async status => {
+    const f = fixture(580);
+    f.refunds.list.mockResolvedValue({ data: [{ ...f.refund, id: `re_old_${status}`, status, amount: 3480 }, f.refund], has_more: false });
+    await expect(f.close()).resolves.toBe(true);
+    expect(f.rpc).toHaveBeenLastCalledWith('pay_stripe_test_clock_close_refunded', { p_facts: expect.objectContaining({
+      paidMinor: 3480, taxMinor: 580, refunds: [{ id: f.refund.id, amount: 3480, createdAt: new Date(f.refund.created * 1000).toISOString() }] }) });
+  });
+  it.each(['failed', 'canceled'].flatMap(status => ['charge', 'intent', 'currency', 'amount', 'timestamp'].map(field => ({ status, field }))))(
+    'does not ignore conflicting provider identity or malformed historical refund facts: %j', async ({ status, field }) => {
+      const f = fixture();
+      const historical = { ...f.refund, id: 're_historical', status };
+      if (field === 'charge') historical.charge = 'ch_other';
+      if (field === 'intent') historical.payment_intent = 'pi_other';
+      if (field === 'currency') historical.currency = 'eur';
+      if (field === 'amount') historical.amount = 0.5;
+      if (field === 'timestamp') historical.created = -1;
+      f.refunds.list.mockResolvedValue({ data: [historical, f.refund], has_more: false });
+      await expect(f.close()).rejects.toThrow('PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT');
+      expect(f.rpc).not.toHaveBeenCalledWith('pay_stripe_test_clock_close_refunded', expect.anything());
+    });
+  it.each(['pending', 'requires_action', 'unknown'])('refuses an unresolved %s refund even beside a full successful refund', async status => {
+    const f = fixture();
+    f.refunds.list.mockResolvedValue({ data: [{ ...f.refund, id: 're_unresolved', status }, f.refund], has_more: false });
+    await expect(f.close()).rejects.toThrow('PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT');
+    expect(f.rpc).not.toHaveBeenCalledWith('pay_stripe_test_clock_close_refunded', expect.anything());
+  });
   it('accepts two different successful refund parts only after a complete paginated scan sums to the gross total', async () => {
     const f = fixture();
     f.refunds.list.mockResolvedValueOnce({ data: [{ ...f.refund, id: 're_part1', amount: 1000 }], has_more: true })

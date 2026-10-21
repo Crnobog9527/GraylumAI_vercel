@@ -66,9 +66,13 @@ export async function closeRefundedTestClockCheckout(db: SupabaseClient, stripe:
     after = rows.data.at(-1)!.id;
   }
   if (!all.length || new Set(all.map(row => row.id)).size !== all.length
-    || all.some(row => row.object !== 'refund' || row.status !== 'succeeded' || id(row.charge) !== chargeId
-      || id(row.payment_intent) !== intentId || row.currency !== cash.currency || !Number.isSafeInteger(row.amount) || row.amount <= 0)
-    || all.reduce((sum, row) => sum + row.amount, 0) !== charge.amount_captured) throw new Error(PAYMENT_EVIDENCE_CONFLICT);
+    || all.some(row => row.object !== 'refund' || !['succeeded', 'failed', 'canceled'].includes(row.status ?? '')
+      || id(row.charge) !== chargeId || id(row.payment_intent) !== intentId || row.currency !== cash.currency
+      || !Number.isSafeInteger(row.amount) || row.amount <= 0
+      || !Number.isSafeInteger(row.created) || row.created <= 0)) throw new Error(PAYMENT_EVIDENCE_CONFLICT);
+  // A failed/canceled historical attempt moved no cash. Pending or unknown states above remain a conflict.
+  const succeeded = all.filter(row => row.status === 'succeeded');
+  if (succeeded.reduce((sum, row) => sum + row.amount, 0) !== charge.amount_captured) throw new Error(PAYMENT_EVIDENCE_CONFLICT);
   const clock = await observeStripeTestClock(db, stripe, scope, order);
   if (!clock || clock.clockId !== verifiedClock.clockId || id(subscription.test_clock) !== clock.clockId || id(invoice.test_clock) !== clock.clockId) {
     throw new Error(PAYMENT_EVIDENCE_CONFLICT);
@@ -77,7 +81,7 @@ export async function closeRefundedTestClockCheckout(db: SupabaseClient, stripe:
     checkout: sessionId, customer: customerId, clock: clock.clockId, merchant: scope.merchant,
     invoice: invoice.id, paymentIntent: intentId, charge: chargeId, subscription: subscriptionId,
     paidMinor: invoice.amount_paid, taxMinor: cash.tax, currency: cash.currency, paidAt: cash.paidAt,
-    canceledAt: iso(subscription.canceled_at), refunds: all.map(row => ({ id: row.id, amount: row.amount, createdAt: iso(row.created) })) } });
+    canceledAt: iso(subscription.canceled_at), refunds: succeeded.map(row => ({ id: row.id, amount: row.amount, createdAt: iso(row.created) })) } });
   if (result.error || result.data?.state !== 'refunded' || result.data?.orderId !== order.id || result.data?.credits !== 0) {
     throw new Error('PAY_STRIPE_TEST_CLOCK_CLOSE_UNAVAILABLE', { cause: result.error });
   }
