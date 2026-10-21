@@ -13,10 +13,12 @@ import { PAYMENT_EVIDENCE_CONFLICT } from './stripeWebhookError';
 import { readDisputePayment } from './disputePayment';
 import { resumeOrderDisputes, type DisputeAlert } from './disputes';
 import { refundDisputedRenewal } from './disputeRenewalRefund';
+import { observeStripeTestClock, type TestClockOrder } from './stripeTestClock';
+import { closeRefundedTestClockOrder } from './stripeTestClockClose';
 import { logger } from '../../lib/logger';
 
 const id = (value: string | { id: string } | null | undefined) => typeof value === 'string' ? value : value?.id ?? null;
-type CardSubscriptionOrder = { id: string; user_id: string; payment_method: string; purchase_snapshot?: unknown;
+type CardSubscriptionOrder = TestClockOrder & { id: string; user_id: string; payment_method: string; purchase_snapshot?: unknown;
   localSubscriptionId: string | null };
 const iso = (seconds: number | null | undefined) => {
   if (!Number.isSafeInteger(seconds) || (seconds as number) <= 0) throw new Error(PAYMENT_EVIDENCE_CONFLICT);
@@ -32,7 +34,7 @@ async function findCardOrder(db: SupabaseClient, stripe: Stripe, scope: { mercha
     .eq('merchant_namespace', scope.merchant).eq('mode', scope.mode).eq('object_type', 'subscription')
     .eq('external_id', subscriptionId).maybeSingle();
   if (ref.error) throw new Error('PAY_WAFFO_PERSISTENCE_UNAVAILABLE');
-  const query = db.from('payment_orders').select('id,user_id,payment_method,purchase_snapshot').in('payment_method', ['card', 'card_cn']);
+  const query = db.from('payment_orders').select('*').in('payment_method', ['card', 'card_cn']);
   if (ref.data?.subscription_id) {
     const mapped = await query.eq('subscription_id', ref.data.subscription_id).eq('purchase_action', 'checkout')
       .order('created_at', { ascending: true }).limit(1).maybeSingle();
@@ -92,6 +94,16 @@ export async function handleCardSubscriptionInvoice(db: SupabaseClient, stripe: 
   if (!subscriptionId) return false;
   const order = await findCardOrder(db, stripe, scope, subscriptionId);
   if (!order) return false;
+  const clock = await observeStripeTestClock(db, stripe, scope, order);
+  if (clock) {
+    const subscription = await readSubscription(stripe, subscriptionId);
+    if (invoice.livemode !== false || id(invoice.test_clock) !== clock.clockId || id(subscription.test_clock) !== clock.clockId
+      || id(invoice.customer) !== clock.customerId
+      || id(subscription.customer) !== clock.customerId || subscription.metadata?.orderId !== order.id
+      || subscription.metadata?.userId !== order.user_id || subscription.managed_payments?.enabled !== true) {
+      throw new Error(PAYMENT_EVIDENCE_CONFLICT);
+    }
+  }
   const paid = eventType === 'invoice.paid' || eventType === 'invoice.payment_succeeded';
   if (paid && invoice.billing_reason === 'subscription_create') {
     await recoverMethodCheckout(db, stripe, await orderCheckoutSession(db, stripe, scope, order, subscriptionId), eventType, disputeAlert);
@@ -145,12 +157,18 @@ export async function handleCardSubscriptionState(db: SupabaseClient, stripe: St
   const order = await findCardOrder(db, stripe, scope, subscriptionId);
   if (!order) return false;
   const subscription = await readSubscription(stripe, subscriptionId);
+  const clock = await observeStripeTestClock(db, stripe, scope, order);
+  if (clock && (id(subscription.test_clock) !== clock.clockId || id(subscription.customer) !== clock.customerId || subscription.metadata?.orderId !== order.id
+    || subscription.metadata?.userId !== order.user_id || subscription.managed_payments?.enabled !== true)) {
+    throw new Error(PAYMENT_EVIDENCE_CONFLICT);
+  }
   if (!order.localSubscriptionId) {
     // Before the first payment is recorded there is nothing local to update. A plain state needs nothing, but a stop
     // or cancellation must not be lost: refuse it so Stripe retries once the first payment has created the mapping.
     // incomplete_expired: the first invoice was never paid and Stripe sends nothing more; nothing to carry.
     if (subscription.status === 'incomplete_expired') return true;
     const state = stripeStopState(subscription);
+    if (state.canceled && await closeRefundedTestClockOrder(db, stripe, scope, order.id)) return true;
     if (state.stop || state.canceled) throw new Error('PAY_STRIPE_MP_FIRST_PAYMENT_PENDING');
     return true;
   }

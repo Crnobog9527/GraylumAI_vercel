@@ -2,6 +2,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { readPaymentMethodRoutes } from './methodRouting';
 import { isStagingPaymentDeployment, methodCheckoutMethods, methodCheckoutReady } from './methodCheckoutGate';
+import { refreshStripeTestClockUser } from './stripeTestClock';
 import { readFounderStatus } from '../founder/member';
 
 type PaidMembership = { id: string; subscription_id: string; purchase_membership_level: string; payment_method: string;
@@ -16,6 +17,8 @@ const GRACE_MS = 24 * 3600 * 1000;
  * shared across merchants/methods in the same mode, matching 0204's atomic reservation. */
 export async function readMethodMembership(db: SupabaseClient, userId: string, now = Date.now(),
   env: Record<string, string | undefined> = process.env, mode: 'test' | 'live' = 'test') {
+  const clockTimes = mode === 'test' ? await refreshStripeTestClockUser(db, userId, env) : new Map<string, number>();
+  const asOf = (row: PaidMembership) => clockTimes.get(row.id) ?? now;
   // R7 (0296): the Stripe account's mode (live in production); founder seats are counted per mode like admission.
   const [routes, orders, founderOrders] = await Promise.all([
     readPaymentMethodRoutes(db),
@@ -58,7 +61,8 @@ export async function readMethodMembership(db: SupabaseClient, userId: string, n
   // Stripe card / card_cn) keeps access for 24 hours after its end while the renewal payment lands. Display only.
   const inGrace = (row: PaidMembership) => {
     const state = states.get(row.subscription_id)!;
-    return Date.parse(row.entitlement_end) <= now
+    return Date.parse(row.entitlement_end) <= asOf(row)
+      && Date.parse(row.entitlement_end) > asOf(row) - GRACE_MS
       && (row.payment_channel === 'waffo' && row.payment_method === 'card'
         || row.payment_channel === 'stripe' && ['card', 'card_cn'].includes(row.payment_method))
       && row.auto_renew === true && state.status === 'active' && !stopped(row)
@@ -66,7 +70,8 @@ export async function readMethodMembership(db: SupabaseClient, userId: string, n
       && !recent.some(later => later.subscription_id === row.subscription_id && later.id !== row.id
         && Date.parse(later.entitlement_end) > Date.parse(row.entitlement_end));
   };
-  const paid = recent.filter(row => Date.parse(row.entitlement_end) > now || inGrace(row));
+  const paid = recent.filter(row => (!clockTimes.has(row.id) || Date.parse(row.entitlement_start) <= asOf(row))
+    && (Date.parse(row.entitlement_end) > asOf(row) || inGrace(row)));
   const memberships = paid.map(row => ({ ...row, cancel_at_period_end: stopped(row),
     auto_renew: row.auto_renew === true && !stopped(row), inGrace: inGrace(row) }));
   // For the purchase entry (PAY-STRIPE-MP step 5): the published terms version methodCheckout requires, and whether
