@@ -86,7 +86,6 @@ export const ALWAYS_NOINDEX_PATHS = [
   '/library',
   '/marketplace',
   '/workbench',
-  '/chat',
 ] as const;
 
 export const NOINDEX_HEADER = { key: 'X-Robots-Tag', value: 'noindex, nofollow' } as const;

@@ -62,9 +62,9 @@ describe('auth callback link errors', () => {
   });
 
   it('sends other link errors to the login page with a code, never the provider text', async () => {
-    const to = await callback('error=access_denied&error_description=Pay+here&next=%2Fworkbench%3Ftab%3Da');
+    const to = await callback('error=access_denied&error_description=Pay+here&next=%2Fpositioning%3Ftab%3Da');
     expect(to.pathname).toBe('/login');
-    // An old address in `next` is moved: /workbench itself now opens positioning (E1).
+    // An old address in `next` is moved under /app (E1).
     expect(Object.fromEntries(to.searchParams)).toEqual({ error: 'callback_failed', redirect: '/app/positioning?tab=a' });
   });
 

@@ -22,10 +22,10 @@ export const MOVED_APP_SEGMENTS = [
   'expert-consult',
 ] as const;
 
-// Old pages without a page of their own any more (LEGACY-CLOSE): they open positioning, as before the move.
-// /workbench itself is listed here; /workbench/marketplace and /workbench/search moved like any other page.
-export const RETIRED_APP_PATHS = ['/chat', '/workbench'] as const;
-export const RETIRED_APP_DESTINATION = `${APP_PREFIX}/positioning`;
+// Moved folders with no page of their own: only their subpages moved (/workbench/marketplace, /workbench/search).
+// The folder address itself is not redirected and answers 404, like the retired /chat (Owner 2026-10-21: the
+// site has no real users yet, so the old /chat and /workbench entries are not kept).
+export const SEGMENTS_WITHOUT_INDEX: readonly string[] = ['workbench'];
 
 function splitTarget(target: string) {
   const index = target.search(/[?#]/);
@@ -42,10 +42,9 @@ export function toAppPath(target: string): string {
   if (path === '/') {
     return `${APP_PREFIX}${rest}`;
   }
-  // "/workbench/" is the retired page too; /app/workbench itself has no page.
-  if ((RETIRED_APP_PATHS as readonly string[]).includes(path.replace(/\/+$/, ''))) {
-    return `${RETIRED_APP_DESTINATION}${rest}`;
-  }
-  const segment = path.split('/')[1];
-  return (MOVED_APP_SEGMENTS as readonly string[]).includes(segment) ? `${APP_PREFIX}${target}` : target;
+  const parts = path.split('/').filter(Boolean);
+  const segment = parts[0];
+  if (!(MOVED_APP_SEGMENTS as readonly string[]).includes(segment)) return target;
+  // A folder without a page stays as it is (404), instead of becoming a missing /app address.
+  return parts.length === 1 && SEGMENTS_WITHOUT_INDEX.includes(segment) ? target : `${APP_PREFIX}${target}`;
 }

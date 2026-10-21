@@ -100,7 +100,7 @@ describe('login pages for a user who is already logged in', () => {
       ['/positioning/draft-1?step=2', '/app/positioning/draft-1?step=2'],
       ['/app/library', '/app/library'],
       ['/', '/app'],
-      ['/chat?conversation=old', '/app/positioning?conversation=old'],
+      ['/chat?conversation=old', '/chat?conversation=old'],
       ['https://evil.example/x', '/app/profile'],
       [null, '/app/profile'],
     ];
