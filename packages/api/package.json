@@ -79,6 +79,7 @@
     "./src/services/payments/cardRefundWebhook": "./src/services/payments/cardRefundWebhook.ts",
     "./src/services/payments/stripeCardReconciliation": "./src/services/payments/stripeCardReconciliation.ts",
     "./src/services/payments/walletWebhook": "./src/services/payments/walletWebhook.ts",
+    "./src/services/payments/walletPaymentFailure": "./src/services/payments/walletPaymentFailure.ts",
     "./src/services/payments/methodMaintenance": "./src/services/payments/methodMaintenance.ts",
     "./src/services/notify/reminders": "./src/services/notify/reminders.ts"
   },

@@ -164,6 +164,17 @@ describe('SubscriptionCard catalog availability', () => {
     expect(markup).toContain('升级到 Gold');
   });
 
+  it('shows only the highest current membership after a wallet upgrade', () => {
+    const member = { subscription_id: 'pro-old', purchase_membership_level: 'pro', payment_method: 'wechat_pay',
+      billing_cycle: 'monthly', offer_kind: 'standard', entitlement_end: '2099-11-21T00:00:00Z',
+      auto_renew: false, cancel_at_period_end: true };
+    componentState.membershipQuery = queryState({ data: { ...ENTRY, memberships: [member,
+      { ...member, subscription_id: 'gold-current', purchase_membership_level: 'gold', payment_method: 'alipay' }] } });
+    const markup = renderSubscription();
+    expect(markup).toContain('Gold · 月付');
+    expect(markup).not.toContain('Pro · 月付');
+  });
+
   it('explains an old subscription with an unsuccessful payment and keeps purchases closed (#937)', () => {
     componentState.plansQuery = queryState({ data: [plan] });
     componentState.entitlementsQuery = { data: { level: 'free' }, isError: false };
@@ -458,6 +469,59 @@ describe('membership page in a local browser', () => {
     } finally { await page.close(); }
   }, 30_000);
 
+  it.each(['wechat_pay', 'alipay'])('switches a %s monthly wallet term to a queued annual term using wallets only', async payment_method => {
+    const walletPro = { ...proMember, payment_method, payment_channel: 'stripe', auto_renew: false, cancel_at_period_end: true };
+    const membership = { ...ENTRY, memberships: [walletPro], checkoutMethods: ['card', 'card_cn', 'wechat_pay', 'alipay'],
+      routes: { ...ROUTES, wechat_pay: { enabled: true, annualVerified: true }, alipay: { enabled: true, annualVerified: true } } };
+    const { page, errors } = await open({ level: 'pro', membership });
+    try {
+      await page.getByRole('radio', { name: '按年' }).click();
+      await page.getByTestId('profile-membership-plan-pro').getByRole('button', { name: '改为年付' }).click();
+      await browserExpect(page.getByTestId('method-checkout-dialog')).toContainText('2099/11/14 接续，当前剩余会员期限保留');
+      await browserExpect(page.getByTestId('method-checkout-dialog')).toContainText('不会提前发放新一期积分');
+      await browserExpect(page.getByTestId('method-checkout-method-card')).toHaveCount(0);
+      await browserExpect(page.getByTestId('method-checkout-method-card_cn')).toHaveCount(0);
+      await page.getByTestId(`method-checkout-method-${payment_method}`).click();
+      await page.getByTestId('method-checkout-terms').check();
+      await page.getByTestId('method-checkout-pay').click();
+      await browserExpect(page).toHaveURL('https://checkout.stripe.com/c/pay/cs_test_9');
+      expect(sentByPage.get(page)).toEqual([{ itemType: 'membership_plan', itemId: 'plan-pro', billingCycle: 'yearly',
+        offer: 'standard', transition: 'wallet_renewal', priorSubscriptionId: proMember.subscription_id,
+        method: payment_method, routingVersion: 7, acceptedTerms: true, termsVersion: 'terms-v3' }]);
+      expect(errors).toEqual([]);
+    } finally { await page.close(); }
+  }, 30_000);
+
+  it('keeps the current monthly summary and appends advance repurchase after an already-paid future annual term', async () => {
+    const current = { ...proMember, payment_method: 'alipay', payment_channel: 'stripe', auto_renew: false, cancel_at_period_end: true };
+    const future = { ...current, subscription_id: 'queued-sub', entitlement_start: current.entitlement_end,
+      entitlement_end: '2100-11-14T12:00:00Z', billing_cycle: 'yearly' };
+    const membership = { ...ENTRY, memberships: [future, current], checkoutMethods: ['card', 'alipay'],
+      routes: { ...ROUTES, alipay: { enabled: true, annualVerified: true } } };
+    const { page, errors } = await open({ level: 'pro', membership });
+    try {
+      await browserExpect(page.getByTestId('profile-method-memberships')).toContainText('Pro · 月付');
+      await browserExpect(page.getByTestId('profile-method-memberships')).not.toContainText('Pro · 年付');
+      await page.getByTestId('profile-membership-plan-pro').getByRole('button', { name: '提前续买一个月' }).click();
+      await browserExpect(page.getByTestId('method-checkout-dialog')).toContainText('2100/11/14 接续');
+      await page.getByTestId('method-checkout-terms').check();
+      await page.getByTestId('method-checkout-pay').click();
+      await browserExpect(page).toHaveURL('https://checkout.stripe.com/c/pay/cs_test_9');
+      expect(sentByPage.get(page)).toEqual([expect.objectContaining({ transition: 'wallet_renewal', priorSubscriptionId: 'queued-sub',
+        billingCycle: 'monthly', method: 'alipay' })]);
+      expect(errors).toEqual([]);
+    } finally { await page.close(); }
+  }, 30_000);
+
+  it.each(['wechat_pay', 'alipay'])('returns a canceled %s checkout without card-country advice', async paymentMethod => {
+    const { page, errors } = await open({ search: 'tab=subscription&checkout=canceled&session_id=cs_test_wallet',
+      syncResult: { fulfilledAt: null, orderStatus: 'failed', paymentStatus: 'unpaid', paymentMethod } });
+    try {
+      await browserExpect(page.getByTestId('profile-checkout-notice')).toHaveText('你已取消本次支付，没有发生扣费。');
+      expect(errors).toEqual([]);
+    } finally { await page.close(); }
+  }, 30_000);
+
   it('upgrades a Pro member to Gold as a new Gold checkout that names the Pro subscription', async () => {
     const { page, errors } = await open({ level: 'pro', membership: { ...ENTRY, goldFirstMonthEligible: true, memberships: [proMember] } });
     try {
@@ -529,7 +593,7 @@ describe('membership page in a local browser', () => {
       expect(paid.errors).toEqual([]);
     } finally { await paid.page.close(); }
     const canceled = await open({ search: 'tab=subscription&checkout=canceled&session_id=cs_test_no',
-      syncResult: { fulfilledAt: null, orderStatus: 'pending', paymentStatus: 'unpaid' } });
+      syncResult: { fulfilledAt: null, orderStatus: 'pending', paymentStatus: 'unpaid', paymentMethod: 'card' } });
     try {
       await browserExpect(canceled.page.getByTestId('profile-checkout-notice'))
         .toHaveText('你已取消本次支付，没有发生扣费。如果你在中国大陆，国际银行卡付款页会提示不支持；请回来改选“中国大陆银行卡”。');

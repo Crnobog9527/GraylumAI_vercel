@@ -16,7 +16,7 @@ import { EligibilityNotices } from './EligibilityNotices';
 import { CreditPackagesSection } from './CreditPackagesSection';
 import { MembershipPlanCard, type PlanConfig } from './MembershipPlanCard';
 import { MethodMembershipSummary } from './MethodMembershipSummary';
-import { currentMethodMembership, methodPlanAction, parseBuyDeepLink, type MethodMembershipRow } from './methodPlanAction';
+import { currentMethodMembership, methodPlanAction, parseBuyDeepLink, walletRenewalSource, type MethodMembershipRow } from './methodPlanAction';
 import { methodTaxSummary, planCheckoutTarget } from './planCheckoutTarget';
 import { useMethodCheckout } from '@/components/paywall/useMethodCheckout';
 import { MethodCheckoutDialog, type MethodCheckoutTarget } from '@/components/paywall/MethodCheckoutDialog';
@@ -193,6 +193,7 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
 
   const memberships = (checkout.entry?.memberships ?? []) as MethodMembershipRow[];
   const current = currentMethodMembership(memberships);
+  const walletRenewal = walletRenewalSource(memberships, current);
   const methods = checkout.methodsFor('membership_plan', billingCycle);
   const goldFirstMonth = checkout.entry?.goldFirstMonthEligible === true && !firstMonthDeclined;
   const founderSeats = founderSoldOut || founderDeclined ? 0 : founderSeatsLeft(checkout.entry);
@@ -219,7 +220,7 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
     }
     return methodPlanAction({ level: plan.level, price: Number(plan.price?.[cycle]),
       checkoutReady: plan.checkoutReady?.[cycle] === true && checkout.methodsFor('membership_plan', cycle).length > 0,
-      current, entitlementLevel: entitlements.data?.level ?? null,
+      current, billingCycle: cycle, walletRenewal, walletCheckoutReady: walletRenewalOpen, entitlementLevel: entitlements.data?.level ?? null,
       unpaidSubscription });
   }
 
@@ -243,7 +244,8 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
   const dialogTarget: MethodCheckoutTarget | null = (() => {
     const plan = target && sellable.find(item => item.id === target.planId);
     const action = target && actionFor(target.planId, target.cycle);
-    return plan && action ? planCheckoutTarget({ plan, billing: target.cycle, action, prior: current, goldFirstMonth, founderSeats,
+    return plan && action ? planCheckoutTarget({ plan, billing: target.cycle, action,
+      prior: action.kind === 'wallet_renewal' ? walletRenewal : current, goldFirstMonth, founderSeats,
       founderRenewal: checkout.entry?.founderRenewal }) : null;
   })();
 
@@ -341,15 +343,16 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
           />
         ) : displayPlans.length === 0 ? (
           <ProfileCatalogState status="empty" />
-        ) : displayPlans.map((plan) => (
-          <MembershipPlanCard key={plan.id} plan={plan} billingCycle={billingCycle}
-            action={checkout.open ? actionFor(plan.id, billingCycle) : null}
-            taxNote={methods.length > 0 ? methodTaxSummary(methods) : null}
-            firstMonth={goldFirstMonth && plan.level === 'gold' && billingCycle === 'monthly'}
+        ) : displayPlans.map((plan) => {
+          const action = checkout.open ? actionFor(plan.id, billingCycle) : null;
+          const planMethods = action?.kind === 'wallet_renewal' ? methods.filter(method => method === 'wechat_pay' || method === 'alipay') : methods;
+          return <MembershipPlanCard key={plan.id} plan={plan} billingCycle={billingCycle}
+            action={action} taxNote={planMethods.length > 0 ? methodTaxSummary(planMethods) : null}
+            firstMonth={action?.kind !== 'wallet_renewal' && goldFirstMonth && plan.level === 'gold' && billingCycle === 'monthly'}
             founderSeats={plan.level === 'gold' && billingCycle === 'yearly' && checkout.open ? founderSeats : 0}
-            founderRenewal={plan.level === 'gold' && billingCycle === 'yearly' && actionFor(plan.id, billingCycle)?.kind === 'founder_renewal'}
-            onSelect={() => setTarget({ planId: plan.id, cycle: billingCycle })} />
-        ))}
+            founderRenewal={plan.level === 'gold' && billingCycle === 'yearly' && action?.kind === 'founder_renewal'}
+            onSelect={() => setTarget({ planId: plan.id, cycle: billingCycle })} />;
+        })}
       </div>
     </div>
   );

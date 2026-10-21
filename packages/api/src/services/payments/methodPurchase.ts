@@ -14,7 +14,7 @@ const methodPurchaseShape = {
   routingVersion: z.number().int().positive(),
   acceptedTerms: z.literal(true),
   termsVersion: z.string().regex(/^[A-Za-z0-9_.:-]{1,80}$/).optional(),
-  transition: z.enum(['upgrade', 'founder_renewal']).optional(),
+  transition: z.enum(['upgrade', 'founder_renewal', 'wallet_renewal']).optional(),
   priorSubscriptionId: z.uuid().optional(),
 };
 const transitionPaired = (value: { transition?: unknown; priorSubscriptionId?: unknown }) =>

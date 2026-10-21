@@ -19,7 +19,7 @@ export async function findStripeReference(db: Db, objectType: string, externalId
 // Preserve existing presentation field names, but obtain their values only from provider refs.
 // Private financial rows passed here must come from the server client, never request metadata.
 export async function resolveStripeOrderIds<T extends { id?: string | null; price_ref_id?: string | null;
-  subscription_id?: string | null; payment_channel?: string | null; merchant_namespace?: string | null;
+  payment_method?: string | null; subscription_id?: string | null; payment_channel?: string | null; merchant_namespace?: string | null;
   payment_mode?: string | null }>(db: Db, order: T) {
   if (!order.id || order.payment_channel !== 'stripe' || !order.merchant_namespace || !order.payment_mode) {
     throw new Error('PAY_COMMON_ORDER_IDENTITY_UNKNOWN');
@@ -37,7 +37,8 @@ export async function resolveStripeOrderIds<T extends { id?: string | null; pric
     .eq('merchant_namespace', order.merchant_namespace).eq('mode', order.payment_mode).maybeSingle() : null;
   if (price?.error || !price?.data) throw new Error('PAY_COMMON_PRICE_MAPPING_MISSING');
   let subscription: string | null = null;
-  if (order.subscription_id) {
+  const wallet = ['wechat_pay', 'alipay'].includes(order.payment_method ?? '');
+  if (order.subscription_id && !wallet) {
     const ref = await db.from('payment_provider_refs').select('external_id')
       .eq('subscription_id', order.subscription_id).eq('object_type', 'subscription').eq('channel', 'stripe')
       .eq('merchant_namespace', order.merchant_namespace).eq('mode', order.payment_mode).limit(2);

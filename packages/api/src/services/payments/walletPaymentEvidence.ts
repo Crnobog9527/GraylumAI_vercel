@@ -12,6 +12,7 @@ export async function readWalletPaymentEvidence(input: {
     payment_channel: string; merchant_namespace: string; payment_mode: string };
   sessionId: string;
   onValidatedSession?: (session: Stripe.Checkout.Session) => void;
+  onFailedAttempt?: (paymentIntentId: string) => void;
 }) {
   const { stripe, scope, order } = input;
   // R7 (0296): every Stripe object must be in the account's own mode (live in production, test on staging).
@@ -26,14 +27,40 @@ export async function readWalletPaymentEvidence(input: {
   assertPurchaseReceipt({ snapshot: order.purchase_snapshot, scope, amount: session.amount_total, tax: session.total_details?.amount_tax,
     currency: session.currency, livemode: session.livemode });
   input.onValidatedSession?.(session);
-  if (session.payment_status !== 'paid') return null;
   const intentId = id(session.payment_intent);
-  if (!intentId) throw new Error('PAY_WAFFO_PAYMENT_CONFLICT');
+  if (!intentId) {
+    if (session.payment_status === 'paid') throw new Error('PAY_WAFFO_PAYMENT_CONFLICT');
+    return null;
+  }
   const intent = await stripe.paymentIntents.retrieve(intentId);
   const chargeId = id(intent.latest_charge);
-  if (intent.object !== 'payment_intent' || intent.id !== intentId || intent.livemode !== live || intent.status !== 'succeeded' || !chargeId
+  if (intent.object !== 'payment_intent' || intent.id !== intentId || intent.livemode !== live
     || intent.metadata.orderId !== order.id || intent.metadata.userId !== order.user_id
     || id(intent.customer) !== id(session.customer)) throw new Error('PAY_WAFFO_PAYMENT_CONFLICT');
+  if (session.payment_status !== 'paid') {
+    assertPurchaseReceipt({ snapshot: order.purchase_snapshot, scope, amount: intent.amount,
+      currency: intent.currency, livemode: intent.livemode });
+    if (intent.payment_method_types.length !== 1 || intent.payment_method_types[0] !== order.payment_method) {
+      throw new Error('PAY_WAFFO_PAYMENT_CONFLICT');
+    }
+    if (session.status === 'open' && session.payment_status === 'unpaid' && intent.status === 'requires_payment_method'
+      && intent.last_payment_error && intent.amount_received === 0) {
+      if (chargeId) {
+        const failed = await stripe.charges.retrieve(chargeId);
+        // A failed Alipay charge may still have captured=true/amount_captured prefilled. Actual failure is
+        // the current PI's zero amount_received plus a bound failed, unpaid charge, never those capture fields.
+        if (failed.object !== 'charge' || failed.id !== chargeId || failed.livemode !== live || failed.status !== 'failed'
+          || failed.paid || failed.amount_refunded !== 0 || failed.refunded
+          || id(failed.payment_intent) !== intentId || failed.payment_method_details?.type !== order.payment_method
+          || id(failed.customer) !== id(session.customer)) throw new Error('PAY_WAFFO_PAYMENT_CONFLICT');
+        assertPurchaseReceipt({ snapshot: order.purchase_snapshot, scope, amount: failed.amount,
+          currency: failed.currency, livemode: failed.livemode });
+      }
+      input.onFailedAttempt?.(intentId);
+    }
+    return null;
+  }
+  if (intent.status !== 'succeeded' || !chargeId) throw new Error('PAY_WAFFO_PAYMENT_CONFLICT');
   assertPurchaseReceipt({ snapshot: order.purchase_snapshot, scope, amount: intent.amount_received,
     currency: intent.currency, livemode: intent.livemode });
   const charge = await stripe.charges.retrieve(chargeId);
