@@ -100,8 +100,12 @@ export async function runReportFee({db,Client,connectionString,report}) {
   // Interrupted recovery must release an incomplete report's fixed fee without a page read.
   const lost = await execution(db,f);
   const heldBalance = await wallet(db,f.actor);
-  await db.query(`UPDATE bill2_runs SET session_ref=$2,runtime_epoch=1,
-    runtime_dispatch_deadline=now()-interval '10 minutes' WHERE id=$1`,[lost.run.run,f.session]);
+  // This synthetic run starts bound to a different fixture scope; link it only inside this disposable test.
+  await db.query('SET session_replication_role=replica');
+  try {
+    await db.query(`UPDATE bill2_runs SET session_ref=$2,runtime_epoch=1,
+      runtime_dispatch_deadline=now()-interval '10 minutes' WHERE id=$1`,[lost.run.run,f.session]);
+  } finally { await db.query('SET session_replication_role=origin'); }
   await db.query(`UPDATE runtime_executions SET state='interrupted',created_at=now()-interval '20 minutes'
     WHERE id=$1`,[lost.id]);
   await db.query('UPDATE runtime_sessions SET active_execution=$2 WHERE id=$1',[f.session,lost.id]);

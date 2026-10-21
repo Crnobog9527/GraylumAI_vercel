@@ -64,7 +64,9 @@ BEGIN
   RETURN jsonb_build_object('state','released');
  END IF;
  -- No charged PAYG spend to compensate. Existing cancellation also refunds incomplete report fees.
- ended:=runtime_execution(p_actor_id,e.id,'owner_cancel',jsonb_build_object('epoch',p_epoch,'value',NULL));
+ -- This RPC already owns the same epoch and locks; financial cancellation must also work
+ -- after content context was revoked. runtime_cancel still enforces actor and scope authority.
+ ended:=runtime_cancel(p_actor_id,e.id);
  PERFORM report_fee_settle_internal(e.id,false);
  RETURN ended;
 END $$;
