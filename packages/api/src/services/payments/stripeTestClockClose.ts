@@ -14,8 +14,9 @@ const iso = (seconds: number | null | undefined) => {
 type CloseOrder = TestClockOrder & CardOrder & { fulfilled_at?: string | null; subscription_id?: string | null };
 /** Only a fresh persisted terminal row may reach the RPC's exact-facts, read-only replay branch. */
 async function persistedCashClose(db: SupabaseClient, order: CloseOrder) {
-  const result = await db.from('payment_orders').select('id,user_id,status,payment_status,qualification_state,'
-    + 'fulfilled_at,subscription_id,purchase_closed_at,metadata').eq('id', order.id).eq('user_id', order.user_id).maybeSingle();
+  const result = await db.from('payment_orders').select(
+    'id,user_id,status,payment_status,qualification_state,fulfilled_at,subscription_id,purchase_closed_at,metadata',
+  ).eq('id', order.id).eq('user_id', order.user_id).maybeSingle();
   if (result.error) throw new Error('PAY_STRIPE_TEST_CLOCK_CLOSE_UNAVAILABLE', { cause: result.error });
   const row = result.data;
   const marker = row?.metadata?.stripeTestClockClose;
