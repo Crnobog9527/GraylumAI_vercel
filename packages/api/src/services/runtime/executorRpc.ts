@@ -39,6 +39,13 @@ export function executorRpc(options:{database:SessionRpc;actor:()=>Promise<strin
   const bound={...args,p_actor_id:z.string().uuid().parse(await options.actor())};
   const result=await (name==='runtime_receipt_saved'?readBillingRpc(database,name,bound,options.budget):database.rpc(name,bound));
   if(result.error){
+   const error=result.error as {code?:unknown};
+   const databaseCode=typeof error.code==='string'&&/^(?:[0-9A-Z]{5}|PGRST[0-9]{3})$/.test(error.code)
+    ?error.code:'UNKNOWN';
+   logger.error('api','runtime_rpc_failed',{rpc:name,databaseCode,
+    ...(typeof args.p_execution_id==='string'&&z.string().uuid().safeParse(args.p_execution_id).success
+     ?{executionId:args.p_execution_id}:{}),
+    ...(typeof args.p_action==='string'&&/^[a-z_]{1,32}$/.test(args.p_action)?{action:args.p_action}:{})});
    throwIfContentErased(result.error);
    // A private, exact identity mismatch permits only the bounded legacy replay
    // below. Authorization, storage and all other failures never trigger it.

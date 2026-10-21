@@ -11,6 +11,8 @@ import { expect, it, vi } from 'vitest';
 import { runtimeExecutor } from './execute';
 import { createRuntimeBudget } from './budget';
 import { authoritativeBilling } from '../bill2/service';
+import { recoverInterruptedExecutions } from './interruptedRecovery';
+import { erasureFinancialBudget } from '../accountErasure/financialRecovery';
 
 async function fixture(invalid?: 'primary' | 'organizer' | 'terminal') {
   const connectionString = process.env.V3_LOCAL_DB;
@@ -102,6 +104,73 @@ async function fixture(invalid?: 'primary' | 'organizer' | 'terminal') {
   return { db, admin, actor, admitted, rpc, options, requests, snapshot, pause, interrupted,
     close: async () => { await new Promise<void>((resolve, reject) => server.close(e => e ? reject(e) : resolve())); await db.end(); } };
 }
+
+it.each(['normal', 'concurrent', 'new-epoch', 'live-window', 'unknown-cost', 'capacity'] as const)
+('RUNTIME: interrupted automatic recovery closes only its expired original epoch (%s)', async mode => {
+  const f = await fixture();
+  try {
+    if (mode === 'normal') {
+      const rights = (await f.db.query(`select
+        has_function_privilege('service_role','runtime_interrupted_recovery(uuid,uuid,bigint,integer)','execute') service,
+        has_function_privilege('authenticated','runtime_interrupted_recovery(uuid,uuid,bigint,integer)','execute') authenticated,
+        has_function_privilege('anon','runtime_interrupted_recovery(uuid,uuid,bigint,integer)','execute') anon,
+        has_table_privilege('service_role','runtime_executions','select') direct_read`)).rows[0];
+      expect(rights).toEqual({ service: true, authenticated: false, anon: false, direct_read: false });
+    }
+    await f.interrupted();
+    const primary = (await f.db.query('select primary_result from runtime_executions where id=$1',
+      [f.admitted.executionId])).rows[0].primary_result;
+    // Age only this disposable fixture; no remote state or paid requests participate.
+    await f.db.query("update runtime_executions set created_at=now()-interval '20 minutes' where id=$1", [f.admitted.executionId]);
+    await f.db.query("update bill2_calls set dispatched_at=now()-interval '20 minutes' where run_id=$1", [f.admitted.runId]);
+    await f.db.query("update bill2_runs set runtime_dispatch_deadline=now()-interval '10 minutes' where id=$1", [f.admitted.runId]);
+    if (mode === 'live-window') await f.db.query('update bill2_calls set dispatched_at=now() where run_id=$1', [f.admitted.runId]);
+    if (mode === 'unknown-cost') await f.db.query(
+      "update bill2_calls set state='unknown',settled_at=null,selected_cost_usd=null where run_id=$1 and sequence=2", [f.admitted.runId]);
+    if (mode === 'capacity') await f.db.query(
+      "update runtime_executions set failure_code='RUNTIME_REQUIRED_CONTEXT_EXCEEDS_CAPACITY' where id=$1", [f.admitted.executionId]);
+    let raced = false;
+    const admin = mode !== 'new-epoch' ? f.admin : new Proxy(f.admin, {
+      get(target, key) {
+        if (key !== 'rpc') return Reflect.get(target, key, target);
+        return async (name: string, args: Record<string, unknown>) => {
+          if (!raced && name === 'runtime_interrupted_recovery' && args.p_execution_id) {
+            raced = true;
+            // The database epoch fence must reject even if resume won after inventory was read.
+            await f.db.query('update bill2_runs set runtime_epoch=runtime_epoch+1 where id=$1', [f.admitted.runId]);
+          }
+          return target.rpc(name, args);
+        };
+      },
+    });
+    const recover = () => recoverInterruptedExecutions({ database: admin, actorId: f.actor, budget: erasureFinancialBudget(55_000) });
+    const result = await Promise.all(mode === 'concurrent' ? [recover(), recover()] : [recover()]);
+    if (['live-window', 'unknown-cost', 'capacity'].includes(mode)) {
+      expect(result[0]).toMatchObject({ selected: 0, settled: 0, failed: 0 });
+      expect(await f.snapshot()).toMatchObject({ closed: false, execution_state: 'interrupted' });
+    } else if (mode === 'new-epoch') {
+      expect(result[0]).toMatchObject({ settled: 0, pending: 1, failed: 0 });
+      expect(await f.snapshot()).toMatchObject({ closed: false, execution_state: 'interrupted' });
+    } else {
+      expect(result.some(row => row.settled === 1)).toBe(true);
+      expect(await f.snapshot()).toMatchObject({ closed: true, execution_state: 'cancelled', active_execution: null,
+        credits: 94, ledger: 94, calls: 2, spends: 2, reserved: 0 });
+      const terminal = await f.snapshot();
+      expect(await recover()).toMatchObject({ selected: 0, failed: 0 });
+      expect(await f.snapshot()).toEqual(terminal);
+      const next = (await f.db.query('select payload,session_id from runtime_executions where id=$1',
+        [f.admitted.executionId])).rows[0];
+      const billing = (await f.db.query('select payload from bill2_runs where id=$1', [f.admitted.runId])).rows[0].payload;
+      const requestId = randomUUID(), context = { ...next.payload, request: { sessionId: next.session_id, requestId } };
+      const admitted = await f.rpc('runtime_admit', { p_actor_id: f.actor, p_session_id: next.session_id,
+        p_request_id: requestId, p_payload: context, p_billing: { ...billing, input: context } });
+      expect(admitted.executionId).not.toBe(f.admitted.executionId);
+    }
+    expect((await f.db.query('select primary_result from runtime_executions where id=$1',
+      [f.admitted.executionId])).rows[0].primary_result).toEqual(primary);
+    expect(f.requests).toHaveLength(2);
+  } finally { await f.close(); }
+}, 60000);
 
 it.each(['normal', 'committed-lost-response', 'not-committed', 'readback-fails'])
 ('RUNTIME: reliability finalize normal/ambiguous transaction %s', async mode => {
