@@ -193,6 +193,7 @@ it('shows both wallets alongside both cards when staging routes are enabled, and
     }
     await page.getByTestId('report-paywall-method-wechat_pay').click();
     await browserExpect(page.getByTestId('report-paywall-tax')).toHaveText('不另收税');
+    await browserExpect(page.getByTestId('report-paywall-renewal')).toHaveText('一次性付款，不自动续费。');
     await page.getByTestId('report-paywall-terms').check();
     await page.getByTestId('report-paywall-pay').click();
     await browserExpect(page).toHaveURL('https://checkout.stripe.com/c/pay/cs_test_1');

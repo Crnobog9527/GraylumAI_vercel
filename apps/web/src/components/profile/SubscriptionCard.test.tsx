@@ -129,6 +129,7 @@ describe('SubscriptionCard catalog availability', () => {
     expect(markup).toContain('支付宝：不另收税');
   });
 
+
   it('pauses purchases when the membership read fails, but keeps subscription management', () => {
     componentState.plansQuery = queryState({ data: [plan] });
     componentState.membershipQuery = queryState({ data: undefined, isError: true });
@@ -348,6 +349,39 @@ describe('membership page in a local browser', () => {
     await page.addScriptTag({ content: code });
     return { page, errors };
   }
+
+  it('disables yearly purchase when wallet routes are not verified for annual billing', async () => {
+    const membership = { ...ENTRY, checkoutMethods: ['wechat_pay', 'alipay'], routes: { version: 7,
+      card: { enabled: false }, card_cn: { enabled: false }, wechat_pay: { enabled: true, annualVerified: false },
+      alipay: { enabled: true, annualVerified: false } } };
+    const { page, errors } = await open({ membership });
+    try {
+      await page.getByRole('radio', { name: '按年' }).click();
+      const yearly = page.getByTestId('profile-membership-plan-pro').getByRole('button', { name: '暂不可购买' });
+      await browserExpect(yearly).toBeDisabled();
+      await page.getByRole('radio', { name: '按月' }).click();
+      await page.getByTestId('profile-membership-plan-pro').getByRole('button', { name: '开通' }).click();
+      await page.getByTestId('method-checkout-method-wechat_pay').click();
+      await browserExpect(page.getByTestId('method-checkout-renewal')).toHaveText('一次性付款，不自动续费。');
+      expect(errors).toEqual([]);
+    } finally { await page.close(); }
+  }, 30_000);
+
+  it('explains that a founder wallet term is one-time and has no auto-renewal discount', async () => {
+    const membership = { ...ENTRY, checkoutMethods: ['wechat_pay'], routes: { version: 7,
+      card: { enabled: false }, card_cn: { enabled: false }, wechat_pay: { enabled: true, annualVerified: true },
+      alipay: { enabled: false, annualVerified: false } }, founder: { total: 50, sold: 20, reserved: 0, available: 30 } };
+    const { page, errors } = await open({ membership });
+    try {
+      await page.getByRole('radio', { name: '按年' }).click();
+      await page.getByTestId('profile-membership-plan-gold').getByRole('button', { name: '开通' }).click();
+      await page.getByTestId('method-checkout-method-wechat_pay').click();
+      await browserExpect(page.getByTestId('method-checkout-renewal')).toHaveText('一次性付款，不自动续费。');
+      await browserExpect(page.getByTestId('method-checkout-fineprint')).toHaveText(
+        '本次创始会员年付为一次性付款，不自动续费；创始会员续费优惠仅适用于连续自动续费的订阅。');
+      expect(errors).toEqual([]);
+    } finally { await page.close(); }
+  }, 30_000);
 
   it('buys Pro by card after ticking the terms, and hands off only to Stripe', async () => {
     const { page, errors } = await open({});

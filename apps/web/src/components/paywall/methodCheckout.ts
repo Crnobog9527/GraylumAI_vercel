@@ -80,6 +80,8 @@ export const CHECKOUT_COPY = {
   // the renewal line beside the button states the current charge.
   founderRule: '创始会员终身 6 折续费（只要连续续费不中断）。取消自动续费后，权益保留到当期结束；'
     + '到期没有续费（银行卡扣款失败有 7 天宽限期），6 折续费资格结束，之后按当时的价格重新订阅，名额不再放出。',
+  walletMembershipOneTime: '一次性付款，不自动续费。',
+  walletFounderOneTime: '本次创始会员年付为一次性付款，不自动续费；创始会员续费优惠仅适用于连续自动续费的订阅。',
   mainlandHint: '如果你在中国大陆，国际银行卡付款页会提示不支持；请回来改选“中国大陆银行卡”。',
 } as const;
 

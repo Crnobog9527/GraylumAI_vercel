@@ -45,6 +45,11 @@ export function MethodCheckoutForm(props: Props) {
   const termsVersion = checkout.entry?.termsVersion ?? null;
   const accepted = acceptedVersion !== null && acceptedVersion === termsVersion;
   const method = methods.includes(picked) ? picked : methods[0];
+  const oneTimeWalletMembership = purchase?.itemType === 'membership_plan'
+    && (method === 'wechat_pay' || method === 'alipay');
+  const renewal = oneTimeWalletMembership ? CHECKOUT_COPY.walletMembershipOneTime : props.renewal;
+  const walletFounder = oneTimeWalletMembership && (purchase?.offer === 'founder' || purchase?.offer === 'founder_renewal');
+  const fineprint = walletFounder ? CHECKOUT_COPY.walletFounderOneTime : props.fineprint;
   const purchaseKey = purchase ? JSON.stringify(purchase) : '';
   const { clearOutcome } = checkout;
   // A refusal belongs to the item it was about; choosing another item starts clean.
@@ -87,8 +92,8 @@ export function MethodCheckoutForm(props: Props) {
         <b className="text-base" style={{ color: 'var(--text-primary)' }}>{props.price}</b>
         <span data-testid={`${id}-tax`} style={{ color: 'var(--text-secondary)' }}>{METHOD_COPY[method].tax}</span>
       </p>
-      <p className="text-xs" data-testid={`${id}-renewal`} style={muted}>{props.renewal}</p>
-      {props.fineprint ? <p className="text-xs" data-testid={`${id}-fineprint`} style={muted}>{props.fineprint}</p> : null}
+      <p className="text-xs" data-testid={`${id}-renewal`} style={muted}>{renewal}</p>
+      {fineprint ? <p className="text-xs" data-testid={`${id}-fineprint`} style={muted}>{fineprint}</p> : null}
       <p className="text-xs" data-testid={`${id}-refund`} style={muted}>{CHECKOUT_COPY.refundSummary}</p>
 
       <label className="flex items-start gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>

@@ -205,7 +205,8 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
     const plan = apiPlans.find(item => item.id === planId);
     if (!plan) return null;
     return methodPlanAction({ level: plan.level, price: Number(plan.price?.[cycle]),
-      checkoutReady: plan.checkoutReady?.[cycle] === true, current, entitlementLevel: entitlements.data?.level ?? null,
+      checkoutReady: plan.checkoutReady?.[cycle] === true && checkout.methodsFor('membership_plan', cycle).length > 0,
+      current, entitlementLevel: entitlements.data?.level ?? null,
       unpaidSubscription });
   }
 
