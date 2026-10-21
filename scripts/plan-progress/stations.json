@@ -416,6 +416,19 @@
       "note": "第二版功能，方案已写好，上线后再做。"
     },
     {
+      "id": "attribution",
+      "name": "看清用户从哪来、卡在哪",
+      "plain": "上线后接入 PostHog，看访客从哪来（含 AI 推荐）、中间走了哪些页面、在哪一步离开、哪条路径付了钱。",
+      "afterLaunch": true,
+      "tasks": [
+        {
+          "name": "ANALYTICS-POSTHOG",
+          "plain": "接入 PostHog（美国区），跟随 Cookie 同意弹窗；开工前先出方案。",
+          "note": "上线后第一周开工，冻结前不做。"
+        }
+      ]
+    },
+    {
       "id": "chargeback",
       "name": "拒付处理",
       "plain": "用户找银行拒付时，系统帮你整理申诉材料，判输后扣回对应的积分。",
