@@ -73,9 +73,9 @@ try {
   applyServerOnly:input=>outcome(docker(['exec',name,'psql','-X','-qAt','-U','postgres','-d','b2a','-c',input])),
   fingerprint:development?undefined:snapshot});
  assert.equal(report.build.failed,null);
- // Pending numbering is explicit: exercise the exact proposed SQL only in this disposable database.
- const optimization=read('docs/launch/evidence/data-erasure-user9-prune/migration.sql');
- ok(sql(optimization));const optimized=snapshot();ok(sql(optimization));
+ // The optimization is built through the canonical migration chain; repeat its final version too.
+ const optimization=read('packages/db/migrations/0333_erasure_prune_owned_runtime.sql');
+ const optimized=snapshot();ok(sql(optimization));
  assert.deepEqual(snapshot(),optimized,'runtime owner optimization repeats without catalog drift');
  const require=createRequire(resolve(root,'packages/api/package.json'));
  const {Client}=require('pg');

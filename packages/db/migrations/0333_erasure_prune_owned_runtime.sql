@@ -1,5 +1,5 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
--- DATA-ERASURE: controller assigns the migration number before this moves into migrations/.
+-- DATA-ERASURE: filter owned Runtime rows before reading JSON; financial and deletion guards stay authoritative.
 BEGIN;
 SET LOCAL lock_timeout='5s';
 DO $patch$
