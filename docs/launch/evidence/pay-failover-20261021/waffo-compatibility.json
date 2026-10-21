@@ -1,8 +1,8 @@
 {
   "result": "PASS",
   "replay": {
-    "steps": 335,
-    "passed": 335,
+    "steps": 336,
+    "passed": 336,
     "bridges": [
       "0143_ticket_grants_and_own_rls.sql"
     ],

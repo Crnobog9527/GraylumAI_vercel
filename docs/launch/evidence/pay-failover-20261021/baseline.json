@@ -1,12 +1,12 @@
 {
   "image": "postgres@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73",
   "failed": null,
-  "steps": 335,
-  "passed": 335,
+  "steps": 336,
+  "passed": 336,
   "bridges": [
     "0143_ticket_grants_and_own_rls.sql"
   ],
-  "repeated": 266,
+  "repeated": 267,
   "groups": 2698,
   "accountOpenAudit": [],
   "builtFingerprint": "written",
