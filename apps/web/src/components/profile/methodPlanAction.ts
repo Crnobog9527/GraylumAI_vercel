@@ -41,7 +41,7 @@ export function currentMethodMembership(rows: readonly MethodMembershipRow[] | n
 }
 
 export type PlanAction =
-  | { kind: 'buy' | 'upgrade'; label: string; disabled: false; priorSubscriptionId?: string }
+  | { kind: 'buy' | 'upgrade' | 'founder_renewal'; label: string; disabled: false; priorSubscriptionId?: string }
   | { kind: 'none'; label: string; disabled: true };
 
 export function methodPlanAction(input: {

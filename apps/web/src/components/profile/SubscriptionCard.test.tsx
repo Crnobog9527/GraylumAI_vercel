@@ -63,6 +63,7 @@ const plan = {
 const ROUTES = { version: 7, card: { enabled: true }, card_cn: { enabled: true },
   wechat_pay: { enabled: false, annualVerified: false }, alipay: { enabled: false, annualVerified: false } };
 const ENTRY = { mode: 'test', routes: ROUTES, checkoutReady: true, termsVersion: 'terms-v3', goldFirstMonthEligible: false,
+  checkoutMethods: ['card', 'card_cn'],
   founder: { total: 50, sold: 50, reserved: 0, available: 0 }, memberships: [] as unknown[] };
 
 function queryState(overrides: Record<string, unknown> = {}) {
@@ -113,10 +114,22 @@ describe('SubscriptionCard catalog availability', () => {
     componentState.plansQuery = queryState({ data: [plan] });
     componentState.membershipQuery = queryState({ data: entry });
     const markup = renderSubscription();
-    expect(markup).toContain('银行卡付款暂未开放');
+    expect(markup).toContain('付款暂未开放');
     expect(markup).not.toContain('>开通<');
     expect(markup).not.toContain('税另计');
   });
+
+  it('projects the staging wallet methods into the member page checkout summary', () => {
+    componentState.plansQuery = queryState({ data: [plan] });
+    componentState.membershipQuery = queryState({ data: { ...ENTRY,
+      routes: { ...ROUTES, wechat_pay: { enabled: true, annualVerified: false }, alipay: { enabled: true, annualVerified: true } },
+      checkoutMethods: ['card', 'card_cn', 'wechat_pay', 'alipay'] } });
+    const markup = renderSubscription();
+    expect(markup).toContain('微信支付：不另收税');
+    expect(markup).toContain('支付宝：不另收税');
+  });
+
+
 
   it('pauses purchases when the membership read fails, but keeps subscription management', () => {
     componentState.plansQuery = queryState({ data: [plan] });
@@ -337,6 +350,64 @@ describe('membership page in a local browser', () => {
     await page.addScriptTag({ content: code });
     return { page, errors };
   }
+
+  it('disables yearly purchase when wallet routes are not verified for annual billing', async () => {
+    const membership = { ...ENTRY, checkoutMethods: ['wechat_pay', 'alipay'], routes: { version: 7,
+      card: { enabled: false }, card_cn: { enabled: false }, wechat_pay: { enabled: true, annualVerified: false },
+      alipay: { enabled: true, annualVerified: false } } };
+    const { page, errors } = await open({ membership });
+    try {
+      await page.getByRole('radio', { name: '按年' }).click();
+      const yearly = page.getByTestId('profile-membership-plan-pro').getByRole('button', { name: '暂不可购买' });
+      await browserExpect(yearly).toBeDisabled();
+      await page.getByRole('radio', { name: '按月' }).click();
+      await page.getByTestId('profile-membership-plan-pro').getByRole('button', { name: '开通' }).click();
+      await page.getByTestId('method-checkout-method-wechat_pay').click();
+      await browserExpect(page.getByTestId('method-checkout-renewal')).toHaveText('一次性付款，不自动续费。');
+      expect(errors).toEqual([]);
+    } finally { await page.close(); }
+  }, 30_000);
+
+  it('explains that a founder wallet term is one-time and allows renewal within its founder window', async () => {
+    const membership = { ...ENTRY, checkoutMethods: ['wechat_pay'], routes: { version: 7,
+      card: { enabled: false }, card_cn: { enabled: false }, wechat_pay: { enabled: true, annualVerified: true },
+      alipay: { enabled: false, annualVerified: false } }, founder: { total: 50, sold: 20, reserved: 0, available: 30 } };
+    const { page, errors } = await open({ membership });
+    try {
+      await page.getByRole('radio', { name: '按年' }).click();
+      await page.getByTestId('profile-membership-plan-gold').getByRole('button', { name: '开通' }).click();
+      await page.getByTestId('method-checkout-method-wechat_pay').click();
+      await browserExpect(page.getByTestId('method-checkout-renewal')).toHaveText('一次性付款，不自动续费。');
+      await browserExpect(page.getByTestId('method-checkout-fineprint')).toHaveText(
+        '本次创始会员年付为一次性付款，不自动续费；到期前可在期限内按创始续费价格手动续买一年。');
+      expect(errors).toEqual([]);
+    } finally { await page.close(); }
+  }, 30_000);
+
+  it('offers the server-projected $496 wallet founder renewal and sends the founder_renewal transition', async () => {
+    const membership = { ...ENTRY, checkoutMethods: ['wechat_pay'], routes: { version: 7,
+      card: { enabled: false }, card_cn: { enabled: false }, wechat_pay: { enabled: true, annualVerified: true },
+      alipay: { enabled: false, annualVerified: false } }, founder: { total: 50, sold: 20, reserved: 0, available: 30 },
+      founderRenewal: { itemId: 'plan-gold', subscriptionId: 'founder-sub', eligibleUntil: '2099-01-08T00:00:00Z' } };
+    const { page, errors } = await open({ membership, level: 'gold' });
+    try {
+      await page.getByRole('radio', { name: '按年' }).click();
+      const goldPlan = page.getByTestId('profile-membership-plan-gold');
+      await browserExpect(goldPlan).toContainText('创始会员续费价');
+      await browserExpect(goldPlan).toContainText('$496');
+      await goldPlan.getByRole('button', { name: '续买创始会员一年' }).click();
+      await browserExpect(page.getByTestId('method-checkout-dialog')).toContainText('续买 Gold 创始会员 · 年付');
+      await browserExpect(page.getByTestId('method-checkout-renewal')).toHaveText('一次性付款 $496，不自动续费。');
+      await page.getByTestId('method-checkout-method-wechat_pay').click();
+      await page.getByTestId('method-checkout-terms').check();
+      await page.getByTestId('method-checkout-pay').click();
+      await browserExpect(page).toHaveURL('https://checkout.stripe.com/c/pay/cs_test_9');
+      expect(sentByPage.get(page)).toEqual([{ itemType: 'membership_plan', itemId: 'plan-gold', billingCycle: 'yearly',
+        offer: 'founder_renewal', transition: 'founder_renewal', priorSubscriptionId: 'founder-sub', method: 'wechat_pay',
+        routingVersion: 7, acceptedTerms: true, termsVersion: 'terms-v3' }]);
+      expect(errors).toEqual([]);
+    } finally { await page.close(); }
+  }, 30_000);
 
   it('buys Pro by card after ticking the terms, and hands off only to Stripe', async () => {
     const { page, errors } = await open({});

@@ -5,8 +5,8 @@ import { useRef, useState } from 'react';
 import { checkoutAnalyticsIds, reportBeginCheckout } from '@/lib/analytics/events';
 import { trpc } from '@/trpc/client';
 import {
-  CHECKOUT_COPY, cardMethods, checkoutEntryOpen, describeCheckoutError, isStripeCheckoutUrl,
-  type CardMethod, type MethodPurchase,
+  CHECKOUT_COPY, checkoutMethods, checkoutEntryOpen, describeCheckoutError, isStripeCheckoutUrl,
+  type CheckoutMethod, type MethodPurchase,
 } from './methodCheckout';
 
 export type CheckoutOutcome = {
@@ -14,7 +14,7 @@ export type CheckoutOutcome = {
 };
 
 /**
- * Membership entry and the card purchase action (`payments.methodCheckout`). One in-flight request
+ * Membership entry and the purchase action (`payments.methodCheckout`). One in-flight request
  * at a time; after a hand-off to Stripe the button stays disabled. A `recovery_required` answer is
  * never retried here: the user is sent to billing records so the same order is not bought twice.
  */
@@ -32,11 +32,11 @@ export function useMethodCheckout() {
 
   /** `acceptedTermsVersion` is the terms version the user ticked; nothing is sent unless it is still the published one.
    * `onFounderSoldOut` runs when the server says the last founder seat just went: the caller drops to the standard price. */
-  async function start(purchase: MethodPurchase, method: CardMethod, acceptedTermsVersion: string | null,
+  async function start(purchase: MethodPurchase, method: CheckoutMethod, acceptedTermsVersion: string | null,
     onFounderSoldOut?: () => void) {
     if (inFlight.current || redirecting || !checkoutEntryOpen(entry) || !acceptedTermsVersion
       || acceptedTermsVersion !== entry.termsVersion) return;
-    if (!cardMethods(entry, purchase.itemType).includes(method) || locked.has(purchaseLockKey(purchase))) return;
+    if (!checkoutMethods(entry, purchase.itemType, purchase.billingCycle).includes(method) || locked.has(purchaseLockKey(purchase))) return;
     inFlight.current = true;
     setOutcome(null);
     try {
@@ -72,7 +72,8 @@ export function useMethodCheckout() {
   return {
     entry, open, loading: membership.isLoading, failed: membership.isError,
     pending: mutation.isPending || redirecting, outcome, clearOutcome: () => setOutcome(null),
-    methodsFor: (itemType: MethodPurchase['itemType']) => cardMethods(entry, itemType),
+    methodsFor: (itemType: MethodPurchase['itemType'], billingCycle?: MethodPurchase['billingCycle']) =>
+      checkoutMethods(entry, itemType, billingCycle),
     lockedMessage: (purchase: MethodPurchase | null) => (purchase ? locked.get(purchaseLockKey(purchase)) ?? null : null),
     start,
   };

@@ -3,13 +3,14 @@
 
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { CHECKOUT_COPY, METHOD_COPY, TERMS_LINKS, refundPolicyHref, type CardMethod, type MethodPurchase } from './methodCheckout';
+import { CHECKOUT_COPY, METHOD_COPY, TERMS_LINKS, refundPolicyHref, type CheckoutMethod, type MethodPurchase } from './methodCheckout';
 import type { MethodCheckout } from './useMethodCheckout';
 
 type Props = {
   checkout: MethodCheckout;
   /** null when the chosen item cannot be bought right now (the reason is `blockedReason`). */
   purchase: MethodPurchase | null;
+  billingCycle?: MethodPurchase['billingCycle'];
   price: string;
   renewal: string;
   cta: string;
@@ -37,14 +38,22 @@ const muted = { color: 'var(--text-tertiary)' };
  */
 export function MethodCheckoutForm(props: Props) {
   const { checkout, purchase, testIdPrefix: id } = props;
-  const methods = purchase ? checkout.methodsFor(purchase.itemType) : checkout.methodsFor('membership_plan');
-  const [picked, setPicked] = useState<CardMethod>('card');
+  const itemType = purchase?.itemType ?? 'membership_plan';
+  const billingCycle = purchase?.billingCycle ?? props.billingCycle;
+  const methods = checkout.methodsFor(itemType, billingCycle);
+  const [picked, setPicked] = useState<CheckoutMethod>('card');
   // Consent is to one terms version: if methodMembership refetches a newer one (e.g. after reading the terms in
   // another tab), the box clears and must be ticked again for that version.
   const [acceptedVersion, setAcceptedVersion] = useState<string | null>(null);
   const termsVersion = checkout.entry?.termsVersion ?? null;
   const accepted = acceptedVersion !== null && acceptedVersion === termsVersion;
   const method = methods.includes(picked) ? picked : methods[0];
+  const oneTimeWalletMembership = purchase?.itemType === 'membership_plan'
+    && (method === 'wechat_pay' || method === 'alipay');
+  const renewal = oneTimeWalletMembership && purchase?.offer !== 'founder_renewal'
+    ? CHECKOUT_COPY.walletMembershipOneTime : props.renewal;
+  const walletFounder = oneTimeWalletMembership && (purchase?.offer === 'founder' || purchase?.offer === 'founder_renewal');
+  const fineprint = walletFounder ? CHECKOUT_COPY.walletFounderOneTime : props.fineprint;
   const purchaseKey = purchase ? JSON.stringify(purchase) : '';
   const { clearOutcome } = checkout;
   // A refusal belongs to the item it was about; choosing another item starts clean.
@@ -87,8 +96,8 @@ export function MethodCheckoutForm(props: Props) {
         <b className="text-base" style={{ color: 'var(--text-primary)' }}>{props.price}</b>
         <span data-testid={`${id}-tax`} style={{ color: 'var(--text-secondary)' }}>{METHOD_COPY[method].tax}</span>
       </p>
-      <p className="text-xs" data-testid={`${id}-renewal`} style={muted}>{props.renewal}</p>
-      {props.fineprint ? <p className="text-xs" data-testid={`${id}-fineprint`} style={muted}>{props.fineprint}</p> : null}
+      <p className="text-xs" data-testid={`${id}-renewal`} style={muted}>{renewal}</p>
+      {fineprint ? <p className="text-xs" data-testid={`${id}-fineprint`} style={muted}>{fineprint}</p> : null}
       <p className="text-xs" data-testid={`${id}-refund`} style={muted}>{CHECKOUT_COPY.refundSummary}</p>
 
       <label className="flex items-start gap-2 text-sm" style={{ color: 'var(--text-secondary)' }}>

@@ -1,7 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { readPaymentMethodRoutes } from './methodRouting';
-import { methodCardCheckoutReady } from './methodCheckoutGate';
+import { isStagingPaymentDeployment, methodCheckoutMethods, methodCheckoutReady } from './methodCheckoutGate';
+import { readFounderStatus } from '../founder/member';
 
 type PaidMembership = { id: string; subscription_id: string; purchase_membership_level: string; payment_method: string;
   payment_channel: string; auto_renew: boolean | null; entitlement_start: string; entitlement_end: string; offer_kind: string;
@@ -88,11 +89,39 @@ export async function readMethodMembership(db: SupabaseClient, userId: string, n
   const occupied = founderOrders.data.length;
   const sold = founderOrders.data.filter(row => row.qualification_state === 'sold').length;
   if (occupied > 50) throw new Error('PAY_WAFFO_FOUNDER_CAPACITY_CONFLICT');
+  const checkoutMethods = methodCheckoutMethods(env, routes);
+  let founderRenewal: { itemId: string; subscriptionId: string; eligibleUntil: string } | null = null;
+  // Wallet founders renew manually. Project the already-approved 7-day renewal window on the exact
+  // staging deployment; the checkout admission RPC remains the authority when the button is used.
+  if (mode === 'test' && isStagingPaymentDeployment(env)
+    && checkoutMethods.some(method => method === 'wechat_pay' || method === 'alipay')) {
+    const status = await readFounderStatus(db, userId);
+    if ((status.state === 'active' || status.state === 'grace') && status.orderId) {
+      const source = await db.from('payment_orders').select('item_id,subscription_id,payment_method,payment_channel,offer_kind')
+        .eq('id', status.orderId).eq('user_id', userId).eq('payment_mode', mode)
+        .eq('status', 'completed').eq('payment_status', 'paid').eq('qualification_state', 'sold')
+        .not('fulfilled_at', 'is', null).maybeSingle();
+      if (source.error) throw new Error('PAY_WAFFO_MEMBERSHIP_UNAVAILABLE');
+      const order = source.data as { item_id?: unknown; subscription_id?: unknown; payment_method?: unknown;
+        payment_channel?: unknown; offer_kind?: unknown } | null;
+      if (order && ['wechat_pay', 'alipay'].includes(String(order.payment_method)) && order.payment_channel === 'stripe'
+        && ['founder', 'founder_renewal'].includes(String(order.offer_kind))
+        && typeof order.item_id === 'string' && typeof order.subscription_id === 'string') {
+        const deadline = await db.rpc('pay_waffo_founder_deadline', { p_order: status.orderId });
+        if (deadline.error) throw new Error('PAY_WAFFO_MEMBERSHIP_UNAVAILABLE');
+        const eligibleUntil = typeof deadline.data === 'string' ? new Date(deadline.data) : null;
+        if (eligibleUntil && Number.isFinite(eligibleUntil.getTime()) && eligibleUntil.getTime() > now) {
+          founderRenewal = { itemId: order.item_id, subscriptionId: order.subscription_id, eligibleUntil: eligibleUntil.toISOString() };
+        }
+      }
+    }
+  }
   return { mode, routes,
-    // Card only: staging, a test-only exact staging PR preview, or R7 bound production with its switch plus route.
-    checkoutReady: methodCardCheckoutReady(env, routes, undefined, mode),
+    // Staging wallet routes can also expose the entry; production readiness stays on the card path.
+    checkoutReady: methodCheckoutReady(env, routes, undefined, mode),
+    checkoutMethods,
     founder: { total: 50, sold, reserved: occupied - sold, available: 50 - occupied },
-    memberships,
+    memberships, founderRenewal,
     termsVersion: typeof version === 'string' ? version : null,
     goldFirstMonthEligible: gold.data.length === 0,
   };
