@@ -9,7 +9,7 @@ import { resolveStripeScope } from './stripeCheckoutPersistence';
 import { buildStripeCheckoutRequest, dispatchStripeCheckoutIntent, type StripeCardCheckout } from './stripeCheckoutIntent';
 import { observeUpgradePrior } from './cardUpgrade';
 import { settleBuyerOrders } from './methodOrderSettle';
-import { stripeTestClockStagingOpen } from './methodCheckoutGate';
+import { stripeTestClockRuntimeOpen, readStripeTestClock } from './stripeTestClock';
 
 type Input = {
   db: SupabaseClient; stripe: Stripe; userId: string; appUrl: string; termsVersion: string;
@@ -41,7 +41,7 @@ function frozenCoupon(request: Stripe.Checkout.SessionCreateParams) {
 async function assertTestClockCustomer(input: Input, mode: 'test' | 'live') {
   const customerId = input.stripeTestClockCustomerId;
   if (!customerId) return;
-  if (mode !== 'test' || !stripeTestClockStagingOpen(process.env)
+  if (mode !== 'test' || !stripeTestClockRuntimeOpen(process.env)
     || input.purchase.itemType !== 'membership_plan' || input.purchase.method !== 'card'
     || input.purchase.billingCycle !== 'monthly') throw new Error('PAY_WAFFO_STEP2_NOT_READY');
   const plan = await input.db.from('membership_plans').select('id, level')
@@ -49,12 +49,12 @@ async function assertTestClockCustomer(input: Input, mode: 'test' | 'live') {
   if (plan.error || plan.data?.id !== input.purchase.itemId || plan.data?.level !== 'pro') {
     throw new Error('PAY_WAFFO_TEST_CLOCK_PLAN_DENIED');
   }
-  const customer = await input.stripe.customers.retrieve(customerId);
-  if ('deleted' in customer && customer.deleted) throw new Error('PAY_WAFFO_TEST_CLOCK_CUSTOMER_DENIED');
-  const testClockId = typeof customer.test_clock === 'string' ? customer.test_clock : customer.test_clock?.id;
-  if (customer.id !== customerId || customer.livemode !== false
-    || customer.metadata?.graylum_user_id !== input.userId || !testClockId) {
-    throw new Error('PAY_WAFFO_TEST_CLOCK_CUSTOMER_DENIED');
+  const clock = await readStripeTestClock(input.stripe, customerId, input.userId).catch(error => {
+    throw new Error('PAY_WAFFO_TEST_CLOCK_CUSTOMER_DENIED', { cause: error });
+  });
+  // New Checkout must be on the real order timeline. Only subsequent renewals may run in the future.
+  if (Math.abs(Date.parse(clock.asOf) - Date.now()) > 5 * 60 * 1000) {
+    throw new Error('PAY_WAFFO_TEST_CLOCK_NOT_ALIGNED');
   }
 }
 

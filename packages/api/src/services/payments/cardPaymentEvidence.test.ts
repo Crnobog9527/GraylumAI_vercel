@@ -22,11 +22,11 @@ function fixture(method: 'card' | 'card_cn' = 'card', snapshot: Record<string, u
     managed_payments: method === 'card' ? { enabled: true } : null, payment_method_types: method === 'card' ? ['card', 'link'] : ['card'],
     amount_total: due, total_details: { amount_tax: 0 }, currency: 'usd', subscription: 'sub_1', invoice: 'in_1',
     payment_intent: membership ? null : 'pi_1' };
-  const subscription = { object: 'subscription', id: 'sub_1', livemode: false, metadata: { userId: 'user', orderId }, customer: 'cus_1',
+  const subscription = { object: 'subscription', id: 'sub_1', livemode: false, metadata: { userId: 'user', orderId }, customer: 'cus_1', test_clock: null as string | null,
     managed_payments: method === 'card' ? { enabled: true } : null,
     items: { data: [{ price: { id: 'price_gold_month' }, quantity: 1, current_period_start: 1791794554, current_period_end: 1794472954 }] } };
   const line = { quantity: 1, pricing: { price_details: { price: 'price_gold_month' } }, period: { start: 1791794554, end: 1794472954 } };
-  const invoice = { object: 'invoice', id: 'in_1', livemode: false, status: 'paid', billing_reason: 'subscription_create', currency: 'usd',
+  const invoice = { object: 'invoice', id: 'in_1', livemode: false, customer: 'cus_1', test_clock: null as string | null, status: 'paid', billing_reason: 'subscription_create', currency: 'usd',
     lines: { has_more: false, data: [line] },
     amount_due: due, amount_paid: due, total_taxes: [] as Array<{ amount: number }>, status_transitions: { paid_at: 1791794560 },
     parent: { subscription_details: { subscription: 'sub_1' } } };
@@ -37,12 +37,30 @@ function fixture(method: 'card' | 'card_cn' = 'card', snapshot: Record<string, u
   const stripe = { checkout: { sessions: { retrieve: vi.fn(async () => session) } },
     subscriptions: { retrieve: vi.fn(async () => subscription) }, invoices: { retrieve: vi.fn(async () => invoice) },
     paymentIntents: { retrieve: vi.fn(async () => intent) }, charges: { retrieve: vi.fn(async () => charge) } };
-  const read = () => readCardPaymentEvidence({ stripe: stripe as unknown as Parameters<typeof readCardPaymentEvidence>[0]['stripe'],
+  const read = (testClock?: Parameters<typeof readCardPaymentEvidence>[0]['testClock']) => readCardPaymentEvidence({ testClock, stripe: stripe as unknown as Parameters<typeof readCardPaymentEvidence>[0]['stripe'],
     scope, order, priceId: 'price_gold_month', sessionId: 'cs_1' });
   return { order, session, subscription, invoice, intent, charge, read };
 }
 
 describe('PAY-STRIPE-MP card first-payment evidence', () => {
+  it('keeps ordinary first-payment evidence unchanged without an admitted clock context', async () => {
+    const t = fixture();
+    await expect(t.read()).resolves.toMatchObject({ paymentId: 'in_1', amount: 4900 });
+  });
+  it('checks the admitted frozen customer and clock on every first-payment object', async () => {
+    const t = fixture(); t.subscription.test_clock = 'clock_fixture'; t.invoice.test_clock = 'clock_fixture';
+    await expect(t.read({ customerId: 'cus_1', clockId: 'clock_fixture' }))
+      .resolves.toMatchObject({ paymentId: 'in_1', amount: 4900 });
+  });
+  it.each(['frozen-customer', 'subscription-clock', 'invoice-clock', 'invoice-customer'])(
+    'rejects admitted clock evidence with wrong %s', async reason => {
+      const t = fixture(); t.subscription.test_clock = 'clock_fixture'; t.invoice.test_clock = 'clock_fixture';
+      if (reason === 'subscription-clock') t.subscription.test_clock = 'clock_other';
+      if (reason === 'invoice-clock') t.invoice.test_clock = 'clock_other';
+      if (reason === 'invoice-customer') t.invoice.customer = 'cus_other';
+      const clock = { customerId: reason === 'frozen-customer' ? 'cus_other' : 'cus_1', clockId: 'clock_fixture' };
+      await expect(t.read(clock)).rejects.toThrow('PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT');
+    });
   it('reads a paid first month from the subscription\'s first invoice and the Stripe period', async () => {
     await expect(fixture().read()).resolves.toEqual({ paymentId: 'in_1', checkoutId: 'cs_1', amount: 4900, tax: 0, currency: 'usd',
       paidAt: '2026-10-12T08:42:40.000Z',

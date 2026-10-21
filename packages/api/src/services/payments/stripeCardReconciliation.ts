@@ -3,6 +3,7 @@ import { reconcilePaymentDisputes, type DisputeAlert } from './disputes';
 import { reconcileDisputeRenewalRefunds } from './disputeRenewalRefund';
 import type Stripe from 'stripe';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { reconcileStripeTestClockSources } from './stripeTestClockReconciliation';
 import { resolveStripeScope } from './stripeCheckoutPersistence';
 import { findStripeReference } from './stripeReferences';
 import { recoverMethodCheckout } from './walletWebhook';
@@ -82,6 +83,14 @@ export async function reconcileStripeCardPayments(db: SupabaseClient, stripe: St
     complete = false;
     findings.push({ kind: 'scan_incomplete', object });
   };
+
+  if (!outOfTime) {
+    const clocks = await reconcileStripeTestClockSources(db, stripe, scope, { deadline, maxPages,
+      alert: options.alert, disputeAlert: options.disputeAlert });
+    checked += clocks.checked; repaired += clocks.repaired; complete &&= clocks.complete;
+    findings.push(...clocks.findings);
+    outOfTime = Date.now() > deadline;
+  }
 
   // 1. Paid checkout sessions of card orders that are not delivered: the first-payment recovery delivers them.
   await scan('checkout', after => stripe.checkout.sessions.list({ created: { gte: since }, status: 'complete', limit: 100,
