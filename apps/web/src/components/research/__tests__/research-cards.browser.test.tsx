@@ -124,7 +124,7 @@ for (const width of [1440, 375]) {
 
       const table = page.getByRole("region", { name: "对标表" });
       await ui(table.getByText("这次没查到").first()).toBeVisible();
-      await ui(table).toContainText("可以照着学 3 个");
+      await ui(table).toContainText("数据条件达标 3 个");
       await table.getByRole("button", { name: "刷新 sample_1 的数据" }).click();
       await ui(table.getByRole("button", { name: "刷新 sample_1 的数据" })).toHaveText("已申请刷新");
       await ui(table.getByRole("button", { name: "刷新 sample_1 的数据" })).toBeDisabled();

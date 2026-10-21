@@ -37,7 +37,7 @@ export function BenchmarkTable({ rows, now = new Date(), onRefresh, refreshDisab
     <section aria-label="对标表" className={styles.wrap}>
       <div className={styles.top}>
         <p className={styles.head}>对标表</p>
-        <p className={styles.summary}>{rows.length} 个账号 · 可以照着学 {qualified} 个</p>
+        <p className={styles.summary}>{rows.length} 个账号 · 数据条件达标 {qualified} 个</p>
       </div>
       <div className={styles.scroll}>
       <table className={styles.table}>
@@ -56,7 +56,7 @@ export function BenchmarkTable({ rows, now = new Date(), onRefresh, refreshDisab
                   {platformLabel(row.platform)}
                   {row.category && <span className={styles.category}>{CATEGORY_LABELS[row.category]}</span>}
                   <span className={cn(styles.badge, row.qualified ? styles.ok : styles.off)}>
-                    {row.qualified ? "可以照着学" : "只作参考"}
+                    {row.qualified ? "数据条件达标" : "只作参考"}
                   </span>
                 </span>
                 {onRefresh && <RefreshButton account={row.account} disabled={refreshDisabled} onRefresh={() => onRefresh(row)} />}
@@ -87,6 +87,7 @@ export function BenchmarkTable({ rows, now = new Date(), onRefresh, refreshDisab
         </ol>
       )}
       {fetchedAt && <p className={styles.note}>查询时间：{formatFetchedAt(fetchedAt)}</p>}
+      <p className={styles.note}>数据条件达标仅指粉丝量、近期更新和作品数量符合筛选条件；内容主题是否适合你，仍需结合具体作品判断。</p>
       {children}
       {onRefresh && <p className={styles.note}>点“刷新”会重新读取这个账号的最新数据，算一次新的查询。</p>}
       <p className={styles.note}>{note ?? `${DATA_SOURCE_NOTE}缺失的数字标为“${MISSING_TEXT}”，不按 0 计算。`}</p>
