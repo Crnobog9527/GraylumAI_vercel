@@ -19,7 +19,12 @@ const paid = (id: string, end = TERM_END, patch: Record<string, unknown> = {}) =
 const sub = (id: string, patch: Record<string, unknown> = {}) => ({ id: `s-${id}`, status: 'active', cancel_at_period_end: false,
   method_cancel_requested_at: null, method_cancel_confirmed_at: null, ...patch });
 function fixture(orders: unknown[], subscriptions: unknown[], holds: unknown[] = []) {
-  const responses: unknown[] = [null, orders, [], ...(orders.length ? [holds, ...(holds.length === orders.length ? [] : [subscriptions])] : []),
+  const frozen = new Set((holds as Array<{ order_id: string }>).map(row => row.order_id));
+  const visible = (orders as ReturnType<typeof paid>[]).filter(row => !frozen.has(row.id));
+  const latestTerms = [...new Set(visible.map(row => row.subscription_id))].map(id => ({ entitlement_end:
+    visible.filter(row => row.subscription_id === id).map(row => row.entitlement_end).sort().at(-1) }));
+  const responses: unknown[] = [null, orders, [], [], ...(orders.length ? [holds,
+    ...(visible.length ? [subscriptions, ...latestTerms] : [])] : []),
     { value: { version: 'terms' } }, [{ id: 'gold-plan' }], []];
   const from = vi.fn(() => {
     const result = { data: responses.shift(), error: null };

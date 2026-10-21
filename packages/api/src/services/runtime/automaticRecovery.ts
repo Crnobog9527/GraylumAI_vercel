@@ -9,6 +9,8 @@ import type { RuntimeBudget } from './budget';
 import { stagingTransport } from './stagingTransport';
 import type { StagingPolicy } from './stagingPolicy';
 import { autoCompensateStaleRounds, type StaleRoundAutoClose } from './staleChargedRounds';
+import { recoverInterruptedExecutions } from './interruptedRecovery';
+import { logger } from '../../lib/logger';
 
 export const AUTOMATIC_RECOVERY_LOOKUP_MS = 2_000;
 export const ADMISSION_RECOVERY_MS = 8_000;
@@ -68,7 +70,13 @@ export async function recoverPendingFinancials(input: {
         summary.processed++;
         if (state === 'completed' || state === 'cancelled') summary.settled++;
         else summary.pending++;
-      } catch { summary.failed++; }
+        logger.info('api', 'runtime_financial_recovery_result', {
+          executionId: item.executionId, runId: item.runId, userStop: Boolean(item.userStop), state,
+        });
+      } catch {
+        summary.failed++;
+        logger.error('api', 'runtime_financial_recovery_failed', { executionId: item.executionId, runId: item.runId });
+      }
     }
   } catch { summary.failed++; }
   return summary;
@@ -86,6 +94,9 @@ export async function runAutomaticFinancialRecovery(admin: SupabaseClient, actor
   const summary = await recoverPendingFinancials({ database, budget, actorId,
     adapter: policy => stagingTransport(admin, policy as StagingPolicy, budget),
   });
+  const interrupted = await recoverInterruptedExecutions({ database, budget, actorId });
+  for (const key of ['selected', 'processed', 'settled', 'pending', 'failed'] as const) summary[key] += interrupted[key];
+  logger.info('api', 'runtime_automatic_recovery', { ...summary, interrupted, actorScoped: Boolean(actorId) });
   if (actorId) return summary;
   const canStart = () => { try { budget.assertCanStart(STALE_ROUND_STEP_MS); return true; } catch { return false; } };
   // No time left even to read the report: not knowing is a failure, so a recovery backlog cannot starve refunds silently.

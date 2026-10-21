@@ -97,6 +97,28 @@ export async function runReportFee({db,Client,connectionString,report}) {
   await balanced(db,f.actor,'refunds');
   report.checks.push('report price: cut-off, structurally incomplete, stopped and cancelled reports refund the whole price');
 
+  // Interrupted recovery must release an incomplete report's fixed fee without a page read.
+  const lost = await execution(db,f);
+  const heldBalance = await wallet(db,f.actor);
+  // This synthetic run starts bound to a different fixture scope; link it only inside this disposable test.
+  await db.query('SET session_replication_role=replica');
+  try {
+    await db.query(`UPDATE bill2_runs SET session_ref=$2,runtime_epoch=1,
+      runtime_dispatch_deadline=now()-interval '10 minutes' WHERE id=$1`,[lost.run.run,f.session]);
+  } finally { await db.query('SET session_replication_role=origin'); }
+  await db.query(`UPDATE runtime_executions SET state='interrupted',created_at=now()-interval '20 minutes'
+    WHERE id=$1`,[lost.id]);
+  await db.query('UPDATE runtime_sessions SET active_execution=$2 WHERE id=$1',[f.session,lost.id]);
+  assert.equal((await service(db,'runtime_interrupted_recovery',f.actor,lost.id,1,20)).state,'cancelled');
+  assert.equal((await fee(db,lost.id)).state,'refunded','cron refunds the fixed fee immediately');
+  assert.equal(await wallet(db,f.actor),heldBalance+PRICE);
+  assert.equal((await db.query('SELECT active_execution FROM runtime_sessions WHERE id=$1',[f.session])).rows[0].active_execution,null);
+  const refundedBalance = await wallet(db,f.actor);
+  assert.equal((await service(db,'runtime_interrupted_recovery',f.actor,lost.id,1,20)).state,'cancelled');
+  assert.equal(await wallet(db,f.actor),refundedBalance,'repeat recovery does not refund twice');
+  await balanced(db,f.actor,'interrupted recovery report refund');
+  report.checks.push('interrupted recovery: incomplete report refunds 500 once and frees its Session without a model call');
+
   // Admission refused below the price plus the call's own hold: nothing held.
   const poor = await seed(db);
   await setBalance(db,poor.actor,PRICE+99);
