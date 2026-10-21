@@ -36,6 +36,12 @@ export function stoppedCompletion(options: RuntimeExecutorOptions, billing: Retu
       let unknown=false;responsePending=false;
       for(const call of execution.stopCalls??[]){
         if(!call.dispatched)continue;
+        // Research receipts contain supplier data, not model prose. A settled tool has no
+        // runtime_response to wait for; unsettled tools still retain their financial/window guards.
+        if(call.phase==='research'){
+          if(!call.settled){unknown=true;if(call.responsePending)responsePending=true;}
+          continue;
+        }
         const response=await rpc<{rawBody:string|null}|null>('runtime_response',{
           ...args,p_sequence:call.sequence,p_request_hash:call.requestHash});
         if(response?.rawBody){try{raws.set(call.sequence,JSON.parse(response.rawBody));}catch{/* Invalid stored output cannot be saved. */}}

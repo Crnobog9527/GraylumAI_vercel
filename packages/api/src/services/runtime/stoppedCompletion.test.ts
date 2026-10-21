@@ -139,6 +139,27 @@ it('ordinary cancellation after stop delegates to existing financial recovery',a
  expect(f.billing.recoverReceipts).not.toHaveBeenCalled();
 });
 
+it('settled research calls have no model response and never delay stopped completion',async()=>{
+ const f=fixture();
+ for(let sequence=2;sequence<=13;sequence++)f.execution.stopCalls!.push({sequence,
+  requestHash:'b'.repeat(64),phase:'research',dispatched:true,settled:true,responsePending:true});
+ expect(await f.complete(id)).toMatchObject({state:'completed',stopped:true});
+ expect(f.database.rpc.mock.calls.filter(([name])=>name==='runtime_response')).toHaveLength(1);
+ expect(f.billing.recoverReceipts).not.toHaveBeenCalled();
+});
+
+it('unsettled research keeps the original response window and cannot invent a zero-cost completion',async()=>{
+ const f=fixture();f.execution.stopCalls!.push({sequence:2,requestHash:'b'.repeat(64),phase:'research',
+  dispatched:true,settled:false,responsePending:true});
+ expect(await f.complete(id)).toEqual({state:'stopping'});
+ expect(f.billing.recoverReceipts).not.toHaveBeenCalled();expect(f.results).toEqual([]);
+ expect(f.database.rpc.mock.calls.filter(([name])=>name==='runtime_response')).toHaveLength(1);
+ f.execution.stopCalls![1].responsePending=false;
+ expect(await f.complete(id)).toEqual({state:'cost_pending'});
+ expect(f.billing.recoverReceipts).toHaveBeenCalledExactlyOnceWith(id,undefined);
+ expect(f.billing.dispatchOnce).not.toHaveBeenCalled();
+});
+
 it.each(['\n',' ','\u3000'])('step whitespace %j preserves the message source when stopped',async whitespace=>{
  for(const content of [whitespace+'Hello world','Hello world'+whitespace]){
   const f=fixture();f.execution.stop={stopAt:5,source:'message'};
