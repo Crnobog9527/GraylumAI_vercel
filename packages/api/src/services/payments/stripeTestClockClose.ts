@@ -37,7 +37,9 @@ export async function closeRefundedTestClockCheckout(db: SupabaseClient, stripe:
   const payment = payments.data[0];
   if (payments.has_more || payments.data.length !== 1 || payment?.payment.type !== 'payment_intent'
     || id(payment.invoice) !== invoice.id || payment.livemode !== false || payment.object !== 'invoice_payment'
-    || payment.status !== 'paid' || payment.amount_paid !== invoice.amount_paid || payment.currency !== cash.currency) throw new Error(PAYMENT_EVIDENCE_CONFLICT);
+    || payment.status !== 'paid' || payment.amount_paid !== invoice.amount_paid || payment.currency !== cash.currency) {
+    throw new Error(PAYMENT_EVIDENCE_CONFLICT);
+  }
   const intentId = id(payment.payment.payment_intent);
   if (!intentId) throw new Error(PAYMENT_EVIDENCE_CONFLICT);
   const intent = await stripe.paymentIntents.retrieve(intentId);
