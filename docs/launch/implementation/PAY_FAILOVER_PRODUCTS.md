@@ -1,6 +1,6 @@
 # PAY-FAILOVER：Waffo 一次性测试商品与 staging 验收前提
 
-2026-10-22：经Owner授权，以下12个一次性商品已在原Waffo测试店铺创建并逐个回读核对。原六个订阅商品税类均为saas；官方查询不提供taxIncluded，原创建请求也省略，Owner本聊天明确确认本次照原请求省略该字段。结账priceSnapshot仍按既定规则taxIncluded=true锁定含税实付金额，两者不混为同一事实。所有币种USD，不启用试用、不使用订阅商品、不产生自动续费。映射尚未写入staging数据库，交总控审阅独立数据脚本，在0332之后应用。会员商品名称可保留“月付/年付”，但供应商商品类型必须是一次性，本站按期限履约。
+2026-10-22：经Owner授权，以下12个一次性商品已在原Waffo测试店铺创建并逐个回读核对。原六个订阅商品税类均为saas；官方查询不提供taxIncluded，原创建请求也省略，Owner本聊天明确确认本次照原请求省略该字段。结账priceSnapshot仍按既定规则taxIncluded=true锁定含税实付金额，两者不混为同一事实。所有币种USD，不启用试用、不使用订阅商品、不产生自动续费。映射尚未写入staging数据库，交总控审阅[独立数据脚本](./PAY_FAILOVER_TEST_MAPPING.sql)及[执行说明](./PAY_FAILOVER_TEST_MAPPING.md)，在0332之后应用。本地11项验证已通过。会员商品名称可保留“月付/年付”，但供应商商品类型必须是一次性，本站按期限履约。
 
 |本站商品|USD|Waffo 一次性商品编号|billing_cycle|offer_kind|price_usage|package_tier|
 |---|---:|---|---|---|---|---|
