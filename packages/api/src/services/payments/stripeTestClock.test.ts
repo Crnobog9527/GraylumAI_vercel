@@ -24,8 +24,8 @@ function fixture() {
   const clocks = { retrieve: vi.fn().mockImplementation(async () => clock) };
   const rpc = vi.fn().mockResolvedValue({ data: null, error: null });
   const sources: unknown[] = [order];
-  const q = { select: vi.fn(), eq: vi.fn(), not: vi.fn(), limit: vi.fn().mockImplementation(async () => ({ data: sources, error: null })) };
-  for (const key of ['select', 'eq', 'not'] as const) q[key].mockReturnValue(q);
+  const q = { select: vi.fn(), eq: vi.fn(), in: vi.fn(), not: vi.fn(), limit: vi.fn().mockImplementation(async () => ({ data: sources, error: null })) };
+  for (const key of ['select', 'eq', 'in', 'not'] as const) q[key].mockReturnValue(q);
   const from = vi.fn().mockReturnValue(q);
   return { customer, clock, customers, clocks, rpc, from, sources,
     db: { rpc, from } as unknown as SupabaseClient,
@@ -95,6 +95,40 @@ describe('authoritative narrow Stripe test-clock context', () => {
     expect(f.customers.retrieve).toHaveBeenCalledTimes(2); expect(f.clocks.retrieve).toHaveBeenCalledTimes(2);
     expect(f.rpc).toHaveBeenLastCalledWith('pay_stripe_test_clock_observe', expect.objectContaining({ p_as_of: new Date((AS_OF + 3600) * 1000).toISOString() }));
   });
+  it('observes the same verified customer/clock for mainland non-MP sources', async () => {
+    const f = fixture();
+    const mainland = { ...order, payment_method: 'card_cn', stripe_managed_payments: false };
+    await expect(observeStripeTestClock(f.db, f.stripe, scope, mainland, env)).resolves.toMatchObject({
+      customerId: f.customer.id, clockId: f.clock.id });
+    expect(f.rpc).toHaveBeenCalledExactlyOnceWith('pay_stripe_test_clock_observe', expect.objectContaining({ p_order: order.id }));
+  });
+  it.each(['environment', 'scope-live', 'order-live', 'customer-live', 'owner', 'clockless', 'clock-live', 'unready'])(
+    'keeps mainland observation closed when %s gate is missing', async missing => {
+      const f = fixture();
+      const mainland = { ...order, payment_method: 'card_cn', stripe_managed_payments: false };
+      const actualEnv = missing === 'environment' ? { ...env, VERCEL_GIT_COMMIT_REF: 'main' } : env;
+      const actualScope = missing === 'scope-live' ? { ...scope, mode: 'live' as const } : scope;
+      if (missing === 'order-live') mainland.payment_mode = 'live';
+      if (missing === 'customer-live') f.customer.livemode = true;
+      if (missing === 'owner') f.customer.metadata.graylum_user_id = 'other';
+      if (missing === 'clockless') Object.assign(f.customer, { test_clock: null });
+      if (missing === 'clock-live') f.clock.livemode = true;
+      if (missing === 'unready') f.clock.status = 'advancing';
+      const observed = observeStripeTestClock(f.db, f.stripe, actualScope, mainland, actualEnv);
+      if (['environment', 'scope-live', 'order-live'].includes(missing)) await expect(observed).resolves.toBeNull();
+      else await expect(observed).rejects.toThrow('PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT');
+      expect(f.rpc).not.toHaveBeenCalled();
+    });
+  it.each([
+    { payment_method: 'card_cn', stripe_managed_payments: true },
+    { payment_method: 'card_cn', stripe_managed_payments: null },
+    { payment_method: 'card', stripe_managed_payments: false },
+    { payment_method: 'wechat_pay', stripe_managed_payments: false },
+  ])('never observes a mismatched method/MP pair: %j', async patch => {
+    const f = fixture();
+    expect(await observeStripeTestClock(f.db, f.stripe, scope, { ...order, ...patch }, env)).toBeNull();
+    expect(f.customers.retrieve).not.toHaveBeenCalled(); expect(f.rpc).not.toHaveBeenCalled();
+  });
   it('does not treat a persistence failure as an accepted observation', async () => {
     const f = fixture(); f.rpc.mockResolvedValue({ data: null, error: { message: 'scope denied' } });
     await expect(observeStripeTestClock(f.db, f.stripe, scope, order, env)).rejects.toThrow('PAY_STRIPE_TEST_CLOCK_UNAVAILABLE');
@@ -125,8 +159,9 @@ describe('authoritative narrow Stripe test-clock context', () => {
     await expect(refreshStripeTestClockOrder(f.db, f.stripe, reason === 'live' ? { ...scope, mode: 'live' } : scope, order.id)).resolves.toBeNull();
     expect(f.from).not.toHaveBeenCalled(); expect(f.rpc).not.toHaveBeenCalled(); expect(f.customers.retrieve).not.toHaveBeenCalled();
   });
-  it('returns only database-authoritative times after all provider observations', async () => {
+  it.each(['card', 'card_cn'])('returns only database-authoritative times after all %s provider observations', async method => {
     const f = fixture();
+    f.sources[0] = { ...order, payment_method: method, stripe_managed_payments: method === 'card' };
     f.rpc.mockImplementation(async (name: string) => ({ data: name === 'pay_stripe_test_clock_times'
       ? [{ orderId: 'order', now: '2026-11-21T12:00:00Z' }, { orderId: 'renewal', now: '2026-11-21T12:00:00Z' }] : null, error: null }));
     const times = await refreshStripeTestClockUser(f.db, 'owner', env, f.stripe);
