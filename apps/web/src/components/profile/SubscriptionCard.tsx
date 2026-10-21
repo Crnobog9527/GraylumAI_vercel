@@ -187,7 +187,7 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
 
   const memberships = (checkout.entry?.memberships ?? []) as MethodMembershipRow[];
   const current = currentMethodMembership(memberships);
-  const methods = checkout.methodsFor('membership_plan');
+  const methods = checkout.methodsFor('membership_plan', billingCycle);
   const goldFirstMonth = checkout.entry?.goldFirstMonthEligible === true && !firstMonthDeclined;
   const founderSeats = founderSoldOut || founderDeclined ? 0 : founderSeatsLeft(checkout.entry);
   const sellable = useMemo(() => pickPaywallPlans(apiPlans), [apiPlans]);

@@ -63,6 +63,7 @@ const plan = {
 const ROUTES = { version: 7, card: { enabled: true }, card_cn: { enabled: true },
   wechat_pay: { enabled: false, annualVerified: false }, alipay: { enabled: false, annualVerified: false } };
 const ENTRY = { mode: 'test', routes: ROUTES, checkoutReady: true, termsVersion: 'terms-v3', goldFirstMonthEligible: false,
+  checkoutMethods: ['card', 'card_cn'],
   founder: { total: 50, sold: 50, reserved: 0, available: 0 }, memberships: [] as unknown[] };
 
 function queryState(overrides: Record<string, unknown> = {}) {
@@ -113,9 +114,19 @@ describe('SubscriptionCard catalog availability', () => {
     componentState.plansQuery = queryState({ data: [plan] });
     componentState.membershipQuery = queryState({ data: entry });
     const markup = renderSubscription();
-    expect(markup).toContain('银行卡付款暂未开放');
+    expect(markup).toContain('付款暂未开放');
     expect(markup).not.toContain('>开通<');
     expect(markup).not.toContain('税另计');
+  });
+
+  it('projects the staging wallet methods into the member page checkout summary', () => {
+    componentState.plansQuery = queryState({ data: [plan] });
+    componentState.membershipQuery = queryState({ data: { ...ENTRY,
+      routes: { ...ROUTES, wechat_pay: { enabled: true, annualVerified: false }, alipay: { enabled: true, annualVerified: true } },
+      checkoutMethods: ['card', 'card_cn', 'wechat_pay', 'alipay'] } });
+    const markup = renderSubscription();
+    expect(markup).toContain('微信支付：不另收税');
+    expect(markup).toContain('支付宝：不另收税');
   });
 
   it('pauses purchases when the membership read fails, but keeps subscription management', () => {

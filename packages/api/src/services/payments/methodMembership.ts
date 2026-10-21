@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { readPaymentMethodRoutes } from './methodRouting';
-import { methodCheckoutReady } from './methodCheckoutGate';
+import { methodCheckoutMethods, methodCheckoutReady } from './methodCheckoutGate';
 
 type PaidMembership = { id: string; subscription_id: string; purchase_membership_level: string; payment_method: string;
   payment_channel: string; auto_renew: boolean | null; entitlement_start: string; entitlement_end: string; offer_kind: string;
@@ -91,6 +91,7 @@ export async function readMethodMembership(db: SupabaseClient, userId: string, n
   return { mode, routes,
     // Staging wallet routes can also expose the entry; production readiness stays on the card path.
     checkoutReady: methodCheckoutReady(env, routes, undefined, mode),
+    checkoutMethods: methodCheckoutMethods(env, routes),
     founder: { total: 50, sold, reserved: occupied - sold, available: 50 - occupied },
     memberships,
     termsVersion: typeof version === 'string' ? version : null,

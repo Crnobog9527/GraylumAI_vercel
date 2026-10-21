@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
-import { LIVE_PAYMENT_PIPELINE_READY, assertMethodCheckoutEnvironment, methodCheckoutReady, methodCheckoutEnvironmentOpen,
+import { LIVE_PAYMENT_PIPELINE_READY, assertMethodCheckoutEnvironment, methodCheckoutReady, methodCheckoutEnvironmentOpen, methodCheckoutMethods,
   stripeTestClockStagingOpen } from './methodCheckoutGate';
 
 // The staging deployment, bound like the runtime staging check (project, branch, repository, database).
@@ -36,12 +36,16 @@ describe('PAY-STRIPE-MP checkout gate (3c: card open on staging only, behind the
       }
       expect(methodCheckoutReady(env, routes(true))).toBe(true);
       expect(methodCheckoutReady(env, routes(false))).toBe(false);
+      expect(methodCheckoutMethods(env, routes(true))).toEqual(methods);
+      expect(methodCheckoutMethods(env, routes(false))).toEqual([]);
     }
     expect(methodCheckoutReady(staging, null)).toBe(false);
     // Either card route makes the entry ready; `routes` tells the page which method is open.
     expect(methodCheckoutReady(staging, { ...routes(false), card_cn: { enabled: true } })).toBe(true);
     expect(methodCheckoutReady(staging, { ...routes(false), wechat_pay: { enabled: true, annualVerified: false } })).toBe(true);
     expect(methodCheckoutReady(staging, { ...routes(false), alipay: { enabled: false, annualVerified: true } })).toBe(false);
+    expect(methodCheckoutMethods(staging, { ...routes(false), wechat_pay: { enabled: true, annualVerified: false } }))
+      .toEqual(['wechat_pay']);
   });
   it('a preview of the staging project, another project or another database stays closed', () => {
     for (const patch of [{ VERCEL_GIT_COMMIT_REF: 'feature-branch', VERCEL_ENV: 'preview' }, { VERCEL_PROJECT_ID: 'other-project' },
@@ -124,6 +128,9 @@ describe('R7 production checkout gate: bound deployment plus a separate default-
     expect(methodCheckoutReady({ ...production, ...cardOn }, routes(true), true)).toBe(true);
     expect(methodCheckoutReady({ ...production, ...cardOn }, routes(false), true)).toBe(false);
     expect(methodCheckoutReady({ ...production, ...walletOn }, routes(true), true)).toBe(false);
+    expect(methodCheckoutMethods({ ...production, ...cardOn }, routes(true), true)).toEqual(['card', 'card_cn']);
+    expect(methodCheckoutMethods({ ...production, ...walletOn }, routes(true), true)).toEqual(['wechat_pay', 'alipay']);
+    expect(methodCheckoutMethods(production, routes(true), true)).toEqual([]);
   });
   it.each(Object.keys(production))('stays closed with both switches on when %s is missing', key =>
     expect(open({ ...production, ...cardOn, ...walletOn, [key]: undefined })).toEqual([]));

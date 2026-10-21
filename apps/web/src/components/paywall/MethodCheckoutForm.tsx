@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { CHECKOUT_COPY, METHOD_COPY, TERMS_LINKS, refundPolicyHref, type CardMethod, type MethodPurchase } from './methodCheckout';
+import { CHECKOUT_COPY, METHOD_COPY, TERMS_LINKS, refundPolicyHref, type CheckoutMethod, type MethodPurchase } from './methodCheckout';
 import type { MethodCheckout } from './useMethodCheckout';
 
 type Props = {
@@ -37,8 +37,8 @@ const muted = { color: 'var(--text-tertiary)' };
  */
 export function MethodCheckoutForm(props: Props) {
   const { checkout, purchase, testIdPrefix: id } = props;
-  const methods = purchase ? checkout.methodsFor(purchase.itemType) : checkout.methodsFor('membership_plan');
-  const [picked, setPicked] = useState<CardMethod>('card');
+  const methods = purchase ? checkout.methodsFor(purchase.itemType, purchase.billingCycle) : checkout.methodsFor('membership_plan');
+  const [picked, setPicked] = useState<CheckoutMethod>('card');
   // Consent is to one terms version: if methodMembership refetches a newer one (e.g. after reading the terms in
   // another tab), the box clears and must be ticked again for that version.
   const [acceptedVersion, setAcceptedVersion] = useState<string | null>(null);

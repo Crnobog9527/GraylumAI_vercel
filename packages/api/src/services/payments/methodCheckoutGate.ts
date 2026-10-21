@@ -70,6 +70,15 @@ export function methodCheckoutEnvironmentOpen(env: Env, method: PaymentMethod, l
   return method === 'card' || method === 'card_cn' ? cardCheckoutEnvironmentOpen(env, liveReady) : walletCheckoutEnvironmentOpen(env, liveReady);
 }
 
+/** Server projection for the purchase UI. Route switches and the deployment gate are both required, so
+ * production wallet options cannot appear unless the bound production wallet switch is open. */
+export function methodCheckoutMethods(env: Env, routes: PaymentMethodRoutes | null,
+  liveReady = LIVE_PAYMENT_PIPELINE_READY): PaymentMethod[] {
+  const methods: PaymentMethod[] = ['card', 'card_cn', 'wechat_pay', 'alipay'];
+  return methods.filter(method => routes?.[method]?.enabled === true
+    && methodCheckoutEnvironmentOpen(env, method, liveReady));
+}
+
 export function assertMethodCheckoutEnvironment(env: Env, method: PaymentMethod, liveReady = LIVE_PAYMENT_PIPELINE_READY,
   testClockCustomerRequested = false) {
   const testClockStaging = testClockCustomerRequested && method === 'card' && stripeTestClockStagingOpen(env);

@@ -51,8 +51,10 @@ describe('method membership read projection', () => {
     }
   });
   it('projects enabled staging wallet routes as ready while leaving production unchanged', async () => {
-    const ready = async (env: typeof staging, route: ReturnType<typeof routes>) =>
-      (await readMethodMembership(fixture(undefined, route).db, 'actor', 0, env)).checkoutReady;
+    const projection = async (env: Record<string, string | undefined>, route: ReturnType<typeof routes>) =>
+      readMethodMembership(fixture(undefined, route).db, 'actor', 0, env);
+    const ready = async (env: Record<string, string | undefined>, route: ReturnType<typeof routes>) =>
+      (await projection(env, route)).checkoutReady;
     const walletsOff = { ...routes(false), wechat_pay: { enabled: false, annualVerified: false },
       alipay: { enabled: false, annualVerified: false } };
     const wechatOn = { ...walletsOff, wechat_pay: { enabled: true, annualVerified: false } };
@@ -60,9 +62,14 @@ describe('method membership read projection', () => {
     expect(await ready(staging, wechatOn)).toBe(true);
     expect(await ready(staging, alipayOn)).toBe(true);
     expect(await ready(staging, walletsOff)).toBe(false);
+    expect((await projection(staging, wechatOn)).checkoutMethods).toEqual(['wechat_pay']);
+    expect((await projection(staging, alipayOn)).checkoutMethods).toEqual(['alipay']);
+    expect((await projection(staging, walletsOff)).checkoutMethods).toEqual([]);
     for (const enabled of [true, false]) {
-      expect(await ready({ ...staging, VERCEL_PROJECT_PRODUCTION_URL: 'app.graylum.com' },
-        enabled ? routes(true) : walletsOff)).toBe(false);
+      const productionLike = { ...staging, VERCEL_PROJECT_PRODUCTION_URL: 'app.graylum.com' };
+      const productionProjection = await projection(productionLike, enabled ? routes(true) : walletsOff);
+      expect(productionProjection.checkoutReady).toBe(false);
+      expect(productionProjection.checkoutMethods).toEqual([]);
     }
   });
   it('tells the purchase entry the terms version and whether the Gold first-month offer applies (display only)', async () => {
