@@ -43,7 +43,7 @@ function fixture(tax = 0) {
   const refund = { id: 're_fixture', object: 'refund', status: 'succeeded', charge: 'ch_fixture', payment_intent: 'pi_fixture',
     currency: 'usd', amount: gross, created: PAID + 120 };
   const refunds = { list: vi.fn().mockResolvedValue({ data: [refund], has_more: false }) };
-  const rpc = vi.fn<(name: string, params?: unknown) => Promise<{ data: { state: string; orderId: string; credits: number } | null;
+  const rpc = vi.fn<(name: string, params?: unknown) => Promise<{ data: { state: string; orderId: string; credits: number; duplicate?: boolean } | null;
     error: { message: string } | null }>>().mockImplementation(async name => ({ data: name === 'pay_stripe_test_clock_close_refunded'
     ? { state: 'refunded', orderId: ORDER, credits: 0 } : null, error: null }));
   const stripe = { checkout: { sessions: { retrieve: vi.fn(async () => session) } },
@@ -54,9 +54,14 @@ function fixture(tax = 0) {
       test_clock: 'clock_fixture', metadata: { graylum_user_id: USER } })) },
     testHelpers: { testClocks: { retrieve: vi.fn(async () => ({ id: 'clock_fixture', object: 'test_helpers.test_clock',
       livemode: false, status: 'ready', frozen_time: PAID + 180 })) } } };
-  const db = { rpc } as unknown as SupabaseClient;
+  const persisted: { data: Record<string, unknown> | null } = { data: null };
+  const from = vi.fn(() => {
+    const q = { select: vi.fn(), eq: vi.fn(), maybeSingle: vi.fn(async () => ({ data: persisted.data, error: null })) };
+    q.select.mockReturnValue(q); q.eq.mockReturnValue(q); return q;
+  });
+  const db = { rpc, from } as unknown as SupabaseClient;
   const close = () => closeRefundedTestClockCheckout(db, stripe as unknown as Stripe, scope, order, 'cs_fixture', 'price_pro');
-  return { order, session, subscription, invoice, invoicePayment, intent, charge, refund, refunds, rpc, stripe, db, close };
+  return { order, session, subscription, invoice, invoicePayment, intent, charge, refund, refunds, rpc, stripe, db, persisted, from, close };
 }
 describe('unfulfilled first payment closes only from authoritative full-refund evidence', () => {
   beforeEach(() => { resolveScope.mockReset().mockResolvedValue(scope); for (const [k, v] of Object.entries(env)) vi.stubEnv(k, v); });
@@ -151,6 +156,62 @@ describe('unfulfilled first payment closes only from authoritative full-refund e
     const f = fixture(); f.charge.refunded = false; f.charge.amount_refunded = 0;
     await expect(f.close()).resolves.toBe(false);
     expect(f.rpc).not.toHaveBeenCalled(); expect(f.refunds.list).not.toHaveBeenCalled();
+  });
+  async function persistClosed(f: ReturnType<typeof fixture>) {
+    await f.close();
+    const recorded = f.rpc.mock.calls.find(call => call[0] === 'pay_stripe_test_clock_close_refunded')![1] as { p_facts: Record<string, unknown> };
+    const facts = structuredClone(recorded.p_facts);
+    f.persisted.data = { id: ORDER, user_id: USER, status: 'refunded', payment_status: 'refunded', qualification_state: 'released',
+      fulfilled_at: null, subscription_id: null, purchase_closed_at: '2026-10-21T12:00:00Z', metadata: { stripeTestClockClose: facts } };
+    f.rpc.mockClear();
+    return facts;
+  }
+  it('allows the exact persisted cash-close through DB duplicate comparison after a later provider dispute', async () => {
+    const f = fixture();
+    const facts = await persistClosed(f); f.charge.disputed = true;
+    f.rpc.mockImplementation(async name => ({ data: name === 'pay_stripe_test_clock_close_refunded'
+      ? { state: 'refunded', orderId: ORDER, credits: 0, duplicate: true } : null, error: null }));
+    await expect(f.close()).resolves.toBe(true);
+    expect(f.from).toHaveBeenCalledWith('payment_orders');
+    expect(f.from.mock.results[0]!.value.eq).toHaveBeenCalledWith('id', ORDER);
+    expect(f.from.mock.results[0]!.value.eq).toHaveBeenCalledWith('user_id', USER);
+    expect(f.rpc).toHaveBeenLastCalledWith('pay_stripe_test_clock_close_refunded', { p_facts: facts });
+    expect(f.rpc.mock.calls.map(call => call[0])).toEqual(['pay_stripe_test_clock_close_refunded']);
+  });
+  it.each([
+    { status: 'pending' }, { payment_status: 'paid' }, { qualification_state: 'reserved' }, { purchase_closed_at: null },
+    { fulfilled_at: '2026-10-21T12:00:00Z' }, { subscription_id: 'local-subscription' }, { id: 'another-order' }, { user_id: 'other' },
+    { metadata: { stripeTestClockClose: true } }, { metadata: { stripeTestClockClose: [] } },
+    { metadata: { stripeTestClockClose: { order: 'another-order' } } },
+  ])('does not use an incomplete or foreign persisted marker to admit a disputed first close: %j', async patch => {
+    const f = fixture(); await persistClosed(f); Object.assign(f.persisted.data!, patch); f.charge.disputed = true;
+    await expect(f.close()).rejects.toThrow('PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT');
+    expect(f.rpc).not.toHaveBeenCalledWith('pay_stripe_test_clock_close_refunded', expect.anything());
+  });
+  it('does not trust a final-close marker supplied on the order when the persisted DB row is absent', async () => {
+    const f = fixture(); await persistClosed(f);
+    Object.assign(f.order, f.persisted.data); f.persisted.data = null; f.charge.disputed = true;
+    await expect(f.close()).rejects.toThrow('PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT');
+    expect(f.rpc).not.toHaveBeenCalledWith('pay_stripe_test_clock_close_refunded', expect.anything());
+  });
+  it('does not accept changed provider cash facts when the locked duplicate RPC rejects them', async () => {
+    const f = fixture(); await persistClosed(f); f.charge.disputed = true; f.refund.id = 're_changed';
+    f.rpc.mockImplementation(async name => ({ data: null, error: name === 'pay_stripe_test_clock_close_refunded'
+      ? { message: 'PAY_STRIPE_TEST_CLOCK_CLOSE_CONFLICT' } : null }));
+    await expect(f.close()).rejects.toThrow('PAY_STRIPE_TEST_CLOCK_CLOSE_UNAVAILABLE');
+    expect(f.rpc).toHaveBeenCalledWith('pay_stripe_test_clock_close_refunded', { p_facts: expect.objectContaining({
+      refunds: [expect.objectContaining({ id: 're_changed' })] }) });
+  });
+  it('never accepts a nonduplicate DB mutation result for an already disputed charge', async () => {
+    const f = fixture(); await persistClosed(f); f.charge.disputed = true;
+    f.rpc.mockImplementation(async name => ({ data: name === 'pay_stripe_test_clock_close_refunded'
+      ? { state: 'refunded', orderId: ORDER, credits: 0, duplicate: false } : null, error: null }));
+    await expect(f.close()).rejects.toThrow('PAY_STRIPE_TEST_CLOCK_CLOSE_UNAVAILABLE');
+  });
+  it('retains every other provider cash guard even with a valid final-close marker and a dispute', async () => {
+    const f = fixture(); await persistClosed(f); f.charge.disputed = true; f.charge.currency = 'eur';
+    await expect(f.close()).rejects.toThrow('PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT');
+    expect(f.rpc).not.toHaveBeenCalledWith('pay_stripe_test_clock_close_refunded', expect.anything());
   });
   it('requires tax to match both the session and the invoice pre-tax amount', async () => {
     const f = fixture(580); f.invoice.total_taxes = [];

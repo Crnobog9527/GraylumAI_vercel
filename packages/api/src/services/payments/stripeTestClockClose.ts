@@ -12,6 +12,19 @@ const iso = (seconds: number | null | undefined) => {
   return new Date((seconds as number) * 1000).toISOString();
 };
 type CloseOrder = TestClockOrder & CardOrder & { fulfilled_at?: string | null; subscription_id?: string | null };
+/** Only a fresh persisted terminal row may reach the RPC's exact-facts, read-only replay branch. */
+async function persistedCashClose(db: SupabaseClient, order: CloseOrder) {
+  const result = await db.from('payment_orders').select('id,user_id,status,payment_status,qualification_state,'
+    + 'fulfilled_at,subscription_id,purchase_closed_at,metadata').eq('id', order.id).eq('user_id', order.user_id).maybeSingle();
+  if (result.error) throw new Error('PAY_STRIPE_TEST_CLOCK_CLOSE_UNAVAILABLE', { cause: result.error });
+  const row = result.data;
+  const marker = row?.metadata?.stripeTestClockClose;
+  return row?.id === order.id && row.user_id === order.user_id && row.status === 'refunded'
+    && row.payment_status === 'refunded' && row.qualification_state === 'released'
+    && row.fulfilled_at === null && row.subscription_id === null
+    && typeof row.purchase_closed_at === 'string' && Number.isFinite(Date.parse(row.purchase_closed_at))
+    && marker !== null && typeof marker === 'object' && !Array.isArray(marker) && marker.order === order.id;
+}
 /** The canceled, fully refunded first payment is closed without ever granting access. No synthetic unpaid fact. */
 export async function closeRefundedTestClockCheckout(db: SupabaseClient, stripe: Stripe, scope: StripeScope,
   order: CloseOrder, sessionId: string, priceId: string) {
@@ -49,8 +62,9 @@ export async function closeRefundedTestClockCheckout(db: SupabaseClient, stripe:
     || intent.amount_received !== invoice.amount_paid) throw new Error(PAYMENT_EVIDENCE_CONFLICT);
   const charge = await stripe.charges.retrieve(chargeId);
   if (charge.refunded === false && charge.amount_refunded === 0) return false;
+  const disputedReplay = charge.disputed === true && await persistedCashClose(db, order);
   if (charge.id !== chargeId || charge.object !== 'charge' || charge.livemode !== false || charge.status !== 'succeeded'
-    || !charge.paid || !charge.captured || charge.disputed || id(charge.payment_intent) !== intentId
+    || !charge.paid || !charge.captured || (charge.disputed && !disputedReplay) || id(charge.payment_intent) !== intentId
     || id(charge.customer) !== customerId || charge.currency !== cash.currency
     || charge.amount_captured !== invoice.amount_paid || !charge.refunded || charge.amount_refunded !== charge.amount_captured) {
     throw new Error(PAYMENT_EVIDENCE_CONFLICT);
@@ -73,7 +87,7 @@ export async function closeRefundedTestClockCheckout(db: SupabaseClient, stripe:
   // A failed/canceled historical attempt moved no cash. Pending or unknown states above remain a conflict.
   const succeeded = all.filter(row => row.status === 'succeeded');
   if (succeeded.reduce((sum, row) => sum + row.amount, 0) !== charge.amount_captured) throw new Error(PAYMENT_EVIDENCE_CONFLICT);
-  const clock = await observeStripeTestClock(db, stripe, scope, order);
+  const clock = disputedReplay ? verifiedClock : await observeStripeTestClock(db, stripe, scope, order);
   if (!clock || clock.clockId !== verifiedClock.clockId || id(subscription.test_clock) !== clock.clockId || id(invoice.test_clock) !== clock.clockId) {
     throw new Error(PAYMENT_EVIDENCE_CONFLICT);
   }
@@ -82,7 +96,8 @@ export async function closeRefundedTestClockCheckout(db: SupabaseClient, stripe:
     invoice: invoice.id, paymentIntent: intentId, charge: chargeId, subscription: subscriptionId,
     paidMinor: invoice.amount_paid, taxMinor: cash.tax, currency: cash.currency, paidAt: cash.paidAt,
     canceledAt: iso(subscription.canceled_at), refunds: succeeded.map(row => ({ id: row.id, amount: row.amount, createdAt: iso(row.created) })) } });
-  if (result.error || result.data?.state !== 'refunded' || result.data?.orderId !== order.id || result.data?.credits !== 0) {
+  if (result.error || result.data?.state !== 'refunded' || result.data?.orderId !== order.id || result.data?.credits !== 0
+    || (disputedReplay && result.data?.duplicate !== true)) {
     throw new Error('PAY_STRIPE_TEST_CLOCK_CLOSE_UNAVAILABLE', { cause: result.error });
   }
   return true;
