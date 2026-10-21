@@ -78,3 +78,18 @@ it.each(['card', 'card_cn'])('keeps stopped %s subscriptions blocked until renew
     expect(result.reasonCode).toBe('RENEWAL_RESTORE_REQUIRED');
   }
 });
+
+it.each(['card','alipay'])('keeps a Waffo one-time %s term active for upgrades without restoring automatic renewal', async payment_method => {
+  const supabase = {rpc:async()=>({data:data({...paid('pro'),payment_method,payment_channel:'waffo',
+    purchase_mode:'payment',billing_cycle:'monthly'}),error:null})};
+  for(const targetBillingCycle of ['monthly','yearly'] as const){
+    const result = await resolveMembershipEligibility({supabase,userId:actorId,profile:{membership_level:'pro'},
+      action:'create_membership_checkout',targetPlan:{level:'gold'},targetBillingCycle});
+    expect(result).toMatchObject({state:'active',reasonCode:'UPGRADE_REQUIRES_CHANGE_SUBSCRIPTION'});
+    expect(result.safeMessage).not.toContain('恢复续费');
+  }
+});
+it.each(['subscription',undefined])('retains stopped legacy Waffo %s renewal state',purchase_mode=>{
+  expect(getState({profileLevel:'free',latestMembershipOrder:null,latestSubscription:{...paid('pro'),
+    payment_channel:'waffo',purchase_mode}})).toMatchObject({state:'cancel_at_period_end',level:'pro'});
+});

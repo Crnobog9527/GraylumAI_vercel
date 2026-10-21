@@ -3,10 +3,12 @@ import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {advancedCases} from './advanced.mjs';
 import {disputeCases} from './disputes.mjs';
+import {seedLegacyPurchase,legacyFailoverCases} from './legacy-admission.mjs';
 export async function runCases({admin,service,connect}) {
  const cases=[];
  const actor=randomUUID(),normal=randomUUID(),disabled=randomUUID();
  await admin.query("INSERT INTO profiles(id,role,status) VALUES($1,'admin','active'),($2,'user','active'),($3,'admin','inactive')",[actor,normal,disabled]);
+ const legacy=await seedLegacyPurchase({admin,service});
  const routes={version:1,card:{enabled:true},card_cn:{enabled:true},wechat_pay:{enabled:true,annualVerified:true},alipay:{enabled:true,annualVerified:true}};
  await admin.query("INSERT INTO system_settings(key,value) VALUES('payment_method_routes',$1)",[routes]);
  const current=async()=>(await admin.query("SELECT value FROM system_settings WHERE key='payment_method_routes'")).rows[0].value;
@@ -62,6 +64,7 @@ export async function runCases({admin,service,connect}) {
   if(review!==undefined)args.push(review);
   return(await db.query('SELECT pay_failover_fulfill('+args.map((_,i)=>'$'+(i+1)).join(',')+') v',args)).rows[0].v;
  };
+ cases.push(...await legacyFailoverCases({admin,service,connect,actor,legacy,current,switchTo,create,bind}));
  const first=await create();assert.equal(first.purchase_snapshot.tax_behavior,'inclusive','Waffo one-time price is tax inclusive');assert.equal(first.payment_channel,'waffo');assert.equal(first.mode,'payment');assert.equal(first.auto_renew,false);
  await assert.rejects(()=>admin.query("UPDATE payment_orders SET provider_payment_method='card' WHERE id=$1",[first.id]),/WRITE_DENIED/);
  await bind(first);
@@ -69,9 +72,10 @@ export async function runCases({admin,service,connect}) {
  const paid=await Promise.all([pay(first),pay(first,{db:two})]);
  assert.equal(paid.filter(p=>p.duplicate===false).length,1);
  assert.equal((await admin.query('SELECT credits FROM profiles WHERE id=$1',[first.user_id])).rows[0].credits,3480);
+ assert.equal((await service.query('SELECT pay_common_membership_facts($1) v',[first.user_id])).rows[0].v.internal_membership.purchase_mode,'payment');
  await assert.rejects(()=>pay(first,{method:'alipay'}),/METHOD_CONFLICT/);
  assert.equal((await admin.query('SELECT count(*)::int n FROM payment_provider_refs WHERE subscription_id=(SELECT subscription_id FROM payment_orders WHERE id=$1)',[first.id])).rows[0].n,0);
- cases.push('waffo-card-one-time-only','actual-method-direct-write-denied','concurrent-duplicate-grants-once','actual-method-frozen','no-waffo-subscription-created');
+ cases.push('membership-facts-identify-waffo-one-time-mode','waffo-card-one-time-only','actual-method-direct-write-denied','concurrent-duplicate-grants-once','actual-method-frozen','no-waffo-subscription-created');
  const unknown=await create({method:'alipay'});await bind(unknown);
  assert.equal((await pay(unknown,{method:'unknown'})).state,'review');
  assert.equal((await pay(unknown,{method:'unknown'})).state,'review');

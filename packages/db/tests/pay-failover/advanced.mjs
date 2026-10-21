@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
+import {refundedChargebackCase} from './refunded-disputes.mjs';
 export async function advancedCases({admin,service,connect,actor,create,bind,pay,current,switchTo,plan,gold,first}) {
  const cases=[];
  const expired=await create();await bind(expired);
@@ -25,10 +26,10 @@ export async function advancedCases({admin,service,connect,actor,create,bind,pay
  assert.equal((await admin.query('SELECT qualification_state FROM payment_orders WHERE id=$1',[rejected.id])).rows[0].qualification_state,'released');
  cases.push('expired-local-timer-keeps-pending-and-checked-cash-fulfills','definitive-provider-rejection-releases','provider-confirmed-terminal-unpaid-late-cash-review');
  const members=[];
- for(const method of ['card','alipay','failed_refund']){
-  const actual=method==='failed_refund'?'card':method;
-  const o=await create({method:actual});await bind(o);assert.equal((await pay(o,{method:actual})).state,'fulfilled');
-  members.push({...o,refundFailure:method==='failed_refund'});
+ for(const method of ['card','alipay','failed_refund','partial_refund']){
+  const actual=method==='failed_refund'||method==='partial_refund'?'card':method;
+  const o=await create({method:actual,cycle:method==='partial_refund'?'yearly':'monthly'});await bind(o);assert.equal((await pay(o,{method:actual})).state,'fulfilled');
+  members.push({...o,refundFailure:method==='failed_refund',partialRefund:method==='partial_refund'});
  }
  const pack=(await admin.query(`INSERT INTO credit_packages(name,price,credits_amount,bonus_credits)
   VALUES('PAY-FAILOVER pack',990,990,0) RETURNING id`)).rows[0].id;
@@ -45,10 +46,11 @@ export async function advancedCases({admin,service,connect,actor,create,bind,pay
   const row=(await admin.query('SELECT qualified_paid_at FROM payment_orders WHERE id=$1',[o.id])).rows[0];
   const cash={orderId:o.id,merchant:'fixture',mode:'test',currency:'usd',paidMinor:o.amount_total,
    taxMinor:0,refundedMinor:0,refundCount:0,disputed:false,chargeId:`PAY_${o.id}`,paymentIntentId:`PAY_${o.id}`,paidAt:row.qualified_paid_at};
+  const fee=o.partialRefund?'confirmed':'not_permitted';
   const quote=(await service.query('SELECT pay_common_package_refund_quote($1,$2,$3,$4,$5,$6) v',
-   [actor,o.id,ticket,cash,'not_permitted','test-case'])).rows[0].v;
+   [actor,o.id,ticket,cash,fee,'test-case'])).rows[0].v;
   const approval=(await service.query('SELECT pay_common_package_refund_decide($1,$2,$3,$4,$5,$6,$7,$8) v',
-   [actor,o.id,ticket,cash,'not_permitted','test-case',quote.versionHash,'approve'])).rows[0].v;
+   [actor,o.id,ticket,cash,fee,'test-case',quote.versionHash,'approve'])).rows[0].v;
   await service.query('SELECT pay_common_package_refund_claim($1,$2,$3,$4)',[actor,o.id,approval.id,cash]);
   const refund={id:`REF_${approval.id}`,intentId:approval.id,orderId:o.id,paymentIntentId:cash.paymentIntentId,
    chargeId:cash.chargeId,currency:'usd',amount:approval.netMinor,mode:'test',merchant:'fixture',status:o.refundFailure?'failed':'succeeded'};
@@ -60,9 +62,10 @@ export async function advancedCases({admin,service,connect,actor,create,bind,pay
    assert.equal((await admin.query('SELECT credits FROM profiles WHERE id=$1',[o.user_id])).rows[0].credits,3480);
   } else assert.equal(late.reason,'refund_observed');
   const status=(await admin.query('SELECT payment_status FROM payment_orders WHERE id=$1',[o.id])).rows[0].payment_status;
-  assert.equal(status,o.refundFailure?'paid':'refunded');
+  assert.equal(status,o.refundFailure?'paid':o.partialRefund?'partially_refunded':'refunded');
   assert.equal((await admin.query("SELECT channel FROM payment_provider_refs WHERE order_id=$1 AND object_type='refund'",[o.id])).rows[0].channel,'waffo');
   if(o.item_type==='membership_plan'&&!o.refundFailure)assert.equal((await admin.query('SELECT status FROM user_subscriptions WHERE id=(SELECT subscription_id FROM payment_orders WHERE id=$1)',[o.id])).rows[0].status,'canceled');
+  if(o.item_type==='membership_plan'&&!o.refundFailure)cases.push(await refundedChargebackCase({admin,service,order:o}));
  }
  cases.push('waffo-discounted-card-cn-credit-pack','card-and-alipay-membership-refund-closes-entitlements','package-refund-on-original-provider','failed-waffo-refund-restores-once','duplicate-refund-and-late-paid-never-regrant');
  // Actual Alipay facts are simulated; checkout's requested card stays frozen as original evidence.

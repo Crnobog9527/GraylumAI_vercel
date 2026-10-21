@@ -150,7 +150,7 @@ BEGIN
   $new$IF o.auto_renew THEN$new$,1),
  ('pay_common_membership_facts(uuid)',
   $old$'payment_method',o.payment_method,'status','active'$old$,
-  $new$'payment_method',coalesce(o.provider_payment_method,o.payment_method),'status','active'$new$,1),
+  $new$'payment_method',coalesce(o.provider_payment_method,o.payment_method),'purchase_mode',o.mode,'status','active'$new$,1),
  ('pay_waffo_abort_before_dispatch(uuid,uuid,text,timestamptz)',
   $old$o.payment_channel IS DISTINCT FROM 'stripe'$old$,
   $new$NOT (o.payment_channel='stripe' OR o.payment_channel='waffo' AND o.mode='payment'

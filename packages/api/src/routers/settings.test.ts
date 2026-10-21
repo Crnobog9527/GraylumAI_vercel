@@ -129,16 +129,19 @@ function createPublicCatalogCaller(table: string, result: Promise<unknown>, sele
       expect(actualTable).toBe('payment_provider_refs');
       // The member-tier pack read (card checkout) filters on package_tier with in(); the legacy read with eq().
       let memberTiers = false;
+      let refChannel = 'stripe';
       const rows = () => result.then(value => ({ data: ((value as { data?: Array<Record<string, unknown>> }).data ?? []).flatMap(row =>
         table === 'credit_packages' && memberTiers
           ? Object.entries((row.member_prices ?? {}) as Record<string, unknown>).flatMap(([tier, ids]) => (Array.isArray(ids) ? ids : [ids])
             .map(id => ({ credit_package_id: row.id, package_tier: tier, external_id: id })))
           : table === 'credit_packages'
           ? (row.stripe_price_id ? [{ credit_package_id: row.id, billing_cycle: 'one_time', external_id: row.stripe_price_id }] : [])
-          : ['monthly', 'yearly'].flatMap(cycle => row[`stripe_${cycle}_price_id`]
-            ? [{ membership_plan_id: row.id, billing_cycle: cycle, external_id: row[`stripe_${cycle}_price_id`] }] : [])), error: null }));
+          : ['monthly', 'yearly'].flatMap(cycle => {
+            const id = row[refChannel === 'waffo' ? `waffo_${cycle}_product_id` : `stripe_${cycle}_price_id`];
+            return (Array.isArray(id) ? id : id ? [id] : []).map(external_id => ({membership_plan_id:row.id,billing_cycle:cycle,external_id}));
+          })), error: null }));
       const builder = {
-        select: () => builder, eq: () => builder,
+        select: () => builder, eq: (column: string,value: string) => { if(column === 'channel') refChannel = value; return builder; },
         in: (column: string) => { if (column === 'package_tier') memberTiers = true; return builder; },
         then: (resolve: (value: unknown) => unknown, reject?: (error: unknown) => unknown) => rows().then(resolve, reject),
       };
@@ -839,19 +842,17 @@ describe('routing model settings', () => {
 
 
 describe('selected channel catalog readiness', () => {
-  it.each([null, { channel: 'waffo', version: 2 }])('keeps packages and plans unavailable for %j', async selection => {
+  it.each([null, { channel: 'waffo', version: 2 }, { channel: 'other', version: 1 }, { channel: 'stripe', version: 0 }])('keeps the legacy package gate but ignores the old global channel for memberships: %j', async selection => {
     const packages = await createPublicCatalogCaller('credit_packages',
       Promise.resolve({ data: [validCreditPackage], error: null }), selection).getCreditPackages();
-    expect(packages[0]).toMatchObject({ paymentChannel: 'waffo', checkout_ready: false });
+    expect(packages[0]?.checkout_ready).toBe(false);
     const plans = await createPublicCatalogCaller('membership_plans',
       Promise.resolve({ data: [validMembershipPlan], error: null }), selection).getMembershipPlans();
-    expect(plans[0]).toMatchObject({ paymentChannel: 'waffo', checkoutReady: { monthly: false, yearly: false } });
+    expect(plans[0]).toMatchObject({ paymentChannel: 'stripe', checkoutReady: { monthly: true, yearly: true } });
   });
 });
 
 it.each([
-  [{ channel: 'other', version: 1 }, true],
-  [{ channel: 'stripe', version: 0 }, true],
   [new Error('unavailable'), true],
   [{ channel: 'stripe', version: 1 }, false],
   [{ channel: 'stripe', version: 1 }, 'missing'],
@@ -876,9 +877,10 @@ it('keeps emergency membership and member-pack catalogs available when Stripe is
     const packages = await createPublicCatalogCaller('credit_packages', Promise.resolve({ data: [pack], error: null }),
       { channel: 'stripe', version: 1 }, true, 'waffo').getCreditPackages();
     expect(packages[0]).toMatchObject({ member_checkout_ready: { pro: true, gold: true } });
-    const plans = await createPublicCatalogCaller('membership_plans', Promise.resolve({ data: [validMembershipPlan], error: null }),
+    const plans = await createPublicCatalogCaller('membership_plans', Promise.resolve({ data: [{...validMembershipPlan,
+      waffo_monthly_product_id:'PROD_month',waffo_yearly_product_id:'PROD_year'}], error: null }),
       { channel: 'stripe', version: 1 }, true, 'waffo').getMembershipPlans();
-    expect(plans).toHaveLength(1);
+    expect(plans[0]).toMatchObject({paymentChannel:'waffo',checkoutReady:{monthly:true,yearly:true}});
   } finally { stripe.mockImplementation(original!); }
 });
 
@@ -894,4 +896,18 @@ it('keeps membership plans visible during a primary Stripe outage and closes onl
       .getCreditPackages();
     expect(packs).toHaveLength(1); expect(packs[0]?.checkout_ready).toBe(false);
   } finally { stripe.mockImplementation(original!); }
+});
+
+it.each(['missing','duplicate','invalid'])('closes only the unavailable Waffo membership cycle for %s mapping',async kind=>{
+  const row = {...validMembershipPlan,waffo_monthly_product_id:kind==='missing'?null:kind==='duplicate'
+    ?['PROD_month1','PROD_month2']:'price_wrong_provider',waffo_yearly_product_id:'PROD_year'};
+  const caller=createPublicCatalogCaller('membership_plans',Promise.resolve({data:[row],error:null}),
+    {channel:'stripe',version:1},true,'waffo');
+  expect((await caller.getMembershipPlans())[0]).toMatchObject({paymentChannel:'waffo',checkoutReady:{monthly:false,yearly:true}});
+});
+it('switches membership availability back to original Stripe mappings after emergency sales end',async()=>{
+  const row={...validMembershipPlan,waffo_monthly_product_id:'PROD_month',waffo_yearly_product_id:'PROD_year',stripe_yearly_price_id:null};
+  const caller=createPublicCatalogCaller('membership_plans',Promise.resolve({data:[row],error:null}),
+    {channel:'stripe',version:1},true,'stripe');
+  expect((await caller.getMembershipPlans())[0]).toMatchObject({paymentChannel:'stripe',checkoutReady:{monthly:true,yearly:false}});
 });

@@ -154,3 +154,22 @@ export async function legacyStripeCatalogReady(db: Pick<SupabaseClient, 'from'>,
   return legacyChannel === 'stripe' && isStripeCheckoutConfigured()
     && newPurchaseChannel(await readPaymentMethodRoutes(db)) === 'stripe';
 }
+
+/** Waffo membership entry readiness uses the same one-time, original-mode mapping that admission selects.
+ * null retains the existing Stripe catalog path; duplicate or absent mappings cannot open a purchase. */
+export async function loadWaffoMembershipReadiness(db: Pick<SupabaseClient, 'from'>, ids: string[]) {
+  if (newPurchaseChannel(await readPaymentMethodRoutes(db)) !== 'waffo') return null;
+  const ready = new Map<string, boolean>();
+  if (!ids.length) return ready;
+  const scope = getWaffoOperationsClient(paymentDeploymentMode());
+  const result = await db.from('payment_provider_refs').select('external_id,membership_plan_id,billing_cycle')
+    .eq('channel', 'waffo').eq('merchant_namespace', scope.merchant).eq('mode', scope.mode)
+    .eq('object_type', 'price').eq('offer_kind', 'standard').eq('is_current', true)
+    .eq('price_usage', 'one_time').in('billing_cycle', ['monthly', 'yearly']).in('membership_plan_id', ids);
+  if (result.error || !Array.isArray(result.data)) throw new Error('PAY_COMMON_MAPPING_READ_FAILED', { cause: result.error });
+  for (const ref of result.data) {
+    const key = `${ref.membership_plan_id}:${ref.billing_cycle}`;
+    ready.set(key, !ready.has(key) && typeof ref.external_id === 'string' && /^PROD_[A-Za-z0-9]+$/.test(ref.external_id));
+  }
+  return ready;
+}

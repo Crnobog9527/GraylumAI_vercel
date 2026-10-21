@@ -65,6 +65,36 @@ function locallySettledRefund(payment: WaffoPayment, value: unknown, provider: P
   } catch { return false; }
 }
 
+const refundedSourceSchema = z.object({ id: z.uuid(), payment_channel: z.literal('waffo'), payment_mode: z.enum(['test', 'live']),
+  merchant_namespace: z.string(), mode: z.literal('payment'), auto_renew: z.literal(false),
+  qualified_paid_at: z.string().datetime({ offset: true }), amount_total: z.number().int().positive(), currency: z.string().regex(/^[a-z]{3}$/) });
+/** Refunding does not erase the original payment's dispute lifecycle. Observe only: never fulfill or refund again. */
+async function observeRefundedChargebacks(db: Db, provider: Provider, payment: WaffoPayment, value: unknown, deadline: number) {
+  const source = refundedSourceSchema.safeParse(value);
+  if (!source.success || !provider.storeId || !provider.readChargebacks
+    || source.data.payment_mode !== provider.mode || source.data.merchant_namespace !== provider.merchant) {
+    throw new Error('PAY_WAFFO_OPERATION_SCOPE');
+  }
+  const order = source.data;
+  const disputes = await provider.readChargebacks(payment.id, deadline);
+  if (disputes.some(d => d.paymentId !== payment.id || d.storeId !== provider.storeId || d.testMode !== (provider.mode === 'test')
+    || !/^[A-Za-z0-9_:-]{1,160}$/.test(d.id) || !Number.isFinite(Date.parse(d.createdAt)))) {
+    throw new Error('PAY_WAFFO_OPERATION_SCOPE');
+  }
+  let unknown = false;
+  for (const dispute of disputes) {
+    let amount = /^[1-9][0-9]{0,8}$/.test(dispute.amount?.amount ?? '') ? Number(dispute.amount!.amount) : null;
+    const currency = /^[A-Z]{3}$/.test(dispute.amount?.currency ?? '') ? dispute.amount!.currency!.toLowerCase() : null;
+    if (currency === order.currency && amount !== null && amount > order.amount_total) amount = null;
+    unknown ||= amount === null || currency === null || currency !== order.currency;
+    const result = await db.rpc('pay_failover_dispute_observed', { p_order: order.id, p_merchant: provider.merchant,
+      p_mode: provider.mode, p_payment: payment.id, p_dispute: dispute.id, p_amount: amount,
+      p_currency: currency, p_observed_at: dispute.createdAt });
+    if (result.error) throw new Error('PAY_WAFFO_DISPUTE_UNAVAILABLE');
+  }
+  return disputes.length ? unknown ? 'chargeback_amount_unknown' as const : 'chargeback_observed' as const : null;
+}
+
 /** Daily backstop for the narrowed scope: compare Waffo's paid records with what we delivered and
  * report differences for manual handling. It never grants, refunds or cancels anything. */
 export async function reconcileWaffoPayments(db: Db, provider: Provider, options?: {
@@ -124,7 +154,7 @@ export async function reconcileWaffoPayments(db: Db, provider: Provider, options
   const orderOf = new Map(refs.map(r => [r.external_id!, r.order_id!]));
   const readOrders = (ids: string[]) => chunked(ids, part => db.from('payment_orders')
     .select('id,fulfilled_at,qualification_state,method_review_reason,payment_channel,merchant_namespace,payment_mode,'
-      + 'amount_total,currency,status,payment_status,refund_approval').in('id', part));
+      + 'amount_total,currency,status,payment_status,refund_approval,mode,auto_renew,qualified_paid_at').in('id', part));
   const orderById = new Map((await readOrders([...new Set(orderOf.values())])).map(o => [o.id!, o]));
   const refundIds = [...orderById.values()].flatMap(order => {
     const checked = settledRefundSchema.safeParse(order);
@@ -148,6 +178,17 @@ export async function reconcileWaffoPayments(db: Db, provider: Provider, options
     const orderId = orderOf.get(payment.id);
     const order = orderId ? orderById.get(orderId) : undefined;
     if (refunded(payment)) {
+      if (options?.recover && order) {
+        if (Date.now() >= deadline) {
+          complete = false;
+          if (!findings.some(f => f.kind === 'scan_incomplete')) findings.push({ kind: 'scan_incomplete', refundCandidate: false });
+        } else {
+          try {
+            const kind = await observeRefundedChargebacks(db, provider, payment, order, deadline);
+            if (kind) findings.push({ kind, paymentId: payment.id, orderId, refundCandidate: false });
+          } catch { findings.push({ kind: 'recovery_failed', paymentId: payment.id, orderId, refundCandidate: false }); }
+        }
+      }
       if (!locallySettledRefund(payment, order, provider, settledRefundRefs)) {
         findings.push({ kind: 'refund_observed', paymentId: payment.id, orderId, refundCandidate: false });
       }

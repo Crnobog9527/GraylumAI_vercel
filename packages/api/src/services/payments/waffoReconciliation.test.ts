@@ -121,3 +121,58 @@ describe('settled Waffo refunds in daily reconciliation', () => {
     expect(result.findings).toEqual([{ kind: 'refund_observed', paymentId: 'PAY_refunded', refundCandidate: false }]);
   });
 });
+
+describe('chargebacks arriving after a successful Waffo refund', () => {
+  function refundedWithDisputes(full: boolean) {
+    const f = settledRefundFixture(full);
+    const order = { ...f.order, mode: 'payment', auto_renew: false, qualified_paid_at: '2026-10-11T05:59:48.325Z' };
+    const dispute = { id: 'CBK_after_refund', paymentId: 'PAY_refunded', storeId: 'STO_fixture', orderId: 'ORD_fixture1',
+      status: 'open', testMode: true, amount: { amount: '100', currency: 'USD' }, createdAt: '2026-10-20T00:00:00.000Z' };
+    const rpc = vi.fn().mockResolvedValue({ data: { source_state: 'superseded' }, error: null });
+    const provider = { merchant: 'fixture', mode: 'test' as const, storeId: 'STO_fixture',
+      readPayment: vi.fn(), readChargebacks: vi.fn().mockResolvedValue([dispute]),
+      listPayments: vi.fn().mockResolvedValue({ rows: [f.paid], complete: true }) };
+    const run = () => reconcileWaffoPayments(fakeDb({ payment_orders: [order],
+      payment_provider_refs: [ref('PAY_refunded', refundOrderId), ...f.refunds] }, rpc), provider, { recover: true });
+    return { ...f, rpc, provider, run, dispute };
+  }
+  it.each([true, false])('records a real chargeback after full=%s refund without fulfilling or refunding again', async full => {
+    const f = refundedWithDisputes(full);
+    expect(await f.run()).toMatchObject({ success: false, findings: [{ kind: 'chargeback_observed', paymentId: 'PAY_refunded' }] });
+    expect(f.provider.readChargebacks).toHaveBeenCalledWith('PAY_refunded', expect.any(Number));
+    expect(f.rpc).toHaveBeenCalledExactlyOnceWith('pay_failover_dispute_observed', {
+      p_order: refundOrderId, p_merchant: 'fixture', p_mode: 'test', p_payment: 'PAY_refunded', p_dispute: 'CBK_after_refund',
+      p_amount: 100, p_currency: 'usd', p_observed_at: f.dispute.createdAt });
+  });
+  it('accepts the real PostgREST timestamptz offset shape for an originally paid source', async () => {
+    const f = settledRefundFixture(true);
+    const rpc = vi.fn().mockResolvedValue({ data: { source_state: 'superseded' }, error: null });
+    const db = fakeDb({ payment_orders: [{ ...f.order, mode: 'payment', auto_renew: false,
+      qualified_paid_at: '2026-10-11T05:59:48.325+00:00' }], payment_provider_refs: [ref('PAY_refunded', refundOrderId), ...f.refunds] }, rpc);
+    const result = await reconcileWaffoPayments(db, { merchant: 'fixture', mode: 'test', storeId: 'STO_fixture',
+      listPayments: vi.fn().mockResolvedValue({ rows: [f.paid], complete: true }), readPayment: vi.fn(),
+      readChargebacks: vi.fn().mockResolvedValue([{ id: 'CBK_offset', paymentId: 'PAY_refunded', storeId: 'STO_fixture', orderId: 'ORD_fixture1',
+        status: 'open', testMode: true, amount: { amount: '100', currency: 'USD' }, createdAt: '2026-10-20T00:00:00.000Z' }]),
+    }, { recover: true });
+    expect(result.findings).toEqual([{ kind: 'chargeback_observed', paymentId: 'PAY_refunded', orderId: refundOrderId, refundCandidate: false }]);
+    expect(rpc).toHaveBeenCalledWith('pay_failover_dispute_observed', expect.objectContaining({ p_dispute: 'CBK_offset' }));
+  });
+  it('rejects a foreign PAY from the chargeback lookup without recording it against this source', async () => {
+    const f = refundedWithDisputes(true);
+    f.provider.readChargebacks.mockResolvedValueOnce([{ ...f.dispute, paymentId: 'PAY_foreign' }]);
+    expect(await f.run()).toMatchObject({ success: false, findings: [{ kind: 'recovery_failed' }] });
+    expect(f.rpc).not.toHaveBeenCalled();
+  });
+  it('holds an unknown dispute amount and currency using NULL while preserving its real identity', async () => {
+    const f = refundedWithDisputes(true);
+    f.provider.readChargebacks.mockResolvedValueOnce([{ ...f.dispute, amount: null }]);
+    expect(await f.run()).toMatchObject({ success: false, findings: [{ kind: 'chargeback_amount_unknown' }] });
+    expect(f.rpc).toHaveBeenCalledWith('pay_failover_dispute_observed', expect.objectContaining({
+      p_dispute: 'CBK_after_refund', p_amount: null, p_currency: null }));
+  });
+  it('leaves a settled refund clean when the authoritative chargeback lookup is empty', async () => {
+    const f = refundedWithDisputes(true); f.provider.readChargebacks.mockResolvedValueOnce([]);
+    expect(await f.run()).toEqual({ success: true, complete: true, checkedPayments: 1, findings: [] });
+    expect(f.rpc).not.toHaveBeenCalled();
+  });
+});

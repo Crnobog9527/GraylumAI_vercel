@@ -18,7 +18,7 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { validateReportPrice } from '../services/report/fees';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { isSellableMemberPack, loadConfiguredStripePrices, loadSelectedMemberPackReadiness, legacyStripeCatalogReady }
+import { isSellableMemberPack, loadConfiguredStripePrices, loadSelectedMemberPackReadiness, legacyStripeCatalogReady, loadWaffoMembershipReadiness }
   from '../services/payments/stripeCatalog';
 import {
   LAUNCH_BASELINE_SETTING_KEY,
@@ -425,10 +425,9 @@ export const settingsRouter = router({
 
   // Public membership catalog.
   getMembershipPlans: publicProcedure.query(async ({ ctx }) => {
-    const selectedChannel = ctx.hasSupabaseAdminPrivileges && ctx.supabaseAdmin
-      ? await readPaymentChannel(ctx.supabaseAdmin).catch(() => null) : null;
+    // Membership uses method checkout: only its audited route controls new sales, never the old global channel.
     const stripeReady = ctx.hasSupabaseAdminPrivileges && Boolean(ctx.supabaseAdmin)
-      && await legacyStripeCatalogReady(ctx.supabaseAdmin, selectedChannel?.channel).catch(() => false);
+      && await legacyStripeCatalogReady(ctx.supabaseAdmin, 'stripe').catch(() => false);
     const readClient = getPublicReadClient(ctx);
     let result;
 
@@ -463,7 +462,8 @@ export const settingsRouter = router({
     const priceRefs = stripeReady && ctx.hasSupabaseAdminPrivileges
       ? await loadConfiguredStripePrices({ db: ctx.supabaseAdmin,
         kind: 'membership_plan', ids: plans.map(plan => plan.id) }).catch(() => new Map<string, string>()) : new Map<string, string>();
-    // 映射字段名以兼容前端
+    const emergencyReady = ctx.hasSupabaseAdminPrivileges && ctx.supabaseAdmin
+      ? await loadWaffoMembershipReadiness(ctx.supabaseAdmin, plans.map(plan => plan.id)).catch(() => undefined) : undefined;
     return plans.map(plan => ({
       id: plan.id,
       name: plan.name,
@@ -487,10 +487,12 @@ export const settingsRouter = router({
       // 使用 level 判断推荐：gold 为推荐/高亮
       recommended: plan.level === 'gold',
       highlight: plan.level === 'gold',
-      paymentChannel: selectedChannel?.channel ?? null,
+      paymentChannel: emergencyReady ? 'waffo' : emergencyReady === null ? 'stripe' : null,
       checkoutReady: {
-        monthly: stripeReady && plan.level !== 'free' && plan.monthly_price > 0 && hasConfiguredStripePriceId(priceRefs.get(`${plan.id}:monthly`) ?? null),
-        yearly: stripeReady && plan.level !== 'free' && plan.yearly_price > 0 && hasConfiguredStripePriceId(priceRefs.get(`${plan.id}:yearly`) ?? null),
+        monthly: plan.level !== 'free' && plan.monthly_price > 0 && (emergencyReady === null
+          ? stripeReady && hasConfiguredStripePriceId(priceRefs.get(`${plan.id}:monthly`) ?? null) : emergencyReady?.get(`${plan.id}:monthly`) === true),
+        yearly: plan.level !== 'free' && plan.yearly_price > 0 && (emergencyReady === null
+          ? stripeReady && hasConfiguredStripePriceId(priceRefs.get(`${plan.id}:yearly`) ?? null) : emergencyReady?.get(`${plan.id}:yearly`) === true),
       },
     }));
   }),
