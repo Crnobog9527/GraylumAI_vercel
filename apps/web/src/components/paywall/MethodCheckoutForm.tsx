@@ -10,6 +10,7 @@ type Props = {
   checkout: MethodCheckout;
   /** null when the chosen item cannot be bought right now (the reason is `blockedReason`). */
   purchase: MethodPurchase | null;
+  billingCycle?: MethodPurchase['billingCycle'];
   price: string;
   renewal: string;
   cta: string;
@@ -37,7 +38,9 @@ const muted = { color: 'var(--text-tertiary)' };
  */
 export function MethodCheckoutForm(props: Props) {
   const { checkout, purchase, testIdPrefix: id } = props;
-  const methods = purchase ? checkout.methodsFor(purchase.itemType, purchase.billingCycle) : checkout.methodsFor('membership_plan');
+  const itemType = purchase?.itemType ?? 'membership_plan';
+  const billingCycle = purchase?.billingCycle ?? props.billingCycle;
+  const methods = checkout.methodsFor(itemType, billingCycle);
   const [picked, setPicked] = useState<CheckoutMethod>('card');
   // Consent is to one terms version: if methodMembership refetches a newer one (e.g. after reading the terms in
   // another tab), the box clears and must be ticked again for that version.

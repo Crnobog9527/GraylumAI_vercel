@@ -202,6 +202,24 @@ it('shows both wallets alongside both cards when staging routes are enabled, and
   } finally { await page.close(); }
 }, 30000);
 
+it('disables yearly selection for wallet-only routes without annual verification and preserves monthly wallet checkout', async () => {
+  const routes = { ...ROUTES, card: { enabled: false }, card_cn: { enabled: false },
+    wechat_pay: { enabled: true, annualVerified: false }, alipay: { enabled: true, annualVerified: false } };
+  const membership = { ...ENTRY, routes, checkoutMethods: ['wechat_pay', 'alipay'] };
+  const { page, errors } = await open({ membership });
+  try {
+    const yearly = page.getByRole('radio', { name: /年付/ });
+    await browserExpect(yearly).toBeDisabled();
+    await browserExpect(page.getByTestId('report-paywall-method-wechat_pay')).toBeVisible();
+    await page.getByTestId('report-paywall-method-wechat_pay').click();
+    await page.getByTestId('report-paywall-terms').check();
+    await page.getByTestId('report-paywall-pay').click();
+    await browserExpect(page).toHaveURL('https://checkout.stripe.com/c/pay/cs_test_1');
+    expect(await checkouts(page)).toMatchObject([{ method: 'wechat_pay', billingCycle: 'monthly' }]);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 30000);
+
 it('shows no card entry until the server says checkout is ready and terms are published', async () => {
   for (const membership of [{ ...ENTRY, checkoutReady: false }, { ...ENTRY, termsVersion: null }]) {
     const { page, errors } = await open({ membership });

@@ -17,14 +17,15 @@ type Props = {
   selected: PaywallLevel;
   disabled: boolean;
   quoteOptions?: PaywallQuoteOptions;
+  yearlyCheckoutAvailable: boolean;
   onBilling: (billing: PaywallBilling) => void;
   onSelect: (level: PaywallLevel) => void;
 };
 
 /** Billing switch and plan cards; monthly is the default (MASTER_PLAN §2.1 item 51). */
-export function PaywallPlanPicker({ plans, billing, selected, disabled, quoteOptions, onBilling, onSelect }: Props) {
+export function PaywallPlanPicker({ plans, billing, selected, disabled, quoteOptions, yearlyCheckoutAvailable, onBilling, onSelect }: Props) {
   const badge = yearlyBadge(plans, quoteOptions?.founderUsd ?? null);
-  const yearly = plans.some(plan => paywallQuote(plan, 'yearly'));
+  const yearly = yearlyCheckoutAvailable && plans.some(plan => paywallQuote(plan, 'yearly'));
   return (
     <fieldset className="grid min-w-0 gap-3" disabled={disabled}>
       <legend className="sr-only">计费周期和方案</legend>

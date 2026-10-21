@@ -98,7 +98,8 @@ export function ReportPaywallView({ checkout, onClose }: { checkout: PaywallChec
               : (
                 <>
                   <PaywallPlanPicker plans={checkout.plans} billing={billing} selected={plan?.level ?? 'pro'}
-                    quoteOptions={checkout.quoteOptions} disabled={checkout.method.pending}
+                    quoteOptions={checkout.quoteOptions} yearlyCheckoutAvailable={checkout.method.methodsFor('membership_plan', 'yearly').length > 0}
+                    disabled={checkout.method.pending}
                     onBilling={chooseBilling} onSelect={setSelected} />
                   {checkout.founderSeats > 0 && plan?.level === 'gold' && billing === 'yearly' ? (
                     <p data-testid="paywall-founder-seats" className="text-sm" style={{ color: 'var(--text-secondary)' }}>
@@ -112,7 +113,7 @@ export function ReportPaywallView({ checkout, onClose }: { checkout: PaywallChec
 
           {plan && quote && !checkout.loading && !checkout.catalogFailed ? (
             <>
-              <MethodCheckoutForm checkout={checkout.method} purchase={purchase} testIdPrefix="report-paywall"
+              <MethodCheckoutForm checkout={checkout.method} purchase={purchase} billingCycle={billing} testIdPrefix="report-paywall"
                 price={`${formatUsd(quote.amount)} ${quote.perLabel}`} renewal={quote.renewal}
                 cta={`${COPY.cta} · ${formatUsd(quote.amount)}`} ctaSub={COPY.ctaSub}
                 blockedReason={checkout.unpaidSubscription ? UNPAID_SUBSCRIPTION_BLOCKS_PURCHASE : purchase ? null : COPY.notReady}
