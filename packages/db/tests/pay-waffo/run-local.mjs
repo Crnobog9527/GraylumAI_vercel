@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import assert from 'node:assert/strict';
@@ -65,7 +65,10 @@ try {
     // 0296 patches the bodies replayed above; applied twice it leaves the patched bodies unchanged.
     '0296_pay_stripe_live_mode.sql', '0296_pay_stripe_live_mode.sql',
     '0297_pay_stripe_live_refunds.sql', '0297_pay_stripe_live_refunds.sql',
-    '0298_pay_wallet_membership_refund.sql', '0298_pay_wallet_membership_refund.sql']) {
+    '0298_pay_wallet_membership_refund.sql', '0298_pay_wallet_membership_refund.sql',
+    // Preserve the later payment/dispute patches after the older bodies above are replaced.
+    ...readdirSync(resolve(root,'packages/db/migrations')).filter(f=>/^\d{4}_.*\.sql$/.test(f)
+      && f>'0298_pay_wallet_membership_refund.sql').sort()]) {
     sql(readFileSync(resolve(root, 'packages/db/migrations', file),'utf8'));
   }
   assert.deepEqual(fingerprint(),before,'new migration repeat preserves structure');
@@ -120,7 +123,7 @@ try {
   cases.push(...await stripeMpExternalRefundCases({admin,service,connect}));
   cases.push(...await stripeMpUpgradeCases({admin,service,connect}));
   cases.push(...await stripeMpPackRefundCases({admin,service}));
-  cases.push(...await stripeMpSubscriptionRefundCases({admin,service}));
+  cases.push(...await stripeMpSubscriptionRefundCases({admin,service,connect}));
   cases.push(...await stripeMpLiveCases({admin,service}));
   cases.push(...await stripeMpLiveRefundCases({admin,service}));
   cases.push(...await stripeMpWalletRefundCases({admin,service}));
