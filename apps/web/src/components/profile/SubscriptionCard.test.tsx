@@ -541,7 +541,7 @@ describe('membership page in a local browser', () => {
 
   it.each([null, '2026-10-14T00:00:00Z'])('shows a refunded return as terminal, including fulfilledAt=%s', async fulfilledAt => {
     const { page, errors } = await open({ search: 'tab=subscription&checkout=success&session_id=cs_test_refunded',
-      syncResult: { fulfilledAt, orderStatus: 'refunded', paymentStatus: 'refunded' } });
+      syncResult: { fulfilledAt, orderStatus: 'refunded', paymentStatus: 'paid' } });
     try {
       await browserExpect(page.getByTestId('profile-checkout-notice')).toHaveText('这笔订单已全额退款，订单状态已同步。');
       await browserExpect(page.getByTestId('profile-membership-plan-pro').getByRole('button', { name: '开通', exact: true }))
