@@ -204,6 +204,13 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
   function actionFor(planId: string, cycle: 'monthly' | 'yearly') {
     const plan = apiPlans.find(item => item.id === planId);
     if (!plan) return null;
+    const founderRenewal = checkout.entry?.founderRenewal;
+    const walletRenewalOpen = checkout.methodsFor('membership_plan', cycle).some(method => method === 'wechat_pay' || method === 'alipay');
+    if (plan.level === 'gold' && cycle === 'yearly' && walletRenewalOpen && founderRenewal
+      && Date.parse(founderRenewal.eligibleUntil) > Date.now()) {
+      return { kind: 'founder_renewal' as const, label: '续买创始会员一年', disabled: false as const,
+        priorSubscriptionId: founderRenewal.subscriptionId };
+    }
     return methodPlanAction({ level: plan.level, price: Number(plan.price?.[cycle]),
       checkoutReady: plan.checkoutReady?.[cycle] === true && checkout.methodsFor('membership_plan', cycle).length > 0,
       current, entitlementLevel: entitlements.data?.level ?? null,
@@ -230,7 +237,8 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
   const dialogTarget: MethodCheckoutTarget | null = (() => {
     const plan = target && sellable.find(item => item.id === target.planId);
     const action = target && actionFor(target.planId, target.cycle);
-    return plan && action ? planCheckoutTarget({ plan, billing: target.cycle, action, prior: current, goldFirstMonth, founderSeats }) : null;
+    return plan && action ? planCheckoutTarget({ plan, billing: target.cycle, action, prior: current, goldFirstMonth, founderSeats,
+      founderRenewal: checkout.entry?.founderRenewal }) : null;
   })();
 
   return (
@@ -333,6 +341,7 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
             taxNote={methods.length > 0 ? methodTaxSummary(methods) : null}
             firstMonth={goldFirstMonth && plan.level === 'gold' && billingCycle === 'monthly'}
             founderSeats={plan.level === 'gold' && billingCycle === 'yearly' && checkout.open ? founderSeats : 0}
+            founderRenewal={plan.level === 'gold' && billingCycle === 'yearly' && actionFor(plan.id, billingCycle)?.kind === 'founder_renewal'}
             onSelect={() => setTarget({ planId: plan.id, cycle: billingCycle })} />
         ))}
       </div>

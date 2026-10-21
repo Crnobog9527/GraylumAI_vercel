@@ -130,6 +130,7 @@ describe('SubscriptionCard catalog availability', () => {
   });
 
 
+
   it('pauses purchases when the membership read fails, but keeps subscription management', () => {
     componentState.plansQuery = queryState({ data: [plan] });
     componentState.membershipQuery = queryState({ data: undefined, isError: true });
@@ -367,7 +368,7 @@ describe('membership page in a local browser', () => {
     } finally { await page.close(); }
   }, 30_000);
 
-  it('explains that a founder wallet term is one-time and has no auto-renewal discount', async () => {
+  it('explains that a founder wallet term is one-time and allows renewal within its founder window', async () => {
     const membership = { ...ENTRY, checkoutMethods: ['wechat_pay'], routes: { version: 7,
       card: { enabled: false }, card_cn: { enabled: false }, wechat_pay: { enabled: true, annualVerified: true },
       alipay: { enabled: false, annualVerified: false } }, founder: { total: 50, sold: 20, reserved: 0, available: 30 } };
@@ -378,7 +379,32 @@ describe('membership page in a local browser', () => {
       await page.getByTestId('method-checkout-method-wechat_pay').click();
       await browserExpect(page.getByTestId('method-checkout-renewal')).toHaveText('一次性付款，不自动续费。');
       await browserExpect(page.getByTestId('method-checkout-fineprint')).toHaveText(
-        '本次创始会员年付为一次性付款，不自动续费；创始会员续费优惠仅适用于连续自动续费的订阅。');
+        '本次创始会员年付为一次性付款，不自动续费；到期前可在期限内按创始续费价格手动续买一年。');
+      expect(errors).toEqual([]);
+    } finally { await page.close(); }
+  }, 30_000);
+
+  it('offers the server-projected $496 wallet founder renewal and sends the founder_renewal transition', async () => {
+    const membership = { ...ENTRY, checkoutMethods: ['wechat_pay'], routes: { version: 7,
+      card: { enabled: false }, card_cn: { enabled: false }, wechat_pay: { enabled: true, annualVerified: true },
+      alipay: { enabled: false, annualVerified: false } }, founder: { total: 50, sold: 20, reserved: 0, available: 30 },
+      founderRenewal: { itemId: 'plan-gold', subscriptionId: 'founder-sub', eligibleUntil: '2099-01-08T00:00:00Z' } };
+    const { page, errors } = await open({ membership, level: 'gold' });
+    try {
+      await page.getByRole('radio', { name: '按年' }).click();
+      const goldPlan = page.getByTestId('profile-membership-plan-gold');
+      await browserExpect(goldPlan).toContainText('创始会员续费价');
+      await browserExpect(goldPlan).toContainText('$496');
+      await goldPlan.getByRole('button', { name: '续买创始会员一年' }).click();
+      await browserExpect(page.getByTestId('method-checkout-dialog')).toContainText('续买 Gold 创始会员 · 年付');
+      await browserExpect(page.getByTestId('method-checkout-renewal')).toHaveText('一次性付款 $496，不自动续费。');
+      await page.getByTestId('method-checkout-method-wechat_pay').click();
+      await page.getByTestId('method-checkout-terms').check();
+      await page.getByTestId('method-checkout-pay').click();
+      await browserExpect(page).toHaveURL('https://checkout.stripe.com/c/pay/cs_test_9');
+      expect(sentByPage.get(page)).toEqual([{ itemType: 'membership_plan', itemId: 'plan-gold', billingCycle: 'yearly',
+        offer: 'founder_renewal', transition: 'founder_renewal', priorSubscriptionId: 'founder-sub', method: 'wechat_pay',
+        routingVersion: 7, acceptedTerms: true, termsVersion: 'terms-v3' }]);
       expect(errors).toEqual([]);
     } finally { await page.close(); }
   }, 30_000);

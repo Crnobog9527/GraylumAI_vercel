@@ -50,7 +50,8 @@ export function MethodCheckoutForm(props: Props) {
   const method = methods.includes(picked) ? picked : methods[0];
   const oneTimeWalletMembership = purchase?.itemType === 'membership_plan'
     && (method === 'wechat_pay' || method === 'alipay');
-  const renewal = oneTimeWalletMembership ? CHECKOUT_COPY.walletMembershipOneTime : props.renewal;
+  const renewal = oneTimeWalletMembership && purchase?.offer !== 'founder_renewal'
+    ? CHECKOUT_COPY.walletMembershipOneTime : props.renewal;
   const walletFounder = oneTimeWalletMembership && (purchase?.offer === 'founder' || purchase?.offer === 'founder_renewal');
   const fineprint = walletFounder ? CHECKOUT_COPY.walletFounderOneTime : props.fineprint;
   const purchaseKey = purchase ? JSON.stringify(purchase) : '';

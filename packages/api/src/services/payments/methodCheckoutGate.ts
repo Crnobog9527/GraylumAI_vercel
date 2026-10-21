@@ -11,6 +11,9 @@ function stagingDeployment(env: Env) {
   try { stagingRuntimeWindow(env, true); return true; } catch { return false; }
 }
 
+/** Shared exact-bound staging predicate for staging-only checkout projections. */
+export function isStagingPaymentDeployment(env: Env) { return stagingDeployment(env); }
+
 /** R7: exact production domains of the production Vercel project, the same set RUNTIME-PROD (R5) admits. */
 const PRODUCTION_URLS: ReadonlySet<string> = new Set(['app.graylum.com', 'www.graylum.com']);
 const STAGING_KEYS = ['V3_RUNTIME_STAGING_ENABLED', 'V3_RUNTIME_STAGING_PROJECT_ID',
