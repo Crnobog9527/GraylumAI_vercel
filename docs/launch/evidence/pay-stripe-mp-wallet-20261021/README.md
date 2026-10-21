@@ -40,7 +40,7 @@
 | 目标后端回归 | PASS | 259 项：资格、钱包与卡、收据归属、取消返回、异步失败 |
 | 前端及本地真实浏览器 | PASS | 58 项：钱包升级入口、最高等级展示、钱包无国际卡提示、银行卡提示保留、账单组件 |
 | 本地 PostgreSQL 支付回归 | PASS | `node packages/db/tests/pay-waffo/run-local.mjs --quick`，215 项，含双方钱包升级、重放/并发一次履约、积分保留、同级改年付不能绕过缺失规则、失败无会员无积分、迟到付款人工核对及原银行卡回归 |
-| CI 同款升级及钱包集成 | PASS | `node packages/db/tests/stripe-upgrade-overlap/run-local.mjs --local-only`，51 项；含本迁移中断原子回滚、重复不改变 ACL、恢复与重放不损失会员/余额/积分来源；该入口已接入现有 CI |
+| CI 同款升级及钱包集成 | PASS | `node packages/db/tests/stripe-upgrade-overlap/run-local.mjs --local-only`，51 项；两种钱包均覆盖 Pro 月付→Gold 月付及 Pro 月付→Gold 年付，后者是已定的跨等级升级，同等级改年付仍阻断；含本迁移中断原子回滚、重复不改变 ACL、恢复与重放不损失会员/余额/积分来源；该入口已接入现有 CI |
 | 真实角色权限 | PASS | authenticated 可读本人 facts，不能直接读取私有付款方式列，不能读他人 facts；service_role 不能直接写失败原因列；通过原受控 RPC 能完成失败处理 |
 | 空库回放、逐对象指纹、迁移重复 | PASS | 332/332 步、263 次重复、2,676 对象；指纹仅两个预期函数体变化，ACL 未变 |
 | API 全量 | PASS | 533 文件通过，8,118 测试通过；另有 3 文件/19 测试按现有配置跳过，不能计为通过 |

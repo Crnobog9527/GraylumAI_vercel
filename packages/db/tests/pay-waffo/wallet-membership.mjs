@@ -52,7 +52,8 @@ export async function walletMembershipCases({ admin, service, connect }) {
   const profile = user => one(admin, 'SELECT credits,membership_level FROM profiles WHERE id=$1', [user]);
   const a = await connect(), b = await connect();
   await a.query('SET ROLE service_role'); await b.query('SET ROLE service_role');
-  for (const [method, next] of [['wechat_pay', 'alipay'], ['alipay', 'wechat_pay']]) {
+  for (const [method, next, targetCycle] of [['wechat_pay', 'alipay', 'monthly'], ['alipay', 'wechat_pay', 'monthly'],
+    ['wechat_pay', 'alipay', 'yearly'], ['alipay', 'wechat_pay', 'yearly']]) {
     const user = await actor(), initial = await buy(user, method);
     await bind(initial);
     const paid = (await pay(service, initial)).v;
@@ -75,8 +76,9 @@ export async function walletMembershipCases({ admin, service, connect }) {
     // No approved same-level monthly -> annual/advance-renewal policy: never bypass admission with ordinary checkout.
     await assert.rejects(() => buy(user, next, pro, 'yearly'), /MEMBERSHIP_TRANSITION_REQUIRED/);
     await assert.rejects(() => buy(user, next, pro, 'monthly'), /MEMBERSHIP_TRANSITION_REQUIRED/);
-    const upgrade = await buy(user, next, gold, 'monthly', 'gold_first30', paid.subscriptionId);
-    assert.equal((await buy(user, next, gold, 'monthly', 'gold_first30', paid.subscriptionId)).id, upgrade.id);
+    const offer = targetCycle === 'yearly' ? 'standard' : 'gold_first30';
+    const upgrade = await buy(user, next, gold, targetCycle, offer, paid.subscriptionId);
+    assert.equal((await buy(user, next, gold, targetCycle, offer, paid.subscriptionId)).id, upgrade.id);
     assert.deepEqual(await profile(user), { credits: 3480, membership_level: 'pro' }, 'unpaid upgrade changes nothing');
     await bind(upgrade);
     const results = await Promise.all([pay(a, upgrade), pay(b, upgrade)]);
