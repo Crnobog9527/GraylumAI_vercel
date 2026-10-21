@@ -7,9 +7,11 @@ const staging = { VERCEL: '1', VERCEL_PROJECT_PRODUCTION_URL: 'auth-staging.gray
   V3_RUNTIME_STAGING_PROJECT_ID: 'synthetic-staging-project', NEXT_PUBLIC_SUPABASE_URL: 'https://synthetic.supabase.co',
   V3_RUNTIME_STAGING_DATABASE_HOST: 'synthetic.supabase.co', V3_RUNTIME_STAGING_WINDOW_ID: '00000000-0000-4000-8000-000000000001', WAFFO_TEST_OPERATIONS_ENABLED: 'true' };
 const routes = (card: boolean) => ({ version: 2, card: { enabled: card },
-  wechat_pay: { enabled: true, annualVerified: true }, alipay: { enabled: true, annualVerified: true } });
+  wechat_pay: { enabled: card, annualVerified: true }, alipay: { enabled: card, annualVerified: true } });
 function fixture(counts: Array<number | null> = [40, 3, 2], route: unknown = null,
-  memberships: unknown[] = [], subscriptions: unknown[] | null = [], goldOrders: unknown[] = []) {
+  memberships: unknown[] = [], subscriptions: unknown[] | null = [], goldOrders: unknown[] = [], options: {
+    founderStatus?: unknown; renewalOrder?: unknown; deadline?: string | null;
+  } = {}) {
   const results: Array<{ data: unknown; error: null }> = [{ data: route === null ? null : { value: route }, error: null },
     { data: memberships, error: null },
     { data: counts.some(n => n === null) ? null : counts.flatMap((n, i) =>
@@ -17,6 +19,7 @@ function fixture(counts: Array<number | null> = [40, 3, 2], route: unknown = nul
   if (memberships.length) results.push({ data: [], error: null }, { data: subscriptions, error: null });
   results.push({ data: { value: { version: 'terms-2026-10' } }, error: null }, { data: [{ id: 'plan-gold' }], error: null },
     { data: goldOrders, error: null });
+  if (options.renewalOrder !== undefined) results.push({ data: options.renewalOrder, error: null });
   const queries: Array<{ eq: ReturnType<typeof vi.fn>; not: ReturnType<typeof vi.fn>; or: ReturnType<typeof vi.fn>; gt: ReturnType<typeof vi.fn> }> = [];
   const from = vi.fn(() => {
     const result = results.shift();
@@ -26,7 +29,10 @@ function fixture(counts: Array<number | null> = [40, 3, 2], route: unknown = nul
     for (const method of ['select', 'eq', 'not', 'gt', 'or', 'is', 'in', 'order', 'limit'] as const) query[method].mockReturnValue(query);
     queries.push(query); return query;
   });
-  return { db: { from } as unknown as SupabaseClient, queries };
+  const rpc = vi.fn((name: string) => Promise.resolve({ data: name === 'pay_founder_status' ? options.founderStatus ?? {
+    state: 'none', orderId: null, foundedAt: null, periodEnd: null, deadline: null, endedAt: null, endedReason: null,
+  } : options.deadline ?? null, error: null }));
+  return { db: { from, rpc } as unknown as SupabaseClient, queries, rpc };
 }
 describe('method membership read projection', () => {
   it('R7: reads paid memberships, founder seats and Gold history in the Stripe account mode it is given', async () => {
@@ -50,14 +56,52 @@ describe('method membership read projection', () => {
       expect(q.eq).not.toHaveBeenCalledWith('payment_status', expect.anything());
     }
   });
-  it('reports card checkout ready only on staging with the server switch on (PAY-STRIPE-MP 3c)', async () => {
-    const ready = async (env: typeof staging, enabled: boolean) =>
-      (await readMethodMembership(fixture(undefined, routes(enabled)).db, 'actor', 0, env)).checkoutReady;
-    expect(await ready(staging, true)).toBe(true);
-    expect(await ready(staging, false)).toBe(false);
+  it('projects enabled staging wallet routes as ready while leaving production unchanged', async () => {
+    const projection = async (env: Record<string, string | undefined>, route: ReturnType<typeof routes>) =>
+      readMethodMembership(fixture(undefined, route).db, '00000000-0000-4000-8000-000000000099', 0, env);
+    const ready = async (env: Record<string, string | undefined>, route: ReturnType<typeof routes>) =>
+      (await projection(env, route)).checkoutReady;
+    const walletsOff = { ...routes(false), wechat_pay: { enabled: false, annualVerified: false },
+      alipay: { enabled: false, annualVerified: false } };
+    const wechatOn = { ...walletsOff, wechat_pay: { enabled: true, annualVerified: false } };
+    const alipayOn = { ...walletsOff, alipay: { enabled: true, annualVerified: false } };
+    expect(await ready(staging, wechatOn)).toBe(true);
+    expect(await ready(staging, alipayOn)).toBe(true);
+    expect(await ready(staging, walletsOff)).toBe(false);
+    expect((await projection(staging, wechatOn)).checkoutMethods).toEqual(['wechat_pay']);
+    expect((await projection(staging, alipayOn)).checkoutMethods).toEqual(['alipay']);
+    expect((await projection(staging, walletsOff)).checkoutMethods).toEqual([]);
     for (const enabled of [true, false]) {
-      expect(await ready({ ...staging, VERCEL_PROJECT_PRODUCTION_URL: 'app.graylum.com' }, enabled)).toBe(false);
+      const productionLike = { ...staging, VERCEL_PROJECT_PRODUCTION_URL: 'app.graylum.com' };
+      const productionProjection = await projection(productionLike, enabled ? routes(true) : walletsOff);
+      expect(productionProjection.checkoutReady).toBe(false);
+      expect(productionProjection.checkoutMethods).toEqual([]);
     }
+  });
+  it.each([
+    ['wechat_pay', 'stripe', true], ['alipay', 'stripe', true], ['wechat_pay', 'waffo', false],
+  ])('projects eligible staging founder renewal for %s / %s: %s', async (method, channel, eligible) => {
+    const orderId = '00000000-0000-4000-8000-000000000031';
+    const f = fixture(undefined, routes(true), [], [], [], {
+      founderStatus: { state: 'active', orderId, foundedAt: '2026-01-01T00:00:00Z', periodEnd: '2027-01-01T00:00:00Z',
+        deadline: null, endedAt: null, endedReason: null },
+      renewalOrder: { item_id: 'plan-gold', subscription_id: '00000000-0000-4000-8000-000000000032',
+        payment_method: method, payment_channel: channel, offer_kind: 'founder' },
+      deadline: '2027-01-08T00:00:00Z',
+    });
+    const userId = '00000000-0000-4000-8000-000000000099';
+    const result = await readMethodMembership(f.db, userId, Date.parse('2026-12-25T00:00:00Z'), staging);
+    expect(result.founderRenewal).toEqual(eligible ? { itemId: 'plan-gold', subscriptionId: '00000000-0000-4000-8000-000000000032',
+      eligibleUntil: '2027-01-08T00:00:00.000Z' } : null);
+    expect(f.rpc).toHaveBeenCalledWith('pay_founder_status', { p_user: userId });
+    if (eligible) expect(f.rpc).toHaveBeenCalledWith('pay_waffo_founder_deadline', { p_order: orderId });
+    else expect(f.rpc).not.toHaveBeenCalledWith('pay_waffo_founder_deadline', { p_order: orderId });
+    expect(f.queries.at(-1)?.eq).toHaveBeenCalledWith('payment_mode', 'test');
+  });
+  it('does not project the founder wallet renewal on a production deployment', async () => {
+    const env = { ...staging, VERCEL_PROJECT_PRODUCTION_URL: 'app.graylum.com' };
+    const result = await readMethodMembership(fixture(undefined, routes(true)).db, 'actor', 0, env);
+    expect(result.founderRenewal).toBeNull();
   });
   it('tells the purchase entry the terms version and whether the Gold first-month offer applies (display only)', async () => {
     const first = await readMethodMembership(fixture().db, 'actor', 0, staging);

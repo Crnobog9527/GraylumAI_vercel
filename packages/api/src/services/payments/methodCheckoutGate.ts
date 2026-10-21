@@ -11,6 +11,9 @@ function stagingDeployment(env: Env) {
   try { stagingRuntimeWindow(env, true); return true; } catch { return false; }
 }
 
+/** Shared exact-bound staging predicate for staging-only checkout projections. */
+export function isStagingPaymentDeployment(env: Env) { return stagingDeployment(env); }
+
 /** R7: exact production domains of the production Vercel project, the same set RUNTIME-PROD (R5) admits. */
 const PRODUCTION_URLS: ReadonlySet<string> = new Set(['app.graylum.com', 'www.graylum.com']);
 const STAGING_KEYS = ['V3_RUNTIME_STAGING_ENABLED', 'V3_RUNTIME_STAGING_PROJECT_ID',
@@ -56,10 +59,11 @@ function cardCheckoutEnvironmentOpen(env: Env, liveReady: boolean) {
   return liveReady && productionDeployment(env) && env.PAY_PRODUCTION_CARD_CHECKOUT_ENABLED === 'true';
 }
 
-/** Stripe wallet purchases (WeChat Pay, Alipay) through the method checkout. Staging stays closed as before; they
- * never follow the card switch. Production (R7): only the bound production deployment, behind its own default-off
- * switch PAY_PRODUCTION_WALLET_CHECKOUT_ENABLED (set only after the Owner approves). */
+/** Stripe wallet purchases (WeChat Pay, Alipay) through the method checkout. Staging opens only on the exact bound
+ * staging deployment; `payment_method_routes.<method>.enabled` remains the server-side switch. Production (R7): only
+ * the bound production deployment, behind its own default-off PAY_PRODUCTION_WALLET_CHECKOUT_ENABLED switch. */
 function walletCheckoutEnvironmentOpen(env: Env, liveReady: boolean) {
+  if (stagingDeployment(env)) return true;
   return liveReady && productionDeployment(env) && env.PAY_PRODUCTION_WALLET_CHECKOUT_ENABLED === 'true';
 }
 
@@ -69,18 +73,28 @@ export function methodCheckoutEnvironmentOpen(env: Env, method: PaymentMethod, l
   return method === 'card' || method === 'card_cn' ? cardCheckoutEnvironmentOpen(env, liveReady) : walletCheckoutEnvironmentOpen(env, liveReady);
 }
 
+/** Server projection for the purchase UI. Route switches and the deployment gate are both required, so
+ * production wallet options cannot appear unless the bound production wallet switch is open. */
+export function methodCheckoutMethods(env: Env, routes: PaymentMethodRoutes | null,
+  liveReady = LIVE_PAYMENT_PIPELINE_READY): PaymentMethod[] {
+  const methods: PaymentMethod[] = ['card', 'card_cn', 'wechat_pay', 'alipay'];
+  return methods.filter(method => routes?.[method]?.enabled === true
+    && methodCheckoutEnvironmentOpen(env, method, liveReady));
+}
+
 export function assertMethodCheckoutEnvironment(env: Env, method: PaymentMethod, liveReady = LIVE_PAYMENT_PIPELINE_READY,
   testClockCustomerRequested = false) {
   const testClockStaging = testClockCustomerRequested && method === 'card' && stripeTestClockStagingOpen(env);
   if (!testClockStaging && !methodCheckoutEnvironmentOpen(env, method, liveReady)) throw new Error('PAY_WAFFO_STEP2_NOT_READY');
 }
 
-/** Member-page projection: open when either card route is on (`routes` tells which one); the checkout mutation
- * re-checks the same conditions for the method actually chosen. */
-export function methodCardCheckoutReady(env: Env, routes: PaymentMethodRoutes | null, liveReady = LIVE_PAYMENT_PIPELINE_READY,
+/** Member-page projection: card routes behave as before; on staging, either wallet route also exposes the entry.
+ * The checkout mutation re-checks the environment and selected route before creating an order. */
+export function methodCheckoutReady(env: Env, routes: PaymentMethodRoutes | null, liveReady = LIVE_PAYMENT_PIPELINE_READY,
   testMode?: string) {
   const regular = methodCheckoutEnvironmentOpen(env, 'card', liveReady);
+  const stagingWallet = stagingDeployment(env) && (routes?.wechat_pay.enabled === true || routes?.alipay.enabled === true);
   const testClockStaging = testMode === 'test' && stripeTestClockStagingOpen(env);
-  return (regular && (routes?.card.enabled === true || routes?.card_cn?.enabled === true))
+  return stagingWallet || (regular && (routes?.card.enabled === true || routes?.card_cn?.enabled === true))
     || (testClockStaging && routes?.card.enabled === true);
 }

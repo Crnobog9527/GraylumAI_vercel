@@ -96,6 +96,7 @@ const PLANS = [plan('free', 0, 0), plan('pro', 29, 279), plan('gold', 69, 621)];
 const ROUTES = { version: 7, card: { enabled: true }, card_cn: { enabled: true },
   wechat_pay: { enabled: false, annualVerified: false }, alipay: { enabled: false, annualVerified: false } };
 const ENTRY = { mode: 'test', routes: ROUTES, checkoutReady: true, termsVersion: 'terms-v3', goldFirstMonthEligible: false,
+  checkoutMethods: ['card', 'card_cn'],
   founder: { total: 50, sold: 50, reserved: 0, available: 0 }, memberships: [] };
 const WITH_SEATS = { ...ENTRY, founder: { total: 50, sold: 37, reserved: 0, available: 13 } };
 const MEMBERSHIP = { executionId: null, refusal: { text: '生成完整报告需要开通会员。', membership: true } };
@@ -181,11 +182,49 @@ it('shows each card method with its own tax line and sends the mainland card whe
   } finally { await page.close(); }
 }, 30000);
 
+it('shows both wallets alongside both cards when staging routes are enabled, and sends wallet checkout in Stripe test mode', async () => {
+  const routes = { ...ROUTES, wechat_pay: { enabled: true, annualVerified: true }, alipay: { enabled: true, annualVerified: true } };
+  const membership = { ...ENTRY, routes, checkoutMethods: ['card', 'card_cn', 'wechat_pay', 'alipay'] };
+  const { page, errors } = await open({ membership });
+  try {
+    for (const [method, label] of [['card', '国际银行卡'], ['card_cn', '中国大陆银行卡'],
+      ['wechat_pay', '微信支付'], ['alipay', '支付宝']] as const) {
+      await browserExpect(page.getByTestId(`report-paywall-method-${method}`)).toContainText(label);
+    }
+    await page.getByTestId('report-paywall-method-wechat_pay').click();
+    await browserExpect(page.getByTestId('report-paywall-tax')).toHaveText('不另收税');
+    await browserExpect(page.getByTestId('report-paywall-renewal')).toHaveText('一次性付款，不自动续费。');
+    await page.getByTestId('report-paywall-terms').check();
+    await page.getByTestId('report-paywall-pay').click();
+    await browserExpect(page).toHaveURL('https://checkout.stripe.com/c/pay/cs_test_1');
+    expect(await checkouts(page)).toMatchObject([{ method: 'wechat_pay', itemId: 'pro-plan', billingCycle: 'monthly', routingVersion: 7 }]);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 30000);
+
+it('disables yearly selection for wallet-only routes without annual verification and preserves monthly wallet checkout', async () => {
+  const routes = { ...ROUTES, card: { enabled: false }, card_cn: { enabled: false },
+    wechat_pay: { enabled: true, annualVerified: false }, alipay: { enabled: true, annualVerified: false } };
+  const membership = { ...ENTRY, routes, checkoutMethods: ['wechat_pay', 'alipay'] };
+  const { page, errors } = await open({ membership });
+  try {
+    const yearly = page.getByRole('radio', { name: /年付/ });
+    await browserExpect(yearly).toBeDisabled();
+    await browserExpect(page.getByTestId('report-paywall-method-wechat_pay')).toBeVisible();
+    await page.getByTestId('report-paywall-method-wechat_pay').click();
+    await page.getByTestId('report-paywall-terms').check();
+    await page.getByTestId('report-paywall-pay').click();
+    await browserExpect(page).toHaveURL('https://checkout.stripe.com/c/pay/cs_test_1');
+    expect(await checkouts(page)).toMatchObject([{ method: 'wechat_pay', billingCycle: 'monthly' }]);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 30000);
+
 it('shows no card entry until the server says checkout is ready and terms are published', async () => {
   for (const membership of [{ ...ENTRY, checkoutReady: false }, { ...ENTRY, termsVersion: null }]) {
     const { page, errors } = await open({ membership });
     try {
-      await browserExpect(page.getByTestId('report-paywall-closed')).toHaveText('银行卡付款暂未开放，请稍后再来。');
+      await browserExpect(page.getByTestId('report-paywall-closed')).toHaveText('付款暂未开放，请稍后再来。');
       await browserExpect(page.getByTestId('report-paywall-pay')).toHaveCount(0);
       await browserExpect(page.getByTestId('report-paywall-terms')).toHaveCount(0);
       expect(errors).toEqual([]);
