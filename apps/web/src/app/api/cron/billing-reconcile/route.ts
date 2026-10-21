@@ -77,9 +77,9 @@ async function runWaffoReconciliation(supabase: SupabaseClient) {
     const closedExpired = await closeExpiredWaffoCheckouts(supabase, provider.merchant, undefined, mode);
     const recovered = await recoverWaffoOneTimeCheckouts(supabase, provider, undefined,
       orderId => afterWaffoFulfillment(supabase, orderId, deadline), deadline);
+    const refunds = await reconcileFailoverRefunds(supabase, provider, deadline);
     const payments = await reconcileWaffoPayments(supabase, provider, { recover: true, deadline,
       afterFulfillment: orderId => afterWaffoFulfillment(supabase, orderId, deadline) });
-    const refunds = await reconcileFailoverRefunds(supabase, provider, deadline);
     return { ...payments, success: payments.success && refunds.success && recovered.blocked.length === 0,
       findings: [...payments.findings, ...refunds.findings,
         ...recovered.blocked.map(orderId => ({ kind: 'checkout_unresolved', orderId, refundCandidate: false }))],

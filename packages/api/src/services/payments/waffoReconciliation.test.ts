@@ -76,3 +76,48 @@ describe('Waffo daily reconciliation (report only)', () => {
       .toEqual({ success: true, checkedPayments: 1, complete: true, findings: [] });
   });
 });
+
+const refundOrderId = '00000000-0000-4000-8000-000000000051';
+const approvalId = '00000000-0000-4000-8000-000000000052';
+function settledRefundFixture(full = false) {
+  const netMinor = full ? 6900 : 6000;
+  const order = { id: refundOrderId, payment_channel: 'waffo', merchant_namespace: 'fixture', payment_mode: 'test',
+    amount_total: 6900, currency: 'usd', fulfilled_at: '2026-10-11T06:00:00Z', qualification_state: 'sold',
+    status: full ? 'refunded' : 'partially_refunded', payment_status: full ? 'refunded' : 'partially_refunded',
+    refund_approval: { id: approvalId, orderId: refundOrderId, status: 'succeeded', currency: 'usd', netMinor,
+      refundId: 'REF_settled', idempotencyKey: `pay-common:refund:${approvalId}`,
+      cash: { paymentIntentId: 'PAY_refunded', chargeId: 'PAY_refunded' } } };
+  const paid = payment({ id: 'PAY_refunded', orderMerchantExternalId: refundOrderId, refundStatus: 'partial', isFullyRefunded: full,
+    refundedAmount: { amount: String(netMinor), currency: 'USD' } });
+  const refunds = [{ ...ref('REF_settled', refundOrderId), object_type: 'refund' }];
+  const run = () => reconcileWaffoPayments(fakeDb({ payment_orders: [order],
+    payment_provider_refs: [ref('PAY_refunded', refundOrderId), ...refunds],
+    // The daily check follows the old order's binding even after new purchases switch back to Stripe.
+    system_settings: [{ key: 'payment_method_routes', value: { version: 5, newPurchaseChannel: 'stripe' } }],
+  }, vi.fn()), { merchant: 'fixture', mode: 'test', listPayments: vi.fn().mockResolvedValue({ rows: [paid], complete: true }) });
+  return { order, paid, refunds, run };
+}
+describe('settled Waffo refunds in daily reconciliation', () => {
+  it.each([false, true])('accepts an already closed %s refund after new purchases switch back to Stripe', async full => {
+    expect(await settledRefundFixture(full).run()).toEqual({ success: true, checkedPayments: 1, complete: true, findings: [] });
+  });
+  it.each(['amount', 'currency', 'localPending', 'wrongPayment', 'missingRefundMapping', 'missingAmount', 'status', 'extraRefund'])(
+    'keeps %s discrepancies visible instead of accepting local status alone', async kind => {
+      const f = settledRefundFixture();
+      if (kind === 'amount') f.paid.refundedAmount!.amount = '5999';
+      if (kind === 'currency') f.paid.refundedAmount!.currency = 'EUR';
+      if (kind === 'localPending') f.order.refund_approval.status = 'pending';
+      if (kind === 'wrongPayment') f.order.refund_approval.cash.paymentIntentId = 'PAY_other';
+      if (kind === 'missingRefundMapping') f.refunds.length = 0;
+      if (kind === 'missingAmount') f.paid.refundedAmount = null;
+      if (kind === 'status') f.order.payment_status = 'paid';
+      if (kind === 'extraRefund') f.paid.refundedAmount!.amount = '6100';
+      expect(await f.run()).toMatchObject({ success: false, findings: [{ kind: 'refund_observed', paymentId: 'PAY_refunded' }] });
+    });
+  it('reports an external unrecorded refunded payment even without a local order mapping', async () => {
+    const f = settledRefundFixture();
+    const result = await reconcileWaffoPayments(fakeDb({}, vi.fn()), {
+      merchant: 'fixture', mode: 'test', listPayments: vi.fn().mockResolvedValue({ rows: [f.paid], complete: true }) });
+    expect(result.findings).toEqual([{ kind: 'refund_observed', paymentId: 'PAY_refunded', refundCandidate: false }]);
+  });
+});

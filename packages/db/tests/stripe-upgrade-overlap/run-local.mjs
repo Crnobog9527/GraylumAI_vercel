@@ -164,8 +164,9 @@ try {
     'rollback preserves later migrations and every non-target catalog object');
   assert.deepEqual((await data()).rows[0].v,preserved,'code rollback preserves balances, grants and source attribution');
   sql(read('packages/db/migrations/0322_pay_stripe_mp_upgrade_overlap.sql'));
-  // Historical code rollback keeps paid rows; replay the complete later chain to restore today's contract.
-  for(const file of laterMigrations(322))sql(read('packages/db/migrations/'+file));
+  // Only these later migrations extend the three runtime functions restored above; payment bodies stay current.
+  sql(read('packages/db/migrations/0324_paywall_profile_archive.sql'));
+  sql(read('packages/db/migrations/0326_paywall_fusion_archive_fence.sql'));
   assert.deepEqual(objects(),finalCatalog,'reapplying after rollback restores the complete final catalog');
   cases.push('migration-interruption-rolls-back','migration-repeat-unchanged','rollback-preserves-financial-data','reapply-converges');
   console.log(JSON.stringify({result:'PASS',build,cases}));

@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { readPaymentFacts, type WaffoPayment, type WaffoTestPayments } from './waffoPayments';
 import type { WaffoChargeback } from './waffoTestOperationsClient';
+import { majorToCents } from './purchaseFacts';
 import { deliverWaffoOneTime } from './waffoOneTimeDelivery';
 
 type Db = Pick<SupabaseClient, 'from' | 'rpc'>;
@@ -34,6 +35,35 @@ async function chunked(values: string[], read: (part: string[]) => PromiseLike<{
 }
 
 const refunded = (p: WaffoPayment) => p.refundStatus !== 'none' || p.isFullyRefunded !== false || p.refundedAmount?.amount !== '0';
+
+const settledRefundSchema = z.object({
+  id: z.string(), payment_channel: z.literal('waffo'), merchant_namespace: z.string(), payment_mode: z.enum(['test', 'live']),
+  amount_total: z.number().int().positive(), currency: z.literal('usd'), status: z.enum(['refunded', 'partially_refunded']),
+  payment_status: z.enum(['refunded', 'partially_refunded']),
+  refund_approval: z.object({ id: z.uuid(), orderId: z.string(), status: z.literal('succeeded'),
+    currency: z.literal('usd'), netMinor: z.number().int().positive(), refundId: z.string().min(1), idempotencyKey: z.string(),
+    cash: z.object({ paymentIntentId: z.string(), chargeId: z.string() }) }),
+});
+function locallySettledRefund(payment: WaffoPayment, value: unknown, provider: Provider, refundRefs: Set<string>) {
+  const checked = settledRefundSchema.safeParse(value);
+  if (!checked.success) return false;
+  const order = checked.data, approval = order.refund_approval;
+  const full = approval.netMinor === order.amount_total;
+  try {
+    return order.merchant_namespace === provider.merchant && order.payment_mode === provider.mode
+      && approval.orderId === order.id && approval.cash.paymentIntentId === payment.id && approval.cash.chargeId === payment.id
+      && approval.idempotencyKey === `pay-common:refund:${approval.id}`
+      && approval.netMinor <= order.amount_total && payment.orderMerchantExternalId === order.id
+      && order.status === (full ? 'refunded' : 'partially_refunded') && order.payment_status === order.status
+      && payment.amount.currency === 'USD' && /^[1-9][0-9]{0,8}$/.test(payment.amount.amount)
+      && Number(payment.amount.amount) === order.amount_total && payment.pspAmountDetails?.currency === 'USD'
+      && majorToCents(payment.pspAmountDetails.amount) === order.amount_total
+      && payment.refundedAmount?.currency === 'USD' && /^[1-9][0-9]{0,8}$/.test(payment.refundedAmount.amount)
+      && Number(payment.refundedAmount.amount) === approval.netMinor && payment.isFullyRefunded === full
+      && Boolean(payment.refundStatus) && payment.refundStatus !== 'none'
+      && refundRefs.has(`${order.id}:${approval.refundId}`);
+  } catch { return false; }
+}
 
 /** Daily backstop for the narrowed scope: compare Waffo's paid records with what we delivered and
  * report differences for manual handling. It never grants, refunds or cancels anything. */
@@ -93,8 +123,16 @@ export async function reconcileWaffoPayments(db: Db, provider: Provider, options
   const refs = await chunked(paid.map(p => p.id), part => paymentRefs().in('external_id', part));
   const orderOf = new Map(refs.map(r => [r.external_id!, r.order_id!]));
   const readOrders = (ids: string[]) => chunked(ids, part => db.from('payment_orders')
-    .select('id,fulfilled_at,qualification_state,method_review_reason').in('id', part));
+    .select('id,fulfilled_at,qualification_state,method_review_reason,payment_channel,merchant_namespace,payment_mode,'
+      + 'amount_total,currency,status,payment_status,refund_approval').in('id', part));
   const orderById = new Map((await readOrders([...new Set(orderOf.values())])).map(o => [o.id!, o]));
+  const refundIds = [...orderById.values()].flatMap(order => {
+    const checked = settledRefundSchema.safeParse(order);
+    return checked.success ? [checked.data.refund_approval.refundId] : [];
+  });
+  const settledRefundRefs = new Set((await chunked([...new Set(refundIds)], part => db.from('payment_provider_refs')
+    .select('external_id,order_id').eq('channel', 'waffo').eq('merchant_namespace', provider.merchant).eq('mode', provider.mode)
+    .eq('object_type', 'refund').in('external_id', part))).map(ref => `${ref.order_id}:${ref.external_id}`));
   const offsite = await db.from('waffo_event_receipts').select('resolution').eq('merchant_namespace', provider.merchant)
     .eq('mode', provider.mode).eq('resolution->>kind', 'offsite');
   if (offsite.error) throw new Error('PAY_WAFFO_RECONCILIATION_UNAVAILABLE');
@@ -110,7 +148,9 @@ export async function reconcileWaffoPayments(db: Db, provider: Provider, options
     const orderId = orderOf.get(payment.id);
     const order = orderId ? orderById.get(orderId) : undefined;
     if (refunded(payment)) {
-      if (order) findings.push({ kind: 'refund_observed', paymentId: payment.id, orderId, refundCandidate: false });
+      if (!locallySettledRefund(payment, order, provider, settledRefundRefs)) {
+        findings.push({ kind: 'refund_observed', paymentId: payment.id, orderId, refundCandidate: false });
+      }
       continue;
     }
     if (order?.fulfilled_at) continue;
