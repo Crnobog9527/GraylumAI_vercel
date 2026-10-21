@@ -42,7 +42,7 @@ async function assertTestClockCustomer(input: Input, mode: 'test' | 'live') {
   const customerId = input.stripeTestClockCustomerId;
   if (!customerId) return;
   if (mode !== 'test' || !stripeTestClockRuntimeOpen(process.env)
-    || input.purchase.itemType !== 'membership_plan' || input.purchase.method !== 'card'
+    || input.purchase.itemType !== 'membership_plan' || !['card', 'card_cn'].includes(input.purchase.method)
     || input.purchase.billingCycle !== 'monthly') throw new Error('PAY_WAFFO_STEP2_NOT_READY');
   const plan = await input.db.from('membership_plans').select('id, level')
     .eq('id', input.purchase.itemId).maybeSingle();

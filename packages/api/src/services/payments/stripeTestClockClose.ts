@@ -30,7 +30,8 @@ async function persistedCashClose(db: SupabaseClient, order: CloseOrder) {
 export async function closeRefundedTestClockCheckout(db: SupabaseClient, stripe: Stripe, scope: StripeScope,
   order: CloseOrder, sessionId: string, priceId: string) {
   const customerId = testClockCustomerForOrder(order, scope);
-  if (!customerId || order.fulfilled_at || order.subscription_id) return false;
+  if (!customerId || order.payment_method !== 'card' || order.stripe_managed_payments !== true
+    || order.fulfilled_at || order.subscription_id) return false;
   const session = await stripe.checkout.sessions.retrieve(sessionId);
   if (session.status !== 'complete' || session.payment_status !== 'paid') return false;
   const subscriptionId = id(session.subscription);
