@@ -122,6 +122,12 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
         void invalidatePostCheckoutMembershipQueries(utils);
         void utils.payments.getSubscriptionManagement.invalidate();
 
+        if (result.orderStatus === 'refunded' || result.paymentStatus === 'refunded') {
+          setCheckoutNotice({ tone: 'success', message: '这笔订单已全额退款，订单状态已同步。' });
+          clearCheckoutParams();
+          return;
+        }
+
         if (result.fulfilledAt || result.orderStatus === 'completed') {
           setCheckoutNotice({
             tone: 'success',

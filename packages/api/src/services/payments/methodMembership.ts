@@ -56,6 +56,17 @@ export async function readMethodMembership(db: SupabaseClient, userId: string, n
   if (subscriptions.error || !Array.isArray(subscriptions.data)) throw new Error('PAY_WAFFO_MEMBERSHIP_UNAVAILABLE');
   const states = new Map((subscriptions.data as SubscriptionState[]).map(row => [row.id, row]));
   if (recent.some(row => !states.has(row.subscription_id))) throw new Error('PAY_WAFFO_MEMBERSHIP_UNAVAILABLE');
+  // Match pay_common_membership_facts: any later term blocks an older term's grace, even if that
+  // later term was refunded. Looking only at completed/paid rows would resurrect the first term.
+  const latestTerms = await Promise.all(subscriptionIds.map(async subscriptionId => {
+    const latest = await db.from('payment_orders').select('entitlement_end')
+      .eq('user_id', userId).eq('payment_mode', mode).eq('subscription_id', subscriptionId)
+      .not('entitlement_end', 'is', null).order('entitlement_end', { ascending: false }).limit(1).maybeSingle();
+    if (latest.error || typeof latest.data?.entitlement_end !== 'string'
+      || !Number.isFinite(Date.parse(latest.data.entitlement_end))) throw new Error('PAY_WAFFO_MEMBERSHIP_UNAVAILABLE');
+    return [subscriptionId, latest.data?.entitlement_end] as const;
+  }));
+  const latestEnds = new Map(latestTerms);
   const stopped = (row: PaidMembership) => String(states.get(row.subscription_id)!.cancel_at_period_end) === 'true';
   // Same rule as pay_common_membership_facts: the latest paid term of a still-renewing card subscription (Waffo card,
   // Stripe card / card_cn) keeps access for 24 hours after its end while the renewal payment lands. Display only.
@@ -67,8 +78,7 @@ export async function readMethodMembership(db: SupabaseClient, userId: string, n
         || row.payment_channel === 'stripe' && ['card', 'card_cn'].includes(row.payment_method))
       && row.auto_renew === true && state.status === 'active' && !stopped(row)
       && !state.method_cancel_requested_at && !state.method_cancel_confirmed_at
-      && !recent.some(later => later.subscription_id === row.subscription_id && later.id !== row.id
-        && Date.parse(later.entitlement_end) > Date.parse(row.entitlement_end));
+      && !(Date.parse(latestEnds.get(row.subscription_id) ?? '') > Date.parse(row.entitlement_end));
   };
   const paid = recent.filter(row => (!clockTimes.has(row.id) || Date.parse(row.entitlement_start) <= asOf(row))
     && (Date.parse(row.entitlement_end) > asOf(row) || inGrace(row)));

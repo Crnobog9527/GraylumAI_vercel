@@ -539,6 +539,19 @@ describe('membership page in a local browser', () => {
     } finally { await canceled.page.close(); }
   }, 30_000);
 
+  it.each([null, '2026-10-14T00:00:00Z'])('shows a refunded return as terminal, including fulfilledAt=%s', async fulfilledAt => {
+    const { page, errors } = await open({ search: 'tab=subscription&checkout=success&session_id=cs_test_refunded',
+      syncResult: { fulfilledAt, orderStatus: 'refunded', paymentStatus: 'refunded' } });
+    try {
+      await browserExpect(page.getByTestId('profile-checkout-notice')).toHaveText('这笔订单已全额退款，订单状态已同步。');
+      await browserExpect(page.getByTestId('profile-membership-plan-pro').getByRole('button', { name: '开通', exact: true }))
+        .toBeEnabled();
+      expect(await page.evaluate(() => (window as unknown as { __pay: { syncs: unknown[] } }).__pay.syncs))
+        .toEqual([{ sessionId: 'cs_test_refunded' }]);
+      expect(errors).toEqual([]);
+    } finally { await page.close(); }
+  }, 30_000);
+
   it('sells Gold yearly at the founder price with real seats, and falls back to $621 when they sell out at checkout', async () => {
     const { page, errors } = await open({ membership: { ...ENTRY, founder: { total: 50, sold: 49, reserved: 0, available: 1 } },
       checkoutError: { code: 'CONFLICT', message: '创始会员名额已售完。' } });
