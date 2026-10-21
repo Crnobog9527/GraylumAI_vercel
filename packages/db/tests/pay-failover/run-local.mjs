@@ -33,7 +33,7 @@ try {
  const report=buildFromFiles(root,{applyFile:path=>apply(read(path)),applyServerOnly:apply,
   fingerprint:process.argv.includes('--quick')?undefined:fingerprint});
  assert.equal(report.failed,null,JSON.stringify(report));
- const before=fingerprint();sql(read('packages/db/migrations/0333_pay_failover.sql'));
+ const before=fingerprint();sql(read('packages/db/migrations/0335_pay_failover.sql'));
  assert.deepEqual(fingerprint(),before,'repeat migration preserves complete structure');
  const port=Number(docker(['port',name,'5432/tcp']).split(':').at(-1));
  const connect=async()=>{

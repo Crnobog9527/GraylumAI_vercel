@@ -57,7 +57,7 @@ try {
   });
   assert.equal(report.failed, null, JSON.stringify(report));
   const before = fingerprint();
-  // 0333 extends the wallet refund rejection predicate; restore its historical predecessor
+  // 0335 extends the wallet refund rejection predicate; restore its historical predecessor
   // before replaying 0298, whose guarded patch must still run at its own historical position.
   const refund185=readFileSync(resolve(root,'packages/db/migrations/0185_pay_common_package_refund.sql'),'utf8');
   const rejectionStart=refund185.indexOf('CREATE OR REPLACE FUNCTION public.pay_common_package_refund_reject(');

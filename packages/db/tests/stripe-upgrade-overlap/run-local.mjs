@@ -165,7 +165,7 @@ try {
     finalCatalog['con:payment_orders'],'recovery retains the constraint for paid renewal rows');
   assert.deepEqual((await data()).rows[0].v,preserved,'wallet recovery preserves paid balances and retained credit sources');
   sql(read(walletMigration));
-  // Forward-fix every later extension too; 0333 intentionally extends the same wallet functions.
+  // Forward-fix every later extension too; 0335 intentionally extends the same wallet functions.
   for(const file of laterMigrations(330))sql(read('packages/db/migrations/'+file));
   assert.deepEqual(objects(),finalCatalog,'wallet reapply restores complete final catalog');
   cases.push('wallet-migration-interruption-atomic','wallet-migration-repeat-acl-unchanged','wallet-recovery-preserves-paid-data');

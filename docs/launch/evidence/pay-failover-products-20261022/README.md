@@ -7,6 +7,9 @@ Owner授权见[#1234](https://github.com/Crnobog9527/GraylumAI_vercel/issues/123
 - 官方创建端点：[POST /v1/actions/onetime-product/create-product](https://docs.waffo.ai/api-reference/endpoints/onetime-products/create-product)。只用了该写端点和GraphQL只读接口，未发布、创建结账页或付款。
 - 私钥由现有测试配置仅在进程内加载；Vercel将staging私钥标为sensitive，不可回读，使用前先将原配置的商户/店铺与当前staging绑定在内存严格比较，再由已签名的供应商test查询确认。没有输出或新增/修改任何密钥，证据不含签名、凭据、店铺认证编号或个人数据。
 - `mapping-validation.json`：独立数据SQL本地11项PASS，含12关联、幂等、冲突整批回滚、原订阅/Stripe/live/settings不变。已同步#1238并按最终0333/336步schema重验；数据脚本验证不代替独立完成的0333完整回放/指纹。
-- staging映射尚未写入；采用独立数据SQL供总控核对并在0333之后应用，避免把测试店铺数据混进结构迁移或正式环境。原六订阅映射保留，新映射每维度唯一current；遇不同current整批拒绝，不静默覆盖。
+- staging映射尚未写入；采用独立数据SQL供总控核对并在0335之后应用，避免把测试店铺数据混进结构迁移或正式环境。原六订阅映射保留，新映射每维度唯一current；遇不同current整批拒绝，不静默覆盖。
 
 商品创建通过不等于支付验收。staging银行卡全链路仍NOT_RUN，#1237/#1238已合并并同步；0333本地验证已完成，待最终CI/机器人检查、总控上库合并和正常staging部署后执行。
+
+
+Owner最新分配PAY-FAILOVER0335；#1240/0333和#1239/0334已合并同步。映射SQL引用已更新，旧0333/336步验证仅保留历史，待0335完整前置后重新验证。
