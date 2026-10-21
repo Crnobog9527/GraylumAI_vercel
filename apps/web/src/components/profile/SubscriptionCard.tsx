@@ -122,6 +122,12 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
         void invalidatePostCheckoutMembershipQueries(utils);
         void utils.payments.getSubscriptionManagement.invalidate();
 
+        if (result.orderStatus === 'refunded') {
+          setCheckoutNotice({ tone: 'success', message: '这笔订单已全额退款，订单状态已同步。' });
+          clearCheckoutParams();
+          return;
+        }
+
         if (result.fulfilledAt || result.orderStatus === 'completed') {
           setCheckoutNotice({
             tone: 'success',
@@ -205,6 +211,9 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
   function actionFor(planId: string, cycle: 'monthly' | 'yearly') {
     const plan = apiPlans.find(item => item.id === planId);
     if (!plan) return null;
+    if (plan.level !== 'free' && checkout.entry?.refundedRenewalNotice) {
+      return { kind: 'none' as const, label: checkout.entry.refundedRenewalNotice.buttonLabel, disabled: true as const };
+    }
     const founderRenewal = checkout.entry?.founderRenewal;
     const walletRenewalOpen = checkout.methodsFor('membership_plan', cycle).some(method => method === 'wechat_pay' || method === 'alipay');
     if (plan.level === 'gold' && cycle === 'yearly' && walletRenewalOpen && founderRenewal
@@ -256,6 +265,10 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
         onGoldFirstDeclined={() => setFirstMonthDeclined(true)} onFounderDeclined={() => setFounderDeclined(true)}
         onFounderSoldOut={() => setFounderSoldOut(true)}
         notice={founderSoldOut && target?.cycle === 'yearly' && dialogTarget?.purchase.offer === 'standard' ? CHECKOUT_COPY.founderSoldOut : null} />
+      {checkout.entry?.refundedRenewalNotice && (
+        <p role="status" data-testid="profile-refunded-renewal-notice" className="mb-4 text-sm"
+          style={{ color: 'var(--text-secondary)' }}>{checkout.entry.refundedRenewalNotice.message}</p>
+      )}
       {/* Header */}
       <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div className="flex items-center gap-3">

@@ -308,7 +308,7 @@ describe('membership page in a local browser', () => {
             if (state.checkoutError) throw Object.assign(new Error(state.checkoutError.message), { data: { code: state.checkoutError.code } });
             if (state.recovery) return { orderId: 'o1', state: 'recovery_required', url: null };
             return { orderId: 'o1', state: 'open', url: 'https://checkout.stripe.com/c/pay/cs_test_9' }; }),
-          getSubscriptionManagement: { useQuery: () => query({ available: false }) },
+          getSubscriptionManagement: { useQuery: () => query({ available: state.managementAvailable === true }) },
           createCustomerPortalSession: mutation(async () => ({})),
           syncCheckoutSession: mutation(async input => { state.syncs.push(input); return state.syncResult; }),
         } };
@@ -601,6 +601,40 @@ describe('membership page in a local browser', () => {
         .toEqual([{ sessionId: 'cs_test_no', checkoutState: 'canceled' }]);
       expect(canceled.errors).toEqual([]);
     } finally { await canceled.page.close(); }
+  }, 30_000);
+
+  it.each([null, '2026-10-14T00:00:00Z'])('shows a refunded return as terminal, including fulfilledAt=%s', async fulfilledAt => {
+    const { page, errors } = await open({ search: 'tab=subscription&checkout=success&session_id=cs_test_refunded',
+      syncResult: { fulfilledAt, orderStatus: 'refunded', paymentStatus: 'paid' } });
+    try {
+      await browserExpect(page.getByTestId('profile-checkout-notice')).toHaveText('这笔订单已全额退款，订单状态已同步。');
+      await browserExpect(page.getByTestId('profile-membership-plan-pro').getByRole('button', { name: '开通', exact: true }))
+        .toBeEnabled();
+      expect(await page.evaluate(() => (window as unknown as { __pay: { syncs: unknown[] } }).__pay.syncs))
+        .toEqual([{ sessionId: 'cs_test_refunded' }]);
+      expect(errors).toEqual([]);
+    } finally { await page.close(); }
+  }, 30_000);
+
+  it.each([1280, 375])('explains refunded but still renewing subscriptions and blocks new purchases at %s px', async width => {
+    const notice = { message: '这一期已退款，但旧订阅的自动续费还开着。请先在“管理订阅 / 取消续费”里停掉续费，或联系客服处理后再重新购买。',
+      buttonLabel: '已退款，请先停止旧订阅续费' };
+    const { page, errors } = await open({ membership: { ...ENTRY, refundedRenewalNotice: notice }, managementAvailable: true,
+      search: 'tab=subscription&buy=pro&cycle=monthly' }, width);
+    try {
+      await browserExpect(page.getByTestId('profile-refunded-renewal-notice')).toHaveText(notice.message);
+      for (const level of ['pro', 'gold']) {
+        await browserExpect(page.getByTestId(`profile-membership-plan-${level}`).getByRole('button', { name: notice.buttonLabel }))
+          .toBeDisabled();
+      }
+      await browserExpect(page.getByRole('button', { name: '管理订阅 / 取消续费', exact: true })).toBeVisible();
+      await browserExpect(page.getByTestId('method-checkout-dialog')).toHaveCount(0);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      expect(sentByPage.get(page)).toEqual([]);
+      expect(await page.locator('body').innerText()).not.toContain('续费处理中');
+      await page.screenshot({ path: `/tmp/graylum-1236-refund-manual-${width}.png`, fullPage: true });
+      expect(errors).toEqual([]);
+    } finally { await page.close(); }
   }, 30_000);
 
   it('sells Gold yearly at the founder price with real seats, and falls back to $621 when they sell out at checkout', async () => {
