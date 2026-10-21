@@ -84,6 +84,13 @@
 
 ### 2.1 Owner 的新决定（2026-09-27 起，2026-10-20 更新）
 
+**2026-10-21：停用的旧入口 `/chat`、`/workbench` 不再保留跳转，访问时 404**
+
+来源：总控在 E1 后续派工中转达 Owner 的意见（2026-10-21，不是 Owner 原话）：网站还没有上线、没有真实用户，`/chat`、`/workbench` 这两个早已停用的旧入口不需要保留。
+
+落实范围（#1227）：删除 `/chat`、`/workbench` 到定位页的跳转，登录回跳也不再改写这两个地址，访问时走正常 404（未登录先到登录页）。`/workbench/marketplace`、`/workbench/search` 以及 `/positioning`、`/library`、`/profile` 等搬到 `/app` 的旧地址的 308 保持不变。
+取代：2026-09-29 LEGACY-CLOSE 决定里"旧链接直接跳到 `/positioning`"（#507 起 `/chat` 临时跳转定位页），以及 SEO_GEO_SPEC 第 15 节"旧应用路径跳转"中 `/chat` 改跳 `/app/positioning`、`/workbench` 整个目录 308 的写法。
+
 **2026-10-21：评审团执行约束席改用 Gemini 4 Argon**
 
 Owner 原话（2026-10-21，经总控在 FUSION-REVIEW 执行任务中转达）：
@@ -2706,7 +2713,7 @@ node scripts/plan-progress.mjs --ref origin/staging
 | | EXPERT-CONSULT | 真人专家诊断的预约入口（第 2.1 节第 51 项，[记录 L](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5972732100)、[记录 Q](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980762284)、[记录 R](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980780017)）：放在报告末尾、价格页和工作室版联系入口；只面向已有数据基础的账号，卡片写"预约咨询，免费询价"，不写价格；用户填写需求和联系方式，提交后通知 Owner，由 Owner 线下跟进。不做"同意专家查看报告"的授权开关，资料由用户自己导出后发来；授权查看功能上线时不做。咨询费不进产品结账流程（Stripe 或线下收款，税务由 Owner 处理）。联系方式按个人数据处理，接入账号注销和数据保留规则 | PAYWALL（入口位置）、DATA-ERASURE | 高 | 小 / 1–2 | — |
 | | PUBLISH-MONITOR | 方向（Owner 2026-10-04，第 2.1 节第 51、52 项，[记录 Q](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980762284)）：上线前接入 Post for Me，提供多平台发布和数据监控，海外 9 个平台（TikTok、Instagram、YouTube、Facebook、X、Threads、LinkedIn、Pinterest、Bluesky），用户授权自己的账号。Pro：一键发布 + 自己作品近 30 天数据；Gold：另加对标账号监控、90 天趋势、每周自动复盘；两档都按积分计费、不限条数。**D1 范围变更**：这两项原不在上线范围（第 10 节 D1）。Post for Me 实测和条款核对通过之前，相关功能和说法不上线。2026-10-13 补充（第 2.1 节）：负责首页"复盘数据"说法；小红书、抖音用 TikHub 公开数据，另加手动导入兜底和 AI 每周复盘；SOCIAL-SYNC 并入本任务。验收与交接：[Post for Me 平台、费用、数据窗口与许可待核对项](https://github.com/Crnobog9527/GraylumAI_vercel/issues/716#issuecomment-6038093010)。 | RESEARCH-TOOLS；Post for Me 实测和条款核对（第 52 项）；其余依赖由方案定 | 高 | 待实施方案细化 | — |
 | | CHAT-AUTO-CONTEXT | 自由对话里 AI 教练自己决定查资料库（Postgres 自带检索，不用向量）、读已确认定位和对标表、读最近发布数据、调用通用研究工具（每条回答最多 3 次研究调用、12 次子调用，逐条扣积分），对话里显示工作状态（Owner 2026-10-17，第 2.1 节；见[实施方案](tasks/CHAT-AUTO-CONTEXT.md)）。上线前完成，和落地页演示一致；冻结时没验收的部分开关关闭。 | LIB-DOCS（LIB-4b）；发布数据部分依赖 PUBLISH-MONITOR；研究工具部分依赖 RESEARCH-TOOLS | 高 | 中 / 6 | — |
-| | LEGACY-CLOSE | 关入口由 #507 提前实施（2026-09-29）：`/chat` 临时跳转 `/positioning`，`/api/ai/stream` 对新请求返回 410，8 处入口改指或禁用；本任务剩余工作是删除旧代码（`/chat` 页面与组件、`/api/ai/stream`、`modelRouter`、`contextManager`、`agentSlice`、旧 `workbench` 接口等；自研内容检查 `contentModerator.ts`、`aiOutputFilter.ts`、`streamingOutput.ts`，以及它们在 `agentSlice` 和旧 `workbench` 生成里的调用，不单独开任务）和功能对照检查记录。旧检查文件随 LEGACY-CLOSE 删除；删除前核实必要的凭证保护和用户数据隔离不受影响，不要求迁移旧的通用 PII 正则过滤。按 Owner 2026-09-29 决定不再提供旧对话只读查看入口（staging 和正式环境都没有真实用户，上线前清空数据），旧链接直接跳到 `/positioning`；旧对话不迁移、不删除 | AC-4 接管自由对话；入口改指（#507）；UI-MODEL、UI-B、UI-C、UI-FINISH 交付；并完成一次功能对照检查（旧 `/chat` 的模型选择、引用、附件和常用操作在新工作区都有对应，或明确记录为不再提供） | 高 | 中 / 3–4 | — |
+| | LEGACY-CLOSE | 关入口由 #507 提前实施（2026-09-29）：`/chat` 临时跳转 `/positioning`，`/api/ai/stream` 对新请求返回 410，8 处入口改指或禁用；本任务剩余工作是删除旧代码（`/chat` 页面与组件、`/api/ai/stream`、`modelRouter`、`contextManager`、`agentSlice`、旧 `workbench` 接口等；自研内容检查 `contentModerator.ts`、`aiOutputFilter.ts`、`streamingOutput.ts`，以及它们在 `agentSlice` 和旧 `workbench` 生成里的调用，不单独开任务）和功能对照检查记录。旧检查文件随 LEGACY-CLOSE 删除；删除前核实必要的凭证保护和用户数据隔离不受影响，不要求迁移旧的通用 PII 正则过滤。按 Owner 2026-09-29 决定不再提供旧对话只读查看入口（staging 和正式环境都没有真实用户，上线前清空数据）；旧链接原先直接跳到 `/positioning`，2026-10-21 起不再跳转、访问时 404（见第 2.1 节 2026-10-21 记录）；旧对话不迁移、不删除 | AC-4 接管自由对话；入口改指（#507）；UI-MODEL、UI-B、UI-C、UI-FINISH 交付；并完成一次功能对照检查（旧 `/chat` 的模型选择、引用、附件和常用操作在新工作区都有对应，或明确记录为不再提供） | 高 | 中 / 3–4 | — |
 | | POSITIONING-GATE | 定位前置检查（第 2.1 节 2026-10-12 决定）：Skill 后台“与社交媒体相关”勾选；无定位用户为自己账号做社媒运营的请求（含自由对话语义判断、无关 Skill 中途转社媒；社媒常识问答等照常回答）不继续并引导定位或“我已有定位”导入。语义判断用模型完成：Decisions 先判断、主模型兜底；被拦的回合（含主模型兜底判为拦截）不扣用户积分，由 Graylum 承担。 | MODEL-IDENTITY-GUARD（与之排队改同一块 runtime） | 高 | 中 / 2–3 | — |
 | | MODEL-IDENTITY-GUARD | 模型身份保护（第 2.1 节 2026-10-12 决定，Fusion 评审团例外、后台一键开关）：身份说明（指令）、自我介绍式泄露的回答替换、界面与接口去除真实模型名；不做输入侧拦截，身份询问照常调用模型（Owner 2026-10-12 补充）；品牌话术由 Owner 确认，不声称自研。上线前完成。 | RUNTIME-PROD（与在途 runtime 执行改动排队） | 高 | 中 / 3–4 | — |
 | | SKILL-I18N-HOOK | Skill 多语言对照接口（第 2.1 节 2026-10-12 多语言决定）：Skill 内核保持简体中文唯一原版；后台可为用户可见文字（步骤名、字段名、提问卡选项、报告标题）配英文对照；AI 按用户语言回答。产品界面英文化、语言提示条归上线后的 I18N-EN。 | MODEL-IDENTITY-GUARD、POSITIONING-GATE（同改 Skill 编辑器与 AI 指令，排在其后） | 高 | 小 / 1–2 | — |
