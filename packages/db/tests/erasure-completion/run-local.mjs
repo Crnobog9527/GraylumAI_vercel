@@ -14,6 +14,7 @@ import {runFusionExecutor} from './fusion.mjs';
 import {runExecutor} from './executor.mjs';
 import {runProcessor} from './processor.mjs';
 import {runLeaves} from './leaves.mjs';
+import {runPruneSelection} from './prune-selection.mjs';
 import {runConcurrency} from './concurrency.mjs';
 import {startRedisDouble} from './redis-double.mjs';
 
@@ -79,6 +80,7 @@ try {
  client=new Client({connectionString});await client.connect();
  await client.query(read('packages/db/tests/erasure-b2a/fixture.sql'));
  await client.query(read('packages/db/tests/package-refund/fixture.sql'));
+ await runPruneSelection(client,report);
  // Compile the exact production composition, with only external HTTP replaced in tests.
  const ts=require('typescript');
  compiled=mkdtempSync(resolve(root,'packages/api/.erasure-processor-test-'));

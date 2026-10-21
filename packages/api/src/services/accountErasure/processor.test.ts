@@ -50,6 +50,37 @@ function setup(overrides: Record<string, Override> = {}) {
 }
 
 describe('unwired account erasure processor', () => {
+  it.each([0, 1999])('does not dispatch a local write with only %i ms left', async remaining => {
+    let now = 0;
+    const f = setup();
+    f.storageAdapter.cleanSubject.mockImplementation(async () => {
+      now = 10_000 - remaining;
+      return { complete: true, remaining: 0, manualReview: 0 };
+    });
+    const result = await processAccountErasure({ ...f.input, budget: { now: () => now, deadline: 10_000 } });
+    expect(f.rpc.mock.calls.map(([name]) => name)).not.toContain('account_erasure_local_cleanup');
+    expect(result.errorCodes).toContain('ERASURE_BUDGET_EXHAUSTED');
+    expect(result.errorCodes).not.toContain('ERASURE_RPC_LOCAL_CLEANUP_TIMEOUT_UNKNOWN');
+    expect(f.authAdapter.remove).not.toHaveBeenCalled();
+  });
+  it('allows a local RPC when exactly its full operation budget remains', async () => {
+    let now = 0;
+    const f = setup();
+    f.storageAdapter.cleanSubject.mockImplementation(async () => {
+      now = 8000;
+      return { complete: true, remaining: 0, manualReview: 0 };
+    });
+    expect((await processAccountErasure({ ...f.input, budget: { now: () => now, deadline: 10_000 } })).retry).toBe(false);
+    expect(f.rpc).toHaveBeenCalledWith('account_erasure_local_cleanup', expect.anything());
+  });
+  it('does not dispatch Auth deletion without its full operation budget', async () => {
+    let now = 0;
+    const f = setup();
+    f.authAdapter.getState.mockImplementation(async () => { now = 8500; return 'present'; });
+    const result = await processAccountErasure({ ...f.input, budget: { now: () => now, deadline: 10_000 } });
+    expect(f.authAdapter.remove).not.toHaveBeenCalled();
+    expect(result.retry).toBe(true);
+  });
   it('uses original identities, independent RPCs, financial recovery and persisted intent before deletion', async () => {
     const f = setup();
     expect(await processAccountErasure(f.input)).toEqual({ stage: 'completed', retry: false, remaining: 0, manualReview: 0, errorCodes: [] });
