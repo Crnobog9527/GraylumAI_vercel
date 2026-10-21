@@ -1,7 +1,7 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC.
 -- All rights reserved.
 -- This code is proprietary and confidential.
--- PAY-FAILOVER test catalog data only. Controller-reviewed application AFTER migration 0332.
+-- PAY-FAILOVER test catalog data only. Controller-reviewed application AFTER migration 0333.
 -- Source: docs/launch/evidence/pay-failover-products-20261022/products.json (12 confirmed one-time USD products).
 -- Execute ONLY on staging project gvcpmcunmfrbxuwimxfa, after checking the actual connection target.
 -- This file cannot infer a Supabase project from a PostgreSQL connection; the executor must verify it.
@@ -34,7 +34,7 @@ DECLARE merchant text; matches integer; namespaces integer;
 BEGIN
  IF to_regprocedure('public.pay_failover_fulfill(uuid,text,text,text,text,integer,text,timestamptz,timestamptz,timestamptz,text)') IS NULL
   OR to_regprocedure('public.pay_failover_set_channel(uuid,bigint,text)') IS NULL THEN
-  RAISE EXCEPTION 'PAY_FAILOVER_MAPPING_REQUIRES_0332'; END IF;
+  RAISE EXCEPTION 'PAY_FAILOVER_MAPPING_REQUIRES_0333'; END IF;
  -- Lock catalog rows before references: this matches catalog maintenance's row -> reference lock order.
  PERFORM 1 FROM public.membership_plans WHERE id IN (
   '10000000-0000-4000-8000-000000000002','10000000-0000-4000-8000-000000000003') ORDER BY id FOR SHARE;

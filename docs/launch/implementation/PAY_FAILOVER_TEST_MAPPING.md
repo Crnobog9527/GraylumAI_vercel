@@ -5,7 +5,7 @@
 
 ## 应用前置
 
-1. 先完成 #1237 前置同步，再按最终版本应用 `0332_pay_failover.sql`。本脚本检查两个 PAY-FAILOVER RPC 存在；执行者仍须核对实际迁移记录及对应版本。
+1. 先完成 #1237（0331）与 #1238（0332）前置同步，再按总控最终分配应用 `0333_pay_failover.sql`。本脚本检查两个 PAY-FAILOVER RPC 存在；执行者仍须核对实际迁移记录及对应版本。
 2. 执行连接必须为 staging Supabase 项目 `gvcpmcunmfrbxuwimxfa`。普通 PostgreSQL 连接内无法可靠推断项目编号，须在执行端核对，不能把 SQL 内的 namespace 检查当作项目识别。
 3. 商品依据为 [12 个测试商品回读 manifest](../evidence/pay-failover-products-20261022/products.json)。Owner 已授权建立这 12 个测试一次性 USD 商品，主窗口已完成创建及逐个回读核对；本脚本不读取供应商密钥。
 
@@ -28,6 +28,8 @@
 失败时事务整体回滚。成功后若需撤回映射，不删除已可能被订单引用的付款事实；交总控核对是否被引用，再做单独的受控前向处理。
 
 ## 本地验证
+
+Owner再次改号为0333；以下是改号前0332版本的历史验证，等待#1238合并同步后重新运行，不作为0333最终证据。
 
 独立测试命令：`node packages/db/tests/pay-failover-mapping/run-local.mjs --local-only`。只使用临时本地 PostgreSQL，不加载远程密钥，不调用供应商 API，不刷新迁移指纹。
 

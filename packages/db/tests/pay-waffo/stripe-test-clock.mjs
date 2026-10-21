@@ -109,7 +109,7 @@ export async function stripeTestClockCases({admin,service,connect},method='card'
     refunds:[{id:'re_close_'+close.o.id.replaceAll('-',''),amount:3190,createdAt:start.toISOString()}]};
   const finish=(db=service,p=closeFacts)=>db.query('SELECT pay_stripe_test_clock_close_refunded($1) v',[p]);
   if(method==='card_cn') {
-    await assert.rejects(()=>finish(),/TEST_CLOCK_CLOSE/,'0332 does not extend MP first-payment cash close');
+    await assert.rejects(()=>finish(),/TEST_CLOCK_CLOSE/,'0333 does not extend MP first-payment cash close');
     for(const role of ['anon','authenticated']) {
       await service.query(`SET ROLE ${role}`);
       await assert.rejects(()=>observe(close,future),/permission denied/);
