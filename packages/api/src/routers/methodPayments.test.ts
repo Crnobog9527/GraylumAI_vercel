@@ -12,10 +12,10 @@ const mocks = vi.hoisted(() => ({ cancel: vi.fn(), provider: vi.fn(), wallet: vi
 vi.mock('../services/payments/methodMembership', () => ({ readMethodMembership: mocks.membership }));
 vi.mock('../services/payments/stripeCheckoutPersistence', () => ({ resolveStripeScope: mocks.scope }));
 vi.mock('../services/payments/waffoTestOperationsClient', () => ({ getWaffoTestOperationsClient: mocks.provider }));
-// Every new checkout is closed in code during PR-1; the error-mapping tests open the gate explicitly.
+// Keep the real environment binding unless a test opens the gate to isolate later checkout handling.
 vi.mock('../services/payments/methodCheckoutGate', async (load) => {
   const real = await load<typeof import('../services/payments/methodCheckoutGate')>();
-  return { ...real, assertMethodCheckoutEnvironment: (env: Record<string, string | undefined>, method: 'card') => {
+  return { ...real, assertMethodCheckoutEnvironment: (env: Record<string, string | undefined>, method: 'card' | 'card_cn' | 'wechat_pay' | 'alipay') => {
     if (!mocks.gateOpen.value) real.assertMethodCheckoutEnvironment(env, method);
   } };
 });
@@ -159,11 +159,18 @@ it('checks the route switch and version before the wallet checkout', async () =>
     .resolves.toEqual({ orderId: 'order', state: 'open', url: 'https://checkout.stripe.com/c/pay/x', checkoutValue: null });
   expect(mocks.wallet).toHaveBeenCalledWith(expect.objectContaining({ userId, termsVersion: 'terms-test', purchase: wallet }));
 });
-it('does not open Stripe wallets while the code gate is closed', async () => {
+it('opens an enabled Stripe wallet checkout through the bound staging environment gate', async () => {
   stubStaging();
   const f = fixture('user', settings(true));
+  await expect(f.caller.methodCheckout(wallet))
+    .resolves.toEqual({ orderId: 'order', state: 'open', url: 'https://checkout.stripe.com/c/pay/x', checkoutValue: null });
+  expect(mocks.wallet).toHaveBeenCalledWith(expect.objectContaining({ userId, termsVersion: 'terms-test', purchase: wallet }));
+});
+it('keeps staging wallet checkout closed while its route switch is off', async () => {
+  stubStaging();
+  const f = fixture('user', settings(false));
   await expect(f.caller.methodCheckout(wallet)).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
-  expect(f.from.mock.calls.every(([table]) => table === 'profiles')).toBe(true);
+  expect(f.from.mock.calls.map(([table]) => table)).toContain('system_settings');
   expect(mocks.wallet).not.toHaveBeenCalled();
 });
 it('logs the secret-free failure reason that the generic 503 hides', async () => {
