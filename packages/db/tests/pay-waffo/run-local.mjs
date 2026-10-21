@@ -25,6 +25,7 @@ import { stripeMpSubscriptionRefundCases } from './stripe-mp-subscription-refund
 import { stripeMpLiveCases } from './stripe-mp-live.mjs';
 import { stripeMpLiveRefundCases } from './stripe-mp-live-refunds.mjs';
 import { stripeMpWalletRefundCases } from './stripe-mp-wallet-refund.mjs';
+import { stripeTestClockCases } from './stripe-test-clock.mjs';
 import { POSTGRES_IMAGE } from '../v3/images.mjs';
 import { buildFromFiles, installPgCronStub } from '../baseline/build-from-files.mjs';
 
@@ -129,6 +130,7 @@ try {
   cases.push(...await stripeMpLiveCases({admin,service}));
   cases.push(...await stripeMpLiveRefundCases({admin,service}));
   cases.push(...await stripeMpWalletRefundCases({admin,service}));
+  cases.push(...await stripeTestClockCases({admin,service,connect}));
   console.log(JSON.stringify({result:'PASS',replay:report,
     cases:['event-idempotency','event-conflict','test-live-isolation','refund-event-not-payment-dedup',
       'service-only-receipt','durable-lookup-refs-no-contact-data','route-version-cas','route-delete-denied',...scopedCases,...cases]}));

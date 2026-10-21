@@ -35,6 +35,7 @@ export async function readCardPaymentEvidence(input: {
   stripe: Pick<Stripe, 'checkout' | 'subscriptions' | 'invoices' | 'paymentIntents' | 'charges'>; scope: StripeScope;
   order: CardOrder; priceId: string; sessionId: string;
   onValidatedSession?: (session: Stripe.Checkout.Session) => void;
+  testClock?: { customerId: string; clockId: string };
 }): Promise<CardPaymentEvidence | null> {
   const { stripe, scope, order } = input;
   if (order.payment_channel !== 'stripe' || order.payment_mode !== scope.mode || order.merchant_namespace !== scope.merchant
@@ -46,6 +47,7 @@ export async function readCardPaymentEvidence(input: {
   if (session.object !== 'checkout.session' || session.id !== input.sessionId || session.livemode !== (scope.mode === 'live')
     || session.client_reference_id !== order.user_id || session.metadata?.userId !== order.user_id
     || session.metadata?.orderId !== order.id || session.mode !== (membership ? 'subscription' : 'payment')
+    || (input.testClock && id(session.customer) !== input.testClock.customerId)
     || managed !== (order.payment_method === 'card')
     || (order.payment_method === 'card_cn' && (session.payment_method_types.length !== 1 || session.payment_method_types[0] !== 'card'))) {
     throw new Error(PAYMENT_EVIDENCE_CONFLICT);
@@ -68,6 +70,7 @@ async function readSubscriptionPayment(input: Parameters<typeof readCardPaymentE
   if (subscription.object !== 'subscription' || subscription.id !== subscriptionId
     || subscription.livemode !== (scope.mode === 'live')
     || subscription.metadata?.orderId !== order.id || subscription.metadata?.userId !== order.user_id
+    || (input.testClock && id(subscription.test_clock) !== input.testClock.clockId)
     || id(subscription.customer) !== id(session.customer) || !item || item.price?.id !== input.priceId || item.quantity !== 1
     || (subscription.managed_payments?.enabled === true) !== (order.payment_method === 'card')) {
     throw new Error(PAYMENT_EVIDENCE_CONFLICT);
@@ -78,6 +81,7 @@ async function readSubscriptionPayment(input: Parameters<typeof readCardPaymentE
   const taxes = (invoice.total_taxes ?? []).reduce((sum, row) => sum + (row.amount ?? 0), 0);
   const line = invoice.lines?.data?.length === 1 && !invoice.lines.has_more ? invoice.lines.data[0] : null;
   if (invoice.object !== 'invoice' || invoice.id !== invoiceId || invoice.livemode !== (scope.mode === 'live')
+    || (input.testClock && (id(invoice.test_clock) !== input.testClock.clockId || id(invoice.customer) !== input.testClock.customerId))
     || invoice.status !== 'paid'
     || invoice.billing_reason !== 'subscription_create' || invoice.currency !== 'usd' || invoice.amount_paid !== invoice.amount_due
     || id(invoice.parent?.subscription_details?.subscription) !== subscriptionId

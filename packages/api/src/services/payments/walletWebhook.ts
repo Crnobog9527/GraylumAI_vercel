@@ -10,6 +10,8 @@ import { stopPriorAfterUpgrade } from './cardUpgrade';
 import { stopUndeliveredSubscription } from './cardSubscriptionStop';
 import { readDisputePayment } from './disputePayment';
 import { resumeOrderDisputes, type DisputeAlert } from './disputes';
+import { observeStripeTestClock } from './stripeTestClock';
+import { closeRefundedTestClockCheckout } from './stripeTestClockClose';
 import { reportGaPurchase } from '../analytics/gaPurchase';
 
 const isCard = (method: string) => method === 'card' || method === 'card_cn';
@@ -68,12 +70,14 @@ export async function recoverMethodCheckout(db: SupabaseClient, stripe: Stripe, 
   if (order.payment_mode !== scope.mode || !['wechat_pay', 'alipay', 'card', 'card_cn'].includes(order.payment_method)) {
     throw new Error('PAY_WAFFO_PAYMENT_CONFLICT');
   }
+  const priceId = isCard(order.payment_method) ? await orderPriceId(db, order) : null;
+  const clock = isCard(order.payment_method) ? await observeStripeTestClock(db, stripe, scope, order) : null;
   let observed: Pick<Stripe.Checkout.Session, 'status' | 'payment_status'> | null = null;
   let failedAttempt: string | null = null;
   const onValidatedSession = (value: Stripe.Checkout.Session) => { observed = value; };
   const cash: CardPaymentEvidence | Awaited<ReturnType<typeof readWalletPaymentEvidence>> = isCard(order.payment_method)
     ? await readCardPaymentEvidence({ stripe, scope, order: order as CardOrder, sessionId, onValidatedSession,
-      priceId: await orderPriceId(db, order) })
+      priceId: priceId!, ...(clock ? { testClock: clock } : {}) })
     : await readWalletPaymentEvidence({ stripe, scope, order, sessionId, onValidatedSession,
       onFailedAttempt: value => { failedAttempt = value; } });
   if (recoveredSession) {
@@ -82,6 +86,12 @@ export async function recoverMethodCheckout(db: SupabaseClient, stripe: Stripe, 
     if (bound.error) throw new Error('PAY_WAFFO_CHECKOUT_UNAVAILABLE');
   }
   const validated = observed as Pick<Stripe.Checkout.Session, 'status' | 'payment_status'> | null;
+  // A timed-out original bind is repaired only after the same authoritative payment evidence as normal recovery.
+  if (isCard(order.payment_method)) {
+    if (await closeRefundedTestClockCheckout(db, stripe, scope, order, sessionId, priceId!)) {
+      return { orderId: order.id, checkoutStatus: 'complete', paymentStatus: 'paid' };
+    }
+  }
   if (!cash) {
     if (failedAttempt && validated?.status === 'open' && validated.payment_status === 'unpaid') {
       const failed = await db.rpc('pay_waffo_observe_qualification', { p_order: order.id, p_merchant: scope.merchant,
