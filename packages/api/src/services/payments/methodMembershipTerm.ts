@@ -13,9 +13,14 @@ function instant(value: string) {
 export function walletMembershipTerm(input: {
   paidAt: string; term: 'month' | 'year' | 'days30';
   founderRenewal?: { originalEnd: string; eligibleUntil: string };
+  walletRenewal?: { originalEnd: string };
 }) {
   const paid = instant(input.paidAt);
   let start = paid;
+  if (input.walletRenewal) {
+    if (input.founderRenewal || input.term === 'days30') throw new Error('PAY_WAFFO_TERM_INVALID');
+    start = instant(input.walletRenewal.originalEnd);
+  }
   if (input.founderRenewal) {
     if (input.term !== 'year' || paid > instant(input.founderRenewal.eligibleUntil)) {
       throw new Error('PAY_WAFFO_FOUNDER_EXPIRED');

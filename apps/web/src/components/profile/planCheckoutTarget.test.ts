@@ -24,3 +24,29 @@ describe('founder wallet renewal checkout target', () => {
       founderRenewal: { itemId: plan.id, subscriptionId: 'source', eligibleUntil: '2026-10-28T00:00:00Z' } })).toBeNull();
   });
 });
+
+describe('ordinary wallet renewal checkout target', () => {
+  const prior = { subscription_id: 'wallet-source', purchase_membership_level: 'gold', payment_method: 'alipay',
+    billing_cycle: 'monthly', offer_kind: 'gold_first30', entitlement_end: '2026-11-21T00:00:00Z',
+    auto_renew: false, cancel_at_period_end: true };
+  const action = { kind: 'wallet_renewal' as const, label: '改为年付', disabled: false as const, priorSubscriptionId: prior.subscription_id };
+  it('explains preserved time and delayed monthly credits, and names the source term', () => {
+    const target = planCheckoutTarget({ plan, billing: 'yearly', action, prior, goldFirstMonth: true, founderSeats: 0 });
+    expect(target?.purchase).toEqual({ itemType: 'membership_plan', itemId: plan.id, billingCycle: 'yearly',
+      offer: 'standard', transition: 'wallet_renewal', priorSubscriptionId: prior.subscription_id });
+    expect(target?.description).toBe('一次性付款，会员新期限从原到期日接续。');
+    expect(target?.details?.join(' ')).toContain('2026/11/21 接续');
+    expect(target?.details?.join(' ')).toContain('不会提前发放新一期积分');
+    expect(planCheckoutTarget({ plan, billing: 'monthly', action, prior, goldFirstMonth: true, founderSeats: 0 })?.purchase.offer)
+      .toBe('standard');
+  });
+  it('keeps the existing first founder annual offer and requires the matching wallet source', () => {
+    expect(planCheckoutTarget({ plan, billing: 'yearly', action, prior, goldFirstMonth: false, founderSeats: 10 })?.purchase.offer)
+      .toBe('founder');
+    expect(planCheckoutTarget({ plan, billing: 'yearly', action, prior: null, goldFirstMonth: false, founderSeats: 0 })).toBeNull();
+    expect(planCheckoutTarget({ plan, billing: 'yearly', action, prior: { ...prior, payment_method: 'card' },
+      goldFirstMonth: false, founderSeats: 0 })).toBeNull();
+    expect(planCheckoutTarget({ plan, billing: 'yearly', action, prior: { ...prior, offer_kind: 'founder' },
+      goldFirstMonth: false, founderSeats: 0 })).toBeNull();
+  });
+});

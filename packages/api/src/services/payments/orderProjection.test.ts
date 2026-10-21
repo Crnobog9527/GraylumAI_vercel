@@ -20,6 +20,7 @@ it('shows a released unpaid checkout as closed while the stored pending state st
   expect(projectBillingStatus(closed)).toBe('expired');
   expect(projectBillingStatus({ ...closed, method_review_reason: 'verified_checkout_absent' })).toBe('expired');
   expect(projectBillingStatus({ ...closed, method_review_reason: 'card_checkout_rejected' })).toBe('failed');
+  expect(projectBillingStatus({ ...closed, method_review_reason: 'async_payment_failed' })).toBe('failed');
   // Still open, or money observed after the close: never hidden as closed.
   expect(projectBillingStatus({ ...closed, qualification_state: 'reserved', purchase_closed_at: null })).toBe('pending');
   expect(projectBillingStatus({ ...closed, payment_status: 'paid' })).toBe('pending');
@@ -27,4 +28,13 @@ it('shows a released unpaid checkout as closed while the stored pending state st
   expect(projectBillingStatus({ ...closed, fulfilled_at: '2026-10-11T16:50:00Z' })).toBe('pending');
   expect(projectBillingStatus({ ...closed, status: 'completed' })).toBe('completed');
   expect(projectBillingStatus({ status: 'pending' })).toBe('pending');
+});
+it('immediately displays a failed wallet attempt while its open checkout remains reserved for retry', () => {
+  const retryable = { status: 'pending', payment_status: 'unpaid', fulfilled_at: null, qualification_state: 'reserved',
+    purchase_closed_at: null, method_review_reason: 'wallet_payment_failed' };
+  expect(projectBillingStatus(retryable)).toBe('failed');
+  expect(projectBillingStatus({ ...retryable, payment_status: 'paid' })).toBe('pending');
+  expect(projectBillingStatus({ ...retryable, status: 'completed', payment_status: 'paid', fulfilled_at: '2026-10-21T00:00:00Z' }))
+    .toBe('completed');
+  expect(projectBillingStatus({ ...retryable, qualification_state: 'review' })).toBe('pending');
 });

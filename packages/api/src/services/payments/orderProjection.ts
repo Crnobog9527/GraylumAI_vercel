@@ -25,14 +25,17 @@ export function projectOrderPayment(order: Order, documents?: Documents) {
 type ClosedOrder = { status: string; payment_status?: string | null; fulfilled_at?: string | null;
   qualification_state?: string | null; purchase_closed_at?: string | null; method_review_reason?: string | null };
 
-/** Display only. A method order whose unpaid checkout was released (0204/0211 close paths) keeps
- * status=pending in the database so a late payment still lands in manual review; the customer sees
- * it as closed. Any recorded payment or fulfilment takes the order out of this projection. */
+/** Display only. A failed wallet attempt remains reserved/pending so the same checkout can succeed on retry.
+ * Released unpaid checkouts (0204/0211) stay pending for late-payment review but display as closed.
+ * Any recorded payment or fulfilment takes the order out of either unpaid projection. */
 export function projectBillingStatus(order: ClosedOrder): PaymentOrderStatus {
   const status = normalizePaymentOrderStatus(order.status);
-  if (status !== 'pending' || order.payment_status !== 'unpaid' || order.fulfilled_at
-    || order.qualification_state !== 'released' || !order.purchase_closed_at) return status;
-  return order.method_review_reason === 'card_checkout_rejected' ? 'failed' : 'expired';
+  if (status !== 'pending' || order.payment_status !== 'unpaid' || order.fulfilled_at) return status;
+  if (order.qualification_state === 'reserved' && !order.purchase_closed_at && order.method_review_reason === 'wallet_payment_failed') {
+    return 'failed';
+  }
+  if (order.qualification_state !== 'released' || !order.purchase_closed_at) return status;
+  return ['card_checkout_rejected', 'async_payment_failed'].includes(order.method_review_reason ?? '') ? 'failed' : 'expired';
 }
 
 export type BillingRecord = ReturnType<typeof projectOrderPayment> & {
@@ -53,6 +56,7 @@ export type BillingRecord = ReturnType<typeof projectOrderPayment> & {
 };
 
 export type PaymentOrderBillingRow = {
+  payment_method?: string | null;
   user_id?: string;
   payment_amount_facts?: unknown;
   payment_channel?: string | null;

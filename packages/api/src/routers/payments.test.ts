@@ -2402,6 +2402,7 @@ describe('paymentsRouter error sanitization', () => {
       caller.syncCheckoutSession({ sessionId: 'cs_test_sync_subscription' }),
     ).resolves.toEqual({
       sessionId: 'cs_test_sync_subscription',
+      paymentMethod: null,
       mode: 'subscription',
       checkoutStatus: 'complete',
       paymentStatus: 'paid',
@@ -2540,6 +2541,7 @@ describe('paymentsRouter error sanitization', () => {
       caller.syncCheckoutSession({ sessionId: 'cs_test_sync_duplicate_orders' }),
     ).resolves.toEqual({
       sessionId: 'cs_test_sync_duplicate_orders',
+      paymentMethod: null,
       mode: 'subscription',
       checkoutStatus: 'complete',
       paymentStatus: 'paid',
@@ -2745,6 +2747,7 @@ describe('paymentsRouter error sanitization', () => {
       }),
     ).resolves.toEqual({
       sessionId: 'cs_test_canceled_return',
+      paymentMethod: null,
       mode: 'payment',
       checkoutStatus: 'open',
       paymentStatus: 'unpaid',
@@ -3671,7 +3674,7 @@ describe('PAY-STRIPE-MP browser checkout return', () => {
   it('syncs a card or wallet order through the method recovery, never the legacy recording', async () => {
     methodState.recover.mockResolvedValue({ orderId: 'order-card' });
     const h = harness({ status: 'completed', fulfilled_at: '2026-10-13T00:00:00.000Z' });
-    await expect(h.caller.syncCheckoutSession({ sessionId: 'cs_card' })).resolves.toEqual({ sessionId: 'cs_card', mode: 'subscription',
+    await expect(h.caller.syncCheckoutSession({ sessionId: 'cs_card' })).resolves.toEqual({ sessionId: 'cs_card', paymentMethod: null, mode: 'subscription',
       checkoutStatus: 'complete', paymentStatus: 'paid', orderStatus: 'completed', fulfilledAt: '2026-10-13T00:00:00.000Z',
       stripeSubscriptionId: null, stripeInvoiceId: null });
     expect(methodState.recover).toHaveBeenCalledWith(h.admin, expect.anything(), 'cs_card');

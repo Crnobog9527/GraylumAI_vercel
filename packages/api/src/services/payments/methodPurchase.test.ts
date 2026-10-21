@@ -11,6 +11,18 @@ it('requires explicit consent and rejects client prices or provider scope', () =
   expect(methodPurchaseInputSchema.safeParse({ ...purchase, amount: 1 }).success).toBe(false);
   expect(methodPurchaseInputSchema.safeParse({ ...purchase, merchantNamespace: 'attacker' }).success).toBe(false);
 });
+it.each(['wechat_pay', 'alipay'] as const)('passes %s advance renewal through the controlled transition', async method => {
+  const rpc = vi.fn().mockResolvedValue({ data: { id, user_id: id }, error: null });
+  const renewal = { ...purchase, method, offer: 'standard' as const, billingCycle: 'yearly' as const,
+    transition: 'wallet_renewal' as const, priorSubscriptionId: id };
+  expect(methodPurchaseInputSchema.safeParse({ ...renewal, priorSubscriptionId: undefined }).success).toBe(false);
+  expect(methodPurchaseInputSchema.safeParse({ ...renewal, entitlementStart: '2027-01-01' }).success).toBe(false);
+  await prepareMethodPurchase({ admin: { rpc } as never, userId: id, purchase: renewal,
+    merchantNamespace: 'fixture', paymentMode: 'test', termsVersion: 'terms-v1' });
+  expect(rpc).toHaveBeenCalledWith('pay_waffo_create_transition', expect.objectContaining({
+    p_user: id, p_prior: id, p_transition: 'wallet_renewal', p_method: method, p_cycle: 'yearly', p_offer: 'standard',
+  }));
+});
 it('uses the server Stripe scope (test or live) and authenticated identity for reservations', async () => {
   const rpc = vi.fn().mockResolvedValue({ data: { id, user_id: id }, error: null });
   const input = { admin: { rpc } as never, userId: id, purchase, merchantNamespace: 'fixture',

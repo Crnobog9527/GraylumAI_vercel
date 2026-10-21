@@ -3,6 +3,7 @@
   "framework": "nextjs",
   "git": {
     "deploymentEnabled": {
+      "codex/pay-stripe-mp-wallet-fixes": false,
       "codex/agent-core-reliability-20261020": false,
       "main": true,
       "codex/consumption-read-contract-20260910": false,

@@ -56,6 +56,12 @@ describe('Stripe external identity authority', () => {
     await expect(resolveStripeOrderIds(database([...refs.slice(0, 3), ...subscriptions]), order))
       .rejects.toThrow('PAY_COMMON_SUBSCRIPTION_MAPPING_MISSING');
   });
+  it.each(['wechat_pay', 'alipay'])('resolves %s one-time membership without a Stripe subscription', async payment_method => {
+    const db = database(refs.filter(row => !['subscription', 'invoice'].includes(String(row.object_type))));
+    await expect(resolveStripeOrderIds(db, { ...order, payment_method })).resolves.toMatchObject({
+      stripe_checkout_session_id: 'cs_original', stripe_subscription_id: null,
+    });
+  });
   it('rejects unknown order identity and mapping read failures', async () => {
     await expect(resolveStripeOrderIds(database(refs), { ...order, payment_channel: 'unknown' }))
       .rejects.toThrow('PAY_COMMON_ORDER_IDENTITY_UNKNOWN');
