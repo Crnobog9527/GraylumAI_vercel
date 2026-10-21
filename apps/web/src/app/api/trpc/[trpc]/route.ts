@@ -3,6 +3,7 @@ import { after, type NextRequest } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
 import { appRouter } from '@repo/api/src/root';
+import { withPlatformSecretRequest } from '@repo/api/src/services/platformSecrets/request';
 import { createTRPCContext,createRuntimeBudget,withRuntimeBudget } from '@repo/api/src/trpc';
 
 export const maxDuration = 300;
@@ -64,7 +65,7 @@ const handler = async (req: NextRequest) => {
     // Timing is measurement only; the maintenance check parses paths again.
   }
   try {
-    return await runtimeBudget.timing.run(() => handleTrpc(req, runtimeBudget));
+    return await withPlatformSecretRequest(() => runtimeBudget.timing.run(() => handleTrpc(req, runtimeBudget)));
   } finally {
     runtimeBudget.timing.release();
   }

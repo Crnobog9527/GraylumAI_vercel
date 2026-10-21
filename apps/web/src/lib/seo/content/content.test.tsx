@@ -95,7 +95,10 @@ describe.each(ARTICLES.map(content => [content.path, content] as const))('public
     // The author attribution itself links to About (SEO_GEO_SPEC 7.5).
     expect(html).toContain(`<a href="${SITE_CHROME[content.locale].company[0].href}" rel="author"`);
     expect(html).toContain(`>${SITE_CHROME[content.locale].authorLabel}</a>`);
-    expect(html).toContain(`lang="${content.locale === 'zh-TW' ? 'zh-Hant-TW' : 'zh-Hans'}"`);
+    // The page language is on the document, set by the root layout of the page's section (app/zh-tw for Taiwan
+    // pages, app/(zh-hans) for the rest), so the page carries no language wrapper of its own.
+    expect(html).not.toMatch(/lang="zh-H/);
+    expect(content.path === '/zh-tw' || content.path.startsWith('/zh-tw/')).toBe(content.locale === 'zh-TW');
     const data = JSON.parse(html.match(/<script type="application\/ld\+json">(.*?)<\/script>/)![1]);
     const faq = data.find((item: { '@type': string }) => item['@type'] === 'FAQPage');
     expect(faq?.mainEntity.map((item: { name: string }) => item.name)).toEqual(content.faq?.map(item => item.question));

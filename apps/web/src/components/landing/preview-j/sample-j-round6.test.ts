@@ -58,7 +58,7 @@ describe('style sample J, round six (Owner 2026-10-15)', () => {
     expect(html).not.toContain('用户案例');
     expect(html).not.toContain('href="/landing/samples"');
     expect(html).not.toMatch(/href="\/en/);
-    // The refund policy page exists (src/app/refund), so it is no longer pending (review on #1088).
+    // The refund policy page exists (src/app/(zh-hans)/refund), so it is no longer pending (review on #1088).
     expect(J_PENDING_PAGES).not.toContain('/refund');
   });
 });

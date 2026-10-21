@@ -3,7 +3,7 @@
 
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { Check, FileText, Loader2, Sparkles } from 'lucide-react';
-import { MentorMarkdown } from '@/app/app/positioning/[draftId]/MentorMarkdown';
+import { MentorMarkdown } from '@/app/(zh-hans)/app/positioning/[draftId]/MentorMarkdown';
 import { DEMO_LABEL } from '@/components/landing/demo/demo-script';
 import { CaptureChecklist } from '@/components/opc/capture-checklist';
 import { DraftRow } from '@/components/opc/draft-row';

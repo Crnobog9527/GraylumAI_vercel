@@ -2,7 +2,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import sitemap from '@/app/sitemap';
-import { metadata } from '@/app/landing/preview/k/page';
+import { metadata } from '@/app/(zh-hans)/landing/preview/k/page';
 import { SampleJ } from '@/components/landing/preview-j/SampleJ';
 import { J_COMPARE } from '@/lib/landing/landing-copy-j-compare';
 import { J_PRICE_TOTAL } from '@/lib/landing/landing-copy-j-price';

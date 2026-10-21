@@ -14,11 +14,11 @@ const read = (path: string) => readFileSync(join(web, path), 'utf8');
 
 describe('sample L\'s edit mode (Owner 2026-10-18): the preview page only, a local development server only', () => {
   it('is mounted by the preview page alone, behind the development check; never by SampleL or /landing', () => {
-    const preview = read('src/app/landing/preview/l/page.tsx');
+    const preview = read('src/app/(zh-hans)/landing/preview/l/page.tsx');
     expect(preview).toMatch(/process\.env\.NODE_ENV === 'development'\s*\?\s*dynamic\(\(\) => import\('@\/components\/landing\/preview-l\/OwnerEditL'\)/);
     // The live landing page, and everything sample L is built from (which #1088 turns into it), carry none of it: only a
     // passive check of the editing mark (use-owner-editing), which nothing outside a development server ever sets.
-    expect(read('src/app/landing/page.tsx')).not.toMatch(/OwnerEdit|owner-edits|改字/);
+    expect(read('src/app/(zh-hans)/landing/page.tsx')).not.toMatch(/OwnerEdit|owner-edits|改字/);
     const parts = readdirSync(join(web, 'src/components/landing/preview-l'))
       .filter(name => /\.tsx?$/.test(name) && !name.includes('.test.') && !['OwnerEditL.tsx', 'demo-copy-l.ts'].includes(name));
     for (const name of parts) expect(read(`src/components/landing/preview-l/${name}`), name).not.toMatch(/OwnerEdit[JL]|owner-edits|demo-copy-l/);

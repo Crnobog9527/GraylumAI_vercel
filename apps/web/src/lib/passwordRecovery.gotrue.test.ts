@@ -103,7 +103,7 @@ async function requestAndOpenLink(requester: SupabaseClient, email: string) {
 async function routeCallback(landing: URL, opener: SupabaseClient | null) {
   process.env.NEXT_PUBLIC_SUPABASE_URL ??= 'http://gotrue.local';
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ??= 'local-anon';
-  const { GET } = await import('@/app/auth/callback/route');
+  const { GET } = await import('@/app/(zh-hans)/auth/callback/route');
   browser.current = opener;
   const to = new URL((await GET(new NextRequest(landing.toString()))).headers.get('location')!);
   return `${to.pathname}${to.search}`;

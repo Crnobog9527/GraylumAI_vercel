@@ -7,6 +7,7 @@ const s = vi.hoisted(() => ({
   gate: { positioned: false, refusals24h: 0 } as { positioned: boolean; refusals24h: number },
   begin: {} as Record<string, unknown>, rpcs: [] as Array<{ name: string; args: Record<string, unknown> }>, claim: { state: 'claimed' } as Record<string, unknown>,
   tooLarge: [] as string[], allowed: null as Error | null, endFails: false, existing: null as unknown, probes: 0, admitError: null as Error | null, credits: 10, budget: '1' as string | null, usd: 0n, requests: [] as Array<{ instructions: string }>, admitCalls: [] as unknown[], replayOnly: false,
+  archiveAt: null as string | null, cleanupFails: false, replayError: null as Error | null,
 }));
 vi.mock('./compareAdmission', async original => ({ ...(await original<typeof import('./compareAdmission')>()),
   assertCompareAllowed: async () => { if (s.allowed) throw s.allowed; return { answerOutputTokens: 4096, dispatchMinutes: 10, maxBudgetUsd: s.budget }; },
@@ -15,12 +16,14 @@ vi.mock('./compareAdmission', async original => ({ ...(await original<typeof imp
     return { columns: input.modelIds.map((modelId, index) => ({ index, modelId, upperCredits: s.credits, upperUsd: '0.01' })), tooLarge: s.tooLarge,
       totalCredits: s.credits * input.modelIds.length, totalUsd: s.usd };
   },
-  replayCompareGroup: async () => { s.probes += 1; return s.existing; },
+  replayCompareGroup: async () => { s.probes += 1; if (s.replayError) throw s.replayError; return s.existing; },
   admitCompareGroup: async (input: { request: { instructions: string }; shown: unknown }) => { s.admitCalls.push(input); if (s.admitError) throw s.admitError;
     return { groupId: id(70), replayed: false, runs: [{ runId: id(80), index: 0, body: 'b', call: { phase: 'fusion_compare' } },
       { runId: id(81), index: 1, body: 'b', call: { phase: 'fusion_compare' } }] }; },
   compareRpc: async (_a: unknown, name: string, args: Record<string, unknown>) => {
     s.rpcs.push({ name, args });
+    if (name === s.archiveAt) throw new Error('OPC_BUSINESS_ARCHIVED');
+    if (name === 'fusion_compare_stop_archived' && s.cleanupFails) throw new Error('FUSION_ADMISSION_UNAVAILABLE');
     if (name === 'fusion_compare_begin') { if ((s.begin as { __throw?: boolean }).__throw) throw s.begin as unknown as Error; return s.begin; }
     if (name === 'fusion_compare_claim') return s.claim;
     if (name === 'fusion_compare_end' && s.endFails) throw new Error('end failed');
@@ -52,6 +55,48 @@ beforeEach(() => {
   s.gate = { positioned: false, refusals24h: 0 }; s.begin = fresh(); s.rpcs = []; s.claim = { state: 'claimed' }; s.tooLarge = []; s.credits = 10;
   s.requests = []; s.admitCalls = []; classify.mockReset(); classify.mockResolvedValue('allow'); s.budget = '1'; s.usd = 0n; s.endFails = false; s.existing = null; s.probes = 0; s.admitError = null; s.allowed = null;
   rateLimit.mockReset(); rateLimit.mockResolvedValue(undefined);
+  s.archiveAt = null; s.cleanupFails = false; s.replayError = null;
+});
+
+describe('archived compare cleanup', () => {
+  it('cleans by request id when the admission replay probe itself refuses', async () => {
+    s.replayError = new Error('OPC_BUSINESS_ARCHIVED');
+    await expect(start()).rejects.toThrow('OPC_BUSINESS_ARCHIVED');
+    expect(names()).toEqual(['fusion_compare_stop_archived']);
+  });
+  it('cleans the record when group admission refuses after the judgement', async () => {
+    s.admitError = new Error('OPC_BUSINESS_ARCHIVED');
+    await expect(start()).rejects.toThrow('OPC_BUSINESS_ARCHIVED');
+    expect(names().at(-1)).toBe('fusion_compare_stop_archived');
+    expect(names()).not.toContain('fusion_compare_claim');
+  });
+  it.each(['fusion_compare_begin', 'fusion_compare_gate', 'fusion_compare_claim'])(
+    'ends the persisted request when %s refuses after archive, including runs without any call', async stage => {
+      s.archiveAt = stage;
+      await expect(start()).rejects.toThrow('OPC_BUSINESS_ARCHIVED');
+      expect(s.rpcs.at(-1)).toEqual({ name: 'fusion_compare_stop_archived', args: { p_actor_id: id(50), p_request_id: id(60) } });
+    });
+  it('retries the same cleanup even when replay refuses before returning a compare id', async () => {
+    s.existing = { groupId: id(70), replayed: true, runs: [] }; s.archiveAt = 'fusion_compare_begin';
+    await expect(start()).rejects.toThrow('OPC_BUSINESS_ARCHIVED');
+    await expect(start()).rejects.toThrow('OPC_BUSINESS_ARCHIVED');
+    expect(names().filter(name => name === 'fusion_compare_stop_archived')).toHaveLength(2);
+    expect(names()).not.toContain('fusion_compare_claim');
+  });
+  it('surfaces cleanup unavailability and retries cleanup on the original request, without another admission', async () => {
+    s.archiveAt = 'fusion_compare_claim'; s.cleanupFails = true;
+    await expect(start()).rejects.toThrow('FUSION_ADMISSION_UNAVAILABLE');
+    s.existing = { groupId: id(70), replayed: true, runs: [] }; s.archiveAt = 'fusion_compare_begin'; s.cleanupFails = false;
+    const admitted = s.admitCalls.length;
+    await expect(start()).rejects.toThrow('OPC_BUSINESS_ARCHIVED');
+    expect(s.admitCalls).toHaveLength(admitted);
+    expect(names().filter(name => name === 'fusion_compare_stop_archived')).toHaveLength(2);
+  });
+  it('keeps non-archive refusals on their existing path', async () => {
+    s.admitError = new Error('FUSION_COMPARE_STALE');
+    await expect(start()).rejects.toThrow('FUSION_COMPARE_STALE');
+    expect(names()).not.toContain('fusion_compare_stop_archived');
+  });
 });
 
 describe('compare estimate', () => {

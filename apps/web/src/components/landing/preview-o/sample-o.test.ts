@@ -2,7 +2,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import sitemap from '@/app/sitemap';
-import { metadata } from '@/app/landing/preview/o/page';
+import { metadata } from '@/app/(zh-hans)/landing/preview/o/page';
 import { RISK_REVERSAL, VOICE_WALL } from '@/lib/landing/landing-copy';
 import { J_NOTE_ANSWERS } from '@/lib/landing/landing-copy-j';
 import { L_CARE, L_COMPARE_NEXT, L_HERO_FLOW, L_NOTE_REGIONS, L_OPS, L_REPORTS } from '@/lib/landing/landing-copy-l';

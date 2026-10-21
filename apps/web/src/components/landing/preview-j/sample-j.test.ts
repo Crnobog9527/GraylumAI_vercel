@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
 import sitemap from '@/app/sitemap';
-import { metadata } from '@/app/landing/preview/j/page';
+import { metadata } from '@/app/(zh-hans)/landing/preview/j/page';
 import { H_COMPARE, HERO, PRICE_COMPARE, RISK_REVERSAL, VOICE_WALL } from '@/lib/landing/landing-copy';
 import * as copyJ from '@/lib/landing/landing-copy-j';
 import { J_FAQ_REWORDS, J_FINAL, J_HERO_PROMISE, J_ID_PLACEHOLDER, J_NOTE_HEADS, J_PRICE, J_TAKEOVER, noteSource } from '@/lib/landing/landing-copy-j';

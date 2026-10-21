@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from "vitest";
-import { readMentorTurn } from "@/app/app/positioning/[draftId]/mentor-response";
+import { readMentorTurn } from "@/app/(zh-hans)/app/positioning/[draftId]/mentor-response";
 import {
   AGENT_TURN_BODY_LIMIT,
   AGENT_TURN_FORMAT,

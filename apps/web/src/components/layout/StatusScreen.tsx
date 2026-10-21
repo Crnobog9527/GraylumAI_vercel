@@ -9,10 +9,19 @@ interface StatusScreenProps {
   icon: ReactNode;
   onRetry?: () => void;
   reference?: string;
+  /** Button and reference wording; Simplified by default, Traditional on /zh-tw pages. */
+  labels?: StatusScreenLabels;
 }
 
+export type StatusScreenLabels = { retry: string; home: string; homeHref: string; reference: string };
+
+const SIMPLIFIED_LABELS: StatusScreenLabels = { retry: '重试', home: '返回首页', homeHref: '/', reference: '错误编号' };
+export const TAIWAN_LABELS: StatusScreenLabels = { retry: '重試', home: '返回首頁', homeHref: '/zh-tw', reference: '錯誤編號' };
+
 // 全站错误页和 404 页共用的展示。首页链接用普通 <a>，出错后整页重新加载更稳妥。
-export function StatusScreen({ code, title, description, icon, onRetry, reference }: StatusScreenProps) {
+export function StatusScreen({
+  code, title, description, icon, onRetry, reference, labels = SIMPLIFIED_LABELS,
+}: StatusScreenProps) {
   return (
     <main
       className="min-h-screen flex items-center justify-center p-4"
@@ -36,19 +45,19 @@ export function StatusScreen({ code, title, description, icon, onRetry, referenc
           {onRetry && (
             <Button type="button" onClick={onRetry}>
               <RefreshCw />
-              重试
+              {labels.retry}
             </Button>
           )}
           <Button asChild variant={onRetry ? 'outline' : 'default'}>
-            <a href="/">
+            <a href={labels.homeHref}>
               <Home />
-              返回首页
+              {labels.home}
             </a>
           </Button>
         </div>
         {reference && (
           <p className="text-xs mt-6" style={{ color: 'var(--text-tertiary)' }}>
-            错误编号：{reference}
+            {labels.reference}：{reference}
           </p>
         )}
       </section>
