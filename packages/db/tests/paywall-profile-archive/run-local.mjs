@@ -12,6 +12,8 @@ import pg from 'pg';
 import {POSTGRES_IMAGE} from '../v3/images.mjs';
 import {buildFromFiles,installPgCronStub} from '../baseline/build-from-files.mjs';
 import {runCases} from './cases.mjs';
+import {fusionArchiveCases} from './fusion-cases.mjs';
+import {reviewArchiveCases} from './review-cases.mjs';
 assert.ok(process.argv[2]==='--local-only'&&!process.env.CI || process.argv[2]==='--ci'&&process.env.CI,
   'use --local-only locally or --ci in CI; only an isolated local database is supported');
 const root=resolve(import.meta.dirname,'../../../..');
@@ -41,29 +43,33 @@ try {
  installPgCronStub(root,name,(args,input)=>docker(['exec',...args],input));
  const apply=input=>{try {sql(input);return {ok:true};} catch(e) {return {ok:false,error:e.message};}};
  const objects=()=>JSON.parse(sql(read('packages/db/tests/baseline/fingerprint.sql')));
- let before,after;
+ const snapshots=new Map();
+ let finalCatalog;
  const legacyActor=randomUUID(),legacyBusiness=randomUUID();
  const build=buildFromFiles(root,{applyFile:path=>{
   const migration=read(path);
-  if(!path.endsWith('_paywall_profile_archive.sql')) return apply(migration);
+  if(!/\/(0324_paywall_profile_archive|0326_paywall_fusion_archive_fence)\.sql$/.test(path)) return apply(migration);
+  if(path.includes('/0324_')) {
   sql(`INSERT INTO profiles(id) VALUES('${legacyActor}');
    INSERT INTO opc_businesses(id,actor_id,name) VALUES('${legacyBusiness}','${legacyActor}','Pre-0324 archive fixture');`);
-  before=objects();
+  }
+  const before=objects();
   const failed=apply(migration.replace(/COMMIT;\s*$/,
-   "DO $$ BEGIN RAISE EXCEPTION 'ARCHIVE_ROLLBACK_PROBE'; END $$; COMMIT;"));
+   ()=>"DO $$ BEGIN RAISE EXCEPTION 'ARCHIVE_ROLLBACK_PROBE'; END $$; COMMIT;"));
   assert.equal(failed.ok,false);
   assert.match(failed.error,/ARCHIVE_ROLLBACK_PROBE/);
   assert.deepEqual(objects(),before,'interrupted migration leaves original definitions, data shape and ACL unchanged');
   const applied=apply(migration);
   if(!applied.ok) return applied;
-  after=objects();
+  const after=objects();
+  snapshots.set(path,{before,after});
   sql(migration);
   assert.deepEqual(objects(),after,'second application preserves structure and ACL');
   return applied;
  },applyServerOnly:apply});
  assert.equal(build.failed,null,JSON.stringify(build.failed));
- assert.ok(before&&after,'migration verified at its historical position');
- const built=objects(); // Final catalog includes later migrations such as 0325.
+ assert.equal(snapshots.size,2,'0324 and 0326 verified at their historical positions');
+ finalCatalog=objects(); // Include the 0325 catalog, not only the archive migration's historical snapshot.
  assert.equal(sql(`SELECT archived_at IS NULL FROM opc_businesses WHERE id='${legacyBusiness}'`),'t');
  report.build=build;
  report.checks.push('migration interruption rolls back every catalog object','migration repeat preserves structure and ACL');
@@ -79,11 +85,13 @@ try {
    VALUES($1,$1,$2,$3,$4,$5,false,false,0) ON CONFLICT(level) DO NOTHING`,[level,monthly,annual,credits,credits*12]);
  }
  await runCases({admin,connect,report,read});
+ await fusionArchiveCases({admin,connect,report});
+ await reviewArchiveCases({admin,connect,report,read});
  const preserved=sql('SELECT jsonb_agg(to_jsonb(b) ORDER BY id) FROM opc_businesses b');
- sql(read('packages/db/migrations/0324_paywall_profile_archive.sql'));
+ sql(read('packages/db/migrations/0326_paywall_fusion_archive_fence.sql'));
  assert.equal(sql('SELECT jsonb_agg(to_jsonb(b) ORDER BY id) FROM opc_businesses b'),preserved,
   'forward recovery/reapply retains every archive, source and revision');
- assert.deepEqual(objects(),built,'archive recovery preserves the final catalog including later migrations');
+ assert.deepEqual(objects(),finalCatalog,'archive recovery preserves the final catalog including 0325');
  assert.equal(sql(read('packages/db/tests/account-open-policy-audit.sql')),'');
  report.checks.push('reapply retains archived content and releases no additional slots','account-open policy audit PASS');
  console.log(JSON.stringify({result:'PASS',...report}));
