@@ -69,11 +69,13 @@ export async function recoverMethodCheckout(db: SupabaseClient, stripe: Stripe, 
     throw new Error('PAY_WAFFO_PAYMENT_CONFLICT');
   }
   let observed: Pick<Stripe.Checkout.Session, 'status' | 'payment_status'> | null = null;
+  let failedAttempt: string | null = null;
   const onValidatedSession = (value: Stripe.Checkout.Session) => { observed = value; };
   const cash: CardPaymentEvidence | Awaited<ReturnType<typeof readWalletPaymentEvidence>> = isCard(order.payment_method)
     ? await readCardPaymentEvidence({ stripe, scope, order: order as CardOrder, sessionId, onValidatedSession,
       priceId: await orderPriceId(db, order) })
-    : await readWalletPaymentEvidence({ stripe, scope, order, sessionId, onValidatedSession });
+    : await readWalletPaymentEvidence({ stripe, scope, order, sessionId, onValidatedSession,
+      onFailedAttempt: value => { failedAttempt = value; } });
   if (recoveredSession) {
     const bound = await db.rpc('pay_waffo_bind_checkout', { p_user: order.user_id, p_order: order.id, p_merchant: scope.merchant,
       p_checkout: recoveredSession.id, p_expires: new Date(recoveredSession.expires_at * 1000).toISOString() });
@@ -81,6 +83,12 @@ export async function recoverMethodCheckout(db: SupabaseClient, stripe: Stripe, 
   }
   const validated = observed as Pick<Stripe.Checkout.Session, 'status' | 'payment_status'> | null;
   if (!cash) {
+    if (failedAttempt && validated?.status === 'open' && validated.payment_status === 'unpaid') {
+      const failed = await db.rpc('pay_waffo_observe_qualification', { p_order: order.id, p_merchant: scope.merchant,
+        p_mode: scope.mode, p_checkout: sessionId, p_state: 'failed_attempt_unpaid', p_payment: failedAttempt,
+        p_amount: 0, p_currency: 'usd', p_paid_at: null });
+      if (failed.error) throw new Error('PAY_WAFFO_CHECKOUT_UNAVAILABLE');
+    }
     if (validated?.payment_status === 'unpaid' && (validated.status === 'expired'
       || validated.status === 'complete' && verifiedEventType === 'checkout.session.async_payment_failed')) {
       const closed = await db.rpc('pay_waffo_observe_qualification', { p_order: order.id, p_merchant: scope.merchant,
@@ -94,6 +102,13 @@ export async function recoverMethodCheckout(db: SupabaseClient, stripe: Stripe, 
     return { orderId: order.id, checkoutStatus: validated?.status ?? null, paymentStatus: validated?.payment_status ?? null };
   }
   let renewal: { originalEnd: string; eligibleUntil: string } | undefined;
+  let walletRenewal: { originalEnd: string } | undefined;
+  if (order.method_transition === 'wallet_renewal') {
+    const original = await db.from('payment_orders').select('entitlement_end').eq('id', order.source_order_id)
+      .eq('user_id', order.user_id).maybeSingle();
+    if (original.error || !original.data?.entitlement_end) throw new Error('PAY_WAFFO_TERM_INVALID');
+    walletRenewal = { originalEnd: new Date(original.data.entitlement_end).toISOString() };
+  }
   if (order.method_transition === 'founder_renewal') {
     const original = await db.from('payment_orders').select('entitlement_end').eq('id', order.source_order_id)
       .eq('user_id', order.user_id).maybeSingle();
@@ -106,7 +121,7 @@ export async function recoverMethodCheckout(db: SupabaseClient, stripe: Stripe, 
   // A card subscription's term is the Stripe subscription's own current period (calendar month or year).
   const card = 'subscription' in cash ? cash.subscription : null;
   const term = card ? { start: card.start, end: card.end } : order.item_type === 'membership_plan'
-    ? walletMembershipTerm({ paidAt: cash.paidAt, term: order.entitlement_term, founderRenewal: renewal }) : null;
+    ? walletMembershipTerm({ paidAt: cash.paidAt, term: order.entitlement_term, founderRenewal: renewal, walletRenewal }) : null;
   const payment = await readDisputePayment(stripe, scope, { paymentIntentId: cash.paymentId.startsWith('pi_') ? cash.paymentId : null,
     invoiceId: cash.paymentId.startsWith('in_') ? cash.paymentId : null });
   const applied = await db.rpc('pay_dispute_fulfill', { p_facts: {

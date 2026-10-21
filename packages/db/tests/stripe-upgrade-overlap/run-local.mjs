@@ -51,13 +51,17 @@ try {
   });
   let before,after,originals,originalFunctionKeys,originalFunctionEntries;
   let walletOriginals,walletBefore,walletChangedKeys;
-  const walletMigration='packages/db/migrations/0329_pay_wallet_membership_projection.sql';
+  const walletMigration='packages/db/migrations/0330_pay_wallet_membership_projection.sql';
   const build=buildFromFiles(root,{applyFile:path=>{
     const migration=read(path);
     if(path===walletMigration) {
       walletBefore=objects();
       walletOriginals=['public.pay_common_membership_facts(uuid)',
-        'public.pay_waffo_observe_qualification(uuid,text,text,text,text,text,integer,text,timestamptz)']
+        'public.pay_waffo_observe_qualification(uuid,text,text,text,text,text,integer,text,timestamptz)',
+        'public.pay_waffo_admit_purchase(uuid,text,uuid,text,text,text,text,text,bigint,text,jsonb,text,uuid)',
+        'public.pay_waffo_fulfill_payment(uuid,text,text,text,integer,text,timestamptz,text,timestamptz,timestamptz)',
+        'public.pay_waffo_release_due(integer)',
+        'public.pay_common_package_refund_quote(uuid,uuid,uuid,jsonb,text,text)']
         .map(sig=>sql(`SELECT pg_get_functiondef('${sig}'::regprocedure);`));
       const interrupted=apply(migration.replace(/COMMIT;\s*$/,
         "DO $$ BEGIN RAISE EXCEPTION 'WALLET_ROLLBACK_PROBE'; END $$; COMMIT;"));
@@ -67,8 +71,9 @@ try {
       if(!applied.ok) return applied;
       const current=objects();
       walletChangedKeys=Object.keys(current).filter(key=>current[key]!==walletBefore[key]);
-      assert.equal(walletChangedKeys.length,2,'wallet migration only changes two function bodies');
-      assert.ok(walletChangedKeys.every(key=>key.startsWith('fn:')),'wallet migration never changes ACL');
+      assert.equal(walletChangedKeys.length,7,'wallet migration changes six function bodies and one transition constraint');
+      assert.ok(walletChangedKeys.every(key=>key.startsWith('fn:')||key==='con:payment_orders'),
+        'wallet migration never changes ACL or other schema');
       sql(migration);
       assert.deepEqual(objects(),current,'wallet second application preserves schema and ACL');
       return applied;
@@ -124,7 +129,11 @@ try {
   assert.ok(walletOriginals&&walletBefore&&walletChangedKeys,'wallet migration tested at its historical position');
   sql('BEGIN;\n'+walletOriginals.map(src=>src+';').join('\n')+'\nCOMMIT;');
   const walletRestored=objects();
-  for(const key of walletChangedKeys) assert.equal(walletRestored[key],walletBefore[key],'wallet old body restored');
+  for(const key of walletChangedKeys.filter(key=>key.startsWith('fn:'))) {
+    assert.equal(walletRestored[key],walletBefore[key],'wallet old body restored');
+  }
+  assert.equal(walletRestored['con:payment_orders'],
+    finalCatalog['con:payment_orders'],'recovery retains the constraint for paid renewal rows');
   assert.deepEqual((await data()).rows[0].v,preserved,'wallet recovery preserves paid balances and retained credit sources');
   sql(read(walletMigration));
   assert.deepEqual(objects(),finalCatalog,'wallet reapply restores complete final catalog');

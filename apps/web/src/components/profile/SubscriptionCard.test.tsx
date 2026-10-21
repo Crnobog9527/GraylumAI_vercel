@@ -469,6 +469,50 @@ describe('membership page in a local browser', () => {
     } finally { await page.close(); }
   }, 30_000);
 
+  it.each(['wechat_pay', 'alipay'])('switches a %s monthly wallet term to a queued annual term using wallets only', async payment_method => {
+    const walletPro = { ...proMember, payment_method, payment_channel: 'stripe', auto_renew: false, cancel_at_period_end: true };
+    const membership = { ...ENTRY, memberships: [walletPro], checkoutMethods: ['card', 'card_cn', 'wechat_pay', 'alipay'],
+      routes: { ...ROUTES, wechat_pay: { enabled: true, annualVerified: true }, alipay: { enabled: true, annualVerified: true } } };
+    const { page, errors } = await open({ level: 'pro', membership });
+    try {
+      await page.getByRole('radio', { name: '按年' }).click();
+      await page.getByTestId('profile-membership-plan-pro').getByRole('button', { name: '改为年付' }).click();
+      await browserExpect(page.getByTestId('method-checkout-dialog')).toContainText('2099/11/14 接续，当前剩余会员期限保留');
+      await browserExpect(page.getByTestId('method-checkout-dialog')).toContainText('不会提前发放新一期积分');
+      await browserExpect(page.getByTestId('method-checkout-method-card')).toHaveCount(0);
+      await browserExpect(page.getByTestId('method-checkout-method-card_cn')).toHaveCount(0);
+      await page.getByTestId(`method-checkout-method-${payment_method}`).click();
+      await page.getByTestId('method-checkout-terms').check();
+      await page.getByTestId('method-checkout-pay').click();
+      await browserExpect(page).toHaveURL('https://checkout.stripe.com/c/pay/cs_test_9');
+      expect(sentByPage.get(page)).toEqual([{ itemType: 'membership_plan', itemId: 'plan-pro', billingCycle: 'yearly',
+        offer: 'standard', transition: 'wallet_renewal', priorSubscriptionId: proMember.subscription_id,
+        method: payment_method, routingVersion: 7, acceptedTerms: true, termsVersion: 'terms-v3' }]);
+      expect(errors).toEqual([]);
+    } finally { await page.close(); }
+  }, 30_000);
+
+  it('keeps the current monthly summary and appends advance repurchase after an already-paid future annual term', async () => {
+    const current = { ...proMember, payment_method: 'alipay', payment_channel: 'stripe', auto_renew: false, cancel_at_period_end: true };
+    const future = { ...current, subscription_id: 'queued-sub', entitlement_start: current.entitlement_end,
+      entitlement_end: '2100-11-14T12:00:00Z', billing_cycle: 'yearly' };
+    const membership = { ...ENTRY, memberships: [future, current], checkoutMethods: ['card', 'alipay'],
+      routes: { ...ROUTES, alipay: { enabled: true, annualVerified: true } } };
+    const { page, errors } = await open({ level: 'pro', membership });
+    try {
+      await browserExpect(page.getByTestId('profile-method-memberships')).toContainText('Pro · 月付');
+      await browserExpect(page.getByTestId('profile-method-memberships')).not.toContainText('Pro · 年付');
+      await page.getByTestId('profile-membership-plan-pro').getByRole('button', { name: '提前续买一个月' }).click();
+      await browserExpect(page.getByTestId('method-checkout-dialog')).toContainText('2100/11/14 接续');
+      await page.getByTestId('method-checkout-terms').check();
+      await page.getByTestId('method-checkout-pay').click();
+      await browserExpect(page).toHaveURL('https://checkout.stripe.com/c/pay/cs_test_9');
+      expect(sentByPage.get(page)).toEqual([expect.objectContaining({ transition: 'wallet_renewal', priorSubscriptionId: 'queued-sub',
+        billingCycle: 'monthly', method: 'alipay' })]);
+      expect(errors).toEqual([]);
+    } finally { await page.close(); }
+  }, 30_000);
+
   it.each(['wechat_pay', 'alipay'])('returns a canceled %s checkout without card-country advice', async paymentMethod => {
     const { page, errors } = await open({ search: 'tab=subscription&checkout=canceled&session_id=cs_test_wallet',
       syncResult: { fulfilledAt: null, orderStatus: 'failed', paymentStatus: 'unpaid', paymentMethod } });

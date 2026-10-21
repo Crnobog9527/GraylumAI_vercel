@@ -38,6 +38,20 @@ describe('wallet callback/recovery', () => {
       orderId: 'order', start: '2028-01-31T00:00:00.000Z', end: '2028-02-29T00:00:00.000Z', paymentId: 'pi_1',
     }) }));
   });
+  it.each(['month', 'year'])('uses the original paid end for an advance wallet %s', async entitlement_term => {
+    const f = fixture({ method_transition: 'wallet_renewal', source_order_id: 'original', entitlement_term,
+      entitlement_end: '2028-02-29T00:00:00Z' });
+    await expect(f.run()).resolves.toBe(true);
+    expect(f.db.rpc).toHaveBeenCalledWith('pay_dispute_fulfill', expect.objectContaining({ p_facts: expect.objectContaining({
+      start: '2028-02-29T00:00:00.000Z', end: entitlement_term === 'year' ? '2029-02-28T00:00:00.000Z'
+        : '2028-03-29T00:00:00.000Z', paidAt: '2028-01-31T00:00:00.000Z',
+    }) }));
+  });
+  it('does not substitute the payment date when the renewal source cannot be read', async () => {
+    const f = fixture({ method_transition: 'wallet_renewal', source_order_id: 'original' });
+    await expect(f.run()).rejects.toThrow('PAY_WAFFO_TERM_INVALID');
+    expect(f.db.rpc).not.toHaveBeenCalledWith('pay_dispute_fulfill', expect.anything());
+  });
   it('reports the GA purchase only from the call that newly delivered the order (ANALYTICS 0280)', async () => {
     mocks.report.mockReset().mockResolvedValue(true);
     const first = fixture(); first.db.rpc.mockResolvedValue({ data: { state: 'fulfilled', duplicate: false }, error: null });
@@ -107,6 +121,21 @@ describe('wallet callback/recovery', () => {
     expect(f.db.rpc).toHaveBeenCalledWith('pay_waffo_observe_qualification', expect.objectContaining({
       p_state: 'closed_unpaid', p_checkout: 'cs_wallet', p_payment: null, p_amount: 0,
     }));
+  });
+  it('records a failed attempt without releasing its purchase, then delivers success from the same checkout on retry', async () => {
+    mocks.cash.mockImplementation(async input => {
+      input.onValidatedSession({ status: 'open', payment_status: 'unpaid' }); input.onFailedAttempt('pi_failed'); return null;
+    });
+    const f = fixture(); await expect(f.run()).resolves.toBe(true);
+    expect(f.db.rpc.mock.calls).toEqual([['pay_waffo_observe_qualification', expect.objectContaining({
+      p_state: 'failed_attempt_unpaid', p_payment: 'pi_failed', p_amount: 0, p_paid_at: null,
+    })]]);
+    mocks.cash.mockResolvedValue({ paymentId: 'pi_failed', checkoutId: 'cs_wallet', amount: 6900,
+      currency: 'usd', paidAt: '2028-01-31T00:00:00.000Z' });
+    await expect(f.run()).resolves.toBe(true);
+    expect(f.db.rpc).toHaveBeenLastCalledWith('pay_dispute_fulfill', expect.objectContaining({ p_facts: expect.objectContaining({
+      orderId: 'order', paymentId: 'pi_failed', checkoutId: 'cs_wallet',
+    }) }));
   });
   it('releases a complete/unpaid session only for the verified asynchronous failure event', async () => {
     mocks.cash.mockImplementation(async (input) => {

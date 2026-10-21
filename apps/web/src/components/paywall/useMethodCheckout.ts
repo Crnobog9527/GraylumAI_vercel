@@ -37,6 +37,7 @@ export function useMethodCheckout() {
     if (inFlight.current || redirecting || !checkoutEntryOpen(entry) || !acceptedTermsVersion
       || acceptedTermsVersion !== entry.termsVersion) return;
     if (!checkoutMethods(entry, purchase.itemType, purchase.billingCycle).includes(method) || locked.has(purchaseLockKey(purchase))) return;
+    if (purchase.transition === 'wallet_renewal' && method !== 'wechat_pay' && method !== 'alipay') return;
     inFlight.current = true;
     setOutcome(null);
     try {

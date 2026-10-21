@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
-import { currentMethodMembership, describeMethodMembership, methodPlanAction, parseBuyDeepLink, type MethodMembershipRow } from './methodPlanAction';
+import { currentMethodMembership, describeMethodMembership, methodPlanAction, parseBuyDeepLink, walletRenewalSource,
+  type MethodMembershipRow } from './methodPlanAction';
 
 const NOW = Date.parse('2026-10-14T00:00:00Z');
 const row = (patch: Partial<MethodMembershipRow> = {}): MethodMembershipRow => ({
@@ -43,6 +44,35 @@ describe('plan buttons', () => {
     expect(currentMethodMembership([row(), gold], NOW)).toBe(gold);
     expect(currentMethodMembership([row({ entitlement_end: '2026-10-01T00:00:00Z' })], NOW)).toBeNull();
     expect(currentMethodMembership(undefined, NOW)).toBeNull();
+  });
+
+  it.each(['wechat_pay', 'alipay'])('allows %s same-level annual switch and advance repurchase after the last paid term', payment_method => {
+    const current = row({ payment_method, payment_channel: 'stripe', auto_renew: false, cancel_at_period_end: true });
+    const source = walletRenewalSource([current], current);
+    expect(methodPlanAction({ level: 'pro', ...ready, current, billingCycle: 'yearly', walletRenewal: source, walletCheckoutReady: true }))
+      .toMatchObject({ kind: 'wallet_renewal', label: '改为年付', priorSubscriptionId: current.subscription_id });
+    expect(methodPlanAction({ level: 'pro', ...ready, current, billingCycle: 'monthly', walletRenewal: source, walletCheckoutReady: true }))
+      .toMatchObject({ kind: 'wallet_renewal', label: '提前续买一个月' });
+    const queued = row({ ...current, subscription_id: 'queued', entitlement_start: current.entitlement_end,
+      entitlement_end: '2027-11-14T12:00:00Z', billing_cycle: 'yearly' });
+    expect(currentMethodMembership([queued, current], NOW)).toBe(current);
+    expect(walletRenewalSource([queued, current], current)).toBe(queued);
+    expect(methodPlanAction({ level: 'pro', ...ready, current, billingCycle: 'yearly',
+      walletRenewal: queued, walletCheckoutReady: true })).toMatchObject({ label: '提前续买一年', priorSubscriptionId: 'queued' });
+    expect(methodPlanAction({ level: 'pro', ...ready, current, billingCycle: 'yearly',
+      walletRenewal: queued, walletCheckoutReady: false })).toMatchObject({ kind: 'none', disabled: true });
+  });
+
+  it('keeps cards and founder sources on their existing renewal paths', () => {
+    const card = row();
+    expect(walletRenewalSource([card], card)).toBeNull();
+    const founder = row({ payment_method: 'alipay', payment_channel: 'stripe', offer_kind: 'founder', auto_renew: false });
+    expect(walletRenewalSource([founder], founder)).toBeNull();
+    const ordinary = row({ ...founder, offer_kind: 'standard' });
+    const queuedFounder = row({ ...founder, entitlement_start: ordinary.entitlement_end, entitlement_end: '2027-11-14T12:00:00Z' });
+    expect(walletRenewalSource([ordinary, queuedFounder], ordinary)).toBeNull();
+    expect(methodPlanAction({ level: 'pro', ...ready, current: card, billingCycle: 'yearly',
+      walletRenewal: ordinary, walletCheckoutReady: true })).toMatchObject({ kind: 'none', label: '当前方案' });
   });
 });
 
