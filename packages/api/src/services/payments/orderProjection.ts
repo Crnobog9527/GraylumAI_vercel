@@ -32,7 +32,7 @@ export function projectBillingStatus(order: ClosedOrder): PaymentOrderStatus {
   const status = normalizePaymentOrderStatus(order.status);
   if (status !== 'pending' || order.payment_status !== 'unpaid' || order.fulfilled_at
     || order.qualification_state !== 'released' || !order.purchase_closed_at) return status;
-  return order.method_review_reason === 'card_checkout_rejected' ? 'failed' : 'expired';
+  return ['card_checkout_rejected', 'async_payment_failed'].includes(order.method_review_reason ?? '') ? 'failed' : 'expired';
 }
 
 export type BillingRecord = ReturnType<typeof projectOrderPayment> & {
@@ -53,6 +53,7 @@ export type BillingRecord = ReturnType<typeof projectOrderPayment> & {
 };
 
 export type PaymentOrderBillingRow = {
+  payment_method?: string | null;
   user_id?: string;
   payment_amount_facts?: unknown;
   payment_channel?: string | null;

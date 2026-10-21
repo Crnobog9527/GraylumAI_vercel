@@ -20,6 +20,7 @@ it('shows a released unpaid checkout as closed while the stored pending state st
   expect(projectBillingStatus(closed)).toBe('expired');
   expect(projectBillingStatus({ ...closed, method_review_reason: 'verified_checkout_absent' })).toBe('expired');
   expect(projectBillingStatus({ ...closed, method_review_reason: 'card_checkout_rejected' })).toBe('failed');
+  expect(projectBillingStatus({ ...closed, method_review_reason: 'async_payment_failed' })).toBe('failed');
   // Still open, or money observed after the close: never hidden as closed.
   expect(projectBillingStatus({ ...closed, qualification_state: 'reserved', purchase_closed_at: null })).toBe('pending');
   expect(projectBillingStatus({ ...closed, payment_status: 'paid' })).toBe('pending');

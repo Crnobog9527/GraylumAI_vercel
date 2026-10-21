@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import assert from 'node:assert/strict';
 import pg from 'pg';
+import { walletMembershipCases } from './wallet-membership.mjs';
 import { admissionCases } from './admission.mjs';
 import { retentionCases } from './retention.mjs';
 import { sourceCases } from './sources.mjs';
@@ -118,6 +119,7 @@ try {
   cases.push(...await stripeMpCases({admin,service,connect}));
   cases.push(...await stripeMpCheckoutCases({admin,service,connect}));
   cases.push(...await stripeMpFulfillCases({admin,service,connect}));
+  cases.push(...await walletMembershipCases({admin,service,connect}));
   cases.push(...await stripeMpRenewalCases({admin,service,connect}));
   cases.push(...await membershipExpiryStripeCases({admin,service}));
   cases.push(...await stripeMpExternalRefundCases({admin,service,connect}));

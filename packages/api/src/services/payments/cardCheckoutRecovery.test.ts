@@ -90,7 +90,7 @@ describe('PAY-STRIPE-MP card first payment through the method recovery', () => {
       await expect(f.run(eventType)).resolves.toEqual({ orderId: 'order', checkoutStatus: status, paymentStatus: 'unpaid' });
       if (closes) {
         expect(f.db.rpc).toHaveBeenCalledWith('pay_waffo_observe_qualification', expect.objectContaining({ p_order: 'order',
-          p_checkout: 'cs_card', p_state: 'closed_unpaid', p_amount: 0 }));
+          p_checkout: 'cs_card', p_state: status === 'complete' ? 'failed_unpaid' : 'closed_unpaid', p_amount: 0 }));
       } else expect(f.db.rpc).not.toHaveBeenCalled();
       expect(f.db.rpc).not.toHaveBeenCalledWith('pay_dispute_fulfill', expect.anything());
     }

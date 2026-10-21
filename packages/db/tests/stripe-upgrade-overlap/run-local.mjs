@@ -7,6 +7,7 @@ import {randomUUID} from 'node:crypto';
 import pg from 'pg';
 import {POSTGRES_IMAGE} from '../v3/images.mjs';
 import {buildFromFiles,installPgCronStub} from '../baseline/build-from-files.mjs';
+import { walletMembershipCases } from '../pay-waffo/wallet-membership.mjs';
 import {stripeMpUpgradeCases} from '../pay-waffo/stripe-mp-upgrade.mjs';
 
 assert.ok(process.argv[2]==='--local-only'&&!process.env.CI || process.argv[2]==='--ci'&&process.env.CI,
@@ -49,8 +50,29 @@ try {
     });
   });
   let before,after,originals,originalFunctionKeys,originalFunctionEntries;
+  let walletOriginals,walletBefore,walletChangedKeys;
+  const walletMigration='packages/db/migrations/0329_pay_wallet_membership_projection.sql';
   const build=buildFromFiles(root,{applyFile:path=>{
     const migration=read(path);
+    if(path===walletMigration) {
+      walletBefore=objects();
+      walletOriginals=['public.pay_common_membership_facts(uuid)',
+        'public.pay_waffo_observe_qualification(uuid,text,text,text,text,text,integer,text,timestamptz)']
+        .map(sig=>sql(`SELECT pg_get_functiondef('${sig}'::regprocedure);`));
+      const interrupted=apply(migration.replace(/COMMIT;\s*$/,
+        "DO $$ BEGIN RAISE EXCEPTION 'WALLET_ROLLBACK_PROBE'; END $$; COMMIT;"));
+      assert.equal(interrupted.ok,false); assert.match(interrupted.error,/WALLET_ROLLBACK_PROBE/);
+      assert.deepEqual(objects(),walletBefore,'wallet interrupted migration preserves schema and ACL');
+      const applied=apply(migration);
+      if(!applied.ok) return applied;
+      const current=objects();
+      walletChangedKeys=Object.keys(current).filter(key=>current[key]!==walletBefore[key]);
+      assert.equal(walletChangedKeys.length,2,'wallet migration only changes two function bodies');
+      assert.ok(walletChangedKeys.every(key=>key.startsWith('fn:')),'wallet migration never changes ACL');
+      sql(migration);
+      assert.deepEqual(objects(),current,'wallet second application preserves schema and ACL');
+      return applied;
+    }
     if(!path.endsWith('_pay_stripe_mp_upgrade_overlap.sql')) return apply(migration);
     before=objects();
     originalFunctionKeys=functionCatalogKeys(before);
@@ -93,11 +115,20 @@ try {
     FROM membership_plans WHERE level='gold'`);
   const cases=await stripeMpUpgradeCases({admin,service,connect});
   cases.push(...(await stripeMpUpgradeCases({admin,service,connect,proCycle:'yearly'})).map(c=>'annual-'+c));
+  cases.push(...await walletMembershipCases({admin,service,connect}));
   const data=()=>admin.query(`SELECT jsonb_build_object(
     'profiles',(SELECT jsonb_agg(to_jsonb(p) ORDER BY id) FROM profiles p),
     'grants',(SELECT jsonb_agg(to_jsonb(g) ORDER BY id) FROM subscription_credit_grants g),
     'sources',(SELECT jsonb_agg(to_jsonb(e) ORDER BY id) FROM credit_source_entries e)) v`);
   const preserved=(await data()).rows[0].v;
+  assert.ok(walletOriginals&&walletBefore&&walletChangedKeys,'wallet migration tested at its historical position');
+  sql('BEGIN;\n'+walletOriginals.map(src=>src+';').join('\n')+'\nCOMMIT;');
+  const walletRestored=objects();
+  for(const key of walletChangedKeys) assert.equal(walletRestored[key],walletBefore[key],'wallet old body restored');
+  assert.deepEqual((await data()).rows[0].v,preserved,'wallet recovery preserves paid balances and retained credit sources');
+  sql(read(walletMigration));
+  assert.deepEqual(objects(),finalCatalog,'wallet reapply restores complete final catalog');
+  cases.push('wallet-migration-interruption-atomic','wallet-migration-repeat-acl-unchanged','wallet-recovery-preserves-paid-data');
   sql('BEGIN;\n'+originals.map(src=>src+';').join('\n')+'\nCOMMIT;');
   const restoredCatalog=objects();
   assert.deepEqual(Object.fromEntries(originalFunctionKeys.map(key=>[key,restoredCatalog[key]])),

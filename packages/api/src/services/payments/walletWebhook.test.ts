@@ -116,7 +116,7 @@ describe('wallet callback/recovery', () => {
     await f.run(); expect(f.db.rpc).not.toHaveBeenCalled();
     await f.run({} as Stripe, 'checkout.session.completed'); expect(f.db.rpc).not.toHaveBeenCalled();
     await f.run({} as Stripe, 'checkout.session.async_payment_failed');
-    expect(f.db.rpc).toHaveBeenCalledWith('pay_waffo_observe_qualification', expect.objectContaining({ p_state: 'closed_unpaid' }));
+    expect(f.db.rpc).toHaveBeenCalledWith('pay_waffo_observe_qualification', expect.objectContaining({ p_state: 'failed_unpaid' }));
   });
   it('does not let a late failure event undo a verified successful payment', async () => {
     const f = fixture(); await f.run({} as Stripe, 'checkout.session.async_payment_failed');

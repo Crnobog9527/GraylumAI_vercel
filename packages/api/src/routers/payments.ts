@@ -1472,7 +1472,7 @@ export const paymentsRouter = router({
       });
 
       return {
-        sessionId: session.id,
+        sessionId: session.id, paymentMethod: session.managed_payments?.enabled === true ? 'card' : null,
         mode: session.mode,
         checkoutStatus: session.status,
         paymentStatus: session.payment_status,
@@ -1493,7 +1493,7 @@ export const paymentsRouter = router({
           'item_type',
           'billing_cycle',
           'user_id', 'payment_channel', 'merchant_namespace', 'payment_mode', 'payment_amount_facts',
-          'price_ref_id', 'subscription_id',
+          'price_ref_id', 'subscription_id', 'payment_method',
           'amount_total',
           'currency',
           'status',

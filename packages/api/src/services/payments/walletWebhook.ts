@@ -84,8 +84,11 @@ export async function recoverMethodCheckout(db: SupabaseClient, stripe: Stripe, 
     if (validated?.payment_status === 'unpaid' && (validated.status === 'expired'
       || validated.status === 'complete' && verifiedEventType === 'checkout.session.async_payment_failed')) {
       const closed = await db.rpc('pay_waffo_observe_qualification', { p_order: order.id, p_merchant: scope.merchant,
-        p_mode: scope.mode, p_checkout: sessionId, p_state: 'closed_unpaid', p_payment: null, p_amount: 0, p_currency: 'usd', p_paid_at: null });
+        p_mode: scope.mode, p_checkout: sessionId,
+        p_state: validated.status === 'complete' ? 'failed_unpaid' : 'closed_unpaid',
+        p_payment: null, p_amount: 0, p_currency: 'usd', p_paid_at: null });
       if (closed.error) throw new Error('PAY_WAFFO_CHECKOUT_UNAVAILABLE');
+
     }
     // The session as this recovery validated it (newer than the caller's copy): a browser return reports it.
     return { orderId: order.id, checkoutStatus: validated?.status ?? null, paymentStatus: validated?.payment_status ?? null };
