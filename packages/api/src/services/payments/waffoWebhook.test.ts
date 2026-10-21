@@ -31,6 +31,11 @@ describe('Waffo authenticated durable receipt', () => {
   it.each([{ ...event, mode: 'prod' }, { ...event, storeId: 'STO_other' }])('rejects wrong scope', value => {
     expect(() => verifyWaffoReceipt(fixture(value))).toThrow('WAFFO_SCOPE_MISMATCH');
   });
+  it('accepts prod only when the server selected the live key and exact store binding', () => {
+    const signed = fixture({ ...event, mode: 'prod', eventType: 'onetime.payment_succeeded' });
+    expect(verifyWaffoReceipt({ ...signed, mode: 'live' }).mode).toBe('live');
+    expect(() => verifyWaffoReceipt({ ...fixture(event), mode: 'live' })).toThrow('WAFFO_SCOPE_MISMATCH');
+  });
   it('does not acknowledge storage failure; repeated delivery uses identical database identity', async () => {
     const rpc = vi.fn().mockResolvedValue({ data: 'receipt-1', error: null });
     const input = { ...fixture(), db: { rpc } as unknown as Parameters<typeof receiveWaffoWebhook>[0]['db'] };

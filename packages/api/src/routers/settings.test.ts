@@ -3,9 +3,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../services/stripe', () => ({
   isStripeCheckoutConfigured: () => true,
-  getStripeClient: () => ({ accounts: { retrieveCurrent: async () => ({ id: 'acct_fixture' }) },
-    balance: { retrieve: async () => ({ livemode: false }) } }),
+  getStripeClient: vi.fn(() => ({ accounts: { retrieveCurrent: async () => ({ id: 'acct_fixture' }) },
+    balance: { retrieve: async () => ({ livemode: false }) } })),
 }));
+vi.mock('../services/payments/waffoTestOperationsClient', () => ({
+  getWaffoOperationsClient: () => ({ merchant: 'fixture', mode: 'test' }),
+}));
+import { getStripeClient } from '../services/stripe';
 import { getPublicReadClient, settingsRouter } from './settings';
 import { validateReportPrice } from '../services/report/fees';
 import { resetPlatformSecretCacheForTests } from '../services/platformSecrets/reader';
@@ -103,7 +107,7 @@ function createQueryBuilder(result: Promise<unknown>) {
   };
 }
 
-function createPublicCatalogCaller(table: string, result: Promise<unknown>, selection: unknown = { channel: 'stripe', version: 1 }, privileged: boolean | 'missing' = true) {
+function createPublicCatalogCaller(table: string, result: Promise<unknown>, selection: unknown = { channel: 'stripe', version: 1 }, privileged: boolean | 'missing' = true, routeChannel: 'stripe' | 'waffo' = 'stripe') {
   return settingsRouter.createCaller({
     supabase: {},
     supabasePublic: {
@@ -115,8 +119,13 @@ function createPublicCatalogCaller(table: string, result: Promise<unknown>, sele
     supabaseAdmin: privileged === 'missing' ? null : { from(actualTable: string) {
       expect(privileged).toBe(true);
       if (selection instanceof Error) throw selection;
-      if (actualTable === 'system_settings') return { select() { return this; }, eq() { return this; },
-        maybeSingle: async () => ({ data: selection === null ? null : { value: selection }, error: null }) };
+      if (actualTable === 'system_settings') {
+        let key = '';
+        return { select() { return this; }, eq(_field: string, value: string) { key = value; return this; },
+          maybeSingle: async () => ({ data: key === 'payment_method_routes' ? { value: { version: 1, newPurchaseChannel: routeChannel,
+            card: { enabled: true }, wechat_pay: { enabled: false, annualVerified: false },
+            alipay: { enabled: false, annualVerified: false } } } : selection === null ? null : { value: selection }, error: null }) };
+      }
       expect(actualTable).toBe('payment_provider_refs');
       // The member-tier pack read (card checkout) filters on package_tier with in(); the legacy read with eq().
       let memberTiers = false;
@@ -855,4 +864,34 @@ it.each([
     Promise.resolve({ data: [validMembershipPlan], error: null }), selection, privileged).getMembershipPlans();
   expect(plans).toHaveLength(1);
   expect(plans[0]).toMatchObject({ paymentChannel: null, checkoutReady: { monthly: false, yearly: false } });
+});
+
+
+it('keeps emergency membership and member-pack catalogs available when Stripe is offline', async () => {
+  const stripe = vi.mocked(getStripeClient), original = stripe.getMockImplementation();
+  stripe.mockImplementation(() => { throw new Error('Stripe unavailable'); });
+  try {
+    const pack = { ...validCreditPackage, price: 990, credits_amount: 990, bonus_credits: 0,
+      member_prices: { pro: 'PROD_pro', gold: 'PROD_gold' } };
+    const packages = await createPublicCatalogCaller('credit_packages', Promise.resolve({ data: [pack], error: null }),
+      { channel: 'stripe', version: 1 }, true, 'waffo').getCreditPackages();
+    expect(packages[0]).toMatchObject({ member_checkout_ready: { pro: true, gold: true } });
+    const plans = await createPublicCatalogCaller('membership_plans', Promise.resolve({ data: [validMembershipPlan], error: null }),
+      { channel: 'stripe', version: 1 }, true, 'waffo').getMembershipPlans();
+    expect(plans).toHaveLength(1);
+  } finally { stripe.mockImplementation(original!); }
+});
+
+
+it('keeps membership plans visible during a primary Stripe outage and closes only its buying readiness', async () => {
+  const stripe = vi.mocked(getStripeClient), original = stripe.getMockImplementation();
+  stripe.mockImplementation(() => { throw new Error('Stripe unavailable'); });
+  try {
+    const plans = await createPublicCatalogCaller('membership_plans', Promise.resolve({ data: [validMembershipPlan], error: null }))
+      .getMembershipPlans();
+    expect(plans).toHaveLength(1); expect(plans[0]?.checkoutReady).toEqual({ monthly: false, yearly: false });
+    const packs = await createPublicCatalogCaller('credit_packages', Promise.resolve({ data: [validCreditPackage], error: null }))
+      .getCreditPackages();
+    expect(packs).toHaveLength(1); expect(packs[0]?.checkout_ready).toBe(false);
+  } finally { stripe.mockImplementation(original!); }
 });

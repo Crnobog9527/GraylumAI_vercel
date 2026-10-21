@@ -57,6 +57,13 @@ try {
   });
   assert.equal(report.failed, null, JSON.stringify(report));
   const before = fingerprint();
+  // 0331 extends the wallet refund rejection predicate; restore its historical predecessor
+  // before replaying 0298, whose guarded patch must still run at its own historical position.
+  const refund185=readFileSync(resolve(root,'packages/db/migrations/0185_pay_common_package_refund.sql'),'utf8');
+  const rejectionStart=refund185.indexOf('CREATE OR REPLACE FUNCTION public.pay_common_package_refund_reject(');
+  const rejectionEnd=refund185.indexOf('CREATE OR REPLACE FUNCTION public.pay_common_package_refund_decide(');
+  assert.ok(rejectionStart>=0&&rejectionEnd>rejectionStart,'0185 refund rejection replay anchors');
+  sql(refund185.slice(rejectionStart,rejectionEnd));
   // Later migrations replace 0204's routing and admission; replay the whole chain to stay at the latest state.
   for (const file of ['0204_pay_waffo_qualification.sql', '0211_pay_waffo_delivery.sql', '0214_pay_waffo_renewal_grace.sql',
     '0221_pay_stripe_mp_routing.sql', '0222_pay_stripe_mp_checkout.sql',
@@ -139,3 +146,8 @@ try {
   await Promise.all(clients.map(c=>c.end()));
   try {docker(['rm','-f',name]);} catch { /* preserve original failure */ }
 }
+
+// PAY-FAILOVER has its own fresh fixtures; run sequentially after the existing container is removed.
+const failover=spawnSync(process.execPath,[resolve(root,'packages/db/tests/pay-failover/run-local.mjs'),
+  ...(process.argv.includes('--quick')?['--quick']:[])],{cwd:root,stdio:'inherit',timeout:600000});
+if(failover.status!==0||failover.error)throw new Error(failover.error?.message??'PAY_FAILOVER_DATABASE_TEST_FAILED');

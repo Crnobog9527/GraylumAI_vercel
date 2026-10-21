@@ -120,3 +120,13 @@ describe('renewal states (backend inGrace, payment_channel)', () => {
       .toMatchObject({ kind: 'upgrade' });
   });
 });
+
+it('extends and upgrades a Waffo one-time card membership while preserving old recurring restrictions', () => {
+  const current = row({payment_channel:'waffo',auto_renew:false,cancel_at_period_end:true});
+  expect(walletRenewalSource([current],current)).toBe(current);
+  expect(methodPlanAction({level:'pro',...ready,current,billingCycle:'yearly',walletRenewal:current,walletCheckoutReady:true}))
+    .toMatchObject({kind:'wallet_renewal',label:'改为年付'});
+  expect(methodPlanAction({level:'gold',...ready,current,now:NOW})).toMatchObject({kind:'upgrade'});
+  expect(describeMethodMembership(current).status).toBe('不自动续费，会员权益用到 2026-11-14');
+  expect(walletRenewalSource([row({payment_channel:'waffo'})],row({payment_channel:'waffo'}))).toBeNull();
+});

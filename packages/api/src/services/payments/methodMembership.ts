@@ -1,13 +1,13 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { readPaymentMethodRoutes } from './methodRouting';
-import { isStagingPaymentDeployment, methodCheckoutMethods, methodCheckoutReady } from './methodCheckoutGate';
+import { readPaymentMethodRoutes, newPurchaseChannel } from './methodRouting';
+import { methodCheckoutMethods, methodCheckoutReady } from './methodCheckoutGate';
 import { refreshStripeTestClockUser } from './stripeTestClock';
 import { readFounderStatus } from '../founder/member';
 
 type PaidMembership = { id: string; subscription_id: string; purchase_membership_level: string; payment_method: string;
   payment_channel: string; auto_renew: boolean | null; entitlement_start: string; entitlement_end: string; offer_kind: string;
-  billing_cycle: string };
+  billing_cycle: string; provider_payment_method?: string | null };
 type SubscriptionState = { id: string; status: string; cancel_at_period_end: string | boolean | null;
   method_cancel_requested_at: string | null; method_cancel_confirmed_at: string | null };
 const GRACE_MS = 24 * 3600 * 1000;
@@ -24,7 +24,7 @@ export async function readMethodMembership(db: SupabaseClient, userId: string, n
     readPaymentMethodRoutes(db),
     db.from('payment_orders').select([
       'id', 'subscription_id', 'purchase_membership_level', 'payment_method', 'payment_channel', 'auto_renew',
-      'entitlement_start', 'entitlement_end', 'offer_kind', 'billing_cycle',
+      'entitlement_start', 'entitlement_end', 'offer_kind', 'billing_cycle', 'provider_payment_method',
     ].join(',')).eq('user_id', userId).eq('payment_mode', mode)
       .eq('item_type', 'membership_plan').eq('qualification_state', 'sold')
       .eq('payment_status', 'paid').eq('status', 'completed').not('fulfilled_at', 'is', null)
@@ -72,7 +72,8 @@ export async function readMethodMembership(db: SupabaseClient, userId: string, n
   };
   const paid = recent.filter(row => (!clockTimes.has(row.id) || Date.parse(row.entitlement_start) <= asOf(row))
     && (Date.parse(row.entitlement_end) > asOf(row) || inGrace(row)));
-  const memberships = paid.map(row => ({ ...row, cancel_at_period_end: stopped(row),
+  const memberships = paid.map(row => ({ ...row, payment_method: row.provider_payment_method ?? row.payment_method,
+    cancel_at_period_end: stopped(row),
     auto_renew: row.auto_renew === true && !stopped(row), inGrace: inGrace(row) }));
   // For the purchase entry (PAY-STRIPE-MP step 5): the published terms version methodCheckout requires, and whether
   // the Gold first-month offer applies. The latter is display only: pay_waffo_admit_purchase decides at checkout,
@@ -98,18 +99,18 @@ export async function readMethodMembership(db: SupabaseClient, userId: string, n
   let founderRenewal: { itemId: string; subscriptionId: string; eligibleUntil: string } | null = null;
   // Wallet founders renew manually. Project the already-approved 7-day renewal window on the exact
   // staging deployment; the checkout admission RPC remains the authority when the button is used.
-  if (mode === 'test' && isStagingPaymentDeployment(env)
-    && checkoutMethods.some(method => method === 'wechat_pay' || method === 'alipay')) {
+  if (checkoutMethods.length > 0) {
     const status = await readFounderStatus(db, userId);
     if ((status.state === 'active' || status.state === 'grace') && status.orderId) {
-      const source = await db.from('payment_orders').select('item_id,subscription_id,payment_method,payment_channel,offer_kind')
+      const source = await db.from('payment_orders').select('item_id,subscription_id,payment_method,payment_channel,offer_kind,auto_renew')
         .eq('id', status.orderId).eq('user_id', userId).eq('payment_mode', mode)
         .eq('status', 'completed').eq('payment_status', 'paid').eq('qualification_state', 'sold')
         .not('fulfilled_at', 'is', null).maybeSingle();
       if (source.error) throw new Error('PAY_WAFFO_MEMBERSHIP_UNAVAILABLE');
       const order = source.data as { item_id?: unknown; subscription_id?: unknown; payment_method?: unknown;
-        payment_channel?: unknown; offer_kind?: unknown } | null;
-      if (order && ['wechat_pay', 'alipay'].includes(String(order.payment_method)) && order.payment_channel === 'stripe'
+        payment_channel?: unknown; offer_kind?: unknown; auto_renew?: unknown } | null;
+      if (order && (order.payment_channel === 'waffo' && order.auto_renew === false
+        || order.payment_channel === 'stripe' && ['wechat_pay', 'alipay'].includes(String(order.payment_method)))
         && ['founder', 'founder_renewal'].includes(String(order.offer_kind))
         && typeof order.item_id === 'string' && typeof order.subscription_id === 'string') {
         const deadline = await db.rpc('pay_waffo_founder_deadline', { p_order: status.orderId });
@@ -121,7 +122,7 @@ export async function readMethodMembership(db: SupabaseClient, userId: string, n
       }
     }
   }
-  return { mode, routes,
+  return { mode, routes, purchaseChannel: newPurchaseChannel(routes),
     // Staging wallet routes can also expose the entry; production readiness stays on the card path.
     checkoutReady: methodCheckoutReady(env, routes, undefined, mode),
     checkoutMethods,

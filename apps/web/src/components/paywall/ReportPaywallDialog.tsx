@@ -99,7 +99,7 @@ export function ReportPaywallView({ checkout, onClose }: { checkout: PaywallChec
                 <>
                   <PaywallPlanPicker plans={checkout.plans} billing={billing} selected={plan?.level ?? 'pro'}
                     quoteOptions={checkout.quoteOptions} yearlyCheckoutAvailable={checkout.method.methodsFor('membership_plan', 'yearly').length > 0}
-                    disabled={checkout.method.pending}
+                    disabled={checkout.method.pending} oneTime={checkout.method.entry?.purchaseChannel === 'waffo'}
                     onBilling={chooseBilling} onSelect={setSelected} />
                   {checkout.founderSeats > 0 && plan?.level === 'gold' && billing === 'yearly' ? (
                     <p data-testid="paywall-founder-seats" className="text-sm" style={{ color: 'var(--text-secondary)' }}>

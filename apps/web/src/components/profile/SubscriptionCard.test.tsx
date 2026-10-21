@@ -307,7 +307,7 @@ describe('membership page in a local browser', () => {
           methodCheckout: mutation(async input => { state.checkouts.push(input); window.recordCheckout?.(input);
             if (state.checkoutError) throw Object.assign(new Error(state.checkoutError.message), { data: { code: state.checkoutError.code } });
             if (state.recovery) return { orderId: 'o1', state: 'recovery_required', url: null };
-            return { orderId: 'o1', state: 'open', url: 'https://checkout.stripe.com/c/pay/cs_test_9' }; }),
+            return { orderId: 'o1', state: 'open', url: state.checkoutUrl ?? 'https://checkout.stripe.com/c/pay/cs_test_9' }; }),
           getSubscriptionManagement: { useQuery: () => query({ available: false }) },
           createCustomerPortalSession: mutation(async () => ({})),
           syncCheckoutSession: mutation(async input => { state.syncs.push(input); return state.syncResult; }),
@@ -352,7 +352,7 @@ describe('membership page in a local browser', () => {
     await page.route('**/*', route => {
       const url = route.request().url();
       if (url.split('?')[0] === 'http://profile.test/') return route.fulfill({ contentType: 'text/html', body: '<!doctype html><div id="root"></div>' });
-      if (url.startsWith('https://checkout.stripe.com/')) return route.fulfill({ contentType: 'text/html', body: 'stripe' });
+      if (url.startsWith('https://checkout.stripe.com/') || url.startsWith('https://pancake.waffo.ai/')) return route.fulfill({ contentType: 'text/html', body: 'stripe' });
       return route.abort();
     });
     await page.goto(`http://profile.test/${setup.urlSearch ? `?${setup.urlSearch}` : ''}`);
@@ -468,6 +468,28 @@ describe('membership page in a local browser', () => {
       expect(errors).toEqual([]);
     } finally { await page.close(); }
   }, 30_000);
+
+  it.each(['stripe', 'waffo'])('extends an existing %s one-time membership through emergency Waffo card checkout', async source => {
+    const current = { ...proMember, payment_channel: source, payment_method: source === 'stripe' ? 'alipay' : 'card',
+      auto_renew: false, cancel_at_period_end: true };
+    const checkoutUrl = 'https://pancake.waffo.ai/store/test-store/checkout/cs_123?test=true';
+    const membership = { ...ENTRY, purchaseChannel:'waffo', memberships:[current], checkoutMethods:['card'] };
+    const {page,errors} = await open({level:'pro',membership,checkoutUrl});
+    try {
+      await browserExpect(page.getByTestId('profile-method-memberships')).toContainText('不自动续费');
+      await page.getByRole('radio',{name:'按年'}).click();
+      await page.getByTestId('profile-membership-plan-pro').getByRole('button',{name:'改为年付'}).click();
+      await browserExpect(page.getByTestId('method-checkout-dialog')).toContainText('2099/11/14 接续');
+      await browserExpect(page.getByTestId('method-checkout-method-card')).toContainText('Waffo 结账页');
+      await browserExpect(page.getByTestId('method-checkout-renewal')).toContainText('不自动续费');
+      await page.getByTestId('method-checkout-terms').check();
+      await page.getByTestId('method-checkout-pay').click();
+      await browserExpect(page).toHaveURL(checkoutUrl);
+      expect(sentByPage.get(page)).toEqual([expect.objectContaining({transition:'wallet_renewal',method:'card',
+        priorSubscriptionId:current.subscription_id,billingCycle:'yearly'})]);
+      expect(errors).toEqual([]);
+    } finally {await page.close();}
+  },30000);
 
   it.each(['wechat_pay', 'alipay'])('switches a %s monthly wallet term to a queued annual term using wallets only', async payment_method => {
     const walletPro = { ...proMember, payment_method, payment_channel: 'stripe', auto_renew: false, cancel_at_period_end: true };

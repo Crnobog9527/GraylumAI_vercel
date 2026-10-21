@@ -4,12 +4,14 @@ import { z } from 'zod';
 import { readPaymentFacts, type PaymentFacts, type WaffoPayment, type WaffoTestPayments } from './waffoPayments';
 import type { WaffoTestOperations } from './waffoOperations';
 import { describeWaffoFailure } from './waffoFailure';
+import type { WaffoChargeback } from './waffoTestOperationsClient';
+import { deliverWaffoOneTime } from './waffoOneTimeDelivery';
 import { logger } from '../../lib/logger';
 
 type Db = Pick<SupabaseClient, 'rpc' | 'from'>;
 type Provider = WaffoTestPayments & Pick<WaffoTestOperations, 'cancelSubscription' | 'readSubscription'>
-  & { merchant: string; mode: 'test' };
-export type WaffoReceipt = { id: string; merchant: string; refs: { paymentId?: string; orderId?: string; subscriptionId?: string } };
+  & { merchant: string; mode: 'test' | 'live'; readChargebacks?: (paymentId: string, deadline?: number) => Promise<WaffoChargeback[]> };
+export type WaffoReceipt = { id: string; merchant: string; mode?: 'test' | 'live'; refs: { paymentId?: string; orderId?: string; subscriptionId?: string } };
 export type ReceiptOutcome = { state: 'applied' | 'review' | 'ignored'; reason: string };
 
 const BUSINESS = /\b(PAY_WAFFO_[A-Z_]{1,50})\b/;
@@ -46,11 +48,11 @@ async function single(query: PromiseLike<{ data: unknown; error: unknown }>) {
 async function firstPayment(db: Db, provider: Provider, facts: PaymentFacts): Promise<Decision | null> {
   if (!facts.externalId || !z.uuid().safeParse(facts.externalId).success) return null;
   const order = await single(db.from('payment_orders').select('id,fulfilled_at,subscription_id').eq('id', facts.externalId)
-    .eq('payment_channel', 'waffo').eq('payment_method', 'card').eq('merchant_namespace', provider.merchant).eq('payment_mode', 'test').maybeSingle());
+    .eq('payment_channel', 'waffo').eq('payment_method', 'card').eq('merchant_namespace', provider.merchant).eq('payment_mode', provider.mode).maybeSingle());
   if (!order) return null;
   if (order.fulfilled_at && await secondFirstPayment(db, provider, order, facts)) return { state: 'review', reason: 'duplicate_order_payment' };
   const checkout = await single(db.from('payment_provider_refs').select('external_id').eq('order_id', order.id)
-    .eq('object_type', 'checkout').eq('channel', 'waffo').eq('merchant_namespace', provider.merchant).eq('mode', 'test').maybeSingle());
+    .eq('object_type', 'checkout').eq('channel', 'waffo').eq('merchant_namespace', provider.merchant).eq('mode', provider.mode).maybeSingle());
   if (!checkout) return { state: 'review', reason: 'checkout_unmapped' };
   return decide(db, 'pay_waffo_fulfill_payment', {
     p_order: order.id, p_merchant: provider.merchant, p_checkout: checkout.external_id, p_payment: facts.paymentId,
@@ -66,17 +68,17 @@ async function firstPayment(db: Db, provider: Provider, facts: PaymentFacts): Pr
  * payment of the delivered subscription itself, is not a second payment. */
 async function secondFirstPayment(db: Db, provider: Provider, order: Record<string, string>, facts: PaymentFacts) {
   const known = await single(db.from('payment_provider_refs').select('order_id').eq('object_type', 'payment')
-    .eq('external_id', facts.paymentId).eq('channel', 'waffo').eq('merchant_namespace', provider.merchant).eq('mode', 'test').maybeSingle());
+    .eq('external_id', facts.paymentId).eq('channel', 'waffo').eq('merchant_namespace', provider.merchant).eq('mode', provider.mode).maybeSingle());
   if (known) return false;
   const delivered = order.subscription_id ? await single(db.from('payment_provider_refs').select('external_id')
     .eq('subscription_id', order.subscription_id).eq('object_type', 'subscription').eq('channel', 'waffo')
-    .eq('merchant_namespace', provider.merchant).eq('mode', 'test').maybeSingle()) : null;
+    .eq('merchant_namespace', provider.merchant).eq('mode', provider.mode).maybeSingle()) : null;
   return delivered?.external_id !== facts.waffoOrderId;
 }
 
 async function renewal(db: Db, provider: Provider, facts: PaymentFacts): Promise<Decision | null> {
   const ref = await single(db.from('payment_provider_refs').select('subscription_id').eq('object_type', 'subscription')
-    .eq('external_id', facts.waffoOrderId).eq('channel', 'waffo').eq('merchant_namespace', provider.merchant).eq('mode', 'test').maybeSingle());
+    .eq('external_id', facts.waffoOrderId).eq('channel', 'waffo').eq('merchant_namespace', provider.merchant).eq('mode', provider.mode).maybeSingle());
   if (!ref?.subscription_id) return null;
   // Amount authority is the database's recorded order price (49 then 69, founder 496), not the catalog.
   return decide(db, 'pay_waffo_renew_subscription', {
@@ -129,18 +131,19 @@ async function stopUnknownRenewal(db: Db, provider: Provider, payment: WaffoPaym
   if (['test_mode_unproven', 'store_scope'].includes(reason) || !payment.testMode || !order?.testMode
     || order.storeId !== provider.storeId || order.id !== payment.orderId) return;
   const mapped = await single(db.from('payment_provider_refs').select('subscription_id').eq('object_type', 'subscription')
-    .eq('external_id', payment.orderId).eq('channel', 'waffo').eq('merchant_namespace', provider.merchant).eq('mode', 'test').maybeSingle());
+    .eq('external_id', payment.orderId).eq('channel', 'waffo').eq('merchant_namespace', provider.merchant).eq('mode', provider.mode).maybeSingle());
   if (!mapped) await stopRenewal(provider, payment.orderId);
 }
 
 /** Normal path only: first payment and renewal of our own card orders. Every other situation is left
  * as review for the daily reconciliation and manual handling; nothing is inferred or retried here. */
-export async function processWaffoReceipt(db: Db, provider: Provider, receipt: WaffoReceipt): Promise<ReceiptOutcome> {
-  if (provider.mode !== 'test' || provider.merchant !== receipt.merchant) throw new Error('PAY_WAFFO_OPERATION_SCOPE');
+export async function processWaffoReceipt(db: Db, provider: Provider, receipt: WaffoReceipt,
+  afterFulfillment?: (orderId: string) => Promise<unknown>): Promise<ReceiptOutcome> {
+  if (provider.merchant !== receipt.merchant || provider.mode !== (receipt.mode ?? 'test')) throw new Error('PAY_WAFFO_OPERATION_SCOPE');
   const paymentId = receipt.refs.paymentId;
   if (!paymentId) return { state: 'ignored', reason: 'no_payment' };
   const current = await single(db.from('waffo_event_receipts').select('status').eq('id', receipt.id)
-    .eq('merchant_namespace', receipt.merchant).eq('mode', 'test').maybeSingle());
+    .eq('merchant_namespace', receipt.merchant).eq('mode', provider.mode).maybeSingle());
   if (current?.status !== 'received') return { state: 'ignored', reason: 'already_resolved' };
   let payment;
   try { payment = await provider.readPayment(paymentId); } catch (error) {
@@ -149,13 +152,18 @@ export async function processWaffoReceipt(db: Db, provider: Provider, receipt: W
   }
   // Read-after-write visibility is not guaranteed; let the provider redeliver.
   if (!payment) throw new Transient('PAY_WAFFO_PAYMENT_NOT_VISIBLE');
-  const reading = readPaymentFacts(payment, provider.storeId);
+  const reading = readPaymentFacts(payment, provider.storeId, provider.mode);
   if (reading.kind === 'not_paid') return { state: 'ignored', reason: 'not_paid' };
   if (reading.kind === 'unknown') {
     await stopUnknownRenewal(db, provider, payment, reading.reason);
     return resolve(db, receipt, 'review', reading.reason);
   }
   const { facts } = reading;
+  if (facts.purchaseMode === 'payment') {
+    const decision = await deliverWaffoOneTime(db, provider, facts);
+    if (decision.state === 'applied' && facts.externalId && afterFulfillment) await afterFulfillment(facts.externalId);
+    return resolve(db, receipt, decision.state, decision.reason);
+  }
   const decision = facts.periodNumber === 1 ? await firstPayment(db, provider, facts) : await renewal(db, provider, facts);
   if (!decision) {
     // No site order or subscription: offsite cash. Stop first; the offsite RPC resolves the receipt itself.
@@ -174,7 +182,7 @@ export async function processWaffoReceipt(db: Db, provider: Provider, receipt: W
 async function mappedRenewalStillOpen(db: Db, provider: Provider, decision: Decision, facts: PaymentFacts) {
   if (decision.reason !== 'review') return false;
   const ref = await single(db.from('payment_provider_refs').select('subscription_id').eq('object_type', 'subscription')
-    .eq('external_id', facts.waffoOrderId).eq('channel', 'waffo').eq('merchant_namespace', provider.merchant).eq('mode', 'test').maybeSingle());
+    .eq('external_id', facts.waffoOrderId).eq('channel', 'waffo').eq('merchant_namespace', provider.merchant).eq('mode', provider.mode).maybeSingle());
   if (!ref?.subscription_id) return false;
   const sub = await single(db.from('user_subscriptions').select('method_cancel_requested_at').eq('id', ref.subscription_id).maybeSingle());
   return Boolean(sub) && !sub!.method_cancel_requested_at;

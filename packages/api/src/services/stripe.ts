@@ -100,7 +100,7 @@ export function assertStripeCheckoutConfigured(): void {
   throw new Error(`Stripe checkout is not fully configured: missing ${missingKeys.join(', ')}`);
 }
 
-export function getStripeClient(): Stripe {
+export function getStripeClient(options?: { timeout: number; maxNetworkRetries: 0 }): Stripe {
   ensureWorkspaceServerEnv();
   const secretKey = process.env.STRIPE_SECRET_KEY;
 
@@ -108,6 +108,7 @@ export function getStripeClient(): Stripe {
     throw new Error('STRIPE_SECRET_KEY is not configured');
   }
 
+  if (options) return new Stripe(secretKey, options);
   stripeClient ??= new Stripe(secretKey);
   return stripeClient;
 }

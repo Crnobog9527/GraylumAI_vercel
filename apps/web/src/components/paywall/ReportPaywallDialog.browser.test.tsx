@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium, expect as browserExpect, type Browser, type Page } from '@playwright/test';
 import { afterAll, beforeAll, expect, it } from 'vitest';
+import { CHECKOUT_COPY } from './methodCheckout';
 
 let browser: Browser;
 let code: string;
@@ -110,7 +111,7 @@ async function open(setup: Record<string, unknown>, width = 1280) {
     const url = route.request().url();
     if (url === 'http://paywall.test/') return route.fulfill({ contentType: 'text/html', body: '<!doctype html><div id="root"></div>' });
     // Stands in for the Stripe-hosted page; nothing leaves the machine.
-    if (url.startsWith('https://checkout.stripe.com/')) return route.fulfill({ contentType: 'text/html', body: 'stripe' });
+    if (url.startsWith('https://checkout.stripe.com/') || url.startsWith('https://pancake.waffo.ai/')) return route.fulfill({ contentType: 'text/html', body: 'stripe' });
     return route.abort();
   });
   const sent: unknown[] = [];
@@ -569,3 +570,19 @@ it('shows the founder seats only with yearly billing, never next to a monthly Go
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 30000);
+
+it('offers the Waffo hosted page as a one-time membership purchase without inventing Alipay', async () => {
+  const url = 'https://pancake.waffo.ai/store/test-store/checkout/cs_123?test=true';
+  const {page,errors} = await open({membership:{...ENTRY,purchaseChannel:'waffo',checkoutMethods:['card']},checkoutUrl:url});
+  try {
+    await browserExpect(page.getByTestId('report-paywall-method-card')).toContainText('Waffo 结账页');
+    await browserExpect(page.getByTestId('report-paywall-method-alipay')).toHaveCount(0);
+    await browserExpect(page.getByTestId('report-paywall-renewal')).toHaveText(CHECKOUT_COPY.waffoMembershipOneTime);
+    await browserExpect(page.getByTestId('report-paywall-tax')).toHaveText('不另收税');
+    await page.getByTestId('report-paywall-terms').check();
+    await page.getByTestId('report-paywall-pay').click();
+    await browserExpect(page).toHaveURL(url);
+    expect(await checkouts(page)).toHaveLength(1);
+    expect(errors).toEqual([]);
+  } finally {await page.close();}
+},30000);

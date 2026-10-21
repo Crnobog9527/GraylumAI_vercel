@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 
-/** R7 PR-B1 (0296): Stripe card / wallet orders run in the Stripe account's mode (live in production); Waffo stays test.
+/** R7 PR-B1 (0296): Stripe card / wallet orders run in the Stripe account's mode (live in production); PAY-FAILOVER also permits one-time Waffo live orders in code.
  * Every step writes and reads in the order's own mode and never crosses into the other mode's references. */
 export async function stripeMpLiveCases({admin,service}) {
   const plan=(await admin.query("SELECT id FROM membership_plans WHERE level='gold'")).rows[0].id;
@@ -13,7 +13,7 @@ export async function stripeMpLiveCases({admin,service}) {
   const allowed=async(channel,mode)=>(await admin.query('SELECT pay_method_mode_allowed($1,$2) v',[channel,mode])).rows[0].v;
   assert.deepEqual([await allowed('stripe','test'),await allowed('stripe','live'),await allowed('waffo','test'),
     await allowed('waffo','live'),await allowed('stripe',null),await allowed(null,'live'),await allowed('stripe','LIVE')],
-  [true,true,true,false,false,false,false]);
+  [true,true,true,true,false,false,false]);
   const user=async()=>{const id=randomUUID(); await admin.query('INSERT INTO profiles(id,credits) VALUES($1,0)',[id]); return id;};
   const terms=digest=>JSON.stringify([{kind:'email',key_version:'test-v1',digest}]);
   const buy=(buyer,{item=plan,method='card',offer='standard',cycle='monthly',mode='live',digest}={})=>service.query(

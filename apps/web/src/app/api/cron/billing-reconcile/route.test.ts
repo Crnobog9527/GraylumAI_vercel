@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   validateCronRequest: vi.fn(),
   cronJob: vi.fn(),
   waffo: vi.fn(),
+  waffoRefunds: vi.fn(),
+  waffoRecovery: vi.fn(),
   waffoClient: vi.fn(),
   closeExpired: vi.fn(),
   logError: vi.fn(),
@@ -23,7 +25,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@repo/api/src/services/payments/waffoReconciliation', () => ({ reconcileWaffoPayments: mocks.waffo }));
-vi.mock('@repo/api/src/services/payments/waffoTestOperationsClient', () => ({ getWaffoTestOperationsClient: mocks.waffoClient }));
+vi.mock('@repo/api/src/services/payments/waffoTestOperationsClient', () => ({ getWaffoTestOperationsClient: mocks.waffoClient, getWaffoOperationsClient: mocks.waffoClient }));
 vi.mock('@repo/api/src/services/runtime/staleChargedRounds', () => ({ findStaleChargedRounds: mocks.staleRounds }));
 vi.mock('@repo/api/src/services/payments/stripeCardReconciliation', () => ({ reconcileStripeCardPayments: mocks.stripeCard }));
 vi.mock('@repo/api/src/services/stripe', () => ({ getStripeClient: mocks.stripeClient }));
@@ -34,6 +36,9 @@ vi.mock('@repo/api/src/services/bill2/stuckCalls', () => ({ findStuckPaygCalls: 
 vi.mock('@repo/api/src/services/fusion/background', () => ({ kickStalledReviews: mocks.fusionKick }));
 vi.mock('@repo/api/src/services/report/fees', () => ({ settleDueReportFees: mocks.reportFees }));
 vi.mock('@repo/api/src/services/payments/waffoCardCheckout', () => ({ closeExpiredWaffoCheckouts: mocks.closeExpired }));
+
+vi.mock('@repo/api/src/services/payments/waffoOneTimeRecovery', () => ({ recoverWaffoOneTimeCheckouts: mocks.waffoRecovery }));
+vi.mock('@repo/api/src/services/payments/failoverReconciliation', () => ({ reconcileFailoverRefunds: mocks.waffoRefunds }));
 
 vi.mock('@supabase/supabase-js', () => ({
   createClient: mocks.createClient,
@@ -88,6 +93,9 @@ const readinessSuccess = {
 describe('/api/cron/billing-reconcile', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.unstubAllEnvs();
+    mocks.waffoRefunds.mockResolvedValue({ success: true, findings: [] });
+    mocks.waffoRecovery.mockResolvedValue({ closed: 0, blocked: [] });
     vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://example.supabase.co');
     vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 'test-service-role-key');
     mocks.validateCronRequest.mockReturnValue(null);
@@ -235,11 +243,16 @@ describe('/api/cron/billing-reconcile', () => {
     );
   });
 
-  it('runs the report-only Waffo reconciliation only when the test binding is enabled', async () => {
+  it('runs Waffo cash recovery and original-order refunds only in the bound environment', async () => {
     vi.stubEnv('WAFFO_TEST_OPERATIONS_ENABLED', 'false');
     expect((await GET(new Request('https://graylum.test/api/cron/billing-reconcile'))).status).toBe(200);
     expect(mocks.waffo).not.toHaveBeenCalled();
     vi.stubEnv('WAFFO_TEST_OPERATIONS_ENABLED', 'true');
+    const binding = { VERCEL: '1', VERCEL_PROJECT_PRODUCTION_URL: 'auth-staging.graylum.com', VERCEL_GIT_COMMIT_REF: 'staging',
+      VERCEL_GIT_REPO_OWNER: 'Crnobog9527', VERCEL_GIT_REPO_SLUG: 'GraylumAI_vercel', VERCEL_PROJECT_ID: 'synthetic-project',
+      V3_RUNTIME_STAGING_PROJECT_ID: 'synthetic-project', V3_RUNTIME_STAGING_DATABASE_HOST: 'example.supabase.co',
+      V3_RUNTIME_STAGING_WINDOW_ID: '00000000-0000-4000-8000-000000000001' };
+    for (const [key, value] of Object.entries(binding)) vi.stubEnv(key, value);
     mocks.waffoClient.mockReturnValue({ merchant: 'fixture' });
     mocks.closeExpired.mockResolvedValue(2);
     mocks.waffo.mockResolvedValue({ success: false, complete: true, checkedPayments: 1,
@@ -247,7 +260,7 @@ describe('/api/cron/billing-reconcile', () => {
     const response = await GET(new Request('https://graylum.test/api/cron/billing-reconcile'));
     expect(response.status).toBe(500);
     expect(await response.json()).toMatchObject({ waffo: { closedExpired: 2, findings: [{ kind: 'paid_not_delivered' }] } });
-    expect(mocks.closeExpired).toHaveBeenCalledWith({ client: 'service-role' }, 'fixture');
+    expect(mocks.closeExpired).toHaveBeenCalledWith({ client: 'service-role' }, 'fixture', undefined, 'test');
     expect(mocks.cronJob).toHaveBeenCalledWith('billing-reconcile', 'failed', expect.any(Number),
       expect.stringContaining('Waffo payments need manual review: 1'), expect.any(Object));
     mocks.waffo.mockRejectedValue(new Error('PAY_WAFFO_PROVIDER_UNAVAILABLE'));

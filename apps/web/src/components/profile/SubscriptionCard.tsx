@@ -206,7 +206,8 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
     const plan = apiPlans.find(item => item.id === planId);
     if (!plan) return null;
     const founderRenewal = checkout.entry?.founderRenewal;
-    const walletRenewalOpen = checkout.methodsFor('membership_plan', cycle).some(method => method === 'wechat_pay' || method === 'alipay');
+    const walletRenewalOpen = checkout.methodsFor('membership_plan', cycle).some(method => checkout.entry?.purchaseChannel === 'waffo'
+      || method === 'wechat_pay' || method === 'alipay');
     if (plan.level === 'gold' && cycle === 'yearly' && walletRenewalOpen && founderRenewal
       && Date.parse(founderRenewal.eligibleUntil) > Date.now()) {
       return { kind: 'founder_renewal' as const, label: '续买创始会员一年', disabled: false as const,
@@ -214,7 +215,8 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
     }
     return methodPlanAction({ level: plan.level, price: Number(plan.price?.[cycle]),
       checkoutReady: plan.checkoutReady?.[cycle] === true && checkout.methodsFor('membership_plan', cycle).length > 0,
-      current, billingCycle: cycle, walletRenewal, walletCheckoutReady: walletRenewalOpen, entitlementLevel: entitlements.data?.level ?? null,
+      current, billingCycle: cycle, walletRenewal, walletCheckoutReady: walletRenewalOpen,
+      entitlementLevel: entitlements.data?.level ?? null,
       unpaidSubscription });
   }
 
@@ -339,9 +341,11 @@ export const SubscriptionCard = memo(function SubscriptionCard({ user: _user }: 
           <ProfileCatalogState status="empty" />
         ) : displayPlans.map((plan) => {
           const action = checkout.open ? actionFor(plan.id, billingCycle) : null;
-          const planMethods = action?.kind === 'wallet_renewal' ? methods.filter(method => method === 'wechat_pay' || method === 'alipay') : methods;
+          const planMethods = action?.kind === 'wallet_renewal' && checkout.entry?.purchaseChannel !== 'waffo'
+            ? methods.filter(method => method === 'wechat_pay' || method === 'alipay') : methods;
           return <MembershipPlanCard key={plan.id} plan={plan} billingCycle={billingCycle}
-            action={action} taxNote={planMethods.length > 0 ? methodTaxSummary(planMethods) : null}
+            action={action} taxNote={planMethods.length > 0 ? methodTaxSummary(planMethods, checkout.entry?.purchaseChannel) : null}
+            oneTime={checkout.entry?.purchaseChannel === 'waffo'}
             firstMonth={action?.kind !== 'wallet_renewal' && goldFirstMonth && plan.level === 'gold' && billingCycle === 'monthly'}
             founderSeats={plan.level === 'gold' && billingCycle === 'yearly' && checkout.open ? founderSeats : 0}
             founderRenewal={plan.level === 'gold' && billingCycle === 'yearly' && action?.kind === 'founder_renewal'}

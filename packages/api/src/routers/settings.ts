@@ -1,3 +1,4 @@
+import { setPaymentFailover, assertNoFailoverChange } from './paymentFailover';
 import { PAYMENT_METHOD_ROUTES_KEY, paymentMethodRoutesSchema, readPaymentMethodRoutes } from '../services/payments/methodRouting';
 import { FUSION_SETTINGS_KEY } from '../services/fusion/settings';
 import { validateCompareLimit } from '../services/fusion/compareLimit';
@@ -17,8 +18,8 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { validateReportPrice } from '../services/report/fees';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { isStripeCheckoutConfigured } from '../services/stripe';
-import { isSellableMemberPack, loadConfiguredStripePrices, loadMemberPackReadiness } from '../services/payments/stripeCatalog';
+import { isSellableMemberPack, loadConfiguredStripePrices, loadSelectedMemberPackReadiness, legacyStripeCatalogReady }
+  from '../services/payments/stripeCatalog';
 import {
   LAUNCH_BASELINE_SETTING_KEY,
   parseLaunchBaselineAt,
@@ -197,6 +198,7 @@ async function validateSummarySelection(client: SupabaseClient<any, 'public', an
 }
 
 async function validateRoutingSelections(client: SupabaseClient<any, 'public', any>, input: Array<{key:string;value:unknown}>) {
+  await assertNoFailoverChange(client, input);
   for (const setting of input) {
     if (setting.key !== 'primary_model_id') continue;
     if (setting.value === '') continue;
@@ -226,6 +228,7 @@ export const settingsRouter = router({
   getPaymentMethodRoutes: adminProcedure.query(({ ctx }) => readPaymentMethodRoutes(ctx.supabase).catch(error => {
     throw createSafeServiceUnavailableError(error, '付款方式配置暂时无法读取，请稍后重试');
   })),
+  setPaymentFailover,
   getPaymentChannel: adminProcedure.query(({ ctx }) => readPaymentChannel(ctx.supabase)),
   getRoutingModels: adminProcedure.query(async ({ ctx }) => {
     const { data, error } = await ctx.supabase.from('ai_models')
@@ -357,7 +360,8 @@ export const settingsRouter = router({
   getCreditPackages: publicProcedure.query(async ({ ctx }) => {
     const selectedChannel = ctx.hasSupabaseAdminPrivileges && ctx.supabaseAdmin
       ? await readPaymentChannel(ctx.supabaseAdmin).catch(() => null) : null;
-    const stripeReady = selectedChannel?.channel === 'stripe' && isStripeCheckoutConfigured();
+    const stripeReady = ctx.hasSupabaseAdminPrivileges && Boolean(ctx.supabaseAdmin)
+      && await legacyStripeCatalogReady(ctx.supabaseAdmin, selectedChannel?.channel).catch(() => false);
     const readClient = getPublicReadClient(ctx);
     let result;
 
@@ -392,13 +396,10 @@ export const settingsRouter = router({
 
     const priceRefs = stripeReady && ctx.hasSupabaseAdminPrivileges
       ? await loadConfiguredStripePrices({ db: ctx.supabaseAdmin,
-        kind: 'credit_package', ids: packages.map(pkg => pkg.id) }).catch(error => {
-          throw createSafeServiceUnavailableError(error, CATALOG_UNAVAILABLE_MESSAGE);
-        }) : new Map<string, string>();
-    // Card checkout (PAY-STRIPE-MP) charges the buyer's own Pro/Gold pack price, independent of the legacy channel
-    // and generic price above. A read failure only closes buying; the public catalog stays visible.
-    const memberReady = isStripeCheckoutConfigured() && ctx.hasSupabaseAdminPrivileges && ctx.supabaseAdmin
-      ? await loadMemberPackReadiness({ db: ctx.supabaseAdmin, ids: packages.map(pkg => pkg.id) }).catch(() => {
+        kind: 'credit_package', ids: packages.map(pkg => pkg.id) }).catch(() => new Map<string, string>()) : new Map<string, string>();
+    // Member pack availability follows the audited new-purchase route; catalog reads survive provider failures.
+    const memberReady = ctx.hasSupabaseAdminPrivileges && ctx.supabaseAdmin
+      ? await loadSelectedMemberPackReadiness(ctx.supabaseAdmin, packages.map(pkg => pkg.id)).catch(() => {
         logger.warn('billing', 'settings_member_pack_prices_unavailable', {});
         return new Map<string, boolean>();
       }) : new Map<string, boolean>();
@@ -422,14 +423,12 @@ export const settingsRouter = router({
   /** Public offer facts (Gold first month, founder price and seats left); see routers/publicOffers.ts. */
   getPublicOffers,
 
-  /**
-   * 获取会员等级列表 (公开接口)
-   * 返回所有会员等级供用户查看和订阅
-   */
+  // Public membership catalog.
   getMembershipPlans: publicProcedure.query(async ({ ctx }) => {
     const selectedChannel = ctx.hasSupabaseAdminPrivileges && ctx.supabaseAdmin
       ? await readPaymentChannel(ctx.supabaseAdmin).catch(() => null) : null;
-    const stripeReady = selectedChannel?.channel === 'stripe' && isStripeCheckoutConfigured();
+    const stripeReady = ctx.hasSupabaseAdminPrivileges && Boolean(ctx.supabaseAdmin)
+      && await legacyStripeCatalogReady(ctx.supabaseAdmin, selectedChannel?.channel).catch(() => false);
     const readClient = getPublicReadClient(ctx);
     let result;
 
@@ -463,9 +462,7 @@ export const settingsRouter = router({
 
     const priceRefs = stripeReady && ctx.hasSupabaseAdminPrivileges
       ? await loadConfiguredStripePrices({ db: ctx.supabaseAdmin,
-        kind: 'membership_plan', ids: plans.map(plan => plan.id) }).catch(error => {
-          throw createSafeServiceUnavailableError(error, CATALOG_UNAVAILABLE_MESSAGE);
-        }) : new Map<string, string>();
+        kind: 'membership_plan', ids: plans.map(plan => plan.id) }).catch(() => new Map<string, string>()) : new Map<string, string>();
     // 映射字段名以兼容前端
     return plans.map(plan => ({
       id: plan.id,
