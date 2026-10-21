@@ -13,7 +13,7 @@ export type MethodPurchase = {
   itemId: string;
   billingCycle: 'monthly' | 'yearly' | 'one_time';
   offer: MethodOffer;
-  transition?: 'upgrade' | 'founder_renewal';
+  transition?: 'upgrade' | 'founder_renewal' | 'wallet_renewal';
   priorSubscriptionId?: string;
 };
 

@@ -29,6 +29,19 @@ describe('PAY-STRIPE-MP paid session recovered by a new checkout request', () =>
     // paymentStatus 'paid' is what makes the cancel-page notice say "payment received, under review" (canceledReturnNotice).
     expect(result).toMatchObject({ checkoutStatus: 'complete', paymentStatus: 'paid', fulfilledAt: null });
   });
+  it.each(['wechat_pay', 'alipay', 'card', 'card_cn'])('returns the persisted %s method for cancel copy', async payment_method => {
+    recover.mockReset().mockResolvedValue({ orderId: 'order', checkoutStatus: 'complete', paymentStatus: 'unpaid' });
+    const result = await syncMethodCheckoutReturn(db({ status: 'pending', fulfilled_at: null, payment_method }), {} as Stripe,
+      session, 'user-1');
+    expect(result).toMatchObject({ paymentMethod: payment_method, paymentStatus: 'unpaid' });
+  });
+  it('reports an open unpaid wallet attempt as failed immediately without claiming payment or fulfillment', async () => {
+    recover.mockReset().mockResolvedValue({ orderId: 'order-wallet', checkoutStatus: 'open', paymentStatus: 'unpaid' });
+    const result = await syncMethodCheckoutReturn(db({ status: 'pending', payment_status: 'unpaid', payment_method: 'alipay',
+      qualification_state: 'reserved', purchase_closed_at: null, method_review_reason: 'wallet_payment_failed', fulfilled_at: null }),
+    {} as Stripe, session, 'user-1');
+    expect(result).toMatchObject({ orderStatus: 'failed', paymentStatus: 'unpaid', checkoutStatus: 'open', fulfilledAt: null });
+  });
   it('keeps the legacy fulfillment for legacy orders', async () => {
     recover.mockReset().mockResolvedValue(null);
     const legacy = vi.fn();

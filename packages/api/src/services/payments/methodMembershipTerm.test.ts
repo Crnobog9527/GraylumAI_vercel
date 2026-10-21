@@ -2,6 +2,23 @@
 import { describe, it, expect } from 'vitest';
 import { walletMembershipTerm, membershipGrantWindows, founderGraceDeadline, assertProUpgradeWindow } from './methodMembershipTerm';
 describe('method membership terms', () => {
+  it.each(['month', 'year'] as const)('wallet advance %s retains the paid period and starts at its end', term => {
+    const result = walletMembershipTerm({ paidAt: '2028-01-05T08:00:00Z', term,
+      walletRenewal: { originalEnd: '2028-01-31T08:00:00Z' } });
+    expect(result).toEqual({ start: '2028-01-31T08:00:00.000Z',
+      end: term === 'year' ? '2029-01-31T08:00:00.000Z' : '2028-02-29T08:00:00.000Z' });
+    const windows = membershipGrantWindows({ orderId: 'renewal', ...result, yearly: term === 'year',
+      credits: term === 'year' ? 41760 : 3480 });
+    expect(windows[0]?.start).toBe(result.start);
+    expect(windows.every(window => Date.parse(window.start) > Date.parse('2028-01-05T08:00:00Z'))).toBe(true);
+  });
+  it('rejects first-month offers or mixed founder rules on an ordinary wallet renewal', () => {
+    const walletRenewal = { originalEnd: '2028-01-31T08:00:00Z' };
+    expect(() => walletMembershipTerm({ paidAt: '2028-01-05T08:00:00Z', term: 'days30', walletRenewal }))
+      .toThrow('PAY_WAFFO_TERM_INVALID');
+    expect(() => walletMembershipTerm({ paidAt: '2028-01-05T08:00:00Z', term: 'year', walletRenewal,
+      founderRenewal: { ...walletRenewal, eligibleUntil: '2028-02-07T08:00:00Z' } })).toThrow('PAY_WAFFO_TERM_INVALID');
+  });
   it('preserves month-end and leap-year anchors across twelve grants', () => {
     const term = walletMembershipTerm({ paidAt: '2028-01-31T08:00:00Z', term: 'year' });
     const grants = membershipGrantWindows({ orderId: 'order', ...term, yearly: true, credits: 107640 });
