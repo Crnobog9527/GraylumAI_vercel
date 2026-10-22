@@ -63,6 +63,7 @@ const plan = {
 const ROUTES = { version: 7, card: { enabled: true }, card_cn: { enabled: true },
   wechat_pay: { enabled: false, annualVerified: false }, alipay: { enabled: false, annualVerified: false } };
 const ENTRY = { mode: 'test', routes: ROUTES, checkoutReady: true, termsVersion: 'terms-v3', goldFirstMonthEligible: false,
+  checkoutMethods: ['card', 'card_cn'],
   founder: { total: 50, sold: 50, reserved: 0, available: 0 }, memberships: [] as unknown[] };
 
 function queryState(overrides: Record<string, unknown> = {}) {
@@ -113,10 +114,22 @@ describe('SubscriptionCard catalog availability', () => {
     componentState.plansQuery = queryState({ data: [plan] });
     componentState.membershipQuery = queryState({ data: entry });
     const markup = renderSubscription();
-    expect(markup).toContain('银行卡付款暂未开放');
+    expect(markup).toContain('付款暂未开放');
     expect(markup).not.toContain('>开通<');
     expect(markup).not.toContain('税另计');
   });
+
+  it('projects the staging wallet methods into the member page checkout summary', () => {
+    componentState.plansQuery = queryState({ data: [plan] });
+    componentState.membershipQuery = queryState({ data: { ...ENTRY,
+      routes: { ...ROUTES, wechat_pay: { enabled: true, annualVerified: false }, alipay: { enabled: true, annualVerified: true } },
+      checkoutMethods: ['card', 'card_cn', 'wechat_pay', 'alipay'] } });
+    const markup = renderSubscription();
+    expect(markup).toContain('微信支付：不另收税');
+    expect(markup).toContain('支付宝：不另收税');
+  });
+
+
 
   it('pauses purchases when the membership read fails, but keeps subscription management', () => {
     componentState.plansQuery = queryState({ data: [plan] });
@@ -149,6 +162,17 @@ describe('SubscriptionCard catalog availability', () => {
     expect(markup).toContain('自动续费中，本期到 2099-11-14');
     expect(markup).toContain('当前方案');
     expect(markup).toContain('升级到 Gold');
+  });
+
+  it('shows only the highest current membership after a wallet upgrade', () => {
+    const member = { subscription_id: 'pro-old', purchase_membership_level: 'pro', payment_method: 'wechat_pay',
+      billing_cycle: 'monthly', offer_kind: 'standard', entitlement_end: '2099-11-21T00:00:00Z',
+      auto_renew: false, cancel_at_period_end: true };
+    componentState.membershipQuery = queryState({ data: { ...ENTRY, memberships: [member,
+      { ...member, subscription_id: 'gold-current', purchase_membership_level: 'gold', payment_method: 'alipay' }] } });
+    const markup = renderSubscription();
+    expect(markup).toContain('Gold · 月付');
+    expect(markup).not.toContain('Pro · 月付');
   });
 
   it('explains an old subscription with an unsuccessful payment and keeps purchases closed (#937)', () => {
@@ -283,8 +307,8 @@ describe('membership page in a local browser', () => {
           methodCheckout: mutation(async input => { state.checkouts.push(input); window.recordCheckout?.(input);
             if (state.checkoutError) throw Object.assign(new Error(state.checkoutError.message), { data: { code: state.checkoutError.code } });
             if (state.recovery) return { orderId: 'o1', state: 'recovery_required', url: null };
-            return { orderId: 'o1', state: 'open', url: 'https://checkout.stripe.com/c/pay/cs_test_9' }; }),
-          getSubscriptionManagement: { useQuery: () => query({ available: false }) },
+            return { orderId: 'o1', state: 'open', url: state.checkoutUrl ?? 'https://checkout.stripe.com/c/pay/cs_test_9' }; }),
+          getSubscriptionManagement: { useQuery: () => query({ available: state.managementAvailable === true }) },
           createCustomerPortalSession: mutation(async () => ({})),
           syncCheckoutSession: mutation(async input => { state.syncs.push(input); return state.syncResult; }),
         } };
@@ -328,7 +352,7 @@ describe('membership page in a local browser', () => {
     await page.route('**/*', route => {
       const url = route.request().url();
       if (url.split('?')[0] === 'http://profile.test/') return route.fulfill({ contentType: 'text/html', body: '<!doctype html><div id="root"></div>' });
-      if (url.startsWith('https://checkout.stripe.com/')) return route.fulfill({ contentType: 'text/html', body: 'stripe' });
+      if (url.startsWith('https://checkout.stripe.com/') || url.startsWith('https://pancake.waffo.ai/')) return route.fulfill({ contentType: 'text/html', body: 'stripe' });
       return route.abort();
     });
     await page.goto(`http://profile.test/${setup.urlSearch ? `?${setup.urlSearch}` : ''}`);
@@ -337,6 +361,64 @@ describe('membership page in a local browser', () => {
     await page.addScriptTag({ content: code });
     return { page, errors };
   }
+
+  it('disables yearly purchase when wallet routes are not verified for annual billing', async () => {
+    const membership = { ...ENTRY, checkoutMethods: ['wechat_pay', 'alipay'], routes: { version: 7,
+      card: { enabled: false }, card_cn: { enabled: false }, wechat_pay: { enabled: true, annualVerified: false },
+      alipay: { enabled: true, annualVerified: false } } };
+    const { page, errors } = await open({ membership });
+    try {
+      await page.getByRole('radio', { name: '按年' }).click();
+      const yearly = page.getByTestId('profile-membership-plan-pro').getByRole('button', { name: '暂不可购买' });
+      await browserExpect(yearly).toBeDisabled();
+      await page.getByRole('radio', { name: '按月' }).click();
+      await page.getByTestId('profile-membership-plan-pro').getByRole('button', { name: '开通' }).click();
+      await page.getByTestId('method-checkout-method-wechat_pay').click();
+      await browserExpect(page.getByTestId('method-checkout-renewal')).toHaveText('一次性付款，不自动续费。');
+      expect(errors).toEqual([]);
+    } finally { await page.close(); }
+  }, 30_000);
+
+  it('explains that a founder wallet term is one-time and allows renewal within its founder window', async () => {
+    const membership = { ...ENTRY, checkoutMethods: ['wechat_pay'], routes: { version: 7,
+      card: { enabled: false }, card_cn: { enabled: false }, wechat_pay: { enabled: true, annualVerified: true },
+      alipay: { enabled: false, annualVerified: false } }, founder: { total: 50, sold: 20, reserved: 0, available: 30 } };
+    const { page, errors } = await open({ membership });
+    try {
+      await page.getByRole('radio', { name: '按年' }).click();
+      await page.getByTestId('profile-membership-plan-gold').getByRole('button', { name: '开通' }).click();
+      await page.getByTestId('method-checkout-method-wechat_pay').click();
+      await browserExpect(page.getByTestId('method-checkout-renewal')).toHaveText('一次性付款，不自动续费。');
+      await browserExpect(page.getByTestId('method-checkout-fineprint')).toHaveText(
+        '本次创始会员年付为一次性付款，不自动续费；到期前可在期限内按创始续费价格手动续买一年。');
+      expect(errors).toEqual([]);
+    } finally { await page.close(); }
+  }, 30_000);
+
+  it('offers the server-projected $496 wallet founder renewal and sends the founder_renewal transition', async () => {
+    const membership = { ...ENTRY, checkoutMethods: ['wechat_pay'], routes: { version: 7,
+      card: { enabled: false }, card_cn: { enabled: false }, wechat_pay: { enabled: true, annualVerified: true },
+      alipay: { enabled: false, annualVerified: false } }, founder: { total: 50, sold: 20, reserved: 0, available: 30 },
+      founderRenewal: { itemId: 'plan-gold', subscriptionId: 'founder-sub', eligibleUntil: '2099-01-08T00:00:00Z' } };
+    const { page, errors } = await open({ membership, level: 'gold' });
+    try {
+      await page.getByRole('radio', { name: '按年' }).click();
+      const goldPlan = page.getByTestId('profile-membership-plan-gold');
+      await browserExpect(goldPlan).toContainText('创始会员续费价');
+      await browserExpect(goldPlan).toContainText('$496');
+      await goldPlan.getByRole('button', { name: '续买创始会员一年' }).click();
+      await browserExpect(page.getByTestId('method-checkout-dialog')).toContainText('续买 Gold 创始会员 · 年付');
+      await browserExpect(page.getByTestId('method-checkout-renewal')).toHaveText('一次性付款 $496，不自动续费。');
+      await page.getByTestId('method-checkout-method-wechat_pay').click();
+      await page.getByTestId('method-checkout-terms').check();
+      await page.getByTestId('method-checkout-pay').click();
+      await browserExpect(page).toHaveURL('https://checkout.stripe.com/c/pay/cs_test_9');
+      expect(sentByPage.get(page)).toEqual([{ itemType: 'membership_plan', itemId: 'plan-gold', billingCycle: 'yearly',
+        offer: 'founder_renewal', transition: 'founder_renewal', priorSubscriptionId: 'founder-sub', method: 'wechat_pay',
+        routingVersion: 7, acceptedTerms: true, termsVersion: 'terms-v3' }]);
+      expect(errors).toEqual([]);
+    } finally { await page.close(); }
+  }, 30_000);
 
   it('buys Pro by card after ticking the terms, and hands off only to Stripe', async () => {
     const { page, errors } = await open({});
@@ -383,6 +465,81 @@ describe('membership page in a local browser', () => {
       await browserExpect(page.getByTestId('profile-method-memberships')).not.toContainText('已停止续费');
       await page.getByRole('button', { name: '升级到 Gold' }).click();
       await browserExpect(page.getByTestId('method-checkout-dialog')).toContainText('原 Pro 是一次性购买，用到本期结束，不退差价。');
+      expect(errors).toEqual([]);
+    } finally { await page.close(); }
+  }, 30_000);
+
+  it.each(['stripe', 'waffo'])('extends an existing %s one-time membership through emergency Waffo card checkout', async source => {
+    const current = { ...proMember, payment_channel: source, payment_method: source === 'stripe' ? 'alipay' : 'card',
+      auto_renew: false, cancel_at_period_end: true };
+    const checkoutUrl = 'https://pancake.waffo.ai/store/test-store/checkout/cs_123?test=true';
+    const membership = { ...ENTRY, purchaseChannel:'waffo', memberships:[current], checkoutMethods:['card'] };
+    const {page,errors} = await open({level:'pro',membership,checkoutUrl});
+    try {
+      await browserExpect(page.getByTestId('profile-method-memberships')).toContainText('不自动续费');
+      await page.getByRole('radio',{name:'按年'}).click();
+      await page.getByTestId('profile-membership-plan-pro').getByRole('button',{name:'改为年付'}).click();
+      await browserExpect(page.getByTestId('method-checkout-dialog')).toContainText('2099/11/14 接续');
+      await browserExpect(page.getByTestId('method-checkout-method-card')).toContainText('Waffo 结账页');
+      await browserExpect(page.getByTestId('method-checkout-renewal')).toContainText('不自动续费');
+      await page.getByTestId('method-checkout-terms').check();
+      await page.getByTestId('method-checkout-pay').click();
+      await browserExpect(page).toHaveURL(checkoutUrl);
+      expect(sentByPage.get(page)).toEqual([expect.objectContaining({transition:'wallet_renewal',method:'card',
+        priorSubscriptionId:current.subscription_id,billingCycle:'yearly'})]);
+      expect(errors).toEqual([]);
+    } finally {await page.close();}
+  },30000);
+
+  it.each(['wechat_pay', 'alipay'])('switches a %s monthly wallet term to a queued annual term using wallets only', async payment_method => {
+    const walletPro = { ...proMember, payment_method, payment_channel: 'stripe', auto_renew: false, cancel_at_period_end: true };
+    const membership = { ...ENTRY, memberships: [walletPro], checkoutMethods: ['card', 'card_cn', 'wechat_pay', 'alipay'],
+      routes: { ...ROUTES, wechat_pay: { enabled: true, annualVerified: true }, alipay: { enabled: true, annualVerified: true } } };
+    const { page, errors } = await open({ level: 'pro', membership });
+    try {
+      await page.getByRole('radio', { name: '按年' }).click();
+      await page.getByTestId('profile-membership-plan-pro').getByRole('button', { name: '改为年付' }).click();
+      await browserExpect(page.getByTestId('method-checkout-dialog')).toContainText('2099/11/14 接续，当前剩余会员期限保留');
+      await browserExpect(page.getByTestId('method-checkout-dialog')).toContainText('不会提前发放新一期积分');
+      await browserExpect(page.getByTestId('method-checkout-method-card')).toHaveCount(0);
+      await browserExpect(page.getByTestId('method-checkout-method-card_cn')).toHaveCount(0);
+      await page.getByTestId(`method-checkout-method-${payment_method}`).click();
+      await page.getByTestId('method-checkout-terms').check();
+      await page.getByTestId('method-checkout-pay').click();
+      await browserExpect(page).toHaveURL('https://checkout.stripe.com/c/pay/cs_test_9');
+      expect(sentByPage.get(page)).toEqual([{ itemType: 'membership_plan', itemId: 'plan-pro', billingCycle: 'yearly',
+        offer: 'standard', transition: 'wallet_renewal', priorSubscriptionId: proMember.subscription_id,
+        method: payment_method, routingVersion: 7, acceptedTerms: true, termsVersion: 'terms-v3' }]);
+      expect(errors).toEqual([]);
+    } finally { await page.close(); }
+  }, 30_000);
+
+  it('keeps the current monthly summary and appends advance repurchase after an already-paid future annual term', async () => {
+    const current = { ...proMember, payment_method: 'alipay', payment_channel: 'stripe', auto_renew: false, cancel_at_period_end: true };
+    const future = { ...current, subscription_id: 'queued-sub', entitlement_start: current.entitlement_end,
+      entitlement_end: '2100-11-14T12:00:00Z', billing_cycle: 'yearly' };
+    const membership = { ...ENTRY, memberships: [future, current], checkoutMethods: ['card', 'alipay'],
+      routes: { ...ROUTES, alipay: { enabled: true, annualVerified: true } } };
+    const { page, errors } = await open({ level: 'pro', membership });
+    try {
+      await browserExpect(page.getByTestId('profile-method-memberships')).toContainText('Pro · 月付');
+      await browserExpect(page.getByTestId('profile-method-memberships')).not.toContainText('Pro · 年付');
+      await page.getByTestId('profile-membership-plan-pro').getByRole('button', { name: '提前续买一个月' }).click();
+      await browserExpect(page.getByTestId('method-checkout-dialog')).toContainText('2100/11/14 接续');
+      await page.getByTestId('method-checkout-terms').check();
+      await page.getByTestId('method-checkout-pay').click();
+      await browserExpect(page).toHaveURL('https://checkout.stripe.com/c/pay/cs_test_9');
+      expect(sentByPage.get(page)).toEqual([expect.objectContaining({ transition: 'wallet_renewal', priorSubscriptionId: 'queued-sub',
+        billingCycle: 'monthly', method: 'alipay' })]);
+      expect(errors).toEqual([]);
+    } finally { await page.close(); }
+  }, 30_000);
+
+  it.each(['wechat_pay', 'alipay'])('returns a canceled %s checkout without card-country advice', async paymentMethod => {
+    const { page, errors } = await open({ search: 'tab=subscription&checkout=canceled&session_id=cs_test_wallet',
+      syncResult: { fulfilledAt: null, orderStatus: 'failed', paymentStatus: 'unpaid', paymentMethod } });
+    try {
+      await browserExpect(page.getByTestId('profile-checkout-notice')).toHaveText('你已取消本次支付，没有发生扣费。');
       expect(errors).toEqual([]);
     } finally { await page.close(); }
   }, 30_000);
@@ -458,7 +615,7 @@ describe('membership page in a local browser', () => {
       expect(paid.errors).toEqual([]);
     } finally { await paid.page.close(); }
     const canceled = await open({ search: 'tab=subscription&checkout=canceled&session_id=cs_test_no',
-      syncResult: { fulfilledAt: null, orderStatus: 'pending', paymentStatus: 'unpaid' } });
+      syncResult: { fulfilledAt: null, orderStatus: 'pending', paymentStatus: 'unpaid', paymentMethod: 'card' } });
     try {
       await browserExpect(canceled.page.getByTestId('profile-checkout-notice'))
         .toHaveText('你已取消本次支付，没有发生扣费。如果你在中国大陆，国际银行卡付款页会提示不支持；请回来改选“中国大陆银行卡”。');
@@ -466,6 +623,40 @@ describe('membership page in a local browser', () => {
         .toEqual([{ sessionId: 'cs_test_no', checkoutState: 'canceled' }]);
       expect(canceled.errors).toEqual([]);
     } finally { await canceled.page.close(); }
+  }, 30_000);
+
+  it.each([null, '2026-10-14T00:00:00Z'])('shows a refunded return as terminal, including fulfilledAt=%s', async fulfilledAt => {
+    const { page, errors } = await open({ search: 'tab=subscription&checkout=success&session_id=cs_test_refunded',
+      syncResult: { fulfilledAt, orderStatus: 'refunded', paymentStatus: 'paid' } });
+    try {
+      await browserExpect(page.getByTestId('profile-checkout-notice')).toHaveText('这笔订单已全额退款，订单状态已同步。');
+      await browserExpect(page.getByTestId('profile-membership-plan-pro').getByRole('button', { name: '开通', exact: true }))
+        .toBeEnabled();
+      expect(await page.evaluate(() => (window as unknown as { __pay: { syncs: unknown[] } }).__pay.syncs))
+        .toEqual([{ sessionId: 'cs_test_refunded' }]);
+      expect(errors).toEqual([]);
+    } finally { await page.close(); }
+  }, 30_000);
+
+  it.each([1280, 375])('explains refunded but still renewing subscriptions and blocks new purchases at %s px', async width => {
+    const notice = { message: '这一期已退款，但旧订阅的自动续费还开着。请先在“管理订阅 / 取消续费”里停掉续费，或联系客服处理后再重新购买。',
+      buttonLabel: '已退款，请先停止旧订阅续费' };
+    const { page, errors } = await open({ membership: { ...ENTRY, refundedRenewalNotice: notice }, managementAvailable: true,
+      search: 'tab=subscription&buy=pro&cycle=monthly' }, width);
+    try {
+      await browserExpect(page.getByTestId('profile-refunded-renewal-notice')).toHaveText(notice.message);
+      for (const level of ['pro', 'gold']) {
+        await browserExpect(page.getByTestId(`profile-membership-plan-${level}`).getByRole('button', { name: notice.buttonLabel }))
+          .toBeDisabled();
+      }
+      await browserExpect(page.getByRole('button', { name: '管理订阅 / 取消续费', exact: true })).toBeVisible();
+      await browserExpect(page.getByTestId('method-checkout-dialog')).toHaveCount(0);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      expect(sentByPage.get(page)).toEqual([]);
+      expect(await page.locator('body').innerText()).not.toContain('续费处理中');
+      await page.screenshot({ path: `/tmp/graylum-1236-refund-manual-${width}.png`, fullPage: true });
+      expect(errors).toEqual([]);
+    } finally { await page.close(); }
   }, 30_000);
 
   it('sells Gold yearly at the founder price with real seats, and falls back to $621 when they sell out at checkout', async () => {

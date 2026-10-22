@@ -34,7 +34,7 @@ export function usePaywallCheckout() {
     founderUsd: founderSeats > 0 ? GOLD_FOUNDER_YEAR_USD : null };
 
   function purchaseFor(plan: PaywallPlan, billing: PaywallBilling): MethodPurchase | null {
-    if (catalogFailed || plan.checkoutReady?.[billing] !== true) return null;
+    if (catalogFailed || plan.checkoutReady?.[billing] !== true || method.methodsFor('membership_plan', billing).length === 0) return null;
     const gold = plan.level === 'gold';
     const offer = goldFirstMonth && gold && billing === 'monthly' ? 'gold_first30'
       : founderSeats > 0 && gold && billing === 'yearly' ? 'founder' : 'standard';

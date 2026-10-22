@@ -1,9 +1,10 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { refundedRepurchaseCases } from './refunded-repurchase.mjs';
 
 /** PAY-STRIPE-MP step 4b-2 (0253): our approved monthly first-purchase refund of a card subscription. */
-export async function stripeMpSubscriptionRefundCases({admin,service}) {
+export async function stripeMpSubscriptionRefundCases({admin,service,connect}) {
   const plan=(await admin.query("SELECT id FROM membership_plans WHERE level='gold'")).rows[0].id;
   const current=(await admin.query("SELECT value FROM system_settings WHERE key='payment_method_routes'")).rows[0].value;
   const version=current.version+1;
@@ -100,6 +101,7 @@ export async function stripeMpSubscriptionRefundCases({admin,service}) {
   assert.equal((await admin.query('SELECT monthly_refund_erasure_safe($1) ok',[proof])).rows[0].ok,true);
   assert.equal((await admin.query('SELECT monthly_refund_erasure_safe($1) ok',
     [{...proof,terms:{...proof.terms,taxMinor:-1}}])).rows[0].ok,false);
+  const repurchaseCases=await refundedRepurchaseCases({admin,service,connect,refunded:f,plan,version});
 
   // No fee where the law forbids it: the whole charge comes back and the order is fully refunded.
   const g=await buyer('e2'.repeat(32));
@@ -163,7 +165,7 @@ export async function stripeMpSubscriptionRefundCases({admin,service}) {
 
   await admin.query("UPDATE system_settings SET value=$1 WHERE key='payment_method_routes'",
     [{...current,card:{enabled:false},card_cn:{enabled:false},version:version+1}]);
-  return ['stripe-mp-subscription-refund-tax-terms','stripe-mp-subscription-refund-held','stripe-mp-subscription-refund-cancel',
+  return [...repurchaseCases,'stripe-mp-subscription-refund-tax-terms','stripe-mp-subscription-refund-held','stripe-mp-subscription-refund-cancel',
     'stripe-mp-subscription-refund-erasure-proof','stripe-mp-subscription-refund-no-fee','stripe-mp-subscription-refund-restore',
     'stripe-mp-subscription-refund-mainland','stripe-mp-subscription-refund-abandoned','stripe-mp-subscription-refund-paid-history','stripe-mp-subscription-refund-open-checkout','stripe-mp-subscription-refund-consumption'];
 }

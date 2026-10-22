@@ -84,11 +84,7 @@ export async function verifyEndedMemberships({admin,service,connect},seeded) {
     'id',gen_random_uuid()) WHERE user_id=$1`,[seeded.walletHeld.user]);
   assert.equal((await service.query('SELECT pay_common_settle_membership_level($1) v',[seeded.walletHeld.user])).rows[0].v,false);
   assert.equal(await level(admin,seeded.walletHeld.user),'gold');
-  // Repeated small batches: a profile the setter would skip never takes a slot, so every run still settles one.
-  for(let run=0;run<2;run++)
-    assert.equal((await service.query('SELECT pay_common_settle_membership_levels(1) n')).rows[0].n,1,`run ${run}`);
-  assert.equal(await level(admin,seeded.walletHeld.user),'gold');
-  await admin.query("UPDATE payment_orders SET refund_approval=NULL WHERE user_id=$1",[seeded.walletHeld.user]);
+  // Configure overrides before any batch can settle these randomly ordered users.
   // Admin overrides follow the facts predicate: one set before the last paid term is ignored, a newer one is kept.
   for(const [name,at] of [['oldOverride','2020-01-01T00:00:00Z'],['newOverride',new Date(Date.now()+60000)]])
     await admin.query(`UPDATE user_subscriptions SET status='admin_override',metadata='{"adminOverride":{"newLevel":"gold"}}',
@@ -96,6 +92,12 @@ export async function verifyEndedMemberships({admin,service,connect},seeded) {
   const facts=async user=>(await service.query('SELECT pay_common_membership_facts($1) v',[user])).rows[0].v.internal_membership;
   assert.equal((await facts(seeded.oldOverride.user)).mapping_state,'internal_inactive');
   assert.equal(await facts(seeded.newOverride.user),null);
+  assert.equal(await level(admin,seeded.newOverride.user),'gold','override fixture starts at Gold');
+  // Repeated small batches: a profile the setter would skip never takes a slot, so every run still settles one.
+  for(let run=0;run<2;run++)
+    assert.equal((await service.query('SELECT pay_common_settle_membership_levels(1) n')).rows[0].n,1,`run ${run}`);
+  assert.equal(await level(admin,seeded.walletHeld.user),'gold');
+  await admin.query("UPDATE payment_orders SET refund_approval=NULL WHERE user_id=$1",[seeded.walletHeld.user]);
   // Daily batch: ended terms settle, renewal grace keeps the level, and a second run changes nothing.
   assert.ok((await service.query('SELECT pay_common_settle_membership_levels(100) n')).rows[0].n>=3);
   assert.equal(await level(admin,seeded.oldOverride.user),'free','an older admin override does not keep a stale level');

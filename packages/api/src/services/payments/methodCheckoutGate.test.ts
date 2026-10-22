@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
-import { LIVE_PAYMENT_PIPELINE_READY, assertMethodCheckoutEnvironment, methodCardCheckoutReady, methodCheckoutEnvironmentOpen,
+import { LIVE_PAYMENT_PIPELINE_READY, assertMethodCheckoutEnvironment, methodCheckoutReady, methodCheckoutEnvironmentOpen, methodCheckoutMethods,
   stripeTestClockStagingOpen } from './methodCheckoutGate';
 
 // The staging deployment, bound like the runtime staging check (project, branch, repository, database).
@@ -9,7 +9,7 @@ const staging = { VERCEL: '1', VERCEL_PROJECT_PRODUCTION_URL: 'auth-staging.gray
   V3_RUNTIME_STAGING_PROJECT_ID: 'synthetic-staging-project', NEXT_PUBLIC_SUPABASE_URL: 'https://synthetic.supabase.co',
   V3_RUNTIME_STAGING_DATABASE_HOST: 'synthetic.supabase.co', V3_RUNTIME_STAGING_WINDOW_ID: '00000000-0000-4000-8000-000000000001' };
 const routes = (card: boolean) => ({ version: 4, card: { enabled: card }, card_cn: { enabled: card },
-  wechat_pay: { enabled: true, annualVerified: true }, alipay: { enabled: true, annualVerified: true } });
+  wechat_pay: { enabled: card, annualVerified: true }, alipay: { enabled: card, annualVerified: true } });
 const methods = ['card', 'card_cn', 'wechat_pay', 'alipay'] as const;
 
 describe('PAY-STRIPE-MP checkout gate (3c: card open on staging only, behind the server switch)', () => {
@@ -20,32 +20,39 @@ describe('PAY-STRIPE-MP checkout gate (3c: card open on staging only, behind the
         expect(methodCheckoutEnvironmentOpen(env, method)).toBe(false);
         expect(() => assertMethodCheckoutEnvironment(env, method)).toThrow('PAY_WAFFO_STEP2_NOT_READY');
       }
-      expect(methodCardCheckoutReady(env, routes(true))).toBe(false);
+      expect(methodCheckoutReady(env, routes(true))).toBe(false);
     }
   });
-  it('staging opens card checkout in code; the default-off server switch still decides; wallets stay closed', () => {
+  it('staging opens checkout in code; route switches decide which methods are available', () => {
     // 3c "打开银行卡下单": the code gate is open on staging only. The old Waffo test flag changes nothing.
     for (const env of [staging, { ...staging, WAFFO_TEST_OPERATIONS_ENABLED: 'true' }]) {
       for (const method of ['card', 'card_cn'] as const) {
         expect(methodCheckoutEnvironmentOpen(env, method)).toBe(true);
         expect(() => assertMethodCheckoutEnvironment(env, method)).not.toThrow();
       }
-      for (const method of ['wechat_pay', 'alipay'] as const) {
-        expect(methodCheckoutEnvironmentOpen(env, method)).toBe(false);
+      for (const method of methods) {
+        expect(methodCheckoutEnvironmentOpen(env, method)).toBe(true);
+        expect(() => assertMethodCheckoutEnvironment(env, method)).not.toThrow();
       }
-      expect(methodCardCheckoutReady(env, routes(true))).toBe(true);
-      expect(methodCardCheckoutReady(env, routes(false))).toBe(false);
+      expect(methodCheckoutReady(env, routes(true))).toBe(true);
+      expect(methodCheckoutReady(env, routes(false))).toBe(false);
+      expect(methodCheckoutMethods(env, routes(true))).toEqual(methods);
+      expect(methodCheckoutMethods(env, routes(false))).toEqual([]);
     }
-    expect(methodCardCheckoutReady(staging, null)).toBe(false);
+    expect(methodCheckoutReady(staging, null)).toBe(false);
     // Either card route makes the entry ready; `routes` tells the page which method is open.
-    expect(methodCardCheckoutReady(staging, { ...routes(false), card_cn: { enabled: true } })).toBe(true);
+    expect(methodCheckoutReady(staging, { ...routes(false), card_cn: { enabled: true } })).toBe(true);
+    expect(methodCheckoutReady(staging, { ...routes(false), wechat_pay: { enabled: true, annualVerified: false } })).toBe(true);
+    expect(methodCheckoutReady(staging, { ...routes(false), alipay: { enabled: false, annualVerified: true } })).toBe(false);
+    expect(methodCheckoutMethods(staging, { ...routes(false), wechat_pay: { enabled: true, annualVerified: false } }))
+      .toEqual(['wechat_pay']);
   });
   it('a preview of the staging project, another project or another database stays closed', () => {
     for (const patch of [{ VERCEL_GIT_COMMIT_REF: 'feature-branch', VERCEL_ENV: 'preview' }, { VERCEL_PROJECT_ID: 'other-project' },
       { NEXT_PUBLIC_SUPABASE_URL: 'https://other.supabase.co' }, { VERCEL_GIT_REPO_OWNER: 'someone-else' },
       { VERCEL_PROJECT_PRODUCTION_URL: 'app.graylum.com' }, { VERCEL: undefined }]) {
       expect(methodCheckoutEnvironmentOpen({ ...staging, ...patch }, 'card')).toBe(false);
-      expect(methodCardCheckoutReady({ ...staging, ...patch }, routes(true))).toBe(false);
+      expect(methodCheckoutReady({ ...staging, ...patch }, routes(true))).toBe(false);
     }
   });
 });
@@ -61,10 +68,10 @@ const testClockStaging = { VERCEL: '1', VERCEL_ENV: 'production',
 describe('Stripe test-clock customer checkout staging gate', () => {
   it('opens only for the exact staging deployment, Stripe test mode, and enabled card route', () => {
     expect(stripeTestClockStagingOpen(testClockStaging)).toBe(true);
-    expect(methodCardCheckoutReady(testClockStaging, routes(true), undefined, 'test')).toBe(true);
-    expect(methodCardCheckoutReady(testClockStaging, routes(false), undefined, 'test')).toBe(false);
+    expect(methodCheckoutReady(testClockStaging, routes(true), undefined, 'test')).toBe(true);
+    expect(methodCheckoutReady(testClockStaging, routes(false), undefined, 'test')).toBe(false);
     // Staging's normal card checkout remains open; the service separately refuses test-clock Customers unless Stripe is in test mode.
-    expect(methodCardCheckoutReady(testClockStaging, routes(true), undefined, 'live')).toBe(true);
+    expect(methodCheckoutReady(testClockStaging, routes(true), undefined, 'live')).toBe(true);
     expect(methodCheckoutEnvironmentOpen(testClockStaging, 'card')).toBe(true);
     expect(() => assertMethodCheckoutEnvironment(testClockStaging, 'card', undefined, true)).not.toThrow();
   });
@@ -74,7 +81,7 @@ describe('Stripe test-clock customer checkout staging gate', () => {
     expect(stripeTestClockStagingOpen(publicProduction)).toBe(false);
     expect(() => assertMethodCheckoutEnvironment(publicProduction, 'card', undefined, true))
       .toThrow('PAY_WAFFO_STEP2_NOT_READY');
-    expect(methodCardCheckoutReady(publicProduction, routes(true), undefined, 'test')).toBe(false);
+    expect(methodCheckoutReady(publicProduction, routes(true), undefined, 'test')).toBe(false);
   });
 
   it.each([
@@ -108,7 +115,7 @@ describe('R7 production checkout gate: bound deployment plus a separate default-
       expect(open({ ...production, PAY_PRODUCTION_CARD_CHECKOUT_ENABLED: value,
         PAY_PRODUCTION_WALLET_CHECKOUT_ENABLED: value })).toEqual([]);
     }
-    expect(methodCardCheckoutReady(production, routes(true), true)).toBe(false);
+    expect(methodCheckoutReady(production, routes(true), true)).toBe(false);
   });
   it('opens card and wallets independently on the bound production deployment', () => {
     expect(open({ ...production, ...cardOn })).toEqual(['card', 'card_cn']);
@@ -118,9 +125,12 @@ describe('R7 production checkout gate: bound deployment plus a separate default-
     expect(() => assertMethodCheckoutEnvironment({ ...production, ...cardOn }, 'card', true)).not.toThrow();
     expect(() => assertMethodCheckoutEnvironment({ ...production, ...cardOn }, 'alipay', true)).toThrow('PAY_WAFFO_STEP2_NOT_READY');
     // The member page still needs the default-off route switch on top of the code gate.
-    expect(methodCardCheckoutReady({ ...production, ...cardOn }, routes(true), true)).toBe(true);
-    expect(methodCardCheckoutReady({ ...production, ...cardOn }, routes(false), true)).toBe(false);
-    expect(methodCardCheckoutReady({ ...production, ...walletOn }, routes(true), true)).toBe(false);
+    expect(methodCheckoutReady({ ...production, ...cardOn }, routes(true), true)).toBe(true);
+    expect(methodCheckoutReady({ ...production, ...cardOn }, routes(false), true)).toBe(false);
+    expect(methodCheckoutReady({ ...production, ...walletOn }, routes(true), true)).toBe(false);
+    expect(methodCheckoutMethods({ ...production, ...cardOn }, routes(true), true)).toEqual(['card', 'card_cn']);
+    expect(methodCheckoutMethods({ ...production, ...walletOn }, routes(true), true)).toEqual(['wechat_pay', 'alipay']);
+    expect(methodCheckoutMethods(production, routes(true), true)).toEqual([]);
   });
   it.each(Object.keys(production))('stays closed with both switches on when %s is missing', key =>
     expect(open({ ...production, ...cardOn, ...walletOn, [key]: undefined })).toEqual([]));
@@ -140,13 +150,13 @@ describe('R7 production checkout gate: bound deployment plus a separate default-
   it.each(['V3_RUNTIME_STAGING_ENABLED', 'V3_RUNTIME_STAGING_PROJECT_ID', 'V3_RUNTIME_STAGING_DATABASE_HOST',
     'V3_RUNTIME_STAGING_WINDOW_ID'])('refuses a mixed configuration with %s set', key =>
     expect(open({ ...production, ...cardOn, ...walletOn, [key]: 'x' })).toEqual([]));
-  it('the production switches change nothing on staging or on any other deployment', () => {
-    expect(open({ ...staging, ...cardOn, ...walletOn })).toEqual(['card', 'card_cn']);
-    expect(open({ ...staging, PAY_PRODUCTION_CARD_CHECKOUT_ENABLED: 'false' })).toEqual(['card', 'card_cn']);
+  it('production switches change nothing on staging or on any other deployment', () => {
+    expect(open({ ...staging, ...cardOn, ...walletOn })).toEqual(methods);
+    expect(open({ ...staging, PAY_PRODUCTION_CARD_CHECKOUT_ENABLED: 'false' })).toEqual(methods);
     expect(open({ ...cardOn, ...walletOn })).toEqual([]);
     // Production project variables on the staging deployment do not turn it into production.
     expect(open({ ...staging, ...walletOn, V3_RUNTIME_PRODUCTION_PROJECT_ID: staging.VERCEL_PROJECT_ID,
-      V3_RUNTIME_PRODUCTION_DATABASE_HOST: staging.V3_RUNTIME_STAGING_DATABASE_HOST })).toEqual(['card', 'card_cn']);
+      V3_RUNTIME_PRODUCTION_DATABASE_HOST: staging.V3_RUNTIME_STAGING_DATABASE_HOST })).toEqual(methods);
   });
 });
 
@@ -160,12 +170,25 @@ describe('R7 hard guard: the live payment pipeline is wired (PR-B1/B2/B3), so th
       expect(methodCheckoutEnvironmentOpen(env, method, false)).toBe(false);
       expect(() => assertMethodCheckoutEnvironment(env, method, false)).toThrow('PAY_WAFFO_STEP2_NOT_READY');
     }
-    expect(methodCardCheckoutReady(env, routes(true))).toBe(true);
-    expect(methodCardCheckoutReady(env, routes(true), false)).toBe(false);
+    expect(methodCheckoutReady(env, routes(true))).toBe(true);
+    expect(methodCheckoutReady(env, routes(true), false)).toBe(false);
   });
   it('staging is not affected by the marker', () => {
     expect(methodCheckoutEnvironmentOpen(staging, 'card')).toBe(true);
     expect(methodCheckoutEnvironmentOpen(staging, 'card', false)).toBe(true);
-    expect(methodCardCheckoutReady(staging, routes(true))).toBe(true);
+    expect(methodCheckoutReady(staging, routes(true))).toBe(true);
+  });
+});
+
+
+describe('Waffo failover UI gate', () => {
+  it('requires the bound sandbox and test-operation gate; never pretends sandbox Alipay works', () => {
+    const emergency = { ...routes(true), newPurchaseChannel: 'waffo' as const };
+    expect(methodCheckoutMethods(staging, emergency)).toEqual([]);
+    expect(methodCheckoutMethods({ ...staging, WAFFO_TEST_OPERATIONS_ENABLED: 'true' }, emergency))
+      .toEqual(['card', 'card_cn']);
+    expect(methodCheckoutReady({ ...staging, WAFFO_TEST_OPERATIONS_ENABLED: 'true' }, emergency)).toBe(true);
+    expect(methodCheckoutMethods({ ...staging, WAFFO_TEST_OPERATIONS_ENABLED: 'true', VERCEL_GIT_COMMIT_REF: 'branch' }, emergency))
+      .toEqual([]);
   });
 });

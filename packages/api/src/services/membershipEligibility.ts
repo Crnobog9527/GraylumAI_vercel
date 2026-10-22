@@ -75,7 +75,7 @@ type MembershipPlanSnapshot = {
 };
 
 type SubscriptionRow = {
-  membership_level?: string | null;
+  payment_method?: string | null; membership_level?: string | null; purchase_mode?: string | null;
   id?: string | null;
   membership_plan_id?: string | null;
   payment_channel?: string | null;

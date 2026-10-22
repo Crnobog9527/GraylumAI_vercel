@@ -34,7 +34,8 @@ function Amount({ value, highlight }: { value: string; highlight: boolean }) {
 }
 
 /** One plan on the membership page; the button opens the card checkout dialog (or is hidden while it is closed). */
-export function MembershipPlanCard({ plan, billingCycle, action, taxNote, firstMonth, founderSeats, onSelect }: {
+export function MembershipPlanCard({ plan, billingCycle, action, taxNote, firstMonth, founderSeats,
+  founderRenewal = false, oneTime = false, onSelect }: {
   plan: PlanConfig;
   billingCycle: 'monthly' | 'yearly';
   /** null while card checkout is closed: no purchase entry is shown. */
@@ -43,6 +44,9 @@ export function MembershipPlanCard({ plan, billingCycle, action, taxNote, firstM
   firstMonth: boolean;
   /** Real founder seats left for this card (Gold yearly only), 0 when none. */
   founderSeats: number;
+  /** Server-projected one-time wallet founder renewal; its displayed amount is the existing $496 price. */
+  founderRenewal?: boolean;
+  oneTime?: boolean;
   onSelect: () => void;
 }) {
   const highlight = Boolean(plan.recommended || plan.highlight);
@@ -67,14 +71,15 @@ export function MembershipPlanCard({ plan, billingCycle, action, taxNote, firstM
       <div className="mb-4 grid justify-items-center gap-1 text-center">
         {price === 0 ? (
           <span className="text-3xl font-bold" style={{ color: 'var(--text-primary)' }}>免费</span>
-        ) : billingCycle === 'yearly' && founderSeats > 0 ? (
+        ) : billingCycle === 'yearly' && (founderSeats > 0 || founderRenewal) ? (
           <>
             <div className="flex items-baseline justify-center gap-1">
               <Amount value={formatUsd(GOLD_FOUNDER_YEAR_USD)} highlight={highlight} />
               <span className="text-sm" style={{ color: 'var(--text-tertiary)' }}>/年</span>
             </div>
-            <span data-testid="profile-founder-seats" className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-              创始会员 · 还剩 {founderSeats} 个名额（共 50 个）
+            <span data-testid={founderRenewal ? 'profile-founder-renewal-price' : 'profile-founder-seats'}
+              className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+              {founderRenewal ? '创始会员续费价' : `创始会员 · 还剩 ${founderSeats} 个名额（共 50 个）`}
             </span>
             <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>标准年付 {formatUsd(price)}/年</span>
           </>
@@ -97,7 +102,7 @@ export function MembershipPlanCard({ plan, billingCycle, action, taxNote, firstM
               <span className="text-sm" style={{ color: 'var(--text-tertiary)' }}>首月</span>
               <Amount value={formatUsd(GOLD_FIRST_MONTH_USD)} highlight={highlight} />
             </div>
-            <span className="text-sm" style={{ color: 'var(--text-tertiary)' }}>之后每月 {formatUsd(price)}</span>
+            <span className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{oneTime ? '下次续买按标准价 ' : '之后每月 '}{formatUsd(price)}</span>
           </>
         ) : (
           <div className="flex items-baseline justify-center gap-1">
@@ -105,6 +110,9 @@ export function MembershipPlanCard({ plan, billingCycle, action, taxNote, firstM
             <span className="text-sm" style={{ color: 'var(--text-tertiary)' }}>/月</span>
           </div>
         )}
+        {price > 0 && oneTime ? (
+          <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>一次性付款，不自动续费</span>
+        ) : null}
         {price > 0 && taxNote ? (
           <span data-testid={`profile-membership-plan-tax-${plan.level}`} className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
             {taxNote}
@@ -122,7 +130,7 @@ export function MembershipPlanCard({ plan, billingCycle, action, taxNote, firstM
       </div>
 
       {action ? (
-        <Button onClick={onSelect} className="w-full" disabled={action.disabled}
+        <Button onClick={onSelect} className="h-auto min-h-10 w-full whitespace-normal px-3 py-2 text-center" disabled={action.disabled}
           style={{ background: action.disabled ? 'var(--bg-tertiary)'
             : 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-secondary) 100%)',
           color: action.disabled ? 'var(--text-tertiary)' : 'var(--bg-primary)', cursor: action.disabled ? 'default' : 'pointer' }}>

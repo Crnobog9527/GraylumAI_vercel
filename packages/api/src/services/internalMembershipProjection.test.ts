@@ -1,12 +1,12 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from 'vitest';
-import { getState, loadLatestMembershipFacts } from './membershipEligibility';
+import { getState, loadLatestMembershipFacts, resolveMembershipEligibility } from './membershipEligibility';
 import { readMembershipEntitlements, assertFusionEntitlement } from './membershipEntitlements';
 import { actorId, fixture, planIds } from './__tests__/entitlementsFixture';
 
 const paid = (level = 'gold') => ({
   id: 'internal-sub', membership_plan_id: planIds[level as keyof typeof planIds], membership_level: level,
-  mapping_state: 'internal_paid', payment_channel: 'stripe', status: 'active', billing_cycle: 'yearly',
+  payment_method: 'card', mapping_state: 'internal_paid', payment_channel: 'stripe', status: 'active', billing_cycle: 'yearly',
   cancel_at_period_end: 'true', current_period_end: new Date(Date.now() + 86_400_000).toISOString(),
 });
 const data = (projection: unknown) => ({
@@ -58,4 +58,38 @@ describe('paid internal membership consumer projection', () => {
       expect(facts.latestSubscription).toEqual(row);
     }
   });
+});
+
+it.each(['wechat_pay', 'alipay'])('does not require %s renewal restoration for wallet upgrades', async payment_method => {
+  const supabase = { rpc: async () => ({ data: data({ ...paid('pro'), payment_method, billing_cycle: 'monthly' }), error: null }) };
+  for (const targetBillingCycle of ['monthly', 'yearly'] as const) {
+    const result = await resolveMembershipEligibility({ supabase, userId: actorId, profile: { membership_level: 'pro' },
+      action: 'create_membership_checkout', targetPlan: { level: 'gold' }, targetBillingCycle });
+    expect(result).toMatchObject({ state: 'active', reasonCode: 'UPGRADE_REQUIRES_CHANGE_SUBSCRIPTION' });
+    expect(result.safeMessage).not.toContain('恢复续费');
+  }
+});
+
+it.each(['card', 'card_cn'])('keeps stopped %s subscriptions blocked until renewal is restored', async payment_method => {
+  const supabase = { rpc: async () => ({ data: data({ ...paid('pro'), billing_cycle: 'monthly', payment_method }), error: null }) };
+  for (const [targetLevel, targetBillingCycle] of [['gold', 'monthly'], ['pro', 'yearly']] as const) {
+    const result = await resolveMembershipEligibility({ supabase, userId: actorId, profile: { membership_level: 'pro' },
+      action: 'create_membership_checkout', targetPlan: { level: targetLevel }, targetBillingCycle });
+    expect(result.reasonCode).toBe('RENEWAL_RESTORE_REQUIRED');
+  }
+});
+
+it.each(['card','alipay'])('keeps a Waffo one-time %s term active for upgrades without restoring automatic renewal', async payment_method => {
+  const supabase = {rpc:async()=>({data:data({...paid('pro'),payment_method,payment_channel:'waffo',
+    purchase_mode:'payment',billing_cycle:'monthly'}),error:null})};
+  for(const targetBillingCycle of ['monthly','yearly'] as const){
+    const result = await resolveMembershipEligibility({supabase,userId:actorId,profile:{membership_level:'pro'},
+      action:'create_membership_checkout',targetPlan:{level:'gold'},targetBillingCycle});
+    expect(result).toMatchObject({state:'active',reasonCode:'UPGRADE_REQUIRES_CHANGE_SUBSCRIPTION'});
+    expect(result.safeMessage).not.toContain('恢复续费');
+  }
+});
+it.each(['subscription',undefined])('retains stopped legacy Waffo %s renewal state',purchase_mode=>{
+  expect(getState({profileLevel:'free',latestMembershipOrder:null,latestSubscription:{...paid('pro'),
+    payment_channel:'waffo',purchase_mode}})).toMatchObject({state:'cancel_at_period_end',level:'pro'});
 });

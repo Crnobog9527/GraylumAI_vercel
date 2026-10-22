@@ -17,6 +17,7 @@ import {
 import { reportPaymentEvidenceConflict } from '@/lib/payment-alert.mjs';
 import { PAYMENT_EVIDENCE_CONFLICT, stripeWebhookErrorCode } from '@repo/api/src/services/payments/stripeWebhookError';
 import { recoverMethodCheckout } from '@repo/api/src/services/payments/walletWebhook';
+import { recoverWalletPaymentFailure } from '@repo/api/src/services/payments/walletPaymentFailure';
 import { handleCardSubscriptionInvoice, handleCardSubscriptionState } from '@repo/api/src/services/payments/cardSubscriptionWebhook';
 import { handleCardRefund, handlePaymentDispute } from '@repo/api/src/services/payments/cardRefundWebhook';
 import { reportPaymentDispute } from '@/lib/payment-dispute-alert.mjs';
@@ -32,6 +33,10 @@ export async function handleStripeWebhookEvent(
   supabase: ReturnType<typeof createServiceRoleSupabaseClient>,
   event: StripeWebhookEvent,
 ) {
+  if (event.type === 'payment_intent.payment_failed') {
+    await recoverWalletPaymentFailure(supabase, getStripeClient(), event.data.object.id, reportPaymentDispute);
+    return;
+  }
   if (event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded'
     || event.type === 'checkout.session.expired' || event.type === 'checkout.session.async_payment_failed') {
     // Wallet and PAY-STRIPE-MP card orders never take the legacy recording path below.

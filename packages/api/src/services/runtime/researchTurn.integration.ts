@@ -9,6 +9,8 @@ import pg from 'pg';
 import { createClient } from '@supabase/supabase-js';
 import { expect, it, vi } from 'vitest';
 import { runtimeExecutor } from './execute';
+import { recoverPendingFinancials } from './automaticRecovery';
+import { erasureFinancialBudget } from '../accountErasure/financialRecovery';
 import { freezeHistorySelection } from './hostTurn';
 import { frozenResearchTurn, RESEARCH_PHASE, RESEARCH_RESULT_RESERVE_BYTES, RESEARCH_TURN_VERSION } from './researchTurn';
 import { toolCallPolicy } from '../bill2/toolBilling';
@@ -165,6 +167,42 @@ it('RUNTIME: a research mentor turn claims the subcall between its model calls, 
       [f.admitted.runId, f.actor])).rows[0];
     // (0.003 + 0.005 + 0.003) × 1000 × 1 = 11 credits, rounded once for the whole turn.
     expect(run).toEqual({ charged: 11, credits: 1000 - 11 });
+  } finally { await f.close(); }
+}, 60000);
+
+it.each(['page-stop', 'automatic'] as const)
+('RUNTIME: settled research never stalls stopped receipt recovery (%s)', async mode => {
+  supplier.calls = 0;
+  const f = await researchRound();
+  try {
+    const database = { rpc: (name: string, args: Record<string, unknown>) =>
+      name === 'runtime_execution' && args.p_action === 'complete'
+        ? Promise.resolve({ data: null, error: { code: '57014' } }) : f.admin.rpc(name, args) };
+    const options = { database, actor: async () => f.actor, callGate: async () => ({ ok: true as const }), endpoint: f.endpoint };
+    expect(await runtimeExecutor(options).execute(f.admitted.executionId)).toMatchObject({ state: 'pending' });
+    const stop = await f.admin.rpc('runtime_execution', { p_actor_id: f.actor, p_execution_id: f.admitted.executionId,
+      p_action: 'stop', p_result: { stopAt: 2, source: 'assistant', call: 3 } });
+    expect(stop.error).toBeNull();
+    const lookup = vi.fn(), dispatch = vi.fn();
+    if (mode === 'automatic') {
+      expect(await recoverPendingFinancials({ database: f.admin, actorId: f.actor, budget: erasureFinancialBudget(55_000),
+        adapter: () => ({ lookup, dispatch }) })).toMatchObject({ settled: 1, pending: 0, failed: 0 });
+    } else {
+      expect(await runtimeExecutor({ ...options, database: f.admin }).execute(f.admitted.executionId))
+        .toMatchObject({ state: 'completed', stopped: true });
+    }
+    expect(lookup).not.toHaveBeenCalled(); expect(dispatch).not.toHaveBeenCalled();
+    const state = async () => (await f.db.query(`select e.state,r.closed,r.charged,r.reserved,s.active_execution,p.credits,
+      (select sum(amount)::int from credit_transactions where bill2_run_id=r.id) ledger_delta
+      from runtime_executions e join bill2_runs r on r.id=e.billing_run_id join runtime_sessions s on s.id=e.session_id
+      join profiles p on p.id=e.actor_id where e.id=$1`, [f.admitted.executionId])).rows[0];
+    expect(await state()).toMatchObject({ state: 'completed', closed: true, charged: 11, credits: 989,
+      reserved: 0, active_execution: null, ledger_delta: -11 });
+    const before = await state();
+    await runtimeExecutor({ ...options, database: f.admin }).execute(f.admitted.executionId);
+    expect(await state()).toEqual(before);
+    expect(supplier.calls).toBe(1); expect(f.requests).toHaveLength(2);
+    expect((await f.db.query('select count(*)::int n from bill2_calls where run_id=$1', [f.admitted.runId])).rows[0].n).toBe(3);
   } finally { await f.close(); }
 }, 60000);
 

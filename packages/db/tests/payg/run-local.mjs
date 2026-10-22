@@ -22,6 +22,7 @@ import {nominalCases} from './nominal.mjs';
 import {erasureCases} from './erasure.mjs';
 import {concurrencyCases} from './concurrency.mjs';
 import {windowConcurrencyCases} from './window-concurrency.mjs';
+import {runtimeTestWindowCallPoliciesCases} from './runtime-test-window-call-policies.mjs';
 import {fusionGroupCases} from './fusion-group.mjs';
 import {fusionSessionlessCases} from './fusion-sessionless.mjs';
 import {fusionAdmitCases} from './fusion-admit.mjs';
@@ -135,6 +136,7 @@ try {
   await erasureCases(db,report,createFixture,claim,receipt);
   await concurrencyCases({db,Client,connectionString,report,createFixture,claim,receipt});
   await windowConcurrencyCases({db,Client,connectionString,report,createFixture,claim});
+  await runtimeTestWindowCallPoliciesCases(db,report);
   await fusionGroupCases({db,Client,connectionString,report,createFixture,claim});
   await fusionSessionlessCases({db,Client,connectionString,report,createFixture});
   await fusionAdmitCases({db,Client,connectionString,report,createFixture});

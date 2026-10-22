@@ -79,8 +79,13 @@
     "./src/services/payments/cardRefundWebhook": "./src/services/payments/cardRefundWebhook.ts",
     "./src/services/payments/stripeCardReconciliation": "./src/services/payments/stripeCardReconciliation.ts",
     "./src/services/payments/walletWebhook": "./src/services/payments/walletWebhook.ts",
+    "./src/services/payments/walletPaymentFailure": "./src/services/payments/walletPaymentFailure.ts",
     "./src/services/payments/methodMaintenance": "./src/services/payments/methodMaintenance.ts",
-    "./src/services/notify/reminders": "./src/services/notify/reminders.ts"
+    "./src/services/notify/reminders": "./src/services/notify/reminders.ts",
+    "./src/services/payments/methodCheckoutGate": "./src/services/payments/methodCheckoutGate.ts",
+    "./src/services/payments/failoverAfterFulfillment": "./src/services/payments/failoverAfterFulfillment.ts",
+    "./src/services/payments/failoverReconciliation": "./src/services/payments/failoverReconciliation.ts",
+    "./src/services/payments/waffoOneTimeRecovery": "./src/services/payments/waffoOneTimeRecovery.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/client": "2.2.0",
@@ -103,14 +108,14 @@
   },
   "devDependencies": {
     "@modelcontextprotocol/node": "2.0.0",
-    "@modelcontextprotocol/server": "2.2.0",
+    "@modelcontextprotocol/server": "2.3.0",
     "@types/node": "24.12.4",
     "@types/pg": "8.15.6",
     "@vitest/coverage-v8": "^4.1.11",
     "eslint": "10.12.0",
     "typescript": "6.0.3",
     "typescript-eslint": "8.71.0",
-    "vite": "8.0.16",
+    "vite": "8.1.6",
     "vitest": "^4.1.11"
   }
 }

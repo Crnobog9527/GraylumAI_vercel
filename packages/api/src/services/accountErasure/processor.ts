@@ -53,6 +53,9 @@ export async function processAccountErasure(input: Input): Promise<ErasureProces
   };
   const rpc = async (name: string, args: Record<string, unknown>) => {
     if (databaseUncertain) throw new ProcessorFault('ERASURE_RPC_UNCERTAIN');
+    // Do not send a mutation whose response window is already shorter than its contract.
+    // Otherwise an expected pass boundary is misreported as an uncertain committed write.
+    if (deadline - now() < timeout) throw new ProcessorFault('ERASURE_BUDGET_EXHAUSTED');
     let sent = false;
     try {
       const response = await bounded(() => { sent = true; return input.database.rpc(name, args); });

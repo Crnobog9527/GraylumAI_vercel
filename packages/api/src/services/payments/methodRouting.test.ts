@@ -44,3 +44,21 @@ describe('PAY-STRIPE-MP fixed method routing', () => {
     }
   });
 });
+
+// PAY-FAILOVER reuses the same route version and restores Stripe's existing contract on return.
+describe('PAY-FAILOVER reversible one-time routing', () => {
+  it('routes every admitted Waffo item once without changing Stripe defaults', () => {
+    for (const method of ['card', 'card_cn', 'alipay'] as const) {
+      for (const itemType of ['membership_plan', 'credit_package'] as const) {
+        expect(assertPaymentMethodRoute({ ...base, routes: { ...routes, newPurchaseChannel: 'waffo' },
+          method, itemType, annual: true })).toEqual({ channel: 'waffo', mode: 'payment', managedPayments: false });
+      }
+    }
+    expect(assertPaymentMethodRoute({ ...base, method: 'card', routes: { ...routes, newPurchaseChannel: 'stripe' } }).mode)
+      .toBe('subscription');
+    expect(() => assertPaymentMethodRoute({ ...base, routes: { ...routes, newPurchaseChannel: 'waffo' } }))
+      .toThrow('METHOD_DENIED');
+    expect(() => assertPaymentMethodRoute({ ...base, routes: { ...routes, newPurchaseChannel: 'waffo' },
+      method: 'card', expectedVersion: 2 })).toThrow('VERSION_CONFLICT');
+  });
+});

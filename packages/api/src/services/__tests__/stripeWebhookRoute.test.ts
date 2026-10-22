@@ -7,8 +7,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Stripe from 'stripe';
 
-const walletMocks = vi.hoisted(() => ({ recover: vi.fn(), invoice: vi.fn(), subscription: vi.fn(), refund: vi.fn(), dispute: vi.fn() }));
+const walletMocks = vi.hoisted(() => ({ recover: vi.fn(), failure: vi.fn(), invoice: vi.fn(), subscription: vi.fn(), refund: vi.fn(), dispute: vi.fn() }));
 vi.mock('@repo/api/src/services/payments/walletWebhook', () => ({ recoverMethodCheckout: walletMocks.recover }));
+vi.mock('@repo/api/src/services/payments/walletPaymentFailure', () => ({ recoverWalletPaymentFailure: walletMocks.failure }));
 vi.mock('@repo/api/src/services/payments/cardSubscriptionWebhook', () => ({
   handleCardSubscriptionInvoice: walletMocks.invoice, handleCardSubscriptionState: walletMocks.subscription }));
 vi.mock('@repo/api/src/services/payments/cardRefundWebhook', () => ({ handleCardRefund: walletMocks.refund, handlePaymentDispute: walletMocks.dispute }));
@@ -43,6 +44,7 @@ import { handleStripeWebhookEvent, POST } from '../../../../../apps/web/src/app/
 describe('stripe webhook route', () => {
   beforeEach(() => {
     walletMocks.recover.mockReset().mockResolvedValue(null);
+    walletMocks.failure.mockReset().mockResolvedValue(true);
     walletMocks.invoice.mockReset().mockResolvedValue(false);
     walletMocks.subscription.mockReset().mockResolvedValue(false);
     walletMocks.refund.mockReset().mockResolvedValue(false);
@@ -127,6 +129,16 @@ describe('stripe webhook route', () => {
     await handleStripeWebhookEvent({} as never, event);
     expect(walletMocks.recover).toHaveBeenCalledWith({}, undefined, 'cs_failed', 'checkout.session.async_payment_failed', expect.any(Function));
     expect(stripeFulfillmentMocks.upsertPaymentOrderBySession).not.toHaveBeenCalled();
+  });
+  it('uses the signed PaymentIntent failure as a trigger for current wallet evidence and keeps lookup failures retryable', async () => {
+    const event = { type: 'payment_intent.payment_failed', data: { object: { id: 'pi_failed',
+      metadata: { orderId: 'event-metadata-is-not-authority' } } } } as unknown as Stripe.Event;
+    await handleStripeWebhookEvent({} as never, event);
+    expect(walletMocks.failure).toHaveBeenCalledWith({}, undefined, 'pi_failed', expect.any(Function));
+    expect(walletMocks.recover).not.toHaveBeenCalled();
+    expect(stripeFulfillmentMocks.upsertPaymentOrderBySession).not.toHaveBeenCalled();
+    walletMocks.failure.mockRejectedValue(new Error('timeout'));
+    await expect(handleStripeWebhookEvent({} as never, event)).rejects.toThrow('timeout');
   });
 
   it.each(['PAY_COMMON_RECEIPT_MISMATCH', 'PAY_COMMON_ATTEMPT_IDENTITY_MISMATCH'])(

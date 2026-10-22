@@ -11,8 +11,9 @@ const db = await localDb(), c = db.client;
 const report = { build: db.build, migration: '0224', checks: [] };
 const v = async (sql, args = []) => (await c.query(sql, args)).rows[0]?.v;
 const code = async (promise, expected) => assert.equal((await promise.then(() => null, e => e))?.message, expected);
-const plan = async () => v(`INSERT INTO membership_plans(name,level,allow_fusion_review,allow_fusion_compare,library_storage_bytes)
-  VALUES('Renewal fixture',$1,false,false,0) RETURNING id v`, ['test_' + randomUUID()]);
+const plan = async () => v(`INSERT INTO membership_plans(name,level,allow_fusion_review,allow_fusion_compare,
+  library_storage_bytes,positioning_profile_limit)
+  VALUES('Renewal fixture',$1,false,false,0,1) RETURNING id v`, ['test_' + randomUUID()]);
 const profile = async () => { const a = randomUUID(); await c.query('INSERT INTO profiles(id,credits) VALUES($1,7)', [a]); return a; };
 const contract = p => ({ version: 1, item_type: 'membership_plan', item_id: p, item_updated_at: '2026-10-12T00:00:00Z',
   billing_cycle: 'monthly', currency: 'usd', unit: 'major', price: '19.99', discount: '0.00', tax_behavior: 'unspecified',

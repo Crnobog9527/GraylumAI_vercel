@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { chromium, expect as browserExpect, type Browser, type Page } from '@playwright/test';
 import { afterAll, beforeAll, expect, it } from 'vitest';
+import { CHECKOUT_COPY } from './methodCheckout';
 
 let browser: Browser;
 let code: string;
@@ -96,6 +97,7 @@ const PLANS = [plan('free', 0, 0), plan('pro', 29, 279), plan('gold', 69, 621)];
 const ROUTES = { version: 7, card: { enabled: true }, card_cn: { enabled: true },
   wechat_pay: { enabled: false, annualVerified: false }, alipay: { enabled: false, annualVerified: false } };
 const ENTRY = { mode: 'test', routes: ROUTES, checkoutReady: true, termsVersion: 'terms-v3', goldFirstMonthEligible: false,
+  checkoutMethods: ['card', 'card_cn'],
   founder: { total: 50, sold: 50, reserved: 0, available: 0 }, memberships: [] };
 const WITH_SEATS = { ...ENTRY, founder: { total: 50, sold: 37, reserved: 0, available: 13 } };
 const MEMBERSHIP = { executionId: null, refusal: { text: '生成完整报告需要开通会员。', membership: true } };
@@ -109,7 +111,7 @@ async function open(setup: Record<string, unknown>, width = 1280) {
     const url = route.request().url();
     if (url === 'http://paywall.test/') return route.fulfill({ contentType: 'text/html', body: '<!doctype html><div id="root"></div>' });
     // Stands in for the Stripe-hosted page; nothing leaves the machine.
-    if (url.startsWith('https://checkout.stripe.com/')) return route.fulfill({ contentType: 'text/html', body: 'stripe' });
+    if (url.startsWith('https://checkout.stripe.com/') || url.startsWith('https://pancake.waffo.ai/')) return route.fulfill({ contentType: 'text/html', body: 'stripe' });
     return route.abort();
   });
   const sent: unknown[] = [];
@@ -181,11 +183,49 @@ it('shows each card method with its own tax line and sends the mainland card whe
   } finally { await page.close(); }
 }, 30000);
 
+it('shows both wallets alongside both cards when staging routes are enabled, and sends wallet checkout in Stripe test mode', async () => {
+  const routes = { ...ROUTES, wechat_pay: { enabled: true, annualVerified: true }, alipay: { enabled: true, annualVerified: true } };
+  const membership = { ...ENTRY, routes, checkoutMethods: ['card', 'card_cn', 'wechat_pay', 'alipay'] };
+  const { page, errors } = await open({ membership });
+  try {
+    for (const [method, label] of [['card', '国际银行卡'], ['card_cn', '中国大陆银行卡'],
+      ['wechat_pay', '微信支付'], ['alipay', '支付宝']] as const) {
+      await browserExpect(page.getByTestId(`report-paywall-method-${method}`)).toContainText(label);
+    }
+    await page.getByTestId('report-paywall-method-wechat_pay').click();
+    await browserExpect(page.getByTestId('report-paywall-tax')).toHaveText('不另收税');
+    await browserExpect(page.getByTestId('report-paywall-renewal')).toHaveText('一次性付款，不自动续费。');
+    await page.getByTestId('report-paywall-terms').check();
+    await page.getByTestId('report-paywall-pay').click();
+    await browserExpect(page).toHaveURL('https://checkout.stripe.com/c/pay/cs_test_1');
+    expect(await checkouts(page)).toMatchObject([{ method: 'wechat_pay', itemId: 'pro-plan', billingCycle: 'monthly', routingVersion: 7 }]);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 30000);
+
+it('disables yearly selection for wallet-only routes without annual verification and preserves monthly wallet checkout', async () => {
+  const routes = { ...ROUTES, card: { enabled: false }, card_cn: { enabled: false },
+    wechat_pay: { enabled: true, annualVerified: false }, alipay: { enabled: true, annualVerified: false } };
+  const membership = { ...ENTRY, routes, checkoutMethods: ['wechat_pay', 'alipay'] };
+  const { page, errors } = await open({ membership });
+  try {
+    const yearly = page.getByRole('radio', { name: /年付/ });
+    await browserExpect(yearly).toBeDisabled();
+    await browserExpect(page.getByTestId('report-paywall-method-wechat_pay')).toBeVisible();
+    await page.getByTestId('report-paywall-method-wechat_pay').click();
+    await page.getByTestId('report-paywall-terms').check();
+    await page.getByTestId('report-paywall-pay').click();
+    await browserExpect(page).toHaveURL('https://checkout.stripe.com/c/pay/cs_test_1');
+    expect(await checkouts(page)).toMatchObject([{ method: 'wechat_pay', billingCycle: 'monthly' }]);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 30000);
+
 it('shows no card entry until the server says checkout is ready and terms are published', async () => {
   for (const membership of [{ ...ENTRY, checkoutReady: false }, { ...ENTRY, termsVersion: null }]) {
     const { page, errors } = await open({ membership });
     try {
-      await browserExpect(page.getByTestId('report-paywall-closed')).toHaveText('银行卡付款暂未开放，请稍后再来。');
+      await browserExpect(page.getByTestId('report-paywall-closed')).toHaveText('付款暂未开放，请稍后再来。');
       await browserExpect(page.getByTestId('report-paywall-pay')).toHaveCount(0);
       await browserExpect(page.getByTestId('report-paywall-terms')).toHaveCount(0);
       expect(errors).toEqual([]);
@@ -530,3 +570,19 @@ it('shows the founder seats only with yearly billing, never next to a monthly Go
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 30000);
+
+it('offers the Waffo hosted page as a one-time membership purchase without inventing Alipay', async () => {
+  const url = 'https://pancake.waffo.ai/store/test-store/checkout/cs_123?test=true';
+  const {page,errors} = await open({membership:{...ENTRY,purchaseChannel:'waffo',checkoutMethods:['card']},checkoutUrl:url});
+  try {
+    await browserExpect(page.getByTestId('report-paywall-method-card')).toContainText('Waffo 结账页');
+    await browserExpect(page.getByTestId('report-paywall-method-alipay')).toHaveCount(0);
+    await browserExpect(page.getByTestId('report-paywall-renewal')).toHaveText(CHECKOUT_COPY.waffoMembershipOneTime);
+    await browserExpect(page.getByTestId('report-paywall-tax')).toHaveText('不另收税');
+    await page.getByTestId('report-paywall-terms').check();
+    await page.getByTestId('report-paywall-pay').click();
+    await browserExpect(page).toHaveURL(url);
+    expect(await checkouts(page)).toHaveLength(1);
+    expect(errors).toEqual([]);
+  } finally {await page.close();}
+},30000);

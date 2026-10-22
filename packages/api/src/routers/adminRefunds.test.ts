@@ -11,6 +11,9 @@ const actions = vi.hoisted(() => ({
   reconcilePackageRefund: vi.fn(async () => ({ status: 'succeeded' })),
 }));
 vi.mock('../services/payments/packageRefund', () => actions);
+vi.mock('../services/payments/refundDispatch', () => ({
+  dispatchOrderRefund: (_db: unknown, _order: string, stripe: (provider: unknown) => unknown) => stripe({}),
+}));
 vi.mock('../services/stripe', () => ({ getStripeClient: () => ({}) }));
 import { router } from '../trpc';
 import { adminRefundProcedures } from './adminRefunds';

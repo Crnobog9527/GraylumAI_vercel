@@ -1,12 +1,11 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 
 /**
- * Card checkout through `payments.methodCheckout` (PAY-STRIPE-MP step 5, #847 MIGRATION-PLAN §2.1).
- * Pure helpers: which card methods to offer, the tax copy next to a price, the return-URL check and
- * the text for each server refusal. The server decides prices, eligibility and offers; nothing here
- * grants a purchase. Wallets stay closed in code and are never offered.
+ * Checkout through `payments.methodCheckout` (PAY-STRIPE-MP step 5, #847 MIGRATION-PLAN §2.1).
+ * Pure helpers: which server-enabled methods to offer, the tax copy next to a price, the return-URL
+ * check and the text for each server refusal. The server decides prices, eligibility and offers.
  */
-export type CardMethod = 'card' | 'card_cn';
+export type CheckoutMethod = 'card' | 'card_cn' | 'wechat_pay' | 'alipay';
 export type MethodOffer = 'standard' | 'gold_first30' | 'founder' | 'founder_renewal';
 
 export type MethodPurchase = {
@@ -14,7 +13,7 @@ export type MethodPurchase = {
   itemId: string;
   billingCycle: 'monthly' | 'yearly' | 'one_time';
   offer: MethodOffer;
-  transition?: 'upgrade' | 'founder_renewal';
+  transition?: 'upgrade' | 'founder_renewal' | 'wallet_renewal';
   priorSubscriptionId?: string;
 };
 
@@ -22,11 +21,15 @@ export type MethodPurchase = {
 export type MethodMembershipEntry = {
   /** Payment mode the server sells in; only 'test' (Stripe test mode, no real money) may use the interim refund link. */
   mode?: string;
+  purchaseChannel?: 'stripe' | 'waffo';
   checkoutReady: boolean;
   termsVersion: string | null;
   goldFirstMonthEligible: boolean;
   founder?: { total: number; available: number };
-  routes: { version: number; card: { enabled: boolean }; card_cn?: { enabled: boolean } } | null;
+  routes: { version: number; newPurchaseChannel?: 'stripe' | 'waffo'; card: { enabled: boolean }; card_cn?: { enabled: boolean };
+    wechat_pay?: { enabled: boolean; annualVerified: boolean }; alipay?: { enabled: boolean; annualVerified: boolean } } | null;
+  /** Methods the server has allowed for this deployment after applying its environment gate. */
+  checkoutMethods: CheckoutMethod[];
 };
 
 /** Gold monthly first month (Owner 2026-10-12: natural month, one-time coupon). Shown only when the server says eligible. */
@@ -40,9 +43,11 @@ export function founderSeatsLeft(entry: MethodMembershipEntry | null | undefined
   return typeof left === 'number' && Number.isInteger(left) && left > 0 ? left : 0;
 }
 
-export const METHOD_COPY: Record<CardMethod, { label: string; note: string | null; tax: string }> = {
+export const METHOD_COPY: Record<CheckoutMethod, { label: string; note: string | null; tax: string }> = {
   card: { label: '国际银行卡 / Apple Pay / Google Pay', note: null, tax: '税另计，结账时按所在地计算' },
   card_cn: { label: '中国大陆银行卡', note: '仅限中国大陆用户', tax: '不另收税' },
+  wechat_pay: { label: '微信支付', note: null, tax: '不另收税' },
+  alipay: { label: '支付宝', note: null, tax: '不另收税' },
 };
 
 /**
@@ -66,7 +71,7 @@ export const CHECKOUT_COPY = {
   recovery: '原来的付款页面已经不能用了。为避免重复付款，请不要重新下单，稍后到个人中心的账单记录查看这笔订单的状态。',
   badUrl: '付款页面地址异常，已停止跳转。为避免重复付款，请不要重新下单，稍后到个人中心的账单记录查看这笔订单的状态。',
   rateLimited: '下单太频繁了，请稍等一分钟再试。',
-  closed: '银行卡付款暂未开放，请稍后再来。',
+  closed: '付款暂未开放，请稍后再来。',
   termsRequired: '请先勾选同意《服务条款》和《退款政策》。',
   // Record W: a short refund line beside checkout. Record AA: the whole account must have used no credits since this
   // payment (older and gifted credits included). The 7-day window stays in the FAQ and terms.
@@ -76,10 +81,13 @@ export const CHECKOUT_COPY = {
   // the renewal line beside the button states the current charge.
   founderRule: '创始会员终身 6 折续费（只要连续续费不中断）。取消自动续费后，权益保留到当期结束；'
     + '到期没有续费（银行卡扣款失败有 7 天宽限期），6 折续费资格结束，之后按当时的价格重新订阅，名额不再放出。',
+  walletMembershipOneTime: '一次性付款，不自动续费。',
+  waffoMembershipOneTime: '一次性付款，不自动续费；到期后需自行续买。',
+  walletFounderOneTime: '本次创始会员年付为一次性付款，不自动续费；到期前可在期限内按创始续费价格手动续买一年。',
   mainlandHint: '如果你在中国大陆，国际银行卡付款页会提示不支持；请回来改选“中国大陆银行卡”。',
 } as const;
 
-/** The card entry shows only when the server says card checkout is open and a terms version is published. */
+/** The entry shows only when the server says checkout is open and a terms version is published. */
 export function checkoutEntryOpen(entry: MethodMembershipEntry | null | undefined): entry is MethodMembershipEntry & {
   termsVersion: string; routes: NonNullable<MethodMembershipEntry['routes']>;
 } {
@@ -87,13 +95,18 @@ export function checkoutEntryOpen(entry: MethodMembershipEntry | null | undefine
     && entry.termsVersion.length > 0 && entry.routes && refundPolicyHref(entry) !== null);
 }
 
-/** Card methods the routes allow for this item; the mainland card only sells membership subscriptions. */
-export function cardMethods(entry: MethodMembershipEntry | null | undefined, itemType: MethodPurchase['itemType']): CardMethod[] {
+/** Methods allowed by the server projection and route switches, with restrictions of the selected channel. */
+export function checkoutMethods(entry: MethodMembershipEntry | null | undefined, itemType: MethodPurchase['itemType'],
+  billingCycle?: MethodPurchase['billingCycle']): CheckoutMethod[] {
   if (!checkoutEntryOpen(entry)) return [];
-  const methods: CardMethod[] = [];
-  if (entry.routes.card.enabled === true) methods.push('card');
-  if (entry.routes.card_cn?.enabled === true && itemType === 'membership_plan') methods.push('card_cn');
-  return methods;
+  const stripe = (entry.purchaseChannel ?? entry.routes.newPurchaseChannel ?? 'stripe') === 'stripe';
+  return entry.checkoutMethods.filter(method => {
+    if (entry.routes?.[method]?.enabled !== true) return false;
+    if (stripe && method === 'card_cn' && itemType !== 'membership_plan') return false;
+    if (stripe && (method === 'wechat_pay' || method === 'alipay') && billingCycle === 'yearly'
+      && entry.routes[method]?.annualVerified !== true) return false;
+    return true;
+  });
 }
 
 /** Only an https Stripe-hosted checkout page may receive the user; anything else is not followed. */
@@ -106,6 +119,32 @@ export function isStripeCheckoutUrl(value: unknown): value is string {
   } catch {
     return false;
   }
+}
+
+/** Waffo hosted checkout uses one fixed official host and a session path, with no arbitrary redirect target. */
+export function isWaffoCheckoutUrl(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && url.hostname === 'pancake.waffo.ai' && !url.port
+      && !url.username && !url.password && !url.hash
+      && /^\/store\/[a-zA-Z0-9_-]+\/checkout\/cs_[a-zA-Z0-9_-]+$/.test(url.pathname)
+      && Array.from(url.searchParams.entries()).every(([key, item]) => key === 'test' && item === 'true')
+      && url.searchParams.getAll('test').length <= 1;
+  } catch {
+    return false;
+  }
+}
+
+/** Pin the accepted checkout host to the route the user read before submitting. */
+export function isMethodCheckoutUrl(value: unknown, channel: 'stripe' | 'waffo' = 'stripe'): value is string {
+  return channel === 'waffo' ? isWaffoCheckoutUrl(value) : isStripeCheckoutUrl(value);
+}
+
+export function methodCopy(method: CheckoutMethod, channel?: 'stripe' | 'waffo') {
+  return channel === 'waffo' && method === 'card'
+    ? { label: 'Waffo 结账页', note: '一次性付款，可用方式以结账页为准', tax: '不另收税' }
+    : METHOD_COPY[method];
 }
 
 /** `founderIneligible`: this account already had a founder order (0222 FOUNDER_RENEWAL_REQUIRED / FOUNDER_EXPIRED);

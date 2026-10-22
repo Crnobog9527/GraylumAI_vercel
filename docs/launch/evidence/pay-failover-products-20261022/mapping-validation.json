@@ -1,0 +1,26 @@
+{
+  "result": "PASS",
+  "cases": 11,
+  "checks": [
+    "12-exact-public-manifest-associations",
+    "same-ID-current-replay-noop",
+    "legacy-six-live-stripe-and-settings-unchanged",
+    "different-current-final-SKU-rejects-all-12",
+    "inactive-identical-ID-not-silently-reactivated",
+    "same-product-wrong-namespace-refuses-entire-batch",
+    "manifest-product-live-collision-is-read-only",
+    "manifest-product-subscription-collision-is-read-only",
+    "missing-original-test-binding-refuses-entire-batch",
+    "changed-catalog-price-refuses-entire-batch",
+    "valid-batch-remains-applicable-after-rejections"
+  ],
+  "replay": {
+    "steps": 338,
+    "passed": 338,
+    "bridges": [
+      "0143_ticket_grants_and_own_rls.sql"
+    ],
+    "repeated": 0,
+    "failed": null
+  }
+}
