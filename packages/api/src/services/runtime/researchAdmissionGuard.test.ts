@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {beforeEach,expect,it,vi} from 'vitest';
-import {guardResearchAdmission,requiresBenchmarkResearch} from './researchAdmissionGuard';
+import {guardResearchAdmission,requiresBenchmarkResearch,researchInputHost} from './researchAdmissionGuard';
 import {stagingProcedureError} from './stagingErrors';
 import type {ResearchAdmissionRejection} from './researchAdmissionDiagnostics';
 import {RESEARCH_TOOLS_CONTEXT_CAPACITY_MESSAGE,RESEARCH_TOOLS_UNAVAILABLE_MESSAGE} from '../../shared/runtimeAdmissionMessages';
@@ -51,4 +51,19 @@ it('does not log or refuse successful tools; non-benchmark steps keep their ordi
  state.attached=false;f.input.context.hostTurnContext!.stepId='ordinary';
  expect(requiresBenchmarkResearch(f.input.context.hostTurnContext)).toBe(false);
  await expect(guardResearchAdmission(f.input)).resolves.toBe(false);
+});
+
+it('new projection preserves the existing host ceiling and leaves openings, summaries and disabled turns unchanged',async()=>{
+ const {hostTurnContextSchema,HOST_TURN_MAX_BYTES}=await import('./hostTurn');
+ const host=hostTurnContextSchema.parse({stepId:'s',opening:false,checklist:[{id:'s',title:'Research',fields:[{
+  id:'benchmark_findings',title:'Findings',required:true,role:'agent_proposal',status:'draft',protected:false,value:'x'}]}]});
+ expect(researchInputHost(host,true)?.materialProjection).toBe('checklist-dedup-v1');
+ expect(researchInputHost(host,false)).toBe(host);
+ expect(researchInputHost({...host,opening:true},true)?.materialProjection).toBeUndefined();
+ const value=host.checklist[0]!.fields[0]!;
+ value.value='x'.repeat(HOST_TURN_MAX_BYTES-Buffer.byteLength(JSON.stringify(host))+1);
+ expect(Buffer.byteLength(JSON.stringify(host))).toBe(HOST_TURN_MAX_BYTES);
+ expect(hostTurnContextSchema.safeParse(host).success).toBe(true);
+ expect(researchInputHost(host,true)).toBe(host);
+ expect(host).not.toHaveProperty('materialProjection');
 });

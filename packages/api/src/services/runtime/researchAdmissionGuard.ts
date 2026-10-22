@@ -4,12 +4,18 @@ import type {FrozenPaygRun, FrozenRun} from '../bill2/service';
 import {logger} from '../../lib/logger';
 import {attachResearchTurn} from './researchAdmission';
 import type {ResearchAdmissionRejection} from './researchAdmissionDiagnostics';
-import type {HostTurnContext} from './hostTurn';
+import {hostTurnContextSchema, type HostTurnContext} from './hostTurn';
 import {StagingAccessError} from './stagingErrors';
 
 /** The published field contract (CONVERSATION_CAPTURE_WRITEBACK_V2_FIELDS), not a step number, title or user text. */
 export function requiresBenchmarkResearch(host: HostTurnContext | undefined): boolean {
   return Boolean(host?.checklist.find(step => step.id === host.stepId)?.fields.some(field => field.id === 'benchmark_findings'));
+}
+/** Keep the existing host byte cap even when its values already fill the envelope. Refusal remains fail-closed. */
+export function researchInputHost(host: HostTurnContext | undefined, enabled: boolean): HostTurnContext | undefined {
+  if (!enabled || !host || host.opening || host.stepSummary || !requiresBenchmarkResearch(host)) return host;
+  const projected = {...host, materialProjection: 'checklist-dedup-v1' as const};
+  return hostTurnContextSchema.safeParse(projected).success ? projected : host;
 }
 const benchmarkTools = ['propose_keywords', 'benchmark_discover', 'propose_more_candidates', 'benchmark_fetch'] as const;
 type AttachInput = Parameters<typeof attachResearchTurn>[0];

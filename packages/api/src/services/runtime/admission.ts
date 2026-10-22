@@ -59,7 +59,7 @@ import {admitContentSource,isSqlStagingRefusal,type ContentSourceKind} from './c
 import {fitsCapacity} from './researchAdmission';
 import {researchCapacity} from './researchCapacity';
 import {RESEARCH_RESULT_RESERVE_BYTES} from './researchTurn';
-import {guardResearchAdmission,requiresBenchmarkResearch} from './researchAdmissionGuard';
+import {guardResearchAdmission,researchInputHost} from './researchAdmissionGuard';
 import {organizerSelection} from './organizerSelection';
 import {readAdmissionConfiguration} from './admissionConfiguration';
 const uuid=z.string().uuid();
@@ -175,10 +175,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    const hostParsed=hostTurnContextSchema.safeParse(policy.hostTurnContext);
    if(policy.hostTurnContext!==undefined&&(!hostParsed.success||!mentorStream||input.selection.kind!=='skill'||
     hostParsed.data.opening!==isOpeningInput(input.input)))throw new Error('RUNTIME_CONTEXT_INVALID');
-   const hostTurnContext=policy.hostTurnContext===undefined?undefined:hostParsed.data;
+   const hostTurnContext=researchInputHost(policy.hostTurnContext===undefined?undefined:hostParsed.data,Boolean(policy.researchTools));
    const stepSummary=Boolean(hostTurnContext?.stepSummary);
-   if(policy.researchTools&&hostTurnContext&&!hostTurnContext.opening&&!stepSummary&&requiresBenchmarkResearch(hostTurnContext))
-    hostTurnContext.materialProjection='checklist-dedup-v1';
    if(stepSummary&&(input.input!==STEP_SUMMARY_INPUT||input.organizeAfter||hostTurnContext!.opening))
     throw new Error('RUNTIME_CONTEXT_INVALID');
    const historySelection=hostTurnContext?freezeHistorySelection():undefined;
