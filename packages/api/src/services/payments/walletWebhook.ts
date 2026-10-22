@@ -145,14 +145,23 @@ export async function recoverMethodCheckout(db: SupabaseClient, stripe: Stripe, 
   // a tax bookkeeping failure can never leave the replaced Pro renewing next to the Gold.
   const failures: unknown[] = [];
   const attempt = async (step: () => Promise<unknown>) => { try { await step(); } catch (error) { failures.push(error); } };
-  const fulfillment = applied.data as { state?: string; disputeFrozen?: boolean; duplicate?: unknown };
+  const fulfillment = applied.data as { state?: string; reason?: string; disputeFrozen?: boolean; duplicate?: unknown };
   // Dispute receipt and fulfillment serialize in pay_dispute_fulfill. A payment can therefore be recorded as
   // fulfilled while its newly granted source is already frozen; that is review, not a delivered upgrade.
   const delivered = fulfillment.state === 'fulfilled' && fulfillment.disputeFrozen !== true;
   await attempt(() => resumeOrderDisputes(db, stripe, order.id, disputeAlert));
   if (delivered) await attempt(() => stopPriorAfterUpgrade(db, stripe, order));
   // Paid but kept for review (not delivered): its card subscription must not renew; the prior Pro is kept.
-  else if (card) await attempt(() => stopUndeliveredSubscription(stripe, card.id));
+  else if (card) await attempt(async () => {
+    if (fulfillment.reason === 'refund_observed') {
+      // A refund is review, not proof of non-delivery (Owner 2026-10-14). Read after the locked RPC:
+      // another recovery may have delivered and refunded the order since our initial snapshot.
+      const latest = await db.from('payment_orders').select('fulfilled_at').eq('id', order.id).maybeSingle();
+      if (latest.error || !latest.data) throw new Error('PAY_WAFFO_PERSISTENCE_UNAVAILABLE', { cause: latest.error });
+      if (latest.data.fulfilled_at) return;
+    }
+    await stopUndeliveredSubscription(stripe, card.id);
+  });
   if ('tax' in cash) await attempt(() => recordCardPaymentTax(db, scope.merchant, order.id, cash));
   // ANALYTICS: only the call that newly delivered the order (duplicate false) reports, whichever caller wins
   // (webhook, browser return, reconciliation). Statistics only: it never throws and never blocks delivery.
