@@ -149,7 +149,7 @@ it('a 90000-byte first-step request keeps its saved facts and the next step rece
  const {POSITIONING_RESEARCH_TOOLS}=await import('../research/tools/schemas');
  const steps=[{id:'first',title:'First'},{id:'research',title:'Research'}];
  const schema=Array.from({length:7},(_,i)=>({id:`fact${i}`,title:`Fact ${i}`,required:true}));
- const values=Object.fromEntries(schema.map(field=>[field.id,{value:'中'.repeat(200),nature:'fact',status:'confirmed'}]));
+ const values=Object.fromEntries(schema.map(field=>[field.id,{value:'中'.repeat(400),nature:'fact',status:'confirmed'}]));
  const fieldMeta=Object.fromEntries(schema.map(field=>[field.id,{source:'user',protected:true,basis:'user_statement',
   hasPendingSuggestion:false,createdAt:'2026-10-22T00:00:00Z',executionId:requestId,origin:'capture'}]));
  const information={first:{schema,values,meta:fieldMeta},research:{schema:[{id:'benchmark_findings',required:true,
@@ -187,6 +187,16 @@ it('a 90000-byte first-step request keeps its saved facts and the next step rece
  expect(context.scopeMaterial).toEqual(original);
  expect(scopeMaterial).toEqual(original);
  expect(context.hostTurnContext?.materialProjection).toBe('checklist-dedup-v1');
+ const {researchCapacity}=await import('./researchCapacity');
+ const {researchToolBytes}=await import('./researchAdmission');
+ const {RESEARCH_RESULT_RESERVE_BYTES}=await import('./researchTurn');
+ const beforeHost={...context.hostTurnContext!};delete beforeHost.materialProjection;
+ // The old composition really fails; this is not a small fixture that passed even before the fix.
+ const oldComposition=researchCapacity({instructions:context.instructions+REPLY_LANGUAGE_INSTRUCTIONS,
+  currentInput:runtimeScopeInput(context.input,context.scopeMaterial,beforeHost),inputBudgetBytes:112000,
+  existingToolsBytes:groundedCardToolBytes()+150,researchToolsBytes:researchToolBytes(POSITIONING_RESEARCH_TOOLS,true),
+  researchHostDeltaBytes:0,resultReserveBytes:RESEARCH_RESULT_RESERVE_BYTES});
+ expect(oldComposition.deficitBytes).toBeGreaterThan(0);
 });
 
 it('a still-oversize required research turn records numeric components and creates no billable execution',async()=>{
