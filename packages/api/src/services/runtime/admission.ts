@@ -56,7 +56,8 @@ import {POSITIONING_FALLBACK,POSITIONING_FALLBACK_INSTRUCTIONS} from './position
 import {LIBRARY_RETRIEVAL_CALLS,admitLibraryReferences,admitLibraryRetrieval,candidateToolBytes,libraryReferenceInput} from './libraryAdmission';
 import {libraryReserveBytes,readSourceSlots,sourceReadFlags,throwLibraryRefusal} from './libraryAdmission';
 import {admitContentSource,isSqlStagingRefusal,type ContentSourceKind} from './contentSource';
-import {attachResearchTurn,fitsCapacity} from './researchAdmission';
+import {fitsCapacity} from './researchAdmission';
+import {guardResearchAdmission} from './researchAdmissionGuard';
 import {organizerSelection} from './organizerSelection';
 import {readAdmissionConfiguration} from './admissionConfiguration';
 const uuid=z.string().uuid();
@@ -464,9 +465,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     billing={...billing,contractVersion:'bill2.v2',callPolicy,
      rules:{...billing.rules,billingUnit:realCalls?billing.rules.billingUnit!:policy.payg!.billingUnit},limits:{...billing.limits,credits:0}};
    }
-   // RT-3b PR-3: a positioning mentor turn may also offer the research tools (admin switch, priced routes, room left).
-   if(policy.researchTools&&mentorStream&&!opening&&hostTurnContext&&!stepSummary&&billing.contractVersion==='bill2.v2'&&
-    await attachResearchTurn({admin,real:policy.real,context,billing,settings,actorId,sessionId:input.sessionId,
+   if(policy.researchTools&&mentorStream&&!opening&&hostTurnContext&&!stepSummary&&
+    await guardResearchAdmission({admin,real:policy.real,context,billing,settings,actorId,sessionId:input.sessionId,requestId:input.requestId,
      fits:(extra,bytes)=>fitsCapacity(()=>requireCapacity(instructions+positioningRule,Boolean(skillFile),currentInput,historyRead,extra,bytes))}))
     billing.sourceHash=createHash('sha256').update(JSON.stringify(context)).digest('hex');
    // Both SQL CHECKs measure jsonb::text; validate before atomically admitting the execution/reservation.

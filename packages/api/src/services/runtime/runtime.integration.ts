@@ -1210,6 +1210,10 @@ it('RUNTIME: AC-1 opc.mentorTurnStream admits and streams a mentor turn in one i
   expect(provider.calls.map(c=>c.model)).toEqual(['ac1-mentor','ac1-organizer','ac1-mentor','ac1-organizer','ac1-mentor','ac1-organizer','ac1-mentor','ac1-organizer']);
   const all={oldPrepareOpening,oldStreamOpening,oldPrepareAnswer,oldStreamAnswer,opening,answer};
   const counts=Object.fromEntries(Object.entries(all).map(([name,m])=>[name,phases(m.summary)]));
+  // RESEARCH-TOOLS: a refused optional attachment awaits exactly one safe log insert; openings and execution do not.
+  for(const name of ['oldPrepareAnswer','answer'] as const)expect(all[name].summary.labels['rest/application_logs']?.rt).toBe(1);
+  for(const name of ['oldPrepareOpening','oldStreamOpening','oldStreamAnswer','opening'] as const)
+   expect(all[name].summary.labels['rest/application_logs']).toBeUndefined();
   expect(counts,JSON.stringify(Object.fromEntries(Object.entries(all).map(([name,m])=>[name,m.summary])))).toEqual({
    // B2 adds one frozen-material read and one canonical opening replay check; ordinary turns add only the material read.
    // Attached organizers skip one Session history read in each execution.
@@ -1218,11 +1222,11 @@ it('RUNTIME: AC-1 opc.mentorTurnStream admits and streams a mentor turn in one i
    oldPrepareOpening:{prelude:2,policy:0,host:9,admission:15,rateLimit:0},
    oldStreamOpening:{prelude:2,policy:0,host:3,execute:7,provider:18,rateLimit:0},
    // R1 sizes all readable files: seven cold resources plus two permission checks; warm turns add only two checks.
-   oldPrepareAnswer:{prelude:2,policy:0,host:8,admission:20,rateLimit:0},
+   oldPrepareAnswer:{prelude:2,policy:0,host:8,admission:21,rateLimit:0},
    oldStreamAnswer:{prelude:2,policy:0,host:3,execute:7,provider:18,rateLimit:0},
    // One invocation: one prelude instead of two; admission and execution unchanged.
    opening:{prelude:2,policy:0,host:12,admission:11,execute:7,provider:18,rateLimit:0},
-   answer:{prelude:2,policy:0,host:11,admission:13,execute:7,provider:18,rateLimit:0},
+   answer:{prelude:2,policy:0,host:11,admission:14,execute:7,provider:18,rateLimit:0},
   });
   // Empty backlog: exactly one pre-admission RPC and one completion capture RPC.
   const label=(name:string)=>Object.fromEntries(Object.entries(all).map(([key,m])=>[key,m.summary.labels[name]?.rt??0]));

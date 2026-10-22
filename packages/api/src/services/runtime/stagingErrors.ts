@@ -4,11 +4,14 @@ import { TRPCError } from '@trpc/server';
 import { logger } from '../../lib/logger';
 import { DatabaseReadError } from '../../lib/databaseReadError';
 import { RUNTIME_INPUT_TOO_LONG_MESSAGE } from '../../shared/runtimeInputMessages';
-import { RUNTIME_PAYG_PROFILE_REQUIRED_MESSAGE } from '../../shared/runtimeAdmissionMessages';
+import { RESEARCH_TOOLS_UNAVAILABLE_MESSAGE, RESEARCH_TOOLS_CONTEXT_CAPACITY_MESSAGE,
+  RUNTIME_PAYG_PROFILE_REQUIRED_MESSAGE } from '../../shared/runtimeAdmissionMessages';
 import { POSITIONING_REQUIRED_MESSAGE } from '../../shared/positioningGate';
 import { CONTENT_SOURCE_MESSAGES } from '../../shared/contentSourceMessages';
 
 const failures = {
+  RESEARCH_TOOLS_UNAVAILABLE: ['PRECONDITION_FAILED', RESEARCH_TOOLS_UNAVAILABLE_MESSAGE],
+  RESEARCH_TOOLS_CONTEXT_CAPACITY: ['PRECONDITION_FAILED', RESEARCH_TOOLS_CONTEXT_CAPACITY_MESSAGE],
   OPC_BUSINESS_ARCHIVED: ['FORBIDDEN', 'OPC_BUSINESS_ARCHIVED：这个定位档案已归档，只能查看和导出。'],
   OPC_BUSINESS_BUSY: ['CONFLICT', 'OPC_BUSINESS_BUSY：这个定位档案正在处理，请稍后归档。'],
   CONTENT_ERASED: ['PRECONDITION_FAILED', 'CONTENT_ERASED'],
