@@ -16,7 +16,7 @@ const STATUS_TEXT: Record<string, string> = {
   succeeded: '退款已完成', failed: '退款失败，积分已退回', review_required: '结果待核对，请点"核对结果"',
 };
 
-/** 后台积分包和钱包会员退款（MASTER_PLAN 第 51 项，记录 AA；R7 B3）：7 天内、付款后整个账户没有任何积分消耗才可退；规则由服务端判断。 */
+/** 后台积分包和一次性会员退款（MASTER_PLAN 第 51 项，记录 AA；R7 B3）：7 天内、付款后整个账户没有任何积分消耗才可退；规则由服务端判断。 */
 export function AdminPackageRefunds() {
   const refund = usePackageRefund();
   const { form, errors, quote, intent } = refund;
@@ -34,9 +34,13 @@ export function AdminPackageRefunds() {
   return (
     <div className="space-y-6 p-4 md:p-8" data-testid="package-refunds">
       <div>
-        <h2 className="text-xl font-bold md:text-2xl" style={{ color: 'var(--text-primary)' }}>积分包和钱包会员退款</h2>
+        <h2 className="text-xl font-bold md:text-2xl" style={{ color: 'var(--text-primary)' }}>积分包和一次性会员退款</h2>
         <p className="mt-1 text-sm" style={{ color: 'var(--text-tertiary)' }}>
-          付款 7 天内、而且付款后整个账户没有用过任何积分才可退：积分包整包积分扣回；微信或支付宝一次性买的会员，扣回这笔订单已发放的积分，退款成功后会员立即结束。国际卡（Managed Payments）的税全额退还，6% 手续费只按税前金额算。
+          付款 7 天内、而且付款后整个账户没有用过任何积分才可退：积分包整包积分扣回；一次性买的会员（含 Waffo 银行卡），扣回这笔订单已发放的积分，退款成功后会员立即结束。国际卡（Managed Payments）的税全额退还，6% 手续费只按税前金额算。
+        </p>
+        <p className="mt-1 text-sm" style={{ color: 'var(--text-tertiary)' }}>
+          Waffo 会员月付、年付和创始会员均在这里处理；Stripe 银行卡自动续费月付使用上方的月付退款入口。
+          退款始终沿原订单渠道执行，当前新购买渠道不会改变它。
         </p>
       </div>
       <section className="space-y-4 rounded-xl border p-4" style={cardStyle}>
@@ -74,9 +78,9 @@ export function AdminPackageRefunds() {
             <dt>税（全额退还）</dt><dd>{money(quote.taxMinor, quote.currency)}</dd>
             <dt>退给用户</dt><dd data-testid="package-refund-net">{money(quote.netMinor, quote.currency)}</dd>
             <dt>扣回积分</dt><dd>{quote.credits}</dd>
-            <dt>订单类型</dt><dd>{quote.treatment === 'wallet_membership' ? '钱包会员（退款成功后会员立即结束）' : '积分包'}</dd>
+            <dt>订单类型</dt><dd>{quote.treatment === 'wallet_membership' ? '一次性会员（退款成功后会员立即结束）' : '积分包'}</dd>
             <dt>支付模式</dt><dd data-testid="package-refund-mode">{quote.cash?.mode === 'live' ? '正式（真实付款，会退真钱）'
-              : quote.cash?.mode === 'test' ? '测试（Stripe 沙盒）' : '未知'}</dd>
+              : quote.cash?.mode === 'test' ? '测试（不涉及真钱）' : '未知'}</dd>
           </dl>
           <ConfirmRefundAction testId="package-refund-approve-button" label="批准退款" pendingLabel="正在批准…"
             title="确认批准这次退款？" confirmLabel="批准" pending={refund.busy} disabled={refund.busy} onConfirm={() => void refund.approve()}>
@@ -93,7 +97,7 @@ export function AdminPackageRefunds() {
             {status === 'approved' ? (
               <ConfirmRefundAction testId="package-refund-execute-button" label="执行退款" pendingLabel="正在执行…"
                 title="确认执行这次退款？" confirmLabel="执行" pending={refund.busy} disabled={refund.busy} onConfirm={() => void refund.execute()}>
-                <p>会立即在 Stripe 发起退款并扣回积分。执行后不能撤销。
+                <p>会在原订单的支付渠道发起退款并扣回积分；结果不明时先核对，不要重复执行。执行后不能撤销。
                   {(intent.cash as { mode?: string } | undefined)?.mode === 'live' ? '这是正式付款，会退真钱。' : ''}</p>
               </ConfirmRefundAction>
             ) : null}

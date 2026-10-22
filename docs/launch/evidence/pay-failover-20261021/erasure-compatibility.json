@@ -1,0 +1,45 @@
+{
+  "development": false,
+  "safeupdate": false,
+  "build": {
+    "steps": 338,
+    "passed": 338,
+    "bridges": [
+      "0143_ticket_grants_and_own_rls.sql"
+    ],
+    "repeated": 269,
+    "failed": null
+  },
+  "checks": [
+    "0190/0191 historical empty rollback/reapply exact",
+    "0192 historical empty rollback/reapply exact",
+    "0318 stale claim (>15 min) taken over: erasure completes once, Auth intent reopened once, old token refused, younger claim kept",
+    "wired executor with 5001 unrelated tickets and replies + local service SQL + locked SDK synthetic HTTP: success, repeat, barrier/new transaction retry, lost/slow Storage response, 251-path resumable manifest, serial network latency exceeding two seconds, history refusal with independent cleanup, durable claim/CAS and denied roles",
+    "wired account-erasure executor completes for an account with a settled sessionless Fusion call and saved output; output removed, money unchanged",
+    "executor syncs the off-database manifest: ids and times only, nothing left unsynced",
+    "upload admission: active allowed; suspended/closed/missing denied; duplicate and cross-subject denied; RPC roles",
+    "close-before-finish drains only confirmed absence; storage false blocks Auth; profile identity scrub preserves credits and rejects refill",
+    "pending original refund: manual review blocks Auth; original evidence retained",
+    "pending frozen checkout evidence: manual review blocks Auth; original evidence retained",
+    "malformed financial metadata: manual review blocks Auth; original evidence retained",
+    "terminal envelopes: fixed projection, price/tax/hash unchanged, first-marker finance tamper/refill denied; malformed numbers retained/manual",
+    "payment wrappers: six valid test and five live Stripe channel/method/offer shapes complete; Waffo live refused; independent malformed and cross-row evidence stays blocked; privacy removed, finances unchanged",
+    "progress capability: service-only issue/read, immutable token, wrong token/request and expired token denied",
+    "minimal subject completes only after absence proof; Auth claim once; original request resumes; wrong request/false/null never complete",
+    "business prune is internal, closed-subject-only, bounded; unmarked body retained",
+    "0187 detach then 0192 cleanup deletes runtime; original receipt/recovery/replay accepted; money and run/call/receipt identities unchanged",
+    "runtime history/batches physically removed after scrub/detach; unknown-finance run/session/execution and money retained",
+    "chat pruning severs only nullable usage links; token/usage rows and all monetary fields survive conversation/message deletion",
+    "0271: legacy chat tables, ordinary_chat_transition and the conversations delete guard are gone",
+    "101 message leaves: first bounded batch remains pending, repeated cleanup reaches zero and is idempotent",
+    "owned runtime prune: money/binding/cross-account/idempotency preserved; empty-subject JSON scan 5.365ms, indexed 0.02ms (64 synthetic large canaries)",
+    "separate-connection transaction/lock barriers refuse Storage and cleanup; closed-ticket/admin-path reference writes denied",
+    "missing provider/cost: original money/identity retained, durable review and fixed due date, no Auth deletion",
+    "Auth uncertainty is persisted before dispatch; resumed intent reads only and clears review after absence proof",
+    "actual TypeScript processor with real service-role RPCs: minimal and settled Runtime complete; unknown finance blocks Auth; money preserved",
+    "cleanup/progress facts require forward repair; rollback refused",
+    "account-open policy audit unchanged"
+  ],
+  "failed": null,
+  "cleanup": "PASS"
+}

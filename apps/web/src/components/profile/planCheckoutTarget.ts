@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { formatUsd, paywallQuote, type PaywallBilling, type PaywallPlan } from '@/components/paywall/paywallPlans';
-import { CHECKOUT_COPY, GOLD_FIRST_MONTH_USD, GOLD_FOUNDER_YEAR_USD, METHOD_COPY, type CheckoutMethod } from '@/components/paywall/methodCheckout';
+import { CHECKOUT_COPY, GOLD_FIRST_MONTH_USD, GOLD_FOUNDER_YEAR_USD, methodCopy, type CheckoutMethod } from '@/components/paywall/methodCheckout';
 import type { MethodCheckoutTarget } from '@/components/paywall/MethodCheckoutDialog';
 import { isOneTimeMembership, type MethodMembershipRow, type PlanAction } from './methodPlanAction';
 
@@ -59,7 +59,7 @@ export function planCheckoutTarget(input: {
 }
 
 /** Tax copy under a plan price before a method is picked: one line per offered method. */
-export function methodTaxSummary(methods: readonly CheckoutMethod[]) {
-  if (methods.length === 1) return METHOD_COPY[methods[0]].tax;
-  return methods.map(method => `${METHOD_COPY[method].label.split(' / ')[0]}：${METHOD_COPY[method].tax}`).join('；');
+export function methodTaxSummary(methods: readonly CheckoutMethod[], channel?: 'stripe' | 'waffo') {
+  if (methods.length === 1) return methodCopy(methods[0], channel).tax;
+  return methods.map(method => `${methodCopy(method, channel).label.split(' / ')[0]}：${methodCopy(method, channel).tax}`).join('；');
 }

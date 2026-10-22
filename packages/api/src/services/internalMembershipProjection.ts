@@ -3,6 +3,7 @@ import type { MembershipBillingCycle, MembershipEligibilityResult, MembershipLev
 
 type InternalSubscription = {
   payment_method?: string | null;
+  purchase_mode?: string | null;
   id?: string | null;
   payment_channel?: string | null;
   mapping_state?: string | null;
@@ -22,8 +23,8 @@ export function internalMembershipState(subscription: InternalSubscription | nul
   const end = Math.max(Date.parse(subscription?.current_period_end ?? ''), Date.parse(subscription?.renewal_grace_until ?? '') || -Infinity);
   const active = mapping === 'internal_paid' && (level === 'pro' || level === 'gold')
     && Number.isFinite(end) && end > Date.now();
-  const oneTime = subscription?.payment_channel === 'stripe'
-    && ['wechat_pay', 'alipay'].includes(subscription?.payment_method ?? '');
+  const oneTime = subscription?.payment_channel === 'waffo' && subscription.purchase_mode === 'payment'
+    || subscription?.payment_channel === 'stripe' && ['wechat_pay', 'alipay'].includes(subscription?.payment_method ?? '');
   return {
     state: active ? (!oneTime && (subscription?.cancel_at_period_end === true || subscription?.cancel_at_period_end === 'true')
       ? 'cancel_at_period_end' as const : 'active' as const) : 'free' as const,

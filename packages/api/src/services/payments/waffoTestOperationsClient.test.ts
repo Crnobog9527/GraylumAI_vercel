@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { createHash, createVerify, generateKeyPairSync } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createWaffoTestOperationsClient, getWaffoTestOperationsClient } from './waffoTestOperationsClient';
+import { createWaffoTestOperationsClient, createWaffoOperationsClient, getWaffoTestOperationsClient } from './waffoTestOperationsClient';
 import { payment } from './waffoTestHarness';
 const keys = generateKeyPairSync('rsa', { modulusLength: 2048 });
 const config = { merchant: 'fixture', merchantId: 'MER_fixture', storeId: 'STO_fixture',
@@ -110,6 +110,67 @@ describe('Pancake test operation transport', () => {
     await client.cancelSubscription('ORD_original');
     expect(timeout.mock.calls.map(([ms]) => ms)).toEqual([20000, 8000]);
     timeout.mockRestore();
+  });
+  it('checks a one-time product in the bound store and supports an explicitly selected live client', async () => {
+    const request = vi.fn().mockResolvedValue(Response.json({ data: { onetimeProducts: [{ id: 'PROD_once', storeId: 'STO_fixture', status: 'active', prices: [{ currency: 'USD', priceInfo: { amount: '69.00', taxCategory: 'saas' } }] }] } }));
+    const client = createWaffoOperationsClient({ ...config, mode: 'live' }, request);
+    expect(client.mode).toBe('live');
+    expect(await client.readOneTimeProduct('PROD_once')).toEqual({ id: 'PROD_once', storeId: 'STO_fixture', status: 'active', prices: [{ currency: 'USD', priceInfo: { amount: '69.00', taxCategory: 'saas' } }] });
+    const query = JSON.parse(request.mock.calls[0]![1].body);
+    expect(query.query).toContain('onetimeProducts(storeId: $storeId');
+    request.mockResolvedValueOnce(Response.json({ data: { onetimeProducts: [{ id: 'PROD_once', storeId: 'STO_wrong', status: 'active', prices: [] }] } }));
+    await expect(client.readOneTimeProduct('PROD_once')).rejects.toThrow('OPERATION_SCOPE');
+  });
+  it('looks for all original payment refunds, paginates completely, and never retries refund dispatch', async () => {
+    const refund = { id: 'RFD_one', paymentId: 'PAY_fixture1', ticketId: 'TKT_one', status: 'succeeded', testMode: true,
+      amount: { amount: '100', currency: 'USD' }, pspAmountDetails: { amount: '1.00', currency: 'USD' },
+      orderMerchantExternalId: 'order-1', refundTicketMerchantExternalId: 'ref-fixture1', createdAt: '2026-10-21T00:00:00.000Z' };
+    const request = vi.fn().mockResolvedValueOnce(Response.json({ data: { refunds: Array.from({ length: 100 }, () => refund) } }))
+      .mockResolvedValueOnce(Response.json({ data: { refunds: [] } }));
+    const client = createWaffoTestOperationsClient(config, request);
+    expect(await client.findRefunds({ paymentId: 'PAY_fixture1' })).toHaveLength(100);
+    expect(JSON.parse(request.mock.calls[0]![1].body).query).not.toContain('refundTicketMerchantExternalId: { eq:');
+    expect(JSON.parse(request.mock.calls[1]![1].body).query).toContain('offset: 100');
+    request.mockRejectedValueOnce(new DOMException('aborted', 'TimeoutError'));
+    await expect(client.createRefundTicket({ paymentId: 'PAY_fixture1', reason: 'refund', requestedAmount: { amount: '1.00', currency: 'USD' },
+      refundTicketMerchantExternalId: 'ref-fixture1' })).rejects.toThrow('PROVIDER_UNAVAILABLE');
+    expect(request).toHaveBeenCalledTimes(3);
+  });
+  it('fails closed when a refund/ticket query is still full at its scan cap', async () => {
+    const ticket = { id: 'TKT_one', subjectId: 'PAY_fixture1', status: 'processing', refundTicketMerchantExternalId: 'ref-fixture1' };
+    const request = vi.fn().mockImplementation(async () => Response.json({ data: { refundTickets: Array.from({ length: 100 }, () => ticket) } }));
+    const client = createWaffoTestOperationsClient(config, request);
+    await expect(client.findRefundTickets('ref-fixture1')).rejects.toThrow('RECONCILIATION_REQUIRED');
+    expect(request).toHaveBeenCalledTimes(20);
+  });
+  it('does not infer no dispute when the authoritative chargeback query fails', async () => {
+    const request = vi.fn().mockResolvedValueOnce(Response.json({ data: { chargebacks: [] } }))
+      .mockResolvedValueOnce(Response.json({ errors: [{ message: 'unavailable' }] }));
+    const client = createWaffoOperationsClient({ ...config, mode: 'live' }, request);
+    expect(await client.hasChargeback('PAY_fixture1')).toBe(false);
+    expect(JSON.parse(request.mock.calls[0]![1].body).variables).toEqual({ payment: 'PAY_fixture1', store: 'STO_fixture', test: false });
+    await expect(client.hasChargeback('PAY_fixture1')).rejects.toThrow('PROVIDER_UNAVAILABLE');
+  });
+  it('propagates a shared deadline to every HTTP request and refuses dispatch after it expires', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    const request = vi.fn().mockResolvedValue(Response.json({ data: { chargebacks: [] } }));
+    const client = createWaffoOperationsClient({ ...config, mode: 'test', deadline: Date.now() + 500 }, request);
+    await client.hasChargeback('PAY_fixture1');
+    expect(timeout.mock.calls.at(-1)![0]).toBeGreaterThan(0);
+    expect(timeout.mock.calls.at(-1)![0]).toBeLessThanOrEqual(500);
+    const expired = createWaffoOperationsClient({ ...config, mode: 'test', deadline: Date.now() - 1 }, request);
+    await expect(expired.hasChargeback('PAY_fixture1')).rejects.toThrow('RECONCILIATION_REQUIRED');
+    expect(request).toHaveBeenCalledTimes(1);
+    timeout.mockRestore();
+  });
+  it('preserves a strongly scoped chargeback with unknown money, and rejects foreign scope', async () => {
+    const row = { id: 'CBK_real', paymentId: 'PAY_fixture1', storeId: 'STO_fixture', orderId: null,
+      status: 'open', testMode: true, amount: null, createdAt: '2026-10-21T00:00:00.000Z' };
+    const request = vi.fn().mockResolvedValueOnce(Response.json({ data: { chargebacks: [row] } }))
+      .mockResolvedValueOnce(Response.json({ data: { chargebacks: [{ ...row, storeId: 'STO_wrong' }] } }));
+    const client = createWaffoTestOperationsClient(config, request);
+    expect(await client.readChargebacks('PAY_fixture1')).toEqual([row]);
+    await expect(client.readChargebacks('PAY_fixture1')).rejects.toThrow('OPERATION_SCOPE');
   });
   it('does not load a provider binding until explicitly enabled in test configuration', () => {
     vi.stubEnv('WAFFO_TEST_OPERATIONS_ENABLED', 'false');

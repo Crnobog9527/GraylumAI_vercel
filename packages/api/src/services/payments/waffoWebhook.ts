@@ -19,7 +19,7 @@ const FUTURE_SKEW_MS = 60 * 1000;
  * authoritative lookup; their body is never payment or entitlement evidence. */
 export function verifyWaffoReceipt(input: {
   body: Uint8Array; signature: string | null; publicKey: string; storeId: string;
-  merchantNamespace: string; now?: number;
+  merchantNamespace: string; mode?: 'test' | 'live'; now?: number;
 }) {
   if (!input.body.byteLength || input.body.byteLength > WAFFO_MAX_BODY_BYTES) throw new Error('WAFFO_BODY_INVALID');
   const parts = /^t=([0-9]{13}),v1=([A-Za-z0-9+/]+={0,2})$/.exec(input.signature ?? '');
@@ -35,9 +35,10 @@ export function verifyWaffoReceipt(input: {
   if (!valid) throw new Error('WAFFO_SIGNATURE_INVALID');
   const event = envelope.parse(JSON.parse(Buffer.from(input.body).toString('utf8')));
   // Deliberately no production key selection from an untrusted header or body.
-  if (event.mode !== 'test' || event.storeId !== input.storeId) throw new Error('WAFFO_SCOPE_MISMATCH');
+  const mode = input.mode ?? 'test';
+  if (event.mode !== (mode === 'test' ? 'test' : 'prod') || event.storeId !== input.storeId) throw new Error('WAFFO_SCOPE_MISMATCH');
   return {
-    merchant: input.merchantNamespace, mode: 'test' as const,
+    merchant: input.merchantNamespace, mode,
     type: event.eventType, id: event.eventId,
     digest: createHash('sha256').update(input.body).digest('hex'),
     refs: event.data, requiresLookup: age > WAFFO_SIGNATURE_WINDOW_MS,
@@ -55,5 +56,5 @@ export async function receiveWaffoWebhook(input: Parameters<typeof verifyWaffoRe
     p_id: receipt.id, p_digest: receipt.digest, p_refs: receipt.refs,
   });
   if (result.error || typeof result.data !== 'string' || !result.data) throw new Error('WAFFO_RECEIPT_UNAVAILABLE');
-  return { receiptId: result.data, requiresLookup: receipt.requiresLookup, merchant: receipt.merchant, refs: receipt.refs };
+  return { receiptId: result.data, requiresLookup: receipt.requiresLookup, merchant: receipt.merchant, mode: receipt.mode, refs: receipt.refs };
 }

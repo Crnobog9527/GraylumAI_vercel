@@ -1,0 +1,24 @@
+{
+  "image": "postgres@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73",
+  "failed": null,
+  "steps": 338,
+  "passed": 338,
+  "bridges": [
+    "0143_ticket_grants_and_own_rls.sql"
+  ],
+  "repeated": 269,
+  "groups": 2700,
+  "accountOpenAudit": [],
+  "builtFingerprint": "written",
+  "convergenceReapply": "unchanged",
+  "rollback": {
+    "removed": [
+      "fn:prevent_client_profile_credit_write()",
+      "fnacl:prevent_client_profile_credit_write()",
+      "trg:profiles.trg_prevent_client_profile_credit_write"
+    ],
+    "changedByRollback": [],
+    "restored": true
+  },
+  "cleanup": "PASS"
+}

@@ -29,8 +29,9 @@ const RANK: Record<string, number> = { pro: 1, gold: 2 };
 /** WeChat Pay / Alipay sell one-time terms (0221: never auto_renew). 0211 stores their subscription row with
  * cancel_at_period_end=true, so `cancel_at_period_end` alone cannot tell "never renewed" from "renewal stopped". */
 const ONE_TIME_METHODS = new Set(['wechat_pay', 'alipay']);
-export function isOneTimeMembership(row: Pick<MethodMembershipRow, 'payment_method'>) {
-  return ONE_TIME_METHODS.has(row.payment_method);
+export function isOneTimeMembership(row: Pick<MethodMembershipRow, 'payment_method'>
+  & Partial<Pick<MethodMembershipRow, 'payment_channel' | 'auto_renew'>>) {
+  return ONE_TIME_METHODS.has(row.payment_method) || row.payment_channel === 'waffo' && row.auto_renew === false;
 }
 
 /** The highest paid level still in force; the server only returns memberships that have not ended. */
@@ -47,7 +48,7 @@ export function walletRenewalSource(rows: readonly MethodMembershipRow[], curren
   if (!current || !isOneTimeMembership(current) || current.inGrace) return null;
   const latest = rows.filter(row => row.purchase_membership_level === current.purchase_membership_level)
     .sort((a, b) => Date.parse(b.entitlement_end) - Date.parse(a.entitlement_end))[0];
-  return latest && isOneTimeMembership(latest) && latest.payment_channel === 'stripe'
+  return latest && isOneTimeMembership(latest) && (latest.payment_channel === 'stripe' || latest.payment_channel === 'waffo')
     && !['founder', 'founder_renewal'].includes(latest.offer_kind) ? latest : null;
 }
 

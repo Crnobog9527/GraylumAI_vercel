@@ -105,9 +105,9 @@ describe('expired card checkout release', () => {
     const db = fakeDb({ payment_orders: [{ ...base, id: 'recent', created_at: ago(5) }, { ...base, id: 'early', created_at: ago(45) },
       { ...base, id: 'old', created_at: ago(90) }, { ...base, id: 'wallet', payment_method: 'alipay', created_at: ago(90) },
       { ...base, id: 'closed', purchase_closed_at: '2026-10-11T00:00:00Z', created_at: ago(90) }] }, rpc);
-    expect(await closeExpiredWaffoCheckouts(db, 'fixture')).toBe(1);
+    expect(await closeExpiredWaffoCheckouts(db, 'fixture')).toBe(2);
     // Recent rows never take a slot in the capped batch; oldest first.
-    expect(rpc.mock.calls.map(c => c[1].p_order)).toEqual(['old', 'early']);
+    expect(rpc.mock.calls.map(c => c[1].p_order)).toEqual(['old', 'wallet', 'early']);
     rpc.mockResolvedValue({ data: null, error: { message: 'connection reset' } });
     await expect(closeExpiredWaffoCheckouts(db, 'fixture')).rejects.toThrow('PERSISTENCE_UNAVAILABLE');
   });

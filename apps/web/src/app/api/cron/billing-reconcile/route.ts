@@ -1,3 +1,7 @@
+import { recoverWaffoOneTimeCheckouts } from '@repo/api/src/services/payments/waffoOneTimeRecovery';
+import { afterWaffoFulfillment } from '@repo/api/src/services/payments/failoverAfterFulfillment';
+import { reconcileFailoverRefunds } from '@repo/api/src/services/payments/failoverReconciliation';
+import { paymentDeploymentMode, assertWaffoWebhookEnvironment } from '@repo/api/src/services/payments/methodCheckoutGate';
 import { reportPaymentDispute } from '@/lib/payment-dispute-alert.mjs';
 import { NextResponse } from 'next/server';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
@@ -8,7 +12,7 @@ import {
 import { logger } from '@repo/api/src/services';
 import { runErasureFinancialReconciliation } from '@repo/api/src/services/accountErasure/financialRecovery';
 import { reconcileWaffoPayments } from '@repo/api/src/services/payments/waffoReconciliation';
-import { getWaffoTestOperationsClient } from '@repo/api/src/services/payments/waffoTestOperationsClient';
+import { getWaffoTestOperationsClient, getWaffoOperationsClient } from '@repo/api/src/services/payments/waffoTestOperationsClient';
 import { closeExpiredWaffoCheckouts } from '@repo/api/src/services/payments/waffoCardCheckout';
 import { describeWaffoFailure } from '@repo/api/src/services/payments/waffoFailure';
 import { findStaleChargedRounds } from '@repo/api/src/services/runtime/staleChargedRounds';
@@ -61,12 +65,25 @@ async function runStuckCallScan(supabase: SupabaseClient) {
 }
 
 async function runWaffoReconciliation(supabase: SupabaseClient) {
-  if (process.env.WAFFO_TEST_OPERATIONS_ENABLED !== 'true') return { success: true, skipped: true, findings: [] };
+  const mode = paymentDeploymentMode();
+  if (mode === 'test' ? process.env.WAFFO_TEST_OPERATIONS_ENABLED !== 'true' : !process.env.WAFFO_MERCHANT_NAMESPACE) {
+    return { success: true, skipped: true, findings: [] };
+  }
   try {
-    const provider = getWaffoTestOperationsClient();
-    // Lifecycle only: release unpaid card orders past their checkout window (late cash stays review).
-    const closedExpired = await closeExpiredWaffoCheckouts(supabase, provider.merchant);
-    return { ...await reconcileWaffoPayments(supabase, provider), closedExpired, skipped: false };
+    assertWaffoWebhookEnvironment();
+    const deadline = Date.now() + 45_000;
+    const provider = mode === 'test' ? getWaffoTestOperationsClient({ deadline }) : getWaffoOperationsClient('live', { deadline });
+    // Legacy recurring checkout expiry remains separate; one-time orders require original-provider proof.
+    const closedExpired = await closeExpiredWaffoCheckouts(supabase, provider.merchant, undefined, mode);
+    const recovered = await recoverWaffoOneTimeCheckouts(supabase, provider, undefined,
+      orderId => afterWaffoFulfillment(supabase, orderId, deadline), deadline);
+    const refunds = await reconcileFailoverRefunds(supabase, provider, deadline);
+    const payments = await reconcileWaffoPayments(supabase, provider, { recover: true, deadline,
+      afterFulfillment: orderId => afterWaffoFulfillment(supabase, orderId, deadline) });
+    return { ...payments, success: payments.success && refunds.success && recovered.blocked.length === 0,
+      findings: [...payments.findings, ...refunds.findings,
+        ...recovered.blocked.map(orderId => ({ kind: 'checkout_unresolved', orderId, refundCandidate: false }))],
+      closedExpired: closedExpired + recovered.closed, skipped: false };
   } catch (error) {
     logger.error('billing', 'pay_waffo_reconciliation_failed', describeWaffoFailure(error));
     return { success: false, skipped: false, findings: [{ kind: 'scan_failed', refundCandidate: false }] };

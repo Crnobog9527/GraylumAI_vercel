@@ -47,6 +47,8 @@ export async function verifyAfterStripeRouting({admin,service},legacy) {
   const renewed=(await service.query(`SELECT pay_waffo_renew_subscription($1,'fixture',$2,6900,'usd',$3,$4,$5) v`,
     [legacy.subscription,`renew_${legacy.order}`,new Date(Math.floor(Date.now()/1000)*1000),legacy.end,renewalEnd])).rows[0].v;
   assert.equal(renewed.duplicate,false);
+  assert.equal((await service.query('SELECT pay_common_membership_facts($1) v',[legacy.user])).rows[0].v.internal_membership.purchase_mode,
+    'subscription','legacy Waffo cards remain recurring in the source-of-truth projection');
   assert.equal((await admin.query('SELECT credits FROM profiles WHERE id=$1',[legacy.user])).rows[0].credits,17940);
   const renewal=(await admin.query(`SELECT payment_channel,payment_method FROM payment_orders WHERE subscription_id=$1
     ORDER BY created_at DESC LIMIT 1`,[legacy.subscription])).rows[0];
@@ -79,5 +81,5 @@ export async function verifyAfterStripeRouting({admin,service},legacy) {
   await assert.rejects(()=>pay('2025-03-02T12:00:00Z'),/TERM_INVALID/,'30 days is no longer the first Gold period');
   assert.equal((await pay('2025-02-28T12:00:00Z')).rows[0].v.state,'fulfilled');
   return ['0221-wallet-first-month-jan31-to-feb28','0221-wallet-first-month-not-30-days','0221-closes-waffo-card-switch','0221-keeps-waffo-order-channel','0221-backfills-recurring-price-usage',
-    '0221-waffo-renewal-still-works','0221-waffo-stop-still-works','0221-card-cn-absent-closed','0221-new-card-is-stripe-mp'];
+    '0221-waffo-renewal-still-works','membership-facts-identify-legacy-waffo-subscription-mode','0221-waffo-stop-still-works','0221-card-cn-absent-closed','0221-new-card-is-stripe-mp'];
 }

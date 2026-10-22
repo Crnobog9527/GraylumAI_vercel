@@ -63,6 +63,7 @@ it.each(['single', 'bulk'])('preserves version and switches in one %s database w
 it.each(['updateSystemSettings', 'updateSystemSettingsBulk'] as const)
 ('propagates the transaction version conflict as HTTP 409 without retry: %s', async path => {
   const f = fixture({ error: { code: 'PT409', message: 'private fixture detail' } });
+  f.read.mockResolvedValue({ data: { value: closed }, error: null });
   const input = { key, value: closed };
   const response = await fetchRequestHandler({ endpoint: '/trpc', router: settingsRouter, createContext: () => f.context,
     req: new Request(`http://localhost/trpc/${path}`, { method: 'POST', headers: { 'content-type': 'application/json' },

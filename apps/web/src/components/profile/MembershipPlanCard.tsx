@@ -34,7 +34,8 @@ function Amount({ value, highlight }: { value: string; highlight: boolean }) {
 }
 
 /** One plan on the membership page; the button opens the card checkout dialog (or is hidden while it is closed). */
-export function MembershipPlanCard({ plan, billingCycle, action, taxNote, firstMonth, founderSeats, founderRenewal = false, onSelect }: {
+export function MembershipPlanCard({ plan, billingCycle, action, taxNote, firstMonth, founderSeats,
+  founderRenewal = false, oneTime = false, onSelect }: {
   plan: PlanConfig;
   billingCycle: 'monthly' | 'yearly';
   /** null while card checkout is closed: no purchase entry is shown. */
@@ -45,6 +46,7 @@ export function MembershipPlanCard({ plan, billingCycle, action, taxNote, firstM
   founderSeats: number;
   /** Server-projected one-time wallet founder renewal; its displayed amount is the existing $496 price. */
   founderRenewal?: boolean;
+  oneTime?: boolean;
   onSelect: () => void;
 }) {
   const highlight = Boolean(plan.recommended || plan.highlight);
@@ -100,7 +102,7 @@ export function MembershipPlanCard({ plan, billingCycle, action, taxNote, firstM
               <span className="text-sm" style={{ color: 'var(--text-tertiary)' }}>首月</span>
               <Amount value={formatUsd(GOLD_FIRST_MONTH_USD)} highlight={highlight} />
             </div>
-            <span className="text-sm" style={{ color: 'var(--text-tertiary)' }}>之后每月 {formatUsd(price)}</span>
+            <span className="text-sm" style={{ color: 'var(--text-tertiary)' }}>{oneTime ? '下次续买按标准价 ' : '之后每月 '}{formatUsd(price)}</span>
           </>
         ) : (
           <div className="flex items-baseline justify-center gap-1">
@@ -108,6 +110,9 @@ export function MembershipPlanCard({ plan, billingCycle, action, taxNote, firstM
             <span className="text-sm" style={{ color: 'var(--text-tertiary)' }}>/月</span>
           </div>
         )}
+        {price > 0 && oneTime ? (
+          <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>一次性付款，不自动续费</span>
+        ) : null}
         {price > 0 && taxNote ? (
           <span data-testid={`profile-membership-plan-tax-${plan.level}`} className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
             {taxNote}

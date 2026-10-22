@@ -15,9 +15,10 @@ const MIN_RECREATE_SECONDS = 5 * 60;
 
 /** Release unpaid card orders 40 minutes after checkout started (Owner decision 2026-10-11), so an abandoned
  * checkout does not block the next purchase or hold a founder seat. The database enforces timing. */
-export async function closeExpiredWaffoCheckouts(db: Pick<SupabaseClient, 'from' | 'rpc'>, merchant: string, userId?: string) {
-  let query = db.from('payment_orders').select('id,user_id').eq('payment_channel', 'waffo').eq('payment_method', 'card')
-    .eq('payment_mode', 'test').eq('merchant_namespace', merchant).eq('qualification_state', 'reserved')
+export async function closeExpiredWaffoCheckouts(db: Pick<SupabaseClient, 'from' | 'rpc'>, merchant: string, userId?: string, mode: 'test' | 'live' = 'test') {
+  let query = db.from('payment_orders').select('id,user_id,auto_renew,checkout_request').eq('payment_channel', 'waffo')
+    .in('payment_method', ['card', 'card_cn', 'alipay'])
+    .eq('payment_mode', mode).eq('merchant_namespace', merchant).eq('qualification_state', 'reserved')
     .eq('payment_status', 'unpaid').is('purchase_closed_at', null)
     // Only rows old enough can qualify (dispatch never precedes creation); oldest first so the cap never starves them.
     .lt('created_at', new Date(Date.now() - 40 * 60 * 1000).toISOString()).order('created_at', { ascending: true });
@@ -25,7 +26,9 @@ export async function closeExpiredWaffoCheckouts(db: Pick<SupabaseClient, 'from'
   const due = await query.limit(100);
   if (due.error) throw new Error('PAY_WAFFO_PERSISTENCE_UNAVAILABLE');
   let closed = 0;
-  for (const row of (due.data ?? []) as { id: string; user_id: string }[]) {
+  for (const row of (due.data ?? []) as { id: string; user_id: string; auto_renew?: boolean; checkout_request?: { purchaseMode?: string } }[]) {
+    // One-time sessions require a provider terminal-unpaid lookup; a local TTL is not payment evidence.
+    if (row.auto_renew === false || row.checkout_request?.purchaseMode === 'payment') continue;
     const result = await db.rpc('pay_waffo_close_card_checkout', { p_user: row.user_id, p_order: row.id, p_merchant: merchant, p_rejected: false });
     if (!result.error) closed += 1;
     else if (!/PAY_WAFFO_CLOSE_DENIED/.test(result.error.message ?? '')) throw new Error('PAY_WAFFO_PERSISTENCE_UNAVAILABLE');

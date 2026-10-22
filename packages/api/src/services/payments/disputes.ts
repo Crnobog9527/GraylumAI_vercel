@@ -9,7 +9,7 @@ import { PAYMENT_EVIDENCE_CONFLICT } from './stripeWebhookError';
 import { logger } from '../../lib/logger';
 
 export type DisputeRow = {
-  id: string; merchant_namespace: string; mode: 'test' | 'live'; provider_dispute_id: string;
+  id: string; provider?: 'stripe' | 'waffo'; merchant_namespace: string; mode: 'test' | 'live'; provider_dispute_id: string;
   provider_charge_id: string; provider_payment_intent_id: string; provider_invoice_id: string | null;
   provider_subscription_id: string | null; order_id: string | null; subscription_id: string | null;
   freeze_state: string; renewal_stop_state: string; stop_attempts: number; source_review_required: boolean; status: string; outcome: string | null;
@@ -64,6 +64,7 @@ async function mark(db: SupabaseClient, disputeId: string, values: Record<string
 
 export async function resumeDisputeActions(db: SupabaseClient, stripe: Stripe, dispute: DisputeRow,
   alert: DisputeAlert = NO_ALERT) {
+  if (dispute.provider === 'waffo') throw new Error('PAY_DISPUTE_PROVIDER_MISMATCH');
   if (dispute.freeze_state === 'external') return true;
   let stopFailed = false;
   if (dispute.order_id && dispute.provider_subscription_id && dispute.renewal_stop_state !== 'confirmed') {
@@ -140,7 +141,7 @@ export async function reconcilePaymentDisputes(db: SupabaseClient, stripe: Strip
     let after: string | undefined;
     for (let page = 0; page < 20; page++) {
       if (Date.now() > deadline) return false;
-      let query = db.from('payment_disputes').select('*').eq('merchant_namespace', scope.merchant).eq('mode', scope.mode)
+      let query = db.from('payment_disputes').select('*').eq('provider', 'stripe').eq('merchant_namespace', scope.merchant).eq('mode', scope.mode)
         .neq('freeze_state', 'external');
       if (kind === 'stops') query = query.not('order_id', 'is', null)
         .or('renewal_stop_state.eq.pending,and(renewal_stop_state.eq.manual,stop_attempts.lt.3)');
@@ -186,7 +187,7 @@ export async function reconcilePaymentDisputes(db: SupabaseClient, stripe: Strip
 
 /** A payment callback claims pending disputes inside its grant transaction, then resumes provider effects after commit. */
 export async function resumeOrderDisputes(db: SupabaseClient, stripe: Stripe, orderId: string, alert: DisputeAlert = NO_ALERT) {
-  const rows = await db.from('payment_disputes').select('*').eq('order_id', orderId);
+  const rows = await db.from('payment_disputes').select('*').eq('order_id', orderId).eq('provider', 'stripe');
   if (rows.error || !Array.isArray(rows.data)) throw new Error('PAY_DISPUTE_ORDER_READ_UNAVAILABLE');
   for (const row of rows.data as DisputeRow[]) await resumeDisputeActions(db, stripe, row, alert);
 }
