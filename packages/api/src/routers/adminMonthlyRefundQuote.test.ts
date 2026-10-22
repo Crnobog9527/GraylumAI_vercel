@@ -31,7 +31,7 @@ function setup(role = 'admin') {
     user: { id: actorId, app_metadata: {}, user_metadata: {} }, isEmailVerified: true, authProvider: 'email',
     supabase: scoped, supabaseAuth: scoped, supabasePublic: {}, supabaseAdmin: db, hasSupabaseAdminPrivileges: true,
   } as unknown as Parameters<typeof testRouter.createCaller>[0]);
-  return { ...f, caller, rpc };
+  return { ...f, caller, rpc, sub };
 }
 beforeEach(() => vi.useFakeTimers({ now: new Date('2026-10-10T00:00:00Z') }));
 afterEach(() => { vi.useRealTimers(); vi.clearAllMocks(); });
@@ -48,6 +48,17 @@ describe('monthly quote reasons through real evidence/service and admin route', 
       expect(name).toBe('pay_common_monthly_refund_approve');
       expect(args).toMatchObject({ p_actor: actorId, p_order: request.orderId, p_local_version: null });
     }
+    expect(f.write).not.toHaveBeenCalled();
+  });
+  it('quotes annual subscriptions through the generic alias, treating unknown location as zero fee', async () => {
+    const f = setup();
+    f.snapshot.billing_cycle = f.order.billing_cycle = 'yearly';
+    f.snapshot.credits = 12000; f.snapshot.bonus_credits = 1200;
+    f.sub.items.data[0].price.recurring.interval = 'year';
+    const requestUnknown = { ...request, feePermitted: 'unknown' as const };
+    const quote = await f.caller.quoteSubscriptionRefund(requestUnknown);
+    expect(quote).toMatchObject({ terms: { credits: 1100, feePermitted: 'not_permitted', feeMinor: 0, netMinor: 6900 } });
+    expect(await f.caller.quoteMonthlyRefund(requestUnknown)).toEqual(quote);
     expect(f.write).not.toHaveBeenCalled();
   });
   it.each([
@@ -91,6 +102,9 @@ describe('monthly quote reasons through real evidence/service and admin route', 
   it('retains the admin-only boundary', async () => {
     const f = setup('user');
     await expect(f.caller.quoteMonthlyRefund(request)).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(f.caller.quoteSubscriptionRefund(request)).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(f.caller.executeSubscriptionRefund({ orderId: request.orderId,
+      intentId: '77777777-7777-4777-8777-777777777777' })).rejects.toMatchObject({ code: 'FORBIDDEN' });
     expect(f.reads).toEqual([]);
     expect(f.rpc).not.toHaveBeenCalled();
     expect(f.tables.profiles[1].id).toBe(subjectId);

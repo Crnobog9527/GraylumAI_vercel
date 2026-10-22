@@ -47,6 +47,7 @@ export async function quoteMonthlyRefund(
     periodEnd: new Date(sub.items.data[0].current_period_end * 1000).toISOString(),
     originalCancelAtPeriodEnd: sub.cancel_at_period_end,
     credits: f.evidence.grants.filter(g => g.source_order_id === f.order.id).reduce((n, g) => n + g.credits_granted, 0),
+    priorPro: f.priorPro,
     taxMinor: 'taxMinor' in f.provider.cash ? f.provider.cash.taxMinor : undefined,
     feeEvidence: input.feeEvidence, snapshot: f.order.purchase_snapshot,
   });

@@ -23,8 +23,9 @@ async function safe<T>(action: () => Promise<T>, operation?: 'quote' | 'status' 
     throw createSafeInternalError(error, '退款证据不足或状态已变化，请重新核对订单与工单');
   }
 }
-const monthlyRequest = request.extend({ feeEvidence: z.string().regex(/^[A-Za-z0-9:._/-]{1,160}$/) });
-export const adminRefundProcedures = {
+const monthlyRequest = request.extend({ feePermitted: z.enum(['confirmed', 'not_permitted', 'unknown']),
+  feeEvidence: z.string().regex(/^[A-Za-z0-9:._/-]{1,160}$/) });
+const refundProcedures = {
   quoteMonthlyRefund: adminProcedure.input(monthlyRequest).query(({ ctx, input }) =>
     safe(() => quoteMonthlyRefund(ctx.supabaseAdmin, getStripeClient(), ctx.profileId, input), 'quote')),
   approveMonthlyRefund: adminProcedure.input(monthlyRequest.extend({
@@ -67,4 +68,14 @@ export const adminRefundProcedures = {
     .mutation(({ ctx, input }) => safe(() => dispatchOrderRefund(ctx.supabaseAdmin, input.orderId,
       provider => reconcilePackageRefund(ctx.supabaseAdmin, provider, ctx.profileId, input.orderId),
       provider => reconcileWaffoRefund(ctx.supabaseAdmin, provider, ctx.profileId, input.orderId)))),
+};
+
+// Stable subscription names for the shared admin UI; legacy monthly routes remain compatible.
+export const adminRefundProcedures = {
+  ...refundProcedures,
+  quoteSubscriptionRefund: refundProcedures.quoteMonthlyRefund,
+  approveSubscriptionRefund: refundProcedures.approveMonthlyRefund,
+  executeSubscriptionRefund: refundProcedures.executeMonthlyRefund,
+  getSubscriptionRefundStatus: refundProcedures.getMonthlyRefundStatus,
+  rejectSubscriptionRefund: refundProcedures.rejectMonthlyRefund,
 };

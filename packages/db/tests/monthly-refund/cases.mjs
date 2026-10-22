@@ -45,7 +45,7 @@ export async function runCases({db,Client,connectionString,report}) {
   i=await start(f,i,'stop_renewal',before);i=await start(f,i,'refund');
   const r=fact(f,i);i=await result(f,i,r);i=await result(f,i,r);
   assert.equal(i.status,'review_required');
-  const e=seen(f,i);e.refunds.rows=[r];e.subscription.status='canceled';
+  const e=seen(f,i);e.refunds.rows=[r];e.subscription.status='canceled';e.subscription.cancelAtPeriodEnd=false;
   i=await finish(f,i,e);assert.equal(i.status,'succeeded');
   assert.equal((await finish(f,i,e)).status,'succeeded');
   assert.equal((await one('select credits from profiles where id=$1',[f.user])).credits,400);
@@ -104,7 +104,7 @@ export async function runCases({db,Client,connectionString,report}) {
  const noStop=seen(nested,n);noStop.subscription.cancelAtPeriodEnd=false;noStop.subscription.renewalOwnership='original';
  n=await start(nested,n,'stop_renewal',noStop);n=await start(nested,n,'refund');
  const cash=fact(nested,n);n=await result(nested,n,cash);
- const terminal=seen(nested,n);terminal.subscription.status='canceled';terminal.refunds.rows=[cash];n=await finish(nested,n,terminal);
+ const terminal=seen(nested,n);terminal.subscription.status='canceled';terminal.subscription.cancelAtPeriodEnd=false;terminal.refunds.rows=[cash];n=await finish(nested,n,terminal);
  assert.equal((await one('select monthly_refund_erasure_safe($1) ok',[{...n,terms:{...n.terms,snapshot:{...n.terms.snapshot,unknownBody:'preserve'}}}])).ok,false);
  const rejected=await fx();
  const rejection=await one("select pay_common_monthly_refund_reject($1,$2,$3,'evidence_missing') i",[rejected.actor,rejected.order,rejected.ticket]);

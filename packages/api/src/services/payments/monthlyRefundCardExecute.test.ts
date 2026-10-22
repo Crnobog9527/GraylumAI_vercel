@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { monthlyRefundVersion } from './monthlyRefundApproval';
 import { claimedFixture, now } from './__tests__/monthlyRefundExecutionFixture';
 const mocks = vi.hoisted(() => ({ read: vi.fn(), scope: vi.fn() }));
 vi.mock('./monthlyRefundProvider', async importActual => ({
@@ -14,9 +15,12 @@ afterEach(() => vi.useRealTimers());
 /** PAY-STRIPE-MP step 4b-2: the real execution loop for a claimed card intent with tax, against a stand-in database
  * that applies each persisted stage, and Stripe as the original channel. */
 describe('executing an approved card subscription refund with tax', () => {
-  it('stops renewal, refunds pre-tax less fee plus the tax at Stripe, records it, then cancels marked as ours', async () => {
+  it.each([['monthly', false], ['yearly', false], ['yearly', true]] as const)(
+    '%s refund (lost response=%s) refunds once and reconciles before cancel', async (cycle, lostResponse) => {
     const f = claimedFixture(1380);
-    const terms = { ...f.intent.terms, merchant: 'merchant-fixture' };
+    const terms = { ...f.intent.terms, merchant: 'merchant-fixture', snapshot: { ...f.intent.terms.snapshot,
+      billing_cycle: cycle, credits: f.intent.terms.snapshot.credits * (cycle === 'yearly' ? 12 : 1) } };
+    f.intent.versionHash = monthlyRefundVersion(terms);
     let intent: Record<string, unknown> = { ...f.intent, terms, kind: 'monthly_first_purchase', approvedBy: 'admin',
       status: 'review_required', hold: 'held', revision: 1, localVersion: 'local' };
     const cash: { refund: Record<string, unknown> | null; canceled: boolean; stopping: boolean } = { refund: null, canceled: false, stopping: false };
@@ -50,15 +54,24 @@ describe('executing an approved card subscription refund with tax', () => {
       cash.refund = { id: 're_card', intentId: f.intent.id, orderId: terms.orderId, chargeId: terms.chargeId,
         paymentIntentId: terms.paymentIntentId, currency: 'usd', amount: params.amount, merchant: 'merchant-fixture', mode: 'test',
         status: 'succeeded' };
+      if (lostResponse) throw new Error('ACCEPTED_BUT_RESPONSE_LOST');
       return { object: 'refund', id: 're_card', amount: params.amount, currency: 'usd', charge: terms.chargeId,
         payment_intent: terms.paymentIntentId, status: 'succeeded', metadata: params.metadata };
     });
     const update = vi.fn(async (_id: string, params: { cancel_at_period_end?: boolean }) => { cash.stopping = Boolean(params.cancel_at_period_end); });
-    const cancel = vi.fn(async () => { cash.canceled = true; });
+    const cancel = vi.fn(async () => { cash.canceled = true; cash.stopping = false; });
     const stripe = { refunds: { create }, subscriptions: { update, cancel } } as unknown as MonthlyStripe;
 
-    const done = await executeMonthlyRefund(db, stripe, 'admin', terms.orderId, f.intent.id);
+    let done = await executeMonthlyRefund(db, stripe, 'admin', terms.orderId, f.intent.id);
+    if (lostResponse) {
+      expect(done).toMatchObject({ status: 'review_required' });
+      expect(cancel).not.toHaveBeenCalled();
+      done = await executeMonthlyRefund(db, stripe, 'admin', terms.orderId, f.intent.id);
+    }
     expect(done).toMatchObject({ status: 'succeeded' });
+    await executeMonthlyRefund(db, stripe, 'admin', terms.orderId, f.intent.id);
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(cancel).toHaveBeenCalledTimes(1);
     expect(update).toHaveBeenCalledWith(terms.providerSubscriptionId, expect.objectContaining({ cancel_at_period_end: true,
       cancellation_details: { comment: 'graylum_initiated' } }), expect.anything());
     // 69.00 pre-tax - 4.14 fee + 13.80 tax.

@@ -21,6 +21,7 @@ import { membershipExpiryStripeCases } from './membership-expiry-stripe.mjs';
 import { stripeMpExternalRefundCases } from './stripe-mp-external-refund.mjs';
 import { stripeMpUpgradeCases } from './stripe-mp-upgrade.mjs';
 import { stripeMpPackRefundCases } from './stripe-mp-pack-refund.mjs';
+import { stripeMpAnnualRefundCases } from './stripe-mp-annual-refund.mjs';
 import { stripeMpSubscriptionRefundCases } from './stripe-mp-subscription-refund.mjs';
 import { stripeMpLiveCases } from './stripe-mp-live.mjs';
 import { stripeMpLiveRefundCases } from './stripe-mp-live-refunds.mjs';
@@ -119,7 +120,10 @@ try {
     /VERSION_CONFLICT/);
   await assert.rejects(()=>admin.query("DELETE FROM system_settings WHERE key='payment_method_routes'"),/DELETE_DENIED/);
   await admin.query("UPDATE system_settings SET value=$1 WHERE key='payment_method_routes'",[{...routes,version:2}]);
-  const cases = await admissionCases({admin,service,connect});
+  const annualOnly = process.argv.includes('--annual-only');
+  const cases = annualOnly ? await stripeMpAnnualRefundCases({admin,service,connect})
+    : await admissionCases({admin,service,connect});
+  if (!annualOnly) {
   cases.push(...await retentionCases({admin,service}));
   cases.push(...await sourceCases({admin}));
   cases.push(...await catalogCases({admin,service}));
@@ -138,6 +142,7 @@ try {
   cases.push(...await stripeMpLiveRefundCases({admin,service}));
   cases.push(...await stripeMpWalletRefundCases({admin,service}));
   cases.push(...await stripeTestClockCases({admin,service,connect}));
+  }
   console.log(JSON.stringify({result:'PASS',replay:report,
     cases:['event-idempotency','event-conflict','test-live-isolation','refund-event-not-payment-dedup',
       'service-only-receipt','durable-lookup-refs-no-contact-data','route-version-cas','route-delete-denied',...scopedCases,...cases]}));

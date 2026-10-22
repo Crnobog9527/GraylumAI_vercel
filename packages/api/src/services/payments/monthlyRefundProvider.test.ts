@@ -25,6 +25,34 @@ describe('monthly original-channel evidence reader', () => {
       subscription: { preflight: 'clear', renewalOwnership: 'original' }, refunds: { complete: true, rows: [] } });
     expect(f.writes).toEqual([]);
   });
+  it('checks an annual subscription against its original annual snapshot, without releasing unissued credits', async () => {
+    const f = fixture();
+    f.intent.terms.snapshot.billing_cycle = 'yearly';
+    f.intent.terms.snapshot.credits *= 12;
+    f.sub.items.data[0].price.recurring!.interval = 'year';
+    expect(await readMonthlyProvider(f.stripe, f.intent)).toMatchObject({ subscription: { preflight: 'clear' } });
+    f.sub.items.data[0].price.recurring!.interval = 'month';
+    await expect(readMonthlyProvider(f.stripe, f.intent)).rejects.toThrow();
+    expect(f.writes).toEqual([]);
+  });
+  it('allows only the bound paid Pro history and rechecks its stopped renewal and original expiry', async () => {
+    const f = fixture();
+    const prior = { ...structuredClone(f.sub), id: 'sub_prior', cancel_at_period_end: true };
+    f.intent.terms.priorPro = { orderId: 'prior-order', subscriptionId: 'prior-sub',
+      providerSubscriptionId: prior.id, invoiceId: 'in_prior', periodEnd: f.intent.terms.periodEnd };
+    f.stripe.subscriptions.retrieve = vi.fn(async (id: string) => id === prior.id ? prior : f.sub) as unknown as MonthlyStripe['subscriptions']['retrieve'];
+    const priorInvoice = { ...structuredClone(f.invoice), id: 'in_prior',
+      parent: { type: 'subscription_details', subscription_details: { subscription: prior.id } } };
+    const rows = [f.invoice, priorInvoice];
+    f.stripe.invoices.list = vi.fn(async () => ({ data: rows, has_more: false })) as unknown as MonthlyStripe['invoices']['list'];
+    expect((await readMonthlyProvider(f.stripe, f.intent)).subscription.preflight).toBe('clear');
+    prior.cancel_at_period_end = false;
+    expect((await readMonthlyProvider(f.stripe, f.intent)).subscription.preflight).toBe('conflict');
+    prior.cancel_at_period_end = true;
+    rows.push({ ...f.invoice, id: 'in_unrelated' });
+    expect((await readMonthlyProvider(f.stripe, f.intent)).subscription.preflight).toBe('conflict');
+    expect(f.writes).toEqual([]);
+  });
   it('reads a card order (PAY-STRIPE-MP) as charged the pre-tax amount plus its tax', async () => {
     const f = fixture(1380);
     // Stripe charged 69.00 + 13.80 tax for the card subscription's first invoice.

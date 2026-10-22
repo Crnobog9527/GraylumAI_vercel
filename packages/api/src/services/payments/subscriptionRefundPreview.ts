@@ -7,6 +7,7 @@ import { refundTime } from './refundMoney';
 import { evaluateRefundPolicy, type RefundPolicyResult, type RefundPolicyInput } from './refundPolicy';
 import type { RefundRequest, RefundStripe } from './packageRefund';
 import { resolveStripeScope } from './stripeCheckoutPersistence';
+import { subscriptionRefundPriorPro } from './subscriptionRefundPriorPro';
 import { disputeAllowsRefund } from './disputeRefundEligibility';
 import {
   readPreviewOrder, readSubscriptionRefundEvidence,
@@ -216,7 +217,10 @@ export async function readSubscriptionRefundFacts(
     requireEvidence(other.every(row => refundTime(row.paidAt) !== paid), 'PAY_REFUND_PAYMENT_ORDER_UNRESOLVED');
     const spend = consumption(last, paidAt, observedAt);
     requireEvidence(spend, 'PAY_REFUND_CONSUMPTION_UNRESOLVED');
-    const kind = target.billingReason === 'subscription_create' && !order.source_order_id ? 'membership_first'
+    const renewal = target.billingReason === 'subscription_cycle' || order.method_transition === 'founder_renewal';
+    const priorPro = renewal ? undefined : subscriptionRefundPriorPro(last, order);
+    const kind = renewal ? 'renewal' : priorPro && target.billingReason === 'subscription_create' ? 'pro_to_gold'
+      : target.billingReason === 'subscription_create' && !order.source_order_id ? 'membership_first'
       : target.billingReason === 'subscription_cycle' ? 'renewal' : 'unknown';
     const policy: RefundPolicyInput = {
       order: { id: order.id, userId: order.user_id, channel: 'stripe', mode: order.payment_mode as 'test' | 'live',
@@ -228,9 +232,10 @@ export async function readSubscriptionRefundFacts(
       membershipHistory: { userId: order.user_id, orderId: order.id, paidAt, complete: true,
         priorPaidMembershipCount: other.filter(row => refundTime(row.paidAt)! < paid).length,
         evidenceRef: hash(provider.invoices) },
-      consumption: spend, observedAt, accountState: 'active', feePermitted: input.feePermitted, reason: 'ordinary',
+      consumption: spend, observedAt, accountState: 'active', reason: 'ordinary',
+      feePermitted: input.feePermitted === 'unknown' ? 'not_permitted' : input.feePermitted,
     };
-    return { policy, order, evidence: last, provider };
+    return { policy, order, evidence: last, provider, priorPro };
 }
 
 export async function previewSubscriptionRefund(
