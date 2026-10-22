@@ -58,6 +58,30 @@ export async function readPackageRefundCash(db: Pick<Db, 'from'>, stripe: Refund
   const intentId = await paymentId(db, order);
   // PAY-STRIPE-MP: an international card pack charged the pre-tax amount plus the tax recorded for its payment (0237).
   const taxMinor = order.payment_method === 'card' ? recordedTax(order, intentId) : 0;
+  return readCapturedCash(db, stripe, order, scope, intentId, taxMinor);
+}
+/** Bind the original recurring invoice to its captured cash before restoring its entitlement. */
+export async function readRecurringRefundCash(db: Pick<Db, 'from'>,
+  stripe: RefundStripe & Pick<Stripe, 'invoicePayments'>, orderId: string, invoice: Stripe.Invoice) {
+  const { order, scope } = await scopedOrder(db, stripe, orderId);
+  const invoiceId = await paymentId(db, order);
+  const taxMinor = order.payment_method === 'card' ? recordedTax(order, invoiceId) : 0;
+  if (!['card', 'card_cn'].includes(order.payment_method ?? '') || invoice.id !== invoiceId
+    || invoice.livemode !== (scope.mode === 'live') || invoice.status !== 'paid'
+    || invoice.amount_paid !== order.amount_total + taxMinor || invoice.currency !== order.currency) {
+    throw new Error('PAY_REFUND_PAYMENT_MISMATCH');
+  }
+  const payments = await stripe.invoicePayments.list({ invoice: invoiceId, limit: 100 });
+  const payment = payments.data[0];
+  const intentId = payment && payment.payment.type === 'payment_intent' ? id(payment.payment.payment_intent) : null;
+  if (payments.has_more || payments.data.length !== 1 || !payment || payment.object !== 'invoice_payment'
+    || payment.livemode !== (scope.mode === 'live') || payment.status !== 'paid'
+    || id(payment.invoice) !== invoiceId || payment.amount_paid !== invoice.amount_paid
+    || payment.currency !== order.currency || !intentId) throw new Error('PAY_REFUND_PAYMENT_MISMATCH');
+  return readCapturedCash(db, stripe, order, scope, intentId, taxMinor);
+}
+async function readCapturedCash(db: Pick<Db, 'from'>, stripe: RefundStripe, order: Order,
+  scope: Awaited<ReturnType<typeof resolveStripeScope>>, intentId: string, taxMinor: number) {
   const charged = order.amount_total + taxMinor;
   const payment = await stripe.paymentIntents.retrieve(intentId);
   const chargeId = id(payment.latest_charge);
