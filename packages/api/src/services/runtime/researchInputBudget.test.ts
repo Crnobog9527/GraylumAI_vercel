@@ -50,7 +50,7 @@ function researchConfig(enabled:boolean){
   verifiedPlatforms:['tiktok'],benchmarkPlatforms:['tiktok'],routes,limits:{maxSubcallsPerRound:20,discoverSubcalls:25}}),
   revision:2,updatedBy:actor,updatedAt:new Date(now).toISOString()};
 }
-function fixture(enabled:boolean,budgets=true){
+function fixture(enabled:boolean,budgets=true,scopeMaterial?:unknown){
  const settings:Record<string,unknown>={research_tools_config:researchConfig(enabled),
   billing_provider_prices:{version:1,entries:[price('tikhub',null,'call'),price('parallel','parallel:search:fast','sku_search'),
    price('firecrawl',FIRECRAWL_ROUTE,'credit')]},
@@ -58,8 +58,9 @@ function fixture(enabled:boolean,budgets=true){
    report:{inputBytes:196608,historyItems:0}},
   billing_payg_start_thresholds:{version:'v1',thresholds:routes.map(r=>({model:`${r.vendor}:${r.route}`,purpose:RESEARCH_PHASE,credits:1}))}};
  let saved:unknown=null;
+ const logs:unknown[]=[];
  const rpc=vi.fn(async(name:string,args:Record<string,unknown>)=>{
-  if(name==='runtime_session_context')return {data:{scope:{kind:'positioning_draft',draftId:actor}},error:null};
+  if(name==='runtime_session_context')return {data:{scope:{kind:'positioning_draft',draftId:actor},...(scopeMaterial?{scopeMaterial}: {})},error:null};
   if(name==='runtime_admission_replay')return {data:saved,error:null};
   if(name==='research_user_cards')return {data:[{cardId:requestId,kind:'keywords',options:[],minSelect:1,maxSelect:5,
    confirmationId:modelId,items:['家居收纳']}],error:null};
@@ -70,7 +71,7 @@ function fixture(enabled:boolean,budgets=true){
  const row={id:modelId,model_id:'fixture/mentor',is_active:'true',provider:'fixture',max_tokens:1000,input_limit:400000};
  const admin={rpc,from:(table:string)=>{
   let key='';
-  const query={select:()=>query,eq:(_column:string,value:string)=>{key=value;return query;},in:async(_column:string,keys:string[])=>({data:table==='system_settings'
+  const query={insert:(row:unknown)=>({abortSignal:async()=>{logs.push(row);return {error:null};}}),select:()=>query,eq:(_column:string,value:string)=>{key=value;return query;},in:async(_column:string,keys:string[])=>({data:table==='system_settings'
     ?keys.filter(key=>settings[key]!==undefined).map(key=>({key,value:settings[key]})):[],error:null}),
    maybeSingle:async()=>({error:null,data:settings[key]===undefined?null:{key,value:settings[key],revision:'2'}}),
    single:async()=>({data:table==='modules'?{id:moduleId,active:true,skill_id:moduleId,model_id:modelId}:row,error:null})};
@@ -81,7 +82,7 @@ function fixture(enabled:boolean,budgets=true){
   historyItems:0,opcTurnToken:requestId,mentorStream:true,hostTurnContext:{stepId:'step-1',opening:false,checklist:[]},
   researchTools:true,purposeBudgets:budgets,payg:{callPolicies:[modelPolicy],billingUnit}};
  const input={sessionId:actor,requestId,input:'帮我找对标账号',network:'deny',selection:{kind:'skill',moduleId,revisionId}};
- return {admin,user,policy,input,rpc};
+ return {admin,user,policy,input,rpc,logs};
 }
 
 // The Skill instructions stand in for a long positioning step (the user text is capped at 20000 characters).
@@ -138,4 +139,79 @@ it('the host block is measured as sent: serialized into the message, then escape
  expect(sentHostBytes(after)-sentHostBytes(before)).toBe(request(after)-request(before));
  // A single serialization would undercount the escaped quotes and backslashes.
  expect(Buffer.byteLength(JSON.stringify(after))-Buffer.byteLength(JSON.stringify(before))).toBeLessThan(request(after)-request(before));
+});
+
+it('a 90000-byte first-step request keeps its saved facts and the next step receives every research tool',async()=>{
+ const {captureHostContext}=await import('../opc/captureContext');
+ const {runtimeScopeInput}=await import('./context');
+ const {groundedCardToolBytes}=await import('./groundedCard');
+ const {REPLY_LANGUAGE_INSTRUCTIONS}=await import('./primaryInstructions');
+ const {POSITIONING_RESEARCH_TOOLS}=await import('../research/tools/schemas');
+ const steps=[{id:'first',title:'First'},{id:'research',title:'Research'}];
+ const schema=Array.from({length:7},(_,i)=>({id:`fact${i}`,title:`Fact ${i}`,required:true}));
+ const values=Object.fromEntries(schema.map(field=>[field.id,{value:'中'.repeat(400),nature:'fact',status:'confirmed'}]));
+ const fieldMeta=Object.fromEntries(schema.map(field=>[field.id,{source:'user',protected:true,basis:'user_statement',
+  hasPendingSuggestion:false,createdAt:'2026-10-22T00:00:00Z',executionId:requestId,origin:'capture'}]));
+ const information={first:{schema,values,meta:fieldMeta},research:{schema:[{id:'benchmark_findings',required:true,
+  elicitation:'agent_proposal' as const}],values:{},meta:{}}};
+ const scopeMaterial={sessionId:actor,revision:11,hash:'a'.repeat(64),content:{work:{roundId:actor,
+  steps:{first:{information:values,fieldMeta,valid:true,body:'Prior summary'},research:{information:{},fieldMeta:{},valid:false}}}}};
+ const original=structuredClone(scopeMaterial);
+ const first=fixture(true,true,scopeMaterial);
+ const firstHost=captureHostContext(steps,information,'first',false,undefined,{first:true});
+ skill.text='S'.repeat(43000);
+ const firstService=runtimeAdmissionService(first.user,first.admin,{...first.policy,hostTurnContext:firstHost});
+ const measure=(context:ReturnType<typeof runtimeContext.parse>)=>Buffer.byteLength(JSON.stringify({
+  instructions:context.instructions+REPLY_LANGUAGE_INSTRUCTIONS,
+  messages:[{role:'user',content:runtimeScopeInput(context.input,context.scopeMaterial,context.hostTurnContext)}],
+ }))+groundedCardToolBytes()+150+1024;
+ // JSON escaping is part of the byte budget. All input stays within the existing 8000-character OPC limit.
+ const baseline=await firstService.prepare({...first.input,input:'x'});
+ const extra=90000-measure(runtimeContext.parse(baseline.context));
+ const text='\u0001'.repeat(Math.floor(extra/7))+'x'.repeat(extra%7+1);
+ expect(text.length).toBeLessThanOrEqual(8000);
+ const full=fixture(true,true,scopeMaterial);
+ const admittedFirst=await runtimeAdmissionService(full.user,full.admin,{...full.policy,hostTurnContext:firstHost})
+  .prepare({...full.input,input:text});
+ expect(measure(runtimeContext.parse(admittedFirst.context))).toBe(90000);
+ expect(admittedFirst.context.research).toBeUndefined();
+ // A fresh request in this same round, using the saved fields; no old session or historical linking.
+ skill.text='S'.repeat(59133);
+ const next=fixture(true,true,scopeMaterial);
+ const host=captureHostContext(steps,information,'research',false,undefined,{first:true});
+ const admitted=await runtimeAdmissionService(next.user,next.admin,{...next.policy,hostTurnContext:host})
+  .prepare({...next.input,input:'请给我关键词确认卡'});
+ const context=runtimeContext.parse(admitted.context);
+ expect(context.tools).toEqual(['ask_question',...POSITIONING_RESEARCH_TOOLS]);
+ expect(context.purposeBudget?.inputBytes).toBe(112000);
+ expect(context.scopeMaterial).toEqual(original);
+ expect(scopeMaterial).toEqual(original);
+ expect(context.hostTurnContext?.materialProjection).toBe('checklist-dedup-v1');
+ const {researchCapacity}=await import('./researchCapacity');
+ const {researchToolBytes}=await import('./researchAdmission');
+ const {RESEARCH_RESULT_RESERVE_BYTES}=await import('./researchTurn');
+ const beforeHost={...context.hostTurnContext!};delete beforeHost.materialProjection;
+ // The old composition really fails; this is not a small fixture that passed even before the fix.
+ const oldComposition=researchCapacity({instructions:context.instructions+REPLY_LANGUAGE_INSTRUCTIONS,
+  currentInput:runtimeScopeInput(context.input,context.scopeMaterial,beforeHost),inputBudgetBytes:112000,
+  existingToolsBytes:groundedCardToolBytes()+150,researchToolsBytes:researchToolBytes(POSITIONING_RESEARCH_TOOLS,true),
+  researchHostDeltaBytes:0,resultReserveBytes:RESEARCH_RESULT_RESERVE_BYTES});
+ expect(oldComposition.deficitBytes).toBeGreaterThan(0);
+});
+
+it('a still-oversize required research turn records numeric components and creates no billable execution',async()=>{
+ skill.text='S'.repeat(83000);
+ const f=fixture(true);
+ const host={stepId:'research',opening:false,checklist:[{id:'research',title:'Research',fields:[{
+  id:'benchmark_findings',title:'Findings',required:true,role:'agent_proposal' as const,status:'missing' as const,protected:false}]}]};
+ const input={...f.input,input:'Secret input https://private.invalid/?token=secret'};
+ await expect(runtimeAdmissionService(f.user,f.admin,{...f.policy,hostTurnContext:host}).prepare(input))
+  .rejects.toThrow('RESEARCH_TOOLS_CONTEXT_CAPACITY');
+ expect(f.rpc.mock.calls.some(([name])=>name==='runtime_admit')).toBe(false);
+ const log=f.logs[0] as {context:{capacity:Record<string,number>}};
+ expect(log.context.capacity.deficitBytes).toBeGreaterThan(0);
+ expect(Object.values(log.context.capacity).every(value=>typeof value==='number'&&Number.isSafeInteger(value))).toBe(true);
+ expect(JSON.stringify(f.logs)).not.toContain(input.input);
+ expect(JSON.stringify(f.logs)).not.toContain('private.invalid');
+ expect(input.input).toBe('Secret input https://private.invalid/?token=secret');
 });
