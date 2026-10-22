@@ -84,6 +84,15 @@
 
 ### 2.1 Owner 的新决定（2026-09-27 起，2026-10-22 更新）
 
+**2026-10-22：退款手续费在用户所在地不确定时一律不扣**
+
+Owner 原话（2026-10-22，总控对话，回答总控给出的 A/B 选项）：
+
+> 退款手续费：不确定用户所在地时一律不扣，只有能确认当地法律允许时才扣 6%。
+
+管理员处理退款报价时，只有能确认用户所在地且当地法律允许扣手续费，才选"法律允许，扣 6% 手续费"；所在地不明或无法核实时选"法律不允许，不扣手续费"，并在核对依据里注明所在地未知。
+取代第 51 项 2026-10-07 补充决定和第 10 节退款一行中"适用性未知先核对"的写法；资格条件（7 天内、整个账户未用过积分、续费期不退）和 6% 费率不变。后台退款表单提示文字随后对齐。
+
 **2026-10-22：PAY-FAILOVER 改为0335，先等待0333/0334前置合并**
 
 Owner原话（PAY-FAILOVER本聊天）：
@@ -165,6 +174,12 @@ Owner 原话（2026-10-21，总控对话）：
 10-25 冻结前不做任何接入改动。PostHog 跟随 Termly 同意状态，注销时同步删除该用户在 PostHog 的数据；隐私政策和 Termly 需新增该数据处理方（条款文字由 Owner 生成）。
 GA4 是否退出浏览器、录像范围等细节是总控建议，不属于本决定，以 ANALYTICS-POSTHOG 开工时的方案为准。
 
+**2026-10-21：停用的旧入口 `/chat`、`/workbench` 不再保留跳转，访问时 404**
+
+来源：总控在 E1 后续派工中转达 Owner 的意见（2026-10-21，不是 Owner 原话）：网站还没有上线、没有真实用户，`/chat`、`/workbench` 这两个早已停用的旧入口不需要保留。
+
+落实范围（#1227）：删除 `/chat`、`/workbench` 到定位页的跳转，登录回跳也不再改写这两个地址，访问时走正常 404（未登录先到登录页）。`/workbench/marketplace`、`/workbench/search` 以及 `/positioning`、`/library`、`/profile` 等搬到 `/app` 的旧地址的 308 保持不变。
+取代：2026-09-29 LEGACY-CLOSE 决定里"旧链接直接跳到 `/positioning`"（#507 起 `/chat` 临时跳转定位页），以及 SEO_GEO_SPEC 第 15 节"旧应用路径跳转"中 `/chat` 改跳 `/app/positioning`、`/workbench` 整个目录 308 的写法。
 
 **2026-10-21：评审团执行约束席改用 Gemini 4 Argon**
 
@@ -2329,7 +2344,7 @@ Owner 原话（本会话，记录于 [#741](https://github.com/Crnobog9527/Grayl
 | 开户赠送 = Owner 实测后按公式定；积分包 $9.90 以外的档位待定；积分包会员价四舍五入到分 | 第 2.1 节第 50 项"数值怎么定"；第 51 项旧写法；记录 S | 由第 2.1 节第 51 项取代（[记录 S](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980831854)、[记录 T](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980843167)）：注册赠送 500 积分；积分包三档 $9.90 / $29.90 / $99.90；会员价向下取整到 $0.10；均为先定，实测后可能调整 |
 | 创始会员只限银行卡订阅、微信一次性不参加；年付标签"最高省 40%"只在银行卡付款时显示 | 第 2.1 节第 51 项旧写法；记录 E、F、J、P | 由第 2.1 节第 51 项取代（[记录 V](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981192614)）：前 50 位 Gold 年付会员，银行卡和微信都算；名额没卖完时不论付款方式都写"最高省 40%" |
 | 全额退款放回创始名额（记录 J）；以及本 PR 曾统一的"全额退款并且 Waffo 确认创始订阅已取消后才放回"、#626 方案前置事项第 2 条的放回条件 | 第 2.1 节第 51 项、第 7.1 节 PAY-WAFFO 行旧写法；[记录 J](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5972539553) | 由第 2.1 节第 51 项取代（[记录 V](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981192614)）：已售出的名额在任何情况下都不放回；例外退款立即结束创始身份 |
-| 订阅和积分包付款成功后默认不退款，Owner 逐笔批准人工例外；不提供 7 天退款 | [DATA-ERASURE 实施说明](tasks/DATA-ERASURE.md) E5（#474）；[PAY-COMMON 实施说明](tasks/PAY-COMMON.md) 已定 E5 和 P1；第 2.1 节第 47 项、第 51 项旧写法 | 由第 2.1 节第 51 项取代（[记录 Y](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982111397)）：首购、积分包、Pro 升 Gold 在 7 天内且从这次付款起整个账户没有任何积分消耗可以退（记录 AA），按 2026-10-07 补充决定，法律允许时固定扣 6% 手续费、按币种最小单位向下取整；法律禁止时不扣费，适用性未知先核对；续费期、超过 7 天、积分已用过不退；取消用到当期结束。支付商已经发生的退款或争议事件仍不能忽略 |
+| 订阅和积分包付款成功后默认不退款，Owner 逐笔批准人工例外；不提供 7 天退款 | [DATA-ERASURE 实施说明](tasks/DATA-ERASURE.md) E5（#474）；[PAY-COMMON 实施说明](tasks/PAY-COMMON.md) 已定 E5 和 P1；第 2.1 节第 47 项、第 51 项旧写法 | 由第 2.1 节第 51 项取代（[记录 Y](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982111397)）：首购、积分包、Pro 升 Gold 在 7 天内且从这次付款起整个账户没有任何积分消耗可以退（记录 AA），按 2026-10-07 补充决定，法律允许时固定扣 6% 手续费、按币种最小单位向下取整；法律禁止时不扣费，所在地或适用性不确定时一律不扣（2026-10-22 Owner 决定）；续费期、超过 7 天、积分已用过不退；取消用到当期结束。支付商已经发生的退款或争议事件仍不能忽略 |
 | 记录 W 的 B 部分整体作为上线后任务 CHARGEBACK：年付到期提醒、拒付发起时的冻结都在上线后 | 第 2.1 节第 51 项、第 7.1 节 CHARGEBACK 行旧写法；[记录 W](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981381009) | 由第 2.1 节第 51 项取代（[记录 X](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981808905)）：银行卡年付续费前提醒和微信创始会员到期提醒共用一套、拒付事件接收和可撤回冻结，按 2026-10-09 拆分分别归 PAY-NOTIFY、PAY-DISPUTE-GUARD 上线前完成；判输处理、申诉材料导出、限制反复拒付、账单商户名仍归上线后的 CHARGEBACK |
 | Pro 升 Gold 差价交给 PAY-WAFFO 方案提出、Owner 批准 | 第 2.1 节第 51 项旧写法；[记录 J](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5972539553)；第 10 节待定表 | 由第 2.1 节第 51 项取代（[记录 Q](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980762284)）：不退差价，补发 8,970 积分并立即升级为 Gold 权益；计费周期按[记录 U](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980903324)（扣费日从升级当天重新算，原 Pro 停止续费） |
 | D1：社媒同步等放到上线后（多平台发布和数据监控不在上线范围） | 第 10 节 D1 | 由第 2.1 节第 51 项变更（[记录 Q](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980762284)）：多平台发布和数据监控提前到上线前（PUBLISH-MONITOR），其余后续阶段不变 |
@@ -2788,7 +2803,7 @@ node scripts/plan-progress.mjs --ref origin/staging
 | | EXPERT-CONSULT | 真人专家诊断的预约入口（第 2.1 节第 51 项，[记录 L](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5972732100)、[记录 Q](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980762284)、[记录 R](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980780017)）：放在报告末尾、价格页和工作室版联系入口；只面向已有数据基础的账号，卡片写"预约咨询，免费询价"，不写价格；用户填写需求和联系方式，提交后通知 Owner，由 Owner 线下跟进。不做"同意专家查看报告"的授权开关，资料由用户自己导出后发来；授权查看功能上线时不做。咨询费不进产品结账流程（Stripe 或线下收款，税务由 Owner 处理）。联系方式按个人数据处理，接入账号注销和数据保留规则 | PAYWALL（入口位置）、DATA-ERASURE | 高 | 小 / 1–2 | — |
 | | PUBLISH-MONITOR | 方向（Owner 2026-10-04，第 2.1 节第 51、52 项，[记录 Q](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980762284)）：上线前接入 Post for Me，提供多平台发布和数据监控，海外 9 个平台（TikTok、Instagram、YouTube、Facebook、X、Threads、LinkedIn、Pinterest、Bluesky），用户授权自己的账号。Pro：一键发布 + 自己作品近 30 天数据；Gold：另加对标账号监控、90 天趋势、每周自动复盘；两档都按积分计费、不限条数。**D1 范围变更**：这两项原不在上线范围（第 10 节 D1）。Post for Me 实测和条款核对通过之前，相关功能和说法不上线。2026-10-13 补充（第 2.1 节）：负责首页"复盘数据"说法；小红书、抖音用 TikHub 公开数据，另加手动导入兜底和 AI 每周复盘；SOCIAL-SYNC 并入本任务。验收与交接：[Post for Me 平台、费用、数据窗口与许可待核对项](https://github.com/Crnobog9527/GraylumAI_vercel/issues/716#issuecomment-6038093010)。 | RESEARCH-TOOLS；Post for Me 实测和条款核对（第 52 项）；其余依赖由方案定 | 高 | 待实施方案细化 | — |
 | | CHAT-AUTO-CONTEXT | 自由对话里 AI 教练自己决定查资料库（Postgres 自带检索，不用向量）、读已确认定位和对标表、读最近发布数据、调用通用研究工具（每条回答最多 3 次研究调用、12 次子调用，逐条扣积分），对话里显示工作状态（Owner 2026-10-17，第 2.1 节；见[实施方案](tasks/CHAT-AUTO-CONTEXT.md)）。上线前完成，和落地页演示一致；冻结时没验收的部分开关关闭。 | LIB-DOCS（LIB-4b）；发布数据部分依赖 PUBLISH-MONITOR；研究工具部分依赖 RESEARCH-TOOLS | 高 | 中 / 6 | — |
-| | LEGACY-CLOSE | 关入口由 #507 提前实施（2026-09-29）：`/chat` 临时跳转 `/positioning`，`/api/ai/stream` 对新请求返回 410，8 处入口改指或禁用；本任务剩余工作是删除旧代码（`/chat` 页面与组件、`/api/ai/stream`、`modelRouter`、`contextManager`、`agentSlice`、旧 `workbench` 接口等；自研内容检查 `contentModerator.ts`、`aiOutputFilter.ts`、`streamingOutput.ts`，以及它们在 `agentSlice` 和旧 `workbench` 生成里的调用，不单独开任务）和功能对照检查记录。旧检查文件随 LEGACY-CLOSE 删除；删除前核实必要的凭证保护和用户数据隔离不受影响，不要求迁移旧的通用 PII 正则过滤。按 Owner 2026-09-29 决定不再提供旧对话只读查看入口（staging 和正式环境都没有真实用户，上线前清空数据），旧链接直接跳到 `/positioning`；旧对话不迁移、不删除 | AC-4 接管自由对话；入口改指（#507）；UI-MODEL、UI-B、UI-C、UI-FINISH 交付；并完成一次功能对照检查（旧 `/chat` 的模型选择、引用、附件和常用操作在新工作区都有对应，或明确记录为不再提供） | 高 | 中 / 3–4 | — |
+| | LEGACY-CLOSE | 关入口由 #507 提前实施（2026-09-29）：`/chat` 临时跳转 `/positioning`，`/api/ai/stream` 对新请求返回 410，8 处入口改指或禁用；本任务剩余工作是删除旧代码（`/chat` 页面与组件、`/api/ai/stream`、`modelRouter`、`contextManager`、`agentSlice`、旧 `workbench` 接口等；自研内容检查 `contentModerator.ts`、`aiOutputFilter.ts`、`streamingOutput.ts`，以及它们在 `agentSlice` 和旧 `workbench` 生成里的调用，不单独开任务）和功能对照检查记录。旧检查文件随 LEGACY-CLOSE 删除；删除前核实必要的凭证保护和用户数据隔离不受影响，不要求迁移旧的通用 PII 正则过滤。按 Owner 2026-09-29 决定不再提供旧对话只读查看入口（staging 和正式环境都没有真实用户，上线前清空数据）；旧链接原先直接跳到 `/positioning`，2026-10-21 起不再跳转、访问时 404（见第 2.1 节 2026-10-21 记录）；旧对话不迁移、不删除 | AC-4 接管自由对话；入口改指（#507）；UI-MODEL、UI-B、UI-C、UI-FINISH 交付；并完成一次功能对照检查（旧 `/chat` 的模型选择、引用、附件和常用操作在新工作区都有对应，或明确记录为不再提供） | 高 | 中 / 3–4 | — |
 | | POSITIONING-GATE | 定位前置检查（第 2.1 节 2026-10-12 决定）：Skill 后台“与社交媒体相关”勾选；无定位用户为自己账号做社媒运营的请求（含自由对话语义判断、无关 Skill 中途转社媒；社媒常识问答等照常回答）不继续并引导定位或“我已有定位”导入。语义判断用模型完成：Decisions 先判断、主模型兜底；被拦的回合（含主模型兜底判为拦截）不扣用户积分，由 Graylum 承担。 | MODEL-IDENTITY-GUARD（与之排队改同一块 runtime） | 高 | 中 / 2–3 | — |
 | | MODEL-IDENTITY-GUARD | 模型身份保护（第 2.1 节 2026-10-12 决定，Fusion 评审团例外、后台一键开关）：身份说明（指令）、自我介绍式泄露的回答替换、界面与接口去除真实模型名；不做输入侧拦截，身份询问照常调用模型（Owner 2026-10-12 补充）；品牌话术由 Owner 确认，不声称自研。上线前完成。 | RUNTIME-PROD（与在途 runtime 执行改动排队） | 高 | 中 / 3–4 | — |
 | | SKILL-I18N-HOOK | Skill 多语言对照接口（第 2.1 节 2026-10-12 多语言决定）：Skill 内核保持简体中文唯一原版；后台可为用户可见文字（步骤名、字段名、提问卡选项、报告标题）配英文对照；AI 按用户语言回答。产品界面英文化、语言提示条归上线后的 I18N-EN。 | MODEL-IDENTITY-GUARD、POSITIONING-GATE（同改 Skill 编辑器与 AI 指令，排在其后） | 高 | 小 / 1–2 | — |

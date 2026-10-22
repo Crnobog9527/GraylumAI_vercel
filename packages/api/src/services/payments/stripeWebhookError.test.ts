@@ -21,4 +21,16 @@ describe('Stripe webhook error classification', () => {
     const error: { cause?: unknown } = {}; error.cause = error;
     expect(stripeWebhookErrorCode(error)).toBe('PAY_COMMON_WEBHOOK_HANDLER_FAILED');
   });
+  it.each([
+    new Error('PAY_STRIPE_TEST_CLOCK_NOT_READY'),
+    new Error('wrapper', { cause: { code: 'PAY_STRIPE_TEST_CLOCK_NOT_READY' } }),
+  ])('preserves the retryable clock classification through cause wrappers', error => {
+    expect(stripeWebhookErrorCode(error)).toBe('PAY_STRIPE_TEST_CLOCK_NOT_READY');
+  });
+  it('does not let a retryable wrapper hide conflicting evidence', () => {
+    const error = new Error('PAY_STRIPE_TEST_CLOCK_NOT_READY', {
+      cause: new Error(PAYMENT_EVIDENCE_CONFLICT),
+    });
+    expect(stripeWebhookErrorCode(error)).toBe(PAYMENT_EVIDENCE_CONFLICT);
+  });
 });

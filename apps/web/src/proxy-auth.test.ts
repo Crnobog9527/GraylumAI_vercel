@@ -49,7 +49,7 @@ describe('proxy login requirement on every host', () => {
     const cases = [
       ['https://auth-staging.graylum.com/app/profile?tab=x', 'https://auth-staging.graylum.com/verify-email?redirect=%2Fapp%2Fprofile%3Ftab%3Dx'],
       // An old return target is moved under /app before it is passed on.
-      ['https://auth-staging.graylum.com/login?redirect=%2Fchat', 'https://auth-staging.graylum.com/verify-email?redirect=%2Fapp%2Fpositioning'],
+      ['https://auth-staging.graylum.com/login?redirect=%2Fpositioning', 'https://auth-staging.graylum.com/verify-email?redirect=%2Fapp%2Fpositioning'],
       ['http://localhost:3000/app/profile', 'http://localhost:3000/verify-email?redirect=%2Fapp%2Fprofile'],
       ['https://www.graylum.com/login?redirect=%2Fprofile', 'https://www.graylum.com/verify-email?redirect=%2Fapp%2Fprofile'],
     ];

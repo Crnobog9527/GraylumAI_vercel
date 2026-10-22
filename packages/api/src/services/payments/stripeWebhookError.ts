@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 export const PAYMENT_EVIDENCE_CONFLICT = 'PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT';
+export const STRIPE_TEST_CLOCK_NOT_READY = 'PAY_STRIPE_TEST_CLOCK_NOT_READY';
 
 // Exact local validation codes only: transport, database availability, and missing
 // mappings are retryable operational failures, not evidence of conflicting money facts.
@@ -19,13 +20,15 @@ const evidenceErrors = new Set([
 export function stripeWebhookErrorCode(error: unknown): string {
   const seen = new Set<object>();
   let current = error;
+  let clockNotReady = false;
   for (let depth = 0; depth < 8 && current && typeof current === 'object'; depth++) {
     if (seen.has(current)) break;
     seen.add(current);
     const entry = current as { message?: unknown; code?: unknown; cause?: unknown };
     if ((typeof entry.message === 'string' && evidenceErrors.has(entry.message))
       || (typeof entry.code === 'string' && evidenceErrors.has(entry.code))) return PAYMENT_EVIDENCE_CONFLICT;
+    if (entry.message === STRIPE_TEST_CLOCK_NOT_READY || entry.code === STRIPE_TEST_CLOCK_NOT_READY) clockNotReady = true;
     current = entry.cause;
   }
-  return 'PAY_COMMON_WEBHOOK_HANDLER_FAILED';
+  return clockNotReady ? STRIPE_TEST_CLOCK_NOT_READY : 'PAY_COMMON_WEBHOOK_HANDLER_FAILED';
 }

@@ -4,7 +4,7 @@
  * This code is proprietary and confidential.
  */
 
-import { APP_PREFIX, MOVED_APP_SEGMENTS, RETIRED_APP_DESTINATION, RETIRED_APP_PATHS } from './app-paths';
+import { APP_PREFIX, MOVED_APP_SEGMENTS, SEGMENTS_WITHOUT_INDEX } from './app-paths';
 
 // next.config redirects for the single host (E1, SEO_GEO_SPEC sections 2 and 15). They run before the proxy
 // and before any page, so an old address never reaches the login check.
@@ -27,12 +27,12 @@ export type ConfigRedirect = { source: string; destination: string; permanent: b
 /** Redirects on every host. Next.js keeps the query string; permanent ones are 308 and keep the request method. */
 export function buildPathRedirects(): ConfigRedirect[] {
   return [
-    // LEGACY-CLOSE: the old /chat and /workbench pages are deleted; their links land on positioning, reversibly.
-    ...RETIRED_APP_PATHS.map(source => ({ source, destination: RETIRED_APP_DESTINATION, permanent: false })),
     // Logged-in pages moved under /app. The folder itself has its own rule and subpaths use ":path+": on Vercel an
     // empty ":path*" leaves a trailing slash ("/app/profile/"), which costs a second 308 to strip it.
+    // A folder without a page of its own (/workbench) only moves its subpages; the folder itself answers 404.
     ...MOVED_APP_SEGMENTS.flatMap(segment => [
-      { source: `/${segment}`, destination: `${APP_PREFIX}/${segment}`, permanent: true },
+      ...(SEGMENTS_WITHOUT_INDEX.includes(segment)
+        ? [] : [{ source: `/${segment}`, destination: `${APP_PREFIX}/${segment}`, permanent: true }]),
       { source: `/${segment}/:path+`, destination: `${APP_PREFIX}/${segment}/:path+`, permanent: true },
     ]),
     // The public home page is served at "/" (the proxy rewrites it to this page), so its own address goes there.

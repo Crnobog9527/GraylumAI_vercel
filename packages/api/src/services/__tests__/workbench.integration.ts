@@ -439,13 +439,10 @@ it('ADMIN: browser imports a Skill folder, configures steps, publishes the confi
     await expect.poll(() => page.getByRole('dialog').count(), { timeout: 30000 }).toBe(0);
     const module = (await sql.query('select id,skill_id from modules where title=$1', [input.module.title])).rows[0];
     expect(module.skill_id).toBeTruthy();
-    // LEGACY-CHAT-OFF (#507): /chat no longer opens module conversations. The browser-configured
-    // steps must still be the published workflow, and the old module link must land on positioning.
+    // LEGACY-CHAT-OFF (#507): /chat no longer opens module conversations, and since 2026-10-21 the old address is
+    // gone entirely (404). The browser-configured steps must still be the published workflow.
     const configured = (await sql.query('select workflow from artifact_workflows where module_id=$1 and enabled',[module.id])).rows[0].workflow;
     expect(configured.steps.map((step: any) => step.title)).toEqual(['需求确认', '定位成果']);
-    await page.goto(app + '/chat?module=' + module.id);
-    await page.waitForURL(u => u.pathname === '/app/positioning', { timeout: 30000 });
-    await page.screenshot({ path: output + '/admin-skill-legacy-entry.png' });
     configured.planResources=['SKILL.md'];
     configured.steps.forEach((step: any,i:number)=>{step.information=[{id:'goal',title:'Goal '+i,required:true,profileKey:'goal_'+i}];});
     const original = await db.rpc('admin_read_skill_module',{p_actor_id:admin.id,p_module_id:module.id});
