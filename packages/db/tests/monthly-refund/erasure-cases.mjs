@@ -6,13 +6,16 @@ export async function checkErasureProof(db, good) {
   assert.equal(rows[0].ok,expected,label);
  };
  await check(good,true,'complete original terminal evidence');
- for(const path of [[],['terms'],['terms','snapshot'],['started'],['recordedRefund']]){
+ for(const path of [[],['terms'],['terms','snapshot'],['started'],['recordedRefund'],['renewalEvidence']]){
   const source=path.reduce((node,key)=>node[key],good);
   for(const key of Object.keys(source)){
    for(const mode of ['missing','null','wrong_type']){
     if(mode==='null'&&path[0]==='started'&&source[key]===null)continue;
     const broken=structuredClone(good);const object=path.reduce((node,k)=>node[k],broken);
     if(mode==='missing')delete object[key];else object[key]=mode==='null'?null:{unexpected:true};
+    if(path.length===0&&key==='renewalEvidence'&&mode==='missing'){
+     await check(broken,true,'legacy monthly proof without optional renewal evidence');continue;
+    }
     await check(broken,false,`${path.join('.')}.${key}: ${mode}`);
    }
   }
@@ -32,7 +35,7 @@ export async function checkErasureProof(db, good) {
  const live=structuredClone(good);live.terms.mode='live';await check(live,true,'terms.mode: live');
  await mutate(['recordedRefund','id'],'  ','blank cash identity');
  await mutate(['terms','snapshot','price'],69,'numeric snapshot price');
- await mutate(['terms','snapshot','billing_cycle'],'yearly','wrong snapshot scope');
+ await mutate(['terms','snapshot','billing_cycle'],'one_time','wrong snapshot scope');
  await mutate(['terms','snapshot','currency'],'cny','wrong snapshot currency');
  await mutate(['claimedAt'],'2000-01-01T00:00:00Z','claim before approval');
  await mutate(['started','refund'],'2000-01-01T00:00:00Z','stage before claim');

@@ -19,7 +19,11 @@ export async function runCases({db,Client,connectionString,report}) {
  const fact=(f,i,status='succeeded')=>({id:'re_'+f.order,intentId:i.id,orderId:f.order,chargeId:f.terms.chargeId,
   paymentIntentId:f.terms.paymentIntentId,currency:'usd',amount:6486,merchant:'acct_fixture',mode:'test',status});
  const result=async(f,i,r)=>(await one('select pay_common_monthly_refund_result($1,$2,$3) i',[f.order,i.id,r])).i;
- const finish=async(f,i,e)=>(await one('select pay_common_monthly_refund_finish($1,$2,$3,$4) i',[f.actor,f.order,i.id,e])).i;
+ const finish=async(f,i,e)=>{
+  await db.query('SET ROLE service_role');
+  try{return (await one('select pay_common_monthly_refund_finish($1,$2,$3,$4) i',[f.actor,f.order,i.id,e])).i;}
+  finally{await db.query('RESET ROLE');}
+ };
  for(const level of ['pro','gold']) {
   const f=await fx(level);let i=await approve(f);
   assert.equal((await approve(f)).id,i.id);

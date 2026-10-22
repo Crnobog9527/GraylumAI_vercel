@@ -84,6 +84,14 @@
 
 ### 2.1 Owner 的新决定（2026-09-27 起，2026-10-22 更新）
 
+**2026-10-22：退款所在地不确定时不扣手续费**
+
+来源：Owner 本轮 PAY-REFUND 任务指令（实施交接 [#1248](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1248)）。Owner 原话：
+
+> 法律允许时扣 6%，所在地不确定一律不扣（Owner 10-22 决定）；续费期不退。
+
+补充第 51 项退款规则：只有明确确认适用法律允许时才扣 6%；所在地不能确定按不扣执行，不因法律适用性未知而阻断符合条件的退款。取代此前该未知状态必须先确定能否扣费再报价的执行口径；首购七天内、付款后全账户未用积分、税全退、续费不退及其他资格和证据规则保持。
+
 **2026-10-22：PAY-FAILOVER 改为0335，先等待0333/0334前置合并**
 
 Owner原话（PAY-FAILOVER本聊天）：
@@ -2296,7 +2304,7 @@ Owner 原话（本会话，记录于 [#741](https://github.com/Crnobog9527/Grayl
 | 开户赠送 = Owner 实测后按公式定；积分包 $9.90 以外的档位待定；积分包会员价四舍五入到分 | 第 2.1 节第 50 项"数值怎么定"；第 51 项旧写法；记录 S | 由第 2.1 节第 51 项取代（[记录 S](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980831854)、[记录 T](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980843167)）：注册赠送 500 积分；积分包三档 $9.90 / $29.90 / $99.90；会员价向下取整到 $0.10；均为先定，实测后可能调整 |
 | 创始会员只限银行卡订阅、微信一次性不参加；年付标签"最高省 40%"只在银行卡付款时显示 | 第 2.1 节第 51 项旧写法；记录 E、F、J、P | 由第 2.1 节第 51 项取代（[记录 V](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981192614)）：前 50 位 Gold 年付会员，银行卡和微信都算；名额没卖完时不论付款方式都写"最高省 40%" |
 | 全额退款放回创始名额（记录 J）；以及本 PR 曾统一的"全额退款并且 Waffo 确认创始订阅已取消后才放回"、#626 方案前置事项第 2 条的放回条件 | 第 2.1 节第 51 项、第 7.1 节 PAY-WAFFO 行旧写法；[记录 J](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5972539553) | 由第 2.1 节第 51 项取代（[记录 V](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981192614)）：已售出的名额在任何情况下都不放回；例外退款立即结束创始身份 |
-| 订阅和积分包付款成功后默认不退款，Owner 逐笔批准人工例外；不提供 7 天退款 | [DATA-ERASURE 实施说明](tasks/DATA-ERASURE.md) E5（#474）；[PAY-COMMON 实施说明](tasks/PAY-COMMON.md) 已定 E5 和 P1；第 2.1 节第 47 项、第 51 项旧写法 | 由第 2.1 节第 51 项取代（[记录 Y](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982111397)）：首购、积分包、Pro 升 Gold 在 7 天内且从这次付款起整个账户没有任何积分消耗可以退（记录 AA），按 2026-10-07 补充决定，法律允许时固定扣 6% 手续费、按币种最小单位向下取整；法律禁止时不扣费，适用性未知先核对；续费期、超过 7 天、积分已用过不退；取消用到当期结束。支付商已经发生的退款或争议事件仍不能忽略 |
+| 订阅和积分包付款成功后默认不退款，Owner 逐笔批准人工例外；不提供 7 天退款 | [DATA-ERASURE 实施说明](tasks/DATA-ERASURE.md) E5（#474）；[PAY-COMMON 实施说明](tasks/PAY-COMMON.md) 已定 E5 和 P1；第 2.1 节第 47 项、第 51 项旧写法 | 由第 2.1 节第 51 项取代（[记录 Y](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5982111397)）：首购、积分包、Pro 升 Gold 在 7 天内且从这次付款起整个账户没有任何积分消耗可以退（记录 AA），按 2026-10-07 补充决定，法律允许时固定扣 6% 手续费、按币种最小单位向下取整；法律禁止或所在地不确定时不扣费（2026-10-22 Owner 决定，见本节最新记录）；续费期、超过 7 天、积分已用过不退；取消用到当期结束。支付商已经发生的退款或争议事件仍不能忽略 |
 | 记录 W 的 B 部分整体作为上线后任务 CHARGEBACK：年付到期提醒、拒付发起时的冻结都在上线后 | 第 2.1 节第 51 项、第 7.1 节 CHARGEBACK 行旧写法；[记录 W](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981381009) | 由第 2.1 节第 51 项取代（[记录 X](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5981808905)）：银行卡年付续费前提醒和微信创始会员到期提醒共用一套、拒付事件接收和可撤回冻结，按 2026-10-09 拆分分别归 PAY-NOTIFY、PAY-DISPUTE-GUARD 上线前完成；判输处理、申诉材料导出、限制反复拒付、账单商户名仍归上线后的 CHARGEBACK |
 | Pro 升 Gold 差价交给 PAY-WAFFO 方案提出、Owner 批准 | 第 2.1 节第 51 项旧写法；[记录 J](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5972539553)；第 10 节待定表 | 由第 2.1 节第 51 项取代（[记录 Q](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980762284)）：不退差价，补发 8,970 积分并立即升级为 Gold 权益；计费周期按[记录 U](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980903324)（扣费日从升级当天重新算，原 Pro 停止续费） |
 | D1：社媒同步等放到上线后（多平台发布和数据监控不在上线范围） | 第 10 节 D1 | 由第 2.1 节第 51 项变更（[记录 Q](https://github.com/Crnobog9527/GraylumAI_vercel/pull/618#issuecomment-5980762284)）：多平台发布和数据监控提前到上线前（PUBLISH-MONITOR），其余后续阶段不变 |

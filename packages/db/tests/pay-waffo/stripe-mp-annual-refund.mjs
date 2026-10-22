@@ -101,6 +101,15 @@ export async function stripeMpAnnualRefundCases({admin,service,connect}) {
  assert.equal((await one('SELECT pay_waffo_grant_period($1,2) n',[cn.order])).n,0,'held annual source does not release');
  await done(cn,i);
  assert.equal((await one('SELECT credits FROM profiles WHERE id=$1',[cn.user],admin)).credits,0);
+ const issued=await buyer('pro','standard','card_cn',40);
+ await service.query('SELECT pay_waffo_grant_period($1,2)',[issued.order]);
+ issued.terms.credits=issued.credits=Number((await one(
+  'SELECT sum(credits_granted) n FROM subscription_credit_grants WHERE source_order_id=$1',[issued.order],admin)).n);
+ assert.equal(issued.credits,6960,'two of twelve periods have actually been issued');
+ issued.terms.submittedAt=new Date(Date.parse(issued.terms.paidAt)+86400000).toISOString();
+ await admin.query('UPDATE tickets SET created_at=$2 WHERE id=$1',[issued.terms.ticketId,issued.terms.submittedAt]);
+ await done(issued,await claim(issued,await approve(issued)));
+ assert.equal((await one('SELECT credits FROM profiles WHERE id=$1',[issued.user],admin)).credits,0);
  const card=await buyer('gold','standard','card');await done(card,await claim(card,await approve(card)));
  const used=await buyer();
  await admin.query(`INSERT INTO credit_transactions(user_id,amount,type,ledger_type,counts_as_spend,balance_before,balance_after)
@@ -154,7 +163,7 @@ export async function stripeMpAnnualRefundCases({admin,service,connect}) {
  const renew=await termsFor(old.user,renewal.orderId,renewalPaid);
  await assert.rejects(()=>approve(renew),/PAY_MONTHLY_SCOPE_OR_STATE/);
  await admin.query("UPDATE system_settings SET value=$1 WHERE key='payment_method_routes'",[{...current,version:version+1}]);
- return ['annual-first-purchase-card-cn','annual-first-purchase-managed-tax','annual-used-rejected','annual-seven-days-rejected',
+ return ['annual-first-purchase-card-cn','annual-first-purchase-managed-tax','annual-only-issued-two-months-clawed-back','annual-used-rejected','annual-seven-days-rejected',
   'annual-founder-refund-unlisted-sold-retained','annual-upgrade-restores-paid-pro','annual-concurrent-approval-one-intent',
   'annual-repeat-finish-one-clawback','annual-provider-cancel-evidence','annual-erasure-proof','annual-renewal-rejected',
   'annual-unknown-cash-keeps-manual-hold'];
