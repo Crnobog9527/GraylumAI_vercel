@@ -20,7 +20,7 @@ type Order = { id: string; user_id: string; payment_channel: string; payment_mod
   payment_method: string | null; payment_amount_facts: Array<{ kind?: string; amount?: string; evidence_ref?: string }> | null };
 export type RefundRequest = { orderId: string; ticketId: string; feePermitted: 'confirmed' | 'not_permitted';
   feeEvidence: string };
-const id = (value: string | { id: string } | null) => typeof value === 'string' ? value : value?.id;
+const id = (value: string | { id: string } | null | undefined) => typeof value === 'string' ? value : value?.id;
 
 async function rpc(db: Db, name: string, args: Record<string, unknown>) {
   const result = await db.rpc(name, args);
