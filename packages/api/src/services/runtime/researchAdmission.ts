@@ -84,13 +84,10 @@ export async function admitResearchTurn(input: ResearchAdmissionInput): Promise<
   if (subcalls < 1) return reject('CALL_LIMIT', {subcalls});
   if (room < 1) return reject('TOOL_LIMIT');
   const now = input.now?.() ?? new Date();
-  let prices: Awaited<ReturnType<typeof readProviderPrices>>;
-  let thresholds: Set<string> | null;
-  try { prices = await readProviderPrices(input.admin); }
-  catch { return reject('PRICE_CONFIG_UNAVAILABLE'); }
-  try { thresholds = await thresholdKeys(input.admin); }
-  catch { return reject('THRESHOLD_CONFIG_UNAVAILABLE'); }
-  if (!thresholds) return reject('THRESHOLD_CONFIG_UNAVAILABLE');
+  const [priceRead, thresholdRead] = await Promise.allSettled([readProviderPrices(input.admin), thresholdKeys(input.admin)]);
+  if (priceRead.status === 'rejected') return reject('PRICE_CONFIG_UNAVAILABLE');
+  if (thresholdRead.status === 'rejected' || !thresholdRead.value) return reject('THRESHOLD_CONFIG_UNAVAILABLE');
+  const prices = priceRead.value, thresholds = thresholdRead.value;
   const priced = new Map<string, { entry: ResearchToolsConfig['routes'][number]; policy: ToolCallPolicy }>();
   for (const entry of config.routes) {
     const skipped = (reason: ResearchRouteRejection) => {
