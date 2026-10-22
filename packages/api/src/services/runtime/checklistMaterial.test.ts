@@ -5,7 +5,8 @@
  */
 import {expect,it} from 'vitest';
 import {captureHostContext} from '../opc/captureContext';
-import {hostTurnInput} from './hostTurn';
+import {hostTurnInput,projectHostTurnItem} from './hostTurn';
+import {projectSupersededScopeItem} from './context';
 import {checklistMaterial} from './checklistMaterial';
 
 function fixture(){
@@ -61,4 +62,19 @@ it('input assembly uses the same projection and preserves user text as data',()=
  expect(wire.scopeMaterial).toEqual(checklistMaterial(material,host));
  expect(checklistMaterial(undefined,host)).toBeUndefined();
  expect(checklistMaterial({unrecognized:'unchanged'},host)).toEqual({unrecognized:'unchanged'});
+});
+it('historical comparisons keep deduplicated facts as data after removing old host authority',()=>{
+ const {host,material}=fixture();
+ const original={role:'user',content:hostTurnInput('Earlier request',material,host)};
+ for(const preserve of [true,false]){
+  const current=preserve?material:{...material,hash:'different-at-same-revision'};
+  const projected=projectHostTurnItem(original,current,preserve,projectSupersededScopeItem) as typeof original;
+  const message=JSON.parse(projected.content);
+  expect(message).not.toHaveProperty('hostTurnContext');
+  expect(message.historicalChecklistData).toEqual(host.checklist);
+  expect(message.userRequest).toBe('Earlier request');
+ }
+ const superseded=projectHostTurnItem(original,{...material,revision:12},false,projectSupersededScopeItem) as typeof original;
+ expect(JSON.parse(superseded.content)).not.toHaveProperty('historicalChecklistData');
+ expect(original.content).toBe(hostTurnInput('Earlier request',material,host));
 });
