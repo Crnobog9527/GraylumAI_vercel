@@ -5,6 +5,7 @@
 // claim against it), a start threshold for this phase, and on staging the same entry in the test window.
 // The run's call ceiling counts the extra model call that reads a tool result plus every supplier subcall.
 import { z } from 'zod';
+import type {ResearchCapacity} from './researchCapacity';
 import type {ResearchAdmissionRejection, ResearchRejectionObserver, ResearchRouteRejection} from './researchAdmissionDiagnostics';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { readProviderPrices, resolveProviderPrice } from '../billingProviderPrices';
@@ -51,6 +52,7 @@ export interface ResearchAdmissionInput {
   now?: () => Date;
   onRejected?: ResearchRejectionObserver;
   requiredTools?: readonly ResearchToolName[];
+  capacity?: (toolBytes: number) => ResearchCapacity;
 }
 
 export interface ResearchAdmission { research: FrozenResearchTurn; tools: ResearchToolName[]; policies: ToolCallPolicy[] }
@@ -136,7 +138,9 @@ export async function admitResearchTurn(input: ResearchAdmissionInput): Promise<
     return reject('REQUIRED_TOOLS_UNAVAILABLE', {...routeDetails, requiredTools: input.requiredTools.length, eligibleTools: tools.length});
   if (tools.length > room) return reject('TOOL_LIMIT', {eligibleTools: tools.length});
   const fastOnly = fastSearchOnly({ routes: [...priced.values()].map(({ entry }) => entry) });
-  if (!input.fits(researchToolBytes(tools, fastOnly) + RESEARCH_RESULT_RESERVE_BYTES)) return reject('CONTEXT_CAPACITY');
+  const toolBytes = researchToolBytes(tools, fastOnly);
+  if (!input.fits(toolBytes + RESEARCH_RESULT_RESERVE_BYTES))
+    return reject('CONTEXT_CAPACITY', {capacity: input.capacity?.(toolBytes)});
   const used = [...priced.values()].filter(({ entry }) => entry.platform === 'web'
     ? (entry.kind === 'web_fetch' ? offered.has('web_fetch') : offered.has('web_search'))
     : fetchable.includes(entry.platform) && (BENCHMARK_ROUTE_KINDS[entry.platform]!.kinds.includes(entry.kind as never)
@@ -182,7 +186,8 @@ export const sentHostBytes = (value: unknown) => Buffer.byteLength(JSON.stringif
  * to read a tool result, the subcall allowance, and the frozen tool prices. false = nothing changes.
  */
 export async function attachResearchTurn(input: Omit<ResearchAdmissionInput, 'modelCalls' | 'offeredTools' | 'maxTools'
-  | 'defaultMultiplier' | 'runMultiplier' | 'deadline'> & { context: MentorContext; billing: FrozenPaygRun;
+  | 'defaultMultiplier' | 'runMultiplier' | 'deadline' | 'capacity'> & { context: MentorContext; billing: FrozenPaygRun;
+  capacity?: (toolBytes: number, hostDeltaBytes: number, inputBytes?: number) => ResearchCapacity;
   /** RT-6: the research host block (cards, benchmark table) joins the turn only with the tools, sized with them. */
   settings?: Promise<SettingsRead>; actorId?: string; sessionId?: string }): Promise<boolean> {
   const { context, billing } = input;
@@ -203,6 +208,7 @@ export async function attachResearchTurn(input: Omit<ResearchAdmissionInput, 'mo
     ? await researchHost(context.hostTurnContext, input.admin, input.actorId, input.sessionId, input.settings) : context.hostTurnContext;
   const hostBytes = host && host !== context.hostTurnContext ? sentHostBytes(host) - sentHostBytes(context.hostTurnContext) : 0;
   const admitted = await admitResearchTurn({ ...input, fits: extra => input.fits(extra + hostBytes, raised),
+    capacity: input.capacity ? tools => input.capacity!(tools, hostBytes, raised) : undefined,
     modelCalls: billing.limits.maxCalls, offeredTools: context.tools.length,
     maxTools: primary.payg.maxTools, defaultMultiplier: billing.rules.billingUnit.defaultMultiplier,
     runMultiplier: billing.rules.multiplier, deadline: billing.limits.deadline });

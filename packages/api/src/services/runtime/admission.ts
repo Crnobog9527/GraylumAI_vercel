@@ -57,7 +57,9 @@ import {LIBRARY_RETRIEVAL_CALLS,admitLibraryReferences,admitLibraryRetrieval,can
 import {libraryReserveBytes,readSourceSlots,sourceReadFlags,throwLibraryRefusal} from './libraryAdmission';
 import {admitContentSource,isSqlStagingRefusal,type ContentSourceKind} from './contentSource';
 import {fitsCapacity} from './researchAdmission';
-import {guardResearchAdmission} from './researchAdmissionGuard';
+import {researchCapacity} from './researchCapacity';
+import {RESEARCH_RESULT_RESERVE_BYTES} from './researchTurn';
+import {guardResearchAdmission,requiresBenchmarkResearch} from './researchAdmissionGuard';
 import {organizerSelection} from './organizerSelection';
 import {readAdmissionConfiguration} from './admissionConfiguration';
 const uuid=z.string().uuid();
@@ -149,7 +151,6 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    if(policy.real&&(input.network!=='deny'||policy.searchEnabled))throw new Error('RUNTIME_REAL_SEARCH_DISABLED');
    if(input.network==='require_latest'&&!policy.searchEnabled)throw new Error('RUNTIME_SEARCH_UNAVAILABLE');
    let session=await query('runtime_session_context',{p_session_id:input.sessionId});
-   // Resolve replay before model or revision freshness changes produce another budget.
    const replay=await query('runtime_admission_replay',{p_request_id:input.requestId,p_request:request});
    if(replay)return replay;
    const configuration=readAdmissionConfiguration(admin),settings=readAdmissionSettings(admin,configuration);
@@ -166,7 +167,6 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    const leaveRateLimit=currentRequestTiming()?.enter('rateLimit');
    try{requireNewWork(await newWorkGate(admin,runtimeGateEnvironment(policy.real)).message(actorId,settings));}
    finally{leaveRateLimit?.();}
-   // Only users without a confirmed positioning are checked, after the rate limit.
    const gateState=await positioning;
    const gated=Boolean(gateState&&!gateState.positioned);
    const capped=gated&&gateState!.refusals24h>=POSITIONING_REFUSAL_CAP;
@@ -177,6 +177,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     hostParsed.data.opening!==isOpeningInput(input.input)))throw new Error('RUNTIME_CONTEXT_INVALID');
    const hostTurnContext=policy.hostTurnContext===undefined?undefined:hostParsed.data;
    const stepSummary=Boolean(hostTurnContext?.stepSummary);
+   if(policy.researchTools&&hostTurnContext&&!hostTurnContext.opening&&!stepSummary&&requiresBenchmarkResearch(hostTurnContext))
+    hostTurnContext.materialProjection='checklist-dedup-v1';
    if(stepSummary&&(input.input!==STEP_SUMMARY_INPUT||input.organizeAfter||hostTurnContext!.opening))
     throw new Error('RUNTIME_CONTEXT_INVALID');
    const historySelection=hostTurnContext?freezeHistorySelection():undefined;
@@ -282,7 +284,6 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
      ...(policy.organizerInput?{input:z.string().max(24000).parse(policy.organizerInput)}:{}),
     };
    }
-   // SDK turns count model requests only; paid search uses another BILL2 call, attached organization stays in this run.
    let candidates=input.selection.kind==='auto'?await discoverRuntimeCandidates(
     user,admin,{...policy,inputBytes,maxOutputTokens:configuredOutput??policy.maxOutputTokens,excludeSocial:gated,
      ...(policy.real?{resolveCapacity:(row:Record<string,unknown>)=>{const q=realModel(row);return {inputLimit:Math.min(inputBytes,q.inputLimit),outputLimit:outputCapacity(row,Infinity,configuredOutput)};}}:{})}):[];
@@ -341,7 +342,6 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    const postsBudget=await ownPostsBudget(admin,await actor(),ownPosts,maxCalls,fitsWith);
    ownPosts=postsBudget.on;maxCalls=postsBudget.calls;libraryBytes+=postsBudget.bytes;
    const strategyGuide=workspaceContext&&fitsWith(workspaceStrategyReserve(maxCalls));
-   // The executor sizes a selected Skill with these exact tool descriptions plus the same cache/marker overhead.
    if(candidates.length)candidates=await fittingCandidates(candidates,candidate=>activateCandidateWithSource(user,admin,candidate,brandIdentity),
     {input:currentInput,inputBytes,toolBytes:candidateToolBytes(libraryReferences,sourceTools,workspaceContext,libraryRetrieval)+
      (historySelection?.markerReserveBytes??(promptCache?PROMPT_CACHE_OVERHEAD_BYTES:0)),
@@ -366,7 +366,6 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    // A2: a chosen derived-content Skill reads its saved source in a topic window; refused or too large before any charge.
    const sourceContent=chosenSource&&await admitContentSource(admin,{actorId,sessionId:input.sessionId,kind:chosenSource,
     fits:bytes=>requireCapacity(instructions+positioningRule+'x'.repeat(bytes),Boolean(skillFile))});
-   // New mentor turns use the interactive format (replays returned earlier); a host-opened mentor turn gets no card.
    const opening=Boolean(mentorStream&&isOpeningInput(input.input));
    if(mentorStream&&candidates.length)throw new Error('RUNTIME_MODEL_DENIED');
    let reasoning:ReasoningPolicy|undefined;
@@ -395,8 +394,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     ...(ownPosts?{ownPosts:true as const}:{}),
     ...(positioningFallback?{positioningGate:POSITIONING_FALLBACK}:{}),replyLanguage:REPLY_LANGUAGE,...(sourceContent?{sourceContent}:{}),
     modelId,...(attachedOrganizer?{attachedOrganizer}:{}),maxOutputTokens,maxTurns:primaryTurns,historyItems,network:input.network,
-    // Freeze the purpose ceiling; each selected model keeps its own call-policy limit.
-    ...(budgets||policy.reportGeneration?{purposeBudget:{purpose,inputBytes,historyItems}}:{}),
+     ...(budgets||policy.reportGeneration?{purposeBudget:{purpose,inputBytes,historyItems}}:{}),
     ...(skillFile?{skillFile,skillFileReserve}:{}),...(libraryReferences.length?{libraryReferences}:{}),
     ...sourceReadFlags(libraryRetrieval,sourceTools),
     ...(historyRead?{historyRead:{version:MENTOR_HISTORY_VERSION,reserve:MENTOR_HISTORY_RESERVE_BYTES}}:{}),
@@ -467,9 +465,11 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    }
    if(policy.researchTools&&mentorStream&&!opening&&hostTurnContext&&!stepSummary&&
     await guardResearchAdmission({admin,real:policy.real,context,billing,settings,actorId,sessionId:input.sessionId,requestId:input.requestId,
+     capacity:(researchToolsBytes,researchHostDeltaBytes,bytes)=>researchCapacity({instructions:instructions+positioningRule,
+      currentInput,inputBudgetBytes:limitOf(bytes),existingToolsBytes:admissionToolBytes(Boolean(skillFile),historyRead),
+      researchToolsBytes,researchHostDeltaBytes,resultReserveBytes:RESEARCH_RESULT_RESERVE_BYTES}),
      fits:(extra,bytes)=>fitsCapacity(()=>requireCapacity(instructions+positioningRule,Boolean(skillFile),currentInput,historyRead,extra,bytes))}))
     billing.sourceHash=createHash('sha256').update(JSON.stringify(context)).digest('hex');
-   // Both SQL CHECKs measure jsonb::text; validate before atomically admitting the execution/reservation.
    await requireAllowedInput({actorId,sessionId:input.sessionId,requestId:input.requestId,
     text:input.input,opening});
    capReviewAdmission(context,billing,policy.weeklyReview);assertFrozenPayloads(context,billing);

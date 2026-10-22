@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type {ResearchToolsConfig} from '../research/vendors/config';
+import type {ResearchCapacity} from './researchCapacity';
 
 export type ResearchRejectionReason =
   | 'CONFIG_DISABLED' | 'CONFIG_MISSING' | 'CONFIG_UNAVAILABLE' | 'CALL_LIMIT' | 'TOOL_LIMIT' | 'MESSAGE_LIMIT'
@@ -24,6 +25,7 @@ export interface ResearchAdmissionRejection {
   eligibleTools?: number;
   requiredMessages?: number;
   maxMessages?: number;
+  capacity?: ResearchCapacity;
   routes?: Array<Pick<Route, 'vendor' | 'platform' | 'kind'> & {reason: ResearchRouteRejection}>;
 }
 export type ResearchRejectionObserver = (rejection: ResearchAdmissionRejection) => void;
