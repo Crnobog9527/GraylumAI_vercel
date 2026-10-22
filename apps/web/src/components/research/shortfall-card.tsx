@@ -44,7 +44,7 @@ export function ShortfallCardView({ card, disabled = false, onChoose }: {
         <p className={styles.head}>对标不足时怎么办 · 已确认</p>
         <ul className={styles.echo}><li className={styles.echoItem}>{shortfallChoiceText(card.choice, qualified)}</li></ul>
         {card.choice === "generate" && <p className={styles.hint}>
-          报告会注明对标样本不足：只有 {qualified} 个可学账号，结论参考性有限，建议之后补找对标再核对。</p>}
+          报告会注明对标样本不足：只有 {qualified} 个数据条件达标的账号，结论参考性有限，建议之后补找对标再核对。</p>}
       </section>
     );
   }
@@ -68,11 +68,11 @@ export function ShortfallCardView({ card, disabled = false, onChoose }: {
   return (
     <section aria-label="对标不足时怎么办" data-selection-card="shortfall" className={styles.card}>
       <p className={styles.head}>对标账号还不够 {card.required} 个</p>
-      <p className={styles.title}>已经找了 {card.offeredRounds} 轮，目前有 {n} 个可以照着学的对标账号</p>
+      <p className={styles.title}>已经找了 {card.offeredRounds} 轮，目前有 {n} 个数据条件达标的对标账号</p>
       <div role="radiogroup" aria-label="接下来怎么做" className={styles.list}>
         {option("continue", "继续找对标（推荐）", "换关键词再找，或贴你知道的账号主页链接。凑够后报告更可靠。")}
         {option("generate", `用现有 ${n} 个对标先生成报告`,
-          `报告会注明对标样本不足：只有 ${n} 个可学账号，结论参考性有限，建议之后补找对标再核对。`)}
+          `报告会注明对标样本不足：只有 ${n} 个数据条件达标的账号，结论参考性有限，建议之后补找对标再核对。`)}
       </div>
       <div className={styles.footer}>
         <span className={styles.count}>选好后确认，只能选一次。</span>

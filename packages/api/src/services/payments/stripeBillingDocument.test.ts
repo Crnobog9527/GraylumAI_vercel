@@ -16,6 +16,7 @@ describe('Stripe document projection failures', () => {
       balance: { retrieve: async () => ({ livemode: false }) }, invoices: { retrieve },
       checkout: { sessions: { retrieve } } } as unknown as Parameters<typeof loadStripeBillingDocument>[0];
     const db = { from: () => ({ select() { return this; }, eq() { return this; },
+      limit: async () => ({ data: [], error: null }),
       maybeSingle: async () => ({ data: { external_id: 'price_fixture' }, error: null }),
       then: (resolve: (value: unknown) => unknown) => Promise.resolve({ data: [{
         object_type: invoice ? 'invoice' : 'checkout', external_id: invoice ? 'in_fixture' : 'cs_fixture',
@@ -37,6 +38,25 @@ describe('Stripe document projection failures', () => {
     const { stripe, db } = setup({ id: 'in_fixture', livemode: false, amount_paid: 100, currency: 'usd', invoice_pdf: url });
     expect(projectOrderPayment(order, await loadStripeBillingDocument(stripe, db, order)).documentStatus)
       .toBe(url ? 'available' : 'unavailable');
+  });
+  it.each(['wechat_pay', 'alipay'])('loads a verified %s membership receipt without a provider subscription', async payment_method => {
+    const receipt = 'https://pay.stripe.com/receipts/fixture';
+    const { stripe, db } = setup({ id: 'cs_fixture', livemode: false, amount_total: 100, currency: 'usd',
+      metadata: { userId: order.user_id, orderId: order.id }, payment_intent: { latest_charge: { receipt_url: receipt } } }, false);
+    const membership = { ...order, item_type: 'membership_plan', billing_cycle: 'monthly' as const, payment_method,
+      subscription_id: 'internal-membership' };
+    const result = await loadStripeBillingDocument(stripe, db, membership);
+    expect(result.receiptUrl).toBe(receipt);
+    expect(projectOrderPayment(membership, result).documentStatus).toBe('available');
+  });
+  it.each(['userId', 'orderId'])('rejects another wallet member receipt with mismatched %s', async key => {
+    const { stripe, db } = setup({ id: 'cs_fixture', livemode: false, amount_total: 100, currency: 'usd',
+      metadata: { userId: order.user_id, orderId: order.id, [key]: 'other' },
+      payment_intent: { latest_charge: { receipt_url: 'https://pay.stripe.com/receipts/other' } } }, false);
+    const result = await loadStripeBillingDocument(stripe, db, { ...order, payment_method: 'alipay',
+      subscription_id: 'internal-membership', item_type: 'membership_plan' });
+    expect(result.receiptUrl).toBeNull();
+    expect(projectOrderPayment(order, result).documentStatus).toBe('unknown');
   });
   it.each(['pi_unexpanded', { latest_charge: 'ch_unexpanded' }])(
     'does not treat an unexpanded receipt as confirmed absence: %j', async paymentIntent => {

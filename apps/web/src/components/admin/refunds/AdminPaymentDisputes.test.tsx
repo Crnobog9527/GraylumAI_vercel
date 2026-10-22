@@ -75,3 +75,43 @@ it.each(['needs_response', 'under_review', 'warning_needs_response', 'warning_un
 it('says a lost dispute is already lost', () => {
   expect(confirmHtml('lost')).toContain('已判输'); expect(confirmHtml('needs_response')).toContain('还没判赢');
 });
+
+it('shows the original Waffo dispute provider and requires manual confirmation there', () => {
+  fixture.rows = [{id:'waffo-dispute',provider:'waffo',provider_dispute_id:'CBK_original',order_id:'order-id',
+    merchant_namespace:'waffo-fixture',mode:'test',amount:100,currency:'usd',status:'under_review',
+    freeze_state:'frozen',renewal_stop_state:'not_applicable',evidence_due_by:null,source_review_required:false}];
+  const html = renderToStaticMarkup(<AdminPaymentDisputes />);
+  expect(html).toContain('Waffo 拒付编号');
+  expect(html).not.toContain('Stripe 拒付编号');
+  expect(html).toContain('无需续费');
+  const confirmation = renderToStaticMarkup(<WithdrawConfirm status="under_review" providerLabel="Waffo" pending={false}
+    onConfirm={vi.fn()} onCancel={vi.fn()} />);
+  expect(confirmation).toContain('我已在Waffo核对，仍要撤回');
+  expect(confirmation).not.toContain('Stripe');
+  expect(confirmation).toMatch(/<button[^>]*disabled=""[^>]*>确认撤回冻结/);
+});
+
+it('shows unknown Waffo chargeback amounts as unverified while retaining the source hold', () => {
+  fixture.rows = [{id:'unknown-amount',provider:'waffo',provider_dispute_id:'CBK_unknown',order_id:'order-id',
+    merchant_namespace:'waffo-fixture',mode:'test',amount:null,currency:'usd',status:'under_review',
+    freeze_state:'frozen',renewal_stop_state:'not_applicable',evidence_due_by:null,source_review_required:false}];
+  const html = renderToStaticMarkup(<AdminPaymentDisputes />);
+  expect(html).toContain('金额待核实');
+  expect(html).toContain('冻结中');
+  expect(html).not.toContain('0.00 USD');
+});
+
+it.each([null,undefined,''])('shows currency %s as unverified instead of assuming USD or crashing', currency => {
+  fixture.rows = [{id:'unknown-currency',provider:'waffo',provider_dispute_id:'CBK_unknown',order_id:'order-id',
+    merchant_namespace:'waffo-fixture',mode:'test',amount:100,currency,status:'under_review',
+    freeze_state:'frozen',renewal_stop_state:'not_applicable',evidence_due_by:null,source_review_required:false}];
+  const html = renderToStaticMarkup(<AdminPaymentDisputes />);
+  expect(html).toContain('金额待核实'); expect(html).not.toContain('USD');
+});
+it('shows a known foreign chargeback currency without substituting USD',()=>{
+  fixture.rows = [{id:'foreign-currency',provider:'waffo',provider_dispute_id:'CBK_foreign',order_id:'order-id',
+    merchant_namespace:'waffo-fixture',mode:'test',amount:1234,currency:'eur',status:'under_review',
+    freeze_state:'frozen',renewal_stop_state:'not_applicable',evidence_due_by:null,source_review_required:false}];
+  const html = renderToStaticMarkup(<AdminPaymentDisputes />);
+  expect(html).toContain('12.34 EUR'); expect(html).not.toContain('USD');
+});

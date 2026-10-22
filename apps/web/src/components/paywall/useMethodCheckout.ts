@@ -5,7 +5,7 @@ import { useRef, useState } from 'react';
 import { checkoutAnalyticsIds, reportBeginCheckout } from '@/lib/analytics/events';
 import { trpc } from '@/trpc/client';
 import {
-  CHECKOUT_COPY, checkoutMethods, checkoutEntryOpen, describeCheckoutError, isStripeCheckoutUrl,
+  CHECKOUT_COPY, checkoutMethods, checkoutEntryOpen, describeCheckoutError, isMethodCheckoutUrl,
   type CheckoutMethod, type MethodPurchase,
 } from './methodCheckout';
 
@@ -15,7 +15,7 @@ export type CheckoutOutcome = {
 
 /**
  * Membership entry and the purchase action (`payments.methodCheckout`). One in-flight request
- * at a time; after a hand-off to Stripe the button stays disabled. A `recovery_required` answer is
+ * at a time; after a hand-off to the payment provider the button stays disabled. A `recovery_required` answer is
  * never retried here: the user is sent to billing records so the same order is not bought twice.
  */
 export function useMethodCheckout() {
@@ -37,6 +37,7 @@ export function useMethodCheckout() {
     if (inFlight.current || redirecting || !checkoutEntryOpen(entry) || !acceptedTermsVersion
       || acceptedTermsVersion !== entry.termsVersion) return;
     if (!checkoutMethods(entry, purchase.itemType, purchase.billingCycle).includes(method) || locked.has(purchaseLockKey(purchase))) return;
+    if (purchase.transition === 'wallet_renewal' && entry.purchaseChannel !== 'waffo' && method !== 'wechat_pay' && method !== 'alipay') return;
     inFlight.current = true;
     setOutcome(null);
     try {
@@ -47,7 +48,7 @@ export function useMethodCheckout() {
       const result = await mutation.mutateAsync({ ...purchase, method, routingVersion: entry.routes.version,
         acceptedTerms: true, termsVersion: acceptedTermsVersion,
         ...(stripeTestClockCustomerId ? { stripeTestClockCustomerId } : {}), ...(analytics ? { analytics } : {}) });
-      if (result.state === 'open' && isStripeCheckoutUrl(result.url)) {
+      if (result.state === 'open' && isMethodCheckoutUrl(result.url, entry.purchaseChannel)) {
         setRedirecting(true);
         // Statistics only (catalog item and pre-tax value, no order ID); a no-op without consent.
         reportBeginCheckout(purchase.itemId, 'checkoutValue' in result ? result.checkoutValue ?? null : null);

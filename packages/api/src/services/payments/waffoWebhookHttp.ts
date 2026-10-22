@@ -2,7 +2,7 @@
 import { receiveWaffoWebhook, WAFFO_MAX_BODY_BYTES } from './waffoWebhook';
 
 type Dependencies = {
-  config: () => { publicKey: string; storeId: string; merchantNamespace: string } | null;
+  config: () => { publicKey: string; storeId: string; merchantNamespace: string; mode?: 'test' | 'live' } | null;
   database: () => Parameters<typeof receiveWaffoWebhook>[0]['db'];
   /** Normal-path delivery after the receipt is durable. Throwing asks the provider to redeliver. */
   process?: (receipt: Awaited<ReturnType<typeof receiveWaffoWebhook>>) => Promise<unknown>;

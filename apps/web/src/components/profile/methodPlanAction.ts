@@ -12,6 +12,7 @@ export type MethodMembershipRow = {
   payment_method: string;
   billing_cycle: string;
   offer_kind: string;
+  entitlement_start?: string;
   entitlement_end: string;
   auto_renew: boolean;
   cancel_at_period_end: boolean;
@@ -28,20 +29,31 @@ const RANK: Record<string, number> = { pro: 1, gold: 2 };
 /** WeChat Pay / Alipay sell one-time terms (0221: never auto_renew). 0211 stores their subscription row with
  * cancel_at_period_end=true, so `cancel_at_period_end` alone cannot tell "never renewed" from "renewal stopped". */
 const ONE_TIME_METHODS = new Set(['wechat_pay', 'alipay']);
-export function isOneTimeMembership(row: Pick<MethodMembershipRow, 'payment_method'>) {
-  return ONE_TIME_METHODS.has(row.payment_method);
+export function isOneTimeMembership(row: Pick<MethodMembershipRow, 'payment_method'>
+  & Partial<Pick<MethodMembershipRow, 'payment_channel' | 'auto_renew'>>) {
+  return ONE_TIME_METHODS.has(row.payment_method) || row.payment_channel === 'waffo' && row.auto_renew === false;
 }
 
 /** The highest paid level still in force; the server only returns memberships that have not ended. */
 export function currentMethodMembership(rows: readonly MethodMembershipRow[] | null | undefined, now = Date.now()) {
   const live = (rows ?? []).filter(row => RANK[row.purchase_membership_level]
+    && (!row.entitlement_start || Date.parse(row.entitlement_start) <= now)
     && (Date.parse(row.entitlement_end) > now || row.inGrace === true));
   return live.sort((a, b) => RANK[b.purchase_membership_level] - RANK[a.purchase_membership_level]
     || Date.parse(b.entitlement_end) - Date.parse(a.entitlement_end))[0] ?? null;
 }
 
+/** Append after the latest paid term, including terms not yet in force. Founder sources retain their own renewal rules. */
+export function walletRenewalSource(rows: readonly MethodMembershipRow[], current: MethodMembershipRow | null) {
+  if (!current || !isOneTimeMembership(current) || current.inGrace) return null;
+  const latest = rows.filter(row => row.purchase_membership_level === current.purchase_membership_level)
+    .sort((a, b) => Date.parse(b.entitlement_end) - Date.parse(a.entitlement_end))[0];
+  return latest && isOneTimeMembership(latest) && (latest.payment_channel === 'stripe' || latest.payment_channel === 'waffo')
+    && !['founder', 'founder_renewal'].includes(latest.offer_kind) ? latest : null;
+}
+
 export type PlanAction =
-  | { kind: 'buy' | 'upgrade' | 'founder_renewal'; label: string; disabled: false; priorSubscriptionId?: string }
+  | { kind: 'buy' | 'upgrade' | 'founder_renewal' | 'wallet_renewal'; label: string; disabled: false; priorSubscriptionId?: string }
   | { kind: 'none'; label: string; disabled: true };
 
 export function methodPlanAction(input: {
@@ -52,6 +64,9 @@ export function methodPlanAction(input: {
   now?: number;
   /** #937: an older subscription whose payment failed blocks new purchases until it is handled. */
   unpaidSubscription?: boolean;
+  billingCycle?: 'monthly' | 'yearly';
+  walletRenewal?: MethodMembershipRow | null;
+  walletCheckoutReady?: boolean;
 }): PlanAction {
   if (!RANK[input.level]) return { kind: 'none', label: '免费方案', disabled: true };
   if (!input.checkoutReady || !Number.isFinite(input.price) || input.price <= 0) {
@@ -63,7 +78,15 @@ export function methodPlanAction(input: {
   if (!current && RANK[input.entitlementLevel ?? '']) return { kind: 'none', label: '会员仍在有效期内', disabled: true };
   if (!current) return { kind: 'buy', label: '开通', disabled: false };
   if (current.inGrace) return { kind: 'none', label: '续费处理中，请稍后再看', disabled: true };
-  if (current.purchase_membership_level === input.level) return { kind: 'none', label: '当前方案', disabled: true };
+  if (current.purchase_membership_level === input.level) {
+    if (isOneTimeMembership(current) && input.walletRenewal && input.walletCheckoutReady && input.billingCycle) {
+      const annualSwitch = current.billing_cycle === 'monthly' && input.billingCycle === 'yearly'
+        && current.subscription_id === input.walletRenewal.subscription_id;
+      return { kind: 'wallet_renewal', label: annualSwitch ? '改为年付' : `提前续买${input.billingCycle === 'yearly' ? '一年' : '一个月'}`,
+        disabled: false, priorSubscriptionId: input.walletRenewal.subscription_id };
+    }
+    return { kind: 'none', label: '当前方案', disabled: true };
+  }
   if (current.purchase_membership_level === 'pro' && input.level === 'gold') {
     // A card Pro whose renewal is already stopped cannot be upgraded (0222/0251 need it still renewing);
     // Gold can be bought normally once that Pro ends. A one-time wallet Pro never renewed: 0222 admits its upgrade.

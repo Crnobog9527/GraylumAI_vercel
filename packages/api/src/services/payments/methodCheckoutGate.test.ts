@@ -179,3 +179,16 @@ describe('R7 hard guard: the live payment pipeline is wired (PR-B1/B2/B3), so th
     expect(methodCheckoutReady(staging, routes(true))).toBe(true);
   });
 });
+
+
+describe('Waffo failover UI gate', () => {
+  it('requires the bound sandbox and test-operation gate; never pretends sandbox Alipay works', () => {
+    const emergency = { ...routes(true), newPurchaseChannel: 'waffo' as const };
+    expect(methodCheckoutMethods(staging, emergency)).toEqual([]);
+    expect(methodCheckoutMethods({ ...staging, WAFFO_TEST_OPERATIONS_ENABLED: 'true' }, emergency))
+      .toEqual(['card', 'card_cn']);
+    expect(methodCheckoutReady({ ...staging, WAFFO_TEST_OPERATIONS_ENABLED: 'true' }, emergency)).toBe(true);
+    expect(methodCheckoutMethods({ ...staging, WAFFO_TEST_OPERATIONS_ENABLED: 'true', VERCEL_GIT_COMMIT_REF: 'branch' }, emergency))
+      .toEqual([]);
+  });
+});

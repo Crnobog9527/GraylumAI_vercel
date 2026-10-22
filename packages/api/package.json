@@ -79,8 +79,13 @@
     "./src/services/payments/cardRefundWebhook": "./src/services/payments/cardRefundWebhook.ts",
     "./src/services/payments/stripeCardReconciliation": "./src/services/payments/stripeCardReconciliation.ts",
     "./src/services/payments/walletWebhook": "./src/services/payments/walletWebhook.ts",
+    "./src/services/payments/walletPaymentFailure": "./src/services/payments/walletPaymentFailure.ts",
     "./src/services/payments/methodMaintenance": "./src/services/payments/methodMaintenance.ts",
-    "./src/services/notify/reminders": "./src/services/notify/reminders.ts"
+    "./src/services/notify/reminders": "./src/services/notify/reminders.ts",
+    "./src/services/payments/methodCheckoutGate": "./src/services/payments/methodCheckoutGate.ts",
+    "./src/services/payments/failoverAfterFulfillment": "./src/services/payments/failoverAfterFulfillment.ts",
+    "./src/services/payments/failoverReconciliation": "./src/services/payments/failoverReconciliation.ts",
+    "./src/services/payments/waffoOneTimeRecovery": "./src/services/payments/waffoOneTimeRecovery.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/client": "2.2.0",

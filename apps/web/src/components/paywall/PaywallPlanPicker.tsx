@@ -18,12 +18,14 @@ type Props = {
   disabled: boolean;
   quoteOptions?: PaywallQuoteOptions;
   yearlyCheckoutAvailable: boolean;
+  oneTime?: boolean;
   onBilling: (billing: PaywallBilling) => void;
   onSelect: (level: PaywallLevel) => void;
 };
 
 /** Billing switch and plan cards; monthly is the default (MASTER_PLAN §2.1 item 51). */
-export function PaywallPlanPicker({ plans, billing, selected, disabled, quoteOptions, yearlyCheckoutAvailable, onBilling, onSelect }: Props) {
+export function PaywallPlanPicker({ plans, billing, selected, disabled, quoteOptions, yearlyCheckoutAvailable,
+  oneTime = false, onBilling, onSelect }: Props) {
   const badge = yearlyBadge(plans, quoteOptions?.founderUsd ?? null);
   const yearly = yearlyCheckoutAvailable && plans.some(plan => paywallQuote(plan, 'yearly'));
   return (
@@ -71,7 +73,9 @@ export function PaywallPlanPicker({ plans, billing, selected, disabled, quoteOpt
                     <span style={{ color: 'var(--text-tertiary)' }}>{quote.perLabel}</span>
                     {quote.saving ? <em className="not-italic" style={{ color: 'var(--success)' }}>{quote.saving}</em> : null}
                   </span>
-                  {quote.monthlyEquivalent ? <span style={{ color: 'var(--text-tertiary)' }}>{quote.monthlyEquivalent}</span> : null}
+                  {quote.monthlyEquivalent ? <span style={{ color: 'var(--text-tertiary)' }}>
+                    {oneTime && billing === 'monthly' ? quote.monthlyEquivalent.replace('之后每月', '下次续买按标准价')
+                      : quote.monthlyEquivalent}</span> : null}
                 </>
               ) : <span style={{ color: 'var(--text-tertiary)' }}>暂不提供年付</span>}
               <span style={{ color: 'var(--text-secondary)' }}>每月 {monthlyCredits(plan).toLocaleString('en-US')} 积分</span>

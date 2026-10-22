@@ -8,6 +8,8 @@ import type { MonthlyStripe } from './monthlyRefundProvider';
 import { findStripeReference } from './stripeReferences';
 import type { StripeScope } from './purchaseFacts';
 import { PAYMENT_EVIDENCE_CONFLICT } from './stripeWebhookError';
+import { refreshStripeTestClockOrder } from './stripeTestClock';
+import { closeRefundedTestClockOrder } from './stripeTestClockClose';
 import { logger } from '../../lib/logger';
 
 const id = (value: string | { id: string } | null | undefined) => typeof value === 'string' ? value : value?.id ?? null;
@@ -40,6 +42,8 @@ export async function handleCardRefund(db: SupabaseClient, stripe: RefundStripe,
   const paymentIntentId = id(refunds[0]!.payment_intent);
   if (refunds.some(refund => id(refund.charge) !== chargeId)) throw new Error(PAYMENT_EVIDENCE_CONFLICT);
   const match = await findCardOrderForPayment(db, stripe, scope, { chargeId, paymentIntentId }, { includeWalletMembership: true, includeWalletPacks: true });
+  if (match && !match.order.fulfilled_at
+    && await closeRefundedTestClockOrder(db, stripe as Stripe, scope, match.order.id)) return true;
   if (match?.kind === 'pack' && ['wechat_pay', 'alipay'].includes(match.order.payment_method)) {
     const holds = await db.from('payment_disputes').select('id').eq('order_id', match.order.id).in('freeze_state', ['frozen', 'superseded']).limit(1);
     if (holds.error || !Array.isArray(holds.data)) throw new Error('PAY_DISPUTE_REFUND_SCOPE_UNAVAILABLE');
@@ -72,7 +76,9 @@ export async function handleCardRefund(db: SupabaseClient, stripe: RefundStripe,
     const intent = paymentIntentId ?? (chargeId ? id((await stripe.charges.retrieve(chargeId)).payment_intent) : null);
     // A card order whose payment is not recorded yet: Stripe retries until the payment (and its reference) exists,
     // so the refund is never lost and the payment cannot be granted after it.
-    if (await cardOrderAwaitingPayment(db, stripe, intent)) throw new Error('PAY_STRIPE_MP_FIRST_PAYMENT_PENDING');
+    const awaiting = await cardOrderAwaitingPayment(db, stripe, intent);
+    if (awaiting && await closeRefundedTestClockOrder(db, stripe as Stripe, scope, awaiting)) return true;
+    if (awaiting) throw new Error('PAY_STRIPE_MP_FIRST_PAYMENT_PENDING');
     // No local order references this payment at all (a lost mapping, an off-site charge): the legacy path would only
     // fail the webhook again and again. Alert it for manual review (which order, membership, credits) and acknowledge.
     const succeeded = external.filter(refund => refund.status === 'succeeded');
@@ -85,6 +91,7 @@ export async function handleCardRefund(db: SupabaseClient, stripe: RefundStripe,
     }
     return false;
   }
+  await refreshStripeTestClockOrder(db, stripe as Stripe, scope, match.order.id);
   // Oldest first, so the refund that completes a full refund is the one that ends the order.
   for (const refund of [...external].sort((a, b) => a.created - b.created)) {
     if (refund.status !== 'succeeded') continue;
@@ -171,8 +178,9 @@ async function cardOrderAwaitingPayment(db: Pick<SupabaseClient, 'from'>, stripe
   const order = await db.from('payment_orders').select('payment_method,payment_channel,item_type').eq('id', orderId).maybeSingle();
   if (order.error) throw new Error('PAY_WAFFO_PERSISTENCE_UNAVAILABLE', { cause: order.error });
   // R7 (0298): a wallet one-time membership is settled by this handler too, so its refund also waits for the payment.
-  return order.data?.payment_channel === 'stripe' && (['card', 'card_cn'].includes(order.data.payment_method)
+  const eligible = order.data?.payment_channel === 'stripe' && (['card', 'card_cn'].includes(order.data.payment_method)
     || order.data.item_type === 'membership_plan' && ['wechat_pay', 'alipay'].includes(order.data.payment_method));
+  return eligible ? orderId : null;
 }
 
 

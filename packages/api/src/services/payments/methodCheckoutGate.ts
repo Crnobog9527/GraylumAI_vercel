@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import type { PaymentMethod, PaymentMethodRoutes } from './methodRouting';
+import { newPurchaseChannel, type PaymentMethod, type PaymentMethodRoutes } from './methodRouting';
 import { stagingRuntimeWindow } from '../runtime/stagingEnvironment';
 
 type Env = Record<string, string | undefined>;
@@ -43,6 +43,26 @@ function productionDeployment(env: Env) {
     && url.pathname === '/' && !url.search && !url.hash;
 }
 
+/** Display facts must remain available when Stripe is unavailable. The deployment binding,
+ * shared by admission, determines which isolated ledger is shown without a provider request. */
+export function paymentDeploymentMode(env: Env = process.env): 'test' | 'live' {
+  return productionDeployment(env) ? 'live' : 'test';
+}
+
+export function assertWaffoWebhookEnvironment(env: Env = process.env) {
+  if (!productionDeployment(env) && !(stagingDeployment(env) && env.WAFFO_TEST_OPERATIONS_ENABLED === 'true')) {
+    throw new Error('PAY_WAFFO_STEP2_NOT_READY');
+  }
+}
+
+export function assertWaffoCheckoutEnvironment(env: Env, method: PaymentMethod) {
+  if (method === 'wechat_pay' || !methodCheckoutEnvironmentOpen(env, method)
+    || (!productionDeployment(env) && !stagingDeployment(env))
+    || (stagingDeployment(env) && (method === 'alipay' || env.WAFFO_TEST_OPERATIONS_ENABLED !== 'true'))) {
+    throw new Error('PAY_WAFFO_STEP2_NOT_READY');
+  }
+}
+
 /** Hard guard (R7 review P1): production stays closed here until the checkout, fulfilment, renewal, entitlement and
  * refund paths run in the Stripe account's live mode. R7 PR-B1/B2/B3 (0296/0297/0298) wired them, so the marker is on;
  * opening production still needs the bound deployment and a switch set to `true` (Owner approval). Staging is not
@@ -77,14 +97,19 @@ export function methodCheckoutEnvironmentOpen(env: Env, method: PaymentMethod, l
  * production wallet options cannot appear unless the bound production wallet switch is open. */
 export function methodCheckoutMethods(env: Env, routes: PaymentMethodRoutes | null,
   liveReady = LIVE_PAYMENT_PIPELINE_READY): PaymentMethod[] {
-  const methods: PaymentMethod[] = ['card', 'card_cn', 'wechat_pay', 'alipay'];
+  const methods: PaymentMethod[] = newPurchaseChannel(routes) === 'waffo'
+    ? ['card', 'card_cn', 'alipay'] : ['card', 'card_cn', 'wechat_pay', 'alipay'];
+  if (newPurchaseChannel(routes) === 'waffo') return methods.filter(method => {
+    if (routes?.[method]?.enabled !== true) return false;
+    try { assertWaffoCheckoutEnvironment(env, method); return true; } catch { return false; }
+  });
   return methods.filter(method => routes?.[method]?.enabled === true
     && methodCheckoutEnvironmentOpen(env, method, liveReady));
 }
 
 export function assertMethodCheckoutEnvironment(env: Env, method: PaymentMethod, liveReady = LIVE_PAYMENT_PIPELINE_READY,
   testClockCustomerRequested = false) {
-  const testClockStaging = testClockCustomerRequested && method === 'card' && stripeTestClockStagingOpen(env);
+  const testClockStaging = testClockCustomerRequested && ['card', 'card_cn'].includes(method) && stripeTestClockStagingOpen(env);
   if (!testClockStaging && !methodCheckoutEnvironmentOpen(env, method, liveReady)) throw new Error('PAY_WAFFO_STEP2_NOT_READY');
 }
 
@@ -92,6 +117,7 @@ export function assertMethodCheckoutEnvironment(env: Env, method: PaymentMethod,
  * The checkout mutation re-checks the environment and selected route before creating an order. */
 export function methodCheckoutReady(env: Env, routes: PaymentMethodRoutes | null, liveReady = LIVE_PAYMENT_PIPELINE_READY,
   testMode?: string) {
+  if (newPurchaseChannel(routes) === 'waffo') return methodCheckoutMethods(env, routes, liveReady).length > 0;
   const regular = methodCheckoutEnvironmentOpen(env, 'card', liveReady);
   const stagingWallet = stagingDeployment(env) && (routes?.wechat_pay.enabled === true || routes?.alipay.enabled === true);
   const testClockStaging = testMode === 'test' && stripeTestClockStagingOpen(env);

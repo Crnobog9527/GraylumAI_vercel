@@ -121,7 +121,7 @@ export function ResearchSessionBenchmarks({ sessionId, disabled = false, onRefre
       {qualified < REPORT_MIN_QUALIFIED && (qualified > 0 && shortfall.data?.card?.choice === "generate"
         ? <p className={styles.hint}>你已选择用现有 {qualified} 个对标先生成报告，报告里会注明对标样本不足。</p>
         : <p className={styles.hint}>
-          生成定位报告需要至少 {REPORT_MIN_QUALIFIED} 个可以照着学的对标账号，目前 {qualified} 个。可以换关键词再找，或直接贴对标账号的主页链接。</p>)}
+          生成定位报告需要至少 {REPORT_MIN_QUALIFIED} 个数据条件达标的对标账号，目前 {qualified} 个。可以换关键词再找，或直接贴对标账号的主页链接。</p>)}
     </BenchmarkTable>
   );
 }

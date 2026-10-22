@@ -19,7 +19,7 @@ function allowTestClockStaging() {
     VERCEL_GIT_REPO_SLUG: 'GraylumAI_vercel', STRIPE_TEST_CLOCK_CHECKOUT_ENABLED: 'true',
     V3_RUNTIME_STAGING_PROJECT_ID: 'prj_N9BO48YSAYBQ5Nrvzd3WA9wrQEpC',
     V3_RUNTIME_STAGING_ENABLED: 'true', V3_RUNTIME_STAGING_WINDOW_ID: '00000000-0000-4000-8000-000000000001',
-    V3_RUNTIME_STAGING_DATABASE_HOST: 'staging.supabase.co', NEXT_PUBLIC_SUPABASE_URL: 'https://staging.supabase.co' })) {
+    V3_RUNTIME_STAGING_DATABASE_HOST: 'gvcpmcunmfrbxuwimxfa.supabase.co', NEXT_PUBLIC_SUPABASE_URL: 'https://gvcpmcunmfrbxuwimxfa.supabase.co' })) {
     vi.stubEnv(key, value);
   }
 }
@@ -66,29 +66,50 @@ describe('PAY-STRIPE-MP card checkout adapter', () => {
       expect(f.eq).toHaveBeenCalledWith('is_current', true);
     }
   });
-  it('accepts only a user-owned, test-clock Stripe customer on the exact staging deployment', async () => {
+  it.each(['card', 'card_cn'] as const)('accepts only a user-owned %s test-clock Customer on the exact staging deployment', async method => {
     allowTestClockStaging();
-    const f = fixture('card');
+    const f = fixture(method);
     const customerId = 'cus_clockcustomer123';
     const retrieve = vi.fn().mockResolvedValue({ id: customerId, object: 'customer', livemode: false,
       metadata: { graylum_user_id: id }, test_clock: 'clock_fixture' });
     const checkoutInput = { ...f.input, stripeTestClockCustomerId: customerId };
-    checkoutInput.stripe = { customers: { retrieve } } as unknown as Stripe;
+    checkoutInput.stripe = { customers: { retrieve }, testHelpers: { testClocks: { retrieve: vi.fn().mockResolvedValue({
+      id: 'clock_fixture', object: 'test_helpers.test_clock', livemode: false, status: 'ready', frozen_time: Math.floor(Date.now() / 1000),
+    }) } } } as unknown as Stripe;
     f.rpc.mockResolvedValue({ data: { dispatch: true, request: { providerRequest: { expires_at: 9999999999,
       discounts: [{ coupon: 'coupon_first' }], customer: customerId } } }, error: null });
 
     await expect(createStripeCardCheckout(checkoutInput)).resolves.toMatchObject({ state: 'open' });
     expect(retrieve).toHaveBeenCalledWith(customerId);
     expect(mocks.build).toHaveBeenCalledWith(expect.objectContaining({ testClockCustomerId: customerId,
-      card: expect.objectContaining({ testClockCustomerId: customerId }) }));
+      card: expect.objectContaining({ testClockCustomerId: customerId, managedPayments: method === 'card' }) }));
   });
-  it('refuses a Stripe test customer owned by another account before reserving an order', async () => {
+  it.each(['card', 'card_cn'] as const)('preserves the first-checkout alignment guard for %s', async method => {
+    for (const offset of [-301, 301, 31 * 86400]) {
     allowTestClockStaging();
-    const f = fixture('card');
+    const f = fixture(method);
+    const customerId = 'cus_clockcustomer123';
+    const retrieve = vi.fn().mockResolvedValue({ id: customerId, object: 'customer', livemode: false,
+      metadata: { graylum_user_id: id }, test_clock: 'clock_fixture' });
+    const clock = { id: 'clock_fixture', object: 'test_helpers.test_clock', livemode: false, status: 'ready',
+      frozen_time: Math.floor(Date.now() / 1000) + offset };
+    const checkoutInput = { ...f.input, stripeTestClockCustomerId: customerId,
+      stripe: { customers: { retrieve }, testHelpers: { testClocks: { retrieve: vi.fn().mockResolvedValue(clock) } } } as unknown as Stripe };
+    await expect(createStripeCardCheckout(checkoutInput)).rejects.toThrow('PAY_WAFFO_TEST_CLOCK_NOT_ALIGNED');
+    expect(mocks.prepare).not.toHaveBeenCalled();
+    expect(f.rpc).not.toHaveBeenCalled();
+    expect(mocks.dispatch).not.toHaveBeenCalled();
+    }
+  });
+  it.each(['card', 'card_cn'] as const)('refuses another account’s %s test customer before reserving an order', async method => {
+    allowTestClockStaging();
+    const f = fixture(method);
     const retrieve = vi.fn().mockResolvedValue({ id: 'cus_clockcustomer123', object: 'customer', livemode: false,
       metadata: { graylum_user_id: 'another-user' }, test_clock: 'clock_fixture' });
     const checkoutInput = { ...f.input, stripeTestClockCustomerId: 'cus_clockcustomer123' };
-    checkoutInput.stripe = { customers: { retrieve } } as unknown as Stripe;
+    checkoutInput.stripe = { customers: { retrieve }, testHelpers: { testClocks: { retrieve: vi.fn().mockResolvedValue({
+      id: 'clock_fixture', object: 'test_helpers.test_clock', livemode: false, status: 'ready', frozen_time: Math.floor(Date.now() / 1000),
+    }) } } } as unknown as Stripe;
 
     await expect(createStripeCardCheckout(checkoutInput)).rejects.toThrow('PAY_WAFFO_TEST_CLOCK_CUSTOMER_DENIED');
     expect(mocks.prepare).not.toHaveBeenCalled();
@@ -106,20 +127,24 @@ describe('PAY-STRIPE-MP card checkout adapter', () => {
     const f = fixture('card');
     const retrieve = vi.fn();
     const checkoutInput = { ...f.input, stripeTestClockCustomerId: 'cus_clockcustomer123' };
-    checkoutInput.stripe = { customers: { retrieve } } as unknown as Stripe;
+    checkoutInput.stripe = { customers: { retrieve }, testHelpers: { testClocks: { retrieve: vi.fn().mockResolvedValue({
+      id: 'clock_fixture', object: 'test_helpers.test_clock', livemode: false, status: 'ready', frozen_time: Math.floor(Date.now() / 1000),
+    }) } } } as unknown as Stripe;
 
     await expect(createStripeCardCheckout(checkoutInput)).rejects.toThrow('PAY_WAFFO_STEP2_NOT_READY');
     expect(retrieve).not.toHaveBeenCalled();
     expect(mocks.prepare).not.toHaveBeenCalled();
     expect(f.rpc).not.toHaveBeenCalled();
   });
-  it('refuses a test-clock customer when Stripe resolves to live mode', async () => {
+  it.each(['card', 'card_cn'] as const)('refuses a %s test-clock customer when Stripe resolves to live mode', async method => {
     allowTestClockStaging();
     mocks.scope.mockResolvedValue({ merchant: 'fixture', mode: 'live' });
-    const f = fixture('card');
+    const f = fixture(method);
     const retrieve = vi.fn();
     const checkoutInput = { ...f.input, stripeTestClockCustomerId: 'cus_clockcustomer123' };
-    checkoutInput.stripe = { customers: { retrieve } } as unknown as Stripe;
+    checkoutInput.stripe = { customers: { retrieve }, testHelpers: { testClocks: { retrieve: vi.fn().mockResolvedValue({
+      id: 'clock_fixture', object: 'test_helpers.test_clock', livemode: false, status: 'ready', frozen_time: Math.floor(Date.now() / 1000),
+    }) } } } as unknown as Stripe;
 
     await expect(createStripeCardCheckout(checkoutInput)).rejects.toThrow('PAY_WAFFO_STEP2_NOT_READY');
     expect(retrieve).not.toHaveBeenCalled();

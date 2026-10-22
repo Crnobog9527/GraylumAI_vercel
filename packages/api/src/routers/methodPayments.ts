@@ -1,5 +1,6 @@
+import { observeFailoverUpgrade } from '../services/payments/failoverAfterFulfillment';
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { assertCheckoutRateLimit, getStripeAppUrl, getStripeClient, isStripeCheckoutConfigured } from '../services/stripe';
+import { assertCheckoutRateLimit, getStripeAppUrl, getStripeClient } from '../services/stripe';
 import { methodCheckoutInputSchema } from '../services/payments/methodPurchase';
 import { checkoutValue, storeGaCheckoutIds } from '../services/analytics/gaPurchase';
 import { createWalletCheckout } from '../services/payments/walletCheckout';
@@ -7,13 +8,13 @@ import { createStripeCardCheckout } from '../services/payments/stripeMethodCheck
 import { readPaymentMethodRoutes, assertPaymentMethodRoute, isCardMethod } from '../services/payments/methodRouting';
 import { z } from 'zod';
 import { cancelWaffoMembership, controlWaffoProduct } from '../services/payments/waffoOperations';
-import { getWaffoTestOperationsClient } from '../services/payments/waffoTestOperationsClient';
+import { getWaffoTestOperationsClient, getWaffoOperationsClient } from '../services/payments/waffoTestOperationsClient';
 import { protectedProcedure, adminProcedure } from '../trpc';
 import { createSafeServiceUnavailableError } from '../lib/publicError';
 import { RateLimitError } from '../lib/rateLimitError';
 import { readMethodMembership } from '../services/payments/methodMembership';
-import { resolveStripeScope } from '../services/payments/stripeCheckoutPersistence';
-import { assertMethodCheckoutEnvironment } from '../services/payments/methodCheckoutGate';
+import { createWaffoOneTimeCheckout } from '../services/payments/waffoOneTimeCheckout';
+import { assertMethodCheckoutEnvironment, assertWaffoCheckoutEnvironment, paymentDeploymentMode } from '../services/payments/methodCheckoutGate';
 import { describeWaffoFailure } from '../services/payments/waffoFailure';
 import { hasUnpaidSubscription, mapMethodPurchaseRejection, MethodPurchaseRejected } from '../services/payments/methodPurchaseError';
 import { logger } from '../lib/logger';
@@ -55,19 +56,29 @@ export const methodPaymentProcedures = {
       assertMethodCheckoutEnvironment(process.env, input.method, undefined, Boolean(stripeTestClockCustomerId));
       if (!ctx.hasSupabaseAdminPrivileges) throw new Error('PAY_WAFFO_PERSISTENCE_UNAVAILABLE');
       const routes = await readPaymentMethodRoutes(ctx.supabaseAdmin);
-      assertPaymentMethodRoute({ routes, expectedVersion: input.routingVersion, method: input.method,
+      const route = assertPaymentMethodRoute({ routes, expectedVersion: input.routingVersion, method: input.method,
         annual: input.billingCycle === 'yearly', itemType: input.itemType });
+      if (route.channel === 'waffo') {
+        assertWaffoCheckoutEnvironment(process.env, input.method);
+        if (stripeTestClockCustomerId) throw new Error('PAY_WAFFO_METHOD_DENIED');
+      }
       const terms = await ctx.supabaseAdmin.from('system_settings').select('value').eq('key', 'payment_terms_version').maybeSingle();
       if (terms.error || typeof terms.data?.value?.version !== 'string' || input.termsVersion !== terms.data.value.version) {
         throw new Error('PAY_WAFFO_TERMS_UNAVAILABLE');
       }
       await assertCheckoutRateLimit(ctx.profileId, ctx.headers);
-      // Channel choice stays in methodRouting: every new purchase is Stripe. Card checkout stays behind the
-      // environment gate until payment fulfillment (PAY-STRIPE-MP PR-3) lands.
-      const checkout = { db: ctx.supabaseAdmin, stripe: getStripeClient(), userId: ctx.profileId,
-        appUrl: getStripeAppUrl(), termsVersion: terms.data.value.version, purchase: input };
-      const result = await (isCardMethod(input.method)
-        ? createStripeCardCheckout({ ...checkout, stripeTestClockCustomerId }) : createWalletCheckout(checkout));
+      const common = { db: ctx.supabaseAdmin, userId: ctx.profileId, appUrl: getStripeAppUrl(),
+        termsVersion: terms.data.value.version, purchase: input };
+      if (route.channel === 'waffo' && input.transition === 'upgrade') {
+        await observeFailoverUpgrade(ctx.supabaseAdmin, ctx.profileId, input.priorSubscriptionId);
+      }
+      // Resolve only the chosen provider. A Stripe risk outage cannot prevent Waffo checkout.
+      const result = route.channel === 'waffo'
+        ? await createWaffoOneTimeCheckout({ ...common, provider: getWaffoOperationsClient(paymentDeploymentMode()),
+          checkoutOrigin: 'https://pancake.waffo.ai' })
+        : await (isCardMethod(input.method)
+          ? createStripeCardCheckout({ ...common, stripe: getStripeClient(), stripeTestClockCustomerId })
+          : createWalletCheckout({ ...common, stripe: getStripeClient() }));
       if (result.state !== 'open') return result;
       if (analytics !== undefined) await storeGaCheckoutIds(ctx.supabaseAdmin, ctx.profileId, result.orderId, analytics, requestedAt);
       // The order's pre-tax amount for the browser's begin_checkout (statistics only; null when unreadable).
@@ -87,8 +98,7 @@ export const methodPaymentProcedures = {
       new Error('PAY_WAFFO_PERSISTENCE_UNAVAILABLE'), '会员状态暂不可用，请稍后重试',
     );
     try {
-      // Without Stripe checkout configured nothing can be bought: keep the local read in test mode, never call Stripe.
-      const mode = isStripeCheckoutConfigured() ? (await resolveStripeScope(getStripeClient())).mode : 'test';
+      const mode = paymentDeploymentMode();
       return await readMethodMembership(ctx.supabaseAdmin, ctx.profileId, Date.now(), process.env, mode);
     }
     catch (error) { throw createSafeServiceUnavailableError(error, '会员状态暂不可用，请稍后重试'); }

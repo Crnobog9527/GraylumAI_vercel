@@ -27,7 +27,7 @@ import { changedSettings, mergeReadSettings } from './changedSettings';
 import { MembershipPlanPermissions } from '@/components/admin/MembershipPlanPermissions';
 import { FUSION_COMPARE_SETTING_KEY, FusionCompareSetting } from '@/components/admin/FusionCompareSetting';
 import { FusionReviewSettings } from '@/components/admin/FusionReviewSettings';
-import { PaymentChannelSetting } from '@/components/admin/PaymentChannelSetting';
+import { PaymentFailoverSetting } from '@/components/admin/PaymentFailoverSetting';
 import type { MembershipPlanRow } from '@/components/admin/membershipEntitlementDraft';
 
 // 完整的系统设置定义
@@ -308,7 +308,7 @@ export default function AdminSettingsPage() {
 
         {/* Billing Tab */}
         <TabsContent value="billing">
-          <PaymentChannelSetting />
+          <PaymentFailoverSetting />
           <Card data-testid="admin-settings-billing-section" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
             <CardHeader>
               <CardTitle style={{ color: 'var(--text-primary)' }}>积分计费设置</CardTitle>

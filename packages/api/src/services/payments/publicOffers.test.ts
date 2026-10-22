@@ -30,6 +30,11 @@ const stripeIn = (livemode: boolean) => ({
   balance: { retrieve: vi.fn(async () => ({ livemode })) },
 }) as never;
 
+const production = { VERCEL: '1', VERCEL_ENV: 'production', VERCEL_GIT_COMMIT_REF: 'main',
+  VERCEL_GIT_REPO_OWNER: 'Crnobog9527', VERCEL_GIT_REPO_SLUG: 'GraylumAI_vercel',
+  VERCEL_PROJECT_PRODUCTION_URL: 'app.graylum.com', VERCEL_PROJECT_ID: 'production',
+  V3_RUNTIME_PRODUCTION_PROJECT_ID: 'production', V3_RUNTIME_PRODUCTION_DATABASE_HOST: 'production.supabase.co',
+  NEXT_PUBLIC_SUPABASE_URL: 'https://production.supabase.co' };
 beforeEach(() => resetPublicOffersCache());
 
 describe('public offers', () => {
@@ -40,7 +45,7 @@ describe('public offers', () => {
     expect(sql).toContain(`>=${FOUNDER_SEATS_TOTAL} THEN\n        RAISE EXCEPTION 'PAY_WAFFO_FOUNDER_SOLD_OUT'`);
   });
 
-  it('counts held seats exactly like checkout, in the authenticated Stripe mode, and returns only public numbers', async () => {
+  it('counts held seats exactly like checkout, in the bound deployment mode without consulting Stripe, and returns only public numbers', async () => {
     const f = database(13);
     const offers = await readPublicOffers(f.db, stripeIn(false));
     expect(offers).toEqual({ goldFirstMonth: 49, founder: { price: 496, total: 50, available: 37 } });
@@ -51,17 +56,19 @@ describe('public offers', () => {
     ]);
     resetPublicOffersCache();
     const live = database(60);
-    expect(await readPublicOffers(live.db, stripeIn(true))).toEqual({ goldFirstMonth: 49,
+    expect(await readPublicOffers(live.db, stripeIn(true), Date.now(), production)).toEqual({ goldFirstMonth: 49,
       founder: { price: 496, total: 50, available: 0 } });
     expect(live.filters).toContainEqual(['eq', 'payment_mode', 'live']);
   });
 
-  it('hides the founder offer instead of guessing when Stripe, the database or the count is unavailable', async () => {
+  it('hides the founder offer instead of guessing when the database or count is unavailable and survives Stripe outages', async () => {
     expect(await readPublicOffers(null, stripeIn(false))).toEqual({ goldFirstMonth: 49, founder: null });
-    expect(await readPublicOffers(database(1).db, null)).toEqual({ goldFirstMonth: 49, founder: null });
     expect(await readPublicOffers(database(null, { code: '57014' }).db, stripeIn(false))).toEqual({ goldFirstMonth: 49, founder: null });
     const broken = { accounts: { retrieveCurrent: async () => { throw new Error('down'); } }, balance: { retrieve: async () => ({}) } };
-    expect(await readPublicOffers(database(1).db, broken as never)).toEqual({ goldFirstMonth: 49, founder: null });
+    expect(await readPublicOffers(database(1).db, broken as never)).toEqual({ goldFirstMonth: 49,
+      founder: { price: 496, total: 50, available: 49 } });
+    resetPublicOffersCache();
+    expect((await readPublicOffers(database(2).db, null)).founder?.available).toBe(48);
   });
 
   it('caches a full answer for a minute, but never caches a missing founder answer', async () => {

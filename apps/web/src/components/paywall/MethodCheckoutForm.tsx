@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { CHECKOUT_COPY, METHOD_COPY, TERMS_LINKS, refundPolicyHref, type CheckoutMethod, type MethodPurchase } from './methodCheckout';
+import { CHECKOUT_COPY, methodCopy, TERMS_LINKS, refundPolicyHref, type CheckoutMethod, type MethodPurchase } from './methodCheckout';
 import type { MethodCheckout } from './useMethodCheckout';
 
 type Props = {
@@ -40,7 +40,9 @@ export function MethodCheckoutForm(props: Props) {
   const { checkout, purchase, testIdPrefix: id } = props;
   const itemType = purchase?.itemType ?? 'membership_plan';
   const billingCycle = purchase?.billingCycle ?? props.billingCycle;
-  const methods = checkout.methodsFor(itemType, billingCycle);
+  const methods = checkout.methodsFor(itemType, billingCycle)
+    .filter(method => purchase?.transition !== 'wallet_renewal' || checkout.entry?.purchaseChannel === 'waffo'
+      || method === 'wechat_pay' || method === 'alipay');
   const [picked, setPicked] = useState<CheckoutMethod>('card');
   // Consent is to one terms version: if methodMembership refetches a newer one (e.g. after reading the terms in
   // another tab), the box clears and must be ticked again for that version.
@@ -49,9 +51,10 @@ export function MethodCheckoutForm(props: Props) {
   const accepted = acceptedVersion !== null && acceptedVersion === termsVersion;
   const method = methods.includes(picked) ? picked : methods[0];
   const oneTimeWalletMembership = purchase?.itemType === 'membership_plan'
-    && (method === 'wechat_pay' || method === 'alipay');
+    && (checkout.entry?.purchaseChannel === 'waffo' || method === 'wechat_pay' || method === 'alipay');
   const renewal = oneTimeWalletMembership && purchase?.offer !== 'founder_renewal'
-    ? CHECKOUT_COPY.walletMembershipOneTime : props.renewal;
+    ? checkout.entry?.purchaseChannel === 'waffo' ? CHECKOUT_COPY.waffoMembershipOneTime
+      : CHECKOUT_COPY.walletMembershipOneTime : props.renewal;
   const walletFounder = oneTimeWalletMembership && (purchase?.offer === 'founder' || purchase?.offer === 'founder_renewal');
   const fineprint = walletFounder ? CHECKOUT_COPY.walletFounderOneTime : props.fineprint;
   const purchaseKey = purchase ? JSON.stringify(purchase) : '';
@@ -77,24 +80,27 @@ export function MethodCheckoutForm(props: Props) {
       <fieldset className="grid gap-2" disabled={checkout.pending}>
         <legend className="mb-1 text-sm font-medium" style={{ color: 'var(--text-primary)' }}>付款方式</legend>
         <div role="radiogroup" aria-label="付款方式" className="grid gap-2">
-          {methods.map(item => (
-            <label key={item} data-testid={`${id}-method-${item}`}
-              className="flex cursor-pointer items-start gap-2 rounded-lg border px-3 py-2 text-sm"
-              style={{ borderColor: method === item ? 'var(--text-primary)' : 'var(--border-primary)' }}>
-              <input type="radio" name={`${id}-method`} className="mt-1" value={item} checked={method === item}
-                onChange={() => setPicked(item)} />
-              <span className="grid min-w-0 gap-0.5">
-                <b style={{ color: 'var(--text-primary)' }}>{METHOD_COPY[item].label}</b>
-                {METHOD_COPY[item].note ? <span style={{ color: 'var(--warning)' }}>{METHOD_COPY[item].note}</span> : null}
-              </span>
-            </label>
-          ))}
+          {methods.map(item => {
+            const copy = methodCopy(item, checkout.entry?.purchaseChannel);
+            return (
+              <label key={item} data-testid={`${id}-method-${item}`}
+                className="flex cursor-pointer items-start gap-2 rounded-lg border px-3 py-2 text-sm"
+                style={{ borderColor: method === item ? 'var(--text-primary)' : 'var(--border-primary)' }}>
+                <input type="radio" name={`${id}-method`} className="mt-1" value={item} checked={method === item}
+                  onChange={() => setPicked(item)} />
+                <span className="grid min-w-0 gap-0.5">
+                  <b style={{ color: 'var(--text-primary)' }}>{copy.label}</b>
+                  {copy.note ? <span style={{ color: 'var(--warning)' }}>{copy.note}</span> : null}
+                </span>
+              </label>
+            );
+          })}
         </div>
       </fieldset>
 
       <p className="flex flex-wrap items-baseline gap-x-2 text-sm">
         <b className="text-base" style={{ color: 'var(--text-primary)' }}>{props.price}</b>
-        <span data-testid={`${id}-tax`} style={{ color: 'var(--text-secondary)' }}>{METHOD_COPY[method].tax}</span>
+        <span data-testid={`${id}-tax`} style={{ color: 'var(--text-secondary)' }}>{methodCopy(method, checkout.entry?.purchaseChannel).tax}</span>
       </p>
       <p className="text-xs" data-testid={`${id}-renewal`} style={muted}>{renewal}</p>
       {fineprint ? <p className="text-xs" data-testid={`${id}-fineprint`} style={muted}>{fineprint}</p> : null}

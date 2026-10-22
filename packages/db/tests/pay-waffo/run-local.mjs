@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import assert from 'node:assert/strict';
 import pg from 'pg';
+import { walletMembershipCases } from './wallet-membership.mjs';
 import { admissionCases } from './admission.mjs';
 import { retentionCases } from './retention.mjs';
 import { sourceCases } from './sources.mjs';
@@ -24,6 +25,7 @@ import { stripeMpSubscriptionRefundCases } from './stripe-mp-subscription-refund
 import { stripeMpLiveCases } from './stripe-mp-live.mjs';
 import { stripeMpLiveRefundCases } from './stripe-mp-live-refunds.mjs';
 import { stripeMpWalletRefundCases } from './stripe-mp-wallet-refund.mjs';
+import { stripeTestClockCases } from './stripe-test-clock.mjs';
 import { POSTGRES_IMAGE } from '../v3/images.mjs';
 import { buildFromFiles, installPgCronStub } from '../baseline/build-from-files.mjs';
 
@@ -55,6 +57,13 @@ try {
   });
   assert.equal(report.failed, null, JSON.stringify(report));
   const before = fingerprint();
+  // 0335 extends the wallet refund rejection predicate; restore its historical predecessor
+  // before replaying 0298, whose guarded patch must still run at its own historical position.
+  const refund185=readFileSync(resolve(root,'packages/db/migrations/0185_pay_common_package_refund.sql'),'utf8');
+  const rejectionStart=refund185.indexOf('CREATE OR REPLACE FUNCTION public.pay_common_package_refund_reject(');
+  const rejectionEnd=refund185.indexOf('CREATE OR REPLACE FUNCTION public.pay_common_package_refund_decide(');
+  assert.ok(rejectionStart>=0&&rejectionEnd>rejectionStart,'0185 refund rejection replay anchors');
+  sql(refund185.slice(rejectionStart,rejectionEnd));
   // Later migrations replace 0204's routing and admission; replay the whole chain to stay at the latest state.
   for (const file of ['0204_pay_waffo_qualification.sql', '0211_pay_waffo_delivery.sql', '0214_pay_waffo_renewal_grace.sql',
     '0221_pay_stripe_mp_routing.sql', '0222_pay_stripe_mp_checkout.sql',
@@ -118,6 +127,7 @@ try {
   cases.push(...await stripeMpCases({admin,service,connect}));
   cases.push(...await stripeMpCheckoutCases({admin,service,connect}));
   cases.push(...await stripeMpFulfillCases({admin,service,connect}));
+  cases.push(...await walletMembershipCases({admin,service,connect}));
   cases.push(...await stripeMpRenewalCases({admin,service,connect}));
   cases.push(...await membershipExpiryStripeCases({admin,service}));
   cases.push(...await stripeMpExternalRefundCases({admin,service,connect}));
@@ -127,6 +137,7 @@ try {
   cases.push(...await stripeMpLiveCases({admin,service}));
   cases.push(...await stripeMpLiveRefundCases({admin,service}));
   cases.push(...await stripeMpWalletRefundCases({admin,service}));
+  cases.push(...await stripeTestClockCases({admin,service,connect}));
   console.log(JSON.stringify({result:'PASS',replay:report,
     cases:['event-idempotency','event-conflict','test-live-isolation','refund-event-not-payment-dedup',
       'service-only-receipt','durable-lookup-refs-no-contact-data','route-version-cas','route-delete-denied',...scopedCases,...cases]}));
@@ -135,3 +146,8 @@ try {
   await Promise.all(clients.map(c=>c.end()));
   try {docker(['rm','-f',name]);} catch { /* preserve original failure */ }
 }
+
+// PAY-FAILOVER has its own fresh fixtures; run sequentially after the existing container is removed.
+const failover=spawnSync(process.execPath,[resolve(root,'packages/db/tests/pay-failover/run-local.mjs'),
+  ...(process.argv.includes('--quick')?['--quick']:[])],{cwd:root,stdio:'inherit',timeout:600000});
+if(failover.status!==0||failover.error)throw new Error(failover.error?.message??'PAY_FAILOVER_DATABASE_TEST_FAILED');

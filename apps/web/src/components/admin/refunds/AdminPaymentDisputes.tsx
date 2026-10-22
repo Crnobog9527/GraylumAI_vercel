@@ -13,8 +13,8 @@ const label = (state: string) => statusLabel[state] ?? '待核对';
 // 只有已判赢或预警已结束，撤回才没有钱被扣回的风险；其余状态（含未知）都要二次确认。
 const safeToWithdraw = new Set(['won', 'warning_closed']);
 
-export function WithdrawConfirm({ status, pending, onConfirm, onCancel }:
-  { status: string; pending: boolean; onConfirm: () => void; onCancel: () => void }) {
+export function WithdrawConfirm({ status, pending, onConfirm, onCancel, providerLabel = '原支付渠道' }:
+  { status: string; providerLabel?: string; pending: boolean; onConfirm: () => void; onCancel: () => void }) {
   const risky = !safeToWithdraw.has(status);
   const [understood, setUnderstood] = useState(false);
   return <div className="space-y-2">
@@ -23,7 +23,7 @@ export function WithdrawConfirm({ status, pending, onConfirm, onCancel }:
       <p>注意：这笔拒付{status === 'lost' ? '已判输' : '还没判赢'}（当前：{label(status)}）。撤回后用户可以继续使用这些积分和会员权益，钱可能已被银行扣回。</p>
       <label className="flex items-center gap-2 font-normal">
         <input type="checkbox" checked={understood} onChange={e => setUnderstood(e.target.checked)} />
-        我已在 Stripe 核对，仍要撤回
+        我已在{providerLabel}核对，仍要撤回
       </label>
     </div> : null}
     <Button disabled={pending || (risky && !understood)} onClick={onConfirm}>确认撤回冻结</Button>
@@ -57,7 +57,7 @@ export function AdminPaymentDisputes() {
   return (
     <section id="payment-disputes" className="scroll-mt-4 space-y-4 p-4 md:p-8" data-testid="payment-disputes">
       <h2 className="text-xl font-bold">付款争议</h2>
-      <p className="text-sm">收到拒付后会暂停相关权益和积分，并停止续费。结案不会自动解冻，请先在 Stripe 核对。</p>
+      <p className="text-sm">收到拒付后会暂停相关权益和积分，并停止续费。结案不会自动解冻，请先在该笔记录的原支付渠道核对。</p>
       {message ? <p role="status">{message}</p> : null}
       {rows.isError ? <p role="alert">拒付记录暂时无法读取。</p> : null}
       {rows.isLoading ? <p>正在读取…</p> : null}
@@ -69,33 +69,38 @@ export function AdminPaymentDisputes() {
         <Button variant="outline" disabled={rows.isError || rows.isFetching || withdraw.isPending || (rows.data?.length ?? 0) < 100}
           onClick={() => { setOffset(n => n + 100); setSelected(null); }}>下一页</Button>
       </nav>
-      {rows.data?.map(row => (
-        <article key={row.id} className="space-y-2 rounded-xl border p-4" style={{ borderColor: 'var(--border-primary)' }}>
-          <p className="break-all text-sm">Stripe 拒付编号：{row.provider_dispute_id ?? '暂时无法读取'}</p>
-          <p className="break-all text-sm">商户：{row.merchant_namespace ?? '暂时无法读取'} · 环境：
-            {row.mode === 'test' ? '测试' : row.mode === 'live' ? '正式' : '暂时无法读取'}</p>
-          <p className="break-all text-sm">订单：{row.order_id ?? '等待匹配'}</p>
-          <p>{(Number(row.amount) / 100).toFixed(2)} {row.currency.toUpperCase()} · 拒付：{label(row.status)}</p>
-          <p>冻结：{label(row.freeze_state)} · 停续费：{label(row.renewal_stop_state)}</p>
-          {row.evidence_due_by ? <p>举证截止：{new Date(row.evidence_due_by).toLocaleString('zh-CN')}</p> : null}
-          {row.source_review_required ? <p role="alert">积分来源无法核实，未扣取无法确认的积分，请人工核对。</p> : null}
-          {!row.order_id && row.provider_dispute_id && row.merchant_namespace && ['test', 'live'].includes(row.mode)
-            && ['pending', 'review'].includes(row.freeze_state) ? (
-            externalSelected === row.id ? <div className="space-y-2">
-              <p>请先在对应商户和环境的 Stripe 中核实拒付 {row.provider_dispute_id} 是与 Graylum 订单无关的站外付款。确认后将结案并停止重试匹配。</p>
-              <Button disabled={resolveExternal.isPending}
-                onClick={() => resolveExternal.mutate({ disputeId: row.id })}>确认站外结案</Button>
-              <Button variant="outline" disabled={resolveExternal.isPending} onClick={() => setExternalSelected(null)}>返回</Button>
-            </div> : <Button variant="outline"
-              onClick={() => { setExternalSelected(row.id); setSelected(null); }}>已核实站外付款</Button>
-          ) : null}
-          {row.freeze_state === 'frozen' ? (
-            selected === row.id ? <WithdrawConfirm status={row.status} pending={withdraw.isPending}
-              onConfirm={() => withdraw.mutate({ disputeId: row.id })} onCancel={() => setSelected(null)} />
-            : <Button variant="outline" onClick={() => { setSelected(row.id); setExternalSelected(null); }}>撤回冻结</Button>
-          ) : null}
-        </article>
-      ))}
+      {rows.data?.map(row => {
+        const providerLabel = row.provider === 'waffo' ? 'Waffo' : row.provider === 'stripe' ? 'Stripe' : '原支付渠道';
+        return (
+          <article key={row.id} className="space-y-2 rounded-xl border p-4" style={{ borderColor: 'var(--border-primary)' }}>
+            <p className="break-all text-sm">{providerLabel} 拒付编号：{row.provider_dispute_id ?? '暂时无法读取'}</p>
+            <p className="break-all text-sm">商户：{row.merchant_namespace ?? '暂时无法读取'} · 环境：
+              {row.mode === 'test' ? '测试' : row.mode === 'live' ? '正式' : '暂时无法读取'}</p>
+            <p className="break-all text-sm">订单：{row.order_id ?? '等待匹配'}</p>
+            <p>{typeof row.amount === 'number' && Number.isSafeInteger(row.amount) && row.amount > 0
+              && typeof row.currency === 'string' && /^[a-zA-Z]{3}$/.test(row.currency)
+              ? `${(row.amount / 100).toFixed(2)} ${row.currency.toUpperCase()}` : '金额待核实'} · 拒付：{label(row.status)}</p>
+            <p>冻结：{label(row.freeze_state)} · 停续费：{label(row.renewal_stop_state)}</p>
+            {row.evidence_due_by ? <p>举证截止：{new Date(row.evidence_due_by).toLocaleString('zh-CN')}</p> : null}
+            {row.source_review_required ? <p role="alert">积分来源无法核实，未扣取无法确认的积分，请人工核对。</p> : null}
+            {!row.order_id && row.provider_dispute_id && row.merchant_namespace && ['test', 'live'].includes(row.mode)
+              && ['pending', 'review'].includes(row.freeze_state) ? (
+              externalSelected === row.id ? <div className="space-y-2">
+                <p>请先在对应商户和环境的 {providerLabel} 中核实拒付 {row.provider_dispute_id} 是与 Graylum 订单无关的站外付款。确认后将结案并停止重试匹配。</p>
+                <Button disabled={resolveExternal.isPending}
+                  onClick={() => resolveExternal.mutate({ disputeId: row.id })}>确认站外结案</Button>
+                <Button variant="outline" disabled={resolveExternal.isPending} onClick={() => setExternalSelected(null)}>返回</Button>
+              </div> : <Button variant="outline"
+                onClick={() => { setExternalSelected(row.id); setSelected(null); }}>已核实站外付款</Button>
+            ) : null}
+            {row.freeze_state === 'frozen' ? (
+              selected === row.id ? <WithdrawConfirm status={row.status} pending={withdraw.isPending} providerLabel={providerLabel}
+                onConfirm={() => withdraw.mutate({ disputeId: row.id })} onCancel={() => setSelected(null)} />
+              : <Button variant="outline" onClick={() => { setSelected(row.id); setExternalSelected(null); }}>撤回冻结</Button>
+            ) : null}
+          </article>
+        );
+      })}
     </section>
   );
 }

@@ -11,6 +11,10 @@ import {
   previewPackageRefund, decidePackageRefund, executePackageRefund, reconcilePackageRefund, rejectPackageRefund, readPackageRefundStatus,
 } from '../services/payments/packageRefund';
 
+import { dispatchOrderRefund } from '../services/payments/refundDispatch';
+import { previewWaffoRefund, decideWaffoRefund, executeWaffoRefund, reconcileWaffoRefund }
+  from '../services/payments/waffoRefund';
+
 const request = z.object({ orderId: z.string().uuid(), ticketId: z.string().uuid(),
   feePermitted: z.enum(['confirmed', 'not_permitted']), feeEvidence: z.string().trim().min(1).max(160) }).strict();
 async function safe<T>(action: () => Promise<T>, operation?: 'quote' | 'status' | 'reject') {
@@ -44,15 +48,23 @@ export const adminRefundProcedures = {
     reason: z.enum(['ineligible', 'evidence_missing', 'customer_withdrew']),
   }).strict()).mutation(({ ctx, input }) => safe(() => rejectPackageRefund(ctx.supabaseAdmin, ctx.profileId, input))),
   previewPackageRefund: adminProcedure.input(request).query(({ ctx, input }) =>
-    safe(() => previewPackageRefund(ctx.supabaseAdmin, getStripeClient(), ctx.profileId, input))),
+    safe(() => dispatchOrderRefund(ctx.supabaseAdmin, input.orderId,
+      provider => previewPackageRefund(ctx.supabaseAdmin, provider, ctx.profileId, input),
+      provider => previewWaffoRefund(ctx.supabaseAdmin, provider, ctx.profileId, input)))),
   decidePackageRefund: adminProcedure.input(request.extend({
     versionHash: z.string().regex(/^[a-f0-9]{32}$/), decision: z.enum(['approve', 'reject']),
   })).mutation(({ ctx, input }) =>
-    safe(() => decidePackageRefund(ctx.supabaseAdmin, getStripeClient(), ctx.profileId, input))),
+    safe(() => dispatchOrderRefund(ctx.supabaseAdmin, input.orderId,
+      provider => decidePackageRefund(ctx.supabaseAdmin, provider, ctx.profileId, input),
+      provider => decideWaffoRefund(ctx.supabaseAdmin, provider, ctx.profileId, input)))),
   executePackageRefund: adminProcedure.input(z.object({
     orderId: z.string().uuid(), intentId: z.string().uuid(),
   }).strict()).mutation(({ ctx, input }) =>
-    safe(() => executePackageRefund(ctx.supabaseAdmin, getStripeClient(), ctx.profileId, input))),
+    safe(() => dispatchOrderRefund(ctx.supabaseAdmin, input.orderId,
+      provider => executePackageRefund(ctx.supabaseAdmin, provider, ctx.profileId, input),
+      provider => executeWaffoRefund(ctx.supabaseAdmin, provider, ctx.profileId, input)))),
   reconcilePackageRefund: adminProcedure.input(z.object({ orderId: z.string().uuid() }).strict())
-    .mutation(({ ctx, input }) => safe(() => reconcilePackageRefund(ctx.supabaseAdmin, getStripeClient(), ctx.profileId, input.orderId))),
+    .mutation(({ ctx, input }) => safe(() => dispatchOrderRefund(ctx.supabaseAdmin, input.orderId,
+      provider => reconcilePackageRefund(ctx.supabaseAdmin, provider, ctx.profileId, input.orderId),
+      provider => reconcileWaffoRefund(ctx.supabaseAdmin, provider, ctx.profileId, input.orderId)))),
 };

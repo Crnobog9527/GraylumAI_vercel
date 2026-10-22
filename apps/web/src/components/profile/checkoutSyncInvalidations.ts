@@ -41,7 +41,7 @@ export function invalidatePostCheckoutMembershipQueries(utils: PostCheckoutInval
 
 /** Cancel-URL return: the server re-reads the session, which another tab may have paid in the meantime. */
 export function canceledReturnNotice(
-  result: { fulfilledAt?: string | null; orderStatus?: string | null; paymentStatus?: string | null } | null | undefined,
+  result: { fulfilledAt?: string | null; orderStatus?: string | null; paymentStatus?: string | null; paymentMethod?: string | null } | null | undefined,
 ) {
   if (result?.fulfilledAt || result?.orderStatus === 'completed') {
     return { tone: 'success' as const, message: '这笔支付已经完成，订单状态已同步到账。' };
@@ -50,6 +50,6 @@ export function canceledReturnNotice(
   if (result?.paymentStatus === 'paid') {
     return { tone: 'warning' as const, message: '这笔付款已经收到，订单正在核对，处理结果会在账单记录里更新。' };
   }
-  // Stripe does not say why the user left; a mainland card refused by the international page is the common case.
-  return { tone: 'cancelled' as const, message: `你已取消本次支付，没有发生扣费。${CHECKOUT_COPY.mainlandHint}` };
+  const hint = result?.paymentMethod === 'card' ? CHECKOUT_COPY.mainlandHint : '';
+  return { tone: 'cancelled' as const, message: `你已取消本次支付，没有发生扣费。${hint}` };
 }

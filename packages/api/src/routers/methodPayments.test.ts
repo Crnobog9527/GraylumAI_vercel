@@ -7,11 +7,11 @@ import { logger } from '../lib/logger';
 import { WaffoFailure } from '../services/payments/waffoFailure';
 import { RateLimitError } from '../lib/rateLimitError';
 import { assertCheckoutRateLimit } from '../services/stripe';
-const mocks = vi.hoisted(() => ({ cancel: vi.fn(), provider: vi.fn(), wallet: vi.fn(), card: vi.fn(), gateOpen: { value: false },
+const mocks = vi.hoisted(() => ({ cancel: vi.fn(), provider: vi.fn(), oneTime: vi.fn(), wallet: vi.fn(), card: vi.fn(), gateOpen: { value: false },
   membership: vi.fn(), scope: vi.fn(), stripeConfigured: { value: false } }));
 vi.mock('../services/payments/methodMembership', () => ({ readMethodMembership: mocks.membership }));
 vi.mock('../services/payments/stripeCheckoutPersistence', () => ({ resolveStripeScope: mocks.scope }));
-vi.mock('../services/payments/waffoTestOperationsClient', () => ({ getWaffoTestOperationsClient: mocks.provider }));
+vi.mock('../services/payments/waffoTestOperationsClient', () => ({ getWaffoTestOperationsClient: mocks.provider, getWaffoOperationsClient: mocks.provider }));
 // Keep the real environment binding unless a test opens the gate to isolate later checkout handling.
 vi.mock('../services/payments/methodCheckoutGate', async (load) => {
   const real = await load<typeof import('../services/payments/methodCheckoutGate')>();
@@ -19,6 +19,7 @@ vi.mock('../services/payments/methodCheckoutGate', async (load) => {
     if (!mocks.gateOpen.value) real.assertMethodCheckoutEnvironment(env, method);
   } };
 });
+vi.mock('../services/payments/waffoOneTimeCheckout', () => ({ createWaffoOneTimeCheckout: mocks.oneTime }));
 vi.mock('../services/payments/walletCheckout', () => ({ createWalletCheckout: mocks.wallet }));
 vi.mock('../services/payments/stripeMethodCheckout', () => ({ createStripeCardCheckout: mocks.card }));
 vi.mock('../services/stripe', () => ({ assertCheckoutRateLimit: vi.fn(), getStripeAppUrl: () => 'https://auth-staging.graylum.com',
@@ -54,6 +55,7 @@ function fixture(role = 'user', settings?: Record<string, unknown>, unpaidSubscr
 }
 afterEach(() => { vi.unstubAllEnvs(); });
 beforeEach(() => {
+  mocks.oneTime.mockReset().mockResolvedValue({ orderId: 'waffo-order', state: 'open', url: 'https://pancake.waffo.ai/store/test/checkout/cs_fixture?test=true' });
   mocks.wallet.mockReset().mockResolvedValue({ orderId: 'order', state: 'open', url: 'https://checkout.stripe.com/c/pay/x' });
   mocks.card.mockReset().mockResolvedValue({ orderId: 'card-order', state: 'open', url: 'https://checkout.stripe.com/c/pay/card' });
   mocks.gateOpen.value = false;
@@ -213,7 +215,7 @@ it('answers an expected admission refusal with a typed error and plain message, 
 });
 
 describe('R7: member page reads in the connected Stripe account mode', () => {
-  it('reads local membership in test mode without calling Stripe when checkout is not configured; live when it is', async () => {
+  it('reads membership without consulting Stripe even if its configured account is offline', async () => {
     mocks.membership.mockResolvedValue({ mode: 'test' });
     mocks.stripeConfigured.value = false;
     await fixture().caller.methodMembership();
@@ -221,7 +223,22 @@ describe('R7: member page reads in the connected Stripe account mode', () => {
     expect(mocks.membership).toHaveBeenLastCalledWith(expect.anything(), userId, expect.any(Number), process.env, 'test');
     mocks.stripeConfigured.value = true; mocks.scope.mockResolvedValue({ merchant: 'acct_live', mode: 'live' });
     await fixture().caller.methodMembership();
-    expect(mocks.membership).toHaveBeenLastCalledWith(expect.anything(), userId, expect.any(Number), process.env, 'live');
+    expect(mocks.membership).toHaveBeenLastCalledWith(expect.anything(), userId, expect.any(Number), process.env, 'test');
+    expect(mocks.scope).not.toHaveBeenCalled();
     mocks.stripeConfigured.value = false;
   });
+});
+
+
+it('switches only new purchases to Waffo and restores Stripe without touching the legacy channel', async () => {
+  stubStaging();
+  const emergency = { ...settings(true), payment_method_routes: { ...routes(true), newPurchaseChannel: 'waffo' } };
+  await expect(fixture('user', emergency).caller.methodCheckout(card)).resolves.toMatchObject({ orderId: 'waffo-order' });
+  expect(mocks.oneTime).toHaveBeenCalledTimes(1);
+  expect(mocks.card).not.toHaveBeenCalled();
+  expect(mocks.oneTime).toHaveBeenCalledWith(expect.objectContaining({ purchase: card }));
+  await expect(fixture('user', settings(true)).caller.methodCheckout(card)).resolves.toMatchObject({ orderId: 'card-order' });
+  expect(mocks.card).toHaveBeenCalledTimes(1);
+  await expect(fixture('user', emergency).caller.methodCheckout(wallet)).rejects.toThrow();
+  expect(mocks.oneTime).toHaveBeenCalledTimes(1);
 });

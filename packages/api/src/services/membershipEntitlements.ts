@@ -2,6 +2,7 @@
 import { TRPCError } from '@trpc/server';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
+import { refreshStripeTestClockUser } from './payments/stripeTestClock';
 import { evaluateAction, getState, loadLatestMembershipFacts } from './membershipEligibility';
 import {
   entitlementRowShape, FUSION_COMPARE_SETTING, fusionCompareLimitSchema, membershipLevelSchema,
@@ -34,6 +35,8 @@ async function readPlan(client: SupabaseClient, level: MembershipLevel) {
 }
 
 async function resolveCurrentMembership(client: SupabaseClient, profileId: string) {
+  // All callers provide the server-owned admin client. User-scoped eligibility remains strictly read-only.
+  await refreshStripeTestClockUser(client, profileId);
   const [profileResult, facts] = await Promise.all([
     client.from('profiles').select('membership_level,status,is_deleted').eq('id', profileId).single(),
     loadLatestMembershipFacts(client, profileId),

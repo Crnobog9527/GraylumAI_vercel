@@ -1,7 +1,10 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { describe, it, expect, vi } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { readMethodMembership } from './methodMembership';
+const clock = vi.hoisted(() => ({ times: new Map<string, number>() }));
+vi.mock('./stripeTestClock', () => ({ refreshStripeTestClockUser: vi.fn(async () => clock.times) }));
+beforeEach(() => clock.times.clear());
 const staging = { VERCEL: '1', VERCEL_PROJECT_PRODUCTION_URL: 'auth-staging.graylum.com', VERCEL_GIT_COMMIT_REF: 'staging',
   VERCEL_GIT_REPO_OWNER: 'Crnobog9527', VERCEL_GIT_REPO_SLUG: 'GraylumAI_vercel', VERCEL_PROJECT_ID: 'synthetic-staging-project',
   V3_RUNTIME_STAGING_PROJECT_ID: 'synthetic-staging-project', NEXT_PUBLIC_SUPABASE_URL: 'https://synthetic.supabase.co',
@@ -10,13 +13,25 @@ const routes = (card: boolean) => ({ version: 2, card: { enabled: card },
   wechat_pay: { enabled: card, annualVerified: true }, alipay: { enabled: card, annualVerified: true } });
 function fixture(counts: Array<number | null> = [40, 3, 2], route: unknown = null,
   memberships: unknown[] = [], subscriptions: unknown[] | null = [], goldOrders: unknown[] = [], options: {
-    founderStatus?: unknown; renewalOrder?: unknown; deadline?: string | null;
+    founderStatus?: unknown; renewalOrder?: unknown; deadline?: string | null; laterTerms?: unknown[]; termsError?: boolean;
+    refundedOrders?: unknown[];
   } = {}) {
-  const results: Array<{ data: unknown; error: null }> = [{ data: route === null ? null : { value: route }, error: null },
+  const results: Array<{ data: unknown; error: unknown }> = [{ data: route === null ? null : { value: route }, error: null },
     { data: memberships, error: null },
     { data: counts.some(n => n === null) ? null : counts.flatMap((n, i) =>
-      Array.from({ length: n! }, () => ({ qualification_state: ['sold', 'reserved', 'review'][i] }))), error: null }];
-  if (memberships.length) results.push({ data: [], error: null }, { data: subscriptions, error: null });
+      Array.from({ length: n! }, () => ({ qualification_state: ['sold', 'reserved', 'review'][i] }))), error: null },
+    { data: options.refundedOrders ?? [], error: null }];
+  if (memberships.length) results.push({ data: [], error: null });
+  const rows = memberships as Array<{ subscription_id: string; entitlement_end: string }>;
+  const references = [...rows, ...(options.refundedOrders ?? [])] as typeof rows;
+  const allTerms = [...references, ...(options.laterTerms ?? [])] as typeof rows;
+  const subscriptionIds = new Set(references.map(row => row.subscription_id).filter(Boolean));
+  if (subscriptionIds.size) results.push({ data: subscriptions, error: null });
+  for (const sub of subscriptionIds) {
+    const term = allTerms.filter(row => row.subscription_id === sub)
+      .sort((a, b) => Date.parse(b.entitlement_end) - Date.parse(a.entitlement_end))[0];
+    results.push({ data: term, error: options.termsError ? { message: 'unavailable' } : null });
+  }
   results.push({ data: { value: { version: 'terms-2026-10' } }, error: null }, { data: [{ id: 'plan-gold' }], error: null },
     { data: goldOrders, error: null });
   if (options.renewalOrder !== undefined) results.push({ data: options.renewalOrder, error: null });
@@ -126,7 +141,7 @@ describe('method membership read projection', () => {
     const result = await readMethodMembership(f.db, 'actor', 0, staging);
     expect(result.memberships.map(m => [m.id, m.auto_renew, m.cancel_at_period_end]))
       .toEqual([['o1', false, true], ['o2', true, false]]);
-    expect(f.queries[4]?.eq).toHaveBeenCalledWith('user_id', 'actor');
+    expect(f.queries[5]?.eq).toHaveBeenCalledWith('user_id', 'actor');
   });
   it('returns a still-renewing card subscription in its 24-hour renewal grace, marked inGrace (same rule as entitlements)', async () => {
     const now = Date.parse('2026-10-14T12:00:00.000Z');
@@ -154,5 +169,69 @@ describe('method membership read projection', () => {
     expect(ok.memberships[0]?.auto_renew).toBe(false);
     await expect(readMethodMembership(fixture(undefined, null, [once], []).db, 'actor')).rejects.toThrow('PAY_WAFFO_MEMBERSHIP_UNAVAILABLE');
     await expect(readMethodMembership(fixture(undefined, null, [once], null).db, 'actor')).rejects.toThrow('PAY_WAFFO_MEMBERSHIP_UNAVAILABLE');
+  });
+  it.each(['card', 'card_cn'])('does not resurrect an older %s term after the later renewal is refunded', async method => {
+    const now = Date.parse('2026-11-21T15:10:48Z');
+    const first = { id: 'first', subscription_id: 'sub', auto_renew: true, purchase_membership_level: 'pro',
+      payment_method: method, payment_channel: 'stripe', entitlement_start: '2026-10-21T14:09:48Z',
+      entitlement_end: '2026-11-21T14:09:48Z' };
+    const subscription = { id: 'sub', status: 'active', cancel_at_period_end: 'false' };
+    // The completed/paid query excludes this refund, but the latest-term query must still see it.
+    const f = fixture(undefined, null, [first], [subscription], [], { laterTerms: [{ id: 'renewal',
+      subscription_id: 'sub', status: 'refunded', payment_status: 'refunded', entitlement_end: '2026-12-21T14:09:48Z' }] });
+    clock.times.set(first.id, now);
+    const result = await readMethodMembership(f.db, 'actor', Date.parse('2026-10-21T14:25:00Z'), staging);
+    expect(result.memberships).toEqual([]);
+    const latest = f.queries[6];
+    expect(latest.eq).toHaveBeenCalledWith('user_id', 'actor');
+    expect(latest.eq).toHaveBeenCalledWith('payment_mode', 'test');
+    expect(latest.eq).toHaveBeenCalledWith('subscription_id', 'sub');
+    expect(latest.eq).not.toHaveBeenCalledWith('status', expect.anything());
+    expect(latest.eq).not.toHaveBeenCalledWith('payment_status', expect.anything());
+  });
+  it('keeps the actual latest term in grace and drops it after 24 hours; refund of another subscription does not hide it', async () => {
+    const first = { id: 'first', subscription_id: 'sub', auto_renew: true, purchase_membership_level: 'pro',
+      payment_method: 'card_cn', payment_channel: 'stripe', entitlement_end: '2026-11-21T14:09:48Z' };
+    const sub = { id: 'sub', status: 'active', cancel_at_period_end: 'false' };
+    const fresh = () => fixture(undefined, null, [first], [sub], [], { laterTerms: [
+      { subscription_id: 'other', entitlement_end: '2026-12-21T14:09:48Z' }] });
+    const during = await readMethodMembership(fresh().db, 'actor', Date.parse('2026-11-22T14:09:47Z'), staging);
+    expect(during.memberships.map(row => [row.id, row.inGrace])).toEqual([['first', true]]);
+    const expired = await readMethodMembership(fresh().db, 'actor', Date.parse('2026-11-22T14:09:48Z'), staging);
+    expect(expired.memberships).toEqual([]);
+  });
+  it('fails closed if later-term evidence cannot be read', async () => {
+    const f = fixture(undefined, null, [{ id: 'first', subscription_id: 'sub',
+      entitlement_end: '2026-11-21T14:09:48Z' }], [{ id: 'sub' }], [], { termsError: true });
+    await expect(readMethodMembership(f.db, 'actor', 0, staging)).rejects.toThrow('PAY_WAFFO_MEMBERSHIP_UNAVAILABLE');
+  });
+  it.each([
+    ['active', false, null, true], ['past_due', false, null, true],
+    ['active', true, null, false], ['canceled', true, null, false],
+  ])('explains an externally refunded %s subscription without admitting another purchase', async (status, stopped, terminated, renewing) => {
+    const refund = { id: 'refund', subscription_id: 'sub', status: 'refunded', payment_status: 'refunded',
+      entitlement_end: '2026-12-21T14:09:48Z' };
+    const f = fixture(undefined, null, [], [{ id: 'sub', status, cancel_at_period_end: String(stopped),
+      current_period_end: refund.entitlement_end, credit_release_terminated_at: terminated }], [], { refundedOrders: [refund] });
+    const result = await readMethodMembership(f.db, 'actor', Date.parse('2026-11-21T15:10:48Z'), staging);
+    expect(result.memberships).toEqual([]);
+    expect(result.refundedRenewalNotice?.message).toContain('这一期已退款');
+    expect(result.refundedRenewalNotice?.message).toContain('管理订阅 / 取消续费');
+    expect(result.refundedRenewalNotice?.message).toContain('联系客服');
+    expect(result.refundedRenewalNotice?.buttonLabel).toBe(renewing ? '已退款，请先停止旧订阅续费' : '已退款，请先确认旧订阅或联系客服');
+    expect(f.queries[3]?.eq).toHaveBeenCalledWith('payment_status', 'refunded');
+    expect(f.queries[3]?.not).toHaveBeenCalledWith('fulfilled_at', 'is', null);
+    expect(f.rpc).not.toHaveBeenCalled();
+  });
+  it('does not block an approved refund termination or revive an older refund after a newer paid term', async () => {
+    const refund = { id: 'refund', subscription_id: 'sub', status: 'refunded', payment_status: 'refunded',
+      entitlement_end: '2026-12-21T14:09:48Z' };
+    const terminated = fixture(undefined, null, [], [{ id: 'sub', status: 'canceled', cancel_at_period_end: 'true',
+      current_period_end: refund.entitlement_end, credit_release_terminated_at: '2026-11-21T15:00:00Z' }], [], { refundedOrders: [refund] });
+    expect((await readMethodMembership(terminated.db, 'actor', 0, staging)).refundedRenewalNotice).toBeNull();
+    const renewed = fixture(undefined, null, [], [{ id: 'sub', status: 'active' }], [], { refundedOrders: [refund],
+      laterTerms: [{ id: 'new-paid', subscription_id: 'sub', status: 'completed', payment_status: 'paid',
+        entitlement_end: '2027-01-21T14:09:48Z' }] });
+    expect((await readMethodMembership(renewed.db, 'actor', 0, staging)).refundedRenewalNotice).toBeNull();
   });
 });

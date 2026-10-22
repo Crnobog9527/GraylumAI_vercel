@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
 import {
-  CHECKOUT_COPY, REFUND_POLICY_PATH, refundPolicyHref, founderSeatsLeft, METHOD_COPY, checkoutMethods, checkoutEntryOpen, describeCheckoutError, isStripeCheckoutUrl,
+  CHECKOUT_COPY, REFUND_POLICY_PATH, refundPolicyHref, founderSeatsLeft, METHOD_COPY, checkoutMethods, checkoutEntryOpen, describeCheckoutError, isStripeCheckoutUrl, isWaffoCheckoutUrl, isMethodCheckoutUrl, methodCopy,
   type MethodMembershipEntry,
 } from './methodCheckout';
 
@@ -53,6 +53,24 @@ describe('purchase entry', () => {
     expect(checkoutMethods(wallets, 'membership_plan', 'yearly')).toEqual(['wechat_pay']);
     expect(checkoutMethods(wallets, 'credit_package', 'one_time')).toEqual(['wechat_pay', 'alipay']);
     expect(checkoutMethods(entry({ checkoutMethods: ['wechat_pay', 'alipay'] }), 'membership_plan')).toEqual([]);
+  });
+  it.each(['projection', 'route'] as const)('keeps Waffo-only mainland card packs and simulated Alipay annual choices (%s)', source => {
+    const emergency = (method: 'card_cn' | 'alipay') => entry({ mode: method === 'alipay' ? 'live' : 'test',
+      ...(source === 'projection' ? { purchaseChannel: 'waffo' as const } : {}),
+      routes: { version: 8, ...(source === 'route' ? { newPurchaseChannel: 'waffo' as const } : {}),
+        card: { enabled: false }, card_cn: { enabled: method === 'card_cn' },
+        alipay: { enabled: method === 'alipay', annualVerified: false } }, checkoutMethods: [method] });
+    expect(checkoutMethods(emergency('card_cn'), 'credit_package', 'one_time')).toEqual(['card_cn']);
+    expect(checkoutMethods(emergency('alipay'), 'membership_plan', 'yearly')).toEqual(['alipay']);
+    expect(checkoutMethods({ ...emergency('card_cn'), checkoutMethods: [] }, 'credit_package', 'one_time')).toEqual([]);
+    expect(checkoutMethods({ ...emergency('alipay'), checkoutReady: false }, 'membership_plan', 'yearly')).toEqual([]);
+  });
+  it('restores Stripe-specific method restrictions after switching back', () => {
+    const restored = entry({ purchaseChannel: 'stripe', routes: { version: 9, newPurchaseChannel: 'stripe',
+      card: { enabled: false }, card_cn: { enabled: true }, alipay: { enabled: true, annualVerified: false } },
+    checkoutMethods: ['card_cn', 'alipay'] });
+    expect(checkoutMethods(restored, 'credit_package', 'one_time')).toEqual(['alipay']);
+    expect(checkoutMethods(restored, 'membership_plan', 'yearly')).toEqual(['card_cn']);
   });
   it('writes the tax rule beside the price without any tax amount', () => {
     expect(METHOD_COPY.card.tax).toBe('税另计，结账时按所在地计算');
@@ -121,4 +139,24 @@ it('counts only real positive founder seats from the server', () => {
 it('states the account-wide refund condition beside checkout, without the 7-day window (record AA)', () => {
   expect(CHECKOUT_COPY.refundSummary).toContain('整个账户没有用过任何积分（包括之前的和赠送的积分）');
   expect(CHECKOUT_COPY.refundSummary).not.toMatch(/这次的积分|7 天/);
+});
+
+it('accepts only the official Waffo session path for an emergency route', () => {
+  const url = 'https://pancake.waffo.ai/store/test-store/checkout/cs_123?test=true';
+  expect(isWaffoCheckoutUrl(url)).toBe(true);
+  expect(isMethodCheckoutUrl(url, 'waffo')).toBe(true);
+  expect(isMethodCheckoutUrl(url, 'stripe')).toBe(false);
+  expect(isMethodCheckoutUrl('https://checkout.stripe.com/c/pay/cs_test_1', 'waffo')).toBe(false);
+  for (const invalid of [
+    'https://pancake.waffo.ai.evil.test/store/a/checkout/cs_123',
+    'https://user@pancake.waffo.ai/store/a/checkout/cs_123',
+    'https://pancake.waffo.ai:8443/store/a/checkout/cs_123',
+    'http://pancake.waffo.ai/store/a/checkout/cs_123',
+    'https://pancake.waffo.ai/store/a',
+    'https://pancake.waffo.ai/store/a/checkout/cs_123?redirect=https://evil.test',
+    'https://pancake.waffo.ai/store/a/checkout/cs_123?test=true&test=true',
+    'https://pancake.waffo.ai/store/a/checkout/cs_123#redirect',
+  ]) expect(isWaffoCheckoutUrl(invalid)).toBe(false);
+  expect(methodCopy('card', 'waffo')).toMatchObject({label:'Waffo 结账页',tax:'不另收税'});
+  expect(methodCopy('card', 'stripe')).toEqual(METHOD_COPY.card);
 });

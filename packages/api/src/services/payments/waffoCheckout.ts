@@ -2,7 +2,7 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { freezePurchaseSnapshot } from './contracts';
-import { snapshotAmountDue } from './purchaseFacts';
+import { centsToMajor, snapshotAmountDue } from './purchaseFacts';
 
 export const WAFFO_CHECKOUT_TTL_SECONDS = 30 * 60;
 const sessionSchema = z.object({
@@ -43,6 +43,31 @@ export function buildWaffoCheckoutRequest(input: {
   };
 }
 
+/** Emergency checkout selects a verified one-time product, never a recurring product or trial.
+ * The merchant's hosted page exposes enabled payment methods automatically (Owner/Waffo 2026-10-21). */
+export function buildWaffoOneTimeCheckoutRequest(input: Parameters<typeof buildWaffoCheckoutRequest>[0]) {
+  const { order } = input;
+  const snapshot = freezePurchaseSnapshot(order.purchase_snapshot);
+  const origin = new URL(input.appUrl);
+  if (order.merchant_namespace !== input.merchantNamespace || !['test', 'live'].includes(order.payment_mode)
+    || order.payment_channel !== 'waffo' || !['card', 'card_cn', 'alipay'].includes(order.payment_method)
+    || !['membership_plan', 'credit_package'].includes(snapshot.item_type) || snapshot.currency !== 'usd'
+    || snapshot.tax_behavior !== 'inclusive'
+    || origin.protocol !== 'https:' || origin.username || origin.password
+    || !/^PROD_[A-Za-z0-9]+$/.test(input.productId) || !z.string().uuid().safeParse(order.id).success
+    || !z.string().uuid().safeParse(order.user_id).success || !/^[A-Za-z0-9_-]{1,64}$/.test(input.merchantNamespace)
+    || !['standard', 'gold_first30', 'founder', 'founder_renewal'].includes(order.offer_kind)
+    || (order.offer_kind === 'gold_first30' && (snapshot.billing_cycle !== 'monthly' || snapshotAmountDue(snapshot) !== 4900))
+    || (order.offer_kind.startsWith('founder') && (snapshot.billing_cycle !== 'yearly' || snapshotAmountDue(snapshot) !== 49600))) {
+    throw new Error('PAY_WAFFO_CHECKOUT_INVALID');
+  }
+  return { productId: input.productId, currency: 'USD', withTrial: false,
+    priceSnapshot: { amount: centsToMajor(snapshotAmountDue(snapshot)), taxIncluded: true, taxCategory: 'saas' },
+    buyerIdentity: createHash('sha256').update(`waffo:${order.payment_mode}:${input.merchantNamespace}:${order.user_id}`).digest('hex'),
+    orderMerchantExternalId: order.id, metadata: { orderId: order.id }, expiresInSeconds: WAFFO_CHECKOUT_TTL_SECONDS,
+    successUrl: `${origin.origin}/app/profile?tab=subscription&order_id=${encodeURIComponent(order.id)}` };
+}
+
 export function validateWaffoCheckoutSession(value: unknown, input: {
   createdAfter: number; latestExpiry: number; allowedCheckoutOrigin: string;
 }) {
@@ -60,9 +85,9 @@ export function validateWaffoCheckoutSession(value: unknown, input: {
 /** Persisted dispatch admission is one-shot. Merchant external ID is NOT assumed idempotent.
  * On a timeout/write failure a caller must recover the same intent, never create a second session. */
 export async function dispatchWaffoCheckout(input: {
-  request: ReturnType<typeof buildWaffoCheckoutRequest>;
+  request: Record<string, unknown>;
   claimDispatch: () => Promise<boolean>;
-  create: (request: ReturnType<typeof buildWaffoCheckoutRequest>) => Promise<unknown>;
+  create: (request: Record<string, unknown>) => Promise<unknown>;
   recover: () => Promise<unknown | null>;
   persist: (session: z.infer<typeof sessionSchema>) => Promise<void>;
   createdAfter: number; latestExpiry: number; allowedCheckoutOrigin: string;

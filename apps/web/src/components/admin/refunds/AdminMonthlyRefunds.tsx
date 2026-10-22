@@ -37,9 +37,10 @@ export function AdminMonthlyRefunds() {
   return (
     <div className="space-y-6 p-4 md:p-8">
       <div>
-        <h1 className="text-2xl font-bold md:text-3xl" style={{ color: 'var(--text-primary)' }}>月付首购退款</h1>
+        <h1 className="text-2xl font-bold md:text-3xl" style={{ color: 'var(--text-primary)' }}>Stripe 银行卡月付首购退款</h1>
         <p className="mt-1 text-sm" style={{ color: 'var(--text-tertiary)' }}>
-          只处理 Pro / Gold 月付的第一次购买，按用户的账单工单人工审批。续费、积分包和年付不在这里处理。目前只支持测试模式。
+          只处理 Stripe 银行卡自动续费 Pro / Gold 月付的第一次购买，按用户的账单工单人工审批。
+          Waffo 会员和 Stripe 钱包一次性会员使用下方“一次性会员退款”；续费、积分包和年付不在这里处理。
         </p>
       </div>
 

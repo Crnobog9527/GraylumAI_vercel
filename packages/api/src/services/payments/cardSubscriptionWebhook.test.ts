@@ -2,12 +2,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type Stripe from 'stripe';
 import type { SupabaseClient } from '@supabase/supabase-js';
-const mocks = vi.hoisted(() => ({ scope: vi.fn(), recover: vi.fn(), conflict: vi.fn(), monthly: vi.fn(),
+const mocks = vi.hoisted(() => ({ scope: vi.fn(), recover: vi.fn(), conflict: vi.fn(), monthly: vi.fn(), clock: vi.fn(),
   resumeDisputes: vi.fn(async () => {}), refundDisputedRenewal: vi.fn(async () => 'succeeded') }));
 vi.mock('./stripeCheckoutPersistence', () => ({ resolveStripeScope: mocks.scope }));
 vi.mock('./walletWebhook', () => ({ recoverMethodCheckout: mocks.recover }));
 vi.mock('./stripeConflictEvidence', () => ({ recordStripeInvoiceConflict: mocks.conflict }));
 vi.mock('./monthlyRefundWebhook', () => ({ syncMonthlyRefundSubscription: mocks.monthly }));
+vi.mock('./stripeTestClock', async importOriginal => ({
+  ...await importOriginal<typeof import('./stripeTestClock')>(), observeStripeTestClock: mocks.clock }));
 vi.mock('./disputePayment', () => ({ readDisputePayment: vi.fn(async () => ({ paymentIntentId: 'pi_fixture',
  chargeId: 'ch_fixture', invoiceId: 'in_1', subscriptionId: 'sub_1', paymentAt: '2026-10-18T00:00:00Z' })) }));
 vi.mock('./disputes', () => ({ resumeOrderDisputes: mocks.resumeDisputes }));
@@ -46,8 +48,39 @@ describe('PAY-STRIPE-MP card subscription webhooks', () => {
     mocks.scope.mockReset().mockResolvedValue({ mode: 'test', merchant: 'fixture' });
     mocks.recover.mockReset().mockResolvedValue({ orderId }); mocks.conflict.mockReset().mockResolvedValue(undefined);
     mocks.monthly.mockReset().mockResolvedValue(false);
+    mocks.clock.mockReset().mockResolvedValue(null);
     mocks.resumeDisputes.mockReset().mockResolvedValue(undefined);
     mocks.refundDisputedRenewal.mockReset().mockResolvedValue('succeeded');
+  });
+  it.each(['card', 'card_cn'])('validates the actual %s invoice and subscription against the observed clock', async method => {
+    const f = fixture({ subscriptionRef: { subscription_id: 'local_sub' },
+      order: { ...cardOrder, payment_method: method, purchase_snapshot: firstMonth } });
+    mocks.clock.mockResolvedValue({ customerId: 'cus_clockfixture', clockId: 'clock_fixture', asOf: '2026-11-12T12:00:00Z' });
+    Object.assign(f.invoice, renewal({ customer: 'cus_clockfixture', test_clock: 'clock_fixture',
+      amount_paid: 8280, amount_due: 8280, total_taxes: [{ amount: 1380 }] }));
+    const subscription = { object: 'subscription', id: 'sub_1', livemode: false, status: 'active',
+      metadata: { orderId, userId: 'user' }, customer: 'cus_clockfixture', test_clock: 'clock_fixture',
+      managed_payments: { enabled: method === 'card' }, cancel_at: null, cancel_at_period_end: false,
+      items: { data: [{ current_period_end: 1797064954 }] } };
+    f.raw.subscriptions.retrieve.mockResolvedValue(subscription);
+    await expect(handleCardSubscriptionInvoice(f.db, f.stripe, 'in_1', 'invoice.paid')).resolves.toBe(true);
+    expect(f.rpc).toHaveBeenCalledWith('pay_dispute_renew', { p_facts: expect.objectContaining({ amount: 6900 }) });
+    f.rpc.mockClear();
+    await expect(handleCardSubscriptionState(f.db, f.stripe, 'sub_1')).resolves.toBe(true);
+    expect(f.rpc).toHaveBeenCalledWith('pay_stripe_mp_sync_subscription', expect.anything());
+    f.rpc.mockClear();
+    await expect(handleCardSubscriptionInvoice(f.db, f.stripe, 'in_1', 'invoice.payment_failed', 1792600000)).resolves.toBe(true);
+    expect(f.rpc).toHaveBeenCalledExactlyOnceWith('pay_stripe_mp_record_renewal_failure', {
+      p_subscription: 'local_sub', p_merchant: 'fixture', p_invoice: 'in_1',
+      p_failed_at: new Date(1792600000 * 1000).toISOString() });
+    f.rpc.mockClear();
+    for (const patch of [{ customer: 'cus_other' }, { test_clock: 'clock_other' }, { metadata: { orderId, userId: 'other' } },
+      { managed_payments: { enabled: method !== 'card' } }, { livemode: true }]) {
+      f.raw.subscriptions.retrieve.mockResolvedValue({ ...subscription, ...patch });
+      await expect(handleCardSubscriptionInvoice(f.db, f.stripe, 'in_1', 'invoice.paid')).rejects.toThrow('PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT');
+      await expect(handleCardSubscriptionState(f.db, f.stripe, 'sub_1')).rejects.toThrow('PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT');
+      expect(f.rpc).not.toHaveBeenCalled();
+    }
   });
   it('leaves a subscription held by our approved monthly refund to that flow (step 4b-2)', async () => {
     const f = fixture({ subscriptionRef: { subscription_id: 'local_sub' }, order: cardOrder });

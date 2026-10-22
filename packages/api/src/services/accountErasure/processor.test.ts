@@ -178,6 +178,21 @@ describe('unwired account erasure processor', () => {
     expect((await processAccountErasure({ ...f.input, budget: { maxPages: 1 } })).errorCodes).toContain('ERASURE_PAGE_LIMIT');
     expect(f.authAdapter.remove).not.toHaveBeenCalled();
   });
+  it('does not dispatch local cleanup with a truncated response window, then completes on the next pass', async () => {
+    const f = setup(); let now = 0;
+    f.storageAdapter.cleanSubject.mockImplementationOnce(async () => {
+      now = 8500; return { complete: true, remaining: 0, manualReview: 0 };
+    });
+    const result = await processAccountErasure({ ...f.input, budget: { now: () => now, deadline: 10000 } });
+    expect(result.errorCodes).toContain('ERASURE_BUDGET_EXHAUSTED');
+    expect(result.errorCodes).not.toContain('ERASURE_RPC_LOCAL_CLEANUP_TIMEOUT_UNKNOWN');
+    expect(f.rpc.mock.calls.some(([name]) => name === 'account_erasure_local_cleanup')).toBe(false);
+    expect(f.authAdapter.remove).not.toHaveBeenCalled();
+    now = 0;
+    expect(await processAccountErasure({ ...f.input, budget: { now: () => now, deadline: 10000 } }))
+      .toMatchObject({ stage: 'completed', retry: false });
+    expect(f.authAdapter.remove).toHaveBeenCalledOnce();
+  });
   it('never starts another RPC after a transaction timeout with uncertain completion', async () => {
     const f = setup({ bill2_cancel: () => new Promise(() => {}) });
     const result = await processAccountErasure({ ...f.input, budget: { operationTimeoutMs: 2 } });
