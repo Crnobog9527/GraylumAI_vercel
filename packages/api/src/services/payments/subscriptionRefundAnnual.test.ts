@@ -40,7 +40,7 @@ describe('Stripe annual and founder first-purchase refund through the shared sub
     f.policy.order.kind = 'pro_to_gold';
     f.policy.membershipHistory!.priorPaidMembershipCount = 1;
     f.binding.priorPro = { orderId: 'prior-order', subscriptionId: 'prior-sub', providerSubscriptionId: 'sub_prior',
-      invoiceId: 'in_prior', periodEnd: '2027-01-01T00:00:00Z' };
+      invoiceId: 'in_prior', autoRenew: true, periodEnd: '2027-01-01T00:00:00Z' };
     const result = prepareMonthlyRefundQuote(f.policy, f.binding);
     expect(result).toMatchObject({ status: 'eligible', quote: { terms: { priorPro: f.binding.priorPro } } });
     if (result.status !== 'eligible') throw new Error('fixture');

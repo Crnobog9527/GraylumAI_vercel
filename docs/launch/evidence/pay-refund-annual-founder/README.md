@@ -14,7 +14,7 @@
 | `getSubscriptionRefundStatus`（query） | orderId → 当前批准记录或 null |
 | `rejectSubscriptionRefund` | 与原月付拒绝接口相同 |
 
-月付接口保留，二者引用同一 procedure。内部沿用 `monthly_first_purchase` 和 SQL/RPC 名称，避免另起状态机或破坏历史记录。可选 `terms.priorPro` 绑定升级前的订单、订阅、供应商引用和原到期日；客户端不能声明恢复范围或金额。`renewalEvidence` 记录退款前后的 cancel_at_period_end。
+月付接口保留，二者引用同一 procedure。内部沿用 `monthly_first_purchase` 和 SQL/RPC 名称，避免另起状态机或破坏历史记录。可选 `terms.priorPro` 绑定升级前的订单、订阅、供应商引用和原到期日；客户端不能声明恢复范围或金额。原 Pro 的 `autoRenew` 一并冻结；一次性钱包来源的 providerSubscriptionId 必须为 null，invoiceId 保存它原有的 payment 引用，不伪造订阅。`renewalEvidence` 记录退款前后的 cancel_at_period_end。
 
 首购申请以真实付款至原工单提交时间计算，最长 168 小时；付款后全账户用过积分、续费、未决扣费、付款/争议/映射不明一律不执行。手续费仅 confirmed 扣 6%；unknown 统一映射不扣，税仍全退。年付只锁定并扣回本单已经到账的月度发放，未发部分终止；保留其他来源。创始身份、徽章和展示墙资格使用原有退款状态派生，已售资格继续 sold，名额不返还。
 
@@ -25,9 +25,9 @@ Gold 升级退款后，仅恢复精确关联且仍在原付费期限内的 Pro�
 ## 本地验证
 
 - PASS：新增年付回归先在原实现复现 3 项失败，修复后通过。
-- PASS：`node packages/db/tests/pay-waffo/run-local.mjs --quick --annual-only`：339 步文件建库成功，33 项主套件用例通过（随后原故障切换回归 50 项也通过）。包含 card_cn Pro 年付、Managed Payments Gold 年付含税、已用/超期拒退、真实年付续费拒退、创始下墙/身份撤销且 sold 保留、原 Pro 恢复、并发批准同一记录、重复完成只扣一次、pending 保持人工和金融擦除证明。
+- PASS：`node packages/db/tests/pay-waffo/run-local.mjs --quick --annual-only`：339 步文件建库成功，34 项主套件用例通过（随后原故障切换回归 50 项也通过）。包含 card_cn Pro 年付、Managed Payments Gold 年付含税、已用/超期拒退、真实年付续费拒退、创始下墙/身份撤销且 sold 保留、原银行卡及一次性钱包 Pro 恢复（微信月付、支付宝年付）、关闭账号不恢复等级、并发批准同一记录、重复完成只扣一次、pending 保持人工和金融擦除证明。
 - PASS：单元回归覆盖真实执行循环的响应丢失后转人工，再从原退款读取恢复；重复执行只发送一次退款及取消。
-- PASS：完整支付单元 80 文件 / 1344 项，后续增加原 Pro 供应商证据分支的 21 项定向复核通过；API 类型、lint、代码尺寸检查通过。
+- PASS：完整支付单元 80 文件 / 1347 项，另定向复核银行卡及钱包 Pro 的真实报价证据链；API 类型、lint、代码尺寸检查通过。
 - PASS：原支付数据库主套件 243 项及故障切换回归 50 项（含原月付、Stripe 含税/无税及本机 live 模拟兼容）；没有访问正式环境。
 - PASS：空库回放 339/339，270 次历史位置重复执行，结构指纹已刷新，清理 PASS。
 - PASS：年付已发两个月仅扣回两期、并发执行只有一个 claim 成功；原月付恢复套件 12 组检查通过，含真实 TS 服务 + PostgreSQL 的停止续费/退款/取消超时恢复、现金冲突、晚到 webhook、关闭账号、失败恢复及擦除证明。

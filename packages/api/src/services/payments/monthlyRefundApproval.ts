@@ -18,8 +18,8 @@ export const monthlyRefundTermsSchema = z.object({
   paymentIntentId: ref,
   chargeId: ref,
   invoiceId: ref,
-  priorPro: z.object({ orderId: ref, subscriptionId: ref, providerSubscriptionId: ref,
-    invoiceId: ref, periodEnd: time }).strict().optional(),
+  priorPro: z.object({ orderId: ref, subscriptionId: ref, providerSubscriptionId: ref.nullable(),
+    invoiceId: ref, periodEnd: time, autoRenew: z.boolean() }).strict().optional(),
   merchant: ref,
   // R7 (0297): the order's Stripe mode; the stored hash of an existing test intent is unchanged.
   mode: z.enum(['test', 'live']),

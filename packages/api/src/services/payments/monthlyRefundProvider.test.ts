@@ -39,7 +39,7 @@ describe('monthly original-channel evidence reader', () => {
     const f = fixture();
     const prior = { ...structuredClone(f.sub), id: 'sub_prior', cancel_at_period_end: true };
     f.intent.terms.priorPro = { orderId: 'prior-order', subscriptionId: 'prior-sub',
-      providerSubscriptionId: prior.id, invoiceId: 'in_prior', periodEnd: f.intent.terms.periodEnd };
+      providerSubscriptionId: prior.id, invoiceId: 'in_prior', autoRenew: true, periodEnd: f.intent.terms.periodEnd };
     f.stripe.subscriptions.retrieve = vi.fn(async (id: string) => id === prior.id ? prior : f.sub) as unknown as MonthlyStripe['subscriptions']['retrieve'];
     const priorInvoice = { ...structuredClone(f.invoice), id: 'in_prior',
       parent: { type: 'subscription_details', subscription_details: { subscription: prior.id } } };

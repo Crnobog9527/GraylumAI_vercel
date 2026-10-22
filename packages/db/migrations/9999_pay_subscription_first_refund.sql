@@ -44,7 +44,9 @@ SELECT pg_temp.pay_subscription_refund_patch('public.monthly_refund_validate(uui
    OR old_sub.credit_release_terminated_at IS NOT NULL OR old_sub.cancel_at_period_end IS DISTINCT FROM 'true'
    OR old_sub.current_period_end IS DISTINCT FROM prior.entitlement_end
    OR p_terms->'priorPro' IS NULL OR jsonb_typeof(p_terms->'priorPro') IS DISTINCT FROM 'object'
-   OR (p_terms->'priorPro')-ARRAY['orderId','subscriptionId','providerSubscriptionId','invoiceId','periodEnd']<>'{}'::jsonb
+   OR (p_terms->'priorPro')-ARRAY['orderId','subscriptionId','providerSubscriptionId','invoiceId','periodEnd','autoRenew']<>'{}'::jsonb
+   OR jsonb_typeof(p_terms->'priorPro'->'autoRenew') IS DISTINCT FROM 'boolean'
+   OR p_terms->'priorPro'->'autoRenew' IS DISTINCT FROM to_jsonb(prior.auto_renew)
    OR p_terms->'priorPro'->>'orderId' IS DISTINCT FROM prior.id::text
    OR p_terms->'priorPro'->>'subscriptionId' IS DISTINCT FROM old_sub.id::text
    OR (p_terms->'priorPro'->>'periodEnd')::timestamptz IS DISTINCT FROM prior.entitlement_end
@@ -55,9 +57,15 @@ SELECT pg_temp.pay_subscription_refund_patch('public.monthly_refund_validate(uui
    OR NOT EXISTS(SELECT 1 FROM payment_provider_refs WHERE order_id=prior.id AND object_type='payment'
     AND external_id=p_terms->'priorPro'->>'invoiceId' AND channel='stripe' AND mode=o.payment_mode
     AND merchant_namespace=o.merchant_namespace)
-   OR NOT EXISTS(SELECT 1 FROM payment_provider_refs WHERE subscription_id=old_sub.id AND object_type='subscription'
-    AND external_id=p_terms->'priorPro'->>'providerSubscriptionId' AND channel='stripe' AND mode=o.payment_mode
-    AND merchant_namespace=o.merchant_namespace)
+   OR prior.auto_renew IS NULL OR old_sub.stripe_subscription_id IS NOT NULL
+   OR prior.auto_renew AND (prior.payment_method IS NULL OR prior.payment_method NOT IN ('card','card_cn')
+    OR jsonb_typeof(p_terms->'priorPro'->'providerSubscriptionId') IS DISTINCT FROM 'string'
+    OR NOT EXISTS(SELECT 1 FROM payment_provider_refs WHERE subscription_id=old_sub.id AND object_type='subscription'
+     AND external_id=p_terms->'priorPro'->>'providerSubscriptionId' AND channel='stripe' AND mode=o.payment_mode
+     AND merchant_namespace=o.merchant_namespace))
+   OR prior.auto_renew IS FALSE AND (prior.payment_method IS NULL OR prior.payment_method NOT IN ('wechat_pay','alipay')
+    OR p_terms->'priorPro'->'providerSubscriptionId' IS DISTINCT FROM 'null'::jsonb
+    OR EXISTS(SELECT 1 FROM payment_provider_refs WHERE subscription_id=old_sub.id AND object_type='subscription'))
    OR pay_dispute_order_frozen(prior.id)
   THEN RAISE EXCEPTION 'PAY_REFUND_PRIOR_PRO_UNRESOLVED'; END IF;
  ELSIF p_terms ? 'priorPro' THEN RAISE EXCEPTION 'PAY_REFUND_PRIOR_PRO_UNRESOLVED'; END IF;$new$);
@@ -161,7 +169,8 @@ SELECT pg_temp.pay_subscription_refund_patch('public.pay_common_monthly_refund_f
   UPDATE profiles SET membership_level=CASE
    WHEN pay_common_membership_facts((t->>'userId')::uuid)->'internal_membership'->>'mapping_state'='internal_paid'
     AND pay_common_membership_facts((t->>'userId')::uuid)->'internal_membership'->>'id'=t->'priorPro'->>'subscriptionId'
-   THEN 'pro' ELSE 'free' END WHERE id=(t->>'userId')::uuid;
+   THEN 'pro' ELSE 'free' END WHERE id=(t->>'userId')::uuid AND status='active' AND is_deleted='false'
+   AND NOT EXISTS(SELECT 1 FROM account_erasure_requests WHERE profile_id=(t->>'userId')::uuid);
  END IF;
  PERFORM set_config('pay_common.monthly_transition','',true);$new$);
 
@@ -192,13 +201,18 @@ BEGIN
  IF t ? 'priorPro' THEN
   pr:=t->'priorPro';
   IF jsonb_typeof(pr) IS DISTINCT FROM 'object'
-   OR NOT pr ?& ARRAY['orderId','subscriptionId','providerSubscriptionId','invoiceId','periodEnd']
-   OR pr-ARRAY['orderId','subscriptionId','providerSubscriptionId','invoiceId','periodEnd']<>'{}'::jsonb
+   OR NOT pr ?& ARRAY['orderId','subscriptionId','providerSubscriptionId','invoiceId','periodEnd','autoRenew']
+   OR pr-ARRAY['orderId','subscriptionId','providerSubscriptionId','invoiceId','periodEnd','autoRenew']<>'{}'::jsonb
+   OR jsonb_typeof(pr->'autoRenew') IS DISTINCT FROM 'boolean'
    OR t->>'plan' IS DISTINCT FROM 'gold' THEN RETURN false; END IF;
-  FOREACH k IN ARRAY ARRAY['orderId','subscriptionId','providerSubscriptionId','invoiceId','periodEnd'] LOOP
+  FOREACH k IN ARRAY ARRAY['orderId','subscriptionId','invoiceId','periodEnd'] LOOP
    IF jsonb_typeof(pr->k) IS DISTINCT FROM 'string' OR length(btrim(pr->>k)) NOT BETWEEN 1 AND 160
    THEN RETURN false; END IF;
   END LOOP;
+  IF pr->>'autoRenew'='true' THEN
+   IF jsonb_typeof(pr->'providerSubscriptionId') IS DISTINCT FROM 'string'
+    OR length(btrim(pr->>'providerSubscriptionId')) NOT BETWEEN 1 AND 160 THEN RETURN false; END IF;
+  ELSIF pr->'providerSubscriptionId' IS DISTINCT FROM 'null'::jsonb THEN RETURN false; END IF;
   PERFORM (pr->>'orderId')::uuid,(pr->>'subscriptionId')::uuid;
   IF pr->>'orderId'=t->>'orderId' OR pr->>'subscriptionId'=t->>'subscriptionId'
    OR pr->>'periodEnd' !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}[T ]' THEN RETURN false; END IF;

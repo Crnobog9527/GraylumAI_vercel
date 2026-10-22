@@ -17,6 +17,8 @@ export function subscriptionRefundPriorPro(e: SubscriptionRefundEvidence, o: Pre
     || prior.subscription_id !== sub.id || prior.purchase_membership_level !== 'pro'
     || prior.user_id !== o.user_id || sub.user_id !== o.user_id
     || prior.status !== 'completed' || prior.payment_status !== 'paid' || !prior.fulfilled_at || prior.refund_status
+    || typeof prior.auto_renew !== 'boolean'
+    || !prior.auto_renew && !['wechat_pay', 'alipay'].includes(prior.payment_method ?? '')
     || prior.payment_channel !== 'stripe' || sub.payment_channel !== 'stripe'
     || prior.payment_mode !== o.payment_mode || sub.payment_mode !== o.payment_mode
     || prior.merchant_namespace !== o.merchant_namespace || sub.merchant_namespace !== o.merchant_namespace
@@ -31,7 +33,7 @@ export function subscriptionRefundPriorPro(e: SubscriptionRefundEvidence, o: Pre
     && row.merchant_namespace === o.merchant_namespace);
   const subscriptions = refs.filter(row => row.subscription_id === sub.id && row.object_type === 'subscription');
   const invoices = refs.filter(row => row.order_id === prior.id && row.object_type === 'payment');
-  if (subscriptions.length !== 1 || invoices.length !== 1) return fail();
-  return { orderId: prior.id, subscriptionId: sub.id, providerSubscriptionId: subscriptions[0].external_id,
-    invoiceId: invoices[0].external_id, periodEnd: sub.current_period_end };
+  if (subscriptions.length !== (prior.auto_renew ? 1 : 0) || invoices.length !== 1) return fail();
+  return { orderId: prior.id, subscriptionId: sub.id, providerSubscriptionId: prior.auto_renew ? subscriptions[0].external_id : null,
+    invoiceId: invoices[0].external_id, periodEnd: sub.current_period_end, autoRenew: prior.auto_renew! };
 }

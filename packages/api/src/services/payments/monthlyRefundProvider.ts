@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type Stripe from 'stripe';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { readPackageRefundCash } from './packageRefund';
 import { disputeAllowsRefund } from './disputeRefundEligibility';
 import type { MonthlyRefundTerms } from './monthlyRefundApproval';
 import type { MonthlyRefundIntent, MonthlyRefundObservation } from './subscriptionRefundExecution';
@@ -105,7 +106,8 @@ export async function readMonthlyProvider(stripe: MonthlyStripe, intent: Monthly
     renewalOwnership(stripe, intent, sub),
   ]);
   let priorValid = !t.priorPro;
-  if (t.priorPro) {
+  if (t.priorPro?.autoRenew) {
+    evidence(t.priorPro.providerSubscriptionId);
     const prior = await stripe.subscriptions.retrieve(t.priorPro.providerSubscriptionId);
     const priorItem = prior.items.data[0];
     const priorInvoice = invoices.filter(row => row.id === t.priorPro!.invoiceId);
@@ -117,6 +119,11 @@ export async function readMonthlyProvider(stripe: MonthlyStripe, intent: Monthly
       && prior.schedule === null && prior.pending_update === null
       && priorInvoice.length === 1 && priorInvoice[0].status === 'paid' && priorInvoice[0].livemode === live
       && objectId(priorInvoice[0].parent?.subscription_details?.subscription) === prior.id;
+  } else if (t.priorPro) {
+    evidence(db && t.priorPro.providerSubscriptionId === null);
+    const cash = await readPackageRefundCash(db, stripe, t.priorPro.orderId);
+    priorValid = cash.paymentIntentId === t.priorPro.invoiceId && cash.currency === t.currency
+      && Date.parse(cash.paidAt) < Date.parse(t.paidAt);
   }
   const original = invoices.filter(row => row.id === t.invoiceId);
   const originalValid = original.length === 1 && original[0].livemode === live && original[0].status === 'paid'
@@ -124,7 +131,7 @@ export async function readMonthlyProvider(stripe: MonthlyStripe, intent: Monthly
     && objectId(original[0].parent?.subscription_details?.subscription) === sub.id;
   const clear = originalValid && priorValid && invoices.every(row => row.livemode === live
     && (row.id === t.invoiceId || row.status === 'void' || row.status === 'uncollectible'
-      || t.priorPro && row.status === 'paid'
+      || t.priorPro?.autoRenew && row.status === 'paid'
         && objectId(row.parent?.subscription_details?.subscription) === t.priorPro.providerSubscriptionId))
     && invoiceItems.length === 0 && sub.schedule === null && sub.pending_update === null
     && sub.pause_collection === null && sub.pending_setup_intent == null

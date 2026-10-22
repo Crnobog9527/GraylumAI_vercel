@@ -28,7 +28,7 @@ async function rpc(db: Db, name: string, args: Record<string, unknown>) {
   if (!result.data || typeof result.data !== 'object') throw new Error('PAY_REFUND_RESULT_UNKNOWN');
   return result.data;
 }
-async function loadOrder(db: Db, orderId: string): Promise<Order> {
+async function loadOrder(db: Pick<Db, 'from'>, orderId: string): Promise<Order> {
   const result = await db.from('payment_orders')
     .select('id,user_id,payment_channel,payment_mode,merchant_namespace,amount_total,currency,refund_approval,payment_method,'
       + 'payment_amount_facts')
@@ -36,7 +36,7 @@ async function loadOrder(db: Db, orderId: string): Promise<Order> {
   if (result.error || !result.data) throw new Error('PAY_REFUND_ORDER_UNKNOWN');
   return result.data as unknown as Order;
 }
-async function scopedOrder(db: Db, stripe: RefundStripe, orderId: string) {
+async function scopedOrder(db: Pick<Db, 'from'>, stripe: RefundStripe, orderId: string) {
   const order = await loadOrder(db, orderId);
   const scope = await resolveStripeScope(stripe);
   // R7 (0297): the order's mode must be the connected account's (live in production, test on staging).
@@ -44,7 +44,7 @@ async function scopedOrder(db: Db, stripe: RefundStripe, orderId: string) {
     || order.merchant_namespace !== scope.merchant) throw new Error('PAY_REFUND_TEST_STRIPE_ONLY');
   return { order, scope };
 }
-async function paymentId(db: Db, order: Order) {
+async function paymentId(db: Pick<Db, 'from'>, order: Order) {
   const mapping = await db.from('payment_provider_refs').select('external_id')
     .eq('order_id', order.id).eq('object_type', 'payment').eq('channel', 'stripe')
     .eq('merchant_namespace', order.merchant_namespace).eq('mode', order.payment_mode).limit(2);
@@ -53,7 +53,7 @@ async function paymentId(db: Db, order: Order) {
   }
   return String(mapping.data[0].external_id);
 }
-export async function readPackageRefundCash(db: Db, stripe: RefundStripe, orderId: string) {
+export async function readPackageRefundCash(db: Pick<Db, 'from'>, stripe: RefundStripe, orderId: string) {
   const { order, scope } = await scopedOrder(db, stripe, orderId);
   const intentId = await paymentId(db, order);
   // PAY-STRIPE-MP: an international card pack charged the pre-tax amount plus the tax recorded for its payment (0237).
