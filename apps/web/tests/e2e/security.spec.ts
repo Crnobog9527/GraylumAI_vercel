@@ -266,10 +266,10 @@ test.describe('Security', () => {
 
       await page.click('button[type="submit"]');
 
-      // Should not log in (no dashboard redirect)
+      // Should not log in (no redirect into the logged-in app under /app)
       await page.waitForTimeout(2000);
       const url = page.url();
-      expect(url).not.toContain('/chat');
+      expect(new URL(url).pathname.startsWith('/app')).toBe(false);
       expect(url).not.toContain('/dashboard');
     });
 

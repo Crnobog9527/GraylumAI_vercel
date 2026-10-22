@@ -44,13 +44,11 @@ describe('old addresses of the logged-in pages on every host (E1)', () => {
     }
   });
 
-  // LEGACY-CLOSE: the deleted /chat and /workbench pages open positioning in one step, reversibly.
-  it.each(['/chat', '/chat?conversation=old', '/chat?mode=skill&conversation=old', '/workbench', '/workbench?project=old'])(
-    'sends %s straight to /app/positioning with a reversible 307',
+  // The retired /chat and the page-less /workbench folder are no longer redirected (Owner 2026-10-21); they 404.
+  it.each(['/chat', '/chat?conversation=old', '/chat/x', '/workbench', '/workbench?project=old'])(
+    'leaves %s without a redirect',
     async path => {
-      const { status, to } = await visit(`https://graylum.test${path}`);
-      expect(status).toBe(307);
-      expect(new URL(to!).pathname).toBe('/app/positioning');
+      expect((await visit(`https://www.graylum.com${path}`)).to, path).toBeNull();
     },
   );
 
@@ -84,9 +82,15 @@ describe('redirect rules without empty wildcards', () => {
     }
   });
 
-  it.each(['/profile', '/positioning', '/library', '/workbench/search'])('has an exact rule for %s', path => {
-    const exact = buildPathRedirects().find(rule => rule.source === path || rule.source === `/${path.split('/')[1]}`);
-    expect(exact, path).toBeDefined();
+  it.each(['/profile', '/positioning', '/library'])('has an exact rule for %s', path => {
+    expect(buildPathRedirects().some(rule => rule.source === path), path).toBe(true);
+  });
+
+  it('moves /workbench subpages but leaves the page-less folder itself alone', () => {
+    const sources = buildPathRedirects().map(rule => rule.source);
+    expect(sources).toContain('/workbench/:path+');
+    expect(sources).not.toContain('/workbench');
+    expect(sources).not.toContain('/chat');
   });
 });
 
@@ -109,7 +113,7 @@ describe('old production hosts', () => {
       ['https://app.graylum.com/positioning/draft-1?x=1', 'https://www.graylum.com/app/positioning/draft-1?x=1'],
       ['https://app.graylum.com/profile?tab=subscription', 'https://www.graylum.com/app/profile?tab=subscription'],
       ['https://app.graylum.com/workbench/search', 'https://www.graylum.com/app/workbench/search'],
-      ['https://app.graylum.com/chat?conversation=old', 'https://www.graylum.com/app/positioning?conversation=old'],
+      ['https://app.graylum.com/chat?conversation=old', 'https://www.graylum.com/chat?conversation=old'],
       ['https://app.graylum.com/landing', 'https://www.graylum.com/'],
       // Only the host changes for login entry pages, auth, API, admin and public pages. Next.js serves its own
       // /_next files without redirects, so a page still open on the old host keeps loading them.

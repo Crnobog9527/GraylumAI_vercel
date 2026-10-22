@@ -15,13 +15,11 @@ describe('sanitizeRedirectTarget', () => {
     ['/library?item=one#details', '/app/library?item=one#details'],
     ['/workbench/search', '/app/workbench/search'],
     ['/publish-monitor/connect?request=r', '/app/publish-monitor/connect?request=r'],
-    ['/chat?conversation=old', '/app/positioning?conversation=old'],
-    ['/workbench', '/app/positioning'],
-    ['/workbench/', '/app/positioning'],
-    ['/workbench//?project=old', '/app/positioning?project=old'],
-    ['/chat/?conversation=old', '/app/positioning?conversation=old'],
     ['/workbench/search/', '/app/workbench/search/'],
   ])('moves the old address %s to %s', (value, expected) => expect(sanitizeRedirectTarget(value)).toBe(expected));
+  // The retired /chat and the page-less /workbench folder are not moved (Owner 2026-10-21); they answer 404.
+  it.each(['/chat', '/chat?conversation=old', '/workbench', '/workbench/', '/workbench?project=old'])
+    ('leaves the retired address %s as it is', value => expect(sanitizeRedirectTarget(value)).toBe(value));
   it.each(['/profiles', '/positioning-x', '/apps', '/admin/users', '/login', '/chatroom'])
     ('leaves %s alone, matching whole segments only', value => expect(sanitizeRedirectTarget(value)).toBe(value));
   it.each([null, undefined, '', 'javascript:alert(1)', '//evil.example',
