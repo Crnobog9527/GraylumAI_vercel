@@ -105,8 +105,22 @@ export async function stripeMpWalletRefundCases({admin,service}) {
   // Any credit used since the payment: not refundable (record AA). The admin can reject a wallet membership request.
   const k=await buyer('a4'.repeat(32));
   await admin.query(`INSERT INTO credit_transactions(user_id,amount,type,description,ledger_type,counts_as_spend,balance_before,balance_after)
-    VALUES($1,-10,'deduction','spend','spend',true,$2::integer,$2::integer-10)`,[k.user,k.granted]);
-  await assert.rejects(()=>quote(k),/CONSUMPTION_OR_UNKNOWN/);
+    VALUES($1,-2,'deduction','spend','spend',true,$2::integer,$2::integer-2)`,[k.user,k.granted]);
+  const beforeUsed=await profile(k.user);
+  await assert.rejects(()=>quote(k),/PAY_REFUND_CREDITS_CONSUMED/);
+  // A positive return cannot erase the already-observed spend; quote/rejection never dispatches a refund.
+  await admin.query(`INSERT INTO credit_transactions(user_id,amount,type,description,ledger_type,counts_as_spend,balance_before,balance_after)
+    VALUES($1,2,'refund','returned credits','adjustment',false,$2::integer,$2::integer+2)`,[k.user,k.granted-2]);
+  await assert.rejects(()=>quote(k),/PAY_REFUND_CREDITS_CONSUMED/);
+  assert.deepEqual(await profile(k.user),beforeUsed,'refused quotes do not change balance or membership');
+  assert.equal((await admin.query('SELECT refund_approval FROM payment_orders WHERE id=$1',[k.o.id])).rows[0].refund_approval,null);
+
+  // Unknown negative adjustments still fail closed without falsely claiming a confirmed spend.
+  const unknown=await buyer('a6'.repeat(32));
+  await admin.query(`INSERT INTO credit_transactions(user_id,amount,type,description,ledger_type,source_type,reason_code,counts_as_spend,balance_before,balance_after)
+    VALUES($1,-1,'deduction','unknown adjustment','adjustment','system','unresolved_adjustment',false,$2::integer,$2::integer-1)`,[unknown.user,unknown.granted]);
+  await assert.rejects(()=>quote(unknown),/PAY_REFUND_CONSUMPTION_OR_UNKNOWN/);
+
   assert.equal((await one(`SELECT pay_common_package_refund_reject($1,$2,$3,'ineligible') q`,[actor,k.o.id,k.ticket])).q.status,'rejected');
 
   // A refund made outside our flow (Stripe Dashboard): a partial one is only recorded for review; the full one reverses
@@ -139,5 +153,6 @@ export async function stripeMpWalletRefundCases({admin,service}) {
     [{...current,card:{enabled:false},card_cn:{enabled:false},version:version+1}]);
   return ['wallet-refund-live-cash-mode','wallet-refund-takes-granted-credits','wallet-refund-pauses-release',
     'wallet-refund-ends-membership','wallet-refund-no-fee-full','wallet-refund-failure-restores','wallet-refund-consumption',
+    'wallet-refund-return-keeps-consumption','wallet-refund-unknown-consumption-separate',
     'wallet-refund-reject','wallet-external-refund-partial-then-full','card-subscription-not-this-path'];
 }

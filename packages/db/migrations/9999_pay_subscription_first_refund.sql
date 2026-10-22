@@ -235,5 +235,13 @@ EXCEPTION WHEN others THEN RETURN false;
 END $$;
 REVOKE ALL ON FUNCTION public.monthly_refund_erasure_safe(jsonb),public.monthly_refund_erasure_safe_pre_annual(jsonb)
  FROM PUBLIC,anon,authenticated,service_role;
+-- A confirmed spend is an ordinary policy refusal; retain the existing fail-closed unknown-ledger guard.
+SELECT pg_temp.pay_subscription_refund_patch('public.pay_common_package_refund_quote(uuid,uuid,uuid,jsonb,text,text)',
+ $old$ -- Canonical spend cannot be cancelled by a positive return. Unknown negative rows fail closed.$old$,
+ $new$ -- Confirmed account-wide consumption is distinct from incomplete ledger evidence.
+ IF EXISTS(SELECT 1 FROM credit_transactions c WHERE c.user_id=o.user_id AND c.created_at>=paid_at
+   AND c.ledger_type='spend' AND c.amount<>0)
+   THEN RAISE EXCEPTION 'PAY_REFUND_CREDITS_CONSUMED'; END IF;
+ -- Canonical spend cannot be cancelled by a positive return. Unknown negative rows fail closed.$new$);
 DROP FUNCTION pg_temp.pay_subscription_refund_patch(text,text,text);
 COMMIT;

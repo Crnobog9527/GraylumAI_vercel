@@ -81,7 +81,7 @@ export async function stripeMpPackRefundCases({admin,service}) {
   const h=await buyer('d3'.repeat(32));
   await admin.query(`INSERT INTO credit_transactions(user_id,amount,type,description,ledger_type,counts_as_spend,balance_before,balance_after)
     VALUES($1,-10,'deduction','spend','spend',true,1000,990)`,[h.user]);
-  await assert.rejects(()=>quote(h),/CONSUMPTION_OR_UNKNOWN/);
+  await assert.rejects(()=>quote(h),/PAY_REFUND_CREDITS_CONSUMED/);
   // A non-admin cannot quote.
   await assert.rejects(()=>service.query(`SELECT pay_common_package_refund_quote($1,$2,$3,$4,'confirmed','x') q`,
     [f.user,f.o.id,f.ticket,f.cash]),/ADMIN_REQUIRED/);
