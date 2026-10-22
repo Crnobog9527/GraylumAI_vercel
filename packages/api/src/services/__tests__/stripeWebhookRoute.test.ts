@@ -179,6 +179,34 @@ describe('stripe webhook route', () => {
     expect(stripeServiceMocks.createServiceRoleSupabaseClient).not.toHaveBeenCalled();
   });
 
+  it.each(['customer.subscription.updated', 'invoice.paid'])(
+    'keeps %s advancing retries at HTTP 500 without a payment conflict alert', async type => {
+      const event = { type, data: { object: { id: 'fixture' } } };
+      const stripe = new Stripe('fixture-client');
+      const body = JSON.stringify(event);
+      const secret = 'fixture-signature-secret';
+      const signature = stripe.webhooks.generateTestHeaderString({ payload: body, secret });
+      stripeServiceMocks.getStripeClient.mockReturnValue(stripe);
+      stripeServiceMocks.getStripeWebhookSecret.mockReturnValue(secret);
+      const handler = type === 'invoice.paid' ? walletMocks.invoice : walletMocks.subscription;
+      handler.mockRejectedValue(new Error('PAY_STRIPE_TEST_CLOCK_NOT_READY'));
+      const post = () => POST(new Request('https://example.test/api/stripe/webhook', {
+        method: 'POST', headers: { 'stripe-signature': signature }, body,
+      }));
+      const failures = await Promise.all([post(), post()]);
+      expect(failures.map(response => response.status)).toEqual([500, 500]);
+      expect(alertMocks.logServerError).toHaveBeenCalledWith('billing', 'stripe_webhook_handler_failed', {
+        code: 'PAY_STRIPE_TEST_CLOCK_NOT_READY', eventType: type,
+      });
+      expect(alertMocks.captureMessage).not.toHaveBeenCalled();
+      expect(stripeFulfillmentMocks.syncSubscriptionState).not.toHaveBeenCalled();
+      expect(stripeFulfillmentMocks.fulfillMembershipInvoice).not.toHaveBeenCalled();
+      handler.mockResolvedValue(true);
+      expect((await post()).status).toBe(200);
+      expect((await post()).status).toBe(200);
+      expect(alertMocks.captureMessage).not.toHaveBeenCalled();
+    });
+
   it('keeps a signed event transport failure retryable without a payment conflict alarm', async () => {
     const event = { type: 'invoice.paid', data: { object: { id: 'in_fixture' } } };
     stripeServiceMocks.getStripeClient.mockReturnValue({ webhooks: { constructEvent: () => event } });
