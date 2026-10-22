@@ -8,6 +8,7 @@ import { createServer } from 'node:http';
 import pg from 'pg';
 import { createClient } from '@supabase/supabase-js';
 import { expect, it, vi } from 'vitest';
+import {guardResearchAdmission} from './researchAdmissionGuard';
 import { runtimeExecutor } from './execute';
 import { recoverPendingFinancials } from './automaticRecovery';
 import { erasureFinancialBudget } from '../accountErasure/financialRecovery';
@@ -252,3 +253,32 @@ it('RUNTIME: a subcall the balance cannot start pauses the turn at its slot; aft
     expect(ledger.rows[0].n).toBe(1000 + 100 - 11);
   } finally { await f.close(); }
 }, 60000);
+
+
+it('RUNTIME: rejected benchmark research persists safe diagnostics with no execution, reservation or fee',async()=>{
+ if(!connectionString?.startsWith('postgres://postgres@127.0.0.1:')||!connectionString.endsWith('/v3_disposable'))
+  throw new Error('isolated runner required');
+ const db=new pg.Client({connectionString});
+ const admin=createClient(process.env.V3_LOCAL_REST!,process.env.V3_LOCAL_SERVICE_JWT!,{auth:{persistSession:false}});
+ await db.connect();
+ try{
+  const actorId=randomUUID(),requestId=randomUUID(),secret='private fixture content: never in a diagnostic';
+  await db.query('insert into profiles(id,credits) values($1,100)',[actorId]);
+  const started=await admin.rpc('runtime_start',{p_actor_id:actorId,p_request_id:randomUUID(),p_payload:{scope:{kind:'positioning_draft'}}});
+  expect(started.error).toBeNull();const sessionId=started.data.sessionId;
+  const input={admin,actorId,sessionId,requestId,fits:()=>true,
+   billing:{contractVersion:'bill2.v2',callPolicy:[],rules:{}},
+   context:{input:secret,instructions:secret,modelId:randomUUID(),hostTurnContext:{stepId:'research',checklist:[{id:'research',
+    fields:[{id:'benchmark_findings',value:secret}]}]}}};
+  await expect(guardResearchAdmission(input as unknown as Parameters<typeof guardResearchAdmission>[0]))
+   .rejects.toThrow('RESEARCH_TOOLS_UNAVAILABLE');
+  const logs=(await db.query('select message,context from application_logs where user_id=$1 and request_id=$2',[actorId,requestId])).rows;
+  expect(logs).toHaveLength(1);
+  expect(logs[0]).toMatchObject({message:'research_admission_rejected',context:{required:true,reason:'BILLING_PROFILE_UNAVAILABLE'}});
+  expect(JSON.stringify(logs)).not.toContain(secret);
+  expect((await db.query('select credits from profiles where id=$1',[actorId])).rows[0].credits).toBe(100);
+  expect((await db.query('select active_execution from runtime_sessions where id=$1',[sessionId])).rows[0].active_execution).toBeNull();
+  expect((await db.query('select count(*) n from runtime_executions where session_id=$1',[sessionId])).rows[0].n).toBe('0');
+  expect((await db.query('select count(*) n from bill2_runs where actor_id=$1',[actorId])).rows[0].n).toBe('0');
+ }finally{await db.end();}
+});

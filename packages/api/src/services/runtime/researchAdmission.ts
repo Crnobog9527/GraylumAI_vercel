@@ -5,6 +5,7 @@
 // claim against it), a start threshold for this phase, and on staging the same entry in the test window.
 // The run's call ceiling counts the extra model call that reads a tool result plus every supplier subcall.
 import { z } from 'zod';
+import type {ResearchAdmissionRejection, ResearchRejectionObserver, ResearchRouteRejection} from './researchAdmissionDiagnostics';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { readProviderPrices, resolveProviderPrice } from '../billingProviderPrices';
 import { decimal } from '../bill2/decimal';
@@ -48,6 +49,8 @@ export interface ResearchAdmissionInput {
   /** Whether the required context still fits with these extra tool bytes plus the result reserve (within `inputBytes` if given). */
   fits: (extraBytes: number, inputBytes?: number) => boolean;
   now?: () => Date;
+  onRejected?: ResearchRejectionObserver;
+  requiredTools?: readonly ResearchToolName[];
 }
 
 export interface ResearchAdmission { research: FrozenResearchTurn; tools: ResearchToolName[]; policies: ToolCallPolicy[] }
@@ -64,42 +67,55 @@ async function thresholdKeys(admin: SupabaseClient): Promise<Set<string> | null>
   return new Set([...counts].filter(([, count]) => count === 1).map(([key]) => key));
 }
 
-/** null = this turn offers no research tool (switch off, nothing priced, or no room); never an admission failure. */
+/** null = fail closed; the observer records which gate refused without exposing its input. */
 export async function admitResearchTurn(input: ResearchAdmissionInput): Promise<ResearchAdmission | null> {
   const state = await readResearchToolsConfig(input.admin);
   const config = state.config;
-  if (!config.enabled) return null;
+  const routes: NonNullable<ResearchAdmissionRejection['routes']> = [];
+  const reject = (reason: ResearchAdmissionRejection['reason'], details: Partial<ResearchAdmissionRejection> = {}) => {
+    input.onRejected?.({reason, configRevision: state.revision, modelCalls: input.modelCalls,
+      offeredTools: input.offeredTools, maxTools: input.maxTools, configuredRoutes: config.routes.length, routes, ...details});
+    return null;
+  };
+  if (!config.enabled) return reject(state.source === 'invalid' ? 'CONFIG_UNAVAILABLE'
+    : state.source === 'default' ? 'CONFIG_MISSING' : 'CONFIG_DISABLED');
   const subcalls = Math.min(config.limits.maxSubcallsPerRound, RUN_MAX_CALLS - input.modelCalls - 1);
   const room = input.maxTools - input.offeredTools;
-  if (subcalls < 1 || room < 1) return null;
+  if (subcalls < 1) return reject('CALL_LIMIT', {subcalls});
+  if (room < 1) return reject('TOOL_LIMIT');
   const now = input.now?.() ?? new Date();
   let prices: Awaited<ReturnType<typeof readProviderPrices>>;
   let thresholds: Set<string> | null;
-  try { [prices, thresholds] = await Promise.all([readProviderPrices(input.admin), thresholdKeys(input.admin)]); }
-  catch { return null; }
-  if (!thresholds) return null;
+  try { prices = await readProviderPrices(input.admin); }
+  catch { return reject('PRICE_CONFIG_UNAVAILABLE'); }
+  try { thresholds = await thresholdKeys(input.admin); }
+  catch { return reject('THRESHOLD_CONFIG_UNAVAILABLE'); }
+  if (!thresholds) return reject('THRESHOLD_CONFIG_UNAVAILABLE');
   const priced = new Map<string, { entry: ResearchToolsConfig['routes'][number]; policy: ToolCallPolicy }>();
   for (const entry of config.routes) {
-    if (!config.vendors[entry.vendor].enabled) continue;
-    if (entry.platform !== 'web' && !config.verifiedPlatforms.includes(entry.platform)) continue;
+    const skipped = (reason: ResearchRouteRejection) => {
+      routes.push({vendor: entry.vendor, platform: entry.platform, kind: entry.kind, reason});
+    };
+    if (!config.vendors[entry.vendor].enabled) { skipped('VENDOR_DISABLED'); continue; }
+    if (entry.platform !== 'web' && !config.verifiedPlatforms.includes(entry.platform)) { skipped('PLATFORM_UNVERIFIED'); continue; }
     const model = `${entry.vendor}:${entry.route}`;
     // RUNTIME-PROD: production has no window; the research switch, vendor hard caps and price entries approve a route.
     const production = input.real?.mode === 'production';
     const windowEntry = production ? undefined : input.real?.toolPolicies?.find(policy => policy.model === model);
-    if (input.real && !production && !windowEntry) continue;
+    if (input.real && !production && !windowEntry) { skipped('WINDOW_POLICY_MISSING'); continue; }
     let policy: ToolCallPolicy;
     try {
       const account = windowEntry?.account ?? (production ? PRODUCTION_RESEARCH_ACCOUNT : LOCAL_RESEARCH_ACCOUNT);
       policy = toolCallPolicy({ vendor: entry.vendor, account, route: entry.route,
         purposes: [RESEARCH_PHASE], maxUnitsPerCall: entry.maxUnitsPerCall,
         price: resolveProviderPrice(prices.config, { provider: entry.vendor, route: entry.route }, input.defaultMultiplier, now) });
-    } catch { continue; }
+    } catch { skipped('PRICE_UNAVAILABLE'); continue; }
     // Staging: the window must approve exactly this frozen price (runtime_test_window_allowed compares entries).
-    if (windowEntry && canonical(windowEntry) !== canonical(policy)) continue;
-    if (Date.parse(policy.toolPricing.validUntil) <= Date.parse(input.deadline)) continue;
+    if (windowEntry && canonical(windowEntry) !== canonical(policy)) { skipped('WINDOW_PRICE_MISMATCH'); continue; }
+    if (Date.parse(policy.toolPricing.validUntil) <= Date.parse(input.deadline)) { skipped('PRICE_EXPIRES_BEFORE_DEADLINE'); continue; }
     // A window reserves for its highest m; production has none, so the run multiplier follows the route (attachResearchTurn).
-    if (!production && decimal(policy.multiplier) > decimal(input.runMultiplier)) continue;
-    if (!thresholds.has(`${model}\n${RESEARCH_PHASE}`)) continue;
+    if (!production && decimal(policy.multiplier) > decimal(input.runMultiplier)) { skipped('MULTIPLIER_EXCEEDS_WINDOW'); continue; }
+    if (!thresholds.has(`${model}\n${RESEARCH_PHASE}`)) { skipped('START_THRESHOLD_MISSING_OR_DUPLICATE'); continue; }
     priced.set(`${entry.platform}:${entry.kind}`, { entry, policy });
   }
   const has = (platform: SocialPlatform | 'web', kind: string) => priced.has(`${platform}:${kind}`);
@@ -113,10 +129,17 @@ export async function admitResearchTurn(input: ResearchAdmissionInput): Promise<
     ...(has('web', 'web_fetch') ? ['web_fetch'] as const : []),
   ]);
   const tools = POSITIONING_RESEARCH_TOOLS.filter(name => offered.has(name));
-  // All or nothing: a partial benchmark tool set could not finish its flow.
-  if (!tools.length || tools.length > room) return null;
+  const missingBenchmarkRoutes = config.benchmarkPlatforms.flatMap(platform =>
+    [...(BENCHMARK_ROUTE_KINDS[platform]?.kinds ?? []), 'keyword_posts' as const]
+      .filter(kind => !has(platform, kind)).map(kind => ({platform, kind})));
+  const routeDetails = {pricedRoutes: priced.size, missingBenchmarkRoutes};
+  // The benchmark step cannot silently proceed with only unrelated web tools.
+  if (!tools.length) return reject('NO_ELIGIBLE_TOOLS', {...routeDetails, eligibleTools: 0});
+  if (input.requiredTools?.some(name => !tools.includes(name)))
+    return reject('REQUIRED_TOOLS_UNAVAILABLE', {...routeDetails, requiredTools: input.requiredTools.length, eligibleTools: tools.length});
+  if (tools.length > room) return reject('TOOL_LIMIT', {eligibleTools: tools.length});
   const fastOnly = fastSearchOnly({ routes: [...priced.values()].map(({ entry }) => entry) });
-  if (!input.fits(researchToolBytes(tools, fastOnly) + RESEARCH_RESULT_RESERVE_BYTES)) return null;
+  if (!input.fits(researchToolBytes(tools, fastOnly) + RESEARCH_RESULT_RESERVE_BYTES)) return reject('CONTEXT_CAPACITY');
   const used = [...priced.values()].filter(({ entry }) => entry.platform === 'web'
     ? (entry.kind === 'web_fetch' ? offered.has('web_fetch') : offered.has('web_search'))
     : fetchable.includes(entry.platform) && (BENCHMARK_ROUTE_KINDS[entry.platform]!.kinds.includes(entry.kind as never)
@@ -167,9 +190,16 @@ export async function attachResearchTurn(input: Omit<ResearchAdmissionInput, 'mo
   settings?: Promise<SettingsRead>; actorId?: string; sessionId?: string }): Promise<boolean> {
   const { context, billing } = input;
   const primary = billing.callPolicy.find(policy => policy.modelId === context.modelId);
-  if (!primary?.payg || !billing.rules.billingUnit) return false;
+  if (!primary?.payg || !billing.rules.billingUnit) {
+    input.onRejected?.({reason: 'BILLING_PROFILE_UNAVAILABLE'});
+    return false;
+  }
   // One more serial tool round must still fit the profile's message budget (freezePaygMessageBudget).
-  if (2 + 4 * Math.min(context.maxToolCalls + 1, context.maxTurns) > primary.payg.maxMessages) return false;
+  const requiredMessages = 2 + 4 * Math.min(context.maxToolCalls + 1, context.maxTurns);
+  if (requiredMessages > primary.payg.maxMessages) {
+    input.onRejected?.({reason: 'MESSAGE_LIMIT', requiredMessages, maxMessages: primary.payg.maxMessages});
+    return false;
+  }
   const budget = context.purposeBudget;
   const raised = budget?.purpose === 'interactive' && budget.inputBytes < RESEARCH_TURN_INPUT_BYTES ? RESEARCH_TURN_INPUT_BYTES : undefined;
   const host = context.hostTurnContext && input.settings && input.actorId && input.sessionId

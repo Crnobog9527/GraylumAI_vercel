@@ -51,6 +51,7 @@ function fixture(enabled:boolean){
    price('firecrawl',FIRECRAWL_ROUTE,'credit')]},
   billing_payg_start_thresholds:{version:'v1',thresholds:routes.map(r=>({model:`${r.vendor}:${r.route}`,purpose:RESEARCH_PHASE,credits:1}))}};
  let saved:unknown=null;
+ const logs:unknown[]=[];
  const rpc=vi.fn(async(name:string,args:Record<string,unknown>)=>{
   if(name==='runtime_session_context')return {data:{scope:{kind:'positioning_draft',draftId:actor}},error:null};
   if(name==='runtime_admission_replay')return {data:saved,error:null};
@@ -60,7 +61,7 @@ function fixture(enabled:boolean){
  const row={id:modelId,model_id:'fixture/mentor',is_active:'true',provider:'fixture',max_tokens:1000,input_limit:64000};
  const admin={rpc,from:(table:string)=>{
   let key='';
-  const query={select:()=>query,eq:(_column:string,value:string)=>{key=value;return query;},in:async()=>({data:[],error:null}),
+  const query={insert:(row:unknown)=>({abortSignal:async()=>{logs.push(row);return {error:null};}}),select:()=>query,eq:(_column:string,value:string)=>{key=value;return query;},in:async()=>({data:[],error:null}),
    maybeSingle:async()=>({error:null,data:settings[key]===undefined?null:{value:settings[key],revision:'2'}}),
    single:async()=>({data:table==='modules'?{id:moduleId,active:true,skill_id:moduleId,model_id:modelId}:row,error:null})};
   return query;
@@ -70,7 +71,7 @@ function fixture(enabled:boolean){
   historyItems:0,opcTurnToken:requestId,mentorStream:true,hostTurnContext:{stepId:'step-1',opening:false,checklist:[]},
   researchTools:true,payg:{callPolicies:[modelPolicy],billingUnit}};
  const input={sessionId:actor,requestId,input:'帮我找对标账号',network:'deny',selection:{kind:'skill',moduleId,revisionId}};
- return {admin,user,policy,input,rpc};
+ return {admin,user,policy,input,rpc,logs,settings};
 }
 const researchNames=new Set<string>(POSITIONING_RESEARCH_TOOLS);
 
@@ -109,4 +110,46 @@ it('openings and hosts that did not ask for research never get the tools, even w
  const plain=await runtimeAdmissionService(other.user,other.admin,{...other.policy,researchTools:false}).prepare(other.input);
  expect(plain.context.tools).toEqual(['ask_question']);
  expect(toolCallPolicies(plain.billing.callPolicy)).toEqual([]);
+});
+
+// user6 regression: the published benchmark field identifies research work independently of step numbering.
+it('refuses a benchmark-field turn before runtime_admit when research is disabled, with no billable execution',async()=>{
+ const f=fixture(false);
+ const hostTurnContext={stepId:'renamed-research',opening:false,checklist:[{id:'renamed-research',title:'Research',
+  fields:[{id:'benchmark_findings',title:'Findings',required:true,role:'agent_proposal' as const,status:'missing' as const,protected:false}]}]};
+ await expect(runtimeAdmissionService(f.user,f.admin,{...f.policy,hostTurnContext}).prepare(f.input))
+  .rejects.toThrow('RESEARCH_TOOLS_UNAVAILABLE');
+ expect(f.rpc.mock.calls.some(([name])=>name==='runtime_admit')).toBe(false);
+ expect(f.logs).toEqual([expect.objectContaining({message:'research_admission_rejected',request_id:requestId,
+  context:expect.objectContaining({required:true,reason:'CONFIG_DISABLED'})})]);
+ expect(JSON.stringify(f.logs)).not.toContain(f.input.input);
+});
+
+it('requires the research tool set only on the active declared benchmark field, preserving ordinary step discussions',async()=>{
+ for(const enabled of [false,true]) {
+  const f=fixture(enabled);
+  const hostTurnContext={stepId:'research',opening:false,checklist:[{id:'research',title:'Research',
+   fields:[{id:'benchmark_findings',title:'Findings',required:true,role:'agent_proposal' as const,status:'missing' as const,protected:false}]}]};
+  if(enabled){
+   const admitted=await runtimeAdmissionService(f.user,f.admin,{...f.policy,hostTurnContext}).prepare(f.input);
+   expect(admitted.context.tools).toContain('propose_keywords');expect(f.logs).toHaveLength(0);
+  }else{
+   hostTurnContext.stepId='ordinary';
+   await expect(runtimeAdmissionService(f.user,f.admin,{...f.policy,hostTurnContext}).prepare(f.input)).resolves.toBeDefined();
+  }
+ }
+});
+
+it('logs a route threshold refusal and never creates an execution or reservation for a pure-text fallback',async()=>{
+ const f=fixture(true);
+ f.settings.billing_payg_start_thresholds={version:'v1',thresholds:[]};
+ const hostTurnContext={stepId:'research',opening:false,checklist:[{id:'research',title:'Research',
+  fields:[{id:'benchmark_findings',title:'Findings',required:true,role:'agent_proposal' as const,status:'missing' as const,protected:false}]}]};
+ const service=runtimeAdmissionService(f.user,f.admin,{...f.policy,hostTurnContext});
+ // A repeated refused request still cannot create billable work.
+ for(let attempt=0;attempt<2;attempt++)await expect(service.prepare(f.input)).rejects.toThrow('RESEARCH_TOOLS_UNAVAILABLE');
+ expect(f.rpc.mock.calls.some(([name])=>name==='runtime_admit')).toBe(false);
+ expect(f.logs).toHaveLength(2);
+ expect(f.logs[0]).toMatchObject({context:{reason:'NO_ELIGIBLE_TOOLS',routes:expect.arrayContaining([
+  expect.objectContaining({reason:'START_THRESHOLD_MISSING_OR_DUPLICATE'})])}});
 });

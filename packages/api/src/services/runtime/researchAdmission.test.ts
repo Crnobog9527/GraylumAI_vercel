@@ -9,6 +9,7 @@ import { tikhubRouteId } from '../research/vendors/tikhub';
 import { FIRECRAWL_ROUTE } from '../research/vendors/firecrawl';
 import { toolModelId } from '../bill2/toolBilling';
 import type { FrozenPaygRun } from '../bill2/service';
+import type {ResearchAdmissionRejection} from './researchAdmissionDiagnostics';
 import type { StagingPolicy } from './stagingPolicy';
 
 const admin = '11111111-1111-4111-8111-111111111111';
@@ -192,5 +193,69 @@ describe('frozen research context', () => {
     expect(runtimeContext.safeParse({ ...ok, maxTurns: 1, maxToolCalls: 1 }).success).toBe(false);
     expect(runtimeContext.safeParse({ ...ok, maxTurns: 3 }).success).toBe(false);
     expect(runtimeContext.safeParse({ ...ok, hostTurnContext: { ...base.hostTurnContext, opening: true } }).success).toBe(false);
+  });
+});
+
+
+describe('structured research admission diagnostics',()=>{
+  async function denied(db=full(),patch:Record<string,unknown>={}) {
+    const rejections:ResearchAdmissionRejection[]=[];
+    expect(await admitResearchTurn(input(db,{...patch,onRejected:(value:ResearchAdmissionRejection)=>rejections.push(value)}))).toBeNull();
+    expect(rejections).toHaveLength(1);
+    return rejections[0]!;
+  }
+  it('distinguishes off, missing/invalid config, unreadable price/threshold config and exhausted budgets',async()=>{
+    expect((await denied(database({config:{...config(),enabled:false}}))).reason).toBe('CONFIG_DISABLED');
+    expect((await denied(database({}))).reason).toBe('CONFIG_MISSING');
+    expect((await denied(database({config:{secret:'not-a-valid-config'}}))).reason).toBe('CONFIG_UNAVAILABLE');
+    expect((await denied(database({config:config(),prices:'invalid-json'}))).reason).toBe('PRICE_CONFIG_UNAVAILABLE');
+    expect((await denied(database({config:config(),prices:allPrices()}))).reason).toBe('THRESHOLD_CONFIG_UNAVAILABLE');
+    expect(await denied(full(),{modelCalls:31})).toMatchObject({reason:'CALL_LIMIT',modelCalls:31,subcalls:0});
+    expect(await denied(full(),{offeredTools:9})).toMatchObject({reason:'TOOL_LIMIT',offeredTools:9,maxTools:9});
+    expect(await denied(full(),{offeredTools:4})).toMatchObject({reason:'TOOL_LIMIT',eligibleTools:6});
+    expect((await denied(full(),{fits:()=>false})).reason).toBe('CONTEXT_CAPACITY');
+  });
+  it('identifies each filtered route without logging URLs, settings blobs or exception messages',async()=>{
+    const offVendors=Object.fromEntries(Object.keys(config().vendors).map(key=>[key,{enabled:false,hardCapAttested:null}]));
+    const disabled=await denied(database({config:config({vendors:offVendors}),prices:allPrices(),thresholds:allThresholds()}));
+    expect(disabled.routes!.every(route=>route.reason==='VENDOR_DISABLED')).toBe(true);
+    const unverified=await denied(database({config:config({verifiedPlatforms:[],benchmarkPlatforms:[],routes:tiktokRoutes}),
+      prices:allPrices(),thresholds:allThresholds()}));
+    expect(unverified.routes!.every(route=>route.reason==='PLATFORM_UNVERIFIED')).toBe(true);
+    const local=(await admitResearchTurn(input(full())))!;
+    const window=(policies:unknown[])=>({id:admin,toolPolicies:policies}) as unknown as StagingPolicy;
+    const absent=await denied(full(),{real:window([])});
+    expect(absent).toMatchObject({reason:'NO_ELIGIBLE_TOOLS',configRevision:4,configuredRoutes:5,pricedRoutes:0});
+    expect(absent.routes).toHaveLength(5);
+    expect(absent.routes!.every(route=>route.reason==='WINDOW_POLICY_MISSING')).toBe(true);
+    const stale=await denied(full(),{real:window(local.policies.map(p=>({...p,upperUsd:'0.2'})))});
+    expect(stale.routes!.every(route=>route.reason==='WINDOW_PRICE_MISMATCH')).toBe(true);
+    const expired=allPrices();expired.entries=expired.entries.map(p=>({...p,validUntil:new Date(now.getTime()+60000).toISOString()}));
+    const short=await denied(database({config:config(),prices:expired,thresholds:allThresholds()}));
+    expect(short.routes!.every(route=>route.reason==='PRICE_EXPIRES_BEFORE_DEADLINE')).toBe(true);
+    const multiplier=await denied(full(),{runMultiplier:'3'});
+    expect(multiplier.routes!.every(route=>route.reason==='MULTIPLIER_EXCEEDS_WINDOW')).toBe(true);
+    const thresholds=await denied(database({config:config(),prices:allPrices(),thresholds:[]}));
+    expect(thresholds.routes!.every(route=>route.reason==='START_THRESHOLD_MISSING_OR_DUPLICATE')).toBe(true);
+    const unpriced=await denied(database({config:config(),prices:{version:1,entries:[]},thresholds:allThresholds()}));
+    expect(unpriced.routes!.every(route=>route.reason==='PRICE_UNAVAILABLE')).toBe(true);
+    expect(JSON.stringify([absent,stale,short,multiplier,thresholds,unpriced])).not.toMatch(/https|secret|evidenceHash|verifiedAt|official list/);
+  });
+  it('refuses a benchmark step with only partial/web tools, naming the missing benchmark routes',async()=>{
+    const db=database({config:config(),prices:allPrices(),thresholds:allThresholds().filter(t=>!t.model.startsWith('tikhub:'))});
+    const report=await denied(db,{requiredTools:['propose_keywords','benchmark_discover','benchmark_fetch']});
+    expect(report).toMatchObject({reason:'REQUIRED_TOOLS_UNAVAILABLE',eligibleTools:2,requiredTools:3});
+    expect(report.missingBenchmarkRoutes).toEqual(expect.arrayContaining([{platform:'tiktok',kind:'keyword_posts'}]));
+  });
+  it('reports the extra-message budget and missing billing profile before altering the frozen run',async()=>{
+    const billing={contractVersion:'bill2.v2',callPolicy:[{modelId:admin,payg:{maxMessages:5}}],rules:{billingUnit:{}},limits:{maxCalls:3}} as unknown as FrozenPaygRun;
+    const context={modelId:admin,maxToolCalls:1,maxTurns:2,tools:['ask_question'],historyItems:0};
+    const reasons:ResearchAdmissionRejection[]=[];
+    const args={admin:full(),context,billing,fits:()=>true,onRejected:(value:ResearchAdmissionRejection)=>reasons.push(value)};
+    expect(await attachResearchTurn(args as Parameters<typeof attachResearchTurn>[0])).toBe(false);
+    expect(reasons).toEqual([{reason:'MESSAGE_LIMIT',requiredMessages:10,maxMessages:5}]);
+    billing.callPolicy=[];reasons.length=0;
+    expect(await attachResearchTurn(args as Parameters<typeof attachResearchTurn>[0])).toBe(false);
+    expect(reasons).toEqual([{reason:'BILLING_PROFILE_UNAVAILABLE'}]);
   });
 });

@@ -66,3 +66,19 @@ it('a refusal released before admission says why and never claims the request is
  expect(release(Object.assign(new Error('{"issues":[]}'),{data:{httpStatus:400,code:'BAD_REQUEST',path:'opc.mentorTurnStream'}}))).toBe(DEFINITE_REFUSAL_NOTICE);
  expect(release(Object.assign(new Error(RUNTIME_INPUT_TOO_LONG_MESSAGE),{data:{httpStatus:412,code:'PRECONDITION_FAILED',path:'opc.prepareStep'}}))).toBe(RUNTIME_INPUT_TOO_LONG_MESSAGE);
 });
+
+
+it('research refusal is shown as a recoverable search notice and restores the input for retry without an execution',async()=>{
+ const {RESEARCH_TOOLS_UNAVAILABLE_MESSAGE,RESEARCH_TOOLS_CONTEXT_CAPACITY_MESSAGE}=await import(
+  '../../../../../../../../packages/api/src/shared/runtimeAdmissionMessages');
+ for(const message of [RESEARCH_TOOLS_UNAVAILABLE_MESSAGE,RESEARCH_TOOLS_CONTEXT_CAPACITY_MESSAGE]){
+  const values=new Map([['key',JSON.stringify({request:{draftId:'d',stepId:'s',requestId:'a',input:'请生成关键词卡'}})]]);
+  const storage={getItem:(key:string)=>values.get(key)??null,setItem:()=>{},removeItem:(key:string)=>{values.delete(key);}};
+  let restored='';
+  const refusal=Object.assign(new Error(message),{data:{httpStatus:412,code:'PRECONDITION_FAILED',path:'opc.mentorTurnStream'}});
+  expect(releaseRejectedAnswer(storage,'key','a',refusal,value=>{restored=value;},false)).toBe(true);
+  expect(admissionMessage(refusal)).toBe(message);
+  expect(admissionMessage(refusal)).toContain('未扣积分');
+  expect(restored).toBe('请生成关键词卡');expect(values.size).toBe(0);
+ }
+});
