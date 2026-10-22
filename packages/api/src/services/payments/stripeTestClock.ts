@@ -4,7 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { stripeTestClockStagingOpen } from './methodCheckoutGate';
 import { resolveStripeScope } from './stripeCheckoutPersistence';
 import type { StripeScope } from './purchaseFacts';
-import { PAYMENT_EVIDENCE_CONFLICT } from './stripeWebhookError';
+import { PAYMENT_EVIDENCE_CONFLICT, STRIPE_TEST_CLOCK_NOT_READY } from './stripeWebhookError';
 
 type Env = Record<string, string | undefined>;
 export const STRIPE_TEST_CLOCK_BINDING = Object.freeze({ projectId: 'prj_N9BO48YSAYBQ5Nrvzd3WA9wrQEpC',
@@ -36,8 +36,12 @@ export async function readStripeTestClock(stripe: Stripe, customerId: string, us
   if (!clockId) throw new Error(PAYMENT_EVIDENCE_CONFLICT);
   const clock = await stripe.testHelpers.testClocks.retrieve(clockId);
   if (clock.object !== 'test_helpers.test_clock' || clock.id !== clockId || clock.livemode !== false
-    || clock.status !== 'ready' || !Number.isSafeInteger(clock.frozen_time) || clock.frozen_time <= 0
+    || (clock.status !== 'ready' && clock.status !== 'advancing')
+    || !Number.isSafeInteger(clock.frozen_time) || clock.frozen_time <= 0
     || !Number.isFinite(new Date(clock.frozen_time * 1000).getTime())) throw new Error(PAYMENT_EVIDENCE_CONFLICT);
+  // A valid clock may still be advancing when Stripe delivers its subscription/invoice events.
+  // Keep retrying without accepting the old frozen time or reporting conflicting payment facts.
+  if (clock.status === 'advancing') throw new Error(STRIPE_TEST_CLOCK_NOT_READY);
   return { customerId, clockId, asOf: new Date(clock.frozen_time * 1000).toISOString() };
 }
 /** No caller-supplied comparison time: every observation is a fresh, scoped provider read. */

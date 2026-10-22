@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const resolveScope = vi.hoisted(() => vi.fn());
 vi.mock('./stripeCheckoutPersistence', () => ({ resolveStripeScope: resolveScope }));
 import { observeStripeTestClock, refreshStripeTestClockOrder, refreshStripeTestClockUser, stripeTestClockRuntimeOpen, STRIPE_TEST_CLOCK_BINDING } from './stripeTestClock';
+import { stripeWebhookErrorCode } from './stripeWebhookError';
 const env = { VERCEL: '1', VERCEL_ENV: 'production', VERCEL_PROJECT_PRODUCTION_URL: 'auth-staging.graylum.com',
   VERCEL_GIT_COMMIT_REF: 'staging', VERCEL_GIT_REPO_OWNER: 'Crnobog9527', VERCEL_GIT_REPO_SLUG: 'GraylumAI_vercel',
   VERCEL_PROJECT_ID: 'prj_N9BO48YSAYBQ5Nrvzd3WA9wrQEpC', V3_RUNTIME_STAGING_PROJECT_ID: 'prj_N9BO48YSAYBQ5Nrvzd3WA9wrQEpC',
@@ -77,13 +78,43 @@ describe('authoritative narrow Stripe test-clock context', () => {
     expect(f.clocks.retrieve).not.toHaveBeenCalled(); expect(f.rpc).not.toHaveBeenCalled();
   });
   it.each([
-    { id: 'clock_other' }, { object: 'customer' }, { livemode: true }, { status: 'advancing' }, { status: 'internal_failure' },
+    { id: 'clock_other' }, { object: 'customer' }, { livemode: true }, { status: 'internal_failure' },
     { frozen_time: 0 }, { frozen_time: -1 }, { frozen_time: AS_OF + 0.5 }, { frozen_time: Number.MAX_SAFE_INTEGER },
   ])('never guesses a failed, wrong or unready clock time: %j', async patch => {
     const f = fixture(); Object.assign(f.clock, patch);
     await expect(observeStripeTestClock(f.db, f.stripe, scope, order, env)).rejects.toThrow('PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT');
     expect(f.rpc).not.toHaveBeenCalled();
   });
+  it.each(['card', 'card_cn'])('retries advancing %s observations without accepting stale time', async method => {
+    const f = fixture();
+    const source = { ...order, payment_method: method, stripe_managed_payments: method === 'card' };
+    f.clock.status = 'advancing';
+    const observe = () => observeStripeTestClock(f.db, f.stripe, scope, source, env);
+    const attempts = await Promise.allSettled([observe(), observe()]);
+    for (const attempt of attempts) {
+      expect(attempt.status).toBe('rejected');
+      if (attempt.status === 'rejected') {
+        expect(attempt.reason.message).toBe('PAY_STRIPE_TEST_CLOCK_NOT_READY');
+        expect(stripeWebhookErrorCode(attempt.reason)).toBe('PAY_STRIPE_TEST_CLOCK_NOT_READY');
+      }
+    }
+    expect(f.rpc).not.toHaveBeenCalled();
+    f.clock.status = 'ready';
+    f.clock.frozen_time += 3600;
+    const ready = await Promise.all([observe(), observe()]);
+    expect(ready).toEqual([expect.objectContaining({ asOf: new Date(f.clock.frozen_time * 1000).toISOString() }),
+      expect.objectContaining({ asOf: new Date(f.clock.frozen_time * 1000).toISOString() })]);
+    expect(f.rpc).toHaveBeenCalledTimes(2);
+    expect(f.clocks.retrieve).toHaveBeenCalledTimes(4);
+  });
+  it.each([{ id: 'other' }, { object: 'customer' }, { livemode: true },
+    { frozen_time: 0 }, { frozen_time: AS_OF + 0.5 }, { frozen_time: Number.MAX_SAFE_INTEGER }])(
+    'keeps invalid advancing clock evidence a conflict: %j', async patch => {
+      const f = fixture(); Object.assign(f.clock, { status: 'advancing' }, patch);
+      await expect(observeStripeTestClock(f.db, f.stripe, scope, order, env))
+        .rejects.toThrow('PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT');
+      expect(f.rpc).not.toHaveBeenCalled();
+    });
   it('persists only the freshly read clock time and exact environment binding, re-reading every duplicate', async () => {
     const f = fixture();
     const observed = await observeStripeTestClock(f.db, f.stripe, scope, order, env);
@@ -116,7 +147,8 @@ describe('authoritative narrow Stripe test-clock context', () => {
       if (missing === 'unready') f.clock.status = 'advancing';
       const observed = observeStripeTestClock(f.db, f.stripe, actualScope, mainland, actualEnv);
       if (['environment', 'scope-live', 'order-live'].includes(missing)) await expect(observed).resolves.toBeNull();
-      else await expect(observed).rejects.toThrow('PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT');
+      else await expect(observed).rejects.toThrow(missing === 'unready'
+        ? 'PAY_STRIPE_TEST_CLOCK_NOT_READY' : 'PAY_COMMON_PAYMENT_EVIDENCE_CONFLICT');
       expect(f.rpc).not.toHaveBeenCalled();
     });
   it.each([
