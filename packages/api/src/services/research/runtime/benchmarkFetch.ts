@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { accountMetrics, suppliedWholeHistory, type EvidenceItem } from '../benchmark/metrics';
 import { classifyAccount, qualifyFetchedAccount } from '../benchmark/classify';
+import { topicRelevance } from '../benchmark/relevance';
 import { authorizeBenchmarkFetch } from '../tools/authorize';
 import { shortfallNotice } from './shortfall';
 import { toolEnvelope } from '../tools/envelope';
@@ -34,6 +35,9 @@ export async function benchmarkFetch(ctx: ResearchToolContext, args: ResearchToo
   if (!authorization.ok) return toolEnvelope({ status: 'not_confirmed', reason: authorization.reason });
   const rows: ResearchItem[] = [];
   let partial = false;
+  // Read at most once per call, and only when an account was really fetched; a read failure only drops the label.
+  let sessionKeywords: Promise<string[]> | undefined;
+  const keywords = () => (sessionKeywords ??= (ctx.store.sessionKeywords?.() ?? Promise.resolve([])).catch(() => []));
   let stopReason: string | null = null;
   let stopBudget = false;
   for (const account of authorization.accounts) {
@@ -138,7 +142,9 @@ export async function benchmarkFetch(ctx: ResearchToolContext, args: ResearchToo
       const metrics = accountMetrics({ profile, posts, followersItem: results[routes.followersFrom]?.[0],
         complete: suppliedWholeHistory(results.account_profile?.[0], posts) }, ctx.now());
       const classification = qualifyFetchedAccount(metrics, classifyAccount(metrics, ctx.config.recentGrowth, ctx.now()));
-      const evidence = { ...account, metrics, classification, fetchedAt: ctx.now().toISOString() };
+      // BENCHMARK-COVERAGE: how much of the account is on the confirmed niche (a label, never a qualification rule).
+      const relevance = topicRelevance(posts, await keywords());
+      const evidence = { ...account, metrics, classification, ...(relevance ? { relevance } : {}), fetchedAt: ctx.now().toISOString() };
       await ctx.store.fetchFinish(claim.fetchId, claim.attempt, 'succeeded', evidence);
       rows.push({ fields: { ...account, evidence: JSON.stringify(evidence) }, missing: metrics.missing });
     } catch (error) {
