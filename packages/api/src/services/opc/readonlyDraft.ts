@@ -59,6 +59,17 @@ function hasConfirmedContent(projection: ReturnType<typeof readonlyDraftProjecti
 }
 
 /**
+ * The sidebar list keeps a read-only draft exactly while SQL finds something confirmed in it, including a published
+ * version that the current round no longer shows. Ask the same list; if it cannot be read, keep the page (fail open).
+ */
+async function retainedInList(raw: Raw, rpc: (name: string, args: Record<string, unknown>) => Promise<unknown>) {
+  try {
+    const list = await rpc('opc_query', {});
+    return !Array.isArray(list) || list.some((row) => (row as { draftId?: unknown } | null)?.draftId === raw.draftId);
+  } catch { return true; }
+}
+
+/**
  * The draft read: the confirmed-only projection when the conversation was deleted, otherwise the full read.
  * A deleted conversation with nothing confirmed has nothing left to show, so it reads as not found.
  */
@@ -66,7 +77,8 @@ function hasConfirmedContent(projection: ReturnType<typeof readonlyDraftProjecti
 export async function draftReadResponse(raw: any, rpc: (name: string, args: Record<string, unknown>) => Promise<unknown>) {
   if (raw?.conversationDeleted) {
     const projection = readonlyDraftProjection(raw);
-    if (!hasConfirmedContent(projection)) throw new TRPCError({ code: 'NOT_FOUND', message: 'OPC_DRAFT_NOT_FOUND' });
+    if (!hasConfirmedContent(projection) && !await retainedInList(raw, rpc))
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'OPC_DRAFT_NOT_FOUND' });
     return projection;
   }
   return withStepConfirmation(await withReportFlag(raw, rpc));
