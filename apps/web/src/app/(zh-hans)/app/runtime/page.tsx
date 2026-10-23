@@ -109,7 +109,8 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  const view=trpc.runtime.view.useQuery({sessionId},{enabled:Boolean(sessionId),...viewPolling.options});
  const router=useRouter();
  // A deleted conversation (here, in another tab, or just before a reload) never stays open: start a new one.
- const erased=Boolean(view.error)&&classifyErasureError(view.error,'preview').type==='gone';
+ // NOT_FOUND (someone else's or a missing one, which read the same) leaves the same way.
+ const erased=Boolean(view.error)&&(classifyErasureError(view.error,'preview').type==='gone'||view.error?.data?.code==='NOT_FOUND');
  useEffect(()=>{if(erased)router.replace('/app/positioning');},[erased,router]);
  // A resumed turn may settle charges: re-read the balance as each streamed turn does.
  // "继续" streams too: the same execution and resume token over runtime.resumeStream (runner is declared below).
