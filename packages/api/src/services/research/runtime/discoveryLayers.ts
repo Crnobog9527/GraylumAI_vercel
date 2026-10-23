@@ -11,7 +11,7 @@ import type { ResearchItem, SocialPlatform } from '../vendors/types';
 import type { DiscoveryRecord } from './store';
 import type { SupplierRequest } from './subcall';
 import { canonicalAccount, parseProfileLink } from '../tools/accountLinks';
-import { selectRoute } from '../vendors/config';
+import { BENCHMARK_ROUTE_KINDS, selectRoute } from '../vendors/config';
 import { socialRequest, type ResearchToolContext } from './toolContext';
 
 /** Platforms whose keyword search costs 0.01 USD a call (Owner A: half the ceiling of the 0.001 USD platforms). */
@@ -137,10 +137,13 @@ export async function deepen(input: DeepenInput): Promise<void> {
     // Layer 4: web pages that list this niche's creators; the accounts their links name are leads like any other.
     // Only while the round would otherwise end without a card: it is the lowest-yield layer, so a card of 8–11 does not
     // pay for it.
+    // A platform screened through one of the author's own videos (YouTube) cannot screen a channel known only by its link,
+    // so the web layer would pay for leads it can never check.
     const web = selectRoute(ctx.config, 'web', 'web_search');
-    if (web.ok && web.vendor === 'parallel' && !input.cardable()) {
+    const screenable = BENCHMARK_ROUTE_KINDS[platform]?.followersFrom !== 'post_detail';
+    if (web.ok && web.vendor === 'parallel' && screenable && !input.cardable()) {
       for (const keyword of d.keywords.slice(0, WEB_QUERIES)) {
-        if (done()) return;
+        if (done() || input.cardable()) return;
         const query = `${keyword} ${PLATFORM_NAMES[platform] ?? platform} creators`;
         const result = await pay(platform, { vendor: 'parallel', route: web.route, query, mode: 'fast' }, 'webSearches');
         if (!result || isStopped()) break;

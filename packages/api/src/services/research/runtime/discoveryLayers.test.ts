@@ -195,4 +195,24 @@ describe('deeper discovery layers', () => {
     expect(web).not.toHaveBeenCalled();
     expect(envelope.candidateCard).toMatchObject({ shown: true, selectable: 9 });
   });
+
+  it('stops before a second web search once the first one\'s leads made a card possible', async () => {
+    const queries: string[] = [];
+    const page = (handles: string[]): ResearchItem => ({ url: 'https://example.com/list', missing: [],
+      fields: { title: 'list', excerpt: handles.map(h => `https://www.tiktok.com/@${h}`).join(' ') } });
+    // 7 first-page authors, then the first web page names one more: 8 can show, the second query is never paid for.
+    const f = fixture('tiktok', { firstPage: keyword => keyword === 'one' ? Array.from({ length: 7 }, (_, i) => `a${i}`) : [],
+      web: query => { queries.push(query); return [page(['webeight', 'webnine'])]; } });
+    const envelope = await f.run();
+    expect(queries).toEqual(['one TikTok creators']);
+    expect(envelope.candidateCard).toMatchObject({ shown: true, selectable: 8 });
+  });
+
+  it('skips the web layer on YouTube, whose channels can only be screened through a video found by the search', async () => {
+    const web = vi.fn(() => [] as ResearchItem[]);
+    const f = fixture('youtube', { firstPage: () => [], web }, ['keyword_posts', 'account_posts', 'post_detail']);
+    const envelope = await f.run();
+    expect(web).not.toHaveBeenCalled();
+    expect(envelope.coverage.platforms.youtube.spent.webSearches).toBe(0);
+  });
 });
