@@ -13,7 +13,7 @@ const good = JSON.stringify({ tone: '口语', sentenceLength: '短', openings: '
   platforms: '', samples: ['哎下班到家都七点了，咋整。'] });
 function admin(begin: unknown = { replayed: false, version: { id: 'v1' }, material }) {
   const calls: Array<[string, Record<string, unknown>]> = [];
-  return { calls, rpc: vi.fn(async (name: string, args: Record<string, unknown>) => {
+  return { calls, rpc: vi.fn(async (name: string, args: Record<string, unknown>): Promise<{ data: unknown; error: unknown }> => {
     calls.push([name, args]);
     if (name === 'voice_generation_begin') return { data: begin, error: null };
     if (name === 'voice_generation_finish') return { data: { id: 'v1', status: args.failure_code ? 'failed' : 'draft' }, error: null };
@@ -23,6 +23,7 @@ function admin(begin: unknown = { replayed: false, version: { id: 'v1' }, materi
 const deps = (db: ReturnType<typeof admin>) => ({ admin: db as never, actorId: 'a1', budget: { modelCallTimeout: vi.fn() } as never,
   transport: () => ({}) as never, callGate: () => vi.fn(async () => ({ ok: true })) as never });
 const finish = (db: ReturnType<typeof admin>) => db.calls.find(([name]) => name === 'voice_generation_finish')?.[1];
+const finishes = (db: ReturnType<typeof admin>) => db.calls.filter(([name]) => name === 'voice_generation_finish').map(([, args]) => args);
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -31,7 +32,7 @@ beforeEach(() => {
   mocks.billing = {
     claimPaygCall: vi.fn(async () => ({ id: 'c1', state: 'claimed' })),
     dispatchOnce: vi.fn(async () => ({ dispatched: true, observation: {} })),
-    closeRun: vi.fn(async () => ({})), finalizeRun: vi.fn(async () => ({ closed: true })),
+    closeRun: vi.fn(async () => ({})), finalizeRun: vi.fn(async () => ({ closed: true, state: 'settled' })),
     requestCancel: vi.fn(async () => ({})), recordReceipt: vi.fn(),
   };
 });
@@ -41,7 +42,26 @@ describe('generateVoiceProfile', () => {
     const db = admin();
     expect((await generateVoiceProfile(deps(db), 'r', [])).status).toBe('draft');
     expect(mocks.billing.closeRun).toHaveBeenCalledWith('r1', 'delivered', expect.objectContaining({ kind: 'usable_result' }));
-    expect(finish(db)).toMatchObject({ failure_code: null, settled: true, result: expect.objectContaining({ tone: '口语' }) });
+    // Saved first (not yet settled), then marked settled once the run is final.
+    expect(finishes(db)).toEqual([expect.objectContaining({ settled: false, result: expect.objectContaining({ tone: '口语' }) }),
+      expect.objectContaining({ settled: true, result: null, failure_code: null })]);
+    expect(db.rpc.mock.invocationCallOrder[1]).toBeLessThan(mocks.billing.closeRun!.mock.invocationCallOrder[0]!);
+  });
+  it('keeps the run with the daily recovery while its cost is pending', async () => {
+    mocks.billing.finalizeRun!.mockResolvedValue({ closed: true, state: 'cost_pending' });
+    const db = admin();
+    await generateVoiceProfile(deps(db), 'r', []);
+    expect(finishes(db)).toEqual([expect.objectContaining({ settled: false, result: expect.objectContaining({ tone: '口语' }) })]);
+  });
+  it('a database failure while saving the profile leaves the run open, never closed as delivered', async () => {
+    const db = admin();
+    db.rpc.mockImplementation(async (name: string, args: Record<string, unknown>) => {
+      db.calls.push([name, args]);
+      if (name === 'voice_generation_begin') return { data: { replayed: false, version: { id: 'v1' }, material }, error: null };
+      return { data: null, error: { message: 'connection reset' } };
+    });
+    await expect(generateVoiceProfile(deps(db), 'r', [])).rejects.toThrow('VOICE_UNAVAILABLE');
+    expect(mocks.billing.closeRun).not.toHaveBeenCalled();
   });
   it('releases the run and records the failure when the balance cannot cover the call', async () => {
     mocks.billing.claimPaygCall!.mockResolvedValue({ id: null, state: 'waiting_credits' });
