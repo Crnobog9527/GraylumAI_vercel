@@ -50,6 +50,11 @@ export function reportPositioningComplete(): boolean {
   return sendGaEvent(ANALYTICS_CONFIG.gaMeasurementId, 'positioning_complete');
 }
 
+/** A paywall was shown to the user (opened once per display). `scene` names which paywall; no user or order ID. */
+export function reportPaywallView(scene: 'report'): boolean {
+  return sendGaEvent(ANALYTICS_CONFIG.gaMeasurementId, 'paywall_view', { scene });
+}
+
 /** A Stripe checkout session was created and the user is about to be sent to it (plan §3.1: currency, value and
  * the catalog item ID only; the value is the order's pre-tax amount from the server). */
 export function reportBeginCheckout(itemId: string, value: number | null): boolean {
