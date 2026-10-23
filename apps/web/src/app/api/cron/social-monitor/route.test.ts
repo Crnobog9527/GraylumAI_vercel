@@ -108,5 +108,5 @@ it('alerts on Post for Me cleanup that stopped retrying, with counts only, and s
   mocks.run.mockResolvedValue({ failures: [], stuck: { connections: 2, requests: 1 } });
   await call();
   expect(mocks.sentry).toHaveBeenCalledWith('PUBLISH_MONITOR_CLEANUP_STUCK', expect.objectContaining({
-    fingerprint: ['PUBLISH_MONITOR_CLEANUP_STUCK'], extra: { connections: 2, requests: 1 } }));
+    fingerprint: ['PUBLISH_MONITOR_CLEANUP_STUCK'], extra: { connections: 2, requests: 1, page: '/admin/publish-monitor/cleanup' } }));
 });

@@ -9,6 +9,6 @@ export function reportPublishMonitorStuck(stuck: { connections: number; requests
   const code = 'PUBLISH_MONITOR_CLEANUP_STUCK';
   captureMessage(code, {
     level: 'error', fingerprint: [code], tags: { category: 'publish_monitor', code },
-    extra: { connections: stuck.connections, requests: stuck.requests },
+    extra: { connections: stuck.connections, requests: stuck.requests, page: '/admin/publish-monitor/cleanup' },
   });
 }
