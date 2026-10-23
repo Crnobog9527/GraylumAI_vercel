@@ -3,12 +3,12 @@ import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { logger } from '../../lib/logger';
 import { voiceProfile, type VoiceProfile } from '../voice/profile';
-import { VOICE_GUIDE, withPrimaryAddenda } from './primaryInstructions';
+import { VOICE_GUIDE, VOICE_GUIDES, withPrimaryAddenda } from './primaryInstructions';
 
 /** VOICE (Master Plan 5.3 step 4): what admission freezes for a run that may write in the user's voice. Only the version id:
  * its text is read again when the run executes, so a deleted version is never read again (0337 voice_profile_read). */
 /** Without a version: the user has no confirmed profile (and has not turned the voice off), so the Skill only hints once. */
-export const frozenVoiceProfile = z.object({ guide: z.literal(VOICE_GUIDE), versionId: z.string().uuid().optional(),
+export const frozenVoiceProfile = z.object({ guide: z.enum(VOICE_GUIDES), versionId: z.string().uuid().optional(),
   version: z.number().int().positive().optional(), modules: z.array(z.string().uuid()).min(1).max(16) }).strict();
 export type FrozenVoiceProfile = z.infer<typeof frozenVoiceProfile>;
 type Rpc = { rpc(name: string, args: Record<string, unknown>): PromiseLike<{ data: unknown; error: unknown }> };
