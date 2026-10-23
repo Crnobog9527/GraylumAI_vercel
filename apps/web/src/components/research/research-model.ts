@@ -53,7 +53,7 @@ export function callCredits(call: Pick<ResearchCall, "state" | "credits">): stri
 
 export const DATA_KIND_LABELS: Record<ResearchCall["dataKind"], string> = {
   keyword_posts: "关键词作品", account_profile: "账号资料", account_posts: "近期作品",
-  account_relation: "粉丝数", post_detail: "作品详情", web_search: "网页搜索", web_fetch: "网页正文",
+  account_relation: "粉丝数", post_detail: "作品详情", account_search: "搜索账号", web_search: "网页搜索", web_fetch: "网页正文",
 };
 
 const record = (value: unknown): Record<string, unknown> =>
