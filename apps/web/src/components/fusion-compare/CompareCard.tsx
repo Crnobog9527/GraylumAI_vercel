@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Check, Loader2, Square } from 'lucide-react';
 import { trpc } from '@/trpc/client';
 import { MessageMarkdown } from '@/components/chat/MessageMarkdown';
-import { chargedCredits, columnPhase, compareErrorText, heldCredits, type ColumnPhase, type ReadColumn } from './compare-view';
+import { chargedCredits, columnPhase, compareErrorText, heldCredits, stoppedLabel, type ColumnPhase, type ReadColumn } from './compare-view';
 import styles from './compare.module.css';
 
 type View = { compareId: string; state: string; question?: string | null; chargedCredits?: number; columns: ReadColumn[];
@@ -117,7 +117,7 @@ export function CompareCard({ compareId, names, onAdopted, onQuote }: {
                 <strong>{names[column.modelId] ?? '模型'}</strong>
                 <span className={styles.phase} data-phase={phase}>
                   {phase === 'streaming' && <Loader2 size={13} className={styles.spin} />}
-                  {phase === 'pending' ? `结果待核对，暂时冻结 ${heldCredits(column)} 积分` : PHASE_LABEL[phase]}
+                  {phase === 'pending' ? `结果待核对，暂时冻结 ${heldCredits(column)} 积分` : phase === 'stopped' ? stoppedLabel(column) : PHASE_LABEL[phase]}
                 </span>
               </div>
               <div className={styles.answer}>{text ? <MessageMarkdown text={text} streaming={phase === 'streaming'} /> : <p className={styles.muted}>{

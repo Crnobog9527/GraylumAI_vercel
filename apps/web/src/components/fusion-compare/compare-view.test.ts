@@ -69,3 +69,20 @@ describe('which failures spend the start request id', () => {
     expect(isDefiniteRefusal(new Error('NetworkError when attempting to fetch resource.'))).toBe(false);
   });
 });
+
+import { stoppedLabel } from './compare-view';
+describe('a stopped column is never called free when it was charged', () => {
+  const stopped = (charged: number | null): ReadColumn => ({ column: 0, runId: 'r', modelId: 'm', body: null,
+    billing: { reservedCredits: 9, chargedCredits: charged, closed: true }, call: { callId: 'c', state: 'settled', dispatched: true, verdict: 'user_stopped' } });
+  it('user_stopped is a stop, with wording that follows what was charged', () => {
+    expect(columnPhase(stopped(4), 'stopped')).toBe('stopped');
+    expect(stoppedLabel(stopped(4))).toBe('已停止，按已生成的部分计费 4 积分');
+    expect(stoppedLabel(stopped(0))).toBe('已停止，不收费');
+    expect(stoppedLabel(stopped(null))).toBe('已停止，不收费');
+  });
+  it('an unavailable server code keeps the start request id', () => {
+    expect(isDefiniteRefusal({ message: 'FUSION_ADMISSION_UNAVAILABLE' })).toBe(false);
+    expect(isDefiniteRefusal({ message: 'FUSION_SETTINGS_UNAVAILABLE' })).toBe(false);
+    expect(isDefiniteRefusal({ message: 'FUSION_COMPARE_PRICE_CHANGED' })).toBe(true);
+  });
+});

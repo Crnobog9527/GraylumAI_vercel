@@ -39,7 +39,8 @@ export function compareDraftProblems(c: CompareSettings, maxModels: number): str
 export function FusionCompareGroupSettings({ maxModels }: { maxModels: number }) {
   const settings = trpc.fusionSettings.get.useQuery(undefined, { staleTime: 0, retry: false });
   if (settings.isLoading) return <p style={muted}>正在读取对比设置…</p>;
-  if (!settings.data) return <p role="alert" style={{ color: 'var(--color-destructive)' }}>{settingsErrorText(settings.error)}</p>;
+  // A read failure is a status line, not an alert: this form sits inside the Fusion settings card, whose own read errors are the alert.
+  if (!settings.data) return <p role="status" style={{ color: 'var(--color-destructive)' }}>对比设置：{settingsErrorText(settings.error)}</p>;
   return <CompareForm key={JSON.stringify(settings.data.compare)} saved={settings.data} maxModels={maxModels} onSaved={() => settings.refetch()} />;
 }
 
@@ -72,7 +73,7 @@ function CompareForm({ saved, maxModels, onSaved }: { saved: FusionSettingsValue
         <Switch id="fusion-compare-enabled" checked={compare.enabled} onCheckedChange={enabled => set({ enabled })} />
         <Label htmlFor="fusion-compare-enabled" style={{ color: 'var(--text-secondary)' }}>开启多模型对比（关掉后输入框不显示入口）</Label>
       </div>
-      {models.error ? <p role="alert" style={{ color: 'var(--color-destructive)' }}>模型列表读不到：测试窗口可能没开或已过期。</p> : null}
+      {models.error ? <p role="status" style={{ color: 'var(--color-destructive)' }}>模型列表读不到：测试窗口可能没开或已过期。</p> : null}
       <fieldset className="space-y-2">
         <legend className="mb-1 text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>可选模型和默认勾选（用户看到的是这里的真实模型名）</legend>
         {usable.length === 0 && !models.isLoading ? <p style={muted}>还没有模型通过对比准入（需要对比用途的计费档案和报价）。</p> : null}

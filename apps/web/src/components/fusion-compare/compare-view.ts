@@ -53,8 +53,9 @@ export function compareErrorText(error: unknown): string {
   const message = error && typeof error === 'object' && 'message' in error ? String((error as { message: unknown }).message) : '';
   return REFUSALS[message] ?? '多模型对比暂时出了点问题，请稍后再试。';
 }
-/** A refusal the server states with a compare/report/positioning code: the request was not admitted, so its id is spent. */
-export const isDefiniteRefusal = (error: unknown) => /^(FUSION|REPORT)_[A-Z_]+$|^POSITIONING_REQUIRED$/
+/** A refusal the server states with a compare/report/positioning code: the request was not admitted, so its id is spent.
+ * An "unavailable" code (database or settings read) is not one: the server keeps that request's record recoverable by its id. */
+export const isDefiniteRefusal = (error: unknown) => /^(FUSION|REPORT)_(?![A-Z_]*UNAVAILABLE)[A-Z_]+$|^POSITIONING_REQUIRED$/
   .test(error && typeof error === 'object' && 'message' in error ? String((error as { message: unknown }).message) : '');
 export const isUpgradeRefusal = (error: unknown) => /FUSION_COMPARE_FORBIDDEN|FUSION_MEMBERSHIP_REQUIRED/
   .test(error && typeof error === 'object' && 'message' in error ? String((error as { message: unknown }).message) : '');
@@ -69,6 +70,8 @@ export type ColumnPhase = 'queued' | 'streaming' | 'done' | 'failed' | 'pending'
  * or stopped. `streaming` is only ever set by the page while its own request runs. */
 export function columnPhase(column: ReadColumn, compareState: string): ColumnPhase {
   if (column.call?.verdict === 'usable' || (column.body && column.call?.verdict === null)) return 'done';
+  // A stop after dispatch settles at the known usage (it can charge); the card must not call it free (see stoppedLabel).
+  if (column.call?.verdict === 'user_stopped') return 'stopped';
   if (column.call?.verdict) return 'failed';
   if (column.billing?.closed) return column.call?.dispatched ? 'failed' : 'stopped';
   if (column.call?.dispatched) return 'pending';
@@ -79,3 +82,7 @@ export function columnPhase(column: ReadColumn, compareState: string): ColumnPha
 export const heldCredits = (column: ReadColumn) => column.billing?.closed ? 0
   : Math.max(0, (column.billing?.reservedCredits ?? 0) - (column.billing?.chargedCredits ?? 0));
 export const chargedCredits = (column: ReadColumn) => column.billing?.chargedCredits ?? 0;
+
+/** The label of a stopped column: one stopped after dispatch is charged for what was already used, so it never says "free". */
+export const stoppedLabel = (column: ReadColumn) =>
+  chargedCredits(column) > 0 ? `已停止，按已生成的部分计费 ${chargedCredits(column)} 积分` : '已停止，不收费';

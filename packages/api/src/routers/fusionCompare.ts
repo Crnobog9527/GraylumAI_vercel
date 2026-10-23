@@ -61,8 +61,10 @@ export const fusionCompareRouter = router({
   list: reader.input(z.object({ sessionId: uuid }).strict()).query(async ({ ctx, input }) => {
     const cards = await compareRpc<Array<{ config?: { models?: string[] } }>>(ctx.admin, 'fusion_compare_list',
       { p_actor_id: ctx.user.id, p_session_id: input.sessionId });
-    // Real model names for exactly the models these cards used, independent of the current allowlist or the switch.
-    return { cards, names: await compareModelNames(ctx.admin, cards.flatMap(card => card.config?.models ?? [])) };
+    // Real model names for exactly the models these cards used, independent of the current allowlist or the switch. A failed
+    // name lookup never hides the cards (their dispatch and stop controls must stay): the page then shows a generic label.
+    const names = await compareModelNames(ctx.admin, cards.flatMap(card => card.config?.models ?? [])).catch(() => ({}));
+    return { cards, names };
   }),
   /** "At most X credits": priced per chosen model, nothing recorded, no paid judgement; repeatable. */
   estimate: worker.input(request).mutation(({ ctx, input }) => ctx.compare.estimate(input)),
