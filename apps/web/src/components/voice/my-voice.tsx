@@ -25,7 +25,8 @@ export function MyVoice({ onOpenDocuments }: { onOpenDocuments: () => void }) {
   // Once a state read made after this page opened shows nothing generating, a kept request id has a final outcome: the next
   // click must start a new generation, never replay the old one. Never from cached state (a remount still holds the state
   // from before the paid call), or a click before the fresh read would start and charge a second generation (#1262 review).
-  const fresh = query.isFetchedAfterMount && !query.isFetching;
+  // A failed refetch also counts as "fetched after mount" and keeps the old data, so success is required too.
+  const fresh = query.isFetchedAfterMount && query.isSuccess && !query.isFetching;
   useEffect(() => {
     if (canClearRequestId(fresh, state, generate.isPending)) sessionStorage.removeItem(REQUEST_KEY);
   }, [fresh, state, generate.isPending]);
