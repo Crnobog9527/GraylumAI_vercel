@@ -10,13 +10,20 @@ const db = (result: Result | (() => never)) => ({
 describe('public publish-monitor features', () => {
   it('names own data only when the switch is exactly true, and the review only on top of it', async () => {
     expect(await readPublicFeatures(db({ data: [{ key: 'publish_monitor_enabled', value: true },
-      { key: 'publish_monitor_review_enabled', value: true }], error: null }))).toEqual({ ownData: true, weeklyReview: true });
+      { key: 'publish_monitor_review_enabled', value: true }], error: null }))).toEqual({ ownData: true, weeklyReview: true, publish: false });
     expect(await readPublicFeatures(db({ data: [{ key: 'publish_monitor_enabled', value: 'true' },
       { key: 'publish_monitor_review_enabled', value: true }], error: null }))).toEqual(NO_PUBLIC_FEATURES);
     expect(await readPublicFeatures(db({ data: [{ key: 'publish_monitor_review_enabled', value: true }], error: null })))
       .toEqual(NO_PUBLIC_FEATURES);
     expect(await readPublicFeatures(db({ data: [{ key: 'publish_monitor_enabled', value: true }], error: null })))
-      .toEqual({ ownData: true, weeklyReview: false });
+      .toEqual({ ownData: true, weeklyReview: false, publish: false });
+  });
+  it('names one-click publishing only when its own listing switch is on as well', async () => {
+    expect(await readPublicFeatures(db({ data: [{ key: 'publish_monitor_enabled', value: true },
+      { key: 'publish_monitor_publish_listed', value: true }], error: null })))
+      .toEqual({ ownData: true, weeklyReview: false, publish: true });
+    expect(await readPublicFeatures(db({ data: [{ key: 'publish_monitor_publish_listed', value: true }], error: null })))
+      .toEqual(NO_PUBLIC_FEATURES);
   });
   it('shows nothing when the read fails', async () => {
     expect(await readPublicFeatures(db({ data: null, error: { message: 'boom' } }))).toEqual(NO_PUBLIC_FEATURES);

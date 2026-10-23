@@ -90,7 +90,7 @@ export function PaywallPlanPicker({ plans, billing, selected, disabled, quoteOpt
 
 /**
  * Pro/Gold comparison; only rows the backend or an Owner decision backs (no unlaunched features). The publishing-and-
- * data rows (paywall v25 "发布与数据") follow the admin switches; one-click publishing is not named until it ships.
+ * data rows (paywall v25 "发布与数据") follow the admin switches; one-click publishing has its own, off until it ships.
  */
 export function PaywallCompareTable({ plans }: { plans: PaywallPlan[] }) {
   const features = trpc.publishMonitor.features.useQuery(undefined, { retry: false, staleTime: 300_000 }).data;
@@ -99,6 +99,7 @@ export function PaywallCompareTable({ plans }: { plans: PaywallPlan[] }) {
   const no = <Minus className="inline h-4 w-4" aria-label="没有" style={{ color: 'var(--text-disabled)' }} />;
   const rows: Array<[string, (plan: PaywallPlan) => ReactNode]> = [
     ['每月积分', plan => monthlyCredits(plan).toLocaleString('en-US')],
+    ...(features?.publish ? [['一键发布到海外平台（TikTok、Instagram、YouTube 等）', () => yes] as [string, () => ReactNode]] : []),
     ...(features?.ownData ? [['查看海外平台自有账号近 30 天作品数据', () => yes] as [string, () => ReactNode]] : []),
     ...(features?.weeklyReview ? [['对标账号监控、90 天趋势、每周自动复盘',
       (plan: PaywallPlan) => (plan.level === 'gold' ? yes : no)] as [string, (plan: PaywallPlan) => ReactNode]] : []),

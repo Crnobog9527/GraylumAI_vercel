@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
 const useQueryMock = vi.hoisted(() => vi.fn(() => ({ data: undefined, isError: false })));
-const featuresMock = vi.hoisted(() => vi.fn(() => ({ data: undefined as undefined | { ownData: boolean; weeklyReview: boolean } })));
+const featuresMock = vi.hoisted(() => vi.fn(() => ({ data: undefined as undefined | { ownData: boolean; weeklyReview: boolean; publish?: boolean } })));
 vi.mock('@/trpc/client', () => ({ trpc: { settings: { getPublicOffers: { useQuery: useQueryMock } },
   publishMonitor: { features: { useQuery: featuresMock } } } }));
 import { faqItems } from '@/lib/landing-content';
@@ -48,7 +48,7 @@ describe('pricing plans', () => {
     expect(html).toContain('/app/profile?tab=subscription&amp;buy=gold&amp;cycle=monthly');
   });
 
-  it('names publishing-and-data rows only while their switches are on, and never one-click publishing', () => {
+  it('names publishing-and-data rows only while their switches are on; one-click publishing only on its own switch', () => {
     const render = () => text(renderToStaticMarkup(createElement(PricingPlans, { plans: PLANS, links: LINKS })));
     featuresMock.mockReturnValue({ data: undefined });
     expect(render()).not.toMatch(/作品数据|每周自动复盘|一键发布/);
@@ -60,6 +60,8 @@ describe('pricing plans', () => {
     const row = html.match(/<tr[^>]*><td[^>]*>对标账号监控、90 天趋势、每周自动复盘<\/td>(.*?)<\/tr>/)?.[1] ?? '';
     expect(row.match(/aria-label="(有|没有)"/g)).toEqual(['aria-label="没有"', 'aria-label="有"']);
     expect(text(html)).not.toContain('一键发布');
+    featuresMock.mockReturnValue({ data: { ownData: true, weeklyReview: true, publish: true } });
+    expect(render()).toContain('一键发布到海外平台');
     featuresMock.mockReturnValue({ data: undefined });
   });
 
