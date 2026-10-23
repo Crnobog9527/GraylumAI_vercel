@@ -9,12 +9,13 @@ import { readPackageRefundCash, type RefundRequest, type RefundStripe } from './
 import { resolveStripeScope } from './stripeCheckoutPersistence';
 import { subscriptionRefundPriorPro } from './subscriptionRefundPriorPro';
 import { disputeAllowsRefund } from './disputeRefundEligibility';
+import { isAbandonedRenewalInvoice } from './abandonedRenewalInvoice';
 import {
   readPreviewOrder, readSubscriptionRefundEvidence,
   type PreviewDb, type PreviewOrder, type SubscriptionRefundEvidence,
 } from './subscriptionRefundEvidence';
 
-export type SubscriptionRefundStripe = RefundStripe & Pick<Stripe, 'invoices' | 'invoicePayments'>;
+export type SubscriptionRefundStripe = RefundStripe & Pick<Stripe, 'invoices' | 'invoicePayments' | 'subscriptions'>;
 export type SubscriptionRefundPreviewRequest = Omit<RefundRequest, 'feePermitted'> & {
   feePermitted: 'confirmed' | 'not_permitted' | 'unknown';
 };
@@ -96,7 +97,8 @@ async function readInvoiceHistory(db: PreviewDb, stripe: SubscriptionRefundStrip
         requireEvidence(invoice.object === 'invoice' && invoice.livemode === (order.payment_mode === 'live')
           && objectId(invoice.parent?.subscription_details?.subscription) === subscriptionId,
         'PAY_REFUND_INVOICE_MISMATCH');
-        // Open/draft invoices may still complete. They cannot prove a closed history.
+        // Open/draft invoices may still complete. They cannot prove a closed history, except a renewal Stripe gave up on.
+        if (await isAbandonedRenewalInvoice(stripe, invoice, order.payment_mode === 'live')) continue;
         requireEvidence(['paid', 'void', 'uncollectible'].includes(invoice.status ?? ''), 'PAY_REFUND_PROVIDER_HISTORY_UNRESOLVED');
         if (invoice.status !== 'paid') continue;
         const matches = evidence.refs.filter(row => ['invoice', 'payment'].includes(row.object_type)

@@ -191,4 +191,32 @@ describe('subscription refund read-only preview', () => {
       amount: -1, ledger_type: null, type: 'deduction', source_type: null, idempotency_key: null, counts_as_spend: null } as Row);
     await unresolved(f);
   });
+  describe('renewal invoice Stripe gave up on (Owner 2026-10-24 A)', () => {
+    const dead = (patch: Row = {}) => ({ id: 'in_dead', object: 'invoice', livemode: false, status: 'open', amount_paid: 0,
+      amount_due: 6900, currency: 'usd', next_payment_attempt: null, billing_reason: 'subscription_cycle',
+      parent: { subscription_details: { subscription: 'sub_fixture' } }, status_transitions: { paid_at: null }, ...patch });
+    const withDead = (patch: Row = {}, status = 'canceled') => {
+      const f = fixture();
+      f.invoices.push(dead(patch) as unknown as (typeof f.invoices)[number]);
+      Object.assign(f.stripe.subscriptions, { retrieve: vi.fn(async (id: string) => ({ id, livemode: false, status })) });
+      return f;
+    };
+    it('no longer turns an otherwise complete history into manual review', async () => {
+      const f = withDead();
+      expect(await run(f)).toMatchObject({ status: 'eligible', treatment: 'first_purchase', executable: false });
+      expect(f.write).not.toHaveBeenCalled();
+    });
+    it.each([
+      ['Stripe will still retry', { next_payment_attempt: 1798199939 }, 'canceled'],
+      ['something was paid', { amount_paid: 100 }, 'canceled'],
+      ['the subscription is not canceled', {}, 'past_due'],
+    ])('still requires review when %s', async (_name, patch, status) => {
+      await unresolved(withDead(patch, status));
+    });
+    it('takes the invoice back into the history once the buyer pays it', async () => {
+      await unresolved(withDead({ status: 'paid', amount_paid: 6900,
+        status_transitions: { paid_at: Date.parse('2026-10-09T00:00:00Z') / 1000 } }));
+    });
+  });
 });
+
