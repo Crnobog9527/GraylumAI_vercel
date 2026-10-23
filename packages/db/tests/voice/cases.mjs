@@ -146,6 +146,7 @@ export async function runCases({db,report}) {
  assert.ok(await one(db,'SELECT content_deleted_at IS NOT NULL v FROM bill2_runs WHERE id=$1',[f.run]));
  const candidates=await svc('voice_recovery_candidates',50);
  assert.ok(Array.isArray(candidates.generations)&&Array.isArray(candidates.scrubs));
+ assert.equal(await svc('voice_run_recovery',f.run).catch(e=>e.message),'permission denied for function voice_run_recovery','binding helper is private');
  report.checks.push('receipts of a deleted source wait for the run to close, then are scrubbed once');
 
  // Account erasure removes every voice row.

@@ -277,14 +277,23 @@ $$;
 
 -- Daily backstop (billing-reconcile): generations left open by a closed page, and runs waiting for a scrub. A scrub
 -- waits 30 minutes, so a generation still running when its source was deleted can finish its own settlement first.
+-- The frozen staging binding of a run, as Fusion recovery reads it (0235): recovery never goes through live admission.
+CREATE OR REPLACE FUNCTION public.voice_run_recovery(p_run_id uuid) RETURNS jsonb
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
+ SELECT CASE WHEN r.payload->>'mode'='staging_test' AND r.test_window_id IS NOT NULL THEN jsonb_build_object(
+  'id',r.test_window_id,'callPolicies',r.payload->'callPolicy','creditsPerUsd',r.payload->'rules'->>'creditsPerUsd',
+  'multiplier',r.payload->'rules'->>'multiplier','expiresAt',r.deadline) END
+ FROM bill2_runs r WHERE r.id=p_run_id;
+$$;
 CREATE OR REPLACE FUNCTION public.voice_recovery_candidates(p_limit integer DEFAULT 50) RETURNS jsonb
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
  SELECT jsonb_build_object(
   'generations',(SELECT coalesce(jsonb_agg(jsonb_build_object('actorId',actor_id,'versionId',id,'runId',billing_run_id,
-    'status',status)),'[]') FROM (SELECT * FROM voice_profile_versions
+    'status',status,'recovery',voice_run_recovery(billing_run_id))),'[]') FROM (SELECT * FROM voice_profile_versions
     WHERE (status='generating' OR (billing_run_id IS NOT NULL AND NOT billing_settled))
      AND updated_at<clock_timestamp()-interval '30 minutes' ORDER BY updated_at LIMIT p_limit) g),
-  'scrubs',(SELECT coalesce(jsonb_agg(jsonb_build_object('actorId',actor_id,'runId',run_id)),'[]')
+  'scrubs',(SELECT coalesce(jsonb_agg(jsonb_build_object('actorId',actor_id,'runId',run_id,
+    'recovery',voice_run_recovery(run_id))),'[]')
    FROM (SELECT * FROM voice_billing_scrubs WHERE created_at<clock_timestamp()-interval '30 minutes'
     ORDER BY created_at LIMIT p_limit) s));
 $$;
@@ -336,7 +345,7 @@ REVOKE ALL ON FUNCTION public.voice_corpus_limit(),public.voice_current_corpus(u
  public.voice_profile_set_enabled(uuid,integer,boolean),public.voice_profile_delete(uuid,uuid),
  public.voice_delete_versions(uuid,uuid[]),public.voice_library_trigger(),public.voice_profile_current(uuid),
  public.voice_profile_read(uuid,uuid),public.voice_recovery_candidates(integer),public.voice_billing_scrub(uuid),
- public.erasure_business_owner(text,jsonb),public.account_erasure_prune_business(uuid,integer),
+ public.voice_run_recovery(uuid),public.erasure_business_owner(text,jsonb),public.account_erasure_prune_business(uuid,integer),
  public.account_erasure_business_remaining(uuid)
  FROM PUBLIC,anon,authenticated,service_role;
 GRANT EXECUTE ON FUNCTION public.voice_state(uuid),public.voice_generation_begin(uuid,uuid,uuid[]),
