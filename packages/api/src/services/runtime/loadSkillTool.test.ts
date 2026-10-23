@@ -34,7 +34,7 @@ beforeEach(() => clearSkillResourceCache());
 describe('load_skill', () => {
   it('reads the frozen package, journals the result and returns the Skill instructions', async () => {
     const call = rpc();
-    const tool = executionLoadSkillTool({executionId: id(9), catalog: [entry()], maxResultBytes: 20000, rpc: call,
+    const tool = executionLoadSkillTool({executionId: id(9), catalog: [entry()], maxResultBytes: 20000, maxLoads: 2, rpc: call,
       assertCanStart: () => {}});
     expect(tool.name).toBe(LOAD_SKILL_TOOL);
     const result = JSON.parse(await tool.execute({name: 'script-writer'}, 'call-1'));
@@ -48,7 +48,7 @@ describe('load_skill', () => {
     const saved = {name: 'script-writer', moduleId: id(1), packageId: id(11), revisionId: id(21), packageHash: descriptor().packageHash,
       instructions: '已保存的说明'};
     const call = rpc(saved);
-    const tool = executionLoadSkillTool({executionId: id(9), catalog: [entry()], maxResultBytes: 20000, rpc: call, assertCanStart: () => {}});
+    const tool = executionLoadSkillTool({executionId: id(9), catalog: [entry()], maxResultBytes: 20000, maxLoads: 2, rpc: call, assertCanStart: () => {}});
     expect(JSON.parse(await tool.execute({name: 'script-writer'}, 'call-1'))).toEqual(saved);
     expect(call.mock.calls.some(([name]) => name === 'read_skill_package')).toBe(false);
   });
@@ -57,7 +57,7 @@ describe('load_skill', () => {
     const onRefused = vi.fn();
     const call = rpc({name: 'script-writer', moduleId: id(1), packageId: id(11), revisionId: id(22), packageHash: 'a'.repeat(64),
       instructions: 'x'});
-    const tool = executionLoadSkillTool({executionId: id(9), catalog: [entry()], maxResultBytes: 20000, rpc: call,
+    const tool = executionLoadSkillTool({executionId: id(9), catalog: [entry()], maxResultBytes: 20000, maxLoads: 2, rpc: call,
       assertCanStart: () => {}, onRefused});
     expect(await tool.execute({name: '别的技能'}, 'c')).toBe(SKILL_LOAD_REFUSED);
     expect(call).not.toHaveBeenCalled();
@@ -68,7 +68,7 @@ describe('load_skill', () => {
 
   it('a refusal the executor classified (a third load, a name not frozen) is permanent', async () => {
     const call = vi.fn(async () => { throw new Error('RUNTIME_SKILL_LOAD_REFUSED'); }) as never;
-    const tool = executionLoadSkillTool({executionId: id(9), catalog: [entry()], maxResultBytes: 20000, rpc: call, assertCanStart: () => {}});
+    const tool = executionLoadSkillTool({executionId: id(9), catalog: [entry()], maxResultBytes: 20000, maxLoads: 2, rpc: call, assertCanStart: () => {}});
     expect(await tool.execute({name: 'script-writer'}, 'c')).toBe(SKILL_LOAD_REFUSED);
   });
 
@@ -78,7 +78,7 @@ describe('load_skill', () => {
       if (name === 'read_skill_package') throw new Error('RUNTIME_SKILL_FILE_REFUSED');
       return args.p_action === 'claim' ? {result: null} : {result: args.p_result};
     }) as never;
-    const tool = executionLoadSkillTool({executionId: id(9), catalog: [entry()], maxResultBytes: 20000, rpc: call,
+    const tool = executionLoadSkillTool({executionId: id(9), catalog: [entry()], maxResultBytes: 20000, maxLoads: 2, rpc: call,
       assertCanStart: () => {}, onRefused});
     expect(await tool.execute({name: 'script-writer'}, 'c')).toBe(SKILL_LOAD_REFUSED);
     expect(onRefused).toHaveBeenCalledOnce();
@@ -98,12 +98,22 @@ describe('load_skill', () => {
         if (first) { first = false; throw failure; }
         return {result: args.p_result};
       }) as never;
-      const tool = executionLoadSkillTool({executionId: id(9), catalog: [entry()], maxResultBytes: 20000, rpc: call,
+      const tool = executionLoadSkillTool({executionId: id(9), catalog: [entry()], maxResultBytes: 20000, maxLoads: 2, rpc: call,
         assertCanStart: () => {}, onRefused});
       await expect(tool.execute({name: 'script-writer'}, 'c')).rejects.toThrow(failure.message);
       clearSkillResourceCache();
     }
     expect(onRefused).not.toHaveBeenCalled();
+  });
+
+  it('stops being offered after the load limit (Owner: at most 2 per reply), counting refused calls too', async () => {
+    const tool = executionLoadSkillTool({executionId: id(9), catalog: [entry()], maxResultBytes: 20000, maxLoads: 2, rpc: rpc(),
+      assertCanStart: () => {}});
+    expect(tool.enabled?.()).toBe(true);
+    await tool.execute({name: 'script-writer'}, 'c1');
+    expect(tool.enabled?.()).toBe(true);
+    await tool.execute({name: 'not-listed'}, 'c2');
+    expect(tool.enabled?.()).toBe(false);
   });
 
   it('declares a small fixed tool definition', () => {

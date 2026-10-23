@@ -34,7 +34,7 @@ export function executionTools(input:{
   name==='read_skill_file'?executionSkillFileTool({executionId,moduleId:context.moduleId!,binding:context.skillFile!,
    rpc:ownerRpc,assertCanStart:()=>budget.assertCanStart(),timing:budget.timing,onRefused:input.onRefused}):
   name===LOAD_SKILL_TOOL?executionLoadSkillTool({executionId,catalog:context.skillCatalog!,maxResultBytes:context.skillCatalogMaxBytes!,
-   rpc:ownerRpc,assertCanStart:()=>budget.assertCanStart(),onRefused:input.onRefused}):
+   maxLoads:context.maxSkillLoads!,rpc:ownerRpc,assertCanStart:()=>budget.assertCanStart(),onRefused:input.onRefused}):
   name===READ_HISTORY_TOOL?executionMentorHistoryTool({executionId,rpc:ownerRpc,assertCanStart:()=>budget.assertCanStart(),
    onRefused:input.onRefused}):
   withSourceWorkProgress(sourceRuntimeTool({name,context,args:input.args,ownerRpc,budget,

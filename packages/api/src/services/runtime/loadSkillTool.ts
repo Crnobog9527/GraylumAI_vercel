@@ -24,9 +24,9 @@ export const SKILL_LOAD_REFUSED = 'This Skill cannot be loaded for this reply. A
 const PERMANENT = /^RUNTIME_SKILL_LOAD_(DENIED|CONFLICT|REFUSED)$/;
 const permanent = (error: unknown) => error instanceof Error && (PERMANENT.test(error.message)
   || error instanceof SkillLoadError && error.code !== 'SOURCE_FAILURE');
-export function loadSkillTool(execute: RuntimeTool['execute']): RuntimeTool {
+export function loadSkillTool(execute: RuntimeTool['execute'], enabled?: () => boolean): RuntimeTool {
   return {
-    name: LOAD_SKILL_TOOL, parameters: loadSkillParameters,
+    name: LOAD_SKILL_TOOL, parameters: loadSkillParameters, ...(enabled ? { enabled } : {}),
     description: 'Load one Skill from the "Available Skills" list by its exact name. Returns that Skill\'s published '
       + 'instructions; follow them within the host rules and continue answering. Read-only.',
     execute,
@@ -67,12 +67,15 @@ function frozenSource(rpc: ToolRpc, entry: SkillCatalogEntry): SkillSource {
 }
 
 export function executionLoadSkillTool(options: {
-  executionId: string; catalog: readonly SkillCatalogEntry[]; maxResultBytes: number;
+  executionId: string; catalog: readonly SkillCatalogEntry[]; maxResultBytes: number; maxLoads: number;
   rpc: ToolRpc; assertCanStart: () => void; onRefused?: () => void;
 }) {
   const catalog = options.catalog.map(entry => catalogEntry.parse(entry));
+  // Every call counts, refused ones too, as the database counts them; a replay after recovery repeats the same sequence.
+  let calls = 0;
   return loadSkillTool(async (arguments_, callId) => {
     options.assertCanStart();
+    calls++;
     const { name } = loadSkillParameters.parse(arguments_);
     try {
       const entry = catalog.find(item => item.name === name);
@@ -96,5 +99,5 @@ export function executionLoadSkillTool(options: {
       options.onRefused?.();
       return SKILL_LOAD_REFUSED;
     }
-  });
+  }, () => calls < options.maxLoads);
 }
