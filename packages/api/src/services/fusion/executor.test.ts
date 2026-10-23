@@ -50,7 +50,8 @@ describe('Fusion executor', () => {
     h.gate.mockResolvedValueOnce({ ok: false, reason: 'call_limited', retryAfter: 30, window: 'minute' } as never);
     h.calls.length = 0;
     await expect(h.executor.run(run, { runId: 'run-1', id: 'call-1', state: 'prepared', fresh: false }, () => 'usable')).rejects.toThrow();
-    expect(h.calls).toEqual(['finalize', 'cancel', 'finalize']);
+    // The request that owns the dispatch (it rotated the token) is the one whose refusal releases the hold.
+    expect(h.calls).toEqual(['rotate', 'finalize', 'cancel', 'finalize']);
   });
   it('saves the body, writes the host verdict, then settles and closes the run', async () => {
     const h = harness(); const onChunk = vi.fn();
@@ -58,6 +59,32 @@ describe('Fusion executor', () => {
     expect(result).toEqual({ state: 'judged', verdict: 'usable', text: '{"issues":[]}' });
     expect(h.calls).toEqual(['dispatch', 'fusion_call_output_save:', 'fusion_call_verdict:usable', 'finalize', 'cancel', 'finalize']);
     expect(h.billing.dispatchOnce).toHaveBeenCalledWith('call-1', run.body, onChunk);
+  });
+  it('a reply the host refuses before saving (positioning fallback marker) is never saved, judged no_delivery and settled free', async () => {
+    const h = harness({ dispatched: true, observation: observation(sse('[[GRAYLUM_POSITIONING_REQUIRED]]')) });
+    const refuse = vi.fn((text: string) => text.startsWith('[[GRAYLUM_POSITIONING_REQUIRED]]'));
+    const result = await h.executor.run(run, { runId: 'run-1', id: 'call-1', state: 'prepared', fresh: true }, () => 'usable', undefined, refuse);
+    expect(result).toEqual({ state: 'judged', verdict: 'no_delivery' });
+    expect(refuse).toHaveBeenCalledWith('[[GRAYLUM_POSITIONING_REQUIRED]]');
+    // No fusion_call_output_save: 0235 allows no_delivery only for a call without a saved body.
+    expect(h.calls).toEqual(['dispatch', 'fusion_call_verdict:no_delivery', 'finalize', 'cancel', 'finalize']);
+  });
+  it('a reply the host does not refuse is saved and judged as before, and `refuse` is optional', async () => {
+    const h = harness();
+    const result = await h.executor.run(run, { runId: 'run-1', id: 'call-1', state: 'prepared', fresh: true }, () => 'usable', undefined, () => false);
+    expect(result).toMatchObject({ state: 'judged', verdict: 'usable' });
+    expect(h.calls).toContain('fusion_call_output_save:');
+  });
+  it('a request that loses the dispatch to another owner never touches the call gate or the shared run', async () => {
+    const h = harness();
+    (h.billing.rotatePrepared as ReturnType<typeof vi.fn>).mockResolvedValue(false);
+    h.gate.mockResolvedValue({ ok: false as const, reason: 'rate_limited' } as never);
+    const result = await h.executor.run(run, { runId: 'run-1', id: 'call-1', state: 'prepared', fresh: false }, () => 'usable');
+    expect(result).toEqual({ state: 'pending', reason: 'not_dispatched' });
+    expect(h.gate).not.toHaveBeenCalled();
+    expect(h.calls).not.toContain('finalize');
+    expect(h.calls).not.toContain('cancel');
+    expect(h.billing.dispatchOnce).not.toHaveBeenCalled();
   });
   it('checks the time budget before dispatch and stops without dispatching when exhausted', async () => {
     const h = harness();
