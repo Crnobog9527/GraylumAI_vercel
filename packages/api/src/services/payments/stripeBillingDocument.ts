@@ -7,6 +7,15 @@ import { resolveStripeScope } from './stripeCheckoutPersistence';
 import { resolveStripeOrderIds } from './stripeReferences';
 import type { PaymentOrderBillingRow } from './orderProjection';
 
+/** Managed Payments adds tax on top of the order's pre-tax amount_total (0237), so the provider
+ * total is compared after taking out the tax the same provider object reports. A tax that is not a
+ * whole non-negative amount within the total never matches. */
+function matchesPreTax(total: number | null | undefined, tax: number | null | undefined, amountTotal: unknown) {
+  const added = tax ?? 0;
+  return typeof total === 'number' && Number.isSafeInteger(total) && Number.isSafeInteger(added)
+    && added >= 0 && added <= total && total - added === Number(amountTotal);
+}
+
 export async function loadStripeBillingDocument(
   stripe: ReturnType<typeof getStripeClient> | null, supabase: SupabaseClient, order: PaymentOrderBillingRow,
 ) {
@@ -31,7 +40,8 @@ export async function loadStripeBillingDocument(
     if (order.stripe_invoice_id) {
       const invoice = await stripe.invoices.retrieve(order.stripe_invoice_id);
       if (invoice.id !== order.stripe_invoice_id || invoice.livemode !== (scope.mode === 'live')
-        || invoice.amount_paid !== Number(order.amount_total) || invoice.currency !== order.currency) {
+        || !matchesPreTax(invoice.amount_paid, (invoice.total_taxes ?? []).reduce((sum, row) => sum + (row.amount ?? 0), 0),
+          order.amount_total) || invoice.currency !== order.currency) {
         throw new Error('PAY_COMMON_INVOICE_RECEIPT_MISMATCH');
       }
       return {
@@ -52,7 +62,8 @@ export async function loadStripeBillingDocument(
 
     if (session.id !== order.stripe_checkout_session_id || session.metadata?.userId !== order.user_id
       || session.metadata?.orderId !== order.id || session.livemode !== (scope.mode === 'live')
-      || session.amount_total !== Number(order.amount_total) || session.currency !== order.currency) {
+      || !matchesPreTax(session.amount_total, session.total_details?.amount_tax, order.amount_total)
+      || session.currency !== order.currency) {
       throw new Error('PAY_COMMON_RECEIPT_MISMATCH');
     }
     if (typeof session.payment_intent === 'string') throw new Error('PAY_COMMON_RECEIPT_NOT_EXPANDED');
