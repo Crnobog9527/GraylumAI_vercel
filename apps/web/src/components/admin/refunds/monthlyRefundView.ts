@@ -73,6 +73,16 @@ export const MONTHLY_REFUND_RULES = [
   '按这笔付款原来的模式退款（测试付款在 Stripe 沙盒退，正式付款退真钱）',
 ] as const;
 
+/** Same checks for the yearly / founder / Pro-to-Gold entry (PAY-REFUND #1248); the server stays the authority. */
+export const SUBSCRIPTION_REFUND_RULES = [
+  '这是该账号第一次购买这类会员（Stripe 银行卡年付、创始会员，或有明确原单的 Pro 升 Gold），不是续费',
+  '付款后 7 天内提交了退款工单',
+  '从这次付款起，整个账户没有用过任何积分',
+  '按这笔付款原来的模式退款（测试付款在 Stripe 沙盒退，正式付款退真钱）',
+] as const;
+
+export const BILLING_CYCLE_LABELS: Record<string, string> = { monthly: '月付', yearly: '年付' };
+
 export const FEE_PERMITTED_LABELS: Record<FeePermitted, string> = {
   confirmed: '法律允许，扣 6% 手续费',
   not_permitted: '法律不允许，不扣手续费',

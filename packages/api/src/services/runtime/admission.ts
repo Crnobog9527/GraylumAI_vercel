@@ -24,7 +24,7 @@ import type {StagingPolicy} from './stagingPolicy';
 import { throwIfContentBindingRefused } from '../opc/contentBindingError';
 import {StagingAccessError,stagingRpcFailure} from './stagingErrors';
 import {readOpenRouterKey} from '../models/openRouterKey';
-import {frozenCallPolicy, type FrozenPaygRun, type FrozenRun} from '../bill2/service';
+import {type FrozenPaygRun, type FrozenRun} from '../bill2/service';
 import { selectRuntimeHistory, fixtureInputCapacity, runtimeScopeInput } from './context';
 import { activateCandidateWithSource, discoverRuntimeCandidates, fittingCandidates, matchingInput, MATCH_INSTRUCTIONS } from './matching';
 import { FREE_CHAT_BASE_INSTRUCTIONS, REPLY_LANGUAGE, REPLY_LANGUAGE_INSTRUCTIONS, workspaceStrategyReserve, withPrimaryAddenda, workspaceFrozen } from './primaryInstructions';
@@ -46,8 +46,7 @@ import {requireAllowedInput} from './moderation';
 import {FREE_CHAT_REQUEST_FORMAT,PLAIN_TEXT_STREAM,plainTextStreamAllowed} from './providerRequest';
 import {admissionDeadline,admittedOutputLimit,timedAdmission} from './admissionLimits';
 import {admitPricing} from './pricingAdmission';
-import {freezeStagingPaygPricing} from './paygPricing';
-import {freezePaygMessageBudget} from './paygMessageBudget';
+import {freezeAdmissionPayg} from './admissionPayg';
 import {isProductionPolicy,readPaygPolicies,realContract,runtimeGateEnvironment} from './realHost';
 import {runAutomaticFinancialRecovery} from './automaticRecovery';
 import {readPositioningGate,judgePositioning,windowBoundKey,refusePositioning,POSITIONING_REFUSAL_CAP,
@@ -444,23 +443,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
      instructions:attachedOrganizer.instructions??'',inputBytes:attachedInputLimit!,historyItems:0,toolBytes:0,
     });
    }
-   if(paygTemplates){
-    // #878 regression: a PAYG call carries at most its profile's maxTools (SQL 0162 caps it at 2). The
-    // history read is the optional extra tool, guided only by its own description, so it alone is dropped.
-    const maxTools=Math.min(...paygTemplates.filter(p=>p.modelId===modelId).map(p=>p.payg?.maxTools??0));
-    if(context.historyRead&&context.tools.length>maxTools){
-     context.tools=context.tools.filter(name=>name!==READ_HISTORY_TOOL);delete context.historyRead;
-    }
-    freezePaygMessageBudget(context,paygTemplates);
-    billing.sourceHash=createHash('sha256').update(JSON.stringify(context)).digest('hex');
-    const templates=paygTemplates.filter(p=>selectedIds.has(p.modelId));
-    const callPolicy=realCalls
-     ?await freezeStagingPaygPricing(admin,realCalls.map(p=>({...p,payg:templates.find(t=>t.modelId===p.modelId)?.payg})))
-     :templates.map(p=>frozenCallPolicy.parse(p));
-    if(callPolicy.length!==selectedIds.size||callPolicy.some(p=>!p.payg))throw new Error('BILL2_PAYG_QUOTE_INVALID');
-    billing={...billing,contractVersion:'bill2.v2',callPolicy,
-     rules:{...billing.rules,billingUnit:realCalls?billing.rules.billingUnit!:policy.payg!.billingUnit},limits:{...billing.limits,credits:0}};
-   }
+   if(paygTemplates)billing=await freezeAdmissionPayg({admin,context,billing,paygTemplates,realCalls,selectedIds,modelId,
+    billingUnit:realCalls?billing.rules.billingUnit!:policy.payg!.billingUnit});
    if(policy.researchTools&&mentorStream&&!opening&&hostTurnContext&&!stepSummary&&
     await guardResearchAdmission({admin,real:policy.real,context,billing,settings,actorId,sessionId:input.sessionId,requestId:input.requestId,
      capacity:(researchToolsBytes,researchHostDeltaBytes,bytes)=>researchCapacity({instructions:instructions+positioningRule,

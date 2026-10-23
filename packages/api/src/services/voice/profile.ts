@@ -14,7 +14,7 @@ export const voiceProfile = z.object({
   phrases: items,
   avoid: items,
   platforms: text(300),
-  samples: z.array(text(400).min(1)).min(1).max(3),
+  samples: z.array(text(400).min(1)).min(2).max(3),
 }).strict();
 export type VoiceProfile = z.infer<typeof voiceProfile>;
 

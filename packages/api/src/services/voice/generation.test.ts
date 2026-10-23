@@ -8,9 +8,9 @@ vi.mock('../fusion/executor', () => ({ fusionResponseText: mocks.text }));
 vi.mock('../runtime/stagingTransport', () => ({ stagingTransport: () => ({}) }));
 import { generateVoiceProfile } from './generation';
 
-const material = [{ documentId: 'd1', filename: 'a.md', text: '哎下班到家都七点了，咋整。' }];
+const material = [{ documentId: 'd1', filename: 'a.md', text: '哎下班到家都七点了，咋整。\n一口锅搞定呗。' }];
 const good = JSON.stringify({ tone: '口语', sentenceLength: '短', openings: '吐槽', stance: '温和', phrases: [], avoid: [],
-  platforms: '', samples: ['哎下班到家都七点了，咋整。'] });
+  platforms: '', samples: ['哎下班到家都七点了，咋整。', '一口锅搞定呗。'] });
 function admin(begin: unknown = { replayed: false, version: { id: 'v1' }, material }) {
   const calls: Array<[string, Record<string, unknown>]> = [];
   return { calls, rpc: vi.fn(async (name: string, args: Record<string, unknown>): Promise<{ data: unknown; error: unknown }> => {

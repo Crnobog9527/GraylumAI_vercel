@@ -11,6 +11,7 @@ export default function AdminRefundsPage() {
     <>
       <AdminPaymentDisputes />
       <AdminMonthlyRefunds />
+      <AdminMonthlyRefunds variant="subscription" />
       <AdminPackageRefunds />
       <AdminStaleRounds />
     </>
