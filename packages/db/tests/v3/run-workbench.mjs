@@ -88,7 +88,8 @@ if(withoutApp&&(!withoutAppSuite||serve||legacyRef||casePattern))throw new Error
 // DB-BASELINE: build the schema from repository files only (baseline/build-from-files.mjs) instead of
 // the local fixture; database/API suites and explicitly bounded Runtime cases.
 const schemaFromFiles=args.includes('--schema-from-files')||opcMode;
-const c2StopOffline = casePattern === '^OPC: MENTOR_STREAM C2_STOP_OFFLINE$';
+const c2StopOrganizer = casePattern === '^OPC: MENTOR_STREAM C2_STOP_ORGANIZER$';
+const c2StopOffline = casePattern === '^OPC: MENTOR_STREAM C2_STOP_OFFLINE$' || c2StopOrganizer;
 const fileBuiltOpcMode=opcMode&&!legacyRef;
 if (c2StopOffline && (!opcMode || !stagingHost || !stagingSchema || !schemaFromFiles
   || previewOptions.persistent || serve || legacyRef || withoutApp))
@@ -983,7 +984,7 @@ try {
         ...(bill2Mode ? ['src/services/bill2/billing.integration.ts'] : []),
         ...(runtimeMode ? WITHOUT_APP_SUITES[cdcEval ? "cdc" : "runtime"].files : []),
         ...(opcMode ? ['src/services/opc/opc.integration.ts',
-          ...(c2StopOffline ? ['src/services/opc/mentor-stop.browser.integration.ts']
+          ...(c2StopOffline ? [c2StopOrganizer ? 'src/services/opc/mentor-stop-organizer.browser.integration.ts' : 'src/services/opc/mentor-stop.browser.integration.ts']
             : mentorStreamTest ? ['src/services/opc/mentor-browser.integration.ts'] : [])] : []),
         "--reporter",
         "verbose",
