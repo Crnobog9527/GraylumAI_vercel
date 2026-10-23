@@ -70,12 +70,18 @@ describe('which failures spend the start request id', () => {
   });
 });
 
-import { stoppedLabel } from './compare-view';
+import { allSettled, stoppedLabel } from './compare-view';
 describe('a stopped column is never called free when it was charged', () => {
   const stopped = (charged: number | null): ReadColumn => ({ column: 0, runId: 'r', modelId: 'm', body: null,
     billing: { reservedCredits: 9, chargedCredits: charged, closed: true }, call: { callId: 'c', state: 'settled', dispatched: true, verdict: 'user_stopped' } });
   it('user_stopped is a stop, with wording that follows what was charged', () => {
     expect(columnPhase(stopped(4), 'stopped')).toBe('stopped');
+    // Closed billing is what makes a stop final; before that its hold is still held.
+    const open = stopped(null); open.billing = { reservedCredits: 9, chargedCredits: null, closed: false };
+    expect(columnPhase(open, 'stopped')).toBe('pending');
+    expect(heldCredits(open)).toBe(9);
+    expect(allSettled([stopped(4), open])).toBe(false);
+    expect(allSettled([stopped(4), stopped(0)])).toBe(true);
     expect(stoppedLabel(stopped(4))).toBe('已停止，按已生成的部分计费 4 积分');
     expect(stoppedLabel(stopped(0))).toBe('已停止，不收费');
     expect(stoppedLabel(stopped(null))).toBe('已停止，不收费');

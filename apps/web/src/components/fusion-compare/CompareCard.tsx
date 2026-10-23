@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Check, Loader2, Square } from 'lucide-react';
 import { trpc } from '@/trpc/client';
 import { MessageMarkdown } from '@/components/chat/MessageMarkdown';
-import { chargedCredits, columnPhase, compareErrorText, heldCredits, stoppedLabel, type ColumnPhase, type ReadColumn } from './compare-view';
+import { allSettled, chargedCredits, columnPhase, compareErrorText, heldCredits, stoppedLabel, type ColumnPhase, type ReadColumn } from './compare-view';
 import styles from './compare.module.css';
 
 type View = { compareId: string; state: string; question?: string | null; chargedCredits?: number; columns: ReadColumn[];
@@ -41,7 +41,9 @@ export function CompareCard({ compareId, names, onAdopted, onQuote }: {
   const view = trpc.fusionCompare.read.useQuery({ compareId }, {
     retry: false, refetchInterval: query => {
       const data = query.state.data as View | undefined;
-      return !data || data.state === 'running' || streaming ? 2000 : false;
+      if (!data || data.state === 'running' || streaming) return 2000;
+      // Stopped but a dispatched column's cost is not confirmed yet: keep looking, slowly, until its billing closes.
+      return allSettled(data.columns) ? false : 10_000;
     } });
   const stop = trpc.fusionCompare.stop.useMutation({ onSettled: () => void view.refetch() });
   const adopt = trpc.fusionCompare.adopt.useMutation();
@@ -80,7 +82,7 @@ export function CompareCard({ compareId, names, onAdopted, onQuote }: {
 
   if (!data) return <section className={styles.card} aria-busy="true"><p className={styles.muted}>正在读取对比…</p></section>;
   const adoptedColumn = data.adoption?.column ?? null;
-  const ended = data.state !== 'running' && !streaming;
+  const ended = data.state !== 'running' && !streaming && allSettled(data.columns);
 
   async function adoptAnswer(column: number) {
     if (adopt.isPending) return;
@@ -124,7 +126,7 @@ export function CompareCard({ compareId, names, onAdopted, onQuote }: {
                 phase === 'queued' || phase === 'streaming' ? '正在生成…' : '没有回答'}</p>}</div>
               <footer className={styles.columnFoot}>
                 {ended && <span>实际扣费 {chargedCredits(column)} 积分</span>}
-                {phase === 'streaming' && <button type="button" className={styles.ghost} disabled={stop.isPending}
+                {(phase === 'streaming' || phase === 'pending') && <button type="button" className={styles.ghost} disabled={stop.isPending}
                   onClick={() => stop.mutate({ compareId, column: column.column })}>停止这一列</button>}
                 {adoptedColumn === column.column && <span className={styles.adopted}><Check size={14} /> 已用这个回答继续</span>}
                 {adoptedColumn === null && phase === 'done' && <button type="button" className={styles.primary} disabled={adopt.isPending}

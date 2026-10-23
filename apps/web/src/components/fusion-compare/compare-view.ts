@@ -71,7 +71,8 @@ export type ColumnPhase = 'queued' | 'streaming' | 'done' | 'failed' | 'pending'
 export function columnPhase(column: ReadColumn, compareState: string): ColumnPhase {
   if (column.call?.verdict === 'usable' || (column.body && column.call?.verdict === null)) return 'done';
   // A stop after dispatch settles at the known usage (it can charge); the card must not call it free (see stoppedLabel).
-  if (column.call?.verdict === 'user_stopped') return 'stopped';
+  // Not free until billing closes: a stop with no confirmed provider cost yet keeps its hold, and recovery may still charge it.
+  if (column.call?.verdict === 'user_stopped') return column.billing?.closed ? 'stopped' : 'pending';
   if (column.call?.verdict) return 'failed';
   if (column.billing?.closed) return column.call?.dispatched ? 'failed' : 'stopped';
   if (column.call?.dispatched) return 'pending';
@@ -86,3 +87,7 @@ export const chargedCredits = (column: ReadColumn) => column.billing?.chargedCre
 /** The label of a stopped column: one stopped after dispatch is charged for what was already used, so it never says "free". */
 export const stoppedLabel = (column: ReadColumn) =>
   chargedCredits(column) > 0 ? `已停止，按已生成的部分计费 ${chargedCredits(column)} 积分` : '已停止，不收费';
+
+/** The compare is over only when every column's billing has closed: a stopped compare may still hold credits for a dispatched
+ * column whose cost is not confirmed, so its totals are not final yet. */
+export const allSettled = (columns: readonly ReadColumn[]) => columns.every(column => column.billing?.closed === true);
