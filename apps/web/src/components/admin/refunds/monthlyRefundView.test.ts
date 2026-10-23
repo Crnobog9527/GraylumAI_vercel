@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   canExecuteMonthlyRefund, canRejectMonthlyRefund, executeReasonLabel, stopAllowsRetry, stoppedExecutionReason, monthlyRefundStages, monthlyRefundStatusLabel,
-  validateMonthlyRefundForm, validateRefundFields,
+  validateMonthlyRefundForm, validateRefundFields, EMPTY_MONTHLY_REFUND_FORM, FEE_UNKNOWN_EVIDENCE, feePermittedPatch,
 } from './monthlyRefundView';
 
 const ORDER = '11111111-1111-4111-8111-111111111111';
@@ -80,5 +80,27 @@ describe('intent presentation', () => {
     expect(canRejectMonthlyRefund({ status: 'approved', claimedAt: null })).toBe(true);
     expect(canRejectMonthlyRefund({ status: 'review_required', claimedAt: '2026-10-09T00:00:00Z' })).toBe(false);
     expect(canRejectMonthlyRefund({ status: 'rejected' })).toBe(false);
+  });
+});
+
+describe('fee default (location unknown means no fee)', () => {
+  it('starts on not_permitted with the placeholder basis, which passes the quote checks', () => {
+    expect(EMPTY_MONTHLY_REFUND_FORM.feePermitted).toBe('not_permitted');
+    expect(EMPTY_MONTHLY_REFUND_FORM.feeEvidence).toBe('location-unknown-no-fee');
+    expect(validateRefundFields({ ...EMPTY_MONTHLY_REFUND_FORM, orderId: ORDER, ticketId: TICKET }, 'quote')).toEqual({});
+  });
+
+  it('clears the placeholder when switching to deduct, so a real basis is required', () => {
+    const patch = feePermittedPatch('confirmed', EMPTY_MONTHLY_REFUND_FORM);
+    expect(patch).toEqual({ feePermitted: 'confirmed', feeEvidence: '' });
+    expect(Object.keys(validateRefundFields({ ...EMPTY_MONTHLY_REFUND_FORM, ...patch }, 'quote'))).toContain('feeEvidence');
+  });
+
+  it('keeps a typed basis and restores the placeholder only when the basis is empty', () => {
+    const typed = { ...EMPTY_MONTHLY_REFUND_FORM, feePermitted: 'confirmed' as const, feeEvidence: 'legal:us-ca:2026-10' };
+    expect(feePermittedPatch('not_permitted', typed)).toEqual({ feePermitted: 'not_permitted', feeEvidence: 'legal:us-ca:2026-10' });
+    expect(feePermittedPatch('not_permitted', { ...typed, feeEvidence: '' }))
+      .toEqual({ feePermitted: 'not_permitted', feeEvidence: FEE_UNKNOWN_EVIDENCE });
+    expect(feePermittedPatch('confirmed', typed)).toEqual({ feePermitted: 'confirmed', feeEvidence: 'legal:us-ca:2026-10' });
   });
 });

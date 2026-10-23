@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ConfirmRefundAction } from './ConfirmRefundAction';
 import { usePackageRefund } from './usePackageRefund';
-import { FEE_PERMITTED_LABELS, REJECT_REASON_LABELS, type FeePermitted, type RejectReason } from './monthlyRefundView';
+import { FEE_PERMITTED_HINT, FEE_PERMITTED_LABELS, REJECT_REASON_LABELS, feePermittedPatch, type FeePermitted, type RejectReason } from './monthlyRefundView';
 
 const cardStyle = { background: 'var(--bg-secondary)', borderColor: 'var(--border-primary)' };
 const money = (minor: number | undefined, currency: string) => `${((minor ?? 0) / 100).toFixed(2)} ${currency.toUpperCase()}`;
@@ -49,7 +49,7 @@ export function AdminPackageRefunds() {
           {field('ticketId', '工单编号', '用户提交的账单类退款工单')}
           <div className="space-y-1.5">
             <Label htmlFor="package-refund-feePermitted" style={{ color: 'var(--text-primary)' }}>能否扣 6% 手续费</Label>
-            <Select value={form.feePermitted} disabled={refund.busy} onValueChange={value => refund.updateForm({ feePermitted: value as FeePermitted })}>
+            <Select value={form.feePermitted} disabled={refund.busy} onValueChange={value => refund.updateForm(feePermittedPatch(value as FeePermitted, form))}>
               <SelectTrigger id="package-refund-feePermitted"><SelectValue placeholder="请选择" /></SelectTrigger>
               <SelectContent>
                 {(Object.keys(FEE_PERMITTED_LABELS) as FeePermitted[]).map(key => (
@@ -58,7 +58,7 @@ export function AdminPackageRefunds() {
               </SelectContent>
             </Select>
             {errors.feePermitted ? <p role="alert" className="text-xs" style={{ color: 'var(--error)' }}>{errors.feePermitted}</p>
-              : <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>按用户所在地法律核对；不确定时先核对，不要猜</p>}
+              : <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{FEE_PERMITTED_HINT}</p>}
           </div>
           {field('feeEvidence', '手续费核对依据', '核对记录的编号，例如 legal:us-ca:2026-10')}
         </div>

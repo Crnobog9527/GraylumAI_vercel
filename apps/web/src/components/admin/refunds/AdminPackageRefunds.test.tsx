@@ -25,6 +25,9 @@ describe('admin credit-pack refund section (PAY-STRIPE-MP 4b-1)', () => {
     expect(html).toContain('6% 手续费只按税前金额算');
     expect(html).toContain('Waffo 会员月付、年付和创始会员均在这里处理');
     expect(html).toContain('退款始终沿原订单渠道执行');
+    // Fee defaults to "not permitted" with the location-unknown basis (Owner 2026-10-22).
+    expect(html).toContain('所在地不确定时选不扣；只有确认当地法律允许才选扣 6%');
+    expect(html).toContain('value="location-unknown-no-fee"');
     expect(html).toContain('data-testid="package-refund-quote-button"');
     // Nothing to approve or execute before a server quote.
     expect(html).not.toContain('package-refund-approve-button');
