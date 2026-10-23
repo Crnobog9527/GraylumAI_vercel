@@ -118,3 +118,15 @@ export function describeAlert(alert: StopLossAlert) {
   }
   return { title: '其他止损告警', detail: '', day: null };
 }
+
+/** Mail state written by the stop-loss notifier (details.notify); only its state and error code are shown. */
+export function describeNotice(alert: StopLossAlert) {
+  const notify = detail(alert.details, 'notify');
+  const state = detail(notify, 'state');
+  const raw = detail(notify, 'lastErrorCode');
+  const code = typeof raw === 'string' && /^[A-Z0-9_]{1,80}$/.test(raw) ? raw : null;
+  if (state === 'sent') return '已发邮件通知';
+  if (state === 'failed') return `邮件没有发出，已停止重试${code ? `（${code}）` : ''}`;
+  if (state === 'pending' && code) return `邮件还没发出，会自动重试（${code}）`;
+  return '等待发送邮件';
+}
