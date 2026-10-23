@@ -98,12 +98,8 @@ export function fusionExecutor(deps: { billing: Billing; admin: SupabaseClient; 
       await settle(run.runId);
       return { state: 'judged', verdict, text };
     },
-    /** A compare column whose body was saved but never judged (interrupted between the two): a compare answer has no
-     * format to check, so the saved body is usable, then the run settles exactly as an uninterrupted call would. */
-    async judgeSaved(runId: string, callId: string) {
-      await rpc('fusion_call_verdict', { p_call_id: callId, p_verdict: 'usable' });
-      return settle(runId);
-    },
+    /** Settles a compare run whose only call already has its verdict (judged on read after an interruption). */
+    settleJudged: (runId: string) => settle(runId),
     /** User stop: cancel each run; undispatched calls are released, dispatched ones settle at known cost. */
     async stop(runIds: string[]) {
       for (const runId of runIds) { await billing.requestCancel(runId); await billing.finalizeRun(runId); }

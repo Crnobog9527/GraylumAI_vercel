@@ -1,12 +1,14 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
--- FUSION-COMPARE PR-2c (docs/launch/tasks/FUSION-COMPARE.md §3.4, §4 fusionCompare.list). Provisional number; the
+-- FUSION-COMPARE PR-2c (docs/launch/tasks/FUSION-COMPARE.md §3.4, §4 fusionCompare.list). Placeholder number 9999; the
 -- controller assigns the final one at merge.
 -- The compare cards of one conversation, so a reloaded page can show them in place and recognise the adopted answer
 -- (adoption.executionId is written only by fusion_compare_adopt, so the page cannot forge it). fusion_compares is closed
 -- to every API role (0290), hence a SECURITY DEFINER reader with the same ownership and deletion checks as
 -- fusion_compare_read. Read only: no table, no existing function and no data change.
--- Rollback: DROP FUNCTION public.fusion_compare_list(uuid,uuid); nothing depends on it except the compare list route,
--- which is behind the compare switch (off by default).
+-- Also fusion_compare_unjudged: compare calls whose answer was saved but whose verdict was never written (the process ended
+-- between the two), for the daily recovery to judge before settlement, as fusion_review_unjudged does for reviews.
+-- Rollback: DROP FUNCTION public.fusion_compare_list(uuid,uuid), public.fusion_compare_unjudged(integer); nothing depends on
+-- them except the compare list route (behind the compare switch, off by default) and the recovery step that lists them.
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 
@@ -29,5 +31,18 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION public.fusion_compare_list(uuid,uuid) FROM PUBLIC,anon,authenticated,service_role;
 GRANT EXECUTE ON FUNCTION public.fusion_compare_list(uuid,uuid) TO service_role;
+
+CREATE OR REPLACE FUNCTION public.fusion_compare_unjudged(p_limit integer)
+RETURNS TABLE(actor_id uuid, compare_id uuid, call_id uuid, run_id uuid)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
+  SELECT fc.actor_id, fc.id, c.id, br.id
+  FROM fusion_compares fc JOIN bill2_runs br ON br.fusion_group_id=fc.group_id AND br.actor_id=fc.actor_id
+  JOIN bill2_calls c ON c.run_id=br.id
+  WHERE fc.group_id IS NOT NULL AND c.fusion_verdict IS NULL AND c.settled_at IS NULL
+    AND EXISTS(SELECT 1 FROM fusion_call_outputs o WHERE o.call_id=c.id)
+  ORDER BY c.created_at, c.id LIMIT least(greatest(coalesce(p_limit,50),1),200);
+$$;
+REVOKE ALL ON FUNCTION public.fusion_compare_unjudged(integer) FROM PUBLIC,anon,authenticated,service_role;
+GRANT EXECUTE ON FUNCTION public.fusion_compare_unjudged(integer) TO service_role;
 
 COMMIT;

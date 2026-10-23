@@ -6,7 +6,7 @@ import { StagingAccessError, stagingProcedureError } from '../services/runtime/s
 import { compareOptions } from '../services/fusion/compareOptions';
 import { compareRpc } from '../services/fusion/compareAdmission';
 import { compareSkillInput } from '../services/fusion/compareLoad';
-import { liveCompare, type CompareCtx } from '../services/fusion/compareLive';
+import { liveCompare, readCompare, stopCompare, type CompareCtx } from '../services/fusion/compareLive';
 import type { ColumnEvent } from '../services/fusion/compareColumn';
 
 const uuid = z.string().uuid();
@@ -21,7 +21,7 @@ function compareError(thrown: unknown, path: string): TRPCError {
   const cause = thrown instanceof TRPCError && thrown.code === 'INTERNAL_SERVER_ERROR' && thrown.cause ? thrown.cause : thrown;
   if (cause instanceof TRPCError) return cause;
   const message = cause instanceof Error ? cause.message : '';
-  if (/^FUSION_[A-Z_]+$/.test(message)) {
+  if (/^(FUSION|REPORT)_[A-Z_]+$/.test(message)) {
     return new TRPCError({ code: forbidden.has(message) ? 'FORBIDDEN' : conflict.has(message) ? 'CONFLICT' : 'BAD_REQUEST', message, cause });
   }
   return stagingProcedureError(cause, path);
@@ -67,10 +67,12 @@ export const fusionCompareRouter = router({
   stream: worker.input(compare.extend({ column: z.number().int().min(0).max(7) }).strict())
     .mutation(async function* ({ ctx, input }): AsyncGenerator<ColumnEvent> { yield* ctx.compare.stream(input); }),
   /** Every column's state, body, charged credits and the total; finishes a compare whose runs are all closed. */
-  read: worker.input(compare).query(({ ctx, input }) => ctx.compare.read(input.compareId)),
+  // Read and stop need no provider call: they stay available when the staging call window has closed.
+  read: reader.input(compare).query(({ ctx, input }) => readCompare(ctx.admin, ctx.user.id, input.compareId,
+    async () => (await liveCompare(ctx as CompareCtx)).settle)),
   /** Stop the whole compare, or one column (after the claim). Undispatched calls are released free. */
-  stop: worker.input(compare.extend({ column: z.number().int().min(0).max(7).optional() }).strict())
-    .mutation(({ ctx, input }) => ctx.compare.stop(input)),
+  stop: reader.input(compare.extend({ column: z.number().int().min(0).max(7).optional() }).strict())
+    .mutation(({ ctx, input }) => stopCompare(ctx.admin, ctx.user.id, input)),
   /** "Use this answer": writes the pair into the main conversation, or returns a quote when it moved on. Free. */
   adopt: worker.input(compare.extend({ column: z.number().int().min(0).max(7), requestId: uuid }).strict())
     .mutation(({ ctx, input }) => ctx.compare.adopt(input)),

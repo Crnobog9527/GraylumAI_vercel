@@ -24,6 +24,35 @@ export type CompareCtx = { hasSupabaseAdminPrivileges?: boolean; supabaseAdmin?:
 type ReadColumn = { column: number; runId: string; body: string | null;
   call: { callId: string; verdict: string | null; inFlight?: boolean; settled?: boolean } | null };
 
+/** The compare view, after judging any column whose body was saved but whose verdict never got written (a crash between
+ * the two): a compare answer has no format to check, so a saved body is usable, as it would have been uninterrupted. Needs
+ * only the admin client, so a compare stays readable when the staging call window has closed; settling the judged run is
+ * attempted through `settle` and otherwise left to the daily recovery (which settles judged calls). */
+export async function readCompare(admin: SupabaseClient, actorId: string, compareId: string, settle?: () => Promise<(runId: string) => Promise<unknown>>) {
+  const read = () => compareRpc<{ columns: ReadColumn[] } | null>(admin, 'fusion_compare_read', { p_actor_id: actorId, p_compare_id: compareId });
+  const view = await read();
+  if (!view) throw new Error('FUSION_COMPARE_DENIED');
+  const unjudged = view.columns.filter(c => c.body !== null && c.call && c.call.verdict === null && !c.call.inFlight);
+  if (!unjudged.length) return view;
+  for (const column of unjudged) {
+    await compareRpc(admin, 'fusion_call_verdict', { p_actor_id: actorId, p_call_id: column.call!.callId, p_verdict: 'usable' }).catch(() => undefined);
+  }
+  const settleRun = await settle?.().catch(() => undefined);
+  if (settleRun) for (const column of unjudged) await settleRun(column.runId).catch(() => undefined);
+  return read();
+}
+
+/** Stop the whole compare or one column: the database cancels and settles, no provider call is needed. */
+export async function stopCompare(admin: SupabaseClient, actorId: string, input: { compareId: string; column?: number }) {
+  let runId: string | null = null;
+  if (input.column !== undefined) {
+    const view = await compareRpc<{ columns: ReadColumn[] } | null>(admin, 'fusion_compare_read', { p_actor_id: actorId, p_compare_id: input.compareId });
+    runId = view?.columns.find(c => c.column === input.column)?.runId ?? null;
+    if (!runId) throw new Error('FUSION_COMPARE_DENIED');
+  }
+  return compareRpc<unknown>(admin, 'fusion_compare_stop', { p_actor_id: actorId, p_compare_id: input.compareId, p_run_id: runId });
+}
+
 /** The live compare for one request: the staging test window, billing, the Fusion executor and the call gate. */
 export async function liveCompare(ctx: CompareCtx) {
   if (!ctx.hasSupabaseAdminPrivileges || !ctx.supabaseAdmin) throw new StagingAccessError('RUNTIME_STAGING_SERVICE_UNAVAILABLE');
@@ -47,32 +76,13 @@ export async function liveCompare(ctx: CompareCtx) {
     rateLimit: async () => requireNewWork(await gate.message(actorId)) });
   const choose = (input: CompareRequestInput) => loadCompareChoice({ admin, user: ctx.userScopedSupabase, actorId }, input);
 
-  /** The compare view, after judging any column whose body was saved but whose verdict never got written (a crash between
-   * the two): a compare answer has no format to check, so a saved body is usable, as it would have been uninterrupted. */
-  async function read(compareId: string) {
-    const view = await compareRpc<{ columns: ReadColumn[] } | null>(admin, 'fusion_compare_read', { p_actor_id: actorId, p_compare_id: compareId });
-    if (!view) throw new Error('FUSION_COMPARE_DENIED');
-    const unjudged = view.columns.filter(c => c.body !== null && c.call && c.call.verdict === null && !c.call.inFlight);
-    if (!unjudged.length) return view;
-    for (const column of unjudged) await executor.judgeSaved(column.runId, column.call!.callId).catch(() => undefined);
-    return compareRpc<unknown>(admin, 'fusion_compare_read', { p_actor_id: actorId, p_compare_id: compareId });
-  }
-
   return {
     estimate: async (input: CompareRequestInput): Promise<CompareEstimate> => estimateCompare(deps(input.modelIds), await choose(input)),
     start: async (input: CompareRequestInput & { requestId: string; shown: Pick<CompareEstimate, 'credits' | 'columns'> }) =>
       startCompare(deps(input.modelIds), { ...await choose(input), requestId: input.requestId, shown: input.shown }),
     stream: (input: { compareId: string; column: number }) => streamCompareColumn({ admin, actorId, executor }, input),
-    read,
-    stop: async (input: { compareId: string; column?: number }) => {
-      let runId: string | null = null;
-      if (input.column !== undefined) {
-        const view = await compareRpc<{ columns: ReadColumn[] } | null>(admin, 'fusion_compare_read', { p_actor_id: actorId, p_compare_id: input.compareId });
-        runId = view?.columns.find(c => c.column === input.column)?.runId ?? null;
-        if (!runId) throw new Error('FUSION_COMPARE_DENIED');
-      }
-      return compareRpc<unknown>(admin, 'fusion_compare_stop', { p_actor_id: actorId, p_compare_id: input.compareId, p_run_id: runId });
-    },
+    /** Settles a run whose only call was just judged (read after an interruption). */
+    settle: (runId: string) => executor.settleJudged(runId),
     adopt: (input: { compareId: string; column: number; requestId: string }) => adoptCompare({ admin, actorId }, input),
   };
 }
