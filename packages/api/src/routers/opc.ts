@@ -12,6 +12,7 @@ import {briefAdoption, contentReaction, topicAdoptionWithSource} from "../servic
 import { dedupeHandoffResults } from "../services/opc/handoff-view";
 import { realHostMode } from "../services/runtime/productionEnvironment";
 import { conversationRename, renameConversation } from "../services/opc/conversationName";
+import { sessionResultEdit, sessionResultFamily, sessionResultSave, sessionResultsList, sessionResultsService } from "../services/opc/sessionResults";
 import {
   opcService,
   opcStart,
@@ -182,6 +183,17 @@ export const opcRouter = router({
   conversationRename: procedure
     .input(conversationRename)
     .mutation(({ ctx, input }) => renameConversation(ctx.supabaseAdmin, ctx.user.id, input)),
+  // C1-lite: this conversation's results folder. The user confirms every write; the AI never writes here.
+  sessionResults: readProcedure.input(sessionResultsList)
+    .query(({ ctx, input }) => sessionResultsService(ctx.supabaseAdmin, ctx.user.id).list(input)),
+  sessionResultVersions: readProcedure.input(sessionResultFamily)
+    .query(({ ctx, input }) => sessionResultsService(ctx.supabaseAdmin, ctx.user.id).versions(input)),
+  sessionResultSave: procedure.input(sessionResultSave)
+    .mutation(({ ctx, input }) => sessionResultsService(ctx.supabaseAdmin, ctx.user.id).save(input)),
+  sessionResultEdit: procedure.input(sessionResultEdit)
+    .mutation(({ ctx, input }) => sessionResultsService(ctx.supabaseAdmin, ctx.user.id).edit(input)),
+  sessionResultDelete: procedure.input(sessionResultFamily)
+    .mutation(({ ctx, input }) => sessionResultsService(ctx.supabaseAdmin, ctx.user.id).remove(input)),
   planRequestState: readProcedure
     .input(
       z
