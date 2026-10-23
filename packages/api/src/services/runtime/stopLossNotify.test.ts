@@ -33,7 +33,8 @@ function fixture(rows: Row[], mailbox: unknown = 'owner@example.test', opts: { r
         like(...args: unknown[]) { filters.push(['like', ...args]); return q; },
         gte(...args: unknown[]) { filters.push(['gte', ...args]); return q; },
         order() { return q; },
-        limit: async () => opts.readError ? { data: null, error: { code: 'x' } } : { data: rows, error: null },
+        range: async (from: number, to: number) => opts.readError ? { data: null, error: { code: 'x' } }
+          : { data: rows.slice(from, to + 1), error: null },
         update(value: Record<string, unknown>) { patch = value; return q; },
       };
       return q;
@@ -71,6 +72,31 @@ it('the same alert set always reuses the same idempotency key', async () => {
   expect(keys[0]).toBe(keys[1]);
 });
 
+it('retries earlier alerts under their original key and mails new ones separately', async () => {
+  const keys: Array<{ key: string; text: string }> = [];
+  const transport = vi.fn(async (_k: string, mail: { idempotencyKey: string; text: string }) => {
+    keys.push({ key: mail.idempotencyKey, text: mail.text }); return { kind: 'unknown' as const, code: 'PAYMENT_NOTICE_PROVIDER_UNREACHABLE' };
+  });
+  const first = fixture([site('a')]);
+  await deliverStopLossAlerts(first.db, { config, transport, env: {}, now });
+  const stored = first.updates[0]!.details.notify as { batchKey: string };
+  expect(stored.batchKey).toBe(keys[0]!.key);
+  // next run: 'a' already attempted under that key, 'b' is new
+  const second = fixture([site('a', { state: 'pending', attempts: 1, batchKey: stored.batchKey }), site('b')]);
+  await deliverStopLossAlerts(second.db, { config, transport, env: {}, now });
+  expect(keys).toHaveLength(3);
+  expect(keys[1]!.key).toBe(keys[0]!.key);
+  expect(keys[2]!.key).not.toBe(keys[0]!.key);
+});
+
+it('pages past delivered alerts so newer undelivered ones are not starved', async () => {
+  const done = Array.from({ length: 120 }, (_, i) => site(`d${i}`, { state: 'sent', attempts: 1 }));
+  const f = fixture([...done, site('new')]);
+  const transport = vi.fn(async () => ({ kind: 'sent' as const, providerMessageId: 'msg_3' }));
+  expect(await deliverStopLossAlerts(f.db, { config, transport, env: {}, now })).toEqual({ outcome: 'sent', alerts: 1 });
+  expect(f.updates.map(u => u.id)).toEqual(['new']);
+});
+
 it('does nothing when every recent alert was already delivered or gave up', async () => {
   const f = fixture([site('a', { state: 'sent', attempts: 1 }), site('b', { state: 'failed', attempts: 5 })]);
   const transport = vi.fn();
@@ -85,8 +111,8 @@ it('records a failed send on the rows and gives up after the attempt limit', asy
   expect(await deliverStopLossAlerts(f.db, { config, transport, env: {}, now }))
     .toEqual({ outcome: 'not_sent', alerts: 2, code: 'PAYMENT_NOTICE_PROVIDER_422' });
   expect(f.updates.map(u => u.details.notify)).toEqual([
-    { state: 'pending', attempts: 1, lastErrorCode: 'PAYMENT_NOTICE_PROVIDER_422', lastAttemptAt: now.toISOString() },
-    { state: 'failed', attempts: STOP_LOSS_NOTICE_MAX_ATTEMPTS, lastErrorCode: 'PAYMENT_NOTICE_PROVIDER_422', lastAttemptAt: now.toISOString() },
+    { state: 'pending', attempts: 1, lastErrorCode: 'PAYMENT_NOTICE_PROVIDER_422', lastAttemptAt: now.toISOString(), batchKey: expect.stringMatching(/^runtime-stop-loss-/) },
+    { state: 'failed', attempts: STOP_LOSS_NOTICE_MAX_ATTEMPTS, lastErrorCode: 'PAYMENT_NOTICE_PROVIDER_422', lastAttemptAt: now.toISOString(), batchKey: expect.stringMatching(/^runtime-stop-loss-/) },
   ]);
   expect(log.error).toHaveBeenCalledWith('billing', 'runtime_stop_loss_notice_failed', { code: 'PAYMENT_NOTICE_PROVIDER_422', alerts: 2 });
 });

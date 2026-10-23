@@ -57,12 +57,12 @@ it('fails while reported stale-round refunds were deferred by the time budget', 
   mocks.recover.mockResolvedValue({ selected: 0, processed: 0, settled: 0, pending: 0, failed: 0, staleRounds });
   expect((await GET(new Request('https://synthetic.test/api/cron/runtime-recovery'))).status).toBe(500);
 });
-it('mails stop-loss alerts after recovery, even when recovery fails, without changing its status', async () => {
+it('mails stop-loss alerts before recovery, bounded, and even when recovery fails, without changing its status', async () => {
   mocks.notice.mockResolvedValue({ outcome: 'not_sent', alerts: 2, code: 'PAYMENT_NOTICE_NOT_CONFIGURED' });
   const ok = await GET(new Request('https://synthetic.test/api/cron/runtime-recovery'));
   expect(ok.status).toBe(200);
   expect(mocks.notice).toHaveBeenCalledWith({ synthetic: true });
-  expect(mocks.recover.mock.invocationCallOrder[0]).toBeLessThan(mocks.notice.mock.invocationCallOrder[0]!);
+  expect(mocks.notice.mock.invocationCallOrder[0]).toBeLessThan(mocks.recover.mock.invocationCallOrder[0]!);
   mocks.recover.mockRejectedValue(new Error('synthetic'));
   expect((await GET(new Request('https://synthetic.test/api/cron/runtime-recovery'))).status).toBe(500);
   expect(mocks.notice).toHaveBeenCalledTimes(2);

@@ -14,7 +14,8 @@ import { logger } from '../../lib/logger';
 
 export const AUTOMATIC_RECOVERY_LOOKUP_MS = 2_000;
 export const ADMISSION_RECOVERY_MS = 8_000;
-export const CRON_RECOVERY_MS = 55_000;
+// 45s so stop-loss delivery (bounded to ~12s in the cron route) fits in the 60s route limit.
+export const CRON_RECOVERY_MS = 45_000;
 export const RECOVERY_BATCH_SIZE = 20;
 /** Time reserved for one stale-round refund (one report read or one compensation transaction). */
 export const STALE_ROUND_STEP_MS = 2_000;

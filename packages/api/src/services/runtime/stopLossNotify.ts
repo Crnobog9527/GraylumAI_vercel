@@ -17,10 +17,12 @@ export const STOP_LOSS_NOTICE_TIMEOUT_MS = 5_000;
 export const STOP_LOSS_NOTICE_WINDOW_MS = 24 * 3600_000;
 export const STOP_LOSS_NOTICE_MAX_ATTEMPTS = 5;
 const BATCH = 50;
+const PAGE = 100;
+const MAX_PAGES = 5;
 
 type Db = Pick<SupabaseClient, 'rpc' | 'from'>;
 type Notify = { state: 'sent' | 'pending' | 'failed'; attempts: number; lastErrorCode?: string;
-  lastAttemptAt?: string; sentAt?: string; providerMessageId?: string };
+  lastAttemptAt?: string; sentAt?: string; providerMessageId?: string; batchKey?: string };
 type Row = { id: string; test_id: string; details: Record<string, unknown> | null; created_at: string };
 
 export interface StopLossNoticeDeps {
@@ -99,25 +101,55 @@ async function mark(db: Db, rows: Row[], notify: (row: Row) => Notify) {
   if (failed) logger.error('billing', 'runtime_stop_loss_notice_mark_failed', { rows: failed });
 }
 
+const isPending = (row: Row) => {
+  const n = notifyOf(row);
+  return !n || (n.state === 'pending' && n.attempts < STOP_LOSS_NOTICE_MAX_ATTEMPTS);
+};
+
+/** Pages past delivered/given-up rows so a full window of terminal alerts cannot starve newer ones. */
+async function readPending(db: Db, since: string) {
+  const pending: Row[] = [];
+  for (let page = 0; page < MAX_PAGES && pending.length < BATCH; page += 1) {
+    const { data, error } = await db.from('diagnostic_results').select('id,test_id,details,created_at')
+      .eq('test_name', 'Runtime stop-loss').like('test_id', 'runtime_stop_loss_%').gte('created_at', since)
+      .order('created_at', { ascending: true }).range(page * PAGE, page * PAGE + PAGE - 1);
+    if (error) throw new Error('read');
+    const rows = (data ?? []) as Row[];
+    pending.push(...rows.filter(isPending));
+    if (rows.length < PAGE) break;
+  }
+  return pending.slice(0, BATCH);
+}
+
 /**
- * Mails every alert of the last 24 hours that has not been delivered as one digest, so a burst of
+ * Alerts that were already attempted keep the batch (and Resend idempotency key) they were first sent
+ * under, so a retry after an uncertain send never re-mails them under a different key; new alerts form
+ * their own batch whose key is stored with the first attempt.
+ */
+function groupBatches(pending: Row[]) {
+  const groups = new Map<string, Row[]>();
+  const fresh: Row[] = [];
+  for (const row of pending) {
+    const key = notifyOf(row)?.batchKey;
+    if (key) groups.set(key, [...(groups.get(key) ?? []), row]); else fresh.push(row);
+  }
+  if (fresh.length) {
+    const ids = fresh.map(row => row.id).sort();
+    groups.set(`runtime-stop-loss-${createHash('sha256').update(ids.join(',')).digest('hex').slice(0, 40)}`, fresh);
+  }
+  return groups;
+}
+
+/**
+ * Mails every alert of the last 24 hours that has not been delivered, one digest per batch, so a burst of
  * alerts is one mail and a delivered alert is never mailed again. Recipient: support_email in system
  * settings; outside production only PAYMENT_NOTICE_TEST_RECIPIENTS (same guard as payment notices).
- * The Resend idempotency key is derived from the alert ids, so a retry of the same set mails once.
  */
 export async function deliverStopLossAlerts(db: Db, deps: StopLossNoticeDeps = {}): Promise<StopLossNoticeOutcome> {
   const now = deps.now ?? new Date();
   let pending: Row[] = [];
   try {
-    const { data, error } = await db.from('diagnostic_results').select('id,test_id,details,created_at')
-      .eq('test_name', 'Runtime stop-loss').like('test_id', 'runtime_stop_loss_%')
-      .gte('created_at', new Date(now.getTime() - STOP_LOSS_NOTICE_WINDOW_MS).toISOString())
-      .order('created_at', { ascending: true }).limit(BATCH);
-    if (error) throw new Error('read');
-    pending = ((data ?? []) as Row[]).filter(row => {
-      const n = notifyOf(row);
-      return !n || (n.state === 'pending' && n.attempts < STOP_LOSS_NOTICE_MAX_ATTEMPTS);
-    });
+    pending = await readPending(db, new Date(now.getTime() - STOP_LOSS_NOTICE_WINDOW_MS).toISOString());
     if (pending.length === 0) return { outcome: 'none', alerts: 0 };
     const env = deps.env ?? process.env;
     const config = deps.config ?? await noticeConfig(db, env);
@@ -131,31 +163,36 @@ export async function deliverStopLossAlerts(db: Db, deps: StopLossNoticeDeps = {
       const changed = pending.filter(row => notifyOf(row)?.lastErrorCode !== code);
       if (changed.length) {
         logger.error('billing', 'runtime_stop_loss_notice_not_configured', { code, alerts: pending.length });
-        await mark(db, changed, row => ({ state: 'pending', attempts: notifyOf(row)?.attempts ?? 0, lastErrorCode: code }));
+        await mark(db, changed, row => ({ ...notifyOf(row), state: 'pending', attempts: notifyOf(row)?.attempts ?? 0,
+          lastErrorCode: code }));
       }
       return { outcome: 'not_sent', alerts: pending.length, code };
     }
-    const ids = pending.map(row => row.id).sort();
-    const key = `runtime-stop-loss-${createHash('sha256').update(ids.join(',')).digest('hex').slice(0, 40)}`;
     const transport = deps.transport ?? resendTransport(fetch, STOP_LOSS_NOTICE_TIMEOUT_MS);
-    const result = await transport(config.config.apiKey, {
-      ...stopLossNotice(pending, isProductionSite(env)), idempotencyKey: key,
-      from: config.config.from, to, replyTo: config.config.replyTo,
-    });
     const at = now.toISOString();
-    if (result.kind === 'sent') {
-      await mark(db, pending, row => ({ state: 'sent', attempts: (notifyOf(row)?.attempts ?? 0) + 1, sentAt: at,
-        providerMessageId: result.providerMessageId }));
-      logger.info('billing', 'runtime_stop_loss_notice_sent', { alerts: pending.length });
-      return { outcome: 'sent', alerts: pending.length };
+    let sent = 0;
+    let failure: string | null = null;
+    for (const [key, rows] of groupBatches(pending)) {
+      const result = await transport(config.config.apiKey, {
+        ...stopLossNotice(rows, isProductionSite(env)), idempotencyKey: key,
+        from: config.config.from, to, replyTo: config.config.replyTo,
+      });
+      if (result.kind === 'sent') {
+        sent += rows.length;
+        await mark(db, rows, row => ({ state: 'sent', attempts: (notifyOf(row)?.attempts ?? 0) + 1, sentAt: at,
+          providerMessageId: result.providerMessageId, batchKey: key }));
+        continue;
+      }
+      failure ??= result.code;
+      await mark(db, rows, row => {
+        const attempts = (notifyOf(row)?.attempts ?? 0) + 1;
+        const final = result.kind === 'conflict' || attempts >= STOP_LOSS_NOTICE_MAX_ATTEMPTS;
+        return { state: final ? 'failed' : 'pending', attempts, lastErrorCode: result.code, lastAttemptAt: at, batchKey: key };
+      });
+      logger.error('billing', 'runtime_stop_loss_notice_failed', { code: result.code, alerts: rows.length });
     }
-    await mark(db, pending, row => {
-      const attempts = (notifyOf(row)?.attempts ?? 0) + 1;
-      const final = result.kind === 'conflict' || attempts >= STOP_LOSS_NOTICE_MAX_ATTEMPTS;
-      return { state: final ? 'failed' : 'pending', attempts, lastErrorCode: result.code, lastAttemptAt: at };
-    });
-    logger.error('billing', 'runtime_stop_loss_notice_failed', { code: result.code, alerts: pending.length });
-    return { outcome: 'not_sent', alerts: pending.length, code: result.code };
+    if (sent) logger.info('billing', 'runtime_stop_loss_notice_sent', { alerts: sent });
+    return failure ? { outcome: 'not_sent', alerts: pending.length, code: failure } : { outcome: 'sent', alerts: sent };
   } catch {
     logger.error('billing', 'runtime_stop_loss_notice_unavailable', { alerts: pending.length });
     return { outcome: 'not_sent', alerts: pending.length, code: 'STOP_LOSS_NOTICE_UNAVAILABLE' };
