@@ -11,6 +11,9 @@ export async function readReviewSettings(db:Pick<SupabaseClient,'from'>){
  const model=value(REVIEW_MODEL)||value('primary_model_id');
  const modelId=z.string().uuid().safeParse(model);
  const cap=z.string().regex(/^(0|[1-9]\d{0,3})(\.\d{1,6})?$/).safeParse(String(value(REVIEW_CAP)??'0'));
+ // `modelId` is the effective model; `ownModelId` is only what an admin chose for reviews (null = follow the
+ // conversation model), so a form that saves another field does not turn the inherited model into a dedicated one.
+ const own=z.string().uuid().safeParse(value(REVIEW_MODEL));
  return {enabled:value(REVIEW_SWITCH)===true,modelId:modelId.success?modelId.data:null,
-  maxCostUsd:cap.success?cap.data:'0'};
+  ownModelId:own.success?own.data:null,maxCostUsd:cap.success?cap.data:'0'};
 }
