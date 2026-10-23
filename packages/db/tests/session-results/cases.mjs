@@ -2,7 +2,7 @@
 // CONTENT-CONVERSATION-DRIVEN C1-lite (0337): the results folder of an ordinary free conversation. Synthetic fixtures only.
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
-import {rpc} from '../erasure-b2a/cases.mjs';
+import {rpc,closeAccount} from '../erasure-b2a/cases.mjs';
 import {runtimeFixture,erase} from '../content-erasure/cases.mjs';
 
 const REPLY = '标题：早起的人赢在哪\n开头：你有没有发现，早起三十天之后……\n结尾：明天六点见。';
@@ -34,7 +34,7 @@ export async function runCases({db,Client,connectionString,report}) {
     const whole = await save(db,f);
     assert.deepEqual([whole.version,whole.versions,whole.resultType,whole.body,whole.sourceAvailable,whole.familyId],
       [1,1,'script',REPLY,true,whole.id]);
-    assert.equal(whole.title,'标题：早起的人赢在哪 开头：你有没有发现，早起三十天之后……'.slice(0,40));
+    assert.equal(whole.title,REPLY.replace(/\s+/g,' ').trim().slice(0,40),'default title: first 40 characters on one line');
     const request = randomUUID();
     const part = await save(db,f,{request,type:'copy',title:' 结尾句 ',excerpt:'明天六点见。'});
     assert.deepEqual([part.title,part.body],['结尾句','明天六点见。']);
@@ -105,6 +105,7 @@ export async function runCases({db,Client,connectionString,report}) {
     const f = await freeChat(db);
     await save(db,f);await save(db,f,{type:'copy',excerpt:'明天六点见。'});
     assert.ok(Number((await db.query('SELECT account_erasure_body_remaining($1) v',[f.actor])).rows[0].v)>=2);
+    await closeAccount(db,f);
     const counts = (await db.query('SELECT account_erasure_scrub_content($1) v',[f.actor])).rows[0].v;
     assert.equal(counts.runtime_session_results_deleted,2);
     assert.equal(await count(db,'actor_id=$1',[f.actor]),0);
