@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { logger } from '../../lib/logger';
 import { isProductionSite, noticeConfig, normalizeMailbox, type NoticeConfigResult } from '../notify/config';
@@ -125,8 +126,7 @@ async function readPending(db: Db, since: string) {
 
 /**
  * Mails every alert of the last 24 hours that has not been delivered, one mail per alert. The Resend
- * idempotency key is the alert id and the body depends on that row alone, so a retry always repeats the same
- * request and a delivered alert is never mailed again. At most MAX_MAILS_PER_RUN per run, inside a time budget. Recipient: support_email in system
+ * idempotency key is the alert id plus a hash of the whole envelope, so a retry repeats the same request and a delivered alert is never mailed again. At most MAX_MAILS_PER_RUN per run, inside a time budget. Recipient: support_email in system
  * settings; outside production only PAYMENT_NOTICE_TEST_RECIPIENTS (same guard as payment notices).
  */
 export async function deliverStopLossAlerts(db: Db, deps: StopLossNoticeDeps = {}): Promise<StopLossNoticeOutcome> {
@@ -161,10 +161,13 @@ export async function deliverStopLossAlerts(db: Db, deps: StopLossNoticeDeps = {
     for (const row of pending) {
       if (tried >= MAX_MAILS_PER_RUN || Date.now() - startedAt > DELIVERY_BUDGET_MS) break;
       tried += 1;
-      const result = await transport(config.config.apiKey, {
-        ...stopLossNotice([row], isProductionSite(env)), idempotencyKey: `runtime-stop-loss-${row.id}`,
-        from: config.config.from, to, replyTo: config.config.replyTo,
-      });
+      const mail = { ...stopLossNotice([row], isProductionSite(env)), from: config.config.from, to,
+        replyTo: config.config.replyTo };
+      // The key covers the whole envelope: the same request is repeated byte for byte, and a changed recipient,
+      // sender or template becomes a new request instead of a permanent Resend idempotency conflict.
+      const envelope = createHash('sha256').update(JSON.stringify([mail.to, mail.from, mail.replyTo, mail.subject,
+        mail.text, mail.html])).digest('hex').slice(0, 16);
+      const result = await transport(config.config.apiKey, { ...mail, idempotencyKey: `runtime-stop-loss-${row.id}-${envelope}` });
       if (result.kind === 'sent') {
         sent += 1;
         await mark(db, [row], r => ({ state: 'sent', attempts: (notifyOf(r)?.attempts ?? 0) + 1, sentAt: at,

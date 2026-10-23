@@ -51,7 +51,8 @@ it('mails each undelivered alert once under its own key and marks only those sen
   expect(await deliverStopLossAlerts(f.db, { config, transport, env: {}, now })).toEqual({ outcome: 'sent', alerts: 2 });
   expect(transport).toHaveBeenCalledTimes(2);
   const mails = transport.mock.calls.map(c => (c as unknown[])[1] as { to: string; subject: string; text: string; idempotencyKey: string });
-  expect(mails.map(m => m.idempotencyKey)).toEqual(['runtime-stop-loss-a', 'runtime-stop-loss-c']);
+  expect(mails.map(m => m.idempotencyKey)).toEqual([expect.stringMatching(/^runtime-stop-loss-a-[0-9a-f]{16}$/),
+    expect.stringMatching(/^runtime-stop-loss-c-[0-9a-f]{16}$/)]);
   expect(mails[0]!.to).toBe('owner@example.test');
   expect(mails[0]!.subject).toContain('[staging]');
   expect(mails[0]!.text).toContain('全站每日上限已达到');
@@ -74,6 +75,19 @@ it('a retry repeats the identical request (key and body) even when other alerts 
   seen.length = 0;
   await deliverStopLossAlerts(fixture([site('c'), site('a', { state: 'pending', attempts: 1 })]).db, { config, transport, env: {}, now });
   expect(seen.find(m => m.key === first.key)).toEqual(first);
+});
+
+it('a changed recipient uses a new key instead of colliding with the earlier request', async () => {
+  const keys: string[] = [];
+  const transport = vi.fn(async (_k: string, mail: { idempotencyKey: string }) => {
+    keys.push(mail.idempotencyKey); return { kind: 'unknown' as const, code: 'PAYMENT_NOTICE_PROVIDER_UNREACHABLE' };
+  });
+  const open = { ...config, config: { ...(config as { config: object }).config, allowedRecipients: null } } as NoticeConfigResult;
+  await deliverStopLossAlerts(fixture([site('a')], 'owner@example.test').db, { config: open, transport, env: {}, now });
+  await deliverStopLossAlerts(fixture([site('a')], 'owner@example.test').db, { config: open, transport, env: {}, now });
+  await deliverStopLossAlerts(fixture([site('a')], 'other@example.test').db, { config: open, transport, env: {}, now });
+  expect(keys[0]).toBe(keys[1]);
+  expect(keys[2]).not.toBe(keys[0]);
 });
 
 it('sends at most a few mails per run; the rest wait for the next run', async () => {
