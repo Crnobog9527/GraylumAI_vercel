@@ -55,7 +55,8 @@ export function classifyAccount(
   // Plan §1.2: the earliest obtainable post (the oldest fetched one) within N days.
   const young = earliest !== null && now.getTime() - earliest <= growth.maxFirstPostAgeDays * DAY_MS;
   const k = ratio(growth.minViewsToFollowers);
-  const viral = k !== null && metrics.medianViews.value !== null && metrics.medianViews.value >= followers * k;
+  // Against the largest count an approximate label may stand for, so every possible exact count meets the ratio.
+  const viral = k !== null && metrics.medianViews.value !== null && metrics.medianViews.value >= (highExclusive - 1) * k;
   return { category: young || viral ? 'fast_rising' : 'imitable', qualified: true, excluded: null };
 }
 

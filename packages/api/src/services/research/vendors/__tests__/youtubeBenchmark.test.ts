@@ -89,6 +89,24 @@ describe('approximate followers in benchmark classification', () => {
     expect(classify(9_990, true).classification.excluded).toBe('FOLLOWERS_BELOW_MIN');
   });
 
+  it('reads the fast-rising ratio against the largest count the label may stand for', () => {
+    const views = (median: number) => {
+      const detail = item('d#1', { id: 'v0', publishedAt: '2026-09-04T09:00:02.000Z', followers: 18_800, followersApprox: true });
+      const viewed = posts.map(post => ({ ...post, fields: { ...post.fields, views: median } }));
+      const metrics = accountMetrics({ profile: detail, followersItem: detail, posts: viewed }, now);
+      return classifyAccount(metrics, { maxFirstPostAgeDays: 1, minViewsToFollowers: '1' }, now).category;
+    };
+    expect(views(18_850)).toBe('imitable');
+    expect(views(18_899)).toBe('fast_rising');
+  });
+
+  it('marks a numeric YouTube follower count approximate too', async () => {
+    const body = { ...samples.videoInfo, data: { ...samples.videoInfo.data, channel_follower_count: 18_800 } };
+    const result = await callTikhub({ platform: 'youtube', kind: 'post_detail', postId: 'vid00000000' },
+      { ...deps, fetchImpl: jsonFetch(200, body) });
+    expect(result.items[0]!.fields).toMatchObject({ followers: 18_800, followersApprox: true });
+  });
+
   it('keeps exact counts on the exact thresholds', () => {
     expect(classify(200_000, false).classification.qualified).toBe(true);
     expect(classify(10_000, false).classification.qualified).toBe(true);

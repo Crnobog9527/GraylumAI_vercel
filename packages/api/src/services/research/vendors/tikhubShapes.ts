@@ -136,7 +136,8 @@ function youtubeVideo(item: Raw, channel: string | undefined) {
  * `followersApprox` (Owner 2026-10-23, approxCount.ts); thresholds then read it conservatively.
  */
 function withYoutubeFollowers(item: ResearchItem, raw: Raw, paths: readonly string[]): ResearchItem {
-  if (item.fields.followers !== undefined) return item;
+  // A numeric YouTube count is the same rounded figure in another shape: still approximate, never exact.
+  if (item.fields.followers !== undefined) return { ...item, fields: { ...item.fields, followersApprox: true } };
   const approx = paths.map(path => approximateSubscribers(text(raw, [path]))).find(value => value !== undefined);
   if (approx === undefined) return item;
   return { ...item, fields: { ...item.fields, followers: approx, followersApprox: true },

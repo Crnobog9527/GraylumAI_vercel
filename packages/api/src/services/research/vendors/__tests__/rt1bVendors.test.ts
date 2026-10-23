@@ -121,7 +121,7 @@ const videoDetail = (extra: Record<string, unknown> = {}) => ({ code: 200, data:
   comment_count: 120, ...extra } });
 
 describe('YouTube post detail', () => {
-  it('reads one video by a strictly checked id and returns exact followers and an absolute date', async () => {
+  it('reads one video by a strictly checked id and returns its (rounded) followers and an absolute date', async () => {
     const calls: RecordedCall[] = [];
     const result = await callTikhub({ platform: 'youtube', kind: 'post_detail', postId: 'zd3yCa1bJCM' },
       deps(jsonFetch(200, videoDetail(), calls)));
@@ -130,7 +130,7 @@ describe('YouTube post detail', () => {
     expect(result).toMatchObject({ outcome: 'ok', usage: { unit: 'call', units: '1' } });
     expect(result.items).toEqual([{ url: 'https://www.youtube.com/watch?v=zd3yCa1bJCM', fields: {
       id: 'zd3yCa1bJCM', title: 'Minecraft: DREAM!', author: 'Maizen', authorId: 'UCJHBJ7F-nAIlMGolm0Hu4vg',
-      publishedAt: '2026-10-01T16:00:00.000Z', views: 343_369, likes: 0, comments: 120, followers: 98_400 }, missing: ['shares'] }]);
+      publishedAt: '2026-10-01T16:00:00.000Z', views: 343_369, likes: 0, comments: 120, followers: 98_400, followersApprox: true }, missing: ['shares'] }]);
   });
 
   it('refuses a bad or missing video id before any call; the account field is never used for it', async () => {
