@@ -9,7 +9,7 @@ import { KeywordCardView } from "./keyword-card";
 import { shortfallChoiceInput, ShortfallCardView, type ShortfallCard, type ShortfallChoice } from "./shortfall-card";
 import type { ResearchCall } from "./research-model";
 import {
-  AUTO_CONTINUE_INPUT, AUTO_CONTINUE_LIMIT, autoContinueDecision, isResearchEvent, REPORT_MIN_QUALIFIED, researchConfirmedInput,
+  AUTO_CONTINUE_INPUT, AUTO_CONTINUE_LIMIT, autoContinueDecision, continuationAfterResult, isResearchEvent, REPORT_MIN_QUALIFIED, researchConfirmedInput,
   researchRefreshInput, toBenchmarkRows, toSessionCards, withResearchCall,
   type CallsByExecution, type ResearchContinuation, type StoredBenchmark, type StoredCard,
 } from "./research-session-model";
@@ -29,11 +29,22 @@ export function useResearchCalls(sessionId: string | null | undefined) {
   const utils = trpc.useUtils();
   const [calls, setCalls] = useState<CallsByExecution>(() => new Map());
   const [continuation, setContinuation] = useState<ResearchContinuation | null>(null);
+  // The host's signal waits here until its own turn ends; only a normally completed turn arms it (a stop disarms it).
+  const pending = useRef<ResearchContinuation | null>(null);
   const observe = useCallback((executionId: string, event: { type: string }) => {
+    if (event.type === "result") {
+      const armed = pending.current;
+      if (armed && armed.executionId === executionId) {
+        pending.current = null;
+        const outcome = (event as { result?: { state?: string; stopped?: boolean; completeness?: string } }).result ?? {};
+        setContinuation(continuationAfterResult(armed, executionId, outcome).keep ? armed : null);
+      }
+      return;
+    }
     if (!isResearchEvent(event)) return;
     // Benchmark rows are written after a call's final event; the panel re-reads them once the turn is saved.
     if (event.type === "research_call") setCalls(current => withResearchCall(current, executionId, event));
-    else if (event.type === "research_continue") setContinuation({ executionId, discoveryId: event.discoveryId });
+    else if (event.type === "research_continue") pending.current = { executionId, discoveryId: event.discoveryId };
     else if (sessionId) void utils.research.cards.invalidate({ sessionId });
   }, [sessionId, utils]);
   const of = useCallback((executionId: string) => calls.get(executionId) ?? NO_CALLS, [calls]);

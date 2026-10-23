@@ -22,6 +22,16 @@ export function isResearchEvent(event: { type: string }): event is ResearchEvent
 
 /** A discovery round the host said goes on in the next reply (`research_continue`), with the turn that said so. */
 export interface ResearchContinuation { executionId: string; discoveryId: string }
+
+/**
+ * The continuation once its turn's own `result` arrived: kept only when that turn completed normally. A turn the user
+ * stopped, that was cancelled or paused, or whose stream ended without a result never continues on its own.
+ */
+export function continuationAfterResult(pending: ResearchContinuation | null, executionId: string,
+  result: { state?: string; stopped?: boolean; completeness?: string }): { keep: boolean } {
+  if (!pending || pending.executionId !== executionId) return { keep: false };
+  return { keep: result.state === "completed" && result.stopped !== true && result.completeness !== "stopped" };
+}
 /**
  * Replies the page sends on the user's behalf to finish one discovery round (Owner 2026-10-23, 3 A). A round needs at
  * most 80 lookups at 26 a reply, so 4 suffice; past the limit the user replies "继续" themselves.
