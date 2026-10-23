@@ -79,6 +79,24 @@ $dispatchFence$;
  END IF;
 END $dispatch$;
 
+-- Editing the confirmed profile makes a newer confirmed version, which would bury a paid result still pending
+-- (a generation or a draft with a higher version is never shown, see voice_state): refused here, not only in the page
+-- (#1262 review: a second window can still hold the edit form).
+DO $confirm$ DECLARE d text;anchor text;patch text;
+BEGIN
+ d:=pg_get_functiondef('public.voice_profile_confirm(uuid,uuid,integer,jsonb)'::regprocedure);
+ IF position('-- VOICE pending result' IN d)=0 THEN
+  anchor:=$a$  IF v.profile=result THEN RETURN voice_state(a); END IF;$a$;
+  patch:=$p$  -- VOICE pending result
+  IF v.profile IS DISTINCT FROM result AND EXISTS(SELECT 1 FROM voice_profile_versions
+   WHERE actor_id=a AND status IN ('generating','draft') AND version>v.version) THEN
+   RAISE EXCEPTION 'VOICE_PENDING_RESULT'; END IF;
+$p$;
+  IF array_length(string_to_array(d,anchor),1)<>2 THEN RAISE EXCEPTION 'VOICE_CONFIRM_SOURCE_MISMATCH';END IF;
+  EXECUTE replace(d,anchor,patch||anchor);
+ END IF;
+END $confirm$;
+
 -- Account erasure: the reference rows hold no content; prune them before their executions (as 0262).
 DO $$
 DECLARE source text; needle text; replacement text; sig text;
@@ -97,6 +115,8 @@ BEGIN
 END $$;
 
 REVOKE ALL ON FUNCTION public.runtime_voice_references_freeze(),public.runtime_voice_source_gone(uuid),
+ public.voice_profile_confirm(uuid,uuid,integer,jsonb),
  public.erasure_business_owner(text,jsonb),public.account_erasure_prune_business(uuid,integer)
  FROM PUBLIC,anon,authenticated,service_role;
+GRANT EXECUTE ON FUNCTION public.voice_profile_confirm(uuid,uuid,integer,jsonb) TO service_role;
 COMMIT;

@@ -94,6 +94,22 @@ export async function runReferences({db,report}) {
  assert.equal((await rpc(db,'bill2_dispatch',ok.actor,ok.run,okClaim.id,okClaim.dispatchToken)).dispatch,true);
  report.checks.push('bill2_dispatch refuses a new provider request for a run whose voice is gone; others dispatch as before');
 
+ // Editing the confirmed profile is refused while a newer result is pending (it would bury the paid result).
+ {
+  const c=await one(db,'SELECT voice_test.actor() v');
+  const first=await confirmed(c,'pending-a.md');
+  const pendingDoc=await doc(c,'pending-b.md');void pendingDoc;
+  const generating=await svc('voice_generation_begin',c,randomUUID(),[]);
+  const state=await svc('voice_state',c);
+  await denied(svc('voice_profile_confirm',c,first.version,state.revision,JSON.stringify({...PROFILE,tone:'改一下'})),'VOICE_PENDING_RESULT');
+  // The same text is a no-op, and a failed or finished-and-deleted generation no longer blocks.
+  await svc('voice_profile_confirm',c,first.version,state.revision,JSON.stringify(PROFILE));
+  await svc('voice_generation_finish',c,generating.version.id,null,'VOICE_FORMAT_INVALID',true);
+  const after=await svc('voice_profile_confirm',c,first.version,(await svc('voice_state',c)).revision,JSON.stringify({...PROFILE,tone:'改一下'}));
+  assert.equal(after.confirmed.profile.tone,'改一下');
+  report.checks.push('editing the confirmed profile is refused server-side while a generation or draft is pending, and allowed again once it failed');
+ }
+
  // Account erasure: the references go with their executions.
  for(const table of ['runtime_voice_references'])
   assert.equal(await one(db,'SELECT erasure_business_owner($1,$2) v',[table,JSON.stringify({actor_id:a})]),a);
