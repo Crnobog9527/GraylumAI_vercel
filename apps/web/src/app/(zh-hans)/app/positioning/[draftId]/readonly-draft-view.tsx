@@ -7,6 +7,8 @@ import { confirmedSections } from './information-export';
 import { ArchivedReport } from './archived-report';
 // The gate imports this view; re-exported here so the pages keep one import line.
 export { DraftArchiveGate, RouteDraftArchiveGate } from './draft-archive-gate';
+// Every read of the draft behind the gate stops at a missing or someone else's draft, as the gate's own read does.
+export { retryUnlessMissing } from '@/lib/read-retry';
 import { PROFILE_ARCHIVE_TEXT } from '@/components/opc/profile-archive/profile-archive';
 
 /**
