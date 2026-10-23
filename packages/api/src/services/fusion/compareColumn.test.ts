@@ -57,6 +57,11 @@ describe('compare column stream (FUSION-COMPARE §3.5)', () => {
     await collect(streamCompareColumn(deps(unreadable), { compareId: id(1), column: 0 }));
     expect(s.rpcs).not.toContain('fusion_compare_dispatch_release');
   });
+  it('gives the claim back when the executor throws during setup, so a retry can dispatch', async () => {
+    const boom = vi.fn(async () => { throw new Error('RUNTIME_STAGING_CREDENTIAL_UNAVAILABLE'); });
+    await expect(collect(streamCompareColumn(deps(boom), { compareId: id(1), column: 0 }))).rejects.toThrow('RUNTIME_STAGING_CREDENTIAL_UNAVAILABLE');
+    expect(s.rpcs).toContain('fusion_compare_dispatch_release');
+  });
   it('dispatches the other column, not a neighbour: columns are independent requests', async () => {
     const run = vi.fn(async () => ({ state: 'judged', verdict: 'usable' }) as FusionCallOutcome);
     await collect(streamCompareColumn(deps(run), { compareId: id(1), column: 1 }));

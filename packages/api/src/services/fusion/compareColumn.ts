@@ -65,7 +65,12 @@ export async function* streamCompareColumn(deps: ColumnDeps, input: { compareId:
       streamer.settle(outcome.state === 'judged' && outcome.verdict === 'no_delivery' && hold && isPositioningRefusal(streamer.text()));
       push(outcome.state === 'judged' ? { type: 'done', verdict: outcome.verdict } : { type: 'pending', reason: outcome.reason });
     })
-    .catch(error => { failure = error; })
+    .catch(async error => {
+      failure = error;
+      // Setup threw before anything was sent (the call is still prepared): give the claim back so a retry can dispatch. The
+      // database refuses to release a call that was dispatched or settled, so this is safe on every exception path.
+      await compareRpc(deps.admin, 'fusion_compare_dispatch_release', { p_actor_id: deps.actorId, p_call_id: column.call!.callId }).catch(() => undefined);
+    })
     .finally(() => { finished = true; wake?.(); });
   for (;;) {
     while (queue.length) yield queue.shift()!;

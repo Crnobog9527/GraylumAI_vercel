@@ -31,7 +31,10 @@ export async function readCompare(admin: SupabaseClient, actorId: string, compar
   const read = () => compareRpc<{ columns: ReadColumn[] } | null>(admin, 'fusion_compare_read', { p_actor_id: actorId, p_compare_id: compareId });
   const view = await read();
   if (!view) throw new Error('FUSION_COMPARE_DENIED');
-  const unjudged = view.columns.filter(c => c.body !== null && c.call && c.call.verdict === null && !c.call.inFlight);
+  const unjudged = view.columns.filter(c => c.body !== null && c.call && c.call.verdict === null);
+  // `inFlight` only means dispatched, unsettled and before the recovery deadline, not that a writer is still running, so it
+  // is no signal to skip on: a verdict write is row-locked and idempotent for the same verdict, and settling twice is a no-op,
+  // so repairing beside a writer that is just finishing is safe.
   if (!unjudged.length) return view;
   // Only a column whose verdict was written may settle: settling one that is still unjudged would close its run as stopped and
   // charge a saved answer that can then never be adopted. A failed repair stays open for the daily recovery.

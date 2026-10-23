@@ -8,7 +8,7 @@ vi.mock('./compareAdmission', () => ({
   compareRpc: async (_admin: unknown, name: string, args: Record<string, unknown>) => {
     s.calls.push(name === 'fusion_call_verdict' ? `verdict:${String(args.p_call_id)}` : name);
     if (name === 'fusion_compare_read') return { state: 'running', columns: [0, 1].map(i => ({ column: i, runId: id(10 + i), body: '回答',
-      call: { callId: id(20 + i), verdict: null, inFlight: false } })) };
+      call: { callId: id(20 + i), verdict: null, inFlight: true } })) };
     if (name === 'fusion_call_verdict' && (s.failVerdict === 'all' || args.p_call_id === s.failVerdict)) throw new Error('FUSION_ADMISSION_UNAVAILABLE');
     return {};
   },
@@ -19,6 +19,7 @@ const admin = {} as SupabaseClient;
 beforeEach(() => { s.calls = []; s.failVerdict = ''; });
 
 describe('compare read repairs an interrupted column (FUSION-COMPARE §3.5)', () => {
+  // inFlight is true in these fixtures on purpose: it means dispatched and unsettled, which is exactly an interrupted answer.
   it('judges saved, unjudged answers usable and settles each judged run', async () => {
     const settled: string[] = [];
     await readCompare(admin, id(1), id(2), async () => async (runId: string) => { settled.push(runId); });
