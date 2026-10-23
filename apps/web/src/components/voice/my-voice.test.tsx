@@ -37,6 +37,16 @@ describe('MyVoiceView', () => {
     expect(html).toContain('当前使用的文风画像');expect(html).toContain('<blockquote>哎下班到家都七点了，咋整。</blockquote>');expect(html).toContain('<blockquote>一口锅搞定呗。</blockquote>');
     expect(html).toContain('重新学习');
   });
+  it('the confirmed profile cannot be edited while a newer result is pending (#1262 review)', () => {
+    expect(render({ confirmed: version('confirmed') })).toContain('>修改</button>');
+    for (const latest of [version('generating'), { ...version('draft'), version: 2 }]) {
+      const html = render({ confirmed: version('confirmed'), latest });
+      expect(html).toContain('当前使用的文风画像');
+      expect(html).not.toContain('>修改</button>');
+      expect(html).toContain('先处理它');
+    }
+    expect(render({ confirmed: version('confirmed'), latest: version('failed') })).toContain('>修改</button>');
+  });
   it('shows generating, stale, failure, switched off and needs update', () => {
     expect(render({ latest: version('generating') })).toContain('正在读你的文章');
     expect(render({ latest: version('stale') })).toContain(voiceErrorMessage('VOICE_STALE'));

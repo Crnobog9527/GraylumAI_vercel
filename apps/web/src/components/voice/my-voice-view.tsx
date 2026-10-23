@@ -17,6 +17,8 @@ export function MyVoiceView(props: MyVoiceViewProps) {
   const latest = state.latest;
   const running = props.generating || latest?.status === 'generating';
   const hasCorpus = state.documents.length > 0;
+  // Saving an edit of the confirmed profile makes a newer version, which would bury a paid result still pending (#1262 review).
+  const editLocked = running || latest?.status === 'draft';
   return <div className={styles.root}>
     <section className={styles.panel} aria-label="我的文风">
       <div className={styles.cardHead}>
@@ -47,8 +49,10 @@ export function MyVoiceView(props: MyVoiceViewProps) {
       <div className={styles.actions}><button type="button" disabled={busy} onClick={() => props.onDelete(latest.id)}>知道了</button></div>
     </section>}
     {state.confirmed && <VoiceProfileCard key={state.confirmed.id + ':' + state.confirmed.version} version={state.confirmed}
-      title="当前使用的文风画像" busy={busy} onConfirm={profile => props.onConfirm(state.confirmed!.id, profile)}
-      onDelete={() => props.onDelete(state.confirmed!.id)} />}
+      title="当前使用的文风画像" busy={busy} onDelete={() => props.onDelete(state.confirmed!.id)}
+      onConfirm={editLocked ? undefined : profile => props.onConfirm(state.confirmed!.id, profile)} />}
+    {state.confirmed && editLocked && <p className={styles.hint}>
+      有一份新的文风画像{running ? '正在生成' : '等你确认'}，先处理它，再修改当前这份。</p>}
 
     <section className={styles.panel} aria-label="学习我的文风">
       <DisplayHeading as="h2">{state.confirmed ? '重新学习我的文风' : '学习我的文风'}</DisplayHeading>
