@@ -40,7 +40,7 @@ export const J_WORK_MAKE: readonly WorkScene[] = [
       },
       {
         label: '上传完成',
-        explain: '文件传完会标"已上传"，之后每次写稿都会参考这些文字。',
+        explain: '文件传完会标"已上传"。AI 教练接着总结出你的文风画像，你确认后，每次写稿都按这份画像来。',
         blocks: [
           { kind: 'upload', done: true },
           { kind: 'user', text: '传好了，你读一下。' },
