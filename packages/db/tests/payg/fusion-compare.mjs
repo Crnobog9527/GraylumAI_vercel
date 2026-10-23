@@ -404,6 +404,29 @@ export async function fusionCompareCases({db,Client,connectionString,report,crea
   assert.equal(shown.title,firstMessage,'titled with the compared question');
   await db.query("UPDATE fusion_compares SET state='refused' WHERE id=$1",[firstCompare.compareId]);
   assert.equal(await listedFresh(),undefined,'a refused start is not listed');
+  // Before/after equivalence for every account in this database: the ids and order the list returned before 0348
+  // (conversations with a plain/Skill turn, newest activity first) are exactly the new list minus compare-only conversations.
+  const actors = (await db.query("SELECT DISTINCT actor_id FROM runtime_sessions WHERE scope->>'kind'='positioning_draft'")).rows;
+  let compared = 0;
+  for (const {actor_id} of actors) {
+    let now;
+    try { now = (await rpc(db,'opc_free_conversations',actor_id)).map(row=>row.sessionId); }
+    catch (error) { if (/BILL2_ACTOR_DENIED/.test(String(error.message))) continue; throw error; }
+    const before = (await db.query(`SELECT s.id FROM runtime_sessions s
+      CROSS JOIN LATERAL (SELECT e.payload FROM runtime_executions e WHERE e.session_id=s.id AND e.actor_id=$1
+        AND e.payload->>'role' IN ('ordinary','skill') ORDER BY e.created_at,e.id LIMIT 1) t
+      CROSS JOIN LATERAL (SELECT max(e.created_at) AS la FROM runtime_executions e WHERE e.session_id=s.id AND e.actor_id=$1) act
+      WHERE s.erased_at IS NULL AND s.content_deleted_at IS NULL AND s.actor_id=$1 AND s.scope->>'kind'='positioning_draft'
+        AND bill2_scope_allowed($1,s.scope) AND NOT EXISTS(SELECT 1 FROM opc_drafts d WHERE d.session_id=s.id)
+        AND NOT EXISTS(SELECT 1 FROM opc_topic_workspaces w WHERE w.session_id=s.id)
+        AND NOT coalesce(t.payload ? 'weeklyReview',false)
+      ORDER BY act.la DESC,s.id LIMIT 100`,[actor_id])).rows.map(row=>row.id);
+    const compareOnly = new Set((await db.query(`SELECT s.id FROM runtime_sessions s WHERE s.actor_id=$1 AND NOT EXISTS(SELECT 1 FROM runtime_executions e
+      WHERE e.session_id=s.id AND e.actor_id=$1 AND e.payload->>'role' IN ('ordinary','skill'))`,[actor_id])).rows.map(row=>row.id));
+    assert.deepEqual(now.filter(id=>!compareOnly.has(id)),before,'the list of pre-existing conversations is unchanged for '+actor_id);
+    compared += before.length;
+  }
+  report.checks.push('0348 before/after: for '+actors.length+' accounts ('+compared+' conversations) every previously listed conversation is still listed in the same order');
   report.checks.push('a conversation that holds only a compare appears in the list with the question as title; a refused one does not');
 
   // Account erasure removes compare records and counts them while present.
