@@ -12,6 +12,7 @@ import { VersionCompare } from '@/components/opc/version-compare';
 import { StrategyOverviewDialog } from '@/components/opc/strategy-overview-dialog';
 import { useVersionMarks, VersionMark } from '@/components/fusion-review/VersionMark';
 import { MyDocuments } from '@/components/library/my-documents';
+import { MyVoice } from '@/components/voice/my-voice';
 import { useScanRecognition } from '@/hooks/use-scan-recognition';
 import { LibraryEvidence } from '@/components/research/library-evidence';
 import { PublishEntry } from '../publish-monitor/publish/publish-entry';
@@ -19,6 +20,7 @@ import { libraryTabFromParam, libraryTabParam, type LibraryTab } from './library
 import styles from './library.module.css';
 
 const INTRO:Record<LibraryTab,string>={documents:'上传和管理你自己写的文章和参考资料。',
+ voice:'让 AI 教练学会你的说话习惯，写出来的稿子像你本人。',
  topics:'按平台和账号查看已采用选题、稿件和当前定位。',evidence:'AI 教练在对话里查过的公开数据和来源。'};
 
 type ContentVersion={id:string;title?:string|null;kind:'brief'|'script'|'storyboard'|'editing';version:number;status:'draft'|'final';body:string|null;contentAvailable:boolean;sourceContentId:string|null;executionId:string|null;requestId:string;createdAt:string};
@@ -106,10 +108,12 @@ export default function LibraryPage(){
   <nav className={styles.tabs} role="tablist" aria-label="资料库分类">
    <button type="button" role="tab" aria-selected={tab==='topics'} onClick={()=>chooseTab('topics')}>选题与稿件</button>
    <button type="button" role="tab" aria-selected={tab==='documents'} onClick={()=>chooseTab('documents')}>我的文档</button>
+   <button type="button" role="tab" aria-selected={tab==='voice'} onClick={()=>chooseTab('voice')}>我的文风</button>
    <button type="button" role="tab" aria-selected={tab==='evidence'} onClick={()=>chooseTab('evidence')}>搜索记录</button>
   </nav>
   <p className={styles.intro}>{INTRO[tab]}</p>
   {tab==='evidence'&&<div className={styles.evidencePane}><LibraryEvidence/></div>}
+  {tab==='voice'&&<MyVoice onOpenDocuments={()=>chooseTab('documents')}/>}
   {documentsOpened&&<div className={styles.documentsPane} hidden={tab!=='documents'}>
    <MyDocuments scan={scan}/></div>}{tab==='topics'&&<div className={styles.catalog}>
    <nav className={styles.catalogNav} aria-label="资料库平台与账号"><button type="button" aria-current={!selectedProject?'page':undefined} onClick={()=>{setSelectedProject('');setPage(1);}}>全部选题 <span>{count(accounts.reduce((n,a)=>n+a.items.length,0))}</span></button>{[...new Set(accounts.map(account=>account.platform))].map(platform=><div key={platform} className={styles.platform}><strong>{platform}<span>{count(accounts.filter(account=>account.platform===platform).reduce((n,a)=>n+a.items.length,0))}</span></strong>{accounts.filter(account=>account.platform===platform).map(account=><button key={account.projectId} type="button" aria-current={selectedProject===account.projectId?'page':undefined} onClick={()=>{setSelectedProject(account.projectId);setPage(1);}}>{(account.displayName??account.account)}<span>{count(account.items.length)}</span></button>)}</div>)}</nav>

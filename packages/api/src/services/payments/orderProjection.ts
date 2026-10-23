@@ -95,6 +95,10 @@ export type PaymentOrderBillingRow = {
   payment_mode?: string | null;
   price_ref_id?: string | null;
   subscription_id?: string | null;
+  source_order_id?: string | null;
+  method_transition?: string | null;
+  offer_kind?: string | null;
+  purchase_action?: string | null;
   id: string;
   item_id: string;
   item_type: 'credit_package' | 'membership_plan' | string;
@@ -112,3 +116,17 @@ export type PaymentOrderBillingRow = {
   purchase_closed_at?: string | null;
   method_review_reason?: string | null;
 };
+
+/** Display only: a card subscription's automatic renewal (linked to the first period, not an upgrade), a founder
+ * renewal, or a legacy renewal row. Wallet re-purchases are one-time orders and keep the ordinary label. */
+export function isRenewalBillingOrder(order: Pick<PaymentOrderBillingRow, 'item_type' | 'payment_method'
+  | 'source_order_id' | 'method_transition' | 'offer_kind' | 'purchase_action'>) {
+  if (order.item_type !== 'membership_plan') return false;
+  if (order.offer_kind === 'founder_renewal' || order.purchase_action === 'renewal') return true;
+  return Boolean(order.source_order_id) && !order.method_transition && ['card', 'card_cn'].includes(order.payment_method ?? '');
+}
+
+export function billingDescription(order: Parameters<typeof isRenewalBillingOrder>[0], cycle: string) {
+  if (order.item_type !== 'membership_plan') return '一次性积分购买';
+  return `${isRenewalBillingOrder(order) ? '续费账单' : '订阅账单'} · ${cycle === 'yearly' ? '年付' : '月付'}`;
+}
