@@ -87,12 +87,14 @@ describe('callTikhub', () => {
     expect(result.items[0].missing).toContain('following');
   });
 
-  it('reads a YouTube channel profile and keeps abbreviated subscriber labels missing', async () => {
+  it('reads a YouTube channel profile with its rounded subscriber label as an approximate count', async () => {
     const body = { code: 200, data: { channel_id: 'UCLA_DiR1FfKNvjuUpBHmylQ', handle: '@natgeo', title: 'National Geographic', subscriber_count: '1.2M' } };
     const result = await callTikhub({ platform: 'youtube', kind: 'account_profile', account: 'UCLA_DiR1FfKNvjuUpBHmylQ' }, deps(jsonFetch(200, body)));
     expect(result).toMatchObject({ outcome: 'ok' });
     expect(result.items[0].fields).toMatchObject({ id: 'UCLA_DiR1FfKNvjuUpBHmylQ', handle: '@natgeo', name: 'National Geographic' });
-    expect(result.items[0].missing).toContain('followers');
+    // YouTube publishes only rounded counts (Owner 2026-10-23: judged conservatively, never as exact).
+    expect(result.items[0].fields).toMatchObject({ followers: 1_200_000, followersApprox: true });
+    expect(result.items[0].missing).not.toContain('followers');
   });
 
   it('keeps the YouTube relative date and abbreviated views missing', async () => {

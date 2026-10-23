@@ -66,13 +66,32 @@ export function mapMethodPurchaseRejection(error: unknown,
   return new TRPCError({ code: rejection.code, message, cause: error });
 }
 
-/** Whether the buyer has a subscription whose payment failed; a failed read keeps the ordinary wording. */
-export async function hasUnpaidSubscription(db: Pick<SupabaseClient, 'from'>, userId: string) {
+const RENEWAL_GRACE_MS = 24 * 3600 * 1000;
+
+/** Whether the buyer has a subscription whose payment failed; a failed read keeps the ordinary wording.
+ * A card subscription keeps its local status active while Stripe retries a failed renewal (past_due is not copied, so
+ * the 24-hour renewal grace works, cardSubscriptionWebhook). A still-renewing Stripe subscription whose period ended
+ * more than that grace ago has therefore not been paid. Wallet terms are stored as stopping at period end. */
+export async function hasUnpaidSubscription(db: Pick<SupabaseClient, 'from'>, userId: string, now = Date.now()) {
   try {
     const result = await db.from('user_subscriptions').select('id').eq('user_id', userId)
       .in('status', ['past_due', 'incomplete', 'unpaid']).limit(1);
-    return !result.error && Array.isArray(result.data) && result.data.length > 0;
+    if (!result.error && Array.isArray(result.data) && result.data.length > 0) return true;
+    const renewing = await db.from('user_subscriptions').select('id,cancel_at_period_end').eq('user_id', userId)
+      .eq('status', 'active').eq('payment_channel', 'stripe')
+      .lt('current_period_end', new Date(now - RENEWAL_GRACE_MS).toISOString()).limit(20);
+    return !renewing.error && Array.isArray(renewing.data)
+      && renewing.data.some(row => String((row as { cancel_at_period_end: unknown }).cancel_at_period_end) === 'false');
   } catch { return false; }
+}
+
+/** Eligibility matrix entry for a buyer with an unpaid subscription: admission refuses them anyway (the subscription
+ * still blocks), so say what to do instead of offering a checkout that will be refused. */
+export function unpaidRenewalEntry<T extends { allowed: boolean; state: string; action: string; reasonCode: string;
+  safeMessage: string }>(entry: T, unpaid: boolean): T {
+  if (!unpaid || !entry.allowed) return entry;
+  return { ...entry, allowed: false, state: 'payment_attention', action: 'resolvePaymentIssue',
+    reasonCode: 'PAYMENT_ATTENTION_REQUIRED', safeMessage: '当前订阅存在付款异常，请先处理付款问题后再切换套餐。' };
 }
 
 const BLOCKING_STATUSES = ['active', 'trialing', 'past_due', 'incomplete', 'unpaid'];

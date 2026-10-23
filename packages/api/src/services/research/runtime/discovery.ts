@@ -2,7 +2,7 @@
 import { z } from 'zod';
 import { aggregateAuthors, classifyAccount, selectCandidates, type ScoredAccount } from '../benchmark/classify';
 import { accountMetrics, type EvidenceItem } from '../benchmark/metrics';
-import { BENCHMARK_RULES } from '../vendors/config';
+import { BENCHMARK_ROUTE_KINDS, BENCHMARK_RULES } from '../vendors/config';
 import { authorizeDiscoverStart } from '../tools/authorize';
 import { canonicalAccount } from '../tools/accountLinks';
 import { toolEnvelope } from '../tools/envelope';
@@ -34,15 +34,37 @@ export function accountName(...values: unknown[]): string | undefined {
   return undefined;
 }
 
+/**
+ * The paid lookup that screens one author: the account profile where the platform's benchmark routes have one, otherwise
+ * the route its followers come from. YouTube has no profile route; it reads the detail of one of the author's own videos
+ * found by this search (the channel's subscriber label, BENCHMARK-COVERAGE #1290).
+ */
+function authorLookup(ctx: ResearchToolContext, platform: SocialPlatform, account: string, authorPosts: EvidenceItem[]) {
+  const routes = BENCHMARK_ROUTE_KINDS[platform];
+  if (!routes || routes.kinds.includes('account_profile')) return socialRequest(ctx, platform, 'account_profile', { account });
+  if (routes.followersFrom !== 'post_detail') return socialRequest(ctx, platform, routes.followersFrom, { account });
+  const postId = authorPosts.map(post => post.fields.id).find((id): id is string => typeof id === 'string');
+  return postId ? socialRequest(ctx, platform, 'post_detail', { account, postId }) : null;
+}
+
+/** A round searched to the end with fewer selectable accounts than a candidate card needs: no card (plan §1.2 step 5). */
 export function candidateShortage(available: number) {
   const required = BENCHMARK_RULES.candidatesMin;
   return {
-    message: `已找到 ${available} 个可选、需要 ${required} 个。`,
-    nextStep: '建议换或补充关键词再找，或让用户贴账号主页链接以便取数核对。',
+    message: `这一轮已经搜完：找到 ${available} 个可选、需要 ${required} 个才能出候选卡。`,
+    nextStep: '告诉用户两条出路：换一组关键词再搜一轮，或直接发来想对标的账号主页链接（按链接取数核对，'
+      + '核对合格的账号同样算对标）。搜过两轮仍不够时，主要建议发链接，不要只让用户再搜。',
     availableCandidates: available,
     requiredCandidates: required,
   };
 }
+
+/** A round stopped before its end (this reply's lookups ran out): it is not a round yet and continues on the next reply. */
+export const ROUND_UNFINISHED_NEXT_STEP = '这一轮搜索还没搜完，不算一轮。告诉用户回复"继续"即可接着搜完这一轮；'
+  + '已经取过的数据不会重复取、不重复收费。不要说已经搜完，也不要建议换关键词。';
+
+/** Authors whose profiles one scan batch reads; the first batch is read whole so the card can show up to 12. */
+const AUTHOR_BATCH = 15;
 
 /** The operation is the durable cursor. A crash after dispatch never causes another supplier request. */
 async function step(ctx: ResearchToolContext, d: DiscoveryRecord, budget: ToolAllowance,
@@ -133,7 +155,7 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
   const posts = new Map<SocialPlatform, EvidenceItem[]>();
   const found: FoundAccount[] = [];
   let authorCursor = 0;
-  let authorLimit = z.number().int().positive().safeParse(d.cursor.authorLimit).data ?? 15;
+  let authorLimit = z.number().int().positive().safeParse(d.cursor.authorLimit).data ?? AUTHOR_BATCH;
   for (const platform of d.platforms) {
     const entries: EvidenceItem[] = [];
     posts.set(platform, entries);
@@ -155,34 +177,40 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
     // Rank across platforms, then spend at most the remaining discovery subcall cap on profiles.
     const authors = d.platforms.flatMap(platform => aggregateAuthors(posts.get(platform) ?? [], (posts.get(platform) ?? []).length)
       .map(author => ({ ...author, platform }))).sort((a, b) => b.appearances - a.appearances || b.interactions - a.interactions);
-    for (const author of authors.slice(0, authorLimit)) {
-      const account = canonicalAccount(author.platform, author.authorId);
-      if (!account) continue;
-      const request = socialRequest(ctx, author.platform, 'account_profile', { account });
-      if (!request) { complete = false; continue; }
-      const result = await step(ctx, d, budget, index++, request);
-      complete &&= result.complete;
-      if (result.stopped) {
-        stopped = true;
-        stopReason = result.reason;
-        stopBudget = result.budget === true;
-        break;
+    let scanned = 0;
+    // Too few candidates in this batch: widen the scan within this call's own allowance (a stop at the allowance saves the
+    // wider limit; the next reply re-reads paid operations and continues), so a reply never ends a round early by itself.
+    while (!stopped) {
+      for (const [offset, author] of authors.slice(scanned, authorLimit).entries()) {
+        // Past the first batch, the eighth selectable account ends the scan: no further profile is paid for.
+        if (scanned + offset >= AUTHOR_BATCH && selectCandidates(found, true).enough) break;
+        const account = canonicalAccount(author.platform, author.authorId);
+        if (!account) continue;
+        const authorPosts = (posts.get(author.platform) ?? []).filter(p => p.fields.authorId === author.authorId);
+        const request = authorLookup(ctx, author.platform, account, authorPosts);
+        if (!request) { complete = false; continue; }
+        const result = await step(ctx, d, budget, index++, request);
+        complete &&= result.complete;
+        if (result.stopped) {
+          stopped = true;
+          stopReason = result.reason;
+          stopBudget = result.budget === true;
+          break;
+        }
+        authorCursor += 1;
+        const profile = result.items[0];
+        // A video detail speaks for its own channel only: a different channel's numbers never screen this author.
+        if (!profile || (request.vendor === 'tikhub' && request.call.kind === 'post_detail'
+          && profile.fields.authorId !== author.authorId)) continue;
+        const metrics = accountMetrics({ profile: { ...profile, ref: `${result.operationId}#1` }, posts: authorPosts }, ctx.now());
+        const name = accountName(profile.fields.name, author.author);
+        found.push({ key: `${author.platform}:${account}`, platform: author.platform, account, ...(name ? { name } : {}),
+          evidenceRef: `${result.operationId}#1`, metrics,
+          classification: classifyAccount(metrics, ctx.config.recentGrowth, ctx.now(), 'discovery') });
       }
-      authorCursor += 1;
-      const profile = result.items[0];
-      if (!profile) continue;
-      const metrics = accountMetrics({ profile: { ...profile, ref: `${result.operationId}#1` },
-        posts: (posts.get(author.platform) ?? []).filter(p => p.fields.authorId === author.authorId) }, ctx.now());
-      const name = accountName(profile.fields.name, author.author);
-      found.push({ key: `${author.platform}:${account}`, platform: author.platform, account, ...(name ? { name } : {}),
-        evidenceRef: `${result.operationId}#1`, metrics,
-        classification: classifyAccount(metrics, ctx.config.recentGrowth, ctx.now(), 'discovery') });
-    }
-    if (!stopped && !selectCandidates(found, true).enough && authorLimit < authors.length) {
-      // A later batch only reads old operations and spends this round's allowance on new authors.
-      authorLimit = Math.min(authorLimit + 15, authors.length);
-      stopped = true;
-      stopReason = 'CANDIDATE_SCAN_INCOMPLETE';
+      scanned = authorLimit;
+      if (stopped || selectCandidates(found, true).enough || authorLimit >= authors.length) break;
+      authorLimit = Math.min(authorLimit + AUTHOR_BATCH, authors.length);
     }
   }
   // Reconstruct from stable operations each time; the saved candidates support free follow-up cards.
@@ -190,8 +218,8 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
   const onCard = stopped ? 0 : await card(ctx, d.discoveryId, found, false, '');
   const shown = onCard > 0;
   const available = selectCandidates(found, true).selectable.length;
-  const insufficient = !stopped && complete && !shown;
-  const resumable = stopReason === 'ROUND_LIMIT' || stopReason === 'CANDIDATE_SCAN_INCOMPLETE';
+  const insufficient = !stopped && !shown;
+  const resumable = stopReason === 'ROUND_LIMIT';
   const blockedWithoutData = stopped && !resumable && found.length === 0;
   // A round saved as completed (the same state 0320 counts as a round, partial supplier failures included) without a
   // candidate card: the host may now offer the shortfall choice (0320 decides).
@@ -204,6 +232,7 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
     // The host shows the card, not the model's text: say so, or the model may deny a card the user can see.
     ...(shown ? { candidateCard: { shown: true, selectable: onCard }, nextStep: CARD_SHOWN_NEXT_STEP }
       : { candidateCard: { shown: false } }),
+    ...(stopped && resumable ? { nextStep: ROUND_UNFINISHED_NEXT_STEP } : {}),
     discoveryId: d.discoveryId, continue: stopped && resumable,
     items: found.map(a => ({ fields: { platform: a.platform, account: a.account, ...(a.name ? { name: a.name } : {}),
       evidenceRef: a.evidenceRef,

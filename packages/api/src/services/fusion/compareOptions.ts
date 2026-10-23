@@ -34,3 +34,14 @@ export async function compareOptions(admin: SupabaseClient, actorId: string, env
     // Fewer usable models than the minimum: the picker explains instead of offering a choice that can never be made.
     usable: listed.length >= min };
 }
+
+/** The real configured names (Owner 2026-10-17 Q1) of the models a conversation's compares used, resolved from the models
+ * themselves and not from today's allowlist: a card of a model that was later removed or switched off keeps its name. */
+export async function compareModelNames(admin: SupabaseClient, modelIds: readonly string[]): Promise<Record<string, string>> {
+  const ids = [...new Set(modelIds)];
+  if (!ids.length) return {};
+  const rows = await admin.from('ai_models').select('id,name,model_id').in('id', ids);
+  if (rows.error) throw new Error('FUSION_SETTINGS_UNAVAILABLE');
+  const listed = (rows.data ?? []).map(row => ({ id: row.id as string, name: String(row.name ?? row.model_id) }));
+  return Object.fromEntries(publicModelChoices(listed, { surface: FUSION_COMPARE_SURFACE }).map(choice => [choice.id, choice.label]));
+}

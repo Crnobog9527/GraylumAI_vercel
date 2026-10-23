@@ -9,6 +9,7 @@
 > 全部复用现有机制：`modules`（是否启用、对话模型、"与社交媒体相关"勾选，#831）、Skill 发布版本
 > （`skills` / `skill_revisions` / `skill_packages`）、`workflow.yaml`（`skills/workflowManifest.ts`）、
 > 运行时的意图匹配（`runtime/matching.ts`）。不新建表、不新建发布流程。
+> **2026-10-23（晚）起部分被取代**：自由对话不再做独立 Skill 匹配（`selection.kind:'auto'` 的匹配调用、匹配计费、按模块绑定模型执行、最多 3 个 Skill 等规定）。改为当前对话模型看到 Skill 目录后自行调用 `load_skill` 加载，每条回复最多 2 个，在当前对话模型上执行、无匹配费，按当前模型正常计费（任务 LOAD-SKILL，见 [Master Plan](../MASTER_PLAN.md) 第 2.1 节 2026-10-23（晚）条目）。定位流程、选题窗口、报告和手动"技能"菜单不受影响。本文其余内容与该条目冲突处以该条目为准。
 
 ## 1. 什么是"平台创作 Skill"
 
