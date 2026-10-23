@@ -212,6 +212,15 @@ export async function fusionCompareCases({db,Client,connectionString,report,crea
   await assert.rejects(call(db,'fusion_compare_adopt',actor,first.compareId,1,randomUUID(),billing(1),items2),/FUSION_COMPARE_ADOPTED/);
   await assert.rejects(call(db,'fusion_compare_adopt',actor,first.compareId,1,adoptRequest,billing(1),items2),/FUSION_COMPARE_REQUEST_CONFLICT/,
     'a replay of the adoption request for another column is a conflict, not a success');
+  // 0337: the conversation's cards carry the server-written adoption and the frozen workspace dependencies; another actor sees none.
+  const cards = await call(db,'fusion_compare_list',actor,session);
+  const card = cards.find(x=>x.compareId===first.compareId);
+  assert.equal(card.question,question);assert.equal(card.adoption.executionId,adopted.adoption.executionId);
+  assert.deepEqual(card.workspaceDependencies,[]);
+  assert.ok(cards.every(x=>x.groupId),'a start that never built a group shows no card');
+  const stranger = (await createFixture(db,{credits:1,phase:'fusion_compare'})).actor;
+  assert.deepEqual(await call(db,'fusion_compare_list',stranger,session),[],'a foreign conversation lists nothing');
+  report.checks.push('fusion_compare_list returns the conversation cards with adoption and dependencies, nothing for another actor');
   report.checks.push('adoption writes the question and chosen answer through a zero-amount adoption run bound like an ordinary turn; '+
     'the execution ends cancelled, the conversation shows it, the next turn can read it; written once, replayable');
 

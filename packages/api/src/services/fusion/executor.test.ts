@@ -59,6 +59,21 @@ describe('Fusion executor', () => {
     expect(h.calls).toEqual(['dispatch', 'fusion_call_output_save:', 'fusion_call_verdict:usable', 'finalize', 'cancel', 'finalize']);
     expect(h.billing.dispatchOnce).toHaveBeenCalledWith('call-1', run.body, onChunk);
   });
+  it('a reply the host refuses before saving (positioning fallback marker) is never saved, judged no_delivery and settled free', async () => {
+    const h = harness({ dispatched: true, observation: observation(sse('[[GRAYLUM_POSITIONING_REQUIRED]]')) });
+    const refuse = vi.fn((text: string) => text.startsWith('[[GRAYLUM_POSITIONING_REQUIRED]]'));
+    const result = await h.executor.run(run, { runId: 'run-1', id: 'call-1', state: 'prepared', fresh: true }, () => 'usable', undefined, refuse);
+    expect(result).toEqual({ state: 'judged', verdict: 'no_delivery' });
+    expect(refuse).toHaveBeenCalledWith('[[GRAYLUM_POSITIONING_REQUIRED]]');
+    // No fusion_call_output_save: 0235 allows no_delivery only for a call without a saved body.
+    expect(h.calls).toEqual(['dispatch', 'fusion_call_verdict:no_delivery', 'finalize', 'cancel', 'finalize']);
+  });
+  it('a reply the host does not refuse is saved and judged as before, and `refuse` is optional', async () => {
+    const h = harness();
+    const result = await h.executor.run(run, { runId: 'run-1', id: 'call-1', state: 'prepared', fresh: true }, () => 'usable', undefined, () => false);
+    expect(result).toMatchObject({ state: 'judged', verdict: 'usable' });
+    expect(h.calls).toContain('fusion_call_output_save:');
+  });
   it('checks the time budget before dispatch and stops without dispatching when exhausted', async () => {
     const h = harness();
     (h.budget.modelCallTimeout as ReturnType<typeof vi.fn>).mockImplementation(() => { throw new Error('RUNTIME_TIME_BUDGET_EXHAUSTED'); });

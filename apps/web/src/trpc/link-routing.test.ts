@@ -4,7 +4,7 @@ import { trpcLinkKind } from "./link-routing";
 
 describe("trpcLinkKind", () => {
   it("streams the long-running turn procedures", () => {
-    for (const path of ["opc.mentorTurnStream", "runtime.executeStream", "runtime.resumeStream"])
+    for (const path of ["opc.mentorTurnStream", "runtime.executeStream", "runtime.resumeStream", "fusionCompare.stream"])
       expect(trpcLinkKind(path)).toBe("stream");
   });
   it("sends the polled history and the sidebar conversation list on their own", () => {

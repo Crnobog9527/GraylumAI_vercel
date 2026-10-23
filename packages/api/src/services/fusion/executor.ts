@@ -10,6 +10,8 @@ import { requireNewWork, type RuntimeCallGate } from '../runtime/newWorkGate';
 import type { AdmittedFusionRun } from './admission';
 
 type Billing = ReturnType<typeof authoritativeBilling>;
+/** What dispatching a call needs of its admitted run: reviews and compare columns both satisfy it. */
+export type ExecutableRun = Pick<AdmittedFusionRun, 'runId' | 'body' | 'call'>;
 /** Host verdicts written after the body is saved (0234/0235). no_delivery is the host's for a confirmed failure. */
 export type FusionBodyVerdict = 'usable' | 'format_invalid' | 'revision_invalid';
 export type FusionClaimedCall = { runId: string; id: string; state: string; fresh: boolean };
@@ -53,8 +55,10 @@ export function fusionExecutor(deps: { billing: Billing; admin: SupabaseClient; 
     claim: (groupId: string, stepKey: string, attempt: number, runs: AdmittedFusionRun[]) =>
       billing.claimFusionGroup(groupId, stepKey, attempt, runs.map(run => ({ runId: run.runId, payload: run.call }))),
     /** Dispatch, save, judge and settle one call. judge sees the exact saved text (PR-4 validates it). */
-    async run(run: AdmittedFusionRun, claimed: FusionClaimedCall, judge: (text: string) => FusionBodyVerdict,
-      onChunk?: (chunk: string) => void): Promise<FusionCallOutcome> {
+    /** `refuse` (compare columns admitted with the positioning fallback rule): called with the complete reply before anything
+     * is saved; true ends the call as no_delivery, never saved and never charged (0235 allows no_delivery only without a body). */
+    async run(run: ExecutableRun, claimed: FusionClaimedCall, judge: (text: string) => FusionBodyVerdict,
+      onChunk?: (chunk: string) => void, refuse?: (text: string) => boolean): Promise<FusionCallOutcome> {
       deps.budget.modelCallTimeout(OPENROUTER_RESPONSE_TIMEOUT_MS);
       // Exactly one call-gate unit per actual dispatch, whichever request dispatches it (one browser request
       // per model, retries, replays; #954 review). A refusal releases this call's hold instead of leaving it
@@ -83,11 +87,22 @@ export function fusionExecutor(deps: { billing: Billing; admin: SupabaseClient; 
       const text = fusionResponseText(dispatch.observation, run.call.model);
       // Unreadable or incomplete: no body is saved; recovery settles it at the deadline as no_delivery.
       if (!text) return { state: 'pending', reason: 'response_unreadable' };
+      if (refuse?.(text)) {
+        await rpc('fusion_call_verdict', { p_call_id: claimed.id, p_verdict: 'no_delivery' });
+        await settle(run.runId);
+        return { state: 'judged', verdict: 'no_delivery' };
+      }
       await rpc('fusion_call_output_save', { p_call_id: claimed.id, p_body: text });
       const verdict = judge(text);
       await rpc('fusion_call_verdict', { p_call_id: claimed.id, p_verdict: verdict });
       await settle(run.runId);
       return { state: 'judged', verdict, text };
+    },
+    /** A compare column whose body was saved but never judged (interrupted between the two): a compare answer has no
+     * format to check, so the saved body is usable, then the run settles exactly as an uninterrupted call would. */
+    async judgeSaved(runId: string, callId: string) {
+      await rpc('fusion_call_verdict', { p_call_id: callId, p_verdict: 'usable' });
+      return settle(runId);
     },
     /** User stop: cancel each run; undispatched calls are released, dispatched ones settle at known cost. */
     async stop(runIds: string[]) {
