@@ -1,7 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
-const mocks = vi.hoisted(() => ({ auth: vi.fn(), create: vi.fn(), deps: vi.fn(), run: vi.fn(), start: vi.fn(), finish: vi.fn(), budget: vi.fn() }));
+const mocks = vi.hoisted(() => ({ auth: vi.fn(), create: vi.fn(), deps: vi.fn(), run: vi.fn(), start: vi.fn(), finish: vi.fn(), budget: vi.fn(),
+  sentry: vi.fn() }));
+vi.mock('@sentry/nextjs', () => ({ captureMessage: mocks.sentry }));
 vi.mock('@/lib/cron-auth', () => ({ validateCronRequest: mocks.auth }));
 vi.mock('@supabase/supabase-js', () => ({ createClient: mocks.create }));
 vi.mock('@repo/api/src/services/publishMonitor/secrets', () => ({ loadPostForMeDeps: mocks.deps }));
@@ -97,4 +99,14 @@ it('shares the entry-time Runtime budget even when setup has already consumed in
   expect(mocks.budget.mock.invocationCallOrder[0]).toBeLessThan(mocks.start.mock.invocationCallOrder[0]!);
   expect(mocks.run.mock.calls[0]![6].budget).toBe(mocks.budget.mock.results[0]!.value);
  }finally{clock.mockRestore();}
+});
+
+it('alerts on Post for Me cleanup that stopped retrying, with counts only, and stays quiet when there is none', async () => {
+  mocks.run.mockResolvedValue({ failures: [], stuck: { connections: 0, requests: 0 } });
+  await call();
+  expect(mocks.sentry).not.toHaveBeenCalled();
+  mocks.run.mockResolvedValue({ failures: [], stuck: { connections: 2, requests: 1 } });
+  await call();
+  expect(mocks.sentry).toHaveBeenCalledWith('PUBLISH_MONITOR_CLEANUP_STUCK', expect.objectContaining({
+    fingerprint: ['PUBLISH_MONITOR_CLEANUP_STUCK'], extra: { connections: 2, requests: 1 } }));
 });

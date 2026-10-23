@@ -7,6 +7,7 @@ import { reconcilePublishes, type ReconcileReport } from './publish';
 import { PUBLISH_MONITOR_SWITCH } from './foundation';
 import { cleanupAttempts, runProviderWork, sweepOrphans, type RunReport, type SweepReport } from './providerCleanup';
 import { pruneSnapshots, runRefresh, type RefreshReport, type WindowLookup } from './refresh';
+import { readStuckCleanup } from './stuckCleanup';
 import { closeOrphanRuns, runTikhubRefresh, type TikhubEntitlementLookup, type TikhubReport } from './tikhubRefresh';
 
 // The cron route reads the owner's data window from the server-side entitlement.
@@ -31,6 +32,8 @@ export type SocialMonitorReport = {
   sweepDeleteEnabled: boolean; pruned: number | null; refresh: RefreshReport | null; tikhub: TikhubReport | null;
   reviews: Awaited<ReturnType<typeof runWeeklyReviews>> | null;
   billedRunsClosed: number | null; billedPruned: number | null; postForMe: boolean; failures: string[];
+  /** Plan §9 item 25: Post for Me cleanup that stopped after 50 attempts (counts only; the route raises the alert). */
+  stuck: { connections: number; requests: number } | null;
 };
 
 /** Strictly true or off; a setting that cannot be read is reported as a failure, never as "off". */
@@ -72,7 +75,7 @@ export async function runSocialMonitorJob(db: Db, client: ClientDeps | null, unt
   now: () => number = Date.now, tikhub?: TikhubStep, reviews?: ReviewStep): Promise<SocialMonitorReport> {
   const report: SocialMonitorReport = { publishes: null, providerWork: null, attempts: null, sweep: null,
     sweepDeleteEnabled: false, pruned: null, refresh: null, tikhub: null, billedRunsClosed: null, billedPruned: null,
-    postForMe: client !== null, reviews: null, failures: [] };
+    postForMe: client !== null, reviews: null, failures: [], stuck: null };
   try { report.pruned = await pruneSnapshots(db, until, now); } catch { report.failures.push('prune'); }
   try { report.billedPruned = await pruneBilledReads(db); } catch { report.failures.push('billed_prune'); }
   try {
@@ -107,5 +110,10 @@ export async function runSocialMonitorJob(db: Db, client: ClientDeps | null, unt
       report.sweep = await sweepOrphans(db, client, report.sweepDeleteEnabled, until, now);
     } catch { report.failures.push('sweep'); }
   }
+  // Last and database only: what the cleanup steps left stopped is counted even when the budget ran out.
+  try {
+    const stuck = await readStuckCleanup(db);
+    report.stuck = { connections: stuck.connections.length, requests: stuck.requests.length };
+  } catch { report.failures.push('stuck'); }
   return report;
 }
