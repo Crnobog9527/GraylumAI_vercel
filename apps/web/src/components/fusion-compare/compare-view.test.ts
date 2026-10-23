@@ -86,3 +86,13 @@ describe('a stopped column is never called free when it was charged', () => {
     expect(isDefiniteRefusal({ message: 'FUSION_COMPARE_PRICE_CHANGED' })).toBe(true);
   });
 });
+
+import { withStarted } from './CompareThread';
+describe('a compare this tab started stays visible while the list is unreadable', () => {
+  const card = (id: string, state: string) => ({ compareId: id, state, createdAt: '2026-10-23T10:00:00Z' });
+  it('adds the started compare when the list lacks it, and lets the listed card win once it appears', () => {
+    expect(withStarted([], [card('a', 'running')]).map(c => c.compareId)).toEqual(['a']);
+    expect(withStarted([card('a', 'finished')], [card('a', 'running')])).toEqual([card('a', 'finished')]);
+    expect(withStarted([card('b', 'finished')], [card('a', 'running')]).map(c => c.compareId)).toEqual(['b', 'a']);
+  });
+});
