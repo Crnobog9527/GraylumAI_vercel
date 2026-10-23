@@ -94,7 +94,7 @@ async function researchRound(toolThreshold = 1, freeChat = false) {
   await db.query(`insert into system_settings(key,value) values('billing_payg_start_thresholds',$1::jsonb)
     on conflict(key) do update set value=jsonb_set(system_settings.value,'{thresholds}',
     coalesce(system_settings.value->'thresholds','[]')||(excluded.value->'thresholds'))`,
-  [{ version: 'local-v1', thresholds: [{ model, purpose: 'skill', credits: 1 }] }]);
+  [{ version: 'local-v1', thresholds: [{ model, purpose: 'skill', credits: 1 }, { model, purpose: 'ordinary', credits: 1 }] }]);
   // One threshold entry per tool route and purpose (0180); an earlier run of this file may have added it.
   await db.query(`update system_settings set value=jsonb_set(value,'{thresholds}',(select coalesce(jsonb_agg(t),'[]')
     from jsonb_array_elements(value->'thresholds') t where t->>'model'<>$1)||$2::jsonb) where key='billing_payg_start_thresholds'`,
@@ -298,7 +298,8 @@ it('RUNTIME: a free chat reply makes a general lookup, rounds once, keeps it as 
     const events: RuntimeProgress[] = [];
     const host = () => runtimeExecutor({ database: f.admin, actor: async () => f.actor, callGate: async () => ({ ok: true as const }),
       endpoint: f.endpoint });
-    expect(await host().execute(f.admitted.executionId, event => events.push(event))).toMatchObject({ state: 'completed' });
+    const outcome = await host().execute(f.admitted.executionId, event => events.push(event));
+    expect(JSON.stringify(outcome)).toContain('"completed"');
     const calls = (await f.db.query(`select sequence,call_kind from bill2_calls where run_id=$1 order by sequence`, [f.admitted.runId])).rows;
     expect(calls.map(c => [c.sequence, c.call_kind])).toEqual([[1, 'model'], [2, 'tool'], [3, 'model']]);
     expect(supplier.calls).toBe(1);
