@@ -63,6 +63,7 @@ Owner 决定不补测 Opus 的截断。依据：
 2. **`runtime_payg_staging.profiles`**：按补丁文件逐个模型处理（在现有那条同模型同线路的档案上改，其余字段不动）：
    - Sol、Opus：`purposes` 加 `fusion_compare`，`requestFormats` 加 `fusion-text-v1-stream`，`evidence.compareShape` 照补丁文件填；
    - Sonnet、Gemini：只加 `fusion_compare` 和 `fusion-text-v1-stream`（完整矩阵证据，不用 `compareShape`）。
+   - 四个档案的 `profileVersion` 末尾追加 `+compare-20261023`（补丁文件里的 `profileVersionSuffix`），Sol、Opus 的 `evidenceVersion` 也追加（`evidenceVersionSuffix`）：这两个标识会被冻结进每次调用，计量审查靠它区分旧评审档案和本次新证据；不要沿用旧标识。
    写完后在后台"Fusion 设置"的对比模型列表里，四个模型都应出现。
 3. **`fusion_settings.compare`**（验收期间，开关由总控临时打开，验完关闭）：
    - `allowedModelIds`：Sonnet、Gemini、Sol、Opus 四个模型的编号；`defaultModelIds`：其中 3 个（Owner 没定默认组，验收期间用 Sonnet、Gemini、Sol）；`minModels` 2；

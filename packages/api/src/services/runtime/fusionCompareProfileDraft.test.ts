@@ -21,6 +21,13 @@ it('the patch cites the committed evidence file, which stays within the Owner bu
     status: number; egress: string }) => s.costWithinBound && s.completionWithinLimit && s.cachedWithinPrompt && s.status === 200
     && s.egress === 'US')).toBe(true);
 });
+it('every patched profile gets a new version suffix, and the ones with new evidence a new evidence version', () => {
+  expect(patchFile.patches).toHaveLength(4);
+  for (const patch of patchFile.patches) {
+    expect(patch.profileVersionSuffix).toBe('+compare-20261023');
+    expect(patch.evidenceVersionSuffix === '+compare-20261023').toBe('setEvidenceCompareShape' in patch);
+  }
+});
 it.each(['openai/gpt-6.1-sol', 'anthropic/claude-opus-5.5'])('%s patched profile is valid and matches its compare evidence', model => {
   const patch = patchFile.patches.find((p: { model: string }) => p.model === model);
   const profile = structuredClone(base.profiles.find((p: { model: string }) => p.model === model));
