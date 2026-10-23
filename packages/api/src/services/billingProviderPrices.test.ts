@@ -220,6 +220,9 @@ describe('read and save', () => {
   it('a non-string stored value is hashed from PostgreSQL\'s own text (as the 0346 writer hashes it)', async () => {
     const legacy = db({ data: { value: { version: 2 }, raw: '{"version": 2}' }, error: null });
     await expect(providerPricesView(legacy.client)).resolves.toMatchObject({ source: 'invalid', hash: sha('{"version": 2}') });
+    // A row whose value is SQL NULL is a broken row (hash of "null", as 0346 computes it), not a missing one.
+    const empty = db({ data: { value: null, raw: null }, error: null });
+    await expect(providerPricesView(empty.client)).resolves.toMatchObject({ source: 'invalid', hash: sha('null') });
   });
 
   it('an invalid stored value can be replaced by quoting its hash', async () => {

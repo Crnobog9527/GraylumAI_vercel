@@ -8,7 +8,7 @@
 -- (saveProviderPrices then writes with its old upsert). No stored data depends on the function.
 CREATE OR REPLACE FUNCTION public.billing_provider_prices_swap(p_expected_hash text, p_value text) RETURNS text
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
-DECLARE current_value jsonb; current_hash text;
+DECLARE current_value jsonb; current_hash text; present boolean;
 BEGIN
   IF p_value IS NULL OR jsonb_typeof(p_value::jsonb) IS DISTINCT FROM 'object'
    OR (p_expected_hash IS NOT NULL AND p_expected_hash !~ '^[0-9a-f]{64}$') THEN
@@ -17,7 +17,10 @@ BEGIN
   -- The row may not exist yet (first save): the advisory lock serializes that case too.
   PERFORM pg_advisory_xact_lock(hashtext('billing_provider_prices'));
   SELECT value INTO current_value FROM system_settings WHERE key='billing_provider_prices' FOR UPDATE;
-  current_hash:=CASE WHEN current_value IS NULL THEN NULL
+  present:=FOUND;
+  -- A row whose value is SQL NULL is a broken row, not a missing one: the client hashes it as the text "null".
+  current_hash:=CASE WHEN NOT present THEN NULL
+    WHEN current_value IS NULL THEN encode(sha256(convert_to('null','UTF8')),'hex')
     WHEN jsonb_typeof(current_value)='string' THEN encode(sha256(convert_to(current_value #>> '{}','UTF8')),'hex')
     ELSE encode(sha256(convert_to(current_value::text,'UTF8')),'hex') END;
   IF current_hash IS DISTINCT FROM p_expected_hash THEN

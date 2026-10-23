@@ -74,6 +74,13 @@ try {
   assert.equal(await stored(), config('0.006'));
   report.checks.push('a non-string stored value is replaced by quoting the hash of its PostgreSQL text (the client reads the same text)');
 
+  // A row whose value is SQL NULL is replaced by quoting the hash of "null" (what the client reads), never as "no row".
+  await db.query('UPDATE system_settings SET value=NULL WHERE key=$1', [KEY]);
+  await assert.rejects(swap(db, null, config('0.007')), /CONFLICT/);
+  assert.equal(await swap(db, sha('null'), config('0.007')), sha(config('0.007')));
+  assert.equal(await stored(), config('0.007'));
+  report.checks.push('a row whose value is SQL NULL is replaced by quoting sha("null"), not treated as a missing row');
+
   const grants = (await db.query(`SELECT has_function_privilege('anon',f,'EXECUTE') anon, has_function_privilege('authenticated',f,'EXECUTE') auth,
     has_function_privilege('service_role',f,'EXECUTE') service FROM (SELECT 'public.billing_provider_prices_swap(text,text)'::regprocedure f) x`)).rows[0];
   assert.deepEqual(grants, { anon: false, auth: false, service: true });
