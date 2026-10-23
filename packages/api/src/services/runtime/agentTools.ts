@@ -3,7 +3,7 @@ import {z} from 'zod';
 import {AGENT_TURN_MESSAGE_LIMIT,ASK_QUESTION_TOOL,MAX_OPTIONS,MIN_OPTIONS,OPTION_MAX_CHARS,QUESTION_MAX_CHARS} from '../../shared/agentTurn';
 import {parseQuestionCard,questionCardSchema,questionToolCardSchema,questionMessageSchema,type QuestionCard} from '../../shared/agentTurn';
 import type {RuntimeTool} from './runner';
-import {POSITIONING_RESEARCH_TOOLS} from '../research/tools/names';
+import {GENERAL_RESEARCH_TOOLS,POSITIONING_RESEARCH_TOOLS} from '../research/tools/names';
 
 /** Interactive Agent turn tools (AC-1). Only the `agent-turn-v5-stream`
  * request format may carry them, and only when its frozen context lists them.
@@ -15,6 +15,8 @@ export const READ_HISTORY_TOOL='read_history';
 export const AGENT_TOOL_NAMES:ReadonlySet<string>=new Set([ASK_QUESTION_TOOL,READ_SKILL_FILE_TOOL,READ_HISTORY_TOOL,...POSITIONING_RESEARCH_TOOLS]);
 /** The only tool of the older formats. */
 export const SOURCE_TOOL_NAMES:ReadonlySet<string>=new Set(['read_source']);
+/** CHAT-AUTO-CONTEXT C: a free chat (v6) offers read_source and, when admission froze them, the general research tools. */
+export const FREE_CHAT_TOOL_NAMES:ReadonlySet<string>=new Set(['read_source',...GENERAL_RESEARCH_TOOLS]);
 /** At most this many tool definitions in one new-format request (card, Skill file, history, six research tools). */
 export const MAX_AGENT_TOOLS=9;
 /** Stream parsing for an Agent turn response: its tool names, and up to eight

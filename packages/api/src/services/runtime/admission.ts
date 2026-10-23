@@ -59,6 +59,7 @@ import {fitsCapacity} from './researchAdmission';
 import {researchCapacity} from './researchCapacity';
 import {RESEARCH_RESULT_RESERVE_BYTES} from './researchTurn';
 import {guardResearchAdmission,researchInputHost} from './researchAdmissionGuard';
+import {attachFreeChatResearch} from './freeChatResearch';
 import {organizerSelection} from './organizerSelection';
 import {readAdmissionConfiguration} from './admissionConfiguration';
 const uuid=z.string().uuid();
@@ -450,7 +451,9 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
      capacity:(researchToolsBytes,researchHostDeltaBytes,bytes)=>researchCapacity({instructions:instructions+positioningRule,
       currentInput,inputBudgetBytes:limitOf(bytes),existingToolsBytes:admissionToolBytes(Boolean(skillFile),historyRead),
       researchToolsBytes,researchHostDeltaBytes,resultReserveBytes:RESEARCH_RESULT_RESERVE_BYTES}),
-     fits:(extra,bytes)=>fitsCapacity(()=>requireCapacity(instructions+positioningRule,Boolean(skillFile),currentInput,historyRead,extra,bytes))}))
+     fits:(extra,bytes)=>fitsCapacity(()=>requireCapacity(instructions+positioningRule,Boolean(skillFile),currentInput,historyRead,extra,bytes))})
+    ||freeChat&&await attachFreeChatResearch({admin,real:policy.real!,context,billing,
+     fits:(extra,bytes)=>fitsCapacity(()=>requireCapacity(instructions+positioningRule,false,currentInput,false,extra,bytes))}))
     billing.sourceHash=createHash('sha256').update(JSON.stringify(context)).digest('hex');
    await requireAllowedInput({actorId,sessionId:input.sessionId,requestId:input.requestId,
     text:input.input,opening});

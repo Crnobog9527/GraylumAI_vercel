@@ -37,7 +37,7 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
  children:ReactNode;right?:ReactNode;rightOpen?:boolean;onToggleRight?:()=>void;
  /** Changes to a new number when the page wants the right panel shown, also on a phone (where it is an overlay). */
  revealRight?:number;
- activeWorkItemId?:string;area?:'chat'|'library'|'topics'|'marketplace'|'search'|'start';notice?:string;
+ activeWorkItemId?:string;area?:'chat'|'library'|'topics'|'marketplace'|'search'|'start'|'review';notice?:string;
 }){
  const [mobileNav,setMobileNav]=useState(false),[mobileRight,setMobileRight]=useState(false);
  // Reveal before the next animation frame, when the checklist requests field focus.
@@ -101,6 +101,8 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
  const conversations=trpc.opc.conversations.useQuery(undefined,{staleTime:0});
  const visibleConversations=(conversations.data??[]).filter(row=>!conversationErasure.hidden.has(row.sessionId));
  const profile=trpc.user.getUserProfile.useQuery();
+ // PUBLISH-MONITOR PR-7: 数据复盘 becomes a link once its admin switch is on (public booleans, no user data).
+ const publishMonitor=trpc.publishMonitor.features.useQuery(undefined,{retry:false,staleTime:300_000});
  const historyRef=useRef<HTMLDivElement>(null);
  const sidebarActor=profile.data?.id;
  const [restoredActor,setRestoredActor]=useState<string>();
@@ -204,7 +206,7 @@ export function WorkspaceFrame({children,right,rightOpen=true,onToggleRight,acti
   <GlobalHeader area={area} onOpenNav={()=>setMobileNav(true)}/>
   {noticeOpen&&<AnnouncementBar notice={notice} returnParam={returnParam} onClose={()=>setNoticeOpen(false)}/>}
   <div className={[styles.shell,right&&rightOpen?styles.withRight:'',mobileNav?styles.navOpen:'',mobileRight?styles.mobileRightOpen:'',!noticeOpen?styles.noNotice:''].join(' ')}>
-   <RailView area={area} returnParam={returnParam} onCloseMobile={()=>setMobileNav(false)}>
+   <RailView area={area} returnParam={returnParam} dataReview={publishMonitor.data?.ownData===true} onCloseMobile={()=>setMobileNav(false)}>
     <RailHistory historyRef={historyRef} archiveView={archiveView} onToggleArchive={()=>setArchiveView(value=>!value)} onControl={takeSidebarControl}
      onScroll={()=>{setMenuId('');if(!restoringScroll.current&&pendingScroll.current===null)saveSidebar();}}>
      {[...platforms].map(([platform,accounts])=>{

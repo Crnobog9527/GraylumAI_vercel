@@ -53,3 +53,5 @@
 .confirmCard div{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
 .confirmCard button{height:auto;min-height:34px;padding:7px 12px;border-radius:8px;font-size:12px;white-space:normal}
 .linkButton{border:0;background:none;color:#666;font-size:12px;text-decoration:underline;cursor:pointer;padding:0}
+/* CHAT-UI-POLISH: long unbroken strings wrap inside the checklist column. */
+.step>summary>*,.fieldHead label,.hint,.note,.confirmCard>p,.stepFooter p,.alert{min-width:0;overflow-wrap:anywhere}

@@ -12,7 +12,9 @@ import { databaseRuntimeResearchStore } from '../research/runtime/store';
 import { platformSecretReader } from '../research/runtime/secrets';
 import { ResearchPause } from '../research/runtime/subcall';
 import type { ResearchToolContext } from '../research/runtime/toolContext';
-import { POSITIONING_RESEARCH_TOOLS, type ResearchToolName } from '../research/tools/schemas';
+import { RESEARCH_TOOL_NAMES, type ResearchToolName } from '../research/tools/schemas';
+import { canonicalAccount, type CanonicalAccount } from '../research/tools/accountLinks';
+import type { SocialPlatform } from '../research/vendors/types';
 import type { RuntimeExecution } from './paygResume';
 import { researchToolBytes } from './researchAdmission';
 import { fastSearchOnly, researchRuntimeTools } from './researchRuntimeTool';
@@ -56,7 +58,7 @@ export function researchExecution(input: {
 }): ResearchExecution | null {
   const { research, execution } = input;
   if (!research) return null;
-  const names = POSITIONING_RESEARCH_TOOLS.filter(name => input.tools.includes(name)) as ResearchToolName[];
+  const names = RESEARCH_TOOL_NAMES.filter(name => input.tools.includes(name)) as ResearchToolName[];
   const readCalls = async () => {
     const result = await readBillingRpc(input.database,'bill2_read',
       { p_actor_id: input.actorId, p_run_id: execution.runId },input.budget);
@@ -103,10 +105,38 @@ export function researchExecution(input: {
       ...(input.now ? { now: input.now } : {}),
     },
   };
+  // A subcall slot of this run (any state) is one this answer already spent, also across a pause or a restart.
+  const usedSubcalls = async () => {
+    let used = 0;
+    for (const call of await readCalls()) if (await isSubcall(call)) used++;
+    return used;
+  };
+  async function isSubcall(call: z.infer<typeof runCalls>['calls'][number]) {
+    // An object for a tool call of this answer in any state (also one recovery cancelled before its receipt), null otherwise.
+    const kind = await input.database.rpc('research_runtime_call_charge',
+      { a: input.actorId, s: execution.sessionId, e: input.executionId, p_call: call.id });
+    if (kind.error) throw new Error('RESEARCH_STATE_UNAVAILABLE');
+    return kind.data !== null && typeof kind.data === 'object';
+  }
+  // CHAT-AUTO-CONTEXT C: social_account takes accounts only from the user's benchmark table or the message being answered.
+  const freeChat = research.freeChat ? { accounts: {
+    async benchmarkAccounts() {
+      const result = await input.database.rpc('research_chat_benchmark_accounts',
+        { a: input.actorId, s: execution.sessionId, e: input.executionId });
+      if (result.error) throw new Error('RESEARCH_STATE_UNAVAILABLE');
+      return (Array.isArray(result.data) ? result.data : []).flatMap((item: { platform?: unknown; account?: unknown }) => {
+        if (typeof item?.platform !== 'string' || typeof item.account !== 'string') return [];
+        const account = canonicalAccount(item.platform as SocialPlatform, item.account);
+        return account ? [{ platform: item.platform as SocialPlatform, account } satisfies CanonicalAccount] : [];
+      });
+    },
+    currentMessage: () => store.authorization.userMessage(scope, input.executionId),
+  } } : undefined;
   return {
     // After a confirmed erasure the tool call ends the turn instead of handing a result to the model.
     // A pause ends the turn at the subcall's slot; the resumed turn runs this tool call again.
-    tools: researchRuntimeTools(ctx, names).map(tool => ({ ...tool, async execute(args, callId) {
+    // A free chat reply counts what it already spent (CHAT-AUTO-CONTEXT C); the mentor turn keeps its single-call round.
+    tools: researchRuntimeTools(ctx, names, freeChat ? { usedSubcalls, freeChat } : {}).map(tool => ({ ...tool, async execute(args, callId) {
       let result;
       try { result = await tool.execute(args, callId); }
       catch (error) {
@@ -118,16 +148,11 @@ export function researchExecution(input: {
       input.onSubcallSettled?.();
       return result;
     } })),
-    definitionBytes: researchToolBytes(names, fastSearchOnly(ctx.config)), reserve: research.reserve,
+    definitionBytes: researchToolBytes(names, fastSearchOnly(ctx.config), Boolean(research.freeChat)), reserve: research.reserve,
     claimedSubcall: sequence => claimedSubcalls.has(sequence),
     async isSubcall(sequence) {
       const call = (await readCalls()).find(item => item.sequence === sequence);
-      if (!call) return false;
-      // An object for a tool call of this answer in any state (also one recovery cancelled before its receipt), null otherwise.
-      const kind = await input.database.rpc('research_runtime_call_charge',
-        { a: input.actorId, s: execution.sessionId, e: input.executionId, p_call: call.id });
-      if (kind.error) throw new Error('RESEARCH_STATE_UNAVAILABLE');
-      return kind.data !== null && typeof kind.data === 'object';
+      return call ? isSubcall(call) : false;
     },
   };
 }
