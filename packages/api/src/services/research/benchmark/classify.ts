@@ -2,6 +2,7 @@
 // RESEARCH-TOOLS RT-4 (part a): benchmark categories, qualification and candidate selection
 // (RESEARCH_TOOLS_PLAN.md §1, §1.2). The product thresholds are the server constants in BENCHMARK_RULES;
 // only the "recent fast growth" N and K come from the admin config.
+import { approximateRange } from '../vendors/approxCount';
 import { BENCHMARK_RULES, type ResearchToolsConfig } from '../vendors/config';
 import type { AccountMetrics, EvidenceItem } from './metrics';
 
@@ -33,8 +34,14 @@ export function classifyAccount(
 ): Classification {
   const followers = metrics.followers.value;
   if (followers === null) return { category: null, qualified: false, excluded: 'FOLLOWERS_MISSING' };
-  if (followers < BENCHMARK_RULES.followersMin) return { category: null, qualified: false, excluded: 'FOLLOWERS_BELOW_MIN' };
-  if (followers > BENCHMARK_RULES.followersMax) return { category: 'head_reference', qualified: false, excluded: null };
+  // A rounded YouTube count meets a threshold only when every exact count it may stand for does (Owner 2026-10-23, A).
+  const { low, highExclusive } = metrics.followers.approximate ? approximateRange(followers) : { low: followers, highExclusive: followers + 1 };
+  if (highExclusive - 1 < BENCHMARK_RULES.followersMin) return { category: null, qualified: false, excluded: 'FOLLOWERS_BELOW_MIN' };
+  if (low > BENCHMARK_RULES.followersMax) return { category: 'head_reference', qualified: false, excluded: null };
+  // Straddling a threshold, the exact count that decides it is unknown.
+  if (low < BENCHMARK_RULES.followersMin || highExclusive - 1 > BENCHMARK_RULES.followersMax) {
+    return { category: null, qualified: false, excluded: 'FOLLOWERS_MISSING' };
+  }
   if (metrics.postsAnalyzed === 0) return { category: null, qualified: false, excluded: 'NO_POSTS' };
   if (phase === 'discovery') {
     return { category: null, qualified: false, excluded: 'ACTIVE_CHECK_PENDING' };

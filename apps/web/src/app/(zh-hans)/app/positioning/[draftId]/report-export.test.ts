@@ -44,6 +44,12 @@ describe("reportExportMarkdown", () => {
     // A GFM table: header, delimiter and rows on consecutive lines (review P2, #1213).
     expect(text).toMatch(/\| 账号 \| 平台 .*\|\n\| --- .*\|\n\| 咖啡/);
   });
+  it("marks YouTube followers as approximate (YouTube publishes rounded counts)", () => {
+    const youtube = { ...strategy, data: { ...strategy.data, data: { benchmarks: { accounts: [{ platform: "YouTube", account: "stitch",
+      category: "同量级", takeaway: "学结构", metrics: { followers: 18800, medianViews: null, engagementRate: null, weeklyPosts: null,
+        capturedAt: null } }] } } } } as unknown as typeof strategy;
+    expect(reportExportMarkdown({ body, strategy: youtube })).toContain("| stitch | YouTube | 约 1.88 万（YouTube 只公开约数） |");
+  });
   it("says the notes once under the title", () => {
     const text = reportExportMarkdown({ body, notes: ["这份报告的结构不完整，不能作为正式报告。"] });
     expect(text).toContain("\n\n> 这份报告的结构不完整，不能作为正式报告。\n\n");
