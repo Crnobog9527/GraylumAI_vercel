@@ -20,10 +20,12 @@ type Item = { workItemId: string; title: string; contentType?: string; content: 
 type Account = { projectId: string; platform: string; items: Item[] };
 type Business = { businessId: string; name: string; accounts: Account[] };
 type ResultVersion = { version: number; title: string; body: string };
-type Source = { kind: 'item' | 'result'; id: string };
+type Source = { kind: 'item' | 'result'; id: string; sessionId?: string };
 
 const JOB_KEY = (source: Source) => `publish-monitor-job:${source.kind}:${source.id}`;
-const BACK = (source: Source) => source.kind === 'item' ? `/app/library?item=${source.id}` : '/app/runtime';
+const BACK = (source: Source) => source.kind === 'item' ? `/app/library?item=${source.id}`
+  : source.sessionId ? `/app/runtime?session=${source.sessionId}` : '/app/runtime';
+const BRAND_KEY = (source: Source) => `publish-monitor-brand:${source.id}`;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** The latest final draft is the starting caption; a video script is not a caption, so a video starts from its title. */
@@ -44,14 +46,18 @@ function Workbench({ source }: { source: Source }) {
   const [retryTargets, setRetryTargets] = useState<string[] | null>(null);
   const [round, setRound] = useState(0);
   const [pickedBrand, setPickedBrand] = useState('');
+  const [pending, setPending] = useState(false);
   const storageKey = JOB_KEY(source);
   // A job in progress survives a reload: only its id is kept, never a media link.
   useEffect(() => {
     try {
       const saved = sessionStorage.getItem(storageKey);
       if (saved && UUID.test(saved)) setJobId(saved);
+      // The brand an unconfirmed result publish was started with comes back after a reload, with its saved attempt.
+      const brand = sessionStorage.getItem(BRAND_KEY(source));
+      if (brand && UUID.test(brand)) setPickedBrand(brand);
     } catch { /* storage unavailable: the page still works without it */ }
-  }, [storageKey]);
+  }, [storageKey]); // eslint-disable-line react-hooks/exhaustive-deps
   function remember(id: string | null) {
     setJobId(id);
     try {
@@ -72,7 +78,7 @@ function Workbench({ source }: { source: Source }) {
       </div>
     );
   }
-  const failure = connections.error ?? options.error ?? (isItem ? library.error : versions.error);
+  const failure = connections.error ?? options.error ?? library.error ?? (isItem ? null : versions.error);
   if (failure) return <p role="alert">{publishErrorMessage(failure.message, failure.data?.code)}</p>;
   if (!library.data || !connections.data || !options.data || (!isItem && !versions.data)) {
     return <div className="flex justify-center p-8"><Loader2 className="h-5 w-5 animate-spin" /></div>;
@@ -123,7 +129,11 @@ function Workbench({ source }: { source: Source }) {
             <label className="block space-y-1 text-sm">
               <span className="font-medium">用哪个品牌的账号发布</span>
               <select className="w-full rounded-md border px-2 py-1.5" value={chosen?.business.businessId ?? ''}
-                aria-label="品牌" onChange={event => { setPickedBrand(event.target.value); setRetryTargets(null); }}>
+                aria-label="品牌" disabled={pending}
+                onChange={event => {
+                  setPickedBrand(event.target.value); setRetryTargets(null);
+                  try { sessionStorage.setItem(BRAND_KEY(source), event.target.value); } catch { /* optional */ }
+                }}>
                 <option value="">请选择</option>
                 {brands.map(entry => (
                   <option key={entry.business.businessId} value={entry.business.businessId}>
@@ -134,7 +144,7 @@ function Workbench({ source }: { source: Source }) {
           )}
           {chosen && (
             <PublishForm key={`${round}:${chosen.business.businessId}`} businessId={chosen.business.businessId} workItemId={null}
-              contextKey={`result:${source.id}`} targets={chosen.targets} initialCaption={latest.body}
+              contextKey={`result:${source.id}:${chosen.business.businessId}`} onPendingChange={setPending} targets={chosen.targets} initialCaption={latest.body}
               initialTargets={retryTargets ?? (chosen.targets.length === 1 && chosen.targets[0]!.ready ? [chosen.targets[0]!.id] : [])}
               holdCreditsByTargets={options.data.holdCreditsByTargets} onSubmitted={remember} />
           )}
@@ -149,8 +159,9 @@ function PublishPage() {
   const params = useSearchParams();
   const item = params.get('item');
   const result = params.get('result');
+  const session = params.get('session');
   const source: Source | null = item && UUID.test(item) ? { kind: 'item', id: item }
-    : result && UUID.test(result) ? { kind: 'result', id: result } : null;
+    : result && UUID.test(result) ? { kind: 'result', id: result, ...(session && UUID.test(session) ? { sessionId: session } : {}) } : null;
   return (
     <main className="mx-auto max-w-2xl px-4 py-10">
       {source ? <Workbench source={source} /> : <p role="alert">请从资料库里的选题，或对话的成果夹里打开一键发布。</p>}

@@ -21,10 +21,12 @@ import { MediaPicker, type PickedMedia } from './media-picker';
  * server replays it and never posts twice); every new attempt after a final failure uploads again with a new key.
  */
 export function PublishForm({ businessId, workItemId, contextKey, targets, initialCaption, initialTargets, holdCreditsByTargets,
-  onSubmitted }: {
+  onSubmitted, onPendingChange }: {
   // contextKey names this publish for the saved-attempt storage: the topic, or the saved result being published.
   businessId: string; workItemId: string | null; contextKey: string; targets: Target[]; initialCaption: string; initialTargets: string[];
   holdCreditsByTargets: number[] | null; onSubmitted: (jobId: string) => void;
+  // Tells the page whether an earlier submit is still unconfirmed (the page then keeps the brand fixed).
+  onPendingChange?: (pending: boolean) => void;
 }) {
   const [selected, setSelected] = useState<string[]>(initialTargets.filter(id => targets.some(t => t.id === id && t.ready)));
   const [caption, setCaption] = useState(initialCaption);
@@ -40,6 +42,7 @@ export function PublishForm({ businessId, workItemId, contextKey, targets, initi
     const stored = loadAttempt(contextKey);
     if (stored) { setRecovered(stored); setSelected(stored.connectionIds); setCaption(stored.caption); }
   }, [contextKey]);
+  useEffect(() => { onPendingChange?.(recovered !== null); }, [recovered]); // eslint-disable-line react-hooks/exhaustive-deps
   const uploadUrl = trpc.publishMonitor.publish.uploadUrl.useMutation();
   const submit = trpc.publishMonitor.publish.submit.useMutation();
   const utils = trpc.useUtils();

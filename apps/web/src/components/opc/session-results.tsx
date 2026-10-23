@@ -111,7 +111,7 @@ function ResultCard({ sessionId, item }: { sessionId: string; item: SessionResul
       setDraft({ title: item.title, body: item.body, requestId: '', baseVersion: item.version });
     } }}
     onDraft={value => setDraft(current => ({ ...current, ...value, requestId: '' }))}
-    onSave={() => void saveEdit()} onDelete={() => void confirmDelete()} publish={<PublishResultLink familyId={item.familyId}/>}/>;
+    onSave={() => void saveEdit()} onDelete={() => void confirmDelete()} publish={<PublishResultLink familyId={item.familyId} sessionId={sessionId}/>}/>;
 }
 
 export function ResultCardView({ item, mode, draft, error, pending, versions, historyError, onRetryHistory, onMode, onDraft,

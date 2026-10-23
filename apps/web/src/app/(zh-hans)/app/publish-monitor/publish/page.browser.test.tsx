@@ -302,3 +302,33 @@ it('a saved result of the results folder is published without a topic, to the br
     expect(calls.find(c => c.path === 'opc.sessionResultVersions')!.input).toMatchObject({ familyId: RESULT });
   } finally { await page.close(); }
 }, 30000);
+
+it('an unconfirmed result publish keeps its brand after a reload and the brand cannot be switched while it is pending', async () => {
+  const BIZ2 = '00000000-0000-4000-8000-000000000c22';
+  const { page, calls } = await open(path => {
+    if (path === 'opc.library') return { data: { businesses: [...library.businesses, { businessId: BIZ2, name: '另一个品牌', accounts: [] }] } };
+    if (path === 'publishMonitor.connections') return { data: [connection(CONN_X, 'x', ACCOUNT_X),
+      { ...connection('00000000-0000-4000-8000-000000000c23', 'x', 'p2'), businessId: BIZ2 }] };
+    if (path === 'opc.sessionResultVersions') return { data: [{ version: 1, title: '早起口播稿', body: '成果夹里的文案' }] };
+    if (path === 'publishMonitor.publish.submit') {
+      return { error: { code: 'INTERNAL_SERVER_ERROR', message: 'PUBLISH_MONITOR_UNAVAILABLE', status: 500 } };
+    }
+  }, undefined, `?result=${RESULT}&session=${ITEM}`);
+  try {
+    await page.getByLabel('品牌').selectOption(BIZ);
+    await ui(page.getByRole('textbox')).toHaveValue('成果夹里的文案');
+    await page.getByRole('button', { name: '发布', exact: true }).click();
+    await page.getByRole('dialog').getByRole('checkbox').click();
+    await page.getByRole('dialog').getByRole('button', { name: '确认发布' }).click();
+    await ui(page.getByRole('button', { name: '再试一次（同一次发布，不会重复发）' })).toBeVisible();
+    await ui(page.getByLabel('品牌')).toBeDisabled();
+    // The tab reloads: the same brand comes back by itself, still locked, with the saved request.
+    await page.goto(`https://publish.test/?result=${RESULT}&session=${ITEM}`);
+    await page.addScriptTag({ content: code });
+    await ui(page.getByText('上一次提交还没有确认结果')).toBeVisible();
+    await ui(page.getByLabel('品牌')).toHaveValue(BIZ);
+    await ui(page.getByLabel('品牌')).toBeDisabled();
+    await ui(page.getByRole('link', { name: '回到对话' })).toHaveAttribute('href', `/app/runtime?session=${ITEM}`);
+    expect(calls.filter(c => c.path === 'publishMonitor.publish.submit')).toHaveLength(1);
+  } finally { await page.close(); }
+}, 30000);

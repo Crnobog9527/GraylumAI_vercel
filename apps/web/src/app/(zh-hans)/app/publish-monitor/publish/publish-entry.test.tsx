@@ -19,8 +19,8 @@ it('links to the publish page only for a final draft, an open platform and a pla
 });
 
 it('the results folder links a saved result to the publish page only when a platform is open', () => {
-  const link = () => renderToStaticMarkup(<PublishResultLink familyId={ITEM} />);
-  expect(link()).toContain(`/app/publish-monitor/publish?result=${ITEM}`);
+  const link = () => renderToStaticMarkup(<PublishResultLink familyId={ITEM} sessionId={ITEM} />);
+  expect(link()).toContain(`/app/publish-monitor/publish?result=${ITEM}&amp;session=${ITEM}`);
   state.data = { platforms: [], holdCreditsByTargets: null };
   expect(link()).toBe('');
   state.data = undefined;
