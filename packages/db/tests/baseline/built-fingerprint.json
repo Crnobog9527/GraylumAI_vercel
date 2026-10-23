@@ -3558,7 +3558,7 @@
   "fn:opc_draft_has_confirmed(uuid)": "9a3dbd159652",
   "fn:opc_draft_identity()": "fe33a668ff79",
   "fn:opc_draft_readonly(uuid,uuid)": "cd985ba5ec8d",
-  "fn:opc_free_conversations(uuid)": "215aa12d45ad",
+  "fn:opc_free_conversations(uuid)": "c3f3c0dee8de",
   "fn:opc_guard_content_kind()": "d064863dde2d",
   "fn:opc_guard_saved_content_type()": "3de8386f8415",
   "fn:opc_handoff(uuid,uuid,uuid,uuid,jsonb)": "1d4da40719d6",
