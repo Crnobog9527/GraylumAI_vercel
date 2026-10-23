@@ -50,7 +50,7 @@ export async function runCases({db,report}) {
  assert.equal(s.latest.id,first.version.id);assert.equal(s.confirmed,null);assert.equal(s.needsUpdate,false);
  s=await svc('voice_profile_confirm',a,first.version.id,s.revision,JSON.stringify({...PROFILE,tone:'改过的'}));
  assert.equal(s.confirmed.id,first.version.id);assert.equal(s.confirmed.profile.tone,'改过的');assert.equal(s.latest,null);
- assert.deepEqual(await svc('voice_profile_current',a),{versionId:first.version.id,version:1});
+ assert.deepEqual(await svc('voice_profile_current',a),{enabled:true,versionId:first.version.id,version:1});
  await denied(svc('voice_profile_confirm',a,first.version.id,s.revision-1,JSON.stringify(PROFILE)),'VOICE_REVISION_CONFLICT');
  s=await svc('voice_profile_confirm',a,first.version.id,s.revision,JSON.stringify({...PROFILE,tone:'第二版'}));
  const second=s.confirmed.id;
@@ -62,7 +62,7 @@ export async function runCases({db,report}) {
 
  // The switch.
  s=await svc('voice_profile_set_enabled',a,s.revision,false);
- assert.equal(s.enabled,false);assert.equal(await svc('voice_profile_current',a),null);
+ assert.equal(s.enabled,false);assert.deepEqual(await svc('voice_profile_current',a),{enabled:false,versionId:null,version:null});
  s=await svc('voice_profile_set_enabled',a,s.revision,true);
  assert.equal((await svc('voice_profile_current',a)).versionId,second);
  report.checks.push('"使用我的文风" off: no version is offered for writing');
@@ -114,7 +114,7 @@ export async function runCases({db,report}) {
  // ... and every earlier version that read it, confirmed and superseded alike (必测项 2).
  assert.equal(await svc('voice_profile_read',a,first.version.id),null);
  assert.equal(await svc('voice_profile_read',a,second),null);
- assert.equal(await svc('voice_profile_current',a),null);
+ assert.deepEqual(await svc('voice_profile_current',a),{enabled:true,versionId:null,version:null});
  s=await state(a);assert.equal(s.confirmed,null);
  assert.doesNotMatch(JSON.stringify(await one(db,'SELECT jsonb_agg(to_jsonb(x)) v FROM voice_profile_versions x WHERE actor_id=$1',[a])??[]),/old\.md|VOICE_CANARY old/);
  report.checks.push('deleting a source document deletes every version that read it, including one still generating');
@@ -123,6 +123,7 @@ export async function runCases({db,report}) {
  const closed=await actor();await doc(closed,'c.md');
  await db.query("UPDATE profiles SET status='deleted',is_deleted='true' WHERE id=$1",[closed]);
  await denied(state(closed),'LIBRARY_ACCOUNT_CLOSED');await denied(begin(closed),'LIBRARY_ACCOUNT_CLOSED');
+ assert.deepEqual(await svc('voice_profile_current',randomUUID()),{enabled:true,versionId:null,version:null},'no profile row');
  report.checks.push('closed accounts are refused');
 
  // Billing receipts of a version whose source was deleted are scrubbed once the run is closed.
