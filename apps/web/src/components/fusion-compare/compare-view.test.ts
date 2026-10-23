@@ -46,3 +46,15 @@ describe('column phases (§3.5, §4.4)', () => {
     expect(heldCredits(column({ billing: { reservedCredits: 9, chargedCredits: 3, closed: true } }))).toBe(0);
   });
 });
+
+import { placeCompareCards } from './CompareThread';
+describe('compare cards in the transcript', () => {
+  it('sit after the last turn that started before them', () => {
+    const card = (id: string, createdAt: string) => ({ compareId: id, state: 'finished', createdAt });
+    const turns = [{ createdAt: '2026-10-23T10:00:00Z' }, { createdAt: '2026-10-23T10:05:00Z' }];
+    const placed = placeCompareCards([card('a', '2026-10-23T09:00:00Z'), card('b', '2026-10-23T10:01:00Z'), card('c', '2026-10-23T11:00:00Z')], turns);
+    expect(placed.get(-1)?.map(c => c.compareId)).toEqual(['a']);
+    expect(placed.get(0)?.map(c => c.compareId)).toEqual(['b']);
+    expect(placed.get(1)?.map(c => c.compareId)).toEqual(['c']);
+  });
+});

@@ -5,7 +5,21 @@ import { trpc } from '@/trpc/client';
 import { CompareCard } from './CompareCard';
 import type { CompareOptions } from './compare-view';
 
-type Card = { compareId: string; state: string; createdAt: string; adoption?: { executionId?: string } | null };
+export type CompareCardRow = { compareId: string; state: string; createdAt: string; adoption?: { executionId?: string } | null };
+type Card = CompareCardRow;
+
+/** Where each card goes in the transcript: after the last turn that started before it (-1: before every turn), so a compare
+ * sits where it was asked and later turns follow it. */
+export function placeCompareCards(cards: readonly Card[], turns: ReadonlyArray<{ createdAt?: string }> | undefined): Map<number, Card[]> {
+  const placed = new Map<number, Card[]>();
+  for (const card of cards) {
+    let at = -1;
+    const asked = Date.parse(card.createdAt);
+    (turns ?? []).forEach((turn, index) => { if (turn.createdAt && Date.parse(turn.createdAt) <= asked) at = index; });
+    placed.set(at, [...(placed.get(at) ?? []), card]);
+  }
+  return placed;
+}
 
 /**
  * The compares of one conversation, for the free-conversation page (FUSION-COMPARE §3.4): `cards` to place by time next to the
