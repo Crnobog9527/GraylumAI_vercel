@@ -55,16 +55,17 @@ export async function readPublishOptions(db: Pick<SupabaseClient, 'from'>) {
 }
 
 /**
- * The connection ids of this user's job under this idempotency key, or null when there is none. A job under the key is a
- * replay, which is answered from the database and is never gated again.
+ * The connection ids and state of this user's job under this idempotency key, or null when there is none. A job under
+ * the key is a replay, which is answered from the database and is never gated again.
  */
-export async function publishKeyTargets(db: Pick<SupabaseClient, 'from'>, profileId: string, key: string): Promise<string[] | null> {
+export async function publishKeyJob(db: Pick<SupabaseClient, 'from'>, profileId: string,
+  key: string): Promise<{ targets: string[]; state: string } | null> {
   const { data, error } = await db.from('social_publish_jobs').select('targets,state').eq('actor_id', profileId)
     .eq('idempotency_key', key).maybeSingle();
   if (error) throw new PublishError('PUBLISH_MONITOR_UNAVAILABLE');
   if (!data) return null;
   const targets = z.array(z.object({ connectionId: z.string() }).passthrough()).safeParse(data.targets);
-  return targets.success ? targets.data.map(t => t.connectionId) : [];
+  return { targets: targets.success ? targets.data.map(t => t.connectionId) : [], state: String(data.state) };
 }
 
 /**
@@ -72,7 +73,7 @@ export async function publishKeyTargets(db: Pick<SupabaseClient, 'from'>, profil
  * saved, and only while that job still has an open result to settle; any other id gets the normal checks.
  */
 export async function assertUploadAllowed(db: Db, profileId: string, connectionIds: string[], key?: string): Promise<void> {
-  const saved = key ? await publishKeyTargets(db, profileId, key) : null;
+  const saved = key ? (await publishKeyJob(db, profileId, key))?.targets ?? null : null;
   const same = saved !== null && saved.length === connectionIds.length && new Set(connectionIds).size === saved.length
     && connectionIds.every(id => saved.includes(id));
   if (!same) await assertPublishPlatformsOpen(db, profileId, connectionIds);

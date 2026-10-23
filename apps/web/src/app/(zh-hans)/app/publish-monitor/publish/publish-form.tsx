@@ -119,7 +119,11 @@ export function PublishForm({ businessId, workItemId, targets, initialCaption, i
         const httpCode = trpcError.data?.code;
         // Only a definite refusal of the submit itself means nothing was sent. Anything else (and any refusal of an
         // upload step) may follow a submit that reached the server, so the key stays and is replayed, never replaced.
-        const definite = submitting && httpCode && httpCode !== 'INTERNAL_SERVER_ERROR' && httpCode !== 'TOO_MANY_REQUESTS';
+        // The answers that can follow a job already created (switch paused, plan lapsed, account closed) are not definite.
+        const mayHaveJob = ['PUBLISH_MONITOR_DISABLED', 'PUBLISH_MONITOR_ENTITLEMENT_REQUIRED', 'PUBLISH_MONITOR_ACCOUNT_CLOSED']
+          .includes(trpcError.message ?? '');
+        const definite = submitting && httpCode && httpCode !== 'INTERNAL_SERVER_ERROR' && httpCode !== 'TOO_MANY_REQUESTS'
+          && !mayHaveJob;
         // The price was raised after the user confirmed: nothing was held; show the new maximum before asking again.
         if (trpcError.message === 'PUBLISH_MONITOR_PRICE_CHANGED') void utils.publishMonitor.publish.options.invalidate();
         if (definite) discardEarlier();

@@ -10,7 +10,7 @@ import { publishMonitorRouter } from './publishMonitor';
 const actor = '00000000-0000-4000-8000-0000000f0001';
 const profile = { id: actor, role: 'user', status: 'active', nickname: 'U', email: 'u@example.com' };
 function caller(rpc: ReturnType<typeof vi.fn>, switchOn: boolean, settings: Record<string, unknown> = {},
-  existingJob: boolean | { targets: unknown } = false) {
+  existingJob: boolean | { targets: unknown; state?: string } = false) {
   const from = (table: string) => {
     let key = '';
     return { select() { return this; }, eq(_column: string, value: string) { key = value; return this; },
@@ -109,6 +109,21 @@ describe('publish-monitor one-click publishing', () => {
       message: 'PUBLISH_MONITOR_PLATFORM_NOT_OPEN' });
     // It got past the gate: the next step (reading the provider key) is what failed here.
     expect(rpc).toHaveBeenCalled();
+  });
+
+  it('a submit replay of a job already handed to the provider ignores the switch and the plan; a never-sent job does not', async () => {
+    mocks.limit.mockResolvedValue({ success: true });
+    const sent = { targets: [{ connectionId: conn, platform: 'x', providerAccountId: 'spc_x' }], state: 'unknown' };
+    const rpc = vi.fn().mockRejectedValue(new Error('reached the provider key'));
+    mocks.entitlements.mockResolvedValue({ allowPublish: false });
+    // Paused and no plan: still past the gates (the next step, reading the provider key, is what fails here).
+    await expect(caller(rpc, false, {}, sent).publish.submit(submit)).rejects.not.toMatchObject({ code: 'FORBIDDEN' });
+    expect(rpc).toHaveBeenCalled();
+    // A job that was claimed but never sent is still gated like a new request.
+    await expect(caller(vi.fn(), false, {}, { ...sent, state: 'claimed' }).publish.submit(submit))
+      .rejects.toMatchObject({ code: 'FORBIDDEN', message: 'PUBLISH_MONITOR_DISABLED' });
+    await expect(caller(vi.fn(), true, {}, { ...sent, state: 'claimed' }).publish.submit(submit))
+      .rejects.toMatchObject({ code: 'FORBIDDEN', message: 'PUBLISH_MONITOR_ENTITLEMENT_REQUIRED' });
   });
 
   it('an upload replay skips the platform checks only for the exact targets the existing job saved', async () => {

@@ -50,6 +50,18 @@ function Workbench({ workItemId }: { workItemId: string }) {
     } catch { /* see above */ }
   }
 
+  // A saved job comes first and needs none of the new-publish queries: while the feature is paused or the plan has lapsed
+  // those fail, but the job (and the credits it holds) must stay visible and refreshable.
+  if (jobId) {
+    return (
+      <div className="space-y-6">
+        <h1 className="text-xl font-semibold">一键发布</h1>
+        <PublishStatus jobId={jobId} onDone={() => remember(null)}
+          onRetry={ids => { setRetryTargets(ids); setRound(round + 1); remember(null); }} />
+        <Link className="text-sm underline" href={`/app/library?item=${workItemId}`}>回到资料库</Link>
+      </div>
+    );
+  }
   const failure = library.error ?? connections.error ?? options.error;
   if (failure) return <p role="alert">{publishErrorMessage(failure.message, failure.data?.code)}</p>;
   if (!library.data || !connections.data || !options.data) {
@@ -68,14 +80,9 @@ function Workbench({ workItemId }: { workItemId: string }) {
         <h1 className="text-xl font-semibold">一键发布</h1>
         <p className="text-sm text-[var(--text-secondary)]">{found.business.name} · {found.item.title}</p>
       </header>
-      {jobId ? (
-        <PublishStatus jobId={jobId} onDone={() => remember(null)}
-          onRetry={ids => { setRetryTargets(ids); setRound(round + 1); remember(null); }} />
-      ) : (
-        <PublishForm key={round} businessId={found.business.businessId} workItemId={workItemId} targets={targets}
-          initialCaption={startingCaption(found.item)} initialTargets={retryTargets ?? (own ? [own.id] : [])}
-          holdCreditsByTargets={options.data.holdCreditsByTargets} onSubmitted={remember} />
-      )}
+      <PublishForm key={round} businessId={found.business.businessId} workItemId={workItemId} targets={targets}
+        initialCaption={startingCaption(found.item)} initialTargets={retryTargets ?? (own ? [own.id] : [])}
+        holdCreditsByTargets={options.data.holdCreditsByTargets} onSubmitted={remember} />
       <Link className="text-sm underline" href={`/app/library?item=${workItemId}`}>回到资料库</Link>
     </div>
   );

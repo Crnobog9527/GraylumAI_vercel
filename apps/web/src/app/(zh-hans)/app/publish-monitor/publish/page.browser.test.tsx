@@ -69,7 +69,7 @@ afterAll(async () => { await browser?.close(); }, 30000);
 type Call = { path: string; input: unknown };
 type Answer = { data?: unknown; error?: { code: string; message: string; status: number } };
 
-async function open(answer: (path: string, input: unknown, calls: Call[]) => Answer | undefined) {
+async function open(answer: (path: string, input: unknown, calls: Call[]) => Answer | undefined, savedJob?: string) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   const calls: Call[] = [];
   const uploads: string[] = [];
@@ -100,6 +100,7 @@ async function open(answer: (path: string, input: unknown, calls: Call[]) => Ans
     }
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ result: { data: result.data } }) });
   });
+  if (savedJob) await page.addInitScript(([key, value]) => sessionStorage.setItem(key, value!), [`publish-monitor-job:${ITEM}`, savedJob]);
   await page.goto('https://publish.test/');
   await page.addScriptTag({ content: code });
   await ui(page.getByRole('heading', { name: '一键发布' })).toBeVisible({ timeout: 5000 });
@@ -255,5 +256,18 @@ it('a price raised after the user confirmed is refused with nothing held, and th
     await ui(page.getByRole('alert')).toContainText('发布价格刚刚调整');
     await ui(page.getByText('最多 9 积分')).toBeVisible();
     expect((calls.find(c => c.path === 'publishMonitor.publish.submit')!.input as { maxHoldCredits: number }).maxHoldCredits).toBe(6);
+  } finally { await page.close(); }
+}, 30000);
+
+it('a saved job stays visible and refreshable while the feature is paused or the plan has lapsed (the new-publish queries fail)', async () => {
+  const refused = { error: { code: 'FORBIDDEN', message: 'PUBLISH_MONITOR_DISABLED', status: 403 } };
+  const { page, calls } = await open(path => path === 'publishMonitor.publish.job' ? { data: job('unknown', 'pending') }
+    : path === 'publishMonitor.publish.refresh' ? { data: job('completed', 'published') }
+      : path.startsWith('publishMonitor.') || path === 'opc.library' ? refused : undefined, JOB);
+  try {
+    await ui(page.getByText('已提交，正在等平台结果')).toBeVisible();
+    await page.getByRole('button', { name: '刷新状态' }).click();
+    expect(calls.some(c => c.path === 'publishMonitor.publish.refresh')).toBe(true);
+    expect(await page.getByText('这个功能还没有开放').count()).toBe(0);
   } finally { await page.close(); }
 }, 30000);

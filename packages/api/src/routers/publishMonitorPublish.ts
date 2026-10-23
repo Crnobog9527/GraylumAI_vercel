@@ -8,9 +8,10 @@ import {
   createMediaUploads, MAX_MEDIA, publishInput, readPublishJob, refreshPublishJob, submitPublish,
 } from '../services/publishMonitor/publish';
 import { takeUploadSlots } from '../services/publishMonitor/postForMe/config';
-import { assertPublishPlatformsOpen, assertUploadAllowed, publishKeyTargets, readPublishOptions } from '../services/publishMonitor/publishOptions';
+import { assertPublishPlatformsOpen, assertUploadAllowed, publishKeyJob, readPublishOptions } from '../services/publishMonitor/publishOptions';
 import { requirePostForMeDeps } from '../services/publishMonitor/secrets';
 import { RateLimitError } from '../lib/rateLimitError';
+import { assertPublishMonitorEnabled } from '../services/publishMonitor/foundation';
 import { guarded } from './publishMonitorGuard';
 
 /**
@@ -52,16 +53,19 @@ export const publishMonitorPublishRouter = router({
     return createMediaUploads(await requirePostForMeDeps(ctx.supabaseAdmin), input.count);
   })),
   submit: protectedProcedure.input(publishInput).mutation(({ ctx, input }) => guarded(ctx, async () => {
-    await requirePublishEntitlement(ctx);
-    // A key that already has a job is a replay of an earlier submit whose answer was lost: it is answered from the
-    // database whatever the platform or account state is now (the state may have changed since), never gated again.
-    // A new key meets the platform and target checks first.
-    if ((await publishKeyTargets(ctx.supabaseAdmin, ctx.profileId, input.idempotencyKey)) === null) {
-      await assertPublishPlatformsOpen(ctx.supabaseAdmin, ctx.profileId, input.connectionIds);
+    // A key that already has a job is a replay of an earlier submit whose answer was lost. Once that job has been
+    // handed to the provider (any state past "claimed") it is answered from the database whatever the switch, the plan,
+    // the platform or the account state is now: the credits it holds can only be settled through it. Only a job that
+    // was never sent, and a new key, meet the switch and plan checks; only a new key meets the platform checks.
+    const existing = await publishKeyJob(ctx.supabaseAdmin, ctx.profileId, input.idempotencyKey);
+    if (!existing || existing.state === 'claimed') {
+      await assertPublishMonitorEnabled(ctx.supabaseAdmin);
+      await requirePublishEntitlement(ctx);
     }
+    if (!existing) await assertPublishPlatformsOpen(ctx.supabaseAdmin, ctx.profileId, input.connectionIds);
     await limitStep('publish', ctx.profileId);
     return submitPublish(ctx.supabaseAdmin, await requirePostForMeDeps(ctx.supabaseAdmin), ctx.profileId, input);
-  })),
+  }, false)),
   // Reading one's own job stays possible while the feature is paused: credits may still be held by it.
   job: protectedProcedure.input(jobInput).query(({ ctx, input }) =>
     guarded(ctx, () => readPublishJob(ctx.supabaseAdmin, ctx.profileId, input.jobId), false)),
