@@ -28,6 +28,7 @@ import {type FrozenPaygRun, type FrozenRun} from '../bill2/service';
 import { selectRuntimeHistory, fixtureInputCapacity, runtimeScopeInput } from './context';
 import { activateCandidateWithSource, discoverRuntimeCandidates, fittingCandidates, matchingInput, MATCH_INSTRUCTIONS } from './matching';
 import { FREE_CHAT_BASE_INSTRUCTIONS, REPLY_LANGUAGE, REPLY_LANGUAGE_INSTRUCTIONS, workspaceStrategyReserve, withPrimaryAddenda, workspaceFrozen } from './primaryInstructions';
+import { admitVoice } from './voiceAdmission';
 import { type ReasoningPolicy } from './reasoningPolicy';
 import { admitReasoning } from './reasoningAdmission';
 import type {AnsweredCard} from '../opc/answerCard';
@@ -204,14 +205,15 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    let skillChars=0;
    let skillFile:SkillFileBinding|undefined,skillFileReserve=0;
    let skillId:string|undefined,moduleId:string|undefined,revisionId:string|undefined,chosenSource:ContentSourceKind|undefined;
+   let voiceFlagged=false;
    if(input.selection.kind==='ordinary'||input.selection.kind==='auto')
     modelId=policy.real&&!policy.weeklyReview?serverChatModel(await settings):input.selection.modelId;
    else if(input.selection.kind==='skill'){
-    const module=await admin.from('modules').select('id,active,skill_id,model_id,report_model_id,social_media_related')
+    const module=await admin.from('modules').select('id,active,skill_id,model_id,report_model_id,social_media_related,uses_user_voice')
      .eq('id',input.selection.moduleId).single();
     if(module.error||module.data?.active!==true)throw new Error('RUNTIME_SKILL_DENIED');
     if(gated&&module.data.social_media_related===true)refusePositioning();
-    moduleId=uuid.parse(module.data.id);skillId=uuid.parse(module.data.skill_id);
+    moduleId=uuid.parse(module.data.id);skillId=uuid.parse(module.data.skill_id);voiceFlagged=module.data.uses_user_voice===true;
     modelId=uuid.parse(policy.reportGeneration ? module.data.report_model_id ?? module.data.model_id : module.data.model_id);
     revisionId=input.selection.revisionId;
     // The service-role row above never substitutes for the user-scoped admission the source performs once (AC-0c).
@@ -255,7 +257,12 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    // gated turn always keeps the fallback rule, since Decisions does not see earlier turns ("好的，那帮我写三条").
    const positioningFallback=gated&&await judgePositioning(policy.positioningGate!,{text:input.input,apiKey},capped);
    // The executor appends these rules (withPrimaryAddenda); admission sizes them too, so a fitting turn never fails later.
-   const positioningRule=REPLY_LANGUAGE_INSTRUCTIONS+(positioningFallback?POSITIONING_FALLBACK_INSTRUCTIONS:'');
+   // VOICE: a chosen writing Skill carries the user's confirmed voice; the executor appends it, so it is sized here too.
+   // Not for host-built turns (mentor, report), whose prompt cache covers the whole system message.
+   const voiceTurn=!hostTurnContext&&!policy.reportGeneration&&!mentorStream&&!stepStream;
+   let voice=voiceTurn&&voiceFlagged?await admitVoice(admin,actorId,[moduleId!],true):undefined;
+   const positioningRule=REPLY_LANGUAGE_INSTRUCTIONS+(positioningFallback?POSITIONING_FALLBACK_INSTRUCTIONS:'')+
+    (voice?withPrimaryAddenda('',{voice:{guide:voice.frozen.guide,profile:voice.profile}}):'');
    if(input.selection.kind==='organizer')modelConfiguration(()=>assertSeparateSummaryModel(session.dialogueModel,row.data.model_id));
    let attachedOrganizer:{
     modelId:string;model:string;maxOutputTokens:number;inputBytes?:number;historyItems?:number;reasoning?:ReasoningPolicy;instructions?:string;input?:string
@@ -340,12 +347,14 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    const postsBudget=await ownPostsBudget(admin,await actor(),ownPosts,maxCalls,fitsWith);
    ownPosts=postsBudget.on;maxCalls=postsBudget.calls;libraryBytes+=postsBudget.bytes;
    const strategyGuide=workspaceContext&&fitsWith(workspaceStrategyReserve(maxCalls));
+   // VOICE: a matched writing Skill may carry the voice too; every candidate is sized with it (never under-sized).
+   if(voiceTurn&&candidates.length)voice=await admitVoice(admin,actorId,candidates.map(candidate=>candidate.moduleId));
    if(candidates.length)candidates=await fittingCandidates(candidates,candidate=>activateCandidateWithSource(user,admin,candidate,brandIdentity),
     {input:currentInput,inputBytes,toolBytes:candidateToolBytes(libraryReferences,sourceTools,workspaceContext,libraryRetrieval)+
      (historySelection?.markerReserveBytes??(promptCache?PROMPT_CACHE_OVERHEAD_BYTES:0)),
      instructions:skill=>withPrimaryAddenda(skill,{...workspaceFrozen(workspaceContext,strategyGuide),ownPosts,network:input.network,
       replyLanguage:REPLY_LANGUAGE,libraryReferences,libraryRetrieval,
-      ...(positioningFallback?{positioningGate:POSITIONING_FALLBACK}:{})})});
+      ...(positioningFallback?{positioningGate:POSITIONING_FALLBACK}:{}),...(voice?{voice:{guide:voice.frozen.guide,profile:voice.profile}}:{})})});
    const primaryTurns=maxCalls-(attachedOrganizer?1:0)-(searchAllowed?1:0)-(candidates.length?1:0);
    if(primaryTurns<(searchAllowed||input.sources.length||workspaceContext||libraryRead?2:1))throw new Error('RUNTIME_CALL_BUDGET');
    // Splitting only helps when a modest message still fits; otherwise this is a configuration failure (500).
@@ -391,6 +400,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     ...(!policy.reportGeneration&&session.scopeMaterial?{scopeMaterial:session.scopeMaterial}:{}),...workspaceFrozen(workspaceContext,strategyGuide),
     ...(ownPosts?{ownPosts:true as const}:{}),
     ...(positioningFallback?{positioningGate:POSITIONING_FALLBACK}:{}),replyLanguage:REPLY_LANGUAGE,...(sourceContent?{sourceContent}:{}),
+    ...(voice?{voiceProfile:voice.frozen}:{}),
     modelId,...(attachedOrganizer?{attachedOrganizer}:{}),maxOutputTokens,maxTurns:primaryTurns,historyItems,network:input.network,
      ...(budgets||policy.reportGeneration?{purposeBudget:{purpose,inputBytes,historyItems}}:{}),
     ...(skillFile?{skillFile,skillFileReserve}:{}),...(libraryReferences.length?{libraryReferences}:{}),
