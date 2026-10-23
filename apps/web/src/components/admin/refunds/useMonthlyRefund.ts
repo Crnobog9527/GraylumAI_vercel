@@ -21,7 +21,18 @@ export type MonthlyRefundIntent = Record<string, unknown> & { id?: unknown; stat
  * itself) → approve pinned to that quote's versions → execute separately; or reject.
  * Every money decision is re-checked on the server; this hook only sequences the calls.
  */
-export function useMonthlyRefund() {
+export type RefundVariant = 'monthly' | 'subscription';
+// Both families are the same server procedures (PAY-REFUND #1248); the subscription names are the
+// yearly / founder / Pro-to-Gold entry.
+const PROCEDURES = {
+  monthly: { quote: 'quoteMonthlyRefund', approve: 'approveMonthlyRefund', execute: 'executeMonthlyRefund',
+    reject: 'rejectMonthlyRefund', status: 'getMonthlyRefundStatus' },
+  subscription: { quote: 'quoteSubscriptionRefund', approve: 'approveSubscriptionRefund', execute: 'executeSubscriptionRefund',
+    reject: 'rejectSubscriptionRefund', status: 'getSubscriptionRefundStatus' },
+} as const;
+
+export function useMonthlyRefund(variant: RefundVariant = 'monthly') {
+  const names = PROCEDURES[variant];
   const utils = trpc.useUtils();
   const [form, setForm] = useState<MonthlyRefundForm>(EMPTY_MONTHLY_REFUND_FORM);
   const [errors, setErrors] = useState<Partial<Record<keyof MonthlyRefundForm, string>>>({});
@@ -35,9 +46,9 @@ export function useMonthlyRefund() {
   const [loadingStatus, setLoadingStatus] = useState(false);
   const [rejectReason, setRejectReason] = useState<RejectReason | ''>('');
 
-  const approve = trpc.admin.approveMonthlyRefund.useMutation();
-  const execute = trpc.admin.executeMonthlyRefund.useMutation();
-  const reject = trpc.admin.rejectMonthlyRefund.useMutation();
+  const approve = trpc.admin[names.approve].useMutation();
+  const execute = trpc.admin[names.execute].useMutation();
+  const reject = trpc.admin[names.reject].useMutation();
   const busy = quoting || loadingStatus || approve.isPending || execute.isPending || reject.isPending;
   // A double click lands before React re-renders the disabled button; this ref closes that gap.
   const inFlight = useRef(false);
@@ -86,7 +97,7 @@ export function useMonthlyRefund() {
     setQuoteError(null);
     setActionError(null);
     try {
-      const quote = await utils.admin.quoteMonthlyRefund.fetch(request, { staleTime: 0, retry: false });
+      const quote = await utils.admin[names.quote].fetch(request, { staleTime: 0, retry: false });
       if (current(started)) setQuoted({ request, quote });
     } catch (error) {
       if (!current(started)) return;
@@ -104,13 +115,13 @@ export function useMonthlyRefund() {
     setLoadingStatus(true);
     setStatusError(null);
     try {
-      const data = await utils.admin.getMonthlyRefundStatus.fetch({ orderId }, { staleTime: 0, retry: false });
+      const data = await utils.admin[names.status].fetch({ orderId }, { staleTime: 0, retry: false });
       if (!current(started)) return;
       setExecuteResult(null);
       // Since #759 an existing order without any refund record answers null, not an error.
       if (data === null) {
         setIntent(null);
-        setStatusError(NO_RECORD);
+        setStatusError(variant === 'monthly' ? NO_RECORD : '这个订单还没有退款记录');
         return;
       }
       setIntent(data as MonthlyRefundIntent);
@@ -155,7 +166,7 @@ export function useMonthlyRefund() {
         return;
       }
       try {
-        const fresh = await utils.admin.getMonthlyRefundStatus.fetch({ orderId }, { staleTime: 0, retry: false });
+        const fresh = await utils.admin[names.status].fetch({ orderId }, { staleTime: 0, retry: false });
         if (current(started) && fresh) setIntent(fresh as MonthlyRefundIntent);
       } catch {
         if (!current(started)) return;
