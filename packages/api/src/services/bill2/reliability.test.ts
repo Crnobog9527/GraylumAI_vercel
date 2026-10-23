@@ -115,28 +115,30 @@ it('bounds finalize reentry and inspects the second ambiguous result', async () 
 const claimed = (callId: string) => ({ data: { id: callId, state: 'prepared', dispatchToken: randomUUID() }, error: null });
 const frozenCall: FrozenCall = { provider: 'fixture', account: 'synthetic', model: 'm', protocol: 'fixture-cost-v1', requestHash: 'a'.repeat(64),
   upperUsd: '0.01', inputLimit: 1000, outputLimit: 1000, automaticRetry: false, hiddenTools: false, lookupSupported: true, phase: 'ordinary' };
-it('resends an identical claim once when the database cancelled the claim statement (57014)', async () => {
+const timedOut = { code: '57014', message: 'canceling statement due to statement timeout' };
+it('resends an identical claim once when the database cancelled the claim statement on timeout', async () => {
   const f = fixture(), callId = randomUUID();
-  f.rpc.mockResolvedValueOnce({ data: null, error: { code: '57014' } }).mockResolvedValueOnce(claimed(callId));
+  f.rpc.mockResolvedValueOnce({ data: null, error: timedOut }).mockResolvedValueOnce(claimed(callId));
   expect(await f.api.claimCall(f.runId, 1, frozenCall)).toEqual({ id: callId, state: 'prepared' });
   expect(f.rpc.mock.calls.map(([name]) => name)).toEqual(['bill2_claim', 'bill2_claim']);
   expect(f.rpc.mock.calls[1]![1]).toEqual(f.rpc.mock.calls[0]![1]);
 });
 it('stops after the second cancelled claim', async () => {
-  const f = fixture(); f.rpc.mockResolvedValue({ data: null, error: { code: '57014' } });
+  const f = fixture(); f.rpc.mockResolvedValue({ data: null, error: timedOut });
   await expect(f.api.claimCall(f.runId, 1, frozenCall)).rejects.toThrow('BILL2_DATABASE_UNAVAILABLE');
   expect(f.rpc).toHaveBeenCalledTimes(2);
 });
 // A transport failure may follow a committed claim, and a refusal is final: neither is resent.
-it.each(['PGRST003', 'ECONNRESET', '08006', '42501'])('never resends a claim after %s', async code => {
-  const f = fixture(); f.rpc.mockResolvedValue({ data: null, error: { code } });
+it.each([{ code: 'PGRST003' }, { code: 'ECONNRESET' }, { code: '08006' }, { code: '42501' }, { code: '57014' },
+  { code: '57014', message: 'canceling statement due to user request' }])('never resends a claim after %o', async error => {
+  const f = fixture(); f.rpc.mockResolvedValue({ data: null, error });
   await expect(f.api.claimCall(f.runId, 1, frozenCall)).rejects.toThrow('BILL2_DATABASE_UNAVAILABLE');
   expect(f.rpc).toHaveBeenCalledTimes(1);
 });
 it('does not resend a cancelled claim without time left for it', async () => {
   const f = fixture(); let elapsed = 0; const budget = createRuntimeBudget(() => elapsed);
   const api = authoritativeBilling({ admin: { rpc: f.rpc }, actor: async () => f.actor, adapter: f.adapter, budget });
-  f.rpc.mockImplementation(async () => { elapsed = budget.persistenceDeadline - 1_000; return { data: null, error: { code: '57014' } }; });
+  f.rpc.mockImplementation(async () => { elapsed = budget.persistenceDeadline - 1_000; return { data: null, error: timedOut }; });
   await expect(api.claimCall(f.runId, 1, frozenCall)).rejects.toThrow('BILL2_DATABASE_UNAVAILABLE');
   expect(f.rpc).toHaveBeenCalledTimes(1);
 });
