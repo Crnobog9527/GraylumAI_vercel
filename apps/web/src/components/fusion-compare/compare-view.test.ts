@@ -94,6 +94,9 @@ describe('a stopped column is never called free when it was charged', () => {
     expect(isDefiniteRefusal({ message: 'FUSION_ADMISSION_UNAVAILABLE' })).toBe(false);
     expect(isDefiniteRefusal({ message: 'FUSION_SETTINGS_UNAVAILABLE' })).toBe(false);
     expect(isDefiniteRefusal({ message: 'FUSION_COMPARE_PRICE_CHANGED' })).toBe(true);
+    // Every code after which the server keeps the request's record or group recoverable keeps the id too (compareStart KEEP_RECORD).
+    for (const code of ['FUSION_COMPARE_ACTIVE', 'FUSION_COMPARE_DENIED', 'FUSION_COMPARE_ENDED', 'FUSION_COMPARE_REQUEST_CONFLICT',
+      'FUSION_GROUP_CONFLICT', 'BILL2_REQUEST_CONFLICT']) expect(isDefiniteRefusal({ message: code })).toBe(false);
   });
 });
 

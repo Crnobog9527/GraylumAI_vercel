@@ -55,8 +55,14 @@ export function compareErrorText(error: unknown): string {
 }
 /** A refusal the server states with a compare/report/positioning code: the request was not admitted, so its id is spent.
  * An "unavailable" code (database or settings read) is not one: the server keeps that request's record recoverable by its id. */
-export const isDefiniteRefusal = (error: unknown) => /^(FUSION|REPORT)_(?![A-Z_]*UNAVAILABLE)[A-Z_]+$|^POSITIONING_REQUIRED$/
-  .test(error && typeof error === 'object' && 'message' in error ? String((error as { message: unknown }).message) : '');
+/** Codes after which the server keeps the request's record (or group) recoverable by the same request id (compareStart KEEP_RECORD):
+ * the id must be kept so the next click replays that request, never replaced by a new one that would meet FUSION_COMPARE_ACTIVE. */
+const RECOVERABLE = new Set(['FUSION_COMPARE_ACTIVE', 'FUSION_COMPARE_DENIED', 'FUSION_COMPARE_ENDED', 'FUSION_COMPARE_REQUEST_CONFLICT',
+  'FUSION_GROUP_CONFLICT', 'BILL2_REQUEST_CONFLICT', 'FUSION_ADMISSION_UNAVAILABLE']);
+export const isDefiniteRefusal = (error: unknown) => {
+  const code = error && typeof error === 'object' && 'message' in error ? String((error as { message: unknown }).message) : '';
+  return !RECOVERABLE.has(code) && /^(FUSION|REPORT)_(?![A-Z_]*UNAVAILABLE)[A-Z_]+$|^POSITIONING_REQUIRED$/.test(code);
+};
 export const isUpgradeRefusal = (error: unknown) => /FUSION_COMPARE_FORBIDDEN|FUSION_MEMBERSHIP_REQUIRED/
   .test(error && typeof error === 'object' && 'message' in error ? String((error as { message: unknown }).message) : '');
 

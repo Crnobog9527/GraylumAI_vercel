@@ -31,6 +31,9 @@ export function CompareButton({ sessionId, question, skill, disabled, blockedRea
 }) {
   const options = trpc.fusionCompare.options.useQuery(undefined, { staleTime: 60_000, retry: false });
   const [open, setOpen] = useState(false);
+  // The start request id outlives the dialog: a start that is waiting for credits, or whose outcome is unknown, is continued
+  // by the same id when the picker is opened again with the same choice (a new id would meet FUSION_COMPARE_ACTIVE).
+  const startId = useRef<{ key: string; id: string } | null>(null);
   const data = options.data as CompareOptions | undefined;
   if (!data || (!data.enabled && data.reason === 'disabled')) return null;
   if (!data.enabled) {
@@ -42,19 +45,18 @@ export function CompareButton({ sessionId, question, skill, disabled, blockedRea
       title={blockedReason ?? (question.trim() ? undefined : '先写好问题再对比')}
       onClick={() => setOpen(true)}><Columns3 size={16} /> 多模型对比</button>
     {open && <ComparePicker options={data} sessionId={sessionId} question={question} skill={skill} onClose={() => setOpen(false)}
-      onMaybeStarted={onMaybeStarted}
+      onMaybeStarted={onMaybeStarted} startId={startId}
       onStarted={(compareId, names) => { setOpen(false); onStarted(compareId, names); }} />}
   </>;
 }
 
-function ComparePicker({ options, sessionId, question, skill, onClose, onStarted, onMaybeStarted }: {
+function ComparePicker({ options, sessionId, question, skill, onClose, onStarted, onMaybeStarted, startId }: {
   options: Extract<CompareOptions, { enabled: true }>; sessionId: string; question: string; skill?: CompareSkill;
-  onClose: () => void; onMaybeStarted?: () => void; onStarted: (compareId: string, names: Record<string, string>) => void;
+  onClose: () => void; onMaybeStarted?: () => void; startId: { current: { key: string; id: string } | null }; onStarted: (compareId: string, names: Record<string, string>) => void;
 }) {
   const [picked, setPicked] = useState(() => initialPick(options));
   const [error, setError] = useState<{ text: string; upgrade: boolean } | null>(null);
   const [estimate, setEstimate] = useState<Estimate | null>(null);
-  const requestId = useRef<string | null>(null);
   const price = trpc.fusionCompare.estimate.useMutation();
   const start = trpc.fusionCompare.start.useMutation();
   const status = pickStatus(picked, options);
@@ -64,7 +66,7 @@ function ComparePicker({ options, sessionId, question, skill, onClose, onStarted
 
   // Priced again whenever the choice changes; a new choice is a new request (a fresh request id at start).
   useEffect(() => {
-    setEstimate(null); requestId.current = null;
+    setEstimate(null);
     if (!status.ready) return;
     let current = true;
     price.mutateAsync(input).then(result => { if (current) { setEstimate(result as Estimate); setError(null); } })
@@ -76,18 +78,23 @@ function ComparePicker({ options, sessionId, question, skill, onClose, onStarted
   const blocked = !estimate || estimate.tooLarge.length > 0 || estimate.overBudget;
   async function begin() {
     if (!estimate || blocked || start.isPending) return;
-    requestId.current ??= crypto.randomUUID();
+    // The same choice continues the same start; a changed choice is a new request.
+    if (startId.current?.key !== key) startId.current = { key, id: crypto.randomUUID() };
+    const requestId = startId.current.id;
     try {
-      const result = await start.mutateAsync({ ...input, requestId: requestId.current,
+      const result = await start.mutateAsync({ ...input, requestId,
         shown: { credits: estimate.credits, columns: estimate.columns } });
-      if (result.state === 'waiting_credits') { setError({ text: `余额不够这次对比的上限（最多 ${estimate.credits} 积分），充值后再开始。`, upgrade: false }); return; }
+      // The group exists but holds nothing yet: keep the request id (it outlives this dialog) so a top-up and another click
+      // continue the same start instead of meeting FUSION_COMPARE_ACTIVE.
+      if (result.state === 'waiting_credits') { setError({ text: `余额不够这次对比的上限（最多 ${estimate.credits} 积分）。充值后再点一次开始，会接着这次对比继续。`, upgrade: false }); return; }
       if (result.state === 'processing') { setError({ text: '正在准备，请稍候再点一次开始。', upgrade: false }); return; }
+      startId.current = null;
       onStarted(result.compareId, names);
     } catch (cause) {
       // A definite refusal (a compare error code from the server) ends this request id. Anything else (network, a lost
       // response) may have claimed the group: keep the id so the next click replays the same start instead of meeting
       // FUSION_COMPARE_ACTIVE, and re-read the compares so an already created card shows up.
-      if (isDefiniteRefusal(cause)) requestId.current = null; else onMaybeStarted?.();
+      if (isDefiniteRefusal(cause)) startId.current = null; else onMaybeStarted?.();
       setError({ text: compareErrorText(cause), upgrade: isUpgradeRefusal(cause) });
     }
   }
@@ -118,7 +125,7 @@ function ComparePicker({ options, sessionId, question, skill, onClose, onStarted
         {status.ready && <p className={styles.estimate} role="status">{price.isPending || !estimate
           ? <><Loader2 size={14} className={styles.spin} /> 正在计算预计消耗…</>
           : estimate.overBudget ? '这次对比超过单次上限，请少选几个模型。'
-            : <>最多消耗 <strong>{estimate.credits}</strong> 积分，按各模型实际用量分别结算，没生成出回答的不收费。</>}</p>}
+            : <>最多消耗 <strong>{estimate.credits}</strong> 积分，按各模型实际用量分别结算；没生成出回答的不收费，开始生成后手动停止的按已用量计费。</>}</p>}
         {error && <p role="alert" className={styles.error}>{error.text}{error.upgrade && <>
           {' '}<a href={profileTabHref('subscription')} target="_blank" rel="noopener">去升级</a></>}</p>}
         <DialogFooter>

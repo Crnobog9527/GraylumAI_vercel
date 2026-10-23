@@ -136,7 +136,7 @@ export function CompareCard({ compareId, names, onAdopted, onQuote }: {
           );
         })}
       </div>
-      {ended && <p className={styles.total}>本次对比共扣 {data.chargedCredits ?? 0} 积分（各列分别结算，只有生成出回答的列收费）</p>}
+      {ended && <p className={styles.total}>本次对比共扣 {data.chargedCredits ?? 0} 积分（各列分别结算：没生成出回答的列不收费，开始生成后手动停止的按已用量计费）</p>}
       {error && <p role="alert" className={styles.error}>{error}</p>}
     </section>
   );
