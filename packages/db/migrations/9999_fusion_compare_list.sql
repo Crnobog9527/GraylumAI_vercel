@@ -7,12 +7,13 @@
 -- fusion_compare_read. Read only: no table, no existing function and no data change.
 -- Also fusion_compare_unjudged: compare calls whose answer was saved but whose verdict was never written (the process ended
 -- between the two), for the daily recovery to judge before settlement, as fusion_review_unjudged does for reviews.
--- Rollback: DROP FUNCTION public.fusion_compare_list(uuid,uuid), public.fusion_compare_unjudged(integer); nothing depends on
+-- Rollback: DROP FUNCTION public.fusion_compare_list(uuid,uuid,uuid), public.fusion_compare_unjudged(integer); nothing depends on
 -- them except the compare list route (behind the compare switch, off by default) and the recovery step that lists them.
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 
-CREATE OR REPLACE FUNCTION public.fusion_compare_list(p_actor_id uuid, p_session_id uuid)
+-- p_compare_id: one exact compare of the conversation (adoption and its replay), never cut by the newest-50 page.
+CREATE OR REPLACE FUNCTION public.fusion_compare_list(p_actor_id uuid, p_session_id uuid, p_compare_id uuid DEFAULT NULL)
 RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE cards jsonb;
 BEGIN
@@ -26,11 +27,12 @@ BEGIN
     SELECT fusion_compare_view(fc)||jsonb_build_object('question',fc.question,'workspaceDependencies',fc.workspace_dependencies) card,
       fc.created_at
     FROM fusion_compares fc WHERE fc.actor_id=p_actor_id AND fc.session_id=p_session_id AND fc.group_id IS NOT NULL
+      AND (p_compare_id IS NULL OR fc.id=p_compare_id)
     ORDER BY fc.created_at DESC LIMIT 50) x;
   RETURN cards;
 END $$;
-REVOKE ALL ON FUNCTION public.fusion_compare_list(uuid,uuid) FROM PUBLIC,anon,authenticated,service_role;
-GRANT EXECUTE ON FUNCTION public.fusion_compare_list(uuid,uuid) TO service_role;
+REVOKE ALL ON FUNCTION public.fusion_compare_list(uuid,uuid,uuid) FROM PUBLIC,anon,authenticated,service_role;
+GRANT EXECUTE ON FUNCTION public.fusion_compare_list(uuid,uuid,uuid) TO service_role;
 
 CREATE OR REPLACE FUNCTION public.fusion_compare_unjudged(p_limit integer)
 RETURNS TABLE(actor_id uuid, compare_id uuid, call_id uuid, run_id uuid)

@@ -225,6 +225,10 @@ export async function fusionCompareCases({db,Client,connectionString,report,crea
   assert.ok(cards.every(x=>x.groupId),'a start that never built a group shows no card');
   const stranger = (await createFixture(db,{credits:1,phase:'fusion_compare'})).actor;
   assert.deepEqual(await call(db,'fusion_compare_list',stranger,session),[],'a foreign conversation lists nothing');
+  // One exact compare by id (adoption and its replay): not cut by the newest-50 page, and still owner-checked.
+  assert.deepEqual((await call(db,'fusion_compare_list',actor,session,first.compareId)).map(x=>x.compareId),[first.compareId]);
+  assert.deepEqual(await call(db,'fusion_compare_list',stranger,session,first.compareId),[],'by id still checks the owner');
+  assert.deepEqual(await call(db,'fusion_compare_list',actor,session,randomUUID()),[],'an unknown compare id lists nothing');
   report.checks.push('fusion_compare_list returns the conversation cards with adoption and dependencies, nothing for another actor');
   report.checks.push('adoption writes the question and chosen answer through a zero-amount adoption run bound like an ordinary turn; '+
     'the execution ends cancelled, the conversation shows it, the next turn can read it; written once, replayable');

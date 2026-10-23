@@ -84,8 +84,9 @@ export async function adoptCompare(deps: { admin: SupabaseClient; actorId: strin
     ?? (() => { throw new Error('FUSION_COMPARE_DENIED'); })());
   const column = read.columns.find(c => c.column === input.column);
   if (!column?.body) throw new Error('FUSION_COMPARE_NOT_ADOPTABLE');
+  // This exact compare, not the conversation's newest-50 page: an older compare must still adopt and replay.
   const cards = z.array(cardSchema.passthrough()).parse(await compareRpc<unknown>(admin, 'fusion_compare_list',
-    { p_actor_id: actorId, p_session_id: read.sessionId }));
+    { p_actor_id: actorId, p_session_id: read.sessionId, p_compare_id: input.compareId }));
   const card = cards.find(c => c.compareId === input.compareId);
   if (!card) throw new Error('FUSION_COMPARE_DENIED');
   // An adoption already written is answered from the stored record, with no staging window or billing needed: a retry whose
