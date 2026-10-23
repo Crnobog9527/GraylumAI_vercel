@@ -80,6 +80,24 @@ describe('publish-monitor one-click publishing', () => {
     expect(mocks.uploads).not.toHaveBeenCalled();
   });
 
+  it('refuses an unknown or unfit connection before any upload slot is issued', async () => {
+    mocks.entitlements.mockResolvedValue({ allowPublish: true });
+    mocks.limit.mockClear();
+    mocks.uploads.mockClear();
+    const other = '00000000-0000-4000-8000-0000000f0009';
+    const second = '00000000-0000-4000-8000-0000000f000a';
+    const unfit = [{ ...connection('x'), consentPublish: false }, { ...connection('x', second), source: 'tikhub' },
+      { ...connection('x', other), status: 'reauth_required' }];
+    for (const [ids, rows] of [[[other], [connection('x')]], [[conn], [unfit[0]]], [[second], [unfit[1]]], [[other], [unfit[2]]],
+      [[conn, second], [connection('x'), connection('x', second)]]] as const) {
+      const rpc = vi.fn().mockResolvedValue({ data: rows, error: null });
+      await expect(caller(rpc, true, open).publish.uploadUrl({ disclosureAccepted: true, count: 1, connectionIds: [...ids] }))
+        .rejects.toMatchObject({ code: 'FORBIDDEN', message: 'PUBLISH_MONITOR_TARGET_INVALID' });
+    }
+    expect(mocks.limit).not.toHaveBeenCalled();
+    expect(mocks.uploads).not.toHaveBeenCalled();
+  });
+
   it('options lists the open platforms and the exact hold for 1..9 targets', async () => {
     mocks.entitlements.mockResolvedValue({ allowPublish: true });
     await expect(caller(vi.fn(), true, open).publish.options())

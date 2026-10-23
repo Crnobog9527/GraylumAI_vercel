@@ -107,7 +107,9 @@ export function PublishForm({ businessId, workItemId, targets, initialCaption, i
               <li key={target.id} className="flex flex-wrap items-center gap-2 text-sm">
                 <label className="flex items-center gap-2">
                   <Checkbox checked={selected.includes(target.id)} disabled={!target.ready || busy}
-                    onCheckedChange={value => changed(setSelected)(value === true ? [...selected, target.id]
+                    onCheckedChange={value => changed(setSelected)(value === true
+                      // One account per platform: picking one replaces another account of the same platform.
+                      ? [...selected.filter(id => targets.find(t => t.id === id)?.platform !== target.platform), target.id]
                       : selected.filter(id => id !== target.id))} />
                   {platformName(target.platform)}{target.displayHint ? ` · ${target.displayHint}` : ''}
                 </label>

@@ -55,15 +55,20 @@ export async function readPublishOptions(db: Pick<SupabaseClient, 'from'>) {
 }
 
 /**
- * Every target must be one of the user's own connections on an open platform. Unknown connection ids are left to the
- * claim, which refuses them as invalid targets.
+ * Every target must be one of the user's own connected, publish-authorized Post for Me accounts on an open platform,
+ * one per platform. This runs before an upload slot is issued (the claim only comes after the upload), so an unknown
+ * or unfit id never costs a provider storage slot.
  */
 export async function assertPublishPlatformsOpen(db: Db, profileId: string, connectionIds: string[]): Promise<void> {
   const open = new Set(await openPublishPlatforms(db));
   if (open.size === 0) throw new PublishError('PUBLISH_MONITOR_PLATFORM_NOT_OPEN');
-  const mine = new Map((await listConnections(db, profileId)).map(c => [c.id, c.platform]));
+  const mine = new Map((await listConnections(db, profileId)).map(c => [c.id, c]));
+  const seen = new Set<string>();
   for (const id of connectionIds) {
-    const platform = mine.get(id);
-    if (platform !== undefined && !open.has(platform)) throw new PublishError('PUBLISH_MONITOR_PLATFORM_NOT_OPEN');
+    const connection = mine.get(id);
+    if (!connection || connection.role !== 'own' || connection.source !== 'postforme' || connection.status !== 'connected'
+      || !connection.consentPublish || seen.has(connection.platform)) throw new PublishError('PUBLISH_MONITOR_TARGET_INVALID');
+    seen.add(connection.platform);
+    if (!open.has(connection.platform)) throw new PublishError('PUBLISH_MONITOR_PLATFORM_NOT_OPEN');
   }
 }
