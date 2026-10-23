@@ -86,6 +86,9 @@ function ResultCard({ sessionId, item }: { sessionId: string; item: SessionResul
   const history = trpc.opc.sessionResultVersions.useQuery({ familyId: item.familyId }, { enabled: mode === 'history' });
   const refresh = () => utils.opc.sessionResults.invalidate({ sessionId });
   async function saveEdit() {
+    // The server refuses these outright; say how to fix the draft instead of a vague pending state.
+    if (!draft.body.trim()) { setError('内容不能为空。'); return; }
+    if (draft.body.length > 20000) { setError('内容最多 20000 字，请缩短后再保存。'); return; }
     // One request id per edit attempt: a retry after an unclear failure never adds a second version.
     const requestId = draft.requestId || crypto.randomUUID();
     setDraft(current => ({ ...current, requestId }));
@@ -125,7 +128,7 @@ export function ResultCardView({ item, mode, draft, error, pending, versions, hi
     {mode === 'edit' ? <>
       <input aria-label="修改标题" maxLength={80} className="w-full rounded border px-2 py-1" value={draft.title}
         onChange={event => onDraft({ title: event.target.value })}/>
-      <textarea aria-label="修改内容" rows={8} className="w-full rounded border px-2 py-1" value={draft.body}
+      <textarea aria-label="修改内容" rows={8} maxLength={20000} className="w-full rounded border px-2 py-1" value={draft.body}
         onChange={event => onDraft({ body: event.target.value })}/>
     </> : <p className="max-h-48 overflow-auto whitespace-pre-wrap">{item.body}</p>}
     {mode === 'history' && <ol aria-label="历史版本" className="space-y-2 border-t pt-2">
