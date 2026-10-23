@@ -65,5 +65,10 @@ export async function executionVoice(db: Rpc, actorId: string, frozen: FrozenVoi
 export async function withExecutionVoice(db: Rpc, actorId: string, instructions: string,
   context: Parameters<typeof withPrimaryAddenda>[1] & { voiceProfile?: FrozenVoiceProfile }, moduleId: string | undefined) {
   const voice = await executionVoice(db, actorId, context.voiceProfile, moduleId);
+  // Owner 2026-10-23: a deleted voice must not be used, not even by the run in progress. Bound to a version that can no
+  // longer be read: end before any provider request (the database also stops it at its next action, 0345).
+  if (context.voiceProfile?.versionId && moduleId && context.voiceProfile.modules.includes(moduleId) && !voice) {
+    throw new Error('VOICE_SOURCE_DELETED');
+  }
   return withPrimaryAddenda(instructions, { ...context, ...(voice ? { voice } : {}) });
 }

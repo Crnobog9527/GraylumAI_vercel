@@ -126,7 +126,7 @@ export const preflightCodes=new Set([
  'BILL2_PROVIDER_MODEL_DENIED',
  'BILL2_PROVIDER_QUOTE_REQUIRED',
  'BILL2_PROVIDER_QUOTE_CONFLICT',
- 'PUBLISH_MONITOR_REVIEW_SOURCE_REQUIRED']);
+ 'PUBLISH_MONITOR_REVIEW_SOURCE_REQUIRED','VOICE_SOURCE_DELETED']);
 /** Graylum-side request failures that end the round with its charges restored (Owner 2026-10-12).
  * Time-budget exhaustion is excluded: that round resumes on the next request. */
 export function platformFailureReason(code:string|undefined):'provider_history'|'preflight'|undefined{
