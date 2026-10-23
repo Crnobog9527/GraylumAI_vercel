@@ -20,7 +20,7 @@ const catalogState = vi.hoisted(() => ({ value: undefined as unknown, probe: und
 vi.mock('./skillCatalogAdmission', async (original) => {
   const real = await original<typeof import('./skillCatalogAdmission')>();
   return { ...real, admitSkillCatalog: async (...args: Parameters<typeof real.admitSkillCatalog>) =>
-    catalogState.probe ? (catalogState.probe(args[2].fits), undefined) : catalogState.value && args[2].eligible && args[2].fits('x'.repeat(200), 100) ? catalogState.value : real.admitSkillCatalog(...args) };
+    catalogState.probe ? (catalogState.probe((text, extra) => args[2].fitsWith(extra, text)), undefined) : catalogState.value && args[2].eligible && args[2].fitsWith(100, 'x'.repeat(200)) ? catalogState.value : real.admitSkillCatalog(...args) };
 });
 // The window/configuration consistency of BILL-UNIT is covered in billingUnitAdmission.test.ts.
 vi.mock('./billingUnitAdmission', async (original) => ({

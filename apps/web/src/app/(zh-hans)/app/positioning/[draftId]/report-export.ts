@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { splitReportBody, type BenchmarkAccount, type SanitizedReportData } from "@repo/api/src/shared/reportData";
 import { reportDataLines } from "@repo/api/src/shared/reportDataText";
-import { withDisplayHeadings } from "@/components/chat-display/report-view/report-sections";
+import { formatApproxCount, isYoutube, withDisplayHeadings } from "@/components/chat-display/report-view/report-sections";
 
 /**
  * 导出报告 (MASTER_PLAN §2.1 item 50 "已生成的报告仍可看、可导出"; 2026-10-12 旧版本报告可导出). PDF is out (D6),
@@ -38,7 +38,8 @@ function benchmarkTable(data: SanitizedReportData["data"]): string[] {
   if (!accounts.some(account => account.metrics)) return [];
   // The table's rows stay on consecutive lines (the document joins its parts with blank lines).
   return ["### 对标账号数据", ["| 账号 | 平台 | 粉丝 | 中位播放 | 互动率 | 每周更新 |", "| --- | --- | --- | --- | --- | --- |",
-    ...accounts.map(account => "| " + [literal(account.account), literal(account.platform), shown(account.metrics?.followers),
+    ...accounts.map(account => "| " + [literal(account.account), literal(account.platform), shown(account.metrics?.followers,
+      value => isYoutube(account.platform) ? `${formatApproxCount(value)}（YouTube 只公开约数）` : number.format(value)),
       shown(account.metrics?.medianViews), shown(account.metrics?.engagementRate, value => `${number.format(value * 100)}%`),
       shown(account.metrics?.weeklyPosts, value => `${number.format(value)} 次`)].join(" | ") + " |")].join("\n")];
 }

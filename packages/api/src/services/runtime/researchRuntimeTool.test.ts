@@ -4,6 +4,7 @@ import { researchRuntimeTools } from './researchRuntimeTool';
 import { requestIdentity, ResearchPause, runSubcall, type SubcallContext } from '../research/runtime/subcall';
 import { socialRequest, stableResearchId, type ResearchToolContext } from '../research/runtime/toolContext';
 import { SHORTFALL_MESSAGE } from '../research/runtime/shortfall';
+import { ROUND_UNFINISHED_NEXT_STEP } from '../research/runtime/discovery';
 import type { DiscoveryRecord, FetchClaim, RuntimeOperation, RuntimePlan, RuntimeResearchStore } from '../research/runtime/store';
 import type { ToolEnvelope } from '../research/tools/envelope';
 import { DISABLED_RESEARCH_TOOLS, researchToolsConfigSchema } from '../research/vendors/config';
@@ -637,12 +638,16 @@ describe('durable benchmark discovery and free follow-up', () => {
     expect(await f.execute('benchmark_discover', discoveryArgs)).toMatchObject({ candidateCard: { shown: false } });
   });
 
-  it('withholds the initial selection card below eight qualified accounts', async () => {
+  it('withholds the initial selection card below eight and names both ways out once the round is searched to the end', async () => {
     const f = fixture();
     f.setAuthors(7);
-    expect(await f.execute('benchmark_discover', discoveryArgs)).toMatchObject({ status: 'partial',
-      reason: 'NOT_ENOUGH_CANDIDATES', message: '已找到 7 个可选、需要 8 个。',
-      nextStep: '建议换或补充关键词再找，或让用户贴账号主页链接以便取数核对。' });
+    const result = await f.execute('benchmark_discover', discoveryArgs);
+    expect(result).toMatchObject({ status: 'partial', reason: 'NOT_ENOUGH_CANDIDATES', continue: false,
+      message: '这一轮已经搜完：找到 7 个可选、需要 8 个才能出候选卡。', availableCandidates: 7, requiredCandidates: 8 });
+    expect(result.nextStep).toContain('主页链接');
+    // Searched to the end: saved as a completed round (0320 counts it) and the shortfall card is asked for.
+    expect(f.store.discoverySave).toHaveBeenLastCalledWith(discoveryId, expect.anything(), 'completed');
+    expect(f.store.offerShortfall).toHaveBeenCalledTimes(1);
     expect(f.store.createCard).not.toHaveBeenCalled();
     expect(subcall).toHaveBeenCalledTimes(10);
   });
@@ -805,7 +810,7 @@ describe('full 25-subcall benchmark discovery', () => {
 
 
 describe('discovery continues beyond an insufficient first author batch', () => {
-  it('advances saved author progress and reuses paid operations until eight candidates qualify', async () => {
+  it('widens the scan within the call, saves progress at the allowance and reuses paid operations until eight qualify', async () => {
     const f = fixture(25);
     f.setAuthors(25);
     const original = subcall.getMockImplementation()!;
@@ -822,10 +827,13 @@ describe('discovery continues beyond an insufficient first author batch', () => 
       }
       return outcome;
     });
+    // The first 15 authors hold no qualified account: the same call goes on to the next batch until its 25 subcalls run out.
     expect(await f.execute('benchmark_discover', discoveryArgs)).toMatchObject({ status: 'partial',
-      reason: 'CANDIDATE_SCAN_INCOMPLETE', continue: true });
+      reason: 'ROUND_LIMIT', continue: true, nextStep: ROUND_UNFINISHED_NEXT_STEP });
+    expect(subcall).toHaveBeenCalledTimes(25);
     expect(f.store.createCard).not.toHaveBeenCalled();
-    expect(f.discoveries.get(discoveryId)?.cursor).toMatchObject({ authorCursor: 15, authorLimit: 25 });
+    expect(f.store.offerShortfall).not.toHaveBeenCalled();
+    expect(f.discoveries.get(discoveryId)).toMatchObject({ state: 'running', cursor: { authorCursor: 22, authorLimit: 25 } });
     const firstIds = subcall.mock.calls.map(([context]) => context.newId());
     f.ctx.executionId = refreshId;
     expect(await f.makeExecute()('benchmark_discover', { discoveryId })).toMatchObject({ status: 'ok', continue: false });
@@ -834,6 +842,37 @@ describe('discovery continues beyond an insufficient first author batch', () => 
     expect(new Set(ids).size).toBe(28);
     expect(ids.slice(0, firstIds.length)).toEqual(firstIds);
     expect(f.store.createCard.mock.calls[0]?.[1].options).toHaveLength(8);
+  });
+});
+
+describe('discovery stops paying for profiles once the eighth candidate qualifies', () => {
+  it('ends a widened batch at the eighth selectable account, also when the call is resumed', async () => {
+    const f = fixture(25);
+    f.setAuthors(25);
+    const original = subcall.getMockImplementation()!;
+    subcall.mockImplementation(async (context, request) => {
+      const outcome = await original(context, request);
+      if (outcome.sent && request.vendor === 'tikhub' && request.call.kind === 'account_profile') {
+        // Lexical order: the first 15 authors hold three candidates (author2, author20, author21); author22..author4 add five.
+        const qualified = ['author2', 'author20', 'author21', 'author22', 'author23', 'author24', 'author3', 'author4', 'author5']
+          .includes(request.call.account ?? '');
+        outcome.result.items = [item({ followers: qualified ? 50000 : 100 })];
+        f.operations.set(context.newId(), { state: 'succeeded', identityHash: requestIdentity(request),
+          result: { ...outcome.result } });
+      }
+      return outcome;
+    });
+    expect(await f.execute('benchmark_discover', discoveryArgs)).toMatchObject({ status: 'ok', continue: false });
+    // 3 searches + 15 first-batch profiles + author22..author4 (5 more) = 23 of 25; author5 is never requested.
+    expect(subcall).toHaveBeenCalledTimes(23);
+    const accounts = subcall.mock.calls.flatMap(([, request]) => request.vendor === 'tikhub'
+      && request.call.kind === 'account_profile' ? [request.call.account] : []);
+    expect(accounts).not.toContain('author5');
+    expect(f.store.createCard.mock.calls[0]?.[1].options.filter(option => option.selectable)).toHaveLength(8);
+    // A recovery reads the same 20 saved profiles and stops at the same place without a new request.
+    f.ctx.executionId = refreshId;
+    expect(await f.makeExecute()('benchmark_discover', { discoveryId })).toMatchObject({ status: 'ok' });
+    expect(subcall).toHaveBeenCalledTimes(23);
   });
 });
 

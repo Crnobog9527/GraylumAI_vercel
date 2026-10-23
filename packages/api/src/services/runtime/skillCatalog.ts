@@ -36,6 +36,14 @@ export async function entryInstructions(source: SkillSource, entry: Pick<SkillCa
   return (await activateFreeChatSkill(source, descriptor, { maxContextBytes: maxBytes, withResources: false })).instructions;
 }
 
+/**
+ * Bytes one load adds to the request: the tool returns the result as a JSON string, which the SDK then serializes again
+ * into the next request, so quotes, backslashes and control characters are escaped twice (as skillFile.ts measures too).
+ */
+export function serializedResultBytes(result: unknown): number {
+  return Buffer.byteLength(JSON.stringify(JSON.stringify(result)));
+}
+
 /** The tool result bytes for one entry, measured exactly as the tool will serialize it. */
 export function loadSkillResult(entry: Omit<SkillCatalogEntry, 'resultBytes'>, instructions: string) {
   return { name: entry.name, moduleId: entry.moduleId, packageId: entry.packageId, revisionId: entry.revisionId,
@@ -48,8 +56,25 @@ export function loadSkillResult(entry: Omit<SkillCatalogEntry, 'resultBytes'>, i
 // per-process, per-user cache can at worst list a Skill that was just unpublished: loading it is then refused. Test isolation
 // clears it.
 const CATALOG_TTL_MS = 5 * 60 * 1000, CATALOG_CACHE_ENTRIES = 256;
-const catalogCache = new Map<string, { at: number; entries: SkillCatalogEntry[] }>();
+const catalogCache = new Map<string, { at: number; entries: SkillCatalogEntry[]; versions: Record<string, number | null> }>();
 export function clearSkillCatalogCache(): void { catalogCache.clear(); }
+
+/**
+ * The published version of each Skill, in one read. A republished Skill takes effect on the next turn (CONTENT_SKILL_RULES 4.3),
+ * so a cached catalog is used only while every Skill in it is still on the version it was listed with.
+ */
+async function publishedVersions(admin: SupabaseClient, skillIds: readonly string[]): Promise<Record<string, number | null>> {
+  const unique = [...new Set(skillIds)];
+  if (!unique.length) return {};
+  const rows = await admin.from('skills').select('id,status,published_version').in('id', unique);
+  if (rows.error) throw new Error('RUNTIME_CATALOG_UNAVAILABLE');
+  return Object.fromEntries(unique.map(id => {
+    const row = rows.data.find(r => r.id === id);
+    return [id, row?.status === 'published' && Number.isInteger(row.published_version) ? Number(row.published_version) : null];
+  }));
+}
+const sameVersions = (a: Record<string, number | null>, b: Record<string, number | null>) =>
+  Object.keys(a).length === Object.keys(b).length && Object.keys(a).every(id => a[id] !== null && a[id] === b[id]);
 
 /**
  * Skills the current dialogue model may load in free chat: active, visible to this user, published, not the guided
@@ -61,11 +86,16 @@ export async function discoverSkillCatalog(user: SupabaseClient, admin: Supabase
   const key = limits.actorId ? [limits.actorId, limits.excludeSocial, limits.maxResultBytes].join('|') : undefined;
   const now = limits.now ?? Date.now();
   const cached = key ? catalogCache.get(key) : undefined;
-  if (cached && now - cached.at < CATALOG_TTL_MS) return structuredClone(cached.entries);
+  // One read confirms no listed Skill was republished or unpublished since; otherwise the catalog is rebuilt.
+  if (cached && now - cached.at < CATALOG_TTL_MS
+    && sameVersions(cached.versions, await publishedVersions(admin, cached.entries.map(e => e.skillId)))) {
+    return structuredClone(cached.entries);
+  }
   const entries = await discoverUncached(user, admin, limits);
   if (key) {
+    const versions = await publishedVersions(admin, entries.map(e => e.skillId));
     catalogCache.delete(key);
-    catalogCache.set(key, { at: now, entries: structuredClone(entries) });
+    catalogCache.set(key, { at: now, entries: structuredClone(entries), versions });
     for (const oldest of catalogCache.keys()) { if (catalogCache.size <= CATALOG_CACHE_ENTRIES) break; catalogCache.delete(oldest); }
   }
   return entries;
@@ -100,7 +130,7 @@ async function discoverUncached(user: SupabaseClient, admin: SupabaseClient,
       let instructions;
       try { instructions = await entryInstructions(source, entry, limits.maxResultBytes); }
       catch (error) { if (error instanceof SkillLoadError && error.code === 'CAPACITY_EXCEEDED') continue; throw error; }
-      const resultBytes = Buffer.byteLength(JSON.stringify(loadSkillResult(entry, instructions)));
+      const resultBytes = serializedResultBytes(loadSkillResult(entry, instructions));
       if (resultBytes > limits.maxResultBytes) continue;
       // Names are what the model calls; a duplicate name would be ambiguous, so the first (lowest module id) wins.
       if (catalog.some(other => other.name === entry.name)) continue;

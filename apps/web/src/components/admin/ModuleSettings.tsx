@@ -3,6 +3,7 @@
 
 import { ReportModelSetting } from './ReportModelSetting';
 import { SocialMediaFlagSetting } from './SocialMediaFlagSetting';
+import { VoiceFlagSetting } from './VoiceFlagSetting';
 import { SkillTranslationsSetting } from './SkillTranslationsSetting';
 import { syncModuleVersion } from '@/app/(zh-hans)/admin/prompts/module-version-sync';
 
@@ -21,6 +22,7 @@ export function ModuleSettings<T extends Versioned>({ editing, setEditing, refet
     <ReportModelSetting moduleId={moduleId} hasReport={hasReport}
       onSaved={() => syncModuleVersion<T>(refetch, moduleId, setEditing)} />
     <SocialMediaFlagSetting moduleId={moduleId} moduleUpdatedAt={editing?.updated_at} onVersion={adoptVersion} />
+    <VoiceFlagSetting moduleId={moduleId} moduleUpdatedAt={editing?.updated_at} onVersion={adoptVersion} />
     <SkillTranslationsSetting moduleId={moduleId} moduleUpdatedAt={editing?.updated_at} onVersion={adoptVersion} />
   </>;
 }

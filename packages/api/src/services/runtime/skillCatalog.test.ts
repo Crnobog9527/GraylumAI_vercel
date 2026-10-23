@@ -1,9 +1,10 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {it,expect,beforeEach,vi} from 'vitest';
 import type {SupabaseClient} from '@supabase/supabase-js';
-import {clearSkillCatalogCache,discoverSkillCatalog} from './skillCatalog';
+import {clearSkillCatalogCache,discoverSkillCatalog,serializedResultBytes} from './skillCatalog';
 import {clearSkillResourceCache,packageHash,sha256} from '../skills/loader';
 
+const skillState={status:'published',version:1};
 const id=(n:number)=>'00000000-0000-4000-8000-'+String(n).padStart(12,'0');
 type Fixture={module:string;skill:string;revision:string;model:string;name:string;tasks:boolean;modelActive:boolean;serviceAllowed:boolean;workflow?:string};
 const guidedWorkflow='kind: document\nsteps:\n  - title: 了解你\n    resources: [SKILL.md]\n    information:\n      - {id: who, title: 目标用户, required: true, profileKey: audience}\n';
@@ -52,6 +53,8 @@ function clients(social:Record<string,boolean|undefined>={}){
   from:tables((table,f)=>{
    if(table==='modules')return {data:catalog.filter(c=>(f.id as string[]).includes(c.module)).map(c=>({id:c.module,skill_id:c.skill,model_id:c.model,
     social_media_related:c.module in social?social[c.module]:false})),error:null};
+   // CONTENT-CONVERSATION-DRIVEN: the published version of each Skill, which a cached catalog is checked against.
+   if(table==='skills')return {data:(f.id as string[]).map(skill=>({id:skill,status:skillState.status,published_version:skillState.version})),error:null};
    const c=catalog.find(x=>x.model===f.id)!;
    return {data:{id:c.model,model_id:'provider/'+c.name,provider:'fixture',is_active:String(c.modelActive),max_tokens:1000,input_limit:32000},error:null};
   }),
@@ -63,7 +66,7 @@ function clients(social:Record<string,boolean|undefined>={}){
  } as unknown as SupabaseClient;
  return {user,admin};
 }
-beforeEach(()=>{clearSkillResourceCache();clearSkillCatalogCache();});
+beforeEach(()=>{clearSkillResourceCache();clearSkillCatalogCache();skillState.status='published';skillState.version=1;});
 
 // CONTENT-CONVERSATION-DRIVEN: the catalog never reads a model binding; it lists what the dialogue model may load.
 it('lists loadable Skills without reading any model, skipping task packages, positioning and unavailable packages',async()=>{
@@ -117,4 +120,36 @@ it('does not cache without an actor',async()=>{
  clearSkillResourceCache();
  await discoverSkillCatalog(user,admin,{maxResultBytes:20000,excludeSocial:false});
  expect(spy.mock.calls.length).toBe(cost*2);
+});
+
+// A republished Skill takes effect on the next turn (CONTENT_SKILL_RULES 4.3): the cache is used only while every listed
+// Skill is still on the version it was listed with, checked with one read.
+it('rebuilds a cached catalog when a listed Skill was republished or unpublished, and a hit costs one read',async()=>{
+ const {user,admin}=clients();
+ const spy=vi.spyOn(admin as unknown as {rpc:()=>unknown},'rpc');
+ const from=vi.spyOn(admin as unknown as {from:(table:string)=>unknown},'from');
+ const limits={maxResultBytes:20000,excludeSocial:false,actorId:'a'};
+ const first=await discoverSkillCatalog(user,admin,{...limits,now:1000});
+ expect(first.length).toBeGreaterThan(0);
+ const packageReads=spy.mock.calls.length,tableReads=from.mock.calls.length;
+ await discoverSkillCatalog(user,admin,{...limits,now:2000});
+ expect(spy.mock.calls.length).toBe(packageReads);
+ expect(from.mock.calls.length).toBe(tableReads+1);
+ skillState.version=2;
+ await discoverSkillCatalog(user,admin,{...limits,now:3000});
+ expect(spy.mock.calls.length).toBeGreaterThan(packageReads);
+ const rebuilt=spy.mock.calls.length;
+ await discoverSkillCatalog(user,admin,{...limits,now:4000});
+ expect(spy.mock.calls.length).toBe(rebuilt);
+ skillState.status='archived';
+ await discoverSkillCatalog(user,admin,{...limits,now:5000});
+ expect(spy.mock.calls.length).toBeGreaterThan(rebuilt);
+});
+
+// The tool returns the result as a JSON string that the SDK serializes again into the next request.
+it('measures a load as the doubly serialized result, so quotes and backslashes count twice',()=>{
+ const plain={instructions:'abcdefgh'},quoted={instructions:'"\\"\\"\\"\\"'};
+ expect(serializedResultBytes(plain)).toBeGreaterThan(Buffer.byteLength(JSON.stringify(plain)));
+ expect(serializedResultBytes(quoted)-serializedResultBytes(plain)).toBeGreaterThan(
+  Buffer.byteLength(JSON.stringify(quoted))-Buffer.byteLength(JSON.stringify(plain)));
 });

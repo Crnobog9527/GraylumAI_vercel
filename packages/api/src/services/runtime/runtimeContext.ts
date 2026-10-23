@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {STEP_SUMMARY_INPUT} from '../../shared/opcStepSummary';
 import {frozenSourceContent} from './contentSource';
+import {frozenVoiceProfile} from './voiceAdmission';
 import {skillFileBinding} from './skillFile';
 import {frozenReport} from '../report/contract';
 import {z} from 'zod';
@@ -60,6 +61,8 @@ export const runtimeContext=z.object({
  workspaceGuide:z.literal('strategy-read-v1').optional(),
  // A2: the saved version a directly chosen derived-content Skill was admitted with (checkpoint_source injects it).
  sourceContent:frozenSourceContent.optional(),
+ // VOICE: the confirmed voice version a writing Skill of this run reads at execution (0337).
+ voiceProfile:frozenVoiceProfile.optional(),
  workspaceContext:z.boolean().optional(),opcTurnToken:z.string().uuid().optional(),matching:matchingPlan.optional(),scopeMaterial:z.unknown().optional(),
  answeredCard:z.unknown().optional(),request:z.unknown().optional(),
  moduleId:z.string().uuid().optional(),skillId:z.string().uuid().optional(),revisionId:z.string().uuid().optional(),sources:z.array(z.unknown()).optional(),

@@ -3,6 +3,7 @@
 import type {z} from 'zod';
 import {executionSkillFileTool} from './skillFileExecution';
 import {executionLoadSkillTool,LOAD_SKILL_TOOL} from './loadSkillTool';
+import {skillCatalogReserveBytes} from './skillCatalog';
 import {skillFileToolBytes} from './skillFile';
 import {executionMentorHistoryTool,mentorHistoryToolBytes} from './mentorHistory';
 import {sourceRuntimeTool} from './sourceRuntimeTool';
@@ -40,6 +41,8 @@ export function executionTools(input:{
    execution:input.execution,exchange:input.exchange}),input.onProgress,Boolean(context.ownPosts),context)));
  const toolBytes=(input.agentTurn?(input.grounded?groundedCardToolBytes():askQuestionToolBytes(input.fiveFields)):
   Buffer.byteLength(JSON.stringify(tools.map(t=>({name:t.name,description:t.description})))))+
+  // CONTENT-CONVERSATION-DRIVEN: history selection leaves room for the Skill loads this reply may make (as admission did).
+  (context.skillCatalog?skillCatalogReserveBytes(context.skillCatalog):0)+
   (context.skillFile?skillFileToolBytes():0)+(context.historyRead?mentorHistoryToolBytes():0)+(research?.definitionBytes??0)+
   (context.historySelection?.markerReserveBytes??(context.promptCache?PROMPT_CACHE_OVERHEAD_BYTES:0));
  return {tools,toolBytes};

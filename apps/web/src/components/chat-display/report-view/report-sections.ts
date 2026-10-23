@@ -55,3 +55,11 @@ export function withDisplayHeadings(text: string): string {
 const count = new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 1 });
 /** 12345 → 1.2 万; smaller numbers as they are. */
 export const formatCount = (value: number) => (value >= 10000 ? `${count.format(value / 10000)} 万` : count.format(value));
+
+const approx = new Intl.NumberFormat("zh-CN", { maximumSignificantDigits: 3 });
+/** YouTube only publishes rounded subscriber counts (Owner 2026-10-23): "约 1.88 万", three figures as YouTube shows them. */
+export const isYoutube = (platform: string) => platform.trim().toLowerCase() === "youtube";
+export const formatApproxCount = (value: number) => `约 ${value >= 10000 ? `${approx.format(value / 10000)} 万` : approx.format(value)}`;
+/** Followers as the table states them: a YouTube count says it is approximate. */
+export const formatFollowers = (platform: string, value: number) =>
+  isYoutube(platform) ? `${formatApproxCount(value)}（YouTube 只公开约数）` : formatCount(value);

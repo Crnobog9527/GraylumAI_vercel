@@ -1051,18 +1051,19 @@ it('RUNTIME: AC-0 router round trips per phase stay fixed for admission, Skill l
   const skillPrepare=async()=>prepareIn(await newSession());
   // The same verified revision again: package files now come from the process cache.
   const skillWarm=await skillPrepare();
-  // A second free-chat reply of the same user: the Skill list is kept for a few minutes, so it costs nothing again.
+  // A second free-chat reply of the same user: the Skill list is kept for a few minutes; one read confirms no Skill was republished.
   const warmSession=await newSession();
   const ordinaryWarm=await measured(c=>c.prepare({sessionId:warmSession,requestId:randomUUID(),input:'Please work',selection:{kind:'ordinary',modelId},network:'deny'}));
-  expect(phases(ordinaryWarm.summary)).toEqual({prelude:2,policy:0,host:0,admission:7,rateLimit:0});
+  expect(phases(ordinaryWarm.summary)).toEqual({prelude:2,policy:0,host:0,admission:8,rateLimit:0});
   const all={start,ordinary,stream,skill,execute,skillWarm};
   const counts=Object.fromEntries(Object.entries(all).map(([name,m])=>[name,phases(m.summary)]));
   // POSITIONING-GATE: free-chat admission adds one read (runtime_positioning_gate); this user has no positioning
   // and the fixture model has no OpenRouter key, so Decisions is not called (fallback rule frozen instead).
   expect(counts,JSON.stringify(Object.fromEntries(Object.entries(all).map(([name,m])=>[name,m.summary])))).toEqual({
    start:{prelude:2,policy:0,host:1},
-   // 7 for the reply itself plus the first-time listing of the user's loadable Skills (about 14 for this one Skill module).
-   ordinary:{prelude:2,policy:0,host:0,admission:21,rateLimit:0},
+   // 7 for the reply itself plus the first-time listing of the user's loadable Skills (about 14 for this one Skill module)
+   // and the published-version read that lets the next reply reuse that listing.
+   ordinary:{prelude:2,policy:0,host:0,admission:22,rateLimit:0},
    stream:{prelude:2,policy:0,host:0,execute:7,provider:9,rateLimit:0},
    skill:{prelude:2,policy:0,host:0,admission:14,rateLimit:0},
    execute:{prelude:2,policy:0,host:0,execute:6,provider:7,rateLimit:0},

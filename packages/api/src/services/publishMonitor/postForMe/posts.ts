@@ -14,7 +14,8 @@ const JOB_ID = z.string().uuid();
 const DEFINITE_REJECTIONS = new Set([400, 401, 403, 404, 422]);
 
 export type CreatePostInput = {
-  externalId: string; caption: string; socialAccountIds: string[]; mediaUrls: string[];
+  externalId: string; caption: string; socialAccountIds: string[];
+  media: Array<{ url: string; thumbnailTimestampMs?: number }>;
 };
 
 export type CreateOutcome =
@@ -33,10 +34,12 @@ export async function createPost(deps: ClientDeps, input: CreatePostInput): Prom
   if (input.socialAccountIds.length < 1 || input.socialAccountIds.length > 9 || input.socialAccountIds.some(id => !ID.test(id))) {
     throw new Error('POSTFORME_ACCOUNT_ID_INVALID');
   }
-  const media = input.mediaUrls.map(url => {
-    const safe = publicHttpsUrl(url);
+  const media = input.media.map(item => {
+    const safe = publicHttpsUrl(item.url);
     if (!safe) throw new Error('POSTFORME_MEDIA_URL_INVALID');
-    return { url: safe };
+    const cover = item.thumbnailTimestampMs;
+    if (cover !== undefined && (!Number.isInteger(cover) || cover < 0)) throw new Error('POSTFORME_COVER_INVALID');
+    return { url: safe, ...(cover === undefined ? {} : { thumbnail_timestamp_ms: cover }) };
   });
   const result = await exchange({ method: 'POST', path: '/social-posts', body: {
     caption: input.caption, social_accounts: input.socialAccountIds, external_id: input.externalId,

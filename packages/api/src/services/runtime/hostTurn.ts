@@ -16,7 +16,8 @@ export const RESEARCH_REFRESH_NOTE = 'The user pressed Refresh for this benchmar
   'This grant authorizes one new paid fetch only.';
 /** RT-6: fixed host text for the session's selection cards and benchmark table; never model-written. */
 export const RESEARCH_CARDS_NOTE = 'Host records of this session, newest last. A card with confirmationId null still waits for the ' +
-  'user: do not search for it. Use ids only from here. benchmarks counts host-verified qualified accounts; numbers are host data.';
+  'user: do not search for it. Use ids only from here. benchmarks counts host-verified qualified accounts; numbers are host data. ' +
+  'YouTube followers are approximate (YouTube publishes rounded counts): write them as 约 X 万 and say YouTube only shows approximate counts.';
 /**
  * BENCHMARK-SHORTFALL (Owner 2026-10-20, choice B): fixed host text for the shortfall choice; never model-written.
  * rounds counts completed benchmark searches of this session; the host itself shows the card when it is due.
