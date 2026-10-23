@@ -2,6 +2,7 @@
 import { z } from 'zod';
 import { aggregateAuthors, classifyAccount, selectCandidates, type ScoredAccount } from '../benchmark/classify';
 import { accountMetrics, type EvidenceItem } from '../benchmark/metrics';
+import { BENCHMARK_RULES } from '../vendors/config';
 import { authorizeDiscoverStart } from '../tools/authorize';
 import { canonicalAccount } from '../tools/accountLinks';
 import { toolEnvelope } from '../tools/envelope';
@@ -21,13 +22,15 @@ interface StepResult {
   reason?: string; budget?: boolean;
 }
 
-/** A round searched to the end without one selectable account (with any, the card is shown). */
-export function candidateShortage() {
+/** A round searched to the end with fewer selectable accounts than a candidate card needs: no card (plan §1.2 step 5). */
+export function candidateShortage(available: number) {
+  const required = BENCHMARK_RULES.candidatesMin;
   return {
-    message: '这一轮已经搜完，没有找到可选的对标账号。',
-    nextStep: '告诉用户两条出路：换一组关键词再搜一轮，或直接发来想对标的账号主页链接（按链接取数核对）。'
-      + '搜过两轮仍找不到时，主要建议发链接，不要只让用户再搜。',
-    availableCandidates: 0,
+    message: `这一轮已经搜完：找到 ${available} 个可选、需要 ${required} 个才能出候选卡。`,
+    nextStep: '告诉用户两条出路：换一组关键词再搜一轮，或直接发来想对标的账号主页链接（按链接取数核对，'
+      + '核对合格的账号同样算对标）。搜过两轮仍不够时，主要建议发链接，不要只让用户再搜。',
+    availableCandidates: available,
+    requiredCandidates: required,
   };
 }
 
@@ -81,9 +84,7 @@ async function card(ctx: ResearchToolContext, discoveryId: string, accounts: Fou
   const keys = new Set(chosen.map(a => `${a.platform}:${a.account}`));
   const remaining = accounts.filter(a => !keys.has(a.key));
   const selection = selectCandidates(remaining, true);
-  // The first card comes only from a round searched to the end (the caller), so fewer than candidatesMin means the
-  // keywords found no more: show what there is (a small niche still reaches the shortfall choice, Owner 2026-10-20 B).
-  if (selection.selectable.length === 0) return false;
+  if ((!followUp && !selection.enough) || selection.selectable.length === 0) return false;
   const selectable = new Set(selection.selectable.map(a => a.key));
   const references = !followUp ? selection.headReferences.slice(0, 3) : [];
   const ordered = [...selection.selectable.slice(0, 12 - references.length), ...references] as FoundAccount[];
@@ -179,6 +180,7 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
   // Reconstruct from stable operations each time; the saved candidates support free follow-up cards.
   await ctx.store.discoverySave(d.discoveryId, { accounts: found, attempted: index, authorCursor, authorLimit }, stopped ? 'running' : 'completed');
   const shown = !stopped && await card(ctx, d.discoveryId, found, false, '');
+  const available = selectCandidates(found, true).selectable.length;
   const insufficient = !stopped && !shown;
   const resumable = stopReason === 'ROUND_LIMIT';
   const blockedWithoutData = stopped && !resumable && found.length === 0;
@@ -189,7 +191,7 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
     : complete && shown ? 'ok' : 'partial',
     reason: stopped ? stopReason : shown ? (complete ? null : 'DISCOVERY_PARTIAL')
       : complete ? 'NOT_ENOUGH_CANDIDATES' : 'DISCOVERY_PARTIAL',
-    ...(insufficient ? candidateShortage() : {}),
+    ...(insufficient ? candidateShortage(available) : {}),
     ...(stopped && resumable ? { nextStep: ROUND_UNFINISHED_NEXT_STEP } : {}),
     discoveryId: d.discoveryId, continue: stopped && resumable,
     items: found.map(a => ({ fields: { platform: a.platform, account: a.account,
@@ -203,7 +205,7 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
 export async function moreCandidates(ctx: ResearchToolContext, discoveryId: string, callId: string) {
   const d = await ctx.store.discoveryRead(discoveryId);
   if (!d) return toolEnvelope({ status: 'not_confirmed', reason: 'DISCOVERY_NOT_FOUND' });
-  // A follow-up only replaces accounts picked from a confirmed card; it never stands in for a round's first card.
+  // A follow-up only replaces accounts picked from a confirmed card; it never stands in for the 8-candidate first card.
   if ((await ctx.store.selectedAccounts(discoveryId)).length === 0) {
     return toolEnvelope({ status: 'not_confirmed', reason: 'NO_CONFIRMED_SELECTION', discoveryId });
   }
