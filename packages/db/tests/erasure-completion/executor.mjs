@@ -309,7 +309,9 @@ export async function runExecutor({db,Client,connectionString,require,runAccount
     ['account_erasure_attachment_checkpoint',{p_profile_id:locked.actor,p_request_id:locked.request,p_token:token}],
     ['account_erasure_attachment_classify',{p_profile_id:locked.actor,p_paths:[]}],['account_erasure_executor_finish',finish],
     ['account_erasure_executor_proof',{p_profile_id:locked.actor,p_request_id:locked.request,p_token:token}]]) {
-    assert.ok((await base.rpc(name,args)).error,role+' cannot execute '+name);
+    // base.rpc always switches to service_role, so it cannot test a denied role: call the function as the role itself.
+    await assert.rejects(service.query(`select public."${name}"(${Object.keys(args).map((k,n)=>k+'=> $'+(n+1)).join(',')})`,
+     Object.values(args)),error=>error.code==='42501',role+' cannot execute '+name);
    }
   }
   await service.query('SET ROLE service_role');
