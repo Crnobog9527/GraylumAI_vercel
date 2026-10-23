@@ -70,4 +70,14 @@ describe('free chat research tool calls in a streamed response',()=>{
   expect((await observe(['read_source','web_search'],'social_account')).evidence.rejectedReason??'').not.toBe('');
   expect((await observe(['read_source','web_search'],'benchmark_fetch')).evidence.rejectedReason??'').not.toBe('');
  });
+ it('rejects any tool call in the answer-only request after the last tool round (no tool offered)',async()=>{
+  const a=openRouterAdapter({allowWorkspaceRead:true,credential:async()=> 'LOCAL_SYNTHETIC_KEY',
+   transport:async()=>new Response(body('read_source'),{headers:{'x-generation-id':'gen-1'}})});
+  const history=[{role:'user',content:'q'},{role:'assistant',content:null,tool_calls:[call('web_search')]},
+   {role:'tool',tool_call_id:'call_1',content:'{"status":"ok"}'}];
+  const raw=JSON.parse(request({messages:history}));delete raw.tools;
+  const observation=await a.dispatch({input:JSON.stringify(raw)},identity);
+  expect(observation).toMatchObject({sourceTools:true,sourceToolNames:[]});
+  expect((a.evidence(observation,identity,'response') as {rejectedReason?:string}).rejectedReason??'').not.toBe('');
+ });
 });

@@ -167,6 +167,9 @@ export function openRouterAdapter(options:{credential:(identity:OpenRouterIdenti
    const sourceTurn=Boolean(!agentTurn&&options.allowWorkspaceRead&&Array.isArray(parsed?.tools)&&parsed.tools.length>0&&
     workspaceTools.safeParse(parsed.tools).success);
    const sourceNames:string[]=sourceTurn?(parsed.tools as Array<{function:{name:string}}>).map(tool=>tool.function.name):[];
+   // The request after the last allowed tool round offers no tool at all: a call in its response is never valid.
+   const answerOnly=Boolean(!agentTurn&&!sourceTurn&&options.allowWorkspaceRead&&Array.isArray(parsed?.messages)&&
+    (parsed.tools===undefined||Array.isArray(parsed.tools)&&parsed.tools.length===0)&&parsed.messages.some((m:{role?:unknown})=>m?.role==='tool'));
    const cachedHistoryIndex=Array.isArray(parsed?.messages)?historyCacheIndex(parsed.messages,agentTurn&&
     identity.model.startsWith('anthropic/')&&identity.providerLimits.cacheWriteUsdPerMillion!==undefined):-1;
    // These routing constraints must already be in the frozen request bytes.
@@ -206,7 +209,7 @@ export function openRouterAdapter(options:{credential:(identity:OpenRouterIdenti
    const send:()=>Promise<TransportObservation>=()=>{
     if(used)throw new Error('BILL2_DISPATCH_CAPABILITY_CONSUMED');
     used=true;return request('chat/completions',key,body,send,parsed.stream===true?identity.model:undefined,onChunk,agentTurn,onIdentity,
-     undefined,sourceTurn?sourceNames:false);
+     undefined,sourceTurn||answerOnly?sourceNames:false);
    };
    return send;
  }
