@@ -328,7 +328,12 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  async function recover(executionId:string){setError('');try{const executed=await runner.run(executionId);if('unavailable' in executed&&executed.unavailable==='capacity'){markCapacity(executionId);setError('原请求的必要材料超过模型输入容量，无法继续发送。已有内容已保留；请点“停止”后缩短材料再发送。');}await view.refetch();}
   catch(cause){if(isLibrarySourceDeleted(cause)){await view.refetch();return;}setError('暂时无法恢复，请保留原任务。');}}
  // FUSION-COMPARE: first version only on free conversations (no work item), Owner 2026-10-17 Q3.
- const compare=useCompareThread(sessionId&&view.data&&view.data.scope?.kind!=='work_item'?sessionId:null);
+ // The compare asks for exactly the selection the composer would send: until the choices are loaded and a chosen Skill resolves,
+ // it stays disabled instead of silently falling back to a no-Skill comparison (the user would pay for a different prompt).
+ const compareChoice=choices.data?.skills.find(x=>'skill:'+x.moduleId===activeSelection);
+ const compareSkill={ready:Boolean(choices.data&&activeSelection&&(!activeSelection.startsWith('skill:')||compareChoice)),
+  skill:compareChoice?{kind:'skill' as const,moduleId:compareChoice.moduleId,revisionId:compareChoice.revisionId}:undefined};
+ const compare=useCompareThread(sessionId&&freeChat?sessionId:null);
  const executions=view.data?.executions as Array<{executionId:string;createdAt?:string;state:string;input:string|null;body:string|null;primaryBody:string|null;organizerComplete:boolean|null;skillExecution:boolean;needsTask:boolean;unavailableReason:string|null;historyOmitted?:boolean;contentAvailable:boolean;userStopPending?:boolean;stopped?:boolean;
   billing?:{pausedReason?:string|null;cancelRequested?:boolean}|null;cursor?:number|null;epoch?:number|null;remainingCalls?:number|null}>|undefined;
  const capacitySignature=executions?.map(e=>e.executionId+':'+e.state).join('|');
@@ -446,10 +451,10 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
    </section>
   </div>
   {sessionId&&<footer className={`${composerStyles.zone} ${workStyles.composerZone}`}><div className={composerStyles.wrap}>
-   {!workItem&&<CompareButton sessionId={sessionId} question={input} disabled={busy||Boolean(view.data?.activeExecution)}
+   {freeChat&&<CompareButton sessionId={sessionId} question={input}
+    disabled={busy||Boolean(view.data?.activeExecution)||!compareSkill.ready}
     blockedReason={COMPOSER_REFERENCES_ENABLED&&referencesNamedIn(input,references).length?'带 @ 引用资料的消息暂时不能多模型对比，请去掉引用后再试。':undefined}
-    skill={(()=>{const s=choices.data?.skills.find(x=>'skill:'+x.moduleId===activeSelection);
-     return s?{kind:'skill' as const,moduleId:s.moduleId,revisionId:s.revisionId}:undefined;})()}
+    skill={compareSkill.skill}
     onStarted={compareId=>{updateInput('');compare.add(compareId);void compare.refresh();}} onMaybeStarted={()=>void compare.refresh()}/>}
    {workItem&&isVideo&&<Button variant="outline" disabled={busy||Boolean(view.data?.activeExecution)||!choices.data?.defaultSkill} onClick={()=>send(true)}>{currentScript?'修改口播稿':'起草口播稿'}</Button>}
    <WorkComposer value={input} onChange={updateInput} onSend={()=>void send()}
