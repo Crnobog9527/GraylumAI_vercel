@@ -22,7 +22,9 @@ type Business = { businessId: string; name: string; accounts: Account[] };
 type ResultVersion = { version: number; title: string; body: string };
 type Source = { kind: 'item' | 'result'; id: string; sessionId?: string };
 
-const JOB_KEY = (source: Source) => `publish-monitor-job:${source.kind}:${source.id}`;
+// A topic keeps the keys the first release used (a tab opened before an update still finds its job and saved request);
+// only results are namespaced.
+const JOB_KEY = (source: Source) => source.kind === 'item' ? `publish-monitor-job:${source.id}` : `publish-monitor-job:result:${source.id}`;
 const BACK = (source: Source) => source.kind === 'item' ? `/app/library?item=${source.id}`
   : source.sessionId ? `/app/runtime?session=${source.sessionId}` : '/app/runtime';
 const BRAND_KEY = (source: Source) => `publish-monitor-brand:${source.id}`;
@@ -99,7 +101,7 @@ function Workbench({ source }: { source: Source }) {
           <h1 className="text-xl font-semibold">一键发布</h1>
           <p className="text-sm text-[var(--text-secondary)]">{found.business.name} · {found.item.title}</p>
         </header>
-        <PublishForm key={round} businessId={found.business.businessId} workItemId={source.id} contextKey={`item:${source.id}`}
+        <PublishForm key={round} businessId={found.business.businessId} workItemId={source.id} contextKey={source.id}
           targets={targets} initialCaption={startingCaption(found.item)} initialTargets={retryTargets ?? (own ? [own.id] : [])}
           holdCreditsByTargets={options.data.holdCreditsByTargets} onSubmitted={remember} />
         {back}

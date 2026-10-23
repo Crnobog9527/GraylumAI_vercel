@@ -101,7 +101,7 @@ async function open(answer: (path: string, input: unknown, calls: Call[]) => Ans
     }
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ result: { data: result.data } }) });
   });
-  if (savedJob) await page.addInitScript(([key, value]) => sessionStorage.setItem(key, value!), [`publish-monitor-job:item:${ITEM}`, savedJob]);
+  if (savedJob) await page.addInitScript(([key, value]) => sessionStorage.setItem(key, value!), [`publish-monitor-job:${ITEM}`, savedJob]);
   await page.goto(`https://publish.test/${query}`);
   await page.addScriptTag({ content: code });
   await ui(page.getByRole('heading', { name: '一键发布' })).toBeVisible({ timeout: 5000 });
