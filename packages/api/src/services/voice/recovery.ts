@@ -4,7 +4,7 @@ import { authoritativeBilling, type BillingRpc, type BillingTransport } from '..
 import { createRuntimeBudget } from '../runtime/budget';
 import { parseStagingPolicy } from '../runtime/stagingPolicy';
 import { stagingTransport } from '../runtime/stagingTransport';
-import { isSettled } from './generation';
+import { isSettled, voiceEvidence } from './generation';
 import { voiceRpc } from './state';
 
 type Item = { actorId: string; runId: string | null; recovery: unknown };
@@ -25,12 +25,17 @@ export async function recoverVoiceGenerations(admin: SupabaseClient, options: { 
   // The cron route has 60 seconds in total and runs other reconciliations alongside.
   const stopAt = now() + (options.timeLimitMs ?? 40_000);
   const candidates = await voiceRpc<Candidates>(admin, 'voice_recovery_candidates', { p_limit: 50 });
-  async function settle(item: Item & { runId: string }) {
+  /** `outcome`: a profile was saved (delivered), none was (confirmed failure: provider cost recorded, user refunded), or the
+   * user deleted the version (cancelled: undispatched released, dispatched at its known cost). */
+  async function settle(item: Item & { runId: string }, outcome: 'delivered' | 'confirmed_failure' | 'cancelled', versionId?: string) {
     const budget = createRuntimeBudget(now, Math.max(1, stopAt - now()));
     const adapter = item.recovery ? stagingTransport(admin, parseStagingPolicy(item.recovery), budget) : noTransport;
     const billing = authoritativeBilling({ admin: admin as unknown as BillingRpc, actor: async () => item.actorId, adapter, budget });
     if (item.recovery) await billing.recoverReceipts(item.runId, { timeoutMs: 2000 }).catch(() => undefined);
-    if (!(await billing.readRun(item.runId)).closed) await billing.requestCancel(item.runId);
+    if (!(await billing.readRun(item.runId)).closed) {
+      if (outcome === 'cancelled' || !versionId) await billing.requestCancel(item.runId);
+      else await billing.closeRun(item.runId, outcome, voiceEvidence(versionId, outcome === 'delivered' ? 'ok' : 'failed'));
+    }
     return isSettled(await billing.finalizeRun(item.runId));
   }
   // Keep room for the slowest single step (one lookup and settlement) before the limit.
@@ -38,7 +43,9 @@ export async function recoverVoiceGenerations(admin: SupabaseClient, options: { 
   for (const item of candidates.generations) {
     if (outOfTime()) { summary.deferred += 1; continue; }
     try {
-      const settled = item.runId ? await settle({ ...item, runId: item.runId }) : true;
+      // Still generating means no profile was ever saved; otherwise the profile exists and the run was delivered.
+      const settled = item.runId ? await settle({ ...item, runId: item.runId },
+        item.status === 'generating' ? 'confirmed_failure' : 'delivered', item.versionId) : true;
       await voiceRpc(admin, 'voice_generation_finish', { a: item.actorId, vid: item.versionId, result: null,
         failure_code: item.status === 'generating' ? 'VOICE_INTERRUPTED' : null, settled });
       if (settled) summary.settled += 1; else summary.waiting += 1;
@@ -49,7 +56,7 @@ export async function recoverVoiceGenerations(admin: SupabaseClient, options: { 
     try {
       let outcome = await voiceRpc<string>(admin, 'voice_billing_scrub', { p_run_id: item.runId });
       // The version was deleted while its run was still open: settle the run here, then scrub.
-      if (outcome === 'waiting' && await settle(item)) {
+      if (outcome === 'waiting' && await settle(item, 'cancelled')) {
         outcome = await voiceRpc<string>(admin, 'voice_billing_scrub', { p_run_id: item.runId });
       }
       if (outcome === 'done') summary.scrubbed += 1; else summary.waiting += 1;

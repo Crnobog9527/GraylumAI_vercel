@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const billing = vi.hoisted(() => ({ recoverReceipts: vi.fn(), readRun: vi.fn(), requestCancel: vi.fn(), finalizeRun: vi.fn() }));
+const billing = vi.hoisted(() => ({ recoverReceipts: vi.fn(), readRun: vi.fn(), requestCancel: vi.fn(), closeRun: vi.fn(), finalizeRun: vi.fn() }));
 vi.mock('../bill2/service', async importOriginal => ({ ...await importOriginal<object>(), authoritativeBilling: () => billing }));
 const parsed = vi.hoisted(() => vi.fn((value: unknown) => value));
 vi.mock('../runtime/stagingPolicy', () => ({ parseStagingPolicy: parsed, loadStagingPolicy: () => { throw new Error('live admission'); } }));
@@ -29,9 +29,16 @@ describe('recoverVoiceGenerations', () => {
   it('settles an interrupted generation and records it as failed', async () => {
     const db = admin({ generations: [{ actorId: 'a', versionId: 'v', runId: 'r', status: 'generating' }], scrubs: [] });
     expect(await recoverVoiceGenerations(db as never)).toMatchObject({ success: true, settled: 1 });
-    expect(billing.requestCancel).toHaveBeenCalledWith('r');
+    // No profile was saved: a confirmed failure, so the user is refunded rather than charged for the lost result.
+    expect(billing.closeRun).toHaveBeenCalledWith('r', 'confirmed_failure', expect.objectContaining({ kind: 'confirmed_failure' }));
+    expect(billing.requestCancel).not.toHaveBeenCalled();
     expect(db.calls.find(([name]) => name === 'voice_generation_finish')?.[1])
       .toMatchObject({ failure_code: 'VOICE_INTERRUPTED', settled: true, result: null });
+  });
+  it('a saved profile whose run was never closed is closed as delivered', async () => {
+    const db = admin({ generations: [{ actorId: 'a', versionId: 'v', runId: 'r', status: 'draft' }], scrubs: [] });
+    await recoverVoiceGenerations(db as never);
+    expect(billing.closeRun).toHaveBeenCalledWith('r', 'delivered', expect.objectContaining({ kind: 'usable_result' }));
   });
   it('a run whose cost is still pending stays listed for the next day', async () => {
     billing.finalizeRun.mockResolvedValue({ closed: true, state: 'cost_pending' });
