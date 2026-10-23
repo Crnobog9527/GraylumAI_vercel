@@ -3978,7 +3978,7 @@
   "fn:voice_profile_read(uuid,uuid)": "8ed1624e45d6",
   "fn:voice_profile_set_enabled(uuid,integer,boolean)": "c29e40c3ccee",
   "fn:voice_recovery_candidates(integer)": "e608eb630ccf",
-  "fn:voice_run_recovery(uuid)": "e10401e319f2",
+  "fn:voice_run_recovery(uuid)": "fec16afe4a10",
   "fn:voice_state(uuid)": "663842a46bea",
   "fn:voice_version_view(voice_profile_versions)": "51d7b86fe9ec",
   "fnacl:account_erasure_activity_safe(text,text,timestamp with time zone,xid,xid,timestamp with time zone)": "341a58cafc38",

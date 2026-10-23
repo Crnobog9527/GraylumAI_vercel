@@ -280,7 +280,10 @@ $$;
 -- The frozen staging binding of a run, as Fusion recovery reads it (0235): recovery never goes through live admission.
 CREATE OR REPLACE FUNCTION public.voice_run_recovery(p_run_id uuid) RETURNS jsonb
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
- SELECT CASE WHEN r.payload->>'mode'='staging_test' AND r.test_window_id IS NOT NULL THEN jsonb_build_object(
+ SELECT CASE WHEN r.payload->>'mode'='production' AND r.test_window_id IS NULL THEN jsonb_build_object('mode','production',
+  'id',r.payload->'rules'->>'quoteVersion','callPolicies',r.payload->'callPolicy','creditsPerUsd',r.payload->'rules'->>'creditsPerUsd',
+  'multiplier',r.payload->'rules'->>'multiplier','expiresAt',r.deadline)
+ WHEN r.payload->>'mode'='staging_test' AND r.test_window_id IS NOT NULL THEN jsonb_build_object(
   'id',r.test_window_id,'callPolicies',r.payload->'callPolicy','creditsPerUsd',r.payload->'rules'->>'creditsPerUsd',
   'multiplier',r.payload->'rules'->>'multiplier','expiresAt',r.deadline) END
  FROM bill2_runs r WHERE r.id=p_run_id;
