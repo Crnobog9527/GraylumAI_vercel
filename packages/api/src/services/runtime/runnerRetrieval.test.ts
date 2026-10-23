@@ -60,3 +60,12 @@ describe('executions admitted with the sourceCalls marker', () => {
     expect(h.executed).toEqual([]);
   });
 });
+
+describe('free chat research replies (CHAT-AUTO-CONTEXT C)', () => {
+  it('one call per response, and no tool on the request after the last allowed call, without the retrieval marker', async () => {
+    const h = harness({sourceCalls: 'first-call-v1', research: {freeChat: 'free-chat-v1'}, maxToolCalls: 2} as never);
+    await expect(h.run()).resolves.toBe('final answer');
+    expect(h.executed).toEqual(['search:a', 'search:c']);
+    expect(h.bodies[2]!.tools ?? []).toEqual([]);
+  });
+});

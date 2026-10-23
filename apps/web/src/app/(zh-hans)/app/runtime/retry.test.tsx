@@ -18,7 +18,8 @@ import RuntimePage from './page';
 beforeEach(()=>{state.session='';state.kind='';state.calls=[];state.retry=undefined;});
 it.each([
  ['', '', ['runtime.choices']],
- ['00000000-0000-4000-8000-000000000001', 'positioning_draft', ['runtime.choices','runtime.view']],
+ // A free conversation also retries its results folder (C1-lite).
+ ['00000000-0000-4000-8000-000000000001', 'positioning_draft', ['runtime.choices','runtime.view','opc.sessionResults']],
  ['00000000-0000-4000-8000-000000000001', 'work_item', ['runtime.choices','runtime.view','opc.library']],
 ])('retries only queries whose session and scope are ready (%s, %s)',async(session,kind,expected)=>{
  state.session=session as string;state.kind=kind as string;

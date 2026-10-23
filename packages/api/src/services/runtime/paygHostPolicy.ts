@@ -28,8 +28,7 @@ const admittedRoutes: Readonly<Record<string,string>> = {
 /** The model/route pairs whose request shape and output semantics were approved (staging and production alike). */
 export const isAdmittedRoute = (model: string, endpointTag: string) => admittedRoutes[model] === endpointTag;
 // fusion_review / fusion_summary: FUSION-REVIEW per-model calls, claimed only as a billing group (0234).
-// fusion_compare: FUSION-COMPARE columns (0290), one plain-text streamed answer per model; its profile entry and
-// evidence come with FUSION-COMPARE PR-4.
+// fusion_compare: FUSION-COMPARE columns (0290), one plain-text streamed answer per model (fusion-text-v1-stream).
 const phase = z.enum(['ordinary', 'skill', 'organizer', 'skill_matching', 'attached_organizer', 'report',
   'fusion_review', 'fusion_summary', 'fusion_compare']);
 const sharedEvidence = {
@@ -39,17 +38,28 @@ const sharedEvidence = {
   outputSemantics: z.literal('max-tokens-includes-reasoning'),
   includesReasoning: z.literal(true), cacheCovered: z.literal(true), costBoundPassed: z.literal(true),
 };
-const FUSION_PURPOSES: ReadonlySet<string> = new Set(['fusion_review', 'fusion_summary']);
+const FUSION_PURPOSES: ReadonlySet<string> = new Set(['fusion_review', 'fusion_summary', 'fusion_compare']);
 /** FUSION-PROFILE (Owner 2026-10-17, plan B): evidence taken on the real Fusion wire (fusionRequestBody: system + user,
  * Chinese report and JSON material, strict JSON-schema output, no tools, two messages) in two size bands, the larger
  * one near the per-call byte cap. Accepted only for a profile whose every purpose is a Fusion purpose and whose only
  * request format is fusion-json-v1-stream; every other purpose keeps requiring the full #665 matrix. The byte, cost
  * and output-semantics checks are the same as the matrix's. */
+/** FUSION-COMPARE (Owner 2026-10-17 Q4 "对比计费档案选 A"): the same kind of evidence, taken on the real compare wire
+ * (system + conversation history + user, plain-text streamed answer, no tools, web plugin off) in two size bands. It is what
+ * lets a shape-evidenced profile carry fusion-text-v1-stream; the byte, cost and cache checks are the same as above. */
+const compareShapeEvidence = z.object({
+  reference, manifestHash: z.string().regex(/^[a-f0-9]{64}$/),
+  distinctSamples: z.number().int().min(4), sizeBands: z.literal(2),
+  maxVerifiedBytes: z.number().int().min(180000).max(PAYG_PROFILE_MAX_BYTES),
+  maxPromptToBytes: sharedEvidence.maxPromptToBytes, maxPromptToUpper: sharedEvidence.maxPromptToUpper,
+  testedOutputLimit: sharedEvidence.testedOutputLimit, cacheCovered: z.literal(true), costBoundPassed: z.literal(true),
+}).strict();
 const fusionShapeEvidence = z.object({
   scope: z.literal('fusion-request-shape'), reference, manifestHash: z.string().regex(/^[a-f0-9]{64}$/),
   distinctSamples: z.number().int().min(4), sizeBands: z.literal(2),
   maxVerifiedBytes: z.number().int().min(180000).max(PAYG_PROFILE_MAX_BYTES),
   ...sharedEvidence,
+  compareShape: compareShapeEvidence.optional(),
 }).strict();
 /** Trusted admin configuration, never a browser admission field. Evidence references
  * must identify independently checked real samples; fixture results are not evidence. */
@@ -64,7 +74,8 @@ const profileFields = {
   // Up to 9 (0267). The positioning mentor profiles need at least 9: the research tools are offered all or nothing, so a
   // smaller profile (2 or 3) leaves them out entirely. A profile that is too small only loses the optional tools.
   maxTools: z.number().int().min(2).max(PAYG_MAX_TOOLS), maxSchemaBytes: z.literal(16384),
-  purposes: z.array(phase).min(1).max(8),
+  // Every purpose at most once (nine since fusion_compare); a profile covering all of them must not be refused.
+  purposes: z.array(phase).min(1).max(9),
   requestFormats: z.array(z.enum(['serial-tools-v2', 'serial-tools-v4-stream',
     'agent-turn-v5-stream', 'serial-tools-v6-reasoning', 'fusion-json-v1-stream', 'fusion-text-v1-stream'])).min(1).max(6),
   reasoningVariants: z.array(z.object({
@@ -84,8 +95,15 @@ const profileFields = {
   }).strict(), fusionShapeEvidence]),
 };
 export type ProfileCore = z.infer<z.ZodObject<typeof profileFields>>;
-const fusionScope = (p: ProfileCore) => !('scope' in p.evidence) || (p.purposes.every(purpose => FUSION_PURPOSES.has(purpose))
-  && p.requestFormats.length === 1 && p.requestFormats[0] === 'fusion-json-v1-stream');
+/** Shape evidence covers Fusion purposes only, and only the request formats it was taken on: the review JSON shape always,
+ * the compare text shape when compareShape is present (with its tested output limit matching the variants'). */
+const fusionScope = (p: ProfileCore) => {
+  if (!('scope' in p.evidence)) return true;
+  const compare = p.evidence.compareShape;
+  const covered = new Set(['fusion-json-v1-stream', ...(compare ? ['fusion-text-v1-stream'] : [])]);
+  return p.purposes.every(purpose => FUSION_PURPOSES.has(purpose)) && p.requestFormats.every(format => covered.has(format))
+    && (!compare || compare.testedOutputLimit === p.evidence.testedOutputLimit);
+};
 const outputEvidence = (p: ProfileCore) => p.outputLimit <= p.evidence.outputLimit
   && p.reasoningVariants.every(v => v.outputLimit <= p.evidence.outputLimit
     && v.testedOutputLimit === p.evidence.testedOutputLimit);

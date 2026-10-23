@@ -39,6 +39,11 @@ export async function* streamCompareColumn(deps: ColumnDeps, input: { compareId:
   const group = await replayCompareGroup(deps.admin, deps.actorId, view.requestId, view.sessionId);
   const run = group?.runs.find(candidate => candidate.index === input.column && candidate.runId === column.runId);
   if (!run) throw new Error('FUSION_COMPARE_DENIED');
+  // One request owns the dispatch of a column: an exclusive claim in the database, taken before the executor is entered (its
+  // call-gate unit and its refusal path belong to the owner only). A request that lost, or a column claimed a moment ago by a
+  // tab that is dispatching it, answers `already`: the page reads the column instead of streaming it.
+  const owner = await compareRpc<boolean>(deps.admin, 'fusion_compare_dispatch_claim', { p_actor_id: deps.actorId, p_call_id: column.call.callId });
+  if (owner !== true) { yield { type: 'already', verdict: null }; return; }
 
   // A column admitted with the positioning fallback rule may answer with the marker instead of an answer: held back and
   // refused before saving, so it is never shown, never saved and never charged.
@@ -51,11 +56,21 @@ export async function* streamCompareColumn(deps: ColumnDeps, input: { compareId:
   const streamer = columnStreamer({ holdForRefusal: hold, emit: text => push({ type: 'delta', text }) });
   const task = deps.executor.run(run, { runId: run.runId, id: column.call.callId, state: column.call.state, fresh: false },
     () => 'usable', streamer.onChunk, hold ? isPositioningRefusal : undefined)
-    .then(outcome => {
+    .then(async outcome => {
+      // The connection was confirmed never started (the call is back to prepared): give the claim back so a retry can
+      // dispatch within the call's dispatch window instead of waiting out the lease.
+      if (outcome.state === 'pending' && outcome.reason === 'not_started') {
+        await compareRpc(deps.admin, 'fusion_compare_dispatch_release', { p_actor_id: deps.actorId, p_call_id: column.call!.callId }).catch(() => undefined);
+      }
       streamer.settle(outcome.state === 'judged' && outcome.verdict === 'no_delivery' && hold && isPositioningRefusal(streamer.text()));
       push(outcome.state === 'judged' ? { type: 'done', verdict: outcome.verdict } : { type: 'pending', reason: outcome.reason });
     })
-    .catch(error => { failure = error; })
+    .catch(async error => {
+      failure = error;
+      // Setup threw before anything was sent (the call is still prepared): give the claim back so a retry can dispatch. The
+      // database refuses to release a call that was dispatched or settled, so this is safe on every exception path.
+      await compareRpc(deps.admin, 'fusion_compare_dispatch_release', { p_actor_id: deps.actorId, p_call_id: column.call!.callId }).catch(() => undefined);
+    })
     .finally(() => { finished = true; wake?.(); });
   for (;;) {
     while (queue.length) yield queue.shift()!;

@@ -50,7 +50,8 @@ describe('Fusion executor', () => {
     h.gate.mockResolvedValueOnce({ ok: false, reason: 'call_limited', retryAfter: 30, window: 'minute' } as never);
     h.calls.length = 0;
     await expect(h.executor.run(run, { runId: 'run-1', id: 'call-1', state: 'prepared', fresh: false }, () => 'usable')).rejects.toThrow();
-    expect(h.calls).toEqual(['finalize', 'cancel', 'finalize']);
+    // The request that owns the dispatch (it rotated the token) is the one whose refusal releases the hold.
+    expect(h.calls).toEqual(['rotate', 'finalize', 'cancel', 'finalize']);
   });
   it('saves the body, writes the host verdict, then settles and closes the run', async () => {
     const h = harness(); const onChunk = vi.fn();
@@ -73,6 +74,17 @@ describe('Fusion executor', () => {
     const result = await h.executor.run(run, { runId: 'run-1', id: 'call-1', state: 'prepared', fresh: true }, () => 'usable', undefined, () => false);
     expect(result).toMatchObject({ state: 'judged', verdict: 'usable' });
     expect(h.calls).toContain('fusion_call_output_save:');
+  });
+  it('a request that loses the dispatch to another owner never touches the call gate or the shared run', async () => {
+    const h = harness();
+    (h.billing.rotatePrepared as ReturnType<typeof vi.fn>).mockResolvedValue(false);
+    h.gate.mockResolvedValue({ ok: false as const, reason: 'rate_limited' } as never);
+    const result = await h.executor.run(run, { runId: 'run-1', id: 'call-1', state: 'prepared', fresh: false }, () => 'usable');
+    expect(result).toEqual({ state: 'pending', reason: 'not_dispatched' });
+    expect(h.gate).not.toHaveBeenCalled();
+    expect(h.calls).not.toContain('finalize');
+    expect(h.calls).not.toContain('cancel');
+    expect(h.billing.dispatchOnce).not.toHaveBeenCalled();
   });
   it('checks the time budget before dispatch and stops without dispatching when exhausted', async () => {
     const h = harness();

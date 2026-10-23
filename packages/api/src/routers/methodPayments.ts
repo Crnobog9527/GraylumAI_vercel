@@ -16,7 +16,7 @@ import { readMethodMembership } from '../services/payments/methodMembership';
 import { createWaffoOneTimeCheckout } from '../services/payments/waffoOneTimeCheckout';
 import { assertMethodCheckoutEnvironment, assertWaffoCheckoutEnvironment, paymentDeploymentMode } from '../services/payments/methodCheckoutGate';
 import { describeWaffoFailure } from '../services/payments/waffoFailure';
-import { hasUnpaidSubscription, mapMethodPurchaseRejection, MethodPurchaseRejected } from '../services/payments/methodPurchaseError';
+import { hasOpenDispute, hasUnpaidSubscription, mapMethodPurchaseRejection, MethodPurchaseRejected } from '../services/payments/methodPurchaseError';
 import { logger } from '../lib/logger';
 
 /** The client only sees a generic 503; this keeps the secret-free reason (#815 checkout had none).
@@ -87,9 +87,11 @@ export const methodPaymentProcedures = {
       logMethodPaymentFailure('method_checkout', ctx.profileId, error, { method: input.method });
       // A throttled buyer gets TOO_MANY_REQUESTS with its retry hint, which the purchase page shows as such.
       if (error instanceof RateLimitError) throw error;
-      const unpaidSubscription = error instanceof MethodPurchaseRejected && error.message === 'PAY_WAFFO_MEMBERSHIP_TRANSITION_REQUIRED'
-        && ctx.hasSupabaseAdminPrivileges && await hasUnpaidSubscription(ctx.supabaseAdmin, ctx.profileId);
-      throw mapMethodPurchaseRejection(error, { unpaidSubscription })
+      const transition = error instanceof MethodPurchaseRejected && error.message === 'PAY_WAFFO_MEMBERSHIP_TRANSITION_REQUIRED'
+        && ctx.hasSupabaseAdminPrivileges;
+      const openDispute = transition && await hasOpenDispute(ctx.supabaseAdmin, ctx.profileId);
+      const unpaidSubscription = transition && !openDispute && await hasUnpaidSubscription(ctx.supabaseAdmin, ctx.profileId);
+      throw mapMethodPurchaseRejection(error, { unpaidSubscription, openDispute })
         ?? createSafeServiceUnavailableError(error, '暂时无法创建付款，请稍后查看原订单状态');
     }
   }),

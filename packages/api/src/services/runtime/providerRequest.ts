@@ -6,7 +6,7 @@ import {openRouterBound} from '../bill2/openRouterPolicy';
 import type {frozenCallPolicy} from '../bill2/service';
 import {normalizeOpenRouterHistory} from './openRouterHistory';
 import {matchesFrozenReasoning,reasoningPolicy,type ReasoningPolicy} from './reasoningPolicy';
-import {AGENT_TOOL_NAMES,SOURCE_TOOL_NAMES} from './agentTools';
+import {AGENT_TOOL_NAMES,FREE_CHAT_TOOL_NAMES,SOURCE_TOOL_NAMES} from './agentTools';
 
 /** The request formats a frozen Runtime context may carry. */
 export const PROVIDER_REQUEST_FORMATS=['serial-tools-v1','serial-tools-v2','serial-tools-v3-stream',
@@ -44,7 +44,7 @@ export const AGENT_TURN_REQUEST_FORMAT='agent-turn-v5-stream';
 type FrozenCallPolicy=z.infer<typeof frozenCallPolicy>;
 /** Only the frozen context fields that decide the provider bytes. */
 export type RequestContext={providerRequestFormat?:ProviderRequestFormat;textStream?:string;tools:readonly string[];workspaceContext?:boolean;
- libraryReferences?:readonly unknown[];libraryRetrieval?:boolean;
+ libraryReferences?:readonly unknown[];libraryRetrieval?:boolean;research?:{freeChat?:string};
  promptCache?:PromptCachePolicy;network?:string;reasoning?:ReasoningPolicy;attachedOrganizer?:{reasoning?:ReasoningPolicy}};
 
 /** Fail closed for reasoning attached to an older, unmarked request format. */
@@ -55,9 +55,9 @@ export function validReasoningFormat(context:RequestContext):boolean{
   (!context.attachedOrganizer?.reasoning||allowed&&reasoningPolicy.safeParse(context.attachedOrganizer.reasoning).success);
 }
 
-/** Tool names whose history a format may replay. */
+/** Tool names whose history a format may replay (v6 also free chat's research calls, CHAT-AUTO-CONTEXT C). */
 export function historyToolNames(format:ProviderRequestFormat|undefined):ReadonlySet<string>{
- return format===AGENT_TURN_REQUEST_FORMAT?AGENT_TOOL_NAMES:SOURCE_TOOL_NAMES;
+ return format===AGENT_TURN_REQUEST_FORMAT?AGENT_TOOL_NAMES:format===FREE_CHAT_REQUEST_FORMAT?FREE_CHAT_TOOL_NAMES:SOURCE_TOOL_NAMES;
 }
 
 /** Turns the SDK's request into the exact OpenRouter bytes that are hashed,
@@ -73,11 +73,15 @@ export function openRouterRequestBody(request:string,options:{context:RequestCon
  // older format may use only the owned-source read of a workspace context
  // or of frozen library references (LIB-4b).
  const ownedRead=Boolean(context.workspaceContext||context.libraryReferences?.length||context.libraryRetrieval);
+ // CHAT-AUTO-CONTEXT C: a v6 free chat that froze research tools may also use exactly the ones its context lists.
+ const freeChatResearch=format===FREE_CHAT_REQUEST_FORMAT&&Boolean(context.research?.freeChat);
+ const olderToolAllowed=(name:string)=>name==='read_source'?ownedRead:freeChatResearch&&FREE_CHAT_TOOL_NAMES.has(name);
  const toolsDenied=format===AGENT_TURN_REQUEST_FORMAT
   ?context.tools.some(name=>!AGENT_TOOL_NAMES.has(name))||Boolean(context.workspaceContext)||
    requested.some(tool=>tool.type!=='function'||!context.tools.includes(String(tool.function?.name)))
-  :context.tools.some(name=>name!=='read_source'||!ownedRead)||
-   requested.some(tool=>tool.type!=='function'||tool.function?.name!=='read_source'||!ownedRead);
+  :context.tools.some(name=>!olderToolAllowed(name))||
+   requested.some(tool=>tool.type!=='function'||!olderToolAllowed(String(tool.function?.name))||
+    tool.function?.name!=='read_source'&&!context.tools.includes(String(tool.function?.name)));
  if(toolsDenied||context.network!=='deny'||original.model!==policy.model)throw new Error('RUNTIME_REAL_TOOLS_DISABLED');
  if(!policy.providerLimits)throw new Error('RUNTIME_REAL_QUOTE_REQUIRED');
  // Matching carries no reasoning; the attached organizer has its own frozen value.

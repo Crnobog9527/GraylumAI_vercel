@@ -60,15 +60,17 @@ export function fusionExecutor(deps: { billing: Billing; admin: SupabaseClient; 
     async run(run: ExecutableRun, claimed: FusionClaimedCall, judge: (text: string) => FusionBodyVerdict,
       onChunk?: (chunk: string) => void, refuse?: (text: string) => boolean): Promise<FusionCallOutcome> {
       deps.budget.modelCallTimeout(OPENROUTER_RESPONSE_TIMEOUT_MS);
-      // Exactly one call-gate unit per actual dispatch, whichever request dispatches it (one browser request
+      // A replayed claim carries no token: rotate one for a call that was never dispatched. This is what decides which of
+      // several requests for the same call (two tabs, a retry) owns the dispatch, so it comes first: a request that lost
+      // never touches the call gate and never settles or cancels the run the winner is about to dispatch.
+      if (!claimed.fresh && !(await billing.rotatePrepared(run.runId, claimed.id, run.call))) {
+        return { state: 'pending', reason: 'not_dispatched' };
+      }
+      // Exactly one call-gate unit per actual dispatch, taken by the request that owns it (one browser request
       // per model, retries, replays; #954 review). A refusal releases this call's hold instead of leaving it
       // frozen until the dispatch deadline.
       const gate = await deps.callGate(actorId, 1, 'bill2.v2');
       if (!gate.ok) { await settle(run.runId); requireNewWork(gate); }
-      // A replayed claim carries no token: rotate one for a call that was never dispatched.
-      if (!claimed.fresh && !(await billing.rotatePrepared(run.runId, claimed.id, run.call))) {
-        return { state: 'pending', reason: 'not_dispatched' };
-      }
       const dispatch = await billing.dispatchOnce(claimed.id, run.body, onChunk);
       if (dispatch.transportNotStarted) return { state: 'pending', reason: 'not_started' };
       if (!dispatch.dispatched) return { state: 'pending', reason: 'not_dispatched' };

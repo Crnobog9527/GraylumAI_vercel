@@ -4,9 +4,9 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { POSITIONING_MARKER } from '../runtime/positioningFallback';
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
-const s = vi.hoisted(() => ({ view: null as unknown, group: null as unknown, rpcs: [] as string[] }));
+const s = vi.hoisted(() => ({ view: null as unknown, group: null as unknown, rpcs: [] as string[], owner: true }));
 vi.mock('./compareAdmission', () => ({
-  compareRpc: async (_admin: unknown, name: string) => { s.rpcs.push(name); return s.view; },
+  compareRpc: async (_admin: unknown, name: string) => { s.rpcs.push(name); return name === 'fusion_compare_dispatch_claim' ? s.owner : s.view; },
   replayCompareGroup: async () => { s.rpcs.push('replay'); return s.group; },
 }));
 import { streamCompareColumn, type ColumnDeps, type ColumnEvent } from './compareColumn';
@@ -24,7 +24,7 @@ const collect = async (iterable: AsyncGenerator<ColumnEvent>) => { const out: Co
 const deps = (run: ReturnType<typeof vi.fn>): ColumnDeps => ({ admin: {} as SupabaseClient, actorId: id(50),
   executor: { run: run as unknown as ColumnDeps['executor']['run'] } });
 
-beforeEach(() => { s.view = view(); s.group = group(-1); s.rpcs = []; });
+beforeEach(() => { s.view = view(); s.group = group(-1); s.rpcs = []; s.owner = true; });
 
 describe('compare column stream (FUSION-COMPARE §3.5)', () => {
   it('dispatches the column with its frozen request and call, streams the visible text in order, then reports the verdict', async () => {
@@ -40,6 +40,27 @@ describe('compare column stream (FUSION-COMPARE §3.5)', () => {
     expect(claimed).toEqual({ runId: id(10), id: id(20), state: 'prepared', fresh: false });
     expect((judge as (text: string) => string)('any text')).toBe('usable');
     expect(refuse).toBeUndefined(); // no fallback rule on this column
+  });
+  it('a request that does not win the dispatch claim never enters the executor: it answers already', async () => {
+    s.owner = false;
+    const run = vi.fn(async () => ({ state: 'judged', verdict: 'usable' }) as FusionCallOutcome);
+    expect(await collect(streamCompareColumn(deps(run), { compareId: id(1), column: 0 }))).toEqual([{ type: 'already', verdict: null }]);
+    expect(run).not.toHaveBeenCalled();
+    expect(s.rpcs).toContain('fusion_compare_dispatch_claim');
+  });
+  it('gives the dispatch claim back when the connection was confirmed never started, and only then', async () => {
+    const noStart = vi.fn(async () => ({ state: 'pending', reason: 'not_started' }) as FusionCallOutcome);
+    expect(await collect(streamCompareColumn(deps(noStart), { compareId: id(1), column: 0 }))).toEqual([{ type: 'pending', reason: 'not_started' }]);
+    expect(s.rpcs).toContain('fusion_compare_dispatch_release');
+    s.rpcs = [];
+    const unreadable = vi.fn(async () => ({ state: 'pending', reason: 'response_unreadable' }) as FusionCallOutcome);
+    await collect(streamCompareColumn(deps(unreadable), { compareId: id(1), column: 0 }));
+    expect(s.rpcs).not.toContain('fusion_compare_dispatch_release');
+  });
+  it('gives the claim back when the executor throws during setup, so a retry can dispatch', async () => {
+    const boom = vi.fn(async () => { throw new Error('RUNTIME_STAGING_CREDENTIAL_UNAVAILABLE'); });
+    await expect(collect(streamCompareColumn(deps(boom), { compareId: id(1), column: 0 }))).rejects.toThrow('RUNTIME_STAGING_CREDENTIAL_UNAVAILABLE');
+    expect(s.rpcs).toContain('fusion_compare_dispatch_release');
   });
   it('dispatches the other column, not a neighbour: columns are independent requests', async () => {
     const run = vi.fn(async () => ({ state: 'judged', verdict: 'usable' }) as FusionCallOutcome);

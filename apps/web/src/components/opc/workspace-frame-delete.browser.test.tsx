@@ -45,7 +45,7 @@ const stubs: Array<[(id: string) => boolean, string]> = [
         conversations:{useQuery:()=>q([{sessionId:'${SESSION}',title:'周末选题讨论',lastActivityAt:'2026-10-13T00:00:00Z'},
           ...(location.hash==='#rename-slow'?[{sessionId:'${OTHER}',title:'第二个对话',lastActivityAt:'2026-10-12T00:00:00Z'}]:[])])},
         workUiChange:{useMutation:m},accountUiChange:{useMutation:m}},
-      user:{getUserProfile:{useQuery:()=>q(null)}},ticket:{createTicket:{useMutation:m}},
+      user:{getUserProfile:{useQuery:()=>q(null)}},publishMonitor:{features:{useQuery:()=>q(undefined)}},ticket:{createTicket:{useMutation:m}},
       fusionReview:{mine:{useQuery:()=>q([])}}};`],
   [id => id.endsWith('/hooks/use-credits'), 'export const useCreditsBalance=()=>({data:undefined});'],
   [id => id.endsWith('/lib/supabase'), 'export const createClient=()=>({auth:{signOut:async()=>{}}});'],

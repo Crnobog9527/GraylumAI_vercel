@@ -1,6 +1,7 @@
 'use client';
 
 import { Suspense, useState } from 'react';
+import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -16,10 +17,13 @@ import { trpc } from '@/trpc/client';
 const PLATFORM_NAMES: Record<string, string> = { x: 'X', youtube: 'YouTube', tiktok: 'TikTok', tiktok_business: 'TikTok 商业号',
   instagram: 'Instagram', facebook: 'Facebook', threads: 'Threads', linkedin: 'LinkedIn', pinterest: 'Pinterest', bluesky: 'Bluesky' };
 const platformName = (p: string) => PLATFORM_NAMES[p] ?? p;
+const DATA_PAGE = '/app/publish-monitor';
 
-function Message({ title, text }: { title: string; text: string }) {
+function Message({ title, text, back = false }: { title: string; text: string; back?: boolean }) {
   return (
-    <Card><CardHeader><CardTitle>{title}</CardTitle><CardDescription>{text}</CardDescription></CardHeader></Card>
+    <Card><CardHeader><CardTitle>{title}</CardTitle><CardDescription>{text}</CardDescription></CardHeader>
+      {back && <CardContent><Link className="text-sm underline" href={DATA_PAGE}>回到数据复盘</Link></CardContent>}
+    </Card>
   );
 }
 
@@ -31,8 +35,8 @@ function ConnectConfirm({ requestId, providerFailed, ownedElsewhere }: { request
   const [picked, setPicked] = useState<string | null>(null);
   const [autoTrack, setAutoTrack] = useState(false);
 
-  if (confirm.data) return <Message title="连接成功" text="已连接。可以回到账号页查看作品数据。" />;
-  if (cancel.data) return <Message title="已取消" text="没有连接任何账号；这次授权导入的新账号会被清理。" />;
+  if (confirm.data) return <Message title="连接成功" text="已连接。作品数据会在第一次读取完成后出现。" back />;
+  if (cancel.data) return <Message title="已取消" text="没有连接任何账号；这次授权导入的新账号会被清理。" back />;
   if (pending.isLoading) return <div className="flex justify-center p-8"><Loader2 className="h-5 w-5 animate-spin" /></div>;
   if (pending.error || !pending.data) return <Message title="无法继续" text={connectErrorMessage(pending.error?.message)} />;
 

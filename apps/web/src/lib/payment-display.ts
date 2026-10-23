@@ -51,6 +51,59 @@ export function formatAmountFact(amount: string | null | undefined, currency: st
 
 export type AmountFactRow = { kind: string; label: string; value: string };
 
+const DECIMAL = /^\d+(\.\d+)?$/;
+
+/** Exact sum of two non-negative decimal strings, keeping the larger scale; null when either is not a plain decimal. */
+function addDecimalAmounts(a: string, b: string) {
+  if (!DECIMAL.test(a) || !DECIMAL.test(b)) return null;
+  const scale = Math.max(a.split('.')[1]?.length ?? 0, b.split('.')[1]?.length ?? 0);
+  const toUnits = (value: string) => {
+    const [whole, fraction = ''] = value.split('.');
+    return BigInt(whole + fraction.padEnd(scale, '0'));
+  };
+  const digits = (toUnits(a) + toUnits(b)).toString().padStart(scale + 1, '0');
+  return scale === 0 ? digits : `${digits.slice(0, -scale)}.${digits.slice(-scale)}`;
+}
+
+function isZeroAmount(value: string) {
+  return /^0+(\.0+)?$/.test(value);
+}
+
+export type TaxInclusivePaid = { total: string; tax: string; currency: string };
+
+/**
+ * Stripe Managed Payments records `paid` as the pre-tax amount and the tax it added on top as a
+ * separate `tax` fact (0237, #847), so the buyer was charged paid + tax. Combined only when the order
+ * has exactly one known paid value and one known tax value in the same currency; anything else
+ * (several values, an unknown, mixed currencies) returns null so the separate rows stay visible.
+ */
+export function getTaxInclusivePaid(facts: readonly AmountFact[] | null | undefined): TaxInclusivePaid | null {
+  const list = Array.isArray(facts) ? facts : [];
+  const distinct = (kind: string) => {
+    const seen = new Map<string, AmountFact>();
+    for (const fact of list) if (fact.kind === kind) seen.set(`${fact.amount}|${fact.currency?.toLowerCase()}`, fact);
+    return [...seen.values()];
+  };
+  const paid = distinct('paid');
+  const tax = distinct('tax');
+  if (paid.length !== 1 || tax.length !== 1) return null;
+  const [p] = paid as [AmountFact];
+  const [t] = tax as [AmountFact];
+  if (!p.amount || !t.amount || !p.currency || p.currency.toLowerCase() !== t.currency?.toLowerCase()) return null;
+  const total = addDecimalAmounts(p.amount, t.amount);
+  return total === null ? null : { total, tax: t.amount, currency: p.currency };
+}
+
+/** Buyer rows: like buildAmountFactRows, but a Stripe pre-tax paid + tax pair reads as one tax-inclusive 实付 row. */
+export function buildUserAmountFactRows(facts: readonly AmountFact[] | null | undefined): AmountFactRow[] {
+  const rows = buildAmountFactRows(facts, { allowed: USER_AMOUNT_FACT_KINDS });
+  const combined = getTaxInclusivePaid(facts);
+  if (!combined) return rows;
+  const value = formatAmountFact(combined.total, combined.currency) + (isZeroAmount(combined.tax)
+    ? '' : `（含税 ${formatAmountFact(combined.tax, combined.currency)}）`);
+  return rows.filter(row => row.kind !== 'tax').map(row => row.kind === 'paid' ? { ...row, value } : row);
+}
+
 /**
  * Rows for display, one per kind. `required` kinds always appear and show unknown when the fact is missing.
  * `allowed` limits which kinds appear at all (undefined = every kind).

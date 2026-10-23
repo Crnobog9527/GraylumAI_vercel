@@ -152,13 +152,29 @@ export async function fusionCompareCases({db,Client,connectionString,report,crea
 
   // Column 0 answers; column 1 is stopped before dispatch (released free). Read shows each column.
   const [c0,c1] = admitted.runs.map(r=>claimed.calls.find(x=>x.runId===r.runId));
+  // 0340: exactly one request owns the dispatch of an undispatched column; the claim is a lease that can be taken again.
+  const owns = async (who,call) => (await db.query('SELECT fusion_compare_dispatch_claim($1,$2) v',[who,call])).rows[0].v;
+  assert.equal(await owns(actor,c1.id),true,'the first request owns the dispatch');
+  assert.equal(await owns(actor,c1.id),false,'a second request for the same column does not');
+  const outsider = (await createFixture(db,{credits:1,phase:'fusion_compare'})).actor;
+  assert.equal(await owns(outsider,c1.id),false,'nobody else can claim another actor\'s column');
+  await db.query("UPDATE fusion_compare_dispatch_claims SET claimed_at=now()-interval '3 minutes' WHERE call_id=$1",[c1.id]);
+  assert.equal(await owns(actor,c1.id),true,'a claim never followed by a dispatch can be taken again after the lease');
+  assert.equal(await owns(actor,randomUUID()),false,'an unknown call cannot be claimed');
+  const release = async (who,call) => (await db.query('SELECT fusion_compare_dispatch_release($1,$2) v',[who,call])).rows[0].v;
+  assert.equal(await release(outsider,c1.id),false,'nobody else can release another actor\'s claim');
+  assert.equal(await release(actor,c1.id),true,'a confirmed no-start gives the claim back');
+  assert.equal(await release(actor,c1.id),false,'releasing twice is a no-op');
+  assert.equal(await owns(actor,c1.id),true,'and the next request can dispatch at once');
+  await db.query('DELETE FROM fusion_compare_dispatch_claims WHERE call_id=$1',[c1.id]);
+  report.checks.push('fusion_compare_dispatch_claim: one winner per column, owner-checked, re-claimable after the lease');
   assert.equal((await rpc(db,'bill2_dispatch',actor,c0.runId,c0.id,c0.dispatchToken)).dispatch,true);
   await rpc(db,'bill2_record',actor,c0.runId,c0.id,{provider:a.claimPayload.provider,account:'sandbox',model:a.claimPayload.model,
     protocol:a.claimPayload.protocol,providerId:'generation-'+c0.id,source:'response',sourceHash:'c'.repeat(64),
     observedAt:new Date().toISOString(),coverage:'request_total',final:true,cost:'0.0004',currency:'USD',usage:{inputTokens:400,outputTokens:0}});
   const answer = 'Hook A: lead with the result.';
   await rpc(db,'fusion_call_output_save',actor,c0.id,answer);
-  // 9999: a saved answer without its verdict (interrupted between the two) is listed for the daily recovery to judge.
+  // 0340: a saved answer without its verdict (interrupted between the two) is listed for the daily recovery to judge.
   const unjudged = (await db.query('SELECT call_id,compare_id FROM fusion_compare_unjudged(200)')).rows;
   assert.ok(unjudged.some(x=>x.call_id===c0.id&&x.compare_id===first.compareId),'the saved, unjudged compare call is listed');
   await rpc(db,'fusion_call_verdict',actor,c0.id,'usable');
@@ -217,7 +233,7 @@ export async function fusionCompareCases({db,Client,connectionString,report,crea
   await assert.rejects(call(db,'fusion_compare_adopt',actor,first.compareId,1,randomUUID(),billing(1),items2),/FUSION_COMPARE_ADOPTED/);
   await assert.rejects(call(db,'fusion_compare_adopt',actor,first.compareId,1,adoptRequest,billing(1),items2),/FUSION_COMPARE_REQUEST_CONFLICT/,
     'a replay of the adoption request for another column is a conflict, not a success');
-  // 9999: the conversation's cards carry the server-written adoption and the frozen workspace dependencies; another actor sees none.
+  // 0340: the conversation's cards carry the server-written adoption and the frozen workspace dependencies; another actor sees none.
   const cards = await call(db,'fusion_compare_list',actor,session);
   const card = cards.find(x=>x.compareId===first.compareId);
   assert.equal(card.question,question);assert.equal(card.adoption.executionId,adopted.adoption.executionId);
@@ -225,6 +241,10 @@ export async function fusionCompareCases({db,Client,connectionString,report,crea
   assert.ok(cards.every(x=>x.groupId),'a start that never built a group shows no card');
   const stranger = (await createFixture(db,{credits:1,phase:'fusion_compare'})).actor;
   assert.deepEqual(await call(db,'fusion_compare_list',stranger,session),[],'a foreign conversation lists nothing');
+  // One exact compare by id (adoption and its replay): not cut by the newest-50 page, and still owner-checked.
+  assert.deepEqual((await call(db,'fusion_compare_list',actor,session,first.compareId)).map(x=>x.compareId),[first.compareId]);
+  assert.deepEqual(await call(db,'fusion_compare_list',stranger,session,first.compareId),[],'by id still checks the owner');
+  assert.deepEqual(await call(db,'fusion_compare_list',actor,session,randomUUID()),[],'an unknown compare id lists nothing');
   report.checks.push('fusion_compare_list returns the conversation cards with adoption and dependencies, nothing for another actor');
   report.checks.push('adoption writes the question and chosen answer through a zero-amount adoption run bound like an ordinary turn; '+
     'the execution ends cancelled, the conversation shows it, the next turn can read it; written once, replayable');
