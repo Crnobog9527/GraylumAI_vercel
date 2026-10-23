@@ -29,7 +29,7 @@ import { PositioningHeader, PositioningResultPanel, PositioningStepStrip } from 
 import { MentorChatHeading, MentorChatLog, MentorLiveReply, MentorPendingMessage, MentorReply, MentorTurnGroup, MentorUserMessage,
   MentorWelcome } from "@/components/chat-display/mentor-messages";
 import { useMentorLogScroll } from "./use-mentor-log-scroll";
-import { mentorTailNotices, mentorTurnNotice, RETRY_PENDING_NOTICE, turnNeedsRetry } from "./mentor-notices";
+import { mentorTailNotices, mentorTurnNotice, RETRY_PENDING_NOTICE, turnNeedsRetry, useOpeningFailureNotice } from "./mentor-notices";
 import { useAutoStepRecovery, useHistoryPolling } from "./use-step-recovery";
 import { executionSettled } from "./step-recovery";
 import { useLiveReply } from "./use-live-reply";
@@ -402,7 +402,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const autoOpening = useRef(new Set<string>());
   const openingInFlight = useRef(new Set<string>());
   const [openingSteps, setOpeningSteps] = useState<string[]>([]);
-  const [notice, setNotice] = useState("");
+  const [notice, setNotice] = useState(""), openingFailed = useOpeningFailureNotice(d, history.data?.executions, notice, setNotice);
   useEffect(() => {
     if (planView || hydratedDraft !== draftId || !d || !history.data || d.conversationDeleted) return; // read-only: no turn
     // A manual draft (我已有定位, R15) opens too: the mentor asks for the existing positioning first.
@@ -462,13 +462,13 @@ function PositioningDraftContent({draftId}:{draftId:string}){
         // entry identity is deterministic, so a later retry reuses the same
         // turn instead of producing a second one or a second charge.
         sessionStorage.removeItem(key);
-        setNotice("AI 教练引导这次没有加载成功。你可以直接填写右侧表单，或刷新后重试；不会重复生成或重复扣费。");
+        setNotice(openingFailed(step.id));
       } finally {
         openingInFlight.current.delete(step.id);
         setOpeningSteps([...openingInFlight.current]);
       }
     })();
-  }, [planView, hydratedDraft, draftId, d, history.data, activeStep]);
+  }, [planView, hydratedDraft, draftId, d, history.data, activeStep, openingFailed]);
   const recoveryNeedsUser = useAutoStepRecovery({ history: history.data, historyFailed: history.isError, draftId, recover: recoverPendingStep,
     steps: (d?.snapshot.workflow.steps ?? []) as Step[],
     ready: !planView && hydratedDraft === draftId, blocked: busy || openingSteps.length > 0 });
