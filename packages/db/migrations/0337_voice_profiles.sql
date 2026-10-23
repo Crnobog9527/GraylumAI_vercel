@@ -94,6 +94,8 @@ BEGIN
  SELECT * INTO c FROM voice_profile_versions WHERE id=p.confirmed_version_id;
  SELECT * INTO l FROM voice_profile_versions WHERE actor_id=a AND status IN ('generating','draft','stale','failed')
   AND (c.id IS NULL OR version>c.version) ORDER BY version DESC LIMIT 1;
+ -- A draft whose corpus changed since generation cannot be confirmed (voice_profile_confirm); show it as stale.
+ IF l.status='draft' AND l.corpus IS DISTINCT FROM voice_current_corpus(a) THEN l.status:='stale'; END IF;
  RETURN jsonb_build_object('enabled',coalesce(p.enabled,true),'revision',coalesce(p.revision,1),
   'confirmed',voice_version_view(c),'latest',voice_version_view(l),
   'needsUpdate',c.id IS NOT NULL AND c.corpus IS DISTINCT FROM voice_current_corpus(a),
@@ -185,7 +187,9 @@ BEGIN
  IF p.revision IS DISTINCT FROM expected_revision THEN RAISE EXCEPTION 'VOICE_REVISION_CONFLICT'; END IF;
  SELECT * INTO v FROM voice_profile_versions WHERE id=vid AND actor_id=a FOR UPDATE;
  IF v.id IS NULL THEN RAISE EXCEPTION 'VOICE_VERSION_GONE'; END IF;
- IF v.status='stale' THEN RAISE EXCEPTION 'VOICE_STALE'; END IF;
+ -- Checked again when it takes effect (LIBRARY-VOICE "保存和生效前比对"): a draft whose corpus changed is stale.
+ IF v.status='stale' OR (v.status='draft' AND v.corpus IS DISTINCT FROM voice_current_corpus(a)) THEN
+  RAISE EXCEPTION 'VOICE_STALE'; END IF;
  old:=p.confirmed_version_id;
  IF v.status='draft' THEN
   UPDATE voice_profile_versions SET profile=result,status='confirmed',confirmed_at=clock_timestamp(),

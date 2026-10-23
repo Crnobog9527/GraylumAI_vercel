@@ -88,6 +88,17 @@ export async function runCases({db,report}) {
  await del(a,during);
  report.checks.push('a corpus change during generation leaves the new version stale; it cannot be confirmed');
 
+ // A corpus change after the draft is produced but before it is confirmed: shown stale, refused (review P2).
+ const g3=await begin(a);
+ v=await finish(a,g3.version.id);assert.equal(v.status,'draft');
+ const after=await doc(a,'after.md');
+ s=await state(a);assert.equal(s.latest.status,'stale');
+ await denied(svc('voice_profile_confirm',a,g3.version.id,s.revision,JSON.stringify(PROFILE)),'VOICE_STALE');
+ await del(a,after);
+ assert.equal((await state(a)).latest.status,'draft','back to the generated corpus: confirmable again');
+ await svc('voice_profile_delete',a,g3.version.id);
+ report.checks.push('a corpus change between draft and confirmation is shown stale and refused at confirmation');
+
  // Failure.
  const f1=await begin(a);
  v=await finish(a,f1.version.id,null,'FORMAT_INVALID');
