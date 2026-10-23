@@ -15,6 +15,7 @@ import {runExecutor} from './executor.mjs';
 import {runProcessor} from './processor.mjs';
 import {runLeaves} from './leaves.mjs';
 import {runOwnedRuntimePrune} from './owned-runtime-prune.mjs';
+import {runOwnedSessionPrune} from './owned-session-prune.mjs';
 import {runConcurrency} from './concurrency.mjs';
 import {startRedisDouble} from './redis-double.mjs';
 
@@ -74,9 +75,13 @@ try {
   fingerprint:development?undefined:snapshot});
  assert.equal(report.build.failed,null);
  // The optimization is built through the canonical migration chain; repeat its final version too.
- const optimization=read('packages/db/migrations/0333_erasure_prune_owned_runtime.sql');
- const optimized=snapshot();ok(sql(optimization));
+ // 0349 rewrote the 0333 anchor, so 0333 on the final catalog refuses instead of re-patching.
+ const optimized=snapshot();
+ ok(sql(read('packages/db/migrations/0349_erasure_prune_session_tables.sql')));
  assert.deepEqual(snapshot(),optimized,'runtime owner optimization repeats without catalog drift');
+ const superseded=sql(read('packages/db/migrations/0333_erasure_prune_owned_runtime.sql'));
+ assert.notEqual(superseded.status,0);assert.match(superseded.stderr,/ERASURE_PRUNE_RUNTIME_SOURCE_MISMATCH/);
+ assert.deepEqual(snapshot(),optimized,'refused superseded 0333 leaves the catalog unchanged');
  const require=createRequire(resolve(root,'packages/api/package.json'));
  const {Client}=require('pg');
  const address=ok(docker(['port',name,'5432/tcp']));assert.match(address,/^127\.0\.0\.1:\d+$/);
@@ -114,6 +119,7 @@ try {
  report.checks.push('executor syncs the off-database manifest: ids and times only, nothing left unsynced');
  await runCases(client,report);
  await runLeaves(client,report);
+ await runOwnedSessionPrune(client,report);
  await runOwnedRuntimePrune(client,report);
  await runConcurrency({db:client,Client,connectionString,report});
  const {processAccountErasure}=await import(module('processor'));
