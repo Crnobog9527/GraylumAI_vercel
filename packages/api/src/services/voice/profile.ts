@@ -3,7 +3,7 @@ import { z } from 'zod';
 
 /** VOICE (Master Plan 5.3 step 2): what a writing-voice profile holds. The user can edit every field before confirming;
  * the passages are the user's own words, copied verbatim from the corpus. Bounded so a writing run carries at most
- * ~3k tokens (0337 also caps the stored JSON at 16384 bytes). */
+ * ~3k tokens (0341 also caps the stored JSON at 16384 bytes). */
 const text = (max: number) => z.string().trim().max(max);
 const items = z.array(text(80).min(1)).max(12);
 export const voiceProfile = z.object({

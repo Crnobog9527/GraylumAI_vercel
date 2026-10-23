@@ -11,7 +11,7 @@ export type VoiceState = { enabled: boolean; revision: number; needsUpdate: bool
   confirmed: VoiceVersion | null; latest: VoiceVersion | null;
   documents: Array<{ id: string; filename: string | null; textBytes: number; contentVersion: number; createdAt: string; preferred: boolean }> };
 
-/** Exact 0337/library refusals reach the page; anything else is "unavailable", never database detail. */
+/** Exact 0341/library refusals reach the page; anything else is "unavailable", never database detail. */
 export async function voiceRpc<T>(admin: SupabaseClient, name: string, args: Record<string, unknown>): Promise<T> {
   const result = await admin.rpc(name, args);
   if (result.error) {

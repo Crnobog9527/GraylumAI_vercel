@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
--- Local-only fixtures for 0337: accounts and ready library documents.
+-- Local-only fixtures for 0341: accounts and ready library documents.
 CREATE SCHEMA IF NOT EXISTS voice_test;
 CREATE OR REPLACE FUNCTION voice_test.actor() RETURNS uuid LANGUAGE plpgsql AS $$
 DECLARE a uuid:=gen_random_uuid();
