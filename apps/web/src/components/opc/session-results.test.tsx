@@ -62,6 +62,14 @@ describe('session results panel', () => {
     expect(view.html).toContain('第一版');
     expect(view.html).toContain('生成它的回复已不可用');
   });
+  it('shows a retry instead of endless loading when history cannot be read', () => {
+    const onRetryHistory = vi.fn();
+    const view = card({ mode: 'history', versions: undefined, historyError: true, onRetryHistory });
+    expect(view.html).toContain('历史版本暂时读不出来');
+    expect(view.html).not.toContain('正在读取历史版本');
+    button(view.tree, '重试').props.onClick?.();
+    expect(onRetryHistory).toHaveBeenCalledOnce();
+  });
   it('save form offers every result type and shows refusals', () => {
     const handlers = { onType: vi.fn(), onTitle: vi.fn(), onText: vi.fn(), onConfirm: vi.fn(), onCancel: vi.fn() };
     const tree = SaveReplyForm({ type: 'body', title: '', text: '原文', error: '只能保存回复里的原文', pending: false, ...handlers });

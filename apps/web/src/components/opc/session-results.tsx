@@ -101,6 +101,7 @@ function ResultCard({ sessionId, item }: { sessionId: string; item: SessionResul
   }
   return <ResultCardView item={item} mode={mode} draft={draft} error={error} pending={edit.isPending || remove.isPending}
     versions={history.data as SessionResultItem[] | undefined}
+    historyError={Boolean(history.error)} onRetryHistory={() => void history.refetch()}
     onMode={next => { setMode(next); setError(''); if (next === 'edit') {
       setDraft({ title: item.title, body: item.body, requestId: '', baseVersion: item.version });
     } }}
@@ -108,9 +109,10 @@ function ResultCard({ sessionId, item }: { sessionId: string; item: SessionResul
     onSave={() => void saveEdit()} onDelete={() => void confirmDelete()}/>;
 }
 
-export function ResultCardView({ item, mode, draft, error, pending, versions, onMode, onDraft, onSave, onDelete }: {
+export function ResultCardView({ item, mode, draft, error, pending, versions, historyError, onRetryHistory, onMode, onDraft,
+  onSave, onDelete }: {
   item: SessionResultItem; mode: 'view' | 'edit' | 'history' | 'delete'; draft: { title: string; body: string };
-  error: string; pending: boolean; versions?: SessionResultItem[];
+  error: string; pending: boolean; versions?: SessionResultItem[]; historyError?: boolean; onRetryHistory?(): void;
   onMode(mode: 'view' | 'edit' | 'history' | 'delete'): void; onDraft(value: { title?: string; body?: string }): void;
   onSave(): void; onDelete(): void;
 }) {
@@ -129,7 +131,9 @@ export function ResultCardView({ item, mode, draft, error, pending, versions, on
     {mode === 'history' && <ol aria-label="历史版本" className="space-y-2 border-t pt-2">
       {(versions ?? []).map(version => <li key={version.id}><span className="text-xs text-[var(--text-tertiary)]">第 {version.version} 版</span>
         <p className="max-h-32 overflow-auto whitespace-pre-wrap">{version.body}</p></li>)}
-      {!versions && <li className="text-xs">正在读取历史版本…</li>}
+      {!versions && !historyError && <li className="text-xs">正在读取历史版本…</li>}
+      {!versions && historyError && <li className="text-xs" role="alert">历史版本暂时读不出来。
+        <Button size="sm" variant="ghost" onClick={onRetryHistory}>重试</Button></li>}
     </ol>}
     {mode === 'delete' && <p role="alert">删除后这一项的所有版本都会消失，生成它的回复仍保留在对话里。</p>}
     {error && <p role="alert" className="text-[var(--text-danger,#b42318)]">{error}</p>}

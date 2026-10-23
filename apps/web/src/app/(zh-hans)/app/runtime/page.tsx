@@ -392,7 +392,9 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
    meta={workItem?{platform:workItem.platform,account:workItem.account,infoHref:'/app/library?item='+workItem.workItemId+'&return='+sessionId,
     showExpand:!panelOpen,onExpand:()=>setPanelOpen(true)}:undefined}
    action={!sessionId&&requestedModule?<Button variant="outline" disabled={busy||!choices.data||Boolean(input.trim())||Boolean(requestedModule&&!chosenModule)}
-    onClick={open}><Plus className="mr-2 h-4 w-4"/>用此功能准备新任务</Button>:null}/>
+    onClick={open}><Plus className="mr-2 h-4 w-4"/>用此功能准备新任务</Button>
+    // A closed results folder of a free chat reopens here (the frame's own reopen button is mobile-only).
+    :!workItem&&!panelOpen&&results.data?.length?<Button variant="outline" onClick={()=>setPanelOpen(true)}>展开成果夹</Button>:null}/>
   {requestedModule&&!chosenModule&&<p className="shrink-0 px-6 py-1 text-center text-[11px] text-[var(--text-tertiary)]">所选功能当前不满足本地工作区准入条件；不会自动换用其他功能。</p>}
   <QueryNotice error={choices.error||view.error||library.error||results.error} label="当前工作" retry={()=>Promise.all([choices.refetch(),...(sessionId?[view.refetch()]:[]),...(sessionId&&view.data?.scope?.kind==='work_item'?[library.refetch()]:[]),...(freeChat?[results.refetch()]:[])])}/>
   <div ref={scrollArea} onScroll={rememberScroll} className={workStyles.scrollArea} aria-label="对话记录">
