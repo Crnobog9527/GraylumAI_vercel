@@ -212,7 +212,20 @@ it.runIf(process.env.V3_LOCAL_STAGING_HOST === 'true')('OPC: MENTOR_STREAM C2_ST
     stamp('page-settled');
     expect(await page.getByRole('button', { name: '停止', exact: true }).count()).toBe(0);
     expect(await page.getByText('回复暂未完成', { exact: false }).count()).toBe(0);
-    expect((await read()).result).toMatchObject({ stopped: true });
+    const saved = (await read()).result;
+    expect(saved).toMatchObject({ stopped: true, completeness: 'complete' });
+    // The whole saved reply stays on screen, and the next message can be typed and sent.
+    const message = (JSON.parse(saved.body).message as string).trim();
+    const shown = await page.locator('[data-message-role="assistant"] [data-message-markdown]').last()
+      .evaluate(node => (node as HTMLElement).innerText.trim());
+    expect(shown).toBe(message);
+    const box = page.getByRole('textbox', { name: '给 AI 教练的回复', exact: true });
+    expect(await box.evaluate(node => node.getAttribute('aria-disabled') !== 'true'
+      && (node as HTMLElement).isContentEditable)).toBe(true);
+    await box.click();
+    await box.fill('下一条消息');
+    expect(await page.getByRole('button', { name: '发送', exact: true }).evaluate(node => !(node as HTMLButtonElement).disabled))
+      .toBe(true);
     expect(turns).toBe(1);
     expect(stops).toHaveLength(1);
     await writeFile(process.env.V3_WORKBENCH_OUTPUT + '/c2-stop-organizer.json', JSON.stringify({ executionId: execution.id, timeline }, null, 2));
