@@ -48,13 +48,21 @@ export function admissionError(message: unknown, cause: unknown) {
 export const UNPAID_SUBSCRIPTION_MESSAGE = '你还有一个付款没有成功的订阅（例如自动续费扣款失败）。为避免重复扣费，暂时不能购买新的套餐。'
   + '请提交工单，我们帮你停止这个订阅或补上付款，处理好后就能重新购买。';
 
-/** `unpaidSubscription`: the buyer has a subscription whose payment failed (past_due, incomplete, unpaid). Admission
- * refuses it with the same code as an active membership; only the wording differs, so the buyer knows what to do. */
-export function mapMethodPurchaseRejection(error: unknown, context: { unpaidSubscription?: boolean } = {}) {
+/** A payment under an open dispute (chargeback) keeps its stopped subscription's period, which admission reads as a
+ * membership (PR #1229 acceptance: user4 was told they already had an active membership). */
+export const OPEN_DISPUTE_MESSAGE = '你有一笔付款争议（拒付）还没有处理完，处理完之前暂时不能购买新的会员。'
+  + '如有疑问，请提交工单联系我们。';
+
+/** `openDispute`: the buyer has a payment frozen by an open dispute. `unpaidSubscription`: the buyer has a subscription
+ * whose payment failed (past_due, incomplete, unpaid). Admission refuses both with the same code as an active
+ * membership; only the wording differs, so the buyer knows what is actually in the way. */
+export function mapMethodPurchaseRejection(error: unknown,
+  context: { unpaidSubscription?: boolean; openDispute?: boolean } = {}) {
   if (!(error instanceof MethodPurchaseRejected)) return null;
   const rejection = REJECTIONS[error.message]!;
-  const message = error.message === 'PAY_WAFFO_MEMBERSHIP_TRANSITION_REQUIRED' && context.unpaidSubscription
-    ? UNPAID_SUBSCRIPTION_MESSAGE : rejection.message;
+  const transition = error.message === 'PAY_WAFFO_MEMBERSHIP_TRANSITION_REQUIRED';
+  const message = transition && context.openDispute ? OPEN_DISPUTE_MESSAGE
+    : transition && context.unpaidSubscription ? UNPAID_SUBSCRIPTION_MESSAGE : rejection.message;
   return new TRPCError({ code: rejection.code, message, cause: error });
 }
 
@@ -64,5 +72,28 @@ export async function hasUnpaidSubscription(db: Pick<SupabaseClient, 'from'>, us
     const result = await db.from('user_subscriptions').select('id').eq('user_id', userId)
       .in('status', ['past_due', 'incomplete', 'unpaid']).limit(1);
     return !result.error && Array.isArray(result.data) && result.data.length > 0;
+  } catch { return false; }
+}
+
+const BLOCKING_STATUSES = ['active', 'trialing', 'past_due', 'incomplete', 'unpaid'];
+
+/** Whether the membership that blocks this purchase is held only by subscriptions under a frozen dispute. Mirrors the
+ * admission gate (0222 + 0328): a subscription blocks while chargeable or until its period ends, unless it is canceled
+ * with its credit release terminated. If any blocking subscription has no frozen dispute, the ordinary "active
+ * membership" wording stays true, so a dispute on an unrelated order never replaces it. A failed read keeps the
+ * ordinary wording. */
+export async function hasOpenDispute(db: Pick<SupabaseClient, 'from'>, userId: string, now = new Date()) {
+  try {
+    const disputes = await db.from('payment_disputes').select('subscription_id,payment_orders!inner(user_id)')
+      .eq('payment_orders.user_id', userId).eq('freeze_state', 'frozen').not('subscription_id', 'is', null).limit(100);
+    if (disputes.error || !Array.isArray(disputes.data) || disputes.data.length === 0) return false;
+    const disputed = new Set(disputes.data.map(row => (row as { subscription_id: string }).subscription_id));
+    const subscriptions = await db.from('user_subscriptions').select('id,status,credit_release_terminated_at')
+      .eq('user_id', userId).or(`status.in.(${BLOCKING_STATUSES.join(',')}),current_period_end.gt.${now.toISOString()}`)
+      .limit(100);
+    if (subscriptions.error || !Array.isArray(subscriptions.data)) return false;
+    const blocking = (subscriptions.data as Array<{ id: string; status: string | null; credit_release_terminated_at: string | null }>)
+      .filter(row => row.status !== 'canceled' || row.credit_release_terminated_at === null);
+    return blocking.length > 0 && blocking.every(row => disputed.has(row.id));
   } catch { return false; }
 }

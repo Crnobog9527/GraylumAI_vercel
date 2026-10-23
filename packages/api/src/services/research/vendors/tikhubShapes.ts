@@ -4,6 +4,7 @@
 // Only whitelisted fields leave this module: no bios, contact details, avatars or commenter data.
 import { SOCIAL_EARLIEST_MS, bool, clip, count, displayCount, findAll, first, has, idText, text, timestamp } from './fields';
 import { publicHttpUrl } from './http';
+import { normalizeAccountSearch } from './accountSearchShapes';
 import type { ResearchItem, SocialKind, SocialPlatform } from './types';
 
 export const POST_FIELDS = [
@@ -216,6 +217,7 @@ function usable(item: ResearchItem, kind: SocialKind): boolean {
 /** Normalized items for a TikHub envelope; an unrecognized shape yields no items, never invented ones. */
 export function normalizeTikhub(json: unknown, platform: SocialPlatform, kind: SocialKind, account?: string): ResearchItem[] {
   const data = (json as Raw | null)?.data;
+  if (kind === 'account_search') return normalizeAccountSearch(data, platform);
   if (kind === 'account_relation') {
     // The documented relation object is just {following, follower}; it need not repeat the user id,
     // so the requested account is the identity.
@@ -292,6 +294,9 @@ const EMPTY_LIST_PATHS: Partial<Record<`${SocialPlatform}:${SocialKind}`, readon
   'youtube:keyword_posts': ['data.videos', 'data.contents'],
   'youtube:account_posts': ['data.videos', 'data.contents'],
   'x:keyword_posts': ['data.entries', 'data.timeline', 'data.tweets'],
+  'tiktok:account_search': ['data.user_list'],
+  'douyin:account_search': ['data.user_list'],
+  'xiaohongshu:account_search': ['data.data.users'],
   'x:account_posts': ['data.entries', 'data.timeline', 'data.tweets'],
   'instagram:account_posts': ['data.edges', 'data.items', 'data.data.items'],
 };

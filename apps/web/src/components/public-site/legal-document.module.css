@@ -1,4 +1,5 @@
-/* The formal legal documents (privacy, terms, cookies, refund): plain HTML from content/legal, styled for the dark public site. */
+/* The formal legal documents (privacy, terms, cookies, refund): plain HTML from content/legal, styled for the dark public site.
+   The classes the HTML carries (meta, toc, table-wrap) are literal, so they must be :global or the module would rename them. */
 .doc {
   color: #c8c8c8;
   font-size: 1rem;
@@ -34,7 +35,7 @@
   margin: 0 0 1rem;
 }
 
-.doc .meta {
+.doc :global(.meta) {
   color: #8a8a8a;
   font-size: 0.875rem;
   margin-bottom: 2rem;
@@ -69,11 +70,11 @@
   margin: 0 0 1rem;
 }
 
-.doc .toc {
+.doc :global(.toc) {
   columns: 1;
 }
 
-.doc .table-wrap {
+.doc :global(.table-wrap) {
   margin: 0 0 1.5rem;
   overflow-x: auto;
 }
@@ -99,7 +100,7 @@
 }
 
 @media (min-width: 768px) {
-  .doc .toc {
+  .doc :global(.toc) {
     columns: 2;
     column-gap: 2rem;
   }
