@@ -59,8 +59,8 @@ async function adoptionRun(admin: SupabaseClient, actorId: string, card: z.infer
   const billingUnit = await freezeWindowBillingUnit(admin, window, [quote]);
   const rules: FrozenPaygRun['rules'] = { ...realContract(window).rules,
     creditsPerUsd: window.creditsPerUsd, multiplier: window.multiplier, fx: {}, billingUnit };
-  // Only the bound is used: it states what the run could cost if it ever called, and it never calls.
-  const { call } = runtimePaygCall(fusionRequestBody(priced!, { instructions: '', input: card.question }, outputLimit, reasoning),
+  // Only the bound is used: it states what the run could cost if it ever called. It never claims, so nothing is held.
+  const { call, upperCredits } = runtimePaygCall(fusionRequestBody(priced!, { instructions: 'Adopted compare answer; never sent.', input: card.question }, outputLimit, reasoning),
     phase, priced!, rules, 1, true);
   return (columnIndex: number) => {
     const input = { version: 'runtime.v1', network: 'deny', tools: [], sources: [], input: card.question,
@@ -69,7 +69,7 @@ async function adoptionRun(admin: SupabaseClient, actorId: string, card: z.infer
       operation: 'question', modelId,
       ...(module ? { moduleId: skill!.moduleId, skillId: String(module.data!.skill_id), revisionId: skill!.revisionId } : {}),
       sourceHash: createHash('sha256').update(JSON.stringify(input)).digest('hex'), input, callPolicy: [priced],
-      rules, limits: { costUsd: call.upperUsd, credits: 0, maxPreDeduct: 0, maxCalls: 1, deadline } });
+      rules, limits: { costUsd: call.upperUsd, credits: 0, maxPreDeduct: upperCredits, maxCalls: 1, deadline } });
   };
 }
 

@@ -60,7 +60,7 @@ async function member(credits = 1000) {
   const actor = randomUUID();
   await db.query("insert into profiles(id,credits,membership_level) values($1,$2,'gold')", [actor, credits]);
   await db.query(`insert into credit_transactions(user_id,amount,type,ledger_type,reason_code,source_type,idempotency_key,
-    balance_before,balance_after) values($1,$2,'addition','grant','opening_grant','system',$3,0,$2)`, [actor, credits, 'opening:' + actor]);
+    balance_before,balance_after) values($1,$2,'addition','grant','opening_grant','system',$3,0,$4)`, [actor, credits, 'opening:' + actor, credits]);
   await db.query('update runtime_test_windows set actor_ids=array_append(actor_ids,$2) where id=$1', [windowId, actor]);
   const session = await admin.rpc('runtime_start', { p_actor_id: actor, p_request_id: randomUUID(), p_payload: { scope: { kind: 'positioning_draft' } } });
   if (session.error) throw new Error(session.error.message);
