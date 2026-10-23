@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { logger } from '../../lib/logger';
 
 /**
  * The attached organizer's response can be lost while its call is still billed:
@@ -52,6 +53,9 @@ export function organizerExchange(protocol: string, payg: boolean, runId: string
       }
       if (saved?.state !== 'responded') throw error;
       lost = true;
+      // Identifiers only, never the reply or user content: lets the next occurrence be traced.
+      logger.warn('api', 'runtime_organizer_output_lost', { executionId: args.p_execution_id, callId: saved.callId,
+        sequence: pending.sequence, phase: 'attached_organizer', code: ORGANIZER_OUTPUT_LOST });
       throw new Error(ORGANIZER_OUTPUT_LOST);
     },
     /** The organizer summary, or `{ lost: true }` when its output can never be read. */

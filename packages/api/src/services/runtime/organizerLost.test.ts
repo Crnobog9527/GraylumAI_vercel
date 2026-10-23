@@ -3,6 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { organizerExchange, responsePending, ORGANIZER_OUTPUT_LOST } from './organizerLost';
 import { runtimeExecutor } from './execute';
 import { createRuntimeBudget } from './budget';
+import { logger } from '../../lib/logger';
 const mock = vi.hoisted(() => ({ run: vi.fn(), billing: {
   claimCall: vi.fn(), dispatchOnce: vi.fn(), recoverRun: vi.fn(), recoverReceipts: vi.fn(), finalizeRun: vi.fn(),
 } }));
@@ -20,10 +21,14 @@ function helper(stored: Array<{ callId?: string; state?: string; rawBody?: strin
 }
 
 it('a responded organizer call without a body is lost, and only that round reads as lost', async () => {
+  const warn = vi.spyOn(logger, 'warn');
   const h = helper([]);
   await expect(h.call.recover(responsePending({ callId: 'c', state: 'responded', rawBody: null }, 2, 'h')))
     .rejects.toThrow(ORGANIZER_OUTPUT_LOST);
   expect(h.billing.recoverReceipts).not.toHaveBeenCalled();
+  // Identifiers only: no reply text or user content in the log.
+  expect(warn).toHaveBeenCalledExactlyOnceWith('api', 'runtime_organizer_output_lost', { executionId: id, callId: 'c', sequence: 2,
+    phase: 'attached_organizer', code: ORGANIZER_OUTPUT_LOST });
   expect(await h.call.summary(async () => { throw new Error('RUNTIME_EXECUTION_PENDING'); })).toEqual({ lost: true });
   const fresh = helper([]);
   await expect(fresh.call.summary(async () => { throw new Error('RUNTIME_EXECUTION_PENDING'); })).rejects.toThrow('RUNTIME_EXECUTION_PENDING');
