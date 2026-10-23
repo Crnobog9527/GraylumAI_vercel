@@ -3,7 +3,6 @@ import {describe,it,expect,vi} from 'vitest';
 import {openRouterBound} from './openRouterPolicy';
 import {openRouterAdapter} from './openRouterAdapter';
 import {historyToolNames} from '../runtime/providerRequest';
-import {openRouterStream,SOURCE_STREAM_TOOLS} from './openRouterStream';
 
 // CHAT-AUTO-CONTEXT C at the provider boundary: a free chat request may offer read_source and the general research
 // tools (each once) and replay their one-call history; the positioning flow tools and the Agent card tools stay out.
@@ -49,17 +48,26 @@ describe('free chat research tools at the provider boundary',()=>{
 
 describe('free chat research tool calls in a streamed response',()=>{
  const frame=(delta:unknown,finish:string|null=null)=>'data: '+JSON.stringify({id:'gen-1',model:'test/model',choices:[{index:0,delta,finish_reason:finish}]})+'\n\n';
- const usage='data: '+JSON.stringify({id:'gen-1',model:'test/model',choices:[],usage:{prompt_tokens:1,completion_tokens:1,total_tokens:2}})+'\n\ndata: [DONE]\n\n';
- it.each(['social_search','web_fetch'])('parses a %s call of a free chat response',name=>{
-  const stream=openRouterStream('test/model',undefined,undefined,SOURCE_STREAM_TOOLS);
-  stream.push(frame({tool_calls:[{index:0,id:'call_a',type:'function',function:{name,arguments:'{}'}}]})+frame({},'tool_calls')+usage);
-  const result=stream.result();
-  expect(result.error).toBeUndefined();
-  expect(result.sdkResponse?.choices[0]?.message.tool_calls?.map(c=>c.function.name)).toEqual([name]);
+ const usage='data: '+JSON.stringify({id:'gen-1',model:'test/model',choices:[],usage:{prompt_tokens:1,completion_tokens:1,total_tokens:2,cost:0.001}})+'\n\ndata: [DONE]\n\n';
+ const body=(name:string)=>frame({role:'assistant',content:null})+frame({tool_calls:[{index:0,id:'call_a',type:'function',function:{name,arguments:'{}'}}]})+frame({},'tool_calls')+usage;
+ const observe=async(offered:string[],name:string)=>{
+  const a=openRouterAdapter({allowWorkspaceRead:true,credential:async()=> 'LOCAL_SYNTHETIC_KEY',
+   transport:async()=>new Response(body(name),{headers:{'x-generation-id':'gen-1'}})});
+  const observation=await a.dispatch({input:request({tools:offered.map(tool)})},identity);
+  return {observation,evidence:a.evidence(observation,identity,'response') as {rejectedReason?:string;sdkResponse?:unknown}};
+ };
+ it.each(['social_search','web_fetch'])('keeps a %s call when the request offered it, also when the receipt is read back',async name=>{
+  const {observation,evidence}=await observe(['read_source',name],name);
+  expect(observation).toMatchObject({sourceTools:true,sourceToolNames:['read_source',name]});
+  expect(evidence.rejectedReason).toBeUndefined();
  });
- it('still refuses a positioning flow tool in a free chat response',()=>{
-  const stream=openRouterStream('test/model',undefined,undefined,SOURCE_STREAM_TOOLS);
-  stream.push(frame({tool_calls:[{index:0,id:'call_a',type:'function',function:{name:'benchmark_fetch',arguments:'{}'}}]})+frame({},'tool_calls')+usage);
-  expect(stream.error??stream.result().error).toBeDefined();
+ it.each(['social_search','web_fetch'])('rejects a %s call the request did not offer (read_source only: nothing changes)',async name=>{
+  const {observation,evidence}=await observe(['read_source'],name);
+  expect(observation.sourceToolNames).toBeUndefined();
+  expect(evidence.rejectedReason??'').not.toBe('');
+ });
+ it('rejects a research tool that is globally allowed but missing from this request, and a positioning flow tool',async()=>{
+  expect((await observe(['read_source','web_search'],'social_account')).evidence.rejectedReason??'').not.toBe('');
+  expect((await observe(['read_source','web_search'],'benchmark_fetch')).evidence.rejectedReason??'').not.toBe('');
  });
 });
