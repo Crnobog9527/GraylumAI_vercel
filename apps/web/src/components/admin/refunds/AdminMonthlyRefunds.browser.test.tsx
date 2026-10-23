@@ -41,11 +41,16 @@ beforeAll(async () => {
       useUtils: () => ({admin: {
         quoteMonthlyRefund: {fetch: input => server('quote', input)},
         getMonthlyRefundStatus: {fetch: input => server('status', input)},
+        quoteSubscriptionRefund: {fetch: input => server('subscription-quote', input)},
+        getSubscriptionRefundStatus: {fetch: input => server('subscription-status', input)},
       }}),
       admin: {
         approveMonthlyRefund: {useMutation: mutation('approve')},
         executeMonthlyRefund: {useMutation: mutation('execute')},
         rejectMonthlyRefund: {useMutation: mutation('reject')},
+        approveSubscriptionRefund: {useMutation: mutation('subscription-approve')},
+        executeSubscriptionRefund: {useMutation: mutation('subscription-execute')},
+        rejectSubscriptionRefund: {useMutation: mutation('subscription-reject')},
       },
     };
   `;
@@ -60,7 +65,7 @@ beforeAll(async () => {
       if (id === '\0refund-trpc') return mock;
       if (id === entry) return `import React from 'react'; import { createRoot } from 'react-dom/client';
         import {AdminMonthlyRefunds} from ${JSON.stringify(source)};
-        createRoot(document.getElementById('root')).render(React.createElement(AdminMonthlyRefunds));`;
+        createRoot(document.getElementById('root')).render(React.createElement(AdminMonthlyRefunds, { variant: window.variant }));`;
     } }],
     build: { write: false, minify: false, lib: { entry, name: 'MonthlyRefundTest', formats: ['iife'] } },
   });
@@ -77,17 +82,19 @@ const terms = {
   submittedAt: '2026-10-07T00:00:00Z', periodEnd: '2026-11-05T00:00:00Z', feePermitted: 'confirmed',
   feeEvidence: 'legal:us-ca:2026-10', evidenceRefs: ['a', 'b', 'c', 'd'],
 };
+const yearlyTerms = { ...terms, snapshot: { billing_cycle: 'yearly' }, credits: 2990 };
+const upgradeTerms = { ...terms, priorPro: { orderId: ORDER, periodEnd: '2027-03-05T00:00:00Z', autoRenew: false } };
 const quote = { terms, versionHash: 'a'.repeat(64), localVersion: 'b'.repeat(32), executable: false };
 const approved = { kind: 'monthly_first_purchase', id: INTENT, status: 'approved', terms, hold: 'none', claimedAt: null,
   approvedAt: '2026-10-08T00:00:00Z', started: { stop_renewal: null, refund: null, cancel: null, restore_renewal: null } };
 
-async function open(responses: Record<string, unknown> = {}) {
+async function open(responses: Record<string, unknown> = {}, variant: 'monthly' | 'subscription' = 'monthly') {
   const page = await browser.newPage();
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.route('**/*', route => route.abort());
   await page.setContent('<div id="root"></div>');
-  await page.evaluate(value => { Object.assign(window, { responses: value }); }, responses);
+  await page.evaluate(value => { Object.assign(window, value); }, { responses, variant });
   await page.addScriptTag({ content: code });
   return { page, errors };
 }
@@ -398,6 +405,45 @@ it('says plainly when an order has no refund record yet, and names status and re
     await page.getByTestId('monthly-refund-reject-button-confirm').click();
     await browserExpect(page.getByTestId('monthly-refund-action-error')).toContainText('退款证据不足或状态已变化');
     await browserExpect(page.getByTestId('monthly-refund-action-error')).not.toContainText('PAY_');
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 30000);
+
+it('routes the yearly / founder entry through the subscription procedures with the same no-fee default', async () => {
+  const yearly = { terms: yearlyTerms, versionHash: 'c'.repeat(64), localVersion: 'd'.repeat(32), executable: false };
+  const { page, errors } = await open({ 'subscription-quote': yearly, 'subscription-approve': { ...approved, terms: yearlyTerms } }, 'subscription');
+  try {
+    await browserExpect(page.getByRole('heading', { name: 'Stripe 银行卡年付和创始会员首购退款' })).toBeVisible();
+    await browserExpect(page.getByLabel('手续费核对依据')).toHaveValue('location-unknown-no-fee');
+    await page.getByLabel('订单编号').fill(ORDER);
+    await page.getByLabel('工单编号').fill(TICKET);
+    await page.getByTestId('monthly-refund-quote-button').click();
+    const card = page.getByTestId('monthly-refund-quote');
+    await browserExpect(card).toContainText('Gold 年付（首次购买）');
+    await browserExpect(card).toContainText('收回积分（本单已到账的月度发放）');
+    await browserExpect(card).toContainText('2,990 积分');
+    await browserExpect(card).toContainText('Stripe 银行卡年付、创始会员，或有明确原单的 Pro 升 Gold');
+    await page.getByTestId('monthly-refund-approve').click();
+    await page.getByTestId('monthly-refund-approve-confirm').click();
+    await browserExpect(page.getByTestId('monthly-refund-status-label')).toHaveText('已批准，等待执行');
+    expect((await calls(page)).map(([name]) => name)).toEqual(['subscription-quote', 'subscription-approve']);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 30000);
+
+it('shows the original Pro that comes back for a Pro-to-Gold upgrade quote, and reads status via the subscription procedure', async () => {
+  const upgrade = { terms: upgradeTerms, versionHash: 'e'.repeat(64), localVersion: 'f'.repeat(32), executable: false };
+  const { page, errors } = await open({ 'subscription-quote': upgrade, 'subscription-status': null }, 'subscription');
+  try {
+    await page.getByLabel('订单编号').fill(ORDER);
+    await page.getByLabel('工单编号').fill(TICKET);
+    await page.getByTestId('monthly-refund-quote-button').click();
+    const card = page.getByTestId('monthly-refund-quote');
+    await browserExpect(card).toContainText('Gold 月付（从 Pro 升级，首次购买 Gold）');
+    await browserExpect(card).toContainText('退款后恢复原 Pro');
+    await page.getByTestId('monthly-refund-status-button').click();
+    await browserExpect(page.getByTestId('monthly-refund-status-message')).toHaveText('这个订单还没有退款记录');
+    expect((await calls(page)).map(([name]) => name)).toEqual(['subscription-quote', 'subscription-status']);
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 30000);

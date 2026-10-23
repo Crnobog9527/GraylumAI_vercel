@@ -4,7 +4,7 @@
 import { CheckCircle } from 'lucide-react';
 import { formatMinorAmount } from '@/lib/payment-display';
 import { ConfirmRefundAction } from './ConfirmRefundAction';
-import { FEE_PERMITTED_LABELS, MONTHLY_REFUND_RULES, PLAN_LABELS, formatRefundTime } from './monthlyRefundView';
+import { BILLING_CYCLE_LABELS, FEE_PERMITTED_LABELS, MONTHLY_REFUND_RULES, PLAN_LABELS, formatRefundTime } from './monthlyRefundView';
 
 export type MonthlyRefundQuoteTerms = {
   orderId: string; ticketId: string;
@@ -13,10 +13,15 @@ export type MonthlyRefundQuoteTerms = {
   taxMinor?: number;
   credits: number; paidAt: string; submittedAt: string; periodEnd: string; mode: string;
   feePermitted: 'confirmed' | 'not_permitted'; feeEvidence: string; evidenceRefs: string[];
+  /** The order's billing cycle, as the server snapshot recorded it. */
+  snapshot?: { billing_cycle?: string };
+  /** Pro-to-Gold upgrades only: the Pro order that comes back after this refund (original end date kept). */
+  priorPro?: { periodEnd: string; autoRenew: boolean };
 };
 
 type Props = {
   terms: MonthlyRefundQuoteTerms;
+  rules?: readonly string[];
   approving: boolean;
   disabled: boolean;
   onApprove: () => void;
@@ -25,10 +30,11 @@ type Props = {
 const rowStyle = { color: 'var(--text-secondary)' };
 
 /** Read-only quote; the server only returns one when every refund rule passed. */
-export function MonthlyRefundQuoteCard({ terms, approving, disabled, onApprove }: Props) {
+export function MonthlyRefundQuoteCard({ terms, rules = MONTHLY_REFUND_RULES, approving, disabled, onApprove }: Props) {
   const money = (minor: number) => formatMinorAmount(minor, terms.currency);
   const rows: Array<[string, string]> = [
-    ['会员', `${PLAN_LABELS[terms.plan] ?? terms.plan} 月付（首次购买）`],
+    ['会员', `${PLAN_LABELS[terms.plan] ?? terms.plan} ${BILLING_CYCLE_LABELS[terms.snapshot?.billing_cycle ?? 'monthly'] ?? '月付'}`
+      + `（${terms.priorPro ? '从 Pro 升级，首次购买 Gold' : '首次购买'}）`],
     ['付款时间', formatRefundTime(terms.paidAt)],
     ['工单提交时间', formatRefundTime(terms.submittedAt)],
     ['当前计费周期结束', formatRefundTime(terms.periodEnd)],
@@ -41,7 +47,8 @@ export function MonthlyRefundQuoteCard({ terms, approving, disabled, onApprove }
     ['计算基数', money(terms.basisMinor)],
     ['手续费', `${money(terms.feeMinor)}（${FEE_PERMITTED_LABELS[terms.feePermitted]}）`],
     ['退回给用户', money(terms.netMinor)],
-    ['收回积分', `${terms.credits.toLocaleString()} 积分`],
+    [terms.snapshot?.billing_cycle === 'yearly' ? '收回积分（本单已到账的月度发放）' : '收回积分', `${terms.credits.toLocaleString()} 积分`],
+    ...(terms.priorPro ? [['退款后恢复原 Pro', `到原到期日 ${formatRefundTime(terms.priorPro.periodEnd)}，保持停止续费`] as [string, string]] : []),
     ['支付模式', terms.mode === 'test' ? '测试（Stripe 沙盒）' : terms.mode === 'live' ? '正式（真实付款，会退真钱）' : '未知'],
   ];
   return (
@@ -54,7 +61,7 @@ export function MonthlyRefundQuoteCard({ terms, approving, disabled, onApprove }
         </p>
       </div>
       <ul className="space-y-1 text-sm" aria-label="已核对的退款条件">
-        {MONTHLY_REFUND_RULES.map(rule => (
+        {rules.map(rule => (
           <li key={rule} className="flex items-start gap-2" style={rowStyle}>
             <CheckCircle className="mt-0.5 h-4 w-4 flex-shrink-0" style={{ color: 'var(--success)' }} />
             <span>{rule}</span>
