@@ -261,12 +261,14 @@ CREATE TRIGGER voice_library_deleted AFTER UPDATE OF deleted_at ON public.librar
  FOR EACH ROW WHEN (OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL)
  EXECUTE FUNCTION public.voice_library_trigger();
 
--- The version a writing run uses (VOICE PR-2): the confirmed one, when the switch is on.
+-- What a writing run uses (VOICE PR-2), read without locking the account: the switch, and the confirmed version
+-- (only when the switch is on). No profile row means the switch was never turned off and nothing is confirmed.
 CREATE OR REPLACE FUNCTION public.voice_profile_current(a uuid) RETURNS jsonb
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
- SELECT jsonb_build_object('versionId',v.id,'version',v.version)
- FROM voice_profiles p JOIN voice_profile_versions v ON v.id=p.confirmed_version_id AND v.status='confirmed'
- WHERE p.actor_id=a AND p.enabled;
+ SELECT jsonb_build_object('enabled',coalesce(p.enabled,true),'versionId',CASE WHEN p.enabled THEN v.id END,
+  'version',CASE WHEN p.enabled THEN v.version END)
+ FROM (SELECT a AS actor_id) x LEFT JOIN voice_profiles p ON p.actor_id=x.actor_id
+  LEFT JOIN voice_profile_versions v ON v.id=p.confirmed_version_id AND v.status='confirmed';
 $$;
 -- The text of a frozen version (replays keep their version); NULL once deleted.
 CREATE OR REPLACE FUNCTION public.voice_profile_read(a uuid,vid uuid) RETURNS jsonb

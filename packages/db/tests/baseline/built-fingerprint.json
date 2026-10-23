@@ -3973,7 +3973,7 @@
   "fn:voice_generation_finish(uuid,uuid,jsonb,text,boolean)": "3aae8da4bf1e",
   "fn:voice_library_trigger()": "94432cebc663",
   "fn:voice_profile_confirm(uuid,uuid,integer,jsonb)": "da2c42b4d7bb",
-  "fn:voice_profile_current(uuid)": "ee744617d653",
+  "fn:voice_profile_current(uuid)": "db0a723a05d7",
   "fn:voice_profile_delete(uuid,uuid)": "bbc9b905cc3f",
   "fn:voice_profile_read(uuid,uuid)": "8ed1624e45d6",
   "fn:voice_profile_set_enabled(uuid,integer,boolean)": "c29e40c3ccee",
