@@ -90,12 +90,23 @@ export async function runCases({db,Client,connectionString,report}) {
       'the reply stays');
   });
 
-  await check('C1 deleting the reply or the conversation erases its results, edits included', async () => {
+  await check('C1 erasing only the source reply keeps the saved text as source-unavailable; erasing the conversation removes it', async () => {
     const f = await freeChat(db);
     const saved = await save(db,f);
-    await rpc(db,'runtime_session_result_edit',f.actor,saved.familyId,randomUUID(),1,null,'用户自己改过的版本');
+    const edited = await rpc(db,'runtime_session_result_edit',f.actor,saved.familyId,randomUUID(),1,null,'用户自己改过的版本');
     await erase(db,f,'answer',f.execution);
-    assert.equal(await count(db,'family_id=$1',[saved.familyId]),0,'answer erasure removes the whole family');
+    assert.equal(await count(db,'family_id=$1',[saved.familyId]),2,'answer erasure keeps the user\'s saved and edited versions');
+    const [kept] = await rpc(db,'runtime_session_results_list',f.actor,f.session);
+    assert.deepEqual([kept.id,kept.body,kept.sourceAvailable,kept.versions],[edited.id,'用户自己改过的版本',true,2],
+      'the newest version is the user\'s own edit, so it has no source to lose');
+    const versions = await rpc(db,'runtime_session_result_versions',f.actor,saved.familyId);
+    assert.deepEqual(versions.map(v=>[v.version,v.sourceAvailable]),[[2,true],[1,false]],'only the version saved from the erased reply is unavailable');
+    await assert.rejects(save(db,f),/SESSION_RESULT_SOURCE/,'an erased reply cannot be saved again');
+    const h = await freeChat(db);
+    const plain = await save(db,h);
+    await erase(db,h,'answer',h.execution);
+    const [still] = await rpc(db,'runtime_session_results_list',h.actor,h.session);
+    assert.deepEqual([still.id,still.body,still.sourceAvailable],[plain.id,REPLY,false],'an unedited result stays, marked source unavailable');
     const g = await freeChat(db);
     await save(db,g);
     await erase(db,g,'session',g.session);
