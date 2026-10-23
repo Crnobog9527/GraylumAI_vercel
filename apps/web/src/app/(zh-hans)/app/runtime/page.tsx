@@ -19,6 +19,7 @@ import { followTranscript, transcriptSignature } from '@/components/chat/chat-sc
 import { WorkComposer } from '@/components/opc/work-composer';
 import { WorkspaceFrame } from '@/components/opc/workspace-frame';
 import { ContentEditor } from '@/components/opc/content-editor';
+import { looksLikeCreationRequest } from '@/lib/creation-intent';
 import composerStyles from '@/components/opc/work-composer.module.css';
 import workStyles from './runtime-work.module.css';
 import {
@@ -189,7 +190,10 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
   let restoreInput=()=>{},stored=false;
   try{
   const chosen=choices.data?.skills.find(s=>'skill:'+s.moduleId===activeSelection);
-  const selected=chosen?{kind:'skill' as const,moduleId:chosen.moduleId,revisionId:chosen.revisionId}:activeSelection.startsWith('auto:')?{kind:'auto' as const,modelId:activeSelection.slice(5)}:{kind:'ordinary' as const,modelId:activeSelection};
+  // Free chat only (no topic), no Skill loaded by hand: a code gate decides whether the paid Skill matching is worth calling.
+  const plainChat=!chosen&&!workItem&&!activeSelection.startsWith('skill:')&&!activeSelection.startsWith('auto:');
+  const autoMatch=plainChat&&Boolean(choices.data?.skills.length)&&looksLikeCreationRequest(input);
+  const selected=chosen?{kind:'skill' as const,moduleId:chosen.moduleId,revisionId:chosen.revisionId}:activeSelection.startsWith('auto:')?{kind:'auto' as const,modelId:activeSelection.slice(5)}:autoMatch?{kind:'auto' as const,modelId:activeSelection}:{kind:'ordinary' as const,modelId:activeSelection};
   const submitted=input,sent=COMPOSER_REFERENCES_ENABLED?referencesNamedIn(input,references):[];
   const requestInput=scriptRequest?'[OPC_SCRIPT_V1] 请基于当前选题简报讨论并给出可修改的口播稿。'+(submitted.trim()||'先给我一版口播稿。'):submitted;
   // An unconfirmed earlier send of the same input keeps its request id, so the server replays instead of charging twice.
