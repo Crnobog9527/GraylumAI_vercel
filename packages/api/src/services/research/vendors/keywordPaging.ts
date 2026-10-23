@@ -28,8 +28,16 @@ const int = (value: unknown) => (typeof value === 'number' && Number.isSafeInteg
   : typeof value === 'string' && /^[1-9]\d{0,8}$/.test(value) ? Number(value) : null);
 const more = (value: unknown) => value === true || value === 1 || value === '1';
 
-/** The next page's cursor, only when the supplier says there is one and it has the expected form. */
-export function keywordNextCursor(json: unknown, platform: SocialPlatform): string | undefined {
+/** The page position a cursor stands for (offset, cursor or page number); null for YouTube's opaque token. */
+function position(platform: SocialPlatform, cursor: string): number | null {
+  return platform === 'youtube' ? null : Number(cursor.split(':')[0]);
+}
+
+/**
+ * The next page's cursor, only when the supplier says there is one, it has the expected form and it moves forward from
+ * `current` (the cursor this answer was requested with): a cursor that does not advance would pay for the same page again.
+ */
+export function keywordNextCursor(json: unknown, platform: SocialPlatform, current?: string): string | undefined {
   const data = (first(json, ['data']) ?? null) as Raw | null;
   if (!data || typeof data !== 'object') return undefined;
   let cursor: string | undefined;
@@ -49,7 +57,10 @@ export function keywordNextCursor(json: unknown, platform: SocialPlatform): stri
   } else if (platform === 'youtube') {
     cursor = typeof data.continuation_token === 'string' ? data.continuation_token : undefined;
   }
-  return cursor !== undefined && validKeywordCursor(platform, cursor) ? cursor : undefined;
+  if (cursor === undefined || !validKeywordCursor(platform, cursor) || cursor === current) return undefined;
+  const from = current === undefined ? (platform === 'xiaohongshu' ? 1 : 0) : position(platform, current);
+  const to = position(platform, cursor);
+  return from !== null && to !== null && to <= from ? undefined : cursor;
 }
 
 /** Request parameters a checked cursor sets on the platform's keyword search (overriding its first-page values). */

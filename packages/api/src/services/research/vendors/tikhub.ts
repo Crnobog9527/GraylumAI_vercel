@@ -260,7 +260,7 @@ export async function callTikhub(call: TikhubCall, deps: VendorDeps): Promise<Re
   }
   const limit = Math.min(Math.max(Math.trunc(call.limit ?? MAX_POSTS), 1), MAX_POSTS);
   const items = all.slice(0, limit);
-  const nextCursor = call.kind === 'keyword_posts' ? keywordNextCursor(answer.json, call.platform)
+  const nextCursor = call.kind === 'keyword_posts' ? keywordNextCursor(answer.json, call.platform, call.cursor)
     : call.kind !== 'account_posts' ? undefined
     : call.platform === 'xiaohongshu' ? xhsNextCursor(answer.json)
       : call.platform === 'tiktok' || call.platform === 'douyin' ? videoNextCursor(answer.json, call.cursor) : undefined;

@@ -26,6 +26,19 @@ describe('keyword search next-page cursors', () => {
     expect(keywordNextCursor({ data: { cursor: 'abc' } }, 'x')).toBeUndefined();
   });
 
+  it('never returns a cursor that does not move forward from the one requested (it would pay for the same page)', () => {
+    expect(keywordNextCursor({ data: { cursor: 40, has_more: 1 } }, 'tiktok', '40')).toBeUndefined();
+    expect(keywordNextCursor({ data: { cursor: 20, has_more: 1 } }, 'tiktok', '40')).toBeUndefined();
+    expect(keywordNextCursor({ data: { cursor: 60, has_more: 1 } }, 'tiktok', '40')).toBe('60');
+    const douyin = (cursor: number) => ({ data: { business_config: { has_more: 1, next_page: { cursor, search_id: DY_SEARCH } } } });
+    expect(keywordNextCursor(douyin(8), 'douyin', `8:${DY_SEARCH}`)).toBeUndefined();
+    expect(keywordNextCursor(douyin(16), 'douyin', `8:${DY_SEARCH}`)).toBe(`16:${DY_SEARCH}`);
+    const xhs = (page: number) => ({ data: { next_page: page, search_id: XHS_SEARCH, search_session_id: XHS_SESSION } });
+    expect(keywordNextCursor(xhs(2), 'xiaohongshu', `2:${XHS_SEARCH}:${XHS_SESSION}`)).toBeUndefined();
+    expect(keywordNextCursor(xhs(3), 'xiaohongshu', `2:${XHS_SEARCH}:${XHS_SESSION}`)).toBe(`3:${XHS_SEARCH}:${XHS_SESSION}`);
+    expect(keywordNextCursor({ data: { continuation_token: YT_TOKEN } }, 'youtube', YT_TOKEN)).toBeUndefined();
+  });
+
   it('never passes on a malformed cursor', () => {
     expect(keywordNextCursor({ data: { cursor: -1, has_more: 1 } }, 'tiktok')).toBeUndefined();
     expect(keywordNextCursor({ data: { business_config: { has_more: 1, next_page: { cursor: 8, search_id: 'bad id!' } } } }, 'douyin'))
