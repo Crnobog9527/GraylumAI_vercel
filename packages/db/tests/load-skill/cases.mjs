@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// CONTENT-CONVERSATION-DRIVEN load_skill (0340): the free-chat model loads a Skill from the catalog frozen at admission.
+// CONTENT-CONVERSATION-DRIVEN load_skill (0342): the free-chat model loads a Skill from the catalog frozen at admission.
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {rpc} from '../erasure-b2a/cases.mjs';

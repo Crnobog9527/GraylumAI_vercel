@@ -47,14 +47,14 @@ $$;
 DO $$ DECLARE definition text;names text;complete text;
 BEGIN
  definition:=pg_get_functiondef('public.runtime_tool(uuid,uuid,text,text,jsonb,text,jsonb)'::regprocedure);
- IF position('-- 0340 load_skill' IN definition)=0 THEN
+ IF position('-- 0342 load_skill' IN definition)=0 THEN
   names:='p_name NOT IN (''search'',''read_source'',''read_skill_file'',''read_history'')';
   complete:=' SELECT * INTO t FROM runtime_tool_calls WHERE execution_id=e.id AND call_id=p_call_id;';
   IF array_length(string_to_array(definition,names),1)<>2 OR array_length(string_to_array(definition,complete),1)<>2 THEN
-   RAISE EXCEPTION 'RUNTIME_TOOL_SOURCE_MISMATCH: 0340';END IF;
+   RAISE EXCEPTION 'RUNTIME_TOOL_SOURCE_MISMATCH: 0342';END IF;
   definition:=replace(definition,names,
    'p_name NOT IN (''search'',''read_source'',''read_skill_file'',''read_history'',''load_skill'')'||E'\n'||
-   ' -- 0340 load_skill: a name from the catalog frozen at admission, at most maxSkillLoads per execution'||E'\n'||
+   ' -- 0342 load_skill: a name from the catalog frozen at admission, at most maxSkillLoads per execution'||E'\n'||
    ' OR (p_name=''load_skill'' AND NOT runtime_load_skill_allowed(e,p_call_id,p_arguments))');
   definition:=replace(definition,complete,
    ' IF p_name=''load_skill'' AND p_action=''complete'' AND NOT runtime_load_skill_result_valid(e,p_arguments,p_result)'||E'\n'||

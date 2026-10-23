@@ -62,7 +62,7 @@ export function executionLoadSkillTool(options: {
     try {
       const entry = catalog.find(item => item.name === name);
       if (!entry) throw new Error('RUNTIME_SKILL_LOAD_DENIED');
-      // The journal keeps the tool's one argument under "query", the key every journaled tool argument uses (0340).
+      // The journal keeps the tool's one argument under "query", the key every journaled tool argument uses (0342).
       const args = { p_execution_id: options.executionId, p_call_id: callId, p_name: LOAD_SKILL_TOOL, p_arguments: { query: name } };
       const saved = await options.rpc<{ result: unknown | null }>('runtime_tool', { ...args, p_action: 'claim' });
       if (saved.result !== null) {

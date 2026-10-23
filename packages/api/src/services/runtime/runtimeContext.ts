@@ -15,6 +15,7 @@ import {matchingPlan} from './matching';
 import {reasoningPolicy} from './reasoningPolicy';
 import {frozenResearchTurn} from './researchTurn';
 import {GENERAL_RESEARCH_TOOLS,POSITIONING_RESEARCH_TOOLS,RESEARCH_TOOL_NAMES} from '../research/tools/names';
+import {MAX_SKILL_LOADS_PER_TURN,skillCatalog} from './skillCatalog';
 /** Library documents the user referenced with @: each the caller's own document at the version they chose. */
 export const libraryReferences=z.array(z.object({documentId:z.string().uuid(),version:z.number().int().positive()}).strict())
  .min(1).max(5).refine(items=>new Set(items.map(item=>item.documentId.toLowerCase())).size===items.length,'LIB_REFERENCE_INVALID');
@@ -34,7 +35,10 @@ export const runtimeContext=z.object({
  skillFile:skillFileBinding.optional(),
  skillFileReserve:z.number().int().min(12288).max(131072).optional(),
  historyRead:z.object({version:z.literal(MENTOR_HISTORY_VERSION),reserve:z.literal(MENTOR_HISTORY_RESERVE_BYTES)}).strict().optional(),
- tools:z.array(z.enum(['search','read_source','read_skill_file',READ_HISTORY_TOOL,ASK_QUESTION_TOOL,...RESEARCH_TOOL_NAMES])).default([]),
+ tools:z.array(z.enum(['search','read_source','read_skill_file','load_skill',READ_HISTORY_TOOL,ASK_QUESTION_TOOL,...RESEARCH_TOOL_NAMES])).default([]),
+ // CONTENT-CONVERSATION-DRIVEN: free chat's loadable Skills, frozen at admission, and how many one reply may load.
+ skillCatalog:skillCatalog.min(1).optional(),maxSkillLoads:z.number().int().min(1).max(MAX_SKILL_LOADS_PER_TURN).optional(),
+ skillCatalogMaxBytes:z.number().int().positive().optional(),
  // RT-3b PR-3: a positioning mentor turn's research tools, routes, prices' phase and subcall allowance
  // (CHAT-AUTO-CONTEXT C: or a free chat's general lookups, `research.freeChat`).
  research:frozenResearchTurn.optional(),
@@ -78,7 +82,8 @@ export const runtimeContext=z.object({
  const within=(set:readonly string[])=>researchTools.every(name=>set.includes(name));
  if(Boolean(context.research)!==researchTools.length>0||context.research&&(context.research.freeChat
   ?context.providerRequestFormat!=='serial-tools-v6-reasoning'||context.role!=='ordinary'||context.hostTurnContext||
-   context.network!=='deny'||!within(GENERAL_RESEARCH_TOOLS)||context.tools.some(name=>name!=='read_source'&&!researchTools.includes(name))
+   context.network!=='deny'||!within(GENERAL_RESEARCH_TOOLS)||
+   context.tools.some(name=>name!=='read_source'&&name!=='load_skill'&&!researchTools.includes(name))
   :!context.hostTurnContext||context.hostTurnContext.opening||context.hostTurnContext.stepSummary||!within(POSITIONING_RESEARCH_TOOLS)||
    context.providerRequestFormat!=='agent-turn-v5-stream'||!context.tools.includes(ASK_QUESTION_TOOL)||context.network!=='deny'||
    context.maxTurns!==2+(context.skillFile?1:0)||context.maxToolCalls!==2))
@@ -93,6 +98,12 @@ export const runtimeContext=z.object({
   (!context.skillFile||!context.opcTurnToken||!context.hostTurnContext||context.hostTurnContext.stepSummary||
    !context.tools.includes(ASK_QUESTION_TOOL)))
   ctx.addIssue({code:'custom',message:'RUNTIME_HISTORY_READ_CONTEXT_INVALID'});
+ // A Skill catalog belongs to an ordinary free-chat turn only, with its tool, load limit and size frozen together.
+ const catalog=context.skillCatalog!==undefined;
+ if(catalog!==context.tools.includes('load_skill')||catalog!==(context.maxSkillLoads!==undefined)||
+  catalog!==(context.skillCatalogMaxBytes!==undefined)||catalog&&(context.role!=='ordinary'||context.hostTurnContext||
+   context.reportGeneration||context.opcTurnToken))
+  ctx.addIssue({code:'custom',message:'RUNTIME_SKILL_CATALOG_CONTEXT_INVALID'});
  if(context.hostTurnContext?.stepSummary&&(context.input!==STEP_SUMMARY_INPUT||context.hostTurnContext.opening||
    context.tools.includes(ASK_QUESTION_TOOL)||context.attachedOrganizer))
   ctx.addIssue({code:'custom',message:'RUNTIME_STEP_SUMMARY_CONTEXT_INVALID'});

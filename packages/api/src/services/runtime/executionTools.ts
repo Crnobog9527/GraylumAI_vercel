@@ -2,6 +2,7 @@
 // The tools one execution offers its primary model, from its frozen context only, and the request bytes they take.
 import type {z} from 'zod';
 import {executionSkillFileTool} from './skillFileExecution';
+import {executionLoadSkillTool,LOAD_SKILL_TOOL} from './loadSkillTool';
 import {skillFileToolBytes} from './skillFile';
 import {executionMentorHistoryTool,mentorHistoryToolBytes} from './mentorHistory';
 import {sourceRuntimeTool} from './sourceRuntimeTool';
@@ -31,6 +32,8 @@ export function executionTools(input:{
   (name===ASK_QUESTION_TOOL?questionTool:
   name==='read_skill_file'?executionSkillFileTool({executionId,moduleId:context.moduleId!,binding:context.skillFile!,
    rpc:ownerRpc,assertCanStart:()=>budget.assertCanStart(),timing:budget.timing,onRefused:input.onRefused}):
+  name===LOAD_SKILL_TOOL?executionLoadSkillTool({executionId,catalog:context.skillCatalog!,maxResultBytes:context.skillCatalogMaxBytes!,
+   rpc:ownerRpc,assertCanStart:()=>budget.assertCanStart(),onRefused:input.onRefused}):
   name===READ_HISTORY_TOOL?executionMentorHistoryTool({executionId,rpc:ownerRpc,assertCanStart:()=>budget.assertCanStart(),
    onRefused:input.onRefused}):
   withSourceWorkProgress(sourceRuntimeTool({name,context,args:input.args,ownerRpc,budget,
