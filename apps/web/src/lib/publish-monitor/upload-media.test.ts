@@ -57,7 +57,7 @@ describe('media digest', () => {
     await expect(uploadPublishFiles([new File([], 'a.png', { type: 'image/png' })], requestSlots))
       .rejects.toMatchObject({ code: 'MEDIA_TOO_LARGE' });
     const huge = new File(['x'], 'v.mp4', { type: 'video/mp4' });
-    Object.defineProperty(huge, 'size', { value: 6 * 1024 ** 3 });
+    Object.defineProperty(huge, 'size', { value: 1024 ** 3 + 1 });
     await expect(uploadPublishFiles([huge], requestSlots)).rejects.toMatchObject({ code: 'MEDIA_TOO_LARGE' });
     expect(requestSlots).not.toHaveBeenCalled();
   });
