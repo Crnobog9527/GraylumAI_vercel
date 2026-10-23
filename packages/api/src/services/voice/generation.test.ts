@@ -75,8 +75,8 @@ describe('generateVoiceProfile', () => {
     mocks.text.mockReturnValue('好的');
     const db = admin();
     await generateVoiceProfile(deps(db), 'r', []);
-    expect(mocks.billing.closeRun).not.toHaveBeenCalled();
-    expect(mocks.billing.requestCancel).toHaveBeenCalled();
+    expect(mocks.billing.requestCancel).not.toHaveBeenCalled();
+    expect(mocks.billing.closeRun).toHaveBeenCalledWith('r1', 'confirmed_failure', expect.objectContaining({ kind: 'confirmed_failure' }));
     expect(finish(db)).toMatchObject({ result: null, failure_code: 'VOICE_FORMAT_INVALID' });
   });
   it('leaves an unrecorded receipt to the daily recovery', async () => {
