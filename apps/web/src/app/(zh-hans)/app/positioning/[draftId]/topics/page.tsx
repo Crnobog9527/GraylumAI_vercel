@@ -22,7 +22,7 @@ import { WorkComposer, useFreeConversation } from '@/components/opc/work-compose
 import { WorkspaceFrame } from '@/components/opc/workspace-frame';
 import composerStyles from '@/components/opc/work-composer.module.css';
 import topicStyles from './topic-candidates.module.css';
-import { ReadonlyDraftView, RouteDraftArchiveGate } from '../readonly-draft-view';
+import { ReadonlyDraftView, RouteDraftArchiveGate, retryUnlessMissing } from '../readonly-draft-view';
 import { trpc } from '@/trpc/client';
 import { planItem, opcPlan, opcHandoff, opcTopicTurn, opcTopicDraft, opcAdoptTopics } from '@repo/api/src/shared/opcRequests';
 import { consentedTopicIds } from './adoption-consent';
@@ -140,7 +140,7 @@ function TopicWorkspaceContent() {
   const persistedExecution = useRef('');
   const adoptedExecution = useRef('');
 
-  const read = trpc.opc.read.useQuery({ draftId }, { enabled: Boolean(draftId) });
+  const read = trpc.opc.read.useQuery({ draftId }, { enabled: Boolean(draftId), retry: retryUnlessMissing });
   // Read-only draft (conversation deleted): no topic workspace, conversation, polling or write starts.
   const workspace = trpc.opc.topicWorkspace.useQuery({ draftId },
     { enabled: Boolean(draftId && read.data && !read.data.conversationDeleted), refetchInterval: 30000 });

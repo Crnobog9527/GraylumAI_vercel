@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
-import { parseVoiceProfile, voiceInput, voiceProfile } from './profile';
+import { NO_PLATFORM_DIFFERENCE, parseVoiceProfile, VOICE_INSTRUCTIONS, voiceInput, voiceProfile } from './profile';
 
 const material = [{ documentId: 'd1', filename: '旧笔记.md', text: '哎下班到家都七点了，咋整。\n一口锅搞定呗。' }];
 const both = ['哎下班到家都七点了，咋整。', '一口锅搞定呗。'];
@@ -17,6 +17,12 @@ describe('parseVoiceProfile', () => {
     expect(parseVoiceProfile(answer({ samples: ['编出来的一句', ...both] }), material)?.samples).toEqual(both);
     expect(parseVoiceProfile(answer({ samples: ['编出来的一句', '一口锅搞定呗。'] }), material)).toBeNull();
     expect(parseVoiceProfile(answer({ samples: ['编出来的一句'] }), material)).toBeNull();
+  });
+  it('never leaves the platform differences empty: says the samples cannot show them (acceptance step 3)', () => {
+    expect(parseVoiceProfile(answer({ platforms: '' }), material)?.platforms).toBe(NO_PLATFORM_DIFFERENCE);
+    expect(parseVoiceProfile(answer({ platforms: undefined }), material)?.platforms).toBe(NO_PLATFORM_DIFFERENCE);
+    expect(parseVoiceProfile(answer({ platforms: '小红书更短' }), material)?.platforms).toBe('小红书更短');
+    expect(VOICE_INSTRUCTIONS).toContain(NO_PLATFORM_DIFFERENCE);
   });
   it('refuses anything that is not the object', () => {
     expect(parseVoiceProfile('好的，这是文风总结', material)).toBeNull();

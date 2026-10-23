@@ -3,6 +3,7 @@
 import type { ReactNode } from 'react';
 import { useParams } from 'next/navigation';
 import { trpc } from '@/trpc/client';
+import { retryUnlessMissing } from '@/lib/read-retry';
 import { PROFILE_ARCHIVE_TEXT } from '@/components/opc/profile-archive/profile-archive';
 import { useDraftArchiveState } from '@/components/opc/profile-archive/profile-archive-api';
 import { ReadonlyDraftView } from './readonly-draft-view';
@@ -13,11 +14,16 @@ import { ReadonlyDraftView } from './readonly-draft-view';
  * adoption, only mounts once the profile is confirmed active. A deleted conversation keeps its own read-only page.
  */
 export function DraftArchiveGate({ draftId, children }: { draftId: string; children: ReactNode }) {
-  const read = trpc.opc.read.useQuery({ draftId }, { enabled: Boolean(draftId) });
+  const read = trpc.opc.read.useQuery({ draftId }, { enabled: Boolean(draftId), retry: retryUnlessMissing });
   const deleted = (read.data as { conversationDeleted?: unknown } | undefined)?.conversationDeleted === true;
   const archive = useDraftArchiveState(draftId, Boolean(draftId) && read.isSuccess && !deleted);
-  // The page itself shows a missing id, a failed read and a deleted conversation.
-  if (!draftId || read.isError || deleted) return children;
+  // The page itself shows a missing id, a failed read and a deleted conversation. "Failed" is the last settled read:
+  // the page's own read of the same draft refetches the failed query on mount, which puts it back to pending without
+  // data. Showing "checking" then would unmount the page, whose next mount refetches again: an endless loop.
+  // Only a read that never returned the draft counts: with cached data, a failed refetch still goes through the
+  // archive check, so an archived draft never opens its editor.
+  const failed = read.data === undefined && (read.isError || (read.errorUpdatedAt ?? 0) > (read.dataUpdatedAt ?? 0));
+  if (!draftId || failed || deleted) return children;
   if (read.isPending || archive.state === 'pending') return <main className="p-6" role="status">{PROFILE_ARCHIVE_TEXT.checking}</main>;
   if (archive.state === 'error') return <main className="p-6"><p role="alert">{PROFILE_ARCHIVE_TEXT.loadFailed}{' '}
     <button type="button" className="underline" onClick={archive.retry}>重试</button></p></main>;

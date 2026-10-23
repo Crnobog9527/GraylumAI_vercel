@@ -59,8 +59,18 @@ async function call(database: Database, name: string, args: Record<string, unkno
 /** The actor always comes from the verified session, never from the input. */
 export function sessionResultsService(database: Database, actorId: string) {
   return {
-    list: async (input: z.infer<typeof sessionResultsList>) => z.array(sessionResult).parse(await call(database,
-      'runtime_session_results_list', { p_actor_id: actorId, p_session_id: sessionResultsList.parse(input).sessionId })),
+    // null: not an ordinary free conversation of this actor (a positioning or topic one, someone else's, a missing
+    // one; all read the same). The page then shows no folder and no save button, instead of a server error.
+    list: async (input: z.infer<typeof sessionResultsList>) => {
+      const sessionId = sessionResultsList.parse(input).sessionId;
+      try {
+        return z.array(sessionResult).parse(await call(database, 'runtime_session_results_list',
+          { p_actor_id: actorId, p_session_id: sessionId }));
+      } catch (cause) {
+        if (cause instanceof Error && cause.message === 'OPC_RESULT_NOT_FOUND') return null;
+        throw cause;
+      }
+    },
     save: async (input: z.input<typeof sessionResultSave>) => {
       const v = sessionResultSave.parse(input);
       return sessionResult.parse(await call(database, 'runtime_session_result_save', {

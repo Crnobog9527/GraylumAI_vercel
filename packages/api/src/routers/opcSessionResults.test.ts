@@ -52,7 +52,15 @@ it.each([
   await expect(f.caller.sessionResultSave({sessionId:id(1), executionId:id(2), requestId:id(4), resultType:'copy'}))
     .rejects.toThrow(code);
 });
-it.each([['list','sessionResults',{sessionId:id(1)}],['versions','sessionResultVersions',{familyId:id(3)}]] as const)(
+it('reads no folder (null) for a conversation that is not an ordinary free one, never a server error', async () => {
+  const f = fixture({error:{code:'42501', message:'SESSION_RESULT_NOT_FOUND'}});
+  await expect(f.caller.sessionResults({sessionId:id(1)})).resolves.toBeNull();
+  // Other refusals and failures are unchanged.
+  await expect(fixture({error:{code:'42501', message:'CONTENT_ERASED'}}).caller.sessionResults({sessionId:id(1)}))
+    .rejects.toThrow('OPC_CONVERSATION_ERASED');
+  await expect(fixture({error:{code:'XX000', message:'boom'}}).caller.sessionResults({sessionId:id(1)})).rejects.toThrow();
+});
+it.each([['versions','sessionResultVersions',{familyId:id(3)}]] as const)(
   'keeps the bounded not-found refusal on the read route (%s) instead of a generic server error', async (_name, route, input) => {
   const f = fixture({error:{code:'42501', message:'SESSION_RESULT_NOT_FOUND'}});
   await expect((f.caller[route] as (value: unknown) => Promise<unknown>)(input)).rejects.toThrow('OPC_RESULT_NOT_FOUND');
