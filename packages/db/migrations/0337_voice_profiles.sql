@@ -271,7 +271,8 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
  WHERE id=vid AND actor_id=a AND status IN ('confirmed','superseded');
 $$;
 
--- Daily backstop (billing-reconcile): generations left open by a closed page, and runs waiting for a scrub.
+-- Daily backstop (billing-reconcile): generations left open by a closed page, and runs waiting for a scrub. A scrub
+-- waits 30 minutes, so a generation still running when its source was deleted can finish its own settlement first.
 CREATE OR REPLACE FUNCTION public.voice_recovery_candidates(p_limit integer DEFAULT 50) RETURNS jsonb
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
  SELECT jsonb_build_object(
@@ -280,7 +281,8 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
     WHERE (status='generating' OR (billing_run_id IS NOT NULL AND NOT billing_settled))
      AND updated_at<clock_timestamp()-interval '30 minutes' ORDER BY updated_at LIMIT p_limit) g),
   'scrubs',(SELECT coalesce(jsonb_agg(jsonb_build_object('actorId',actor_id,'runId',run_id)),'[]')
-   FROM (SELECT * FROM voice_billing_scrubs ORDER BY created_at LIMIT p_limit) s));
+   FROM (SELECT * FROM voice_billing_scrubs WHERE created_at<clock_timestamp()-interval '30 minutes'
+    ORDER BY created_at LIMIT p_limit) s));
 $$;
 -- Projects a closed run's receipts to their financial fields (0262's rule), then forgets it. Waits while open.
 CREATE OR REPLACE FUNCTION public.voice_billing_scrub(p_run_id uuid) RETURNS text
