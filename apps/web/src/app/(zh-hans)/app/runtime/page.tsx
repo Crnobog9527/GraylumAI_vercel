@@ -427,7 +427,7 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
      {freeChat&&results.isSuccess&&e.state==='completed'&&e.contentAvailable&&(e.body??e.primaryBody)&&
       displayReply(e.input,e.body??e.primaryBody)===(e.body??e.primaryBody)&&
       <SaveReplyButton sessionId={sessionId} executionId={e.executionId} reply={(e.body??e.primaryBody)!}
-       saved={results.data.some(result=>result.sourceExecutionId===e.executionId)}/>}
+       savedItems={results.data.filter(result=>result.sourceExecutionId===e.executionId)}/>}
      <LiveReplyText text={liveReplyText(runner.reply,e.executionId,e)}/>
      <ChatNoticeList notices={compare.adoptedExecutions.has(e.executionId)?[]:[...turnNotices(e),...withResumeStop(payg.turnNotices(e,busy),
       runner.streaming&&runner.reply?.executionId===e.executionId,{onClick:()=>void stop(e.executionId),disabled:cancel.isPending})]}/>
