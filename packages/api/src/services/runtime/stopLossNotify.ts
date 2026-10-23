@@ -13,7 +13,7 @@ import { noticeLayout } from '../notify/templates';
  * stop itself: the database already refused the calls before anything is mailed.
  */
 export const STOP_LOSS_NOTICE_TIMEOUT_MS = 5_000;
-/** Resend keeps an idempotency key for 24 hours; older undelivered alerts stay visible in the admin only. */
+/** Resend keeps an idempotency key for 24 hours: an alert already attempted that long ago is not retried (it could duplicate). */
 export const STOP_LOSS_NOTICE_WINDOW_MS = 24 * 3600_000;
 export const STOP_LOSS_NOTICE_MAX_ATTEMPTS = 5;
 const BATCH = 50;
@@ -104,28 +104,31 @@ async function mark(db: Db, rows: Row[], notify: (row: Row) => Notify) {
   if (failed) logger.error('billing', 'runtime_stop_loss_notice_mark_failed', { rows: failed });
 }
 
-const isPending = (row: Row) => {
+const isPending = (row: Row, now: Date) => {
   const n = notifyOf(row);
-  return !n || (n.state === 'pending' && n.attempts < STOP_LOSS_NOTICE_MAX_ATTEMPTS);
+  if (!n) return true;
+  if (n.state !== 'pending' || n.attempts >= STOP_LOSS_NOTICE_MAX_ATTEMPTS) return false;
+  // Never sent (blocked by configuration) stays retryable at any age; an ambiguous earlier request only inside Resend's window.
+  return n.attempts === 0 || now.getTime() - Date.parse(row.created_at) < STOP_LOSS_NOTICE_WINDOW_MS;
 };
 
-/** Pages past delivered/given-up rows so a full window of terminal alerts cannot starve newer ones. */
-async function readPending(db: Db, since: string) {
+/** Pages past delivered/given-up rows (newest first) so terminal alerts cannot starve undelivered ones. */
+async function readPending(db: Db, now: Date) {
   const pending: Row[] = [];
   for (let page = 0; page < MAX_PAGES && pending.length < BATCH; page += 1) {
     const { data, error } = await db.from('diagnostic_results').select('id,test_id,details,created_at')
-      .eq('test_name', 'Runtime stop-loss').like('test_id', 'runtime_stop_loss_%').gte('created_at', since)
-      .order('created_at', { ascending: true }).range(page * PAGE, page * PAGE + PAGE - 1);
+      .eq('test_name', 'Runtime stop-loss').like('test_id', 'runtime_stop_loss_%')
+      .order('created_at', { ascending: false }).range(page * PAGE, page * PAGE + PAGE - 1);
     if (error) throw new Error('read');
     const rows = (data ?? []) as Row[];
-    pending.push(...rows.filter(isPending));
+    pending.push(...rows.filter(row => isPending(row, now)));
     if (rows.length < PAGE) break;
   }
   return pending.slice(0, BATCH);
 }
 
 /**
- * Mails every alert of the last 24 hours that has not been delivered, one mail per alert. The Resend
+ * Mails every alert that has not been delivered, one mail per alert. The Resend
  * idempotency key is the alert id plus a hash of the whole envelope, so a retry repeats the same request and a
  * delivered alert is never mailed again. At most MAX_MAILS_PER_RUN per run, inside a time budget.
  * Recipient: support_email in system
@@ -135,7 +138,7 @@ export async function deliverStopLossAlerts(db: Db, deps: StopLossNoticeDeps = {
   const now = deps.now ?? new Date();
   let pending: Row[] = [];
   try {
-    pending = await readPending(db, new Date(now.getTime() - STOP_LOSS_NOTICE_WINDOW_MS).toISOString());
+    pending = await readPending(db, now);
     if (pending.length === 0) return { outcome: 'none', alerts: 0 };
     const env = deps.env ?? process.env;
     const config = deps.config ?? await noticeConfig(db, env);

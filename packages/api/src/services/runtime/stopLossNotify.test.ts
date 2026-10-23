@@ -60,7 +60,6 @@ it('mails each undelivered alert once under its own key and marks only those sen
   expect(f.updates.map(u => u.id)).toEqual(['a', 'c']);
   expect(f.updates[1]!.details).toMatchObject({ dedupeKey: '2026-10-23:siteDailyUsd:c', notify: { state: 'sent', attempts: 3 } });
   expect(f.filters).toContainEqual(['eq', 'test_name', 'Runtime stop-loss']);
-  expect(f.filters).toContainEqual(['gte', 'created_at', '2026-10-22T12:00:00.000Z']);
 });
 
 it('a retry repeats the identical request (key and body) even when other alerts come and go', async () => {
@@ -96,6 +95,15 @@ it('sends at most a few mails per run; the rest wait for the next run', async ()
   expect(await deliverStopLossAlerts(f.db, { config, transport, env: {}, now })).toEqual({ outcome: 'sent', alerts: MAX_MAILS_PER_RUN });
   expect(transport).toHaveBeenCalledTimes(MAX_MAILS_PER_RUN);
   expect(f.updates).toHaveLength(MAX_MAILS_PER_RUN);
+});
+
+it('old alerts blocked by configuration are still sent; old ones already attempted are not retried', async () => {
+  const old = (id: string, notify?: unknown) => ({ ...site(id, notify), created_at: '2026-10-20T00:00:00Z' });
+  const f = fixture([old('never', { state: 'pending', attempts: 0, lastErrorCode: 'PAYMENT_NOTICE_NOT_CONFIGURED' }),
+    old('tried', { state: 'pending', attempts: 1, lastErrorCode: 'PAYMENT_NOTICE_PROVIDER_UNREACHABLE' })]);
+  const transport = vi.fn(async () => ({ kind: 'sent' as const, providerMessageId: 'msg_5' }));
+  expect(await deliverStopLossAlerts(f.db, { config, transport, env: {}, now })).toEqual({ outcome: 'sent', alerts: 1 });
+  expect(f.updates.map(u => u.id)).toEqual(['never']);
 });
 
 it('pages past delivered alerts so newer undelivered ones are not starved', async () => {

@@ -48,7 +48,7 @@ providerBalanceAlertUsd:null,notificationChannel:null}`。
 
 ## 告警外发（切片 C）
 
-`stopLossNotify.ts` 把最近 24 小时内还没送达的止损告警逐条发邮件给 Owner（每条一封，每次运行最多 3 封、8 秒内，其余下一次运行再发），复用 PAY-NOTIFY 的 Resend 通道：
+`stopLossNotify.ts` 把还没送达的止损告警逐条发邮件给 Owner（从未发出过的任何时候都会补发；已尝试过的超过 24 小时不再重试，避免超出 Resend 幂等窗口后重复）（每条一封，每次运行最多 3 封、8 秒内，其余下一次运行再发），复用 PAY-NOTIFY 的 Resend 通道：
 密钥用后台“第三方密钥”的 resend 槽，收件人是系统设置里的 `support_email`（与专家诊断预约提醒同一地址），
 非正式站只发给 `PAYMENT_NOTICE_TEST_RECIPIENTS` 里的地址，邮件主题带 `[staging]`。
 不新增表、队列或定时任务：发送状态写回同一条告警的 `details.notify`（sent / pending / failed、次数、错误码），
