@@ -3,6 +3,7 @@ import {describe,it,expect,vi} from 'vitest';
 import {openRouterBound} from './openRouterPolicy';
 import {openRouterAdapter} from './openRouterAdapter';
 import {historyToolNames} from '../runtime/providerRequest';
+import {openRouterStream,SOURCE_STREAM_TOOLS} from './openRouterStream';
 
 // CHAT-AUTO-CONTEXT C at the provider boundary: a free chat request may offer read_source and the general research
 // tools (each once) and replay their one-call history; the positioning flow tools and the Agent card tools stay out.
@@ -43,5 +44,22 @@ describe('free chat research tools at the provider boundary',()=>{
   expect(historyToolNames('serial-tools-v6-reasoning').has('social_search')).toBe(true);
   expect(historyToolNames('serial-tools-v2').has('social_search')).toBe(false);
   expect(historyToolNames('agent-turn-v5-stream').has('social_account')).toBe(false);
+ });
+});
+
+describe('free chat research tool calls in a streamed response',()=>{
+ const frame=(delta:unknown,finish:string|null=null)=>'data: '+JSON.stringify({id:'gen-1',model:'test/model',choices:[{index:0,delta,finish_reason:finish}]})+'\n\n';
+ const usage='data: '+JSON.stringify({id:'gen-1',model:'test/model',choices:[],usage:{prompt_tokens:1,completion_tokens:1,total_tokens:2}})+'\n\ndata: [DONE]\n\n';
+ it.each(['social_search','web_fetch'])('parses a %s call of a free chat response',name=>{
+  const stream=openRouterStream('test/model',undefined,undefined,SOURCE_STREAM_TOOLS);
+  stream.push(frame({tool_calls:[{index:0,id:'call_a',type:'function',function:{name,arguments:'{}'}}]})+frame({},'tool_calls')+usage);
+  const result=stream.result();
+  expect(result.error).toBeUndefined();
+  expect(result.sdkResponse?.choices[0]?.message.tool_calls?.map(c=>c.function.name)).toEqual([name]);
+ });
+ it('still refuses a positioning flow tool in a free chat response',()=>{
+  const stream=openRouterStream('test/model',undefined,undefined,SOURCE_STREAM_TOOLS);
+  stream.push(frame({tool_calls:[{index:0,id:'call_a',type:'function',function:{name:'benchmark_fetch',arguments:'{}'}}]})+frame({},'tool_calls')+usage);
+  expect(stream.error??stream.result().error).toBeDefined();
  });
 });

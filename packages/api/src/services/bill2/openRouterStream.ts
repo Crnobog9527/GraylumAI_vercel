@@ -2,6 +2,7 @@
 import {parseExactJson} from './decimal';
 import {ASK_QUESTION_TOOL,ASK_QUESTION_ARGUMENT_LIMIT,DEFAULT_TOOL_ARGUMENT_LIMIT,toolArgumentLimit} from '../../shared/agentTurn';
 import {OPENROUTER_RESPONSE_BYTE_LIMIT,PURPOSE_OUTPUT_CAP} from './responseCapacity';
+import {FREE_CHAT_TOOL_NAMES} from '../runtime/agentTools';
 
 // Preserve the existing 512 wire-byte allowance per output unit (SSE envelopes included).
 export const OPENROUTER_STREAM_BYTE_LIMIT=512*PURPOSE_OUTPUT_CAP;
@@ -13,7 +14,8 @@ const finishes=new Set(['stop','length','content_filter','tool_calls']);
 /** Stream parsing for a request that offers only the owned-source read (`read_source`): a model may answer with several
  * parallel calls (indexes 0..7). They are kept as paid response evidence and the Runtime executes only the first, as for an
  * Agent turn. Without this a second call would make the whole response an invalid, never settled stream. */
-export const SOURCE_STREAM_TOOLS=Object.freeze({toolNames:new Set(['read_source']) as ReadonlySet<string>,maxCalls:8});
+// CHAT-AUTO-CONTEXT C: a free chat response may also call the general research tools its request offered.
+export const SOURCE_STREAM_TOOLS=Object.freeze({toolNames:FREE_CHAT_TOOL_NAMES,maxCalls:8});
 /** Bounded official Chat Completions SSE. Raw frames stay server-side; the SDK
  * receives validated data frames and the browser receives only SDK text deltas.
  * https://openrouter.ai/docs/api/reference/streaming
