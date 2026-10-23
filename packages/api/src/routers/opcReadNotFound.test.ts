@@ -10,7 +10,9 @@ function fixture(result: {data?: unknown; error?: {code: string; message: string
     status:'active', is_deleted:'false', membership_level:'free'};
   const user = {id:profile.id, email:profile.email, email_confirmed_at:'2026-01-01'};
   const answer = {data:result.data ?? null, error:result.error ?? null};
-  const rpc = vi.fn(() => Object.assign(Promise.resolve(answer), {abortSignal:() => Promise.resolve(answer)}));
+  type Answer = {data: unknown; error: {code: string; message: string} | null};
+  const rpc = vi.fn((_name?: string, _args?: Record<string, unknown>) =>
+    Object.assign(Promise.resolve<Answer>(answer), {abortSignal:() => Promise.resolve<Answer>(answer)}));
   const db = {rpc, auth:{getUser:async () => ({data:{user},error:null})},
     from:() => ({select() {return this;}, eq() {return this;}, single:async () => ({data:profile,error:null})})};
   const ctx = {headers:new Headers(), user, isEmailVerified:true, hasSupabaseAdminPrivileges:true,
