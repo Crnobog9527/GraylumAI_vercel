@@ -38,6 +38,9 @@ export function candidateShortage(available: number) {
 export const ROUND_UNFINISHED_NEXT_STEP = '这一轮搜索还没搜完，不算一轮。告诉用户回复"继续"即可接着搜完这一轮；'
   + '已经取过的数据不会重复取、不重复收费。不要说已经搜完，也不要建议换关键词。';
 
+/** Authors whose profiles one scan batch reads; the first batch is read whole so the card can show up to 12. */
+const AUTHOR_BATCH = 15;
+
 /** The operation is the durable cursor. A crash after dispatch never causes another supplier request. */
 async function step(ctx: ResearchToolContext, d: DiscoveryRecord, budget: ToolAllowance,
   index: number, request: SupplierRequest): Promise<StepResult> {
@@ -124,7 +127,7 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
   const posts = new Map<SocialPlatform, EvidenceItem[]>();
   const found: FoundAccount[] = [];
   let authorCursor = 0;
-  let authorLimit = z.number().int().positive().safeParse(d.cursor.authorLimit).data ?? 15;
+  let authorLimit = z.number().int().positive().safeParse(d.cursor.authorLimit).data ?? AUTHOR_BATCH;
   for (const platform of d.platforms) {
     const entries: EvidenceItem[] = [];
     posts.set(platform, entries);
@@ -150,7 +153,9 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
     // Too few candidates in this batch: widen the scan within this call's own allowance (a stop at the allowance saves the
     // wider limit; the next reply re-reads paid operations and continues), so a reply never ends a round early by itself.
     while (!stopped) {
-      for (const author of authors.slice(scanned, authorLimit)) {
+      for (const [offset, author] of authors.slice(scanned, authorLimit).entries()) {
+        // Past the first batch, the eighth selectable account ends the scan: no further profile is paid for.
+        if (scanned + offset >= AUTHOR_BATCH && selectCandidates(found, true).enough) break;
         const account = canonicalAccount(author.platform, author.authorId);
         if (!account) continue;
         const request = socialRequest(ctx, author.platform, 'account_profile', { account });
@@ -174,7 +179,7 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
       }
       scanned = authorLimit;
       if (stopped || selectCandidates(found, true).enough || authorLimit >= authors.length) break;
-      authorLimit = Math.min(authorLimit + 15, authors.length);
+      authorLimit = Math.min(authorLimit + AUTHOR_BATCH, authors.length);
     }
   }
   // Reconstruct from stable operations each time; the saved candidates support free follow-up cards.

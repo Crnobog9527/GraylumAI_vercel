@@ -811,6 +811,37 @@ describe('discovery continues beyond an insufficient first author batch', () => 
   });
 });
 
+describe('discovery stops paying for profiles once the eighth candidate qualifies', () => {
+  it('ends a widened batch at the eighth selectable account, also when the call is resumed', async () => {
+    const f = fixture(25);
+    f.setAuthors(25);
+    const original = subcall.getMockImplementation()!;
+    subcall.mockImplementation(async (context, request) => {
+      const outcome = await original(context, request);
+      if (outcome.sent && request.vendor === 'tikhub' && request.call.kind === 'account_profile') {
+        // Lexical order: the first 15 authors hold three candidates (author2, author20, author21); author22..author4 add five.
+        const qualified = ['author2', 'author20', 'author21', 'author22', 'author23', 'author24', 'author3', 'author4', 'author5']
+          .includes(request.call.account ?? '');
+        outcome.result.items = [item({ followers: qualified ? 50000 : 100 })];
+        f.operations.set(context.newId(), { state: 'succeeded', identityHash: requestIdentity(request),
+          result: { ...outcome.result } });
+      }
+      return outcome;
+    });
+    expect(await f.execute('benchmark_discover', discoveryArgs)).toMatchObject({ status: 'ok', continue: false });
+    // 3 searches + 15 first-batch profiles + author22..author4 (5 more) = 23 of 25; author5 is never requested.
+    expect(subcall).toHaveBeenCalledTimes(23);
+    const accounts = subcall.mock.calls.flatMap(([, request]) => request.vendor === 'tikhub'
+      && request.call.kind === 'account_profile' ? [request.call.account] : []);
+    expect(accounts).not.toContain('author5');
+    expect(f.store.createCard.mock.calls[0]?.[1].options.filter(option => option.selectable)).toHaveLength(8);
+    // A recovery reads the same 20 saved profiles and stops at the same place without a new request.
+    f.ctx.executionId = refreshId;
+    expect(await f.makeExecute()('benchmark_discover', { discoveryId })).toMatchObject({ status: 'ok' });
+    expect(subcall).toHaveBeenCalledTimes(23);
+  });
+});
+
 describe('candidate card total option ceiling', () => {
   it('fits twelve qualified accounts plus head references into twelve total options', async () => {
     const f = fixture(20);
