@@ -41,7 +41,7 @@ describe('load_skill', () => {
     expect(result).toMatchObject({name: 'script-writer', moduleId: id(1), revisionId: id(21)});
     expect(result.instructions).toContain('先问清主题');
     const complete = call.mock.calls.find(([name, args]) => name === 'runtime_tool' && args.p_action === 'complete')!;
-    expect(complete[1]).toMatchObject({p_execution_id: id(9), p_call_id: 'call-1', p_name: 'load_skill', p_arguments: {name: 'script-writer'}});
+    expect(complete[1]).toMatchObject({p_execution_id: id(9), p_call_id: 'call-1', p_name: 'load_skill', p_arguments: {query: 'script-writer'}});
   });
 
   it('returns the journaled result on replay without reading the package again', async () => {
