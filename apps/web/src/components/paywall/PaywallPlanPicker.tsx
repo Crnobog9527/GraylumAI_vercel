@@ -4,6 +4,7 @@
 import type { ReactNode } from 'react';
 import { Check, Minus } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { trpc } from '@/trpc/client';
 import {
   PLAN_EARLY_ACCESS, PLAN_FIT, PLAN_SUPPORT, formatUsd, monthlyCredits, packDiscountLabel, paywallQuote, yearlyBadge,
   type PaywallBilling, type PaywallLevel, type PaywallPlan, type PaywallQuoteOptions,
@@ -87,13 +88,21 @@ export function PaywallPlanPicker({ plans, billing, selected, disabled, quoteOpt
   );
 }
 
-/** Pro/Gold comparison; only rows the backend or an Owner decision backs (no unlaunched features). */
+/**
+ * Pro/Gold comparison; only rows the backend or an Owner decision backs (no unlaunched features). The publishing-and-
+ * data rows (paywall v25 "发布与数据") follow the admin switches; one-click publishing has its own, off until it ships.
+ */
 export function PaywallCompareTable({ plans }: { plans: PaywallPlan[] }) {
+  const features = trpc.publishMonitor.features.useQuery(undefined, { retry: false, staleTime: 300_000 }).data;
   if (plans.length < 2) return null;
   const yes = <Check className="inline h-4 w-4" aria-label="有" style={{ color: 'var(--success)' }} />;
   const no = <Minus className="inline h-4 w-4" aria-label="没有" style={{ color: 'var(--text-disabled)' }} />;
   const rows: Array<[string, (plan: PaywallPlan) => ReactNode]> = [
     ['每月积分', plan => monthlyCredits(plan).toLocaleString('en-US')],
+    ...(features?.publish ? [['一键发布到海外平台（TikTok、Instagram、YouTube 等）', () => yes] as [string, () => ReactNode]] : []),
+    ...(features?.ownData ? [['查看海外平台自有账号近 30 天作品数据', () => yes] as [string, () => ReactNode]] : []),
+    ...(features?.weeklyReview ? [['对标账号监控、90 天趋势、每周自动复盘',
+      (plan: PaywallPlan) => (plan.level === 'gold' ? yes : no)] as [string, (plan: PaywallPlan) => ReactNode]] : []),
     ['积分包', plan => packDiscountLabel(plan.discount)],
     ['客服回复', plan => PLAN_SUPPORT[plan.level]],
     ['优先体验内测新功能', plan => (PLAN_EARLY_ACCESS[plan.level] ? yes : no)],

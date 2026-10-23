@@ -12,7 +12,7 @@ import { readProviderPrices, resolveProviderPrice } from '../billingProviderPric
 import { decimal } from '../bill2/decimal';
 import { toolCallPolicy, type ToolCallPolicy } from '../bill2/toolBilling';
 import { BENCHMARK_ROUTE_KINDS, readResearchToolsConfig, RUN_MAX_CALLS, type ResearchToolsConfig } from '../research/vendors/config';
-import { POSITIONING_RESEARCH_TOOLS, type ResearchToolName } from '../research/tools/schemas';
+import { GENERAL_RESEARCH_TOOLS, POSITIONING_RESEARCH_TOOLS, type ResearchToolName } from '../research/tools/schemas';
 import { RESEARCH_VENDORS, type SocialPlatform } from '../research/vendors/types';
 import type { FrozenPaygRun } from '../bill2/service';
 import { freezePaygMessageBudget } from './paygMessageBudget';
@@ -21,14 +21,14 @@ import type { StagingPolicy } from './stagingPolicy';
 import type { SettingsRead } from './newWorkGate';
 import type { HostTurnContext } from './hostTurn';
 import { researchHost } from './researchHostContext';
-import { frozenResearchTurn, LOCAL_RESEARCH_ACCOUNT, PRODUCTION_RESEARCH_ACCOUNT, RESEARCH_PHASE, RESEARCH_RESULT_RESERVE_BYTES,
-  RESEARCH_TURN_VERSION,
+import { FREE_CHAT_RESEARCH, frozenResearchTurn, LOCAL_RESEARCH_ACCOUNT, PRODUCTION_RESEARCH_ACCOUNT, RESEARCH_PHASE,
+  RESEARCH_RESULT_RESERVE_BYTES, RESEARCH_TURN_VERSION,
   type FrozenResearchTurn } from './researchTurn';
 
 /** Serialized tool definitions as the SDK sends them; the full request is checked again before dispatch. */
-export function researchToolBytes(names: readonly ResearchToolName[], fastOnly = false): number {
+export function researchToolBytes(names: readonly ResearchToolName[], fastOnly = false, freeChat = false): number {
   return Buffer.byteLength(JSON.stringify(names.map(name => ({ type: 'function', function: { name,
-    description: researchToolDescription(name), strict: true,
+    description: researchToolDescription(name, freeChat), strict: true,
     parameters: z.toJSONSchema(researchToolParameters(name, fastOnly)) } }))));
 }
 
@@ -53,6 +53,10 @@ export interface ResearchAdmissionInput {
   onRejected?: ResearchRejectionObserver;
   requiredTools?: readonly ResearchToolName[];
   capacity?: (toolBytes: number) => ResearchCapacity;
+  /** CHAT-AUTO-CONTEXT C: offer the general lookups of a free chat instead of the positioning benchmark flow. */
+  general?: boolean;
+  /** Model calls that read research results (one for a mentor turn's single slot). */
+  extraModelCalls?: number;
 }
 
 export interface ResearchAdmission { research: FrozenResearchTurn; tools: ResearchToolName[]; policies: ToolCallPolicy[] }
@@ -81,7 +85,7 @@ export async function admitResearchTurn(input: ResearchAdmissionInput): Promise<
   };
   if (!config.enabled) return reject(state.source === 'invalid' ? 'CONFIG_UNAVAILABLE'
     : state.source === 'default' ? 'CONFIG_MISSING' : 'CONFIG_DISABLED');
-  const subcalls = Math.min(config.limits.maxSubcallsPerRound, RUN_MAX_CALLS - input.modelCalls - 1);
+  const subcalls = Math.min(config.limits.maxSubcallsPerRound, RUN_MAX_CALLS - input.modelCalls - (input.extraModelCalls ?? 1));
   const room = input.maxTools - input.offeredTools;
   if (subcalls < 1) return reject('CALL_LIMIT', {subcalls});
   if (room < 1) return reject('TOOL_LIMIT');
@@ -121,6 +125,7 @@ export async function admitResearchTurn(input: ResearchAdmissionInput): Promise<
   const fetchable = config.benchmarkPlatforms.filter(platform =>
     BENCHMARK_ROUTE_KINDS[platform]?.verified && BENCHMARK_ROUTE_KINDS[platform]!.kinds.every(kind => has(platform, kind)));
   const discoverable = fetchable.filter(platform => has(platform, 'keyword_posts'));
+  if (input.general) return admitGeneral(input, state.revision, config, priced, subcalls, reject);
   const offered = new Set<ResearchToolName>([
     ...(discoverable.length ? ['propose_keywords', 'benchmark_discover', 'propose_more_candidates'] as const : []),
     ...(fetchable.length ? ['benchmark_fetch'] as const : []),
@@ -152,6 +157,43 @@ export async function admitResearchTurn(input: ResearchAdmissionInput): Promise<
     verifiedPlatforms: config.verifiedPlatforms.filter(platform => used.some(({ entry }) => entry.platform === platform)),
     benchmarkPlatforms: fetchable, routes: used.map(({ entry }) => entry),
     discoverSubcalls: Math.min(config.limits.discoverSubcalls, subcalls), recentGrowth: config.recentGrowth,
+  });
+  return { research, tools, policies: used.map(({ policy }) => policy) };
+}
+
+type Priced = Map<string, { entry: ResearchToolsConfig['routes'][number]; policy: ToolCallPolicy }>;
+/**
+ * CHAT-AUTO-CONTEXT C (plan §2.3.1): a free chat gets the general lookups whose routes are priced: social_search where a
+ * verified platform has keyword_posts, social_account where it has its whole account route set, and the web tools.
+ * Nothing here writes a benchmark table, so no benchmark platform is frozen.
+ */
+function admitGeneral(input: ResearchAdmissionInput, revision: number, config: ResearchToolsConfig, priced: Priced,
+  subcalls: number, reject: (reason: ResearchAdmissionRejection['reason'], details?: Partial<ResearchAdmissionRejection>) => null,
+): ResearchAdmission | null {
+  const has = (platform: SocialPlatform | 'web', kind: string) => priced.has(`${platform}:${kind}`);
+  const social = config.verifiedPlatforms;
+  const searchable = social.filter(platform => has(platform, 'keyword_posts'));
+  const accountable = social.filter(platform => BENCHMARK_ROUTE_KINDS[platform]?.kinds.every(kind => has(platform, kind)));
+  const offered = new Set<ResearchToolName>([
+    ...(searchable.length ? ['social_search'] as const : []), ...(accountable.length ? ['social_account'] as const : []),
+    ...(has('web', 'web_search') ? ['web_search'] as const : []), ...(has('web', 'web_fetch') ? ['web_fetch'] as const : []),
+  ]);
+  const tools = GENERAL_RESEARCH_TOOLS.filter(name => offered.has(name));
+  if (!tools.length) return reject('NO_ELIGIBLE_TOOLS', {pricedRoutes: priced.size, eligibleTools: 0});
+  if (tools.length > input.maxTools - input.offeredTools) return reject('TOOL_LIMIT', {eligibleTools: tools.length});
+  const fastOnly = fastSearchOnly({ routes: [...priced.values()].map(({ entry }) => entry) });
+  const toolBytes = researchToolBytes(tools, fastOnly, true);
+  if (!input.fits(toolBytes + RESEARCH_RESULT_RESERVE_BYTES)) return reject('CONTEXT_CAPACITY', {capacity: input.capacity?.(toolBytes)});
+  const used = [...priced.values()].filter(({ entry }) => entry.platform === 'web'
+    ? offered.has(entry.kind === 'web_fetch' ? 'web_fetch' : 'web_search')
+    : entry.kind === 'keyword_posts' ? searchable.includes(entry.platform)
+      : accountable.includes(entry.platform) && BENCHMARK_ROUTE_KINDS[entry.platform]!.kinds.includes(entry.kind as never));
+  const research = frozenResearchTurn.parse({
+    version: RESEARCH_TURN_VERSION, configRevision: revision, phase: RESEARCH_PHASE, subcalls, reserve: RESEARCH_RESULT_RESERVE_BYTES,
+    vendors: RESEARCH_VENDORS.filter(name => used.some(({ entry }) => entry.vendor === name)),
+    verifiedPlatforms: social.filter(platform => used.some(({ entry }) => entry.platform === platform)),
+    benchmarkPlatforms: [], routes: used.map(({ entry }) => entry), discoverSubcalls: 1, freeChat: FREE_CHAT_RESEARCH,
+    recentGrowth: config.recentGrowth,
   });
   return { research, tools, policies: used.map(({ policy }) => policy) };
 }

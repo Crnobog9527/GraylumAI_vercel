@@ -14,6 +14,9 @@ export const RESEARCH_RESULT_RESERVE_BYTES = 24576;
 export const LOCAL_RESEARCH_ACCOUNT = 'research-local';
 /** RUNTIME-PROD: production has no window; its routes are approved by the research and price settings (SQL 0292). */
 export const PRODUCTION_RESEARCH_ACCOUNT = 'research-production';
+/** CHAT-AUTO-CONTEXT C (Owner 2026-10-17, question 1 A): a free chat reply may make up to this many research calls. */
+export const FREE_CHAT_RESEARCH_CALLS = 3;
+export const FREE_CHAT_RESEARCH = 'free-chat-v1';
 
 const route = z.object({
   platform: z.enum([...SOCIAL_PLATFORMS, 'web']),
@@ -35,6 +38,8 @@ export const frozenResearchTurn = z.object({
   benchmarkPlatforms: z.array(z.enum(SOCIAL_PLATFORMS)).max(SOCIAL_PLATFORMS.length),
   routes: z.array(route).min(1).max(64),
   discoverSubcalls: z.number().int().min(1).max(RUN_MAX_CALLS - 1),
+  /** CHAT-AUTO-CONTEXT C: the general research tools of a free chat (absent: a positioning mentor turn). */
+  freeChat: z.literal(FREE_CHAT_RESEARCH).optional(),
   recentGrowth: z.object({
     maxFirstPostAgeDays: z.number().int().min(1).max(365),
     minViewsToFollowers: z.string().regex(/^(0|[1-9]\d{0,3})(\.\d{1,4})?$/),

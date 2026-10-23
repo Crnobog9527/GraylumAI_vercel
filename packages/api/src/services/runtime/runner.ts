@@ -52,6 +52,8 @@ export type RuntimeRunnerInput = {
   /** CHAT-AUTO-CONTEXT: a free chat that may search the library. It runs one tool call per response (like firstToolCallOnly)
    * and, once `maxToolCalls` calls ran, offers no tool to the next request so that request can only answer. */
   libraryRetrieval?: boolean;
+  /** CHAT-AUTO-CONTEXT C: a free chat reply that froze research tools ends the same way (no tool on the request after the last). */
+  research?: {freeChat?: string};
   maxToolCalls?: number;
   /** Frozen at admission for new executions that offer the owned-source read: execute only the first parallel call. */
   sourceCalls?: string;
@@ -181,7 +183,7 @@ export async function runRuntime(input: RuntimeRunnerInput) {
   const model=new OpenAIChatCompletionsModel(client,input.model,{strictFeatureValidation:true});
   let toolCalls=0;
   const tools=input.tools.map(t=>tool({name:t.name,description:t.description,
-    isEnabled:()=>!input.libraryRetrieval||input.maxToolCalls===undefined||toolCalls<input.maxToolCalls,
+    isEnabled:()=>!(input.libraryRetrieval||input.research?.freeChat)||input.maxToolCalls===undefined||toolCalls<input.maxToolCalls,
     parameters:t.parameters??defaultToolParameters,errorFunction:t.invalidResult===undefined?null:()=>t.invalidResult!,
     execute:async(args,_context,details)=>{
       const callId=details?.toolCall?.callId;
