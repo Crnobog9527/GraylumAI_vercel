@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { previewSubscriptionRefund } from './subscriptionRefundPreview';
+import { previewSubscriptionRefund, readSubscriptionRefundFacts } from './subscriptionRefundPreview';
 import { actorId, subjectId, request, paidAt, fixture, type Row } from './__tests__/subscriptionRefundPreviewFixture';
 
 beforeEach(() => vi.useFakeTimers({ now: new Date('2026-10-10T00:00:00Z') }));
@@ -216,6 +216,21 @@ describe('subscription refund read-only preview', () => {
     it('takes the invoice back into the history once the buyer pays it', async () => {
       await unresolved(withDead({ status: 'paid', amount_paid: 6900,
         status_transitions: { paid_at: Date.parse('2026-10-09T00:00:00Z') / 1000 } }));
+    });
+  });
+  describe('refunded orders say why they cannot be quoted', () => {
+    it.each([
+      ['an external full refund', { status: 'refunded', payment_status: 'refunded' }, 'PAY_REFUND_ALREADY_REFUNDED'],
+      ['our refund that succeeded', { refund_approval: { status: 'succeeded' } }, 'PAY_REFUND_ALREADY_REFUNDED'],
+      ['a partial refund', { status: 'partially_refunded' }, 'PAY_REFUND_PARTIALLY_REFUNDED'],
+    ])('%s', async (_name, patch, code) => {
+      const f = fixture(); Object.assign(f.order, patch);
+      await expect(readSubscriptionRefundFacts(f.db, f.provider, actorId, request)).rejects.toThrow(code);
+      expect(f.write).not.toHaveBeenCalled();
+    });
+    it('keeps the generic refusal for an order that is unavailable for other reasons', async () => {
+      const f = fixture(); f.order.payment_status = 'unpaid';
+      await expect(readSubscriptionRefundFacts(f.db, f.provider, actorId, request)).rejects.toThrow('PAY_REFUND_ORDER_UNAVAILABLE');
     });
   });
 });

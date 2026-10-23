@@ -55,6 +55,10 @@ function mapped(evidence: SubscriptionRefundEvidence, order: PreviewOrder, kind:
 function verifyOrder(order: PreviewOrder) {
   requireEvidence(order.item_type === 'membership_plan' && order.payment_channel === 'stripe'
     && (order.payment_mode === 'test' || order.payment_mode === 'live') && order.merchant_namespace, 'PAY_REFUND_TEST_SUBSCRIPTION_ONLY');
+  // Say why a refunded order cannot be quoted instead of reporting it as unreadable.
+  requireEvidence(order.status !== 'refunded' && order.payment_status !== 'refunded' && order.refund_status !== 'succeeded',
+    'PAY_REFUND_ALREADY_REFUNDED');
+  requireEvidence(order.status !== 'partially_refunded', 'PAY_REFUND_PARTIALLY_REFUNDED');
   const snapshot = freezePurchaseSnapshot(order.purchase_snapshot);
   requireEvidence(snapshot.item_type === 'membership_plan' && snapshot.item_id === order.item_id
     && snapshot.billing_cycle === order.billing_cycle && snapshot.currency === order.currency
