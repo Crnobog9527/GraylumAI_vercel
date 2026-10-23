@@ -4,12 +4,12 @@ import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
 import {readFileSync,readdirSync} from 'node:fs';
-import {supersededPatch} from './md5-chain.mjs';
 import {supersededScopePatch} from './wrapped-patch.mjs';
 import {createRequire} from 'node:module';
 import {resolve} from 'node:path';
 import {POSTGRES_IMAGE} from '../v3/images.mjs';
 import {buildFromFiles,installPgCronStub} from '../baseline/build-from-files.mjs';
+import {replayTail} from './tail-replay.mjs';
 import {runCases} from './cases.mjs';
 import {runVideo} from './video.mjs';
 import {runProducers} from './producers.mjs';
@@ -64,30 +64,14 @@ try {
  assert.equal(report.build.failed,null);
  const finalCatalog=snapshot();
  // Later migrations patch 0201 functions in place, so 0201 is replayed together with every
- // migration after it, in order; the whole tail must be repeatable and land on the same catalog.
+ // migration after it, in order (tail-replay.mjs); the tail must land on the same catalog.
  // 0201's patch of bill2_scope_allowed is left out when a later migration wrapped that function (wrapped-patch.mjs).
- const tail=readdirSync(resolve(root,'packages/db/migrations')).filter(f=>/^\d{4}_.*\.sql$/.test(f)&&f>'0201_').sort()
-  .map(name=>({name,sql:read('packages/db/migrations/'+name)}));
- const scopeSkip=await supersededScopePatch(migration,tail,async fn=>ok(sql(
+ const listing=readdirSync(resolve(root,'packages/db/migrations')).filter(f=>/^\d{4}_.*\.sql$/.test(f)&&f>='0201_').sort();
+ const scopeSkip=await supersededScopePatch(migration,listing.map(name=>({name,sql:read('packages/db/migrations/'+name)})),async fn=>ok(sql(
   `SELECT coalesce(pg_get_functiondef(to_regprocedure('public.${fn}(uuid,jsonb)')),'');`)));
  if(scopeSkip.skip)console.log('skip superseded patch '+scopeSkip.reason);
  if(scopeSkip.skip)(report.skipped??=[]).push(scopeSkip.reason);
- ok(sql(scopeSkip.skip?scopeSkip.rest:migration));
- // The md5 block of a patch superseded by a later md5 patch of the same function is left out only when the files prove
- // the chain and the database is at its tail; the rest of that migration still runs (md5-chain.mjs). Every skip is printed.
- const currentMd5=signature=>ok(sql(`SELECT md5(pg_get_functiondef('public.${signature}'::regprocedure));`));
- const hasMarker=(signature,marker)=>{assert.ok(!marker.includes('$md5_chain_marker$'));
-  return ok(sql(`SELECT position($md5_chain_marker$${marker}$md5_chain_marker$ IN pg_get_functiondef('public.${signature}'::regprocedure))>0;`))==='t';};
- report.skipped??=[];
- for(let i=0;i<tail.length;i++){
-  const superseded=await supersededPatch(tail,i,currentMd5,hasMarker);
-  if(superseded.skip)console.log('skip superseded md5 patch '+superseded.reason);
-  if(superseded.skip)report.skipped.push(superseded.reason);
-  // The tail starts with 0201 itself (its name sorts after '0201_'): its scope patch is left out here too.
-  const replay=tail[i].name===migrationPath.split('/').at(-1)&&scopeSkip.skip?scopeSkip.rest:tail[i].sql;
-  ok(sql(superseded.skip?superseded.rest:replay));
- }
- assert.deepEqual(snapshot(),finalCatalog,'repeat 0201 and every later migration preserves the complete final catalog');
+ await replayTail({root,read,sql,ok,snapshot,finalCatalog,report,migrationPath,first:scopeSkip.skip?scopeSkip.rest:migration});
  report.checks.push('0201 reapplication followed by all later migrations (superseded md5 patches proven and skipped) preserves full catalog');
  const require=createRequire(resolve(root,'packages/api/package.json'));
  const {Client}=require('pg');

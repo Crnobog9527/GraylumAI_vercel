@@ -8,6 +8,7 @@ import {createRequire} from 'node:module';
 import {resolve} from 'node:path';
 import {POSTGRES_IMAGE} from '../v3/images.mjs';
 import {buildFromFiles,installPgCronStub} from '../baseline/build-from-files.mjs';
+import {replayTail} from '../content-erasure/tail-replay.mjs';
 import {runCases as runDeletionRegression} from '../content-erasure/cases.mjs';
 import {runArtifacts} from '../content-erasure/artifacts.mjs';
 import {runCaptureV3} from '../content-erasure/capture-v3.mjs';
@@ -66,8 +67,8 @@ try {
   fingerprint:development?undefined:snapshot});
  assert.equal(report.build.failed,null);
  const finalCatalog=snapshot();
- ok(sql(migration));
- assert.deepEqual(snapshot(),finalCatalog,'repeat 0209 preserves the complete final catalog');
+ // 0209 rewrites functions that later migrations patched (0249, 0324, ...): replay it with every later migration.
+ await replayTail({root,read,sql,ok,snapshot,finalCatalog,report,migrationPath,first:migration});
  report.checks.push('0209 reapplication with all later migrations preserves full catalog');
  const require=createRequire(resolve(root,'packages/api/package.json'));
  const {Client}=require('pg');

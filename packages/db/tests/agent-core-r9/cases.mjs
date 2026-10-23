@@ -44,10 +44,13 @@ export async function runCases(db,report){
  await testTopics(db,report);
  await testTopics(db,report,true);
  // Relevant record families now all have creation time columns; legacy unknowns are not fabricated.
+ // Named sidecars added after R9 are one row per conversation and carry no creation time of their own: the conversation's
+ // runtime_sessions row has it, and the sidecar only holds the latest rename time (0232 runtime_session_names.updated_at).
+ const sidecars=['runtime_session_names'];
  const missing=(await db.query(`SELECT table_name FROM information_schema.tables t WHERE table_schema='public'
   AND (table_name LIKE 'opc_%' OR table_name LIKE 'artifact_%' OR table_name LIKE 'runtime_%')
-  AND table_type='BASE TABLE' AND NOT EXISTS(SELECT 1 FROM information_schema.columns c
-   WHERE c.table_schema=t.table_schema AND c.table_name=t.table_name AND c.column_name='created_at')`)).rows;
+  AND table_type='BASE TABLE' AND table_name<>ALL($1) AND NOT EXISTS(SELECT 1 FROM information_schema.columns c
+   WHERE c.table_schema=t.table_schema AND c.table_name=t.table_name AND c.column_name='created_at')`,[sidecars])).rows;
  assert.deepEqual(missing,[]);
  report.checks.push('all audited OPC/artifact/runtime base tables have creation timestamps');
 }
