@@ -46,6 +46,12 @@ export async function generateVoiceProfile(deps: VoiceGenerationDeps, requestId:
   return saved as VoiceVersion;
 }
 
+/** The evidence BILL2 requires to close a run as delivered or as a confirmed failure. */
+export const voiceEvidence = (versionId: string, kind: 'ok' | 'failed') => {
+  const ref = `voice-${kind}:${versionId}`;
+  return { kind: kind === 'ok' ? 'usable_result' : 'confirmed_failure', evidenceRef: ref, evidenceHash: createHash('sha256').update(ref).digest('hex') };
+};
+
 /** Only a final run state ends billing; cost_pending keeps its hold and stays with the daily recovery. */
 export const isSettled = (view: { state?: string }) => view.state === 'settled' || view.state === 'refunded';
 
@@ -78,13 +84,15 @@ async function execute(billing: Billing, callGate: RuntimeCallGate, run: Admitte
   if (dispatch.providerRejected) return cancel('VOICE_PROVIDER_REJECTED');
   const text = fusionResponseText(dispatch.observation, run.call.model);
   const profile = text ? parseVoiceProfile(text, material) : null;
-  if (!profile) return cancel('VOICE_FORMAT_INVALID');
+  if (!profile) {
+    // The call ran but gave nothing usable: a confirmed failure records the provider cost and refunds the user.
+    await billing.closeRun(run.runId, 'confirmed_failure', voiceEvidence(versionId, 'failed'));
+    return { failure: 'VOICE_FORMAT_INVALID', settled: isSettled(await billing.finalizeRun(run.runId)) };
+  }
   // The profile is saved before the run is closed as delivered: a failure after this point leaves a saved profile and
   // an open run that the daily recovery settles, never a charge without the result.
   const saved = await finish(profile, null, false);
-  const ref = `voice:${versionId}`;
-  await billing.closeRun(run.runId, 'delivered', { kind: 'usable_result', evidenceRef: ref,
-    evidenceHash: createHash('sha256').update(ref).digest('hex') });
+  await billing.closeRun(run.runId, 'delivered', voiceEvidence(versionId, 'ok'));
   const settled = isSettled(await billing.finalizeRun(run.runId));
   return { saved: settled ? await finish(null, null, true) : saved, failure: '', settled };
 }
