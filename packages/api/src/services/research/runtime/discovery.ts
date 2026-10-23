@@ -167,8 +167,9 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
   const pay = async (platform: SocialPlatform, request: SupplierRequest, kind: keyof PlatformCoverage['spent']) => {
     const spent = coverage.platforms[platform]!;
     if (total(spent) >= discoveryCap(platform, d.platforms.length)) { spent.capReached = true; return null; }
-    spent.spent[kind] += 1;
     const result = await step(ctx, d, budget, index++, request);
+    // Counted only when dispatched now or replayed from a saved operation: a step stopped before sending never happened.
+    if (!result.stopped) spent.spent[kind] += 1;
     complete &&= result.complete;
     if (result.stopped) {
       stopped = true;
@@ -210,7 +211,8 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
       const page = result.items.map((item, i) => ({ ...item, ref: `${result.operationId}#${i + 1}` }));
       entries.push(...page);
       firstPages.set(`${platform}\n${keyword}`, { cursor: result.nextCursor,
-        fresh: new Set(page.map(post => post.fields.authorId).filter(id => !seen.has(id))).size });
+        fresh: new Set(page.map(post => post.fields.authorId)
+          .filter((id): id is string => typeof id === 'string' && id.length > 0 && !seen.has(id))).size });
     }
     if (stopped) break;
   }
@@ -235,8 +237,10 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
     }
   }
   // BENCHMARK-COVERAGE: still short of a card after every first-page author, search deeper before calling it a shortfall.
-  if (!stopped && !enough()) {
-    await deepen({ ctx, d, posts, firstPages, coverage, pay, screen, enough, isStopped: () => stopped });
+  // Deeper layers stop at a full card (candidatesMax, plan §3 item 1); a card still shows from candidatesMin.
+  const full = () => selectCandidates(found, true).selectable.length >= BENCHMARK_RULES.candidatesMax;
+  if (!stopped && !full()) {
+    await deepen({ ctx, d, posts, firstPages, coverage, pay, screen, enough: full, isStopped: () => stopped });
   }
   // Reconstruct from stable operations each time; the saved candidates support free follow-up cards.
   await ctx.store.discoverySave(d.discoveryId, { accounts: found, attempted: index, authorCursor, authorLimit }, stopped ? 'running' : 'completed');

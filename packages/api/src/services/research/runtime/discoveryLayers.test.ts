@@ -60,7 +60,7 @@ function fixture(platform: SocialPlatform, script: Script, kinds: SocialKind[] =
     verifiedPlatforms: [platform], benchmarkPlatforms: [platform], limits: { maxSubcallsPerRound: 29, discoverSubcalls: 29 },
     routes: kinds.map(kind => ({ platform, kind, vendor: 'tikhub', route: tikhubRouteId(platform, kind), backup: null, maxUnitsPerCall: '1' })) });
   const sent: SupplierRequest[] = [];
-  const post = (author: string, n: number): ResearchItem => ({ fields: { id: `${author}-v${n}`, authorId: author, author: `Name ${author}`,
+  const post = (author: string, n: number): ResearchItem => ({ fields: { id: `${author}-v${n}`, ...(author ? { authorId: author } : {}), author: `Name ${author}`,
     title: 'video', publishedAt: now.toISOString(), views: 1000, likes: 10, comments: 1, shares: 1 }, missing: [] });
   subcall.mockImplementation(async (context, request) => {
     const operationId = context.newId();
@@ -108,14 +108,29 @@ describe('deeper discovery layers', () => {
     expect(envelope.candidateCard).toMatchObject({ shown: true });
   });
 
-  it('too few first-page authors: searches for accounts with each keyword and screens the leads until a card can show', async () => {
+  it('too few first-page authors: searches for accounts with each keyword and screens the leads until the card is full', async () => {
     const f = fixture('tiktok', { firstPage: keyword => [`${keyword}a`], leads: keyword => [`${keyword}l1`, `${keyword}l2`, `${keyword}l3`] },
       ['keyword_posts', 'account_profile', 'account_posts', 'account_search']);
     const envelope = await f.run();
-    expect(f.kindsSent()).toEqual(['keyword_posts', 'keyword_posts', 'keyword_posts', 'account_profile', 'account_profile', 'account_profile',
-      'account_search', 'account_profile', 'account_profile', 'account_profile', 'account_search', 'account_profile', 'account_profile']);
-    expect(envelope.candidateCard).toMatchObject({ shown: true, selectable: 8 });
-    expect(envelope.coverage.platforms.tiktok.spent).toEqual({ searches: 3, pages: 0, accountSearches: 2, profiles: 8 });
+    const profiles = Array(3).fill('account_profile');
+    expect(f.kindsSent()).toEqual([...Array(3).fill('keyword_posts'), ...profiles, 'account_search', ...profiles,
+      'account_search', ...profiles, 'account_search', ...profiles]);
+    expect(envelope.candidateCard).toMatchObject({ shown: true, selectable: 12 });
+    expect(envelope.coverage.platforms.tiktok.spent).toEqual({ searches: 3, pages: 0, accountSearches: 3, profiles: 12 });
+  });
+
+  it('counts only lookups that really ran, and never lets posts without an author count as new authors', async () => {
+    // Two real new authors plus two unattributed posts: not three new authors, so no next page is paid for.
+    const f = fixture('tiktok', { firstPage: keyword => keyword === 'one' ? ['p1', 'p2', '', ''] : [], firstCursor: '20',
+      nextPage: () => ({ authors: ['n1', 'n2', 'n3'] }) });
+    const envelope = await f.run();
+    expect(f.sent.some(r => r.vendor === 'tikhub' && r.call.cursor)).toBe(false);
+    expect(envelope.coverage.platforms.tiktok.spent).toEqual({ searches: 3, pages: 0, accountSearches: 0, profiles: 2 });
+    // A reply that runs out after two lookups reports those two, not the one it could not send.
+    const g = fixture('tiktok', { firstPage: keyword => [`${keyword}a`] });
+    const stopped = await g.run(2);
+    expect(stopped).toMatchObject({ continue: true, reason: 'ROUND_LIMIT' });
+    expect(stopped.coverage.platforms.tiktok.spent).toEqual({ searches: 2, pages: 0, accountSearches: 0, profiles: 0 });
   });
 
   it('pages a keyword only while its last page brought at least three new authors, at most to page 3', async () => {

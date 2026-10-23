@@ -53,6 +53,7 @@ export interface DeepenInput {
   coverage: DiscoveryCoverage;
   pay: (platform: SocialPlatform, request: SupplierRequest, kind: keyof PlatformCoverage['spent']) => Promise<Step | null>;
   screen: (platform: SocialPlatform, authorId: string, label: string | null, authorPosts: EvidenceItem[]) => Promise<void>;
+  /** A full card (candidatesMax selectable): the deeper layers stop there. */
   enough: () => boolean;
   isStopped: () => boolean;
 }
