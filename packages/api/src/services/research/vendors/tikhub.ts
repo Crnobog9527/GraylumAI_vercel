@@ -86,6 +86,19 @@ export const TIKHUB_ROUTES: Partial<Record<`${SocialPlatform}:${SocialKind}`, Ti
     params: ({ account, limit, cursor }) => ({ unique_id: account!, max_cursor: cursor === undefined ? 0 : Number(cursor),
       count: Math.min(limit, 20), sort_type: 0 }),
   },
+  // BENCHMARK-COVERAGE PR-2: account search, checked against real responses (2026-10-23). TikTok and Douyin give exact
+  // follower counts; Xiaohongshu only a "Fans 77.9k" label. No follower filter: on TikTok it returned unrelated accounts.
+  'tiktok:account_search': {
+    method: 'GET', path: '/tiktok/app/v3/fetch_user_search_result',
+    params: ({ keyword, limit }) => ({ keyword: keyword!, offset: 0, count: Math.min(limit, 20) }),
+  },
+  'douyin:account_search': {
+    method: 'POST', path: '/douyin/search/fetch_user_search',
+    params: ({ keyword }) => ({ keyword: keyword!, cursor: 0, douyin_user_fans: '', douyin_user_type: '', search_id: '' }),
+  },
+  'xiaohongshu:account_search': {
+    method: 'GET', path: '/xiaohongshu/app_v2/search_users', params: ({ keyword }) => ({ keyword: keyword!, page: 1 }),
+  },
   'youtube:keyword_posts': {
     method: 'GET', path: '/youtube/web_v2/get_general_search_v2', params: ({ keyword }) => ({ keyword: keyword!, type: 'video' }),
   },
@@ -167,7 +180,7 @@ export function buildTikhubRequest(call: TikhubCall): { request: VendorRequest }
   const route = TIKHUB_ROUTES[`${call.platform}:${call.kind}`];
   if (!route) return { reason: 'ROUTE_NOT_SUPPORTED' };
   const limit = Math.min(Math.max(Math.trunc(call.limit ?? MAX_POSTS), 1), MAX_POSTS);
-  if (call.kind === 'keyword_posts') {
+  if (call.kind === 'keyword_posts' || call.kind === 'account_search') {
     const keyword = call.keyword?.trim();
     if (!keyword || [...keyword].length > 40 || /\p{Cc}/u.test(keyword)) return { reason: 'INVALID_KEYWORD' };
     return { request: requestFor(route, { keyword, limit }) };
@@ -230,7 +243,7 @@ export async function callTikhub(call: TikhubCall, deps: VendorDeps): Promise<Re
   const all = normalizeTikhub(answer.json, call.platform, call.kind, call.account?.trim());
   // A recognized empty post list is a real, billed "no results" answer. A missing profile or an
   // unrecognized payload is not a delivery and is never reported as a successful, billable result.
-  const listKind = call.kind === 'keyword_posts' || call.kind === 'account_posts';
+  const listKind = call.kind === 'keyword_posts' || call.kind === 'account_posts' || call.kind === 'account_search';
   if (all.length === 0 && listKind && hasEmptyPostList(answer.json, call.platform, call.kind)) {
     return { ...base, outcome: 'ok', reason: 'NO_RESULTS', httpStatus: 200, supplierMayCharge: true, usage: { unit: 'call', units: '1' } };
   }

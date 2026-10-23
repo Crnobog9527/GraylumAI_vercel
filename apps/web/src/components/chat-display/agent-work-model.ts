@@ -57,6 +57,20 @@ const KINDS: readonly WorkKind[] = ['positioning', 'library_search', 'library_re
 const STATES: readonly WorkState[] = ['running', 'done', 'missing', 'pending'];
 const text = (value: unknown, max: number): string | null => (typeof value === 'string' ? value.slice(0, max) : null);
 
+const DATA_KINDS: readonly ResearchCall['dataKind'][] = ['keyword_posts', 'account_profile', 'account_posts', 'account_relation',
+  'post_detail', 'account_search', 'web_search', 'web_fetch'];
+const CALL_STATES: readonly ResearchCall['state'][] = ['running', 'succeeded', 'failed', 'unknown'];
+/** The `research` object of a saved row as a research call; null when it is not well-formed. */
+function researchCallOf(id: string, raw: unknown): ResearchCall | null {
+  const value = (raw ?? {}) as Record<string, unknown>;
+  const query = text(value.query, 200), platform = text(value.platform, 20);
+  if (query === null || !platform || !DATA_KINDS.includes(value.dataKind as ResearchCall['dataKind'])
+    || !CALL_STATES.includes(value.state as ResearchCall['state'])) return null;
+  return { callId: id, toolName: text(value.toolName, 40) ?? '', args: {}, query, platform: platform as ResearchCall['platform'],
+    dataKind: value.dataKind as ResearchCall['dataKind'], state: value.state as ResearchCall['state'],
+    credits: text(value.credits, 40) };
+}
+
 /**
  * The work rows a view attaches to one answer (`workItems`, from runtime_work_items). Anything that is not a well-formed
  * row is dropped, so a malformed reply can never break the page.
@@ -69,6 +83,9 @@ export function workItemsOf(execution: unknown): WorkItem[] {
     const value = (row ?? {}) as Record<string, unknown>;
     const id = text(value.id, 256), label = text(value.label, 200);
     if (!id || label === null || !KINDS.includes(value.kind as WorkKind) || !STATES.includes(value.state as WorkState)) continue;
+    // A saved research row (runtime_work_items) keeps its call facts nested under `research`; show it like the live row.
+    const research = value.kind === 'research' ? researchCallOf(id, value.research) : null;
+    if (research) { items.push(workItemFromResearchCall(research)); continue; }
     items.push({id, kind: value.kind as WorkKind, state: value.state as WorkState, label,
       detail: text(value.detail, 200), credits: text(value.credits, 40)});
   }

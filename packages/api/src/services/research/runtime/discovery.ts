@@ -16,10 +16,22 @@ import { shortfallNotice } from './shortfall';
 
 const itemSchema = z.object({ url: z.string().optional(), fields: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])),
   missing: z.array(z.string()) });
-interface FoundAccount extends ScoredAccount { platform: SocialPlatform; account: string; evidenceRef: string }
+interface FoundAccount extends ScoredAccount { platform: SocialPlatform; account: string; evidenceRef: string; name?: string }
 interface StepResult {
   items: ResearchItem[]; operationId: string; complete: boolean; stopped: boolean;
   reason?: string; budget?: boolean;
+}
+
+const CARD_SHOWN_NEXT_STEP = '候选卡已经显示给用户：请用户在卡上勾选并确认，确认后再取数。不要说没有候选卡。';
+
+/** The supplier's display name for a card label: one line, no control characters, never longer than 30 characters. */
+export function accountName(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (typeof value !== 'string') continue;
+    const name = Array.from(value.replace(/[\p{Cc}\p{Cf}]/gu, ' ').replace(/\s+/g, ' ').trim()).slice(0, 30).join('').trimEnd();
+    if (name) return name;
+  }
+  return undefined;
 }
 
 export function candidateShortage(available: number) {
@@ -73,19 +85,21 @@ async function step(ctx: ResearchToolContext, d: DiscoveryRecord, budget: ToolAl
     ...(!outcome.sent ? { reason: outcome.stop, budget: outcome.budget } : {}) };
 }
 
+/** Shows the card and returns how many options on it the user can tick (0: no card shown). */
 async function card(ctx: ResearchToolContext, discoveryId: string, accounts: FoundAccount[], followUp: boolean, callId: string) {
   const chosen = followUp ? await ctx.store.selectedAccounts(discoveryId) : [];
   const keys = new Set(chosen.map(a => `${a.platform}:${a.account}`));
   const remaining = accounts.filter(a => !keys.has(a.key));
   const selection = selectCandidates(remaining, true);
-  if ((!followUp && !selection.enough) || selection.selectable.length === 0) return false;
+  if ((!followUp && !selection.enough) || selection.selectable.length === 0) return 0;
   const selectable = new Set(selection.selectable.map(a => a.key));
   const references = !followUp ? selection.headReferences.slice(0, 3) : [];
   const ordered = [...selection.selectable.slice(0, 12 - references.length), ...references] as FoundAccount[];
   const options: ResearchCandidateOption[] = ordered
     .map((a, i) => ({ id: `c${i}`, platform: a.platform, account: a.account, evidenceRef: a.evidenceRef,
+      // The account id stays on the card's second line; the label leads with the readable name.
       label: a.classification.excluded === 'ACTIVE_CHECK_PENDING'
-        ? `${a.account} · 活跃度待核对` : a.account,
+        ? `${a.name ?? a.account} · 活跃度待核对` : a.name ?? a.account,
       selectable: selectable.has(a.key) }));
   const payload = { kind: 'candidates' as const, discoveryId, options: options.map(o => ({ ...o })),
     ...(followUp ? { followUp: true, minSelect: Math.min(options.length, Math.max(1, 3 - keys.size)) } : {}) };
@@ -94,7 +108,8 @@ async function card(ctx: ResearchToolContext, discoveryId: string, accounts: Fou
   const savedOptions = saved.options as unknown as ResearchCandidateOption[];
   ctx.emit({ type: 'research_card', card: { ...saved, kind: 'candidates', options: savedOptions,
     ...(followUp ? { followUp: true } : {}) } });
-  return true;
+  // Count what was emitted: head references take slots and a reused saved card may differ from this rebuild.
+  return savedOptions.filter(option => option.selectable).length;
 }
 
 export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<'benchmark_discover'>,
@@ -158,7 +173,8 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
       if (!profile) continue;
       const metrics = accountMetrics({ profile: { ...profile, ref: `${result.operationId}#1` },
         posts: (posts.get(author.platform) ?? []).filter(p => p.fields.authorId === author.authorId) }, ctx.now());
-      found.push({ key: `${author.platform}:${account}`, platform: author.platform, account,
+      const name = accountName(profile.fields.name, author.author);
+      found.push({ key: `${author.platform}:${account}`, platform: author.platform, account, ...(name ? { name } : {}),
         evidenceRef: `${result.operationId}#1`, metrics,
         classification: classifyAccount(metrics, ctx.config.recentGrowth, ctx.now(), 'discovery') });
     }
@@ -171,7 +187,8 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
   }
   // Reconstruct from stable operations each time; the saved candidates support free follow-up cards.
   await ctx.store.discoverySave(d.discoveryId, { accounts: found, attempted: index, authorCursor, authorLimit }, stopped ? 'running' : 'completed');
-  const shown = !stopped && await card(ctx, d.discoveryId, found, false, '');
+  const onCard = stopped ? 0 : await card(ctx, d.discoveryId, found, false, '');
+  const shown = onCard > 0;
   const available = selectCandidates(found, true).selectable.length;
   const insufficient = !stopped && complete && !shown;
   const resumable = stopReason === 'ROUND_LIMIT' || stopReason === 'CANDIDATE_SCAN_INCOMPLETE';
@@ -184,8 +201,11 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
     reason: stopped ? stopReason : shown ? (complete ? null : 'DISCOVERY_PARTIAL')
       : complete ? 'NOT_ENOUGH_CANDIDATES' : 'DISCOVERY_PARTIAL',
     ...(insufficient ? candidateShortage(available) : {}),
+    // The host shows the card, not the model's text: say so, or the model may deny a card the user can see.
+    ...(shown ? { candidateCard: { shown: true, selectable: onCard }, nextStep: CARD_SHOWN_NEXT_STEP }
+      : { candidateCard: { shown: false } }),
     discoveryId: d.discoveryId, continue: stopped && resumable,
-    items: found.map(a => ({ fields: { platform: a.platform, account: a.account,
+    items: found.map(a => ({ fields: { platform: a.platform, account: a.account, ...(a.name ? { name: a.name } : {}),
       evidenceRef: a.evidenceRef,
       category: a.classification.excluded === 'ACTIVE_CHECK_PENDING'
         ? 'activity_pending' : a.classification.category ?? 'excluded',
@@ -201,8 +221,10 @@ export async function moreCandidates(ctx: ResearchToolContext, discoveryId: stri
     return toolEnvelope({ status: 'not_confirmed', reason: 'NO_CONFIRMED_SELECTION', discoveryId });
   }
   const accounts = (d.cursor.accounts ?? []) as FoundAccount[];
-  const shown = await card(ctx, discoveryId, accounts, true, callId);
+  const onCard = await card(ctx, discoveryId, accounts, true, callId);
+  const shown = onCard > 0;
   const shortfall = shown ? undefined : await shortfallNotice(ctx);
   return toolEnvelope({ status: shown ? 'ok' : 'partial', reason: shown ? null : 'NOT_ENOUGH_CANDIDATES', discoveryId,
+    candidateCard: shown ? { shown, selectable: onCard } : { shown }, ...(shown ? { nextStep: CARD_SHOWN_NEXT_STEP } : {}),
     ...(shortfall ? { shortfall } : {}) });
 }

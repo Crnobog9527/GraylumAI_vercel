@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   ADMIN_REQUIRED_FACT_KINDS, USER_AMOUNT_FACT_KINDS, UNKNOWN_AMOUNT, buildAmountFactRows, formatAmountFact,
-  formatMinorAmount, getDocumentStatusPresentation, getPaymentChannelLabel,
+  buildUserAmountFactRows, formatMinorAmount, getDocumentStatusPresentation, getPaymentChannelLabel, getTaxInclusivePaid,
 } from './payment-display';
 
 describe('document status', () => {
@@ -110,4 +110,48 @@ describe('minor amounts', () => {
 it('labels a missing channel as unknown', () => {
   expect(getPaymentChannelLabel(null)).toBe('未知渠道');
   expect(getPaymentChannelLabel('Stripe')).toBe('Stripe');
+});
+
+describe('tax-inclusive paid for buyers', () => {
+  const fact = (kind: string, amount: string | null, currency = 'usd') => ({ kind, amount, currency, unit: 'major' as const });
+
+  it('shows a Stripe pre-tax paid plus tax as the amount actually charged (user12 founder annual)', () => {
+    const facts = [fact('paid', '496.00'), fact('tax', '24.80')];
+    expect(getTaxInclusivePaid(facts)).toEqual({ total: '520.80', tax: '24.80', currency: 'usd' });
+    expect(buildUserAmountFactRows(facts)).toEqual([{ kind: 'paid', label: '实付', value: 'USD 520.80（含税 USD 24.80）' }]);
+  });
+
+  it('keeps a refund row next to the combined paid amount, so a full refund matches what was charged', () => {
+    const facts = [fact('paid', '29.00'), fact('tax', '1.45'), fact('refund', '30.45')];
+    expect(buildUserAmountFactRows(facts)).toEqual([
+      { kind: 'paid', label: '实付', value: 'USD 30.45（含税 USD 1.45）' },
+      { kind: 'refund', label: '已退款', value: 'USD 30.45' },
+    ]);
+  });
+
+  it('drops the zero-tax note and carries exact decimals without float rounding', () => {
+    expect(buildUserAmountFactRows([fact('paid', '29.00'), fact('tax', '0.00')]))
+      .toEqual([{ kind: 'paid', label: '实付', value: 'USD 29.00' }]);
+    expect(getTaxInclusivePaid([fact('paid', '0.10'), fact('tax', '0.2')])?.total).toBe('0.30');
+    expect(getTaxInclusivePaid([fact('paid', '99999999999999.99'), fact('tax', '0.01')])?.total).toBe('100000000000000.00');
+  });
+
+  it('treats the same fact recorded twice as one value', () => {
+    const facts = [fact('paid', '29.00'), fact('tax', '1.45'), fact('paid', '29.00'), fact('tax', '1.45')];
+    expect(getTaxInclusivePaid(facts)?.total).toBe('30.45');
+  });
+
+  it('leaves separate rows when the pair is ambiguous, unknown or in different currencies', () => {
+    for (const facts of [
+      [fact('paid', '29.00')],
+      [fact('paid', '29.00'), fact('paid', '49.00'), fact('tax', '1.45')],
+      [fact('paid', '29.00'), fact('tax', '1.45'), fact('tax', '2.45')],
+      [fact('paid', null), fact('tax', '1.45')],
+      [fact('paid', '29.00'), fact('tax', '1.45', 'eur')],
+      [fact('paid', '29.00'), fact('tax', '-1.45')],
+    ]) {
+      expect(getTaxInclusivePaid(facts)).toBeNull();
+      expect(buildUserAmountFactRows(facts)).toEqual(buildAmountFactRows(facts, { allowed: USER_AMOUNT_FACT_KINDS }));
+    }
+  });
 });

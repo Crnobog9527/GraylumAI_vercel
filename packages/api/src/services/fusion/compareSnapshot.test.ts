@@ -10,7 +10,7 @@ import { FUSION_INPUT_CAP } from './request';
 
 const parts = (patch: Partial<CompareParts> = {}): CompareParts => ({ skill: null, positioningFallback: false, history: [], workspace: [],
   references: [], question: '哪个开头更好？', ...patch });
-const skill = { moduleId: 'm', revisionId: 'r', instructions: 'SKILL TEXT', resources: [{ path: 'a.md', hash: 'h1' }], socialMedia: false };
+const skill = { moduleId: 'm', revisionId: 'r', skillId: 's', instructions: 'SKILL TEXT', resources: [{ path: 'a.md', hash: 'h1' }], socialMedia: false };
 
 describe('compare snapshot (FUSION-COMPARE §3.2)', () => {
   it('starts from the ordinary free-conversation instruction and reply-language rule, with no brand identity statement', () => {
