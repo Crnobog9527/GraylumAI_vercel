@@ -8,7 +8,7 @@ import {
   createMediaUploads, MAX_MEDIA, publishInput, readPublishJob, refreshPublishJob, submitPublish,
 } from '../services/publishMonitor/publish';
 import { takeUploadSlots } from '../services/publishMonitor/postForMe/config';
-import { assertPublishPlatformsOpen, publishKeyExists, readPublishOptions } from '../services/publishMonitor/publishOptions';
+import { assertPublishPlatformsOpen, assertUploadAllowed, publishKeyTargets, readPublishOptions } from '../services/publishMonitor/publishOptions';
 import { requirePostForMeDeps } from '../services/publishMonitor/secrets';
 import { RateLimitError } from '../lib/rateLimitError';
 import { guarded } from './publishMonitorGuard';
@@ -44,9 +44,7 @@ export const publishMonitorPublishRouter = router({
   })),
   uploadUrl: protectedProcedure.input(uploadInput).mutation(({ ctx, input }) => guarded(ctx, async () => {
     await requirePublishEntitlement(ctx);
-    if (!input.idempotencyKey || !(await publishKeyExists(ctx.supabaseAdmin, ctx.profileId, input.idempotencyKey))) {
-      await assertPublishPlatformsOpen(ctx.supabaseAdmin, ctx.profileId, input.connectionIds);
-    }
+    await assertUploadAllowed(ctx.supabaseAdmin, ctx.profileId, input.connectionIds, input.idempotencyKey);
     await limitStep('upload', ctx.profileId);
     // Weighted by the number of slots, so parallel or split requests cannot exceed the per-user upload allowance.
     const slots = await takeUploadSlots(ctx.profileId, input.count);
@@ -58,7 +56,7 @@ export const publishMonitorPublishRouter = router({
     // A key that already has a job is a replay of an earlier submit whose answer was lost: it is answered from the
     // database whatever the platform or account state is now (the state may have changed since), never gated again.
     // A new key meets the platform and target checks first.
-    if (!(await publishKeyExists(ctx.supabaseAdmin, ctx.profileId, input.idempotencyKey))) {
+    if ((await publishKeyTargets(ctx.supabaseAdmin, ctx.profileId, input.idempotencyKey)) === null) {
       await assertPublishPlatformsOpen(ctx.supabaseAdmin, ctx.profileId, input.connectionIds);
     }
     await limitStep('publish', ctx.profileId);

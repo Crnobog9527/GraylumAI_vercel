@@ -49,7 +49,8 @@ export function PublishForm({ businessId, workItemId, targets, initialCaption, i
   const targetCount = recovered ? recovered.connectionIds.length : chosen.length;
   const hold = recovered ? recovered.maxHoldCredits : holdCreditsByTargets?.[chosen.length - 1] ?? null;
   const tooLong = captionTooLong(caption, chosen.map(t => t.platform));
-  const tooLongForServer = [...caption].length > MAX_CAPTION;
+  // The server counts UTF-16 units (z.string().max), so this does too.
+  const tooLongForServer = caption.length > MAX_CAPTION;
   // While an earlier submit is unconfirmed, what is published cannot change: another key could post and charge twice.
   const locked = recovered !== null;
   const mediaIssue = recovered ? null : mediaProblem(chosen.map(t => t.platform), media.map(m => m.file.type.toLowerCase()));
@@ -84,10 +85,11 @@ export function PublishForm({ businessId, workItemId, targets, initialCaption, i
     try {
       setPhase('uploading');
       if (recovered) {
-        const digests: string[] = [];
-        for (const item of media) digests.push(await mediaDigest(item.file));
-        if (!sameFiles(recovered, digests)) {
-          setError('上一次提交还没有确认结果，请按原来的顺序选择同样的文件，或放弃上一次。');
+        const files: Array<{ sha256: string; size: number; mimeType: string }> = [];
+        for (const item of media) files.push({ sha256: await mediaDigest(item.file), size: item.file.size,
+          mimeType: item.file.type.toLowerCase() });
+        if (!sameFiles(recovered, files)) {
+          setError('上一次提交还没有确认结果，请按原来的顺序选择同样的文件（名字和格式也要一样），或放弃上一次。');
           return;
         }
       }

@@ -124,7 +124,11 @@ describe('submit publish (simulated provider)', () => {
     await expect(submitPublish(d.db, p.deps, USER, input)).rejects.toMatchObject({ code: 'PUBLISH_MONITOR_PRICE_CHANGED' });
     expect(d.calls.at(-1)).toEqual(['publish_monitor_publish_release', { p_job: JOB, p_code: 'PUBLISH_MONITOR_PRICE_CHANGED' }]);
     expect(p.calls).toEqual([]);
-    // A replay of an earlier job is never re-judged by the price.
+    // A replay of a job that is still only claimed (an earlier release failed) is judged by the price too.
+    const stuck = database({ ...fresh(), publish_monitor_publish_claim: [{ ...view('claimed', { holdCredits: 13 }), replayed: true }] });
+    await expect(submitPublish(stuck.db, provider([]).deps, USER, input)).rejects.toMatchObject({ code: 'PUBLISH_MONITOR_PRICE_CHANGED' });
+    expect(stuck.calls.at(-1)![0]).toBe('publish_monitor_publish_release');
+    // A replay of a job already past that point is never re-judged by the price.
     const replay = database({ publish_monitor_publish_claim: [{ ...view('completed', { holdCredits: 99 }), replayed: true }] });
     expect((await submitPublish(replay.db, provider([]).deps, USER, input)).state).toBe('completed');
   });

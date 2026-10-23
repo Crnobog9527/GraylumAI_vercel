@@ -32,7 +32,8 @@ export function loadAttempt(workItemId: string, store: Store | null = defaultSto
   } catch { return null; }
 }
 
-/** The files picked again must be the same files in the same order (same request, same fingerprint). */
-export function sameFiles(stored: StoredAttempt, digests: string[]): boolean {
-  return digests.length === stored.media.length && digests.every((digest, i) => digest === stored.media[i]!.sha256);
+/** The files picked again must be the same files in the same order, with the same size and type (same fingerprint). */
+export function sameFiles(stored: StoredAttempt, files: Array<{ sha256: string; size: number; mimeType: string }>): boolean {
+  return files.length === stored.media.length && files.every((file, i) => file.sha256 === stored.media[i]!.sha256
+    && file.size === stored.media[i]!.size && file.mimeType === stored.media[i]!.mimeType);
 }

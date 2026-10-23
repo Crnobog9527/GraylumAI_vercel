@@ -162,8 +162,9 @@ export async function submitPublish(db: Rpc, deps: ClientDeps, profileId: string
   if (job.quotaAlert) logger.warn('api', 'publish_monitor_quota_80_percent', { jobId: job.id });
   if (job.state !== 'claimed') return job;
   // The price is read by the claim itself: a price raised after the user confirmed must not charge more than approved.
-  // Nothing was sent, so the new job is released at once (its hold and slots return) and the user confirms again.
-  if (!job.replayed && job.holdCredits !== null && job.holdCredits > input.maxHoldCredits) {
+  // Nothing was sent (the job is still only claimed), so it is released at once (hold and slots return), also when an
+  // earlier release failed and this is its replay; the user confirms again.
+  if (job.holdCredits !== null && job.holdCredits > input.maxHoldCredits) {
     await releaseProven(db, job.id, 'PUBLISH_MONITOR_PRICE_CHANGED', pacing);
     throw new PublishError('PUBLISH_MONITOR_PRICE_CHANGED');
   }

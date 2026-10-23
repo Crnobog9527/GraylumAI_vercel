@@ -29,8 +29,12 @@ describe('publish recovery', () => {
   });
 
   it('accepts only the same files in the same order', () => {
-    expect(sameFiles(attempt, ['a'.repeat(64)])).toBe(true);
-    expect(sameFiles(attempt, ['b'.repeat(64)])).toBe(false);
+    const same = { sha256: 'a'.repeat(64), size: 5, mimeType: 'video/mp4' };
+    expect(sameFiles(attempt, [same])).toBe(true);
+    expect(sameFiles(attempt, [{ ...same, sha256: 'b'.repeat(64) }])).toBe(false);
+    // Same bytes under another type or size is a different request to the server (the fingerprint has both).
+    expect(sameFiles(attempt, [{ ...same, mimeType: 'video/quicktime' }])).toBe(false);
+    expect(sameFiles(attempt, [{ ...same, size: 6 }])).toBe(false);
     expect(sameFiles(attempt, [])).toBe(false);
     expect(sameFiles({ ...attempt, media: [] }, [])).toBe(true);
   });

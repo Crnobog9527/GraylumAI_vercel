@@ -10,12 +10,12 @@ import { publishMonitorRouter } from './publishMonitor';
 const actor = '00000000-0000-4000-8000-0000000f0001';
 const profile = { id: actor, role: 'user', status: 'active', nickname: 'U', email: 'u@example.com' };
 function caller(rpc: ReturnType<typeof vi.fn>, switchOn: boolean, settings: Record<string, unknown> = {},
-  existingJob = false) {
+  existingJob: boolean | { targets: unknown } = false) {
   const from = (table: string) => {
     let key = '';
     return { select() { return this; }, eq(_column: string, value: string) { key = value; return this; },
       single: async () => ({ data: profile, error: null }),
-      maybeSingle: async () => ({ data: table === 'social_publish_jobs' ? (existingJob ? { id: 'job' } : null)
+      maybeSingle: async () => ({ data: table === 'social_publish_jobs' ? (existingJob === true ? { id: 'job' } : existingJob || null)
         : table !== 'system_settings' ? profile
         : key === 'publish_monitor_enabled' ? { value: switchOn } : key in settings ? { value: settings[key] } : null,
       error: null }) };
@@ -109,6 +109,25 @@ describe('publish-monitor one-click publishing', () => {
       message: 'PUBLISH_MONITOR_PLATFORM_NOT_OPEN' });
     // It got past the gate: the next step (reading the provider key) is what failed here.
     expect(rpc).toHaveBeenCalled();
+  });
+
+  it('an upload replay skips the platform checks only for the exact targets the existing job saved', async () => {
+    mocks.entitlements.mockResolvedValue({ allowPublish: true });
+    mocks.limit.mockResolvedValue({ success: true });
+    mocks.uploads.mockResolvedValue({ ok: true });
+    const other = '00000000-0000-4000-8000-0000000f0009';
+    const job = { targets: [{ connectionId: conn, platform: 'x', providerAccountId: 'spc_x' }], state: 'unknown' };
+    const rpc = vi.fn().mockRejectedValue(new Error('reached the provider key'));
+    // The saved target, with no platform open: passes the gate (the next step, reading the provider key, is what fails).
+    await expect(caller(rpc, true, {}, job).publish.uploadUrl({ disclosureAccepted: true, count: 1, connectionIds: [conn],
+      idempotencyKey: 'key-00000001' })).rejects.not.toMatchObject({ message: 'PUBLISH_MONITOR_PLATFORM_NOT_OPEN' });
+    // Any other id under the same key gets the normal checks.
+    await expect(caller(rpc, true, {}, job).publish.uploadUrl({ disclosureAccepted: true, count: 1,
+      connectionIds: [conn, other], idempotencyKey: 'key-00000001' }))
+      .rejects.toMatchObject({ message: 'PUBLISH_MONITOR_PLATFORM_NOT_OPEN' });
+    await expect(caller(rpc, true, {}, job).publish.uploadUrl({ disclosureAccepted: true, count: 1,
+      connectionIds: [other], idempotencyKey: 'key-00000001' }))
+      .rejects.toMatchObject({ message: 'PUBLISH_MONITOR_PLATFORM_NOT_OPEN' });
   });
 
   it('options lists the open platforms and the exact hold for 1..9 targets', async () => {
