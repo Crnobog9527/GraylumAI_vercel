@@ -333,7 +333,9 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  const compareChoice=choices.data?.skills.find(x=>'skill:'+x.moduleId===activeSelection);
  const compareSkill={ready:Boolean(choices.data&&activeSelection&&(!activeSelection.startsWith('skill:')||compareChoice)),
   skill:compareChoice?{kind:'skill' as const,moduleId:compareChoice.moduleId,revisionId:compareChoice.revisionId}:undefined};
- const compare=useCompareThread(sessionId&&freeChat?sessionId:null);
+ // Listed as soon as the session id is known (not after the view: the list answers [] for a conversation without compares), so
+ // the cards and the adoption markers arrive together with the history instead of seconds later.
+ const compare=useCompareThread(sessionId||null);
  const executions=view.data?.executions as Array<{executionId:string;createdAt?:string;state:string;input:string|null;body:string|null;primaryBody:string|null;organizerComplete:boolean|null;skillExecution:boolean;needsTask:boolean;unavailableReason:string|null;historyOmitted?:boolean;contentAvailable:boolean;userStopPending?:boolean;stopped?:boolean;
   billing?:{pausedReason?:string|null;cancelRequested?:boolean}|null;cursor?:number|null;epoch?:number|null;remainingCalls?:number|null}>|undefined;
  const capacitySignature=executions?.map(e=>e.executionId+':'+e.state).join('|');
@@ -434,7 +436,7 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
       <SaveReplyButton sessionId={sessionId} executionId={e.executionId} reply={(e.body??e.primaryBody)!}
        savedItems={results.data.filter(result=>result.sourceExecutionId===e.executionId)}/>}
      <LiveReplyText text={liveReplyText(runner.reply,e.executionId,e)}/>
-     <ChatNoticeList notices={compare.adoptedExecutions.has(e.executionId)?[]:[...turnNotices(e),...withResumeStop(payg.turnNotices(e,busy),
+     <ChatNoticeList notices={compare.adoptedExecutions.has(e.executionId)||(!compare.loaded&&e.state==='cancelled')?[]:[...turnNotices(e),...withResumeStop(payg.turnNotices(e,busy),
       runner.streaming&&runner.reply?.executionId===e.executionId,{onClick:()=>void stop(e.executionId),disabled:cancel.isPending})]}/>
    </RuntimeTurnView>{cardsAt(index)}</Fragment>)}</>;})()}
    {isVideo&&currentScript&&videoPromptEnded&&(!currentStoryboard||!currentEditing)&&<Button variant="outline" onClick={()=>{localStorage.removeItem('opc-video-ended:'+currentScript.id);setVideoUiRevision(v=>v+1);}}>继续这版口播稿的分镜或剪辑</Button>}
