@@ -19,7 +19,9 @@ export function DraftArchiveGate({ draftId, children }: { draftId: string; child
   // The page itself shows a missing id, a failed read and a deleted conversation. "Failed" is the last settled read:
   // the page's own read of the same draft refetches the failed query on mount, which puts it back to pending without
   // data. Showing "checking" then would unmount the page, whose next mount refetches again: an endless loop.
-  const failed = read.isError || (read.errorUpdatedAt ?? 0) > (read.dataUpdatedAt ?? 0);
+  // Only a read that never returned the draft counts: with cached data, a failed refetch still goes through the
+  // archive check, so an archived draft never opens its editor.
+  const failed = read.data === undefined && (read.isError || (read.errorUpdatedAt ?? 0) > (read.dataUpdatedAt ?? 0));
   if (!draftId || failed || deleted) return children;
   if (read.isPending || archive.state === 'pending') return <main className="p-6" role="status">{PROFILE_ARCHIVE_TEXT.checking}</main>;
   if (archive.state === 'error') return <main className="p-6"><p role="alert">{PROFILE_ARCHIVE_TEXT.loadFailed}{' '}

@@ -72,4 +72,14 @@ describe('profile-archive gate in front of the editable draft and topics pages',
     businesses = { isPending: true, isSuccess: false, isError: false, error: null };
     for (const html of await render()) expect(html).toContain('正在读取定位档案');
   });
+
+  it('still applies the archive check when a background refetch of a cached draft fails', async () => {
+    const cachedThenFailed = { data: { draftId: 'draft' }, isPending: false, isSuccess: false, isError: true,
+      error: new Error('down'), errorUpdatedAt: 3000, dataUpdatedAt: 2000 };
+    read = cachedThenFailed;
+    businesses = ok(profile(true));
+    for (const html of await render()) { expect(html).toContain('ARCHIVED_VIEW'); expect(html).not.toContain('EDITABLE'); }
+    businesses = ok(profile(false));
+    for (const html of await render()) expect(html).toBe('<p>EDITABLE</p>');
+  });
 });
