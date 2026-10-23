@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
@@ -8,9 +8,10 @@ import {
 } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import {
-  authorizeHere, captionTooLong, newIdempotencyKey, platformName, publishErrorMessage, type Target,
+  authorizeHere, captionTooLong, MAX_CAPTION, newIdempotencyKey, platformName, publishErrorMessage, type Target,
 } from '@/lib/publish-monitor/publish-flow';
-import { MediaUploadError, uploadPublishFiles, type UploadedMedia } from '@/lib/publish-monitor/upload-media';
+import { clearAttempt, loadAttempt, saveAttempt, sameFiles, type StoredAttempt } from '@/lib/publish-monitor/publish-recovery';
+import { mediaDigest, MediaUploadError, uploadPublishFiles, type UploadedMedia } from '@/lib/publish-monitor/upload-media';
 import { trpc } from '@/trpc/client';
 import { MediaPicker, type PickedMedia } from './media-picker';
 
@@ -33,8 +34,14 @@ export function PublishForm({ businessId, workItemId, targets, initialCaption, i
   const [accepted, setAccepted] = useState(false);
   const [phase, setPhase] = useState<'idle' | 'uploading' | 'submitting'>('idle');
   const [error, setError] = useState('');
-  // Kept only in memory for one attempt; never written to storage or logs.
+  // The uploads of one attempt stay in memory only; storage keeps just the key and file identities (publish-recovery.ts).
   const [attempt, setAttempt] = useState<Attempt | null>(null);
+  // An earlier submit whose answer never arrived (reload, crash): the next try must reuse its key, so it is replayed.
+  const [recovered, setRecovered] = useState<StoredAttempt | null>(null);
+  useEffect(() => {
+    const stored = workItemId ? loadAttempt(workItemId) : null;
+    if (stored) { setRecovered(stored); setSelected(stored.connectionIds); setCaption(stored.caption); }
+  }, [workItemId]);
   const uploadUrl = trpc.publishMonitor.publish.uploadUrl.useMutation();
   const submit = trpc.publishMonitor.publish.submit.useMutation();
 
@@ -42,9 +49,17 @@ export function PublishForm({ businessId, workItemId, targets, initialCaption, i
   const chosen = targets.filter(t => selected.includes(t.id));
   const hold = holdCreditsByTargets?.[chosen.length - 1] ?? null;
   const tooLong = captionTooLong(caption, chosen.map(t => t.platform));
-  const canPublish = chosen.length > 0 && caption.trim().length > 0 && !busy;
-  // Any change to what is published makes the next confirmation a new attempt with fresh uploads.
-  const changed = <T,>(set: (value: T) => void) => (value: T) => { setAttempt(null); set(value); };
+  const tooLongForServer = [...caption].length > MAX_CAPTION;
+  // While an earlier submit is unconfirmed, what is published cannot change: another key could post and charge twice.
+  const locked = attempt !== null || recovered !== null;
+  const canPublish = chosen.length > 0 && caption.trim().length > 0 && !tooLongForServer && !busy;
+  const changed = <T,>(set: (value: T) => void) => (value: T) => { if (!locked) set(value); };
+  function discardEarlier() {
+    if (workItemId) clearAttempt(workItemId);
+    setAttempt(null);
+    setRecovered(null);
+    setError('');
+  }
 
   async function authorize(target: Target) {
     setError('');
@@ -61,6 +76,16 @@ export function PublishForm({ businessId, workItemId, targets, initialCaption, i
     setError('');
     let current = attempt;
     try {
+      if (!current && recovered) {
+        setPhase('uploading');
+        const digests: string[] = [];
+        for (const item of media) digests.push(await mediaDigest(item.file));
+        if (!sameFiles(recovered, digests)) { setError('上一次提交还没有确认结果，请按原来的顺序选择同样的文件，或放弃上一次。'); return; }
+        const uploaded = media.length === 0 ? [] : await uploadPublishFiles(media.map(m => m.file), async count =>
+          uploadUrl.mutateAsync({ disclosureAccepted: true, count, connectionIds: recovered.connectionIds }));
+        current = { key: recovered.key, media: uploaded, covers: recovered.media.map(m => m.coverMs) };
+        setAttempt(current);
+      }
       if (!current) {
         setPhase('uploading');
         // A text-only post (X, Threads, LinkedIn, Bluesky, Facebook) uploads nothing.
@@ -70,23 +95,29 @@ export function PublishForm({ businessId, workItemId, targets, initialCaption, i
         setAttempt(current);
       }
       setPhase('submitting');
+      if (workItemId) saveAttempt(workItemId, { key: current.key, connectionIds: chosen.map(t => t.id), caption,
+        media: current.media.map((item, i) => ({ sha256: item.sha256, size: item.size, mimeType: item.mimeType,
+          coverMs: current!.covers[i] ?? null })) });
       const job = await submit.mutateAsync({ idempotencyKey: current.key, businessId, workItemId,
         connectionIds: chosen.map(t => t.id), caption,
         media: current.media.map((item, i) => ({ ...item,
           ...(current!.covers[i] !== null && item.mimeType.startsWith('video/') ? { thumbnailTimestampMs: current!.covers[i]! } : {}) })),
       });
+      if (workItemId) clearAttempt(workItemId);
       setAttempt(null);
+      setRecovered(null);
       onSubmitted(job.id);
     } catch (cause) {
       if (cause instanceof MediaUploadError) {
-        setAttempt(null);
+        // Nothing was submitted by this try; an earlier unconfirmed submit (recovered) stays protected.
+        if (!recovered) setAttempt(null);
         setError(publishErrorMessage(cause.code));
       } else {
         const trpcError = cause as { message?: string; data?: { code?: string } };
         // A definite refusal means nothing was sent: the next try is a new attempt. Anything else may have reached the
         // server, so the same attempt (same key, same uploads) is replayed and can never post twice.
         const httpCode = trpcError.data?.code;
-        if (httpCode && httpCode !== 'INTERNAL_SERVER_ERROR' && httpCode !== 'TOO_MANY_REQUESTS') setAttempt(null);
+        if (httpCode && httpCode !== 'INTERNAL_SERVER_ERROR' && httpCode !== 'TOO_MANY_REQUESTS') discardEarlier();
         setError(publishErrorMessage(trpcError.message, httpCode));
       }
     } finally {
@@ -106,7 +137,7 @@ export function PublishForm({ businessId, workItemId, targets, initialCaption, i
             {targets.map(target => (
               <li key={target.id} className="flex flex-wrap items-center gap-2 text-sm">
                 <label className="flex items-center gap-2">
-                  <Checkbox checked={selected.includes(target.id)} disabled={!target.ready || busy}
+                  <Checkbox checked={selected.includes(target.id)} disabled={!target.ready || busy || locked}
                     onCheckedChange={value => changed(setSelected)(value === true
                       // One account per platform: picking one replaces another account of the same platform.
                       ? [...selected.filter(id => targets.find(t => t.id === id)?.platform !== target.platform), target.id]
@@ -124,17 +155,25 @@ export function PublishForm({ businessId, workItemId, targets, initialCaption, i
 
       <section aria-labelledby="media" className="space-y-2">
         <h2 id="media" className="font-medium">图片或视频</h2>
-        <MediaPicker items={media} onChange={changed(setMedia)} disabled={busy} />
+        <MediaPicker items={media} onChange={setMedia} disabled={busy || attempt !== null} />
       </section>
 
       <section aria-labelledby="caption" className="space-y-2">
         <h2 id="caption" className="font-medium">文案</h2>
-        <Textarea aria-labelledby="caption" value={caption} disabled={busy} rows={8} maxLength={5000}
+        <Textarea aria-labelledby="caption" value={caption} disabled={busy || locked} rows={8} maxLength={MAX_CAPTION}
           onChange={event => changed(setCaption)(event.target.value)} />
+        {tooLongForServer && <p role="alert" className="text-sm text-[var(--color-error)]">
+          文案超过 {MAX_CAPTION} 字，请先删减再发布。</p>}
         {tooLong.length > 0 && <p className="text-sm text-[var(--text-secondary)]">
           文案超过了 {tooLong.map(platformName).join('、')} 的字数上限，平台可能拒绝或截断。</p>}
       </section>
 
+      {locked && <div role="status" className="space-y-2 rounded border border-[var(--border-default)] p-3 text-sm">
+        <p>上一次提交还没有确认结果，可能已经发出。为了不重复发布和扣费，现在不能改账号和文案：请{recovered
+          ? (recovered.media.length > 0 ? '按原来的顺序选择同样的文件，' : '')+'再点一次发布' : '再点一次发布'}，系统会认出是同一次。</p>
+        <Button size="sm" variant="outline" disabled={busy} onClick={discardEarlier}>
+          放弃上一次，重新开始（请先去平台确认是否已发出）</Button>
+      </div>}
       {error && <p role="alert" className="text-sm text-[var(--color-error)]">{error}</p>}
       <div className="flex items-center gap-3">
         <Button disabled={!canPublish} onClick={() => { setAccepted(false); setConfirming(true); }}>

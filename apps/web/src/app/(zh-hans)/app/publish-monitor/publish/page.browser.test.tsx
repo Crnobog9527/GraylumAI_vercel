@@ -197,3 +197,43 @@ it('a full publishing channel tells the user it is busy and that nothing was cha
     await ui(page.getByRole('button', { name: '发布', exact: true })).toBeVisible();
   } finally { await page.close(); }
 }, 30000);
+
+it('after a reload, an unconfirmed submit is replayed with the same key and the same file, and nothing else can change', async () => {
+  let submits = 0;
+  const { page, calls, uploads } = await open(path => {
+    if (path === 'publishMonitor.publish.uploadUrl') return slot(1);
+    if (path === 'publishMonitor.publish.submit') {
+      submits += 1;
+      return submits === 1 ? { error: { code: 'INTERNAL_SERVER_ERROR', message: 'PUBLISH_MONITOR_UNAVAILABLE', status: 500 } }
+        : { data: job('unknown', 'pending') };
+    }
+    if (path === 'publishMonitor.publish.job') return { data: job('unknown', 'pending') };
+  });
+  const file = { name: 'a.png', mimeType: 'image/png', buffer: Buffer.from('89504e470d0a1a0a', 'hex') };
+  try {
+    await pickImageAndConfirm(page);
+    await ui(page.getByRole('button', { name: '再试一次（同一次发布，不会重复发）' })).toBeVisible();
+    // The tab reloads before the user retries: memory is gone, storage keeps only the key and the file identity.
+    await page.goto('https://publish.test/');
+    await page.addScriptTag({ content: code });
+    await ui(page.getByText('上一次提交还没有确认结果')).toBeVisible();
+    await ui(page.getByRole('textbox')).toBeDisabled();
+    await ui(page.getByRole('checkbox', { name: 'X' })).toBeDisabled();
+    await page.getByLabel('选择要发布的图片或视频').setInputFiles({ ...file, buffer: Buffer.from('ffd8ffe000104a46', 'hex') });
+    await page.getByRole('button', { name: '发布', exact: true }).click();
+    await page.getByRole('dialog').getByRole('checkbox').click();
+    await page.getByRole('dialog').getByRole('button', { name: '确认发布' }).click();
+    await ui(page.getByRole('alert')).toContainText('同样的文件');
+    expect(uploads).toHaveLength(1);
+    await page.getByRole('button', { name: /移除/ }).click();
+    await page.getByLabel('选择要发布的图片或视频').setInputFiles(file);
+    await page.getByRole('button', { name: '发布', exact: true }).click();
+    await page.getByRole('dialog').getByRole('checkbox').click();
+    await page.getByRole('dialog').getByRole('button', { name: '确认发布' }).click();
+    await ui(page.getByText('已提交，正在等平台结果')).toBeVisible();
+    const keys = calls.filter(c => c.path === 'publishMonitor.publish.submit').map(c => (c.input as { idempotencyKey: string }).idempotencyKey);
+    expect(keys).toHaveLength(2);
+    expect(keys[1]).toBe(keys[0]);
+    expect(uploads).toHaveLength(2);
+  } finally { await page.close(); }
+}, 30000);

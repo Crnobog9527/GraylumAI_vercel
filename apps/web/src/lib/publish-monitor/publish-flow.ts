@@ -45,6 +45,7 @@ export function newIdempotencyKey(): string {
   return `pub-${crypto.randomUUID()}`;
 }
 
+export const MAX_CAPTION = 5000;
 export const MAX_COVER_MS = 24 * 3600 * 1000;
 
 const MESSAGES: Record<string, string> = {
