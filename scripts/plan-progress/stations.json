@@ -295,6 +295,10 @@
           "plain": "银行卡订阅改用 Stripe（MP 覆盖的国家代收代缴税，未覆盖的照常卖并监控纳税门槛）；中国大陆用户可选微信、支付宝或大陆银行卡。正式开通、税务编码、正式密钥和回调到上线前再逐项请你批准。"
         },
         {
+          "name": "PAY-FAILOVER",
+          "plain": "Stripe 出问题时把新购买马上切到 Waffo，上线前实测切换和切回。"
+        },
+        {
           "name": "PAY-FOUNDER",
           "plain": "创始社群、展示墙和徽章，独立交付。"
         },
@@ -414,6 +418,19 @@
       "afterLaunch": true,
       "tasks": [],
       "note": "第二版功能，方案已写好，上线后再做。"
+    },
+    {
+      "id": "attribution",
+      "name": "看清用户从哪来、卡在哪",
+      "plain": "上线后接入 PostHog，看访客从哪来（含 AI 推荐）、中间走了哪些页面、在哪一步离开、哪条路径付了钱。",
+      "afterLaunch": true,
+      "tasks": [
+        {
+          "name": "ANALYTICS-POSTHOG",
+          "plain": "接入 PostHog（美国区），跟随 Cookie 同意弹窗；开工前先出方案。",
+          "note": "上线后第一周开工，冻结前不做。"
+        }
+      ]
     },
     {
       "id": "chargeback",
