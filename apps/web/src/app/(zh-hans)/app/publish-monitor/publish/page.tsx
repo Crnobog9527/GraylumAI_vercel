@@ -161,7 +161,8 @@ function PublishPage() {
   const result = params.get('result');
   const session = params.get('session');
   const source: Source | null = item && UUID.test(item) ? { kind: 'item', id: item }
-    : result && UUID.test(result) ? { kind: 'result', id: result, ...(session && UUID.test(session) ? { sessionId: session } : {}) } : null;
+    : result && UUID.test(result)
+      ? { kind: 'result', id: result, ...(session && UUID.test(session) ? { sessionId: session } : {}) } : null;
   return (
     <main className="mx-auto max-w-2xl px-4 py-10">
       {source ? <Workbench source={source} /> : <p role="alert">请从资料库里的选题，或对话的成果夹里打开一键发布。</p>}
