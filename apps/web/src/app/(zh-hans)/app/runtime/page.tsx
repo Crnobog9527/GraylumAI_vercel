@@ -19,6 +19,7 @@ import { followTranscript, transcriptSignature } from '@/components/chat/chat-sc
 import { WorkComposer } from '@/components/opc/work-composer';
 import { WorkspaceFrame } from '@/components/opc/workspace-frame';
 import { ContentEditor } from '@/components/opc/content-editor';
+import { SaveReplyButton, SessionResultsPanel } from '@/components/opc/session-results';
 import composerStyles from '@/components/opc/work-composer.module.css';
 import workStyles from './runtime-work.module.css';
 import {
@@ -109,7 +110,8 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  const view=trpc.runtime.view.useQuery({sessionId},{enabled:Boolean(sessionId),...viewPolling.options});
  const router=useRouter();
  // A deleted conversation (here, in another tab, or just before a reload) never stays open: start a new one.
- const erased=Boolean(view.error)&&classifyErasureError(view.error,'preview').type==='gone';
+ // NOT_FOUND (someone else's or a missing one, which read the same) leaves the same way.
+ const erased=Boolean(view.error)&&(classifyErasureError(view.error,'preview').type==='gone'||view.error?.data?.code==='NOT_FOUND');
  useEffect(()=>{if(erased)router.replace('/app/positioning');},[erased,router]);
  // A resumed turn may settle charges: re-read the balance as each streamed turn does.
  // "继续" streams too: the same execution and resume token over runtime.resumeStream (runner is declared below).
@@ -117,6 +119,9 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  const saved=trpc.opc.workResults.useQuery({sessionId},{enabled:Boolean(sessionId&&view.data?.scope?.kind==='work_item')});
  const saveWorkResult=trpc.opc.saveWorkResult.useMutation();
  const library=trpc.opc.library.useQuery({search:'',from:null,to:null},{enabled:Boolean(sessionId&&view.data?.scope?.kind==='work_item')});
+ // C1-lite: an ordinary free conversation's results folder (the database refuses other sessions).
+ const freeChat=Boolean(sessionId&&view.data?.scope?.kind==='positioning_draft');
+ const results=trpc.opc.sessionResults.useQuery({sessionId},{enabled:freeChat,retry:false});
  const [panelOpen,setPanelOpen]=useState(true),[guiding,setGuiding]=useState(false);
  const guidanceAttempt=useRef(false);
  const [typePending,setTypePending]=useState(false);
@@ -380,16 +385,19 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  async function setType(value:string){if(!workItem)return;const key='opc-content-type:'+workItem.workItemId;try{await navigator.locks.request(key,async()=>{const raw=localStorage.getItem(key);const frozen=raw?JSON.parse(raw):{requestId:crypto.randomUUID(),target:'item' as const,targetId:workItem.workItemId,expectedRevision:workItem.revision,patch:{title:workItem.title,brief:workItem.brief??'',day:workItem.day,contentType:value}};localStorage.setItem(key,JSON.stringify(frozen));setTypePending(true);await editItem.mutateAsync(frozen);localStorage.removeItem(key);setTypePending(false);await library.refetch();});}catch(cause){const code=cause instanceof Error?cause.message:'';if(['OPC_VERSION_CONFLICT','OPC_REQUEST_CONFLICT','OPC_DENIED','OPC_LIBRARY_INVALID'].includes(code)){localStorage.setItem(key+':rejected',localStorage.getItem(key)??'');localStorage.removeItem(key);setTypePending(false);await library.refetch();setError('类型保存已明确拒绝，已读取当前版本，请重新确认。');}else setError('类型保存状态待核实；再次选择会恢复原请求，不会覆盖为另一类型。');}}
 
  return <WorkspaceFrame area="chat" activeWorkItemId={workItem?.workItemId} notice={choices.data?.mode==='staging_test'?'Staging 真实对话测试 · 消耗测试预算':choices.data?.mode==='isolated'?'本地隔离 · 模型回复为模拟，保存写入本地测试服务':undefined} rightOpen={panelOpen} onToggleRight={()=>setPanelOpen(value=>!value)} right={workItem?(contentType==='unknown'?<RuntimeTypePendingPanel/>:<ContentEditor key={workItem.workItemId+':'+contentType} item={workItem} onSaved={()=>library.refetch()}><RuntimeResultsSection isVideo={isVideo} versions={versions}
-  currentScriptId={currentScript?.id} saved={saved.data} libraryHref={'/app/library?item='+workItem.workItemId+'&return='+sessionId}/></ContentEditor>):undefined}><main className={`${workStyles.conversation} flex h-full min-h-0 flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]`}>
+  currentScriptId={currentScript?.id} saved={saved.data} libraryHref={'/app/library?item='+workItem.workItemId+'&return='+sessionId}/></ContentEditor>)
+  :results.data?.length?<SessionResultsPanel sessionId={sessionId} items={results.data}/>:undefined}><main className={`${workStyles.conversation} flex h-full min-h-0 flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]`}>
   <RuntimeHeader title={workItem?.title??'工作对话'}
    subtitle={workItem?undefined:(choices.data?.mode??view.data?.mode)==='staging_test'?'Staging 真实对话测试'
     :(choices.data?.mode??view.data?.mode)==='production'?undefined:'本地模拟体验'}
    meta={workItem?{platform:workItem.platform,account:workItem.account,infoHref:'/app/library?item='+workItem.workItemId+'&return='+sessionId,
     showExpand:!panelOpen,onExpand:()=>setPanelOpen(true)}:undefined}
    action={!sessionId&&requestedModule?<Button variant="outline" disabled={busy||!choices.data||Boolean(input.trim())||Boolean(requestedModule&&!chosenModule)}
-    onClick={open}><Plus className="mr-2 h-4 w-4"/>用此功能准备新任务</Button>:null}/>
+    onClick={open}><Plus className="mr-2 h-4 w-4"/>用此功能准备新任务</Button>
+    // A closed results folder of a free chat reopens here (the frame's own reopen button is mobile-only).
+    :!workItem&&!panelOpen&&results.data?.length?<Button variant="outline" onClick={()=>setPanelOpen(true)}>展开成果夹</Button>:null}/>
   {requestedModule&&!chosenModule&&<p className="shrink-0 px-6 py-1 text-center text-[11px] text-[var(--text-tertiary)]">所选功能当前不满足本地工作区准入条件；不会自动换用其他功能。</p>}
-  <QueryNotice error={choices.error||view.error||library.error} label="当前工作" retry={()=>Promise.all([choices.refetch(),...(sessionId?[view.refetch()]:[]),...(sessionId&&view.data?.scope?.kind==='work_item'?[library.refetch()]:[])])}/>
+  <QueryNotice error={choices.error||view.error||library.error||results.error} label="当前工作" retry={()=>Promise.all([choices.refetch(),...(sessionId?[view.refetch()]:[]),...(sessionId&&view.data?.scope?.kind==='work_item'?[library.refetch()]:[]),...(freeChat?[results.refetch()]:[])])}/>
   <div ref={scrollArea} onScroll={rememberScroll} className={workStyles.scrollArea} aria-label="对话记录">
    {!executions?.length&&<RuntimeEmptyState
     text={workItem?'已带入选题简报和原工作方法，正在根据当前进度准备引导。':sessionId?'输入一条消息，发送后可刷新查看记录。':'从左侧“新对话”开始。'}/>}
@@ -409,6 +417,11 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
       text={displayReply(e.input,e.body??e.primaryBody)}/>:!liveReplyText(runner.reply,e.executionId,e)&&showsReply(e)&&<RuntimeReply available={e.contentAvailable} text={displayReply(e.input,e.body??e.primaryBody)}/>}
      {workItem&&contentType!=='unknown'&&e.state==='completed'&&e.skillExecution&&!e.input?.startsWith('[OPC_VIDEO_PACKAGE_V1]')&&!e.input?.startsWith('[OPC_WORK_CONTINUE_V1]')&&<div className="mt-3 flex flex-wrap gap-2">{versions.some(v=>v.kind===(isVideo?'script':'brief')&&v.executionId===e.executionId)?<Link className="underline" href={'/app/library?item='+workItem.workItemId+'&return='+sessionId}>{isVideo?'这版口播稿已定稿':'已采用为草稿'} · 查看</Link>:<Button disabled={busy} onClick={()=>finalizeScript(e.executionId)}>{isVideo?'将这条回复定稿为口播稿':'采用为当前草稿'}</Button>}</div>}
      {workItem&&contentType==='unknown'&&e.state==='completed'&&e.skillExecution&&e.contentAvailable&&!e.input?.startsWith('[OPC_WORK_CONTINUE_V1]')&&!e.input?.startsWith('[OPC_VIDEO_PACKAGE_V1]')&&<div className="mt-2">{saved.data?.find((result:{artifactId:string;version:number})=>result.artifactId===e.executionId)?<p role="status">已保存成果 · 第 {saved.data.find((result:{artifactId:string;version:number})=>result.artifactId===e.executionId)?.version} 版</p>:<Button variant="outline" disabled={saveWorkResult.isPending} onClick={()=>persistSkillResult(e.executionId)}>保存 Skill 成果</Button>}</div>}
+     {/* Only a reply shown exactly as stored can be saved: the server keeps verbatim text, never a reformatted list. */}
+     {freeChat&&results.isSuccess&&e.state==='completed'&&e.contentAvailable&&(e.body??e.primaryBody)&&
+      displayReply(e.input,e.body??e.primaryBody)===(e.body??e.primaryBody)&&
+      <SaveReplyButton sessionId={sessionId} executionId={e.executionId} reply={(e.body??e.primaryBody)!}
+       saved={results.data.some(result=>result.sourceExecutionId===e.executionId)}/>}
      <LiveReplyText text={liveReplyText(runner.reply,e.executionId,e)}/>
      <ChatNoticeList notices={[...turnNotices(e),...withResumeStop(payg.turnNotices(e,busy),
       runner.streaming&&runner.reply?.executionId===e.executionId,{onClick:()=>void stop(e.executionId),disabled:cancel.isPending})]}/>

@@ -41,6 +41,18 @@ describe('BillingRecordsCard', () => {
     expect(html).toContain('凭证可查看');
   });
 
+  it('shows a Stripe tax-exclusive order as the tax-inclusive amount charged', () => {
+    state.data = [{ ...base, id: 'a', itemType: 'membership_plan', amountTotal: 496, documentStatus: 'available',
+      amountFacts: [{ kind: 'paid', amount: '496.00', currency: 'usd', unit: 'major' },
+        { kind: 'tax', amount: '24.80', currency: 'usd', unit: 'major' }] }];
+    const html = renderToStaticMarkup(createElement(BillingRecordsCard));
+    expect(html).toContain('$520.80');
+    expect(html).not.toContain('$496.00');
+    expect(html).toContain('<dt>实付</dt><dd');
+    expect(html).toContain('USD 520.80（含税 USD 24.80）');
+    expect(html).not.toContain('<dt>税费</dt>');
+  });
+
   it('labels a missing channel as unknown', () => {
     state.data = [{ ...base, id: 'a', paymentChannel: null, paymentChannelLabel: '未知渠道', documentStatus: 'unknown' }];
     expect(renderToStaticMarkup(createElement(BillingRecordsCard))).toContain('支付渠道 未知渠道');

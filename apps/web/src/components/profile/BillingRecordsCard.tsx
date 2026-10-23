@@ -3,7 +3,7 @@
 import { ScrollText } from 'lucide-react';
 import { trpc } from '@/trpc/client';
 import { AmountFactList, DocumentStatusBadge, PaymentDocumentLinks } from '@/components/payments/PaymentDocumentLinks';
-import { USER_AMOUNT_FACT_KINDS, buildAmountFactRows, getPaymentChannelLabel } from '@/lib/payment-display';
+import { buildUserAmountFactRows, getPaymentChannelLabel, getTaxInclusivePaid } from '@/lib/payment-display';
 import { getBillingRecordStatusPresentation } from './billingRecordStatus';
 
 function formatMoney(amount: number, currency: string) {
@@ -119,12 +119,13 @@ export default function BillingRecordsCard() {
                     </div>
 
                     <div className="flex flex-wrap gap-4 text-sm" style={{ color: 'var(--text-tertiary)' }}>
-                      <span>{formatMoney(record.amountTotal, record.currency)}</span>
+                      <span>{formatMoney(Number(getTaxInclusivePaid(record.amountFacts)?.total ?? record.amountTotal),
+                        record.currency)}</span>
                       <span>{formatDate(record.fulfilledAt ?? record.createdAt)}</span>
                       <span>支付渠道 {getPaymentChannelLabel(record.paymentChannelLabel)}</span>
                       {record.invoiceNumber && <span>发票号 {record.invoiceNumber}</span>}
                     </div>
-                    <AmountFactList rows={buildAmountFactRows(record.amountFacts, { allowed: USER_AMOUNT_FACT_KINDS })} />
+                    <AmountFactList rows={buildUserAmountFactRows(record.amountFacts)} />
                   </div>
 
                   <div className="flex flex-wrap gap-2">
