@@ -79,6 +79,8 @@ function providerEvidence(observation:TransportObservation,identity:CallIdentity
 }
 const financialNames=new Set(['bill2_read','bill2_record','bill2_finalize','bill2_pending_calls','bill2_recovery_claim',
   'bill2_revoke_unstarted_dispatch','bill2_close','bill2_cancel','runtime_receipt_saved']);
+const CLAIM_RESEND_MIN_MS=3_000;
+const serverCancelled=(error:unknown)=>typeof error==='object'&&error!==null&&(error as {code?:unknown}).code==='57014';
 export type DispatchClaim = { id: string; state: string; dispatchToken: string | null };
 /** Trusted server composition only: actor comes from verified authentication, policy from the server.
  * No public route exposes raw RPC payloads or accepts a browser price/receipt. No env/fallback loading. */
@@ -101,7 +103,11 @@ export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: Billi
       const query=deps.admin.rpc(name,bound);
       return financialNames.has(name)&&query.abortSignal ? query.abortSignal(AbortSignal.timeout(Math.min(10_000,remaining))) : query;
     };
-    const result=await (isBillingRead(name)?readBillingRpc(deps.admin,name,bound,deps.budget):send());
+    let result=await (isBillingRead(name)?readBillingRpc(deps.admin,name,bound,deps.budget):send());
+    // 57014 is the database cancelling the claim statement itself, so its transaction rolled back and
+    // nothing was reserved. The claim is keyed by run + sequence + payload: one identical resend is safe.
+    if (result.error && name==='bill2_claim' && serverCancelled(result.error)
+      && (deps.budget?.remainingPersistence()??10_000)>=CLAIM_RESEND_MIN_MS) result=await send();
     if (result.error) {
       if (name === 'bill2_claim' || name === 'bill2_dispatch' || name === 'fusion_group_claim') throw claimFailure(result.error);
       // Before 0261 the database refuses a non-402 pending refusal; dispatch then records the plain observation.
