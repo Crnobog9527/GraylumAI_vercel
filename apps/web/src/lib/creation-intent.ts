@@ -11,9 +11,19 @@
  */
 const MAX_SCANNED = 4000;
 // Chinese: creation verbs and the things people ask Skills for.
-const ZH = /(?:写|撰|改写|润色|扩写|续写|起草|编写|创作|重写|重新写|换一[版条篇个段]|再来一[版条篇个段]|缩短|精简|出一[版条篇个段]|来一[版条篇个段]|生成.{0,6}(?:文|稿|案|本|题|标题|脚本)|口播|文案|脚本|分镜|剪辑|标题|选题|话题|稿子?|文章|图文|帖子|贴文|推文|笔记|简介|话术|开场白|结尾|钩子|爆款)/;
+const ZH = new RegExp([
+  '写|撰|改写|润色|扩写|续写|起草|编写|创作|重写|重新写|缩短|精简',
+  '[换再]?来一[版条篇个段]|换一[版条篇个段]|出一[版条篇个段]',
+  '生成.{0,6}(?:文|稿|案|本|题|标题|脚本)',
+  '口播|文案|脚本|分镜|剪辑|标题|选题|话题|稿子?|文章|图文|帖子|贴文|推文|笔记|简介|话术|开场白|结尾|钩子|爆款',
+].join('|'));
 // English: whole-word forms only, so "postal" or "scripture" never match.
-const EN = /\b(?:write|writes|writing|draft|drafting|rewrite|rewriting|polish|compose|script|scripts|voice-?over|storyboard|shot list|caption|captions|headline|headlines|hook|hooks|blog post|article|essay|copywriting|ad copy|video idea|video ideas|content idea|content ideas|topic idea|topic ideas|reel|reels|tiktok script)\b/i;
+const EN = new RegExp('\\b(?:' + [
+  'write|writes|writing|draft|drafting|rewrite|rewriting|polish|compose',
+  'script|scripts|voice-?over|storyboard|shot list|caption|captions|headline|headlines|hook|hooks',
+  'blog post|article|essay|copywriting|ad copy|reel|reels|tiktok script',
+  'video ideas?|content ideas?|topic ideas?',
+].join('|') + ')\\b', 'i');
 
 /** True when the message looks like a request to write, plan or polish content. Pure; no model, no network. */
 export function looksLikeCreationRequest(text: string | null | undefined): boolean {
