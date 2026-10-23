@@ -6,6 +6,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { connectErrorMessage } from '@/lib/publish-monitor-messages';
 import { trpc } from '@/trpc/client';
+import { AddAccountForm } from './AddAccountForm';
 import type { Brand, BrandAccount } from './brands';
 import { COMBINED_AUTH_PLATFORMS, connectRoute, dataErrorMessage, errorCode, platformName } from './labels';
 
@@ -27,10 +28,11 @@ export async function startPostForMe(body: StartBody, assign: (url: string) => v
   assign(json.url);
 }
 
-export function ConnectForm({ brands, connected, initialProjectId = '', onConnected }: { brands: Brand[]; connected: Set<string>;
-  initialProjectId?: string; onConnected: () => void }) {
+export function ConnectForm({ brands, connected, initialProjectId = '', onConnected, onAccountAdded }: { brands: Brand[];
+  connected: Set<string>; initialProjectId?: string; onConnected: () => void; onAccountAdded?: () => void }) {
   const accounts = brands.flatMap(brand => brand.accounts);
   const [projectId, setProjectId] = useState(initialProjectId);
+  const [addOpen, setAddOpen] = useState(false);
   const account = accounts.find(a => a.projectId === projectId) ?? null;
   return (
     <div className="space-y-3 rounded-lg border p-4" style={{ borderColor: 'var(--border-primary)' }}>
@@ -52,8 +54,9 @@ export function ConnectForm({ brands, connected, initialProjectId = '', onConnec
           ))}
         </select>
       </label>
-      {accounts.length === 0 && <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-        还没有品牌账号。先在对话里确定要做的平台和账号，这里就能连接。</p>}
+      {(addOpen || accounts.length === 0) ? <AddAccountForm brands={brands}
+        onAdded={id => { setAddOpen(false); setProjectId(id); onAccountAdded?.(); }} />
+        : <button type="button" className="text-sm underline" onClick={() => setAddOpen(true)}>没有想要的账号？添加品牌账号</button>}
       {account && connectRoute(account.platform) === 'postforme' && <PostForMeStart key={account.projectId} account={account} />}
       {account && connectRoute(account.platform) === 'profile_link'
         && <ProfileLinkConnect key={account.projectId} account={account} onConnected={onConnected} />}
