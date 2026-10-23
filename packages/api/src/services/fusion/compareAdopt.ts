@@ -17,7 +17,8 @@ import { fusionRequestBody } from './request';
 
 const uuid = z.string().uuid();
 const cardSchema = z.object({ compareId: uuid, sessionId: uuid, question: z.string(), workspaceDependencies: z.array(z.unknown()),
-  config: z.object({ skill: z.object({ moduleId: uuid, revisionId: uuid }).nullable().optional(),
+  adoption: z.object({ requestId: uuid.optional(), column: z.number().int(), executionId: uuid }).passthrough().nullable().optional(),
+  config: z.object({ skill: z.object({ moduleId: uuid, skillId: uuid, revisionId: uuid }).nullable().optional(),
     answerOutputTokens: z.number().int().positive().optional() }).passthrough() }).passthrough();
 const readSchema = z.object({ sessionId: uuid, columns: z.array(z.object({ column: z.number().int(), modelId: uuid,
   body: z.string().nullable() }).passthrough()) }).passthrough();
@@ -34,7 +35,8 @@ async function adoptionRun(admin: SupabaseClient, actorId: string, card: z.infer
   const deadline = admissionDeadline(window.expiresAt);
   const skill = card.config.skill ?? null;
   const module = skill ? await admin.from('modules').select('id,skill_id,model_id').eq('id', skill.moduleId).single() : null;
-  if (module && (module.error || !module.data)) throw new Error('FUSION_COMPARE_SKILL_MISMATCH');
+  // The module must still belong to the Skill frozen at start; a module re-bound to another Skill cannot take this adoption.
+  if (module && (module.error || !module.data || String(module.data.skill_id) !== skill!.skillId)) throw new Error('FUSION_COMPARE_SKILL_MISMATCH');
   const modelId = module ? String(module.data!.model_id) : column.modelId;
   const rows = await admin.from('ai_models').select(FUSION_MODEL_COLUMNS).eq('id', modelId);
   const row = (rows.data as FusionModelRow[] | null)?.[0];
@@ -67,7 +69,7 @@ async function adoptionRun(admin: SupabaseClient, actorId: string, card: z.infer
       dependencies: card.workspaceDependencies, fusionAdoption: { compareId: card.compareId, column: columnIndex } };
     return frozenPaygRunSchema.parse({ contractVersion: 'bill2.v2', ...realContract(window).host, scope: sessionScope,
       operation: 'question', modelId,
-      ...(module ? { moduleId: skill!.moduleId, skillId: String(module.data!.skill_id), revisionId: skill!.revisionId } : {}),
+      ...(module ? { moduleId: skill!.moduleId, skillId: skill!.skillId, revisionId: skill!.revisionId } : {}),
       sourceHash: createHash('sha256').update(JSON.stringify(input)).digest('hex'), input, callPolicy: [priced],
       rules, limits: { costUsd: call.upperUsd, credits: 0, maxPreDeduct: upperCredits, maxCalls: 1, deadline } });
   };
@@ -86,6 +88,13 @@ export async function adoptCompare(deps: { admin: SupabaseClient; actorId: strin
     { p_actor_id: actorId, p_session_id: read.sessionId }));
   const card = cards.find(c => c.compareId === input.compareId);
   if (!card) throw new Error('FUSION_COMPARE_DENIED');
+  // An adoption already written is answered from the stored record, with no staging window or billing needed: a retry whose
+  // first response was lost gets the same result later, and a different request or column is refused as the database does.
+  if (card.adoption) {
+    if (card.adoption.requestId !== input.requestId) throw new Error('FUSION_COMPARE_ADOPTED');
+    if (card.adoption.column !== input.column) throw new Error('FUSION_COMPARE_REQUEST_CONFLICT');
+    return { state: 'adopted', adoption: card.adoption };
+  }
   const session = await compareRpc<{ scope?: unknown }>(admin, 'runtime_session_context', { p_actor_id: actorId, p_session_id: read.sessionId });
   const run = await adoptionRun(admin, actorId, card, column, session.scope, deps.env ?? process.env);
   const items = [{ role: 'user', content: card.question },

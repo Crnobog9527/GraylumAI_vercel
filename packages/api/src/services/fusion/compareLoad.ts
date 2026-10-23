@@ -60,7 +60,7 @@ async function loadSkill(admin: SupabaseClient, user: SupabaseClient, skill: Non
     if (!descriptor) throw new Error('FUSION_COMPARE_SKILL_INVALID');
     // The whole free-chat activation (guide and steps' files): a compare column has no tools to read them later.
     const activated = await activateFreeChatSkill(source, descriptor, { task: skill.task, maxContextBytes: SKILL_BYTES });
-    return { moduleId: skill.moduleId, revisionId: skill.revisionId, instructions: activated.instructions,
+    return { moduleId: skill.moduleId, revisionId: skill.revisionId, skillId: String(module.data.skill_id), instructions: activated.instructions,
       resources: activated.loaded.resourceIdentities().map(r => ({ path: r.path, hash: sha(`${skill.revisionId}:${r.path}`) })),
       socialMedia: module.data.social_media_related === true };
   } catch { throw new Error('FUSION_COMPARE_SKILL_INVALID'); }

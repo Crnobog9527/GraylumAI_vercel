@@ -10,7 +10,6 @@ import { runtimeActor } from '../runtime/actor';
 import { loadStagingPolicy } from '../runtime/stagingPolicy';
 import { stagingTransport } from '../runtime/stagingTransport';
 import { StagingAccessError } from '../runtime/stagingErrors';
-import { adoptCompare } from './compareAdopt';
 import { compareRpc } from './compareAdmission';
 import { streamCompareColumn } from './compareColumn';
 import { loadCompareChoice, type CompareRequestInput } from './compareLoad';
@@ -83,6 +82,5 @@ export async function liveCompare(ctx: CompareCtx) {
     stream: (input: { compareId: string; column: number }) => streamCompareColumn({ admin, actorId, executor }, input),
     /** Settles a run whose only call was just judged (read after an interruption). */
     settle: (runId: string) => executor.settleJudged(runId),
-    adopt: (input: { compareId: string; column: number; requestId: string }) => adoptCompare({ admin, actorId }, input),
   };
 }

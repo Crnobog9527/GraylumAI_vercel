@@ -5,6 +5,7 @@ import { protectedProcedure, router } from '../trpc';
 import { StagingAccessError, stagingProcedureError } from '../services/runtime/stagingErrors';
 import { compareOptions } from '../services/fusion/compareOptions';
 import { compareRpc } from '../services/fusion/compareAdmission';
+import { adoptCompare } from '../services/fusion/compareAdopt';
 import { compareSkillInput } from '../services/fusion/compareLoad';
 import { liveCompare, readCompare, stopCompare, type CompareCtx } from '../services/fusion/compareLive';
 import type { ColumnEvent } from '../services/fusion/compareColumn';
@@ -74,6 +75,7 @@ export const fusionCompareRouter = router({
   stop: reader.input(compare.extend({ column: z.number().int().min(0).max(7).optional() }).strict())
     .mutation(({ ctx, input }) => stopCompare(ctx.admin, ctx.user.id, input)),
   /** "Use this answer": writes the pair into the main conversation, or returns a quote when it moved on. Free. */
-  adopt: worker.input(compare.extend({ column: z.number().int().min(0).max(7), requestId: uuid }).strict())
-    .mutation(({ ctx, input }) => ctx.compare.adopt(input)),
+  // Adoption makes no provider call and holds nothing: it needs only the admin client (a replay works after the window closes).
+  adopt: reader.input(compare.extend({ column: z.number().int().min(0).max(7), requestId: uuid }).strict())
+    .mutation(({ ctx, input }) => adoptCompare({ admin: ctx.admin, actorId: ctx.user.id }, input)),
 });
