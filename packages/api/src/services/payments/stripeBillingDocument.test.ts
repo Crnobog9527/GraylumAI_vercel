@@ -64,4 +64,40 @@ describe('Stripe document projection failures', () => {
       metadata: { userId: order.user_id, orderId: order.id }, payment_intent: paymentIntent }, false);
     expect(projectOrderPayment(order, await loadStripeBillingDocument(stripe, db, order)).documentStatus).toBe('unknown');
   });
+  it('verifies a Managed Payments invoice whose paid total includes the tax added on top', async () => {
+    // user12 founder annual: order amount_total 49600 (pre-tax), Stripe charged 52080 with 2480 tax.
+    const founder = { ...order, amount_total: 49600, item_type: 'membership_plan', billing_cycle: 'yearly' as const };
+    const { stripe, db } = setup({ id: 'in_fixture', livemode: false, amount_paid: 52080, currency: 'usd',
+      total_taxes: [{ amount: 2480 }], invoice_pdf: 'https://invoice.stripe.com/fixture' });
+    expect(projectOrderPayment(founder, await loadStripeBillingDocument(stripe, db, founder)).documentStatus).toBe('available');
+  });
+  it('verifies a checkout receipt whose total includes Stripe tax', async () => {
+    const receipt = 'https://pay.stripe.com/receipts/fixture';
+    const { stripe, db } = setup({ id: 'cs_fixture', livemode: false, amount_total: 105, total_details: { amount_tax: 5 },
+      currency: 'usd', metadata: { userId: order.user_id, orderId: order.id },
+      payment_intent: { latest_charge: { receipt_url: receipt } } }, false);
+    const result = await loadStripeBillingDocument(stripe, db, order);
+    expect(result.receiptUrl).toBe(receipt);
+    expect(projectOrderPayment(order, result).documentStatus).toBe('available');
+  });
+  it.each([
+    ['tax does not explain the difference', { amount_paid: 52080, total_taxes: [{ amount: 2000 }] }],
+    ['tax-inclusive total with no tax reported', { amount_paid: 52080 }],
+    ['pre-tax total but tax reported on top', { amount_paid: 49600, total_taxes: [{ amount: 2480 }] }],
+    ['tax larger than the total', { amount_paid: 100, total_taxes: [{ amount: -49500 }] }],
+    ['another currency', { amount_paid: 52080, total_taxes: [{ amount: 2480 }], currency: 'eur' }],
+  ])('still reports a real invoice mismatch as unknown: %s', async (_name, patch) => {
+    const founder = { ...order, amount_total: 49600 };
+    const { stripe, db } = setup({ id: 'in_fixture', livemode: false, currency: 'usd',
+      invoice_pdf: 'https://invoice.stripe.com/fixture', ...patch });
+    const result = await loadStripeBillingDocument(stripe, db, founder);
+    expect(result.invoicePdfUrl).toBeNull();
+    expect(projectOrderPayment(founder, result).documentStatus).toBe('unknown');
+  });
+  it('still reports a checkout total that tax does not explain as unknown', async () => {
+    const { stripe, db } = setup({ id: 'cs_fixture', livemode: false, amount_total: 110, total_details: { amount_tax: 5 },
+      currency: 'usd', metadata: { userId: order.user_id, orderId: order.id },
+      payment_intent: { latest_charge: { receipt_url: 'https://pay.stripe.com/receipts/fixture' } } }, false);
+    expect(projectOrderPayment(order, await loadStripeBillingDocument(stripe, db, order)).documentStatus).toBe('unknown');
+  });
 });
