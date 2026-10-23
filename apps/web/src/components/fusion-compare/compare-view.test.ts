@@ -58,3 +58,14 @@ describe('compare cards in the transcript', () => {
     expect(placed.get(1)?.map(c => c.compareId)).toEqual(['c']);
   });
 });
+
+import { isDefiniteRefusal } from './compare-view';
+describe('which failures spend the start request id', () => {
+  it('a server refusal with a compare code does; a lost response or network failure does not', () => {
+    expect(isDefiniteRefusal({ message: 'FUSION_COMPARE_ACTIVE' })).toBe(true);
+    expect(isDefiniteRefusal({ message: 'REPORT_MEMBERSHIP_REQUIRED' })).toBe(true);
+    expect(isDefiniteRefusal({ message: 'POSITIONING_REQUIRED' })).toBe(true);
+    expect(isDefiniteRefusal({ message: 'Failed to fetch' })).toBe(false);
+    expect(isDefiniteRefusal(new Error('NetworkError when attempting to fetch resource.'))).toBe(false);
+  });
+});

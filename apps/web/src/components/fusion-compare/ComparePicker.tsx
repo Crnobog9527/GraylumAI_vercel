@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { profileTabHref } from '@/lib/profile-tabs';
-import { compareErrorText, initialPick, isUpgradeRefusal, pickStatus, togglePick, type CompareOptions } from './compare-view';
+import { compareErrorText, initialPick, isDefiniteRefusal, isUpgradeRefusal, pickStatus, togglePick, type CompareOptions } from './compare-view';
 import styles from './compare.module.css';
 
 export type CompareSkill = { kind: 'skill'; moduleId: string; revisionId: string; task?: string };
@@ -21,9 +21,13 @@ type Estimate = { credits: number; columns: Array<{ modelId: string; credits: nu
  * the user may untick or pick others within [minModels, maxModels]; "最多消耗 X 积分" is priced by the server for exactly this
  * request and the start carries it, so the group never holds more than the user agreed to.
  */
-export function CompareButton({ sessionId, question, skill, disabled, onStarted }: {
+export function CompareButton({ sessionId, question, skill, disabled, blockedReason, onStarted, onMaybeStarted }: {
   sessionId: string; question: string; skill?: CompareSkill; disabled?: boolean;
+  /** Why a compare cannot start with this message (shown as the button's hint), for example an @ library reference. */
+  blockedReason?: string;
   onStarted: (compareId: string, names: Record<string, string>) => void;
+  /** A start whose outcome is unknown (the response was lost): the page re-reads the conversation's compares. */
+  onMaybeStarted?: () => void;
 }) {
   const options = trpc.fusionCompare.options.useQuery(undefined, { staleTime: 60_000, retry: false });
   const [open, setOpen] = useState(false);
@@ -34,16 +38,18 @@ export function CompareButton({ sessionId, question, skill, disabled, onStarted 
       onClick={() => void window.open(profileTabHref('subscription'), '_blank', 'noopener')}><Columns3 size={16} /> 多模型对比 · Gold 专享</button>;
   }
   return <>
-    <button type="button" className={styles.entry} disabled={disabled || !question.trim()} title={question.trim() ? undefined : '先写好问题再对比'}
+    <button type="button" className={styles.entry} disabled={disabled || !question.trim() || Boolean(blockedReason)}
+      title={blockedReason ?? (question.trim() ? undefined : '先写好问题再对比')}
       onClick={() => setOpen(true)}><Columns3 size={16} /> 多模型对比</button>
     {open && <ComparePicker options={data} sessionId={sessionId} question={question} skill={skill} onClose={() => setOpen(false)}
+      onMaybeStarted={onMaybeStarted}
       onStarted={(compareId, names) => { setOpen(false); onStarted(compareId, names); }} />}
   </>;
 }
 
-function ComparePicker({ options, sessionId, question, skill, onClose, onStarted }: {
+function ComparePicker({ options, sessionId, question, skill, onClose, onStarted, onMaybeStarted }: {
   options: Extract<CompareOptions, { enabled: true }>; sessionId: string; question: string; skill?: CompareSkill;
-  onClose: () => void; onStarted: (compareId: string, names: Record<string, string>) => void;
+  onClose: () => void; onMaybeStarted?: () => void; onStarted: (compareId: string, names: Record<string, string>) => void;
 }) {
   const [picked, setPicked] = useState(() => initialPick(options));
   const [error, setError] = useState<{ text: string; upgrade: boolean } | null>(null);
@@ -78,7 +84,10 @@ function ComparePicker({ options, sessionId, question, skill, onClose, onStarted
       if (result.state === 'processing') { setError({ text: '正在准备，请稍候再点一次开始。', upgrade: false }); return; }
       onStarted(result.compareId, names);
     } catch (cause) {
-      requestId.current = null;
+      // A definite refusal (a compare error code from the server) ends this request id. Anything else (network, a lost
+      // response) may have claimed the group: keep the id so the next click replays the same start instead of meeting
+      // FUSION_COMPARE_ACTIVE, and re-read the compares so an already created card shows up.
+      if (isDefiniteRefusal(cause)) requestId.current = null; else onMaybeStarted?.();
       setError({ text: compareErrorText(cause), upgrade: isUpgradeRefusal(cause) });
     }
   }

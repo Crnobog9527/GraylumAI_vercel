@@ -34,6 +34,8 @@ export function CompareCard({ compareId, names, onAdopted, onQuote }: {
   const [tab, setTab] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const started = useRef(new Set<number>());
+  const attempts = useRef(new Map<number, number>());
+  const [retryTick, setRetryTick] = useState(0);
   const adoptRequest = useRef<{ column: number; id: string } | null>(null);
   const streaming = Object.values(live).some(column => column.streaming);
   const view = trpc.fusionCompare.read.useQuery({ compareId }, {
@@ -62,11 +64,19 @@ export function CompareCard({ compareId, names, onAdopted, onQuote }: {
         } catch (cause) { setError(compareErrorText(cause)); }
         finally {
           setLive(old => ({ ...old, [column.column]: { text: old[column.column]?.text ?? '', streaming: false } }));
-          void view.refetch();
+          // The column may still be undispatched (the server released its claim after a failure before anything was sent):
+          // ask for it again, a few times and not in a tight loop, so it neither needs a page reload nor hammers the server.
+          const fresh = (await view.refetch()).data as View | undefined;
+          const again = fresh?.columns.find(item => item.column === column.column);
+          const tries = (attempts.current.get(column.column) ?? 0) + 1;
+          attempts.current.set(column.column, tries);
+          if (fresh?.state === 'running' && again && columnPhase(again, fresh.state) === 'queued' && tries < 3) {
+            setTimeout(() => { started.current.delete(column.column); setRetryTick(tick => tick + 1); }, 2000);
+          }
         }
       })();
     }
-  }, [data, compareId, utils, view]);
+  }, [data, compareId, utils, view, retryTick]);
 
   if (!data) return <section className={styles.card} aria-busy="true"><p className={styles.muted}>正在读取对比…</p></section>;
   const adoptedColumn = data.adoption?.column ?? null;

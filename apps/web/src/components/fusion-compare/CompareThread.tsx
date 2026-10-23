@@ -3,7 +3,6 @@
 
 import { trpc } from '@/trpc/client';
 import { CompareCard } from './CompareCard';
-import type { CompareOptions } from './compare-view';
 
 export type CompareCardRow = { compareId: string; state: string; createdAt: string; adoption?: { executionId?: string } | null };
 type Card = CompareCardRow;
@@ -27,12 +26,13 @@ export function placeCompareCards(cards: readonly Card[], turns: ReadonlyArray<{
  * the page cannot mark anything itself), and the real model names for the column titles.
  */
 export function useCompareThread(sessionId: string | null) {
-  const options = trpc.fusionCompare.options.useQuery(undefined, { staleTime: 60_000, retry: false });
-  const enabled = Boolean(sessionId) && (options.data as CompareOptions | undefined)?.enabled === true;
-  const list = trpc.fusionCompare.list.useQuery({ sessionId: sessionId ?? '' }, { enabled, retry: false });
-  const cards = (enabled ? (list.data as Card[] | undefined) ?? [] : []);
-  const data = options.data as CompareOptions | undefined;
-  const names: Record<string, string> = data?.enabled ? Object.fromEntries(data.models.map(model => [model.id, model.name])) : {};
+  // The conversation's existing compares are listed whatever the switch, the plan or the allowlist say now: only the new-compare
+  // button depends on eligibility. A compare still running must keep its controls (dispatch, stop) and a finished one its answers.
+  const list = trpc.fusionCompare.list.useQuery({ sessionId: sessionId ?? '' }, { enabled: Boolean(sessionId), retry: false });
+  const data = list.data as { cards: Card[]; names: Record<string, string> } | undefined;
+  const cards = data?.cards ?? [];
+  // Real model names of exactly the models these cards used (server-resolved), not today's allowlist.
+  const names = data?.names ?? {};
   const adoptedExecutions = new Set(cards.map(card => card.adoption?.executionId).filter((id): id is string => Boolean(id)));
   return { cards, names, adoptedExecutions, refresh: () => list.refetch() };
 }

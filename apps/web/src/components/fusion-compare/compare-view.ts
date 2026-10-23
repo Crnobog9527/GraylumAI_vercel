@@ -53,6 +53,9 @@ export function compareErrorText(error: unknown): string {
   const message = error && typeof error === 'object' && 'message' in error ? String((error as { message: unknown }).message) : '';
   return REFUSALS[message] ?? '多模型对比暂时出了点问题，请稍后再试。';
 }
+/** A refusal the server states with a compare/report/positioning code: the request was not admitted, so its id is spent. */
+export const isDefiniteRefusal = (error: unknown) => /^(FUSION|REPORT)_[A-Z_]+$|^POSITIONING_REQUIRED$/
+  .test(error && typeof error === 'object' && 'message' in error ? String((error as { message: unknown }).message) : '');
 export const isUpgradeRefusal = (error: unknown) => /FUSION_COMPARE_FORBIDDEN|FUSION_MEMBERSHIP_REQUIRED/
   .test(error && typeof error === 'object' && 'message' in error ? String((error as { message: unknown }).message) : '');
 

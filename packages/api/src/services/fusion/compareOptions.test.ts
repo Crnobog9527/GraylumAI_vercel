@@ -67,3 +67,17 @@ describe('compare picker options', () => {
     await expect(compareOptions(admin, id(50))).rejects.toThrow('FUSION_SETTINGS_UNAVAILABLE');
   });
 });
+
+import { compareModelNames } from './compareOptions';
+describe('compare card model names', () => {
+  it('names exactly the models a conversation used, even ones no longer on the allowlist or switched off', async () => {
+    state.compare = { enabled: false, allowedModelIds: [], defaultModelIds: [], minModels: 2 };
+    state.rows = [{ id: id(1), name: 'Claude Sonnet 5.5', model_id: 'anthropic/claude-sonnet-5.5', is_active: 'false' }];
+    expect(await compareModelNames(admin, [id(1), id(1)])).toEqual({ [id(1)]: 'Claude Sonnet 5.5' });
+    expect(await compareModelNames(admin, [])).toEqual({});
+  });
+  it('reports an unreadable model list as unavailable, never a partial map', async () => {
+    state.error = true;
+    await expect(compareModelNames(admin, [id(1)])).rejects.toThrow('FUSION_SETTINGS_UNAVAILABLE');
+  });
+});
