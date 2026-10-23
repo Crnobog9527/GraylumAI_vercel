@@ -165,4 +165,14 @@ describe('free chat research tools', () => {
       .toMatchObject({ status: 'unavailable', reason: 'OPERATION_IDENTITY_MISMATCH' });
     expect(other.sent).toHaveLength(0);
   });
+
+  it('a two-request account lookup still fits when only two subcalls of the round are left', async () => {
+    const f = fixture({ used: 10, benchmark: ['alice'] });
+    const result = await f.execute('social_account', { platform: 'tiktok', account: 'alice' });
+    expect(result.status).toBe('ok');
+    expect(f.sent).toHaveLength(2);
+    const refused = fixture({ used: 11, benchmark: ['alice'] });
+    expect(await refused.execute('social_account', { platform: 'tiktok', account: 'alice' })).toMatchObject({ status: 'budget_exhausted' });
+    expect(refused.sent).toHaveLength(0);
+  });
 });

@@ -3807,7 +3807,7 @@
   "fn:research_cancel(uuid,uuid)": "eed19976d2ba",
   "fn:research_card_confirm(uuid,uuid,jsonb)": "6570eed06955",
   "fn:research_card_create(uuid,uuid,uuid,uuid,jsonb)": "e105b452c15c",
-  "fn:research_chat_benchmark_accounts(uuid,uuid,uuid)": "e424d1f89293",
+  "fn:research_chat_benchmark_accounts(uuid,uuid,uuid)": "ce2369d357f0",
   "fn:research_confirmation_read(uuid,uuid,uuid)": "898632f62746",
   "fn:research_discovery_save(uuid,uuid,uuid,jsonb,text)": "040af686a299",
   "fn:research_discovery_start(uuid,uuid,uuid,uuid,text[])": "c3ec298437ed",

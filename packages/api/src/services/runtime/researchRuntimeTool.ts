@@ -2,10 +2,11 @@
 // The positioning research tools. RT-3b PR-3 offers the frozen subset in a mentor turn (researchExecution.ts).
 import { z } from 'zod';
 import type { RuntimeTool } from './runner';
-import { admitSubcalls, POSITIONING_RESEARCH_TOOLS, RESEARCH_TOOL_DESCRIPTIONS, researchToolArgs, subcallNeed,
+import { admitSubcalls, POSITIONING_RESEARCH_TOOLS, RESEARCH_TOOL_DESCRIPTIONS, researchToolArgs, subcallNeed, type SubcallNeed,
   type ResearchToolName } from '../research/tools/schemas';
 import { statusForOutcome, toolEnvelope } from '../research/tools/envelope';
-import { selectRoute, type ResearchToolsConfig } from '../research/vendors/config';
+import { BENCHMARK_ROUTE_KINDS, selectRoute, type ResearchToolsConfig } from '../research/vendors/config';
+import type { SocialPlatform } from '../research/vendors/types';
 import { parallelModeFor } from '../research/vendors/parallel';
 import { benchmarkFetch } from '../research/runtime/benchmarkFetch';
 import { discover, moreCandidates } from '../research/runtime/discovery';
@@ -43,6 +44,13 @@ export const researchToolParameters = (name: ResearchToolName, fastSearchOnly = 
 export const fastSearchOnly = (config: Pick<ResearchToolsConfig, 'routes'>) =>
   !config.routes.some(route => route.platform === 'web' && route.kind === 'web_search_pro');
 
+/** social_account spends its platform's real route set (two requests for most, three for Bilibili), not a flat three. */
+const accountNeed = (name: ResearchToolName, args: unknown): SubcallNeed | undefined => {
+  if (name !== 'social_account') return undefined;
+  const kinds = BENCHMARK_ROUTE_KINDS[(args as { platform: SocialPlatform }).platform]?.kinds.length;
+  return kinds ? { mode: 'all_or_nothing', subcalls: kinds } : undefined;
+};
+
 export interface ResearchToolOptions {
   /** CHAT-AUTO-CONTEXT C: free chat descriptions, the per-reply call limit and the account sources of social_account. */
   freeChat?: { accounts: AccountSources };
@@ -65,7 +73,7 @@ export function researchRuntimeTools(ctx: ResearchToolContext, names: readonly R
       if (!parsed.success) return toolEnvelope({ status: 'not_confirmed', reason: 'INVALID_ARGUMENTS' });
       if (!ctx.config.enabled) return toolEnvelope({ status: 'unavailable', reason: 'RESEARCH_DISABLED' });
       remaining ??= Math.max(0, ctx.config.limits.maxSubcallsPerRound - (await options.usedSubcalls?.() ?? 0));
-      const allowance = admitSubcalls(subcallNeed(name, parsed.data, ctx.config), remaining);
+      const allowance = admitSubcalls(accountNeed(name, parsed.data) ?? subcallNeed(name, parsed.data, ctx.config), remaining);
       // Social lookups check their own allowance after reading what this answer already saved (researchSocialTool).
       if (allowance.exhausted && !['web_search', 'web_fetch', 'benchmark_fetch', 'social_search', 'social_account'].includes(name)) {
         return toolEnvelope({ status: 'budget_exhausted', reason: 'ROUND_LIMIT' });

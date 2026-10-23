@@ -320,6 +320,15 @@ it('RUNTIME: a free chat reply makes a general lookup, rounds once, keeps it as 
     // Benchmark accounts: the caller's own (none yet); another user's session is refused.
     const own = await f.admin.rpc('research_chat_benchmark_accounts', { a: f.actor, s: f.sessionId, e: f.admitted.executionId });
     expect(own).toMatchObject({ error: null, data: [] });
+    // A live benchmark row of an unconfirmed positioning (this chat session is no confirmed positioning's session) is not
+    // a source: the model could only guess its account, so social_account must not accept it.
+    const fetch = (await f.db.query(`insert into research_account_fetches(actor_id,session_id,execution_id,platform,account,state,account_key)
+      values($1,$2,$3,'tiktok','historical',$4,$5) returning id`, [f.actor, f.sessionId, f.admitted.executionId, 'unknown', 'a'.repeat(64)])).rows[0];
+    await f.db.query(`insert into research_benchmarks(fetch_id,actor_id,session_id,execution_id,platform,account,posts_analyzed,excluded,
+      refs,operation_ids,missing,fetched_at,qualified) values($1,$2,$3,$4,'tiktok','historical',0,'EVIDENCE_UNVERIFIED','{}',ARRAY[]::uuid[],ARRAY[]::text[],now(),false)`,
+    [fetch.id, f.actor, f.sessionId, f.admitted.executionId]);
+    expect(await f.admin.rpc('research_chat_benchmark_accounts', { a: f.actor, s: f.sessionId, e: f.admitted.executionId }))
+      .toMatchObject({ error: null, data: [] });
     const other = randomUUID();
     await f.db.query('insert into profiles(id,credits) values($1,0)', [other]);
     const denied = await f.admin.rpc('research_chat_benchmark_accounts', { a: other, s: f.sessionId, e: f.admitted.executionId });

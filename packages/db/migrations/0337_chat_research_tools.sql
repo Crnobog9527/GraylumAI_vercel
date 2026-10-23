@@ -1,8 +1,8 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
 -- CHAT-AUTO-CONTEXT C (Owner 2026-10-17, questions 1-3 all A; docs/launch/tasks/CHAT-AUTO-CONTEXT.md §2.3, §4): a free
 -- chat reply may call the general research tools. Two read-only functions; no table, no column, no data written.
---   * research_chat_benchmark_accounts(a,s,e): the accounts of the caller's own benchmark tables (live answers of live
---     sessions), so social_account can refuse an account the model made up. Scoped by research_session_owned to the
+--   * research_chat_benchmark_accounts(a,s,e): the accounts of the benchmark tables the caller's free chat can read (the
+--     entries runtime_workspace_source lists, same rows as their body), so social_account can refuse an account the model made up. Scoped by research_session_owned to the
 --     caller's live free-chat session and answer.
 --   * runtime_work_items: patched (not replaced; earlier projections are kept) to also return each free-chat answer's
 --     research subcalls as work rows, so the rows survive a page refresh. Only the facts the research_call stream event
@@ -18,13 +18,23 @@ SET LOCAL lock_timeout='5s';
 
 CREATE OR REPLACE FUNCTION public.research_chat_benchmark_accounts(a uuid,s uuid,e uuid) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE sessions uuid[];
 BEGIN
  PERFORM research_session_owned(a,s,e);
- RETURN (SELECT coalesce(jsonb_agg(jsonb_build_object('platform',x.platform,'account',x.account) ORDER BY x.platform,x.account),'[]'::jsonb)
-  FROM (SELECT DISTINCT rb.platform,rb.account FROM research_benchmarks rb
-   JOIN runtime_sessions rs ON rs.id=rb.session_id AND rs.actor_id=a AND rs.content_deleted_at IS NULL AND rs.erased_at IS NULL
-   JOIN runtime_executions x ON x.id=rb.execution_id AND x.actor_id=a AND x.content_deleted_at IS NULL AND x.erased_at IS NULL
-   WHERE rb.actor_id=a ORDER BY rb.platform,rb.account LIMIT 500) x);
+ -- Exactly the tables a free chat can read: the benchmark entries runtime_workspace_source lists for this caller (the
+ -- confirmed positioning's own session, positioning version still allowed), never an older or unconfirmed table.
+ SELECT coalesce(array_agg((x->>'sessionId')::uuid),ARRAY[]::uuid[]) INTO sessions
+ FROM jsonb_array_elements(runtime_workspace_source(a,s,'')->'entries') x WHERE x->>'kind'='benchmarks';
+ -- Same rows and order as the entry's body (live answers of that session, at most 30).
+ RETURN (SELECT coalesce(jsonb_agg(jsonb_build_object('platform',b.platform,'account',b.account)),'[]'::jsonb)
+  FROM (SELECT DISTINCT ON (t.platform,t.account) t.platform,t.account FROM (
+    SELECT rb.platform,rb.account,row_number() OVER (PARTITION BY rb.session_id
+      ORDER BY rb.qualified DESC,rb.followers DESC NULLS LAST,rb.platform,rb.account) n
+    FROM research_benchmarks rb
+    JOIN runtime_executions x ON x.id=rb.execution_id AND x.actor_id=a AND x.session_id=rb.session_id
+     AND x.content_deleted_at IS NULL AND x.erased_at IS NULL
+    WHERE rb.actor_id=a AND rb.session_id=ANY(sessions)) t WHERE t.n<=30
+   ORDER BY t.platform,t.account) b);
 END $$;
 REVOKE ALL ON FUNCTION public.research_chat_benchmark_accounts(uuid,uuid,uuid) FROM PUBLIC,anon,authenticated,service_role;
 GRANT EXECUTE ON FUNCTION public.research_chat_benchmark_accounts(uuid,uuid,uuid) TO service_role;
