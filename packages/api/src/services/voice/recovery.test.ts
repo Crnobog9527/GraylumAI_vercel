@@ -84,7 +84,7 @@ describe('recoverVoiceGenerations', () => {
     billing.finalizeRun.mockImplementation(async () => { clock += 25_000; return { closed: true, state: 'settled' }; });
     const db = admin({ generations: [1, 2, 3].map(n => ({ actorId: 'a', versionId: 'v' + n, runId: 'r' + n, status: 'generating' })),
       scrubs: [{ actorId: 'a', runId: 's' }] });
-    expect(await recoverVoiceGenerations(db as never, { now: () => clock })).toMatchObject({ settled: 2, deferred: 2 });
+    expect(await recoverVoiceGenerations(db as never, { now: () => clock })).toMatchObject({ settled: 2, scrubbed: 1, deferred: 1 });
   });
   it('a deleted version that had no profile is refunded, not charged', async () => {
     const db = admin({ generations: [], scrubs: [{ actorId: 'a', runId: 's', outcome: 'confirmed_failure' }] }, ['waiting', 'done']);
@@ -102,6 +102,14 @@ describe('recoverVoiceGenerations', () => {
     });
     expect(await recoverVoiceGenerations(db as never)).toMatchObject({ success: false, failed: 1 });
     expect(db.calls.find(([name]) => name === 'voice_scrub_touch')?.[1]).toEqual({ p_run_id: 's' });
+  });
+  it('alternates the queues: a full generation queue does not starve the scrubs', async () => {
+    let clock = 0;
+    billing.finalizeRun.mockImplementation(async () => { clock += 12_000; return { closed: true, state: 'settled' }; });
+    const db = admin({ generations: [1, 2, 3, 4].map(n => ({ actorId: 'a', versionId: 'v' + n, runId: 'r' + n, status: 'generating' })),
+      scrubs: [{ actorId: 'a', runId: 's', outcome: 'cancelled' }] });
+    await recoverVoiceGenerations(db as never, { now: () => clock });
+    expect(db.calls.some(([name, args]) => name === 'voice_billing_scrub' && args.p_run_id === 's')).toBe(true);
   });
   it('counts a failure without stopping the others', async () => {
     billing.finalizeRun.mockRejectedValueOnce(new Error('down'));

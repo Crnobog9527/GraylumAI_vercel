@@ -131,7 +131,9 @@ BEGIN
  ON CONFLICT(actor_id) DO UPDATE SET preferred_document_ids=EXCLUDED.preferred_document_ids,updated_at=clock_timestamp();
  FOR doc IN SELECT d.id,d.filename,d.content_version FROM library_documents d
   WHERE d.actor_id=a AND d.kind='document' AND d.purpose='authored' AND d.status='ready' AND d.deleted_at IS NULL
-  ORDER BY (d.id=ANY(preferred)) DESC,d.created_at DESC,d.id LOOP
+  ORDER BY (d.id=ANY(preferred)) DESC,d.created_at DESC,d.id FOR SHARE OF d LOOP
+  -- The share lock keeps a document's version fixed while its text is read, so the frozen corpus below matches the
+  -- material (a recognition save or deletion waits for this transaction).
   EXIT WHEN used>=voice_corpus_limit();
   parts:='{}';
   FOR seg IN SELECT body FROM library_document_segments WHERE document_id=doc.id ORDER BY ordinal LOOP

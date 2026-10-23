@@ -4017,7 +4017,7 @@
   "fn:voice_corpus_limit()": "b41be220f585",
   "fn:voice_current_corpus(uuid)": "9a04476c91ff",
   "fn:voice_delete_versions(uuid,uuid[])": "f4ea8928403c",
-  "fn:voice_generation_begin(uuid,uuid,uuid[])": "c40fe9b8992d",
+  "fn:voice_generation_begin(uuid,uuid,uuid[])": "cca2db2bec9a",
   "fn:voice_generation_bind(uuid,uuid,uuid)": "548fd57f6770",
   "fn:voice_generation_finish(uuid,uuid,jsonb,text,boolean)": "7d4425f364a3",
   "fn:voice_library_trigger()": "94432cebc663",

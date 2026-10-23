@@ -6,7 +6,7 @@ const one=async(db,text,args=[])=>(await db.query(text,args)).rows[0]?.v;
 const denied=async(promise,code)=>{await assert.rejects(promise,error=>{if(!String(error.message).includes(code))throw error;return true;},code);};
 const PROFILE={tone:'像跟朋友聊天',sentenceLength:'短句多',samples:['VOICE_CANARY sample']};
 
-export async function runCases({db,report}) {
+export async function runCases({db,Client,connectionString,report}) {
  // Entry points require the service role, as every library function does.
  const svc=async(name,...args)=>{await db.query('SET ROLE service_role');try{return await rpc(db,name,...args);}finally{await db.query('RESET ROLE');}};
  const actor=()=>one(db,'SELECT voice_test.actor() v');
@@ -41,6 +41,21 @@ export async function runCases({db,report}) {
  assert.equal((await begin(a,[],randomUUID()).catch(e=>e.message)),'VOICE_GENERATION_BUSY');
  const replay=await svc('voice_generation_begin',a,(await one(db,'SELECT request_id v FROM voice_profile_versions WHERE id=$1',[first.version.id])),[]);
  assert.equal(replay.replayed,true);assert.equal(replay.material,undefined);
+ // The text read and the corpus snapshot come from one locked read (review P2): a concurrent change waits for begin.
+ {
+  const l=await actor();const ld=await doc(l,'lock.md');
+  const holder=new Client({connectionString});await holder.connect();
+  try{
+   await holder.query('BEGIN');await holder.query("SET LOCAL ROLE service_role");
+   await holder.query('SELECT voice_generation_begin($1,$2,$3)',[l,randomUUID(),[]]);
+   await db.query("SET lock_timeout='300ms'");
+   await assert.rejects(db.query('UPDATE library_documents SET content_version=content_version+1 WHERE id=$1',[ld]),/lock timeout|canceling statement/i);
+   await holder.query('ROLLBACK');
+   await db.query("SET lock_timeout=0");
+   await db.query('UPDATE library_documents SET content_version=content_version+1 WHERE id=$1',[ld]);
+  }finally{await db.query("SET lock_timeout=0").catch(()=>undefined);await holder.end();}
+  report.checks.push('begin locks the documents it reads: a concurrent version change waits, so material and corpus agree');
+ }
  report.checks.push('corpus is authored-only, preferred first, newest next, capped at 60000 bytes; one generation at a time; replay has no text');
 
  // Unchanged corpus: draft. Confirm makes it current; editing the confirmed one makes a new version.

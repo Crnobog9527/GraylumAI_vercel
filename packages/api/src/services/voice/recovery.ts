@@ -44,8 +44,8 @@ export async function recoverVoiceGenerations(admin: SupabaseClient, options: { 
   }
   // Keep room for the slowest single step (one lookup and settlement) before the limit.
   const outOfTime = () => now() + 10_000 > stopAt;
-  for (const item of candidates.generations) {
-    if (outOfTime()) { summary.deferred += 1; continue; }
+  const doGeneration = async (item: Candidates['generations'][number]) => {
+    if (outOfTime()) { summary.deferred += 1; return; }
     try {
       // Delivered only when a profile was really saved. A version marked failed (result pending) or still generating has
       // none: the user must not be charged for a result they never received.
@@ -58,9 +58,9 @@ export async function recoverVoiceGenerations(admin: SupabaseClient, options: { 
       summary.failed += 1;
       await voiceRpc(admin, 'voice_recovery_touch', { p_version_id: item.versionId }).catch(() => undefined);
     }
-  }
-  for (const item of candidates.scrubs) {
-    if (outOfTime()) { summary.deferred += 1; continue; }
+  };
+  const doScrub = async (item: Candidates['scrubs'][number]) => {
+    if (outOfTime()) { summary.deferred += 1; return; }
     try {
       let outcome = await voiceRpc<string>(admin, 'voice_billing_scrub', { p_run_id: item.runId });
       // The version was deleted while its run was still open: settle the run here, then scrub.
@@ -72,6 +72,12 @@ export async function recoverVoiceGenerations(admin: SupabaseClient, options: { 
       summary.failed += 1;
       await voiceRpc(admin, 'voice_scrub_touch', { p_run_id: item.runId }).catch(() => undefined);
     }
+  };
+  // Alternate the two queues, so a full generation queue can never starve the deleted-content scrubs (or the reverse).
+  const total = Math.max(candidates.generations.length, candidates.scrubs.length);
+  for (let index = 0; index < total; index++) {
+    if (candidates.generations[index]) await doGeneration(candidates.generations[index]!);
+    if (candidates.scrubs[index]) await doScrub(candidates.scrubs[index]!);
   }
   summary.success = summary.failed === 0;
   return summary;
