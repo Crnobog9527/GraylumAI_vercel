@@ -39,6 +39,11 @@ export async function* streamCompareColumn(deps: ColumnDeps, input: { compareId:
   const group = await replayCompareGroup(deps.admin, deps.actorId, view.requestId, view.sessionId);
   const run = group?.runs.find(candidate => candidate.index === input.column && candidate.runId === column.runId);
   if (!run) throw new Error('FUSION_COMPARE_DENIED');
+  // One request owns the dispatch of a column: an exclusive claim in the database, taken before the executor is entered (its
+  // call-gate unit and its refusal path belong to the owner only). A request that lost, or a column claimed a moment ago by a
+  // tab that is dispatching it, answers `already`: the page reads the column instead of streaming it.
+  const owner = await compareRpc<boolean>(deps.admin, 'fusion_compare_dispatch_claim', { p_actor_id: deps.actorId, p_call_id: column.call.callId });
+  if (owner !== true) { yield { type: 'already', verdict: null }; return; }
 
   // A column admitted with the positioning fallback rule may answer with the marker instead of an answer: held back and
   // refused before saving, so it is never shown, never saved and never charged.

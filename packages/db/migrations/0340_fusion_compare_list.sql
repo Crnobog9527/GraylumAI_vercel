@@ -6,8 +6,13 @@
 -- fusion_compare_read. Read only: no table, no existing function and no data change.
 -- Also fusion_compare_unjudged: compare calls whose answer was saved but whose verdict was never written (the process ended
 -- between the two), for the daily recovery to judge before settlement, as fusion_review_unjudged does for reviews.
--- Rollback: DROP FUNCTION public.fusion_compare_list(uuid,uuid,uuid), public.fusion_compare_unjudged(integer); nothing depends on
--- them except the compare list route (behind the compare switch, off by default) and the recovery step that lists them.
+-- Also fusion_compare_dispatch_claim: an exclusive, one-winner claim to dispatch one compare column. bill2_dispatch's rotation
+-- always succeeds on a prepared call (the later rotation steals the earlier token), so it cannot decide which of two requests
+-- for the same column (two tabs, a retry) dispatches; the claim does, before any call-gate unit is taken. The claim is a lease:
+-- one that was never followed by a dispatch can be taken again after two minutes.
+-- Rollback: DROP FUNCTION public.fusion_compare_list(uuid,uuid,uuid), public.fusion_compare_unjudged(integer),
+-- public.fusion_compare_dispatch_claim(uuid,uuid); DROP TABLE public.fusion_compare_dispatch_claims (it holds only call ids and
+-- times); nothing depends on them except the compare routes (behind the compare switch, off by default) and the recovery step.
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 
@@ -45,5 +50,30 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
 $$;
 REVOKE ALL ON FUNCTION public.fusion_compare_unjudged(integer) FROM PUBLIC,anon,authenticated,service_role;
 GRANT EXECUTE ON FUNCTION public.fusion_compare_unjudged(integer) TO service_role;
+
+CREATE TABLE IF NOT EXISTS public.fusion_compare_dispatch_claims (
+  call_id uuid CONSTRAINT fusion_compare_dispatch_claims_pk PRIMARY KEY,
+  claimed_at timestamptz NOT NULL DEFAULT clock_timestamp()
+);
+ALTER TABLE public.fusion_compare_dispatch_claims ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.fusion_compare_dispatch_claims FROM PUBLIC, anon, authenticated, service_role;
+
+-- True for exactly one caller per call (and per lease): the call must be an undispatched column of one of this actor's compares.
+CREATE OR REPLACE FUNCTION public.fusion_compare_dispatch_claim(p_actor_id uuid, p_call_id uuid)
+RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE won uuid;
+BEGIN
+  PERFORM bill2_actor(p_actor_id);
+  IF NOT EXISTS(SELECT 1 FROM bill2_calls c JOIN bill2_runs br ON br.id=c.run_id JOIN fusion_compares fc ON fc.group_id=br.fusion_group_id
+    WHERE c.id=p_call_id AND br.actor_id=p_actor_id AND fc.actor_id=p_actor_id AND c.dispatched_at IS NULL AND c.settled_at IS NULL)
+  THEN RETURN false; END IF;
+  INSERT INTO fusion_compare_dispatch_claims(call_id) VALUES(p_call_id)
+    ON CONFLICT (call_id) DO UPDATE SET claimed_at=clock_timestamp()
+      WHERE fusion_compare_dispatch_claims.claimed_at < clock_timestamp()-interval '2 minutes'
+    RETURNING call_id INTO won;
+  RETURN won IS NOT NULL;
+END $$;
+REVOKE ALL ON FUNCTION public.fusion_compare_dispatch_claim(uuid,uuid) FROM PUBLIC,anon,authenticated,service_role;
+GRANT EXECUTE ON FUNCTION public.fusion_compare_dispatch_claim(uuid,uuid) TO service_role;
 
 COMMIT;

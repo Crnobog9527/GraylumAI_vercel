@@ -152,6 +152,16 @@ export async function fusionCompareCases({db,Client,connectionString,report,crea
 
   // Column 0 answers; column 1 is stopped before dispatch (released free). Read shows each column.
   const [c0,c1] = admitted.runs.map(r=>claimed.calls.find(x=>x.runId===r.runId));
+  // 0340: exactly one request owns the dispatch of an undispatched column; the claim is a lease that can be taken again.
+  const owns = async (who,call) => (await db.query('SELECT fusion_compare_dispatch_claim($1,$2) v',[who,call])).rows[0].v;
+  assert.equal(await owns(actor,c1.id),true,'the first request owns the dispatch');
+  assert.equal(await owns(actor,c1.id),false,'a second request for the same column does not');
+  const outsider = (await createFixture(db,{credits:1,phase:'fusion_compare'})).actor;
+  assert.equal(await owns(outsider,c1.id),false,'nobody else can claim another actor\'s column');
+  await db.query("UPDATE fusion_compare_dispatch_claims SET claimed_at=now()-interval '3 minutes' WHERE call_id=$1",[c1.id]);
+  assert.equal(await owns(actor,c1.id),true,'a claim never followed by a dispatch can be taken again after the lease');
+  assert.equal(await owns(actor,randomUUID()),false,'an unknown call cannot be claimed');
+  report.checks.push('fusion_compare_dispatch_claim: one winner per column, owner-checked, re-claimable after the lease');
   assert.equal((await rpc(db,'bill2_dispatch',actor,c0.runId,c0.id,c0.dispatchToken)).dispatch,true);
   await rpc(db,'bill2_record',actor,c0.runId,c0.id,{provider:a.claimPayload.provider,account:'sandbox',model:a.claimPayload.model,
     protocol:a.claimPayload.protocol,providerId:'generation-'+c0.id,source:'response',sourceHash:'c'.repeat(64),
