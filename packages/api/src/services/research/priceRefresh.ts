@@ -17,8 +17,14 @@ const DAY_MS = 86_400_000;
 const TIKHUB_VALID_MS = 7 * DAY_MS;
 const WARN_BEFORE_MS = DAY_MS;
 const REQUEST_TIMEOUT_MS = 5_000;
-/** Five at a time (TikHub allows 10 per second): ~17 routes finish in a few seconds inside the daily job's 60 s. */
+/**
+ * At most five requests per second (TikHub allows 10 per endpoint per second, shared with live traffic): a batch of five,
+ * then the rest of that second. ~17 routes take about 4 s inside the daily job's 60 s.
+ */
 const BATCH = 5;
+const BATCH_INTERVAL_MS = 1_000;
+/** A rate-limited answer (429) gets one more try after this pause; a second 429 is a failure for the day. */
+const RETRY_AFTER_MS = 1_500;
 const PRICE = /^(0|[1-9]\d{0,5})(\.\d{1,9})?$/;
 
 export interface PriceRefreshResult {
@@ -38,6 +44,7 @@ export interface PriceRefreshDeps {
   now?: () => Date;
   /** The staging test window whose tool policies follow the prices; null outside staging. */
   windowId: string | null;
+  sleep?: (ms: number) => Promise<void>;
 }
 
 /** One route's official price, or the reason it could not be read. Never throws. */
@@ -91,9 +98,17 @@ export async function refreshResearchPrices(db: SupabaseClient, deps: PriceRefre
   let key: string | null = null;
   try { key = routes.length ? await deps.readKey() : null; } catch { key = null; }
   const fresh = new Map<string, ProviderPriceEntry>();
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)));
   const reads: Array<Awaited<ReturnType<typeof officialPrice>> | null> = [];
   for (let start = 0; key && start < routes.length; start += BATCH) {
-    reads.push(...await Promise.all(routes.slice(start, start + BATCH).map(route => officialPrice(route, key!, fetchImpl))));
+    const begun = Date.now();
+    reads.push(...await Promise.all(routes.slice(start, start + BATCH).map(async route => {
+      const first = await officialPrice(route, key!, fetchImpl);
+      if (first.ok || first.code !== 'HTTP_429') return first;
+      await sleep(RETRY_AFTER_MS);
+      return officialPrice(route, key!, fetchImpl);
+    })));
+    if (start + BATCH < routes.length) await sleep(Math.max(0, BATCH_INTERVAL_MS - (Date.now() - begun)));
   }
   for (const [index, route] of routes.entries()) {
     const read = reads[index] ?? null;

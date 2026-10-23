@@ -141,16 +141,19 @@ export async function providerPricesView(db: SupabaseClient) {
 }
 
 /**
- * Saves only if the stored row still has the hash the admin edited (null = no row yet). The read and
- * the write are separate statements, so a concurrent save landing between them can still win.
+ * Saves only if the stored row still has the hash the caller edited (null = no row yet). The comparison and the write
+ * happen in one locked statement (billing_provider_prices_swap), so the admin page and the daily price refresh can never
+ * overwrite each other's save; the early read only spares a doomed write.
  */
 export async function saveProviderPrices(db: SupabaseClient, input: unknown, expectedHash: string | null) {
   const config = parseProviderPrices(input);
   const current = await readProviderPricesRow(db);
   if (current.hash !== expectedHash) throw new BillingUnitConfigError('BILLING_UNIT_PROVIDER_PRICES_CONFLICT');
-  const { error } = await db.from('system_settings')
-    .upsert({ key: PROVIDER_PRICES_KEY, value: JSON.stringify(config) }, { onConflict: 'key' });
-  if (error) throw new BillingUnitConfigError('BILLING_UNIT_PROVIDER_PRICES_UNAVAILABLE');
+  const { error } = await db.rpc('billing_provider_prices_swap', { p_expected_hash: expectedHash, p_value: JSON.stringify(config) });
+  if (error) {
+    throw new BillingUnitConfigError(String(error.message ?? '').includes('BILLING_UNIT_PROVIDER_PRICES_CONFLICT')
+      ? 'BILLING_UNIT_PROVIDER_PRICES_CONFLICT' : 'BILLING_UNIT_PROVIDER_PRICES_UNAVAILABLE');
+  }
   const saved = await readProviderPrices(db);
   // Read-back mismatch is a storage problem, not a bad request.
   if (JSON.stringify(saved.config) !== JSON.stringify(config)) {

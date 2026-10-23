@@ -102,6 +102,25 @@ describe('refreshResearchPrices', () => {
       toolPricing: { entryHash: providerEntryHash(saved), validUntil: '2026-10-31T04:00:00.000Z', price: '0.001' } });
   });
 
+  it('sends at most five requests per second and retries a 429 once', async () => {
+    store.config = { version: 1, entries: Array.from({ length: 7 }, (_, i) =>
+      entry('tikhub', `/tiktok/app/v3/route_${i}`, '0.001', '2026-10-30T00:00:00.000Z')) } as ProviderPrices;
+    const order: string[] = [];
+    let limited = true;
+    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+      const endpoint = new URL(String(url)).searchParams.get('endpoint')!;
+      order.push(endpoint.slice(-7));
+      if (endpoint.endsWith('route_6') && limited) { limited = false; return new Response('slow down', { status: 429 }); }
+      return new Response(JSON.stringify({ data: { endpoint_uri: endpoint, endpoint_cost: 0.001 } }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const sleep = vi.fn(async (ms: number) => { order.push(`sleep ${ms > 1_200 ? 'retry' : 'second'}`); });
+    const result = await refreshResearchPrices(windowDb([]).db, { readKey: async () => 'key', windowId: null, now: () => NOW,
+      fetchImpl, sleep });
+    expect(result).toMatchObject({ success: true, failed: [] });
+    expect(order.slice(0, 6)).toEqual(['route_0', 'route_1', 'route_2', 'route_3', 'route_4', 'sleep second']);
+    expect(order.slice(6)).toEqual(['route_5', 'route_6', 'sleep retry', 'route_6']);
+  });
+
   it('reports a failed save instead of a refresh', async () => {
     store.saveError = new Error('conflict');
     const result = await refreshResearchPrices(windowDb([]).db, { readKey: async () => 'key', windowId: null, now: () => NOW,
