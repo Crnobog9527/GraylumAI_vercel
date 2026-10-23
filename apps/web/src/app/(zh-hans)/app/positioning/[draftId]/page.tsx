@@ -34,7 +34,7 @@ import { useAutoStepRecovery, useHistoryPolling } from "./use-step-recovery";
 import { executionSettled } from "./step-recovery";
 import { useLiveReply } from "./use-live-reply";
 import { PublishFootnote, PublishNext, ReportEntry, reportPublishes } from "./report-panel";
-import { DraftArchiveGate, ReadonlyDraftView } from './readonly-draft-view';
+import { DraftArchiveGate, ReadonlyDraftView, retryUnlessMissing } from './readonly-draft-view';
 import { InformationExport } from "./InformationExport";
 import { EXISTING_WELCOME } from "../start-entry";
 import { isStepSummaryInput, offersStepSummary, STEP_SUMMARY_INPUT, STEP_SUMMARY_LABEL, stepSummaryRequest, summaryRefusal,
@@ -58,7 +58,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const router = useRouter();
   const planView = usePathname().endsWith("/plan");
   const utils = trpc.useUtils();
-  const read = trpc.opc.read.useQuery({ draftId });
+  const read = trpc.opc.read.useQuery({ draftId }, { retry: retryUnlessMissing });
   const library = trpc.opc.library.useQuery({search:'',from:null,to:null});
   const discussionAccounts = ((library.data?.businesses??[]) as Array<{accounts:Array<{strategyDraftId?:string;pendingStrategyDraftId?:string|null;displayName?:string;account:string;platform:string}>}>).flatMap(business=>business.accounts).filter(account=>account.pendingStrategyDraftId===draftId||account.strategyDraftId===draftId);
   const discussionAccount = discussionAccounts.length===1?discussionAccounts[0]:undefined;

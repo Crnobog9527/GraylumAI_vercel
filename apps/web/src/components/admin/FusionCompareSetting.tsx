@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { getSafeErrorMessage } from '@/lib/safe-error-message';
 import { FUSION_COMPARE_MAX, FUSION_COMPARE_MIN, fusionCompareInput, readFusionCompareLimit } from './membershipEntitlementDraft';
+import { FusionCompareGroupSettings } from './FusionCompareGroupSettings';
 
 export const FUSION_COMPARE_SETTING_KEY = 'fusion_compare_max_models';
 const cardStyle = { background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' };
@@ -104,6 +105,7 @@ export function FusionCompareSetting({ saved, onSaved }: { saved: unknown; onSav
               </p>
             ) : <p style={{ color: 'var(--text-tertiary)' }}>当前值 {current}</p>}
         </div>
+        <FusionCompareGroupSettings maxModels={current ?? 4} />
       </CardContent>
     </Card>
   );

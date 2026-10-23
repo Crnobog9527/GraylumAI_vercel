@@ -54,7 +54,7 @@ export interface ResearchCallResult {
   items: ResearchItem[];
   truncated: boolean;
   fetchedAt: string;
-  /** Cursor of the next page of an account's posts when the supplier says more exist (Xiaohongshu notes). */
+  /** Cursor of the next page when the supplier says more exist: an account's posts, or a keyword search (BENCHMARK-COVERAGE). */
   nextCursor?: string;
 }
 
