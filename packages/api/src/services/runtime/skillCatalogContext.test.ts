@@ -5,6 +5,7 @@ import {openRouterRequestBody, type RequestContext} from './providerRequest';
 import {historyToolNames, FREE_CHAT_REQUEST_FORMAT} from './providerRequest';
 import {executionTools} from './executionTools';
 import {skillCatalogReserveBytes} from './skillCatalog';
+import {selectRuntimeCallInput} from './context';
 
 const id = (n: number) => '00000000-0000-4000-8000-' + String(n).padStart(12, '0');
 const baseEntry = {name: 'script-writer', description: '写口播稿时使用。', moduleId: id(1), skillId: id(2), packageId: id(2),
@@ -50,8 +51,9 @@ describe('provider request', () => {
 });
 
 describe('execution tool budget', () => {
-  // History selection at execution leaves room for the loads this reply may make, as admission reserved them.
-  it('adds the catalog reserve (largest 2 loads) to the tool bytes, and nothing without a catalog', () => {
+  // The loads this reply may make are reserved once, for the first history selection only (like a Skill file's reserve):
+  // later calls measure the actual result already in the request, never the result plus its reserve.
+  it('reports the catalog reserve (largest 2 loads) separately and keeps it out of the per-call tool bytes', () => {
     const run = (context: unknown) => executionTools({context: runtimeContext.parse(context), executionId: id(9), args: {p_execution_id: id(9)},
       agentTurn: false, grounded: false, fiveFields: false, sources: (() => []) as never, ownerRpc: (async () => ({})) as never,
       budget: {assertCanStart: () => {}}, execution: {sessionId: id(8)}, research: null, onRefused: () => {},
@@ -61,7 +63,38 @@ describe('execution tool budget', () => {
     const loaded = run({...withCatalog, skillCatalog: catalog});
     expect(loaded.tools.map(tool => tool.name)).toEqual(['load_skill']);
     expect(skillCatalogReserveBytes(catalog)).toBe(2600);
-    expect(loaded.toolBytes - plain.toolBytes).toBeGreaterThanOrEqual(2600);
-    expect(loaded.toolBytes - plain.toolBytes).toBeLessThan(2600 + 1000);
+    expect(loaded.catalogReserve).toBe(2600);
+    expect(plain.catalogReserve).toBe(0);
+    expect(loaded.toolBytes - plain.toolBytes).toBeLessThan(600);
+  });
+});
+
+describe('loaded Skills in later turns', () => {
+  const call = (callId: string) => ({type: 'function_call', callId, name: 'load_skill', arguments: '{"query":"script-writer"}', status: 'completed'});
+  const result = (callId: string, instructions: string, named = true) => ({type: 'function_call_result', callId, ...(named ? {name: 'load_skill'} : {}),
+    output: JSON.stringify({name: 'script-writer', instructions}), status: 'completed'});
+  const user = (text: string) => ({type: 'message', role: 'user', content: text});
+  const options = {instructions: 'I', inputBytes: 100000, toolBytes: 0};
+
+  it('replaces a Skill loaded in an earlier turn by a marker, because that Skill may since be republished or disabled', () => {
+    const items = [user('write a script'), call('c1'), result('c1', 'OLD SKILL INSTRUCTIONS'), user('shorter')];
+    const sent = JSON.stringify(selectRuntimeCallInput(items, 3, options));
+    expect(sent).not.toContain('OLD SKILL INSTRUCTIONS');
+    expect(sent).toContain('script-writer');
+    expect(sent).toContain('load_skill again');
+  });
+  it('knows the result by its call when the item carries no name, and keeps the result of the current turn', () => {
+    const items = [user('a'), call('c1'), result('c1', 'OLD INSTRUCTIONS', false), user('b'), call('c2'), result('c2', 'CURRENT INSTRUCTIONS')];
+    const sent = JSON.stringify(selectRuntimeCallInput(items, 3, options));
+    expect(sent).not.toContain('OLD INSTRUCTIONS');
+    expect(sent).toContain('CURRENT INSTRUCTIONS');
+  });
+  it('leaves other tools alone, even when the user asks to compare versions', () => {
+    const other = {type: 'function_call_result', callId: 'r1', name: 'read_source', output: '{"body":"KEEP"}', status: 'completed'};
+    const readCall = {type: 'function_call', callId: 'r1', name: 'read_source', arguments: '{}', status: 'completed'};
+    const items = [user('a'), readCall, other, user('b')];
+    expect(JSON.stringify(selectRuntimeCallInput(items, 3, {...options, preserveHistoricalMaterial: true}))).toContain('KEEP');
+    const loaded = [user('a'), call('c1'), result('c1', 'OLD INSTRUCTIONS'), user('b')];
+    expect(JSON.stringify(selectRuntimeCallInput(loaded, 3, {...options, preserveHistoricalMaterial: true}))).not.toContain('OLD INSTRUCTIONS');
   });
 });

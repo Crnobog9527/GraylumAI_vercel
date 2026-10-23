@@ -26,7 +26,7 @@ export function executionTools(input:{
  execution:{live?:boolean;sessionId:string};research:ResearchExecution|null;onRefused:()=>void;
  onProgress?:(event:AgentToolEvent)=>void;
  exchange:Parameters<typeof sourceRuntimeTool>[0]['exchange'];
-}):{tools:RuntimeTool[];toolBytes:number}{
+}):{tools:RuntimeTool[];toolBytes:number;catalogReserve:number}{
  const {context,executionId,ownerRpc,budget,research}=input;
  const questionTool=input.grounded?groundedCardTool(input.sources):askQuestionTool(input.fiveFields);
  const tools:RuntimeTool[]=context.tools.map(name=>research?.tools.find(tool=>tool.name===name)??
@@ -41,9 +41,8 @@ export function executionTools(input:{
    execution:input.execution,exchange:input.exchange}),input.onProgress,Boolean(context.ownPosts),context)));
  const toolBytes=(input.agentTurn?(input.grounded?groundedCardToolBytes():askQuestionToolBytes(input.fiveFields)):
   Buffer.byteLength(JSON.stringify(tools.map(t=>({name:t.name,description:t.description})))))+
-  // CONTENT-CONVERSATION-DRIVEN: history selection leaves room for the Skill loads this reply may make (as admission did).
-  (context.skillCatalog?skillCatalogReserveBytes(context.skillCatalog):0)+
   (context.skillFile?skillFileToolBytes():0)+(context.historyRead?mentorHistoryToolBytes():0)+(research?.definitionBytes??0)+
   (context.historySelection?.markerReserveBytes??(context.promptCache?PROMPT_CACHE_OVERHEAD_BYTES:0));
- return {tools,toolBytes};
+ // The loads this reply may make: reserved once, in the first history selection only, never in later per-call totals.
+ return {tools,toolBytes,catalogReserve:context.skillCatalog?skillCatalogReserveBytes(context.skillCatalog):0};
 }
