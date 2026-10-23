@@ -48,6 +48,7 @@
   | `sign_up` | 注册成功（邮箱验证完成或 Google 首次登录）| `method`：email / google |
   | `positioning_complete` | 用户确认定位最后一步 | 无 |
   | `begin_checkout` | 创建 Stripe 结账会话成功后、跳转前 | `currency`、`value`、`items[].item_id`（套餐代码，不放订单号） |
+  | `paywall_view`（PAYWALL 曝光记录，2026-10-23） | 报告付费墙弹窗每次打开发一次，同意前不发 | `scene`：目前只有 `report` |
   | `purchase` | **服务器**在 Stripe webhook 履约成功后用 Measurement Protocol 上报 | `transaction_id`=上报时现生成的随机编号（不存、不等于订单号）、`currency`、`value`（**税前**商品金额：MP 订单另收税，`amount_total` 含税，要用 Stripe 返回的税额扣掉后再用现有 `centsToMajor` 换成元，例如 1799 → 17.99）、`items[].item_id`，以及 Measurement Protocol 要求的 `session_id`、`engagement_time_msec`（取固定小值，例如 1） |
 
 - **付款成功只记一次**：只在这次 webhook 调用**真正把订单从未履约改为已履约**的那个分支里上报（重放、重复 webhook 走“已履约”分支，不再上报）；`transaction_id` 用上报那一刻现生成的随机编号，**不用订单号、也不存下来**：订单和账号会按账务期限长期关联，用订单号就等于一直保留“账号 → 订单 → GA 事件”的对应关系。去重靠前面的原子取出，不靠 GA 的交易号。上报失败只记日志、不重试、不影响履约——统计少一笔不动钱，金额以数据库报表为准。**不新建表**。
