@@ -6,7 +6,7 @@ import type { LiveReply } from '@/app/(zh-hans)/app/positioning/[draftId]/agent-
 import { liveReplyController, type LiveReplyController } from '@/app/(zh-hans)/app/positioning/[draftId]/live-reply-controller';
 import { TEXT_PROTOCOL } from '@/app/(zh-hans)/app/positioning/[draftId]/mentor-turn';
 import type { StopRequest } from '@/app/(zh-hans)/app/positioning/[draftId]/stop-reply';
-import { workItemsOf, type WorkItem } from '@/components/chat-display/agent-work-model';
+import { workItemFromResearchCall, workItemsOf, type WorkItem } from '@/components/chat-display/agent-work-model';
 import { isLibrarySourceDeleted } from './gate-notices';
 
 type OpenStream = (executionId: string) => Promise<AsyncIterable<AgentTurnEvent>>;
@@ -61,8 +61,9 @@ export function useRuntimeStream(sessionId: string, onResult: (executionId: stri
   // No same-tab prefix storage here: a reload shows the saved history, as before.
   const live = useMemo(() => liveReplyController({ draftId: 'runtime:' + sessionId, storage: () => null, show: setReply,
     observe: (executionId, event) => {
-      if (event.type !== 'agent_tool') return;
-      const [item] = workItemsOf({workItems: [{...event, id: event.callId}]});
+      // CHAT-AUTO-CONTEXT C: a research lookup of a free chat shows as a row too (the RT-5 mapping, with its credits).
+      const item = event.type === 'research_call' ? workItemFromResearchCall(event)
+        : event.type === 'agent_tool' ? workItemsOf({workItems: [{...event, id: event.callId}]})[0] : undefined;
       if (!item) return;
       setWork(old => {
         const items = old.sessionId === sessionId ? old.items : {};

@@ -45,7 +45,7 @@ const toolPolicy = toolCallPolicy({ vendor: 'parallel', account: 'research-local
       validUntil: new Date(Date.now() + 7 * 86_400_000).toISOString(), chargeCondition: 'per search', includedInReceipt: false,
       priceMultiplier: null } } });
 
-async function researchRound(toolThreshold = 1) {
+async function researchRound(toolThreshold = 1, freeChat = false) {
   if (!connectionString?.startsWith('postgres://postgres@127.0.0.1:') || !connectionString.endsWith('/v3_disposable'))
     throw new Error('isolated runner required');
   const db = new pg.Client({ connectionString });
@@ -88,13 +88,13 @@ async function researchRound(toolThreshold = 1) {
     payg: { version: 'v1', policyId: 'research-turn', profileVersion: 'local-v1', evidenceVersion: 'local-v1',
       pricingHash, endpointTag, templateTokens: 4096, marginTokens: 4096, admissionPath: 'fixture',
       maxBytes: 64000, maxMessages: 32, maxTools: 9, maxSchemaBytes: 16384,
-      purposes: ['skill'], expiresAt: new Date(Date.now() + 3600000).toISOString(),
+      purposes: ['skill', 'ordinary'], expiresAt: new Date(Date.now() + 3600000).toISOString(),
       nominalPricing: { version: 'nominal-v1', pricingHash, endpointTag,
         tiers: [{ minPromptTokens: 0, prompt: '1', completion: '0', request: '0' }], timeOfDay: [] } } };
   await db.query(`insert into system_settings(key,value) values('billing_payg_start_thresholds',$1::jsonb)
     on conflict(key) do update set value=jsonb_set(system_settings.value,'{thresholds}',
     coalesce(system_settings.value->'thresholds','[]')||(excluded.value->'thresholds'))`,
-  [{ version: 'local-v1', thresholds: [{ model, purpose: 'skill', credits: 1 }] }]);
+  [{ version: 'local-v1', thresholds: [{ model, purpose: 'skill', credits: 1 }, { model, purpose: 'ordinary', credits: 1 }] }]);
   // One threshold entry per tool route and purpose (0180); an earlier run of this file may have added it.
   await db.query(`update system_settings set value=jsonb_set(value,'{thresholds}',(select coalesce(jsonb_agg(t),'[]')
     from jsonb_array_elements(value->'thresholds') t where t->>'model'<>$1)||$2::jsonb) where key='billing_payg_start_thresholds'`,
@@ -102,18 +102,25 @@ async function researchRound(toolThreshold = 1) {
   const session = await rpc('runtime_start', { p_actor_id: actor, p_request_id: randomUUID(),
     p_payload: { scope: { kind: 'positioning_draft' } } });
   const requestId = randomUUID();
-  const context = { version: 'runtime.v1', sdkVersion: '0.18.0', role: 'skill', input: '帮我看看同类账号怎么做',
+  // CHAT-AUTO-CONTEXT C: the same lookup from a free chat reply (v6, ordinary role, up to three research rounds).
+  const chat = { version: 'runtime.v1', sdkVersion: '0.18.0', role: 'ordinary', input: '对标账号最近在发什么',
+    instructions: 'Synthetic free chat', model, maxOutputTokens: 1000, maxTurns: 4, maxToolCalls: 3, historyItems: 0,
+    tools: ['web_search'], research: { ...research, freeChat: 'free-chat-v1' }, sources: [], network: 'deny',
+    nativeOutput: 'native-output-v1', providerRequestFormat: 'serial-tools-v6-reasoning', reasoning: { parameter: 'none' },
+    inputSelection: 'scope-projection-v1', sourceCalls: 'first-call-v1', request: { sessionId: session.sessionId, requestId } };
+  const mentor = { version: 'runtime.v1', sdkVersion: '0.18.0', role: 'skill', input: '帮我看看同类账号怎么做',
     instructions: 'Synthetic positioning mentor', model, maxOutputTokens: 1000, maxTurns: 2, maxToolCalls: 2, historyItems: 0,
     tools: ['ask_question', 'web_search'], research, sources: [], network: 'deny', nativeOutput: 'native-output-v1',
     providerRequestFormat: 'agent-turn-v5-stream', reasoning: { parameter: 'none' }, inputSelection: 'scope-projection-v2',
     hostTurnContext: { stepId: 'step-1', opening: false, checklist: [] }, historySelection: freezeHistorySelection(),
     request: { sessionId: session.sessionId, requestId } };
+  const context = freeChat ? chat : mentor;
   const billing = { contractVersion: 'bill2.v2', mode: 'isolated', scope: session.scope, operation: 'question',
     modelId: primary, sourceHash: 'b'.repeat(64), input: context, callPolicy: [modelPolicy, toolPolicy],
     rules: { version: 'v1', quoteVersion: 'local-v1', creditsPerUsd: '1000', multiplier: '1', fx: {},
       billingUnit: { version: 'bill-unit-v2', creditsPerUsd: '1000', defaultMultiplier: '1', hash: 'f'.repeat(64), providers: {},
         models: { [primary]: { multiplier: '1', source: 'global' } } } },
-    limits: { costUsd: '0.220000000000', credits: 0, maxPreDeduct: 0, maxCalls: 2 + 4, deadline: new Date(Date.now() + 3600000).toISOString() } };
+    limits: { costUsd: freeChat ? '0.420000000000' : '0.220000000000', credits: 0, maxPreDeduct: 0, maxCalls: (freeChat ? 4 : 2) + 4, deadline: new Date(Date.now() + 3600000).toISOString() } };
   const admitted = await rpc('runtime_admit', { p_actor_id: actor, p_session_id: session.sessionId,
     p_request_id: requestId, p_payload: context, p_billing: billing });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -123,7 +130,8 @@ async function researchRound(toolThreshold = 1) {
     if (server.listening) await new Promise<void>((resolve, reject) => server.close(e => e ? reject(e) : resolve()));
     await db.end();
   };
-  return { admin, admitted, db, actor, requests, close, endpoint: 'http://127.0.0.1:' + address.port };
+  return { admin, admitted, db, actor, requests, close, sessionId: session.sessionId as string,
+    endpoint: 'http://127.0.0.1:' + address.port };
 }
 
 it('RUNTIME: a research mentor turn claims the subcall between its model calls, rounds once and replays without resending', async () => {
@@ -282,3 +290,48 @@ it('RUNTIME: rejected benchmark research persists safe diagnostics with no execu
   expect((await db.query('select count(*) n from bill2_runs where actor_id=$1',[actorId])).rows[0].n).toBe('0');
  }finally{await db.end();}
 });
+
+it('RUNTIME: a free chat reply makes a general lookup, rounds once, keeps it as a work row and reads benchmark accounts in scope', async () => {
+  supplier.calls = 0;
+  const f = await researchRound(1, true);
+  try {
+    const events: RuntimeProgress[] = [];
+    const host = () => runtimeExecutor({ database: f.admin, actor: async () => f.actor, callGate: async () => ({ ok: true as const }),
+      endpoint: f.endpoint });
+    const outcome = await host().execute(f.admitted.executionId, event => events.push(event));
+    expect(JSON.stringify(outcome)).toContain('"completed"');
+    const calls = (await f.db.query(`select sequence,call_kind from bill2_calls where run_id=$1 order by sequence`, [f.admitted.runId])).rows;
+    expect(calls.map(c => [c.sequence, c.call_kind])).toEqual([[1, 'model'], [2, 'tool'], [3, 'model']]);
+    expect(supplier.calls).toBe(1);
+    // v6 request: the second model call replays the research call and its result (one call per assistant message).
+    expect(f.requests[1]!.messages.map(message => message.role)).toEqual(['system', 'user', 'assistant', 'tool']);
+    expect(events.filter(event => event.type === 'research_call').map(event => event.type === 'research_call' && event.state))
+      .toEqual(['running', 'succeeded']);
+    expect((await f.db.query('select charged from bill2_runs where id=$1', [f.admitted.runId])).rows[0].charged).toBe(11);
+    // After a refresh the row comes back from the database: the query, state and this subcall's credits, no supplier or USD.
+    const work = await f.admin.rpc('runtime_work_items', { p_actor_id: f.actor, p_session_id: f.sessionId });
+    expect(work.error).toBeNull();
+    const rows = (work.data as Record<string, Array<Record<string, unknown>>>)[f.admitted.executionId]!;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ kind: 'research', state: 'done', label: '搜索 coffee shop positioning',
+      research: { toolName: 'web_search', query: 'coffee shop positioning', platform: 'web', dataKind: 'web_search', state: 'succeeded' } });
+    expect(Number((rows[0]!.research as { credits: string }).credits)).toBe(5);
+    expect(JSON.stringify(rows)).not.toMatch(/parallel|usd/i);
+    // Benchmark accounts: the caller's own (none yet); another user's session is refused.
+    const own = await f.admin.rpc('research_chat_benchmark_accounts', { a: f.actor, s: f.sessionId, e: f.admitted.executionId });
+    expect(own).toMatchObject({ error: null, data: [] });
+    // A live benchmark row of an unconfirmed positioning (this chat session is no confirmed positioning's session) is not
+    // a source: the model could only guess its account, so social_account must not accept it.
+    const fetch = (await f.db.query(`insert into research_account_fetches(actor_id,session_id,execution_id,platform,account,state,account_key)
+      values($1,$2,$3,'tiktok','historical',$4,$5) returning id`, [f.actor, f.sessionId, f.admitted.executionId, 'unknown', 'a'.repeat(64)])).rows[0];
+    await f.db.query(`insert into research_benchmarks(fetch_id,actor_id,session_id,execution_id,platform,account,posts_analyzed,excluded,
+      refs,operation_ids,missing,fetched_at,qualified) values($1,$2,$3,$4,'tiktok','historical',0,'EVIDENCE_UNVERIFIED','{}',ARRAY[]::uuid[],ARRAY[]::text[],now(),false)`,
+    [fetch.id, f.actor, f.sessionId, f.admitted.executionId]);
+    expect(await f.admin.rpc('research_chat_benchmark_accounts', { a: f.actor, s: f.sessionId, e: f.admitted.executionId }))
+      .toMatchObject({ error: null, data: [] });
+    const other = randomUUID();
+    await f.db.query('insert into profiles(id,credits) values($1,0)', [other]);
+    const denied = await f.admin.rpc('research_chat_benchmark_accounts', { a: other, s: f.sessionId, e: f.admitted.executionId });
+    expect(denied.error?.message).toContain('RESEARCH_SCOPE_DENIED');
+  } finally { await f.close(); }
+}, 60000);
