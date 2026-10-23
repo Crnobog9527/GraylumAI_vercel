@@ -21,6 +21,8 @@ const NOTES: Record<ToolStatus, string> = {
   budget_exhausted: 'The lookup limit for this turn was reached; nothing was sent. Tell the user and continue with what you have.',
 };
 
+export interface CandidateCardState { shown: boolean; selectable?: number }
+
 export interface ToolEnvelope {
   status: ToolStatus;
   reason: string | null;
@@ -37,6 +39,8 @@ export interface ToolEnvelope {
   requiredCandidates?: number;
   /** BENCHMARK-SHORTFALL (0320): the host's choice card the coach presents now. */
   shortfall?: ShortfallNotice;
+  /** Whether the host showed the user a candidate card this call; the model's text must not contradict it. */
+  candidateCard?: CandidateCardState;
 }
 
 /** Adapter outcome → tool status. A confirmed failure and an unknown result both read as `unavailable`. */
@@ -79,6 +83,7 @@ export interface EnvelopeInput {
   availableCandidates?: number;
   requiredCandidates?: number;
   shortfall?: ShortfallNotice;
+  candidateCard?: CandidateCardState;
 }
 
 /**
@@ -98,6 +103,7 @@ export function toolEnvelope(input: EnvelopeInput, maxBytes = TOOL_RESULT_MAX_BY
     ...(input.availableCandidates !== undefined ? { availableCandidates: input.availableCandidates } : {}),
     ...(input.requiredCandidates !== undefined ? { requiredCandidates: input.requiredCandidates } : {}),
     ...(input.shortfall ? { shortfall: input.shortfall } : {}),
+    ...(input.candidateCard ? { candidateCard: input.candidateCard } : {}),
   };
   const full = (input.items ?? []).map((item, index) => ({
     ...(input.evidenceId ? { ref: `${input.evidenceId}#${index + 1}` } : {}),
