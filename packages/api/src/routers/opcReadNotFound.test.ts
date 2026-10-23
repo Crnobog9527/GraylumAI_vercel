@@ -27,8 +27,8 @@ it('lets the owner read a deleted conversation that still has confirmed content'
   await expect(f.caller.read({draftId:id(1)})).resolves.toMatchObject({conversationDeleted:true,
     information:{s1:{values:{goal:{value:'已确认目标'}}}}});
 });
-const listed = (f: ReturnType<typeof fixture>, rows: unknown[]) => f.rpc.mockImplementation((_name: string, args: Record<string, unknown>) => {
-  const answer = {data:args.p_draft_id ? draft(false) : rows, error:null};
+const listed = (f: ReturnType<typeof fixture>, rows: unknown[]) => f.rpc.mockImplementation((_name?: string, args?: Record<string, unknown>) => {
+  const answer = {data:args?.p_draft_id ? draft(false) : rows, error:null};
   return Object.assign(Promise.resolve(answer), {abortSignal:() => Promise.resolve(answer)});
 });
 it('reads a deleted conversation with nothing confirmed as not found', async () => {
