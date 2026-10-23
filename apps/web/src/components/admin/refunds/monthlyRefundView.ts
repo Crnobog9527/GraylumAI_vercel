@@ -10,7 +10,21 @@ export type MonthlyRefundForm = { orderId: string; ticketId: string; feePermitte
 export type MonthlyRefundRequest = { orderId: string; ticketId: string; feePermitted: FeePermitted; feeEvidence: string };
 export type RejectReason = 'ineligible' | 'evidence_missing' | 'customer_withdrew';
 
-export const EMPTY_MONTHLY_REFUND_FORM: MonthlyRefundForm = { orderId: '', ticketId: '', feePermitted: '', feeEvidence: '' };
+// Owner 2026-10-22: when the user's location is uncertain, never deduct the fee; only a confirmed
+// legal basis allows the 6%. So the form starts on "not permitted" with a placeholder basis.
+export const FEE_UNKNOWN_EVIDENCE = 'location-unknown-no-fee';
+export const FEE_PERMITTED_HINT = '所在地不确定时选不扣；只有确认当地法律允许才选扣 6%';
+export const EMPTY_MONTHLY_REFUND_FORM: MonthlyRefundForm = {
+  orderId: '', ticketId: '', feePermitted: 'not_permitted', feeEvidence: FEE_UNKNOWN_EVIDENCE,
+};
+
+/** Switching to "deduct" drops the placeholder basis so a real one must be typed; switching back restores it. */
+export function feePermittedPatch(next: FeePermitted, current: MonthlyRefundForm): Partial<MonthlyRefundForm> {
+  if (next === 'confirmed') {
+    return { feePermitted: next, feeEvidence: current.feeEvidence.trim() === FEE_UNKNOWN_EVIDENCE ? '' : current.feeEvidence };
+  }
+  return { feePermitted: next, feeEvidence: current.feeEvidence.trim() === '' ? FEE_UNKNOWN_EVIDENCE : current.feeEvidence };
+}
 
 export type RefundFormScope = 'quote' | 'status' | 'reject';
 type FormErrors = Partial<Record<keyof MonthlyRefundForm, string>>;

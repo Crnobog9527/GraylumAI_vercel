@@ -10,7 +10,7 @@ import { MonthlyRefundQuoteCard, type MonthlyRefundQuoteTerms } from './MonthlyR
 import { MonthlyRefundStatusCard } from './MonthlyRefundStatusCard';
 import { useMonthlyRefund } from './useMonthlyRefund';
 import {
-  FEE_PERMITTED_LABELS, REJECT_REASON_LABELS, canRejectMonthlyRefund,
+  FEE_PERMITTED_HINT, FEE_PERMITTED_LABELS, REJECT_REASON_LABELS, feePermittedPatch, canRejectMonthlyRefund,
   type FeePermitted, type MonthlyRefundForm, type RejectReason,
 } from './monthlyRefundView';
 
@@ -54,9 +54,9 @@ export function AdminMonthlyRefunds() {
             <Input id="refund-ticketId" value={form.ticketId} disabled={refund.busy} autoComplete="off" spellCheck={false}
               onChange={event => refund.updateForm({ ticketId: event.target.value })} />
           </Field>
-          <Field id="feePermitted" label="能否扣 6% 手续费" hint="按用户所在地法律核对；不确定时先核对，不要猜"
+          <Field id="feePermitted" label="能否扣 6% 手续费" hint={FEE_PERMITTED_HINT}
             error={errors.feePermitted}>
-            <Select value={form.feePermitted} disabled={refund.busy} onValueChange={value => refund.updateForm({ feePermitted: value as FeePermitted })}>
+            <Select value={form.feePermitted} disabled={refund.busy} onValueChange={value => refund.updateForm(feePermittedPatch(value as FeePermitted, form))}>
               <SelectTrigger id="refund-feePermitted"><SelectValue placeholder="请选择" /></SelectTrigger>
               <SelectContent>
                 {(Object.keys(FEE_PERMITTED_LABELS) as FeePermitted[]).map(key => (

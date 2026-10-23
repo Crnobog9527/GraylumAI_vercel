@@ -107,8 +107,32 @@ it('checks the form locally and never calls the server with invalid input', asyn
   try {
     await page.getByTestId('monthly-refund-quote-button').click();
     await browserExpect(page.getByText('请填写完整的订单编号', { exact: false })).toBeVisible();
-    await browserExpect(page.getByText('请先确认当地法律是否允许扣手续费')).toBeVisible();
+    // The fee choice starts on "not permitted" (Owner 2026-10-22), so it is never the missing field.
+    await browserExpect(page.getByText('请先确认当地法律是否允许扣手续费')).toHaveCount(0);
     expect(await calls(page)).toEqual([]);
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 20000);
+
+it('defaults to no fee with the location-unknown basis and requires a real basis to deduct 6%', async () => {
+  const { page, errors } = await open({ quote });
+  try {
+    await browserExpect(page.getByLabel('能否扣 6% 手续费')).toContainText('法律不允许，不扣手续费');
+    await browserExpect(page.getByLabel('手续费核对依据')).toHaveValue('location-unknown-no-fee');
+    await browserExpect(page.getByText('所在地不确定时选不扣；只有确认当地法律允许才选扣 6%')).toBeVisible();
+    await page.getByLabel('订单编号').fill(ORDER);
+    await page.getByLabel('工单编号').fill(TICKET);
+    await page.getByTestId('monthly-refund-quote-button').click();
+    await browserExpect(page.getByTestId('monthly-refund-quote')).toBeVisible();
+    // Choosing to deduct clears the placeholder, so a real basis must be typed first.
+    await page.getByLabel('能否扣 6% 手续费').click();
+    await page.getByRole('option', { name: '法律允许，扣 6% 手续费' }).click();
+    await browserExpect(page.getByLabel('手续费核对依据')).toHaveValue('');
+    await page.getByTestId('monthly-refund-quote-button').click();
+    await browserExpect(page.getByText('请填写核对依据的编号', { exact: false })).toBeVisible();
+    expect(await calls(page)).toEqual([
+      ['quote', { orderId: ORDER, ticketId: TICKET, feePermitted: 'not_permitted', feeEvidence: 'location-unknown-no-fee' }],
+    ]);
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 20000);
