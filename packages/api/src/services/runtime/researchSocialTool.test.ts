@@ -175,4 +175,18 @@ describe('free chat research tools', () => {
     expect(await refused.execute('social_account', { platform: 'tiktok', account: 'alice' })).toMatchObject({ status: 'budget_exhausted' });
     expect(refused.sent).toHaveLength(0);
   });
+
+  it('a lookup paused after paying for its profile continues with the remaining request after a top-up', async () => {
+    const first = fixture({ benchmark: ['alice'] });
+    await first.execute('social_account', { platform: 'tiktok', account: 'alice' });
+    expect(first.sent).toHaveLength(2);
+    // Resume: only the profile subcall was saved; 11 of the 12 round subcalls are counted, one is left for the posts request.
+    const resumed = fixture({ used: 11, benchmark: ['alice'] });
+    const [profileKey] = [...first.operations.keys()];
+    resumed.operations.set(profileKey!, first.operations.get(profileKey!)!);
+    const result = await resumed.execute('social_account', { platform: 'tiktok', account: 'alice' });
+    expect(result.status).toBe('ok');
+    expect(resumed.sent.map(request => request.vendor === 'tikhub' && request.call.kind)).toEqual(['account_posts']);
+    expect(result.items.map(item => item.fields.dataKind)).toEqual(['account_profile', 'account_posts']);
+  });
 });
