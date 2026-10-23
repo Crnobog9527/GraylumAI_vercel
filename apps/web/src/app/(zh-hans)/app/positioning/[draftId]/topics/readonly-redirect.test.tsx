@@ -22,7 +22,8 @@ vi.mock('@/trpc/client', () => ({
 vi.mock('next/navigation', () => ({ useParams: () => ({ draftId: 'draft' }), useRouter: () => ({ push() {}, replace() {} }) }));
 // The archive gate is tested on its own (draft-archive-gate.test.tsx); here it only marks that it wraps the page.
 vi.mock('../readonly-draft-view', () => ({ ReadonlyDraftView: () => <p>READONLY_VIEW</p>,
-  RouteDraftArchiveGate: ({ children }: { children: React.ReactNode }) => <section data-archive-gate="">{children}</section> }));
+  RouteDraftArchiveGate: ({ children }: { children: React.ReactNode }) => <section data-archive-gate="">{children}</section>,
+  retryUnlessMissing: () => false }));
 vi.mock('@/components/opc/workspace-frame', () => ({ WorkspaceFrame: () => <p>TOPICS_WORKSPACE</p> }));
 
 describe('topics page of a draft whose conversation was deleted', () => {
