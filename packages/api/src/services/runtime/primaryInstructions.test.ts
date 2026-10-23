@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {describe, expect, it} from 'vitest';
-import {REPLY_LANGUAGE,REPLY_LANGUAGE_INSTRUCTIONS,WORKSPACE_STRATEGY_GUIDE,withPrimaryAddenda} from './primaryInstructions';
+import {REPLY_LANGUAGE,REPLY_LANGUAGE_INSTRUCTIONS,VOICE_GUIDE,WORKSPACE_STRATEGY_GUIDE,voiceAddendum,withPrimaryAddenda} from './primaryInstructions';
 import {sourceToolBytes} from './sourceRuntimeTool';
 import {agentTurnInstructions} from '../opc/agentTurnPrompt';
 
@@ -76,3 +76,20 @@ describe('REPORT-VISUAL strategy read guide', () => {
   });
 });
 
+
+describe('VOICE writing addendum', () => {
+  const profile = { tone: '像跟朋友唠嗑', sentenceLength: '短句多', openings: '', stance: '', phrases: ['咋整', '搞定'], avoid: ['家人们'],
+    platforms: '', samples: ['哎下班到家都七点了，咋整。'] };
+  it('appends the confirmed profile only with the frozen guide', () => {
+    const text = withPrimaryAddenda('BASE', { voice: { guide: VOICE_GUIDE, profile } });
+    expect(text.startsWith('BASE\n\nWriting voice (host rule)')).toBe(true);
+    expect(text).toContain('<user_voice>\n- 语气：像跟朋友唠嗑\n- 句子长短：短句多\n- 常用表达：咋整、搞定\n- 不会用的表达：家人们');
+    expect(text).toContain('- 原文片段 1：哎下班到家都七点了，咋整。\n</user_voice>');
+    expect(text).not.toContain('开头方式');
+    expect(withPrimaryAddenda('BASE', { voice: { guide: 'voice-v0', profile } })).toBe('BASE');
+    expect(withPrimaryAddenda('BASE', {})).toBe('BASE');
+  });
+  it('is the same text voiceAddendum gives admission to size', () => {
+    expect(withPrimaryAddenda('B', { voice: { guide: VOICE_GUIDE, profile } })).toBe('B' + voiceAddendum(profile));
+  });
+});
