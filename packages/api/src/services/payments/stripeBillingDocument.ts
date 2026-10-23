@@ -4,7 +4,7 @@ import type { getStripeClient } from '../stripe';
 import { logger } from '../../lib/logger';
 import { isSubscriptionPlanChangeOrder } from '../subscriptionPlanChangeLock';
 import { resolveStripeScope } from './stripeCheckoutPersistence';
-import { resolveStripeOrderIds } from './stripeReferences';
+import { findCardSubscriptionInvoiceId, resolveStripeOrderIds } from './stripeReferences';
 import type { PaymentOrderBillingRow } from './orderProjection';
 
 /** Managed Payments adds tax on top of the order's pre-tax amount_total (0237), so the provider
@@ -37,6 +37,7 @@ export async function loadStripeBillingDocument(
       throw new Error('PAY_COMMON_ORDER_IDENTITY_UNKNOWN');
     }
     order = await resolveStripeOrderIds(supabase, order);
+    if (!order.stripe_invoice_id) order = { ...order, stripe_invoice_id: await findCardSubscriptionInvoiceId(supabase, order) };
     if (order.stripe_invoice_id) {
       const invoice = await stripe.invoices.retrieve(order.stripe_invoice_id);
       if (invoice.id !== order.stripe_invoice_id || invoice.livemode !== (scope.mode === 'live')
