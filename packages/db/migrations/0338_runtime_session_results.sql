@@ -210,12 +210,12 @@ DO $$ DECLARE source text;sig text;needle text;replacement text;marker text; BEG
  FOR sig,needle,replacement,marker IN SELECT * FROM (VALUES
  ('content_erasure_confirm(uuid,text,uuid,text)',
   $n$ -- 0320 shortfall: the choice card goes with its answer or conversation.$n$,
-  $r$ -- 0337 session results: a saved result goes with its conversation; erasing only its source reply keeps it (shown as source unavailable).
+  $r$ -- 0338 session results: a saved result goes with its conversation; erasing only its source reply keeps it (shown as source unavailable).
  DELETE FROM runtime_session_results WHERE actor_id=a AND session_id=ANY(sessions);
  -- 0320 shortfall: the choice card goes with its answer or conversation.$r$,'conversation results erasure'),
  ('account_erasure_scrub_content(uuid)',
   $n$  -- 0320 shortfall$n$,
-  $r$  -- 0337 session results
+  $r$  -- 0338 session results
   DELETE FROM runtime_session_results WHERE actor_id=p_profile_id;
   GET DIAGNOSTICS n=ROW_COUNT;counts:=counts||jsonb_build_object('runtime_session_results_deleted',n);
   -- 0320 shortfall$r$,'account results scrub'),
@@ -224,7 +224,7 @@ DO $$ DECLARE source text;sig text;needle text;replacement text;marker text; BEG
   $r$+(SELECT count(*) FROM fusion_compares WHERE actor_id=p_profile_id)
   +(SELECT count(*) FROM runtime_session_results WHERE actor_id=p_profile_id)$r$,'account results proof')
  ) changes(signature,anchor,patch,label) LOOP
-  marker:='-- 0337 '||marker;
+  marker:='-- 0338 '||marker;
   source:=pg_get_functiondef(('public.'||sig)::regprocedure);
   IF position(marker IN source)=0 THEN
    IF length(source)-length(replace(source,needle,''))<>length(needle)

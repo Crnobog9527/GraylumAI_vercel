@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// Local-only CONTENT-CONVERSATION-DRIVEN C1-lite (0337) verification; no database URL, environment secrets or remote host accepted.
+// Local-only CONTENT-CONVERSATION-DRIVEN C1-lite (0338) verification; no database URL, environment secrets or remote host accepted.
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
@@ -25,7 +25,7 @@ const sql=input=>docker(['exec','-i',name,'psql','-X','-qAt','-U','postgres','-d
 const fp=read('packages/db/tests/baseline/fingerprint.sql');
 const objectSql=fp.slice(0,fp.indexOf('-- FINAL'))+'SELECT jsonb_object_agg(k,d ORDER BY k) FROM grouped;';
 const snapshot=()=>JSON.parse(ok(sql(objectSql)));
-const migrationPath='packages/db/migrations/0337_runtime_session_results.sql';
+const migrationPath='packages/db/migrations/0338_runtime_session_results.sql';
 const migration=read(migrationPath);
 const report={development,build:null,checks:[],failed:null};
 let client;
@@ -46,11 +46,11 @@ try {
  assert.equal(report.build.failed,null);
  const finalCatalog=snapshot();
  ok(sql(migration));
- assert.deepEqual(snapshot(),finalCatalog,'repeat 0337 preserves complete catalog');
+ assert.deepEqual(snapshot(),finalCatalog,'repeat 0338 preserves complete catalog');
  const interrupted=sql(migration.replace(/COMMIT;\s*$/,"DO $$ BEGIN RAISE EXCEPTION 'C1_TEST_ROLLBACK'; END $$; COMMIT;"));
  assert.notEqual(interrupted.status,0);assert.match(interrupted.stderr,/C1_TEST_ROLLBACK/);
- assert.deepEqual(snapshot(),finalCatalog,'failed 0337 leaves the catalog untouched');
- report.checks.push('0337 applied again on the full file-built catalog: unchanged; failure before COMMIT rolls back');
+ assert.deepEqual(snapshot(),finalCatalog,'failed 0338 leaves the catalog untouched');
+ report.checks.push('0338 applied again on the full file-built catalog: unchanged; failure before COMMIT rolls back');
  const require=createRequire(resolve(root,'packages/api/package.json'));
  const {Client}=require('pg');
  const address=ok(docker(['port',name,'5432/tcp']));assert.match(address,/^127\.0\.0\.1:\d+$/);
