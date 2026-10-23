@@ -6,16 +6,26 @@ import { isAbandonedRenewalInvoice } from './abandonedRenewalInvoice';
 const invoice = (patch: Record<string, unknown> = {}) => ({ id: 'in_dead', object: 'invoice', status: 'open', amount_paid: 0,
   next_payment_attempt: null, livemode: false, parent: { subscription_details: { subscription: 'sub_dead' } },
   ...patch }) as unknown as Stripe.Invoice;
-const stripe = (status = 'canceled', patch: Record<string, unknown> = {}) => {
+const stripe = (status = 'canceled', patch: Record<string, unknown> = {}, latest?: Record<string, unknown>) => {
   const retrieve = vi.fn(async (id: string) => ({ id, livemode: false, status, ...patch }));
-  return { client: { subscriptions: { retrieve } } as unknown as Pick<Stripe, 'subscriptions'>, retrieve };
+  const retrieveInvoice = vi.fn(async () => invoice(latest));
+  return { client: { subscriptions: { retrieve }, invoices: { retrieve: retrieveInvoice } } as unknown as
+    Pick<Stripe, 'subscriptions' | 'invoices'>, retrieve, retrieveInvoice };
 };
 
 describe('isAbandonedRenewalInvoice', () => {
   it('skips an unpaid open invoice with no further attempt under a canceled subscription', async () => {
-    const { client, retrieve } = stripe();
+    const { client, retrieve, retrieveInvoice } = stripe();
     expect(await isAbandonedRenewalInvoice(client, invoice(), false)).toBe(true);
     expect(retrieve).toHaveBeenCalledWith('sub_dead');
+    expect(retrieveInvoice).toHaveBeenCalledWith('in_dead');
+  });
+  it.each([
+    ['paid after it was listed', { status: 'paid', amount_paid: 3045 }],
+    ['given another attempt after it was listed', { next_payment_attempt: 1798199939 }],
+    ['partly paid after it was listed', { amount_paid: 100 }],
+  ])('re-reads the invoice after the subscription: keeps it when %s', async (_name, latest) => {
+    expect(await isAbandonedRenewalInvoice(stripe('canceled', {}, latest).client, invoice(), false)).toBe(false);
   });
   it.each([
     ['Stripe will still retry it', { next_payment_attempt: 1798199939 }],

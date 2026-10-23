@@ -195,10 +195,11 @@ describe('subscription refund read-only preview', () => {
     const dead = (patch: Row = {}) => ({ id: 'in_dead', object: 'invoice', livemode: false, status: 'open', amount_paid: 0,
       amount_due: 6900, currency: 'usd', next_payment_attempt: null, billing_reason: 'subscription_cycle',
       parent: { subscription_details: { subscription: 'sub_fixture' } }, status_transitions: { paid_at: null }, ...patch });
-    const withDead = (patch: Row = {}, status = 'canceled') => {
+    const withDead = (patch: Row = {}, status = 'canceled', latest?: Row) => {
       const f = fixture();
       f.invoices.push(dead(patch) as unknown as (typeof f.invoices)[number]);
       Object.assign(f.stripe.subscriptions, { retrieve: vi.fn(async (id: string) => ({ id, livemode: false, status })) });
+      Object.assign(f.stripe.invoices, { retrieve: vi.fn(async () => latest ?? dead(patch)) });
       return f;
     };
     it('no longer turns an otherwise complete history into manual review', async () => {
@@ -212,6 +213,9 @@ describe('subscription refund read-only preview', () => {
       ['the subscription is not canceled', {}, 'past_due'],
     ])('still requires review when %s', async (_name, patch, status) => {
       await unresolved(withDead(patch, status));
+    });
+    it('is not skipped when the buyer pays it between the list and the check', async () => {
+      await unresolved(withDead({}, 'canceled', dead({ status: 'paid', amount_paid: 6900 })));
     });
     it('takes the invoice back into the history once the buyer pays it', async () => {
       await unresolved(withDead({ status: 'paid', amount_paid: 6900,

@@ -181,7 +181,7 @@ describe('monthly original-channel evidence reader', () => {
 });
 
 describe('renewal invoice Stripe gave up on (Owner 2026-10-24 A), re-read before any money moves', () => {
-  function withDead(patch: Record<string, unknown> = {}, status = 'canceled') {
+  function withDead(patch: Record<string, unknown> = {}, status = 'canceled', latest?: Record<string, unknown>) {
     const f = fixture();
     const dead = { ...f.invoice, id: 'in_dead', status: 'open', amount_paid: 0, next_payment_attempt: null,
       parent: { subscription_details: { subscription: 'sub_old' } }, ...patch };
@@ -189,12 +189,18 @@ describe('renewal invoice Stripe gave up on (Owner 2026-10-24 A), re-read before
     const retrieve = f.stripe.subscriptions.retrieve;
     f.stripe.subscriptions.retrieve = vi.fn(async (id: string) => id === 'sub_old'
       ? { id, livemode: false, status } : retrieve(id)) as unknown as MonthlyStripe['subscriptions']['retrieve'];
+    f.stripe.invoices.retrieve = vi.fn(async () => latest ?? dead) as unknown as MonthlyStripe['invoices']['retrieve'];
     return f;
   }
   it('clears an unpaid open invoice with no further attempt under a canceled subscription', async () => {
     const f = withDead();
     expect((await readMonthlyProvider(f.stripe, f.intent)).subscription.preflight).toBe('clear');
     expect(f.writes).toEqual([]);
+  });
+  it('still conflicts when the buyer pays it between the list and the check', async () => {
+    const f = withDead({}, 'canceled', { id: 'in_dead', object: 'invoice', livemode: false, status: 'paid', amount_paid: 3045,
+      next_payment_attempt: null, parent: { subscription_details: { subscription: 'sub_old' } } });
+    expect((await readMonthlyProvider(f.stripe, f.intent)).subscription.preflight).toBe('conflict');
   });
   it.each([
     ['Stripe will still retry', { next_payment_attempt: 1798199939 }, 'canceled'],
