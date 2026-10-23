@@ -42,7 +42,8 @@ export function PublishForm({ businessId, workItemId, contextKey, targets, initi
     const stored = loadAttempt(contextKey);
     if (stored) { setRecovered(stored); setSelected(stored.connectionIds); setCaption(stored.caption); }
   }, [contextKey]);
-  useEffect(() => { onPendingChange?.(recovered !== null); }, [recovered]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Pending from confirmation until a definite outcome: while uploading or submitting, and while a lost answer is unresolved.
+  useEffect(() => { onPendingChange?.(recovered !== null || phase !== 'idle'); }, [recovered, phase]); // eslint-disable-line react-hooks/exhaustive-deps
   const uploadUrl = trpc.publishMonitor.publish.uploadUrl.useMutation();
   const submit = trpc.publishMonitor.publish.submit.useMutation();
   const utils = trpc.useUtils();

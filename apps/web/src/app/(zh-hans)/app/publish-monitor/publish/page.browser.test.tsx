@@ -332,3 +332,42 @@ it('an unconfirmed result publish keeps its brand after a reload and the brand c
     expect(calls.filter(c => c.path === 'publishMonitor.publish.submit')).toHaveLength(1);
   } finally { await page.close(); }
 }, 30000);
+
+it('the brand cannot be switched while a publish is in flight, and an unconfirmed one is never moved to another brand', async () => {
+  const BIZ2 = '00000000-0000-4000-8000-000000000c32';
+  const { page } = await open(path => {
+    if (path === 'opc.library') return { data: { businesses: [...library.businesses, { businessId: BIZ2, name: '另一个品牌', accounts: [] }] } };
+    if (path === 'publishMonitor.connections') return { data: [connection(CONN_X, 'x', ACCOUNT_X),
+      { ...connection('00000000-0000-4000-8000-000000000c33', 'x', 'p2'), businessId: BIZ2 }] };
+    if (path === 'opc.sessionResultVersions') return { data: [{ version: 1, title: '早起口播稿', body: '成果夹里的文案' }] };
+    if (path === 'publishMonitor.publish.submit') {
+      return { error: { code: 'INTERNAL_SERVER_ERROR', message: 'PUBLISH_MONITOR_UNAVAILABLE', status: 500 } };
+    }
+  }, undefined, `?result=${RESULT}`);
+  try {
+    await page.getByLabel('品牌').selectOption(BIZ);
+    await page.getByRole('button', { name: '发布', exact: true }).click();
+    await page.getByRole('dialog').getByRole('checkbox').click();
+    await page.getByRole('dialog').getByRole('button', { name: '确认发布' }).click();
+    await ui(page.getByRole('button', { name: '再试一次（同一次发布，不会重复发）' })).toBeVisible();
+    // The first brand stops being eligible (its account is gone) while only the other brand remains: it is not chosen for the
+    // unconfirmed publish; the user is told, and must discard the earlier one first.
+    await page.unroute('**/*');
+    await page.route('**/*', async route => {
+      const path = new URL(route.request().url()).pathname;
+      if (path === '/') return route.fulfill({ contentType: 'text/html', body: '<div id="root"></div>' });
+      const name = path.replace('/api/trpc/', '');
+      const data = name === 'opc.library' ? { businesses: [...library.businesses, { businessId: BIZ2, name: '另一个品牌', accounts: [] }] }
+        : name === 'publishMonitor.connections' ? [{ ...connection('00000000-0000-4000-8000-000000000c33', 'x', 'p2'), businessId: BIZ2 }]
+          : name === 'publishMonitor.publish.options' ? { platforms: ['x'], holdCreditsByTargets: [6] }
+            : name === 'opc.sessionResultVersions' ? [{ version: 1, title: '早起口播稿', body: '成果夹里的文案' }] : {};
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ result: { data } }) });
+    });
+    await page.goto(`https://publish.test/?result=${RESULT}`);
+    await page.addScriptTag({ content: code });
+    await ui(page.getByText('上一次发布还没有确认结果')).toBeVisible();
+    expect(await page.getByRole('textbox').count()).toBe(0);
+    await page.getByRole('button', { name: '确认过了，放弃上一次，重新开始' }).click();
+    await ui(page.getByRole('textbox')).toHaveValue('成果夹里的文案');
+  } finally { await page.close(); }
+}, 30000);

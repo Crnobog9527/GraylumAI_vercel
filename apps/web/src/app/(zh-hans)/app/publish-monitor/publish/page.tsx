@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { platformName, publishErrorMessage, publishTargets, type Connection } from '@/lib/publish-monitor/publish-flow';
+import { clearAttempt, loadAttempt } from '@/lib/publish-monitor/publish-recovery';
 import { trpc } from '@/trpc/client';
 import { PublishForm } from './publish-form';
 import { PublishStatus } from './publish-status';
@@ -115,13 +116,29 @@ function Workbench({ source }: { source: Source }) {
   // Brands that have at least one connected account on an open platform; the user chooses which brand's accounts publish.
   const brands = businesses.map(business => ({ business, targets: publishTargets(all, business.businessId, open) }))
     .filter(entry => entry.targets.length > 0);
-  const chosen = brands.find(entry => entry.business.businessId === pickedBrand) ?? (brands.length === 1 ? brands[0]! : null);
+  // An unconfirmed publish stays with the brand it was started with, whatever is eligible now: another brand is never
+  // chosen for it silently (a new request under a new key could publish and charge twice).
+  const stuckBrand = pickedBrand && !brands.some(entry => entry.business.businessId === pickedBrand)
+    && loadAttempt(`result:${source.id}:${pickedBrand}`) !== null;
+  const chosen = brands.find(entry => entry.business.businessId === pickedBrand)
+    ?? (!pickedBrand && brands.length === 1 ? brands[0]! : null);
   return (
     <div className="space-y-6">
       <header className="space-y-1">
         <h1 className="text-xl font-semibold">一键发布</h1>
         <p className="text-sm text-[var(--text-secondary)]">成果夹 · {latest.title}</p>
       </header>
+      {stuckBrand && (
+        <div role="status" className="space-y-2 rounded border border-[var(--border-default)] p-3 text-sm">
+          <p>上一次发布还没有确认结果，可能已经发出，但它用的品牌账号现在不能用了
+            （可能已断开，或这个平台暂时关闭）。请先去平台确认有没有发出。</p>
+          <button type="button" className="underline" onClick={() => {
+            clearAttempt(`result:${source.id}:${pickedBrand}`);
+            try { sessionStorage.removeItem(BRAND_KEY(source)); } catch { /* optional */ }
+            setPickedBrand('');
+          }}>确认过了，放弃上一次，重新开始</button>
+        </div>
+      )}
       {brands.length === 0 ? (
         <p className="text-sm text-[var(--text-secondary)]">
           你还没有可以一键发布的账号：先在"数据复盘"页连接海外平台账号；只显示已经开放一键发布的平台。</p>
