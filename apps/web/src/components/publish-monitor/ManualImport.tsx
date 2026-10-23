@@ -119,16 +119,20 @@ export function ManualImport({ brands, onImported }: { brands: Brand[]; onImport
   );
 }
 
-/** The rows that will be written, as the server will store them (first 20; the count above is the full total). */
-function RowPreview({ rows }: { rows: ReturnType<typeof buildRows>['rows'] }) {
+/**
+ * Every row that will be written, as the server will store them: the confirmation covers all of them, so none is
+ * hidden (scrolls inside the box; a file holds at most 1,000 rows).
+ */
+export function RowPreview({ rows }: { rows: ReturnType<typeof buildRows>['rows'] }) {
   const metrics = [...new Set(rows.flatMap(row => Object.keys(row.metrics)))];
   return (
-    <div className="overflow-x-auto">
+    <div className="max-h-96 overflow-auto">
       <table className="text-left text-xs" aria-label="将要导入的行">
-        <thead><tr><th className="pr-3 font-medium">作品</th><th className="pr-3 font-medium">发布时间</th>
-          {metrics.map(key => <th key={key} className="pr-3 font-medium">{metricLabel(key)}</th>)}</tr></thead>
+        <thead className="sticky top-0" style={{ background: 'var(--bg-primary)' }}>
+          <tr><th className="pr-3 font-medium">作品</th><th className="pr-3 font-medium">发布时间</th>
+            {metrics.map(key => <th key={key} className="pr-3 font-medium">{metricLabel(key)}</th>)}</tr></thead>
         <tbody>
-          {rows.slice(0, 20).map((row, i) => (
+          {rows.map((row, i) => (
             <tr key={i}><td className="max-w-[240px] truncate pr-3">{row.titleExcerpt || row.postKey}</td>
               <td className="pr-3">{row.postedAt ? row.postedAt.slice(0, 10) : '未提供'}</td>
               {metrics.map(key => {
@@ -138,7 +142,6 @@ function RowPreview({ rows }: { rows: ReturnType<typeof buildRows>['rows'] }) {
           ))}
         </tbody>
       </table>
-      {rows.length > 20 && <p className="text-xs">只显示前 20 条。</p>}
     </div>
   );
 }

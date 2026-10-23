@@ -21,7 +21,7 @@ const errorText = (error: unknown) => {
   return ERRORS[code] ?? '暂时无法读取或保存复盘设置，请稍后再试。';
 };
 
-type Saved = { enabled: boolean; modelId: string | null; maxCostUsd: string };
+type Saved = { enabled: boolean; modelId: string | null; ownModelId: string | null; maxCostUsd: string };
 
 /**
  * 每周复盘设置（PUBLISH-MONITOR PR-6 后端，PR-7 页面；方案第 5.3 节）：开关、复盘用的模型、每次花费上限（美元）。
@@ -59,7 +59,8 @@ function Shell({ children }: { children: React.ReactNode }) {
 
 function Form({ saved, onSaved }: { saved: Saved; onSaved: () => Promise<unknown> }) {
   const [enabled, setEnabled] = useState(saved.enabled);
-  const [modelId, setModelId] = useState(saved.modelId ?? '');
+  // The explicit choice only: with none, the select stays on "沿用对话模型" and saving other fields keeps following it.
+  const [modelId, setModelId] = useState(saved.ownModelId ?? '');
   const [cap, setCap] = useState(saved.maxCostUsd);
   const [notice, setNotice] = useState('');
   const models = trpc.settings.getSummaryModels.useQuery({ use: 'skill' }, { retry: false });
