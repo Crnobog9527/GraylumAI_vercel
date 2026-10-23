@@ -31,8 +31,9 @@ export function PublishMonitorStuckCleanup() {
         </CardTitle>
         <CardDescription style={muted}>
           Post for Me 的删除、断开或清理连续失败 50 次后停止自动重试。先到 Post for Me 后台按账号编号查看。
-          还没处理好、想让系统再试：点“重新排队”。已经确认那个账号在 Post for Me 里不存在了：点“已手动处理，结束”，
-          系统不会再重试（Post for Me 对不存在的账号返回的是出错，不是“找不到”，单靠重新排队结束不了）。
+          还没处理好、想让系统再试：点“重新排队”。已经确认那个账号在 Post for Me 里不存在了：点“已手动处理，结束”
+          （Post for Me 对不存在的账号返回的是出错，不是“找不到”，单靠重新排队结束不了）。
+          账号清理结束后不再重试；连接请求结束后，30 天内仍会每天复查一次迟到的授权，复查再失败 50 次会重新出现在这里。
           连接请求的清理停下后，每日孤儿清扫仍会兜底。</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4 text-sm" style={{ color: 'var(--text-primary)' }}>
