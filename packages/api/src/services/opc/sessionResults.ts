@@ -4,7 +4,7 @@ import { stagingRpcFailure } from '../runtime/stagingErrors';
 
 /*
  * CONTENT-CONVERSATION-DRIVEN C1-lite (Owner 2026-10-13, option A): the "本对话成果夹" of an ordinary free
- * conversation. The user confirms every save; the AI never writes here. Migration 0337 owns ownership, the
+ * conversation. The user confirms every save; the AI never writes here. Migration 0338 owns ownership, the
  * verbatim-excerpt check, versions and erasure; this layer only shapes input and output.
  */
 const uuid = z.string().uuid();

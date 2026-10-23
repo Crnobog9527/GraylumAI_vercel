@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {allowedOutput} from './moderation';
+import {logger} from '../../lib/logger';
 import { agentTurnResult } from './agentTurnResult';
 import { questionMessageFromArguments, QUESTION_CONTRACT, askQuestionTool } from './agentTools';
 import { terminalAgentReplyFailure } from './terminalAgentReply';
@@ -46,7 +47,11 @@ export function stoppedCompletion(options: RuntimeExecutorOptions, billing: Retu
           ...args,p_sequence:call.sequence,p_request_hash:call.requestHash});
         if(response?.rawBody){try{raws.set(call.sequence,JSON.parse(response.rawBody));}catch{/* Invalid stored output cannot be saved. */}}
         else {
-          if(call.responsePending)responsePending=true;
+          // A billed organizer without a stored body is lost (organizerLost.ts): its summary is optional,
+          // so the stop saves the reply as not organized instead of waiting out the 300-second window.
+          if(call.phase==='attached_organizer'&&call.settled)logger.warn('api','runtime_organizer_output_lost',
+            {executionId,sequence:call.sequence,phase:call.phase,code:'RUNTIME_ORGANIZER_OUTPUT_LOST',stop:true});
+          else if(call.responsePending)responsePending=true;
           if(!call.settled)unknown=true;
         }
       }

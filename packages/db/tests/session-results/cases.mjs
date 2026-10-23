@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// CONTENT-CONVERSATION-DRIVEN C1-lite (0337): the results folder of an ordinary free conversation. Synthetic fixtures only.
+// CONTENT-CONVERSATION-DRIVEN C1-lite (0338): the results folder of an ordinary free conversation. Synthetic fixtures only.
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {rpc,closeAccount} from '../erasure-b2a/cases.mjs';
