@@ -75,13 +75,10 @@ try {
   fingerprint:development?undefined:snapshot});
  assert.equal(report.build.failed,null);
  // The optimization is built through the canonical migration chain; repeat its final version too.
- // 0349 rewrote the 0333 anchor, so 0333 on the final catalog refuses instead of re-patching.
  const optimized=snapshot();
- ok(sql(read('packages/db/migrations/0349_erasure_prune_session_tables.sql')));
- assert.deepEqual(snapshot(),optimized,'runtime owner optimization repeats without catalog drift');
- const superseded=sql(read('packages/db/migrations/0333_erasure_prune_owned_runtime.sql'));
- assert.notEqual(superseded.status,0);assert.match(superseded.stderr,/ERASURE_PRUNE_RUNTIME_SOURCE_MISMATCH/);
- assert.deepEqual(snapshot(),optimized,'refused superseded 0333 leaves the catalog unchanged');
+ for(const file of ['0333_erasure_prune_owned_runtime.sql','0349_erasure_prune_session_tables.sql'])
+  ok(sql(read('packages/db/migrations/'+file)));
+ assert.deepEqual(snapshot(),optimized,'runtime owner optimizations repeat without catalog drift');
  const require=createRequire(resolve(root,'packages/api/package.json'));
  const {Client}=require('pg');
  const address=ok(docker(['port',name,'5432/tcp']));assert.match(address,/^127\.0\.0\.1:\d+$/);

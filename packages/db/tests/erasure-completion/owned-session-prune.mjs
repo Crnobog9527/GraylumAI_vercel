@@ -15,7 +15,7 @@ const sessionScope=t=>`SELECT ctid::text c FROM ${t} x
 // 0349: the pruned rows of both session tables are exactly the rows erasure_business_owner assigns.
 export async function runOwnedSessionPrune(db,report) {
  const src=(await db.query(`SELECT pg_get_functiondef('account_erasure_prune_business(uuid,integer)'::regprocedure) d`)).rows[0].d;
- assert.ok(src.includes("WHEN t IN ('runtime_session_batches','runtime_session_history')"),'0349 patch installed');
+ assert.ok(src.includes('-- 0349: session-owned Runtime rows'),'0349 patch installed');
  // Synthetic open-account canaries: a closed subject's pruning must not touch or serialize them.
  const open=await fixture(db);
  open.execution=(await db.query('SELECT b2a_test.bind($1) v',[open])).rows[0].v;
