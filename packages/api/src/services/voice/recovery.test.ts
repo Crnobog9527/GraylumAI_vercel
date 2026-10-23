@@ -22,7 +22,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   billing.recoverReceipts.mockResolvedValue({});
   billing.readRun.mockResolvedValue({ closed: false });
-  billing.finalizeRun.mockResolvedValue({ closed: true });
+  billing.finalizeRun.mockResolvedValue({ closed: true, state: 'settled' });
 });
 
 describe('recoverVoiceGenerations', () => {
@@ -32,6 +32,12 @@ describe('recoverVoiceGenerations', () => {
     expect(billing.requestCancel).toHaveBeenCalledWith('r');
     expect(db.calls.find(([name]) => name === 'voice_generation_finish')?.[1])
       .toMatchObject({ failure_code: 'VOICE_INTERRUPTED', settled: true, result: null });
+  });
+  it('a run whose cost is still pending stays listed for the next day', async () => {
+    billing.finalizeRun.mockResolvedValue({ closed: true, state: 'cost_pending' });
+    const db = admin({ generations: [{ actorId: 'a', versionId: 'v', runId: 'r', status: 'draft' }], scrubs: [] });
+    expect(await recoverVoiceGenerations(db as never)).toMatchObject({ settled: 0, waiting: 1 });
+    expect(db.calls.find(([name]) => name === 'voice_generation_finish')?.[1]).toMatchObject({ settled: false });
   });
   it('a generation that never reached billing is only marked failed', async () => {
     const db = admin({ generations: [{ actorId: 'a', versionId: 'v', runId: null, status: 'generating' }], scrubs: [] });
@@ -56,7 +62,7 @@ describe('recoverVoiceGenerations', () => {
   });
   it('leaves what does not fit the cron window for the next run', async () => {
     let clock = 0;
-    billing.finalizeRun.mockImplementation(async () => { clock += 25_000; return { closed: true }; });
+    billing.finalizeRun.mockImplementation(async () => { clock += 25_000; return { closed: true, state: 'settled' }; });
     const db = admin({ generations: [1, 2, 3].map(n => ({ actorId: 'a', versionId: 'v' + n, runId: 'r' + n, status: 'generating' })),
       scrubs: [{ actorId: 'a', runId: 's' }] });
     expect(await recoverVoiceGenerations(db as never, { now: () => clock })).toMatchObject({ settled: 2, deferred: 2 });
