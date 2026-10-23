@@ -121,7 +121,7 @@ const videoDetail = (extra: Record<string, unknown> = {}) => ({ code: 200, data:
   comment_count: 120, ...extra } });
 
 describe('YouTube post detail', () => {
-  it('reads one video by a strictly checked id and returns exact followers and an absolute date', async () => {
+  it('reads one video by a strictly checked id and returns its (rounded) followers and an absolute date', async () => {
     const calls: RecordedCall[] = [];
     const result = await callTikhub({ platform: 'youtube', kind: 'post_detail', postId: 'zd3yCa1bJCM' },
       deps(jsonFetch(200, videoDetail(), calls)));
@@ -130,7 +130,7 @@ describe('YouTube post detail', () => {
     expect(result).toMatchObject({ outcome: 'ok', usage: { unit: 'call', units: '1' } });
     expect(result.items).toEqual([{ url: 'https://www.youtube.com/watch?v=zd3yCa1bJCM', fields: {
       id: 'zd3yCa1bJCM', title: 'Minecraft: DREAM!', author: 'Maizen', authorId: 'UCJHBJ7F-nAIlMGolm0Hu4vg',
-      publishedAt: '2026-10-01T16:00:00.000Z', views: 343_369, likes: 0, comments: 120, followers: 98_400 }, missing: ['shares'] }]);
+      publishedAt: '2026-10-01T16:00:00.000Z', views: 343_369, likes: 0, comments: 120, followers: 98_400, followersApprox: true }, missing: ['shares'] }]);
   });
 
   it('refuses a bad or missing video id before any call; the account field is never used for it', async () => {
@@ -163,12 +163,12 @@ describe('benchmark route sets', () => {
   it('lists each platform set, keeps every set within 3 sub-calls and enables only verified platforms', () => {
     expect(BENCHMARK_ROUTE_KINDS.bilibili).toEqual({ kinds: ['account_profile', 'account_relation', 'account_posts'],
       followersFrom: 'account_relation', verified: false });
-    expect(BENCHMARK_ROUTE_KINDS.youtube).toEqual({ kinds: ['account_posts', 'post_detail'], followersFrom: 'post_detail', verified: false });
+    expect(BENCHMARK_ROUTE_KINDS.youtube).toEqual({ kinds: ['account_posts', 'post_detail'], followersFrom: 'post_detail', verified: true });
     expect(BENCHMARK_ROUTE_KINDS.xiaohongshu).toEqual({ kinds: ['account_profile', 'account_posts'],
       followersFrom: 'account_profile', verified: true });
     expect(BENCHMARK_ROUTE_KINDS.douyin).toEqual({ kinds: ['account_profile', 'account_posts'],
       followersFrom: 'account_profile', verified: true });
-    expect(BENCHMARK_CAPABLE_PLATFORMS).toEqual(['tiktok', 'x', 'xiaohongshu', 'douyin']);
+    expect(BENCHMARK_CAPABLE_PLATFORMS).toEqual(['tiktok', 'x', 'xiaohongshu', 'douyin', 'youtube']);
     expect(MAX_BENCHMARK_SUBCALLS_PER_ACCOUNT).toBe(3);
     for (const platform of SOCIAL_PLATFORMS) expect(benchmarkSubcallsPerAccount(platform)).toBeLessThanOrEqual(3);
     expect([benchmarkSubcallsPerAccount('bilibili'), benchmarkSubcallsPerAccount('youtube'), benchmarkSubcallsPerAccount('douyin')])
@@ -197,11 +197,11 @@ describe('benchmark route sets', () => {
       recentGrowth: { maxFirstPostAgeDays: 90, minViewsToFollowers: '1' },
     } as unknown as ResearchToolsConfig;
     expect(researchToolsConfigSchema.safeParse(config).success).toBe(true);
-    for (const platform of ['bilibili', 'youtube'] as const) {
-      const parsed = researchToolsConfigSchema.safeParse({ ...config, benchmarkPlatforms: [platform] });
-      expect(parsed.success).toBe(false);
-      expect(JSON.stringify(parsed.error?.issues)).toContain('cannot supply benchmark fields yet');
-    }
+    const parsed = researchToolsConfigSchema.safeParse({ ...config, benchmarkPlatforms: ['bilibili'] });
+    expect(parsed.success).toBe(false);
+    expect(JSON.stringify(parsed.error?.issues)).toContain('cannot supply benchmark fields yet');
+    // YouTube's routes were checked against real responses (BENCHMARK-COVERAGE, 2026-10-23).
+    expect(researchToolsConfigSchema.safeParse({ ...config, benchmarkPlatforms: ['youtube'] }).success).toBe(true);
     const wrongPath = { ...config, routes: [route('youtube', 'post_detail', '/youtube/web_v2/get_video_info')] };
     expect(researchToolsConfigSchema.safeParse(wrongPath).success).toBe(false);
   });
