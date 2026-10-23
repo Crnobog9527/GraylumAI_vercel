@@ -16,11 +16,11 @@ import {openRouterBound} from '../bill2/openRouterPolicy';
 const admittedSkill = vi.hoisted(() => ({ source: undefined as SkillSource | undefined }));
 vi.mock('../skills/databaseSource', () => ({ databaseSkillSource: () => admittedSkill.source }));
 // CONTENT-CONVERSATION-DRIVEN: a test may hand admission a ready catalog; otherwise the real (here empty) discovery runs.
-const catalogState = vi.hoisted(() => ({ value: undefined as unknown }));
+const catalogState = vi.hoisted(() => ({ value: undefined as unknown, probe: undefined as undefined | ((fits: (text: string, extra: number) => boolean) => void) }));
 vi.mock('./skillCatalogAdmission', async (original) => {
   const real = await original<typeof import('./skillCatalogAdmission')>();
   return { ...real, admitSkillCatalog: async (...args: Parameters<typeof real.admitSkillCatalog>) =>
-    catalogState.value && args[2].eligible && args[2].fits('x'.repeat(200), 100) ? catalogState.value : real.admitSkillCatalog(...args) };
+    catalogState.probe ? (catalogState.probe(args[2].fits), undefined) : catalogState.value && args[2].eligible && args[2].fits('x'.repeat(200), 100) ? catalogState.value : real.admitSkillCatalog(...args) };
 });
 // The window/configuration consistency of BILL-UNIT is covered in billingUnitAdmission.test.ts.
 vi.mock('./billingUnitAdmission', async (original) => ({
@@ -431,4 +431,21 @@ it('free chat freezes a Skill catalog with load_skill on the primary model; ment
   const mentorContext=runtimeContext.parse((await mentor.service.prepare({...mentor.input,organizeAfter:false})).context);
   expect(mentorContext).not.toHaveProperty('skillCatalog');expect(mentorContext.tools).not.toContain('load_skill');
  }finally{catalogState.value=undefined;}
+});
+
+// The optional catalog is measured where it is serialized: text that fits as raw bytes but not escaped is dropped
+// (the reply is then ordinary chat), never accepted and then refused as an over-long request.
+it('measures the Skill catalog inside the serialized instructions, so escaped text is dropped rather than refused later',async()=>{
+ const f=(()=>{const x=fixture();return x;})();
+ const free:Record<string,unknown>={...f.policy};delete free.opcTurnToken;delete free.mentorStream;
+ let largestPlain=0,quoted=true;
+ catalogState.probe=fits=>{
+  let low=0,high=2_000_000;
+  while(low<high){const mid=Math.ceil((low+high)/2);if(fits('x'.repeat(mid),0))low=mid;else high=mid-1;}
+  largestPlain=low;quoted=fits('"'.repeat(low),0);
+ };
+ try{await runtimeAdmissionService(f.user,f.admin,free as typeof f.policy).prepare({...f.input,organizeAfter:false});}
+ finally{catalogState.probe=undefined;}
+ expect(largestPlain).toBeGreaterThan(1000);
+ expect(quoted).toBe(false);
 });

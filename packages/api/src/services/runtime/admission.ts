@@ -337,7 +337,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    const libraryRead=libraryReferences.length>0||libraryRetrieval;
    const sourceTools=[...(searchAllowed?['search']:[]),...(input.sources.length||workspaceContext||libraryRead?['read_source']:[])];
    libraryBytes=libraryReserveBytes(libraryReferences,sourceTools,workspaceContext,libraryRetrieval);
-   const fitsWith=(extra:number)=>fitsCapacity(()=>requireCapacity(instructions+positioningRule,Boolean(skillFile),
+   const fitsWith=(extra:number,more='')=>fitsCapacity(()=>requireCapacity(instructions+more+positioningRule,Boolean(skillFile),
     runtimeScopeInput(input.input,policy.reportGeneration?undefined:session.scopeMaterial,hostTurnContext),historyRead,extra));
    const postsBudget=await ownPostsBudget(admin,await actor(),ownPosts,maxCalls,fitsWith);
    ownPosts=postsBudget.on;maxCalls=postsBudget.calls;libraryBytes+=postsBudget.bytes;
@@ -346,7 +346,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    const skillCatalog=await admitSkillCatalog(user,admin,{excludeSocial:gated,inputLimit,actor,
     eligible:input.selection.kind==='ordinary'&&!mentorStream&&!stepStream&&!hostTurnContext&&!policy.reportGeneration&&
      !policy.opcTurnToken&&(session.scope as {kind?:unknown}|null)?.kind==='positioning_draft',
-    fits:(text,extra)=>fitsWith(extra+(strategyGuide?workspaceStrategyReserve(maxCalls+MAX_SKILL_LOADS_PER_TURN):0)+Buffer.byteLength(text))});
+    // Measured appended to the instructions, as it is serialized (escaped quotes count), never as raw bytes.
+    fits:(text,extra)=>fitsWith(extra+(strategyGuide?workspaceStrategyReserve(maxCalls+MAX_SKILL_LOADS_PER_TURN):0),text)});
    if(skillCatalog){instructions+=skillCatalog.text;catalogBytes=skillCatalog.reserveBytes;maxCalls+=skillCatalog.frozen.maxSkillLoads;}
    if(candidates.length)candidates=await fittingCandidates(candidates,candidate=>activateCandidateWithSource(user,admin,candidate,brandIdentity),
     {input:currentInput,inputBytes,toolBytes:candidateToolBytes(libraryReferences,sourceTools,workspaceContext,libraryRetrieval)+
