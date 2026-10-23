@@ -5,11 +5,10 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { trpc } from '@/trpc/client';
 import { accountIndex, type Brand } from './brands';
-import { ConnectForm, startPostForMe } from './ConnectForm';
+import { ConnectForm } from './ConnectForm';
 import {
   CONNECTION_STATUS, SOURCE_LABEL, dataErrorMessage, errorCode, formatTime, platformName,
 } from './labels';
-import { connectErrorMessage } from '@/lib/publish-monitor-messages';
 
 /** One row of `publishMonitor.connections` (foundation.ts connectionSchema). */
 export type Connection = { id: string; businessId: string; accountProjectId: string | null; role: 'own' | 'benchmark';
@@ -20,24 +19,35 @@ export type RefreshState = { id: string; refreshError: string | null; delayed: b
   refreshState: string | null };
 
 /**
+ * Brand accounts that cannot be connected again. Only a live connection blocks: one that needs re-authorizing is
+ * connected again through the same form (the server updates it in place), and a manual-only account is upgraded in
+ * place by the first real connection (publish_monitor_connect_confirm, publish_monitor_tikhub_connect).
+ */
+export function blockingProjectIds(own: Connection[]): Set<string> {
+  return new Set(own.flatMap(c => (c.accountProjectId && c.status === 'connected' && c.source !== 'manual'
+    ? [c.accountProjectId] : [])));
+}
+
+/**
  * PUBLISH-MONITOR PR-7: the user's connected accounts with their state, refresh and disconnect, a form to connect
  * another brand account, and (Gold) the benchmark accounts. Every check is repeated on the server; the buttons are
  * only entry points.
  */
 export function ConnectionsPanel({ brands, connections, refresh, gold, onChanged }: { brands: Brand[];
   connections: Connection[]; refresh: Map<string, RefreshState>; gold: boolean; onChanged: () => void }) {
-  const [adding, setAdding] = useState(false);
+  const [adding, setAdding] = useState(false), [preselect, setPreselect] = useState('');
   const own = connections.filter(c => c.role === 'own');
   const benchmarks = connections.filter(c => c.role === 'benchmark');
   const accounts = accountIndex(brands);
-  const connected = new Set(own.flatMap(c => (c.accountProjectId ? [c.accountProjectId] : [])));
+  const connected = blockingProjectIds(own);
   return (
     <section className="space-y-4" aria-labelledby="pm-accounts">
       <div className="flex items-center justify-between gap-2">
         <h2 id="pm-accounts" className="text-base font-semibold">我的账号</h2>
-        <Button variant="outline" onClick={() => setAdding(value => !value)}>{adding ? '收起' : '连接账号'}</Button>
+        <Button variant="outline" onClick={() => { setPreselect(''); setAdding(value => !value); }}>{adding ? '收起' : '连接账号'}</Button>
       </div>
-      {adding && <ConnectForm brands={brands} connected={connected} onConnected={() => { setAdding(false); onChanged(); }} />}
+      {adding && <ConnectForm key={preselect} brands={brands} connected={connected} initialProjectId={preselect}
+        onConnected={() => { setAdding(false); onChanged(); }} />}
       {own.length === 0 ? (
         <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
           还没有连接账号。海外 9 个平台授权后读取你自己作品的数据；小红书、抖音贴主页链接读取公开数据；其他平台可以用表格导入。</p>
@@ -46,6 +56,7 @@ export function ConnectionsPanel({ brands, connections, refresh, gold, onChanged
           {own.map(c => {
             const account = c.accountProjectId ? accounts.get(c.accountProjectId) : undefined;
             return <ConnectionRow key={c.id} connection={c} refresh={refresh.get(c.id)} onChanged={onChanged}
+              onReauthorize={projectId => { setPreselect(projectId); setAdding(true); }}
               title={`${account?.businessName ?? '品牌'} · ${platformName(c.platform)} · ${account?.label ?? c.displayHint ?? ''}`} />;
           })}
         </ul>
@@ -63,19 +74,13 @@ function stateLine(c: Connection, refresh: RefreshState | undefined): string {
   return `最后更新于 ${formatTime(c.lastSuccessAt)}`;
 }
 
-function ConnectionRow({ connection: c, refresh, title, onChanged }: { connection: Connection;
-  refresh: RefreshState | undefined; title: string; onChanged: () => void }) {
+function ConnectionRow({ connection: c, refresh, title, onChanged, onReauthorize }: { connection: Connection;
+  refresh: RefreshState | undefined; title: string; onChanged: () => void; onReauthorize: (projectId: string) => void }) {
   const doRefresh = trpc.publishMonitor.refresh.useMutation();
   const disconnect = trpc.publishMonitor.disconnect.useMutation();
-  const [confirming, setConfirming] = useState(false), [reauthError, setReauthError] = useState('');
+  const [confirming, setConfirming] = useState(false);
   const error = doRefresh.error ?? disconnect.error;
   const needsReauth = c.source === 'postforme' && (c.status === 'reauth_required' || c.status === 'quarantined');
-  async function reauthorize() {
-    if (!c.accountProjectId) return;
-    setReauthError('');
-    try { await startPostForMe({ accountProjectId: c.accountProjectId, publish: false }); }
-    catch (cause) { setReauthError(connectErrorMessage(errorCode(cause))); }
-  }
   return (
     <li className="space-y-2 p-3 text-sm">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -87,14 +92,13 @@ function ConnectionRow({ connection: c, refresh, title, onChanged }: { connectio
       {doRefresh.data && <p role="status">{doRefresh.data.inserted > 0 ? `读到 ${doRefresh.data.inserted} 条新作品。`
         : doRefresh.data.outcome === 'partial' ? '已读取一部分，剩下的会在下次更新时接着读。' : '已刷新。'}</p>}
       {error && <p role="alert" style={{ color: 'var(--color-error)' }}>{dataErrorMessage(errorCode(error))}</p>}
-      {reauthError && <p role="alert" style={{ color: 'var(--color-error)' }}>{reauthError}</p>}
       <div className="flex flex-wrap gap-2">
         {c.source === 'postforme' && c.status === 'connected' && (
           <Button size="sm" variant="outline" disabled={doRefresh.isPending}
             onClick={() => doRefresh.mutate({ connectionId: c.id }, { onSuccess: onChanged })}>
             {doRefresh.isPending ? '正在刷新…' : '刷新数据'}</Button>
         )}
-        {needsReauth && <Button size="sm" onClick={reauthorize}>重新授权</Button>}
+        {needsReauth && c.accountProjectId && <Button size="sm" onClick={() => onReauthorize(c.accountProjectId!)}>重新授权</Button>}
         {confirming ? <>
           <span className="self-center">断开后不再读取这个账号，已读到的作品数据会一起删除。确定吗？</span>
           <Button size="sm" variant="destructive" disabled={disconnect.isPending}

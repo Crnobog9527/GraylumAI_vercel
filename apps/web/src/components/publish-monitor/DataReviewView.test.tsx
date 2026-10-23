@@ -25,7 +25,7 @@ vi.mock('@/trpc/client', () => ({ trpc: {
 import { DataReviewView } from './DataReviewView';
 import { PostsPanel, type Post } from './PostsPanel';
 import { ReviewPanel } from './ReviewPanel';
-import { ConnectionsPanel, type Connection } from './ConnectionsPanel';
+import { ConnectionsPanel, blockingProjectIds, type Connection } from './ConnectionsPanel';
 
 const ok = (data: unknown) => ({ isPending: false, isSuccess: true, data, error: null });
 const failed = (message: string) => ({ isPending: false, isSuccess: false, data: undefined, error: { message, data: {} } });
@@ -93,6 +93,16 @@ describe('accounts', () => {
     expect(t).toContain('重新授权');
     expect(t).toContain('还没读到作品，如果你已经发过，请重新授权');
     expect(t).not.toContain('本周没有发内容');
+  });
+  it('lets a manual-only or re-authorizing account be connected, and blocks only a live real connection', () => {
+    const ids = blockingProjectIds([own({ accountProjectId: 'live' }), own({ id: 'm', accountProjectId: 'manual', source: 'manual' }),
+      own({ id: 'r', accountProjectId: 'reauth', status: 'reauth_required' }), own({ id: 'q', accountProjectId: 'quar', status: 'quarantined' }),
+      own({ id: 't', accountProjectId: 'tik', source: 'tikhub', platform: 'douyin' }), own({ id: 'n', accountProjectId: null })]);
+    expect([...ids].sort()).toEqual(['live', 'tik']);
+  });
+  it('offers re-authorization through the connect form, not a direct call without the platform details', () => {
+    const t = render([own({ id: 'i', platform: 'instagram', status: 'reauth_required' })]);
+    expect(t).toContain('重新授权');
   });
   it('shows benchmark accounts only to Gold', () => {
     expect(render([])).not.toContain('对标账号（Gold）');

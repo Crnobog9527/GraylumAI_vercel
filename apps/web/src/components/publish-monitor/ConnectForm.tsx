@@ -27,10 +27,10 @@ export async function startPostForMe(body: StartBody, assign: (url: string) => v
   assign(json.url);
 }
 
-export function ConnectForm({ brands, connected, onConnected }: { brands: Brand[]; connected: Set<string>;
-  onConnected: () => void }) {
+export function ConnectForm({ brands, connected, initialProjectId = '', onConnected }: { brands: Brand[]; connected: Set<string>;
+  initialProjectId?: string; onConnected: () => void }) {
   const accounts = brands.flatMap(brand => brand.accounts);
-  const [projectId, setProjectId] = useState('');
+  const [projectId, setProjectId] = useState(initialProjectId);
   const account = accounts.find(a => a.projectId === projectId) ?? null;
   return (
     <div className="space-y-3 rounded-lg border p-4" style={{ borderColor: 'var(--border-primary)' }}>

@@ -67,6 +67,7 @@ const APP_TEMPLATES = [
   '/admin/payment-notices',
   '/admin/performance',
   '/admin/prompts',
+  '/admin/publish-monitor',
   '/admin/refunds',
   '/admin/secrets',
   '/admin/settings',
