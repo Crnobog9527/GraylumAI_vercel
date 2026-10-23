@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { TRPCError } from '@trpc/server';
 import { adminProcedure, router } from '../trpc';
-import { readStuckCleanup, requeueInput, requeueStuckCleanup } from '../services/publishMonitor/stuckCleanup';
+import { readStuckCleanup, requeueInput, requeueStuckCleanup, resolveStuckCleanup } from '../services/publishMonitor/stuckCleanup';
 
 /**
  * PUBLISH-MONITOR plan §9 item 25: the admin view of Post for Me cleanup that stopped retrying ("外部待处理") and the
@@ -18,4 +18,7 @@ export const publishMonitorAdminRouter = router({
   stuck: adminProcedure.query(({ ctx }) => safe(ctx.hasSupabaseAdminPrivileges, () => readStuckCleanup(ctx.supabaseAdmin))),
   requeue: adminProcedure.input(requeueInput).mutation(({ ctx, input }) =>
     safe(ctx.hasSupabaseAdminPrivileges, () => requeueStuckCleanup(ctx.supabaseAdmin, input))),
+  // After a person verified at Post for Me that the account is gone: ends the record instead of retrying it.
+  resolve: adminProcedure.input(requeueInput).mutation(({ ctx, input }) =>
+    safe(ctx.hasSupabaseAdminPrivileges, () => resolveStuckCleanup(ctx.supabaseAdmin, input))),
 });

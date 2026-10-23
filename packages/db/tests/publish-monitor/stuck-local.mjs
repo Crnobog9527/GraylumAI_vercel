@@ -30,6 +30,7 @@ const confirm = (a, req, pid, ext) => svc('SELECT publish_monitor_connect_confir
 const conn = async pid => (await c.query('SELECT * FROM social_connections WHERE provider_account_id=$1', [pid])).rows[0];
 const list = () => svc('SELECT publish_monitor_stuck_list(200) v');
 const requeue = (kind, id) => svc('SELECT publish_monitor_stuck_requeue($1,$2) v', [kind, id]);
+const resolve = (kind, id) => svc('SELECT publish_monitor_stuck_resolve($1,$2) v', [kind, id]);
 
 try {
   await c.query(fixtureSql);
@@ -42,7 +43,8 @@ try {
   report.checks.push('0337 reapplication preserves the complete catalog');
 
   for (const role of ['anon', 'authenticated']) {
-    for (const fn of ['publish_monitor_stuck_list(integer)', 'publish_monitor_stuck_requeue(text,uuid)']) {
+    for (const fn of ['publish_monitor_stuck_list(integer)', 'publish_monitor_stuck_requeue(text,uuid)',
+      'publish_monitor_stuck_resolve(text,uuid)']) {
       assert.equal(await v('SELECT has_function_privilege($1,$2,\'EXECUTE\') v', [role, fn]), false, `${role} ${fn}`);
       assert.equal(await v('SELECT has_function_privilege(\'service_role\',$1,\'EXECUTE\') v', [fn]), true, fn);
     }
@@ -50,11 +52,12 @@ try {
   await c.query('SET ROLE service_role');
   await code(c.query('SELECT count(*) FROM social_connections'), '42501');
   await c.query('RESET ROLE');
-  report.checks.push('only service_role may call the two functions; the tables stay closed to it');
+  report.checks.push('only service_role may call the three functions; the tables stay closed to it');
 
   await code(svc('SELECT publish_monitor_stuck_list(0) v'), '22023');
   await code(requeue('other', randomUUID()), '22023');
-  assert.deepEqual(await list(), { connections: [], requests: [] });
+  await code(resolve('other', randomUUID()), '22023');
+  assert.deepEqual(await list(), { totals: { connections: 0, requests: 0 }, connections: [], requests: [] });
   report.checks.push('bad input is refused and an empty state lists nothing');
 
   // A deletion that failed 50 times, one that failed 49 times, and a takeover disconnect that failed 50 times.
@@ -79,6 +82,10 @@ try {
   await c.query("UPDATE social_connect_requests SET state='abandoned',cleanup_attempts=3 WHERE id=$1", [r2.requestId]);
 
   const stuck = await list();
+  assert.deepEqual(stuck.totals, { connections: 2, requests: 1 });
+  const bounded = await svc('SELECT publish_monitor_stuck_list(1) v');
+  assert.deepEqual([bounded.connections.length, bounded.totals], [1, { connections: 2, requests: 1 }],
+    'the detail list is bounded, the totals are not');
   assert.deepEqual(stuck.connections.map(x => [x.providerAccountId, x.kind, x.attempts, x.error]).sort(),
     [['pfm_stuck_del', 'deletion', 50, 'PROVIDER_RETRY'], ['pfm_stuck_take', 'takeover_disconnect', 50, 'PROVIDER_500']]);
   assert.deepEqual(stuck.requests.map(x => [x.id, x.state, x.attempts, x.error, x.providerAccountIds]),
@@ -108,6 +115,29 @@ try {
   const after = await list();
   assert.deepEqual(after.connections.map(x => x.providerAccountId), ['pfm_stuck_take']);
   assert.deepEqual(after.requests, []);
+  assert.deepEqual(after.totals, { connections: 1, requests: 0 });
   report.checks.push('a re-queued attempt cleanup is claimed again and leaves the list');
+
+  // A person verified at Post for Me that the account is gone: the record ends without a worker claim.
+  const takeId = (await conn('pfm_stuck_take')).id;
+  assert.equal(await resolve('connection', (await conn('pfm_retrying')).id), false, 'a record still retrying is untouched');
+  assert.equal(await resolve('connection', takeId), true);
+  const taken = await conn('pfm_stuck_take');
+  assert.deepEqual([taken.provider_disconnect_pending, taken.deletion_attempts, taken.deletion_error], [false, 0, null],
+    'a resolved takeover disconnect is settled and leaves the list');
+  assert.equal(await resolve('connection', takeId), false, 'a second click changes nothing');
+  // A stopped deletion is removed; one held for an unresolved publish keeps its record with tokens cleared.
+  await c.query("UPDATE social_connections SET deletion_attempts=50,deletion_error='PROVIDER_500' WHERE provider_account_id='pfm_stuck_del'");
+  assert.equal(await resolve('connection', delId), true);
+  assert.equal(await conn('pfm_stuck_del'), undefined, 'a resolved deletion record ends');
+  // A connect attempt stuck on cleanup is marked cleaned, so the worker never picks it up again.
+  await c.query("UPDATE social_connect_requests SET cleanup_attempts=50,cleanup_error='PROVIDER_LIST_FAILED' WHERE id=$1", [r1.requestId]);
+  assert.equal(await resolve('request', r2.requestId), false, 'an attempt still within its retries is untouched');
+  assert.equal(await resolve('request', r1.requestId), true);
+  const done = (await c.query('SELECT cleaned_at,cleanup_attempts,cleanup_error FROM social_connect_requests WHERE id=$1', [r1.requestId])).rows[0];
+  assert.deepEqual([done.cleaned_at !== null, done.cleanup_attempts, done.cleanup_error], [true, 0, null]);
+  assert.ok(!(await svc('SELECT publish_monitor_cleanup_claim(50,120) v')).map(x => x.requestId).includes(r1.requestId));
+  assert.deepEqual((await list()).totals, { connections: 0, requests: 0 });
+  report.checks.push('resolve ends a stopped deletion, takeover disconnect or attempt cleanup once, and touches nothing else');
 } catch (error) { report.failed = String(error.stack ?? error); process.exitCode = 1; }
 finally { await db.close(); console.log(JSON.stringify(report, null, 2)); }

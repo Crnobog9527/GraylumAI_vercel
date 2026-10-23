@@ -113,7 +113,7 @@ export async function runSocialMonitorJob(db: Db, client: ClientDeps | null, unt
   // Last and database only: what the cleanup steps left stopped is counted even when the budget ran out.
   try {
     const stuck = await readStuckCleanup(db);
-    report.stuck = { connections: stuck.connections.length, requests: stuck.requests.length };
+    report.stuck = stuck.totals;
   } catch { report.failures.push('stuck'); }
   return report;
 }

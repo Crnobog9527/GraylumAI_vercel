@@ -10,6 +10,7 @@ import { z } from 'zod';
 type Rpc = Pick<SupabaseClient, 'rpc'>;
 const code = z.string().regex(/^[A-Z0-9_]{1,64}$/).nullable();
 const stuckSchema = z.object({
+  totals: z.object({ connections: z.number().int().min(0), requests: z.number().int().min(0) }).strict(),
   connections: z.array(z.object({ id: z.string().uuid(), kind: z.enum(['deletion', 'takeover_disconnect']),
     platform: z.string(), providerAccountId: z.string().nullable(), attempts: z.number().int(), error: code,
     updatedAt: z.string() }).strict()),
@@ -31,4 +32,14 @@ export async function requeueStuckCleanup(db: Rpc, input: z.infer<typeof requeue
   const result = await db.rpc('publish_monitor_stuck_requeue', { p_kind: input.kind, p_id: input.id });
   if (result.error || typeof result.data !== 'boolean') throw new Error('PUBLISH_MONITOR_STUCK_UNAVAILABLE');
   return { requeued: result.data };
+}
+
+/**
+ * A person verified at Post for Me that the account is already gone: ends the record (the worker alone would keep failing,
+ * because Post for Me answers 500, not 404, for an unknown account).
+ */
+export async function resolveStuckCleanup(db: Rpc, input: z.infer<typeof requeueInput>): Promise<{ resolved: boolean }> {
+  const result = await db.rpc('publish_monitor_stuck_resolve', { p_kind: input.kind, p_id: input.id });
+  if (result.error || typeof result.data !== 'boolean') throw new Error('PUBLISH_MONITOR_STUCK_UNAVAILABLE');
+  return { resolved: result.data };
 }
