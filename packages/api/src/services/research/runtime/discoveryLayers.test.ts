@@ -154,11 +154,15 @@ describe('deeper discovery layers', () => {
       ['keyword_posts', 'account_profile', 'account_posts', 'account_search']);
     const first = await f.run(29);
     expect(first).toMatchObject({ continue: true, reason: 'ROUND_LIMIT' });
+    // The page is told the round goes on, so it can continue it for the user (PR-7); the finished round is not.
+    expect(f.ctx.emit).toHaveBeenCalledWith({ type: 'research_continue', discoveryId });
+    vi.mocked(f.ctx.emit).mockClear();
     const firstSent = f.sent.length;
     const second = await f.run(29, { discoveryId });
     expect(f.sent.length - firstSent).toBe(40 - firstSent);
     expect(second.coverage.platforms.douyin).toMatchObject({ capReached: true });
     expect(second.continue).toBe(false);
     expect(f.discoveries.get(discoveryId)?.state).toBe('completed');
+    expect(f.ctx.emit).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'research_continue' }));
   });
 });

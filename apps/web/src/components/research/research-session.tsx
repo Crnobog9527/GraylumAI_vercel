@@ -9,8 +9,9 @@ import { KeywordCardView } from "./keyword-card";
 import { shortfallChoiceInput, ShortfallCardView, type ShortfallCard, type ShortfallChoice } from "./shortfall-card";
 import type { ResearchCall } from "./research-model";
 import {
-  isResearchEvent, REPORT_MIN_QUALIFIED, researchConfirmedInput, researchRefreshInput, toBenchmarkRows, toSessionCards, withResearchCall,
-  type CallsByExecution, type StoredBenchmark, type StoredCard,
+  AUTO_CONTINUE_INPUT, AUTO_CONTINUE_LIMIT, autoContinueDecision, isResearchEvent, REPORT_MIN_QUALIFIED, researchConfirmedInput,
+  researchRefreshInput, toBenchmarkRows, toSessionCards, withResearchCall,
+  type CallsByExecution, type ResearchContinuation, type StoredBenchmark, type StoredCard,
 } from "./research-session-model";
 import type { CandidateSubmission, CardConfirmation, KeywordSubmission } from "./selection-card-model";
 import styles from "./research.module.css";
@@ -27,14 +28,17 @@ export const REFRESH_LOCK_MS = 8000;
 export function useResearchCalls(sessionId: string | null | undefined) {
   const utils = trpc.useUtils();
   const [calls, setCalls] = useState<CallsByExecution>(() => new Map());
+  const [continuation, setContinuation] = useState<ResearchContinuation | null>(null);
   const observe = useCallback((executionId: string, event: { type: string }) => {
     if (!isResearchEvent(event)) return;
     // Benchmark rows are written after a call's final event; the panel re-reads them once the turn is saved.
     if (event.type === "research_call") setCalls(current => withResearchCall(current, executionId, event));
+    else if (event.type === "research_continue") setContinuation({ executionId, discoveryId: event.discoveryId });
     else if (sessionId) void utils.research.cards.invalidate({ sessionId });
   }, [sessionId, utils]);
   const of = useCallback((executionId: string) => calls.get(executionId) ?? NO_CALLS, [calls]);
-  return { observe, of };
+  // `panel`: what ResearchSessionPanel needs from the stream (spread onto it).
+  return { observe, of, continuation, panel: { continuation } };
 }
 
 /**
@@ -155,13 +159,27 @@ export function ResearchShortfallCard({ sessionId, disabled, onChosen }: {
  * `onSend` sends one mentor message on the page's behalf: after a card is confirmed, and for a refresh (with the
  * one-time grant the host issued).
  */
-export function ResearchSessionPanel({ settledTurns, onSend, ...props }: Omit<Parameters<typeof ResearchSessionCards>[0], "onConfirmed"> & {
+export function ResearchSessionPanel({ settledTurns, onSend, continuation = null, ...props }:
+  Omit<Parameters<typeof ResearchSessionCards>[0], "onConfirmed"> & {
   settledTurns: number;
   onSend: (text: string, researchRefreshId?: string) => void | Promise<void>;
+  /** The host's latest "the discovery round goes on" signal (`useResearchCalls().continuation`). */
+  continuation?: ResearchContinuation | null;
 }) {
   const utils = trpc.useUtils();
   const { sessionId } = props;
   const seen = useRef(settledTurns);
+  // Auto-continue (Owner 2026-10-23, 3 A): once the turn that ran out is over, send the continuation for the user.
+  const sentFor = useRef(new Set<string>());
+  const sentPerRound = useRef(new Map<string, number>());
+  const decision = autoContinueDecision(continuation, sentFor.current, sentPerRound.current, props.disabled);
+  useEffect(() => {
+    if (decision !== "send" || !continuation) return;
+    sentFor.current.add(continuation.executionId);
+    sentPerRound.current.set(continuation.discoveryId, (sentPerRound.current.get(continuation.discoveryId) ?? 0) + 1);
+    void onSend(AUTO_CONTINUE_INPUT);
+  }, [decision, continuation, onSend]);
+  const batch = continuation ? sentPerRound.current.get(continuation.discoveryId) ?? 0 : 0;
   useEffect(() => {
     if (seen.current === settledTurns) return;
     seen.current = settledTurns;
@@ -171,6 +189,9 @@ export function ResearchSessionPanel({ settledTurns, onSend, ...props }: Omit<Pa
   }, [settledTurns, sessionId, utils]);
   return (
     <>
+      {decision === "limit"
+        ? <p className={styles.hint}>已经自动接着搜了 {AUTO_CONTINUE_LIMIT} 次，回复"继续"可以接着搜完这一轮。</p>
+        : batch > 0 && props.disabled && <p className={styles.hint} role="status">正在扩大搜索，第 {batch + 1} 批…已经查过的不会重复收费。</p>}
       <ResearchSessionCards {...props} onConfirmed={confirmation => void onSend(researchConfirmedInput(confirmation))}/>
       <ResearchShortfallCard sessionId={sessionId} disabled={props.disabled}
         onChosen={(choice, qualified) => void onSend(shortfallChoiceInput(choice, qualified))}/>

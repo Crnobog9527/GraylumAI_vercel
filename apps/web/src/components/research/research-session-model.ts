@@ -17,7 +17,27 @@ export type CallsByExecution = ReadonlyMap<string, readonly ResearchCall[]>;
 export const MAX_CALLS_PER_EXECUTION = 128;
 
 export function isResearchEvent(event: { type: string }): event is ResearchEvent {
-  return event.type === "research_call" || event.type === "research_card";
+  return event.type === "research_call" || event.type === "research_card" || event.type === "research_continue";
+}
+
+/** A discovery round the host said goes on in the next reply (`research_continue`), with the turn that said so. */
+export interface ResearchContinuation { executionId: string; discoveryId: string }
+/**
+ * Replies the page sends on the user's behalf to finish one discovery round (Owner 2026-10-23, 3 A). A round needs at
+ * most 80 lookups at 26 a reply, so 4 suffice; past the limit the user replies "继续" themselves.
+ */
+export const AUTO_CONTINUE_LIMIT = 6;
+export const AUTO_CONTINUE_INPUT = "继续搜索对标账号";
+
+/**
+ * What to do about the latest continuation: send it once its turn is over and the conversation takes a message, never
+ * twice for one turn, and not past the limit for one round.
+ */
+export function autoContinueDecision(continuation: ResearchContinuation | null, sentFor: ReadonlySet<string>,
+  sentPerRound: ReadonlyMap<string, number>, disabled: boolean): "send" | "wait" | "limit" | "none" {
+  if (!continuation || sentFor.has(continuation.executionId)) return "none";
+  if ((sentPerRound.get(continuation.discoveryId) ?? 0) >= AUTO_CONTINUE_LIMIT) return "limit";
+  return disabled ? "wait" : "send";
 }
 
 /**

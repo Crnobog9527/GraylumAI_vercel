@@ -63,8 +63,8 @@ export function candidateShortage(available: number) {
 }
 
 /** A round stopped before its end (this reply's lookups ran out): it is not a round yet and continues on the next reply. */
-export const ROUND_UNFINISHED_NEXT_STEP = '这一轮搜索还没搜完，不算一轮。告诉用户回复"继续"即可接着搜完这一轮；'
-  + '已经取过的数据不会重复取、不重复收费。不要说已经搜完，也不要建议换关键词。';
+export const ROUND_UNFINISHED_NEXT_STEP = '这一轮搜索还没搜完，不算一轮。用一句话告诉用户正在扩大搜索、会自动接着搜'
+  + '（没有自动继续时回复"继续"即可）；已经取过的数据不会重复取、不重复收费。不要说已经搜完，也不要建议换关键词。';
 
 /** Authors whose profiles one scan batch reads; the first batch is read whole so the card can show up to 12. */
 const AUTHOR_BATCH = 15;
@@ -253,6 +253,8 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
   // A round saved as completed (the same state 0320 counts as a round, partial supplier failures included) without a
   // candidate card: the host may now offer the shortfall choice (0320 decides).
   const shortfall = !stopped && !shown ? await shortfallNotice(ctx) : undefined;
+  // The round goes on in the next reply: tell the page (it continues on the user's behalf, plan §4.2 / PR-7).
+  if (stopped && resumable) ctx.emit({ type: 'research_continue', discoveryId: d.discoveryId });
   return toolEnvelope({ ...(shortfall ? { shortfall } : {}), status: blockedWithoutData ? (stopBudget ? 'budget_exhausted' : 'unavailable')
     : complete && shown ? 'ok' : 'partial',
     reason: stopped ? stopReason : shown ? (complete ? null : 'DISCOVERY_PARTIAL')
