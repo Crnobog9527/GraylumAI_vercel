@@ -4,7 +4,7 @@ import {cachedSystemContent,historyCacheIndex} from './cacheMessages';
 import {ASK_QUESTION_ARGUMENT_LIMIT,toolArgumentLimit} from '../../shared/agentTurn';
 import {OPENROUTER_RESPONSE_BYTE_LIMIT,OPENROUTER_FRAME_BYTE_LIMIT} from './responseCapacity';
 import {gzipSync} from 'node:zlib';
-import {openRouterStream,OPENROUTER_STREAM_BYTE_LIMIT,SOURCE_STREAM_TOOLS} from './openRouterStream';
+import {openRouterStream,OPENROUTER_STREAM_BYTE_LIMIT,offeredStreamTools} from './openRouterStream';
 import {withRuntimeBudget,type RuntimeBudget} from '../runtime/budget';
 import {openRouterBound,openRouterCallBound,OPENROUTER_RESPONSE_TIMEOUT_MS,OPENROUTER_LOOKUP_TIMEOUT_MS} from './openRouterPolicy';
 import {decimal} from './decimal';
@@ -16,7 +16,7 @@ import {createHash} from 'node:crypto';
 import {openRouterEvidence,validGenerationId,type OpenRouterIdentity} from './openRouterEvidence';
 import type {CallIdentity,TransportObservation} from './fixtureAdapter';
 import {approvedReasoningEfforts,reasoningObject} from '../runtime/reasoningPolicy';
-import {AGENT_STREAM_TOOLS,AGENT_TOOL_NAMES,MAX_AGENT_TOOLS} from '../runtime/agentTools';
+import {AGENT_STREAM_TOOLS,AGENT_TOOL_NAMES,FREE_CHAT_TOOL_NAMES,MAX_AGENT_TOOLS} from '../runtime/agentTools';
 // Only this adapter can mint this one-use proof, before invoking transport.
 // A timeout or identical Error message from a started transport is not proof.
 const unstarted=new WeakMap<object,{requestHash:string;send:()=>Promise<TransportObservation>}>();
@@ -36,8 +36,11 @@ export const sourceCall=z.object({id:z.string().min(1).max(256),type:z.literal('
 export const toolCallFor=(names:ReadonlySet<string>)=>z.object({id:z.string().min(1).max(256),type:z.literal('function'),
  function:z.object({name:z.string().refine(name=>names.has(name)),arguments:z.string().max(ASK_QUESTION_ARGUMENT_LIMIT)}).strict()
   .refine(call=>call.arguments.length<=toolArgumentLimit(call.name),'tool arguments too long')}).strict();
-const workspaceMessage=z.union([z.object({role:z.literal('assistant'),content:z.string().nullable(),tool_calls:z.array(sourceCall).min(1).max(1)}).strict(),z.object({role:z.literal('tool'),content:z.string(),tool_call_id:z.string().min(1).max(256)}).strict()]);
-const workspaceTools=z.array(z.object({type:z.literal('function'),function:z.object({name:z.literal('read_source'),description:z.string().max(16000).optional(),parameters:z.record(z.string(),z.unknown()),strict:z.boolean().optional()}).strict()}).strict()).max(1);
+// CHAT-AUTO-CONTEXT C: a free chat may also offer (and replay) the general research tools its admission froze.
+const freeChatCall=toolCallFor(FREE_CHAT_TOOL_NAMES);
+const workspaceMessage=z.union([z.object({role:z.literal('assistant'),content:z.string().nullable(),tool_calls:z.array(freeChatCall).min(1).max(1)}).strict(),z.object({role:z.literal('tool'),content:z.string(),tool_call_id:z.string().min(1).max(256)}).strict()]);
+const workspaceTools=z.array(z.object({type:z.literal('function'),function:z.object({name:z.string().refine(name=>FREE_CHAT_TOOL_NAMES.has(name)),description:z.string().max(16000).optional(),parameters:z.record(z.string(),z.unknown()),strict:z.boolean().optional()}).strict()}).strict())
+ .max(FREE_CHAT_TOOL_NAMES.size).refine(tools=>new Set(tools.map(tool=>tool.function.name)).size===tools.length);
 // Interactive Agent turn tools (AC-1): only the allowlisted names, at most two,
 // each once. Their history is one call per assistant message plus its result.
 const agentCall=toolCallFor(AGENT_TOOL_NAMES);
@@ -80,7 +83,7 @@ export function openRouterAdapter(options:{credential:(identity:OpenRouterIdenti
  }
  async function request(path:string,key:string,body?:string,send?:()=>Promise<TransportObservation>,streamModel?:string,
   onChunk?:(chunk:string)=>void,agentTurn=false,onIdentity?:(id:string)=>void,lookupTimeoutMs=OPENROUTER_LOOKUP_TIMEOUT_MS,
-  sourceTurn=false):Promise<TransportObservation> {
+  sourceTurn:false|readonly string[]=false):Promise<TransportObservation> {
   let timeout=lookupTimeoutMs;
   try{if(body===undefined)options.budget?.assertCanStart(timeout);
    else timeout=options.budget?.modelCallTimeout(OPENROUTER_RESPONSE_TIMEOUT_MS)??OPENROUTER_RESPONSE_TIMEOUT_MS;}
@@ -102,7 +105,7 @@ export function openRouterAdapter(options:{credential:(identity:OpenRouterIdenti
   };
   if(response.ok)notifyIdentity(generationId);
   const stream=streamModel&&response.ok?openRouterStream(streamModel,generationId,onChunk,
-   agentTurn?AGENT_STREAM_TOOLS:sourceTurn?SOURCE_STREAM_TOOLS:undefined):undefined;
+   agentTurn?AGENT_STREAM_TOOLS:sourceTurn?offeredStreamTools(sourceTurn):undefined):undefined;
   const decoder=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}),byteLimit=streamModel?OPENROUTER_STREAM_BYTE_LIMIT:
    body!==undefined&&response.ok?OPENROUTER_RESPONSE_BYTE_LIMIT:OPENROUTER_FRAME_BYTE_LIMIT;
   const reader=response.body?.getReader(),chunks:Uint8Array[]=[];let bytes=0,observedBytes=0,complete=!reader,transportIssue:string|null=null;
@@ -122,7 +125,8 @@ export function openRouterAdapter(options:{credential:(identity:OpenRouterIdenti
   // would otherwise exceed the existing receipt row limit for ordinary streams.
   const raw=streamModel?{rawBody:'',rawBodyBase64:gzipSync(buffer).toString('base64'),rawBodyEncoding:'gzip-base64' as const,rawBodyByteLength:buffer.length,rawBodySha256:retainedHash,observedByteLength:observedBytes,sourceHash:observedHash.digest('hex'),stream:true as const,
    // Receipt projection re-parses these bytes with the same tool rules.
-   ...(agentTurn?{agentTools:true as const}:sourceTurn?{sourceTools:true as const}:{})}:
+   ...(agentTurn?{agentTools:true as const}:sourceTurn?{sourceTools:true as const,
+    ...(sourceTurn.length===1&&sourceTurn[0]==='read_source'?{}:{sourceToolNames:[...sourceTurn]})}:{})}:
    buffer.length>OPENROUTER_FRAME_BYTE_LIMIT?{rawBody:'',rawBodyBase64:gzipSync(buffer).toString('base64'),
     rawBodyEncoding:'gzip-base64' as const,rawBodyByteLength:buffer.length,rawBodySha256:retainedHash,
     observedByteLength:buffer.length,sourceHash:retainedHash}:
@@ -159,9 +163,13 @@ export function openRouterAdapter(options:{credential:(identity:OpenRouterIdenti
    // replays their history) and never the optional parallel_tool_calls hint;
    // older requests keep their rules.
    const agentTurn=Boolean(options.allowAgentTools&&parsed&&typeof parsed==='object'&&!Array.isArray(parsed)&&agentTurnRequest(parsed));
-   // A request that offers only read_source (free chat reading its sources) may get parallel calls back; see SOURCE_STREAM_TOOLS.
+   // A free chat request (read_source, and the research tools it froze) may get parallel calls back; see SOURCE_STREAM_TOOLS.
    const sourceTurn=Boolean(!agentTurn&&options.allowWorkspaceRead&&Array.isArray(parsed?.tools)&&parsed.tools.length>0&&
     workspaceTools.safeParse(parsed.tools).success);
+   const sourceNames:string[]=sourceTurn?(parsed.tools as Array<{function:{name:string}}>).map(tool=>tool.function.name):[];
+   // The request after the last allowed tool round offers no tool at all: a call in its response is never valid.
+   const answerOnly=Boolean(!agentTurn&&!sourceTurn&&options.allowWorkspaceRead&&Array.isArray(parsed?.messages)&&
+    (parsed.tools===undefined||Array.isArray(parsed.tools)&&parsed.tools.length===0)&&parsed.messages.some((m:{role?:unknown})=>m?.role==='tool'));
    const cachedHistoryIndex=Array.isArray(parsed?.messages)?historyCacheIndex(parsed.messages,agentTurn&&
     identity.model.startsWith('anthropic/')&&identity.providerLimits.cacheWriteUsdPerMillion!==undefined):-1;
    // These routing constraints must already be in the frozen request bytes.
@@ -201,7 +209,7 @@ export function openRouterAdapter(options:{credential:(identity:OpenRouterIdenti
    const send:()=>Promise<TransportObservation>=()=>{
     if(used)throw new Error('BILL2_DISPATCH_CAPABILITY_CONSUMED');
     used=true;return request('chat/completions',key,body,send,parsed.stream===true?identity.model:undefined,onChunk,agentTurn,onIdentity,
-     undefined,sourceTurn);
+     undefined,sourceTurn||answerOnly?sourceNames:false);
    };
    return send;
  }
