@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { trpc } from '@/trpc/client';
-import { voiceErrorCode, voiceErrorMessage, type VoiceProfile, type VoiceState } from '@/lib/voice/format';
+import { canClearRequestId, voiceErrorCode, voiceErrorMessage, type VoiceProfile, type VoiceState } from '@/lib/voice/format';
 import { MyVoiceView } from './my-voice-view';
 import styles from './my-voice.module.css';
 
@@ -22,11 +22,13 @@ export function MyVoice({ onOpenDocuments }: { onOpenDocuments: () => void }) {
   const [preferred, setPreferred] = useState<string[] | null>(null);
   const [busy, setBusy] = useState(false);
   useEffect(() => { setPolling(state?.latest?.status === 'generating'); }, [state?.latest?.status]);
-  // Once nothing is generating, a kept request id has a final outcome: the next click must start a new generation,
-  // never replay the old one (#1262 review).
+  // Once a state read made after this page opened shows nothing generating, a kept request id has a final outcome: the next
+  // click must start a new generation, never replay the old one. Never from cached state (a remount still holds the state
+  // from before the paid call), or a click before the fresh read would start and charge a second generation (#1262 review).
+  const fresh = query.isFetchedAfterMount && !query.isFetching;
   useEffect(() => {
-    if (state && state.latest?.status !== 'generating' && !generate.isPending) sessionStorage.removeItem(REQUEST_KEY);
-  }, [state, generate.isPending]);
+    if (canClearRequestId(fresh, state, generate.isPending)) sessionStorage.removeItem(REQUEST_KEY);
+  }, [fresh, state, generate.isPending]);
   useEffect(() => {
     if (state && preferred === null) setPreferred(state.documents.filter(doc => doc.preferred).map(doc => doc.id));
   }, [state, preferred]);
@@ -65,7 +67,7 @@ export function MyVoice({ onOpenDocuments }: { onOpenDocuments: () => void }) {
       await setEnabled.mutateAsync({ expectedRevision: state.revision, enabled }); await query.refetch(); })}
     onConfirm={(versionId: string, profile: VoiceProfile) => void run(async () => {
       await confirm.mutateAsync({ versionId, expectedRevision: state.revision, profile }); await query.refetch();
-      toast.success('文风画像已确认，之后写稿会按它来。'); })}
+      toast.success(state.enabled ? '文风画像已确认，之后写稿会按它来。' : '文风画像已保存。"写稿时使用我的文风"现在是关闭的，打开后才会用。'); })}
     onDelete={versionId => void run(async () => { await remove.mutateAsync({ versionId }); await query.refetch(); })}
     onOpenDocuments={onOpenDocuments} />;
 }

@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { fromForm, toForm, voiceErrorMessage, type VoiceState, type VoiceVersion } from '@/lib/voice/format';
+import { canClearRequestId, fromForm, toForm, voiceErrorMessage, type VoiceState, type VoiceVersion } from '@/lib/voice/format';
 import { MyVoiceView, type MyVoiceViewProps } from './my-voice-view';
 
 const profile = { tone: '像跟朋友唠嗑', sentenceLength: '短句多', openings: '先吐槽', stance: '', phrases: ['咋整'], avoid: ['家人们'],
@@ -55,5 +55,15 @@ describe('voice form', () => {
   });
   it('maps unknown errors to a plain sentence', () => {
     expect(voiceErrorMessage(new Error('boom'))).toBe('暂时无法完成，请稍后再试。');
+  });
+});
+
+describe('kept request id (review P1)', () => {
+  it('is dropped only after a fresh read shows no generation', () => {
+    expect(canClearRequestId(false, base, false)).toBe(false); // cached state from before the paid call
+    expect(canClearRequestId(true, undefined, false)).toBe(false);
+    expect(canClearRequestId(true, { ...base, latest: version('generating') }, false)).toBe(false);
+    expect(canClearRequestId(true, base, true)).toBe(false);
+    expect(canClearRequestId(true, base, false)).toBe(true);
   });
 });

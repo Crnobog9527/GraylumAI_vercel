@@ -60,3 +60,8 @@ export function voiceErrorMessage(error: unknown): string {
   const code = voiceErrorCode(error);
   return (code && MESSAGES[code]) || FALLBACK;
 }
+
+/** The kept generation request id may be dropped only after a state read made since this page opened shows no generation. */
+export function canClearRequestId(freshRead: boolean, state: VoiceState | undefined, requestPending: boolean): boolean {
+  return freshRead && Boolean(state) && state?.latest?.status !== 'generating' && !requestPending;
+}
