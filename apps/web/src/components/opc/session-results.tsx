@@ -80,7 +80,9 @@ function ResultCard({ sessionId, item }: { sessionId: string; item: SessionResul
   const utils = trpc.useUtils();
   const edit = trpc.opc.sessionResultEdit.useMutation(), remove = trpc.opc.sessionResultDelete.useMutation();
   const [mode, setMode] = useState<'view' | 'edit' | 'history' | 'delete'>('view');
-  const [draft, setDraft] = useState({ title: item.title, body: item.body, requestId: '' }), [error, setError] = useState('');
+  // baseVersion: the version this edit started from. A newer version saved elsewhere must never be silently superseded.
+  const [draft, setDraft] = useState({ title: item.title, body: item.body, requestId: '', baseVersion: item.version });
+  const [error, setError] = useState('');
   const history = trpc.opc.sessionResultVersions.useQuery({ familyId: item.familyId }, { enabled: mode === 'history' });
   const refresh = () => utils.opc.sessionResults.invalidate({ sessionId });
   async function saveEdit() {
@@ -88,7 +90,7 @@ function ResultCard({ sessionId, item }: { sessionId: string; item: SessionResul
     const requestId = draft.requestId || crypto.randomUUID();
     setDraft(current => ({ ...current, requestId }));
     try {
-      await edit.mutateAsync({ familyId: item.familyId, requestId, expectedVersion: item.version,
+      await edit.mutateAsync({ familyId: item.familyId, requestId, expectedVersion: draft.baseVersion,
         title: draft.title.trim() || null, body: draft.body });
       setMode('view'); setError(''); setDraft(current => ({ ...current, requestId: '' }));
     } catch (cause) { setError(resultErrorText(cause)); } finally { await refresh(); }
@@ -99,7 +101,9 @@ function ResultCard({ sessionId, item }: { sessionId: string; item: SessionResul
   }
   return <ResultCardView item={item} mode={mode} draft={draft} error={error} pending={edit.isPending || remove.isPending}
     versions={history.data as SessionResultItem[] | undefined}
-    onMode={next => { setMode(next); setError(''); if (next === 'edit') setDraft({ title: item.title, body: item.body, requestId: '' }); }}
+    onMode={next => { setMode(next); setError(''); if (next === 'edit') {
+      setDraft({ title: item.title, body: item.body, requestId: '', baseVersion: item.version });
+    } }}
     onDraft={value => setDraft(current => ({ ...current, ...value, requestId: '' }))}
     onSave={() => void saveEdit()} onDelete={() => void confirmDelete()}/>;
 }

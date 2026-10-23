@@ -45,7 +45,7 @@ export function excerptProblem(reply: string, excerpt: string) {
 const REFUSAL_TEXT: Record<string, string> = {
   OPC_RESULT_SOURCE: '这条回复已不可用，不能保存。',
   OPC_RESULT_INVALID: '内容不符合保存要求，请检查后再试。',
-  OPC_VERSION_CONFLICT: '这一项已经在别处改过，已读取最新版本，请在最新版本上修改。',
+  OPC_VERSION_CONFLICT: '这一项已经在别处改过，你的修改没有保存。请先复制你的内容，点取消，再基于最新版本编辑。',
   OPC_REQUEST_CONFLICT: '这次保存和之前的请求不一致，请刷新后再试。',
   OPC_RESULT_LIMIT: '这个对话的成果已达上限，请先删除不需要的。',
   OPC_RESULT_NOT_FOUND: '这一项已不存在，请刷新。',
