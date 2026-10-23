@@ -402,7 +402,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
   const autoOpening = useRef(new Set<string>());
   const openingInFlight = useRef(new Set<string>());
   const [openingSteps, setOpeningSteps] = useState<string[]>([]);
-  const [notice, setNotice] = useState(""), openingFailed = useOpeningFailureNotice(d, notice, setNotice);
+  const [notice, setNotice] = useState(""), openingFailed = useOpeningFailureNotice(d, history.data?.executions, notice, setNotice);
   useEffect(() => {
     if (planView || hydratedDraft !== draftId || !d || !history.data || d.conversationDeleted) return; // read-only: no turn
     // A manual draft (我已有定位, R15) opens too: the mentor asks for the existing positioning first.
