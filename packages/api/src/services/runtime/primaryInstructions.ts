@@ -75,6 +75,11 @@ export function libraryAddendum(references:boolean,retrieval:boolean):string {
  * {guide, versionId}; the text is read for that version when the run executes (a deleted version is never read again), and
  * admission sizes the same text. VOICE_GUIDE versions the wording so earlier executions replay byte-identical. */
 export const VOICE_GUIDE='voice-v1';
+/** Owner 2026-10-23 (A): with no confirmed profile yet, the coach points to the library page once instead of learning in chat. */
+export const VOICE_HINT_INSTRUCTIONS=
+  '\n\nWriting voice (host rule): the user has not set up their own writing voice yet. Once, at the end of this reply, '+
+  'add one short sentence in the user\'s language saying that if they upload things they wrote themselves, Graylum can learn '+
+  'their voice in [资料库 · 我的文风](/app/library?tab=voice) and write like them. Skip it if it was already said in this conversation.';
 export function voiceAddendum(profile:VoiceProfile):string {
   const line=(label:string,value:string)=>value?`\n- ${label}：${value}`:'';
   const list=(label:string,values:string[])=>values.length?`\n- ${label}：${values.join('、')}`:'';
@@ -90,7 +95,7 @@ export function voiceAddendum(profile:VoiceProfile):string {
 export function withPrimaryAddenda(instructions:string,
   context:{workspaceContext?:boolean;network?:string;positioningGate?:string;replyLanguage?:string;
     workspaceGuide?:string;ownPosts?:boolean;libraryReferences?:unknown[];libraryRetrieval?:boolean;
-    voice?:{guide:string;profile:VoiceProfile}}):string {
+    voice?:{guide:string;profile?:VoiceProfile}}):string {
   return instructions+(context.replyLanguage===REPLY_LANGUAGE?REPLY_LANGUAGE_INSTRUCTIONS:'')+
     (context.workspaceContext?WORKSPACE_CONTEXT_INSTRUCTIONS+
       (context.workspaceGuide===WORKSPACE_STRATEGY_GUIDE?WORKSPACE_STRATEGY_INSTRUCTIONS:''):'')+
@@ -99,5 +104,5 @@ export function withPrimaryAddenda(instructions:string,
     (context.network==='require_latest'?REQUIRE_LATEST_INSTRUCTIONS:'')+
     // POSITIONING-GATE: frozen at admission only when Decisions was unavailable for this turn.
     (context.positioningGate===POSITIONING_FALLBACK?POSITIONING_FALLBACK_INSTRUCTIONS:'')+
-    (context.voice?.guide===VOICE_GUIDE?voiceAddendum(context.voice.profile):'');
+    (context.voice?.guide===VOICE_GUIDE?context.voice.profile?voiceAddendum(context.voice.profile):VOICE_HINT_INSTRUCTIONS:'');
 }
