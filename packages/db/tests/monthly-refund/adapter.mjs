@@ -10,8 +10,11 @@ const col = value => {
 export function transport(client) {
  return {
   async rpc(name,args){
-   try {const result=await client.query(`select public.${id(name)}(${Object.keys(args).map((k,n)=>id(k)+'=> $'+(n+1)).join(',')}) data`,Object.values(args));
+   try {
+    await client.query('SET ROLE service_role');
+    const result=await client.query(`select public.${id(name)}(${Object.keys(args).map((k,n)=>id(k)+'=> $'+(n+1)).join(',')}) data`,Object.values(args));
     return {data:result.rows[0].data,error:null};}catch(error){return {data:null,error};}
+   finally {await client.query('RESET ROLE');}
   },
   from(table){
    const filters=[],values=[];let selected='id',offset=0,limit=2001,single=false;

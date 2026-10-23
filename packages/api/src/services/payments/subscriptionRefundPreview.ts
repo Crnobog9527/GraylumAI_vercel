@@ -5,8 +5,9 @@ import { freezePurchaseSnapshot } from './contracts';
 import { assembleRefundConsumption } from './refundFacts';
 import { refundTime } from './refundMoney';
 import { evaluateRefundPolicy, type RefundPolicyResult, type RefundPolicyInput } from './refundPolicy';
-import type { RefundRequest, RefundStripe } from './packageRefund';
+import { readPackageRefundCash, type RefundRequest, type RefundStripe } from './packageRefund';
 import { resolveStripeScope } from './stripeCheckoutPersistence';
+import { subscriptionRefundPriorPro } from './subscriptionRefundPriorPro';
 import { disputeAllowsRefund } from './disputeRefundEligibility';
 import {
   readPreviewOrder, readSubscriptionRefundEvidence,
@@ -63,7 +64,7 @@ function verifyOrder(order: PreviewOrder) {
 
 // List *all* invoices for every local subscription, including canceled contracts.
 // This catches paid provider invoices that have not yet reached the local webhook.
-async function readInvoiceHistory(stripe: SubscriptionRefundStripe, evidence: SubscriptionRefundEvidence, order: PreviewOrder) {
+async function readInvoiceHistory(db: PreviewDb, stripe: SubscriptionRefundStripe, evidence: SubscriptionRefundEvidence, order: PreviewOrder) {
   const invoices: { id: string; orderId: string; paidAt: string; billingReason: string | null }[] = [];
   const seen = new Set<string>();
   requireEvidence(evidence.subscriptions.length > 0 && evidence.subscriptions.length <= 100,
@@ -71,6 +72,18 @@ async function readInvoiceHistory(stripe: SubscriptionRefundStripe, evidence: Su
   for (const subscription of evidence.subscriptions) {
     requireEvidence(subscription.user_id === order.user_id && scopeMatches(subscription, order), 'PAY_REFUND_MEMBERSHIP_HISTORY_UNRESOLVED');
     freezePurchaseSnapshot(subscription.contract_snapshot);
+    const sources = evidence.orders.filter(row => row.subscription_id === subscription.id && tookMoney(row, evidence.refs));
+    if (sources.length && sources.every(row => row.auto_renew === false && ['wechat_pay', 'alipay'].includes(row.payment_method ?? ''))) {
+      requireEvidence(order.method_transition === 'upgrade' && order.method_prior_subscription === subscription.id
+        && sources.some(row => row.id === order.source_order_id)
+        && !evidence.refs.some(row => row.subscription_id === subscription.id && row.object_type === 'subscription'),
+      'PAY_REFUND_UPGRADE_EVIDENCE');
+      for (const source of sources) {
+        const cash = await readPackageRefundCash(db, stripe, source.id);
+        invoices.push({ id: cash.paymentIntentId, orderId: source.id, paidAt: cash.paidAt, billingReason: 'one_time' });
+      }
+      continue;
+    }
     const subscriptionId = mapped(evidence, order, 'subscription', 'subscription_id', subscription.id);
     let cursor: string | undefined;
     let complete = false;
@@ -119,7 +132,7 @@ async function providerFacts(db: PreviewDb, stripe: SubscriptionRefundStripe, ev
   const scope = await resolveStripeScope(stripe);
   requireEvidence(scope.mode === order.payment_mode && scope.merchant === order.merchant_namespace, 'PAY_REFUND_SCOPE_MISMATCH');
   const live = scope.mode === 'live';
-  const invoices = await readInvoiceHistory(stripe, evidence, order);
+  const invoices = await readInvoiceHistory(db, stripe, evidence, order);
   const invoice = invoices.find(row => row.orderId === order.id);
   requireEvidence(invoice, 'PAY_REFUND_INVOICE_MISSING');
   // Subscription Checkout does not necessarily persist a PaymentIntent ref.
@@ -216,7 +229,10 @@ export async function readSubscriptionRefundFacts(
     requireEvidence(other.every(row => refundTime(row.paidAt) !== paid), 'PAY_REFUND_PAYMENT_ORDER_UNRESOLVED');
     const spend = consumption(last, paidAt, observedAt);
     requireEvidence(spend, 'PAY_REFUND_CONSUMPTION_UNRESOLVED');
-    const kind = target.billingReason === 'subscription_create' && !order.source_order_id ? 'membership_first'
+    const renewal = target.billingReason === 'subscription_cycle' || order.method_transition === 'founder_renewal';
+    const priorPro = renewal ? undefined : subscriptionRefundPriorPro(last, order);
+    const kind = renewal ? 'renewal' : priorPro && target.billingReason === 'subscription_create' ? 'pro_to_gold'
+      : target.billingReason === 'subscription_create' && !order.source_order_id ? 'membership_first'
       : target.billingReason === 'subscription_cycle' ? 'renewal' : 'unknown';
     const policy: RefundPolicyInput = {
       order: { id: order.id, userId: order.user_id, channel: 'stripe', mode: order.payment_mode as 'test' | 'live',
@@ -228,9 +244,10 @@ export async function readSubscriptionRefundFacts(
       membershipHistory: { userId: order.user_id, orderId: order.id, paidAt, complete: true,
         priorPaidMembershipCount: other.filter(row => refundTime(row.paidAt)! < paid).length,
         evidenceRef: hash(provider.invoices) },
-      consumption: spend, observedAt, accountState: 'active', feePermitted: input.feePermitted, reason: 'ordinary',
+      consumption: spend, observedAt, accountState: 'active', reason: 'ordinary',
+      feePermitted: input.feePermitted === 'unknown' ? 'not_permitted' : input.feePermitted,
     };
-    return { policy, order, evidence: last, provider };
+    return { policy, order, evidence: last, provider, priorPro };
 }
 
 export async function previewSubscriptionRefund(

@@ -146,7 +146,7 @@ export async function reconcileStripeCardPayments(db: SupabaseClient, stripe: St
     types: ['refund.created', 'refund.updated', 'charge.refund.updated', 'charge.refunded'],
     ...(after ? { starting_after: after } : {}) }), async event => {
     const object = event.data.object as { id: string; object: string; metadata?: Record<string, string> | null };
-    if (seen.has(object.id) || object.metadata?.refundIntentId) return;
+    if (seen.has(object.id)) return;
     seen.add(object.id);
     if (object.object === 'charge') {
       await handleCardRefund(db, stripe, { chargeId: object.id }, options.alert);

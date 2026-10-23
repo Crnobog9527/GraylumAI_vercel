@@ -172,7 +172,7 @@ describe('PAY-STRIPE-MP daily Stripe card reconciliation', () => {
     await expect(review.run()).resolves.toMatchObject({ success: true, repaired: 0 });
     expect(mocks.invoice).toHaveBeenCalledWith(review.db, review.stripe, 'in_cycle', 'invoice.paid', undefined, undefined, undefined);
   });
-  it('records an external refund whose webhook was lost, from the refund events of the window', async () => {
+  it('recovers external and approved subscription refunds whose webhook was lost from the window events', async () => {
     // re_late was created long before the window and succeeded inside it: its refund.updated event is in the window.
     const f = fixture({ recorded: new Set(['refund:re_known']), refunds: [{ id: 're_known', status: 'succeeded', metadata: {} },
       { id: 're_late', status: 'succeeded', metadata: {} }, { id: 're_late', status: 'succeeded', metadata: {} },
@@ -183,15 +183,15 @@ describe('PAY-STRIPE-MP daily Stripe card reconciliation', () => {
         data: { object: { object: 'refund', id, metadata: id === 're_ours' ? { refundIntentId: 'i' } : {} } } })),
       { id: 'evt_charge', type: 'charge.refunded', data: { object: { object: 'charge', id: 'ch_1', metadata: {} } } }] }));
     mocks.refund.mockImplementation(async (_db: unknown, _s: unknown, input: { refundId?: string }) => {
-      if (input.refundId === 're_late') f.recorded.add('refund:re_late');
+      if (input.refundId === 're_late' || input.refundId === 're_ours') f.recorded.add(`refund:${input.refundId}`);
       return true;
     });
-    await expect(f.run()).resolves.toMatchObject({ success: false, repaired: 1,
+    await expect(f.run()).resolves.toMatchObject({ success: false, repaired: 2,
       findings: [{ kind: 'refund_not_recorded', object: 'refund', externalId: 're_stuck' }] });
-    // Each refund once (re_late had two events); ours are skipped; the failed one is replayed but owes nothing;
+    // Each refund once (re_late had two events); approved refunds are verified by their existing handler; the failed one is replayed but owes nothing;
     // a recorded refund is replayed (it may owe a review alert) but is not a repair; a charge event replays the charge.
     expect(mocks.refund.mock.calls.map(call => call[2])).toEqual([{ refundId: 're_known' }, { refundId: 're_late' },
-      { refundId: 're_failed' }, { refundId: 're_stuck' }, { chargeId: 'ch_1' }]);
+      { refundId: 're_ours' }, { refundId: 're_failed' }, { refundId: 're_stuck' }, { chargeId: 'ch_1' }]);
     expect(f.stripe.events.list).toHaveBeenCalledWith({ created: { gte: 1791345600 }, limit: 100,
       types: ['refund.created', 'refund.updated', 'charge.refund.updated', 'charge.refunded'] });
   });

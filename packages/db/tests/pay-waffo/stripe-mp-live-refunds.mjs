@@ -84,7 +84,7 @@ export async function stripeMpLiveRefundCases({admin,service}) {
     chargeId:terms.chargeId,paymentIntentId:terms.paymentIntentId,currency:'usd',merchant:'fixture',mode:'test',amount:1,status:'unknown'}]),
   /RESULT_MISMATCH/);
   i=await start('cancel');
-  const done=seen('live',{status:'canceled'});done.refunds.rows=[fact()];
+  const done=seen('live',{status:'canceled',cancelAtPeriodEnd:false});done.refunds.rows=[fact()];
   i=(await one('SELECT pay_common_monthly_refund_finish($1,$2,$3,$4) i',[actor,m.o.id,i.id,done])).i;
   assert.equal(i.status,'succeeded');
   const proof=(await admin.query('SELECT refund_approval FROM payment_orders WHERE id=$1',[m.o.id])).rows[0].refund_approval;

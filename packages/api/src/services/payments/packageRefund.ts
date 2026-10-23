@@ -20,7 +20,7 @@ type Order = { id: string; user_id: string; payment_channel: string; payment_mod
   payment_method: string | null; payment_amount_facts: Array<{ kind?: string; amount?: string; evidence_ref?: string }> | null };
 export type RefundRequest = { orderId: string; ticketId: string; feePermitted: 'confirmed' | 'not_permitted';
   feeEvidence: string };
-const id = (value: string | { id: string } | null) => typeof value === 'string' ? value : value?.id;
+const id = (value: string | { id: string } | null | undefined) => typeof value === 'string' ? value : value?.id;
 
 async function rpc(db: Db, name: string, args: Record<string, unknown>) {
   const result = await db.rpc(name, args);
@@ -28,7 +28,7 @@ async function rpc(db: Db, name: string, args: Record<string, unknown>) {
   if (!result.data || typeof result.data !== 'object') throw new Error('PAY_REFUND_RESULT_UNKNOWN');
   return result.data;
 }
-async function loadOrder(db: Db, orderId: string): Promise<Order> {
+async function loadOrder(db: Pick<Db, 'from'>, orderId: string): Promise<Order> {
   const result = await db.from('payment_orders')
     .select('id,user_id,payment_channel,payment_mode,merchant_namespace,amount_total,currency,refund_approval,payment_method,'
       + 'payment_amount_facts')
@@ -36,7 +36,7 @@ async function loadOrder(db: Db, orderId: string): Promise<Order> {
   if (result.error || !result.data) throw new Error('PAY_REFUND_ORDER_UNKNOWN');
   return result.data as unknown as Order;
 }
-async function scopedOrder(db: Db, stripe: RefundStripe, orderId: string) {
+async function scopedOrder(db: Pick<Db, 'from'>, stripe: RefundStripe, orderId: string) {
   const order = await loadOrder(db, orderId);
   const scope = await resolveStripeScope(stripe);
   // R7 (0297): the order's mode must be the connected account's (live in production, test on staging).
@@ -44,7 +44,7 @@ async function scopedOrder(db: Db, stripe: RefundStripe, orderId: string) {
     || order.merchant_namespace !== scope.merchant) throw new Error('PAY_REFUND_TEST_STRIPE_ONLY');
   return { order, scope };
 }
-async function paymentId(db: Db, order: Order) {
+async function paymentId(db: Pick<Db, 'from'>, order: Order) {
   const mapping = await db.from('payment_provider_refs').select('external_id')
     .eq('order_id', order.id).eq('object_type', 'payment').eq('channel', 'stripe')
     .eq('merchant_namespace', order.merchant_namespace).eq('mode', order.payment_mode).limit(2);
@@ -53,11 +53,35 @@ async function paymentId(db: Db, order: Order) {
   }
   return String(mapping.data[0].external_id);
 }
-export async function readPackageRefundCash(db: Db, stripe: RefundStripe, orderId: string) {
+export async function readPackageRefundCash(db: Pick<Db, 'from'>, stripe: RefundStripe, orderId: string) {
   const { order, scope } = await scopedOrder(db, stripe, orderId);
   const intentId = await paymentId(db, order);
   // PAY-STRIPE-MP: an international card pack charged the pre-tax amount plus the tax recorded for its payment (0237).
   const taxMinor = order.payment_method === 'card' ? recordedTax(order, intentId) : 0;
+  return readCapturedCash(db, stripe, order, scope, intentId, taxMinor);
+}
+/** Bind the original recurring invoice to its captured cash before restoring its entitlement. */
+export async function readRecurringRefundCash(db: Pick<Db, 'from'>,
+  stripe: RefundStripe & Pick<Stripe, 'invoicePayments'>, orderId: string, invoice: Stripe.Invoice) {
+  const { order, scope } = await scopedOrder(db, stripe, orderId);
+  const invoiceId = await paymentId(db, order);
+  const taxMinor = order.payment_method === 'card' ? recordedTax(order, invoiceId) : 0;
+  if (!['card', 'card_cn'].includes(order.payment_method ?? '') || invoice.id !== invoiceId
+    || invoice.livemode !== (scope.mode === 'live') || invoice.status !== 'paid'
+    || invoice.amount_paid !== order.amount_total + taxMinor || invoice.currency !== order.currency) {
+    throw new Error('PAY_REFUND_PAYMENT_MISMATCH');
+  }
+  const payments = await stripe.invoicePayments.list({ invoice: invoiceId, limit: 100 });
+  const payment = payments.data[0];
+  const intentId = payment && payment.payment.type === 'payment_intent' ? id(payment.payment.payment_intent) : null;
+  if (payments.has_more || payments.data.length !== 1 || !payment || payment.object !== 'invoice_payment'
+    || payment.livemode !== (scope.mode === 'live') || payment.status !== 'paid'
+    || id(payment.invoice) !== invoiceId || payment.amount_paid !== invoice.amount_paid
+    || payment.currency !== order.currency || !intentId) throw new Error('PAY_REFUND_PAYMENT_MISMATCH');
+  return readCapturedCash(db, stripe, order, scope, intentId, taxMinor);
+}
+async function readCapturedCash(db: Pick<Db, 'from'>, stripe: RefundStripe, order: Order,
+  scope: Awaited<ReturnType<typeof resolveStripeScope>>, intentId: string, taxMinor: number) {
   const charged = order.amount_total + taxMinor;
   const payment = await stripe.paymentIntents.retrieve(intentId);
   const chargeId = id(payment.latest_charge);

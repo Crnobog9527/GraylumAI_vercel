@@ -33,7 +33,7 @@ export function provider(f) {
    },
    cancel:async(id,params)=>{
     assert.equal(id,sub.id);assert.deepEqual(params,{invoice_now:false,prorate:false,cancellation_details:{comment:'graylum_initiated'}});writes.push({stage:'cancel',params});
-    if(failStage==='cancel')throw new Error('Synthetic cancellation timeout');sub.status='canceled';return snapshot(sub);
+    if(failStage==='cancel')throw new Error('Synthetic cancellation timeout');sub.status='canceled';sub.cancel_at_period_end=false;return snapshot(sub);
    }},
   refunds:{list:async()=>page(refunds),retrieve:async id=>snapshot(refunds.find(r=>r.id===id)),
    create:async(params,options)=>{

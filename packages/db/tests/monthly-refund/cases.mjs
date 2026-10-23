@@ -19,7 +19,11 @@ export async function runCases({db,Client,connectionString,report}) {
  const fact=(f,i,status='succeeded')=>({id:'re_'+f.order,intentId:i.id,orderId:f.order,chargeId:f.terms.chargeId,
   paymentIntentId:f.terms.paymentIntentId,currency:'usd',amount:6486,merchant:'acct_fixture',mode:'test',status});
  const result=async(f,i,r)=>(await one('select pay_common_monthly_refund_result($1,$2,$3) i',[f.order,i.id,r])).i;
- const finish=async(f,i,e)=>(await one('select pay_common_monthly_refund_finish($1,$2,$3,$4) i',[f.actor,f.order,i.id,e])).i;
+ const finish=async(f,i,e)=>{
+  await db.query('SET ROLE service_role');
+  try{return (await one('select pay_common_monthly_refund_finish($1,$2,$3,$4) i',[f.actor,f.order,i.id,e])).i;}
+  finally{await db.query('RESET ROLE');}
+ };
  for(const level of ['pro','gold']) {
   const f=await fx(level);let i=await approve(f);
   assert.equal((await approve(f)).id,i.id);
@@ -45,7 +49,7 @@ export async function runCases({db,Client,connectionString,report}) {
   i=await start(f,i,'stop_renewal',before);i=await start(f,i,'refund');
   const r=fact(f,i);i=await result(f,i,r);i=await result(f,i,r);
   assert.equal(i.status,'review_required');
-  const e=seen(f,i);e.refunds.rows=[r];e.subscription.status='canceled';
+  const e=seen(f,i);e.refunds.rows=[r];e.subscription.status='canceled';e.subscription.cancelAtPeriodEnd=false;
   i=await finish(f,i,e);assert.equal(i.status,'succeeded');
   assert.equal((await finish(f,i,e)).status,'succeeded');
   assert.equal((await one('select credits from profiles where id=$1',[f.user])).credits,400);
@@ -104,7 +108,7 @@ export async function runCases({db,Client,connectionString,report}) {
  const noStop=seen(nested,n);noStop.subscription.cancelAtPeriodEnd=false;noStop.subscription.renewalOwnership='original';
  n=await start(nested,n,'stop_renewal',noStop);n=await start(nested,n,'refund');
  const cash=fact(nested,n);n=await result(nested,n,cash);
- const terminal=seen(nested,n);terminal.subscription.status='canceled';terminal.refunds.rows=[cash];n=await finish(nested,n,terminal);
+ const terminal=seen(nested,n);terminal.subscription.status='canceled';terminal.subscription.cancelAtPeriodEnd=false;terminal.refunds.rows=[cash];n=await finish(nested,n,terminal);
  assert.equal((await one('select monthly_refund_erasure_safe($1) ok',[{...n,terms:{...n.terms,snapshot:{...n.terms.snapshot,unknownBody:'preserve'}}}])).ok,false);
  const rejected=await fx();
  const rejection=await one("select pay_common_monthly_refund_reject($1,$2,$3,'evidence_missing') i",[rejected.actor,rejected.order,rejected.ticket]);

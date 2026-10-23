@@ -75,7 +75,7 @@ describe('subscription refund read-only preview', () => {
     expect(await previewSubscriptionRefund(f.db, f.provider, actorId, { ...request, feePermitted: 'not_permitted' }))
       .toMatchObject({ quote: { feeMinor: 0, netMinor: 6900 }, executable: false });
     expect(await previewSubscriptionRefund(f.db, f.provider, actorId, { ...request, feePermitted: 'unknown' }))
-      .toMatchObject({ status: 'review_required', quote: null, executable: false });
+      .toMatchObject({ status: 'eligible', quote: { feeMinor: 0, netMinor: 6900 }, executable: false });
     expect(f.write).not.toHaveBeenCalled();
   });
   it('rejects renewal and never implements upgrade recovery', async () => {

@@ -18,6 +18,8 @@ export const monthlyRefundTermsSchema = z.object({
   paymentIntentId: ref,
   chargeId: ref,
   invoiceId: ref,
+  priorPro: z.object({ orderId: ref, subscriptionId: ref, providerSubscriptionId: ref.nullable(),
+    invoiceId: ref, periodEnd: time, autoRenew: z.boolean() }).strict().optional(),
   merchant: ref,
   // R7 (0297): the order's Stripe mode; the stored hash of an existing test intent is unchanged.
   mode: z.enum(['test', 'live']),
@@ -62,6 +64,7 @@ type Binding = {
   credits: number;
   taxMinor?: number;
   feeEvidence: string;
+  priorPro?: MonthlyRefundTerms['priorPro'];
   snapshot: unknown;
 };
 
@@ -79,16 +82,19 @@ export function prepareMonthlyRefundQuote(policy: RefundPolicyInput, binding: Bi
   }
   const snapshot = purchaseSnapshotSchema.safeParse(binding.snapshot);
   if (!snapshot.success || snapshot.data.item_type !== 'membership_plan'
-    || snapshot.data.billing_cycle !== 'monthly' || binding.billingCycle !== 'monthly'
+    || !['monthly', 'yearly'].includes(binding.billingCycle) || snapshot.data.billing_cycle !== binding.billingCycle
     || !['pro', 'gold'].includes(binding.plan) || policy.reason !== 'ordinary'
-    || policy.order.kind !== 'membership_first' || policy.order.channel !== 'stripe'
+    || !['membership_first', 'pro_to_gold'].includes(policy.order.kind) || policy.order.channel !== 'stripe'
     || policy.accountState !== 'active') return fail('monthly_scope_required');
   if (binding.orderId !== policy.order.id || binding.userId !== policy.order.userId
     || snapshot.data.currency !== policy.order.currency
-    || binding.credits !== snapshot.data.credits + snapshot.data.bonus_credits) return fail('binding_mismatch');
+    || binding.credits <= 0 || binding.credits > snapshot.data.credits + snapshot.data.bonus_credits
+    || binding.billingCycle === 'monthly' && binding.credits !== snapshot.data.credits + snapshot.data.bonus_credits
+    || (policy.order.kind === 'pro_to_gold') !== Boolean(binding.priorPro)) return fail('binding_mismatch');
   const end = refundTime(binding.periodEnd);
   if (end === null || end <= refundTime(policy.observedAt)!) return fail('subscription_period_unresolved');
   const parsed = monthlyRefundTermsSchema.safeParse({
+    ...(binding.priorPro ? { priorPro: binding.priorPro } : {}),
     kind: 'monthly_first_purchase', orderId: policy.order.id, userId: policy.order.userId,
     ticketId: policy.ticket.id, subscriptionId: binding.subscriptionId,
     providerSubscriptionId: binding.providerSubscriptionId, paymentIntentId: binding.paymentIntentId,
@@ -100,7 +106,8 @@ export function prepareMonthlyRefundQuote(policy: RefundPolicyInput, binding: Bi
     feeMinor: evaluation.quote!.feeMinor, ...(binding.taxMinor === undefined ? {} : { taxMinor: binding.taxMinor }),
     netMinor: evaluation.quote!.netMinor + (binding.taxMinor ?? 0), credits: binding.credits,
     feePermitted: policy.feePermitted, feeEvidence: binding.feeEvidence,
-    evidenceRefs: evaluation.evidenceRefs, snapshot: snapshot.data,
+    evidenceRefs: [...evaluation.evidenceRefs!, ...(binding.priorPro
+      ? [createHash('sha256').update(JSON.stringify(binding.priorPro)).digest('hex')] : [])], snapshot: snapshot.data,
   });
   if (!parsed.success) return fail('monthly_evidence_incomplete');
   return { status: 'eligible', quote: { terms: parsed.data, versionHash: monthlyRefundVersion(parsed.data), executable: false } };

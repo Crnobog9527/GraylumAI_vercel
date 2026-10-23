@@ -100,9 +100,11 @@ function next(intent: MonthlyRefundIntent, seen: MonthlyRefundObservation, now: 
   const observed = refundTime(seen.checkedAt)!;
   if (observed > now || now - observed > observationWindow) return review('fresh_observation_required');
   if (!local.adminActive) return review('admin_required');
-  if (terms.snapshot.billing_cycle !== 'monthly' || terms.snapshot.item_type !== 'membership_plan'
+  if (!['monthly', 'yearly'].includes(terms.snapshot.billing_cycle) || terms.snapshot.item_type !== 'membership_plan'
     || terms.snapshot.currency !== terms.currency
-    || terms.credits !== terms.snapshot.credits + terms.snapshot.bonus_credits) return review('monthly_scope_required');
+    || terms.credits > terms.snapshot.credits + terms.snapshot.bonus_credits
+    || terms.snapshot.billing_cycle === 'monthly'
+      && terms.credits !== terms.snapshot.credits + terms.snapshot.bonus_credits) return review('monthly_scope_required');
   const elapsed = refundTime(terms.submittedAt)! - refundTime(terms.paidAt)!;
   if (elapsed < 0 || elapsed > REFUND_WINDOW_MICROSECONDS) return review('application_window_invalid');
   const money = calculateRefundMoney({ paidMinor: terms.paidMinor, refundedMinor: 0,
@@ -163,7 +165,10 @@ function next(intent: MonthlyRefundIntent, seen: MonthlyRefundObservation, now: 
     return { kind: 'pending', refundId: refund.id };
   }
   if (refund?.status === 'succeeded') {
-    if (subscription.status === 'canceled') return { kind: 'finalize_success', refundId: refund.id };
+    if (subscription.status === 'canceled') {
+      if (!terms.originalCancelAtPeriodEnd && subscription.cancelAtPeriodEnd) return review('renewal_state_changed');
+      return { kind: 'finalize_success', refundId: refund.id };
+    }
     if (subscription.status !== 'active' || subscription.preflight !== 'clear') {
       return review('cash_succeeded_subscription_unresolved');
     }

@@ -90,7 +90,7 @@ export async function stripeMpSubscriptionRefundCases({admin,service,connect}) {
   i=await result(f,i,fact(f,i));
   assert.equal((await order(f)).status,'partially_refunded','the fee was kept');
   i=await start(f,i,'cancel');
-  const done=seen(f,{status:'canceled'});done.refunds.rows=[fact(f,i)];
+  const done=seen(f,{status:'canceled',cancelAtPeriodEnd:false});done.refunds.rows=[fact(f,i)];
   i=await finish(f,i,done);
   assert.equal(i.status,'succeeded');
   assert.equal((await finish(f,i,done)).status,'succeeded','finishing again changes nothing');

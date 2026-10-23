@@ -12,6 +12,9 @@ const orderSchema = z.object({
   payment_channel: nullable, payment_mode: nullable, merchant_namespace: nullable,
   purchase_snapshot: z.unknown(), subscription_id: nullable, source_order_id: nullable,
   fulfilled_at: nullable, updated_at: ref, refund_status: z.string().nullable(),
+  auto_renew: z.boolean().nullable().optional(),
+  method_transition: nullable.optional(), method_prior_subscription: nullable.optional(),
+  purchase_membership_level: nullable.optional(),
   payment_method: nullable, payment_amount_facts: z.unknown(), qualification_state: nullable,
 });
 export type PreviewOrder = z.infer<typeof orderSchema>;
@@ -19,10 +22,11 @@ const columns = {
   orders: 'id,user_id,item_type,item_id,billing_cycle,status,payment_status,amount_total,currency,'
     + 'payment_channel,payment_mode,merchant_namespace,purchase_snapshot,subscription_id,source_order_id,'
     + 'fulfilled_at,updated_at,refund_status:refund_approval->>status,payment_method,payment_amount_facts,'
-    + 'qualification_state',
+    + 'qualification_state,method_transition,method_prior_subscription,purchase_membership_level,auto_renew',
   profiles: 'id,role,status,is_deleted',
   tickets: 'id,user_id,category,is_deleted,created_at,updated_at',
-  subscriptions: 'id,user_id,status,payment_channel,payment_mode,merchant_namespace,contract_snapshot,updated_at',
+  subscriptions: 'id,user_id,status,payment_channel,payment_mode,merchant_namespace,contract_snapshot,updated_at,'
+    + 'current_period_end,cancel_at_period_end',
   grants: 'id,user_id,subscription_id,source_order_id,grant_snapshot,status,credits_granted,credit_transaction_id,updated_at',
   ledger: 'id,user_id,created_at,amount,type,ledger_type,reason_code,source_type,idempotency_key,source_order_id,counts_as_spend',
   holds: 'id,user_id,operation_type,pre_deduct_id:metadata->>preDeductId',
@@ -35,6 +39,7 @@ const ticketSchema = z.object({
 const subscriptionSchema = z.object({
   id: ref, user_id: ref, status: ref, payment_channel: nullable, payment_mode: nullable,
   merchant_namespace: nullable, contract_snapshot: z.unknown(), updated_at: ref,
+  current_period_end: nullable.optional(), cancel_at_period_end: nullable.optional(),
 });
 const grantSchema = z.object({
   id: ref, user_id: ref, subscription_id: nullable, source_order_id: nullable, grant_snapshot: z.unknown(),

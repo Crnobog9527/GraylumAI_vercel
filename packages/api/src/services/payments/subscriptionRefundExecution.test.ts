@@ -52,7 +52,7 @@ describe('non-executing monthly refund progression', () => {
     expect(result).toEqual({ kind: 'provider_request', stage: 'cancel', operation: 'cancel_subscription',
       objectId: 'sub_fixture', parameters: { invoice_now: false, prorate: false }, executable: false });
     expect(result).not.toHaveProperty('idempotencyKey');
-    f.seen.subscription.status = 'canceled';
+    f.seen.subscription.status = 'canceled'; f.seen.subscription.cancelAtPeriodEnd = false;
     expect(run(f)).toMatchObject({ kind: 'finalize_success', refundId: 're_fixture', executable: false });
   });
   it('runs a card order with tax (PAY-STRIPE-MP) end to end: refunds pre-tax less fee plus tax, then cancels', () => {
@@ -64,7 +64,7 @@ describe('non-executing monthly refund progression', () => {
     expect(run(f)).toMatchObject({ kind: 'record_refund', status: 'succeeded' });
     record(f); f.intent.started.cancel = now;
     expect(run(f)).toMatchObject({ kind: 'provider_request', stage: 'cancel', operation: 'cancel_subscription' });
-    f.seen.subscription.status = 'canceled';
+    f.seen.subscription.status = 'canceled'; f.seen.subscription.cancelAtPeriodEnd = false;
     expect(run(f)).toMatchObject({ kind: 'finalize_success', refundId: 're_fixture' });
     // A refund amount that does not match pre-tax less fee plus the tax is never executed.
     const tampered = stoppedFixture(1380); tampered.intent.terms.netMinor = 6486; refreshVersion(tampered);
@@ -112,7 +112,7 @@ describe('non-executing monthly refund progression', () => {
     f.seen.subscription.preflight = 'conflict';
     expect(run(f)).toMatchObject({ kind: 'record_refund', status: 'succeeded' }); record(f);
     expect(run(f)).toMatchObject({ kind: 'review_required' });
-    f.seen.subscription.status = 'canceled';
+    f.seen.subscription.status = 'canceled'; f.seen.subscription.cancelAtPeriodEnd = false;
     expect(run(f)).toMatchObject({ kind: 'finalize_success' });
   });
   it('refuses new sends after closure without making a new identity', () => {
@@ -169,7 +169,7 @@ describe('identity, lifecycle and missing-evidence refusal', () => {
     ['future write marker', f => { f.intent.started.refund = '2026-10-08T12:00:00Z'; }],
     ['dispatch before claim', f => { f.intent.started.refund = '2026-10-06T12:00:00Z'; }],
     ['cancel without cash attempt', f => { f.intent.started.cancel = now; }],
-    ['annual scope', f => { f.intent.terms.snapshot.billing_cycle = 'yearly'; refreshVersion(f); }],
+    ['one-time scope', f => { f.intent.terms.snapshot.billing_cycle = 'one_time'; f.intent.terms.snapshot.item_type = 'credit_package'; refreshVersion(f); }],
     ['late application', f => { f.intent.terms.submittedAt = '2026-10-08T00:00:00.000001Z'; refreshVersion(f); }],
   ];
   it.each(edits)('refuses %s', (_, change) => {
@@ -206,7 +206,7 @@ describe('identity, lifecycle and missing-evidence refusal', () => {
     expect(run(f)).toMatchObject({ kind: 'review_required', reason: 'renewal_restore_requires_review' });
   });
   it('does not restore after the subscription was canceled externally', () => {
-    const f = refundFixture('failed'); record(f); f.seen.subscription.status = 'canceled';
+    const f = refundFixture('failed'); record(f); f.seen.subscription.status = 'canceled'; f.seen.subscription.cancelAtPeriodEnd = false;
     expect(run(f)).toMatchObject({ kind: 'review_required' });
   });
   it('does not rewind to stopping renewal after a cash attempt', () => {
