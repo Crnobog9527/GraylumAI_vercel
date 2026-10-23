@@ -3,6 +3,7 @@
 // Douyin search v5 and Instagram posts v2 failed upstream and are deliberately absent. Responses
 // carry no cost: each successful call is one unit at the frozen official price (RT-2).
 import { exchange } from './http';
+import { keywordCursorParams, keywordNextCursor, validKeywordCursor } from './keywordPaging';
 import { hasEmptyPostList, normalizeTikhub, tikhubBodyCode, videoNextCursor, xhsNextCursor } from './tikhubShapes';
 import type {
   ResearchCallResult, SocialKind, SocialPlatform, VendorDeps, VendorRequest,
@@ -25,8 +26,8 @@ interface TikhubRoute {
 export const TIKHUB_ROUTES: Partial<Record<`${SocialPlatform}:${SocialKind}`, TikhubRoute>> = {
   'douyin:keyword_posts': {
     method: 'POST', path: '/douyin/search/fetch_video_search_v2',
-    params: ({ keyword }) => ({ keyword: keyword!, cursor: 0, sort_type: '0', publish_time: '0', filter_duration: '0',
-      content_type: '0', search_id: '', backtrace: '' }),
+    params: ({ keyword, cursor }) => ({ keyword: keyword!, cursor: 0, sort_type: '0', publish_time: '0', filter_duration: '0',
+      content_type: '0', search_id: '', backtrace: '', ...keywordCursorParams('douyin', cursor) }),
   },
   // PUBLISH-MONITOR PR-4 (TikHub OpenAPI, NOT YET VERIFIED with a real call: RT-7 / staging check before release).
   // Douyin identifies a profile by its sec_user_id (the /user/<sec_uid> segment of a profile link); a wrong one may
@@ -43,7 +44,7 @@ export const TIKHUB_ROUTES: Partial<Record<`${SocialPlatform}:${SocialKind}`, Ti
   },
   'xiaohongshu:keyword_posts': {
     method: 'GET', path: '/xiaohongshu/app_v2/search_notes',
-    params: ({ keyword }) => ({ keyword: keyword!, page: 1, sort_type: 'general' }),
+    params: ({ keyword, cursor }) => ({ keyword: keyword!, page: 1, sort_type: 'general', ...keywordCursorParams('xiaohongshu', cursor) }),
   },
   // RT-1b (TikHub OpenAPI). Only `user_id` is sent, never a share link. TikHub documents that a wrong user id still
   // answers 200 with Xiaohongshu's "服务异常" and is billed, so the id is checked strictly before any call.
@@ -76,7 +77,8 @@ export const TIKHUB_ROUTES: Partial<Record<`${SocialPlatform}:${SocialKind}`, Ti
   },
   'tiktok:keyword_posts': {
     method: 'GET', path: '/tiktok/app/v3/fetch_video_search_result',
-    params: ({ keyword, limit }) => ({ keyword: keyword!, offset: 0, count: limit, sort_type: 0, publish_time: 0, region: 'US' }),
+    params: ({ keyword, limit, cursor }) => ({ keyword: keyword!, offset: 0, count: limit, sort_type: 0, publish_time: 0, region: 'US',
+      ...keywordCursorParams('tiktok', cursor) }),
   },
   'tiktok:account_profile': {
     method: 'GET', path: '/tiktok/app/v3/handler_user_profile', account: 'tiktok_handle', params: ({ account }) => ({ unique_id: account! }),
@@ -100,7 +102,8 @@ export const TIKHUB_ROUTES: Partial<Record<`${SocialPlatform}:${SocialKind}`, Ti
     method: 'GET', path: '/xiaohongshu/app_v2/search_users', params: ({ keyword }) => ({ keyword: keyword!, page: 1 }),
   },
   'youtube:keyword_posts': {
-    method: 'GET', path: '/youtube/web_v2/get_general_search_v2', params: ({ keyword }) => ({ keyword: keyword!, type: 'video' }),
+    method: 'GET', path: '/youtube/web_v2/get_general_search_v2',
+    params: ({ keyword, cursor }) => ({ keyword: keyword!, type: 'video', ...keywordCursorParams('youtube', cursor) }),
   },
   // Tested in RESEARCH-0. Abbreviated subscriber labels ("1.2M") stay missing, so YouTube is not
   // benchmark-capable; the profile still serves ordinary account lookups.
@@ -161,7 +164,7 @@ export interface TikhubCall {
   /** The post to read for `post_detail` (a YouTube video id). */
   postId?: string;
   limit?: number;
-  /** Next-page cursor for account_posts routes; malformed cursors are rejected before sending. */
+  /** Next-page cursor for account_posts and keyword_posts routes; malformed cursors are rejected before sending. */
   cursor?: string;
 }
 
@@ -183,7 +186,11 @@ export function buildTikhubRequest(call: TikhubCall): { request: VendorRequest }
   if (call.kind === 'keyword_posts' || call.kind === 'account_search') {
     const keyword = call.keyword?.trim();
     if (!keyword || [...keyword].length > 40 || /\p{Cc}/u.test(keyword)) return { reason: 'INVALID_KEYWORD' };
-    return { request: requestFor(route, { keyword, limit }) };
+    // Only a keyword search pages (BENCHMARK-COVERAGE); a malformed or foreign cursor is never sent.
+    if (call.cursor !== undefined && (call.kind !== 'keyword_posts' || !validKeywordCursor(call.platform, call.cursor))) {
+      return { reason: 'INVALID_CURSOR' };
+    }
+    return { request: requestFor(route, { keyword, limit, ...(call.cursor ? { cursor: call.cursor } : {}) }) };
   }
   const account = (call.kind === 'post_detail' ? call.postId : call.account)?.trim();
   if (!account || !route.account || !ACCOUNT_PATTERNS[route.account].test(account)) {
@@ -253,7 +260,8 @@ export async function callTikhub(call: TikhubCall, deps: VendorDeps): Promise<Re
   }
   const limit = Math.min(Math.max(Math.trunc(call.limit ?? MAX_POSTS), 1), MAX_POSTS);
   const items = all.slice(0, limit);
-  const nextCursor = call.kind !== 'account_posts' ? undefined
+  const nextCursor = call.kind === 'keyword_posts' ? keywordNextCursor(answer.json, call.platform, call.cursor)
+    : call.kind !== 'account_posts' ? undefined
     : call.platform === 'xiaohongshu' ? xhsNextCursor(answer.json)
       : call.platform === 'tiktok' || call.platform === 'douyin' ? videoNextCursor(answer.json, call.cursor) : undefined;
   return { ...base, outcome: all.length > limit ? 'partial' : 'ok', reason: null, httpStatus: 200,

@@ -3,6 +3,7 @@
 import type { ReactNode } from 'react';
 import { useParams } from 'next/navigation';
 import { trpc } from '@/trpc/client';
+import { retryUnlessMissing } from '@/lib/read-retry';
 import { PROFILE_ARCHIVE_TEXT } from '@/components/opc/profile-archive/profile-archive';
 import { useDraftArchiveState } from '@/components/opc/profile-archive/profile-archive-api';
 import { ReadonlyDraftView } from './readonly-draft-view';
@@ -13,7 +14,7 @@ import { ReadonlyDraftView } from './readonly-draft-view';
  * adoption, only mounts once the profile is confirmed active. A deleted conversation keeps its own read-only page.
  */
 export function DraftArchiveGate({ draftId, children }: { draftId: string; children: ReactNode }) {
-  const read = trpc.opc.read.useQuery({ draftId }, { enabled: Boolean(draftId) });
+  const read = trpc.opc.read.useQuery({ draftId }, { enabled: Boolean(draftId), retry: retryUnlessMissing });
   const deleted = (read.data as { conversationDeleted?: unknown } | undefined)?.conversationDeleted === true;
   const archive = useDraftArchiveState(draftId, Boolean(draftId) && read.isSuccess && !deleted);
   // The page itself shows a missing id, a failed read and a deleted conversation. "Failed" is the last settled read:

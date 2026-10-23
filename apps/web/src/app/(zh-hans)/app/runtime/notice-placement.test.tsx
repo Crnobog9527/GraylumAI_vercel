@@ -14,7 +14,7 @@ vi.mock('@/trpc/client',()=>{
   useQuery:()=>({data:group==='runtime'&&name==='view'?view:undefined,error:null,refetch:async()=>undefined}),
   useMutation:()=>({isPending:false,mutateAsync:vi.fn()}),
  })});
- return {trpc:{runtime:namespace('runtime'),opc:namespace('opc'),user:namespace('user'),useUtils:()=>({})}};
+ return {trpc:{runtime:namespace('runtime'),opc:namespace('opc'),user:namespace('user'),fusionCompare:namespace('fusionCompare'),useUtils:()=>({})}};
 });
 import RuntimePage from './page';
 

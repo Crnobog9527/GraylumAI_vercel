@@ -2,7 +2,7 @@
 import { z } from 'zod';
 import { aggregateAuthors, classifyAccount, selectCandidates, type ScoredAccount } from '../benchmark/classify';
 import { accountMetrics, type EvidenceItem } from '../benchmark/metrics';
-import { BENCHMARK_RULES } from '../vendors/config';
+import { BENCHMARK_ROUTE_KINDS, BENCHMARK_RULES } from '../vendors/config';
 import { authorizeDiscoverStart } from '../tools/authorize';
 import { canonicalAccount } from '../tools/accountLinks';
 import { toolEnvelope } from '../tools/envelope';
@@ -32,6 +32,19 @@ export function accountName(...values: unknown[]): string | undefined {
     if (name) return name;
   }
   return undefined;
+}
+
+/**
+ * The paid lookup that screens one author: the account profile where the platform's benchmark routes have one, otherwise
+ * the route its followers come from. YouTube has no profile route; it reads the detail of one of the author's own videos
+ * found by this search (the channel's subscriber label, BENCHMARK-COVERAGE #1290).
+ */
+function authorLookup(ctx: ResearchToolContext, platform: SocialPlatform, account: string, authorPosts: EvidenceItem[]) {
+  const routes = BENCHMARK_ROUTE_KINDS[platform];
+  if (!routes || routes.kinds.includes('account_profile')) return socialRequest(ctx, platform, 'account_profile', { account });
+  if (routes.followersFrom !== 'post_detail') return socialRequest(ctx, platform, routes.followersFrom, { account });
+  const postId = authorPosts.map(post => post.fields.id).find((id): id is string => typeof id === 'string');
+  return postId ? socialRequest(ctx, platform, 'post_detail', { account, postId }) : null;
 }
 
 /** A round searched to the end with fewer selectable accounts than a candidate card needs: no card (plan §1.2 step 5). */
@@ -173,7 +186,8 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
         if (scanned + offset >= AUTHOR_BATCH && selectCandidates(found, true).enough) break;
         const account = canonicalAccount(author.platform, author.authorId);
         if (!account) continue;
-        const request = socialRequest(ctx, author.platform, 'account_profile', { account });
+        const authorPosts = (posts.get(author.platform) ?? []).filter(p => p.fields.authorId === author.authorId);
+        const request = authorLookup(ctx, author.platform, account, authorPosts);
         if (!request) { complete = false; continue; }
         const result = await step(ctx, d, budget, index++, request);
         complete &&= result.complete;
@@ -185,9 +199,10 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
         }
         authorCursor += 1;
         const profile = result.items[0];
-        if (!profile) continue;
-        const metrics = accountMetrics({ profile: { ...profile, ref: `${result.operationId}#1` },
-          posts: (posts.get(author.platform) ?? []).filter(p => p.fields.authorId === author.authorId) }, ctx.now());
+        // A video detail speaks for its own channel only: a different channel's numbers never screen this author.
+        if (!profile || (request.vendor === 'tikhub' && request.call.kind === 'post_detail'
+          && profile.fields.authorId !== author.authorId)) continue;
+        const metrics = accountMetrics({ profile: { ...profile, ref: `${result.operationId}#1` }, posts: authorPosts }, ctx.now());
         const name = accountName(profile.fields.name, author.author);
         found.push({ key: `${author.platform}:${account}`, platform: author.platform, account, ...(name ? { name } : {}),
           evidenceRef: `${result.operationId}#1`, metrics,
