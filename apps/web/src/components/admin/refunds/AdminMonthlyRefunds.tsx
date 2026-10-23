@@ -10,7 +10,7 @@ import { MonthlyRefundQuoteCard, type MonthlyRefundQuoteTerms } from './MonthlyR
 import { MonthlyRefundStatusCard } from './MonthlyRefundStatusCard';
 import { useMonthlyRefund, type RefundVariant } from './useMonthlyRefund';
 import {
-  FEE_PERMITTED_HINT, FEE_PERMITTED_LABELS, REJECT_REASON_LABELS, SUBSCRIPTION_REFUND_RULES, feePermittedPatch, canRejectMonthlyRefund,
+  FEE_PERMITTED_HINT, FEE_PERMITTED_LABELS, REJECT_REASON_LABELS, feePermittedPatch, canRejectMonthlyRefund,
   type FeePermitted, type MonthlyRefundForm, type RejectReason,
 } from './monthlyRefundView';
 
@@ -114,7 +114,6 @@ export function AdminMonthlyRefunds({ variant = 'monthly' }: { variant?: RefundV
 
       {refund.quoted ? (
         <MonthlyRefundQuoteCard
-          rules={variant === 'subscription' ? SUBSCRIPTION_REFUND_RULES : undefined}
           terms={refund.quoted.quote.terms as MonthlyRefundQuoteTerms} approving={refund.approving}
           disabled={refund.busy} onApprove={() => void refund.approveQuote()} />
       ) : null}

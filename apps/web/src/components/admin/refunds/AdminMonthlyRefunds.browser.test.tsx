@@ -447,3 +447,16 @@ it('shows the original Pro that comes back for a Pro-to-Gold upgrade quote, and 
     expect(errors).toEqual([]);
   } finally { await page.close(); }
 }, 30000);
+
+it('picks the checklist from the quoted order, not from the section it was entered in', async () => {
+  const { page, errors } = await open({ quote: { terms: yearlyTerms, versionHash: 'c'.repeat(64), localVersion: 'd'.repeat(32), executable: false } });
+  try {
+    await page.getByLabel('订单编号').fill(ORDER);
+    await page.getByLabel('工单编号').fill(TICKET);
+    await page.getByTestId('monthly-refund-quote-button').click();
+    const card = page.getByTestId('monthly-refund-quote');
+    await browserExpect(card).toContainText('Gold 年付（首次购买）');
+    await browserExpect(card).toContainText('Stripe 银行卡年付、创始会员，或有明确原单的 Pro 升 Gold');
+    expect(errors).toEqual([]);
+  } finally { await page.close(); }
+}, 30000);

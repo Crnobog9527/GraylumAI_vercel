@@ -4,7 +4,9 @@
 import { CheckCircle } from 'lucide-react';
 import { formatMinorAmount } from '@/lib/payment-display';
 import { ConfirmRefundAction } from './ConfirmRefundAction';
-import { BILLING_CYCLE_LABELS, FEE_PERMITTED_LABELS, MONTHLY_REFUND_RULES, PLAN_LABELS, formatRefundTime } from './monthlyRefundView';
+import {
+  BILLING_CYCLE_LABELS, FEE_PERMITTED_LABELS, MONTHLY_REFUND_RULES, PLAN_LABELS, SUBSCRIPTION_REFUND_RULES, formatRefundTime,
+} from './monthlyRefundView';
 
 export type MonthlyRefundQuoteTerms = {
   orderId: string; ticketId: string;
@@ -21,7 +23,6 @@ export type MonthlyRefundQuoteTerms = {
 
 type Props = {
   terms: MonthlyRefundQuoteTerms;
-  rules?: readonly string[];
   approving: boolean;
   disabled: boolean;
   onApprove: () => void;
@@ -30,7 +31,10 @@ type Props = {
 const rowStyle = { color: 'var(--text-secondary)' };
 
 /** Read-only quote; the server only returns one when every refund rule passed. */
-export function MonthlyRefundQuoteCard({ terms, rules = MONTHLY_REFUND_RULES, approving, disabled, onApprove }: Props) {
+export function MonthlyRefundQuoteCard({ terms, approving, disabled, onApprove }: Props) {
+  // The checklist follows the quoted order itself, not the section it was typed into: both sections call the
+  // same server procedures, so only the returned terms say what kind of purchase was checked.
+  const rules = terms.snapshot?.billing_cycle === 'yearly' || terms.priorPro ? SUBSCRIPTION_REFUND_RULES : MONTHLY_REFUND_RULES;
   const money = (minor: number) => formatMinorAmount(minor, terms.currency);
   const rows: Array<[string, string]> = [
     ['会员', `${PLAN_LABELS[terms.plan] ?? terms.plan} ${BILLING_CYCLE_LABELS[terms.snapshot?.billing_cycle ?? 'monthly'] ?? '月付'}`
