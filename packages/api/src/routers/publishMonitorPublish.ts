@@ -8,6 +8,7 @@ import {
   createMediaUploads, MAX_MEDIA, publishInput, readPublishJob, refreshPublishJob, submitPublish,
 } from '../services/publishMonitor/publish';
 import { takeUploadSlots } from '../services/publishMonitor/postForMe/config';
+import { assertPublishPlatformsOpen, readPublishOptions } from '../services/publishMonitor/publishOptions';
 import { requirePostForMeDeps } from '../services/publishMonitor/secrets';
 import { RateLimitError } from '../lib/rateLimitError';
 import { guarded } from './publishMonitorGuard';
@@ -18,8 +19,10 @@ import { guarded } from './publishMonitorGuard';
  * user confirmed that the files go to a third-party service on a public link (the input must say so).
  */
 const uuid = z.string().uuid();
-// One request returns every upload slot a post needs, so a complete post fits the per-user step allowance.
-const uploadInput = z.object({ disclosureAccepted: z.literal(true), count: z.number().int().min(1).max(MAX_MEDIA) }).strict();
+// One request returns every upload slot a post needs, so a complete post fits the per-user step allowance. The targets
+// come along so nothing is uploaded for a platform that is not open for publishing.
+const uploadInput = z.object({ disclosureAccepted: z.literal(true), count: z.number().int().min(1).max(MAX_MEDIA),
+  connectionIds: z.array(uuid).min(1).max(9) }).strict();
 const jobInput = z.object({ jobId: uuid }).strict();
 // Each step reads from the site-wide Post for Me budget; one user gets a small allowance per step (5 per 5 minutes).
 const limitStep = (step: string, profileId: string) => checkRateLimitOrThrow(`publish-monitor-${step}:${profileId}`, 'auth');
@@ -31,8 +34,14 @@ async function requirePublishEntitlement(ctx: { supabaseAdmin: Parameters<typeof
 }
 
 export const publishMonitorPublishRouter = router({
+  // Which platforms are open for publishing and the most a publish to n targets can hold (no provider call).
+  options: protectedProcedure.query(({ ctx }) => guarded(ctx, async () => {
+    await requirePublishEntitlement(ctx);
+    return readPublishOptions(ctx.supabaseAdmin);
+  })),
   uploadUrl: protectedProcedure.input(uploadInput).mutation(({ ctx, input }) => guarded(ctx, async () => {
     await requirePublishEntitlement(ctx);
+    await assertPublishPlatformsOpen(ctx.supabaseAdmin, ctx.profileId, input.connectionIds);
     await limitStep('upload', ctx.profileId);
     // Weighted by the number of slots, so parallel or split requests cannot exceed the per-user upload allowance.
     const slots = await takeUploadSlots(ctx.profileId, input.count);
@@ -41,6 +50,7 @@ export const publishMonitorPublishRouter = router({
   })),
   submit: protectedProcedure.input(publishInput).mutation(({ ctx, input }) => guarded(ctx, async () => {
     await requirePublishEntitlement(ctx);
+    await assertPublishPlatformsOpen(ctx.supabaseAdmin, ctx.profileId, input.connectionIds);
     await limitStep('publish', ctx.profileId);
     return submitPublish(ctx.supabaseAdmin, await requirePostForMeDeps(ctx.supabaseAdmin), ctx.profileId, input);
   })),

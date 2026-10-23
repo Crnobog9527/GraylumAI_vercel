@@ -18,15 +18,21 @@ const providerId = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/);
 
 export const MAX_CAPTION = 5000;
 const MAX_MEDIA_ITEMS = 10;
+export const MAX_MEDIA_BYTES = 1024 ** 3;
+const MAX_COVER_MS = 24 * 3600 * 1000;
 const media = z.object({
   // The public URL Post for Me returned with the upload slot; a retry must upload again (plan §2.1).
   mediaUrl: z.string().max(2048).refine(url => publicHttpsUrl(url) !== null, 'MEDIA_URL_NOT_PUBLIC_HTTPS'),
   // Identifies the file for the idempotency fingerprint, so a re-upload of the same file is the same request. The browser
   // hashes the size plus the first and last 4 MB (bounded memory for large videos); identity only, not integrity.
   sha256: z.string().regex(/^[0-9a-f]{64}$/),
-  size: z.number().int().positive().max(5 * 1024 ** 3),
+  // Post for Me support (Caleb, 2026-10): about 1 GB per file; the server transcodes per platform.
+  size: z.number().int().positive().max(MAX_MEDIA_BYTES),
   mimeType: z.string().regex(/^(image|video)\/[a-z0-9.+-]{1,64}$/),
-}).strict();
+  // Video cover: the frame at this time. Platforms without cover support get a screenshot at it (Post for Me answer).
+  thumbnailTimestampMs: z.number().int().min(0).max(MAX_COVER_MS).optional(),
+}).strict().refine(item => item.thumbnailTimestampMs === undefined || item.mimeType.startsWith('video/'),
+  'COVER_ONLY_FOR_VIDEO');
 
 export const publishInput = z.object({
   idempotencyKey: z.string().regex(/^[A-Za-z0-9_-]{8,128}$/),
@@ -52,7 +58,7 @@ export type PublishErrorCode = 'PUBLISH_MONITOR_IDEMPOTENCY_MISMATCH' | 'PUBLISH
   | 'PUBLISH_MONITOR_WORK_ITEM_INVALID' | 'PUBLISH_MONITOR_QUOTA_EXHAUSTED' | 'PUBLISH_MONITOR_QUOTA_NOT_CONFIGURED'
   | 'PUBLISH_MONITOR_PRICE_NOT_CONFIGURED' | 'PUBLISH_MONITOR_INSUFFICIENT_CREDITS' | 'PUBLISH_MONITOR_TOO_MANY_REJECTIONS'
   | 'PUBLISH_MONITOR_JOB_NOT_FOUND' | 'PUBLISH_MONITOR_ACCOUNT_CLOSED' | 'PUBLISH_MONITOR_PROVIDER_BUSY'
-  | 'PUBLISH_MONITOR_UNAVAILABLE';
+  | 'PUBLISH_MONITOR_PLATFORM_NOT_OPEN' | 'PUBLISH_MONITOR_UNAVAILABLE';
 const KNOWN: PublishErrorCode[] = ['PUBLISH_MONITOR_IDEMPOTENCY_MISMATCH', 'PUBLISH_MONITOR_TARGET_INVALID',
   'PUBLISH_MONITOR_WORK_ITEM_INVALID', 'PUBLISH_MONITOR_QUOTA_EXHAUSTED', 'PUBLISH_MONITOR_QUOTA_NOT_CONFIGURED',
   'PUBLISH_MONITOR_PRICE_NOT_CONFIGURED', 'PUBLISH_MONITOR_INSUFFICIENT_CREDITS', 'PUBLISH_MONITOR_TOO_MANY_REJECTIONS',
@@ -78,7 +84,9 @@ export function publishFingerprint(input: PublishInput): string {
   const canonical = JSON.stringify({
     businessId: input.businessId, workItemId: input.workItemId, connectionIds: [...input.connectionIds].sort(),
     caption: input.caption.normalize('NFC'),
-    media: input.media.map(item => ({ sha256: item.sha256, size: item.size, mimeType: item.mimeType })),
+    // The cover is part of the request only when chosen, so fingerprints of requests without one stay unchanged.
+    media: input.media.map(item => ({ sha256: item.sha256, size: item.size, mimeType: item.mimeType,
+      ...(item.thumbnailTimestampMs === undefined ? {} : { thumbnailTimestampMs: item.thumbnailTimestampMs }) })),
   });
   return createHash('sha256').update(canonical, 'utf8').digest('hex');
 }
@@ -161,7 +169,8 @@ export async function submitPublish(db: Rpc, deps: ClientDeps, profileId: string
   let created: Awaited<ReturnType<typeof createPost>>;
   try {
     created = await createPost(deps, { externalId: job.id, caption: input.caption,
-      socialAccountIds: ready.providerAccountIds, mediaUrls: input.media.map(item => item.mediaUrl) });
+      socialAccountIds: ready.providerAccountIds,
+      media: input.media.map(item => ({ url: item.mediaUrl, thumbnailTimestampMs: item.thumbnailTimestampMs })) });
   } catch {
     // createPost only throws while checking its input, before any request: provably not sent, so release now.
     return releaseProven(db, job.id, 'PUBLISH_MONITOR_REQUEST_INVALID', pacing);
