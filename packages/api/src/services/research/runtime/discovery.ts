@@ -85,12 +85,13 @@ async function step(ctx: ResearchToolContext, d: DiscoveryRecord, budget: ToolAl
     ...(!outcome.sent ? { reason: outcome.stop, budget: outcome.budget } : {}) };
 }
 
+/** Shows the card and returns how many options on it the user can tick (0: no card shown). */
 async function card(ctx: ResearchToolContext, discoveryId: string, accounts: FoundAccount[], followUp: boolean, callId: string) {
   const chosen = followUp ? await ctx.store.selectedAccounts(discoveryId) : [];
   const keys = new Set(chosen.map(a => `${a.platform}:${a.account}`));
   const remaining = accounts.filter(a => !keys.has(a.key));
   const selection = selectCandidates(remaining, true);
-  if ((!followUp && !selection.enough) || selection.selectable.length === 0) return false;
+  if ((!followUp && !selection.enough) || selection.selectable.length === 0) return 0;
   const selectable = new Set(selection.selectable.map(a => a.key));
   const references = !followUp ? selection.headReferences.slice(0, 3) : [];
   const ordered = [...selection.selectable.slice(0, 12 - references.length), ...references] as FoundAccount[];
@@ -107,7 +108,8 @@ async function card(ctx: ResearchToolContext, discoveryId: string, accounts: Fou
   const savedOptions = saved.options as unknown as ResearchCandidateOption[];
   ctx.emit({ type: 'research_card', card: { ...saved, kind: 'candidates', options: savedOptions,
     ...(followUp ? { followUp: true } : {}) } });
-  return true;
+  // Count what was emitted: head references take slots and a reused saved card may differ from this rebuild.
+  return savedOptions.filter(option => option.selectable).length;
 }
 
 export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<'benchmark_discover'>,
@@ -185,7 +187,8 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
   }
   // Reconstruct from stable operations each time; the saved candidates support free follow-up cards.
   await ctx.store.discoverySave(d.discoveryId, { accounts: found, attempted: index, authorCursor, authorLimit }, stopped ? 'running' : 'completed');
-  const shown = !stopped && await card(ctx, d.discoveryId, found, false, '');
+  const onCard = stopped ? 0 : await card(ctx, d.discoveryId, found, false, '');
+  const shown = onCard > 0;
   const available = selectCandidates(found, true).selectable.length;
   const insufficient = !stopped && complete && !shown;
   const resumable = stopReason === 'ROUND_LIMIT' || stopReason === 'CANDIDATE_SCAN_INCOMPLETE';
@@ -199,7 +202,7 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
       : complete ? 'NOT_ENOUGH_CANDIDATES' : 'DISCOVERY_PARTIAL',
     ...(insufficient ? candidateShortage(available) : {}),
     // The host shows the card, not the model's text: say so, or the model may deny a card the user can see.
-    ...(shown ? { candidateCard: { shown: true, selectable: available }, nextStep: CARD_SHOWN_NEXT_STEP }
+    ...(shown ? { candidateCard: { shown: true, selectable: onCard }, nextStep: CARD_SHOWN_NEXT_STEP }
       : { candidateCard: { shown: false } }),
     discoveryId: d.discoveryId, continue: stopped && resumable,
     items: found.map(a => ({ fields: { platform: a.platform, account: a.account, ...(a.name ? { name: a.name } : {}),
@@ -218,9 +221,10 @@ export async function moreCandidates(ctx: ResearchToolContext, discoveryId: stri
     return toolEnvelope({ status: 'not_confirmed', reason: 'NO_CONFIRMED_SELECTION', discoveryId });
   }
   const accounts = (d.cursor.accounts ?? []) as FoundAccount[];
-  const shown = await card(ctx, discoveryId, accounts, true, callId);
+  const onCard = await card(ctx, discoveryId, accounts, true, callId);
+  const shown = onCard > 0;
   const shortfall = shown ? undefined : await shortfallNotice(ctx);
   return toolEnvelope({ status: shown ? 'ok' : 'partial', reason: shown ? null : 'NOT_ENOUGH_CANDIDATES', discoveryId,
-    candidateCard: { shown }, ...(shown ? { nextStep: CARD_SHOWN_NEXT_STEP } : {}),
+    candidateCard: shown ? { shown, selectable: onCard } : { shown }, ...(shown ? { nextStep: CARD_SHOWN_NEXT_STEP } : {}),
     ...(shortfall ? { shortfall } : {}) });
 }

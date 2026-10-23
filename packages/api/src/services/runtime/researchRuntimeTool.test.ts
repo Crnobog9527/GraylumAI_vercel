@@ -677,11 +677,13 @@ describe('durable benchmark discovery and free follow-up', () => {
     const cardId = stableResearchId(discoveryId, 'first-card');
     const saved = { cardId, kind: 'candidates' as const,
       options: Array.from({ length: 8 }, (_, i) => ({ id: `c${i}`, platform: 'tiktok',
-        account: `author${i}`, evidenceRef: `old#${i + 1}`, label: `author${i}`, selectable: true })),
+        account: `author${i}`, evidenceRef: `old#${i + 1}`, label: `author${i}`, selectable: i < 6 })),
       minSelect: 3, maxSelect: 5 };
     f.store.readCard.mockResolvedValue(saved);
 
-    expect(await f.execute('benchmark_discover', discoveryArgs)).toMatchObject({ status: 'ok' });
+    // The count told to the model is the saved card's, not the rebuilt candidate list's.
+    expect(await f.execute('benchmark_discover', discoveryArgs))
+      .toMatchObject({ status: 'ok', candidateCard: { shown: true, selectable: 6 } });
     expect(f.store.readCard).toHaveBeenCalledWith(cardId);
     expect(f.store.createCard).not.toHaveBeenCalled();
     expect(f.ctx.emit).toHaveBeenCalledWith({ type: 'research_card', card: saved });
@@ -704,7 +706,8 @@ describe('durable benchmark discovery and free follow-up', () => {
     expect(f.store.createCard.mock.calls[0]?.[1].options).toHaveLength(8);
     expect(subcall).toHaveBeenCalledTimes(11);
     f.store.selectedAccounts.mockResolvedValue([{ platform: 'tiktok', account: 'author0' }]);
-    expect(await f.execute('propose_more_candidates', { discoveryId }, 'more')).toMatchObject({ status: 'ok' });
+    expect(await f.execute('propose_more_candidates', { discoveryId }, 'more'))
+      .toMatchObject({ status: 'ok', candidateCard: { shown: true, selectable: 7 } });
     const payload = f.store.createCard.mock.calls[1]?.[1];
     expect(payload).toMatchObject({ followUp: true, minSelect: 2 });
     expect(payload?.options).toHaveLength(7);
