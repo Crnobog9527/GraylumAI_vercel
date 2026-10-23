@@ -13,6 +13,7 @@ import { executeResearchCall, socialRequest, stableResearchId, type ResearchTool
 import type { DiscoveryRecord } from './store';
 import { requestIdentity, type SupplierRequest } from './subcall';
 import { shortfallNotice } from './shortfall';
+import { deepen, discoveryCap, discoveryCoverage, total, type PlatformCoverage } from './discoveryLayers';
 
 const itemSchema = z.object({ url: z.string().optional(), fields: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])),
   missing: z.array(z.string()) });
@@ -20,6 +21,8 @@ interface FoundAccount extends ScoredAccount { platform: SocialPlatform; account
 interface StepResult {
   items: ResearchItem[]; operationId: string; complete: boolean; stopped: boolean;
   reason?: string; budget?: boolean;
+  /** A keyword search's next page (BENCHMARK-COVERAGE), from the answer or the saved operation. */
+  nextCursor?: string;
 }
 
 const CARD_SHOWN_NEXT_STEP = '候选卡已经显示给用户：请用户在卡上勾选并确认，确认后再取数。不要说没有候选卡。';
@@ -96,14 +99,17 @@ async function step(ctx: ResearchToolContext, d: DiscoveryRecord, budget: ToolAl
   }
   if (prior && prior.state !== 'prepared') {
     const parsed = z.array(itemSchema).safeParse(prior.result?.items);
+    const saved = prior.result?.nextCursor;
     return { operationId, items: parsed.success ? parsed.data : [],
-      complete: prior.state === 'succeeded' && parsed.success, stopped: false };
+      complete: prior.state === 'succeeded' && parsed.success, stopped: false,
+      ...(typeof saved === 'string' ? { nextCursor: saved } : {}) };
   }
   if (budget.left === 0) return { operationId, items: [], complete: false, stopped: true, reason: 'ROUND_LIMIT', budget: true };
   const outcome = await executeResearchCall(ctx, budget, request, operationId, 'benchmark_discover',
     { discoveryId: d.discoveryId }, d.discoveryId);
   return { operationId, items: outcome.sent ? outcome.result.items : [],
     complete: outcome.sent && ['ok', 'partial'].includes(outcome.result.outcome), stopped: !outcome.sent,
+    ...(outcome.sent && outcome.result.nextCursor ? { nextCursor: outcome.result.nextCursor } : {}),
     ...(!outcome.sent ? { reason: outcome.stop, budget: outcome.budget } : {}) };
 }
 
@@ -156,20 +162,57 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
   const found: FoundAccount[] = [];
   let authorCursor = 0;
   let authorLimit = z.number().int().positive().safeParse(d.cursor.authorLimit).data ?? AUTHOR_BATCH;
+  const coverage = discoveryCoverage(d.platforms, d.keywords.length);
+  // Every paid step of this discovery goes through here, in a fixed order, so a resumed call replays the same ids.
+  const pay = async (platform: SocialPlatform, request: SupplierRequest, kind: keyof PlatformCoverage['spent']) => {
+    const spent = coverage.platforms[platform]!;
+    if (total(spent) >= discoveryCap(platform, d.platforms.length)) { spent.capReached = true; return null; }
+    const result = await step(ctx, d, budget, index++, request);
+    // Counted only when dispatched now or replayed from a saved operation: a step stopped before sending never happened.
+    if (!result.stopped) spent.spent[kind] += 1;
+    complete &&= result.complete;
+    if (result.stopped) {
+      stopped = true;
+      stopReason = result.reason;
+      stopBudget = result.budget === true;
+    }
+    return result;
+  };
+  const screened = new Set<string>();
+  const enough = () => selectCandidates(found, true).enough;
+  /** One paid lookup that screens an author (or an account-search lead); each account at most once. */
+  const screen = async (platform: SocialPlatform, authorId: string, label: string | null, authorPosts: EvidenceItem[]) => {
+    const account = canonicalAccount(platform, authorId);
+    if (!account || screened.has(`${platform}:${account}`)) return;
+    const request = authorLookup(ctx, platform, account, authorPosts);
+    if (!request) { complete = false; return; }
+    const result = await pay(platform, request, 'profiles');
+    if (!result || result.stopped) return;
+    screened.add(`${platform}:${account}`);
+    authorCursor += 1;
+    const profile = result.items[0];
+    // A video detail speaks for its own channel only: a different channel's numbers never screen this author.
+    if (!profile || (request.vendor === 'tikhub' && request.call.kind === 'post_detail'
+      && profile.fields.authorId !== authorId)) return;
+    const metrics = accountMetrics({ profile: { ...profile, ref: `${result.operationId}#1` }, posts: authorPosts }, ctx.now());
+    const name = accountName(profile.fields.name, label);
+    found.push({ key: `${platform}:${account}`, platform, account, ...(name ? { name } : {}),
+      evidenceRef: `${result.operationId}#1`, metrics,
+      classification: classifyAccount(metrics, ctx.config.recentGrowth, ctx.now(), 'discovery') });
+  };
+  const firstPages = new Map<string, { cursor?: string; fresh: number }>();
   for (const platform of d.platforms) {
     const entries: EvidenceItem[] = [];
     posts.set(platform, entries);
     for (const keyword of d.keywords) {
-      const request = socialRequest(ctx, platform, 'keyword_posts', { keyword })!;
-      const result = await step(ctx, d, budget, index++, request);
-      complete &&= result.complete;
-      if (result.stopped) {
-        stopped = true;
-        stopReason = result.reason;
-        stopBudget = result.budget === true;
-        break;
-      }
-      entries.push(...result.items.map((item, i) => ({ ...item, ref: `${result.operationId}#${i + 1}` })));
+      const seen = new Set(entries.map(post => post.fields.authorId));
+      const result = await pay(platform, socialRequest(ctx, platform, 'keyword_posts', { keyword })!, 'searches');
+      if (!result || stopped) break;
+      const page = result.items.map((item, i) => ({ ...item, ref: `${result.operationId}#${i + 1}` }));
+      entries.push(...page);
+      firstPages.set(`${platform}\n${keyword}`, { cursor: result.nextCursor,
+        fresh: new Set(page.map(post => post.fields.authorId)
+          .filter((id): id is string => typeof id === 'string' && id.length > 0 && !seen.has(id))).size });
     }
     if (stopped) break;
   }
@@ -183,35 +226,21 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
     while (!stopped) {
       for (const [offset, author] of authors.slice(scanned, authorLimit).entries()) {
         // Past the first batch, the eighth selectable account ends the scan: no further profile is paid for.
-        if (scanned + offset >= AUTHOR_BATCH && selectCandidates(found, true).enough) break;
-        const account = canonicalAccount(author.platform, author.authorId);
-        if (!account) continue;
-        const authorPosts = (posts.get(author.platform) ?? []).filter(p => p.fields.authorId === author.authorId);
-        const request = authorLookup(ctx, author.platform, account, authorPosts);
-        if (!request) { complete = false; continue; }
-        const result = await step(ctx, d, budget, index++, request);
-        complete &&= result.complete;
-        if (result.stopped) {
-          stopped = true;
-          stopReason = result.reason;
-          stopBudget = result.budget === true;
-          break;
-        }
-        authorCursor += 1;
-        const profile = result.items[0];
-        // A video detail speaks for its own channel only: a different channel's numbers never screen this author.
-        if (!profile || (request.vendor === 'tikhub' && request.call.kind === 'post_detail'
-          && profile.fields.authorId !== author.authorId)) continue;
-        const metrics = accountMetrics({ profile: { ...profile, ref: `${result.operationId}#1` }, posts: authorPosts }, ctx.now());
-        const name = accountName(profile.fields.name, author.author);
-        found.push({ key: `${author.platform}:${account}`, platform: author.platform, account, ...(name ? { name } : {}),
-          evidenceRef: `${result.operationId}#1`, metrics,
-          classification: classifyAccount(metrics, ctx.config.recentGrowth, ctx.now(), 'discovery') });
+        if (scanned + offset >= AUTHOR_BATCH && enough()) break;
+        await screen(author.platform, author.authorId, author.author,
+          (posts.get(author.platform) ?? []).filter(p => p.fields.authorId === author.authorId));
+        if (stopped) break;
       }
       scanned = authorLimit;
-      if (stopped || selectCandidates(found, true).enough || authorLimit >= authors.length) break;
+      if (stopped || enough() || authorLimit >= authors.length) break;
       authorLimit = Math.min(authorLimit + AUTHOR_BATCH, authors.length);
     }
+  }
+  // BENCHMARK-COVERAGE: still short of a card after every first-page author, search deeper before calling it a shortfall.
+  // Deeper layers stop at a full card (candidatesMax, plan §3 item 1); a card still shows from candidatesMin.
+  const full = () => selectCandidates(found, true).selectable.length >= BENCHMARK_RULES.candidatesMax;
+  if (!stopped && !full()) {
+    await deepen({ ctx, d, posts, firstPages, coverage, pay, screen, enough: full, isStopped: () => stopped });
   }
   // Reconstruct from stable operations each time; the saved candidates support free follow-up cards.
   await ctx.store.discoverySave(d.discoveryId, { accounts: found, attempted: index, authorCursor, authorLimit }, stopped ? 'running' : 'completed');
@@ -233,6 +262,8 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
     ...(shown ? { candidateCard: { shown: true, selectable: onCard }, nextStep: CARD_SHOWN_NEXT_STEP }
       : { candidateCard: { shown: false } }),
     ...(stopped && resumable ? { nextStep: ROUND_UNFINISHED_NEXT_STEP } : {}),
+    // What this round searched (code-counted): the coach says this, never its own guess at the coverage.
+    coverage,
     discoveryId: d.discoveryId, continue: stopped && resumable,
     items: found.map(a => ({ fields: { platform: a.platform, account: a.account, ...(a.name ? { name: a.name } : {}),
       evidenceRef: a.evidenceRef,
