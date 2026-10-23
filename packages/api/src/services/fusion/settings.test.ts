@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { DEFAULT_FUSION_SETTINGS, fusionSettings, readFusionSettings } from './settings';
+import { PURPOSE_OUTPUT_CAP } from '../runtime/purposeBudgets';
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const enabled = { ...DEFAULT_FUSION_SETTINGS, review: { ...DEFAULT_FUSION_SETTINGS.review, enabled: true,
@@ -69,6 +70,16 @@ describe('Fusion compare settings (FUSION-COMPARE §3.3)', () => {
     expect(read.compare).toMatchObject({ minModels: 2, allowedModelIds: [], defaultModelIds: [], maxBudgetUsd: null });
     // An old row that says enabled has no models or budget: refused, never half-configured.
     await expect(readFusionSettings(db({ ...old, compare: { enabled: true } }))).rejects.toThrow('FUSION_SETTINGS_INVALID');
+  });
+  it('uses the ordinary output ceiling for new and older compare defaults, retaining explicit limits', async () => {
+    expect((await readFusionSettings(db(undefined))).compare.answerOutputTokens).toBe(PURPOSE_OUTPUT_CAP);
+    const older = { ...DEFAULT_FUSION_SETTINGS, compare: { enabled: false } };
+    expect((await readFusionSettings(db(older))).compare.answerOutputTokens).toBe(PURPOSE_OUTPUT_CAP);
+    const withoutLimit: Partial<typeof on.compare> = { ...on.compare };
+    delete withoutLimit.answerOutputTokens;
+    expect(fusionSettings.parse({ ...on, compare: withoutLimit }).compare.answerOutputTokens).toBe(PURPOSE_OUTPUT_CAP);
+    expect(fusionSettings.parse({ ...on, compare: { ...on.compare, answerOutputTokens: 8192 } })
+      .compare.answerOutputTokens).toBe(8192);
   });
   it('accepts a complete configuration and requires enough models, default ticks and a budget to enable', () => {
     expect(fusionSettings.safeParse(on).success).toBe(true);

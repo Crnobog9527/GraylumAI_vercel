@@ -16,8 +16,9 @@ export function installPurchaseFixture(user: Db, admin: Db, getStripe: () => Str
   const orders = new Map<string, Row>();
   admin.from = (table: string) => {
     if (table === 'credit_packages' || table === 'membership_plans') return userFrom(table);
-    if (table === 'system_settings') return { select() { return this; }, eq() { return this; },
-      maybeSingle: async () => ({ data: { value: { channel: 'stripe', version: 1 } } }) } as unknown as Query;
+    // Legacy channel is Stripe; the failover switch is unset (Stripe by default).
+    if (table === 'system_settings') { let key = ''; return { select() { return this; }, eq(_: string, value: string) { key = value; return this; },
+      maybeSingle: async () => ({ data: key === 'payment_method_routes' ? null : { value: { channel: 'stripe', version: 1 } } }) } as unknown as Query; }
     if (table === 'payment_orders') {
       const query = from(table);
       const originalSelect = query.select;

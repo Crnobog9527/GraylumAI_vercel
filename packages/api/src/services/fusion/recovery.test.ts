@@ -18,7 +18,8 @@ const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')
 const now = Date.parse('2026-10-14T00:00:00Z');
 const item = (n: number, dispatched: boolean, minutes: number) => ({ actor_id: id(100), run_id: id(n), call_id: id(n + 50), dispatched,
   dispatch_deadline: new Date(now + minutes * 60_000).toISOString(), recovery: null, created_at: `2026-10-13T00:00:${String(n).padStart(2, '0')}.000001Z` });
-function admin(rows: unknown[], options: { deleted?: string[]; failFinalize?: string; unjudged?: unknown[] | ((limit: number) => unknown[]); saved?: string[] } = {}) {
+function admin(rows: unknown[], options: { deleted?: string[]; failFinalize?: string; unjudged?: unknown[] | ((limit: number) => unknown[]); saved?: string[];
+  compareUnjudged?: unknown[]; failVerdict?: string } = {}) {
   const calls: string[] = [];
   const db = { rpc(name: string, args: Record<string, unknown>) {
     calls.push(`${name}:${String(args.p_run_id ?? '')}`);
@@ -36,6 +37,11 @@ function admin(rows: unknown[], options: { deleted?: string[]; failFinalize?: st
       ? { callId: args.p_call_id, body: 'x' } : null, error: null });
     if (name === 'fusion_review_unjudged') return Promise.resolve({ data: typeof options.unjudged === 'function'
       ? options.unjudged(Number(args.p_limit)) : options.unjudged ?? [], error: null });
+    if (name === 'fusion_compare_unjudged') return Promise.resolve({ data: options.compareUnjudged ?? [], error: null });
+    if (name === 'fusion_call_verdict') {
+      calls.push(`verdict:${String(args.p_call_id)}:${String(args.p_verdict)}`);
+      return Promise.resolve(args.p_call_id === options.failVerdict ? { data: null, error: { message: 'x' } } : { data: {}, error: null });
+    }
     if (name === 'fusion_review_pause_idle') {
       // Like the real query builder: cancellable with an abort signal.
       const result = Promise.resolve({ data: 0, error: null });
@@ -47,6 +53,21 @@ function admin(rows: unknown[], options: { deleted?: string[]; failFinalize?: st
 }
 
 describe('Fusion daily recovery', () => {
+  it('judges saved, unjudged compare answers usable before settlement, so they bill and stay adoptable (FUSION-COMPARE)', async () => {
+    const compare = (call: number) => ({ actor_id: id(100), compare_id: id(300), call_id: id(call), run_id: id(call + 1) });
+    const a = admin([{ ...item(10, true, -60), call_id: id(400) }], { compareUnjudged: [compare(400)] });
+    const summary = await recoverFusionFinancials(a.db, { now: () => now, budget: createRuntimeBudget() });
+    expect(a.calls).toContain(`verdict:${id(400)}:usable`);
+    expect(a.calls.indexOf(`verdict:${id(400)}:usable`)).toBeLessThan(a.calls.findIndex(c => c.startsWith('bill2_finalize')));
+    expect(summary).toMatchObject({ rejudged: 1, success: true });
+  });
+  it('keeps a compare call whose judging failed out of this settlement pass', async () => {
+    const a = admin([{ ...item(10, true, -60), call_id: id(400) }],
+      { compareUnjudged: [{ actor_id: id(100), compare_id: id(300), call_id: id(400), run_id: id(10) }], failVerdict: id(400) });
+    const summary = await recoverFusionFinancials(a.db, { now: () => now, budget: createRuntimeBudget() });
+    expect(a.calls).not.toContain(`bill2_finalize:${id(10)}`);
+    expect(summary).toMatchObject({ failed: 1, success: false });
+  });
   it('re-judges saved, unjudged review bodies once per review before any settlement', async () => {
     rejudged.length = 0;
     const row = (call: number) => ({ actor_id: id(100), review_id: id(300), call_id: id(call), run_id: id(call + 1), phase: 'fusion_review', round: 1 });
