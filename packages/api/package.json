@@ -65,6 +65,7 @@
     "./src/services/runtime/stopLossNotify": "./src/services/runtime/stopLossNotify.ts",
     "./src/services/fusion/background": "./src/services/fusion/background.ts",
     "./src/services/fusion/recovery": "./src/services/fusion/recovery.ts",
+    "./src/services/voice/recovery": "./src/services/voice/recovery.ts",
     "./src/services/bill2/stuckCalls": "./src/services/bill2/stuckCalls.ts",
     "./src/services/report/fees": "./src/services/report/fees.ts",
     "./src/services/accountErasure/executor": "./src/services/accountErasure/executor.ts",

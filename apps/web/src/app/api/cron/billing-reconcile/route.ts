@@ -20,6 +20,7 @@ import { reconcileStripeCardPayments } from '@repo/api/src/services/payments/str
 import { getStripeClient } from '@repo/api/src/services/stripe';
 import { reportPaymentEvidenceConflict, reportStripeCardReconciliation } from '@/lib/payment-alert.mjs';
 import { recoverFusionFinancials } from '@repo/api/src/services/fusion/recovery';
+import { recoverVoiceGenerations } from '@repo/api/src/services/voice/recovery';
 import { settleDueReportFees } from '@repo/api/src/services/report/fees';
 import { findStuckPaygCalls } from '@repo/api/src/services/bill2/stuckCalls';
 import { kickStalledReviews } from '@repo/api/src/services/fusion/background';
@@ -42,6 +43,12 @@ async function runStaleRoundReconciliation(supabase: SupabaseClient) {
 async function runFusionRecovery(supabase: SupabaseClient) {
   try { return await recoverFusionFinancials(supabase); }
   catch { return { success: false, scanned: 0, cancelled: 0, recovered: 0, scrubbed: 0, failed: 1 }; }
+}
+
+/** VOICE: settle generations whose page closed before they finished; scrub runs whose source document was deleted. */
+async function runVoiceRecovery(supabase: SupabaseClient) {
+  try { return await recoverVoiceGenerations(supabase); }
+  catch { return { success: false, settled: 0, scrubbed: 0, waiting: 0, failed: 1 }; }
 }
 
 /** REPORT fixed price (0295): settle held prices of report executions that have ended. */
@@ -148,7 +155,8 @@ export async function GET(request: Request) {
     logger.system.cronJob('billing-reconcile', 'started');
     // ANALYTICS 0280: GA checkout ids never taken (long past their 45-minute window) are deleted (statistics only, never fails the job).
     const analyticsIds = pruneGaCheckoutIds(supabase);
-    const [result, readinessAudit, erasureFinancial, waffo, staleRounds, stripeCard, { fusion, fusionKick }, stuckCalls, reportFees] = await Promise.all([
+    const [result, readinessAudit, erasureFinancial, waffo, staleRounds, stripeCard, { fusion, fusionKick }, stuckCalls, reportFees,
+      voice] = await Promise.all([
       runDailyBillingReconciliation(supabase),
       runBillingEngineV15ReadinessAudit(supabase),
       runErasureFinancialReconciliation(supabase),
@@ -162,10 +170,11 @@ export async function GET(request: Request) {
       })(),
       runStuckCallScan(supabase),
       runReportFeeSettlement(supabase),
+      runVoiceRecovery(supabase),
     ]);
     const success = result.success && readinessAudit.success && erasureFinancial.success && waffo.success
       && staleRounds.success && stripeCard.success && fusion.success && fusionKick.success && stuckCalls.success
-      && reportFees.success;
+      && reportFees.success && voice.success;
 
     if (!success) {
       logger.system.cronJob(
@@ -181,7 +190,8 @@ export async function GET(request: Request) {
           ...(fusion.success ? [] : [`Fusion calls pending recovery: ${fusion.failed}`]),
           ...(stuckCalls.success ? [] : [`PAYG calls with unknown cost need manual settlement: ${stuckCalls.total}`]),
           ...(fusionKick.success ? [] : ['Fusion review kick failed']),
-          ...(reportFees.success ? [] : ['Report price settlement failed'])].join(' | '),
+          ...(reportFees.success ? [] : ['Report price settlement failed']),
+          ...(voice.success ? [] : [`Voice generations pending recovery: ${voice.failed}`])].join(' | '),
         {
           erasureFinancial,
           waffo,
@@ -191,6 +201,7 @@ export async function GET(request: Request) {
           stuckCalls,
           fusionKick,
           reportFees,
+          voice,
           mismatches: result.mismatches,
           summary: result.summary,
           readinessAudit: {
@@ -233,6 +244,7 @@ export async function GET(request: Request) {
       stuckCalls,
       fusionKick,
       reportFees,
+      voice,
       timestamp: new Date().toISOString(),
     }, { status: success ? 200 : 500 });
   } catch (error) {
