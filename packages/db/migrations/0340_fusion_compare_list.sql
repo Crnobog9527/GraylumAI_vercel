@@ -1,6 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
--- FUSION-COMPARE PR-2c (docs/launch/tasks/FUSION-COMPARE.md §3.4, §4 fusionCompare.list). Placeholder number 9999; the
--- controller assigns the final one at merge.
+-- FUSION-COMPARE PR-2c (docs/launch/tasks/FUSION-COMPARE.md §3.4, §4 fusionCompare.list). Number 0340 assigned by the controller (2026-10-23).
 -- The compare cards of one conversation, so a reloaded page can show them in place and recognise the adopted answer
 -- (adoption.executionId is written only by fusion_compare_adopt, so the page cannot forge it). fusion_compares is closed
 -- to every API role (0290), hence a SECURITY DEFINER reader with the same ownership and deletion checks as

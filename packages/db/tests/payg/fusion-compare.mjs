@@ -158,7 +158,7 @@ export async function fusionCompareCases({db,Client,connectionString,report,crea
     observedAt:new Date().toISOString(),coverage:'request_total',final:true,cost:'0.0004',currency:'USD',usage:{inputTokens:400,outputTokens:0}});
   const answer = 'Hook A: lead with the result.';
   await rpc(db,'fusion_call_output_save',actor,c0.id,answer);
-  // 9999: a saved answer without its verdict (interrupted between the two) is listed for the daily recovery to judge.
+  // 0340: a saved answer without its verdict (interrupted between the two) is listed for the daily recovery to judge.
   const unjudged = (await db.query('SELECT call_id,compare_id FROM fusion_compare_unjudged(200)')).rows;
   assert.ok(unjudged.some(x=>x.call_id===c0.id&&x.compare_id===first.compareId),'the saved, unjudged compare call is listed');
   await rpc(db,'fusion_call_verdict',actor,c0.id,'usable');
@@ -217,7 +217,7 @@ export async function fusionCompareCases({db,Client,connectionString,report,crea
   await assert.rejects(call(db,'fusion_compare_adopt',actor,first.compareId,1,randomUUID(),billing(1),items2),/FUSION_COMPARE_ADOPTED/);
   await assert.rejects(call(db,'fusion_compare_adopt',actor,first.compareId,1,adoptRequest,billing(1),items2),/FUSION_COMPARE_REQUEST_CONFLICT/,
     'a replay of the adoption request for another column is a conflict, not a success');
-  // 9999: the conversation's cards carry the server-written adoption and the frozen workspace dependencies; another actor sees none.
+  // 0340: the conversation's cards carry the server-written adoption and the frozen workspace dependencies; another actor sees none.
   const cards = await call(db,'fusion_compare_list',actor,session);
   const card = cards.find(x=>x.compareId===first.compareId);
   assert.equal(card.question,question);assert.equal(card.adoption.executionId,adopted.adoption.executionId);
