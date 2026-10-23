@@ -37,12 +37,28 @@ DROP TRIGGER IF EXISTS runtime_voice_references_freeze ON public.runtime_executi
 CREATE TRIGGER runtime_voice_references_freeze AFTER INSERT ON public.runtime_executions
  FOR EACH ROW WHEN (NEW.payload->'voiceProfile' ? 'versionId') EXECUTE FUNCTION public.runtime_voice_references_freeze();
 
--- True while a run's bound version still exists (and is the actor's own).
+-- True once a run's bound version no longer exists (or is not the actor's own). The check first share-locks the version
+-- row, which a deletion takes exclusively: a deletion that is committing is waited for and then seen, so a provider
+-- grant or a saved answer is never decided against a version that is being deleted at that moment (strict order).
 CREATE OR REPLACE FUNCTION public.runtime_voice_source_gone(p_execution_id uuid) RETURNS boolean
-LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
- SELECT EXISTS(SELECT 1 FROM runtime_voice_references r WHERE r.execution_id=p_execution_id
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+BEGIN
+ PERFORM v.id FROM runtime_voice_references r JOIN voice_profile_versions v ON v.id=r.version_id AND v.actor_id=r.actor_id
+  WHERE r.execution_id=p_execution_id FOR SHARE OF v;
+ RETURN EXISTS(SELECT 1 FROM runtime_voice_references r WHERE r.execution_id=p_execution_id
   AND NOT EXISTS(SELECT 1 FROM voice_profile_versions v WHERE v.id=r.version_id AND v.actor_id=r.actor_id));
-$$;
+END $$;
+
+-- The host's display fence (as runtime_library_sources_gone, 0277): executions whose bound version is gone. Read only.
+CREATE OR REPLACE FUNCTION public.runtime_voice_sources_gone(p_actor_id uuid,p_execution_ids uuid[])
+RETURNS SETOF uuid LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
+BEGIN
+ PERFORM bill2_actor(p_actor_id);
+ IF p_execution_ids IS NULL OR cardinality(p_execution_ids)>500 THEN RAISE EXCEPTION 'RUNTIME_VIEW_DENIED'; END IF;
+ RETURN QUERY SELECT DISTINCT r.execution_id FROM runtime_voice_references r
+  WHERE r.actor_id=p_actor_id AND r.execution_id=ANY(p_execution_ids)
+   AND NOT EXISTS(SELECT 1 FROM voice_profile_versions v WHERE v.id=r.version_id AND v.actor_id=r.actor_id);
+END $$;
 
 -- Entry check of every runtime_execution action: a running execution whose voice version is gone is source-deleted at
 -- once (begin/read report it unavailable; every other action takes the 0262 cancellation path). Inserted in front of
@@ -115,8 +131,9 @@ BEGIN
 END $$;
 
 REVOKE ALL ON FUNCTION public.runtime_voice_references_freeze(),public.runtime_voice_source_gone(uuid),
+ public.runtime_voice_sources_gone(uuid,uuid[]),
  public.voice_profile_confirm(uuid,uuid,integer,jsonb),
  public.erasure_business_owner(text,jsonb),public.account_erasure_prune_business(uuid,integer)
  FROM PUBLIC,anon,authenticated,service_role;
-GRANT EXECUTE ON FUNCTION public.voice_profile_confirm(uuid,uuid,integer,jsonb) TO service_role;
+GRANT EXECUTE ON FUNCTION public.voice_profile_confirm(uuid,uuid,integer,jsonb),public.runtime_voice_sources_gone(uuid,uuid[]) TO service_role;
 COMMIT;

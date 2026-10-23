@@ -66,7 +66,7 @@ try {
  await client.query(read('packages/db/tests/content-erasure/fixture.sql'));
  await client.query(read('packages/db/tests/voice/fixture.sql'));
  await runCases({db:client,Client,connectionString,report});
- await runReferences({db:client,report});
+ await runReferences({db:client,Client,connectionString,report});
  const audits=ok(sql(read('packages/db/tests/account-open-policy-audit.sql')));
  assert.equal(audits,'');report.checks.push('account-open policy audit unchanged');
 } catch(error) {report.failed=String(error.stack??error);process.exitCode=1;}

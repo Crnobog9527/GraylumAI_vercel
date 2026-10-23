@@ -56,6 +56,12 @@ describe('executionVoice', () => {
     expect(await executionVoice(db({ read: { profile } }), id(5), frozen, id(2))).toBeUndefined();
     expect(await executionVoice(db({ read: { profile } }), id(5), undefined, id(1))).toBeUndefined();
   });
+  it('a read that fails or comes back unreadable is a retryable fault, never "deleted" (review P2)', async () => {
+    const context = { voiceProfile: frozen };
+    await expect(withExecutionVoice(db({ readError: true }), id(5), 'SKILL', context, id(1))).rejects.toThrow('VOICE_PROFILE_UNAVAILABLE');
+    await expect(withExecutionVoice(db({ read: { profile: { tone: 1 } } }), id(5), 'SKILL', context, id(1)))
+      .rejects.toThrow('VOICE_PROFILE_UNAVAILABLE');
+  });
   it('a version deleted since admission is never read again: no voice text is produced', async () => {
     expect(await executionVoice(db({ read: null }), id(5), frozen, id(1))).toBeUndefined();
   });

@@ -8,7 +8,7 @@ const one=async(db,text,args=[])=>(await db.query(text,args)).rows[0]?.v;
 const denied=async(promise,code)=>{await assert.rejects(promise,error=>{if(!String(error.message).includes(code))throw error;return true;},code);};
 const PROFILE={tone:'像跟朋友聊天',samples:['VOICE_CANARY sample one','VOICE_CANARY sample two']};
 
-export async function runReferences({db,report}) {
+export async function runReferences({db,Client,connectionString,report}) {
  const svc=async(name,...args)=>{await db.query('SET ROLE service_role');try{return await rpc(db,name,...args);}finally{await db.query('RESET ROLE');}};
  const doc=(a,name)=>one(db,'SELECT voice_test.doc($1,$2) v',[a,name]);
  // A confirmed version for actor a, learned from a fresh authored document; returns {version,document}.
@@ -81,6 +81,28 @@ export async function runReferences({db,report}) {
  assert.equal(await one(db,'SELECT result IS NULL v FROM runtime_executions WHERE id=$1',[pending.execution]),true);
  assert.equal(await one(db,'SELECT active_execution IS NULL v FROM runtime_sessions WHERE id=$1',[pending.session]),true);
  report.checks.push('a run in flight when the voice is deleted saves and shows no answer; unknown cost waits then settles by the existing deletion-abort rule and releases the session');
+
+ // The check is ordered strictly against a deletion that is committing (review P1): the runtime waits for the lock,
+ // then sees the deletion; it never decides on a version that is being deleted at that moment.
+ {
+  const racing=await runtimeFixture(db,{dispatched:true});
+  const mineRacing=await confirmed(racing.actor,'race.md');
+  await db.query('INSERT INTO runtime_voice_references(execution_id,actor_id,version_id) VALUES($1,$2,$3)',[racing.execution,racing.actor,mineRacing.version]);
+  const deleting=new Client({connectionString});await deleting.connect();
+  try{
+   await deleting.query('BEGIN');await deleting.query('SET LOCAL ROLE service_role');
+   await deleting.query('SELECT public.voice_profile_delete($1,$2)',[racing.actor,mineRacing.version]);
+   await db.query('BEGIN');await db.query("SET LOCAL lock_timeout='300ms'");
+   await assert.rejects(rpc(db,'runtime_execution',racing.actor,racing.execution,'complete',outcome),error=>error.code==='55P03');
+   await db.query('ROLLBACK');await deleting.query('COMMIT');
+  }finally{await deleting.end();}
+  const late=await rpc(db,'runtime_execution',racing.actor,racing.execution,'complete',outcome);
+  assert.equal(late.state,'cost_pending');
+  assert.equal(await one(db,'SELECT result IS NULL v FROM runtime_executions WHERE id=$1',[racing.execution]),true);
+  assert.equal(await one(db,'SELECT count(*)::int v FROM runtime_voice_sources_gone($1,ARRAY[$2]::uuid[])',[racing.actor,racing.execution]),1);
+  assert.equal(await one(db,'SELECT count(*)::int v FROM runtime_voice_sources_gone($1,ARRAY[$2]::uuid[])',[racing.actor,bound]),0);
+  report.checks.push('a runtime action waits for a committing voice deletion and then sees it; the display fence lists exactly the runs whose version is gone');
+ }
 
  // No NEW provider request is granted once the version is gone.
  const fresh=await runtimeFixture(db,{});
