@@ -171,7 +171,10 @@ export async function deliverStopLossAlerts(db: Db, deps: StopLossNoticeDeps = {
       const prior = notifyOf(row);
       // An uncertain earlier request is repeated exactly as sent; otherwise the envelope comes from live
       // configuration and its key covers the whole envelope, so a changed recipient or sender is a new request.
-      const used = prior?.retry ?? { to, from: config.config.from, replyTo: config.config.replyTo,
+      // A stored recipient that is no longer allowed (outside production) is never mailed again: use live settings.
+      const stored = prior?.retry && (!config.config.allowedRecipients || config.config.allowedRecipients.has(prior.retry.to))
+        ? prior.retry : undefined;
+      const used = stored ?? { to, from: config.config.from, replyTo: config.config.replyTo,
         production: isProductionSite(env), key: '' };
       const mail = { ...stopLossNotice([row], used.production), from: used.from, to: used.to, replyTo: used.replyTo };
       const envelope = createHash('sha256').update(JSON.stringify([mail.to, mail.from, mail.replyTo, mail.subject,

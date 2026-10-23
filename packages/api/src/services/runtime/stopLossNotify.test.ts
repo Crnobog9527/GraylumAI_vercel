@@ -7,8 +7,9 @@ const log = vi.hoisted(() => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }))
 vi.mock('../../lib/logger', () => ({ logger: log }));
 
 const now = new Date('2026-10-23T12:00:00Z');
-const config: NoticeConfigResult = { ok: true, config: { apiKey: 'synthetic-key', from: 'Graylum <no-reply@graylum.com>',
-  replyTo: null, allowedRecipients: new Set(['owner@example.test']) } };
+const withRecipients = (allowed: ReadonlySet<string> | null): NoticeConfigResult => ({ ok: true, config: {
+  apiKey: 'synthetic-key', from: 'Graylum <no-reply@graylum.com>', replyTo: null, allowedRecipients: allowed } });
+const config = withRecipients(new Set(['owner@example.test']));
 type Row = { id: string; test_id: string; details: Record<string, unknown> | null; created_at: string };
 const site = (id: string, notify?: unknown): Row => ({ id, test_id: 'runtime_stop_loss_siteDailyUsd',
   created_at: '2026-10-23T11:00:00Z', details: { dedupeKey: `2026-10-23:siteDailyUsd:${id}`, utcDate: '2026-10-23',
@@ -77,7 +78,7 @@ it('a retry repeats the identical request (key and body) even when other alerts 
 });
 
 it('after a definite refusal a changed recipient is a new request; after an uncertain send the request repeats exactly', async () => {
-  const open = { ...config, config: { ...(config as { config: object }).config, allowedRecipients: null } } as NoticeConfigResult;
+  const open = withRecipients(null);
   const refused = vi.fn(async () => ({ kind: 'failed' as const, code: 'PAYMENT_NOTICE_PROVIDER_422' }));
   const f1 = fixture([site('a')], 'owner@example.test');
   await deliverStopLossAlerts(f1.db, { config: open, transport: refused, env: {}, now });
@@ -97,6 +98,17 @@ it('after a definite refusal a changed recipient is a new request; after an unce
   const f3 = fixture([site('a', { state: 'pending', attempts: 1, ...stored2 })], 'other@example.test');
   await deliverStopLossAlerts(f3.db, { config: open, transport: unsure, env: {}, now });
   expect(seen[1]).toEqual(seen[0]);
+});
+
+it('a stored retry recipient that is no longer allowed is not mailed; live settings are used', async () => {
+  const restricted = withRecipients(new Set(['new@example.test']));
+  const stored = { state: 'pending', attempts: 1, firstAttemptAt: now.toISOString(), retry: { key: 'runtime-stop-loss-a-old',
+    to: 'old@example.test', from: 'Graylum <no-reply@graylum.com>', replyTo: null, production: false } };
+  const transport = vi.fn(async () => ({ kind: 'sent' as const, providerMessageId: 'msg_7' }));
+  await deliverStopLossAlerts(fixture([site('a', stored)], 'new@example.test').db, { config: restricted, transport, env: {}, now });
+  const mail = (transport.mock.calls[0] as unknown[])[1] as { to: string; idempotencyKey: string };
+  expect(mail.to).toBe('new@example.test');
+  expect(mail.idempotencyKey).not.toBe('runtime-stop-loss-a-old');
 });
 
 it('the retry window starts at the first attempt, not at the alert creation', async () => {
