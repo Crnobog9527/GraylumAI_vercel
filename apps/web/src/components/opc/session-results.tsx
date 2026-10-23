@@ -1,8 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { trpc } from '@/trpc/client';
+import { PublishResultLink } from '@/app/(zh-hans)/app/publish-monitor/publish/publish-entry';
 import {
   RESULT_TYPES, RESULT_TYPE_LABEL, groupResults, resultErrorText, saveProblem, saveRequestId,
   type ResultType, type SessionResultItem,
@@ -110,15 +111,15 @@ function ResultCard({ sessionId, item }: { sessionId: string; item: SessionResul
       setDraft({ title: item.title, body: item.body, requestId: '', baseVersion: item.version });
     } }}
     onDraft={value => setDraft(current => ({ ...current, ...value, requestId: '' }))}
-    onSave={() => void saveEdit()} onDelete={() => void confirmDelete()}/>;
+    onSave={() => void saveEdit()} onDelete={() => void confirmDelete()} publish={<PublishResultLink familyId={item.familyId}/>}/>;
 }
 
 export function ResultCardView({ item, mode, draft, error, pending, versions, historyError, onRetryHistory, onMode, onDraft,
-  onSave, onDelete }: {
+  onSave, onDelete, publish }: {
   item: SessionResultItem; mode: 'view' | 'edit' | 'history' | 'delete'; draft: { title: string; body: string };
   error: string; pending: boolean; versions?: SessionResultItem[]; historyError?: boolean; onRetryHistory?(): void;
   onMode(mode: 'view' | 'edit' | 'history' | 'delete'): void; onDraft(value: { title?: string; body?: string }): void;
-  onSave(): void; onDelete(): void;
+  onSave(): void; onDelete(): void; publish?: ReactNode;
 }) {
   return <article aria-label={item.title} className="space-y-2 rounded-lg border border-[var(--border-primary)] p-3">
     <header className="flex items-baseline justify-between gap-2">
@@ -149,6 +150,7 @@ export function ResultCardView({ item, mode, draft, error, pending, versions, hi
       {(mode === 'view' || mode === 'history') && <>
         <Button size="sm" variant="outline" onClick={() => void navigator.clipboard?.writeText(item.body)}>复制</Button>
         <Button size="sm" variant="outline" onClick={() => onMode('edit')}>编辑</Button>
+        {publish}
         {item.versions > 1 && <Button size="sm" variant="ghost" onClick={() => onMode(mode === 'history' ? 'view' : 'history')}>
           {mode === 'history' ? '收起历史版本' : `历史版本（${item.versions}）`}</Button>}
         <Button size="sm" variant="ghost" onClick={() => onMode('delete')}>删除</Button>

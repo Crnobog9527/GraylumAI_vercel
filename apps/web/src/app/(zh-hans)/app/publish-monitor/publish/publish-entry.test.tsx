@@ -3,7 +3,7 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 const state = vi.hoisted(() => ({ data: undefined as unknown }));
 vi.mock('@/trpc/client', () => ({ trpc: { publishMonitor: { publish: { options: { useQuery: () => ({ data: state.data }) } } } } }));
-import { PublishEntry } from './publish-entry';
+import { PublishEntry, PublishResultLink } from './publish-entry';
 
 const ITEM = '00000000-0000-4000-8000-000000000d01';
 const html = (finalized: boolean) => renderToStaticMarkup(<PublishEntry workItemId={ITEM} finalized={finalized} />);
@@ -16,4 +16,13 @@ it('links to the publish page only for a final draft, an open platform and a pla
   expect(html(true)).toBe('');
   state.data = undefined; // free plan, feature off, or still loading
   expect(html(true)).toBe('');
+});
+
+it('the results folder links a saved result to the publish page only when a platform is open', () => {
+  const link = () => renderToStaticMarkup(<PublishResultLink familyId={ITEM} />);
+  expect(link()).toContain(`/app/publish-monitor/publish?result=${ITEM}`);
+  state.data = { platforms: [], holdCreditsByTargets: null };
+  expect(link()).toBe('');
+  state.data = undefined;
+  expect(link()).toBe('');
 });

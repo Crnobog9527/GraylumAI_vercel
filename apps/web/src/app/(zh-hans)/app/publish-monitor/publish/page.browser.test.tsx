@@ -41,7 +41,7 @@ beforeAll(async () => {
       resolveId(id: string) { if (id === entry || id.endsWith('/lib/supabase') || id === 'next/navigation' || id === 'next/link') return id; },
       load(id: string) {
         if (id === 'next/navigation') return `export const useRouter=()=>({replace:()=>{},push:()=>{}});
-          export const useSearchParams=()=>new URLSearchParams('item=${ITEM}');`;
+          export const useSearchParams=()=>new URLSearchParams(location.search);`;
         if (id === 'next/link') return `import React from 'react'; export default function Link(p){return React.createElement('a',p)}`;
         if (id.endsWith('/lib/supabase')) return `export const createClient=()=>({auth:{
           getSession:async()=>({data:{session:{user:{id:'synthetic-user'}}},error:null}),
@@ -69,7 +69,8 @@ afterAll(async () => { await browser?.close(); }, 30000);
 type Call = { path: string; input: unknown };
 type Answer = { data?: unknown; error?: { code: string; message: string; status: number } };
 
-async function open(answer: (path: string, input: unknown, calls: Call[]) => Answer | undefined, savedJob?: string) {
+async function open(answer: (path: string, input: unknown, calls: Call[]) => Answer | undefined, savedJob?: string,
+  query = `?item=${ITEM}`) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   const calls: Call[] = [];
   const uploads: string[] = [];
@@ -100,8 +101,8 @@ async function open(answer: (path: string, input: unknown, calls: Call[]) => Ans
     }
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ result: { data: result.data } }) });
   });
-  if (savedJob) await page.addInitScript(([key, value]) => sessionStorage.setItem(key, value!), [`publish-monitor-job:${ITEM}`, savedJob]);
-  await page.goto('https://publish.test/');
+  if (savedJob) await page.addInitScript(([key, value]) => sessionStorage.setItem(key, value!), [`publish-monitor-job:item:${ITEM}`, savedJob]);
+  await page.goto(`https://publish.test/${query}`);
   await page.addScriptTag({ content: code });
   await ui(page.getByRole('heading', { name: '一键发布' })).toBeVisible({ timeout: 5000 });
   return { page, calls, uploads, errors };
@@ -216,7 +217,7 @@ it('after a reload, an unconfirmed submit is replayed with the same key and the 
     await pickImageAndConfirm(page);
     await ui(page.getByRole('button', { name: '再试一次（同一次发布，不会重复发）' })).toBeVisible();
     // The tab reloads before the user retries: memory is gone, storage keeps only the key and the file identity.
-    await page.goto('https://publish.test/');
+    await page.goto(`https://publish.test/?item=${ITEM}`);
     await page.addScriptTag({ content: code });
     await ui(page.getByText('上一次提交还没有确认结果')).toBeVisible();
     await ui(page.getByRole('textbox')).toBeDisabled();
@@ -269,5 +270,35 @@ it('a saved job stays visible and refreshable while the feature is paused or the
     await page.getByRole('button', { name: '刷新状态' }).click();
     expect(calls.some(c => c.path === 'publishMonitor.publish.refresh')).toBe(true);
     expect(await page.getByText('这个功能还没有开放').count()).toBe(0);
+  } finally { await page.close(); }
+}, 30000);
+
+const RESULT = '00000000-0000-4000-8000-000000000c11';
+it('a saved result of the results folder is published without a topic, to the brand the user picks', async () => {
+  const BIZ2 = '00000000-0000-4000-8000-000000000c12';
+  const { page, calls } = await open(path => {
+    if (path === 'opc.library') return { data: { businesses: [...library.businesses, { businessId: BIZ2, name: '另一个品牌', accounts: [] }] } };
+    if (path === 'publishMonitor.connections') return { data: [connection(CONN_X, 'x', ACCOUNT_X),
+      { ...connection('00000000-0000-4000-8000-000000000c13', 'x', 'p2'), businessId: BIZ2 }] };
+    if (path === 'opc.sessionResultVersions') return { data: [{ version: 1, title: '旧版', body: '旧文案' },
+      { version: 2, title: '早起口播稿', body: '成果夹里的文案' }] };
+    if (path === 'publishMonitor.publish.submit') return { data: job('unknown', 'pending') };
+    if (path === 'publishMonitor.publish.job') return { data: job('unknown', 'pending') };
+  }, undefined, `?result=${RESULT}`);
+  try {
+    await ui(page.getByText('成果夹 · 早起口播稿')).toBeVisible();
+    // Two brands have a connected account: nothing is offered until the user picks one.
+    expect(await page.getByRole('textbox').count()).toBe(0);
+    await page.getByLabel('品牌').selectOption(BIZ);
+    await ui(page.getByRole('textbox')).toHaveValue('成果夹里的文案');
+    // The brand's only connected account is chosen for the user.
+    await ui(page.getByRole('checkbox', { name: 'X' })).toBeChecked();
+    await page.getByRole('button', { name: '发布', exact: true }).click();
+    await page.getByRole('dialog').getByRole('checkbox').click();
+    await page.getByRole('dialog').getByRole('button', { name: '确认发布' }).click();
+    await ui(page.getByText('已提交，正在等平台结果')).toBeVisible();
+    const submit = calls.find(c => c.path === 'publishMonitor.publish.submit')!.input as Record<string, unknown>;
+    expect(submit).toMatchObject({ businessId: BIZ, workItemId: null, connectionIds: [CONN_X], caption: '成果夹里的文案' });
+    expect(calls.find(c => c.path === 'opc.sessionResultVersions')!.input).toMatchObject({ familyId: RESULT });
   } finally { await page.close(); }
 }, 30000);

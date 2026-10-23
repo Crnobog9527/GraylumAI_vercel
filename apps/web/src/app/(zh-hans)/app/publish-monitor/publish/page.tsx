@@ -4,21 +4,26 @@ import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
-import { publishErrorMessage, publishTargets, type Connection } from '@/lib/publish-monitor/publish-flow';
+import { platformName, publishErrorMessage, publishTargets, type Connection } from '@/lib/publish-monitor/publish-flow';
 import { trpc } from '@/trpc/client';
 import { PublishForm } from './publish-form';
 import { PublishStatus } from './publish-status';
 
 /**
- * PUBLISH-MONITOR PR-5: one-click publishing of one topic (?item=<work item id>) to the brand's connected overseas
- * accounts. Only platforms an admin opened after their real publishing check are listed; the server refuses others.
+ * PUBLISH-MONITOR PR-5: one-click publishing of one topic (?item=<work item id>) or of one saved result of a free
+ * conversation's results folder (?result=<result family id>) to the brand's connected overseas accounts. A result has no
+ * brand of its own, so the user picks one of their brands that has a connected account (no topic is attached to the
+ * job). Only platforms an admin opened after their real publishing check are listed; the server refuses others.
  */
 type Version = { kind: string; version: number; status: 'draft' | 'final'; body: string | null; contentAvailable: boolean };
 type Item = { workItemId: string; title: string; contentType?: string; content: Version[] };
 type Account = { projectId: string; platform: string; items: Item[] };
 type Business = { businessId: string; name: string; accounts: Account[] };
+type ResultVersion = { version: number; title: string; body: string };
+type Source = { kind: 'item' | 'result'; id: string };
 
-const JOB_KEY = (item: string) => `publish-monitor-job:${item}`;
+const JOB_KEY = (source: Source) => `publish-monitor-job:${source.kind}:${source.id}`;
+const BACK = (source: Source) => source.kind === 'item' ? `/app/library?item=${source.id}` : '/app/runtime';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** The latest final draft is the starting caption; a video script is not a caption, so a video starts from its title. */
@@ -29,26 +34,31 @@ function startingCaption(item: Item): string {
   return final?.body ?? item.title;
 }
 
-function Workbench({ workItemId }: { workItemId: string }) {
+function Workbench({ source }: { source: Source }) {
+  const isItem = source.kind === 'item';
   const library = trpc.opc.library.useQuery({ search: '', from: null, to: null }, { retry: false });
+  const versions = trpc.opc.sessionResultVersions.useQuery({ familyId: source.id }, { retry: false, enabled: !isItem });
   const connections = trpc.publishMonitor.connections.useQuery(undefined, { retry: false });
   const options = trpc.publishMonitor.publish.options.useQuery(undefined, { retry: false });
   const [jobId, setJobId] = useState<string | null>(null);
   const [retryTargets, setRetryTargets] = useState<string[] | null>(null);
   const [round, setRound] = useState(0);
+  const [pickedBrand, setPickedBrand] = useState('');
+  const storageKey = JOB_KEY(source);
   // A job in progress survives a reload: only its id is kept, never a media link.
   useEffect(() => {
     try {
-      const saved = sessionStorage.getItem(JOB_KEY(workItemId));
+      const saved = sessionStorage.getItem(storageKey);
       if (saved && UUID.test(saved)) setJobId(saved);
     } catch { /* storage unavailable: the page still works without it */ }
-  }, [workItemId]);
+  }, [storageKey]);
   function remember(id: string | null) {
     setJobId(id);
     try {
-      if (id) sessionStorage.setItem(JOB_KEY(workItemId), id); else sessionStorage.removeItem(JOB_KEY(workItemId));
+      if (id) sessionStorage.setItem(storageKey, id); else sessionStorage.removeItem(storageKey);
     } catch { /* see above */ }
   }
+  const back = <Link className="text-sm underline" href={BACK(source)}>{isItem ? '回到资料库' : '回到对话'}</Link>;
 
   // A saved job comes first and needs none of the new-publish queries: while the feature is paused or the plan has lapsed
   // those fail, but the job (and the credits it holds) must stay visible and refreshable.
@@ -58,41 +68,92 @@ function Workbench({ workItemId }: { workItemId: string }) {
         <h1 className="text-xl font-semibold">一键发布</h1>
         <PublishStatus jobId={jobId} onDone={() => remember(null)}
           onRetry={ids => { setRetryTargets(ids); setRound(round + 1); remember(null); }} />
-        <Link className="text-sm underline" href={`/app/library?item=${workItemId}`}>回到资料库</Link>
+        {back}
       </div>
     );
   }
-  const failure = library.error ?? connections.error ?? options.error;
+  const failure = connections.error ?? options.error ?? (isItem ? library.error : versions.error);
   if (failure) return <p role="alert">{publishErrorMessage(failure.message, failure.data?.code)}</p>;
-  if (!library.data || !connections.data || !options.data) {
+  if (!library.data || !connections.data || !options.data || (!isItem && !versions.data)) {
     return <div className="flex justify-center p-8"><Loader2 className="h-5 w-5 animate-spin" /></div>;
   }
   const businesses = (library.data.businesses ?? []) as Business[];
-  const found = businesses.flatMap(business => business.accounts.flatMap(account => account.items
-    .filter(item => item.workItemId === workItemId).map(item => ({ business, account, item }))))[0];
-  if (!found) return <p role="alert">找不到这条选题，或者它不属于你。</p>;
-  const targets = publishTargets(connections.data as Connection[], found.business.businessId, options.data.platforms);
-  const own = targets.find(t => t.accountProjectId === found.account.projectId);
+  const all = connections.data as Connection[];
+  const open = options.data.platforms;
 
+  if (isItem) {
+    const found = businesses.flatMap(business => business.accounts.flatMap(account => account.items
+      .filter(item => item.workItemId === source.id).map(item => ({ business, account, item }))))[0];
+    if (!found) return <p role="alert">找不到这条选题，或者它不属于你。</p>;
+    const targets = publishTargets(all, found.business.businessId, open);
+    const own = targets.find(t => t.accountProjectId === found.account.projectId);
+    return (
+      <div className="space-y-6">
+        <header className="space-y-1">
+          <h1 className="text-xl font-semibold">一键发布</h1>
+          <p className="text-sm text-[var(--text-secondary)]">{found.business.name} · {found.item.title}</p>
+        </header>
+        <PublishForm key={round} businessId={found.business.businessId} workItemId={source.id} contextKey={`item:${source.id}`}
+          targets={targets} initialCaption={startingCaption(found.item)} initialTargets={retryTargets ?? (own ? [own.id] : [])}
+          holdCreditsByTargets={options.data.holdCreditsByTargets} onSubmitted={remember} />
+        {back}
+      </div>
+    );
+  }
+
+  const latest = ((versions.data ?? []) as ResultVersion[]).reduce<ResultVersion | null>(
+    (best, v) => (!best || v.version > best.version ? v : best), null);
+  if (!latest) return <p role="alert">找不到这条成果，或者它已被删除。</p>;
+  // Brands that have at least one connected account on an open platform; the user chooses which brand's accounts publish.
+  const brands = businesses.map(business => ({ business, targets: publishTargets(all, business.businessId, open) }))
+    .filter(entry => entry.targets.length > 0);
+  const chosen = brands.find(entry => entry.business.businessId === pickedBrand) ?? (brands.length === 1 ? brands[0]! : null);
   return (
     <div className="space-y-6">
       <header className="space-y-1">
         <h1 className="text-xl font-semibold">一键发布</h1>
-        <p className="text-sm text-[var(--text-secondary)]">{found.business.name} · {found.item.title}</p>
+        <p className="text-sm text-[var(--text-secondary)]">成果夹 · {latest.title}</p>
       </header>
-      <PublishForm key={round} businessId={found.business.businessId} workItemId={workItemId} targets={targets}
-        initialCaption={startingCaption(found.item)} initialTargets={retryTargets ?? (own ? [own.id] : [])}
-        holdCreditsByTargets={options.data.holdCreditsByTargets} onSubmitted={remember} />
-      <Link className="text-sm underline" href={`/app/library?item=${workItemId}`}>回到资料库</Link>
+      {brands.length === 0 ? (
+        <p className="text-sm text-[var(--text-secondary)]">
+          你还没有可以一键发布的账号：先在"数据复盘"页连接海外平台账号；只显示已经开放一键发布的平台。</p>
+      ) : (
+        <>
+          {brands.length > 1 && (
+            <label className="block space-y-1 text-sm">
+              <span className="font-medium">用哪个品牌的账号发布</span>
+              <select className="w-full rounded-md border px-2 py-1.5" value={chosen?.business.businessId ?? ''}
+                aria-label="品牌" onChange={event => { setPickedBrand(event.target.value); setRetryTargets(null); }}>
+                <option value="">请选择</option>
+                {brands.map(entry => (
+                  <option key={entry.business.businessId} value={entry.business.businessId}>
+                    {entry.business.name}（{entry.targets.map(t => platformName(t.platform)).join('、')}）</option>
+                ))}
+              </select>
+            </label>
+          )}
+          {chosen && (
+            <PublishForm key={`${round}:${chosen.business.businessId}`} businessId={chosen.business.businessId} workItemId={null}
+              contextKey={`result:${source.id}`} targets={chosen.targets} initialCaption={latest.body}
+              initialTargets={retryTargets ?? (chosen.targets.length === 1 && chosen.targets[0]!.ready ? [chosen.targets[0]!.id] : [])}
+              holdCreditsByTargets={options.data.holdCreditsByTargets} onSubmitted={remember} />
+          )}
+        </>
+      )}
+      {back}
     </div>
   );
 }
 
 function PublishPage() {
-  const item = useSearchParams().get('item');
+  const params = useSearchParams();
+  const item = params.get('item');
+  const result = params.get('result');
+  const source: Source | null = item && UUID.test(item) ? { kind: 'item', id: item }
+    : result && UUID.test(result) ? { kind: 'result', id: result } : null;
   return (
     <main className="mx-auto max-w-2xl px-4 py-10">
-      {item && UUID.test(item) ? <Workbench workItemId={item} /> : <p role="alert">请从资料库里的选题打开一键发布。</p>}
+      {source ? <Workbench source={source} /> : <p role="alert">请从资料库里的选题，或对话的成果夹里打开一键发布。</p>}
     </main>
   );
 }
