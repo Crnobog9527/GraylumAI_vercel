@@ -26,6 +26,8 @@ interface Script {
   firstCursor?: string;
   leads?: (keyword: string) => string[];
   followers?: number;
+  /** Web search results (Parallel); configured only when given. */
+  web?: (query: string) => ResearchItem[];
 }
 
 function fixture(platform: SocialPlatform, script: Script, kinds: SocialKind[] = ['keyword_posts', 'account_profile', 'account_posts']) {
@@ -58,16 +60,25 @@ function fixture(platform: SocialPlatform, script: Script, kinds: SocialKind[] =
   const config = researchToolsConfigSchema.parse({ ...DISABLED_RESEARCH_TOOLS, enabled: true,
     vendors: { tikhub: vendor, parallel: vendor, firecrawl: vendor },
     verifiedPlatforms: [platform], benchmarkPlatforms: [platform], limits: { maxSubcallsPerRound: 29, discoverSubcalls: 29 },
-    routes: kinds.map(kind => ({ platform, kind, vendor: 'tikhub', route: tikhubRouteId(platform, kind), backup: null, maxUnitsPerCall: '1' })) });
+    routes: [...kinds.map(kind => ({ platform, kind, vendor: 'tikhub', route: tikhubRouteId(platform, kind), backup: null, maxUnitsPerCall: '1' })),
+      ...(script.web ? [{ platform: 'web', kind: 'web_search', vendor: 'parallel', route: 'parallel:search:fast', backup: null,
+        maxUnitsPerCall: '1' }] : [])] });
   const sent: SupplierRequest[] = [];
   const post = (author: string, n: number): ResearchItem => ({ fields: { id: `${author}-v${n}`, ...(author ? { authorId: author } : {}), author: `Name ${author}`,
     title: 'video', publishedAt: now.toISOString(), views: 1000, likes: 10, comments: 1, shares: 1 }, missing: [] });
   subcall.mockImplementation(async (context, request) => {
     const operationId = context.newId();
     sent.push(request);
+    let items: ResearchItem[] = [];
+    if (request.vendor === 'parallel') {
+      items = script.web?.(request.query) ?? [];
+      operations.set(operationId, { state: 'succeeded', identityHash: requestIdentity(request),
+        result: { items, outcome: 'ok', reason: null, fetchedAt: now.toISOString(), truncated: false } });
+      return { sent: true, operationId, callId: id, result: { vendor: 'parallel', route: request.route, outcome: 'ok', reason: null,
+        httpStatus: 200, supplierMayCharge: true, usage: { unit: 'sku_search', units: '1' }, items, truncated: false, fetchedAt: now.toISOString() } };
+    }
     if (request.vendor !== 'tikhub') throw new Error('vendor');
     const { kind, keyword, cursor, account } = request.call;
-    let items: ResearchItem[] = [];
     let nextCursor: string | undefined;
     if (kind === 'keyword_posts' && !cursor) {
       items = script.firstPage(keyword!).map((author, n) => post(author, n));
@@ -116,7 +127,7 @@ describe('deeper discovery layers', () => {
     expect(f.kindsSent()).toEqual([...Array(3).fill('keyword_posts'), ...profiles, 'account_search', ...profiles,
       'account_search', ...profiles, 'account_search', ...profiles]);
     expect(envelope.candidateCard).toMatchObject({ shown: true, selectable: 12 });
-    expect(envelope.coverage.platforms.tiktok.spent).toEqual({ searches: 3, pages: 0, accountSearches: 3, profiles: 12 });
+    expect(envelope.coverage.platforms.tiktok.spent).toEqual({ searches: 3, pages: 0, accountSearches: 3, webSearches: 0, profiles: 12 });
   });
 
   it('counts only lookups that really ran, and never lets posts without an author count as new authors', async () => {
@@ -125,12 +136,12 @@ describe('deeper discovery layers', () => {
       nextPage: () => ({ authors: ['n1', 'n2', 'n3'] }) });
     const envelope = await f.run();
     expect(f.sent.some(r => r.vendor === 'tikhub' && r.call.cursor)).toBe(false);
-    expect(envelope.coverage.platforms.tiktok.spent).toEqual({ searches: 3, pages: 0, accountSearches: 0, profiles: 2 });
+    expect(envelope.coverage.platforms.tiktok.spent).toEqual({ searches: 3, pages: 0, accountSearches: 0, webSearches: 0, profiles: 2 });
     // A reply that runs out after two lookups reports those two, not the one it could not send.
     const g = fixture('tiktok', { firstPage: keyword => [`${keyword}a`] });
     const stopped = await g.run(2);
     expect(stopped).toMatchObject({ continue: true, reason: 'ROUND_LIMIT' });
-    expect(stopped.coverage.platforms.tiktok.spent).toEqual({ searches: 2, pages: 0, accountSearches: 0, profiles: 0 });
+    expect(stopped.coverage.platforms.tiktok.spent).toEqual({ searches: 2, pages: 0, accountSearches: 0, webSearches: 0, profiles: 0 });
   });
 
   it('pages a keyword only while its last page brought at least three new authors, at most to page 3', async () => {
@@ -140,7 +151,7 @@ describe('deeper discovery layers', () => {
     // Only "one" brought 3 new authors on page 1; its page 2 brought 2 new ones, so there is no page 3.
     expect(f.sent.filter(r => r.vendor === 'tikhub' && r.call.cursor).map(r => r.vendor === 'tikhub' && [r.call.keyword, r.call.cursor]))
       .toEqual([['one', '20']]);
-    expect(envelope.coverage.platforms.tiktok).toMatchObject({ spent: { searches: 3, pages: 1, accountSearches: 0, profiles: 5 },
+    expect(envelope.coverage.platforms.tiktok).toMatchObject({ spent: { searches: 3, pages: 1, accountSearches: 0, webSearches: 0, profiles: 5 },
       capReached: false, exhausted: true });
     expect(envelope).toMatchObject({ status: 'partial', reason: 'NOT_ENOUGH_CANDIDATES', candidateCard: { shown: false } });
   });
@@ -160,5 +171,28 @@ describe('deeper discovery layers', () => {
     expect(second.coverage.platforms.douyin).toMatchObject({ capReached: true });
     expect(second.continue).toBe(false);
     expect(f.discoveries.get(discoveryId)?.state).toBe('completed');
+  });
+
+  it('last, reads web pages listing the niche\'s creators and screens the accounts their links name (code-extracted)', async () => {
+    const queries: string[] = [];
+    const page = (handles: string[]): ResearchItem => ({ url: 'https://example.com/best-creators', missing: [],
+      fields: { title: 'Top hardanger creators', excerpt: handles.map(h => `https://www.tiktok.com/@${h}/video/7${h.length}0000000`).join(' ')
+        + ' and https://www.youtube.com/@ignored and https://www.tiktok.com/@Shared' } });
+    const f = fixture('tiktok', { firstPage: () => [], web: query => { queries.push(query); return [page(['webone', 'webtwo'])]; } });
+    const envelope = await f.run();
+    expect(queries).toEqual(['one TikTok creators', 'two TikTok creators']);
+    const screened = f.sent.filter(r => r.vendor === 'tikhub' && r.call.kind === 'account_profile')
+      .map(r => r.vendor === 'tikhub' && r.call.account);
+    // Each account once, handles lower-cased as pasted links are; the YouTube @handle link is skipped.
+    expect(screened).toEqual(['webone', 'webtwo', 'shared']);
+    expect(envelope.coverage.platforms.tiktok).toMatchObject({ spent: { webSearches: 2, profiles: 3 }, exhausted: true });
+  });
+
+  it('does not pay for web searches when a card of 8–11 can already show', async () => {
+    const web = vi.fn(() => [] as ResearchItem[]);
+    const f = fixture('tiktok', { firstPage: keyword => keyword === 'one' ? Array.from({ length: 9 }, (_, i) => `a${i}`) : [], web });
+    const envelope = await f.run();
+    expect(web).not.toHaveBeenCalled();
+    expect(envelope.candidateCard).toMatchObject({ shown: true, selectable: 9 });
   });
 });

@@ -1,14 +1,17 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // BENCHMARK-COVERAGE PR-1b (docs/launch/implementation/BENCHMARK_COVERAGE_PLAN.md §3, Owner 2026-10-23 "1 选 A"): when the
-// first page of every keyword and every author on it still leave fewer than candidatesMin selectable accounts, a
+// first page of every keyword and every author on it still leave fewer than candidatesMax selectable accounts, a
 // discovery searches deeper before it may call the round short: accounts found by searching for them (where the
-// platform has an account search route), then pages 2–3 of the keywords whose previous page brought new authors. Each
+// platform has an account search route), then pages 2–3 of the keywords whose previous page brought new authors, then
+// web pages that list the niche's creators (Parallel, PR-4: the links' accounts are screened like authors). Each
 // discovery has a per-platform ceiling on paid lookups, priced by tier; the coverage it reached is reported so the coach
 // can say what was searched instead of guessing.
 import type { EvidenceItem } from '../benchmark/metrics';
 import type { ResearchItem, SocialPlatform } from '../vendors/types';
 import type { DiscoveryRecord } from './store';
 import type { SupplierRequest } from './subcall';
+import { canonicalAccount, parseProfileLink } from '../tools/accountLinks';
+import { selectRoute } from '../vendors/config';
 import { socialRequest, type ResearchToolContext } from './toolContext';
 
 /** Platforms whose keyword search costs 0.01 USD a call (Owner A: half the ceiling of the 0.001 USD platforms). */
@@ -18,6 +21,30 @@ const MAX_PAGE = 3;
 const MAX_EXTRA_PAGES = 14;
 /** A page brings "new authors" when at least this many were not seen on earlier pages (plan §2.2). */
 const FRESH_AUTHORS = 3;
+/** Layer 4: web searches per platform, one per keyword, for pages that list the niche's creators (plan §2.4). */
+const WEB_QUERIES = 2;
+const PLATFORM_NAMES: Partial<Record<SocialPlatform, string>> = {
+  tiktok: 'TikTok', youtube: 'YouTube', x: 'X Twitter', xiaohongshu: '小红书', douyin: '抖音', bilibili: 'B站', instagram: 'Instagram',
+};
+const LINK = /https?:\/\/[^\s"'<>()\]]+/g;
+
+/**
+ * Accounts on `platform` named by one web result: its own link and the links in its title and excerpt. Profile links
+ * only (as pasted links are read), plus TikTok video links, which carry the author's handle. Code-extracted, never
+ * model-written; YouTube @handle links are skipped (no handle → channel route).
+ */
+export function webLeads(item: ResearchItem, platform: SocialPlatform): string[] {
+  const links = [item.url, ...[item.fields.title, item.fields.excerpt].flatMap(value => (typeof value === 'string'
+    ? value.match(LINK) ?? [] : []))].filter((link): link is string => typeof link === 'string');
+  const leads = links.map(link => {
+    const profile = parseProfileLink(link);
+    if (profile) return profile.platform === platform ? profile.account : null;
+    if (platform !== 'tiktok') return null;
+    const video = link.match(/^https?:\/\/(?:www\.|m\.)?tiktok\.com\/@([^/?#]+)\/video\/\d+/i);
+    return video ? canonicalAccount('tiktok', video[1]!) : null;
+  });
+  return [...new Set(leads.filter((lead): lead is string => lead !== null))];
+}
 
 /**
  * Paid lookups one discovery may spend per platform: 80 on a 0.001 USD platform, 40 on a 0.01 USD one; with two
@@ -29,7 +56,7 @@ export function discoveryCap(platform: SocialPlatform, platforms: number): numbe
 }
 
 export interface PlatformCoverage {
-  spent: { searches: number; pages: number; accountSearches: number; profiles: number };
+  spent: { searches: number; pages: number; accountSearches: number; webSearches: number; profiles: number };
   capReached: boolean;
   /** Every layer this platform supports was searched to its end (not stopped by the ceiling or this reply's allowance). */
   exhausted: boolean;
@@ -38,7 +65,7 @@ export interface DiscoveryCoverage { keywords: number; platforms: Partial<Record
 
 export function discoveryCoverage(platforms: SocialPlatform[], keywords: number): DiscoveryCoverage {
   return { keywords, platforms: Object.fromEntries(platforms.map(platform => [platform,
-    { spent: { searches: 0, pages: 0, accountSearches: 0, profiles: 0 }, capReached: false, exhausted: false }])) };
+    { spent: { searches: 0, pages: 0, accountSearches: 0, webSearches: 0, profiles: 0 }, capReached: false, exhausted: false }])) };
 }
 
 export const total = (coverage: PlatformCoverage) => Object.values(coverage.spent).reduce((sum, value) => sum + value, 0);
@@ -55,6 +82,8 @@ export interface DeepenInput {
   screen: (platform: SocialPlatform, authorId: string, label: string | null, authorPosts: EvidenceItem[]) => Promise<void>;
   /** A full card (candidatesMax selectable): the deeper layers stop there. */
   enough: () => boolean;
+  /** A card can show (candidatesMin selectable): the speculative web layer only runs while it cannot. */
+  cardable: () => boolean;
   isStopped: () => boolean;
 }
 
@@ -103,6 +132,23 @@ export async function deepen(input: DeepenInput): Promise<void> {
         }
       }
       pages = next;
+    }
+    if (done()) return;
+    // Layer 4: web pages that list this niche's creators; the accounts their links name are leads like any other.
+    // Only while the round would otherwise end without a card: it is the lowest-yield layer, so a card of 8–11 does not
+    // pay for it.
+    const web = selectRoute(ctx.config, 'web', 'web_search');
+    if (web.ok && web.vendor === 'parallel' && !input.cardable()) {
+      for (const keyword of d.keywords.slice(0, WEB_QUERIES)) {
+        if (done()) return;
+        const query = `${keyword} ${PLATFORM_NAMES[platform] ?? platform} creators`;
+        const result = await pay(platform, { vendor: 'parallel', route: web.route, query, mode: 'fast' }, 'webSearches');
+        if (!result || isStopped()) break;
+        for (const lead of result.items.flatMap(item => webLeads(item, platform))) {
+          if (done() || input.cardable()) return;
+          await screen(platform, lead, null, []);
+        }
+      }
     }
     cover.exhausted = !cover.capReached && !isStopped();
   }
