@@ -12,7 +12,7 @@ vi.mock('@/trpc/client',()=>{
   useQuery:()=>({data:group==='runtime'&&name==='view'&&state.session?{scope:{kind:state.kind},executions:[]}:undefined,error:group==='runtime'&&name==='choices'?{message:'temporary outage'}:null,refetch:async()=>{state.calls.push(group+'.'+String(name));}}),
   useMutation:()=>({isPending:false,mutateAsync:vi.fn()}),
  })});
- return {trpc:{runtime:namespace('runtime'),opc:namespace('opc'),user:namespace('user'),useUtils:()=>({})}};
+ return {trpc:{runtime:namespace('runtime'),opc:namespace('opc'),user:namespace('user'),fusionCompare:namespace('fusionCompare'),useUtils:()=>({})}};
 });
 import RuntimePage from './page';
 beforeEach(()=>{state.session='';state.kind='';state.calls=[];state.retry=undefined;});
