@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import {it,expect,beforeEach} from 'vitest';
+import {it,expect,beforeEach,vi} from 'vitest';
 import type {SupabaseClient} from '@supabase/supabase-js';
-import {discoverSkillCatalog} from './skillCatalog';
+import {clearSkillCatalogCache,discoverSkillCatalog} from './skillCatalog';
 import {clearSkillResourceCache,packageHash,sha256} from '../skills/loader';
 
 const id=(n:number)=>'00000000-0000-4000-8000-'+String(n).padStart(12,'0');
@@ -63,7 +63,7 @@ function clients(social:Record<string,boolean|undefined>={}){
  } as unknown as SupabaseClient;
  return {user,admin};
 }
-beforeEach(()=>clearSkillResourceCache());
+beforeEach(()=>{clearSkillResourceCache();clearSkillCatalogCache();});
 
 // CONTENT-CONVERSATION-DRIVEN: the catalog never reads a model binding; it lists what the dialogue model may load.
 it('lists loadable Skills without reading any model, skipping task packages, positioning and unavailable packages',async()=>{
@@ -82,4 +82,39 @@ it('drops social media Skills without a confirmed positioning and Skills too lar
  expect((await discoverSkillCatalog(user,admin,{maxResultBytes:20000,excludeSocial:true})).map(c=>c.moduleId)).toEqual([id(3),id(5)]);
  clearSkillResourceCache();
  expect(await discoverSkillCatalog(user,admin,{maxResultBytes:50,excludeSocial:false})).toEqual([]);
+});
+
+// The catalog costs about ten round trips per Skill, so it is kept briefly per user; a hit costs none and never crosses users.
+it('serves a user\'s catalog from a short cache without reading again, and never across users or settings',async()=>{
+ const {user,admin}=clients();
+ const reads=()=>(admin.rpc as unknown as {mock?:{calls:unknown[]}}).mock?.calls.length??0;
+ const spy=vi.spyOn(admin as unknown as {rpc:()=>unknown},'rpc');
+ const first=await discoverSkillCatalog(user,admin,{maxResultBytes:20000,excludeSocial:false,actorId:'a',now:1000});
+ const cost=spy.mock.calls.length;
+ expect(cost).toBeGreaterThan(0);
+ const again=await discoverSkillCatalog(user,admin,{maxResultBytes:20000,excludeSocial:false,actorId:'a',now:1000+4*60*1000});
+ expect(spy.mock.calls.length).toBe(cost);
+ expect(again).toEqual(first);
+ // The cache hands out copies, so a caller cannot change what the next reply sees.
+ again.pop();
+ expect(await discoverSkillCatalog(user,admin,{maxResultBytes:20000,excludeSocial:false,actorId:'a',now:1000+4*60*1000})).toEqual(first);
+ // Another user, another gate setting and another size limit are other entries; after the TTL it reads again.
+ await discoverSkillCatalog(user,admin,{maxResultBytes:20000,excludeSocial:false,actorId:'b',now:2000});
+ expect(spy.mock.calls.length).toBeGreaterThan(cost);
+ const afterOther=spy.mock.calls.length;
+ await discoverSkillCatalog(user,admin,{maxResultBytes:20000,excludeSocial:true,actorId:'a',now:2000});
+ expect(spy.mock.calls.length).toBeGreaterThan(afterOther);
+ const afterGate=spy.mock.calls.length;
+ await discoverSkillCatalog(user,admin,{maxResultBytes:20000,excludeSocial:false,actorId:'a',now:1000+5*60*1000+1});
+ expect(spy.mock.calls.length).toBeGreaterThan(afterGate);
+ expect(reads()).toBe(spy.mock.calls.length);
+});
+it('does not cache without an actor',async()=>{
+ const {user,admin}=clients();
+ const spy=vi.spyOn(admin as unknown as {rpc:()=>unknown},'rpc');
+ await discoverSkillCatalog(user,admin,{maxResultBytes:20000,excludeSocial:false});
+ const cost=spy.mock.calls.length;
+ clearSkillResourceCache();
+ await discoverSkillCatalog(user,admin,{maxResultBytes:20000,excludeSocial:false});
+ expect(spy.mock.calls.length).toBe(cost*2);
 });

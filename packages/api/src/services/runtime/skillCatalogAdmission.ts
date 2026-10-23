@@ -19,14 +19,14 @@ export type AdmittedSkillCatalog = {
  * billed like any other call; there is no matching call and no matching fee.
  */
 export async function admitSkillCatalog(user: SupabaseClient, admin: SupabaseClient, options: {
-  eligible: boolean; excludeSocial: boolean; inputLimit: number; fits: (text: string, extraBytes: number) => boolean;
+  eligible: boolean; excludeSocial: boolean; actor: () => Promise<string>; inputLimit: number; fits: (text: string, extraBytes: number) => boolean;
 }): Promise<AdmittedSkillCatalog | undefined> {
   if (!options.eligible) return undefined;
   // A loaded Skill may take at most a quarter of the dialogue model's input, like a chosen Skill's step files.
   const maxResultBytes = Math.floor(options.inputLimit / 4);
   // The catalog is optional: if it cannot be read now, this reply is ordinary chat rather than a failed turn.
   let catalog: SkillCatalogEntry[];
-  try { catalog = await discoverSkillCatalog(user, admin, { maxResultBytes, excludeSocial: options.excludeSocial }); }
+  try { catalog = await discoverSkillCatalog(user, admin, { maxResultBytes, excludeSocial: options.excludeSocial, actorId: await options.actor() }); }
   catch { return undefined; }
   if (!catalog.length) return undefined;
   const text = skillCatalogInstructions(catalog);

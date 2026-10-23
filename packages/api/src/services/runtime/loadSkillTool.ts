@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
-import { validateDescriptor, sameIdentity, type SkillSource } from '../skills/loader';
+import { validateDescriptor, sameIdentity, SkillLoadError, type SkillSource } from '../skills/loader';
 import { catalogEntry, entryInstructions, loadSkillResult, type SkillCatalogEntry } from './skillCatalog';
 import type { RuntimeTool } from './runner';
 import type { ToolRpc } from './skillFileExecution';
@@ -16,11 +16,17 @@ const savedResult = z.object({
   name: z.string(), moduleId: z.string().uuid(), packageId: z.string().min(1), revisionId: z.string().uuid(),
   packageHash: z.string().regex(/^[a-f0-9]{64}$/), instructions: z.string().min(1),
 }).strict();
-const INVALID = 'This Skill is not in the list available for this reply. Answer without it.';
+// What the model is told when a load is permanently refused (unknown name, limit reached, package changed or revoked).
+export const SKILL_LOAD_REFUSED = 'This Skill cannot be loaded for this reply. Answer without it.';
+// Only these refusals become that text. Anything uncertain (a lost response, a timeout, a storage error) propagates,
+// so recovery can replay the journaled result instead of the model being told the Skill is unavailable.
+const PERMANENT = /^(RUNTIME_SKILL_LOAD_(DENIED|CONFLICT)|RUNTIME_TOOL_(DENIED|LIMIT|CONFLICT|RESULT_CONFLICT))$/;
+const permanent = (error: unknown) => error instanceof Error && (PERMANENT.test(error.message)
+  || error instanceof SkillLoadError && error.code !== 'SOURCE_FAILURE');
 
 export function loadSkillTool(execute: RuntimeTool['execute']): RuntimeTool {
   return {
-    name: LOAD_SKILL_TOOL, parameters: loadSkillParameters, invalidResult: INVALID,
+    name: LOAD_SKILL_TOOL, parameters: loadSkillParameters,
     description: 'Load one Skill from the "Available Skills" list by its exact name. Returns that Skill\'s published '
       + 'instructions; follow them within the host rules and continue answering. Read-only.',
     execute,
@@ -77,8 +83,9 @@ export function executionLoadSkillTool(options: {
       const committed = await options.rpc<{ result: unknown }>('runtime_tool', { ...args, p_action: 'complete', p_result: result });
       return JSON.stringify(committed.result);
     } catch (error) {
-      if (error instanceof Error && /^RUNTIME_SKILL_LOAD_(DENIED|CONFLICT)$/.test(error.message)) options.onRefused?.();
-      throw error;
+      if (!permanent(error)) throw error;
+      options.onRefused?.();
+      return SKILL_LOAD_REFUSED;
     }
   });
 }

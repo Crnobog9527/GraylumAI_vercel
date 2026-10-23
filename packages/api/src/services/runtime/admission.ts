@@ -343,7 +343,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    ownPosts=postsBudget.on;maxCalls=postsBudget.calls;libraryBytes+=postsBudget.bytes;
    const strategyGuide=workspaceContext&&fitsWith(workspaceStrategyReserve(maxCalls));
    // CONTENT-CONVERSATION-DRIVEN: free chat's model may load listed Skills itself (frozen here, after the other reserves).
-   const skillCatalog=await admitSkillCatalog(user,admin,{excludeSocial:gated,inputLimit,
+   const skillCatalog=await admitSkillCatalog(user,admin,{excludeSocial:gated,inputLimit,actor,
     eligible:input.selection.kind==='ordinary'&&!mentorStream&&!stepStream&&!hostTurnContext&&!policy.reportGeneration&&
      !policy.opcTurnToken&&(session.scope as {kind?:unknown}|null)?.kind==='positioning_draft',
     fits:(text,extra)=>fitsWith(extra+(strategyGuide?workspaceStrategyReserve(maxCalls+MAX_SKILL_LOADS_PER_TURN):0)+Buffer.byteLength(text))});

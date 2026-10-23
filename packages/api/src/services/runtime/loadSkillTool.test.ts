@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {clearSkillResourceCache, packageHash, sha256} from '../skills/loader';
-import {executionLoadSkillTool, LOAD_SKILL_TOOL, loadSkillToolBytes} from './loadSkillTool';
+import {executionLoadSkillTool, LOAD_SKILL_TOOL, loadSkillToolBytes, SKILL_LOAD_REFUSED} from './loadSkillTool';
 import {MAX_SKILL_LOADS_PER_TURN, skillCatalogInstructions, skillCatalogReserveBytes, type SkillCatalogEntry} from './skillCatalog';
 
 const id = (n: number) => '00000000-0000-4000-8000-' + String(n).padStart(12, '0');
@@ -53,17 +53,47 @@ describe('load_skill', () => {
     expect(call.mock.calls.some(([name]) => name === 'read_skill_package')).toBe(false);
   });
 
-  it('refuses a name outside the frozen catalog and a journaled result for another package', async () => {
+  it('tells the model a permanent refusal (name outside the catalog, package changed) without failing the run', async () => {
     const onRefused = vi.fn();
     const call = rpc({name: 'script-writer', moduleId: id(1), packageId: id(11), revisionId: id(22), packageHash: 'a'.repeat(64),
       instructions: 'x'});
     const tool = executionLoadSkillTool({executionId: id(9), catalog: [entry()], maxResultBytes: 20000, rpc: call,
       assertCanStart: () => {}, onRefused});
-    await expect(tool.execute({name: '别的技能'}, 'c')).rejects.toThrow('RUNTIME_SKILL_LOAD_DENIED');
+    expect(await tool.execute({name: '别的技能'}, 'c')).toBe(SKILL_LOAD_REFUSED);
     expect(call).not.toHaveBeenCalled();
-    await expect(tool.execute({name: 'script-writer'}, 'c')).rejects.toThrow('RUNTIME_SKILL_LOAD_CONFLICT');
+    expect(await tool.execute({name: 'script-writer'}, 'c')).toBe(SKILL_LOAD_REFUSED);
     expect(onRefused).toHaveBeenCalledTimes(2);
-    expect(tool.invalidResult).toContain('not in the list');
+    expect(tool.invalidResult).toBeUndefined();
+  });
+
+  it('refusals from the database (a third load, a name not frozen) are permanent too', async () => {
+    for (const code of ['RUNTIME_TOOL_DENIED', 'RUNTIME_TOOL_LIMIT', 'RUNTIME_SKILL_LOAD_CONFLICT']) {
+      const call = vi.fn(async () => { throw new Error(code); }) as never;
+      const tool = executionLoadSkillTool({executionId: id(9), catalog: [entry()], maxResultBytes: 20000, rpc: call, assertCanStart: () => {}});
+      expect(await tool.execute({name: 'script-writer'}, 'c')).toBe(SKILL_LOAD_REFUSED);
+    }
+  });
+
+  it('lets an uncertain failure propagate so recovery can replay the journaled result', async () => {
+    const onRefused = vi.fn();
+    for (const failure of [new Error('fetch failed'), new Error('RUNTIME_TOOL_CLOSED'), new Error('canceling statement due to timeout')]) {
+      let first = true;
+      const call = vi.fn(async (name: string, args: Record<string, unknown>) => {
+        if (name === 'read_skill_package') {
+          if (args.p_path === null) return descriptor();
+          if (args.p_path === '') return true;
+          return Buffer.from(files[args.p_path as keyof typeof files]).toString('base64');
+        }
+        if (args.p_action === 'claim') return {result: null};
+        if (first) { first = false; throw failure; }
+        return {result: args.p_result};
+      }) as never;
+      const tool = executionLoadSkillTool({executionId: id(9), catalog: [entry()], maxResultBytes: 20000, rpc: call,
+        assertCanStart: () => {}, onRefused});
+      await expect(tool.execute({name: 'script-writer'}, 'c')).rejects.toThrow(failure.message);
+      clearSkillResourceCache();
+    }
+    expect(onRefused).not.toHaveBeenCalled();
   });
 
   it('declares a small fixed tool definition', () => {

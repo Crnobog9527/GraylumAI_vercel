@@ -42,12 +42,36 @@ export function loadSkillResult(entry: Omit<SkillCatalogEntry, 'resultBytes'>, i
     packageHash: entry.packageHash, instructions };
 }
 
+// Discovery costs about ten database round trips per Skill (every read re-checks the user and the module), too much to
+// repeat before each free-chat reply. The catalog only supplies names, descriptions and the immutable package identity; the
+// actual load re-reads the package through read_skill_package, which rechecks access (load_skill, 0342). So a short
+// per-process, per-user cache can at worst list a Skill that was just unpublished: loading it is then refused. Test isolation
+// clears it.
+const CATALOG_TTL_MS = 5 * 60 * 1000, CATALOG_CACHE_ENTRIES = 256;
+const catalogCache = new Map<string, { at: number; entries: SkillCatalogEntry[] }>();
+export function clearSkillCatalogCache(): void { catalogCache.clear(); }
+
 /**
  * Skills the current dialogue model may load in free chat: active, visible to this user, published, not the guided
  * positioning Skill, not a legacy task package, not social-media related when the user has no confirmed positioning
  * (POSITIONING-GATE), and small enough to load. No model binding is read: the Skill runs on the dialogue model.
  */
 export async function discoverSkillCatalog(user: SupabaseClient, admin: SupabaseClient,
+  limits: { maxResultBytes: number; excludeSocial: boolean; actorId?: string; now?: number }): Promise<SkillCatalogEntry[]> {
+  const key = limits.actorId ? [limits.actorId, limits.excludeSocial, limits.maxResultBytes].join('|') : undefined;
+  const now = limits.now ?? Date.now();
+  const cached = key ? catalogCache.get(key) : undefined;
+  if (cached && now - cached.at < CATALOG_TTL_MS) return structuredClone(cached.entries);
+  const entries = await discoverUncached(user, admin, limits);
+  if (key) {
+    catalogCache.delete(key);
+    catalogCache.set(key, { at: now, entries: structuredClone(entries) });
+    for (const oldest of catalogCache.keys()) { if (catalogCache.size <= CATALOG_CACHE_ENTRIES) break; catalogCache.delete(oldest); }
+  }
+  return entries;
+}
+
+async function discoverUncached(user: SupabaseClient, admin: SupabaseClient,
   limits: { maxResultBytes: number; excludeSocial: boolean }): Promise<SkillCatalogEntry[]> {
   const visible = await userVisibleModules(user, { limit: 65, orderById: true });
   if (visible.error || visible.data.length > 64) throw new Error('RUNTIME_CATALOG_CAPACITY');
