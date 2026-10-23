@@ -69,13 +69,16 @@ export type ColumnPhase = 'queued' | 'streaming' | 'done' | 'failed' | 'pending'
 /** What a column shows (§3.5, §4.4 three outcomes): an answer, a confirmed failure (free), a result being checked (its hold kept),
  * or stopped. `streaming` is only ever set by the page while its own request runs. */
 export function columnPhase(column: ReadColumn, compareState: string): ColumnPhase {
+  const closed = column.billing?.closed === true;
+  // Nothing is final until BILL2 closes the column's run: a saved answer or a verdict whose settlement failed or whose provider
+  // cost is still pending keeps its hold (and recovery may still charge it), and adoption is refused for an unsettled call. So a
+  // dispatched column is `pending` until its billing closes, however terminal it looks.
+  if (column.call?.dispatched && !closed) return 'pending';
   if (column.call?.verdict === 'usable' || (column.body && column.call?.verdict === null)) return 'done';
   // A stop after dispatch settles at the known usage (it can charge); the card must not call it free (see stoppedLabel).
-  // Not free until billing closes: a stop with no confirmed provider cost yet keeps its hold, and recovery may still charge it.
-  if (column.call?.verdict === 'user_stopped') return column.billing?.closed ? 'stopped' : 'pending';
+  if (column.call?.verdict === 'user_stopped') return 'stopped';
   if (column.call?.verdict) return 'failed';
-  if (column.billing?.closed) return column.call?.dispatched ? 'failed' : 'stopped';
-  if (column.call?.dispatched) return 'pending';
+  if (closed) return column.call?.dispatched ? 'failed' : 'stopped';
   return compareState === 'stopped' ? 'stopped' : 'queued';
 }
 

@@ -36,8 +36,12 @@ describe('column phases (§3.5, §4.4)', () => {
   it('reads the three outcomes and the waiting states from the server view', () => {
     expect(columnPhase(column(), 'running')).toBe('queued');
     expect(columnPhase(column({}, { dispatched: true }), 'running')).toBe('pending');
-    expect(columnPhase(column({ body: '答' }, { dispatched: true, verdict: 'usable' }), 'finished')).toBe('done');
-    expect(columnPhase(column({ body: '答' }, { dispatched: true }), 'running')).toBe('done'); // saved, verdict not yet written
+    const closed = { reservedCredits: 9, chargedCredits: 3, closed: true };
+    expect(columnPhase(column({ body: '答', billing: closed }, { dispatched: true, verdict: 'usable' }), 'finished')).toBe('done');
+    expect(columnPhase(column({ body: '答', billing: closed }, { dispatched: true }), 'finished')).toBe('done'); // saved, verdict not yet written
+    // An answer or verdict whose settlement failed or whose cost is pending stays pending: held credits, no adoption yet.
+    expect(columnPhase(column({ body: '答' }, { dispatched: true, verdict: 'usable' }), 'running')).toBe('pending');
+    expect(columnPhase(column({}, { dispatched: true, verdict: 'no_delivery' }), 'running')).toBe('pending');
     expect(columnPhase(column({ billing: { closed: true } }, { dispatched: true, verdict: 'no_delivery' }), 'finished')).toBe('failed');
     expect(columnPhase(column({ billing: { closed: true } }), 'stopped')).toBe('stopped');
   });
