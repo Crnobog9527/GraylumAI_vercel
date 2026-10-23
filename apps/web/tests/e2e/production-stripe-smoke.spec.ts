@@ -8,7 +8,7 @@ import { isAllowedHttpsUrl } from '../../src/lib/safe-url';
 import { expect, test } from '@playwright/test';
 import { authStatePaths } from './support/auth';
 import { gotoWithBypass } from './support/deploymentProtection';
-import { openMethodCheckoutDialog, payInMethodCheckoutDialog } from './support/methodCheckout';
+import { openMethodCheckoutDialog, payInMethodCheckoutDialog, settledPackBuyButton } from './support/methodCheckout';
 
 test.describe('production-only stripe smoke', () => {
   const productionBaseUrl = process.env.PLAYWRIGHT_BASE_URL ?? '';
@@ -45,7 +45,7 @@ test.describe('production-only stripe smoke', () => {
       await expect(page.getByRole('heading', { name: '积分加油包' })).toBeVisible();
 
       // Packs are for paid members only; the buy button stays disabled for anyone else.
-      const buyButton = page.getByTestId(/^profile-credit-package-(?!name)/).first().getByRole('button');
+      const buyButton = await settledPackBuyButton(page);
       test.skip(await buyButton.isDisabled(), 'The smoke user cannot buy a credit package.');
 
       const dialog = await openMethodCheckoutDialog(page, buyButton);

@@ -26,3 +26,11 @@ export async function payInMethodCheckoutDialog(page: Page, dialog: Locator) {
   await dialog.getByTestId('method-checkout-pay').click();
   return responsePromise;
 }
+
+/** The first credit package's buy button, once the package list and the membership check have settled. */
+export async function settledPackBuyButton(page: Page) {
+  const buyButton = page.getByTestId(/^profile-credit-package-(?!name)/).first().getByRole('button');
+  await expect(buyButton).toBeVisible({ timeout: 15000 });
+  await expect(buyButton).not.toHaveText('正在确认会员状态', { timeout: 15000 });
+  return buyButton;
+}

@@ -10,7 +10,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { authStatePaths, hasCredentials } from './support/auth';
 
 import { gotoWithBypass } from './support/deploymentProtection';
-import { openMethodCheckoutDialog } from './support/methodCheckout';
+import { openMethodCheckoutDialog, settledPackBuyButton } from './support/methodCheckout';
 import { createIssueMonitor, writeFlowAudit } from './support/monitoring';
 
 const ticketUploadFixture = path.resolve(__dirname, './fixtures/ticket-attachment.png');
@@ -106,8 +106,7 @@ test.describe('User Extended Flows', () => {
       await expect(page.getByText('会员订阅')).toBeVisible({ timeout: 10000 });
 
       steps.push('Trigger a package purchase action');
-      const buyButton = page.getByTestId(/^profile-credit-package-(?!name)/).first().getByRole('button');
-      await expect(buyButton).toBeVisible({ timeout: 10000 });
+      const buyButton = await settledPackBuyButton(page);
 
       if (await buyButton.isDisabled()) {
         // Packs are for paid members and need open checkout; a disabled button is the page's own answer, not silence.
