@@ -1,5 +1,5 @@
 import { setPaymentFailover, assertNoFailoverChange } from './paymentFailover';
-import { PAYMENT_METHOD_ROUTES_KEY, paymentMethodRoutesSchema, readPaymentMethodRoutes } from '../services/payments/methodRouting';
+import { PAYMENT_METHOD_ROUTES_KEY, paymentMethodRoutesSchema, readPaymentMethodRoutes, newPurchaseChannel } from '../services/payments/methodRouting';
 import { FUSION_SETTINGS_KEY } from '../services/fusion/settings';
 import { validateCompareLimit } from '../services/fusion/compareLimit';
 import { PAYMENT_CHANNEL_KEY, paymentChannelSettingSchema, readPaymentChannel } from '../services/payments/channelSettings';
@@ -362,6 +362,8 @@ export const settingsRouter = router({
       ? await readPaymentChannel(ctx.supabaseAdmin).catch(() => null) : null;
     const stripeReady = ctx.hasSupabaseAdminPrivileges && Boolean(ctx.supabaseAdmin)
       && await legacyStripeCatalogReady(ctx.supabaseAdmin, selectedChannel?.channel).catch(() => false);
+    const routeChannel = ctx.hasSupabaseAdminPrivileges && ctx.supabaseAdmin
+      ? await readPaymentMethodRoutes(ctx.supabaseAdmin).then(newPurchaseChannel, () => null) : null;
     const readClient = getPublicReadClient(ctx);
     let result;
 
@@ -403,7 +405,6 @@ export const settingsRouter = router({
         logger.warn('billing', 'settings_member_pack_prices_unavailable', {});
         return new Map<string, boolean>();
       }) : new Map<string, boolean>();
-    // 映射字段名以兼容前端
     return packages.map(pkg => ({
       id: pkg.id,
       name: pkg.name,
@@ -411,7 +412,7 @@ export const settingsRouter = router({
       bonus_credits: pkg.bonus_credits ?? 0,
       price: (pkg.price ?? 0) / 100, // 从分转换为美元
       is_popular: pkg.is_popular === 'true',
-      paymentChannel: selectedChannel?.channel ?? null,
+      paymentChannel: routeChannel, // the audited failover switch users buy through, not the legacy key
       checkout_ready: stripeReady && pkg.price > 0 && hasConfiguredStripePriceId(priceRefs.get(`${pkg.id}:one_time`) ?? null),
       member_checkout_ready: {
         pro: isSellableMemberPack(pkg) && memberReady.get(`${pkg.id}:pro`) === true,

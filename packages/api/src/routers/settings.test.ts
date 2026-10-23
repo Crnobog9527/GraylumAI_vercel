@@ -876,7 +876,8 @@ it('keeps emergency membership and member-pack catalogs available when Stripe is
       member_prices: { pro: 'PROD_pro', gold: 'PROD_gold' } };
     const packages = await createPublicCatalogCaller('credit_packages', Promise.resolve({ data: [pack], error: null }),
       { channel: 'stripe', version: 1 }, true, 'waffo').getCreditPackages();
-    expect(packages[0]).toMatchObject({ member_checkout_ready: { pro: true, gold: true } });
+    // The legacy key still says Stripe; the pack reports the one switch users actually buy through.
+    expect(packages[0]).toMatchObject({ paymentChannel: 'waffo', checkout_ready: false, member_checkout_ready: { pro: true, gold: true } });
     const plans = await createPublicCatalogCaller('membership_plans', Promise.resolve({ data: [{...validMembershipPlan,
       waffo_monthly_product_id:'PROD_month',waffo_yearly_product_id:'PROD_year'}], error: null }),
       { channel: 'stripe', version: 1 }, true, 'waffo').getMembershipPlans();
