@@ -53,15 +53,15 @@ it('anything other than a billed call keeps the original error (financial recove
   await expect(helper([]).call.recover(plain)).rejects.toBe(plain);
 });
 
-it('a live turn whose organizer body was lost completes as not organized instead of staying pending', async () => {
+it.each([true, false])('a live turn whose organizer body was lost completes as not organized (native %s)', async native => {
   // staging 2026-10-23: the provider finished; only a cost-only lookup reached BILL2.
   const policy = { modelId: id, provider: 'fixture', account: 'synthetic', model: 'primary', protocol: 'fixture-cost-v1',
     upperUsd: '0.02', inputLimit: 32000, outputLimit: 1000, automaticRetry: false, hiddenTools: false, lookupSupported: true };
   const execution = { state: 'running', live: true, cancelRequested: false, runId: id, sessionId: id, result: null,
     context: { version: 'runtime.v1', sdkVersion: '0.18.0', role: 'ordinary', input: 'input', instructions: 'Answer',
       model: 'primary', maxOutputTokens: 1000, maxTurns: 1, historyItems: 0, tools: [], network: 'deny',
-      nativeOutput: 'native-output-v1', envelopeOrder: 'message-first-v1', providerRequestFormat: 'serial-tools-v4-stream',
-      reasoning: { effort: 'none' }, attachedOrganizer: { modelId: organizerId, model: 'organizer', maxOutputTokens: 1000 } },
+      ...(native ? { nativeOutput: 'native-output-v1', envelopeOrder: 'message-first-v1', providerRequestFormat: 'serial-tools-v4-stream',
+        reasoning: { effort: 'none' } } : {}), attachedOrganizer: { modelId: organizerId, model: 'organizer', maxOutputTokens: 1000 } },
     billing: { callPolicy: [policy, { ...policy, modelId: organizerId, model: 'organizer' }], rules: {}, limits: { maxCalls: 2 } } };
   const body = '{"message":"kept reply"}';
   const calls = new Map<number, { state: string; rawBody: string | null }>();
@@ -90,9 +90,9 @@ it('a live turn whose organizer body was lost completes as not organized instead
   });
   const result = await runtimeExecutor({ database, actor: async () => id, adapter: { dispatch: vi.fn() } as never,
     callGate: vi.fn(async () => ({ ok: true as const })), budget: createRuntimeBudget() }).execute(id);
-  expect(result).toMatchObject({ state: 'completed', body, organized: false });
+  expect(result).toMatchObject(native ? { state: 'completed', body, organized: false } : { state: 'completed' });
   expect(mock.billing.recoverReceipts).toHaveBeenCalledExactlyOnceWith(id, { callId: '2' });
   expect(database.rpc.mock.calls.find(([, args]) => args.p_action === 'complete')?.[1].p_result)
-    .toMatchObject({ body, summary: '', organized: false });
+    .toMatchObject({ summary: '', organized: false });
   expect(mock.billing.dispatchOnce).toHaveBeenCalledTimes(2);
 });

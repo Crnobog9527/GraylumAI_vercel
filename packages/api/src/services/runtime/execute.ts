@@ -407,8 +407,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
      exchange:async(_sequence,request)=>{
       const envelope=await exchange(request,'attached_organizer',organizerPolicy).catch(organizerCall.recover),response=envelope.usage?.sdkResponse;
       if(!response||response.model!==organizer.model||response.choices?.length!==1)invalidResponse();
-      checkAgentReply(response,true);
-      return JSON.stringify(response);
+      checkAgentReply(response,true);return JSON.stringify(response);
      }}));
     summary=typeof organized==='string'?organized:'';if(typeof organized!=='string')turnMetadata={...turnMetadata,organized:false};}
    }
@@ -420,7 +419,8 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    }
    if(native&&summary!==undefined&&turnMetadata.organized!==false)({summary,metadata:turnMetadata}=finalizeNativeSummary(body,turnMetadata,summary));
    const result={kind:'usable_result',evidenceRef:executionId,
-    evidenceHash:hash(JSON.stringify({body,summary,...turnMetadata})),body,...turnMetadata,...((native?summary!==undefined:Boolean(summary))?{summary}:{})};
+    evidenceHash:hash(JSON.stringify({body,summary,...turnMetadata})),body,...turnMetadata,
+    ...((native||turnMetadata.organized===false?summary!==undefined:Boolean(summary))?{summary}:{})}; // lost organizer: summary ''
    progress({type:'phase',phase:'saving'});
    const completed=await ownerRpc<{state:'completed'|'cost_pending'}>('runtime_execution',{...args,p_action:'complete',p_result:result});
    return {...nativeMetadata(result),body,...(summary!==undefined?{summary}:{}),state:completed.state};
