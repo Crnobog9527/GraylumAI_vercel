@@ -76,17 +76,35 @@ it('a retry repeats the identical request (key and body) even when other alerts 
   expect(seen.find(m => m.key === first.key)).toEqual(first);
 });
 
-it('a changed recipient uses a new key instead of colliding with the earlier request', async () => {
-  const keys: string[] = [];
-  const transport = vi.fn(async (_k: string, mail: { idempotencyKey: string }) => {
-    keys.push(mail.idempotencyKey); return { kind: 'unknown' as const, code: 'PAYMENT_NOTICE_PROVIDER_UNREACHABLE' };
-  });
+it('after a definite refusal a changed recipient is a new request; after an uncertain send the request repeats exactly', async () => {
   const open = { ...config, config: { ...(config as { config: object }).config, allowedRecipients: null } } as NoticeConfigResult;
-  await deliverStopLossAlerts(fixture([site('a')], 'owner@example.test').db, { config: open, transport, env: {}, now });
-  await deliverStopLossAlerts(fixture([site('a')], 'owner@example.test').db, { config: open, transport, env: {}, now });
-  await deliverStopLossAlerts(fixture([site('a')], 'other@example.test').db, { config: open, transport, env: {}, now });
-  expect(keys[0]).toBe(keys[1]);
-  expect(keys[2]).not.toBe(keys[0]);
+  const refused = vi.fn(async () => ({ kind: 'failed' as const, code: 'PAYMENT_NOTICE_PROVIDER_422' }));
+  const f1 = fixture([site('a')], 'owner@example.test');
+  await deliverStopLossAlerts(f1.db, { config: open, transport: refused, env: {}, now });
+  const stored1 = f1.updates[0]!.details.notify as { retry?: unknown };
+  expect(stored1.retry).toBeUndefined();
+
+  const seen: Array<{ key: string; to: string }> = [];
+  const unsure = vi.fn(async (_k: string, mail: { idempotencyKey: string; to: string }) => {
+    seen.push({ key: mail.idempotencyKey, to: mail.to }); return { kind: 'unknown' as const, code: 'PAYMENT_NOTICE_PROVIDER_UNREACHABLE' };
+  });
+  const f2 = fixture([site('a')], 'owner@example.test');
+  await deliverStopLossAlerts(f2.db, { config: open, transport: unsure, env: {}, now });
+  const stored2 = f2.updates[0]!.details.notify as { retry: { key: string; to: string }; firstAttemptAt: string };
+  expect(stored2.retry).toMatchObject({ key: seen[0]!.key, to: 'owner@example.test' });
+  expect(stored2.firstAttemptAt).toBe(now.toISOString());
+  // support_email changed before the retry: the retry still repeats the original request
+  const f3 = fixture([site('a', { state: 'pending', attempts: 1, ...stored2 })], 'other@example.test');
+  await deliverStopLossAlerts(f3.db, { config: open, transport: unsure, env: {}, now });
+  expect(seen[1]).toEqual(seen[0]);
+});
+
+it('the retry window starts at the first attempt, not at the alert creation', async () => {
+  const old = { ...site('o', { state: 'pending', attempts: 1, firstAttemptAt: '2026-10-23T08:00:00Z' }), created_at: '2026-10-20T00:00:00Z' };
+  const transport = vi.fn(async () => ({ kind: 'sent' as const, providerMessageId: 'msg_6' }));
+  expect(await deliverStopLossAlerts(fixture([old]).db, { config, transport, env: {}, now })).toEqual({ outcome: 'sent', alerts: 1 });
+  const expired = { ...old, details: { ...old.details, notify: { state: 'pending', attempts: 1, firstAttemptAt: '2026-10-22T08:00:00Z' } } };
+  expect(await deliverStopLossAlerts(fixture([expired]).db, { config, transport, env: {}, now })).toEqual({ outcome: 'none', alerts: 0 });
 });
 
 it('sends at most a few mails per run; the rest wait for the next run', async () => {
@@ -128,8 +146,8 @@ it('records a failed send on the rows and gives up after the attempt limit', asy
   expect(await deliverStopLossAlerts(f.db, { config, transport, env: {}, now }))
     .toEqual({ outcome: 'not_sent', alerts: 2, code: 'PAYMENT_NOTICE_PROVIDER_422' });
   expect(f.updates.map(u => u.details.notify)).toEqual([
-    { state: 'pending', attempts: 1, lastErrorCode: 'PAYMENT_NOTICE_PROVIDER_422', lastAttemptAt: now.toISOString() },
-    { state: 'failed', attempts: STOP_LOSS_NOTICE_MAX_ATTEMPTS, lastErrorCode: 'PAYMENT_NOTICE_PROVIDER_422', lastAttemptAt: now.toISOString() },
+    { state: 'pending', attempts: 1, lastErrorCode: 'PAYMENT_NOTICE_PROVIDER_422', lastAttemptAt: now.toISOString(), firstAttemptAt: now.toISOString() },
+    { state: 'failed', attempts: STOP_LOSS_NOTICE_MAX_ATTEMPTS, lastErrorCode: 'PAYMENT_NOTICE_PROVIDER_422', lastAttemptAt: now.toISOString(), firstAttemptAt: now.toISOString() },
   ]);
   expect(log.error).toHaveBeenCalledWith('billing', 'runtime_stop_loss_notice_failed', { code: 'PAYMENT_NOTICE_PROVIDER_422' });
 });

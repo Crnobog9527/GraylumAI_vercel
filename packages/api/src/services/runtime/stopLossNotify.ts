@@ -13,7 +13,7 @@ import { noticeLayout } from '../notify/templates';
  * stop itself: the database already refused the calls before anything is mailed.
  */
 export const STOP_LOSS_NOTICE_TIMEOUT_MS = 5_000;
-/** Resend keeps an idempotency key for 24 hours: an alert already attempted that long ago is not retried (it could duplicate). */
+/** Resend keeps an idempotency key for 24 hours: an alert is not retried more than that long after its first attempt (it could duplicate). */
 export const STOP_LOSS_NOTICE_WINDOW_MS = 24 * 3600_000;
 export const STOP_LOSS_NOTICE_MAX_ATTEMPTS = 5;
 const BATCH = 50;
@@ -25,7 +25,9 @@ const MAX_PAGES = 5;
 
 type Db = Pick<SupabaseClient, 'rpc' | 'from'>;
 type Notify = { state: 'sent' | 'pending' | 'failed'; attempts: number; lastErrorCode?: string;
-  lastAttemptAt?: string; sentAt?: string; providerMessageId?: string };
+  lastAttemptAt?: string; sentAt?: string; providerMessageId?: string; firstAttemptAt?: string; retry?: RetryEnvelope };
+/** The request of an uncertain send, kept so its retry is byte-identical (same key, recipient, sender, body). */
+type RetryEnvelope = { key: string; to: string; from: string; replyTo: string | null; production: boolean };
 type Row = { id: string; test_id: string; details: Record<string, unknown> | null; created_at: string };
 
 export interface StopLossNoticeDeps {
@@ -109,7 +111,7 @@ const isPending = (row: Row, now: Date) => {
   if (!n) return true;
   if (n.state !== 'pending' || n.attempts >= STOP_LOSS_NOTICE_MAX_ATTEMPTS) return false;
   // Never sent (blocked by configuration) stays retryable at any age; an ambiguous earlier request only inside Resend's window.
-  return n.attempts === 0 || now.getTime() - Date.parse(row.created_at) < STOP_LOSS_NOTICE_WINDOW_MS;
+  return n.attempts === 0 || now.getTime() - Date.parse(n.firstAttemptAt ?? row.created_at) < STOP_LOSS_NOTICE_WINDOW_MS;
 };
 
 /** Pages past delivered/given-up rows (newest first) so terminal alerts cannot starve undelivered ones. */
@@ -166,25 +168,30 @@ export async function deliverStopLossAlerts(db: Db, deps: StopLossNoticeDeps = {
     for (const row of pending) {
       if (tried >= MAX_MAILS_PER_RUN || Date.now() - startedAt > DELIVERY_BUDGET_MS) break;
       tried += 1;
-      const mail = { ...stopLossNotice([row], isProductionSite(env)), from: config.config.from, to,
-        replyTo: config.config.replyTo };
-      // The key covers the whole envelope: the same request is repeated byte for byte, and a changed recipient,
-      // sender or template becomes a new request instead of a permanent Resend idempotency conflict.
+      const prior = notifyOf(row);
+      // An uncertain earlier request is repeated exactly as sent; otherwise the envelope comes from live
+      // configuration and its key covers the whole envelope, so a changed recipient or sender is a new request.
+      const used = prior?.retry ?? { to, from: config.config.from, replyTo: config.config.replyTo,
+        production: isProductionSite(env), key: '' };
+      const mail = { ...stopLossNotice([row], used.production), from: used.from, to: used.to, replyTo: used.replyTo };
       const envelope = createHash('sha256').update(JSON.stringify([mail.to, mail.from, mail.replyTo, mail.subject,
         mail.text, mail.html])).digest('hex').slice(0, 16);
-      const idempotencyKey = `runtime-stop-loss-${row.id}-${envelope}`;
+      const idempotencyKey = used.key || `runtime-stop-loss-${row.id}-${envelope}`;
       const result = await transport(config.config.apiKey, { ...mail, idempotencyKey });
+      const firstAttemptAt = prior?.firstAttemptAt ?? at;
       if (result.kind === 'sent') {
         sent += 1;
         await mark(db, [row], r => ({ state: 'sent', attempts: (notifyOf(r)?.attempts ?? 0) + 1, sentAt: at,
-          providerMessageId: result.providerMessageId }));
+          providerMessageId: result.providerMessageId, firstAttemptAt }));
         continue;
       }
       failure ??= result.code;
       await mark(db, [row], r => {
         const attempts = (notifyOf(r)?.attempts ?? 0) + 1;
         const final = result.kind === 'conflict' || attempts >= STOP_LOSS_NOTICE_MAX_ATTEMPTS;
-        return { state: final ? 'failed' : 'pending', attempts, lastErrorCode: result.code, lastAttemptAt: at };
+        const retry = result.kind === 'unknown' ? { ...used, key: idempotencyKey } : undefined;
+        return { state: final ? 'failed' : 'pending', attempts, lastErrorCode: result.code, lastAttemptAt: at,
+          firstAttemptAt, ...(retry ? { retry } : {}) };
       });
       logger.error('billing', 'runtime_stop_loss_notice_failed', { code: result.code });
     }
