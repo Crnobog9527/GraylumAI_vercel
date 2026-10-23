@@ -434,7 +434,8 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
   </div>
   {sessionId&&<footer className={`${composerStyles.zone} ${workStyles.composerZone}`}><div className={composerStyles.wrap}>
    {!workItem&&<CompareButton sessionId={sessionId} question={input} disabled={busy||Boolean(view.data?.activeExecution)}
-    skill={(()=>{const s=choices.data?.skills.find(x=>'skill:'+x.moduleId===activeSelection);return s?{kind:'skill' as const,moduleId:s.moduleId,revisionId:s.revisionId}:undefined;})()}
+    skill={(()=>{const s=choices.data?.skills.find(x=>'skill:'+x.moduleId===activeSelection);
+     return s?{kind:'skill' as const,moduleId:s.moduleId,revisionId:s.revisionId}:undefined;})()}
     onStarted={()=>{updateInput('');void compare.refresh();}}/>}
    {workItem&&isVideo&&<Button variant="outline" disabled={busy||Boolean(view.data?.activeExecution)||!choices.data?.defaultSkill} onClick={()=>send(true)}>{currentScript?'修改口播稿':'起草口播稿'}</Button>}
    <WorkComposer value={input} onChange={updateInput} onSend={()=>void send()}

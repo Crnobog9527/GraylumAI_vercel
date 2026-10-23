@@ -73,5 +73,6 @@ export function columnPhase(column: ReadColumn, compareState: string): ColumnPha
 }
 
 /** "待核对，暂时冻结 N 积分" (§4.4): the hold kept for a column whose result is unknown. */
-export const heldCredits = (column: ReadColumn) => column.billing?.closed ? 0 : Math.max(0, (column.billing?.reservedCredits ?? 0) - (column.billing?.chargedCredits ?? 0));
+export const heldCredits = (column: ReadColumn) => column.billing?.closed ? 0
+  : Math.max(0, (column.billing?.reservedCredits ?? 0) - (column.billing?.chargedCredits ?? 0));
 export const chargedCredits = (column: ReadColumn) => column.billing?.chargedCredits ?? 0;
