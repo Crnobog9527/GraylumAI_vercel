@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { TRPCError } from '@trpc/server';
 import { withStepConfirmation } from '../../shared/opcStepConfirmation';
 import { withReportFlag } from './reportFlag';
 
@@ -51,9 +52,22 @@ export function readonlyDraftProjection(raw: Raw) {
   };
 }
 
-/** The draft read: the confirmed-only projection when the conversation was deleted, otherwise the full read. */
+/** Whether the projection still has anything to show: a confirmed field value or a confirmed step's body. */
+function hasConfirmedContent(projection: ReturnType<typeof readonlyDraftProjection>) {
+  const bodies = Object.values(projection.snapshot.steps).some((step) => 'body' in step);
+  return bodies || Object.values(projection.information).some((info) => Object.keys(info.values).length > 0);
+}
+
+/**
+ * The draft read: the confirmed-only projection when the conversation was deleted, otherwise the full read.
+ * A deleted conversation with nothing confirmed has nothing left to show, so it reads as not found.
+ */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the RPC result is the untyped opc_query projection.
 export async function draftReadResponse(raw: any, rpc: (name: string, args: Record<string, unknown>) => Promise<unknown>) {
-  if (raw?.conversationDeleted) return readonlyDraftProjection(raw);
+  if (raw?.conversationDeleted) {
+    const projection = readonlyDraftProjection(raw);
+    if (!hasConfirmedContent(projection)) throw new TRPCError({ code: 'NOT_FOUND', message: 'OPC_DRAFT_NOT_FOUND' });
+    return projection;
+  }
   return withStepConfirmation(await withReportFlag(raw, rpc));
 }

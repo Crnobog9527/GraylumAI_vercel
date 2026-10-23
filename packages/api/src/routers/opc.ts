@@ -4,6 +4,7 @@ import {executionVisibility} from '../services/runtime/libraryVisibility';
 import type { AgentTurnEvent } from "../shared/agentTurn";
 import { capturePendingInput, captureResolveInput } from "../services/opc/capture";
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../trpc";
 import {loadStagingPolicy,assertStagingReadAccess} from '../services/runtime/stagingPolicy';
 import {executeOriginalExecution,runtimeLocalEndpoint,streamOriginalExecution} from '../services/runtime/executionStream';
@@ -57,7 +58,12 @@ const procedure = protectedProcedure.use(async ({ ctx, next, path }) => {
 function isOpcRefusal(cause: unknown): cause is Error {
   return cause instanceof Error && cause.constructor === Error && /^OPC_[A-Z_]+$/.test(cause.message);
 }
-const readProcedure = protectedProcedure.use(async ({ ctx, next, path }) => {
+// A read of another account's (or a removed) record is refused by SQL with an OPC_*_DENIED code. For a query that
+// is "not found", the same answer for both, so the reply never reveals whether the record exists.
+function isOpcReadDenial(cause: unknown): boolean {
+  return cause instanceof Error && cause.constructor === Error && /^OPC_(?:[A-Z]+_)*DENIED$/.test(cause.message);
+}
+const readProcedure = protectedProcedure.use(async ({ ctx, next, path, type }) => {
   ctx.runtimeBudget?.timing?.enter('policy');
   let local = false;
   try {
@@ -69,6 +75,8 @@ const readProcedure = protectedProcedure.use(async ({ ctx, next, path }) => {
   } catch (cause) { throw stagingProcedureError(cause, path); }
   ctx.runtimeBudget?.timing?.enter('host');
   const result = await next({ ctx: { ...ctx, opc: opcService(ctx.userScopedSupabase, ctx.supabaseAdmin), stagingRead: !local } });
+  if (!result.ok && type === 'query' && isOpcReadDenial(result.error.cause))
+    throw new TRPCError({ code: 'NOT_FOUND', message: 'OPC_NOT_FOUND' });
   if (!result.ok) throw stagingProcedureError(result.error, path);
   return result;
 });
