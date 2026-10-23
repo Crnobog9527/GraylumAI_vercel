@@ -18,7 +18,7 @@ import { fusionExecutor } from './executor';
 import { DEFAULT_FUSION_SETTINGS, FUSION_SETTINGS_KEY } from './settings';
 
 // FUSION-COMPARE PR-2c: real loading, start, per-column streaming, adoption and stop -> PostgREST -> PostgreSQL
-// (0290/0313/0337) with a synthetic OpenRouter stream. No network.
+// (0290/0313/9999) with a synthetic OpenRouter stream. No network.
 const db = new pg.Client({ connectionString: process.env.V3_LOCAL_DB! });
 const admin = createClient(process.env.V3_LOCAL_REST!, process.env.V3_LOCAL_SERVICE_JWT!, { auth: { persistSession: false } });
 const staging = process.env.V3_LOCAL_STAGING_SCHEMA === 'true';

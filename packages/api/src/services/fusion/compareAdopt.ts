@@ -60,8 +60,8 @@ async function adoptionRun(admin: SupabaseClient, actorId: string, card: z.infer
   const rules: FrozenPaygRun['rules'] = { ...realContract(window).rules,
     creditsPerUsd: window.creditsPerUsd, multiplier: window.multiplier, fx: {}, billingUnit };
   // Only the bound is used: it states what the run could cost if it ever called. It never claims, so nothing is held.
-  const { call, upperCredits } = runtimePaygCall(fusionRequestBody(priced!, { instructions: 'Adopted compare answer; never sent.', input: card.question }, outputLimit, reasoning),
-    phase, priced!, rules, 1, true);
+  const never = fusionRequestBody(priced!, { instructions: 'Adopted compare answer; never sent.', input: card.question }, outputLimit, reasoning);
+  const { call, upperCredits } = runtimePaygCall(never, phase, priced!, rules, 1, true);
   return (columnIndex: number) => {
     const input = { version: 'runtime.v1', network: 'deny', tools: [], sources: [], input: card.question,
       dependencies: card.workspaceDependencies, fusionAdoption: { compareId: card.compareId, column: columnIndex } };
