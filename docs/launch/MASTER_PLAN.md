@@ -335,6 +335,7 @@ Owner 原话（本次性能专项派工，记录于 [#1219](https://github.com/C
 本条取代上述冻结前继续扩大速度优化的安排，先完成本次复测发现的 fresh 凭据读取故障修复；不降低下列门槛，不授权现在部署/测试正式环境，不改既有上线批准规则。
 
 不降低既定门槛：首字 20 次至少 18 次 ≤3 秒；回复结束到右侧清单整理结果 20 次至少 18 次 ≤10 秒。
+（2026-10-23 晚 Owner 决定：首字速度不算核心、不挡上线，在正式环境实测记录，不达标作为上线后第一件优化；以上两项改为正式环境记录项，见第 2.1 节 2026-10-23（晚）条目。）
 本条增加冻结前专项和正式 Pro 环境复测前提，不取代既有计费、预算、权限、删除、身份保护及上线批准规则。
 
 **2026-10-19：银行卡续费提醒交由 Stripe/Link 发送，Graylum 停用重复的卡类提醒**
@@ -2517,7 +2518,7 @@ RUNTIME-PROD ④ 和 REPORT-GEN 在本基准没有独立同名任务文件；仓
 ### 3.5 验收（在 staging 用真实模型实测）
 
 - 新手从进入到定稿完整走通，全程不需要逐题点确认，每一步只确认一次；
-- 连续发送 20 次，至少 18 次在 3 秒内出现第一个字（需要先读参考文件的轮次单独记录，不计入）；整理结果至少 18 次在回复结束后 10 秒内出现；
+- 连续发送 20 次，至少 18 次在 3 秒内出现第一个字（需要先读参考文件的轮次单独记录，不计入）；整理结果至少 18 次在回复结束后 10 秒内出现（2026-10-23 晚起：这两项改为正式环境记录项，不挡上线，见第 2.1 节）；
 - 用户在第一步顺口说出的后面步骤的信息，会被整理进对应栏目，Agent 之后不再重复问；
 - 跑题时 Agent 简短回应后拉回；用户说"不确定"或说不清时，Agent 在正文里给分析和举例，并同时说明"这是猜测、由你决定"以及为什么需要猜（目前信息还不够做专业判断），猜测不做成卡片，也不会被当成答案；
 - 刷新、断网、重新登录后，对话、提问卡、笔记和确认状态都能恢复；计费没有重复；
@@ -2835,6 +2836,7 @@ node scripts/plan-progress.mjs --ref origin/staging
 | | CONVERSATION-DRIVEN-CAPTURE | 右侧信息跟着对话走（方向 B，第 48 项；[方案 #588](https://github.com/Crnobog9527/GraylumAI_vercel/pull/588)）：整理不再按固定题目顺序，由实际聊到的内容填写，最后收齐 Skill 要求的信息。分两步：B1 数据库与写入（#593，迁移 0159）；B2 同时处理 #582 的出卡分寸问题、激活 PROMPT-CACHE-HISTORY H1。验收与交接：[联合验收及延期分支](https://github.com/Crnobog9527/GraylumAI_vercel/issues/716#issuecomment-6037691095)、[CDC-WRITEBACK-V2 工具、私有候选与待批准评测/发布](https://github.com/Crnobog9527/GraylumAI_vercel/issues/716#issuecomment-6038630556)。 | #497（AC1-4）；B2 在 B1 之后 | 高 | 中 / 2（B1、B2） | — |
 | | CHAT-NATIVE-OUTPUT | 方向（Owner 2026-10-03，第 44 项；[方案 #604](https://github.com/Crnobog9527/GraylumAI_vercel/pull/604)）：首版按 [CHAT_NATIVE_OUTPUT_PLAN.md](CHAT_NATIVE_OUTPUT_PLAN.md) 拆为 C0（流式）、C1（统一上限与写满收尾）、C2（停止时保存已写内容并收尾）。这里的 C2 是停止保存，不是早期方案的自动续写；自动续写（最多 3 次）已移到上线后第二版（第 44 项后续决定）。方案 #604 的首版范围以 Owner 决定为准（不做自动续写，正式环境及 staging 单次上限 32768，staging 提前实施依 2026-10-07 OUTPUT-CAP-RAISE 决定）。**实施前必须先解决**（[#604 总控记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/604#issuecomment-5971006438)，解决前相关实施 PR 不得合并）：C0 ① 可以出卡片的导师回合（非开场回合）目前完全缓冲，C0 要定义这类回合怎样流式输出权威文本并加入 C0 测试；② 调用进行中重连拿不到当前快照，C0 增量传输要持久化或共享当前投影，或者把承诺缩小为只重放终态并写明中间状态怎样显示；C2 ③ 结果已提交、还没送达时点停止，C2 要定义终态结果的交接规则并仍遵守 stopAt。验收与交接：[C0/C1/C2 验收矩阵缺口](https://github.com/Crnobog9527/GraylumAI_vercel/issues/716#issuecomment-6038028506)、[修复前 C2 停止保存失败记录](https://github.com/Crnobog9527/GraylumAI_vercel/issues/716#issuecomment-6039433804)、[正文呈现修复 #729](https://github.com/Crnobog9527/GraylumAI_vercel/pull/729)、[2026-10-07 C2 A 批局部验证与未运行项](https://github.com/Crnobog9527/GraylumAI_vercel/issues/716#issuecomment-6040869092)。 | C0+C1 在 PAYG PR-B2 #632 之后；C2（停止保存）在 C0+C1 之后；REPORT-GEN 以前述 C0+C1 为前置 | 高 | 待实施方案细化 | — |
 | | CONTENT-CONVERSATION-DRIVEN | 方向（Owner 2026-10-03，第 45 项）：定位之后的选题和创作改为自由对话加轻引导、按意图加载平台技能；一窗口一选题（提醒式）；自由对话由用户手动"整理纪要"；是否存进资料库由用户决定。将取代视频线固定按钮流程和 D9"自由对话不自动整理"（第 2.2 节）；方案定稿和实施前现有流程照常。方案见 #621。**实施前必须先解决**（[#621 总控记录](https://github.com/Crnobog9527/GraylumAI_vercel/pull/621#issuecomment-5971687700)，解决前相关实施 PR 不得合并）：① P1-A 必须把已保存的正文从常驻材料投影（`runtime_scope_material`）中移出，或停止注入这个投影，然后才能依赖按需注入；② 暴露"保存正文/简报"按钮之前，定义并迁移 `opc_content_versions.kind` 和 `opc_guard_content_kind` 缺少的类型，并同步 API schema；③ 提议是否已消耗按最新一次已准入的对话执行判断，不论这次执行成功、失败或停止，可用性只在展示提议时检查。**2026-10-13**：三项前置的设计和 PR 拆分见 [#876](https://github.com/Crnobog9527/GraylumAI_vercel/pull/876)（开工前置设计）；同日 Owner 定稿除定位外不做强引导、多个 Skill 按需一起用、右侧改为本对话成果夹（第 2.1 节），由本任务交付（R8a 范围，R8b 取消） | 排在 #604 定稿之后，和 CONVERSATION-DRIVEN-CAPTURE（#588 方向 B）合并设计 | 待方案定 | 待实施方案细化 | — |
+| | LOAD-SKILL | 自由对话由当前对话模型自行加载 Skill（Owner 2026-10-23 晚，第 2.1 节）：准入时冻结可加载 Skill 目录（名字和简介），模型用 load_skill 自己加载，每条回复最多 2 个，Skill 在当前对话模型上执行、不读绑定模型、无匹配费，加载按当前模型正常计费；定位、选题窗口、报告、手动技能菜单不变。核心 12 项"自由对话"的一部分，上线前在 staging 真实验收 | CHAT-AUTO-CONTEXT C | 高（计费、准入容量、迁移） | 中 / 1–2 | |
 | | RESEARCH-0 | 由 #457、#465、#466 实施（2026-09-28）。第三方搜索供应商对比测试：同一组查询测每一家，记录平台覆盖、新鲜度、字段完整度、速度、单次成本、失败率、是否返回每次调用的官方成本；Owner 据此确定了供应商（第 3.7 节、D13，结论见 [实施说明](tasks/RESEARCH-TOOLS.md)） | —（可与 AC-0 同期） | 高（真实付费调用） | 小 / 0–1 | 完成 |
 | | CI-TRUST | 其余部分：ESLint 覆盖 TS/TSX；网站单测统一入口；API 独立类型检查；删除 `@repo/ui` 空壳和未接入的 ESLint 配置包；依赖升级机器人改发到 staging 并清理指向 `main` 的旧升级 PR（第 8.4 节第 1–3 项）。由 #511、#512、#523 实施 | — | 高 | 中 / 3–4 | 完成 |
 | | DEBT-QUICK | 第 8.3 节第 2 项的快速清理（只含普通改动）；关闭已解决和已废弃的问题单（第 8.4 节第 4–5 项）。由 #482、#483、#558、#607（诊断结论修正、删除旧 `services/promptCache.ts`）、#634（删除 `costCalculator.ts`、`streamHandler.ts`）实施；第 8.4 节第 4–5 项的问题单已核对为关闭状态 | — | 普通 | 小 | 完成 |
