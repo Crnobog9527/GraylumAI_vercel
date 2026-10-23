@@ -22,6 +22,11 @@ export function MyVoice({ onOpenDocuments }: { onOpenDocuments: () => void }) {
   const [preferred, setPreferred] = useState<string[] | null>(null);
   const [busy, setBusy] = useState(false);
   useEffect(() => { setPolling(state?.latest?.status === 'generating'); }, [state?.latest?.status]);
+  // Once nothing is generating, a kept request id has a final outcome: the next click must start a new generation,
+  // never replay the old one (#1262 review).
+  useEffect(() => {
+    if (state && state.latest?.status !== 'generating' && !generate.isPending) sessionStorage.removeItem(REQUEST_KEY);
+  }, [state, generate.isPending]);
   useEffect(() => {
     if (state && preferred === null) setPreferred(state.documents.filter(doc => doc.preferred).map(doc => doc.id));
   }, [state, preferred]);
