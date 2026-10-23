@@ -16,7 +16,7 @@ const LEASE = '00000000-0000-4000-8000-00000000a006';
 const MINE = 'a'.repeat(32);
 const MEDIA = 'https://data.postforme.dev/storage/v1/object/public/post-media/secret-file.jpg';
 const input: PublishInput = {
-  idempotencyKey: 'key-00000001', businessId: BIZ, workItemId: null, connectionIds: [CX, CY], caption: 'Hello',
+  idempotencyKey: 'key-00000001', businessId: BIZ, workItemId: null, connectionIds: [CX, CY], caption: 'Hello', maxHoldCredits: 12,
   media: [{ mediaUrl: MEDIA, sha256: 'f'.repeat(64), size: 1000, mimeType: 'image/jpeg' }],
 };
 const view = (state: string, extra: Record<string, unknown> = {}) => ({ id: JOB, state, businessId: BIZ, workItemId: null,
@@ -116,6 +116,17 @@ describe('submit publish (simulated provider)', () => {
     expect(JSON.stringify([...info.mock.calls, ...warn.mock.calls])).not.toContain('secret-file');
     info.mockRestore();
     warn.mockRestore();
+  });
+
+  it('a price raised after the user confirmed releases the new job before anything is sent', async () => {
+    const d = database({ ...fresh(), publish_monitor_publish_claim: [{ ...view('claimed', { holdCredits: 13 }), replayed: false }] });
+    const p = provider([]);
+    await expect(submitPublish(d.db, p.deps, USER, input)).rejects.toMatchObject({ code: 'PUBLISH_MONITOR_PRICE_CHANGED' });
+    expect(d.calls.at(-1)).toEqual(['publish_monitor_publish_release', { p_job: JOB, p_code: 'PUBLISH_MONITOR_PRICE_CHANGED' }]);
+    expect(p.calls).toEqual([]);
+    // A replay of an earlier job is never re-judged by the price.
+    const replay = database({ publish_monitor_publish_claim: [{ ...view('completed', { holdCredits: 99 }), replayed: true }] });
+    expect((await submitPublish(replay.db, provider([]).deps, USER, input)).state).toBe('completed');
   });
 
   it('a replayed request whose job is no longer only claimed never reaches the provider', async () => {

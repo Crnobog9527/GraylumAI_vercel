@@ -238,3 +238,22 @@ it('after a reload, an unconfirmed submit is replayed with the same key and the 
     expect(uploads).toHaveLength(2);
   } finally { await page.close(); }
 }, 30000);
+
+it('a price raised after the user confirmed is refused with nothing held, and the new maximum is shown before asking again', async () => {
+  let price = 6;
+  const { page, calls } = await open(path => {
+    if (path === 'publishMonitor.publish.options') return { data: { platforms: ['x', 'tiktok'], holdCreditsByTargets: [price, 12, 18, 24, 30, 36, 42, 48, 54] } };
+    if (path === 'publishMonitor.publish.uploadUrl') return slot(1);
+    if (path === 'publishMonitor.publish.submit') {
+      price = 9;
+      return { error: { code: 'PRECONDITION_FAILED', message: 'PUBLISH_MONITOR_PRICE_CHANGED', status: 412 } };
+    }
+  });
+  try {
+    await ui(page.getByText('最多 6 积分')).toBeVisible();
+    await pickImageAndConfirm(page);
+    await ui(page.getByRole('alert')).toContainText('发布价格刚刚调整');
+    await ui(page.getByText('最多 9 积分')).toBeVisible();
+    expect((calls.find(c => c.path === 'publishMonitor.publish.submit')!.input as { maxHoldCredits: number }).maxHoldCredits).toBe(6);
+  } finally { await page.close(); }
+}, 30000);

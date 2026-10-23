@@ -4,7 +4,7 @@ import { clearAttempt, loadAttempt, saveAttempt, sameFiles, type StoredAttempt }
 
 const memory = () => { const data = new Map<string, string>(); return { getItem: (k: string) => data.get(k) ?? null,
   setItem: (k: string, v: string) => void data.set(k, v), removeItem: (k: string) => void data.delete(k), data }; };
-const attempt: StoredAttempt = { key: 'pub-00000001', connectionIds: ['c1'], caption: 'Hi',
+const attempt: StoredAttempt = { key: 'pub-00000001', connectionIds: ['c1'], caption: 'Hi', maxHoldCredits: 6,
   media: [{ sha256: 'a'.repeat(64), size: 5, mimeType: 'video/mp4', coverMs: 1500 }] };
 
 describe('publish recovery', () => {

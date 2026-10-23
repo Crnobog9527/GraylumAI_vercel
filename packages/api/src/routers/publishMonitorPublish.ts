@@ -22,7 +22,10 @@ const uuid = z.string().uuid();
 // One request returns every upload slot a post needs, so a complete post fits the per-user step allowance. The targets
 // come along so nothing is uploaded for a platform that is not open for publishing.
 const uploadInput = z.object({ disclosureAccepted: z.literal(true), count: z.number().int().min(1).max(MAX_MEDIA),
-  connectionIds: z.array(uuid).min(1).max(9) }).strict();
+  connectionIds: z.array(uuid).min(1).max(9),
+  // Sent when an unconfirmed submit is being replayed: its targets may no longer be open or connected, and the replay
+  // is answered from the database whatever their state is now.
+  idempotencyKey: z.string().regex(/^[A-Za-z0-9_-]{8,128}$/).optional() }).strict();
 const jobInput = z.object({ jobId: uuid }).strict();
 // Each step reads from the site-wide Post for Me budget; one user gets a small allowance per step (5 per 5 minutes).
 const limitStep = (step: string, profileId: string) => checkRateLimitOrThrow(`publish-monitor-${step}:${profileId}`, 'auth');
@@ -41,7 +44,9 @@ export const publishMonitorPublishRouter = router({
   })),
   uploadUrl: protectedProcedure.input(uploadInput).mutation(({ ctx, input }) => guarded(ctx, async () => {
     await requirePublishEntitlement(ctx);
-    await assertPublishPlatformsOpen(ctx.supabaseAdmin, ctx.profileId, input.connectionIds);
+    if (!input.idempotencyKey || !(await publishKeyExists(ctx.supabaseAdmin, ctx.profileId, input.idempotencyKey))) {
+      await assertPublishPlatformsOpen(ctx.supabaseAdmin, ctx.profileId, input.connectionIds);
+    }
     await limitStep('upload', ctx.profileId);
     // Weighted by the number of slots, so parallel or split requests cannot exceed the per-user upload allowance.
     const slots = await takeUploadSlots(ctx.profileId, input.count);

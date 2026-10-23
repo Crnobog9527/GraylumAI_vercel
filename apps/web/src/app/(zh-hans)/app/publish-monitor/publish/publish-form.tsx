@@ -41,16 +41,20 @@ export function PublishForm({ businessId, workItemId, targets, initialCaption, i
   }, [workItemId]);
   const uploadUrl = trpc.publishMonitor.publish.uploadUrl.useMutation();
   const submit = trpc.publishMonitor.publish.submit.useMutation();
+  const utils = trpc.useUtils();
 
   const busy = phase !== 'idle';
   const chosen = targets.filter(t => selected.includes(t.id));
-  const hold = holdCreditsByTargets?.[chosen.length - 1] ?? null;
+  // In recovery the saved request decides (its targets may be closed or disconnected by now); otherwise the current choice.
+  const targetCount = recovered ? recovered.connectionIds.length : chosen.length;
+  const hold = recovered ? recovered.maxHoldCredits : holdCreditsByTargets?.[chosen.length - 1] ?? null;
   const tooLong = captionTooLong(caption, chosen.map(t => t.platform));
   const tooLongForServer = [...caption].length > MAX_CAPTION;
   // While an earlier submit is unconfirmed, what is published cannot change: another key could post and charge twice.
   const locked = recovered !== null;
-  const mediaIssue = mediaProblem(chosen.map(t => t.platform), media.map(m => m.file.type.toLowerCase()));
-  const canPublish = chosen.length > 0 && caption.trim().length > 0 && !tooLongForServer && mediaIssue === null && !busy;
+  const mediaIssue = recovered ? null : mediaProblem(chosen.map(t => t.platform), media.map(m => m.file.type.toLowerCase()));
+  const canPublish = targetCount > 0 && hold !== null && caption.trim().length > 0 && !tooLongForServer && mediaIssue === null
+    && !busy;
   const changed = <T,>(set: (value: T) => void) => (value: T) => { if (!locked) set(value); };
   // In recovery the covers are the saved ones (they are part of the request), shown on the files picked again.
   const pick = (items: PickedMedia[]) => setMedia(recovered
@@ -89,8 +93,9 @@ export function PublishForm({ businessId, workItemId, targets, initialCaption, i
       }
       // A text-only post (X, Threads, LinkedIn, Bluesky, Facebook) uploads nothing.
       const uploaded = media.length === 0 ? [] : await uploadPublishFiles(media.map(m => m.file), async count =>
-        uploadUrl.mutateAsync({ disclosureAccepted: true, count, connectionIds: ids }));
-      const record: StoredAttempt = recovered ?? { key: newIdempotencyKey(), connectionIds: ids, caption,
+        uploadUrl.mutateAsync({ disclosureAccepted: true, count, connectionIds: ids,
+          ...(recovered ? { idempotencyKey: recovered.key } : {}) }));
+      const record: StoredAttempt = recovered ?? { key: newIdempotencyKey(), connectionIds: ids, caption, maxHoldCredits: hold ?? 0,
         media: uploaded.map((item, i) => ({ sha256: item.sha256, size: item.size, mimeType: item.mimeType,
           coverMs: media[i]!.coverMs })) };
       setPhase('submitting');
@@ -98,7 +103,7 @@ export function PublishForm({ businessId, workItemId, targets, initialCaption, i
       submitting = true;
       sent = record;
       const job = await submit.mutateAsync({ idempotencyKey: record.key, businessId, workItemId, connectionIds: record.connectionIds,
-        caption: record.caption, media: uploaded.map((item, i) => ({ ...item,
+        caption: record.caption, maxHoldCredits: record.maxHoldCredits, media: uploaded.map((item, i) => ({ ...item,
           ...(record.media[i]!.coverMs !== null && item.mimeType.startsWith('video/')
             ? { thumbnailTimestampMs: record.media[i]!.coverMs! } : {}) })) });
       discardEarlier();
@@ -113,6 +118,8 @@ export function PublishForm({ businessId, workItemId, targets, initialCaption, i
         // Only a definite refusal of the submit itself means nothing was sent. Anything else (and any refusal of an
         // upload step) may follow a submit that reached the server, so the key stays and is replayed, never replaced.
         const definite = submitting && httpCode && httpCode !== 'INTERNAL_SERVER_ERROR' && httpCode !== 'TOO_MANY_REQUESTS';
+        // The price was raised after the user confirmed: nothing was held; show the new maximum before asking again.
+        if (trpcError.message === 'PUBLISH_MONITOR_PRICE_CHANGED') void utils.publishMonitor.publish.options.invalidate();
         if (definite) discardEarlier();
         else if (sent) setRecovered(sent);
         setError(publishErrorMessage(trpcError.message, httpCode));
@@ -177,7 +184,7 @@ export function PublishForm({ businessId, workItemId, targets, initialCaption, i
         <Button disabled={!canPublish} onClick={() => { setAccepted(false); setConfirming(true); }}>
           {phase === 'uploading' ? '正在上传素材……' : phase === 'submitting' ? '正在提交……'
             : recovered ? '再试一次（同一次发布，不会重复发）' : '发布'}</Button>
-        {hold !== null && chosen.length > 0 && <span className="text-sm text-[var(--text-secondary)]">
+        {hold !== null && targetCount > 0 && <span className="text-sm text-[var(--text-secondary)]">
           最多 {hold} 积分，只按发布成功的平台扣，失败不扣</span>}
       </div>
 
@@ -186,7 +193,7 @@ export function PublishForm({ businessId, workItemId, targets, initialCaption, i
           <DialogHeader>
             <DialogTitle>确认发布</DialogTitle>
             <DialogDescription>
-              发布到 {chosen.map(t => platformName(t.platform)).join('、')}，发出后在平台上公开可见；要删帖需要你自己去平台删除。
+              发布到 {recovered ? `${targetCount} 个账号（和上一次相同）` : chosen.map(t => platformName(t.platform)).join('、')}，发出后在平台上公开可见；要删帖需要你自己去平台删除。
             </DialogDescription>
           </DialogHeader>
           <ul className="list-disc space-y-1 pl-5 text-sm">

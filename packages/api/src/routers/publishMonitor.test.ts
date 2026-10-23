@@ -54,7 +54,7 @@ describe('publish-monitor one-click publishing', () => {
   const biz = '00000000-0000-4000-8000-0000000f0003';
   const conn = '00000000-0000-4000-8000-0000000f0004';
   const submit = { idempotencyKey: 'key-00000001', businessId: biz, workItemId: null, connectionIds: [conn], caption: 'Hi',
-    media: [] };
+    maxHoldCredits: 6, media: [] };
   const open = { publish_monitor_publish_platforms: ['x'],
     publish_monitor_publish_price: { usdPerTarget: '0.01', multiplier: '6', creditsPerUsd: '100' } };
   const connection = (platform: string, id = conn) => ({ id, businessId: biz, accountProjectId: biz, role: 'own',

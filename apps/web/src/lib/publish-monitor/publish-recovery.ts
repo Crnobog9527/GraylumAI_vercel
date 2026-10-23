@@ -4,7 +4,7 @@
  * would use a new idempotency key and could post and charge twice. Only what the server needs to recognize the same
  * request is kept per topic: key, targets, caption and each file's identity (never a media link).
  */
-export type StoredAttempt = { key: string; connectionIds: string[]; caption: string;
+export type StoredAttempt = { key: string; connectionIds: string[]; caption: string; maxHoldCredits: number;
   media: Array<{ sha256: string; size: number; mimeType: string; coverMs: number | null }> };
 type Store = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 
@@ -26,7 +26,7 @@ export function loadAttempt(workItemId: string, store: Store | null = defaultSto
     if (!raw) return null;
     const value = JSON.parse(raw) as StoredAttempt;
     const valid = typeof value.key === 'string' && Array.isArray(value.connectionIds) && typeof value.caption === 'string'
-      && Array.isArray(value.media) && value.media.every(m => SHA.test(m.sha256) && Number.isInteger(m.size)
+      && Number.isInteger(value.maxHoldCredits) && Array.isArray(value.media) && value.media.every(m => SHA.test(m.sha256) && Number.isInteger(m.size)
         && typeof m.mimeType === 'string' && (m.coverMs === null || Number.isInteger(m.coverMs)));
     return valid ? value : null;
   } catch { return null; }

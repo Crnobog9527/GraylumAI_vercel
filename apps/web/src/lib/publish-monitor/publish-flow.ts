@@ -67,6 +67,7 @@ const MESSAGES: Record<string, string> = {
   PUBLISH_MONITOR_IDEMPOTENCY_MISMATCH: '这是一次新的发布，请重新提交。',
   PUBLISH_MONITOR_TARGET_INVALID: '选中的账号不能发布（可能已断开或没有授权发布），请刷新页面后重选。',
   PUBLISH_MONITOR_WORK_ITEM_INVALID: '这条选题不属于这个品牌，不能从这里发布。',
+  PUBLISH_MONITOR_PRICE_CHANGED: '发布价格刚刚调整，请看一下新的积分上限，再确认一次。这次没有扣积分。',
   PUBLISH_MONITOR_PLATFORM_NOT_OPEN: '这个平台的一键发布还没开放。',
   PUBLISH_MONITOR_ENTITLEMENT_REQUIRED: '一键发布需要 Pro 或 Gold 会员。',
   PUBLISH_MONITOR_DISABLED: '一键发布还没有开放。',

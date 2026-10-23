@@ -40,6 +40,9 @@ export const publishInput = z.object({
   workItemId: uuid.nullable(),
   connectionIds: z.array(uuid).min(1).max(9),
   caption: z.string().min(1).max(MAX_CAPTION),
+  // The most credits the user approved holding for this publish (the confirmation dialog). Not part of the fingerprint:
+  // a replay returns the existing job whatever the price is now.
+  maxHoldCredits: z.number().int().min(0).max(1_000_000),
   media: z.array(media).max(MAX_MEDIA_ITEMS),
 }).strict();
 export type PublishInput = z.infer<typeof publishInput>;
@@ -58,7 +61,7 @@ export type PublishErrorCode = 'PUBLISH_MONITOR_IDEMPOTENCY_MISMATCH' | 'PUBLISH
   | 'PUBLISH_MONITOR_WORK_ITEM_INVALID' | 'PUBLISH_MONITOR_QUOTA_EXHAUSTED' | 'PUBLISH_MONITOR_QUOTA_NOT_CONFIGURED'
   | 'PUBLISH_MONITOR_PRICE_NOT_CONFIGURED' | 'PUBLISH_MONITOR_INSUFFICIENT_CREDITS' | 'PUBLISH_MONITOR_TOO_MANY_REJECTIONS'
   | 'PUBLISH_MONITOR_JOB_NOT_FOUND' | 'PUBLISH_MONITOR_ACCOUNT_CLOSED' | 'PUBLISH_MONITOR_PROVIDER_BUSY'
-  | 'PUBLISH_MONITOR_PLATFORM_NOT_OPEN' | 'PUBLISH_MONITOR_UNAVAILABLE';
+  | 'PUBLISH_MONITOR_PLATFORM_NOT_OPEN' | 'PUBLISH_MONITOR_PRICE_CHANGED' | 'PUBLISH_MONITOR_UNAVAILABLE';
 const KNOWN: PublishErrorCode[] = ['PUBLISH_MONITOR_IDEMPOTENCY_MISMATCH', 'PUBLISH_MONITOR_TARGET_INVALID',
   'PUBLISH_MONITOR_WORK_ITEM_INVALID', 'PUBLISH_MONITOR_QUOTA_EXHAUSTED', 'PUBLISH_MONITOR_QUOTA_NOT_CONFIGURED',
   'PUBLISH_MONITOR_PRICE_NOT_CONFIGURED', 'PUBLISH_MONITOR_INSUFFICIENT_CREDITS', 'PUBLISH_MONITOR_TOO_MANY_REJECTIONS',
@@ -158,6 +161,12 @@ export async function submitPublish(db: Rpc, deps: ClientDeps, profileId: string
     p_connections: input.connectionIds }, claimed);
   if (job.quotaAlert) logger.warn('api', 'publish_monitor_quota_80_percent', { jobId: job.id });
   if (job.state !== 'claimed') return job;
+  // The price is read by the claim itself: a price raised after the user confirmed must not charge more than approved.
+  // Nothing was sent, so the new job is released at once (its hold and slots return) and the user confirms again.
+  if (!job.replayed && job.holdCredits !== null && job.holdCredits > input.maxHoldCredits) {
+    await releaseProven(db, job.id, 'PUBLISH_MONITOR_PRICE_CHANGED', pacing);
+    throw new PublishError('PUBLISH_MONITOR_PRICE_CHANGED');
+  }
   const ids = await targetAccountIds(db, profileId, job.id);
   const observed = await observeTargets(deps, ids, pacing);
   // The slot for the create call is taken before the job is marked as possibly sent.
