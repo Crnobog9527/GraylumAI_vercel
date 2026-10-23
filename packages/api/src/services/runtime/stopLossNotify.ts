@@ -1,5 +1,4 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { logger } from '../../lib/logger';
 import { isProductionSite, noticeConfig, normalizeMailbox, type NoticeConfigResult } from '../notify/config';
@@ -18,11 +17,14 @@ export const STOP_LOSS_NOTICE_WINDOW_MS = 24 * 3600_000;
 export const STOP_LOSS_NOTICE_MAX_ATTEMPTS = 5;
 const BATCH = 50;
 const PAGE = 100;
+/** Mails per invocation and wall-clock budget for starting another one; the rest go out on the next run. */
+export const MAX_MAILS_PER_RUN = 3;
+const DELIVERY_BUDGET_MS = 8_000;
 const MAX_PAGES = 5;
 
 type Db = Pick<SupabaseClient, 'rpc' | 'from'>;
 type Notify = { state: 'sent' | 'pending' | 'failed'; attempts: number; lastErrorCode?: string;
-  lastAttemptAt?: string; sentAt?: string; providerMessageId?: string; batchKey?: string };
+  lastAttemptAt?: string; sentAt?: string; providerMessageId?: string };
 type Row = { id: string; test_id: string; details: Record<string, unknown> | null; created_at: string };
 
 export interface StopLossNoticeDeps {
@@ -75,7 +77,7 @@ export function describeStopLossAlert(row: Pick<Row, 'test_id' | 'details'>) {
 
 export function stopLossNotice(rows: Row[], production: boolean) {
   const env = production ? '' : '[staging] ';
-  return noticeLayout(`${env}Graylum 止损告警 ${rows.length} 条 / Stop-loss alert`, [
+  return noticeLayout(`${env}Graylum 止损告警 / Stop-loss alert`, [
     `有 ${rows.length} 条新的成本止损告警${production ? '' : '（来自测试站 staging）'}：`,
     rows.map((row, i) => `${i + 1}. ${describeStopLossAlert(row)}（记录于 ${row.created_at.slice(0, 19).replace('T', ' ')} UTC）`)
       .join('\n'),
@@ -122,27 +124,9 @@ async function readPending(db: Db, since: string) {
 }
 
 /**
- * Alerts that were already attempted keep the batch (and Resend idempotency key) they were first sent
- * under, so a retry after an uncertain send never re-mails them under a different key; new alerts form
- * their own batch whose key is stored with the first attempt.
- */
-function groupBatches(pending: Row[]) {
-  const groups = new Map<string, Row[]>();
-  const fresh: Row[] = [];
-  for (const row of pending) {
-    const key = notifyOf(row)?.batchKey;
-    if (key) groups.set(key, [...(groups.get(key) ?? []), row]); else fresh.push(row);
-  }
-  if (fresh.length) {
-    const ids = fresh.map(row => row.id).sort();
-    groups.set(`runtime-stop-loss-${createHash('sha256').update(ids.join(',')).digest('hex').slice(0, 40)}`, fresh);
-  }
-  return groups;
-}
-
-/**
- * Mails every alert of the last 24 hours that has not been delivered, one digest per batch, so a burst of
- * alerts is one mail and a delivered alert is never mailed again. Recipient: support_email in system
+ * Mails every alert of the last 24 hours that has not been delivered, one mail per alert. The Resend
+ * idempotency key is the alert id and the body depends on that row alone, so a retry always repeats the same
+ * request and a delivered alert is never mailed again. At most MAX_MAILS_PER_RUN per run, inside a time budget. Recipient: support_email in system
  * settings; outside production only PAYMENT_NOTICE_TEST_RECIPIENTS (same guard as payment notices).
  */
 export async function deliverStopLossAlerts(db: Db, deps: StopLossNoticeDeps = {}): Promise<StopLossNoticeOutcome> {
@@ -170,26 +154,30 @@ export async function deliverStopLossAlerts(db: Db, deps: StopLossNoticeDeps = {
     }
     const transport = deps.transport ?? resendTransport(fetch, STOP_LOSS_NOTICE_TIMEOUT_MS);
     const at = now.toISOString();
+    const startedAt = Date.now();
     let sent = 0;
     let failure: string | null = null;
-    for (const [key, rows] of groupBatches(pending)) {
+    let tried = 0;
+    for (const row of pending) {
+      if (tried >= MAX_MAILS_PER_RUN || Date.now() - startedAt > DELIVERY_BUDGET_MS) break;
+      tried += 1;
       const result = await transport(config.config.apiKey, {
-        ...stopLossNotice(rows, isProductionSite(env)), idempotencyKey: key,
+        ...stopLossNotice([row], isProductionSite(env)), idempotencyKey: `runtime-stop-loss-${row.id}`,
         from: config.config.from, to, replyTo: config.config.replyTo,
       });
       if (result.kind === 'sent') {
-        sent += rows.length;
-        await mark(db, rows, row => ({ state: 'sent', attempts: (notifyOf(row)?.attempts ?? 0) + 1, sentAt: at,
-          providerMessageId: result.providerMessageId, batchKey: key }));
+        sent += 1;
+        await mark(db, [row], r => ({ state: 'sent', attempts: (notifyOf(r)?.attempts ?? 0) + 1, sentAt: at,
+          providerMessageId: result.providerMessageId }));
         continue;
       }
       failure ??= result.code;
-      await mark(db, rows, row => {
-        const attempts = (notifyOf(row)?.attempts ?? 0) + 1;
+      await mark(db, [row], r => {
+        const attempts = (notifyOf(r)?.attempts ?? 0) + 1;
         const final = result.kind === 'conflict' || attempts >= STOP_LOSS_NOTICE_MAX_ATTEMPTS;
-        return { state: final ? 'failed' : 'pending', attempts, lastErrorCode: result.code, lastAttemptAt: at, batchKey: key };
+        return { state: final ? 'failed' : 'pending', attempts, lastErrorCode: result.code, lastAttemptAt: at };
       });
-      logger.error('billing', 'runtime_stop_loss_notice_failed', { code: result.code, alerts: rows.length });
+      logger.error('billing', 'runtime_stop_loss_notice_failed', { code: result.code });
     }
     if (sent) logger.info('billing', 'runtime_stop_loss_notice_sent', { alerts: sent });
     return failure ? { outcome: 'not_sent', alerts: pending.length, code: failure } : { outcome: 'sent', alerts: sent };

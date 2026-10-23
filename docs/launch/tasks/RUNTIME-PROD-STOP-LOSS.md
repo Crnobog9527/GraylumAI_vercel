@@ -48,11 +48,11 @@ providerBalanceAlertUsd:null,notificationChannel:null}`。
 
 ## 告警外发（切片 C）
 
-`stopLossNotify.ts` 把最近 24 小时内还没送达的止损告警合成一封邮件发给 Owner，复用 PAY-NOTIFY 的 Resend 通道：
+`stopLossNotify.ts` 把最近 24 小时内还没送达的止损告警逐条发邮件给 Owner（每条一封，每次运行最多 3 封、8 秒内，其余下一次运行再发），复用 PAY-NOTIFY 的 Resend 通道：
 密钥用后台“第三方密钥”的 resend 槽，收件人是系统设置里的 `support_email`（与专家诊断预约提醒同一地址），
 非正式站只发给 `PAYMENT_NOTICE_TEST_RECIPIENTS` 里的地址，邮件主题带 `[staging]`。
 不新增表、队列或定时任务：发送状态写回同一条告警的 `details.notify`（sent / pending / failed、次数、错误码），
-已送达的不再发；Resend 幂等键由告警 id 集合得出，同一批重试只送达一次。
+已送达的不再发；Resend 幂等键就是告警 id，邮件内容只取决于这一条告警，重试请求完全相同，只会送达一次。
 传输失败最多重试 5 次后标 failed；缺密钥、缺收件地址、收件人不在测试名单这类配置问题不消耗次数，改好后自动补发。
 每次失败都记 error 日志，后台告警列表逐条显示“已发邮件通知 / 会自动重试（错误码）/ 已停止重试”。
 邮件正文只取金额、日期、供应商等白名单字段，不含用户标识、正文或密钥。
