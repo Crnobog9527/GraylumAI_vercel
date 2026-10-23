@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// BENCHMARK-SHORTFALL small niche (03XX on 0320): a round searched to the end with fewer than 8 selectable accounts
+// BENCHMARK-SHORTFALL small niche (0343 on 0320): a round searched to the end with fewer than 8 selectable accounts
 // still shows a first candidate card, so a small niche can reach the shortfall choice. Synthetic fixtures only.
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';

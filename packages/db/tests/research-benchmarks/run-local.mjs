@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// Local-only RT-4b (0268), BENCHMARK-SHORTFALL (0320) and its small-niche card (03XX) verification; no database URL, environment secrets or remote host accepted.
+// Local-only RT-4b (0268), BENCHMARK-SHORTFALL (0320) and its small-niche card (0343) verification; no database URL, environment secrets or remote host accepted.
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
