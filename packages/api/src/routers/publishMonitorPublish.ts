@@ -8,8 +8,10 @@ import {
   createMediaUploads, MAX_MEDIA, publishInput, readPublishJob, refreshPublishJob, submitPublish,
 } from '../services/publishMonitor/publish';
 import { takeUploadSlots } from '../services/publishMonitor/postForMe/config';
+import { assertPublishPlatformsOpen, assertUploadAllowed, publishKeyJob, readPublishOptions } from '../services/publishMonitor/publishOptions';
 import { requirePostForMeDeps } from '../services/publishMonitor/secrets';
 import { RateLimitError } from '../lib/rateLimitError';
+import { assertPublishMonitorEnabled } from '../services/publishMonitor/foundation';
 import { guarded } from './publishMonitorGuard';
 
 /**
@@ -18,8 +20,13 @@ import { guarded } from './publishMonitorGuard';
  * user confirmed that the files go to a third-party service on a public link (the input must say so).
  */
 const uuid = z.string().uuid();
-// One request returns every upload slot a post needs, so a complete post fits the per-user step allowance.
-const uploadInput = z.object({ disclosureAccepted: z.literal(true), count: z.number().int().min(1).max(MAX_MEDIA) }).strict();
+// One request returns every upload slot a post needs, so a complete post fits the per-user step allowance. The targets
+// come along so nothing is uploaded for a platform that is not open for publishing.
+const uploadInput = z.object({ disclosureAccepted: z.literal(true), count: z.number().int().min(1).max(MAX_MEDIA),
+  connectionIds: z.array(uuid).min(1).max(9),
+  // Sent when an unconfirmed submit is being replayed: its targets may no longer be open or connected, and the replay
+  // is answered from the database whatever their state is now.
+  idempotencyKey: z.string().regex(/^[A-Za-z0-9_-]{8,128}$/).optional() }).strict();
 const jobInput = z.object({ jobId: uuid }).strict();
 // Each step reads from the site-wide Post for Me budget; one user gets a small allowance per step (5 per 5 minutes).
 const limitStep = (step: string, profileId: string) => checkRateLimitOrThrow(`publish-monitor-${step}:${profileId}`, 'auth');
@@ -31,8 +38,14 @@ async function requirePublishEntitlement(ctx: { supabaseAdmin: Parameters<typeof
 }
 
 export const publishMonitorPublishRouter = router({
+  // Which platforms are open for publishing and the most a publish to n targets can hold (no provider call).
+  options: protectedProcedure.query(({ ctx }) => guarded(ctx, async () => {
+    await requirePublishEntitlement(ctx);
+    return readPublishOptions(ctx.supabaseAdmin);
+  })),
   uploadUrl: protectedProcedure.input(uploadInput).mutation(({ ctx, input }) => guarded(ctx, async () => {
     await requirePublishEntitlement(ctx);
+    await assertUploadAllowed(ctx.supabaseAdmin, ctx.profileId, input.connectionIds, input.idempotencyKey);
     await limitStep('upload', ctx.profileId);
     // Weighted by the number of slots, so parallel or split requests cannot exceed the per-user upload allowance.
     const slots = await takeUploadSlots(ctx.profileId, input.count);
@@ -40,10 +53,19 @@ export const publishMonitorPublishRouter = router({
     return createMediaUploads(await requirePostForMeDeps(ctx.supabaseAdmin), input.count);
   })),
   submit: protectedProcedure.input(publishInput).mutation(({ ctx, input }) => guarded(ctx, async () => {
-    await requirePublishEntitlement(ctx);
+    // A key that already has a job is a replay of an earlier submit whose answer was lost. Once that job has been
+    // handed to the provider (any state past "claimed") it is answered from the database whatever the switch, the plan,
+    // the platform or the account state is now: the credits it holds can only be settled through it. Only a job that
+    // was never sent, and a new key, meet the switch and plan checks; only a new key meets the platform checks.
+    const existing = await publishKeyJob(ctx.supabaseAdmin, ctx.profileId, input.idempotencyKey);
+    if (!existing || existing.state === 'claimed') {
+      await assertPublishMonitorEnabled(ctx.supabaseAdmin);
+      await requirePublishEntitlement(ctx);
+    }
+    if (!existing) await assertPublishPlatformsOpen(ctx.supabaseAdmin, ctx.profileId, input.connectionIds);
     await limitStep('publish', ctx.profileId);
     return submitPublish(ctx.supabaseAdmin, await requirePostForMeDeps(ctx.supabaseAdmin), ctx.profileId, input);
-  })),
+  }, false)),
   // Reading one's own job stays possible while the feature is paused: credits may still be held by it.
   job: protectedProcedure.input(jobInput).query(({ ctx, input }) =>
     guarded(ctx, () => readPublishJob(ctx.supabaseAdmin, ctx.profileId, input.jobId), false)),

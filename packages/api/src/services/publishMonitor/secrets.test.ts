@@ -56,7 +56,7 @@ describe('Post for Me Vault reader', () => {
     });
     const outcome = await createPost({ ...deps, limiter: { acquire: async () => ({ ok: true as const }) }, fetchImpl }, {
       externalId: '11111111-1111-4111-8111-111111111111', caption: 'synthetic publish',
-      socialAccountIds: ['spc_1'], mediaUrls: [],
+      socialAccountIds: ['spc_1'], media: [],
     });
     expect(outcome).toEqual({ kind: 'created', providerPostId: 'sp_1' });
     expect(fetchImpl).toHaveBeenCalledOnce();
