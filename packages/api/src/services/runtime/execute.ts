@@ -14,6 +14,7 @@ import {executorRpc,historyGuard,terminalReplyGuard,recoverExecutorFinancial,obs
 import {fitNativeRequestOutput,runtimePaygCall, type ResumeInput, type PaygWait, type PaygPosition} from './paygRuntime';
 import {beginPaygExecution, type RuntimeExecution} from './paygResume';
 import {runtimeContext} from './runtimeContext';
+import {assertExecutionTools} from './executeContextChecks';
 export {runtimeContext};
 import {projectHostTurnItem} from './hostTurn';
 import {selectBlockHistory,validateBlockCall} from './historySelection';
@@ -26,7 +27,7 @@ import {AGENT_TURN_REQUEST_FORMAT,validReasoningFormat,
  PLAIN_TEXT_STREAM,streamsPrimary,historyToolNames,openRouterRequestBody} from './providerRequest';
 import {cardSources, groundedCardFallback, rejectSeparateCardProse} from './groundedCard';
 import {agentTurnResult} from './agentTurnResult';
-import {questionMessageFromArguments,QUESTION_CONTRACT,READ_HISTORY_TOOL} from './agentTools';
+import {questionMessageFromArguments,QUESTION_CONTRACT} from './agentTools';
 import {ASK_QUESTION_TOOL,INVALID_REPLY_NOTICE} from '../../shared/agentTurn';
 import { authoritativeBilling, type FrozenCall } from '../bill2/service';
 import { modelCallPolicies } from '../bill2/runPolicies';
@@ -93,10 +94,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    toolMessage:agentTurn&&fiveFields&&!grounded,appendCard:Boolean(context.mentorText)};
   let projection=new NativeProgressProjection(projectionOptions);
   let primaryLength=false;
-  if(fiveFields&&!agentTurn)throw new Error('RUNTIME_CONTEXT_INVALID');
-  if(agentTurn&&(context.matching||context.workspaceContext||context.tools.some(name=>name!==ASK_QUESTION_TOOL&&
-   name!=='read_skill_file'&&name!==READ_HISTORY_TOOL&&!context.research)))throw new Error('RUNTIME_CONTEXT_INVALID');
-  if(!agentTurn&&context.tools.includes(ASK_QUESTION_TOOL))throw new Error('RUNTIME_CONTEXT_INVALID');
+  assertExecutionTools(context,agentTurn,fiveFields);
   const policy=modelCallPolicies(execution.billing.callPolicy).find(p=>p.model===context.model);
   if(!policy)throw new Error('RUNTIME_MODEL_DENIED');
   const session=new PostgresSession(ownerDatabase,{actorId:await options.actor(),sessionId:execution.sessionId,executionId});
