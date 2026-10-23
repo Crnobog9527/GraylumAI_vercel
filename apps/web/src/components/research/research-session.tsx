@@ -31,6 +31,11 @@ export function useResearchCalls(sessionId: string | null | undefined) {
   const [continuation, setContinuation] = useState<ResearchContinuation | null>(null);
   // The host's signal waits here until its own turn ends; only a normally completed turn arms it (a stop disarms it).
   const pending = useRef<ResearchContinuation | null>(null);
+  // What was sent on the user's behalf lives here, with the page, not in the panel: switching steps remounts the panel,
+  // and a remounted panel must never send an old signal again or start a round's count over.
+  const sentFor = useRef(new Set<string>());
+  const sentPerRound = useRef(new Map<string, number>());
+  const [batch, setBatch] = useState(0);
   const observe = useCallback((executionId: string, event: { type: string }) => {
     if (event.type === "result") {
       const armed = pending.current;
@@ -38,7 +43,7 @@ export function useResearchCalls(sessionId: string | null | undefined) {
         pending.current = null;
         const outcome = (event as { result?: { state?: string; stopped?: boolean; completeness?: string } }).result ?? {};
         setContinuation(continuationAfterResult(armed, executionId, outcome).keep ? armed : null);
-      }
+      } else setBatch(0);
       return;
     }
     if (!isResearchEvent(event)) return;
@@ -48,8 +53,16 @@ export function useResearchCalls(sessionId: string | null | undefined) {
     else if (sessionId) void utils.research.cards.invalidate({ sessionId });
   }, [sessionId, utils]);
   const of = useCallback((executionId: string) => calls.get(executionId) ?? NO_CALLS, [calls]);
+  const consume = useCallback((sent: ResearchContinuation) => {
+    sentFor.current.add(sent.executionId);
+    const count = (sentPerRound.current.get(sent.discoveryId) ?? 0) + 1;
+    sentPerRound.current.set(sent.discoveryId, count);
+    setBatch(count);
+    setContinuation(current => (current?.executionId === sent.executionId ? null : current));
+  }, []);
   // `panel`: what ResearchSessionPanel needs from the stream (spread onto it).
-  return { observe, of, continuation, panel: { continuation } };
+  const autoContinue = { sentFor: sentFor.current, sentPerRound: sentPerRound.current, batch, consume };
+  return { observe, of, continuation, panel: { continuation, autoContinue } };
 }
 
 /**
@@ -170,27 +183,29 @@ export function ResearchShortfallCard({ sessionId, disabled, onChosen }: {
  * `onSend` sends one mentor message on the page's behalf: after a card is confirmed, and for a refresh (with the
  * one-time grant the host issued).
  */
-export function ResearchSessionPanel({ settledTurns, onSend, continuation = null, ...props }:
+export function ResearchSessionPanel({ settledTurns, onSend, continuation = null, autoContinue, ...props }:
   Omit<Parameters<typeof ResearchSessionCards>[0], "onConfirmed"> & {
   settledTurns: number;
   onSend: (text: string, researchRefreshId?: string) => void | Promise<void>;
   /** The host's latest "the discovery round goes on" signal (`useResearchCalls().continuation`). */
   continuation?: ResearchContinuation | null;
+  /** The page-level record of what was sent on the user's behalf (`useResearchCalls().panel.autoContinue`). */
+  autoContinue?: { sentFor: ReadonlySet<string>; sentPerRound: ReadonlyMap<string, number>; batch: number;
+    consume: (sent: ResearchContinuation) => void };
 }) {
   const utils = trpc.useUtils();
   const { sessionId } = props;
   const seen = useRef(settledTurns);
-  // Auto-continue (Owner 2026-10-23, 3 A): once the turn that ran out is over, send the continuation for the user.
-  const sentFor = useRef(new Set<string>());
-  const sentPerRound = useRef(new Map<string, number>());
-  const decision = autoContinueDecision(continuation, sentFor.current, sentPerRound.current, props.disabled);
+  // Auto-continue (Owner 2026-10-23, 3 A): once the turn that ran out is over, send the continuation for the user, once;
+  // consuming it withdraws the signal.
+  const decision = autoContinue
+    ? autoContinueDecision(continuation, autoContinue.sentFor, autoContinue.sentPerRound, props.disabled) : "none";
   useEffect(() => {
-    if (decision !== "send" || !continuation) return;
-    sentFor.current.add(continuation.executionId);
-    sentPerRound.current.set(continuation.discoveryId, (sentPerRound.current.get(continuation.discoveryId) ?? 0) + 1);
+    if (decision !== "send" || !continuation || !autoContinue) return;
+    autoContinue.consume(continuation);
     void onSend(AUTO_CONTINUE_INPUT);
-  }, [decision, continuation, onSend]);
-  const batch = continuation ? sentPerRound.current.get(continuation.discoveryId) ?? 0 : 0;
+  }, [decision, continuation, autoContinue, onSend]);
+  const batch = autoContinue?.batch ?? 0;
   useEffect(() => {
     if (seen.current === settledTurns) return;
     seen.current = settledTurns;
