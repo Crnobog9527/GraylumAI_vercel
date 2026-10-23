@@ -2,7 +2,8 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-type Result = { data?: unknown; error?: unknown; isPending?: boolean; isSuccess?: boolean; isError?: boolean };
+type Result = { data?: unknown; error?: unknown; isPending?: boolean; isSuccess?: boolean; isError?: boolean;
+  errorUpdatedAt?: number; dataUpdatedAt?: number };
 let read: Result;
 let businesses: Result;
 const enabled: Record<string, boolean> = {};
@@ -60,5 +61,15 @@ describe('profile-archive gate in front of the editable draft and topics pages',
     expect(enabled.businesses).toBe(false);
     read = { isPending: false, isSuccess: false, isError: true, error: new Error('x') };
     for (const html of await render()) expect(html).toBe('<p>EDITABLE</p>');
+  });
+
+  it('keeps the page mounted while its own read refetches a failed draft (no checking/unmount loop)', async () => {
+    // A missing or someone else's draft: the page's read refetches on mount, so the query is pending again, no data.
+    read = { isPending: true, isSuccess: false, isError: false, error: null, errorUpdatedAt: 2000, dataUpdatedAt: 0 };
+    for (const html of await render()) expect(html).toBe('<p>EDITABLE</p>');
+    // A later successful read is newer than the failure: the archive check applies again.
+    read = { ...ok({ draftId: 'draft' }), errorUpdatedAt: 2000, dataUpdatedAt: 3000 };
+    businesses = { isPending: true, isSuccess: false, isError: false, error: null };
+    for (const html of await render()) expect(html).toContain('正在读取定位档案');
   });
 });

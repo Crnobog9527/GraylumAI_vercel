@@ -1492,7 +1492,7 @@ export const paymentsRouter = router({
           'item_id',
           'item_type',
           'billing_cycle',
-          'user_id', 'payment_channel', 'merchant_namespace', 'payment_mode', 'payment_amount_facts',
+          'user_id', 'payment_channel', 'merchant_namespace', 'payment_mode', 'payment_amount_facts', 'refund_approval',
           'price_ref_id', 'subscription_id', 'payment_method',
           'amount_total',
           'currency',
