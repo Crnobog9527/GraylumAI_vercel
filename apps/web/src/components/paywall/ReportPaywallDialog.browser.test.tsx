@@ -24,6 +24,7 @@ beforeAll(async () => {
     const q = value => ({data: value, isLoading: false, isError: false});
     export const trpc = {
       fusionReview: {versionMarks: {useQuery: () => q({})}},
+      publishMonitor: {features: {useQuery: () => q(window.publishMonitorFeatures)}},
       runtime: {reportAvailable: {useQuery: () => q({enabled: true, priceCredits: 500})}},
       user: {getEntitlements: {useQuery: (_input, options) => {
         if (options?.enabled) window.entitlementReads = (window.entitlementReads ?? 0) + 1;

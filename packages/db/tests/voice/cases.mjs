@@ -6,7 +6,7 @@ const one=async(db,text,args=[])=>(await db.query(text,args)).rows[0]?.v;
 const denied=async(promise,code)=>{await assert.rejects(promise,error=>{if(!String(error.message).includes(code))throw error;return true;},code);};
 const PROFILE={tone:'像跟朋友聊天',sentenceLength:'短句多',samples:['VOICE_CANARY sample']};
 
-export async function runCases({db,report}) {
+export async function runCases({db,Client,connectionString,report}) {
  // Entry points require the service role, as every library function does.
  const svc=async(name,...args)=>{await db.query('SET ROLE service_role');try{return await rpc(db,name,...args);}finally{await db.query('RESET ROLE');}};
  const actor=()=>one(db,'SELECT voice_test.actor() v');
@@ -41,6 +41,21 @@ export async function runCases({db,report}) {
  assert.equal((await begin(a,[],randomUUID()).catch(e=>e.message)),'VOICE_GENERATION_BUSY');
  const replay=await svc('voice_generation_begin',a,(await one(db,'SELECT request_id v FROM voice_profile_versions WHERE id=$1',[first.version.id])),[]);
  assert.equal(replay.replayed,true);assert.equal(replay.material,undefined);
+ // The text read and the corpus snapshot come from one locked read (review P2): a concurrent change waits for begin.
+ {
+  const l=await actor();const ld=await doc(l,'lock.md');
+  const holder=new Client({connectionString});await holder.connect();
+  try{
+   await holder.query('BEGIN');await holder.query("SET LOCAL ROLE service_role");
+   await holder.query('SELECT voice_generation_begin($1,$2,$3)',[l,randomUUID(),[]]);
+   await db.query("SET lock_timeout='300ms'");
+   await assert.rejects(db.query('UPDATE library_documents SET content_version=content_version+1 WHERE id=$1',[ld]),/lock timeout|canceling statement/i);
+   await holder.query('ROLLBACK');
+   await db.query("SET lock_timeout=0");
+   await db.query('UPDATE library_documents SET content_version=content_version+1 WHERE id=$1',[ld]);
+  }finally{await db.query("SET lock_timeout=0").catch(()=>undefined);await holder.end();}
+  report.checks.push('begin locks the documents it reads: a concurrent version change waits, so material and corpus agree');
+ }
  report.checks.push('corpus is authored-only, preferred first, newest next, capped at 60000 bytes; one generation at a time; replay has no text');
 
  // Unchanged corpus: draft. Confirm makes it current; editing the confirmed one makes a new version.
@@ -50,7 +65,7 @@ export async function runCases({db,report}) {
  assert.equal(s.latest.id,first.version.id);assert.equal(s.confirmed,null);assert.equal(s.needsUpdate,false);
  s=await svc('voice_profile_confirm',a,first.version.id,s.revision,JSON.stringify({...PROFILE,tone:'改过的'}));
  assert.equal(s.confirmed.id,first.version.id);assert.equal(s.confirmed.profile.tone,'改过的');assert.equal(s.latest,null);
- assert.deepEqual(await svc('voice_profile_current',a),{versionId:first.version.id,version:1});
+ assert.deepEqual(await svc('voice_profile_current',a),{enabled:true,versionId:first.version.id,version:1});
  await denied(svc('voice_profile_confirm',a,first.version.id,s.revision-1,JSON.stringify(PROFILE)),'VOICE_REVISION_CONFLICT');
  s=await svc('voice_profile_confirm',a,first.version.id,s.revision,JSON.stringify({...PROFILE,tone:'第二版'}));
  const second=s.confirmed.id;
@@ -62,7 +77,7 @@ export async function runCases({db,report}) {
 
  // The switch.
  s=await svc('voice_profile_set_enabled',a,s.revision,false);
- assert.equal(s.enabled,false);assert.equal(await svc('voice_profile_current',a),null);
+ assert.equal(s.enabled,false);assert.deepEqual(await svc('voice_profile_current',a),{enabled:false,versionId:null,version:null});
  s=await svc('voice_profile_set_enabled',a,s.revision,true);
  assert.equal((await svc('voice_profile_current',a)).versionId,second);
  report.checks.push('"使用我的文风" off: no version is offered for writing');
@@ -114,7 +129,7 @@ export async function runCases({db,report}) {
  // ... and every earlier version that read it, confirmed and superseded alike (必测项 2).
  assert.equal(await svc('voice_profile_read',a,first.version.id),null);
  assert.equal(await svc('voice_profile_read',a,second),null);
- assert.equal(await svc('voice_profile_current',a),null);
+ assert.deepEqual(await svc('voice_profile_current',a),{enabled:true,versionId:null,version:null});
  s=await state(a);assert.equal(s.confirmed,null);
  assert.doesNotMatch(JSON.stringify(await one(db,'SELECT jsonb_agg(to_jsonb(x)) v FROM voice_profile_versions x WHERE actor_id=$1',[a])??[]),/old\.md|VOICE_CANARY old/);
  report.checks.push('deleting a source document deletes every version that read it, including one still generating');
@@ -123,6 +138,7 @@ export async function runCases({db,report}) {
  const closed=await actor();await doc(closed,'c.md');
  await db.query("UPDATE profiles SET status='deleted',is_deleted='true' WHERE id=$1",[closed]);
  await denied(state(closed),'LIBRARY_ACCOUNT_CLOSED');await denied(begin(closed),'LIBRARY_ACCOUNT_CLOSED');
+ assert.deepEqual(await svc('voice_profile_current',randomUUID()),{enabled:true,versionId:null,version:null},'no profile row');
  report.checks.push('closed accounts are refused');
 
  // Billing receipts of a version whose source was deleted are scrubbed once the run is closed.
@@ -144,9 +160,39 @@ export async function runCases({db,report}) {
  assert.equal(await svc('voice_billing_scrub',f.run),'done');
  assert.equal(await one(db,'SELECT count(*)::int v FROM voice_billing_scrubs WHERE run_id=$1',[f.run]),0);
  assert.ok(await one(db,'SELECT content_deleted_at IS NOT NULL v FROM bill2_runs WHERE id=$1',[f.run]));
+ // Rotation (review P1): a scrub that keeps waiting moves behind rows not yet checked; candidates report whether a profile exists.
+ const stale=await one(db,"SELECT checked_at v FROM voice_billing_scrubs WHERE run_id=$1",[f.run]).catch(()=>null);
  const candidates=await svc('voice_recovery_candidates',50);
  assert.ok(Array.isArray(candidates.generations)&&Array.isArray(candidates.scrubs));
  assert.equal(await svc('voice_run_recovery',f.run).catch(e=>e.message),'permission denied for function voice_run_recovery','binding helper is private');
+ {
+  const w=await actor();const wd=await doc(w,'wait.md');const wb=await begin(w);await finish(w,wb.version.id);
+  await db.query("UPDATE voice_profile_versions SET billing_run_id=$2,billing_settled=false,updated_at=now()-interval '2 hours' WHERE id=$1",[wb.version.id,randomUUID()]);
+  const listed=async()=>(await svc('voice_recovery_candidates',50)).generations.find(g=>g.versionId===wb.version.id);
+  assert.equal((await listed()).hasProfile,true,'a saved profile counts as delivered');
+  await svc('voice_generation_finish',w,wb.version.id,null,null,false);
+  assert.equal(await listed(),undefined,'an attempt that stays unsettled moves the row to the back of the queue');
+  const failed=await begin(w);await finish(w,failed.version.id,null,'VOICE_RESULT_PENDING');
+  await db.query("UPDATE voice_profile_versions SET billing_run_id=$2,billing_settled=false,updated_at=now()-interval '2 hours' WHERE id=$1",[failed.version.id,randomUUID()]);
+  assert.equal((await svc('voice_recovery_candidates',50)).generations.find(g=>g.versionId===failed.version.id).hasProfile,false,
+   'a failed (result pending) version has no profile: never charged');
+  await db.query("INSERT INTO voice_billing_scrubs(run_id,actor_id,created_at,checked_at) VALUES($1,$2,now()-interval '3 hours',now()-interval '3 hours')",[randomUUID(),w]);
+  const scrubRun=(await db.query("SELECT run_id FROM voice_billing_scrubs WHERE actor_id=$1",[w])).rows[0].run_id;
+  assert.ok((await svc('voice_recovery_candidates',50)).scrubs.some(x=>x.runId===scrubRun));
+  assert.equal((await db.query('SELECT outcome FROM voice_billing_scrubs WHERE run_id=$1',[scrubRun])).rows[0].outcome,'cancelled');
+  // Deleting a version that has no profile queues its run to be refunded; one with a profile settles at its cost.
+  const noProfile=await begin(w);await db.query("UPDATE voice_profile_versions SET billing_run_id=$2 WHERE id=$1",[noProfile.version.id,randomUUID()]);
+  const keptRun=(await db.query('SELECT billing_run_id r FROM voice_profile_versions WHERE id=$1',[noProfile.version.id])).rows[0].r;
+  await svc('voice_profile_delete',w,failed.version.id).catch(()=>undefined);
+  await db.query("UPDATE voice_profile_versions SET status='failed',profile=NULL WHERE id=$1",[noProfile.version.id]);
+  await svc('voice_profile_delete',w,noProfile.version.id);
+  assert.equal((await db.query('SELECT outcome FROM voice_billing_scrubs WHERE run_id=$1',[keptRun])).rows[0].outcome,'confirmed_failure');
+  await svc('voice_billing_scrub',scrubRun);
+  await db.query("UPDATE voice_billing_scrubs SET checked_at=now()-interval '3 hours' WHERE run_id=$1",[scrubRun]).catch(()=>undefined);
+  await svc('voice_scrub_touch',scrubRun);
+  assert.ok(!(await svc('voice_recovery_candidates',50)).scrubs.some(x=>x.runId===scrubRun),'a checked scrub moves behind unchecked ones');
+  await svc('voice_profile_delete',w,failed.version.id).catch(()=>undefined);void wd;
+ }
  report.checks.push('receipts of a deleted source wait for the run to close, then are scrubbed once');
 
  // Account erasure removes every voice row.

@@ -2,6 +2,7 @@
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createSafeServiceUnavailableError } from '../../lib/publicError';
+import { newPurchaseChannel, readPaymentMethodRoutes } from './methodRouting';
 
 export const PAYMENT_CHANNEL_KEY = 'payment_new_purchase_channel';
 export const paymentChannelSettingSchema = z.object({
@@ -21,6 +22,16 @@ export async function readPaymentChannel(db: Pick<SupabaseClient, 'from'>) {
   return parsed.data;
 }
 
+/** Legacy-key channel effective for fresh legacy checkouts: the audited failover switch
+ * (`payment_method_routes.newPurchaseChannel`) overrides it, so one switch governs every entry. */
+export async function readEffectiveLegacyChannel(db: Pick<SupabaseClient, 'from'>) {
+  const legacy = await readPaymentChannel(db);
+  const routes = await readPaymentMethodRoutes(db).catch(error => {
+    throw createSafeServiceUnavailableError(error, '支付渠道暂时无法读取，请稍后重试');
+  });
+  return newPurchaseChannel(routes) === 'waffo' ? { ...legacy, channel: 'waffo' as const } : legacy;
+}
+
 // Preflight before any provider call. The SQL transaction remains authoritative against saves racing this read.
 export async function assertCheckoutChannel(db: Pick<SupabaseClient, 'from'>, userId: string, itemType: string) {
   const pending = await db.from('payment_orders').select('payment_channel')
@@ -30,7 +41,7 @@ export async function assertCheckoutChannel(db: Pick<SupabaseClient, 'from'>, us
       throw createSafeServiceUnavailableError(error, '支付订单暂时无法读取，请稍后重试');
     });
   if (pending.error) throw createSafeServiceUnavailableError(pending.error, '支付订单暂时无法读取，请稍后重试');
-  const channel = pending.data ? pending.data.payment_channel : (await readPaymentChannel(db)).channel;
+  const channel = pending.data ? pending.data.payment_channel : (await readEffectiveLegacyChannel(db)).channel;
   if (channel !== 'stripe') throw createSafeServiceUnavailableError(
     new Error('PAY_COMMON_CHANNEL_NOT_READY'), '当前支付渠道尚未接入，暂不可购买');
 }

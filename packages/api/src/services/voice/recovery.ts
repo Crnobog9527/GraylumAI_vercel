@@ -8,7 +8,10 @@ import { isSettled, voiceEvidence } from './generation';
 import { voiceRpc } from './state';
 
 type Item = { actorId: string; runId: string | null; recovery: unknown };
-type Candidates = { generations: Array<Item & { versionId: string; status: string }>; scrubs: Array<Item & { runId: string }> };
+type Candidates = {
+  generations: Array<Item & { versionId: string; status: string; hasProfile: boolean }>;
+  scrubs: Array<Item & { runId: string; outcome: 'cancelled' | 'confirmed_failure' }>;
+};
 const noTransport: BillingTransport = {
   dispatch: async () => { throw new Error('VOICE_RECOVERY_NO_DISPATCH'); },
   lookup: async () => { throw new Error('VOICE_RECOVERY_LOOKUP_UNAVAILABLE'); },
@@ -27,40 +30,54 @@ export async function recoverVoiceGenerations(admin: SupabaseClient, options: { 
   const candidates = await voiceRpc<Candidates>(admin, 'voice_recovery_candidates', { p_limit: 50 });
   /** `outcome`: a profile was saved (delivered), none was (confirmed failure: provider cost recorded, user refunded), or the
    * user deleted the version (cancelled: undispatched released, dispatched at its known cost). */
-  async function settle(item: Item & { runId: string }, outcome: 'delivered' | 'confirmed_failure' | 'cancelled', versionId?: string) {
+  async function settle(item: Item & { runId: string }, outcome: 'delivered' | 'confirmed_failure' | 'cancelled', evidenceId?: string) {
     const budget = createRuntimeBudget(now, Math.max(1, stopAt - now()));
     const adapter = item.recovery ? stagingTransport(admin, parseStagingPolicy(item.recovery), budget) : noTransport;
     const billing = authoritativeBilling({ admin: admin as unknown as BillingRpc, actor: async () => item.actorId, adapter, budget });
     if (item.recovery) await billing.recoverReceipts(item.runId, { timeoutMs: 2000 }).catch(() => undefined);
     if (!(await billing.readRun(item.runId)).closed) {
-      if (outcome === 'cancelled' || !versionId) await billing.requestCancel(item.runId);
-      else await billing.closeRun(item.runId, outcome, voiceEvidence(versionId, outcome === 'delivered' ? 'ok' : 'failed'));
+      if (outcome === 'cancelled' || !evidenceId) await billing.requestCancel(item.runId);
+      else await billing.closeRun(item.runId, outcome,
+        voiceEvidence(evidenceId, outcome === 'delivered' ? 'ok' : 'failed'));
     }
     return isSettled(await billing.finalizeRun(item.runId));
   }
   // Keep room for the slowest single step (one lookup and settlement) before the limit.
   const outOfTime = () => now() + 10_000 > stopAt;
-  for (const item of candidates.generations) {
-    if (outOfTime()) { summary.deferred += 1; continue; }
+  const doGeneration = async (item: Candidates['generations'][number]) => {
+    if (outOfTime()) { summary.deferred += 1; return; }
     try {
-      // Still generating means no profile was ever saved; otherwise the profile exists and the run was delivered.
+      // Delivered only when a profile was really saved. A version marked failed (result pending) or still generating has
+      // none: the user must not be charged for a result they never received.
       const settled = item.runId ? await settle({ ...item, runId: item.runId },
-        item.status === 'generating' ? 'confirmed_failure' : 'delivered', item.versionId) : true;
+        item.hasProfile ? 'delivered' : 'confirmed_failure', item.versionId) : true;
       await voiceRpc(admin, 'voice_generation_finish', { a: item.actorId, vid: item.versionId, result: null,
         failure_code: item.status === 'generating' ? 'VOICE_INTERRUPTED' : null, settled });
       if (settled) summary.settled += 1; else summary.waiting += 1;
-    } catch { summary.failed += 1; }
-  }
-  for (const item of candidates.scrubs) {
-    if (outOfTime()) { summary.deferred += 1; continue; }
+    } catch {
+      summary.failed += 1;
+      await voiceRpc(admin, 'voice_recovery_touch', { p_version_id: item.versionId }).catch(() => undefined);
+    }
+  };
+  const doScrub = async (item: Candidates['scrubs'][number]) => {
+    if (outOfTime()) { summary.deferred += 1; return; }
     try {
       let outcome = await voiceRpc<string>(admin, 'voice_billing_scrub', { p_run_id: item.runId });
       // The version was deleted while its run was still open: settle the run here, then scrub.
-      if (outcome === 'waiting' && await settle(item, 'cancelled')) {
+      if (outcome === 'waiting' && await settle(item, item.outcome, item.runId)) {
         outcome = await voiceRpc<string>(admin, 'voice_billing_scrub', { p_run_id: item.runId });
       }
       if (outcome === 'done') summary.scrubbed += 1; else summary.waiting += 1;
-    } catch { summary.failed += 1; }
+    } catch {
+      summary.failed += 1;
+      await voiceRpc(admin, 'voice_scrub_touch', { p_run_id: item.runId }).catch(() => undefined);
+    }
+  };
+  // Alternate the two queues, so a full generation queue can never starve the deleted-content scrubs (or the reverse).
+  const total = Math.max(candidates.generations.length, candidates.scrubs.length);
+  for (let index = 0; index < total; index++) {
+    if (candidates.generations[index]) await doGeneration(candidates.generations[index]!);
+    if (candidates.scrubs[index]) await doScrub(candidates.scrubs[index]!);
   }
   summary.success = summary.failed === 0;
   return summary;

@@ -185,3 +185,16 @@ it.each(['','Visible prose'])('guarded card stop never reconstructs unchecked ar
  const result=await f.complete(id);
  expect(result).toMatchObject(prose?{state:'completed',body:agentTurnBody('Visib',null)}:{state:'cancelled'});
 });
+it('a billed organizer whose body was lost does not hold the stop for the 300-second window',async()=>{
+ // staging 2026-10-23: the organizer was settled by a cost-only lookup and its response never stored.
+ const f=fixture();f.execution.context={...f.execution.context as object,attachedOrganizer:{modelId:id,model:'organizer',maxOutputTokens:100}};
+ f.execution.primaryResult={body:'{"message":"中😀后","inputKind":"answer"}'};
+ f.execution.stopCalls!.push({sequence:2,requestHash:'b'.repeat(64),phase:'attached_organizer',dispatched:true,settled:true,responsePending:true});
+ expect(await f.complete(id)).toMatchObject({state:'completed',organized:false,summary:'',completeness:'stopped'});
+ expect(f.billing.recoverReceipts).not.toHaveBeenCalled();
+});
+it('an organizer still in flight keeps the stop saving',async()=>{
+ const f=fixture();f.execution.context={...f.execution.context as object,attachedOrganizer:{modelId:id,model:'organizer',maxOutputTokens:100}};
+ f.execution.stopCalls!.push({sequence:2,requestHash:'b'.repeat(64),phase:'attached_organizer',dispatched:true,settled:false,responsePending:true});
+ expect(await f.complete(id)).toEqual({state:'stopping'});expect(f.results).toEqual([]);
+});

@@ -259,6 +259,45 @@ it('Fusion-shape evidence keeps its own bounds',()=>{
 });
 
 
+// FUSION-COMPARE (Owner 2026-10-17 Q4): shape evidence extends to compare only with samples on the compare wire.
+const compareShape=()=>({reference:'test-only',manifestHash:'c'.repeat(64),distinctSamples:4,sizeBands:2,maxVerifiedBytes:186000,
+ maxPromptToBytes:0.4,maxPromptToUpper:0.38,testedOutputLimit:2048,cacheCovered:true,costBoundPassed:true});
+function compareProfile(){
+ const f=fusionOnly();f.profile.purposes=['fusion_summary','fusion_compare'];
+ f.profile.requestFormats=['fusion-json-v1-stream','fusion-text-v1-stream'];
+ (f.profile.evidence as unknown as Record<string,unknown>).compareShape=compareShape();
+ return f;
+}
+it('admits fusion_compare on the text format only with compare-shape samples',async()=>{
+ const f=compareProfile();
+ expect(paygHostProfile.safeParse(f.profile).success).toBe(true);
+ expect(await f.read('fusion_compare','fusion-text-v1-stream')).toHaveLength(1);
+ expect(await f.read('fusion_summary')).toHaveLength(1);
+ const g=compareProfile();delete (g.profile.evidence as unknown as Record<string,unknown>).compareShape;
+ expect(paygHostProfile.safeParse(g.profile).success).toBe(false);
+ await expect(g.read('fusion_compare','fusion-text-v1-stream')).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
+ // The review shape alone never admits the compare format, even when the profile lists the purpose.
+ const h=fusionOnly();h.profile.purposes=['fusion_summary','fusion_compare'];
+ await expect(h.read('fusion_compare','fusion-text-v1-stream')).rejects.toThrow('RUNTIME_PAYG_PROFILE_REQUIRED');
+});
+it('compare-shape samples keep their own bounds and never cover another purpose',()=>{
+ const bad:Array<(e:Record<string,unknown>)=>void>=[
+  e=>{e.distinctSamples=3;},e=>{e.sizeBands=1;},e=>{e.maxVerifiedBytes=120000;},e=>{e.maxPromptToBytes=0.71;},
+  e=>{e.costBoundPassed=false;},e=>{e.cacheCovered=false;},e=>{e.testedOutputLimit=512;},e=>{e.extra=1;},
+ ];
+ for(const change of bad){
+  const f=compareProfile();change((f.profile.evidence as unknown as {compareShape:Record<string,unknown>}).compareShape);
+  expect(paygHostProfile.safeParse(f.profile).success).toBe(false);
+ }
+ const f=compareProfile();f.profile.purposes=['fusion_compare','ordinary'];
+ expect(paygHostProfile.safeParse(f.profile).success).toBe(false);
+});
+it('a full-matrix profile may list all nine purposes',()=>{
+ const f=fixture();
+ f.profile.purposes=['ordinary','skill','organizer','skill_matching','attached_organizer','report','fusion_review','fusion_summary','fusion_compare'];
+ expect(paygHostProfile.safeParse(f.profile).success).toBe(true);
+});
+
 it('Argon admits evidenced review low only on google-ai-studio; alternatives and other purposes stay denied', async () => {
  const f=fusionOnly('google/gemini-4-argon','google-ai-studio');
  f.profile.purposes=['fusion_review'];

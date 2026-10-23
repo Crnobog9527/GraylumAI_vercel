@@ -90,3 +90,18 @@ it('uses the saved projection after completion, and does not regress a finished 
  expect(streamedWorkItems({state:'completed',workItems:[]},[done])).toEqual([]);
  expect(streamedWorkItems({state:'cancelled',workItems:[]},[done])).toEqual([]);
 });
+
+describe('saved research rows (after a refresh)', () => {
+  const saved = {id: 'op1', kind: 'research', state: 'done', label: '搜索 咖啡', research: {callId: 'op1', toolName: 'social_search',
+    args: {}, query: '咖啡', platform: 'xiaohongshu', dataKind: 'keyword_posts', state: 'succeeded', credits: '1.250000'}};
+  it('shows the settled credits and the platform line like the live row', () => {
+    const [row] = workItemsOf({workItems: [saved]});
+    expect(row).toMatchObject({kind: 'research', state: 'done', label: '搜索 咖啡', credits: '1.25 积分'});
+    expect(row!.detail).toContain('小红书');
+    expect(JSON.stringify(row)).not.toMatch(/tikhub|parallel|usd/i);
+  });
+  it('a malformed research object falls back to the plain row', () => {
+    const [row] = workItemsOf({workItems: [{...saved, research: {query: 1}}]});
+    expect(row).toMatchObject({id: 'op1', kind: 'research', label: '搜索 咖啡'});
+  });
+});

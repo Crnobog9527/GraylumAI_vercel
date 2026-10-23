@@ -1,0 +1,76 @@
+{
+ "note": "Patch for the live runtime_payg_staging.profiles rows (FUSION-COMPARE PR-4). Not written by this PR; the controller applies it to the existing row of the same model and route, keeping every other field. Sol and Opus use shape evidence (add `evidence.compareShape`); Sonnet and Gemini keep their full-matrix evidence and only gain the purpose and the format. Every patched profile also gets new version identifiers so the metering review can tell the new evidence from the old review profiles: append `profileVersionSuffix` to the live profileVersion, and (Sol and Opus, which gain new evidence) `evidenceVersionSuffix` to the live evidenceVersion.",
+ "evidenceSha256": "07aeefd7890e9b7a81bc618087649a15512b42fe326ad462655201c0a50ba74f",
+ "patches": [
+  {
+   "model": "openai/gpt-6.1-sol",
+   "endpointTag": "openai",
+   "addPurposes": [
+    "fusion_compare"
+   ],
+   "addRequestFormats": [
+    "fusion-text-v1-stream"
+   ],
+   "setEvidenceCompareShape": {
+    "reference": "fusion-compare-20261023",
+    "manifestHash": "07aeefd7890e9b7a81bc618087649a15512b42fe326ad462655201c0a50ba74f",
+    "distinctSamples": 4,
+    "sizeBands": 2,
+    "maxVerifiedBytes": 185926,
+    "maxPromptToBytes": 0.2792,
+    "maxPromptToUpper": 0.2675,
+    "testedOutputLimit": 512,
+    "cacheCovered": true,
+    "costBoundPassed": true
+   },
+   "profileVersionSuffix": "+compare-20261023",
+   "evidenceVersionSuffix": "+compare-20261023"
+  },
+  {
+   "model": "anthropic/claude-opus-5.5",
+   "endpointTag": "anthropic",
+   "addPurposes": [
+    "fusion_compare"
+   ],
+   "addRequestFormats": [
+    "fusion-text-v1-stream"
+   ],
+   "setEvidenceCompareShape": {
+    "reference": "fusion-compare-20261023",
+    "manifestHash": "07aeefd7890e9b7a81bc618087649a15512b42fe326ad462655201c0a50ba74f",
+    "distinctSamples": 4,
+    "sizeBands": 2,
+    "maxVerifiedBytes": 185937,
+    "maxPromptToBytes": 0.3676,
+    "maxPromptToUpper": 0.3521,
+    "testedOutputLimit": 2048,
+    "cacheCovered": true,
+    "costBoundPassed": true
+   },
+   "profileVersionSuffix": "+compare-20261023",
+   "evidenceVersionSuffix": "+compare-20261023"
+  },
+  {
+   "model": "anthropic/claude-sonnet-5.5",
+   "endpointTag": "anthropic",
+   "addPurposes": [
+    "fusion_compare"
+   ],
+   "addRequestFormats": [
+    "fusion-text-v1-stream"
+   ],
+   "profileVersionSuffix": "+compare-20261023"
+  },
+  {
+   "model": "google/gemini-3.8-flash",
+   "endpointTag": "google-ai-studio",
+   "addPurposes": [
+    "fusion_compare"
+   ],
+   "addRequestFormats": [
+    "fusion-text-v1-stream"
+   ],
+   "profileVersionSuffix": "+compare-20261023"
+  }
+ ]
+}

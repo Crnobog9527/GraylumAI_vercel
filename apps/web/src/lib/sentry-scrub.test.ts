@@ -100,4 +100,13 @@ describe('sentry allowlist scrub', () => {
   it('drops console breadcrumbs entirely', () => {
     expect(scrubBreadcrumb({ category: 'console', message: 'anything' })).toBeNull();
   });
+
+  it('keeps the fixed publish-monitor cleanup alert code, and nothing else of it', () => {
+    const out = scrubErrorEvent({ message: 'PUBLISH_MONITOR_CLEANUP_STUCK', level: 'error', fingerprint: ['PUBLISH_MONITOR_CLEANUP_STUCK'],
+      tags: { category: 'publish_monitor' }, extra: { connections: 2, requests: 1, page: '/admin/publish-monitor/cleanup' } } as never);
+    expect(out.message).toBe('PUBLISH_MONITOR_CLEANUP_STUCK');
+    expect(JSON.stringify(out)).not.toContain('requests');
+    expect(scrubText('PUBLISH_MONITOR_CLEANUP_STUCK')).toBe('PUBLISH_MONITOR_CLEANUP_STUCK');
+    expect(scrubText('PUBLISH_MONITOR: user a@b.co')).toBe('[text]');
+  });
 });

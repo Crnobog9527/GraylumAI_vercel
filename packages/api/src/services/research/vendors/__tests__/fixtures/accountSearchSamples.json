@@ -1,0 +1,177 @@
+{
+ "tiktok": {
+  "code": 200,
+  "message": "Request successful. This request will incur a charge.",
+  "data": {
+   "user_list": [
+    {
+     "user_info": {
+      "uid": "7000000000000000000",
+      "unique_id": "test.creator0",
+      "nickname": "Test Creator 0",
+      "follower_count": 49545,
+      "aweme_count": 258,
+      "sec_uid": "MS4wLjABAAAAtttttttttttttttttttttttttttttttttttttttt0",
+      "search_user_name": "test.creator0"
+     },
+     "items": [
+      {
+       "aweme_id": "7100000000000000000",
+       "author": {
+        "unique_id": "other.author0",
+        "follower_count": 5
+       }
+      }
+     ],
+     "challenges": null,
+     "mix_list": null,
+     "musics": null,
+     "position": null
+    },
+    {
+     "user_info": {
+      "uid": "7000000000000000001",
+      "unique_id": "test.creator1",
+      "nickname": "Test Creator 1",
+      "follower_count": 227,
+      "aweme_count": 55,
+      "sec_uid": "MS4wLjABAAAAtttttttttttttttttttttttttttttttttttttttt1",
+      "search_user_name": "test.creator1"
+     },
+     "items": null,
+     "challenges": null,
+     "mix_list": null,
+     "musics": null,
+     "position": null
+    },
+    {
+     "user_info": {
+      "uid": "7000000000000000002",
+      "unique_id": "test.creator2",
+      "nickname": "Test Creator 2",
+      "follower_count": 6229,
+      "aweme_count": 256,
+      "sec_uid": "MS4wLjABAAAAtttttttttttttttttttttttttttttttttttttttt2",
+      "search_user_name": "test.creator2"
+     },
+     "items": null,
+     "challenges": null,
+     "mix_list": null,
+     "musics": null,
+     "position": null
+    },
+    {
+     "user_info": {
+      "uid": "7000000000000000003",
+      "unique_id": "test.creator3",
+      "nickname": "Test Creator 3",
+      "follower_count": 12883,
+      "aweme_count": 50,
+      "sec_uid": "MS4wLjABAAAAtttttttttttttttttttttttttttttttttttttttt3",
+      "search_user_name": "test.creator3"
+     },
+     "items": null,
+     "challenges": null,
+     "mix_list": null,
+     "musics": null,
+     "position": null
+    }
+   ],
+   "cursor": 20,
+   "has_more": 1,
+   "status_code": 0,
+   "type": 1
+  }
+ },
+ "douyin": {
+  "code": 200,
+  "data": {
+   "type": 1,
+   "user_list": [
+    {
+     "position": null,
+     "items": null,
+     "dynamic_patch": {
+      "height": 80,
+      "origin_type": "lynx_dynamic",
+      "raw_data": "{\"is_red_uniqueid\": false, \"user_info\": {\"uid\": \"4000000000000000\", \"sec_uid\": \"MS4wLjABAAAAdddddddddddddddddddddddddddddddddddddddd0\", \"nickname\": \"测试账号0\", \"follower_count\": 590201, \"unique_id\": \"\"}}"
+     }
+    },
+    {
+     "position": null,
+     "items": null,
+     "dynamic_patch": {
+      "height": 80,
+      "origin_type": "lynx_dynamic",
+      "raw_data": "{\"is_red_uniqueid\": false, \"user_info\": {\"uid\": \"4000000000000001\", \"sec_uid\": \"MS4wLjABAAAAdddddddddddddddddddddddddddddddddddddddd1\", \"nickname\": \"测试账号1\", \"follower_count\": 805868, \"unique_id\": \"testdy1\"}}"
+     }
+    },
+    {
+     "position": null,
+     "items": null,
+     "dynamic_patch": {
+      "height": 80,
+      "origin_type": "lynx_dynamic",
+      "raw_data": "{\"is_red_uniqueid\": false, \"user_info\": {\"uid\": \"4000000000000002\", \"sec_uid\": \"MS4wLjABAAAAdddddddddddddddddddddddddddddddddddddddd2\", \"nickname\": \"测试账号2\", \"follower_count\": 109689, \"unique_id\": \"testdy2\"}}"
+     }
+    },
+    {
+     "position": null,
+     "items": null,
+     "dynamic_patch": {
+      "height": 80,
+      "origin_type": "lynx_dynamic",
+      "raw_data": "{\"is_red_uniqueid\": false, \"user_info\": {\"uid\": \"4000000000000003\", \"sec_uid\": \"MS4wLjABAAAAdddddddddddddddddddddddddddddddddddddddd3\", \"nickname\": \"测试账号3\", \"follower_count\": 68718, \"unique_id\": \"testdy3\"}}"
+     }
+    },
+    {
+     "position": null,
+     "dynamic_patch": {
+      "raw_data": "{not json"
+     }
+    }
+   ],
+   "cursor": 10,
+   "has_more": 1,
+   "status_code": 0
+  }
+ },
+ "xiaohongshu": {
+  "code": 200,
+  "data": {
+   "success": true,
+   "code": 0,
+   "search_id": "0123456789abcdef",
+   "page": 1,
+   "next_page": 2,
+   "data": {
+    "users": [
+     {
+      "id": "000000000000000000abc000",
+      "red_id": "900000000",
+      "name": "测试用户0",
+      "sub_title": "Fans 77.9k",
+      "red_official_verified": true,
+      "link": "xhsdiscover://1/user/user.000000000000000000abc000"
+     },
+     {
+      "id": "000000000000000000abc001",
+      "red_id": "900000001",
+      "name": "测试用户1",
+      "sub_title": "Fans 39.8k",
+      "red_official_verified": false,
+      "link": "xhsdiscover://1/user/user.000000000000000000abc001"
+     },
+     {
+      "id": "000000000000000000abc002",
+      "red_id": "900000002",
+      "name": "测试用户2",
+      "sub_title": "Fans 102.6k",
+      "red_official_verified": true,
+      "link": "xhsdiscover://1/user/user.000000000000000000abc002"
+     }
+    ]
+   }
+  }
+ }
+}
