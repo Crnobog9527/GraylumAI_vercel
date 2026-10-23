@@ -106,7 +106,7 @@ export function MentorPendingMessage({ requestId, stepTitle, text, sending, acce
   return (
     <div data-message-role="user" data-request-id={requestId} className="ml-8 rounded-xl bg-[var(--bg-tertiary)] p-3">
       <span>你 · {stepTitle}</span>
-      <p className={`whitespace-pre-wrap ${resultStyles.messageBody}`}>
+      <p className={`whitespace-pre-wrap break-words ${resultStyles.messageBody}`}>
         {text}</p>{!accepted && <ChatPendingStatus sending={sending}/>}</div>
   );
 }

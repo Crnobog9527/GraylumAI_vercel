@@ -62,6 +62,7 @@
     "./src/services/platformSecrets/request": "./src/services/platformSecrets/request.ts",
     "./src/services/runtime/automaticRecovery": "./src/services/runtime/automaticRecovery.ts",
     "./src/services/runtime/staleChargedRounds": "./src/services/runtime/staleChargedRounds.ts",
+    "./src/services/runtime/stopLossNotify": "./src/services/runtime/stopLossNotify.ts",
     "./src/services/fusion/background": "./src/services/fusion/background.ts",
     "./src/services/fusion/recovery": "./src/services/fusion/recovery.ts",
     "./src/services/voice/recovery": "./src/services/voice/recovery.ts",
