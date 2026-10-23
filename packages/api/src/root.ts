@@ -1,6 +1,7 @@
 import { paymentDisputesRouter } from './routers/paymentDisputes';
 import { researchRouter } from './routers/research';
 import { libraryRouter } from './routers/library';
+import { voiceRouter } from './routers/voice';
 import { reportModelRouter } from './routers/reportModel';
 import { socialMediaFlagRouter } from './routers/socialMediaFlag';
 import { skillTranslationsRouter } from './routers/skillTranslations';
@@ -88,6 +89,7 @@ export const appRouter = router({
   expertConsult: expertConsultRouter,
   publishMonitor: publishMonitorRouter,
   library: libraryRouter,
+  voice: voiceRouter,
 });
 
 /**

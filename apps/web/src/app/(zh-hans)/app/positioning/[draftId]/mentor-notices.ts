@@ -3,6 +3,7 @@ import { createElement } from "react";
 import { CHAT_ACTION, type ChatNotice } from "@/components/chat/ChatInlineNotice";
 import { livePhaseNotice, type ReplyNotice } from "./agent-turn-display";
 import { STOPPED_NOTICE, UNORGANIZED_NOTICE, stopSaving } from "./stop-reply";
+export { useOpeningFailureNotice } from "./opening-notice";
 
 /** The failed explicit retry of a retained request; the retry notice already says the same. */
 export const RETRY_PENDING_NOTICE = "原请求仍未确认结果，已继续保留。请稍后再点“重试”，不会重复发送或重复扣费。";
