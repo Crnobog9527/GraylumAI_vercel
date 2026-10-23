@@ -16,7 +16,7 @@ import {createHash} from 'node:crypto';
 import {openRouterEvidence,validGenerationId,type OpenRouterIdentity} from './openRouterEvidence';
 import type {CallIdentity,TransportObservation} from './fixtureAdapter';
 import {approvedReasoningEfforts,reasoningObject} from '../runtime/reasoningPolicy';
-import {AGENT_STREAM_TOOLS,AGENT_TOOL_NAMES,MAX_AGENT_TOOLS} from '../runtime/agentTools';
+import {AGENT_STREAM_TOOLS,AGENT_TOOL_NAMES,FREE_CHAT_TOOL_NAMES,MAX_AGENT_TOOLS} from '../runtime/agentTools';
 // Only this adapter can mint this one-use proof, before invoking transport.
 // A timeout or identical Error message from a started transport is not proof.
 const unstarted=new WeakMap<object,{requestHash:string;send:()=>Promise<TransportObservation>}>();
@@ -36,8 +36,11 @@ export const sourceCall=z.object({id:z.string().min(1).max(256),type:z.literal('
 export const toolCallFor=(names:ReadonlySet<string>)=>z.object({id:z.string().min(1).max(256),type:z.literal('function'),
  function:z.object({name:z.string().refine(name=>names.has(name)),arguments:z.string().max(ASK_QUESTION_ARGUMENT_LIMIT)}).strict()
   .refine(call=>call.arguments.length<=toolArgumentLimit(call.name),'tool arguments too long')}).strict();
-const workspaceMessage=z.union([z.object({role:z.literal('assistant'),content:z.string().nullable(),tool_calls:z.array(sourceCall).min(1).max(1)}).strict(),z.object({role:z.literal('tool'),content:z.string(),tool_call_id:z.string().min(1).max(256)}).strict()]);
-const workspaceTools=z.array(z.object({type:z.literal('function'),function:z.object({name:z.literal('read_source'),description:z.string().max(16000).optional(),parameters:z.record(z.string(),z.unknown()),strict:z.boolean().optional()}).strict()}).strict()).max(1);
+// CHAT-AUTO-CONTEXT C: a free chat may also offer (and replay) the general research tools its admission froze.
+const freeChatCall=toolCallFor(FREE_CHAT_TOOL_NAMES);
+const workspaceMessage=z.union([z.object({role:z.literal('assistant'),content:z.string().nullable(),tool_calls:z.array(freeChatCall).min(1).max(1)}).strict(),z.object({role:z.literal('tool'),content:z.string(),tool_call_id:z.string().min(1).max(256)}).strict()]);
+const workspaceTools=z.array(z.object({type:z.literal('function'),function:z.object({name:z.string().refine(name=>FREE_CHAT_TOOL_NAMES.has(name)),description:z.string().max(16000).optional(),parameters:z.record(z.string(),z.unknown()),strict:z.boolean().optional()}).strict()}).strict())
+ .max(FREE_CHAT_TOOL_NAMES.size).refine(tools=>new Set(tools.map(tool=>tool.function.name)).size===tools.length);
 // Interactive Agent turn tools (AC-1): only the allowlisted names, at most two,
 // each once. Their history is one call per assistant message plus its result.
 const agentCall=toolCallFor(AGENT_TOOL_NAMES);
@@ -159,7 +162,7 @@ export function openRouterAdapter(options:{credential:(identity:OpenRouterIdenti
    // replays their history) and never the optional parallel_tool_calls hint;
    // older requests keep their rules.
    const agentTurn=Boolean(options.allowAgentTools&&parsed&&typeof parsed==='object'&&!Array.isArray(parsed)&&agentTurnRequest(parsed));
-   // A request that offers only read_source (free chat reading its sources) may get parallel calls back; see SOURCE_STREAM_TOOLS.
+   // A free chat request (read_source, and the research tools it froze) may get parallel calls back; see SOURCE_STREAM_TOOLS.
    const sourceTurn=Boolean(!agentTurn&&options.allowWorkspaceRead&&Array.isArray(parsed?.tools)&&parsed.tools.length>0&&
     workspaceTools.safeParse(parsed.tools).success);
    const cachedHistoryIndex=Array.isArray(parsed?.messages)?historyCacheIndex(parsed.messages,agentTurn&&

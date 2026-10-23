@@ -6,7 +6,7 @@ import {openRouterBound} from '../bill2/openRouterPolicy';
 import type {frozenCallPolicy} from '../bill2/service';
 import {normalizeOpenRouterHistory} from './openRouterHistory';
 import {matchesFrozenReasoning,reasoningPolicy,type ReasoningPolicy} from './reasoningPolicy';
-import {AGENT_TOOL_NAMES,SOURCE_TOOL_NAMES} from './agentTools';
+import {AGENT_TOOL_NAMES,FREE_CHAT_TOOL_NAMES,SOURCE_TOOL_NAMES} from './agentTools';
 
 /** The request formats a frozen Runtime context may carry. */
 export const PROVIDER_REQUEST_FORMATS=['serial-tools-v1','serial-tools-v2','serial-tools-v3-stream',
@@ -55,9 +55,9 @@ export function validReasoningFormat(context:RequestContext):boolean{
   (!context.attachedOrganizer?.reasoning||allowed&&reasoningPolicy.safeParse(context.attachedOrganizer.reasoning).success);
 }
 
-/** Tool names whose history a format may replay. */
+/** Tool names whose history a format may replay (v6 also free chat's research calls, CHAT-AUTO-CONTEXT C). */
 export function historyToolNames(format:ProviderRequestFormat|undefined):ReadonlySet<string>{
- return format===AGENT_TURN_REQUEST_FORMAT?AGENT_TOOL_NAMES:SOURCE_TOOL_NAMES;
+ return format===AGENT_TURN_REQUEST_FORMAT?AGENT_TOOL_NAMES:format===FREE_CHAT_REQUEST_FORMAT?FREE_CHAT_TOOL_NAMES:SOURCE_TOOL_NAMES;
 }
 
 /** Turns the SDK's request into the exact OpenRouter bytes that are hashed,

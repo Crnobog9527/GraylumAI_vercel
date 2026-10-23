@@ -14,7 +14,7 @@ import {frozenPurposeBudget,FROZEN_OUTPUT_CAP} from './purposeBudgets';
 import {matchingPlan} from './matching';
 import {reasoningPolicy} from './reasoningPolicy';
 import {frozenResearchTurn} from './researchTurn';
-import {POSITIONING_RESEARCH_TOOLS} from '../research/tools/names';
+import {GENERAL_RESEARCH_TOOLS,POSITIONING_RESEARCH_TOOLS,RESEARCH_TOOL_NAMES} from '../research/tools/names';
 /** Library documents the user referenced with @: each the caller's own document at the version they chose. */
 export const libraryReferences=z.array(z.object({documentId:z.string().uuid(),version:z.number().int().positive()}).strict())
  .min(1).max(5).refine(items=>new Set(items.map(item=>item.documentId.toLowerCase())).size===items.length,'LIB_REFERENCE_INVALID');
@@ -34,8 +34,9 @@ export const runtimeContext=z.object({
  skillFile:skillFileBinding.optional(),
  skillFileReserve:z.number().int().min(12288).max(131072).optional(),
  historyRead:z.object({version:z.literal(MENTOR_HISTORY_VERSION),reserve:z.literal(MENTOR_HISTORY_RESERVE_BYTES)}).strict().optional(),
- tools:z.array(z.enum(['search','read_source','read_skill_file',READ_HISTORY_TOOL,ASK_QUESTION_TOOL,...POSITIONING_RESEARCH_TOOLS])).default([]),
- // RT-3b PR-3: a positioning mentor turn's research tools, routes, prices' phase and subcall allowance.
+ tools:z.array(z.enum(['search','read_source','read_skill_file',READ_HISTORY_TOOL,ASK_QUESTION_TOOL,...RESEARCH_TOOL_NAMES])).default([]),
+ // RT-3b PR-3: a positioning mentor turn's research tools, routes, prices' phase and subcall allowance
+ // (CHAT-AUTO-CONTEXT C: or a free chat's general lookups, `research.freeChat`).
  research:frozenResearchTurn.optional(),
  maxToolCalls:z.number().int().min(0).max(16).default(0),
  modelId:z.string().uuid().optional(),network:z.enum(['deny','allow','require_latest']).optional(),
@@ -73,8 +74,12 @@ export const runtimeContext=z.object({
   ctx.addIssue({code:'custom',message:'REPORT_CONTEXT_INVALID'});
  // A research slot adds one tool call and the model call that reads its result (a card turn already has one tool call).
  const researchSlot=context.research?1:0;
- if(Boolean(context.research)!==context.tools.some(name=>(POSITIONING_RESEARCH_TOOLS as readonly string[]).includes(name))||context.research&&
-  (!context.hostTurnContext||context.hostTurnContext.opening||context.hostTurnContext.stepSummary||
+ const researchTools=context.tools.filter(name=>(RESEARCH_TOOL_NAMES as readonly string[]).includes(name));
+ const within=(set:readonly string[])=>researchTools.every(name=>set.includes(name));
+ if(Boolean(context.research)!==researchTools.length>0||context.research&&(context.research.freeChat
+  ?context.providerRequestFormat!=='serial-tools-v6-reasoning'||context.role!=='ordinary'||context.hostTurnContext||
+   context.network!=='deny'||!within(GENERAL_RESEARCH_TOOLS)||context.tools.some(name=>name!=='read_source'&&!researchTools.includes(name))
+  :!context.hostTurnContext||context.hostTurnContext.opening||context.hostTurnContext.stepSummary||!within(POSITIONING_RESEARCH_TOOLS)||
    context.providerRequestFormat!=='agent-turn-v5-stream'||!context.tools.includes(ASK_QUESTION_TOOL)||context.network!=='deny'||
    context.maxTurns!==2+(context.skillFile?1:0)||context.maxToolCalls!==2))
   ctx.addIssue({code:'custom',message:'RUNTIME_RESEARCH_CONTEXT_INVALID'});
