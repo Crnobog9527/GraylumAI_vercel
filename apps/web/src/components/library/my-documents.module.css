@@ -27,7 +27,7 @@
   display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; align-items: center;
   padding: 8px 10px; border: 1px solid #eee; border-radius: 8px; font-size: 12px;
 }
-.queueItem strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.queueItem strong { min-width: 0; font-weight: 500; overflow-wrap: anywhere; }
 .queueItem small { grid-column: 1 / -1; color: #6b6b6b; }
 .queueItem[data-status='failed'] small, .queueItem[data-status='rejected'] small { color: #8a3d2e; }
 .progress { grid-column: 1 / -1; height: 4px; border-radius: 4px; background: #eee; overflow: hidden; }
@@ -46,8 +46,8 @@
 .row:last-child { border-bottom: 0; }
 .head { min-height: 44px; background: #fafafa; color: #6b6b6b; font-size: 11px; }
 .name { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #333; }
-.name small { display: block; color: #6b6b6b; font-size: 11px; }
+.name span { color: #333; overflow-wrap: anywhere; }
+.name small { display: block; overflow-wrap: anywhere; color: #6b6b6b; font-size: 11px; }
 .row select { width: 100%; padding: 5px 6px; border: 1px solid #e5e5e5; border-radius: 7px; background: #fff; font-size: 12px; }
 .status { color: #6b6b6b; }
 .status[data-status='deleting'] { color: #8a3d2e; }
