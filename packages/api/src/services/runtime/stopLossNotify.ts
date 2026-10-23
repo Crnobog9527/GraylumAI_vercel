@@ -1,0 +1,163 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { createHash } from 'node:crypto';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { logger } from '../../lib/logger';
+import { isProductionSite, noticeConfig, normalizeMailbox, type NoticeConfigResult } from '../notify/config';
+import { resendTransport, type NoticeTransport } from '../notify/resend';
+import { noticeLayout } from '../notify/templates';
+
+/**
+ * RUNTIME-PROD slice C: mails new stop-loss alerts to the Owner. The alert rows written by
+ * runtime_stop_loss_alert stay the durable record; delivery state is kept on the same row in
+ * details.notify, so no table, queue or cron is added. Sending never throws and never touches the
+ * stop itself: the database already refused the calls before anything is mailed.
+ */
+export const STOP_LOSS_NOTICE_TIMEOUT_MS = 5_000;
+/** Resend keeps an idempotency key for 24 hours; older undelivered alerts stay visible in the admin only. */
+export const STOP_LOSS_NOTICE_WINDOW_MS = 24 * 3600_000;
+export const STOP_LOSS_NOTICE_MAX_ATTEMPTS = 5;
+const BATCH = 50;
+
+type Db = Pick<SupabaseClient, 'rpc' | 'from'>;
+type Notify = { state: 'sent' | 'pending' | 'failed'; attempts: number; lastErrorCode?: string;
+  lastAttemptAt?: string; sentAt?: string; providerMessageId?: string };
+type Row = { id: string; test_id: string; details: Record<string, unknown> | null; created_at: string };
+
+export interface StopLossNoticeDeps {
+  config?: NoticeConfigResult;
+  transport?: NoticeTransport;
+  env?: Record<string, string | undefined>;
+  now?: Date;
+}
+export type StopLossNoticeOutcome =
+  | { outcome: 'none' | 'sent'; alerts: number }
+  | { outcome: 'not_sent'; alerts: number; code: string };
+
+function notifyOf(row: Row): Notify | null {
+  const value = row.details?.notify;
+  return value && typeof value === 'object' ? value as Notify : null;
+}
+const text = (d: Row['details'], key: string) => {
+  const value = d?.[key];
+  return typeof value === 'string' && /^[0-9A-Za-z.:_-]{1,64}$/.test(value) ? value : null;
+};
+const usd = (value: string | null) => value === null ? '未知' : `$${value}`;
+const PROVIDERS: Record<string, string> = {
+  openrouter: 'OpenRouter', tikhub: 'TikHub', parallel: 'Parallel', firecrawl: 'Firecrawl', brightdata: 'Bright Data',
+};
+
+/** Same wording as the admin list; reads aggregate fields one by one, never the whole details object. */
+export function describeStopLossAlert(row: Pick<Row, 'test_id' | 'details'>) {
+  const d = row.details;
+  const day = text(d, 'utcDate');
+  const when = day ? `（统计日 ${day} UTC）` : '';
+  switch (row.test_id) {
+    case 'runtime_stop_loss_siteDailyUsd':
+      return `全站每日上限已达到，新的计费调用已被拒绝：当天实际 ${usd(text(d, 'actualUsd'))}，上限 ${usd(text(d, 'thresholdUsd'))}${when}`;
+    case 'runtime_stop_loss_siteAlertUsd':
+      return `全站成本提醒线已达到：当天实际 ${usd(text(d, 'actualUsd'))}，提醒线 ${usd(text(d, 'thresholdUsd'))}${when}`;
+    case 'runtime_stop_loss_userDailyUsd':
+      return `有用户达到每人每日上限 ${usd(text(d, 'thresholdUsd'))}（只记汇总，不记录是哪位用户）${when}`;
+    case 'runtime_stop_loss_monitor_unavailable':
+      return '止损检查暂时无法读取设置，这期间新的计费调用会被拒绝，请检查并重新保存止损设置。';
+    default: {
+      const balance = /^runtime_stop_loss_balance_([a-z]+)_(low|unknown)$/.exec(row.test_id);
+      if (!balance) return '其他止损告警，请到后台查看。';
+      const name = PROVIDERS[balance[1]!] ?? balance[1];
+      return balance[2] === 'low'
+        ? `${name} 余额偏低：记录余额 ${usd(text(d, 'balanceUsd'))}，提醒线 ${usd(text(d, 'thresholdUsd'))}`
+        : `${name} 余额未知：24 小时内没有有效的余额记录，提醒线 ${usd(text(d, 'thresholdUsd'))}`;
+    }
+  }
+}
+
+export function stopLossNotice(rows: Row[], production: boolean) {
+  const env = production ? '' : '[staging] ';
+  return noticeLayout(`${env}Graylum 止损告警 ${rows.length} 条 / Stop-loss alert`, [
+    `有 ${rows.length} 条新的成本止损告警${production ? '' : '（来自测试站 staging）'}：`,
+    rows.map((row, i) => `${i + 1}. ${describeStopLossAlert(row)}（记录于 ${row.created_at.slice(0, 19).replace('T', ' ')} UTC）`)
+      .join('\n'),
+    '处理入口：后台 → 系统设置 → 成本止损。要立刻停止所有新调用，可在那里打开"停止新调用"。',
+    'New runtime stop-loss alerts were recorded. Details are in the admin settings, tab 成本止损.',
+  ]);
+}
+
+async function ownerMailbox(db: Db) {
+  const { data, error } = await db.from('system_settings').select('value').eq('key', 'support_email').maybeSingle();
+  if (error) return null;
+  const value = (data as { value?: unknown } | null)?.value;
+  return typeof value === 'string' ? normalizeMailbox(value) : null;
+}
+
+async function mark(db: Db, rows: Row[], notify: (row: Row) => Notify) {
+  let failed = 0;
+  for (const row of rows) {
+    const { error } = await db.from('diagnostic_results')
+      .update({ details: { ...(row.details ?? {}), notify: notify(row) } }).eq('id', row.id);
+    if (error) failed += 1;
+  }
+  if (failed) logger.error('billing', 'runtime_stop_loss_notice_mark_failed', { rows: failed });
+}
+
+/**
+ * Mails every alert of the last 24 hours that has not been delivered as one digest, so a burst of
+ * alerts is one mail and a delivered alert is never mailed again. Recipient: support_email in system
+ * settings; outside production only PAYMENT_NOTICE_TEST_RECIPIENTS (same guard as payment notices).
+ * The Resend idempotency key is derived from the alert ids, so a retry of the same set mails once.
+ */
+export async function deliverStopLossAlerts(db: Db, deps: StopLossNoticeDeps = {}): Promise<StopLossNoticeOutcome> {
+  const now = deps.now ?? new Date();
+  let pending: Row[] = [];
+  try {
+    const { data, error } = await db.from('diagnostic_results').select('id,test_id,details,created_at')
+      .eq('test_name', 'Runtime stop-loss').like('test_id', 'runtime_stop_loss_%')
+      .gte('created_at', new Date(now.getTime() - STOP_LOSS_NOTICE_WINDOW_MS).toISOString())
+      .order('created_at', { ascending: true }).limit(BATCH);
+    if (error) throw new Error('read');
+    pending = ((data ?? []) as Row[]).filter(row => {
+      const n = notifyOf(row);
+      return !n || (n.state === 'pending' && n.attempts < STOP_LOSS_NOTICE_MAX_ATTEMPTS);
+    });
+    if (pending.length === 0) return { outcome: 'none', alerts: 0 };
+    const env = deps.env ?? process.env;
+    const config = deps.config ?? await noticeConfig(db, env);
+    const to = await ownerMailbox(db);
+    const refusal = !config.ok ? config.code : !to ? 'STOP_LOSS_NOTICE_NO_MAILBOX'
+      : config.config.allowedRecipients && !config.config.allowedRecipients.has(to)
+        ? 'STOP_LOSS_NOTICE_RECIPIENT_NOT_ALLOWED' : null;
+    if (refusal || !config.ok || !to) {
+      const code = refusal ?? 'STOP_LOSS_NOTICE_UNAVAILABLE';
+      // Configuration problems do not use up attempts: the mail goes out once the setting is fixed.
+      const changed = pending.filter(row => notifyOf(row)?.lastErrorCode !== code);
+      if (changed.length) {
+        logger.error('billing', 'runtime_stop_loss_notice_not_configured', { code, alerts: pending.length });
+        await mark(db, changed, row => ({ state: 'pending', attempts: notifyOf(row)?.attempts ?? 0, lastErrorCode: code }));
+      }
+      return { outcome: 'not_sent', alerts: pending.length, code };
+    }
+    const ids = pending.map(row => row.id).sort();
+    const key = `runtime-stop-loss-${createHash('sha256').update(ids.join(',')).digest('hex').slice(0, 40)}`;
+    const transport = deps.transport ?? resendTransport(fetch, STOP_LOSS_NOTICE_TIMEOUT_MS);
+    const result = await transport(config.config.apiKey, {
+      ...stopLossNotice(pending, isProductionSite(env)), idempotencyKey: key,
+      from: config.config.from, to, replyTo: config.config.replyTo,
+    });
+    const at = now.toISOString();
+    if (result.kind === 'sent') {
+      await mark(db, pending, row => ({ state: 'sent', attempts: (notifyOf(row)?.attempts ?? 0) + 1, sentAt: at,
+        providerMessageId: result.providerMessageId }));
+      logger.info('billing', 'runtime_stop_loss_notice_sent', { alerts: pending.length });
+      return { outcome: 'sent', alerts: pending.length };
+    }
+    await mark(db, pending, row => {
+      const attempts = (notifyOf(row)?.attempts ?? 0) + 1;
+      const final = result.kind === 'conflict' || attempts >= STOP_LOSS_NOTICE_MAX_ATTEMPTS;
+      return { state: final ? 'failed' : 'pending', attempts, lastErrorCode: result.code, lastAttemptAt: at };
+    });
+    logger.error('billing', 'runtime_stop_loss_notice_failed', { code: result.code, alerts: pending.length });
+    return { outcome: 'not_sent', alerts: pending.length, code: result.code };
+  } catch {
+    logger.error('billing', 'runtime_stop_loss_notice_unavailable', { alerts: pending.length });
+    return { outcome: 'not_sent', alerts: pending.length, code: 'STOP_LOSS_NOTICE_UNAVAILABLE' };
+  }
+}

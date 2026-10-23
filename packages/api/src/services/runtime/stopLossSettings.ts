@@ -54,7 +54,7 @@ export async function stopLossStatus(db: SupabaseClient) {
     const settings = await readStopLoss(db);
     const { data, error } = await db.rpc('runtime_stop_loss_usage', { a: null });
     if (error || !data) return unavailable();
-    return { ...settings, usage: data, basis: 'settled_provider_usd', timezone: 'UTC', externalNotifications: 'not_connected' };
+    return { ...settings, usage: data, basis: 'settled_provider_usd', timezone: 'UTC', externalNotifications: 'email' };
   } catch { return unavailable(); }
 }
 export async function stopLossAlerts(db: SupabaseClient) {

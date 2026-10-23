@@ -32,19 +32,34 @@
 | `get` / `update` | 原限流配置，含 stopNewCalls；保持原合同 |
 | `stopLossConfig` | 返回 `{config,source}` |
 | `updateStopLoss` | 完整配置，保存后读回 `{config,source}` |
-| `stopLossStatus` | 配置、当天全站实际 USD、UTC 日期和 externalNotifications=not_connected |
+| `stopLossStatus` | 配置、当天全站实际 USD、UTC 日期和 externalNotifications=email（切片 C 起） |
 | `stopLossAlerts` | 最新 100 条止损告警，含类型、金额、阈值、日期和来源 |
 | `recordProviderBalance` | `{provider,balanceUsd}`；仅记录管理员观察，返回 observedAt 和 source=admin_observation |
 
 配置对象：`{version:1,userDailyUsd:null,siteDailyUsd:null,siteAlertUsd:null,
 providerBalanceAlertUsd:null,notificationChannel:null}`。
 四个金额字段为十进制字符串或 null。notificationChannel 为去除首尾空白后 1–100 个 Unicode 字符的渠道标签，
-本切片不发送外部通知、不存 webhook 密钥。
+只是备注，不决定发送去向；本切片不存 webhook 密钥。外部通知见下方“告警外发（切片 C）”。
 
 稳定业务码：`RUNTIME_NEW_CALLS_STOPPED`、`RUNTIME_USER_DAILY_USD_LIMIT`、
 `RUNTIME_SITE_DAILY_USD_LIMIT`、`RUNTIME_STOP_LOSS_CONFIG_INVALID`、`RUNTIME_STOP_LOSS_UNAVAILABLE`。
 入口暂停沿用 SERVICE_UNAVAILABLE，并在 tRPC error.data.businessCode 提供 RUNTIME_NEW_CALLS_STOPPED。
 执行过程中 SQL 的可信拒绝映射为固定中文 notice 与 outcome.code；错误不会泄漏数据库原文。
+
+## 告警外发（切片 C）
+
+`stopLossNotify.ts` 把最近 24 小时内还没送达的止损告警合成一封邮件发给 Owner，复用 PAY-NOTIFY 的 Resend 通道：
+密钥用后台“第三方密钥”的 resend 槽，收件人是系统设置里的 `support_email`（与专家诊断预约提醒同一地址），
+非正式站只发给 `PAYMENT_NOTICE_TEST_RECIPIENTS` 里的地址，邮件主题带 `[staging]`。
+不新增表、队列或定时任务：发送状态写回同一条告警的 `details.notify`（sent / pending / failed、次数、错误码），
+已送达的不再发；Resend 幂等键由告警 id 集合得出，同一批重试只送达一次。
+传输失败最多重试 5 次后标 failed；缺密钥、缺收件地址、收件人不在测试名单这类配置问题不消耗次数，改好后自动补发。
+每次失败都记 error 日志，后台告警列表逐条显示“已发邮件通知 / 会自动重试（错误码）/ 已停止重试”。
+邮件正文只取金额、日期、供应商等白名单字段，不含用户标识、正文或密钥。
+发送在告警落库之后、在原监控之外进行，任何失败都不影响止损拒绝调用，也不删除告警记录。
+
+触发点：`/api/cron/runtime-recovery`（每分钟，Vercel Pro 后生效）在恢复之后调用；
+每日诊断和后台手动运行“Runtime 成本与余额告警”检查时也会调用。上线前 Vercel 未升级 Pro 时，时效以每日诊断为准。
 
 ## 余额观察的明确限制
 
