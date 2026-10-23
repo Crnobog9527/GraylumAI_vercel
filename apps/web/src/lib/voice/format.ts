@@ -46,6 +46,7 @@ const MESSAGES: Record<string, string> = {
   VOICE_PAUSED: '系统暂时停止了新任务，请稍后再试。',
   VOICE_INTERRUPTED: '上一次学习没有完成就中断了，可以重新学习。',
   VOICE_RESULT_PENDING: '结果还在核对，请稍后刷新查看。',
+  VOICE_PENDING_RESULT: '有一份新的文风画像正在生成或等你确认，先处理它，再修改当前这份。',
   VOICE_REVISION_CONFLICT: '页面内容已经更新，请刷新后再操作。',
   VOICE_STALE: '生成期间你的文档有变化，这一版不能使用，请重新学习。',
   VOICE_VERSION_GONE: '这一版已经删除（用到的文档被删除了）。',

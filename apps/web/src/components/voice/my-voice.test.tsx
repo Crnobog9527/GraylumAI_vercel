@@ -43,6 +43,7 @@ describe('MyVoiceView', () => {
       const html = render({ confirmed: version('confirmed'), latest });
       expect(html).toContain('当前使用的文风画像');
       expect(html).not.toContain('>修改</button>');
+      expect(html).toContain('>删除</button>'); // deleting the current profile stays possible
       expect(html).toContain('先处理它');
     }
     expect(render({ confirmed: version('confirmed'), latest: version('failed') })).toContain('>修改</button>');

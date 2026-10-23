@@ -59,8 +59,8 @@ export function VoiceProfileCard({ version, title, busy, onConfirm, onDelete }: 
           <div key={key}><dt>{label}</dt><dd>{profile[key].join('、')}</dd></div>)}
       </dl>
       <div className={styles.samples}>{profile.samples.map((sample, index) => <blockquote key={index}>{sample}</blockquote>)}</div>
-      {onConfirm && <div className={styles.actions}>
-        <button type="button" disabled={busy} onClick={() => setEditing(true)}>修改</button>
+      {(onConfirm || onDelete) && <div className={styles.actions}>
+        {onConfirm && <button type="button" disabled={busy} onClick={() => setEditing(true)}>修改</button>}
         {onDelete && <button type="button" className={styles.danger} disabled={busy} onClick={onDelete}>删除</button>}
       </div>}
     </>}
