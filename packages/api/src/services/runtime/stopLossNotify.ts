@@ -126,7 +126,9 @@ async function readPending(db: Db, since: string) {
 
 /**
  * Mails every alert of the last 24 hours that has not been delivered, one mail per alert. The Resend
- * idempotency key is the alert id plus a hash of the whole envelope, so a retry repeats the same request and a delivered alert is never mailed again. At most MAX_MAILS_PER_RUN per run, inside a time budget. Recipient: support_email in system
+ * idempotency key is the alert id plus a hash of the whole envelope, so a retry repeats the same request and a
+ * delivered alert is never mailed again. At most MAX_MAILS_PER_RUN per run, inside a time budget.
+ * Recipient: support_email in system
  * settings; outside production only PAYMENT_NOTICE_TEST_RECIPIENTS (same guard as payment notices).
  */
 export async function deliverStopLossAlerts(db: Db, deps: StopLossNoticeDeps = {}): Promise<StopLossNoticeOutcome> {
