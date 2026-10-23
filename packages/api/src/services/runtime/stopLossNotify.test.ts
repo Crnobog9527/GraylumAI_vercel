@@ -151,7 +151,8 @@ it('old alerts blocked by configuration are still sent; old ones already attempt
     old('tried', { state: 'pending', attempts: 1, lastErrorCode: 'PAYMENT_NOTICE_PROVIDER_UNREACHABLE' })]);
   const transport = vi.fn(async () => ({ kind: 'sent' as const, providerMessageId: 'msg_5' }));
   expect(await deliverStopLossAlerts(f.db, { config, transport, env: {}, now })).toEqual({ outcome: 'sent', alerts: 1 });
-  expect(f.updates.map(u => u.id)).toEqual(['never']);
+  expect(f.updates.map(u => u.id).sort()).toEqual(['never', 'tried']);
+  expect(f.updates.find(u => u.id === 'tried')!.details.notify).toMatchObject({ state: 'failed' });
 });
 
 it('pages past delivered alerts so newer undelivered ones are not starved', async () => {
