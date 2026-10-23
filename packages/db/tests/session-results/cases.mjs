@@ -39,6 +39,8 @@ export async function runCases({db,Client,connectionString,report}) {
     const part = await save(db,f,{request,type:'copy',title:' 结尾句 ',excerpt:'明天六点见。'});
     assert.deepEqual([part.title,part.body],['结尾句','明天六点见。']);
     assert.equal((await save(db,f,{request,type:'copy',title:'结尾句',excerpt:'明天六点见。'})).id,part.id,'replay');
+    const retitled = await save(db,f,{request,type:'copy',title:null,excerpt:'明天六点见。'});
+    assert.deepEqual([retitled.id,retitled.title],[part.id,'结尾句'],'the same save with another title replays the first one');
     await assert.rejects(save(db,f,{request,type:'copy',title:'结尾句',excerpt:'明天六点'}),/SESSION_RESULT_REQUEST_CONFLICT/);
     await assert.rejects(save(db,f,{excerpt:'不在回复里的话'}),/SESSION_RESULT_INVALID/);
     await assert.rejects(save(db,f,{type:'minutes'}),/SESSION_RESULT_INVALID/,'minutes are never saved here (Q1)');
@@ -124,6 +126,25 @@ export async function runCases({db,Client,connectionString,report}) {
       await assert.rejects(pending,/CONTENT_ERASED/);
       assert.equal(await count(db,'session_id=$1',[f.session]),0);
     } finally {await deleter.end();}
+  });
+
+  await check('C1 identical saves in parallel yield one result; an edit racing a delete never revives the family', async () => {
+    const f = await freeChat(db);
+    const request = randomUUID();
+    const clients = await Promise.all([0,1,2].map(async()=>{const c = new Client({connectionString});await c.connect();return c;}));
+    try {
+      const saved = await Promise.all(clients.map(c=>rpc(c,'runtime_session_result_save',f.actor,f.session,f.execution,request,'copy',null,'明天六点见。')));
+      assert.equal(new Set(saved.map(r=>r.id)).size,1,'one result for three identical requests');
+      assert.equal(await count(db,'session_id=$1',[f.session]),1);
+      const family = saved[0].familyId;
+      // Edit and delete race: either the delete wins (edit finds nothing) or the edit commits first (delete removes both).
+      const outcomes = await Promise.allSettled([
+        rpc(clients[0],'runtime_session_result_edit',f.actor,family,randomUUID(),1,null,'改过的稿子'),
+        rpc(clients[1],'runtime_session_result_delete',f.actor,family)]);
+      assert.equal(outcomes[1].status,'fulfilled');
+      if (outcomes[0].status==='rejected') assert.match(String(outcomes[0].reason),/SESSION_RESULT_NOT_FOUND/);
+      assert.equal(await count(db,'family_id=$1',[family]),0,'no version survives the delete');
+    } finally {await Promise.all(clients.map(c=>c.end()));}
   });
 
   await check('C1 table and functions are closed to client roles', async () => {

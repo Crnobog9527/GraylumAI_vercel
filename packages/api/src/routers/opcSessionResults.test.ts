@@ -52,6 +52,11 @@ it.each([
   await expect(f.caller.sessionResultSave({sessionId:id(1), executionId:id(2), requestId:id(4), resultType:'copy'}))
     .rejects.toThrow(code);
 });
+it.each([['list','sessionResults',{sessionId:id(1)}],['versions','sessionResultVersions',{familyId:id(3)}]] as const)(
+  'keeps the bounded not-found refusal on the read route (%s) instead of a generic server error', async (_name, route, input) => {
+  const f = fixture({error:{code:'42501', message:'SESSION_RESULT_NOT_FOUND'}});
+  await expect((f.caller[route] as (value: unknown) => Promise<unknown>)(input)).rejects.toThrow('OPC_RESULT_NOT_FOUND');
+});
 it('rejects an actor in the input, an unknown type and over-long text before the database', async () => {
   const f = fixture({});
   const base = {sessionId:id(1), executionId:id(2), requestId:id(4), resultType:'script' as const};

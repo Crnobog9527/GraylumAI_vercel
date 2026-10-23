@@ -184,9 +184,10 @@ export const opcRouter = router({
     .input(conversationRename)
     .mutation(({ ctx, input }) => renameConversation(ctx.supabaseAdmin, ctx.user.id, input)),
   // C1-lite: this conversation's results folder. The user confirms every write; the AI never writes here.
-  sessionResults: readProcedure.input(sessionResultsList)
+  // `procedure`, not `readProcedure`: it keeps the bounded OPC_RESULT_* refusals the page maps to plain text.
+  sessionResults: procedure.input(sessionResultsList)
     .query(({ ctx, input }) => sessionResultsService(ctx.supabaseAdmin, ctx.user.id).list(input)),
-  sessionResultVersions: readProcedure.input(sessionResultFamily)
+  sessionResultVersions: procedure.input(sessionResultFamily)
     .query(({ ctx, input }) => sessionResultsService(ctx.supabaseAdmin, ctx.user.id).versions(input)),
   sessionResultSave: procedure.input(sessionResultSave)
     .mutation(({ ctx, input }) => sessionResultsService(ctx.supabaseAdmin, ctx.user.id).save(input)),

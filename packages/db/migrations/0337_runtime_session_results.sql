@@ -94,6 +94,8 @@ DECLARE s runtime_sessions;e runtime_executions;r runtime_session_results;reply 
 BEGIN
  PERFORM bill2_actor(p_actor_id);
  IF p_request_id IS NULL OR p_execution_id IS NULL THEN RAISE EXCEPTION 'SESSION_RESULT_INVALID' USING ERRCODE='22023';END IF;
+ -- Identical concurrent requests (double click, transport retry) queue here; the second one replays the first.
+ PERFORM pg_advisory_xact_lock(hashtextextended(p_actor_id::text||p_request_id::text,337));
  s:=runtime_session_results_session(p_actor_id,p_session_id);
  SELECT * INTO e FROM runtime_executions WHERE id=p_execution_id AND actor_id=p_actor_id AND session_id=s.id FOR SHARE;
  IF e.id IS NULL OR e.state<>'completed' OR e.content_deleted_at IS NOT NULL OR e.erased_at IS NOT NULL
@@ -108,8 +110,9 @@ BEGIN
  IF char_length(clean)>80 OR clean ~ '[[:cntrl:]]' THEN RAISE EXCEPTION 'SESSION_RESULT_INVALID' USING ERRCODE='22023';END IF;
  SELECT * INTO r FROM runtime_session_results WHERE actor_id=p_actor_id AND request_id=p_request_id;
  IF FOUND THEN
+  -- The title is not part of the identity of a save: the same reply, type and text saved again keeps its first title.
   IF r.session_id<>s.id OR r.source_execution_id IS DISTINCT FROM e.id OR r.version<>1 OR r.result_type<>p_result_type
-   OR r.body<>saved OR r.title<>clean THEN RAISE EXCEPTION 'SESSION_RESULT_REQUEST_CONFLICT' USING ERRCODE='23505';END IF;
+   OR r.body<>saved THEN RAISE EXCEPTION 'SESSION_RESULT_REQUEST_CONFLICT' USING ERRCODE='23505';END IF;
  ELSE
   IF (SELECT count(*) FROM runtime_session_results WHERE session_id=s.id AND version=1)>=200 THEN
    RAISE EXCEPTION 'SESSION_RESULT_LIMIT' USING ERRCODE='54000';END IF;
@@ -128,6 +131,10 @@ DECLARE s runtime_sessions;latest runtime_session_results;r runtime_session_resu
 BEGIN
  PERFORM bill2_actor(p_actor_id);
  IF p_request_id IS NULL THEN RAISE EXCEPTION 'SESSION_RESULT_INVALID' USING ERRCODE='22023';END IF;
+ -- Replays of one request queue, then edits and deletion of one result queue (the delete takes the same family lock):
+ -- an edit never inserts a version after the family was deleted, and a delete always sees every committed version.
+ PERFORM pg_advisory_xact_lock(hashtextextended(p_actor_id::text||p_request_id::text,337));
+ PERFORM pg_advisory_xact_lock(hashtextextended(p_family_id::text,338));
  SELECT * INTO latest FROM runtime_session_results WHERE family_id=p_family_id AND actor_id=p_actor_id ORDER BY version DESC LIMIT 1;
  IF latest.id IS NULL THEN RAISE EXCEPTION 'SESSION_RESULT_NOT_FOUND' USING ERRCODE='42501';END IF;
  s:=runtime_session_results_session(p_actor_id,latest.session_id);
@@ -158,6 +165,7 @@ LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE sid uuid;n integer;
 BEGIN
  PERFORM bill2_actor(p_actor_id);
+ PERFORM pg_advisory_xact_lock(hashtextextended(p_family_id::text,338));
  SELECT session_id INTO sid FROM runtime_session_results WHERE family_id=p_family_id AND actor_id=p_actor_id LIMIT 1;
  IF sid IS NULL THEN RETURN jsonb_build_object('familyId',p_family_id,'deleted',0);END IF;
  PERFORM runtime_session_results_session(p_actor_id,sid);
