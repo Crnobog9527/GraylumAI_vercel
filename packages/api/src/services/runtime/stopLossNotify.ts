@@ -167,7 +167,8 @@ export async function deliverStopLossAlerts(db: Db, deps: StopLossNoticeDeps = {
       // sender or template becomes a new request instead of a permanent Resend idempotency conflict.
       const envelope = createHash('sha256').update(JSON.stringify([mail.to, mail.from, mail.replyTo, mail.subject,
         mail.text, mail.html])).digest('hex').slice(0, 16);
-      const result = await transport(config.config.apiKey, { ...mail, idempotencyKey: `runtime-stop-loss-${row.id}-${envelope}` });
+      const idempotencyKey = `runtime-stop-loss-${row.id}-${envelope}`;
+      const result = await transport(config.config.apiKey, { ...mail, idempotencyKey });
       if (result.kind === 'sent') {
         sent += 1;
         await mark(db, [row], r => ({ state: 'sent', attempts: (notifyOf(r)?.attempts ?? 0) + 1, sentAt: at,
