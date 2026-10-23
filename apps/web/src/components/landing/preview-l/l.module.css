@@ -184,6 +184,15 @@
 p.riskLine b { font-size: 15px; font-weight: 600; letter-spacing: 0; }
 
 /*
+ * Phones: the big titles never break inside a Chinese word (keep-all), so below 480px they shrink with the screen to keep
+ * each phrase whole on its line: "AI 教练怎么接手你的运营" on one line at 375px, and nothing wider than a 320px screen.
+ */
+@media (max-width: 479px) {
+  .lines :global(#hero-title) { font-size: min(48px, 12.8vw); }
+  .lines :is(:global(#steps-title), :global(#samples-title)) { font-size: min(34px, 7.4vw); }
+}
+
+/*
  * Owner 2026-10-18: a line break written into the page's own words (in the edit mode, then carried into the copy files)
  * shows as one. The product pictures inside keep the product's own rules (dialogs, inert pictures, chat logs and
  * bubbles are left alone), and any rule of the page's own wins over this one (no specificity).

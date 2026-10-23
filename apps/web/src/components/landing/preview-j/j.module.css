@@ -167,4 +167,6 @@
 .foldButton {
   display: inline-flex; align-items: center; gap: 4px; margin-top: 8px; padding: 0; border: 0; background: none; color: var(--j-gold-text);
   font: inherit; font-size: 14px; font-weight: 500; cursor: pointer;
+  /* A finger-sized target (44px tall) that takes no more room than the 24px line it is. */
+  min-height: 44px; margin-block: -2px -10px;
 }

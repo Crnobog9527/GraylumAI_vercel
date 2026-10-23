@@ -84,5 +84,5 @@ h2.title { margin-bottom: clamp(32px, 4vw, 56px); }
 /* Sample L (data-quiet): our price in plain ink, no sheen; the full-pricing link as a quiet text link. */
 .versus[data-quiet] .price { background: none; color: var(--j-ink); }
 .versus[data-quiet] .price { animation: none !important; }
-.moreLink { display: inline-flex; align-items: center; gap: 4px; color: var(--j-ink); font-size: 15px; font-weight: 500; text-underline-offset: 4px; }
+.moreLink { display: inline-flex; align-items: center; gap: 4px; min-height: 44px; color: var(--j-ink); font-size: 15px; font-weight: 500; text-underline-offset: 4px; }
 .moreLink:hover { text-decoration: underline; }
