@@ -30,7 +30,9 @@ interface Script {
   web?: (query: string) => ResearchItem[];
 }
 
-function fixture(platform: SocialPlatform, script: Script, kinds: SocialKind[] = ['keyword_posts', 'account_profile', 'account_posts']) {
+function fixture(platform: SocialPlatform, script: Script, kinds: SocialKind[] = ['keyword_posts', 'account_profile', 'account_posts'],
+  more: SocialPlatform[] = []) {
+  const all = [platform, ...more];
   const operations = new Map<string, RuntimeOperation>();
   const discoveries = new Map<string, DiscoveryRecord>();
   const evidence = { open: vi.fn(), dispatch: vi.fn(), finish: vi.fn(), link: vi.fn(), cancel: vi.fn() };
@@ -59,8 +61,9 @@ function fixture(platform: SocialPlatform, script: Script, kinds: SocialKind[] =
   const vendor = { enabled: true, hardCapAttested: { by: id, at: now.toISOString() } };
   const config = researchToolsConfigSchema.parse({ ...DISABLED_RESEARCH_TOOLS, enabled: true,
     vendors: { tikhub: vendor, parallel: vendor, firecrawl: vendor },
-    verifiedPlatforms: [platform], benchmarkPlatforms: [platform], limits: { maxSubcallsPerRound: 29, discoverSubcalls: 29 },
-    routes: [...kinds.map(kind => ({ platform, kind, vendor: 'tikhub', route: tikhubRouteId(platform, kind), backup: null, maxUnitsPerCall: '1' })),
+    verifiedPlatforms: all, benchmarkPlatforms: all, limits: { maxSubcallsPerRound: 29, discoverSubcalls: 29 },
+    routes: [...all.flatMap(p => kinds.map(kind => ({ platform: p, kind, vendor: 'tikhub', route: tikhubRouteId(p, kind), backup: null,
+      maxUnitsPerCall: '1' }))),
       ...(script.web ? [{ platform: 'web', kind: 'web_search', vendor: 'parallel', route: 'parallel:search:fast', backup: null,
         maxUnitsPerCall: '1' }] : [])] });
   const sent: SupplierRequest[] = [];
@@ -102,7 +105,7 @@ function fixture(platform: SocialPlatform, script: Script, kinds: SocialKind[] =
     subcall: { policies: [], billing: { runId: id, claim: vi.fn(), dispatch: vi.fn(), record: vi.fn() }, evidence, nextSequence: vi.fn(),
       phase: 'question', secrets: vi.fn(), rateCounter: vi.fn(), newId: vi.fn() } as unknown as SubcallContext,
     emit: vi.fn(), now: () => now };
-  const run = async (left = 29, args: Record<string, unknown> = { keywordConfirmationId: id, platforms: [platform] }) =>
+  const run = async (left = 29, args: Record<string, unknown> = { keywordConfirmationId: id, platforms: all }) =>
     JSON.parse(await discover(ctx, args as never, { left, used: 0 }));
   const kindsSent = () => sent.map(request => request.vendor === 'tikhub' ? request.call.kind : request.vendor);
   return { ctx, store, sent, run, kindsSent, discoveries };
@@ -220,5 +223,17 @@ describe('deeper discovery layers', () => {
     const item: ResearchItem = { missing: [], fields: { title: '推荐', excerpt: '关注 https://www.tiktok.com/@alice。还有 '
       + 'https://www.tiktok.com/@bob, https://www.tiktok.com/@carol/video/7123456789. 以及https://www.tiktok.com/@dave！' } };
     expect(webLeads(item, 'tiktok')).toEqual(['alice', 'bob', 'carol', 'dave']);
+  });
+
+  it('runs every platform\'s own deeper layers before any web search, so a web lead never skips the second platform', async () => {
+    const order: string[] = [];
+    const f = fixture('tiktok', { firstPage: () => [], leads: keyword => keyword === 'one' ? ['solo'] : [],
+      web: () => [{ missing: [], fields: { title: 'list', excerpt: Array.from({ length: 8 }, (_, i) => `https://www.tiktok.com/@w${i}`).join(' ') } }] },
+    ['keyword_posts', 'account_profile', 'account_posts', 'account_search'], ['douyin']);
+    await f.run(29);
+    for (const r of f.sent) order.push(r.vendor === 'tikhub' ? `${r.call.platform}:${r.call.kind}` : r.vendor);
+    const lastAccountSearch = order.lastIndexOf('douyin:account_search');
+    expect(lastAccountSearch).toBeGreaterThan(-1);
+    expect(order.indexOf('parallel')).toBeGreaterThan(lastAccountSearch);
   });
 });

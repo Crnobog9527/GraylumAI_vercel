@@ -87,7 +87,10 @@ export interface DeepenInput {
   isStopped: () => boolean;
 }
 
-/** Layers 2 and 3. Returns when a card can be shown, the reply's allowance stopped it, or every layer ran out. */
+/**
+ * Layers 2–3 for every platform, then layer 4. Returns when the card is full, the reply's allowance stopped it, or every
+ * layer ran out.
+ */
 export async function deepen(input: DeepenInput): Promise<void> {
   const { ctx, d, posts, coverage, pay, screen, enough, isStopped } = input;
   const done = () => isStopped() || enough();
@@ -133,26 +136,32 @@ export async function deepen(input: DeepenInput): Promise<void> {
       }
       pages = next;
     }
-    if (done()) return;
-    // Layer 4: web pages that list this niche's creators; the accounts their links name are leads like any other.
+  }
+  // Layer 4, after layers 2–3 of every platform (a second platform's own layers are never skipped for it): web pages
+  // that list this niche's creators; the accounts their links name are leads like any other.
     // Only while the round would otherwise end without a card: it is the lowest-yield layer, so a card of 8–11 does not
     // pay for it.
     // A platform screened through one of the author's own videos (YouTube) cannot screen a channel known only by its link,
     // so the web layer would pay for leads it can never check.
-    const web = selectRoute(ctx.config, 'web', 'web_search');
+  const web = selectRoute(ctx.config, 'web', 'web_search');
+  for (const platform of d.platforms) {
+    if (done()) return;
     const screenable = BENCHMARK_ROUTE_KINDS[platform]?.followersFrom !== 'post_detail';
     if (web.ok && web.vendor === 'parallel' && screenable && !input.cardable()) {
       for (const keyword of d.keywords.slice(0, WEB_QUERIES)) {
-        if (done() || input.cardable()) return;
+        if (done() || input.cardable()) break;
         const query = `${keyword} ${PLATFORM_NAMES[platform] ?? platform} creators`;
         const result = await pay(platform, { vendor: 'parallel', route: web.route, query, mode: 'fast' }, 'webSearches');
         if (!result || isStopped()) break;
         for (const lead of result.items.flatMap(item => webLeads(item, platform))) {
-          if (done() || input.cardable()) return;
+          if (done() || input.cardable()) break;
           await screen(platform, lead, null, []);
         }
       }
     }
+  }
+  for (const platform of d.platforms) {
+    const cover = coverage.platforms[platform]!;
     cover.exhausted = !cover.capReached && !isStopped();
   }
 }
