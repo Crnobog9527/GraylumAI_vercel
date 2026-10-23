@@ -25,10 +25,10 @@ export function toForm(profile: VoiceProfile): VoiceForm {
     samples: [...profile.samples, '', '', ''].slice(0, 3) };
 }
 const lines = (value: string) => value.split('\n').map(line => line.trim()).filter(Boolean);
-/** Back to the stored shape with the server's bounds; null when no passage is left (one is required). */
+/** Back to the stored shape with the server's bounds; null when fewer than two passages are left (2–3 are required). */
 export function fromForm(form: VoiceForm): VoiceProfile | null {
   const samples = form.samples.map(sample => sample.trim()).filter(Boolean).map(sample => sample.slice(0, 400));
-  if (!samples.length) return null;
+  if (samples.length < 2) return null;
   const text = (value: string) => value.trim().slice(0, 300);
   return { tone: text(form.tone), sentenceLength: text(form.sentenceLength), openings: text(form.openings),
     stance: text(form.stance), platforms: text(form.platforms),

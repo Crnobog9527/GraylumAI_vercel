@@ -5,7 +5,7 @@ import { fromForm, toForm, voiceErrorMessage, type VoiceState, type VoiceVersion
 import { MyVoiceView, type MyVoiceViewProps } from './my-voice-view';
 
 const profile = { tone: '像跟朋友唠嗑', sentenceLength: '短句多', openings: '先吐槽', stance: '', phrases: ['咋整'], avoid: ['家人们'],
-  platforms: '', samples: ['哎下班到家都七点了，咋整。'] };
+  platforms: '', samples: ['哎下班到家都七点了，咋整。', '一口锅搞定呗。'] };
 const version = (status: VoiceVersion['status'], extra: Partial<VoiceVersion> = {}): VoiceVersion => ({ id: status, version: 1,
   status, profile: ['draft', 'confirmed'].includes(status) ? profile : null, failure: null, createdAt: '', confirmedAt: null,
   sources: [{ documentId: 'd1', filename: '旧笔记.md' }], ...extra });
@@ -34,7 +34,7 @@ describe('MyVoiceView', () => {
   });
   it('the confirmed profile is shown read-only with its passages', () => {
     const html = render({ confirmed: version('confirmed') });
-    expect(html).toContain('当前使用的文风画像');expect(html).toContain('<blockquote>哎下班到家都七点了，咋整。</blockquote>');
+    expect(html).toContain('当前使用的文风画像');expect(html).toContain('<blockquote>哎下班到家都七点了，咋整。</blockquote>');expect(html).toContain('<blockquote>一口锅搞定呗。</blockquote>');
     expect(html).toContain('重新学习');
   });
   it('shows generating, stale, failure, switched off and needs update', () => {
@@ -47,9 +47,10 @@ describe('MyVoiceView', () => {
 });
 
 describe('voice form', () => {
-  it('round-trips and requires one passage', () => {
+  it('round-trips and requires two passages', () => {
     expect(fromForm(toForm(profile))).toEqual(profile);
     expect(fromForm({ ...toForm(profile), samples: ['', ' ', ''] })).toBeNull();
+    expect(fromForm({ ...toForm(profile), samples: ['只有一段', '', ''] })).toBeNull();
     expect(fromForm({ ...toForm(profile), phrases: ' 咋整 \n\n搞定 ' })?.phrases).toEqual(['咋整', '搞定']);
   });
   it('maps unknown errors to a plain sentence', () => {

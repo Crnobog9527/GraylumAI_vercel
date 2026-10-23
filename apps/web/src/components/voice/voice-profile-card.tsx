@@ -20,7 +20,7 @@ export function VoiceProfileCard({ version, title, busy, onConfirm, onDelete }: 
   const set = (key: keyof VoiceForm, value: string) => setForm(current => current && { ...current, [key]: value });
   function submit() {
     const next = form && fromForm(form);
-    if (!next) { setError('至少保留一段你自己写的原文。'); return; }
+    if (!next) { setError('至少保留两段你自己写的原文。'); return; }
     setError('');
     onConfirm?.(next);
   }
