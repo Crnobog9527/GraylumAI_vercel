@@ -2,7 +2,7 @@
 -- All rights reserved.
 -- This code is proprietary and confidential.
 -- PAY-REFUND: annual/founder first-purchase refunds extend the existing subscription intent.
--- Temporary number: obtain the controller's migration number before applying remotely.
+-- Controller assigned 0336 on 2026-10-23; remote application remains with the controller.
 -- Database first, same RPC signatures and monthly intent/hash format. Repeatable, no data rewrite.
 -- Recovery: forward-fix. Never roll back financial rows or provider refunds; unresolved intents stay held.
 BEGIN;
