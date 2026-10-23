@@ -1,25 +1,42 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { expect, it, vi } from 'vitest';
+import { beforeEach, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-vi.mock('@/trpc/client', () => ({ trpc: { publishMonitor: { addAccount: { useMutation: () => ({ error: null, isPending: false, mutate: vi.fn() }) } } } }));
-import { ADD_PLATFORMS, AddAccountForm } from './AddAccountForm';
+const state = vi.hoisted(() => ({ list: { data: undefined as unknown, isLoading: false, error: null as unknown } }));
+vi.mock('@/trpc/client', () => ({ trpc: {
+  opc: { businesses: { useQuery: () => state.list } },
+  publishMonitor: { addAccount: { useMutation: () => ({ error: null, isPending: false, mutate: vi.fn() }) } } } }));
+import { ADD_PLATFORMS, AddAccountForm, eligibleProfiles } from './AddAccountForm';
 import { dataErrorMessage } from './labels';
 
-const brand = (businessId: string, name: string) => ({ businessId, name, accounts: [] });
+const profile = (businessId: string, name: string, extra: Record<string, unknown> = {}) =>
+  ({ businessId, name, isArchived: false, currentSourceVersionId: '00000000-0000-4000-8000-000000000001', ...extra });
+beforeEach(() => { state.list = { data: [], isLoading: false, error: null }; });
 
-it('says to confirm a positioning first when the user has no positioning profile (none is created here)', () => {
-  const html = renderToStaticMarkup(<AddAccountForm brands={[]} onAdded={() => {}} />);
+it('only live profiles with a confirmed positioning are offered (archived and unconfirmed ones are not)', () => {
+  expect(eligibleProfiles([profile('a', '甲'), profile('b', '乙', { isArchived: true }),
+    profile('c', '丙', { currentSourceVersionId: null }), profile('d', '')]))
+    .toEqual([{ businessId: 'a', name: '甲' }, { businessId: 'd', name: '未命名定位档案' }]);
+  expect(eligibleProfiles(undefined)).toEqual([]);
+});
+
+it('says to confirm a positioning first when no profile qualifies (none is created here)', () => {
+  state.list = { data: [profile('c', '丙', { currentSourceVersionId: null }), profile('b', '乙', { isArchived: true })],
+    isLoading: false, error: null };
+  const html = renderToStaticMarkup(<AddAccountForm onAdded={() => {}} />);
   expect(html).toContain('完成并确认一个定位');
   expect(html).not.toContain('<select');
+  state.list = { data: undefined, isLoading: false, error: new Error('x') };
+  expect(renderToStaticMarkup(<AddAccountForm onAdded={() => {}} />)).toContain('暂时读不到你的定位档案');
 });
 
 it('lists the connectable platforms (not TikTok Business) and asks for the profile only when there are several', () => {
   expect(ADD_PLATFORMS).not.toContain('tiktok_business');
-  const one = renderToStaticMarkup(<AddAccountForm brands={[brand('a', '品牌甲')]} onAdded={() => {}} />);
+  state.list = { data: [profile('a', '甲')], isLoading: false, error: null };
+  const one = renderToStaticMarkup(<AddAccountForm onAdded={() => {}} />);
   expect(one).not.toContain('选择定位档案');
   for (const name of ['X', 'YouTube', 'Instagram', '小红书', '抖音']) expect(one).toContain(name);
-  const two = renderToStaticMarkup(<AddAccountForm brands={[brand('a', '品牌甲'), brand('b', '品牌乙')]} onAdded={() => {}} />);
-  expect(two).toContain('选择定位档案');
+  state.list = { data: [profile('a', '甲'), profile('b', '乙')], isLoading: false, error: null };
+  expect(renderToStaticMarkup(<AddAccountForm onAdded={() => {}} />)).toContain('选择定位档案');
 });
 
 it('every refusal of the database has its own readable text', () => {

@@ -4,7 +4,6 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { trpc } from '@/trpc/client';
-import type { Brand } from './brands';
 import { dataErrorMessage, errorCode, platformName } from './labels';
 
 /**
@@ -14,13 +13,29 @@ import { dataErrorMessage, errorCode, platformName } from './labels';
 export const ADD_PLATFORMS = ['x', 'youtube', 'tiktok', 'instagram', 'facebook', 'threads', 'linkedin', 'pinterest',
   'bluesky', 'xiaohongshu', 'douyin'] as const;
 
-export function AddAccountForm({ brands, onAdded }: { brands: Brand[]; onAdded: (projectId: string) => void }) {
-  const [businessId, setBusinessId] = useState(brands.length === 1 ? brands[0]!.businessId : '');
+/** Positioning profiles an account can hang on: live (not archived) and with a confirmed positioning (server rule too). */
+export function eligibleProfiles(list: unknown): Array<{ businessId: string; name: string }> {
+  if (!Array.isArray(list)) return [];
+  return list.flatMap(entry => {
+    const b = entry as { businessId?: unknown; name?: unknown; isArchived?: unknown; currentSourceVersionId?: unknown };
+    return typeof b.businessId === 'string' && b.isArchived !== true && typeof b.currentSourceVersionId === 'string'
+      ? [{ businessId: b.businessId, name: typeof b.name === 'string' && b.name ? b.name : '未命名定位档案' }] : [];
+  });
+}
+
+export function AddAccountForm({ onAdded }: { onAdded: (projectId: string) => void }) {
+  const profiles = trpc.opc.businesses.useQuery(undefined, { retry: false, refetchOnWindowFocus: false });
+  const brands = eligibleProfiles(profiles.data);
+  const [businessId, setBusinessId] = useState('');
   const [platform, setPlatform] = useState<string>(''), [account, setAccount] = useState('');
   const add = trpc.publishMonitor.addAccount.useMutation();
+  if (profiles.isLoading) return <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>正在读取定位档案…</p>;
+  if (profiles.error) return <p role="alert" className="text-sm" style={{ color: 'var(--color-error)' }}>
+    暂时读不到你的定位档案，请稍后重试。</p>;
   if (brands.length === 0) return <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-    还没有定位档案。先去"定位"完成并确认一个定位，这里才能添加账号。</p>;
-  const ready = Boolean(businessId && platform && account.trim());
+    还没有已确认定位的定位档案。先去"定位"完成并确认一个定位，这里才能添加账号。</p>;
+  const chosen = businessId || (brands.length === 1 ? brands[0]!.businessId : '');
+  const ready = Boolean(chosen && platform && account.trim());
   return (
     <fieldset className="space-y-2 rounded-md border p-3 text-sm" style={{ borderColor: 'var(--border-primary)' }}>
       <legend className="px-1 font-medium">添加品牌账号</legend>
@@ -40,7 +55,7 @@ export function AddAccountForm({ brands, onAdded }: { brands: Brand[]; onAdded: 
       <Input aria-label="账号名" placeholder="账号名，例如 your_handle（小写字母、数字和 . _ : -）" maxLength={128} value={account}
         onChange={event => setAccount(event.target.value)} />
       {add.error && <p role="alert" style={{ color: 'var(--color-error)' }}>{dataErrorMessage(errorCode(add.error))}</p>}
-      <Button disabled={!ready || add.isPending} onClick={() => add.mutate({ businessId,
+      <Button disabled={!ready || add.isPending} onClick={() => add.mutate({ businessId: chosen,
         platform: platform as typeof ADD_PLATFORMS[number], account: account.trim() }, {
         onSuccess: result => { setAccount(''); onAdded(result.accountProjectId); } })}>
         {add.isPending ? '添加中…' : '添加账号'}</Button>

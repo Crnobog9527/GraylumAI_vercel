@@ -54,7 +54,7 @@ export function ConnectForm({ brands, connected, initialProjectId = '', onConnec
           ))}
         </select>
       </label>
-      {(addOpen || accounts.length === 0) ? <AddAccountForm brands={brands}
+      {(addOpen || accounts.length === 0) ? <AddAccountForm
         onAdded={id => { setAddOpen(false); setProjectId(id); onAccountAdded?.(); }} />
         : <button type="button" className="text-sm underline" onClick={() => setAddOpen(true)}>没有想要的账号？添加品牌账号</button>}
       {account && connectRoute(account.platform) === 'postforme' && <PostForMeStart key={account.projectId} account={account} />}
