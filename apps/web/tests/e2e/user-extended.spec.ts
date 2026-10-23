@@ -10,6 +10,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { authStatePaths, hasCredentials } from './support/auth';
 
 import { gotoWithBypass } from './support/deploymentProtection';
+import { openMethodCheckoutDialog } from './support/methodCheckout';
 import { createIssueMonitor, writeFlowAudit } from './support/monitoring';
 
 const ticketUploadFixture = path.resolve(__dirname, './fixtures/ticket-attachment.png');
@@ -105,38 +106,19 @@ test.describe('User Extended Flows', () => {
       await expect(page.getByText('会员订阅')).toBeVisible({ timeout: 10000 });
 
       steps.push('Trigger a package purchase action');
-      const checkoutResponsePromise = page
-        .waitForResponse(
-          (response) =>
-            response.url().includes('/api/trpc/payments.createCheckoutSession') &&
-            response.request().method() === 'POST',
-          { timeout: 20000 },
-        )
-        .catch(() => null);
-      await page.getByTestId(/^profile-credit-package-/).first().getByRole('button', { name: '购买' }).click();
+      const buyButton = page.getByTestId(/^profile-credit-package-(?!name)/).first().getByRole('button');
+      await expect(buyButton).toBeVisible({ timeout: 10000 });
 
-      steps.push('Accept the legacy support dialog, a live Stripe Checkout redirect, or a created checkout session');
-      const purchaseIntentDialog = page.getByText('支付暂不可用');
-      const redirectedToCheckout = await page
-        .waitForURL(/https:\/\/(?:checkout|buy)\.stripe\.com\//, { timeout: 15000 })
-        .then(() => true)
-        .catch(() => false);
-      const checkoutResponse = await checkoutResponsePromise;
-
-      if (redirectedToCheckout) {
-        monitor.removeIssues((issue) =>
-          (issue.source === 'console' && issue.message === 'Failed to load resource: net::ERR_FAILED') ||
-          (issue.url?.includes('js.stripe.com/v3/.deploy_status_henson.json') ?? false) ||
-          issue.message.includes('js.stripe.com/v3/.deploy_status_henson.json') ||
-          issue.message.includes("origin 'https://checkout.stripe.com'"),
-        );
-        actual = 'Subscription purchase action redirected to Stripe Checkout';
-      } else if (checkoutResponse?.ok()) {
-        actual = 'Subscription purchase action created a Stripe Checkout session';
+      if (await buyButton.isDisabled()) {
+        // Packs are for paid members and need open checkout; a disabled button is the page's own answer, not silence.
+        steps.push('Package purchase is gated for this user: the buy button is disabled');
+        actual = 'Package purchase button is disabled for this user (members only or checkout closed)';
       } else {
-        await expect(purchaseIntentDialog).toBeVisible({ timeout: 10000 });
-        await expect(page.getByRole('button', { name: '提交工单咨询' })).toBeVisible({ timeout: 10000 });
-        actual = 'Subscription purchase action opened the support escalation dialog';
+        steps.push('Open the method-checkout dialog (nothing is paid)');
+        const dialog = await openMethodCheckoutDialog(page, buyButton);
+        await expect(dialog.getByTestId('method-checkout-pay')).toBeVisible({ timeout: 10000 });
+        actual = 'Subscription purchase action opened the method-checkout dialog';
+        await page.keyboard.press('Escape');
       }
 
       const blockingIssues = monitor.getIssues('P1');
@@ -152,7 +134,7 @@ test.describe('User Extended Flows', () => {
           title: 'subscription-purchase-next-step',
           role: 'user',
           route: '/app/profile?tab=subscription',
-          expected: 'Subscription and credit package actions either open the support dialog when checkout is disabled or redirect into Stripe Checkout when checkout is enabled.',
+          expected: 'Credit package purchase either opens the method-checkout dialog or is visibly disabled when the user cannot buy.',
         },
         actual,
         steps,
