@@ -47,6 +47,11 @@
 }
 .brand { display: flex; align-items: center; gap: 9px; color: var(--j-ink); font-size: 21px; font-weight: 600; letter-spacing: -.04em; text-decoration: none; }
 .brand img { width: 28px; height: 28px; border-radius: 6px; background: #262626; }
+/* The header stays one row (the sticky step-one stage leaves exactly its height): a longer site name, such as staging's
+   "Graylum AI Staging" on a phone, ends in an ellipsis instead of wrapping to a second line. */
+.brand { min-width: 0; }
+.brand img { flex-shrink: 0; }
+.brand span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 
 /* Pills */
 .pill, .pillSmall, .pillSmallLight {
