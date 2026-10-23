@@ -3,7 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const billing = vi.hoisted(() => ({ recoverReceipts: vi.fn(), readRun: vi.fn(), requestCancel: vi.fn(), finalizeRun: vi.fn() }));
 vi.mock('../bill2/service', async importOriginal => ({ ...await importOriginal<object>(), authoritativeBilling: () => billing }));
-vi.mock('../runtime/stagingPolicy', () => ({ loadStagingPolicy: async () => ({}) }));
+const parsed = vi.hoisted(() => vi.fn((value: unknown) => value));
+vi.mock('../runtime/stagingPolicy', () => ({ parseStagingPolicy: parsed, loadStagingPolicy: () => { throw new Error('live admission'); } }));
 vi.mock('../runtime/stagingTransport', () => ({ stagingTransport: () => ({}) }));
 import { recoverVoiceGenerations } from './recovery';
 
@@ -42,6 +43,23 @@ describe('recoverVoiceGenerations', () => {
     expect(await recoverVoiceGenerations(db as never)).toMatchObject({ success: true, scrubbed: 1 });
     expect(billing.requestCancel).toHaveBeenCalledWith('r');
     expect(db.calls.filter(([name]) => name === 'voice_billing_scrub')).toHaveLength(2);
+  });
+  it('settles with the run\'s frozen binding, never live admission, and looks the receipt up only with one', async () => {
+    const db = admin({ generations: [{ actorId: 'a', versionId: 'v', runId: 'r', status: 'draft', recovery: { id: 'w' } }], scrubs: [] });
+    expect(await recoverVoiceGenerations(db as never)).toMatchObject({ success: true, settled: 1 });
+    expect(parsed).toHaveBeenCalledWith({ id: 'w' });
+    expect(billing.recoverReceipts).toHaveBeenCalledWith('r', { timeoutMs: 2000 });
+    billing.recoverReceipts.mockClear();
+    await recoverVoiceGenerations(admin({ generations: [{ actorId: 'a', versionId: 'v', runId: 'r', status: 'draft', recovery: null }],
+      scrubs: [] }) as never);
+    expect(billing.recoverReceipts).not.toHaveBeenCalled();
+  });
+  it('leaves what does not fit the cron window for the next run', async () => {
+    let clock = 0;
+    billing.finalizeRun.mockImplementation(async () => { clock += 25_000; return { closed: true }; });
+    const db = admin({ generations: [1, 2, 3].map(n => ({ actorId: 'a', versionId: 'v' + n, runId: 'r' + n, status: 'generating' })),
+      scrubs: [{ actorId: 'a', runId: 's' }] });
+    expect(await recoverVoiceGenerations(db as never, { now: () => clock })).toMatchObject({ settled: 2, deferred: 2 });
   });
   it('counts a failure without stopping the others', async () => {
     billing.finalizeRun.mockRejectedValueOnce(new Error('down'));
