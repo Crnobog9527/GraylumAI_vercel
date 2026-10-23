@@ -114,7 +114,7 @@ describe('compare estimate', () => {
     expect(s.rpcs).toEqual([]);
   });
   it('refuses a social-media Skill for a user without a positioning, but only reports the refund cap otherwise', async () => {
-    const skill = { moduleId: 'm', revisionId: 'r', instructions: 'S', resources: [], socialMedia: true };
+    const skill = { moduleId: 'm', revisionId: 'r', skillId: 's', instructions: 'S', resources: [], socialMedia: true };
     await expect(estimateCompare(deps(), choice({ skill }))).rejects.toThrow('POSITIONING_REQUIRED');
     s.gate = { positioned: true, refusals24h: 0 };
     await expect(estimateCompare(deps(), choice({ skill }))).resolves.toBeDefined();
