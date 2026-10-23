@@ -4,6 +4,7 @@ import { authoritativeBilling, type BillingRpc, type BillingTransport } from '..
 import { createRuntimeBudget } from '../runtime/budget';
 import { parseStagingPolicy } from '../runtime/stagingPolicy';
 import { stagingTransport } from '../runtime/stagingTransport';
+import { isSettled } from './generation';
 import { voiceRpc } from './state';
 
 type Item = { actorId: string; runId: string | null; recovery: unknown };
@@ -30,7 +31,7 @@ export async function recoverVoiceGenerations(admin: SupabaseClient, options: { 
     const billing = authoritativeBilling({ admin: admin as unknown as BillingRpc, actor: async () => item.actorId, adapter, budget });
     if (item.recovery) await billing.recoverReceipts(item.runId, { timeoutMs: 2000 }).catch(() => undefined);
     if (!(await billing.readRun(item.runId)).closed) await billing.requestCancel(item.runId);
-    return (await billing.finalizeRun(item.runId)).closed;
+    return isSettled(await billing.finalizeRun(item.runId));
   }
   // Keep room for the slowest single step (one lookup and settlement) before the limit.
   const outOfTime = () => now() + 10_000 > stopAt;

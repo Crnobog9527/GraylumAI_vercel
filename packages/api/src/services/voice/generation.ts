@@ -40,21 +40,25 @@ export async function generateVoiceProfile(deps: VoiceGenerationDeps, requestId:
   const billing = authoritativeBilling({ admin: admin as unknown as BillingRpc, actor: async () => actorId, budget,
     adapter: deps.transport ? deps.transport(run, budget) : stagingTransport(admin, run.window, budget) });
   const gate = deps.callGate ? deps.callGate(run) : newWorkGate(admin, runtimeGateEnvironment(run.window)).calls;
-  const outcome = await execute(billing, gate, run, actorId, versionId, budget, begun.material);
-  const saved = await finish(outcome.profile ?? null, outcome.profile ? null : outcome.failure, outcome.settled);
+  const outcome = await execute(billing, gate, run, actorId, versionId, budget, begun.material, finish);
+  const saved = outcome.saved ?? await finish(null, outcome.failure, outcome.settled);
   if (saved.status === 'deleted') throw new Error('VOICE_VERSION_GONE');
   return saved as VoiceVersion;
 }
 
-type Outcome = { profile?: unknown; failure: string; settled: boolean };
+/** Only a final run state ends billing; cost_pending keeps its hold and stays with the daily recovery. */
+export const isSettled = (view: { state?: string }) => view.state === 'settled' || view.state === 'refunded';
+
+type Saved = VoiceVersion | { status: 'deleted' };
+type Outcome = { saved?: Saved; failure: string; settled: boolean };
 
 async function execute(billing: Billing, callGate: RuntimeCallGate, run: AdmittedVoiceRun, actorId: string, versionId: string,
-  budget: RuntimeBudget, material: VoiceMaterial[]): Promise<Outcome> {
+  budget: RuntimeBudget, material: VoiceMaterial[],
+  finish: (result: unknown, failure: string | null, settled: boolean) => Promise<Saved>): Promise<Outcome> {
   /** No usable answer: undispatched calls are released, a dispatched one settles at its known cost (as a Fusion stop). */
   const cancel = async (failure: string): Promise<Outcome> => {
     await billing.requestCancel(run.runId);
-    const view = await billing.finalizeRun(run.runId);
-    return { failure, settled: view.closed };
+    return { failure, settled: isSettled(await billing.finalizeRun(run.runId)) };
   };
   const gate = await callGate(actorId, 1, 'bill2.v2');
   if (!gate.ok) return cancel(gate.reason === 'paused' ? 'VOICE_PAUSED' : 'VOICE_RATE_LIMITED');
@@ -75,11 +79,14 @@ async function execute(billing: Billing, callGate: RuntimeCallGate, run: Admitte
   const text = fusionResponseText(dispatch.observation, run.call.model);
   const profile = text ? parseVoiceProfile(text, material) : null;
   if (!profile) return cancel('VOICE_FORMAT_INVALID');
+  // The profile is saved before the run is closed as delivered: a failure after this point leaves a saved profile and
+  // an open run that the daily recovery settles, never a charge without the result.
+  const saved = await finish(profile, null, false);
   const ref = `voice:${versionId}`;
   await billing.closeRun(run.runId, 'delivered', { kind: 'usable_result', evidenceRef: ref,
     evidenceHash: createHash('sha256').update(ref).digest('hex') });
-  const view = await billing.finalizeRun(run.runId);
-  return { profile, failure: '', settled: view.closed };
+  const settled = isSettled(await billing.finalizeRun(run.runId));
+  return { saved: settled ? await finish(null, null, true) : saved, failure: '', settled };
 }
 
 const codeOf = (error: unknown, fallback: string) =>
