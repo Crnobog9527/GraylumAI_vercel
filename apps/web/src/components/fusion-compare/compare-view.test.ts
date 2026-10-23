@@ -66,7 +66,7 @@ describe('compare cards in the transcript', () => {
 import { isDefiniteRefusal } from './compare-view';
 describe('which failures spend the start request id', () => {
   it('a server refusal with a compare code does; a lost response or network failure does not', () => {
-    expect(isDefiniteRefusal({ message: 'FUSION_COMPARE_ACTIVE' })).toBe(true);
+    expect(isDefiniteRefusal({ message: 'FUSION_COMPARE_TOO_FEW' })).toBe(true);
     expect(isDefiniteRefusal({ message: 'REPORT_MEMBERSHIP_REQUIRED' })).toBe(true);
     expect(isDefiniteRefusal({ message: 'POSITIONING_REQUIRED' })).toBe(true);
     expect(isDefiniteRefusal({ message: 'Failed to fetch' })).toBe(false);

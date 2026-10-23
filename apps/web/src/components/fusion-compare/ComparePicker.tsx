@@ -52,7 +52,8 @@ export function CompareButton({ sessionId, question, skill, disabled, blockedRea
 
 function ComparePicker({ options, sessionId, question, skill, onClose, onStarted, onMaybeStarted, startId }: {
   options: Extract<CompareOptions, { enabled: true }>; sessionId: string; question: string; skill?: CompareSkill;
-  onClose: () => void; onMaybeStarted?: () => void; startId: { current: { key: string; id: string } | null }; onStarted: (compareId: string, names: Record<string, string>) => void;
+  onClose: () => void; onMaybeStarted?: () => void; startId: { current: { key: string; id: string } | null };
+  onStarted: (compareId: string, names: Record<string, string>) => void;
 }) {
   const [picked, setPicked] = useState(() => initialPick(options));
   const [error, setError] = useState<{ text: string; upgrade: boolean } | null>(null);
