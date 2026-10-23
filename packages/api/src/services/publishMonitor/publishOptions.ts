@@ -54,6 +54,14 @@ export async function readPublishOptions(db: Pick<SupabaseClient, 'from'>) {
   return { platforms: open, holdCreditsByTargets: holdCreditsByTargets(rawPrice) };
 }
 
+/** True when this user already has a job under this idempotency key: a replay, which is never gated again. */
+export async function publishKeyExists(db: Pick<SupabaseClient, 'from'>, profileId: string, key: string): Promise<boolean> {
+  const { data, error } = await db.from('social_publish_jobs').select('id').eq('actor_id', profileId)
+    .eq('idempotency_key', key).maybeSingle();
+  if (error) throw new PublishError('PUBLISH_MONITOR_UNAVAILABLE');
+  return data !== null && data !== undefined;
+}
+
 /**
  * Every target must be one of the user's own connected, publish-authorized Post for Me accounts on an open platform,
  * one per platform. This runs before an upload slot is issued (the claim only comes after the upload), so an unknown

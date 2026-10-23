@@ -9,12 +9,14 @@ import { publishMonitorRouter } from './publishMonitor';
 
 const actor = '00000000-0000-4000-8000-0000000f0001';
 const profile = { id: actor, role: 'user', status: 'active', nickname: 'U', email: 'u@example.com' };
-function caller(rpc: ReturnType<typeof vi.fn>, switchOn: boolean, settings: Record<string, unknown> = {}) {
+function caller(rpc: ReturnType<typeof vi.fn>, switchOn: boolean, settings: Record<string, unknown> = {},
+  existingJob = false) {
   const from = (table: string) => {
     let key = '';
     return { select() { return this; }, eq(_column: string, value: string) { key = value; return this; },
       single: async () => ({ data: profile, error: null }),
-      maybeSingle: async () => ({ data: table !== 'system_settings' ? profile
+      maybeSingle: async () => ({ data: table === 'social_publish_jobs' ? (existingJob ? { id: 'job' } : null)
+        : table !== 'system_settings' ? profile
         : key === 'publish_monitor_enabled' ? { value: switchOn } : key in settings ? { value: settings[key] } : null,
       error: null }) };
   };
@@ -96,6 +98,17 @@ describe('publish-monitor one-click publishing', () => {
     }
     expect(mocks.limit).not.toHaveBeenCalled();
     expect(mocks.uploads).not.toHaveBeenCalled();
+  });
+
+  it('a key that already has a job is a replay: answered from the database even if the platform has closed since', async () => {
+    mocks.entitlements.mockResolvedValue({ allowPublish: true });
+    mocks.limit.mockResolvedValue({ success: true });
+    const rpc = vi.fn().mockRejectedValue(new Error('reached the claim'));
+    // No open platform at all, yet the replay passes the gate and reaches the database claim (which replays the job).
+    await expect(caller(rpc, true, {}, true).publish.submit(submit)).rejects.not.toMatchObject({
+      message: 'PUBLISH_MONITOR_PLATFORM_NOT_OPEN' });
+    // It got past the gate: the next step (reading the provider key) is what failed here.
+    expect(rpc).toHaveBeenCalled();
   });
 
   it('options lists the open platforms and the exact hold for 1..9 targets', async () => {

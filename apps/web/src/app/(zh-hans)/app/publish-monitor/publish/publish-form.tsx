@@ -11,7 +11,7 @@ import {
   authorizeHere, captionTooLong, MAX_CAPTION, mediaProblem, newIdempotencyKey, platformName, publishErrorMessage, type Target,
 } from '@/lib/publish-monitor/publish-flow';
 import { clearAttempt, loadAttempt, saveAttempt, sameFiles, type StoredAttempt } from '@/lib/publish-monitor/publish-recovery';
-import { mediaDigest, MediaUploadError, uploadPublishFiles, type UploadedMedia } from '@/lib/publish-monitor/upload-media';
+import { mediaDigest, MediaUploadError, uploadPublishFiles } from '@/lib/publish-monitor/upload-media';
 import { trpc } from '@/trpc/client';
 import { MediaPicker, type PickedMedia } from './media-picker';
 
@@ -20,8 +20,6 @@ import { MediaPicker, type PickedMedia } from './media-picker';
  * confirms the disclosure. A submit whose answer was lost is retried with the same key and the same uploads (the
  * server replays it and never posts twice); every new attempt after a final failure uploads again with a new key.
  */
-type Attempt = { key: string; media: UploadedMedia[]; covers: Array<number | null> };
-
 export function PublishForm({ businessId, workItemId, targets, initialCaption, initialTargets, holdCreditsByTargets,
   onSubmitted }: {
   businessId: string; workItemId: string | null; targets: Target[]; initialCaption: string; initialTargets: string[];
@@ -34,9 +32,8 @@ export function PublishForm({ businessId, workItemId, targets, initialCaption, i
   const [accepted, setAccepted] = useState(false);
   const [phase, setPhase] = useState<'idle' | 'uploading' | 'submitting'>('idle');
   const [error, setError] = useState('');
-  // The uploads of one attempt stay in memory only; storage keeps just the key and file identities (publish-recovery.ts).
-  const [attempt, setAttempt] = useState<Attempt | null>(null);
-  // An earlier submit whose answer never arrived (reload, crash): the next try must reuse its key, so it is replayed.
+  // A submit whose answer never arrived (lost answer, reload, crash): the next try reuses its key and uploads the files
+  // again (an old media link is never reused). Storage keeps only the key and file identities (publish-recovery.ts).
   const [recovered, setRecovered] = useState<StoredAttempt | null>(null);
   useEffect(() => {
     const stored = workItemId ? loadAttempt(workItemId) : null;
@@ -51,13 +48,15 @@ export function PublishForm({ businessId, workItemId, targets, initialCaption, i
   const tooLong = captionTooLong(caption, chosen.map(t => t.platform));
   const tooLongForServer = [...caption].length > MAX_CAPTION;
   // While an earlier submit is unconfirmed, what is published cannot change: another key could post and charge twice.
-  const locked = attempt !== null || recovered !== null;
+  const locked = recovered !== null;
   const mediaIssue = mediaProblem(chosen.map(t => t.platform), media.map(m => m.file.type.toLowerCase()));
   const canPublish = chosen.length > 0 && caption.trim().length > 0 && !tooLongForServer && mediaIssue === null && !busy;
   const changed = <T,>(set: (value: T) => void) => (value: T) => { if (!locked) set(value); };
+  // In recovery the covers are the saved ones (they are part of the request), shown on the files picked again.
+  const pick = (items: PickedMedia[]) => setMedia(recovered
+    ? items.map((item, i) => ({ ...item, coverMs: recovered.media[i]?.coverMs ?? null })) : items);
   function discardEarlier() {
     if (workItemId) clearAttempt(workItemId);
-    setAttempt(null);
     setRecovered(null);
     setError('');
   }
@@ -75,50 +74,47 @@ export function PublishForm({ businessId, workItemId, targets, initialCaption, i
   async function publish() {
     setConfirming(false);
     setError('');
-    let current = attempt;
+    const ids = recovered?.connectionIds ?? chosen.map(t => t.id);
+    let submitting = false;
+    let sent: StoredAttempt | null = null;
     try {
-      if (!current && recovered) {
-        setPhase('uploading');
+      setPhase('uploading');
+      if (recovered) {
         const digests: string[] = [];
         for (const item of media) digests.push(await mediaDigest(item.file));
-        if (!sameFiles(recovered, digests)) { setError('上一次提交还没有确认结果，请按原来的顺序选择同样的文件，或放弃上一次。'); return; }
-        const uploaded = media.length === 0 ? [] : await uploadPublishFiles(media.map(m => m.file), async count =>
-          uploadUrl.mutateAsync({ disclosureAccepted: true, count, connectionIds: recovered.connectionIds }));
-        current = { key: recovered.key, media: uploaded, covers: recovered.media.map(m => m.coverMs) };
-        setAttempt(current);
+        if (!sameFiles(recovered, digests)) {
+          setError('上一次提交还没有确认结果，请按原来的顺序选择同样的文件，或放弃上一次。');
+          return;
+        }
       }
-      if (!current) {
-        setPhase('uploading');
-        // A text-only post (X, Threads, LinkedIn, Bluesky, Facebook) uploads nothing.
-        const uploaded = media.length === 0 ? [] : await uploadPublishFiles(media.map(m => m.file), async count =>
-          uploadUrl.mutateAsync({ disclosureAccepted: true, count, connectionIds: chosen.map(t => t.id) }));
-        current = { key: newIdempotencyKey(), media: uploaded, covers: media.map(m => m.coverMs) };
-        setAttempt(current);
-      }
+      // A text-only post (X, Threads, LinkedIn, Bluesky, Facebook) uploads nothing.
+      const uploaded = media.length === 0 ? [] : await uploadPublishFiles(media.map(m => m.file), async count =>
+        uploadUrl.mutateAsync({ disclosureAccepted: true, count, connectionIds: ids }));
+      const record: StoredAttempt = recovered ?? { key: newIdempotencyKey(), connectionIds: ids, caption,
+        media: uploaded.map((item, i) => ({ sha256: item.sha256, size: item.size, mimeType: item.mimeType,
+          coverMs: media[i]!.coverMs })) };
       setPhase('submitting');
-      if (workItemId) saveAttempt(workItemId, { key: current.key, connectionIds: chosen.map(t => t.id), caption,
-        media: current.media.map((item, i) => ({ sha256: item.sha256, size: item.size, mimeType: item.mimeType,
-          coverMs: current!.covers[i] ?? null })) });
-      const job = await submit.mutateAsync({ idempotencyKey: current.key, businessId, workItemId,
-        connectionIds: chosen.map(t => t.id), caption,
-        media: current.media.map((item, i) => ({ ...item,
-          ...(current!.covers[i] !== null && item.mimeType.startsWith('video/') ? { thumbnailTimestampMs: current!.covers[i]! } : {}) })),
-      });
-      if (workItemId) clearAttempt(workItemId);
-      setAttempt(null);
-      setRecovered(null);
+      if (workItemId) saveAttempt(workItemId, record);
+      submitting = true;
+      sent = record;
+      const job = await submit.mutateAsync({ idempotencyKey: record.key, businessId, workItemId, connectionIds: record.connectionIds,
+        caption: record.caption, media: uploaded.map((item, i) => ({ ...item,
+          ...(record.media[i]!.coverMs !== null && item.mimeType.startsWith('video/')
+            ? { thumbnailTimestampMs: record.media[i]!.coverMs! } : {}) })) });
+      discardEarlier();
       onSubmitted(job.id);
     } catch (cause) {
       if (cause instanceof MediaUploadError) {
         // Nothing was submitted by this try; an earlier unconfirmed submit (recovered) stays protected.
-        if (!recovered) setAttempt(null);
         setError(publishErrorMessage(cause.code));
       } else {
         const trpcError = cause as { message?: string; data?: { code?: string } };
-        // A definite refusal means nothing was sent: the next try is a new attempt. Anything else may have reached the
-        // server, so the same attempt (same key, same uploads) is replayed and can never post twice.
         const httpCode = trpcError.data?.code;
-        if (httpCode && httpCode !== 'INTERNAL_SERVER_ERROR' && httpCode !== 'TOO_MANY_REQUESTS') discardEarlier();
+        // Only a definite refusal of the submit itself means nothing was sent. Anything else (and any refusal of an
+        // upload step) may follow a submit that reached the server, so the key stays and is replayed, never replaced.
+        const definite = submitting && httpCode && httpCode !== 'INTERNAL_SERVER_ERROR' && httpCode !== 'TOO_MANY_REQUESTS';
+        if (definite) discardEarlier();
+        else if (sent) setRecovered(sent);
         setError(publishErrorMessage(trpcError.message, httpCode));
       }
     } finally {
@@ -156,7 +152,7 @@ export function PublishForm({ businessId, workItemId, targets, initialCaption, i
 
       <section aria-labelledby="media" className="space-y-2">
         <h2 id="media" className="font-medium">图片或视频</h2>
-        <MediaPicker items={media} onChange={setMedia} disabled={busy || attempt !== null} />
+        <MediaPicker items={media} onChange={pick} disabled={busy} lockCover={locked} />
       </section>
 
       <section aria-labelledby="caption" className="space-y-2">
@@ -180,7 +176,7 @@ export function PublishForm({ businessId, workItemId, targets, initialCaption, i
       <div className="flex items-center gap-3">
         <Button disabled={!canPublish} onClick={() => { setAccepted(false); setConfirming(true); }}>
           {phase === 'uploading' ? '正在上传素材……' : phase === 'submitting' ? '正在提交……'
-            : attempt ? '再试一次（同一次发布，不会重复发）' : '发布'}</Button>
+            : recovered ? '再试一次（同一次发布，不会重复发）' : '发布'}</Button>
         {hold !== null && chosen.length > 0 && <span className="text-sm text-[var(--text-secondary)]">
           最多 {hold} 积分，只按发布成功的平台扣，失败不扣</span>}
       </div>

@@ -8,7 +8,7 @@ import {
   createMediaUploads, MAX_MEDIA, publishInput, readPublishJob, refreshPublishJob, submitPublish,
 } from '../services/publishMonitor/publish';
 import { takeUploadSlots } from '../services/publishMonitor/postForMe/config';
-import { assertPublishPlatformsOpen, readPublishOptions } from '../services/publishMonitor/publishOptions';
+import { assertPublishPlatformsOpen, publishKeyExists, readPublishOptions } from '../services/publishMonitor/publishOptions';
 import { requirePostForMeDeps } from '../services/publishMonitor/secrets';
 import { RateLimitError } from '../lib/rateLimitError';
 import { guarded } from './publishMonitorGuard';
@@ -50,7 +50,12 @@ export const publishMonitorPublishRouter = router({
   })),
   submit: protectedProcedure.input(publishInput).mutation(({ ctx, input }) => guarded(ctx, async () => {
     await requirePublishEntitlement(ctx);
-    await assertPublishPlatformsOpen(ctx.supabaseAdmin, ctx.profileId, input.connectionIds);
+    // A key that already has a job is a replay of an earlier submit whose answer was lost: it is answered from the
+    // database whatever the platform or account state is now (the state may have changed since), never gated again.
+    // A new key meets the platform and target checks first.
+    if (!(await publishKeyExists(ctx.supabaseAdmin, ctx.profileId, input.idempotencyKey))) {
+      await assertPublishPlatformsOpen(ctx.supabaseAdmin, ctx.profileId, input.connectionIds);
+    }
     await limitStep('publish', ctx.profileId);
     return submitPublish(ctx.supabaseAdmin, await requirePostForMeDeps(ctx.supabaseAdmin), ctx.profileId, input);
   })),

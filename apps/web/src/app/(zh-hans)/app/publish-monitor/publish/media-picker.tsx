@@ -14,7 +14,8 @@ export type PickedMedia = { key: string; file: File; coverMs: number | null };
 const MEDIA = /^(image|video)\//;
 const sizeLabel = (bytes: number) => bytes >= 1024 ** 2 ? `${(bytes / 1024 ** 2).toFixed(1)} MB` : `${Math.ceil(bytes / 1024)} KB`;
 
-function Preview({ item, disabled, onCover }: { item: PickedMedia; disabled: boolean; onCover: (ms: number | null) => void }) {
+function Preview({ item, disabled, lockCover, onCover }: { item: PickedMedia; disabled: boolean; lockCover: boolean;
+  onCover: (ms: number | null) => void }) {
   const url = useMemo(() => URL.createObjectURL(item.file), [item.file]);
   useEffect(() => () => URL.revokeObjectURL(url), [url]);
   const [duration, setDuration] = useState(0);
@@ -28,10 +29,10 @@ function Preview({ item, disabled, onCover }: { item: PickedMedia; disabled: boo
       {duration > 0 && (
         <label className="block text-xs text-[var(--text-secondary)]">
           封面：{item.coverMs === null ? '平台默认' : `第 ${seconds.toFixed(1)} 秒`}
-          <input type="range" min={0} max={Math.min(Math.floor(duration * 1000), MAX_COVER_MS)} step={100} disabled={disabled}
+          <input type="range" min={0} max={Math.min(Math.floor(duration * 1000), MAX_COVER_MS)} step={100} disabled={disabled || lockCover}
             value={item.coverMs ?? 0} aria-label="选择封面时间点" className="block w-40"
             onChange={event => onCover(Number(event.target.value))} />
-          {item.coverMs !== null && <button type="button" className="underline" disabled={disabled}
+          {item.coverMs !== null && <button type="button" className="underline" disabled={disabled || lockCover}
             onClick={() => onCover(null)}>用平台默认</button>}
         </label>
       )}
@@ -39,8 +40,8 @@ function Preview({ item, disabled, onCover }: { item: PickedMedia; disabled: boo
   );
 }
 
-export function MediaPicker({ items, onChange, disabled }: { items: PickedMedia[]; onChange: (items: PickedMedia[]) => void;
-  disabled: boolean }) {
+export function MediaPicker({ items, onChange, disabled, lockCover = false }: { items: PickedMedia[];
+  onChange: (items: PickedMedia[]) => void; disabled: boolean; lockCover?: boolean }) {
   const [error, setError] = useState('');
   function add(list: FileList | null) {
     setError('');
@@ -59,7 +60,7 @@ export function MediaPicker({ items, onChange, disabled }: { items: PickedMedia[
       <ul className="flex flex-wrap gap-3">
         {items.map(item => (
           <li key={item.key} className="flex items-start gap-2 rounded border border-[var(--border-default)] p-2">
-            <Preview item={item} disabled={disabled}
+            <Preview item={item} disabled={disabled} lockCover={lockCover}
               onCover={ms => onChange(items.map(i => i.key === item.key ? { ...i, coverMs: ms } : i))} />
             <div className="text-xs">
               <p className="max-w-40 truncate">{item.file.name}</p>

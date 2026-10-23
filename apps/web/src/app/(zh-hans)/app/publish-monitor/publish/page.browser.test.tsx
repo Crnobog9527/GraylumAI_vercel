@@ -176,14 +176,15 @@ it('a lost submit answer is retried with the same key and the same upload; a fai
     const keys = calls.filter(c => c.path === 'publishMonitor.publish.submit').map(c => (c.input as { idempotencyKey: string }).idempotencyKey);
     expect(keys).toHaveLength(2);
     expect(keys[1]).toBe(keys[0]);
-    expect(uploads).toHaveLength(1);
+    // Every retry uploads the file again (an old media link is never reused), under the same key.
+    expect(uploads).toHaveLength(2);
     // After a final failure, a new attempt uploads again under a new key.
     await page.getByRole('button', { name: '重新发布（会重新上传素材）' }).click();
     await pickImageAndConfirm(page);
     await ui(page.getByText('积分已全部退回')).toBeVisible();
     const third = calls.filter(c => c.path === 'publishMonitor.publish.submit').at(-1)!.input as { idempotencyKey: string };
     expect(third.idempotencyKey).not.toBe(keys[0]);
-    expect(uploads).toHaveLength(2);
+    expect(uploads).toHaveLength(3);
   } finally { await page.close(); }
 }, 30000);
 
@@ -220,14 +221,14 @@ it('after a reload, an unconfirmed submit is replayed with the same key and the 
     await ui(page.getByRole('textbox')).toBeDisabled();
     await ui(page.getByRole('checkbox', { name: 'X' })).toBeDisabled();
     await page.getByLabel('选择要发布的图片或视频').setInputFiles({ ...file, buffer: Buffer.from('ffd8ffe000104a46', 'hex') });
-    await page.getByRole('button', { name: '发布', exact: true }).click();
+    await page.getByRole('button', { name: '再试一次（同一次发布，不会重复发）' }).click();
     await page.getByRole('dialog').getByRole('checkbox').click();
     await page.getByRole('dialog').getByRole('button', { name: '确认发布' }).click();
     await ui(page.getByRole('alert')).toContainText('同样的文件');
     expect(uploads).toHaveLength(1);
     await page.getByRole('button', { name: /移除/ }).click();
     await page.getByLabel('选择要发布的图片或视频').setInputFiles(file);
-    await page.getByRole('button', { name: '发布', exact: true }).click();
+    await page.getByRole('button', { name: '再试一次（同一次发布，不会重复发）' }).click();
     await page.getByRole('dialog').getByRole('checkbox').click();
     await page.getByRole('dialog').getByRole('button', { name: '确认发布' }).click();
     await ui(page.getByText('已提交，正在等平台结果')).toBeVisible();
