@@ -6,7 +6,7 @@ import { DISABLED_RESEARCH_TOOLS, researchToolsConfigSchema } from '../vendors/c
 import { tikhubRouteId } from '../vendors/tikhub';
 import type { ResearchItem, SocialKind, SocialPlatform } from '../vendors/types';
 import { discover } from './discovery';
-import { discoveryCap } from './discoveryLayers';
+import { discoveryCap, webLeads } from './discoveryLayers';
 import type { DiscoveryRecord, RuntimeOperation, RuntimeResearchStore } from './store';
 import { requestIdentity, runSubcall, type SubcallContext, type SupplierRequest } from './subcall';
 import type { ResearchToolContext } from './toolContext';
@@ -214,5 +214,11 @@ describe('deeper discovery layers', () => {
     const envelope = await f.run();
     expect(web).not.toHaveBeenCalled();
     expect(envelope.coverage.platforms.youtube.spent.webSearches).toBe(0);
+  });
+
+  it('cuts web links at sentence punctuation and adjacent Chinese, as pasted links are', () => {
+    const item: ResearchItem = { missing: [], fields: { title: '推荐', excerpt: '关注 https://www.tiktok.com/@alice。还有 '
+      + 'https://www.tiktok.com/@bob, https://www.tiktok.com/@carol/video/7123456789. 以及https://www.tiktok.com/@dave！' } };
+    expect(webLeads(item, 'tiktok')).toEqual(['alice', 'bob', 'carol', 'dave']);
   });
 });

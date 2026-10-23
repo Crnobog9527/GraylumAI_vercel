@@ -10,7 +10,7 @@ import type { EvidenceItem } from '../benchmark/metrics';
 import type { ResearchItem, SocialPlatform } from '../vendors/types';
 import type { DiscoveryRecord } from './store';
 import type { SupplierRequest } from './subcall';
-import { canonicalAccount, parseProfileLink } from '../tools/accountLinks';
+import { canonicalAccount, linksIn, parseProfileLink } from '../tools/accountLinks';
 import { BENCHMARK_ROUTE_KINDS, selectRoute } from '../vendors/config';
 import { socialRequest, type ResearchToolContext } from './toolContext';
 
@@ -26,7 +26,6 @@ const WEB_QUERIES = 2;
 const PLATFORM_NAMES: Partial<Record<SocialPlatform, string>> = {
   tiktok: 'TikTok', youtube: 'YouTube', x: 'X Twitter', xiaohongshu: '小红书', douyin: '抖音', bilibili: 'B站', instagram: 'Instagram',
 };
-const LINK = /https?:\/\/[^\s"'<>()\]]+/g;
 
 /**
  * Accounts on `platform` named by one web result: its own link and the links in its title and excerpt. Profile links
@@ -34,8 +33,9 @@ const LINK = /https?:\/\/[^\s"'<>()\]]+/g;
  * model-written; YouTube @handle links are skipped (no handle → channel route).
  */
 export function webLeads(item: ResearchItem, platform: SocialPlatform): string[] {
+  // Links in text are cut exactly as in a user's message (profileLinksIn): no trailing punctuation or adjacent Chinese.
   const links = [item.url, ...[item.fields.title, item.fields.excerpt].flatMap(value => (typeof value === 'string'
-    ? value.match(LINK) ?? [] : []))].filter((link): link is string => typeof link === 'string');
+    ? linksIn(value) : []))].filter((link): link is string => typeof link === 'string');
   const leads = links.map(link => {
     const profile = parseProfileLink(link);
     if (profile) return profile.platform === platform ? profile.account : null;
