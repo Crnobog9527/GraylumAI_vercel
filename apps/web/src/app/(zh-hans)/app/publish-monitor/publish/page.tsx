@@ -144,7 +144,8 @@ function Workbench({ source }: { source: Source }) {
           )}
           {chosen && (
             <PublishForm key={`${round}:${chosen.business.businessId}`} businessId={chosen.business.businessId} workItemId={null}
-              contextKey={`result:${source.id}:${chosen.business.businessId}`} onPendingChange={setPending} targets={chosen.targets} initialCaption={latest.body}
+              contextKey={`result:${source.id}:${chosen.business.businessId}`} onPendingChange={setPending}
+              targets={chosen.targets} initialCaption={latest.body}
               initialTargets={retryTargets ?? (chosen.targets.length === 1 && chosen.targets[0]!.ready ? [chosen.targets[0]!.id] : [])}
               holdCreditsByTargets={options.data.holdCreditsByTargets} onSubmitted={remember} />
           )}
