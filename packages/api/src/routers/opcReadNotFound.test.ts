@@ -27,18 +27,18 @@ it('lets the owner read a deleted conversation that still has confirmed content'
   await expect(f.caller.read({draftId:id(1)})).resolves.toMatchObject({conversationDeleted:true,
     information:{s1:{values:{goal:{value:'已确认目标'}}}}});
 });
-const listed = (f: ReturnType<typeof fixture>, rows: unknown[]) => f.rpc.mockImplementation((...call: [name?: string, args?: Record<string, unknown>]) => {
+const listed = (f: ReturnType<typeof fixture>, rows: unknown) => f.rpc.mockImplementation((...call: [name?: string, args?: Record<string, unknown>]) => {
   const answer = {data:call[1]?.p_draft_id ? draft(false) : rows, error:null};
   return Object.assign(Promise.resolve(answer), {abortSignal:() => Promise.resolve(answer)});
 });
 it('reads a deleted conversation with nothing confirmed as not found', async () => {
   const f = fixture({data:draft(false)});
-  listed(f, []);
+  listed(f, {drafts:[{draftId:id(2)}]});
   await expect(f.caller.read({draftId:id(1)})).rejects.toMatchObject({code:'NOT_FOUND'});
 });
 it('keeps a deleted conversation that the sidebar list still holds for its published version', async () => {
   const f = fixture({data:draft(false)});
-  listed(f, [{draftId:id(1)}]);
+  listed(f, {drafts:[{draftId:id(1)}]});
   await expect(f.caller.read({draftId:id(1)})).resolves.toMatchObject({conversationDeleted:true});
 });
 it.each(['read', 'topicWorkspace', 'topicDraft', 'positionHistory'] as const)(

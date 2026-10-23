@@ -64,8 +64,8 @@ function hasConfirmedContent(projection: ReturnType<typeof readonlyDraftProjecti
  */
 async function retainedInList(raw: Raw, rpc: (name: string, args: Record<string, unknown>) => Promise<unknown>) {
   try {
-    const list = await rpc('opc_query', {});
-    return !Array.isArray(list) || list.some((row) => (row as { draftId?: unknown } | null)?.draftId === raw.draftId);
+    const drafts = ((await rpc('opc_query', {})) as { drafts?: unknown } | null)?.drafts;
+    return !Array.isArray(drafts) || drafts.some((row) => (row as { draftId?: unknown } | null)?.draftId === raw.draftId);
   } catch { return true; }
 }
 
