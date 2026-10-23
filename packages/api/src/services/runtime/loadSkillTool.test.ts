@@ -66,12 +66,22 @@ describe('load_skill', () => {
     expect(tool.invalidResult).toBeUndefined();
   });
 
-  it('refusals from the database (a third load, a name not frozen) are permanent too', async () => {
-    for (const code of ['RUNTIME_TOOL_DENIED', 'RUNTIME_TOOL_LIMIT', 'RUNTIME_SKILL_LOAD_CONFLICT']) {
-      const call = vi.fn(async () => { throw new Error(code); }) as never;
-      const tool = executionLoadSkillTool({executionId: id(9), catalog: [entry()], maxResultBytes: 20000, rpc: call, assertCanStart: () => {}});
-      expect(await tool.execute({name: 'script-writer'}, 'c')).toBe(SKILL_LOAD_REFUSED);
-    }
+  it('a refusal the executor classified (a third load, a name not frozen) is permanent', async () => {
+    const call = vi.fn(async () => { throw new Error('RUNTIME_SKILL_LOAD_REFUSED'); }) as never;
+    const tool = executionLoadSkillTool({executionId: id(9), catalog: [entry()], maxResultBytes: 20000, rpc: call, assertCanStart: () => {}});
+    expect(await tool.execute({name: 'script-writer'}, 'c')).toBe(SKILL_LOAD_REFUSED);
+  });
+
+  it('a revoked or disabled package (the package reader refuses) is a permanent refusal, not a retry', async () => {
+    const onRefused = vi.fn();
+    const call = vi.fn(async (name: string, args: Record<string, unknown>) => {
+      if (name === 'read_skill_package') throw new Error('RUNTIME_SKILL_FILE_REFUSED');
+      return args.p_action === 'claim' ? {result: null} : {result: args.p_result};
+    }) as never;
+    const tool = executionLoadSkillTool({executionId: id(9), catalog: [entry()], maxResultBytes: 20000, rpc: call,
+      assertCanStart: () => {}, onRefused});
+    expect(await tool.execute({name: 'script-writer'}, 'c')).toBe(SKILL_LOAD_REFUSED);
+    expect(onRefused).toHaveBeenCalledOnce();
   });
 
   it('lets an uncertain failure propagate so recovery can replay the journaled result', async () => {

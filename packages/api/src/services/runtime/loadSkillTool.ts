@@ -18,12 +18,12 @@ const savedResult = z.object({
 }).strict();
 // What the model is told when a load is permanently refused (unknown name, limit reached, package changed or revoked).
 export const SKILL_LOAD_REFUSED = 'This Skill cannot be loaded for this reply. Answer without it.';
-// Only these refusals become that text. Anything uncertain (a lost response, a timeout, a storage error) propagates,
-// so recovery can replay the journaled result instead of the model being told the Skill is unavailable.
-const PERMANENT = /^(RUNTIME_SKILL_LOAD_(DENIED|CONFLICT)|RUNTIME_TOOL_(DENIED|LIMIT|CONFLICT|RESULT_CONFLICT))$/;
+// Only these refusals become that text. executorRpc classifies the database's refusals into RUNTIME_SKILL_LOAD_REFUSED;
+// anything uncertain (a lost response, a timeout, a storage error, a closed run) propagates, so recovery can replay the
+// journaled result instead of the model being told the Skill is unavailable.
+const PERMANENT = /^RUNTIME_SKILL_LOAD_(DENIED|CONFLICT|REFUSED)$/;
 const permanent = (error: unknown) => error instanceof Error && (PERMANENT.test(error.message)
   || error instanceof SkillLoadError && error.code !== 'SOURCE_FAILURE');
-
 export function loadSkillTool(execute: RuntimeTool['execute']): RuntimeTool {
   return {
     name: LOAD_SKILL_TOOL, parameters: loadSkillParameters,
@@ -41,10 +41,19 @@ export function loadSkillToolBytes(): number {
 
 /** A source over one frozen package through the service reader, which rechecks publication and revocation. */
 function frozenSource(rpc: ToolRpc, entry: SkillCatalogEntry): SkillSource {
-  const read = <T>(path: string | null, maxBytes = 2097152) => rpc<T>('read_skill_package', {
-    p_module_id: entry.moduleId, p_skill_id: entry.skillId, p_revision_id: entry.revisionId,
-    p_package_hash: entry.packageHash, p_path: path, p_max_bytes: maxBytes,
-  });
+  // The package reader refuses a revoked revision or a disabled module for good; the loader would hide that as a source
+  // failure (a retry), so it is translated into a load error that is not SOURCE_FAILURE.
+  const read = async <T>(path: string | null, maxBytes = 2097152) => {
+    try {
+      return await rpc<T>('read_skill_package', {
+        p_module_id: entry.moduleId, p_skill_id: entry.skillId, p_revision_id: entry.revisionId,
+        p_package_hash: entry.packageHash, p_path: path, p_max_bytes: maxBytes,
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message === 'RUNTIME_SKILL_FILE_REFUSED') throw new SkillLoadError('UNAVAILABLE');
+      throw error;
+    }
+  };
   return {
     list: async () => [validateDescriptor(await read(null))],
     state: async identity => (sameIdentity(identity, entry) && await read('') === true ? 'enabled' : 'denied'),
