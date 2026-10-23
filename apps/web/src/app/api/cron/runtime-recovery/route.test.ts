@@ -1,10 +1,11 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
-const mocks = vi.hoisted(() => ({ auth: vi.fn(), create: vi.fn(), recover: vi.fn() }));
+const mocks = vi.hoisted(() => ({ auth: vi.fn(), create: vi.fn(), recover: vi.fn(), notice: vi.fn() }));
 vi.mock('@/lib/cron-auth', () => ({ validateCronRequest: mocks.auth }));
 vi.mock('@supabase/supabase-js', () => ({ createClient: mocks.create }));
 vi.mock('@repo/api/src/services/runtime/automaticRecovery', () => ({ runAutomaticFinancialRecovery: mocks.recover }));
+vi.mock('@repo/api/src/services/runtime/stopLossNotify', () => ({ deliverStopLossAlerts: mocks.notice }));
 import { GET } from './route';
 afterEach(() => vi.unstubAllEnvs());
 beforeEach(() => {
@@ -13,11 +14,13 @@ beforeEach(() => {
   vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 'synthetic-service-value');
   mocks.create.mockReturnValue({ synthetic: true });
   mocks.recover.mockResolvedValue({ selected: 1, processed: 1, settled: 1, pending: 0, failed: 0 });
+  mocks.notice.mockResolvedValue({ outcome: 'none', alerts: 0 });
 });
 it('denies unauthenticated cron before inventory or provider work', async () => {
   mocks.auth.mockReturnValue(new Response('Unauthorized', { status: 401 }));
   expect((await GET(new Request('https://synthetic.test/api/cron/runtime-recovery'))).status).toBe(401);
   expect(mocks.create).not.toHaveBeenCalled(); expect(mocks.recover).not.toHaveBeenCalled();
+  expect(mocks.notice).not.toHaveBeenCalled();
 });
 it('runs the bounded recovery through the existing authenticated cron entry', async () => {
   const response = await GET(new Request('https://synthetic.test/api/cron/runtime-recovery?actorId=ignored'));
@@ -53,4 +56,14 @@ it('fails while reported stale-round refunds were deferred by the time budget', 
   const staleRounds = { found: 5, compensated: 2, alreadyCompensated: 0, skipped: 0, failed: 0, credits: 6, manualReview: 0, deferred: 3 };
   mocks.recover.mockResolvedValue({ selected: 0, processed: 0, settled: 0, pending: 0, failed: 0, staleRounds });
   expect((await GET(new Request('https://synthetic.test/api/cron/runtime-recovery'))).status).toBe(500);
+});
+it('mails stop-loss alerts before recovery, bounded, and even when recovery fails, without changing its status', async () => {
+  mocks.notice.mockResolvedValue({ outcome: 'not_sent', alerts: 2, code: 'PAYMENT_NOTICE_NOT_CONFIGURED' });
+  const ok = await GET(new Request('https://synthetic.test/api/cron/runtime-recovery'));
+  expect(ok.status).toBe(200);
+  expect(mocks.notice).toHaveBeenCalledWith({ synthetic: true });
+  expect(mocks.notice.mock.invocationCallOrder[0]).toBeLessThan(mocks.recover.mock.invocationCallOrder[0]!);
+  mocks.recover.mockRejectedValue(new Error('synthetic'));
+  expect((await GET(new Request('https://synthetic.test/api/cron/runtime-recovery'))).status).toBe(500);
+  expect(mocks.notice).toHaveBeenCalledTimes(2);
 });

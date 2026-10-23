@@ -12,6 +12,7 @@ function db(switchValue: unknown, failing: string[] = [], featureOn: boolean | '
       if (failing.includes(name)) return { data: null, error: { message: 'x' } };
       if (name === 'publish_monitor_orphan_classify') return { data: { delete: [], unknownFormat: [], takenOver: [] }, error: null };
       if (name === 'publish_monitor_snapshot_prune' || name === 'publish_monitor_billed_prune') return { data: 0, error: null };
+      if (name === 'publish_monitor_stuck_list') return { data: { totals: { connections: 3, requests: 250 }, connections: [], requests: [] }, error: null };
       return { data: [], error: null };
     },
     from: () => {
@@ -37,8 +38,10 @@ describe('publish-monitor daily job', () => {
     const report = await runSocialMonitorJob(off.db, deps(), Date.now() + 60_000, windowFor);
     expect(off.calls).toEqual(['publish_monitor_snapshot_prune', 'publish_monitor_billed_prune', 'publish_monitor_publish_reconcile_claim',
       'publish_monitor_billed_orphans',
-      'publish_monitor_provider_work_claim', 'publish_monitor_cleanup_claim', 'publish_monitor_orphan_classify']);
-    expect([report.sweepDeleteEnabled, report.refresh, report.failures]).toEqual([false, null, []]);
+      'publish_monitor_provider_work_claim', 'publish_monitor_cleanup_claim', 'publish_monitor_orphan_classify',
+      'publish_monitor_stuck_list']);
+    expect([report.sweepDeleteEnabled, report.refresh, report.failures, report.stuck])
+      .toEqual([false, null, [], { connections: 3, requests: 250 }]);
     expect((await runSocialMonitorJob(db(true).db, deps(), Date.now() + 60_000, windowFor)).sweepDeleteEnabled).toBe(true);
   });
 
@@ -48,7 +51,7 @@ describe('publish-monitor daily job', () => {
     expect(on.calls).toEqual(['publish_monitor_snapshot_prune', 'publish_monitor_billed_prune', 'publish_monitor_publish_reconcile_claim',
       'publish_monitor_billed_orphans',
       'publish_monitor_provider_work_claim', 'publish_monitor_cleanup_claim', 'publish_monitor_refresh_claim',
-      'publish_monitor_orphan_classify']);
+      'publish_monitor_orphan_classify', 'publish_monitor_stuck_list']);
     expect(report.refresh).toEqual({ claimed: 0, outcomes: {} });
   });
 
@@ -84,6 +87,15 @@ describe('publish-monitor daily job', () => {
     expect(second.failures).toEqual(['publishes']);
     expect(publishes.calls).toContain('publish_monitor_provider_work_claim');
     expect(broken.calls).toContain('publish_monitor_cleanup_claim');
+  });
+
+  it('counts stopped cleanup last, even after a failing step, and reports a failed count as a failure', async () => {
+    const stuck = db(undefined, ['publish_monitor_cleanup_claim']);
+    const report = await runSocialMonitorJob(stuck.db, deps(), Date.now() + 60_000, windowFor);
+    expect([report.failures, report.stuck, stuck.calls.at(-1)])
+      .toEqual([['attempts'], { connections: 3, requests: 250 }, 'publish_monitor_stuck_list']);
+    const unreadable = await runSocialMonitorJob(db(undefined, ['publish_monitor_stuck_list']).db, deps(), Date.now() + 60_000, windowFor);
+    expect([unreadable.failures, unreadable.stuck]).toEqual([['stuck'], null]);
   });
 
   it('without a provider key, expired publish claims are still released (database only, no check work handed out)',

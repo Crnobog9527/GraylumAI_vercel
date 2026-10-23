@@ -24,7 +24,7 @@ const mock = `
     if (name==='get') return {config:s.limits,source:'configured',enforcement:{admission:true,calls:true,pause:true}};
     if (name==='stopLossConfig') return {config:s.stopLoss,revision:s.revision,source:s.source};
     if (name==='stopLossStatus') return {config:s.stopLoss,revision:s.revision,source:s.source,usage:s.usage,basis:'settled_provider_usd',
-      timezone:'UTC',externalNotifications:'not_connected'};
+      timezone:'UTC',externalNotifications:'email'};
     if (name==='stopLossAlerts') return {alerts:s.alerts,limit:100};
   };
   const cache = {};
