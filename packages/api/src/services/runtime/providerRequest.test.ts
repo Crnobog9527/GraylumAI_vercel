@@ -111,3 +111,22 @@ describe('MR-2 frozen reasoning binding',()=>{
   expect(()=>body(sdk('read_source',{reasoning:{max_tokens:2048}}),context)).toThrow('RUNTIME_PROVIDER_BINDING_DENIED');
  });
 });
+
+describe('CHAT-AUTO-CONTEXT C: free chat research tools',()=>{
+ const free=(patch:Partial<RequestContext>={}):RequestContext=>({...older('serial-tools-v6-reasoning'),libraryRetrieval:true,
+  tools:['read_source','social_search','web_search'],research:{freeChat:'free-chat-v1'},...patch});
+ const request=(names:string[])=>JSON.stringify({model:'m/x',messages:[{content:'I',role:'system'},{role:'user',content:'hello'}],
+  tools:names.map(tool),max_tokens:100,stream:false,store:false,reasoning_effort:'none'});
+ it('sends the research tools the frozen context lists, together with read_source',()=>{
+  const sent=JSON.parse(body(request(['read_source','social_search','web_search']),free(),'ordinary'));
+  expect(sent.tools.map((t:{function:{name:string}})=>t.function.name)).toEqual(['read_source','social_search','web_search']);
+ });
+ it.each([
+  ['a research tool the context did not freeze',request(['read_source','web_fetch']),free()],
+  ['a positioning flow tool',request(['read_source','benchmark_fetch']),free({tools:['read_source','benchmark_fetch']})],
+  ['research tools without the frozen free chat marker',request(['read_source','web_search']),free({research:undefined})],
+  ['research tools on another format',request(['read_source','web_search']),free({providerRequestFormat:'serial-tools-v4-stream'})],
+ ])('refuses %s',(_case,requestBody,context)=>{
+  expect(()=>body(requestBody,context,'ordinary')).toThrow('RUNTIME_REAL_TOOLS_DISABLED');
+ });
+});

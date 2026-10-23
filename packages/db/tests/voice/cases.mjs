@@ -145,9 +145,29 @@ export async function runCases({db,report}) {
  assert.equal(await svc('voice_billing_scrub',f.run),'done');
  assert.equal(await one(db,'SELECT count(*)::int v FROM voice_billing_scrubs WHERE run_id=$1',[f.run]),0);
  assert.ok(await one(db,'SELECT content_deleted_at IS NOT NULL v FROM bill2_runs WHERE id=$1',[f.run]));
+ // Rotation (review P1): a scrub that keeps waiting moves behind rows not yet checked; candidates report whether a profile exists.
+ const stale=await one(db,"SELECT checked_at v FROM voice_billing_scrubs WHERE run_id=$1",[f.run]).catch(()=>null);
  const candidates=await svc('voice_recovery_candidates',50);
  assert.ok(Array.isArray(candidates.generations)&&Array.isArray(candidates.scrubs));
  assert.equal(await svc('voice_run_recovery',f.run).catch(e=>e.message),'permission denied for function voice_run_recovery','binding helper is private');
+ {
+  const w=await actor();const wd=await doc(w,'wait.md');const wb=await begin(w);await finish(w,wb.version.id);
+  await db.query("UPDATE voice_profile_versions SET billing_run_id=$2,billing_settled=false,updated_at=now()-interval '2 hours' WHERE id=$1",[wb.version.id,randomUUID()]);
+  const listed=async()=>(await svc('voice_recovery_candidates',50)).generations.find(g=>g.versionId===wb.version.id);
+  assert.equal((await listed()).hasProfile,true,'a saved profile counts as delivered');
+  await svc('voice_generation_finish',w,wb.version.id,null,null,false);
+  assert.equal(await listed(),undefined,'an attempt that stays unsettled moves the row to the back of the queue');
+  const failed=await begin(w);await finish(w,failed.version.id,null,'VOICE_RESULT_PENDING');
+  await db.query("UPDATE voice_profile_versions SET billing_run_id=$2,billing_settled=false,updated_at=now()-interval '2 hours' WHERE id=$1",[failed.version.id,randomUUID()]);
+  assert.equal((await svc('voice_recovery_candidates',50)).generations.find(g=>g.versionId===failed.version.id).hasProfile,false,
+   'a failed (result pending) version has no profile: never charged');
+  await db.query("INSERT INTO voice_billing_scrubs(run_id,actor_id,created_at,checked_at) VALUES($1,$2,now()-interval '3 hours',now()-interval '3 hours')",[randomUUID(),w]);
+  const scrubRun=(await db.query("SELECT run_id FROM voice_billing_scrubs WHERE actor_id=$1",[w])).rows[0].run_id;
+  assert.ok((await svc('voice_recovery_candidates',50)).scrubs.some(x=>x.runId===scrubRun));
+  await svc('voice_billing_scrub',scrubRun);
+  assert.ok(!(await svc('voice_recovery_candidates',50)).scrubs.some(x=>x.runId===scrubRun),'a checked scrub moves behind unchecked ones');
+  await svc('voice_profile_delete',w,failed.version.id).catch(()=>undefined);void wd;
+ }
  report.checks.push('receipts of a deleted source wait for the run to close, then are scrubbed once');
 
  // Account erasure removes every voice row.

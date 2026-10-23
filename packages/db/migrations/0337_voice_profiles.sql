@@ -47,8 +47,11 @@ CREATE TABLE IF NOT EXISTS public.voice_profiles (
 -- financial fields once the run is closed (the 0262 rule), then the row goes.
 CREATE TABLE IF NOT EXISTS public.voice_billing_scrubs (
  run_id uuid PRIMARY KEY, actor_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE RESTRICT,
- created_at timestamptz NOT NULL DEFAULT clock_timestamp()
+ created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ -- Last recovery attempt: candidates are taken oldest-checked first, so rows that keep waiting never crowd out newer ones.
+ checked_at timestamptz NOT NULL DEFAULT clock_timestamp()
 );
+ALTER TABLE public.voice_billing_scrubs ADD COLUMN IF NOT EXISTS checked_at timestamptz NOT NULL DEFAULT clock_timestamp();
 CREATE INDEX IF NOT EXISTS voice_billing_scrubs_actor ON public.voice_billing_scrubs(actor_id);
 ALTER TABLE public.voice_profile_versions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.voice_profiles ENABLE ROW LEVEL SECURITY;
@@ -163,7 +166,9 @@ BEGIN
  SELECT * INTO v FROM voice_profile_versions WHERE id=vid AND actor_id=a FOR UPDATE;
  IF v.id IS NULL THEN RETURN jsonb_build_object('status','deleted'); END IF;
  IF v.status<>'generating' THEN
-  IF settled THEN UPDATE voice_profile_versions SET billing_settled=true WHERE id=vid RETURNING * INTO v; END IF;
+  -- A recovery attempt always moves the row to the back of the queue, settled or not.
+  UPDATE voice_profile_versions SET billing_settled=billing_settled OR coalesce(settled,false),updated_at=clock_timestamp()
+   WHERE id=vid RETURNING * INTO v;
   RETURN voice_version_view(v);
  END IF;
  IF (result IS NULL)=(failure_code IS NULL) THEN RAISE EXCEPTION 'VOICE_INVALID'; END IF;
@@ -293,14 +298,21 @@ $$;
 CREATE OR REPLACE FUNCTION public.voice_recovery_candidates(p_limit integer DEFAULT 50) RETURNS jsonb
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
  SELECT jsonb_build_object(
+  -- hasProfile: a profile was really saved, so the run was delivered; otherwise the user must not be charged.
   'generations',(SELECT coalesce(jsonb_agg(jsonb_build_object('actorId',actor_id,'versionId',id,'runId',billing_run_id,
-    'status',status,'recovery',voice_run_recovery(billing_run_id))),'[]') FROM (SELECT * FROM voice_profile_versions
+    'status',status,'hasProfile',profile IS NOT NULL,'recovery',voice_run_recovery(billing_run_id))),'[]')
+    FROM (SELECT * FROM voice_profile_versions
     WHERE (status='generating' OR (billing_run_id IS NOT NULL AND NOT billing_settled))
      AND updated_at<clock_timestamp()-interval '30 minutes' ORDER BY updated_at LIMIT p_limit) g),
   'scrubs',(SELECT coalesce(jsonb_agg(jsonb_build_object('actorId',actor_id,'runId',run_id,
     'recovery',voice_run_recovery(run_id))),'[]')
-   FROM (SELECT * FROM voice_billing_scrubs WHERE created_at<clock_timestamp()-interval '30 minutes'
-    ORDER BY created_at LIMIT p_limit) s));
+   FROM (SELECT * FROM voice_billing_scrubs WHERE checked_at<clock_timestamp()-interval '30 minutes'
+    ORDER BY checked_at LIMIT p_limit) s));
+$$;
+-- A candidate that could not be processed (an error before any state change) also goes to the back of the queue.
+CREATE OR REPLACE FUNCTION public.voice_recovery_touch(p_version_id uuid) RETURNS void
+LANGUAGE sql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+ UPDATE voice_profile_versions SET updated_at=clock_timestamp() WHERE id=p_version_id;
 $$;
 -- Projects a closed run's receipts to their financial fields (0262's rule), then forgets it. Waits while open.
 CREATE OR REPLACE FUNCTION public.voice_billing_scrub(p_run_id uuid) RETURNS text
@@ -309,6 +321,7 @@ DECLARE s voice_billing_scrubs; b bill2_runs; scrub jsonb;
 BEGIN
  SELECT * INTO s FROM voice_billing_scrubs WHERE run_id=p_run_id FOR UPDATE SKIP LOCKED;
  IF s.run_id IS NULL THEN RETURN 'done'; END IF;
+ UPDATE voice_billing_scrubs SET checked_at=clock_timestamp() WHERE run_id=p_run_id;
  SELECT * INTO b FROM bill2_runs WHERE id=p_run_id AND actor_id=s.actor_id FOR UPDATE NOWAIT;
  IF b.id IS NOT NULL THEN
   IF NOT b.closed THEN RETURN 'waiting'; END IF;
@@ -350,12 +363,12 @@ REVOKE ALL ON FUNCTION public.voice_corpus_limit(),public.voice_current_corpus(u
  public.voice_profile_set_enabled(uuid,integer,boolean),public.voice_profile_delete(uuid,uuid),
  public.voice_delete_versions(uuid,uuid[]),public.voice_library_trigger(),public.voice_profile_current(uuid),
  public.voice_profile_read(uuid,uuid),public.voice_recovery_candidates(integer),public.voice_billing_scrub(uuid),
- public.voice_run_recovery(uuid),public.erasure_business_owner(text,jsonb),public.account_erasure_prune_business(uuid,integer),
+ public.voice_run_recovery(uuid),public.voice_recovery_touch(uuid),public.erasure_business_owner(text,jsonb),public.account_erasure_prune_business(uuid,integer),
  public.account_erasure_business_remaining(uuid)
  FROM PUBLIC,anon,authenticated,service_role;
 GRANT EXECUTE ON FUNCTION public.voice_state(uuid),public.voice_generation_begin(uuid,uuid,uuid[]),
  public.voice_generation_bind(uuid,uuid,uuid),public.voice_generation_finish(uuid,uuid,jsonb,text,boolean),
  public.voice_profile_confirm(uuid,uuid,integer,jsonb),public.voice_profile_set_enabled(uuid,integer,boolean),
  public.voice_profile_delete(uuid,uuid),public.voice_profile_current(uuid),public.voice_profile_read(uuid,uuid),
- public.voice_recovery_candidates(integer),public.voice_billing_scrub(uuid) TO service_role;
+ public.voice_recovery_candidates(integer),public.voice_billing_scrub(uuid),public.voice_recovery_touch(uuid) TO service_role;
 COMMIT;

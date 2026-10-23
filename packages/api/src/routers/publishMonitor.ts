@@ -1,7 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import {publishMonitorReviewRouter} from './publishMonitorReview';
 import { TRPCError } from '@trpc/server';
-import { protectedProcedure, router } from '../trpc';
+import { protectedProcedure, publicProcedure, router } from '../trpc';
+import { NO_PUBLIC_FEATURES, readPublicFeatures } from '../services/publishMonitor/publicFeatures';
 import { readMembershipEntitlements } from '../services/membershipEntitlements';
 import {
   autoReviewInput, disconnectConnection, disconnectInput, listConnections, readPublishMonitorSettings, setAutoReview,
@@ -15,6 +16,7 @@ import {
   addBenchmark, benchmarkAddInput, connectOwnTikhub, tikhubConnectInput,
 } from '../services/publishMonitor/tikhub';
 import { checkRateLimitOrThrow } from '../services/redisRateLimiter';
+import { publishMonitorAdminRouter } from './publishMonitorAdmin';
 import { publishMonitorConnectRouter } from './publishMonitorConnect';
 import { publishMonitorPublishRouter } from './publishMonitorPublish';
 import { guarded as safe } from './publishMonitorGuard';
@@ -31,6 +33,9 @@ async function dataWindow(ctx: Ctx): Promise<number> {
 
 export const publishMonitorRouter = router({
   review: publishMonitorReviewRouter,
+  // PR-7: two booleans for the paywall, pricing page and rail; public, so it reveals nothing beyond the switches.
+  features: publicProcedure.query(({ ctx }) =>
+    (ctx.hasSupabaseAdminPrivileges ? readPublicFeatures(ctx.supabaseAdmin) : NO_PUBLIC_FEATURES)),
   settings: protectedProcedure.query(({ ctx }) =>
     safe(ctx, () => readPublishMonitorSettings(ctx.supabaseAdmin, ctx.profileId))),
   // Weekly automatic review is a Gold entitlement (Master Plan §2.1 item 51); turning it off is always allowed,
@@ -82,6 +87,7 @@ export const publishMonitorRouter = router({
     await checkRateLimitOrThrow(`publish-monitor-benchmark:${ctx.profileId}`, 'api');
     return addBenchmark(ctx.supabaseAdmin, ctx.profileId, input);
   })),
+  admin: publishMonitorAdminRouter,
   connect: publishMonitorConnectRouter,
   publish: publishMonitorPublishRouter,
 });

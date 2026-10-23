@@ -8,7 +8,7 @@ import { isSettled, voiceEvidence } from './generation';
 import { voiceRpc } from './state';
 
 type Item = { actorId: string; runId: string | null; recovery: unknown };
-type Candidates = { generations: Array<Item & { versionId: string; status: string }>; scrubs: Array<Item & { runId: string }> };
+type Candidates = { generations: Array<Item & { versionId: string; status: string; hasProfile: boolean }>; scrubs: Array<Item & { runId: string }> };
 const noTransport: BillingTransport = {
   dispatch: async () => { throw new Error('VOICE_RECOVERY_NO_DISPATCH'); },
   lookup: async () => { throw new Error('VOICE_RECOVERY_LOOKUP_UNAVAILABLE'); },
@@ -43,13 +43,17 @@ export async function recoverVoiceGenerations(admin: SupabaseClient, options: { 
   for (const item of candidates.generations) {
     if (outOfTime()) { summary.deferred += 1; continue; }
     try {
-      // Still generating means no profile was ever saved; otherwise the profile exists and the run was delivered.
+      // Delivered only when a profile was really saved. A version marked failed (result pending) or still generating has
+      // none: the user must not be charged for a result they never received.
       const settled = item.runId ? await settle({ ...item, runId: item.runId },
-        item.status === 'generating' ? 'confirmed_failure' : 'delivered', item.versionId) : true;
+        item.hasProfile ? 'delivered' : 'confirmed_failure', item.versionId) : true;
       await voiceRpc(admin, 'voice_generation_finish', { a: item.actorId, vid: item.versionId, result: null,
         failure_code: item.status === 'generating' ? 'VOICE_INTERRUPTED' : null, settled });
       if (settled) summary.settled += 1; else summary.waiting += 1;
-    } catch { summary.failed += 1; }
+    } catch {
+      summary.failed += 1;
+      await voiceRpc(admin, 'voice_recovery_touch', { p_version_id: item.versionId }).catch(() => undefined);
+    }
   }
   for (const item of candidates.scrubs) {
     if (outOfTime()) { summary.deferred += 1; continue; }

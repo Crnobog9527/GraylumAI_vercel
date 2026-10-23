@@ -36,9 +36,20 @@ describe('recoverVoiceGenerations', () => {
       .toMatchObject({ failure_code: 'VOICE_INTERRUPTED', settled: true, result: null });
   });
   it('a saved profile whose run was never closed is closed as delivered', async () => {
-    const db = admin({ generations: [{ actorId: 'a', versionId: 'v', runId: 'r', status: 'draft' }], scrubs: [] });
+    const db = admin({ generations: [{ actorId: 'a', versionId: 'v', runId: 'r', status: 'draft', hasProfile: true }], scrubs: [] });
     await recoverVoiceGenerations(db as never);
     expect(billing.closeRun).toHaveBeenCalledWith('r', 'delivered', expect.objectContaining({ kind: 'usable_result' }));
+  });
+  it('a version marked failed with no saved profile is a confirmed failure, never delivered', async () => {
+    const db = admin({ generations: [{ actorId: 'a', versionId: 'v', runId: 'r', status: 'failed', hasProfile: false }], scrubs: [] });
+    await recoverVoiceGenerations(db as never);
+    expect(billing.closeRun).toHaveBeenCalledWith('r', 'confirmed_failure', expect.anything());
+  });
+  it('an item that errors moves to the back of the queue', async () => {
+    billing.finalizeRun.mockRejectedValueOnce(new Error('down'));
+    const db = admin({ generations: [{ actorId: 'a', versionId: 'v9', runId: 'r', status: 'generating', hasProfile: false }], scrubs: [] });
+    await recoverVoiceGenerations(db as never);
+    expect(db.calls.find(([name]) => name === 'voice_recovery_touch')?.[1]).toEqual({ p_version_id: 'v9' });
   });
   it('a run whose cost is still pending stays listed for the next day', async () => {
     billing.finalizeRun.mockResolvedValue({ closed: true, state: 'cost_pending' });
