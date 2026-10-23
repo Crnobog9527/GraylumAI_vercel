@@ -9,8 +9,8 @@ export type UploadSlot = { uploadUrl: string; mediaUrl: string };
 export type UploadedMedia = { mediaUrl: string; sha256: string; size: number; mimeType: string };
 
 const MIME = /^(image|video)\/[a-z0-9.+-]{1,64}$/;
-// Post for Me accepts files up to 5 GB (plan §2 item 10).
-export const MAX_MEDIA_BYTES = 5 * 1024 ** 3;
+// Post for Me support (Caleb, 2026-10): about 1 GB per file; the server transcodes per platform.
+export const MAX_MEDIA_BYTES = 1024 ** 3;
 // The server accepts at most 10 files per post.
 export const MAX_MEDIA_FILES = 10;
 const SAMPLE_BYTES = 4 * 1024 * 1024;
@@ -34,7 +34,7 @@ export class MediaUploadError extends Error {
 
 /**
  * Uploads all files of one post. requestSlots is the tRPC
- * `publishMonitor.publish.uploadUrl({ disclosureAccepted: true, count })` mutation: one request for the whole post.
+ * `publishMonitor.publish.uploadUrl({ disclosureAccepted: true, count, connectionIds })` mutation: one request for the whole post.
  * Every file is checked before any slot is requested.
  */
 export async function uploadPublishFiles(files: File[], requestSlots: (count: number) => Promise<UploadSlot[]>,

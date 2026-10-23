@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { logger } from '../../lib/logger';
 import type { ClientDeps } from './postForMe/client';
 import {
-  createMediaUploads, publishFingerprint, reconcilePublishes, refreshPublishJob, submitPublish, type Pacing, type PublishInput,
+  createMediaUploads, publishFingerprint, publishInput, reconcilePublishes, refreshPublishJob, submitPublish, type Pacing, type PublishInput,
 } from './publish';
 
 // Simulated provider only: no request leaves the test (PR-5 never publishes for real without Owner approval).
@@ -16,7 +16,7 @@ const LEASE = '00000000-0000-4000-8000-00000000a006';
 const MINE = 'a'.repeat(32);
 const MEDIA = 'https://data.postforme.dev/storage/v1/object/public/post-media/secret-file.jpg';
 const input: PublishInput = {
-  idempotencyKey: 'key-00000001', businessId: BIZ, workItemId: null, connectionIds: [CX, CY], caption: 'Hello',
+  idempotencyKey: 'key-00000001', businessId: BIZ, workItemId: null, connectionIds: [CX, CY], caption: 'Hello', maxHoldCredits: 12,
   media: [{ mediaUrl: MEDIA, sha256: 'f'.repeat(64), size: 1000, mimeType: 'image/jpeg' }],
 };
 const view = (state: string, extra: Record<string, unknown> = {}) => ({ id: JOB, state, businessId: BIZ, workItemId: null,
@@ -66,9 +66,35 @@ describe('publish fingerprint', () => {
     expect(publishFingerprint({ ...input, media: [{ ...input.media[0]!, sha256: 'e'.repeat(64) }] })).not.toBe(base);
     expect(publishFingerprint({ ...input, connectionIds: [CX] })).not.toBe(base);
   });
+
+  it('a chosen video cover is part of the request; a request without one keeps its old fingerprint', () => {
+    const video = { ...input, media: [{ ...input.media[0]!, mimeType: 'video/mp4' }] };
+    const base = publishFingerprint(video);
+    expect(base).toBe(publishFingerprint({ ...video, media: [{ ...video.media[0]!, thumbnailTimestampMs: undefined }] }));
+    expect(publishFingerprint({ ...video, media: [{ ...video.media[0]!, thumbnailTimestampMs: 1500 }] })).not.toBe(base);
+  });
+});
+
+describe('publish input limits', () => {
+  it('accepts files up to 1 GB, and a cover only on a video', () => {
+    const one = (extra: Record<string, unknown>) => publishInput.safeParse({ ...input, media: [{ ...input.media[0]!, ...extra }] }).success;
+    expect(one({ size: 1024 ** 3 })).toBe(true);
+    expect(one({ size: 1024 ** 3 + 1 })).toBe(false);
+    expect(one({ mimeType: 'video/mp4', thumbnailTimestampMs: 2000 })).toBe(true);
+    expect(one({ thumbnailTimestampMs: 2000 })).toBe(false);
+    expect(one({ mimeType: 'video/mp4', thumbnailTimestampMs: -1 })).toBe(false);
+  });
 });
 
 describe('submit publish (simulated provider)', () => {
+  it('sends a chosen video cover as thumbnail_timestamp_ms on that media item', async () => {
+    const d = database(fresh());
+    const p = provider([account('spc_x'), account('spc_y'), json(200, { id: 'sp_1', external_id: JOB })]);
+    await submitPublish(d.db, p.deps, USER, { ...input,
+      media: [{ ...input.media[0]!, mimeType: 'video/mp4', thumbnailTimestampMs: 2500 }] });
+    expect(p.calls[2]!.body).toMatchObject({ media: [{ url: MEDIA, thumbnail_timestamp_ms: 2500 }] });
+  });
+
   it('checks owners, takes the limiter slot, dispatches, and creates exactly one post carrying the job id', async () => {
     const d = database(fresh());
     const p = provider([account('spc_x'), account('spc_y'), json(200, { id: 'sp_1', external_id: JOB, status: 'processing' })]);
@@ -90,6 +116,21 @@ describe('submit publish (simulated provider)', () => {
     expect(JSON.stringify([...info.mock.calls, ...warn.mock.calls])).not.toContain('secret-file');
     info.mockRestore();
     warn.mockRestore();
+  });
+
+  it('a price raised after the user confirmed releases the new job before anything is sent', async () => {
+    const d = database({ ...fresh(), publish_monitor_publish_claim: [{ ...view('claimed', { holdCredits: 13 }), replayed: false }] });
+    const p = provider([]);
+    await expect(submitPublish(d.db, p.deps, USER, input)).rejects.toMatchObject({ code: 'PUBLISH_MONITOR_PRICE_CHANGED' });
+    expect(d.calls.at(-1)).toEqual(['publish_monitor_publish_release', { p_job: JOB, p_code: 'PUBLISH_MONITOR_PRICE_CHANGED' }]);
+    expect(p.calls).toEqual([]);
+    // A replay of a job that is still only claimed (an earlier release failed) is judged by the price too.
+    const stuck = database({ ...fresh(), publish_monitor_publish_claim: [{ ...view('claimed', { holdCredits: 13 }), replayed: true }] });
+    await expect(submitPublish(stuck.db, provider([]).deps, USER, input)).rejects.toMatchObject({ code: 'PUBLISH_MONITOR_PRICE_CHANGED' });
+    expect(stuck.calls.at(-1)![0]).toBe('publish_monitor_publish_release');
+    // A replay of a job already past that point is never re-judged by the price.
+    const replay = database({ publish_monitor_publish_claim: [{ ...view('completed', { holdCredits: 99 }), replayed: true }] });
+    expect((await submitPublish(replay.db, provider([]).deps, USER, input)).state).toBe('completed');
   });
 
   it('a replayed request whose job is no longer only claimed never reaches the provider', async () => {

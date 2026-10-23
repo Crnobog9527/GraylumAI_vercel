@@ -9,10 +9,17 @@ import { publishMonitorRouter } from './publishMonitor';
 
 const actor = '00000000-0000-4000-8000-0000000f0001';
 const profile = { id: actor, role: 'user', status: 'active', nickname: 'U', email: 'u@example.com' };
-function caller(rpc: ReturnType<typeof vi.fn>, switchOn: boolean) {
-  const from = (table: string) => ({ select() { return this; }, eq() { return this; },
-    single: async () => ({ data: profile, error: null }),
-    maybeSingle: async () => ({ data: table === 'system_settings' ? { value: switchOn } : profile, error: null }) });
+function caller(rpc: ReturnType<typeof vi.fn>, switchOn: boolean, settings: Record<string, unknown> = {},
+  existingJob: boolean | { targets: unknown; state?: string } = false) {
+  const from = (table: string) => {
+    let key = '';
+    return { select() { return this; }, eq(_column: string, value: string) { key = value; return this; },
+      single: async () => ({ data: profile, error: null }),
+      maybeSingle: async () => ({ data: table === 'social_publish_jobs' ? (existingJob === true ? { id: 'job' } : existingJob || null)
+        : table !== 'system_settings' ? profile
+        : key === 'publish_monitor_enabled' ? { value: switchOn } : key in settings ? { value: settings[key] } : null,
+      error: null }) };
+  };
   const db = { from, rpc };
   return publishMonitorRouter.createCaller({
     headers: new Headers(), user: { id: actor, email: 'u@example.com', app_metadata: {}, user_metadata: {} },
@@ -47,13 +54,118 @@ describe('publish-monitor one-click publishing', () => {
   const biz = '00000000-0000-4000-8000-0000000f0003';
   const conn = '00000000-0000-4000-8000-0000000f0004';
   const submit = { idempotencyKey: 'key-00000001', businessId: biz, workItemId: null, connectionIds: [conn], caption: 'Hi',
-    media: [] };
+    maxHoldCredits: 6, media: [] };
+  const open = { publish_monitor_publish_platforms: ['x'],
+    publish_monitor_publish_price: { usdPerTarget: '0.01', multiplier: '6', creditsPerUsd: '100' } };
+  const connection = (platform: string, id = conn) => ({ id, businessId: biz, accountProjectId: biz, role: 'own',
+    source: 'postforme', platform, displayHint: null, status: 'connected', consentRead: true, consentAutoTrack: false,
+    consentPublish: true, lastSuccessAt: null, postCount: 0 });
+
+  it('opens only listed platforms, on the server, before any upload slot, claim or provider call', async () => {
+    mocks.entitlements.mockResolvedValue({ allowPublish: true });
+    mocks.limit.mockClear();
+    mocks.uploads.mockClear();
+    const youtube = vi.fn().mockResolvedValue({ data: [connection('youtube')], error: null });
+    await expect(caller(youtube, true, open).publish.submit(submit))
+      .rejects.toMatchObject({ code: 'FORBIDDEN', message: 'PUBLISH_MONITOR_PLATFORM_NOT_OPEN' });
+    await expect(caller(youtube, true, open).publish.uploadUrl({ disclosureAccepted: true, count: 1, connectionIds: [conn] }))
+      .rejects.toMatchObject({ code: 'FORBIDDEN', message: 'PUBLISH_MONITOR_PLATFORM_NOT_OPEN' });
+    expect(youtube.mock.calls.map(call => call[0])).toEqual(['publish_monitor_connections', 'publish_monitor_connections']);
+    // No list at all (the default) opens nothing, without even reading the connections.
+    const none = vi.fn();
+    await expect(caller(none, true).publish.submit(submit))
+      .rejects.toMatchObject({ code: 'FORBIDDEN', message: 'PUBLISH_MONITOR_PLATFORM_NOT_OPEN' });
+    await expect(caller(none, true, { publish_monitor_publish_platforms: 'x' }).publish.submit(submit))
+      .rejects.toMatchObject({ code: 'FORBIDDEN', message: 'PUBLISH_MONITOR_PLATFORM_NOT_OPEN' });
+    expect(none).not.toHaveBeenCalled();
+    expect(mocks.limit).not.toHaveBeenCalled();
+    expect(mocks.uploads).not.toHaveBeenCalled();
+  });
+
+  it('refuses an unknown or unfit connection before any upload slot is issued', async () => {
+    mocks.entitlements.mockResolvedValue({ allowPublish: true });
+    mocks.limit.mockClear();
+    mocks.uploads.mockClear();
+    const other = '00000000-0000-4000-8000-0000000f0009';
+    const second = '00000000-0000-4000-8000-0000000f000a';
+    const unfit = [{ ...connection('x'), consentPublish: false }, { ...connection('x', second), source: 'tikhub' },
+      { ...connection('x', other), status: 'reauth_required' }];
+    for (const [ids, rows] of [[[other], [connection('x')]], [[conn], [unfit[0]]], [[second], [unfit[1]]], [[other], [unfit[2]]],
+      [[conn, second], [connection('x'), connection('x', second)]]] as const) {
+      const rpc = vi.fn().mockResolvedValue({ data: rows, error: null });
+      await expect(caller(rpc, true, open).publish.uploadUrl({ disclosureAccepted: true, count: 1, connectionIds: [...ids] }))
+        .rejects.toMatchObject({ code: 'FORBIDDEN', message: 'PUBLISH_MONITOR_TARGET_INVALID' });
+    }
+    expect(mocks.limit).not.toHaveBeenCalled();
+    expect(mocks.uploads).not.toHaveBeenCalled();
+  });
+
+  it('a key that already has a job is a replay: answered from the database even if the platform has closed since', async () => {
+    mocks.entitlements.mockResolvedValue({ allowPublish: true });
+    mocks.limit.mockResolvedValue({ success: true });
+    const rpc = vi.fn().mockRejectedValue(new Error('reached the claim'));
+    // No open platform at all, yet the replay passes the gate and reaches the database claim (which replays the job).
+    await expect(caller(rpc, true, {}, true).publish.submit(submit)).rejects.not.toMatchObject({
+      message: 'PUBLISH_MONITOR_PLATFORM_NOT_OPEN' });
+    // It got past the gate: the next step (reading the provider key) is what failed here.
+    expect(rpc).toHaveBeenCalled();
+  });
+
+  it('a submit replay of a job already handed to the provider ignores the switch and the plan; a never-sent job does not', async () => {
+    mocks.limit.mockResolvedValue({ success: true });
+    const sent = { targets: [{ connectionId: conn, platform: 'x', providerAccountId: 'spc_x' }], state: 'unknown' };
+    const rpc = vi.fn().mockRejectedValue(new Error('reached the provider key'));
+    mocks.entitlements.mockResolvedValue({ allowPublish: false });
+    // Paused and no plan: still past the gates (the next step, reading the provider key, is what fails here).
+    await expect(caller(rpc, false, {}, sent).publish.submit(submit)).rejects.not.toMatchObject({ code: 'FORBIDDEN' });
+    expect(rpc).toHaveBeenCalled();
+    // A job that was claimed but never sent is still gated like a new request.
+    await expect(caller(vi.fn(), false, {}, { ...sent, state: 'claimed' }).publish.submit(submit))
+      .rejects.toMatchObject({ code: 'FORBIDDEN', message: 'PUBLISH_MONITOR_DISABLED' });
+    await expect(caller(vi.fn(), true, {}, { ...sent, state: 'claimed' }).publish.submit(submit))
+      .rejects.toMatchObject({ code: 'FORBIDDEN', message: 'PUBLISH_MONITOR_ENTITLEMENT_REQUIRED' });
+  });
+
+  it('an upload replay skips the platform checks only for the exact targets the existing job saved', async () => {
+    mocks.entitlements.mockResolvedValue({ allowPublish: true });
+    mocks.limit.mockResolvedValue({ success: true });
+    mocks.uploads.mockResolvedValue({ ok: true });
+    const other = '00000000-0000-4000-8000-0000000f0009';
+    const job = { targets: [{ connectionId: conn, platform: 'x', providerAccountId: 'spc_x' }], state: 'unknown' };
+    const rpc = vi.fn().mockRejectedValue(new Error('reached the provider key'));
+    // The saved target, with no platform open: passes the gate (the next step, reading the provider key, is what fails).
+    await expect(caller(rpc, true, {}, job).publish.uploadUrl({ disclosureAccepted: true, count: 1, connectionIds: [conn],
+      idempotencyKey: 'key-00000001' })).rejects.not.toMatchObject({ message: 'PUBLISH_MONITOR_PLATFORM_NOT_OPEN' });
+    // Any other id under the same key gets the normal checks.
+    await expect(caller(rpc, true, {}, job).publish.uploadUrl({ disclosureAccepted: true, count: 1,
+      connectionIds: [conn, other], idempotencyKey: 'key-00000001' }))
+      .rejects.toMatchObject({ message: 'PUBLISH_MONITOR_PLATFORM_NOT_OPEN' });
+    await expect(caller(rpc, true, {}, job).publish.uploadUrl({ disclosureAccepted: true, count: 1,
+      connectionIds: [other], idempotencyKey: 'key-00000001' }))
+      .rejects.toMatchObject({ message: 'PUBLISH_MONITOR_PLATFORM_NOT_OPEN' });
+  });
+
+  it('options lists the open platforms and the exact hold for 1..9 targets', async () => {
+    mocks.entitlements.mockResolvedValue({ allowPublish: true });
+    await expect(caller(vi.fn(), true, open).publish.options())
+      .resolves.toEqual({ platforms: ['x'], holdCreditsByTargets: [6, 12, 18, 24, 30, 36, 42, 48, 54] });
+    await expect(caller(vi.fn(), true, { publish_monitor_publish_price: { usdPerTarget: '0.015', multiplier: '6',
+      creditsPerUsd: '100' } }).publish.options()).resolves.toEqual({ platforms: [],
+      holdCreditsByTargets: [9, 18, 27, 36, 45, 54, 63, 72, 81] });
+    await expect(caller(vi.fn(), true, { publish_monitor_publish_price: { usdPerTarget: '0.011', multiplier: '1',
+      creditsPerUsd: '100' } }).publish.options()).resolves.toMatchObject({ holdCreditsByTargets: [2, 3, 4, 5, 6, 7, 8, 9, 10] });
+    await expect(caller(vi.fn(), true, { publish_monitor_publish_price: { usdPerTarget: 'x' } }).publish.options())
+      .resolves.toEqual({ platforms: [], holdCreditsByTargets: null });
+  });
+
   it('refuses publishing without the entitlement before any database or provider work, and while paused', async () => {
     mocks.entitlements.mockResolvedValue({ allowPublish: false });
     const rpc = vi.fn();
     await expect(caller(rpc, true).publish.submit(submit))
       .rejects.toMatchObject({ code: 'FORBIDDEN', message: 'PUBLISH_MONITOR_ENTITLEMENT_REQUIRED' });
-    await expect(caller(rpc, true).publish.uploadUrl({ disclosureAccepted: true, count: 1 }))
+    await expect(caller(rpc, true).publish.uploadUrl({ disclosureAccepted: true, count: 1, connectionIds: [conn] }))
+      .rejects.toMatchObject({ code: 'FORBIDDEN', message: 'PUBLISH_MONITOR_ENTITLEMENT_REQUIRED' });
+    await expect(caller(rpc, true).publish.options())
       .rejects.toMatchObject({ code: 'FORBIDDEN', message: 'PUBLISH_MONITOR_ENTITLEMENT_REQUIRED' });
     mocks.entitlements.mockResolvedValue({ allowPublish: true });
     await expect(caller(rpc, false).publish.submit(submit))
@@ -65,16 +177,18 @@ describe('publish-monitor one-click publishing', () => {
     mocks.entitlements.mockResolvedValue({ allowPublish: true });
     mocks.limit.mockResolvedValue({ success: true });
     mocks.uploads.mockResolvedValue({ ok: false, retryAfterSeconds: 120 });
-    const rpc = vi.fn();
-    await expect(caller(rpc, true).publish.uploadUrl({ disclosureAccepted: true, count: 7 }))
+    const rpc = vi.fn().mockResolvedValue({ data: [connection('x')], error: null });
+    await expect(caller(rpc, true, open).publish.uploadUrl({ disclosureAccepted: true, count: 7, connectionIds: [conn] }))
       .rejects.toMatchObject({ code: 'TOO_MANY_REQUESTS' });
     expect(mocks.uploads).toHaveBeenCalledWith(actor, 7);
   });
 
   it('an upload slot needs the confirmed disclosure; a job is readable only through the owner-scoped lookup', async () => {
-    await expect(caller(vi.fn(), true).publish.uploadUrl({ disclosureAccepted: false, count: 1 } as never))
+    await expect(caller(vi.fn(), true).publish.uploadUrl({ disclosureAccepted: false, count: 1, connectionIds: [conn] } as never))
       .rejects.toMatchObject({ code: 'BAD_REQUEST' });
-    await expect(caller(vi.fn(), true).publish.uploadUrl({ disclosureAccepted: true, count: 11 }))
+    await expect(caller(vi.fn(), true).publish.uploadUrl({ disclosureAccepted: true, count: 11, connectionIds: [conn] }))
+      .rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    await expect(caller(vi.fn(), true).publish.uploadUrl({ disclosureAccepted: true, count: 1 } as never))
       .rejects.toMatchObject({ code: 'BAD_REQUEST' });
     const job = '00000000-0000-4000-8000-0000000f0005';
     const rpc = vi.fn().mockResolvedValue({ data: null, error: { message: 'PUBLISH_MONITOR_JOB_NOT_FOUND' } });

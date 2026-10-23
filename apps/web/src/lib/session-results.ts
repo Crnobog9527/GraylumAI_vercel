@@ -34,6 +34,23 @@ export async function saveRequestId(executionId: string, type: ResultType, text:
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
+/**
+ * A result already saved from this very reply with exactly this text. Refreshing resets the form (title, type), so the
+ * check does not depend on either: the same reply and the same text are never saved twice (an edited result keeps its
+ * own text and is not matched).
+ */
+export function savedFromReply(items: readonly SessionResultItem[], executionId: string, text: string) {
+  return items.find(item => item.sourceExecutionId === executionId && item.body === text);
+}
+
+/** Why this save must not be sent, or '' when it may go: invalid text, or already saved from this reply. */
+export function saveProblem(reply: string, text: string, items: readonly SessionResultItem[], executionId: string) {
+  const problem = excerptProblem(reply, text);
+  if (problem) return problem;
+  const already = savedFromReply(items, executionId, text);
+  return already ? `这段内容已经保存在成果夹里（${RESULT_TYPE_LABEL[already.resultType]}「${already.title}」），不会重复保存。` : '';
+}
+
 /** The server accepts only text that appears in the reply verbatim; say so before sending. */
 export function excerptProblem(reply: string, excerpt: string) {
   if (!excerpt.trim()) return '请保留要保存的内容。';

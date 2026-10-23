@@ -83,7 +83,9 @@ async function beginCompare(deps: CompareDeps, choice: CompareStartInput): Promi
   // What identifies this request needs no pricing, so it is built first: a repeat of a request whose group already exists
   // must reach the frozen replay even if prices, the budget or a model's availability have changed since.
   const snapshot = snapshotHash(choice.parts);
-  const skill = choice.parts.skill && { moduleId: choice.parts.skill.moduleId, revisionId: choice.parts.skill.revisionId };
+  // The Skill identity is frozen whole (module, Skill and revision): adoption must carry the same one, however the module row changes.
+  const skill = choice.parts.skill && { moduleId: choice.parts.skill.moduleId, skillId: choice.parts.skill.skillId,
+    revisionId: choice.parts.skill.revisionId };
   const question = choice.parts.question;
   // The answer limit is recorded only with a new request; a repeat of an admitted one is answered from the stored record.
   const begin = (answerOutputTokens?: number) => {

@@ -607,6 +607,37 @@ describe('durable benchmark discovery and free follow-up', () => {
     expect(f.store.offerShortfall).not.toHaveBeenCalled();
   });
 
+  it('tells the model a candidate card is on screen and labels candidates by their public name', async () => {
+    const f = fixture();
+    const original = subcall.getMockImplementation()!;
+    subcall.mockImplementation(async (context, request) => {
+      const outcome = await original(context, request);
+      if (outcome.sent && request.vendor === 'tikhub') {
+        const named = (entry: ResearchItem): ResearchItem => request.call.kind === 'keyword_posts'
+          ? { ...entry, fields: { ...entry.fields, author: `作者 ${String(entry.fields.authorId)}` } }
+          : { ...entry, fields: { ...entry.fields, name: '家常\u0007便当\n小厨'.repeat(4) } };
+        outcome.result.items = outcome.result.items.map(entry => request.call.kind === 'account_profile'
+          && request.call.account !== 'author0' ? entry : named(entry));
+      }
+      return outcome;
+    });
+
+    const result = await f.execute('benchmark_discover', discoveryArgs);
+    expect(result).toMatchObject({ status: 'ok', candidateCard: { shown: true, selectable: 8 } });
+    expect(result.nextStep).toContain('候选卡已经显示给用户');
+    const options = f.store.createCard.mock.calls[0]?.[1].options ?? [];
+    // The profile name wins and is cleaned to one short line; without one, the post author name is used.
+    expect(options.find(o => o.account === 'author0')?.label).toBe('家常 便当 小厨家常 便当 小厨家常 便当 小厨家常 便当 · 活跃度待核对');
+    expect(options.find(o => o.account === 'author1')?.label).toBe('作者 author1 · 活跃度待核对');
+    expect(options.every(o => String(o.account).startsWith('author'))).toBe(true);
+  });
+
+  it('says no candidate card was shown when there are too few accounts', async () => {
+    const f = fixture();
+    f.setAuthors(7);
+    expect(await f.execute('benchmark_discover', discoveryArgs)).toMatchObject({ candidateCard: { shown: false } });
+  });
+
   it('withholds the initial selection card below eight and names both ways out once the round is searched to the end', async () => {
     const f = fixture();
     f.setAuthors(7);
@@ -651,11 +682,13 @@ describe('durable benchmark discovery and free follow-up', () => {
     const cardId = stableResearchId(discoveryId, 'first-card');
     const saved = { cardId, kind: 'candidates' as const,
       options: Array.from({ length: 8 }, (_, i) => ({ id: `c${i}`, platform: 'tiktok',
-        account: `author${i}`, evidenceRef: `old#${i + 1}`, label: `author${i}`, selectable: true })),
+        account: `author${i}`, evidenceRef: `old#${i + 1}`, label: `author${i}`, selectable: i < 6 })),
       minSelect: 3, maxSelect: 5 };
     f.store.readCard.mockResolvedValue(saved);
 
-    expect(await f.execute('benchmark_discover', discoveryArgs)).toMatchObject({ status: 'ok' });
+    // The count told to the model is the saved card's, not the rebuilt candidate list's.
+    expect(await f.execute('benchmark_discover', discoveryArgs))
+      .toMatchObject({ status: 'ok', candidateCard: { shown: true, selectable: 6 } });
     expect(f.store.readCard).toHaveBeenCalledWith(cardId);
     expect(f.store.createCard).not.toHaveBeenCalled();
     expect(f.ctx.emit).toHaveBeenCalledWith({ type: 'research_card', card: saved });
@@ -678,7 +711,8 @@ describe('durable benchmark discovery and free follow-up', () => {
     expect(f.store.createCard.mock.calls[0]?.[1].options).toHaveLength(8);
     expect(subcall).toHaveBeenCalledTimes(11);
     f.store.selectedAccounts.mockResolvedValue([{ platform: 'tiktok', account: 'author0' }]);
-    expect(await f.execute('propose_more_candidates', { discoveryId }, 'more')).toMatchObject({ status: 'ok' });
+    expect(await f.execute('propose_more_candidates', { discoveryId }, 'more'))
+      .toMatchObject({ status: 'ok', candidateCard: { shown: true, selectable: 7 } });
     const payload = f.store.createCard.mock.calls[1]?.[1];
     expect(payload).toMatchObject({ followUp: true, minSelect: 2 });
     expect(payload?.options).toHaveLength(7);
