@@ -104,27 +104,36 @@ async function mark(db: Db, rows: Row[], notify: (row: Row) => Notify) {
     if (error) failed += 1;
   }
   if (failed) logger.error('billing', 'runtime_stop_loss_notice_mark_failed', { rows: failed });
+  return failed;
 }
 
-const isPending = (row: Row, now: Date) => {
+/** 'send': deliver now; 'expired': an uncertain request older than Resend's key window (must not be retried); 'skip'. */
+const classify = (row: Row, now: Date): 'send' | 'expired' | 'skip' => {
   const n = notifyOf(row);
-  if (!n) return true;
-  if (n.state !== 'pending' || n.attempts >= STOP_LOSS_NOTICE_MAX_ATTEMPTS) return false;
+  if (!n) return 'send';
+  if (n.state !== 'pending' || n.attempts >= STOP_LOSS_NOTICE_MAX_ATTEMPTS) return 'skip';
   // Never sent (blocked by configuration) stays retryable at any age; an ambiguous earlier request only inside Resend's window.
-  return n.attempts === 0 || now.getTime() - Date.parse(n.firstAttemptAt ?? row.created_at) < STOP_LOSS_NOTICE_WINDOW_MS;
+  if (n.attempts === 0) return 'send';
+  return now.getTime() - Date.parse(n.firstAttemptAt ?? row.created_at) < STOP_LOSS_NOTICE_WINDOW_MS ? 'send' : 'expired';
 };
 
 /** Pages past delivered/given-up rows (newest first) so terminal alerts cannot starve undelivered ones. */
 async function readPending(db: Db, now: Date) {
   const pending: Row[] = [];
+  const expired: Row[] = [];
   for (let page = 0; page < MAX_PAGES && pending.length < BATCH; page += 1) {
     const { data, error } = await db.from('diagnostic_results').select('id,test_id,details,created_at')
       .eq('test_name', 'Runtime stop-loss').like('test_id', 'runtime_stop_loss_%')
       .order('created_at', { ascending: false }).range(page * PAGE, page * PAGE + PAGE - 1);
     if (error) throw new Error('read');
     const rows = (data ?? []) as Row[];
-    pending.push(...rows.filter(row => isPending(row, now)));
+    pending.push(...rows.filter(row => classify(row, now) === 'send'));
+    expired.push(...rows.filter(row => classify(row, now) === 'expired'));
     if (rows.length < PAGE) break;
+  }
+  // Shown as stopped in the admin instead of promising a retry that can no longer happen.
+  if (expired.length) {
+    await mark(db, expired, row => ({ ...notifyOf(row)!, state: 'failed', lastErrorCode: 'STOP_LOSS_NOTICE_RETRY_EXPIRED' }));
   }
   return pending.slice(0, BATCH);
 }
@@ -184,8 +193,10 @@ export async function deliverStopLossAlerts(db: Db, deps: StopLossNoticeDeps = {
       const firstAttemptAt = prior?.firstAttemptAt ?? at;
       if (result.kind === 'sent') {
         sent += 1;
-        await mark(db, [row], r => ({ state: 'sent', attempts: (notifyOf(r)?.attempts ?? 0) + 1, sentAt: at,
-          providerMessageId: result.providerMessageId, firstAttemptAt }));
+        // A mail that went out but could not be recorded must not look delivered: it stays unresolved for the caller.
+        const unrecorded = await mark(db, [row], r => ({ state: 'sent', attempts: (notifyOf(r)?.attempts ?? 0) + 1,
+          sentAt: at, providerMessageId: result.providerMessageId, firstAttemptAt }));
+        if (unrecorded) failure ??= 'STOP_LOSS_NOTICE_STATE_WRITE_FAILED';
         continue;
       }
       failure ??= result.code;

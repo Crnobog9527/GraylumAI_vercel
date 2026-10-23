@@ -15,7 +15,7 @@ const site = (id: string, notify?: unknown): Row => ({ id, test_id: 'runtime_sto
   created_at: '2026-10-23T11:00:00Z', details: { dedupeKey: `2026-10-23:siteDailyUsd:${id}`, utcDate: '2026-10-23',
     scope: 'site', thresholdUsd: '20', actualUsd: '20.5', ...(notify ? { notify } : {}) } });
 
-function fixture(rows: Row[], mailbox: unknown = 'owner@example.test', opts: { readError?: boolean } = {}) {
+function fixture(rows: Row[], mailbox: unknown = 'owner@example.test', opts: { readError?: boolean; writeError?: boolean } = {}) {
   const updates: Array<{ id: string; details: Record<string, unknown> }> = [];
   const filters: unknown[][] = [];
   const db = {
@@ -28,7 +28,8 @@ function fixture(rows: Row[], mailbox: unknown = 'owner@example.test', opts: { r
       const q = {
         select() { return q; },
         eq(...args: unknown[]) {
-          if (patch) { updates.push({ id: args[1] as string, details: patch.details as Record<string, unknown> }); return Promise.resolve({ error: null }); }
+          if (patch) { updates.push({ id: args[1] as string, details: patch.details as Record<string, unknown> });
+            return Promise.resolve({ error: opts.writeError ? { code: 'x' } : null }); }
           filters.push(['eq', ...args]); return q;
         },
         like(...args: unknown[]) { filters.push(['like', ...args]); return q; },
@@ -109,6 +110,23 @@ it('a stored retry recipient that is no longer allowed is not mailed; live setti
   const mail = (transport.mock.calls[0] as unknown[])[1] as { to: string; idempotencyKey: string };
   expect(mail.to).toBe('new@example.test');
   expect(mail.idempotencyKey).not.toBe('runtime-stop-loss-a-old');
+});
+
+it('a sent mail whose state cannot be recorded is reported as unresolved', async () => {
+  const transport = vi.fn(async () => ({ kind: 'sent' as const, providerMessageId: 'msg_8' }));
+  const f = fixture([site('a')], 'owner@example.test', { writeError: true });
+  expect(await deliverStopLossAlerts(f.db, { config, transport, env: {}, now }))
+    .toEqual({ outcome: 'not_sent', alerts: 1, code: 'STOP_LOSS_NOTICE_STATE_WRITE_FAILED' });
+  expect(log.error).toHaveBeenCalledWith('billing', 'runtime_stop_loss_notice_mark_failed', { rows: 1 });
+});
+
+it('an uncertain request past the retry window is marked stopped, not left pending', async () => {
+  const expired = site('e', { state: 'pending', attempts: 1, firstAttemptAt: '2026-10-22T08:00:00Z', lastErrorCode: 'X' });
+  const f = fixture([expired]);
+  const transport = vi.fn();
+  expect(await deliverStopLossAlerts(f.db, { config, transport, env: {}, now })).toEqual({ outcome: 'none', alerts: 0 });
+  expect(transport).not.toHaveBeenCalled();
+  expect(f.updates[0]!.details.notify).toMatchObject({ state: 'failed', lastErrorCode: 'STOP_LOSS_NOTICE_RETRY_EXPIRED' });
 });
 
 it('the retry window starts at the first attempt, not at the alert creation', async () => {
