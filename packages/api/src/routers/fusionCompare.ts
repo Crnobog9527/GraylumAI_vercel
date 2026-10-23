@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { protectedProcedure, router } from '../trpc';
 import { StagingAccessError, stagingProcedureError } from '../services/runtime/stagingErrors';
-import { compareOptions } from '../services/fusion/compareOptions';
+import { compareModelNames, compareOptions } from '../services/fusion/compareOptions';
 import { compareRpc } from '../services/fusion/compareAdmission';
 import { adoptCompare } from '../services/fusion/compareAdopt';
 import { compareSkillInput } from '../services/fusion/compareLoad';
@@ -58,8 +58,14 @@ export const fusionCompareRouter = router({
   /** The picker's contents. A failed settings read reads as "off" to the page rather than leaking a database error. */
   options: reader.query(({ ctx }) => compareOptions(ctx.admin, ctx.user.id)),
   /** This conversation's compare cards, oldest first, with the server-written adoption (the adopted answer's execution). */
-  list: reader.input(z.object({ sessionId: uuid }).strict())
-    .query(({ ctx, input }) => compareRpc<unknown[]>(ctx.admin, 'fusion_compare_list', { p_actor_id: ctx.user.id, p_session_id: input.sessionId })),
+  list: reader.input(z.object({ sessionId: uuid }).strict()).query(async ({ ctx, input }) => {
+    const cards = await compareRpc<Array<{ config?: { models?: string[] } }>>(ctx.admin, 'fusion_compare_list',
+      { p_actor_id: ctx.user.id, p_session_id: input.sessionId });
+    // Real model names for exactly the models these cards used, independent of the current allowlist or the switch. A failed
+    // name lookup never hides the cards (their dispatch and stop controls must stay): the page then shows a generic label.
+    const names = await compareModelNames(ctx.admin, cards.flatMap(card => card.config?.models ?? [])).catch(() => ({}));
+    return { cards, names };
+  }),
   /** "At most X credits": priced per chosen model, nothing recorded, no paid judgement; repeatable. */
   estimate: worker.input(request).mutation(({ ctx, input }) => ctx.compare.estimate(input)),
   /** Records, judges positioning once, admits and claims the whole group (or answers waiting_credits, holding nothing). */
