@@ -8,7 +8,10 @@ import { isSettled, voiceEvidence } from './generation';
 import { voiceRpc } from './state';
 
 type Item = { actorId: string; runId: string | null; recovery: unknown };
-type Candidates = { generations: Array<Item & { versionId: string; status: string; hasProfile: boolean }>; scrubs: Array<Item & { runId: string }> };
+type Candidates = {
+  generations: Array<Item & { versionId: string; status: string; hasProfile: boolean }>;
+  scrubs: Array<Item & { runId: string; outcome: 'cancelled' | 'confirmed_failure' }>;
+};
 const noTransport: BillingTransport = {
   dispatch: async () => { throw new Error('VOICE_RECOVERY_NO_DISPATCH'); },
   lookup: async () => { throw new Error('VOICE_RECOVERY_LOOKUP_UNAVAILABLE'); },
@@ -27,14 +30,15 @@ export async function recoverVoiceGenerations(admin: SupabaseClient, options: { 
   const candidates = await voiceRpc<Candidates>(admin, 'voice_recovery_candidates', { p_limit: 50 });
   /** `outcome`: a profile was saved (delivered), none was (confirmed failure: provider cost recorded, user refunded), or the
    * user deleted the version (cancelled: undispatched released, dispatched at its known cost). */
-  async function settle(item: Item & { runId: string }, outcome: 'delivered' | 'confirmed_failure' | 'cancelled', versionId?: string) {
+  async function settle(item: Item & { runId: string }, outcome: 'delivered' | 'confirmed_failure' | 'cancelled', evidenceId?: string) {
     const budget = createRuntimeBudget(now, Math.max(1, stopAt - now()));
     const adapter = item.recovery ? stagingTransport(admin, parseStagingPolicy(item.recovery), budget) : noTransport;
     const billing = authoritativeBilling({ admin: admin as unknown as BillingRpc, actor: async () => item.actorId, adapter, budget });
     if (item.recovery) await billing.recoverReceipts(item.runId, { timeoutMs: 2000 }).catch(() => undefined);
     if (!(await billing.readRun(item.runId)).closed) {
-      if (outcome === 'cancelled' || !versionId) await billing.requestCancel(item.runId);
-      else await billing.closeRun(item.runId, outcome, voiceEvidence(versionId, outcome === 'delivered' ? 'ok' : 'failed'));
+      if (outcome === 'cancelled' || !evidenceId) await billing.requestCancel(item.runId);
+      else await billing.closeRun(item.runId, outcome,
+        voiceEvidence(evidenceId, outcome === 'delivered' ? 'ok' : 'failed'));
     }
     return isSettled(await billing.finalizeRun(item.runId));
   }
@@ -60,11 +64,14 @@ export async function recoverVoiceGenerations(admin: SupabaseClient, options: { 
     try {
       let outcome = await voiceRpc<string>(admin, 'voice_billing_scrub', { p_run_id: item.runId });
       // The version was deleted while its run was still open: settle the run here, then scrub.
-      if (outcome === 'waiting' && await settle(item, 'cancelled')) {
+      if (outcome === 'waiting' && await settle(item, item.outcome, item.runId)) {
         outcome = await voiceRpc<string>(admin, 'voice_billing_scrub', { p_run_id: item.runId });
       }
       if (outcome === 'done') summary.scrubbed += 1; else summary.waiting += 1;
-    } catch { summary.failed += 1; }
+    } catch {
+      summary.failed += 1;
+      await voiceRpc(admin, 'voice_scrub_touch', { p_run_id: item.runId }).catch(() => undefined);
+    }
   }
   summary.success = summary.failed === 0;
   return summary;

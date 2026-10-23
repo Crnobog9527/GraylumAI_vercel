@@ -164,7 +164,17 @@ export async function runCases({db,report}) {
   await db.query("INSERT INTO voice_billing_scrubs(run_id,actor_id,created_at,checked_at) VALUES($1,$2,now()-interval '3 hours',now()-interval '3 hours')",[randomUUID(),w]);
   const scrubRun=(await db.query("SELECT run_id FROM voice_billing_scrubs WHERE actor_id=$1",[w])).rows[0].run_id;
   assert.ok((await svc('voice_recovery_candidates',50)).scrubs.some(x=>x.runId===scrubRun));
+  assert.equal((await db.query('SELECT outcome FROM voice_billing_scrubs WHERE run_id=$1',[scrubRun])).rows[0].outcome,'cancelled');
+  // Deleting a version that has no profile queues its run to be refunded; one with a profile settles at its cost.
+  const noProfile=await begin(w);await db.query("UPDATE voice_profile_versions SET billing_run_id=$2 WHERE id=$1",[noProfile.version.id,randomUUID()]);
+  const keptRun=(await db.query('SELECT billing_run_id r FROM voice_profile_versions WHERE id=$1',[noProfile.version.id])).rows[0].r;
+  await svc('voice_profile_delete',w,failed.version.id).catch(()=>undefined);
+  await db.query("UPDATE voice_profile_versions SET status='failed',profile=NULL WHERE id=$1",[noProfile.version.id]);
+  await svc('voice_profile_delete',w,noProfile.version.id);
+  assert.equal((await db.query('SELECT outcome FROM voice_billing_scrubs WHERE run_id=$1',[keptRun])).rows[0].outcome,'confirmed_failure');
   await svc('voice_billing_scrub',scrubRun);
+  await db.query("UPDATE voice_billing_scrubs SET checked_at=now()-interval '3 hours' WHERE run_id=$1",[scrubRun]).catch(()=>undefined);
+  await svc('voice_scrub_touch',scrubRun);
   assert.ok(!(await svc('voice_recovery_candidates',50)).scrubs.some(x=>x.runId===scrubRun),'a checked scrub moves behind unchecked ones');
   await svc('voice_profile_delete',w,failed.version.id).catch(()=>undefined);void wd;
  }

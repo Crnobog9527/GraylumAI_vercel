@@ -8,9 +8,10 @@ vi.mock('../runtime/stagingPolicy', () => ({ parseStagingPolicy: parsed, loadSta
 vi.mock('../runtime/stagingTransport', () => ({ stagingTransport: () => ({}) }));
 import { recoverVoiceGenerations } from './recovery';
 
+type RpcOut = { data: unknown; error: { message: string } | null };
 function admin(candidates: unknown, scrub: string[] = []) {
   const calls: Array<[string, Record<string, unknown>]> = [];
-  return { calls, rpc: vi.fn(async (name: string, args: Record<string, unknown>) => {
+  return { calls, rpc: vi.fn(async (name: string, args: Record<string, unknown>): Promise<RpcOut> => {
     calls.push([name, args]);
     if (name === 'voice_recovery_candidates') return { data: candidates, error: null };
     if (name === 'voice_billing_scrub') return { data: scrub.shift() ?? 'done', error: null };
@@ -63,7 +64,7 @@ describe('recoverVoiceGenerations', () => {
     expect(billing.finalizeRun).not.toHaveBeenCalled();
   });
   it('settles the open run of a deleted version, then scrubs it', async () => {
-    const db = admin({ generations: [], scrubs: [{ actorId: 'a', runId: 'r' }] }, ['waiting', 'done']);
+    const db = admin({ generations: [], scrubs: [{ actorId: 'a', runId: 'r', outcome: 'cancelled' }] }, ['waiting', 'done']);
     expect(await recoverVoiceGenerations(db as never)).toMatchObject({ success: true, scrubbed: 1 });
     expect(billing.requestCancel).toHaveBeenCalledWith('r');
     expect(db.calls.filter(([name]) => name === 'voice_billing_scrub')).toHaveLength(2);
@@ -84,6 +85,23 @@ describe('recoverVoiceGenerations', () => {
     const db = admin({ generations: [1, 2, 3].map(n => ({ actorId: 'a', versionId: 'v' + n, runId: 'r' + n, status: 'generating' })),
       scrubs: [{ actorId: 'a', runId: 's' }] });
     expect(await recoverVoiceGenerations(db as never, { now: () => clock })).toMatchObject({ settled: 2, deferred: 2 });
+  });
+  it('a deleted version that had no profile is refunded, not charged', async () => {
+    const db = admin({ generations: [], scrubs: [{ actorId: 'a', runId: 's', outcome: 'confirmed_failure' }] }, ['waiting', 'done']);
+    await recoverVoiceGenerations(db as never);
+    expect(billing.closeRun).toHaveBeenCalledWith('s', 'confirmed_failure', expect.objectContaining({ kind: 'confirmed_failure' }));
+    expect(billing.requestCancel).not.toHaveBeenCalled();
+  });
+  it('a scrub that errors moves to the back of the queue', async () => {
+    const db = admin({ generations: [], scrubs: [{ actorId: 'a', runId: 's', outcome: 'cancelled' }] });
+    db.rpc.mockImplementation(async (name: string, args: Record<string, unknown>): Promise<RpcOut> => {
+      db.calls.push([name, args]);
+      if (name === 'voice_recovery_candidates') return { data: { generations: [], scrubs: [{ actorId: 'a', runId: 's', outcome: 'cancelled' }] }, error: null };
+      if (name === 'voice_billing_scrub') return { data: null, error: { message: 'locked' } };
+      return { data: {}, error: null };
+    });
+    expect(await recoverVoiceGenerations(db as never)).toMatchObject({ success: false, failed: 1 });
+    expect(db.calls.find(([name]) => name === 'voice_scrub_touch')?.[1]).toEqual({ p_run_id: 's' });
   });
   it('counts a failure without stopping the others', async () => {
     billing.finalizeRun.mockRejectedValueOnce(new Error('down'));

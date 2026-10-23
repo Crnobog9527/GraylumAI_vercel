@@ -49,9 +49,14 @@ CREATE TABLE IF NOT EXISTS public.voice_billing_scrubs (
  run_id uuid PRIMARY KEY, actor_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE RESTRICT,
  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
  -- Last recovery attempt: candidates are taken oldest-checked first, so rows that keep waiting never crowd out newer ones.
- checked_at timestamptz NOT NULL DEFAULT clock_timestamp()
+ checked_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ -- How the run ends if it is still open: a version with no saved profile is a confirmed failure (the user is refunded);
+ -- one that had a profile settles at its known cost.
+ outcome text NOT NULL DEFAULT 'cancelled' CHECK(outcome IN ('cancelled','confirmed_failure'))
 );
 ALTER TABLE public.voice_billing_scrubs ADD COLUMN IF NOT EXISTS checked_at timestamptz NOT NULL DEFAULT clock_timestamp();
+ALTER TABLE public.voice_billing_scrubs ADD COLUMN IF NOT EXISTS outcome text NOT NULL DEFAULT 'cancelled'
+ CHECK(outcome IN ('cancelled','confirmed_failure'));
 CREATE INDEX IF NOT EXISTS voice_billing_scrubs_actor ON public.voice_billing_scrubs(actor_id);
 ALTER TABLE public.voice_profile_versions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.voice_profiles ENABLE ROW LEVEL SECURITY;
@@ -243,8 +248,9 @@ CREATE OR REPLACE FUNCTION public.voice_delete_versions(a uuid,ids uuid[]) RETUR
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
 DECLARE n integer;
 BEGIN
- INSERT INTO voice_billing_scrubs(run_id,actor_id)
- SELECT billing_run_id,a FROM voice_profile_versions WHERE actor_id=a AND id=ANY(ids) AND billing_run_id IS NOT NULL
+ INSERT INTO voice_billing_scrubs(run_id,actor_id,outcome)
+ SELECT billing_run_id,a,CASE WHEN profile IS NULL THEN 'confirmed_failure' ELSE 'cancelled' END
+ FROM voice_profile_versions WHERE actor_id=a AND id=ANY(ids) AND billing_run_id IS NOT NULL
  ON CONFLICT(run_id) DO NOTHING;
  DELETE FROM voice_profile_versions WHERE actor_id=a AND id=ANY(ids);
  GET DIAGNOSTICS n=ROW_COUNT;
@@ -304,7 +310,7 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public,pg_temp AS $$
     FROM (SELECT * FROM voice_profile_versions
     WHERE (status='generating' OR (billing_run_id IS NOT NULL AND NOT billing_settled))
      AND updated_at<clock_timestamp()-interval '30 minutes' ORDER BY updated_at LIMIT p_limit) g),
-  'scrubs',(SELECT coalesce(jsonb_agg(jsonb_build_object('actorId',actor_id,'runId',run_id,
+  'scrubs',(SELECT coalesce(jsonb_agg(jsonb_build_object('actorId',actor_id,'runId',run_id,'outcome',outcome,
     'recovery',voice_run_recovery(run_id))),'[]')
    FROM (SELECT * FROM voice_billing_scrubs WHERE checked_at<clock_timestamp()-interval '30 minutes'
     ORDER BY checked_at LIMIT p_limit) s));
@@ -313,6 +319,10 @@ $$;
 CREATE OR REPLACE FUNCTION public.voice_recovery_touch(p_version_id uuid) RETURNS void
 LANGUAGE sql SECURITY DEFINER SET search_path=public,pg_temp AS $$
  UPDATE voice_profile_versions SET updated_at=clock_timestamp() WHERE id=p_version_id;
+$$;
+CREATE OR REPLACE FUNCTION public.voice_scrub_touch(p_run_id uuid) RETURNS void
+LANGUAGE sql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+ UPDATE voice_billing_scrubs SET checked_at=clock_timestamp() WHERE run_id=p_run_id;
 $$;
 -- Projects a closed run's receipts to their financial fields (0262's rule), then forgets it. Waits while open.
 CREATE OR REPLACE FUNCTION public.voice_billing_scrub(p_run_id uuid) RETURNS text
@@ -363,12 +373,12 @@ REVOKE ALL ON FUNCTION public.voice_corpus_limit(),public.voice_current_corpus(u
  public.voice_profile_set_enabled(uuid,integer,boolean),public.voice_profile_delete(uuid,uuid),
  public.voice_delete_versions(uuid,uuid[]),public.voice_library_trigger(),public.voice_profile_current(uuid),
  public.voice_profile_read(uuid,uuid),public.voice_recovery_candidates(integer),public.voice_billing_scrub(uuid),
- public.voice_run_recovery(uuid),public.voice_recovery_touch(uuid),public.erasure_business_owner(text,jsonb),public.account_erasure_prune_business(uuid,integer),
+ public.voice_run_recovery(uuid),public.voice_recovery_touch(uuid),public.voice_scrub_touch(uuid),public.erasure_business_owner(text,jsonb),public.account_erasure_prune_business(uuid,integer),
  public.account_erasure_business_remaining(uuid)
  FROM PUBLIC,anon,authenticated,service_role;
 GRANT EXECUTE ON FUNCTION public.voice_state(uuid),public.voice_generation_begin(uuid,uuid,uuid[]),
  public.voice_generation_bind(uuid,uuid,uuid),public.voice_generation_finish(uuid,uuid,jsonb,text,boolean),
  public.voice_profile_confirm(uuid,uuid,integer,jsonb),public.voice_profile_set_enabled(uuid,integer,boolean),
  public.voice_profile_delete(uuid,uuid),public.voice_profile_current(uuid),public.voice_profile_read(uuid,uuid),
- public.voice_recovery_candidates(integer),public.voice_billing_scrub(uuid),public.voice_recovery_touch(uuid) TO service_role;
+ public.voice_recovery_candidates(integer),public.voice_billing_scrub(uuid),public.voice_recovery_touch(uuid),public.voice_scrub_touch(uuid) TO service_role;
 COMMIT;
