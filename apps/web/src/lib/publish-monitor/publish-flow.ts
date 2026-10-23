@@ -46,6 +46,16 @@ export function newIdempotencyKey(): string {
 }
 
 export const MAX_CAPTION = 5000;
+
+// Platforms that cannot post text alone, and the one that needs a video. Caught here so the user is told before any
+// upload or hold instead of after the platform refuses.
+const NEEDS_MEDIA = new Set(['instagram', 'tiktok', 'tiktok_business', 'pinterest', 'youtube']);
+export function mediaProblem(platforms: string[], mimeTypes: string[]): string | null {
+  const missing = platforms.filter(platform => NEEDS_MEDIA.has(platform));
+  if (missing.length > 0 && mimeTypes.length === 0) return `${missing.map(platformName).join('、')} 不能只发文字，请先选择图片或视频。`;
+  if (platforms.includes('youtube') && !mimeTypes.some(type => type.startsWith('video/'))) return 'YouTube 需要视频文件。';
+  return null;
+}
 export const MAX_COVER_MS = 24 * 3600 * 1000;
 
 const MESSAGES: Record<string, string> = {

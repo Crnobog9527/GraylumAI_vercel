@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
 import {
-  captionTooLong, jobSummary, newIdempotencyKey, publishErrorMessage, publishTargets, type Connection,
+  captionTooLong, jobSummary, mediaProblem, newIdempotencyKey, publishErrorMessage, publishTargets, type Connection,
 } from './publish-flow';
 
 const BIZ = '00000000-0000-4000-8000-000000000b01';
@@ -16,6 +16,16 @@ describe('publish targets', () => {
       conn('g', 'x', { status: 'reauth_required' })];
     expect(publishTargets(list, BIZ, ['x', 'youtube']).map(t => [t.id, t.ready])).toEqual([['b', false], ['a', true]]);
     expect(publishTargets(list, BIZ, [])).toEqual([]);
+  });
+});
+
+describe('media requirements', () => {
+  it('stops a text-only post for platforms that need media, and a YouTube post without a video', () => {
+    expect(mediaProblem(['x', 'bluesky'], [])).toBeNull();
+    expect(mediaProblem(['x', 'instagram'], [])).toContain('Instagram');
+    expect(mediaProblem(['pinterest'], ['image/png'])).toBeNull();
+    expect(mediaProblem(['youtube'], ['image/png'])).toContain('视频');
+    expect(mediaProblem(['youtube', 'x'], ['video/mp4'])).toBeNull();
   });
 });
 

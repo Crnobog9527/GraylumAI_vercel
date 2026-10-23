@@ -8,7 +8,7 @@ import {
 } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import {
-  authorizeHere, captionTooLong, MAX_CAPTION, newIdempotencyKey, platformName, publishErrorMessage, type Target,
+  authorizeHere, captionTooLong, MAX_CAPTION, mediaProblem, newIdempotencyKey, platformName, publishErrorMessage, type Target,
 } from '@/lib/publish-monitor/publish-flow';
 import { clearAttempt, loadAttempt, saveAttempt, sameFiles, type StoredAttempt } from '@/lib/publish-monitor/publish-recovery';
 import { mediaDigest, MediaUploadError, uploadPublishFiles, type UploadedMedia } from '@/lib/publish-monitor/upload-media';
@@ -52,7 +52,8 @@ export function PublishForm({ businessId, workItemId, targets, initialCaption, i
   const tooLongForServer = [...caption].length > MAX_CAPTION;
   // While an earlier submit is unconfirmed, what is published cannot change: another key could post and charge twice.
   const locked = attempt !== null || recovered !== null;
-  const canPublish = chosen.length > 0 && caption.trim().length > 0 && !tooLongForServer && !busy;
+  const mediaIssue = mediaProblem(chosen.map(t => t.platform), media.map(m => m.file.type.toLowerCase()));
+  const canPublish = chosen.length > 0 && caption.trim().length > 0 && !tooLongForServer && mediaIssue === null && !busy;
   const changed = <T,>(set: (value: T) => void) => (value: T) => { if (!locked) set(value); };
   function discardEarlier() {
     if (workItemId) clearAttempt(workItemId);
@@ -164,6 +165,7 @@ export function PublishForm({ businessId, workItemId, targets, initialCaption, i
           onChange={event => changed(setCaption)(event.target.value)} />
         {tooLongForServer && <p role="alert" className="text-sm text-[var(--color-error)]">
           文案超过 {MAX_CAPTION} 字，请先删减再发布。</p>}
+        {mediaIssue && chosen.length > 0 && <p role="alert" className="text-sm text-[var(--color-error)]">{mediaIssue}</p>}
         {tooLong.length > 0 && <p className="text-sm text-[var(--text-secondary)]">
           文案超过了 {tooLong.map(platformName).join('、')} 的字数上限，平台可能拒绝或截断。</p>}
       </section>
