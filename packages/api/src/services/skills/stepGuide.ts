@@ -42,6 +42,11 @@ export async function loadStepWork(source: SkillSource, descriptor: PackageDescr
   const manifest = await readStepManifest(source, descriptor);
   return manifest && stepWorkOf(manifest, maxGuideBytes);
 }
+/** A3a: the guided positioning Skill starts only from the positioning entry, never from free chat matching. */
+export async function isPositioningPackage(source: SkillSource, descriptor: PackageDescriptor): Promise<boolean> {
+  const manifest = await readStepManifest(source, descriptor);
+  return Boolean(manifest && isPositioningWorkflow(manifest));
+}
 async function readStepManifest(source: SkillSource, descriptor: PackageDescriptor): Promise<WorkflowManifest | undefined> {
   // Treat a descriptor without a file list as one without workflow.yaml.
   if (!(descriptor.files ?? []).some(item => item.path === workflowManifestPath)) return undefined;

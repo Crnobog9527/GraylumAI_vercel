@@ -3,18 +3,19 @@ import { describe, expect, it } from 'vitest';
 import { parseVoiceProfile, voiceInput, voiceProfile } from './profile';
 
 const material = [{ documentId: 'd1', filename: '旧笔记.md', text: '哎下班到家都七点了，咋整。\n一口锅搞定呗。' }];
+const both = ['哎下班到家都七点了，咋整。', '一口锅搞定呗。'];
 const answer = (extra: Record<string, unknown> = {}) => JSON.stringify({ tone: '像跟朋友唠嗑', sentenceLength: '短句多',
   openings: '先吐槽一句', stance: '温和', phrases: ['咋整', '搞定'], avoid: ['家人们'], platforms: '',
-  samples: ['哎下班到家都七点了，咋整。'], ...extra });
+  samples: both, ...extra });
 
 describe('parseVoiceProfile', () => {
   it('accepts the JSON object, also inside a code fence', () => {
     expect(parseVoiceProfile(answer(), material)?.tone).toBe('像跟朋友唠嗑');
-    expect(parseVoiceProfile('```json\n' + answer() + '\n```', material)?.samples).toEqual(['哎下班到家都七点了，咋整。']);
+    expect(parseVoiceProfile('```json\n' + answer() + '\n```', material)?.samples).toEqual(both);
   });
-  it('drops passages that are not verbatim and refuses when none is left', () => {
-    const parsed = parseVoiceProfile(answer({ samples: ['编出来的一句', '一口锅搞定呗。'] }), material);
-    expect(parsed?.samples).toEqual(['一口锅搞定呗。']);
+  it('drops passages that are not verbatim and refuses when fewer than two are left', () => {
+    expect(parseVoiceProfile(answer({ samples: ['编出来的一句', ...both] }), material)?.samples).toEqual(both);
+    expect(parseVoiceProfile(answer({ samples: ['编出来的一句', '一口锅搞定呗。'] }), material)).toBeNull();
     expect(parseVoiceProfile(answer({ samples: ['编出来的一句'] }), material)).toBeNull();
   });
   it('refuses anything that is not the object', () => {

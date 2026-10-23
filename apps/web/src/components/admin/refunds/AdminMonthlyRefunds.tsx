@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { ConfirmRefundAction } from './ConfirmRefundAction';
 import { MonthlyRefundQuoteCard, type MonthlyRefundQuoteTerms } from './MonthlyRefundQuoteCard';
 import { MonthlyRefundStatusCard } from './MonthlyRefundStatusCard';
-import { useMonthlyRefund } from './useMonthlyRefund';
+import { useMonthlyRefund, type RefundVariant } from './useMonthlyRefund';
 import {
   FEE_PERMITTED_HINT, FEE_PERMITTED_LABELS, REJECT_REASON_LABELS, feePermittedPatch, canRejectMonthlyRefund,
   type FeePermitted, type MonthlyRefundForm, type RejectReason,
@@ -16,12 +16,12 @@ import {
 
 const cardStyle = { background: 'var(--bg-secondary)', borderColor: 'var(--border-primary)' };
 
-function Field({ id, label, hint, error, children }: {
-  id: keyof MonthlyRefundForm; label: string; hint?: string; error?: string; children: React.ReactNode;
+function Field({ id, idPrefix, label, hint, error, children }: {
+  id: keyof MonthlyRefundForm; idPrefix: string; label: string; hint?: string; error?: string; children: React.ReactNode;
 }) {
   return (
     <div className="space-y-1.5">
-      <Label htmlFor={`refund-${id}`} style={{ color: 'var(--text-primary)' }}>{label}</Label>
+      <Label htmlFor={`${idPrefix}-${id}`} style={{ color: 'var(--text-primary)' }}>{label}</Label>
       {children}
       {hint && !error ? <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{hint}</p> : null}
       {error ? <p role="alert" className="text-xs" style={{ color: 'var(--error)' }}>{error}</p> : null}
@@ -29,35 +29,50 @@ function Field({ id, label, hint, error, children }: {
   );
 }
 
-/** 后台月付首购退款（PAY-COMMON）：按工单人工审批，报价、批准、执行分三步，规则全部由服务端判断。 */
-export function AdminMonthlyRefunds() {
-  const refund = useMonthlyRefund();
+const COPY: Record<RefundVariant, { title: string; intro: string; idPrefix: string }> = {
+  monthly: {
+    title: 'Stripe 银行卡月付首购退款', idPrefix: 'refund',
+    intro: '只处理 Stripe 银行卡自动续费 Pro / Gold 月付的第一次购买，按用户的账单工单人工审批。'
+      + 'Waffo 会员和 Stripe 钱包一次性会员使用下方“一次性会员退款”；续费和积分包不在这里处理；'
+      + 'Stripe 银行卡年付和创始会员使用下方“年付和创始会员首购退款”。',
+  },
+  subscription: {
+    title: 'Stripe 银行卡年付和创始会员首购退款', idPrefix: 'subscription-refund',
+    intro: '处理 Stripe 银行卡（含国际卡）的年付首购、创始会员首购，以及有明确原单的 Pro 升 Gold 首购，'
+      + '按用户的账单工单人工审批。年付只收回本单已经到账的月度积分，没发的部分终止；'
+      + '创始会员退款成功后身份和展示墙资格一并结束，已售名额不放回；'
+      + 'Pro 升 Gold 退款后恢复原 Pro 到原到期日。续费、月付首购和积分包不在这里处理。',
+  },
+};
+
+/** 后台订阅首购退款（PAY-COMMON / PAY-REFUND）：按工单人工审批，报价、批准、执行分三步，规则全部由服务端判断。 */
+export function AdminMonthlyRefunds({ variant = 'monthly' }: { variant?: RefundVariant } = {}) {
+  const refund = useMonthlyRefund(variant);
+  const copy = COPY[variant];
+  const { idPrefix } = copy;
   const { form, errors, rejectReason, setRejectReason } = refund;
 
   return (
-    <div className="space-y-6 p-4 md:p-8">
+    <div className="space-y-6 p-4 md:p-8" data-testid={`${variant}-refund-section`}>
       <div>
-        <h1 className="text-2xl font-bold md:text-3xl" style={{ color: 'var(--text-primary)' }}>Stripe 银行卡月付首购退款</h1>
-        <p className="mt-1 text-sm" style={{ color: 'var(--text-tertiary)' }}>
-          只处理 Stripe 银行卡自动续费 Pro / Gold 月付的第一次购买，按用户的账单工单人工审批。
-          Waffo 会员和 Stripe 钱包一次性会员使用下方“一次性会员退款”；续费、积分包和年付不在这里处理。
-        </p>
+        <h1 className="text-2xl font-bold md:text-3xl" style={{ color: 'var(--text-primary)' }}>{copy.title}</h1>
+        <p className="mt-1 text-sm" style={{ color: 'var(--text-tertiary)' }}>{copy.intro}</p>
       </div>
 
       <section className="space-y-4 rounded-xl border p-4" style={cardStyle} data-testid="monthly-refund-form">
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <Field id="orderId" label="订单编号" hint='在"支付订单"页每笔订单最下面一行' error={errors.orderId}>
-            <Input id="refund-orderId" value={form.orderId} disabled={refund.busy} autoComplete="off" spellCheck={false}
+          <Field id="orderId" idPrefix={idPrefix} label="订单编号" hint='在"支付订单"页每笔订单最下面一行' error={errors.orderId}>
+            <Input id={`${idPrefix}-orderId`} value={form.orderId} disabled={refund.busy} autoComplete="off" spellCheck={false}
               onChange={event => refund.updateForm({ orderId: event.target.value })} />
           </Field>
-          <Field id="ticketId" label="工单编号" hint="用户提交的账单类退款工单" error={errors.ticketId}>
-            <Input id="refund-ticketId" value={form.ticketId} disabled={refund.busy} autoComplete="off" spellCheck={false}
+          <Field id="ticketId" idPrefix={idPrefix} label="工单编号" hint="用户提交的账单类退款工单" error={errors.ticketId}>
+            <Input id={`${idPrefix}-ticketId`} value={form.ticketId} disabled={refund.busy} autoComplete="off" spellCheck={false}
               onChange={event => refund.updateForm({ ticketId: event.target.value })} />
           </Field>
-          <Field id="feePermitted" label="能否扣 6% 手续费" hint={FEE_PERMITTED_HINT}
+          <Field id="feePermitted" idPrefix={idPrefix} label="能否扣 6% 手续费" hint={FEE_PERMITTED_HINT}
             error={errors.feePermitted}>
             <Select value={form.feePermitted} disabled={refund.busy} onValueChange={value => refund.updateForm(feePermittedPatch(value as FeePermitted, form))}>
-              <SelectTrigger id="refund-feePermitted"><SelectValue placeholder="请选择" /></SelectTrigger>
+              <SelectTrigger id={`${idPrefix}-feePermitted`}><SelectValue placeholder="请选择" /></SelectTrigger>
               <SelectContent>
                 {(Object.keys(FEE_PERMITTED_LABELS) as FeePermitted[]).map(key => (
                   <SelectItem key={key} value={key}>{FEE_PERMITTED_LABELS[key]}</SelectItem>
@@ -65,8 +80,9 @@ export function AdminMonthlyRefunds() {
               </SelectContent>
             </Select>
           </Field>
-          <Field id="feeEvidence" label="手续费核对依据" hint="核对记录的编号，例如 legal:us-ca:2026-10" error={errors.feeEvidence}>
-            <Input id="refund-feeEvidence" value={form.feeEvidence} disabled={refund.busy} autoComplete="off" spellCheck={false}
+          <Field id="feeEvidence" idPrefix={idPrefix} label="手续费核对依据"
+            hint="核对记录的编号，例如 legal:us-ca:2026-10" error={errors.feeEvidence}>
+            <Input id={`${idPrefix}-feeEvidence`} value={form.feeEvidence} disabled={refund.busy} autoComplete="off" spellCheck={false}
               onChange={event => refund.updateForm({ feeEvidence: event.target.value })} />
           </Field>
         </div>
@@ -97,7 +113,8 @@ export function AdminMonthlyRefunds() {
       </section>
 
       {refund.quoted ? (
-        <MonthlyRefundQuoteCard terms={refund.quoted.quote.terms as MonthlyRefundQuoteTerms} approving={refund.approving}
+        <MonthlyRefundQuoteCard
+          terms={refund.quoted.quote.terms as MonthlyRefundQuoteTerms} approving={refund.approving}
           disabled={refund.busy} onApprove={() => void refund.approveQuote()} />
       ) : null}
 
