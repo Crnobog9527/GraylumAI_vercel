@@ -56,7 +56,12 @@ export async function* streamCompareColumn(deps: ColumnDeps, input: { compareId:
   const streamer = columnStreamer({ holdForRefusal: hold, emit: text => push({ type: 'delta', text }) });
   const task = deps.executor.run(run, { runId: run.runId, id: column.call.callId, state: column.call.state, fresh: false },
     () => 'usable', streamer.onChunk, hold ? isPositioningRefusal : undefined)
-    .then(outcome => {
+    .then(async outcome => {
+      // The connection was confirmed never started (the call is back to prepared): give the claim back so a retry can
+      // dispatch within the call's dispatch window instead of waiting out the lease.
+      if (outcome.state === 'pending' && outcome.reason === 'not_started') {
+        await compareRpc(deps.admin, 'fusion_compare_dispatch_release', { p_actor_id: deps.actorId, p_call_id: column.call!.callId }).catch(() => undefined);
+      }
       streamer.settle(outcome.state === 'judged' && outcome.verdict === 'no_delivery' && hold && isPositioningRefusal(streamer.text()));
       push(outcome.state === 'judged' ? { type: 'done', verdict: outcome.verdict } : { type: 'pending', reason: outcome.reason });
     })

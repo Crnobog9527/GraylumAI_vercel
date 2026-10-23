@@ -48,6 +48,15 @@ describe('compare column stream (FUSION-COMPARE §3.5)', () => {
     expect(run).not.toHaveBeenCalled();
     expect(s.rpcs).toContain('fusion_compare_dispatch_claim');
   });
+  it('gives the dispatch claim back when the connection was confirmed never started, and only then', async () => {
+    const noStart = vi.fn(async () => ({ state: 'pending', reason: 'not_started' }) as FusionCallOutcome);
+    expect(await collect(streamCompareColumn(deps(noStart), { compareId: id(1), column: 0 }))).toEqual([{ type: 'pending', reason: 'not_started' }]);
+    expect(s.rpcs).toContain('fusion_compare_dispatch_release');
+    s.rpcs = [];
+    const unreadable = vi.fn(async () => ({ state: 'pending', reason: 'response_unreadable' }) as FusionCallOutcome);
+    await collect(streamCompareColumn(deps(unreadable), { compareId: id(1), column: 0 }));
+    expect(s.rpcs).not.toContain('fusion_compare_dispatch_release');
+  });
   it('dispatches the other column, not a neighbour: columns are independent requests', async () => {
     const run = vi.fn(async () => ({ state: 'judged', verdict: 'usable' }) as FusionCallOutcome);
     await collect(streamCompareColumn(deps(run), { compareId: id(1), column: 1 }));

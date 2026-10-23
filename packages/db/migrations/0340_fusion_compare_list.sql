@@ -9,9 +9,9 @@
 -- Also fusion_compare_dispatch_claim: an exclusive, one-winner claim to dispatch one compare column. bill2_dispatch's rotation
 -- always succeeds on a prepared call (the later rotation steals the earlier token), so it cannot decide which of two requests
 -- for the same column (two tabs, a retry) dispatches; the claim does, before any call-gate unit is taken. The claim is a lease:
--- one that was never followed by a dispatch can be taken again after two minutes.
+-- one that was never followed by a dispatch can be taken again after two minutes, and a confirmed no-start releases it at once.
 -- Rollback: DROP FUNCTION public.fusion_compare_list(uuid,uuid,uuid), public.fusion_compare_unjudged(integer),
--- public.fusion_compare_dispatch_claim(uuid,uuid); DROP TABLE public.fusion_compare_dispatch_claims (it holds only call ids and
+-- public.fusion_compare_dispatch_claim(uuid,uuid), public.fusion_compare_dispatch_release(uuid,uuid); DROP TABLE public.fusion_compare_dispatch_claims (it holds only call ids and
 -- times); nothing depends on them except the compare routes (behind the compare switch, off by default) and the recovery step.
 BEGIN;
 SET LOCAL lock_timeout = '5s';
@@ -75,5 +75,22 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION public.fusion_compare_dispatch_claim(uuid,uuid) FROM PUBLIC,anon,authenticated,service_role;
 GRANT EXECUTE ON FUNCTION public.fusion_compare_dispatch_claim(uuid,uuid) TO service_role;
+
+-- A column whose provider connection was confirmed never started (BILL2 restored the call to prepared) gives its claim back, so
+-- the next request can dispatch it within the call's dispatch window instead of waiting out the lease.
+CREATE OR REPLACE FUNCTION public.fusion_compare_dispatch_release(p_actor_id uuid, p_call_id uuid)
+RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
+DECLARE gone uuid;
+BEGIN
+  PERFORM bill2_actor(p_actor_id);
+  DELETE FROM fusion_compare_dispatch_claims d USING bill2_calls c JOIN bill2_runs br ON br.id=c.run_id
+    JOIN fusion_compares fc ON fc.group_id=br.fusion_group_id
+    WHERE d.call_id=p_call_id AND c.id=p_call_id AND br.actor_id=p_actor_id AND fc.actor_id=p_actor_id
+      AND c.dispatched_at IS NULL AND c.settled_at IS NULL
+    RETURNING d.call_id INTO gone;
+  RETURN gone IS NOT NULL;
+END $$;
+REVOKE ALL ON FUNCTION public.fusion_compare_dispatch_release(uuid,uuid) FROM PUBLIC,anon,authenticated,service_role;
+GRANT EXECUTE ON FUNCTION public.fusion_compare_dispatch_release(uuid,uuid) TO service_role;
 
 COMMIT;

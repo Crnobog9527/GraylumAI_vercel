@@ -161,6 +161,12 @@ export async function fusionCompareCases({db,Client,connectionString,report,crea
   await db.query("UPDATE fusion_compare_dispatch_claims SET claimed_at=now()-interval '3 minutes' WHERE call_id=$1",[c1.id]);
   assert.equal(await owns(actor,c1.id),true,'a claim never followed by a dispatch can be taken again after the lease');
   assert.equal(await owns(actor,randomUUID()),false,'an unknown call cannot be claimed');
+  const release = async (who,call) => (await db.query('SELECT fusion_compare_dispatch_release($1,$2) v',[who,call])).rows[0].v;
+  assert.equal(await release(outsider,c1.id),false,'nobody else can release another actor\'s claim');
+  assert.equal(await release(actor,c1.id),true,'a confirmed no-start gives the claim back');
+  assert.equal(await release(actor,c1.id),false,'releasing twice is a no-op');
+  assert.equal(await owns(actor,c1.id),true,'and the next request can dispatch at once');
+  await db.query('DELETE FROM fusion_compare_dispatch_claims WHERE call_id=$1',[c1.id]);
   report.checks.push('fusion_compare_dispatch_claim: one winner per column, owner-checked, re-claimable after the lease');
   assert.equal((await rpc(db,'bill2_dispatch',actor,c0.runId,c0.id,c0.dispatchToken)).dispatch,true);
   await rpc(db,'bill2_record',actor,c0.runId,c0.id,{provider:a.claimPayload.provider,account:'sandbox',model:a.claimPayload.model,
