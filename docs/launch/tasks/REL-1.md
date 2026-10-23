@@ -39,7 +39,7 @@ V3-M3 → REL-1 的依赖是"以上全部"（Master Plan 第 7.1 节第 2375 行
 | --- | --- | --- |
 | 被阻塞，没开工 | VOICE | — |
 | 实施中，有在途 PR | RUNTIME-PROD、REPORT-GEN、REPORT-VISUAL、CONTENT-CONVERSATION-DRIVEN、RUNTIME-FAILURE-RECONCILE、RESEARCH-TOOLS、ADMIN-SECRETS、LIB-DOCS、EXPERT-CONSULT、FUSION-REVIEW、FUSION-COMPARE、PUBLISH-MONITOR、PAYWALL、PAY-STRIPE-MP、PAY-FOUNDER、PAY-DISPUTE-GUARD、ANALYTICS、PUBLIC-SITE | #1073、#1102、#1106/#1108、#1036、#1061、#1062、#1041、#1022/#1042/#1050/#1051、#1060、#1098、#1099（方案 #1059）、#1075/#1081、#1097、#1101/#1104/#1111、#1110、#1069、#1076/#1077、#992/#1088/#1090/#1091 |
-| 实施中，没有在途 PR（剩余工作待核实） | AGENT-CORE、AGENT-CORE-UI、CONVERSATION-DRIVEN-CAPTURE、CHAT-NATIVE-OUTPUT、PROMPT-CACHE-HISTORY、DB-BASELINE（已核实实质完成，待标完成）、STAGING-HOST-CLEANUP、DATA-ERASURE、UI-A、UI-MODEL、UI-B、UI-C、UI-FINISH、PAY-COMMON、POSITIONING-GATE、MODEL-IDENTITY-GUARD、PAY-NOTIFY、PAY-EVIDENCE、LEGACY-CLOSE、SKILL-I18N-HOOK | — |
+| 实施中，没有在途 PR（剩余工作待核实） | AGENT-CORE、AGENT-CORE-UI、CONVERSATION-DRIVEN-CAPTURE、CHAT-NATIVE-OUTPUT、PROMPT-CACHE-HISTORY、DB-BASELINE（已核实实质完成，待标完成）、STAGING-HOST-CLEANUP、DATA-ERASURE、UI-A、UI-MODEL、UI-B、UI-C、UI-FINISH、PAY-COMMON、POSITIONING-GATE、MODEL-IDENTITY-GUARD、PAY-NOTIFY、LEGACY-CLOSE、SKILL-I18N-HOOK | — |
 | 已定，不阻塞 | MODERATION（Owner 2026-10-17 定上线时继续暂缓、上线后再定，Master Plan 第 2.1 节） | — |
 
 （2026-10-18 按 `node scripts/plan-progress.mjs --ref origin/staging` 重列；#1027 SKILL-I18N-HOOK、#1030 LEGACY-CLOSE、#1032/#1033 PUBLISH-MONITOR、#1038 PAY-DISPUTE-GUARD D0 已合并，不再在途。）
@@ -124,7 +124,7 @@ Owner 2026-10-17 选 A（原话见第 6 节）：**日期不变，10-25 冻结**
 | R3 | 计费配置行：`billing_credits_per_usd`=100、`billing_token_price_multiplier`=6 必须作为真实设置行写入（正式模式不接受代码默认值） | q=100、m=6 是 Owner 已定数值 | 总控（需批准每一组数值） | R1；B1 | 读回两行 | 同上；第 1450 行 |
 | R4 | 正式准入档案：`system_settings.runtime_payg_production` = `{version:1, enabled, policyVersion, profiles:[…]}`，结构同 staging 的 `runtime_payg_staging`，但没有 windowId 和到期日（取代 H3 里"准入记录"的写法）；应急关闭写 `{"enabled":false}` | 哪些模型和线路能被正式调用 | 总控（需批准） | R1；R3 | 读回档案；关闭后新调用被拒 | 同上 |
 | R5 | Vercel 正式项目环境变量（非密钥）：`V3_RUNTIME_PRODUCTION_PROJECT_ID`（正式项目 ID）、`V3_RUNTIME_PRODUCTION_DATABASE_HOST`（新正式 Supabase 主机）、`V3_RUNTIME_PRODUCTION_ENABLED=true`（**随 10-29 的部署一起设成 true**，此时 `stopNewCalls` 仍是开的，新调用照样被拒；环境变量只对新部署生效，冒烟当天只靠临时关 `stopNewCalls`，不再改变量、不再重新部署）；**正式项目不能设任何 `V3_RUNTIME_STAGING_*`**（设了代码拒绝）；正式域名代码里只认 `app.graylum.com` 和 `www.graylum.com` | 项目和库绑定，防止误连 | 总控（需批准） | R1；N1 | 变量名清单读回；`stopNewCalls` 开着时模型调用被拒 | 同上 |
-| R6 | 首版正式环境的评审团和研究工具还不可用，由后续两个 PR 在冻结前补上（总控已排）；补不上就按 10-24 缺口清单处理 | 避免对外说有但实际没有 | RUNTIME-PROD 窗口 | R1 | 缺口清单里列明 | 同上 |
+| R6 | 首版正式环境的评审团和研究工具还不可用，由后续两个 PR 在冻结前补上（总控已排）。**评审团是上线硬门槛**（Owner 2026-10-20，Master Plan 第 2.1 节）：正式环境评审团不可用就不能上线，不适用缺口清单的关开关；研究工具补不上按 10-24 缺口清单处理 | 避免对外说有但实际没有 | RUNTIME-PROD 窗口 | R1 | 缺口清单里列明 | 同上 |
 | R7 | **正式环境付款入口的代码闸门**：`packages/api/src/services/payments/methodCheckoutGate.ts` 现在把银行卡下单写死成只在 staging 部署上开放（第 25–31 行），微信和支付宝一律关闭（`WALLET_CHECKOUT_READY = false`）；正式环境靠配置打不开。需要一个 PR：为正式部署加上和 R5 同样的"项目、数据库主机"绑定的放行条件，银行卡和钱包分别放行；**默认仍关闭**，真正打开仍要 Owner 批准。
 
 **拆分（总控 2026-10-17）**：#1093 只做入口闸门；B1（#1101，迁移 0296）已在 `methodRouting.ts`、`methodPurchase.ts`、`stripeMethodCheckout.ts` 去掉 Waffo 以外的 live 硬拒，`0222` 的检查由 0296 的 `pay_method_mode_allowed` 取代；退款路径依赖 **B2（#1104，覆盖积分包、月付首单、订阅退款和外部退款回调）+ B3（R7 窗口的 PR-B3，一次性钱包会员订单退款，冻结前合并）**。R7 窗口会逐条核对下面列出的行号，有遗漏在 B3 一起修。
