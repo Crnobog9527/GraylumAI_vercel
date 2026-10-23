@@ -28,7 +28,7 @@ import {runtimeActor} from './actor';
 import {postgresJsonbBytes,assertFrozenPayloads} from './payloadSize';
 import { runtimeAdmissionService } from './admission';
 import { activateRuntimeCandidate } from './matching';
-import {packageHash,sha256} from '../skills/loader';
+import {clearSkillResourceCache,packageHash,sha256} from '../skills/loader';
 import { makePackage, makeWorkflow } from '../__tests__/fixtures/artifacts';
 import { workbenchService } from '../artifacts/workbench';
 import { artifactReuse } from '../artifacts/reuse';
@@ -1038,6 +1038,9 @@ it('RUNTIME: AC-0 router round trips per phase stay fixed for admission, Skill l
   const ordinary=await measured(c=>c.prepare({sessionId,requestId:randomUUID(),input:'Please work',selection:{kind:'ordinary',modelId},network:'deny'}));
   const stream=await measured(async c=>{const events=[];for await(const event of await c.executeStream({executionId:ordinary.result.executionId}))events.push(event);return events;});
   expect(stream.result.at(-1)).toMatchObject({type:'result',result:{state:'completed'}});
+  // The ordinary prepare above listed the user's loadable Skills (CONTENT-CONVERSATION-DRIVEN) and so warmed the package
+  // cache; this measurement is the first Skill prepare of a cold process, as before.
+  clearSkillResourceCache();
   const skill=await measured(c=>c.prepare({sessionId,requestId:randomUUID(),input:'Please work',selection:{kind:'skill',moduleId,revisionId:pack.revisionId},network:'deny'}));
   const execute=await measured(c=>c.execute({executionId:skill.result.executionId}));
   expect(execute.result).toMatchObject({state:'completed'});
@@ -1048,13 +1051,18 @@ it('RUNTIME: AC-0 router round trips per phase stay fixed for admission, Skill l
   const skillPrepare=async()=>prepareIn(await newSession());
   // The same verified revision again: package files now come from the process cache.
   const skillWarm=await skillPrepare();
+  // A second free-chat reply of the same user: the Skill list is kept for a few minutes, so it costs nothing again.
+  const warmSession=await newSession();
+  const ordinaryWarm=await measured(c=>c.prepare({sessionId:warmSession,requestId:randomUUID(),input:'Please work',selection:{kind:'ordinary',modelId},network:'deny'}));
+  expect(phases(ordinaryWarm.summary)).toEqual({prelude:2,policy:0,host:0,admission:7,rateLimit:0});
   const all={start,ordinary,stream,skill,execute,skillWarm};
   const counts=Object.fromEntries(Object.entries(all).map(([name,m])=>[name,phases(m.summary)]));
   // POSITIONING-GATE: free-chat admission adds one read (runtime_positioning_gate); this user has no positioning
   // and the fixture model has no OpenRouter key, so Decisions is not called (fallback rule frozen instead).
   expect(counts,JSON.stringify(Object.fromEntries(Object.entries(all).map(([name,m])=>[name,m.summary])))).toEqual({
    start:{prelude:2,policy:0,host:1},
-   ordinary:{prelude:2,policy:0,host:0,admission:7,rateLimit:0},
+   // 7 for the reply itself plus the first-time listing of the user's loadable Skills (about 14 for this one Skill module).
+   ordinary:{prelude:2,policy:0,host:0,admission:21,rateLimit:0},
    stream:{prelude:2,policy:0,host:0,execute:7,provider:9,rateLimit:0},
    skill:{prelude:2,policy:0,host:0,admission:14,rateLimit:0},
    execute:{prelude:2,policy:0,host:0,execute:6,provider:7,rateLimit:0},
