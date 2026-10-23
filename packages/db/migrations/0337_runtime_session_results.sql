@@ -9,8 +9,10 @@
 --     opc_content_versions; positioning keeps its own flow.
 -- Lite scope (not in this migration): AI save proposals (save_content), the D7 "result" preview branch, copying a
 -- result into the library, result_adoption data events.
--- Erasure: deleting the conversation, or any execution a result was saved from, deletes the result family; account
--- erasure deletes every row and the body proof counts them.
+-- Erasure (design 8.1.5): deleting the conversation, the result itself, or the account deletes the results. Erasing only
+-- the reply a result was saved from keeps the user's saved (and edited) text; it is then marked "source unavailable"
+-- (sourceAvailable=false, because runtime_history_available of the erased reply is false). Account erasure deletes
+-- every row and the body proof counts them.
 -- Compatibility: a new table and new functions; existing functions only gain the delete lines, so old code is
 -- unaffected. Repeatable: IF NOT EXISTS, CREATE OR REPLACE, marker-skipped patches.
 -- Recovery: restore content_erasure_confirm, account_erasure_scrub_content and account_erasure_body_remaining from
@@ -190,14 +192,17 @@ END $$;
 -- Every version of one result, newest first ("旧版本仍可看").
 CREATE OR REPLACE FUNCTION public.runtime_session_result_versions(p_actor_id uuid,p_family_id uuid) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=public,pg_temp AS $$
-DECLARE sid uuid;n integer;
+DECLARE sid uuid;
 BEGIN
  PERFORM bill2_actor(p_actor_id);
- SELECT session_id,count(*) OVER () INTO sid,n FROM runtime_session_results WHERE family_id=p_family_id AND actor_id=p_actor_id LIMIT 1;
+ SELECT session_id INTO sid FROM runtime_session_results WHERE family_id=p_family_id AND actor_id=p_actor_id LIMIT 1;
  IF sid IS NULL THEN RAISE EXCEPTION 'SESSION_RESULT_NOT_FOUND' USING ERRCODE='42501';END IF;
  PERFORM runtime_session_results_session(p_actor_id,sid);
- RETURN (SELECT jsonb_agg(runtime_session_result_view(r,n) ORDER BY r.version DESC)
-  FROM runtime_session_results r WHERE r.family_id=p_family_id AND r.actor_id=p_actor_id);
+ -- One statement, one snapshot: the version count always matches the returned rows even if an edit commits meanwhile.
+ RETURN coalesce((SELECT jsonb_agg(runtime_session_result_view(r,c.n) ORDER BY r.version DESC)
+  FROM runtime_session_results r,
+   LATERAL (SELECT count(*)::integer n FROM runtime_session_results x WHERE x.family_id=p_family_id AND x.actor_id=p_actor_id) c
+  WHERE r.family_id=p_family_id AND r.actor_id=p_actor_id),'[]'::jsonb);
 END $$;
 
 -- Erasure, patched at unique anchors (same method as 0232 / 0320).
@@ -205,9 +210,8 @@ DO $$ DECLARE source text;sig text;needle text;replacement text;marker text; BEG
  FOR sig,needle,replacement,marker IN SELECT * FROM (VALUES
  ('content_erasure_confirm(uuid,text,uuid,text)',
   $n$ -- 0320 shortfall: the choice card goes with its answer or conversation.$n$,
-  $r$ -- 0337 session results: a saved result goes with its conversation or with any reply it was saved from.
- DELETE FROM runtime_session_results WHERE actor_id=a AND (session_id=ANY(sessions) OR family_id IN (
-  SELECT family_id FROM runtime_session_results WHERE actor_id=a AND source_execution_id=ANY(ids)));
+  $r$ -- 0337 session results: a saved result goes with its conversation; erasing only its source reply keeps it (shown as source unavailable).
+ DELETE FROM runtime_session_results WHERE actor_id=a AND session_id=ANY(sessions);
  -- 0320 shortfall: the choice card goes with its answer or conversation.$r$,'conversation results erasure'),
  ('account_erasure_scrub_content(uuid)',
   $n$  -- 0320 shortfall$n$,
