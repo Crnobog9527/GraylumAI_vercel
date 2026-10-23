@@ -3,7 +3,7 @@ import {executionTools} from './executionTools';
 import {researchExecution,responseAfterResearch} from './researchExecution';
 import {runtimeCallGate} from './callGate';
 import {billingClaimNotice,claimNoticeFields} from './claimNotice';
-import {stoppedCompletion} from './stoppedCompletion';
+import {stoppedCompletion} from './stoppedCompletion';import {organizerExchange,responsePending} from './organizerLost';
 import {NativeSession} from './nativeSession';
 import {NativeProgressProjection} from './nativeProgress';
 import {visibleText,nativeMetadata,prepareNativePrimary,nativeFrameProjection,
@@ -156,7 +156,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
      let raw=existing?.rawBody;
      if(!raw){
       // Recovery is replay-only, even when a later step had not yet been sent.
-      if(!execution.live||existing?.state==='dispatched'||existing?.state==='unknown'||existing?.state==='responded')throw new Error('RUNTIME_RESPONSE_PENDING');
+      if(!execution.live||existing?.state==='dispatched'||existing?.state==='unknown'||existing?.state==='responded')throw responsePending(existing,sequence,requestHash);
       try{
        if(selectedPolicy.protocol==='openrouter-chat-v1')budget.modelCallTimeout(OPENROUTER_RESPONSE_TIMEOUT_MS);
        else budget.assertCanStart(5000);
@@ -207,11 +207,11 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
        }
       }
       if(dispatch.providerRejected){providerRejected=true;throw new Error('RUNTIME_PROVIDER_REJECTED');}
-      const saved=await ownerRpc<{rawBody:string|null}|null>('runtime_response',{...args,p_sequence:sequence,p_request_hash:requestHash});
-      raw=saved?.rawBody;
+      existing=await ownerRpc<typeof existing>('runtime_response',{...args,p_sequence:sequence,p_request_hash:requestHash});
+      raw=existing?.rawBody;
      gatePassed=false;
      }
-     if(!raw)throw new Error('RUNTIME_RESPONSE_PENDING');
+     if(!raw)throw responsePending(existing,sequence,requestHash);
      if(isPayg)await billing.finalizeRun(execution.runId);
      const decoded=JSON.parse(raw);
      return selectedPolicy.protocol==='openrouter-chat-v1' ? {usage:{sdkResponse:decoded}} : decoded;
@@ -395,20 +395,21 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     const organizer=context.attachedOrganizer;
     const organizerPolicy=modelCallPolicies(execution.billing.callPolicy).find(p=>p.modelId===organizer.modelId&&p.model===organizer.model);
     if(!organizerPolicy)throw new Error('RUNTIME_ORGANIZER_DENIED');
+    const organizerCall=organizerExchange(organizerPolicy.protocol,isPayg,execution.runId,billing,ownerRpc,args);
     const instructions=organizer.instructions ?? 'Organize this operation result. Preserve provenance and uncertainty. Do not add new facts.';
     const organizerInput=organizer.input ? organizer.input+'\n\nPrimary assistant reply:\n'+body : body;
-    summary=await runRuntime({model:organizer.model,instructions,input:organizerInput,session:nativeSession??session,maxOutputTokens:organizer.maxOutputTokens,maxTurns:1,tools:[],
+    const organized=await organizerCall.summary(()=>runRuntime({model:organizer.model,instructions,input:organizerInput,session:nativeSession??session,maxOutputTokens:organizer.maxOutputTokens,maxTurns:1,tools:[],
      reasoning:organizer.reasoning,readSessionHistory:organizer.historyItems===0?false:undefined,
      // New explicit-zero organizers never read Session; older frozen values replay as before.
      selectHistory:async(history,incoming)=>selectRuntimeHistory(history,incoming,{
       instructions,inputBytes:Math.min(organizerPolicy.inputLimit,organizer.inputBytes??Infinity),
       historyItems:organizer.historyItems??0,toolBytes:0}),
      exchange:async(_sequence,request)=>{
-      const envelope=await exchange(request,'attached_organizer',organizerPolicy),response=envelope.usage?.sdkResponse;
+      const envelope=await exchange(request,'attached_organizer',organizerPolicy).catch(organizerCall.recover),response=envelope.usage?.sdkResponse;
       if(!response||response.model!==organizer.model||response.choices?.length!==1)invalidResponse();
-      checkAgentReply(response,true);
-      return JSON.stringify(response);
-     }});}
+      checkAgentReply(response,true);return JSON.stringify(response);
+     }}));
+    summary=typeof organized==='string'?organized:'';if(typeof organized!=='string')turnMetadata={...turnMetadata,organized:false};}
    }
    if(summary!==undefined)summary=identity.summary(summary);
    // This is after organizer spend and streamed text. Real moderation must decide
@@ -416,9 +417,10 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    if(execution.live&&!await allowedOutput({actorId:await options.actor(),executionId,body,summary})){
     moderationBlocked=true;throw new Error('RUNTIME_MODERATION_BLOCKED');
    }
-   if(native&&summary!==undefined)({summary,metadata:turnMetadata}=finalizeNativeSummary(body,turnMetadata,summary));
+   if(native&&summary!==undefined&&turnMetadata.organized!==false)({summary,metadata:turnMetadata}=finalizeNativeSummary(body,turnMetadata,summary));
    const result={kind:'usable_result',evidenceRef:executionId,
-    evidenceHash:hash(JSON.stringify({body,summary,...turnMetadata})),body,...turnMetadata,...((native?summary!==undefined:Boolean(summary))?{summary}:{})};
+    evidenceHash:hash(JSON.stringify({body,summary,...turnMetadata})),body,...turnMetadata,
+    ...((native||turnMetadata.organized===false?summary!==undefined:Boolean(summary))?{summary}:{})}; // lost organizer: summary ''
    progress({type:'phase',phase:'saving'});
    const completed=await ownerRpc<{state:'completed'|'cost_pending'}>('runtime_execution',{...args,p_action:'complete',p_result:result});
    return {...nativeMetadata(result),body,...(summary!==undefined?{summary}:{}),state:completed.state};
