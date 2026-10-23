@@ -39,7 +39,7 @@ import { PostgresSession } from './session';
 import { runRuntime } from './runner';
 import { selectRuntimeHistory, selectRuntimeCallInput, projectSupersededScopeItem, requestsHistoricalComparison, assertRuntimeRequestCapacity, runtimeScopeInput } from './context';
 import { matchingInput, MATCH_INSTRUCTIONS, parseMatch } from './matching';
-import { withPrimaryAddenda } from './primaryInstructions';
+import { withExecutionVoice } from './voiceAdmission';
 import { callBillingUnit } from './billingUnitAdmission';
 import type {GateRejection} from './newWorkGate';
 import {allowedOutput} from './moderation';
@@ -225,7 +225,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     }
    };
    let effective={model:context.model,instructions:context.instructions,maxOutputTokens:context.maxOutputTokens,role:context.role,
-    contentSource:context.sourceContent?.kind};
+    contentSource:context.sourceContent?.kind,moduleId:context.role==='skill'?context.moduleId:undefined};
    if(context.matching){
     // Matching is also billable: reject unusable latest history before any call.
     if(normalized){
@@ -251,11 +251,11 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
      const instructions=withBrandIdentity(await options.activateSkill(candidate),frozenBrandIdentity(context.instructions));
      const selectedPolicy=modelCallPolicies(execution.billing.callPolicy).find(p=>p.modelId===candidate.modelId&&p.model===candidate.model);
      if(!selectedPolicy)throw new Error('RUNTIME_MODEL_DENIED');
-     primaryPolicy=selectedPolicy;
-     effective={model:candidate.model,instructions,maxOutputTokens:candidate.outputLimit,role:'skill',contentSource:candidate.contentSource};
+     primaryPolicy=selectedPolicy;const moduleId=candidate.moduleId;
+     effective={model:candidate.model,instructions,maxOutputTokens:candidate.outputLimit,role:'skill',contentSource:candidate.contentSource,moduleId};
     }
    }
-   effective.instructions=withPrimaryAddenda(effective.instructions,context);
+   effective.instructions=await withExecutionVoice(options.database,await options.actor(),effective.instructions,context,effective.moduleId);
    const {tools,toolBytes}=executionTools({context,executionId,args,agentTurn,grounded,fiveFields,sources:()=>sources,ownerRpc,budget,
     execution,research,exchange,onProgress:progress,onRefused:()=>{terminalReplyFailure=true;}});
    // A2: a derived-content Skill gets its saved source in this call's instructions, read and recorded in one transaction.

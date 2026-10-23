@@ -90,6 +90,9 @@ describe("benchmark table", () => {
       .toEqual(["9,800", "3.8 万", "12.6 万", "235 万", "3.4 亿"]);
     expect([formatRate(0.0634), formatRate(0.112), formatFrequency(4.2), formatFrequency(2)]).toEqual(["6.34%", "11.2%", "每周 4.2 条", "每周 2 条"]);
     expect([formatCount(null), formatRate(null), formatFrequency(null), formatLastUpdate(null, NOW)]).toEqual(Array(4).fill(MISSING_TEXT));
+    const youtube = { ...ROWS[0]!, platform: "youtube" as const, metrics: { ...ROWS[0]!.metrics, followers: { value: 18800, refs: ["d#1"] } } };
+    expect(cellText(youtube, "followers", NOW)).toBe("约 1.88 万（YouTube 只公开约数）");
+    expect(cellText({ ...youtube, platform: "tiktok" }, "followers", NOW)).toBe("1.9 万");
     expect(formatCount(0)).toBe("0");
     expect(formatLastUpdate("2026-10-13T10:00:00Z", NOW)).toBe("2026-10-13（1 天前）");
     expect(cellText(ROWS[1]!, "medianViews", NOW)).toBe(MISSING_TEXT);

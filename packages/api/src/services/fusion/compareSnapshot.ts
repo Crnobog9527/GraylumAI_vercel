@@ -9,7 +9,7 @@ import { FUSION_INPUT_CAP, type FusionRequest } from './request';
  * been read and permission-checked by the host; nothing in this module touches a database or a model. */
 export type CompareParts = {
   /** Output of the free-conversation Skill activation (activateFreeChatSkill), or null for a plain conversation. */
-  skill: { moduleId: string; revisionId: string; instructions: string; resources: Array<{ path: string; hash: string }>;
+  skill: { moduleId: string; revisionId: string; skillId: string; instructions: string; resources: Array<{ path: string; hash: string }>;
     /** The module's social-media flag (modules.social_media_related): such a Skill is refused for a user without a positioning. */
     socialMedia: boolean } | null;
   /** The positioning gate could not decide and the turn is admitted with the fallback rule (POSITIONING-GATE). */

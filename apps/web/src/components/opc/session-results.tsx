@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { trpc } from '@/trpc/client';
 import {
-  RESULT_TYPES, RESULT_TYPE_LABEL, excerptProblem, groupResults, resultErrorText, saveRequestId,
+  RESULT_TYPES, RESULT_TYPE_LABEL, groupResults, resultErrorText, saveProblem, saveRequestId,
   type ResultType, type SessionResultItem,
 } from '@/lib/session-results';
 
@@ -13,15 +13,15 @@ import {
  * (the AI never writes here); editing adds a version; deleting removes one result, never the reply.
  */
 /** Under a completed reply: confirm type, title and the exact text before saving. */
-export function SaveReplyButton({ sessionId, executionId, reply, saved }: {
-  sessionId: string; executionId: string; reply: string; saved: boolean;
+export function SaveReplyButton({ sessionId, executionId, reply, savedItems }: {
+  sessionId: string; executionId: string; reply: string; savedItems: readonly SessionResultItem[];
 }) {
   const utils = trpc.useUtils();
   const save = trpc.opc.sessionResultSave.useMutation();
   const [open, setOpen] = useState(false), [type, setType] = useState<ResultType>('body');
   const [title, setTitle] = useState(''), [text, setText] = useState(reply), [error, setError] = useState('');
   async function confirm() {
-    const problem = excerptProblem(reply, text);
+    const problem = saveProblem(reply, text, savedItems, executionId);
     if (problem) { setError(problem); return; }
     setError('');
     try {
@@ -31,8 +31,9 @@ export function SaveReplyButton({ sessionId, executionId, reply, saved }: {
     } catch (cause) { setError(resultErrorText(cause)); }
     finally { await utils.opc.sessionResults.invalidate({ sessionId }); }
   }
-  if (!open) return <div className="mt-2"><Button variant="outline" size="sm" onClick={() => { setText(reply); setOpen(true); }}>
-    {saved ? '再存一段到成果夹' : '保存到成果夹'}</Button></div>;
+  const reopen = () => { setText(reply); setError(''); if (savedItems[0]) setType(savedItems[0].resultType); setOpen(true); };
+  if (!open) return <div className="mt-2"><Button variant="outline" size="sm" onClick={reopen}>
+    {savedItems.length ? '再存一段到成果夹' : '保存到成果夹'}</Button></div>;
   return <SaveReplyForm type={type} title={title} text={text} error={error} pending={save.isPending}
     onType={setType} onTitle={setTitle} onText={setText} onConfirm={() => void confirm()} onCancel={() => setOpen(false)}/>;
 }

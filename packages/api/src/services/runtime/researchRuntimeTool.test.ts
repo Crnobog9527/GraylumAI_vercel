@@ -607,11 +607,42 @@ describe('durable benchmark discovery and free follow-up', () => {
     expect(f.store.offerShortfall).not.toHaveBeenCalled();
   });
 
-  it('a round searched to the end with fewer than eight selectable accounts shows them (small niche, Owner 2026-10-20 B)', async () => {
+  it('tells the model a candidate card is on screen and labels candidates by their public name', async () => {
+    const f = fixture();
+    const original = subcall.getMockImplementation()!;
+    subcall.mockImplementation(async (context, request) => {
+      const outcome = await original(context, request);
+      if (outcome.sent && request.vendor === 'tikhub') {
+        const named = (entry: ResearchItem): ResearchItem => request.call.kind === 'keyword_posts'
+          ? { ...entry, fields: { ...entry.fields, author: `作者 ${String(entry.fields.authorId)}` } }
+          : { ...entry, fields: { ...entry.fields, name: '家常\u0007便当\n小厨'.repeat(4) } };
+        outcome.result.items = outcome.result.items.map(entry => request.call.kind === 'account_profile'
+          && request.call.account !== 'author0' ? entry : named(entry));
+      }
+      return outcome;
+    });
+
+    const result = await f.execute('benchmark_discover', discoveryArgs);
+    expect(result).toMatchObject({ status: 'ok', candidateCard: { shown: true, selectable: 8 } });
+    expect(result.nextStep).toContain('候选卡已经显示给用户');
+    const options = f.store.createCard.mock.calls[0]?.[1].options ?? [];
+    // The profile name wins and is cleaned to one short line; without one, the post author name is used.
+    expect(options.find(o => o.account === 'author0')?.label).toBe('家常 便当 小厨家常 便当 小厨家常 便当 小厨家常 便当 · 活跃度待核对');
+    expect(options.find(o => o.account === 'author1')?.label).toBe('作者 author1 · 活跃度待核对');
+    expect(options.every(o => String(o.account).startsWith('author'))).toBe(true);
+  });
+
+  it('says no candidate card was shown when no account is selectable', async () => {
+    const f = fixture();
+    f.setAuthors(0);
+    expect(await f.execute('benchmark_discover', discoveryArgs)).toMatchObject({ candidateCard: { shown: false } });
+  });
+
+  it('a round searched to the end with fewer than eight selectable accounts shows them (Owner 2026-10-23)', async () => {
     const f = fixture();
     f.setAuthors(7);
     const result = await f.execute('benchmark_discover', discoveryArgs);
-    expect(result).toMatchObject({ status: 'ok', reason: null, continue: false });
+    expect(result).toMatchObject({ status: 'ok', reason: null, continue: false, candidateCard: { shown: true, selectable: 7 } });
     expect(result).not.toHaveProperty('message');
     expect(f.store.discoverySave).toHaveBeenLastCalledWith(discoveryId, expect.anything(), 'completed');
     const payload = f.store.createCard.mock.calls[0]?.[1];
@@ -630,7 +661,7 @@ describe('durable benchmark discovery and free follow-up', () => {
     f.setAuthors(0);
     const result = await f.execute('benchmark_discover', discoveryArgs);
     expect(result).toMatchObject({ status: 'partial', reason: 'NOT_ENOUGH_CANDIDATES', continue: false,
-      message: '这一轮已经搜完，没有找到可选的对标账号。', availableCandidates: 0 });
+      message: '这一轮已经搜完，没有找到可选的对标账号。', availableCandidates: 0, candidateCard: { shown: false } });
     expect(result.nextStep).toContain('主页链接');
     expect(f.store.discoverySave).toHaveBeenLastCalledWith(discoveryId, expect.anything(), 'completed');
     expect(f.store.createCard).not.toHaveBeenCalled();
@@ -667,11 +698,13 @@ describe('durable benchmark discovery and free follow-up', () => {
     const cardId = stableResearchId(discoveryId, 'first-card');
     const saved = { cardId, kind: 'candidates' as const,
       options: Array.from({ length: 8 }, (_, i) => ({ id: `c${i}`, platform: 'tiktok',
-        account: `author${i}`, evidenceRef: `old#${i + 1}`, label: `author${i}`, selectable: true })),
+        account: `author${i}`, evidenceRef: `old#${i + 1}`, label: `author${i}`, selectable: i < 6 })),
       minSelect: 3, maxSelect: 5 };
     f.store.readCard.mockResolvedValue(saved);
 
-    expect(await f.execute('benchmark_discover', discoveryArgs)).toMatchObject({ status: 'ok' });
+    // The count told to the model is the saved card's, not the rebuilt candidate list's.
+    expect(await f.execute('benchmark_discover', discoveryArgs))
+      .toMatchObject({ status: 'ok', candidateCard: { shown: true, selectable: 6 } });
     expect(f.store.readCard).toHaveBeenCalledWith(cardId);
     expect(f.store.createCard).not.toHaveBeenCalled();
     expect(f.ctx.emit).toHaveBeenCalledWith({ type: 'research_card', card: saved });
@@ -694,7 +727,8 @@ describe('durable benchmark discovery and free follow-up', () => {
     expect(f.store.createCard.mock.calls[0]?.[1].options).toHaveLength(8);
     expect(subcall).toHaveBeenCalledTimes(11);
     f.store.selectedAccounts.mockResolvedValue([{ platform: 'tiktok', account: 'author0' }]);
-    expect(await f.execute('propose_more_candidates', { discoveryId }, 'more')).toMatchObject({ status: 'ok' });
+    expect(await f.execute('propose_more_candidates', { discoveryId }, 'more'))
+      .toMatchObject({ status: 'ok', candidateCard: { shown: true, selectable: 7 } });
     const payload = f.store.createCard.mock.calls[1]?.[1];
     expect(payload).toMatchObject({ followUp: true, minSelect: 2 });
     expect(payload?.options).toHaveLength(7);
@@ -824,6 +858,37 @@ describe('discovery continues beyond an insufficient first author batch', () => 
     expect(new Set(ids).size).toBe(28);
     expect(ids.slice(0, firstIds.length)).toEqual(firstIds);
     expect(f.store.createCard.mock.calls[0]?.[1].options).toHaveLength(8);
+  });
+});
+
+describe('discovery stops paying for profiles once the eighth candidate qualifies', () => {
+  it('ends a widened batch at the eighth selectable account, also when the call is resumed', async () => {
+    const f = fixture(25);
+    f.setAuthors(25);
+    const original = subcall.getMockImplementation()!;
+    subcall.mockImplementation(async (context, request) => {
+      const outcome = await original(context, request);
+      if (outcome.sent && request.vendor === 'tikhub' && request.call.kind === 'account_profile') {
+        // Lexical order: the first 15 authors hold three candidates (author2, author20, author21); author22..author4 add five.
+        const qualified = ['author2', 'author20', 'author21', 'author22', 'author23', 'author24', 'author3', 'author4', 'author5']
+          .includes(request.call.account ?? '');
+        outcome.result.items = [item({ followers: qualified ? 50000 : 100 })];
+        f.operations.set(context.newId(), { state: 'succeeded', identityHash: requestIdentity(request),
+          result: { ...outcome.result } });
+      }
+      return outcome;
+    });
+    expect(await f.execute('benchmark_discover', discoveryArgs)).toMatchObject({ status: 'ok', continue: false });
+    // 3 searches + 15 first-batch profiles + author22..author4 (5 more) = 23 of 25; author5 is never requested.
+    expect(subcall).toHaveBeenCalledTimes(23);
+    const accounts = subcall.mock.calls.flatMap(([, request]) => request.vendor === 'tikhub'
+      && request.call.kind === 'account_profile' ? [request.call.account] : []);
+    expect(accounts).not.toContain('author5');
+    expect(f.store.createCard.mock.calls[0]?.[1].options.filter(option => option.selectable)).toHaveLength(8);
+    // A recovery reads the same 20 saved profiles and stops at the same place without a new request.
+    f.ctx.executionId = refreshId;
+    expect(await f.makeExecute()('benchmark_discover', { discoveryId })).toMatchObject({ status: 'ok' });
+    expect(subcall).toHaveBeenCalledTimes(23);
   });
 });
 

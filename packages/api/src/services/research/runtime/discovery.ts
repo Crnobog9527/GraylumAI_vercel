@@ -15,18 +15,30 @@ import { shortfallNotice } from './shortfall';
 
 const itemSchema = z.object({ url: z.string().optional(), fields: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])),
   missing: z.array(z.string()) });
-interface FoundAccount extends ScoredAccount { platform: SocialPlatform; account: string; evidenceRef: string }
+interface FoundAccount extends ScoredAccount { platform: SocialPlatform; account: string; evidenceRef: string; name?: string }
 interface StepResult {
   items: ResearchItem[]; operationId: string; complete: boolean; stopped: boolean;
   reason?: string; budget?: boolean;
 }
 
-/** A round searched to the end without one selectable account (with any, the card is shown). */
+const CARD_SHOWN_NEXT_STEP = '候选卡已经显示给用户：请用户在卡上勾选并确认，确认后再取数。不要说没有候选卡。';
+
+/** The supplier's display name for a card label: one line, no control characters, never longer than 30 characters. */
+export function accountName(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (typeof value !== 'string') continue;
+    const name = Array.from(value.replace(/[\p{Cc}\p{Cf}]/gu, ' ').replace(/\s+/g, ' ').trim()).slice(0, 30).join('').trimEnd();
+    if (name) return name;
+  }
+  return undefined;
+}
+
+/** A round searched to the end without one selectable account (with any, the card is shown: Owner 2026-10-23). */
 export function candidateShortage() {
   return {
     message: '这一轮已经搜完，没有找到可选的对标账号。',
-    nextStep: '告诉用户两条出路：换一组关键词再搜一轮，或直接发来想对标的账号主页链接（按链接取数核对）。'
-      + '搜过两轮仍找不到时，主要建议发链接，不要只让用户再搜。',
+    nextStep: '告诉用户两条出路：换一组关键词再搜一轮，或直接发来想对标的账号主页链接（按链接取数核对，'
+      + '核对合格的账号同样算对标）。搜过两轮仍找不到时，主要建议发链接，不要只让用户再搜。',
     availableCandidates: 0,
   };
 }
@@ -34,6 +46,9 @@ export function candidateShortage() {
 /** A round stopped before its end (this reply's lookups ran out): it is not a round yet and continues on the next reply. */
 export const ROUND_UNFINISHED_NEXT_STEP = '这一轮搜索还没搜完，不算一轮。告诉用户回复"继续"即可接着搜完这一轮；'
   + '已经取过的数据不会重复取、不重复收费。不要说已经搜完，也不要建议换关键词。';
+
+/** Authors whose profiles one scan batch reads; the first batch is read whole so the card can show up to 12. */
+const AUTHOR_BATCH = 15;
 
 /** The operation is the durable cursor. A crash after dispatch never causes another supplier request. */
 async function step(ctx: ResearchToolContext, d: DiscoveryRecord, budget: ToolAllowance,
@@ -76,21 +91,23 @@ async function step(ctx: ResearchToolContext, d: DiscoveryRecord, budget: ToolAl
     ...(!outcome.sent ? { reason: outcome.stop, budget: outcome.budget } : {}) };
 }
 
+/** Shows the card and returns how many options on it the user can tick (0: no card shown). */
 async function card(ctx: ResearchToolContext, discoveryId: string, accounts: FoundAccount[], followUp: boolean, callId: string) {
   const chosen = followUp ? await ctx.store.selectedAccounts(discoveryId) : [];
   const keys = new Set(chosen.map(a => `${a.platform}:${a.account}`));
   const remaining = accounts.filter(a => !keys.has(a.key));
   const selection = selectCandidates(remaining, true);
-  // The first card comes only from a round searched to the end (the caller), so fewer than candidatesMin means the
-  // keywords found no more: show what there is (a small niche still reaches the shortfall choice, Owner 2026-10-20 B).
-  if (selection.selectable.length === 0) return false;
+  // The first card comes only from a round searched to the end (the caller), so fewer than candidatesMin means the keywords
+  // found no more: show what there is (Owner 2026-10-23; the database checks the round is completed, 0343).
+  if (selection.selectable.length === 0) return 0;
   const selectable = new Set(selection.selectable.map(a => a.key));
   const references = !followUp ? selection.headReferences.slice(0, 3) : [];
   const ordered = [...selection.selectable.slice(0, 12 - references.length), ...references] as FoundAccount[];
   const options: ResearchCandidateOption[] = ordered
     .map((a, i) => ({ id: `c${i}`, platform: a.platform, account: a.account, evidenceRef: a.evidenceRef,
+      // The account id stays on the card's second line; the label leads with the readable name.
       label: a.classification.excluded === 'ACTIVE_CHECK_PENDING'
-        ? `${a.account} · 活跃度待核对` : a.account,
+        ? `${a.name ?? a.account} · 活跃度待核对` : a.name ?? a.account,
       selectable: selectable.has(a.key) }));
   const payload = { kind: 'candidates' as const, discoveryId, options: options.map(o => ({ ...o })),
     ...(followUp ? { followUp: true, minSelect: Math.min(options.length, Math.max(1, 3 - keys.size)) } : {}) };
@@ -99,7 +116,8 @@ async function card(ctx: ResearchToolContext, discoveryId: string, accounts: Fou
   const savedOptions = saved.options as unknown as ResearchCandidateOption[];
   ctx.emit({ type: 'research_card', card: { ...saved, kind: 'candidates', options: savedOptions,
     ...(followUp ? { followUp: true } : {}) } });
-  return true;
+  // Count what was emitted: head references take slots and a reused saved card may differ from this rebuild.
+  return savedOptions.filter(option => option.selectable).length;
 }
 
 export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<'benchmark_discover'>,
@@ -123,7 +141,7 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
   const posts = new Map<SocialPlatform, EvidenceItem[]>();
   const found: FoundAccount[] = [];
   let authorCursor = 0;
-  let authorLimit = z.number().int().positive().safeParse(d.cursor.authorLimit).data ?? 15;
+  let authorLimit = z.number().int().positive().safeParse(d.cursor.authorLimit).data ?? AUTHOR_BATCH;
   for (const platform of d.platforms) {
     const entries: EvidenceItem[] = [];
     posts.set(platform, entries);
@@ -149,7 +167,9 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
     // Too few candidates in this batch: widen the scan within this call's own allowance (a stop at the allowance saves the
     // wider limit; the next reply re-reads paid operations and continues), so a reply never ends a round early by itself.
     while (!stopped) {
-      for (const author of authors.slice(scanned, authorLimit)) {
+      for (const [offset, author] of authors.slice(scanned, authorLimit).entries()) {
+        // Past the first batch, the eighth selectable account ends the scan: no further profile is paid for.
+        if (scanned + offset >= AUTHOR_BATCH && selectCandidates(found, true).enough) break;
         const account = canonicalAccount(author.platform, author.authorId);
         if (!account) continue;
         const request = socialRequest(ctx, author.platform, 'account_profile', { account });
@@ -167,18 +187,20 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
         if (!profile) continue;
         const metrics = accountMetrics({ profile: { ...profile, ref: `${result.operationId}#1` },
           posts: (posts.get(author.platform) ?? []).filter(p => p.fields.authorId === author.authorId) }, ctx.now());
-        found.push({ key: `${author.platform}:${account}`, platform: author.platform, account,
+        const name = accountName(profile.fields.name, author.author);
+        found.push({ key: `${author.platform}:${account}`, platform: author.platform, account, ...(name ? { name } : {}),
           evidenceRef: `${result.operationId}#1`, metrics,
           classification: classifyAccount(metrics, ctx.config.recentGrowth, ctx.now(), 'discovery') });
       }
       scanned = authorLimit;
       if (stopped || selectCandidates(found, true).enough || authorLimit >= authors.length) break;
-      authorLimit = Math.min(authorLimit + 15, authors.length);
+      authorLimit = Math.min(authorLimit + AUTHOR_BATCH, authors.length);
     }
   }
   // Reconstruct from stable operations each time; the saved candidates support free follow-up cards.
   await ctx.store.discoverySave(d.discoveryId, { accounts: found, attempted: index, authorCursor, authorLimit }, stopped ? 'running' : 'completed');
-  const shown = !stopped && await card(ctx, d.discoveryId, found, false, '');
+  const onCard = stopped ? 0 : await card(ctx, d.discoveryId, found, false, '');
+  const shown = onCard > 0;
   const insufficient = !stopped && !shown;
   const resumable = stopReason === 'ROUND_LIMIT';
   const blockedWithoutData = stopped && !resumable && found.length === 0;
@@ -190,9 +212,12 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
     reason: stopped ? stopReason : shown ? (complete ? null : 'DISCOVERY_PARTIAL')
       : complete ? 'NOT_ENOUGH_CANDIDATES' : 'DISCOVERY_PARTIAL',
     ...(insufficient ? candidateShortage() : {}),
+    // The host shows the card, not the model's text: say so, or the model may deny a card the user can see.
+    ...(shown ? { candidateCard: { shown: true, selectable: onCard }, nextStep: CARD_SHOWN_NEXT_STEP }
+      : { candidateCard: { shown: false } }),
     ...(stopped && resumable ? { nextStep: ROUND_UNFINISHED_NEXT_STEP } : {}),
     discoveryId: d.discoveryId, continue: stopped && resumable,
-    items: found.map(a => ({ fields: { platform: a.platform, account: a.account,
+    items: found.map(a => ({ fields: { platform: a.platform, account: a.account, ...(a.name ? { name: a.name } : {}),
       evidenceRef: a.evidenceRef,
       category: a.classification.excluded === 'ACTIVE_CHECK_PENDING'
         ? 'activity_pending' : a.classification.category ?? 'excluded',
@@ -208,8 +233,10 @@ export async function moreCandidates(ctx: ResearchToolContext, discoveryId: stri
     return toolEnvelope({ status: 'not_confirmed', reason: 'NO_CONFIRMED_SELECTION', discoveryId });
   }
   const accounts = (d.cursor.accounts ?? []) as FoundAccount[];
-  const shown = await card(ctx, discoveryId, accounts, true, callId);
+  const onCard = await card(ctx, discoveryId, accounts, true, callId);
+  const shown = onCard > 0;
   const shortfall = shown ? undefined : await shortfallNotice(ctx);
   return toolEnvelope({ status: shown ? 'ok' : 'partial', reason: shown ? null : 'NOT_ENOUGH_CANDIDATES', discoveryId,
+    candidateCard: shown ? { shown, selectable: onCard } : { shown }, ...(shown ? { nextStep: CARD_SHOWN_NEXT_STEP } : {}),
     ...(shortfall ? { shortfall } : {}) });
 }

@@ -58,7 +58,7 @@ const STATES: readonly WorkState[] = ['running', 'done', 'missing', 'pending'];
 const text = (value: unknown, max: number): string | null => (typeof value === 'string' ? value.slice(0, max) : null);
 
 const DATA_KINDS: readonly ResearchCall['dataKind'][] = ['keyword_posts', 'account_profile', 'account_posts', 'account_relation',
-  'post_detail', 'web_search', 'web_fetch'];
+  'post_detail', 'account_search', 'web_search', 'web_fetch'];
 const CALL_STATES: readonly ResearchCall['state'][] = ['running', 'succeeded', 'failed', 'unknown'];
 /** The `research` object of a saved row as a research call; null when it is not well-formed. */
 function researchCallOf(id: string, raw: unknown): ResearchCall | null {

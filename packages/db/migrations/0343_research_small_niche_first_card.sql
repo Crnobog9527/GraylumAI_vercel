@@ -1,7 +1,8 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
--- BENCHMARK-SHORTFALL small niche (Owner 2026-10-20 choice B; 0320): a keyword search that finds fewer than 8 selectable
--- accounts never showed a candidate card (0263 required 8–12 on a first card), so the user could select nothing, the
--- session never got a qualified benchmark and the shortfall choice (1 <= qualified < 3 after 2 rounds) was out of reach.
+-- BENCHMARK-SHORTFALL small niche (Owner 2026-10-23, Master Plan 2.1; serves 2026-10-20 choice B, 0320): a keyword
+-- search that finds fewer than 8 selectable accounts never showed a candidate card (0263 required 8–12 on a first
+-- card), so the user could select nothing, the session never got a qualified benchmark and the shortfall choice
+-- (1 <= qualified < 3 after 2 rounds) was out of reach.
 --   * research_card_create: a first candidate card may now offer 1–7 selectable accounts, but only for a discovery of
 --     this session already saved as completed (searched to the end of its plan). A discovery still running keeps the
 --     8–12 rule, so a partial scan can never stand in for a round. Picks stay 3–5, fewer only when fewer are offered

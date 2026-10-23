@@ -80,6 +80,26 @@ export async function recoverFusionFinancials(admin: SupabaseClient, options: { 
     // Done when everything is listed, or nothing new can be reached (only failed reviews remain in front).
     if (listedAll || !reviews.size || pageLimit === 200 && listed.every(item => attempted.has(item.review_id))) break;
   }
+  // Compare columns (FUSION-COMPARE §3.5): an answer has no format to check, so a saved, unjudged body is usable, as it
+  // would have been without the interruption; judged before settlement so it is billed and adoptable like any answer.
+  // Anything left unlisted falls back to the per-call body check below, so no saved answer settles unjudged.
+  let compareDone = false;
+  for (let pass = 0; pass < 20 && now() + 10_000 <= stopAt; pass++) {
+    const compare = await bounded(admin.rpc('fusion_compare_unjudged', { p_limit: 200 }));
+    const listed = compare.error ? undefined : z.array(z.object({ actor_id: z.string().uuid(), call_id: z.string().uuid() }).passthrough())
+      .safeParse(compare.data).data;
+    if (!listed) { listingFailed = true; break; }
+    const fresh = listed.filter(item => !attempted.has(item.call_id));
+    for (const item of fresh) {
+      attempted.add(item.call_id);
+      const judged = await bounded(admin.rpc('fusion_call_verdict', { p_actor_id: item.actor_id, p_call_id: item.call_id, p_verdict: 'usable' }));
+      if (judged.error) { summary.failed++; summary.success = false; unsettleable.add(item.call_id); }
+      else { rejudged.add(item.call_id); summary.rejudged++; }
+    }
+    if (listed.length < 200) { compareDone = true; break; }
+    if (!fresh.length) break;
+  }
+  if (!compareDone) listedAll = false;
   if (listingFailed) summary.success = false;
   // Listing is cheap: collect the pages first. Pages advance past calls that cannot progress yet (0235).
   // Keep paging (each call bounded, stopping before the per-item reserve) so expired undispatched calls

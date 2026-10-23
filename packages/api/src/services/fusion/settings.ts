@@ -71,7 +71,7 @@ const compare = z.object({
   /** At least this many models per compare (Owner 2026-10-03: 2 <= min <= D3; D3 is checked against the database value on save). */
   minModels: z.number().int().min(2).max(COMPARE_MAX_MODELS).default(2),
   /** Per answer, reasoning tokens included; frozen on every column of a compare. */
-  answerOutputTokens: z.number().int().min(512).max(PURPOSE_OUTPUT_CAP).default(8192),
+  answerOutputTokens: z.number().int().min(512).max(PURPOSE_OUTPUT_CAP).default(PURPOSE_OUTPUT_CAP),
   /** Single-compare budget in USD (the sum of the columns' bounds); no default, so enabling requires an administrator value. */
   maxBudgetUsd: usd.nullable().default(null),
   /** A claimed call not dispatched within this time is cancelled by the daily reconciliation. */
@@ -101,7 +101,7 @@ export const DEFAULT_FUSION_SETTINGS: FusionSettings = {
     // The summary writes the whole report plus a ruling per issue: 16384 was cut off in a staging run (#962).
     summaryOutputTokens: PURPOSE_OUTPUT_CAP, maxBudgetUsd: null, fixedPriceCredits: 1500,
     dispatchMinutes: 10, breaker: { platformUsd: '2', noDeliveryCalls: 10 }, displayNames: DEFAULT_PANEL_NAMES, reviewerRoles: {} },
-  compare: { enabled: false, allowedModelIds: [], defaultModelIds: [], minModels: 2, answerOutputTokens: 8192, maxBudgetUsd: null,
+  compare: { enabled: false, allowedModelIds: [], defaultModelIds: [], minModels: 2, answerOutputTokens: PURPOSE_OUTPUT_CAP, maxBudgetUsd: null,
     dispatchMinutes: 10, breaker: { platformUsd: '2', noDeliveryCalls: 10 } },
 };
 
