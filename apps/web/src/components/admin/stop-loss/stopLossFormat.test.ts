@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
-import { STOP_LOSS_QUERY_OPTIONS, describeAlert, formatUsd, parseUsdInput, reachedLimit, stopLossErrorMessage } from './stopLossFormat';
+import { STOP_LOSS_QUERY_OPTIONS, describeAlert, describeNotice, formatUsd, parseUsdInput, reachedLimit, stopLossErrorMessage } from './stopLossFormat';
 
 describe('stop-loss amounts', () => {
   it('treats empty as not set and accepts only the server amount format', () => {
@@ -69,5 +69,16 @@ describe('stop-loss alerts', () => {
 describe('stop-loss refresh', () => {
   it('re-reads server data periodically because the tab stays mounted', () => {
     expect(STOP_LOSS_QUERY_OPTIONS).toEqual({ refetchOnMount: 'always', refetchOnWindowFocus: true, refetchInterval: 60_000 });
+  });
+});
+describe('stop-loss mail state', () => {
+  const at = '2026-10-23T00:00:00Z';
+  const row = (notify: unknown) => ({ id: '1', test_id: 'runtime_stop_loss_siteDailyUsd', created_at: at, details: { notify } });
+  it('shows only the state and a well-formed error code', () => {
+    expect(describeNotice(row(undefined))).toBe('等待发送邮件');
+    expect(describeNotice(row({ state: 'sent' }))).toBe('已发邮件通知');
+    expect(describeNotice(row({ state: 'pending', lastErrorCode: 'PAYMENT_NOTICE_NOT_CONFIGURED' })))
+      .toBe('邮件还没发出，会自动重试（PAYMENT_NOTICE_NOT_CONFIGURED）');
+    expect(describeNotice(row({ state: 'failed', lastErrorCode: '<b>raw</b>' }))).toBe('邮件没有发出，已停止重试');
   });
 });

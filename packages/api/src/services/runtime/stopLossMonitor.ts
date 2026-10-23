@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { DiagnosticContext, DiagnosticTestResult } from '../diagnostics';
 import { readStopLoss, usdThreshold } from './stopLossSettings';
+import { deliverStopLossAlerts } from './stopLossNotify';
 
 export const providerBalanceInput = z.object({
   provider: z.enum(['openrouter', 'tikhub', 'parallel', 'firecrawl', 'brightdata']),
@@ -61,9 +62,13 @@ export async function testRuntimeStopLoss(ctx: DiagnosticContext): Promise<Diagn
     const siteUsd = String(data?.siteUsd ?? '');
     const warning = balances.some(v => v.status !== 'ok') || [config.siteDailyUsd, config.siteAlertUsd]
       .some(limit => limit !== null && scaled(siteUsd) >= scaled(limit));
-    return { ...base, status: warning ? 'warning' : 'passed', latencyMs: Date.now() - start,
-      message: warning ? '成本已达阈值，或供应商余额偏低/未知；详情见止损告警。' : '成本检查已完成，外部通知尚未连接。',
-      details: { usage: data, balances, externalNotifications: 'not_connected' } };
+    // Delivery runs after the checks and never changes their result; failures stay on the alert rows.
+    const notice = await deliverStopLossAlerts(ctx.supabaseAdmin);
+    const noticeFailed = notice.outcome === 'not_sent';
+    return { ...base, status: warning || noticeFailed ? 'warning' : 'passed', latencyMs: Date.now() - start,
+      message: warning ? '成本已达阈值，或供应商余额偏低/未知；详情见止损告警。'
+        : noticeFailed ? '止损告警邮件没有发出，详情见止损告警。' : '成本检查已完成。',
+      details: { usage: data, balances, externalNotifications: 'email', notice } };
   } catch {
     return { ...base, status: 'error', latencyMs: Date.now() - start, message: 'RUNTIME_STOP_LOSS_MONITOR_UNAVAILABLE' };
   }
