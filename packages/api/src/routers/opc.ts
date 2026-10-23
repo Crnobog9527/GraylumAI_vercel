@@ -13,6 +13,7 @@ import {briefAdoption, contentReaction, topicAdoptionWithSource} from "../servic
 import { dedupeHandoffResults } from "../services/opc/handoff-view";
 import { realHostMode } from "../services/runtime/productionEnvironment";
 import { conversationRename, renameConversation } from "../services/opc/conversationName";
+import { sessionResultEdit, sessionResultFamily, sessionResultSave, sessionResultsList, sessionResultsService } from "../services/opc/sessionResults";
 import {
   opcService,
   opcStart,
@@ -63,7 +64,9 @@ function isOpcRefusal(cause: unknown): cause is Error {
 function isOpcReadDenial(cause: unknown): boolean {
   return cause instanceof Error && cause.constructor === Error && /^OPC_(?:[A-Z]+_)*DENIED$/.test(cause.message);
 }
-const readProcedure = protectedProcedure.use(async ({ ctx, next, path, type }) => {
+// Reads need only read access (they stay available after generation is switched off). `keepRefusals` keeps the bounded
+// OPC_* refusal codes the page maps to plain text instead of turning them into a generic server error.
+const readAccess = (keepRefusals: boolean) => protectedProcedure.use(async ({ ctx, next, path, type }) => {
   ctx.runtimeBudget?.timing?.enter('policy');
   let local = false;
   try {
@@ -75,11 +78,13 @@ const readProcedure = protectedProcedure.use(async ({ ctx, next, path, type }) =
   } catch (cause) { throw stagingProcedureError(cause, path); }
   ctx.runtimeBudget?.timing?.enter('host');
   const result = await next({ ctx: { ...ctx, opc: opcService(ctx.userScopedSupabase, ctx.supabaseAdmin), stagingRead: !local } });
-  if (!result.ok && type === 'query' && isOpcReadDenial(result.error.cause))
+  if (!result.ok && !keepRefusals && type === 'query' && isOpcReadDenial(result.error.cause))
     throw new TRPCError({ code: 'NOT_FOUND', message: 'OPC_NOT_FOUND' });
-  if (!result.ok) throw stagingProcedureError(result.error, path);
+  if (!result.ok && !(keepRefusals && isOpcRefusal(result.error.cause))) throw stagingProcedureError(result.error, path);
   return result;
 });
+const readProcedure = readAccess(false);
+const resultReadProcedure = readAccess(true);
 export const opcRouter = router({
   businesses: readProcedure.query(({ ctx }) => listBusinesses(ctx.supabaseAdmin, ctx.user.id)),
   archiveBusiness: readProcedure.input(archiveBusinessInput)
@@ -190,6 +195,17 @@ export const opcRouter = router({
   conversationRename: procedure
     .input(conversationRename)
     .mutation(({ ctx, input }) => renameConversation(ctx.supabaseAdmin, ctx.user.id, input)),
+  // C1-lite: this conversation's results folder. The user confirms every write; the AI never writes here.
+  sessionResults: resultReadProcedure.input(sessionResultsList)
+    .query(({ ctx, input }) => sessionResultsService(ctx.supabaseAdmin, ctx.user.id).list(input)),
+  sessionResultVersions: resultReadProcedure.input(sessionResultFamily)
+    .query(({ ctx, input }) => sessionResultsService(ctx.supabaseAdmin, ctx.user.id).versions(input)),
+  sessionResultSave: procedure.input(sessionResultSave)
+    .mutation(({ ctx, input }) => sessionResultsService(ctx.supabaseAdmin, ctx.user.id).save(input)),
+  sessionResultEdit: procedure.input(sessionResultEdit)
+    .mutation(({ ctx, input }) => sessionResultsService(ctx.supabaseAdmin, ctx.user.id).edit(input)),
+  sessionResultDelete: procedure.input(sessionResultFamily)
+    .mutation(({ ctx, input }) => sessionResultsService(ctx.supabaseAdmin, ctx.user.id).remove(input)),
   planRequestState: readProcedure
     .input(
       z
