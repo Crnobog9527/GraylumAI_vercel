@@ -4,6 +4,7 @@ import { listAdminPaymentOrders } from '../services/payments/adminOrders';
 import { billingDescription, projectBillingStatus, projectOrderPayment, type BillingRecord, type PaymentOrderBillingRow }
   from '../services/payments/orderProjection';
 import { assertCheckoutChannel } from '../services/payments/channelSettings';
+import { hasUnpaidSubscription, unpaidRenewalEntry } from '../services/payments/methodPurchaseError';
 /*
  * Copyright (c) 2026 Grayscale Luminary LLC.
  * All rights reserved.
@@ -1081,6 +1082,7 @@ export const paymentsRouter = router({
       }
 
       const billingCycles: MembershipBillingCycle[] = ['monthly', 'yearly'];
+      const unpaid = ctx.hasSupabaseAdminPrivileges ? hasUnpaidSubscription(ctx.supabaseAdmin, ctx.profileId) : false;
       let entries;
 
       try {
@@ -1100,17 +1102,9 @@ export const paymentsRouter = router({
                 throw new Error('Membership eligibility facts could not be read');
               }
 
-              return {
-                planId: plan.id,
-                planLevel: plan.level,
-                billingCycle,
-                allowed: eligibility.allowed,
-                state: eligibility.state,
-                currentLevel: eligibility.level,
-                action: eligibility.action,
-                reasonCode: eligibility.reasonCode,
-                safeMessage: eligibility.safeMessage,
-              };
+              return unpaidRenewalEntry({ planId: plan.id, planLevel: plan.level, billingCycle, allowed: eligibility.allowed,
+                state: eligibility.state, currentLevel: eligibility.level, action: eligibility.action,
+                reasonCode: eligibility.reasonCode, safeMessage: eligibility.safeMessage }, await unpaid);
             }),
           ),
         );
