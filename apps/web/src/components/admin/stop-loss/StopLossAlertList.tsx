@@ -3,7 +3,7 @@
 import { trpc } from '@/trpc/client';
 import { Button } from '@/components/ui/button';
 import { StaleDataNotice } from './StaleDataNotice';
-import { STOP_LOSS_QUERY_OPTIONS, describeAlert, formatTime, stopLossErrorMessage, type StopLossAlert } from './stopLossFormat';
+import { STOP_LOSS_QUERY_OPTIONS, describeAlert, describeNotice, formatTime, stopLossErrorMessage, type StopLossAlert } from './stopLossFormat';
 
 /** Read-only list of the latest stop-loss alerts (aggregates only, no user identifiers). */
 export function StopLossAlertList() {
@@ -16,7 +16,7 @@ export function StopLossAlertList() {
         {alerts.isFetching ? '读取中…' : '刷新'}
       </Button>
     </div>
-    <p className="text-sm">外部通知（邮件、消息等）还没有接入，告警只显示在这里。</p>
+    <p className="text-sm">新告警会自动发邮件到“客服邮箱”（同类告警每天只发一次）；测试站只发给测试收件人。</p>
     {alerts.error && alerts.data && <StaleDataNotice onRetry={() => { void alerts.refetch(); }} />}
     {alerts.error && !alerts.data ? <p role="alert">{stopLossErrorMessage(alerts.error, 'read')}</p>
       : !alerts.data ? <p>读取中…</p>
@@ -27,7 +27,7 @@ export function StopLossAlertList() {
               return <li key={alert.id} className="space-y-1 py-2">
                 <p className="font-medium">{text.title}</p>
                 {text.detail && <p className="text-sm">{text.detail}</p>}
-                <p className="text-xs">{text.day ? `统计日：${text.day}，` : ''}记录时间：{formatTime(alert.created_at)}</p>
+                <p className="text-xs">{text.day ? `统计日：${text.day}，` : ''}记录时间：{formatTime(alert.created_at)}，{describeNotice(alert)}</p>
               </li>;
             })}
           </ul>}

@@ -144,7 +144,7 @@ export function StopLossLimitsForm() {
           <Input id="stop-loss-channel" placeholder="未设置" value={current.notificationChannel} disabled={busy}
             onChange={event => edit('notificationChannel', event.target.value)} />
           <p className="text-xs">
-            {[...channel].length > 100 ? '最多 100 个字。' : '只是备注，外部通知还没有接入，不会发出任何消息。'}
+            {[...channel].length > 100 ? '最多 100 个字。' : '只是备注；告警邮件发到“客服邮箱”，不按这里发送。'}
           </p>
         </div>
       </div>

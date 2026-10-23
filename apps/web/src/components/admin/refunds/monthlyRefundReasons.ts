@@ -67,6 +67,9 @@ const REASONS: Record<string, Reason> = {
   PAY_REFUND_CHARGE_MISMATCH: CHECK('扣款记录对不上'),
   PAY_REFUND_PAYMENT_ORDER_UNRESOLVED: CHECK('付款和订单的对应关系无法确认'),
   PAY_REFUND_PAYMENT_TIME_UNRESOLVED: CHECK('付款时间无法确认'),
+  // PAY-REFUND #1248: Pro-to-Gold upgrades need the original Pro order to be exactly bound and still valid.
+  PAY_REFUND_UPGRADE_EVIDENCE: CHECK('升级订单的证据不完整，无法确认它对应的原 Pro 订单'),
+  PAY_REFUND_PRIOR_PRO_UNRESOLVED: CHECK('原 Pro 订单无法确认（已退款、有拒付或付款记录对不上），请先人工核对'),
   // Status and reject answers since #759 (table in #759 comment 6084918439).
   PAY_REFUND_STATUS_UNAVAILABLE: CHECK('暂时无法读取退款进度，请稍后再试'),
   PAY_REFUND_REJECT_UNAVAILABLE: CHECK('暂时无法完成操作，请先查看进度再决定下一步'),

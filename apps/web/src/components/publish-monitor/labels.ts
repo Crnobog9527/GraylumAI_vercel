@@ -69,6 +69,8 @@ export const POSTED_AT_SOURCE: Record<string, string> = { provider: '', x_snowfl
 
 export function formatDay(value: string | null): string {
   if (!value) return '未提供';
+  // A date-only value is a calendar day, not an instant: shown as is, never shifted by the viewer's time zone.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
   const time = Date.parse(value);
   return Number.isFinite(time) ? new Date(time).toLocaleDateString('sv-SE') : '未提供';
 }

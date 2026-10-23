@@ -69,6 +69,7 @@ const APP_TEMPLATES = [
   '/admin/prompts',
   '/admin/publish-monitor',
   '/admin/refunds',
+  '/admin/publish-monitor/cleanup',
   '/admin/secrets',
   '/admin/settings',
   '/admin/skills',

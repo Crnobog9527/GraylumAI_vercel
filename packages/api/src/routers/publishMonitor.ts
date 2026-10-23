@@ -16,6 +16,7 @@ import {
   addBenchmark, benchmarkAddInput, connectOwnTikhub, tikhubConnectInput,
 } from '../services/publishMonitor/tikhub';
 import { checkRateLimitOrThrow } from '../services/redisRateLimiter';
+import { publishMonitorAdminRouter } from './publishMonitorAdmin';
 import { publishMonitorConnectRouter } from './publishMonitorConnect';
 import { publishMonitorPublishRouter } from './publishMonitorPublish';
 import { guarded as safe } from './publishMonitorGuard';
@@ -86,6 +87,7 @@ export const publishMonitorRouter = router({
     await checkRateLimitOrThrow(`publish-monitor-benchmark:${ctx.profileId}`, 'api');
     return addBenchmark(ctx.supabaseAdmin, ctx.profileId, input);
   })),
+  admin: publishMonitorAdminRouter,
   connect: publishMonitorConnectRouter,
   publish: publishMonitorPublishRouter,
 });

@@ -2,7 +2,7 @@
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { databaseSkillSource, userVisibleModules } from '../skills/databaseSource';
-import { activateFreeChatSkill, type ContentSourceKind } from '../skills/stepGuide';
+import { activateFreeChatSkill, isPositioningPackage, type ContentSourceKind } from '../skills/stepGuide';
 import { activateSkill, discoverSkills, SkillLoadError } from '../skills/loader';
 import { fixtureInputCapacity, selectRuntimeHistory } from './context';
 import { withBrandIdentity } from '../modelIdentity/brandIdentity';
@@ -52,6 +52,11 @@ export async function discoverRuntimeCandidates(user:SupabaseClient,admin:Supaba
   for(const item of found){
    const descriptor=descriptors.find(d=>d.revisionId===item.selection.revisionId);
    if(!descriptor)throw new Error('RUNTIME_CATALOG_CHANGED');
+   // A3a: never pay a match for a Skill that cannot run here: a legacy task package is refused at activation,
+   // and the guided positioning Skill starts only from its own entry. An unreadable workflow.yaml fails activation too.
+   if(Object.keys(descriptor.tasks).length)continue;
+   let positioning;try{positioning=await isPositioningPackage(source,descriptor);}catch{continue;}
+   if(positioning)continue;
    candidates.push(matchCandidate.parse({key:'candidate-'+candidates.length,name:item.public.name,description:item.public.description,
     moduleId:row.id,skillId:row.skill_id,packageId:item.selection.packageId,revisionId:item.selection.revisionId,packageHash:item.selection.packageHash,
     modelId:row.model_id,model:model.data.model_id,inputLimit,outputLimit,requiresTask:Object.keys(descriptor.tasks).length>0}));

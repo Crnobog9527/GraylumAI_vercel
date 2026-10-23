@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
 import { brandsFromLibrary } from './brands';
-import { connectRoute, dataErrorMessage, errorCode, metricCell, metricColumns, platformName } from './labels';
+import { connectRoute, dataErrorMessage, errorCode, formatDay, metricCell, metricColumns, platformName } from './labels';
 import { reviewTable } from './ReviewPanel';
 
 describe('metric cells (plan §9 item 2: a missing field is never 0)', () => {
@@ -56,5 +56,19 @@ describe('stored review table', () => {
       weekly: [{ start: '2026-10-01', end: '2026-10-08', published: 2, matched_posts: 0, status: 'data_accumulating' }, 'x'] }))
       .toEqual({ rows: [{ postId: 'a', ageDays: 1, status: 'too_new', comparisons: {} }],
         weeks: [{ start: '2026-10-01', end: '2026-10-08', published: 2, matched_posts: 0, status: 'data_accumulating' }] });
+  });
+});
+
+describe('calendar days', () => {
+  it('shows a date-only value as it is in any time zone, and an unreadable one as 未提供', () => {
+    const zone = process.env.TZ;
+    try {
+      for (const tz of ['America/Los_Angeles', 'Pacific/Kiritimati', 'UTC']) {
+        process.env.TZ = tz;
+        expect(formatDay('2026-10-18')).toBe('2026-10-18');
+      }
+    } finally { if (zone === undefined) delete process.env.TZ; else process.env.TZ = zone; }
+    expect(formatDay(null)).toBe('未提供');
+    expect(formatDay('not a date')).toBe('未提供');
   });
 });
