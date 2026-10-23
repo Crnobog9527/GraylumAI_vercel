@@ -9,7 +9,7 @@ import { trpc } from '@/trpc/client';
 import {
   LayoutDashboard, Bot, Wand2, Package, Users,
   CreditCard, Settings, ChevronLeft, Shield, DollarSign,
-  Megaphone, Headphones, Activity, Stethoscope, BarChart3, Receipt, RotateCcw, KeyRound, Mail, BadgeCheck, ShieldAlert
+  Megaphone, Headphones, Activity, Stethoscope, BarChart3, Receipt, RotateCcw, KeyRound, Mail, BadgeCheck, ShieldAlert, LineChart
 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 
@@ -33,6 +33,7 @@ const menuItems: MenuItem[] = [
   { name: '付款提醒邮件', icon: Mail, href: '/admin/payment-notices' },
   { name: '创始会员', icon: BadgeCheck, href: '/admin/founders' },
   { name: '财务统计', icon: DollarSign, href: '/admin/finance' },
+  { name: '数据复盘', icon: LineChart, href: '/admin/publish-monitor' },
   { name: '公告管理', icon: Megaphone, href: '/admin/announcements' },
   { name: '工单管理', icon: Headphones, href: '/admin/tickets' },
   { name: '性能监控', icon: Activity, href: '/admin/performance' },

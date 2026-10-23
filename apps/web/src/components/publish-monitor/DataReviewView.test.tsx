@@ -1,0 +1,116 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { renderToStaticMarkup } from 'react-dom/server';
+
+const state = vi.hoisted(() => ({
+  connections: {} as Record<string, unknown>, data: {} as Record<string, unknown>, library: {} as Record<string, unknown>,
+  reviews: {} as Record<string, unknown>,
+}));
+const mutation = vi.hoisted(() => () => ({ mutate: () => {}, mutateAsync: async () => ({}), isPending: false, error: null,
+  data: undefined }));
+vi.mock('@/trpc/client', () => ({ trpc: {
+  useUtils: () => ({ publishMonitor: { connections: { invalidate: vi.fn() }, data: { invalidate: vi.fn() },
+    settings: { invalidate: vi.fn() }, review: { export: { fetch: vi.fn() } } } }),
+  opc: { library: { useQuery: () => state.library } },
+  publishMonitor: {
+    connections: { useQuery: () => state.connections }, data: { useQuery: () => state.data },
+    postHistory: { useQuery: () => ({ isPending: true }) },
+    refresh: { useMutation: mutation }, disconnect: { useMutation: mutation }, linkPost: { useMutation: mutation },
+    addBenchmark: { useMutation: mutation }, connectTikhub: { useMutation: mutation }, manualImport: { useMutation: mutation },
+    settings: { useQuery: () => ({ data: { autoReviewEnabled: true, autoReviewEnabledAt: '2026-10-20T00:00:00Z' } }) },
+    setAutoReview: { useMutation: mutation },
+    review: { list: { useQuery: () => state.reviews } },
+  },
+} }));
+import { DataReviewView } from './DataReviewView';
+import { PostsPanel, type Post } from './PostsPanel';
+import { ReviewPanel } from './ReviewPanel';
+import { ConnectionsPanel, type Connection } from './ConnectionsPanel';
+
+const ok = (data: unknown) => ({ isPending: false, isSuccess: true, data, error: null });
+const failed = (message: string) => ({ isPending: false, isSuccess: false, data: undefined, error: { message, data: {} } });
+const text = (html: string) => html.replace(/<[^>]*>/g, '');
+const post = (over: Partial<Post> = {}): Post => ({ id: 'p1', connectionId: 'c1', source: 'postforme', url: 'https://x.com/a/status/1',
+  postedAt: '2026-10-20T08:00:00Z', postedAtSource: 'x_snowflake', firstSeenAt: '2026-10-21T00:00:00Z', titleExcerpt: '合成作品',
+  workItemId: null, latest: { capturedOn: '2026-10-22', metrics: { likes: 0, views: 30 }, missingFields: ['shares'] }, ...over });
+
+beforeEach(() => {
+  state.connections = ok([]);
+  state.data = ok({ windowDays: 30, connections: [], posts: [] });
+  state.library = ok({ businesses: [] });
+  state.reviews = ok([]);
+});
+
+describe('data review page access follows the server', () => {
+  it('says the feature is not open while the admin switch is off, without offering anything to do', () => {
+    state.connections = failed('PUBLISH_MONITOR_DISABLED');
+    state.data = failed('PUBLISH_MONITOR_DISABLED');
+    const html = renderToStaticMarkup(<DataReviewView />);
+    expect(text(html)).toContain('作品数据和复盘还没有开放。');
+    expect(text(html)).not.toContain('重试');
+    expect(text(html)).not.toContain('连接账号');
+  });
+  it('shows the upgrade note to a free account (the server refused the data window)', () => {
+    state.data = failed('PUBLISH_MONITOR_ENTITLEMENT_REQUIRED');
+    const html = renderToStaticMarkup(<DataReviewView />);
+    expect(text(html)).toContain('这项功能需要会员');
+    expect(html).toContain('/app/profile?tab=subscription');
+    expect(text(html)).not.toContain('作品数据（近');
+  });
+  it('shows the posts tab for a member, with the window from the server', () => {
+    state.data = ok({ windowDays: 30, connections: [{ id: 'c1', platform: 'x' }], posts: [post()] });
+    const html = renderToStaticMarkup(<DataReviewView />);
+    expect(text(html)).toContain('作品数据（近 30 天）');
+    expect(text(html)).toContain('合成作品');
+  });
+});
+
+describe('posts', () => {
+  it('shows a real 0, the platform gap and a missing date without inventing numbers', () => {
+    const html = renderToStaticMarkup(<PostsPanel windowDays={90} posts={[post(), post({ id: 'p2', postedAt: null, postedAtSource: null,
+      latest: null, titleExcerpt: null })]} connections={[{ id: 'c1', platform: 'x' }]} accountOf={() => undefined} onLinked={() => {}} />);
+    const t = text(html);
+    expect(t).toContain('作品数据（近 90 天）');
+    expect(t).toContain('2026-10-20（按作品编号推算）');
+    expect(t).toContain('平台不提供');
+    expect(t).toContain('未提供');
+    expect(t).toContain('未取到');
+    expect(t).toContain('从连接那天开始记录');
+  });
+});
+
+describe('accounts', () => {
+  const own = (over: Partial<Connection>): Connection => ({ id: 'c1', businessId: 'b', accountProjectId: 'p', role: 'own',
+    source: 'postforme', platform: 'x', displayHint: null, status: 'connected', consentRead: true, consentAutoTrack: true,
+    consentPublish: false, lastSuccessAt: '2026-10-22T00:00:00Z', postCount: 3, ...over });
+  const render = (connections: Connection[], gold = false) => text(renderToStaticMarkup(
+    <ConnectionsPanel brands={[]} connections={connections} refresh={new Map([['c2', { id: 'c2', refreshError: 'x', delayed: false,
+      manualRefreshAt: null, refreshState: null }]])} gold={gold} onChanged={() => {}} />));
+  it('names each state instead of claiming there was no content', () => {
+    const t = render([own({}), own({ id: 'c2' }), own({ id: 'c3', status: 'reauth_required' }), own({ id: 'c4', postCount: 0 })]);
+    expect(t).toContain('数据更新失败');
+    expect(t).toContain('需要重新授权');
+    expect(t).toContain('重新授权');
+    expect(t).toContain('还没读到作品，如果你已经发过，请重新授权');
+    expect(t).not.toContain('本周没有发内容');
+  });
+  it('shows benchmark accounts only to Gold', () => {
+    expect(render([])).not.toContain('对标账号（Gold）');
+    expect(render([], true)).toContain('对标账号（Gold）');
+  });
+});
+
+describe('reviews', () => {
+  it('shows the automatic switch only to Gold and the reason a week was skipped', () => {
+    state.reviews = ok([{ id: 'r1', periodStart: '2026-10-13T00:00:00Z', status: 'skipped', body: null, tables: null,
+      notice: '余额不足，未复盘' }]);
+    const pro = text(renderToStaticMarkup(<ReviewPanel gold={false} />));
+    expect(pro).not.toContain('每周自动复盘');
+    expect(pro).toContain('余额不足，未复盘');
+    expect(text(renderToStaticMarkup(<ReviewPanel gold />))).toContain('每周自动复盘');
+  });
+  it('says the weekly review is not open when the review switch is off', () => {
+    state.reviews = failed('PUBLISH_MONITOR_REVIEW_DISABLED');
+    expect(text(renderToStaticMarkup(<ReviewPanel gold />))).toContain('每周复盘还没有开放。');
+  });
+});

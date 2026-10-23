@@ -83,3 +83,9 @@ it('keeps 发布排期 and 数据复盘 unavailable by default and shows them av
   expect(launched).toMatch(/<a><img[^>]*calendar-blank[^>]*\/>发布排期<\/a>/);
   for (const name of ['发布排期', '数据复盘']) expect(launched).toContain(name);
 });
+
+it('links 数据复盘 to the data review page once its switch is on, leaving 发布排期 unavailable', () => {
+  const html = renderToStaticMarkup(<RailView area="review" returnParam="?returnTo=%2Fapp" dataReview><span/></RailView>);
+  expect(html).toMatch(/<a aria-current="page" href="\/app\/publish-monitor\?returnTo=%2Fapp"><img[^>]*chart-bar[^>]*\/>数据复盘<\/a>/);
+  expect(html.match(/<small>待接入<\/small>/g)).toHaveLength(1);
+});
