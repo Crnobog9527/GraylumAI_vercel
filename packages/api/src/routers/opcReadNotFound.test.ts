@@ -11,8 +11,8 @@ function fixture(result: {data?: unknown; error?: {code: string; message: string
   const user = {id:profile.id, email:profile.email, email_confirmed_at:'2026-01-01'};
   const answer = {data:result.data ?? null, error:result.error ?? null};
   type Answer = {data: unknown; error: {code: string; message: string} | null};
-  const rpc = vi.fn((_name?: string, _args?: Record<string, unknown>) =>
-    Object.assign(Promise.resolve<Answer>(answer), {abortSignal:() => Promise.resolve<Answer>(answer)}));
+  type Call = (name?: string, args?: Record<string, unknown>) => Promise<Answer> & {abortSignal: () => Promise<Answer>};
+  const rpc = vi.fn<Call>(() => Object.assign(Promise.resolve<Answer>(answer), {abortSignal:() => Promise.resolve<Answer>(answer)}));
   const db = {rpc, auth:{getUser:async () => ({data:{user},error:null})},
     from:() => ({select() {return this;}, eq() {return this;}, single:async () => ({data:profile,error:null})})};
   const ctx = {headers:new Headers(), user, isEmailVerified:true, hasSupabaseAdminPrivileges:true,
@@ -27,8 +27,8 @@ it('lets the owner read a deleted conversation that still has confirmed content'
   await expect(f.caller.read({draftId:id(1)})).resolves.toMatchObject({conversationDeleted:true,
     information:{s1:{values:{goal:{value:'已确认目标'}}}}});
 });
-const listed = (f: ReturnType<typeof fixture>, rows: unknown[]) => f.rpc.mockImplementation((_name?: string, args?: Record<string, unknown>) => {
-  const answer = {data:args?.p_draft_id ? draft(false) : rows, error:null};
+const listed = (f: ReturnType<typeof fixture>, rows: unknown[]) => f.rpc.mockImplementation((...call: [name?: string, args?: Record<string, unknown>]) => {
+  const answer = {data:call[1]?.p_draft_id ? draft(false) : rows, error:null};
   return Object.assign(Promise.resolve(answer), {abortSignal:() => Promise.resolve(answer)});
 });
 it('reads a deleted conversation with nothing confirmed as not found', async () => {
