@@ -105,18 +105,26 @@ test.describe('User Extended Flows', () => {
       await gotoWithBypass(page, '/app/profile?tab=subscription');
       await expect(page.getByText('会员订阅')).toBeVisible({ timeout: 10000 });
 
-      steps.push('Trigger a package purchase action');
-      const buyButton = await settledPackBuyButton(page);
+      steps.push('Open the method-checkout dialog from a membership plan (nothing is paid)');
+      const targetPlan = page.locator('[data-testid="profile-membership-plan-gold"]');
+      await expect(targetPlan).toBeVisible({ timeout: 10000 });
+      const dialog = await openMethodCheckoutDialog(page, targetPlan.getByRole('button').last());
+      await expect(dialog.getByTestId('method-checkout-pay')).toBeVisible({ timeout: 10000 });
+      actual = 'Membership purchase action opened the method-checkout dialog';
+      await page.keyboard.press('Escape');
+      await expect(dialog).toBeHidden({ timeout: 10000 });
 
+      steps.push('Check the credit package purchase gate');
+      const buyButton = await settledPackBuyButton(page);
       if (await buyButton.isDisabled()) {
-        // Packs are for paid members and need open checkout; a disabled button is the page's own answer, not silence.
-        steps.push('Package purchase is gated for this user: the buy button is disabled');
-        actual = 'Package purchase button is disabled for this user (members only or checkout closed)';
+        // Packs are for paid members: a disabled button must come with the page's own reason, not silence.
+        await expect(page.getByTestId(/^profile-credit-packages-(members-only|renewal-grace|entitlement-error)$/).first()
+          .or(page.getByTestId('profile-method-checkout-closed'))).toBeVisible({ timeout: 10000 });
+        actual += '; package purchase is gated with a visible reason';
       } else {
-        steps.push('Open the method-checkout dialog (nothing is paid)');
-        const dialog = await openMethodCheckoutDialog(page, buyButton);
-        await expect(dialog.getByTestId('method-checkout-pay')).toBeVisible({ timeout: 10000 });
-        actual = 'Subscription purchase action opened the method-checkout dialog';
+        const packDialog = await openMethodCheckoutDialog(page, buyButton);
+        await expect(packDialog.getByTestId('method-checkout-pay')).toBeVisible({ timeout: 10000 });
+        actual += '; package purchase opened the method-checkout dialog';
         await page.keyboard.press('Escape');
       }
 
@@ -133,7 +141,7 @@ test.describe('User Extended Flows', () => {
           title: 'subscription-purchase-next-step',
           role: 'user',
           route: '/app/profile?tab=subscription',
-          expected: 'Credit package purchase either opens the method-checkout dialog or is visibly disabled when the user cannot buy.',
+          expected: 'A membership plan opens the method-checkout dialog; credit packages open it too or are disabled with a visible reason.',
         },
         actual,
         steps,
