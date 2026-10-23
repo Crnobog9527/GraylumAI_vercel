@@ -4,6 +4,7 @@ import { researchRuntimeTools } from './researchRuntimeTool';
 import { requestIdentity, ResearchPause, runSubcall, type SubcallContext } from '../research/runtime/subcall';
 import { socialRequest, stableResearchId, type ResearchToolContext } from '../research/runtime/toolContext';
 import { SHORTFALL_MESSAGE } from '../research/runtime/shortfall';
+import { ROUND_UNFINISHED_NEXT_STEP } from '../research/runtime/discovery';
 import type { DiscoveryRecord, FetchClaim, RuntimeOperation, RuntimePlan, RuntimeResearchStore } from '../research/runtime/store';
 import type { ToolEnvelope } from '../research/tools/envelope';
 import { DISABLED_RESEARCH_TOOLS, researchToolsConfigSchema } from '../research/vendors/config';
@@ -555,7 +556,7 @@ describe('durable benchmark discovery and free follow-up', () => {
 
   it('BENCHMARK-SHORTFALL: a search round without new candidates, or a finished fetch, carries the host\'s open card', async () => {
     const f = fixture();
-    f.setAuthors(7);
+    f.setAuthors(0);
     const open = { cardId: discoveryId, required: 3, offeredQualified: 2, offeredRounds: 2, choice: null, confirmationId: null };
     f.store.offerShortfall.mockResolvedValueOnce(open);
     const short = await f.execute('benchmark_discover', discoveryArgs);
@@ -606,14 +607,34 @@ describe('durable benchmark discovery and free follow-up', () => {
     expect(f.store.offerShortfall).not.toHaveBeenCalled();
   });
 
-  it('withholds the initial selection card below eight qualified accounts', async () => {
+  it('a round searched to the end with fewer than eight selectable accounts shows them (small niche, Owner 2026-10-20 B)', async () => {
     const f = fixture();
     f.setAuthors(7);
-    expect(await f.execute('benchmark_discover', discoveryArgs)).toMatchObject({ status: 'partial',
-      reason: 'NOT_ENOUGH_CANDIDATES', message: '已找到 7 个可选、需要 8 个。',
-      nextStep: '建议换或补充关键词再找，或让用户贴账号主页链接以便取数核对。' });
-    expect(f.store.createCard).not.toHaveBeenCalled();
+    const result = await f.execute('benchmark_discover', discoveryArgs);
+    expect(result).toMatchObject({ status: 'ok', reason: null, continue: false });
+    expect(result).not.toHaveProperty('message');
+    expect(f.store.discoverySave).toHaveBeenLastCalledWith(discoveryId, expect.anything(), 'completed');
+    const payload = f.store.createCard.mock.calls[0]?.[1];
+    expect(f.store.createCard.mock.calls[0]?.[0]).toBe(stableResearchId(discoveryId, 'first-card'));
+    expect(payload?.options.filter(option => option.selectable)).toHaveLength(7);
+    // A first card: the database sets the picks (3–5, all of them below 3), never the host.
+    expect(payload).not.toHaveProperty('minSelect');
+    expect(payload).not.toHaveProperty('followUp');
+    expect(f.store.offerShortfall).not.toHaveBeenCalled();
+    // Showing the card is free: only the 3 searches and 7 profiles were sent.
     expect(subcall).toHaveBeenCalledTimes(10);
+  });
+
+  it('a round searched to the end without one selectable account shows no card and names the ways out', async () => {
+    const f = fixture();
+    f.setAuthors(0);
+    const result = await f.execute('benchmark_discover', discoveryArgs);
+    expect(result).toMatchObject({ status: 'partial', reason: 'NOT_ENOUGH_CANDIDATES', continue: false,
+      message: '这一轮已经搜完，没有找到可选的对标账号。', availableCandidates: 0 });
+    expect(result.nextStep).toContain('主页链接');
+    expect(f.store.discoverySave).toHaveBeenLastCalledWith(discoveryId, expect.anything(), 'completed');
+    expect(f.store.createCard).not.toHaveBeenCalled();
+    expect(f.store.offerShortfall).toHaveBeenCalledTimes(1);
   });
 
   it('keeps old keyword-hit accounts selectable and marks activity as pending until benchmark_fetch', async () => {
@@ -658,12 +679,12 @@ describe('durable benchmark discovery and free follow-up', () => {
 
   it('refuses a follow-up card before any initial candidate selection was confirmed', async () => {
     const f = fixture();
-    f.setAuthors(7);
+    f.setAuthors(0);
     await f.execute('benchmark_discover', discoveryArgs);
     expect(await f.execute('propose_more_candidates', { discoveryId }, 'more'))
       .toMatchObject({ status: 'not_confirmed', reason: 'NO_CONFIRMED_SELECTION' });
     expect(f.store.createCard).not.toHaveBeenCalled();
-    expect(subcall).toHaveBeenCalledTimes(10);
+    expect(subcall).toHaveBeenCalledTimes(3);
   });
 
   it('creates a stable initial card and excludes already selected accounts from a free follow-up', async () => {
@@ -771,7 +792,7 @@ describe('full 25-subcall benchmark discovery', () => {
 
 
 describe('discovery continues beyond an insufficient first author batch', () => {
-  it('advances saved author progress and reuses paid operations until eight candidates qualify', async () => {
+  it('widens the scan within the call, saves progress at the allowance and reuses paid operations until eight qualify', async () => {
     const f = fixture(25);
     f.setAuthors(25);
     const original = subcall.getMockImplementation()!;
@@ -788,10 +809,13 @@ describe('discovery continues beyond an insufficient first author batch', () => 
       }
       return outcome;
     });
+    // The first 15 authors hold no qualified account: the same call goes on to the next batch until its 25 subcalls run out.
     expect(await f.execute('benchmark_discover', discoveryArgs)).toMatchObject({ status: 'partial',
-      reason: 'CANDIDATE_SCAN_INCOMPLETE', continue: true });
+      reason: 'ROUND_LIMIT', continue: true, nextStep: ROUND_UNFINISHED_NEXT_STEP });
+    expect(subcall).toHaveBeenCalledTimes(25);
     expect(f.store.createCard).not.toHaveBeenCalled();
-    expect(f.discoveries.get(discoveryId)?.cursor).toMatchObject({ authorCursor: 15, authorLimit: 25 });
+    expect(f.store.offerShortfall).not.toHaveBeenCalled();
+    expect(f.discoveries.get(discoveryId)).toMatchObject({ state: 'running', cursor: { authorCursor: 22, authorLimit: 25 } });
     const firstIds = subcall.mock.calls.map(([context]) => context.newId());
     f.ctx.executionId = refreshId;
     expect(await f.makeExecute()('benchmark_discover', { discoveryId })).toMatchObject({ status: 'ok', continue: false });

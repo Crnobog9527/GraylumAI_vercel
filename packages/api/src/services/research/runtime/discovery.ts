@@ -2,7 +2,6 @@
 import { z } from 'zod';
 import { aggregateAuthors, classifyAccount, selectCandidates, type ScoredAccount } from '../benchmark/classify';
 import { accountMetrics, type EvidenceItem } from '../benchmark/metrics';
-import { BENCHMARK_RULES } from '../vendors/config';
 import { authorizeDiscoverStart } from '../tools/authorize';
 import { canonicalAccount } from '../tools/accountLinks';
 import { toolEnvelope } from '../tools/envelope';
@@ -22,15 +21,19 @@ interface StepResult {
   reason?: string; budget?: boolean;
 }
 
-export function candidateShortage(available: number) {
-  const required = BENCHMARK_RULES.candidatesMin;
+/** A round searched to the end without one selectable account (with any, the card is shown). */
+export function candidateShortage() {
   return {
-    message: `已找到 ${available} 个可选、需要 ${required} 个。`,
-    nextStep: '建议换或补充关键词再找，或让用户贴账号主页链接以便取数核对。',
-    availableCandidates: available,
-    requiredCandidates: required,
+    message: '这一轮已经搜完，没有找到可选的对标账号。',
+    nextStep: '告诉用户两条出路：换一组关键词再搜一轮，或直接发来想对标的账号主页链接（按链接取数核对）。'
+      + '搜过两轮仍找不到时，主要建议发链接，不要只让用户再搜。',
+    availableCandidates: 0,
   };
 }
+
+/** A round stopped before its end (this reply's lookups ran out): it is not a round yet and continues on the next reply. */
+export const ROUND_UNFINISHED_NEXT_STEP = '这一轮搜索还没搜完，不算一轮。告诉用户回复"继续"即可接着搜完这一轮；'
+  + '已经取过的数据不会重复取、不重复收费。不要说已经搜完，也不要建议换关键词。';
 
 /** The operation is the durable cursor. A crash after dispatch never causes another supplier request. */
 async function step(ctx: ResearchToolContext, d: DiscoveryRecord, budget: ToolAllowance,
@@ -78,7 +81,9 @@ async function card(ctx: ResearchToolContext, discoveryId: string, accounts: Fou
   const keys = new Set(chosen.map(a => `${a.platform}:${a.account}`));
   const remaining = accounts.filter(a => !keys.has(a.key));
   const selection = selectCandidates(remaining, true);
-  if ((!followUp && !selection.enough) || selection.selectable.length === 0) return false;
+  // The first card comes only from a round searched to the end (the caller), so fewer than candidatesMin means the
+  // keywords found no more: show what there is (a small niche still reaches the shortfall choice, Owner 2026-10-20 B).
+  if (selection.selectable.length === 0) return false;
   const selectable = new Set(selection.selectable.map(a => a.key));
   const references = !followUp ? selection.headReferences.slice(0, 3) : [];
   const ordered = [...selection.selectable.slice(0, 12 - references.length), ...references] as FoundAccount[];
@@ -140,41 +145,42 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
     // Rank across platforms, then spend at most the remaining discovery subcall cap on profiles.
     const authors = d.platforms.flatMap(platform => aggregateAuthors(posts.get(platform) ?? [], (posts.get(platform) ?? []).length)
       .map(author => ({ ...author, platform }))).sort((a, b) => b.appearances - a.appearances || b.interactions - a.interactions);
-    for (const author of authors.slice(0, authorLimit)) {
-      const account = canonicalAccount(author.platform, author.authorId);
-      if (!account) continue;
-      const request = socialRequest(ctx, author.platform, 'account_profile', { account });
-      if (!request) { complete = false; continue; }
-      const result = await step(ctx, d, budget, index++, request);
-      complete &&= result.complete;
-      if (result.stopped) {
-        stopped = true;
-        stopReason = result.reason;
-        stopBudget = result.budget === true;
-        break;
+    let scanned = 0;
+    // Too few candidates in this batch: widen the scan within this call's own allowance (a stop at the allowance saves the
+    // wider limit; the next reply re-reads paid operations and continues), so a reply never ends a round early by itself.
+    while (!stopped) {
+      for (const author of authors.slice(scanned, authorLimit)) {
+        const account = canonicalAccount(author.platform, author.authorId);
+        if (!account) continue;
+        const request = socialRequest(ctx, author.platform, 'account_profile', { account });
+        if (!request) { complete = false; continue; }
+        const result = await step(ctx, d, budget, index++, request);
+        complete &&= result.complete;
+        if (result.stopped) {
+          stopped = true;
+          stopReason = result.reason;
+          stopBudget = result.budget === true;
+          break;
+        }
+        authorCursor += 1;
+        const profile = result.items[0];
+        if (!profile) continue;
+        const metrics = accountMetrics({ profile: { ...profile, ref: `${result.operationId}#1` },
+          posts: (posts.get(author.platform) ?? []).filter(p => p.fields.authorId === author.authorId) }, ctx.now());
+        found.push({ key: `${author.platform}:${account}`, platform: author.platform, account,
+          evidenceRef: `${result.operationId}#1`, metrics,
+          classification: classifyAccount(metrics, ctx.config.recentGrowth, ctx.now(), 'discovery') });
       }
-      authorCursor += 1;
-      const profile = result.items[0];
-      if (!profile) continue;
-      const metrics = accountMetrics({ profile: { ...profile, ref: `${result.operationId}#1` },
-        posts: (posts.get(author.platform) ?? []).filter(p => p.fields.authorId === author.authorId) }, ctx.now());
-      found.push({ key: `${author.platform}:${account}`, platform: author.platform, account,
-        evidenceRef: `${result.operationId}#1`, metrics,
-        classification: classifyAccount(metrics, ctx.config.recentGrowth, ctx.now(), 'discovery') });
-    }
-    if (!stopped && !selectCandidates(found, true).enough && authorLimit < authors.length) {
-      // A later batch only reads old operations and spends this round's allowance on new authors.
+      scanned = authorLimit;
+      if (stopped || selectCandidates(found, true).enough || authorLimit >= authors.length) break;
       authorLimit = Math.min(authorLimit + 15, authors.length);
-      stopped = true;
-      stopReason = 'CANDIDATE_SCAN_INCOMPLETE';
     }
   }
   // Reconstruct from stable operations each time; the saved candidates support free follow-up cards.
   await ctx.store.discoverySave(d.discoveryId, { accounts: found, attempted: index, authorCursor, authorLimit }, stopped ? 'running' : 'completed');
   const shown = !stopped && await card(ctx, d.discoveryId, found, false, '');
-  const available = selectCandidates(found, true).selectable.length;
-  const insufficient = !stopped && complete && !shown;
-  const resumable = stopReason === 'ROUND_LIMIT' || stopReason === 'CANDIDATE_SCAN_INCOMPLETE';
+  const insufficient = !stopped && !shown;
+  const resumable = stopReason === 'ROUND_LIMIT';
   const blockedWithoutData = stopped && !resumable && found.length === 0;
   // A round saved as completed (the same state 0320 counts as a round, partial supplier failures included) without a
   // candidate card: the host may now offer the shortfall choice (0320 decides).
@@ -183,7 +189,8 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
     : complete && shown ? 'ok' : 'partial',
     reason: stopped ? stopReason : shown ? (complete ? null : 'DISCOVERY_PARTIAL')
       : complete ? 'NOT_ENOUGH_CANDIDATES' : 'DISCOVERY_PARTIAL',
-    ...(insufficient ? candidateShortage(available) : {}),
+    ...(insufficient ? candidateShortage() : {}),
+    ...(stopped && resumable ? { nextStep: ROUND_UNFINISHED_NEXT_STEP } : {}),
     discoveryId: d.discoveryId, continue: stopped && resumable,
     items: found.map(a => ({ fields: { platform: a.platform, account: a.account,
       evidenceRef: a.evidenceRef,
@@ -196,7 +203,7 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
 export async function moreCandidates(ctx: ResearchToolContext, discoveryId: string, callId: string) {
   const d = await ctx.store.discoveryRead(discoveryId);
   if (!d) return toolEnvelope({ status: 'not_confirmed', reason: 'DISCOVERY_NOT_FOUND' });
-  // A follow-up only replaces accounts picked from a confirmed card; it never stands in for the 8-candidate first card.
+  // A follow-up only replaces accounts picked from a confirmed card; it never stands in for a round's first card.
   if ((await ctx.store.selectedAccounts(discoveryId)).length === 0) {
     return toolEnvelope({ status: 'not_confirmed', reason: 'NO_CONFIRMED_SELECTION', discoveryId });
   }
