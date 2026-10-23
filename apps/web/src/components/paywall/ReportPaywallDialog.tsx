@@ -10,6 +10,7 @@ import { CHECKOUT_COPY, GOLD_FOUNDER_YEAR_USD } from './methodCheckout';
 import { SUPPORT_TICKET_HREF, UNPAID_SUBSCRIPTION_BLOCKS_PURCHASE } from '@/components/profile/subscriptionPlanButtonState';
 import { formatUsd, paywallQuote, type PaywallBilling, type PaywallLevel } from './paywallPlans';
 import { usePaywallCheckout } from './usePaywallCheckout';
+import { reportPaywallView } from '@/lib/analytics/events';
 import { REPORT_DELIVERABLES, REPORT_PAYWALL_COPY as COPY } from './reportPaywallCopy';
 
 /**
@@ -19,6 +20,13 @@ import { REPORT_DELIVERABLES, REPORT_PAYWALL_COPY as COPY } from './reportPaywal
  * backend lacks (design README "文案规则").
  */
 export function ReportPaywallDialog({ onClose }: { onClose: () => void }) {
+  // One paywall_view per display (GA4 only, consent-gated; the funnel continues with begin_checkout / purchase).
+  const reported = useRef(false);
+  useEffect(() => {
+    if (reported.current) return;
+    reported.current = true;
+    reportPaywallView('report');
+  }, []);
   return <ReportPaywallView checkout={usePaywallCheckout()} onClose={onClose} />;
 }
 
