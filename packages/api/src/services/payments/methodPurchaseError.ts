@@ -75,11 +75,25 @@ export async function hasUnpaidSubscription(db: Pick<SupabaseClient, 'from'>, us
   } catch { return false; }
 }
 
-/** Whether one of the buyer's payments is frozen by an open dispute; a failed read keeps the ordinary wording. */
-export async function hasOpenDispute(db: Pick<SupabaseClient, 'from'>, userId: string) {
+const BLOCKING_STATUSES = ['active', 'trialing', 'past_due', 'incomplete', 'unpaid'];
+
+/** Whether the membership that blocks this purchase is held only by subscriptions under a frozen dispute. Mirrors the
+ * admission gate (0222 + 0328): a subscription blocks while chargeable or until its period ends, unless it is canceled
+ * with its credit release terminated. If any blocking subscription has no frozen dispute, the ordinary "active
+ * membership" wording stays true, so a dispute on an unrelated order never replaces it. A failed read keeps the
+ * ordinary wording. */
+export async function hasOpenDispute(db: Pick<SupabaseClient, 'from'>, userId: string, now = new Date()) {
   try {
-    const result = await db.from('payment_disputes').select('id,payment_orders!inner(user_id)')
-      .eq('payment_orders.user_id', userId).eq('freeze_state', 'frozen').limit(1);
-    return !result.error && Array.isArray(result.data) && result.data.length > 0;
+    const disputes = await db.from('payment_disputes').select('subscription_id,payment_orders!inner(user_id)')
+      .eq('payment_orders.user_id', userId).eq('freeze_state', 'frozen').not('subscription_id', 'is', null).limit(100);
+    if (disputes.error || !Array.isArray(disputes.data) || disputes.data.length === 0) return false;
+    const disputed = new Set(disputes.data.map(row => (row as { subscription_id: string }).subscription_id));
+    const subscriptions = await db.from('user_subscriptions').select('id,status,credit_release_terminated_at')
+      .eq('user_id', userId).or(`status.in.(${BLOCKING_STATUSES.join(',')}),current_period_end.gt.${now.toISOString()}`)
+      .limit(100);
+    if (subscriptions.error || !Array.isArray(subscriptions.data)) return false;
+    const blocking = (subscriptions.data as Array<{ id: string; status: string | null; credit_release_terminated_at: string | null }>)
+      .filter(row => row.status !== 'canceled' || row.credit_release_terminated_at === null);
+    return blocking.length > 0 && blocking.every(row => disputed.has(row.id));
   } catch { return false; }
 }

@@ -27,7 +27,8 @@ vi.mock('../services/stripe', () => ({ assertCheckoutRateLimit: vi.fn(), getStri
 const router = createTRPCRouter(methodPaymentProcedures);
 const userId = '00000000-0000-4000-8000-000000000001';
 const subscriptionId = '00000000-0000-4000-8000-000000000002';
-function fixture(role = 'user', settings?: Record<string, unknown>, unpaidSubscriptions?: unknown[], frozenDisputes?: unknown[]) {
+function fixture(role = 'user', settings?: Record<string, unknown>, unpaidSubscriptions?: unknown[], frozenDisputes?: unknown[],
+  blockingSubscriptions?: unknown[]) {
   const profile = { id: userId, nickname: 'Fixture', role, status: 'active', is_deleted: 'false', membership_level: 'free', email: 'fixture@example.test' };
   const rpc = vi.fn().mockResolvedValue({ error: null, data: { dispatch: true, subscriptionId,
     providerId: 'ORD_original', merchant: 'fixture', mode: 'test' } });
@@ -38,13 +39,16 @@ function fixture(role = 'user', settings?: Record<string, unknown>, unpaidSubscr
         maybeSingle: async () => ({ data: key in settings ? { value: settings[key] } : null, error: null }) };
       return chain;
     }
-    if (table === 'user_subscriptions' && unpaidSubscriptions) {
-      const chain = { select: () => chain, eq: () => chain, in: () => chain, limit: async () => ({ data: unpaidSubscriptions, error: null }) };
+    if (table === 'user_subscriptions' && (unpaidSubscriptions || blockingSubscriptions)) {
+      let blockingLookup = false;
+      const chain = { select: () => chain, eq: () => chain, in: () => chain, or: () => { blockingLookup = true; return chain; },
+        limit: async () => ({ data: blockingLookup ? blockingSubscriptions ?? [] : unpaidSubscriptions ?? [], error: null }) };
       return chain;
     }
     if (table === 'payment_disputes' && frozenDisputes) {
       const filters: Array<[string, unknown]> = [];
-      const chain = { select: () => chain, eq: (column: string, value: unknown) => { filters.push([column, value]); return chain; },
+      const chain = { select: () => chain, not: () => chain,
+        eq: (column: string, value: unknown) => { filters.push([column, value]); return chain; },
         limit: async () => ({ data: filters.some(([column, value]) => column === 'payment_orders.user_id' && value === userId)
           && filters.some(([column, value]) => column === 'freeze_state' && value === 'frozen') ? frozenDisputes : [], error: null }) };
       return chain;
@@ -214,16 +218,34 @@ it('answers an expected admission refusal with a typed error and plain message, 
   await expect(fixture('user', settings(true), []).caller.methodCheckout(wallet)).rejects.toMatchObject({
     code: 'PRECONDITION_FAILED', message: '你已有生效中的会员，不能重复购买。会员到期前无需再次付款。' });
   // A payment frozen by an open dispute keeps its stopped subscription's period; say what is actually in the way (#1229).
+  const disputeMessage = '你有一笔付款争议（拒付）还没有处理完，处理完之前暂时不能购买新的会员。如有疑问，请提交工单联系我们。';
+  const membershipMessage = '你已有生效中的会员，不能重复购买。会员到期前无需再次付款。';
+  const disputed = [{ subscription_id: 'sub-disputed' }];
+  const stopped = { id: 'sub-disputed', status: 'canceled', credit_release_terminated_at: null };
   mocks.wallet.mockRejectedValueOnce(new MethodPurchaseRejected('PAY_WAFFO_MEMBERSHIP_TRANSITION_REQUIRED'));
-  await expect(fixture('user', settings(true), [{ id: 'sub-past-due' }], [{ id: 'dispute' }]).caller.methodCheckout(wallet))
-    .rejects.toMatchObject({ code: 'PRECONDITION_FAILED', message: '你有一笔付款争议（拒付）还没有处理完，处理完之前暂时不能购买新的会员。'
-      + '如有疑问，请提交工单联系我们。' });
+  await expect(fixture('user', settings(true), [{ id: 'sub-past-due' }], disputed, [stopped]).caller.methodCheckout(wallet))
+    .rejects.toMatchObject({ code: 'PRECONDITION_FAILED', message: disputeMessage });
+  // Another subscription without a dispute also blocks: the active-membership wording is the true reason (review P2).
+  mocks.wallet.mockRejectedValueOnce(new MethodPurchaseRejected('PAY_WAFFO_MEMBERSHIP_TRANSITION_REQUIRED'));
+  await expect(fixture('user', settings(true), [], disputed,
+    [stopped, { id: 'sub-other', status: 'active', credit_release_terminated_at: null }]).caller.methodCheckout(wallet))
+    .rejects.toMatchObject({ code: 'PRECONDITION_FAILED', message: membershipMessage });
+  // A dispute on an order that holds no blocking subscription (e.g. a credit package) does not change the wording.
+  mocks.wallet.mockRejectedValueOnce(new MethodPurchaseRejected('PAY_WAFFO_MEMBERSHIP_TRANSITION_REQUIRED'));
+  await expect(fixture('user', settings(true), [], disputed,
+    [{ id: 'sub-other', status: 'active', credit_release_terminated_at: null }]).caller.methodCheckout(wallet))
+    .rejects.toMatchObject({ code: 'PRECONDITION_FAILED', message: membershipMessage });
+  // A disputed subscription already refunded and terminated no longer blocks, so it is not the reason.
+  mocks.wallet.mockRejectedValueOnce(new MethodPurchaseRejected('PAY_WAFFO_MEMBERSHIP_TRANSITION_REQUIRED'));
+  await expect(fixture('user', settings(true), [], disputed,
+    [{ ...stopped, credit_release_terminated_at: '2026-10-23T00:00:00Z' }]).caller.methodCheckout(wallet))
+    .rejects.toMatchObject({ code: 'PRECONDITION_FAILED', message: membershipMessage });
   mocks.wallet.mockRejectedValueOnce(new MethodPurchaseRejected('PAY_WAFFO_MEMBERSHIP_TRANSITION_REQUIRED'));
   await expect(fixture('user', settings(true), [], []).caller.methodCheckout(wallet)).rejects.toMatchObject({
-    code: 'PRECONDITION_FAILED', message: '你已有生效中的会员，不能重复购买。会员到期前无需再次付款。' });
+    code: 'PRECONDITION_FAILED', message: membershipMessage });
   // Other refusals keep their own wording even with an open dispute.
   mocks.wallet.mockRejectedValueOnce(new MethodPurchaseRejected('PAY_WAFFO_GOLD_FIRST_INELIGIBLE'));
-  await expect(fixture('user', settings(true), [], [{ id: 'dispute' }]).caller.methodCheckout(wallet)).rejects.toMatchObject({
+  await expect(fixture('user', settings(true), [], disputed, [stopped]).caller.methodCheckout(wallet)).rejects.toMatchObject({
     code: 'PRECONDITION_FAILED', message: expect.stringContaining('首月优惠仅限首次购买') });
   // The same code text without the admission marker (e.g. a server fault) is still a 503.
   mocks.wallet.mockRejectedValueOnce(new Error('PAY_WAFFO_MEMBERSHIP_TRANSITION_REQUIRED'));
