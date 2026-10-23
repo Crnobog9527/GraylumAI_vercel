@@ -40,8 +40,10 @@ export const BENCHMARK_RULES = Object.freeze({
  * - bilibili: the profile has no followers; they come from the separate relation call.
  * - xiaohongshu: no public view counts, so `views` is always missing.
  * - douyin: play counts are hidden (always 0 upstream), so `views` is always missing; the profile route needs the sec_user_id.
- * - youtube: channel videos have only relative times and abbreviated subscriber labels; one post_detail of the
- *   newest video gives the exact followers and that video's absolute date. Other videos keep publishedAt missing.
+ * - youtube: channel videos have only relative times; one post_detail of the newest video gives that video's absolute
+ *   date and the channel's subscriber label. YouTube only publishes rounded counts, so its followers are approximate and
+ *   judged conservatively (Owner 2026-10-23, vendors/approxCount.ts). Checked against real responses on 2026-10-23
+ *   (BENCHMARK-COVERAGE): the channel list is newest first, 30 videos per page. Other videos keep publishedAt missing.
  */
 export interface BenchmarkRouteSet { kinds: readonly SocialKind[]; followersFrom: SocialKind; verified: boolean }
 const routeSet = (kinds: SocialKind[], followersFrom: SocialKind, verified: boolean): Readonly<BenchmarkRouteSet> =>
@@ -52,7 +54,7 @@ export const BENCHMARK_ROUTE_KINDS: Readonly<Partial<Record<SocialPlatform, Read
   bilibili: routeSet(['account_profile', 'account_relation', 'account_posts'], 'account_relation', false),
   xiaohongshu: routeSet(['account_profile', 'account_posts'], 'account_profile', true),
   douyin: routeSet(['account_profile', 'account_posts'], 'account_profile', true),
-  youtube: routeSet(['account_posts', 'post_detail'], 'post_detail', false),
+  youtube: routeSet(['account_posts', 'post_detail'], 'post_detail', true),
 });
 
 /**

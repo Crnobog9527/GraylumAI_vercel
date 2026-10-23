@@ -31,6 +31,8 @@ export interface AccountEvidence {
 export interface Metric {
   value: number | null;
   refs: string[];
+  /** YouTube followers: the supplier's rounded label, not an exact count (vendors/approxCount.ts). */
+  approximate?: true;
 }
 
 export interface AccountMetrics {
@@ -138,7 +140,8 @@ export function accountMetrics(evidence: AccountEvidence, now: Date): AccountMet
   const oldest = dated[dated.length - 1];
 
   const result: AccountMetrics = {
-    followers: metric(followers, [followersSource.ref]),
+    followers: followers !== null && followersSource.fields.followersApprox === true
+      ? { ...metric(followers, [followersSource.ref]), approximate: true } : metric(followers, [followersSource.ref]),
     postsAnalyzed: posts.length,
     medianViews: metric(medianViews, viewed.map(post => post.ref)),
     engagementRate: metric(median(rates), rateRefs),
