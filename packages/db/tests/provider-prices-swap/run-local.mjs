@@ -65,6 +65,15 @@ try {
   assert.equal(winner, sha(config('0.004')));
   report.checks.push('two saves with the same stale-to-be hash: the second waits for the lock, then gets CONFLICT');
 
+  // A non-string (legacy or broken) value is hashed from PostgreSQL's own text, as readProviderPricesRow reads it
+  // (`raw:value::text`), so the admin page can still replace it by quoting that hash.
+  await db.query("UPDATE system_settings SET value='{\"version\": 2, \"entries\": []}'::jsonb WHERE key=$1", [KEY]);
+  const objectText = (await db.query('SELECT value::text t FROM system_settings WHERE key=$1', [KEY])).rows[0].t;
+  await assert.rejects(swap(db, sha(JSON.stringify({ version: 2, entries: [] })), config('0.006')), /CONFLICT/);
+  assert.equal(await swap(db, sha(objectText), config('0.006')), sha(config('0.006')));
+  assert.equal(await stored(), config('0.006'));
+  report.checks.push('a non-string stored value is replaced by quoting the hash of its PostgreSQL text (the client reads the same text)');
+
   const grants = (await db.query(`SELECT has_function_privilege('anon',f,'EXECUTE') anon, has_function_privilege('authenticated',f,'EXECUTE') auth,
     has_function_privilege('service_role',f,'EXECUTE') service FROM (SELECT 'public.billing_provider_prices_swap(text,text)'::regprocedure f) x`)).rows[0];
   assert.deepEqual(grants, { anon: false, auth: false, service: true });

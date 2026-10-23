@@ -108,14 +108,17 @@ export function parseProviderPrices(raw: unknown): ProviderPrices {
 async function readProviderPricesRow(db: SupabaseClient): Promise<{ raw: string | null; hash: string | null }> {
   let result;
   try {
-    result = await db.from('system_settings').select('value').eq('key', PROVIDER_PRICES_KEY).maybeSingle();
+    // `raw` is PostgreSQL's own text of the value: a non-string (legacy or broken) value is hashed exactly as
+    // billing_provider_prices_swap (0346) hashes it, so the admin page can still replace it by quoting that hash.
+    result = await db.from('system_settings').select('value,raw:value::text').eq('key', PROVIDER_PRICES_KEY).maybeSingle();
   } catch {
     throw new BillingUnitConfigError('BILLING_UNIT_PROVIDER_PRICES_UNAVAILABLE');
   }
   if (result.error) throw new BillingUnitConfigError('BILLING_UNIT_PROVIDER_PRICES_UNAVAILABLE');
   if (!result.data) return { raw: null, hash: null };
   const value: unknown = result.data.value;
-  const raw = typeof value === 'string' ? value : JSON.stringify(value);
+  const stored = (result.data as { raw?: unknown }).raw;
+  const raw = typeof value === 'string' ? value : typeof stored === 'string' ? stored : JSON.stringify(value);
   return { raw, hash: createHash('sha256').update(raw).digest('hex') };
 }
 

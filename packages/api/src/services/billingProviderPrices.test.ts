@@ -217,6 +217,11 @@ describe('read and save', () => {
     expect(stored.writes).toEqual([]);
   });
 
+  it('a non-string stored value is hashed from PostgreSQL\'s own text (as the 0346 writer hashes it)', async () => {
+    const legacy = db({ data: { value: { version: 2 }, raw: '{"version": 2}' }, error: null });
+    await expect(providerPricesView(legacy.client)).resolves.toMatchObject({ source: 'invalid', hash: sha('{"version": 2}') });
+  });
+
   it('an invalid stored value can be replaced by quoting its hash', async () => {
     const broken = db({ data: { value: '{"version":2}' }, error: null });
     await expect(saveProviderPrices(broken.client, config(entry()), sha('{"version":2}'))).resolves.toMatchObject({ source: 'configured' });
