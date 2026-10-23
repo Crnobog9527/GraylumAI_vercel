@@ -24,7 +24,7 @@ export async function keywordCardCases({db,check,rpc,seed,answer}) {
       additions:Array.from({length:8},(_,i)=>`多 ${i} ${tag}`)}),/RESEARCH_CARD_INVALID/,'never more than 10 in all');
   });
 
-  await check('KEYWORDS the patch is repeatable and refuses a changed source', async () => {
+  await check('KEYWORDS the patch is repeatable and leaves the candidate rules alone', async () => {
     const migration = readFileSync(new URL('../../migrations/0350_research_keyword_cards.sql',import.meta.url),'utf8');
     const definition = async () => (await db.query(
       "SELECT pg_get_functiondef('public.research_card_create(uuid,uuid,uuid,uuid,jsonb)'::regprocedure) d")).rows[0].d;
