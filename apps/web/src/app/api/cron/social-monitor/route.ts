@@ -7,6 +7,7 @@ import {
   createRuntimeBudget, entitlementWindow, runSocialMonitorJob, tikhubEntitlements,
 } from '@repo/api/src/services/publishMonitor/socialMonitorJob';
 import { validateCronRequest } from '@/lib/cron-auth';
+import { reportPublishMonitorStuck } from '@/lib/publish-monitor-alert';
 
 export const runtime = 'nodejs';
 // Vercel Hobby allows 300 seconds; the job stops starting new work at 240 seconds (plan §8).
@@ -46,6 +47,7 @@ export async function GET(request: Request) {
     const report = await runSocialMonitorJob(client, deps, startedAt + 240_000, entitlementWindow(client), Date.now,
       { env: process.env, entitlement: tikhubEntitlements(client) }, { env: process.env, defer: work => after(work), budget });
     if (keyError) report.failures.push('postforme_key');
+    reportPublishMonitorStuck(report.stuck);
     const success = report.failures.length === 0;
     await finish(success ? 'success' : 'error', { ...report, ...(keyError ? { postForMeKeyError: keyError } : {}) },
       keyError ?? (success ? null : `FAILED_STEPS:${report.failures.join(',')}`));
