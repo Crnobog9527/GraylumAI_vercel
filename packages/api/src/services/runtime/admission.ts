@@ -205,14 +205,15 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    let skillChars=0;
    let skillFile:SkillFileBinding|undefined,skillFileReserve=0;
    let skillId:string|undefined,moduleId:string|undefined,revisionId:string|undefined,chosenSource:ContentSourceKind|undefined;
+   let voiceFlagged=false;
    if(input.selection.kind==='ordinary'||input.selection.kind==='auto')
     modelId=policy.real&&!policy.weeklyReview?serverChatModel(await settings):input.selection.modelId;
    else if(input.selection.kind==='skill'){
-    const module=await admin.from('modules').select('id,active,skill_id,model_id,report_model_id,social_media_related')
+    const module=await admin.from('modules').select('id,active,skill_id,model_id,report_model_id,social_media_related,uses_user_voice')
      .eq('id',input.selection.moduleId).single();
     if(module.error||module.data?.active!==true)throw new Error('RUNTIME_SKILL_DENIED');
     if(gated&&module.data.social_media_related===true)refusePositioning();
-    moduleId=uuid.parse(module.data.id);skillId=uuid.parse(module.data.skill_id);
+    moduleId=uuid.parse(module.data.id);skillId=uuid.parse(module.data.skill_id);voiceFlagged=module.data.uses_user_voice===true;
     modelId=uuid.parse(policy.reportGeneration ? module.data.report_model_id ?? module.data.model_id : module.data.model_id);
     revisionId=input.selection.revisionId;
     // The service-role row above never substitutes for the user-scoped admission the source performs once (AC-0c).
@@ -259,7 +260,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    // VOICE: a chosen writing Skill carries the user's confirmed voice; the executor appends it, so it is sized here too.
    // Not for host-built turns (mentor, report), whose prompt cache covers the whole system message.
    const voiceTurn=!hostTurnContext&&!policy.reportGeneration&&!mentorStream&&!stepStream;
-   let voice=voiceTurn&&input.selection.kind==='skill'&&moduleId?await admitVoice(admin,actorId,[moduleId]):undefined;
+   let voice=voiceTurn&&voiceFlagged?await admitVoice(admin,actorId,[moduleId!],true):undefined;
    const positioningRule=REPLY_LANGUAGE_INSTRUCTIONS+(positioningFallback?POSITIONING_FALLBACK_INSTRUCTIONS:'')+
     (voice?withPrimaryAddenda('',{voice:{guide:voice.frozen.guide,profile:voice.profile}}):'');
    if(input.selection.kind==='organizer')modelConfiguration(()=>assertSeparateSummaryModel(session.dialogueModel,row.data.model_id));

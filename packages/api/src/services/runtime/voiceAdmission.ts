@@ -15,13 +15,17 @@ type Rpc = { rpc(name: string, args: Record<string, unknown>): PromiseLike<{ dat
 
 /** The confirmed profile, when one of these modules is a writing Skill flagged "使用用户文风" (0337 uses_user_voice) and the
  * user has a confirmed profile with "使用我的文风" on. Any read failure means no voice for this run (never a refused turn). */
-export async function admitVoice(admin: SupabaseClient, actorId: string, moduleIds: string[]):
+export async function admitVoice(admin: SupabaseClient, actorId: string, moduleIds: string[], flagged = false):
   Promise<{ frozen: FrozenVoiceProfile; profile?: VoiceProfile } | undefined> {
   if (!moduleIds.length) return undefined;
   try {
-    const rows = await admin.from('modules').select('id,uses_user_voice').in('id', moduleIds);
-    if (rows.error) throw new Error('VOICE_MODULES_UNAVAILABLE');
-    const modules = (rows.data ?? []).filter(row => row.uses_user_voice === true).map(row => String(row.id));
+    // `flagged`: the caller already read uses_user_voice with the module row (a chosen Skill: no extra round trip).
+    let modules = moduleIds;
+    if (!flagged) {
+      const rows = await admin.from('modules').select('id,uses_user_voice').in('id', moduleIds);
+      if (rows.error) throw new Error('VOICE_MODULES_UNAVAILABLE');
+      modules = (rows.data ?? []).filter(row => row.uses_user_voice === true).map(row => String(row.id));
+    }
     if (!modules.length) return undefined;
     const current = await admin.rpc('voice_profile_current', { a: actorId });
     if (current.error) throw new Error('VOICE_PROFILE_UNAVAILABLE');
