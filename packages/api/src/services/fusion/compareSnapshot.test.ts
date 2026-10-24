@@ -24,10 +24,13 @@ describe('compare snapshot (FUSION-COMPARE §3.2)', () => {
     expect(compareInstructions(parts({ positioningFallback: true }))).toBe(FREE_CHAT_BASE_INSTRUCTIONS + REPLY_RULE
       + POSITIONING_FALLBACK_INSTRUCTIONS);
   });
-  it('carries the language set in the profile, and a different language is a different snapshot (Owner 2026-10-24)', () => {
-    for (const locale of ['zh-Hant', 'en'] as const)
+  it('carries the language set in the profile; the language is not part of the request identity (Owner 2026-10-24)', () => {
+    for (const locale of ['zh-Hant', 'en'] as const) {
       expect(compareInstructions(parts({ replyLocale: locale }))).toBe(FREE_CHAT_BASE_INSTRUCTIONS + replySettingInstructions(locale));
-    expect(snapshotHash(parts({ replyLocale: 'en' }))).not.toBe(snapshotHash(parts()));
+      expect(compareRequest(parts({ replyLocale: locale })).instructions).toContain(replySettingInstructions(locale));
+      // A retry after the user changed the setting must still match the request (and group) frozen by the first attempt.
+      expect(snapshotHash(parts({ replyLocale: locale }))).toBe(snapshotHash(parts()));
+    }
   });
   it('the user message is byte-identical to an ordinary turn without sources or documents', () => {
     expect(compareInput(parts())).toBe('哪个开头更好？');

@@ -399,4 +399,11 @@ describe('compare start: the request identity binds the frozen context (review f
     expect(await hashOf({}, { workspace: [{ sourceVersionId: id(77), kind: 'positioning', body: 'b' }] })).not.toBe(base);
     expect(await hashOf({}, { history: [{ role: 'user', text: 'earlier' }] })).not.toBe(base);
   });
+  it('does not change with the reply language: a retry after the user changed it still finds the frozen group', async () => {
+    const base = await hashOf();
+    expect(await hashOf({}, { replyLocale: 'en' })).toBe(base);
+    expect(await hashOf({}, { replyLocale: 'zh-Hant' })).toBe(base);
+    s.rpcs.length = 0; s.begin = fresh({ created: false, gateVerdict: 'allow', groupId: id(70), state: 'running' });
+    await expect(start({ replyLocale: 'en' })).resolves.toMatchObject({ state: 'claimed', compareId: id(90) });
+  });
 });

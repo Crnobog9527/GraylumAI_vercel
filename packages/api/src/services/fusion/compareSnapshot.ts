@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { POSITIONING_FALLBACK_INSTRUCTIONS } from '../runtime/positioningFallback';
 import { FREE_CHAT_BASE_INSTRUCTIONS } from '../runtime/primaryInstructions';
 import { replySettingInstructions } from '../runtime/replyLanguage';
-import type { ReplyLocale } from '../../shared/replyLanguage';
+import { DEFAULT_REPLY_LOCALE, type ReplyLocale } from '../../shared/replyLanguage';
 import { runtimeScopeInput } from '../runtime/context';
 import { FUSION_INPUT_CAP, type FusionRequest } from './request';
 
@@ -70,9 +70,11 @@ export function assertCompareFits(request: FusionRequest) {
 
 const sha = (text: string) => createHash('sha256').update(text).digest('hex');
 /** Everything a column is sent apart from the model-specific wire fields. Excludes the positioning fallback flag, which is
- * only known after the paid judgement; the flag is stored with the verdict and rebuilt deterministically. */
+ * only known after the paid judgement; the flag is stored with the verdict and rebuilt deterministically. Excludes the reply
+ * language too: it is read from the profile on every attempt, so a retry after the user changed it must still find the group
+ * that was frozen (with the language of the first attempt); before a group exists the compare starts in the language read now. */
 export function snapshotHash(parts: CompareParts): string {
-  const request = compareRequest({ ...parts, positioningFallback: false });
+  const request = compareRequest({ ...parts, positioningFallback: false, replyLocale: DEFAULT_REPLY_LOCALE });
   return sha(JSON.stringify({ instructions: request.instructions, history: request.history, input: request.input,
     skill: parts.skill && { moduleId: parts.skill.moduleId, revisionId: parts.skill.revisionId, resources: parts.skill.resources },
     workspace: parts.workspace.map(({ sourceVersionId, body }) => [sourceVersionId, sha(body)]),
