@@ -59,10 +59,11 @@ export async function concurrencyCases({db,Client,connectionString,report,create
       );
       let waiting=false;
       for(let i=0;i<100&&!waiting;i++) {
-        waiting=(await db.query("SELECT wait_event='advisory' waiting FROM pg_stat_activity WHERE pid=$1",[waitingPid])).rows[0]?.waiting===true;
+        waiting=(await db.query("SELECT wait_event_type='Lock' waiting FROM pg_stat_activity WHERE pid=$1",[waitingPid])).rows[0]?.waiting===true;
         if(!waiting) await new Promise(resolve=>setTimeout(resolve,10));
       }
-      assert.equal(waiting,true,'other run must wait on the held model advisory lock');
+      // Same actor: since DB-PERF 0353 the claim first waits on the actor's wallet row the receipt holds.
+      assert.equal(waiting,true,'other run of the same actor must wait for the uncommitted threshold receipt');
       assert.equal((await db.query('SELECT count(*)::int n FROM bill2_calls WHERE run_id=$1',[waitingRun.id])).rows[0].n,0);
       await writers[0].query('COMMIT');
       const resumed=await pendingClaim;
@@ -74,6 +75,55 @@ export async function concurrencyCases({db,Client,connectionString,report,create
       await pendingClaim;
     }
     report.checks.push('model-lock race: second run waits for uncommitted threshold receipt, then refuses without a hold');
+
+    // DB-PERF 0353: another user's claim on the same model waits only for a write that blocks the model.
+    const flagged = await createFixture(db,{empirical:true});
+    const fc = await claim(db,flagged,1,true);
+    const bystander = await createFixture(db,{empirical:true,sameModel:flagged});
+    await writers[0].query('BEGIN');
+    let bystanderClaim;
+    try {
+      await receipt(writers[0],flagged,fc,'0.00001',{inputTokens:80,outputTokens:0});
+      assert.equal((await writers[0].query(`SELECT bool_or(metering_exit OR metering_missing OR budget_conflict) b
+        FROM bill2_calls WHERE id=$1`,[fc.id])).rows[0].b,true,'fixture receipt must block the model');
+      bystanderClaim = claim(writers[1],bystander,1,false).then(value=>({ok:true,value}),error=>({ok:false,error}));
+      let waiting=false;
+      for(let i=0;i<100&&!waiting;i++) {
+        waiting=(await db.query("SELECT wait_event='advisory' waiting FROM pg_stat_activity WHERE pid=$1",[waitingPid])).rows[0]?.waiting===true;
+        if(!waiting) await new Promise(resolve=>setTimeout(resolve,10));
+      }
+      assert.equal(waiting,true,'another user waits on the exclusive key held by the blocking receipt');
+      await writers[0].query('COMMIT');
+      const resumed=await bystanderClaim;
+      assert.equal(resumed.ok,false);
+      assert.match(resumed.error.message,/METERING_BLOCKED/);
+      assert.equal((await db.query('SELECT count(*)::int n FROM bill2_calls WHERE run_id=$1',[bystander.run])).rows[0].n,0);
+    } finally {
+      await writers[0].query('ROLLBACK');
+      await bystanderClaim;
+    }
+    report.checks.push('DB-PERF: another user\'s claim on the same model waits for an uncommitted blocking receipt, then refuses without a hold');
+
+    const first = await createFixture(db);
+    const second = await createFixture(db,{sameModel:first});
+    const third = await createFixture(db);
+    await writers[0].query('BEGIN');
+    try {
+      const held = await claim(writers[0],first,1,false);
+      assert.ok(held.id,'first claim holds the shared key, uncommitted');
+      await writers[1].query("SET statement_timeout='2s'");
+      const sameModel = await claim(writers[1],second,1,false);
+      const otherModel = await claim(writers[1],third,1,false);
+      assert.ok(sameModel.id&&otherModel.id,'other users claim while the first claim is still open');
+      assert.equal((await rpc(writers[1],'bill2_dispatch',second.actor,second.run,sameModel.id,sameModel.dispatchToken)).dispatch,true);
+      assert.equal((await db.query("SELECT state FROM bill2_calls WHERE id=$1",[sameModel.id])).rows[0].state,'dispatched');
+    } finally {
+      await writers[0].query('ROLLBACK');
+      await writers[1].query("SET statement_timeout='10s'");
+    }
+    await conserved(db,second);
+    await conserved(db,third);
+    report.checks.push('DB-PERF: an open claim no longer blocks other users\' claims and dispatches, on the same or another model');
 
     const cancelling = await createFixture(db);
     const pending = await claim(db,cancelling,1,true);

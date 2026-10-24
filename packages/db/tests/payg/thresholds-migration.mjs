@@ -40,6 +40,7 @@ export async function thresholdMigrationCases(db,report,createFixture,claim,rece
     await db.query(read('0313_fusion_compare_context.sql')); // replaces 0290's fusion_compare_view
     await db.query(read('0324_paywall_profile_archive.sql')); // restore the current archive admission/claim guards
     await db.query(read('0326_paywall_fusion_archive_fence.sql')); // restore Fusion source/run guards too
+    await db.query(read('0353_billing_lock_scope.sql')); // restore the DB-PERF late metering check
     assert.equal(await definition(),current);
     assert.deepEqual(await acl(),permissions);
     assert.deepEqual(await snapshot(),frozen);
