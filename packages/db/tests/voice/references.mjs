@@ -45,6 +45,16 @@ export async function runReferences({db,Client,connectionString,report}) {
  await denied(admit(other,mine.version),'VOICE_REFERENCE_STALE');
  report.checks.push('a run binds the voice version it carries; a missing, unconfirmed or another account\'s version refuses the admission');
 
+ // A run admitted before the migration has no reference row: the migration's own backfill statement restores it.
+ const migration=(await import('node:fs')).readFileSync(new URL('../../migrations/0345_voice_runtime_references.sql',import.meta.url),'utf8');
+ const backfill=migration.match(/INSERT INTO public\.runtime_voice_references[\s\S]*?ON CONFLICT \(execution_id\) DO NOTHING;/)[0];
+ await db.query('DELETE FROM runtime_voice_references WHERE execution_id=$1',[bound]);
+ await db.query(backfill);
+ await db.query(backfill);
+ assert.equal(await one(db,'SELECT version_id v FROM runtime_voice_references WHERE execution_id=$1',[bound]),mine.version);
+ assert.equal(await one(db,'SELECT count(*)::int v FROM runtime_voice_references WHERE execution_id=$1',[plain]),0);
+ report.checks.push('the migration backfills the version reference of a run admitted before it, repeatably, and none for an unbound run');
+
  // Deleting the version: the bound running execution is source-deleted at once, for read and for every other action.
  const gone=await svc('voice_profile_delete',a,mine.version);
  assert.equal(gone.confirmed,null);

@@ -37,6 +37,14 @@ DROP TRIGGER IF EXISTS runtime_voice_references_freeze ON public.runtime_executi
 CREATE TRIGGER runtime_voice_references_freeze AFTER INSERT ON public.runtime_executions
  FOR EACH ROW WHEN (NEW.payload->'voiceProfile' ? 'versionId') EXECUTE FUNCTION public.runtime_voice_references_freeze();
 
+-- Runs admitted before this migration carry the same binding (the trigger only sees new inserts): backfill it once for
+-- every run whose version still exists, so deleting the version stops them too. Repeatable.
+INSERT INTO public.runtime_voice_references(execution_id,actor_id,version_id)
+SELECT e.id,e.actor_id,(e.payload->'voiceProfile'->>'versionId')::uuid FROM public.runtime_executions e
+ WHERE (e.payload->'voiceProfile'->>'versionId') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+  AND EXISTS(SELECT 1 FROM public.voice_profile_versions v WHERE v.id=(e.payload->'voiceProfile'->>'versionId')::uuid AND v.actor_id=e.actor_id)
+ON CONFLICT (execution_id) DO NOTHING;
+
 -- True once a run's bound version no longer exists (or is not the actor's own). The check first share-locks the version
 -- row, which a deletion takes exclusively: a deletion that is committing is waited for and then seen, so a provider
 -- grant or a saved answer is never decided against a version that is being deleted at that moment (strict order).
