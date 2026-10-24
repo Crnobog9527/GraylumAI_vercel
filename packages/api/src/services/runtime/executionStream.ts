@@ -65,8 +65,10 @@ export async function executeOriginalExecution(host:OriginalExecutionHost,execut
    }
    const retained=['cancelled','cost_pending'].includes(result.state);
    const reason=retained?await retainedOutputReason(host.admin,host.actorId,executionId):null;
-   // Capture and retained-output reads may overlap a deletion commit.
-   await visible();
+   // Capture and retained-output reads may overlap a deletion commit. A streaming route (host.visibility) shows the
+   // result only after its own check right before yielding it, with no write in between (DB-PERF PR-2A): that check
+   // is this one, moved to the moment the result is shown. The non-streaming routes return here, so they check here.
+   if(!host.visibility)await visible();
    return retained?{...result,...(reason?{unavailable:reason}:{})}:withClaimNotice(result);
   };
   const financial=inflightFinancialHost({database:host.admin,actorId:host.actorId,executionId,actor,budget:host.budget});

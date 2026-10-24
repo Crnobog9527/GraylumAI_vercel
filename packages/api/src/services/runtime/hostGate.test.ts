@@ -3,7 +3,8 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { executeOriginalExecution } from './executionStream';
+import { executeOriginalExecution, streamOriginalExecution } from './executionStream';
+import { executionVisibility } from './libraryVisibility';
 import { createRuntimeBudget } from './budget';
 import { denyNewCalls } from './newWorkGate';
 const mock = vi.hoisted(() => ({ factory: vi.fn(), policy: vi.fn(), gate: vi.fn(), recover: vi.fn(), capture: vi.fn() }));
@@ -118,5 +119,26 @@ it('refuses a buffered response when deletion commits during post-execution capt
  await expect(executeOriginalExecution({admin:{rpc} as never,user:{auth:{}} as never,
   actorId:'actor',budget:createRuntimeBudget(),maintenanceEndpoint:'http://127.0.0.1:1'},'execution'))
   .rejects.toMatchObject({code:'PRECONDITION_FAILED',message:'CONTENT_ERASED'});
+ expect(mock.capture).toHaveBeenCalledOnce();
+});
+
+it('PR-2A: a streaming route checks once at the result yield instead of right after capture; a deletion during capture is still refused', async () => {
+ let deleted=false;
+ mock.factory.mockReturnValue({execute:async()=>({state:'completed',summary:'PRIVATE_RESPONSE',body:'PRIVATE_BODY'})});
+ mock.capture.mockImplementationOnce(async()=>{deleted=true;});
+ const rpc=vi.fn(async(name:string)=>{
+  expect(name).toBe('runtime_execution_visibility');
+  return deleted?{data:null,error:{code:'42501',message:'CONTENT_ERASED'}}:{data:'visible',error:null};
+ });
+ const admin={rpc} as never,visibility=executionVisibility(admin,'actor','execution');
+ const stream=streamOriginalExecution(onProgress=>executeOriginalExecution({admin,user:{auth:{}} as never,actorId:'actor',
+  budget:createRuntimeBudget(),maintenanceEndpoint:'http://127.0.0.1:1',visibility},'execution',onProgress),
+  undefined,'runtime.executeStream',undefined,'textDelta-v1',visibility.visible);
+ const seen:unknown[]=[];
+ await expect((async()=>{for await(const event of stream)seen.push(event);})())
+  .rejects.toMatchObject({code:'PRECONDITION_FAILED',message:'CONTENT_ERASED'});
+ expect(JSON.stringify(seen)).not.toContain('PRIVATE');
+ // Before capture (a write follows it), then at the result yield; the check between them is the yield's.
+ expect(rpc).toHaveBeenCalledTimes(2);
  expect(mock.capture).toHaveBeenCalledOnce();
 });
