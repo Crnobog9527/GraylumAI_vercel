@@ -2,6 +2,8 @@
 import {OWN_POSTS_INSTRUCTIONS} from './workspacePosts';
 import {POSITIONING_FALLBACK,POSITIONING_FALLBACK_INSTRUCTIONS} from './positioningFallback';
 import type {VoiceProfile} from '../voice/profile';
+import {frozenReplyLocale,replySettingInstructions} from './replyLanguage';
+export {readReplySetting} from './replyLanguage';
 /** The system instruction of an ordinary free conversation turn without a Skill. Admission and the FUSION-COMPARE columns
  * (which must start from the same text) both read it from here. */
 export const FREE_CHAT_BASE_INSTRUCTIONS='Answer the user request directly. Ordinary questions do not require choosing a work direction '+
@@ -51,6 +53,13 @@ export const REPLY_LANGUAGE_INSTRUCTIONS=
   "in the user's language: that of their latest message, or of earlier ones when unclear (Traditional Chinese uses Taiwan "+
   "usage). A language the user explicitly asks for wins. With no user message this turn, follow the user's own words in "+
   "the material, else Simplified Chinese. Keep required exact strings (report headings, ids, JSON keys) unchanged.";
+/** The reply-language paragraph of a frozen value: v1 (the user's own language) for executions admitted before the
+ * setting, the set language (replyLanguage.ts) after it, nothing for any other value. */
+export function replyLanguageText(frozen?:string):string {
+  if(frozen===REPLY_LANGUAGE)return REPLY_LANGUAGE_INSTRUCTIONS;
+  const locale=frozenReplyLocale(frozen);
+  return locale?replySettingInstructions(locale):'';
+}
 /** LIB-4b: the user referenced library documents with @ in this message (frozen as libraryReferences). */
 export const LIBRARY_INSTRUCTIONS=
   '\nThe user attached documents from their own library to this message as doc-1, doc-2 and so on. When the request '+
@@ -107,7 +116,7 @@ export function withPrimaryAddenda(instructions:string,
   context:{workspaceContext?:boolean;network?:string;positioningGate?:string;replyLanguage?:string;
     workspaceGuide?:string;ownPosts?:boolean;libraryReferences?:unknown[];libraryRetrieval?:boolean;
     voice?:{guide:string;profile?:VoiceProfile}}):string {
-  return instructions+(context.replyLanguage===REPLY_LANGUAGE?REPLY_LANGUAGE_INSTRUCTIONS:'')+
+  return instructions+replyLanguageText(context.replyLanguage)+
     (context.workspaceContext?WORKSPACE_CONTEXT_INSTRUCTIONS+
       (context.workspaceGuide===WORKSPACE_STRATEGY_GUIDE?WORKSPACE_STRATEGY_INSTRUCTIONS:''):'')+
     (context.ownPosts?OWN_POSTS_INSTRUCTIONS:'')+
