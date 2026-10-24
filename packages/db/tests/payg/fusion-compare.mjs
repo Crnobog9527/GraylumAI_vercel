@@ -259,7 +259,7 @@ export async function fusionCompareCases({db,Client,connectionString,report,crea
   assert.deepEqual((await call(db,'fusion_compare_context',actor,session,100)).items,[],'a turn with library references is omitted');
   await db.query('DELETE FROM runtime_library_references WHERE execution_id=$1',[turnExecution]);
   // ... and so is a turn built on such a turn (its answer is derived from the document), through the dependency lineage.
-  const other = (await db.query('SELECT id FROM runtime_executions WHERE id<>$1 ORDER BY id LIMIT 1',[turnExecution])).rows[0]?.id;
+  const other = (await db.query('SELECT id FROM runtime_executions WHERE id<>$1 AND erased_at IS NULL AND content_deleted_at IS NULL ORDER BY id LIMIT 1',[turnExecution])).rows[0]?.id;
   if (other) {
     await db.query('INSERT INTO runtime_library_references(execution_id,actor_id,document_id,content_version,ordinal) SELECT id,actor_id,$2,1,1 FROM runtime_executions WHERE id=$1',[other,randomUUID()]);
     await db.query('INSERT INTO runtime_history_dependencies(execution_id,dependency_id) VALUES($1,$2)',[turnExecution,other]);
@@ -386,6 +386,50 @@ export async function fusionCompareCases({db,Client,connectionString,report,crea
   assert.equal(sixth.state,'admitting','a compare whose runs recovery closed no longer blocks a new one');
   assert.equal((await call(db,'fusion_compare_read',actor,fifth.compareId)).state,'finished');
   report.checks.push('after recovery closes a compare\'s runs the user can start a new compare without reading it; the next read finishes it');
+
+  // First-message compare (0348): a conversation that so far holds only a compare is listed, titled with the question;
+  // a refused start leaves nothing to list.
+  const fresh = randomUUID();
+  const freeDraft = await rpc(db,'bill2_create_draft',actor);
+  await db.query("INSERT INTO runtime_sessions(id,actor_id,scope,start_request_id,start_payload) VALUES($1,$2,$3,$4,'{}')",
+    [fresh,actor,{kind:'positioning_draft',draftId:freeDraft},randomUUID()]);
+  const listedFresh = async () => (await rpc(db,'opc_free_conversations',actor)).find(row=>row.sessionId===fresh);
+  assert.equal(await listedFresh(),undefined,'an empty new conversation is not listed');
+  const firstMessage = 'First message of a new chat';
+  const firstReq = {...request(),question:firstMessage,questionHash:sha(firstMessage),requestHash:sha('first-message')};
+  await db.query("UPDATE fusion_compares SET state='stopped' WHERE actor_id=$1 AND state IN ('admitting','running')",[actor]);
+  const firstCompare = await begin(firstReq,randomUUID(),fresh);
+  const shown = await listedFresh();
+  assert.ok(shown,'a conversation holding only a compare is listed');
+  assert.equal(shown.title,firstMessage,'titled with the compared question');
+  await db.query("UPDATE fusion_compares SET created_at=now()-interval '6 minutes' WHERE id=$1",[firstCompare.compareId]);
+  assert.equal(await listedFresh(),undefined,'a start stuck admitting past five minutes is not listed');
+  await db.query("UPDATE fusion_compares SET state='refused' WHERE id=$1",[firstCompare.compareId]);
+  assert.equal(await listedFresh(),undefined,'a refused start is not listed');
+  // Before/after equivalence for every account in this database: the ids and order the list returned before 0348
+  // (conversations with a plain/Skill turn, newest activity first) are exactly the new list minus compare-only conversations.
+  const actors = (await db.query("SELECT DISTINCT actor_id FROM runtime_sessions WHERE scope->>'kind'='positioning_draft'")).rows;
+  let compared = 0;
+  for (const {actor_id} of actors) {
+    let now;
+    try { now = (await rpc(db,'opc_free_conversations',actor_id)).map(row=>row.sessionId); }
+    catch (error) { if (/BILL2_ACTOR_DENIED/.test(String(error.message))) continue; throw error; }
+    const before = (await db.query(`SELECT s.id FROM runtime_sessions s
+      CROSS JOIN LATERAL (SELECT e.payload FROM runtime_executions e WHERE e.session_id=s.id AND e.actor_id=$1
+        AND e.payload->>'role' IN ('ordinary','skill') ORDER BY e.created_at,e.id LIMIT 1) t
+      CROSS JOIN LATERAL (SELECT max(e.created_at) AS la FROM runtime_executions e WHERE e.session_id=s.id AND e.actor_id=$1) act
+      WHERE s.erased_at IS NULL AND s.content_deleted_at IS NULL AND s.actor_id=$1 AND s.scope->>'kind'='positioning_draft'
+        AND bill2_scope_allowed($1,s.scope) AND NOT EXISTS(SELECT 1 FROM opc_drafts d WHERE d.session_id=s.id)
+        AND NOT EXISTS(SELECT 1 FROM opc_topic_workspaces w WHERE w.session_id=s.id)
+        AND NOT coalesce(t.payload ? 'weeklyReview',false)
+      ORDER BY act.la DESC,s.id LIMIT 100`,[actor_id])).rows.map(row=>row.id);
+    const compareOnly = new Set((await db.query(`SELECT s.id FROM runtime_sessions s WHERE s.actor_id=$1 AND NOT EXISTS(SELECT 1 FROM runtime_executions e
+      WHERE e.session_id=s.id AND e.actor_id=$1 AND e.payload->>'role' IN ('ordinary','skill'))`,[actor_id])).rows.map(row=>row.id));
+    assert.deepEqual(now.filter(id=>!compareOnly.has(id)),before,'the list of pre-existing conversations is unchanged for '+actor_id);
+    compared += before.length;
+  }
+  report.checks.push('0348 before/after: for '+actors.length+' accounts ('+compared+' conversations) every previously listed conversation is still listed in the same order');
+  report.checks.push('a conversation that holds only a compare appears in the list with the question as title; a refused one does not');
 
   // Account erasure removes compare records and counts them while present.
   assert.ok(await count(db,'SELECT account_erasure_body_remaining($1)::bigint v',[actor])>0);

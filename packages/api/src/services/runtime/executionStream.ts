@@ -154,9 +154,24 @@ export async function executeOriginalExecution(host:OriginalExecutionHost,execut
   // even if a later test window is now selected in the host environment.
   const original=await loadStagingRecoveryPolicy(host.admin,host.actorId,executionId,process.env);
   const adapter=stagingTransport(host.admin,original,host.budget);
-  return outcome(await run(adapter,()=>runtimeExecutor({...base,adapter,activateSkill,
+  const result=await run(adapter,()=>runtimeExecutor({...base,adapter,activateSkill,
    resumePricing:policies=>admitPricing(host.admin,policies),
-   callGate:replayOnly?denyNewCalls:newWorkGate(host.admin,realRuntimeEnvironment(process.env)).calls}).execute(executionId,publicProgress,resume)));
+   callGate:replayOnly?denyNewCalls:newWorkGate(host.admin,realRuntimeEnvironment(process.env)).calls}).execute(executionId,publicProgress,resume));
+  return outcome(resume?await endClosedResume(host,executionId,result):result);
+}
+
+/**
+ * A waiting round whose frozen test window or model no longer admits it can never resume (staging 2026-10-24: the
+ * window was switched while the organizer waited, and every new message stayed blocked by it). When its reply was
+ * already saved and shown, the round ends without the organizer: the delivered reply keeps its charge and the step
+ * that never ran costs nothing (runtime_cancel settles known calls only). Without a saved reply it keeps waiting.
+ */
+export async function endClosedResume(host:OriginalExecutionHost,executionId:string,result:AgentTurnOutcome):Promise<AgentTurnOutcome>{
+ if(!(result as {resumeClosed?:true}).resumeClosed||!result.body)return result;
+ const ended=await host.admin.rpc('runtime_cancel',{p_actor_id:host.actorId,p_execution_id:executionId});
+ if(ended.error)stagingRpcFailure(ended.error);
+ logger.warn('api','runtime_resume_closed_ended',{executionId,state:ended.data?.state});
+ return {state:ended.data.state,body:result.body,resumeClosed:true};
 }
 export type OriginalExecutionOutcome=AgentTurnOutcome;
 export type ExecutionStreamEvent=RuntimeProgress|NativeTextDelta|{type:'result';result:OriginalExecutionOutcome};
