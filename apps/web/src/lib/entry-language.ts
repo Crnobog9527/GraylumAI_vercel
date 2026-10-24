@@ -3,8 +3,8 @@
 import { entryLocaleHint, type EntryLocale } from '@repo/api/src/shared/replyLanguage';
 
 /**
- * CHAT-LANGUAGE (Owner 2026-10-24, A): a sign-up started from the Traditional Chinese pages carries `lang=zh-Hant`. The
- * login page keeps that hint here until the account exists, then the app applies it once (only while the user never chose
+ * CHAT-LANGUAGE (Owner 2026-10-24, A): a sign-up started from the Traditional Chinese pages carries `lang=zh-Hant`. On the
+ * login page that hint is kept here until the account exists, then the app applies it once (only while the user never chose
  * a language) and clears it. Only the language code is stored; storage may be unavailable, which just drops the hint.
  */
 const KEY = 'graylum.entry-language';

@@ -3,16 +3,18 @@
 
 import { useEffect } from 'react';
 import { usePathname } from 'next/navigation';
-import { clearEntryLanguage, pendingEntryLanguage } from '@/lib/entry-language';
+import { clearEntryLanguage, pendingEntryLanguage, rememberEntryLanguage } from '@/lib/entry-language';
 import { createClient } from '@/lib/supabase';
 import { trpc } from '@/trpc/client';
 
-/** Applies a pending sign-up entry language (see lib/entry-language.ts) once the user is signed in. Checked again on
- * every navigation, because a password sign-in moves to the app without reloading the page. */
+/** Keeps the login page's sign-up entry language, and applies it (see lib/entry-language.ts) once the user is signed in.
+ * Checked again on every navigation, because a password sign-in moves to the app without reloading the page. */
 export function useEntryReplyLanguage() {
   const utils = trpc.useUtils();
   const pathname = usePathname();
   useEffect(() => {
+    // The sign-up link of the Traditional Chinese pages opens the login page with lang=zh-Hant.
+    if (pathname === '/login') rememberEntryLanguage(new URLSearchParams(window.location.search).get('lang'));
     const language = pendingEntryLanguage();
     if (!language) return;
     let live = true;

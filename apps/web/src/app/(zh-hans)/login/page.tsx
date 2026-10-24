@@ -23,7 +23,6 @@ import { AuthRedirectNotice } from '@/components/auth/AuthRedirectNotice';
 import { GoogleIcon } from '@/components/auth/GoogleIcon';
 import { FORGOT_PASSWORD_PATH, PASSWORD_RESET_DONE_MESSAGE } from '@/lib/passwordRecovery';
 import { clearPendingEmail, rememberPendingEmail, restorePendingEmail } from '@/lib/pendingAuthEmail';
-import { rememberEntryLanguage } from '@/lib/entry-language';
 
 type AuthMode = 'login' | 'signup';
 
@@ -65,8 +64,6 @@ export function LoginPageContent() {
     const redirect = sanitizeRedirectTarget(searchParams.get('redirect'));
     const error = searchParams.get('error');
     const planParam = searchParams.get('plan');
-    // CHAT-LANGUAGE: a sign-up from the Traditional Chinese pages starts the account's AI replies in Traditional Chinese.
-    rememberEntryLanguage(searchParams.get('lang'));
 
     setMode(action === 'signup' ? 'signup' : 'login');
     setRedirectTarget(redirect);
