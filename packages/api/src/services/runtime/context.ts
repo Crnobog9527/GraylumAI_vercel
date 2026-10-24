@@ -67,6 +67,31 @@ export function requestsHistoricalComparison(input:string){
 
 /** Keep the prior user request while removing only a complete scope snapshot
  * superseded by a newer snapshot from the same authenticated Session. */
+/**
+ * CONTENT-CONVERSATION-DRIVEN: a Skill loaded in an earlier turn is not replayed as instructions. It may have been
+ * republished, revoked or disabled since (CONTENT_SKILL_RULES 4.3 and 4.4), so a later turn gets only a marker and the
+ * model loads it again from the current catalog if it still needs it. The current turn's results are never passed here.
+ * A result is recognised by its own name or, when the item has none, by the call it answers.
+ */
+export function projectLoadedSkillHistory(items:unknown[]):unknown[]{
+ const loadCalls=new Set<string>();
+ for(const item of items){
+  const call=item as {type?:unknown;name?:unknown;callId?:unknown}|null;
+  if(call&&call.type==='function_call'&&call.name==='load_skill'&&typeof call.callId==='string')loadCalls.add(call.callId);
+ }
+ return items.map(item=>{
+  const value=item as {type?:unknown;name?:unknown;callId?:unknown;output?:unknown}|null;
+  const loaded=value?.name==='load_skill'||typeof value?.callId==='string'&&loadCalls.has(value.callId);
+  if(!value||value.type!=='function_call_result'||!loaded)return item;
+  const output=value.output as {text?:unknown}|string|null;
+  const text=typeof output==='string'?output:output&&typeof output==='object'?output.text:undefined;
+  let name:unknown;
+  try{name=JSON.parse(String(text)).name;}catch{/* a marker without a name still stops the replay */}
+  const marker=JSON.stringify({...(typeof name==='string'?{name}:{}),loaded:'earlier in this conversation',
+   note:'Its instructions are not repeated. Call load_skill again if this Skill is still needed.'});
+  return {...value,output:typeof output==='string'?marker:{...(output as object),text:marker}};
+ });
+}
 export function projectSupersededScopeItem(item:unknown,currentMaterial:unknown):unknown{
  if(!item||typeof item!=='object'||(item as {role?:string}).role!=='user'||typeof (item as {content?:unknown}).content!=='string'
   ||!currentMaterial||typeof currentMaterial!=='object')return item;
@@ -93,7 +118,8 @@ export function projectSupersededScopeItem(item:unknown,currentMaterial:unknown)
  * remain intact. Final serialized transport capacity is checked separately. */
 export function selectRuntimeCallInput(items:unknown[],historyCount:number,options:{instructions:string;inputBytes:number;toolBytes:number;currentMaterial?:unknown;preserveHistoricalMaterial?:boolean;projectItemsForSizing?:(items:unknown[],historyCount:number)=>unknown[]}){
  if(!Number.isSafeInteger(historyCount)||historyCount<0||historyCount>items.length)throw new Error('RUNTIME_HISTORY_SELECTION');
- let history=items.slice(0,historyCount).map(item=>options.preserveHistoricalMaterial?item:projectSupersededScopeItem(item,options.currentMaterial));
+ const superseded=(item:unknown)=>options.preserveHistoricalMaterial?item:projectSupersededScopeItem(item,options.currentMaterial);
+ let history=projectLoadedSkillHistory(items.slice(0,historyCount).map(superseded));
  const required=items.slice(historyCount);
  const projected=options.projectItemsForSizing?.([...history,...required],history.length);
  let measured=projected?.slice(0,history.length);

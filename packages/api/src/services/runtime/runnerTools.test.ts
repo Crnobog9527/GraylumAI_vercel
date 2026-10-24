@@ -131,7 +131,7 @@ describe('question card tool definition and invalid cards',()=>{
     $schema:'http://json-schema.org/draft-07/schema#',type:'object',additionalProperties:false,required:['question','options','recommended'],properties:{
      question:{type:'string',minLength:1,maxLength:500},
      options:{type:'array',minItems:2,maxItems:5,items:{type:'string',minLength:1,maxLength:200}},
-     recommended:{anyOf:[{type:'number'},{type:'null'}]},
+     recommended:{type:['number','null']},
     }}}}]);
  });
 
@@ -172,7 +172,7 @@ it('freezes exact v5 provider request bytes including the exported strict tool s
   providerLimits:{providerSlug:'deepinfra/fp8',contextTokens:32000,
    promptUsdPerMillion:'0.1',completionUsdPerMillion:'0.1',requestUsd:'0'}};
  const wire=openRouterRequestBody(t.bodies[0]!,{context,policy,phase:'skill',primaryDialogue:true});
- expect(sha(wire)).toBe('fcf48b77f31231796042c784a576d054a3a4e66377cfc0b3d7fb9ac06ced21ab');
+ expect(sha(wire)).toBe('be228a021566fc69918a16c921a609e4658856a49906ef700cf01b9dadad49fb');
  const sent=JSON.parse(wire);
  expect(sent.tools).toHaveLength(1);expect(sent.tools[0].function.strict).toBe(true);
  expect(askQuestionToolBytes()).toBeGreaterThanOrEqual(Buffer.byteLength(JSON.stringify(sent.tools)));
