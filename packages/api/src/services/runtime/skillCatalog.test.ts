@@ -61,7 +61,7 @@ function clients(social:Record<string,boolean|undefined>={}){
   rpc:async(_name:string,args:{p_module_id:string;p_path:string|null;p_paths?:string[]})=>{
    const c=catalog.find(x=>x.module===args.p_module_id)!;
    if(!c.serviceAllowed)return {data:null,error:{message:'Skill unavailable'}};
-   // A batch read (p_paths, 0358) returns the listed files in the same checked call.
+   // A batch read (p_paths, 0361) returns the listed files in the same checked call.
    if(args.p_paths)return {data:{files:Object.fromEntries(args.p_paths.map(path=>[path,Buffer.from(fileOf(c,path)).toString('base64')]))},error:null};
    return {data:args.p_path===null?manifest(c):args.p_path===''?true:Buffer.from(fileOf(c,args.p_path)).toString('base64'),error:null};
   },

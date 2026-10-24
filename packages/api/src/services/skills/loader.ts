@@ -165,7 +165,7 @@ async function checkedTexts(source: SkillSource, p: PackageDescriptor, paths: re
   }
   return texts;
 }
-/** A batch source's reply: exactly the requested files, base64 encoded (read_skill_package with p_paths, 0358). */
+/** A batch source's reply: exactly the requested files, base64 encoded (read_skill_package with p_paths, 0361). */
 export function batchFiles(data: unknown, files: readonly { path: string }[]): Map<string, Uint8Array> {
   const read = (data as { files?: unknown } | null)?.files;
   if (!read || typeof read !== 'object' || Array.isArray(read)) fail('SOURCE_FAILURE');

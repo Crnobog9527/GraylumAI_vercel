@@ -18,7 +18,7 @@ const entry = (over: Partial<SkillCatalogEntry> = {}): SkillCatalogEntry => ({na
   moduleId: id(1), skillId: id(11), packageId: id(11), revisionId: id(21), packageHash: descriptor().packageHash, resultBytes: 500,
   ...over});
 
-/** The package reader: a batch (p_paths, 0358) returns the listed files; otherwise the manifest, the check or one file. */
+/** The package reader: a batch (p_paths, 0361) returns the listed files; otherwise the manifest, the check or one file. */
 function readPackage(args: Record<string, unknown>) {
   const base64 = (path: string) => Buffer.from(files[path as keyof typeof files]).toString('base64');
   if (Array.isArray(args.p_paths)) return {files: Object.fromEntries((args.p_paths as string[]).map(path => [path, base64(path)]))};
