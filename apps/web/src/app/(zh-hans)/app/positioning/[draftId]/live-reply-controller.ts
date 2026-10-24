@@ -142,6 +142,9 @@ export function liveReplyController(options: {
           onProgress: (execution, event) => live.apply(execution, event),
           onFinished: handlers.onFinished,
         }));
+        // The turn's own result reaches the observer too (readAgentTurn keeps it out of onProgress): a research signal of
+        // this turn, such as BENCHMARK-COVERAGE's auto-continue, depends on how the turn ended.
+        if (id) options.observe?.(id, { type: "result", result });
         handlers.onResult?.(result);
         return result;
       } finally {
