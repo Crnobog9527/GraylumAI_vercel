@@ -179,7 +179,11 @@ export async function processAccountErasure(input: Input): Promise<ErasureProces
       const storage = storageSchema.parse(await bounded(() => input.storageAdapter.cleanSubject(input.profileId), storageTimeout));
       storageVerified = storage.complete && storage.remaining === 0 && storage.manualReview === 0;
       report.remaining += storage.remaining; report.manualReview += storage.manualReview;
-      if (!storageVerified) { report.remaining = Math.max(1, report.remaining); error('ERASURE_STORAGE_PENDING'); }
+      if (!storageVerified) {
+        report.remaining = Math.max(1, report.remaining); error('ERASURE_STORAGE_PENDING');
+        // Which storage step stopped the pass (fixed code only), so a stuck erasure is diagnosable.
+        if (storage.errorCode) error(storage.errorCode);
+      }
     });
     const local = localSchema.parse(await rpc('account_erasure_local_cleanup', { ...actor, p_storage_verified: storageVerified }));
     report.remaining += local.remaining; report.manualReview += local.manualReview;

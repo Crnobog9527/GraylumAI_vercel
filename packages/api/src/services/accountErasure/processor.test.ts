@@ -105,6 +105,13 @@ describe('unwired account erasure processor', () => {
     expect(f.rpc).toHaveBeenCalledWith('account_erasure_local_cleanup', { p_profile_id: actor, p_storage_verified: false });
     expect(f.authAdapter.remove).not.toHaveBeenCalled();
   });
+  it('records which storage step stopped the pass, next to the pending code', async () => {
+    const f = setup(); f.storageAdapter.cleanSubject.mockResolvedValue({ complete: false, remaining: 1, manualReview: 0,
+      errorCode: 'ERASURE_HISTORY_UNKNOWN' });
+    const result = await processAccountErasure(f.input);
+    expect(result.errorCodes).toEqual(expect.arrayContaining(['ERASURE_STORAGE_PENDING', 'ERASURE_HISTORY_UNKNOWN']));
+    expect(f.authAdapter.remove).not.toHaveBeenCalled();
+  });
   it('unresolved upload or transaction barrier prevents Storage, while independent local cleanup continues', async () => {
     const f = setup({ account_erasure_storage_ready: () => ({ ready: false }) });
     const result = await processAccountErasure(f.input);
