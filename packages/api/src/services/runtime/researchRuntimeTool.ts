@@ -65,7 +65,7 @@ export function researchRuntimeTools(ctx: ResearchToolContext, names: readonly R
   const freeChat = options.freeChat;
   const make = (name: ResearchToolName): RuntimeTool => ({
     name, description: researchToolDescription(name, Boolean(freeChat)), parameters: researchToolParameters(name, fastSearchOnly(ctx.config)),
-    invalidResult: INVALID_RESEARCH_ARGUMENTS,
+    invalidResult: INVALID_RESEARCH_ARGUMENTS, invalidInputOnly: true,
     async execute(raw, callId) {
       // Replayed calls of a resumed answer run through here again, so this count is rebuilt in order.
       if (freeChat && ++calls > FREE_CHAT_RESEARCH_CALLS) return toolEnvelope({ status: 'budget_exhausted', reason: 'REPLY_CALL_LIMIT' });

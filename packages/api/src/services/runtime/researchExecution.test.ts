@@ -187,12 +187,24 @@ describe('one research call per mentor turn', () => {
         clearSession: async () => {} } as never, persistSession: false, selectHistory: async (history: unknown[], incoming: unknown[]) =>
         [...history, ...incoming],
       tools: [{ name: 'propose_keywords', description: 'd', parameters: researchToolParameters('propose_keywords'),
-        invalidResult: INVALID_RESEARCH_ARGUMENTS, execute }],
+        invalidResult: INVALID_RESEARCH_ARGUMENTS, invalidInputOnly: true, execute }],
       exchange: async (_sequence: number, request: string) => { requests.push(JSON.parse(request)); return responses.shift()!; },
     } as never);
     expect(output).toBe('done');
     expect(execute).not.toHaveBeenCalled();
     expect(JSON.stringify(requests[1]!.messages.at(-1))).toContain('INVALID_ARGUMENTS');
+    // A failed execution (here a credit pause) is not invalid input: it still stops the run for the executor to handle.
+    const valid = reply({ content: null, tool_calls: [{ id: 'c2', type: 'function', function: { name: 'propose_keywords',
+      arguments: JSON.stringify({ keywords: ['a', 'b', 'c'] }) } }] }, 'tool_calls');
+    await expect(runRuntime({ model: 'm', instructions: 'i', input: 'hi', maxOutputTokens: 100, maxTurns: 3,
+      session: { getSessionId: async () => 's', getItems: async () => [], addItems: async () => {}, popItem: async () => undefined,
+        clearSession: async () => {} } as never, persistSession: false, selectHistory: async (history: unknown[], incoming: unknown[]) =>
+        [...history, ...incoming],
+      tools: [{ name: 'propose_keywords', description: 'd', parameters: researchToolParameters('propose_keywords'),
+        invalidResult: INVALID_RESEARCH_ARGUMENTS, invalidInputOnly: true,
+        execute: async () => { throw new Error('RUNTIME_WAITING_CREDITS'); } }],
+      exchange: async () => valid,
+    } as never)).rejects.toThrow('RUNTIME_EXECUTION_PENDING');
   });
 });
 
