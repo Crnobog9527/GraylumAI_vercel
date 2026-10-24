@@ -53,7 +53,7 @@
 | 4 | 自由对话（资料库 + 模型自行加载 Skill） | ① 资料库 @ 引用和自动检索回答用到文档；② 说"写口播稿"会加载对应 Skill，同一轮最多 2 个，按当前对话模型计费、无匹配费；③ 定位、选题窗口、报告仍用后台绑定模型，"重做定位"不在自由对话里跑；④ 手动"技能"菜单可用 | 资料库：CHAT-AUTO-CONTEXT 验收记录；LOAD-SKILL：[#1285](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1285) 验收记录 | 资料库 10-20 PASS；#1285 已合并（0342 已上库），**还没有浏览器验收**；#1258 抽查结果未核实 | 内容对话窗口；Codex |
 | 5 | 付款和会员 | ① 银行卡订阅（月付、年付、创始年付、Gold 首月）结账开通；② 续费成功、续费失败宽限后取消、续费期退款规则；③ 微信、支付宝一次性会员和年付在沙盒付款成功和失败；④ 升级、改年付规则；⑤ 积分包只给会员；⑥ 付款前条款勾选 | PAY-STRIPE-MP、PAY-FOUNDER、PAY-NOTIFY 各 PR 验收；续费沙盒测试时钟记录；[#1302](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1302)、[#1304](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1304)、[#1307](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1307) | 续费成功、失败全链、续费外部退款在沙盒 PASS；创始 7 天宽限本机集成测试 PASS；钱包沙盒结果未核实；#1307 后台文案、#1304 回归抽查待页面复验；[#1299](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1299)（旧冒烟脚本）在途 | Codex；总控 |
 | 6 | 退款和拒付 | ① 用户申请 → 管理员报价 → 批准 → 执行，只退一次；② 积分已用的订单被拒、续费订单不退；③ 拒付冻结、停续费、判赢后手动撤回；④ 已退款续费单报价说明原因 | [#1104](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1104) 验收表、[#1152](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1152)、[#1155](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1155)、[#1253](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1253)、[#1307](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1307) | 退款主路径和拒付冻结此前 PASS；#1253 后台两栏、②、"上一期拒付 + 下一期续费并发"未核实 | Codex；上线当天真钱一笔见第 4 节 |
-| 7 | 注销 24 小时 | ① 真实注销一个现有测试账号，24 小时内正文和存储清完；② 删除定位对话不超时；③ 注销清理慢查询修好；④ 注销弹窗页面验收；⑤ 新表都接入注销审计 | 端到端结果表在 [#1292](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1292) 评论；[#1311](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1311)、[#1312](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1312) | ① PASS（约 3 小时清完）；②③⑤ 在途（0344、0349）；④ 浏览器提示词还没出 | DATA-ERASURE 窗口；Codex |
+| 7 | 注销 24 小时 | ① 真实注销一个现有测试账号，24 小时内正文和存储清完；② 删除定位对话不超时；③ 注销清理慢查询修好；④ 注销弹窗页面验收；⑤ 新表都接入注销审计；⑥ **资料库清理积压演练**：在 Pro 的 5 分钟频率下做大量并发删除、存储删除失败后重试、签名晚到对象，证明最坏情况也在 24 小时内清完，并定出积压告警阈值，结果记在 PR 上（[LIB_DOCS_PLAN](../LIB_DOCS_PLAN.md) 第 146–147 行；只看定时任务返回 200 不算） | 端到端结果表在 [#1292](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1292) 评论；[#1311](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1311)、[#1312](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1312) | ① PASS（约 3 小时清完）；②③⑤ 在途（0344、0349）；④ 浏览器提示词还没出；⑥ 还没做（#1158 写明不在该 PR 内） | DATA-ERASURE 窗口；Codex |
 | 8 | 注册登录 + 开户 500 积分 | ① 冻结版本上新邮箱从零注册（过 hCaptcha、邮件确认）→ 恰好 500 积分、一条流水；② 登录、找回密码邮件送达；③ Google 登录只发一次赠送 | 第 4 节冒烟记录；staging 回归记录 | 0230 已合并、此前单点验过；同邮箱重注册 Owner 说 10-12 已测，不再重测；①② 冻结版本上未跑 | Codex（人机验证由 Owner 点）；Owner |
 | 9 | 多模型对比 | ① 只给 Gold，非 Gold 看到"Gold 专属"；② 默认勾 Sonnet 5.5、Gemini 3.8 Flash、GPT-6.1 Sol，Opus 只在可选列表；③ 每次最多 3.5 美元；④ 新对话第一条消息就能对比；⑤ 出字后全部停止，已开始的列按部分计费、各列之和等于合计；⑥ 采用一列后对话继续；⑦（正式）正式库"正式模式准入"验证通过（第 4.1 节 K6） | [#1260](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1260)、[#1270](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1270)、[#1273](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1273)、[#1309](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1309) 验收；[#1310](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1310)（0348，上库前后各跑一次 PR 评论里的比对 SQL） | 首轮 13 步有 5 步失败，修后复验部分通过；⑤ 没覆盖；④ #1310 在途；⑦ 正式路径从没测过 | 对比窗口；总控；Codex |
 | 10 | 作品复盘 + 一键发布 | 一键发布：① 从选题定稿、成果夹成果、"我的账号"里添加的品牌账号都能走到发布（添加账号要先有已确认定位）；② 不真发的 7 步验收通过；③ X、YouTube 各真实发布并查回一次（每次 Owner 当次批准）；④ 名单内平台开放（见第 7 节 E1）。作品复盘：⑤ 导入表格、按档位显示 30/90 天、每周自动复盘、单次上限 0.30 美元；前提不具备时整体关（第 1.1 节例外） | [#1263](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1263)、[#1261](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1261)、[#1267](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1267) 验收；[#1300](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1300)（0347）、[#1295](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1295) | 复盘关闭态和后台页 PASS；一键发布已合并但全库品牌账号 0 条、入口可能走不到，等 #1300、#1295；② 未跑；Post for Me 多平台计数回复未核实 | 一键发布窗口；Codex；Owner |
@@ -98,7 +98,7 @@
 | --- | --- | --- |
 | 正式 Supabase 项目 `Graylum_main` | 已新建（Owner 2026-10-17 选新建）；区域 us-west-1（旧版建议 us-west-2，已建不能改，和 Vercel sfo1、Upstash sfo1 同在美西）；10-22 已升级 Pro、换 Micro | 总控记录 |
 | Vercel | 已是 Pro；正式项目 `graylum-ai-vercel-v1` 暂停中、函数区域 sfo1 | 总控记录 |
-| 定时任务频率（旧 A2） | `apps/web/vercel.json` 已是 Pro 频率：`runtime-recovery` 每分钟（也负责发止损告警）、`account-erasure` 和 `library-cleanup` 每 5 分钟、`social-monitor` 每 10 分钟（作品复盘开关关着时空转） | [#1158](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1158) |
+| 定时任务频率（旧 A2） | `apps/web/vercel.json` 已是 Pro 频率：`runtime-recovery` 每分钟（也负责发止损告警）、`account-erasure` 和 `library-cleanup` 每 5 分钟、`social-monitor` 每 10 分钟（作品复盘开关关着时空转）。**只是频率改好了**，资料库清理积压演练不在 #1158 里，仍是开放门槛（第 1.2 节第 7 项⑥） | [#1158](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1158) |
 | 正式 Upstash Redis | 已建，`UPSTASH_REDIS_REST_URL` / `_TOKEN` 已加到 Production | 总控记录 |
 | Resend | `graylum.com` 发信域名已验证 | 总控记录 |
 | Stripe 正式 | 已开通 Managed Payments；续费、卡到期、扣款失败提醒由 Stripe 发（我方不再发卡类续费提醒） | 总控记录；Master Plan 第 2.1 节 2026-10-19 |
@@ -195,7 +195,7 @@
 
 | # | 谁 | 做什么 | 怎么确认 |
 | --- | --- | --- | --- |
-| O-1 | 总控 | 开放前核对表：第 1.2 节标"（正式）"的部分已通过；备份恢复演练（[DATA_ERASURE_BACKUP_RESTORE_REPLAY](../../runbooks/DATA_ERASURE_BACKUP_RESTORE_REPLAY.md)）已通过，或有 Owner 明确批准延期的原话；成本、扣款、平台承担、冻结释放、重复请求没有新派发；告警和停止开关可用；正式库里没有测试数据 | 每项 PASS / FAIL；任何一项不过不开放 |
+| O-1 | 总控 | 开放前核对表：第 1.2 节标"（正式）"的部分已通过；资料库清理积压演练（第 1.2 节第 7 项⑥）有 PASS 记录；备份恢复演练（[DATA_ERASURE_BACKUP_RESTORE_REPLAY](../../runbooks/DATA_ERASURE_BACKUP_RESTORE_REPLAY.md)）已通过，或有 Owner 明确批准延期的原话；成本、扣款、平台承担、冻结释放、重复请求没有新派发；告警和停止开关可用；正式库里没有测试数据 | 每项 PASS / FAIL；任何一项不过不开放 |
 | O-2 | ★ Owner 批准 → 总控 | 设 `SITE_INDEXING=public` **并重新部署**（构建时读，不重新部署不生效） | `/robots.txt` 放行搜索爬虫、拒绝训练爬虫；首页响应头没有 `X-Robots-Tag: noindex`；登录后页面仍有 noindex |
 | O-3 | ★ Owner 操作 | 撤掉部署访问保护；作废 S-3 的绕过口令并从回调地址上去掉 | 公众能打开首页；Stripe 回调仍成功 |
 | O-4 | ★ Owner 批准 → 总控 | 关掉 `stopNewCalls`，其他限流保持初始值 | 一个公开测试身份完成一次对话 |
@@ -321,7 +321,7 @@
 | R1 正式模型调用、R7 付款入口代码闸门 | **已完成**（0291、#1093、0296–0298）→ 第 3.0 节 |
 | R2–R4 | 保留 → B2、B3、B4（B4 补了文风、对比、研究工具的档案要求） |
 | R6"评审团、研究工具首版正式环境不可用，研究工具补不上按缺口清单处理" | **已取代**：研究工具是核心项，不能关开关上线；对比的正式路径要在建库后先验证 → 第 1.2 节第 9、11 项 |
-| A1 Vercel Pro、A2 定时任务、A2a、A5 Upstash | **已完成** → 第 3.0 节 |
+| A1 Vercel Pro、A2 定时任务频率、A2a、A5 Upstash | **已完成** → 第 3.0 节；A2 的 24 小时积压演练**没做、保留为门槛** → 第 1.2 节第 7 项⑥ |
 | A3 取消暂停、A6 限流、A9 Sentry | 保留 → S-1、B6、第 3.0 节 |
 | A4 `main` 依赖漏洞 | 保留 → M1 |
 | A8 备份恢复演练"公开开放的前提" | 保留为开放门槛 → 第 3.7 节、O-1；只有 Owner 明确批准才可延期 → 第 7 节 E2 |
