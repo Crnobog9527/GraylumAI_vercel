@@ -7,6 +7,20 @@ import {askQuestionTool} from '../../packages/api/src/services/runtime/agentTool
 import {freezePromptCache} from '../../packages/api/src/services/runtime/promptCache';
 
 type Route=z.infer<typeof priceSchema>['routes'][number];
+/**
+ * The r8/r9 batches were approved and executed with zod < 4.6, which wrote a nullable as
+ * `anyOf:[{type:X},{type:'null'}]`; zod 4.6 writes `type:[X,'null']`. These historical requests (their hashes
+ * identify the attempt locks and receipts) must keep their original bytes, so the old form is written back here.
+ */
+export function legacyNullableAnyOf(schema:unknown):unknown {
+  if(Array.isArray(schema))return schema.map(legacyNullableAnyOf);
+  if(!schema||typeof schema!=='object')return schema;
+  const entries=Object.entries(schema as Record<string,unknown>);
+  const type=(schema as {type?:unknown}).type;
+  if(Array.isArray(type)&&type.length===2&&type[1]==='null'&&typeof type[0]==='string'&&entries.length===1)
+    return {anyOf:[{type:type[0]},{type:'null'}]};
+  return Object.fromEntries(entries.map(([k,v])=>[k,legacyNullableAnyOf(v)]));
+}
 export const r8Scopes=[
   {name:'mentor',phase:'skill',format:'agent-turn-v5-stream'},
   {name:'step',phase:'skill',format:'serial-tools-v4-stream'},
@@ -30,7 +44,7 @@ export function r8Request(route:Route,B:number,O:number,scope:Scope|undefined,va
     cacheWriteUsdPerMillion:route.write,instructions,skillChars:instructions.length});
   const mentor=askQuestionTool(true);
   const tools=scope?.name==='mentor'?[{type:'function',function:{name:mentor.name,description:mentor.description,
-    parameters:z.toJSONSchema(mentor.parameters!),strict:true}}]:[];
+    parameters:legacyNullableAnyOf(z.toJSONSchema(mentor.parameters!)),strict:true}}]:[];
   // Report probes exercise the intended primary report wire. The known execute.ts
   // phase/role mismatch is separately documented and is NOT proven fixed by this probe.
   const serialize=(data:string)=>openRouterRequestBody(JSON.stringify({model:route.model,

@@ -20,6 +20,9 @@ const REASONS: Record<string, Reason> = {
   PAY_REFUND_CREDITS_CONSUMED: RULE('从这次付款起，这个账户用过积分'),
   PAY_REFUND_NOT_FIRST_PURCHASE: RULE('不是第一次购买会员'),
   PAY_REFUND_RENEWAL: RULE('这是续费，续费不退款'),
+  PAY_REFUND_ALREADY_REFUNDED: CHECK('该订单已全额退款，不可再退'),
+  // Existing rule: a payment with a prior refund is not refunded again by the ordinary path.
+  PAY_REFUND_PARTIALLY_REFUNDED: CHECK('该订单已有部分退款（已退金额见订单记录），剩余部分不能按普通退款再退，需要人工核对'),
   PAY_REFUND_PRIOR_REFUND_OR_DISPUTE: RULE('这笔付款已经有退款或争议（拒付）记录，不能再退'),
   // monthlyRefundApproval: also channel, mode, refund reason or account state, not only the product.
   PAY_REFUND_MONTHLY_SCOPE_REQUIRED: CHECK('这笔订单可能不是 Pro 或 Gold 月付首购，或者渠道、模式、账户状态不符合'),

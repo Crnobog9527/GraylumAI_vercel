@@ -81,6 +81,6 @@
     "@upstash/redis": "^1.39.0",
     "drizzle-orm": "^0.45.4",
     "postgres": "^3.4.9",
-    "zod": "^4.3.6"
+    "zod": "^4.6.6"
   }
 }

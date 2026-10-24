@@ -7,6 +7,7 @@ const aliases: Record<string, string> = {
   account_consumed_since_payment: 'PAY_REFUND_CREDITS_CONSUMED',
   not_first_membership_purchase: 'PAY_REFUND_NOT_FIRST_PURCHASE',
   renewal: 'PAY_REFUND_RENEWAL',
+  already_refunded: 'PAY_REFUND_ALREADY_REFUNDED',
   consumption_unresolved: 'PAY_REFUND_CONSUMPTION_UNRESOLVED',
   membership_history_unresolved: 'PAY_REFUND_MEMBERSHIP_HISTORY_UNRESOLVED',
   purchase_kind_unresolved: 'PAY_REFUND_PURCHASE_KIND_UNRESOLVED',
@@ -36,7 +37,7 @@ const publicCodes = new Set([
   'PAY_REFUND_PRIOR_REFUND_OR_DISPUTE', 'PAY_REFUND_PAYMENT_TIME_UNRESOLVED', 'PAY_REFUND_PAYMENT_ORDER_UNRESOLVED',
   'PAY_REFUND_GRANTS_UNRESOLVED', 'PAY_REFUND_FEE_EVIDENCE_REQUIRED', 'PAY_REFUND_STALE_APPROVAL',
   'PAY_REFUND_EVIDENCE_CHANGED', 'PAY_MONTHLY_PROVIDER_EVIDENCE',
-  'PAY_REFUND_UPGRADE_EVIDENCE', 'PAY_REFUND_PRIOR_PRO_UNRESOLVED',
+  'PAY_REFUND_UPGRADE_EVIDENCE', 'PAY_REFUND_PRIOR_PRO_UNRESOLVED', 'PAY_REFUND_PARTIALLY_REFUNDED',
 ]);
 export function monthlyRefundPolicyReason(reason: string) {
   return Object.hasOwn(aliases, reason) ? aliases[reason] : 'PAY_REFUND_QUOTE_UNAVAILABLE';
