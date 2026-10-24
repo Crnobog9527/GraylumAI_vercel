@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { previewSubscriptionRefund } from './subscriptionRefundPreview';
+import { previewSubscriptionRefund, readSubscriptionRefundFacts } from './subscriptionRefundPreview';
 import { actorId, subjectId, request, paidAt, fixture, type Row } from './__tests__/subscriptionRefundPreviewFixture';
 
 beforeEach(() => vi.useFakeTimers({ now: new Date('2026-10-10T00:00:00Z') }));
@@ -191,4 +191,51 @@ describe('subscription refund read-only preview', () => {
       amount: -1, ledger_type: null, type: 'deduction', source_type: null, idempotency_key: null, counts_as_spend: null } as Row);
     await unresolved(f);
   });
+  describe('renewal invoice Stripe gave up on (Owner 2026-10-24 A)', () => {
+    const dead = (patch: Row = {}) => ({ id: 'in_dead', object: 'invoice', livemode: false, status: 'open', amount_paid: 0,
+      amount_due: 6900, currency: 'usd', next_payment_attempt: null, billing_reason: 'subscription_cycle',
+      parent: { subscription_details: { subscription: 'sub_fixture' } }, status_transitions: { paid_at: null }, ...patch });
+    const withDead = (patch: Row = {}, status = 'canceled', latest?: Row) => {
+      const f = fixture();
+      f.invoices.push(dead(patch) as unknown as (typeof f.invoices)[number]);
+      Object.assign(f.stripe.subscriptions, { retrieve: vi.fn(async (id: string) => ({ id, livemode: false, status })) });
+      Object.assign(f.stripe.invoices, { retrieve: vi.fn(async () => latest ?? dead(patch)) });
+      return f;
+    };
+    it('no longer turns an otherwise complete history into manual review', async () => {
+      const f = withDead();
+      expect(await run(f)).toMatchObject({ status: 'eligible', treatment: 'first_purchase', executable: false });
+      expect(f.write).not.toHaveBeenCalled();
+    });
+    it.each([
+      ['Stripe will still retry', { next_payment_attempt: 1798199939 }, 'canceled'],
+      ['something was paid', { amount_paid: 100 }, 'canceled'],
+      ['the subscription is not canceled', {}, 'past_due'],
+    ])('still requires review when %s', async (_name, patch, status) => {
+      await unresolved(withDead(patch, status));
+    });
+    it('is not skipped when the buyer pays it between the list and the check', async () => {
+      await unresolved(withDead({}, 'canceled', dead({ status: 'paid', amount_paid: 6900 })));
+    });
+    it('takes the invoice back into the history once the buyer pays it', async () => {
+      await unresolved(withDead({ status: 'paid', amount_paid: 6900,
+        status_transitions: { paid_at: Date.parse('2026-10-09T00:00:00Z') / 1000 } }));
+    });
+  });
+  describe('refunded orders say why they cannot be quoted', () => {
+    it.each([
+      ['an external full refund', { status: 'refunded', payment_status: 'refunded' }, 'PAY_REFUND_ALREADY_REFUNDED'],
+      ['our refund that succeeded', { refund_approval: { status: 'succeeded' } }, 'PAY_REFUND_ALREADY_REFUNDED'],
+      ['a partial refund', { status: 'partially_refunded' }, 'PAY_REFUND_PARTIALLY_REFUNDED'],
+    ])('%s', async (_name, patch, code) => {
+      const f = fixture(); Object.assign(f.order, patch);
+      await expect(readSubscriptionRefundFacts(f.db, f.provider, actorId, request)).rejects.toThrow(code);
+      expect(f.write).not.toHaveBeenCalled();
+    });
+    it('keeps the generic refusal for an order that is unavailable for other reasons', async () => {
+      const f = fixture(); f.order.payment_status = 'unpaid';
+      await expect(readSubscriptionRefundFacts(f.db, f.provider, actorId, request)).rejects.toThrow('PAY_REFUND_ORDER_UNAVAILABLE');
+    });
+  });
 });
+
