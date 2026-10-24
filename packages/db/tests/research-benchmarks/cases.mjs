@@ -9,6 +9,7 @@ import {seed} from '../report-finalization/cases.mjs';
 import {benchmarkCode} from '../payg/research-runtime-host-cache.mjs';
 import {shortfallCases} from './shortfall-cases.mjs';
 import {keywordCardCases} from './keyword-cards-cases.mjs';
+import {smallNicheCases} from './small-niche-cases.mjs';
 
 const DAY = 86400000;
 const growth = {maxFirstPostAgeDays:3,minViewsToFollowers:'1.5'};
@@ -473,5 +474,6 @@ export async function runCases({db,Client,connectionString,report}) {
   });
   await shortfallCases({db,check,rpc,seed,answer,erase,fetchAccount,imitable,gate});
   await keywordCardCases({db,check,rpc,seed,answer});
+  await smallNicheCases({db,check,rpc,seed,answer,fetchAccount,imitable,gate});
   assert.deepEqual(failures,[],failures.join('\n'));
 }

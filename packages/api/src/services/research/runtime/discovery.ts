@@ -50,21 +50,19 @@ function authorLookup(ctx: ResearchToolContext, platform: SocialPlatform, accoun
   return postId ? socialRequest(ctx, platform, 'post_detail', { account, postId }) : null;
 }
 
-/** A round searched to the end with fewer selectable accounts than a candidate card needs: no card (plan §1.2 step 5). */
-export function candidateShortage(available: number) {
-  const required = BENCHMARK_RULES.candidatesMin;
+/** A round searched to the end without one selectable account (with any, the card is shown: Owner 2026-10-23). */
+export function candidateShortage() {
   return {
-    message: `这一轮已经搜完：找到 ${available} 个可选、需要 ${required} 个才能出候选卡。`,
+    message: '这一轮已经搜完，没有找到可选的对标账号。',
     nextStep: '告诉用户两条出路：换一组关键词再搜一轮，或直接发来想对标的账号主页链接（按链接取数核对，'
-      + '核对合格的账号同样算对标）。搜过两轮仍不够时，主要建议发链接，不要只让用户再搜。',
-    availableCandidates: available,
-    requiredCandidates: required,
+      + '核对合格的账号同样算对标）。搜过两轮仍找不到时，主要建议发链接，不要只让用户再搜。',
+    availableCandidates: 0,
   };
 }
 
 /** A round stopped before its end (this reply's lookups ran out): it is not a round yet and continues on the next reply. */
-export const ROUND_UNFINISHED_NEXT_STEP = '这一轮搜索还没搜完，不算一轮。告诉用户回复"继续"即可接着搜完这一轮；'
-  + '已经取过的数据不会重复取、不重复收费。不要说已经搜完，也不要建议换关键词。';
+export const ROUND_UNFINISHED_NEXT_STEP = '这一轮搜索还没搜完，不算一轮。用一句话告诉用户正在扩大搜索、会自动接着搜'
+  + '（没有自动继续时回复"继续"即可）；已经取过的数据不会重复取、不重复收费。不要说已经搜完，也不要建议换关键词。';
 
 /** Authors whose profiles one scan batch reads; the first batch is read whole so the card can show up to 12. */
 const AUTHOR_BATCH = 15;
@@ -119,7 +117,9 @@ async function card(ctx: ResearchToolContext, discoveryId: string, accounts: Fou
   const keys = new Set(chosen.map(a => `${a.platform}:${a.account}`));
   const remaining = accounts.filter(a => !keys.has(a.key));
   const selection = selectCandidates(remaining, true);
-  if ((!followUp && !selection.enough) || selection.selectable.length === 0) return 0;
+  // The first card comes only from a round searched to the end (the caller), so fewer than candidatesMin means the keywords
+  // found no more: show what there is (Owner 2026-10-23; the database checks the round is completed, 0343).
+  if (selection.selectable.length === 0) return 0;
   const selectable = new Set(selection.selectable.map(a => a.key));
   const references = !followUp ? selection.headReferences.slice(0, 3) : [];
   const ordered = [...selection.selectable.slice(0, 12 - references.length), ...references] as FoundAccount[];
@@ -237,27 +237,29 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
     }
   }
   // BENCHMARK-COVERAGE: still short of a card after every first-page author, search deeper before calling it a shortfall.
-  // Deeper layers stop at a full card (candidatesMax, plan §3 item 1); a card still shows from candidatesMin.
+  // Deeper layers stop at a full card (candidatesMax, plan §3 item 1); once the round is searched to the end, a card shows
+  // whatever is selectable, even below candidatesMin (Owner 2026-10-23).
   const full = () => selectCandidates(found, true).selectable.length >= BENCHMARK_RULES.candidatesMax;
   if (!stopped && !full()) {
-    await deepen({ ctx, d, posts, firstPages, coverage, pay, screen, enough: full, isStopped: () => stopped });
+    await deepen({ ctx, d, posts, firstPages, coverage, pay, screen, enough: full, cardable: enough, isStopped: () => stopped });
   }
   // Reconstruct from stable operations each time; the saved candidates support free follow-up cards.
   await ctx.store.discoverySave(d.discoveryId, { accounts: found, attempted: index, authorCursor, authorLimit }, stopped ? 'running' : 'completed');
   const onCard = stopped ? 0 : await card(ctx, d.discoveryId, found, false, '');
   const shown = onCard > 0;
-  const available = selectCandidates(found, true).selectable.length;
   const insufficient = !stopped && !shown;
   const resumable = stopReason === 'ROUND_LIMIT';
   const blockedWithoutData = stopped && !resumable && found.length === 0;
   // A round saved as completed (the same state 0320 counts as a round, partial supplier failures included) without a
   // candidate card: the host may now offer the shortfall choice (0320 decides).
   const shortfall = !stopped && !shown ? await shortfallNotice(ctx) : undefined;
+  // The round goes on in the next reply: tell the page (it continues on the user's behalf, plan §4.2 / PR-7).
+  if (stopped && resumable) ctx.emit({ type: 'research_continue', discoveryId: d.discoveryId });
   return toolEnvelope({ ...(shortfall ? { shortfall } : {}), status: blockedWithoutData ? (stopBudget ? 'budget_exhausted' : 'unavailable')
     : complete && shown ? 'ok' : 'partial',
     reason: stopped ? stopReason : shown ? (complete ? null : 'DISCOVERY_PARTIAL')
       : complete ? 'NOT_ENOUGH_CANDIDATES' : 'DISCOVERY_PARTIAL',
-    ...(insufficient ? candidateShortage(available) : {}),
+    ...(insufficient ? candidateShortage() : {}),
     // The host shows the card, not the model's text: say so, or the model may deny a card the user can see.
     ...(shown ? { candidateCard: { shown: true, selectable: onCard }, nextStep: CARD_SHOWN_NEXT_STEP }
       : { candidateCard: { shown: false } }),
@@ -276,7 +278,7 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
 export async function moreCandidates(ctx: ResearchToolContext, discoveryId: string, callId: string) {
   const d = await ctx.store.discoveryRead(discoveryId);
   if (!d) return toolEnvelope({ status: 'not_confirmed', reason: 'DISCOVERY_NOT_FOUND' });
-  // A follow-up only replaces accounts picked from a confirmed card; it never stands in for the 8-candidate first card.
+  // A follow-up only replaces accounts picked from a confirmed card; it never stands in for a round's first card.
   if ((await ctx.store.selectedAccounts(discoveryId)).length === 0) {
     return toolEnvelope({ status: 'not_confirmed', reason: 'NO_CONFIRMED_SELECTION', discoveryId });
   }

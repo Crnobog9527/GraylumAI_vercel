@@ -58,6 +58,11 @@ export function executorRpc(options:{database:SessionRpc;actor:()=>Promise<strin
      'RUNTIME_SKILL_FILE_TOO_LARGE','RUNTIME_SKILL_FILE_CONFLICT','RUNTIME_TOOL_DENIED','RUNTIME_TOOL_CLOSED',
      'RUNTIME_TOOL_LIMIT','RUNTIME_TOOL_CONFLICT','RUNTIME_TOOL_RESULT_CONFLICT'].includes(message))
     throw new Error('RUNTIME_SKILL_FILE_REFUSED');
+   // CONTENT-CONVERSATION-DRIVEN: a permanent load_skill refusal (a third load, a name or package that no longer matches) is
+   // answered to the model; anything else, including a closed run, stays retryable.
+   if(name==='runtime_tool'&&args.p_name==='load_skill'&&typeof message==='string'&&['RUNTIME_TOOL_DENIED',
+    'RUNTIME_TOOL_LIMIT','RUNTIME_TOOL_CONFLICT','RUNTIME_TOOL_RESULT_CONFLICT','RUNTIME_SKILL_LOAD_CONFLICT'].includes(message))
+    throw new Error('RUNTIME_SKILL_LOAD_REFUSED');
    // R4: a permanent history-read refusal ends the turn; any other failure stays retryable.
    if((name==='runtime_tool'&&args.p_name===READ_HISTORY_TOOL||name==='runtime_mentor_history')&&
     typeof message==='string'&&['RUNTIME_MENTOR_HISTORY_DENIED','RUNTIME_MENTOR_HISTORY_REVOKED',

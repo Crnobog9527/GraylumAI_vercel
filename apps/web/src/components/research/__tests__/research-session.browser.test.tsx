@@ -44,13 +44,15 @@ beforeAll(async () => {
             const research=useResearchCalls(${JSON.stringify(SESSION)});
             const [settled,setSettled]=React.useState(0);
             const [busy,setBusy]=React.useState(false);
+            const [shown,setShown]=React.useState(true);
             window.setBusy=setBusy;
+            window.setShown=setShown;
             window.emit=event=>research.observe('exec-1',event);
             window.settle=()=>setSettled(value=>value+1);
             return e('main',{style:{maxWidth:760,margin:'0 auto',padding:16,display:'grid',gap:16}},
               e(ResearchCallList,{calls:research.of('exec-1')}),
-              e(ResearchSessionPanel,{sessionId:${JSON.stringify(SESSION)},disabled:busy,settledTurns:settled,
-                onSend:(text,refreshId)=>{window.sent.push(refreshId?[text,refreshId]:text);}}));
+              shown&&e(ResearchSessionPanel,{sessionId:${JSON.stringify(SESSION)},disabled:busy,settledTurns:settled,
+                ...research.panel,onSend:(text,refreshId)=>{window.sent.push(refreshId?[text,refreshId]:text);}}));
           }
           createRoot(document.getElementById('root')).render(e(trpc.Provider,{client:c,queryClient},
             e(QueryClientProvider,{client:queryClient},e(Conversation))));`;
@@ -257,3 +259,42 @@ for (const width of [375, 1440]) {
     }
   }, 30000);
 }
+
+it("continues an unfinished discovery once for the user, not after a stop, and never again after the panel remounts", async () => {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  try {
+    await page.route("**/*", async route => {
+      const url = new URL(route.request().url());
+      if (url.pathname === "/") return route.fulfill({ contentType: "text/html", body: '<div id="root"></div>' });
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ result: { data: { items: [] } } }) });
+    });
+    await page.goto("http://research.test/");
+    await page.addScriptTag({ content: code });
+    await page.waitForFunction(() => typeof (window as unknown as { emit?: unknown }).emit === "function");
+    const sent = () => page.evaluate(() => (window as unknown as { sent: unknown[] }).sent);
+    const emit = (event: unknown) => page.evaluate(value => (window as unknown as { emit: (e: unknown) => void }).emit(value), event);
+    // A turn whose lookups ran out, then its normal end: sent once for the user.
+    await page.evaluate(() => (window as unknown as { setBusy: (b: boolean) => void }).setBusy(true));
+    await emit({ type: "research_continue", discoveryId: "d1" });
+    await emit({ type: "result", result: { state: "completed", completeness: "complete" } });
+    expect(await sent()).toEqual([]);
+    await page.evaluate(() => (window as unknown as { setBusy: (b: boolean) => void }).setBusy(false));
+    await page.waitForFunction(() => (window as unknown as { sent: unknown[] }).sent.length === 1);
+    expect(await sent()).toEqual(["继续搜索对标账号"]);
+    // Switching steps remounts the panel: the consumed signal is never sent again.
+    await page.evaluate(() => (window as unknown as { setShown: (b: boolean) => void }).setShown(false));
+    await page.evaluate(() => (window as unknown as { setShown: (b: boolean) => void }).setShown(true));
+    await page.waitForTimeout(300);
+    expect(await sent()).toEqual(["继续搜索对标账号"]);
+    // A turn the user stopped never continues on its own.
+    await emit({ type: "research_continue", discoveryId: "d1" });
+    await emit({ type: "result", result: { state: "completed", stopped: true, completeness: "stopped" } });
+    await page.waitForTimeout(300);
+    expect(await sent()).toEqual(["继续搜索对标账号"]);
+    expect(errors).toEqual([]);
+  } finally {
+    await page.close();
+  }
+}, 60000);
