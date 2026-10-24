@@ -4,6 +4,7 @@ import type { AgentTurnEvent, AgentTurnOutcome } from "@repo/api/src/shared/agen
 import type { LiveReply } from "./agent-turn-display";
 import { liveReplyController } from "./live-reply-controller";
 import { STREAM_INTERRUPTED } from "./mentor-turn";
+import { autoContinueDecision, continuationAfterResult } from "@/components/research/research-session-model";
 
 const draftId = "11111111-1111-4111-8111-111111111111";
 const executionId = "33333333-3333-4333-8333-333333333333";
@@ -61,5 +62,21 @@ describe("a long mentor turn in the live reply", () => {
     const { live, shown, tick } = setup();
     await expect(live.stream(async () => turn([{ type: "admitted", executionId }], tick, 90_000), {})).rejects.toThrow(STREAM_INTERRUPTED);
     expect(shown.at(-1)).toMatchObject({ executionId, phase: "waiting" });
+  });
+
+  it("hands the turn's own result to the observer after its research events, so auto-continue can arm", async () => {
+    const seen: AgentTurnEvent[] = [];
+    const storage = memoryStorage();
+    let clock = 0;
+    const live = liveReplyController({ draftId, storage: () => storage, show: () => undefined, now: () => clock,
+      observe: (_id, event) => void seen.push(event) });
+    const signal = { type: "research_continue", discoveryId: "d1" } as unknown as AgentTurnEvent;
+    await live.stream(async () => turn([{ type: "admitted", executionId }, signal, delta("还在扩大搜索。", 0),
+      { type: "result", result: completed }], ms => { clock += ms; }, 1000), {});
+    expect(seen.map(event => event.type)).toEqual(["research_continue", "textDelta", "result"]);
+    const result = (seen.at(-1) as Extract<AgentTurnEvent, { type: "result" }>).result;
+    const continuation = { executionId, discoveryId: "d1" };
+    expect(continuationAfterResult(continuation, executionId, result)).toEqual({ keep: true });
+    expect(autoContinueDecision(continuation, new Set(), new Map(), false)).toBe("send");
   });
 });
