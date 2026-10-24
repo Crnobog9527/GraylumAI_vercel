@@ -187,6 +187,81 @@ it.each(['normal', 'concurrent', 'new-epoch', 'live-window', 'unknown-cost', 'ca
   } finally { await f.close(); }
 }, 60000);
 
+// 0397 (placeholder number): a request that dies without marking its execution interrupted (a killed function, or a database fault in its own
+// error path) leaves it running. Once its dispatch lease is over 60 s past, interrupted recovery closes it too.
+it.each(['charged', 'uncharged', 'live-lease', 'unknown-cost'] as const)
+('RUNTIME: a running execution whose owner died is recovered once its lease is gone (%s)', async mode => {
+  const f = await fixture();
+  try {
+    // The process dies right after the claim of this call commits: every later database request fails.
+    const deadAfter = mode === 'uncharged' ? 1 : 2;
+    let dead = false;
+    const database = { rpc: async (name: string, args: Record<string, unknown>) => {
+      if (dead) return { data: null, error: { code: '57014' } };
+      const result = await f.admin.rpc(name, args);
+      if (name === 'bill2_claim' && args.p_sequence === deadAfter) dead = true;
+      return result;
+    } };
+    await runtimeExecutor({ ...f.options, database }).execute(f.admitted.executionId).catch(() => undefined);
+    const charged = mode === 'uncharged' ? 0 : 3;
+    // The unsent claim still holds credits on its call row; the balance already excludes them.
+    const stuck = await f.snapshot();
+    expect(stuck).toMatchObject({ execution_state: 'running', active_execution: f.admitted.executionId,
+      closed: false, calls: deadAfter });
+    expect(stuck.charged ?? 0).toBe(charged);
+    const held = async () => (await f.db.query(`select coalesce(sum(reserved_credits),0)::int n from bill2_calls
+      where run_id=$1 and state='prepared'`, [f.admitted.runId])).rows[0].n;
+    const holding = await held();
+    expect(holding).toBeGreaterThan(0);
+    expect(stuck.credits).toBe(100 - charged - holding);
+    // Age only this disposable fixture.
+    const lease = mode === 'live-lease' ? '30 seconds' : '10 minutes';
+    await f.db.query("update runtime_executions set created_at=now()-interval '20 minutes' where id=$1", [f.admitted.executionId]);
+    await f.db.query(`update bill2_calls set created_at=now()-interval '20 minutes',dispatch_deadline=now()-$2::interval,
+      dispatched_at=case when dispatched_at is null then null else now()-interval '20 minutes' end where run_id=$1`,
+    [f.admitted.runId, lease]);
+    await f.db.query('update bill2_runs set runtime_dispatch_deadline=now()-$2::interval where id=$1', [f.admitted.runId, lease]);
+    if (mode === 'unknown-cost') await f.db.query(
+      "update bill2_calls set state='unknown',settled_at=null,selected_cost_usd=null where run_id=$1 and sequence=1", [f.admitted.runId]);
+    const recover = () => recoverInterruptedExecutions({ database: f.admin, actorId: f.actor, budget: erasureFinancialBudget(55_000) });
+    const result = await recover();
+    if (mode === 'live-lease' || mode === 'unknown-cost') {
+      expect(result).toMatchObject({ selected: 0, failed: 0 });
+      expect(await f.snapshot()).toMatchObject({ execution_state: 'running', active_execution: f.admitted.executionId, closed: false });
+      return;
+    }
+    expect(result).toMatchObject({ selected: 1, processed: 1, failed: 0 });
+    const calls = (await f.db.query('select sequence,state from bill2_calls where run_id=$1 order by sequence',
+      [f.admitted.runId])).rows;
+    if (mode === 'uncharged') {
+      // Nothing was charged: cancelled now, the session is free and the unsent claim's hold is released.
+      expect(await f.snapshot()).toMatchObject({ execution_state: 'cancelled', active_execution: null, closed: true,
+        credits: 100, ledger: 100, reserved: 0, spends: 0 });
+      expect(calls).toEqual([{ sequence: 1, state: 'cancelled' }]);
+      expect(await held()).toBe(0);
+    } else {
+      // Charged: the session is freed and the owner fenced; the round stays open for the 24-hour refund.
+      expect(await f.snapshot()).toMatchObject({ execution_state: 'interrupted', active_execution: null, closed: false,
+        credits: 97, ledger: 97, reserved: 0, spends: 1 });
+      expect(calls).toEqual([{ sequence: 1, state: 'responded' }, { sequence: 2, state: 'cancelled' }]);
+      expect(await held()).toBe(0);
+      expect((await f.db.query('select failure_code from runtime_executions where id=$1', [f.admitted.executionId])).rows[0])
+        .toEqual({ failure_code: 'RUNTIME_INTERRUPTED_RELEASED' });
+      const obsolete = await f.admin.rpc('runtime_execution', { p_actor_id: f.actor,
+        p_execution_id: f.admitted.executionId, p_action: 'complete', p_result: { epoch: 1, value: null } });
+      expect(obsolete.error?.message).toContain('RUNTIME_RESUME_CONFLICT');
+      await f.db.query("update runtime_executions set created_at=now()-interval '25 hours' where id=$1", [f.admitted.executionId]);
+      await f.db.query(`update bill2_calls set created_at=now()-interval '25 hours',dispatched_at=case when dispatched_at is null
+        then null else now()-interval '25 hours' end,settled_at=now()-interval '25 hours' where run_id=$1`, [f.admitted.runId]);
+      expect(await compensateStaleRound(f.admin, f.admitted.runId)).toMatchObject({ state: 'compensated', compensatedCredits: 3 });
+      expect(await f.snapshot()).toMatchObject({ closed: true, execution_state: 'cancelled', credits: 100, ledger: 100, reserved: 0 });
+    }
+    const terminal = await f.snapshot();
+    expect(await recover()).toMatchObject({ selected: 0, failed: 0 });
+    expect(await f.snapshot()).toEqual(terminal);
+  } finally { await f.close(); }
+}, 60000);
+
 it.each(['normal', 'committed-lost-response', 'not-committed', 'readback-fails'])
 ('RUNTIME: reliability finalize normal/ambiguous transaction %s', async mode => {
   const f = await fixture();
