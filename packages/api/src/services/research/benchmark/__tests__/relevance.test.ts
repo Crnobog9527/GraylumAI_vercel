@@ -14,6 +14,15 @@ describe('topic relevance (BENCHMARK-COVERAGE §2.6)', () => {
     expect(topicRelevance([post('one hardanger'), ...Array(4).fill(post('other'))], ['hardanger'])).toMatchObject({ value: 0.2, level: 'medium' });
   });
 
+  it('matches Latin keywords as whole words only, so a short word never hides inside another (#1317 review)', () => {
+    expect(topicRelevance([post('Party planning: wedding cake')], ['art'])).toMatchObject({ value: 0, level: 'low' });
+    expect(topicRelevance([post('Paper art for kids'), post('My arts and crafts'), post('#art')], ['art']))
+      .toMatchObject({ value: 1, matched: 3 });
+    // A joined hashtag still names a longer keyword word; Chinese stays a substring.
+    expect(topicRelevance([post('#hardangerembroidery #needlework')], ['hardanger embroidery'])).toMatchObject({ matched: 1 });
+    expect(topicRelevance([post('#苏绣教学')], ['苏绣'])).toMatchObject({ matched: 1 });
+  });
+
   it('says nothing without keywords or titled posts (unknown, not "low")', () => {
     expect(topicRelevance([post('hardanger')], [])).toBeNull();
     expect(topicRelevance([post()], ['hardanger'])).toBeNull();

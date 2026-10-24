@@ -15,10 +15,23 @@ export interface TopicRelevance {
 
 const normalize = (text: string) => text.toLowerCase().replace(/#/g, ' ').replace(/[\s_]+/g, ' ').trim();
 
-/** A keyword is named when every one of its words appears in the title (any order), Chinese ones as a substring. */
+const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const LATIN = /^[a-z0-9]/;
+
+/**
+ * Whether one keyword word appears in the title. A short Latin word (under 5 letters) must be a whole word, plural s/es
+ * allowed ("art" is not in "party"); a longer one, like Chinese, is a substring so joined hashtags still count
+ * (#hardangerembroidery).
+ */
+function hasWord(title: string, word: string): boolean {
+  if (word.length >= 5 || !LATIN.test(word) || !/[a-z0-9]$/.test(word)) return title.includes(word);
+  return new RegExp(`(?<![a-z0-9])${escape(word)}(?:e?s)?(?![a-z0-9])`).test(title);
+}
+
+/** A keyword is named when every one of its words appears in the title (any order). */
 function names(title: string, keyword: string): boolean {
   const words = normalize(keyword).split(' ').filter(Boolean);
-  return words.length > 0 && words.every(word => title.includes(word));
+  return words.length > 0 && words.every(word => hasWord(title, word));
 }
 
 /** null without keywords or without titled posts: nothing to say, not "low". */
