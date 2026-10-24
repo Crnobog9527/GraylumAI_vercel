@@ -104,7 +104,10 @@ async function step(ctx: ResearchToolContext, d: DiscoveryRecord, budget: ToolAl
       complete: prior.state === 'succeeded' && parsed.success, stopped: false,
       ...(typeof saved === 'string' ? { nextCursor: saved } : {}) };
   }
-  if (budget.left === 0) return { operationId, items: [], complete: false, stopped: true, reason: 'ROUND_LIMIT', budget: true };
+  // This reply's lookups or its time ran out: the round stops before planning anything and continues on the next reply.
+  if (budget.left === 0 || ctx.lookupTime?.() === false) {
+    return { operationId, items: [], complete: false, stopped: true, reason: 'ROUND_LIMIT', budget: true };
+  }
   const outcome = await executeResearchCall(ctx, budget, request, operationId, 'benchmark_discover',
     { discoveryId: d.discoveryId }, d.discoveryId);
   return { operationId, items: outcome.sent ? outcome.result.items : [],
