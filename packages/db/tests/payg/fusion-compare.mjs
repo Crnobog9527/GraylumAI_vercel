@@ -402,6 +402,8 @@ export async function fusionCompareCases({db,Client,connectionString,report,crea
   const shown = await listedFresh();
   assert.ok(shown,'a conversation holding only a compare is listed');
   assert.equal(shown.title,firstMessage,'titled with the compared question');
+  await db.query("UPDATE fusion_compares SET created_at=now()-interval '6 minutes' WHERE id=$1",[firstCompare.compareId]);
+  assert.equal(await listedFresh(),undefined,'a start stuck admitting past five minutes is not listed');
   await db.query("UPDATE fusion_compares SET state='refused' WHERE id=$1",[firstCompare.compareId]);
   assert.equal(await listedFresh(),undefined,'a refused start is not listed');
   // Before/after equivalence for every account in this database: the ids and order the list returned before 0348

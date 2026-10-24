@@ -1,7 +1,7 @@
 -- FUSION-COMPARE first message (Owner 2026-10-24): a new conversation may start with a multi-model compare.
 -- The conversation list (opc_free_conversations) only knew conversations with an ordinary/skill turn, so a conversation
 -- whose only content is a compare (not yet adopted) was invisible. Anchored patch: such a conversation is listed too,
--- titled with the compared question, its activity time counting the compare. A refused start (no group, nothing ran)
+-- titled with the compared question, its activity time counting the compare. A refused start, or one stuck admitting past the 5 minutes the compare semantics allow (no group, nothing ran)
 -- is not a conversation worth listing. Nothing else about the list changes (rename, deletion and review filters stay).
 -- Rollback: re-run the previous function body (0307's patch result) or remove the lines marked "FUSION-COMPARE first message".
 BEGIN;
@@ -35,12 +35,12 @@ BEGIN
  -- FUSION-COMPARE first message: a conversation that so far holds only a compare
  LEFT JOIN LATERAL (
   SELECT c.id,c.question FROM fusion_compares c
-  WHERE c.session_id=s.id AND c.actor_id=p_actor_id AND c.state<>'refused'
+  WHERE c.session_id=s.id AND c.actor_id=p_actor_id AND c.state<>'refused' AND NOT (c.state='admitting' AND c.created_at<=clock_timestamp()-interval '5 minutes')
   ORDER BY c.created_at,c.id LIMIT 1
  ) first_compare ON true
  CROSS JOIN LATERAL (
   SELECT greatest(max(e.created_at),(SELECT max(c.created_at) FROM fusion_compares c
-   WHERE c.session_id=s.id AND c.actor_id=p_actor_id AND c.state<>'refused')) AS last_activity FROM runtime_executions e
+   WHERE c.session_id=s.id AND c.actor_id=p_actor_id AND c.state<>'refused' AND NOT (c.state='admitting' AND c.created_at<=clock_timestamp()-interval '5 minutes'))) AS last_activity FROM runtime_executions e
   WHERE e.session_id=s.id AND e.actor_id=p_actor_id
  ) activity$b$);
   d:=replace(d,a3,$b$ WHERE (first_turn.id IS NOT NULL OR first_compare.id IS NOT NULL)
