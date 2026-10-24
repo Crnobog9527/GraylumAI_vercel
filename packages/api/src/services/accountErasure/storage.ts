@@ -53,7 +53,15 @@ const limitsSchema = z.object({
   maxObjects: z.number().int().min(1).max(1000), requestTimeoutMs: z.number().int().min(1).max(30_000),
   totalTimeoutMs: z.number().int().min(1).max(55_000),
 }).strict();
-export type ErasureStorageResult = { complete: boolean; remaining: number; manualReview: number };
+/** Why a pass stopped early, as a fixed code (never the error text): the thrown codes below, else unknown. */
+export type ErasureStorageResult = { complete: boolean; remaining: number; manualReview: number; errorCode?: string };
+const FAILURE_CODES = new Set(['ERASURE_STORAGE_BUDGET', 'ERASURE_STORAGE_UNKNOWN', 'ERASURE_STORAGE_PAGE_INVALID',
+  'ERASURE_STORAGE_MANIFEST_INVALID', 'ERASURE_STORAGE_REFERENCES_UNKNOWN', 'ERASURE_STORAGE_CURSOR_INVALID',
+  'ERASURE_MANIFEST_UNKNOWN', 'ERASURE_STORAGE_UNPROVEN', 'ERASURE_HISTORY_UNKNOWN', 'ERASURE_PROOF_UNKNOWN']);
+export function erasureStorageFailureCode(error: unknown): string {
+  if (error instanceof z.ZodError) return 'ERASURE_STORAGE_SHAPE_INVALID';
+  return error instanceof Error && FAILURE_CODES.has(error.message) ? error.message : 'ERASURE_STORAGE_FAILED';
+}
 
 /** Exactly one UUID directory and one safe ASCII filename. Never decode or normalize a URL,
  * percent escape, backslash or traversal into an apparently owned object. */
@@ -80,6 +88,7 @@ export function createErasureStorageAdapter(input: {
     let pages = 0;
     let manualReview = 0;
     let incomplete = false;
+    let failure: string | undefined;
     const call = async <T>(operation: (signal: AbortSignal) => Promise<T>): Promise<T> => {
       const duration = Math.min(limits.requestTimeoutMs, deadline - performance.now());
       if (duration <= 0) throw new Error('ERASURE_STORAGE_BUDGET');
@@ -178,8 +187,8 @@ export function createErasureStorageAdapter(input: {
         cursor = page.nextCursor;
         if (cursor !== null) cursors.add(cursor);
       } while (cursor !== null);
-    } catch { incomplete = true; }
+    } catch (error) { incomplete = true; failure = erasureStorageFailureCode(error); }
     return { complete: !incomplete && manualReview === 0,
-      remaining: Math.max(manualReview, incomplete ? 1 : 0), manualReview };
+      remaining: Math.max(manualReview, incomplete ? 1 : 0), manualReview, ...(failure ? { errorCode: failure } : {}) };
   } };
 }
