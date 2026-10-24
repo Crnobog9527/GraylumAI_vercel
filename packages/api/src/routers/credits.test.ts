@@ -1,7 +1,7 @@
 import { TRPCError } from '@trpc/server';
 import { describe, expect, it, vi } from 'vitest';
 import { logger } from '../lib/logger';
-import { ACTUAL_LEDGER_FILTER, creditsRouter, isReservationLedgerRow } from './credits';
+import { ACTUAL_LEDGER_FILTERS, creditsRouter, isHiddenFromCreditRecords, isReservationLedgerRow } from './credits';
 
 function createProfileSupabase(role: 'user' | 'admin', credits = 123) {
   return {
@@ -358,6 +358,20 @@ describe('积分记录只列实际变动（Owner 2026-10-25）', () => {
     expect(isReservationLedgerRow(row)).toBe(hidden);
   });
 
+  const amountRows: Array<[Record<string, string | number | null>, boolean]> = [
+    [{ ledger_type: 'spend', reason_code: 'bill2_spend', amount: 0 }, true],
+    [{ ledger_type: 'spend', reason_code: 'bill2_spend', amount: '0' }, true],
+    [{ ledger_type: 'spend', reason_code: 'bill2_spend', amount: -1 }, false],
+    [{ ledger_type: 'spend', reason_code: 'bill2_spend', amount: -0.5 }, false],
+    [{ ledger_type: 'adjustment', reason_code: 'opening_grant_ineligible', amount: 0 }, false],
+    [{ ledger_type: 'grant', reason_code: 'bonus_grant', amount: 0 }, false],
+    [{ ledger_type: 'spend', reason_code: 'bill2_spend', amount: null }, false],
+    [{ ledger_type: 'adjustment', reason_code: 'bill2_reserve', amount: -12 }, true],
+  ];
+  it.each(amountRows)('hides zero-credit spend rows only: %o → hidden %s', (row, hidden) => {
+    expect(isHiddenFromCreditRecords(row)).toBe(hidden);
+  });
+
   it('filters in the database only when asked, so the page and its count are after filtering', async () => {
     const filters: string[] = [];
     const supabase = { from(table: string) {
@@ -367,9 +381,11 @@ describe('积分记录只列实际变动（Owner 2026-10-25）', () => {
     await caller.getCreditTransactions({ limit: 50 });
     expect(filters).toEqual([]);
     await caller.getCreditTransactions({ limit: 50, actualOnly: true });
-    expect(filters).toEqual([ACTUAL_LEDGER_FILTER]);
-    // The database condition is the exact opposite of the predicate, keeping rows whose fields are empty.
-    expect(ACTUAL_LEDGER_FILTER).toBe(
-      'ledger_type.is.null,ledger_type.neq.adjustment,reason_code.is.null,reason_code.not.in.(bill2_reserve,bill2_release)');
+    expect(filters).toEqual([...ACTUAL_LEDGER_FILTERS]);
+    // The database conditions are the exact opposite of the two predicates, keeping rows whose fields are empty.
+    expect(ACTUAL_LEDGER_FILTERS).toEqual([
+      'ledger_type.is.null,ledger_type.neq.adjustment,reason_code.is.null,reason_code.not.in.(bill2_reserve,bill2_release)',
+      'ledger_type.is.null,ledger_type.neq.spend,amount.neq.0',
+    ]);
   });
 });

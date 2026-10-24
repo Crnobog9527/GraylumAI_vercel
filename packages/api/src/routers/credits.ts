@@ -58,22 +58,31 @@ const GetTransactionsInput = z.object({
   status: TransactionStatus.optional(), // 按状态筛选
   startDate: z.string().datetime().optional(), // 开始日期
   endDate: z.string().datetime().optional(), // 结束日期
-  // Owner 2026-10-25「只给用户看实际扣费」：个人中心积分记录不列调用前的预留和释放（数据不动）。
+  // Owner 2026-10-25「只给用户看实际扣费」：个人中心积分记录不列调用前的预留和释放、0 积分的扣费行（数据不动）。
   actualOnly: z.boolean().optional(),
 });
 
 /**
- * 调用前的预留与释放：成对出现、合计为零（bill2 按调用/按轮次预留，评审团、报告也走同一对 reason_code）。
- * 只按这两个明确字段判断，不看描述文字；补偿（bill2_compensation）、争议冻结、管理员调整、扣费、到账、退款都不在内。
+ * 个人中心不列的两类行，只按明确字段判断，不看描述文字：
+ * - 调用前的预留与释放：成对出现、合计为零（bill2 按调用/按轮次预留，评审团、报告也走同一对 reason_code）；
+ * - 0 积分的扣费行（ledger_type spend、amount 0）：没有实际扣积分。
+ * 补偿（bill2_compensation）、争议冻结、管理员调整、有金额的扣费、到账、退款都不在内。
  */
 export const RESERVATION_REASON_CODES = ['bill2_reserve', 'bill2_release'] as const;
 export function isReservationLedgerRow(row: { ledger_type?: string | null; reason_code?: string | null }) {
   return row.ledger_type === 'adjustment'
     && (RESERVATION_REASON_CODES as readonly string[]).includes(row.reason_code ?? '');
 }
-// 与 isReservationLedgerRow 相反的 PostgREST 条件：空值也保留（NOT IN 遇到 NULL 会把行一起滤掉）。
-export const ACTUAL_LEDGER_FILTER =
-  `ledger_type.is.null,ledger_type.neq.adjustment,reason_code.is.null,reason_code.not.in.(${RESERVATION_REASON_CODES.join(',')})`;
+export function isZeroSpendLedgerRow(row: { ledger_type?: string | null; amount?: number | string | null }) {
+  return row.ledger_type === 'spend' && row.amount !== null && row.amount !== undefined && Number(row.amount) === 0;
+}
+export const isHiddenFromCreditRecords = (row: { ledger_type?: string | null; reason_code?: string | null; amount?: number | string | null }) =>
+  isReservationLedgerRow(row) || isZeroSpendLedgerRow(row);
+// 与上面两条判断正好相反的 PostgREST 条件（两组 or 之间是"且"）：空值也保留（NOT IN 遇到 NULL 会把行一起滤掉）。
+export const ACTUAL_LEDGER_FILTERS = [
+  `ledger_type.is.null,ledger_type.neq.adjustment,reason_code.is.null,reason_code.not.in.(${RESERVATION_REASON_CODES.join(',')})`,
+  'ledger_type.is.null,ledger_type.neq.spend,amount.neq.0',
+] as const;
 
 // ============================================================================
 // 积分路由器
@@ -121,7 +130,7 @@ export const creditsRouter = router({
 
       // 应用筛选条件（在数据库里过滤，分页和条数都是过滤后的）
       if (actualOnly) {
-        query = query.or(ACTUAL_LEDGER_FILTER);
+        for (const filter of ACTUAL_LEDGER_FILTERS) query = query.or(filter);
       }
 
       if (type) {
