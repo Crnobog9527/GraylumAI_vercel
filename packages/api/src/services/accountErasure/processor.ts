@@ -8,7 +8,7 @@ import {
 } from './processorContracts';
 
 export interface ErasureStorageAdapter {
-  cleanSubject(profileId: string): Promise<{ complete: boolean; remaining: number; manualReview: number }>;
+  cleanSubject(profileId: string): Promise<{ complete: boolean; remaining: number; manualReview: number; errorCode?: string }>;
 }
 export interface ErasureAuthAdapter {
   getState(profileId: string): Promise<'present' | 'absent' | 'unknown'>;

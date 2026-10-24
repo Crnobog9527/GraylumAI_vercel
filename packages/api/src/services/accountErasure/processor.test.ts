@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from 'vitest';
-import { processAccountErasure } from './processor';
+import { processAccountErasure, type ErasureStorageAdapter } from './processor';
 import type { BillingRpc } from '../bill2/service';
 
 const actor = '00000000-0000-4000-8000-000000000001';
@@ -40,7 +40,7 @@ function setup(overrides: Record<string, Override> = {}) {
     } finally { active--; }
   });
   let absent = false;
-  const storageAdapter = { cleanSubject: vi.fn(async () => ({ complete: true, remaining: 0, manualReview: 0 })) };
+  const storageAdapter = { cleanSubject: vi.fn<ErasureStorageAdapter['cleanSubject']>(async () => ({ complete: true, remaining: 0, manualReview: 0 })) };
   const authAdapter = {
     getState: vi.fn(async (): Promise<'present' | 'absent' | 'unknown'> => absent ? 'absent' : 'present'),
     remove: vi.fn(async () => { events.push('AUTH_REMOVE'); absent = true; }),
