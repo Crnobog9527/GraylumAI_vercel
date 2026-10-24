@@ -18,13 +18,17 @@ const entry = (over: Partial<SkillCatalogEntry> = {}): SkillCatalogEntry => ({na
   moduleId: id(1), skillId: id(11), packageId: id(11), revisionId: id(21), packageHash: descriptor().packageHash, resultBytes: 500,
   ...over});
 
+/** The package reader: a batch (p_paths, 0358) returns the listed files; otherwise the manifest, the check or one file. */
+function readPackage(args: Record<string, unknown>) {
+  const base64 = (path: string) => Buffer.from(files[path as keyof typeof files]).toString('base64');
+  if (Array.isArray(args.p_paths)) return {files: Object.fromEntries((args.p_paths as string[]).map(path => [path, base64(path)]))};
+  if (args.p_path === null) return descriptor();
+  if (args.p_path === '') return true;
+  return base64(args.p_path as string);
+}
 function rpc(saved: unknown = null) {
   return vi.fn(async (name: string, args: Record<string, unknown>) => {
-    if (name === 'read_skill_package') {
-      if (args.p_path === null) return descriptor();
-      if (args.p_path === '') return true;
-      return Buffer.from(files[args.p_path as keyof typeof files]).toString('base64');
-    }
+    if (name === 'read_skill_package') return readPackage(args);
     if (args.p_action === 'claim') return {result: saved};
     return {result: args.p_result};
   }) as unknown as (<T>(name: string, args: Record<string, unknown>) => Promise<T>) & ReturnType<typeof vi.fn>;
@@ -84,15 +88,32 @@ describe('load_skill', () => {
     expect(onRefused).toHaveBeenCalledOnce();
   });
 
+  it('reuses the frozen listing in the process but refuses a package revoked after it was cached (DB-PERF PR-4)', async () => {
+    let revoked = false;
+    const call = vi.fn(async (name: string, args: Record<string, unknown>) => {
+      if (name === 'read_skill_package') { if (revoked) throw new Error('RUNTIME_SKILL_FILE_REFUSED'); return readPackage(args); }
+      return args.p_action === 'claim' ? {result: null} : {result: args.p_result};
+    }) as unknown as (<T>(name: string, args: Record<string, unknown>) => Promise<T>) & ReturnType<typeof vi.fn>;
+    const tool = () => executionLoadSkillTool({executionId: id(9), catalog: [entry()], maxResultBytes: 20000, maxLoads: 2, rpc: call,
+      assertCanStart: () => {}});
+    expect(JSON.parse(await tool().execute({name: 'script-writer'}, 'c1')).instructions).toContain('先问清主题');
+    const reads = () => call.mock.calls.filter(([name]) => name === 'read_skill_package').map(([, args]) => args.p_paths ?? args.p_path);
+    expect(reads()).toEqual([null, ['SKILL.md']]);
+    call.mockClear();
+    // A later load in the same process: no listing read, still one checked read.
+    await tool().execute({name: 'script-writer'}, 'c2');
+    expect(reads()).toEqual([[]]);
+    revoked = true;
+    expect(await tool().execute({name: 'script-writer'}, 'c3')).toBe(SKILL_LOAD_REFUSED);
+  });
+
   it('lets an uncertain failure propagate so recovery can replay the journaled result', async () => {
     const onRefused = vi.fn();
     for (const failure of [new Error('fetch failed'), new Error('RUNTIME_TOOL_CLOSED'), new Error('canceling statement due to timeout')]) {
       let first = true;
       const call = vi.fn(async (name: string, args: Record<string, unknown>) => {
         if (name === 'read_skill_package') {
-          if (args.p_path === null) return descriptor();
-          if (args.p_path === '') return true;
-          return Buffer.from(files[args.p_path as keyof typeof files]).toString('base64');
+          return readPackage(args);
         }
         if (args.p_action === 'claim') return {result: null};
         if (first) { first = false; throw failure; }
