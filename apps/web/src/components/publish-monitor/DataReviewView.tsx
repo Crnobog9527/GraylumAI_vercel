@@ -27,7 +27,11 @@ export function DataReviewView() {
     [data.data]);
 
   const blocked = errorCode(connections.error) ?? errorCode(data.error);
-  const changed = () => { void utils.publishMonitor.connections.invalidate(); void utils.publishMonitor.data.invalidate(); };
+  // The account list comes from the library query, so adding a brand account refreshes it too.
+  const changed = () => {
+    void utils.publishMonitor.connections.invalidate(); void utils.publishMonitor.data.invalidate();
+    void utils.opc.library.invalidate();
+  };
 
   if (connections.isPending || data.isPending) return <Shell><p className="text-sm">正在读取…</p></Shell>;
   if (blocked === 'PUBLISH_MONITOR_ENTITLEMENT_REQUIRED') return <Shell><Upgrade /></Shell>;

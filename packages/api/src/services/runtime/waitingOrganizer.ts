@@ -25,6 +25,7 @@ export async function finishWaitingOrganizer(context:unknown,requestId:string,
  const token={executionId:waiting.executionId,cursor:waiting.cursor,epoch:waiting.epoch};
  const result=resume?await resume(token):{...waiting,state:waiting.state,
   code:waiting.state==='waiting_credits'?'RUNTIME_WAITING_CREDITS' as const:'RUNTIME_WAITING_RESUME' as const};
- if(result.state==='completed'||(waiting.remainingCalls===0&&result.state==='cancelled'))return null;
+ // A round that can never resume was ended keeping its delivered reply (executionStream.ts): the new message goes ahead.
+ if(result.state==='completed'||(result.state==='cancelled'&&(waiting.remainingCalls===0||result.resumeClosed)))return null;
  return {...result,admitted:false,blockedRequestId:requestId,executionId:waiting.executionId};
 }
