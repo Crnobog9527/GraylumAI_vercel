@@ -498,7 +498,7 @@ describe('durable benchmark discovery and free follow-up', () => {
     f.discoveries.set(discoveryId, { discoveryId, keywords: ['one'], platforms: ['tiktok'], cursor: {}, state: 'running' });
     f.operations.set(stableResearchId(discoveryId, '0'), { state, identityHash: requestIdentity(socialRequest(f.ctx, 'tiktok', 'keyword_posts', { keyword: 'one' })!) });
     expect(await f.execute('benchmark_discover', { discoveryId })).toMatchObject({ status: 'partial', continue: false });
-    expect(subcall).not.toHaveBeenCalled();
+    expect(subcall.mock.calls.filter(([, r]) => r.vendor === 'tikhub')).toEqual([]); // only the shortfall web layer runs
     expect(f.store.createCard).not.toHaveBeenCalled();
   });
 
@@ -515,12 +515,12 @@ describe('durable benchmark discovery and free follow-up', () => {
     const successor = stableResearchId(oldId, 'unsent-successor');
     expect(f.store.cancelUnsentPlan).toHaveBeenCalledWith(oldId);
     expect(f.store.cancelUnsentPlan.mock.invocationCallOrder[0]).toBeLessThan(subcall.mock.invocationCallOrder[0]!);
-    expect(subcall).toHaveBeenCalledTimes(1);
+    expect(subcall).toHaveBeenCalledTimes(2); // the successor search, then the shortfall web layer (BENCHMARK-COVERAGE)
     expect(subcall.mock.calls[0]?.[0].newId()).toBe(successor);
     expect(f.plans.get(oldId)).toMatchObject({ executionId: previousExecution, cancelled: true });
     expect(subcall.mock.calls.some(([ctx]) => ctx.newId() === oldId)).toBe(false);
     await f.makeExecute()('benchmark_discover', { discoveryId });
-    expect(subcall).toHaveBeenCalledTimes(1);
+    expect(subcall).toHaveBeenCalledTimes(2);
   });
 
   it('does not create a successor if cancellation races with dispatch by the previous execution', async () => {
@@ -537,7 +537,7 @@ describe('durable benchmark discovery and free follow-up', () => {
     });
     expect(await f.execute('benchmark_discover', { discoveryId })).toMatchObject({ status: 'partial' });
     expect(f.store.cancelUnsentPlan).toHaveBeenCalledWith(oldId);
-    expect(subcall).not.toHaveBeenCalled();
+    expect(subcall.mock.calls.filter(([, r]) => r.vendor === 'tikhub')).toEqual([]);
     expect(f.store.readOperation).not.toHaveBeenCalledWith(stableResearchId(oldId, 'unsent-successor'));
     expect(f.store.createCard).not.toHaveBeenCalled();
   });
@@ -649,7 +649,7 @@ describe('durable benchmark discovery and free follow-up', () => {
     expect(f.store.discoverySave).toHaveBeenLastCalledWith(discoveryId, expect.anything(), 'completed');
     expect(f.store.offerShortfall).toHaveBeenCalledTimes(1);
     expect(f.store.createCard).not.toHaveBeenCalled();
-    expect(subcall).toHaveBeenCalledTimes(10);
+    expect(subcall).toHaveBeenCalledTimes(12); // 3 searches + 7 profiles + 2 shortfall web searches (BENCHMARK-COVERAGE)
   });
 
   it('keeps old keyword-hit accounts selectable and marks activity as pending until benchmark_fetch', async () => {
@@ -701,7 +701,7 @@ describe('durable benchmark discovery and free follow-up', () => {
     expect(await f.execute('propose_more_candidates', { discoveryId }, 'more'))
       .toMatchObject({ status: 'not_confirmed', reason: 'NO_CONFIRMED_SELECTION' });
     expect(f.store.createCard).not.toHaveBeenCalled();
-    expect(subcall).toHaveBeenCalledTimes(10);
+    expect(subcall).toHaveBeenCalledTimes(12); // 3 searches + 7 profiles + 2 shortfall web searches (BENCHMARK-COVERAGE)
   });
 
   it('creates a stable initial card and excludes already selected accounts from a free follow-up', async () => {
