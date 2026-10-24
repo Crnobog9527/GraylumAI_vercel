@@ -106,9 +106,9 @@ jobs:
       - name: CI safeguards — migration ledger and database baseline
         run: pnpm test:ci:safeguards
 
-  # The contract and ledger workers stay outside the test worker: a queued
-  # migration PR with a numbering gap fails both, and that must not stop the
-  # unit and regression tests from reporting. Both gates below require all three.
+  # The contract and ledger workers stay outside the test worker: a migration
+  # PR the ledger rejects fails both, and that must not stop the unit and
+  # regression tests from reporting. Both gates below require all three.
   ci-contracts:
     name: Test required-check contracts
     runs-on: ubuntu-latest
@@ -169,9 +169,9 @@ jobs:
             exit 1
           fi
 
-          if git cat-file -e "${migration_base_sha}:scripts/check-migration-ledger.mjs" 2>/dev/null; then
+          if git cat-file -e "${migration_base_sha}:scripts/check-migration-ledger-v2.mjs" 2>/dev/null; then
             trusted_checker="$RUNNER_TEMP/graylum-check-migration-ledger.mjs"
-            git show "${migration_base_sha}:scripts/check-migration-ledger.mjs" > "$trusted_checker"
+            git show "${migration_base_sha}:scripts/check-migration-ledger-v2.mjs" > "$trusted_checker"
             echo 'Using migration ledger checker from the exact base commit.'
             if [ "$GITHUB_EVENT_NAME" = schedule ]; then
               # The frozen checker CLI accepts PR/push events only. Its exported
@@ -191,10 +191,10 @@ jobs:
             fi
           else
             echo 'Bootstrapping the migration ledger checker; base-existing migrations must be unchanged.'
-            checker_index_entry="$(git ls-files --stage -- scripts/check-migration-ledger.mjs)"
+            checker_index_entry="$(git ls-files --stage -- scripts/check-migration-ledger-v2.mjs)"
             checker_mode="${checker_index_entry%% *}"
-            if [ -z "$checker_index_entry" ] || [ -L scripts/check-migration-ledger.mjs ] ||
-              [ ! -f scripts/check-migration-ledger.mjs ]; then
+            if [ -z "$checker_index_entry" ] || [ -L scripts/check-migration-ledger-v2.mjs ] ||
+              [ ! -f scripts/check-migration-ledger-v2.mjs ]; then
               echo 'Bootstrap migration ledger checker must be a tracked regular file.' >&2
               exit 1
             fi
@@ -205,15 +205,15 @@ jobs:
                 exit 1
                 ;;
             esac
-            expected_checker_sha='f7b64010de1ffb58c4910bb74aee431e1d2273249257ba8cb1dcbc8b0d2a1f07'
-            actual_checker_sha="$(sha256sum scripts/check-migration-ledger.mjs | awk '{print $1}')"
+            expected_checker_sha='737bc41f2411f17b2872491c5e57e523e77a1545e8ed3dedf718fb051688b17e'
+            actual_checker_sha="$(sha256sum scripts/check-migration-ledger-v2.mjs | awk '{print $1}')"
             if [ "$actual_checker_sha" != "$expected_checker_sha" ]; then
               echo 'Bootstrap migration ledger checker does not match the reviewed content.' >&2
               exit 1
             fi
             git diff --quiet --no-ext-diff --no-textconv --no-renames \
               --diff-filter=MDTUXB "$migration_base_sha" -- packages/db/migrations
-            node scripts/check-migration-ledger.mjs
+            node scripts/check-migration-ledger-v2.mjs
           fi
 
   build-and-e2e:
