@@ -5,7 +5,7 @@ import {databaseSkillSource} from './databaseSource';
 import {activateSkill,clearSkillResourceCache,discoverSkills,frozenDescriptor,identityOf,packageHash,readSkillResource,sha256} from './loader';
 
 /*
- * DB-PERF PR-4: a database Skill load makes one checked batch read (read_skill_package with p_paths, 0347) instead of a
+ * DB-PERF PR-4: a database Skill load makes one checked batch read (read_skill_package with p_paths, 0348) instead of a
  * check before, a check and read per uncached file, and a check after. Cached files are not read again, but the check
  * is still made on every load, so a revoked or unpublished Skill is refused at once even when every file is cached.
  */
@@ -18,7 +18,7 @@ function manifest(version:number){
  const p={packageId:skillId,revisionId:revision(version),directoryName:'demo',packageHash:'',tasks:{},requiredCapabilities:[],files};
  p.packageHash=packageHash(p);return p;
 }
-/** A synthetic package reader that, like 0347, checks access on every call and returns the listed files. */
+/** A synthetic package reader that, like 0348, checks access on every call and returns the listed files. */
 function clients(){
  const state={published:1,revoked:new Set<string>()};
  const user={auth:{getUser:async()=>({data:{user:{id:'actor',email_confirmed_at:'2026-01-01T00:00:00Z'}},error:null})},
