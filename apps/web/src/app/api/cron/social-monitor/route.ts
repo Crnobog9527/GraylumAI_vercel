@@ -7,7 +7,8 @@ import {
   createRuntimeBudget, entitlementWindow, runSocialMonitorJob, tikhubEntitlements,
 } from '@repo/api/src/services/publishMonitor/socialMonitorJob';
 import { validateCronRequest } from '@/lib/cron-auth';
-import { reportPublishMonitorStuck } from '@/lib/publish-monitor-alert';
+import { readQuotaUsage, quotaLevel } from '@repo/api/src/services/publishMonitor/quota';
+import { reportPublishMonitorQuota, reportPublishMonitorStuck } from '@/lib/publish-monitor-alert';
 
 export const runtime = 'nodejs';
 // Vercel Hobby allows 300 seconds; the job stops starting new work at 240 seconds (plan §8).
@@ -48,6 +49,9 @@ export async function GET(request: Request) {
       { env: process.env, entitlement: tikhubEntitlements(client) }, { env: process.env, defer: work => after(work), budget });
     if (keyError) report.failures.push('postforme_key');
     reportPublishMonitorStuck(report.stuck);
+    // A failed read here must not fail the run: the count is only watched, never needed for the work above.
+    await readQuotaUsage(client).then(usage => reportPublishMonitorQuota(usage, usage.configured ? quotaLevel(usage) : 'ok'))
+      .catch(() => undefined);
     const success = report.failures.length === 0;
     await finish(success ? 'success' : 'error', { ...report, ...(keyError ? { postForMeKeyError: keyError } : {}) },
       keyError ?? (success ? null : `FAILED_STEPS:${report.failures.join(',')}`));
