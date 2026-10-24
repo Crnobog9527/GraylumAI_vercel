@@ -7,10 +7,13 @@ import type { AutomaticRecoverySummary } from './automaticRecovery';
 
 export const OWNER_LOST_WINDOW_MS = 24 * 3600 * 1000;
 export const OWNER_LOST_BATCH_SIZE = 20;
+export const OWNER_LOST_PAGE_SIZE = 100;
+/** Report pages read per run: up to 500 open charged rounds from the last 24 hours. */
+export const OWNER_LOST_MAX_PAGES = 5;
 const STEP_MS = 2_000;
 
 const report = z.object({ rounds: z.array(z.object({
-  executionId: z.string().uuid(), actorId: z.string().uuid(), runId: z.string().uuid(),
+  executionId: z.string().uuid(), actorId: z.string().uuid(), runId: z.string().uuid(), since: z.string(),
   evidence: z.object({ executionState: z.string(), savedReplyChars: z.number().int().nonnegative() }).passthrough(),
 }).passthrough()).max(500) }).passthrough();
 const read = z.object({ state: z.string() }).passthrough();
@@ -27,18 +30,34 @@ const read = z.object({ state: z.string() }).passthrough();
  * (expired lease, no call in flight, actor, scope, erasure). Rounds without a saved reply are untouched:
  * interruption release and the 24-hour refund (staleChargedRounds.ts) still own them.
  */
-export async function recoverOwnerLostReplies(input: { database: BillingRpc; budget: RuntimeBudget; now?: number }):
+export async function recoverOwnerLostReplies(input: { database: BillingRpc; budget: RuntimeBudget; now?: number;
+  random?: () => number }):
   Promise<AutomaticRecoverySummary> {
   const summary = { selected: 0, processed: 0, settled: 0, pending: 0, failed: 0 };
   try { input.budget.assertCanStart(STEP_MS); } catch { return summary; }
   const now = input.now ?? Date.now();
   try {
     // A cutoff of now: the report's own lease and in-flight checks decide whether the owner is gone.
-    const response = await input.database.rpc('runtime_stale_charged_rounds', { p_cutoff: new Date(now).toISOString(),
-      p_limit: 100, p_created_since: new Date(now - OWNER_LOST_WINDOW_MS).toISOString() });
-    if (response.error) throw new Error('RUNTIME_OWNER_LOST_INVENTORY_FAILED');
-    const items = report.parse(response.data).rounds.filter(round => round.evidence.savedReplyChars > 0
-      && ['running', 'interrupted'].includes(round.evidence.executionState)).slice(0, OWNER_LOST_BATCH_SIZE);
+    // The report is ordered by creation time; pages advance by it, so rounds without a saved reply cannot fill the view.
+    const eligible = new Map<string, z.infer<typeof report>['rounds'][number]>();
+    let since = new Date(now - OWNER_LOST_WINDOW_MS).toISOString();
+    for (let page = 0; page < OWNER_LOST_MAX_PAGES; page++) {
+      if (page > 0) { try { input.budget.assertCanStart(STEP_MS); } catch { break; } }
+      const response = await input.database.rpc('runtime_stale_charged_rounds', { p_cutoff: new Date(now).toISOString(),
+        p_limit: OWNER_LOST_PAGE_SIZE, p_created_since: since });
+      if (response.error) throw new Error('RUNTIME_OWNER_LOST_INVENTORY_FAILED');
+      const { rounds } = report.parse(response.data);
+      for (const round of rounds) if (round.evidence.savedReplyChars > 0
+        && ['running', 'interrupted'].includes(round.evidence.executionState)) eligible.set(round.executionId, round);
+      const last = rounds.at(-1)?.since;
+      // The next page starts at the last creation time (inclusive; repeats are deduplicated by execution).
+      if (rounds.length < OWNER_LOST_PAGE_SIZE || !last || last === since) break;
+      since = last;
+    }
+    // A random batch: rounds whose read keeps being refused cannot hold the same slots every run.
+    const random = input.random ?? Math.random;
+    const items = [...eligible.values()].map(item => ({ item, key: random() })).sort((a, b) => a.key - b.key)
+      .slice(0, OWNER_LOST_BATCH_SIZE).map(({ item }) => item);
     summary.selected = items.length;
     for (const item of items) {
       try { input.budget.assertCanStart(STEP_MS); } catch { summary.pending += items.length - summary.processed - summary.failed; break; }
