@@ -3,7 +3,7 @@
 -- runtime_view and runtime_work_items, so their rules stay theirs: runtime_view raises exactly as before (another
 -- actor's, missing or out-of-scope session, erased content), and the work rows stay decorative -- any error of
 -- runtime_work_items returns no rows and never fails the view, as the host's separate call did. Read only; nothing is
--- cached. Number provisional until control assigns it. Repeatable: CREATE OR REPLACE.
+-- cached. Number 0359 assigned by control. Repeatable: CREATE OR REPLACE.
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 

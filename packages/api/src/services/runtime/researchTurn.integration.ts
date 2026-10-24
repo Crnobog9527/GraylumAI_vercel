@@ -317,7 +317,7 @@ it('RUNTIME: a free chat reply makes a general lookup, rounds once, keeps it as 
       research: { toolName: 'web_search', query: 'coffee shop positioning', platform: 'web', dataKind: 'web_search', state: 'succeeded' } });
     expect(Number((rows[0]!.research as { credits: string }).credits)).toBe(5);
     expect(JSON.stringify(rows)).not.toMatch(/parallel|usd/i);
-    // DB-PERF PR-5a (0390): one call returns exactly the separate view and work rows; it refuses as runtime_view does.
+    // DB-PERF PR-5a (0359): one call returns exactly the separate view and work rows; it refuses as runtime_view does.
     const both = await f.admin.rpc('runtime_view_with_work_items', { p_actor_id: f.actor, p_session_id: f.sessionId });
     const view = await f.admin.rpc('runtime_view', { p_actor_id: f.actor, p_session_id: f.sessionId });
     expect(both.error).toBeNull();
