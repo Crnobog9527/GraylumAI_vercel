@@ -58,7 +58,7 @@ export async function benchmarkFetch(ctx: ResearchToolContext, args: ResearchToo
     // Cached evidence is free. Only a newly claimed attempt needs a full account allowance.
     // Room for the account's own sub-calls plus any extra post pages its platform may need.
     const extraPages = BENCHMARK_EXTRA_POST_PAGES[account.platform] ?? 0;
-    if (budget.left < routes.kinds.length + extraPages) {
+    if (budget.left < routes.kinds.length + extraPages || ctx.lookupTime?.() === false) {
       partial = true;
       stopReason = 'ROUND_LIMIT';
       stopBudget = true;

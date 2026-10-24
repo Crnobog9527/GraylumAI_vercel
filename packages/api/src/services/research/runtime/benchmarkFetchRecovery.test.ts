@@ -185,4 +185,17 @@ describe('benchmark fetch: the 20-post minimum and its new-account exception (Ow
     expect(saved(f).classification).toMatchObject({ qualified, excluded });
     expect(saved(f).metrics.wholeHistory).toBe('postsCount' in profile && posts > 0 && profile.postsCount <= posts);
   });
+
+  it('keeps newly claimed work unsent when this reply has too little time left, and the next reply sends it (#1308)', async () => {
+    const f = fixture();
+    f.ctx.lookupTime = () => false;
+    const tool = researchRuntimeTools(f.ctx).find(tool => tool.name === 'benchmark_fetch')!;
+    expect(JSON.parse(await tool.execute(args, 'new-call')))
+      .toMatchObject({ status: 'budget_exhausted', reason: 'ROUND_LIMIT', items: [] });
+    expect(f.fetchDispatch).not.toHaveBeenCalled();
+    expect(f.billing.claim).not.toHaveBeenCalled();
+    expect(f.tikhub).not.toHaveBeenCalled();
+    f.ctx.lookupTime = () => true;
+    expect(JSON.parse(await f.run())).toMatchObject({ status: 'ok' });
+  });
 });
