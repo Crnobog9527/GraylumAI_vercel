@@ -17,7 +17,7 @@ it.each(['cookie','bearer'])('preserves actor checks for late receipts and inter
  const getSession=vi.fn(async()=>({data:{session:entry==='cookie'?{access_token:token}:null},error:null}));
  const profile={select(){return this;},eq(){return this;},single:async()=>({data:{id,role:'user',status:'active',credits:100,nickname:'Fixture',email:'fixture@example.test'},error:null})};
  const client={from:()=>profile,auth:{getUser,getSession},rpc:vi.fn(async(name:string)=>{
-  expect(name).toBe('content_erasure_visible');return {data:true,error:null};
+  expect(name).toBe('runtime_execution_visibility');return {data:'visible',error:null};
  })};
  const operations:string[]=[];
  mocks.execute.mockImplementation(async actor=>{
