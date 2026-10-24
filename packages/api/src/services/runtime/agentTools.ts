@@ -16,7 +16,8 @@ export const AGENT_TOOL_NAMES:ReadonlySet<string>=new Set([ASK_QUESTION_TOOL,REA
 /** The only tool of the older formats. */
 export const SOURCE_TOOL_NAMES:ReadonlySet<string>=new Set(['read_source']);
 /** CHAT-AUTO-CONTEXT C: a free chat (v6) offers read_source and, when admission froze them, the general research tools. */
-export const FREE_CHAT_TOOL_NAMES:ReadonlySet<string>=new Set(['read_source',...GENERAL_RESEARCH_TOOLS]);
+// CONTENT-CONVERSATION-DRIVEN: a loaded Skill stays in the history so a follow-up still sees it.
+export const FREE_CHAT_TOOL_NAMES:ReadonlySet<string>=new Set(['read_source','load_skill',...GENERAL_RESEARCH_TOOLS]);
 /** At most this many tool definitions in one new-format request (card, Skill file, history, six research tools). */
 export const MAX_AGENT_TOOLS=9;
 /** Stream parsing for an Agent turn response: its tool names, and up to eight

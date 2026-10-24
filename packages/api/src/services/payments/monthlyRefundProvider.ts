@@ -7,6 +7,7 @@ import type { MonthlyRefundTerms } from './monthlyRefundApproval';
 import type { MonthlyRefundIntent, MonthlyRefundObservation } from './subscriptionRefundExecution';
 import type { SubscriptionRefundStripe } from './subscriptionRefundPreview';
 import { resolveStripeScope } from './stripeCheckoutPersistence';
+import { isAbandonedRenewalInvoice } from './abandonedRenewalInvoice';
 
 export type MonthlyStripe = SubscriptionRefundStripe & Pick<Stripe, 'subscriptions' | 'invoiceItems' | 'events'>;
 export const objectId = (v: string | { id: string } | null | undefined) => typeof v === 'string' ? v : v?.id;
@@ -130,12 +131,15 @@ export async function readMonthlyProvider(stripe: MonthlyStripe, intent: Monthly
     priorValid = cash.paymentIntentId === t.priorPro.invoiceId && cash.currency === t.currency
       && Date.parse(cash.paidAt) < Date.parse(t.paidAt);
   }
+  // Owner 2026-10-24 (A): the same rule as the quote; every invoice is still re-read here before any money moves.
+  const abandoned = new Set<string>();
+  for (const row of invoices) if (row.id !== t.invoiceId && await isAbandonedRenewalInvoice(stripe, row, live)) abandoned.add(row.id);
   const original = invoices.filter(row => row.id === t.invoiceId);
   const originalValid = original.length === 1 && original[0].livemode === live && original[0].status === 'paid'
     && original[0].amount_paid === charged && original[0].currency === t.currency
     && objectId(original[0].parent?.subscription_details?.subscription) === sub.id;
   const clear = originalValid && priorValid && invoices.every(row => row.livemode === live
-    && (row.id === t.invoiceId || row.status === 'void' || row.status === 'uncollectible'
+    && (row.id === t.invoiceId || row.status === 'void' || row.status === 'uncollectible' || abandoned.has(row.id)
       || t.priorPro?.autoRenew && row.status === 'paid'
         && objectId(row.parent?.subscription_details?.subscription) === t.priorPro.providerSubscriptionId))
     && invoiceItems.length === 0 && sub.schedule === null && sub.pending_update === null

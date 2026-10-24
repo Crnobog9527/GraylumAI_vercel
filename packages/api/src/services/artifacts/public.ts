@@ -12,7 +12,7 @@ export const publicWorkflowSchema = z.object({
    * Only whether it is configured; the manifest itself (sections, resources, limits) is never exposed.
    * Accepts the stored manifest or an already projected flag, so projecting twice keeps the answer.
    */
-  reportGeneration: z.unknown().transform(value => value === true || (typeof value === "object" && value !== null)),
+  reportGeneration: z.unknown().optional().transform(value => value === true || (typeof value === "object" && value !== null)),
   steps: z.array(
     z.object({
       id: z.string(),
