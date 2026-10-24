@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {contentVisibilityFence} from '../accountErasure/content';
-import {StagingAccessError,stagingProcedureError,stagingRpcFailure} from './stagingErrors';
+import {StagingAccessError,stagingProcedureError} from './stagingErrors';
 
 /** The frozen context fields the fence needs; the executor reports them before it can emit anything. */
 export type ObservedContext={libraryReferences?:unknown[];libraryRetrieval?:boolean;voiceBound?:boolean};
@@ -22,23 +22,12 @@ export function executionVisibility(database:SupabaseClient,actorId:string,execu
  return {
   observe(context){if(context.libraryReferences?.length||context.libraryRetrieval)referenced=true;if(context.voiceBound)voiceBound=true;},
   async visible(){
-   await content();
-   // VOICE (Owner 2026-10-23: a deleted voice must not be used, not even by the run in progress): a run bound to a
-   // voice version also stops being shown at once when that version is deleted.
-   if(voiceBound){
-    const voiceGone=await database.rpc('runtime_voice_sources_gone',{p_actor_id:actorId,p_execution_ids:[executionId]});
-    try{if(voiceGone.error)stagingRpcFailure(voiceGone.error);}
-    catch(cause){throw stagingProcedureError(cause,'runtime.voiceVisibility');}
-    if(!Array.isArray(voiceGone.data)||voiceGone.data.length)
-     // The page already ends the stream and withdraws the text on this code.
-     throw stagingProcedureError(new StagingAccessError('LIB_SOURCE_DELETED'),'runtime.voiceVisibility');
-   }
-   if(!referenced)return;
-   const gone=await database.rpc('runtime_library_sources_gone',{p_actor_id:actorId,p_execution_ids:[executionId]});
-   try{if(gone.error)stagingRpcFailure(gone.error);}
-   catch(cause){throw stagingProcedureError(cause,'runtime.libraryVisibility');}
-   if(!Array.isArray(gone.data)||gone.data.length)
-    throw stagingProcedureError(new StagingAccessError('LIB_SOURCE_DELETED'),'runtime.libraryVisibility');
+   // One round trip (DB-PERF PR-2A): content erasure (D7), then -- only for what this execution froze -- the voice
+   // version (VOICE, Owner 2026-10-23: a deleted voice must not be used, not even by the run in progress) and the
+   // library references. Still checked on every call; the page already ends the stream and withdraws the text on this code.
+   const gone=await content({voice:voiceBound,library:referenced});
+   if(gone)throw stagingProcedureError(new StagingAccessError('LIB_SOURCE_DELETED'),
+    gone==='voice'?'runtime.voiceVisibility':'runtime.libraryVisibility');
   },
  };
 }
