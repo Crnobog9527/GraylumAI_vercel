@@ -13,7 +13,7 @@ import { useEffect, useRef } from 'react';
 export const RUNTIME_VIEW_ACTIVE_POLL_MS = [5000, 8000, 12000] as const;
 /** The active interval moves to the next step after this long (ms) on the same execution. */
 export const RUNTIME_VIEW_BACKOFF_AFTER_MS = [30_000, 120_000] as const;
-export const RUNTIME_VIEW_IDLE_POLL_MS = 180_000;
+export const RUNTIME_VIEW_IDLE_POLL_MS = 60_000;
 /** States the server is still advancing by itself (same as the positioning page's step recovery). */
 const PROGRESSING_STATES = ['prepared', 'running'];
 
