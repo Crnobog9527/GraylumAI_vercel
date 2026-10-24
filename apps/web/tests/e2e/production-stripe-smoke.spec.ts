@@ -8,6 +8,7 @@ import { isAllowedHttpsUrl } from '../../src/lib/safe-url';
 import { expect, test } from '@playwright/test';
 import { authStatePaths } from './support/auth';
 import { gotoWithBypass } from './support/deploymentProtection';
+import { openMethodCheckoutDialog, payInMethodCheckoutDialog, settledPackBuyButton } from './support/methodCheckout';
 
 test.describe('production-only stripe smoke', () => {
   const productionBaseUrl = process.env.PLAYWRIGHT_BASE_URL ?? '';
@@ -38,18 +39,17 @@ test.describe('production-only stripe smoke', () => {
   test.describe('authenticated checkout smoke', () => {
     test.use({ storageState: authStatePaths.user });
 
-    test('credit package purchase redirects to Stripe Checkout for a normal user', async ({ page }) => {
+    test('credit package purchase redirects to Stripe Checkout for a paid member', async ({ page }) => {
       await gotoWithBypass(page, '/app/profile?tab=subscription');
 
       await expect(page.getByRole('heading', { name: '积分加油包' })).toBeVisible();
 
-      const responsePromise = page.waitForResponse((response) =>
-        response.url().includes('/api/trpc/payments.createCheckoutSession'),
-      );
+      // Packs are for paid members only; the buy button stays disabled for anyone else.
+      const buyButton = await settledPackBuyButton(page);
+      test.skip(await buyButton.isDisabled(), 'The smoke user cannot buy a credit package.');
 
-      await page.getByRole('button', { name: '购买' }).click();
-
-      const response = await responsePromise;
+      const dialog = await openMethodCheckoutDialog(page, buyButton);
+      const response = await payInMethodCheckoutDialog(page, dialog);
       expect(response.status()).toBe(200);
 
       await page.waitForURL(/(checkout|buy)\.stripe\.com/, { timeout: 20000 });
@@ -62,16 +62,10 @@ test.describe('production-only stripe smoke', () => {
       await expect(page.getByRole('heading', { name: '会员订阅' })).toBeVisible();
 
       const targetPlan = page.locator('[data-testid="profile-membership-plan-gold"]');
-
       await expect(targetPlan).toBeVisible();
 
-      const responsePromise = page.waitForResponse((response) =>
-        response.url().includes('/api/trpc/payments.createCheckoutSession'),
-      );
-
-      await targetPlan.getByRole('button', { name: '立即订阅' }).click();
-
-      const response = await responsePromise;
+      const dialog = await openMethodCheckoutDialog(page, targetPlan.getByRole('button').last());
+      const response = await payInMethodCheckoutDialog(page, dialog);
       expect(response.status()).toBe(200);
 
       await page.waitForURL(/(checkout|buy)\.stripe\.com/, { timeout: 20000 });

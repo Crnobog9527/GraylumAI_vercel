@@ -159,6 +159,10 @@
         {
           "name": "CONTENT-CONVERSATION-DRIVEN",
           "plain": "选题和写作改成自由对话，需要时自动用上对应平台的写作技巧。"
+        },
+        {
+          "name": "LOAD-SKILL",
+          "plain": "自由对话里，AI 自己判断要不要用上某个写作技能，不再另外花钱匹配。"
         }
       ]
     },
