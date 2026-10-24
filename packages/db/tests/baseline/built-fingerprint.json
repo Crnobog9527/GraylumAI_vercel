@@ -3921,7 +3921,7 @@
   "fn:research_tools_config_set(jsonb,text[],bigint,uuid)": "73677c4acb8a",
   "fn:research_tools_settings_guard()": "27d76b043a58",
   "fn:research_transition(text,uuid,uuid,uuid,jsonb)": "5c16d1242bae",
-  "fn:research_user_benchmarks(uuid,uuid)": "0725d3aee8c8",
+  "fn:research_user_benchmarks(uuid,uuid)": "dcadccca7dee",
   "fn:research_user_cards(uuid,uuid)": "70a3d9043809",
   "fn:research_user_charge(uuid,uuid,uuid,text)": "43e7695b80b8",
   "fn:research_user_evidence(uuid,integer,timestamp with time zone,uuid)": "2e514323a06f",

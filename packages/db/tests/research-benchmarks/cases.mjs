@@ -8,6 +8,7 @@ import {rpc,closeAccount} from '../erasure-b2a/cases.mjs';
 import {seed} from '../report-finalization/cases.mjs';
 import {benchmarkCode} from '../payg/research-runtime-host-cache.mjs';
 import {shortfallCases} from './shortfall-cases.mjs';
+import {relevanceCases} from './relevance-cases.mjs';
 import {keywordCardCases} from './keyword-cards-cases.mjs';
 import {smallNicheCases} from './small-niche-cases.mjs';
 
@@ -473,6 +474,7 @@ export async function runCases({db,Client,connectionString,report}) {
     } finally {await admit.end();await finisher.end();}
   });
   await shortfallCases({db,check,rpc,seed,answer,erase,fetchAccount,imitable,gate});
+  await relevanceCases({db,check,rpc,seed,answer,fetchAccount,imitable});
   await keywordCardCases({db,check,rpc,seed,answer});
   await smallNicheCases({db,check,rpc,seed,answer,fetchAccount,imitable,gate});
   assert.deepEqual(failures,[],failures.join('\n'));
