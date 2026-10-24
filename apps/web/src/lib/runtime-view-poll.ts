@@ -96,7 +96,9 @@ export function markRuntimeViewStreaming(streaming: { current: string | null }, 
   if (was && !next) void refetch();
 }
 
-export function useRuntimeViewStreaming(polling: { streaming: { current: string | null } }, streaming: string | null, refetch: () => unknown, enabled: boolean) {
+export function useRuntimeViewStreaming(
+  polling: { streaming: { current: string | null } }, streaming: string | null, refetch: () => unknown, enabled: boolean,
+) {
   const latest = useRef(refetch);
   useEffect(() => { latest.current = refetch; });
   useEffect(() => { markRuntimeViewStreaming(polling.streaming, streaming, () => enabled && latest.current()); }, [streaming, enabled, polling.streaming]);
