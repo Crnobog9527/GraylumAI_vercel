@@ -3,7 +3,7 @@
 // fetched posts' titles (captions, hashtags included) against the session's confirmed keywords; never a model guess.
 // A label for the benchmark table and its order only: it never decides whether an account qualifies (a new rule would
 // need an Owner decision).
-import type { EvidenceItem } from './metrics';
+import { distinctPosts, type EvidenceItem } from './metrics';
 
 export interface TopicRelevance {
   /** Share of analyzed posts whose title names one of the keywords (0–1). */
@@ -36,7 +36,8 @@ function names(title: string, keyword: string): boolean {
 
 /** null without keywords or without titled posts: nothing to say, not "low". */
 export function topicRelevance(posts: EvidenceItem[], keywords: readonly string[]): TopicRelevance | null {
-  const titled = posts.slice(0, 30).map(post => post.fields.title).filter((title): title is string => typeof title === 'string');
+  // Counted over the same distinct posts as the account's other metrics.
+  const titled = distinctPosts(posts).slice(0, 30).map(post => post.fields.title).filter((title): title is string => typeof title === 'string');
   const terms = keywords.map(keyword => keyword.trim()).filter(Boolean);
   if (terms.length === 0 || titled.length === 0) return null;
   const matched = titled.filter(title => terms.some(keyword => names(normalize(title), keyword))).length;
