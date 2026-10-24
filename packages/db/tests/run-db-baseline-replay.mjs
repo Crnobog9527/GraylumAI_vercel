@@ -147,6 +147,16 @@ try {
     const audit = ok(psql(read('packages/db/tests/account-open-policy-audit.sql')), 'Account-open audit');
     report.accountOpenAudit = audit ? audit.split('\n') : [];
     if (report.accountOpenAudit.length > 0) report.failed = { step: 'account-open-policy-audit' };
+    // DATA-ERASURE T17: erased tables keep a working guard, and every owner table is wired into erasure.
+    for (const [key, file] of [['erasureConstraintAudit', 'erasure-constraint-audit'], ['erasureCoverageAudit', 'erasure-coverage-audit']]) {
+      const rows = ok(psql(read(`packages/db/tests/${file}.sql`)), file);
+      report[key] = rows ? rows.split('\n') : [];
+      if (report[key].length > 0) report.failed ??= { step: file };
+    }
+    // The coverage audit must see an unwired owner table (probe created and rolled back in one session).
+    const probe = ok(psql(`BEGIN;CREATE TABLE public.erasure_coverage_probe(actor_id uuid);\n${
+      read('packages/db/tests/erasure-coverage-audit.sql')}\nROLLBACK;`), 'erasure coverage probe');
+    if (!/^erasure_coverage_probe\|owner_table_not_wired\|$/m.test(probe)) report.failed ??= { step: 'erasure-coverage-audit probe' };
     if (option('--out')) writeFileSync(option('--out'), JSON.stringify({ groups: local, objects: localDetail }, null, 1));
     if (option('--staging')) {
       report.comparison = compare(local, localDetail, JSON.parse(readFileSync(option('--staging'), 'utf8')),

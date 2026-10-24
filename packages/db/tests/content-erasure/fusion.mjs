@@ -29,7 +29,13 @@ export async function runFusion(db,report){
  assert.equal(await rpc(db,'fusion_call_output_read',f.actor,c.id),null);
  const r=(await db.query('SELECT content_deleted_at,closed FROM bill2_runs WHERE id=$1',[run.run])).rows[0];
  assert.ok(r.content_deleted_at&&r.closed,'the group run is marked and closed');
- report.checks.push('deleting a whole positioning draft deletes the Fusion outputs started from its conversation and closes the group runs');
+ // A reviewer answer that arrives after the deletion must not bring the body back.
+ for(const body of ['draft review body','late review body after deletion'])
+  await assert.rejects(rpc(db,'fusion_call_output_save',f.actor,c.id,body),/FUSION_OUTPUT_DENIED/);
+ assert.equal((await db.query('SELECT count(*)::int n FROM fusion_call_outputs WHERE group_id=$1 OR call_id=$2',[group,c.id])).rows[0].n,0,
+  'a late Fusion save after deletion stores nothing');
+ assert.equal(await rpc(db,'fusion_call_output_read',f.actor,c.id),null);
+ report.checks.push('deleting a whole positioning draft deletes the Fusion outputs started from its conversation and closes the group runs; a late output save is refused and stores nothing');
 }
 
 // FUSION-COMPARE PR-1 (0290): a compare record is removed with its source conversation's draft, and a compare
