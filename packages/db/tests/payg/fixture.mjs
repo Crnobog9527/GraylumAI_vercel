@@ -21,9 +21,10 @@ export async function createFixture(db,options={}) {
       idempotency_key,balance_before,balance_after) VALUES($1,$2::int,'addition','grant','opening_grant','system',$3,0,$2::int)`,
     [actor,credits,'opening_grant:'+actor]);
   }
-  const modelId = randomUUID();
-  const model = 'payg-local-'+modelId;
-  await db.query("INSERT INTO ai_models(id,model_id,name,provider,is_active) VALUES($1,$2,'PAYG local',$3,true)",[modelId,model,provider]);
+  // sameModel: another fixture whose model this one shares (DB-PERF cross-user lock cases).
+  const modelId = options.sameModel?.claimPayload.billingUnit.modelId ?? randomUUID();
+  const model = options.sameModel?.claimPayload.model ?? 'payg-local-'+modelId;
+  if (!options.sameModel) await db.query("INSERT INTO ai_models(id,model_id,name,provider,is_active) VALUES($1,$2,'PAYG local',$3,true)",[modelId,model,provider]);
   const draft = await rpc(db,'bill2_create_draft',actor);
   const pricingHash = 'a'.repeat(64);
   const endpointTag = 'fixture/exact';
@@ -67,7 +68,7 @@ export async function createFixture(db,options={}) {
       billingUnit:{version:'bill-unit-v2',creditsPerUsd:q,defaultMultiplier:multiplier,hash:'f'.repeat(64)}},
     limits:{costUsd:'0.1',credits:0,maxPreDeduct:0,maxCalls:8,deadline:new Date(Date.now()+3600000).toISOString()}};
   // Each fixture adds its exact model threshold without changing other concurrent fixture models.
-  await db.query(`INSERT INTO system_settings(key,value) VALUES('billing_payg_start_thresholds',$1::jsonb)
+  if (!options.sameModel) await db.query(`INSERT INTO system_settings(key,value) VALUES('billing_payg_start_thresholds',$1::jsonb)
     ON CONFLICT(key) DO UPDATE SET value=jsonb_set(system_settings.value,'{thresholds}',
       coalesce(system_settings.value->'thresholds','[]')||(excluded.value->'thresholds'))`,
   [{version:'local-v1',thresholds:policies.map(p=>({model:p.model,purpose:phase,credits:threshold}))}]);
