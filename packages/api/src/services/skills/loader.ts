@@ -37,6 +37,9 @@ export interface SkillSource {
   list(): Promise<readonly PackageDescriptor[]>;
   state(identity: PackageIdentity): Promise<ExecutionState>;
   read(identity: ResourceIdentity, maxBytes: number): Promise<Uint8Array>;
+  /** DB-PERF PR-4: one fresh check of current access and, in the same call, the bytes of every listed file of this
+   * exact package. An empty list is the check alone. Refuses (UNAVAILABLE) whenever state() would not be 'enabled'. */
+  readMany?(identity: PackageIdentity, files: readonly { path: string; bytes: number }[]): Promise<ReadonlyMap<string, Uint8Array>>;
 }
 export function sha256(bytes: Uint8Array | string): string { return createHash('sha256').update(bytes).digest('hex'); }
 export function assertPath(path: string): void {
@@ -103,7 +106,7 @@ const RESOURCE_CACHE_ENTRIES = 256, RESOURCE_CACHE_BYTES = 16 * 1024 * 1024, RES
 const resourceCache = new Map<string, { text: string; bytes: number }>();
 let resourceCacheBytes = 0;
 /** Test isolation only. */
-export function clearSkillResourceCache(): void { resourceCache.clear(); resourceCacheBytes = 0; }
+export function clearSkillResourceCache(): void { resourceCache.clear(); resourceCacheBytes = 0; descriptorCache.clear(); }
 function cacheResource(key: string, text: string, bytes: number) {
   if (bytes > RESOURCE_CACHE_FILE_BYTES) return;
   // Concurrent misses may fill the same key; count its bytes only once.
@@ -115,21 +118,79 @@ function cacheResource(key: string, text: string, bytes: number) {
     resourceCache.delete(oldest); resourceCacheBytes -= entry.bytes;
   }
 }
-async function readVerified(source: SkillSource, p: PackageDescriptor, path: string): Promise<string> {
+type PackageFile = PackageDescriptor['files'][number];
+function fileOf(p: PackageDescriptor, path: string): PackageFile {
   const file = p.files.find(f => f.path === path);
   if (!file) fail('RESOURCE_MISSING');
-  const key = JSON.stringify([p.packageId, p.revisionId, p.packageHash, path, file.sha256, file.bytes]);
+  return file;
+}
+function cachedText(p: PackageDescriptor, file: PackageFile): string | undefined {
+  const key = JSON.stringify([p.packageId, p.revisionId, p.packageHash, file.path, file.sha256, file.bytes]);
   const cached = resourceCache.get(key);
-  if (cached) { resourceCache.delete(key); resourceCache.set(key, cached); return cached.text; }
-  // A source read still requires current access immediately before it.
-  await enabled(source, p);
-  const bytes = await guarded(() => source.read({ ...identityOf(p), path }, file.bytes));
+  if (!cached) return undefined;
+  resourceCache.delete(key); resourceCache.set(key, cached); return cached.text;
+}
+function verifiedText(p: PackageDescriptor, file: PackageFile, bytes: Uint8Array): string {
   if (bytes.byteLength !== file.bytes || sha256(bytes) !== file.sha256) fail('INTEGRITY_MISMATCH');
   let text: string;
   try { text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes); }
   catch { return fail('INVALID_FORMAT'); }
-  cacheResource(key, text, bytes.byteLength);
+  cacheResource(JSON.stringify([p.packageId, p.revisionId, p.packageHash, file.path, file.sha256, file.bytes]), text, bytes.byteLength);
   return text;
+}
+async function readVerified(source: SkillSource, p: PackageDescriptor, path: string): Promise<string> {
+  const file = fileOf(p, path);
+  const cached = cachedText(p, file);
+  if (cached !== undefined) return cached;
+  // A source read still requires current access immediately before it.
+  await enabled(source, p);
+  return verifiedText(p, file, await guarded(() => source.read({ ...identityOf(p), path }, file.bytes)));
+}
+/** DB-PERF PR-4: the texts of `paths` from a batch source, with exactly one fresh access check. Cached files are not
+ * read again, but the check is always made, even when every file is cached; the uncached files arrive in that same
+ * checked call. It is the last remote step before the caller hands the texts on, so it stands for both AC-0c checks
+ * (before private reads and before returning): only in-memory assembly follows it. */
+async function checkedTexts(source: SkillSource, p: PackageDescriptor, paths: readonly string[]): Promise<Map<string, string>> {
+  const texts = new Map<string, string>(), missing: PackageFile[] = [];
+  for (const path of new Set(paths)) {
+    const file = fileOf(p, path), cached = cachedText(p, file);
+    if (cached === undefined) missing.push(file); else texts.set(path, cached);
+  }
+  const read = await guarded(() => source.readMany!(identityOf(p), missing.map(f => ({ path: f.path, bytes: f.bytes }))));
+  for (const file of missing) {
+    const bytes = read.get(file.path);
+    if (!bytes) fail('SOURCE_FAILURE');
+    texts.set(file.path, verifiedText(p, file, bytes));
+  }
+  return texts;
+}
+/** A batch source's reply: exactly the requested files, base64 encoded (read_skill_package with p_paths, 0347). */
+export function batchFiles(data: unknown, files: readonly { path: string }[]): Map<string, Uint8Array> {
+  const read = (data as { files?: unknown } | null)?.files;
+  if (!read || typeof read !== 'object' || Array.isArray(read)) fail('SOURCE_FAILURE');
+  const entries = Object.entries(read as Record<string, unknown>);
+  if (entries.length !== new Set(files.map(f => f.path)).size || entries.some(([path, value]) =>
+    typeof value !== 'string' || !files.some(f => f.path === path))) fail('SOURCE_FAILURE');
+  return new Map(entries.map(([path, value]) => [path, Buffer.from(value as string, 'base64')]));
+}
+/** The total bytes a batch read may return. */
+export function batchBytes(files: readonly { bytes: number }[]): number { return files.reduce((sum, f) => sum + f.bytes, 0); }
+
+/** DB-PERF PR-4: process-local cache of validated descriptors by exact identity. A revision's package never changes and
+ * validateDescriptor binds the descriptor to its packageHash, so a hit can only be the same descriptor. Only sources whose
+ * identity is already frozen with its packageHash use it, and only for list(): every loader path checks current access
+ * after a listing and before any private content leaves it, so a cached listing never stands in for a check. */
+const DESCRIPTOR_CACHE_ENTRIES = 256;
+const descriptorCache = new Map<string, PackageDescriptor>();
+export async function frozenDescriptor(identity: PackageIdentity, load: () => Promise<unknown>): Promise<PackageDescriptor> {
+  const key = JSON.stringify([identity.packageId, identity.revisionId, identity.packageHash]);
+  const cached = descriptorCache.get(key);
+  if (cached) { descriptorCache.delete(key); descriptorCache.set(key, cached); return structuredClone(cached); }
+  const descriptor = validateDescriptor(await load());
+  if (!sameIdentity(descriptor, identity)) fail('UNAVAILABLE');
+  descriptorCache.set(key, structuredClone(descriptor));
+  for (const oldest of descriptorCache.keys()) { if (descriptorCache.size <= DESCRIPTOR_CACHE_ENTRIES) break; descriptorCache.delete(oldest); }
+  return descriptor;
 }
 function metadataFor(entry: string, p: PackageDescriptor) {
   const parsed = parseSkillEntry(entry, p.directoryName);
@@ -153,9 +214,17 @@ async function inventory(source: SkillSource): Promise<PackageDescriptor[]> {
 export async function discoverSkills(source: SkillSource): Promise<DiscoveredSkill[]> {
   const discovered: DiscoveredSkill[] = [];
   for (const p of await inventory(source)) {
-    if (await guarded(() => source.state(p)) !== 'enabled') continue;
-    const metadata = metadataFor(await readVerified(source, p, 'SKILL.md'), p);
-    await enabled(source, p);
+    let entry: string;
+    if (source.readMany) {
+      // One checked call; a refusal skips the package as a non-enabled state did.
+      try { entry = (await checkedTexts(source, p, ['SKILL.md'])).get('SKILL.md')!; }
+      catch (error) { if (error instanceof SkillLoadError && error.code === 'UNAVAILABLE') continue; throw error; }
+    } else {
+      if (await guarded(() => source.state(p)) !== 'enabled') continue;
+      entry = await readVerified(source, p, 'SKILL.md');
+    }
+    const metadata = metadataFor(entry, p);
+    if (!source.readMany) await enabled(source, p);
     discovered.push({ selection: identityOf(p), public: { packageId: p.packageId, revisionId: p.revisionId, ...metadata } });
   }
   return discovered;
@@ -180,7 +249,8 @@ export async function activateSkill(source: SkillSource, selection: PackageIdent
   if (!Number.isSafeInteger(options.maxContextBytes) || options.maxContextBytes < 1 || options.maxContextBytes > 2 * 1024 * 1024) fail('CAPACITY_EXCEEDED');
   const p = (await inventory(source)).find(candidate => sameIdentity(candidate, selected.data));
   if (!p) fail('UNAVAILABLE');
-  await enabled(source, p);
+  const batch = Boolean(source.readMany);
+  if (!batch) await enabled(source, p);
   let roots: string[] = [];
   // Only the trusted workflow host supplies resources, from the immutable,
   // validated round. This does not change package identity or legacy task selection.
@@ -203,18 +273,19 @@ export async function activateSkill(source: SkillSource, selection: PackageIdent
   ['SKILL.md', ...roots].forEach(visit);
   // Fail before reading methods when even the raw method bytes cannot fit.
   if ([...paths].reduce((sum, path) => sum + p.files.find(f => f.path === path)!.bytes, 0) > options.maxContextBytes) fail('CAPACITY_EXCEEDED');
-  // A small bounded batch avoids serial network waits without flooding the database.
-  // readVerified still checks current access before each uncached private read;
-  // the fresh check below covers the whole assembled context, including cache hits.
-  const entry = await readVerified(source, p, 'SKILL.md');
+  // A batch source checks access and returns every uncached file in one call (checkedTexts). Otherwise a small
+  // bounded batch avoids serial network waits without flooding the database: readVerified still checks current
+  // access before each uncached private read, and the fresh check below covers the whole assembled context.
+  const texts = batch ? await checkedTexts(source, p, [...paths]) : undefined;
+  const entry = texts?.get('SKILL.md') ?? await readVerified(source, p, 'SKILL.md');
   const metadata = metadataFor(entry, p);
   const methods = await readResourceBatch([...paths].filter(path => path !== 'SKILL.md'),
-    async path => ({path, content: await readVerified(source, p, path)}));
+    async path => ({path, content: texts?.get(path) ?? await readVerified(source, p, path)}));
   const sections = [{path: 'SKILL.md', content: entry}, ...methods];
   // JSON encoding gives explicit boundaries without trusting markup in private files.
   const context = JSON.stringify({ skill: identityOf(p), resources: sections });
   if (Buffer.byteLength(context, 'utf8') > options.maxContextBytes) fail('CAPACITY_EXCEEDED');
-  await enabled(source, p);
+  if (!batch) await enabled(source, p);
   return new LoadedSkill(context, [...paths].map(path => ({ ...identityOf(p), path })), { packageId: p.packageId, revisionId: p.revisionId, ...metadata });
 }
 
@@ -226,10 +297,12 @@ export async function readSkillResource(source: SkillSource, selection: PackageI
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > 2 * 1024 * 1024) fail('CAPACITY_EXCEEDED');
   const p = (await inventory(source)).find(candidate => sameIdentity(candidate, selection));
   if (!p) fail('UNAVAILABLE');
-  await enabled(source, p);
+  if (!source.readMany) await enabled(source, p);
   const file = p.files.find(item => item.path === path);
   if (!file) fail('RESOURCE_MISSING');
   if (file.bytes > maxBytes) fail('CAPACITY_EXCEEDED');
+  // A batch source: one checked call, even on a cache hit (checkedTexts).
+  if (source.readMany) return (await checkedTexts(source, p, [path])).get(path)!;
   const text = await readVerified(source, p, path);
   await enabled(source, p);
   return text;

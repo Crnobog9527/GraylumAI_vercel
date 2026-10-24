@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
-import { validateDescriptor, sameIdentity, SkillLoadError, type SkillSource } from '../skills/loader';
+import { batchBytes, batchFiles, frozenDescriptor, sameIdentity, SkillLoadError, type SkillSource } from '../skills/loader';
 import { catalogEntry, entryInstructions, loadSkillResult, type SkillCatalogEntry } from './skillCatalog';
 import type { RuntimeTool } from './runner';
 import type { ToolRpc } from './skillFileExecution';
@@ -43,11 +43,11 @@ export function loadSkillToolBytes(): number {
 function frozenSource(rpc: ToolRpc, entry: SkillCatalogEntry): SkillSource {
   // The package reader refuses a revoked revision or a disabled module for good; the loader would hide that as a source
   // failure (a retry), so it is translated into a load error that is not SOURCE_FAILURE.
-  const read = async <T>(path: string | null, maxBytes = 2097152) => {
+  const read = async <T>(path: string | null, maxBytes = 2097152, paths?: readonly string[]) => {
     try {
       return await rpc<T>('read_skill_package', {
         p_module_id: entry.moduleId, p_skill_id: entry.skillId, p_revision_id: entry.revisionId,
-        p_package_hash: entry.packageHash, p_path: path, p_max_bytes: maxBytes,
+        p_package_hash: entry.packageHash, p_path: path, p_max_bytes: maxBytes, ...(paths ? { p_paths: paths } : {}),
       });
     } catch (error) {
       if (error instanceof Error && error.message === 'RUNTIME_SKILL_FILE_REFUSED') throw new SkillLoadError('UNAVAILABLE');
@@ -55,13 +55,19 @@ function frozenSource(rpc: ToolRpc, entry: SkillCatalogEntry): SkillSource {
     }
   };
   return {
-    list: async () => [validateDescriptor(await read(null))],
+    // DB-PERF PR-4: the frozen identity includes the packageHash, so its listing may come from the process cache; the
+    // loader still makes a checked read (readMany) before any instruction is returned.
+    list: async () => [await frozenDescriptor(entry, () => read(null))],
     state: async identity => (sameIdentity(identity, entry) && await read('') === true ? 'enabled' : 'denied'),
     read: async (identity, maxBytes) => {
       if (!sameIdentity(identity, entry)) throw new Error('RUNTIME_SKILL_LOAD_DENIED');
       const value = await read<unknown>(identity.path, maxBytes);
       if (typeof value !== 'string') throw new Error('RUNTIME_SKILL_LOAD_DENIED');
       return Buffer.from(value, 'base64');
+    },
+    readMany: async (identity, files) => {
+      if (!sameIdentity(identity, entry)) throw new Error('RUNTIME_SKILL_LOAD_DENIED');
+      return batchFiles(await read<unknown>(null, batchBytes(files), files.map(f => f.path)), files);
     },
   };
 }
