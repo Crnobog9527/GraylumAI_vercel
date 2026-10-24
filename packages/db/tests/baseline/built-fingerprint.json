@@ -3167,7 +3167,7 @@
   "fn:account_erasure_profile_guard()": "aa79440147a6",
   "fn:account_erasure_progress_issue(uuid,uuid,text)": "4dd2789c1d3d",
   "fn:account_erasure_progress_read(uuid,text)": "dbcd03b12bf4",
-  "fn:account_erasure_prune_business(uuid,integer)": "4d6a81720e8e",
+  "fn:account_erasure_prune_business(uuid,integer)": "60a322a88e82",
   "fn:account_erasure_renewal_channels(uuid)": "84935a976cf4",
   "fn:account_erasure_renewing(uuid)": "d6de73ea342f",
   "fn:account_erasure_scrub_calls(uuid,uuid)": "66f592cc079f",
