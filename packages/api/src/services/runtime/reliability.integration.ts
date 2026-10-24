@@ -204,12 +204,16 @@ it.each(['charged', 'uncharged', 'live-lease', 'unknown-cost'] as const)
     } };
     await runtimeExecutor({ ...f.options, database }).execute(f.admitted.executionId).catch(() => undefined);
     const charged = mode === 'uncharged' ? 0 : 3;
-    // The unsent claim still holds credits (the balance shows them as reserved).
+    // The unsent claim still holds credits on its call row; the balance already excludes them.
     const stuck = await f.snapshot();
     expect(stuck).toMatchObject({ execution_state: 'running', active_execution: f.admitted.executionId,
-      closed: false, charged, calls: deadAfter });
-    expect(stuck.reserved).toBeGreaterThan(0);
-    expect(stuck.credits).toBe(100 - charged - stuck.reserved);
+      closed: false, calls: deadAfter });
+    expect(stuck.charged ?? 0).toBe(charged);
+    const held = async () => (await f.db.query(`select coalesce(sum(reserved_credits),0)::int n from bill2_calls
+      where run_id=$1 and state='prepared'`, [f.admitted.runId])).rows[0].n;
+    const holding = await held();
+    expect(holding).toBeGreaterThan(0);
+    expect(stuck.credits).toBe(100 - charged - holding);
     // Age only this disposable fixture.
     const lease = mode === 'live-lease' ? '30 seconds' : '10 minutes';
     await f.db.query("update runtime_executions set created_at=now()-interval '20 minutes' where id=$1", [f.admitted.executionId]);
@@ -234,11 +238,13 @@ it.each(['charged', 'uncharged', 'live-lease', 'unknown-cost'] as const)
       expect(await f.snapshot()).toMatchObject({ execution_state: 'cancelled', active_execution: null, closed: true,
         credits: 100, ledger: 100, reserved: 0, spends: 0 });
       expect(calls).toEqual([{ sequence: 1, state: 'cancelled' }]);
+      expect(await held()).toBe(0);
     } else {
       // Charged: the session is freed and the owner fenced; the round stays open for the 24-hour refund.
       expect(await f.snapshot()).toMatchObject({ execution_state: 'interrupted', active_execution: null, closed: false,
         credits: 97, ledger: 97, reserved: 0, spends: 1 });
       expect(calls).toEqual([{ sequence: 1, state: 'responded' }, { sequence: 2, state: 'cancelled' }]);
+      expect(await held()).toBe(0);
       expect((await f.db.query('select failure_code from runtime_executions where id=$1', [f.admitted.executionId])).rows[0])
         .toEqual({ failure_code: 'RUNTIME_INTERRUPTED_RELEASED' });
       const obsolete = await f.admin.rpc('runtime_execution', { p_actor_id: f.actor,
