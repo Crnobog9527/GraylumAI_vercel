@@ -3,15 +3,15 @@
     "package": "post-and-article",
     "path": "EVALS.md",
     "mediaType": "text/markdown",
-    "bytes": 1391,
-    "sha256": "457a2b3a7f185fa1183654cfc53e8ecef4e7eefea4b81902f74093f9a57411ca"
+    "bytes": 2138,
+    "sha256": "71da028497b177a6eec5bf56f413b44af340a5c5742ce8c6a0670081d361cb4d"
   },
   {
     "package": "post-and-article",
     "path": "SKILL.md",
     "mediaType": "text/markdown",
-    "bytes": 9270,
-    "sha256": "ac2a52d4066e02dcceb4430df73539e06b825a9a44a7e0c5f925e701688f2bcb"
+    "bytes": 10427,
+    "sha256": "e6927cafd42adf7764d210501448590933e2a93b66c745520c036186c478a438"
   },
   {
     "package": "post-and-article",
@@ -24,15 +24,15 @@
     "package": "short-video-script",
     "path": "EVALS.md",
     "mediaType": "text/markdown",
-    "bytes": 2093,
-    "sha256": "108e4cf967ba1a8ed6b62372dce5fcd8d85213639c640efd5f2d634554dd97e4"
+    "bytes": 3114,
+    "sha256": "652b86a389f160c5cbd79f7d66b88a55c556797c2a732b0292cf449084ad2a19"
   },
   {
     "package": "short-video-script",
     "path": "SKILL.md",
     "mediaType": "text/markdown",
-    "bytes": 11862,
-    "sha256": "34d34140f0a25cb757e3d2c960c8ef77c6d71c4f304ca68b08148bc31264711e"
+    "bytes": 13550,
+    "sha256": "ca028a6a3ba0f946eea768fa29fd2bd9d22a347206f2a17ccfe9cd27d13cae4f"
   },
   {
     "package": "short-video-script",
@@ -73,8 +73,8 @@
     "package": "video-storyboard",
     "path": "SKILL.md",
     "mediaType": "text/markdown",
-    "bytes": 7933,
-    "sha256": "5d1aa41004710021a3ce3a7daa508a4210b9cd4ee0c8c868a242660941917893"
+    "bytes": 7939,
+    "sha256": "0604f7d3ddf9c2f1cc9981c43536a7d274e4890097fdd6fc03ca47f20bd9f30a"
   },
   {
     "package": "video-storyboard",

@@ -159,6 +159,10 @@
         {
           "name": "CONTENT-CONVERSATION-DRIVEN",
           "plain": "选题和写作改成自由对话，需要时自动用上对应平台的写作技巧。"
+        },
+        {
+          "name": "LOAD-SKILL",
+          "plain": "自由对话里，AI 自己判断要不要用上某个写作技能，不再另外花钱匹配。"
         }
       ]
     },
@@ -381,6 +385,10 @@
         {
           "name": "DB-BASELINE",
           "plain": "正式数据库能从仓库里的文件一步建出来。"
+        },
+        {
+          "name": "DB-PERF",
+          "plain": "数据库读写优化：最小档数据库也能扛住 50 人同时高频对话。"
         },
         {
           "name": "STAGING-HOST-CLEANUP",

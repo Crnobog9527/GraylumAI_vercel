@@ -7,6 +7,7 @@
 import { expect, test } from '@playwright/test';
 import { authStatePaths } from './support/auth';
 import { gotoWithBypass } from './support/deploymentProtection';
+import { openMethodCheckoutDialog, payInMethodCheckoutDialog } from './support/methodCheckout';
 
 test.describe('preview-only stripe smoke', () => {
   const previewBaseUrl = process.env.PLAYWRIGHT_BASE_URL ?? '';
@@ -35,18 +36,16 @@ test.describe('preview-only stripe smoke', () => {
   test.describe('authenticated checkout smoke', () => {
     test.use({ storageState: authStatePaths.user });
 
-    test('credit package purchase redirects to Stripe Checkout for a normal user', async ({ page }) => {
+    test('membership purchase redirects to Stripe Checkout for a normal user', async ({ page }) => {
       await gotoWithBypass(page, '/app/profile?tab=subscription');
 
-      await expect(page.getByRole('heading', { name: '积分加油包' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: '会员订阅' })).toBeVisible();
 
-      const responsePromise = page.waitForResponse((response) =>
-        response.url().includes('/api/trpc/payments.createCheckoutSession'),
-      );
+      const targetPlan = page.locator('[data-testid="profile-membership-plan-gold"]');
+      await expect(targetPlan).toBeVisible();
 
-      await page.getByRole('button', { name: '购买' }).first().click();
-
-      const response = await responsePromise;
+      const dialog = await openMethodCheckoutDialog(page, targetPlan.getByRole('button').last());
+      const response = await payInMethodCheckoutDialog(page, dialog);
       expect(response.status()).toBe(200);
 
       await page.waitForURL(/(checkout|buy)\.stripe\.com\/c\/pay\/cs_test_/, { timeout: 20000 });

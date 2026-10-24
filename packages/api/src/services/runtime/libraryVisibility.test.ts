@@ -12,6 +12,10 @@ function database(state:{live:boolean;error?:boolean}){
  const rpc=vi.fn(async(name:string,args:Record<string,unknown>)=>{
   calls.push(name);
   if(name==='content_erasure_visible')return {data:true,error:null};
+  if(name==='runtime_voice_sources_gone'){
+   expect(args).toEqual({p_actor_id:actor,p_execution_ids:[execution]});
+   return state.error?{data:null,error:{code:'57014',message:'timeout'}}:{data:state.live?[]:[execution],error:null};
+  }
   if(name==='runtime_library_sources_gone'){
    expect(args).toEqual({p_actor_id:actor,p_execution_ids:[execution]});
    return state.error?{data:null,error:{code:'57014',message:'timeout'}}:{data:state.live?[]:[execution],error:null};
@@ -86,3 +90,24 @@ it('C (#1022 P1): a version change is not a deletion: the stream keeps showing t
   : { data: name === 'runtime_library_sources_gone' ? [execution] : false, error: null });
  await expect(fence.visible()).rejects.toMatchObject({ message: expect.stringMatching(/^LIB_SOURCE_DELETED：/) });
 });
+
+it('VOICE (Owner: deleted means unusable, also for the run in progress): a run bound to a voice version shows nothing once it is gone',async()=>{
+ const state={live:true},db=database(state),fence=executionVisibility(db.client,actor,execution);
+ fence.observe({});await fence.visible();
+ expect(db.calls).toEqual(['content_erasure_visible']); // not bound: no extra check
+ fence.observe({voiceBound:true});
+ await fence.visible();
+ state.live=false;
+ await expect(fence.visible()).rejects.toMatchObject({code:'PRECONDITION_FAILED',message:expect.stringMatching(/^LIB_SOURCE_DELETED：/)});
+ const broken=executionVisibility(database({live:true,error:true}).client,actor,execution);
+ broken.observe({voiceBound:true});
+ await expect(broken.visible()).rejects.toMatchObject({code:'SERVICE_UNAVAILABLE'});
+});
+
+it('the executor reports a frozen voice version to the fence',()=>{
+ const seen:unknown[]=[];
+ observeContext({onContext:(context:unknown)=>seen.push(context)} as never,{state:'running',context:{voiceProfile:{versionId:execution}}});
+ observeContext({onContext:(context:unknown)=>seen.push(context)} as never,{state:'running',context:{voiceProfile:{}}});
+ expect(seen).toEqual([expect.objectContaining({voiceBound:true}),expect.objectContaining({voiceBound:false})]);
+});
+

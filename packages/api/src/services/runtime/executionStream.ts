@@ -186,7 +186,7 @@ export async function* streamOriginalExecution(run:(onProgress:(event:RuntimePro
    else textEvent={type:'text',text:event.text};
   }
   else if(event.type==='card'){if(!cardSeen){cardSeen=true;cardEvent=event;}}
-  else if(event.type==='research_call'||event.type==='research_card'||event.type==='agent_tool'){
+  else if(event.type==='research_call'||event.type==='research_card'||event.type==='research_continue'||event.type==='agent_tool'){
    if(researchSeen++<RESEARCH_EVENT_LIMIT){
     // Text written before this call is delivered before it: the queue keeps the turn's order.
     if(textEvent){researchEvents.push(nativePending?transport.flush()!:textEvent);nativePending=false;textEvent=undefined;}

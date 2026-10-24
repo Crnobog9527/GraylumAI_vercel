@@ -11,7 +11,8 @@ import {visibleText,nativeMetadata,prepareNativePrimary,nativeFrameProjection,
 import {paygOwnerDatabase} from './paygOwner';
 import {executorRpc,historyGuard,terminalReplyGuard,recoverExecutorFinancial,observeContext,interruptForCapacity,
  preflightCodes,platformFailureReason,hash,progressEmitter,diagnosticCode,failBeforeDispatch,cancelWithCode,type RuntimeExecutorOptions} from './executorRpc';
-import {fitNativeRequestOutput,runtimePaygCall, type ResumeInput, type PaygWait, type PaygPosition} from './paygRuntime';
+import {fitNativeRequestOutput,runtimePaygCall, type ResumeInput, type PaygWait} from './paygRuntime';
+import {recordPaygWait,stopCheckOrNull,waitsOnClaimFailure} from './paygWaitRecord';
 import {beginPaygExecution, type RuntimeExecution} from './paygResume';
 import {runtimeContext} from './runtimeContext';
 import {assertExecutionTools} from './executeContextChecks';
@@ -39,7 +40,7 @@ import { PostgresSession } from './session';
 import { runRuntime } from './runner';
 import { selectRuntimeHistory, selectRuntimeCallInput, projectSupersededScopeItem, requestsHistoricalComparison, assertRuntimeRequestCapacity, runtimeScopeInput } from './context';
 import { matchingInput, MATCH_INSTRUCTIONS, parseMatch } from './matching';
-import { withExecutionVoice } from './voiceAdmission';
+import { withVoice } from './voiceCatalog';
 import { callBillingUnit } from './billingUnitAdmission';
 import type {GateRejection} from './newWorkGate';
 import {allowedOutput} from './moderation';
@@ -115,7 +116,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   const invalidResponse=():never=>{replayFailureCode='RUNTIME_RESPONSE_INVALID';throw new Error(replayFailureCode);};
   const checkAgentReply=terminalReplyGuard(agentTurn,context.tools.includes(ASK_QUESTION_TOOL),()=>{
    terminalReplyFailure=true;replayFailureCode='RUNTIME_TERMINAL_REPLY';},
-   Boolean(context.skillFile),Boolean(context.historyRead),research?.tools.map(tool=>tool.name));
+   Boolean(context.skillFile),Boolean(context.historyRead),research?.tools);
   let preflightFailure:string|undefined,transportFailureCode:string|undefined,replayFailureCode:string|undefined;
   const streaming=streamsPrimary(context);
   // B2a: once BILL2 reports a confirmed erasure, nothing more reaches the client.
@@ -178,6 +179,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
         if(isPayg&&context.reportGeneration&&error instanceof Error&&
          (error.message==='REPORT_MEMBERSHIP_REQUIRED'||error.message==='REPORT_ENTITLEMENTS_UNAVAILABLE'
           ||error.message==='REPORT_SOURCE_CONFLICT'))reportFailure=error.message;
+        if(waitsOnClaimFailure(isPayg,sequence,error))pause('waiting_resume');
         throw error;
        });
       if(claim.id===null)pause('waiting_credits');
@@ -255,7 +257,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
      effective={model:candidate.model,instructions,maxOutputTokens:candidate.outputLimit,role:'skill',contentSource:candidate.contentSource,moduleId};
     }
    }
-   effective.instructions=await withExecutionVoice(options.database,await options.actor(),effective.instructions,context,effective.moduleId);
+   effective.instructions=await withVoice(options,effective.instructions,context,effective.moduleId);
    const {tools,toolBytes,catalogReserve}=executionTools({context,executionId,args,agentTurn,grounded,fiveFields,sources:()=>sources,ownerRpc,budget,
     execution,research,exchange,onProgress:progress,onRefused:()=>{terminalReplyFailure=true;}});
    // A2: a derived-content Skill gets its saved source in this call's instructions, read and recorded in one transaction.
@@ -429,16 +431,14 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
    claimNotice??=billingClaimNotice(error);
    if(error instanceof Error&&error.message===POSITIONING_REFUSED)return endPositioningRefusal(ownerRpc,args,isPayg);
    if(error instanceof ContentSourceRefusal)return {...await cancelRound(ownerRpc,args),code:error.code,notice:CONTENT_SOURCE_MESSAGES[error.code]};
-   if(nativeProgress&&!accountClosed&&!moderationBlocked){const done=await finishStop(executionId,onProgress,undefined,execution.live);if(done)return done;}
+   if(nativeProgress&&!accountClosed&&!moderationBlocked){
+    const done=await stopCheckOrNull(executionId,()=>finishStop(executionId,onProgress,undefined,execution.live));if(done)return done;}
    const exhausted=isPayg&&await finishExhaustedReplay(ownerRpc,args,execution,replayFailureCode??diagnosticCode(error));
    if(exhausted)return exhausted;
    if(nativeProgress&&execution.live&&projection.text&&!waitPoint){const correction=projection.finish(INVALID_REPLY_NOTICE);if(correction)progress(correction);}
    if(waitPoint){
-    const saved=await ownerRpc<PaygPosition & {state:PaygWait['state'];primaryResult?:{body:string}}>(
-     'runtime_execution',{...args,p_action:'payg_wait',p_result:waitPoint});
-    return {state:saved.state,code:saved.state==='waiting_credits'?'RUNTIME_WAITING_CREDITS':'RUNTIME_WAITING_RESUME',
-     executionId,cursor:saved.cursor,epoch:saved.epoch,remainingCalls:saved.remainingCalls,
-     ...(saved.primaryResult?{body:saved.primaryResult.body}:{})} as PaygWait;
+    const waited=await recordPaygWait(ownerRpc,args,waitPoint);
+    return waited.state==='pending'?{...waited,...claimNoticeFields(claimNotice)}:waited;
    }
    if(reportFailure){
     const stopped=await ownerRpc<{state:'cancelled'|'cost_pending'}>('runtime_cancel',args);
