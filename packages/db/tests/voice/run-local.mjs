@@ -57,12 +57,12 @@ try {
  ok(sql(references));
  assert.deepEqual(snapshot(),referencesCatalog,'repeat 0345 preserves complete catalog');
  report.checks.push('0345 applied twice after current staging; complete catalog unchanged');
- const visibility=read('packages/db/migrations/0394_runtime_execution_visibility.sql');
+ const visibility=read('packages/db/migrations/0352_runtime_execution_visibility.sql');
  ok(sql(visibility));
  const visibilityCatalog=snapshot();
  ok(sql(visibility));
- assert.deepEqual(snapshot(),visibilityCatalog,'repeat 0394 preserves complete catalog');
- report.checks.push('0394 applied twice after current staging; complete catalog unchanged');
+ assert.deepEqual(snapshot(),visibilityCatalog,'repeat 0352 preserves complete catalog');
+ report.checks.push('0352 applied twice after current staging; complete catalog unchanged');
  const require=createRequire(resolve(root,'packages/api/package.json'));
  const {Client}=require('pg');
  const address=ok(docker(['port',name,'5432/tcp']));assert.match(address,/^127\.0\.0\.1:\d+$/);

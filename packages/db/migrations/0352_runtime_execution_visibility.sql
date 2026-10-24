@@ -4,7 +4,7 @@
 -- and library references (0277, #1022). This function runs exactly those three checks, in the same order, by calling
 -- the existing functions, so the rules stay theirs: a content erasure raises as before; otherwise the first gone source
 -- is reported ('voice' before 'library', the order the host checked them), else 'visible'. Every call still reads the
--- current state; nothing is cached. Read only, like the functions it calls. Number provisional until control assigns it.
+-- current state; nothing is cached. Read only, like the functions it calls. Number 0352 assigned by control.
 -- Repeatable: CREATE OR REPLACE.
 BEGIN;
 SET LOCAL lock_timeout = '5s';

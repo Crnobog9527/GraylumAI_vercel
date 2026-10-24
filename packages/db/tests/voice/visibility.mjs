@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// DB-PERF PR-2A (0394): the combined display fence answers exactly what the three separate checks answer, in one call.
+// DB-PERF PR-2A (0352): the combined display fence answers exactly what the three separate checks answer, in one call.
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {rpc} from '../erasure-b2a/cases.mjs';
@@ -45,7 +45,7 @@ export async function runVisibility({db,report}) {
  // A newer content version is not a deletion (#1022 decision C).
  await db.query('UPDATE library_documents SET content_version=content_version+1 WHERE id=$1',[document]);
  await same('visible');
- report.checks.push('0394: visible while nothing frozen is gone, including after a newer library content version');
+ report.checks.push('0352: visible while nothing frozen is gone, including after a newer library content version');
 
  // Only the library document is deleted: reported only when the host asks for the library check.
  await svc('library_delete',f.actor,document,false,false,false);
@@ -53,7 +53,7 @@ export async function runVisibility({db,report}) {
  // The voice version is deleted too: voice first, as the host checked it first.
  await svc('voice_profile_delete',f.actor,begun.version.id);
  await same((voice,library)=>voice?'voice':library?'library':'visible');
- report.checks.push('0394: a deleted library document and a deleted voice version are each reported on their own, voice first');
+ report.checks.push('0352: a deleted library document and a deleted voice version are each reported on their own, voice first');
 
  // Only the voice version is gone, on a second execution with no library reference.
  const g=await runtimeFixture(db,{});
@@ -65,7 +65,7 @@ export async function runVisibility({db,report}) {
  await svc('voice_profile_delete',g.actor,begunG.version.id);
  assert.equal(await svc('runtime_execution_visibility',g.actor,g.execution,true,true),'voice');
  assert.equal(await svc('runtime_execution_visibility',g.actor,g.execution,false,true),'visible');
- report.checks.push('0394: a deleted voice version alone is reported as voice');
+ report.checks.push('0352: a deleted voice version alone is reported as voice');
 
  // Content erasure comes first and raises exactly as content_erasure_visible does, whatever else is gone.
  await rpc(db,'content_erasure_mark_session',f.actor,f.session);
@@ -74,12 +74,12 @@ export async function runVisibility({db,report}) {
  const other=await runtimeFixture(db,{});
  assert.equal(await refusal(visibility(true,true,other.actor)),await refusal(svc('content_erasure_visible',other.actor,f.execution)));
  assert.equal(await refusal(visibility(true,true,other.actor)),'CONTENT_NOT_FOUND');
- report.checks.push('0394: content erasure and a foreign execution refuse exactly as content_erasure_visible does');
+ report.checks.push('0352: content erasure and a foreign execution refuse exactly as content_erasure_visible does');
 
  for(const role of ['anon','authenticated']){
   await db.query(`SET ROLE ${role}`);
   try{await assert.rejects(rpc(db,'runtime_execution_visibility',g.actor,g.execution,false,false),/permission denied/);}
   finally{await db.query('RESET ROLE');}
  }
- report.checks.push('0394: only service_role may call the combined fence');
+ report.checks.push('0352: only service_role may call the combined fence');
 }
