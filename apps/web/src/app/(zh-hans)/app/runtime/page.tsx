@@ -41,7 +41,7 @@ import { ENDED_NOTICE, GUIDE_HELD_NOTICE, isOpenTurn, runtimeTailNotices, runtim
 import { finishedExecution } from '@/lib/finished-execution';
 import { isOrganizerPendingError } from '@/lib/payg-wait';
 import { usePaygResume } from '@/lib/use-payg-resume';
-import { useRuntimeViewBusy, useRuntimeViewPolling } from '@/lib/runtime-view-poll';
+import { useRuntimeViewBusy, useRuntimeViewPolling, useRuntimeViewStreaming } from '@/lib/runtime-view-poll';
 import { useRuntimeStream } from './use-runtime-stream';
 import { CompareButton } from '@/components/fusion-compare/ComparePicker';
 import { CompareThread, placeCompareCards, useCompareThread } from '@/components/fusion-compare/CompareThread';
@@ -140,6 +140,8 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  // A sent message whose execution is not in the view yet also keeps the view polling quickly.
  const outgoingUnseen=Boolean(outgoing&&!(view.data?.executions as Array<{executionId:string}>|undefined)?.some(e=>e.executionId===outgoing.executionId));
  useRuntimeViewBusy(viewPolling,busy||outgoingUnseen,view.refetch,Boolean(sessionId));
+ // DB-PERF 5b: no timed reads while this page's stream is open; its close reads once and polling resumes.
+ useRuntimeViewStreaming(viewPolling,runner.streaming,()=>view.refetch({cancelRefetch:false}),Boolean(sessionId));
  const ordinary=choices.data?.models[0]?.id??'';
  const moduleSelection=requestedModule||storedModule;
  const chosenModule=choices.data?.skills.find(skill=>skill.moduleId===moduleSelection);

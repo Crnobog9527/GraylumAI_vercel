@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   RUNTIME_VIEW_IDLE_POLL_MS,
   markRuntimeViewBusy,
+  markRuntimeViewStreaming,
   progressingExecution,
   runtimeViewPollInterval,
   runtimeViewPollOptions,
@@ -16,10 +17,10 @@ describe('runtime.view polling', () => {
 
   it('polls rarely when no turn is in progress', () => {
     expect(runtimeViewPollInterval(undefined, false, 0)).toBe(RUNTIME_VIEW_IDLE_POLL_MS);
-    expect(runtimeViewPollInterval({ activeExecution: null, executions: [] }, false, 0)).toBe(60_000);
+    expect(runtimeViewPollInterval({ activeExecution: null, executions: [] }, false, 0)).toBe(180_000);
     // A paused turn (credits, resume, cost pending) only changes on the user's own action.
     for (const state of ['waiting_credits', 'waiting_resume', 'cost_pending', 'interrupted', 'completed']) {
-      expect(runtimeViewPollInterval({ activeExecution: 'e1', executions: [{ executionId: 'e1', state }] }, false, 0)).toBe(60_000);
+      expect(runtimeViewPollInterval({ activeExecution: 'e1', executions: [{ executionId: 'e1', state }] }, false, 0)).toBe(180_000);
     }
   });
 
@@ -50,7 +51,7 @@ describe('runtime.view polling', () => {
     expect(interval(query(running))).toBe(12_000);
     const next = { activeExecution: 'e2', executions: [{ executionId: 'e2', state: 'prepared' }] };
     expect(interval(query(next))).toBe(5000);
-    expect(interval(query({ activeExecution: null, executions: [] }))).toBe(60_000);
+    expect(interval(query({ activeExecution: null, executions: [] }))).toBe(180_000);
     busy.current = true;
     expect(interval(query({ activeExecution: null, executions: [] }))).toBe(5000);
   });
@@ -65,5 +66,23 @@ describe('runtime.view polling', () => {
     markRuntimeViewBusy(busy, false, refetch);
     expect(busy.current).toBe(false);
     expect(refetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not poll while this page streams, and re-reads once when the stream closes', () => {
+    const streaming = { current: false };
+    const interval = runtimeViewPollOptions({ current: null }, { current: true }, streaming).refetchInterval;
+    expect(interval(query(running))).toBe(5000);
+    streaming.current = true;
+    expect(interval(query(running))).toBe(false);
+    expect(interval(query(undefined))).toBe(false);
+    const refetch = vi.fn();
+    markRuntimeViewStreaming(streaming, true, refetch);
+    expect(refetch).not.toHaveBeenCalled();
+    markRuntimeViewStreaming(streaming, false, refetch);
+    expect(refetch).toHaveBeenCalledTimes(1);
+    markRuntimeViewStreaming(streaming, false, refetch);
+    expect(refetch).toHaveBeenCalledTimes(1);
+    // A turn the server still advances (stream broke) falls back to the quick poll.
+    expect(interval(query(running))).toBe(5000);
   });
 });
