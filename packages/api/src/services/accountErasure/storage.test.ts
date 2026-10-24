@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createErasureStorageAdapter, isCanonicalErasureAttachment,
+import { createErasureStorageAdapter, erasureStorageFailureCode, isCanonicalErasureAttachment,
   type ErasureAttachmentManifest, type ErasureStorageLimits, type ErasureStorageTransport } from './storage';
 
 const actor = '00000000-0000-4000-8000-000000000001';
@@ -197,5 +197,35 @@ describe('bounded erasure storage with synthetic adapters only', () => {
     const adapter = createErasureStorageAdapter({ storage: t.storage, manifest: t.manifest });
     await expect(adapter.cleanSubject('../other')).rejects.toThrow();
     expect(t.storage.listPrefix).not.toHaveBeenCalled();
+  });
+});
+
+describe('a stopped pass names its step with a fixed code', () => {
+  it('reports the proof refusal thrown before the first page (an account without known upload history)', async () => {
+    const t = setup([file('orphan')]);
+    Object.assign(t.manifest, { prefixState: vi.fn(async () => { throw new Error('ERASURE_HISTORY_UNKNOWN'); }) });
+    const adapter = createErasureStorageAdapter({ storage: t.storage, manifest: t.manifest });
+    expect(await adapter.cleanSubject(actor)).toEqual({ complete: false, remaining: 1, manualReview: 0, errorCode: 'ERASURE_HISTORY_UNKNOWN' });
+    expect(t.storage.listPrefix).not.toHaveBeenCalled();
+    expect(t.objects.has(file('orphan'))).toBe(true);
+  });
+
+  it('names a failed listing, a malformed page and anything else without copying error text', async () => {
+    const failing = setup([file('a')]);
+    failing.storage.listPrefix.mockRejectedValueOnce(new Error('ERASURE_STORAGE_UNKNOWN'));
+    expect((await failing.clean()).errorCode).toBe('ERASURE_STORAGE_UNKNOWN');
+    const malformed = setup([file('a')]);
+    malformed.storage.listPrefix.mockResolvedValueOnce({ paths: 'not-a-list', nextAfterPath: null });
+    expect((await malformed.clean()).errorCode).toBe('ERASURE_STORAGE_SHAPE_INVALID');
+    const other = setup([file('a')]);
+    other.storage.listPrefix.mockRejectedValueOnce(new Error('private detail user@example.com'));
+    expect((await other.clean()).errorCode).toBe('ERASURE_STORAGE_FAILED');
+    expect(erasureStorageFailureCode('ERASURE_HISTORY_UNKNOWN')).toBe('ERASURE_STORAGE_FAILED');
+  });
+
+  it('adds no code to a finished pass or to an ordinary manual review', async () => {
+    expect(await setup([file('orphan')]).clean()).toEqual({ complete: true, remaining: 0, manualReview: 0 });
+    const t = setup([file('shared')]); t.states.set(file('shared'), 'shared');
+    expect(await t.clean()).toEqual({ complete: false, remaining: 1, manualReview: 1 });
   });
 });

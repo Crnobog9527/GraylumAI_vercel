@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from 'vitest';
-import { processAccountErasure } from './processor';
+import { processAccountErasure, type ErasureStorageAdapter } from './processor';
 import type { BillingRpc } from '../bill2/service';
 
 const actor = '00000000-0000-4000-8000-000000000001';
@@ -40,7 +40,7 @@ function setup(overrides: Record<string, Override> = {}) {
     } finally { active--; }
   });
   let absent = false;
-  const storageAdapter = { cleanSubject: vi.fn(async () => ({ complete: true, remaining: 0, manualReview: 0 })) };
+  const storageAdapter = { cleanSubject: vi.fn<ErasureStorageAdapter['cleanSubject']>(async () => ({ complete: true, remaining: 0, manualReview: 0 })) };
   const authAdapter = {
     getState: vi.fn(async (): Promise<'present' | 'absent' | 'unknown'> => absent ? 'absent' : 'present'),
     remove: vi.fn(async () => { events.push('AUTH_REMOVE'); absent = true; }),
@@ -103,6 +103,13 @@ describe('unwired account erasure processor', () => {
     const f = setup(); f.storageAdapter.cleanSubject.mockResolvedValue({ complete: false, remaining: 2, manualReview: 1 });
     const result = await processAccountErasure(f.input); expect(result.errorCodes).toContain('ERASURE_STORAGE_PENDING');
     expect(f.rpc).toHaveBeenCalledWith('account_erasure_local_cleanup', { p_profile_id: actor, p_storage_verified: false });
+    expect(f.authAdapter.remove).not.toHaveBeenCalled();
+  });
+  it('records which storage step stopped the pass, next to the pending code', async () => {
+    const f = setup(); f.storageAdapter.cleanSubject.mockResolvedValue({ complete: false, remaining: 1, manualReview: 0,
+      errorCode: 'ERASURE_HISTORY_UNKNOWN' });
+    const result = await processAccountErasure(f.input);
+    expect(result.errorCodes).toEqual(expect.arrayContaining(['ERASURE_STORAGE_PENDING', 'ERASURE_HISTORY_UNKNOWN']));
     expect(f.authAdapter.remove).not.toHaveBeenCalled();
   });
   it('unresolved upload or transaction barrier prevents Storage, while independent local cleanup continues', async () => {
