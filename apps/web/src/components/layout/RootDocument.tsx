@@ -5,6 +5,7 @@ import { getPublicSiteSettings } from "@/lib/public-site";
 import { Toaster } from "@/components/ui/sonner";
 import { JsonLd } from "@/components/seo/JsonLd";
 import { SiteAnalytics } from "@/components/analytics/SiteAnalytics";
+import { EntryReplyLanguage } from "@/hooks/use-entry-reply-language";
 import { NOINDEX_ROBOTS } from "@/lib/seo/metadata";
 import { SITE_LOCALES, type SiteLocale } from "@/lib/seo/site";
 import { organizationJsonLd, websiteJsonLd } from "@/lib/seo/structured-data";
@@ -51,6 +52,8 @@ export function RootDocument({ locale, children }: { locale: SiteLocale; childre
           {children}
           {/* Termly consent, GA4 and Vercel statistics; loads nothing until configured (ANALYTICS plan §3). */}
           <SiteAnalytics onVercel={onVercel} />
+          {/* CHAT-LANGUAGE: a sign-up from the Traditional Chinese pages starts its AI replies in Traditional Chinese. */}
+          <EntryReplyLanguage />
         </Provider>
         <Toaster />
       </body>

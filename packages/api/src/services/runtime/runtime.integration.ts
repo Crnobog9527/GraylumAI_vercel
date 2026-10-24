@@ -1054,7 +1054,9 @@ it('RUNTIME: AC-0 router round trips per phase stay fixed for admission, Skill l
   // A second free-chat reply of the same user: the Skill list is kept for a few minutes; one read confirms no Skill was republished.
   const warmSession=await newSession();
   const ordinaryWarm=await measured(c=>c.prepare({sessionId:warmSession,requestId:randomUUID(),input:'Please work',selection:{kind:'ordinary',modelId},network:'deny'}));
-  expect(phases(ordinaryWarm.summary)).toEqual({prelude:2,policy:0,host:0,admission:8,rateLimit:0});
+  // CHAT-LANGUAGE: every admission reads the profile's reply language once (profiles), concurrently with model loading.
+  expect(phases(ordinaryWarm.summary)).toEqual({prelude:2,policy:0,host:0,admission:9,rateLimit:0});
+  expect(ordinaryWarm.summary.labels['rest/profiles']?.rt).toBe(2); // the caller's profile check, plus the reply language
   const all={start,ordinary,stream,skill,execute,skillWarm};
   const counts=Object.fromEntries(Object.entries(all).map(([name,m])=>[name,phases(m.summary)]));
   // POSITIONING-GATE: free-chat admission adds one read (runtime_positioning_gate); this user has no positioning
@@ -1063,11 +1065,11 @@ it('RUNTIME: AC-0 router round trips per phase stay fixed for admission, Skill l
    start:{prelude:2,policy:0,host:1},
    // 7 for the reply itself plus the first-time listing of the user's loadable Skills (about 14 for this one Skill module)
    // and the published-version read that lets the next reply reuse that listing.
-   ordinary:{prelude:2,policy:0,host:0,admission:22,rateLimit:0},
+   ordinary:{prelude:2,policy:0,host:0,admission:23,rateLimit:0},
    stream:{prelude:2,policy:0,host:0,execute:7,provider:8,rateLimit:0},
-   skill:{prelude:2,policy:0,host:0,admission:14,rateLimit:0},
+   skill:{prelude:2,policy:0,host:0,admission:15,rateLimit:0},
    execute:{prelude:2,policy:0,host:0,execute:6,provider:7,rateLimit:0},
-   skillWarm:{prelude:2,policy:0,host:0,admission:12,rateLimit:0},
+   skillWarm:{prelude:2,policy:0,host:0,admission:13,rateLimit:0},
   });
   // AC-0c: Auth verifies once per invocation and credential, plus once again
   // after the provider response (AC-0 baseline was 2/6/9/12/9).
@@ -1228,14 +1230,15 @@ it('RUNTIME: AC-1 opc.mentorTurnStream admits and streams a mentor turn in one i
    // Attached organizers skip one Session history read in each execution.
    // C2 adds one read-only stop-intent check after the provider response, before completion.
    // The first prepare of this new package misses the Skill file cache (AC-0c).
-   oldPrepareOpening:{prelude:2,policy:0,host:9,admission:15,rateLimit:0},
+   // CHAT-LANGUAGE: each admission adds one read of the profile's reply language.
+   oldPrepareOpening:{prelude:2,policy:0,host:9,admission:16,rateLimit:0},
    oldStreamOpening:{prelude:2,policy:0,host:2,execute:7,provider:18,rateLimit:0},
    // R1 sizes all readable files: seven cold resources plus two permission checks; warm turns add only two checks.
-   oldPrepareAnswer:{prelude:2,policy:0,host:8,admission:21,rateLimit:0},
+   oldPrepareAnswer:{prelude:2,policy:0,host:8,admission:22,rateLimit:0},
    oldStreamAnswer:{prelude:2,policy:0,host:2,execute:7,provider:18,rateLimit:0},
    // One invocation: one prelude instead of two; admission and execution unchanged.
-   opening:{prelude:2,policy:0,host:11,admission:11,execute:7,provider:18,rateLimit:0},
-   answer:{prelude:2,policy:0,host:10,admission:14,execute:7,provider:18,rateLimit:0},
+   opening:{prelude:2,policy:0,host:11,admission:12,execute:7,provider:18,rateLimit:0},
+   answer:{prelude:2,policy:0,host:10,admission:15,execute:7,provider:18,rateLimit:0},
   });
   // Empty backlog: exactly one pre-admission RPC and one completion capture RPC.
   const label=(name:string)=>Object.fromEntries(Object.entries(all).map(([key,m])=>[key,m.summary.labels[name]?.rt??0]));
@@ -1248,7 +1251,8 @@ it('RUNTIME: AC-1 opc.mentorTurnStream admits and streams a mentor turn in one i
   expect(label('rpc/runtime_session_context')).toEqual({oldPrepareOpening:3,oldStreamOpening:0,oldPrepareAnswer:3,oldStreamAnswer:0,opening:3,answer:3});
   // Auth verifies once per invocation, and again after each provider response.
   expect(label('auth/v1/user')).toEqual({oldPrepareOpening:1,oldStreamOpening:3,oldPrepareAnswer:1,oldStreamAnswer:3,opening:3,answer:3});
-  expect(label('rest/profiles')).toEqual({oldPrepareOpening:1,oldStreamOpening:1,oldPrepareAnswer:1,oldStreamAnswer:1,opening:1,answer:1});
+  // CHAT-LANGUAGE: each admission also reads the reply language; streaming an admitted execution does not.
+  expect(label('rest/profiles')).toEqual({oldPrepareOpening:2,oldStreamOpening:1,oldPrepareAnswer:2,oldStreamAnswer:1,opening:2,answer:2});
   for(const m of [opening,answer])expect(m.summary.executionIds).toEqual([m.result[0]!.executionId]);
  }finally{await provider.close();}
 });

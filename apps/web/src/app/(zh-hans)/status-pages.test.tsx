@@ -7,6 +7,7 @@ vi.mock('@sentry/nextjs', () => ({ captureException: vi.fn() }));
 vi.mock('@/components/misans-font', () => ({ MiSansFont: () => null }));
 vi.mock('@/trpc/provider', () => ({ default: ({ children }: { children: ReactNode }) => children }));
 vi.mock('@/components/ui/sonner', () => ({ Toaster: () => null }));
+vi.mock('@/hooks/use-entry-reply-language', () => ({ EntryReplyLanguage: () => null }));
 vi.mock('@/lib/public-site', () => ({ getPublicSiteSettings: vi.fn() }));
 
 import RouteError from './error';

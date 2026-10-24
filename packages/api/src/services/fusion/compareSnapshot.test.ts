@@ -1,7 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
 import { POSITIONING_FALLBACK_INSTRUCTIONS } from '../runtime/positioningFallback';
-import { FREE_CHAT_BASE_INSTRUCTIONS, REPLY_LANGUAGE_INSTRUCTIONS } from '../runtime/primaryInstructions';
+import { FREE_CHAT_BASE_INSTRUCTIONS } from '../runtime/primaryInstructions';
+import { replySettingInstructions } from '../runtime/replyLanguage';
+const REPLY_RULE = replySettingInstructions('zh-Hans');
 import { runtimeScopeInput } from '../runtime/context';
 import { assertCompareFits, compareInput, compareInstructions, compareRequest, compareRequestBytes, snapshotHash, workspaceDependencies,
   type CompareParts } from './compareSnapshot';
@@ -9,18 +11,23 @@ import { fusionRequestBytes } from './request';
 import { FUSION_INPUT_CAP } from './request';
 
 const parts = (patch: Partial<CompareParts> = {}): CompareParts => ({ skill: null, positioningFallback: false, history: [], workspace: [],
-  references: [], question: '哪个开头更好？', ...patch });
+  references: [], question: '哪个开头更好？', replyLocale: 'zh-Hans', ...patch });
 const skill = { moduleId: 'm', revisionId: 'r', skillId: 's', instructions: 'SKILL TEXT', resources: [{ path: 'a.md', hash: 'h1' }], socialMedia: false };
 
 describe('compare snapshot (FUSION-COMPARE §3.2)', () => {
   it('starts from the ordinary free-conversation instruction and reply-language rule, with no brand identity statement', () => {
-    expect(compareInstructions(parts())).toBe(FREE_CHAT_BASE_INSTRUCTIONS + REPLY_LANGUAGE_INSTRUCTIONS);
+    expect(compareInstructions(parts())).toBe(FREE_CHAT_BASE_INSTRUCTIONS + REPLY_RULE);
     expect(compareInstructions(parts())).not.toMatch(/Graylum/);
   });
   it('a Skill replaces the base instruction, as in an ordinary turn; the fallback rule only when the turn carries it', () => {
-    expect(compareInstructions(parts({ skill }))).toBe('SKILL TEXT' + REPLY_LANGUAGE_INSTRUCTIONS);
-    expect(compareInstructions(parts({ positioningFallback: true }))).toBe(FREE_CHAT_BASE_INSTRUCTIONS + REPLY_LANGUAGE_INSTRUCTIONS
+    expect(compareInstructions(parts({ skill }))).toBe('SKILL TEXT' + REPLY_RULE);
+    expect(compareInstructions(parts({ positioningFallback: true }))).toBe(FREE_CHAT_BASE_INSTRUCTIONS + REPLY_RULE
       + POSITIONING_FALLBACK_INSTRUCTIONS);
+  });
+  it('carries the language set in the profile, and a different language is a different snapshot (Owner 2026-10-24)', () => {
+    for (const locale of ['zh-Hant', 'en'] as const)
+      expect(compareInstructions(parts({ replyLocale: locale }))).toBe(FREE_CHAT_BASE_INSTRUCTIONS + replySettingInstructions(locale));
+    expect(snapshotHash(parts({ replyLocale: 'en' }))).not.toBe(snapshotHash(parts()));
   });
   it('the user message is byte-identical to an ordinary turn without sources or documents', () => {
     expect(compareInput(parts())).toBe('哪个开头更好？');

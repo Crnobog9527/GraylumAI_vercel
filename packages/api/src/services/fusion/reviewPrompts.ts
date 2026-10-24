@@ -7,6 +7,7 @@ import type { FusionRequest } from './request';
 import type { MergeResult } from './reviewMerge';
 import type { ReviewerRole } from './reviewEvidence';
 import { reportBodyText } from '../../shared/reportData';
+import { replyLocale, type ReplyLocale } from '../../shared/replyLanguage';
 
 /** Files of the review Skill package (FUSION-REVIEW §4.3). Their text is private and published through the
  * existing Skill upload; this repository only knows the paths. */
@@ -94,11 +95,33 @@ const SUMMARY_FORMAT = [
 const lengthRule = (max: number) =>
   `body 全文（含章节标题）不能超过 ${max} 个字符，超过就算修订失败；原报告已经接近上限时，改写要精简，不要扩写。`;
 
+const LANGUAGE_NAMES: Record<ReplyLocale, string> = {
+  'zh-Hans': 'Simplified Chinese', 'zh-Hant': 'Traditional Chinese (Taiwan usage)', en: 'English' };
+/** Owner 2026-10-24 (A): what the user reads of a review follows the language set in their profile. Frozen in the review's
+ * config at start; a review started before it has none and gets no rule, so its requests stay byte-identical. */
+export function reviewLanguageRule(locale: ReplyLocale | undefined, role: 'reviewer' | 'summary'): string {
+  if (!locale) return '';
+  const name = LANGUAGE_NAMES[locale];
+  return role === 'reviewer'
+    ? `\n\nLanguage (host rule): the user set their language to ${name}. Write every text the user reads (cases, alternatives, `+
+      `bases, issues, responses) in ${name}, even though this guide is in Chinese. Keep ids, enum values, JSON keys, section `+
+      'names and quotes from the report exactly as given.'
+    : `\n\nLanguage (host rule): the user set their language to ${name}. Write change notes and rulings in ${name}, even `+
+      'though this guide is in Chinese. The revised report keeps the language it is written in, and its section headings exactly.';
+}
+/** The language frozen in a review's config, or undefined (reviews started before it, or an unknown value). */
+export const reviewLocale = (config: unknown) => {
+  const parsed = replyLocale.safeParse((config as { replyLocale?: unknown } | null)?.replyLocale);
+  return parsed.success ? { replyLocale: parsed.data } : {};
+};
+
 export type ReviewContext = { report: string; materials: unknown; sections: string[];
   /** The review was started with the evidence check: reviewers are asked for quotes/anchors, the summary gets merged issues. */
   evidence?: boolean;
   /** The template's length limit in characters; the host check refuses a longer body, so the model is told the number. */
-  maxCharacters: number };
+  maxCharacters: number;
+  /** The user's language frozen at start (absent on reviews started before it). */
+  replyLocale?: ReplyLocale };
 /** Reviewers are labelled A, B, C… by their position in the frozen panel, never by model name (§2.2). */
 export const reviewerLabel = (index: number) => String.fromCharCode(65 + index);
 const shown = (opinion: Opinion) => ({ decisions: opinion.decisions, issues: opinion.issues,
@@ -106,7 +129,8 @@ const shown = (opinion: Opinion) => ({ decisions: opinion.decisions, issues: opi
 
 export function reviewerRequest(skill: ReviewSkillText, context: ReviewContext, role?: ReviewerRole | null): FusionRequest {
   const extras = [...(role ? [ROLE_BLOCKS[role]] : []), ...(context.evidence ? [EVIDENCE_FORMAT] : [])].join('\n');
-  return { instructions: `${skill.reviewer}\n\n${skill.rubric}\n\n${REVIEWER_FORMAT}${extras ? `\n${extras}` : ''}`,
+  return { instructions: `${skill.reviewer}\n\n${skill.rubric}\n\n${REVIEWER_FORMAT}${extras ? `\n${extras}` : ''}`
+      + reviewLanguageRule(context.replyLocale, 'reviewer'),
     input: JSON.stringify({ report: context.report, materials: context.materials, sections: context.sections }),
     responseFormat: OPINION_RESPONSE_FORMAT as unknown as Record<string, unknown> };
 }
@@ -116,7 +140,8 @@ export function debateRequest(skill: ReviewSkillText, context: ReviewContext, mi
   others: Array<{ reviewer: string; opinion: Opinion }>, disputed: string[], role?: ReviewerRole | null): FusionRequest {
   // The seat keeps its angle and the quote/anchor rules in the debate round (reviews started with the evidence check).
   const extras = [...(role ? [ROLE_BLOCKS[role]] : []), ...(context.evidence ? [EVIDENCE_FORMAT] : [])].join('\n');
-  return { instructions: `${skill.reviewer}\n\n${skill.rubric}\n\n${REVIEWER_FORMAT}${extras ? `\n${extras}` : ''}\n${DEBATE_FORMAT}`,
+  return { instructions: `${skill.reviewer}\n\n${skill.rubric}\n\n${REVIEWER_FORMAT}${extras ? `\n${extras}` : ''}\n${DEBATE_FORMAT}`
+      + reviewLanguageRule(context.replyLocale, 'reviewer'),
     input: JSON.stringify({ report: context.report, materials: context.materials, sections: context.sections,
       mine: mine ? shown(mine) : null, others: others.map(item => ({ reviewer: item.reviewer, ...shown(item.opinion) })),
       // Exactly these pairs must be answered, each once: every other reviewer on every disputed decision.
@@ -130,7 +155,8 @@ export function summaryRequest(skill: ReviewSkillText, context: ReviewContext, o
     ({ fieldId, currentValue: current[step.stepId]?.[fieldId] ?? '' })) }));
   // REPORT-VISUAL: the summary rewrites only the report text. The strategy data block is not sent: adoption always keeps
   // the original block (0300), and a model that edited it wrote change notes for sections whose text never changed.
-  return { instructions: `${skill.summary}\n\n${skill.rubric}\n\n${SUMMARY_FORMAT}\n${lengthRule(context.maxCharacters)}`,
+  return { instructions: `${skill.summary}\n\n${skill.rubric}\n\n${SUMMARY_FORMAT}\n${lengthRule(context.maxCharacters)}`
+      + reviewLanguageRule(context.replyLocale, 'summary'),
     input: JSON.stringify({ report: reportBodyText(context.report), materials: context.materials, sections: context.sections, steps,
       opinions: opinions.map(item => ({ reviewer: item.reviewer, ...shown(item.opinion) })) }),
     responseFormat: REVISION_RESPONSE_FORMAT as unknown as Record<string, unknown> };
@@ -157,7 +183,8 @@ export function summaryRequestMerged(skill: ReviewSkillText, context: ReviewCont
   const decisions = DECISIONS.map(decision => ({ decision, views: opinions.flatMap(({ reviewer, opinion }) =>
     opinion.decisions.filter(d => d.decision === decision).map(d => ({ reviewer, verdict: d.verdict,
       ...(level >= 1 ? {} : { strongestCase: d.strongestCase, strongestAlternative: d.strongestAlternative, basis: d.basis }) }))) }));
-  return { instructions: `${skill.summary}\n\n${skill.rubric}\n\n${SUMMARY_FORMAT}\n${lengthRule(context.maxCharacters)}`,
+  return { instructions: `${skill.summary}\n\n${skill.rubric}\n\n${SUMMARY_FORMAT}\n${lengthRule(context.maxCharacters)}`
+      + reviewLanguageRule(context.replyLocale, 'summary'),
     input: JSON.stringify({ report, materials: context.materials, sections: context.sections, steps, decisions,
       // Already merged by code: one entry per issue, with the seats that raised it. Quotes were checked against the report.
       issues: kept.map(issue => ({ section: issue.section, severity: issue.severity, kind: issue.kind, raisedBy: issue.reviewers,
