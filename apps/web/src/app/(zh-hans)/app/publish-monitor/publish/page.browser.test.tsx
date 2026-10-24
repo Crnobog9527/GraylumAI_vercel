@@ -411,3 +411,16 @@ it('an automatically chosen brand is kept for recovery, and with several other b
     expect(await page.getByRole('textbox').count()).toBe(0);
   } finally { await page.close(); }
 }, 30000);
+
+it('a remembered brand that is gone and holds no unconfirmed publish is forgotten, so the only eligible brand can publish', async () => {
+  const GONE = '00000000-0000-4000-8000-000000000c52';
+  const { page } = await open(path => {
+    if (path === 'opc.sessionResultVersions') return { data: [{ version: 1, title: '早起口播稿', body: '成果夹里的文案' }] };
+  }, undefined, `?result=${RESULT}`);
+  try {
+    await page.evaluate(([key, id]) => sessionStorage.setItem(key!, id!), [`publish-monitor-brand:${RESULT}`, GONE]);
+    await page.goto(`https://publish.test/?result=${RESULT}`);
+    await page.addScriptTag({ content: code });
+    await ui(page.getByRole('textbox')).toHaveValue('成果夹里的文案');
+  } finally { await page.close(); }
+}, 30000);

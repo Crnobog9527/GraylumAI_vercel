@@ -120,8 +120,12 @@ function Workbench({ source }: { source: Source }) {
   // chosen for it silently (a new request under a new key could publish and charge twice).
   const stuckBrand = pickedBrand && !brands.some(entry => entry.business.businessId === pickedBrand)
     && loadAttempt(`result:${source.id}:${pickedBrand}`) !== null;
-  const chosen = brands.find(entry => entry.business.businessId === pickedBrand)
-    ?? (!pickedBrand && brands.length === 1 ? brands[0]! : null);
+  // A remembered brand that is no longer eligible only matters while it holds an unconfirmed publish; otherwise it is
+  // forgotten, so the user is never left without a form or a way to pick another brand.
+  const staleBrand = Boolean(pickedBrand) && !stuckBrand && !brands.some(entry => entry.business.businessId === pickedBrand);
+  const effectiveBrand = staleBrand ? '' : pickedBrand;
+  const chosen = brands.find(entry => entry.business.businessId === effectiveBrand)
+    ?? (!effectiveBrand && brands.length === 1 ? brands[0]! : null);
   return (
     <div className="space-y-6">
       <header className="space-y-1">
