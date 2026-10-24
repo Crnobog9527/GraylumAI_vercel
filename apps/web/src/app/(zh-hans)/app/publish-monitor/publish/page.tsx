@@ -148,7 +148,7 @@ function Workbench({ source }: { source: Source }) {
             <label className="block space-y-1 text-sm">
               <span className="font-medium">用哪个品牌的账号发布</span>
               <select className="w-full rounded-md border px-2 py-1.5" value={chosen?.business.businessId ?? ''}
-                aria-label="品牌" disabled={pending}
+                aria-label="品牌" disabled={pending || Boolean(stuckBrand)}
                 onChange={event => {
                   setPickedBrand(event.target.value); setRetryTargets(null);
                   try { sessionStorage.setItem(BRAND_KEY(source), event.target.value); } catch { /* optional */ }
@@ -163,7 +163,13 @@ function Workbench({ source }: { source: Source }) {
           )}
           {chosen && (
             <PublishForm key={`${round}:${chosen.business.businessId}`} businessId={chosen.business.businessId} workItemId={null}
-              contextKey={`result:${source.id}:${chosen.business.businessId}`} onPendingChange={setPending}
+              contextKey={`result:${source.id}:${chosen.business.businessId}`} onPendingChange={isPending => {
+                setPending(isPending);
+                // The brand actually used is kept as soon as a publish starts, also when it was chosen automatically.
+                if (isPending) {
+                  try { sessionStorage.setItem(BRAND_KEY(source), chosen.business.businessId); } catch { /* optional */ }
+                }
+              }}
               targets={chosen.targets} initialCaption={latest.body}
               initialTargets={retryTargets ?? (chosen.targets.length === 1 && chosen.targets[0]!.ready ? [chosen.targets[0]!.id] : [])}
               holdCreditsByTargets={options.data.holdCreditsByTargets} onSubmitted={remember} />
