@@ -3,13 +3,15 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { discoverSkillCatalog, MAX_SKILL_LOADS_PER_TURN, skillCatalogInstructions, skillCatalogReserveBytes,
   type SkillCatalogEntry } from './skillCatalog';
 import { LOAD_SKILL_TOOL, loadSkillToolBytes } from './loadSkillTool';
+import { admitCatalogVoice } from './voiceCatalog';
+import type { FrozenVoiceProfile } from './voiceAdmission';
 
 export { MAX_SKILL_LOADS_PER_TURN };
 
 /** What admission freezes for a free-chat turn whose model may load Skills itself. */
 export type AdmittedSkillCatalog = {
   text: string; reserveBytes: number; frozen: { skillCatalog: SkillCatalogEntry[]; maxSkillLoads: number;
-    skillCatalogMaxBytes: number };
+    skillCatalogMaxBytes: number; voiceProfile?: FrozenVoiceProfile };
 };
 
 /** Only an ordinary turn of an ordinary free conversation: never a topic window, positioning, a report or a mentor turn. */
@@ -40,11 +42,16 @@ export async function admitSkillCatalog(user: SupabaseClient, admin: SupabaseCli
   catch { return undefined; }
   if (!catalog.length) return undefined;
   const text = skillCatalogInstructions(catalog);
-  const reserveBytes = skillCatalogReserveBytes(catalog) + loadSkillToolBytes();
+  const base = skillCatalogReserveBytes(catalog) + loadSkillToolBytes();
   const strategy = options.strategyReserve?.(options.maxCalls + MAX_SKILL_LOADS_PER_TURN) ?? 0;
+  // VOICE: the writing Skills of the catalog carry the user's confirmed voice when they load (voiceCatalog.ts). A voice that
+  // does not fit is dropped before the catalog is: the reply then loads Skills without it.
+  let voice = await admitCatalogVoice(admin, await options.actor(), catalog.map(entry => entry.moduleId), MAX_SKILL_LOADS_PER_TURN);
+  if (voice && !options.fitsWith(base + (voice.reserveBytes ?? 0) + strategy, text)) voice = undefined;
+  const reserveBytes = base + (voice?.reserveBytes ?? 0);
   if (!options.fitsWith(reserveBytes + strategy, text)) return undefined;
-  return { text, reserveBytes,
-    frozen: { skillCatalog: catalog, maxSkillLoads: MAX_SKILL_LOADS_PER_TURN, skillCatalogMaxBytes: maxResultBytes } };
+  return { text, reserveBytes, frozen: { skillCatalog: catalog, maxSkillLoads: MAX_SKILL_LOADS_PER_TURN,
+    skillCatalogMaxBytes: maxResultBytes, ...(voice ? { voiceProfile: voice } : {}) } };
 }
 
 /** The tool name and the extra calls a catalog adds: each load is one tool call and the model call that reads it. */

@@ -9,7 +9,9 @@ import { VOICE_GUIDE, VOICE_GUIDES, withPrimaryAddenda } from './primaryInstruct
  * its text is read again when the run executes, so a deleted version is never read again (0337 voice_profile_read). */
 /** Without a version: the user has no confirmed profile (and has not turned the voice off), so the Skill only hints once. */
 export const frozenVoiceProfile = z.object({ guide: z.enum(VOICE_GUIDES), versionId: z.string().uuid().optional(),
-  version: z.number().int().positive().optional(), modules: z.array(z.string().uuid()).min(1).max(16) }).strict();
+  version: z.number().int().positive().optional(), modules: z.array(z.string().uuid()).min(1).max(16),
+  // Free chat's load_skill path: the request bytes the voice of the loads of one reply may add (admission reserves them).
+  reserveBytes: z.number().int().min(0).optional() }).strict();
 export type FrozenVoiceProfile = z.infer<typeof frozenVoiceProfile>;
 type Rpc = { rpc(name: string, args: Record<string, unknown>): PromiseLike<{ data: unknown; error: unknown }> };
 

@@ -69,10 +69,18 @@ function frozenSource(rpc: ToolRpc, entry: SkillCatalogEntry): SkillSource {
 export function executionLoadSkillTool(options: {
   executionId: string; catalog: readonly SkillCatalogEntry[]; maxResultBytes: number; maxLoads: number;
   rpc: ToolRpc; assertCanStart: () => void; onRefused?: () => void;
+  /** VOICE: the user's voice a load of this module appends to the instructions (read at each load, never journaled). */
+  voiceText?: (moduleId: string) => Promise<string | null>;
 }) {
   const catalog = options.catalog.map(entry => catalogEntry.parse(entry));
   // Every call counts, refused ones too, as the database counts them; a replay after recovery repeats the same sequence.
   let calls = 0;
+  const withVoice = async (json: string, moduleId: string) => {
+    const text = await options.voiceText?.(moduleId);
+    if (!text) return json;
+    const loaded = JSON.parse(json) as { instructions: string };
+    return JSON.stringify({ ...loaded, instructions: loaded.instructions + text });
+  };
   return loadSkillTool(async (arguments_, callId) => {
     options.assertCanStart();
     calls++;
@@ -88,12 +96,12 @@ export function executionLoadSkillTool(options: {
         if (result.name !== entry.name || !sameIdentity(result, entry) || result.moduleId !== entry.moduleId)
           throw new Error('RUNTIME_SKILL_LOAD_CONFLICT');
         // Persisted JSONB key order is used both initially and on replay.
-        return JSON.stringify(saved.result);
+        return await withVoice(JSON.stringify(saved.result), entry.moduleId);
       }
       const instructions = await entryInstructions(frozenSource(options.rpc, entry), entry, options.maxResultBytes);
       const result = loadSkillResult(entry, instructions);
       const committed = await options.rpc<{ result: unknown }>('runtime_tool', { ...args, p_action: 'complete', p_result: result });
-      return JSON.stringify(committed.result);
+      return await withVoice(JSON.stringify(committed.result), entry.moduleId);
     } catch (error) {
       if (!permanent(error)) throw error;
       options.onRefused?.();
