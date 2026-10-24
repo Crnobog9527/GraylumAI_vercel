@@ -25,7 +25,7 @@ afterEach(() => vi.unstubAllEnvs());
 it.each(['local', 'staging', 'recovery'])('wires the %s host gate explicitly', async mode => {
   vi.stubEnv('V3_RUNTIME_STAGING_ENABLED', 'true');
   if (mode === 'recovery') mock.policy.mockRejectedValue(new Error('not enabled'));
-  await executeOriginalExecution({ admin: {rpc:async(name:string)=>({data:name==='content_erasure_visible'?true:null,error:null})} as never, user: { auth: {} } as never,
+  await executeOriginalExecution({ admin: {rpc:async(name:string)=>({data:name==='runtime_execution_visibility'?'visible':null,error:null})} as never, user: { auth: {} } as never,
     actorId: 'actor', budget: createRuntimeBudget(),
     ...(mode === 'local' ? { maintenanceEndpoint: 'http://127.0.0.1:1' } : {}) }, 'execution');
   const options = mock.factory.mock.calls[0][0];
@@ -62,15 +62,15 @@ it.each(['waiting_credits','waiting_resume'])('keeps %s when the original stagin
  mock.policy.mockRejectedValue(Error('window unavailable'));
  const execute=vi.fn(async()=>({state,code:state==='waiting_credits'?'RUNTIME_WAITING_CREDITS':'RUNTIME_WAITING_RESUME'}));
  mock.factory.mockReturnValue({execute,recoverFinancial:mock.recover});
- const rpc=vi.fn(async(name:string)=>name==='content_erasure_visible'?{data:true,error:null}
+ const rpc=vi.fn(async(name:string)=>name==='runtime_execution_visibility'?{data:'visible',error:null}
   :{data:{state,billing:{contractVersion:'bill2.v2'}},error:null});
  const result=await executeOriginalExecution({admin:{rpc} as never,user:{auth:{}} as never,
   actorId:'actor',budget:createRuntimeBudget()},'execution');
  expect(result).toMatchObject({state,unavailable:'RUNTIME_PRICE_CONFIGURATION_PENDING'});
  expect(mock.recover).not.toHaveBeenCalled();
  // LIB-4b: the waiting round (which may carry its saved primary body) is rechecked before it is returned.
- expect(rpc.mock.calls.filter(([name])=>name!=='content_erasure_visible')).toHaveLength(2);
- expect(rpc.mock.calls.at(-1)?.[0]).toBe('content_erasure_visible');
+ expect(rpc.mock.calls.filter(([name])=>name!=='runtime_execution_visibility')).toHaveLength(2);
+ expect(rpc.mock.calls.at(-1)?.[0]).toBe('runtime_execution_visibility');
  expect(execute).toHaveBeenCalledExactlyOnceWith('execution');
 });
 it.each(['auth', 'waiting', 'window'])('finishes erased waiting v2 when %s expires without new generation', async mode => {
@@ -112,8 +112,8 @@ it('refuses a buffered response when deletion commits during post-execution capt
  mock.factory.mockReturnValue({execute:async()=>({state:'completed',summary:'PRIVATE_RESPONSE',body:'PRIVATE_BODY'})});
  mock.capture.mockImplementationOnce(async()=>{deleted=true;});
  const rpc=vi.fn(async(name:string)=>{
-  expect(name).toBe('content_erasure_visible');
-  return deleted?{data:null,error:{code:'42501',message:'CONTENT_ERASED'}}:{data:true,error:null};
+  expect(name).toBe('runtime_execution_visibility');
+  return deleted?{data:null,error:{code:'42501',message:'CONTENT_ERASED'}}:{data:'visible',error:null};
  });
  await expect(executeOriginalExecution({admin:{rpc} as never,user:{auth:{}} as never,
   actorId:'actor',budget:createRuntimeBudget(),maintenanceEndpoint:'http://127.0.0.1:1'},'execution'))

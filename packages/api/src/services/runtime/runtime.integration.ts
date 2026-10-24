@@ -1072,8 +1072,8 @@ it('RUNTIME: AC-0 router round trips per phase stay fixed for admission, Skill l
   // AC-0c: Auth verifies once per invocation and credential, plus once again
   // after the provider response (AC-0 baseline was 2/6/9/12/9).
   const label=(name:string)=>Object.fromEntries(Object.entries(all).map(([key,m])=>[key,m.summary.labels[name]?.rt??0]));
-  // D7 checks before buffered output and on both sides of post-execution capture.
-  expect(label('rpc/content_erasure_visible')).toEqual({start:0,ordinary:0,stream:5,skill:0,execute:2,skillWarm:0});
+  // D7 checks before buffered output and on both sides of post-execution capture (one combined call each, PR-2A).
+  expect(label('rpc/runtime_execution_visibility')).toEqual({start:0,ordinary:0,stream:5,skill:0,execute:2,skillWarm:0});
   expect(label('rpc/runtime_positioning_gate')).toEqual({start:0,ordinary:1,stream:0,skill:1,execute:0,skillWarm:1});
   expect(label('auth/v1/user')).toEqual({start:1,ordinary:1,stream:2,skill:1,execute:2,skillWarm:1});
   // AC-0c: one service-role and one user-scoped (RLS) module read per request
@@ -1243,7 +1243,7 @@ it('RUNTIME: AC-1 opc.mentorTurnStream admits and streams a mentor turn in one i
   expect(label('rest/system_settings')).toEqual({oldPrepareOpening:1,oldStreamOpening:0,oldPrepareAnswer:1,
    oldStreamAnswer:0,opening:1,answer:1});
   // D7's seven visibility checks are additional reads, not replacement auth/package checks.
-  expect(label('rpc/content_erasure_visible')).toEqual({oldPrepareOpening:0,oldStreamOpening:7,oldPrepareAnswer:0,oldStreamAnswer:7,opening:7,answer:7});
+  expect(label('rpc/runtime_execution_visibility')).toEqual({oldPrepareOpening:0,oldStreamOpening:7,oldPrepareAnswer:0,oldStreamAnswer:7,opening:7,answer:7});
   expect(label('rpc/opc_capture_apply')).toEqual({oldPrepareOpening:1,oldStreamOpening:1,oldPrepareAnswer:1,oldStreamAnswer:1,opening:2,answer:2});
   expect(label('rpc/runtime_session_context')).toEqual({oldPrepareOpening:3,oldStreamOpening:0,oldPrepareAnswer:3,oldStreamAnswer:0,opening:3,answer:3});
   // Auth verifies once per invocation, and again after each provider response.
