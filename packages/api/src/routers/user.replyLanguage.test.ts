@@ -7,6 +7,7 @@ import { userRouter } from './user';
 function setup(stored: string | null, opts: { admin?: boolean; failWrite?: boolean } = {}) {
   const row = { id: 'user-1', role: 'user', status: 'active', nickname: null, email: 'user@example.com', reply_language: stored };
   const writes: Array<{ value: Record<string, unknown>; onlyWhenNull: boolean }> = [];
+  const targets: string[] = [];
   const supabase = { from(table: string) {
     if (table !== 'profiles') throw new Error(`Unexpected table ${table}`);
     // The auth middleware also records the login time through this client; that write is not under test.
@@ -17,11 +18,12 @@ function setup(stored: string | null, opts: { admin?: boolean; failWrite?: boole
   } };
   const supabaseAdmin = { from(table: string) {
     if (table !== 'profiles') throw new Error(`Unexpected table ${table}`);
-    let value: Record<string, unknown> | null = null, onlyWhenNull = false, ownRow = false;
+    let value: Record<string, unknown> | null = null, onlyWhenNull = false, ownRow = false, target = '';
     const run = async () => {
       if (!value) return { data: { reply_language: row.reply_language }, error: null };
       if (opts.failWrite) return { data: null, error: { code: '57014', message: 'private detail' } };
       writes.push({ value, onlyWhenNull });
+      targets.push(target);
       if (!ownRow || (onlyWhenNull && row.reply_language !== null)) return { data: [], error: null };
       row.reply_language = value.reply_language as string;
       return { data: [{ reply_language: row.reply_language }], error: null };
@@ -29,7 +31,7 @@ function setup(stored: string | null, opts: { admin?: boolean; failWrite?: boole
     const q = {
       update: (next: Record<string, unknown>) => { value = next; return q; },
       select: () => q,
-      eq: (column: string, id: string) => { if (column === 'id' && id === 'user-1') ownRow = true; return q; },
+      eq: (column: string, id: string) => { if (column === 'id') { target = id; ownRow = id === 'user-1'; } return q; },
       is: (column: string, target: unknown) => { if (column === 'reply_language' && target === null) onlyWhenNull = true; return q; },
       single: async () => { const result = await run(); return Array.isArray(result.data) ? { data: result.data[0] ?? null, error: result.error } : result; },
       then: (resolve: (value: unknown) => unknown, reject: (reason: unknown) => unknown) => run().then(resolve, reject),
@@ -41,7 +43,7 @@ function setup(stored: string | null, opts: { admin?: boolean; failWrite?: boole
     isEmailVerified: true, authProvider: 'email', supabase, supabaseAuth: supabase, supabasePublic: {}, supabaseAdmin,
     hasSupabaseAdminPrivileges: opts.admin ?? true,
   } as never);
-  return { caller, writes, row };
+  return { caller, writes, targets, row };
 }
 
 describe('reply language setting (CHAT-LANGUAGE)', () => {
@@ -55,6 +57,15 @@ describe('reply language setting (CHAT-LANGUAGE)', () => {
     await expect(t.caller.setReplyLanguage({ language })).resolves.toEqual({ language });
     expect(t.writes).toEqual([{ value: { reply_language: language }, onlyWhenNull: false }]);
     expect(t.row.reply_language).toBe(language);
+  });
+
+  it('writes only the reply language of the caller\'s own row, whatever else the request carries', async () => {
+    const t = setup(null);
+    const smuggled = { language: 'en', id: 'user-2', profileId: 'user-2', credits: 99999, role: 'admin', nickname: 'x' };
+    await expect(t.caller.setReplyLanguage(smuggled as never)).resolves.toEqual({ language: 'en' });
+    await expect(t.caller.applyEntryReplyLanguage(smuggled as never)).resolves.toEqual({ language: 'en' });
+    expect(t.writes.map(w => Object.keys(w.value))).toEqual([['reply_language'], ['reply_language']]);
+    expect(t.targets).toEqual(['user-1', 'user-1']);
   });
 
   it('refuses a language outside the three choices before writing anything', async () => {
