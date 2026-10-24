@@ -9,8 +9,10 @@ import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 const EXACT_GIT_SHA = /^[0-9a-f]{40}$/i;
 const LEGAL_MIGRATION_FILENAME = /^(?<number>\d{4})_(?<name>[A-Za-z0-9][A-Za-z0-9._-]*)\.sql$/;
-const POST_BASELINE_START = 48;
-const CHECKER_PATH = 'scripts/check-migration-ledger.mjs';
+// v2 (Owner 2026-10-25): numbers only need to rise above the exact base and stay
+// unique; gaps left by queued PRs are allowed. Whether staging applied every
+// merged file is checked by scripts/check-staging-migrations-applied.mjs.
+const CHECKER_PATH = 'scripts/check-migration-ledger-v2.mjs';
 const HISTORICAL_0018_PAIR = new Set([
   '0018_payment_fulfillment_atomicity.sql',
   '0018_rls_text_flags_and_job_runs.sql',
@@ -229,18 +231,6 @@ export async function checkMigrationLedger(directory, { baseSha, repositoryRoot 
     const candidateNumber = Number(LEGAL_MIGRATION_FILENAME.exec(candidateFile).groups.number);
     if (candidateNumber <= baseHighestNumber) {
       errors.push(`New migration must follow exact base high-water mark ${String(baseHighestNumber).padStart(4, '0')}: ${candidateFile}`);
-    }
-  }
-
-  const postBaselineNumbers = [...migrationsByNumber.keys()]
-    .map(Number)
-    .filter((number) => number >= POST_BASELINE_START)
-    .sort((left, right) => left - right);
-  const highestNumber = Math.max(postBaselineNumbers.at(-1) ?? 0, baseHighestNumber);
-  for (let number = POST_BASELINE_START; number <= highestNumber; number += 1) {
-    const paddedNumber = String(number).padStart(4, '0');
-    if (!migrationsByNumber.has(paddedNumber)) {
-      errors.push(`Missing post-baseline migration number ${paddedNumber}`);
     }
   }
 

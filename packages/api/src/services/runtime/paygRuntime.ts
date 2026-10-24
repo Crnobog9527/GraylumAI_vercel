@@ -30,6 +30,8 @@ export type PaygWait = {
   code: 'RUNTIME_NEW_CALLS_STOPPED' | 'RUNTIME_WAITING_CREDITS' | 'RUNTIME_WAITING_RESUME' | 'RUNTIME_USAGE_CONFIGURATION_REQUIRED';
   executionId: string; cursor: number; epoch: number; remainingCalls: number;
   body?: string; unavailable?: AgentTurnUnavailable;
+  /** Internal: the frozen test window or model no longer admits this round, so it can never resume (paygResume.ts). */
+  resumeClosed?: true;
 };
 export type PaygPosition = { cursor: number; epoch: number; remainingCalls: number };
 

@@ -28,13 +28,19 @@ describe('content erasure API boundary',()=>{
    .rejects.toMatchObject({code,message});
  });
  it('fails closed on private errors and rechecks visibility every time',async()=>{
-  const db={rpc:vi.fn().mockResolvedValue({data:true,error:null})};
-  const visible=contentVisibilityFence(db,actor,id);await visible();
+  const db={rpc:vi.fn().mockResolvedValue({data:'visible',error:null})};
+  const visible=contentVisibilityFence(db,actor,id);expect(await visible()).toBeNull();
+  expect(db.rpc).toHaveBeenCalledWith('runtime_execution_visibility',{p_actor_id:actor,p_execution_id:id,p_voice:false,p_library:false});
   db.rpc.mockResolvedValue({data:null,error:{message:'CONTENT_ERASED',code:'42501'}});
   await expect(visible()).rejects.toMatchObject({message:'CONTENT_ERASED'});
   db.rpc.mockResolvedValue({data:null,error:{message:'PRIVATE_DATABASE_BODY'}});
   await expect(visible()).rejects.toMatchObject({message:'CONTENT_ERASURE_UNAVAILABLE',cause:undefined});
-  expect(db.rpc).toHaveBeenCalledTimes(3);
+  db.rpc.mockResolvedValue({data:true,error:null}); // the old boolean answer is not a visibility answer
+  await expect(visible()).rejects.toMatchObject({message:'CONTENT_ERASURE_UNAVAILABLE'});
+  db.rpc.mockResolvedValue({data:'library',error:null});
+  expect(await visible({library:true})).toBe('library');
+  expect(db.rpc).toHaveBeenLastCalledWith('runtime_execution_visibility',{p_actor_id:actor,p_execution_id:id,p_voice:false,p_library:true});
+  expect(db.rpc).toHaveBeenCalledTimes(5);
  });
 });
 

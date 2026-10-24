@@ -10,6 +10,7 @@ import { QueryNotice } from '@/components/opc/query-notice';
 import { WorkspaceFrame } from "@/components/opc/workspace-frame";
 import styles from './start-work.module.css';
 import { WorkComposer, useFreeConversation } from '@/components/opc/work-composer';
+import { CompareButton } from '@/components/fusion-compare/ComparePicker';
 import { readStartEntry, retainedMatches, START_TEXT, type StartMode } from './start-entry';
 import { ProfileArchiveList } from '@/components/opc/profile-archive/ProfileArchiveList';
 import { PROFILE_ARCHIVE_TEXT } from '@/components/opc/profile-archive/profile-archive';
@@ -24,6 +25,11 @@ export default function PositioningHome() {
   useEffect(()=>{const entry=readStartEntry(location.search);setDirectEntry(entry?.intent?entry.mode:null);},[]);
   const free = useFreeConversation({ withReferences: true });
   const [skillId,setSkillId]=useState('');
+  // Same Skill the composer would send: the chosen one, else the account default; not ready until the choices are loaded.
+  const composerChoices=trpc.runtime.choices.useQuery(undefined,{retry:false});
+  const compareChoice=composerChoices.data?.skills.find(x=>skillId?x.moduleId===skillId:x.moduleId===composerChoices.data?.defaultSkill?.moduleId);
+  const compareSkill={ready:Boolean(composerChoices.data&&(!(skillId||composerChoices.data.defaultSkill)||compareChoice)),
+    skill:compareChoice?{kind:'skill' as const,moduleId:compareChoice.moduleId,revisionId:compareChoice.revisionId}:undefined};
   const catalog = trpc.opc.catalog.useQuery(undefined,{retry:false}),
     list = trpc.opc.list.useQuery(undefined,{retry:false}),
     library = trpc.opc.library.useQuery({ search: "", from: null, to: null }),
@@ -102,6 +108,14 @@ export default function PositioningHome() {
         <button aria-pressed={intent==='position'} onClick={choosePosition}><Target size={15}/>梳理账号定位</button>
         <button disabled><ChartNoAxesColumnIncreasing size={15}/>数据复盘</button><button disabled><CalendarDays size={15}/>发布排期</button>
       </section>
+      <CompareButton resolveSession={free.ensureSession} question={startInput}
+        disabled={free.busy||!compareSkill.ready}
+        blockedReason={free.references.length?'带 @ 引用资料的消息暂时不能多模型对比，请去掉引用后再试。':undefined}
+        skill={compareSkill.skill}
+        onStarted={(_compareId,_names,session)=>{
+          // The compare belongs to the new conversation now: carry the chosen Skill there and open it (the question stays in its history).
+          try{sessionStorage.removeItem('opc-new-task-input');if(skillId)localStorage.setItem('opc-runtime-skill:'+session,skillId);}catch{}
+          location.assign('/app/runtime?session='+session);}}/>
       <WorkComposer value={startInput} onChange={value=>{setStartInput(value);sessionStorage.setItem('opc-new-task-input',value);}} onSend={()=>void free.send(startInput,skillId)} disabled={free.busy} referenceList={free.references} onReferencesChange={free.setReferences} label="新任务内容" placeholder="问一个问题，或描述你想做的事…" skillId={skillId} onSkillChange={setSkillId} note="直接发送即可开始对话，也可以添加资料或选择技能。"/>
       {free.error&&<p role="alert">{free.error}</p>}
       {/* UI-B: topic and positioning work cannot read referenced documents; the text carries over without them. */}
