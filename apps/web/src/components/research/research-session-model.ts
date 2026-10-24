@@ -122,7 +122,7 @@ export interface StoredBenchmark {
   platform: string; account: string; followers: number | null; medianViews: number | null; engagementRate: number | null;
   postsPerWeek: number | null; lastPublishedAt: string | null; category: BenchmarkRow["category"]; qualified: boolean;
   fetchedAt: string;
-  /** BENCHMARK-COVERAGE (0351): share of fetched posts on the confirmed niche, 0–1; absent or null when unknown. */
+  /** BENCHMARK-COVERAGE (0357): share of fetched posts on the confirmed niche, 0–1; absent or null when unknown. */
   topicRelevance?: number | null;
   /** Evidence refs (`<research operation id>#<item>`) each displayed number was computed from. */
   refs: Record<"followers" | "medianViews" | "engagementRate" | "postsPerWeek" | "lastPublishedAt", string[]>;

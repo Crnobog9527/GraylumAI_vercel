@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it } from 'vitest';
-import { admitVoice, executionVoice, frozenVoiceProfile } from './voiceAdmission';
+import { admitVoice, executionVoice, frozenVoiceProfile, withExecutionVoice } from './voiceAdmission';
 import { VOICE_GUIDE, voiceAddendum, withPrimaryAddenda } from './primaryInstructions';
 
 const id = (n: number) => `10000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -56,10 +56,21 @@ describe('executionVoice', () => {
     expect(await executionVoice(db({ read: { profile } }), id(5), frozen, id(2))).toBeUndefined();
     expect(await executionVoice(db({ read: { profile } }), id(5), undefined, id(1))).toBeUndefined();
   });
-  it('a version deleted since admission is never read again: the run gets no voice text', async () => {
-    const voice = await executionVoice(db({ read: null }), id(5), frozen, id(1));
-    expect(voice).toBeUndefined();
-    expect(withPrimaryAddenda('SKILL', { ...(voice ? { voice } : {}) })).toBe('SKILL');
+  it('a read that fails or comes back unreadable is a retryable fault, never "deleted" (review P2)', async () => {
+    const context = { voiceProfile: frozen };
+    await expect(withExecutionVoice(db({ readError: true }), id(5), 'SKILL', context, id(1))).rejects.toThrow('VOICE_PROFILE_UNAVAILABLE');
+    await expect(withExecutionVoice(db({ read: { profile: { tone: 1 } } }), id(5), 'SKILL', context, id(1)))
+      .rejects.toThrow('VOICE_PROFILE_UNAVAILABLE');
+  });
+  it('a version deleted since admission is never read again: no voice text is produced', async () => {
+    expect(await executionVoice(db({ read: null }), id(5), frozen, id(1))).toBeUndefined();
+  });
+  it('a run bound to a version that can no longer be read ends before any provider request (Owner: deleted means unusable)', async () => {
+    const context = { voiceProfile: frozen };
+    await expect(withExecutionVoice(db({ read: null }), id(5), 'SKILL', context, id(1))).rejects.toThrow('VOICE_SOURCE_DELETED');
+    // Another Skill of the same run (not on the frozen list) is not bound to the version.
+    expect(await withExecutionVoice(db({ read: null }), id(5), 'SKILL', context, id(2))).toBe('SKILL');
+    expect(await withExecutionVoice(db({ read: { profile } }), id(5), 'SKILL', context, id(1))).toBe('SKILL' + voiceAddendum(profile));
   });
   it('the executor appends exactly the text admission sized', async () => {
     const voice = await executionVoice(db({ read: { profile } }), id(5), frozen, id(1));

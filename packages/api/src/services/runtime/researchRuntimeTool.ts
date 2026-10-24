@@ -39,6 +39,13 @@ export const researchToolParameters = (name: ResearchToolName, fastSearchOnly = 
   name === 'benchmark_discover' ? discoveryParameters
     : name === 'web_search' && fastSearchOnly ? fastSearchParameters as unknown as z.ZodObject<z.ZodRawShape>
       : researchToolArgs[name] as z.ZodObject<z.ZodRawShape>;
+/**
+ * What the model gets when its arguments fail a tool's schema (staging 2026-10-24: a 42-character keyword).
+ * Without it the Agents SDK throws, the whole paid turn fails and its replay fails the same way.
+ */
+export const INVALID_RESEARCH_ARGUMENTS = toolEnvelope({ status: 'not_confirmed', reason: 'INVALID_ARGUMENTS',
+  nextStep: 'The arguments did not match this tool\'s parameters (for example a keyword over 40 characters). '
+    + 'Nothing was sent. Correct them and call the tool again.' });
 /** Whether a turn's frozen routes lack the advanced web search. */
 export const fastSearchOnly = (config: Pick<ResearchToolsConfig, 'routes'>) =>
   !config.routes.some(route => route.platform === 'web' && route.kind === 'web_search_pro');
@@ -58,6 +65,7 @@ export function researchRuntimeTools(ctx: ResearchToolContext, names: readonly R
   const freeChat = options.freeChat;
   const make = (name: ResearchToolName): RuntimeTool => ({
     name, description: researchToolDescription(name, Boolean(freeChat)), parameters: researchToolParameters(name, fastSearchOnly(ctx.config)),
+    invalidResult: INVALID_RESEARCH_ARGUMENTS, invalidInputOnly: true,
     async execute(raw, callId) {
       // Replayed calls of a resumed answer run through here again, so this count is rebuilt in order.
       if (freeChat && ++calls > FREE_CHAT_RESEARCH_CALLS) return toolEnvelope({ status: 'budget_exhausted', reason: 'REPLY_CALL_LIMIT' });

@@ -1,5 +1,6 @@
 // 个人中心的分页。链接到某个分页时用 profileTabHref，避免写出不存在的 tab。
-export const PROFILE_TABS = ['profile', 'subscription', 'credits', 'history', 'security', 'tickets'] as const;
+// 'history'（使用历史）已下线：它读的是已关闭的旧 /chat 对话列表，永远是空的；旧链接 ?tab=history 回到个人资料。
+export const PROFILE_TABS = ['profile', 'subscription', 'credits', 'security', 'tickets'] as const;
 
 export type ProfileTab = (typeof PROFILE_TABS)[number];
 

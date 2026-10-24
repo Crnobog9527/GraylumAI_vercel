@@ -15,6 +15,7 @@ import {runExecutor} from './executor.mjs';
 import {runProcessor} from './processor.mjs';
 import {runLeaves} from './leaves.mjs';
 import {runOwnedRuntimePrune} from './owned-runtime-prune.mjs';
+import {runOwnedSessionPrune} from './owned-session-prune.mjs';
 import {runConcurrency} from './concurrency.mjs';
 import {startRedisDouble} from './redis-double.mjs';
 
@@ -74,9 +75,10 @@ try {
   fingerprint:development?undefined:snapshot});
  assert.equal(report.build.failed,null);
  // The optimization is built through the canonical migration chain; repeat its final version too.
- const optimization=read('packages/db/migrations/0333_erasure_prune_owned_runtime.sql');
- const optimized=snapshot();ok(sql(optimization));
- assert.deepEqual(snapshot(),optimized,'runtime owner optimization repeats without catalog drift');
+ const optimized=snapshot();
+ for(const file of ['0333_erasure_prune_owned_runtime.sql','0355_erasure_prune_session_tables.sql'])
+  ok(sql(read('packages/db/migrations/'+file)));
+ assert.deepEqual(snapshot(),optimized,'runtime owner optimizations repeat without catalog drift');
  const require=createRequire(resolve(root,'packages/api/package.json'));
  const {Client}=require('pg');
  const address=ok(docker(['port',name,'5432/tcp']));assert.match(address,/^127\.0\.0\.1:\d+$/);
@@ -114,6 +116,7 @@ try {
  report.checks.push('executor syncs the off-database manifest: ids and times only, nothing left unsynced');
  await runCases(client,report);
  await runLeaves(client,report);
+ await runOwnedSessionPrune(client,report);
  await runOwnedRuntimePrune(client,report);
  await runConcurrency({db:client,Client,connectionString,report});
  const {processAccountErasure}=await import(module('processor'));

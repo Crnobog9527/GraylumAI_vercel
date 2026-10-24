@@ -10,7 +10,7 @@ describe("benchmark topic relevance label (BENCHMARK-COVERAGE)", () => {
     expect([relevanceLabel(null), relevanceLabel(undefined), relevanceLabel(Number.NaN)]).toEqual([null, null, null]);
   });
 
-  it("keeps the stored relevance on the table row; rows from before 0351 have none", () => {
+  it("keeps the stored relevance on the table row; rows from before 0357 have none", () => {
     const stored = { platform: "tiktok", account: "a", followers: 1, medianViews: null, engagementRate: null, postsPerWeek: null,
       lastPublishedAt: null, category: "imitable", qualified: true, fetchedAt: "2026-10-24T00:00:00Z",
       refs: { followers: [], medianViews: [], engagementRate: [], postsPerWeek: [], lastPublishedAt: [] } } as StoredBenchmark;

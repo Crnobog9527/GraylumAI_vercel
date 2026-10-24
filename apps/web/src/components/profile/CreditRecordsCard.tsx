@@ -150,7 +150,7 @@ export const CreditRecordsCard = memo(function CreditRecordsCard({ user }: { use
   const allTimeSummary = trpc.credits.getCreditsSummary.useQuery({ period: 'all' }, CREDITS_SUMMARY_QUERY_OPTIONS);
 
   // 从 API 获取交易记录
-  const { data: transactionsData, isLoading: isLoadingTx } = trpc.credits.getCreditTransactions.useQuery({ limit: 50 });
+  const { data: transactionsData, isLoading: isLoadingTx } = trpc.credits.getCreditTransactions.useQuery({ limit: 50, actualOnly: true });
 
   // 转换 API 数据为组件所需格式
   const transactions: Transaction[] = useMemo(() => {

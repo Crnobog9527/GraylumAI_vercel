@@ -19,11 +19,11 @@ import path from 'node:path';
 import test from 'node:test';
 
 const repositoryRoot = path.resolve(import.meta.dirname, '../..');
-const checker = path.join(repositoryRoot, 'scripts/check-migration-ledger.mjs');
+const checker = path.join(repositoryRoot, 'scripts/check-migration-ledger-v2.mjs');
 const repositoryMigrations = path.join(repositoryRoot, 'packages/db/migrations');
 const ciWorkflow = path.join(repositoryRoot, '.github/workflows/ci.yml');
 
-// A fixed, contiguous ledger (0001-0063 plus the historical 0018 pair) so these
+// A fixed ledger (0001-0063 plus the historical 0018 pair) so these
 // cases test the checker's rules, not whichever migrations are queued in the repo.
 const FIXTURE_HIGHEST_MIGRATION = 63;
 const FIXTURE_NAMED_MIGRATIONS = new Map([
@@ -53,7 +53,7 @@ async function migrationFixture({ trustedChecker = true, trustedMigrations = tru
   const root = await mkdtemp(path.join(os.tmpdir(), 'graylum-migration-ledger-'));
   const migrations = path.join(root, 'packages/db/migrations');
   if (trustedChecker) {
-    const fixtureChecker = path.join(root, 'scripts/check-migration-ledger.mjs');
+    const fixtureChecker = path.join(root, 'scripts/check-migration-ledger-v2.mjs');
     await mkdir(path.dirname(fixtureChecker), { recursive: true });
     await cp(checker, fixtureChecker);
   }
@@ -107,7 +107,7 @@ async function withFixture(assertion, options) {
   }
 }
 
-test('accepts a contiguous migration ledger against its exact base commit', async () => {
+test('accepts a migration ledger against its exact base commit', async () => {
   await withFixture(async (fixture) => {
     assert.match(runChecker(fixture), /Migration ledger check passed/);
   }, { trustedChecker: false });
@@ -121,8 +121,8 @@ test('bootstrap workflow authenticates this checker and rejects a no-op replacem
   const noOpHash = createHash('sha256').update('process.exit(0);\n').digest('hex');
   assert.equal(checkerHash, pinnedHash);
   assert.notEqual(noOpHash, pinnedHash);
-  assert.match(workflow, /git ls-files --stage -- scripts\/check-migration-ledger\.mjs/);
-  assert.match(workflow, /\[ -L scripts\/check-migration-ledger\.mjs \]/);
+  assert.match(workflow, /git ls-files --stage -- scripts\/check-migration-ledger-v2\.mjs/);
+  assert.match(workflow, /\[ -L scripts\/check-migration-ledger-v2\.mjs \]/);
   assert.match(workflow, /100644\|100755/);
 });
 
@@ -167,7 +167,7 @@ test('candidate-local matching hashes cannot authenticate a modified base migrat
 
 test('rejects changing the successor checker after it exists in the exact base', async () => {
   await withFixture(async (fixture) => {
-    await writeFile(path.join(fixture.root, 'scripts/check-migration-ledger.mjs'), 'process.exit(0);\n');
+    await writeFile(path.join(fixture.root, 'scripts/check-migration-ledger-v2.mjs'), 'process.exit(0);\n');
     assert.throws(
       () => runChecker(fixture),
       (error) => /Migration ledger checker differs from exact base/.test(error.stderr),
@@ -177,7 +177,7 @@ test('rejects changing the successor checker after it exists in the exact base',
 
 test('rejects deleting the successor checker after it exists in the exact base', async () => {
   await withFixture(async (fixture) => {
-    await rm(path.join(fixture.root, 'scripts/check-migration-ledger.mjs'));
+    await rm(path.join(fixture.root, 'scripts/check-migration-ledger-v2.mjs'));
     assert.throws(
       () => runChecker(fixture),
       (error) => /Migration ledger checker differs from exact base/.test(error.stderr),
@@ -215,12 +215,12 @@ test('rejects a duplicate migration number after the historical baseline', async
   });
 });
 
-test('rejects a gap in the post-baseline migration sequence', async () => {
+test('rejects deleting a base-existing migration even when it only leaves a gap', async () => {
   await withFixture(async (fixture) => {
     await rm(path.join(fixture.migrations, '0062_skill_1a_db_publish_contract.sql'));
     assert.throws(
       () => runChecker(fixture),
-      (error) => /Missing post-baseline migration number 0062/.test(error.stderr),
+      (error) => /Missing base-existing migration: 0062_skill_1a_db_publish_contract\.sql/.test(error.stderr),
     );
   });
 });
@@ -257,7 +257,7 @@ test('rejects nested migration entries instead of ignoring them', async () => {
   });
 });
 
-test('allows a future migration only at the next sequential number', async () => {
+test('allows a future migration at the next number', async () => {
   await withFixture(async (fixture) => {
     const migrationNumbers = (await readdir(fixture.migrations))
       .filter((name) => /^\d{4}_.*\.sql$/.test(name))
@@ -271,23 +271,61 @@ test('allows a future migration only at the next sequential number', async () =>
   });
 });
 
-test('rejects a new migration that skips the next sequential number', async () => {
+// Owner 2026-10-25: numbers may skip ones held by queued PRs; they only need to
+// rise above the exact base and stay unique.
+test('accepts a new migration that leaves a gap for a queued number', async () => {
   await withFixture(async (fixture) => {
     await writeFile(path.join(fixture.migrations, '0065_future.sql'), '-- future migration fixture\n');
+    assert.match(runChecker(fixture), /Migration ledger check passed/);
+  });
+});
+
+test('accepts an exact base that already has a gap', async () => {
+  await withFixture(async (fixture) => {
+    assert.match(runChecker(fixture), /Migration ledger check passed/);
+  }, { skip: ['0055'] });
+});
+
+test('rejects a new migration that fills a gap below the base high-water mark', async () => {
+  await withFixture(async (fixture) => {
+    await writeFile(path.join(fixture.migrations, '0055_late.sql'), '-- late migration fixture\n');
     assert.throws(
       () => runChecker(fixture),
-      (error) => /Missing post-baseline migration number 0064/.test(error.stderr),
+      (error) => /New migration must follow exact base high-water mark 0063: 0055_late\.sql/.test(error.stderr),
+    );
+  }, { skip: ['0055'] });
+});
+
+test('rejects a new migration that reuses the base high-water number', async () => {
+  await withFixture(async (fixture) => {
+    await writeFile(path.join(fixture.migrations, '0063_again.sql'), '-- reused number fixture\n');
+    assert.throws(
+      () => runChecker(fixture),
+      (error) => /New migration must follow exact base high-water mark 0063: 0063_again\.sql/.test(error.stderr)
+        && /Duplicate migration number 0063/.test(error.stderr),
     );
   });
 });
 
-test('rejects a ledger whose exact base already has a post-baseline gap', async () => {
+test('rejects two new migrations that share a number', async () => {
   await withFixture(async (fixture) => {
+    await writeFile(path.join(fixture.migrations, '0066_first.sql'), '-- duplicate new fixture\n');
+    await writeFile(path.join(fixture.migrations, '0066_second.sql'), '-- duplicate new fixture\n');
     assert.throws(
       () => runChecker(fixture),
-      (error) => /Missing post-baseline migration number 0055/.test(error.stderr),
+      (error) => /Duplicate migration number 0066: 0066_first\.sql, 0066_second\.sql/.test(error.stderr),
     );
-  }, { skip: ['0055'] });
+  });
+});
+
+test('rejects a new migration filename without a four-digit number', async () => {
+  await withFixture(async (fixture) => {
+    await writeFile(path.join(fixture.migrations, '64_short_number.sql'), '-- malformed fixture\n');
+    assert.throws(
+      () => runChecker(fixture),
+      (error) => /Malformed migration filename: 64_short_number\.sql/.test(error.stderr),
+    );
+  });
 });
 
 test('fails closed when the exact base SHA is missing or cannot be resolved', async () => {

@@ -22,7 +22,9 @@ describe('tool arguments', () => {
     const p = researchToolArgs.propose_keywords;
     expect(p.safeParse({ keywords: ['a', 'b', 'c'] }).success).toBe(true);
     expect(p.safeParse({ keywords: ['a', 'b'] }).success).toBe(false);
-    expect(p.safeParse({ keywords: ['a', 'b', 'c', 'd', 'e', 'f'] }).success).toBe(false);
+    // BENCHMARK-COVERAGE: up to 10 keywords (Owner 2026-10-23), never 11.
+    expect(p.safeParse({ keywords: 'abcdefghij'.split('') }).success).toBe(true);
+    expect(p.safeParse({ keywords: 'abcdefghijk'.split('') }).success).toBe(false);
     expect(p.safeParse({ keywords: ['a', 'B', 'b'] }).success).toBe(false);
     expect(p.safeParse({ keywords: ['a', 'b', '字'.repeat(41)] }).success).toBe(false);
     expect(p.safeParse({ keywords: ['a', 'b', 'c'], extra: 1 }).success).toBe(false);

@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// BENCHMARK-COVERAGE topic relevance (0351 on 0282): the user's benchmark table returns the relevance benchmark_fetch
+// BENCHMARK-COVERAGE topic relevance (0357 on 0282): the user's benchmark table returns the relevance benchmark_fetch
 // stored in each row's own fetch evidence (0–1, anything else NULL) and lists qualified, more relevant rows first.
 // A label only: qualification and the report's frozen table are unchanged. Synthetic fixtures only.
 import assert from 'node:assert/strict';
@@ -25,7 +25,7 @@ export async function relevanceCases({db,check,rpc,seed,answer,fetchAccount,imit
   });
 
   await check('RELEVANCE the migration is repeatable', async () => {
-    const migration = readFileSync(new URL('../../migrations/0351_research_topic_relevance.sql',import.meta.url),'utf8');
+    const migration = readFileSync(new URL('../../migrations/0357_research_topic_relevance.sql',import.meta.url),'utf8');
     const definition = async () => (await db.query(
       "SELECT pg_get_functiondef('public.research_user_benchmarks(uuid,uuid)'::regprocedure) d")).rows[0].d;
     const before = await definition();
