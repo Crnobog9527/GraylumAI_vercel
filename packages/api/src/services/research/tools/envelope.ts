@@ -3,6 +3,7 @@
 // inside fields, never instructions; failures are explicit states, never an empty list posing as "no results".
 import type { ResearchCallResult, ResearchItem } from '../vendors/types';
 import type { ShortfallNotice } from '../runtime/shortfall';
+import type { DiscoveryCoverage } from '../runtime/discoveryLayers';
 
 export const TOOL_STATUSES = ['ok', 'partial', 'unavailable', 'not_supported', 'not_confirmed', 'budget_exhausted'] as const;
 export type ToolStatus = typeof TOOL_STATUSES[number];
@@ -41,6 +42,8 @@ export interface ToolEnvelope {
   shortfall?: ShortfallNotice;
   /** Whether the host showed the user a candidate card this call; the model's text must not contradict it. */
   candidateCard?: CandidateCardState;
+  /** BENCHMARK-COVERAGE: what a discovery searched, counted by code (plan §3 item 6). */
+  coverage?: DiscoveryCoverage;
 }
 
 /** Adapter outcome → tool status. A confirmed failure and an unknown result both read as `unavailable`. */
@@ -84,6 +87,7 @@ export interface EnvelopeInput {
   requiredCandidates?: number;
   shortfall?: ShortfallNotice;
   candidateCard?: CandidateCardState;
+  coverage?: DiscoveryCoverage;
 }
 
 /**
@@ -104,6 +108,7 @@ export function toolEnvelope(input: EnvelopeInput, maxBytes = TOOL_RESULT_MAX_BY
     ...(input.requiredCandidates !== undefined ? { requiredCandidates: input.requiredCandidates } : {}),
     ...(input.shortfall ? { shortfall: input.shortfall } : {}),
     ...(input.candidateCard ? { candidateCard: input.candidateCard } : {}),
+    ...(input.coverage ? { coverage: input.coverage } : {}),
   };
   const full = (input.items ?? []).map((item, index) => ({
     ...(input.evidenceId ? { ref: `${input.evidenceId}#${index + 1}` } : {}),
