@@ -204,9 +204,12 @@ it.each(['charged', 'uncharged', 'live-lease', 'unknown-cost'] as const)
     } };
     await runtimeExecutor({ ...f.options, database }).execute(f.admitted.executionId).catch(() => undefined);
     const charged = mode === 'uncharged' ? 0 : 3;
-    expect(await f.snapshot()).toMatchObject({ execution_state: 'running', active_execution: f.admitted.executionId,
-      closed: false, charged, credits: 100 - charged, calls: deadAfter });
-    expect((await f.snapshot()).reserved).toBeGreaterThan(0);
+    // The unsent claim still holds credits (the balance shows them as reserved).
+    const stuck = await f.snapshot();
+    expect(stuck).toMatchObject({ execution_state: 'running', active_execution: f.admitted.executionId,
+      closed: false, charged, calls: deadAfter });
+    expect(stuck.reserved).toBeGreaterThan(0);
+    expect(stuck.credits).toBe(100 - charged - stuck.reserved);
     // Age only this disposable fixture.
     const lease = mode === 'live-lease' ? '30 seconds' : '10 minutes';
     await f.db.query("update runtime_executions set created_at=now()-interval '20 minutes' where id=$1", [f.admitted.executionId]);
