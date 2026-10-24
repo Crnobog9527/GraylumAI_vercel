@@ -162,6 +162,7 @@ describe('official usage to USD', () => {
 });
 
 describe('read and save', () => {
+  const sha = (text: string) => createHash('sha256').update(text).digest('hex');
   function db(read: { data: unknown; error: unknown } | Error, writeError: unknown = null) {
     const writes: unknown[] = [];
     let stored = read;
@@ -170,15 +171,26 @@ describe('read and save', () => {
         if (stored instanceof Error) throw stored;
         return stored;
       } }) }),
-      upsert: async (row: { value: string }) => {
-        writes.push(row);
-        if (!writeError) stored = { data: { value: row.value }, error: null };
-        return { error: writeError };
-      },
-    }) };
+    }),
+    // billing_provider_prices_swap: compares the stored hash and writes in one locked statement.
+    rpc: async (name: string, args: { p_expected_hash: string | null; p_value: string }) => {
+      expect(name).toBe('billing_provider_prices_swap');
+      const current = stored instanceof Error ? null : (stored.data as { value?: string } | null)?.value ?? null;
+      if ((current === null ? null : sha(current)) !== args.p_expected_hash) {
+        return { error: { message: 'BILLING_UNIT_PROVIDER_PRICES_CONFLICT' } };
+      }
+      writes.push({ value: args.p_value });
+      if (!writeError) stored = { data: { value: args.p_value }, error: null };
+      return { error: writeError };
+    } };
     return { client: client as unknown as SupabaseClient, writes };
   }
-  const sha = (text: string) => createHash('sha256').update(text).digest('hex');
+
+  it('a save that lost the race inside the database is a conflict, not a silent overwrite', async () => {
+    const raced = db({ data: null, error: null });
+    const client = { ...raced.client, rpc: async () => ({ error: { message: 'BILLING_UNIT_PROVIDER_PRICES_CONFLICT' } }) };
+    await expect(saveProviderPrices(client as unknown as SupabaseClient, config(entry()), null)).rejects.toThrow('CONFLICT');
+  });
 
   it('absent configuration prices nothing; read failures are errors; invalid stored values are named as such', async () => {
     await expect(readProviderPrices(db({ data: null, error: null }).client)).resolves.toEqual({
@@ -203,6 +215,14 @@ describe('read and save', () => {
     await expect(saveProviderPrices(stored.client, config(entry({ price: '6' })), null)).rejects.toThrow('CONFLICT');
     await expect(saveProviderPrices(stored.client, config(entry({ price: '6' })), 'b'.repeat(64))).rejects.toThrow('CONFLICT');
     expect(stored.writes).toEqual([]);
+  });
+
+  it('a non-string stored value is hashed from PostgreSQL\'s own text (as the 0346 writer hashes it)', async () => {
+    const legacy = db({ data: { value: { version: 2 }, raw: '{"version": 2}' }, error: null });
+    await expect(providerPricesView(legacy.client)).resolves.toMatchObject({ source: 'invalid', hash: sha('{"version": 2}') });
+    // A row whose value is SQL NULL is a broken row (hash of "null", as 0346 computes it), not a missing one.
+    const empty = db({ data: { value: null, raw: null }, error: null });
+    await expect(providerPricesView(empty.client)).resolves.toMatchObject({ source: 'invalid', hash: sha('null') });
   });
 
   it('an invalid stored value can be replaced by quoting its hash', async () => {

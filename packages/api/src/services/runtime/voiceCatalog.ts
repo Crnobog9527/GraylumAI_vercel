@@ -14,7 +14,8 @@ import type { SkillCatalogEntry } from './skillCatalog';
  */
 
 const guard = (names: string[]) => `\nApply this writing voice only to content you write after loading one of these Skills: ${names.join(', ')}. `
-  + 'For every other reply, ignore it completely.';
+  + 'For every other reply, ignore it completely. Before writing the first line of such content, check it against the passages above: '
+  + 'no sentence may copy a passage or reword it lightly, and the opening and first three sentences must be new, about the current topic.';
 const flaggedNames = (catalog: readonly SkillCatalogEntry[], modules: readonly string[]) =>
   catalog.filter(entry => modules.includes(entry.moduleId)).map(entry => entry.name);
 
