@@ -156,7 +156,8 @@ describe('deeper discovery layers', () => {
       .toEqual([['one', '20']]);
     expect(envelope.coverage.platforms.tiktok).toMatchObject({ spent: { searches: 3, pages: 1, accountSearches: 0, webSearches: 0, profiles: 5 },
       capReached: false, exhausted: true });
-    expect(envelope).toMatchObject({ status: 'partial', reason: 'NOT_ENOUGH_CANDIDATES', candidateCard: { shown: false } });
+    // Searched to the end with 5 selectable: the card shows those 5 (Owner 2026-10-23).
+    expect(envelope).toMatchObject({ status: 'ok', reason: null, candidateCard: { shown: true, selectable: 5 } });
   });
 
   it('a 0.01 USD platform stops at its own ceiling, also across replies, and the round still ends', async () => {
