@@ -44,14 +44,14 @@ export async function admitSkillCatalog(user: SupabaseClient, admin: SupabaseCli
   const text = skillCatalogInstructions(catalog);
   const base = skillCatalogReserveBytes(catalog) + loadSkillToolBytes();
   const strategy = options.strategyReserve?.(options.maxCalls + MAX_SKILL_LOADS_PER_TURN) ?? 0;
-  // VOICE: the writing Skills of the catalog carry the user's confirmed voice when they load (voiceCatalog.ts). A voice that
-  // does not fit is dropped before the catalog is: the reply then loads Skills without it.
-  let voice = await admitCatalogVoice(admin, await options.actor(), catalog.map(entry => entry.moduleId), MAX_SKILL_LOADS_PER_TURN);
-  if (voice && !options.fitsWith(base + (voice.reserveBytes ?? 0) + strategy, text)) voice = undefined;
-  const reserveBytes = base + (voice?.reserveBytes ?? 0);
-  if (!options.fitsWith(reserveBytes + strategy, text)) return undefined;
-  return { text, reserveBytes, frozen: { skillCatalog: catalog, maxSkillLoads: MAX_SKILL_LOADS_PER_TURN,
-    skillCatalogMaxBytes: maxResultBytes, ...(voice ? { voiceProfile: voice } : {}) } };
+  // VOICE: the writing Skills of the catalog are written in the user's confirmed voice (voiceCatalog.ts). The voice is a
+  // system-instruction paragraph the executor appends, sized here with the catalog text: it is never a tool result, so it
+  // never reaches the stored conversation history. A voice that does not fit is dropped before the catalog is.
+  let voice = await admitCatalogVoice(admin, await options.actor(), catalog);
+  if (voice && !options.fitsWith(base + strategy, text + voice.text)) voice = undefined;
+  if (!options.fitsWith(base + strategy, text + (voice?.text ?? ''))) return undefined;
+  return { text, reserveBytes: base, frozen: { skillCatalog: catalog, maxSkillLoads: MAX_SKILL_LOADS_PER_TURN,
+    skillCatalogMaxBytes: maxResultBytes, ...(voice ? { voiceProfile: voice.frozen } : {}) } };
 }
 
 /** The tool name and the extra calls a catalog adds: each load is one tool call and the model call that reads it. */

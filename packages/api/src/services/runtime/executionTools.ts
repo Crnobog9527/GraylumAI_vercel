@@ -24,7 +24,7 @@ export function executionTools(input:{
  agentTurn:boolean;grounded:boolean;fiveFields:boolean;sources:()=>ReturnType<typeof cardSources>;
  ownerRpc:ToolRpc;budget:{assertCanStart:(ms?:number)=>void;timing?:RequestTiming};
  execution:{live?:boolean;sessionId:string};research:ResearchExecution|null;onRefused:()=>void;
- onProgress?:(event:AgentToolEvent)=>void;voiceText?:(moduleId:string)=>Promise<string|null>;
+ onProgress?:(event:AgentToolEvent)=>void;
  exchange:Parameters<typeof sourceRuntimeTool>[0]['exchange'];
 }):{tools:RuntimeTool[];toolBytes:number;catalogReserve:number}{
  const {context,executionId,ownerRpc,budget,research}=input;
@@ -34,8 +34,7 @@ export function executionTools(input:{
   name==='read_skill_file'?executionSkillFileTool({executionId,moduleId:context.moduleId!,binding:context.skillFile!,
    rpc:ownerRpc,assertCanStart:()=>budget.assertCanStart(),timing:budget.timing,onRefused:input.onRefused}):
   name===LOAD_SKILL_TOOL?executionLoadSkillTool({executionId,catalog:context.skillCatalog!,maxResultBytes:context.skillCatalogMaxBytes!,
-   maxLoads:context.maxSkillLoads!,rpc:ownerRpc,assertCanStart:()=>budget.assertCanStart(),onRefused:input.onRefused,
-   voiceText:input.voiceText}):
+   maxLoads:context.maxSkillLoads!,rpc:ownerRpc,assertCanStart:()=>budget.assertCanStart(),onRefused:input.onRefused}):
   name===READ_HISTORY_TOOL?executionMentorHistoryTool({executionId,rpc:ownerRpc,assertCanStart:()=>budget.assertCanStart(),
    onRefused:input.onRefused}):
   withSourceWorkProgress(sourceRuntimeTool({name,context,args:input.args,ownerRpc,budget,
@@ -45,5 +44,5 @@ export function executionTools(input:{
   (context.skillFile?skillFileToolBytes():0)+(context.historyRead?mentorHistoryToolBytes():0)+(research?.definitionBytes??0)+
   (context.historySelection?.markerReserveBytes??(context.promptCache?PROMPT_CACHE_OVERHEAD_BYTES:0));
  // The loads this reply may make: reserved once, in the first history selection only, never in later per-call totals.
- return {tools,toolBytes,catalogReserve:context.skillCatalog?skillCatalogReserveBytes(context.skillCatalog)+(context.voiceProfile?.reserveBytes??0):0};
+ return {tools,toolBytes,catalogReserve:context.skillCatalog?skillCatalogReserveBytes(context.skillCatalog):0};
 }

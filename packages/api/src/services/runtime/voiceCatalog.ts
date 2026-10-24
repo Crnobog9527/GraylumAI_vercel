@@ -1,35 +1,42 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { serializedResultBytes } from './skillCatalog';
-import { voiceText } from './primaryInstructions';
-import { admitVoice, executionVoice, type FrozenVoiceProfile } from './voiceAdmission';
+import { voiceText, withPrimaryAddenda } from './primaryInstructions';
+import { admitVoice, executionVoice, withExecutionVoice, type FrozenVoiceProfile } from './voiceAdmission';
+import type { SkillCatalogEntry } from './skillCatalog';
 
 /*
  * VOICE on the load_skill path (Owner 2026-10-23: the voice goes with every writing Skill, however it is loaded). Free chat's
- * model loads Skills itself, so there is no chosen or matched Skill at admission: the catalog's flagged writing Skills are
- * frozen with the confirmed version, and a load of one of them appends the voice to the loaded instructions. The voice text
- * is never journaled with the load (a deleted voice must not stay in a stored tool result): it is read when the load runs
- * and appended after the journaled result, for the first load and for a replay alike.
+ * model loads Skills itself, so there is no chosen or matched Skill at admission. The catalog's flagged writing Skills are
+ * named in the frozen voice, and the executor appends one system-instruction paragraph: the voice, applied only to what the
+ * model writes after loading one of those Skills. It is a system instruction, not a tool result: system instructions are never
+ * stored in the conversation history, so a later deletion leaves no copy of the voice there (the history keeps the answers,
+ * D7), and one copy is sized whatever number of Skills the reply loads.
  */
 
-/** The frozen voice of a catalog and the request bytes it reserves: each load of a flagged Skill appends it once. */
-export async function admitCatalogVoice(admin: SupabaseClient, actorId: string, moduleIds: string[], maxLoads: number):
-  Promise<FrozenVoiceProfile | undefined> {
-  const voice = await admitVoice(admin, actorId, moduleIds);
+const guard = (names: string[]) => `\nApply this writing voice only to content you write after loading one of these Skills: ${names.join(', ')}. `
+  + 'For every other reply, ignore it completely.';
+const flaggedNames = (catalog: readonly SkillCatalogEntry[], modules: readonly string[]) =>
+  catalog.filter(entry => modules.includes(entry.moduleId)).map(entry => entry.name);
+
+/** The frozen voice of a catalog and the paragraph it adds (for sizing), or undefined when no writing Skill uses it. */
+export async function admitCatalogVoice(admin: SupabaseClient, actorId: string, catalog: readonly SkillCatalogEntry[]):
+  Promise<{ frozen: FrozenVoiceProfile; text: string } | undefined> {
+  const voice = await admitVoice(admin, actorId, catalog.map(entry => entry.moduleId));
   if (!voice) return undefined;
-  const unit = serializedResultBytes(voiceText({ guide: voice.frozen.guide, profile: voice.profile }));
-  return { ...voice.frozen, reserveBytes: unit * Math.min(maxLoads, voice.frozen.modules.length) };
+  return { frozen: voice.frozen,
+    text: voiceText({ guide: voice.frozen.guide, profile: voice.profile }) + guard(flaggedNames(catalog, voice.frozen.modules)) };
 }
 
 type Options = { database: Parameters<typeof executionVoice>[0]; actor: () => Promise<string> };
-/** The text a load of this module appends, or null when the module does not use the voice. A bound version that can no
- * longer be read refuses the load for good (the run is then ended by its deletion binding, 0345). */
-export function voiceLoader(options: Options, context: { voiceProfile?: FrozenVoiceProfile }) {
-  return async (moduleId: string): Promise<string | null> => {
-    const frozen = context.voiceProfile;
-    if (!frozen || !frozen.modules.includes(moduleId)) return null;
-    const voice = await executionVoice(options.database, await options.actor(), frozen, moduleId);
-    if (frozen.versionId && !voice) throw new Error('RUNTIME_SKILL_LOAD_DENIED');
-    return voiceText(voice) || null;
-  };
+type Context = Parameters<typeof withPrimaryAddenda>[1] & { voiceProfile?: FrozenVoiceProfile; skillCatalog?: readonly SkillCatalogEntry[] };
+
+/** The executor's instructions plus the voice: of the chosen or matched Skill (withExecutionVoice), or, in free chat with a
+ * Skill catalog, the catalog voice. A bound version that can no longer be read ends the run before any provider request. */
+export async function withVoice(options: Options, instructions: string, context: Context, moduleId: string | undefined) {
+  const base = await withExecutionVoice(options.database, await options.actor(), instructions, context, moduleId);
+  const frozen = context.voiceProfile;
+  if (moduleId || !frozen || !context.skillCatalog) return base;
+  const voice = await executionVoice(options.database, await options.actor(), frozen, frozen.modules[0]);
+  if (frozen.versionId && !voice) throw new Error('VOICE_SOURCE_DELETED');
+  return base + voiceText(voice) + guard(flaggedNames(context.skillCatalog, frozen.modules));
 }
