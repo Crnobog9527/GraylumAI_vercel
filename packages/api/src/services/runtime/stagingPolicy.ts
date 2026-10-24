@@ -49,6 +49,22 @@ export function parseStagingPolicy(value:unknown,windowId?:string):StagingPolicy
  return policy;
 }
 
+/** Whether the host's current policy admits this actor now; a failure is kept for the original execution's recovery path. */
+export type RealPolicyCheck={ok:true}|{ok:false;failure:unknown};
+export function realPolicyCheck(database:BillingRpc,actorId:string,env:Record<string,string|undefined>=process.env):Promise<RealPolicyCheck>{
+ return loadStagingPolicy(database,actorId,env).then(()=>({ok:true as const}),(failure:unknown)=>({ok:false as const,failure}));
+}
+/**
+ * DB-PERF PR-5a, the access check of an execution route: one policy load serves both the route and the execution.
+ * A loaded policy proves enabled window (or production) access for this actor, which implies the read access check.
+ * Only when it fails does the route run the read access check, exactly as before, so a refusal is unchanged; the
+ * failure goes to the execution's recovery path (a closed window still lets the original round finish).
+ */
+export async function executionRouteAccess(database:BillingRpc,actorId:string,env:Record<string,string|undefined>):Promise<RealPolicyCheck>{
+ const checked=await realPolicyCheck(database,actorId,env);
+ if(!checked.ok)await assertStagingReadAccess(database,actorId,env);
+ return checked;
+}
 /** Reads and maintenance remain target-bound after enablement is switched off. */
 export async function assertStagingReadAccess(database:BillingRpc,actorId:string,env:Record<string,string|undefined>){
  if(realRuntimeEnvironment(env)==='production'){productionRuntimeTarget(env,true);return assertProductionAccess(database as never,actorId);}

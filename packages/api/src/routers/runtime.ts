@@ -7,15 +7,15 @@ import {executionVisibility} from '../services/runtime/libraryVisibility';
 import {reportEnabled,reportLocate,reportService} from '../services/report/service';
 import {reportPrice} from '../services/report/fees';
 import {reportStart} from '../services/report/contract';
-import {readNativeRuntimeView} from '../services/runtime/nativeView';
-import {readWorkItems,withWorkItems} from '../services/runtime/workItems';
+import {readNativeRuntimeViewWithWorkItems} from '../services/runtime/nativeView';
+import {withWorkItems} from '../services/runtime/workItems';
 import {resumeInput} from '../services/runtime/paygRuntime';
 import type {inferProcedureBuilderResolverOptions} from '@trpc/server';
 import type {RuntimeProgress} from '../services/runtime/progress';
 import { z } from 'zod';
 import { protectedProcedure,router } from '../trpc';
 import { runtimeAdmissionService,runtimeAdmission,runtimeMaterialInput } from '../services/runtime/admission';
-import {loadStagingPolicy,assertStagingReadAccess} from '../services/runtime/stagingPolicy';
+import {loadStagingPolicy,assertStagingReadAccess,executionRouteAccess,type RealPolicyCheck} from '../services/runtime/stagingPolicy';
 import {StagingAccessError,stagingProcedureError} from '../services/runtime/stagingErrors';
 import {stagingTransport} from '../services/runtime/stagingTransport';
 import { runtimeExecutor } from '../services/runtime/execute';
@@ -41,6 +41,20 @@ const maintenanceProcedure=protectedProcedure.use(async({ctx,next,path})=>{
  } catch(cause) { throw stagingProcedureError(cause,path); }
  ctx.runtimeBudget?.timing?.enter('host');
  const result=await next({ctx:{...ctx,maintenanceEndpoint}});
+ if(!result.ok)throw stagingProcedureError(result.error,path);
+ return result;
+});
+// Running or recovering an original execution: the same access as maintenanceProcedure, with one policy load shared
+// by this route and the execution (DB-PERF PR-5a, stagingPolicy.ts executionRouteAccess).
+const executionAccessProcedure=protectedProcedure.use(async({ctx,next,path})=>{
+ ctx.runtimeBudget?.timing?.enter('policy');
+ let maintenanceEndpoint:string|undefined,policyChecked:RealPolicyCheck|undefined;
+ try {
+  if(!ctx.hasSupabaseAdminPrivileges||!ctx.supabaseAdmin)throw new StagingAccessError('RUNTIME_STAGING_SERVICE_UNAVAILABLE');
+  try{maintenanceEndpoint=runtimeLocalEndpoint();}catch{policyChecked=await executionRouteAccess(ctx.supabaseAdmin,ctx.user.id,process.env);}
+ } catch(cause) { throw stagingProcedureError(cause,path); }
+ ctx.runtimeBudget?.timing?.enter('host');
+ const result=await next({ctx:{...ctx,maintenanceEndpoint,policyChecked}});
  if(!result.ok)throw stagingProcedureError(result.error,path);
  return result;
 });
@@ -71,11 +85,12 @@ const procedure=protectedProcedure.use(async({ctx,next,path})=>{
  }catch(cause){throw stagingProcedureError(cause,path);}
 });
 
-const executionProcedure=maintenanceProcedure.input(z.object({executionId:z.string().uuid(),textProtocol:z.literal('textDelta-v1').optional()}).strict());
+const executionProcedure=executionAccessProcedure.input(z.object({executionId:z.string().uuid(),textProtocol:z.literal('textDelta-v1').optional()}).strict());
 function executeOriginal({ctx,input}:inferProcedureBuilderResolverOptions<typeof executionProcedure>,onProgress?:(event:RuntimeProgress)=>void,
  visibility?:ReturnType<typeof executionVisibility>){
  return executeOriginalExecution({admin:ctx.supabaseAdmin!,user:ctx.userScopedSupabase,actorId:ctx.user.id,budget:ctx.runtimeBudget,
-  authorization:ctx.headers?.get('Authorization'),maintenanceEndpoint:ctx.maintenanceEndpoint,visibility},input.executionId,onProgress);
+  authorization:ctx.headers?.get('Authorization'),maintenanceEndpoint:ctx.maintenanceEndpoint,visibility,
+  policyChecked:ctx.policyChecked},input.executionId,onProgress);
 }
 export const runtimeRouter=router({
  reportDocument:maintenanceProcedure.input(reportDocumentInput).query(({ctx,input})=>
@@ -158,12 +173,12 @@ export const runtimeRouter=router({
   },input.executionId,undefined,undefined,true);
   if(r.error)throw new Error('RUNTIME_CANCEL_DENIED');return r.data;
  }),
- resume:maintenanceProcedure.input(resumeInput).mutation(({ctx,input})=>executeOriginalExecution({
+ resume:executionAccessProcedure.input(resumeInput).mutation(({ctx,input})=>executeOriginalExecution({
   admin:ctx.supabaseAdmin!,user:ctx.userScopedSupabase,actorId:ctx.user.id,budget:ctx.runtimeBudget,
-  authorization:ctx.headers?.get('Authorization'),maintenanceEndpoint:ctx.maintenanceEndpoint,
+  authorization:ctx.headers?.get('Authorization'),maintenanceEndpoint:ctx.maintenanceEndpoint,policyChecked:ctx.policyChecked,
  },input.executionId,undefined,input)),
  // Same execution and resume token as `resume`; only the delivery streams (CHAT-NATIVE-OUTPUT).
- resumeStream:maintenanceProcedure.input(resumeInput.extend({textProtocol:z.literal('textDelta-v1').optional()})).mutation(async function*({ctx,input}){
+ resumeStream:executionAccessProcedure.input(resumeInput.extend({textProtocol:z.literal('textDelta-v1').optional()})).mutation(async function*({ctx,input}){
   const timing=ctx.runtimeBudget?.timing;
   const {textProtocol,...token}=input;
   // One fence for the executor and every yield: content erasure, and deleted library sources (LIB-4b).
@@ -171,6 +186,7 @@ export const runtimeRouter=router({
   try{yield* streamOriginalExecution(onProgress=>executeOriginalExecution({
    admin:ctx.supabaseAdmin!,user:ctx.userScopedSupabase,actorId:ctx.user.id,budget:ctx.runtimeBudget,
    authorization:ctx.headers?.get('Authorization'),maintenanceEndpoint:ctx.maintenanceEndpoint,visibility,
+   policyChecked:ctx.policyChecked,
   },token.executionId,onProgress,token),timing,'runtime.resumeStream',undefined,textProtocol,visibility.visible);}
   finally{timing?.release();}
  }),
@@ -184,8 +200,7 @@ export const runtimeRouter=router({
   finally{timing?.release();}
  }),
  view:maintenanceProcedure.input(z.object({sessionId:z.string().uuid()}).strict()).query(async({ctx,input})=>{
-  const view=await readNativeRuntimeView(ctx.supabaseAdmin!,ctx.user.id,input.sessionId);
-  const work=await readWorkItems(ctx.supabaseAdmin!,ctx.user.id,input.sessionId);
-  return {...withWorkItems(view,work),mode:ctx.maintenanceEndpoint?'isolated':realHostMode(process.env)};
+  const {view,workItems}=await readNativeRuntimeViewWithWorkItems(ctx.supabaseAdmin!,ctx.user.id,input.sessionId);
+  return {...withWorkItems(view,workItems),mode:ctx.maintenanceEndpoint?'isolated':realHostMode(process.env)};
  }),
 });
