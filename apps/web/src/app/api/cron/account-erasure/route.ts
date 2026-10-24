@@ -4,6 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import { runAccountErasureExecutor } from '@repo/api/src/services/accountErasure/executor';
 import { sweepErasedConversations } from '@repo/api/src/services/accountErasure/content';
 import { validateCronRequest } from '@/lib/cron-auth';
+import { readErasureBacklog, reportErasureBacklog } from '@/lib/erasure-backlog-alert';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -27,6 +28,9 @@ export async function GET(request: Request) {
     // A failing sweep must not skip account erasure in this run; it still fails the run below.
     const conversations = await sweepErasedConversations(client, started + 12_000).catch(() => null);
     const summary = await runAccountErasureExecutor(client, started + 45_000);
+    // The 24-hour promise is watched here, not by the run's own success: alert before the deadline.
+    const backlog = await readErasureBacklog(client).catch(() => null);
+    if (backlog) reportErasureBacklog(backlog);
     if (!conversations) throw new Error('CONTENT_ERASURE_SWEEP_FAILED');
     const success = summary.failed === 0 && summary.pending === 0
       && conversations.pending === 0 && conversations.failed === 0 && !conversations.more;

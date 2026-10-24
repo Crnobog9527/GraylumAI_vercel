@@ -18,3 +18,16 @@ export function PublishEntry({ workItemId, finalized }: { workItemId: string; fi
     </p>
   );
 }
+
+/**
+ * The results folder's entry: one saved result goes to the brand accounts the user has connected. Same rule as above
+ * (plan, switch and an open platform decide); every saved result is text the user confirmed, so no further state is needed.
+ */
+export function PublishResultLink({ familyId, sessionId }: { familyId: string; sessionId: string }) {
+  const options = trpc.publishMonitor.publish.options.useQuery(undefined, { retry: false, refetchOnWindowFocus: false });
+  if (!options.data || options.data.platforms.length === 0) return null;
+  return (
+    <Link className="inline-flex h-8 items-center rounded-md border px-3 text-sm"
+      href={`/app/publish-monitor/publish?result=${familyId}&session=${sessionId}`}>一键发布</Link>
+  );
+}

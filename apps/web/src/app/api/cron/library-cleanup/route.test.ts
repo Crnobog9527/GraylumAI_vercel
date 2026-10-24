@@ -1,10 +1,11 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
-const mocks=vi.hoisted(()=>({auth:vi.fn(),create:vi.fn(),cleanup:vi.fn()}));
+const mocks=vi.hoisted(()=>({auth:vi.fn(),create:vi.fn(),cleanup:vi.fn(),backlog:vi.fn()}));
 vi.mock('@/lib/cron-auth',()=>({validateCronRequest:mocks.auth}));
 vi.mock('@supabase/supabase-js',()=>({createClient:mocks.create}));
 vi.mock('@repo/api/src/services/library/cleanup',()=>({runLibraryCleanup:mocks.cleanup}));
+vi.mock('@/lib/erasure-backlog-alert',()=>({reportLibraryBacklog:mocks.backlog}));
 import { GET } from './route';
 afterEach(()=>vi.unstubAllEnvs());
 beforeEach(()=>{
@@ -39,4 +40,9 @@ it('runs library cleanup and account erasure every 5 minutes (Pro)',()=>{
  const config=JSON.parse(readFileSync('vercel.json','utf8'));
  expect(config.crons).toContainEqual({path:'/api/cron/library-cleanup',schedule:'*/5 * * * *'});
  expect(config.crons).toContainEqual({path:'/api/cron/account-erasure',schedule:'*/5 * * * *'});
+});
+it('checks the deletion backlog against the 24-hour promise on every run',async()=>{
+ mocks.cleanup.mockResolvedValue({checked:0,released:0,pending:7,overdue:0,oldestDeletedAt:'2026-10-24T00:00:00Z',failed:0,unknownPaths:0});
+ await GET(new Request('https://synthetic.test/api/cron/library-cleanup'));
+ expect(mocks.backlog).toHaveBeenCalledWith(expect.objectContaining({pending:7,overdue:0,oldestDeletedAt:'2026-10-24T00:00:00Z'}));
 });
