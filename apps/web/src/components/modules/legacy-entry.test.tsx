@@ -24,7 +24,6 @@ function action(node: ReactNode): ReactElement<any> | undefined {
 beforeEach(() => { vi.clearAllMocks(); mocks.catalog = { data: [], isError: false }; });
 describe('legacy entry replacements', () => {
   it.each([
-    ['components/profile/UsageHistoryCard.tsx', '/app/positioning'],
     ['components/admin/AdminSidebar.tsx', '/app'],
   ])('%s links to %s', (file, destination) => {
     const source = readFileSync(new URL(`../../${file}`, import.meta.url), 'utf8');

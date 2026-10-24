@@ -69,9 +69,8 @@ test.describe('User Extended Flows', () => {
       await expect(page.getByText('积分概览')).toBeVisible({ timeout: 10000 });
       await expect(page.getByText('交易记录')).toBeVisible({ timeout: 10000 });
 
-      steps.push('Open usage history and verify the history shell');
-      await page.getByRole('button', { name: '使用历史' }).click();
-      await expect(page.getByRole('heading', { name: '使用历史' })).toBeVisible({ timeout: 10000 });
+      steps.push('Usage history is no longer offered (Owner 2026-10-25)');
+      await expect(page.getByRole('button', { name: '使用历史' })).toHaveCount(0);
 
       const blockingIssues = monitor.getIssues('P1');
       expect(blockingIssues, JSON.stringify(blockingIssues, null, 2)).toEqual([]);
