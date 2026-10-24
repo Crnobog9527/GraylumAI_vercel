@@ -140,8 +140,8 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
  // A sent message whose execution is not in the view yet also keeps the view polling quickly.
  const outgoingUnseen=Boolean(outgoing&&!(view.data?.executions as Array<{executionId:string}>|undefined)?.some(e=>e.executionId===outgoing.executionId));
  useRuntimeViewBusy(viewPolling,busy||outgoingUnseen,view.refetch,Boolean(sessionId));
- // DB-PERF 5b: no timed reads while this page's stream is open; its close reads once and polling resumes.
- useRuntimeViewStreaming(viewPolling,runner.streaming,()=>view.refetch({cancelRefetch:false}),Boolean(sessionId));
+ // DB-PERF 5b: no timed reads while this page's stream is open; polling stops only once the view lists the streamed execution; its close reads once and polling resumes.
+ useRuntimeViewStreaming(viewPolling,runner.streaming?runner.reply?.executionId??null:null,()=>view.refetch({cancelRefetch:false}),Boolean(sessionId));
  const ordinary=choices.data?.models[0]?.id??'';
  const moduleSelection=requestedModule||storedModule;
  const chosenModule=choices.data?.skills.find(skill=>skill.moduleId===moduleSelection);

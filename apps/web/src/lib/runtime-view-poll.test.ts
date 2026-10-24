@@ -68,19 +68,21 @@ describe('runtime.view polling', () => {
     expect(refetch).toHaveBeenCalledTimes(1);
   });
 
-  it('does not poll while this page streams, and re-reads once when the stream closes', () => {
-    const streaming = { current: false };
+  it('does not poll while this page streams a listed execution, and re-reads once when the stream closes', () => {
+    const streaming = { current: null as string | null };
     const interval = runtimeViewPollOptions({ current: null }, { current: true }, streaming).refetchInterval;
     expect(interval(query(running))).toBe(5000);
-    streaming.current = true;
+    streaming.current = 'e1';
     expect(interval(query(running))).toBe(false);
-    expect(interval(query(undefined))).toBe(false);
+    // The streamed execution is not in the view yet: keep reading so Stop and progress can appear.
+    expect(interval(query({ activeExecution: null, executions: [] }))).toBe(5000);
+    expect(interval(query(undefined))).toBe(5000);
     const refetch = vi.fn();
-    markRuntimeViewStreaming(streaming, true, refetch);
+    markRuntimeViewStreaming(streaming, 'e1', refetch);
     expect(refetch).not.toHaveBeenCalled();
-    markRuntimeViewStreaming(streaming, false, refetch);
+    markRuntimeViewStreaming(streaming, null, refetch);
     expect(refetch).toHaveBeenCalledTimes(1);
-    markRuntimeViewStreaming(streaming, false, refetch);
+    markRuntimeViewStreaming(streaming, null, refetch);
     expect(refetch).toHaveBeenCalledTimes(1);
     // A turn the server still advances (stream broke) falls back to the quick poll.
     expect(interval(query(running))).toBe(5000);
