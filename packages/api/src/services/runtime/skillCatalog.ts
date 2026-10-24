@@ -22,6 +22,9 @@ export const catalogEntry = z.object({
   revisionId: z.string().uuid(), packageHash: z.string().regex(/^[a-f0-9]{64}$/),
   // Bytes of the exact tool result for this entry; admission reserves the largest MAX_SKILL_LOADS_PER_TURN of them.
   resultBytes: z.number().int().positive(),
+  // VOICE: the module is flagged "使用用户文风" (modules.uses_user_voice), read with the module row here so admission needs no extra
+  // database read; present only when true.
+  usesVoice: z.literal(true).optional(),
 }).strict();
 export const skillCatalog = z.array(catalogEntry).max(MAX_CATALOG_ENTRIES);
 export type SkillCatalogEntry = z.infer<typeof catalogEntry>;
@@ -106,7 +109,7 @@ async function discoverUncached(user: SupabaseClient, admin: SupabaseClient,
   const visible = await userVisibleModules(user, { limit: 65, orderById: true });
   if (visible.error || visible.data.length > 64) throw new Error('RUNTIME_CATALOG_CAPACITY');
   if (!visible.data.length) return [];
-  const rows = await admin.from('modules').select('id,skill_id,social_media_related').in('id', visible.data.map(m => m.id))
+  const rows = await admin.from('modules').select('id,skill_id,social_media_related,uses_user_voice').in('id', visible.data.map(m => m.id))
     .eq('active', true).order('id');
   if (rows.error) throw new Error('RUNTIME_CATALOG_UNAVAILABLE');
   const catalog: SkillCatalogEntry[] = [];
@@ -134,7 +137,7 @@ async function discoverUncached(user: SupabaseClient, admin: SupabaseClient,
       if (resultBytes > limits.maxResultBytes) continue;
       // Names are what the model calls; a duplicate name would be ambiguous, so the first (lowest module id) wins.
       if (catalog.some(other => other.name === entry.name)) continue;
-      catalog.push(catalogEntry.parse({ ...entry, resultBytes }));
+      catalog.push(catalogEntry.parse({ ...entry, resultBytes, ...(row.uses_user_voice === true ? { usesVoice: true } : {}) }));
       if (catalog.length >= MAX_CATALOG_ENTRIES) return catalog;
     }
   }

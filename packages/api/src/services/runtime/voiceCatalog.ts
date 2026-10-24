@@ -21,7 +21,9 @@ const flaggedNames = (catalog: readonly SkillCatalogEntry[], modules: readonly s
 /** The frozen voice of a catalog and the paragraph it adds (for sizing), or undefined when no writing Skill uses it. */
 export async function admitCatalogVoice(admin: SupabaseClient, actorId: string, catalog: readonly SkillCatalogEntry[]):
   Promise<{ frozen: FrozenVoiceProfile; text: string } | undefined> {
-  const voice = await admitVoice(admin, actorId, catalog.map(entry => entry.moduleId));
+  // The flags came with the catalog (skillCatalog.ts): no extra read, and no voice call at all when no Skill uses it.
+  const flagged = catalog.filter(entry => entry.usesVoice).map(entry => entry.moduleId);
+  const voice = await admitVoice(admin, actorId, flagged, true);
   if (!voice) return undefined;
   return { frozen: voice.frozen,
     text: voiceText({ guide: voice.frozen.guide, profile: voice.profile }) + guard(flaggedNames(catalog, voice.frozen.modules)) };
