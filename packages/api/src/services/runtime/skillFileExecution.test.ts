@@ -16,12 +16,13 @@ it('claims before reading, freezes once and replays the exact persisted JSON byt
   let saved:unknown=null;
   const calls:string[]=[];
   const rpc=vi.fn(async(name:string,args:Record<string,unknown>)=>{
-    calls.push(`${name}:${args.p_action??args.p_path}`);
+    calls.push(`${name}:${args.p_action??(Array.isArray(args.p_paths)?`[${args.p_paths.join(',')}]`:args.p_path)}`);
     if(name==='runtime_tool'&&args.p_action==='claim')return {result:saved};
     if(name==='runtime_tool'&&args.p_action==='complete'){
       saved=Object.fromEntries(Object.entries(args.p_result as object).reverse());
       return {result:saved};
     }
+    if(Array.isArray(args.p_paths))return {files:Object.fromEntries(args.p_paths.map(path=>[path,Buffer.from(content).toString('base64')]))};
     if(args.p_path===null)return descriptor;
     if(args.p_path==='')return true;
     return Buffer.from(content).toString('base64');
@@ -33,7 +34,9 @@ it('claims before reading, freezes once and replays the exact persisted JSON byt
   expect(second).toBe(first);
   expect(calls[0]).toBe('runtime_tool:claim');
   expect(calls.filter(call=>call==='runtime_tool:complete')).toHaveLength(1);
-  expect(calls.filter(call=>call==='read_skill_package:ref.md')).toHaveLength(1);
+  // DB-PERF PR-4: the file arrives in one checked batch read; the replay rechecks access but reads no content.
+  expect(calls.filter(call=>call==='read_skill_package:[ref.md]')).toHaveLength(1);
+  expect(calls.filter(call=>call==='read_skill_package:ref.md')).toHaveLength(0);
 });
 it('does not read private data if execution ownership/cancellation/erasure claim is denied',async()=>{
   const rpc=vi.fn(async()=>{throw new Error('RUNTIME_TOOL_DENIED');});

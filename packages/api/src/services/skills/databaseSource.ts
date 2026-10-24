@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { isEmailVerified } from '../../lib/auth';
-import { fail, sameIdentity, validateDescriptor, type PackageDescriptor, type PackageIdentity, type SkillSource } from './loader';
+import { batchBytes, batchFiles, fail, sameIdentity, validateDescriptor, type PackageDescriptor, type PackageIdentity, type SkillSource } from './loader';
 
 declare const userScopedRead: unique symbol;
 /** A module row from the user-scoped (RLS-governed) read. Only userVisibleModules()
@@ -32,6 +32,9 @@ export function databaseSkillSource(options: {
   options = { ...options };
   if (typeof window !== 'undefined') fail('UNAVAILABLE');
   let selected: PackageDescriptor | undefined;
+  // DB-PERF PR-4: this source lives for one request; once its full service check has passed (the first listing or a
+  // checked read), a check-only readMany([]) in the same request reuses it. File reads always go to the service.
+  let checked = false;
   let admitted: Promise<void> | undefined;
   if (options.userVisibleModule) {
     // Fail closed on a row that does not prove this exact module is visible and active.
@@ -49,7 +52,7 @@ export function databaseSkillSource(options: {
     }
     return admitted;
   };
-  const read = async (identity?: PackageIdentity, path: string | null = null, maxBytes = 2097152) => {
+  const read = async (identity?: PackageIdentity, path: string | null = null, maxBytes = 2097152, paths?: readonly string[]) => {
     if (!options.privateClient) fail('UNAVAILABLE');
     const auth = await options.userClient.auth.getUser();
     const user = auth.data.user;
@@ -59,6 +62,7 @@ export function databaseSkillSource(options: {
       p_actor_id: user.id, p_module_id: options.moduleId, p_skill_id: options.skillId,
       p_revision_id: identity?.revisionId ?? options.revisionId ?? null,
       p_package_hash: identity?.packageHash ?? null, p_path: path, p_max_bytes: maxBytes,
+      ...(paths ? { p_paths: paths } : {}),
     });
     if (error || data === null) fail('UNAVAILABLE');
     return data;
@@ -68,7 +72,7 @@ export function databaseSkillSource(options: {
     // the same immutable descriptor; callers reach them only through the loader,
     // which checks state immediately after (discoverSkills, activateSkill).
     async list() {
-      if (!selected) selected = validateDescriptor(await read());
+      if (!selected) { selected = validateDescriptor(await read()); checked = true; }
       return [structuredClone(selected)];
     },
     async state(identity) {
@@ -80,6 +84,14 @@ export function databaseSkillSource(options: {
       const data = await read(identity,identity.path,maxBytes);
       if (typeof data !== 'string') fail('SOURCE_FAILURE');
       return Buffer.from(data,'base64');
+    },
+    // DB-PERF PR-4: the same full service check as state(), returning the listed files in the same call.
+    async readMany(identity,files) {
+      if (!selected || !sameIdentity(selected,identity)) fail('UNAVAILABLE');
+      if (!files.length && checked) return new Map();
+      const result = batchFiles(await read(identity,null,batchBytes(files),files.map(f => f.path)),files);
+      checked = true;
+      return result;
     },
   };
 }
