@@ -10,6 +10,11 @@ export type ResearchSelectionCard = { cardId: string; minSelect: number; maxSele
 );
 export type ResearchTurnEvent =
   | { type: 'research_card'; card: ResearchSelectionCard }
+  /**
+   * BENCHMARK-COVERAGE (Owner 2026-10-23, 3 A): this reply's lookups ran out while a benchmark discovery round was still
+   * searching. Host-sent, never model-written: the page may send the continuation on the user's behalf.
+   */
+  | { type: 'research_continue'; discoveryId: string }
   | { type: 'research_call'; callId: string; toolName: string; args: Record<string, unknown>;
       query: string; platform: SocialPlatform | 'web'; dataKind: SocialKind | 'web_search' | 'web_fetch';
       state: 'running' | 'succeeded' | 'failed' | 'unknown'; evidenceId?: string;

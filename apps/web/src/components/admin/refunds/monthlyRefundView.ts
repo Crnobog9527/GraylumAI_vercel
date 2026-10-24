@@ -4,6 +4,15 @@
 // server round trip; the server stays the authority for every rule.
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const FEE_EVIDENCE_PATTERN = /^[A-Za-z0-9:._/-]{1,160}$/;
+// The number every admin ticket page shows (TK-<UTC date>-<first 6 ID characters>); the form looks up its ID.
+const TICKET_NUMBER_PATTERN = /^TK-\d{8}-[0-9a-f]{6}$/i;
+export const isTicketNumber = (value: string) => TICKET_NUMBER_PATTERN.test(value.trim());
+
+/** The ticket ID to send: typed directly, or looked up from the ticket number admins see. */
+export async function ticketIdFor(value: string, lookup: (ticketNumber: string) => Promise<{ ticketId: string }>) {
+  const typed = value.trim();
+  return isTicketNumber(typed) ? (await lookup(typed.toUpperCase())).ticketId : typed;
+}
 
 export type FeePermitted = 'confirmed' | 'not_permitted';
 export type MonthlyRefundForm = { orderId: string; ticketId: string; feePermitted: FeePermitted | ''; feeEvidence: string };
@@ -36,7 +45,9 @@ const SCOPE_FIELDS: Record<RefundFormScope, Array<keyof MonthlyRefundForm>> = {
 
 function fieldError(field: keyof MonthlyRefundForm, form: MonthlyRefundForm): string | null {
   if (field === 'orderId' && !UUID_PATTERN.test(form.orderId.trim())) return '请填写完整的订单编号（支付订单页里的"订单"一行）';
-  if (field === 'ticketId' && !UUID_PATTERN.test(form.ticketId.trim())) return '请填写完整的工单编号（这位用户提交的账单类工单）';
+  if (field === 'ticketId' && !UUID_PATTERN.test(form.ticketId.trim()) && !isTicketNumber(form.ticketId)) {
+    return '请填写工单编号（工单管理页里的 TK-…，这位用户提交的账单类工单）';
+  }
   if (field === 'feePermitted' && form.feePermitted !== 'confirmed' && form.feePermitted !== 'not_permitted') {
     return '请先确认当地法律是否允许扣手续费';
   }
