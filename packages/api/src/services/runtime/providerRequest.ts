@@ -44,7 +44,7 @@ export const AGENT_TURN_REQUEST_FORMAT='agent-turn-v5-stream';
 type FrozenCallPolicy=z.infer<typeof frozenCallPolicy>;
 /** Only the frozen context fields that decide the provider bytes. */
 export type RequestContext={providerRequestFormat?:ProviderRequestFormat;textStream?:string;tools:readonly string[];workspaceContext?:boolean;
- libraryReferences?:readonly unknown[];libraryRetrieval?:boolean;research?:{freeChat?:string};
+ libraryReferences?:readonly unknown[];libraryRetrieval?:boolean;research?:{freeChat?:string};skillCatalog?:readonly unknown[];
  promptCache?:PromptCachePolicy;network?:string;reasoning?:ReasoningPolicy;attachedOrganizer?:{reasoning?:ReasoningPolicy}};
 
 /** Fail closed for reasoning attached to an older, unmarked request format. */
@@ -75,7 +75,9 @@ export function openRouterRequestBody(request:string,options:{context:RequestCon
  const ownedRead=Boolean(context.workspaceContext||context.libraryReferences?.length||context.libraryRetrieval);
  // CHAT-AUTO-CONTEXT C: a v6 free chat that froze research tools may also use exactly the ones its context lists.
  const freeChatResearch=format===FREE_CHAT_REQUEST_FORMAT&&Boolean(context.research?.freeChat);
- const olderToolAllowed=(name:string)=>name==='read_source'?ownedRead:freeChatResearch&&FREE_CHAT_TOOL_NAMES.has(name);
+ // CONTENT-CONVERSATION-DRIVEN: load_skill only where admission froze a Skill catalog.
+ const olderToolAllowed=(name:string)=>name==='read_source'?ownedRead:name==='load_skill'?Boolean(context.skillCatalog?.length):
+  freeChatResearch&&FREE_CHAT_TOOL_NAMES.has(name);
  const toolsDenied=format===AGENT_TURN_REQUEST_FORMAT
   ?context.tools.some(name=>!AGENT_TOOL_NAMES.has(name))||Boolean(context.workspaceContext)||
    requested.some(tool=>tool.type!=='function'||!context.tools.includes(String(tool.function?.name)))

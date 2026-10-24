@@ -8,9 +8,9 @@ import {INVALID_REPLY_NOTICE,questionToolCardSchema} from '../../shared/agentTur
 /** Mirror the existing public reader: sanitize suggestions, never grant confirmation. */
 const patch = z.object({
   value: z.string().refine(value => Boolean(value.trim()) && value.length <= 400).transform(value => value.trim()),
-  status: z.unknown().transform(value => value === 'unclear' ? 'unclear' as const : 'provisional' as const),
+  status: z.unknown().optional().transform(value => value === 'unclear' ? 'unclear' as const : 'provisional' as const),
   nature: z.enum(['fact', 'decision', 'hypothesis', 'unknown']),
-  basis: z.unknown().transform(value => value === 'agent_proposal' ? 'agent_proposal' as const : 'user_statement' as const),
+  basis: z.unknown().optional().transform(value => value === 'agent_proposal' ? 'agent_proposal' as const : 'user_statement' as const),
 });
 const patches = z.record(z.string(), z.unknown()).transform(value => Object.fromEntries(
   Object.entries(value).flatMap(([key, item]) => {

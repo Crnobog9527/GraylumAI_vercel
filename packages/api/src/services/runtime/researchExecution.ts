@@ -22,7 +22,7 @@ import { frozenResearchConfig, type FrozenResearchTurn } from './researchTurn';
 import type { RuntimeTool } from './runner';
 import type { SessionRpc } from './session';
 import { readBillingRpc } from '../bill2/readRetry';
-import type { RuntimeBudget } from './budget';
+import { MIN_MODEL_DISPATCH_MS, type RuntimeBudget } from './budget';
 
 const runCalls = z.object({ calls: z.array(z.object({ id: z.string().uuid(), sequence: z.number().int().positive(),
   providerId: z.string().nullable() }).passthrough()) }).passthrough();
@@ -37,6 +37,14 @@ export interface ResearchExecution {
   isSubcall(sequence: number): Promise<boolean>;
   /** Only this invocation's successful tool claims; replay still consults the database. */
   claimedSubcall?(sequence: number): boolean;
+}
+
+/** Room kept for one slow paid lookup (BILL2 claim, dispatch, supplier answer, record) on top of the reply's own minimum. */
+const LOOKUP_MS = 30_000;
+
+/** Whether this invocation can still afford one slow paid lookup and the model reply after it (no budget: no limit). */
+export function lookupTimeLeft(budget: Pick<RuntimeBudget, 'assertCanStart'> | undefined): boolean {
+  try { budget?.assertCanStart(MIN_MODEL_DISPATCH_MS + LOOKUP_MS); return true; } catch { return false; }
 }
 
 export function researchExecution(input: {
@@ -89,6 +97,9 @@ export function researchExecution(input: {
     scope, executionId: input.executionId, config: frozenResearchConfig(research), store,
     emit: event => { if (!closed) input.emit(event); },
     now: input.now ?? (() => new Date()),
+    // A paid lookup only starts with time left for a slow one and for the reply after it: a round stopped here continues
+    // on the next reply (#1308 staging: a slow database ran a discovery into the 265s limit and the reply failed).
+    lookupTime: () => lookupTimeLeft(input.budget),
     subcall: {
       policies: toolCallPolicies(execution.billing.callPolicy),
       // Replay never claims (like a replayed model call): saved evidence answers, anything unsaved stays pending.

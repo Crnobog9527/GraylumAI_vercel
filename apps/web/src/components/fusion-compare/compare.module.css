@@ -1,0 +1,44 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/* FUSION-COMPARE: the composer entry, the picker and the compare card. Colours follow the composer (work-composer.module.css). */
+.entry{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 12px;border:1px solid #e5e5e5;border-radius:999px;background:#fff;color:#2d2d2d;font-size:12px;white-space:nowrap}
+.entry:hover:not(:disabled){background:#f6f6f6}.entry:disabled{color:#b9b9b9;cursor:not-allowed}
+.muted{color:#6b6b6b;font-size:12px}
+.error{color:var(--color-destructive,#b42318);font-size:12px}
+.spin{animation:spin 1s linear infinite;display:inline-block;vertical-align:-2px}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+.picker{max-width:min(520px,calc(100vw - 32px))}
+.models{display:grid;gap:6px;margin:0;padding:0;border:0}
+.model{display:flex;align-items:center;gap:10px;min-height:44px;padding:8px 10px;border:1px solid #ececec;border-radius:12px;cursor:pointer}
+.model span{flex:1;min-width:0;overflow-wrap:anywhere;font-size:14px;color:#262626}
+.model[data-disabled=true]{opacity:.55;cursor:not-allowed}
+.estimate{margin:0;font-size:13px;color:#262626}.estimate strong{font-size:15px}
+
+.card{margin:16px 0;padding:14px;border:1px solid #e8e8e8;border-radius:18px;background:#fff}
+.head{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;margin-bottom:10px}
+.head strong{font-size:14px;color:#262626}
+.question{flex-basis:100%;order:3;margin:0;color:#4a4a4a;font-size:13px;line-height:1.55;overflow-wrap:anywhere}
+.ghost{display:inline-flex;align-items:center;gap:5px;margin-left:auto;padding:4px 10px;border:1px solid #e5e5e5;border-radius:999px;background:#fff;color:#444;font-size:12px}
+.ghost:disabled{color:#b9b9b9}
+.primary{padding:6px 12px;border:0;border-radius:999px;background:#242424;color:#fff;font-size:12px}
+.primary:disabled{background:#eee;color:#b9b9b9}
+.tabs{display:none}
+.columns{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
+.column{display:flex;flex-direction:column;min-width:0;border:1px solid #efefef;border-radius:14px;background:#fcfcfc}
+.columnHead{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:4px 8px;padding:10px 12px;border-bottom:1px solid #f0f0f0}
+.columnHead strong{font-size:13px;color:#262626;overflow-wrap:anywhere}
+.phase{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:#6b6b6b}
+.phase[data-phase=failed],.phase[data-phase=pending]{color:#9a6700}
+.answer{flex:1;max-height:480px;overflow-y:auto;padding:10px 12px;font-size:14px;overflow-wrap:anywhere}
+.columnFoot{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px;min-height:40px;padding:8px 12px;border-top:1px solid #f0f0f0;font-size:12px;color:#6b6b6b}
+.adopted{display:inline-flex;align-items:center;gap:4px;color:#1a7f37}
+.total{margin:10px 2px 0;font-size:12px;color:#4a4a4a}
+/* Phones: one column at a time, switched with tabs (Master Plan §4.2). */
+@media(max-width:700px){
+  .tabs{display:flex;gap:6px;overflow-x:auto;margin-bottom:8px}
+  .tabs button{flex:none;min-height:36px;padding:0 12px;border:1px solid #e5e5e5;border-radius:999px;background:#fff;color:#444;font-size:12px}
+  .tabs button[aria-selected=true]{background:#242424;border-color:#242424;color:#fff}
+  .columns{grid-template-columns:1fr}
+  .column[data-active=false]{display:none}
+  .answer{max-height:none}
+}

@@ -3,12 +3,12 @@ import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { logger } from '../../lib/logger';
 import { voiceProfile, type VoiceProfile } from '../voice/profile';
-import { VOICE_GUIDE, withPrimaryAddenda } from './primaryInstructions';
+import { VOICE_GUIDE, VOICE_GUIDES, withPrimaryAddenda } from './primaryInstructions';
 
 /** VOICE (Master Plan 5.3 step 4): what admission freezes for a run that may write in the user's voice. Only the version id:
  * its text is read again when the run executes, so a deleted version is never read again (0337 voice_profile_read). */
 /** Without a version: the user has no confirmed profile (and has not turned the voice off), so the Skill only hints once. */
-export const frozenVoiceProfile = z.object({ guide: z.literal(VOICE_GUIDE), versionId: z.string().uuid().optional(),
+export const frozenVoiceProfile = z.object({ guide: z.enum(VOICE_GUIDES), versionId: z.string().uuid().optional(),
   version: z.number().int().positive().optional(), modules: z.array(z.string().uuid()).min(1).max(16) }).strict();
 export type FrozenVoiceProfile = z.infer<typeof frozenVoiceProfile>;
 type Rpc = { rpc(name: string, args: Record<string, unknown>): PromiseLike<{ data: unknown; error: unknown }> };
@@ -43,12 +43,15 @@ export async function admitVoice(admin: SupabaseClient, actorId: string, moduleI
   }
 }
 
-/** The text of a frozen version; undefined once the user deleted it or one of its sources. */
+/** The text of a frozen version; undefined only when the database answered that it no longer exists (the user deleted it or
+ * one of its sources). A failed or unreadable answer is a retryable fault, never "deleted". */
 export async function readVoiceProfile(db: Rpc, actorId: string, versionId: string): Promise<VoiceProfile | undefined> {
   const read = await db.rpc('voice_profile_read', { a: actorId, vid: versionId });
   if (read.error) throw new Error('VOICE_PROFILE_UNAVAILABLE');
-  const parsed = voiceProfile.safeParse((read.data as { profile?: unknown } | null)?.profile);
-  return parsed.success ? parsed.data : undefined;
+  if (read.data === null) return undefined;
+  const parsed = voiceProfile.safeParse((read.data as { profile?: unknown }).profile);
+  if (!parsed.success) throw new Error('VOICE_PROFILE_UNAVAILABLE');
+  return parsed.data;
 }
 
 /** At execution: the addendum input for the Skill that actually runs (chosen, or matched), or undefined. A version deleted
@@ -56,7 +59,7 @@ export async function readVoiceProfile(db: Rpc, actorId: string, versionId: stri
 export async function executionVoice(db: Rpc, actorId: string, frozen: FrozenVoiceProfile | undefined, moduleId: string | undefined) {
   if (!frozen || !moduleId || !frozen.modules.includes(moduleId)) return undefined;
   if (!frozen.versionId) return { guide: frozen.guide };
-  const profile = await readVoiceProfile(db, actorId, frozen.versionId).catch(() => undefined);
+  const profile = await readVoiceProfile(db, actorId, frozen.versionId);
   return profile ? { guide: frozen.guide, profile } : undefined;
 }
 
@@ -65,5 +68,10 @@ export async function executionVoice(db: Rpc, actorId: string, frozen: FrozenVoi
 export async function withExecutionVoice(db: Rpc, actorId: string, instructions: string,
   context: Parameters<typeof withPrimaryAddenda>[1] & { voiceProfile?: FrozenVoiceProfile }, moduleId: string | undefined) {
   const voice = await executionVoice(db, actorId, context.voiceProfile, moduleId);
+  // Owner 2026-10-23: a deleted voice must not be used, not even by the run in progress. Bound to a version that can no
+  // longer be read: end before any provider request (the database also stops it at its next action, 0345).
+  if (context.voiceProfile?.versionId && moduleId && context.voiceProfile.modules.includes(moduleId) && !voice) {
+    throw new Error('VOICE_SOURCE_DELETED');
+  }
   return withPrimaryAddenda(instructions, { ...context, ...(voice ? { voice } : {}) });
 }

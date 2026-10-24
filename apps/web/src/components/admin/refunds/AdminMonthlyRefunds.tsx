@@ -65,7 +65,7 @@ export function AdminMonthlyRefunds({ variant = 'monthly' }: { variant?: RefundV
             <Input id={`${idPrefix}-orderId`} value={form.orderId} disabled={refund.busy} autoComplete="off" spellCheck={false}
               onChange={event => refund.updateForm({ orderId: event.target.value })} />
           </Field>
-          <Field id="ticketId" idPrefix={idPrefix} label="工单编号" hint="用户提交的账单类退款工单" error={errors.ticketId}>
+          <Field id="ticketId" idPrefix={idPrefix} label="工单编号" hint="工单管理页里的 TK-… 编号（用户提交的账单类退款工单）" error={errors.ticketId}>
             <Input id={`${idPrefix}-ticketId`} value={form.ticketId} disabled={refund.busy} autoComplete="off" spellCheck={false}
               onChange={event => refund.updateForm({ ticketId: event.target.value })} />
           </Field>

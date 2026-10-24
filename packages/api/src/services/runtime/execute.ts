@@ -39,7 +39,7 @@ import { PostgresSession } from './session';
 import { runRuntime } from './runner';
 import { selectRuntimeHistory, selectRuntimeCallInput, projectSupersededScopeItem, requestsHistoricalComparison, assertRuntimeRequestCapacity, runtimeScopeInput } from './context';
 import { matchingInput, MATCH_INSTRUCTIONS, parseMatch } from './matching';
-import { withExecutionVoice } from './voiceAdmission';
+import { withVoice } from './voiceCatalog';
 import { callBillingUnit } from './billingUnitAdmission';
 import type {GateRejection} from './newWorkGate';
 import {allowedOutput} from './moderation';
@@ -255,8 +255,8 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
      effective={model:candidate.model,instructions,maxOutputTokens:candidate.outputLimit,role:'skill',contentSource:candidate.contentSource,moduleId};
     }
    }
-   effective.instructions=await withExecutionVoice(options.database,await options.actor(),effective.instructions,context,effective.moduleId);
-   const {tools,toolBytes}=executionTools({context,executionId,args,agentTurn,grounded,fiveFields,sources:()=>sources,ownerRpc,budget,
+   effective.instructions=await withVoice(options,effective.instructions,context,effective.moduleId);
+   const {tools,toolBytes,catalogReserve}=executionTools({context,executionId,args,agentTurn,grounded,fiveFields,sources:()=>sources,ownerRpc,budget,
     execution,research,exchange,onProgress:progress,onRefused:()=>{terminalReplyFailure=true;}});
    // A2: a derived-content Skill gets its saved source in this call's instructions, read and recorded in one transaction.
    if(effective.role==='skill'&&effective.contentSource)
@@ -303,7 +303,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
     }
     const selectionOptions={instructions:effective.instructions,inputBytes:Math.min(primaryPolicy.inputLimit,context.purposeBudget?.inputBytes??Infinity),
      historyItems:context.historyItems,
-     toolBytes:toolBytes+Math.max(context.skillFileReserve??0,context.historyRead?.reserve??0)+(research?.reserve??0),...sizing,
+     toolBytes:toolBytes+Math.max(context.skillFileReserve??0,context.historyRead?.reserve??0)+(research?.reserve??0)+catalogReserve,...sizing,
      projectHistoryItem:(item:unknown)=>context.hostTurnContext?
       projectHostTurnItem(item,context.scopeMaterial,preserveHistoricalMaterial,projectSupersededScopeItem):
       legacyInput||preserveHistoricalMaterial?item:projectSupersededScopeItem(item,context.scopeMaterial)};

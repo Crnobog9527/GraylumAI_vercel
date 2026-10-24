@@ -20,10 +20,13 @@ import { MediaPicker, type PickedMedia } from './media-picker';
  * confirms the disclosure. A submit whose answer was lost is retried with the same key and the same uploads (the
  * server replays it and never posts twice); every new attempt after a final failure uploads again with a new key.
  */
-export function PublishForm({ businessId, workItemId, targets, initialCaption, initialTargets, holdCreditsByTargets,
-  onSubmitted }: {
-  businessId: string; workItemId: string | null; targets: Target[]; initialCaption: string; initialTargets: string[];
+export function PublishForm({ businessId, workItemId, contextKey, targets, initialCaption, initialTargets, holdCreditsByTargets,
+  onSubmitted, onPendingChange }: {
+  // contextKey names this publish for the saved-attempt storage: the topic, or the saved result being published.
+  businessId: string; workItemId: string | null; contextKey: string; targets: Target[]; initialCaption: string; initialTargets: string[];
   holdCreditsByTargets: number[] | null; onSubmitted: (jobId: string) => void;
+  // Tells the page whether an earlier submit is still unconfirmed (the page then keeps the brand fixed).
+  onPendingChange?: (pending: boolean) => void;
 }) {
   const [selected, setSelected] = useState<string[]>(initialTargets.filter(id => targets.some(t => t.id === id && t.ready)));
   const [caption, setCaption] = useState(initialCaption);
@@ -36,9 +39,11 @@ export function PublishForm({ businessId, workItemId, targets, initialCaption, i
   // again (an old media link is never reused). Storage keeps only the key and file identities (publish-recovery.ts).
   const [recovered, setRecovered] = useState<StoredAttempt | null>(null);
   useEffect(() => {
-    const stored = workItemId ? loadAttempt(workItemId) : null;
+    const stored = loadAttempt(contextKey);
     if (stored) { setRecovered(stored); setSelected(stored.connectionIds); setCaption(stored.caption); }
-  }, [workItemId]);
+  }, [contextKey]);
+  // Pending from confirmation until a definite outcome: while uploading or submitting, and while a lost answer is unresolved.
+  useEffect(() => { onPendingChange?.(recovered !== null || phase !== 'idle'); }, [recovered, phase]); // eslint-disable-line react-hooks/exhaustive-deps
   const uploadUrl = trpc.publishMonitor.publish.uploadUrl.useMutation();
   const submit = trpc.publishMonitor.publish.submit.useMutation();
   const utils = trpc.useUtils();
@@ -61,7 +66,7 @@ export function PublishForm({ businessId, workItemId, targets, initialCaption, i
   const pick = (items: PickedMedia[]) => setMedia(recovered
     ? items.map((item, i) => ({ ...item, coverMs: recovered.media[i]?.coverMs ?? null })) : items);
   function discardEarlier() {
-    if (workItemId) clearAttempt(workItemId);
+    clearAttempt(contextKey);
     setRecovered(null);
     setError('');
   }
@@ -101,7 +106,7 @@ export function PublishForm({ businessId, workItemId, targets, initialCaption, i
         media: uploaded.map((item, i) => ({ sha256: item.sha256, size: item.size, mimeType: item.mimeType,
           coverMs: media[i]!.coverMs })) };
       setPhase('submitting');
-      if (workItemId) saveAttempt(workItemId, record);
+      saveAttempt(contextKey, record);
       submitting = true;
       sent = record;
       const job = await submit.mutateAsync({ idempotencyKey: record.key, businessId, workItemId, connectionIds: record.connectionIds,

@@ -16,6 +16,8 @@ export type RuntimeTool = {
   /** When set, invalid arguments or a failed execution become this tool result
    * instead of failing the run. Unset (every older tool) keeps failing it. */
   invalidResult?: string;
+  /** A cap of the tool's own: once it returns false the tool is no longer offered to the model. */
+  enabled?: () => boolean;
 };
 const defaultToolParameters=z.object({query:z.string().max(2000).optional()}).strict();
 export type RuntimeRunnerInput = {
@@ -183,7 +185,7 @@ export async function runRuntime(input: RuntimeRunnerInput) {
   const model=new OpenAIChatCompletionsModel(client,input.model,{strictFeatureValidation:true});
   let toolCalls=0;
   const tools=input.tools.map(t=>tool({name:t.name,description:t.description,
-    isEnabled:()=>!(input.libraryRetrieval||input.research?.freeChat)||input.maxToolCalls===undefined||toolCalls<input.maxToolCalls,
+    isEnabled:()=>(t.enabled?.()??true)&&(!(input.libraryRetrieval||input.research?.freeChat)||input.maxToolCalls===undefined||toolCalls<input.maxToolCalls),
     parameters:t.parameters??defaultToolParameters,errorFunction:t.invalidResult===undefined?null:()=>t.invalidResult!,
     execute:async(args,_context,details)=>{
       const callId=details?.toolCall?.callId;

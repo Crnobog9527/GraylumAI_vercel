@@ -1,8 +1,10 @@
 import { methodPaymentProcedures } from './methodPayments';
 import { createStripeBillingDocumentLoader } from '../services/payments/stripeBillingDocument';
 import { listAdminPaymentOrders } from '../services/payments/adminOrders';
-import { projectBillingStatus, projectOrderPayment, type BillingRecord, type PaymentOrderBillingRow } from '../services/payments/orderProjection';
+import { billingDescription, projectBillingStatus, projectOrderPayment, type BillingRecord, type PaymentOrderBillingRow }
+  from '../services/payments/orderProjection';
 import { assertCheckoutChannel } from '../services/payments/channelSettings';
+import { hasUnpaidSubscription, unpaidRenewalEntry } from '../services/payments/methodPurchaseError';
 /*
  * Copyright (c) 2026 Grayscale Luminary LLC.
  * All rights reserved.
@@ -1080,6 +1082,7 @@ export const paymentsRouter = router({
       }
 
       const billingCycles: MembershipBillingCycle[] = ['monthly', 'yearly'];
+      const unpaid = ctx.hasSupabaseAdminPrivileges ? hasUnpaidSubscription(ctx.supabaseAdmin, ctx.profileId) : false;
       let entries;
 
       try {
@@ -1099,17 +1102,9 @@ export const paymentsRouter = router({
                 throw new Error('Membership eligibility facts could not be read');
               }
 
-              return {
-                planId: plan.id,
-                planLevel: plan.level,
-                billingCycle,
-                allowed: eligibility.allowed,
-                state: eligibility.state,
-                currentLevel: eligibility.level,
-                action: eligibility.action,
-                reasonCode: eligibility.reasonCode,
-                safeMessage: eligibility.safeMessage,
-              };
+              return unpaidRenewalEntry({ planId: plan.id, planLevel: plan.level, billingCycle, allowed: eligibility.allowed,
+                state: eligibility.state, currentLevel: eligibility.level, action: eligibility.action,
+                reasonCode: eligibility.reasonCode, safeMessage: eligibility.safeMessage }, await unpaid);
             }),
           ),
         );
@@ -1501,6 +1496,7 @@ export const paymentsRouter = router({
           'fulfilled_at',
           'created_at',
           'metadata', 'qualification_state', 'purchase_closed_at', 'method_review_reason',
+          'source_order_id', 'method_transition', 'offer_kind', 'purchase_action',
         ].join(','))
         .eq('user_id', ctx.profileId)
         .order('created_at', { ascending: false });
@@ -1541,10 +1537,7 @@ export const paymentsRouter = router({
               id: order.id,
               itemType,
               title,
-              description:
-                itemType === 'membership_plan'
-                  ? `订阅账单 · ${billingCycle === 'yearly' ? '年付' : '月付'}`
-                  : '一次性积分购买',
+              description: billingDescription(order, billingCycle),
               status,
               amountTotal: Number(order.amount_total ?? 0) / 100,
               currency: order.currency ?? 'usd',

@@ -151,8 +151,26 @@ function scrubCommon(event: Event): Event {
   return out;
 }
 
+// Fixed-code data-erasure alerts (erasure-backlog-alert.ts) may keep these counts: non-negative integers only,
+// no ids or text, and only when the message is exactly that code.
+const ALERT_COUNTS: Readonly<Record<string, readonly string[]>> = {
+  LIBRARY_CLEANUP_BACKLOG: ['pending', 'overdue', 'oldestHours'],
+  ERASURE_BACKLOG: ['open', 'over12h', 'over20h', 'oldestHours'],
+};
+function scrubAlertCounts(event: ErrorEvent, out: ErrorEvent) {
+  const keys = event.message && Object.hasOwn(ALERT_COUNTS, event.message) ? ALERT_COUNTS[event.message] : undefined;
+  if (!keys) return;
+  out.fingerprint = [event.message as string];
+  const extra = Object.fromEntries(keys.flatMap((key) => {
+    const value = event.extra?.[key];
+    return Number.isSafeInteger(value) && (value as number) >= 0 ? [[key, value]] : [];
+  }));
+  if (Object.keys(extra).length > 0) out.extra = extra;
+}
+
 export function scrubErrorEvent(event: ErrorEvent): ErrorEvent {
   const out = scrubCommon(event) as ErrorEvent;
+  scrubAlertCounts(event, out);
   // Debug ids let uploaded source maps match minified frames; they identify build files, not people.
   const images = event.debug_meta?.images;
   if (Array.isArray(images)) {

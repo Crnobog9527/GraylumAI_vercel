@@ -74,23 +74,34 @@ export function libraryAddendum(references:boolean,retrieval:boolean):string {
 /** VOICE (Master Plan 5.3 step 4): a writing Skill run carries the user's confirmed voice profile. Admission freezes only
  * {guide, versionId}; the text is read for that version when the run executes (a deleted version is never read again), and
  * admission sizes the same text. VOICE_GUIDE versions the wording so earlier executions replay byte-identical. */
-export const VOICE_GUIDE='voice-v1';
+export const VOICE_GUIDE='voice-v2';
+/** Wordings an execution can have been frozen with; each replays its own text byte-identical. */
+export const VOICE_GUIDES=['voice-v1','voice-v2'] as const;
 /** Owner 2026-10-23 (A): with no confirmed profile yet, the coach points to the library page once instead of learning in chat. */
 export const VOICE_HINT_INSTRUCTIONS=
   '\n\nWriting voice (host rule): the user has not set up their own writing voice yet. Once, at the end of this reply, '+
   'add one short sentence in the user\'s language saying that if they upload things they wrote themselves, Graylum can learn '+
   'their voice in [资料库 · 我的文风](/app/library?tab=voice) and write like them. Skip it if it was already said in this conversation.';
-export function voiceAddendum(profile:VoiceProfile):string {
+export function voiceAddendum(profile:VoiceProfile,guide:string=VOICE_GUIDE):string {
+  const v2=guide!=='voice-v1';
   const line=(label:string,value:string)=>value?`\n- ${label}：${value}`:'';
   const list=(label:string,values:string[])=>values.length?`\n- ${label}：${values.join('、')}`:'';
   return '\n\nWriting voice (host rule): the user confirmed this description of how they write. Write drafts, scripts and '+
     'posts in this voice: follow its tone, sentence rhythm and habits, use their phrases where natural and avoid what they '+
     'avoid. It describes style only: never take facts, events or claims from it, and do not quote the passages unless asked. '+
+    (v2?'The passages show tone, rhythm and word choice only. Never copy a sentence from them, never reuse a sentence with '+
+     'a few words swapped, and never start the draft with a line that resembles how a passage starts: write new sentences '+
+     'about the user\'s current topic. Use the listed phrases sparingly, where they fit. ':'')+
     'If the user asks for a different style this time, follow the user.'+
     '\n<user_voice>'+line('语气',profile.tone)+line('句子长短',profile.sentenceLength)+line('开头方式',profile.openings)+
     line('观点强弱',profile.stance)+list('常用表达',profile.phrases)+list('不会用的表达',profile.avoid)+
-    line('各平台差异',profile.platforms)+profile.samples.map((sample,index)=>`\n- 原文片段 ${index+1}：${sample}`).join('')+
+    line('各平台差异',profile.platforms)+profile.samples.map((sample,index)=>`\n- 原文片段 ${index+1}${v2?'（只看语气，不可照抄）':''}：${sample}`).join('')+
     '\n</user_voice>';
+}
+/** The voice paragraph of an execution: its own frozen wording (never another), the one-time hint without a profile, or nothing. */
+export function voiceText(voice?:{guide:string;profile?:VoiceProfile}):string {
+  if(!voice||!(VOICE_GUIDES as readonly string[]).includes(voice.guide))return '';
+  return voice.profile?voiceAddendum(voice.profile,voice.guide):VOICE_HINT_INSTRUCTIONS;
 }
 export function withPrimaryAddenda(instructions:string,
   context:{workspaceContext?:boolean;network?:string;positioningGate?:string;replyLanguage?:string;
@@ -104,5 +115,5 @@ export function withPrimaryAddenda(instructions:string,
     (context.network==='require_latest'?REQUIRE_LATEST_INSTRUCTIONS:'')+
     // POSITIONING-GATE: frozen at admission only when Decisions was unavailable for this turn.
     (context.positioningGate===POSITIONING_FALLBACK?POSITIONING_FALLBACK_INSTRUCTIONS:'')+
-    (context.voice?.guide===VOICE_GUIDE?context.voice.profile?voiceAddendum(context.voice.profile):VOICE_HINT_INSTRUCTIONS:'');
+    voiceText(context.voice);
 }

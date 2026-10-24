@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { runLibraryCleanup } from '@repo/api/src/services/library/cleanup';
 import { validateCronRequest } from '@/lib/cron-auth';
+import { reportLibraryBacklog } from '@/lib/erasure-backlog-alert';
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 export async function GET(request: Request) {
@@ -16,6 +17,7 @@ export async function GET(request: Request) {
       auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
       global: { fetch: (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(5000) }) },
     }));
+    reportLibraryBacklog(result);
     // Cursor is operational metadata, not returned to HTTP clients.
     const success = result.failed === 0 && result.unknownPaths === 0;
     return NextResponse.json({ success, checked: result.checked, released: result.released, pending: result.pending },
