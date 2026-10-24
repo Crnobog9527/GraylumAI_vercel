@@ -5,6 +5,8 @@ import { lookupTimeLeft, researchExecution, responseAfterResearch } from './rese
 import { createRuntimeBudget } from './budget';
 import { frozenResearchTurn, RESEARCH_PHASE, RESEARCH_RESULT_RESERVE_BYTES, RESEARCH_TURN_VERSION } from './researchTurn';
 import { terminalReplyGuard } from './executorRpc';
+import { INVALID_RESEARCH_ARGUMENTS, researchToolParameters } from './researchRuntimeTool';
+import { runRuntime } from './runner';
 import { toolCallPolicy } from '../bill2/toolBilling';
 import { streamOriginalExecution } from './executionStream';
 import type { RuntimeProgress } from './progress';
@@ -149,16 +151,60 @@ describe('responseAfterResearch', () => {
 });
 
 describe('one research call per mentor turn', () => {
-  const call = (name: string) => ({ choices: [{ finish_reason: 'tool_calls', message: { content: null,
-    tool_calls: [{ id: 'c', type: 'function', function: { name, arguments: '{}' } }] } }] });
+  const call = (name: string, args = '{}') => ({ choices: [{ finish_reason: 'tool_calls', message: { content: null,
+    tool_calls: [{ id: 'c', type: 'function', function: { name, arguments: args } }] } }] });
   it('accepts the first offered research call and refuses a second or an unoffered one', () => {
     const failed = vi.fn();
-    const guard = terminalReplyGuard(true, true, failed, false, false, ['web_search', 'web_fetch']);
+    const guard = terminalReplyGuard(true, true, failed, false, false, [{ name: 'web_search' }, { name: 'web_fetch' }]);
     expect(() => guard(call('web_search'))).not.toThrow();
     expect(() => guard(call('web_fetch'))).toThrow('RUNTIME_TERMINAL_REPLY');
     expect(failed).toHaveBeenCalledOnce();
     const plain = terminalReplyGuard(true, true, vi.fn());
     expect(() => plain(call('web_search'))).toThrow('RUNTIME_TERMINAL_REPLY');
+  });
+  // staging 2026-10-24: a 42-character keyword failed the schema; the corrected call must still be allowed.
+  it('a call whose arguments fail the schema does not use up the turn\'s research call', () => {
+    const tools = (['propose_keywords', 'web_search'] as const).map(name => ({ name, parameters: researchToolParameters(name) }));
+    const failed = vi.fn();
+    const guard = terminalReplyGuard(true, true, failed, false, false, tools);
+    const keywords = (last: string) => JSON.stringify({ keywords: ['Hardanger embroidery', 'drawn thread embroidery', last] });
+    expect(() => guard(call('propose_keywords', keywords('Norwegian Hardanger stitches for beginners')))).not.toThrow();
+    expect(() => guard(call('propose_keywords', '{"keywords":'))).not.toThrow();
+    expect(() => guard(call('propose_keywords', keywords('Hardanger stitches')))).not.toThrow();
+    expect(() => guard(call('web_search', JSON.stringify({ query: 'q' })))).toThrow('RUNTIME_TERMINAL_REPLY');
+    expect(failed).toHaveBeenCalledOnce();
+  });
+  it('the SDK answers invalid research arguments to the model instead of failing the paid turn', async () => {
+    const execute = vi.fn(async () => 'ran');
+    const requests: Array<{ messages: Array<{ role: string; content?: unknown }> }> = [];
+    const reply = (message: Record<string, unknown>, finish: string) => JSON.stringify({ id: 'r', object: 'chat.completion',
+      created: 0, model: 'm', choices: [{ index: 0, finish_reason: finish, message: { role: 'assistant', ...message } }] });
+    const responses = [reply({ content: null, tool_calls: [{ id: 'c1', type: 'function', function: { name: 'propose_keywords',
+      arguments: JSON.stringify({ keywords: ['a', 'b', 'Norwegian Hardanger stitches for beginners'] }) } }] }, 'tool_calls'),
+    reply({ content: 'done' }, 'stop')];
+    const output = await runRuntime({ model: 'm', instructions: 'i', input: 'hi', maxOutputTokens: 100, maxTurns: 3,
+      session: { getSessionId: async () => 's', getItems: async () => [], addItems: async () => {}, popItem: async () => undefined,
+        clearSession: async () => {} } as never, persistSession: false, selectHistory: async (history: unknown[], incoming: unknown[]) =>
+        [...history, ...incoming],
+      tools: [{ name: 'propose_keywords', description: 'd', parameters: researchToolParameters('propose_keywords'),
+        invalidResult: INVALID_RESEARCH_ARGUMENTS, invalidInputOnly: true, execute }],
+      exchange: async (_sequence: number, request: string) => { requests.push(JSON.parse(request)); return responses.shift()!; },
+    } as never);
+    expect(output).toBe('done');
+    expect(execute).not.toHaveBeenCalled();
+    expect(JSON.stringify(requests[1]!.messages.at(-1))).toContain('INVALID_ARGUMENTS');
+    // A failed execution (here a credit pause) is not invalid input: it still stops the run for the executor to handle.
+    const valid = reply({ content: null, tool_calls: [{ id: 'c2', type: 'function', function: { name: 'propose_keywords',
+      arguments: JSON.stringify({ keywords: ['a', 'b', 'c'] }) } }] }, 'tool_calls');
+    await expect(runRuntime({ model: 'm', instructions: 'i', input: 'hi', maxOutputTokens: 100, maxTurns: 3,
+      session: { getSessionId: async () => 's', getItems: async () => [], addItems: async () => {}, popItem: async () => undefined,
+        clearSession: async () => {} } as never, persistSession: false, selectHistory: async (history: unknown[], incoming: unknown[]) =>
+        [...history, ...incoming],
+      tools: [{ name: 'propose_keywords', description: 'd', parameters: researchToolParameters('propose_keywords'),
+        invalidResult: INVALID_RESEARCH_ARGUMENTS, invalidInputOnly: true,
+        execute: async () => { throw new Error('RUNTIME_WAITING_CREDITS'); } }],
+      exchange: async () => valid,
+    } as never)).rejects.toThrow('RUNTIME_EXECUTION_PENDING');
   });
 });
 
