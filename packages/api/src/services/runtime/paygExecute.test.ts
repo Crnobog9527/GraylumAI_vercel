@@ -9,6 +9,9 @@ const mock = vi.hoisted(() => ({ run: vi.fn(), billing: {
 vi.mock('../bill2/service', () => ({ authoritativeBilling: () => mock.billing }));
 vi.mock('./runner', () => ({ runRuntime: mock.run }));
 vi.mock('./session', () => ({ PostgresSession: class {} }));
+// Only native turns fit their output to the context; the fixture measures no real tokens.
+vi.mock('./paygRuntime', async original => ({ ...await original<typeof import('./paygRuntime')>(),
+  fitNativeRequestOutput: (request: string) => request }));
 const id = '10000000-0000-4000-8000-000000000001';
 const otherId = '10000000-0000-4000-8000-000000000002';
 function fixture() {
@@ -225,4 +228,50 @@ it.each(['applied','pending'] as const)('records the pre-dispatch failure code (
   expect(sent[0]).toEqual({ failure_code: 'BILL2_START_THRESHOLD_UNCONFIGURED' });
   expect(sent).toHaveLength(migration === 'pending' ? 2 : 1);
   if (migration === 'pending') expect(sent[1]).toBeNull();
+});
+
+// staging 2026-10-24: the mentor reply was paid and saved, then the organizer's claim timed out and the error
+// path's own database read timed out too. The request answered 500 and the round stayed running.
+it.each([
+  ['the organizer waits at its call and the paid reply is returned', true, 'waiting_resume'],
+  ['the wait cannot be recorded: interrupted for recovery, never a server error', false, 'pending'],
+] as const)('a claim the database could not answer after a paid call: %s', async (_name, waitRecorded, state) => {
+  const f = fixture(); f.fund();
+  Object.assign(f.execution.context, { nativeOutput: 'native-output-v1', envelopeOrder: 'message-first-v1',
+    providerRequestFormat: 'serial-tools-v4-stream', reasoning: { effort: 'none' } });
+  mock.run.mockImplementation(async options => {
+    try { await options.exchange(1, JSON.stringify({ model: options.model, max_tokens: 100,
+      messages: [{ role: 'user', content: options.input }] })); }
+    catch { throw Error('SDK_WRAPPED_ERROR'); }
+    return options.model === 'organizer' ? 'summary' : '{"message":"paid reply"}';
+  });
+  const claim = mock.billing.claimPaygCall.getMockImplementation()!;
+  let congested = false; // From the organizer's claim on, every database request times out.
+  mock.billing.claimPaygCall.mockImplementation(async (...args) => {
+    if (args[1] === 2) { congested = true; throw new Error('BILL2_DATABASE_UNAVAILABLE'); }
+    return claim(...args);
+  });
+  const rpc = f.database.rpc.getMockImplementation()!;
+  f.database.rpc.mockImplementation(async (name, args) => {
+    if (congested && args.p_action === 'read') return { data: null as never, error: { code: '57014' } as never };
+    if (args.p_action === 'payg_wait' && !waitRecorded) return { data: null as never, error: { code: '57014' } as never };
+    return rpc(name, args);
+  });
+  const result = await runtimeExecutor(f.options).execute(id);
+  expect(result).toMatchObject(waitRecorded ? { state, code: 'RUNTIME_WAITING_RESUME', body: expect.any(String) } : { state });
+  expect(mock.billing.dispatchOnce).toHaveBeenCalledTimes(1);
+  expect(f.database.rpc.mock.calls.find(([, a]) => a.p_action === 'payg_wait')?.[1].p_result)
+    .toMatchObject({ sequence: 2, phase: 'attached_organizer', state: 'waiting_resume' });
+  const actions = f.database.rpc.mock.calls.map(([, a]) => a.p_action);
+  expect(actions.includes('interrupt')).toBe(!waitRecorded);
+  expect(actions).not.toContain('fail_before_dispatch');
+});
+
+it('a database fault on the first call still cancels it before dispatch, never waits', async () => {
+  const f = fixture(); f.fund();
+  mock.billing.claimPaygCall.mockRejectedValue(new Error('BILL2_DATABASE_UNAVAILABLE'));
+  await runtimeExecutor(f.options).execute(id);
+  const actions = f.database.rpc.mock.calls.map(([, a]) => a.p_action);
+  expect(actions).toContain('fail_before_dispatch');
+  expect(actions).not.toContain('payg_wait');
 });

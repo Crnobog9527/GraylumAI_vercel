@@ -2,8 +2,9 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { runAutomaticFinancialRecovery } from './automaticRecovery';
-const mocks = vi.hoisted(() => ({ close: vi.fn(), interrupted: vi.fn() }));
+const mocks = vi.hoisted(() => ({ close: vi.fn(), interrupted: vi.fn(), ownerLost: vi.fn() }));
 vi.mock('./interruptedRecovery', () => ({ recoverInterruptedExecutions: mocks.interrupted }));
+vi.mock('./ownerLostRecovery', () => ({ recoverOwnerLostReplies: mocks.ownerLost }));
 vi.mock('./staleChargedRounds', async original => ({ ...await original<typeof import('./staleChargedRounds')>(),
   autoCompensateStaleRounds: mocks.close }));
 const closed = { found: 1, compensated: 1, alreadyCompensated: 0, skipped: 0, failed: 0, credits: 3, manualReview: 0, deferred: 0 };
@@ -23,6 +24,10 @@ beforeEach(() => {
     order.push('interrupted');
     return { selected: 0, processed: 0, settled: 0, pending: 0, failed: 0 };
   });
+  mocks.ownerLost.mockReset().mockImplementation(async () => {
+    order.push('ownerLost');
+    return { selected: 0, processed: 0, settled: 0, pending: 0, failed: 0 };
+  });
 });
 
 it('the scheduled job closes stale rounds after financial recovery, within its own time budget', async () => {
@@ -30,7 +35,8 @@ it('the scheduled job closes stale rounds after financial recovery, within its o
   expect(await runAutomaticFinancialRecovery(a.client)).toEqual({ selected: 0, processed: 0, settled: 0, pending: 0, failed: 0,
     staleRounds: closed });
   // Recovery first: a call it settles is activity, so that round waits another 24 hours.
-  expect(order).toEqual(['runtime_pending_financial_batch', 'interrupted', 'close']);
+  // A saved reply becomes a resumable wait before interruption release could hide it behind the 24-hour refund.
+  expect(order).toEqual(['runtime_pending_financial_batch', 'ownerLost', 'interrupted', 'close']);
   const [database, options] = mocks.close.mock.calls[0]!;
   // Every database request goes through the bounded client, never the raw service client.
   await database.rpc('runtime_stale_charged_rounds', {});
@@ -43,6 +49,7 @@ it('a user admission recovers only that user and never refunds rounds', async ()
   expect(await runAutomaticFinancialRecovery(a.client, '10000000-0000-4000-8000-000000000001'))
     .toEqual({ selected: 0, processed: 0, settled: 0, pending: 0, failed: 0 });
   expect(mocks.close).not.toHaveBeenCalled();
+  expect(mocks.ownerLost).not.toHaveBeenCalled();
   expect(mocks.interrupted).toHaveBeenCalledWith(expect.objectContaining({
     database: expect.objectContaining({ rpc: expect.any(Function) }), actorId: '10000000-0000-4000-8000-000000000001',
   }));
@@ -51,6 +58,11 @@ it('a user admission recovers only that user and never refunds rounds', async ()
 it('an interrupted recovery failure reaches the cron summary instead of a false successful tick', async () => {
   mocks.interrupted.mockResolvedValue({ selected: 1, processed: 0, settled: 0, pending: 0, failed: 1 });
   expect(await runAutomaticFinancialRecovery(admin().client)).toMatchObject({ selected: 1, failed: 1 });
+});
+
+it('owner-lost replies handed back count in the cron summary as pending, not settled', async () => {
+  mocks.ownerLost.mockResolvedValue({ selected: 1, processed: 1, settled: 0, pending: 1, failed: 0 });
+  expect(await runAutomaticFinancialRecovery(admin().client)).toMatchObject({ selected: 1, processed: 1, pending: 1, failed: 0 });
 });
 
 it('no time left even to read the report is a failure, never a silent success', async () => {
