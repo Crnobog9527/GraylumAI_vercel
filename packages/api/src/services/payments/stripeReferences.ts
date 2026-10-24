@@ -49,6 +49,21 @@ export async function resolveStripeOrderIds<T extends { id?: string | null; pric
     stripe_checkout_session_id: one('checkout'), stripe_invoice_id: one('invoice'), stripe_subscription_id: subscription };
 }
 
+/** A card subscription period (first payment or renewal) records its invoice as the order's 'payment' reference
+ * (0238), not as an 'invoice' one; a card credit pack records its PaymentIntent there instead. Billing documents
+ * need the invoice, so only an invoice id under that reference counts. */
+export async function findCardSubscriptionInvoiceId(db: Db, order: { id: string; item_type?: string | null;
+  payment_method?: string | null; merchant_namespace?: string | null; payment_mode?: string | null }) {
+  if (order.item_type !== 'membership_plan' || !['card', 'card_cn'].includes(order.payment_method ?? '')) return null;
+  const result = await db.from('payment_provider_refs').select('external_id').eq('order_id', order.id)
+    .eq('object_type', 'payment').eq('channel', 'stripe').eq('merchant_namespace', order.merchant_namespace ?? '')
+    .eq('mode', order.payment_mode ?? '').limit(2);
+  if (result.error || !Array.isArray(result.data)) throw new Error('PAY_COMMON_MAPPING_READ_FAILED');
+  if (result.data.length > 1) throw new Error('PAY_COMMON_MAPPING_AMBIGUOUS');
+  const id = (result.data[0] as { external_id?: unknown } | undefined)?.external_id;
+  return typeof id === 'string' && id.startsWith('in_') ? id : null;
+}
+
 export async function loadCurrentStripeSubscription(supabase: Db, userId: string, scope: StripeScope, statuses: string[]) {
   const result = await supabase.from('user_subscriptions')
     .select(`id,membership_plan_id,payment_channel,merchant_namespace,payment_mode,status,billing_cycle,

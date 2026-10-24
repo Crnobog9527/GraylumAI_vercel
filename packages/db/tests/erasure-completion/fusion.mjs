@@ -44,6 +44,10 @@ export async function runFusionExecutor({db,Client,connectionString,require,runA
   assert.equal((await db.query('SELECT count(*)::int n FROM fusion_call_outputs WHERE actor_id=$1',[f.actor])).rows[0].n,0);
   assert.equal((await db.query('SELECT credits FROM profiles WHERE id=$1',[f.actor])).rows[0].credits,credits,'money unchanged');
   assert.equal(sdk.authDeletes(),1);
-  report.checks.push('wired account-erasure executor completes for an account with a settled sessionless Fusion call and saved output; output removed, money unchanged');
+  // A reviewer answer arriving after account erasure must not bring the body back.
+  await assert.rejects(rpc(db,'fusion_call_output_save',f.actor,c.id,'late fusion review body'),/BILL2_ACTOR_DENIED/);
+  assert.equal((await db.query('SELECT count(*)::int n FROM fusion_call_outputs WHERE actor_id=$1 OR call_id=$2',[f.actor,c.id])).rows[0].n,0,
+   'a late Fusion save after account erasure stores nothing');
+  report.checks.push('wired account-erasure executor completes for an account with a settled sessionless Fusion call and saved output; output removed, money unchanged; a late output save is refused');
  } finally {await service.end();}
 }

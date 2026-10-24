@@ -5,6 +5,7 @@
 import { SOCIAL_EARLIEST_MS, bool, clip, count, displayCount, findAll, first, has, idText, text, timestamp } from './fields';
 import { publicHttpUrl } from './http';
 import { normalizeAccountSearch } from './accountSearchShapes';
+import { approximateSubscribers } from './approxCount';
 import type { ResearchItem, SocialKind, SocialPlatform } from './types';
 
 export const POST_FIELDS = [
@@ -130,16 +131,32 @@ function youtubeVideo(item: Raw, channel: string | undefined) {
   }, POST_FIELDS, id ? `https://www.youtube.com/watch?v=${id}` : undefined);
 }
 
-/** get_video_info_v2 (need_format): absolute publish_date/published_at and the exact channel_follower_count. */
+/**
+ * YouTube publishes only rounded subscriber counts. Without an exact count, the label's number is kept and marked
+ * `followersApprox` (Owner 2026-10-23, approxCount.ts); thresholds then read it conservatively.
+ */
+function withYoutubeFollowers(item: ResearchItem, raw: Raw, paths: readonly string[]): ResearchItem {
+  // A numeric YouTube count is the same rounded figure in another shape: still approximate, never exact.
+  if (item.fields.followers !== undefined) return { ...item, fields: { ...item.fields, followersApprox: true } };
+  const approx = paths.map(path => approximateSubscribers(text(raw, [path]))).find(value => value !== undefined);
+  if (approx === undefined) return item;
+  return { ...item, fields: { ...item.fields, followers: approx, followersApprox: true },
+    missing: item.missing.filter(name => name !== 'followers') };
+}
+
+/**
+ * get_video_info_v2 (need_format): absolute publish_date. The documented channel_follower_count was absent in the real
+ * responses of 2026-10-23, which carry only subscriber_count_text ("1.88万位订阅者").
+ */
 function youtubeDetail(item: Raw) {
   const id = idText(item, ['video_id', 'id']);
-  return toItem({
+  return withYoutubeFollowers(toItem({
     id, title: clip(text(item, ['title']), TITLE_CHARS),
     author: text(item, ['author', 'channel_name']), authorId: text(item, ['channel_id']),
     publishedAt: timestamp(item, ['published_at', 'publish_date'], SOCIAL_EARLIEST_MS),
     views: count(item, ['view_count']), likes: count(item, ['like_count']), comments: count(item, ['comment_count']),
     shares: undefined, followers: count(item, ['channel_follower_count']),
-  }, POST_DETAIL_FIELDS, id ? `https://www.youtube.com/watch?v=${id}` : undefined);
+  }, POST_DETAIL_FIELDS, id ? `https://www.youtube.com/watch?v=${id}` : undefined), item, ['subscriber_count_text']);
 }
 
 function instagramPost(item: Raw) {
@@ -230,13 +247,15 @@ export function normalizeTikhub(json: unknown, platform: SocialPlatform, kind: S
   if (kind === 'account_profile') {
     const candidates = platform === 'xiaohongshu'
       ? findAll(data, object => has(object, 'red_id', 'userid') && has(object, 'nickname', 'fans', 'interactions'), 20).map(xhsProfile)
-      : findAll(data, object => has(object, ...PROFILE_KEYS), 20).map(profile);
+      : findAll(data, object => has(object, ...PROFILE_KEYS), 20)
+        .map(object => platform === 'youtube' ? withYoutubeFollowers(profile(object), object, ['subscriber_count']) : profile(object));
     const found = candidates.find(item => usable(item, kind));
     return found ? [found] : [];
   }
   if (kind === 'post_detail') {
     if (platform !== 'youtube') return [];
-    const found = findAll(data, o => has(o, 'video_id') && has(o, 'channel_follower_count', 'publish_date', 'published_at'), 5)
+    const found = findAll(data, o => has(o, 'video_id') && has(o, 'channel_follower_count', 'subscriber_count_text', 'publish_date',
+      'published_at'), 5)
       .map(youtubeDetail).find(item => usable(item, kind));
     return found ? [found] : [];
   }

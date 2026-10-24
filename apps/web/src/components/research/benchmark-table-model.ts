@@ -32,10 +32,10 @@ const valid = (value: number | null): value is number => value !== null && Numbe
 const trim = (value: number, digits: number) => value.toFixed(digits).replace(/\.0+$|(\.\d*?)0+$/, "$1");
 
 /** Chinese count units: 9,800 · 1.2 万 · 3.4 亿. */
-export function formatCount(value: number | null): string {
+export function formatCount(value: number | null, digits = 1): string {
   if (!valid(value)) return MISSING_TEXT;
-  if (value >= 1e8) return `${trim(value / 1e8, 1)} 亿`;
-  if (value >= 1e4) return `${trim(value / 1e4, 1)} 万`;
+  if (value >= 1e8) return `${trim(value / 1e8, digits)} 亿`;
+  if (value >= 1e4) return `${trim(value / 1e4, digits)} 万`;
   return Math.round(value).toLocaleString("en-US");
 }
 
@@ -61,7 +61,9 @@ export function formatLastUpdate(value: string | null, now: Date): string {
 export function cellText(row: BenchmarkRow, key: ColumnKey, now: Date): string {
   const { metrics } = row;
   switch (key) {
-    case "followers": return formatCount(metrics.followers.value);
+    // YouTube only publishes rounded counts (Owner 2026-10-23): say so instead of showing them as exact.
+    case "followers": return row.platform === "youtube" && valid(metrics.followers.value)
+      ? `约 ${formatCount(metrics.followers.value, 2)}（YouTube 只公开约数）` : formatCount(metrics.followers.value);
     case "medianViews": return formatCount(metrics.medianViews.value);
     case "engagementRate": return formatRate(metrics.engagementRate.value);
     case "postsPerWeek": return formatFrequency(metrics.postsPerWeek.value);

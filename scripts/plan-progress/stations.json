@@ -159,6 +159,10 @@
         {
           "name": "CONTENT-CONVERSATION-DRIVEN",
           "plain": "选题和写作改成自由对话，需要时自动用上对应平台的写作技巧。"
+        },
+        {
+          "name": "LOAD-SKILL",
+          "plain": "自由对话里，AI 自己判断要不要用上某个写作技能，不再另外花钱匹配。"
         }
       ]
     },
@@ -212,6 +216,10 @@
         {
           "name": "RESEARCH-TOOLS",
           "plain": "接入搜索和对标研究，取不到数据时如实告诉用户。"
+        },
+        {
+          "name": "BENCHMARK-COVERAGE",
+          "plain": "对标搜索做深：多关键词、翻页、直接搜账号、网页线索，扫够了才说找不到。"
         },
         {
           "name": "ADMIN-SECRETS",

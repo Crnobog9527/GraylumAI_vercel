@@ -22,7 +22,7 @@ vi.mock('@/trpc/client',()=>{
   useMutation:()=>({isPending:false,mutateAsync:vi.fn()}),
  })});
  const utils={credits:{getBalance:{invalidate:async()=>{state.invalidated.push('credits.getBalance');}}}};
- return {trpc:{runtime:namespace('runtime'),opc:namespace('opc'),user:namespace('user'),useUtils:()=>utils}};
+ return {trpc:{runtime:namespace('runtime'),opc:namespace('opc'),user:namespace('user'),fusionCompare:namespace('fusionCompare'),useUtils:()=>utils}};
 });
 import RuntimePage from './page';
 const live=(executionId:string,text:string)=>({executionId,text,phase:'mentor',card:null,rev:1,points:text.length,stalled:false});

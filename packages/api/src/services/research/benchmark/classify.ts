@@ -2,6 +2,7 @@
 // RESEARCH-TOOLS RT-4 (part a): benchmark categories, qualification and candidate selection
 // (RESEARCH_TOOLS_PLAN.md §1, §1.2). The product thresholds are the server constants in BENCHMARK_RULES;
 // only the "recent fast growth" N and K come from the admin config.
+import { approximateRange } from '../vendors/approxCount';
 import { BENCHMARK_RULES, type ResearchToolsConfig } from '../vendors/config';
 import type { AccountMetrics, EvidenceItem } from './metrics';
 
@@ -33,12 +34,21 @@ export function classifyAccount(
 ): Classification {
   const followers = metrics.followers.value;
   if (followers === null) return { category: null, qualified: false, excluded: 'FOLLOWERS_MISSING' };
-  if (followers < BENCHMARK_RULES.followersMin) return { category: null, qualified: false, excluded: 'FOLLOWERS_BELOW_MIN' };
-  if (followers > BENCHMARK_RULES.followersMax) return { category: 'head_reference', qualified: false, excluded: null };
-  if (metrics.postsAnalyzed === 0) return { category: null, qualified: false, excluded: 'NO_POSTS' };
+  // A rounded YouTube count meets a threshold only when every exact count it may stand for does (Owner 2026-10-23, A).
+  const { low, highExclusive } = metrics.followers.approximate ? approximateRange(followers) : { low: followers, highExclusive: followers + 1 };
+  if (highExclusive - 1 < BENCHMARK_RULES.followersMin) return { category: null, qualified: false, excluded: 'FOLLOWERS_BELOW_MIN' };
+  if (low > BENCHMARK_RULES.followersMax) return { category: 'head_reference', qualified: false, excluded: null };
+  // Straddling a threshold, the exact count that decides it is unknown.
+  if (low < BENCHMARK_RULES.followersMin || highExclusive - 1 > BENCHMARK_RULES.followersMax) {
+    return { category: null, qualified: false, excluded: 'FOLLOWERS_MISSING' };
+  }
+  // Discovery screens followers only: posts and activity are checked once benchmark_fetch has read the account's own
+  // newest posts. An account found by searching for accounts has no posts yet (BENCHMARK-COVERAGE), so posts cannot
+  // decide anything here.
   if (phase === 'discovery') {
     return { category: null, qualified: false, excluded: 'ACTIVE_CHECK_PENDING' };
   }
+  if (metrics.postsAnalyzed === 0) return { category: null, qualified: false, excluded: 'NO_POSTS' };
   if (metrics.lastPublishedAt.value === null) return { category: null, qualified: false, excluded: 'NO_PUBLISH_TIME' };
   const last = Date.parse(metrics.lastPublishedAt.value);
   if (now.getTime() - last > BENCHMARK_RULES.activeWithinDays * DAY_MS) {
@@ -48,7 +58,8 @@ export function classifyAccount(
   // Plan §1.2: the earliest obtainable post (the oldest fetched one) within N days.
   const young = earliest !== null && now.getTime() - earliest <= growth.maxFirstPostAgeDays * DAY_MS;
   const k = ratio(growth.minViewsToFollowers);
-  const viral = k !== null && metrics.medianViews.value !== null && metrics.medianViews.value >= followers * k;
+  // Against the largest count an approximate label may stand for, so every possible exact count meets the ratio.
+  const viral = k !== null && metrics.medianViews.value !== null && metrics.medianViews.value >= (highExclusive - 1) * k;
   return { category: young || viral ? 'fast_rising' : 'imitable', qualified: true, excluded: null };
 }
 

@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   fusion: vi.fn(),
   stuckCalls: vi.fn(),
   fusionKick: vi.fn(),
+  voice: vi.fn(),
   reportFees: vi.fn(),
 }));
 
@@ -32,6 +33,7 @@ vi.mock('@repo/api/src/services/stripe', () => ({ getStripeClient: mocks.stripeC
 vi.mock('@/lib/payment-alert.mjs', () => ({ reportStripeCardReconciliation: mocks.reportStripeCard,
   reportPaymentEvidenceConflict: vi.fn() }));
 vi.mock('@repo/api/src/services/fusion/recovery', () => ({ recoverFusionFinancials: mocks.fusion }));
+vi.mock('@repo/api/src/services/voice/recovery', () => ({ recoverVoiceGenerations: mocks.voice }));
 vi.mock('@repo/api/src/services/bill2/stuckCalls', () => ({ findStuckPaygCalls: mocks.stuckCalls }));
 vi.mock('@repo/api/src/services/fusion/background', () => ({ kickStalledReviews: mocks.fusionKick }));
 vi.mock('@repo/api/src/services/report/fees', () => ({ settleDueReportFees: mocks.reportFees }));
@@ -110,6 +112,7 @@ describe('/api/cron/billing-reconcile', () => {
     mocks.fusion.mockResolvedValue({ success: true, scanned: 0, cancelled: 0, recovered: 0, scrubbed: 0, failed: 0 });
     mocks.fusionKick.mockResolvedValue({ success: true, kicked: 0, listed: 0 });
     mocks.reportFees.mockResolvedValue({ success: true, settled: 0 });
+    mocks.voice.mockResolvedValue({ success: true, settled: 0, scrubbed: 0, waiting: 0, failed: 0 });
     mocks.stuckCalls.mockResolvedValue({ success: true, calls: [], total: 0, truncated: false });
   });
 
@@ -124,6 +127,17 @@ describe('/api/cron/billing-reconcile', () => {
     expect(mocks.cronJob).toHaveBeenCalledWith('billing-reconcile', 'failed', expect.any(Number),
       expect.stringContaining('PAYG calls with unknown cost need manual settlement: 3'), expect.anything());
     mocks.stuckCalls.mockRejectedValue(new Error('unexpected'));
+    expect((await GET(new Request('https://graylum.test/api/cron/billing-reconcile'))).status).toBe(500);
+  });
+
+  it('runs the voice recovery step and fails the job while a generation cannot be settled', async () => {
+    expect((await GET(new Request('https://graylum.test/api/cron/billing-reconcile'))).status).toBe(200);
+    expect(mocks.voice).toHaveBeenCalledWith({ client: 'service-role' });
+    mocks.voice.mockResolvedValue({ success: false, settled: 0, scrubbed: 0, waiting: 0, failed: 1 });
+    const response = await GET(new Request('https://graylum.test/api/cron/billing-reconcile'));
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({ voice: { failed: 1 } });
+    mocks.voice.mockRejectedValue(new Error('unexpected'));
     expect((await GET(new Request('https://graylum.test/api/cron/billing-reconcile'))).status).toBe(500);
   });
 

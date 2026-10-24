@@ -1,6 +1,6 @@
 'use client';
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { Suspense,useEffect,useState,useRef,useMemo } from 'react';
+import { Fragment,Suspense,useEffect,useState,useRef,useMemo } from 'react';
 import {AgentWorkStatus} from '@/components/chat-display/agent-work-status';
 import {TurnSteps} from '@/components/chat-display/turn-steps';
 import {runtimeTurnProgress} from './runtime-turn-progress';
@@ -37,12 +37,14 @@ import {
  runtimeAdmissionNotice, runtimeExecutionNotice, showsReply,
  videoGateError, videoGateNotice,
 } from './gate-notices';
-import { GUIDE_HELD_NOTICE, isOpenTurn, runtimeTailNotices, runtimeTurnNotices, stopWithRecord, type RuntimeTurn } from './runtime-notices';
+import { ENDED_NOTICE, GUIDE_HELD_NOTICE, isOpenTurn, runtimeTailNotices, runtimeTurnNotices, stopWithRecord, type RuntimeTurn } from './runtime-notices';
 import { finishedExecution } from '@/lib/finished-execution';
 import { isOrganizerPendingError } from '@/lib/payg-wait';
 import { usePaygResume } from '@/lib/use-payg-resume';
 import { useRuntimeViewBusy, useRuntimeViewPolling } from '@/lib/runtime-view-poll';
 import { useRuntimeStream } from './use-runtime-stream';
+import { CompareButton } from '@/components/fusion-compare/ComparePicker';
+import { CompareThread, placeCompareCards, useCompareThread } from '@/components/fusion-compare/CompareThread';
 import { LiveReplyText, PendingLiveReply, liveReplyText, liveScrollSignature, withResumeStop } from './runtime-live-reply';
 
 type VideoChoice='both'|'storyboard'|'editing';
@@ -325,6 +327,18 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
    setUserStops(userStopIds(at.storage,sessionId,executions??[]));}}
  async function recover(executionId:string){setError('');try{const executed=await runner.run(executionId);if('unavailable' in executed&&executed.unavailable==='capacity'){markCapacity(executionId);setError('原请求的必要材料超过模型输入容量，无法继续发送。已有内容已保留；请点“停止”后缩短材料再发送。');}await view.refetch();}
   catch(cause){if(isLibrarySourceDeleted(cause)){await view.refetch();return;}setError('暂时无法恢复，请保留原任务。');}}
+ // FUSION-COMPARE: first version only on free conversations (no work item), Owner 2026-10-17 Q3.
+ // The compare asks for exactly the selection the composer would send: until the choices are loaded and a chosen Skill resolves,
+ // it stays disabled instead of silently falling back to a no-Skill comparison (the user would pay for a different prompt).
+ const compareChoice=choices.data?.skills.find(x=>'skill:'+x.moduleId===activeSelection);
+ const compareSkill={ready:Boolean(choices.data&&activeSelection&&(!activeSelection.startsWith('skill:')||compareChoice)),
+  skill:compareChoice?{kind:'skill' as const,moduleId:compareChoice.moduleId,revisionId:compareChoice.revisionId}:undefined};
+ // Listed as soon as the session id is known (not after the view: the list answers [] for a conversation without compares), so
+ // the cards and the adoption markers arrive together with the history instead of seconds later.
+ const compare=useCompareThread(sessionId||null);
+ // An adopted answer is a cancelled turn that must not read as failed. Until the list has answered it is unknown which are, so only the
+ // generic "ended" line waits (stop, capacity, refusal and rate-limit notices come from their own causes and stay).
+ const compareNotices=(e:RuntimeTurn)=>turnNotices(e).filter(n=>!(freeChat&&!compare.loaded&&n.text===ENDED_NOTICE));
  const executions=view.data?.executions as Array<{executionId:string;createdAt?:string;state:string;input:string|null;body:string|null;primaryBody:string|null;organizerComplete:boolean|null;skillExecution:boolean;needsTask:boolean;unavailableReason:string|null;historyOmitted?:boolean;contentAvailable:boolean;userStopPending?:boolean;stopped?:boolean;
   billing?:{pausedReason?:string|null;cancelRequested?:boolean}|null;cursor?:number|null;epoch?:number|null;remainingCalls?:number|null}>|undefined;
  const capacitySignature=executions?.map(e=>e.executionId+':'+e.state).join('|');
@@ -404,7 +418,9 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
    <section className={workStyles.transcript}>
     {workItem&&typePending&&<ChatInlineNotice tone="warning" label="类型保存待核实"
      actions={[{label:CHAT_ACTION.retry,disabled:editItem.isPending,onClick:()=>void setType('unknown')}]}>内容类型保存结果待核实。</ChatInlineNotice>}
-    {workItem&&contentType==='unknown'&&<section className="rounded-xl border p-4" aria-label="确认内容类型"><h2>这条选题准备做成什么内容？</h2><p>先确认形式，再一起细化重点和结构。</p><div className="flex gap-2 mt-3">{['article','image_text','video'].map(value=><Button key={value} disabled={busy||editItem.isPending||typePending} onClick={()=>setType(value)}>{typeLabel[value]}</Button>)}</div></section>}{executions?.map((e,index)=><RuntimeTurnView key={e.executionId}
+    {workItem&&contentType==='unknown'&&<section className="rounded-xl border p-4" aria-label="确认内容类型"><h2>这条选题准备做成什么内容？</h2><p>先确认形式，再一起细化重点和结构。</p><div className="flex gap-2 mt-3">{['article','image_text','video'].map(value=><Button key={value} disabled={busy||editItem.isPending||typePending} onClick={()=>setType(value)}>{typeLabel[value]}</Button>)}</div></section>}{(()=>{const placed=placeCompareCards(compare.cards,executions);const cardsAt=(at:number)=>placed.get(at)?<CompareThread cards={placed.get(at)!} names={compare.names}
+     onAdopted={()=>{void compare.refresh();void view.refetch();}} onQuote={text=>updateInput(text)}/>:null;
+    return <>{cardsAt(-1)}{executions?.map((e,index)=><Fragment key={e.executionId}><RuntimeTurnView
     dateLabel={e.createdAt&&(index===0||!executions[index-1].createdAt||transcriptDay(executions[index-1].createdAt!)!==transcriptDay(e.createdAt))
      ?transcriptDate(e.createdAt):null}
     userText={e.input&&!e.input.startsWith('[OPC_WORK_CONTINUE_V1]')?shownRuntimeInput(e.input):null}
@@ -418,14 +434,14 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
      {workItem&&contentType!=='unknown'&&e.state==='completed'&&e.skillExecution&&!e.input?.startsWith('[OPC_VIDEO_PACKAGE_V1]')&&!e.input?.startsWith('[OPC_WORK_CONTINUE_V1]')&&<div className="mt-3 flex flex-wrap gap-2">{versions.some(v=>v.kind===(isVideo?'script':'brief')&&v.executionId===e.executionId)?<Link className="underline" href={'/app/library?item='+workItem.workItemId+'&return='+sessionId}>{isVideo?'这版口播稿已定稿':'已采用为草稿'} · 查看</Link>:<Button disabled={busy} onClick={()=>finalizeScript(e.executionId)}>{isVideo?'将这条回复定稿为口播稿':'采用为当前草稿'}</Button>}</div>}
      {workItem&&contentType==='unknown'&&e.state==='completed'&&e.skillExecution&&e.contentAvailable&&!e.input?.startsWith('[OPC_WORK_CONTINUE_V1]')&&!e.input?.startsWith('[OPC_VIDEO_PACKAGE_V1]')&&<div className="mt-2">{saved.data?.find((result:{artifactId:string;version:number})=>result.artifactId===e.executionId)?<p role="status">已保存成果 · 第 {saved.data.find((result:{artifactId:string;version:number})=>result.artifactId===e.executionId)?.version} 版</p>:<Button variant="outline" disabled={saveWorkResult.isPending} onClick={()=>persistSkillResult(e.executionId)}>保存 Skill 成果</Button>}</div>}
      {/* Only a reply shown exactly as stored can be saved: the server keeps verbatim text, never a reformatted list. */}
-     {freeChat&&results.isSuccess&&e.state==='completed'&&e.contentAvailable&&(e.body??e.primaryBody)&&
+     {freeChat&&results.data&&e.state==='completed'&&e.contentAvailable&&(e.body??e.primaryBody)&&
       displayReply(e.input,e.body??e.primaryBody)===(e.body??e.primaryBody)&&
       <SaveReplyButton sessionId={sessionId} executionId={e.executionId} reply={(e.body??e.primaryBody)!}
        savedItems={results.data.filter(result=>result.sourceExecutionId===e.executionId)}/>}
      <LiveReplyText text={liveReplyText(runner.reply,e.executionId,e)}/>
-     <ChatNoticeList notices={[...turnNotices(e),...withResumeStop(payg.turnNotices(e,busy),
+     <ChatNoticeList notices={compare.adoptedExecutions.has(e.executionId)?[]:[...compareNotices(e),...withResumeStop(payg.turnNotices(e,busy),
       runner.streaming&&runner.reply?.executionId===e.executionId,{onClick:()=>void stop(e.executionId),disabled:cancel.isPending})]}/>
-   </RuntimeTurnView>)}
+   </RuntimeTurnView>{cardsAt(index)}</Fragment>)}</>;})()}
    {isVideo&&currentScript&&videoPromptEnded&&(!currentStoryboard||!currentEditing)&&<Button variant="outline" onClick={()=>{localStorage.removeItem('opc-video-ended:'+currentScript.id);setVideoUiRevision(v=>v+1);}}>继续这版口播稿的分镜或剪辑</Button>}
    {isVideo&&currentScript&&!videoPromptEnded&&(!currentStoryboard||!currentEditing)&&<section aria-label="口播稿后续选择" className="space-y-3 rounded-xl border border-[var(--border-primary)] bg-[var(--bg-secondary)] p-4"><h2 className="font-medium">{currentStoryboard?'分镜已保存。要基于这版分镜生成剪辑建议吗？':'口播稿已定稿。要先制作分镜脚本吗？'}</h2><p className="text-sm text-[var(--text-secondary)]">本次只绑定口播稿第 {currentScript.version} 版。选择后才会调用 Agent；以后重新定稿口播稿时不会自动生成。</p><div className="flex flex-wrap gap-2">{!currentStoryboard&&<Button disabled={busy||currentEditing} onClick={()=>chooseVideo('both')}>先做分镜，再生成剪辑建议</Button>}{!currentStoryboard&&<Button variant="outline" disabled={busy} onClick={()=>chooseVideo('storyboard')}>只生成分镜</Button>}{currentStoryboard&&<Button variant="outline" disabled={busy||currentEditing} onClick={()=>chooseVideo('editing')}>只生成剪辑建议</Button>}<Button variant="ghost" disabled={busy} onClick={()=>chooseVideo('end')}>暂时结束</Button></div><p className="text-xs text-[var(--text-tertiary)]">也可以在消息框输入同样的选择；提问卡和自然语言只执行同一个业务动作。</p></section>}
 {pendingOutgoing&&<RuntimePendingMessage text={pendingOutgoing.text} sending={busy}/>}
@@ -440,6 +456,11 @@ function RuntimeWorkspace({routeSession,routeModule}:{routeSession:string;routeM
    </section>
   </div>
   {sessionId&&<footer className={`${composerStyles.zone} ${workStyles.composerZone}`}><div className={composerStyles.wrap}>
+   {freeChat&&<CompareButton sessionId={sessionId} question={input}
+    disabled={busy||Boolean(view.data?.activeExecution)||!compareSkill.ready}
+    blockedReason={COMPOSER_REFERENCES_ENABLED&&referencesNamedIn(input,references).length?'带 @ 引用资料的消息暂时不能多模型对比，请去掉引用后再试。':undefined}
+    skill={compareSkill.skill}
+    onStarted={compareId=>{updateInput('');compare.add(compareId);void compare.refresh();}} onMaybeStarted={()=>void compare.refresh()}/>}
    {workItem&&isVideo&&<Button variant="outline" disabled={busy||Boolean(view.data?.activeExecution)||!choices.data?.defaultSkill} onClick={()=>send(true)}>{currentScript?'修改口播稿':'起草口播稿'}</Button>}
    <WorkComposer value={input} onChange={updateInput} onSend={()=>void send()}
     referenceList={references} onReferencesChange={updateReferences}

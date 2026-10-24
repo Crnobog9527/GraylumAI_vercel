@@ -100,4 +100,42 @@ describe('Stripe document projection failures', () => {
       payment_intent: { latest_charge: { receipt_url: 'https://pay.stripe.com/receipts/fixture' } } }, false);
     expect(projectOrderPayment(order, await loadStripeBillingDocument(stripe, db, order)).documentStatus).toBe('unknown');
   });
+  describe('card subscription invoice recorded as the payment reference (0238)', () => {
+    const invoice = { id: 'in_card', livemode: false, amount_paid: 3045, total_taxes: [{ amount: 145 }], currency: 'usd',
+      number: 'CARD-0001', invoice_pdf: 'https://pay.stripe.com/invoice/card/pdf', hosted_invoice_url: 'https://invoice.stripe.com/i/card' };
+    function cardSetup(paymentRef: string) {
+      const retrieve = vi.fn(async (id: string) => {
+        if (id !== invoice.id) throw new Error('unexpected invoice');
+        return invoice;
+      });
+      const stripe = { accounts: { retrieveCurrent: async () => ({ id: 'acct_fixture' }) },
+        balance: { retrieve: async () => ({ livemode: false }) }, invoices: { retrieve },
+        checkout: { sessions: { retrieve: vi.fn(async () => { throw new Error('session not expected'); }) } },
+      } as unknown as Parameters<typeof loadStripeBillingDocument>[0];
+      const db = { from: () => ({ select() { return this; }, eq() { return this; },
+        limit: async () => ({ data: [{ external_id: paymentRef }], error: null }),
+        maybeSingle: async () => ({ data: { external_id: 'price_fixture' }, error: null }),
+        then: (resolve: (value: unknown) => unknown) => Promise.resolve({ data: [
+          { object_type: 'checkout', external_id: 'cs_card' }, { object_type: 'payment', external_id: paymentRef },
+        ], error: null }).then(resolve),
+      }) } as unknown as Parameters<typeof loadStripeBillingDocument>[1];
+      return { stripe, db, retrieve };
+    }
+    const card = { ...order, item_type: 'membership_plan', billing_cycle: 'monthly' as const, amount_total: 2900,
+      payment_method: 'card', subscription_id: 'internal-card-subscription' };
+    it.each(['card', 'card_cn'])('shows the %s first-period or renewal invoice', async payment_method => {
+      const { stripe, db, retrieve } = cardSetup('in_card');
+      const result = await loadStripeBillingDocument(stripe, db, { ...card, payment_method });
+      expect(retrieve).toHaveBeenCalledWith('in_card');
+      expect(result).toMatchObject({ invoiceNumber: 'CARD-0001', invoicePdfUrl: invoice.invoice_pdf,
+        hostedInvoiceUrl: invoice.hosted_invoice_url });
+      expect(projectOrderPayment(card, result).documentStatus).toBe('available');
+    });
+    it('does not read a PaymentIntent payment reference as an invoice', async () => {
+      const { stripe, db, retrieve } = cardSetup('pi_card');
+      const result = await loadStripeBillingDocument(stripe, db, card);
+      expect(retrieve).not.toHaveBeenCalled();
+      expect(result.invoicePdfUrl).toBeNull();
+    });
+  });
 });

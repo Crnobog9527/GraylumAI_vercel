@@ -4,7 +4,7 @@ import { lazy, Suspense } from "react";
 import { REPORT_DATA_FIELDS } from "@repo/api/src/shared/reportDataSpec";
 import type { BenchmarkAccount, ReportData } from "@repo/api/src/shared/reportData";
 import { ReportDataBlock } from "./report-data-table";
-import { formatCount } from "./report-sections";
+import { formatCount, formatFollowers } from "./report-sections";
 import { REPORT_VIEW_TEXT as T } from "./report-text";
 import styles from "./report-view.module.css";
 
@@ -30,7 +30,7 @@ export function BenchmarkChart({ benchmarks }: { benchmarks: NonNullable<ReportD
     || has(account.metrics.engagementRate) || has(account.metrics.weeklyPosts)));
   const charted = accounts.some(account => has(account.metrics?.followers) || has(account.metrics?.medianViews));
   const summary = accounts.map(account => [account.account,
-    account.metrics?.followers != null ? `粉丝 ${formatCount(account.metrics.followers)}` : "",
+    account.metrics?.followers != null ? `粉丝 ${formatFollowers(account.platform, account.metrics.followers)}` : "",
     account.metrics?.medianViews != null ? `中位播放 ${formatCount(account.metrics.medianViews)}` : "",
   ].filter(Boolean).join("，")).join("；");
   return (
