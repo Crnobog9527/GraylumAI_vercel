@@ -38,3 +38,10 @@ it('names the status and reject codes added in #759 and nothing else', () => {
   // None of them suggests rejecting outright.
   expect(INELIGIBLE_REFUND_CODES).not.toContain('PAY_REFUND_ALREADY_DISPATCHED');
 });
+
+it('says a refunded order cannot be refunded again instead of calling it unreadable', () => {
+  expect(monthlyRefundQuoteRefusal(new Error('PAY_REFUND_ALREADY_REFUNDED'), FALLBACK))
+    .toEqual({ text: '该订单已全额退款，不可再退', specific: true, ineligible: false });
+  expect(monthlyRefundQuoteRefusal(new Error('PAY_REFUND_PARTIALLY_REFUNDED'), FALLBACK))
+    .toMatchObject({ text: expect.stringContaining('已有部分退款'), specific: true, ineligible: false });
+});
