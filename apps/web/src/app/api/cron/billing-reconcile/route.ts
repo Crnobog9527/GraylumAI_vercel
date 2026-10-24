@@ -26,6 +26,9 @@ import { findStuckPaygCalls } from '@repo/api/src/services/bill2/stuckCalls';
 import { kickStalledReviews } from '@repo/api/src/services/fusion/background';
 import { validateCronRequest } from '@/lib/cron-auth';
 import { pruneGaCheckoutIds } from '@repo/api/src/services/analytics/gaPurchase';
+import { refreshResearchPrices } from '@repo/api/src/services/research/priceRefresh';
+import { platformSecretReader } from '@repo/api/src/services/research/runtime/secrets';
+import { stagingRuntimeWindow } from '@repo/api/src/services/runtime/stagingEnvironment';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -62,6 +65,19 @@ async function runReportFeeSettlement(supabase: SupabaseClient) {
 async function runFusionKick(supabase: SupabaseClient, origin: string) {
   try { return await kickStalledReviews(supabase, origin, { timeLimitMs: 10_000 }); }
   catch { return { success: false, kicked: 0 }; }
+}
+
+/** Research prices expire (TikHub after 7 days): re-read TikHub's official prices daily, alert before any price expires. */
+async function runResearchPriceRefresh(supabase: SupabaseClient) {
+  let windowId: string | null = null;
+  // Only the bound staging deployment has a test window whose tool policies follow the prices.
+  try { windowId = stagingRuntimeWindow(process.env, true); } catch { windowId = null; }
+  try {
+    const read = platformSecretReader(supabase);
+    return await refreshResearchPrices(supabase, { readKey: () => read('tikhub'), windowId });
+  } catch {
+    return { success: false, refreshed: [], changed: [], failed: [{ route: '*', code: 'UNEXPECTED' }], expiring: [], window: 'skipped' as const };
+  }
 }
 
 /** Waffo daily backstop: report-only. Off until the test operations binding is explicitly enabled. */
@@ -156,7 +172,7 @@ export async function GET(request: Request) {
     // ANALYTICS 0280: GA checkout ids never taken (long past their 45-minute window) are deleted (statistics only, never fails the job).
     const analyticsIds = pruneGaCheckoutIds(supabase);
     const [result, readinessAudit, erasureFinancial, waffo, staleRounds, stripeCard, { fusion, fusionKick }, stuckCalls, reportFees,
-      voice] = await Promise.all([
+      voice, researchPrices] = await Promise.all([
       runDailyBillingReconciliation(supabase),
       runBillingEngineV15ReadinessAudit(supabase),
       runErasureFinancialReconciliation(supabase),
@@ -171,10 +187,11 @@ export async function GET(request: Request) {
       runStuckCallScan(supabase),
       runReportFeeSettlement(supabase),
       runVoiceRecovery(supabase),
+      runResearchPriceRefresh(supabase),
     ]);
     const success = result.success && readinessAudit.success && erasureFinancial.success && waffo.success
       && staleRounds.success && stripeCard.success && fusion.success && fusionKick.success && stuckCalls.success
-      && reportFees.success && voice.success;
+      && reportFees.success && voice.success && researchPrices.success;
 
     if (!success) {
       logger.system.cronJob(
@@ -191,7 +208,9 @@ export async function GET(request: Request) {
           ...(stuckCalls.success ? [] : [`PAYG calls with unknown cost need manual settlement: ${stuckCalls.total}`]),
           ...(fusionKick.success ? [] : ['Fusion review kick failed']),
           ...(reportFees.success ? [] : ['Report price settlement failed']),
-          ...(voice.success ? [] : [`Voice generations pending recovery: ${voice.failed}`])].join(' | '),
+          ...(voice.success ? [] : [`Voice generations pending recovery: ${voice.failed}`]),
+          ...(researchPrices.success ? [] : [`Research prices: ${researchPrices.failed.length} refresh failures, `
+            + `${researchPrices.expiring.length} expiring within a day, window ${researchPrices.window}`])].join(' | '),
         {
           erasureFinancial,
           waffo,
@@ -202,6 +221,7 @@ export async function GET(request: Request) {
           fusionKick,
           reportFees,
           voice,
+          researchPrices,
           mismatches: result.mismatches,
           summary: result.summary,
           readinessAudit: {
@@ -245,6 +265,7 @@ export async function GET(request: Request) {
       fusionKick,
       reportFees,
       voice,
+      researchPrices,
       timestamp: new Date().toISOString(),
     }, { status: success ? 200 : 500 });
   } catch (error) {

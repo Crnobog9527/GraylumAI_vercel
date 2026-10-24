@@ -47,7 +47,7 @@ export function ConnectionsPanel({ brands, connections, refresh, gold, onChanged
         <Button variant="outline" onClick={() => { setPreselect(''); setAdding(value => !value); }}>{adding ? '收起' : '连接账号'}</Button>
       </div>
       {adding && <ConnectForm key={preselect} brands={brands} connected={connected} initialProjectId={preselect}
-        onConnected={() => { setAdding(false); onChanged(); }} />}
+        onConnected={() => { setAdding(false); onChanged(); }} onAccountAdded={onChanged} />}
       {own.length === 0 ? (
         <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
           还没有连接账号。海外 9 个平台授权后读取你自己作品的数据；小红书、抖音贴主页链接读取公开数据；其他平台可以用表格导入。</p>

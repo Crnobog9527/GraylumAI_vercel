@@ -59,7 +59,8 @@ describe('withVoice (free chat with a Skill catalog)', () => {
   it('appends the voice once as a system paragraph, bound to the flagged Skills only', async () => {
     const text = await withVoice(options({profile}), 'BASE', context, undefined);
     expect(text).toBe('BASE' + voiceAddendum(profile) + '\nApply this writing voice only to content you write after loading one of these Skills: '
-      + 'script-writer, post-writer. For every other reply, ignore it completely.');
+      + 'script-writer, post-writer. For every other reply, ignore it completely. Before writing the first line of such content, check it against '
+      + 'the passages above: no sentence may copy a passage or reword it lightly, and the opening and first three sentences must be new, about the current topic.');
   });
   it('a bound version that is gone ends the run before any provider request (Owner: deleted means unusable)', async () => {
     await expect(withVoice(options(null), 'BASE', context, undefined)).rejects.toThrow('VOICE_SOURCE_DELETED');

@@ -7,6 +7,8 @@ import { useEffect, useRef } from 'react';
  * backs off the longer the turn runs. With no turn in progress it only checks occasionally (another
  * tab may start one). React Query skips interval reads while the tab is hidden, and the page reads
  * once more when it is shown again (even within the 30 s staleTime), so a background tab costs nothing.
+ * While this page's own stream is open the stream carries the progress, so the page does not poll at all
+ * (DB-PERF 5b); when the stream ends or breaks the page reads once and the polling above takes over again.
  */
 export const RUNTIME_VIEW_ACTIVE_POLL_MS = [5000, 8000, 12000] as const;
 /** The active interval moves to the next step after this long (ms) on the same execution. */
@@ -43,13 +45,21 @@ export function runtimeViewPollInterval(view: RuntimeViewPollData, pageBusy: boo
 export function useRuntimeViewPolling() {
   const since = useRef<{ key: string; at: number } | null>(null);
   const busy = useRef(false);
-  return { busy, options: runtimeViewPollOptions(since, busy) };
+  const streaming = useRef<string | null>(null);
+  return { busy, streaming, options: runtimeViewPollOptions(since, busy, streaming) };
 }
 
 /** The options behind useRuntimeViewPolling, with its two refs passed in. */
-export function runtimeViewPollOptions(since: { current: { key: string; at: number } | null }, busy: { current: boolean }) {
+export function runtimeViewPollOptions(
+  since: { current: { key: string; at: number } | null }, busy: { current: boolean }, streaming: { current: string | null } = { current: null },
+) {
   return {
     refetchInterval: (query: { state: { data: unknown } }) => {
+      // The open stream reports progress itself; when it closes useRuntimeViewStreaming reads once and re-arms this.
+      // Only once the view lists the streamed execution: until then the page needs it (Stop button, progress).
+      const streamed = streaming.current;
+      const view0 = query.state.data as RuntimeViewPollData;
+      if (streamed && view0?.executions?.some(execution => execution.executionId === streamed)) return false as const;
       const view = query.state.data as RuntimeViewPollData;
       const key = progressingExecution(view) ?? (busy.current ? 'busy' : '');
       if (!key) { since.current = null; return RUNTIME_VIEW_IDLE_POLL_MS; }
@@ -77,4 +87,19 @@ export function useRuntimeViewBusy(polling: { busy: { current: boolean } }, busy
   const latest = useRef(refetch);
   useEffect(() => { latest.current = refetch; });
   useEffect(() => { markRuntimeViewBusy(polling.busy, busy, () => enabled && latest.current()); }, [busy, enabled, polling.busy]);
+}
+
+/** Records the execution this page's own stream carries (null when none); a closing stream re-reads once so polling can resume. */
+export function markRuntimeViewStreaming(streaming: { current: string | null }, next: string | null, refetch: () => unknown) {
+  const was = streaming.current;
+  streaming.current = next;
+  if (was && !next) void refetch();
+}
+
+export function useRuntimeViewStreaming(
+  polling: { streaming: { current: string | null } }, streaming: string | null, refetch: () => unknown, enabled: boolean,
+) {
+  const latest = useRef(refetch);
+  useEffect(() => { latest.current = refetch; });
+  useEffect(() => { markRuntimeViewStreaming(polling.streaming, streaming, () => enabled && latest.current()); }, [streaming, enabled, polling.streaming]);
 }

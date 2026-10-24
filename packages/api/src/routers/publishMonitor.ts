@@ -10,6 +10,7 @@ import {
 import {
   dataInput, historyInput, linkInput, linkPost, manualRefresh, readData, readPostHistory, refreshInput,
 } from '../services/publishMonitor/data';
+import { addAccountInput, addBrandAccount } from '../services/publishMonitor/accounts';
 import { importManualRows, manualImportInput } from '../services/publishMonitor/manualImport';
 import { requirePostForMeDeps } from '../services/publishMonitor/secrets';
 import {
@@ -88,6 +89,13 @@ export const publishMonitorRouter = router({
     return addBenchmark(ctx.supabaseAdmin, ctx.profileId, input);
   })),
   admin: publishMonitorAdminRouter,
+  // Adds a brand account to one of the user's own businesses, without adopting a topic first (Owner 2026-10-23). Same plan
+  // as connecting (a data window); every other rule is in the database function.
+  addAccount: protectedProcedure.input(addAccountInput).mutation(({ ctx, input }) => safe(ctx, async () => {
+    await dataWindow(ctx);
+    await checkRateLimitOrThrow(`publish-monitor-account:${ctx.profileId}`, 'api');
+    return addBrandAccount(ctx.supabaseAdmin, ctx.profileId, input);
+  })),
   connect: publishMonitorConnectRouter,
   publish: publishMonitorPublishRouter,
 });
