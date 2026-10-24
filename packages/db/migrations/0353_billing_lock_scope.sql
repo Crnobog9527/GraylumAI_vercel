@@ -26,18 +26,18 @@ SET LOCAL lock_timeout='5s';
 CREATE OR REPLACE FUNCTION public.bill2_payg_lock_models(r bill2_runs) RETURNS void
 LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
 BEGIN
- -- DB-PERF 0347: model monitoring is ordered by the stop-loss key (201,1) instead; see bill2_payg_block_lock.
+ -- DB-PERF 0353: model monitoring is ordered by the stop-loss key (201,1) instead; see bill2_payg_block_lock.
  RETURN;
 END $$;
 
 -- 2. New-call checks take the stop-loss key shared. Writers of the same key stay exclusive.
 DO $$ DECLARE src text;fn regprocedure:='public.runtime_stop_loss_assert(uuid,boolean)'::regprocedure; BEGIN
  src:=pg_get_functiondef(fn);
- IF position('-- DB-PERF 0347 shared' IN src)=0 THEN
+ IF position('-- DB-PERF 0353 shared' IN src)=0 THEN
   IF (length(src)-length(replace(src,'PERFORM pg_advisory_xact_lock(201,1);','')))/length('PERFORM pg_advisory_xact_lock(201,1);')<>1 THEN
-   RAISE EXCEPTION 'DB_PERF_0347_ANCHOR_MISSING: runtime_stop_loss_assert';END IF;
+   RAISE EXCEPTION 'DB_PERF_0353_ANCHOR_MISSING: runtime_stop_loss_assert';END IF;
   src:=replace(src,'PERFORM pg_advisory_xact_lock(201,1);',
-   '-- DB-PERF 0347 shared: new calls do not order each other; settlements and setting writes stay exclusive.'
+   '-- DB-PERF 0353 shared: new calls do not order each other; settlements and setting writes stay exclusive.'
    ||E'\n PERFORM pg_advisory_xact_lock_shared(201,1);');
   EXECUTE src;
  END IF;
@@ -47,11 +47,11 @@ END $$;
 --    (the insert trigger has taken the key by then; taking it again here is explicit and reentrant).
 DO $$ DECLARE src text;anchor text;fn regprocedure:='public.bill2_payg_claim(uuid,uuid,integer,jsonb)'::regprocedure; BEGIN
  src:=pg_get_functiondef(fn);
- IF position('-- DB-PERF 0347 late metering check' IN src)=0 THEN
+ IF position('-- DB-PERF 0353 late metering check' IN src)=0 THEN
   anchor:=E'VALUES(rid,seq,p,p->>''provider'',p->>''account'',p->>''model'',u) RETURNING * INTO c;';
   IF (length(src)-length(replace(src,anchor,'')))/length(anchor)<>1 THEN
-   RAISE EXCEPTION 'DB_PERF_0347_ANCHOR_MISSING: bill2_payg_claim';END IF;
-  src:=replace(src,anchor,anchor||E'\n  -- DB-PERF 0347 late metering check: a block committed by a writer holding (201,1) exclusively'
+   RAISE EXCEPTION 'DB_PERF_0353_ANCHOR_MISSING: bill2_payg_claim';END IF;
+  src:=replace(src,anchor,anchor||E'\n  -- DB-PERF 0353 late metering check: a block committed by a writer holding (201,1) exclusively'
    ||E'\n  -- is visible here; a writer that comes later waits for this claim to commit.'
    ||E'\n  PERFORM pg_advisory_xact_lock_shared(201,1);'
    ||E'\n  IF EXISTS(SELECT 1 FROM bill2_calls x WHERE x.model=p->>''model'' AND x.id<>c.id'
@@ -66,10 +66,10 @@ DO $$ DECLARE src text;fn regprocedure:='public.fusion_group_claim(uuid,uuid,tex
  pat text:='FOR k IN SELECT DISTINCT hashtextextended\(''bill2-payg:''\|\|\(x->>''model''\),0\)\s+FROM bill2_runs br, jsonb_array_elements\(br\.payload->''callPolicy''\) x\s+WHERE br\.id IN \(SELECT \(y->>''runId''\)::uuid FROM jsonb_array_elements\(p_items\) y\) ORDER BY 1 LOOP\s+PERFORM pg_advisory_xact_lock\(k\);\s+END LOOP;';
 BEGIN
  src:=pg_get_functiondef(fn);
- IF position('-- DB-PERF 0347 member claims check' IN src)=0 THEN
+ IF position('-- DB-PERF 0353 member claims check' IN src)=0 THEN
   IF (SELECT count(*) FROM regexp_matches(src,pat,'g'))<>1 THEN
-   RAISE EXCEPTION 'DB_PERF_0347_ANCHOR_MISSING: fusion_group_claim';END IF;
-  src:=regexp_replace(src,pat,'-- DB-PERF 0347 member claims check the metering block under (201,1); no model locks here.');
+   RAISE EXCEPTION 'DB_PERF_0353_ANCHOR_MISSING: fusion_group_claim';END IF;
+  src:=regexp_replace(src,pat,'-- DB-PERF 0353 member claims check the metering block under (201,1); no model locks here.');
   EXECUTE src;
  END IF;
 END $$;
@@ -96,9 +96,9 @@ CREATE TRIGGER bill2_payg_zz_block_lock BEFORE INSERT OR UPDATE ON public.bill2_
 DO $$ DECLARE src text;anchor text:=E'IF c.call_kind<>''tool'' OR c.supplier_cost_state IS DISTINCT FROM ''pending'' THEN RETURN;END IF;';
  fn regprocedure:='public.bill2_tool_pending_guard(uuid)'::regprocedure; BEGIN
  src:=pg_get_functiondef(fn);
- IF position('-- DB-PERF 0347 guard lock' IN src)=0 THEN
-  IF position(anchor IN src)=0 THEN RAISE EXCEPTION 'DB_PERF_0347_ANCHOR_MISSING: bill2_tool_pending_guard';END IF;
-  src:=replace(src,anchor,anchor||E'\n  -- DB-PERF 0347 guard lock: count and flag one guard at a time.'
+ IF position('-- DB-PERF 0353 guard lock' IN src)=0 THEN
+  IF position(anchor IN src)=0 THEN RAISE EXCEPTION 'DB_PERF_0353_ANCHOR_MISSING: bill2_tool_pending_guard';END IF;
+  src:=replace(src,anchor,anchor||E'\n  -- DB-PERF 0353 guard lock: count and flag one guard at a time.'
    ||E'\n  PERFORM pg_advisory_xact_lock(201,1);');
   EXECUTE src;
  END IF;
