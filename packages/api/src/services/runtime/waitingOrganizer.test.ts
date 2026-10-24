@@ -25,6 +25,10 @@ it.each(['waiting_credits','waiting_resume','cost_pending','cancelled'] as const
  expect(await finishWaitingOrganizer({waitingOrganizer:waiting},requestId,vi.fn().mockResolvedValue(result)))
   .toEqual({...result,admitted:false,blockedRequestId:requestId});
 });
+it('admits the new request once a round that can never resume was ended keeping its reply',async()=>{
+ const resume=vi.fn().mockResolvedValue({state:'cancelled',body:'old reply',resumeClosed:true});
+ expect(await finishWaitingOrganizer({waitingOrganizer:{...waiting,state:'waiting_resume'}},requestId,resume)).toBeNull();
+});
 it.each(['RUNTIME_RESUME_CONFLICT','RUNTIME_RESUME_SOURCE_CHANGED'])(
  'propagates %s without running a new admission',async code=>{
  const resume=vi.fn().mockRejectedValue(new Error(code));
