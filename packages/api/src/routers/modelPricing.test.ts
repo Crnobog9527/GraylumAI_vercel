@@ -18,7 +18,15 @@ function harness(role: 'admin' | 'user' | 'anonymous', options: {
   const updates: Array<{ patch: Record<string, unknown>; filters: Record<string, unknown> }> = [];
   const settingWrites: Array<{ key: string; value: string }> = [];
   let providerRow: { value: string } | null = null;
-  const db = { from(table: string) {
+  const db = {
+    // billing_provider_prices_swap: one locked compare-and-write (the hash is checked before this call too).
+    rpc: async (name: string, args: { p_value: string }) => {
+      if (name !== 'billing_provider_prices_swap') throw new Error(name);
+      settingWrites.push({ key: 'billing_provider_prices', value: args.p_value });
+      providerRow = { value: args.p_value };
+      return { error: null };
+    },
+    from(table: string) {
     if (table === 'profiles') return { select() { return this; }, eq() { return this; },
       single: async () => ({ data: { id: 'actor', role, status: 'active', credits: 0, nickname: 'S', email: 's@example.test' }, error: null }) };
     if (table === 'system_settings') return {
@@ -28,7 +36,6 @@ function harness(role: 'admin' | 'user' | 'anonymous', options: {
           eq: () => ({ maybeSingle: async () => ({ data: providerRow, error: null }) }),
         };
       },
-      upsert: async (row: { key: string; value: string }) => { settingWrites.push(row); providerRow = { value: row.value }; return { error: null }; },
     };
     if (table !== 'ai_models') throw new Error(table);
     return {

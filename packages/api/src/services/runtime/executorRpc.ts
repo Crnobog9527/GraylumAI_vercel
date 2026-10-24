@@ -171,7 +171,7 @@ export function historyGuard(executionId:string,failed:(code:string)=>void) {
 }
 
 export function terminalReplyGuard(active:boolean,allowsCard:boolean,failed:()=>void,allowsSkillFile=false,allowsHistory=false,
-  researchTools:readonly string[]=[]) {
+  researchTools:readonly {name:string;parameters?:{safeParse:(value:unknown)=>{success:boolean}}}[]=[]) {
   // One read per turn: a Skill file or the user's earlier messages (R4), never both. RT-3b PR-3: one research call.
   let fileRequested=false,researchRequested=false;
   return (response:unknown,organizer=false)=>{
@@ -179,7 +179,12 @@ export function terminalReplyGuard(active:boolean,allowsCard:boolean,failed:()=>
       function?:{name?:string;arguments?:string}}>}}>})?.choices?.[0]?.message;
     const readsFile=message?.tool_calls?.[0]?.function?.name==='read_skill_file';
     const readsHistory=message?.tool_calls?.[0]?.function?.name===READ_HISTORY_TOOL;
-    const researches=researchTools.includes(String(message?.tool_calls?.[0]?.function?.name));
+    const researchTool=researchTools.find(tool=>tool.name===String(message?.tool_calls?.[0]?.function?.name));
+    // Arguments that fail the tool's schema run nothing (the model is told, INVALID_RESEARCH_ARGUMENTS), so they do not
+    // use up the turn's one research call: the corrected call can still run (staging 2026-10-24).
+    let researches=Boolean(researchTool);
+    if(researchTool?.parameters)try{researches=researchTool.parameters.safeParse(
+      JSON.parse(String(message?.tool_calls?.[0]?.function?.arguments))).success;}catch{researches=false;}
     let invalidFileArguments=false;
     if(readsFile){try{
       const call=message!.tool_calls![0]!,{path}=skillFileParameters.parse(JSON.parse(call.function!.arguments!));
@@ -195,7 +200,7 @@ export function terminalReplyGuard(active:boolean,allowsCard:boolean,failed:()=>
      }catch{invalidFileArguments=true;}}
     const oversized=(readsFile||readsHistory)&&Buffer.byteLength(JSON.stringify(JSON.stringify(message)))>SKILL_FILE_TRACE_BYTES;
     if(active&&(terminalAgentReplyFailure(response,organizer,allowsCard,allowsSkillFile&&!fileRequested,allowsHistory&&!fileRequested,
-      researchRequested?[]:researchTools)||
+      researchRequested?[]:researchTools.map(tool=>tool.name))||
       oversized||invalidFileArguments)){
       failed();
       throw new Error('RUNTIME_TERMINAL_REPLY');

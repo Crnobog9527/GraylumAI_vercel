@@ -13,9 +13,12 @@ import type { SkillCatalogEntry } from './skillCatalog';
  * D7), and one copy is sized whatever number of Skills the reply loads.
  */
 
-const guard = (names: string[]) => `\nApply this writing voice only to content you write after loading one of these Skills: ${names.join(', ')}. `
-  + 'For every other reply, ignore it completely. Before writing the first line of such content, check it against the passages above: '
-  + 'no sentence may copy a passage or reword it lightly, and the opening and first three sentences must be new, about the current topic.';
+const GUARD_TAIL = 'For every other reply, ignore it completely.';
+/** voice-v3 adds a closing reminder; executions frozen with an earlier wording replay their own guard byte for byte. */
+const REMINDER = ' Before writing the first line of such content, make sure no sentence repeats earlier wording of the user or '
+  + 'a stock line from the description above: the opening and first three sentences must be new, about the current topic.';
+const guard = (names: string[], guide: string) => '\nApply this writing voice only to content you write after loading one of these Skills: '
+  + `${names.join(', ')}. ` + GUARD_TAIL + (guide === 'voice-v3' ? REMINDER : '');
 const flaggedNames = (catalog: readonly SkillCatalogEntry[], modules: readonly string[]) =>
   catalog.filter(entry => modules.includes(entry.moduleId)).map(entry => entry.name);
 
@@ -27,7 +30,7 @@ export async function admitCatalogVoice(admin: SupabaseClient, actorId: string, 
   const voice = await admitVoice(admin, actorId, flagged, true);
   if (!voice) return undefined;
   return { frozen: voice.frozen,
-    text: voiceText({ guide: voice.frozen.guide, profile: voice.profile }) + guard(flaggedNames(catalog, voice.frozen.modules)) };
+    text: voiceText({ guide: voice.frozen.guide, profile: voice.profile }) + guard(flaggedNames(catalog, voice.frozen.modules), voice.frozen.guide) };
 }
 
 type Options = { database: Parameters<typeof executionVoice>[0]; actor: () => Promise<string> };
@@ -41,5 +44,5 @@ export async function withVoice(options: Options, instructions: string, context:
   if (moduleId || !frozen || !context.skillCatalog) return base;
   const voice = await executionVoice(options.database, await options.actor(), frozen, frozen.modules[0]);
   if (frozen.versionId && !voice) throw new Error('VOICE_SOURCE_DELETED');
-  return base + voiceText(voice) + guard(flaggedNames(context.skillCatalog, frozen.modules));
+  return base + voiceText(voice) + guard(flaggedNames(context.skillCatalog, frozen.modules), frozen.guide);
 }
