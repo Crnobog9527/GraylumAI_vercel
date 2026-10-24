@@ -57,6 +57,7 @@ import {LIBRARY_RETRIEVAL_CALLS,admitLibraryReferences,admitLibraryRetrieval,can
 import {libraryReserveBytes,readSourceSlots,sourceReadFlags,throwLibraryRefusal} from './libraryAdmission';
 import {admitContentSource,isSqlStagingRefusal,type ContentSourceKind} from './contentSource';
 import {fitsCapacity} from './researchAdmission';
+import {admitSkillCatalog,freeChatCatalogTurn,skillCatalogSlots} from './skillCatalogAdmission';
 import {researchCapacity} from './researchCapacity';
 import {RESEARCH_RESULT_RESERVE_BYTES} from './researchTurn';
 import {guardResearchAdmission,researchInputHost} from './researchAdmissionGuard';
@@ -305,8 +306,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    const inputLimit=inputCapacity(row.data,maxOutputTokens,inputBytes),limitOf=(bytes?:number)=>bytes?inputCapacity(row.data,maxOutputTokens,bytes):inputLimit;
    const cardBytes=hostTurnContext?.cardContract?groundedCardToolBytes():askQuestionToolBytes(true);
    // One read slot: the continuation reserve is the larger of the two possible results.
-   let libraryBytes=0;
-   const admissionToolBytes=(file:boolean,history=false,extra=0)=>libraryBytes+extra+(mentorStream&&!stepSummary?cardBytes:policy.searchEnabled?2048:0)+
+   let libraryBytes=0,cb=0; // cb: bytes reserved for the Skill catalog's tool and loads
+   const admissionToolBytes=(file:boolean,history=false,extra=0)=>libraryBytes+cb+extra+(mentorStream&&!stepSummary?cardBytes:policy.searchEnabled?2048:0)+
     (file?skillFileToolBytes()+(history?mentorHistoryToolBytes()+Math.max(skillFileReserve,MENTOR_HISTORY_RESERVE_BYTES):skillFileReserve):0)+
     (historySelection?.markerReserveBytes??(promptCache?PROMPT_CACHE_OVERHEAD_BYTES:0));
    const requireCapacity=(text:string,file:boolean,content=currentInput,history=false,extra=0,bytes?:number)=>selectRuntimeHistory([],[{role:'user',content}],
@@ -342,11 +343,15 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    const libraryRead=libraryReferences.length>0||libraryRetrieval;
    const sourceTools=[...(searchAllowed?['search']:[]),...(input.sources.length||workspaceContext||libraryRead?['read_source']:[])];
    libraryBytes=libraryReserveBytes(libraryReferences,sourceTools,workspaceContext,libraryRetrieval);
-   const fitsWith=(extra:number)=>fitsCapacity(()=>requireCapacity(instructions+positioningRule,Boolean(skillFile),
+   const fitsWith=(extra:number,more='')=>fitsCapacity(()=>requireCapacity(instructions+more+positioningRule,Boolean(skillFile),
     runtimeScopeInput(input.input,policy.reportGeneration?undefined:session.scopeMaterial,hostTurnContext),historyRead,extra));
    const postsBudget=await ownPostsBudget(admin,await actor(),ownPosts,maxCalls,fitsWith);
    ownPosts=postsBudget.on;maxCalls=postsBudget.calls;libraryBytes+=postsBudget.bytes;
    const strategyGuide=workspaceContext&&fitsWith(workspaceStrategyReserve(maxCalls));
+   const skillCatalog=await admitSkillCatalog(user,admin,{excludeSocial:gated,inputLimit,actor,maxCalls,fitsWith,
+    strategyReserve:strategyGuide?workspaceStrategyReserve:undefined,eligible:freeChatCatalogTurn({selection:input.selection,
+     mentorStream,stepStream,hostTurnContext,report:policy.reportGeneration,opcTurnToken:policy.opcTurnToken,scope:session.scope})});
+   if(skillCatalog){instructions+=skillCatalog.text;cb=skillCatalog.reserveBytes;maxCalls+=skillCatalog.frozen.maxSkillLoads;}
    // VOICE: a matched writing Skill may carry the voice too; every candidate is sized with it (never under-sized).
    if(voiceTurn&&candidates.length)voice=await admitVoice(admin,actorId,candidates.map(candidate=>candidate.moduleId));
    if(candidates.length)candidates=await fittingCandidates(candidates,candidate=>activateCandidateWithSource(user,admin,candidate,brandIdentity),
@@ -408,9 +413,9 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     ...(historyRead?{historyRead:{version:MENTOR_HISTORY_VERSION,reserve:MENTOR_HISTORY_RESERVE_BYTES}}:{}),
     tools:mentorStream?(opening?[]:[...(stepSummary?[]:[ASK_QUESTION_TOOL]),...(skillFile?['read_skill_file']:[]),
      ...(historyRead?[READ_HISTORY_TOOL]:[])]):
-     sourceTools,
+     [...sourceTools,...skillCatalogSlots(skillCatalog).tools],...skillCatalog?.frozen,
     maxToolCalls:mentorStream?(opening||stepSummary&&!skillFile?0:1):
-     (searchAllowed?1:0)+readSourceSlots(libraryReferences,primaryTurns,
+     skillCatalogSlots(skillCatalog).calls+(searchAllowed?1:0)+readSourceSlots(libraryReferences,primaryTurns,
       workspaceContext?Math.min(ownPosts?5:2,primaryTurns-1):input.sources.length,fitsWith,libraryRetrieval),
     request,...(policy.answeredCard?{answeredCard:policy.answeredCard}:{}),...(revisionId?{moduleId,skillId,revisionId}:{}),sources:input.sources};
    // CHAT-NATIVE-OUTPUT: free chat and a chosen Skill stream their plain reply; the format and billing profile stay as they were.
