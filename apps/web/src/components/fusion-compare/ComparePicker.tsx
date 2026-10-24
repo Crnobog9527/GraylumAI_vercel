@@ -21,32 +21,51 @@ type Estimate = { credits: number; columns: Array<{ modelId: string; credits: nu
  * the user may untick or pick others within [minModels, maxModels]; "最多消耗 X 积分" is priced by the server for exactly this
  * request and the start carries it, so the group never holds more than the user agreed to.
  */
-export function CompareButton({ sessionId, question, skill, disabled, blockedReason, onStarted, onMaybeStarted }: {
-  sessionId: string; question: string; skill?: CompareSkill; disabled?: boolean;
+export function CompareButton({ sessionId, resolveSession, question, skill, disabled, blockedReason, onStarted, onMaybeStarted }: {
+  /** The conversation to compare in; absent on the blank new-conversation page, where `resolveSession` creates it on demand. */
+  sessionId?: string;
+  /** Creates (idempotently, free of charge) or finds the empty conversation a first-message compare hangs on. */
+  resolveSession?: () => Promise<string>;
+  question: string; skill?: CompareSkill; disabled?: boolean;
   /** Why a compare cannot start with this message (shown as the button's hint), for example an @ library reference. */
   blockedReason?: string;
-  onStarted: (compareId: string, names: Record<string, string>) => void;
+  onStarted: (compareId: string, names: Record<string, string>, sessionId: string) => void;
   /** A start whose outcome is unknown (the response was lost): the page re-reads the conversation's compares. */
   onMaybeStarted?: () => void;
 }) {
   const options = trpc.fusionCompare.options.useQuery(undefined, { staleTime: 60_000, retry: false });
   const [open, setOpen] = useState(false);
+  const [resolved, setResolved] = useState<string | null>(null);
+  const [resolving, setResolving] = useState(false);
+  const [sessionError, setSessionError] = useState('');
   // The start request id outlives the dialog: a start that is waiting for credits, or whose outcome is unknown, is continued
   // by the same id when the picker is opened again with the same choice (a new id would meet FUSION_COMPARE_ACTIVE).
   const startId = useRef<{ key: string; id: string } | null>(null);
   const data = options.data as CompareOptions | undefined;
+  const activeSession = sessionId ?? resolved;
+  async function openPicker() {
+    if (activeSession) { setOpen(true); return; }
+    if (!resolveSession || resolving) return;
+    // First message of a new conversation: make the (empty) conversation first. The same request id always gives the same
+    // conversation, so a retry or a second opening never makes another one.
+    setResolving(true); setSessionError('');
+    try { setResolved(await resolveSession()); setOpen(true); }
+    catch { setSessionError('暂时没能开始对话，请稍后再试。输入已保留。'); }
+    finally { setResolving(false); }
+  }
   if (!data || (!data.enabled && data.reason === 'disabled')) return null;
   if (!data.enabled) {
     return <button type="button" className={styles.entry} title="多模型对比是 Gold 会员功能"
       onClick={() => void window.open(profileTabHref('subscription'), '_blank', 'noopener')}><Columns3 size={16} /> 多模型对比 · Gold 专享</button>;
   }
   return <>
-    <button type="button" className={styles.entry} disabled={disabled || !question.trim() || Boolean(blockedReason)}
+    <button type="button" className={styles.entry} disabled={disabled || resolving || !question.trim() || Boolean(blockedReason)}
       title={blockedReason ?? (question.trim() ? undefined : '先写好问题再对比')}
-      onClick={() => setOpen(true)}><Columns3 size={16} /> 多模型对比</button>
-    {open && <ComparePicker options={data} sessionId={sessionId} question={question} skill={skill} onClose={() => setOpen(false)}
-      onMaybeStarted={onMaybeStarted} startId={startId}
-      onStarted={(compareId, names) => { setOpen(false); onStarted(compareId, names); }} />}
+      onClick={() => void openPicker()}><Columns3 size={16} /> 多模型对比</button>
+    {sessionError && <span role="status" className={styles.error}>{sessionError}</span>}
+    {open && activeSession && <ComparePicker options={data} sessionId={activeSession} question={question} skill={skill}
+      onClose={() => setOpen(false)} onMaybeStarted={onMaybeStarted} startId={startId}
+      onStarted={(compareId, names) => { setOpen(false); onStarted(compareId, names, activeSession); }} />}
   </>;
 }
 
