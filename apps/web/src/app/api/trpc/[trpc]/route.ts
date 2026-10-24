@@ -22,10 +22,23 @@ function shouldFailClosedMaintenance(): boolean {
   return process.env.NODE_ENV === 'production';
 }
 
+// DB-PERF PR-5a: the same short per-instance cache as the page proxy (proxy.ts), so a burst of API calls reads the
+// switch once; turning maintenance on or off reaches the API within about two seconds, as it reaches the pages.
+let maintenanceCache: { enabled: boolean; expiresAt: number } | null = null;
+
 async function isMaintenanceModeEnabled(budgetFetch:typeof fetch): Promise<boolean> {
+  if (maintenanceCache && maintenanceCache.expiresAt > Date.now()) {
+    return maintenanceCache.enabled;
+  }
+  const enabled = await readMaintenanceMode(budgetFetch);
+  maintenanceCache = { enabled: enabled.value, expiresAt: Date.now() + (enabled.read ? 2_000 : 1_000) };
+  return enabled.value;
+}
+
+async function readMaintenanceMode(budgetFetch:typeof fetch): Promise<{ value: boolean; read: boolean }> {
   if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
     logServerError('system', 'trpc_service_role_key_missing');
-    return shouldFailClosedMaintenance();
+    return { value: shouldFailClosedMaintenance(), read: false };
   }
 
   const maintenanceClient = createClient(
@@ -44,10 +57,10 @@ async function isMaintenanceModeEnabled(budgetFetch:typeof fetch): Promise<boole
     logServerError('system', 'trpc_maintenance_mode_read_failed', {
       code: error.code,
     });
-    return shouldFailClosedMaintenance();
+    return { value: shouldFailClosedMaintenance(), read: false };
   }
 
-  return data?.value === true || data?.value === 'true';
+  return { value: data?.value === true || data?.value === 'true', read: true };
 }
 
 // Streamed procedures keep running after the Response is returned; each one

@@ -9,7 +9,7 @@ import type {SupabaseClient} from '@supabase/supabase-js';
 import type {RuntimeProgress} from './progress';
 import type {AgentTurnOutcome} from '../../shared/agentTurn';
 import type {RuntimeBudget} from './budget';
-import {loadStagingPolicy,loadStagingRecoveryPolicy} from './stagingPolicy';
+import {loadStagingRecoveryPolicy,realPolicyCheck,type RealPolicyCheck} from './stagingPolicy';
 import {realRuntimeClosed,realRuntimeEnvironment} from './productionEnvironment';
 import {StagingAccessError,stagingProcedureError,stagingRpcFailure} from './stagingErrors';
 import {stagingTransport} from './stagingTransport';
@@ -40,6 +40,9 @@ export type OriginalExecutionHost={
  authorization?:string|null;maintenanceEndpoint?:string;
  /** A streaming route shares one fence between its yields and the executor (libraryVisibility.ts). */
  visibility?:ExecutionVisibility;
+ /** DB-PERF PR-5a: the route already ran loadStagingPolicy for this request (stagingPolicy.ts realPolicyCheck);
+  * its outcome is used instead of loading the same policy a second time. */
+ policyChecked?:RealPolicyCheck;
 };
 
 /** Runs or recovers one admitted execution under its original frozen policy.
@@ -100,9 +103,9 @@ export async function executeOriginalExecution(host:OriginalExecutionHost,execut
    return outcome(await run(localFixtureAdapter(host.maintenanceEndpoint),()=>runtimeExecutor({
     ...base,endpoint:host.maintenanceEndpoint,activateSkill,
     callGate:replayOnly?denyNewCalls:newWorkGate(host.admin,'local').calls}).execute(executionId,publicProgress,resume)));
-  let policyFailure:unknown;
-  try{await loadStagingPolicy(host.admin,host.actorId,process.env);}catch(cause){
-   policyFailure=cause;
+  const checked=host.policyChecked??await realPolicyCheck(host.admin,host.actorId);
+  if(!checked.ok){
+   const policyFailure=checked.failure;
    const closed=await closeWaiting();if(closed)return closed;
    const observed=await host.admin.rpc('runtime_execution',{
     p_actor_id:host.actorId,p_execution_id:executionId,p_action:'read',
