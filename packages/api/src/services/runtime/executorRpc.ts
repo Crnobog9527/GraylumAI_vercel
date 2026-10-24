@@ -25,14 +25,15 @@ export type RuntimeExecutorOptions={budget?:RuntimeBudget;database:SessionRpc;ac
  resumePricing?:(policies:FrozenRun['callPolicy'])=>Promise<void>;
  callGate:RuntimeCallGate;endpoint?:string;adapter?:BillingTransport;activateSkill?:(candidate:MatchCandidate)=>Promise<string>;
  /** LIB-4b: told the frozen context of an execution about to run, before any progress (libraryVisibility.ts). */
- onContext?:(context:{libraryReferences?:unknown[];libraryRetrieval?:boolean})=>void};
+ onContext?:(context:{libraryReferences?:unknown[];libraryRetrieval?:boolean;voiceBound?:boolean})=>void};
 /** Report a frozen context to the host's visibility fence as soon as the execution is read, before any recovery
  * branch can emit progress. A completed execution is not reported: its answer predates any later deletion (D7). */
 export function observeContext(options:RuntimeExecutorOptions,execution:{state:string;context:unknown}){
  if(execution.state==='completed')return;
- const frozen=execution.context as {libraryReferences?:unknown;libraryRetrieval?:unknown}|null;
+ const frozen=execution.context as {libraryReferences?:unknown;libraryRetrieval?:unknown;voiceProfile?:{versionId?:unknown}}|null;
  const references=frozen?.libraryReferences;
- options.onContext?.({libraryReferences:Array.isArray(references)?references:undefined,libraryRetrieval:frozen?.libraryRetrieval===true});
+ options.onContext?.({libraryReferences:Array.isArray(references)?references:undefined,libraryRetrieval:frozen?.libraryRetrieval===true,
+  voiceBound:typeof frozen?.voiceProfile?.versionId==='string'});
 }
 export function executorRpc(options:{database:SessionRpc;actor:()=>Promise<string>;budget?:RuntimeBudget}) {
  return async function rpc<T>(name:string,args:Record<string,unknown>,database=options.database):Promise<T>{
@@ -131,7 +132,7 @@ export const preflightCodes=new Set([
  'BILL2_PROVIDER_MODEL_DENIED',
  'BILL2_PROVIDER_QUOTE_REQUIRED',
  'BILL2_PROVIDER_QUOTE_CONFLICT',
- 'PUBLISH_MONITOR_REVIEW_SOURCE_REQUIRED']);
+ 'PUBLISH_MONITOR_REVIEW_SOURCE_REQUIRED','VOICE_SOURCE_DELETED']);
 /** Graylum-side request failures that end the round with its charges restored (Owner 2026-10-12).
  * Time-budget exhaustion is excluded: that round resumes on the next request. */
 export function platformFailureReason(code:string|undefined):'provider_history'|'preflight'|undefined{
