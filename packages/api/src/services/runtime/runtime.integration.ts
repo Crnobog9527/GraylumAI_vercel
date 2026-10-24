@@ -1056,7 +1056,7 @@ it('RUNTIME: AC-0 router round trips per phase stay fixed for admission, Skill l
   const ordinaryWarm=await measured(c=>c.prepare({sessionId:warmSession,requestId:randomUUID(),input:'Please work',selection:{kind:'ordinary',modelId},network:'deny'}));
   // CHAT-LANGUAGE: every admission reads the profile's reply language once (profiles), concurrently with model loading.
   expect(phases(ordinaryWarm.summary)).toEqual({prelude:2,policy:0,host:0,admission:9,rateLimit:0});
-  expect(ordinaryWarm.summary.labels['rest/profiles']?.rt).toBe(1);
+  expect(ordinaryWarm.summary.labels['rest/profiles']?.rt).toBe(2); // the caller's profile check, plus the reply language
   const all={start,ordinary,stream,skill,execute,skillWarm};
   const counts=Object.fromEntries(Object.entries(all).map(([name,m])=>[name,phases(m.summary)]));
   // POSITIONING-GATE: free-chat admission adds one read (runtime_positioning_gate); this user has no positioning
@@ -1251,7 +1251,8 @@ it('RUNTIME: AC-1 opc.mentorTurnStream admits and streams a mentor turn in one i
   expect(label('rpc/runtime_session_context')).toEqual({oldPrepareOpening:3,oldStreamOpening:0,oldPrepareAnswer:3,oldStreamAnswer:0,opening:3,answer:3});
   // Auth verifies once per invocation, and again after each provider response.
   expect(label('auth/v1/user')).toEqual({oldPrepareOpening:1,oldStreamOpening:3,oldPrepareAnswer:1,oldStreamAnswer:3,opening:3,answer:3});
-  expect(label('rest/profiles')).toEqual({oldPrepareOpening:1,oldStreamOpening:1,oldPrepareAnswer:1,oldStreamAnswer:1,opening:1,answer:1});
+  // CHAT-LANGUAGE: each admission also reads the reply language; streaming an admitted execution does not.
+  expect(label('rest/profiles')).toEqual({oldPrepareOpening:2,oldStreamOpening:1,oldPrepareAnswer:2,oldStreamAnswer:1,opening:2,answer:2});
   for(const m of [opening,answer])expect(m.summary.executionIds).toEqual([m.result[0]!.executionId]);
  }finally{await provider.close();}
 });
