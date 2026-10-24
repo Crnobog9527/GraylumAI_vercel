@@ -13,6 +13,14 @@ export interface BenchmarkRow {
   category: BenchmarkCategory | null;
   qualified: boolean;
   metrics: Pick<AccountMetrics, "followers" | "medianViews" | "engagementRate" | "postsPerWeek" | "lastPublishedAt">;
+  /** Share of the fetched posts on the confirmed niche (BENCHMARK-COVERAGE), 0–1; null when it cannot be said. */
+  topicRelevance?: number | null;
+}
+
+/** "主题相关度：高" for at least half of the posts on the niche, 中 from a fifth, 低 below; nothing when unknown. */
+export function relevanceLabel(value: number | null | undefined): string | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return `主题相关度：${value >= 0.5 ? "高" : value >= 0.2 ? "中" : "低"}`;
 }
 
 export const CATEGORY_LABELS: Record<BenchmarkCategory, string> = {
