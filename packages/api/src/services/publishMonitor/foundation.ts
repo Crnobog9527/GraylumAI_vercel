@@ -31,7 +31,8 @@ export type PublishMonitorConnection = z.infer<typeof connectionSchema>;
 export const autoReviewInput = z.object({ enabled: z.boolean() }).strict();
 
 export type PublishMonitorErrorCode = 'PUBLISH_MONITOR_DISABLED' | 'PUBLISH_MONITOR_ACCOUNT_CLOSED'
-  | 'PUBLISH_MONITOR_CONNECTION_NOT_FOUND' | 'PUBLISH_MONITOR_UNAVAILABLE';
+  | 'PUBLISH_MONITOR_CONNECTION_NOT_FOUND' | 'PUBLISH_MONITOR_BUSINESS_NOT_FOUND' | 'PUBLISH_MONITOR_ACCOUNT_EXISTS_ELSEWHERE'
+  | 'PUBLISH_MONITOR_PLATFORM_HAS_ACCOUNT' | 'PUBLISH_MONITOR_BUSINESS_NOT_READY' | 'PUBLISH_MONITOR_UNAVAILABLE';
 export class PublishMonitorError extends Error {
   constructor(readonly code: PublishMonitorErrorCode) { super(code); }
 }
