@@ -116,7 +116,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   const invalidResponse=():never=>{replayFailureCode='RUNTIME_RESPONSE_INVALID';throw new Error(replayFailureCode);};
   const checkAgentReply=terminalReplyGuard(agentTurn,context.tools.includes(ASK_QUESTION_TOOL),()=>{
    terminalReplyFailure=true;replayFailureCode='RUNTIME_TERMINAL_REPLY';},
-   Boolean(context.skillFile),Boolean(context.historyRead),research?.tools.map(tool=>tool.name));
+   Boolean(context.skillFile),Boolean(context.historyRead),research?.tools);
   let preflightFailure:string|undefined,transportFailureCode:string|undefined,replayFailureCode:string|undefined;
   const streaming=streamsPrimary(context);
   // B2a: once BILL2 reports a confirmed erasure, nothing more reaches the client.
