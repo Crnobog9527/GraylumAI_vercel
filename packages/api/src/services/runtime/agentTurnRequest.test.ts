@@ -62,7 +62,7 @@ it.each(['ordinary','opening','answer-card'] as const)('freezes a complete B2 H1
   expect(sent.tools[0].function).toMatchObject({strict:true,parameters:{additionalProperties:false,
    required:['intent','requestQuote','basisQuotes','question','options','recommended'],properties:{question:{minLength:1,maxLength:500},
     options:{minItems:2,maxItems:5,items:{properties:{text:{minLength:1,maxLength:200}}}},
-    recommended:{anyOf:[{type:'number'},{type:'null'}]}}}});
+    recommended:{type:['number','null']}}}});
  }
  expect(sent).not.toHaveProperty('parallel_tool_calls');expect(sent).not.toHaveProperty('tool_choice');
  expect(sent).toMatchSnapshot();
