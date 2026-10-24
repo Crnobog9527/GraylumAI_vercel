@@ -34,15 +34,25 @@ export function reportLibraryBacklog(
 }
 
 export type ErasureBacklog = { open: number; overError: number; overFatal: number; oldestConfirmedAt: string | null };
-/** Account erasures confirmed but not completed, read with the cron's service-role client. */
+/** Account erasures confirmed but not completed, counted in the database (no row-limit page can hide an old one). */
 export async function readErasureBacklog(client: SupabaseClient, now = Date.now()): Promise<ErasureBacklog> {
-  const { data, error } = await client.from('account_erasure_requests').select('confirmed_at').neq('stage', 'completed');
-  if (error) throw new Error('ERASURE_BACKLOG_UNAVAILABLE');
-  const times = (data ?? []).map(row => String(row.confirmed_at)).sort();
-  const older = (ms: number) => times.filter(t => now - Date.parse(t) > ms).length;
+  const open = () => client.from('account_erasure_requests');
+  const count = (olderThanMs?: number) => {
+    const query = open().select('confirmed_at', { count: 'exact', head: true }).neq('stage', 'completed');
+    return olderThanMs === undefined ? query : query.lt('confirmed_at', new Date(now - olderThanMs).toISOString());
+  };
+  const [all, overError, overFatal, oldest] = await Promise.all([
+    count(), count(ERASURE_BACKLOG_ERROR_MS), count(ERASURE_BACKLOG_FATAL_MS),
+    open().select('confirmed_at').neq('stage', 'completed').order('confirmed_at', { ascending: true }).limit(1),
+  ]);
+  if ([all, overError, overFatal, oldest].some(result => result.error)
+    || [all, overError, overFatal].some(result => typeof result.count !== 'number')) {
+    throw new Error('ERASURE_BACKLOG_UNAVAILABLE');
+  }
+  const first = (oldest.data ?? [])[0] as { confirmed_at?: string } | undefined;
   return {
-    open: times.length, overError: older(ERASURE_BACKLOG_ERROR_MS), overFatal: older(ERASURE_BACKLOG_FATAL_MS),
-    oldestConfirmedAt: times[0] ?? null,
+    open: all.count as number, overError: overError.count as number, overFatal: overFatal.count as number,
+    oldestConfirmedAt: first?.confirmed_at ? String(first.confirmed_at) : null,
   };
 }
 

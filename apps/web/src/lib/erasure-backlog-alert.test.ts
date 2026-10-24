@@ -28,21 +28,42 @@ it('raises the library backlog with counts only, fatal once a deletion is past 2
   });
 });
 
-it('reads only unfinished erasures and counts the 12 h and 20 h marks', async () => {
-  const neq = vi.fn().mockResolvedValue({ data: [
-    { confirmed_at: ago(ERASURE_BACKLOG_FATAL_MS + 60_000) }, { confirmed_at: ago(ERASURE_BACKLOG_ERROR_MS + 60_000) },
-    { confirmed_at: ago(60_000) },
-  ], error: null });
-  const select = vi.fn(() => ({ neq }));
-  const from = vi.fn(() => ({ select }));
-  const backlog = await readErasureBacklog({ from } as never, now);
-  expect(from).toHaveBeenCalledWith('account_erasure_requests');
-  expect(select).toHaveBeenCalledWith('confirmed_at');
-  expect(neq).toHaveBeenCalledWith('stage', 'completed');
-  expect(backlog).toEqual({ open: 3, overError: 2, overFatal: 1, oldestConfirmedAt: ago(ERASURE_BACKLOG_FATAL_MS + 60_000) });
+// A fake PostgREST builder that applies the filters the code sends, so counts come from the "database" side.
+function fakeBacklogClient(times: string[], fail = false) {
+  const calls: unknown[][] = [];
+  const builder = (head: boolean) => {
+    let rows = [...times];
+    const query = {
+      neq: (column: string, value: string) => { calls.push(['neq', column, value]); return query; },
+      lt: (column: string, value: string) => { calls.push(['lt', column, value]); rows = rows.filter(t => t < value); return query; },
+      order: (column: string, options: object) => { calls.push(['order', column, options]); rows.sort(); return query; },
+      limit: (n: number) => { calls.push(['limit', n]); rows = rows.slice(0, n); return query; },
+      then: (resolve: (value: unknown) => void) => resolve(fail ? { data: null, count: null, error: { message: 'private detail' } }
+        : head ? { data: null, count: rows.length, error: null } : { data: rows.map(t => ({ confirmed_at: t })), error: null }),
+    };
+    return query;
+  };
+  const client = { from: (table: string) => {
+    calls.push(['from', table]);
+    return { select: (column: string, options?: { head?: boolean }) => { calls.push(['select', column, options]); return builder(Boolean(options?.head)); } };
+  } };
+  return { calls, client: client as never };
+}
+
+it('counts unfinished erasures in the database, beyond any one page, with the oldest first', async () => {
+  const recent = Array.from({ length: 1499 }, (_, i) => ago(60_000 + i));
+  const { calls, client } = fakeBacklogClient([...recent, ago(ERASURE_BACKLOG_FATAL_MS + 60_000)]);
+  const backlog = await readErasureBacklog(client, now);
+  expect(backlog).toEqual({ open: 1500, overError: 1, overFatal: 1, oldestConfirmedAt: ago(ERASURE_BACKLOG_FATAL_MS + 60_000) });
+  expect(calls).toContainEqual(['from', 'account_erasure_requests']);
+  expect(calls.filter(call => call[0] === 'neq').every(call => call[1] === 'stage' && call[2] === 'completed')).toBe(true);
+  expect(calls).toContainEqual(['select', 'confirmed_at', { count: 'exact', head: true }]);
+  expect(calls).toContainEqual(['lt', 'confirmed_at', ago(ERASURE_BACKLOG_ERROR_MS)]);
+  expect(calls).toContainEqual(['lt', 'confirmed_at', ago(ERASURE_BACKLOG_FATAL_MS)]);
+  expect(calls).toContainEqual(['order', 'confirmed_at', { ascending: true }]);
   expect(reportErasureBacklog(backlog, now)).toBe('fatal');
   expect(sentry.captureMessage).toHaveBeenCalledWith('ERASURE_BACKLOG', expect.objectContaining({
-    level: 'fatal', extra: { open: 3, over12h: 2, over20h: 1, oldestHours: 20 },
+    level: 'fatal', extra: { open: 1500, over12h: 1, over20h: 1, oldestHours: 20 },
   }));
 });
 
@@ -52,9 +73,7 @@ it('alerts erasures at 12 hours as error and stays quiet before that', () => {
 });
 
 it('fails closed when the backlog cannot be read', async () => {
-  const neq = vi.fn().mockResolvedValue({ data: null, error: { message: 'private detail' } });
-  await expect(readErasureBacklog({ from: () => ({ select: () => ({ neq }) }) } as never, now))
-    .rejects.toThrow('ERASURE_BACKLOG_UNAVAILABLE');
+  await expect(readErasureBacklog(fakeBacklogClient([], true).client, now)).rejects.toThrow('ERASURE_BACKLOG_UNAVAILABLE');
 });
 
 it('both codes pass the Sentry scrubber as their fixed message', () => {
