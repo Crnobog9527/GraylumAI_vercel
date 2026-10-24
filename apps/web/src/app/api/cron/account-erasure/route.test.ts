@@ -1,11 +1,12 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
-const mocks = vi.hoisted(() => ({ auth: vi.fn(), create: vi.fn(), recover: vi.fn(), sweep: vi.fn() }));
+const mocks = vi.hoisted(() => ({ auth: vi.fn(), create: vi.fn(), recover: vi.fn(), sweep: vi.fn(), read: vi.fn(), report: vi.fn() }));
 vi.mock('@/lib/cron-auth', () => ({ validateCronRequest: mocks.auth }));
 vi.mock('@supabase/supabase-js', () => ({ createClient: mocks.create }));
 vi.mock('@repo/api/src/services/accountErasure/executor', () => ({ runAccountErasureExecutor: mocks.recover }));
 vi.mock('@repo/api/src/services/accountErasure/content', () => ({ sweepErasedConversations: mocks.sweep }));
+vi.mock('@/lib/erasure-backlog-alert', () => ({ readErasureBacklog: mocks.read, reportErasureBacklog: mocks.report }));
 import { GET } from './route';
 afterEach(() => vi.unstubAllEnvs());
 beforeEach(() => {
@@ -15,6 +16,7 @@ beforeEach(() => {
   mocks.create.mockReturnValue({ synthetic: true });
   mocks.recover.mockResolvedValue({ processed: 1, completed: 1, pending: 0, failed: 0 });
   mocks.sweep.mockResolvedValue({ cleaned: 2, pending: 0, failed: 0, more: false });
+  mocks.read.mockResolvedValue({ open: 0, overError: 0, overFatal: 0, oldestConfirmedAt: null });
 });
 it('denies unauthenticated cron before inventory or provider work', async () => {
   mocks.auth.mockReturnValue(new Response('Unauthorized', { status: 401 }));
@@ -81,4 +83,14 @@ it('reports cleanup retry as pending rather than success', async () => {
 it('runs every 5 minutes (Pro) so deletion finishes within the 24-hour promise', () => {
   const config = JSON.parse(readFileSync('vercel.json', 'utf8'));
   expect(config.crons).toContainEqual({ path: '/api/cron/account-erasure', schedule: '*/5 * * * *' });
+});
+it('reports the unfinished-erasure backlog after the run, and an unreadable backlog does not fail the run', async () => {
+  const backlog = { open: 2, overError: 1, overFatal: 0, oldestConfirmedAt: '2026-10-23T20:00:00Z' };
+  mocks.read.mockResolvedValue(backlog);
+  expect((await GET(new Request('https://synthetic.test/api/cron/account-erasure'))).status).toBe(200);
+  expect(mocks.read).toHaveBeenCalledWith({ synthetic: true });
+  expect(mocks.report).toHaveBeenCalledWith(backlog);
+  mocks.report.mockClear(); mocks.read.mockRejectedValue(new Error('ERASURE_BACKLOG_UNAVAILABLE'));
+  expect((await GET(new Request('https://synthetic.test/api/cron/account-erasure'))).status).toBe(200);
+  expect(mocks.report).not.toHaveBeenCalled();
 });
