@@ -211,6 +211,13 @@ export function databaseRuntimeResearchStore(deps: {
       a, s, e, p_confirmation: confirmationId, p_platforms: platforms,
     }),
     discoveryRead: (id: string) => read<DiscoveryRecord | null>('discovery', id),
+    /** The keywords the user confirmed on this session's keyword cards (BENCHMARK-COVERAGE relevance); read only. */
+    async sessionKeywords(): Promise<string[]> {
+      const cards = await rpc<Array<{ kind?: unknown; items?: unknown }>>('research_user_cards', { a, s });
+      const found = (Array.isArray(cards) ? cards : []).filter(card => card.kind === 'keywords' && Array.isArray(card.items))
+        .flatMap(card => (card.items as unknown[]).filter((item): item is string => typeof item === 'string'));
+      return [...new Set(found)].slice(0, 40);
+    },
     discoverySave: (id: string, cursor: Record<string, unknown>, state: DiscoveryRecord['state']) =>
       rpc<DiscoveryRecord>('research_discovery_save', { a, s, p_discovery: id, p_cursor: cursor, p_state: state }),
     async selectedAccounts(discoveryId: string): Promise<CanonicalAccount[]> {
@@ -252,4 +259,6 @@ export function databaseRuntimeResearchStore(deps: {
     },
   };
 }
-export type RuntimeResearchStore = ReturnType<typeof databaseRuntimeResearchStore>;
+type DatabaseStore = ReturnType<typeof databaseRuntimeResearchStore>;
+/** `sessionKeywords` is optional: a store without it simply computes no topic relevance. */
+export type RuntimeResearchStore = Omit<DatabaseStore, 'sessionKeywords'> & Partial<Pick<DatabaseStore, 'sessionKeywords'>>;

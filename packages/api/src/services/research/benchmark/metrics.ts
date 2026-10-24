@@ -94,7 +94,8 @@ function newestPosts(posts: EvidenceItem[], time: (item: EvidenceItem) => number
 }
 
 /** One entry per post id, the first in supplier order (0268 counts the same way): a repeated post is not more posts. */
-function distinctPosts(posts: EvidenceItem[]): EvidenceItem[] {
+/** Each post once: a supplier may repeat one on a page (posts without an id are kept). */
+export function distinctPosts(posts: EvidenceItem[]): EvidenceItem[] {
   const seen = new Set<string>();
   return posts.filter(post => {
     const id = post.fields.id;

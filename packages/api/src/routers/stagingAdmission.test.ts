@@ -139,12 +139,17 @@ describe('remote staging admission and HTTP error boundary', () => {
     const owned = { sessionId: actor, scope: { kind: 'positioning_draft' }, activeExecution: null, executions: [] };
     const view = async (denied: boolean) => {
       rpc.mockImplementation(async (name: string) => ({ data: name === 'runtime_test_policy' ? policy : name === 'runtime_test_actor_access' ? true
-        : name === 'runtime_view' && !denied ? owned : null, error: name === 'runtime_view' && denied ? { code: 'P0001', message: 'RUNTIME_SCOPE_DENIED' } : null }));
+        : name === 'runtime_view_with_work_items' && !denied ? { view: owned, workItems: {} } : null,
+        error: name === 'runtime_view_with_work_items' && denied ? { code: 'P0001', message: 'RUNTIME_SCOPE_DENIED' } : null }));
       const url = 'http://localhost/api/trpc/runtime.view?input=' + encodeURIComponent(JSON.stringify({ sessionId: actor }));
       return fetchRequestHandler({ endpoint: '/api/trpc', req: new Request(url), router: app, createContext: () => context() });
     };
     const allowed = await view(false);
     expect(allowed.status).toBe(200);
+    // DB-PERF PR-5a: the view and its work rows are one call.
+    expect(rpc.mock.calls.map(([name]) => name).filter(name => String(name).startsWith('runtime_view')))
+      .toEqual(['runtime_view_with_work_items']);
+    expect(rpc.mock.calls.map(([name]) => name)).not.toContain('runtime_work_items');
     expect((await allowed.json()).result.data).toMatchObject({ sessionId: actor, mode: 'staging_test' });
     const refused = await view(true);
     expect(refused.status).toBe(404);
@@ -251,6 +256,29 @@ describe('downstream real-model admission after a valid remote window',()=>{
    :name==='runtime_financial_recovery'?{data:null,error:{message:'RUNTIME_EXECUTION_STILL_ALLOWED'}}
    :{data:null,error:{code:'42501',message:name==='runtime_test_policy'?'RUNTIME_TEST_WINDOW_DENIED':'RUNTIME_TEST_RECOVERY_DENIED'}});
   const response=await post('runtime.execute',{executionId:actor});expect(response.status).toBe(403);expect((await response.json()).error.message).toContain('无法恢复');
+ });
+ it('DB-PERF PR-5a: an execution route loads the window policy once for itself and the execution; refusals are unchanged',async()=>{
+  const names=()=>rpc.mock.calls.map(([name])=>name);
+  // Allowed: an open window admits the actor, so the read access check is implied and not run; the execution does not reload it.
+  await post('runtime.execute',{executionId:actor});
+  expect(names().filter(name=>name==='runtime_test_policy')).toHaveLength(1);
+  expect(names()).not.toContain('runtime_test_actor_access');
+  // Closed window, allowed reader: the route runs the read check as before and the execution takes the recovery path.
+  rpc.mockClear();
+  rpc.mockImplementation(async(name:string)=>name==='runtime_test_actor_access'?{data:true,error:null}
+   :name==='runtime_financial_recovery'?{data:null,error:{message:'RUNTIME_EXECUTION_STILL_ALLOWED'}}
+   :{data:null,error:{code:'42501',message:name==='runtime_test_policy'?'RUNTIME_TEST_WINDOW_DENIED':'RUNTIME_TEST_RECOVERY_DENIED'}});
+  expect((await post('runtime.execute',{executionId:actor})).status).toBe(403);
+  expect(names().filter(name=>name==='runtime_test_policy')).toHaveLength(1);
+  expect(names().filter(name=>name==='runtime_test_actor_access')).toHaveLength(1);
+  // Refused reader: the same refusal as before, and nothing of the execution is touched.
+  rpc.mockClear();
+  rpc.mockImplementation(async(name:string)=>({data:null,error:{code:'42501',message:name==='runtime_test_policy'?'RUNTIME_TEST_WINDOW_DENIED':'RUNTIME_TEST_ACTOR_DENIED'}}));
+  for(const path of ['runtime.execute','runtime.resume']){
+   const response=await post(path,path==='runtime.resume'?{executionId:actor,resumeToken:actor}:{executionId:actor});
+   expect(response.status).toBe(403);expect((await response.json()).error.message).toContain('账号未获准');
+  }
+  expect(names().filter(name=>!['runtime_test_policy','runtime_test_actor_access'].includes(String(name)))).toEqual([]);
  });
  it('preserves bounded OPC recovery refusals and sanitizes unexpected downstream exceptions',async()=>{
   mocks.prepareStep.mockRejectedValueOnce(new Error('OPC_ANSWER_SOURCE_DENIED'));
