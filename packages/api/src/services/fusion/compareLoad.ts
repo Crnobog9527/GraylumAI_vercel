@@ -9,6 +9,7 @@ import { compareRpc } from './compareAdmission';
 import { compareRequest, compareRequestBytes, type CompareParts } from './compareSnapshot';
 import type { CompareChoice } from './compareStart';
 import { FUSION_INPUT_CAP } from './request';
+import { readReplyLocale } from '../runtime/replyLanguage';
 
 /** What the browser sends to estimate or start a compare: the same Skill selection field as an ordinary turn. */
 export const compareSkillInput = z.object({ kind: z.literal('skill'), moduleId: z.string().uuid(), revisionId: z.string().uuid(),
@@ -94,12 +95,12 @@ export async function loadCompareChoice(deps: { admin: SupabaseClient; user: Sup
   // A turn is running in the main conversation: its answer is not in the history yet, so a compare now would answer
   // a different conversation than the user sees once it lands.
   if (context.busy) throw new Error('FUSION_COMPARE_SESSION_BUSY');
-  const [skill, workspace] = await Promise.all([
+  const [skill, workspace, replyLocale] = await Promise.all([
     input.skill ? loadSkill(admin, deps.user, input.skill) : null,
-    loadWorkspace(admin, actorId, input.sessionId)]);
+    loadWorkspace(admin, actorId, input.sessionId), readReplyLocale(admin, actorId)]);
   const history = context.items.map(row => historyTurn(row.item)).filter((turn): turn is NonNullable<typeof turn> => turn !== null);
   const parts = fitHistory({ skill, positioningFallback: false, history, scopeMaterial: context.scopeMaterial ?? undefined,
-    workspace, references: [], question: input.question });
+    workspace, references: [], question: input.question, replyLocale });
   return { sessionId: input.sessionId, historyRevision: context.revision, modelIds: input.modelIds, parts,
     materialRevision: context.materialRevision };
 }

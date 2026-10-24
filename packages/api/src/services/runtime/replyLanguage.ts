@@ -30,15 +30,18 @@ const LOCALE_OF = Object.fromEntries(Object.entries(REPLY_LANGUAGE_SETTINGS).map
 export const frozenReplyLocale = (value: unknown): ReplyLocale | undefined =>
   typeof value === 'string' && Object.hasOwn(LOCALE_OF, value) ? LOCALE_OF[value] : undefined;
 
-/** The user's reply language for a new execution: its frozen value and host rule. An unreadable profile refuses the turn
- * instead of guessing a language. Started early and awaited later, so a rejection is never left unhandled meanwhile. */
+/** The language set in the user's profile (Simplified Chinese when none). An unreadable profile throws: a turn is refused
+ * instead of guessing a language. */
+export async function readReplyLocale(admin: SupabaseClient, profileId: string): Promise<ReplyLocale> {
+  const { data, error } = await admin.from('profiles').select('reply_language').eq('id', profileId).single();
+  if (error) stagingRpcFailure(error);
+  return effectiveReplyLocale((data as { reply_language?: unknown } | null)?.reply_language);
+}
+
+/** A new execution's frozen value and host rule. Started early and awaited later, so a rejection is never left unhandled. */
 export function readReplySetting(admin: SupabaseClient, profileId: string): Promise<{ setting: FrozenReplySetting; rule: string }> {
-  const read = (async () => {
-    const { data, error } = await admin.from('profiles').select('reply_language').eq('id', profileId).single();
-    if (error) stagingRpcFailure(error);
-    const locale = effectiveReplyLocale((data as { reply_language?: unknown } | null)?.reply_language);
-    return { setting: REPLY_LANGUAGE_SETTINGS[locale], rule: replySettingInstructions(locale) };
-  })();
+  const read = readReplyLocale(admin, profileId)
+    .then(locale => ({ setting: REPLY_LANGUAGE_SETTINGS[locale], rule: replySettingInstructions(locale) }));
   read.catch(() => {});
   return read;
 }

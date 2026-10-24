@@ -19,11 +19,15 @@ import { FUSION_INPUT_CAP } from './request';
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const user = (text: string) => ({ role: 'user', content: text });
 const assistant = (text: string) => ({ role: 'assistant', status: 'completed', content: [{ type: 'output_text', text }] });
-const load = (patch = {}) => loadCompareChoice({ admin: {} as SupabaseClient, user: {} as SupabaseClient, actorId: id(1) },
+// The profile read of the reply language (Owner 2026-10-24); null means none set.
+let replyLanguage: string | null = null;
+const profileRead = { select: () => profileRead, eq: () => profileRead, single: async () => ({ data: { reply_language: replyLanguage }, error: null }) };
+const admin = { from: (table: string) => { expect(table).toBe('profiles'); return profileRead; } } as unknown as SupabaseClient;
+const load = (patch = {}) => loadCompareChoice({ admin, user: {} as SupabaseClient, actorId: id(1) },
   { sessionId: id(2), question: '哪个好？', modelIds: [id(3), id(4)], ...patch });
 
 beforeEach(() => {
-  s.rpcs = []; s.workspace = false; s.sources = {};
+  s.rpcs = []; s.workspace = false; s.sources = {}; replyLanguage = null;
   s.context = { revision: 4, busy: false, materialRevision: 'm-4', scopeMaterial: null,
     items: [{ revision: 1, item: user('第一问') }, { revision: 2, item: { type: 'function_call', name: 'search' } },
       { revision: 3, item: assistant('第一答') }] };
@@ -44,7 +48,14 @@ describe('compare loading (FUSION-COMPARE §3.2)', () => {
     expect(s.rpcs[0]).toEqual(['fusion_compare_context', { p_actor_id: id(1), p_session_id: id(2), p_limit: 200 }]);
     expect(choice).toMatchObject({ sessionId: id(2), historyRevision: 4, materialRevision: 'm-4', modelIds: [id(3), id(4)] });
     expect(choice.parts).toMatchObject({ skill: null, positioningFallback: false, workspace: [], references: [], question: '哪个好？',
-      history: [{ role: 'user', text: '第一问' }, { role: 'assistant', text: '第一答' }] });
+      history: [{ role: 'user', text: '第一问' }, { role: 'assistant', text: '第一答' }], replyLocale: 'zh-Hans' });
+  });
+
+  it('freezes the language set in the profile into the snapshot', async () => {
+    replyLanguage = 'en';
+    expect((await load()).parts.replyLocale).toBe('en');
+    replyLanguage = 'zh-Hant';
+    expect((await load()).parts.replyLocale).toBe('zh-Hant');
   });
 
   it('refuses while a turn of the main conversation is running', async () => {
@@ -69,6 +80,7 @@ describe('compare loading (FUSION-COMPARE §3.2)', () => {
   it('drops the oldest turns until the request fits the per-call cap, never the question', () => {
     const big = 'x'.repeat(30000);
     const parts = { skill: null, positioningFallback: false, scopeMaterial: undefined, workspace: [], references: [], question: '问题',
+      replyLocale: 'zh-Hans' as const,
       history: [{ role: 'user' as const, text: big }, { role: 'assistant' as const, text: big }, { role: 'user' as const, text: big },
         { role: 'assistant' as const, text: 'short' }] };
     const fitted = fitHistory(parts);

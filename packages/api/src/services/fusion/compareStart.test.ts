@@ -43,7 +43,7 @@ const refusePositioning = (): never => { throw new Error('POSITIONING_REQUIRED')
 const rateLimit = vi.fn();
 const deps = (): CompareDeps => ({ admin, actorId: id(50), refusePositioning, decisionsKey: async () => 'k', classify, rateLimit });
 const parts = (patch: Partial<CompareParts> = {}): CompareParts => ({ skill: null, positioningFallback: false, history: [], workspace: [],
-  references: [], question: '哪个更好？', ...patch });
+  references: [], question: '哪个更好？', replyLocale: 'zh-Hans', ...patch });
 const choice = (patch: Partial<CompareParts> = {}) => ({ sessionId: id(61), historyRevision: 4, modelIds: [id(1), id(2)], parts: parts(patch), materialRevision: '0:none' });
 const shown = { credits: 20, columns: [{ modelId: id(1), credits: 10, usd: '0.01' }, { modelId: id(2), credits: 10, usd: '0.01' }] };
 const start = (patch: Partial<CompareParts> = {}, extra: Record<string, unknown> = {}) =>
