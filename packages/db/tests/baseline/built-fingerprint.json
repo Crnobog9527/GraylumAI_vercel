@@ -3900,7 +3900,7 @@
   "fn:research_billing_summary(timestamp with time zone,timestamp with time zone)": "0b49f98c3209",
   "fn:research_cancel(uuid,uuid)": "eed19976d2ba",
   "fn:research_card_confirm(uuid,uuid,jsonb)": "6570eed06955",
-  "fn:research_card_create(uuid,uuid,uuid,uuid,jsonb)": "69885b0cc7a2",
+  "fn:research_card_create(uuid,uuid,uuid,uuid,jsonb)": "cf25ae59b2c3",
   "fn:research_chat_benchmark_accounts(uuid,uuid,uuid)": "ce2369d357f0",
   "fn:research_confirmation_read(uuid,uuid,uuid)": "898632f62746",
   "fn:research_discovery_save(uuid,uuid,uuid,jsonb,text)": "040af686a299",
