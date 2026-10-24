@@ -367,6 +367,10 @@
           "plain": "为英文用户准备：Skill 界面文字可配英文，AI 按用户语言回答。"
         },
         {
+          "name": "CHAT-LANGUAGE",
+          "plain": "个人中心选简体、繁體或英文，AI 就用这个语言回复。"
+        },
+        {
           "name": "MODEL-IDENTITY-GUARD",
           "plain": "用户看不到真实模型品牌和型号，问到或越狱时统一回复品牌话术。"
         },
