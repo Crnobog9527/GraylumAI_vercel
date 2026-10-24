@@ -4,7 +4,7 @@ import {contentVisibilityFence} from '../accountErasure/content';
 import {StagingAccessError,stagingProcedureError,stagingRpcFailure} from './stagingErrors';
 
 /** The frozen context fields the fence needs; the executor reports them before it can emit anything. */
-export type ObservedContext={libraryReferences?:unknown[];libraryRetrieval?:boolean};
+export type ObservedContext={libraryReferences?:unknown[];libraryRetrieval?:boolean;voiceBound?:boolean};
 export type ExecutionVisibility={visible:()=>Promise<void>;observe:(context:ObservedContext)=>void};
 
 /**
@@ -18,11 +18,21 @@ export type ExecutionVisibility={visible:()=>Promise<void>;observe:(context:Obse
  */
 export function executionVisibility(database:SupabaseClient,actorId:string,executionId:string):ExecutionVisibility{
  const content=contentVisibilityFence(database,actorId,executionId);
- let referenced=false;
+ let referenced=false,voiceBound=false;
  return {
-  observe(context){if(context.libraryReferences?.length||context.libraryRetrieval)referenced=true;},
+  observe(context){if(context.libraryReferences?.length||context.libraryRetrieval)referenced=true;if(context.voiceBound)voiceBound=true;},
   async visible(){
    await content();
+   // VOICE (Owner 2026-10-23: a deleted voice must not be used, not even by the run in progress): a run bound to a
+   // voice version also stops being shown at once when that version is deleted.
+   if(voiceBound){
+    const voiceGone=await database.rpc('runtime_voice_sources_gone',{p_actor_id:actorId,p_execution_ids:[executionId]});
+    try{if(voiceGone.error)stagingRpcFailure(voiceGone.error);}
+    catch(cause){throw stagingProcedureError(cause,'runtime.voiceVisibility');}
+    if(!Array.isArray(voiceGone.data)||voiceGone.data.length)
+     // The page already ends the stream and withdraws the text on this code.
+     throw stagingProcedureError(new StagingAccessError('LIB_SOURCE_DELETED'),'runtime.voiceVisibility');
+   }
    if(!referenced)return;
    const gone=await database.rpc('runtime_library_sources_gone',{p_actor_id:actorId,p_execution_ids:[executionId]});
    try{if(gone.error)stagingRpcFailure(gone.error);}
