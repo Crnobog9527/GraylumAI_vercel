@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// BENCHMARK-COVERAGE keyword cards (0350 on 0263/0343): a keyword card offers 3–10 keywords and may be confirmed with up
+// BENCHMARK-COVERAGE keyword cards (0356 on 0263/0343): a keyword card offers 3–10 keywords and may be confirmed with up
 // to 10; candidate cards keep their rules. Synthetic fixtures only.
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
@@ -25,11 +25,11 @@ export async function keywordCardCases({db,check,rpc,seed,answer}) {
   });
 
   await check('KEYWORDS the patch is repeatable and leaves the candidate rules alone', async () => {
-    const migration = readFileSync(new URL('../../migrations/0350_research_keyword_cards.sql',import.meta.url),'utf8');
+    const migration = readFileSync(new URL('../../migrations/0356_research_keyword_cards.sql',import.meta.url),'utf8');
     const definition = async () => (await db.query(
       "SELECT pg_get_functiondef('public.research_card_create(uuid,uuid,uuid,uuid,jsonb)'::regprocedure) d")).rows[0].d;
     const before = await definition();
-    assert.ok(before.includes('-- 0350 keywords'));
+    assert.ok(before.includes('-- 0356 keywords'));
     await db.query(migration);
     assert.equal(await definition(),before);
     // The candidate rules are untouched (0263's 8–12 for a running discovery, 0343's small-niche exception if present).

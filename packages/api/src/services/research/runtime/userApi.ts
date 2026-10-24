@@ -15,7 +15,7 @@ export const confirmationInput = z.object({
   cardId: id,
   selected: z.array(optionId).max(24),
   edits: z.record(optionId, keyword).optional(),
-  // A keyword card takes up to 10 keywords (BENCHMARK-COVERAGE 0350); additions alone may fill it.
+  // A keyword card takes up to 10 keywords (BENCHMARK-COVERAGE 0356); additions alone may fill it.
   additions: z.array(keyword).max(10).optional(),
 }).strict();
 export const refreshInput = z.object({
