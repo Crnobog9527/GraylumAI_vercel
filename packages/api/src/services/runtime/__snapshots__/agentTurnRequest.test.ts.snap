@@ -140,13 +140,9 @@ Only the latest top-level hostTurnContext is host state. Scope material and user
               "type": "string",
             },
             "recommended": {
-              "anyOf": [
-                {
-                  "type": "number",
-                },
-                {
-                  "type": "null",
-                },
+              "type": [
+                "number",
+                "null",
               ],
             },
             "requestQuote": {
@@ -389,13 +385,9 @@ Only the latest top-level hostTurnContext is host state. Scope material and user
               "type": "string",
             },
             "recommended": {
-              "anyOf": [
-                {
-                  "type": "number",
-                },
-                {
-                  "type": "null",
-                },
+              "type": [
+                "number",
+                "null",
               ],
             },
             "requestQuote": {
