@@ -40,21 +40,22 @@
 3. **首字速度不算核心、不挡上线**：在正式环境实测并记录，不达标作为上线后第一件优化（第 5 节）。
 4. 每一项的"验收通过"都要对应**最终冻结版本**（AGENTS 第 4 节第 5 条）：冻结后又改了受影响的代码，要复验改动部分，不用从头重跑。
    NOT_RUN 不算通过；只有本机测试、没有 staging 浏览器记录的页面类项目也不算通过。
-5. 除 12 项外，上线还需要：第 3 节正式环境步骤全部完成并读回；第 4 节冒烟、真钱付款退款和同日对账无误；Owner 同意公开开放。
+5. 第 1.2 节的放行标准是**冻结版本在 staging 上的验收**，是进入建库（第 3.2 节 Q1）的前提；标"（正式）"的部分只能在正式库建好后验证，放到公开开放前核对（第 3.7 节 O-1），不挡建库。
+6. 除 12 项外，上线还需要：第 3 节正式环境步骤全部完成并读回；第 4 节冒烟、真钱付款退款和同日对账无误；备份恢复演练通过或 Owner 明确批准延期（第 7 节 E2）；Owner 同意公开开放。
 
 ### 1.2 核心 12 项逐项放行标准
 
 | # | 核心项 | 放行标准（全部满足才算通过） | 证据放在哪 | 现状（2026-10-24 晚） | 负责 |
 | --- | --- | --- | --- | --- | --- |
 | 1 | 定位三步 + 报告 | ① 新账号从第 1 步走到报告定稿；② 对标：合格 ≥3 才出报告，小众领域扫完不足 8 个也出 1–7 个候选卡，两轮不足 3 个时可选"用现有对标生成、报告注明样本不足"（兜底 B）真实触发一次；③ 对标加深（关键词、按需翻页、自动续扫、YouTube 约数）按 [BENCHMARK_COVERAGE_PLAN](../implementation/BENCHMARK_COVERAGE_PLAN.md) 验收；④ 第 2 步停止不卡、刷新后接回；⑤ 报告扣费一次、双击只扣一次、生成中停止全额退回、生成中刷新接回、导出可用 | 兜底 B：[#1195](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1195) 验收记录；小卡 [#1296](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1296)；停止不卡 [#1272](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1272)；YouTube [#1297](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1297)；加深 [#1313](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1313)、[#1314](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1314)、[#1316](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1316)、[#1317](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1317)；重复请求修复 [#1298](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1298) | 主流程、停止不卡、YouTube 复验 PASS；兜底 B 两次没触发，等 #1296（0343）上库后重跑；加深 4 个 PR 在途（2 个草稿）；报告导出、停止退回、双击、刷新接回在冻结版本上没有新记录 | 对标加深窗口、小卡窗口；Codex |
-| 2 | 评审团 | ① Gold 完整走一轮（三位评审 + 汇总）并采用；② 非 Gold 看到"Gold 专属"、不能发起；③ 编辑定稿后再评审、第三轮行为；④ 失败时退款、页面不卡；⑤ 正式库准入档案含评审用途（第 3.4 节） | [FUSION-REVIEW](FUSION-REVIEW.md) 各 PR 验收记录 | 10-20 Gold 主流程 PASS；②–④ 在 10-23 后没有新记录 | 总控排窗口；Codex |
+| 2 | 评审团 | ① Gold 完整走一轮（三位评审 + 汇总）并采用；② 非 Gold 看到"Gold 专属"、不能发起；③ 编辑定稿后再评审、第三轮行为；④ 失败时退款、页面不卡；⑤（正式）正式库准入档案含评审用途（第 3.3 节 B4） | [FUSION-REVIEW](FUSION-REVIEW.md) 各 PR 验收记录 | 10-20 Gold 主流程 PASS；②–④ 在 10-23 后没有新记录 | 总控排窗口；Codex |
 | 3 | 我的文风 | ① 生成、确认、修改画像，按量扣一次；② 写稿时注入画像（含模型自行加载的写作 Skill）；③ 删除画像或来源立刻生效，进行中的那次写稿也作废；④ 4 个写作 Skill 勾"使用用户文风"；⑤ 写作 Skill 输出语言跟随用户沟通语言、【】只留给真实素材 | [#1259](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1259)、[#1262](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1262)、[#1266](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1266)、[#1305](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1305) 验收；[#1293](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1293)、[#1318](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1318)、[#1306](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1306) | ①② 9 步验收 PASS（一次发送分笔扣费是按模型调用分笔，设计如此）；③ #1293（0345）、#1318、#1306 在途，合并后复验 | 文风窗口、内容对话窗口；Codex |
 | 4 | 自由对话（资料库 + 模型自行加载 Skill） | ① 资料库 @ 引用和自动检索回答用到文档；② 说"写口播稿"会加载对应 Skill，同一轮最多 2 个，按当前对话模型计费、无匹配费；③ 定位、选题窗口、报告仍用后台绑定模型，"重做定位"不在自由对话里跑；④ 手动"技能"菜单可用 | 资料库：CHAT-AUTO-CONTEXT 验收记录；LOAD-SKILL：[#1285](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1285) 验收记录 | 资料库 10-20 PASS；#1285 已合并（0342 已上库），**还没有浏览器验收**；#1258 抽查结果未核实 | 内容对话窗口；Codex |
 | 5 | 付款和会员 | ① 银行卡订阅（月付、年付、创始年付、Gold 首月）结账开通；② 续费成功、续费失败宽限后取消、续费期退款规则；③ 微信、支付宝一次性会员和年付在沙盒付款成功和失败；④ 升级、改年付规则；⑤ 积分包只给会员；⑥ 付款前条款勾选 | PAY-STRIPE-MP、PAY-FOUNDER、PAY-NOTIFY 各 PR 验收；续费沙盒测试时钟记录；[#1302](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1302)、[#1304](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1304)、[#1307](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1307) | 续费成功、失败全链、续费外部退款在沙盒 PASS；创始 7 天宽限本机集成测试 PASS；钱包沙盒结果未核实；#1307 后台文案、#1304 回归抽查待页面复验；[#1299](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1299)（旧冒烟脚本）在途 | Codex；总控 |
 | 6 | 退款和拒付 | ① 用户申请 → 管理员报价 → 批准 → 执行，只退一次；② 积分已用的订单被拒、续费订单不退；③ 拒付冻结、停续费、判赢后手动撤回；④ 已退款续费单报价说明原因 | [#1104](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1104) 验收表、[#1152](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1152)、[#1155](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1155)、[#1253](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1253)、[#1307](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1307) | 退款主路径和拒付冻结此前 PASS；#1253 后台两栏、②、"上一期拒付 + 下一期续费并发"未核实 | Codex；上线当天真钱一笔见第 4 节 |
 | 7 | 注销 24 小时 | ① 真实注销一个现有测试账号，24 小时内正文和存储清完；② 删除定位对话不超时；③ 注销清理慢查询修好；④ 注销弹窗页面验收；⑤ 新表都接入注销审计 | 端到端结果表在 [#1292](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1292) 评论；[#1311](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1311)、[#1312](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1312) | ① PASS（约 3 小时清完）；②③⑤ 在途（0344、0349）；④ 浏览器提示词还没出 | DATA-ERASURE 窗口；Codex |
 | 8 | 注册登录 + 开户 500 积分 | ① 冻结版本上新邮箱从零注册（过 hCaptcha、邮件确认）→ 恰好 500 积分、一条流水；② 登录、找回密码邮件送达；③ Google 登录只发一次赠送 | 第 4 节冒烟记录；staging 回归记录 | 0230 已合并、此前单点验过；同邮箱重注册 Owner 说 10-12 已测，不再重测；①② 冻结版本上未跑 | Codex（人机验证由 Owner 点）；Owner |
-| 9 | 多模型对比 | ① 只给 Gold，非 Gold 看到"Gold 专属"；② 默认勾 Sonnet 5.5、Gemini 3.8 Flash、GPT-6.1 Sol，Opus 只在可选列表；③ 每次最多 3.5 美元；④ 新对话第一条消息就能对比；⑤ 出字后全部停止，已开始的列按部分计费、各列之和等于合计；⑥ 采用一列后对话继续；⑦ 正式库"正式模式准入"验证通过 | [#1260](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1260)、[#1270](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1270)、[#1273](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1273)、[#1309](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1309) 验收；[#1310](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1310)（0348，上库前后各跑一次 PR 评论里的比对 SQL） | 首轮 13 步有 5 步失败，修后复验部分通过；⑤ 没覆盖；④ #1310 在途；⑦ 正式路径从没测过 | 对比窗口；总控；Codex |
+| 9 | 多模型对比 | ① 只给 Gold，非 Gold 看到"Gold 专属"；② 默认勾 Sonnet 5.5、Gemini 3.8 Flash、GPT-6.1 Sol，Opus 只在可选列表；③ 每次最多 3.5 美元；④ 新对话第一条消息就能对比；⑤ 出字后全部停止，已开始的列按部分计费、各列之和等于合计；⑥ 采用一列后对话继续；⑦（正式）正式库"正式模式准入"验证通过（第 4.1 节 K6） | [#1260](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1260)、[#1270](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1270)、[#1273](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1273)、[#1309](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1309) 验收；[#1310](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1310)（0348，上库前后各跑一次 PR 评论里的比对 SQL） | 首轮 13 步有 5 步失败，修后复验部分通过；⑤ 没覆盖；④ #1310 在途；⑦ 正式路径从没测过 | 对比窗口；总控；Codex |
 | 10 | 作品复盘 + 一键发布 | 一键发布：① 从选题定稿、成果夹成果、"我的账号"里添加的品牌账号都能走到发布（添加账号要先有已确认定位）；② 不真发的 7 步验收通过；③ X、YouTube 各真实发布并查回一次（每次 Owner 当次批准）；④ 名单内平台开放（见第 7 节 E1）。作品复盘：⑤ 导入表格、按档位显示 30/90 天、每周自动复盘、单次上限 0.30 美元；前提不具备时整体关（第 1.1 节例外） | [#1263](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1263)、[#1261](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1261)、[#1267](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1267) 验收；[#1300](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1300)（0347）、[#1295](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1295) | 复盘关闭态和后台页 PASS；一键发布已合并但全库品牌账号 0 条、入口可能走不到，等 #1300、#1295；② 未跑；Post for Me 多平台计数回复未核实 | 一键发布窗口；Codex；Owner |
 | 11 | 自由对话研究工具 | ① 4 个场景真实调用并逐条扣费；② 删除整段对话后研究证据被清；③ TikHub 价格每日刷新和到期告警已上线；④ 三家供应商硬上限已设、后台勾"已设硬上限" | [#1264](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1264) 验收；[#1294](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1294)（0346） | ① PASS；② 等 #1292；③ #1294 在途；④ Owner 设 | 研究工具/对标窗口；Codex；Owner |
 | 12 | 成果夹 + 付费墙曝光 | ① 成果夹保存、查看、重复保存不重复；② 选题窗口里的成果（第 11 步）；③ 付费墙曝光事件 `paywall_view` 发出（GA4 上线后第一周才定，不发不挡上线，但要记录结果） | [#1268](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1268)、[#1269](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1269)、[#1288](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1288)、[#1255](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1255) | ① PASS；② 待补验；③ 未核实 | Codex |
@@ -127,7 +128,7 @@
 
 | # | 谁 | 做什么 | 怎么确认 |
 | --- | --- | --- | --- |
-| Q1 | 总控 | 确认第 1.2 节 12 项全部 PASS 且对应冻结版本；冻结版本的 CI、独立审查都对应同一个版本；`pnpm audit --audit-level high` 0 高危 | 记录贴在冻结版本的 PR 上 |
+| Q1 | 总控 | 确认第 1.2 节 12 项在 staging 上全部 PASS 且对应冻结版本（标"（正式）"的部分除外，见第 1.1 节第 5 条）；冻结版本的 CI、独立审查都对应同一个版本；`pnpm audit --audit-level high` 0 高危 | 记录贴在冻结版本的 PR 上 |
 | Q2 | 总控 | 准备**批准包**：正式项目、域名、冻结版本、迁移清单、每组配置值、各家上限金额（Owner 已设的读回值）、冒烟预算；没读过的正式事实标 NOT_RUN | 批准包发 Owner |
 | Q3 | ★ Owner 批准 | 同意冻结版本和批准包（第 6 节可复制句） | 总控记下 Owner 原话 |
 
@@ -140,6 +141,7 @@
 | B1 | ★ Owner 批准 → 总控 | `Graylum_main` 从空库建库：平台前置 → `packages/db/baseline`（0000）→ 全部迁移（同名 bridge 紧挨在迁移前）；**每个文件整段交给服务端执行，不用 `psql -f`** | 只读抓指纹，和 `built-fingerprint`、`expected-differences.json` 比对，没有解释不了的差异 |
 | B2 | ★ Owner 批准 → 总控 | 写正式库标记：`runtime_environment="production"`，读回 `runtime_production_database()` 为 true；正式库启用的测试窗口为 0（**绝不在 staging 写**） | 读回 |
 | B3 | ★ Owner 批准 → 总控 | 配置类数据：套餐（Pro $29 / 3,480、Gold $69 / 8,970，年付 $279 / $621，免费每月 0、每年 0）、积分包和会员折扣、`billing_credits_per_usd`=100、`billing_token_price_multiplier`=6、模型和线路（导入后在后台点"读取价格"，不从 staging 复制价格）、`runtime_purpose_budgets`、已发布的 Skill 和模块、输出上限 32768。不复制 staging 的测试账号、对话、订单、流水、沙盒编号、测试窗口 | 逐项读回 |
+| B3a | ★ Owner 确认 → 总控 | **首批创作 Skill 正式发布前，Owner 看过样例并单独确认**（Master Plan 第 2.1 节 2026-10-17：只豁免 staging 测试发布，正式版本仍须单独确认）。确认前这些 Skill 不在正式库发布（可以导入但保持未发布）；不能用"同意建库""同意上线"这类通用批准代替 | Owner 原话记在上线记录；正式后台 Skill 版本读回 |
 | B4 | ★ Owner 批准 → 总控 | 正式准入档案 `runtime_payg_production`（结构同 staging，去掉 windowId 和到期日；模型 id 字符串和线路可照抄取证，`ai_models` 的 uuid 要用正式库的）。**必须覆盖**：对话和报告模型（Claude、Gemini）；整理模型（`v3_summary_model_id` 指向 GPT-6 Luna）要有 `organizer` 用途、`serial-tools-v6-reasoning` 格式和报价（文风生成用它）；评审团三位评审和汇总；对比四个模型的 `fusion_compare` 用途和 `fusion-text-v1-stream` 格式；自由对话研究工具 `maxTools` ≥5、定位导师回合 ≥9；档案用途上限 9 | 读回；应急关闭写 `{"enabled":false}` |
 | B5 | ★ Owner 批准 → 总控 | 付款配置：`payment_terms_version`＝`{"version":"<已发布版本>"}`（对象）；Stripe 正式目录绑定写进 `payment_provider_refs`（第 3.6 节 S4 的 SQL，每个套餐/积分包/方式/周期恰好一条当前 live 映射）；`launch_baseline_at`（建库后、第一笔真钱前）；微信、支付宝 `annualVerified=true`（路由 `enabled` 仍关）；新购买渠道 `payment_method_routes.newPurchaseChannel` 缺省就是 `stripe`，读回即可（旧键 `payment_new_purchase_channel` 只剩后台旧面板读取，写不写不影响用户） | 逐个读回；会员页 `termsVersion` 不为空、可结账 |
 | B6 | ★ Owner 批准 → 总控 | 限流和停止：`runtime_rate_limits` 消息 10/分钟、200/天，调用 30/分钟、600/天，`stopNewCalls`＝开 | 读回 |
@@ -189,11 +191,11 @@
 
 ### 3.7 公开开放
 
-只有当第 4 节冒烟和同日对账无误、第 1.2 节 12 项 PASS 时才做；任何一项没过，维持冒烟日状态，修好后重新批准，不硬上。
+只有当第 4 节冒烟和同日对账无误、第 1.2 节 12 项 PASS（含标"（正式）"的部分）、备份恢复演练已通过或 Owner 已明确批准延期时才做；任何一项没过，维持冒烟日状态，修好后重新批准，不硬上。
 
 | # | 谁 | 做什么 | 怎么确认 |
 | --- | --- | --- | --- |
-| O-1 | 总控 | 开放前核对表：成本、扣款、平台承担、冻结释放、重复请求没有新派发；告警和停止开关可用；正式库里没有测试数据 | 每项 PASS / FAIL |
+| O-1 | 总控 | 开放前核对表：第 1.2 节标"（正式）"的部分已通过；备份恢复演练（[DATA_ERASURE_BACKUP_RESTORE_REPLAY](../../runbooks/DATA_ERASURE_BACKUP_RESTORE_REPLAY.md)）已通过，或有 Owner 明确批准延期的原话；成本、扣款、平台承担、冻结释放、重复请求没有新派发；告警和停止开关可用；正式库里没有测试数据 | 每项 PASS / FAIL；任何一项不过不开放 |
 | O-2 | ★ Owner 批准 → 总控 | 设 `SITE_INDEXING=public` **并重新部署**（构建时读，不重新部署不生效） | `/robots.txt` 放行搜索爬虫、拒绝训练爬虫；首页响应头没有 `X-Robots-Tag: noindex`；登录后页面仍有 noindex |
 | O-3 | ★ Owner 操作 | 撤掉部署访问保护；作废 S-3 的绕过口令并从回调地址上去掉 | 公众能打开首页；Stripe 回调仍成功 |
 | O-4 | ★ Owner 批准 → 总控 | 关掉 `stopNewCalls`，其他限流保持初始值 | 一个公开测试身份完成一次对话 |
@@ -273,6 +275,7 @@
 **冻结版本选定后**
 - 同意 REL-1 冻结版本 `<版本>` 和批准包 `<批准包链接>`。
 - 同意总控在 `Graylum_main` 按迁移文件从空库建库，写入正式库标记并读回，导入已核对的配置（套餐、积分包、q=100、m=6、模型和线路、免费套餐每月 0 积分）。
+- 我看过首批创作 Skill `<Skill 列表>` 的样例，同意在正式环境发布这些版本 `<版本>`。
 - 同意总控写入正式准入档案、付款条款版本 `<版本>`、对账起点 `<时间>`、钱包年付标记、Stripe 目录绑定，以及手册第 3.3 节 B6、B7 的限流和功能配置，并做 staging 对照的种子配置核对。
 - 同意总控设置 Vercel 正式环境的非密钥变量 `<变量清单>`，并给 `<管理员账号>` 授予管理员角色。
 - 我来在正式后台填好 7 个密钥槽和客服邮箱，并对照 Post for Me Webhook 共享密钥的末 4 位。
@@ -295,7 +298,7 @@
 | # | 事项 | 推荐 | 可复制 |
 | --- | --- | --- | --- |
 | E1 | 一键发布：Owner 定"Post for Me 支持的都开放"（TikTok 商业号不开放，名单：tiktok、instagram、youtube、facebook、x、threads、linkedin、pinterest、bluesky），但只有 X、YouTube 有测试账号能真实验收；Master Plan 第 2.1 节 2026-10-23（晚）条目写的是"没有测试账号或没通过的平台保持关闭并报 Owner 决定" | 上线前 X、YouTube 各真实发布验收一次；其余 7 个平台由 Owner 明确选：A 照原定一起开放，上线首周盯失败率；B 先只开 X、YouTube | 「一键发布选 `<A/B>`；上线前 X 和 YouTube 各真实发布验收一次，每次我当次批准。」 |
-| E2 | 完整的"恢复备份 → 重放删除"演练放上线前还是上线后（24 小时注销已用现有测试账号实测通过） | 上线后第一周，在单独的隔离演练项目里做（不接 Vercel、定时任务、付款回调） | 「备份恢复演练放到上线后第一周做。」 |
+| E2 | 完整的"恢复备份 → 重放删除"演练：按 [DATA_ERASURE_BACKUP_RESTORE_REPLAY](../../runbooks/DATA_ERASURE_BACKUP_RESTORE_REPLAY.md) 仍是公开开放前的门槛。**Owner 没批准延期之前，演练没通过就不开放**（第 3.7 节）。普通注销实测通过不能代替它（验的是删除，不是恢复备份后能否重放删除清单）。演练在单独的隔离项目里做（不接 Vercel、定时任务、付款回调），需要 Pro 套餐 | 有窗口建议延期到上线后第一周，这是放宽上线前检查，只有 Owner 能批；推荐上线前做 | 上线前做：「同意用单独的隔离演练项目在公开开放前演练一次备份恢复和删除重放，费用 `<金额>`。」；延期：「同意备份恢复演练延期到上线后第一周，在演练通过前接受恢复备份可能让已删内容复活的风险。」 |
 | E3 | Firecrawl 是否开通零保留 | Owner 看 Firecrawl 套餐后定，不挡上线 | — |
 
 ## 8. 旧版（2026-10-17）条目去向
@@ -321,7 +324,7 @@
 | A1 Vercel Pro、A2 定时任务、A2a、A5 Upstash | **已完成** → 第 3.0 节 |
 | A3 取消暂停、A6 限流、A9 Sentry | 保留 → S-1、B6、第 3.0 节 |
 | A4 `main` 依赖漏洞 | 保留 → M1 |
-| A8 备份恢复演练"10-31 公开开放的前提" | 改为待 Owner 定 → 第 7 节 E2 |
+| A8 备份恢复演练"公开开放的前提" | 保留为开放门槛 → 第 3.7 节、O-1；只有 Owner 明确批准才可延期 → 第 7 节 E2 |
 | B0 旧库不动 | 保留 → 第 0 节 |
 | B1–B3、B5、B6 建库和核对 | 保留 → B1、B3、B9 |
 | B2a–B2e 付款配置和种子核对 | 保留 → B5、B8；B2c 旧键 `payment_new_purchase_channel` **已取代**为新键缺省 stripe（[#1277](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1277) 后旧接口也服从新开关） |
@@ -342,7 +345,8 @@
 | D9 真钱付款退款、H4 小额冒烟 | 保留 → 第 4.1 节 K2、K8 |
 | E1 单主机 `/app` 代码 | **已完成**（#1206、#1225）；域名切换顺序保留 → S-2、S-4 |
 | E2 撤 307、E3 `SITE_INDEXING`、E4 搜索引擎 | 保留 → S-2、O-2、O-5 |
-| F1–F7、F9、F11 功能开关 | 保留 → B7；"没验收就关"的写法**已取代**（核心项不降级） |
+| F1–F7、F9 功能开关 | 保留 → B7；"没验收就关"的写法**已取代**（核心项不降级） |
+| F11 首批创作 Skill 正式版 Owner 看样例单独确认 | 保留 → B3a |
 | F8 落地页能力开关核对、H1 能力说法核对 | 保留：冻结版本上由总控逐条对照第 1.2 节验收结果，落地页写到的能力都要已验收 |
 | F10 数据使用同意卡片隐藏 | 保留：冻结版本回归时核对 |
 | G1–G3 数据保留、MODERATION | G1、G2 已合并；G3 已定上线时暂缓 → 第 1.3 节 |
