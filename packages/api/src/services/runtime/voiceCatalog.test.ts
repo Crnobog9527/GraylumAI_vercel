@@ -63,6 +63,11 @@ describe('withVoice (free chat with a Skill catalog)', () => {
       + "sentence repeats earlier wording of the user or a stock line from the description above: the opening and first three sentences must be new, "
       + 'about the current topic.');
   });
+  it('an execution frozen with voice-v2 replays the earlier guard, without the closing reminder', async () => {
+    const old = frozenVoiceProfile.parse({guide: 'voice-v2', versionId: id(9), version: 2, modules: [id(1), id(3)]});
+    const text = await withVoice(options({profile}), 'BASE', {voiceProfile: old, skillCatalog: catalog}, undefined);
+    expect(text.endsWith('script-writer, post-writer. For every other reply, ignore it completely.')).toBe(true);
+  });
   it('a bound version that is gone ends the run before any provider request (Owner: deleted means unusable)', async () => {
     await expect(withVoice(options(null), 'BASE', context, undefined)).rejects.toThrow('VOICE_SOURCE_DELETED');
   });
