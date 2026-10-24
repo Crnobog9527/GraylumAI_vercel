@@ -187,7 +187,7 @@ it.each(['normal', 'concurrent', 'new-epoch', 'live-window', 'unknown-cost', 'ca
   } finally { await f.close(); }
 }, 60000);
 
-// 0347: a request that dies without marking its execution interrupted (a killed function, or a database fault in its own
+// 0397 (placeholder number): a request that dies without marking its execution interrupted (a killed function, or a database fault in its own
 // error path) leaves it running. Once its dispatch lease is over 60 s past, interrupted recovery closes it too.
 it.each(['charged', 'uncharged', 'live-lease', 'unknown-cost'] as const)
 ('RUNTIME: a running execution whose owner died is recovered once its lease is gone (%s)', async mode => {
