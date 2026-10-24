@@ -50,6 +50,8 @@ const procedure = protectedProcedure.use(async ({ ctx, next, path }) => {
     token => executeOriginalExecution({
       admin: ctx.supabaseAdmin, user: ctx.userScopedSupabase, actorId: ctx.user.id, budget: ctx.runtimeBudget,
       authorization: ctx.headers?.get("Authorization"), maintenanceEndpoint: real ? undefined : runtimeLocalEndpoint(),
+      // DB-PERF PR-5a: this request already loaded the policy (above), so the execution does not load it again.
+      policyChecked: real ? { ok: true as const } : undefined,
     }, token.executionId, undefined, token)), stagingPolicy: real } });
   if (!result.ok && !isOpcRefusal(result.error.cause)) throw stagingProcedureError(result.error, path);
   return result;
@@ -134,6 +136,7 @@ export const opcRouter = router({
         yield* streamOriginalExecution((onProgress) => executeOriginalExecution({
           admin: ctx.supabaseAdmin, user: ctx.userScopedSupabase, actorId: ctx.user.id, budget: ctx.runtimeBudget,
           authorization: ctx.headers?.get("Authorization"), maintenanceEndpoint, visibility,
+          policyChecked: ctx.stagingPolicy ? { ok: true as const } : undefined,
         }, admitted.executionId, onProgress), timing, path, undefined, input.textProtocol, visibility.visible);
       } finally {
         timing?.release();

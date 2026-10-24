@@ -10,7 +10,8 @@ import { denyNewCalls } from './newWorkGate';
 const mock = vi.hoisted(() => ({ factory: vi.fn(), policy: vi.fn(), gate: vi.fn(), recover: vi.fn(), capture: vi.fn() }));
 vi.mock('../opc/capture', () => ({ captureCompleted: mock.capture }));
 vi.mock('./execute', () => ({ runtimeExecutor: mock.factory }));
-vi.mock('./stagingPolicy', () => ({ loadStagingPolicy: mock.policy, loadStagingRecoveryPolicy: async () => ({}) }));
+vi.mock('./stagingPolicy', () => ({ loadStagingPolicy: mock.policy, loadStagingRecoveryPolicy: async () => ({}),
+  realPolicyCheck: (...args: unknown[]) => Promise.resolve(mock.policy(...args)).then(() => ({ ok: true }), (failure: unknown) => ({ ok: false, failure })) }));
 vi.mock('./stagingTransport', () => ({ stagingTransport: () => ({ lookup: vi.fn() }) }));
 vi.mock('./newWorkGate', async importOriginal => ({
   ...await importOriginal<typeof import('./newWorkGate')>(),
@@ -36,6 +37,17 @@ it.each(['local', 'staging', 'recovery'])('wires the %s host gate explicitly', a
     expect(await options.callGate('actor', 2)).toMatchObject({ ok: false, reason: 'limit_unavailable' });
     expect(mock.gate).not.toHaveBeenCalled(); expect(mock.recover).toHaveBeenCalled();
   } else expect(mock.gate).toHaveBeenCalledExactlyOnceWith(mode);
+});
+it.each(['staging', 'recovery'])('DB-PERF PR-5a: a route policy check is used instead of a second load (%s)', async mode => {
+  vi.stubEnv('V3_RUNTIME_STAGING_ENABLED', 'true');
+  await executeOriginalExecution({ admin: {rpc:async(name:string)=>({data:name==='runtime_execution_visibility'?'visible':null,error:null})} as never, user: { auth: {} } as never,
+    actorId: 'actor', budget: createRuntimeBudget(),
+    policyChecked: mode === 'staging' ? { ok: true } : { ok: false, failure: new Error('not enabled') } }, 'execution');
+  expect(mock.policy).not.toHaveBeenCalled();
+  const options = mock.factory.mock.calls[0][0];
+  // The same branch as when the execution loaded the policy itself: new work for an open window, recovery otherwise.
+  if (mode === 'recovery') { expect(options.callGate).toBe(denyNewCalls); expect(mock.recover).toHaveBeenCalled(); }
+  else expect(mock.gate).toHaveBeenCalledExactlyOnceWith('staging');
 });
 it('router constructor wires its authenticated admin and resolved environment', () => {
   const source = readFileSync(new URL('../../routers/runtime.ts', import.meta.url), 'utf8');

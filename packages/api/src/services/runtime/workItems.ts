@@ -8,15 +8,20 @@ import type {SupabaseClient} from '@supabase/supabase-js';
 export async function readWorkItems(database: SupabaseClient, actorId: string, sessionId: string): Promise<Record<string, unknown[]>> {
   try {
     const result = await database.rpc('runtime_work_items', {p_actor_id: actorId, p_session_id: sessionId});
-    if (result.error || !result.data || typeof result.data !== 'object' || Array.isArray(result.data)) return {};
-    const items: Record<string, unknown[]> = {};
-    for (const [executionId, rows] of Object.entries(result.data as Record<string, unknown>)) {
-      if (Array.isArray(rows) && rows.length) items[executionId] = rows;
-    }
-    return items;
+    return result.error ? {} : workItemsFrom(result.data);
   } catch {
     return {};
   }
+}
+
+/** The rows of a runtime_work_items answer, by answer; anything malformed is no rows. */
+export function workItemsFrom(data: unknown): Record<string, unknown[]> {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return {};
+  const items: Record<string, unknown[]> = {};
+  for (const [executionId, rows] of Object.entries(data as Record<string, unknown>)) {
+    if (Array.isArray(rows) && rows.length) items[executionId] = rows;
+  }
+  return items;
 }
 
 /** The view with each answer's work rows attached under `workItems` (answers without rows are left untouched). */
