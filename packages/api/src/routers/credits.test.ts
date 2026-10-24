@@ -1,7 +1,7 @@
 import { TRPCError } from '@trpc/server';
 import { describe, expect, it, vi } from 'vitest';
 import { logger } from '../lib/logger';
-import { creditsRouter } from './credits';
+import { ACTUAL_LEDGER_FILTER, creditsRouter, isReservationLedgerRow } from './credits';
 
 function createProfileSupabase(role: 'user' | 'admin', credits = 123) {
   return {
@@ -102,6 +102,7 @@ function createBalanceSupabase(options: {
 function createCreditTransactionsSupabase(
   rows: Array<Record<string, unknown>> = [],
   error: Record<string, unknown> | null = null,
+  filters: string[] = [],
 ) {
   const result = Promise.resolve({
     data: error ? null : rows,
@@ -135,6 +136,10 @@ function createCreditTransactionsSupabase(
           return this;
         },
         lte() {
+          return this;
+        },
+        or(filter: string) {
+          filters.push(filter);
           return this;
         },
         then: result.then.bind(result),
@@ -331,5 +336,40 @@ describe('creditsRouter permissions', () => {
     expect(logSpy).toHaveBeenCalledWith('billing', 'credits_summary_query_failed', { code: '57014' });
     expect(JSON.stringify(logSpy.mock.calls)).not.toContain('user@example.com');
     logSpy.mockRestore();
+  });
+});
+
+describe('积分记录只列实际变动（Owner 2026-10-25）', () => {
+  const rows: Array<[Record<string, string | null>, boolean]> = [
+    [{ ledger_type: 'adjustment', reason_code: 'bill2_reserve' }, true],
+    [{ ledger_type: 'adjustment', reason_code: 'bill2_release' }, true],
+    [{ ledger_type: 'adjustment', reason_code: 'bill2_compensation' }, false],
+    [{ ledger_type: 'adjustment', reason_code: 'dispute_freeze' }, false],
+    [{ ledger_type: 'adjustment', reason_code: 'dispute_withdraw' }, false],
+    [{ ledger_type: 'adjustment', reason_code: 'admin_adjustment' }, false],
+    [{ ledger_type: 'adjustment', reason_code: null }, false],
+    [{ ledger_type: 'spend', reason_code: 'bill2_spend' }, false],
+    [{ ledger_type: 'spend', reason_code: 'bill2_reserve' }, false],
+    [{ ledger_type: 'grant', reason_code: 'topup_purchase' }, false],
+    [{ ledger_type: 'refund_clawback', reason_code: 'refund_clawback' }, false],
+    [{ ledger_type: null, reason_code: 'bill2_release' }, false],
+  ];
+  it.each(rows)('hides only the paired pre-call reservation rows: %o → hidden %s', (row, hidden) => {
+    expect(isReservationLedgerRow(row)).toBe(hidden);
+  });
+
+  it('filters in the database only when asked, so the page and its count are after filtering', async () => {
+    const filters: string[] = [];
+    const supabase = { from(table: string) {
+      return table === 'profiles' ? createProfileSupabase('user').from(table) : createCreditTransactionsSupabase([], null, filters).from(table);
+    } };
+    const caller = createCreditsCaller({ role: 'user', supabase });
+    await caller.getCreditTransactions({ limit: 50 });
+    expect(filters).toEqual([]);
+    await caller.getCreditTransactions({ limit: 50, actualOnly: true });
+    expect(filters).toEqual([ACTUAL_LEDGER_FILTER]);
+    // The database condition is the exact opposite of the predicate, keeping rows whose fields are empty.
+    expect(ACTUAL_LEDGER_FILTER).toBe(
+      'ledger_type.is.null,ledger_type.neq.adjustment,reason_code.is.null,reason_code.not.in.(bill2_reserve,bill2_release)');
   });
 });

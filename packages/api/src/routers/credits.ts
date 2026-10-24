@@ -58,7 +58,22 @@ const GetTransactionsInput = z.object({
   status: TransactionStatus.optional(), // 按状态筛选
   startDate: z.string().datetime().optional(), // 开始日期
   endDate: z.string().datetime().optional(), // 结束日期
+  // Owner 2026-10-25「只给用户看实际扣费」：个人中心积分记录不列调用前的预留和释放（数据不动）。
+  actualOnly: z.boolean().optional(),
 });
+
+/**
+ * 调用前的预留与释放：成对出现、合计为零（bill2 按调用/按轮次预留，评审团、报告也走同一对 reason_code）。
+ * 只按这两个明确字段判断，不看描述文字；补偿（bill2_compensation）、争议冻结、管理员调整、扣费、到账、退款都不在内。
+ */
+export const RESERVATION_REASON_CODES = ['bill2_reserve', 'bill2_release'] as const;
+export function isReservationLedgerRow(row: { ledger_type?: string | null; reason_code?: string | null }) {
+  return row.ledger_type === 'adjustment'
+    && (RESERVATION_REASON_CODES as readonly string[]).includes(row.reason_code ?? '');
+}
+// 与 isReservationLedgerRow 相反的 PostgREST 条件：空值也保留（NOT IN 遇到 NULL 会把行一起滤掉）。
+export const ACTUAL_LEDGER_FILTER =
+  `ledger_type.is.null,ledger_type.neq.adjustment,reason_code.is.null,reason_code.not.in.(${RESERVATION_REASON_CODES.join(',')})`;
 
 // ============================================================================
 // 积分路由器
@@ -94,7 +109,7 @@ export const creditsRouter = router({
   getCreditTransactions: protectedProcedure
     .input(GetTransactionsInput)
     .query(async ({ ctx, input }) => {
-      const { limit, cursor, type, status: _status, startDate, endDate } = input;
+      const { limit, cursor, type, status: _status, startDate, endDate, actualOnly } = input;
 
       // 构建查询
       let query = ctx.supabase
@@ -104,7 +119,11 @@ export const creditsRouter = router({
         .order('created_at', { ascending: false })
         .limit(limit + 1); // 多取一条用于判断是否有下一页
 
-      // 应用筛选条件
+      // 应用筛选条件（在数据库里过滤，分页和条数都是过滤后的）
+      if (actualOnly) {
+        query = query.or(ACTUAL_LEDGER_FILTER);
+      }
+
       if (type) {
         query = query.eq('type', type);
       }
