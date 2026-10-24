@@ -59,7 +59,14 @@ describe('withVoice (free chat with a Skill catalog)', () => {
   it('appends the voice once as a system paragraph, bound to the flagged Skills only', async () => {
     const text = await withVoice(options({profile}), 'BASE', context, undefined);
     expect(text).toBe('BASE' + voiceAddendum(profile) + '\nApply this writing voice only to content you write after loading one of these Skills: '
-      + 'script-writer, post-writer. For every other reply, ignore it completely.');
+      + 'script-writer, post-writer. For every other reply, ignore it completely. Before writing the first line of such content, make sure no '
+      + "sentence repeats earlier wording of the user or a stock line from the description above: the opening and first three sentences must be new, "
+      + 'about the current topic.');
+  });
+  it('an execution frozen with voice-v2 replays the earlier guard, without the closing reminder', async () => {
+    const old = frozenVoiceProfile.parse({guide: 'voice-v2', versionId: id(9), version: 2, modules: [id(1), id(3)]});
+    const text = await withVoice(options({profile}), 'BASE', {voiceProfile: old, skillCatalog: catalog}, undefined);
+    expect(text.endsWith('script-writer, post-writer. For every other reply, ignore it completely.')).toBe(true);
   });
   it('a bound version that is gone ends the run before any provider request (Owner: deleted means unusable)', async () => {
     await expect(withVoice(options(null), 'BASE', context, undefined)).rejects.toThrow('VOICE_SOURCE_DELETED');

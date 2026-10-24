@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   fusionKick: vi.fn(),
   voice: vi.fn(),
   reportFees: vi.fn(),
+  researchPrices: vi.fn(),
 }));
 
 vi.mock('@repo/api/src/services/payments/waffoReconciliation', () => ({ reconcileWaffoPayments: mocks.waffo }));
@@ -34,6 +35,8 @@ vi.mock('@/lib/payment-alert.mjs', () => ({ reportStripeCardReconciliation: mock
   reportPaymentEvidenceConflict: vi.fn() }));
 vi.mock('@repo/api/src/services/fusion/recovery', () => ({ recoverFusionFinancials: mocks.fusion }));
 vi.mock('@repo/api/src/services/voice/recovery', () => ({ recoverVoiceGenerations: mocks.voice }));
+vi.mock('@repo/api/src/services/research/priceRefresh', () => ({ refreshResearchPrices: mocks.researchPrices }));
+vi.mock('@repo/api/src/services/research/runtime/secrets', () => ({ platformSecretReader: () => async () => 'key' }));
 vi.mock('@repo/api/src/services/bill2/stuckCalls', () => ({ findStuckPaygCalls: mocks.stuckCalls }));
 vi.mock('@repo/api/src/services/fusion/background', () => ({ kickStalledReviews: mocks.fusionKick }));
 vi.mock('@repo/api/src/services/report/fees', () => ({ settleDueReportFees: mocks.reportFees }));
@@ -114,6 +117,21 @@ describe('/api/cron/billing-reconcile', () => {
     mocks.reportFees.mockResolvedValue({ success: true, settled: 0 });
     mocks.voice.mockResolvedValue({ success: true, settled: 0, scrubbed: 0, waiting: 0, failed: 0 });
     mocks.stuckCalls.mockResolvedValue({ success: true, calls: [], total: 0, truncated: false });
+    mocks.researchPrices.mockResolvedValue({ success: true, refreshed: [], changed: [], failed: [], expiring: [], window: 'skipped' });
+  });
+
+  it('refreshes research prices daily and fails the job while a price cannot be refreshed or is about to expire', async () => {
+    expect((await GET(new Request('https://graylum.test/api/cron/billing-reconcile'))).status).toBe(200);
+    // Outside the bound staging deployment there is no test window to follow the prices.
+    expect(mocks.researchPrices).toHaveBeenCalledWith({ client: 'service-role' }, expect.objectContaining({ windowId: null }));
+    mocks.researchPrices.mockResolvedValue({ success: false, refreshed: [], changed: [], failed: [{ route: '/x', code: 'HTTP_503' }],
+      expiring: [{ provider: 'parallel', route: 'parallel:search:fast', validUntil: '2026-10-24T00:00:00.000Z' }], window: 'skipped' });
+    const response = await GET(new Request('https://graylum.test/api/cron/billing-reconcile'));
+    expect(response.status).toBe(500);
+    expect(mocks.cronJob).toHaveBeenCalledWith('billing-reconcile', 'failed', expect.any(Number),
+      expect.stringContaining('Research prices: 1 refresh failures, 1 expiring within a day'), expect.anything());
+    mocks.researchPrices.mockRejectedValue(new Error('unexpected'));
+    expect((await GET(new Request('https://graylum.test/api/cron/billing-reconcile'))).status).toBe(500);
   });
 
   // 0261: a PAYG call whose cost never became known keeps the daily job failing (the alert) until settled.

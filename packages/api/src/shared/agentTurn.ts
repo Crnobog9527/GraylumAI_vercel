@@ -149,6 +149,8 @@ export type AgentTurnOutcome = {
   stopped?: boolean; completeness?: "complete" | "stopped" | "length_limit";
   organized?: boolean; summaryOmitted?: boolean; envelopeCompact?: boolean; messageFirst?: boolean;
   unavailable?: AgentTurnUnavailable;
+  /** The round could not resume (its frozen policy is closed) and was ended keeping its delivered reply. */
+  resumeClosed?: true;
 };
 
 /**
