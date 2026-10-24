@@ -3,7 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { effectiveReplyLocale, type EntryLocale, type ReplyLocale } from '../shared/replyLanguage';
 
 /** CHAT-LANGUAGE (Owner 2026-10-24, A). profiles.reply_language is written only here, with the service role, for the
- * caller's own row (0399): the client UPDATE policy also checks the nickname, which a user may never have set. */
+ * caller's own row (0360): the client UPDATE policy also checks the nickname, which a user may never have set. */
 export async function setReplyLanguage(admin: SupabaseClient, profileId: string, locale: ReplyLocale): Promise<ReplyLocale> {
   const { data, error } = await admin.from('profiles').update({ reply_language: locale }).eq('id', profileId)
     .select('reply_language').single();
