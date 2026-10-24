@@ -37,8 +37,9 @@ export interface SkillSource {
   list(): Promise<readonly PackageDescriptor[]>;
   state(identity: PackageIdentity): Promise<ExecutionState>;
   read(identity: ResourceIdentity, maxBytes: number): Promise<Uint8Array>;
-  /** DB-PERF PR-4: one fresh check of current access and, in the same call, the bytes of every listed file of this
-   * exact package. An empty list is the check alone. Refuses (UNAVAILABLE) whenever state() would not be 'enabled'. */
+  /** DB-PERF PR-4: the bytes of every listed file of this exact package, read in one call that checks current access.
+   * An empty list is the check alone, which a request-local source may answer from its own earlier passed check in
+   * the same request (never across requests). Refuses whenever state() would not be 'enabled'. */
   readMany?(identity: PackageIdentity, files: readonly { path: string; bytes: number }[]): Promise<ReadonlyMap<string, Uint8Array>>;
 }
 export function sha256(bytes: Uint8Array | string): string { return createHash('sha256').update(bytes).digest('hex'); }
@@ -146,10 +147,10 @@ async function readVerified(source: SkillSource, p: PackageDescriptor, path: str
   await enabled(source, p);
   return verifiedText(p, file, await guarded(() => source.read({ ...identityOf(p), path }, file.bytes)));
 }
-/** DB-PERF PR-4: the texts of `paths` from a batch source, with exactly one fresh access check. Cached files are not
- * read again, but the check is always made, even when every file is cached; the uncached files arrive in that same
- * checked call. It is the last remote step before the caller hands the texts on, so it stands for both AC-0c checks
- * (before private reads and before returning): only in-memory assembly follows it. */
+/** DB-PERF PR-4: the texts of `paths` from a batch source. Cached files are not read again; the uncached ones arrive in
+ * one call that checks current access. With everything cached, readMany([]) is still called: the source answers it with
+ * a fresh check, or with the check it already passed earlier in this same request (Owner/controller 2026-10-25: one
+ * Skill state check per HTTP request, made at its start; a revocation takes effect from the next request). */
 async function checkedTexts(source: SkillSource, p: PackageDescriptor, paths: readonly string[]): Promise<Map<string, string>> {
   const texts = new Map<string, string>(), missing: PackageFile[] = [];
   for (const path of new Set(paths)) {
@@ -287,6 +288,19 @@ export async function activateSkill(source: SkillSource, selection: PackageIdent
   if (Buffer.byteLength(context, 'utf8') > options.maxContextBytes) fail('CAPACITY_EXCEEDED');
   if (!batch) await enabled(source, p);
   return new LoadedSkill(context, [...paths].map(path => ({ ...identityOf(p), path })), { packageId: p.packageId, revisionId: p.revisionId, ...metadata });
+}
+
+/** DB-PERF PR-4: several host-selected resources of one package, each at most maxBytes, with one checked batch read.
+ * Requires a batch source (readMany). */
+export async function readSkillResources(source: SkillSource, selection: PackageIdentity,
+  paths: readonly string[], maxBytes: number): Promise<Map<string, string>> {
+  if (!source.readMany || !identitySchema.safeParse(selection).success) fail('INVALID_IDENTITY');
+  paths.forEach(assertPath);
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > 2 * 1024 * 1024 || paths.length > 64) fail('CAPACITY_EXCEEDED');
+  const p = (await inventory(source)).find(candidate => sameIdentity(candidate, selection));
+  if (!p) fail('UNAVAILABLE');
+  if (paths.some(path => fileOf(p, path).bytes > maxBytes)) fail('CAPACITY_EXCEEDED');
+  return checkedTexts(source, p, paths);
 }
 
 /** Read one host-selected resource without exposing the rest of the private Skill to another model. */

@@ -46,27 +46,37 @@ it('loads a Skill in a new server instance with one listing and one checked batc
  expect(c.batches()).toEqual([['SKILL.md','a.md','b.md']]);
 });
 
-it('still checks access once per load when every file is cached, and reads no content again',async()=>{
+it('checks access once per request: a new request checks again, and nothing cached is read again',async()=>{
  const c=clients();
  await activateSkill(c.source(revision(1)),identityOf((await c.source(revision(1)).list())[0]),{maxContextBytes:100000});
  c.rpc.mockClear();
+ // The next request: its listing is the request's full service check; every later load in it is cached.
  const source=c.source(revision(1));const [descriptor]=await source.list();
  expect((await activateSkill(source,identityOf(descriptor),{maxContextBytes:100000})).forModel()).toContain('B v1');
  expect(await readSkillResource(source,identityOf(descriptor),'a.md',1000)).toBe('A v1\n');
  expect((await discoverSkills(source)).map(s=>s.public.name)).toEqual(['demo']);
- // One listing, then exactly one checked call per load, each with no file to read.
- expect(c.rpc).toHaveBeenCalledTimes(4);
- expect(c.batches()).toEqual([[],[],[]]);
+ expect(c.rpc).toHaveBeenCalledTimes(1);
+ expect(c.batches()).toEqual([]);
+ // A request whose first step is the load still checks once (its own listing), even with every file cached.
+ c.rpc.mockClear();
+ await activateSkill(c.source(revision(1)),identityOf(descriptor),{maxContextBytes:100000});
+ expect(c.rpc).toHaveBeenCalledTimes(1);
 });
 
-it('refuses a revoked revision at once even when its files are cached',async()=>{
+it('a Skill revoked during a request stays usable from cache only in that request; the next request is refused',async()=>{
  const c=clients(),source=c.source(revision(1));
  const [descriptor]=await source.list();
  await activateSkill(source,identityOf(descriptor),{maxContextBytes:100000});
  c.state.revoked.add(revision(1));
- await expect(activateSkill(source,identityOf(descriptor),{maxContextBytes:100000})).rejects.toMatchObject({code:'UNAVAILABLE'});
+ // Same request: the check made at its start stands (controller 2026-10-25), and no file is read again.
+ expect((await activateSkill(source,identityOf(descriptor),{maxContextBytes:100000})).forModel()).toContain('A v1');
+ // Any file not yet cached still goes to the package reader, which refuses at once.
+ clearSkillResourceCache();
  await expect(readSkillResource(source,identityOf(descriptor),'a.md',1000)).rejects.toMatchObject({code:'UNAVAILABLE'});
- expect(await discoverSkills(source)).toEqual([]);
+ // The next request is refused, even with every file cached again.
+ const next=c.source(revision(1));
+ await expect(next.list()).rejects.toMatchObject({code:'UNAVAILABLE'});
+ expect(await discoverSkills(next).catch(()=>[])).toEqual([]);
 });
 
 it('never serves a new version from the previous version\'s cache',async()=>{
@@ -100,4 +110,18 @@ it('caches a frozen descriptor only by its exact identity',async()=>{
  await expect(frozenDescriptor(identityOf(manifest(2)),load)).rejects.toMatchObject({code:'UNAVAILABLE'});
  await expect(frozenDescriptor({...identity,packageHash:'0'.repeat(64)},load)).rejects.toMatchObject({code:'UNAVAILABLE'});
  expect(load).toHaveBeenCalledTimes(3);
+});
+
+it('measures the Skill file continuation with one batch read instead of a check and a read per file',async()=>{
+ const {skillFileContinuationBytes}=await import('../runtime/skillFile');
+ const c=clients(),source=c.source(revision(1));
+ const [descriptor]=await source.list();
+ const cold=await skillFileContinuationBytes(source,descriptor);
+ expect(c.batches()).toEqual([['SKILL.md','a.md','b.md']]);
+ c.rpc.mockClear();
+ const next=c.source(revision(1));const [again]=await next.list();
+ expect(await skillFileContinuationBytes(next,again)).toBe(cold);
+ expect(c.rpc).toHaveBeenCalledTimes(1);
+ c.state.revoked.add(revision(1));
+ await expect(c.source(revision(1)).list()).rejects.toMatchObject({code:'UNAVAILABLE'});
 });

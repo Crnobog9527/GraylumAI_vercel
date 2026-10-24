@@ -41,6 +41,9 @@ export function loadSkillToolBytes(): number {
 
 /** A source over one frozen package through the service reader, which rechecks publication and revocation. */
 function frozenSource(rpc: ToolRpc, entry: SkillCatalogEntry): SkillSource {
+  // DB-PERF PR-4: one load is one tool call; after a passed checked read, a check-only readMany([]) in this same call
+  // reuses it. File reads always go to the package reader.
+  let checked = false;
   // The package reader refuses a revoked revision or a disabled module for good; the loader would hide that as a source
   // failure (a retry), so it is translated into a load error that is not SOURCE_FAILURE.
   const read = async <T>(path: string | null, maxBytes = 2097152, paths?: readonly string[]) => {
@@ -67,7 +70,10 @@ function frozenSource(rpc: ToolRpc, entry: SkillCatalogEntry): SkillSource {
     },
     readMany: async (identity, files) => {
       if (!sameIdentity(identity, entry)) throw new Error('RUNTIME_SKILL_LOAD_DENIED');
-      return batchFiles(await read<unknown>(null, batchBytes(files), files.map(f => f.path)), files);
+      if (!files.length && checked) return new Map();
+      const result = batchFiles(await read<unknown>(null, batchBytes(files), files.map(f => f.path)), files);
+      checked = true;
+      return result;
     },
   };
 }

@@ -32,6 +32,9 @@ export function databaseSkillSource(options: {
   options = { ...options };
   if (typeof window !== 'undefined') fail('UNAVAILABLE');
   let selected: PackageDescriptor | undefined;
+  // DB-PERF PR-4: this source lives for one request; once its full service check has passed (the first listing or a
+  // checked read), a check-only readMany([]) in the same request reuses it. File reads always go to the service.
+  let checked = false;
   let admitted: Promise<void> | undefined;
   if (options.userVisibleModule) {
     // Fail closed on a row that does not prove this exact module is visible and active.
@@ -69,7 +72,7 @@ export function databaseSkillSource(options: {
     // the same immutable descriptor; callers reach them only through the loader,
     // which checks state immediately after (discoverSkills, activateSkill).
     async list() {
-      if (!selected) selected = validateDescriptor(await read());
+      if (!selected) { selected = validateDescriptor(await read()); checked = true; }
       return [structuredClone(selected)];
     },
     async state(identity) {
@@ -85,7 +88,10 @@ export function databaseSkillSource(options: {
     // DB-PERF PR-4: the same full service check as state(), returning the listed files in the same call.
     async readMany(identity,files) {
       if (!selected || !sameIdentity(selected,identity)) fail('UNAVAILABLE');
-      return batchFiles(await read(identity,null,batchBytes(files),files.map(f => f.path)),files);
+      if (!files.length && checked) return new Map();
+      const result = batchFiles(await read(identity,null,batchBytes(files),files.map(f => f.path)),files);
+      checked = true;
+      return result;
     },
   };
 }

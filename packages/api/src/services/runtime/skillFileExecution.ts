@@ -21,13 +21,18 @@ export function executionSkillFileTool(options: {
     p_revision_id: binding.revisionId, p_package_hash: binding.packageHash,
     p_path: path, p_max_bytes: maxBytes, ...(paths ? {p_paths: paths} : {}),
   });
+  // DB-PERF PR-4: this source serves one execution request; after its state check passed (readFrozenSkillFile checks
+  // first), a check-only readMany([]) in the same request reuses it. File reads always go to the package reader.
+  let checked = false;
   const source: SkillSource = {
     // DB-PERF PR-4: the binding includes the packageHash, so its listing may come from the process cache;
     // readFrozenSkillFile still checks access (state, or the checked readMany) before returning any content.
     list: async () => [await frozenDescriptor(binding, () => read(null))],
     state: async identity => {
       if (!sameIdentity(identity, binding)) return 'denied';
-      return await read('') === true ? 'enabled' : 'denied';
+      checked = false;
+      checked = await read('') === true;
+      return checked ? 'enabled' : 'denied';
     },
     read: async (identity, maxBytes) => {
       if (!sameIdentity(identity, binding)) throw new Error('RUNTIME_SKILL_FILE_DENIED');
@@ -37,7 +42,10 @@ export function executionSkillFileTool(options: {
     },
     readMany: async (identity, files) => {
       if (!sameIdentity(identity, binding)) throw new Error('RUNTIME_SKILL_FILE_DENIED');
-      return batchFiles(await read<unknown>(null, batchBytes(files), files.map(f => f.path)), files);
+      if (!files.length && checked) return new Map();
+      const result = batchFiles(await read<unknown>(null, batchBytes(files), files.map(f => f.path)), files);
+      checked = true;
+      return result;
     },
   };
   return skillFileTool(async (arguments_, callId) => {
