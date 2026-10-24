@@ -13,6 +13,7 @@ import {
 } from '../services/payments/packageRefund';
 
 import { dispatchOrderRefund } from '../services/payments/refundDispatch';
+import { resolveTicketNumber, ticketNumberInput } from '../services/payments/ticketReference';
 import { previewWaffoRefund, decideWaffoRefund, executeWaffoRefund, reconcileWaffoRefund }
   from '../services/payments/waffoRefund';
 
@@ -28,6 +29,9 @@ async function safe<T>(action: () => Promise<T>, operation?: 'quote' | 'status' 
 const monthlyRequest = request.extend({ feePermitted: z.enum(['confirmed', 'not_permitted', 'unknown']),
   feeEvidence: z.string().regex(/^[A-Za-z0-9:._/-]{1,160}$/) });
 const refundProcedures = {
+  // Admins see ticket numbers (TK-…); the refund forms turn one into the ticket ID before quoting or rejecting.
+  resolveRefundTicket: adminProcedure.input(ticketNumberInput)
+    .query(({ ctx, input }) => resolveTicketNumber(ctx.supabaseAdmin, input.ticketNumber)),
   quoteMonthlyRefund: adminProcedure.input(monthlyRequest).query(({ ctx, input }) =>
     safe(() => quoteMonthlyRefund(ctx.supabaseAdmin, getStripeClient(), ctx.profileId, input), 'quote')),
   approveMonthlyRefund: adminProcedure.input(monthlyRequest.extend({

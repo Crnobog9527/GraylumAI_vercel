@@ -2,7 +2,7 @@
 
 import { memo, useState } from 'react';
 import {
-  User, Crown, Wallet, History, Shield, Headphones, LogOut
+  User, Crown, Wallet, Shield, Headphones, LogOut
 } from 'lucide-react';
 import { logClientDevError } from '@/lib/client-log';
 import { createClient } from '@/lib/supabase';
@@ -22,7 +22,6 @@ const menuItems: { id: ProfileTab; label: string; icon: typeof User }[] = [
   { id: 'profile', label: '个人资料', icon: User },
   { id: 'subscription', label: '订阅管理', icon: Crown },
   { id: 'credits', label: '积分记录', icon: Wallet },
-  { id: 'history', label: '使用历史', icon: History },
   { id: 'security', label: '账户安全', icon: Shield },
   { id: 'tickets', label: '工单记录', icon: Headphones },
 ];

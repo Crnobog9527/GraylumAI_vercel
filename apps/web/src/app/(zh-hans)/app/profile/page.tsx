@@ -26,7 +26,6 @@ import {
 import { SubscriptionCard, CreditStatsCard } from '@/components/profile/SubscriptionCard';
 import BillingRecordsCard from '@/components/profile/BillingRecordsCard';
 import { CreditRecordsCard } from '@/components/profile/CreditRecordsCard';
-import { UsageHistoryCard } from '@/components/profile/UsageHistoryCard';
 import { SecuritySettingsCard } from '@/components/profile/SecuritySettingsCard';
 import { AccountErasureCard } from '@/components/profile/AccountErasureCard';
 import { DataUseConsentCard } from '@/components/profile/DataUseConsentCard';
@@ -266,8 +265,6 @@ function ProfilePageContent() {
             )}
 
             {userProfile && activeTab === 'credits' && <CreditRecordsCard user={effectiveUser} />}
-
-            {userProfile && activeTab === 'history' && <UsageHistoryCard user={effectiveUser} />}
 
             {userProfile && activeTab === 'security' && <SecuritySettingsCard user={effectiveUser} />}
             {userProfile && activeTab === 'security' && DATA_USE_CONSENT_VISIBLE && <DataUseConsentCard />}

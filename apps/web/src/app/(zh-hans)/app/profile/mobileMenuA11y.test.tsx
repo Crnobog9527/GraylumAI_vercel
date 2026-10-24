@@ -52,7 +52,6 @@ vi.mock('@/components/profile/ReplyLanguageCard', () => ({ ReplyLanguageCard: ()
 vi.mock('@/components/profile/SubscriptionCard', () => ({ SubscriptionCard: () => <p>subscription-card</p>, CreditStatsCard: () => null }));
 vi.mock('@/components/profile/BillingRecordsCard', () => ({ default: () => null }));
 vi.mock('@/components/profile/CreditRecordsCard', () => ({ CreditRecordsCard: () => null }));
-vi.mock('@/components/profile/UsageHistoryCard', () => ({ UsageHistoryCard: () => null }));
 vi.mock('@/components/profile/SecuritySettingsCard', () => ({ SecuritySettingsCard: () => <p>security-card</p> }));
 vi.mock('@/components/profile/AccountErasureCard', () => ({ AccountErasureCard: () => <p>account-erasure-card</p> }));
 vi.mock('@/components/profile/DataUseConsentCard', () => ({ DataUseConsentCard: () => <p>data-use-consent-card</p> }));

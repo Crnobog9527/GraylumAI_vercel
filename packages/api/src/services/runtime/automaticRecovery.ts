@@ -10,6 +10,7 @@ import { stagingTransport } from './stagingTransport';
 import type { StagingPolicy } from './stagingPolicy';
 import { autoCompensateStaleRounds, type StaleRoundAutoClose } from './staleChargedRounds';
 import { recoverInterruptedExecutions } from './interruptedRecovery';
+import { recoverOwnerLostReplies } from './ownerLostRecovery';
 import { logger } from '../../lib/logger';
 
 export const AUTOMATIC_RECOVERY_LOOKUP_MS = 2_000;
@@ -95,9 +96,13 @@ export async function runAutomaticFinancialRecovery(admin: SupabaseClient, actor
   const summary = await recoverPendingFinancials({ database, budget, actorId,
     adapter: policy => stagingTransport(admin, policy as StagingPolicy, budget),
   });
+  // Scheduled only, and before interruption release: a round whose reply was saved becomes a resumable wait
+  // (ownerLostRecovery.ts) instead of being released for the 24-hour refund with its reply hidden.
+  const ownerLost = actorId ? undefined : await recoverOwnerLostReplies({ database, budget });
   const interrupted = await recoverInterruptedExecutions({ database, budget, actorId });
-  for (const key of ['selected', 'processed', 'settled', 'pending', 'failed'] as const) summary[key] += interrupted[key];
-  logger.info('api', 'runtime_automatic_recovery', { ...summary, interrupted, actorScoped: Boolean(actorId) });
+  for (const part of [ownerLost, interrupted]) if (part)
+    for (const key of ['selected', 'processed', 'settled', 'pending', 'failed'] as const) summary[key] += part[key];
+  logger.info('api', 'runtime_automatic_recovery', { ...summary, ownerLost, interrupted, actorScoped: Boolean(actorId) });
   if (actorId) return summary;
   const canStart = () => { try { budget.assertCanStart(STALE_ROUND_STEP_MS); return true; } catch { return false; } };
   // No time left even to read the report: not knowing is a failure, so a recovery backlog cannot starve refunds silently.

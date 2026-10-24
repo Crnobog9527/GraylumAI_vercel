@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { Agent, Runner, OpenAIChatCompletionsModel, tool, type Session, type AgentInputItem } from '@openai/agents';
+import { Agent, Runner, OpenAIChatCompletionsModel, ModelBehaviorError, tool, type Session, type AgentInputItem } from '@openai/agents';
 import OpenAI from 'openai';
 import { z } from 'zod';
 import {OPENROUTER_RESPONSE_TIMEOUT_MS} from '../bill2/openRouterPolicy';
@@ -16,6 +16,9 @@ export type RuntimeTool = {
   /** When set, invalid arguments or a failed execution become this tool result
    * instead of failing the run. Unset (every older tool) keeps failing it. */
   invalidResult?: string;
+  /** Only arguments that fail the schema become invalidResult; a failed execution (a credit pause, a database fault)
+   * still fails the run as before. */
+  invalidInputOnly?: boolean;
   /** A cap of the tool's own: once it returns false the tool is no longer offered to the model. */
   enabled?: () => boolean;
 };
@@ -186,7 +189,9 @@ export async function runRuntime(input: RuntimeRunnerInput) {
   let toolCalls=0;
   const tools=input.tools.map(t=>tool({name:t.name,description:t.description,
     isEnabled:()=>(t.enabled?.()??true)&&(!(input.libraryRetrieval||input.research?.freeChat)||input.maxToolCalls===undefined||toolCalls<input.maxToolCalls),
-    parameters:t.parameters??defaultToolParameters,errorFunction:t.invalidResult===undefined?null:()=>t.invalidResult!,
+    parameters:t.parameters??defaultToolParameters,errorFunction:t.invalidResult===undefined?null:(_context,error)=>{
+      if(t.invalidInputOnly&&!(error instanceof ModelBehaviorError))throw error;
+      return t.invalidResult!;},
     execute:async(args,_context,details)=>{
       const callId=details?.toolCall?.callId;
       if(!callId)throw new Error('RUNTIME_TOOL_ID_REQUIRED');
