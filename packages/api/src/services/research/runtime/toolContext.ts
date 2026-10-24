@@ -16,6 +16,8 @@ export interface ResearchToolContext {
   subcall: SubcallContext;
   emit: (event: ResearchTurnEvent) => void;
   now: () => Date;
+  /** false = too little of this reply's time is left for another paid lookup and the reply after it (missing: no limit). */
+  lookupTime?: () => boolean;
 }
 /** Stable across a resumed discovery; different users/discoveries never share evidence. */
 export function stableResearchId(...parts: string[]): string {

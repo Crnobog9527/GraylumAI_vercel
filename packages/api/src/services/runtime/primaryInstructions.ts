@@ -99,7 +99,7 @@ export function voiceAddendum(profile:VoiceProfile,guide:string=VOICE_GUIDE):str
     '\n</user_voice>';
 }
 /** The voice paragraph of an execution: its own frozen wording (never another), the one-time hint without a profile, or nothing. */
-function voiceText(voice?:{guide:string;profile?:VoiceProfile}):string {
+export function voiceText(voice?:{guide:string;profile?:VoiceProfile}):string {
   if(!voice||!(VOICE_GUIDES as readonly string[]).includes(voice.guide))return '';
   return voice.profile?voiceAddendum(voice.profile,voice.guide):VOICE_HINT_INSTRUCTIONS;
 }

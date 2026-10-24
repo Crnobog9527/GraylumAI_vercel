@@ -6,7 +6,7 @@ import { trpc } from '@/trpc/client';
 import { getSafeErrorMessage } from '@/lib/safe-error-message';
 import { monthlyRefundCodeText, monthlyRefundQuoteRefusal, type QuoteRefusal } from './monthlyRefundReasons';
 import {
-  EMPTY_MONTHLY_REFUND_FORM, validateMonthlyRefundForm, validateRefundFields,
+  EMPTY_MONTHLY_REFUND_FORM, ticketIdFor, validateMonthlyRefundForm, validateRefundFields,
   type MonthlyRefundForm, type MonthlyRefundRequest, type RefundFormScope, type RejectReason,
 } from './monthlyRefundView';
 
@@ -89,10 +89,21 @@ export function useMonthlyRefund(variant: RefundVariant = 'monthly') {
     return Object.keys(found).length === 0;
   }
 
+  // A ticket number (TK-…) becomes its ticket ID before any refund call; a wrong number stays a field error.
+  const lookupTicket = (ticketNumber: string) => utils.admin.resolveRefundTicket.fetch({ ticketNumber }, { staleTime: 0, retry: false });
+  async function withTicketId<T extends { ticketId: string }>(request: T): Promise<T | null> {
+    try { return { ...request, ticketId: await ticketIdFor(request.ticketId, lookupTicket) }; } catch (error) {
+      setErrors({ ticketId: getSafeErrorMessage(error, '找不到这个工单编号，请到工单管理页复制') });
+      return null;
+    }
+  }
+
   const requestQuote = () => once(async () => {
-    const request = validated();
-    if (!request) return;
+    const valid = validated();
+    if (!valid) return;
     const started = revision.current;
+    const request = await withTicketId(valid);
+    if (!request || !current(started)) return;
     setQuoting(true);
     setQuoteError(null);
     setActionError(null);
@@ -189,8 +200,10 @@ export function useMonthlyRefund(variant: RefundVariant = 'monthly') {
     if (!fieldsOk('reject')) return;
     const started = revision.current;
     setActionError(null);
+    const request = await withTicketId({ orderId: form.orderId.trim(), ticketId: form.ticketId.trim(), reason });
+    if (!request || !current(started)) return;
     try {
-      const data = await reject.mutateAsync({ orderId: form.orderId.trim(), ticketId: form.ticketId.trim(), reason });
+      const data = await reject.mutateAsync(request);
       if (!current(started)) return;
       setIntent(data as MonthlyRefundIntent);
       setQuoted(null);

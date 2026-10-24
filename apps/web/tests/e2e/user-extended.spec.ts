@@ -10,6 +10,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { authStatePaths, hasCredentials } from './support/auth';
 
 import { gotoWithBypass } from './support/deploymentProtection';
+import { openMethodCheckoutDialog, settledPackBuyButton } from './support/methodCheckout';
 import { createIssueMonitor, writeFlowAudit } from './support/monitoring';
 
 const ticketUploadFixture = path.resolve(__dirname, './fixtures/ticket-attachment.png');
@@ -104,39 +105,27 @@ test.describe('User Extended Flows', () => {
       await gotoWithBypass(page, '/app/profile?tab=subscription');
       await expect(page.getByText('会员订阅')).toBeVisible({ timeout: 10000 });
 
-      steps.push('Trigger a package purchase action');
-      const checkoutResponsePromise = page
-        .waitForResponse(
-          (response) =>
-            response.url().includes('/api/trpc/payments.createCheckoutSession') &&
-            response.request().method() === 'POST',
-          { timeout: 20000 },
-        )
-        .catch(() => null);
-      await page.getByTestId(/^profile-credit-package-/).first().getByRole('button', { name: '购买' }).click();
+      steps.push('Open the method-checkout dialog from a membership plan (nothing is paid)');
+      const targetPlan = page.locator('[data-testid="profile-membership-plan-gold"]');
+      await expect(targetPlan).toBeVisible({ timeout: 10000 });
+      const dialog = await openMethodCheckoutDialog(page, targetPlan.getByRole('button').last());
+      await expect(dialog.getByTestId('method-checkout-pay')).toBeVisible({ timeout: 10000 });
+      actual = 'Membership purchase action opened the method-checkout dialog';
+      await page.keyboard.press('Escape');
+      await expect(dialog).toBeHidden({ timeout: 10000 });
 
-      steps.push('Accept the legacy support dialog, a live Stripe Checkout redirect, or a created checkout session');
-      const purchaseIntentDialog = page.getByText('支付暂不可用');
-      const redirectedToCheckout = await page
-        .waitForURL(/https:\/\/(?:checkout|buy)\.stripe\.com\//, { timeout: 15000 })
-        .then(() => true)
-        .catch(() => false);
-      const checkoutResponse = await checkoutResponsePromise;
-
-      if (redirectedToCheckout) {
-        monitor.removeIssues((issue) =>
-          (issue.source === 'console' && issue.message === 'Failed to load resource: net::ERR_FAILED') ||
-          (issue.url?.includes('js.stripe.com/v3/.deploy_status_henson.json') ?? false) ||
-          issue.message.includes('js.stripe.com/v3/.deploy_status_henson.json') ||
-          issue.message.includes("origin 'https://checkout.stripe.com'"),
-        );
-        actual = 'Subscription purchase action redirected to Stripe Checkout';
-      } else if (checkoutResponse?.ok()) {
-        actual = 'Subscription purchase action created a Stripe Checkout session';
+      steps.push('Check the credit package purchase gate');
+      const buyButton = await settledPackBuyButton(page);
+      if (await buyButton.isDisabled()) {
+        // Packs are for paid members: a disabled button must come with the page's own reason, not silence.
+        await expect(page.getByTestId(/^profile-credit-packages-(members-only|renewal-grace|entitlement-error)$/).first()
+          .or(page.getByTestId('profile-method-checkout-closed'))).toBeVisible({ timeout: 10000 });
+        actual += '; package purchase is gated with a visible reason';
       } else {
-        await expect(purchaseIntentDialog).toBeVisible({ timeout: 10000 });
-        await expect(page.getByRole('button', { name: '提交工单咨询' })).toBeVisible({ timeout: 10000 });
-        actual = 'Subscription purchase action opened the support escalation dialog';
+        const packDialog = await openMethodCheckoutDialog(page, buyButton);
+        await expect(packDialog.getByTestId('method-checkout-pay')).toBeVisible({ timeout: 10000 });
+        actual += '; package purchase opened the method-checkout dialog';
+        await page.keyboard.press('Escape');
       }
 
       const blockingIssues = monitor.getIssues('P1');
@@ -152,7 +141,7 @@ test.describe('User Extended Flows', () => {
           title: 'subscription-purchase-next-step',
           role: 'user',
           route: '/app/profile?tab=subscription',
-          expected: 'Subscription and credit package actions either open the support dialog when checkout is disabled or redirect into Stripe Checkout when checkout is enabled.',
+          expected: 'A membership plan opens the method-checkout dialog; credit packages open it too or are disabled with a visible reason.',
         },
         actual,
         steps,

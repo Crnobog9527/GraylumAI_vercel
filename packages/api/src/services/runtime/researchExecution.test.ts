@@ -1,7 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
-import { researchExecution, responseAfterResearch } from './researchExecution';
+import { lookupTimeLeft, researchExecution, responseAfterResearch } from './researchExecution';
+import { createRuntimeBudget } from './budget';
 import { frozenResearchTurn, RESEARCH_PHASE, RESEARCH_RESULT_RESERVE_BYTES, RESEARCH_TURN_VERSION } from './researchTurn';
 import { terminalReplyGuard } from './executorRpc';
 import { toolCallPolicy } from '../bill2/toolBilling';
@@ -215,5 +216,17 @@ describe('#1029 review fixes', () => {
     onPause: () => {}, canSend: () => true })!;
     expect(JSON.stringify(z.toJSONSchema(withPro.tools[0]!.parameters!))).toContain('"pro"');
     expect(withPro.definitionBytes).toBeGreaterThan(built.definitionBytes);
+  });
+
+  it('leaves time for a slow lookup and the reply after it before another paid lookup (#1308)', () => {
+    let clock = 0;
+    const budget = createRuntimeBudget(() => clock);
+    expect(lookupTimeLeft(budget)).toBe(true);
+    // 265s of work time: a lookup may start until 90s (60s reply + 30s lookup) remain.
+    clock = 174_999;
+    expect(lookupTimeLeft(budget)).toBe(true);
+    clock = 175_000;
+    expect(lookupTimeLeft(budget)).toBe(false);
+    expect(lookupTimeLeft(undefined)).toBe(true);
   });
 });

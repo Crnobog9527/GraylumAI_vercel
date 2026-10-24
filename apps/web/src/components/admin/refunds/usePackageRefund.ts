@@ -5,7 +5,7 @@ import { useRef, useState } from 'react';
 import { trpc } from '@/trpc/client';
 import { getSafeErrorMessage } from '@/lib/safe-error-message';
 import {
-  EMPTY_MONTHLY_REFUND_FORM, validateRefundFields, type MonthlyRefundForm, type RefundFormScope, type RejectReason,
+  EMPTY_MONTHLY_REFUND_FORM, ticketIdFor, validateRefundFields, type MonthlyRefundForm, type RefundFormScope, type RejectReason,
 } from './monthlyRefundView';
 
 const FALLBACK = '退款证据不足或状态已变化，请重新核对订单与工单';
@@ -42,17 +42,31 @@ export function usePackageRefund() {
     // Any edit invalidates what is shown: approval must match the order and quote on screen.
     setQuote(null); setIntent(null); setError(null); setRejectReason('');
   }
+  // The ticket ID behind a typed ticket number (TK-…), looked up once per typed value before any call that sends it.
+  const ticket = useRef<{ typed: string; id: string } | null>(null);
   async function run(scope: RefundFormScope, action: () => Promise<void>) {
     const found = validateRefundFields(form, scope);
     setErrors(found);
     if (Object.keys(found).length || inFlight.current) return;
     inFlight.current = true; setLoading(true); setError(null);
     const started = revision.current;
+    if (scope !== 'status' && ticket.current?.typed !== form.ticketId.trim()) {
+      try {
+        const typed = form.ticketId.trim();
+        ticket.current = { typed, id: await ticketIdFor(typed, ticketNumber =>
+          utils.admin.resolveRefundTicket.fetch({ ticketNumber }, { staleTime: 0, retry: false })) };
+      } catch (caught) {
+        if (started === revision.current) setErrors({ ticketId: getSafeErrorMessage(caught, '找不到这个工单编号，请到工单管理页复制') });
+        inFlight.current = false; setLoading(false);
+        return;
+      }
+    }
     try { await action(); } catch (caught) {
       if (started === revision.current) setError(getSafeErrorMessage(caught, FALLBACK));
     } finally { inFlight.current = false; setLoading(false); }
   }
-  const request = () => ({ orderId: form.orderId.trim(), ticketId: form.ticketId.trim(),
+  const request = () => ({ orderId: form.orderId.trim(),
+    ticketId: ticket.current?.typed === form.ticketId.trim() ? ticket.current.id : form.ticketId.trim(),
     feePermitted: form.feePermitted as 'confirmed' | 'not_permitted', feeEvidence: form.feeEvidence.trim() });
 
   return {
