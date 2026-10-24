@@ -18,6 +18,8 @@ export const voiceProfile = z.object({
 }).strict();
 export type VoiceProfile = z.infer<typeof voiceProfile>;
 
+/** What the profile says when the samples cannot show any difference between platforms (never left empty). */
+export const NO_PLATFORM_DIFFERENCE = '样文不足以判断各平台差异';
 export type VoiceMaterial = { documentId: string; filename: string | null; text: string };
 
 export const VOICE_INSTRUCTIONS = [
@@ -29,7 +31,7 @@ export const VOICE_INSTRUCTIONS = [
   '- stance：观点强弱、表态方式（不超过 300 字）',
   '- phrases：常用的说法、口头禅、语气词，最多 12 条，每条不超过 80 字，必须在原文里出现过',
   '- avoid：这个人明显不会用的表达或腔调（例如书面套话、AI 腔），最多 12 条，每条不超过 80 字',
-  '- platforms：如果能看出在不同平台写法不同（例如在某平台更短、更口语），写在这里；看不出就写空字符串',
+  `- platforms：如果能看出在不同平台写法不同（例如在某平台更短、更口语），写在这里；样文只有一种平台或看不出来，就原样写“${NO_PLATFORM_DIFFERENCE}”`,
   '- samples：2 到 3 段最能代表这个人说话方式的原文，必须从下面的文字里一字不改地摘出来，每段不超过 400 字',
 ].join('\n');
 
@@ -56,7 +58,7 @@ export function parseVoiceProfile(answer: string, material: VoiceMaterial[]): Vo
   const parsed = voiceProfile.safeParse({
     tone: field(value.tone), sentenceLength: field(value.sentenceLength), openings: field(value.openings),
     stance: field(value.stance), phrases: strings(value.phrases, 80).slice(0, 12), avoid: strings(value.avoid, 80).slice(0, 12),
-    platforms: field(value.platforms),
+    platforms: field(value.platforms) || NO_PLATFORM_DIFFERENCE,
     samples: strings(value.samples, 400).filter(sample => corpus.includes(sample)).slice(0, 3),
   });
   return parsed.success ? parsed.data : null;

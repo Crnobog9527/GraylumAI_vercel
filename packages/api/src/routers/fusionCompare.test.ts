@@ -46,6 +46,13 @@ describe('fusionCompare router', () => {
     s.live.mockReset();
     (db.rpc as ReturnType<typeof vi.fn>).mockReset();
   });
+  it('lists the conversation\'s cards even when the model-name lookup fails', async () => {
+    const cards = [{ compareId: id(5), state: 'running', config: { models: [id(3), id(4)] } }];
+    (db.rpc as ReturnType<typeof vi.fn>).mockImplementation(async (name: string) => name === 'fusion_compare_list' ? { data: cards, error: null } : undefined);
+    // The test client has no model table: the name lookup throws, and the cards (their dispatch and stop controls) still come back.
+    await expect(caller().fusionCompare.list({ sessionId: id(2) })).resolves.toEqual({ cards, names: {} });
+    (db.rpc as ReturnType<typeof vi.fn>).mockReset();
+  });
   it('validates input before any work: a start needs the shown quote', async () => {
     await expect(caller().fusionCompare.start({ ...input, requestId: id(9) } as never)).rejects.toMatchObject({ code: 'BAD_REQUEST' });
   });

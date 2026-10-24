@@ -7,6 +7,7 @@ it.each([
   ['account_consumed_since_payment', 'PAY_REFUND_CREDITS_CONSUMED'],
   ['not_first_membership_purchase', 'PAY_REFUND_NOT_FIRST_PURCHASE'],
   ['renewal', 'PAY_REFUND_RENEWAL'],
+  ['already_refunded', 'PAY_REFUND_ALREADY_REFUNDED'],
   ['consumption_unresolved', 'PAY_REFUND_CONSUMPTION_UNRESOLVED'],
   ['membership_history_unresolved', 'PAY_REFUND_MEMBERSHIP_HISTORY_UNRESOLVED'],
   ['purchase_kind_unresolved', 'PAY_REFUND_PURCHASE_KIND_UNRESOLVED'],
@@ -33,4 +34,9 @@ it.each(['PRIVATE_DIAGNOSTIC', 'PAY_REFUND_WINDOW private-detail', 'toString', '
 it('does not unwrap arbitrary provider causes', () => {
   expect(monthlyRefundQuoteError(new Error('provider', { cause: { message: 'PAY_REFUND_WINDOW' } })).message)
     .toBe('PAY_REFUND_QUOTE_UNAVAILABLE');
+});
+it('passes the refunded-order refusals through to the admin quote', () => {
+  for (const code of ['PAY_REFUND_ALREADY_REFUNDED', 'PAY_REFUND_PARTIALLY_REFUNDED']) {
+    expect(monthlyRefundQuoteError(new Error(code))).toMatchObject({ code: 'BAD_REQUEST', message: code });
+  }
 });

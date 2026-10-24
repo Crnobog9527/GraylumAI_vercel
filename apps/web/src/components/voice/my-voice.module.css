@@ -1,0 +1,48 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+/* Same visual language as 我的文档 (my-documents.module.css). */
+.root { display: grid; gap: 16px; flex: 1; min-height: 0; overflow: auto; margin: 0 24px; padding: 20px 0 40px; color: #292929;
+  align-content: start; max-width: 880px; }
+.panel { padding: 16px 18px; border: 1px solid #ebebeb; border-radius: 12px; background: #fff; }
+.panel :is(h2,:where([data-demo-heading="h2"])) { font-size: 14px; font-weight: 550; }
+.cardHead { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.hint { margin-top: 6px; color: #6b6b6b; font-size: 12px; line-height: 1.6; }
+.note { margin-top: 10px; padding: 10px 12px; border-radius: 8px; background: #f7f7f7; color: #555; font-size: 12px; line-height: 1.6; }
+.warn { padding: 10px 12px; border-radius: 8px; background: #fff7f4; color: #8a3d2e; font-size: 12px; line-height: 1.6; }
+.working { color: #444; font-size: 13px; line-height: 1.6; }
+.badge { padding: 3px 9px; border-radius: 20px; background: #f3f3f3; color: #555; font-size: 11px; }
+.badge[data-status='draft'] { background: #fff4e5; color: #8a5a12; }
+.switch { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #333; cursor: pointer; }
+.fields { display: grid; gap: 10px; margin-top: 14px; }
+.fields div { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 12px; font-size: 13px; line-height: 1.6; }
+.fields dt { color: #6b6b6b; }
+.samples { display: grid; gap: 8px; margin-top: 14px; }
+.samples blockquote { margin: 0; padding: 8px 12px; border-left: 3px solid #e2e2e2; color: #444; font-size: 13px; line-height: 1.7;
+  white-space: pre-wrap; }
+.form { display: grid; gap: 12px; margin-top: 14px; }
+.form label, .form fieldset { display: grid; gap: 6px; border: 0; padding: 0; margin: 0; }
+.form label > span, .form legend { font-size: 12px; color: #555; }
+.form small { margin-left: 6px; color: #999; font-size: 11px; }
+.form textarea { width: 100%; padding: 8px 10px; border: 1px solid #e5e5e5; border-radius: 8px; font: inherit; font-size: 13px;
+  line-height: 1.6; resize: vertical; }
+.form fieldset textarea + textarea { margin-top: 6px; }
+.docs { display: grid; gap: 6px; margin: 12px 0; padding: 0; list-style: none; }
+.docs label { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 8px; align-items: center; min-height: 40px;
+  padding: 6px 10px; border: 1px solid #eee; border-radius: 8px; font-size: 12px; cursor: pointer; }
+.docs span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.docs small { color: #888; }
+.docs em { color: #bbb; font-style: normal; }
+.docs label:has(input:checked) { border-color: #242424; }
+.docs label:has(input:checked) em { color: #242424; }
+.actions { display: flex; align-items: center; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+.actions button { min-height: 36px; padding: 6px 14px; border: 1px solid #e5e5e5; border-radius: 8px; background: #fff; color: #333;
+  font-size: 12px; cursor: pointer; }
+.actions button:disabled { color: #bbb; cursor: not-allowed; }
+.actions .primary { border-color: #242424; background: #242424; color: #fff; }
+.actions .primary:disabled { border-color: #cfcfcf; background: #cfcfcf; color: #fff; }
+.actions .danger { color: #8a3d2e; }
+@media (max-width: 640px) {
+  .root { margin: 0 16px; }
+  .fields div { grid-template-columns: 1fr; gap: 2px; }
+  .docs label { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .docs small { display: none; }
+}
