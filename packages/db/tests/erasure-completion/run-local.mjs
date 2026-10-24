@@ -76,7 +76,7 @@ try {
  assert.equal(report.build.failed,null);
  // The optimization is built through the canonical migration chain; repeat its final version too.
  const optimized=snapshot();
- for(const file of ['0333_erasure_prune_owned_runtime.sql','0349_erasure_prune_session_tables.sql'])
+ for(const file of ['0333_erasure_prune_owned_runtime.sql','0355_erasure_prune_session_tables.sql'])
   ok(sql(read('packages/db/migrations/'+file)));
  assert.deepEqual(snapshot(),optimized,'runtime owner optimizations repeat without catalog drift');
  const require=createRequire(resolve(root,'packages/api/package.json'));

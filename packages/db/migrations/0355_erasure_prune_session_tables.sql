@@ -13,7 +13,7 @@ DO $patch$
 DECLARE src text;
  anchor text:=$a$  IF legacy_evidence AND (t LIKE 'artifact_%' OR t IN ('agent_slice_links','opc_result_links')) THEN CONTINUE; END IF;
 $a$;
- block text:=$b$  -- 0349: session-owned Runtime rows are found through the owner's sessions, not by serializing each row.
+ block text:=$b$  -- 0355: session-owned Runtime rows are found through the owner's sessions, not by serializing each row.
   IF t IN ('runtime_session_batches','runtime_session_history') THEN
    FOR item IN EXECUTE format('SELECT ctid AS row_tid,to_jsonb(x) AS body FROM public.%I x
     WHERE x.session_id IN (SELECT s.id FROM public.runtime_sessions s WHERE s.actor_id=$1)
