@@ -6,7 +6,7 @@ import {
   ERASURE_BACKLOG_ERROR_MS, ERASURE_BACKLOG_FATAL_MS, LIBRARY_BACKLOG_ALERT_MS,
   readErasureBacklog, reportErasureBacklog, reportLibraryBacklog,
 } from './erasure-backlog-alert';
-import { scrubText } from './sentry-scrub';
+import { scrubErrorEvent, scrubText } from './sentry-scrub';
 
 const now = Date.parse('2026-10-24T12:00:00Z');
 const ago = (ms: number) => new Date(now - ms).toISOString();
@@ -59,4 +59,21 @@ it('fails closed when the backlog cannot be read', async () => {
 
 it('both codes pass the Sentry scrubber as their fixed message', () => {
   for (const code of ['LIBRARY_CLEANUP_BACKLOG', 'ERASURE_BACKLOG']) expect(scrubText(code)).toBe(code);
+});
+
+it('the counts and fixed fingerprint survive the Sentry scrubber, nothing else does', () => {
+  reportLibraryBacklog({ pending: 3, overdue: 1, oldestDeletedAt: ago(25 * 3_600_000) }, now);
+  reportErasureBacklog({ open: 2, overError: 1, overFatal: 1, oldestConfirmedAt: ago(21 * 3_600_000) }, now);
+  const [[libCode, lib], [erasureCode, erasure]] = sentry.captureMessage.mock.calls;
+  const scrubbed = (code: string, hint: { level: string; fingerprint: string[]; extra: object }) => scrubErrorEvent({
+    message: code, level: hint.level, fingerprint: hint.fingerprint, tags: { category: 'data_erasure', code },
+    extra: { ...hint.extra, documentId: 'a1b2c3d4-0000-4000-8000-000000000000', note: 'private text' },
+  } as never);
+  expect(scrubbed(libCode, lib)).toMatchObject({ message: 'LIBRARY_CLEANUP_BACKLOG', level: 'fatal',
+    fingerprint: ['LIBRARY_CLEANUP_BACKLOG'], extra: { pending: 3, overdue: 1, oldestHours: 25 } });
+  expect(scrubbed(erasureCode, erasure).extra).toEqual({ open: 2, over12h: 1, over20h: 1, oldestHours: 21 });
+  const other = scrubErrorEvent({ message: 'PAY_SOMETHING', extra: { pending: 3 }, fingerprint: ['x'] } as never);
+  expect(other.extra).toBeUndefined(); expect(other.fingerprint).toBeUndefined();
+  const odd = scrubErrorEvent({ message: 'ERASURE_BACKLOG', extra: { open: -1, over12h: 1.5, over20h: '2', oldestHours: 3 } } as never);
+  expect(odd.extra).toEqual({ oldestHours: 3 });
 });

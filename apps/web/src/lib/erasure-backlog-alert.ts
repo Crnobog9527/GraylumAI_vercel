@@ -4,8 +4,8 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 // DATA-ERASURE: the privacy policy promises deletion within 24 hours. These alerts fire while there is still time to
 // act, from the crons that do the work (every 5 minutes), so Sentry keeps one issue per code until the backlog clears.
-// Only counts and times leave the cron; no account, document or request id. Sentry's scrubber lets the ERASURE and
-// LIBRARY prefixes through.
+// Only counts and hours leave the cron; no account, document or request id. sentry-scrub.ts keeps exactly these
+// integer extras (and the fixed fingerprint) for these two codes and drops everything else.
 const HOUR = 3_600_000;
 // A library deletion waits for the upload guard (3 h 5 min after the upload began) before its object can be proven
 // absent; six hours past that means cleanup is not keeping up.
