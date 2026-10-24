@@ -5,7 +5,7 @@
  */
 
 import type { ArticleContent } from '../../article';
-import { SIGNUP_CTA_HREF } from '../shared';
+import { SIGNUP_CTA_HREF_ZH_TW } from '../shared';
 import { ZH_TW_CRUMB } from './links';
 
 // Target: 自媒體課程; conversion page comparing courses, human coaching (陪跑) and AI coaching
@@ -30,7 +30,7 @@ export const ZH_TW_ZIMEITI_KECHENG: ArticleContent = {
   cta: {
     label: '免費試試 AI 陪跑',
     description: '先免費做一次定位診斷：AI 教練會像陪跑教練一樣問你的經驗、目標和想服務的人，幫你整理出帳號定位和目標受眾，再決定要不要往下走。',
-    href: SIGNUP_CTA_HREF,
+    href: SIGNUP_CTA_HREF_ZH_TW,
   },
   sections: [
     {

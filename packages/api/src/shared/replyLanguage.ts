@@ -5,7 +5,7 @@ import { z } from 'zod';
  * Stored on profiles.reply_language; no value means Simplified Chinese. The interface itself stays Simplified Chinese. */
 export const REPLY_LOCALES = ['zh-Hans', 'zh-Hant', 'en'] as const;
 export type ReplyLocale = (typeof REPLY_LOCALES)[number];
-export const DEFAULT_REPLY_LOCALE: ReplyLocale = 'zh-Hans';
+export const DEFAULT_REPLY_LOCALE = 'zh-Hans' satisfies ReplyLocale;
 export const replyLocale = z.enum(REPLY_LOCALES);
 
 /** How each choice is shown in the profile, in its own script. */
@@ -18,7 +18,9 @@ export function effectiveReplyLocale(stored: unknown): ReplyLocale {
 }
 
 /** The `lang` hint a sign-up link carries (the Traditional Chinese pages send zh-Hant); anything else is no hint. */
-export function entryLocaleHint(value: string | null | undefined): ReplyLocale | null {
-  const parsed = replyLocale.safeParse(value);
-  return parsed.success && parsed.data !== DEFAULT_REPLY_LOCALE ? parsed.data : null;
+export type EntryLocale = Exclude<ReplyLocale, typeof DEFAULT_REPLY_LOCALE>;
+export const entryLocale = replyLocale.exclude(['zh-Hans']);
+export function entryLocaleHint(value: string | null | undefined): EntryLocale | null {
+  const parsed = entryLocale.safeParse(value);
+  return parsed.success ? parsed.data : null;
 }

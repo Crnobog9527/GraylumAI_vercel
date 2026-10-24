@@ -46,11 +46,15 @@ vi.mock('@/components/profile/DataUseConsentCard', () => ({ DataUseConsentCard: 
 const consent = vi.hoisted(() => ({ visible: false }));
 vi.mock('@/components/profile/dataUseConsentVisibility', () => ({ get DATA_USE_CONSENT_VISIBLE() { return consent.visible; } }));
 vi.mock('@/components/founder/FounderProfileCard', () => ({ FounderProfileCard: () => null }));
+vi.mock('@/components/profile/ReplyLanguageCard', () => ({
+  ReplyLanguageCard: ({ language }: { language: string }) => <div data-reply-language={language} />,
+}));
 vi.mock('@/components/profile/TicketsPanel', () => ({ default: () => null }));
 
 import ProfilePage from './page';
 
-const realProfile = { id: 'u1', email: 'a@example.com', nickname: '小王', membership_level: 'pro', created_at: '2026-01-01' };
+const realProfile = { id: 'u1', email: 'a@example.com', nickname: '小王', membership_level: 'pro', created_at: '2026-01-01',
+  reply_language: 'en' };
 
 beforeEach(() => {
   state.params = new URLSearchParams();
@@ -81,6 +85,7 @@ describe('profile page', () => {
   it('renders real profile data when the read succeeds', () => {
     const html = renderToStaticMarkup(<ProfilePage />);
     expect(html).toContain('profile-header:小王:pro');
+    expect(html).toContain('data-reply-language="en"');
     expect(html).not.toContain('animate-spin');
     expect(html).not.toContain('role="alert"');
   });
