@@ -42,10 +42,13 @@ export function classifyAccount(
   if (low < BENCHMARK_RULES.followersMin || highExclusive - 1 > BENCHMARK_RULES.followersMax) {
     return { category: null, qualified: false, excluded: 'FOLLOWERS_MISSING' };
   }
-  if (metrics.postsAnalyzed === 0) return { category: null, qualified: false, excluded: 'NO_POSTS' };
+  // Discovery screens followers only: posts and activity are checked once benchmark_fetch has read the account's own
+  // newest posts. An account found by searching for accounts has no posts yet (BENCHMARK-COVERAGE), so posts cannot
+  // decide anything here.
   if (phase === 'discovery') {
     return { category: null, qualified: false, excluded: 'ACTIVE_CHECK_PENDING' };
   }
+  if (metrics.postsAnalyzed === 0) return { category: null, qualified: false, excluded: 'NO_POSTS' };
   if (metrics.lastPublishedAt.value === null) return { category: null, qualified: false, excluded: 'NO_PUBLISH_TIME' };
   const last = Date.parse(metrics.lastPublishedAt.value);
   if (now.getTime() - last > BENCHMARK_RULES.activeWithinDays * DAY_MS) {

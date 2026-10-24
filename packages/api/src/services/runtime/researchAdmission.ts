@@ -149,7 +149,7 @@ export async function admitResearchTurn(input: ResearchAdmissionInput): Promise<
   const used = [...priced.values()].filter(({ entry }) => entry.platform === 'web'
     ? (entry.kind === 'web_fetch' ? offered.has('web_fetch') : offered.has('web_search'))
     : fetchable.includes(entry.platform) && (BENCHMARK_ROUTE_KINDS[entry.platform]!.kinds.includes(entry.kind as never)
-      || entry.kind === 'keyword_posts' && discoverable.includes(entry.platform)));
+      || (entry.kind === 'keyword_posts' || entry.kind === 'account_search') && discoverable.includes(entry.platform)));
   const research = frozenResearchTurn.parse({
     version: RESEARCH_TURN_VERSION, configRevision: state.revision, phase: RESEARCH_PHASE, subcalls,
     reserve: RESEARCH_RESULT_RESERVE_BYTES,
