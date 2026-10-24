@@ -156,7 +156,8 @@ describe('deeper discovery layers', () => {
       .toEqual([['one', '20']]);
     expect(envelope.coverage.platforms.tiktok).toMatchObject({ spent: { searches: 3, pages: 1, accountSearches: 0, webSearches: 0, profiles: 5 },
       capReached: false, exhausted: true });
-    expect(envelope).toMatchObject({ status: 'partial', reason: 'NOT_ENOUGH_CANDIDATES', candidateCard: { shown: false } });
+    // Searched to the end with 5 selectable: the card shows those 5 (Owner 2026-10-23).
+    expect(envelope).toMatchObject({ status: 'ok', reason: null, candidateCard: { shown: true, selectable: 5 } });
   });
 
   it('a 0.01 USD platform stops at its own ceiling, also across replies, and the round still ends', async () => {
@@ -178,6 +179,23 @@ describe('deeper discovery layers', () => {
     expect(second.continue).toBe(false);
     expect(f.discoveries.get(discoveryId)?.state).toBe('completed');
     expect(f.ctx.emit).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'research_continue' }));
+  });
+
+  it('a reply short of time sends no further lookup and the next reply continues the round (#1308)', async () => {
+    const f = fixture('tiktok', { firstPage: keyword => Array.from({ length: 4 }, (_, i) => `${keyword}a${i}`) });
+    // Time for the three keyword searches and two profiles, then this reply has too little left.
+    let lookups = 0;
+    f.ctx.lookupTime = () => lookups++ < 5;
+    const first = await f.run();
+    expect(f.kindsSent()).toEqual([...Array(3).fill('keyword_posts'), ...Array(2).fill('account_profile')]);
+    expect(first).toMatchObject({ continue: true, reason: 'ROUND_LIMIT', candidateCard: { shown: false } });
+    expect(f.ctx.emit).toHaveBeenCalledWith({ type: 'research_continue', discoveryId });
+    expect(f.discoveries.get(discoveryId)?.state).toBe('running');
+    f.ctx.lookupTime = () => true;
+    const second = await f.run(29, { discoveryId });
+    // Nothing already paid for is sent again: the second reply only adds the remaining ten profiles.
+    expect(f.kindsSent()).toEqual([...Array(3).fill('keyword_posts'), ...Array(12).fill('account_profile')]);
+    expect(second).toMatchObject({ continue: false, candidateCard: { shown: true } });
   });
 
   it('last, reads web pages listing the niche\'s creators and screens the accounts their links name (code-extracted)', async () => {

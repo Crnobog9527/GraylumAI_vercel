@@ -556,7 +556,7 @@ describe('durable benchmark discovery and free follow-up', () => {
 
   it('BENCHMARK-SHORTFALL: a search round without new candidates, or a finished fetch, carries the host\'s open card', async () => {
     const f = fixture();
-    f.setAuthors(7);
+    f.setAuthors(0);
     const open = { cardId: discoveryId, required: 3, offeredQualified: 2, offeredRounds: 2, choice: null, confirmationId: null };
     f.store.offerShortfall.mockResolvedValueOnce(open);
     const short = await f.execute('benchmark_discover', discoveryArgs);
@@ -632,24 +632,40 @@ describe('durable benchmark discovery and free follow-up', () => {
     expect(options.every(o => String(o.account).startsWith('author'))).toBe(true);
   });
 
-  it('says no candidate card was shown when there are too few accounts', async () => {
+  it('says no candidate card was shown when no account is selectable', async () => {
     const f = fixture();
-    f.setAuthors(7);
+    f.setAuthors(0);
     expect(await f.execute('benchmark_discover', discoveryArgs)).toMatchObject({ candidateCard: { shown: false } });
   });
 
-  it('withholds the initial selection card below eight and names both ways out once the round is searched to the end', async () => {
+  it('a round searched to the end with fewer than eight selectable accounts shows them (Owner 2026-10-23)', async () => {
     const f = fixture();
     f.setAuthors(7);
     const result = await f.execute('benchmark_discover', discoveryArgs);
-    expect(result).toMatchObject({ status: 'partial', reason: 'NOT_ENOUGH_CANDIDATES', continue: false,
-      message: '这一轮已经搜完：找到 7 个可选、需要 8 个才能出候选卡。', availableCandidates: 7, requiredCandidates: 8 });
-    expect(result.nextStep).toContain('主页链接');
-    // Searched to the end: saved as a completed round (0320 counts it) and the shortfall card is asked for.
+    expect(result).toMatchObject({ status: 'ok', reason: null, continue: false, candidateCard: { shown: true, selectable: 7 } });
+    expect(result).not.toHaveProperty('message');
     expect(f.store.discoverySave).toHaveBeenLastCalledWith(discoveryId, expect.anything(), 'completed');
-    expect(f.store.offerShortfall).toHaveBeenCalledTimes(1);
+    const payload = f.store.createCard.mock.calls[0]?.[1];
+    expect(f.store.createCard.mock.calls[0]?.[0]).toBe(stableResearchId(discoveryId, 'first-card'));
+    expect(payload?.options.filter(option => option.selectable)).toHaveLength(7);
+    // A first card: the database sets the picks (3–5, all of them below 3), never the host.
+    expect(payload).not.toHaveProperty('minSelect');
+    expect(payload).not.toHaveProperty('followUp');
+    expect(f.store.offerShortfall).not.toHaveBeenCalled();
+    // Showing the card is free: 3 searches + 7 profiles + 2 web searches that tried to reach 8 first (BENCHMARK-COVERAGE).
+    expect(subcall).toHaveBeenCalledTimes(12);
+  });
+
+  it('a round searched to the end without one selectable account shows no card and names the ways out', async () => {
+    const f = fixture();
+    f.setAuthors(0);
+    const result = await f.execute('benchmark_discover', discoveryArgs);
+    expect(result).toMatchObject({ status: 'partial', reason: 'NOT_ENOUGH_CANDIDATES', continue: false,
+      message: '这一轮已经搜完，没有找到可选的对标账号。', availableCandidates: 0, candidateCard: { shown: false } });
+    expect(result.nextStep).toContain('主页链接');
+    expect(f.store.discoverySave).toHaveBeenLastCalledWith(discoveryId, expect.anything(), 'completed');
     expect(f.store.createCard).not.toHaveBeenCalled();
-    expect(subcall).toHaveBeenCalledTimes(12); // 3 searches + 7 profiles + 2 shortfall web searches (BENCHMARK-COVERAGE)
+    expect(f.store.offerShortfall).toHaveBeenCalledTimes(1);
   });
 
   it('keeps old keyword-hit accounts selectable and marks activity as pending until benchmark_fetch', async () => {
@@ -696,12 +712,12 @@ describe('durable benchmark discovery and free follow-up', () => {
 
   it('refuses a follow-up card before any initial candidate selection was confirmed', async () => {
     const f = fixture();
-    f.setAuthors(7);
+    f.setAuthors(0);
     await f.execute('benchmark_discover', discoveryArgs);
     expect(await f.execute('propose_more_candidates', { discoveryId }, 'more'))
       .toMatchObject({ status: 'not_confirmed', reason: 'NO_CONFIRMED_SELECTION' });
     expect(f.store.createCard).not.toHaveBeenCalled();
-    expect(subcall).toHaveBeenCalledTimes(12); // 3 searches + 7 profiles + 2 shortfall web searches (BENCHMARK-COVERAGE)
+    expect(subcall).toHaveBeenCalledTimes(5); // 3 searches + 2 web searches (BENCHMARK-COVERAGE); no author to screen
   });
 
   it('creates a stable initial card and excludes already selected accounts from a free follow-up', async () => {

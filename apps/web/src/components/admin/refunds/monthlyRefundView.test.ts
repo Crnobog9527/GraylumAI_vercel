@@ -1,8 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   canExecuteMonthlyRefund, canRejectMonthlyRefund, executeReasonLabel, stopAllowsRetry, stoppedExecutionReason, monthlyRefundStages, monthlyRefundStatusLabel,
-  validateMonthlyRefundForm, validateRefundFields, EMPTY_MONTHLY_REFUND_FORM, FEE_UNKNOWN_EVIDENCE, feePermittedPatch,
+  validateMonthlyRefundForm, validateRefundFields, EMPTY_MONTHLY_REFUND_FORM, FEE_UNKNOWN_EVIDENCE, feePermittedPatch, ticketIdFor,
 } from './monthlyRefundView';
 
 const ORDER = '11111111-1111-4111-8111-111111111111';
@@ -102,5 +102,25 @@ describe('fee default (location unknown means no fee)', () => {
     expect(feePermittedPatch('not_permitted', { ...typed, feeEvidence: '' }))
       .toEqual({ feePermitted: 'not_permitted', feeEvidence: FEE_UNKNOWN_EVIDENCE });
     expect(feePermittedPatch('confirmed', typed)).toEqual({ feePermitted: 'confirmed', feeEvidence: 'legal:us-ca:2026-10' });
+  });
+});
+
+describe('ticket field: the number admins see or the ticket ID', () => {
+  it('accepts the TK number shown on ticket pages and the full ID, and nothing else', () => {
+    const form = { ...EMPTY_MONTHLY_REFUND_FORM, orderId: ORDER };
+    for (const ticketId of ['TK-20261023-98E52E', ' tk-20261023-98e52e ', TICKET])
+      expect(validateRefundFields({ ...form, ticketId }, 'reject')).toEqual({});
+    for (const ticketId of ['', '98E52E', 'TK-20261023-98E52', 'TK-2026-98E52E', '20261023-98E52E'])
+      expect(validateRefundFields({ ...form, ticketId }, 'reject').ticketId).toContain('TK-');
+  });
+
+  it('looks up a TK number once and sends the ID; an ID is sent as typed without a lookup', async () => {
+    const lookup = vi.fn(async (ticketNumber: string) => ({ ticketId: `id-of-${ticketNumber}` }));
+    await expect(ticketIdFor(' tk-20261023-98e52e ', lookup)).resolves.toBe('id-of-TK-20261023-98E52E');
+    expect(lookup).toHaveBeenCalledExactlyOnceWith('TK-20261023-98E52E');
+    lookup.mockClear();
+    await expect(ticketIdFor(` ${TICKET} `, lookup)).resolves.toBe(TICKET);
+    expect(lookup).not.toHaveBeenCalled();
+    await expect(ticketIdFor('TK-20261023-98E52E', async () => { throw new Error('NOT_FOUND'); })).rejects.toThrow('NOT_FOUND');
   });
 });

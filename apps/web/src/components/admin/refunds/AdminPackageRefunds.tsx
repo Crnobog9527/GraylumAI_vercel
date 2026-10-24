@@ -46,7 +46,7 @@ export function AdminPackageRefunds() {
       <section className="space-y-4 rounded-xl border p-4" style={cardStyle}>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           {field('orderId', '订单编号', '在"支付订单"页每笔订单最下面一行')}
-          {field('ticketId', '工单编号', '用户提交的账单类退款工单')}
+          {field('ticketId', '工单编号', '工单管理页里的 TK-… 编号（用户提交的账单类退款工单）')}
           <div className="space-y-1.5">
             <Label htmlFor="package-refund-feePermitted" style={{ color: 'var(--text-primary)' }}>能否扣 6% 手续费</Label>
             <Select value={form.feePermitted} disabled={refund.busy} onValueChange={value => refund.updateForm(feePermittedPatch(value as FeePermitted, form))}>
