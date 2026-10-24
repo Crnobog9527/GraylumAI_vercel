@@ -34,11 +34,12 @@ export async function replayTail({root,read,sql,ok,snapshot,finalCatalog,report,
   if(/ai_models/.test(replay)&&/\bapi_key\b/.test(replay)&&!/DROP COLUMN api_key/.test(replay))
    ok(sql('ALTER TABLE public.ai_models ADD COLUMN IF NOT EXISTS api_key text;'));
   const replayResult=sql(superseded.skip?superseded.rest:replay);
-  // An anchored patch refuses (an error code containing PATCH, or SOURCE_MISMATCH) when a still later migration already
-  // rewrote the text it anchors on (0307 after 0338). Only that refusal is tolerated, never for the re-applied migration
+  // An anchored patch refuses (an error code containing PATCH, or SOURCE_MISMATCH, or 0328's own gate refusal) when a still
+  // later migration already rewrote the text it anchors on (0307 after 0338, 0328 after 0329/0330/0335). Only those named
+  // refusals are tolerated, never for the re-applied migration
   // itself, each one is printed and recorded, and the catalog equality below must still hold.
   const refusal=replayResult.status!==0&&tail[i].name!==base
-   ?/ERROR:\s+(\w*(?:PATCH|SOURCE_MISMATCH)\w*)/.exec(replayResult.stderr??''):null;
+   ?/ERROR:\s+(\w*(?:PATCH|SOURCE_MISMATCH)\w*|PAY_REFUNDED_REPURCHASE_GATE_MISMATCH)\b/.exec(replayResult.stderr??''):null;
   if(refusal){const reason=tail[i].name+': anchored patch refused on the final catalog ('+refusal[1]+'), a later migration rewrote its anchor; not replayed';
    console.log('skip '+reason);report.skipped.push(reason);refusedSql.push(tail[i].sql);refusedNames.push(tail[i].name.slice(0,4));}
   else ok(replayResult);

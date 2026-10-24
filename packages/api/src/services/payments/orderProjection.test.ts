@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { expect, it } from 'vitest';
-import { approvedRefundFact, projectBillingStatus, projectOrderPayment } from './orderProjection';
+import { approvedRefundFact, isRenewalBillingOrder, projectBillingStatus, projectOrderPayment } from './orderProjection';
 it('keeps original channel, exact amounts and unknown money without private evidence', () => {
   const facts = [{ kind: 'fee', amount: null, currency: 'usd', unit: 'major', evidence_ref: 'private' },
     { kind: 'paid', amount: '12.000000000001', currency: 'usd', unit: 'major', evidence_ref: 'private' }];
@@ -63,4 +63,15 @@ it('shows the cash a Graylum-approved refund returned, once, and nothing it cann
     expect(approvedRefundFact(approval)).toBeNull();
   expect(projectOrderPayment({ payment_amount_facts: facts, refund_approval: { ...monthly, status: 'approved' } }).amountFacts)
     .toHaveLength(2);
+});
+it('labels only automatic and founder renewals as renewal bills', () => {
+  const card = { item_type: 'membership_plan', payment_method: 'card', source_order_id: 'first', method_transition: null };
+  expect(isRenewalBillingOrder(card)).toBe(true);
+  expect(isRenewalBillingOrder({ ...card, payment_method: 'card_cn' })).toBe(true);
+  expect(isRenewalBillingOrder({ ...card, source_order_id: null })).toBe(false);
+  expect(isRenewalBillingOrder({ ...card, method_transition: 'upgrade' })).toBe(false);
+  expect(isRenewalBillingOrder({ ...card, payment_method: 'wechat_pay', method_transition: 'wallet_renewal' })).toBe(false);
+  expect(isRenewalBillingOrder({ item_type: 'membership_plan', payment_method: 'wechat_pay', offer_kind: 'founder_renewal' })).toBe(true);
+  expect(isRenewalBillingOrder({ item_type: 'membership_plan', purchase_action: 'renewal', source_order_id: 'first' })).toBe(true);
+  expect(isRenewalBillingOrder({ ...card, item_type: 'credit_package' })).toBe(false);
 });
