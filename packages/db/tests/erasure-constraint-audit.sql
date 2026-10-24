@@ -19,11 +19,12 @@ WITH marked AS (
 SELECT m.relname, 'no_guard' AS problem, NULL AS detail FROM marked m
 WHERE NOT EXISTS (SELECT 1 FROM guards g WHERE g.tgrelid = m.oid)
 UNION ALL
--- Marker-only is valid only for the dependency table, with no unlisted content columns.
+-- Marker-only is valid only for the dependency table, with no unlisted content columns
+-- (created_at is the creation time every audited base table carries since 0209).
 SELECT m.relname, 'invalid_marker_only', g.spec FROM guards g JOIN marked m ON m.oid = g.tgrelid
 WHERE g.spec = 'marker-only' AND (m.relname <> 'runtime_history_dependencies'
   OR EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = g.tgrelid AND a.attnum > 0
-    AND NOT a.attisdropped AND a.attname NOT IN ('execution_id', 'dependency_id', 'erased_at'))
+    AND NOT a.attisdropped AND a.attname NOT IN ('execution_id', 'dependency_id', 'erased_at', 'created_at'))
   OR EXISTS (SELECT 1 FROM guards other WHERE other.tgrelid = g.tgrelid AND other.spec <> 'marker-only'))
 UNION ALL
 SELECT m.relname, 'not_null_blocks_erasure', c.col FROM cols c JOIN marked m ON m.oid = c.tgrelid

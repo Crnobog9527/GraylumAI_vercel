@@ -101,13 +101,20 @@ const NOT_IN_LINK = /[<>"'()[\],;!?]/;
 /** Sentence-ending dots or colons are not part of a link; no supported handle can end with them. */
 const TRAILING = /[.:]+$/;
 
+/** The links standing in a text, each cut at its end (adjacent Chinese text, ASCII punctuation, sentence dots). */
+export function linksIn(text: string): string[] {
+  return [...text.matchAll(LINK)].map(match => {
+    const cut = match[0].search(NOT_IN_LINK);
+    return (cut === -1 ? match[0] : match[0].slice(0, cut)).replace(TRAILING, '');
+  });
+}
+
 /** Every distinct profile account linked in a message, in order of appearance. */
 export function profileLinksIn(message: string): CanonicalAccount[] {
   const seen = new Set<string>();
   const found: CanonicalAccount[] = [];
-  for (const match of message.matchAll(LINK)) {
-    const cut = match[0].search(NOT_IN_LINK);
-    const parsed = parseProfileLink((cut === -1 ? match[0] : match[0].slice(0, cut)).replace(TRAILING, ''));
+  for (const link of linksIn(message)) {
+    const parsed = parseProfileLink(link);
     if (!parsed) continue;
     const key = `${parsed.platform}:${parsed.account}`;
     if (seen.has(key)) continue;

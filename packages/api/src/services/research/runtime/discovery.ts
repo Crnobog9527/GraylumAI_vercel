@@ -243,7 +243,7 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
   // Deeper layers stop at a full card (candidatesMax, plan §3 item 1); a card still shows from candidatesMin.
   const full = () => selectCandidates(found, true).selectable.length >= BENCHMARK_RULES.candidatesMax;
   if (!stopped && !full()) {
-    await deepen({ ctx, d, posts, firstPages, coverage, pay, screen, enough: full, isStopped: () => stopped });
+    await deepen({ ctx, d, posts, firstPages, coverage, pay, screen, enough: full, cardable: enough, isStopped: () => stopped });
   }
   // Reconstruct from stable operations each time; the saved candidates support free follow-up cards.
   await ctx.store.discoverySave(d.discoveryId, { accounts: found, attempted: index, authorCursor, authorLimit }, stopped ? 'running' : 'completed');
