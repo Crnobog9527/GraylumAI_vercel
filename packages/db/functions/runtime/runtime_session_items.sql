@@ -13,7 +13,7 @@ BEGIN
  -- D7 read boundary
  PERFORM content_erasure_runtime_check(p_actor_id,p_execution_id);
  PERFORM bill2_actor(p_actor_id);
- -- DB-100 C3 read check (0389): this running reply already checked its lineage and admit its history.
+ -- DB-100 C3 read check (0384): this running reply already checked its lineage and admit its history.
  IF p_action='read' AND runtime_read_verified(p_actor_id,p_execution_id) THEN
   SELECT * INTO s FROM runtime_sessions WHERE id=p_session_id AND actor_id=p_actor_id;
   SELECT * INTO e FROM runtime_executions WHERE id=p_execution_id AND session_id=s.id AND actor_id=p_actor_id;

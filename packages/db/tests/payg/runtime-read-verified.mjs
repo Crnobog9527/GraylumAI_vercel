@@ -4,7 +4,7 @@ import {randomUUID} from 'node:crypto';
 import {rpc} from '../erasure-b2a/cases.mjs';
 import {createFixture} from './fixture.mjs';
 
-/** DB-100 C3 (0389): inside a running reply the two read RPCs skip the lineage walk; deletion, owner and writes stay checked. */
+/** DB-100 C3 (0384): inside a running reply the two read RPCs skip the lineage walk; deletion, owner and writes stay checked. */
 export async function runtimeReadVerifiedCases({db,report,setup}) {
   // Same actor, more admitted executions: the reply's frozen lineage (what runtime_billing_allowed walks).
   const ancestors=async(f,n)=>{

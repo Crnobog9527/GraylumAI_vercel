@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
--- DB-100 line Q (C3). Number 0389 is provisional until the controller assigns it.
+-- DB-100 line Q (C3). Number 0384 assigned by the controller.
 -- Owner 2026-10-25: "同一轮回复里读数据不重复查删除、写之前照查". During one running reply the two read RPCs
 -- runtime_response (before and after every model call) and runtime_session_items 'read' walked the execution's whole
 -- frozen history lineage again (runtime_billing_allowed: every ancestor's permission chain under FOR SHARE locks),
@@ -46,7 +46,7 @@ BEGIN
   a1:=$a$ PERFORM runtime_billing_allowed(p_actor_id,(SELECT payload FROM bill2_runs WHERE id=e.billing_run_id),e.billing_run_id);
 $a$;
   IF array_length(string_to_array(d,a1),1)<>2 THEN RAISE EXCEPTION 'DB100_READ_CHECK_SOURCE_MISMATCH: runtime_response';END IF;
-  EXECUTE replace(d,a1,$b$ -- DB-100 C3 read check (0389): this running reply already checked its lineage.
+  EXECUTE replace(d,a1,$b$ -- DB-100 C3 read check (0384): this running reply already checked its lineage.
  IF NOT runtime_read_verified(p_actor_id,e.id) THEN
   PERFORM runtime_billing_allowed(p_actor_id,(SELECT payload FROM bill2_runs WHERE id=e.billing_run_id),e.billing_run_id);
  END IF;
@@ -62,7 +62,7 @@ $a$;
   -- Same answer as the 'read' branch below for history admit checked: no session lock, no lineage walk;
   -- a turn deleted or marked unavailable since then is still left out.
   EXECUTE replace(d,a1,$b$ PERFORM bill2_actor(p_actor_id);
- -- DB-100 C3 read check (0389): this running reply already checked its lineage and admit its history.
+ -- DB-100 C3 read check (0384): this running reply already checked its lineage and admit its history.
  IF p_action='read' AND runtime_read_verified(p_actor_id,p_execution_id) THEN
   SELECT * INTO s FROM runtime_sessions WHERE id=p_session_id AND actor_id=p_actor_id;
   SELECT * INTO e FROM runtime_executions WHERE id=p_execution_id AND session_id=s.id AND actor_id=p_actor_id;
