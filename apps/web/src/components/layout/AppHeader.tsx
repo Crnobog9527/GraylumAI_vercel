@@ -29,6 +29,7 @@ import { buildAppHref, resolveSiteName } from '@/lib/site-config';
 import { profileTabHref } from '@/lib/profile-tabs';
 import { useCreditsBalance, CREDIT_THRESHOLDS } from '@/hooks/use-credits';
 import { trpc } from '@/trpc/client';
+import { LanguageSwitch } from './LanguageSwitch';
 import { AlertTriangle } from 'lucide-react';
 import {
   formatCreditsBalance,
@@ -160,6 +161,7 @@ export function AppHeader() {
 
         {/* Right section */}
         <div className="flex items-center gap-4">
+          <LanguageSwitch className="border" />
           {/* Credits badge with warning styles */}
           {creditsRechargeAction.available ? (
           <Link href={creditsRechargeAction.href} className="hidden sm:block">

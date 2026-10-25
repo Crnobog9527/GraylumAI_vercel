@@ -115,13 +115,13 @@ export default function LandingFooter({
           </div>
           <div className="flex items-center gap-6">
             <Link
-              href={buildAuthHref('/login')}
+              href={buildAuthHref('/login?lang=zh-Hans')}
               className="text-sm text-[#B0B0B0] hover:text-[#FFD700] transition-colors"
             >
               登录
             </Link>
             <Link
-              href={buildAuthHref('/login?action=signup')}
+              href={buildAuthHref('/login?action=signup&lang=zh-Hans')}
               className="text-sm px-4 py-2 bg-[#FFD700]/10 text-[#FFD700] rounded-lg hover:bg-[#FFD700]/20 transition-colors"
             >
               免费注册
