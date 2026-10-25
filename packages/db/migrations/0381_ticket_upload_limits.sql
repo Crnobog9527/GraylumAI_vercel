@@ -1,5 +1,5 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
--- ARCH-FIX B2 (placeholder number; the controller assigns the final one). Ticket attachments (/api/upload) had no
+-- ARCH-FIX B2 (number 0381 assigned by the controller). Ticket attachments (/api/upload) had no
 -- per-user count or byte limit, and an attachment never added to a ticket stayed in Storage until account erasure.
 -- 1. ticket_upload_begin now takes the declared byte size and refuses, per profile, more than 20 attachments or
 --    50 MB in any rolling 24 hours, and more than 10 in any minute. Usage is what Storage already holds for the

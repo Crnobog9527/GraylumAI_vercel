@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// ARCH-FIX B2: per-user ticket attachment limits and the orphan list for the daily cleanup (0391).
+// ARCH-FIX B2: per-user ticket attachment limits and the orphan list for the daily cleanup (0381).
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 

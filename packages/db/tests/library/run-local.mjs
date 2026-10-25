@@ -72,10 +72,10 @@ try {
   const beforeGuardRepeat = [catalog(), triggers()];
   sql(guard);
   assert.deepEqual([catalog(), triggers()], beforeGuardRepeat, '0376 repeat must not change schema/permissions/triggers');
-  const limits = readFileSync(resolve(root, 'packages/db/migrations/0391_ticket_upload_limits.sql'), 'utf8');
+  const limits = readFileSync(resolve(root, 'packages/db/migrations/0381_ticket_upload_limits.sql'), 'utf8');
   const beforeLimitsRepeat = catalog();
   sql(limits);
-  assert.equal(catalog(), beforeLimitsRepeat, '0391 repeat must not change schema/permissions');
+  assert.equal(catalog(), beforeLimitsRepeat, '0381 repeat must not change schema/permissions');
   const port = Number(docker(['port', name, '5432/tcp']).split(':').at(-1));
   const connect = async () => {
     const c = new pg.Client({ host: '127.0.0.1', port, database: 'lib2a', user: 'postgres', password: 'local-test-only' });
