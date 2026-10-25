@@ -7,6 +7,7 @@ import {
   progressingExecution,
   runtimeViewPollInterval,
   runtimeViewPollOptions,
+  turnSettled,
 } from './runtime-view-poll';
 
 const running = { activeExecution: 'e1', executions: [{ executionId: 'e1', state: 'running' }] };
@@ -86,5 +87,12 @@ describe('runtime.view polling', () => {
     expect(refetch).toHaveBeenCalledTimes(1);
     // A turn the server still advances (stream broke) falls back to the quick poll.
     expect(interval(query(running))).toBe(5000);
+  });
+
+  it('reports a turn as settled once the view stops showing it as progressing', () => {
+    const done = { activeExecution: 'e1', executions: [{ executionId: 'e1', state: 'completed' }] };
+    expect(turnSettled(progressingExecution(running), progressingExecution(done))).toBe(true);
+    expect(turnSettled(progressingExecution(running), progressingExecution(running))).toBe(false);
+    expect(turnSettled(null, progressingExecution(done))).toBe(false);
   });
 });
