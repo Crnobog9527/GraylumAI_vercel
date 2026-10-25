@@ -14,6 +14,7 @@ import { openRouterEvidence } from './openRouterEvidence';
 import {consumeOpenRouterNotStarted} from './openRouterAdapter';
 import { aggregateCredits } from './decimal';
 import { isBillingRead, readBillingRpc, BillingDatabaseUnavailable, transientDatabaseFailure } from './readRetry';
+import { swallow } from '../../lib/swallow';
 const uuid = z.string().uuid();
 const scope = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('positioning_draft'), draftId: uuid }).strict(),
@@ -257,7 +258,7 @@ export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: Billi
           model:identity.model,protocol:identity.protocol}),providerId,source:'response',
           sourceHash:createHash('sha256').update(JSON.stringify({providerId,provider:identity.provider,
             account:identity.account,model:identity.model})).digest('hex'),evidenceKind:'transport_observation'};
-        early=recordReceipt(capability.runId,callId,evidence).catch(()=>undefined);
+        early=swallow('bill2_early_receipt_failed',recordReceipt(capability.runId,callId,evidence),undefined,{category:'billing'});
       };
       const send=deps.adapter.prepareDispatch?await deps.adapter.prepareDispatch(input,identity,onChunk,onIdentity):()=>deps.adapter.dispatch(input,identity);
       const actorId=uuid.parse(await deps.actor());

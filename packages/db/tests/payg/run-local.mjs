@@ -21,6 +21,7 @@ import {quarantineCases} from './quarantine.mjs';
 import {ledgerConstraintCases} from './ledger-constraints.mjs';
 import {reconcileCases} from './reconcile.mjs';
 import {refundHoldCases} from './refund-hold.mjs';
+import {creditAvailableCases} from './credit-available.mjs';
 import {nominalCases} from './nominal.mjs';
 import {erasureCases} from './erasure.mjs';
 import {concurrencyCases} from './concurrency.mjs';
@@ -137,6 +138,7 @@ try {
   await quarantineCases({db,Client,connectionString,report,createFixture,claim});
   await ledgerConstraintCases({db,Client,connectionString,report});
   await refundHoldCases(db,report,createFixture,claim);
+  await creditAvailableCases({db,Client,connectionString,report,createFixture,claim});
   await edgeCases(db,report,createFixture,claim,receipt);
   await monitorCases(db,report,createFixture,claim,receipt);
   await erasureCases(db,report,createFixture,claim,receipt);

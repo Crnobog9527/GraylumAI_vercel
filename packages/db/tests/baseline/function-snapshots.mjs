@@ -10,9 +10,17 @@ import { dirname, resolve } from 'node:path';
 export const FUNCTIONS_DIR = 'packages/db/functions';
 // group directory -> function-name pattern (anchored, POSIX regex on pg_proc.proname)
 export const GROUPS = {
-  billing: '^(bill2_|atomic_)',
+  billing: '^(bill2_|atomic_|credit_)',
   runtime: '^runtime_',
   erasure: '^(account_erasure_|content_erasure_)',
+  pay: '^pay_',
+  publish: '^publish_',
+  opc: '^opc_',
+  fusion: '^fusion_',
+  library: '^library_',
+  report: '^report_',
+  research: '^research_',
+  voice: '^voice_',
 };
 
 export const snapshotSql = () => `SELECT coalesce(jsonb_agg(jsonb_build_object('group', g.key, 'name', p.proname,

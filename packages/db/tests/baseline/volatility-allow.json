@@ -1,0 +1,4 @@
+{
+ "_about": "STABLE/IMMUTABLE functions whose body matches the write-word scan of volatility-check.mjs but is a false positive (a word inside dynamic text, a read-only use). Key = function signature, value = why. The list may only shrink; an entry that no longer matches fails the replay.",
+ "functions": {}
+}

@@ -15,6 +15,8 @@ import { streamCompareColumn, type ColumnEvent } from './compareColumn';
 import { loadCompareChoice } from './compareLoad';
 import { estimateCompare, startCompare, type CompareDeps } from './compareStart';
 import { fusionExecutor } from './executor';
+import { readCompare } from './compareLive';
+import { recoverFusionFinancials } from './recovery';
 import { DEFAULT_FUSION_SETTINGS, FUSION_SETTINGS_KEY } from './settings';
 
 // FUSION-COMPARE PR-2c: real loading, start, per-column streaming, adoption and stop -> PostgREST -> PostgreSQL
@@ -52,6 +54,13 @@ const deps = (actor: string): CompareDeps => ({ admin, actorId: actor, env,
 const executorFor = (actor: string) => {
   const budget = createRuntimeBudget();
   const billing = authoritativeBilling({ admin: admin as unknown as BillingRpc, actor: async () => actor, adapter, budget });
+  return fusionExecutor({ billing, admin, actorId: actor, callGate: async () => ({ ok: true as const }), budget });
+};
+/** The same executor with a settlement that fails (the database busy at that moment): the verdict is written, settling is not. */
+const failingSettleExecutorFor = (actor: string) => {
+  const budget = createRuntimeBudget();
+  const real = authoritativeBilling({ admin: admin as unknown as BillingRpc, actor: async () => actor, adapter, budget });
+  const billing = { ...real, finalizeRun: async () => { throw new Error('BILL2_DATABASE_UNAVAILABLE'); } };
   return fusionExecutor({ billing, admin, actorId: actor, callGate: async () => ({ ok: true as const }), budget });
 };
 const collect = async (events: AsyncGenerator<ColumnEvent>) => { const out: ColumnEvent[] = []; for await (const e of events) out.push(e); return out; };
@@ -222,4 +231,49 @@ it.runIf(staging)('RUNTIME: compare without enough credits for the whole group h
   expect((await read(f.actor, running.compareId)).state).toBe('stopped');
   // The user's one compare slot is free again.
   expect((await begin(f.actor, f.session, '再来一次')).started.state).toBe('claimed');
+});
+
+it.runIf(staging)('RUNTIME: compare settlement that fails stays held and unsettled, and the daily recovery settles it exactly once', async () => {
+  const f = await member();
+  const { started } = await begin(f.actor, f.session, '结算失败的对比');
+  if (started.state === 'processing') throw new Error('unexpected');
+  const held = await wallet(f.actor);
+  // Column 0: answered and judged usable, then the settlement fails. Nothing is charged or released; the request fails.
+  await expect(collect(streamCompareColumn({ admin, actorId: f.actor, executor: failingSettleExecutorFor(f.actor) },
+    { compareId: started.compareId, column: 0 }))).rejects.toThrow('BILL2_DATABASE_UNAVAILABLE');
+  await collect(streamCompareColumn({ admin, actorId: f.actor, executor: executorFor(f.actor) }, { compareId: started.compareId, column: 1 }));
+  type Column = { runId: string; billing: { closed: boolean; chargedCredits: number | null };
+    call: { verdict: string | null; settled: boolean; dispatched: boolean } };
+  const columns = async () => (await compareRpc<{ state: string; columns: Column[] }>(admin, 'fusion_compare_read',
+    { p_actor_id: f.actor, p_compare_id: started.compareId }));
+  const before = await columns();
+  // Exactly the state the page shows as "积分结算中" and fusion_pending_financial_batch lists: judged, dispatched, unsettled.
+  expect(before.columns[0]!.call).toMatchObject({ verdict: 'usable', settled: false, dispatched: true });
+  expect(before.columns[0]!.billing.closed).toBe(false);
+  expect(before.columns[1]!.billing.closed).toBe(true);
+  expect(before.state).toBe('running');
+  const column1 = before.columns[1]!.billing.chargedCredits ?? 0;
+  // Column 0's hold is still held: the wallet is below what column 1 alone cost.
+  expect(held).toBeLessThan(1000);
+  expect(await wallet(f.actor)).toBeLessThan(1000 - column1);
+  // Reading it again does not settle (the verdict is written) and charges nothing; the user's one compare slot stays taken.
+  const reread = await readCompare(admin, f.actor, started.compareId, async () => { throw new Error('unexpected settle'); });
+  expect(reread?.settlementPending).toBeUndefined();
+  await expect(begin(f.actor, f.session, '下一次对比')).rejects.toThrow('FUSION_COMPARE_ACTIVE');
+  const listed = await admin.rpc('fusion_pending_financial_batch', { p_limit: 200 });
+  expect((listed.data as Array<{ run_id: string }>).some(row => row.run_id === before.columns[0]!.runId)).toBe(true);
+
+  // The daily recovery and a late settlement of the same run at once, then the recovery again: settled and charged once.
+  await Promise.all([recoverFusionFinancials(admin, { limit: 200 }), executorFor(f.actor).settleJudged(before.columns[0]!.runId)]);
+  await recoverFusionFinancials(admin, { limit: 200 });
+  const after = await columns();
+  expect(after.columns[0]!.call.settled).toBe(true);
+  expect(after.columns[0]!.billing.closed).toBe(true);
+  expect(after.state).toBe('finished');
+  const column0 = after.columns[0]!.billing.chargedCredits ?? 0;
+  expect(column0).toBeGreaterThanOrEqual(1);
+  expect(after.columns[1]!.billing.chargedCredits ?? 0).toBe(column1);
+  expect(await wallet(f.actor)).toBe(1000 - column0 - column1);
+  // The slot is free again.
+  expect((await begin(f.actor, f.session, '下一次对比')).started.state).toBe('claimed');
 });

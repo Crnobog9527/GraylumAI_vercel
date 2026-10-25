@@ -2,6 +2,7 @@
 import { after, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { finishScheduledJobRun, startScheduledJobRun } from '@repo/api/src/services/scheduledJobRuns';
+import { swallow } from '@repo/api/src/lib/swallow';
 import { loadPostForMeDeps } from '@repo/api/src/services/publishMonitor/secrets';
 import {
   createRuntimeBudget, entitlementWindow, runSocialMonitorJob, tikhubEntitlements,
@@ -50,14 +51,14 @@ export async function GET(request: Request) {
     if (keyError) report.failures.push('postforme_key');
     reportPublishMonitorStuck(report.stuck);
     // A failed read here must not fail the run: the count is only watched, never needed for the work above.
-    await readQuotaUsage(client).then(usage => reportPublishMonitorQuota(usage, usage.configured ? quotaLevel(usage) : 'ok'))
-      .catch(() => undefined);
+    await swallow('publish_monitor_quota_check_failed',
+      readQuotaUsage(client).then(usage => reportPublishMonitorQuota(usage, usage.configured ? quotaLevel(usage) : 'ok')), undefined);
     const success = report.failures.length === 0;
     await finish(success ? 'success' : 'error', { ...report, ...(keyError ? { postForMeKeyError: keyError } : {}) },
       keyError ?? (success ? null : `FAILED_STEPS:${report.failures.join(',')}`));
     return NextResponse.json({ success, ...report }, { status: success ? 200 : 500 });
   } catch {
-    await finish('error', {}, 'SOCIAL_MONITOR_FAILED').catch(() => undefined);
+    await swallow('social_monitor_run_record_failed', finish('error', {}, 'SOCIAL_MONITOR_FAILED'), undefined);
     return NextResponse.json({ error: 'Social monitor job failed' }, { status: 500 });
   }
 }

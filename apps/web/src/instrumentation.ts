@@ -7,6 +7,17 @@ import * as Sentry from "@sentry/nextjs";
 export async function register() {
   if (process.env.NEXT_RUNTIME === "nodejs") {
     await import("../sentry.server.config");
+    // The api layer's error logs and swallowed failures go to the same Sentry project (MAINT-P3).
+    const { connectApiLogsToSentry } = await import("./lib/api-log-sentry");
+    connectApiLogsToSentry();
+    // 缺必填环境变量只记日志并上报 Sentry，不 throw：漏配要看得见，但不能让整站起不来。
+    const { validateEnvOnStartup } = await import("@repo/api/src/lib/envValidator");
+    const envResult = validateEnvOnStartup();
+    if (!envResult.valid) {
+      // Fixed code plus variable names only: the Sentry scrubber drops free text and values.
+      const variables = [...new Set(envResult.errors.flatMap((error) => error.match(/\b[A-Z][A-Z0-9_]{3,}\b/g) ?? []))];
+      Sentry.captureMessage("ENV_VALIDATION_FAILED", { level: "error", extra: { variables } });
+    }
   }
 
   if (process.env.NEXT_RUNTIME === "edge") {

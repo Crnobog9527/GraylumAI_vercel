@@ -107,7 +107,8 @@ try {
 
   const user = await member();
   const fresh = await asService(() => v('SELECT publish_monitor_settings($1) v', [user.a]));
-  assert.deepEqual(fresh, { autoReviewEnabled: true, autoReviewEnabledAt: null });
+  // 0307 changed the default to off (auto review is opt-in); this expectation still said on until CI ran the suite.
+  assert.deepEqual(fresh, { autoReviewEnabled: false, autoReviewEnabledAt: null });
   const off = await asService(() => v('SELECT publish_monitor_set_auto_review($1,false) v', [user.a]));
   assert.equal(off.autoReviewEnabled, false);
   await c.query("UPDATE social_monitor_settings SET auto_review_enabled_at=now()-interval '30 days' WHERE actor_id=$1", [user.a]);

@@ -34,6 +34,12 @@ describe('ENTITLEMENTS APIs with real tRPC authentication middleware', () => {
     await expect(userRouter.createCaller(f.context).getEntitlements()).rejects.toBeDefined();
     expect(f.writes).toEqual([]);
   });
+  it.each([{ monthlyPrice: 7900 }, { yearlyPrice: 70000 }])('admin cannot change a membership price (%o): prices change by migration', async price => {
+    const f = fixture(); f.rows.profiles![0]!.role = 'admin';
+    await expect(adminRouter.createCaller(f.context).updateMembershipPlan({ id: planIds.pro, ...price }))
+      .rejects.toMatchObject({ code: 'BAD_REQUEST', message: expect.stringContaining('改价走迁移') });
+    expect(f.writes).toEqual([]);
+  });
   it.each(['free', 'pro', 'gold'] as const)('admin creates %s with D4 defaults', async level => {
     const f = fixture(); f.rows.profiles![0]!.role = 'admin';
     f.rows.membership_plans = f.rows.membership_plans!.filter(row => row.level !== level);

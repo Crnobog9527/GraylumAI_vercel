@@ -10,7 +10,7 @@ import { parseStagingPolicy } from './stagingPolicy';
 vi.mock('../../lib/logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 const key = vi.hoisted(() => ({ value: 'platform-key' as string | undefined }));
 vi.mock('../models/openRouterKey', async original => ({ ...(await original<typeof import('../models/openRouterKey')>()),
-  readOpenRouterKey: async () => key.value }));
+  readOpenRouterKey: async () => key.value, readOpenRouterKeyOrUnset: async () => key.value }));
 vi.mock('../models/openRouterCatalog', () => ({ readOpenRouterPricing: vi.fn(() => { throw new Error('offline'); }) }));
 
 const actor = '30000000-0000-4000-8000-000000000003';

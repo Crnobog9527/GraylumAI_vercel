@@ -2,9 +2,20 @@
 
 One file per function name (overloads share a file), grouped as:
 
-- `billing/` — `bill2_*`, `atomic_*`
+- `billing/` — `bill2_*`, `atomic_*`, `credit_*`
 - `runtime/` — `runtime_*`
 - `erasure/` — `account_erasure_*`, `content_erasure_*`
+- `pay/` — `pay_*`
+- `publish/` — `publish_*`
+- `opc/` — `opc_*`
+- `fusion/` — `fusion_*`
+- `library/` — `library_*`
+- `report/` — `report_*`
+- `research/` — `research_*`
+- `voice/` — `voice_*`
+
+A function is covered when its name matches one of the group patterns. A function whose name matches
+none of them is not checked, so a new function family needs its prefix added to `GROUPS` first.
 
 These files are **generated**, not written by hand. They are the `pg_get_functiondef` output of the
 database built from repository files only (platform stand-in -> `packages/db/baseline` -> every

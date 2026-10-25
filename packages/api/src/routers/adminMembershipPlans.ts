@@ -9,6 +9,9 @@ import {
 import { saveStripeCatalog } from '../services/payments/stripeCatalog';
 import { assertExplicitEntitlementsOnLevelChange } from '../services/membershipPlanChanges';
 
+/** Membership prices are fixed in the checkout SQL guard; changing one is a migration, not an admin edit (Owner 2026-10-25). */
+export const MEMBERSHIP_PRICE_READONLY_MESSAGE = '会员价格不能在后台修改，改价走迁移。';
+
 export const membershipPlanMutations = {
   // UNIQUE(level) makes every valid plan the sole configuration for its tier.
   // No read-then-delete race: this admin endpoint never hard-deletes a plan.
@@ -91,14 +94,15 @@ export const membershipPlanMutations = {
       sortOrder: z.number().int().min(0).optional(),
     }))
     .mutation(async ({ ctx, input }) => {
+      if (input.monthlyPrice !== undefined || input.yearlyPrice !== undefined) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: MEMBERSHIP_PRICE_READONLY_MESSAGE });
+      }
       const previousLevel = await assertExplicitEntitlementsOnLevelChange(ctx.supabase, input);
       const updateData: Record<string, unknown> = {
         ...membershipEntitlementPatch(input),
       };
       if (input.name !== undefined) updateData.name = input.name;
       if (input.level !== undefined) updateData.level = input.level;
-      if (input.monthlyPrice !== undefined) updateData.monthly_price = input.monthlyPrice;
-      if (input.yearlyPrice !== undefined) updateData.yearly_price = input.yearlyPrice;
       if (input.monthlyCredits !== undefined) updateData.monthly_credits = input.monthlyCredits;
       if (input.yearlyCredits !== undefined) updateData.yearly_credits = input.yearlyCredits;
       if (input.monthlyBonusCredits !== undefined) updateData.monthly_bonus_credits = input.monthlyBonusCredits;

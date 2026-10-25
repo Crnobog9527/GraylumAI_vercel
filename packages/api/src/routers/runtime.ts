@@ -29,6 +29,7 @@ import { activateRuntimeCandidate } from '../services/runtime/matching';
 import { defaultModelFirst, freeChatModels, readModelChoiceSettings } from '../services/runtime/defaultModel';
 import { publicModelChoices } from '../services/modelIdentity/display';
 import {executeOriginalExecution,runtimeLocalEndpoint,streamOriginalExecution} from '../services/runtime/executionStream';
+import { swallow } from '../lib/swallow';
 
 // Viewing original state, cancellation and receipt maintenance do not admit
 // new work. Source/actor checks still run in their existing SQL procedures.
@@ -114,8 +115,8 @@ export const runtimeRouter=router({
  reportStart:procedure.input(reportStart.extend({acceptedCredits:z.number().int().positive().optional()})).mutation(({ctx,input})=>ctx.report.start(input)),
  // Display only: whether the report entry is shown. reportStart checks the same switch again.
  // The fixed price (0295) is shown on the button; null when it cannot be read (the button then shows no number).
- reportAvailable:maintenanceProcedure.query(async({ctx})=>({enabled:await reportEnabled(ctx.supabaseAdmin!).catch(()=>false),
-  priceCredits:await reportPrice(ctx.supabaseAdmin!).catch(()=>null)})),
+ reportAvailable:maintenanceProcedure.query(async({ctx})=>({enabled:await swallow('report_switch_read_failed',reportEnabled(ctx.supabaseAdmin!),false),
+  priceCredits:await swallow('report_price_read_failed',reportPrice(ctx.supabaseAdmin!),null)})),
  // Saved reports stay discoverable whatever the switch or membership is now.
  reportLatest:maintenanceProcedure.input(reportLocate).query(({ctx,input})=>reportService(ctx.userScopedSupabase,ctx.supabaseAdmin!,
   {account:'read-only',costPerCall:'0',creditsPerUsd:'100',multiplier:'6',maxCalls:1,maxOutputTokens:1,inputBytes:1024,historyItems:0}).latest(input)),
