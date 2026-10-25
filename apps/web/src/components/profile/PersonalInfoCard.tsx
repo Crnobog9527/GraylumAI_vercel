@@ -1,12 +1,11 @@
 'use client';
 
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import {
   Pencil, Crown, Coins, Plus, RefreshCw, Key, Headphones,
-  Loader2, Check, X, Camera, MessageCircle, CalendarCheck
+  Loader2, Check, X, MessageCircle, CalendarCheck
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
   Dialog,
   DialogContent,
@@ -18,9 +17,9 @@ import { trpc } from '@/trpc/client';
 import { summaryStat } from './summaryStat';
 import { CREDITS_SUMMARY_QUERY_OPTIONS, SummaryRetryButton } from './SummaryRetry';
 import { logClientDevError } from '@/lib/client-log';
-import { createClient } from '@/lib/supabase';
 import { getSafeErrorMessage } from '@/lib/safe-error-message';
 import { formatCreditsBalance } from '@/components/credits/balancePresentation';
+import { ProfileAvatar } from './ProfileAvatar';
 
 // Mock user type
 export interface MockUser {
@@ -46,12 +45,10 @@ export const UserProfileHeader = memo(function UserProfileHeader({
   user: MockUser;
   onUserUpdate?: (user: MockUser) => void;
 }) {
-  const [uploading, setUploading] = useState(false);
   const [editingNickname, setEditingNickname] = useState(false);
   const [nickname, setNickname] = useState(user?.nickname || '');
   const [savingNickname, setSavingNickname] = useState(false);
   const [profileMessage, setProfileMessage] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // tRPC mutation for updating profile
   const updateProfileMutation = trpc.user.updateUserProfile.useMutation();
@@ -71,56 +68,6 @@ export const UserProfileHeader = memo(function UserProfileHeader({
   useEffect(() => {
     setNickname(user?.nickname || '');
   }, [user?.nickname]);
-
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setUploading(true);
-    setProfileMessage(null);
-
-    try {
-      const supabase = createClient();
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.access_token) {
-        throw new Error('当前登录状态已失效，请重新登录后再上传头像。');
-      }
-
-      const formData = new FormData();
-      formData.append('file', file);
-
-      const response = await fetch('/api/upload', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: formData,
-      });
-
-      const result = await response.json().catch(() => null);
-      if (!response.ok || !result?.url) {
-        throw new Error(result?.error || '头像上传失败，请稍后重试。');
-      }
-
-      const updatedProfile = await updateProfileMutation.mutateAsync({ avatarUrl: result.url });
-      onUserUpdate?.({
-        ...user,
-        avatar_url: updatedProfile?.avatar_url || result.url,
-      });
-      setProfileMessage({ tone: 'success', text: '头像已更新。' });
-    } catch (error) {
-      logClientDevError('Failed to upload avatar');
-      setProfileMessage({
-        tone: 'error',
-        text: getSafeErrorMessage(error, '头像上传失败，请稍后重试。'),
-      });
-    } finally {
-      setUploading(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
-    }
-  };
 
   const handleSaveNickname = async () => {
     if (!nickname.trim()) return;
@@ -163,39 +110,7 @@ export const UserProfileHeader = memo(function UserProfileHeader({
     >
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-4">
-          <div className="relative group">
-            <Avatar
-              className="h-20 w-20"
-              style={{ border: '2px solid rgba(255, 215, 0, 0.3)' }}
-            >
-              <AvatarImage src={user?.avatar_url} />
-              <AvatarFallback
-                className="text-2xl font-medium"
-                style={{ background: 'rgba(255, 215, 0, 0.1)', color: 'var(--color-primary)' }}
-              >
-                {user?.full_name?.[0] || user?.email?.[0]?.toUpperCase() || 'U'}
-              </AvatarFallback>
-            </Avatar>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              onChange={handleFileSelect}
-              className="hidden"
-            />
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploading}
-              className="absolute inset-0 grid place-items-center rounded-full opacity-0 focus-visible:opacity-100 group-hover:opacity-100 transition-opacity"
-              style={{ background: 'rgba(0,0,0,0.6)' }}
-            >
-              {uploading ? (
-                <Loader2 className="h-6 w-6 animate-spin text-white" aria-label="上传中" />
-              ) : (
-                <Camera className="h-6 w-6 text-white" aria-label="更换头像" />
-              )}
-            </button>
-          </div>
+          <ProfileAvatar src={user?.avatar_url} initial={user?.full_name?.[0] || user?.email?.[0]?.toUpperCase() || 'U'} />
           <div>
             <div className="flex items-center gap-2 mb-1">
               {editingNickname ? (

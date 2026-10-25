@@ -81,7 +81,7 @@ export async function runCases({db,Client,connectionString,report}) {
  assert.equal((await one('select monthly_refund_erasure_safe($1) ok',[i])).ok,true);
  report.checks.push('complete success/failure financial proofs accepted; each missing/null/wrong-type field and contradictory terminal evidence refused');
  report.checks.push('confirmed failure restores original grant/balance exactly once');
- const blocked=await fx();await db.query("insert into credit_transactions(user_id,amount,type,ledger_type) values($1,-1,'deduction','spend')",[blocked.user]);
+ const blocked=await fx();await db.query("insert into credit_transactions(idempotency_key,user_id,amount,type,ledger_type) values('fixture:'||gen_random_uuid(),$1,-1,'deduction','spend')",[blocked.user]);
  await assert.rejects(()=>approve(blocked),/CONSUMPTION/);
  const noFee=await fx();noFee.terms.feePermitted='not_permitted';noFee.terms.feeMinor=0;noFee.terms.netMinor=6900;
  let nf=await claim(noFee,await approve(noFee));

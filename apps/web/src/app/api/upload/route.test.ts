@@ -88,7 +88,8 @@ describe('POST /api/upload HTTP boundary', () => {
     expect(f.storage.from).toHaveBeenCalledExactlyOnceWith('ticket-attachments');
     expect(f.bucket.upload).toHaveBeenCalledExactlyOnceWith(body.path, Buffer.from(bytes), { contentType: 'image/png', upsert: false });
     const uploadId = body.path.slice(actor.length + 1, -4);
-    expect(f.rpc).toHaveBeenNthCalledWith(1, 'ticket_upload_begin', { p_profile_id: actor, p_upload_id: uploadId });
+    expect(f.rpc).toHaveBeenNthCalledWith(1, 'ticket_upload_begin',
+      { p_profile_id: actor, p_upload_id: uploadId, p_bytes: expect.any(Number) });
     expect(f.rpc).toHaveBeenNthCalledWith(2, 'ticket_upload_finish', { p_profile_id: actor, p_upload_id: uploadId, p_absent: false });
   });
   it.each(['deleted', 'suspended'])('denies %s profile before intent or Storage', async status => {
@@ -135,6 +136,7 @@ describe('POST /api/upload HTTP boundary', () => {
       'ticket_upload_finish', 'remove', 'list', 'ticket_upload_finish:absent']);
     const path = f.bucket.upload.mock.calls[0][0];
     expect(f.bucket.remove).toHaveBeenCalledExactlyOnceWith([path]);
-    expect(f.rpc.mock.calls[2][1]).toEqual({ ...f.rpc.mock.calls[0][1], p_absent: true });
+    const begun = f.rpc.mock.calls[0][1];
+    expect(f.rpc.mock.calls[2][1]).toEqual({ p_profile_id: begun.p_profile_id, p_upload_id: begun.p_upload_id, p_absent: true });
   });
 });

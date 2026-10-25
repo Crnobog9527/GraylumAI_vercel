@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { clearEntryLanguage, ENTRY_CHANGE_WINDOW_MS, ENTRY_LANGUAGE_TTL_MS, entryLanguageNotice, pendingEntryLanguage, rememberEntryLanguage } from './entry-language';
+import { clearEntryLanguage, ENTRY_CHANGE_WINDOW_MS, ENTRY_LANGUAGE_TTL_MS, entryLanguageNotice, parseEntryNotice, pendingEntryLanguage, rememberEntryLanguage } from './entry-language';
 import { SIGNUP_CTA_HREF, SIGNUP_CTA_HREF_ZH_TW } from './seo/content/shared';
 
 function stubStorage() {
@@ -76,5 +76,10 @@ describe('public page entry language (CHAT-LANGUAGE, Owner 2026-10-25)', () => {
   it('describes the application alone when storage is blocked', () => {
     vi.stubGlobal('window', { get localStorage(): Storage { throw new Error('blocked'); } });
     expect(entryLanguageNotice({ language: 'zh-Hant', previous: 'zh-Hant' }).description).toBe('按你进入的页面设置。可在右上角「语言」修改。');
+  });
+
+  it('reads the notice the server adds after saving the language itself', () => {
+    expect(parseEntryNotice('zh-Hans.zh-Hant')).toEqual({ previous: 'zh-Hans', language: 'zh-Hant' });
+    for (const value of [null, '', 'zh-Hans', 'zh-Hans.fr', 'fr.en', 'zh-Hans.en.x']) expect(parseEntryNotice(value)).toBeNull();
   });
 });

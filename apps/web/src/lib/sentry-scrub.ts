@@ -34,6 +34,7 @@ export const APP_SEGMENTS = new Set(['about', 'acceptable-use', 'accessibility',
   'register', 'release-subscription-credits',
   'requests', 'reset-password', 'review', 'runtime', 'runtime-recovery', 'scan-check', 'search', 'secrets', 'settings', 'shequn-jingying', 'shequn-xingxiao',
   'skills', 'social-monitor', 'start', 'stream', 'stripe', 'terms', 'tickets', 'topics', 'transactions', 'trpc', 'upload', 'users',
+  'ticket-attachments-cleanup',
   'verify-email', 'waffo', 'webhook', 'workbench', 'zh-tw', 'zimeiti-jingying', 'zimeiti-kecheng',
   // Style samples D, E, G to O (PUBLIC-SITE, /landing/preview/d … /o), removed with the samples.
   'd', 'e', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o',
@@ -151,11 +152,14 @@ function scrubCommon(event: Event): Event {
   return out;
 }
 
-// Fixed-code data-erasure alerts (erasure-backlog-alert.ts) may keep these counts: non-negative integers only,
+// Fixed-code alerts (erasure-backlog-alert.ts, publish-monitor-alert.ts) may keep these counts: non-negative integers only,
 // no ids or text, and only when the message is exactly that code.
 const ALERT_COUNTS: Readonly<Record<string, readonly string[]>> = {
   LIBRARY_CLEANUP_BACKLOG: ['pending', 'overdue', 'oldestHours'],
   ERASURE_BACKLOG: ['open', 'over12h', 'over20h', 'oldestHours'],
+  // PUBLISH-MONITOR: the Post for Me plan's publish count (publish-monitor-alert.ts); three integers, nothing else.
+  PUBLISH_MONITOR_QUOTA_NEAR: ['limit', 'used', 'reserved'],
+  PUBLISH_MONITOR_QUOTA_FULL: ['limit', 'used', 'reserved'],
 };
 function scrubAlertCounts(event: ErrorEvent, out: ErrorEvent) {
   const keys = event.message && Object.hasOwn(ALERT_COUNTS, event.message) ? ALERT_COUNTS[event.message] : undefined;

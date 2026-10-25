@@ -243,7 +243,7 @@ export function registerReportTests(db: pg.Client, fixture: () => Promise<Fixtur
         expect(frozen.request.input).toBe('Generate the confirmed report.');
         // SKILL-I18N-HOOK: that placeholder never decides the report language; the user's words in the facts do.
         expect(frozen.instructions).toContain('is written by the host, not the user, and never sets the report language');
-        expect(frozen.replyLanguage).toBe('reply-language-v2-zh-Hans');
+        expect(frozen.replyLanguage).toBe('reply-language-v3-zh-Hans');
         if (scenario === 'cancelled') {
           // A stale tab with a new requestId cannot start a second paid report while the first is admitted.
           await expect(service.start({ ...input, requestId: randomUUID() })).rejects.toThrow('REPORT_ALREADY_EXISTS');

@@ -213,8 +213,8 @@ describe('diagnostics routed client contract', () => {
 describe('billing diagnostic service uses only real read paths', () => {
   it.each(['healthy', 'query failure', 'mismatch'] as const)('keeps three read-only probes and reports the unavailable stop-loss monitor: %s', async mode => {
     const writes: string[] = [];
-    // 0071 grants research_billing_summary to service_role only, so reconciliation reads it
-    // through the admin client; the user-scoped client is never asked for a billing RPC.
+    // 0071/0386 grant research_billing_summary and billing_reconcile_day to service_role only, so reconciliation reads
+    // them through the admin client; the user-scoped client is never asked for a billing RPC.
     const rpc = vi.fn(() => { throw new Error('User-scoped billing RPC is not granted'); });
     const from = vi.fn((table: string) => {
       if (table === 'diagnostic_results') return { insert: async () => { writes.push(table); return { error: null }; } };
@@ -231,8 +231,14 @@ describe('billing diagnostic service uses only real read paths', () => {
       return builder;
     });
     const adminRpc = vi.fn(async (name: string) => {
-      if (name !== 'research_billing_summary') throw new Error('No privileged billing mutations allowed');
-      return { data: { count: 0, credits: 0 }, error: null };
+      if (name === 'research_billing_summary') return { data: { count: 0, credits: 0 }, error: null };
+      if (name !== 'billing_reconcile_day') throw new Error('No privileged billing mutations allowed');
+      // ARCH-FIX E2: the day's totals (including billing_history settles) are counted in the database.
+      if (mode === 'query failure') return { data: null, error: { message: 'synthetic read failure' } };
+      return { data: { tokenStatsCount: 0, tokenStatsCredits: 0, webSearchCount: 0,
+        successfulAiRequests: mode === 'mismatch' ? 1 : 0, settleCredits: 0, completedPaymentOrders: 0,
+        completedPaymentAmount: 0, calls: { settledCalls: 0, mismatched: 0, sample: [] },
+        sources: { mismatched: 0, sample: [] }, entries: { unattributed: 0, notApplied: 0 } }, error: null };
     });
     const service = new DiagnosticsService({ supabase: { from, rpc } as never,
       supabaseAdmin: { from, rpc: adminRpc } as never, userId: 'synthetic-admin' });
@@ -241,7 +247,7 @@ describe('billing diagnostic service uses only real read paths', () => {
       ? ['failed', 'failed', 'failed'] : ['warning', 'warning', mode === 'mismatch' ? 'failed' : 'passed']);
     expect(result.results.find(r => r.testId === 'runtime_stop_loss')?.status).toBe('error');
     expect(rpc).not.toHaveBeenCalled();
-    expect(adminRpc.mock.calls.map(([name]) => name)).toEqual(['research_billing_summary']);
+    expect(adminRpc.mock.calls.map(([name]) => name).sort()).toEqual(['billing_reconcile_day', 'research_billing_summary']);
     expect(writes).toEqual(['diagnostic_results']);
     expect(result.saveStatus?.saved).toBe(true);
   });
