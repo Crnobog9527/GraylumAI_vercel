@@ -22,7 +22,8 @@ import {startRedisDouble} from './redis-double.mjs';
 const safeupdateLibrary=process.env.ERASURE_SAFEUPDATE_LIBRARY;
 if(safeupdateLibrary && !safeupdateLibrary.startsWith('/'))throw new Error('Require absolute local safeupdate library path');
 const development=process.argv.slice(2).join(' ')==='--local-only --development';
-if ((!development && process.argv.slice(2).join(' ') !== '--local-only') || process.env.CI) throw new Error('Require --local-only');
+const ci=process.argv.slice(2).join(' ')==='--ci'; // MAINT-P1: --ci (CI only) runs the default mode
+if ((!development && !ci && process.argv.slice(2).join(' ') !== '--local-only') || Boolean(process.env.CI)!==ci) throw new Error('Require --local-only, or --ci in CI');
 const root=resolve(import.meta.dirname,'../../../..');
 const read=path=>readFileSync(resolve(root,path),'utf8');
 const run=(cmd,args,input)=>spawnSync(cmd,args,{input,encoding:'utf8',cwd:root,
