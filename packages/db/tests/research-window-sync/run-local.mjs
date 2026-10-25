@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// 0368 research_test_window_sync_prices: the daily research price refresh realigns the staging test window's TikHub
+// 0372 research_test_window_sync_prices: the daily research price refresh realigns the staging test window's TikHub
 // tool policies with the stored prices. Checks that the price, expiry, entry hash (providerEntryHash) and upperUsd come
 // from the price table, that a price written into the window by anyone is put back to the table's, that nothing outside
 // that window's TikHub research policies changes, that unpriceable routes are skipped and reported, grants, and that the
@@ -9,7 +9,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { localDb, read } from '../runtime-view-perf/local-db.mjs';
 
 const database = await localDb(), db = database.client;
-const migration = read('packages/db/migrations/0368_research_test_window_sync_prices.sql');
+const migration = read('packages/db/migrations/0372_research_test_window_sync_prices.sql');
 // providerEntryHash (billingProviderPrices.ts): sha256 of JSON.stringify of the entry's [key, value] pairs in key order.
 const entryHash = entry => createHash('sha256').update(JSON.stringify(Object.keys(entry).sort().map(key => [key, entry[key]]))).digest('hex');
 const DAY = 86400000;
