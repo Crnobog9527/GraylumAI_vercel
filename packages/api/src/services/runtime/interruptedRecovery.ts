@@ -17,9 +17,12 @@ const itemsSchema = z.array(z.object({
  * This host has no SDK, provider transport, credential or direct-table authority. */
 export async function recoverInterruptedExecutions(input: {
   database: BillingRpc; budget: RuntimeBudget; actorId?: string;
+  /** Time reserved per request; an admission repair (repairActorRounds) works in smaller steps. */
+  stepMs?: number;
 }): Promise<AutomaticRecoverySummary> {
   const summary = { selected: 0, processed: 0, settled: 0, pending: 0, failed: 0 };
-  try { input.budget.assertCanStart(2_000); } catch { return summary; }
+  const step = input.stepMs ?? 2_000;
+  try { input.budget.assertCanStart(step); } catch { return summary; }
   try {
     const response = await input.database.rpc('runtime_interrupted_recovery', {
       p_actor_id: input.actorId ?? null, p_limit: 20,
@@ -30,7 +33,7 @@ export async function recoverInterruptedExecutions(input: {
       throw new Error('RUNTIME_RECOVERY_ACTOR_DENIED');
     summary.selected = items.length;
     for (const item of items) {
-      try { input.budget.assertCanStart(2_000); } catch { summary.pending += items.length - summary.processed - summary.failed; break; }
+      try { input.budget.assertCanStart(step); } catch { summary.pending += items.length - summary.processed - summary.failed; break; }
       try {
         const ended = await input.database.rpc('runtime_interrupted_recovery', {
           p_actor_id: item.actorId, p_execution_id: item.executionId, p_epoch: item.epoch,
