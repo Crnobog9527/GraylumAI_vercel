@@ -226,7 +226,7 @@ try {
   // The monthly fixture's period is not a canonical pre-deduct window (before and after 0275), so it records the spend row only.
   const use = async (user, reservation = true) => {
     if (reservation) await settle(user, await reserve(user, 10), 10);
-    await c.query("INSERT INTO credit_transactions(user_id,amount,type,ledger_type) VALUES($1,-10,'deduction','spend')", [user]);
+    await c.query("INSERT INTO credit_transactions(idempotency_key,user_id,amount,type,ledger_type) VALUES('fixture:'||gen_random_uuid(),$1,-10,'deduction','spend')", [user]);
   };
   const eligibility = async () => {
     const out = [];

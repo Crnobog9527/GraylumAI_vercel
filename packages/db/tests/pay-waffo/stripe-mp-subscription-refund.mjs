@@ -157,8 +157,8 @@ export async function stripeMpSubscriptionRefundCases({admin,service,connect}) {
   await assert.rejects(()=>approve(recorded),/PAY_MONTHLY_HISTORY/,'a Stripe payment recorded');
   // Used credits since the payment: refused (record AA). A non-admin cannot approve.
   const q=await buyer('e7'.repeat(32));
-  await admin.query(`INSERT INTO credit_transactions(user_id,amount,type,description,ledger_type,counts_as_spend,balance_before,balance_after)
-    VALUES($1,-10,'deduction','spend','spend',true,1000,990)`,[q.user]);
+  await admin.query(`INSERT INTO credit_transactions(idempotency_key,user_id,amount,type,description,ledger_type,counts_as_spend,balance_before,balance_after)
+    VALUES('fixture:'||gen_random_uuid(),$1,-10,'deduction','spend','spend',true,1000,990)`,[q.user]);
   await assert.rejects(()=>approve(q),/CONSUMPTION_OR_UNKNOWN/);
   await assert.rejects(()=>service.query('SELECT pay_common_monthly_refund_approve($1,$2,$3,$4)',[q.user,q.order,q.terms,'a'.repeat(64)]),
     /ADMIN_REQUIRED/);
