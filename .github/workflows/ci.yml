@@ -393,11 +393,6 @@ jobs:
       - name: Integration — PAYG runtime waiting, resume and metering review
         run: node packages/db/tests/payg/run-runtime.mjs --ci
 
-      # MAINT-P1: every database suite that starts its own container (packages/db/tests/<dir>/*-local.mjs)
-      # runs here unless packages/db/tests/local-suites-excluded.json lists it (that list only shrinks).
-      - name: Integration — Database behaviour suites (run-local)
-        run: node packages/db/tests/run-local-suites.mjs --ci
-
       - name: Integration — Runtime recovery and streaming
         run: node packages/db/tests/v3/run-workbench.mjs --runtime-only --with-staging-schema --without-app --schema-from-files
 
@@ -447,9 +442,58 @@ jobs:
           fi
           echo 'Validation passed.'
 
+  # MAINT-P1b: the run-local database suites have their own worker, split in two, so neither this job nor
+  # the integration job comes near its 30-minute limit. Every suite still runs; none is skipped.
+  db-suites:
+    name: Run database behaviour suites (${{ matrix.shard }}/2)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Anonymous registry pulls can be rate limited; pulls are read-only and
+      # digest-pinned, so a bounded retry cannot change what is tested.
+      - name: Pull pinned service images
+        run: |
+          set -euo pipefail
+          images="$(node --input-type=module -e 'const m = await import("./packages/db/tests/v3/images.mjs"); console.log(Object.values(m).join("\n"))')"
+          for image in $images; do
+            for attempt in 1 2 3 4 5; do
+              if docker pull --quiet "$image"; then break; fi
+              if [ "$attempt" -eq 5 ]; then echo "Failed to pull $image" >&2; exit 1; fi
+              sleep $((attempt * 15))
+            done
+          done
+
+      # Every database suite that starts its own container (packages/db/tests/<dir>/*-local.mjs) runs in one
+      # of the two shards unless packages/db/tests/local-suites-excluded.json lists it (that list only shrinks).
+      - name: Integration — Database behaviour suites (run-local)
+        run: node packages/db/tests/run-local-suites.mjs --ci --shard ${{ matrix.shard }}/2
+
   unit-check:
     name: Unit Tests
-    needs: [test, integration, ci-contracts, migration-ledger]
+    needs: [test, integration, db-suites, ci-contracts, migration-ledger]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -460,11 +504,13 @@ jobs:
         env:
           WORK_RESULT: ${{ needs.test.result }}
           INTEGRATION_RESULT: ${{ needs.integration.result }}
+          DB_SUITES_RESULT: ${{ needs.db-suites.result }}
           CONTRACTS_RESULT: ${{ needs.ci-contracts.result }}
           LEDGER_RESULT: ${{ needs.migration-ledger.result }}
         run: |
           set -euo pipefail
           if [ "$WORK_RESULT" != success ] || [ "$INTEGRATION_RESULT" != success ] ||
+            [ "$DB_SUITES_RESULT" != success ] ||
             [ "$CONTRACTS_RESULT" != success ] || [ "$LEDGER_RESULT" != success ]; then
             echo 'Missing, failed, cancelled, or skipped validation.' >&2
             exit 1
