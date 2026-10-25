@@ -14,8 +14,8 @@ export default function WorkspaceMarketplace(){
  const [category,setCategory]=useState<string>('all'),[search,setSearch]=useState(''),[page,setPage]=useState(1),[selected,setSelected]=useState(''),[returnTo,setReturnTo]=useState('');
  useEffect(()=>{const params=new URL(location.href).searchParams;setReturnTo(params.get('returnTo')??sessionStorage.getItem('opc-work-return')??'');setSelected(params.get('module')??'');},[]);
  const listing=trpc.modules.getModules.useQuery({category,limit:48,offset:(page-1)*48,sortBy:'newest'});
- const detail=trpc.modules.getModuleById.useQuery({id:selected},{enabled:Boolean(selected),staleTime:RUNTIME_CHOICES_STALE_MS});
- const runtimeChoices=trpc.runtime.choices.useQuery(undefined,{enabled:Boolean(selected)});
+ const detail=trpc.modules.getModuleById.useQuery({id:selected},{enabled:Boolean(selected)});
+ const runtimeChoices=trpc.runtime.choices.useQuery(undefined,{enabled:Boolean(selected),staleTime:RUNTIME_CHOICES_STALE_MS});
  const runnable=Boolean(runtimeChoices.data?.skills.some(skill=>skill.moduleId===selected));
  const modules=listing.data?.modules??[];
  const filtered=modules.filter(module=>(module.title+' '+(module.description??'')).toLocaleLowerCase().includes(search.toLocaleLowerCase()));
