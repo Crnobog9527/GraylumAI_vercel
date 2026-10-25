@@ -62,7 +62,7 @@ export async function concurrencyCases({db,Client,connectionString,report,create
         waiting=(await db.query("SELECT wait_event_type='Lock' waiting FROM pg_stat_activity WHERE pid=$1",[waitingPid])).rows[0]?.waiting===true;
         if(!waiting) await new Promise(resolve=>setTimeout(resolve,10));
       }
-      // Same actor: since DB-PERF 0353 the claim first waits on the actor's wallet row the receipt holds.
+      // Same actor: since DB-PERF 0362 the claim first waits on the actor's wallet row the receipt holds.
       assert.equal(waiting,true,'other run of the same actor must wait for the uncommitted threshold receipt');
       assert.equal((await db.query('SELECT count(*)::int n FROM bill2_calls WHERE run_id=$1',[waitingRun.id])).rows[0].n,0);
       await writers[0].query('COMMIT');
@@ -76,7 +76,7 @@ export async function concurrencyCases({db,Client,connectionString,report,create
     }
     report.checks.push('model-lock race: second run waits for uncommitted threshold receipt, then refuses without a hold');
 
-    // DB-PERF 0353: another user's claim on the same model waits only for a write that blocks the model.
+    // DB-PERF 0362: another user's claim on the same model waits only for a write that blocks the model.
     const flagged = await createFixture(db,{empirical:true});
     const fc = await claim(db,flagged,1,true);
     const bystander = await createFixture(db,{empirical:true,sameModel:flagged});
