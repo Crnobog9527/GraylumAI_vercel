@@ -10,6 +10,13 @@ const HOUR = 3_600_000;
 // A library deletion waits for the upload guard (3 h 5 min after the upload began) before its object can be proven
 // absent; six hours past that means cleanup is not keeping up.
 export const LIBRARY_BACKLOG_ALERT_MS = 3 * HOUR + 5 * 60_000 + 6 * HOUR;
+// REL-1 core 7 (6) drill (#1420): the worst case is about 3 h 5 min + pending / 600 hours at 100 rows per 5-minute run
+// (about 8 h at 3000, 11.5 h at 5000). The age alert only fires at hour 9 of a burst; these counts fire as soon as the
+// burst lands. The margin is kept for Storage outages: in the drill an 8-hour outage plus 10% failures took the same
+// backlog from 13 h to 23 h. Six failing runs in a row (30 minutes) is such an outage.
+export const LIBRARY_BACKLOG_ERROR_PENDING = 3000;
+export const LIBRARY_BACKLOG_FATAL_PENDING = 5000;
+export const LIBRARY_FAILING_RUNS = 6;
 export const ERASURE_BACKLOG_ERROR_MS = 12 * HOUR;
 export const ERASURE_BACKLOG_FATAL_MS = 20 * HOUR;
 
@@ -23,17 +30,31 @@ function raise(code: string, level: Level, extra: Record<string, number | string
 const ageMs = (iso: string | null, now: number) => (iso ? now - Date.parse(iso) : 0);
 
 export function reportLibraryBacklog(
-  backlog: { pending?: number; overdue?: number; oldestDeletedAt?: string | null },
+  backlog: { pending?: number; overdue?: number; oldestDeletedAt?: string | null; failingRuns?: number },
   now = Date.now(),
 ) {
+  const pending = backlog.pending ?? 0;
   const overdue = backlog.overdue ?? 0;
+  const failingRuns = backlog.failingRuns ?? 0;
   const oldestAgeMs = ageMs(backlog.oldestDeletedAt ?? null, now);
-  if (overdue === 0 && oldestAgeMs <= LIBRARY_BACKLOG_ALERT_MS) return null;
-  const level: Level = overdue > 0 ? 'fatal' : 'error';
+  const fatal = overdue > 0 || pending >= LIBRARY_BACKLOG_FATAL_PENDING;
+  if (!fatal && oldestAgeMs <= LIBRARY_BACKLOG_ALERT_MS && pending < LIBRARY_BACKLOG_ERROR_PENDING
+    && failingRuns < LIBRARY_FAILING_RUNS) return null;
+  const level: Level = fatal ? 'fatal' : 'error';
   raise('LIBRARY_CLEANUP_BACKLOG', level, {
-    pending: backlog.pending ?? 0, overdue, oldestHours: Math.floor(oldestAgeMs / HOUR),
+    pending, overdue, oldestHours: Math.floor(oldestAgeMs / HOUR), failingRuns,
   });
   return level;
+}
+
+/** Finished library cleanup runs in a row, newest first, that did not succeed (at most LIBRARY_FAILING_RUNS). */
+async function readFailingRuns(client: SupabaseClient, signal: AbortSignal) {
+  const { data, error } = await client.from('scheduled_job_runs').select('status').eq('job_key', 'library_cleanup')
+    .not('finished_at', 'is', null).order('started_at', { ascending: false }).limit(LIBRARY_FAILING_RUNS)
+    .abortSignal(signal);
+  if (error || !Array.isArray(data)) throw new Error('LIBRARY_CLEANUP_RUNS_UNAVAILABLE');
+  const firstSuccess = (data as { status?: string }[]).findIndex(run => run.status === 'success');
+  return firstSuccess === -1 ? data.length : firstSuccess;
 }
 
 export type ErasureBacklog = { open: number; overError: number; overFatal: number; oldestConfirmedAt: string | null };
@@ -83,10 +104,24 @@ export async function checkErasureBacklog(client: SupabaseClient, now = Date.now
 
 export async function checkLibraryBacklog(client: SupabaseClient, now = Date.now()) {
   try {
-    const { data, error } = await client.rpc('library_cleanup_backlog', { a: null })
-      .abortSignal(AbortSignal.timeout(READ_TIMEOUT_MS));
-    if (error || !data) throw new Error('LIBRARY_BACKLOG_UNAVAILABLE');
-    return reportLibraryBacklog(data as { pending?: number; overdue?: number; oldestDeletedAt?: string | null }, now);
+    const signal = AbortSignal.timeout(READ_TIMEOUT_MS);
+    // A failed run-history read must not hide the backlog itself: log it and count no failing runs.
+    const [{ data, error }, failingRuns] = await Promise.all([
+      client.rpc('library_cleanup_backlog', { a: null }).abortSignal(signal),
+      readFailingRuns(client, signal).catch(() => {
+        console.warn('[erasure-alert] LIBRARY_CLEANUP_RUNS_UNAVAILABLE');
+        return 0;
+      }),
+    ]);
+    // The two signals are independent: cleanup itself calls the backlog RPC, so a failing RPC is exactly what makes
+    // runs fail. Keep the failing-runs alert when only the backlog read is down.
+    if (error || !data) {
+      console.warn('[erasure-alert] LIBRARY_CLEANUP_BACKLOG_UNAVAILABLE');
+      return failingRuns >= LIBRARY_FAILING_RUNS ? reportLibraryBacklog({ failingRuns }, now) : null;
+    }
+    return reportLibraryBacklog({
+      ...(data as { pending?: number; overdue?: number; oldestDeletedAt?: string | null }), failingRuns,
+    }, now);
   } catch {
     console.warn('[erasure-alert] LIBRARY_CLEANUP_BACKLOG_UNAVAILABLE');
     return null;
