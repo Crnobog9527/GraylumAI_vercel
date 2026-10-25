@@ -70,7 +70,7 @@ export const isUpgradeRefusal = (error: unknown) => /FUSION_COMPARE_FORBIDDEN|FU
 export type ReadColumn = { column: number; runId: string; modelId: string; body: string | null;
   billing?: { state?: string; reservedCredits?: number | null; chargedCredits?: number | null; closed?: boolean; outcome?: string | null } | null;
   call: { callId: string; state: string; dispatched: boolean; settled?: boolean; verdict: string | null; inFlight?: boolean } | null };
-export type ColumnPhase = 'queued' | 'streaming' | 'done' | 'failed' | 'pending' | 'stopped';
+export type ColumnPhase = 'queued' | 'streaming' | 'done' | 'failed' | 'pending' | 'settling' | 'stopped';
 
 /** What a column shows (§3.5, §4.4 three outcomes): an answer, a confirmed failure (free), a result being checked (its hold kept),
  * or stopped. `streaming` is only ever set by the page while its own request runs. */
@@ -78,8 +78,10 @@ export function columnPhase(column: ReadColumn, compareState: string): ColumnPha
   const closed = column.billing?.closed === true;
   // Nothing is final until BILL2 closes the column's run: a saved answer or a verdict whose settlement failed or whose provider
   // cost is still pending keeps its hold (and recovery may still charge it), and adoption is refused for an unsettled call. So a
-  // dispatched column is `pending` until its billing closes, however terminal it looks.
-  if (column.call?.dispatched && !closed) return 'pending';
+  // dispatched column is `pending` until its billing closes, however terminal it looks. A usable answer whose run has not closed
+  // is `settling` ("积分结算中"): its result is known, only the settlement is outstanding (a failed one is finished by the daily
+  // recovery), and it is not adoptable yet.
+  if (column.call?.dispatched && !closed) return column.call.verdict === 'usable' ? 'settling' : 'pending';
   if (column.call?.verdict === 'usable' || (column.body && column.call?.verdict === null)) return 'done';
   // A stop after dispatch settles at the known usage (it can charge); the card must not call it free (see stoppedLabel).
   if (column.call?.verdict === 'user_stopped') return 'stopped';

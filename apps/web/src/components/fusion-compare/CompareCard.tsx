@@ -13,7 +13,7 @@ type View = { compareId: string; state: string; question?: string | null; charge
 type Live = { text: string; streaming: boolean };
 
 const PHASE_LABEL: Record<ColumnPhase, string> = { queued: '排队中', streaming: '生成中', done: '已完成', failed: '没有生成出来，不收费',
-  pending: '结果待核对', stopped: '已停止，不收费' };
+  pending: '结果待核对', settling: '积分结算中', stopped: '已停止，不收费' };
 const newId = () => crypto.randomUUID();
 
 /**
@@ -127,7 +127,8 @@ export function CompareCard({ compareId, names, onAdopted, onQuote }: {
                 <strong>{names[column.modelId] ?? '模型'}</strong>
                 <span className={styles.phase} data-phase={phase}>
                   {phase === 'streaming' && <Loader2 size={13} className={styles.spin} />}
-                  {phase === 'pending' ? `结果待核对，暂时冻结 ${heldCredits(column)} 积分` : phase === 'stopped' ? stoppedLabel(column) : PHASE_LABEL[phase]}
+                  {phase === 'pending' || phase === 'settling' ? `${PHASE_LABEL[phase]}，暂时冻结 ${heldCredits(column)} 积分`
+                    : phase === 'stopped' ? stoppedLabel(column) : PHASE_LABEL[phase]}
                 </span>
               </div>
               <div className={styles.answer}>{text ? <MessageMarkdown text={text} streaming={phase === 'streaming'} /> : <p className={styles.muted}>{

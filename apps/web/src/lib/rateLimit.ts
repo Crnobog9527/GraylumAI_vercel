@@ -38,8 +38,22 @@ export type RateLimitType =
 let redis: Redis | null = null;
 
 // All environments fail closed. Offline tests must explicitly mock Redis.
-// 500ms bounds admission latency during outages; it is not a provider timeout.
-const RATE_LIMIT_TIMEOUT_MS = 500;
+// 1000ms bounds admission latency during outages; it is not a provider timeout.
+// 500ms was too tight for cross-region calls (hkg1 functions to a US Redis).
+const RATE_LIMIT_TIMEOUT_MS = 1000;
+
+export type RateLimitFailureKind = 'timeout' | 'connection' | 'quota' | 'unconfigured' | 'other';
+
+/** Coarse failure class for logs only: never the message, URL or token. */
+export function classifyRateLimitFailure(error: unknown): RateLimitFailureKind {
+  const name = error instanceof Error ? error.name : '';
+  const text = `${name} ${error instanceof Error ? error.message : String(error)}`;
+  if (/RATE_LIMIT_UNCONFIGURED/.test(text)) return 'unconfigured';
+  if (/RATE_LIMIT_TIMEOUT|TimeoutError|AbortError|timed? ?out/i.test(text)) return 'timeout';
+  if (/max (daily |requests )?(request|command)s? limit|quota|\b429\b|WRONGPASS|NOPERM/i.test(text)) return 'quota';
+  if (/fetch failed|ECONN|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|UND_ERR|socket|network/i.test(text)) return 'connection';
+  return 'other';
+}
 
 async function limitWithDeadline(limiter: Ratelimit, identifier: string) {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -200,8 +214,10 @@ export async function checkRateLimit(
       retryAfter: result.success ? undefined : Math.max(1, Math.ceil((result.reset - Date.now()) / 1000)),
       reason: result.success ? undefined : 'rate_limited',
     };
-  } catch {
-    logServerError('security', 'web_rate_limit_backend_unavailable_denying_request');
+  } catch (error) {
+    logServerError('security', 'web_rate_limit_backend_unavailable_denying_request', {
+      failureKind: classifyRateLimitFailure(error),
+    });
     return {
       success: false,
       limit: 0,

@@ -10,8 +10,10 @@ import { buildFromFiles, installPgCronStub } from '../baseline/build-from-files.
 export const root = resolve(import.meta.dirname, '../../../..');
 export const read = path => readFileSync(resolve(root, path), 'utf8');
 export async function localDb() {
-  assert.equal(process.argv[2], '--local-only');
-  assert.ok(!process.env.CI);
+  // MAINT-P1: --local-only on a developer machine, --ci in CI (run-local-suites.mjs); never the other way round.
+  const ci = process.argv[2] === '--ci';
+  assert.equal(process.argv[2], ci ? '--ci' : '--local-only');
+  assert.equal(Boolean(process.env.CI), ci);
   const run = (cmd, args, input) => spawnSync(cmd, args, { input, encoding: 'utf8', cwd: root,
     env: { PATH: process.env.PATH, HOME: process.env.HOME }, maxBuffer: 64 * 1024 * 1024, timeout: 300000 });
   const ok = r => { if (r.status !== 0 || r.error) throw new Error((r.stderr || String(r.error)).slice(-5000)); return r.stdout.trim(); };

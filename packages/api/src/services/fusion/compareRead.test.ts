@@ -14,9 +14,11 @@ vi.mock('./compareAdmission', () => ({
   },
 }));
 import { readCompare } from './compareLive';
+import { setLogSink, type LogSink } from '../../lib/logger';
 
 const admin = {} as SupabaseClient;
-beforeEach(() => { s.calls = []; s.failVerdict = ''; });
+const logged: Array<Parameters<LogSink>[0]> = [];
+beforeEach(() => { s.calls = []; s.failVerdict = ''; logged.length = 0; setLogSink(entry => { logged.push(entry); }); });
 
 describe('compare read repairs an interrupted column (FUSION-COMPARE §3.5)', () => {
   // inFlight is true in these fixtures on purpose: it means dispatched and unsettled, which is exactly an interrupted answer.
@@ -37,5 +39,30 @@ describe('compare read repairs an interrupted column (FUSION-COMPARE §3.5)', ()
     const open = vi.fn(async () => async () => undefined);
     await readCompare(admin, id(1), id(2), open);
     expect(open).not.toHaveBeenCalled();
+  });
+});
+
+describe('a failed compare settlement is never answered as done (MAINT-P3 / audit A3)', () => {
+  it('lists the run as pending settlement, logs it, and leaves it to the daily recovery', async () => {
+    const settled: string[] = [];
+    const view = await readCompare(admin, id(1), id(2), async () => async (runId: string) => {
+      if (runId === id(11)) throw new Error('BILL2_DATABASE_UNAVAILABLE');
+      settled.push(runId);
+    });
+    expect(settled).toEqual([id(10)]);
+    expect(view?.settlementPending).toEqual([id(11)]);
+    expect(logged).toEqual([{ level: 'warn', category: 'billing', message: 'fusion_compare_settle_failed' }]);
+  });
+  it('an unavailable billing path (window closed, database down) leaves every judged run pending, logged once', async () => {
+    const view = await readCompare(admin, id(1), id(2), async () => { throw new Error('RUNTIME_STAGING_SERVICE_UNAVAILABLE'); });
+    expect(view?.settlementPending).toEqual([id(10), id(11)]);
+    expect(logged.map(entry => entry.message)).toEqual(['fusion_compare_settle_unavailable']);
+  });
+  it('a successful settlement adds no marker and logs nothing; a failed verdict repair is logged', async () => {
+    expect((await readCompare(admin, id(1), id(2), async () => async () => undefined))?.settlementPending).toBeUndefined();
+    expect(logged).toEqual([]);
+    s.failVerdict = 'all';
+    await readCompare(admin, id(1), id(2), async () => async () => undefined);
+    expect(logged.map(entry => entry.message)).toEqual(['fusion_compare_verdict_repair_failed', 'fusion_compare_verdict_repair_failed']);
   });
 });

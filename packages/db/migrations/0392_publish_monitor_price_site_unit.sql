@@ -1,5 +1,5 @@
 -- Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved.
--- MAINT-P6 (placeholder number 0397; the controller assigns the final one when merging).
+-- MAINT-P6 (0392).
 -- Owner 2026-10-25: "发布监测的积分换算跟全站设置走". One-click publishing kept its own copy of q and m inside
 -- system_settings.publish_monitor_publish_price; a site-wide change of billing_credits_per_usd / billing_token_price_multiplier
 -- would never reach it. After this migration the price row holds only {"usdPerTarget": ...}, and publish_monitor_publish_price()

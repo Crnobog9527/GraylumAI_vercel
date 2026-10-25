@@ -63,11 +63,18 @@ it('locks the tier when editing, keeps name editable, and allows choosing a tier
     const dialog = page.getByRole('dialog');
     await browserExpect(dialog.getByRole('combobox')).toBeDisabled();
     await browserExpect(dialog.getByText('修改等级需同时设置会员权益，暂不支持')).toBeVisible();
+    // Prices are read-only when editing (changing one is a migration) and are never sent.
+    await browserExpect(dialog.getByTestId('membership-plan-monthly-price-input')).toBeDisabled();
+    await browserExpect(dialog.getByTestId('membership-plan-yearly-price-input')).toBeDisabled();
+    await browserExpect(dialog.getByText('月付价格 (USD)（只读，改价走迁移）')).toBeVisible();
     await dialog.getByTestId('membership-plan-name-input').fill('Renamed');
     await dialog.getByRole('button', { name: '保存', exact: true }).click();
     expect(await page.evaluate('window.savedPlans[0]')).toMatchObject({ id: 'plan-pro', level: 'pro', name: 'Renamed' });
+    expect(await page.evaluate('Object.keys(window.savedPlans[0])')).not.toContain('monthlyPrice');
+    expect(await page.evaluate('Object.keys(window.savedPlans[0])')).not.toContain('yearlyPrice');
     await page.getByRole('button', { name: '创建会员等级', exact: true }).click();
     await browserExpect(dialog.getByRole('combobox')).toBeEnabled();
+    await browserExpect(dialog.getByTestId('membership-plan-monthly-price-input')).toBeEnabled();
     await browserExpect(dialog.getByText('修改等级需同时设置会员权益，暂不支持')).toHaveCount(0);
     await dialog.getByRole('combobox').click();
     await page.getByRole('option', { name: 'Gold 黄金版' }).click();

@@ -33,6 +33,15 @@ export interface LogContext {
   [key: string]: unknown;
 }
 
+/** Where error logs and swallowed failures are forwarded besides pino (the web server wires it to Sentry in
+ * instrumentation.ts). Only level, category and the fixed message leave: never the context, which may hold ids. Kept on
+ * globalThis so every bundle that loads this module reports through the one sink. */
+export type LogSink = (entry: { level: LogLevel; category: LogCategory; message: string }) => void;
+const LOG_SINK = Symbol.for("graylum.api.logSink");
+export function setLogSink(sink: LogSink | null) {
+  (globalThis as { [LOG_SINK]?: LogSink | null })[LOG_SINK] = sink;
+}
+
 // 数据库日志记录
 interface DbLogEntry {
   level: LogLevel;
@@ -129,6 +138,11 @@ class AppLogger {
     };
 
     baseLogger[level](logData, message);
+
+    const sink = (globalThis as { [LOG_SINK]?: LogSink | null })[LOG_SINK];
+    if (sink && (level === "error" || context.swallowed === true)) {
+      try { sink({ level, category, message }); } catch { /* reporting never affects the caller */ }
+    }
 
     // 异步写入数据库 (不等待)
     this.writeToDb({

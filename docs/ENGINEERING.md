@@ -176,6 +176,7 @@ node packages/db/tests/run-db-baseline-replay.mjs --local-only --staging <只读
 | 端到端测试 | `pnpm --filter web test:e2e`（Playwright） |
 | 部分集成测试（需要本地 Docker） | `node packages/db/tests/v3/run-workbench.mjs`：默认只跑 `workbench.integration.ts`；用 `--opc-only`、`--runtime-only`、`--ai-only` 等参数选择计费、Runtime、定位等其他集成测试。仓库里的 16 个 `*.integration.ts` 并非都能通过它运行，统一入口由 CI-TRUST 补齐 |
 | 计费和恢复集成测试（CI 同款，需要本地 Docker，不启动网站和浏览器） | `node packages/db/tests/v3/run-workbench.mjs --bill2-core-only --without-app --schema-from-files`；`node packages/db/tests/v3/run-workbench.mjs --runtime-only --with-staging-schema --without-app --schema-from-files`。CI 的 "Unit Tests" 必需检查依赖这两条及空库文件建库检查；需要网站或浏览器而被排除的用例列在 `packages/db/tests/v3/without-app.mjs` |
+| 数据库行为套件统一入口（CI 同款，需要本地 Docker） | `node packages/db/tests/run-local-suites.mjs --local-only`（CI 用 `--ci`；`--list` 只列出，`--only <目录>` 只跑一个目录）。自动发现 `packages/db/tests/<目录>/` 下文件名带 `-local` 的套件，默认全部进 CI；暂时不能跑的写进 `packages/db/tests/local-suites-excluded.json`（要有原因和日期，只许变少，`scripts/tests/local-suites.test.mjs` 检查）。新套件的入口要接受 `--ci`（在 CI）和 `--local-only`（本机）。空库建库回放还会检查：标 STABLE/IMMUTABLE 的函数体里不许写数据或加行锁（PostgREST 对它们开只读事务），误报才可写进 `packages/db/tests/baseline/volatility-allow.json`，同样只许变少 |
 
 - ESLint 用 typescript-eslint 推荐规则检查 TS/TSX，网站另加 React Hooks 的
   `rules-of-hooks` 和 `exhaustive-deps`。已有问题记在各包的 `eslint-suppressions.json`

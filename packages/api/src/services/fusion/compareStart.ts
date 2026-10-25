@@ -7,6 +7,7 @@ import { admitCompareGroup, assertCompareAllowed, assertQuoteCovers, buildCompar
   type CompareAdmitted } from './compareAdmission';
 import { judgeCompareGate, readCompareGate, staticCompareGate } from './compareGate';
 import { compareRequest, snapshotHash, workspaceDependencies, type CompareParts } from './compareSnapshot';
+import { swallow } from '../../lib/swallow';
 
 /** FUSION-COMPARE §3.1–3.2: the estimate shown before the user agrees, and the start that records the request, makes the
  * one paid positioning judgement, then admits and claims the group. Everything here is injected or read through the
@@ -105,6 +106,10 @@ async function beginCompare(deps: CompareDeps, choice: CompareStartInput): Promi
   const claim = (compareId: string, group: CompareAdmitted) => compareRpc<{ state: 'claimed' | 'waiting_credits' }>(admin,
     'fusion_compare_claim', { p_actor_id: actorId, p_compare_id: compareId,
       p_items: group.runs.map(run => ({ runId: run.runId, sequence: 1, payload: run.call })) });
+  // Ending a refused record gives the user's one compare slot back now. Failing that (logged), nothing is held: the slot frees
+  // itself, since an admitting record only counts as active for five minutes (fusion_compare_active), and is reported as refused.
+  const endQuietly = (compareId: string) => swallow('fusion_compare_end_failed',
+    compareRpc(admin, 'fusion_compare_end', { p_actor_id: actorId, p_compare_id: compareId }), undefined, { category: 'billing', compareId });
 
   // A group that already exists is frozen and its holds are taken (the first start's response may have been lost): nothing is
   // repriced, judged or admitted again. The request-hash check still applies, and an ended compare still answers as ended.
@@ -122,9 +127,9 @@ async function beginCompare(deps: CompareDeps, choice: CompareStartInput): Promi
     // This request may already be recorded (judged, no group yet) by an earlier attempt: the live rules now refuse it, so
     // the record is ended instead of holding the user's one slot for five minutes. The database applies the same rules,
     // so a request that was never recorded is refused there without creating anything.
-    const recorded = await begin().catch(() => null);
+    const recorded = await swallow('fusion_compare_record_read_failed', begin(), null, { category: 'billing' });
     if (recorded && recorded.groupId === null && recorded.state === 'admitting') {
-      await compareRpc(admin, 'fusion_compare_end', { p_actor_id: actorId, p_compare_id: recorded.compareId }).catch(() => undefined);
+      await endQuietly(recorded.compareId);
     }
     throw error;
   });
@@ -150,7 +155,7 @@ async function beginCompare(deps: CompareDeps, choice: CompareStartInput): Promi
       if (!settings.maxBudgetUsd || sized.totalUsd > decimal(settings.maxBudgetUsd)) throw new Error('FUSION_BUDGET_EXCEEDED');
       assertQuoteCovers(sized.columns, choice.shown);
     } catch (error) {
-      await compareRpc(admin, 'fusion_compare_end', { p_actor_id: actorId, p_compare_id: compareId }).catch(() => undefined);
+      await endQuietly(compareId);
       throw error;
     }
   }
@@ -163,7 +168,7 @@ async function beginCompare(deps: CompareDeps, choice: CompareStartInput): Promi
     // Over the rate limit: end this compare (nothing held, nothing judged) so it does not occupy the user's one slot.
     try { await deps.rateLimit(); }
     catch (error) {
-      await compareRpc(admin, 'fusion_compare_end', { p_actor_id: actorId, p_compare_id: compareId }).catch(() => undefined);
+      await endQuietly(compareId);
       throw error;
     }
     const key = await deps.decisionsKey();
@@ -198,7 +203,7 @@ async function beginCompare(deps: CompareDeps, choice: CompareStartInput): Promi
     answerTokens: record.config?.answerOutputTokens })
     .catch(async (error: unknown) => {
       if (!KEEP_RECORD.has(error instanceof Error ? error.message : '')) {
-        await compareRpc(admin, 'fusion_compare_end', { p_actor_id: actorId, p_compare_id: compareId }).catch(() => undefined);
+        await endQuietly(compareId);
       }
       throw error;
     });

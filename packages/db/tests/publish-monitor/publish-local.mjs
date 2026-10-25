@@ -10,7 +10,7 @@ import { closeAccount } from '../erasure-b2a/cases.mjs';
 import { fixtureSql } from './fixtures.mjs';
 
 const migrationPath = 'packages/db/migrations/0274_publish_monitor_publish.sql';
-const priceMigrationPath = 'packages/db/migrations/0397_publish_monitor_price_site_unit.sql';
+const priceMigrationPath = 'packages/db/migrations/0392_publish_monitor_price_site_unit.sql';
 const entry = ['publish_monitor_publish_claim(uuid,text,text,uuid,uuid,uuid[])', 'publish_monitor_publish_dispatch(uuid,uuid,jsonb)',
   'publish_monitor_publish_release(uuid,text)', 'publish_monitor_publish_unknown(uuid,text)',
   'publish_monitor_publish_record(uuid,text,jsonb)', 'publish_monitor_publish_webhook_result(text,text,boolean,text)',
