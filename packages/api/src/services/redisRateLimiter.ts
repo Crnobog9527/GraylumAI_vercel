@@ -72,7 +72,8 @@ async function limitWithDeadline(limiter: Ratelimit, identifier: string, rate?: 
   return result;
 }
 
-function getRedis(): Redis {
+/** Shared client (rate limits, runtimeViewVersion): no retries, 500 ms per command. */
+export function getRedis(): Redis {
   if (!redis) {
     const { url, token } = redisEnvironment(process.env);
 

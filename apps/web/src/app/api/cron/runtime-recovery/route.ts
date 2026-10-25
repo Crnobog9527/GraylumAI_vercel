@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { withViewVersionBump } from '@repo/api/src/services/runtimeViewVersion';
 import { runAutomaticFinancialRecovery } from '@repo/api/src/services/runtime/automaticRecovery';
 import { deliverStopLossAlerts } from '@repo/api/src/services/runtime/stopLossNotify';
 import { startScheduledJobRun, finishScheduledJobRun } from '@repo/api/src/services/scheduledJobRuns';
@@ -22,7 +23,8 @@ export async function GET(request: Request) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
-  const db = createClient(url, key);
+  // DB-100 C5: writes here bump conversation view versions (runtimeViewVersion.ts).
+  const db = createClient(url, key, { global: { fetch: withViewVersionBump(fetch) } });
   // RUNTIME-PROD slice C: mail new stop-loss alerts first, bounded to leave the recovery its own budget
   // (route limit 60s = this cap + recovery 45s). It never throws and does not affect recovery status;
   // delivery failures are kept on the alert rows.

@@ -6,6 +6,7 @@
 
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { withViewVersionBump } from '@repo/api/src/services/runtimeViewVersion';
 import { releaseDueAnnualSubscriptionCredits } from '@repo/api/src/services/subscriptionCreditGrants';
 import { releaseMethodMembershipCredits } from '@repo/api/src/services/payments/methodMaintenance';
 import { logger } from '@repo/api/src/services';
@@ -35,7 +36,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: CRON_CONFIG_ERROR_MESSAGE }, { status: 500 });
     }
 
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const supabase = createClient(supabaseUrl, supabaseServiceKey, { global: { fetch: withViewVersionBump(fetch) } });
     logger.system.cronJob('release-subscription-credits', 'started');
     const [creditWork, reminderWork] = await Promise.allSettled([
       (async () => {

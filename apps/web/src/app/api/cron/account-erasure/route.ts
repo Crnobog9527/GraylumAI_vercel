@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { withViewVersionBump } from '@repo/api/src/services/runtimeViewVersion';
 import { runAccountErasureExecutor } from '@repo/api/src/services/accountErasure/executor';
 import { sweepErasedConversations } from '@repo/api/src/services/accountErasure/content';
 import { validateCronRequest } from '@/lib/cron-auth';
@@ -18,6 +19,8 @@ export async function GET(request: Request) {
   try {
     const client = createClient(url, key, {
       auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+      // DB-100 C5: writes here bump conversation view versions (runtimeViewVersion.ts).
+      global: { fetch: withViewVersionBump(fetch) },
     });
     // The 24-hour promise is watched first, so this run's own length or failure cannot skip the alert.
     await checkErasureBacklog(client);

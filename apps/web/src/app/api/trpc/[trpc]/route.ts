@@ -5,6 +5,7 @@ import { createClient } from '@supabase/supabase-js';
 import { appRouter } from '@repo/api/src/root';
 import { withPlatformSecretRequest } from '@repo/api/src/services/platformSecrets/request';
 import { createTRPCContext,createRuntimeBudget,withRuntimeBudget } from '@repo/api/src/trpc';
+import { withViewVersionBump } from '@repo/api/src/services/runtimeViewVersion';
 
 export const maxDuration = 300;
 import { logServerError } from '@/lib/server-log';
@@ -85,7 +86,8 @@ const handler = async (req: NextRequest) => {
 };
 
 async function handleTrpc(req: NextRequest, runtimeBudget: ReturnType<typeof createRuntimeBudget>) {
-  const budgetFetch=withRuntimeBudget(runtimeBudget,fetch,true);
+  // DB-100 C5: the user's own writes bump their conversation view version too (runtimeViewVersion.ts).
+  const budgetFetch=withViewVersionBump(withRuntimeBudget(runtimeBudget,fetch,true));
   const hostname = new URL(req.url).hostname.toLowerCase();
   const authClient = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,

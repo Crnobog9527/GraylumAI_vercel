@@ -3,6 +3,8 @@ import { TRPCError } from '@trpc/server';
 import {throwIfContentErased} from '../accountErasure/content';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { workItemsFrom } from './workItems';
+import { readViewTokens, type ViewTokens } from '../runtimeViewVersion';
+
 /** SQL owns scope, history availability and the public result metadata whitelist. */
 export async function readNativeRuntimeView(database: SupabaseClient, actorId: string, sessionId: string) {
   const view = await database.rpc('runtime_view', { p_actor_id: actorId, p_session_id: sessionId });
@@ -13,10 +15,52 @@ export async function readNativeRuntimeView(database: SupabaseClient, actorId: s
  * (runtime_view_with_work_items). The view keeps every refusal above; the rows stay decorative (none on any problem).
  */
 export async function readNativeRuntimeViewWithWorkItems(database: SupabaseClient, actorId: string, sessionId: string) {
+  const cached = await readCachedView(database, actorId, sessionId);
+  if (cached.hit) return cached.hit;
   const both = await database.rpc('runtime_view_with_work_items', { p_actor_id: actorId, p_session_id: sessionId });
   const data = both.data as { view?: unknown; workItems?: unknown } | null;
   const view = await hideSourceBound(database, actorId, checkedView({ error: both.error, data: data?.view }, sessionId));
-  return { view, workItems: workItemsFrom(data?.workItems) };
+  const result = { view, workItems: workItemsFrom(data?.workItems) };
+  // Only an idle session is cached, and only under the tokens read BEFORE the database read above.
+  if (cached.tokens && !(view as { activeExecution?: unknown }).activeExecution) rememberView(actorId, sessionId, cached.tokens, result);
+  return result;
+}
+
+/**
+ * DB-100 C5: a refresh of an idle conversation that nothing has written to since the last read is answered from this
+ * instance's memory. Never skipped: "may this user see this session" (runtime_view_access, a small read that raises
+ * the same RUNTIME_SCOPE_DENIED as runtime_view). Skipped only: reading and decoding every turn's content.
+ * A hit needs all of: the same user and session, an unchanged user token and shared token in Redis (any server-side write
+ * naming the user, or naming nobody, replaces them: runtimeViewVersion.ts), a session that is idle now, and an entry
+ * younger than VIEW_CACHE_MS. Redis unavailable, an unknown value or any doubt reads the database as before.
+ * The content stays in this process only; Redis holds random version tokens, never conversation text.
+ */
+export const VIEW_CACHE_MS = 30_000;
+const VIEW_CACHE_MAX = 200;
+type Result = { view: Awaited<ReturnType<typeof readNativeRuntimeView>>; workItems: Record<string, unknown[]> };
+const viewCache = new Map<string, { at: number; tokens: ViewTokens; result: Result }>();
+export function clearViewCache() { viewCache.clear(); }
+
+function rememberView(actorId: string, sessionId: string, tokens: ViewTokens, result: Result) {
+  const key = actorId + ':' + sessionId;
+  viewCache.delete(key);
+  viewCache.set(key, { at: Date.now(), tokens, result: structuredClone(result) });
+  while (viewCache.size > VIEW_CACHE_MAX) viewCache.delete(viewCache.keys().next().value as string);
+}
+
+async function readCachedView(database: SupabaseClient, actorId: string, sessionId: string):
+  Promise<{ hit?: Result; tokens: ViewTokens | null }> {
+  const tokens = await readViewTokens(actorId);
+  if (!tokens) return { tokens: null };
+  const entry = viewCache.get(actorId + ':' + sessionId);
+  if (!entry || Date.now() - entry.at > VIEW_CACHE_MS || entry.tokens.actor !== tokens.actor || entry.tokens.global !== tokens.global) {
+    return { tokens };
+  }
+  const access = await database.rpc('runtime_view_access', { p_actor_id: actorId, p_session_id: sessionId });
+  // Any refusal is handled by the full read, which raises exactly what it always raised.
+  const active = (access.data as { activeExecution?: unknown } | null)?.activeExecution;
+  if (access.error || !access.data || active) return { tokens };
+  return { hit: structuredClone(entry.result), tokens };
 }
 async function hideSourceBound<T extends { executions: unknown[] }>(database: SupabaseClient, actorId: string, data: T): Promise<T> {
   const hidden = await sourceBoundBodies(database, actorId, data.executions as ViewedExecution[]);

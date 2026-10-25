@@ -7,7 +7,7 @@ import { logger } from './lib/logger';
 import { assertUsableUserStatus, normalizeUserStatus } from './lib/accountStatus';
 import {createRuntimeBudget,withRuntimeBudget,type RuntimeBudget} from './services/runtime/budget';
 import { openingGrantDigests } from './services/accountErasure/openingGrantIdentity';
-import { procedureRateLimit } from './middleware/procedureRateLimit';
+import { procedureRateLimit } from './middleware/procedureRateLimit';import { withViewVersionBump } from './services/runtimeViewVersion';
 export {createRuntimeBudget,withRuntimeBudget};
 type ApiSupabaseClient = SupabaseClient<any, 'public', any>;
 type ApiContext = Awaited<ReturnType<typeof createTRPCContext>>;
@@ -53,7 +53,7 @@ export const createTRPCContext = async (opts: {
   origin?: string;
 }) => {
   const runtimeBudget=opts.runtimeBudget??createRuntimeBudget();
-  const budgetFetch=withRuntimeBudget(runtimeBudget,fetch,true);
+  const budgetFetch=withViewVersionBump(withRuntimeBudget(runtimeBudget,fetch,true));
   ensureWorkspaceServerEnv();
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;

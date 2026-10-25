@@ -1,5 +1,6 @@
 import { after, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { withViewVersionBump } from '@repo/api/src/services/runtimeViewVersion';
 import { advanceAuthorized, advanceRequest, advanceReview, kickAdvance, MAX_HOPS } from '@repo/api/src/services/fusion/background';
 import { logger } from '@repo/api/src/services';
 
@@ -22,7 +23,7 @@ export async function POST(request: Request) {
   const origin = new URL(request.url).origin;
   const { reviewId, hop } = input;
   after(async () => {
-    const result = await advanceReview({ admin: createClient(url, key), reviewId });
+    const result = await advanceReview({ admin: createClient(url, key, { global: { fetch: withViewVersionBump(fetch) } }), reviewId });
     if (!result.next) return;
     // A relay chain is bounded: past the last hop the backstops (page return, daily kick) take over, with an alert.
     if (hop + 1 > MAX_HOPS) { logger.error('billing', 'fusion_review_relay_limit', { reviewId, hop }); return; }

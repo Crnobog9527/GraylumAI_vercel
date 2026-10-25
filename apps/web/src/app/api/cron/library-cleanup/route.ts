@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { withViewVersionBump } from '@repo/api/src/services/runtimeViewVersion';
 import { runLibraryCleanup } from '@repo/api/src/services/library/cleanup';
 import { validateCronRequest } from '@/lib/cron-auth';
 import { checkLibraryBacklog, flushAlerts } from '@/lib/erasure-backlog-alert';
@@ -14,7 +15,8 @@ export async function GET(request: Request) {
   if (!url || !key) return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
   const client = createClient(url, key, {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-    global: { fetch: (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(5000) }) },
+    // DB-100 C5: writes here bump conversation view versions (runtimeViewVersion.ts).
+    global: { fetch: withViewVersionBump((input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(5000) })) },
   });
   try {
     // The 24-hour promise is watched first, so this run's own length or failure cannot skip the alert.

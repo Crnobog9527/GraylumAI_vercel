@@ -5,6 +5,7 @@ import { paymentDeploymentMode, assertWaffoWebhookEnvironment } from '@repo/api/
 import { reportPaymentDispute } from '@/lib/payment-dispute-alert.mjs';
 import { NextResponse } from 'next/server';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { withViewVersionBump } from '@repo/api/src/services/runtimeViewVersion';
 import {
   runBillingEngineV15ReadinessAudit,
   runDailyBillingReconciliation,
@@ -174,7 +175,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: CRON_CONFIG_ERROR_MESSAGE }, { status: 500 });
     }
 
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const supabase = createClient(supabaseUrl, supabaseServiceKey, { global: { fetch: withViewVersionBump(fetch) } });
     logger.system.cronJob('billing-reconcile', 'started');
     // ANALYTICS 0280: GA checkout ids never taken (long past their 45-minute window) are deleted (statistics only, never fails the job).
     const analyticsIds = pruneGaCheckoutIds(supabase);

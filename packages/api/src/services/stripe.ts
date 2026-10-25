@@ -4,6 +4,7 @@
  * This code is proprietary and confidential.
  */
 import { createClient } from '@supabase/supabase-js';
+import { withViewVersionBump } from './runtimeViewVersion';
 import Stripe from 'stripe';
 import { isIP } from 'node:net';
 import { TRPCError } from '@trpc/server';
@@ -208,7 +209,7 @@ export function createServiceRoleSupabaseClient() {
     throw new Error('Supabase service role credentials are not configured');
   }
 
-  return createClient(supabaseUrl, serviceRoleKey);
+  return createClient(supabaseUrl, serviceRoleKey, { global: { fetch: withViewVersionBump(fetch) } });
 }
 
 async function resolveActiveStripeCustomerId(

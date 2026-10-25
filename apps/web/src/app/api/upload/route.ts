@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { withViewVersionBump } from '@repo/api/src/services/runtimeViewVersion';
 import { logServerError } from '@/lib/server-log';
 import { uploadWithIntent } from './upload-intent';
 
@@ -38,7 +39,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Upload service is not configured' }, { status: 503 });
     }
     const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey);
-    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey);
+    // DB-100 C5: writes here bump conversation view versions (runtimeViewVersion.ts).
+    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey, { global: { fetch: withViewVersionBump(fetch) } });
 
     // Verify user
     const { data: { user }, error: authError } = await supabaseAuth.auth.getUser(token);
