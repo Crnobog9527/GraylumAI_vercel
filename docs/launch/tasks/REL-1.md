@@ -297,9 +297,11 @@
 
 | # | 事项 | 推荐 | 可复制 |
 | --- | --- | --- | --- |
-| E1 | 一键发布：Owner 定"Post for Me 支持的都开放"（TikTok 商业号不开放，名单：tiktok、instagram、youtube、facebook、x、threads、linkedin、pinterest、bluesky），但只有 X、YouTube 有测试账号能真实验收；Master Plan 第 2.1 节 2026-10-23（晚）条目写的是"没有测试账号或没通过的平台保持关闭并报 Owner 决定" | 上线前 X、YouTube 各真实发布验收一次；其余 7 个平台由 Owner 明确选：A 照原定一起开放，上线首周盯失败率；B 先只开 X、YouTube | 「一键发布选 `<A/B>`；上线前 X 和 YouTube 各真实发布验收一次，每次我当次批准。」 |
-| E2 | 完整的"恢复备份 → 重放删除"演练：按 [DATA_ERASURE_BACKUP_RESTORE_REPLAY](../../runbooks/DATA_ERASURE_BACKUP_RESTORE_REPLAY.md) 仍是公开开放前的门槛。**Owner 没批准延期之前，演练没通过就不开放**（第 3.7 节）。普通注销实测通过不能代替它（验的是删除，不是恢复备份后能否重放删除清单）。演练在单独的隔离项目里做（不接 Vercel、定时任务、付款回调），需要 Pro 套餐 | 有窗口建议延期到上线后第一周，这是放宽上线前检查，只有 Owner 能批；推荐上线前做 | 上线前做：「同意用单独的隔离演练项目在公开开放前演练一次备份恢复和删除重放，费用 `<金额>`。」；延期：「同意备份恢复演练延期到上线后第一周，在演练通过前接受恢复备份可能让已删内容复活的风险。」 |
-| E3 | Firecrawl 是否开通零保留 | Owner 看 Firecrawl 套餐后定，不挡上线 | — |
+| E1 | **已定（Owner 2026-10-24：「E1 选 A，七个平台一起开」，见 Master Plan 第 2.1 节）**：名单 tiktok、instagram、youtube、facebook、x、threads、linkedin、pinterest、bluesky 一起开放（TikTok 商业号不开放）；只有 X、YouTube 有测试账号 | 上线前 X、YouTube 各真实发布验收一次（每次 Owner 当次批准）；其余 7 个平台首次真实发布在用户侧，上线首周盯失败率 | 已回复 |
+| E2 | **已定（Owner 2026-10-24：「E2 上线前做备份恢复演练」）**：完整的"恢复备份 → 重放删除"演练按 [DATA_ERASURE_BACKUP_RESTORE_REPLAY](../../runbooks/DATA_ERASURE_BACKUP_RESTORE_REPLAY.md)，仍是公开开放前的门槛，不延期；演练在单独的隔离 Pro 项目里做（不接 Vercel、定时任务、付款回调） | 演练费用需 Owner 当次确认：「同意用单独的隔离演练项目在公开开放前演练一次备份恢复和删除重放，费用 `<金额>`。」 | 已回复；费用待确认 |
+| E3 | **已定（Owner 2026-10-24：「Firecrawl 不开零保留，直接上线」，取代同日先前的"开零保留"）**：Firecrawl 不开零保留，不挡上线 | — | 已回复 |
+| E4 | **待办：正式库 PostgREST 连接池**（Master Plan 第 2.1 节 2026-10-25（晚））。staging 现在是 8；正式库按复测结果定，**上线前要问 Owner**，Owner 同意后才设（需 Owner 生成的 Supabase 管理令牌，放本机密钥文件，不进仓库、日志或 PR）。不设会回到约 20 人就卡 | 复测（连接池 8 与 12）后给 Owner 真实数字再问 | 「同意把正式库的 PostgREST 连接池设成 `<数字>`。」 |
+| E5 | **待办：Waffo 后台打开拒付邮件通知 `notifyChargeback`**（#1355 的建议）。Owner 亲手在 Waffo 后台做；没打开时拒付只靠我们这边的对账发现 | 上线前做；做完告诉总控 | 「Waffo 后台的拒付邮件通知已打开。」 |
 
 ## 8. 旧版（2026-10-17）条目去向
 
