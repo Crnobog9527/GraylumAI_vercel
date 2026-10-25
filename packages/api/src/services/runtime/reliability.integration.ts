@@ -290,6 +290,30 @@ it.each(['5 minutes', '20 minutes'] as const)('RUNTIME: a running round with a s
     } finally { await f.close(); }
   }, 60000);
 
+// 0399 (line D1): an admitted round that was never begun holds its session until interrupted recovery cancels it.
+it.each(['5 minutes', '15 minutes'] as const)('RUNTIME: a never-begun round is cancelled after 10 minutes (admitted %s ago)',
+  async age => {
+    const f = await fixture();
+    try {
+      expect(await f.snapshot()).toMatchObject({ execution_state: 'prepared', active_execution: f.admitted.executionId, calls: 0 });
+      await f.db.query('update runtime_executions set created_at=now()-$2::interval where id=$1', [f.admitted.executionId, age]);
+      const recover = () => recoverInterruptedExecutions({ database: f.admin, actorId: f.actor, budget: erasureFinancialBudget(55_000) });
+      const result = await recover();
+      if (age === '5 minutes') {
+        expect(result).toMatchObject({ selected: 0, failed: 0 });
+        expect(await f.snapshot()).toMatchObject({ execution_state: 'prepared', active_execution: f.admitted.executionId });
+        return;
+      }
+      expect(result).toMatchObject({ selected: 1, processed: 1, settled: 1, failed: 0 });
+      expect(await f.snapshot()).toMatchObject({ execution_state: 'cancelled', active_execution: null, closed: true,
+        credits: 100, ledger: 100, calls: 0, spends: 0 });
+      // A late begin from the vanished client sends nothing and finds the round closed.
+      expect(await runtimeExecutor(f.options).execute(f.admitted.executionId)).toMatchObject({ state: 'cancelled' });
+      expect(f.requests).toHaveLength(0);
+      expect(await recover()).toMatchObject({ selected: 0, failed: 0 });
+    } finally { await f.close(); }
+  }, 60000);
+
 it.each(['normal', 'committed-lost-response', 'not-committed', 'readback-fails'])
 ('RUNTIME: reliability finalize normal/ambiguous transaction %s', async mode => {
   const f = await fixture();

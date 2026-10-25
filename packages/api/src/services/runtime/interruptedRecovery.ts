@@ -10,7 +10,8 @@ import type { RuntimeBudget } from './budget';
 import type { AutomaticRecoverySummary } from './automaticRecovery';
 
 const itemsSchema = z.array(z.object({
-  executionId: z.string().uuid(), actorId: z.string().uuid(), runId: z.string().uuid(), epoch: z.number().int().positive(),
+  executionId: z.string().uuid(), actorId: z.string().uuid(), runId: z.string().uuid(),
+  epoch: z.number().int().nonnegative(), // 0 for a never-begun round (0399)
 })).max(20);
 
 /** SQL owns timeout, known-cost and Session checks, including a fresh locked check before releasing the original owner.
