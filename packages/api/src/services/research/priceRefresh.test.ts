@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { providerEntryHash, type ProviderPriceEntry, type ProviderPrices } from '../billingProviderPrices';
+import type { ProviderPriceEntry, ProviderPrices } from '../billingProviderPrices';
 
 const store = vi.hoisted(() => ({ config: null as unknown as ProviderPrices, saved: [] as unknown[], saveError: null as Error | null }));
 vi.mock('../billingProviderPrices', async importOriginal => {
@@ -31,13 +31,11 @@ const official = (costs: Record<string, number | string>) => vi.fn(async (url: s
   return new Response(JSON.stringify({ code: 200, data: { endpoint_uri: endpoint, endpoint_cost: cost } }), { status: 200 });
 }) as unknown as typeof fetch;
 
-function windowDb(policies: unknown[]) {
-  const updates: unknown[] = [];
-  const db = { from: vi.fn(() => ({
-    select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { call_policies: policies, multiplier: 3 }, error: null }) }) }),
-    update: (value: unknown) => ({ eq: async () => { updates.push(value); return { error: null }; } }),
-  })) } as unknown as SupabaseClient;
-  return { db, updates };
+/** A database whose window sync answers `sync` (research_test_window_sync_prices); records each call. */
+function windowDb(sync: unknown = { status: 'updated', synced: 1, skipped: [] }, error: unknown = null) {
+  const calls: unknown[][] = [];
+  const db = { rpc: vi.fn(async (...args: unknown[]) => { calls.push(args); return { data: sync, error }; }) } as unknown as SupabaseClient;
+  return { db, calls };
 }
 
 beforeEach(() => {
@@ -52,7 +50,7 @@ beforeEach(() => {
 
 describe('refreshResearchPrices', () => {
   it('saves every TikHub route at its official price for 7 more days and reports a changed price', async () => {
-    const { db } = windowDb([]);
+    const { db } = windowDb();
     const result = await refreshResearchPrices(db, { readKey: async () => 'key', windowId: null, now: () => NOW,
       fetchImpl: official({ '/tiktok/app/v3/handler_user_profile': 0.001, '/douyin/app/v3/handler_user_profile': 0.001 }) });
     expect(result).toMatchObject({ success: true, failed: [], expiring: [], window: 'skipped',
@@ -66,7 +64,7 @@ describe('refreshResearchPrices', () => {
   });
 
   it('keeps a route it could not read, fails the run, and warns about what expires within a day', async () => {
-    const { db } = windowDb([]);
+    const { db } = windowDb();
     const result = await refreshResearchPrices(db, { readKey: async () => 'key', windowId: null,
       now: () => new Date('2026-10-24T12:00:00.000Z'),
       fetchImpl: official({ '/tiktok/app/v3/handler_user_profile': 0.001, '/douyin/app/v3/handler_user_profile': 'fail' }) });
@@ -78,28 +76,29 @@ describe('refreshResearchPrices', () => {
 
   it('never sends without a key and never accepts an unrecognized or zero price', async () => {
     const fetchImpl = official({});
-    const noKey = await refreshResearchPrices(windowDb([]).db, { readKey: async () => null, windowId: null, now: () => NOW, fetchImpl });
+    const noKey = await refreshResearchPrices(windowDb().db, { readKey: async () => null, windowId: null, now: () => NOW, fetchImpl });
     expect(noKey.failed.map(f => f.code)).toEqual(['KEY_UNAVAILABLE', 'KEY_UNAVAILABLE']);
     expect(fetchImpl).not.toHaveBeenCalled();
-    const bad = await refreshResearchPrices(windowDb([]).db, { readKey: async () => 'key', windowId: null, now: () => NOW,
+    const bad = await refreshResearchPrices(windowDb().db, { readKey: async () => 'key', windowId: null, now: () => NOW,
       fetchImpl: official({ '/tiktok/app/v3/handler_user_profile': 0, '/douyin/app/v3/handler_user_profile': '0.01' }) });
     expect(bad.failed.map(f => f.code)).toEqual(['UNRECOGNIZED', 'UNRECOGNIZED']);
     expect(store.saved).toHaveLength(0);
   });
 
-  it('recomputes the staging window policies of refreshed routes with the new entry hash, leaving others alone', async () => {
-    const other = { provider: 'openrouter', model: 'openrouter:x', account: 'a' };
-    const stale = { provider: 'tikhub', account: 'research-staging', model: 'tikhub:/tiktok/app/v3/handler_user_profile',
-      purposes: ['research'], toolPricing: { maxUnitsPerCall: '1', entryHash: 'old' } };
-    const { db, updates } = windowDb([other, stale]);
-    const result = await refreshResearchPrices(db, { readKey: async () => 'key', windowId: '897525f9-66f1-4504-8d91-a52d2c0f0e60',
+  it('asks the database to realign the staging window with the saved prices, and alerts when it could not', async () => {
+    const run = (db: SupabaseClient) => refreshResearchPrices(db, { readKey: async () => 'key', windowId: '897525f9-66f1-4504-8d91-a52d2c0f0e60',
       now: () => NOW, fetchImpl: official({ '/tiktok/app/v3/handler_user_profile': 0.001, '/douyin/app/v3/handler_user_profile': 0.01 }) });
-    expect(result.window).toBe('updated');
-    const policies = (updates[0] as { call_policies: Array<Record<string, unknown>> }).call_policies;
-    expect(policies[0]).toEqual(other);
-    const saved = (store.saved[0] as ProviderPrices).entries[0]!;
-    expect(policies[1]).toMatchObject({ model: 'tikhub:/tiktok/app/v3/handler_user_profile', multiplier: '3',
-      toolPricing: { entryHash: providerEntryHash(saved), validUntil: '2026-10-31T04:00:00.000Z', price: '0.001' } });
+    const updated = windowDb();
+    expect(await run(updated.db)).toMatchObject({ success: true, window: 'updated' });
+    // Only the window id goes to the database: no price, hash or policy is sent from here.
+    expect(updated.calls).toEqual([['research_test_window_sync_prices', { p_window: '897525f9-66f1-4504-8d91-a52d2c0f0e60' }]]);
+    expect(await run(windowDb({ status: 'unchanged', synced: 2, skipped: [] }).db)).toMatchObject({ success: true, window: 'unchanged' });
+    // A route left unpriced, a missing window, a malformed answer or a database error fails the day (the job alerts).
+    for (const db of [windowDb({ status: 'updated', synced: 1, skipped: [{ route: '/x', reason: 'PRICE_EXPIRED' }] }).db,
+      windowDb({ status: 'not_found', synced: 0, skipped: [] }).db, windowDb({ status: 'weird' }).db,
+      windowDb(null, { message: 'permission denied' }).db]) {
+      expect(await run(db)).toMatchObject({ success: false, window: 'failed' });
+    }
   });
 
   it('sends at most five requests per second and retries a 429 once', async () => {
@@ -114,7 +113,7 @@ describe('refreshResearchPrices', () => {
       return new Response(JSON.stringify({ data: { endpoint_uri: endpoint, endpoint_cost: 0.001 } }), { status: 200 });
     }) as unknown as typeof fetch;
     const sleep = vi.fn(async (ms: number) => { order.push(`sleep ${ms > 1_200 ? 'retry' : 'second'}`); });
-    const result = await refreshResearchPrices(windowDb([]).db, { readKey: async () => 'key', windowId: null, now: () => NOW,
+    const result = await refreshResearchPrices(windowDb().db, { readKey: async () => 'key', windowId: null, now: () => NOW,
       fetchImpl, sleep });
     expect(result).toMatchObject({ success: true, failed: [] });
     expect(order.slice(0, 6)).toEqual(['route_0', 'route_1', 'route_2', 'route_3', 'route_4', 'sleep second']);
@@ -123,7 +122,7 @@ describe('refreshResearchPrices', () => {
 
   it('reports a failed save instead of a refresh', async () => {
     store.saveError = new Error('conflict');
-    const result = await refreshResearchPrices(windowDb([]).db, { readKey: async () => 'key', windowId: null, now: () => NOW,
+    const result = await refreshResearchPrices(windowDb().db, { readKey: async () => 'key', windowId: null, now: () => NOW,
       fetchImpl: official({ '/tiktok/app/v3/handler_user_profile': 0.001, '/douyin/app/v3/handler_user_profile': 0.01 }) });
     expect(result).toMatchObject({ success: false, refreshed: [], failed: [{ route: '*', code: 'SAVE_FAILED' }] });
   });
