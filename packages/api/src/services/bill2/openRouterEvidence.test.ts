@@ -98,3 +98,21 @@ it('keeps native token evidence when terminal official cost is missing',()=>{
  expect(openRouterEvidence(observed(wire),identity,'response')).toMatchObject({cost:null,final:false,
   usage:{inputTokens:'10',outputTokens:'2',sdkResponse:{usage:{prompt_tokens:10}}}});
 });
+describe('ARCH-FIX G1 single stored copy',()=>{
+ const single=(text:string,status=200)=>{const {rawBodyBase64:dropped,...rest}=observed(text,status);void dropped;return rest;};
+ it.each([[raw,200],[raw,500],['{invalid',200]])('projects a single-copy body exactly like the old two-copy shape',(text,status)=>{
+  const {observedAt:a,transport:oldTransport,...older}=openRouterEvidence(observed(text,status),identity,'response');
+  const {observedAt:b,transport:newTransport,...newer}=openRouterEvidence(single(text,status),identity,'response');
+  void a;void b;expect(newer).toEqual(older);expect(oldTransport).toHaveProperty('rawBodyBase64');
+  expect(newTransport).not.toHaveProperty('rawBody');expect(newTransport).not.toHaveProperty('rawBodyBase64');
+ });
+ it('stores the provider text once in the receipt',()=>{
+  const evidence=openRouterEvidence(single(raw),identity,'response');
+  expect(JSON.stringify(evidence).split(JSON.stringify(raw).slice(1,-1)).length-1).toBe(1);
+  expect(evidence).toMatchObject({rawBody:raw,cost:'0.000000123456',final:true,transport:{httpStatus:200,complete:true}});
+ });
+ it('keeps exact bytes of a non-text body as base64 only',()=>{
+  const evidence=openRouterEvidence({rawBody:'',rawBodyBase64:Buffer.from([0xff,0x00]).toString('base64'),sourceHash:'unused',httpStatus:500,complete:false,transportIssue:'invalid_text'},identity,'response');
+  expect(evidence).toMatchObject({evidenceKind:'transport_observation',transport:{rawBodyBase64:'/wA='}});
+ });
+});

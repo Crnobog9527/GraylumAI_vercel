@@ -80,8 +80,9 @@ export async function beginPaygExecution(input: {
       return { execution: await input.read('payg_resume', { cursor: input.resume.cursor, epoch: input.resume.epoch }),
         resumedGate };
     } catch (error) {
+      // Only a refused test window or model maps here (executorRpc): this frozen round can never resume.
       if (error instanceof StagingAccessError && error.reason === 'RUNTIME_PRICE_CONFIGURATION_PENDING')
-        return { execution, resumedGate: false, wait: wait('RUNTIME_PRICE_CONFIGURATION_PENDING') };
+        return { execution, resumedGate: false, wait: { ...wait('RUNTIME_PRICE_CONFIGURATION_PENDING'), resumeClosed: true } };
       throw error;
     }
   }

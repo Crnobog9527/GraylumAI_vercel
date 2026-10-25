@@ -2,7 +2,7 @@
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import {
-  CATEGORY_LABELS, cellSourceNumbers, cellText, COLUMNS, numberSources, type BenchmarkRow,
+  CATEGORY_LABELS, cellSourceNumbers, cellText, COLUMNS, numberSources, relevanceLabel, type BenchmarkRow,
 } from "./benchmark-table-model";
 import { DATA_SOURCE_NOTE, MISSING_TEXT, platformLabel } from "./research-model";
 import { RefreshButton } from "./refresh-button";
@@ -55,6 +55,7 @@ export function BenchmarkTable({ rows, now = new Date(), onRefresh, refreshDisab
                 <span className={styles.accountMeta}>
                   {platformLabel(row.platform)}
                   {row.category && <span className={styles.category}>{CATEGORY_LABELS[row.category]}</span>}
+                  {relevanceLabel(row.topicRelevance) && <span className={styles.category}>{relevanceLabel(row.topicRelevance)}</span>}
                   <span className={cn(styles.badge, row.qualified ? styles.ok : styles.off)}>
                     {row.qualified ? "数据条件达标" : "只作参考"}
                   </span>

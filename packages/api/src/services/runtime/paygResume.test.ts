@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from 'vitest';
 import { beginPaygExecution, type RuntimeExecution } from './paygResume';
+import { StagingAccessError } from './stagingErrors';
 const id = '10000000-0000-4000-8000-000000000001';
 function fixture(state = 'waiting_credits', staging = false) {
   const execution = { executionId: id, state, cursor: 3, epoch: 2, remainingCalls: 1,
@@ -60,6 +61,20 @@ describe('explicit original-execution resume', () => {
       .toMatchObject({ state: 'waiting_resume', unavailable: 'RUNTIME_PRICE_CONFIGURATION_PENDING' });
     expect(resumePricing).toHaveBeenCalledWith([]);
     expect(f.read).toHaveBeenCalledTimes(1);
+  });
+  // staging 2026-10-24: the window this round was frozen to was switched off while its organizer waited.
+  it('a refused frozen window or model marks the wait as never resumable; a price check failure does not', async () => {
+    const f = fixture('waiting_resume', true);
+    f.read.mockImplementation(async (action: string) => {
+      if (action === 'payg_resume') throw new StagingAccessError('RUNTIME_PRICE_CONFIGURATION_PENDING');
+      return f.execution;
+    });
+    expect((await beginPaygExecution({ ...f, resumePricing: async () => {} })).wait)
+      .toMatchObject({ state: 'waiting_resume', body: 'saved reply', resumeClosed: true });
+    const priced = fixture('waiting_resume', true);
+    const wait = (await beginPaygExecution({ ...priced, resumePricing: async () => { throw Error('RUNTIME_PRICE_SNAPSHOT_STALE'); } })).wait;
+    expect(wait).toMatchObject({ unavailable: 'RUNTIME_PRICE_CONFIGURATION_PENDING' });
+    expect(wait).not.toHaveProperty('resumeClosed');
   });
   it('requires staging price validation and never resumes ordinary running or v1 executions', async () => {
     expect((await beginPaygExecution(fixture('waiting_resume', true))).wait?.unavailable).toBe('RUNTIME_PRICE_UNCONFIRMED');

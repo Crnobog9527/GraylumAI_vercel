@@ -10,6 +10,7 @@ import {POSTGRES_IMAGE} from '../v3/images.mjs';
 import {buildFromFiles,installPgCronStub} from '../baseline/build-from-files.mjs';
 import {runCases} from './cases.mjs';
 import {runReferences} from './references.mjs';
+import {runVisibility} from './visibility.mjs';
 const development=process.argv.slice(2).join(' ')==='--local-only --development';
 if ((!development && process.argv.slice(2).join(' ') !== '--local-only') || process.env.CI) throw new Error('Require --local-only');
 const root=resolve(import.meta.dirname,'../../../..');
@@ -56,6 +57,12 @@ try {
  ok(sql(references));
  assert.deepEqual(snapshot(),referencesCatalog,'repeat 0345 preserves complete catalog');
  report.checks.push('0345 applied twice after current staging; complete catalog unchanged');
+ const visibility=read('packages/db/migrations/0352_runtime_execution_visibility.sql');
+ ok(sql(visibility));
+ const visibilityCatalog=snapshot();
+ ok(sql(visibility));
+ assert.deepEqual(snapshot(),visibilityCatalog,'repeat 0352 preserves complete catalog');
+ report.checks.push('0352 applied twice after current staging; complete catalog unchanged');
  const require=createRequire(resolve(root,'packages/api/package.json'));
  const {Client}=require('pg');
  const address=ok(docker(['port',name,'5432/tcp']));assert.match(address,/^127\.0\.0\.1:\d+$/);
@@ -67,6 +74,7 @@ try {
  await client.query(read('packages/db/tests/voice/fixture.sql'));
  await runCases({db:client,Client,connectionString,report});
  await runReferences({db:client,Client,connectionString,report});
+ await runVisibility({db:client,report});
  const audits=ok(sql(read('packages/db/tests/account-open-policy-audit.sql')));
  assert.equal(audits,'');report.checks.push('account-open policy audit unchanged');
 } catch(error) {report.failed=String(error.stack??error);process.exitCode=1;}

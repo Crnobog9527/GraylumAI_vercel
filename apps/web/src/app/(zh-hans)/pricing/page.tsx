@@ -35,7 +35,7 @@ export default async function PricingPage() {
           <h1 className="text-3xl font-bold md:text-4xl" style={{ color: 'var(--text-primary)' }}>{COPY.title}</h1>
           <p className="mx-auto max-w-2xl text-base" style={{ color: 'var(--text-secondary)' }}>{COPY.lede}</p>
         </header>
-        <PricingPlans plans={plans} links={{ signup: buildAuthHref('/login?action=signup'),
+        <PricingPlans plans={plans} links={{ signup: buildAuthHref('/login?action=signup&lang=zh-Hans'),
           membership: buildAuthHref('/app/profile?tab=subscription') }} offers={offers} />
         <PricingCreditPacks packages={packs.packages} plans={plans} failed={packs.failed} />
         <PricingStudio />

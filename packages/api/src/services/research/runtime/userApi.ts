@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
-import { RESEARCH_TOOL_NAMES, researchToolArgs } from '../tools/schemas';
+import { RESEARCH_TOOL_NAMES, undeclaredResearchToolArgs } from '../tools/schemas';
 import { publicHttpUrl } from '../vendors/http';
 import { SOCIAL_KINDS, SOCIAL_PLATFORMS } from '../vendors/types';
 
@@ -15,7 +15,8 @@ export const confirmationInput = z.object({
   cardId: id,
   selected: z.array(optionId).max(24),
   edits: z.record(optionId, keyword).optional(),
-  additions: z.array(keyword).max(5).optional(),
+  // A keyword card takes up to 10 keywords (BENCHMARK-COVERAGE 0356); additions alone may fill it.
+  additions: z.array(keyword).max(10).optional(),
 }).strict();
 export const refreshInput = z.object({
   sessionId: id,
@@ -69,7 +70,8 @@ const toolMetadata = z.object({ toolName: z.enum(RESEARCH_TOOL_NAMES).nullable()
 function metadata(value: unknown) {
   const row = parse(toolMetadata, value);
   if (!row.toolName) return { toolName: null, args: null };
-  const args = researchToolArgs[row.toolName].safeParse(row.args);
+  // The earlier checks (characters counted) accept every saved call, including those of turns admitted before ARCH-FIX C1.
+  const args = undeclaredResearchToolArgs[row.toolName].safeParse(row.args);
   // Validation must not invent omitted default arguments in the historical record.
   const original = row.args as Record<string, unknown> | null;
   return { toolName: row.toolName, args: args.success && original
@@ -141,6 +143,8 @@ const benchmark = z.object({
   postsPerWeek: count, lastPublishedAt: z.string().nullable(), postsAnalyzed: z.number().int().min(0),
   category: z.enum(['head_reference', 'imitable', 'fast_rising']).nullable(), qualified: z.boolean(),
   excluded: z.string().nullable(), fetchedAt: z.string(),
+  // BENCHMARK-COVERAGE (0357): share of the fetched posts on the confirmed niche; a label only. Absent before 0357.
+  topicRelevance: z.number().min(0).max(1).nullable().optional(),
   refs: z.object({ followers: refList, medianViews: refList, engagementRate: refList, postsPerWeek: refList,
     lastPublishedAt: refList }),
 });

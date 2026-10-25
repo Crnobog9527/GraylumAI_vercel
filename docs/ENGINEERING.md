@@ -96,7 +96,9 @@
 - 权限、金额和状态一致性必须在服务端保证（服务里的检查和数据库 RPC 函数），不能只靠
   前端按钮限制。
 - 数据库结构只能通过在 `packages/db/migrations` 新增迁移文件来修改，不改已有的迁移
-  （CI 的 migration ledger 检查会拦截）。`packages/db/baseline` 只补空库缺失的前提，
+  （CI 的 migration ledger 检查会拦截）。新迁移编号必须大于 staging 上已有的最大编号、
+  全仓不重复，允许空号（Owner 2026-10-25 批准的规则变更，取代"编号必须连续"）；
+  staging 是否漏应用用 `scripts/check-staging-migrations-applied.mjs` 核对。`packages/db/baseline` 只补空库缺失的前提，
   不承载新的业务结构；基线和衔接脚本的例外规则见
   [baseline/README.md](../packages/db/baseline/README.md)。`db:push` 已退役。
   `packages/db/schema.ts` 只作类型参考，生产代码不引用它；结构以 `migrations/` 和

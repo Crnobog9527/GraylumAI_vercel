@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
-export async function disputeCases({admin,service,actor,create,bind,pay}) {
+export async function disputeCases({admin,service,connect,actor,create,bind,pay}) {
  const member=await create();await bind(member);await pay(member);
  const ticket=randomUUID();await admin.query("INSERT INTO tickets(id,user_id,title,description,category) VALUES($1,$2,'Test','Synthetic','billing')",[ticket,member.user_id]);
  const paidAt=(await admin.query('SELECT qualified_paid_at FROM payment_orders WHERE id=$1',[member.id])).rows[0].qualified_paid_at;
@@ -26,6 +26,25 @@ export async function disputeCases({admin,service,actor,create,bind,pay}) {
  assert.equal((await admin.query("SELECT count(*)::int n FROM credit_transactions WHERE source_order_id=$1 AND reason_code='dispute_freeze'",[member.id])).rows[0].n,1);
  await assert.rejects(()=>service.query('SELECT pay_common_package_refund_claim($1,$2,$3,$4)',
   [actor,member.id,approval.id,cash]),/DISPUTE_REFUND_FORBIDDEN/);
+ // Won case: an administrator withdraws the hold exactly like a Stripe dispute; the next daily scan never re-freezes.
+ const held=-(await admin.query("SELECT amount FROM credit_transactions WHERE source_order_id=$1 AND reason_code='dispute_freeze'",[member.id])).rows[0].amount;
+ assert.ok(held>0);
+ const withdrawn=(await service.query('SELECT pay_dispute_withdraw($1,$2) v',[actor,first.id])).rows[0].v;
+ assert.deepEqual(withdrawn,{restored:held,duplicate:false});
+ assert.equal((await admin.query('SELECT credits FROM profiles WHERE id=$1',[member.user_id])).rows[0].credits,held);
+ assert.equal((await observed(member,{amount:100})).freeze_state,'withdrawn');
+ assert.equal((await service.query('SELECT pay_dispute_withdraw($1,$2) v',[actor,first.id])).rows[0].v.duplicate,true);
+ assert.equal((await admin.query('SELECT credits FROM profiles WHERE id=$1',[member.user_id])).rows[0].credits,held);
+ // Delivery-time lookup and the daily scan can observe one chargeback at the same moment: one record, one hold.
+ const raced=await create();await bind(raced);await pay(raced);
+ const racedId=`CB_${randomUUID()}`,other=await connect();await other.query('SET ROLE service_role');
+ const call=c=>c.query('SELECT pay_failover_dispute_observed($1,$2,$3,$4,$5,$6,$7,$8) v',
+  [raced.id,'fixture','test',`PAY_${raced.id}`,racedId,raced.amount_total,'usd',new Date()]);
+ const both=await Promise.all([call(service),call(other)]);
+ assert.equal(both[0].rows[0].v.id,both[1].rows[0].v.id);
+ assert.equal((await admin.query('SELECT count(*)::int n FROM payment_disputes WHERE provider_dispute_id=$1',[racedId])).rows[0].n,1);
+ assert.equal((await admin.query("SELECT count(*)::int n FROM credit_transactions WHERE source_order_id=$1 AND reason_code='dispute_freeze'",[raced.id])).rows[0].n,1);
+ assert.equal((await admin.query('SELECT credits FROM profiles WHERE id=$1',[raced.user_id])).rows[0].credits,0);
  const before=await create();await bind(before);
  const review=await pay(before,{review:'chargeback_observed'});assert.equal(review.state,'review');
  assert.equal(review.reason,'chargeback_observed');
@@ -49,5 +68,6 @@ export async function disputeCases({admin,service,actor,create,bind,pay}) {
  }
  return ['waffo-chargeback-real-id-and-payment-scope','chargeback-freezes-existing-membership-and-credits-once',
   'chargeback-blocks-already-approved-refund','known-method-review-keeps-real-method-and-cash',
-  'pre-fulfillment-chargeback-never-grants','chargeback-id-cannot-rebind','unknown-chargeback-amount-freezes-without-inventing-cash','review-reasons-do-not-pretend-method-unknown'];
+  'pre-fulfillment-chargeback-never-grants','chargeback-id-cannot-rebind','unknown-chargeback-amount-freezes-without-inventing-cash','review-reasons-do-not-pretend-method-unknown',
+  'waffo-won-case-admin-withdraw-and-rescan-never-refreezes','waffo-concurrent-observation-one-record-one-hold'];
 }

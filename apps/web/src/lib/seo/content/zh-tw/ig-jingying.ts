@@ -5,7 +5,7 @@
  */
 
 import type { ArticleContent } from '../../article';
-import { SIGNUP_CTA_HREF } from '../shared';
+import { SIGNUP_CTA_HREF_ZH_TW } from '../shared';
 import { ZH_TW_CRUMB } from './links';
 
 // Target: IG 經營 + 如何經營 IG; tips and courses stay on this page (SEO_GEO_SPEC appendix B).
@@ -29,7 +29,7 @@ export const ZH_TW_IG_JINGYING: ArticleContent = {
   cta: {
     label: '免費開始定位診斷',
     description: '不確定 IG 要經營什麼主題？AI 教練會透過對話問你的經驗和想服務的人，幫你整理出帳號定位和目標受眾。註冊後即可免費開始。',
-    href: SIGNUP_CTA_HREF,
+    href: SIGNUP_CTA_HREF_ZH_TW,
   },
   sections: [
     {

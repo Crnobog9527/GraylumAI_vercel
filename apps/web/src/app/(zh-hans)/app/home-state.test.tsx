@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 const state = vi.hoisted(() => ({ library: {} as Record<string, unknown>, profile: {} as Record<string, unknown> }));
 vi.mock('@/trpc/client', () => ({trpc:{user:{getUserProfile:{useQuery:()=>state.profile}},opc:{library:{useQuery:()=>state.library}}}}));
 vi.mock('@/hooks/use-credits',()=>({useCreditsBalance:()=>({status:'ready',credits:100})}));
+vi.mock('@/components/layout/LanguageSwitch',()=>({LanguageSwitch:()=><button data-language-switch=""/>}));
 import HomePage from './page';
 import { HOME_STEPS } from './home-steps';
 beforeEach(()=>{

@@ -112,10 +112,15 @@ function check(row: Row, snapshot: PricingSnapshot, quote: PricingQuote) {
  * candidate: the frozen run reserves the highest quote of all candidates.
  */
 export async function readPricingStates(admin: SupabaseClient, quotes: readonly PricingQuote[],
-  deps: PricingDeps = {}, storedOnly = false) {
+  deps: PricingDeps = {}, storedOnly = false,
+  /** DB-PERF PR-3: model rows a new admission already read with these columns; any other model is read now. */
+  prefetched: readonly Record<string, unknown>[] = []) {
   const resolved: Required<PricingDeps> = { read: deps.read ?? (model => readOpenRouterPricing(model)), now: deps.now ?? Date.now };
   const ids = [...new Set(quotes.map(quote => quote.modelId))];
-  const rows = await admin.from('ai_models').select(ROW_COLUMNS).in('id', ids);
+  const known = prefetched.filter(row => ids.includes(row.id as string)
+    && ROW_COLUMNS.split(',').every(column => Object.hasOwn(row, column)));
+  const rows = ids.every(id => known.some(row => row.id === id)) ? { data: known, error: null }
+    : await admin.from('ai_models').select(ROW_COLUMNS).in('id', ids);
   if (rows.error) stagingRpcFailure(rows.error);
   const byId = new Map(((rows.data ?? []) as Row[]).map(row => [row.id, row]));
   const now = resolved.now();
@@ -132,8 +137,9 @@ export async function readPricingStates(admin: SupabaseClient, quotes: readonly 
 }
 
 /** Returns the exact checked snapshots, including the existing staging renewal fallback. */
-export async function admitPricingSnapshots(admin: SupabaseClient, quotes: readonly PricingQuote[], deps: PricingDeps = {}) {
-  const state = await readPricingStates(admin, quotes, deps);
+export async function admitPricingSnapshots(admin: SupabaseClient, quotes: readonly PricingQuote[], deps: PricingDeps = {},
+  prefetched: readonly Record<string, unknown>[] = []) {
+  const state = await readPricingStates(admin, quotes, deps, false, prefetched);
   for (const quote of quotes) {
     const { row, snapshot } = state.get(quote.modelId)!;
     check(row, snapshot, quote);
@@ -142,6 +148,7 @@ export async function admitPricingSnapshots(admin: SupabaseClient, quotes: reado
 }
 
 /** The v1 entry point intentionally retains its void result and staging behavior. */
-export async function admitPricing(admin: SupabaseClient, quotes: readonly PricingQuote[], deps: PricingDeps = {}): Promise<void> {
-  await admitPricingSnapshots(admin, quotes, deps);
+export async function admitPricing(admin: SupabaseClient, quotes: readonly PricingQuote[], deps: PricingDeps = {},
+  prefetched: readonly Record<string, unknown>[] = []): Promise<void> {
+  await admitPricingSnapshots(admin, quotes, deps, prefetched);
 }

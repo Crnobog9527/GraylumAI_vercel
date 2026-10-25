@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { describe, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { readNativeRuntimeView } from './nativeView';
+import { readNativeRuntimeView, readNativeRuntimeViewWithWorkItems } from './nativeView';
 const actor = '10000000-0000-4000-8000-000000000001';
 const session = '10000000-0000-4000-8000-000000000002';
 const visible = { contentAvailable: true, body: 'authorized body', state: 'completed' };
@@ -97,5 +97,31 @@ describe('LIB-4b: unfinished rounds show no body once a referenced source is gon
   it('fails closed for unfinished rounds when the check is unavailable, keeping finished answers', async () => {
     const text = JSON.stringify(await readNativeRuntimeView(source({ error: { code: '57014' } }).db, actor, session));
     expect(text).not.toMatch(/GONE_|KEPT_INTERRUPTED/);expect(text).toMatch(/KEPT_DONE[\s\S]*KEPT_STOPPED/);
+  });
+});
+
+describe('DB-PERF PR-5a: the refresh reads the view and the work rows in one call', () => {
+  const view = { sessionId: session, scope: { kind: 'owned' }, activeExecution: null,
+    executions: [{ ...visible, executionId: 'done' }] };
+  const one = (data: unknown, error: unknown = null) => {
+    const rpc = vi.fn(async () => ({ data, error }));
+    return { db: { rpc } as unknown as SupabaseClient, rpc };
+  };
+  it('returns both from runtime_view_with_work_items, rows by answer', async () => {
+    const f = one({ view, workItems: { done: [{ kind: 'read' }], empty: [] } });
+    expect(await readNativeRuntimeViewWithWorkItems(f.db, actor, session)).toEqual({ view, workItems: { done: [{ kind: 'read' }] } });
+    expect(f.rpc).toHaveBeenCalledExactlyOnceWith('runtime_view_with_work_items', { p_actor_id: actor, p_session_id: session });
+  });
+  it('keeps the view when the rows are missing or malformed (decorative, as before)', async () => {
+    for (const workItems of [undefined, null, [], 'x'])
+      expect(await readNativeRuntimeViewWithWorkItems(one({ view, workItems }).db, actor, session)).toEqual({ view, workItems: {} });
+  });
+  it('refuses exactly as the view does: another actor or a missing session is not found, other failures are denied', async () => {
+    await expect(readNativeRuntimeViewWithWorkItems(one(null, { code: 'P0001', message: 'RUNTIME_SCOPE_DENIED' }).db, actor, session))
+      .rejects.toMatchObject({ code: 'NOT_FOUND', message: 'RUNTIME_SESSION_NOT_FOUND' });
+    await expect(readNativeRuntimeViewWithWorkItems(one(null, { code: '42501', message: 'CONTENT_ERASED' }).db, actor, session))
+      .rejects.toMatchObject({ code: 'PRECONDITION_FAILED', message: 'CONTENT_ERASED' });
+    for (const data of [null, { workItems: {} }, { view: { ...view, sessionId: actor } }])
+      await expect(readNativeRuntimeViewWithWorkItems(one(data).db, actor, session)).rejects.toThrow(/^RUNTIME_VIEW_DENIED$/);
   });
 });

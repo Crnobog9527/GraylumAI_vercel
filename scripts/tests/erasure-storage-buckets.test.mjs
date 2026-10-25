@@ -22,6 +22,8 @@ const CALL_SITES = {
   'packages/api/src/lib/ticketAttachments.ts': { TICKET_ATTACHMENT_BUCKET: 'packages/api/src/lib/ticketAttachments.ts' },
   'packages/api/src/services/accountErasure/storageTransport.ts': { bucket: 'packages/api/src/services/accountErasure/storageTransport.ts' },
   'packages/api/src/services/library/storage.ts': { BUCKET: 'packages/api/src/services/library/content.ts' },
+  // Daily cleanup only removes ticket attachments that nothing refers to (ARCH-FIX B2).
+  'packages/api/src/services/ticketAttachmentCleanup.ts': { TICKET_ATTACHMENT_BUCKET: 'packages/api/src/lib/ticketAttachments.ts' },
 };
 
 const sources = () => execFileSync('git', ['ls-files', '--', ':(glob)apps/*/src/**', ':(glob)packages/*/src/**'], { cwd: root, encoding: 'utf8' })

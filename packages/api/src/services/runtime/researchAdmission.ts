@@ -5,6 +5,7 @@
 // claim against it), a start threshold for this phase, and on staging the same entry in the test window.
 // The run's call ceiling counts the extra model call that reads a tool result plus every supplier subcall.
 import { z } from 'zod';
+import { rowFor, type ConfigurationRows } from './settingsRows';
 import type {ResearchCapacity} from './researchCapacity';
 import type {ResearchAdmissionRejection, ResearchRejectionObserver, ResearchRouteRejection} from './researchAdmissionDiagnostics';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -22,14 +23,14 @@ import type { SettingsRead } from './newWorkGate';
 import type { HostTurnContext } from './hostTurn';
 import { researchHost } from './researchHostContext';
 import { FREE_CHAT_RESEARCH, frozenResearchTurn, LOCAL_RESEARCH_ACCOUNT, PRODUCTION_RESEARCH_ACCOUNT, RESEARCH_PHASE,
-  RESEARCH_RESULT_RESERVE_BYTES, RESEARCH_TURN_VERSION,
+  RESEARCH_RESULT_RESERVE_BYTES, RESEARCH_TOOL_LIMITS, RESEARCH_TURN_VERSION,
   type FrozenResearchTurn } from './researchTurn';
 
 /** Serialized tool definitions as the SDK sends them; the full request is checked again before dispatch. */
-export function researchToolBytes(names: readonly ResearchToolName[], fastOnly = false, freeChat = false): number {
+export function researchToolBytes(names: readonly ResearchToolName[], fastOnly = false, freeChat = false, declaredLimits = true): number {
   return Buffer.byteLength(JSON.stringify(names.map(name => ({ type: 'function', function: { name,
     description: researchToolDescription(name, freeChat), strict: true,
-    parameters: z.toJSONSchema(researchToolParameters(name, fastOnly)) } }))));
+    parameters: z.toJSONSchema(researchToolParameters(name, fastOnly, declaredLimits)) } }))));
 }
 
 const canonical = (value: unknown): string => JSON.stringify(value, (_key, item) => item && typeof item === 'object' && !Array.isArray(item)
@@ -51,6 +52,8 @@ export interface ResearchAdmissionInput {
   fits: (extraBytes: number, inputBytes?: number) => boolean;
   now?: () => Date;
   onRejected?: ResearchRejectionObserver;
+  /** DB-PERF PR-3: a new admission's settings rows (settingsRows.ts); absent, each setting is read now. */
+  configuration?: Promise<ConfigurationRows>;
   requiredTools?: readonly ResearchToolName[];
   capacity?: (toolBytes: number) => ResearchCapacity;
   /** CHAT-AUTO-CONTEXT C: offer the general lookups of a free chat instead of the positioning benchmark flow. */
@@ -61,8 +64,10 @@ export interface ResearchAdmissionInput {
 
 export interface ResearchAdmission { research: FrozenResearchTurn; tools: ResearchToolName[]; policies: ToolCallPolicy[] }
 
-async function thresholdKeys(admin: SupabaseClient): Promise<Set<string> | null> {
-  const row = await admin.from('system_settings').select('value').eq('key', 'billing_payg_start_thresholds').maybeSingle();
+export const RESEARCH_THRESHOLDS_KEY = 'billing_payg_start_thresholds';
+async function thresholdKeys(admin: SupabaseClient, configuration?: Promise<ConfigurationRows>): Promise<Set<string> | null> {
+  const row = configuration ? rowFor(await configuration, RESEARCH_THRESHOLDS_KEY)
+    : await admin.from('system_settings').select('value').eq('key', RESEARCH_THRESHOLDS_KEY).maybeSingle();
   if (row.error || !row.data) return null;
   const parsed = z.object({ thresholds: z.array(z.object({ model: z.string(), purpose: z.string() }).passthrough()) }).passthrough()
     .safeParse(typeof row.data.value === 'string' ? JSON.parse(row.data.value) : row.data.value);
@@ -75,7 +80,7 @@ async function thresholdKeys(admin: SupabaseClient): Promise<Set<string> | null>
 
 /** null = fail closed; the observer records which gate refused without exposing its input. */
 export async function admitResearchTurn(input: ResearchAdmissionInput): Promise<ResearchAdmission | null> {
-  const state = await readResearchToolsConfig(input.admin);
+  const state = await readResearchToolsConfig(input.admin, input.configuration);
   const config = state.config;
   const routes: NonNullable<ResearchAdmissionRejection['routes']> = [];
   const reject = (reason: ResearchAdmissionRejection['reason'], details: Partial<ResearchAdmissionRejection> = {}) => {
@@ -90,7 +95,8 @@ export async function admitResearchTurn(input: ResearchAdmissionInput): Promise<
   if (subcalls < 1) return reject('CALL_LIMIT', {subcalls});
   if (room < 1) return reject('TOOL_LIMIT');
   const now = input.now?.() ?? new Date();
-  const [priceRead, thresholdRead] = await Promise.allSettled([readProviderPrices(input.admin), thresholdKeys(input.admin)]);
+  const [priceRead, thresholdRead] = await Promise.allSettled([readProviderPrices(input.admin, input.configuration),
+    thresholdKeys(input.admin, input.configuration)]);
   if (priceRead.status === 'rejected') return reject('PRICE_CONFIG_UNAVAILABLE');
   if (thresholdRead.status === 'rejected' || !thresholdRead.value) return reject('THRESHOLD_CONFIG_UNAVAILABLE');
   const prices = priceRead.value, thresholds = thresholdRead.value;
@@ -157,6 +163,7 @@ export async function admitResearchTurn(input: ResearchAdmissionInput): Promise<
     verifiedPlatforms: config.verifiedPlatforms.filter(platform => used.some(({ entry }) => entry.platform === platform)),
     benchmarkPlatforms: fetchable, routes: used.map(({ entry }) => entry),
     discoverSubcalls: Math.min(config.limits.discoverSubcalls, subcalls), recentGrowth: config.recentGrowth,
+    toolLimits: RESEARCH_TOOL_LIMITS,
   });
   return { research, tools, policies: used.map(({ policy }) => policy) };
 }
@@ -193,7 +200,7 @@ function admitGeneral(input: ResearchAdmissionInput, revision: number, config: R
     vendors: RESEARCH_VENDORS.filter(name => used.some(({ entry }) => entry.vendor === name)),
     verifiedPlatforms: social.filter(platform => used.some(({ entry }) => entry.platform === platform)),
     benchmarkPlatforms: [], routes: used.map(({ entry }) => entry), discoverSubcalls: 1, freeChat: FREE_CHAT_RESEARCH,
-    recentGrowth: config.recentGrowth,
+    recentGrowth: config.recentGrowth, toolLimits: RESEARCH_TOOL_LIMITS,
   });
   return { research, tools, policies: used.map(({ policy }) => policy) };
 }

@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type {SupabaseClient} from '@supabase/supabase-js';
+import {rowsFor,type ConfigurationRows} from './settingsRows';
 import {readData,type PublishMonitorData} from '../publishMonitor/data';
 import type {SessionRpc} from './session';
 import {postgresJsonbBytes} from './payloadSize';
@@ -20,9 +21,11 @@ export async function readWorkspaceCapability(admin:SupabaseClient,actor:string,
  if(r.error&&!['PGRST202','42883'].includes(r.error.code))throw new Error('RUNTIME_WORKSPACE_UNAVAILABLE');
  return !r.error&&r.data===true;
 }
-export async function admitOwnPosts(admin:SupabaseClient,real:boolean,kind:string,excluded:unknown[]):Promise<boolean>{
+export async function admitOwnPosts(admin:SupabaseClient,real:boolean,kind:string,excluded:unknown[],
+ configuration?:Promise<ConfigurationRows>):Promise<boolean>{
  if(!real||kind!=='ordinary'||excluded.some(Boolean))return false;
- const r=await admin.from('system_settings').select('key,value').in('key',[OWN_POSTS_SWITCH,'publish_monitor_enabled']);
+ const r=configuration?rowsFor(await configuration,[OWN_POSTS_SWITCH,'publish_monitor_enabled'])
+  :await admin.from('system_settings').select('key,value').in('key',[OWN_POSTS_SWITCH,'publish_monitor_enabled']);
  if(r.error)throw new Error('RUNTIME_WORKSPACE_UNAVAILABLE');
  return [OWN_POSTS_SWITCH,'publish_monitor_enabled'].every(key=>r.data?.some(row=>row.key===key&&row.value===true));
 }

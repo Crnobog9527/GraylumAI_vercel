@@ -122,6 +122,8 @@ export interface StoredBenchmark {
   platform: string; account: string; followers: number | null; medianViews: number | null; engagementRate: number | null;
   postsPerWeek: number | null; lastPublishedAt: string | null; category: BenchmarkRow["category"]; qualified: boolean;
   fetchedAt: string;
+  /** BENCHMARK-COVERAGE (0357): share of fetched posts on the confirmed niche, 0–1; absent or null when unknown. */
+  topicRelevance?: number | null;
   /** Evidence refs (`<research operation id>#<item>`) each displayed number was computed from. */
   refs: Record<"followers" | "medianViews" | "engagementRate" | "postsPerWeek" | "lastPublishedAt", string[]>;
 }
@@ -138,6 +140,7 @@ export function toBenchmarkRows(items: readonly StoredBenchmark[]): { rows: Benc
     const metric = (value: number | null, key: keyof StoredBenchmark["refs"]) => ({ value, refs: item.refs[key] ?? [] });
     return {
     platform: item.platform as BenchmarkRow["platform"], account: item.account, category: item.category, qualified: item.qualified,
+    topicRelevance: item.topicRelevance ?? null,
     metrics: { followers: metric(item.followers, "followers"), medianViews: metric(item.medianViews, "medianViews"),
       engagementRate: metric(item.engagementRate, "engagementRate"), postsPerWeek: metric(item.postsPerWeek, "postsPerWeek"),
       lastPublishedAt: { value: item.lastPublishedAt, refs: item.refs.lastPublishedAt ?? [] } },

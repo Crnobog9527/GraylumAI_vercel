@@ -61,7 +61,8 @@ function fixture(model:string,tag:string){
   throw new Error(name);
  });
  const admin={rpc,from:(table:string)=>{
-  const q={select:()=>q,eq:()=>q,in:async()=>({data:[modelRow],error:null}),
+  // DB-PERF PR-3: admission's one settings query carries the PAYG profile setting.
+  const q={select:()=>q,eq:()=>q,in:async()=>({data:table==='system_settings'?[{key:'runtime_payg_staging',value:settings}]:[modelRow],error:null}),
    maybeSingle:async()=>({data:table==='system_settings'?{value:settings}:null,error:null}),
    single:async()=>({data:table==='modules'?{id:id(7),active:true,skill_id:id(7),model_id:id(3)}:modelRow,error:null})};
   return q;

@@ -10,53 +10,83 @@ export { GENERAL_RESEARCH_TOOLS, POSITIONING_RESEARCH_TOOLS, RESEARCH_TOOL_NAMES
 
 const chars = (value: string) => [...value].length;
 const noControl = (value: string) => !/\p{Cc}/u.test(value);
-const keyword = z.string().trim().min(1).refine(value => chars(value) <= 40 && noControl(value), 'Keyword: at most 40 characters');
-const account = z.string().trim().min(1).refine(value => chars(value) <= 200 && noControl(value), 'Account: at most 200 characters');
+/**
+ * ARCH-FIX C1: which form of the tool arguments to build.
+ * - `run`: the arguments a tool runs with. Limits are `.max()` (a `.refine()` limit never reaches the JSON Schema).
+ * - `offer`: the parameters sent to the model. As `run`, but an optional field is nullable (the model's null means not
+ *   given): for a strict tool the SDK keeps maxLength only then; its fallback for `.optional()` drops every limit.
+ * - `undeclared`: the earlier refine-only form, offered unchanged to a turn frozen before the limits were declared, so
+ *   its replayed requests keep their bytes.
+ */
+type ArgsForm = 'run' | 'offer' | 'undeclared';
+const text = (max: number, label: string, undeclared: boolean) => undeclared
+  ? z.string().trim().min(1).refine(value => chars(value) <= max && noControl(value), `${label}: at most ${max} characters`)
+  : z.string().trim().min(1).max(max, `${label}: at most ${max} characters`).refine(noControl, `${label}: no control characters`);
 const platform = z.enum(SOCIAL_PLATFORMS);
 const id = z.string().uuid();
 const uniqueBy = <T>(items: T[], key: (item: T) => string) => new Set(items.map(key)).size === items.length;
 
-export const researchToolArgs = {
-  propose_keywords: z.object({
-    keywords: z.array(keyword).min(3).max(5).refine(items => uniqueBy(items, item => item.toLowerCase()), 'Duplicate keyword'),
-  }).strict(),
-  benchmark_discover: z.union([
-    z.object({
-      keywordConfirmationId: id,
-      platforms: z.array(platform).min(1).max(2).refine(items => uniqueBy(items, item => item), 'Duplicate platform'),
+function toolArgs(form: ArgsForm) {
+  const undeclared = form === 'undeclared';
+  const keyword = text(40, 'Keyword', undeclared);
+  const account = text(200, 'Account', undeclared);
+  const optional = <T extends z.ZodTypeAny>(schema: T) => form === 'offer' ? schema.nullable() : schema.optional();
+  return {
+    propose_keywords: z.object({
+      // BENCHMARK-COVERAGE (Owner 2026-10-23): 6–10 keywords, at least 3; research_card_create checks the same range.
+      keywords: z.array(keyword).min(3).max(10).refine(items => uniqueBy(items, item => item.toLowerCase()), 'Duplicate keyword'),
     }).strict(),
-    z.object({ discoveryId: id }).strict(),
-  ]),
-  social_search: z.object({
-    platform,
-    keywords: z.array(keyword).min(1).max(5).refine(items => uniqueBy(items, item => item.toLowerCase()), 'Duplicate keyword'),
-    limit: z.number().int().min(1).max(30).optional(),
-  }).strict(),
-  propose_more_candidates: z.object({ discoveryId: id }).strict(),
-  benchmark_fetch: z.object({
-    accounts: z.array(z.object({ platform, account }).strict()).min(1).max(5),
-    source: z.discriminatedUnion('kind', [
-      z.object({ kind: z.literal('candidate'), confirmationId: id }).strict(),
-      // messageId omitted: the user's message this reply answers (the model never sees message ids).
-      z.object({ kind: z.literal('user_message'), messageId: id.optional() }).strict(),
-      z.object({ kind: z.literal('refresh'), refreshId: id }).strict(),
+    benchmark_discover: z.union([
+      z.object({
+        keywordConfirmationId: id,
+        platforms: z.array(platform).min(1).max(2).refine(items => uniqueBy(items, item => item), 'Duplicate platform'),
+      }).strict(),
+      z.object({ discoveryId: id }).strict(),
     ]),
-  }).strict(),
-  social_account: z.object({ platform, account, posts: z.number().int().min(1).max(30).optional() }).strict(),
-  web_search: z.object({
-    query: z.string().trim().min(1).refine(value => chars(value) <= 200 && noControl(value), 'Query: at most 200 characters'),
-    mode: z.enum(['fast', 'pro']).default('fast'),
-  }).strict(),
-  web_fetch: z.object({
-    url: z.string().max(2048).refine(value => publicHttpUrl(value) !== undefined, 'Only public http(s) links without credentials'),
-  }).strict(),
-} satisfies Record<ResearchToolName, z.ZodTypeAny>;
+    social_search: z.object({
+      platform,
+      keywords: z.array(keyword).min(1).max(5).refine(items => uniqueBy(items, item => item.toLowerCase()), 'Duplicate keyword'),
+      limit: optional(z.number().int().min(1).max(30)),
+    }).strict(),
+    propose_more_candidates: z.object({ discoveryId: id }).strict(),
+    benchmark_fetch: z.object({
+      accounts: z.array(z.object({ platform, account }).strict()).min(1).max(5),
+      source: z.discriminatedUnion('kind', [
+        z.object({ kind: z.literal('candidate'), confirmationId: id }).strict(),
+        // messageId omitted: the user's message this reply answers (the model never sees message ids).
+        z.object({ kind: z.literal('user_message'), messageId: optional(id) }).strict(),
+        z.object({ kind: z.literal('refresh'), refreshId: id }).strict(),
+      ]),
+    }).strict(),
+    social_account: z.object({ platform, account, posts: optional(z.number().int().min(1).max(30)) }).strict(),
+    web_search: z.object({
+      query: text(200, 'Query', undeclared),
+      mode: z.enum(['fast', 'pro']).default('fast'),
+    }).strict(),
+    web_fetch: z.object({
+      url: z.string().max(2048).refine(value => publicHttpUrl(value) !== undefined, 'Only public http(s) links without credentials'),
+    }).strict(),
+  } satisfies Record<ResearchToolName, z.ZodTypeAny>;
+}
+
+export const researchToolArgs = toolArgs('run');
+/** The parameters offered to a turn frozen with declared limits (FrozenResearchTurn.toolLimits). */
+export const declaredResearchParameters = toolArgs('offer');
+/** The parameters offered to a turn frozen without them. */
+export const undeclaredResearchToolArgs = toolArgs('undeclared');
+/** Offered arguments as the tool runs them: a null the model sent for an optional field means it was not given. */
+export function withoutNulls(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withoutNulls);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== null).map(([key, item]) => [key, withoutNulls(item)]));
+}
 
 export type ResearchToolArgs<T extends ResearchToolName> = z.infer<typeof researchToolArgs[T]>;
 
 const PRIVACY = 'Send only keywords, public links or public account names; never personal details or conversation text.';
 export const RESEARCH_TOOL_DESCRIPTIONS: Record<ResearchToolName, string> = {
-  propose_keywords: 'Show the user a keyword selection card (3-5 keywords) before any benchmark search. Free.',
+  propose_keywords: 'Show the user a keyword selection card (aim for 6-10, at least 3: the niche term, synonyms, related terms, '
+    + 'the target market\'s language) before any benchmark search. Free.',
   benchmark_discover: 'Find benchmark candidates for a keyword card the user confirmed (keywordConfirmationId from ' +
     `hostTurnContext.research.cards). To continue, call again with the same confirmation and platforms. ${PRIVACY}`,
   social_search: `Search recent public posts on one platform by keyword. ${PRIVACY}`,

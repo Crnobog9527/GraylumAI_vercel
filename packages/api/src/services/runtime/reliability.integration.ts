@@ -187,10 +187,140 @@ it.each(['normal', 'concurrent', 'new-epoch', 'live-window', 'unknown-cost', 'ca
   } finally { await f.close(); }
 }, 60000);
 
+// 0370: a request that dies without marking its execution interrupted (a killed function, or a database fault in its own
+// error path) leaves it running. Once its dispatch lease is over 60 s past, interrupted recovery closes it too.
+it.each(['charged', 'uncharged', 'live-lease', 'unknown-cost'] as const)
+('RUNTIME: a running execution whose owner died is recovered once its lease is gone (%s)', async mode => {
+  const f = await fixture();
+  try {
+    // The process dies right after the claim of this call commits: every later database request fails.
+    const deadAfter = mode === 'uncharged' ? 1 : 2;
+    let dead = false;
+    const database = { rpc: async (name: string, args: Record<string, unknown>) => {
+      if (dead) return { data: null, error: { code: '57014' } };
+      const result = await f.admin.rpc(name, args);
+      if (name === 'bill2_claim' && args.p_sequence === deadAfter) dead = true;
+      return result;
+    } };
+    await runtimeExecutor({ ...f.options, database }).execute(f.admitted.executionId).catch(() => undefined);
+    const charged = mode === 'uncharged' ? 0 : 3;
+    // The unsent claim still holds credits on its call row; the balance already excludes them.
+    const stuck = await f.snapshot();
+    expect(stuck).toMatchObject({ execution_state: 'running', active_execution: f.admitted.executionId,
+      closed: false, calls: deadAfter });
+    expect(stuck.charged ?? 0).toBe(charged);
+    const held = async () => (await f.db.query(`select coalesce(sum(reserved_credits),0)::int n from bill2_calls
+      where run_id=$1 and state='prepared'`, [f.admitted.runId])).rows[0].n;
+    const holding = await held();
+    expect(holding).toBeGreaterThan(0);
+    expect(stuck.credits).toBe(100 - charged - holding);
+    // Age only this disposable fixture.
+    // The charged round already saved its reply (checkpoint before the organizer claim), so the reply recovery gets the
+    // first 15 minutes (see the saved-reply case below); it is aged past that grace here.
+    const lease = mode === 'live-lease' ? '30 seconds' : mode === 'charged' ? '20 minutes' : '10 minutes';
+    await f.db.query("update runtime_executions set created_at=now()-interval '20 minutes' where id=$1", [f.admitted.executionId]);
+    await f.db.query(`update bill2_calls set created_at=now()-interval '20 minutes',dispatch_deadline=now()-$2::interval,
+      dispatched_at=case when dispatched_at is null then null else now()-interval '20 minutes' end where run_id=$1`,
+    [f.admitted.runId, lease]);
+    await f.db.query('update bill2_runs set runtime_dispatch_deadline=now()-$2::interval where id=$1', [f.admitted.runId, lease]);
+    if (mode === 'unknown-cost') await f.db.query(
+      "update bill2_calls set state='unknown',settled_at=null,selected_cost_usd=null where run_id=$1 and sequence=1", [f.admitted.runId]);
+    const recover = () => recoverInterruptedExecutions({ database: f.admin, actorId: f.actor, budget: erasureFinancialBudget(55_000) });
+    const result = await recover();
+    if (mode === 'live-lease' || mode === 'unknown-cost') {
+      expect(result).toMatchObject({ selected: 0, failed: 0 });
+      expect(await f.snapshot()).toMatchObject({ execution_state: 'running', active_execution: f.admitted.executionId, closed: false });
+      return;
+    }
+    expect(result).toMatchObject({ selected: 1, processed: 1, failed: 0 });
+    const calls = (await f.db.query('select sequence,state from bill2_calls where run_id=$1 order by sequence',
+      [f.admitted.runId])).rows;
+    if (mode === 'uncharged') {
+      // Nothing was charged: cancelled now, the session is free and the unsent claim's hold is released.
+      expect(await f.snapshot()).toMatchObject({ execution_state: 'cancelled', active_execution: null, closed: true,
+        credits: 100, ledger: 100, reserved: 0, spends: 0 });
+      expect(calls).toEqual([{ sequence: 1, state: 'cancelled' }]);
+      expect(await held()).toBe(0);
+    } else {
+      // Charged: the session is freed and the owner fenced; the round stays open for the 24-hour refund.
+      expect(await f.snapshot()).toMatchObject({ execution_state: 'interrupted', active_execution: null, closed: false,
+        credits: 97, ledger: 97, reserved: 0, spends: 1 });
+      expect(calls).toEqual([{ sequence: 1, state: 'responded' }, { sequence: 2, state: 'cancelled' }]);
+      expect(await held()).toBe(0);
+      expect((await f.db.query('select failure_code from runtime_executions where id=$1', [f.admitted.executionId])).rows[0])
+        .toEqual({ failure_code: 'RUNTIME_INTERRUPTED_RELEASED' });
+      const obsolete = await f.admin.rpc('runtime_execution', { p_actor_id: f.actor,
+        p_execution_id: f.admitted.executionId, p_action: 'complete', p_result: { epoch: 1, value: null } });
+      expect(obsolete.error?.message).toContain('RUNTIME_RESUME_CONFLICT');
+      await f.db.query("update runtime_executions set created_at=now()-interval '25 hours' where id=$1", [f.admitted.executionId]);
+      await f.db.query(`update bill2_calls set created_at=now()-interval '25 hours',dispatched_at=case when dispatched_at is null
+        then null else now()-interval '25 hours' end,settled_at=now()-interval '25 hours' where run_id=$1`, [f.admitted.runId]);
+      expect(await compensateStaleRound(f.admin, f.admitted.runId)).toMatchObject({ state: 'compensated', compensatedCredits: 3 });
+      expect(await f.snapshot()).toMatchObject({ closed: true, execution_state: 'cancelled', credits: 100, ledger: 100, reserved: 0 });
+    }
+    const terminal = await f.snapshot();
+    expect(await recover()).toMatchObject({ selected: 0, failed: 0 });
+    expect(await f.snapshot()).toEqual(terminal);
+  } finally { await f.close(); }
+}, 60000);
+
+// 0370 review: a running round that already saved its reply is first left to the reply recovery (ownerLostRecovery.ts);
+// interrupted recovery releases it only once that has not handed it back for 15 minutes.
+it.each(['5 minutes', '20 minutes'] as const)('RUNTIME: a running round with a saved reply waits for the reply recovery (lease %s ago)',
+  async lease => {
+    const f = await fixture();
+    try {
+      await f.interrupted();
+      expect((await f.db.query('select primary_result is not null saved from runtime_executions where id=$1',
+        [f.admitted.executionId])).rows[0].saved).toBe(true);
+      await f.db.query("update runtime_executions set state='running',created_at=now()-interval '30 minutes' where id=$1",
+        [f.admitted.executionId]);
+      await f.db.query(`update bill2_calls set created_at=now()-interval '30 minutes',dispatched_at=now()-interval '30 minutes'
+        where run_id=$1`, [f.admitted.runId]);
+      await f.db.query('update bill2_runs set runtime_dispatch_deadline=now()-$2::interval where id=$1', [f.admitted.runId, lease]);
+      const result = await recoverInterruptedExecutions({ database: f.admin, actorId: f.actor, budget: erasureFinancialBudget(55_000) });
+      if (lease === '5 minutes') {
+        expect(result).toMatchObject({ selected: 0, failed: 0 });
+        expect(await f.snapshot()).toMatchObject({ execution_state: 'running', active_execution: f.admitted.executionId, closed: false });
+      } else {
+        expect(result).toMatchObject({ selected: 1, processed: 1, failed: 0 });
+        expect(await f.snapshot()).toMatchObject({ execution_state: 'interrupted', active_execution: null, closed: false,
+          credits: 94, reserved: 0 });
+      }
+    } finally { await f.close(); }
+  }, 60000);
+
+// 0379 (line D1): an admitted round that was never begun holds its session until interrupted recovery cancels it.
+it.each(['5 minutes', '15 minutes'] as const)('RUNTIME: a never-begun round is cancelled after 10 minutes (admitted %s ago)',
+  async age => {
+    const f = await fixture();
+    try {
+      expect(await f.snapshot()).toMatchObject({ execution_state: 'prepared', active_execution: f.admitted.executionId, calls: 0 });
+      await f.db.query('update runtime_executions set created_at=now()-$2::interval where id=$1', [f.admitted.executionId, age]);
+      const recover = () => recoverInterruptedExecutions({ database: f.admin, actorId: f.actor, budget: erasureFinancialBudget(55_000) });
+      const result = await recover();
+      if (age === '5 minutes') {
+        expect(result).toMatchObject({ selected: 0, failed: 0 });
+        expect(await f.snapshot()).toMatchObject({ execution_state: 'prepared', active_execution: f.admitted.executionId });
+        return;
+      }
+      expect(result).toMatchObject({ selected: 1, processed: 1, settled: 1, failed: 0 });
+      expect(await f.snapshot()).toMatchObject({ execution_state: 'cancelled', active_execution: null, closed: true,
+        credits: 100, ledger: 100, calls: 0, spends: 0 });
+      // A late begin from the vanished client sends nothing and finds the round closed.
+      expect(await runtimeExecutor(f.options).execute(f.admitted.executionId)).toMatchObject({ state: 'cancelled' });
+      expect(f.requests).toHaveLength(0);
+      expect(await recover()).toMatchObject({ selected: 0, failed: 0 });
+    } finally { await f.close(); }
+  }, 60000);
+
 it.each(['normal', 'committed-lost-response', 'not-committed', 'readback-fails'])
 ('RUNTIME: reliability finalize normal/ambiguous transaction %s', async mode => {
   const f = await fixture();
   try {
+    // DB-PERF: a receipt recorded by the live owner settles inside bill2_record, so the executor's finalizeRun now runs
+    // only when replaying a saved response. Save and settle both calls, stop before completion, then replay them.
+    await f.interrupted(); const token = await f.pause();
     let finalized = 0, failed = false;
     const database = { rpc: async (name: string, args: Record<string, unknown>) => {
       if (name === 'bill2_finalize') {
@@ -204,10 +334,10 @@ it.each(['normal', 'committed-lost-response', 'not-committed', 'readback-fails']
       if (failed && mode === 'readback-fails' && name === 'bill2_read') return { data: null, error: { code: '57014' } };
       return f.admin.rpc(name, args);
     } };
-    const result = await runtimeExecutor({ ...f.options, database }).execute(f.admitted.executionId);
+    const result = await runtimeExecutor({ ...f.options, database }).execute(token.executionId, undefined, token);
     if (mode === 'readback-fails') {
       expect(result).toMatchObject({ state: 'pending' }); expect(finalized).toBe(1);
-      expect(await f.snapshot()).toMatchObject({ calls: 1, spends: 1, credits: 97, ledger: 97, reserved: 0, closed: false });
+      expect(await f.snapshot()).toMatchObject({ calls: 2, spends: 2, credits: 94, ledger: 94, reserved: 0, closed: false });
     } else {
       expect(result).toMatchObject({ state: 'completed', body: 'Saved primary answer', summary: 'Saved organizer summary' });
       expect(await f.snapshot()).toMatchObject({ calls: 2, spends: 2, credits: 94, ledger: 94, reserved: 0, execution_state: 'completed' });
@@ -217,6 +347,7 @@ it.each(['normal', 'committed-lost-response', 'not-committed', 'readback-fails']
       await Promise.all([billing.finalizeRun(f.admitted.runId), billing.finalizeRun(f.admitted.runId)]);
       expect(await f.snapshot()).toEqual(before);
     }
+    expect(f.requests).toHaveLength(2);
   } finally { await f.close(); }
 }, 30000);
 
@@ -308,11 +439,12 @@ it.each(['primary', 'organizer', 'terminal'] as const)
 ('RUNTIME: reliability exhausted invalid %s receipt crosses the real Runner and compensates once', async invalid => {
   const f = await fixture(invalid);
   try {
-    const used = invalid === 'organizer' ? 2 : 1; let finalizers = 0;
-    // Persist the supplier response/cost, then stop before the SDK's response validation.
+    const used = invalid === 'organizer' ? 2 : 1; let readBack = false;
+    // Persist the supplier response/cost, then stop before the SDK's response validation: the read-back of the saved
+    // response fails (DB-PERF: the live owner no longer runs finalizeRun after its own settled receipt).
     // A fresh process must classify that invalid saved reply through the real Runner wrapper.
-    const database = { rpc: (name: string, args: Record<string, unknown>) => name === 'bill2_finalize' && ++finalizers === used
-      ? Promise.resolve({ data: null, error: { code: '42501' } }) : f.admin.rpc(name, args) };
+    const database = { rpc: (name: string, args: Record<string, unknown>) => name === 'runtime_response' && args.p_sequence === used
+      && !readBack && (readBack = true) ? Promise.resolve({ data: null, error: { code: '42501' } }) : f.admin.rpc(name, args) };
     expect(await runtimeExecutor({ ...f.options, database }).execute(f.admitted.executionId)).toMatchObject({ state: 'pending' });
     expect(await f.snapshot()).toMatchObject({ calls: used, credits: 100 - 3 * used, reserved: 0, closed: false });
     const token = await f.pause();

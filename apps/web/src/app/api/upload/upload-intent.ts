@@ -15,7 +15,18 @@ export type UploadClient = {
     list(prefix: string, options: { search: string; limit: number }): Promise<{ data: Array<{ name: string }> | null; error: unknown }>;
   } };
 };
-type Outcome = { status: 200; path: string } | { status: 400 | 403 | 503; error: string };
+type Outcome = { status: 200; path: string } | { status: 400 | 403 | 429 | 503; error: string };
+// Per-user limits enforced by ticket_upload_begin; the admission is refused before any byte is stored.
+const LIMITS: Record<string, string> = {
+  UPLOAD_RATE_LIMITED: '上传太快了，请稍等一分钟再试',
+  UPLOAD_DAILY_COUNT: '24 小时内最多上传 20 个附件，请明天再试',
+  UPLOAD_DAILY_BYTES: '24 小时内附件总大小最多 50MB，请明天再试',
+};
+function limitOf(error: unknown) {
+  const message = error && typeof error === 'object' && 'message' in error && typeof error.message === 'string'
+    ? error.message : '';
+  return Object.keys(LIMITS).find(code => message.includes(code));
+}
 function finishShape(value: unknown): value is { released: boolean; closed: boolean } {
   return !!value && typeof value === 'object' && 'released' in value && 'closed' in value
     && typeof value.released === 'boolean' && typeof value.closed === 'boolean';
@@ -28,7 +39,7 @@ export async function uploadWithIntent(input: {
   const uploadId = input.uploadId ?? randomUUID();
   const timeoutMs = input.timeoutMs ?? 10_000;
   const ext = EXTENSIONS[input.mime];
-  if (!UUID.test(input.profileId) || !UUID.test(uploadId) || !ext || input.body.byteLength > 5 * 1024 * 1024
+  if (!UUID.test(input.profileId) || !UUID.test(uploadId) || !ext || input.body.byteLength < 1 || input.body.byteLength > 5 * 1024 * 1024
     || !Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 10_000) {
     return { status: 400, error: '附件参数无效' };
   }
@@ -45,7 +56,9 @@ export async function uploadWithIntent(input: {
   const basename = `${uploadId}.${ext}`;
   const path = `${input.profileId}/${basename}`;
   try {
-    const begun = await bounded(() => input.client.rpc('ticket_upload_begin', args));
+    const begun = await bounded(() => input.client.rpc('ticket_upload_begin', { ...args, p_bytes: input.body.byteLength }));
+    const limit = limitOf(begun.error);
+    if (limit) return { status: 429, error: LIMITS[limit] };
     if (begun.error || !begun.data || typeof begun.data !== 'object' || !('admitted' in begun.data)
       || begun.data.admitted !== true) return pending;
     const bucket = input.client.storage.from('ticket-attachments');

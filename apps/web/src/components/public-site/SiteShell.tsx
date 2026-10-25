@@ -9,7 +9,7 @@ import Link from 'next/link';
 import { ConsentPreferenceLinks } from '@/components/analytics/ConsentPreferenceLinks';
 import { PUBLIC_PAGES } from '@/lib/seo/public-pages';
 import type { SiteLocale } from '@/lib/seo/site';
-import { LANGUAGE_NAMES, LOGIN_HREF, SIGNUP_HREF, SITE_CHROME, visibleHref } from './site-chrome';
+import { LANGUAGE_NAMES, LOGIN_HREFS, SIGNUP_HREFS, SITE_CHROME, visibleHref } from './site-chrome';
 
 const LINK_CLASS = 'text-sm text-[#9A9A9A] transition-colors hover:text-[#FFD700]';
 const LOCALES: SiteLocale[] = ['zh-Hans', 'zh-TW'];
@@ -76,9 +76,9 @@ export function SiteShell({
                 {link.label}
               </Link>
             ))}
-            <Link href={LOGIN_HREF} className="text-sm text-[#B0B0B0] hover:text-white">{chrome.login}</Link>
+            <Link href={LOGIN_HREFS[locale]} className="text-sm text-[#B0B0B0] hover:text-white">{chrome.login}</Link>
             <Link
-              href={SIGNUP_HREF}
+              href={SIGNUP_HREFS[locale]}
               className="rounded-lg bg-[#FFD700] px-4 py-2 text-sm font-semibold text-[#0A0A0A] hover:bg-[#FFE34D]"
             >
               {chrome.signup}

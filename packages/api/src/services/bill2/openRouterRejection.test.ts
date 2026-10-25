@@ -68,3 +68,10 @@ it.each([
 ])('rejects HTTP %s with a body that is not an exclusive refusal %#',(status,body)=>{
  expect(openRouterRejection(withId(observation(body),status),identity,requestHash)).toBeNull();
 });
+it('ARCH-FIX G1: accepts a single-copy body and stores its text once',()=>{
+ const {rawBodyBase64:dropped,...single}=observation(error());void dropped;
+ const proof=openRouterRejection(single,identity,requestHash);
+ expect(proof).toMatchObject({evidenceKind:'provider_rejection',rawBody:JSON.stringify(error())});
+ expect(proof?.transport).not.toHaveProperty('rawBody');expect(proof?.transport).not.toHaveProperty('rawBodyBase64');
+ expect(openRouterRejection({...single,rawBody:single.rawBody+' '},identity,requestHash)).toBeNull();
+});

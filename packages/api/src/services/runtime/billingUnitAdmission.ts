@@ -45,11 +45,13 @@ export async function freezeWindowBillingUnit(
   admin: SupabaseClient,
   window: WindowPolicy,
   selected: readonly CallPolicy[],
+  /** DB-PERF PR-3: this admission's settings rows and the model rows it already read. */
+  prefetched: Parameters<typeof readMultiplierSnapshot>[3] = {},
 ): Promise<MultiplierSnapshot> {
   if (selected.some((policy) => policy.multiplier === undefined)) throw new StagingAccessError('RUNTIME_BILLING_UNIT_WINDOW_OUTDATED');
   let snapshot: MultiplierSnapshot;
   try {
-    snapshot = await readMultiplierSnapshot(admin, selected.map((policy) => policy.modelId));
+    snapshot = await readMultiplierSnapshot(admin, selected.map((policy) => policy.modelId), undefined, prefetched);
   } catch (cause) {
     if (cause instanceof BillingUnitConfigError) throw new StagingAccessError('RUNTIME_BILLING_UNIT_UNAVAILABLE');
     throw cause;

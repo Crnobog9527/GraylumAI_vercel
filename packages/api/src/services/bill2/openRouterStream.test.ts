@@ -7,6 +7,7 @@ import {openRouterStream,OPENROUTER_STREAM_BYTE_LIMIT,OPENROUTER_STREAM_FRAME_LI
 import {openRouterAdapter} from './openRouterAdapter';
 import {openRouterBound} from './openRouterPolicy';
 import {OPENROUTER_RESPONSE_BYTE_LIMIT as responseLimit} from './responseCapacity';
+import type {TransportObservation} from './fixtureAdapter';
 const identity={provider:'openrouter',account:'test',model:'test/model',protocol:'openrouter-chat-v1',providerLimits:{providerSlug:'synthetic',contextTokens:10000,promptUsdPerMillion:'2',completionUsdPerMillion:'0',requestUsd:'0'},outputLimit:100,upperUsd:'0.02'} as const;
 const body=JSON.stringify({model:identity.model,stream:true,stream_options:{include_usage:true},store:false,messages:[],max_tokens:100,provider:openRouterBound(identity.providerLimits,identity.outputLimit).routing});
 const chunk=(delta:Record<string,unknown>,finish:string|null=null,extra:Record<string,unknown>={})=>JSON.stringify({id:'gen-stream',model:identity.model,choices:[{index:0,delta,finish_reason:finish}],...extra});
@@ -73,7 +74,7 @@ describe('stream transport and financial evidence',()=>{
   const observed=await pending;const evidence=adapter.evidence(observed,identity,'response');
   expect(transport).toHaveBeenCalledTimes(1);expect(transport.mock.calls[0]?.[1]?.body).toBe(body);
   expect(evidence).toMatchObject({final:true,providerId:'gen-stream',cost:'0.0000012',sourceHash:createHash('sha256').update(start+remaining).digest('hex')});
-  expect(evidence.transport.rawBody).toBe('');expect(JSON.parse(evidence.rawBody).choices[0].message.content).toBe('你好正文');
+  expect(evidence.transport).toHaveProperty('rawBody','');expect(JSON.parse(evidence.rawBody).choices[0].message.content).toBe('你好正文');
   expect(decodeOpenRouterStreamObservation(observed).toString()).toBe(start+remaining);
   expect(()=>send()).toThrow('CAPABILITY_CONSUMED');
  });
@@ -140,7 +141,8 @@ it('stores more than 512 KiB of normal 4096-delta SSE reversibly within the rece
  expect(Buffer.byteLength(large)).toBeGreaterThan(524288);
  const adapter=adapterFor(async()=>new Response(large)),observation=await adapter.dispatch({input:body},identity),evidence=adapter.evidence(observation,identity,'response');
  expect(evidence).toMatchObject({final:true,cost:'0.0000012',sourceHash:createHash('sha256').update(large).digest('hex')});
- expect(decodeOpenRouterStreamObservation(evidence.transport).toString()).toBe(large);
+ // A streamed transport keeps its full observation shape.
+ expect(decodeOpenRouterStreamObservation(evidence.transport as TransportObservation).toString()).toBe(large);
  expect(Buffer.byteLength(JSON.stringify(evidence))).toBeLessThan(524288-16384);
 });
 it.each(['bad gzip','wrong hash','wrong size','oversize inflate'])('rejects %s compressed evidence without claiming final cost',async(mode)=>{

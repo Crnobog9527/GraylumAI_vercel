@@ -145,7 +145,7 @@ it('a 90000-byte first-step request keeps its saved facts and the next step rece
  const {captureHostContext}=await import('../opc/captureContext');
  const {runtimeScopeInput}=await import('./context');
  const {groundedCardToolBytes}=await import('./groundedCard');
- const {REPLY_LANGUAGE_INSTRUCTIONS}=await import('./primaryInstructions');
+ const DEFAULT_REPLY_RULE=(await import('./replyLanguage')).replySettingInstructions('zh-Hans');
  const {POSITIONING_RESEARCH_TOOLS}=await import('../research/tools/schemas');
  const steps=[{id:'first',title:'First'},{id:'research',title:'Research'}];
  const schema=Array.from({length:7},(_,i)=>({id:`fact${i}`,title:`Fact ${i}`,required:true}));
@@ -162,7 +162,7 @@ it('a 90000-byte first-step request keeps its saved facts and the next step rece
  skill.text='S'.repeat(43000);
  const firstService=runtimeAdmissionService(first.user,first.admin,{...first.policy,hostTurnContext:firstHost});
  const measure=(context:ReturnType<typeof runtimeContext.parse>)=>Buffer.byteLength(JSON.stringify({
-  instructions:context.instructions+REPLY_LANGUAGE_INSTRUCTIONS,
+  instructions:context.instructions+DEFAULT_REPLY_RULE,
   messages:[{role:'user',content:runtimeScopeInput(context.input,context.scopeMaterial,context.hostTurnContext)}],
  }))+groundedCardToolBytes()+150+1024;
  // JSON escaping is part of the byte budget. All input stays within the existing 8000-character OPC limit.
@@ -192,7 +192,7 @@ it('a 90000-byte first-step request keeps its saved facts and the next step rece
  const {RESEARCH_RESULT_RESERVE_BYTES}=await import('./researchTurn');
  const beforeHost={...context.hostTurnContext!};delete beforeHost.materialProjection;
  // The old composition really fails; this is not a small fixture that passed even before the fix.
- const oldComposition=researchCapacity({instructions:context.instructions+REPLY_LANGUAGE_INSTRUCTIONS,
+ const oldComposition=researchCapacity({instructions:context.instructions+DEFAULT_REPLY_RULE,
   currentInput:runtimeScopeInput(context.input,context.scopeMaterial,beforeHost),inputBudgetBytes:112000,
   existingToolsBytes:groundedCardToolBytes()+150,researchToolsBytes:researchToolBytes(POSITIONING_RESEARCH_TOOLS,true),
   researchHostDeltaBytes:0,resultReserveBytes:RESEARCH_RESULT_RESERVE_BYTES});

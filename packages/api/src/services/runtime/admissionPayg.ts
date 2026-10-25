@@ -18,6 +18,8 @@ export async function freezeAdmissionPayg(input: {
   admin: SupabaseClient; context: PaygContext; billing: FrozenRun | FrozenPaygRun;
   paygTemplates: readonly Template[]; realCalls: StagingPolicy['callPolicies'] | undefined;
   selectedIds: ReadonlySet<string>; modelId: string; billingUnit: NonNullable<FrozenPaygRun['rules']['billingUnit']>;
+  /** DB-PERF PR-3: model rows admission already read, reused for the price snapshots. */
+  modelRows?: readonly Record<string, unknown>[];
 }): Promise<FrozenRun | FrozenPaygRun> {
   const { context, billing, paygTemplates, realCalls, selectedIds } = input;
   // #878 regression: a PAYG call carries at most its profile's maxTools (SQL 0162 caps it at 2). The
@@ -30,7 +32,8 @@ export async function freezeAdmissionPayg(input: {
   billing.sourceHash = createHash('sha256').update(JSON.stringify(context)).digest('hex');
   const templates = paygTemplates.filter(p => selectedIds.has(p.modelId));
   const callPolicy = realCalls
-    ? await freezeStagingPaygPricing(input.admin, realCalls.map(p => ({ ...p, payg: templates.find(t => t.modelId === p.modelId)?.payg })))
+    ? await freezeStagingPaygPricing(input.admin, realCalls.map(p => ({ ...p, payg: templates.find(t => t.modelId === p.modelId)?.payg })),
+      {}, input.modelRows)
     : templates.map(p => frozenCallPolicy.parse(p));
   if (callPolicy.length !== selectedIds.size || callPolicy.some(p => !p.payg)) throw new Error('BILL2_PAYG_QUOTE_INVALID');
   return { ...billing, contractVersion: 'bill2.v2', callPolicy,

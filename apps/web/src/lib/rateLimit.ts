@@ -28,7 +28,8 @@ export type RateLimitType =
   | 'api'
   | 'auth'
   | 'anonymous'
-  | 'ip';
+  | 'ip'
+  | 'ip_session';
 
 // ============================================
 // Redis 客户端
@@ -99,6 +100,18 @@ function getRateLimiter(type: RateLimitType): Ratelimit | null {
         limiter: Ratelimit.slidingWindow(60, '1 m'),
         prefix: 'graylum:middleware:',
         analytics: false, // DATA-ERASURE E7: analytics keeps identifiers (user ids) with no expiry.
+        timeout: 0,
+      });
+      break;
+
+    // ARCH-FIX A1: requests that carry a login. Logged-in calls are limited per user in the API
+    // (procedureRateLimit); this is only a coarse guard per exit IP, which many users can share.
+    case 'ip_session':
+      limiter = new Ratelimit({
+        redis,
+        limiter: Ratelimit.slidingWindow(600, '1 m'),
+        prefix: 'graylum:middleware:session:',
+        analytics: false,
         timeout: 0,
       });
       break;

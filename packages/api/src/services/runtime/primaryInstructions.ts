@@ -2,6 +2,8 @@
 import {OWN_POSTS_INSTRUCTIONS} from './workspacePosts';
 import {POSITIONING_FALLBACK,POSITIONING_FALLBACK_INSTRUCTIONS} from './positioningFallback';
 import type {VoiceProfile} from '../voice/profile';
+import {frozenReplyLocale,replySettingInstructions} from './replyLanguage';
+export {readReplySetting} from './replyLanguage';
 /** The system instruction of an ordinary free conversation turn without a Skill. Admission and the FUSION-COMPARE columns
  * (which must start from the same text) both read it from here. */
 export const FREE_CHAT_BASE_INSTRUCTIONS='Answer the user request directly. Ordinary questions do not require choosing a work direction '+
@@ -51,6 +53,13 @@ export const REPLY_LANGUAGE_INSTRUCTIONS=
   "in the user's language: that of their latest message, or of earlier ones when unclear (Traditional Chinese uses Taiwan "+
   "usage). A language the user explicitly asks for wins. With no user message this turn, follow the user's own words in "+
   "the material, else Simplified Chinese. Keep required exact strings (report headings, ids, JSON keys) unchanged.";
+/** The reply-language paragraph of a frozen value: v1 (the user's own language) for executions admitted before the
+ * setting, the set language (replyLanguage.ts) after it, nothing for any other value. */
+export function replyLanguageText(frozen?:string):string {
+  if(frozen===REPLY_LANGUAGE)return REPLY_LANGUAGE_INSTRUCTIONS;
+  const locale=frozenReplyLocale(frozen);
+  return locale?replySettingInstructions(locale):'';
+}
 /** LIB-4b: the user referenced library documents with @ in this message (frozen as libraryReferences). */
 export const LIBRARY_INSTRUCTIONS=
   '\nThe user attached documents from their own library to this message as doc-1, doc-2 and so on. When the request '+
@@ -74,28 +83,33 @@ export function libraryAddendum(references:boolean,retrieval:boolean):string {
 /** VOICE (Master Plan 5.3 step 4): a writing Skill run carries the user's confirmed voice profile. Admission freezes only
  * {guide, versionId}; the text is read for that version when the run executes (a deleted version is never read again), and
  * admission sizes the same text. VOICE_GUIDE versions the wording so earlier executions replay byte-identical. */
-export const VOICE_GUIDE='voice-v2';
+export const VOICE_GUIDE='voice-v3';
 /** Wordings an execution can have been frozen with; each replays its own text byte-identical. */
-export const VOICE_GUIDES=['voice-v1','voice-v2'] as const;
+export const VOICE_GUIDES=['voice-v1','voice-v2','voice-v3'] as const;
 /** Owner 2026-10-23 (A): with no confirmed profile yet, the coach points to the library page once instead of learning in chat. */
 export const VOICE_HINT_INSTRUCTIONS=
   '\n\nWriting voice (host rule): the user has not set up their own writing voice yet. Once, at the end of this reply, '+
   'add one short sentence in the user\'s language saying that if they upload things they wrote themselves, Graylum can learn '+
   'their voice in [资料库 · 我的文风](/app/library?tab=voice) and write like them. Skip it if it was already said in this conversation.';
+/** voice-v3 lists only word-sized phrases: a longer "phrase" is a whole sentence of the samples and could be copied. */
+export const VOICE_PHRASE_MAX=12;
 export function voiceAddendum(profile:VoiceProfile,guide:string=VOICE_GUIDE):string {
-  const v2=guide!=='voice-v1';
+  const v2=guide==='voice-v2',v3=guide==='voice-v3';
   const line=(label:string,value:string)=>value?`\n- ${label}：${value}`:'';
   const list=(label:string,values:string[])=>values.length?`\n- ${label}：${values.join('、')}`:'';
+  const phrases=v3?profile.phrases.filter(phrase=>[...phrase].length<=VOICE_PHRASE_MAX):profile.phrases;
   return '\n\nWriting voice (host rule): the user confirmed this description of how they write. Write drafts, scripts and '+
     'posts in this voice: follow its tone, sentence rhythm and habits, use their phrases where natural and avoid what they '+
     'avoid. It describes style only: never take facts, events or claims from it, and do not quote the passages unless asked. '+
     (v2?'The passages show tone, rhythm and word choice only. Never copy a sentence from them, never reuse a sentence with '+
      'a few words swapped, and never start the draft with a line that resembles how a passage starts: write new sentences '+
      'about the user\'s current topic. Use the listed phrases sparingly, where they fit. ':'')+
+    (v3?'No sample passages are given on purpose: write every sentence new, about the user\'s current topic. '+
+     'Use the listed phrases sparingly, as words inside your own sentences, never as whole stock lines. ':'')+
     'If the user asks for a different style this time, follow the user.'+
     '\n<user_voice>'+line('语气',profile.tone)+line('句子长短',profile.sentenceLength)+line('开头方式',profile.openings)+
-    line('观点强弱',profile.stance)+list('常用表达',profile.phrases)+list('不会用的表达',profile.avoid)+
-    line('各平台差异',profile.platforms)+profile.samples.map((sample,index)=>`\n- 原文片段 ${index+1}${v2?'（只看语气，不可照抄）':''}：${sample}`).join('')+
+    line('观点强弱',profile.stance)+list('常用表达',phrases)+list('不会用的表达',profile.avoid)+line('各平台差异',profile.platforms)+
+    (v3?'':profile.samples.map((sample,index)=>`\n- 原文片段 ${index+1}${v2?'（只看语气，不可照抄）':''}：${sample}`).join(''))+
     '\n</user_voice>';
 }
 /** The voice paragraph of an execution: its own frozen wording (never another), the one-time hint without a profile, or nothing. */
@@ -107,7 +121,7 @@ export function withPrimaryAddenda(instructions:string,
   context:{workspaceContext?:boolean;network?:string;positioningGate?:string;replyLanguage?:string;
     workspaceGuide?:string;ownPosts?:boolean;libraryReferences?:unknown[];libraryRetrieval?:boolean;
     voice?:{guide:string;profile?:VoiceProfile}}):string {
-  return instructions+(context.replyLanguage===REPLY_LANGUAGE?REPLY_LANGUAGE_INSTRUCTIONS:'')+
+  return instructions+replyLanguageText(context.replyLanguage)+
     (context.workspaceContext?WORKSPACE_CONTEXT_INSTRUCTIONS+
       (context.workspaceGuide===WORKSPACE_STRATEGY_GUIDE?WORKSPACE_STRATEGY_INSTRUCTIONS:''):'')+
     (context.ownPosts?OWN_POSTS_INSTRUCTIONS:'')+
