@@ -10,11 +10,16 @@ import { BILLING_CONSTANTS } from '../types/billing';
  * per-model overrides. Read failures and invalid values reject new charging; only a
  * successfully confirmed missing key or a legal NULL override inherits a default.
  */
-// Fallback only for a confirmed-missing row. Kept equal to the pre-BILL-UNIT defaults so merging
-// never changes an environment's effective q/m; the Owner-approved q=100/m=3 is written as rows.
+// Fallback only for a confirmed-missing row: the Owner-approved production values (q=100, m=6, see BILLING_CONSTANTS).
+// Staging's m=3 is an explicit stored row, never this default.
 export const BILLING_UNIT_DEFAULTS = {
   creditsPerUsd: String(BILLING_CONSTANTS.CREDITS_PER_USD),
   multiplier: String(BILLING_CONSTANTS.TOKEN_PRICE_MULTIPLIER),
+} as const;
+/** q / m fields of a local-development or read-only runtime policy; the single place those values come from. */
+export const BILLING_UNIT_POLICY = {
+  creditsPerUsd: BILLING_UNIT_DEFAULTS.creditsPerUsd,
+  multiplier: BILLING_UNIT_DEFAULTS.multiplier,
 } as const;
 export const BILLING_UNIT_SETTING_KEYS = {
   creditsPerUsd: 'billing_credits_per_usd',

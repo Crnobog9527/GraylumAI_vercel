@@ -33,6 +33,7 @@ const uuid = z.string().uuid();
 import {opcTopicBind, startWithPositioningProfileLimit} from './start';
 import {isPositioningWorkflow} from './positioningWorkflow';
 import {researchRefreshContext, withResearchRefresh} from './researchRefresh';
+import {BILLING_UNIT_POLICY} from '../billingUnit';
 export {opcStart, opcTopicBind} from './start';
 export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:StagingPolicy, resumeWaitingOrganizer?:ResumeWaitingOrganizer) {
   async function rpc(name: string, args: Record<string, unknown>, actorId?: string) {
@@ -214,8 +215,7 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
         ...(hostTurnContext ? {hostTurnContext} : {}),
         additionalInstructions, stableAdditionalInstructions: v.purpose === "mentor" ? additionalInstructions : undefined,
         costPerCall: "0.02",
-        creditsPerUsd: "1000",
-        multiplier: "1",
+        ...BILLING_UNIT_POLICY,
         maxCalls: (organizeAfter ? 2 : 1) + (v.purpose === "mentor" && !opening ? 1 : 0),
         organizeOpening: opening,
         purposeBudgets: true, maxOutputTokens: 1000,
@@ -376,8 +376,7 @@ export function opcService(user: SupabaseClient, admin: SupabaseClient, real?:St
         account: "runtime-local",
         additionalInstructions: TOPIC_WORKSPACE_INSTRUCTION,
         costPerCall: "0.02",
-        creditsPerUsd: "1000",
-        multiplier: "1",
+        ...BILLING_UNIT_POLICY,
         maxCalls: 1,
         purposeBudgets: true, maxOutputTokens: 1000,
         inputBytes: 64000,

@@ -57,7 +57,7 @@ describe('publish-monitor one-click publishing', () => {
   const submit = { idempotencyKey: 'key-00000001', businessId: biz, workItemId: null, connectionIds: [conn], caption: 'Hi',
     maxHoldCredits: 6, media: [] };
   const open = { publish_monitor_publish_platforms: ['x'],
-    publish_monitor_publish_price: { usdPerTarget: '0.01', multiplier: '6', creditsPerUsd: '100' } };
+    publish_monitor_publish_price: { usdPerTarget: '0.01' }, billing_credits_per_usd: 100, billing_token_price_multiplier: 6 };
   const connection = (platform: string, id = conn) => ({ id, businessId: biz, accountProjectId: biz, role: 'own',
     source: 'postforme', platform, displayHint: null, status: 'connected', consentRead: true, consentAutoTrack: false,
     consentPublish: true, lastSuccessAt: null, postCount: 0 });
@@ -150,13 +150,26 @@ describe('publish-monitor one-click publishing', () => {
     mocks.entitlements.mockResolvedValue({ allowPublish: true });
     await expect(caller(vi.fn(), true, open).publish.options())
       .resolves.toEqual({ platforms: ['x'], holdCreditsByTargets: [6, 12, 18, 24, 30, 36, 42, 48, 54] });
-    await expect(caller(vi.fn(), true, { publish_monitor_publish_price: { usdPerTarget: '0.015', multiplier: '6',
-      creditsPerUsd: '100' } }).publish.options()).resolves.toEqual({ platforms: [],
+    await expect(caller(vi.fn(), true, { publish_monitor_publish_price: { usdPerTarget: '0.015' },
+      billing_credits_per_usd: 100, billing_token_price_multiplier: 6 }).publish.options()).resolves.toEqual({ platforms: [],
       holdCreditsByTargets: [9, 18, 27, 36, 45, 54, 63, 72, 81] });
-    await expect(caller(vi.fn(), true, { publish_monitor_publish_price: { usdPerTarget: '0.011', multiplier: '1',
-      creditsPerUsd: '100' } }).publish.options()).resolves.toMatchObject({ holdCreditsByTargets: [2, 3, 4, 5, 6, 7, 8, 9, 10] });
+    // q and m follow the site-wide settings, whatever form they are stored in.
+    await expect(caller(vi.fn(), true, { publish_monitor_publish_price: { usdPerTarget: '0.011' },
+      billing_credits_per_usd: '100', billing_token_price_multiplier: '1' }).publish.options())
+      .resolves.toMatchObject({ holdCreditsByTargets: [2, 3, 4, 5, 6, 7, 8, 9, 10] });
     await expect(caller(vi.fn(), true, { publish_monitor_publish_price: { usdPerTarget: 'x' } }).publish.options())
       .resolves.toEqual({ platforms: [], holdCreditsByTargets: null });
+    // A site-wide q with more than six decimals is legal and must not switch the price off.
+    await expect(caller(vi.fn(), true, { publish_monitor_publish_price: { usdPerTarget: '0.01' },
+      billing_credits_per_usd: '100.1234567', billing_token_price_multiplier: 6 }).publish.options())
+      .resolves.toMatchObject({ holdCreditsByTargets: [7, 13, 19, 25, 31, 37, 43, 49, 55] });
+    // A missing site-wide row shows no number (fail closed), never a default.
+    await expect(caller(vi.fn(), true, { publish_monitor_publish_price: { usdPerTarget: '0.01' },
+      billing_credits_per_usd: 100 }).publish.options()).resolves.toEqual({ platforms: [], holdCreditsByTargets: null });
+    // The legacy row still carrying its own q and m (before the migration) is ignored in favour of the site-wide rows.
+    await expect(caller(vi.fn(), true, { publish_monitor_publish_price: { usdPerTarget: '0.01', multiplier: '99',
+      creditsPerUsd: '999' }, billing_credits_per_usd: 100, billing_token_price_multiplier: 6 }).publish.options())
+      .resolves.toMatchObject({ holdCreditsByTargets: [6, 12, 18, 24, 30, 36, 42, 48, 54] });
   });
 
   it('refuses publishing without the entitlement before any database or provider work, and while paused', async () => {

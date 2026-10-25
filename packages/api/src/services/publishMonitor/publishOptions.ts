@@ -12,12 +12,17 @@ import { PublishError } from './publish';
  */
 type Db = Pick<SupabaseClient, 'rpc' | 'from'>;
 export const PUBLISH_PLATFORMS_SETTING = 'publish_monitor_publish_platforms';
+// Publishing has its own USD price per platform only; q and m are the site-wide BILL-UNIT rows (Owner 2026-10-25).
 const PRICE_SETTING = 'publish_monitor_publish_price';
+const CREDITS_PER_USD_SETTING = 'billing_credits_per_usd';
+const MULTIPLIER_SETTING = 'billing_token_price_multiplier';
 const MAX_TARGETS = 9;
 
 const platforms = z.array(z.string().regex(/^[a-z0-9_-]{1,32}$/)).max(32);
 const decimal = z.string().regex(/^\d{1,6}(\.\d{1,6})?$/);
-const price = z.object({ usdPerTarget: decimal, multiplier: decimal, creditsPerUsd: decimal }).passthrough();
+// q has the site-wide format (up to 12 decimals, see parseCreditsPerUsd).
+const creditsPerUsd = z.string().regex(/^(0|[1-9][0-9]{0,11})(\.[0-9]{1,12})?$/);
+const price = z.object({ usdPerTarget: decimal, multiplier: decimal, creditsPerUsd }).passthrough();
 
 async function setting(db: Pick<SupabaseClient, 'from'>, key: string): Promise<unknown> {
   const { data, error } = await db.from('system_settings').select('value').eq('key', key).maybeSingle();
@@ -28,6 +33,20 @@ async function setting(db: Pick<SupabaseClient, 'from'>, key: string): Promise<u
 export async function openPublishPlatforms(db: Pick<SupabaseClient, 'from'>): Promise<string[]> {
   const parsed = platforms.safeParse(await setting(db, PUBLISH_PLATFORMS_SETTING));
   return parsed.success ? [...new Set(parsed.data)] : [];
+}
+
+/** A stored scalar setting as decimal text (numbers are stored as jsonb numbers), or undefined when it is neither. */
+function scalarText(value: unknown): string | undefined {
+  if (typeof value === 'string') return value;
+  return typeof value === 'number' && Number.isFinite(value) ? String(value) : undefined;
+}
+
+/** The price per platform plus the site-wide q and m; null (nothing is shown) when any of the three rows is unusable. */
+async function readPublishPrice(db: Pick<SupabaseClient, 'from'>): Promise<unknown> {
+  const [own, q, m] = await Promise.all([setting(db, PRICE_SETTING), setting(db, CREDITS_PER_USD_SETTING),
+    setting(db, MULTIPLIER_SETTING)]);
+  const usd = z.object({ usdPerTarget: decimal }).passthrough().safeParse(own);
+  return usd.success ? { usdPerTarget: usd.data.usdPerTarget, multiplier: scalarText(m), creditsPerUsd: scalarText(q) } : null;
 }
 
 /** An exact decimal as numerator / denominator, so 0.01 x 6 x 100 is 6, never 6.000000000000001. */
@@ -50,7 +69,7 @@ export function holdCreditsByTargets(raw: unknown): number[] | null {
 }
 
 export async function readPublishOptions(db: Pick<SupabaseClient, 'from'>) {
-  const [open, rawPrice] = await Promise.all([openPublishPlatforms(db), setting(db, PRICE_SETTING)]);
+  const [open, rawPrice] = await Promise.all([openPublishPlatforms(db), readPublishPrice(db)]);
   return { platforms: open, holdCreditsByTargets: holdCreditsByTargets(rawPrice) };
 }
 

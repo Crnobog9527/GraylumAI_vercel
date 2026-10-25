@@ -21,7 +21,6 @@ import {
 } from '../services/performanceCostReport';
 import { buildFinanceUsdOverview, buildFinanceTransactionStats } from '../services/financeReport';
 import { picoToUsd, usdToPico } from '../services/reportUsd';
-import { BILLING_CONSTANTS } from '../types/billing';
 import { describeBillingUnitSettings } from '../services/billingUnit';
 import { issueSignedAttachmentUrlsByBatch } from '../lib/ticketAttachments';
 import {
@@ -283,11 +282,11 @@ function summarizeTicketStatuses(tickets: Array<{ status: string | null | undefi
   return summary;
 }
 
-function parseNumericSetting(
+function parseNumericSetting<F extends number | null>(
   settings: Record<string, unknown>,
   key: string,
-  fallback: number,
-): number {
+  fallback: F,
+): number | F {
   if (!Object.prototype.hasOwnProperty.call(settings, key)) {
     return fallback;
   }
@@ -2337,18 +2336,19 @@ export const adminRouter = router({
       const activeMeteredModels = models.filter((model) =>
         model.is_active === 'true' || model.is_active === true,
       );
-      const creditsPerUsd = parseNumericSetting(settingsMap, 'billing_credits_per_usd', BILLING_CONSTANTS.CREDITS_PER_USD);
-      const tokenPriceMultiplier = parseNumericSetting(settingsMap, 'billing_token_price_multiplier', BILLING_CONSTANTS.TOKEN_PRICE_MULTIPLIER);
+      // q / m come only from stored rows; a missing row is null ("not configured"), never a made-up number.
+      const creditsPerUsd = parseNumericSetting(settingsMap, 'billing_credits_per_usd', null);
+      const tokenPriceMultiplier = parseNumericSetting(settingsMap, 'billing_token_price_multiplier', null);
       // Whether q / the default m is a stored row, a fallback for a missing row, or an invalid stored value.
       const billingUnitSource = describeBillingUnitSettings(settingsMap);
 
-      const currentPrices = activeMeteredModels.map(modelPriceView);
+      const currentPrices = creditsPerUsd === null || tokenPriceMultiplier === null ? [] : activeMeteredModels.map(modelPriceView);
       const inputCreditsPer1KValues = currentPrices.flatMap(({ frozen }) => frozen
-        ? [convertUsdPer1MToCreditsPer1K(Number(frozen.promptUsdPerMillion), creditsPerUsd, tokenPriceMultiplier)] : []);
+        ? [convertUsdPer1MToCreditsPer1K(Number(frozen.promptUsdPerMillion), creditsPerUsd ?? 0, tokenPriceMultiplier ?? 0)] : []);
       const outputCreditsPer1KValues = currentPrices.flatMap(({ frozen }) => frozen
-        ? [convertUsdPer1MToCreditsPer1K(Number(frozen.completionUsdPerMillion), creditsPerUsd, tokenPriceMultiplier)] : []);
+        ? [convertUsdPer1MToCreditsPer1K(Number(frozen.completionUsdPerMillion), creditsPerUsd ?? 0, tokenPriceMultiplier ?? 0)] : []);
       const searchCreditsPer1KValues = currentPrices.flatMap(({ base }) => base?.web_search !== undefined
-        ? [convertUsdPer1KSearchToCreditsPer1KSearch(Number(base.web_search) * 1000, creditsPerUsd, tokenPriceMultiplier)] : []);
+        ? [convertUsdPer1KSearchToCreditsPer1KSearch(Number(base.web_search) * 1000, creditsPerUsd ?? 0, tokenPriceMultiplier ?? 0)] : []);
 
       const runtimeBilling = {
         creditsPerUsd,
