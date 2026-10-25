@@ -1095,7 +1095,11 @@ function PositioningDraftContent({draftId}:{draftId:string}){
       valid: Object.fromEntries(steps.map(step => [step.id, Boolean(snap.steps[step.id].valid)])),
       manual: false, locked, saveState, highlight, conflicts: informationConflicts, resolving: updates.resolving,
       confirmable: stepId => confirmableStep(steps.find(step => step.id === stepId)!),
-      confirmation: stepId => confirmation.envelopeState(stepId).kind,
+      // The envelope is kept from the first request to the last: while this tab sends it, it is not an unfinished one.
+      confirmation: stepId => {
+        const kind = confirmation.envelopeState(stepId).kind;
+        return kind === "valid" && confirmation.confirming ? "running" : kind;
+      },
       onEdit: editField, onReview: openReview, onRecoverConfirmation: stepId => void confirmation.recoverMalformed(stepId),
       onResolve: (stepId, fieldId, suggestion, action) => void updates.resolve(stepId, fieldId, suggestion, action),
       onKeepConflict: retainConflictingInput, onRetrySave: retrySave,
@@ -1211,7 +1215,7 @@ function PositioningDraftContent({draftId}:{draftId:string}){
                       ? { readable: recoveryNeedsUser[0].readable, onClick: () => void recoverPendingStep(recoveryNeedsUser[0]!.step) } : null })]}/>
                   </MentorChatLog>
                   {snap.state === "draft" && !s.valid && <StepConfirmCard stays={!!d.accountRevision || index === steps.length - 1}
-                    title={step.title} info={d.information[step.id]} edits={infoEdits[step.id]} resuming={confirmation.envelopeState(step.id).kind === "valid"}
+                    title={step.title} info={d.information[step.id]} edits={infoEdits[step.id]} resuming={confirmation.envelopeState(step.id).kind === "valid" && !confirmation.confirming}
                     stepId={step.id} canConfirm={confirmableStep(step)} disabled={busy || hasPendingStepRequest} signal={d.stepConfirmation?.[step.id]}
                     onConfirm={settled => confirmation.confirmNow(step.id, d.information[step.id], infoEdits[step.id], snap.steps, settled)}
                     onEdit={highlightFields(step.id)} onReview={() => openReview(step.id)}/>}
