@@ -62,6 +62,10 @@ describe('reportPaywallView', () => {
   it('sends paywall_view with the scene only, and reports GA refusing it (no consent)', () => {
     expect(reportPaywallView('report')).toBe(true);
     expect(send).toHaveBeenLastCalledWith('G-TEST123', 'paywall_view', { scene: 'report' });
+    for (const scene of ['compare', 'jury'] as const) {
+      reportPaywallView(scene);
+      expect(send).toHaveBeenLastCalledWith('G-TEST123', 'paywall_view', { scene });
+    }
     send.mockReturnValue(false);
     expect(reportPaywallView('report')).toBe(false);
   });

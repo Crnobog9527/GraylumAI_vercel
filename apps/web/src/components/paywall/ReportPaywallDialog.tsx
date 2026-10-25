@@ -11,7 +11,8 @@ import { SUPPORT_TICKET_HREF, UNPAID_SUBSCRIPTION_BLOCKS_PURCHASE } from '@/comp
 import { formatUsd, paywallQuote, type PaywallBilling, type PaywallLevel } from './paywallPlans';
 import { usePaywallCheckout } from './usePaywallCheckout';
 import { reportPaywallView } from '@/lib/analytics/events';
-import { REPORT_DELIVERABLES, REPORT_PAYWALL_COPY as COPY } from './reportPaywallCopy';
+import { REPORT_DELIVERABLES, REPORT_PAYWALL_COPY as REPORT_COPY } from './reportPaywallCopy';
+import { GOLD_SCENE_COPY, GOLD_SCENE_DELIVERABLES, type GoldScene } from './goldScenePaywallCopy';
 
 /**
  * Scene 1 of the paywall design v25: a free user who confirmed every step asks for the report.
@@ -19,23 +20,30 @@ import { REPORT_DELIVERABLES, REPORT_PAYWALL_COPY as COPY } from './reportPaywal
  * and the card checkout (`payments.methodCheckout`). No credit-cost estimate, no model names, no consent switch the
  * backend lacks (design README "文案规则").
  */
-export function ReportPaywallDialog({ onClose }: { onClose: () => void }) {
+export type PaywallScene = 'report' | GoldScene;
+
+export function ReportPaywallDialog({ onClose, scene = 'report' }: { onClose: () => void; scene?: PaywallScene }) {
   // One paywall_view per display (GA4 only, consent-gated; the funnel continues with begin_checkout / purchase).
   const reported = useRef(false);
   useEffect(() => {
     if (reported.current) return;
     reported.current = true;
-    reportPaywallView('report');
-  }, []);
-  return <ReportPaywallView checkout={usePaywallCheckout()} onClose={onClose} />;
+    reportPaywallView(scene);
+  }, [scene]);
+  return <ReportPaywallView checkout={usePaywallCheckout()} onClose={onClose} scene={scene} />;
 }
 
 export type PaywallCheckout = ReturnType<typeof usePaywallCheckout>;
 
 /** The paywall itself, given the plans and purchase action; kept apart so it renders without a server. */
-export function ReportPaywallView({ checkout, onClose }: { checkout: PaywallCheckout; onClose: () => void }) {
+export function ReportPaywallView({ checkout: fullCheckout, onClose, scene = 'report' }: { checkout: PaywallCheckout; onClose: () => void; scene?: PaywallScene }) {
   const [billing, setBilling] = useState<PaywallBilling>('monthly');
-  const [selected, setSelected] = useState<PaywallLevel>('pro');
+  // A Gold-only feature offers only the Gold plans (Gold first month and the founder price still come from the server).
+  const goldOnly = scene !== 'report';
+  const checkout = goldOnly ? { ...fullCheckout, plans: fullCheckout.plans.filter(item => item.level === 'gold') } : fullCheckout;
+  const COPY = goldOnly ? { ...REPORT_COPY, ...GOLD_SCENE_COPY[scene] } : REPORT_COPY;
+  const deliverables = goldOnly ? GOLD_SCENE_DELIVERABLES[scene] : REPORT_DELIVERABLES;
+  const [selected, setSelected] = useState<PaywallLevel>(goldOnly ? 'gold' : 'pro');
   const dialog = useRef<HTMLDivElement>(null);
   useEffect(() => { dialog.current?.focus(); }, []);
 
@@ -63,14 +71,14 @@ export function ReportPaywallView({ checkout, onClose }: { checkout: PaywallChec
           <X className="h-4 w-4" aria-hidden="true" />
         </Button>
 
-        <aside aria-label="报告预览" className="grid content-start gap-4 p-5 md:p-6" style={{ background: 'var(--bg-secondary)' }}>
+        <aside aria-label={goldOnly ? '功能介绍' : '报告预览'} className="grid content-start gap-4 p-5 md:p-6" style={{ background: 'var(--bg-secondary)' }}>
           <p className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{COPY.eyebrow}</p>
           <h3 className="text-xl font-semibold" style={{ color: 'var(--text-primary)' }}>{COPY.dossierTitle}</h3>
           <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>{COPY.dossierLede}</p>
           <div className="grid gap-2">
             <b className="text-sm" style={{ color: 'var(--text-primary)' }}>{COPY.deliverHeading}</b>
             <ol className="grid gap-3">
-              {REPORT_DELIVERABLES.map(([title, detail, why], index) => (
+              {deliverables.map(([title, detail, why], index) => (
                 <li key={title} className="grid grid-cols-[1.5rem_1fr] gap-2 text-sm">
                   <span className="flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold"
                     style={{ background: 'var(--bg-tertiary)', color: 'var(--text-primary)' }}>{index + 1}</span>
@@ -90,7 +98,7 @@ export function ReportPaywallView({ checkout, onClose }: { checkout: PaywallChec
             <h2 id="report-paywall-title" className="text-xl font-semibold" style={{ color: 'var(--text-primary)' }}>{COPY.title}</h2>
             <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>{COPY.lede}</p>
           </div>
-          <div className="grid gap-2 rounded-xl border p-3 text-sm sm:grid-cols-2"
+          {goldOnly ? null : <div className="grid gap-2 rounded-xl border p-3 text-sm sm:grid-cols-2"
             style={{ borderColor: 'var(--border-primary)', color: 'var(--text-secondary)' }}>
             <div className="grid"><span>{COPY.anchorConsultant}</span><b style={{ color: 'var(--text-primary)' }}>{COPY.anchorConsultantPrice}</b></div>
             {lowest ? <div className="grid"><span>{COPY.anchorGraylum}</span>
@@ -99,13 +107,13 @@ export function ReportPaywallView({ checkout, onClose }: { checkout: PaywallChec
               来源：<a className="underline" href={COPY.anchorSourceUrl} target="_blank" rel="noopener noreferrer">HawkSEM</a>
               （2026-07-27）：{COPY.anchorSourceQuote}
             </small>
-          </div>
+          </div>}
 
           {checkout.loading ? <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>正在读取会员方案…</p>
             : checkout.catalogFailed ? <p role="alert" className="text-sm" style={{ color: 'var(--error)' }}>{COPY.catalogFailed}</p>
               : (
                 <>
-                  <PaywallPlanPicker plans={checkout.plans} billing={billing} selected={plan?.level ?? 'pro'}
+                  <PaywallPlanPicker plans={checkout.plans} billing={billing} selected={plan?.level ?? selected}
                     quoteOptions={checkout.quoteOptions} yearlyCheckoutAvailable={checkout.method.methodsFor('membership_plan', 'yearly').length > 0}
                     disabled={checkout.method.pending} oneTime={checkout.method.entry?.purchaseChannel === 'waffo'}
                     onBilling={chooseBilling} onSelect={setSelected} />
@@ -135,7 +143,7 @@ export function ReportPaywallView({ checkout, onClose }: { checkout: PaywallChec
           ) : null}
 
           <ul className="flex flex-wrap gap-x-4 gap-y-1 text-xs" style={{ color: 'var(--text-tertiary)' }}>
-            {COPY.trust.map(item => (
+            {(goldOnly ? COPY.trust.slice(0, 2) : COPY.trust).map(item => (
               <li key={item} className="flex items-center gap-1"><Check className="h-3.5 w-3.5" aria-hidden="true" />{item}</li>
             ))}
           </ul>

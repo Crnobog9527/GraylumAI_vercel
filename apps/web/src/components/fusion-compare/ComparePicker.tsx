@@ -7,7 +7,7 @@ import { trpc } from '@/trpc/client';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { profileTabHref } from '@/lib/profile-tabs';
+import { ReportPaywallDialog } from '@/components/paywall/ReportPaywallDialog';
 import { compareErrorText, initialPick, isDefiniteRefusal, isUpgradeRefusal, pickStatus, togglePick, type CompareOptions } from './compare-view';
 import styles from './compare.module.css';
 
@@ -38,6 +38,8 @@ export function CompareButton({ sessionId, resolveSession, question, skill, disa
   const [resolved, setResolved] = useState<string | null>(null);
   const [resolving, setResolving] = useState(false);
   const [sessionError, setSessionError] = useState('');
+  // The Gold paywall opens on this page (Owner 2026-10-25); the question stays where it is.
+  const [paywall, setPaywall] = useState(false);
   // The start request id outlives the dialog: a start that is waiting for credits, or whose outcome is unknown, is continued
   // by the same id when the picker is opened again with the same choice (a new id would meet FUSION_COMPARE_ACTIVE).
   const startId = useRef<{ key: string; id: string } | null>(null);
@@ -55,8 +57,11 @@ export function CompareButton({ sessionId, resolveSession, question, skill, disa
   }
   if (!data || (!data.enabled && data.reason === 'disabled')) return null;
   if (!data.enabled) {
-    return <button type="button" className={styles.entry} title="多模型对比是 Gold 会员功能"
-      onClick={() => void window.open(profileTabHref('subscription'), '_blank', 'noopener')}><Columns3 size={16} /> 多模型对比 · Gold 专享</button>;
+    return <>
+      <button type="button" className={styles.entry} title="多模型对比是 Gold 会员功能"
+        onClick={() => setPaywall(true)}><Columns3 size={16} /> 多模型对比 · Gold 专享</button>
+      {paywall && <ReportPaywallDialog scene="compare" onClose={() => setPaywall(false)} />}
+    </>;
   }
   return <>
     <button type="button" className={styles.entry} disabled={disabled || resolving || !question.trim() || Boolean(blockedReason)}
@@ -65,13 +70,15 @@ export function CompareButton({ sessionId, resolveSession, question, skill, disa
     {sessionError && <span role="status" className={styles.error}>{sessionError}</span>}
     {open && activeSession && <ComparePicker options={data} sessionId={activeSession} question={question} skill={skill}
       onClose={() => setOpen(false)} onMaybeStarted={onMaybeStarted} startId={startId}
+      onUpgrade={() => { setOpen(false); setPaywall(true); }}
       onStarted={(compareId, names) => { setOpen(false); onStarted(compareId, names, activeSession); }} />}
+    {paywall && <ReportPaywallDialog scene="compare" onClose={() => setPaywall(false)} />}
   </>;
 }
 
-function ComparePicker({ options, sessionId, question, skill, onClose, onStarted, onMaybeStarted, startId }: {
+function ComparePicker({ options, sessionId, question, skill, onClose, onUpgrade, onStarted, onMaybeStarted, startId }: {
   options: Extract<CompareOptions, { enabled: true }>; sessionId: string; question: string; skill?: CompareSkill;
-  onClose: () => void; onMaybeStarted?: () => void; startId: { current: { key: string; id: string } | null };
+  onClose: () => void; onUpgrade: () => void; onMaybeStarted?: () => void; startId: { current: { key: string; id: string } | null };
   onStarted: (compareId: string, names: Record<string, string>) => void;
 }) {
   const [picked, setPicked] = useState(() => initialPick(options));
@@ -147,7 +154,7 @@ function ComparePicker({ options, sessionId, question, skill, onClose, onStarted
           : estimate.overBudget ? '这次对比超过单次上限，请少选几个模型。'
             : <>最多消耗 <strong>{estimate.credits}</strong> 积分，按各模型实际用量分别结算；没生成出回答的不收费，开始生成后手动停止的按已用量计费。</>}</p>}
         {error && <p role="alert" className={styles.error}>{error.text}{error.upgrade && <>
-          {' '}<a href={profileTabHref('subscription')} target="_blank" rel="noopener">去升级</a></>}</p>}
+          {' '}<button type="button" className="underline" onClick={onUpgrade}>去升级</button></>}</p>}
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>取消</Button>
           <Button disabled={!status.ready || blocked || start.isPending} onClick={() => void begin()}>
