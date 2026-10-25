@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { openRouterAccount, readOpenRouterKey } from '../models/openRouterKey';
+import { openRouterAccount, readOpenRouterKeyOrUnset } from '../models/openRouterKey';
 import { rowFor, type ConfigurationRows } from './settingsRows';
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -92,7 +92,7 @@ export async function loadProductionPolicy(admin: SupabaseClient, actorId: strin
     throw new StagingAccessError('RUNTIME_BILLING_UNIT_UNAVAILABLE');
   // ADMIN-SECRETS OR-1: the one OpenRouter key lives in the platform Vault slot, not in the model rows. Settings pages
   // (offline) may use a cached read; anything that authorizes a paid call reads it fresh.
-  const key = await readOpenRouterKey(admin, { fresh: !options.offline }).catch(() => undefined);
+  const key = await readOpenRouterKeyOrUnset(admin, { fresh: !options.offline });
   const rows = await admin.from('ai_models').select('id,model_id,provider,api_endpoint,config,updated_at')
     .in('model_id', config.profiles.map(p => p.model)).eq('is_active', 'true');
   if (rows.error) stagingRpcFailure(rows.error);

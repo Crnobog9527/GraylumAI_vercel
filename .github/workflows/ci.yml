@@ -47,6 +47,9 @@ jobs:
       - name: Check code size ratchet
         run: node scripts/check-code-size.mjs
 
+      - name: Check code pattern ratchet
+        run: node scripts/check-pattern-ratchet.mjs
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 

@@ -7,6 +7,9 @@ import * as Sentry from "@sentry/nextjs";
 export async function register() {
   if (process.env.NEXT_RUNTIME === "nodejs") {
     await import("../sentry.server.config");
+    // The api layer's error logs and swallowed failures go to the same Sentry project (MAINT-P3).
+    const { connectApiLogsToSentry } = await import("./lib/api-log-sentry");
+    connectApiLogsToSentry();
   }
 
   if (process.env.NEXT_RUNTIME === "edge") {

@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { logger } from '../../lib/logger';
+import { swallow } from '../../lib/swallow';
 
 /**
  * The attached organizer's response can be lost while its call is still billed:
@@ -42,7 +43,7 @@ export function organizerExchange(protocol: string, payg: boolean, runId: string
       if (!pending) throw error;
       let saved = pending.saved;
       if (saved?.callId && ['dispatched', 'unknown'].includes(saved.state ?? '')) {
-        await billing.recoverReceipts(runId, { callId: saved.callId }).catch(() => undefined);
+        await swallow('organizer_lost_receipt_recovery_failed', billing.recoverReceipts(runId, { callId: saved.callId }), undefined, { category: 'billing' });
         saved = await read(pending.sequence, pending.requestHash);
       }
       if (saved?.rawBody) {

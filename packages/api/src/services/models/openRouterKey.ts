@@ -2,6 +2,7 @@
 import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getPlatformSecret, PlatformSecretError } from '../platformSecrets';
+import { swallow } from '../../lib/swallow';
 
 type RpcClient = Pick<SupabaseClient, 'rpc'>;
 
@@ -20,6 +21,12 @@ export async function readOpenRouterKey(admin: RpcClient, options: { fresh?: boo
     if (error instanceof PlatformSecretError && error.code === 'PLATFORM_SECRET_NOT_CONFIGURED') return undefined;
     throw error;
   }
+}
+
+/** The key, or undefined when it cannot be read either (the caller reports "unavailable"). The read failure is logged with
+ * its code, so an unavailable key never hides a database or Vault error. */
+export function readOpenRouterKeyOrUnset(admin: RpcClient, options: { fresh?: boolean } = {}): Promise<string | undefined> {
+  return swallow('openrouter_key_read_failed', readOpenRouterKey(admin, options), undefined);
 }
 
 /** Whether the OpenRouter key is filled in (for availability checks; the value never leaves the server). */

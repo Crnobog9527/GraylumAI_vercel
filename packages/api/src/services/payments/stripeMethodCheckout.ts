@@ -10,6 +10,7 @@ import { buildStripeCheckoutRequest, dispatchStripeCheckoutIntent, type StripeCa
 import { observeUpgradePrior } from './cardUpgrade';
 import { settleBuyerOrders } from './methodOrderSettle';
 import { stripeTestClockRuntimeOpen, readStripeTestClock } from './stripeTestClock';
+import { swallow } from '../../lib/swallow';
 
 type Input = {
   db: SupabaseClient; stripe: Stripe; userId: string; appUrl: string; termsVersion: string;
@@ -80,7 +81,7 @@ export async function createStripeMethodCheckout(input: Input) {
     // #961: another plan's order that can no longer be paid (session expired without its webhook, or failed before
     // its claim) is closed once Stripe confirms it; admission then runs once more. Anything else keeps the refusal.
     if (!(error instanceof Error) || error.message !== 'PAY_WAFFO_PURCHASE_PENDING') throw error;
-    if (!await settleBuyerOrders(db, stripe, scope, userId).catch(() => false)) throw error;
+    if (!await swallow('stripe_method_settle_buyer_orders_failed', settleBuyerOrders(db, stripe, scope, userId), false, { category: 'billing' })) throw error;
     return prepare();
   });
   // Never claimed, so nothing reached Stripe: release the reservation instead of blocking every other purchase.

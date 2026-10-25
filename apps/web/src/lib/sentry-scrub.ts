@@ -10,7 +10,7 @@ import type { Breadcrumb, ErrorEvent, Event } from '@sentry/nextjs';
 type AnyRecord = Record<string, unknown>;
 
 /** Domains whose stable error codes the application emits (e.g. `ACCOUNT_ERASURE_FAILED`). */
-const CODE_PREFIXES = ['ACCOUNT', 'AGENT', 'ARTIFACT', 'AUTH', 'BILL2', 'BILLING', 'CAPTURE', 'CONTENT', 'CREDIT',
+const CODE_PREFIXES = ['ACCOUNT', 'AGENT', 'API', 'ARTIFACT', 'AUTH', 'BILL2', 'BILLING', 'CAPTURE', 'CONTENT', 'CREDIT',
   'DATA_USE', 'ERASURE', 'EXPERT_CONSULT', 'LIBRARY', 'MODEL', 'OPC', 'OPENING_GRANT', 'PAY', 'PAYG', 'PUBLISH_MONITOR', 'RATE_LIMIT', 'REPORT', 'RESEARCH',
   'RUNTIME', 'SKILL', 'STRIPE', 'WAFFO'];
 const ERROR_CODE = new RegExp(`^(?:${CODE_PREFIXES.join('|')})_[A-Z0-9_]{2,60}(?=$|[:\\s])`);

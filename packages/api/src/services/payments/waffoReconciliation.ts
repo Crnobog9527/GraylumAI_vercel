@@ -7,6 +7,7 @@ import { majorToCents } from './purchaseFacts';
 import { deliverWaffoOneTime } from './waffoOneTimeDelivery';
 import { holdWaffoChargebacks } from './waffoChargebacks';
 import type { DisputeAlert } from './disputes';
+import { logSwallowed } from '../../lib/swallow';
 
 type Db = Pick<SupabaseClient, 'from' | 'rpc'>;
 type Provider = Pick<WaffoTestPayments, 'listPayments'> & Partial<Pick<WaffoTestPayments, 'readPayment' | 'storeId'>>
@@ -66,7 +67,7 @@ function locallySettledRefund(payment: WaffoPayment, value: unknown, provider: P
       && Number(payment.refundedAmount.amount) === approval.netMinor && payment.isFullyRefunded === full
       && Boolean(payment.refundStatus) && payment.refundStatus !== 'none'
       && refundRefs.has(`${order.id}:${approval.refundId}`);
-  } catch { return false; }
+  } catch (error) { logSwallowed('waffo_refund_match_failed', error, { category: 'billing' }); return false; }
 }
 
 /** Daily backstop for the narrowed scope: compare Waffo's paid records with what we delivered and
