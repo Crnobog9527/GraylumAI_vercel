@@ -117,9 +117,9 @@ export function openRouterAdapter(options:{credential:(identity:OpenRouterIdenti
    if(keep.length<part.value.length){transportIssue='body_limit';break;}
   }}catch{transportIssue=signal.aborted?'body_timeout':'body_interrupted';}finally{await reader.cancel().catch(()=>{});}
   if(stream&&complete){try{stream.push(decoder.decode());}catch{complete=false;transportIssue='invalid_text';}}
-  const buffer=Buffer.concat(chunks);let rawBody:string;
+  const buffer=Buffer.concat(chunks);let rawBody:string,exactText=true;
   try{rawBody=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(buffer);if(rawBody.includes('\0'))throw new Error('invalid_text');}
-  catch{rawBody=buffer.toString('utf8').replaceAll('\0','\uFFFD');complete=false;transportIssue??='invalid_text';}
+  catch{rawBody=buffer.toString('utf8').replaceAll('\0','\uFFFD');exactText=false;complete=false;transportIssue??='invalid_text';}
   const retainedHash=createHash('sha256').update(buffer).digest('hex');
   // Keep exact SSE bytes once, reversibly compressed. JSON text plus base64
   // would otherwise exceed the existing receipt row limit for ordinary streams.
@@ -130,7 +130,10 @@ export function openRouterAdapter(options:{credential:(identity:OpenRouterIdenti
    buffer.length>OPENROUTER_FRAME_BYTE_LIMIT?{rawBody:'',rawBodyBase64:gzipSync(buffer).toString('base64'),
     rawBodyEncoding:'gzip-base64' as const,rawBodyByteLength:buffer.length,rawBodySha256:retainedHash,
     observedByteLength:buffer.length,sourceHash:retainedHash}:
-   {rawBody,rawBodyBase64:buffer.toString('base64'),sourceHash:retainedHash};
+   // ARCH-FIX G1: a small body is kept once. Exact UTF-8 text needs no base64 copy;
+   // only bytes that are not exact text keep base64 (and no lossy text).
+   !exactText?{rawBody:'',rawBodyBase64:buffer.toString('base64'),sourceHash:retainedHash}:
+   {rawBody,sourceHash:retainedHash};
   return {...raw,httpStatus:response.status,complete,transportIssue,...(generationId?{generationId}:{})};
  }
  async function prepareDispatch(input:unknown,identity:CallIdentity,onChunk?:(chunk:string)=>void,onIdentity?:(id:string)=>void){
