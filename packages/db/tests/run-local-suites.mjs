@@ -40,8 +40,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     console.log(suites.join('\n'));
   } else {
     // Each suite owns a disposable container with a random name and an ephemeral port, so a few can run at
-    // once; output is buffered per suite and printed when it ends. --jobs N (default 3) bounds the load.
-    const jobs = Number(args.includes('--jobs') ? args[args.indexOf('--jobs') + 1] : 3);
+    // once; output is buffered per suite and printed when it ends. --jobs N (default 4, the CI runner's CPU count) bounds the load.
+    const jobs = Number(args.includes('--jobs') ? args[args.indexOf('--jobs') + 1] : 4);
     const results = [];
     const queue = [...suites];
     const worker = async () => {
