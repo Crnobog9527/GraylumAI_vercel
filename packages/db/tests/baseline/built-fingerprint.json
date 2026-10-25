@@ -3799,7 +3799,7 @@
   "fn:publish_monitor_connect_callback(uuid,uuid,jsonb)": "1e9f1b7eadfa",
   "fn:publish_monitor_connect_cancel(uuid,uuid)": "067feaf2162d",
   "fn:publish_monitor_connect_confirm(uuid,uuid,text,boolean,jsonb)": "55d56d16dab7",
-  "fn:publish_monitor_connect_pending(uuid,uuid)": "01828bcd2a13",
+  "fn:publish_monitor_connect_pending(uuid,uuid)": "5db2437036b8",
   "fn:publish_monitor_connect_start(uuid,uuid,text[])": "c04d2ee4ef45",
   "fn:publish_monitor_connections(uuid)": "e3ef4d0438b2",
   "fn:publish_monitor_data(uuid,integer,uuid)": "18c211d15894",
