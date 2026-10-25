@@ -62,6 +62,18 @@ BEGIN
     RAISE EXCEPTION '用户不存在: %', p_user_id;
   END IF;
 
+  -- ARCH-FIX E3: a concurrent call with the same request committed while this one waited for the profile lock.
+  IF p_request_id IS NOT NULL THEN
+    SELECT id INTO v_existing_id FROM billing_history
+    WHERE user_id = p_user_id AND operation_type = 'pre_deduct' AND metadata->>'requestId' = p_request_id::TEXT;
+    IF v_existing_id IS NOT NULL THEN
+      SELECT metadata->>'balance_before',metadata->>'balance_after' INTO v_balance_before,v_balance_after
+      FROM billing_history WHERE id = v_existing_id;
+      RETURN QUERY SELECT v_existing_id,COALESCE(v_balance_before::INTEGER,0),COALESCE(v_balance_after::INTEGER,0),TRUE;
+      RETURN;
+    END IF;
+  END IF;
+
   IF p_amount <= 0 THEN
     RAISE EXCEPTION '预扣积分必须为正数: %', p_amount;
   END IF;
@@ -112,13 +124,7 @@ BEGIN
       CASE
         WHEN g.status = 'granted'
          AND g.accounting_state = 'trusted'
-         AND EXISTS (
-           SELECT 1
-           FROM user_subscriptions AS terminated_us
-           WHERE (terminated_us.id = g.subscription_id OR (g.subscription_id IS NULL AND terminated_us.stripe_subscription_id = g.stripe_subscription_id))
-             AND terminated_us.user_id = p_user_id
-             AND terminated_us.credit_release_terminated_at IS NOT NULL
-         )
+         AND public.credit_grant_quarantined(g) -- ARCH-FIX E1
         THEN GREATEST(g.credits_granted - g.consumed_amount, 0)
         ELSE 0
       END

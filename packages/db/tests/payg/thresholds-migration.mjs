@@ -41,6 +41,7 @@ export async function thresholdMigrationCases(db,report,createFixture,claim,rece
     await db.query(read('0324_paywall_profile_archive.sql')); // restore the current archive admission/claim guards
     await db.query(read('0326_paywall_fusion_archive_fence.sql')); // restore Fusion source/run guards too
     await db.query(read('0362_billing_lock_scope.sql')); // restore the DB-PERF late metering check
+    await db.query(read('0383_credit_grant_quarantine.sql')); // restore the shared quarantine check (ARCH-FIX E1)
     assert.equal(await definition(),current);
     assert.deepEqual(await acl(),permissions);
     assert.deepEqual(await snapshot(),frozen);

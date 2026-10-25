@@ -127,8 +127,8 @@ BEGIN
     WHERE id = p_user_id;
 
     IF GREATEST(v_balance_delta, 0) > 0 THEN
-      INSERT INTO credit_transactions (user_id, amount, type, description)
-      VALUES (p_user_id, GREATEST(v_balance_delta, 0), 'refund', p_reason)
+      INSERT INTO credit_transactions (idempotency_key, user_id, amount, type, description) /* ARCH-FIX E3 */
+    VALUES ('legacy-finalize:'||gen_random_uuid(), p_user_id, GREATEST(v_balance_delta, 0), 'refund', p_reason)
       RETURNING id INTO v_transaction_id;
     END IF;
 

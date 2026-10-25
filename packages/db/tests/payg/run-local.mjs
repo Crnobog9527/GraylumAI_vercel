@@ -17,6 +17,8 @@ import {thresholdCases} from './thresholds.mjs';
 import {monitorCases} from './monitor.mjs';
 import {edgeCases} from './edges.mjs';
 import {grantCases} from './grants.mjs';
+import {quarantineCases} from './quarantine.mjs';
+import {ledgerConstraintCases} from './ledger-constraints.mjs';
 import {reconcileCases} from './reconcile.mjs';
 import {refundHoldCases} from './refund-hold.mjs';
 import {nominalCases} from './nominal.mjs';
@@ -131,6 +133,8 @@ try {
   await thresholdCases(db,report,createFixture,claim,receipt);
   await nominalCases(db,report,createFixture,claim,receipt);
   await grantCases(db,report,createFixture,claim,receipt);
+  await quarantineCases({db,Client,connectionString,report,createFixture,claim});
+  await ledgerConstraintCases({db,Client,connectionString,report});
   await refundHoldCases(db,report,createFixture,claim);
   await edgeCases(db,report,createFixture,claim,receipt);
   await monitorCases(db,report,createFixture,claim,receipt);

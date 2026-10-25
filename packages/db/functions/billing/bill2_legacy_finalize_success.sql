@@ -200,8 +200,8 @@ BEGIN
   RETURNING id INTO v_assistant_message_id;
 
   IF p_total_credits > 0 THEN
-    INSERT INTO credit_transactions (user_id, amount, type, description)
-    VALUES (p_user_id, -p_total_credits, 'deduction', 'AI 对话消费')
+    INSERT INTO credit_transactions (idempotency_key, user_id, amount, type, description) /* ARCH-FIX E3 */
+    VALUES ('legacy-finalize:'||gen_random_uuid(), p_user_id, -p_total_credits, 'deduction', 'AI 对话消费')
     RETURNING id INTO v_transaction_id;
   END IF;
 
