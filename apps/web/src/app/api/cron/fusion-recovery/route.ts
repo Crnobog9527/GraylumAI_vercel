@@ -1,0 +1,26 @@
+/* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
+import { recoverFusionFinancials } from '@repo/api/src/services/fusion/recovery';
+import { validateCronRequest } from '@/lib/cron-auth';
+
+export const runtime = 'nodejs';
+export const maxDuration = 60;
+/** A dispatched call is recovered this long after its dispatch deadline (the call itself ends within 300 s of dispatch). */
+const DISPATCHED_GRACE_MS = 10 * 60_000;
+
+/** MAINT-P3b: the daily billing-reconcile settles Fusion (review and compare) calls once a day. A compare column whose settlement
+ * failed holds its credits and the user's one compare slot until then, so the same step also runs here, every ten minutes.
+ * It is the same idempotent step (claims and settlements are row-locked), so it can overlap the daily run. */
+export async function GET(request: Request) {
+  const unauthorized = validateCronRequest(request, 'fusion-recovery');
+  if (unauthorized) return unauthorized;
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
+  const client = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } });
+  try {
+    const summary = await recoverFusionFinancials(client, { dispatchedGraceMs: DISPATCHED_GRACE_MS });
+    return NextResponse.json(summary, { status: summary.success ? 200 : 500 });
+  } catch { return NextResponse.json({ error: 'Fusion recovery failed' }, { status: 500 }); }
+}

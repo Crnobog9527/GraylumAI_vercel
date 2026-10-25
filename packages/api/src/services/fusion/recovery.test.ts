@@ -186,4 +186,13 @@ describe('Fusion daily recovery', () => {
     expect((await recoverFusionFinancials({ rpc: async () => ({ data: null, error: { message: 'down' } }) } as unknown as SupabaseClient)).success)
       .toBe(false);
   });
+  it('frequent runs (grace) settle a dispatched call only once no request can still be streaming it (MAINT-P3b)', async () => {
+    const a = admin([item(7, true, -60), item(8, true, -3), item(9, true, 5), { ...item(11, true, -60), dispatch_deadline: null },
+      item(12, false, -1)]);
+    const summary = await recoverFusionFinancials(a.db, { now: () => now, budget: createRuntimeBudget(), dispatchedGraceMs: 10 * 60_000 });
+    expect(summary).toMatchObject({ success: true, scanned: 2, recovered: 1, cancelled: 1, failed: 0 });
+    expect(a.calls).toContain(`bill2_finalize:${id(7)}`);
+    expect(a.calls).toContain(`bill2_cancel:${id(12)}`);
+    for (const n of [8, 9, 11]) expect(a.calls.filter(call => call.endsWith(id(n)))).toEqual([]);
+  });
 });

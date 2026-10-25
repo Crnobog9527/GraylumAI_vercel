@@ -28,7 +28,11 @@ const noTransport: BillingTransport = {
 const UNJUDGED_PAGE = 50;
 
 export async function recoverFusionFinancials(admin: SupabaseClient, options: { limit?: number; pages?: number;
-  budget?: RuntimeBudget; now?: () => number; timeLimitMs?: number } = {}): Promise<Summary> {
+  budget?: RuntimeBudget; now?: () => number; timeLimitMs?: number;
+  /** Frequent runs (MAINT-P3b): a dispatched call is only recovered this long after its dispatch deadline, when no request can
+   * still be streaming it (a lookup on a live call would use up its recovery attempts); one without a deadline waits for
+   * the daily run. Unset (the daily run): every listed call. Undispatched calls past their deadline are never held back. */
+  dispatchedGraceMs?: number } = {}): Promise<Summary> {
   const summary: Summary = { success: true, scanned: 0, cancelled: 0, recovered: 0, scrubbed: 0, failed: 0, deferred: 0, rejudged: 0 };
   const now = options.now ?? Date.now;
   const limit = options.limit ?? 50;
@@ -114,6 +118,11 @@ export async function recoverFusionFinancials(admin: SupabaseClient, options: { 
     if (parsed.data.length < limit) break;
     const last = parsed.data[parsed.data.length - 1]!;
     cursor = { p_after_created: last.created_at, p_after_id: last.call_id };
+  }
+  if (options.dispatchedGraceMs !== undefined) {
+    const grace = options.dispatchedGraceMs;
+    const eligible = rows.filter(item => !item.dispatched || (item.dispatch_deadline !== null && Date.parse(item.dispatch_deadline) + grace <= now()));
+    rows.splice(0, rows.length, ...eligible);
   }
   // Releasing holds of calls never dispatched is quick and must not wait behind slow receipt lookups.
   // When the backlog could not be listed to its end (time, a failed listing, or 200 failing calls in front), a
