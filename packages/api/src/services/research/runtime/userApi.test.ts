@@ -2,6 +2,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   confirmResearchCard, createResearchRefresh, researchBenchmarks, researchCards, researchEvidence, researchToolCharges,
+  researchUnfinishedRound,
 } from './userApi';
 const actor = '00000000-0000-4000-8000-000000000001';
 const id = '00000000-0000-4000-8000-000000000002';
@@ -172,5 +173,24 @@ describe('research user API', () => {
       refs: { followers: ['not-a-ref'], medianViews: [], engagementRate: [], postsPerWeek: [], lastPublishedAt: [] } };
     await expect(researchBenchmarks(db([bad]), actor, other)).rejects.toMatchObject({ message: 'RESEARCH_UNAVAILABLE' });
     await expect(researchBenchmarks(db(null), actor, 'not-a-uuid')).rejects.toThrow();
+  });
+});
+
+describe('research unfinished round (what a page reload cannot lose)', () => {
+  const round = { discoveryId: id, executionId: other, replies: 2 };
+  it('asks the host for this actor and session only, and returns the round it stored', async () => {
+    const client = db({ ...round, secret: 'hidden' });
+    expect(await researchUnfinishedRound(client, actor, id)).toEqual(round);
+    expect(client.rpc).toHaveBeenCalledWith('research_user_unfinished_round', { a: actor, s: id });
+  });
+  it('is null when the host has no unfinished round', async () => {
+    expect(await researchUnfinishedRound(db(null), actor, id)).toBeNull();
+  });
+  it('refuses a malformed answer and a bad session id before asking', async () => {
+    await expect(researchUnfinishedRound(db({ ...round, replies: 0 }), actor, id)).rejects.toMatchObject({ message: 'RESEARCH_UNAVAILABLE' });
+    await expect(researchUnfinishedRound(db({ discoveryId: 'x' }), actor, id)).rejects.toMatchObject({ message: 'RESEARCH_UNAVAILABLE' });
+    const client = db(null);
+    await expect(researchUnfinishedRound(client, actor, 'not-a-uuid')).rejects.toThrow();
+    expect(client.rpc).not.toHaveBeenCalled();
   });
 });

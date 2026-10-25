@@ -50,6 +50,37 @@ export function autoContinueDecision(continuation: ResearchContinuation | null, 
   return disabled ? "wait" : "send";
 }
 
+/** The unfinished round the host stored for this session (`research.unfinishedRound`): what a reload cannot lose. */
+export interface StoredRound { discoveryId: string; executionId: string; replies: number }
+
+/** The stored round when the answer is well formed, null otherwise (no round, or a shape this page does not know). */
+export function storedUnfinishedRound(value: unknown): StoredRound | null {
+  if (!value || typeof value !== "object") return null;
+  const { discoveryId, executionId, replies } = value as Record<string, unknown>;
+  return typeof discoveryId === "string" && typeof executionId === "string" && typeof replies === "number"
+    && Number.isInteger(replies) && replies > 0 ? { discoveryId, executionId, replies } : null;
+}
+
+/**
+ * The continuation to act on: the stream's live signal while this page has it, otherwise the host's stored round. A
+ * reload or a lost connection mid-round drops the live signal, and nothing else would ever continue that round. Both name
+ * the turn that ran out, so one turn is sent once whichever path reports it.
+ */
+export function continuationToSend(live: ResearchContinuation | null, stored: StoredRound | null): ResearchContinuation | null {
+  return live ?? (stored ? { executionId: stored.executionId, discoveryId: stored.discoveryId } : null);
+}
+
+/**
+ * Replies sent per round: this page's own count, never below what the host saw (its first reply was the user's own, the
+ * rest followed on): a reload empties the page's count, not the round's.
+ */
+export function roundCounts(local: ReadonlyMap<string, number>, stored: StoredRound | null): ReadonlyMap<string, number> {
+  if (!stored) return local;
+  const merged = new Map(local);
+  merged.set(stored.discoveryId, Math.max(local.get(stored.discoveryId) ?? 0, stored.replies - 1));
+  return merged;
+}
+
 /**
  * One `research_call` event applied: a new call is appended, a later state of a known call replaces it in place
  * (a paused call resumes with the same id: running → succeeded). A finished call never goes back to running.

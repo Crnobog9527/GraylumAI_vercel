@@ -66,6 +66,8 @@ export const ROUND_UNFINISHED_NEXT_STEP = '这一轮搜索还没搜完，不算�
 
 /** Authors whose profiles one scan batch reads; the first batch is read whole so the card can show up to 12. */
 const AUTHOR_BATCH = 15;
+/** Replies of one round the cursor remembers: a round needs at most a handful, the page stops auto-continuing at 6. */
+const REPLIES_KEPT = 16;
 
 /** The operation is the durable cursor. A crash after dispatch never causes another supplier request. */
 async function step(ctx: ResearchToolContext, d: DiscoveryRecord, budget: ToolAllowance,
@@ -246,12 +248,17 @@ export async function discover(ctx: ResearchToolContext, args: ResearchToolArgs<
   if (!stopped && !full()) {
     await deepen({ ctx, d, posts, firstPages, coverage, pay, screen, enough: full, cardable: enough, isStopped: () => stopped });
   }
+  const resumable = stopReason === 'ROUND_LIMIT';
+  // Which replies this round took (each reply once, also when one is replayed) and, while it waits for its next reply, the
+  // reply that stopped it: the stream's own "goes on" signal is lost by a page reload, this is not (research_user_unfinished_round).
+  const replies = [...new Set([...(Array.isArray(d.cursor.executions) ? d.cursor.executions : [])
+    .filter((x): x is string => typeof x === 'string'), ctx.executionId])].slice(-REPLIES_KEPT);
   // Reconstruct from stable operations each time; the saved candidates support free follow-up cards.
-  await ctx.store.discoverySave(d.discoveryId, { accounts: found, attempted: index, authorCursor, authorLimit }, stopped ? 'running' : 'completed');
+  await ctx.store.discoverySave(d.discoveryId, { accounts: found, attempted: index, authorCursor, authorLimit, executions: replies,
+    ...(stopped && resumable ? { continueFrom: ctx.executionId } : {}) }, stopped ? 'running' : 'completed');
   const onCard = stopped ? 0 : await card(ctx, d.discoveryId, found, false, '');
   const shown = onCard > 0;
   const insufficient = !stopped && !shown;
-  const resumable = stopReason === 'ROUND_LIMIT';
   const blockedWithoutData = stopped && !resumable && found.length === 0;
   // A round saved as completed (the same state 0320 counts as a round, partial supplier failures included) without a
   // candidate card: the host may now offer the shortfall choice (0320 decides).

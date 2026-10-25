@@ -258,4 +258,34 @@ describe('deeper discovery layers', () => {
     expect(lastAccountSearch).toBeGreaterThan(-1);
     expect(order.indexOf('parallel')).toBeGreaterThan(lastAccountSearch);
   });
+
+  it('stores which reply stopped a round and how many replies it took, so a page reload can find the round (#1308 temari)', async () => {
+    const [e1, e2, e3] = ['33333333-3333-4333-8333-333333333333', '44444444-4444-4444-8444-444444444444', '55555555-5555-4555-8555-555555555555'];
+    const f = fixture('douyin', { firstPage: () => [], leads: keyword => Array.from({ length: 30 }, (_, i) => `MS4wLjABAAAA${keyword}${'x'.repeat(30)}${i}`),
+      followers: 500 }, ['keyword_posts', 'account_profile', 'account_posts', 'account_search']);
+    const cursor = () => f.discoveries.get(discoveryId)?.cursor;
+    f.ctx.executionId = e1;
+    expect((await f.run(29)).continue).toBe(true);
+    expect(cursor()).toMatchObject({ continueFrom: e1, executions: [e1] });
+    // The next reply runs out again: the round is now waiting on that reply, and it took two.
+    f.ctx.executionId = e2;
+    expect((await f.run(5, { discoveryId })).continue).toBe(true);
+    expect(cursor()).toMatchObject({ continueFrom: e2, executions: [e1, e2] });
+    // The same reply saving again (a recovery replay) is not a further reply.
+    expect((await f.run(5, { discoveryId })).continue).toBe(true);
+    expect(cursor()).toMatchObject({ continueFrom: e2, executions: [e1, e2] });
+    // The round ends: nothing waits any more, and the host no longer reports it.
+    f.ctx.executionId = e3;
+    expect((await f.run(29, { discoveryId })).continue).toBe(false);
+    expect(cursor()).toMatchObject({ executions: [e1, e2, e3] });
+    expect(cursor()).not.toHaveProperty('continueFrom');
+    expect(f.discoveries.get(discoveryId)?.state).toBe('completed');
+  });
+
+  it('a round that ends in its first reply stores no waiting marker', async () => {
+    const f = fixture('tiktok', { firstPage: keyword => Array.from({ length: 4 }, (_, i) => `${keyword}a${i}`) });
+    await f.run();
+    expect(f.discoveries.get(discoveryId)?.cursor).not.toHaveProperty('continueFrom');
+    expect(f.discoveries.get(discoveryId)?.state).toBe('completed');
+  });
 });
