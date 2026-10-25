@@ -16,7 +16,7 @@ vi.mock('./billingUnitAdmission',async original=>({
     models:{},providers:{},hash:'f'.repeat(64)}),
 }));
 const id=(n:number)=>`10000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
-it('real host admits v2 free chat (v6 + low), replays original admission across switch-off, then admits new requests as v1',async()=>{
+it('real host admits v2 free chat (v6 + low), replays original admission across switch-off, then refuses new requests (I1: no v1)',async()=>{
   const model='anthropic/claude-sonnet-5.5',tag='anthropic';
   const providerLimits={providerSlug:tag,contextTokens:250000,promptUsdPerMillion:'1',completionUsdPerMillion:'1',requestUsd:'0'};
   const quote={modelId:id(3),model,provider:'openrouter',account:'synthetic',protocol:'openrouter-chat-v1' as const,
@@ -60,7 +60,38 @@ it('real host admits v2 free chat (v6 + low), replays original admission across 
   mocks.host.mockResolvedValue(undefined);
   expect(await runtimeAdmissionService(user,admin,policy).prepare(request)).toEqual(first);
   expect(mocks.host).toHaveBeenCalledTimes(1);
-  const next=await runtimeAdmissionService(user,admin,policy).prepare({...request,requestId:id(6)});
-  expect(next).toMatchObject({billing:{contractVersion:'bill2.v1'}});
-  expect(contracts).toEqual(['bill2.v2','bill2.v1']);
+  // I1: with per-call billing off, a new real admission is refused instead of falling back to v1 billing.
+  await expect(runtimeAdmissionService(user,admin,policy).prepare({...request,requestId:id(6)}))
+    .rejects.toMatchObject({reason:'RUNTIME_PAYG_PROFILE_REQUIRED'});
+  expect(contracts).toEqual(['bill2.v2']);
+});
+
+it('I1: with the per-call billing setting off, a new real admission is refused before any execution or charge', async () => {
+  const quote = {modelId:id(3),model:'anthropic/claude-sonnet-5.5',provider:'openrouter',account:'synthetic',
+    protocol:'openrouter-chat-v1' as const,upperUsd:'1',inputLimit:90000,outputLimit:8192,multiplier:'3',
+    automaticRetry:false as const,hiddenTools:false as const,lookupSupported:true,
+    providerLimits:{providerSlug:'anthropic',contextTokens:250000,promptUsdPerMillion:'1',completionUsdPerMillion:'1',requestUsd:'0'}};
+  // The real reader returns undefined when the staging setting is off or missing.
+  mocks.host.mockReset(); mocks.host.mockResolvedValue(undefined); mocks.freeze.mockReset();
+  const rpc = vi.fn(async (name: string) => {
+    if (name === 'runtime_session_context') return {data:{scope:{kind:'positioning_draft',draftId:id(2)}},error:null};
+    if (name === 'runtime_admission_replay') return {data:null,error:null};
+    throw new Error(name);
+  });
+  const reasoning = configuredReasoning(quote.model,{mode:'effort',effort:'low',wire:'reasoning_effort'}).reasoning;
+  const modelRow = {id:id(3),model_id:quote.model,provider:'openrouter',is_active:'true',input_limit:250000,max_tokens:8192,
+    config:{...pricingConfig(quote.model,'anthropic','1','1'),reasoning:{...reasoning,route:'anthropic',
+      catalog:{...reasoning.catalog!,endpoints:reasoning.catalog!.endpoints.map(e=>({...e,tag:'anthropic'}))}}}};
+  const q = {select:()=>q,eq:()=>q,single:async()=>({data:modelRow,error:null}),in:async()=>({data:[modelRow],error:null})};
+  const admin = {rpc,from:()=>q} as unknown as SupabaseClient;
+  const user = {auth:{getUser:async()=>({data:{user:{id:id(1),email_confirmed_at:'2026-01-01'}},error:null})}} as unknown as SupabaseClient;
+  const policy = {real:{id:id(5),creditsPerUsd:'100',multiplier:'3',expiresAt:'2099-01-01T00:00:00Z',callPolicies:[quote]},
+    paygHost:true,account:'local',costPerCall:'1',creditsPerUsd:'100',multiplier:'3',maxCalls:3,
+    maxOutputTokens:8192,inputBytes:90000,historyItems:10};
+  await expect(runtimeAdmissionService(user,admin,policy).prepare({sessionId:id(2),requestId:id(7),input:'Synthetic',
+    selection:{kind:'ordinary',modelId:id(3)},network:'deny'})).rejects.toMatchObject({reason:'RUNTIME_PAYG_PROFILE_REQUIRED'});
+  expect(mocks.host).toHaveBeenCalledTimes(1);
+  // No execution is created and nothing is priced or reserved: runtime_admit is never reached.
+  expect(rpc.mock.calls.map(([name]) => name)).not.toContain('runtime_admit');
+  expect(mocks.freeze).not.toHaveBeenCalled();
 });

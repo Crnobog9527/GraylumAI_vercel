@@ -2,6 +2,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { trpc } from '@/trpc/client';
+import { RUNTIME_CHOICES_STALE_MS } from '@/lib/runtime-choices';
 import styles from './work-composer.module.css';
 import { QueryNotice, workspaceErrorMessage } from './query-notice';
 import { ComposerEditor, type ComposerEditorHandle } from './composer-editor';
@@ -37,7 +38,7 @@ export function WorkComposer({value,onChange,onSend,disabled=false,sendDisabled=
  // The box stays enabled while a turn runs, so focus is kept after Enter; a click on send returns it.
  const sendAndFocus=()=>sendKeepingFocus(()=>onSend(selected),box.current);
  useEffect(()=>{if(!menu)return;const key=(event:KeyboardEvent)=>{if(event.key==='Escape')setMenu(null);};const outside=(event:PointerEvent)=>{if(!root.current?.contains(event.target as Node))setMenu(null);};document.addEventListener('keydown',key);document.addEventListener('pointerdown',outside);return()=>{document.removeEventListener('keydown',key);document.removeEventListener('pointerdown',outside);};},[menu]);
- const choices=trpc.runtime.choices.useQuery(sessionId?{sessionId}:undefined,{enabled:menu==='skills'});
+ const choices=trpc.runtime.choices.useQuery(sessionId?{sessionId}:undefined,{enabled:menu==='skills',staleTime:RUNTIME_CHOICES_STALE_MS});
  const selected=onSkillChange?skillId:localSkill;
  const skills=(choices.data?.skills??[]).filter(skill=>skill.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
  const toggleSkills=()=>{if(menu!=='skills'){if(onSkillChange)onSkillChange('');else setLocalSkill('');}setMenu(menu==='skills'?null:'skills');};

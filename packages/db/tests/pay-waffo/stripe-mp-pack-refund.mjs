@@ -79,8 +79,8 @@ export async function stripeMpPackRefundCases({admin,service}) {
   assert.equal((await admin.query('SELECT status FROM payment_orders WHERE id=$1',[g.o.id])).rows[0].status,'refunded');
   // Any credit used since the payment: not eligible (record AA).
   const h=await buyer('d3'.repeat(32));
-  await admin.query(`INSERT INTO credit_transactions(user_id,amount,type,description,ledger_type,counts_as_spend,balance_before,balance_after)
-    VALUES($1,-10,'deduction','spend','spend',true,1000,990)`,[h.user]);
+  await admin.query(`INSERT INTO credit_transactions(idempotency_key,user_id,amount,type,description,ledger_type,counts_as_spend,balance_before,balance_after)
+    VALUES('fixture:'||gen_random_uuid(),$1,-10,'deduction','spend','spend',true,1000,990)`,[h.user]);
   await assert.rejects(()=>quote(h),/PAY_REFUND_CREDITS_CONSUMED/);
   // A non-admin cannot quote.
   await assert.rejects(()=>service.query(`SELECT pay_common_package_refund_quote($1,$2,$3,$4,'confirmed','x') q`,

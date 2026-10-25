@@ -13,6 +13,21 @@ BEGIN
  -- D7 read boundary
  PERFORM content_erasure_runtime_check(p_actor_id,p_execution_id);
  PERFORM bill2_actor(p_actor_id);
+ -- DB-100 C3 read check (0384): this running reply already checked its lineage and admit its history.
+ IF p_action='read' AND runtime_read_verified(p_actor_id,p_execution_id) THEN
+  SELECT * INTO s FROM runtime_sessions WHERE id=p_session_id AND actor_id=p_actor_id;
+  SELECT * INTO e FROM runtime_executions WHERE id=p_execution_id AND session_id=s.id AND actor_id=p_actor_id;
+  IF s.id IS NULL OR e.id IS NULL OR NOT coalesce(bill2_scope_allowed(p_actor_id,s.scope),false) THEN RAISE EXCEPTION 'RUNTIME_SESSION_DENIED';END IF;
+  IF p_limit<0 THEN RAISE EXCEPTION 'RUNTIME_SESSION_LIMIT';END IF;
+  SELECT coalesce(jsonb_agg(item ORDER BY revision),'[]') INTO answer FROM (
+   SELECT jsonb_build_object('revision',h.revision,'item',h.item) item,h.revision
+   FROM runtime_session_history h JOIN runtime_executions x ON x.id=h.execution_id
+   WHERE h.session_id=s.id AND h.revision=ANY(coalesce(e.selected_history,e.candidate_history)) AND NOT h.internal_control
+    AND x.actor_id=p_actor_id AND x.unavailable_reason IS NULL AND x.erased_at IS NULL AND x.content_deleted_at IS NULL
+   ORDER BY h.revision DESC LIMIT p_limit
+  ) x;
+  RETURN answer;
+ END IF;
  SELECT * INTO s FROM runtime_sessions WHERE id=p_session_id AND actor_id=p_actor_id FOR UPDATE;
  SELECT * INTO e FROM runtime_executions WHERE id=p_execution_id AND session_id=s.id AND actor_id=p_actor_id;
  IF s.id IS NULL OR e.id IS NULL OR NOT coalesce(bill2_scope_allowed(p_actor_id,s.scope),false) THEN RAISE EXCEPTION 'RUNTIME_SESSION_DENIED';END IF;

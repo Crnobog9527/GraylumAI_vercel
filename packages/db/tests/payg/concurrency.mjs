@@ -125,6 +125,38 @@ export async function concurrencyCases({db,Client,connectionString,report,create
     await conserved(db,third);
     report.checks.push('DB-PERF: an open claim no longer blocks other users\' claims and dispatches, on the same or another model');
 
+    // DB-PERF 0389: dispatch locks the test window row before it takes the stop-loss key, as claim does. While another
+    // transaction holds the window row, a dispatch waiting for it must not hold (201,1) shared.
+    const ordered = await createFixture(db,{empirical:true});
+    const orderedCall = await claim(db,ordered,1,false);
+    const dispatchPid = (await writers[1].query('SELECT pg_backend_pid() pid')).rows[0].pid;
+    await writers[0].query('BEGIN');
+    let orderedDispatch;
+    try {
+      await writers[0].query('SELECT id FROM runtime_test_windows WHERE id=$1 FOR UPDATE',[ordered.payload.testWindowId]);
+      orderedDispatch = rpc(writers[1],'bill2_dispatch',ordered.actor,ordered.run,orderedCall.id,orderedCall.dispatchToken).then(
+        value=>({ok:true,value}),error=>({ok:false,error}));
+      let blocked=false;
+      for(let i=0;i<200&&!blocked;i++) {
+        blocked=(await db.query('SELECT $1 = ANY(pg_blocking_pids($2)) b',[(await writers[0].query('SELECT pg_backend_pid() pid')).rows[0].pid,dispatchPid])).rows[0].b===true;
+        if(!blocked) await new Promise(resolve=>setTimeout(resolve,10));
+      }
+      assert.equal(blocked,true,'dispatch must wait for the test window row');
+      await db.query('BEGIN');
+      const exclusive = (await db.query('SELECT pg_try_advisory_xact_lock(201,1) got')).rows[0].got;
+      await db.query('ROLLBACK');
+      assert.equal(exclusive,true,'a dispatch waiting for the window row must not already hold the stop-loss key');
+    } finally {
+      await writers[0].query('ROLLBACK');
+      const done = await orderedDispatch;
+      assert.equal(done.ok,true);
+      assert.equal(done.value.dispatch,true);
+    }
+    const triggers = (await db.query(`SELECT array_agg(tgname::text ORDER BY tgname) names FROM pg_trigger WHERE tgrelid='bill2_calls'::regclass
+      AND NOT tgisinternal AND (tgtype & 2)=2 AND (tgtype & 16)=16 AND tgname IN ('runtime_a_test_dispatch_guard','runtime_stop_loss_call_guard')`)).rows[0].names;
+    assert.deepEqual(triggers,['runtime_a_test_dispatch_guard','runtime_stop_loss_call_guard']);
+    report.checks.push('DB-PERF: dispatch takes the test window row before the stop-loss key, the same order as claim (no deadlock cycle)');
+
     const cancelling = await createFixture(db);
     const pending = await claim(db,cancelling,1,true);
     await Promise.all([

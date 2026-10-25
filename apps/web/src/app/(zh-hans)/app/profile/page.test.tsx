@@ -45,9 +45,6 @@ vi.mock('@/components/profile/DataUseConsentCard', () => ({ DataUseConsentCard: 
 const consent = vi.hoisted(() => ({ visible: false }));
 vi.mock('@/components/profile/dataUseConsentVisibility', () => ({ get DATA_USE_CONSENT_VISIBLE() { return consent.visible; } }));
 vi.mock('@/components/founder/FounderProfileCard', () => ({ FounderProfileCard: () => null }));
-vi.mock('@/components/profile/ReplyLanguageCard', () => ({
-  ReplyLanguageCard: ({ language }: { language: string }) => <div data-reply-language={language} />,
-}));
 vi.mock('@/components/profile/TicketsPanel', () => ({ default: () => null }));
 
 import ProfilePage from './page';
@@ -84,7 +81,8 @@ describe('profile page', () => {
   it('renders real profile data when the read succeeds', () => {
     const html = renderToStaticMarkup(<ProfilePage />);
     expect(html).toContain('profile-header:小王:pro');
-    expect(html).toContain('data-reply-language="en"');
+    // CHAT-LANGUAGE (Owner 2026-10-25): the language is switched only in the top bar, not on this page.
+    expect(html).not.toContain('语言：');
     expect(html).not.toContain('animate-spin');
     expect(html).not.toContain('role="alert"');
   });

@@ -15,6 +15,7 @@ import { TRPC_MAX_BATCH_CALLS } from '@/lib/trpcBatchLimit';
 import { toast } from 'sonner';
 import { isProfileArchivedError, PROFILE_ARCHIVE_TEXT } from '@/components/opc/profile-archive/profile-archive';
 import { PROFILE_BUSINESSES_KEY } from '@/components/opc/profile-archive/profile-archive-api';
+import { mutationAffectsRuntimeChoices } from '@/lib/runtime-choices';
 
 export default function Provider({ children }: { children: React.ReactNode }) {
   // The query client is created once; it reaches the latest recovery handler through this ref.
@@ -30,7 +31,15 @@ export default function Provider({ children }: { children: React.ReactNode }) {
     };
     const client = new QueryClient({
       queryCache: new QueryCache({ onError }),
-      mutationCache: new MutationCache({ onError }),
+      mutationCache: new MutationCache({
+        onError,
+        // DB-100: runtime.choices is cached for minutes; an admin change must show up at once in this browser.
+        onSuccess: (_data, _variables, _context, mutation) => {
+          if (mutationAffectsRuntimeChoices(mutation.options.mutationKey)) {
+            void client.invalidateQueries({ queryKey: [['runtime', 'choices']] });
+          }
+        },
+      }),
       defaultOptions: {
         queries: {
           staleTime: 30_000,

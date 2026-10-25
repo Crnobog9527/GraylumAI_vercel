@@ -14,7 +14,7 @@ const errorOf = promise => promise.then(() => null, error => error);
 async function draftAccount() {
   const actor = await v('SELECT ws_test.actor() v');
   const made = await v("SELECT ws_test.positioning($1,'Biz fixture','PRIVATE_CANARY') v", [actor]);
-  await c.query("INSERT INTO credit_transactions(user_id,amount,type,description) VALUES($1,25,'addition','fixture grant')", [actor]);
+  await c.query("INSERT INTO credit_transactions(idempotency_key,user_id,amount,type,description) VALUES('fixture:'||gen_random_uuid(),$1,25,'addition','fixture grant')", [actor]);
   return { actor, ...made };
 }
 async function erase(f) {

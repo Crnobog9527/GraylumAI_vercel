@@ -13,6 +13,9 @@ import {sourceToolBytes} from './sourceRuntimeTool';
 import {openRouterRequestBody,STREAMING_FORMATS} from './providerRequest';
 import {frozenReasoningFields} from './reasoningPolicy';
 import {openRouterBound} from '../bill2/openRouterPolicy';
+// I1: a real host admits only through a per-call (v2) profile; these tests mock the profile reader and price freeze.
+vi.mock('./paygHostPolicy', async original => ({...(await original<typeof import('./paygHostPolicy')>()), readPaygHostPolicies: (await import('../__tests__/fixtures/paygAdmission')).paygHostPolicies}));
+vi.mock('./paygPricing', async original => ({...(await original<typeof import('./paygPricing')>()), freezeStagingPaygPricing: (await import('../__tests__/fixtures/paygAdmission')).frozenPaygPricing}));
 const admittedSkill = vi.hoisted(() => ({ source: undefined as SkillSource | undefined }));
 vi.mock('../skills/databaseSource', () => ({ databaseSkillSource: () => admittedSkill.source }));
 // CONTENT-CONVERSATION-DRIVEN: a test may hand admission a ready catalog; otherwise the real (here empty) discovery runs.
@@ -58,7 +61,7 @@ function fixture(budgetConfig?:unknown){
  }} as unknown as SupabaseClient;
  const user={auth:{getUser:async()=>({data:{user:{id:actor,email_confirmed_at:'2026-01-01'}},error:null})}} as unknown as SupabaseClient;
  const quotes=models.map(m=>({modelId:m.id,provider:'openrouter',account:'synthetic',model:m.model_id,protocol:'openrouter-chat-v1' as const,providerLimits:{providerSlug:'synthetic/fp8',contextTokens:32000,promptUsdPerMillion:'0.1',completionUsdPerMillion:'0.1',requestUsd:'0'},upperUsd:'0.004',inputLimit:32000,outputLimit:8192,automaticRetry:false as const,hiddenTools:false as const,lookupSupported:true}));
- const policy={real:{id:sessionId,creditsPerUsd:'1000',multiplier:'1',expiresAt:'2030-01-01',callPolicies:quotes},account:'synthetic',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:2,maxOutputTokens:8192,inputBytes:32000,historyItems:10,opcTurnToken:requestId,mentorStream:true};
+ const policy={paygHost:true,real:{id:sessionId,creditsPerUsd:'1000',multiplier:'1',expiresAt:'2030-01-01',callPolicies:quotes},account:'synthetic',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:2,maxOutputTokens:8192,inputBytes:32000,historyItems:10,opcTurnToken:requestId,mentorStream:true};
  const service=runtimeAdmissionService(user,admin,policy);
  const input={sessionId,requestId,input:'Synthetic facts',selection:{kind:'ordinary' as const,modelId:first},network:'deny',organizeAfter:true};
  return {models,settings,service,input,frozen,reads:()=>reads,selectedColumns,rpc,policy,user,admin};
@@ -127,7 +130,8 @@ it.each([false,true])('new openings attach an organizer, preserving caller reque
   attachedOrganizer:{modelId:organizer,...(real?{reasoning:{parameter:'none'}}:{})},
  });
  expect(result.context).not.toHaveProperty('matching');expect(result.context).not.toHaveProperty('workspaceContext');
- expect(result.billing.limits).toMatchObject({maxCalls:2,credits:real?8:40,maxPreDeduct:real?8:40});
+ // A real host is billed per call (v2): nothing is pre-deducted at admission; the ceiling stays frozen.
+ expect(result.billing.limits).toMatchObject({maxCalls:2,credits:real?0:40,maxPreDeduct:real?8:40});
  expect(result.billing.callPolicy).toHaveLength(2);
  const reads=f.reads();f.models[0]!.config.reasoning.purposes={};f.models[2]!.is_active='false';
  expect(await service.prepare(input)).toEqual(result);expect(f.reads()).toBe(reads);
@@ -204,8 +208,8 @@ it('configured budgets freeze separately from unchanged quotes and reservation a
  expect(original.context.maxOutputTokens).toBe(PURPOSE_OUTPUT_CAP);
  expect(original.context.purposeBudget).toEqual({purpose:'interactive',inputBytes:24000,historyItems:7});
  expect(original.context.attachedOrganizer).toMatchObject({maxOutputTokens:4096,inputBytes:16000,historyItems:0});
- expect(original.billing.callPolicy).toEqual(f.policy.real.callPolicies.filter(q=>q.modelId!==second));
- expect(original.billing.limits).toMatchObject({costUsd:'0.008000000000',credits:8,maxPreDeduct:8,maxCalls:2});
+ expect(original.billing.callPolicy).toMatchObject(f.policy.real.callPolicies.filter(q=>q.modelId!==second));
+ expect(original.billing.limits).toMatchObject({costUsd:'0.008000000000',credits:0,maxPreDeduct:8,maxCalls:2});
  config.interactive.maxOutputTokens=PURPOSE_OUTPUT_CAP;config.interactive.historyItems=2;
  const next=await service.prepare({...f.input,requestId:nextId});
  expect(next.context.maxOutputTokens).toBe(PURPOSE_OUTPUT_CAP); // New configuration ceiling; quote arithmetic is unchanged.
@@ -252,8 +256,8 @@ it('new model ceiling below quote remains admissible without changing v1 financi
  const originalQuotes=structuredClone(f.policy.real.callPolicies);
  const admitted=await f.service.prepare(f.input);
  expect(admitted.context.maxOutputTokens).toBe(4096);
- expect(admitted.billing.contractVersion).toBe('bill2.v1');
- expect(admitted.billing.callPolicy).toEqual(originalQuotes.filter(q=>q.modelId!==second));
+ expect(admitted.billing.contractVersion).toBe('bill2.v2');
+ expect(admitted.billing.callPolicy).toMatchObject(originalQuotes.filter(q=>q.modelId!==second));
  f.models[0]!.max_tokens=1024;
  expect(await f.service.prepare(f.input)).toEqual(admitted);
 });
@@ -308,7 +312,7 @@ it.each([false,true])('real Skill admission freezes step streaming and leaves pl
  expect(JSON.stringify(await service.prepare(input))).toBe(bytes);
 });
 
-it.each([8192,32768,32769])('v1 native O is capped at 32768 for model/quote boundary %i with unchanged frozen charges', async limit => {
+it.each([8192,32768,32769])('native O is capped at 32768 for model/quote boundary %i with unchanged frozen charges', async limit => {
  const f=fixture();
  f.models[0]!.max_tokens=limit;
  f.policy.real.callPolicies[0]!.outputLimit=limit;
@@ -316,9 +320,9 @@ it.each([8192,32768,32769])('v1 native O is capped at 32768 for model/quote boun
  const result=await runtimeAdmissionService(f.user,f.admin,f.policy).prepare({...f.input,organizeAfter:false});
  expect(result.context.nativeOutput).toBe('native-output-v1');
  expect(result.context.maxOutputTokens).toBe(Math.min(limit,32768));
- expect(result.billing.contractVersion).toBe('bill2.v1');
- expect(result.billing.callPolicy).toEqual([before[0]]);
- expect(result.billing.limits).toMatchObject({costUsd:'0.008000000000',credits:8,maxPreDeduct:8});
+ expect(result.billing.contractVersion).toBe('bill2.v2');
+ expect(result.billing.callPolicy).toMatchObject([before[0]]);
+ expect(result.billing.limits).toMatchObject({costUsd:'0.008000000000',credits:0,maxPreDeduct:8});
 });
 
 it('new cap freezes the new quote while an old execution and organizer retain their original limits', async () => {
@@ -334,7 +338,7 @@ it('new cap freezes the new quote while an old execution and organizer retain th
  expect(admitted.context.maxOutputTokens).toBe(32768);
  expect(admitted.context.attachedOrganizer.maxOutputTokens).toBe(4096);
  expect(admitted.billing.callPolicy[0].upperUsd).toBe('0.013276800000');
- expect(admitted.billing.limits).toMatchObject({costUsd:'0.026553600000',credits:27,maxPreDeduct:27});
+ expect(admitted.billing.limits).toMatchObject({costUsd:'0.026553600000',credits:0,maxPreDeduct:27});
  expect(JSON.stringify(await next.prepare(f.input))).toBe(oldBytes);
  expect(old.context.maxOutputTokens).toBe(8192);
 });

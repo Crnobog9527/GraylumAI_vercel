@@ -14,6 +14,9 @@ BEGIN
  -- 0324 archived business guard
  PERFORM opc_assert_business_writable(a,jsonb_build_object('runId',rid));
  SELECT * INTO r FROM bill2_runs WHERE id=rid AND actor_id=a FOR UPDATE;
+ -- DB-100 C2 payload read once: fetch and decompress the TOAST value here, not at every r.payload use.
+ -- A run payload is always a JSON object (bill2_prepare); || '{}' returns it unchanged.
+ r.payload:=r.payload||'{}'::jsonb;
  IF r.id IS NULL OR r.contract_version<>'bill2.v2' THEN RAISE EXCEPTION 'BILL2_RUN_DENIED';END IF;
  PERFORM bill2_payg_lock_models(r);
  PERFORM runtime_billing_allowed(a,r.payload,r.id);
@@ -110,9 +113,9 @@ BEGIN
  PERFORM id FROM subscription_credit_grants WHERE user_id=a ORDER BY id FOR UPDATE;
  IF EXISTS(SELECT 1 FROM subscription_credit_grants WHERE user_id=a AND accounting_state<>'trusted') THEN
   RAISE EXCEPTION 'PRE_DEDUCT_GRANT_ACCOUNTING_REVIEW_REQUIRED';END IF;
- SELECT coalesce(sum(greatest(g.credits_granted-g.consumed_amount,0)),0) INTO quarantine
- FROM subscription_credit_grants g WHERE g.user_id=a AND g.status='granted' AND g.accounting_state='trusted'
- AND EXISTS(SELECT 1 FROM user_subscriptions s WHERE s.user_id=a AND s.stripe_subscription_id=g.stripe_subscription_id AND s.credit_release_terminated_at IS NOT NULL);
+ SELECT coalesce(sum(greatest(qg.credits_granted-qg.consumed_amount,0)),0) INTO quarantine
+ FROM subscription_credit_grants qg WHERE qg.user_id=a AND qg.status='granted' AND qg.accounting_state='trusted'
+ AND credit_grant_quarantined(qg); -- ARCH-FIX E1
  quarantine:=quarantine+credit_package_refund_hold(a)+pay_dispute_pending_hold(a) -- PAY-D1 claim-pending
 ; -- PAY-REFUND-HOLD
  avail:=greatest(avail-quarantine,0);
