@@ -82,21 +82,21 @@ describe('compare loading (FUSION-COMPARE §3.2)', () => {
     const turn = (n: number) => ({ role: n % 2 ? 'assistant' as const : 'user' as const, text: 'x'.repeat(4000 + n) });
     const history = Array.from({ length: 40 }, (_, n) => turn(n));
     const base = { skill: null, positioningFallback: false, scopeMaterial: undefined, workspace: [], references: [], question: '问题', history };
-    // Find a question size where the kept turns would differ if each language were measured with its own rule.
-    let found = false;
-    for (let pad = 0; pad < 6000 && !found; pad += 7) {
-      const question = '问题' + 'y'.repeat(pad);
-      const kept = (['zh-Hans', 'zh-Hant', 'en'] as const).map(replyLocale => fitHistory({ ...base, question, replyLocale }).history.length);
-      expect(new Set(kept).size).toBe(1);
-      const own = (['zh-Hant', 'en'] as const).map(replyLocale => {
-        let h = history;
-        const size = (k: typeof h) => compareRequestBytes(compareRequest({ ...base, question, history: k, positioningFallback: true, replyLocale }));
-        while (h.length && size(h) > FUSION_INPUT_CAP) h = h.slice(1);
-        return h.length;
-      });
-      found = own[0] !== own[1];
-    }
-    expect(found).toBe(true);
+    // A question size where the English request with the kept turns is exactly at the cap: measured with its own (longer)
+    // rule, Traditional Chinese would have to drop one more turn.
+    const size = (replyLocale: 'zh-Hant' | 'en', question: string, h: typeof history) =>
+      compareRequestBytes(compareRequest({ ...base, question, history: h, positioningFallback: true, replyLocale }));
+    const ownTurns = (replyLocale: 'zh-Hant' | 'en', question: string) => {
+      let h = history;
+      while (h.length && size(replyLocale, question, h) > FUSION_INPUT_CAP) h = h.slice(1);
+      return h.length;
+    };
+    let edge = history;
+    while (edge.length && size('en', '问题', edge) > FUSION_INPUT_CAP) edge = edge.slice(1);
+    const question = '问题' + 'y'.repeat(FUSION_INPUT_CAP - size('en', '问题', edge));
+    expect(ownTurns('en', question)).not.toBe(ownTurns('zh-Hant', question));
+    const kept = (['zh-Hans', 'zh-Hant', 'en'] as const).map(replyLocale => fitHistory({ ...base, question, replyLocale }).history.length);
+    expect(new Set(kept).size).toBe(1);
   });
 
   it('drops the oldest turns until the request fits the per-call cap, never the question', () => {
