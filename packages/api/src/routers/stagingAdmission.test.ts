@@ -5,13 +5,18 @@ import { configuredReasoning } from '../services/__tests__/fixtures/runtimeReaso
 import { fetchRequestHandler } from '@trpc/server/adapters/fetch';
 const mocks = vi.hoisted(() => ({ realOpc: false, realAdmission: false, prepareStep: vi.fn(), catalog: vi.fn(), list: vi.fn(), library: vi.fn(), captureResolve: vi.fn(), start: vi.fn(), info: vi.fn(), error: vi.fn() }));
 vi.mock('../lib/logger', () => ({ logger: { info: mocks.info, error: mocks.error, warn: vi.fn() } }));
-vi.mock('../services/opc/service', async original => { const actual = await original<typeof import('../services/opc/service')>(); return { ...actual, opcService: (...args: Parameters<typeof actual.opcService>) => mocks.realOpc ? actual.opcService(...args) : ({ catalog: mocks.catalog, list: mocks.list, library: mocks.library, captureResolve: mocks.captureResolve, prepareStep: mocks.realAdmission ? async (input:{requestId:string;input:string;organizeAfter:boolean}) => (await import('../services/runtime/admission')).runtimeAdmissionService(args[0],args[1],{real:args[2],account:'synthetic',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:2,maxOutputTokens:100,inputBytes:8000,historyItems:20}).prepare({sessionId:actor,requestId:input.requestId,input:input.input,organizeAfter:input.organizeAfter,selection:{kind:'ordinary',modelId:actor},network:'deny'}) : mocks.prepareStep }) }; });
+vi.mock('../services/opc/service', async original => { const actual = await original<typeof import('../services/opc/service')>(); return { ...actual, opcService: (...args: Parameters<typeof actual.opcService>) => mocks.realOpc ? actual.opcService(...args) : ({ catalog: mocks.catalog, list: mocks.list, library: mocks.library, captureResolve: mocks.captureResolve, prepareStep: mocks.realAdmission ? async (input:{requestId:string;input:string;organizeAfter:boolean}) => (await import('../services/runtime/admission')).runtimeAdmissionService(args[0],args[1],{real:args[2],paygHost:true,account:'synthetic',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:2,maxOutputTokens:100,inputBytes:8000,historyItems:20}).prepare({sessionId:actor,requestId:input.requestId,input:input.input,organizeAfter:input.organizeAfter,selection:{kind:'ordinary',modelId:actor},network:'deny'}) : mocks.prepareStep }) }; });
 vi.mock('../services/runtime/admission', async original => {const actual=await original<typeof import('../services/runtime/admission')>();return {...actual,runtimeAdmissionService:(...args:Parameters<typeof actual.runtimeAdmissionService>)=>mocks.realAdmission?actual.runtimeAdmissionService(...args):{start:mocks.start}};});
 import { opcRouter } from './opc';
 import { runtimeRouter } from './runtime';
 import { router } from '../trpc';
 import { testPrimaryModel } from '../services/__tests__/fixtures/runtimeGates';
 // The window/configuration consistency of BILL-UNIT is covered in billingUnitAdmission.test.ts.
+// I1: a real host admits only through a per-call (v2) profile; mock the profile reader and price freeze.
+vi.mock('../services/runtime/paygHostPolicy', async original => ({...(await original<typeof import('../services/runtime/paygHostPolicy')>()),
+  readPaygHostPolicies: (await import('../services/__tests__/fixtures/paygAdmission')).paygHostPolicies}));
+vi.mock('../services/runtime/paygPricing', async original => ({...(await original<typeof import('../services/runtime/paygPricing')>()),
+  freezeStagingPaygPricing: (await import('../services/__tests__/fixtures/paygAdmission')).frozenPaygPricing}));
 vi.mock('../services/runtime/billingUnitAdmission', async (original) => ({
   ...(await original<typeof import('../services/runtime/billingUnitAdmission')>()),
   freezeWindowBillingUnit: async () => ({ version: 'bill-unit-v2', creditsPerUsd: '1000', defaultMultiplier: '1', models: {}, providers: {}, hash: 'f'.repeat(64) }),

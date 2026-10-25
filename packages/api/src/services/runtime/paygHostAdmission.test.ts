@@ -16,7 +16,7 @@ vi.mock('./billingUnitAdmission',async original=>({
     models:{},providers:{},hash:'f'.repeat(64)}),
 }));
 const id=(n:number)=>`10000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
-it('real host admits v2 free chat (v6 + low), replays original admission across switch-off, then admits new requests as v1',async()=>{
+it('real host admits v2 free chat (v6 + low), replays original admission across switch-off, then refuses new requests (I1: no v1)',async()=>{
   const model='anthropic/claude-sonnet-5.5',tag='anthropic';
   const providerLimits={providerSlug:tag,contextTokens:250000,promptUsdPerMillion:'1',completionUsdPerMillion:'1',requestUsd:'0'};
   const quote={modelId:id(3),model,provider:'openrouter',account:'synthetic',protocol:'openrouter-chat-v1' as const,
@@ -60,7 +60,8 @@ it('real host admits v2 free chat (v6 + low), replays original admission across 
   mocks.host.mockResolvedValue(undefined);
   expect(await runtimeAdmissionService(user,admin,policy).prepare(request)).toEqual(first);
   expect(mocks.host).toHaveBeenCalledTimes(1);
-  const next=await runtimeAdmissionService(user,admin,policy).prepare({...request,requestId:id(6)});
-  expect(next).toMatchObject({billing:{contractVersion:'bill2.v1'}});
-  expect(contracts).toEqual(['bill2.v2','bill2.v1']);
+  // I1: with per-call billing off, a new real admission is refused instead of falling back to v1 billing.
+  await expect(runtimeAdmissionService(user,admin,policy).prepare({...request,requestId:id(6)}))
+    .rejects.toMatchObject({reason:'RUNTIME_PAYG_PROFILE_REQUIRED'});
+  expect(contracts).toEqual(['bill2.v2']);
 });

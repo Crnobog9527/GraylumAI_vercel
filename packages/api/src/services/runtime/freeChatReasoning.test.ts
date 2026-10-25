@@ -10,6 +10,9 @@ import {openRouterRequestBody} from './providerRequest';
 import {frozenReasoningFields,type ReasoningPolicy} from './reasoningPolicy';
 import {openRouterBound} from '../bill2/openRouterPolicy';
 import type {ReasoningConfig} from '../../shared/modelReasoning';
+// I1: a real host admits only through a per-call (v2) profile; these tests mock the profile reader and price freeze.
+vi.mock('./paygHostPolicy', async original => ({...(await original<typeof import('./paygHostPolicy')>()), readPaygHostPolicies: (await import('../__tests__/fixtures/paygAdmission')).paygHostPolicies}));
+vi.mock('./paygPricing', async original => ({...(await original<typeof import('./paygPricing')>()), freezeStagingPaygPricing: (await import('../__tests__/fixtures/paygAdmission')).frozenPaygPricing}));
 vi.mock('./billingUnitAdmission', async (original) => ({
   ...(await original<typeof import('./billingUnitAdmission')>()),
   freezeWindowBillingUnit: async () => ({ version: 'bill-unit-v2', creditsPerUsd: '1000', defaultMultiplier: '1', models: {}, providers: {}, hash: 'f'.repeat(64) }),
@@ -61,7 +64,7 @@ function fixture(real=true,gate=false){
    upperUsd:openRouterBound(providerLimits,8192).upperUsd,inputLimit:32000,outputLimit:8192,
    automaticRetry:false as const,hiddenTools:false as const,lookupSupported:true};
  });
- const policy={...(real?{real:{id:sessionId,creditsPerUsd:'1000',multiplier:'1',expiresAt:'2030-01-01',callPolicies:quotes}}:{}),
+ const policy={...(real?{paygHost:true,real:{id:sessionId,creditsPerUsd:'1000',multiplier:'1',expiresAt:'2030-01-01',callPolicies:quotes}}:{}),
   account:'synthetic',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:2,maxOutputTokens:8192,inputBytes:32000,historyItems:10,
   ...(gate?{positioningGate:{classify:async()=>'allow' as const}}:{})};
  const service=runtimeAdmissionService(user,admin,policy);

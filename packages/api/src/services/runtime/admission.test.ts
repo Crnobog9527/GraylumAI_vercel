@@ -6,6 +6,9 @@ import {stagingProcedureError} from './stagingErrors';
 import {runtimeAdmissionService} from './admission';
 import {configuredReasoning} from '../__tests__/fixtures/runtimeReasoning';
 import {testPrimaryModel} from '../__tests__/fixtures/runtimeGates';
+// I1: a real host admits only through a per-call (v2) profile; these tests mock the profile reader and price freeze.
+vi.mock('./paygHostPolicy', async original => ({...(await original<typeof import('./paygHostPolicy')>()), readPaygHostPolicies: (await import('../__tests__/fixtures/paygAdmission')).paygHostPolicies}));
+vi.mock('./paygPricing', async original => ({...(await original<typeof import('./paygPricing')>()), freezeStagingPaygPricing: (await import('../__tests__/fixtures/paygAdmission')).frozenPaygPricing}));
 // The window/configuration consistency of BILL-UNIT is covered in billingUnitAdmission.test.ts.
 vi.mock('./billingUnitAdmission', async (original) => ({
   ...(await original<typeof import('./billingUnitAdmission')>()),
@@ -26,7 +29,7 @@ it.each(['PGRST202','42883','42501','PGRST301','XX000',null].flatMap(code=>[fals
   config:configuredReasoning('test/model')},error:null})};
  const user={auth:{getUser:async()=>({data:{user:{id:actor,email_confirmed_at:'2026-01-01T00:00:00Z'}},error:null})}} as unknown as SupabaseClient;
  const admin={rpc,from:()=>query} as unknown as SupabaseClient;
- const admission=runtimeAdmissionService(user,admin,{...(real?{real:{id:sessionId,creditsPerUsd:'1000',multiplier:'1',expiresAt:'2030-01-01T00:00:00Z',callPolicies:[{modelId,provider:'openrouter',account:'test',model:'test/model',protocol:'openrouter-chat-v1' as const,providerLimits:{providerSlug:'synthetic/fp8',contextTokens:32000,promptUsdPerMillion:'0.1',completionUsdPerMillion:'0.1',requestUsd:'0'},upperUsd:'0.004',inputLimit:32000,outputLimit:1000,automaticRetry:false as const,hiddenTools:false as const,lookupSupported:true}]}}:{}),workspaceContext:true,account:'test',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:3,maxOutputTokens:1000,inputBytes:32000,historyItems:10});
+ const admission=runtimeAdmissionService(user,admin,{...(real?{paygHost:true,real:{id:sessionId,creditsPerUsd:'1000',multiplier:'1',expiresAt:'2030-01-01T00:00:00Z',callPolicies:[{modelId,provider:'openrouter',account:'test',model:'test/model',protocol:'openrouter-chat-v1' as const,providerLimits:{providerSlug:'synthetic/fp8',contextTokens:32000,promptUsdPerMillion:'0.1',completionUsdPerMillion:'0.1',requestUsd:'0'},upperUsd:'0.004',inputLimit:32000,outputLimit:1000,automaticRetry:false as const,hiddenTools:false as const,lookupSupported:true}]}}:{}),workspaceContext:true,account:'test',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:3,maxOutputTokens:1000,inputBytes:32000,historyItems:10});
  const promise=admission.prepare({sessionId,requestId,input:'General travel tips',selection:{kind:'ordinary',modelId},network:'deny'});
  if(code&&!['PGRST202','42883'].includes(code)){await expect(promise).rejects.toThrow('RUNTIME_WORKSPACE_UNAVAILABLE');expect(frozen).toBeUndefined();}
  else{await promise;expect(frozen?.inputSelection).toBe('scope-projection-v1');expect(frozen?.providerRequestFormat).toBe(real?'serial-tools-v6-reasoning':undefined);expect(frozen?.reasoning).toEqual(real?{effort:'none'}:undefined);expect(frozen?.workspaceContext).toBe(code?undefined:true);expect(frozen?.scopeMaterial).toBeUndefined();expect(frozen?.sources).toEqual([]);}
@@ -48,15 +51,17 @@ it.each([false,true].flatMap(real=>[false,true].map(mentorStream=>({real,mentorS
  }} as unknown as SupabaseClient;
  const user={auth:{getUser:async()=>({data:{user:{id:actor,email_confirmed_at:'2026-01-01'}},error:null})}} as unknown as SupabaseClient;
  const quotes=models.map(m=>({modelId:m.id,provider:'openrouter',account:'test',model:m.model_id,protocol:'openrouter-chat-v1' as const,providerLimits:{providerSlug:'synthetic/fp8',contextTokens:32000,promptUsdPerMillion:'0.1',completionUsdPerMillion:'0.1',requestUsd:'0'},upperUsd:'0.004',inputLimit:32000,outputLimit:4096,automaticRetry:false as const,hiddenTools:false as const,lookupSupported:true}));
- const policy={...(real?{real:{id:sessionId,creditsPerUsd:'1000',multiplier:'1',expiresAt:'2030-01-01',callPolicies:quotes}}:{}),account:'test',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:2,maxOutputTokens:1000,inputBytes:32000,historyItems:10};
+ const policy={...(real?{paygHost:true,real:{id:sessionId,creditsPerUsd:'1000',multiplier:'1',expiresAt:'2030-01-01',callPolicies:quotes}}:{}),account:'test',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:2,maxOutputTokens:1000,inputBytes:32000,historyItems:10};
  const service=runtimeAdmissionService(user,admin,{...policy,opcTurnToken:requestId,mentorStream});
  const input={sessionId,requestId,input:'Real business facts',selection:{kind:'ordinary',modelId},network:'deny',organizeAfter:true};
  await service.prepare(input);expect(frozen.providerRequestFormat).toBe(mentorStream?'agent-turn-v5-stream':real?'serial-tools-v6-reasoning':undefined);expect(frozen.reasoning).toEqual(real?{effort:'none'}:mentorStream?{parameter:'none'}:undefined);expect(frozen.attachedOrganizer.reasoning).toEqual(real?{parameter:'none'}:undefined);
- expect(frozen.attachedOrganizer.historyItems).toBe(mentorStream?0:undefined);
+ // The per-call (v2) message budget freezes the attached organizer without history (I1: real hosts are v2 only).
+ expect(frozen.attachedOrganizer.historyItems).toBe(mentorStream||real?0:undefined);
  expect(frozen.questionContract).toBe(mentorStream?'five-fields-v2':undefined);
  expect(frozen.instructions.includes('complete public prose in message')).toBe(mentorStream);
  expect(billing.sourceHash).toBe(createHash('sha256').update(JSON.stringify(frozen)).digest('hex'));expect(billing.input).toBe(frozen);expect(frozen.maxOutputTokens).toBe(real?4096:1000);expect(frozen.attachedOrganizer.maxOutputTokens).toBe(real?2048:1000);
- if(real)expect(billing.callPolicy).toEqual(quotes);
+ if(real){expect(billing.contractVersion).toBe('bill2.v2');expect(billing.callPolicy).toMatchObject(quotes);
+  expect(billing.callPolicy.every((p:{payg?:unknown})=>p.payg)).toBe(true);}
  else expect(billing.limits).toMatchObject({maxCalls:2,credits:40,maxPreDeduct:40});
  // Real admissions freeze the BILL-UNIT snapshot into rules; local fixture admissions stay on the old contract.
  if(real)expect(billing.rules.billingUnit).toMatchObject({version:'bill-unit-v2',creditsPerUsd:'1000'});
@@ -79,7 +84,7 @@ it.each(['test/unverified','constructor','__proto__'])('real mentor admission fa
  const user={auth:{getUser:async()=>({data:{user:{id:actor,email_confirmed_at:'2026-01-01'}},error:null})}} as unknown as SupabaseClient;
  const admin={rpc,from:()=>query} as unknown as SupabaseClient;
  const quote={modelId,provider:'openrouter',account:'test',model,protocol:'openrouter-chat-v1' as const,providerLimits:{providerSlug:'synthetic/fp8',contextTokens:32000,promptUsdPerMillion:'0.1',completionUsdPerMillion:'0.1',requestUsd:'0'},upperUsd:'0.004',inputLimit:32000,outputLimit:4096,automaticRetry:false as const,hiddenTools:false as const,lookupSupported:true};
- const service=runtimeAdmissionService(user,admin,{real:{id:sessionId,creditsPerUsd:'1000',multiplier:'1',expiresAt:'2030-01-01T00:00:00Z',callPolicies:[quote]},account:'test',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:1,maxOutputTokens:1000,inputBytes:32000,historyItems:10,opcTurnToken:requestId,mentorStream:true});
+ const service=runtimeAdmissionService(user,admin,{paygHost:true,real:{id:sessionId,creditsPerUsd:'1000',multiplier:'1',expiresAt:'2030-01-01T00:00:00Z',callPolicies:[quote]},account:'test',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:1,maxOutputTokens:1000,inputBytes:32000,historyItems:10,opcTurnToken:requestId,mentorStream:true});
  await expect(service.prepare({sessionId,requestId,input:'HOST_OPEN_CURRENT_QUESTION',selection:{kind:'ordinary',modelId},network:'deny'})).rejects.toThrow('RUNTIME_REASONING_NOT_CONFIGURED');
  expect(rpc.mock.calls.map(([name])=>name)).not.toContain('runtime_admit');
 });
