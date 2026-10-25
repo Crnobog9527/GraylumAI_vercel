@@ -7,6 +7,7 @@ import { logger } from './lib/logger';
 import { assertUsableUserStatus, normalizeUserStatus } from './lib/accountStatus';
 import {createRuntimeBudget,withRuntimeBudget,type RuntimeBudget} from './services/runtime/budget';
 import { openingGrantDigests } from './services/accountErasure/openingGrantIdentity';
+import { procedureRateLimit } from './middleware/procedureRateLimit';
 export {createRuntimeBudget,withRuntimeBudget};
 type ApiSupabaseClient = SupabaseClient<any, 'public', any>;
 type ApiContext = Awaited<ReturnType<typeof createTRPCContext>>;
@@ -439,7 +440,7 @@ async function ensureProfile(ctx: ApiContext) {
   };
 }
 
-export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
+export const protectedProcedure = t.procedure.use(procedureRateLimit).use(async ({ ctx, next }) => {
   if (!ctx.user) {
     throw new TRPCError({
       code: 'UNAUTHORIZED',
@@ -455,7 +456,6 @@ export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
   }
 
   const { profileId, userRole, userStatus, userScopedSupabase } = await ensureProfile(ctx);
-
   assertUsableUserStatus(userStatus);
 
   return next({
