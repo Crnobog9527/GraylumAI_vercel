@@ -3,6 +3,7 @@ import { expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 vi.mock('@/trpc/client', () => ({ trpc: { publishMonitor: { features: { useQuery: () => ({ data: undefined }) } } } }));
+vi.mock('@/lib/profile-tabs', () => ({ profileTabHref: (tab: string) => `/app/profile?tab=${tab}` }));
 vi.mock('./MethodCheckoutForm', () => ({ MethodCheckoutForm: () => <div data-testid="checkout-form" /> }));
 import { ReportPaywallView, type PaywallCheckout } from './ReportPaywallDialog';
 import { GOLD_SCENE_COPY, GOLD_SCENE_DELIVERABLES } from './goldScenePaywallCopy';
@@ -34,4 +35,17 @@ it('a Gold-only scene offers only Gold and its own words; the report scene is un
 it('Gold-scene copy follows the paywall copy rules: no predicted credit cost, no model names, no refund promise', () => {
   const text = JSON.stringify([GOLD_SCENE_COPY, GOLD_SCENE_DELIVERABLES]);
   expect(text).not.toMatch(/预计|消耗|积分|Claude|GPT|Gemini|Opus|Sonnet|退款/);
+});
+
+it('a Pro member (or an account not yet known) is sent to the subscription page to upgrade, never sold a plain new Gold order inline', () => {
+  for (const memberLevel of ['pro', 'unknown', 'loading']) {
+    const html = renderToStaticMarkup(<ReportPaywallView checkout={checkout} onClose={() => {}} scene="compare" memberLevel={memberLevel} />);
+    expect(html).toContain('paywall-upgrade-via-subscription');
+    expect(html).not.toContain('checkout-form');
+    expect(html).not.toContain('name="paywall-plan"');
+  }
+  const html = renderToStaticMarkup(<ReportPaywallView checkout={checkout} onClose={() => {}} scene="compare" memberLevel="pro" />);
+  expect(html).toContain('/app/profile?tab=subscription');
+  const free = renderToStaticMarkup(<ReportPaywallView checkout={checkout} onClose={() => {}} scene="compare" memberLevel="free" />);
+  expect(free).toContain('checkout-form');
 });

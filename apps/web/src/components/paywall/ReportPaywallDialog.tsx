@@ -11,6 +11,8 @@ import { SUPPORT_TICKET_HREF, UNPAID_SUBSCRIPTION_BLOCKS_PURCHASE } from '@/comp
 import { formatUsd, paywallQuote, type PaywallBilling, type PaywallLevel } from './paywallPlans';
 import { usePaywallCheckout } from './usePaywallCheckout';
 import { reportPaywallView } from '@/lib/analytics/events';
+import { trpc } from '@/trpc/client';
+import { profileTabHref } from '@/lib/profile-tabs';
 import { REPORT_DELIVERABLES, REPORT_PAYWALL_COPY as REPORT_COPY } from './reportPaywallCopy';
 import { GOLD_SCENE_COPY, GOLD_SCENE_DELIVERABLES, type GoldScene } from './goldScenePaywallCopy';
 
@@ -30,18 +32,23 @@ export function ReportPaywallDialog({ onClose, scene = 'report' }: { onClose: ()
     reported.current = true;
     reportPaywallView(scene);
   }, [scene]);
-  return <ReportPaywallView checkout={usePaywallCheckout()} onClose={onClose} scene={scene} />;
+  // A Gold-only scene is also opened by Pro members, whose purchase is an upgrade with the old subscription named; that flow
+  // lives on the subscription page. Only a free account buys inline here.
+  const entitlements = trpc.user.getEntitlements.useQuery(undefined, { enabled: scene !== 'report', staleTime: 30_000, retry: false });
+  const memberLevel = scene === 'report' ? 'free' : entitlements.isError ? 'unknown' : entitlements.data ? (entitlements.data.level ?? 'free') : 'loading';
+  return <ReportPaywallView checkout={usePaywallCheckout()} onClose={onClose} scene={scene} memberLevel={memberLevel} />;
 }
 
 export type PaywallCheckout = ReturnType<typeof usePaywallCheckout>;
 
 /** The paywall itself, given the plans and purchase action; kept apart so it renders without a server. */
-export function ReportPaywallView({ checkout: fullCheckout, onClose, scene = 'report' }: {
-  checkout: PaywallCheckout; onClose: () => void; scene?: PaywallScene;
+export function ReportPaywallView({ checkout: fullCheckout, onClose, scene = 'report', memberLevel = 'free' }: {
+  checkout: PaywallCheckout; onClose: () => void; scene?: PaywallScene; memberLevel?: string;
 }) {
   const [billing, setBilling] = useState<PaywallBilling>('monthly');
   // A Gold-only feature offers only the Gold plans (Gold first month and the founder price still come from the server).
   const goldOnly = scene !== 'report';
+  const inlinePurchase = !goldOnly || memberLevel === 'free';
   const checkout = goldOnly ? { ...fullCheckout, plans: fullCheckout.plans.filter(item => item.level === 'gold') } : fullCheckout;
   const COPY = goldOnly ? { ...REPORT_COPY, ...GOLD_SCENE_COPY[scene] } : REPORT_COPY;
   const deliverables = goldOnly ? GOLD_SCENE_DELIVERABLES[scene] : REPORT_DELIVERABLES;
@@ -111,7 +118,16 @@ export function ReportPaywallView({ checkout: fullCheckout, onClose, scene = 're
             </small>
           </div>}
 
-          {checkout.loading ? <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>正在读取会员方案…</p>
+          {!inlinePurchase ? (
+            <div className="grid gap-2 rounded-xl border p-3 text-sm" data-testid="paywall-upgrade-via-subscription"
+              style={{ borderColor: 'var(--border-primary)', color: 'var(--text-secondary)' }}>
+              {memberLevel === 'loading' ? <p>正在确认你的会员状态…</p> : <>
+                <p>{memberLevel === 'pro' ? '你现在是 Pro 会员，升级到 Gold 在订阅页完成：原 Pro 到本期结束，已有积分保留。'
+                  : '请到订阅页开通或升级到 Gold。'}</p>
+                <Button asChild><a href={profileTabHref('subscription')} target="_blank" rel="noopener">去订阅页升级到 Gold</a></Button>
+              </>}
+            </div>
+          ) : checkout.loading ? <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>正在读取会员方案…</p>
             : checkout.catalogFailed ? <p role="alert" className="text-sm" style={{ color: 'var(--error)' }}>{COPY.catalogFailed}</p>
               : (
                 <>
@@ -129,7 +145,7 @@ export function ReportPaywallView({ checkout: fullCheckout, onClose, scene = 're
                 </>
               )}
 
-          {plan && quote && !checkout.loading && !checkout.catalogFailed ? (
+          {inlinePurchase && plan && quote && !checkout.loading && !checkout.catalogFailed ? (
             <>
               <MethodCheckoutForm checkout={checkout.method} purchase={purchase} billingCycle={billing} testIdPrefix="report-paywall"
                 price={`${formatUsd(quote.amount)} ${quote.perLabel}`} renewal={quote.renewal}
