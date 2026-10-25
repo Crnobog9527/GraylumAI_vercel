@@ -84,6 +84,19 @@
 
 ### 2.1 Owner 的新决定（2026-09-27 起，2026-10-25 更新）
 
+**2026-10-26：正式站数据库、服务器、Redis 同地区；测试站 Redis 改到 us-west-2（MAINT-P15）**
+
+Owner 原话（2026-10-26，总控对话转达）：
+
+> 正式站数据库保持 us-west-1，服务器用 sfo1，Redis 用 us-west-1；测试站 Redis 改到 us-west-2
+
+以下是落实范围，不是原话：
+
+- 背景：数据库、服务器、Redis 三者必须在同一地区。测试站服务器 pdx1、数据库 us-west-2 已核实，原 Redis 在 us-east-1，导致偶发 503，所以测试站 Redis 改到 us-west-2。
+- 正式站：Supabase 正式项目 `Graylum_main` 保持 us-west-1，Vercel 正式项目函数区域 sfo1，Upstash 正式 Redis 建在 us-west-1。
+- 上线检查：建正式站前核对三者一致才继续，已写入 [REL-1 上线手册](tasks/REL-1.md) 第 3.2 节 Q4。
+- 测试站 Redis 的更换是对 staging 绑定的改动，仍由总控按 staging 写操作的惯例先通知再做，不在本 PR 范围。
+
 **2026-10-26：仓库保持公开、Skill 原文放进私密仓库、不拆仓库（MAINT-P15）**
 
 Owner 原话（2026-10-26，总控对话转达）：
