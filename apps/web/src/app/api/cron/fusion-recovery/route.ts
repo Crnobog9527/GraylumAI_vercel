@@ -1,8 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
 import { recoverFusionFinancials } from '@repo/api/src/services/fusion/recovery';
-import { validateCronRequest } from '@/lib/cron-auth';
+import { createCronServiceClient, validateCronRequest } from '@/lib/cron-auth';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -15,10 +14,8 @@ const DISPATCHED_GRACE_MS = 10 * 60_000;
 export async function GET(request: Request) {
   const unauthorized = validateCronRequest(request, 'fusion-recovery');
   if (unauthorized) return unauthorized;
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
-  const client = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } });
+  const client = createCronServiceClient();
+  if (!client) return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
   try {
     const summary = await recoverFusionFinancials(client, { dispatchedGraceMs: DISPATCHED_GRACE_MS });
     return NextResponse.json(summary, { status: summary.success ? 200 : 500 });

@@ -1,18 +1,14 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { beforeEach, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 
 const mocks = vi.hoisted(() => ({ auth: vi.fn(), create: vi.fn(), recover: vi.fn() }));
-vi.mock('@/lib/cron-auth', () => ({ validateCronRequest: mocks.auth }));
-vi.mock('@supabase/supabase-js', () => ({ createClient: mocks.create }));
+vi.mock('@/lib/cron-auth', () => ({ validateCronRequest: mocks.auth, createCronServiceClient: mocks.create }));
 vi.mock('@repo/api/src/services/fusion/recovery', () => ({ recoverFusionFinancials: mocks.recover }));
 import { GET } from './route';
 
-afterEach(() => vi.unstubAllEnvs());
 beforeEach(() => {
   vi.resetAllMocks();
-  vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://synthetic.supabase.co');
-  vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 'synthetic-service-value');
   mocks.create.mockReturnValue({ synthetic: true });
   mocks.recover.mockResolvedValue({ success: true, scanned: 1, cancelled: 0, recovered: 1, scrubbed: 0, failed: 0, rejudged: 0, deferred: 0 });
 });
@@ -38,7 +34,7 @@ it('fails the run when a call stays pending, and keeps errors private', async ()
   expect(await response.json()).toEqual({ error: 'Fusion recovery failed' });
 });
 it('does not start when configuration is absent, and is scheduled every ten minutes', async () => {
-  vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', '');
+  mocks.create.mockReturnValue(null);
   expect((await GET(request())).status).toBe(500);
   expect(mocks.recover).not.toHaveBeenCalled();
   const crons = (JSON.parse(readFileSync(new URL('../../../../../vercel.json', import.meta.url), 'utf8')) as { crons: Array<{ path: string; schedule: string }> }).crons;
