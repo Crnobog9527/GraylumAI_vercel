@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
--- DB-PERF PR-7b-A (placeholder number; the controller assigns the final one). opc_free_conversations (the free
+-- DB-PERF PR-7b-A (number 0365 assigned by the controller). opc_free_conversations (the free
 -- conversation list) ran bill2_scope_allowed for every positioning-scope session of the actor before excluding the
 -- sessions that belong to a positioning draft or a topic workspace. Those are never listed, so their checks were wasted:
 -- on staging's largest list 41 of 68 checked sessions were excluded right after (about 1 800 of 3 100 pages).
