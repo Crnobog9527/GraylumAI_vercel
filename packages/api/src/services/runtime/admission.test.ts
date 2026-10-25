@@ -116,6 +116,30 @@ it.each([
   .toMatchObject({code:'BAD_REQUEST',message:expected});
 });
 
+// D2: an admission refused because an earlier round still holds the session repairs that actor's rounds once and retries.
+const repairMock=vi.hoisted(()=>vi.fn(async()=>false));
+vi.mock('./automaticRecovery',async original=>({...await original<typeof import('./automaticRecovery')>(),repairActorRounds:repairMock}));
+it.each([true,false])('a session held by an earlier round is repaired once and the same request retried (repaired=%s)',async repaired=>{
+ repairMock.mockReset();repairMock.mockResolvedValue(repaired);
+ const admits:unknown[]=[];
+ const rpc=vi.fn(async(name:string,args:Record<string,unknown>)=>{
+  if(name==='runtime_session_context')return {data:{scope:{kind:'positioning_draft',draftId:sessionId}},error:null};
+  if(name==='runtime_admission_replay')return {data:null,error:null};
+  if(name==='runtime_admit'){admits.push(args.p_request_id);
+   return admits.length===1?{data:null,error:{code:'P0001',message:'RUNTIME_SESSION_BUSY'}}:{data:{executionId:requestId},error:null};}
+  throw new Error(name);
+ });
+ const query={select:()=>query,eq:()=>query,single:async()=>({data:{id:modelId,model_id:'fixture',provider:'fixture',is_active:'true',max_tokens:1000,input_limit:32000},error:null})};
+ const user={auth:{getUser:async()=>({data:{user:{id:actor,email_confirmed_at:'2026-01-01'}},error:null})}} as unknown as SupabaseClient;
+ const admin={rpc,from:()=>query} as unknown as SupabaseClient;
+ const service=runtimeAdmissionService(user,admin,{account:'test',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:1,maxOutputTokens:1000,inputBytes:32000,historyItems:10});
+ const result=await service.prepare({sessionId,requestId,input:'test',selection:{kind:'ordinary',modelId},network:'deny'}).catch(e=>e);
+ expect(repairMock).toHaveBeenCalledExactlyOnceWith(admin,actor);
+ if(repaired){expect(result).toEqual({executionId:requestId});expect(admits).toEqual([requestId,requestId]);}
+ // Nothing repaired: the original refusal stands, as public as before (the SQL text is never the message).
+ else{expect(result.message).toBe('RUNTIME_ADMISSION_DENIED');expect(admits).toEqual([requestId]);}
+});
+
 vi.mock('./newWorkGate', async importOriginal => ({
  ...await importOriginal<typeof import('./newWorkGate')>(),
  ...(await import('../__tests__/fixtures/runtimeGates')).testAdmissionGates,

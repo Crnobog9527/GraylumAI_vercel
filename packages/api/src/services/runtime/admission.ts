@@ -48,7 +48,7 @@ import {FREE_CHAT_REQUEST_FORMAT,PLAIN_TEXT_STREAM,plainTextStreamAllowed} from 
 import {admissionDeadline,admittedOutputLimit,timedAdmission} from './admissionLimits';
 import {freezeAdmissionPayg} from './admissionPayg';
 import {readPaygPolicies,realContract,runtimeGateEnvironment} from './realHost';
-import {runAutomaticFinancialRecovery} from './automaticRecovery';
+import {runAutomaticFinancialRecovery} from './automaticRecovery';import {admitWithRepair,keepsCause} from './admissionRepair';
 import {readPositioningGate,judgePositioning,windowBoundKey,refusePositioning,POSITIONING_REFUSAL_CAP,
  type PositioningGatePolicy} from './positioningGate';
 import {POSITIONING_FALLBACK,POSITIONING_FALLBACK_INSTRUCTIONS} from './positioningFallback';
@@ -135,7 +135,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     ['OPC_CAPTURE_PENDING','RUNTIME_SKILL_MODEL_DENIED'].includes(r.error.message)))throw new Error(r.error.message);
    if(name==='runtime_admit'&&r.error.message==='OPC_ANSWER_SOURCE_DENIED')throw new Error('OPC_ANSWER_SOURCE_DENIED');
    // Preserve SQL business/permission refusals; classify only operational failures.
-   if(['P0001','PT400','42501'].includes(r.error.code))throw new Error('RUNTIME_ADMISSION_DENIED',{cause:policy.reportGeneration?r.error:undefined});
+   if(['P0001','PT400','42501'].includes(r.error.code))throw new Error('RUNTIME_ADMISSION_DENIED',{cause:policy.reportGeneration||keepsCause(name,r.error.message)?r.error:undefined});
    stagingRpcFailure(r.error);
   }
   return r.data;
@@ -476,7 +476,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    const admit=()=>query('runtime_admit',{
     p_session_id:input.sessionId,p_request_id:input.requestId,p_payload:context,p_billing:billing});
    try{
-    try{return await admit();}
+    try{return await admitWithRepair(admin,actorId,admit);}// D2: a session held by an earlier round is repaired once
     catch(error){
      // A definite SQL refusal rolled back the execution and reservation. Recover
      // once, then reuse the exact request and frozen payload; never retry ambiguity.
