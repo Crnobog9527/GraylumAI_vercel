@@ -8,13 +8,16 @@ CREATE OR REPLACE FUNCTION public.publish_monitor_publish_price()
  STABLE
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-DECLARE p jsonb;d text:='^(0|[1-9][0-9]{0,5})(\.[0-9]{1,6})?$';
+DECLARE p jsonb;q text;m text;d text:='^(0|[1-9][0-9]{0,5})(\.[0-9]{1,6})?$';
+ qd text:='^(0|[1-9][0-9]{0,11})(\.[0-9]{1,12})?$'; -- same format as the site-wide q (parseCreditsPerUsd)
 BEGIN
  SELECT value INTO p FROM system_settings WHERE key='publish_monitor_publish_price';
- IF jsonb_typeof(p) IS DISTINCT FROM 'object' OR p-ARRAY['usdPerTarget','multiplier','creditsPerUsd']<>'{}'::jsonb
-  OR coalesce(p->>'usdPerTarget','') !~ d OR coalesce(p->>'multiplier','') !~ d OR coalesce(p->>'creditsPerUsd','') !~ d
-  OR (p->>'usdPerTarget')::numeric<=0 OR (p->>'multiplier')::numeric<=0 OR (p->>'creditsPerUsd')::numeric<=0 THEN
+ SELECT value #>> '{}' INTO q FROM system_settings WHERE key='billing_credits_per_usd';
+ SELECT value #>> '{}' INTO m FROM system_settings WHERE key='billing_token_price_multiplier';
+ IF jsonb_typeof(p) IS DISTINCT FROM 'object' OR p-ARRAY['usdPerTarget']<>'{}'::jsonb
+  OR coalesce(p->>'usdPerTarget','') !~ d OR coalesce(m,'') !~ d OR coalesce(q,'') !~ qd
+  OR (p->>'usdPerTarget')::numeric<=0 OR m::numeric<=0 OR q::numeric<=0 THEN
   RAISE EXCEPTION 'PUBLISH_MONITOR_PRICE_NOT_CONFIGURED' USING ERRCODE='22023';
  END IF;
- RETURN jsonb_build_object('usdPerTarget',p->>'usdPerTarget','multiplier',p->>'multiplier','creditsPerUsd',p->>'creditsPerUsd');
+ RETURN jsonb_build_object('usdPerTarget',p->>'usdPerTarget','multiplier',m,'creditsPerUsd',q);
 END $function$;
