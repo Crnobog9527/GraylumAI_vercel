@@ -46,8 +46,8 @@ BEGIN
     IF FOUND THEN
       RETURN QUERY SELECT
         v_existing_transaction.id,
-        v_existing_transaction.balance_before,
-        v_existing_transaction.balance_after,
+        v_existing_transaction.balance_before::integer, /* ARCH-FIX E3 replay */
+        v_existing_transaction.balance_after::integer,
         v_existing_transaction.amount,
         TRUE;
       RETURN;
@@ -80,7 +80,7 @@ BEGIN
     p_amount,
     p_type,
     p_description,
-    p_idempotency_key,
+    coalesce(p_idempotency_key,'ledger:'||gen_random_uuid()), /* ARCH-FIX E3 key */
     v_balance_before,
     v_balance_after
   )
