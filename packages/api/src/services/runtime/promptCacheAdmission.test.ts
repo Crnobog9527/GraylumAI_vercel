@@ -12,6 +12,9 @@ import {PROMPT_CACHE_OVERHEAD_BYTES} from './promptCache';
 import {BRAND_IDENTITY_INSTRUCTIONS} from '../modelIdentity/brandIdentity';
 import {testIdentityGuard,testPrimaryModel} from '../__tests__/fixtures/runtimeGates';
 import {replySettingInstructions} from './replyLanguage';
+// I1: a real host admits only through a per-call (v2) profile; these tests mock the profile reader and price freeze.
+vi.mock('./paygHostPolicy', async original => ({...(await original<typeof import('./paygHostPolicy')>()), readPaygHostPolicies: (await import('../__tests__/fixtures/paygAdmission')).paygHostPolicies}));
+vi.mock('./paygPricing', async original => ({...(await original<typeof import('./paygPricing')>()), freezeStagingPaygPricing: (await import('../__tests__/fixtures/paygAdmission')).frozenPaygPricing}));
 // New admissions freeze the profile's reply language; these fixtures' profiles have none (Simplified Chinese).
 const DEFAULT_REPLY_RULE=replySettingInstructions('zh-Hans');
 const skill='Pinned skill 正文';
@@ -52,7 +55,7 @@ function fixture(model='anthropic/test',write:string|undefined='2.5',real=true,i
    in:async()=>({data:[row],error:null})};return query;
  }} as unknown as SupabaseClient;
  const user={auth:{getUser:async()=>({data:{user:{id:actor,email_confirmed_at:'2026-01-01'}},error:null})}} as unknown as SupabaseClient;
- const policy={...(real?{real:{id:actor,creditsPerUsd:'1000',multiplier:'1',expiresAt:'2030-01-01',callPolicies:[quote]}}:{}),
+ const policy={...(real?{paygHost:true,real:{id:actor,creditsPerUsd:'1000',multiplier:'1',expiresAt:'2030-01-01',callPolicies:[quote]}}:{}),
   account:'synthetic',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:1,maxOutputTokens:100,inputBytes,historyItems:0,
   additionalInstructions:host(),stableAdditionalInstructions:AGENT_TURN_STABLE_PREFIX};
  const input={sessionId:actor,requestId,input:'user facts',network:'deny',selection:{kind:'skill',moduleId,revisionId}};

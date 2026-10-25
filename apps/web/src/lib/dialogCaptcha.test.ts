@@ -303,7 +303,7 @@ describe('focus stays in the hCaptcha challenge under the dialog focus trap', ()
     const requireFromDialog = createRequire(dialogEntry);
     const scopeEntry = requireFromDialog.resolve('@radix-ui/react-focus-scope');
     const scopePackage = JSON.parse(readFileSync(resolve(dirname(dirname(scopeEntry)), 'package.json'), 'utf8'));
-    expect(scopePackage.version).toBe('1.1.7');
+    expect(scopePackage.version).toBe('1.3.1');
     const source = readFileSync(scopeEntry.replace(/index\.js$/, 'index.mjs'), 'utf8');
     expect(source).toMatch(/document\.addEventListener\("focusin", handleFocusIn2?\);/);
     expect(source).toMatch(/document\.addEventListener\("focusout", handleFocusOut2?\);/);

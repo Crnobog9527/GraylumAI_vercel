@@ -46,9 +46,8 @@ import {serverChatModel} from './serverChatModel';
 import {requireAllowedInput} from './moderation';
 import {FREE_CHAT_REQUEST_FORMAT,PLAIN_TEXT_STREAM,plainTextStreamAllowed} from './providerRequest';
 import {admissionDeadline,admittedOutputLimit,timedAdmission} from './admissionLimits';
-import {admitPricing} from './pricingAdmission';
 import {freezeAdmissionPayg} from './admissionPayg';
-import {isProductionPolicy,readPaygPolicies,realContract,runtimeGateEnvironment} from './realHost';
+import {readPaygPolicies,realContract,runtimeGateEnvironment} from './realHost';
 import {runAutomaticFinancialRecovery} from './automaticRecovery';
 import {readPositioningGate,judgePositioning,windowBoundKey,refusePositioning,POSITIONING_REFUSAL_CAP,
  type PositioningGatePolicy} from './positioningGate';
@@ -448,7 +447,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    ],process.env,billing.limits.deadline,configuration):undefined;
    const paygTemplates=hostPayg??policy.payg?.callPolicies;
    if(policy.reportGeneration&&!paygTemplates)throw new Error('REPORT_PAYG_REQUIRED');
-   if(realCalls&&!paygTemplates){if(isProductionPolicy(policy.real))throw new StagingAccessError('RUNTIME_PAYG_PROFILE_REQUIRED');/* production: v2 only */await admitPricing(admin,realCalls,{},modelRows);}
+   // I1: a real host bills only through a per-call (v2) profile, staging as production; no v1 fallback.
+   if(realCalls&&!paygTemplates)throw new StagingAccessError('RUNTIME_PAYG_PROFILE_REQUIRED');
    if(realCalls)billing.callPolicy=realCalls;
    // BILL-UNIT: the window must match the current q and each selected model's m_i (0157 claim/finalize).
    if(realCalls)billing.rules.billingUnit=await freezeWindowBillingUnit(admin,policy.real!,realCalls,{configuration,models:modelRows});

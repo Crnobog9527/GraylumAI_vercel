@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import { trpc } from "@/trpc/client";
+import { RUNTIME_CHOICES_STALE_MS } from '@/lib/runtime-choices';
 import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase";
 import { CalendarDays, ChartNoAxesColumnIncreasing, Sparkles, Target, X } from 'lucide-react';
@@ -26,7 +27,7 @@ export default function PositioningHome() {
   const free = useFreeConversation({ withReferences: true });
   const [skillId,setSkillId]=useState('');
   // Same Skill the composer would send: the chosen one, else the account default; not ready until the choices are loaded.
-  const composerChoices=trpc.runtime.choices.useQuery(undefined,{retry:false});
+  const composerChoices=trpc.runtime.choices.useQuery(undefined,{retry:false,staleTime:RUNTIME_CHOICES_STALE_MS});
   const compareChoice=composerChoices.data?.skills.find(x=>skillId?x.moduleId===skillId:x.moduleId===composerChoices.data?.defaultSkill?.moduleId);
   const compareSkill={ready:Boolean(composerChoices.data&&(!(skillId||composerChoices.data.defaultSkill)||compareChoice)),
     skill:compareChoice?{kind:'skill' as const,moduleId:compareChoice.moduleId,revisionId:compareChoice.revisionId}:undefined};

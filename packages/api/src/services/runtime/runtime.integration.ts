@@ -614,36 +614,75 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['missing','mismatch
  // follows an explicit local preflight rejection, not a network timeout.
  expect((await db.query('select count(*)::int n from bill2_receipts where call_id in(select id from bill2_calls where run_id=$1)',[e.runId])).rows[0].n).toBe(0);
 },30000);
-it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each([10000,1050000])('RUNTIME: staging authenticated original admission freezes the allowlisted quote at context %i',async(contextTokens)=>{
+it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each([10000,1050000])('RUNTIME: staging authenticated original admission freezes the allowlisted quote at context %i (I1: per call only)',async(contextTokens)=>{
  const email='window-'+randomUUID()+'@example.test',password='Local-test-password-42!';
  const created=await admin.auth.admin.createUser({email,password,email_confirm:true});if(created.error)throw created.error;
  const actor=created.data.user.id,model=randomUUID(),windowId=randomUUID();
+ // A per-call profile is allowed only on an approved model route (paygHostPolicy admittedRoutes): the long-context case
+ // uses one of them; the 10000-token case keeps the synthetic route, which is refused anyway.
+ const routeModel=contextTokens===1050000?'google/gemini-3.8-flash':'test/admission',routeTag=contextTokens===1050000?'google-ai-studio':'synthetic';
  await db.query('insert into profiles(id,credits) values($1,1000) on conflict(id) do update set credits=1000',[actor]);
  const user=createClient(process.env.V3_LOCAL_REST!,process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,{auth:{persistSession:false}});
  const login=await user.auth.signInWithPassword({email,password});if(login.error)throw login.error;
- await db.query("insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit,price_multiplier) values($1,'Synthetic quote','test/admission','openai','true',1000,$2,1)",[model,contextTokens]);
+ await db.query("insert into ai_models(id,name,model_id,provider,is_active,max_tokens,input_limit,price_multiplier) values($1,'Synthetic quote',$3,'openai','true',1000,$2,1)",[model,contextTokens,routeModel]);
  // Real free chat freezes the administrator's interactive reasoning on the quoted route.
- const reasoning=configuredReasoning('test/admission').reasoning;
- await db.query('update ai_models set config=$2 where id=$1',[model,{...pricingConfig('test/admission','synthetic',contextTokens===1050000?'0.4':'2',contextTokens===1050000?'1.8':'0'),
-  reasoning:{...reasoning,route:'synthetic',catalog:{...reasoning.catalog!,endpoints:reasoning.catalog!.endpoints.map(e=>({...e,tag:'synthetic'}))}}}]);
+ const reasoning=configuredReasoning(routeModel).reasoning;
+ await db.query('update ai_models set config=$2 where id=$1',[model,{...pricingConfig(routeModel,routeTag,contextTokens===1050000?'0.4':'2',contextTokens===1050000?'1.8':'0'),
+  reasoning:{...reasoning,route:routeTag,catalog:{...reasoning.catalog!,endpoints:reasoning.catalog!.endpoints.map(e=>({...e,tag:routeTag}))}}}]);
  const upperUsd=contextTokens===1050000?'0.4218':'0.02',outputLimit=contextTokens===1050000?1000:100;
  // BILL-UNIT window: each entry carries the model's m_i, equal to the configuration (price_multiplier=1).
- const call={multiplier:'1',modelId:model,provider:'openrouter',account:'synthetic-account',model:'test/admission',protocol:'openrouter-chat-v1',upperUsd,inputLimit:8000,outputLimit,automaticRetry:false,hiddenTools:false,lookupSupported:true,providerLimits:{providerSlug:'synthetic',contextTokens,promptUsdPerMillion:contextTokens===1050000?'0.4':'2',completionUsdPerMillion:contextTokens===1050000?'1.8':'0',requestUsd:'0'}};
+ const call={multiplier:'1',modelId:model,provider:'openrouter',account:'synthetic-account',model:routeModel,protocol:'openrouter-chat-v1',upperUsd,inputLimit:8000,outputLimit,automaticRetry:false,hiddenTools:false,lookupSupported:true,providerLimits:{providerSlug:routeTag,contextTokens,promptUsdPerMillion:contextTokens===1050000?'0.4':'2',completionUsdPerMillion:contextTokens===1050000?'1.8':'0',requestUsd:'0'}};
  await db.query("insert into runtime_test_windows(id,enabled,actor_ids,call_policies,credits_per_usd,multiplier,max_cost_usd,max_calls,expires_at) values($1,true,$2,$3,1000,1,0.9,1,now()+interval '2 hours')",[windowId,[actor],JSON.stringify([call])]);
  const env={V3_RUNTIME_STAGING_ENABLED:'true',VERCEL:'1',VERCEL_PROJECT_PRODUCTION_URL:'auth-staging.graylum.com',VERCEL_GIT_COMMIT_REF:'staging',VERCEL_GIT_REPO_OWNER:'Crnobog9527',VERCEL_GIT_REPO_SLUG:'GraylumAI_vercel',V3_RUNTIME_STAGING_PROJECT_ID:'synthetic-project',VERCEL_PROJECT_ID:'synthetic-project',NEXT_PUBLIC_SUPABASE_URL:'https://synthetic.supabase.co',V3_RUNTIME_STAGING_DATABASE_HOST:'synthetic.supabase.co',V3_RUNTIME_STAGING_WINDOW_ID:windowId};
+ // I1: a real host admits only through a per-call (v2) profile. A disposable synthetic profile for this one route,
+ // restored afterwards; the reader also needs the window id in the host environment during admission.
+ const expiresAt=new Date(Date.now()+3*3600000).toISOString();
+ const evidence={reference:'synthetic-only',manifestHash:'a'.repeat(64),distinctSamples:60,messageStressSamples:12,maxVerifiedMessages:128,
+  completeCells:15,variantsPerCell:4,maxPromptToBytes:0.5,maxPromptToUpper:0.4,outputLimit,testedOutputLimit:outputLimit,
+  outputSemantics:'max-tokens-includes-reasoning',includesReasoning:true,cacheCovered:true,costBoundPassed:true};
+ const profile={model:routeModel,endpointTag:routeTag,protocol:'openrouter-chat-v1',profileVersion:'synthetic-only',
+  evidenceVersion:'synthetic-only',admissionPath:'empirical',templateTokens:4096,marginTokens:4096,maxBytes:196608,maxMessages:128,maxTools:2,
+  maxSchemaBytes:16384,purposes:['ordinary'],requestFormats:['serial-tools-v6-reasoning'],
+  reasoningVariants:[{reasoning:{effort:'none'},outputLimit,testedOutputLimit:outputLimit,evidenceReference:'synthetic-only',
+   manifestHash:'b'.repeat(64),outputStressSamples:2,includesReasoning:true}],outputLimit,expiresAt,evidence};
+ const savedPayg=(await db.query("select value from system_settings where key='runtime_payg_staging'")).rows[0]?.value;
+ await db.query("insert into system_settings(key,value) values('runtime_payg_staging',$1) on conflict(key) do update set value=excluded.value",
+  [JSON.stringify({version:1,enabled:true,windowId,profiles:[profile]})]);
+ const prior=Object.fromEntries(Object.keys(env).map(k=>[k,process.env[k]]));
+ Object.assign(process.env,env);
+ try{
+ if(contextTokens===10000){
+  // A profile always reserves 196608 bytes plus 8192 template and margin tokens, so a 10000-token route can never be
+  // admitted per call. I1: such a route is refused (as in production) instead of being billed the old way.
+  testPrimaryModel.id=model;
+  const real=await loadStagingPolicy(admin,actor,env);
+  const small=runtimeAdmissionService(user,admin,{real,paygHost:true,account:'unused-local',costPerCall:'999',creditsPerUsd:'999',
+   multiplier:'999',maxCalls:1,maxOutputTokens:outputLimit,inputBytes:8000,historyItems:0,searchEnabled:false});
+  const started=await small.start(randomUUID(),{kind:'positioning_draft'});
+  await expect(small.prepare({sessionId:started.sessionId,requestId:randomUUID(),input:'User-provided local material',
+   selection:{kind:'ordinary',modelId:model},network:'deny'})).rejects.toMatchObject({reason:'RUNTIME_PAYG_PROFILE_REQUIRED'});
+  expect((await db.query('select count(*)::int n from bill2_runs where actor_id=$1',[actor])).rows[0].n).toBe(0);
+  expect((await db.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(1000);
+  return;
+ }
  // UI-MODEL: real free chat runs on the administrator's primary model (admission settings are mocked below).
  testPrimaryModel.id=model;
  const real=await loadStagingPolicy(admin,actor,env);
- const admission=runtimeAdmissionService(user,admin,{real,account:'unused-local',costPerCall:'999',creditsPerUsd:'999',multiplier:'999',maxCalls:1,maxOutputTokens:outputLimit,inputBytes:8000,historyItems:0,searchEnabled:false});
+ const admission=runtimeAdmissionService(user,admin,{real,paygHost:true,account:'unused-local',costPerCall:'999',creditsPerUsd:'999',multiplier:'999',maxCalls:1,maxOutputTokens:outputLimit,inputBytes:8000,historyItems:0,searchEnabled:false});
  const s=await admission.start(randomUUID(),{kind:'positioning_draft'});
  const request={sessionId:s.sessionId,requestId:randomUUID(),input:'User-provided local material',selection:{kind:'ordinary',modelId:model},network:'deny'} as const;
  await expect(admission.prepare({...request,network:'allow'})).rejects.toThrow('REAL_SEARCH_DISABLED');
  const e=await admission.prepare(request);expect(await admission.prepare(request)).toEqual(e);
  const saved=(await db.query('select payload,reserved from bill2_runs where id=$1',[e.runId])).rows[0];
- expect(saved.reserved).toBe(contextTokens===1050000?422:20);expect(saved.payload).toMatchObject({mode:'staging_test',testWindowId:windowId,callPolicy:[call],rules:{creditsPerUsd:'1000',multiplier:'1'}});
+ // Per-call billing (v2) reserves nothing at admission; the allowlisted quote is frozen with its profile.
+ expect(saved.reserved).toBe(0);expect(contextTokens).toBe(1050000);expect(saved.payload).toMatchObject({contractVersion:'bill2.v2',mode:'staging_test',testWindowId:windowId,
+  callPolicy:[call],rules:{creditsPerUsd:'1000',multiplier:'1'}});
+ expect(saved.payload.callPolicy[0].payg).toMatchObject({endpointTag:routeTag,maxBytes:196608});
  expect(saved.payload.rules.billingUnit).toMatchObject({version:'bill-unit-v2',creditsPerUsd:'1000',models:{[model]:{multiplier:'1',source:'model'}}});
  // Actual protected router + real Auth/PostgREST: switching only the host
  // enablement off must preserve reads and cancel a definitely unsent request.
+ // The host environment above was only for admission; the router part sets its own, as before I1.
+ for(const [key,value] of Object.entries(prior)){if(value===undefined)delete process.env[key];else process.env[key]=value;}
  const caller=runtimeRouter.createCaller(await createTRPCContext({headers:new Headers(),supabaseAuth:user}));
  const previous=Object.fromEntries(Object.keys(env).map(k=>[k,process.env[k]]));
  try{
@@ -656,7 +695,12 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each([10000,1050000])('RU
   expect((await db.query('select credits from profiles where id=$1',[actor])).rows[0].credits).toBe(1000);
  }finally{for(const [key,value] of Object.entries(previous)){if(value===undefined)delete process.env[key];else process.env[key]=value;}}
  await user.auth.signOut();await expect(admission.prepare(request)).rejects.toThrow('AUTH_REQUIRED');
- testPrimaryModel.id=undefined;
+ }finally{
+  for(const [key,value] of Object.entries(prior)){if(value===undefined)delete process.env[key];else process.env[key]=value;}
+  if(savedPayg===undefined)await db.query("delete from system_settings where key='runtime_payg_staging'");
+  else await db.query("update system_settings set value=$1 where key='runtime_payg_staging'",[JSON.stringify(savedPayg)]);
+  testPrimaryModel.id=undefined;
+ }
 },30000);
 it('RUNTIME: atomic draft/session/start replay, admission and SDK append identities',async()=>{
  const f=await fixture();expect(await rpc('runtime_start',{p_actor_id:f.actorId,p_request_id:f.requestId,p_payload:f.start})).toEqual(f.s);

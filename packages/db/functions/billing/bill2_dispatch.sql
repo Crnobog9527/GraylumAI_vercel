@@ -30,6 +30,9 @@ BEGIN
  END; END IF;
 
  SELECT * INTO r FROM bill2_runs WHERE id=p_run_id AND actor_id=p_actor_id FOR UPDATE;
+ -- DB-100 C2 payload read once: fetch and decompress the TOAST value here, not at every r.payload use.
+ -- A run payload is always a JSON object (bill2_prepare); || '{}' returns it unchanged.
+ r.payload:=r.payload||'{}'::jsonb;
  PERFORM bill2_payg_lock_models(r);
  IF r.id IS NOT NULL THEN PERFORM runtime_billing_allowed(p_actor_id,r.payload,r.id);END IF;
  -- VOICE dispatch fence

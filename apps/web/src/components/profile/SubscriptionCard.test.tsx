@@ -27,6 +27,7 @@ vi.mock('@/trpc/client', () => {
     trpc: {
       useUtils: () => ({
         user: { getUserProfile: { invalidate }, getEntitlements: { invalidate } },
+        runtime: { choices: { invalidate } },
         payments: { methodMembership: { invalidate }, getMembershipEligibilityMatrix: { invalidate }, listBillingRecords: { invalidate } },
       }),
       user: { getEntitlements: { useQuery: () => componentState.entitlementsQuery } },
@@ -291,7 +292,7 @@ describe('membership page in a local browser', () => {
       const useRefetchable = () => { const [, force] = useState(0);
         useEffect(() => { refetchers.add(force); return () => { refetchers.delete(force); }; }, []); };
       const inv = { invalidate: async () => {} };
-      const utils = { user: { getUserProfile: inv, getEntitlements: inv }, credits: { getBalance: inv, getCreditsSummary: inv },
+      const utils = { user: { getUserProfile: inv, getEntitlements: inv }, credits: { getBalance: inv, getCreditsSummary: inv }, runtime: { choices: inv },
         payments: { methodMembership: inv, getMembershipEligibilityMatrix: inv, listBillingRecords: inv, getSubscriptionManagement: inv } };
       const query = data => ({ data, isLoading: false, isError: false, isFetching: false, refetch() {} });
       const mutation = fn => ({ useMutation: () => { const [isPending, set] = useState(false);

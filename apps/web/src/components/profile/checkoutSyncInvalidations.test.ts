@@ -7,11 +7,13 @@ it('refreshes the entitlement level after checkout, so a new member can buy cred
   const utils = {
     user: { getUserProfile: query(), getEntitlements: query() },
     credits: { getBalance: query(), getCreditsSummary: query() },
+    runtime: { choices: query() },
     payments: { methodMembership: query(), getMembershipEligibilityMatrix: query(), listBillingRecords: query() },
   };
   await invalidatePostCheckoutMembershipQueries(utils);
   expect(utils.user.getEntitlements.invalidate).toHaveBeenCalledTimes(1);
   expect(utils.user.getUserProfile.invalidate).toHaveBeenCalledTimes(1);
+  expect(utils.runtime.choices.invalidate).toHaveBeenCalledTimes(1);
   // The membership page and the purchase entry read paid memberships from methodMembership.
   expect(utils.payments.methodMembership.invalidate).toHaveBeenCalledTimes(1);
 });
