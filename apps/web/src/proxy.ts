@@ -124,6 +124,13 @@ function needsRateLimit(pathname: string): boolean {
   return RATE_LIMITED_PATHS.some(path => pathname.startsWith(path));
 }
 
+// A bearer token or a Supabase session cookie (sb-<ref>-auth-token, possibly chunked). Not verified here:
+// a forged one only moves the caller to the wider per-IP guard, and the API still checks the login.
+function carriesLogin(request: NextRequest): boolean {
+  return /^Bearer \S/.test(request.headers.get('authorization') ?? '')
+    || request.cookies.getAll().some(({ name }) => /^sb-.+-auth-token(\.\d+)?$/.test(name));
+}
+
 function isMaintenanceBypassPath(pathname: string): boolean {
   if (isSentryTunnelPath(pathname)) {
     return true;
@@ -270,7 +277,7 @@ export async function proxy(request: NextRequest) {
     return NextResponse.json({ error: 'Bad Request', message: `一次最多 ${TRPC_MAX_BATCH_CALLS} 个请求` }, { status: 400 });
   }
   if (needsRateLimit(pathname)) {
-    const result = await checkRateLimit(getClientIP(request), 'ip');
+    const result = await checkRateLimit(getClientIP(request), carriesLogin(request) ? 'ip_session' : 'ip');
     if (result.reason === 'unavailable') return createRateLimitUnavailableResponse();
     if (!result.success) {
       const retryAfter = result.retryAfter ?? 60;

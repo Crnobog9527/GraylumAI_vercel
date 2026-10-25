@@ -54,4 +54,14 @@ describe('tRPC batch size (ARCH-FIX A1)', () => {
     expect(response.status).toBe(429);
     expect(checkRateLimit).toHaveBeenCalledWith('203.0.113.9', 'ip');
   });
+
+  it('gives requests carrying a login the wider per-IP guard; others keep 60 a minute', async () => {
+    const url = 'https://auth-staging.graylum.com/api/trpc/library.list?batch=1';
+    const ip = { 'x-forwarded-for': '203.0.113.9' };
+    await proxy(new NextRequest(url, { headers: ip }));
+    await proxy(new NextRequest(url, { headers: { ...ip, authorization: 'Bearer token' } }));
+    await proxy(new NextRequest(url, { headers: { ...ip, cookie: 'sb-abc-auth-token.0=chunk' } }));
+    await proxy(new NextRequest(url, { headers: { ...ip, authorization: 'Bearer ', cookie: 'sb-abc-other=1' } }));
+    expect(checkRateLimit.mock.calls.map(c => (c as unknown[])[1])).toEqual(['ip', 'ip_session', 'ip_session', 'ip']);
+  });
 });
