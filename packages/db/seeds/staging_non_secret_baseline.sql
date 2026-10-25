@@ -26,17 +26,16 @@
 
 BEGIN;
 
--- BILL-UNIT (#565): billing_credits_per_usd / billing_token_price_multiplier below keep the
--- pre-BILL-UNIT values. The Owner-decided q=100 / m=3 is applied as a separately approved,
--- explicit write of those two rows (with the previous values kept for recovery) — never by
--- re-running this whole seed, which would also overwrite every other key (ON CONFLICT DO UPDATE).
+-- BILL-UNIT: billing_credits_per_usd / billing_token_price_multiplier below are the Owner-decided q=100 / m=6
+-- (2026-10-01; a staging environment that runs m=3 has that as an explicit stored row). Never re-run this whole seed
+-- on a live staging database: it would also overwrite every other key (ON CONFLICT DO UPDATE).
 INSERT INTO public.system_settings (key, value)
 VALUES
   ('site_name', to_jsonb('Graylum AI Staging'::text)),
   ('maintenance_mode', 'false'::jsonb),
   ('new_user_credits', '100'::jsonb),
-  ('billing_credits_per_usd', '1000'::jsonb),
-  ('billing_token_price_multiplier', '1.5'::jsonb),
+  ('billing_credits_per_usd', '100'::jsonb),
+  ('billing_token_price_multiplier', '6'::jsonb),
   ('chat_show_model_selector', 'true'::jsonb),
   ('chat_prompt_text', to_jsonb('Select a staging model to start.'::text)),
   ('chat_welcome_message', to_jsonb('Welcome to the staging baseline.'::text)),

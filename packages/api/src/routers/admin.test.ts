@@ -1224,8 +1224,8 @@ describe('adminRouter finance stats runtime billing summary', () => {
     expect(result.modelStats).toEqual([]);
     expect(result.dailyChart).toHaveLength(30);
     expect(result.runtimeBilling).toMatchObject({
-      creditsPerUsd: 1000,
-      tokenPriceMultiplier: 1.5,
+      creditsPerUsd: null,
+      tokenPriceMultiplier: null,
       billingUnitSource: { creditsPerUsd: 'default', defaultMultiplier: 'default' },
       searchSurchargeCredits: null,
       newUserCredits: 500,

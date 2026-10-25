@@ -13,6 +13,14 @@ export const GROUPS = {
   billing: '^(bill2_|atomic_|credit_)',
   runtime: '^runtime_',
   erasure: '^(account_erasure_|content_erasure_)',
+  pay: '^pay_',
+  publish: '^publish_',
+  opc: '^opc_',
+  fusion: '^fusion_',
+  library: '^library_',
+  report: '^report_',
+  research: '^research_',
+  voice: '^voice_',
 };
 
 export const snapshotSql = () => `SELECT coalesce(jsonb_agg(jsonb_build_object('group', g.key, 'name', p.proname,

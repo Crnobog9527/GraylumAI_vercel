@@ -7,6 +7,7 @@ import { readDisputePayment } from './disputePayment';
 import { readSubscription, stopUndeliveredSubscription, stripeStopState } from './cardSubscriptionStop';
 import { PAYMENT_EVIDENCE_CONFLICT } from './stripeWebhookError';
 import { logger } from '../../lib/logger';
+import { logSwallowed } from '../../lib/swallow';
 
 export type DisputeRow = {
   id: string; provider?: 'stripe' | 'waffo'; merchant_namespace: string; mode: 'test' | 'live'; provider_dispute_id: string;
@@ -86,8 +87,10 @@ export async function resumeDisputeActions(db: SupabaseClient, stripe: Stripe, d
         const saved = await db.rpc('pay_dispute_stop_confirm', { p_dispute: dispute.id, p_canceled: state.canceled });
         if (saved.error) throw new Error('PAY_DISPUTE_STOP_CONFIRM_UNAVAILABLE');
         confirmed = true; break;
-      } catch {
-        // No raw provider error/objects leave this service. The next iteration reads actual Stripe state first.
+      } catch (error) {
+        // No raw provider error/objects leave this service (only a fixed code is logged). The next iteration reads actual
+        // Stripe state first.
+        logSwallowed('pay_dispute_renewal_stop_attempt_failed', error, { category: 'billing' });
       }
     }
     if (!confirmed) {

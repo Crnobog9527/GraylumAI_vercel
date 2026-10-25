@@ -6,6 +6,7 @@ import { parseStagingPolicy } from '../runtime/stagingPolicy';
 import { stagingTransport } from '../runtime/stagingTransport';
 import { isSettled, voiceEvidence } from './generation';
 import { voiceRpc } from './state';
+import { logSwallowed, swallow } from '../../lib/swallow';
 
 type Item = { actorId: string; runId: string | null; recovery: unknown };
 type Candidates = {
@@ -34,7 +35,9 @@ export async function recoverVoiceGenerations(admin: SupabaseClient, options: { 
     const budget = createRuntimeBudget(now, Math.max(1, stopAt - now()));
     const adapter = item.recovery ? stagingTransport(admin, parseStagingPolicy(item.recovery), budget) : noTransport;
     const billing = authoritativeBilling({ admin: admin as unknown as BillingRpc, actor: async () => item.actorId, adapter, budget });
-    if (item.recovery) await billing.recoverReceipts(item.runId, { timeoutMs: 2000 }).catch(() => undefined);
+    if (item.recovery) {
+      await swallow('voice_recovery_receipt_lookup_failed', billing.recoverReceipts(item.runId, { timeoutMs: 2000 }), undefined, { category: 'billing' });
+    }
     if (!(await billing.readRun(item.runId)).closed) {
       if (outcome === 'cancelled' || !evidenceId) await billing.requestCancel(item.runId);
       else await billing.closeRun(item.runId, outcome,
@@ -54,9 +57,10 @@ export async function recoverVoiceGenerations(admin: SupabaseClient, options: { 
       await voiceRpc(admin, 'voice_generation_finish', { a: item.actorId, vid: item.versionId, result: null,
         failure_code: item.status === 'generating' ? 'VOICE_INTERRUPTED' : null, settled });
       if (settled) summary.settled += 1; else summary.waiting += 1;
-    } catch {
+    } catch (error) {
       summary.failed += 1;
-      await voiceRpc(admin, 'voice_recovery_touch', { p_version_id: item.versionId }).catch(() => undefined);
+      logSwallowed('voice_generation_recovery_failed', error, { category: 'billing' });
+      await swallow('voice_recovery_touch_failed', voiceRpc(admin, 'voice_recovery_touch', { p_version_id: item.versionId }), undefined);
     }
   };
   const doScrub = async (item: Candidates['scrubs'][number]) => {
@@ -68,9 +72,10 @@ export async function recoverVoiceGenerations(admin: SupabaseClient, options: { 
         outcome = await voiceRpc<string>(admin, 'voice_billing_scrub', { p_run_id: item.runId });
       }
       if (outcome === 'done') summary.scrubbed += 1; else summary.waiting += 1;
-    } catch {
+    } catch (error) {
       summary.failed += 1;
-      await voiceRpc(admin, 'voice_scrub_touch', { p_run_id: item.runId }).catch(() => undefined);
+      logSwallowed('voice_scrub_recovery_failed', error, { category: 'billing' });
+      await swallow('voice_scrub_touch_failed', voiceRpc(admin, 'voice_scrub_touch', { p_run_id: item.runId }), undefined);
     }
   };
   // Alternate the two queues, so a full generation queue can never starve the deleted-content scrubs (or the reverse).

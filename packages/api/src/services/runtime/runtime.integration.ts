@@ -648,6 +648,9 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each([10000,1050000])('RU
  const savedPayg=(await db.query("select value from system_settings where key='runtime_payg_staging'")).rows[0]?.value;
  await db.query("insert into system_settings(key,value) values('runtime_payg_staging',$1) on conflict(key) do update set value=excluded.value",
   [JSON.stringify({version:1,enabled:true,windowId,profiles:[profile]})]);
+ // The window above freezes q=1000; with no stored row the site default is now 100, so store the matching row for this test.
+ const savedQ=(await db.query("select value from system_settings where key='billing_credits_per_usd'")).rows[0]?.value;
+ await db.query("insert into system_settings(key,value) values('billing_credits_per_usd','1000') on conflict(key) do update set value=excluded.value");
  const prior=Object.fromEntries(Object.keys(env).map(k=>[k,process.env[k]]));
  Object.assign(process.env,env);
  try{
@@ -699,6 +702,8 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each([10000,1050000])('RU
   for(const [key,value] of Object.entries(prior)){if(value===undefined)delete process.env[key];else process.env[key]=value;}
   if(savedPayg===undefined)await db.query("delete from system_settings where key='runtime_payg_staging'");
   else await db.query("update system_settings set value=$1 where key='runtime_payg_staging'",[JSON.stringify(savedPayg)]);
+  if(savedQ===undefined)await db.query("delete from system_settings where key='billing_credits_per_usd'");
+  else await db.query("update system_settings set value=$1 where key='billing_credits_per_usd'",[JSON.stringify(savedQ)]);
   testPrimaryModel.id=undefined;
  }
 },30000);

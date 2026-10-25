@@ -29,6 +29,7 @@ import { createSafeInternalError, createSafeServiceUnavailableError } from '../l
 import { logger } from '../lib/logger';
 import { MODEL_IDENTITY_GUARD_KEY } from '../services/modelIdentity/guardSetting';
 import { getPublicOffers } from './publicOffers';
+import { swallow } from '../lib/swallow';
 
 const USER_FACING_SYSTEM_SETTING_KEYS = [
   FUSION_COMPARE_SETTING,
@@ -359,9 +360,9 @@ export const settingsRouter = router({
    */
   getCreditPackages: publicProcedure.query(async ({ ctx }) => {
     const selectedChannel = ctx.hasSupabaseAdminPrivileges && ctx.supabaseAdmin
-      ? await readPaymentChannel(ctx.supabaseAdmin).catch(() => null) : null;
+      ? await swallow('payment_channel_read_failed', readPaymentChannel(ctx.supabaseAdmin), null) : null;
     const stripeReady = ctx.hasSupabaseAdminPrivileges && Boolean(ctx.supabaseAdmin)
-      && await legacyStripeCatalogReady(ctx.supabaseAdmin, selectedChannel?.channel).catch(() => false);
+      && await swallow('stripe_catalog_read_failed', legacyStripeCatalogReady(ctx.supabaseAdmin, selectedChannel?.channel), false);
     const routeChannel = ctx.hasSupabaseAdminPrivileges && ctx.supabaseAdmin
       ? await readPaymentMethodRoutes(ctx.supabaseAdmin).then(newPurchaseChannel, () => null) : null;
     const readClient = getPublicReadClient(ctx);
@@ -428,10 +429,9 @@ export const settingsRouter = router({
   getMembershipPlans: publicProcedure.query(async ({ ctx }) => {
     // Membership uses method checkout: only its audited route controls new sales, never the old global channel.
     const stripeReady = ctx.hasSupabaseAdminPrivileges && Boolean(ctx.supabaseAdmin)
-      && await legacyStripeCatalogReady(ctx.supabaseAdmin, 'stripe').catch(() => false);
+      && await swallow('stripe_catalog_read_failed', legacyStripeCatalogReady(ctx.supabaseAdmin, 'stripe'), false);
     const readClient = getPublicReadClient(ctx);
     let result;
-
     try {
       result = await readClient
         .from('membership_plans')
@@ -461,10 +461,10 @@ export const settingsRouter = router({
     );
 
     const priceRefs = stripeReady && ctx.hasSupabaseAdminPrivileges
-      ? await loadConfiguredStripePrices({ db: ctx.supabaseAdmin,
-        kind: 'membership_plan', ids: plans.map(plan => plan.id) }).catch(() => new Map<string, string>()) : new Map<string, string>();
+      ? await swallow('stripe_prices_read_failed', loadConfiguredStripePrices({ db: ctx.supabaseAdmin,
+        kind: 'membership_plan', ids: plans.map(plan => plan.id) }), new Map<string, string>()) : new Map<string, string>();
     const emergencyReady = ctx.hasSupabaseAdminPrivileges && ctx.supabaseAdmin
-      ? await loadWaffoMembershipReadiness(ctx.supabaseAdmin, plans.map(plan => plan.id)).catch(() => undefined) : undefined;
+      ? await swallow('waffo_readiness_read_failed', loadWaffoMembershipReadiness(ctx.supabaseAdmin, plans.map(plan => plan.id)), undefined) : undefined;
     return plans.map(plan => ({
       id: plan.id,
       name: plan.name,

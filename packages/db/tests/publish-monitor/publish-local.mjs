@@ -10,6 +10,7 @@ import { closeAccount } from '../erasure-b2a/cases.mjs';
 import { fixtureSql } from './fixtures.mjs';
 
 const migrationPath = 'packages/db/migrations/0274_publish_monitor_publish.sql';
+const priceMigrationPath = 'packages/db/migrations/0392_publish_monitor_price_site_unit.sql';
 const entry = ['publish_monitor_publish_claim(uuid,text,text,uuid,uuid,uuid[])', 'publish_monitor_publish_dispatch(uuid,uuid,jsonb)',
   'publish_monitor_publish_release(uuid,text)', 'publish_monitor_publish_unknown(uuid,text)',
   'publish_monitor_publish_record(uuid,text,jsonb)', 'publish_monitor_publish_webhook_result(text,text,boolean,text)',
@@ -83,8 +84,13 @@ try {
   const catalogSql = fingerprint.slice(0, fingerprint.indexOf('-- FINAL')) + 'SELECT jsonb_object_agg(k,d ORDER BY k) v FROM grouped;';
   const before = await v(catalogSql);
   await c.query(read(migrationPath));
+  await c.query(read(priceMigrationPath));
+  await c.query(read(priceMigrationPath));
   assert.deepEqual(await v(catalogSql), before);
-  report.checks.push('0274 runs twice with an unchanged catalog');
+  report.checks.push('0274 and the site-wide price migration run twice with an unchanged catalog');
+  // The global BILL-UNIT rows (Owner 2026-10-01: q=100, formal m=6); publishing follows them.
+  await c.query(`INSERT INTO system_settings(key,value) VALUES('billing_credits_per_usd','100'::jsonb),
+    ('billing_token_price_multiplier','6'::jsonb) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`);
 
   for (const f of [...entry, ...internal]) {
     for (const role of ['anon', 'authenticated']) {
@@ -98,7 +104,20 @@ try {
     }
   }
   assert.deepEqual(await v("SELECT value v FROM system_settings WHERE key='publish_monitor_publish_price'"),
-    { usdPerTarget: '0.01', multiplier: '6', creditsPerUsd: '100' });
+    { usdPerTarget: '0.01' });
+  assert.deepEqual(await v('SELECT publish_monitor_publish_price() v'), { usdPerTarget: '0.01', multiplier: '6', creditsPerUsd: '100' });
+  // q and m follow the site-wide rows; a missing or malformed row fails closed.
+  await c.query("UPDATE system_settings SET value='3'::jsonb WHERE key='billing_token_price_multiplier'");
+  assert.deepEqual(await v('SELECT publish_monitor_publish_price() v'), { usdPerTarget: '0.01', multiplier: '3', creditsPerUsd: '100' });
+  await c.query("UPDATE system_settings SET value='100.1234567'::jsonb WHERE key='billing_credits_per_usd'");
+  assert.equal((await v('SELECT publish_monitor_publish_price() v')).creditsPerUsd, '100.1234567');
+  await c.query("UPDATE system_settings SET value='\"x\"'::jsonb WHERE key='billing_credits_per_usd'");
+  await code(c.query('SELECT publish_monitor_publish_price()'), 'PUBLISH_MONITOR_PRICE_NOT_CONFIGURED');
+  await c.query("DELETE FROM system_settings WHERE key='billing_credits_per_usd'");
+  await code(c.query('SELECT publish_monitor_publish_price()'), 'PUBLISH_MONITOR_PRICE_NOT_CONFIGURED');
+  await c.query(`INSERT INTO system_settings(key,value) VALUES('billing_credits_per_usd','100'::jsonb)
+    ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`);
+  await c.query("UPDATE system_settings SET value='6'::jsonb WHERE key='billing_token_price_multiplier'");
   report.checks.push('only entry points are callable by service_role; the counter table has no direct access; price preset');
 
   const u = await member();
