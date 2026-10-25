@@ -6,6 +6,7 @@
 // calls, the subcall allowance, and the 112000-byte input ceiling of a research turn. Without any of these the reply
 // carries no research tool at all; nothing here can refuse the turn itself.
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { rowsFor, type ConfigurationRows } from './settingsRows';
 import { decimal } from '../bill2/decimal';
 import type { FrozenPaygRun, FrozenRun } from '../bill2/service';
 import { logger } from '../../lib/logger';
@@ -23,8 +24,9 @@ export const FREE_CHAT_RESEARCH_INSTRUCTIONS = '\nResearch tools: when the answe
   + 'instead of answering from memory. They cost the user credits, so look up only what this answer needs. '
   + 'If a lookup fails or returns nothing, say so plainly.';
 
-export async function chatResearchEnabled(admin: SupabaseClient): Promise<boolean> {
-  const rows = await admin.from('system_settings').select('key,value').in('key', [CHAT_RESEARCH_KEY]);
+export async function chatResearchEnabled(admin: SupabaseClient, configuration?: Promise<ConfigurationRows>): Promise<boolean> {
+  const rows = configuration ? rowsFor(await configuration, [CHAT_RESEARCH_KEY])
+    : await admin.from('system_settings').select('key,value').in('key', [CHAT_RESEARCH_KEY]);
   if (rows.error) stagingRpcFailure(rows.error);
   const value = (rows.data ?? []).find(row => row.key === CHAT_RESEARCH_KEY)?.value;
   return value === true || value === 'true';
@@ -42,9 +44,11 @@ export async function attachFreeChatResearch(input: {
   admin: SupabaseClient; real: StagingPolicy; context: FreeChatContext; billing: FrozenRun | FrozenPaygRun;
   /** Whether the required context still fits with these extra bytes (within `inputBytes` when given). */
   fits: (extraBytes: number, inputBytes?: number) => boolean;
+  /** DB-PERF PR-3: this admission's settings rows (settingsRows.ts). */
+  configuration?: Promise<ConfigurationRows>;
 }): Promise<boolean> {
   const { context, billing } = input;
-  if (billing.contractVersion !== 'bill2.v2' || !await chatResearchEnabled(input.admin)) return false;
+  if (billing.contractVersion !== 'bill2.v2' || !await chatResearchEnabled(input.admin, input.configuration)) return false;
   const run = billing as FrozenPaygRun;
   const primary = run.callPolicy.find(policy => policy.modelId === context.modelId);
   if (!primary?.payg || !run.rules.billingUnit) return false;
@@ -55,7 +59,7 @@ export async function attachFreeChatResearch(input: {
   const raised = budget?.purpose === 'interactive' && budget.inputBytes < RESEARCH_TURN_INPUT_BYTES ? RESEARCH_TURN_INPUT_BYTES : undefined;
   const instructionBytes = Buffer.byteLength(FREE_CHAT_RESEARCH_INSTRUCTIONS);
   const admission: ResearchAdmissionInput = {
-    admin: input.admin, real: input.real, general: true, extraModelCalls: slots,
+    admin: input.admin, real: input.real, general: true, extraModelCalls: slots, configuration: input.configuration,
     modelCalls: run.limits.maxCalls, offeredTools: context.tools.length, maxTools: primary.payg.maxTools,
     defaultMultiplier: run.rules.billingUnit.defaultMultiplier, runMultiplier: run.rules.multiplier,
     deadline: run.limits.deadline, fits: extra => input.fits(extra + instructionBytes, raised),

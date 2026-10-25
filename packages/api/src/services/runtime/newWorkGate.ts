@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
-import type {ConfigurationRows} from './admissionConfiguration';
+import type {ConfigurationRows} from './settingsRows';
 import { StagingAccessError } from './stagingErrors';
 import { logger } from '../../lib/logger';
 import { RateLimitError } from '../../lib/rateLimitError';

@@ -69,8 +69,10 @@ function staging(settingValue: unknown, settingError: unknown = null) {
       protocol: 'openrouter-chat-v1' as const, inputLimit: 196608, outputLimit: 8192, upperUsd: '1', automaticRetry: false as const,
       hiddenTools: false as const, lookupSupported: true, providerLimits: { providerSlug: routes[key][1], contextTokens: 1000000,
         promptUsdPerMillion: '1', completionUsdPerMillion: '1', requestUsd: '0' } })) };
-  const reads = vi.fn(async () => ({ data: settingValue === undefined ? null : { value: settingValue }, error: settingError }));
-  const client = { from: () => ({ select: () => ({ eq: () => ({ maybeSingle: reads }) }) }) } as unknown as SupabaseClient;
+  // DB-PERF PR-3: the list reads its settings once (readModelChoiceSettings), not once per model.
+  const reads = vi.fn(async () => ({ data: settingError ? null : settingValue === undefined ? []
+    : [{ key: 'runtime_payg_staging', value: settingValue }], error: settingError }));
+  const client = { from: () => ({ select: () => ({ in: reads }) }) } as unknown as SupabaseClient;
   return { rows, window, client, reads };
 }
 const config = { version: 1, enabled: true, windowId,
@@ -80,6 +82,7 @@ const config = { version: 1, enabled: true, windowId,
 it('offers only models a free-chat turn can be admitted with (Sol has no billing profile, Luna only organizes)', async () => {
   const f = staging(config);
   expect(await freeChatModels(f.client, f.window, f.rows, env)).toEqual([{ id: 'sonnet', name: 'sonnet' }, { id: 'gemini', name: 'gemini' }]);
+  expect(f.reads).toHaveBeenCalledTimes(1);
 });
 
 it('hides a model whose interactive reasoning is missing even if its route has a profile', async () => {

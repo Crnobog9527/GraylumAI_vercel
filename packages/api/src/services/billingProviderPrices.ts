@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { createHash } from 'node:crypto';
+import { rowFor, type ConfigurationRows } from './runtime/settingsRows';
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
@@ -105,12 +106,14 @@ export function parseProviderPrices(raw: unknown): ProviderPrices {
 }
 
 /** The stored row as text plus its hash (the optimistic-concurrency token), whether or not it is valid. */
-async function readProviderPricesRow(db: SupabaseClient): Promise<{ raw: string | null; hash: string | null }> {
+async function readProviderPricesRow(db: SupabaseClient, configuration?: Promise<ConfigurationRows>): Promise<{ raw: string | null; hash: string | null }> {
   let result;
   try {
     // `raw` is PostgreSQL's own text of the value: a non-string (legacy or broken) value is hashed exactly as
     // billing_provider_prices_swap (0346) hashes it, so the admin page can still replace it by quoting that hash.
-    result = await db.from('system_settings').select('value,raw:value::text').eq('key', PROVIDER_PRICES_KEY).maybeSingle();
+    // DB-PERF PR-3: a new admission's settings rows carry the same `raw` text (admissionConfiguration.ts).
+    result = configuration ? rowFor(await configuration, PROVIDER_PRICES_KEY)
+      : await db.from('system_settings').select('value,raw:value::text').eq('key', PROVIDER_PRICES_KEY).maybeSingle();
   } catch {
     throw new BillingUnitConfigError('BILLING_UNIT_PROVIDER_PRICES_UNAVAILABLE');
   }
@@ -123,8 +126,8 @@ async function readProviderPricesRow(db: SupabaseClient): Promise<{ raw: string 
 }
 
 /** For charging: a failed read or an invalid stored value is an error; only a missing row prices nothing. */
-export async function readProviderPrices(db: SupabaseClient) {
-  const row = await readProviderPricesRow(db);
+export async function readProviderPrices(db: SupabaseClient, configuration?: Promise<ConfigurationRows>) {
+  const row = await readProviderPricesRow(db, configuration);
   if (row.raw === null) return { config: { version: 1 as const, entries: [] }, source: 'absent' as const, hash: null };
   try {
     return { config: parseProviderPrices(row.raw), source: 'configured' as const, hash: row.hash };
