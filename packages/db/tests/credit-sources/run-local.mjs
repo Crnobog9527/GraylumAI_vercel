@@ -8,9 +8,9 @@ import { localDb, read } from '../runtime-view-perf/local-db.mjs';
 
 const migrationPath = 'packages/db/migrations/0275_pay_dispute_credit_sources.sql';
 const MARK = ' -- PR-D0 credit sources';
-// Later migrations that replace or hook 0275's functions (0285 refund hold): reapplied after 0275 so the
-// end state is the full chain again.
-const LATER = ['packages/db/migrations/0285_pay_refunded_pack_hold.sql'];
+// Later migrations that replace or hook 0275's functions (0285 refund hold, 0383 shared quarantine check): reapplied
+// after 0275 so the end state is the full chain again.
+const LATER = ['packages/db/migrations/0285_pay_refunded_pack_hold.sql', 'packages/db/migrations/0383_credit_grant_quarantine.sql'];
 const reapply = async () => { for (const path of [migrationPath, ...LATER]) await c.query(read(path)); };
 const HOOKED = ['atomic_pre_deduct(uuid,integer,text,uuid)', 'bill2_legacy_settle(uuid,uuid,integer,jsonb,jsonb)',
   'bill2_legacy_refund(uuid,uuid,text)', 'bill2_legacy_abort_settle(uuid,uuid,integer,jsonb,text,text)',

@@ -113,9 +113,9 @@ BEGIN
  PERFORM id FROM subscription_credit_grants WHERE user_id=a ORDER BY id FOR UPDATE;
  IF EXISTS(SELECT 1 FROM subscription_credit_grants WHERE user_id=a AND accounting_state<>'trusted') THEN
   RAISE EXCEPTION 'PRE_DEDUCT_GRANT_ACCOUNTING_REVIEW_REQUIRED';END IF;
- SELECT coalesce(sum(greatest(g.credits_granted-g.consumed_amount,0)),0) INTO quarantine
- FROM subscription_credit_grants g WHERE g.user_id=a AND g.status='granted' AND g.accounting_state='trusted'
- AND EXISTS(SELECT 1 FROM user_subscriptions s WHERE s.user_id=a AND s.stripe_subscription_id=g.stripe_subscription_id AND s.credit_release_terminated_at IS NOT NULL);
+ SELECT coalesce(sum(greatest(qg.credits_granted-qg.consumed_amount,0)),0) INTO quarantine
+ FROM subscription_credit_grants qg WHERE qg.user_id=a AND qg.status='granted' AND qg.accounting_state='trusted'
+ AND credit_grant_quarantined(qg); -- ARCH-FIX E1
  quarantine:=quarantine+credit_package_refund_hold(a)+pay_dispute_pending_hold(a) -- PAY-D1 claim-pending
 ; -- PAY-REFUND-HOLD
  avail:=greatest(avail-quarantine,0);
