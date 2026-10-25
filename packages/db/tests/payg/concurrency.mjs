@@ -125,7 +125,7 @@ export async function concurrencyCases({db,Client,connectionString,report,create
     await conserved(db,third);
     report.checks.push('DB-PERF: an open claim no longer blocks other users\' claims and dispatches, on the same or another model');
 
-    // DB-PERF 0399: dispatch locks the test window row before it takes the stop-loss key, as claim does. While another
+    // DB-PERF 0389: dispatch locks the test window row before it takes the stop-loss key, as claim does. While another
     // transaction holds the window row, a dispatch waiting for it must not hold (201,1) shared.
     const ordered = await createFixture(db,{empirical:true});
     const orderedCall = await claim(db,ordered,1,false);

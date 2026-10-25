@@ -15,7 +15,7 @@ SET LOCAL lock_timeout='5s';
 DO $$ BEGIN
  IF (SELECT count(*) FROM pg_trigger WHERE tgrelid='public.bill2_calls'::regclass AND NOT tgisinternal
   AND tgname IN ('runtime_test_dispatch_guard','runtime_a_test_dispatch_guard'))<>1 THEN
-  RAISE EXCEPTION 'DB_PERF_0399_ANCHOR_MISSING: runtime_test_dispatch_guard trigger';END IF;
+  RAISE EXCEPTION 'DB_PERF_0389_ANCHOR_MISSING: runtime_test_dispatch_guard trigger';END IF;
 END $$;
 DROP TRIGGER IF EXISTS runtime_test_dispatch_guard ON public.bill2_calls;
 DROP TRIGGER IF EXISTS runtime_a_test_dispatch_guard ON public.bill2_calls;
