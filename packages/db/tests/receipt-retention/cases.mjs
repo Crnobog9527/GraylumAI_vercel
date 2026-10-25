@@ -32,6 +32,7 @@ const balance=async(db,f)=>(await db.query('SELECT credits FROM profiles WHERE i
 async function finished(db,days){
  const f=await createFixture(db),c=await claim(db,f);
  await rpc(db,'bill2_record',f.actor,f.run,c.id,evidence(f,c));
+ await rpc(db,'bill2_close',f.actor,f.run,'delivered',{kind:'usable_result',evidenceRef:'local-proof',evidenceHash:'d'.repeat(64),body:''});
  assert.equal((await rpc(db,'bill2_finalize',f.actor,f.run)).state,'settled');
  await age(db,c,days);
  return {f,c};
