@@ -26,7 +26,7 @@ import {runtimeActor} from '../services/runtime/actor';
 import { databaseSkillSource, userVisibleModules } from '../services/skills/databaseSource';
 import { discoverSkills } from '../services/skills/loader';
 import { activateRuntimeCandidate } from '../services/runtime/matching';
-import { defaultModelFirst, freeChatModels } from '../services/runtime/defaultModel';
+import { defaultModelFirst, freeChatModels, readModelChoiceSettings } from '../services/runtime/defaultModel';
 import { publicModelChoices } from '../services/modelIdentity/display';
 import {executeOriginalExecution,runtimeLocalEndpoint,streamOriginalExecution} from '../services/runtime/executionStream';
 
@@ -151,9 +151,11 @@ export const runtimeRouter=router({
    }
   }catch{/* unavailable packages are not advertised as runnable */}}
   // Staging hides models a free-chat turn is certain to be refused with; the administrator's default comes first.
-  const offered=ctx.real?await freeChatModels(ctx.supabaseAdmin!,ctx.real,models.data):models.data.map(({id,name})=>({id,name}));
+  // DB-PERF PR-3: one settings read for the whole list instead of one per offered model.
+  const choiceSettings=readModelChoiceSettings(ctx.supabaseAdmin!);
+  const offered=ctx.real?await freeChatModels(ctx.supabaseAdmin!,ctx.real,models.data,process.env,choiceSettings):models.data.map(({id,name})=>({id,name}));
   // MODEL-IDENTITY-GUARD: opaque id plus display label only; never model_id or provider.
-  const ordered=await defaultModelFirst(ctx.supabaseAdmin!,offered);
+  const ordered=await defaultModelFirst(ctx.supabaseAdmin!,offered,choiceSettings);
   const choices=publicModelChoices(ordered,{surface:'user'});
   return {models:choices,skills,defaultSkill:skills.find(skill=>skill.moduleId===workModuleId)??null,mode:realContract(ctx.real).host.mode};
  }),

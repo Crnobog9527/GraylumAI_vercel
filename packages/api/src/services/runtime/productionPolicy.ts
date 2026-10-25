@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { openRouterAccount, readOpenRouterKey } from '../models/openRouterKey';
+import { rowFor, type ConfigurationRows } from './settingsRows';
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { logger } from '../../lib/logger';
@@ -37,8 +38,9 @@ export async function assertProductionAccess(admin: SupabaseClient, actorId: str
   if (result.data !== true) throw new StagingAccessError('RUNTIME_STAGING_SERVICE_UNAVAILABLE');
 }
 
-async function readSettings(admin: SupabaseClient): Promise<Settings> {
-  const { data, error } = await admin.from('system_settings').select('value').eq('key', PAYG_PRODUCTION_SETTING).maybeSingle();
+async function readSettings(admin: SupabaseClient, configuration?: Promise<ConfigurationRows>): Promise<Settings> {
+  const { data, error } = configuration ? rowFor(await configuration, PAYG_PRODUCTION_SETTING)
+    : await admin.from('system_settings').select('value').eq('key', PAYG_PRODUCTION_SETTING).maybeSingle();
   if (error) throw new StagingAccessError('RUNTIME_PAYG_CONFIG_UNAVAILABLE');
   let value: unknown = data?.value ?? null;
   if (typeof value === 'string') { try { value = JSON.parse(value); } catch { value = null; } }
@@ -136,10 +138,12 @@ export async function loadProductionPolicy(admin: SupabaseClient, actorId: strin
 /** Admission's PAYG profiles for the selected production quotes. Off, missing or invalid refuses: production never
  * falls back to v1. The profile version must still be the one the policy was loaded with. */
 export async function readPaygProductionPolicies(admin: SupabaseClient, policy: StagingPolicy,
-  policies: FrozenRun['callPolicy'], requirements: Requirement[], env: Record<string, string | undefined>, deadline: string) {
+  policies: FrozenRun['callPolicy'], requirements: Requirement[], env: Record<string, string | undefined>, deadline: string,
+  /** DB-PERF PR-3: this admission's settings rows; absent, the setting is read now. */
+  configuration?: Promise<ConfigurationRows>) {
   if (!isProductionPolicy(policy)) throw new StagingAccessError('RUNTIME_PRODUCTION_TARGET_DENIED');
   productionRuntimeTarget(env);
-  const config = await readSettings(admin);
+  const config = await readSettings(admin, configuration);
   if (config.policyVersion !== policy.id) throw new StagingAccessError('RUNTIME_PAYG_PROFILE_REQUIRED');
   return policies.map(entry => {
     const profile = matchedProfile(config.profiles, entry, requirements);

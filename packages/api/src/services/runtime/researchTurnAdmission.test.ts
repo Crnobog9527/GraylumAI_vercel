@@ -61,7 +61,8 @@ function fixture(enabled:boolean){
  const row={id:modelId,model_id:'fixture/mentor',is_active:'true',provider:'fixture',max_tokens:1000,input_limit:64000};
  const admin={rpc,from:(table:string)=>{
   let key='';
-  const query={insert:(row:unknown)=>({abortSignal:async()=>{logs.push(row);return {error:null};}}),select:()=>query,eq:(_column:string,value:string)=>{key=value;return query;},in:async()=>({data:[],error:null}),
+  const query={insert:(row:unknown)=>({abortSignal:async()=>{logs.push(row);return {error:null};}}),select:()=>query,eq:(_column:string,value:string)=>{key=value;return query;},in:async(_column:string,keys:string[])=>({data:keys.filter(k=>settings[k]!==undefined)
+    .map(k=>({key:k,value:settings[k],raw:JSON.stringify(settings[k])})),error:null}),
    maybeSingle:async()=>({error:null,data:settings[key]===undefined?null:{value:settings[key],revision:'2'}}),
    single:async()=>({data:table==='modules'?{id:moduleId,active:true,skill_id:moduleId,model_id:modelId}:row,error:null})};
   return query;

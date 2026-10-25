@@ -9,15 +9,30 @@ import {MODEL_IDENTITY_GUARD_KEY} from '../modelIdentity/guardSetting';
 import {RESEARCH_TOOLS_KEY} from '../research/vendors/config';
 import {PURPOSE_BUDGET_KEY} from './purposeBudgets';
 import {SUMMARY_MODEL_SETTING, SUMMARY_OUTPUT_SETTING} from '../artifacts/summaryPolicy';
+import {LIBRARY_AGENT_READ_KEY, LIBRARY_RETRIEVAL_KEY} from './libraryAdmission';
+import {OWN_POSTS_SWITCH} from './workspacePosts';
+import {PAYG_HOST_SETTING, PAYG_PRODUCTION_SETTING} from './paygHostPolicy';
+import {BILLING_UNIT_SETTING_KEYS} from '../billingUnit';
+import {CHAT_RESEARCH_KEY} from './freeChatResearch';
+import {PROVIDER_PRICES_KEY} from '../billingProviderPrices';
+import {RESEARCH_THRESHOLDS_KEY} from './researchAdmission';
+import type {ConfigurationRows} from './settingsRows';
+export type {ConfigurationRows} from './settingsRows';
+/** DB-PERF PR-3: admission's model row also carries what pricing (updated_at) and the billing unit (price_multiplier) read. */
+export const MODEL_ROW_COLUMNS = 'id,model_id,provider,is_active,max_tokens,input_limit,config,api_endpoint,updated_at,price_multiplier';
 
-export type ConfigurationRows = {data: Array<{key: string; value: unknown}> | null; error: unknown};
 /** One new admission's configuration snapshot only. Never reused by the per-call
- * pause/rate gate, execution, another admission or a recovery request. */
+ * pause/rate gate, execution, another admission or a recovery request.
+ * DB-PERF PR-3: every setting a new admission reads is in this one query; each reader takes these rows instead of
+ * its own query (settingsRows.ts). `raw` is PostgreSQL's own text of the value, which the provider prices hash needs. */
 export async function readAdmissionConfiguration(admin: SupabaseClient): Promise<ConfigurationRows> {
   try {
-    return await admin.from('system_settings').select('key,value').in('key', [
+    return await admin.from('system_settings').select('key,value,raw:value::text').in('key', [
       RUNTIME_RATE_LIMIT_KEY, MODEL_IDENTITY_GUARD_KEY, 'primary_model_id', RESEARCH_TOOLS_KEY,
       PURPOSE_BUDGET_KEY, SUMMARY_MODEL_SETTING, SUMMARY_OUTPUT_SETTING,
+      LIBRARY_AGENT_READ_KEY, LIBRARY_RETRIEVAL_KEY, OWN_POSTS_SWITCH, 'publish_monitor_enabled',
+      PAYG_HOST_SETTING, PAYG_PRODUCTION_SETTING, BILLING_UNIT_SETTING_KEYS.creditsPerUsd, BILLING_UNIT_SETTING_KEYS.multiplier,
+      CHAT_RESEARCH_KEY, RESEARCH_THRESHOLDS_KEY, PROVIDER_PRICES_KEY,
     ]);
   } catch (error) { return {data: null, error}; }
 }

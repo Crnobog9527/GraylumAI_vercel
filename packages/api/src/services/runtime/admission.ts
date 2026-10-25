@@ -63,7 +63,7 @@ import {RESEARCH_RESULT_RESERVE_BYTES} from './researchTurn';
 import {guardResearchAdmission,researchInputHost} from './researchAdmissionGuard';
 import {attachFreeChatResearch} from './freeChatResearch';
 import {organizerSelection} from './organizerSelection';
-import {readAdmissionConfiguration} from './admissionConfiguration';
+import {readAdmissionConfiguration,MODEL_ROW_COLUMNS} from './admissionConfiguration';
 const uuid=z.string().uuid();
 export const runtimeMaterialInput=z.object({sessionId:uuid,requestId:uuid,expectedRevision:z.number().int().nonnegative(),
  brief:z.string().max(8000),material:z.string().max(16000),roundId:uuid.nullable().default(null)}).strict();
@@ -157,7 +157,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    if(replay)return replay;
    const configuration=readAdmissionConfiguration(admin),settings=readAdmissionSettings(admin,configuration);
    // LIB-4b: shape and switch before any paid work; runtime_admit checks and freezes each document (0262).
-   const libraryReferences=await admitLibraryReferences(admin,request,policy);
+   const libraryReferences=await admitLibraryReferences(admin,request,policy,configuration);
    // POSITIONING-GATE: the read overlaps the checks below; OPC turns, reports and organizing are never gated.
    const positioning=policy.positioningGate&&!policy.opcTurnToken&&!policy.reportGeneration&&input.selection.kind!=='organizer'
     ?readPositioningGate(admin,actorId):undefined;
@@ -193,9 +193,9 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    const configuredOutput=policy.reportGeneration||budgets&&purpose==='interactive'?PURPOSE_OUTPUT_CAP:undefined;
    const stepStream=Boolean(policy.opcTurnToken&&policy.stepStream);
    const libraryRetrieval=await admitLibraryRetrieval(admin,Boolean(policy.real),input.selection.kind,
-    [mentorStream,stepStream,policy.reportGeneration,policy.opcTurnToken]);
+    [mentorStream,stepStream,policy.reportGeneration,policy.opcTurnToken],configuration);
    let ownPosts=await admitOwnPosts(admin,Boolean(policy.real),input.selection.kind,
-    [mentorStream,stepStream,policy.reportGeneration,policy.opcTurnToken,input.sources.length]);
+    [mentorStream,stepStream,policy.reportGeneration,policy.opcTurnToken,input.sources.length],configuration);
    if(stepStream&&(mentorStream||input.selection.kind!=='skill'||input.network!=='deny'||input.sources.length))
     throw new Error('RUNTIME_CONTEXT_INVALID');
    if(policy.expectedMaterialRevision!==undefined&&session.materialRevision!==policy.expectedMaterialRevision)throw new Error('RUNTIME_MATERIAL_CONFLICT');
@@ -236,7 +236,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
      if (template !== undefined) organizerInstructions = 'Skill organization template:\n' + template +
       '\nHost extraction and write-safety contract (takes precedence):\n' + organizerInstructions;
     }
-   }else({modelId,organizerOutput,instructions}=await organizerSelection(admin,session.dialogueModelId,Boolean(policy.real),modelConfiguration));
+   }else({modelId,organizerOutput,instructions}=await organizerSelection(admin,session.dialogueModelId,Boolean(policy.real),modelConfiguration,configuration));
    // MODEL-IDENTITY-GUARD layer 1: the brand identity leads the single system message and is
    // frozen with this admission; a Skill's cached prefix grows by the same fixed text.
    const settingsRead=await settings;
@@ -245,8 +245,8 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     instructions=withBrandIdentity(instructions,true);
     if(skillChars)skillChars+=BRAND_IDENTITY_INSTRUCTIONS.length+1;
    }
-   const row=await admin.from('ai_models').select('id,model_id,provider,is_active,max_tokens,input_limit,config,api_endpoint')
-    .eq('id',modelId).single();
+   // DB-PERF PR-3: pricing and the billing unit reuse this row (MODEL_ROW_COLUMNS) instead of reading the model again.
+   const row=await admin.from('ai_models').select(MODEL_ROW_COLUMNS).eq('id',modelId).single();
    // Match the actual administrator model to the enabled protocol and exact quote. Never substitute a default model.
    if(policy.real&&row.error){if(row.error.code==='PGRST116')throw unavailableModel();stagingRpcFailure(row.error);}
    if(row.error||row.data?.is_active!=='true'||(!policy.real&&row.data.provider!=='fixture'))throw unavailableModel();
@@ -268,16 +268,16 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    let attachedOrganizer:{
     modelId:string;model:string;maxOutputTokens:number;inputBytes?:number;historyItems?:number;reasoning?:ReasoningPolicy;instructions?:string;input?:string
    }|undefined;
-   let attachedInputLimit:number|undefined;
+   let attachedInputLimit:number|undefined;const modelRows:Record<string,unknown>[]=[row.data];
    if(organizeAfter){
     if(input.selection.kind==='organizer'||policy.maxCalls<2)throw new Error('RUNTIME_ORGANIZER_BUDGET');
     const settings=await configuration;
     if(settings.error)throw new Error('RUNTIME_ORGANIZER_DENIED');
     const summary=modelConfiguration(()=>summaryPolicy(Object.fromEntries((settings.data??[]).map(r=>[r.key,r.value])),modelId));
-    const model=await admin.from('ai_models').select('id,model_id,provider,is_active,max_tokens,input_limit,config').eq('id',summary.modelId).single();
+    const model=await admin.from('ai_models').select(MODEL_ROW_COLUMNS).eq('id',summary.modelId).single();
     if(policy.real&&model.error){if(model.error.code==='PGRST116')throw unavailableModel();stagingRpcFailure(model.error);}
     if(model.error||model.data?.is_active!=='true'||(!policy.real&&model.data.provider!=='fixture'))throw unavailableModel();
-    modelConfiguration(()=>assertSeparateSummaryModel(row.data.model_id,model.data.model_id));
+    modelConfiguration(()=>assertSeparateSummaryModel(row.data.model_id,model.data.model_id));modelRows.push(model.data);
     const limit=outputCapacity(model.data,summary.maxTokens,budgets?summary.maxTokens:undefined);
     if(!Number.isSafeInteger(limit)||limit<1)throw new Error('RUNTIME_MODEL_CAPACITY');
     attachedInputLimit=inputCapacity(model.data,limit,budgets?.organize.inputBytes);
@@ -445,13 +445,13 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
      outputLimit:attachedOrganizer.maxOutputTokens,requestFormat:providerRequestFormat,reasoning:attachedOrganizer.reasoning}]:[]),
     ...(candidates.length?[{modelId,phase:'skill_matching' as const,outputLimit:maxOutputTokens,requestFormat:providerRequestFormat}]:[]),
     ...candidates.map(c=>({modelId:c.modelId,phase:'skill' as const,outputLimit:c.outputLimit,requestFormat:providerRequestFormat})),
-   ],process.env,billing.limits.deadline):undefined;
+   ],process.env,billing.limits.deadline,configuration):undefined;
    const paygTemplates=hostPayg??policy.payg?.callPolicies;
    if(policy.reportGeneration&&!paygTemplates)throw new Error('REPORT_PAYG_REQUIRED');
-   if(realCalls&&!paygTemplates){if(isProductionPolicy(policy.real))throw new StagingAccessError('RUNTIME_PAYG_PROFILE_REQUIRED');/* production: v2 only */await admitPricing(admin,realCalls);}
+   if(realCalls&&!paygTemplates){if(isProductionPolicy(policy.real))throw new StagingAccessError('RUNTIME_PAYG_PROFILE_REQUIRED');/* production: v2 only */await admitPricing(admin,realCalls,{},modelRows);}
    if(realCalls)billing.callPolicy=realCalls;
    // BILL-UNIT: the window must match the current q and each selected model's m_i (0157 claim/finalize).
-   if(realCalls)billing.rules.billingUnit=await freezeWindowBillingUnit(admin,policy.real!,realCalls);
+   if(realCalls)billing.rules.billingUnit=await freezeWindowBillingUnit(admin,policy.real!,realCalls,{configuration,models:modelRows});
    if(budgets&&attachedOrganizer){
     // The organizer's separately configured input cap includes all its required
     // frozen material. The eventual primary reply is checked again at execution.
@@ -460,14 +460,14 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     });
    }
    if(paygTemplates)billing=await freezeAdmissionPayg({admin,context,billing,paygTemplates,realCalls,selectedIds,modelId,
-    billingUnit:realCalls?billing.rules.billingUnit!:policy.payg!.billingUnit});
+    billingUnit:realCalls?billing.rules.billingUnit!:policy.payg!.billingUnit,modelRows});
    if(policy.researchTools&&mentorStream&&!opening&&hostTurnContext&&!stepSummary&&
-    await guardResearchAdmission({admin,real:policy.real,context,billing,settings,actorId,sessionId:input.sessionId,requestId:input.requestId,
+    await guardResearchAdmission({admin,real:policy.real,context,billing,settings,configuration,actorId,sessionId:input.sessionId,requestId:input.requestId,
      capacity:(researchToolsBytes,researchHostDeltaBytes,bytes)=>researchCapacity({instructions:instructions+positioningRule,
       currentInput,inputBudgetBytes:limitOf(bytes),existingToolsBytes:admissionToolBytes(Boolean(skillFile),historyRead),
       researchToolsBytes,researchHostDeltaBytes,resultReserveBytes:RESEARCH_RESULT_RESERVE_BYTES}),
      fits:(extra,bytes)=>fitsCapacity(()=>requireCapacity(instructions+positioningRule,Boolean(skillFile),currentInput,historyRead,extra,bytes))})
-    ||freeChat&&await attachFreeChatResearch({admin,real:policy.real!,context,billing,
+    ||freeChat&&await attachFreeChatResearch({admin,real:policy.real!,context,billing,configuration,
      fits:(extra,bytes)=>fitsCapacity(()=>requireCapacity(instructions+positioningRule,false,currentInput,false,extra,bytes))}))
     billing.sourceHash=createHash('sha256').update(JSON.stringify(context)).digest('hex');
    await requireAllowedInput({actorId,sessionId:input.sessionId,requestId:input.requestId,
