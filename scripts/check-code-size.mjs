@@ -110,11 +110,18 @@ export function parseBaseline(text) {
 
 /** Tracked regular files as they are in the working tree. */
 export async function collectMeasurements(repositoryRoot) {
+  const measurements = new Map();
+  for (const [file, text] of await collectSourceFiles(repositoryRoot)) measurements.set(file, measure(text));
+  return measurements;
+}
+
+/** Text of every checked, tracked regular file as it is in the working tree (also read by check-pattern-ratchet.mjs). */
+export async function collectSourceFiles(repositoryRoot) {
   const { stdout } = await execFileAsync('git', ['-C', repositoryRoot, 'ls-files', '--stage', '-z'], {
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
   });
-  const measurements = new Map();
+  const sources = new Map();
   for (const record of stdout.split('\0')) {
     if (!record) continue;
     const [meta, file] = record.split('\t');
@@ -127,9 +134,9 @@ export async function collectMeasurements(repositoryRoot) {
       if (error?.code === 'ENOENT') continue;
       throw error;
     }
-    measurements.set(file, measure(text));
+    sources.set(file, text);
   }
-  return measurements;
+  return sources;
 }
 
 async function main() {

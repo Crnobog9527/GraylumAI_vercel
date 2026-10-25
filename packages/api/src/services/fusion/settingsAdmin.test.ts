@@ -6,9 +6,10 @@ import { DEFAULT_FUSION_SETTINGS } from './settings';
 const skill = vi.hoisted(() => ({ available: true, writes: 0, refuse: new Map<string, string>(),
   keyReads: [] as Array<{ fresh: boolean }>, admitKeys: [] as unknown[], limits: new Map<string, number>() }));
 // ADMIN-SECRETS OR-1: the platform OpenRouter key is read once per listing or save and shared by every per-model check.
-vi.mock('../models/openRouterKey', () => ({
-  readOpenRouterKey: async (_db: unknown, options?: { fresh?: boolean }) => { skill.keyReads.push({ fresh: options?.fresh === true }); return 'SYNTHETIC_KEY'; },
-}));
+vi.mock('../models/openRouterKey', () => {
+  const read = async (_db: unknown, options?: { fresh?: boolean }) => { skill.keyReads.push({ fresh: options?.fresh === true }); return 'SYNTHETIC_KEY'; };
+  return { readOpenRouterKey: read, readOpenRouterKeyOrUnset: read };
+});
 vi.mock('./reviewPrompts', async original => ({ ...(await original<typeof import('./reviewPrompts')>()),
   resolveReviewSkill: async () => {
     if (!skill.available) throw new Error('FUSION_REVIEW_SKILL_UNAVAILABLE');

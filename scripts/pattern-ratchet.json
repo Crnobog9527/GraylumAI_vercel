@@ -1,0 +1,59 @@
+{
+  "patterns": [
+    {
+      "id": "api-bare-catch-fallback",
+      "description": "Use swallow()/logSwallowed() from packages/api/src/lib/swallow.ts instead of a bare .catch(() => fallback): a swallowed failure must be logged.",
+      "include": [
+        "packages/api/src/"
+      ],
+      "regex": "\\.catch\\(\\s*\\(\\)\\s*=>",
+      "count": "matches",
+      "max": 47
+    },
+    {
+      "id": "system-settings-direct-read",
+      "description": "Files reading system_settings directly. Reuse an existing settings reader instead of adding another .from('system_settings').",
+      "include": [
+        "packages/api/src/",
+        "apps/web/src/"
+      ],
+      "regex": "\\.from\\('system_settings'\\)",
+      "count": "files",
+      "max": 50
+    },
+    {
+      "id": "process-env-direct-read",
+      "description": "Files reading process.env directly. Read configuration through an existing reader (lib/envValidator.ts, lib/serverEnv.ts) instead of adding another file.",
+      "include": [
+        "packages/api/src/",
+        "apps/web/src/"
+      ],
+      "exclude": [
+        "packages/api/src/lib/envValidator.ts"
+      ],
+      "regex": "process\\.env\\.",
+      "count": "files",
+      "max": 59
+    },
+    {
+      "id": "web-error-code-includes",
+      "description": "The web matching server error codes by substring. Compare the exact code instead of adding another .includes('PREFIX_...').",
+      "include": [
+        "apps/web/src/"
+      ],
+      "regex": "\\.includes\\('(RUNTIME|OPC|BILL2|PAY|FUSION|PUBLISH)_",
+      "count": "matches",
+      "max": 9
+    },
+    {
+      "id": "payments-double-cast",
+      "description": "Double casts in payment services. Type the value (zod parse or a narrow helper) instead of adding another 'as unknown as'.",
+      "include": [
+        "packages/api/src/services/payments/"
+      ],
+      "regex": "as unknown as",
+      "count": "matches",
+      "max": 9
+    }
+  ]
+}

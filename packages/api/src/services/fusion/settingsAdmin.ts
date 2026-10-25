@@ -7,7 +7,7 @@ import { realRuntimeEnvironment } from '../runtime/productionEnvironment';
 import { loadProductionPolicy } from '../runtime/productionPolicy';
 import { parseStagingPolicy, type StagingPolicy } from '../runtime/stagingPolicy';
 import { admitFusionModel, FUSION_MODEL_COLUMNS, type FusionModelRow, type FusionPhase } from './models';
-import { readOpenRouterKey } from '../models/openRouterKey';
+import { readOpenRouterKeyOrUnset } from '../models/openRouterKey';
 import { readReviewSkill, resolveReviewSkill } from './reviewPrompts';
 import { fusionSettings, readFusionSettings, writeFusionSettings, type FusionSettings } from './settings';
 import { FUSION_COMPARE_SETTING, fusionCompareLimitSchema } from '../membershipEntitlementConfig';
@@ -45,7 +45,7 @@ export async function saveFusionSettings(db: SupabaseClient, actorId: string, va
       }
       const window = await adminWindow(db, actorId, env);
       const deadline = admissionDeadline(window.expiresAt);
-      const key = await readOpenRouterKey(db, { fresh: true }).catch(() => null); // one fresh read for all checks
+      const key = await readOpenRouterKeyOrUnset(db, { fresh: true }) ?? null; // one fresh read for all checks
       for (const row of models) {
         if (settings.review.enabled && settings.review.reviewerModelIds.includes(row.id)) {
           await admitFusionModel(db, window, row, 'fusion_review', settings.review.opinionOutputTokens, deadline, env, key ?? null);
@@ -106,7 +106,7 @@ export async function fusionModelOptions(db: SupabaseClient, actorId: string, en
   if (rows.error) throw new Error('FUSION_SETTINGS_UNAVAILABLE');
   const deadline = admissionDeadline(window.expiresAt);
   // Read-only listing: one read (the 60 s cache is fine for a display) shared by every per-model check.
-  const key = await readOpenRouterKey(db).catch(() => null);
+  const key = await readOpenRouterKeyOrUnset(db) ?? null;
   const admits = async (row: FusionModelRow, phase: FusionPhase, tokens: number) => {
     try {
       const admitted = await admitFusionModel(db, window, row, phase, tokens, deadline, env, key ?? null);

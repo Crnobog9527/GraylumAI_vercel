@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { RUNTIME_MODEL_COLUMNS, runtimeModelOption, type RuntimeModelRow } from '../models/runtimeEligibility';
-import { openRouterAccount, readOpenRouterKey } from '../models/openRouterKey';
+import { openRouterAccount, readOpenRouterKeyOrUnset } from '../models/openRouterKey';
 import type { z } from 'zod';
 import type { frozenCallPolicy } from '../bill2/service';
 import { PURPOSE_OUTPUT_CAP } from '../bill2/responseCapacity';
@@ -46,7 +46,7 @@ export async function admitFusionModel(db: SupabaseClient, window: StagingPolicy
   // Admission creates the runs and credit holds that dispatch (a fresh read) will check: read fresh here too, so a
   // cleared or replaced key is refused now instead of after holds were created. A caller that checks many models
   // without creating anything (the settings listing and save) reads once and passes it: string = the key, null = none.
-  const key = knownKey === undefined ? await readOpenRouterKey(db, { fresh: true }).catch(() => undefined) : knownKey ?? undefined;
+  const key = knownKey === undefined ? await readOpenRouterKeyOrUnset(db, { fresh: true }) : knownKey ?? undefined;
   if (!runtimeModelOption(row, 'organizer', key !== undefined).available) throw new Error('FUSION_MODEL_UNAVAILABLE');
   const quote = window.callPolicies.find(policy => policy.modelId === row.id);
   if (quote && quote.account !== openRouterAccount(key ?? '')) {

@@ -39,8 +39,9 @@ describe('column phases (§3.5, §4.4)', () => {
     const closed = { reservedCredits: 9, chargedCredits: 3, closed: true };
     expect(columnPhase(column({ body: '答', billing: closed }, { dispatched: true, verdict: 'usable' }), 'finished')).toBe('done');
     expect(columnPhase(column({ body: '答', billing: closed }, { dispatched: true }), 'finished')).toBe('done'); // saved, verdict not yet written
-    // An answer or verdict whose settlement failed or whose cost is pending stays pending: held credits, no adoption yet.
-    expect(columnPhase(column({ body: '答' }, { dispatched: true, verdict: 'usable' }), 'running')).toBe('pending');
+    // An answer or verdict whose settlement failed or whose cost is pending is not final: held credits, no adoption yet. A usable
+    // answer says so as "积分结算中" (settling); any other verdict stays "结果待核对" (pending).
+    expect(columnPhase(column({ body: '答' }, { dispatched: true, verdict: 'usable' }), 'running')).toBe('settling');
     expect(columnPhase(column({}, { dispatched: true, verdict: 'no_delivery' }), 'running')).toBe('pending');
     expect(columnPhase(column({ billing: { closed: true } }, { dispatched: true, verdict: 'no_delivery' }), 'finished')).toBe('failed');
     expect(columnPhase(column({ billing: { closed: true } }), 'stopped')).toBe('stopped');
