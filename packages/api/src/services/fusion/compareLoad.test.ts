@@ -15,6 +15,7 @@ vi.mock('./compareAdmission', () => ({
 vi.mock('../runtime/workspacePosts', () => ({ readWorkspaceCapability: async () => s.workspace }));
 import { fitHistory, historyTurn, loadCompareChoice } from './compareLoad';
 import { FUSION_INPUT_CAP } from './request';
+import { compareRequest, compareRequestBytes } from './compareSnapshot';
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const user = (text: string) => ({ role: 'user', content: text });
@@ -75,6 +76,27 @@ describe('compare loading (FUSION-COMPARE §3.2)', () => {
       { sourceVersionId: id(8), kind: 'strategy', body: '{"platform":"x"}' }]);
     expect(s.rpcs.map(([name, args]) => name === 'runtime_workspace_source' ? args.p_query : name))
       .toEqual(['fusion_compare_context', '', 'p1', 'a1', 'gone']);
+  });
+
+  it('keeps the same turns whatever the language setting, so the request identity does not change with it', () => {
+    const turn = (n: number) => ({ role: n % 2 ? 'assistant' as const : 'user' as const, text: 'x'.repeat(4000 + n) });
+    const history = Array.from({ length: 40 }, (_, n) => turn(n));
+    const base = { skill: null, positioningFallback: false, scopeMaterial: undefined, workspace: [], references: [], question: '问题', history };
+    // Find a question size where the kept turns would differ if each language were measured with its own rule.
+    let found = false;
+    for (let pad = 0; pad < 6000 && !found; pad += 7) {
+      const question = '问题' + 'y'.repeat(pad);
+      const kept = (['zh-Hans', 'zh-Hant', 'en'] as const).map(replyLocale => fitHistory({ ...base, question, replyLocale }).history.length);
+      expect(new Set(kept).size).toBe(1);
+      const own = (['zh-Hant', 'en'] as const).map(replyLocale => {
+        let h = history;
+        const size = (k: typeof h) => compareRequestBytes(compareRequest({ ...base, question, history: k, positioningFallback: true, replyLocale }));
+        while (h.length && size(h) > FUSION_INPUT_CAP) h = h.slice(1);
+        return h.length;
+      });
+      found = own[0] !== own[1];
+    }
+    expect(found).toBe(true);
   });
 
   it('drops the oldest turns until the request fits the per-call cap, never the question', () => {

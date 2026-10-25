@@ -10,6 +10,7 @@ import { compareRequest, compareRequestBytes, type CompareParts } from './compar
 import type { CompareChoice } from './compareStart';
 import { FUSION_INPUT_CAP } from './request';
 import { readReplyLocale } from '../runtime/replyLanguage';
+import { REPLY_LOCALES } from '../../shared/replyLanguage';
 
 /** What the browser sends to estimate or start a compare: the same Skill selection field as an ordinary turn. */
 export const compareSkillInput = z.object({ kind: z.literal('skill'), moduleId: z.string().uuid(), revisionId: z.string().uuid(),
@@ -40,10 +41,13 @@ export function historyTurn(item: unknown): CompareParts['history'][number] | nu
 }
 
 /** The oldest turns go first until the request fits the per-call cap (the question itself is never cut: an oversized
- * question is refused by the size check later). Same direction as an ordinary turn's history selection. */
+ * question is refused by the size check later). Same direction as an ordinary turn's history selection. Measured with the
+ * longest reply-language rule, so the turns kept (part of the request identity) never depend on the language setting:
+ * a retry after the user changed it keeps the same history and finds the frozen group. */
 export function fitHistory(parts: CompareParts): CompareParts {
   let history = parts.history;
-  const bytes = (h: CompareParts['history']) => compareRequestBytes(compareRequest({ ...parts, history: h, positioningFallback: true }));
+  const bytes = (h: CompareParts['history']) => Math.max(...REPLY_LOCALES.map(replyLocale =>
+    compareRequestBytes(compareRequest({ ...parts, history: h, positioningFallback: true, replyLocale }))));
   while (history.length && bytes(history) > FUSION_INPUT_CAP) history = history.slice(1);
   return { ...parts, history };
 }
