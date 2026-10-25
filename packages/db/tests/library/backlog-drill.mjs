@@ -1,7 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // REL-1 core 7 (6): builds an empty local database from the migration files, then runs the library cleanup backlog
 // drill (packages/api/src/services/library/backlogDrill.integration.ts) against it. Local Docker only; needs a
-// local database slot. Sizes: LIBRARY_DRILL_SIZES=1000,6000 (default); LIBRARY_DRILL_BACKGROUND=20000 live documents.
+// local database slot. Sizes: LIBRARY_DRILL_SIZES=1000,6000 (default); LIBRARY_DRILL_BACKGROUND=20000 live documents;
+// LIBRARY_DRILL_BATCH=50 (default) or 100 rows per run.
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';

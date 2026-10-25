@@ -16,6 +16,8 @@ const port = Number(process.env.LIBRARY_DRILL_DB_PORT ?? 0);
 const BUCKET = 'library-documents';
 const RUN_MINUTES = 5;
 const DAY_RUNS = 24 * 60 / RUN_MINUTES;
+// Rows per cron run: 50 is the cron's batch on staging today; LIBRARY_DRILL_BATCH=100 measures the proposed batch.
+const BATCH = Number(process.env.LIBRARY_DRILL_BATCH ?? 50);
 
 type Faults = { down: (run: number) => boolean; rate: number };
 type Outcome = {
@@ -108,6 +110,14 @@ async function shiftClock(admin: pg.Client) {
   await admin.query(`UPDATE library_documents SET deleted_at=deleted_at-${step} WHERE deleted_at IS NOT NULL`);
 }
 
+async function purge(admin: pg.Client, actors: string[]) {
+  await admin.query('DELETE FROM library_document_segments WHERE actor_id=ANY($1)', [actors]);
+  await admin.query('DELETE FROM library_recognition_units WHERE actor_id=ANY($1)', [actors]);
+  await admin.query('DELETE FROM library_upload_reservations WHERE actor_id=ANY($1)', [actors]);
+  await admin.query('DELETE FROM library_documents WHERE actor_id=ANY($1)', [actors]);
+  await admin.query("DELETE FROM storage.objects WHERE bucket_id=$1 AND split_part(name,'/',1)=ANY($2)", [BUCKET, actors]);
+}
+
 async function drain(actors: string[], faults: Faults, maxRuns = DAY_RUNS + 48): Promise<Outcome> {
   const admin = await connect();
   const service = await connect();
@@ -122,6 +132,9 @@ async function drain(actors: string[], faults: Faults, maxRuns = DAY_RUNS + 48):
         AND deleted_at<clock_timestamp()-interval '24 hours') overdue`,
   [actors, BUCKET, actors])).rows[0] as { docs: number; objects: number; overdue: number };
   const documents = (await scope()).docs;
+  const queued = await admin.query(
+    'SELECT count(*)::int n FROM library_upload_reservations WHERE cleanup AND NOT actor_id=ANY($1)', [actors]);
+  expect(queued.rows[0].n, 'an earlier scenario left rows in the cleanup queue').toBe(0);
   // The user deletes everything at once and every inline Storage removal fails: all objects stay for the cron.
   for (const actor of actors) {
     const docs = await admin.query('SELECT id FROM library_documents WHERE actor_id=$1', [actor]);
@@ -135,7 +148,7 @@ async function drain(actors: string[], faults: Faults, maxRuns = DAY_RUNS + 48):
       clock.run++;
       await shiftClock(admin);
       const started = Date.now();
-      const result = await cleanupLibrary(client, { storage });
+      const result = await cleanupLibrary(client, { storage, limit: BATCH });
       outcome.slowestRunMs = Math.max(outcome.slowestRunMs, Date.now() - started);
       outcome.failedRows += result.failed;
       const now = await scope();
@@ -147,6 +160,8 @@ async function drain(actors: string[], faults: Faults, maxRuns = DAY_RUNS + 48):
     outcome.runs = clock.run;
     return outcome;
   } finally {
+    // A scenario that does not drain (8000) must not leave its backlog in the queue the next scenario measures.
+    await purge(admin, actors);
     await admin.end();
     await service.end();
   }
@@ -166,6 +181,13 @@ function report(name: string, outcome: Outcome) {
 describe.skipIf(!port)('library cleanup backlog drill (local database)', () => {
   const sizes = (process.env.LIBRARY_DRILL_SIZES ?? '1000,6000').split(',').map(Number);
   const background = Number(process.env.LIBRARY_DRILL_BACKGROUND ?? 20000);
+
+  it('starts from an empty cleanup queue, so each scenario measures only its own backlog', async () => {
+    const admin = await connect();
+    const pending = await admin.query('SELECT count(*)::int n FROM library_upload_reservations WHERE cleanup');
+    expect(pending.rows[0].n).toBe(0);
+    await admin.end();
+  });
 
   it('seeds untouched documents so every candidate query scans a realistic table', async () => {
     const admin = await connect();
