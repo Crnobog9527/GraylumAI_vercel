@@ -4,7 +4,7 @@
   "apps/web/src/app/(zh-hans)/admin/diagnostics/page.tsx": {"lines":835},
   "apps/web/src/app/(zh-hans)/admin/finance/page.tsx": {"lines":690},
   "apps/web/src/app/(zh-hans)/admin/models/page.tsx": {"lines":751,"longLines":1},
-  "apps/web/src/app/(zh-hans)/admin/packages/page.tsx": {"lines":1333,"longLines":2},
+  "apps/web/src/app/(zh-hans)/admin/packages/page.tsx": {"lines":1332,"longLines":2},
   "apps/web/src/app/(zh-hans)/admin/page.tsx": {"lines":544,"longLines":1},
   "apps/web/src/app/(zh-hans)/admin/performance/page.tsx": {"lines":755,"longLines":2},
   "apps/web/src/app/(zh-hans)/admin/prompts/module-skill-editor.tsx": {"longLines":9},
