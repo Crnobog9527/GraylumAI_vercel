@@ -59,9 +59,9 @@ describe('multiplier and q validation', () => {
 });
 
 describe('billing unit settings read', () => {
-  it('a confirmed-missing row keeps the pre-BILL-UNIT fallback, so merging does not move the effective q/m', () => {
+  it('a confirmed-missing row falls back to the Owner-approved production q=100 / m=6', () => {
     expect(billingUnitSettingsFromRows([])).toEqual({
-      creditsPerUsd: '1000', defaultMultiplier: '1.5', source: { creditsPerUsd: 'default', defaultMultiplier: 'default' },
+      creditsPerUsd: '100', defaultMultiplier: '6', source: { creditsPerUsd: 'default', defaultMultiplier: 'default' },
     });
   });
 

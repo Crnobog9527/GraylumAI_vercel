@@ -66,7 +66,7 @@ export default function AdminFinancePage() {
   const modelStats = data?.modelStats ?? [];
   const financeOverview = data?.financeOverview ?? { paidRevenueCents: 0, recordedCostUsd: 0, estimatedProfitUsd: 0,
     creditsConsumed: 0, creditsPurchased: 0, creditsGiven: 0, netCreditsFlow: 0 };
-  const runtimeBilling = data?.runtimeBilling ?? { creditsPerUsd: 1000, tokenPriceMultiplier: 1.5, billingUnitSource: null,
+  const runtimeBilling = data?.runtimeBilling ?? { creditsPerUsd: null, tokenPriceMultiplier: null, billingUnitSource: null,
     activeModelCount: 0, inputCreditsPer1KRange: null, outputCreditsPer1KRange: null, searchCreditsPer1KRange: null,
     searchSurchargeCredits: 0, newUserCredits: 500 };
 
@@ -563,7 +563,7 @@ export default function AdminFinancePage() {
                       </div>
                     </div>
                     <Badge className="bg-blue-500/20 text-blue-400 text-lg px-3">
-                      {runtimeBilling.creditsPerUsd}
+                      {runtimeBilling.creditsPerUsd ?? '未配置'}
                     </Badge>
                   </div>
 
@@ -579,7 +579,7 @@ export default function AdminFinancePage() {
                       </div>
                     </div>
                     <Badge className="bg-purple-500/20 text-purple-400 text-lg px-3">
-                      {runtimeBilling.tokenPriceMultiplier.toFixed(2)}x
+                      {runtimeBilling.tokenPriceMultiplier === null ? '未配置' : `${runtimeBilling.tokenPriceMultiplier.toFixed(2)}x`}
                     </Badge>
                   </div>
 

@@ -4,14 +4,15 @@ import { modelRouter } from './model';
 
 // ADMIN-SECRETS OR-1: one platform OpenRouter key for every model.
 const platformKey = vi.hoisted(() => ({ value: 'sk-or-test' as string | undefined, reads: 0 }));
-vi.mock('../services/models/openRouterKey', () => ({
-  readOpenRouterKey: async (_db: unknown, options?: { fresh?: boolean }) => {
+vi.mock('../services/models/openRouterKey', () => {
+  const read = async (_db: unknown, options?: { fresh?: boolean }) => {
     platformKey.reads += 1;
     if (!options?.fresh) throw new Error('provider calls must read the key fresh');
     return platformKey.value;
-  },
-  openRouterKeyConfigured: async () => platformKey.value !== undefined,
-}));
+  };
+  return { readOpenRouterKey: read, readOpenRouterKeyOrUnset: (db: unknown, options?: { fresh?: boolean }) => read(db, options).catch(() => undefined),
+    openRouterKeyConfigured: async () => platformKey.value !== undefined };
+});
 afterEach(() => { platformKey.value = 'sk-or-test'; platformKey.reads = 0; });
 
 function createSingleQueryBuilder(result: Promise<unknown>) {

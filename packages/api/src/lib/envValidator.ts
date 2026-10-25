@@ -7,6 +7,7 @@
 
 import { z } from 'zod';
 import { openingGrantKeyringIsValid } from './openingGrantKeyring';
+import { logger } from './logger';
 
 // ============================================
 // 环境变量 Schema
@@ -22,6 +23,8 @@ const rejectDuplicatedEnvPrefix = (key: string) =>
     (value) => !hasDuplicatedEnvPrefix(value, key),
     `${key} 的值包含重复的 ${key}= 前缀，请修正环境变量来源`
   );
+
+const optionalString = z.string().optional();
 
 const envSchema = z.object({
   // Node 环境
@@ -105,14 +108,62 @@ const envSchema = z.object({
     .min(1, 'UPSTASH_REDIS_REST_TOKEN 不能为空')
     .regex(/^\S+$/, 'UPSTASH_REDIS_REST_TOKEN 不能包含空白字符'),
 
-  // Rate limit overrides (optional)
-  RATE_LIMIT_AI_MAX_REQUESTS: z.coerce.number().min(1).max(1000).optional(),
-  RATE_LIMIT_AI_STREAM_MAX_REQUESTS: z.coerce.number().min(1).max(500).optional(),
+  // 定时任务、签名和日志
+  CRON_SECRET: z.string().min(1, 'CRON_SECRET 不能为空').optional(),
+  API_SIGNATURE_SECRET: z.string().min(1).optional(),
+  REQUIRE_API_SIGNATURE: optionalString,
+  LOG_LEVEL: optionalString,
 
-  // Circuit Breaker (可选)
-  CIRCUIT_BREAKER_HOURLY_LIMIT: z.coerce.number().min(100).max(100000).optional(),
-  CIRCUIT_BREAKER_DAILY_LIMIT: z.coerce.number().min(1000).max(1000000).optional(),
+  // 已退役，仅用于提示（见 validateEnv）
+  ANTHROPIC_API_KEY: optionalString,
+
+  // 收款：Stripe 对账模式与 Waffo（成对的 test/正式配置，缺哪个由对应功能自己判定）
+  STRIPE_CARD_RECONCILIATION_MODE: optionalString,
+  WAFFO_MERCHANT_ID: optionalString,
+  WAFFO_MERCHANT_NAMESPACE: optionalString,
+  WAFFO_STORE_ID: optionalString,
+  WAFFO_PRIVATE_KEY: optionalString,
+  WAFFO_WEBHOOK_PUBLIC_KEY: optionalString,
+  WAFFO_TEST_OPERATIONS_ENABLED: optionalString,
+  WAFFO_TEST_MERCHANT_ID: optionalString,
+  WAFFO_TEST_MERCHANT_NAMESPACE: optionalString,
+  WAFFO_TEST_STORE_ID: optionalString,
+  WAFFO_TEST_PRIVATE_KEY: optionalString,
+  WAFFO_TEST_WEBHOOK_PUBLIC_KEY: optionalString,
+
+  // Sentry 构建与环境标识
+  SENTRY_ORG: optionalString,
+  SENTRY_PROJECT: optionalString,
+  SENTRY_ENVIRONMENT: optionalString,
+  APP_ENV: optionalString,
+  NEXT_PUBLIC_APP_ENV: optionalString,
+  ENABLE_SENTRY_BUILD_UPLOAD: optionalString,
+
+  // 前端公开配置与功能开关
+  NEXT_PUBLIC_APP_NAME: optionalString,
+  NEXT_PUBLIC_AUTH_APP_URL: optionalString,
+  NEXT_PUBLIC_COMPOSER_REFERENCES: optionalString,
+  NEXT_PUBLIC_LIBRARY_DOCX_EXTRACTION: optionalString,
+  NEXT_PUBLIC_LIBRARY_PDF_EXTRACTION: optionalString,
+  NEXT_PUBLIC_LIBRARY_SCAN_RECOGNITION: optionalString,
+  NEXT_PUBLIC_GA4_MEASUREMENT_ID: optionalString,
+  NEXT_PUBLIC_HCAPTCHA_SITEKEY: optionalString,
+  NEXT_PUBLIC_TERMLY_WEBSITE_UUID: optionalString,
+  NEXT_PUBLIC_VERCEL_ANALYTICS_CATEGORY: optionalString,
+
+  // 平台注入和测试专用
+  CI: optionalString,
+  NEXT_RUNTIME: optionalString,
+  VERCEL: optionalString,
+  VERCEL_ENV: optionalString,
+  VERCEL_TARGET_ENV: optionalString,
+  VERCEL_URL: optionalString,
+  SECURITY_E2E_LOCAL_ONLY: optionalString,
+  V3_RUNTIME_LOCAL_ENDPOINT: optionalString,
 });
+
+/** 代码里允许读取的全部环境变量名；safeguard 测试要求代码里读取的每个环境变量名都在这里。 */
+export const ENV_SCHEMA_KEYS: readonly string[] = Object.keys(envSchema.shape);
 
 /** Only Redis is in this task's deployment preflight; reuse the same schema. */
 export function validateRedisEnvForBuild(): void {
@@ -178,6 +229,10 @@ export function validateEnv(): ValidationResult {
 
     if (!process.env.NEXT_PUBLIC_APP_URL) {
       errors.push('生产环境必须配置 NEXT_PUBLIC_APP_URL');
+    }
+
+    if (!process.env.CRON_SECRET) {
+      errors.push('生产环境必须配置 CRON_SECRET（定时任务会因此全部 500）');
     }
 
     if (!process.env.NEXT_PUBLIC_SITE_NAME) {
@@ -253,35 +308,24 @@ export function validateEnv(): ValidationResult {
 }
 
 /**
- * 在启动时验证并打印结果
+ * 在启动时验证并写日志。缺必填项只记 error（instrumentation 再上报 Sentry），
+ * 不 throw：上线日漏配要看得见，但不能让整站起不来。
  */
-export function validateEnvOnStartup(): void {
+export function validateEnvOnStartup(): ValidationResult {
   const result = validateEnv();
 
-  console.log('========================================');
-  console.log('环境变量验证');
-  console.log('========================================');
-  console.log(`环境: ${result.environment}`);
-  console.log(`状态: ${result.valid ? '✅ 通过' : '❌ 失败'}`);
-
-  if (result.errors.length > 0) {
-    console.log('\n❌ 错误:');
-    result.errors.forEach((err) => console.log(`  - ${err}`));
+  for (const warning of result.warnings) {
+    logger.warn('system', 'env_validation_warning', { environment: result.environment, warning });
   }
-
-  if (result.warnings.length > 0) {
-    console.log('\n⚠️ 警告:');
-    result.warnings.forEach((warn) => console.log(`  - ${warn}`));
+  if (result.valid) {
+    logger.info('system', 'env_validation_passed', { environment: result.environment });
+  } else {
+    logger.error('system', 'env_validation_failed', {
+      environment: result.environment,
+      errors: result.errors,
+    });
   }
-
-  console.log('========================================\n');
-
-  // 在生产环境，如果验证失败则抛出错误
-  if (!result.valid && result.environment === 'production') {
-    throw new Error(
-      `环境变量验证失败:\n${result.errors.join('\n')}`
-    );
-  }
+  return result;
 }
 
 /**

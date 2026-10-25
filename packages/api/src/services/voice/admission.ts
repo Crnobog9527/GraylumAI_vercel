@@ -5,7 +5,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { frozenPaygRunSchema, type BillingRpc, type FrozenCall, type FrozenPaygRun } from '../bill2/service';
 import { PURPOSE_OUTPUT_CAP } from '../bill2/responseCapacity';
 import { RUNTIME_MODEL_COLUMNS, runtimeModelOption, type RuntimeModelRow } from '../models/runtimeEligibility';
-import { openRouterAccount, readOpenRouterKey } from '../models/openRouterKey';
+import { openRouterAccount, readOpenRouterKeyOrUnset } from '../models/openRouterKey';
 import { isPlainOpenRouterModel } from '../openRouterSearch';
 import { admissionDeadline } from '../runtime/admissionLimits';
 import { freezeWindowBillingUnit } from '../runtime/billingUnitAdmission';
@@ -47,7 +47,7 @@ export async function admitVoiceRun(input: { admin: SupabaseClient; actorId: str
   // The same checks as a Fusion member (admitFusionModel), for the organizer purpose and format.
   if (row.is_active !== 'true' || !['openrouter', 'openai', 'anthropic'].includes(row.provider)) throw new Error('VOICE_MODEL_UNAVAILABLE');
   if (!isPlainOpenRouterModel(row.model_id)) throw new Error('VOICE_MODEL_UNAVAILABLE');
-  const key = await readOpenRouterKey(admin, { fresh: true }).catch(() => undefined);
+  const key = await readOpenRouterKeyOrUnset(admin, { fresh: true });
   if (!runtimeModelOption(row, 'organizer', key !== undefined).available) throw new Error('VOICE_MODEL_UNAVAILABLE');
   const quote = window.callPolicies.find(policy => policy.modelId === row.id);
   if (!quote || quote.account !== openRouterAccount(key ?? '') || quote.model !== row.model_id || !quote.providerLimits

@@ -6,6 +6,7 @@ import { readMembershipEntitlements } from '../membershipEntitlements';
 import type { SocialPlatform } from '../research/vendors/types';
 import { billedTikhubRead, settleLeftOpenRun, type BilledReadDeps } from './billedRead';
 import { applyTikhubPartial, applyTikhubRead, tikhubClaimSchema, type TikhubClaim } from './tikhub';
+import { swallow } from '../../lib/swallow';
 
 /**
  * PUBLISH-MONITOR PR-4b (plan §4.2, §6, §8): the daily TikHub step of `/api/cron/social-monitor`. Own Xiaohongshu/Douyin
@@ -67,7 +68,7 @@ export async function runTikhubRefresh(db: Db, deps: Omit<BilledReadDeps, 'admin
     report.claimed += batch.length;
     for (const claim of batch) {
       if (stop || now() >= until) { await settle(db, claim, 'release'); count('release'); continue; }
-      if (!rights.has(claim.actorId)) rights.set(claim.actorId, await entitlementFor(claim.actorId).catch(() => null));
+      if (!rights.has(claim.actorId)) rights.set(claim.actorId, await swallow('publish_monitor_entitlement_read_failed', entitlementFor(claim.actorId), null));
       const right = rights.get(claim.actorId);
       // Unreadable entitlement: leave it for the next run rather than guess (and stop: the next claim is the same row).
       if (!right) { await settle(db, claim, 'release'); count('release'); stop = true; continue; }

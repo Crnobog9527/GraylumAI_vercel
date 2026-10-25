@@ -16,9 +16,10 @@ import {seedUpgrade,verifyUpgrade} from '../pay-erasure-integration/upgrade.mjs'
 import {runCombined} from '../pay-erasure-integration/combined.mjs';
 import {runManifest} from '../pay-erasure-integration/manifest.mjs';
 
-const args=process.argv.slice(2).join(' ');
+const ci=process.argv.slice(2).join(' ')==='--ci'; // MAINT-P1: --ci (CI only) runs the default mode
+const args=ci?'--local-only':process.argv.slice(2).join(' ');
 const modes=['--local-only','--local-only --development','--local-only --from-0186','--local-only --from-0186 --development'];
-if(!modes.includes(args)||process.env.CI)throw new Error('Require explicit local-only mode');
+if(!modes.includes(args)||Boolean(process.env.CI)!==ci)throw new Error('Require explicit local-only mode, or --ci in CI');
 const integrated=args.includes('--from-0186');
 const development=args.endsWith('--development');
 const root=resolve(import.meta.dirname,'../../../..');

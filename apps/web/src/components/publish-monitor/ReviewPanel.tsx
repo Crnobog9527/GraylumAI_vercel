@@ -32,14 +32,19 @@ export function reviewTable(tables: unknown): { rows: Row[]; weeks: Week[] } {
 }
 
 export function ReviewPanel({ gold }: { gold: boolean }) {
-  const reviews = trpc.publishMonitor.review.list.useQuery(undefined, { retry: false });
+  // The weekly review has its own admin switch; while it is off the server answers 403, so do not ask at all.
+  const features = trpc.publishMonitor.features.useQuery(undefined, { retry: false, staleTime: 300_000 });
+  const open = features.data?.weeklyReview === true;
+  const reviews = trpc.publishMonitor.review.list.useQuery(undefined, { retry: false, enabled: open });
   return (
     <section className="space-y-4" aria-labelledby="pm-review">
       <h2 id="pm-review" className="text-base font-semibold">每周复盘</h2>
       <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
         想现在就复盘，可以在<Link className="underline" href="/app/positioning">对话</Link>里说“帮我复盘最近的作品”，按对话正常扣积分。</p>
       {gold && <AutoReviewSwitch />}
-      {reviews.isPending ? <p className="text-sm">正在读取…</p>
+      {features.isPending ? <p className="text-sm">正在读取…</p>
+        : !open ? <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>每周复盘还没有开放。</p>
+        : reviews.isPending ? <p className="text-sm">正在读取…</p>
         : reviews.error ? <p role="alert" className="text-sm">{dataErrorMessage(errorCode(reviews.error))}</p>
           : (reviews.data as Review[]).length === 0 ? <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
             还没有复盘。{gold ? '自动复盘在打开满 7 天后生成第一份。' : ''}</p>

@@ -1,7 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { authoritativeBilling, type BillingRpc } from '../bill2/service';
-import { readOpenRouterKey } from '../models/openRouterKey';
+import { readOpenRouterKeyOrUnset } from '../models/openRouterKey';
 import { createRuntimeBudget, type RuntimeBudget } from '../runtime/budget';
 import { newWorkGate, requireNewWork } from '../runtime/newWorkGate';
 import { refusePositioning, windowBoundKey } from '../runtime/positioningGate';
@@ -15,6 +15,7 @@ import { streamCompareColumn } from './compareColumn';
 import { loadCompareChoice, type CompareRequestInput } from './compareLoad';
 import { estimateCompare, startCompare, type CompareDeps, type CompareEstimate } from './compareStart';
 import { fusionExecutor } from './executor';
+import { logSwallowed, swallow } from '../../lib/swallow';
 
 /** What the live compare needs from the protected context (as the review's liveFlow). */
 export type CompareCtx = { hasSupabaseAdminPrivileges?: boolean; supabaseAdmin?: SupabaseClient | null; user: { id: string };
@@ -26,8 +27,11 @@ type ReadColumn = { column: number; runId: string; body: string | null;
 /** The compare view, after judging any column whose body was saved but whose verdict never got written (a crash between
  * the two): a compare answer has no format to check, so a saved body is usable, as it would have been uninterrupted. Needs
  * only the admin client, so a compare stays readable when the staging call window has closed; settling a judged run is
- * attempted through `settle` and otherwise left to the daily recovery (which settles judged calls). */
-export async function readCompare(admin: SupabaseClient, actorId: string, compareId: string, settle?: () => Promise<(runId: string) => Promise<unknown>>) {
+ * attempted through `settle`. A settlement that fails is never answered as done: it is logged, its run is listed in
+ * `settlementPending`, and the call stays dispatched and unsettled, which is exactly what the daily recovery
+ * (fusion_pending_financial_batch → recoverFusionFinancials) settles; the page shows such a column as "积分结算中". */
+export async function readCompare(admin: SupabaseClient, actorId: string, compareId: string, settle?: () => Promise<(runId: string) => Promise<unknown>>):
+  Promise<{ columns: ReadColumn[]; settlementPending?: string[] } | null> {
   const read = () => compareRpc<{ columns: ReadColumn[] } | null>(admin, 'fusion_compare_read', { p_actor_id: actorId, p_compare_id: compareId });
   const view = await read();
   if (!view) throw new Error('FUSION_COMPARE_DENIED');
@@ -41,12 +45,19 @@ export async function readCompare(admin: SupabaseClient, actorId: string, compar
   const judged: ReadColumn[] = [];
   for (const column of unjudged) {
     const done = await compareRpc(admin, 'fusion_call_verdict', { p_actor_id: actorId, p_call_id: column.call!.callId, p_verdict: 'usable' })
-      .then(() => true, () => false);
+      .then(() => true, error => { logSwallowed('fusion_compare_verdict_repair_failed', error, { category: 'billing', compareId }); return false; });
     if (done) judged.push(column);
   }
-  const settleRun = judged.length ? await settle?.().catch(() => undefined) : undefined;
-  if (settleRun) for (const column of judged) await settleRun(column.runId).catch(() => undefined);
-  return read();
+  if (!judged.length) return read();
+  const settleRun = settle ? await swallow('fusion_compare_settle_unavailable', settle(), undefined, { category: 'billing', compareId }) : undefined;
+  const pending: string[] = [];
+  for (const column of judged) {
+    const settled = settleRun && await settleRun(column.runId).then(() => true,
+      error => { logSwallowed('fusion_compare_settle_failed', error, { category: 'billing', compareId }); return false; });
+    if (!settled) pending.push(column.runId);
+  }
+  const after = await read();
+  return pending.length && after ? { ...after, settlementPending: pending } : after;
 }
 
 /** Stop the whole compare or one column: the database cancels and settles, no provider call is needed. */
@@ -78,7 +89,7 @@ export async function liveCompare(ctx: CompareCtx) {
       const first = modelIds[0];
       const row = first ? await admin.from('ai_models').select('provider,api_endpoint').eq('id', first).maybeSingle() : null;
       const account = window.callPolicies.find(policy => policy.modelId === first)?.account;
-      return windowBoundKey(row?.data ?? null, await readOpenRouterKey(admin, { fresh: true }).catch(() => undefined), account);
+      return windowBoundKey(row?.data ?? null, await readOpenRouterKeyOrUnset(admin, { fresh: true }), account);
     },
     rateLimit: async () => requireNewWork(await gate.message(actorId)) });
   const choose = (input: CompareRequestInput) => loadCompareChoice({ admin, user: ctx.userScopedSupabase, actorId }, input);

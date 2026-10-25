@@ -38,6 +38,7 @@
 
 额外核对：
 
+- 部署启动日志里看到 `env_validation_passed`（没有 `env_validation_failed`；校验失败只记日志和 Sentry，不会让站点起不来）
 - `NEXT_PUBLIC_APP_URL` 不能是 `localhost`
 - Stripe key 模式必须与本次发布意图一致
 - 若要正式收款，应使用 `pk_live_...` / `sk_live_...`

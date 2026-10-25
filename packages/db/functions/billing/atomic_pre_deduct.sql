@@ -20,12 +20,11 @@ DECLARE
   v_grant_granted INTEGER;
   v_grant_consumed INTEGER;
   v_covering_count INTEGER := 0;
-  v_review_required_count INTEGER := 0;
   v_missing_mirror_count INTEGER := 0;
   v_malformed_covering_count INTEGER := 0;
   v_unexpected_status_count INTEGER := 0;
   v_canonical_candidate_count INTEGER := 0;
-  v_quarantined_terminated_amount INTEGER := 0;
+  v_available INTEGER;
   v_to_period INTEGER := 0;
   v_to_other INTEGER;
 BEGIN
@@ -115,29 +114,11 @@ BEGIN
     AND g.period_start <= now()
     AND g.period_end > now();
 
-  -- Global unresolved quarantine: do not attach period_end to either safety
-  -- barrier. A review row remains fail-closed until explicitly transitioned;
-  -- a terminated trusted remainder stays unavailable while in profiles.credits.
-  SELECT
-    count(*) FILTER (WHERE g.accounting_state <> 'trusted'),
-    COALESCE(sum(
-      CASE
-        WHEN g.status = 'granted'
-         AND g.accounting_state = 'trusted'
-         AND public.credit_grant_quarantined(g) -- ARCH-FIX E1
-        THEN GREATEST(g.credits_granted - g.consumed_amount, 0)
-        ELSE 0
-      END
-    ), 0)::INTEGER
-  INTO v_review_required_count, v_quarantined_terminated_amount
-  FROM subscription_credit_grants AS g
-  WHERE g.user_id = p_user_id AND NOT g.dispute_frozen;
-
-  v_quarantined_terminated_amount := v_quarantined_terminated_amount + credit_package_refund_hold(p_user_id) + pay_dispute_pending_hold(p_user_id) -- PAY-D1 reserve-pending
-; -- PAY-REFUND-HOLD
-  IF v_review_required_count > 0 THEN
-    RAISE EXCEPTION 'PRE_DEDUCT_GRANT_ACCOUNTING_REVIEW_REQUIRED';
-  END IF;
+  -- MAINT-P4: the review barrier and every hold (quarantined grants, held packs, pending disputes) come
+  -- from credit_available, the one formula shared by every spend path.
+  -- The formula's earlier patches here (ARCH-FIX E1, -- PAY-REFUND-HOLD, -- PAY-D1 reserve-pending) live in it now;
+  -- their markers stay so that re-running those migrations leaves this function alone.
+  v_available := public.credit_available(p_user_id);
 
   -- PAY-STRIPE-MP upgrade overlap: allow only the paid upgrade's exact prior subscription.
   -- The census still validates EVERY current source. Malformed, frozen, terminated,
@@ -208,7 +189,7 @@ BEGIN
     v_to_other := p_amount - v_to_period;
   END IF;
 
-  IF v_to_other > GREATEST(v_balance_before - v_to_period - v_quarantined_terminated_amount, 0) THEN
+  IF v_to_other > GREATEST(v_available - v_to_period, 0) THEN
     RAISE EXCEPTION 'PRE_DEDUCT_TERMINATED_GRANT_REMAINDER_QUARANTINED';
   END IF;
 

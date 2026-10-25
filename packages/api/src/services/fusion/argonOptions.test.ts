@@ -7,6 +7,7 @@ import type { StagingPolicy } from '../runtime/stagingPolicy';
 
 vi.mock('../models/openRouterKey', async original => ({
   ...(await original<typeof import('../models/openRouterKey')>()), readOpenRouterKey: async () => 'SYNTHETIC_ARGON_KEY',
+  readOpenRouterKeyOrUnset: async () => 'SYNTHETIC_ARGON_KEY',
 }));
 
 const id = '7169edbf-aaa2-414e-ad6d-f79d0751dc16';

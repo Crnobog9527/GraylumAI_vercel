@@ -1,5 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 // Shared PUBLISH-MONITOR local DB fixtures: a member with a business and one brand account on a platform.
+import { readdirSync } from 'node:fs';
+import { resolve } from 'node:path';
 export const fixtureSql = `CREATE SCHEMA IF NOT EXISTS pm_test;
 CREATE OR REPLACE FUNCTION pm_test.member(a uuid,plat text) RETURNS uuid LANGUAGE plpgsql AS $$
 DECLARE sk uuid:=gen_random_uuid();m uuid:=gen_random_uuid();rev uuid:=gen_random_uuid();p uuid:=gen_random_uuid();
@@ -23,9 +25,8 @@ END $$;`;
 // PR-3a refresh migration (file name; number assigned by the controller).
 export const REFRESH_MIGRATION = '0272_publish_monitor_refresh.sql';
 
-// Migrations after `from` that redefine its functions, so a reapplication check replays the chain in order.
-const CHAIN = {
-  '0240': ['packages/db/migrations/0265_publish_monitor_provider_cleanup.sql'],
-  '0246': ['packages/db/migrations/0265_publish_monitor_provider_cleanup.sql', `packages/db/migrations/${REFRESH_MIGRATION}`],
-};
-export const laterRedefinitions = from => CHAIN[from] ?? [];
+// Every later publish-monitor migration after `from`, in order, so a reapplication check replays the chain
+// that really redefines its functions (MAINT-P1: the hand-written list had gone stale once CI ran this suite).
+export const laterRedefinitions = from => readdirSync(resolve(import.meta.dirname, '../../migrations'))
+  .filter(file => /^\d{4}_publish_monitor.*\.sql$/.test(file) && file.slice(0, 4) > from).sort()
+  .map(file => `packages/db/migrations/${file}`);
