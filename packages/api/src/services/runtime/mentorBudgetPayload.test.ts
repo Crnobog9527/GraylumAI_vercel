@@ -95,9 +95,10 @@ it('46KB resource fits configured input; overflowing frozen payload is rejected 
   expect(postgresJsonbBytes(normal.captured().p_billing)).toBeLessThan(262144 - 8192);
   // This fixture sits exactly between the input and payload limits; the identity prefix (on by default)
   // would trip the input limit first, so it is switched off to keep testing the payload guard. The resource is
-  // 400 bytes smaller than before SKILL-I18N-HOOK, whose reply-language rule admission also sizes.
+  // 400 bytes smaller than before SKILL-I18N-HOOK, whose reply-language rule admission also sizes, and 165 smaller again
+  // for the longer v3 wording of that rule (CHAT-LANGUAGE 2026-10-25).
   testIdentityGuard.enabled = false;
-  const oversized = await fixture(161600);
+  const oversized = await fixture(161435);
   try { await expect(oversized.run()).rejects.toThrow('RUNTIME_FROZEN_PAYLOAD_TOO_LARGE'); }
   finally { testIdentityGuard.enabled = true; }
   expect(oversized.writes).toEqual([]);
