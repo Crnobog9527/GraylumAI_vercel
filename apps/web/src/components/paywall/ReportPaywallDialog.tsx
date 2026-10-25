@@ -36,7 +36,9 @@ export function ReportPaywallDialog({ onClose, scene = 'report' }: { onClose: ()
 export type PaywallCheckout = ReturnType<typeof usePaywallCheckout>;
 
 /** The paywall itself, given the plans and purchase action; kept apart so it renders without a server. */
-export function ReportPaywallView({ checkout: fullCheckout, onClose, scene = 'report' }: { checkout: PaywallCheckout; onClose: () => void; scene?: PaywallScene }) {
+export function ReportPaywallView({ checkout: fullCheckout, onClose, scene = 'report' }: {
+  checkout: PaywallCheckout; onClose: () => void; scene?: PaywallScene;
+}) {
   const [billing, setBilling] = useState<PaywallBilling>('monthly');
   // A Gold-only feature offers only the Gold plans (Gold first month and the founder price still come from the server).
   const goldOnly = scene !== 'report';
