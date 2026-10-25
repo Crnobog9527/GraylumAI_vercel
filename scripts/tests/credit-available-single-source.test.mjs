@@ -14,7 +14,10 @@ const files = Object.fromEntries(readdirSync(base, { withFileTypes: true }).filt
 
 // Every hold that credit_available subtracts; a new hold joins this list and credit_available, nowhere else.
 const HOLDS = ['credit_package_refund_hold', 'pay_dispute_pending_hold'];
-const calls = (text, name) => new RegExp(`\\b${name}\\s*\\(`).test(text.replace(/^-- .*$/gm, ''));
+// Other uses that are not a spend gate. credit_source_apply splits a balance movement between credit sources
+// (PR-D0 attribution); it never decides whether credits may be spent.
+const ALSO = { pay_dispute_pending_hold: ['billing/credit_source_apply.sql'] };
+const calls =(text, name) => new RegExp(`\\b${name}\\s*\\(`).test(text.replace(/^-- .*$/gm, ''));
 
 test('credit_available is snapshotted and subtracts every hold', () => {
   const text = files['billing/credit_available.sql'];
@@ -26,7 +29,8 @@ test('credit_available is snapshotted and subtracts every hold', () => {
 test('no other function adds the holds itself', () => {
   for (const hold of HOLDS) {
     const callers = Object.keys(files).filter(path => !path.endsWith(`/${hold}.sql`) && calls(files[path], hold));
-    assert.deepEqual(callers, ['billing/credit_available.sql'], `${hold} is only subtracted by credit_available`);
+    assert.deepEqual(callers, ['billing/credit_available.sql', ...(ALSO[hold] ?? [])].sort(),
+      `${hold} is only subtracted by credit_available`);
   }
 });
 

@@ -33,8 +33,8 @@ SET LOCAL lock_timeout='5s';
 DO $$ DECLARE f record;
 BEGIN
  FOR f IN SELECT * FROM (VALUES
-  ('public.atomic_pre_deduct(uuid,integer,text,uuid)','@PRE_BEFORE@','@PRE_AFTER@'),
-  ('public.bill2_payg_claim(uuid,uuid,integer,jsonb)','@CLAIM_BEFORE@','@CLAIM_AFTER@')) x(sig,before,after) LOOP
+  ('public.atomic_pre_deduct(uuid,integer,text,uuid)','c290fb14d83736fa7c89ab758dab2614','f33cc2e1861286065363ca84c9245618'),
+  ('public.bill2_payg_claim(uuid,uuid,integer,jsonb)','e83cd6d6c2fa0dcd4285f3c6df9f667c','5889aac01284ce771cc0667fbcc88f4c')) x(sig,before,after) LOOP
   IF md5(pg_get_functiondef(f.sig::regprocedure)) NOT IN (f.before,f.after) THEN
    RAISE EXCEPTION 'MAINT_P4_BASE_MISMATCH: %',f.sig;END IF;
  END LOOP;
