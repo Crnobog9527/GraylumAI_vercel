@@ -52,6 +52,7 @@ const stubs: Array<[(id: string) => boolean, string]> = [
   [id => id === 'next/navigation', `export const usePathname=()=>'/app/runtime';export const useRouter=()=>({push(){},replace(url){window.replaced.push(url)}});`],
   [id => id === 'next/link', `import React from 'react';export default function Link(p){return React.createElement('a',p)}`],
   [id => id.endsWith('/strategy-overview-dialog'), 'export function StrategyOverviewDialog(){return null}'],
+  [id => id.endsWith('/layout/LanguageSwitch'), 'export function LanguageSwitch(){return null}'],
   [id => id.endsWith('/use-account-discussion'), 'export const useAccountDiscussion=()=>({opening:false,open(){}});'],
   [id => id.endsWith('/hooks/use-content-erasure'), `export const useContentErasureSync=()=>{};
     export const useAfterContentErasure=()=>async target=>{window.erased.push(target)};`],

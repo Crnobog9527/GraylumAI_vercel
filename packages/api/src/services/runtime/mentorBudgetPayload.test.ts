@@ -7,7 +7,9 @@ import { testIdentityGuard } from '../__tests__/fixtures/runtimeGates';
 import { postgresJsonbBytes } from './payloadSize';
 import { PURPOSE_INPUT_CAPS, PURPOSE_OUTPUT_CAP, type PurposeBudgets } from './purposeBudgets';
 import { packageHash, sha256, type SkillSource } from '../skills/loader';
-import { REPLY_LANGUAGE_INSTRUCTIONS } from './primaryInstructions';
+import { replySettingInstructions } from './replyLanguage';
+// New admissions freeze the profile's reply language; these fixtures' profiles have none (Simplified Chinese).
+const DEFAULT_REPLY_RULE = replySettingInstructions('zh-Hans');
 
 const source = vi.hoisted(() => ({ current: undefined as SkillSource | undefined }));
 vi.mock('../skills/databaseSource', () => ({ databaseSkillSource: () => source.current }));
@@ -84,7 +86,7 @@ const config: PurposeBudgets = { version: 1,
 // The primary call also carries the execution-time reply-language rule (SKILL-I18N-HOOK), which admission sizes;
 // an attached organizer does not.
 function sizedInput(context: Record<string, unknown>, primary = true) {
-  return Buffer.byteLength(JSON.stringify({ instructions: context.instructions + (primary ? REPLY_LANGUAGE_INSTRUCTIONS : ''),
+  return Buffer.byteLength(JSON.stringify({ instructions: context.instructions + (primary ? DEFAULT_REPLY_RULE : ''),
     messages: [{ role: 'user', content: context.input }] })) + 1024;
 }
 it('46KB resource fits configured input; overflowing frozen payload is rejected before the SQL admission', async () => {

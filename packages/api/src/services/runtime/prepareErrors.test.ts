@@ -19,6 +19,7 @@ function fixture(replay:()=>Promise<Response>,settingsFail=false){
   if(path.endsWith('/runtime_session_context'))return json({scope:{kind:'positioning_draft',draftId:id(2)}});
   if(path.endsWith('/runtime_admission_replay'))return replay();
   if(path.endsWith('/system_settings'))return settingsFail?json({code:'08006',message:'synthetic'},503):json([]);
+  if(path.endsWith('/profiles'))return json({reply_language:null});
   if(path.endsWith('/ai_models'))return json({id:id(3),model_id:'fixture',provider:'fixture',is_active:'true',max_tokens:1000,input_limit:32000});
   if(path.endsWith('/runtime_admit'))return json({executionId:id(4)});
   throw new Error('UNEXPECTED_DESTINATION');

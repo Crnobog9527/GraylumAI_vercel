@@ -84,7 +84,7 @@
   "packages/api/src/services/research/tavilyContract.ts": {"longLines":11},
   "packages/api/src/services/research/tavilySchema.ts": {"longLines":2},
   "packages/api/src/services/runtime/actor.ts": {"longLines":1},
-  "packages/api/src/services/runtime/admission.ts": {"longLines":13},
+  "packages/api/src/services/runtime/admission.ts": {"longLines":12},
   "packages/api/src/services/runtime/context.ts": {"longLines":4},
   "packages/api/src/services/runtime/execute.ts": {"longLines":7},
   "packages/api/src/services/runtime/matching.ts": {"longLines":2},

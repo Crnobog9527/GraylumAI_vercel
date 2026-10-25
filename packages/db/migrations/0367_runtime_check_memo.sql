@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
--- DB-PERF PR-7b-B (placeholder number; the controller assigns the final one; applies after 0398).
+-- DB-PERF PR-7b-B (number 0367 assigned by the controller; applies after 0365).
 -- The conversation page (runtime_view -> runtime_history_availability) and the free conversation list
 -- (opc_free_conversations -> runtime_history_available per row) decide "is this saved turn still visible to its owner"
 -- through a long permission chain. Within ONE such call the same sub-checks run again and again with identical
@@ -139,7 +139,7 @@ BEGIN
  RETURN QUERY SELECT r.execution_id,r.available FROM runtime_history_availability_before_memo(p_execution_ids) r;
  PERFORM runtime_check_memo_close(opened);
 END $$;
--- The list keeps its own function: earlier migrations (0348, 0398) patch it by its text and are re-run on the final
+-- The list keeps its own function: earlier migrations (0348, 0365) patch it by its text and are re-run on the final
 -- schema, so its body gets the two scope lines in place instead of being renamed behind a wrapper.
 DO $list$ DECLARE d text;a1 text;a2 text;
 BEGIN
@@ -155,7 +155,7 @@ $a$;
    RAISE EXCEPTION 'DB_PERF_CHECK_MEMO_LIST_MISMATCH'; END IF;
   d:=replace(d,a1,$b$DECLARE conversations jsonb;memo_opened boolean;
 BEGIN
- -- DB-PERF PR-7b-B memo scope: identical permission sub-checks of this list are evaluated once (0399).
+ -- DB-PERF PR-7b-B memo scope: identical permission sub-checks of this list are evaluated once (0367).
  memo_opened:=runtime_check_memo_open();
  PERFORM bill2_actor(p_actor_id);
 $b$);
