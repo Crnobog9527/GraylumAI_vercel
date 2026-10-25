@@ -129,6 +129,11 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
   const historyChecked=historyGuard(executionId,code=>{preflightFailure=code;});
   try{
    let callSequence=0,streamingCall:number|undefined; // streamingCall: the round whose text streams now (stop binding)
+   // DB-PERF: a live PAYG owner knows which sequences can hold no saved response: beyond the calls that existed when
+   // it began, and not claimed by this invocation (its own main calls only move forward; tool slots are tracked).
+   const existingCalls=isPayg&&execution.live&&typeof execution.remainingCalls==='number'
+    ?execution.billing.limits.maxCalls-execution.remainingCalls:undefined;
+   const unsavedSequence=(seq:number)=>existingCalls!==undefined&&seq>existingCalls&&!research?.claimedSubcall?.(seq);
    // The SDK wraps fetch errors; retain only this verified database verdict.
    let responseConflict=false;
    let primaryPolicy=policy;
@@ -145,7 +150,8 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
       waitPoint={epoch:execution.epoch!,sequence,requestHash,phase,state,gatePassed};
       throw new Error(state==='waiting_credits'?'RUNTIME_WAITING_CREDITS':'RUNTIME_WAITING_RESUME');
      };
-     let {sequence,existing}=await responseAfterResearch(seq=>ownerRpc<{callId:string;state:string;rawBody:string|null;retryable?:boolean}|null>(
+     type Saved={callId:string;state:string;rawBody:string|null;retryable?:boolean}|null;
+     let {sequence,existing}=await responseAfterResearch(seq=>unsavedSequence(seq)?Promise.resolve<Saved>(null):ownerRpc<Saved>(
       'runtime_response',{...args,p_sequence:seq,p_request_hash:requestHash}),++callSequence,research,execution.billing.limits.maxCalls).catch(error=>{
       responseConflict=error instanceof Error&&error.message==='RUNTIME_RESPONSE_CONFLICT';throw error;
      });

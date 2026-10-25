@@ -66,11 +66,16 @@ it('persists organizer waiting despite SDK wrapping; resume replays the saved pr
   expect(first).toMatchObject({ state: 'waiting_credits', code: 'RUNTIME_WAITING_CREDITS', cursor: 1, epoch: 1,
     remainingCalls: 1, body: 'body' });
   expect(mock.billing.dispatchOnce).toHaveBeenCalledTimes(1);
+  // DB-PERF: a fresh live call has no saved response to look up first; only the read-back after dispatch remains.
+  const responses = () => f.database.rpc.mock.calls.filter(([name]) => name === 'runtime_response').map(([, a]) => a.p_sequence);
+  expect(responses()).toEqual([1]);
   expect(f.database.rpc.mock.calls.some(([, a]) => a.p_action === 'fail_before_dispatch')).toBe(false);
   f.fund();
   const result = await runtimeExecutor(f.options).execute(id, undefined, { executionId: id, cursor: 1, epoch: 1 });
   expect(result).toMatchObject({ state: 'completed', body: 'body', summary: 'summary' });
   expect(mock.billing.dispatchOnce.mock.calls.map(([id]) => id)).toEqual(['1', '2']);
+  // The resumed owner replays call 1 from its saved response; call 2 is new, so only its read-back is read.
+  expect(responses()).toEqual([1, 1, 2]);
   expect(f.gate.mock.calls.map((args: unknown[]) => args[1])).toEqual([1, 1, 1]);
   expect(f.database.rpc.mock.calls.filter(([, a]) => a.p_action === 'checkpoint_primary')
     .map(([, a]) => (a.p_result as {epoch:number}).epoch)).toEqual([1, 2]);
