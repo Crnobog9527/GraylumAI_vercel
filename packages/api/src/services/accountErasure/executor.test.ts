@@ -77,12 +77,14 @@ it('does not report success when recording the original claim fails', async () =
 it('requires both historical proof and upload quiescence from service SQL', async () => {
   const database = client(); await runAccountErasureExecutor(database as never);
   const proof = mocks.create.mock.calls[0][0].verifyRetainedHistory;
-  for (const data of [{ historyComplete: false, quiescent: true }, { historyComplete: true, quiescent: false }]) {
+  for (const [data, code] of [[{ historyComplete: false, quiescent: true }, 'ERASURE_HISTORY_UNKNOWN'],
+    [{ historyComplete: false, quiescent: false }, 'ERASURE_HISTORY_UNKNOWN'],
+    [{ historyComplete: true, quiescent: false }, 'ERASURE_STORAGE_UNPROVEN']] as const) {
     database.rpc.mockImplementationOnce(() => {
       const promise = Promise.resolve({ data, error: null });
       return Object.assign(promise, { abortSignal: () => promise });
     });
-    await expect(proof(actor, new AbortController().signal)).rejects.toThrow('ERASURE_STORAGE_UNPROVEN');
+    await expect(proof(actor, new AbortController().signal)).rejects.toThrow(code);
   }
 });
 

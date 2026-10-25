@@ -79,7 +79,10 @@ async function runOne(client: SupabaseClient, deadline: number, drainDeadline: n
       const response = await client.rpc('account_erasure_executor_proof', binding).abortSignal(signal);
       if (response.error) throw new Error('ERASURE_PROOF_UNKNOWN');
       const value = proofSchema.parse(response.data);
-      if (!value.historyComplete || !value.quiescent) throw new Error('ERASURE_STORAGE_UNPROVEN');
+      // Separate codes: an account created before upload history was recorded (0197) can never prove it, while
+      // quiescence is a transient wait. Both stop storage cleanup; only the code tells them apart.
+      if (!value.historyComplete) throw new Error('ERASURE_HISTORY_UNKNOWN');
+      if (!value.quiescent) throw new Error('ERASURE_STORAGE_UNPROVEN');
     };
     const host = createAccountErasureHost({
       profileId: claim.profileId, requestId: claim.requestId, client, deadline,

@@ -2,17 +2,31 @@
 import { TRPCError } from '@trpc/server';
 import {throwIfContentErased} from '../accountErasure/content';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { workItemsFrom } from './workItems';
 /** SQL owns scope, history availability and the public result metadata whitelist. */
 export async function readNativeRuntimeView(database: SupabaseClient, actorId: string, sessionId: string) {
-  const data = await readView(database, actorId, sessionId);
-  const hidden = await sourceBoundBodies(database, actorId, data.executions);
+  const view = await database.rpc('runtime_view', { p_actor_id: actorId, p_session_id: sessionId });
+  return hideSourceBound(database, actorId, checkedView(view, sessionId));
+}
+/**
+ * DB-PERF PR-5a: the conversation refresh reads the view and the coach's work rows in one call
+ * (runtime_view_with_work_items). The view keeps every refusal above; the rows stay decorative (none on any problem).
+ */
+export async function readNativeRuntimeViewWithWorkItems(database: SupabaseClient, actorId: string, sessionId: string) {
+  const both = await database.rpc('runtime_view_with_work_items', { p_actor_id: actorId, p_session_id: sessionId });
+  const data = both.data as { view?: unknown; workItems?: unknown } | null;
+  const view = await hideSourceBound(database, actorId, checkedView({ error: both.error, data: data?.view }, sessionId));
+  return { view, workItems: workItemsFrom(data?.workItems) };
+}
+async function hideSourceBound<T extends { executions: unknown[] }>(database: SupabaseClient, actorId: string, data: T): Promise<T> {
+  const hidden = await sourceBoundBodies(database, actorId, data.executions as ViewedExecution[]);
   for (const execution of data.executions as ViewedExecution[]) {
     if (hidden.has(execution.executionId)) { delete execution.body; delete execution.primaryBody; delete execution.summary; }
   }
   return data;
 }
-async function readView(database: SupabaseClient, actorId: string, sessionId: string) {
-  const view = await database.rpc('runtime_view', { p_actor_id: actorId, p_session_id: sessionId });
+type ViewResponse = Pick<Awaited<ReturnType<SupabaseClient['rpc']>>, 'data' | 'error'>;
+function checkedView(view: ViewResponse, sessionId: string) {
   throwIfContentErased(view.error);
   // runtime_view raises this one refusal for another actor's, missing and
   // out-of-scope sessions alike, so the reply never reveals which one it was.

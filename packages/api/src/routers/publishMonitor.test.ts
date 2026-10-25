@@ -198,6 +198,43 @@ describe('publish-monitor one-click publishing', () => {
   });
 });
 
+describe('publish-monitor add a brand account (0347)', () => {
+  const business = '00000000-0000-4000-8000-0000000f0a01';
+  const input = { businessId: business, platform: 'x' as const, account: ' My_Handle ' };
+  const made = { accountProjectId: '00000000-0000-4000-8000-0000000f0a02', businessId: business, platform: 'x',
+    account: 'my_handle', created: true };
+  it('needs a data window, normalizes the name, and hands only validated values to the database', async () => {
+    mocks.limit.mockResolvedValue({ success: true });
+    mocks.entitlements.mockResolvedValue({ ownDataWindowDays: 0 });
+    const rpc = vi.fn().mockResolvedValue({ data: made, error: null });
+    await expect(caller(rpc, true).addAccount(input)).rejects.toMatchObject({ code: 'FORBIDDEN', message: 'PUBLISH_MONITOR_ENTITLEMENT_REQUIRED' });
+    expect(rpc).not.toHaveBeenCalled();
+    mocks.entitlements.mockResolvedValue({ ownDataWindowDays: 30 });
+    await expect(caller(rpc, true).addAccount(input)).resolves.toEqual(made);
+    expect(rpc).toHaveBeenCalledWith('publish_monitor_account_add',
+      { a: actor, p_business: business, p_platform: 'x', p_account: 'my_handle' });
+    await expect(caller(rpc, false).addAccount(input)).rejects.toMatchObject({ message: 'PUBLISH_MONITOR_DISABLED' });
+    for (const bad of [{ ...input, platform: 'tiktok_business' }, { ...input, account: 'Bad Name' }, { ...input, businessId: 'x' }]) {
+      await expect(caller(rpc, true).addAccount(bad as never)).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+    }
+  });
+
+  it('maps each refusal of the database to a distinct, readable answer', async () => {
+    mocks.limit.mockResolvedValue({ success: true });
+    mocks.entitlements.mockResolvedValue({ ownDataWindowDays: 30 });
+    const refuse = (message: string) => vi.fn().mockResolvedValue({ data: null, error: { message } });
+    await expect(caller(refuse('PUBLISH_MONITOR_BUSINESS_NOT_READY'), true).addAccount(input))
+      .rejects.toMatchObject({ code: 'PRECONDITION_FAILED', message: 'PUBLISH_MONITOR_BUSINESS_NOT_READY' });
+    await expect(caller(refuse('PUBLISH_MONITOR_PLATFORM_HAS_ACCOUNT'), true).addAccount(input))
+      .rejects.toMatchObject({ code: 'CONFLICT', message: 'PUBLISH_MONITOR_PLATFORM_HAS_ACCOUNT' });
+    await expect(caller(refuse('PUBLISH_MONITOR_ACCOUNT_EXISTS_ELSEWHERE'), true).addAccount(input))
+      .rejects.toMatchObject({ code: 'CONFLICT', message: 'PUBLISH_MONITOR_ACCOUNT_EXISTS_ELSEWHERE' });
+    await expect(caller(refuse('PUBLISH_MONITOR_BUSINESS_NOT_FOUND'), true).addAccount(input))
+      .rejects.toMatchObject({ code: 'NOT_FOUND', message: 'PUBLISH_MONITOR_BUSINESS_NOT_FOUND' });
+    await expect(caller(refuse('boom'), true).addAccount(input)).rejects.toMatchObject({ message: 'PUBLISH_MONITOR_UNAVAILABLE' });
+  });
+});
+
 describe('publish-monitor own data (PR-3a)', () => {
   const empty = { windowDays: 30, connections: [], posts: [] };
   it('the window comes from the entitlement; a plan without one is refused before any read', async () => {
