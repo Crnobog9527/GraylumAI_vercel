@@ -14,6 +14,9 @@ BEGIN
  -- 0324 archived business guard
  PERFORM opc_assert_business_writable(a,jsonb_build_object('runId',rid));
  SELECT * INTO r FROM bill2_runs WHERE id=rid AND actor_id=a FOR UPDATE;
+ -- DB-100 C2 payload read once: fetch and decompress the TOAST value here, not at every r.payload use.
+ -- A run payload is always a JSON object (bill2_prepare); || '{}' returns it unchanged.
+ r.payload:=r.payload||'{}'::jsonb;
  IF r.id IS NULL OR r.contract_version<>'bill2.v2' THEN RAISE EXCEPTION 'BILL2_RUN_DENIED';END IF;
  PERFORM bill2_payg_lock_models(r);
  PERFORM runtime_billing_allowed(a,r.payload,r.id);
