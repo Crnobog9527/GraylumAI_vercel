@@ -26,7 +26,8 @@ function setup(method = 'card', fields = {}) {
   }, rpc);
   const provider = { merchant: 'fixture', mode: 'test' as const, storeId: 'STO_fixture',
     readPayment: vi.fn().mockResolvedValue(found), listPayments: vi.fn().mockResolvedValue({ rows: [found], complete: true }),
-    readChargebacks: vi.fn().mockResolvedValue([]), cancelSubscription: vi.fn(), readSubscription: vi.fn() };
+    readChargebacks: vi.fn().mockResolvedValue([]), listChargebacks: vi.fn().mockResolvedValue([]),
+    cancelSubscription: vi.fn(), readSubscription: vi.fn() };
   return { db, rpc, provider };
 }
 describe('Waffo one-time delivery and backstop', () => {
@@ -88,6 +89,7 @@ describe('Waffo one-time delivery and backstop', () => {
     expect(result).toMatchObject({ success: false, complete: false, findings: [{ kind: 'scan_incomplete' }] });
     expect(f.provider.listPayments).not.toHaveBeenCalled();
     expect(f.provider.readPayment).not.toHaveBeenCalled();
+    expect(f.provider.listChargebacks).not.toHaveBeenCalled();
   });
   it('late/repeated cash relies on the atomic original-order result and never cancels a one-time order', async () => {
     const f = setup(); f.rpc.mockImplementation(async fn => ({ data: fn === 'pay_failover_fulfill' ? { state: 'review' } : null, error: null }));

@@ -5,13 +5,17 @@ import { readPaymentFacts, type WaffoPayment, type WaffoTestPayments } from './w
 import type { WaffoChargeback } from './waffoTestOperationsClient';
 import { majorToCents } from './purchaseFacts';
 import { deliverWaffoOneTime } from './waffoOneTimeDelivery';
+import { holdWaffoChargebacks } from './waffoChargebacks';
+import type { DisputeAlert } from './disputes';
 
 type Db = Pick<SupabaseClient, 'from' | 'rpc'>;
 type Provider = Pick<WaffoTestPayments, 'listPayments'> & Partial<Pick<WaffoTestPayments, 'readPayment' | 'storeId'>>
-  & { merchant: string; mode: 'test' | 'live'; readChargebacks?: (paymentId: string, deadline?: number) => Promise<WaffoChargeback[]> };
+  & { merchant: string; mode: 'test' | 'live'; readChargebacks?: (paymentId: string, deadline?: number) => Promise<WaffoChargeback[]>;
+    listChargebacks?: (deadline?: number) => Promise<WaffoChargeback[]> };
 export type WaffoFinding = {
   kind: 'paid_not_delivered' | 'paid_in_review' | 'offsite_refund_due' | 'refund_observed'
-    | 'recovery_failed' | 'chargeback_observed' | 'chargeback_amount_unknown' | 'delivered_without_payment' | 'scan_incomplete' | 'receipt_unprocessed';
+    | 'recovery_failed' | 'chargeback_observed' | 'chargeback_amount_unknown' | 'chargeback_unmatched' | 'chargeback_scan_failed'
+    | 'delivered_without_payment' | 'scan_incomplete' | 'receipt_unprocessed';
   paymentId?: string; orderId?: string; reason?: string; receiptId?: string;
   /** Marks a payment a person should consider refunding; nothing is refunded automatically. */
   refundCandidate: boolean;
@@ -65,45 +69,16 @@ function locallySettledRefund(payment: WaffoPayment, value: unknown, provider: P
   } catch { return false; }
 }
 
-const refundedSourceSchema = z.object({ id: z.uuid(), payment_channel: z.literal('waffo'), payment_mode: z.enum(['test', 'live']),
-  merchant_namespace: z.string(), mode: z.literal('payment'), auto_renew: z.literal(false),
-  qualified_paid_at: z.string().datetime({ offset: true }), amount_total: z.number().int().positive(), currency: z.string().regex(/^[a-z]{3}$/) });
-/** Refunding does not erase the original payment's dispute lifecycle. Observe only: never fulfill or refund again. */
-async function observeRefundedChargebacks(db: Db, provider: Provider, payment: WaffoPayment, value: unknown, deadline: number) {
-  const source = refundedSourceSchema.safeParse(value);
-  if (!source.success || !provider.storeId || !provider.readChargebacks
-    || source.data.payment_mode !== provider.mode || source.data.merchant_namespace !== provider.merchant) {
-    throw new Error('PAY_WAFFO_OPERATION_SCOPE');
-  }
-  const order = source.data;
-  const disputes = await provider.readChargebacks(payment.id, deadline);
-  if (disputes.some(d => d.paymentId !== payment.id || d.storeId !== provider.storeId || d.testMode !== (provider.mode === 'test')
-    || !/^[A-Za-z0-9_:-]{1,160}$/.test(d.id) || !Number.isFinite(Date.parse(d.createdAt)))) {
-    throw new Error('PAY_WAFFO_OPERATION_SCOPE');
-  }
-  let unknown = false;
-  for (const dispute of disputes) {
-    let amount = /^[1-9][0-9]{0,8}$/.test(dispute.amount?.amount ?? '') ? Number(dispute.amount!.amount) : null;
-    const currency = /^[A-Z]{3}$/.test(dispute.amount?.currency ?? '') ? dispute.amount!.currency!.toLowerCase() : null;
-    if (currency === order.currency && amount !== null && amount > order.amount_total) amount = null;
-    unknown ||= amount === null || currency === null || currency !== order.currency;
-    const result = await db.rpc('pay_failover_dispute_observed', { p_order: order.id, p_merchant: provider.merchant,
-      p_mode: provider.mode, p_payment: payment.id, p_dispute: dispute.id, p_amount: amount,
-      p_currency: currency, p_observed_at: dispute.createdAt });
-    if (result.error) throw new Error('PAY_WAFFO_DISPUTE_UNAVAILABLE');
-  }
-  return disputes.length ? unknown ? 'chargeback_amount_unknown' as const : 'chargeback_observed' as const : null;
-}
-
 /** Daily backstop for the narrowed scope: compare Waffo's paid records with what we delivered and
  * report differences for manual handling. It never grants, refunds or cancels anything. */
 export async function reconcileWaffoPayments(db: Db, provider: Provider, options?: {
-  recover?: boolean; deadline?: number; afterFulfillment?: (orderId: string) => Promise<unknown>;
+  recover?: boolean; deadline?: number; afterFulfillment?: (orderId: string) => Promise<unknown>; disputeAlert?: DisputeAlert;
 }) {
   const deadline = options?.deadline ?? Date.now() + 45_000;
   const findings: WaffoFinding[] = [];
   const scanned: WaffoPayment[] = [];
   let complete = false;
+  let disputedPayments = new Set<string>();
   for (let page = 0; page < MAX_PAGES && !complete; page++) {
     if (Date.now() >= deadline) break;
     try {
@@ -115,7 +90,7 @@ export async function reconcileWaffoPayments(db: Db, provider: Provider, options
   if (!complete) findings.push({ kind: 'scan_incomplete', refundCandidate: false });
   const paid = scanned.filter(p => p.status === 'succeeded' && p.testMode === (provider.mode === 'test'));
   if (options?.recover) {
-    if (!provider.readPayment || !provider.storeId) throw new Error('PAY_WAFFO_OPERATION_SCOPE');
+    if (!provider.readPayment || !provider.storeId || !provider.listChargebacks) throw new Error('PAY_WAFFO_OPERATION_SCOPE');
     const ids = paid.filter(p => p.onetimeOrder).map(p => p.orderMerchantExternalId)
       .filter((id): id is string => z.uuid().safeParse(id).success);
     const own = new Set((await chunked([...new Set(ids)], part => db.from('payment_orders').select('id')
@@ -143,6 +118,13 @@ export async function reconcileWaffoPayments(db: Db, provider: Provider, options
         }
       } catch { findings.push({ kind: 'recovery_failed', paymentId: candidate.id, refundCandidate: false }); }
     }
+    if (Date.now() < deadline) try {
+      const held = await holdWaffoChargebacks(db, { merchant: provider.merchant, mode: provider.mode, storeId: provider.storeId,
+        listChargebacks: provider.listChargebacks }, deadline, options.disputeAlert);
+      findings.push(...held.findings);
+      disputedPayments = held.disputedPayments;
+      if (!held.complete) complete = false;
+    } catch { findings.push({ kind: 'chargeback_scan_failed', refundCandidate: false }); }
   }
   if (Date.now() >= deadline) {
     complete = false;
@@ -178,17 +160,7 @@ export async function reconcileWaffoPayments(db: Db, provider: Provider, options
     const orderId = orderOf.get(payment.id);
     const order = orderId ? orderById.get(orderId) : undefined;
     if (refunded(payment)) {
-      if (options?.recover && order) {
-        if (Date.now() >= deadline) {
-          complete = false;
-          if (!findings.some(f => f.kind === 'scan_incomplete')) findings.push({ kind: 'scan_incomplete', refundCandidate: false });
-        } else {
-          try {
-            const kind = await observeRefundedChargebacks(db, provider, payment, order, deadline);
-            if (kind) findings.push({ kind, paymentId: payment.id, orderId, refundCandidate: false });
-          } catch { findings.push({ kind: 'recovery_failed', paymentId: payment.id, orderId, refundCandidate: false }); }
-        }
-      }
+      // A chargeback after a refund is held (or superseded) by the store-wide chargeback scan above.
       if (!locallySettledRefund(payment, order, provider, settledRefundRefs)) {
         findings.push({ kind: 'refund_observed', paymentId: payment.id, orderId, refundCandidate: false });
       }
@@ -242,7 +214,9 @@ export async function reconcileWaffoPayments(db: Db, provider: Provider, options
     const fulfilled = new Set((await readOrders([...new Set(allRefs.map(r => r.order_id!))]))
       .filter(o => o.fulfilled_at).map(o => o.id));
     for (const row of allRefs) {
-      if (fulfilled.has(row.order_id) && !paidIds.has(row.external_id!) && !scanned.some(p => p.id === row.external_id && refunded(p))) {
+      // A charged-back payment may leave Waffo's paid list; its chargeback finding already covers it.
+      if (fulfilled.has(row.order_id) && !paidIds.has(row.external_id!) && !disputedPayments.has(row.external_id!)
+        && !scanned.some(p => p.id === row.external_id && refunded(p))) {
         findings.push({ kind: 'delivered_without_payment', paymentId: row.external_id!, orderId: row.order_id!, refundCandidate: false });
       }
     }
