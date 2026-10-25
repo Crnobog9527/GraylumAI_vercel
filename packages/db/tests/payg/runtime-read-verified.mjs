@@ -8,14 +8,16 @@ import {createFixture} from './fixture.mjs';
 export async function runtimeReadVerifiedCases({db,report,setup}) {
   // Same actor, more admitted executions: the reply's frozen lineage (what runtime_billing_allowed walks).
   const ancestors=async(f,n)=>{
-    const ids=[];
+    const turns=[];
     for(let i=0;i<n;i++){
       const g=await createFixture(db,{actor:f.actor,credits:0,threshold:1});
       const s=await rpc(db,'runtime_start',f.actor,randomUUID(),{scope:g.payload.scope});
-      ids.push((await rpc(db,'runtime_admit',f.actor,s.sessionId,randomUUID(),f.context,{...g.payload,input:f.context})).executionId);
+      turns.push({session:s.sessionId,
+        execution:(await rpc(db,'runtime_admit',f.actor,s.sessionId,randomUUID(),f.context,{...g.payload,input:f.context})).executionId});
     }
-    await db.query('INSERT INTO runtime_history_dependencies(execution_id,dependency_id) SELECT $1,unnest($2::uuid[])',[f.execution,ids]);
-    return ids;
+    await db.query('INSERT INTO runtime_history_dependencies(execution_id,dependency_id) SELECT $1,unnest($2::uuid[])',
+      [f.execution,turns.map(t=>t.execution)]);
+    return turns;
   };
   // One read in its own transaction: answer, lineage checks made, and whether it took a transaction id (a lock or write).
   const measured=async sql=>{
@@ -70,7 +72,7 @@ export async function runtimeReadVerifiedCases({db,report,setup}) {
 
   // A history turn marked unavailable after admit is left out of the fast read too; the execution itself marked
   // unavailable is outside the window and refused by the full check.
-  const h=await setup(),[turn]=await ancestors(h,1);
+  const h=await setup(),[{execution:turn}]=await ancestors(h,1);
   await db.query(`INSERT INTO runtime_session_history(session_id,revision,execution_id,item,internal_control)
     VALUES($1,1,$2,'{"role":"user","content":"revoked canary"}',false)`,[h.session,turn]);
   await db.query('UPDATE runtime_executions SET candidate_history=ARRAY[1]::bigint[] WHERE id=$1',[h.execution]);
@@ -96,4 +98,33 @@ export async function runtimeReadVerifiedCases({db,report,setup}) {
     await assert.rejects(measured(items(r)),/BILL2_CALL_POLICY_DENIED/);
   }finally{await db.query("UPDATE ai_models SET is_active='true' WHERE id=$1",[r.payload.modelId]);}
   report.checks.push('permission revoked mid-reply: window reads serve, append/execution/claim are refused, reads refuse after the window');
+
+  // Each way out of the window goes back to the full check: allowed when everything is still permitted, refused once
+  // the reply's model permission is revoked.
+  const exits={
+    expired:expire,
+    notActive:f=>db.query('UPDATE runtime_sessions SET active_execution=NULL WHERE id=$1',[f.session]),
+    runClosed:f=>db.query('UPDATE bill2_runs SET closed=true WHERE id=$1',[f.run]),
+  };
+  for(const [name,leave] of Object.entries(exits)){
+    const x=await setup();await ancestors(x,2);await leave(x);
+    const allowed=await measured(response(x));
+    assert.equal(allowed.value,null,name);assert.ok(allowed.checks>=3,`${name}: full lineage check`);
+    assert.ok((await measured(items(x))).checks>=3,`${name}: full lineage check on history read`);
+    await db.query("UPDATE ai_models SET is_active='false' WHERE id=$1",[x.payload.modelId]);
+    try{
+      await assert.rejects(measured(response(x)),/BILL2_CALL_POLICY_DENIED/,name);
+      await assert.rejects(measured(items(x)),/BILL2_CALL_POLICY_DENIED/,name);
+    }finally{await db.query("UPDATE ai_models SET is_active='true' WHERE id=$1",[x.payload.modelId]);}
+  }
+  report.checks.push('expired window, not the active execution, closed run: each reads through the full check (allowed and refused)');
+
+  // An ancestor's conversation deleted while this reply runs: the fast read keeps serving, the next write is refused.
+  const a=await setup(),[gone]=await ancestors(a,2);
+  assert.equal((await rpc(db,'content_erasure_mark_session',a.actor,gone.session)).status,'deleted');
+  assert.equal((await measured(response(a))).checks,0);
+  await assert.rejects(append(a),/CONTENT_ERASED|RUNTIME_HISTORY_UNAVAILABLE/);
+  await assert.rejects(rpc(db,'runtime_execution',a.actor,a.execution,'read',null),/CONTENT_ERASED|RUNTIME_CONTEXT_REVOKED/);
+  await assert.rejects(rpc(db,'bill2_claim',a.actor,a.run,1,{...a.claimPayload,runtimeEpoch:1}),/CONTENT_ERASED|RUNTIME_HISTORY_UNAVAILABLE/);
+  report.checks.push('ancestor conversation deleted mid-reply: next append, execution step and claim are refused');
 }
