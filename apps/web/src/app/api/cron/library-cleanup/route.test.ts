@@ -13,7 +13,7 @@ beforeEach(()=>{
  vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL','https://synthetic.supabase.co');
  vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY','synthetic-service-value');
  mocks.create.mockReturnValue({synthetic:true});
- mocks.cleanup.mockResolvedValue({checked:2,released:1,pending:1,failed:0,unknownPaths:0,scanCursor:'internal-cursor'});
+ mocks.cleanup.mockResolvedValue({checked:2,released:1,pending:1,failed:0,unknownPaths:0,storageGuard:true,scanCursor:'internal-cursor'});
 });
 it('denies unauthorized cron before any client or cleanup work',async()=>{
  mocks.auth.mockReturnValue(new Response('Unauthorized',{status:401}));
@@ -25,6 +25,11 @@ it('uses the existing cron auth and does not return storage continuation',async(
  const response=await GET(request);
  expect(mocks.auth).toHaveBeenCalledWith(request,'library_cleanup');
  expect(await response.json()).toEqual({success:true,checked:2,released:1,pending:1});
+});
+it('fails the run when the storage write guard is missing',async()=>{
+ mocks.cleanup.mockResolvedValue({checked:0,released:0,pending:0,failed:0,unknownPaths:0,storageGuard:false});
+ const response=await GET(new Request('https://synthetic.test/api/cron/library-cleanup'));
+ expect(response.status).toBe(500);expect((await response.json()).success).toBe(false);
 });
 it('keeps provider errors private',async()=>{
  mocks.cleanup.mockRejectedValue(new Error('private token diagnostic'));
