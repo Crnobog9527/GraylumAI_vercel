@@ -135,7 +135,7 @@ export async function runReportFee({db,Client,connectionString,report}) {
   assert.equal(await wallet(db,poor.actor),PRICE+99-300,'a repeated hold holds once');
   report.checks.push('report price: refused (nothing held) below price + the call hold; administrator price used; repeated hold holds once');
 
-  // ARCH-FIX E1 (0390): a terminated Waffo grant (no stripe_subscription_id) is not spendable for the price check.
+  // ARCH-FIX E1 (0383): a terminated Waffo grant (no stripe_subscription_id) is not spendable for the price check.
   const quarantined = await seed(db);
   await setBalance(db,quarantined.actor,PRICE+100);
   await terminatedGrant(db,quarantined.actor,{kind:'waffo',credits:200});

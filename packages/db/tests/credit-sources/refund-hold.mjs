@@ -191,7 +191,7 @@ try {
   await assert.rejects(() => settle(ops, legacy.order, 'clawback'), /PAY_PACK_REVIEW_NOT_HELD/);
   assert.equal(await balance(u8), 40);
   await c.query(read(migrationPath));
-  await c.query(read('packages/db/migrations/0390_credit_grant_quarantine.sql')); // keep the current source rows (E1)
+  await c.query(read('packages/db/migrations/0383_credit_grant_quarantine.sql')); // keep the current source rows (E1)
   assert.equal(await v('SELECT status v FROM credit_package_sources WHERE id=$1', [legacy.source]), 'reversed',
     'rerunning 0285 marks such a source reversed');
   report.checks.push('a pack already clawed back by the legacy Stripe refund is not held, cannot be clawed back twice, and its source is marked reversed');
@@ -301,10 +301,10 @@ try {
   report.checks.push('settlement is service-role only; the hold and late-clawback helpers are not callable by any client role');
 
   // Reapplying 0285 after the full chain is a structural no-op; each hooked function carries the marker once.
-  // 0390 (ARCH-FIX E1) patches 0285's credit_source_rows, so it is reapplied after it.
+  // 0383 (ARCH-FIX E1) patches 0285's credit_source_rows, so it is reapplied after it.
   const after = await catalog();
   await c.query(read(migrationPath));
-  await c.query(read('packages/db/migrations/0390_credit_grant_quarantine.sql'));
+  await c.query(read('packages/db/migrations/0383_credit_grant_quarantine.sql'));
   assert.deepEqual(await catalog(), after);
   for (const [fn, lines] of Object.entries(HOOKED)) {
     const src = await v('SELECT pg_get_functiondef($1::regprocedure) v', ['public.' + fn]);

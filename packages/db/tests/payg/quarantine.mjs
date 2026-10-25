@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// ARCH-FIX E1 (0390): one quarantine rule for credits of a terminated subscription, matched by subscription_id.
+// ARCH-FIX E1 (0383): one quarantine rule for credits of a terminated subscription, matched by subscription_id.
 // Grants without a stripe_subscription_id (Waffo, wallet, some Stripe MP) were not quarantined by the claim,
 // the review price check or the report price hold; Stripe grants keep their result.
 import assert from 'node:assert/strict';
