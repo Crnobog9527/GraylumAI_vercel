@@ -5,15 +5,6 @@
  */
 
 import { createServiceRoleSupabaseClient, getStripeClient, getStripeWebhookSecret } from '@repo/api/src/services/stripe';
-import {
-  fulfillCreditPackageOrder,
-  fulfillMembershipInvoice,
-  fulfillPaidMembershipCheckoutSession,
-  markMembershipInvoicePaymentFailed,
-  reconcileSubscriptionRefundFromStripeWebhook,
-  syncSubscriptionState,
-  upsertPaymentOrderBySession,
-} from '@repo/api/src/services/stripeFulfillment';
 import { reportPaymentEvidenceConflict } from '@/lib/payment-alert.mjs';
 import { PAYMENT_EVIDENCE_CONFLICT, stripeWebhookErrorCode } from '@repo/api/src/services/payments/stripeWebhookError';
 import { recoverMethodCheckout } from '@repo/api/src/services/payments/walletWebhook';
@@ -21,7 +12,7 @@ import { recoverWalletPaymentFailure } from '@repo/api/src/services/payments/wal
 import { handleCardSubscriptionInvoice, handleCardSubscriptionState } from '@repo/api/src/services/payments/cardSubscriptionWebhook';
 import { handleCardRefund, handlePaymentDispute } from '@repo/api/src/services/payments/cardRefundWebhook';
 import { reportPaymentDispute } from '@/lib/payment-dispute-alert.mjs';
-import { logServerError } from '@/lib/server-log';
+import { logServerError, logServerWarn } from '@/lib/server-log';
 
 export const runtime = 'nodejs';
 
@@ -39,7 +30,7 @@ export async function handleStripeWebhookEvent(
   }
   if (event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded'
     || event.type === 'checkout.session.expired' || event.type === 'checkout.session.async_payment_failed') {
-    // Wallet and PAY-STRIPE-MP card orders never take the legacy recording path below.
+    // Wallet and PAY-STRIPE-MP card orders.
     if (await recoverMethodCheckout(supabase, getStripeClient(), event.data.object.id, event.type, reportPaymentDispute)) return;
   }
   if (event.type === 'invoice.paid' || event.type === 'invoice.payment_succeeded' || event.type === 'invoice.payment_failed') {
@@ -53,7 +44,7 @@ export async function handleStripeWebhookEvent(
   }
   if (event.type === 'charge.refunded' || event.type === 'refund.created' || event.type === 'refund.updated'
     || event.type === 'refund.failed' || event.type === 'charge.refund.updated') {
-    // PAY-STRIPE-MP card orders: external refunds are recorded on the card order; others keep the legacy path.
+    // PAY-STRIPE-MP card orders: external refunds are recorded on the card order.
     const input = event.type === 'charge.refunded' ? { chargeId: event.data.object.id } : { refundId: event.data.object.id };
     if (await handleCardRefund(supabase, getStripeClient(), input, () => reportPaymentEvidenceConflict(event.type))) return;
   }
@@ -61,66 +52,10 @@ export async function handleStripeWebhookEvent(
     await handlePaymentDispute(supabase, getStripeClient(), event, reportPaymentDispute);
     return;
   }
-  switch (event.type) {
-    case 'checkout.session.completed': {
-      const session = await upsertPaymentOrderBySession(supabase, event.data.object, {
-        eventType: event.type,
-      });
-      if (session.mode === 'payment' && session.payment_status === 'paid') {
-        await fulfillCreditPackageOrder(supabase, session);
-      }
-      if (session.mode === 'subscription' && session.payment_status === 'paid') {
-        await fulfillPaidMembershipCheckoutSession(supabase, getStripeClient(), session);
-      }
-      break;
-    }
-    case 'checkout.session.async_payment_succeeded': {
-      const session = await upsertPaymentOrderBySession(supabase, event.data.object, {
-        eventType: event.type,
-      });
-      await fulfillCreditPackageOrder(supabase, session);
-      break;
-    }
-    case 'checkout.session.async_payment_failed': {
-      await upsertPaymentOrderBySession(supabase, event.data.object, {
-        orderStatus: 'failed',
-        eventType: event.type,
-      });
-      break;
-    }
-    case 'checkout.session.expired': {
-      await upsertPaymentOrderBySession(supabase, event.data.object, {
-        orderStatus: 'expired',
-        eventType: event.type,
-      });
-      break;
-    }
-    case 'invoice.payment_succeeded':
-    case 'invoice.paid': {
-      await fulfillMembershipInvoice(supabase, event.data.object);
-      break;
-    }
-    case 'invoice.payment_failed': {
-      await markMembershipInvoicePaymentFailed(supabase, event.data.object);
-      break;
-    }
-    case 'refund.created':
-    case 'refund.updated':
-    case 'refund.failed':
-    case 'charge.refund.updated':
-    case 'charge.refunded': {
-      await reconcileSubscriptionRefundFromStripeWebhook(supabase, event);
-      break;
-    }
-    case 'customer.subscription.created':
-    case 'customer.subscription.updated':
-    case 'customer.subscription.deleted': {
-      await syncSubscriptionState(supabase, event.data.object);
-      break;
-    }
-    default:
-      break;
-  }
+  // ARCH-FIX F2: the legacy Stripe fulfillment fallback is closed. Orders created before PAY-STRIPE-MP (10-12) exist only as
+  // staging test data; production starts from a new database. An event no current handler claims changes no credits:
+  // it is logged and acknowledged so Stripe stops retrying. stripeFulfillment.ts and its tables stay for other callers.
+  logServerWarn('billing', 'stripe_webhook_unclaimed', { eventType: event.type });
 }
 
 export async function POST(request: Request) {

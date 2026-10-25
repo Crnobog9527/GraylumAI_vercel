@@ -14,7 +14,7 @@ vi.mock('@repo/api/src/services/payments/cardSubscriptionWebhook', () => ({
   handleCardSubscriptionInvoice: walletMocks.invoice, handleCardSubscriptionState: walletMocks.subscription }));
 vi.mock('@repo/api/src/services/payments/cardRefundWebhook', () => ({ handleCardRefund: walletMocks.refund, handlePaymentDispute: walletMocks.dispute }));
 
-const alertMocks = vi.hoisted(() => ({ captureMessage: vi.fn(), logServerError: vi.fn() }));
+const alertMocks = vi.hoisted(() => ({ captureMessage: vi.fn(), logServerError: vi.fn(), logServerWarn: vi.fn() }));
 vi.mock('../../../../../apps/web/node_modules/@sentry/nextjs', () => ({ captureMessage: alertMocks.captureMessage }));
 
 const stripeServiceMocks = vi.hoisted(() => ({
@@ -37,6 +37,7 @@ vi.mock('@repo/api/src/services/stripe', () => stripeServiceMocks);
 vi.mock('@repo/api/src/services/stripeFulfillment', () => stripeFulfillmentMocks);
 vi.mock('@/lib/server-log', () => ({
   logServerError: alertMocks.logServerError,
+  logServerWarn: alertMocks.logServerWarn,
 }));
 
 import { handleStripeWebhookEvent, POST } from '../../../../../apps/web/src/app/api/stripe/webhook/route';
@@ -116,12 +117,17 @@ describe('stripe webhook route', () => {
       expect(walletMocks.subscription).toHaveBeenCalledWith({}, undefined, 'sub_card');
       expect(stripeFulfillmentMocks.syncSubscriptionState).not.toHaveBeenCalled();
     });
-  it('keeps legacy invoices and subscriptions on the legacy path', async () => {
-    await handleStripeWebhookEvent({} as never, { type: 'invoice.paid', data: { object: { id: 'in_legacy' } } } as Stripe.Event);
-    expect(stripeFulfillmentMocks.fulfillMembershipInvoice).toHaveBeenCalledTimes(1);
-    await handleStripeWebhookEvent({} as never, { type: 'customer.subscription.updated', data: { object: { id: 'sub_legacy' } } } as Stripe.Event);
-    expect(stripeFulfillmentMocks.syncSubscriptionState).toHaveBeenCalledTimes(1);
-  });
+  // ARCH-FIX F2: the legacy fulfillment fallback is closed. An event no current handler claims changes no credits.
+  it.each(['checkout.session.completed', 'checkout.session.async_payment_succeeded', 'checkout.session.expired',
+    'checkout.session.async_payment_failed', 'invoice.paid', 'invoice.payment_succeeded', 'invoice.payment_failed',
+    'customer.subscription.created', 'customer.subscription.updated', 'customer.subscription.deleted',
+    'refund.created', 'refund.updated', 'refund.failed', 'charge.refund.updated', 'charge.refunded', 'customer.created'])(
+    'acknowledges an unclaimed %s without the legacy fulfillment path', async (type) => {
+      await expect(handleStripeWebhookEvent({} as never, { type, data: { object: { id: 'obj_legacy',
+        mode: 'subscription', payment_status: 'paid' } } } as Stripe.Event)).resolves.toBeUndefined();
+      Object.values(stripeFulfillmentMocks).forEach(mock => expect(mock).not.toHaveBeenCalled());
+      expect(alertMocks.logServerWarn).toHaveBeenCalledExactlyOnceWith('billing', 'stripe_webhook_unclaimed', { eventType: type });
+    });
 
   it('passes the verified asynchronous failure event into wallet reconciliation', async () => {
     const event = { type: 'checkout.session.async_payment_failed', data: { object: { id: 'cs_failed' } } } as Stripe.Event;
@@ -150,7 +156,7 @@ describe('stripe webhook route', () => {
       const constructEvent = vi.fn(stripe.webhooks.constructEvent.bind(stripe.webhooks));
       stripeServiceMocks.getStripeClient.mockReturnValue({ webhooks: { constructEvent } });
       stripeServiceMocks.getStripeWebhookSecret.mockReturnValue('fixture-signature-secret');
-      stripeFulfillmentMocks.upsertPaymentOrderBySession.mockRejectedValue(new Error('write failed', { cause: { message: reason } }));
+      walletMocks.recover.mockRejectedValue(new Error('write failed', { cause: { message: reason } }));
       const response = await POST(new Request('https://example.test/api/stripe/webhook', {
         method: 'POST', headers: { 'stripe-signature': signature }, body: rawBody,
       }));
@@ -210,7 +216,7 @@ describe('stripe webhook route', () => {
   it('keeps a signed event transport failure retryable without a payment conflict alarm', async () => {
     const event = { type: 'invoice.paid', data: { object: { id: 'in_fixture' } } };
     stripeServiceMocks.getStripeClient.mockReturnValue({ webhooks: { constructEvent: () => event } });
-    stripeFulfillmentMocks.fulfillMembershipInvoice.mockRejectedValue(new Error('ETIMEDOUT'));
+    walletMocks.invoice.mockRejectedValue(new Error('ETIMEDOUT'));
     const response = await POST(new Request('https://example.test/api/stripe/webhook', {
       method: 'POST', headers: { 'stripe-signature': 'fixture-signature' }, body: 'fixture-body',
     }));
@@ -220,135 +226,4 @@ describe('stripe webhook route', () => {
     });
     expect(alertMocks.captureMessage).not.toHaveBeenCalled();
   });
-
-  it.each(['refund.created', 'refund.updated', 'refund.failed', 'charge.refund.updated', 'charge.refunded'])(
-    'routes %s to subscription refund grant reconciliation',
-    async (eventType) => {
-      const supabase = { source: 'service-role-client' };
-      const event = {
-        id: `evt_${eventType.replace('.', '_')}`,
-        type: eventType,
-        data: {
-          object: {
-            id: eventType === 'charge.refunded' ? 'ch_test_refunded' : 're_test_refund',
-          },
-        },
-      };
-
-      await handleStripeWebhookEvent(supabase, event as any);
-
-      expect(stripeFulfillmentMocks.reconcileSubscriptionRefundFromStripeWebhook)
-        .toHaveBeenCalledWith(supabase, event);
-      expect(stripeFulfillmentMocks.fulfillCreditPackageOrder).not.toHaveBeenCalled();
-      expect(stripeFulfillmentMocks.fulfillMembershipInvoice).not.toHaveBeenCalled();
-      expect(stripeFulfillmentMocks.fulfillPaidMembershipCheckoutSession).not.toHaveBeenCalled();
-      expect(stripeFulfillmentMocks.markMembershipInvoicePaymentFailed).not.toHaveBeenCalled();
-      expect(stripeFulfillmentMocks.syncSubscriptionState).not.toHaveBeenCalled();
-      expect(stripeFulfillmentMocks.upsertPaymentOrderBySession).not.toHaveBeenCalled();
-    },
-  );
-
-  it('propagates subscription refund reconciliation failures so webhook delivery can retry', async () => {
-    const supabase = { source: 'service-role-client' };
-    const event = {
-      id: 'evt_refund_created_retry_order_missing',
-      type: 'refund.created',
-      data: {
-        object: {
-          id: 're_test_retry_order_missing',
-        },
-      },
-    };
-    const retryError = new Error('subscription refund invoice payment order missing; retry webhook');
-
-    stripeFulfillmentMocks.reconcileSubscriptionRefundFromStripeWebhook
-      .mockRejectedValueOnce(retryError);
-
-    await expect(handleStripeWebhookEvent(supabase, event as any)).rejects.toThrow(retryError);
-    expect(stripeFulfillmentMocks.reconcileSubscriptionRefundFromStripeWebhook)
-      .toHaveBeenCalledWith(supabase, event);
-  });
-
-  it('fulfills paid subscription checkout sessions after recording the session order', async () => {
-    const supabase = { source: 'service-role-client' };
-    const stripe = { source: 'stripe-client' };
-    const session = {
-      id: 'cs_test_paid_subscription',
-      mode: 'subscription',
-      payment_status: 'paid',
-      subscription: 'sub_test_paid_subscription',
-    };
-    const event = {
-      id: 'evt_checkout_session_completed_subscription',
-      type: 'checkout.session.completed',
-      data: {
-        object: session,
-      },
-    };
-
-    stripeServiceMocks.getStripeClient.mockReturnValue(stripe);
-    stripeFulfillmentMocks.upsertPaymentOrderBySession.mockResolvedValue(session);
-
-    await handleStripeWebhookEvent(supabase, event as any);
-
-    expect(stripeFulfillmentMocks.upsertPaymentOrderBySession).toHaveBeenCalledWith(supabase, session, {
-      eventType: 'checkout.session.completed',
-    });
-    expect(stripeFulfillmentMocks.fulfillPaidMembershipCheckoutSession)
-      .toHaveBeenCalledWith(supabase, stripe, session);
-    expect(stripeFulfillmentMocks.fulfillCreditPackageOrder).not.toHaveBeenCalled();
-    expect(stripeFulfillmentMocks.fulfillMembershipInvoice).not.toHaveBeenCalled();
-  });
-
-  it.each(['invoice.payment_succeeded', 'invoice.paid'])(
-    'routes %s to membership invoice fulfillment',
-    async (eventType) => {
-      const supabase = { source: 'service-role-client' };
-      const invoice = {
-        id: `in_${eventType.replace('.', '_')}`,
-        status: 'paid',
-      };
-      const event = {
-        id: `evt_${eventType.replace('.', '_')}`,
-        type: eventType,
-        data: {
-          object: invoice,
-        },
-      };
-
-      await handleStripeWebhookEvent(supabase, event as any);
-
-      expect(stripeFulfillmentMocks.fulfillMembershipInvoice)
-        .toHaveBeenCalledWith(supabase, invoice);
-      expect(stripeFulfillmentMocks.upsertPaymentOrderBySession).not.toHaveBeenCalled();
-      expect(stripeFulfillmentMocks.fulfillCreditPackageOrder).not.toHaveBeenCalled();
-      expect(stripeFulfillmentMocks.fulfillPaidMembershipCheckoutSession).not.toHaveBeenCalled();
-    },
-  );
-
-  it.each(['customer.subscription.created', 'customer.subscription.updated'])(
-    'routes %s to subscription state sync',
-    async (eventType) => {
-      const supabase = { source: 'service-role-client' };
-      const safeEventType = eventType.replace(/\./g, '_');
-      const subscription = {
-        id: `sub_${safeEventType}`,
-        status: 'active',
-      };
-      const event = {
-        id: `evt_${safeEventType}`,
-        type: eventType,
-        data: {
-          object: subscription,
-        },
-      };
-
-      await handleStripeWebhookEvent(supabase, event as any);
-
-      expect(stripeFulfillmentMocks.syncSubscriptionState)
-        .toHaveBeenCalledWith(supabase, subscription);
-      expect(stripeFulfillmentMocks.fulfillMembershipInvoice).not.toHaveBeenCalled();
-      expect(stripeFulfillmentMocks.fulfillPaidMembershipCheckoutSession).not.toHaveBeenCalled();
-    },
-  );
 });
