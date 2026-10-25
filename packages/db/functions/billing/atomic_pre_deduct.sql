@@ -62,6 +62,18 @@ BEGIN
     RAISE EXCEPTION '用户不存在: %', p_user_id;
   END IF;
 
+  -- ARCH-FIX E3: a concurrent call with the same request committed while this one waited for the profile lock.
+  IF p_request_id IS NOT NULL THEN
+    SELECT id INTO v_existing_id FROM billing_history
+    WHERE user_id = p_user_id AND operation_type = 'pre_deduct' AND metadata->>'requestId' = p_request_id::TEXT;
+    IF v_existing_id IS NOT NULL THEN
+      SELECT metadata->>'balance_before',metadata->>'balance_after' INTO v_balance_before,v_balance_after
+      FROM billing_history WHERE id = v_existing_id;
+      RETURN QUERY SELECT v_existing_id,COALESCE(v_balance_before::INTEGER,0),COALESCE(v_balance_after::INTEGER,0),TRUE;
+      RETURN;
+    END IF;
+  END IF;
+
   IF p_amount <= 0 THEN
     RAISE EXCEPTION '预扣积分必须为正数: %', p_amount;
   END IF;
