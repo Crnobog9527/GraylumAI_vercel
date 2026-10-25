@@ -105,8 +105,9 @@
   `baseline/` 为准。数据库改动的验证要求见 AGENTS.md 第 4 节，上正式环境须 Owner 批准（第 1 节）。
 - 对外返回稳定的错误码（例如 `OPC_*`、`RUNTIME_*`），由前端映射成用户能看懂的提示；
   内部异常用 `packages/api/src/lib/publicError.ts` 包装，不把原始错误返回给前端。
-- 服务端日志用 `packages/api/src/lib/logger.ts`。新增必需的环境变量要加到
-  `packages/api/src/lib/envValidator.ts` 的校验里。
+- 服务端日志用 `packages/api/src/lib/logger.ts`。代码里读取的每个环境变量都必须出现在
+  `packages/api/src/lib/envValidator.ts` 的 schema 里（`envSchemaCoverage.test.ts` 会检查；可选的写 `.optional()`）；
+  启动时 `apps/web/src/instrumentation.ts` 调一次校验，缺必填项只记日志和 Sentry，不 throw。
 
 ### 数据库文件建库与指纹
 
