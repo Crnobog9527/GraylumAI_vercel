@@ -12,6 +12,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { POSTGRES_IMAGE } from './v3/images.mjs';
 import { buildFromFiles, buildPlan, installPgCronStub } from './baseline/build-from-files.mjs';
+import { judgeVolatility, loadAllow, volatilityViolationsSql } from './baseline/volatility-check.mjs';
 import { compareSnapshots, renderSnapshots, snapshotSql, writeSnapshots } from './baseline/function-snapshots.mjs';
 
 const args = process.argv.slice(2);
@@ -149,6 +150,14 @@ try {
     const audit = ok(psql(read('packages/db/tests/account-open-policy-audit.sql')), 'Account-open audit');
     report.accountOpenAudit = audit ? audit.split('\n') : [];
     if (report.accountOpenAudit.length > 0) report.failed = { step: 'account-open-policy-audit' };
+    // MAINT-P1 (A1): PostgREST runs STABLE/IMMUTABLE functions read-only, so none may write or lock rows.
+    const volatile = ok(psql(volatilityViolationsSql()), 'Volatility scan');
+    report.volatilityViolations = judgeVolatility(volatile ? volatile.split('\n') : [], loadAllow(root));
+    if (report.volatilityViolations.length > 0) report.failed ??= { step: 'volatility-scan' };
+    // The scan must see a STABLE function that locks rows (probe created and rolled back in one session).
+    const volatileProbe = ok(psql(`BEGIN;CREATE FUNCTION public.volatility_probe() RETURNS int LANGUAGE plpgsql STABLE AS $$
+      BEGIN PERFORM 1 FROM profiles FOR UPDATE; RETURN 1; END $$;\n${volatilityViolationsSql()}\nROLLBACK;`), 'volatility probe');
+    if (!/^public\.volatility_probe\(\) \[STABLE\] for update$/m.test(volatileProbe)) report.failed ??= { step: 'volatility-scan probe' };
     // DATA-ERASURE T17: erased tables keep a working guard, and every owner table is wired into erasure.
     for (const [key, file] of [['erasureConstraintAudit', 'erasure-constraint-audit'], ['erasureCoverageAudit', 'erasure-coverage-audit']]) {
       const rows = ok(psql(read(`packages/db/tests/${file}.sql`)), file);
