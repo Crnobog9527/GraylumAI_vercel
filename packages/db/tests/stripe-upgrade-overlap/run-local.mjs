@@ -184,6 +184,7 @@ try {
   sql(read('packages/db/migrations/0326_paywall_fusion_archive_fence.sql'));
   sql(read('packages/db/migrations/0383_credit_grant_quarantine.sql')); // ARCH-FIX E1 patches atomic_pre_deduct
   sql(read('packages/db/migrations/0385_billing_ledger_constraints.sql')); // ARCH-FIX E3 patches atomic_pre_deduct
+  sql(read('packages/db/migrations/0399_credit_available.sql')); // MAINT-P4 replaces atomic_pre_deduct's hold formula
   assert.deepEqual(objects(),finalCatalog,'reapplying after rollback restores the complete final catalog');
   cases.push('migration-interruption-rolls-back','migration-repeat-unchanged','rollback-preserves-financial-data','reapply-converges');
   console.log(JSON.stringify({result:'PASS',build,cases}));

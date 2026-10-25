@@ -112,6 +112,8 @@ BEGIN
  -- The balance already excludes all pre-deductions. Subtract only unavailable grant remainder.
  PERFORM id FROM subscription_credit_grants WHERE user_id=a ORDER BY id FOR UPDATE;
  avail:=greatest(credit_available(a),0); -- MAINT-P4 one formula: review barrier and every hold
+ -- Its earlier patches here (ARCH-FIX E1, -- PAY-REFUND-HOLD, -- PAY-D1 claim-pending) live in credit_available;
+ -- their markers stay so that re-running those migrations leaves this function alone.
  IF avail<l THEN
   UPDATE bill2_runs SET paused_reason='insufficient_credits',version=version+1 WHERE id=rid;
   RETURN jsonb_build_object('id',NULL,'state','waiting_credits','dispatchToken',NULL);

@@ -60,7 +60,7 @@ export async function creditAvailableCases({db,Client,connectionString,report,cr
     const f=await createFixture(db);
     await terminatedGrant(db,f.actor,{credits:10,terminated:false});
     if (frozenGrant) await freeze(db,f.actor,10);
-    await db.query("UPDATE subscription_credit_grants SET accounting_state='review_required' WHERE user_id=$1",[f.actor]);
+    await db.query("UPDATE subscription_credit_grants SET accounting_state='review_required',accounting_review_reason='local fixture' WHERE user_id=$1",[f.actor]);
     const before=await balance(db,f.actor);
     await assert.rejects(claim(db,f,1,false),/PRE_DEDUCT_GRANT_ACCOUNTING_REVIEW_REQUIRED/,'claim frozen='+frozenGrant);
     await assert.rejects(preDeduct(db,f.actor,1),/PRE_DEDUCT_GRANT_ACCOUNTING_REVIEW_REQUIRED/,'pre-deduct frozen='+frozenGrant);

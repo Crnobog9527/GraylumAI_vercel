@@ -33,8 +33,8 @@ SET LOCAL lock_timeout='5s';
 DO $$ DECLARE f record;
 BEGIN
  FOR f IN SELECT * FROM (VALUES
-  ('public.atomic_pre_deduct(uuid,integer,text,uuid)','c290fb14d83736fa7c89ab758dab2614','f33cc2e1861286065363ca84c9245618'),
-  ('public.bill2_payg_claim(uuid,uuid,integer,jsonb)','e83cd6d6c2fa0dcd4285f3c6df9f667c','5889aac01284ce771cc0667fbcc88f4c')) x(sig,before,after) LOOP
+  ('public.atomic_pre_deduct(uuid,integer,text,uuid)','c290fb14d83736fa7c89ab758dab2614','73af343796ab0b01acac2a9e84755579'),
+  ('public.bill2_payg_claim(uuid,uuid,integer,jsonb)','e83cd6d6c2fa0dcd4285f3c6df9f667c','10c93696aade98551e6647260046978f')) x(sig,before,after) LOOP
   IF md5(pg_get_functiondef(f.sig::regprocedure)) NOT IN (f.before,f.after) THEN
    RAISE EXCEPTION 'MAINT_P4_BASE_MISMATCH: %',f.sig;END IF;
  END LOOP;
@@ -173,6 +173,8 @@ BEGIN
 
   -- MAINT-P4: the review barrier and every hold (quarantined grants, held packs, pending disputes) come
   -- from credit_available, the one formula shared by every spend path.
+  -- The formula's earlier patches here (ARCH-FIX E1, -- PAY-REFUND-HOLD, -- PAY-D1 reserve-pending) live in it now;
+  -- their markers stay so that re-running those migrations leaves this function alone.
   v_available := public.credit_available(p_user_id);
 
   -- PAY-STRIPE-MP upgrade overlap: allow only the paid upgrade's exact prior subscription.
@@ -397,6 +399,8 @@ BEGIN
  -- The balance already excludes all pre-deductions. Subtract only unavailable grant remainder.
  PERFORM id FROM subscription_credit_grants WHERE user_id=a ORDER BY id FOR UPDATE;
  avail:=greatest(credit_available(a),0); -- MAINT-P4 one formula: review barrier and every hold
+ -- Its earlier patches here (ARCH-FIX E1, -- PAY-REFUND-HOLD, -- PAY-D1 claim-pending) live in credit_available;
+ -- their markers stay so that re-running those migrations leaves this function alone.
  IF avail<l THEN
   UPDATE bill2_runs SET paused_reason='insufficient_credits',version=version+1 WHERE id=rid;
   RETURN jsonb_build_object('id',NULL,'state','waiting_credits','dispatchToken',NULL);

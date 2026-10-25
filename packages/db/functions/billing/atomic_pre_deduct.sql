@@ -116,6 +116,8 @@ BEGIN
 
   -- MAINT-P4: the review barrier and every hold (quarantined grants, held packs, pending disputes) come
   -- from credit_available, the one formula shared by every spend path.
+  -- The formula's earlier patches here (ARCH-FIX E1, -- PAY-REFUND-HOLD, -- PAY-D1 reserve-pending) live in it now;
+  -- their markers stay so that re-running those migrations leaves this function alone.
   v_available := public.credit_available(p_user_id);
 
   -- PAY-STRIPE-MP upgrade overlap: allow only the paid upgrade's exact prior subscription.
