@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// ARCH-FIX E2 (0391): billing_reconcile_day counts the day in the database and checks every settled call and both
+// ARCH-FIX E2 (0386): billing_reconcile_day counts the day in the database and checks every settled call and both
 // credit-source ledgers. Runs last, so its window covers every call the suite settled: none may be flagged.
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';

@@ -213,7 +213,7 @@ describe('diagnostics routed client contract', () => {
 describe('billing diagnostic service uses only real read paths', () => {
   it.each(['healthy', 'query failure', 'mismatch'] as const)('keeps three read-only probes and reports the unavailable stop-loss monitor: %s', async mode => {
     const writes: string[] = [];
-    // 0071/0391 grant research_billing_summary and billing_reconcile_day to service_role only, so reconciliation reads
+    // 0071/0386 grant research_billing_summary and billing_reconcile_day to service_role only, so reconciliation reads
     // them through the admin client; the user-scoped client is never asked for a billing RPC.
     const rpc = vi.fn(() => { throw new Error('User-scoped billing RPC is not granted'); });
     const from = vi.fn((table: string) => {
