@@ -215,7 +215,9 @@ it.each(['charged', 'uncharged', 'live-lease', 'unknown-cost'] as const)
     expect(holding).toBeGreaterThan(0);
     expect(stuck.credits).toBe(100 - charged - holding);
     // Age only this disposable fixture.
-    const lease = mode === 'live-lease' ? '30 seconds' : '10 minutes';
+    // The charged round already saved its reply (checkpoint before the organizer claim), so the reply recovery gets the
+    // first 15 minutes (see the saved-reply case below); it is aged past that grace here.
+    const lease = mode === 'live-lease' ? '30 seconds' : mode === 'charged' ? '20 minutes' : '10 minutes';
     await f.db.query("update runtime_executions set created_at=now()-interval '20 minutes' where id=$1", [f.admitted.executionId]);
     await f.db.query(`update bill2_calls set created_at=now()-interval '20 minutes',dispatch_deadline=now()-$2::interval,
       dispatched_at=case when dispatched_at is null then null else now()-interval '20 minutes' end where run_id=$1`,

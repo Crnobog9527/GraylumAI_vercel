@@ -3950,7 +3950,7 @@
   "fn:runtime_history_availability(uuid[])": "3c3f5f886f67",
   "fn:runtime_history_available(uuid)": "3de8f734b3e0",
   "fn:runtime_interrupt_capacity(uuid,uuid,bigint,text)": "1875e9ebe384",
-  "fn:runtime_interrupted_recovery(uuid,uuid,bigint,integer)": "b1e81ab0d688",
+  "fn:runtime_interrupted_recovery(uuid,uuid,bigint,integer)": "d90875bf896d",
   "fn:runtime_library_propagate(uuid,integer)": "c120a0811650",
   "fn:runtime_library_read(uuid,uuid,text)": "a4215b8231dc",
   "fn:runtime_library_references_freeze()": "ec77142388c8",
