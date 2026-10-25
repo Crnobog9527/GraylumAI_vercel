@@ -66,6 +66,8 @@ it('persists organizer waiting despite SDK wrapping; resume replays the saved pr
   expect(first).toMatchObject({ state: 'waiting_credits', code: 'RUNTIME_WAITING_CREDITS', cursor: 1, epoch: 1,
     remainingCalls: 1, body: 'body' });
   expect(mock.billing.dispatchOnce).toHaveBeenCalledTimes(1);
+  // DB-PERF: the receipt this invocation recorded was settled inside bill2_record; no second settlement round trip.
+  expect(mock.billing.finalizeRun).not.toHaveBeenCalled();
   // DB-PERF: a fresh live call has no saved response to look up first; only the read-back after dispatch remains.
   const responses = () => f.database.rpc.mock.calls.filter(([name]) => name === 'runtime_response').map(([, a]) => a.p_sequence);
   expect(responses()).toEqual([1]);
@@ -74,6 +76,8 @@ it('persists organizer waiting despite SDK wrapping; resume replays the saved pr
   const result = await runtimeExecutor(f.options).execute(id, undefined, { executionId: id, cursor: 1, epoch: 1 });
   expect(result).toMatchObject({ state: 'completed', body: 'body', summary: 'summary' });
   expect(mock.billing.dispatchOnce.mock.calls.map(([id]) => id)).toEqual(['1', '2']);
+  // Only the replayed call 1 settles through finalizeRun; the live call 2 settled in its own record.
+  expect(mock.billing.finalizeRun).toHaveBeenCalledTimes(1);
   // The resumed owner replays call 1 from its saved response; call 2 is new, so only its read-back is read.
   expect(responses()).toEqual([1, 1, 2]);
   expect(f.gate.mock.calls.map((args: unknown[]) => args[1])).toEqual([1, 1, 1]);
@@ -81,6 +85,18 @@ it('persists organizer waiting despite SDK wrapping; resume replays the saved pr
     .map(([, a]) => (a.p_result as {epoch:number}).epoch)).toEqual([1, 2]);
   expect(f.database.rpc.mock.calls.find(([, a]) => a.p_action === 'complete')?.[1].p_result)
     .toMatchObject({epoch:2,value:{body:'body',summary:'summary'}});
+});
+it('a receipt saved through the pending-receipt path still settles through finalizeRun', async () => {
+  const f = fixture();
+  f.fund();
+  mock.billing.dispatchOnce.mockImplementation(async (callId, request) => {
+    f.raw.set(Number(callId), JSON.stringify({ usage: { sdkResponse: { model: JSON.parse(request).model,
+      choices: [{ message: { content: 'reply' } }] } } }));
+    return { dispatched: true, pendingReceipt: { runId: id, callId, evidence: {} } };
+  });
+  expect(await runtimeExecutor(f.options).execute(id)).toMatchObject({ state: 'completed' });
+  expect(f.database.rpc.mock.calls.some(([name]) => name === 'runtime_receipt_saved')).toBe(true);
+  expect(mock.billing.finalizeRun).toHaveBeenCalledTimes(2);
 });
 it('checks the next actual call again and denies it before BILL2 can claim or dispatch', async () => {
   const f = fixture(); f.fund();
