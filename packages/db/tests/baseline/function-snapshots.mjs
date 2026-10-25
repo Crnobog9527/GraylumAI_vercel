@@ -10,7 +10,7 @@ import { dirname, resolve } from 'node:path';
 export const FUNCTIONS_DIR = 'packages/db/functions';
 // group directory -> function-name pattern (anchored, POSIX regex on pg_proc.proname)
 export const GROUPS = {
-  billing: '^(bill2_|atomic_)',
+  billing: '^(bill2_|atomic_|credit_)',
   runtime: '^runtime_',
   erasure: '^(account_erasure_|content_erasure_)',
   pay: '^pay_',

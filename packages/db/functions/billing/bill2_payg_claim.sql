@@ -8,7 +8,7 @@ CREATE OR REPLACE FUNCTION public.bill2_payg_claim(a uuid, rid uuid, seq integer
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 DECLARE r bill2_runs;c bill2_calls;w runtime_test_windows;n integer;used numeric;used_calls bigint;
- cfg jsonb;threshold jsonb;avail integer;quarantine bigint;g numeric;h integer;q record;u numeric;m_call numeric;l numeric;
+ cfg jsonb;threshold jsonb;avail integer;g numeric;h integer;q record;u numeric;m_call numeric;l numeric;
 BEGIN
  -- 0326 Fusion run archive guard
  -- 0324 archived business guard
@@ -111,14 +111,9 @@ BEGIN
  END IF;
  -- The balance already excludes all pre-deductions. Subtract only unavailable grant remainder.
  PERFORM id FROM subscription_credit_grants WHERE user_id=a ORDER BY id FOR UPDATE;
- IF EXISTS(SELECT 1 FROM subscription_credit_grants WHERE user_id=a AND accounting_state<>'trusted') THEN
-  RAISE EXCEPTION 'PRE_DEDUCT_GRANT_ACCOUNTING_REVIEW_REQUIRED';END IF;
- SELECT coalesce(sum(greatest(qg.credits_granted-qg.consumed_amount,0)),0) INTO quarantine
- FROM subscription_credit_grants qg WHERE qg.user_id=a AND qg.status='granted' AND qg.accounting_state='trusted'
- AND credit_grant_quarantined(qg); -- ARCH-FIX E1
- quarantine:=quarantine+credit_package_refund_hold(a)+pay_dispute_pending_hold(a) -- PAY-D1 claim-pending
-; -- PAY-REFUND-HOLD
- avail:=greatest(avail-quarantine,0);
+ avail:=greatest(credit_available(a),0); -- MAINT-P4 one formula: review barrier and every hold
+ -- Its earlier patches here (ARCH-FIX E1, -- PAY-REFUND-HOLD, -- PAY-D1 claim-pending) live in credit_available;
+ -- their markers stay so that re-running those migrations leaves this function alone.
  IF avail<l THEN
   UPDATE bill2_runs SET paused_reason='insufficient_credits',version=version+1 WHERE id=rid;
   RETURN jsonb_build_object('id',NULL,'state','waiting_credits','dispatchToken',NULL);

@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 
 const state = vi.hoisted(() => ({
   connections: {} as Record<string, unknown>, data: {} as Record<string, unknown>, library: {} as Record<string, unknown>,
-  reviews: {} as Record<string, unknown>,
+  reviews: {} as Record<string, unknown>, features: {} as Record<string, unknown>, reviewAsked: [] as boolean[],
 }));
 const mutation = vi.hoisted(() => () => ({ mutate: () => {}, mutateAsync: async () => ({}), isPending: false, error: null,
   data: undefined }));
@@ -19,7 +19,8 @@ vi.mock('@/trpc/client', () => ({ trpc: {
     addBenchmark: { useMutation: mutation }, connectTikhub: { useMutation: mutation }, manualImport: { useMutation: mutation },
     settings: { useQuery: () => ({ data: { autoReviewEnabled: true, autoReviewEnabledAt: '2026-10-20T00:00:00Z' } }) },
     setAutoReview: { useMutation: mutation },
-    review: { list: { useQuery: () => state.reviews } },
+    features: { useQuery: () => state.features },
+    review: { list: { useQuery: (_: unknown, o?: { enabled?: boolean }) => { state.reviewAsked.push(o?.enabled !== false); return state.reviews; } } },
   },
 } }));
 import { DataReviewView } from './DataReviewView';
@@ -39,6 +40,8 @@ beforeEach(() => {
   state.data = ok({ windowDays: 30, connections: [], posts: [] });
   state.library = ok({ businesses: [] });
   state.reviews = ok([]);
+  state.features = ok({ ownData: true, weeklyReview: true, publish: false });
+  state.reviewAsked = [];
 });
 
 describe('data review page access follows the server', () => {
@@ -94,6 +97,15 @@ describe('accounts', () => {
     expect(t).toContain('还没读到作品，如果你已经发过，请重新授权');
     expect(t).not.toContain('本周没有发内容');
   });
+  it('calls a never-read new connection "首次更新中", and a stale one "数据更新延迟"', () => {
+    const delayed = (id: string) => new Map([[id, { id, refreshError: null, delayed: true, manualRefreshAt: null, refreshState: null }]]);
+    const show = (c: Connection) => text(renderToStaticMarkup(<ConnectionsPanel brands={[]} connections={[c]}
+      refresh={delayed(c.id)} gold={false} onChanged={() => {}} />));
+    const fresh = show(own({ lastSuccessAt: null, postCount: 0 }));
+    expect(fresh).toContain('首次更新中');
+    expect(fresh).not.toContain('数据更新延迟');
+    expect(show(own({}))).toContain('数据更新延迟');
+  });
   it('lets a manual-only or re-authorizing account be connected, and blocks only a live real connection', () => {
     const ids = blockingProjectIds([own({ accountProjectId: 'live' }), own({ id: 'm', accountProjectId: 'manual', source: 'manual' }),
       own({ id: 'r', accountProjectId: 'reauth', status: 'reauth_required' }), own({ id: 'q', accountProjectId: 'quar', status: 'quarantined' }),
@@ -122,5 +134,10 @@ describe('reviews', () => {
   it('says the weekly review is not open when the review switch is off', () => {
     state.reviews = failed('PUBLISH_MONITOR_REVIEW_DISABLED');
     expect(text(renderToStaticMarkup(<ReviewPanel gold />))).toContain('每周复盘还没有开放。');
+  });
+  it('does not ask for the reviews at all while the review switch is off', () => {
+    state.features = ok({ ownData: true, weeklyReview: false, publish: false });
+    expect(text(renderToStaticMarkup(<ReviewPanel gold />))).toContain('每周复盘还没有开放。');
+    expect(state.reviewAsked).toEqual([false]);
   });
 });

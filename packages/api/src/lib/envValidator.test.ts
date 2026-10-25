@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { validateEnv, validateEnvOnStartup, getSafeEnvSummary } from './envValidator';
+import { logger } from './logger';
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -18,6 +19,7 @@ function applyBaseEnv(): void {
     NEXT_PUBLIC_SUPPORT_EMAIL: 'support@example.com',
     DATABASE_URL: 'postgresql://postgres:password@example.supabase.co:6543/postgres',
     SENTRY_AUTH_TOKEN: `sntrys_${'a'.repeat(32)}`,
+    CRON_SECRET: 'synthetic-cron-secret',
   };
 }
 
@@ -47,18 +49,38 @@ describe('validateEnv', () => {
     expect(getSafeEnvSummary().OPENING_GRANT_HMAC_KEYS_SET).toBe('✓');
   });
 
-  it('explicit validator invocation rejects a missing or malformed HMAC keyring without logging its value', () => {
+  it('startup validation reports a missing or malformed HMAC keyring without throwing or logging its value', () => {
     process.env.NODE_ENV = 'production';
-    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const error = vi.spyOn(logger, 'error').mockImplementation(() => {});
     try {
       delete process.env.OPENING_GRANT_HMAC_KEYS;
-      expect(() => validateEnvOnStartup()).toThrow(/OPENING_GRANT_HMAC_KEYS/);
+      expect(validateEnvOnStartup().valid).toBe(false);
       process.env.OPENING_GRANT_HMAC_KEYS = 'test-only-malformed-keyring';
-      expect(() => validateEnvOnStartup()).toThrow(/OPENING_GRANT_HMAC_KEYS/);
-      expect(JSON.stringify(log.mock.calls)).not.toContain('test-only-malformed-keyring');
+      expect(validateEnvOnStartup().valid).toBe(false);
+      expect(error).toHaveBeenCalledTimes(2);
+      expect(JSON.stringify(error.mock.calls)).toContain('OPENING_GRANT_HMAC_KEYS');
+      expect(JSON.stringify(error.mock.calls)).not.toContain('test-only-malformed-keyring');
     } finally {
-      log.mockRestore();
+      error.mockRestore();
     }
+  });
+
+  it('startup validation logs a pass when everything required is configured', () => {
+    const info = vi.spyOn(logger, 'info').mockImplementation(() => {});
+    try {
+      expect(validateEnvOnStartup().valid).toBe(true);
+      expect(info).toHaveBeenCalledWith('system', 'env_validation_passed', expect.anything());
+    } finally {
+      info.mockRestore();
+    }
+  });
+
+  it('production requires CRON_SECRET', () => {
+    process.env.NODE_ENV = 'production';
+    delete process.env.CRON_SECRET;
+    const result = validateEnv();
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(error => error.includes('CRON_SECRET'))).toBe(true);
   });
 
   it('rejects DATABASE_URL values polluted with a duplicated key prefix', () => {

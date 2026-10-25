@@ -2,7 +2,7 @@
 
 One file per function name (overloads share a file), grouped as:
 
-- `billing/` — `bill2_*`, `atomic_*`
+- `billing/` — `bill2_*`, `atomic_*`, `credit_*`
 - `runtime/` — `runtime_*`
 - `erasure/` — `account_erasure_*`, `content_erasure_*`
 - `pay/` — `pay_*`

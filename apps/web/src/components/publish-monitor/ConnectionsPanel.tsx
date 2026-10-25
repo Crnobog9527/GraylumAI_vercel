@@ -69,7 +69,7 @@ export function ConnectionsPanel({ brands, connections, refresh, gold, onChanged
 function stateLine(c: Connection, refresh: RefreshState | undefined): string {
   if (c.status !== 'connected') return CONNECTION_STATUS[c.status] ?? c.status;
   if (refresh?.refreshError) return '数据更新失败，会自动重试';
-  if (refresh?.delayed) return '数据更新延迟';
+  if (refresh?.delayed) return c.lastSuccessAt ? '数据更新延迟' : '首次更新中';
   if (c.source === 'postforme' && c.lastSuccessAt && c.postCount === 0) return '还没读到作品，如果你已经发过，请重新授权';
   return `最后更新于 ${formatTime(c.lastSuccessAt)}`;
 }
