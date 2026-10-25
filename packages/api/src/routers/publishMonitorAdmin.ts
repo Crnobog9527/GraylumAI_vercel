@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { TRPCError } from '@trpc/server';
 import { adminProcedure, router } from '../trpc';
+import { readQuotaUsage } from '../services/publishMonitor/quota';
 import { readStuckCleanup, requeueInput, requeueStuckCleanup, resolveStuckCleanup } from '../services/publishMonitor/stuckCleanup';
 
 /**
@@ -15,6 +16,8 @@ async function safe<T>(hasAdmin: boolean, work: () => Promise<T>): Promise<T> {
 }
 
 export const publishMonitorAdminRouter = router({
+  // This period's publish count against the Post for Me plan (read only; what the Owner compares with the usage report).
+  quota: adminProcedure.query(({ ctx }) => safe(ctx.hasSupabaseAdminPrivileges, () => readQuotaUsage(ctx.supabaseAdmin))),
   stuck: adminProcedure.query(({ ctx }) => safe(ctx.hasSupabaseAdminPrivileges, () => readStuckCleanup(ctx.supabaseAdmin))),
   requeue: adminProcedure.input(requeueInput).mutation(({ ctx, input }) =>
     safe(ctx.hasSupabaseAdminPrivileges, () => requeueStuckCleanup(ctx.supabaseAdmin, input))),
