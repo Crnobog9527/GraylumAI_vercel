@@ -16,6 +16,7 @@ import {runProcessor} from './processor.mjs';
 import {runLeaves} from './leaves.mjs';
 import {runOwnedRuntimePrune} from './owned-runtime-prune.mjs';
 import {runOwnedSessionPrune} from './owned-session-prune.mjs';
+import {runResearchRetained} from './research-retained.mjs';
 import {runConcurrency} from './concurrency.mjs';
 import {startRedisDouble} from './redis-double.mjs';
 
@@ -119,6 +120,7 @@ try {
  await runLeaves(client,report);
  await runOwnedSessionPrune(client,report);
  await runOwnedRuntimePrune(client,report);
+ await runResearchRetained(client,report);
  await runConcurrency({db:client,Client,connectionString,report});
  const {processAccountErasure}=await import(module('processor'));
  await runProcessor(client,processAccountErasure,report);

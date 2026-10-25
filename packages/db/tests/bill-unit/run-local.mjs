@@ -11,7 +11,10 @@ import { buildFromFiles, installPgCronStub } from '../baseline/build-from-files.
 import { cases } from './cases.mjs';
 
 const development = process.argv.slice(2).join(' ') === '--local-only --development';
-if ((!development && process.argv.slice(2).join(' ') !== '--local-only') || process.env.CI) throw new Error('Require --local-only');
+const ci = process.argv.slice(2).join(' ') === '--ci'; // MAINT-P1b: --ci (CI only) runs the default mode
+if ((!development && !ci && process.argv.slice(2).join(' ') !== '--local-only') || Boolean(process.env.CI) !== ci) {
+  throw new Error('Require --local-only, or --ci in CI');
+}
 const root = resolve(import.meta.dirname, '../../../..');
 const read = (path) => readFileSync(resolve(root, path), 'utf8');
 const run = (cmd, args, input) => spawnSync(cmd, args, { input, encoding: 'utf8', cwd: root,
@@ -43,57 +46,60 @@ try {
   installPgCronStub(root, name, (argv, input) => ok(docker(['exec', ...argv], input)));
   const outcome = (r) => ({ ok: r.status === 0 && !r.error, error: r.stderr });
   const originals = JSON.parse(read('packages/db/tests/bill-unit/source-md5.json'));
-  let before;
+  // MAINT-P1b: the 0157 structural checks run at 0157's place in the chain. Later migrations (PAYG and on)
+  // redefine bill2_claim/bill2_finalize, so replaying 0157 or its rollback on the finished database means nothing.
+  let before, once;
   report.build = buildFromFiles(root, {
     applyFile: (path) => {
-      if (path === migrationPath && !before) {
-        for (const [sig, md5] of Object.entries(originals)) {
-          assert.equal(ok(sql(`SELECT md5(pg_get_functiondef('${sig}'::regprocedure));`)), md5, sig);
-        }
-        report.checks.push('source md5 before 0157: 2/2');
-        before = snapshot();
+      if (path !== migrationPath || before) return outcome(sql(read(path)));
+      for (const [sig, md5] of Object.entries(originals)) {
+        assert.equal(ok(sql(`SELECT md5(pg_get_functiondef('${sig}'::regprocedure));`)), md5, sig);
       }
-      return outcome(sql(read(path)));
+      report.checks.push('source md5 before 0157: 2/2');
+      before = snapshot();
+      const applied = outcome(sql(migration));
+      if (!applied.ok) return applied;
+      once = snapshot();
+      ok(sql(migration));
+      assert.deepEqual(snapshot(), once, 'repeat 0157 is a structural no-op');
+      report.checks.push('0157 canonical application and replay: identical full catalog');
+
+      // Source drift must abort before the column, helper or any function changes.
+      ok(sql(rollback));
+      assert.deepEqual(snapshot(), before, 'no-data structural rollback restores the exact catalog');
+      ok(sql(`CREATE OR REPLACE FUNCTION bill2_finalize(p_actor_id uuid,p_run_id uuid) RETURNS jsonb LANGUAGE plpgsql
+        SECURITY DEFINER SET search_path=public,pg_temp AS $$ BEGIN RETURN '{}'; END $$;`));
+      const drift = snapshot();
+      const refused = sql(migration);
+      assert.notEqual(refused.status, 0);
+      assert.match(refused.stderr, /BILL_UNIT_SOURCE_MISMATCH/);
+      assert.deepEqual(snapshot(), drift, 'source drift leaves the catalog untouched');
+      report.checks.push('source drift rejects atomically; no-data rollback restores the exact pre-0157 catalog');
+
+      // Rebuild cleanly: restore the original finalize from the rollback text, then reapply 0157.
+      const originalFinalize = rollback.slice(rollback.indexOf('CREATE OR REPLACE FUNCTION public.bill2_finalize'),
+        rollback.indexOf('DROP FUNCTION public.bill2_admin_call_report'));
+      ok(sql(originalFinalize));
+      assert.deepEqual(snapshot(), before);
+      ok(sql(migration));
+      assert.deepEqual(snapshot(), once, 'reapply after rollback reproduces the same catalog');
+
+      // A pre-existing price_multiplier of another type aborts the whole migration.
+      ok(sql(rollback));
+      ok(sql('ALTER TABLE ai_models ADD COLUMN price_multiplier text;'));
+      const typed = sql(migration);
+      assert.notEqual(typed.status, 0);
+      assert.match(typed.stderr, /BILL_UNIT_PRICE_MULTIPLIER_TYPE_MISMATCH/);
+      ok(sql('ALTER TABLE ai_models DROP COLUMN price_multiplier;'));
+      ok(sql(migration));
+      report.checks.push('a pre-existing price_multiplier of another type aborts 0157 and changes nothing');
+      return applied;
     },
     applyServerOnly: (input) => outcome(docker(['exec', name, 'psql', '-X', '-qAt', '-U', 'postgres', '-d', 'billunit', '-c', input])),
     fingerprint: development ? undefined : snapshot,
   });
   assert.equal(report.build.failed, null, JSON.stringify(report.build.failed));
-  assert.ok(before, '0157 must be applied through the canonical build plan');
-  const once = snapshot();
-  ok(sql(migration));
-  assert.deepEqual(snapshot(), once, 'repeat 0157 is a structural no-op');
-  report.checks.push('0157 canonical application and replay: identical full catalog');
-
-  // Source drift must abort before the column, helper or any function changes.
-  ok(sql(rollback));
-  assert.deepEqual(snapshot(), before, 'no-data structural rollback restores the exact catalog');
-  ok(sql(`CREATE OR REPLACE FUNCTION bill2_finalize(p_actor_id uuid,p_run_id uuid) RETURNS jsonb LANGUAGE plpgsql
-    SECURITY DEFINER SET search_path=public,pg_temp AS $$ BEGIN RETURN '{}'; END $$;`));
-  const drift = snapshot();
-  const refused = sql(migration);
-  assert.notEqual(refused.status, 0);
-  assert.match(refused.stderr, /BILL_UNIT_SOURCE_MISMATCH/);
-  assert.deepEqual(snapshot(), drift, 'source drift leaves the catalog untouched');
-  report.checks.push('source drift rejects atomically; no-data rollback restores the exact pre-0157 catalog');
-
-  // Rebuild cleanly: restore the original finalize from the rollback text, then reapply 0157.
-  const originalFinalize = rollback.slice(rollback.indexOf('CREATE OR REPLACE FUNCTION public.bill2_finalize'),
-    rollback.indexOf('DROP FUNCTION public.bill2_admin_call_report'));
-  ok(sql(originalFinalize));
-  assert.deepEqual(snapshot(), before);
-  ok(sql(migration));
-  assert.deepEqual(snapshot(), once, 'reapply after rollback reproduces the same catalog');
-
-  // A pre-existing price_multiplier of another type aborts the whole migration.
-  ok(sql(rollback));
-  ok(sql('ALTER TABLE ai_models ADD COLUMN price_multiplier text;'));
-  const typed = sql(migration);
-  assert.notEqual(typed.status, 0);
-  assert.match(typed.stderr, /BILL_UNIT_PRICE_MULTIPLIER_TYPE_MISMATCH/);
-  ok(sql('ALTER TABLE ai_models DROP COLUMN price_multiplier;'));
-  ok(sql(migration));
-  report.checks.push('a pre-existing price_multiplier of another type aborts 0157 and changes nothing');
+  assert.ok(once, '0157 must be applied through the canonical build plan');
 
   const require = createRequire(resolve(root, 'packages/api/package.json'));
   const { Client } = require('pg');

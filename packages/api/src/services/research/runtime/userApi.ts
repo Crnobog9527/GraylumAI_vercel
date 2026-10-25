@@ -159,6 +159,14 @@ const shortfallCard = z.object({
   choice: z.enum(['continue', 'generate']).nullable(), confirmationId: id.nullable(),
   chosenQualified: z.number().int().nullable(), chosenRounds: z.number().int().nullable(), chosenAt: z.string().nullable(),
 });
+/**
+ * The session's discovery round that stopped on its reply's lookup allowance and is still waiting for its next reply, or
+ * null. A page reload cannot lose it (the stream's own signal can): BENCHMARK-COVERAGE auto-continue reads it back.
+ */
+export async function researchUnfinishedRound(db: Db | null, actor: string, sessionId: string) {
+  return parse(z.object({ discoveryId: id, executionId: id, replies: z.number().int().positive() }).nullable(),
+    await rpc(db, 'research_user_unfinished_round', { a: actor, s: id.parse(sessionId) }));
+}
 export const shortfallChoiceInput = z.object({ cardId: id, choice: z.enum(['continue', 'generate']) }).strict();
 export async function researchShortfall(db: Db | null, actor: string, sessionId: string) {
   return parse(z.object({ rounds: z.number().int(), qualified: z.number().int(), card: shortfallCard.nullable() }),

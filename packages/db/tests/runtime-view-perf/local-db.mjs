@@ -9,7 +9,9 @@ import { POSTGRES_IMAGE } from '../v3/images.mjs';
 import { buildFromFiles, installPgCronStub } from '../baseline/build-from-files.mjs';
 export const root = resolve(import.meta.dirname, '../../../..');
 export const read = path => readFileSync(resolve(root, path), 'utf8');
-export async function localDb() {
+// beforeApply(path, sql): optional, runs synchronously before each repository file is applied (sql(text) runs
+// psql on the build database), so a suite can seed data at the point in the chain it is about.
+export async function localDb({ beforeApply } = {}) {
   // MAINT-P1: --local-only on a developer machine, --ci in CI (run-local-suites.mjs); never the other way round.
   const ci = process.argv[2] === '--ci';
   assert.equal(process.argv[2], ci ? '--ci' : '--local-only');
@@ -36,7 +38,7 @@ export async function localDb() {
     installPgCronStub(root,name,(args,input)=>ok(docker(['exec',...args],input)));
     const outcome = r=>({ok:r.status===0&&!r.error,error:r.stderr});
     const build = buildFromFiles(root, {
-      applyFile: path=>outcome(sql(read(path))),
+      applyFile: path=>{ beforeApply?.(path, input=>ok(sql(input))); return outcome(sql(read(path))); },
       applyServerOnly: input=>outcome(docker(['exec',name,'psql','-X','-qAt','-U','postgres','-d','perf','-c',input])),
     });
     assert.equal(build.failed,null,JSON.stringify(build.failed));

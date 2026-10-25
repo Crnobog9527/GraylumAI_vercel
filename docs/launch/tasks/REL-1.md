@@ -60,6 +60,8 @@
 | 11 | 自由对话研究工具 | ① 4 个场景真实调用并逐条扣费；② 删除整段对话后研究证据被清；③ TikHub 价格每日刷新和到期告警已上线；④ 三家供应商硬上限已设、后台勾"已设硬上限" | [#1264](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1264) 验收；[#1294](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1294)（0346） | ① PASS；② 等 #1292；③ #1294 在途；④ Owner 设 | 研究工具/对标窗口；Codex；Owner |
 | 12 | 成果夹 + 付费墙曝光 | ① 成果夹保存、查看、重复保存不重复；② 选题窗口里的成果（第 11 步）；③ 付费墙曝光事件 `paywall_view` 发出（GA4 上线后第一周才定，不发不挡上线，但要记录结果） | [#1268](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1268)、[#1269](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1269)、[#1288](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1288)、[#1255](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1255) | ① PASS；② 待补验；③ 未核实 | Codex |
 
+**2026-10-26 逐个定性**：44 个实施中任务的结论和每个核心项还差什么见 [REL-1-TASK-AUDIT-2026-10-26](REL-1-TASK-AUDIT-2026-10-26.md)（上表“现状”栏截至 10-24 晚）。
+
 **验收排队建议**（Codex 一次只能跑一个浏览器任务）：最难、最可能再失败的先跑——兜底 B → 对比合并轮 → LOAD-SKILL + 文风 →
 一键发布不真发 7 步 → 注销浏览器部分 → 付款和注册 → 评审团剩余项 → 成果夹第 11 步。
 验收提示词放在对应 PR 的 `Validation handoff` 评论里，结果也回写到那个 PR。
@@ -98,7 +100,7 @@
 | --- | --- | --- |
 | 正式 Supabase 项目 `Graylum_main` | 已新建（Owner 2026-10-17 选新建）；区域 us-west-1（旧版建议 us-west-2，已建不能改，和 Vercel sfo1、Upstash sfo1 同在美西）；10-22 已升级 Pro、换 Micro | 总控记录 |
 | Vercel | 已是 Pro；正式项目 `graylum-ai-vercel-v1` 暂停中、函数区域 sfo1 | 总控记录 |
-| 定时任务频率（旧 A2） | `apps/web/vercel.json` 已是 Pro 频率：`runtime-recovery` 每分钟（也负责发止损告警）、`account-erasure` 和 `library-cleanup` 每 5 分钟、`social-monitor` 每 10 分钟（作品复盘开关关着时空转）。**只是频率改好了**，资料库清理积压演练不在 #1158 里，仍是开放门槛（第 1.2 节第 7 项⑥） | [#1158](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1158) |
+| 定时任务频率（旧 A2） | `apps/web/vercel.json` 已是 Pro 频率：`runtime-recovery` 每分钟（也负责发止损告警）、`account-erasure` 和 `library-cleanup` 每 5 分钟、`social-monitor` 每 10 分钟（作品复盘开关关着时空转）、`fusion-recovery` 每 10 分钟（MAINT-P3b：评审团/对比里已派发且过了派发期限 10 分钟的未结算调用，不等每日对账）。**只是频率改好了**，资料库清理积压演练不在 #1158 里，仍是开放门槛（第 1.2 节第 7 项⑥） | [#1158](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1158) |
 | 正式 Upstash Redis | 已建，`UPSTASH_REDIS_REST_URL` / `_TOKEN` 已加到 Production | 总控记录 |
 | Resend | `graylum.com` 发信域名已验证 | 总控记录 |
 | Stripe 正式 | 已开通 Managed Payments；续费、卡到期、扣款失败提醒由 Stripe 发（我方不再发卡类续费提醒） | 总控记录；Master Plan 第 2.1 节 2026-10-19 |
@@ -131,6 +133,7 @@
 | Q1 | 总控 | 确认第 1.2 节 12 项在 staging 上全部 PASS 且对应冻结版本（标"（正式）"的部分除外，见第 1.1 节第 5 条）；冻结版本的 CI、独立审查都对应同一个版本；`pnpm audit --audit-level high` 0 高危 | 记录贴在冻结版本的 PR 上 |
 | Q2 | 总控 | 准备**批准包**：正式项目、域名、冻结版本、迁移清单、每组配置值、各家上限金额（Owner 已设的读回值）、冒烟预算；没读过的正式事实标 NOT_RUN | 批准包发 Owner |
 | Q3 | ★ Owner 批准 | 同意冻结版本和批准包（第 6 节可复制句） | 总控记下 Owner 原话 |
+| Q4 | 总控 | 建正式站前核对三地区一致：Supabase 正式项目 us-west-1、Vercel 正式项目 Function Region = sfo1、Upstash 正式 Redis us-west-1，三者一致才继续（Owner 2026-10-26，Master Plan 第 2.1 节） | 三项只读读回值写进批准包；任何一项不一致就停下来报告，不继续建库和部署 |
 
 ### 3.3 建库日：维护态（站点保持暂停、`stopNewCalls` 开着、付款路由关着）
 
@@ -145,7 +148,7 @@
 | B4 | ★ Owner 批准 → 总控 | 正式准入档案 `runtime_payg_production`（结构同 staging，去掉 windowId 和到期日；模型 id 字符串和线路可照抄取证，`ai_models` 的 uuid 要用正式库的）。**必须覆盖**：对话和报告模型（Claude、Gemini）；整理模型（`v3_summary_model_id` 指向 GPT-6 Luna）要有 `organizer` 用途、`serial-tools-v6-reasoning` 格式和报价（文风生成用它）；评审团三位评审和汇总；对比四个模型的 `fusion_compare` 用途和 `fusion-text-v1-stream` 格式；自由对话研究工具 `maxTools` ≥5、定位导师回合 ≥9；档案用途上限 9 | 读回；应急关闭写 `{"enabled":false}` |
 | B5 | ★ Owner 批准 → 总控 | 付款配置：`payment_terms_version`＝`{"version":"<已发布版本>"}`（对象）；Stripe 正式目录绑定写进 `payment_provider_refs`（第 3.6 节 S4 的 SQL，每个套餐/积分包/方式/周期恰好一条当前 live 映射）；`launch_baseline_at`（建库后、第一笔真钱前）；微信、支付宝 `annualVerified=true`（路由 `enabled` 仍关）；新购买渠道 `payment_method_routes.newPurchaseChannel` 缺省就是 `stripe`，读回即可（旧键 `payment_new_purchase_channel` 只剩后台旧面板读取，写不写不影响用户） | 逐个读回；会员页 `termsVersion` 不为空、可结账 |
 | B6 | ★ Owner 批准 → 总控 | 限流和停止：`runtime_rate_limits` 消息 10/分钟、200/天，调用 30/分钟、600/天，`stopNewCalls`＝开 | 读回 |
-| B7 | ★ Owner 批准 → 总控 | 功能配置（取值来自 Owner 已定的决定）：对比 `fusion_settings.compare`（允许 Sonnet/Gemini/Sol/Opus 的正式 uuid，默认 Sonnet 5.5、Gemini 3.8 Flash、GPT-6.1 Sol，`minModels`=2，`answerOutputTokens`=8192，`maxBudgetUsd`=3.5）；Sol、Opus 的 `config.reasoning.purposes.interactive` 加低思考档；`allow_fusion_compare` 和评审团只给 Gold；研究工具 `chat_research_tools_enabled`、`research_tools_config`（三家供应商 `enabled` 且 `hardCapAttested`、已验证平台、每条回答子调用 ≤12）、`billing_provider_prices`（未过期）、`billing_payg_start_thresholds`；资料库 `library_agent_read_enabled`、`chat_library_retrieval_enabled`、`chat_my_posts_enabled`、`library_upload_enabled`、`library_scan_recognition_enabled`；作品复盘 `publish_monitor_enabled`（JSON 布尔 `true`）、`_review_enabled`、`_review_model_id`、`_review_max_usd`=`"0.30"`；一键发布 `publish_monitor_publish_platforms`（名单见第 7 节 E1）、`publish_monitor_publish_quota`（条数和 Post for Me 套餐一致，不填就不能发布）、`publish_monitor_publish_listed`；P3 的独占项目确认后才打开孤儿清扫删除 `publish_monitor_orphan_sweep_delete`（默认只记录不删）；写作 Skill `modules.uses_user_voice`（`short-video-script`、`post-and-article`、`video-storyboard`、`video-editing-guide`）；`model_identity_guard` 开 | B8 差异表 |
+| B7 | ★ Owner 批准 → 总控 | 功能配置（取值来自 Owner 已定的决定）：对比 `fusion_settings.compare`（允许 Sonnet/Gemini/Sol/Opus 的正式 uuid，默认 Sonnet 5.5、Gemini 3.8 Flash、GPT-6.1 Sol，`minModels`=2，`answerOutputTokens`=8192，`maxBudgetUsd`=3.5）；Sol、Opus 的 `config.reasoning.purposes.interactive` 加低思考档；`allow_fusion_compare` 和评审团只给 Gold；研究工具 `chat_research_tools_enabled`、`research_tools_config`（三家供应商 `enabled` 且 `hardCapAttested`、已验证平台、每条回答子调用 ≤12）、`billing_provider_prices`（未过期）、`billing_payg_start_thresholds`；资料库 `library_agent_read_enabled`、`chat_library_retrieval_enabled`、`chat_my_posts_enabled`、`library_upload_enabled`、`library_scan_recognition_enabled`；作品复盘 `publish_monitor_enabled`（JSON 布尔 `true`）、`_review_enabled`、`_review_model_id`、`_review_max_usd`=`"0.30"`；一键发布 `publish_monitor_publish_platforms`（名单见第 7 节 E1）、`publish_monitor_publish_quota`（条数和 Post for Me 套餐一致，不填就不能发布）、`publish_monitor_publish_listed`；P3 的独占项目确认后才打开孤儿清扫删除 `publish_monitor_orphan_sweep_delete`（默认只记录不删）；自由对话主力模型 `primary_model_id`（正式库 `ai_models` 的 uuid，且这个模型在 B4 准入档案里，不配则自由对话全部被拒）；写作 Skill `modules.uses_user_voice`（`short-video-script`、`post-and-article`、`video-storyboard`、`video-editing-guide`）；`model_identity_guard` 开 | B8 差异表 |
 | B8 | 总控（只读 staging，需批准读新库） | **种子配置全量核对**：列出 staging 全部 `system_settings` 键、套餐、积分包、模型、Skill 发布状态、`payment_provider_refs`，和新库逐项对照；每个差异补上或写明为什么不需要 | 差异表没有未处理项，附在执行记录 |
 | B9 | 总控（需批准只读） | Vault 已装、0259 已应用；没有"付款方式为空、未关闭、未付款"的旧路径订单；两个资料库桶私有、`storage.objects` / `storage.buckets` 上没有策略 | 只读 SQL |
 | B10 | ★ Owner 注册；授权 Owner 批准 → 总控 | Owner 在新项目注册自己的管理员账号，总控授予管理员角色 | 管理员能进后台、普通账号被拒 |

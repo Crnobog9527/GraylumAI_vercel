@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { spawnSync } from 'node:child_process';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import assert from 'node:assert/strict';
@@ -57,35 +57,39 @@ try {
   installPgCronStub(root, name, (argv, input) => docker(['exec', ...argv], input));
   const apply = input => { try { sql(input); return { ok: true }; } catch (e) { return { ok: false, error: e.message }; } };
   const fingerprint = () => JSON.parse(sql(readFileSync(resolve(root, 'packages/db/tests/baseline/fingerprint.sql'), 'utf8')));
+  // MAINT-P1b: the payment-chain replay runs right after 0298 is first applied, the state it was written for.
+  // Replaying it on the finished database also replayed every later migration, and guarded patches such as
+  // 0325 (runtime_execution base hash) rightly refuse a body that later migrations already changed.
+  const LAST = 'packages/db/migrations/0298_pay_wallet_membership_refund.sql';
+  let replayed = false;
+  const replayPaymentChain = () => {
+    const before = fingerprint();
+    // Later migrations replace 0204's routing and admission; replay the payment chain up to 0298 in order.
+    for (const file of ['0204_pay_waffo_qualification.sql', '0211_pay_waffo_delivery.sql', '0214_pay_waffo_renewal_grace.sql',
+      '0221_pay_stripe_mp_routing.sql', '0222_pay_stripe_mp_checkout.sql',
+      '0237_pay_stripe_mp_card_packs.sql', '0238_pay_stripe_mp_renewal.sql',
+      '0243_pay_common_membership_expiry.sql', '0247_pay_stripe_mp_external_refund.sql',
+      '0251_pay_stripe_mp_upgrade_observation.sql', '0252_pay_stripe_mp_pack_refund.sql',
+      '0253_pay_stripe_mp_subscription_refund.sql',
+      // 0296 patches the bodies replayed above; applied twice it leaves the patched bodies unchanged.
+      '0296_pay_stripe_live_mode.sql', '0296_pay_stripe_live_mode.sql',
+      '0297_pay_stripe_live_refunds.sql', '0297_pay_stripe_live_refunds.sql',
+      '0298_pay_wallet_membership_refund.sql', '0298_pay_wallet_membership_refund.sql']) {
+      sql(readFileSync(resolve(root, 'packages/db/migrations', file),'utf8'));
+    }
+    assert.deepEqual(fingerprint(),before,'payment chain replay at 0298 preserves structure');
+    replayed = true;
+  };
   const report = buildFromFiles(root, {
-    applyFile: path => apply(readFileSync(resolve(root, path), 'utf8')), applyServerOnly: apply, fingerprint: process.argv.includes('--quick') ? undefined : fingerprint,
+    applyFile: path => {
+      const applied = apply(readFileSync(resolve(root, path), 'utf8'));
+      if (applied.ok && path === LAST && !replayed) replayPaymentChain();
+      return applied;
+    },
+    applyServerOnly: apply, fingerprint: process.argv.includes('--quick') ? undefined : fingerprint,
   });
   assert.equal(report.failed, null, JSON.stringify(report));
-  const before = fingerprint();
-  // 0335 extends the wallet refund rejection predicate; restore its historical predecessor
-  // before replaying 0298, whose guarded patch must still run at its own historical position.
-  const refund185=readFileSync(resolve(root,'packages/db/migrations/0185_pay_common_package_refund.sql'),'utf8');
-  const rejectionStart=refund185.indexOf('CREATE OR REPLACE FUNCTION public.pay_common_package_refund_reject(');
-  const rejectionEnd=refund185.indexOf('CREATE OR REPLACE FUNCTION public.pay_common_package_refund_decide(');
-  assert.ok(rejectionStart>=0&&rejectionEnd>rejectionStart,'0185 refund rejection replay anchors');
-  sql(refund185.slice(rejectionStart,rejectionEnd));
-  // Later migrations replace 0204's routing and admission; replay the whole chain to stay at the latest state.
-  for (const file of ['0204_pay_waffo_qualification.sql', '0211_pay_waffo_delivery.sql', '0214_pay_waffo_renewal_grace.sql',
-    '0221_pay_stripe_mp_routing.sql', '0222_pay_stripe_mp_checkout.sql',
-    '0237_pay_stripe_mp_card_packs.sql', '0238_pay_stripe_mp_renewal.sql',
-    '0243_pay_common_membership_expiry.sql', '0247_pay_stripe_mp_external_refund.sql',
-    '0251_pay_stripe_mp_upgrade_observation.sql', '0252_pay_stripe_mp_pack_refund.sql',
-    '0253_pay_stripe_mp_subscription_refund.sql',
-    // 0296 patches the bodies replayed above; applied twice it leaves the patched bodies unchanged.
-    '0296_pay_stripe_live_mode.sql', '0296_pay_stripe_live_mode.sql',
-    '0297_pay_stripe_live_refunds.sql', '0297_pay_stripe_live_refunds.sql',
-    '0298_pay_wallet_membership_refund.sql', '0298_pay_wallet_membership_refund.sql',
-    // Preserve the later payment/dispute patches after the older bodies above are replaced.
-    ...readdirSync(resolve(root,'packages/db/migrations')).filter(f=>/^\d{4}_.*\.sql$/.test(f)
-      && f>'0298_pay_wallet_membership_refund.sql').sort()]) {
-    sql(readFileSync(resolve(root, 'packages/db/migrations', file),'utf8'));
-  }
-  assert.deepEqual(fingerprint(),before,'new migration repeat preserves structure');
+  assert.ok(replayed, '0298 must be applied through the canonical build plan');
   for (const file of ['purchase-admission','checkout-persistence','catalog-write','membership-facts',
     'invoice-grant','annual-grant','upgrade','invoice-lifecycle']) {
     sql(readFileSync(resolve(root, `packages/db/tests/pay-common/${file}.sql`),'utf8'));
