@@ -19,10 +19,19 @@ export function entryLanguageOf(request: NextRequest): Language | null {
   return isLanguage(lang) ? lang : null;
 }
 
+/** A background prefetch of the link (Next's router, or the browser's speculative loading): the visitor has not followed it. */
+export function isPrefetch(request: NextRequest): boolean {
+  const h = request.headers;
+  return h.has('next-router-prefetch') || h.has('x-middleware-prefetch') || h.get('purpose') === 'prefetch'
+    || (h.get('sec-purpose') ?? '').includes('prefetch');
+}
+
 export async function withEntryLanguage(target: URL, request: NextRequest, verifiedUserId: string | null): Promise<URL> {
   const language = entryLanguageOf(request);
   if (!language) return target;
-  if (verifiedUserId) {
+  // Never saved for a prefetch: only following the link takes the page language. If the click then reuses the prefetched
+  // redirect, the app applies the entry_lang it carries.
+  if (verifiedUserId && !isPrefetch(request)) {
     const previous = await saveEntryLanguage(verifiedUserId, language);
     if (previous) {
       target.searchParams.set('entry_notice', `${previous}.${language}`);

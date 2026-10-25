@@ -24,7 +24,8 @@ const logged = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/server-log', () => ({ logServerError: logged }));
 
 const { withEntryLanguage } = await import('./entry-language-server');
-const request = (query: string) => new NextRequest(`https://auth-staging.graylum.com/login?${query}`);
+const request = (query: string, headers: Record<string, string> = {}) =>
+  new NextRequest(`https://auth-staging.graylum.com/login?${query}`, { headers });
 const target = () => new URL('https://auth-staging.graylum.com/app/positioning');
 
 beforeEach(() => {
@@ -54,6 +55,17 @@ describe('a signed-in visitor sent on from a public page login link (CHAT-LANGUA
     expect([db.writes, db.reads]).toEqual([[], []]);
     vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', '');
     expect((await withEntryLanguage(target(), request('lang=en'), 'user-1')).searchParams.get('entry_lang')).toBe('en');
+  });
+
+  it('never saves for a prefetch of the link: just viewing a public page changes nothing', async () => {
+    const prefetches: Array<Record<string, string>> = [{ 'next-router-prefetch': '1' }, { 'x-middleware-prefetch': '1' },
+      { purpose: 'prefetch' }, { 'sec-purpose': 'prefetch;prerender' }];
+    for (const headers of prefetches) {
+      const url = await withEntryLanguage(target(), request('lang=zh-Hant', headers), 'user-1');
+      expect(url.searchParams.get('entry_lang')).toBe('zh-Hant');
+      expect(url.searchParams.has('entry_notice')).toBe(false);
+    }
+    expect([db.writes, db.reads]).toEqual([[], []]);
   });
 
   it('does nothing without a valid page language', async () => {
