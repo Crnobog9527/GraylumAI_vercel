@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
--- DB-PERF PR-7a (placeholder number; the controller assigns the final one). runtime_library_propagate runs on every
+-- DB-PERF PR-7a (number 0363 assigned by the controller). runtime_library_propagate runs on every
 -- library list (library.list sweep), upload, deletion and erasure. 0306 added two own-post cleanup loops that call
 -- runtime_workspace_posts_history_erased(ex.id), a recursive history check, for every execution of the actor (every
 -- execution when called without an actor): staging measured about 136 000 buffer pages and 1.4 s for a full call while
