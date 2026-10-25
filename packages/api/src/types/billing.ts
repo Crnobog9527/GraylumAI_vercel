@@ -118,11 +118,10 @@ export type UsageStats = z.infer<typeof UsageStatsSchema>;
  * 计费相关常量
  */
 export const BILLING_CONSTANTS = {
-  // 积分与美元兑换比例 (1美元 = X积分)。只在 system_settings 确认没有这一行时使用。
-  // Owner 已定 q=100、m=3，但 staging 改值要另行批准：届时写入显式配置行，
-  // 不靠改这里的缺省值，避免合并代码本身改变某个环境的生效值（见 services/billingUnit.ts）。
-  CREDITS_PER_USD: 1000,
+  // 积分与美元兑换比例 (1美元 = X积分)，Owner 2026-10-01 定为 100。
+  // 只在 system_settings 确认没有这一行时作为计费路径的缺省；展示类页面读不到配置时显示"未配置"，不用它。
+  CREDITS_PER_USD: 100,
 
-  // 全站默认加价倍数（缺省值，规则同上）；模型可单独覆盖
-  TOKEN_PRICE_MULTIPLIER: 1.5, // 用户价格 = API 成本 * 1.5
+  // 全站默认加价倍数，Owner 定正式环境为 6（staging 用显式配置行覆盖为 3）；模型可单独覆盖
+  TOKEN_PRICE_MULTIPLIER: 6,
 } as const;
