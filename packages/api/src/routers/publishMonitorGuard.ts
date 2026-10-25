@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { TRPCError } from '@trpc/server';
+import { logger } from '../lib/logger';
 import { RateLimitError } from '../lib/rateLimitError';
 import { ConnectError } from '../services/publishMonitor/connect';
 import { DataError } from '../services/publishMonitor/data';
@@ -71,6 +72,15 @@ export async function guarded<T>(ctx: { hasSupabaseAdminPrivileges: boolean; sup
     if (requireSwitch) await assertPublishMonitorEnabled(ctx.supabaseAdmin);
     return await work();
   } catch (cause) {
-    throw toTrpc(cause);
+    const mapped = toTrpc(cause);
+    // A server-side failure used to leave nothing in the logs, so a 500 here could not be told from any other. Only the
+    // fixed code and the error's class and code are written: no message text, no ids, no user data.
+    if (mapped.code === 'INTERNAL_SERVER_ERROR') {
+      const origin = cause as { name?: unknown; code?: unknown } | null;
+      logger.error('api', 'publish_monitor_internal_error', { code: mapped.message,
+        errorName: typeof origin?.name === 'string' ? origin.name.slice(0, 60) : 'unknown',
+        errorCode: typeof origin?.code === 'string' ? origin.code.slice(0, 80) : null });
+    }
+    throw mapped;
   }
 }

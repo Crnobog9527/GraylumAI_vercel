@@ -1,6 +1,7 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
+import { logger } from '../../lib/logger';
 import { createAuthUrl, getAccount, type AuthUrlInput, type ClientDeps, type PostForMePlatform } from './postForMe/client';
 
 /**
@@ -32,7 +33,11 @@ const KNOWN: ConnectErrorCode[] = ['PUBLISH_MONITOR_ACCOUNT_NOT_FOUND', 'PUBLISH
   'PUBLISH_MONITOR_TARGET_ALREADY_CONNECTED', 'PUBLISH_MONITOR_ACCOUNT_CLOSED', 'PUBLISH_MONITOR_AUTHORIZATION_CHANGED',
   'PUBLISH_MONITOR_CALLBACK_STALE'];
 function dbFailure(error: { message?: string } | null | undefined): ConnectError {
-  return new ConnectError(KNOWN.find(code => error?.message?.includes(code)) ?? 'PUBLISH_MONITOR_UNAVAILABLE');
+  const known = KNOWN.find(code => error?.message?.includes(code));
+  // Anything unrecognized leaves its database error text (our own RAISE codes or a Postgres error: never user data) so
+  // that a 500 can be diagnosed; an answer that failed our own shape check (error is null) is logged as such.
+  if (!known) logger.warn('api', 'publish_monitor_connect_db_failure', { message: error?.message?.slice(0, 160) ?? 'RESULT_SHAPE_INVALID' });
+  return new ConnectError(known ?? 'PUBLISH_MONITOR_UNAVAILABLE');
 }
 
 const startSchema = z.object({ requestId: uuid, externalId: z.string(), platform: z.string(),
