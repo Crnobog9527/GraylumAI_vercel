@@ -6,7 +6,7 @@ import { fusionExecutor, type FusionBodyVerdict } from './executor';
 import { checkRevision, DECISIONS, disputedDecisions, hasDisagreement, parseOpinion, type DeclaredStep, type Opinion, type StepValues } from './hostChecks';
 import { assertSnapshotSize, fusionRequestBytes, type FusionRequest } from './request';
 import { PAYG_PROFILE_MAX_BYTES } from '../runtime/paygHostPolicy';
-import { debateRequest, readReviewSkill, reviewerLabel, reviewerRequest, summaryRequest, summaryRequestMerged, type ReviewContext,
+import { debateRequest, readReviewSkill, reviewerLabel, reviewLocale, reviewerRequest, summaryRequest, summaryRequestMerged, type ReviewContext,
   type ReviewSkill } from './reviewPrompts';
 import { reviewDetail, reviewEvents } from './reviewEvents';
 import { adoptionChoices, adoptionSections, applyChoices, sectionTexts, type AdoptionChoice } from './reviewAdoption';
@@ -140,7 +140,7 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
     return judged;
   }
   const contextOf = (view: ReviewView, src: Source): ReviewContext => ({ report: src.body, materials: view.materials,
-    sections: src.sections, maxCharacters: src.maxCharacters, evidence: Boolean(config.parse(view.config).evidence) });
+    sections: src.sections, maxCharacters: src.maxCharacters, evidence: Boolean(config.parse(view.config).evidence), ...reviewLocale(view.config) });
   /** Round 1 as sent, and the summary at its deepest trimming (verdicts only, which claimStep can always fall back to). */
   function fitsWhenSent(view: ReviewView, src: Source, skill: Awaited<ReturnType<typeof readReviewSkill>>) {
     const context = contextOf(view, src);
@@ -287,13 +287,13 @@ export function reviewFlow(deps: { admin: SupabaseClient; actorId: string;
       // A retried start (lost response) gets its review back before any check that may have changed since (#962 review).
       const existing = await record.replay(input);
       if (existing) return existing;
-      const { settings, skill, text, rounds, estimateUsd, callCaps, requestBytes, priceCredits, holdCredits } = await plan(input);
+      const { settings, skill, text, rounds, estimateUsd, callCaps, requestBytes, priceCredits, holdCredits, replyLocale } = await plan(input);
       if (input.acceptedCredits !== undefined && priceCredits !== input.acceptedCredits) throw new Error('FUSION_REVIEW_ESTIMATE_CHANGED');
       const view = await record.start({ requestId: input.requestId, draftId: input.draftId, sourceVersionId: input.sourceVersionId,
         config: { estimateUsd, estimateCredits: priceCredits, fixedPrice: { credits: priceCredits, holdCredits }, callCaps,
           maxRounds: rounds, reviewers: settings.review.reviewerModelIds, evidence: true,
           roles: settings.review.reviewerModelIds.map(id => settings.review.reviewerRoles[id] ?? null), summary: settings.review.summaryModelId,
-          opinionTokens: settings.review.opinionOutputTokens, summaryTokens: settings.review.summaryOutputTokens, skill, requestBytes } });
+          opinionTokens: settings.review.opinionOutputTokens, summaryTokens: settings.review.summaryOutputTokens, skill, requestBytes, replyLocale } });
       // Before anything is claimed: round 1 and the most trimmed summary, measured exactly as they will be sent, must fit
       // the per-call byte cap; otherwise the review ends here with nothing charged (#962 review).
       if (view.state === 'running' && !view.steps.length && !fitsWhenSent(view, await readSource(view.reviewId), text)) {

@@ -27,7 +27,7 @@ import {readOpenRouterKey} from '../models/openRouterKey';
 import {type FrozenPaygRun, type FrozenRun} from '../bill2/service';
 import { selectRuntimeHistory, fixtureInputCapacity, runtimeScopeInput } from './context';
 import { activateCandidateWithSource, discoverRuntimeCandidates, fittingCandidates, matchingInput, MATCH_INSTRUCTIONS } from './matching';
-import { FREE_CHAT_BASE_INSTRUCTIONS, REPLY_LANGUAGE, REPLY_LANGUAGE_INSTRUCTIONS, workspaceStrategyReserve, withPrimaryAddenda, workspaceFrozen } from './primaryInstructions';
+import { FREE_CHAT_BASE_INSTRUCTIONS, readReplySetting, workspaceStrategyReserve, withPrimaryAddenda, workspaceFrozen } from './primaryInstructions';
 import { admitVoice } from './voiceAdmission';
 import { type ReasoningPolicy } from './reasoningPolicy';
 import { admitReasoning } from './reasoningAdmission';
@@ -169,7 +169,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    const leaveRateLimit=currentRequestTiming()?.enter('rateLimit');
    try{requireNewWork(await newWorkGate(admin,runtimeGateEnvironment(policy.real)).message(actorId,settings));}
    finally{leaveRateLimit?.();}
-   const gateState=await positioning;
+   const gateState=await positioning,replyRead=readReplySetting(admin,actorId);
    const gated=Boolean(gateState&&!gateState.positioned);
    const capped=gated&&gateState!.refusals24h>=POSITIONING_REFUSAL_CAP;
    const mentorStream=Boolean(policy.opcTurnToken&&policy.mentorStream);
@@ -262,7 +262,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    // Not for host-built turns (mentor, report), whose prompt cache covers the whole system message.
    const voiceTurn=!hostTurnContext&&!policy.reportGeneration&&!mentorStream&&!stepStream;
    let voice=voiceTurn&&voiceFlagged?await admitVoice(admin,actorId,[moduleId!],true):undefined;
-   const positioningRule=REPLY_LANGUAGE_INSTRUCTIONS+(positioningFallback?POSITIONING_FALLBACK_INSTRUCTIONS:'')+
+   const {setting:replySetting,rule:replyRule}=await replyRead,positioningRule=replyRule+(positioningFallback?POSITIONING_FALLBACK_INSTRUCTIONS:'')+
     (voice?withPrimaryAddenda('',{voice:{guide:voice.frozen.guide,profile:voice.profile}}):'');
    if(input.selection.kind==='organizer')modelConfiguration(()=>assertSeparateSummaryModel(session.dialogueModel,row.data.model_id));
    let attachedOrganizer:{
@@ -332,7 +332,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
    }
    if(hostTurnContext)promptCache=freezeHostPromptCache({real:Boolean(policy.real),role:input.selection.kind,
     model:row.data.model_id,cacheWriteUsdPerMillion:policy.real?realModel(row.data).providerLimits?.cacheWriteUsdPerMillion:undefined,
-    instructions:instructions+REPLY_LANGUAGE_INSTRUCTIONS,skillChars,stableAdditionalPrefix:policy.stableAdditionalInstructions,
+    instructions:instructions+replyRule,skillChars,stableAdditionalPrefix:policy.stableAdditionalInstructions,
     additionalInstructions:policy.additionalInstructions,mentor:mentorStream,
     historyMarker:!hostTurnContext.opening&&!requestsHistoricalComparison(input.input)&&
      currentInputBytes([{role:'user',content:currentInput}])<=historySelection!.currentReserveBytes});
@@ -358,7 +358,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     {input:currentInput,inputBytes,toolBytes:candidateToolBytes(libraryReferences,sourceTools,workspaceContext,libraryRetrieval)+
      (historySelection?.markerReserveBytes??(promptCache?PROMPT_CACHE_OVERHEAD_BYTES:0)),
      instructions:skill=>withPrimaryAddenda(skill,{...workspaceFrozen(workspaceContext,strategyGuide),ownPosts,network:input.network,
-      replyLanguage:REPLY_LANGUAGE,libraryReferences,libraryRetrieval,
+      replyLanguage:replySetting,libraryReferences,libraryRetrieval,
       ...(positioningFallback?{positioningGate:POSITIONING_FALLBACK}:{}),...(voice?{voice:{guide:voice.frozen.guide,profile:voice.profile}}:{})})});
    const primaryTurns=maxCalls-(attachedOrganizer?1:0)-(searchAllowed?1:0)-(candidates.length?1:0);
    if(primaryTurns<(searchAllowed||input.sources.length||workspaceContext||libraryRead?2:1))throw new Error('RUNTIME_CALL_BUDGET');
@@ -404,7 +404,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     ...(policy.opcTurnToken?{opcTurnToken:uuid.parse(policy.opcTurnToken)}:{}),...(candidates.length?{matching:{candidates}}:{}),
     ...(!policy.reportGeneration&&session.scopeMaterial?{scopeMaterial:session.scopeMaterial}:{}),...workspaceFrozen(workspaceContext,strategyGuide),
     ...(ownPosts?{ownPosts:true as const}:{}),
-    ...(positioningFallback?{positioningGate:POSITIONING_FALLBACK}:{}),replyLanguage:REPLY_LANGUAGE,...(sourceContent?{sourceContent}:{}),
+    ...(positioningFallback?{positioningGate:POSITIONING_FALLBACK}:{}),replyLanguage:replySetting,...(sourceContent?{sourceContent}:{}),
     ...(voice?{voiceProfile:voice.frozen}:{}),
     modelId,...(attachedOrganizer?{attachedOrganizer}:{}),maxOutputTokens,maxTurns:primaryTurns,historyItems,network:input.network,
      ...(budgets||policy.reportGeneration?{purposeBudget:{purpose,inputBytes,historyItems}}:{}),

@@ -5,7 +5,7 @@
  */
 
 import type { ArticleContent } from '../../article';
-import { SIGNUP_CTA_HREF } from '../shared';
+import { SIGNUP_CTA_HREF_ZH_TW } from '../shared';
 import { ZH_TW_CRUMB } from './links';
 
 // Target: 如何經營自媒體 + 自媒體經營 + 經營自媒體 (one search need, SEO_GEO_SPEC appendix B).
@@ -29,7 +29,7 @@ export const ZH_TW_ZIMEITI_JINGYING: ArticleContent = {
   cta: {
     label: '免費開始定位診斷',
     description: '第一步最難：要經營什麼主題、做給誰看？AI 教練會透過對話問你的經驗、興趣和想服務的人，幫你整理出帳號定位和目標受眾。註冊後即可免費開始。',
-    href: SIGNUP_CTA_HREF,
+    href: SIGNUP_CTA_HREF_ZH_TW,
   },
   sections: [
     {
