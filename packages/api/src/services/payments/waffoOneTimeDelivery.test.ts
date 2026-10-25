@@ -65,6 +65,8 @@ describe('Waffo one-time delivery and backstop', () => {
     await reconcileWaffoPayments(f.db, f.provider, { recover: true });
     expect(f.provider.readPayment).toHaveBeenCalledWith('PAY_fixture1');
     expect(f.rpc).toHaveBeenCalledWith('pay_failover_fulfill', expect.objectContaining({ p_payment: 'PAY_fixture1' }));
+    // The store-wide chargeback scan runs before per-payment recovery, so slow recovery reads can never starve it.
+    expect(f.provider.listChargebacks.mock.invocationCallOrder[0]).toBeLessThan(f.provider.readPayment.mock.invocationCallOrder[0]!);
   });
   it('records the actual method and freezes the original source using the real dispute identity', async () => {
     const f = setup(); f.provider.readChargebacks.mockResolvedValue([{ id: 'CBK_real', paymentId: 'PAY_fixture1', storeId: 'STO_fixture',

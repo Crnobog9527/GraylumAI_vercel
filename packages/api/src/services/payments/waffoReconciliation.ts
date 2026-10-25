@@ -91,6 +91,14 @@ export async function reconcileWaffoPayments(db: Db, provider: Provider, options
   const paid = scanned.filter(p => p.status === 'succeeded' && p.testMode === (provider.mode === 'test'));
   if (options?.recover) {
     if (!provider.readPayment || !provider.storeId || !provider.listChargebacks) throw new Error('PAY_WAFFO_OPERATION_SCOPE');
+    // First, on its own: this is the only way a chargeback reaches us, so per-payment recovery below must not starve it.
+    if (Date.now() < deadline) try {
+      const held = await holdWaffoChargebacks(db, { merchant: provider.merchant, mode: provider.mode, storeId: provider.storeId,
+        listChargebacks: provider.listChargebacks }, deadline, options.disputeAlert);
+      findings.push(...held.findings);
+      disputedPayments = held.disputedPayments;
+      if (!held.complete) complete = false;
+    } catch { findings.push({ kind: 'chargeback_scan_failed', refundCandidate: false }); }
     const ids = paid.filter(p => p.onetimeOrder).map(p => p.orderMerchantExternalId)
       .filter((id): id is string => z.uuid().safeParse(id).success);
     const own = new Set((await chunked([...new Set(ids)], part => db.from('payment_orders').select('id')
@@ -118,13 +126,6 @@ export async function reconcileWaffoPayments(db: Db, provider: Provider, options
         }
       } catch { findings.push({ kind: 'recovery_failed', paymentId: candidate.id, refundCandidate: false }); }
     }
-    if (Date.now() < deadline) try {
-      const held = await holdWaffoChargebacks(db, { merchant: provider.merchant, mode: provider.mode, storeId: provider.storeId,
-        listChargebacks: provider.listChargebacks }, deadline, options.disputeAlert);
-      findings.push(...held.findings);
-      disputedPayments = held.disputedPayments;
-      if (!held.complete) complete = false;
-    } catch { findings.push({ kind: 'chargeback_scan_failed', refundCandidate: false }); }
   }
   if (Date.now() >= deadline) {
     complete = false;
