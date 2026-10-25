@@ -18,6 +18,7 @@ class CIWorkflowsTest < Minitest::Test
                                                           'LEDGER_RESULT'=>'migration-ledger'}],
            'build'=>['Build Check','build-and-e2e'], 'security-e2e-tests'=>['Security E2E Tests','build-and-e2e']}.freeze
   INTEGRATION_RUNS = ['node packages/db/tests/v3/run-workbench.mjs --bill2-core-only --without-app --schema-from-files',
+                      'node packages/db/tests/payg/run-runtime.mjs --ci',
                       'node packages/db/tests/v3/run-workbench.mjs --runtime-only --with-staging-schema --without-app --schema-from-files',
                       'node packages/db/tests/run-db-baseline-replay.mjs --ci --after packages/db/tests/baseline/credit-guard-paths.sql,packages/db/tests/pay-common/purchase-admission.sql,packages/db/tests/pay-common/checkout-persistence.sql,packages/db/tests/pay-common/catalog-write.sql,packages/db/tests/pay-common/membership-facts.sql,packages/db/tests/pay-common/invoice-grant.sql,packages/db/tests/pay-common/annual-grant.sql,packages/db/tests/pay-common/upgrade.sql,packages/db/tests/pay-common/invoice-lifecycle.sql'].freeze
   def test_required_context_names_unique

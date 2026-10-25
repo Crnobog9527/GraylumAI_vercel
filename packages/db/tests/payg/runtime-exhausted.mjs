@@ -27,12 +27,23 @@ export async function runtimeExhaustedCases({db,Client,connectionString,report,s
   const other=new Client({connectionString});
   await other.connect();
   try {
+    // Migration 0325 (AGENT-CORE #1216): an exhausted resume no longer cancels. It hands the one winner a fresh
+    // owner epoch for replay only (live=false); the host then replays saved results or retires the run with
+    // the platform-failure refund. It can never mint another call, so the call ceiling is untouched.
     const race=await Promise.allSettled([db,other].map(client=>
       rpc(client,'runtime_execution',f.actor,f.execution,'payg_resume',{epoch:1,cursor:1})));
     assert.equal(race.filter(r=>r.status==='fulfilled').length,1);
-    assert.equal(race.find(r=>r.status==='fulfilled').value.state,'cancelled');
-    assert.match(String(race.find(r=>r.status==='rejected').reason),/RESUME_CLOSED/);
+    const winner=race.find(r=>r.status==='fulfilled').value;
+    assert.equal(winner.state,'running');
+    assert.equal(winner.live,false);
+    assert.match(String(race.find(r=>r.status==='rejected').reason),/RESUME_CONFLICT/);
   } finally {await other.end();}
+  assert.deepEqual(await facts(),before,'replay grant mints no call and moves no credit');
+  assert.equal((await db.query('SELECT count(*)::int n FROM bill2_calls WHERE run_id=$1',[f.run])).rows[0].n,1);
+  await assert.rejects(rpc(db,'runtime_execution',f.actor,f.execution,'payg_resume',{epoch:1,cursor:1}),/RESUME_CONFLICT/);
+  assert.equal((await db.query('SELECT runtime_epoch FROM bill2_runs WHERE id=$1',[f.run])).rows[0].runtime_epoch,'2');
+  // Replay owner gives up: the existing cancellation authority closes the run without another refund.
+  await rpc(db,'runtime_cancel',f.actor,f.execution);
   assert.deepEqual(await facts(),before);
   const terminal=await rpc(db,'runtime_execution',f.actor,f.execution,'read',null);
   assert.equal(terminal.cancelRequested,true);
@@ -40,5 +51,5 @@ export async function runtimeExhaustedCases({db,Client,connectionString,report,s
   const next=await rpc(db,'runtime_admit',f.actor,f.session,randomUUID(),f.context,f.payload);
   assert.notEqual(next.executionId,f.execution);
   assert.deepEqual(await facts(),before);
-  report.checks.push('exhausted pre-transport waiter cancels through original CAS; stale/concurrent resumes rejected, no extra refund, new admission unblocked');
+  report.checks.push('exhausted pre-transport waiter resumes once into a replay-only epoch (no new call, no credit movement); stale/concurrent resumes rejected; cancel closes it with no extra refund; new admission unblocked');
 }

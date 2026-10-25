@@ -384,6 +384,9 @@ jobs:
       - name: Integration — BILL2 billing
         run: node packages/db/tests/v3/run-workbench.mjs --bill2-core-only --without-app --schema-from-files
 
+      - name: Integration — PAYG runtime waiting, resume and metering review
+        run: node packages/db/tests/payg/run-runtime.mjs --ci
+
       - name: Integration — PAY-STRIPE-MP upgrade overlap and retained credits
         run: node packages/db/tests/stripe-upgrade-overlap/run-local.mjs --ci
 

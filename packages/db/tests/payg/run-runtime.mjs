@@ -11,8 +11,10 @@ import {buildFromFiles,installPgCronStub} from '../baseline/build-from-files.mjs
 import {runtimeCases} from './runtime.mjs';
 import {meteringReviewCases} from './metering-review.mjs';
 
-const development = process.argv.slice(2).join(' ')==='--local-only --development';
-if ((!development&&process.argv.slice(2).join(' ')!=='--local-only')||process.env.CI) throw Error('Require --local-only outside CI');
+const mode = process.argv.slice(2).join(' ');
+const development = mode==='--local-only --development';
+// --ci is for the CI runner (CI set, images already pulled by the workflow); --local-only never runs inside CI.
+if (mode==='--ci' ? !process.env.CI : (!development&&mode!=='--local-only')||process.env.CI) throw Error('Require --local-only outside CI, or --ci inside CI');
 const root = resolve(import.meta.dirname,'../../../..');
 const read = path => readFileSync(resolve(root,path),'utf8');
 const run = (args,input) => spawnSync('docker',args,{input,encoding:'utf8',cwd:root,
