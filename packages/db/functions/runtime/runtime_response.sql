@@ -16,7 +16,10 @@ BEGIN
  SELECT * INTO e FROM runtime_executions WHERE id=p_execution_id AND actor_id=p_actor_id;
  SELECT * INTO s FROM runtime_sessions WHERE id=e.session_id;
  IF e.id IS NULL OR NOT coalesce(bill2_scope_allowed(p_actor_id,s.scope),false) THEN RAISE EXCEPTION 'RUNTIME_RESPONSE_DENIED';END IF;
- PERFORM runtime_billing_allowed(p_actor_id,(SELECT payload FROM bill2_runs WHERE id=e.billing_run_id),e.billing_run_id);
+ -- DB-100 C3 read check (0384): this running reply already checked its lineage.
+ IF NOT runtime_read_verified(p_actor_id,e.id) THEN
+  PERFORM runtime_billing_allowed(p_actor_id,(SELECT payload FROM bill2_runs WHERE id=e.billing_run_id),e.billing_run_id);
+ END IF;
  SELECT * INTO c FROM bill2_calls WHERE run_id=e.billing_run_id AND sequence=p_sequence;
  IF c.id IS NULL THEN RETURN NULL;END IF;
  IF c.payload->>'requestHash' IS DISTINCT FROM p_request_hash THEN RAISE EXCEPTION 'RUNTIME_RESPONSE_CONFLICT';END IF;
