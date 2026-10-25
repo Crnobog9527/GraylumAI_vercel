@@ -76,9 +76,11 @@ export function SiteShell({
                 {link.label}
               </Link>
             ))}
-            <Link href={LOGIN_HREFS[locale]} className="text-sm text-[#B0B0B0] hover:text-white">{chrome.login}</Link>
+            {/* No prefetch: following these links is what applies the page language (CHAT-LANGUAGE), so each click reaches the server. */}
+            <Link href={LOGIN_HREFS[locale]} prefetch={false} className="text-sm text-[#B0B0B0] hover:text-white">{chrome.login}</Link>
             <Link
               href={SIGNUP_HREFS[locale]}
+              prefetch={false}
               className="rounded-lg bg-[#FFD700] px-4 py-2 text-sm font-semibold text-[#0A0A0A] hover:bg-[#FFE34D]"
             >
               {chrome.signup}
