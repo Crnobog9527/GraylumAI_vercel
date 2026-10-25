@@ -9,20 +9,12 @@ import { logServerError } from '@/lib/server-log';
 import { isPublicPathname } from '@/lib/public-paths';
 import { BUY_INTENT_PATH, buyIntentPath, parseBuyIntent } from '@/lib/buyIntent';
 import { resolveSupabaseCookieOptions } from '@/lib/site-config';
+import { withEntryLanguage } from '@/lib/entry-language-server';
 
 const SENTRY_TUNNEL_PATH = '/monitoring';
 
 // Public site content: open to everyone and still served while maintenance mode is on, like the public
 // host was before the single-host move (E1). Login entry pages are public too but not in this list.
-// CHAT-LANGUAGE (Owner 2026-10-25): a public page's login link carries the page's language as `lang`. A signed-in visitor
-// never sees the login page, so the redirect passes it on as `entry_lang` for the app to apply (use-entry-reply-language).
-const ENTRY_LANGUAGES = new Set(['zh-Hans', 'zh-Hant', 'en']);
-function withEntryLanguage(target: URL, request: NextRequest): URL {
-  const lang = request.nextUrl.searchParams.get('lang');
-  if (lang && ENTRY_LANGUAGES.has(lang)) target.searchParams.set('entry_lang', lang);
-  return target;
-}
-
 const PUBLIC_SITE_PATHS = [
   '/maintenance',
   '/landing',
@@ -382,9 +374,9 @@ export async function proxy(request: NextRequest) {
       if (!userIsVerified) {
         const verifyUrl = new URL('/verify-email', request.url);
         verifyUrl.searchParams.set('redirect', requestedRedirect);
-        return NextResponse.redirect(withEntryLanguage(verifyUrl, request));
+        return NextResponse.redirect(await withEntryLanguage(verifyUrl, request, null));
       }
-      return NextResponse.redirect(withEntryLanguage(new URL(requestedRedirect, request.url), request));
+      return NextResponse.redirect(await withEntryLanguage(new URL(requestedRedirect, request.url), request, user.id));
     }
     return supabaseResponse;
   }
