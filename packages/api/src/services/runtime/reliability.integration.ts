@@ -290,7 +290,7 @@ it.each(['5 minutes', '20 minutes'] as const)('RUNTIME: a running round with a s
     } finally { await f.close(); }
   }, 60000);
 
-// 0375 (line D1): an admitted round that was never begun holds its session until interrupted recovery cancels it.
+// 0379 (line D1): an admitted round that was never begun holds its session until interrupted recovery cancels it.
 it.each(['5 minutes', '15 minutes'] as const)('RUNTIME: a never-begun round is cancelled after 10 minutes (admitted %s ago)',
   async age => {
     const f = await fixture();
