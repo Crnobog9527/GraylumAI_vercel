@@ -26,6 +26,9 @@ function createInvalidationUtils() {
         invalidate: vi.fn().mockResolvedValue(undefined),
       },
     },
+    runtime: {
+      choices: { invalidate: vi.fn().mockResolvedValue(undefined) },
+    },
     payments: {
       methodMembership: {
         invalidate: vi.fn().mockResolvedValue(undefined),

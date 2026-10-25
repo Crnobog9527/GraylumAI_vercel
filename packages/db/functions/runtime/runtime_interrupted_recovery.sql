@@ -27,9 +27,10 @@ BEGIN
   SELECT coalesce(jsonb_agg(item ORDER BY created_at,id),'[]'::jsonb) INTO items FROM (
    SELECT ex.id,ex.created_at,jsonb_build_object('executionId',ex.id,'actorId',ex.actor_id,
     'runId',br.id,'epoch',br.runtime_epoch) item
-   FROM runtime_executions ex JOIN runtime_sessions sess ON sess.id=ex.session_id AND sess.actor_id=ex.actor_id
+   FROM (SELECT rs.id,rs.actor_id,rs.active_execution FROM runtime_sessions rs WHERE rs.active_execution IS NOT NULL OFFSET 0) sess
+   JOIN runtime_executions ex ON ex.id=sess.active_execution AND ex.session_id=sess.id AND ex.actor_id=sess.actor_id
    JOIN bill2_runs br ON br.id=ex.billing_run_id AND br.actor_id=ex.actor_id AND br.session_ref=sess.id
-   WHERE (p_actor_id IS NULL OR ex.actor_id=p_actor_id) AND sess.active_execution=ex.id
+   WHERE (p_actor_id IS NULL OR ex.actor_id=p_actor_id)
     AND (ex.state='interrupted' OR (ex.state='running' AND br.runtime_dispatch_deadline<=
      CASE WHEN ex.primary_result IS NULL THEN owner_gone ELSE reply_grace END)
      OR (ex.state='prepared' AND br.runtime_epoch=0 AND ex.created_at<=never_begun

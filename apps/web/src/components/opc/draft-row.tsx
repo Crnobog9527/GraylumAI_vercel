@@ -31,7 +31,7 @@ export function DraftRow({ draft, review, menuOpen, menuPosition, onOpenMenu, on
     + (review ? ' · ' + review : '');
   const canDelete = draft.conversationDeleted ? Boolean(draft.projectId) : Boolean(draft.sessionId);
   return <div className={styles.threadRow}>
-    <Link className={styles.thread} href={'/app/positioning/' + draft.draftId}><span>{name}</span><small>{status}</small></Link>
+    <Link prefetch={false} className={styles.thread} href={'/app/positioning/' + draft.draftId}><span>{name}</span><small>{status}</small></Link>
     {canDelete && <button type="button" className={styles.more} aria-label={name + '的更多操作'} aria-expanded={menuOpen}
       onClick={onOpenMenu}><Ellipsis size={17}/></button>}
     {menuOpen && <div className={styles.workMenu} style={menuPosition} role="menu">

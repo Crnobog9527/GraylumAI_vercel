@@ -8,9 +8,9 @@ CREATE OR REPLACE FUNCTION public.content_erasure_ledger_owned(j jsonb)
  STABLE
  SET search_path TO 'public', 'pg_temp'
 AS $function$
- SELECT EXISTS(SELECT 1 FROM bill2_runs r WHERE r.actor_id::text=j->>'user_id' AND r.content_deleted_at IS NOT NULL
-  AND (r.id::text=j->>'bill2_run_id' OR r.pre_deduct_id::text=j->>'id'
-   OR r.id::text=j#>>'{metadata,usage,runId}' OR r.id::text=j#>>'{metadata,runId}'
-   OR r.pre_deduct_id::text=j#>>'{metadata,preDeductId}'))
+ SELECT EXISTS(SELECT 1 FROM bill2_runs r WHERE r.actor_id=content_erasure_uuid(j->>'user_id') AND r.content_deleted_at IS NOT NULL
+  AND (r.id=content_erasure_uuid(j->>'bill2_run_id') OR r.pre_deduct_id=content_erasure_uuid(j->>'id')
+   OR r.id=content_erasure_uuid(j#>>'{metadata,usage,runId}') OR r.id=content_erasure_uuid(j#>>'{metadata,runId}')
+   OR r.pre_deduct_id=content_erasure_uuid(j#>>'{metadata,preDeductId}')))
 ;
 $function$;

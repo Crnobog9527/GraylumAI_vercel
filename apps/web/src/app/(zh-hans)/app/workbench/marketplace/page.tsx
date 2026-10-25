@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Search } from 'lucide-react';
 import { WorkspaceFrame } from '@/components/opc/workspace-frame';
 import { trpc } from '@/trpc/client';
+import { RUNTIME_CHOICES_STALE_MS } from '@/lib/runtime-choices';
 import { useScrollPosition } from '@/components/opc/use-scroll-position';
 import styles from './workspace-marketplace.module.css';
 
@@ -14,7 +15,7 @@ export default function WorkspaceMarketplace(){
  useEffect(()=>{const params=new URL(location.href).searchParams;setReturnTo(params.get('returnTo')??sessionStorage.getItem('opc-work-return')??'');setSelected(params.get('module')??'');},[]);
  const listing=trpc.modules.getModules.useQuery({category,limit:48,offset:(page-1)*48,sortBy:'newest'});
  const detail=trpc.modules.getModuleById.useQuery({id:selected},{enabled:Boolean(selected)});
- const runtimeChoices=trpc.runtime.choices.useQuery(undefined,{enabled:Boolean(selected)});
+ const runtimeChoices=trpc.runtime.choices.useQuery(undefined,{enabled:Boolean(selected),staleTime:RUNTIME_CHOICES_STALE_MS});
  const runnable=Boolean(runtimeChoices.data?.skills.some(skill=>skill.moduleId===selected));
  const modules=listing.data?.modules??[];
  const filtered=modules.filter(module=>(module.title+' '+(module.description??'')).toLocaleLowerCase().includes(search.toLocaleLowerCase()));
