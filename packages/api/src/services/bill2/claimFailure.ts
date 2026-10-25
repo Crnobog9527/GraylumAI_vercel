@@ -1,4 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { DatabaseReadError } from '../../lib/databaseReadError';
 import { logger } from '../../lib/logger';
 
 // Exact SQL exception messages only. Never log database detail, hints, payloads,
@@ -28,10 +29,20 @@ export class BillingClaimRejection extends Error {
   }
 }
 
-export function claimFailure(error: unknown): Error {
+// DB-PERF: an opaque failure keeps only which RPC failed and a diagnostic class, so a load test can tell a
+// deadlock (40P01), a statement timeout (57014), a PostgREST pool wait (PGRST003) and the client's own abort apart.
+function opaqueDiagnostics(error: unknown, rpc?: string) {
+  const fields = error && typeof error === 'object' ? error as { code?: unknown; message?: unknown } : {};
+  const databaseCode = new DatabaseReadError('', typeof fields.code === 'string' ? fields.code : undefined).databaseCode;
+  const clientTimeout = typeof fields.message === 'string' && /^(?:AbortError|TimeoutError)\b/.test(fields.message);
+  return { ...(rpc ? { rpc } : {}), ...(databaseCode ? { databaseCode } : {}), ...(clientTimeout ? { clientTimeout } : {}) };
+}
+
+export function claimFailure(error: unknown, rpc?: string): Error {
   const message = error && typeof error === 'object' && 'message' in error ? error.message : null;
   const code = typeof message === 'string' && claimRejections.has(message)
     ? message : 'BILL2_DATABASE_UNAVAILABLE';
-  logger.warn('api', 'Billing claim rejected', { code });
+  logger.warn('api', 'Billing claim rejected',
+    code === 'BILL2_DATABASE_UNAVAILABLE' ? { code, ...opaqueDiagnostics(error, rpc) } : { code });
   return code === 'BILL2_DATABASE_UNAVAILABLE' ? new Error(code) : new BillingClaimRejection(code);
 }

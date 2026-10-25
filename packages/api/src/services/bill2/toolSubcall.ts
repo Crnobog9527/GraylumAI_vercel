@@ -32,7 +32,7 @@ export function toolSubcallBilling(deps: { admin: BillingRpc; actorId: string; r
   async function call(name: string, args: Record<string, unknown>) {
     const result = await deps.admin.rpc(name, { ...args, p_run_id: runId, p_actor_id: actor });
     if (result.error) {
-      if (name === 'bill2_claim' || name === 'bill2_dispatch') throw claimFailure(result.error);
+      if (name === 'bill2_claim' || name === 'bill2_dispatch') throw claimFailure(result.error, name);
       const receipt = args.p_evidence as ReturnType<typeof toolResultEvidence> | undefined;
       // An authoritative not-dispatched response confirms zero supplier/user cost; no receipt is needed.
       if (name === 'bill2_record' && receipt?.toolOutcome === 'failed_free' && receipt.cost === '0'
