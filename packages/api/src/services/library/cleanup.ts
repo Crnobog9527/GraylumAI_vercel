@@ -5,6 +5,7 @@ import { canonicalPath } from './content';
 import { libraryStorage, type LibraryStorage } from './storage';
 import { startScheduledJobRun, finishScheduledJobRun } from '../scheduledJobRuns';
 import { scheduleErasureManifestSync } from '../accountErasure/offdbManifest';
+import { logger } from '../../lib/logger';
 
 type Reservation = {
   actor_id: string; document_id: string; original_path: string; text_path: string | null;
@@ -95,8 +96,12 @@ export async function runLibraryCleanup(client: SupabaseClient) {
     const page = await storage.scan('', typeof cursor === 'string' ? cursor : undefined);
     const orphanResult = await cleanupOrphanPage(client, storage, page, started);
     const { orphans, unknownPaths, complete } = orphanResult;
-    const summary = { ...result, orphans, unknownPaths, scanCursor: complete ? page.cursor : (cursor ?? null) };
-    await finishScheduledJobRun({ supabase: client, runId, status: result.failed || unknownPaths ? 'error' : 'success', summary });
+    // The upload write guard (0371) lives on Supabase's storage.objects; report it if a platform change removed it.
+    const storageGuard = await libraryRpc<boolean>(client, 'library_storage_guard_present', {});
+    if (storageGuard !== true) logger.error('system', 'library_storage_guard_missing');
+    const summary = { ...result, orphans, unknownPaths, storageGuard, scanCursor: complete ? page.cursor : (cursor ?? null) };
+    const bad = result.failed || unknownPaths || storageGuard !== true;
+    await finishScheduledJobRun({ supabase: client, runId, status: bad ? 'error' : 'success', summary });
     return summary;
   } catch {
     await finishScheduledJobRun({ supabase: client, runId, status: 'error', error: 'LIBRARY_CLEANUP_FAILED' });

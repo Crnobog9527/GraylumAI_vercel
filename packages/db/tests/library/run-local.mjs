@@ -66,11 +66,11 @@ try {
   const beforeSearchRepeat = catalog();
   sql(search);
   assert.equal(catalog(), beforeSearchRepeat, '0244 repeat must not change schema/permissions');
-  const guard = readFileSync(resolve(root, 'packages/db/migrations/0390_library_storage_write_guard.sql'), 'utf8');
+  const guard = readFileSync(resolve(root, 'packages/db/migrations/0371_library_storage_write_guard.sql'), 'utf8');
   const triggers = () => sql("SELECT string_agg(tgname,',') FROM pg_trigger WHERE tgrelid='storage.objects'::regclass");
   const beforeGuardRepeat = [catalog(), triggers()];
   sql(guard);
-  assert.deepEqual([catalog(), triggers()], beforeGuardRepeat, '0390 repeat must not change schema/permissions/triggers');
+  assert.deepEqual([catalog(), triggers()], beforeGuardRepeat, '0371 repeat must not change schema/permissions/triggers');
   const port = Number(docker(['port', name, '5432/tcp']).split(':').at(-1));
   const connect = async () => {
     const c = new pg.Client({ host: '127.0.0.1', port, database: 'lib2a', user: 'postgres', password: 'local-test-only' });

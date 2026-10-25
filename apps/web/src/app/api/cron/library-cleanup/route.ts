@@ -19,7 +19,7 @@ export async function GET(request: Request) {
     }));
     reportLibraryBacklog(result);
     // Cursor is operational metadata, not returned to HTTP clients.
-    const success = result.failed === 0 && result.unknownPaths === 0;
+    const success = result.failed === 0 && result.unknownPaths === 0 && result.storageGuard === true;
     return NextResponse.json({ success, checked: result.checked, released: result.released, pending: result.pending },
       { status: success ? 200 : 500 });
   } catch { return NextResponse.json({ error: 'Library cleanup failed' }, { status: 500 }); }

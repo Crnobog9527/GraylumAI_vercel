@@ -38,7 +38,7 @@ CREATE TABLE storage.buckets(
   file_size_limit bigint, allowed_mime_types text[],
   created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now()
 );
--- Minimal storage.objects: Storage writes one row per object, signed uploads included (library write guard, 0390).
+-- Minimal storage.objects: Storage writes one row per object, signed uploads included (library write guard, 0371).
 CREATE TABLE storage.objects(
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), bucket_id text REFERENCES storage.buckets(id), name text,
   owner_id text, metadata jsonb, version text,
