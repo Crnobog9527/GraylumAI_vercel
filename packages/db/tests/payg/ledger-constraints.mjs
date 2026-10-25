@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// ARCH-FIX E3 (0392): one pre-deduction per (user, requestId), and every ledger row has an idempotency key.
+// ARCH-FIX E3 (0385): one pre-deduction per (user, requestId), and every ledger row has an idempotency key.
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 
