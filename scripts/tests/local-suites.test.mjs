@@ -10,11 +10,11 @@ import { judgeVolatility, loadAllow } from '../../packages/db/tests/baseline/vol
 
 const root = resolve(import.meta.dirname, '../..');
 // Ratchets: lowering these is the point of the work; raising them needs a reviewed reason.
-const MAX_EXCLUDED_SUITES = 91;
+const MAX_EXCLUDED_SUITES = 86;
 const MAX_VOLATILITY_ALLOWED = 0;
-// pay-waffo, package-refund and erasure-run are listed as excluded (stale re-apply tests); they come back first.
-const REQUIRED_IN_CI = ['pay-dispute', 'pay-waffo-delivery', 'monthly-refund',
-  'erasure-completion', 'publish-monitor', 'report-revision', 'stripe-upgrade-overlap', 'paywall-profile-archive'];
+const REQUIRED_IN_CI = ['pay-dispute', 'pay-waffo', 'pay-waffo-delivery', 'monthly-refund', 'package-refund',
+  'erasure-run', 'erasure-completion', 'bill-unit', 'credit-sources', 'publish-monitor', 'report-revision',
+  'stripe-upgrade-overlap', 'paywall-profile-archive'];
 
 test('excluded suites exist, carry a reason and a date, and never exceed the ratchet', () => {
   const { suites } = loadExcluded();
