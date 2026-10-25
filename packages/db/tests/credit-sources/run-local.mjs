@@ -8,14 +8,54 @@ import { localDb, read } from '../runtime-view-perf/local-db.mjs';
 
 const migrationPath = 'packages/db/migrations/0275_pay_dispute_credit_sources.sql';
 const MARK = ' -- PR-D0 credit sources';
-// Later migrations that replace or hook 0275's functions (0285 refund hold, 0383 shared quarantine check): reapplied
-// after 0275 so the end state is the full chain again.
-const LATER = ['packages/db/migrations/0285_pay_refunded_pack_hold.sql', 'packages/db/migrations/0383_credit_grant_quarantine.sql'];
+// Later migrations that replace or hook 0275's functions (0285 refund hold, 0308 PAY-D1 dispute guard, 0383 shared
+// quarantine check): reapplied after 0275 so the end state is the full chain again. MAINT-P1b added 0308, missing
+// since PAY-D1 because the suite was not in CI.
+const LATER = ['packages/db/migrations/0285_pay_refunded_pack_hold.sql', 'packages/db/migrations/0308_pay_dispute_guard.sql',
+  'packages/db/migrations/0383_credit_grant_quarantine.sql'];
 const reapply = async () => { for (const path of [migrationPath, ...LATER]) await c.query(read(path)); };
 const HOOKED = ['atomic_pre_deduct(uuid,integer,text,uuid)', 'bill2_legacy_settle(uuid,uuid,integer,jsonb,jsonb)',
   'bill2_legacy_refund(uuid,uuid,text)', 'bill2_legacy_abort_settle(uuid,uuid,integer,jsonb,text,text)',
   'bill2_payg_compensate(bill2_runs,bill2_calls)'];
-const db = await localDb(), c = db.client;
+// MAINT-P1b: the first-run backfill is rehearsed on the real pre-0275 database (seeded just before 0275 runs in
+// the build). Tearing the 0275 tables out of the finished database stopped working once 0308 code read them.
+const seed = { clean: randomUUID(), clean2: randomUUID(), spent: randomUUID(), adjusted: randomUUID(),
+  cleanPack: randomUUID(), spentPack: randomUUID(), adjustedPack: randomUUID(), grant: randomUUID() };
+const seedPackSql = (user, order, credits, key, at) => `
+INSERT INTO credit_packages(id,name,credits_amount,price,bonus_credits) VALUES('${order}','Fixture ${order}',${credits},10,0);
+INSERT INTO payment_orders(id,user_id,item_type,item_id,billing_cycle,mode,status,payment_status,payment_channel,
+ merchant_namespace,payment_mode,purchase_request_id,purchase_payload_hash,purchase_snapshot,amount_total,currency,fulfilled_at,metadata)
+ VALUES('${order}','${user}','credit_package','${order}','one_time','payment','completed','paid','stripe','acct_fixture','test',
+ gen_random_uuid(),repeat('a',64),jsonb_build_object('version',1,'item_type','credit_package','item_id','${order}',
+ 'item_updated_at','2026-10-01T00:00:00Z','billing_cycle','one_time','currency','usd','unit','major','price','10','discount','0',
+ 'tax_behavior','inclusive','credits',${credits},'bonus_credits',0),1000,'usd',${at},jsonb_build_object('grantedCredits',${credits}));
+UPDATE profiles SET credits=credits+${credits} WHERE id='${user}';
+INSERT INTO credit_transactions(user_id,amount,type,ledger_type,source_order_id,idempotency_key,created_at)
+ VALUES('${user}',${credits},'purchase','grant','${order}','${key}${order}',${at});`;
+const seedSql = () => `
+INSERT INTO profiles(id,credits) VALUES('${seed.clean}',0),('${seed.clean2}',0),('${seed.spent}',0),('${seed.adjusted}',0);
+${seedPackSql(seed.clean, seed.cleanPack, 100, 'pay-common:package:', 'now()')}
+INSERT INTO membership_plans(id,name,level,allow_fusion_review,allow_fusion_compare,library_storage_bytes)
+ VALUES(gen_random_uuid(),'Local fixture','pro',true,true,500000000) ON CONFLICT(level) DO NOTHING;
+INSERT INTO user_subscriptions(user_id,stripe_subscription_id,membership_plan_id,billing_cycle,current_period_start,
+ current_period_end,status) VALUES('${seed.clean2}','sub_${seed.grant}',(SELECT id FROM membership_plans WHERE level='pro'),
+ 'monthly',now()-interval '60 days',now()-interval '30 days','active');
+INSERT INTO subscription_credit_grants(id,user_id,stripe_subscription_id,membership_plan_id,billing_cycle,grant_type,
+ grant_period_key,period_start,period_end,total_periods,stripe_invoice_id,credits_granted,consumed_amount,idempotency_key)
+ VALUES('${seed.grant}','${seed.clean2}','sub_${seed.grant}',(SELECT id FROM membership_plans WHERE level='pro'),'monthly',
+ 'monthly_invoice','invoice:in_${seed.grant}',now()-interval '60 days',now()-interval '30 days',1,'in_${seed.grant}',300,100,
+ 'grant:in_${seed.grant}');
+UPDATE profiles SET credits=credits+200 WHERE id='${seed.clean2}';
+${seedPackSql(seed.spent, seed.spentPack, 100, 'method-package:', "now()-interval '1 hour'")}
+SELECT pre_deduct_id FROM atomic_pre_deduct('${seed.spent}',10,'fixture',gen_random_uuid());
+${seedPackSql(seed.adjusted, seed.adjustedPack, 100, 'pay-common:package:', 'now()')}
+SELECT * FROM atomic_apply_credit_ledger_entry('${seed.adjusted}'::uuid,-5,'deduction','Synthetic admin deduction','test-admin:${seed.adjusted}');`;
+let seeded = false;
+const db = await localDb({ beforeApply: (path, sql) => {
+  if (path !== migrationPath || seeded) return;
+  sql(seedSql());
+  seeded = true;
+} }), c = db.client;
 const report = { build: db.build, migration: '0275', checks: [] };
 const v = async (sql, args = [], client = c) => (await client.query(sql, args)).rows[0]?.v;
 const fingerprint = read('packages/db/tests/baseline/fingerprint.sql');
@@ -246,32 +286,22 @@ try {
   await c.query(read('packages/db/tests/package-refund/fixture.sql'));
   await c.query(read('packages/db/tests/monthly-refund/fixture.sql'));
   const hooked = await scenario();
+  // MAINT-P1b: since 0308 the hooked settle/abort lines also carry the PAY-D1 dispute adjustment, and 0308 skips
+  // functions that already have its marker, so re-applying 0275 after an unhook no longer restores them exactly.
+  // Recovery is therefore the saved full-chain definitions.
+  const hookedDefs = [];
+  for (const fn of HOOKED) hookedDefs.push(await v('SELECT pg_get_functiondef($1::regprocedure) v', ['public.' + fn]));
   await unhook();
   const before = await scenario();
   assert.deepEqual(hooked, before, 'balances, billing history amounts and refund eligibility unchanged');
-  // Recovery is the predecessor definitions; re-applying 0275 hooks them again without re-running the backfill.
-  await reapply();
+  for (const def of hookedDefs) await c.query(def);
   assert.deepEqual(await catalog(), after);
-  report.checks.push('same balances, per-step charges and pack/monthly refund eligibility (fresh: allowed; after use: refused) with and without the hooks; recovery = predecessor definitions, reapply restores the exact catalog');
+  report.checks.push('same balances, per-step charges and pack/monthly refund eligibility (fresh: allowed; after use: refused) with and without the hooks; recovery = saved full-chain definitions restore the exact catalog');
 
-  // Backfill on a database that predates 0275: provable sources tracked, others marked "source unknown".
-  await unhook();
-  await c.query('DROP TABLE credit_source_entries, credit_source_reviews, credit_package_sources');
-  await c.query('DROP TRIGGER credit_package_source_track ON credit_transactions');
-  // Before 0275 the 0285 refund-hold lines do not exist either.
-  for (const fn of ['atomic_pre_deduct(uuid,integer,text,uuid)', 'bill2_payg_claim(uuid,uuid,integer,jsonb)']) {
-    const src = await v('SELECT pg_get_functiondef($1::regprocedure) v', ['public.' + fn]);
-    await c.query(src.split('\n').filter(line => !line.endsWith('-- PAY-REFUND-HOLD')).join('\n'));
-  }
-  const clean = await profile(0), clean2 = await profile(0), spent = await profile(0);
-  const cleanPack = (await pack(clean, 100)).order;
-  const cleanGrant = await period(clean2, 300, -60 * 24 * hour, -30 * 24 * hour, 100);
-  const spentPack = (await pack(spent, 100, 'method-package:', iso(-hour))).order;
-  await reserve(spent, 10);
-  const adjusted = await profile(0);
-  const adjustedPack = (await pack(adjusted, 100)).order;
-  await c.query("SELECT * FROM atomic_apply_credit_ledger_entry($1::uuid,-5,'deduction','Synthetic admin deduction',$2)", [adjusted, 'test-admin:' + adjusted]);
-  await reapply();
+  // Backfill on the database that predated 0275 (seeded in the build): provable sources tracked, others "source unknown".
+  assert.ok(seeded, '0275 must be applied through the canonical build plan');
+  const cleanPack = seed.cleanPack, cleanGrant = { grant: seed.grant }, spentPack = seed.spentPack;
+  const adjustedPack = seed.adjustedPack, spent = seed.spent;
   const reviewed = async (kind, id) => v('SELECT count(*)::int v FROM credit_source_reviews WHERE source_kind=$1 AND source_id=$2', [kind, id]);
   const sourceOf = order => v('SELECT id v FROM credit_package_sources WHERE order_id=$1', [order]);
   assert.equal(await reviewed('credit_package', await sourceOf(cleanPack)), 0);

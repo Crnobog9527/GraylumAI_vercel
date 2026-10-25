@@ -68,8 +68,12 @@ export async function runCases({db,Client,connectionString,report}) {
  await assert.rejects(()=>claim(f,i),/PAY_REFUND_NOT_APPROVED/);
  i=await decide(f,q);
  await run("insert into credit_transactions(idempotency_key,user_id,amount,type,ledger_type) values('fixture:'||gen_random_uuid(),$1,-1,'consumption','spend')",[f.user]);
+ // 0336 reports confirmed spend as an ordinary policy refusal; incomplete ledger evidence keeps the fail-closed code.
+ await assert.rejects(()=>claim(f,i),/PAY_REFUND_CREDITS_CONSUMED/);
+ f=await fresh();q=await quote(f);i=await decide(f,q);
+ await run("insert into credit_transactions(idempotency_key,user_id,amount,type,ledger_type,source_type) values('fixture:'||gen_random_uuid(),$1,-1,'adjustment','adjustment','system')",[f.user]);
  await assert.rejects(()=>claim(f,i),/PAY_REFUND_CONSUMPTION_OR_UNKNOWN/);
- report.checks.push('rejected approval and new consumption stop dispatch');
+ report.checks.push('rejected approval, confirmed spend and unknown negative ledger rows stop dispatch');
  f=await fresh();
  await assert.rejects(()=>quote({...f,actor:f.user}),/PAY_REFUND_ADMIN_REQUIRED/);
  const other=await fresh();
@@ -114,7 +118,8 @@ export async function runCases({db,Client,connectionString,report}) {
   f=await fresh();q=await quote(f);i=await decide(f,q);
   await second.query('begin');
   await second.query('select id from profiles where id=$1 for update',[f.user]);
-  const pending=claim(f,i).then(()=>{throw Error('claim should reject')},e=>assert.match(e.message,/PAY_REFUND_CONSUMPTION_OR_UNKNOWN/));
+  // Confirmed spend is reported as PAY_REFUND_CREDITS_CONSUMED since 0336.
+  const pending=claim(f,i).then(()=>{throw Error('claim should reject')},e=>assert.match(e.message,/PAY_REFUND_CREDITS_CONSUMED/));
   await second.query("insert into credit_transactions(idempotency_key,user_id,amount,type,ledger_type) values('fixture:'||gen_random_uuid(),$1,-1,'consumption','spend')",[f.user]);
   await second.query('commit');await pending;
   report.checks.push('two connections: one approval identity/one claim; concurrent consumption before claim rejects');

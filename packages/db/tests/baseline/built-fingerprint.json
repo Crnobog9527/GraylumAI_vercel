@@ -3153,7 +3153,7 @@
   "fn:account_erasure_auth_result(uuid,uuid,boolean)": "bdaa199dafdd",
   "fn:account_erasure_barrier()": "514d51749c33",
   "fn:account_erasure_body_remaining(uuid)": "903332f4e157",
-  "fn:account_erasure_business_remaining(uuid)": "806ac8aee1c8",
+  "fn:account_erasure_business_remaining(uuid)": "503f8622e77e",
   "fn:account_erasure_confirm(uuid,uuid)": "55bb89ab9b01",
   "fn:account_erasure_confirm_with_digests(uuid,uuid,jsonb)": "bff87ddd9102",
   "fn:account_erasure_detach_runtime(uuid,uuid)": "9dd938797193",

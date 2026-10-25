@@ -42,25 +42,27 @@ try {
  assert.ok(ready,'local postgres ready');
  installPgCronStub(root,name,(argv,input)=>ok(docker(['exec',...argv],input)));
  const outcome=r=>({ok:r.status===0&&!r.error,error:r.stderr});
- let before;
+ // MAINT-P1b: the 0183 structural checks run at 0183's place in the chain. Later migrations redefine the
+ // bill2 erasure functions, so replaying 0183 or its rollback on the finished database no longer means anything.
+ let before,once;
  report.build=buildFromFiles(root,{applyFile:path=>{
-  if(path===migrationPath&&!before){
-   before=snapshot();
-  }
-  return outcome(sql(read(path)));
+  if(path!==migrationPath||before)return outcome(sql(read(path)));
+  before=snapshot();
+  const applied=outcome(sql(migration));
+  if(!applied.ok)return applied;
+  once=snapshot();
+  ok(sql(migration));assert.deepEqual(snapshot(),once,'repeat 0183 is a structural no-op');
+  report.checks.push('0183 canonical application/replay: identical full catalog');
+  ok(sql(read('packages/db/tests/erasure-run/rollback.sql')));
+  assert.deepEqual(snapshot(),before,'empty structural rollback restores pre-migration catalog');
+  ok(sql(migration));assert.deepEqual(snapshot(),once);
+  report.checks.push('empty rollback/reapply exact');
+  return applied;
  },
   applyServerOnly:input=>outcome(docker(['exec',name,'psql','-X','-qAt','-U','postgres','-d','b2a','-c',input])),
   fingerprint:development?undefined:snapshot});
  assert.equal(report.build.failed,null);
- assert.ok(before,'0183 must be applied through the canonical build plan');
- const once=snapshot();
- ok(sql(migration));assert.deepEqual(snapshot(),once,'repeat 0183 is a structural no-op');
- report.checks.push('0183 canonical application/replay: identical full catalog');
- // Refuse source drift before any lasting change, then verify exact no-data rollback.
- ok(sql(read('packages/db/tests/erasure-run/rollback.sql')));
- assert.deepEqual(snapshot(),before,'empty structural rollback restores pre-migration catalog');
- ok(sql(migration)); assert.deepEqual(snapshot(),once);
- report.checks.push('empty rollback/reapply exact');
+ assert.ok(once,'0183 must be applied through the canonical build plan');
  const require=createRequire(resolve(root,'packages/api/package.json'));
  const {Client}=require('pg');
  const address=ok(docker(['port',name,'5432/tcp']));assert.match(address,/^127\.0\.0\.1:\d+$/);

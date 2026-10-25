@@ -98,7 +98,7 @@
 | --- | --- | --- |
 | 正式 Supabase 项目 `Graylum_main` | 已新建（Owner 2026-10-17 选新建）；区域 us-west-1（旧版建议 us-west-2，已建不能改，和 Vercel sfo1、Upstash sfo1 同在美西）；10-22 已升级 Pro、换 Micro | 总控记录 |
 | Vercel | 已是 Pro；正式项目 `graylum-ai-vercel-v1` 暂停中、函数区域 sfo1 | 总控记录 |
-| 定时任务频率（旧 A2） | `apps/web/vercel.json` 已是 Pro 频率：`runtime-recovery` 每分钟（也负责发止损告警）、`account-erasure` 和 `library-cleanup` 每 5 分钟、`social-monitor` 每 10 分钟（作品复盘开关关着时空转）。**只是频率改好了**，资料库清理积压演练不在 #1158 里，仍是开放门槛（第 1.2 节第 7 项⑥） | [#1158](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1158) |
+| 定时任务频率（旧 A2） | `apps/web/vercel.json` 已是 Pro 频率：`runtime-recovery` 每分钟（也负责发止损告警）、`account-erasure` 和 `library-cleanup` 每 5 分钟、`social-monitor` 每 10 分钟（作品复盘开关关着时空转）、`fusion-recovery` 每 10 分钟（MAINT-P3b：评审团/对比里已派发且过了派发期限 10 分钟的未结算调用，不等每日对账）。**只是频率改好了**，资料库清理积压演练不在 #1158 里，仍是开放门槛（第 1.2 节第 7 项⑥） | [#1158](https://github.com/Crnobog9527/GraylumAI_vercel/pull/1158) |
 | 正式 Upstash Redis | 已建，`UPSTASH_REDIS_REST_URL` / `_TOKEN` 已加到 Production | 总控记录 |
 | Resend | `graylum.com` 发信域名已验证 | 总控记录 |
 | Stripe 正式 | 已开通 Managed Payments；续费、卡到期、扣款失败提醒由 Stripe 发（我方不再发卡类续费提醒） | 总控记录；Master Plan 第 2.1 节 2026-10-19 |
@@ -131,6 +131,7 @@
 | Q1 | 总控 | 确认第 1.2 节 12 项在 staging 上全部 PASS 且对应冻结版本（标"（正式）"的部分除外，见第 1.1 节第 5 条）；冻结版本的 CI、独立审查都对应同一个版本；`pnpm audit --audit-level high` 0 高危 | 记录贴在冻结版本的 PR 上 |
 | Q2 | 总控 | 准备**批准包**：正式项目、域名、冻结版本、迁移清单、每组配置值、各家上限金额（Owner 已设的读回值）、冒烟预算；没读过的正式事实标 NOT_RUN | 批准包发 Owner |
 | Q3 | ★ Owner 批准 | 同意冻结版本和批准包（第 6 节可复制句） | 总控记下 Owner 原话 |
+| Q4 | 总控 | 建正式站前核对三地区一致：Supabase 正式项目 us-west-1、Vercel 正式项目 Function Region = sfo1、Upstash 正式 Redis us-west-1，三者一致才继续（Owner 2026-10-26，Master Plan 第 2.1 节） | 三项只读读回值写进批准包；任何一项不一致就停下来报告，不继续建库和部署 |
 
 ### 3.3 建库日：维护态（站点保持暂停、`stopNewCalls` 开着、付款路由关着）
 

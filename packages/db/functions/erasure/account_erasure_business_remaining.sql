@@ -25,7 +25,11 @@ AS $function$
  +public.library_erasure_remaining(p_profile_id)
  +(SELECT count(*) FROM account_erasure_requests WHERE profile_id=p_profile_id
   AND stage<>'completed' AND library_storage_verified_at IS NULL)
- +(SELECT count(*) FROM runtime_sessions WHERE actor_id=p_profile_id)
+ +(SELECT count(*) FROM runtime_sessions s WHERE s.actor_id=p_profile_id
+  -- 0393 research context: an erased shell kept only as the session id of retained, erased research evidence
+  AND NOT (s.erased_at IS NOT NULL
+   AND EXISTS(SELECT 1 FROM research_plans p WHERE p.session_id=s.id AND p.erased_at IS NOT NULL)
+   AND NOT EXISTS(SELECT 1 FROM research_plans p WHERE p.session_id=s.id AND p.erased_at IS NULL)))
  +(SELECT count(*) FROM conversations WHERE user_id=p_profile_id)
  +(SELECT count(*) FROM opc_drafts WHERE actor_id=p_profile_id)
  +(SELECT count(*) FROM opc_library_requests WHERE actor_id=p_profile_id)
