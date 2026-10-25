@@ -72,6 +72,7 @@
     "./src/services/research/runtime/secrets": "./src/services/research/runtime/secrets.ts",
     "./src/services/runtime/stagingEnvironment": "./src/services/runtime/stagingEnvironment.ts",
     "./src/services/bill2/stuckCalls": "./src/services/bill2/stuckCalls.ts",
+    "./src/services/bill2/receiptRetention": "./src/services/bill2/receiptRetention.ts",
     "./src/services/report/fees": "./src/services/report/fees.ts",
     "./src/services/accountErasure/executor": "./src/services/accountErasure/executor.ts",
     "./src/services/accountErasure/content": "./src/services/accountErasure/content.ts",
