@@ -3,7 +3,7 @@ import {describe,expect,it,vi} from 'vitest';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {runtimeAdmissionService} from './admission';
 import {REPLY_LANGUAGE,REPLY_LANGUAGE_INSTRUCTIONS,withPrimaryAddenda} from './primaryInstructions';
-import {REPLY_LANGUAGE_SETTINGS,frozenReplyLocale,replySettingInstructions} from './replyLanguage';
+import {REPLY_LANGUAGE_SETTINGS,frozenReplyRule,replySettingInstructions} from './replyLanguage';
 import {runtimeContext} from './runtimeContext';
 import {effectiveReplyLocale,entryLocaleHint,REPLY_LOCALES} from '../../shared/replyLanguage';
 vi.mock('../redisRateLimiter', () => ({ checkRuntimeRateLimit: async () => ({ success: true }) }));
@@ -24,17 +24,33 @@ describe('the reply-language rule', () => {
     expect(text).toContain("whatever language the Skill, the material or the user's messages are written in");
     expect(text).toContain('Only when the user explicitly asks for another language');
     expect(text).toContain('keep everything else in the set language');
+    // v3 (2026-10-25): what the reply creates is in the set language too, unless the user names the audience's language.
+    expect(text).toContain(`Write everything in ${NAMES[locale]}: the reply itself and everything it creates, such as titles, names, examples, scripts and copy`);
+    expect(text).toContain('or explicitly says which language their audience uses');
     for(const other of REPLY_LOCALES.filter(item=>item!==locale))expect(text).not.toContain(`language to ${NAMES[other]}.`);
   });
   it.each(REPLY_LOCALES)('a frozen %s value appends exactly its own rule, and the context schema accepts it', locale => {
     const value=REPLY_LANGUAGE_SETTINGS[locale];
-    expect(frozenReplyLocale(value)).toBe(locale);
+    expect(value).toBe(`reply-language-v3-${locale}`);
+    expect(frozenReplyRule(value)).toBe(replySettingInstructions(locale));
     expect(withPrimaryAddenda('Skill 正文',{replyLanguage:value})).toBe('Skill 正文'+replySettingInstructions(locale));
     expect(runtimeContext.shape.replyLanguage.parse(value)).toBe(value);
   });
+  it('executions frozen with the v2 wording replay it byte-identical (2026-10-24 text, pinned)', () => {
+    const v2=(name:string)=>`\nReply language (host rule, takes precedence over any language rule in the Skill): the user set their language to `+
+      `${name}. Write replies, questions, card options, drafts and reports in ${name}, whatever language the Skill, the material or `+
+      'the user\'s messages are written in. Only when the user explicitly asks for another language (for example "write an English '+
+      'version" or "用英文回答"), write what they asked for in that language, and keep everything else in the set language. Keep '+
+      'required exact strings (report headings, ids, JSON keys) unchanged.';
+    for(const locale of REPLY_LOCALES){
+      const value=`reply-language-v2-${locale}`;
+      expect(withPrimaryAddenda('base',{replyLanguage:value})).toBe('base'+v2(NAMES[locale]));
+      expect(runtimeContext.shape.replyLanguage.parse(value)).toBe(value);
+    }
+  });
   it('executions admitted before the setting replay their own rule byte-identical; unknown values add nothing', () => {
     expect(withPrimaryAddenda('base',{replyLanguage:REPLY_LANGUAGE})).toBe('base'+REPLY_LANGUAGE_INSTRUCTIONS);
-    for(const value of [undefined,'reply-language-v2','reply-language-v2-fr','toString','__proto__'])
+    for(const value of [undefined,'reply-language-v2','reply-language-v3','reply-language-v3-fr','toString','__proto__'])
       expect(withPrimaryAddenda('base',{replyLanguage:value})).toBe('base');
     expect(()=>runtimeContext.shape.replyLanguage.parse('reply-language-v2-fr')).toThrow();
   });
