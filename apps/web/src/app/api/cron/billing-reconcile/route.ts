@@ -23,6 +23,7 @@ import { recoverFusionFinancials } from '@repo/api/src/services/fusion/recovery'
 import { recoverVoiceGenerations } from '@repo/api/src/services/voice/recovery';
 import { settleDueReportFees } from '@repo/api/src/services/report/fees';
 import { findStuckPaygCalls } from '@repo/api/src/services/bill2/stuckCalls';
+import { scrubExpiredReceiptOutput } from '@repo/api/src/services/bill2/receiptRetention';
 import { kickStalledReviews } from '@repo/api/src/services/fusion/background';
 import { validateCronRequest } from '@/lib/cron-auth';
 import { pruneGaCheckoutIds } from '@repo/api/src/services/analytics/gaPurchase';
@@ -65,6 +66,12 @@ async function runReportFeeSettlement(supabase: SupabaseClient) {
 async function runFusionKick(supabase: SupabaseClient, origin: string) {
   try { return await kickStalledReviews(supabase, origin, { timeLimitMs: 10_000 }); }
   catch { return { success: false, kicked: 0 }; }
+}
+
+/** ARCH-FIX G2: receipts older than 30 days on finished runs lose their raw provider output (Owner 2026-10-25). */
+async function runReceiptRetention(supabase: SupabaseClient) {
+  try { return await scrubExpiredReceiptOutput(supabase); }
+  catch { return { success: false, scrubbed: 0, batches: 0, complete: false }; }
 }
 
 /** Research prices expire (TikHub after 7 days): re-read TikHub's official prices daily, alert before any price expires. */
@@ -172,7 +179,7 @@ export async function GET(request: Request) {
     // ANALYTICS 0280: GA checkout ids never taken (long past their 45-minute window) are deleted (statistics only, never fails the job).
     const analyticsIds = pruneGaCheckoutIds(supabase);
     const [result, readinessAudit, erasureFinancial, waffo, staleRounds, stripeCard, { fusion, fusionKick }, stuckCalls, reportFees,
-      voice, researchPrices] = await Promise.all([
+      voice, researchPrices, receiptRetention] = await Promise.all([
       runDailyBillingReconciliation(supabase),
       runBillingEngineV15ReadinessAudit(supabase),
       runErasureFinancialReconciliation(supabase),
@@ -188,10 +195,11 @@ export async function GET(request: Request) {
       runReportFeeSettlement(supabase),
       runVoiceRecovery(supabase),
       runResearchPriceRefresh(supabase),
+      runReceiptRetention(supabase),
     ]);
     const success = result.success && readinessAudit.success && erasureFinancial.success && waffo.success
       && staleRounds.success && stripeCard.success && fusion.success && fusionKick.success && stuckCalls.success
-      && reportFees.success && voice.success && researchPrices.success;
+      && reportFees.success && voice.success && researchPrices.success && receiptRetention.success;
 
     if (!success) {
       logger.system.cronJob(
@@ -210,7 +218,8 @@ export async function GET(request: Request) {
           ...(reportFees.success ? [] : ['Report price settlement failed']),
           ...(voice.success ? [] : [`Voice generations pending recovery: ${voice.failed}`]),
           ...(researchPrices.success ? [] : [`Research prices: ${researchPrices.failed.length} refresh failures, `
-            + `${researchPrices.expiring.length} expiring within a day, window ${researchPrices.window}`])].join(' | '),
+            + `${researchPrices.expiring.length} expiring within a day, window ${researchPrices.window}`]),
+          ...(receiptRetention.success ? [] : ['Receipt raw output retention failed'])].join(' | '),
         {
           erasureFinancial,
           waffo,
@@ -222,6 +231,7 @@ export async function GET(request: Request) {
           reportFees,
           voice,
           researchPrices,
+          receiptRetention,
           mismatches: result.mismatches,
           summary: result.summary,
           readinessAudit: {
@@ -266,6 +276,7 @@ export async function GET(request: Request) {
       reportFees,
       voice,
       researchPrices,
+      receiptRetention,
       timestamp: new Date().toISOString(),
     }, { status: success ? 200 : 500 });
   } catch (error) {
