@@ -53,13 +53,12 @@ async function readDailyCreditTransactions(supabase: SupabaseClient, start: stri
 }
 
 export async function readDailyBillingCreditSources(supabase: SupabaseClient, start: string, end: string) {
-  const [billingHistoryResult, creditTransactions, researchResult] = await Promise.all([
-      supabase.from('billing_history').select('operation_type, amount, created_at').gte('created_at', start).lt('created_at', end),
+  // billing_history settle totals are counted in the database (billing_reconcile_day, dailyBillingTotals.ts).
+  const [creditTransactions, researchResult] = await Promise.all([
       readDailyCreditTransactions(supabase, start, end),
       supabase.rpc('research_billing_summary', { p_start: start, p_end: end }),
     ]);
 
-  if (billingHistoryResult.error) throw billingHistoryResult.error;
   if (researchResult.error) throw researchResult.error;
 
   const research = researchResult.data as { count: number; credits: number } | null;
@@ -68,7 +67,6 @@ export async function readDailyBillingCreditSources(supabase: SupabaseClient, st
     throw new Error('Invalid research reconciliation totals');
   }
   return {
-    billingHistory: billingHistoryResult.data ?? [],
     creditTransactions,
     research,
     reportFixedPriceCredits: sumFixedPriceSpend(creditTransactions, 'report:'),

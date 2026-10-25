@@ -10,6 +10,7 @@ import {
 } from './paymentOrderStatus';
 import { getDueAnnualGrantPeriods } from './subscriptionCreditGrants';
 import { readDailyBillingCreditSources } from './dailyBillingCreditSources';
+import { readDailyBillingTotals } from './dailyBillingTotals';
 
 export interface BillingReconciliationSummary {
   successfulAiRequests: number;
@@ -25,6 +26,11 @@ export interface BillingReconciliationSummary {
   researchSettledCount?: number;
   reportFixedPriceCredits?: number;
   fusionReviewFixedPriceCredits?: number;
+  settledCalls?: number;
+  callLedgerMismatches?: number;
+  creditSourceMismatches?: number;
+  unattributedSourceEntries?: number;
+  notAppliedSourceEntries?: number;
 }
 
 export interface BillingReconciliationResult {
@@ -1793,46 +1799,17 @@ export async function runDailyBillingReconciliation(
     Date.parse(end),
   )).toISOString();
 
-  const [tokenStatsResult, aiUsageResult, paymentOrdersResult, creditSources] = await Promise.all([
-      supabase
-        .from('token_stats')
-        .select('total_credits, web_search_count, created_at')
-        .gte('created_at', enforcementStart)
-        .lt('created_at', end),
-      supabase
-        .from('ai_usage_logs')
-        .select('status, created_at')
-        .eq('status', 'success')
-        .gte('created_at', enforcementStart)
-        .lt('created_at', end),
-      supabase
-        .from('payment_orders')
-        .select('status, amount_total, created_at')
-        .gte('created_at', enforcementStart)
-        .lt('created_at', end),
+  const [totals, creditSources] = await Promise.all([
+      readDailyBillingTotals(supabase, enforcementStart, end),
       readDailyBillingCreditSources(supabase, enforcementStart, end),
     ]);
+  const { creditTransactions, research, reportFixedPriceCredits, fusionReviewFixedPriceCredits } = creditSources;
 
-  if (tokenStatsResult.error) throw tokenStatsResult.error;
-  if (aiUsageResult.error) throw aiUsageResult.error;
-  if (paymentOrdersResult.error) throw paymentOrdersResult.error;
-
-  const tokenStats = tokenStatsResult.data ?? [];
-  const aiUsageLogs = aiUsageResult.data ?? [];
-  const { billingHistory, creditTransactions, research, reportFixedPriceCredits, fusionReviewFixedPriceCredits } = creditSources;
-  const paymentOrders = paymentOrdersResult.data ?? [];
-
-  const successfulAiRequests = aiUsageLogs.length;
-  const tokenStatsCount = tokenStats.length;
-  const tokenStatsCredits = sumInteger(tokenStats.map((row) => row.total_credits ?? 0));
-  const webSearchCount = sumInteger(tokenStats.map((row) => row.web_search_count ?? 0)) + research.count;
+  const { successfulAiRequests, tokenStatsCount, tokenStatsCredits } = totals;
+  const webSearchCount = totals.webSearchCount + research.count;
   const accountedCredits=tokenStatsCredits+research.credits+reportFixedPriceCredits+fusionReviewFixedPriceCredits;
 
-  const settledCredits = Math.abs(sumInteger(
-    billingHistory
-      .filter((row) => row.operation_type === 'settle' || row.operation_type === 'abort_settle')
-      .map((row) => row.amount ?? 0),
-  ));
+  const settledCredits = Math.abs(totals.settleCredits);
 
   const deductionCredits = Math.abs(sumInteger(
     creditTransactions
@@ -1840,7 +1817,6 @@ export async function runDailyBillingReconciliation(
       .map((row) => row.amount ?? 0),
   ));
 
-  const completedPaymentOrders = paymentOrders.filter((row) => row.status === 'completed');
   const purchaseCredits = sumInteger(
     creditTransactions
       .filter((row) => countsAsTopupPurchaseCredit(row))
@@ -1853,14 +1829,19 @@ export async function runDailyBillingReconciliation(
     tokenStatsCredits,
     settledCredits,
     deductionCredits,
-    completedPaymentOrders: completedPaymentOrders.length,
-    completedPaymentAmount: sumInteger(completedPaymentOrders.map((row) => row.amount_total ?? 0)),
+    completedPaymentOrders: totals.completedPaymentOrders,
+    completedPaymentAmount: totals.completedPaymentAmount,
     purchaseCredits,
     webSearchCount,
     researchSettledCount:research.count,
     researchSettledCredits:research.credits,
     reportFixedPriceCredits,
     fusionReviewFixedPriceCredits,
+    settledCalls: totals.calls.settledCalls,
+    callLedgerMismatches: totals.calls.mismatched,
+    creditSourceMismatches: totals.sources.mismatched,
+    unattributedSourceEntries: totals.entries.unattributed,
+    notAppliedSourceEntries: totals.entries.notApplied,
   };
 
   const mismatches: string[] = [];
@@ -1873,8 +1854,19 @@ export async function runDailyBillingReconciliation(
   if (deductionCredits < accountedCredits) {
     mismatches.push(`Credit deductions (${deductionCredits}) are lower than token stats, research, and fixed price credits (${accountedCredits})`);
   }
-  if (completedPaymentOrders.length > 0 && purchaseCredits <= 0) {
-    mismatches.push(`Completed payment orders (${completedPaymentOrders.length}) have no matching purchase credits`);
+  if (totals.completedPaymentOrders > 0 && purchaseCredits <= 0) {
+    mismatches.push(`Completed payment orders (${totals.completedPaymentOrders}) have no matching purchase credits`);
+  }
+  // ARCH-FIX E2: each settled call's ledger rows sum to its charge less compensation; packs and subscription grants
+  // agree with the credit-source ledger.
+  const { calls, sources } = totals;
+  if (calls.mismatched > 0) {
+    mismatches.push(`Call ledger rows do not match the charge for ${calls.mismatched} of ${calls.settledCalls} settled calls`
+      + ` (${calls.sample.join(', ')})`);
+  }
+  if (sources.mismatched > 0) {
+    const sample = sources.sample.map((row) => `${row.kind}:${row.id}`).join(', ');
+    mismatches.push(`Credit source ledgers disagree for ${sources.mismatched} sources (${sample})`);
   }
 
   return {
