@@ -3823,7 +3823,7 @@
   "fn:publish_monitor_publish_job(uuid,uuid)": "3140d69eac7e",
   "fn:publish_monitor_publish_lock(uuid)": "d255c8986967",
   "fn:publish_monitor_publish_manual_resolve(uuid,uuid,boolean,jsonb)": "6893ae30c7db",
-  "fn:publish_monitor_publish_price()": "d7a1d09ca665",
+  "fn:publish_monitor_publish_price()": "b2a07e437a94",
   "fn:publish_monitor_publish_reconcile_claim(integer,integer,boolean)": "d343f2841e91",
   "fn:publish_monitor_publish_record(uuid,text,jsonb)": "2813062a8c94",
   "fn:publish_monitor_publish_release(uuid,text)": "2241775bef29",
