@@ -29,6 +29,7 @@ import { activateRuntimeCandidate } from '../services/runtime/matching';
 import { defaultModelFirst, freeChatModels, readModelChoiceSettings } from '../services/runtime/defaultModel';
 import { publicModelChoices } from '../services/modelIdentity/display';
 import {executeOriginalExecution,runtimeLocalEndpoint,streamOriginalExecution} from '../services/runtime/executionStream';
+import {BILLING_UNIT_POLICY} from '../services/billingUnit';
 
 // Viewing original state, cancellation and receipt maintenance do not admit
 // new work. Source/actor checks still run in their existing SQL procedures.
@@ -70,7 +71,8 @@ const procedure=protectedProcedure.use(async({ctx,next,path})=>{
    ...(real?{real,paygHost:true}:{}),resumeWaitingOrganizer:(token:import('../services/runtime/paygRuntime').ResumeInput)=>executeOriginalExecution({
    admin:ctx.supabaseAdmin!,user:ctx.userScopedSupabase,actorId:ctx.user.id,budget:ctx.runtimeBudget,
    authorization:ctx.headers?.get('Authorization'),maintenanceEndpoint:endpoint,
-  },token.executionId,undefined,token),purposeBudgets:true,account:'runtime-local',costPerCall:'0.02',creditsPerUsd:'1000',multiplier:'1',maxCalls:3,maxOutputTokens:1000,inputBytes:32000,historyItems:100,searchEnabled:!real,workspaceContext:true,
+  },token.executionId,undefined,token),purposeBudgets:true,account:'runtime-local',costPerCall:'0.02',...BILLING_UNIT_POLICY,
+   maxCalls:3,maxOutputTokens:1000,inputBytes:32000,historyItems:100,searchEnabled:!real,workspaceContext:true,
    // POSITIONING-GATE: free chat only (Decisions via the admitted model's OpenRouter key); reports skip it in admission.
    positioningGate:{}};
   const admission=runtimeAdmissionService(ctx.userScopedSupabase,ctx.supabaseAdmin,admissionPolicy);
@@ -118,10 +120,11 @@ export const runtimeRouter=router({
   priceCredits:await reportPrice(ctx.supabaseAdmin!).catch(()=>null)})),
  // Saved reports stay discoverable whatever the switch or membership is now.
  reportLatest:maintenanceProcedure.input(reportLocate).query(({ctx,input})=>reportService(ctx.userScopedSupabase,ctx.supabaseAdmin!,
-  {account:'read-only',costPerCall:'0',creditsPerUsd:'100',multiplier:'6',maxCalls:1,maxOutputTokens:1,inputBytes:1024,historyItems:0}).latest(input)),
+  {account:'read-only',costPerCall:'0',...BILLING_UNIT_POLICY,
+   maxCalls:1,maxOutputTokens:1,inputBytes:1024,historyItems:0}).latest(input)),
  reportStatus:maintenanceProcedure.input(z.object({executionId:z.string().uuid()}).strict()).query(({ctx,input})=>
-  reportService(ctx.userScopedSupabase,ctx.supabaseAdmin!,{account:'read-only',costPerCall:'0',creditsPerUsd:'100',
-    multiplier:'6',maxCalls:1,maxOutputTokens:1,inputBytes:1024,historyItems:0}).status(input.executionId)),
+  reportService(ctx.userScopedSupabase,ctx.supabaseAdmin!,{account:'read-only',costPerCall:'0',...BILLING_UNIT_POLICY,
+   maxCalls:1,maxOutputTokens:1,inputBytes:1024,historyItems:0}).status(input.executionId)),
  choices:procedure.input(z.object({sessionId:z.string().uuid().optional()}).optional()).query(async({ctx,input})=>{
   let work=false;let workModuleId:string|null=null;let workRevisionId:string|null=null;
   if(input?.sessionId){const listing=await ctx.supabaseAdmin!.rpc('opc_query',{p_actor_id:ctx.user.id});if(!listing.error){const item=(listing.data.accounts??[]).flatMap((a:{items:Array<{sessionId:string;workItemId:string;moduleId?:string;methodRevisionId?:string}>})=>a.items).find((i:{sessionId:string})=>i.sessionId===input.sessionId);work=Boolean(item);if(item){workModuleId=item.moduleId??null;workRevisionId=item.methodRevisionId??null;}}}
