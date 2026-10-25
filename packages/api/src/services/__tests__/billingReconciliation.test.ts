@@ -15,6 +15,8 @@ function createMockSupabase(data: {
   paymentOrders?: Array<Record<string, unknown>>;
   launchBaselineAt?: unknown;
   researchTotals?: {count:number;credits:number};
+  calls?: { settledCalls: number; mismatched: number; sample: string[] };
+  sources?: { mismatched: number; sample: Array<{ kind: string; id: string }> };
 }) {
   const tables: Record<string, Array<Record<string, unknown>>> = {
     token_stats: data.tokenStats ?? [],
@@ -37,7 +39,24 @@ function createMockSupabase(data: {
   let currentRange: [number, number] | null = null;
 
   return {
-    rpc: async () => ({ data: data.researchTotals ?? { count: 0, credits: 0 }, error: null }),
+    // billing_reconcile_day (ARCH-FIX E2) counts in the database; the mock aggregates the same rows the same way.
+    rpc: async (name: string) => {
+      if (name !== 'billing_reconcile_day') return { data: data.researchTotals ?? { count: 0, credits: 0 }, error: null };
+      const sum = (rows: Array<Record<string, unknown>>, key: string) => rows.reduce((total, row) => total + Number(row[key] ?? 0), 0);
+      const completed = tables.payment_orders.filter((row) => row.status === 'completed');
+      return { data: {
+        tokenStatsCount: tables.token_stats.length,
+        tokenStatsCredits: sum(tables.token_stats, 'total_credits'),
+        webSearchCount: sum(tables.token_stats, 'web_search_count'),
+        successfulAiRequests: tables.ai_usage_logs.filter((row) => (row.status ?? 'success') === 'success').length,
+        settleCredits: sum(tables.billing_history.filter((row) => row.operation_type === 'settle' || row.operation_type === 'abort_settle'), 'amount'),
+        completedPaymentOrders: completed.length,
+        completedPaymentAmount: sum(completed, 'amount_total'),
+        calls: data.calls ?? { settledCalls: 0, mismatched: 0, sample: [] },
+        sources: data.sources ?? { mismatched: 0, sample: [] },
+        entries: { unattributed: 0, notApplied: 0 },
+      }, error: null };
+    },
     from: (table: string) => {
       if (table === 'system_settings') {
         const settingsBuilder = {
@@ -60,6 +79,32 @@ function createMockSupabase(data: {
 }
 
 describe('runDailyBillingReconciliation', () => {
+  it('alarms on a settled call whose ledger rows do not match its charge (ARCH-FIX E2)', async () => {
+    const result = await runDailyBillingReconciliation(createMockSupabase({
+      calls: { settledCalls: 1500, mismatched: 1, sample: ['call-1'] },
+    }), new Date('2026-03-10T00:00:00Z'));
+    expect(result.success).toBe(false);
+    expect(result.summary.settledCalls).toBe(1500);
+    expect(result.mismatches).toEqual(['Call ledger rows do not match the charge for 1 of 1500 settled calls (call-1)']);
+  });
+
+  it('alarms when a credit source disagrees with the source ledger (ARCH-FIX E2)', async () => {
+    const result = await runDailyBillingReconciliation(createMockSupabase({
+      sources: { mismatched: 1, sample: [{ kind: 'subscription_grant', id: 'grant-1' }] },
+    }), new Date('2026-03-10T00:00:00Z'));
+    expect(result.success).toBe(false);
+    expect(result.mismatches).toEqual(['Credit source ledgers disagree for 1 sources (subscription_grant:grant-1)']);
+  });
+
+  it('fails closed on malformed database totals (ARCH-FIX E2)', async () => {
+    const supabase = createMockSupabase({});
+    const rpc = supabase.rpc;
+    supabase.rpc = async (name: string) => name === 'billing_reconcile_day'
+      ? { data: { tokenStatsCount: -1 }, error: null } : rpc(name);
+    await expect(runDailyBillingReconciliation(supabase, new Date('2026-03-10T00:00:00Z')))
+      .rejects.toThrow('Invalid daily billing reconciliation totals');
+  });
+
   it('uses the fixed previous UTC day even when invoked mid-day', () => {
     expect(getUtcPreviousDayWindow(new Date('2026-03-10T18:47:12.000-07:00'))).toEqual({
       start: '2026-03-10T00:00:00.000Z',

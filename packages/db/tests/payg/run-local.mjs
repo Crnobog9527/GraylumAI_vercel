@@ -19,6 +19,7 @@ import {edgeCases} from './edges.mjs';
 import {grantCases} from './grants.mjs';
 import {quarantineCases} from './quarantine.mjs';
 import {ledgerConstraintCases} from './ledger-constraints.mjs';
+import {reconcileCases} from './reconcile.mjs';
 import {refundHoldCases} from './refund-hold.mjs';
 import {nominalCases} from './nominal.mjs';
 import {erasureCases} from './erasure.mjs';
@@ -155,6 +156,7 @@ try {
   await productionCases({db,Client,connectionString,report,claim});
   await productionToolCases({db,report,claim});
   await productionFusionCases({db,report});
+  await reconcileCases({db,report,createFixture,claim,receipt});
 } catch (error) {
   report.failed = String(error.stack??error);
   report.databaseError = {code:error.code,detail:error.detail,where:error.where,position:error.position};
