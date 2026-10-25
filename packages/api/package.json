@@ -18,6 +18,7 @@
     "./src/lib/auth": "./src/lib/auth.ts",
     "./src/lib/logger": "./src/lib/logger.ts",
     "./src/lib/swallow": "./src/lib/swallow.ts",
+    "./src/lib/envValidator": "./src/lib/envValidator.ts",
     "./src/middleware/securityChecks": "./src/middleware/securityChecks.ts",
     "./src/types": "./src/types/index.ts",
     "./src/types/ai": "./src/types/ai.ts",
