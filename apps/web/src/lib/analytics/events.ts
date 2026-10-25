@@ -51,7 +51,7 @@ export function reportPositioningComplete(): boolean {
 }
 
 /** A paywall was shown to the user (opened once per display). `scene` names which paywall; no user or order ID. */
-export function reportPaywallView(scene: 'report'): boolean {
+export function reportPaywallView(scene: 'report' | 'compare' | 'jury'): boolean {
   return sendGaEvent(ANALYTICS_CONFIG.gaMeasurementId, 'paywall_view', { scene });
 }
 

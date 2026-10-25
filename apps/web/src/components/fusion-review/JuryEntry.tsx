@@ -5,7 +5,7 @@ import { useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { profileTabHref } from '@/lib/profile-tabs';
+import { ReportPaywallDialog } from '@/components/paywall/ReportPaywallDialog';
 import { trpc } from '@/trpc/client';
 import { resolveSeatNames, SEATS } from '@/components/landing/preview-jury/jury-events';
 import { ACTIVE, reviewHref, startErrorText, toPanel } from './review-adapter';
@@ -41,6 +41,8 @@ function ReportJury({ draftId, sourceVersionId, busy }: { draftId: string; sourc
   const panel = trpc.fusionReview.panel.useQuery(undefined, { enabled, staleTime: Infinity, retry: false });
   const start = trpc.fusionReview.start.useMutation();
   const [open, setOpen] = useState(false);
+  // The Gold paywall opens on this page (Owner 2026-10-25).
+  const [paywall, setPaywall] = useState(false);
   // The fixed price of a review and the balance a start needs (0294), shown before the user agrees.
   const estimate = trpc.fusionReview.estimate.useQuery({ draftId, sourceVersionId }, { enabled: enabled && open, retry: false,
     staleTime: 0, refetchOnWindowFocus: false });
@@ -61,8 +63,9 @@ function ReportJury({ draftId, sourceVersionId, busy }: { draftId: string; sourc
   if (goldOnly) {
     // A review already paid for stays reachable after a downgrade; only starting a new one is Gold-only.
     return <>
-      <Button variant="outline" disabled={busy} onClick={() => void window.open(profileTabHref('subscription'), '_blank', 'noopener')}>
+      <Button variant="outline" disabled={busy} onClick={() => setPaywall(true)}>
         请评审团审阅报告<span className={styles.gold}>Gold 专享</span></Button>
+      {paywall && <ReportPaywallDialog scene="jury" onClose={() => setPaywall(false)} />}
       {latest ? <Link className={styles.link} href={reviewHref(draftId, latest.reviewId)}>
         {ACTIVE.has(latest.state) ? '评审团正在审阅，去看看 →' : latest.awaitingChoice ? '评审完成，去逐章选择 →' : '查看上次评审 →'}</Link> : null}
     </>;
