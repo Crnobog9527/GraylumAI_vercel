@@ -20,7 +20,9 @@ const MAX_TARGETS = 9;
 
 const platforms = z.array(z.string().regex(/^[a-z0-9_-]{1,32}$/)).max(32);
 const decimal = z.string().regex(/^\d{1,6}(\.\d{1,6})?$/);
-const price = z.object({ usdPerTarget: decimal, multiplier: decimal, creditsPerUsd: decimal }).passthrough();
+// q has the site-wide format (up to 12 decimals, see parseCreditsPerUsd).
+const creditsPerUsd = z.string().regex(/^(0|[1-9][0-9]{0,11})(\.[0-9]{1,12})?$/);
+const price = z.object({ usdPerTarget: decimal, multiplier: decimal, creditsPerUsd }).passthrough();
 
 async function setting(db: Pick<SupabaseClient, 'from'>, key: string): Promise<unknown> {
   const { data, error } = await db.from('system_settings').select('value').eq('key', key).maybeSingle();

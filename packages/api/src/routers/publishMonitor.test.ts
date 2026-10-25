@@ -159,6 +159,10 @@ describe('publish-monitor one-click publishing', () => {
       .resolves.toMatchObject({ holdCreditsByTargets: [2, 3, 4, 5, 6, 7, 8, 9, 10] });
     await expect(caller(vi.fn(), true, { publish_monitor_publish_price: { usdPerTarget: 'x' } }).publish.options())
       .resolves.toEqual({ platforms: [], holdCreditsByTargets: null });
+    // A site-wide q with more than six decimals is legal and must not switch the price off.
+    await expect(caller(vi.fn(), true, { publish_monitor_publish_price: { usdPerTarget: '0.01' },
+      billing_credits_per_usd: '100.1234567', billing_token_price_multiplier: 6 }).publish.options())
+      .resolves.toMatchObject({ holdCreditsByTargets: [7, 13, 19, 25, 31, 37, 43, 49, 55] });
     // A missing site-wide row shows no number (fail closed), never a default.
     await expect(caller(vi.fn(), true, { publish_monitor_publish_price: { usdPerTarget: '0.01' },
       billing_credits_per_usd: 100 }).publish.options()).resolves.toEqual({ platforms: [], holdCreditsByTargets: null });

@@ -109,6 +109,8 @@ try {
   // q and m follow the site-wide rows; a missing or malformed row fails closed.
   await c.query("UPDATE system_settings SET value='3'::jsonb WHERE key='billing_token_price_multiplier'");
   assert.deepEqual(await v('SELECT publish_monitor_publish_price() v'), { usdPerTarget: '0.01', multiplier: '3', creditsPerUsd: '100' });
+  await c.query("UPDATE system_settings SET value='100.1234567'::jsonb WHERE key='billing_credits_per_usd'");
+  assert.equal((await v('SELECT publish_monitor_publish_price() v')).creditsPerUsd, '100.1234567');
   await c.query("UPDATE system_settings SET value='\"x\"'::jsonb WHERE key='billing_credits_per_usd'");
   await code(c.query('SELECT publish_monitor_publish_price()'), 'PUBLISH_MONITOR_PRICE_NOT_CONFIGURED');
   await c.query("DELETE FROM system_settings WHERE key='billing_credits_per_usd'");
