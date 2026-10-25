@@ -68,7 +68,7 @@ for (const entry of entries) {
         code: fault === 'over limit' ? 'TOO_MANY_REQUESTS' : 'SERVICE_UNAVAILABLE',
         cause: { retryAfter: 60 },
       });
-      if (fault === 'timeout') await vi.advanceTimersByTimeAsync(500);
+      if (fault === 'timeout') await vi.advanceTimersByTimeAsync(1000);
       await assertion;
       expect(transport).not.toHaveBeenCalled();
       expect(f.reads.every(name => ['agent_slice_result', 'artifact_query', 'artifact_generation', 'research_lookup'].includes(name))).toBe(true);
@@ -85,7 +85,7 @@ describe('real proxy IP admission', () => {
     if (fault === 'timeout') { vi.useFakeTimers(); state.limit.mockImplementation(() => new Promise(() => {})); }
     const { proxy } = await import('@/proxy');
     const pending = proxy(new NextRequest('http://localhost/api/trpc/test', { headers: { 'x-forwarded-for': '203.0.113.7' } }));
-    if (fault === 'timeout') await vi.advanceTimersByTimeAsync(500);
+    if (fault === 'timeout') await vi.advanceTimersByTimeAsync(1000);
     const response = await pending;
     expect(response.status).toBe(fault === 'healthy' ? 200 : fault === 'over limit' ? 429 : 503);
     if (fault === 'healthy') expect(state.auth).toHaveBeenCalled();

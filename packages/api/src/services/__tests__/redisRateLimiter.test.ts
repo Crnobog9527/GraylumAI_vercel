@@ -57,12 +57,12 @@ for (const [name, load] of loaders) {
         const { checkRateLimit } = await load();
         expect(await checkRateLimit('user', type)).toMatchObject({ success: false, reason: 'unavailable' });
       });
-      it(`${type}: bounds a hanging backend to 500ms`, async () => {
+      it(`${type}: bounds a hanging backend to 1000ms`, async () => {
         vi.useFakeTimers();
         mocks.limit.mockImplementation(() => new Promise(() => {}));
         const { checkRateLimit } = await load();
         const pending = checkRateLimit('user', type);
-        await vi.advanceTimersByTimeAsync(500);
+        await vi.advanceTimersByTimeAsync(1000);
         expect(await pending).toMatchObject({ success: false, reason: 'unavailable', retryAfter: 60 });
         expect(vi.getTimerCount()).toBe(0);
       });

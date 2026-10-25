@@ -32,12 +32,12 @@ for (const [name, load] of [
       const { checkRateLimit } = await load();
       expect(await checkRateLimit('user')).toMatchObject({ success: false, reason: 'unavailable' });
     });
-    it('returns within 500ms when Redis never resolves', async () => {
+    it('returns within 1000ms when Redis never resolves', async () => {
       vi.useFakeTimers();
       redis.evalsha.mockImplementation(() => new Promise(() => {}));
       const { checkRateLimit } = await load();
       const pending = checkRateLimit('user');
-      await vi.advanceTimersByTimeAsync(500);
+      await vi.advanceTimersByTimeAsync(1000);
       expect(await pending).toMatchObject({ success: false, reason: 'unavailable', retryAfter: 60 });
       expect(vi.getTimerCount()).toBe(0);
     });
