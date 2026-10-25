@@ -5,6 +5,8 @@ import { TRPCError } from '@trpc/server';
 import { logger } from '../lib/logger';
 import { createSafeInternalError, createSafeServiceUnavailableError } from '../lib/publicError';
 import { countsAsCreditSpend } from '../services/creditLedger';
+import { applyEntryReplyLanguage, setReplyLanguage } from '../services/replyLanguageSetting';
+import { effectiveReplyLocale, entryLocale, replyLocale } from '../shared/replyLanguage';
 
 export const userRouter = router({
   getEntitlements: protectedProcedure.input(z.void()).query(async ({ ctx }) => {
@@ -19,7 +21,7 @@ export const userRouter = router({
     //                  is_deleted, nickname, avatar_url, email, last_login_at, last_ip, deleted_at
     const { data: userProfile, error } = await ctx.supabase
       .from('profiles')
-      .select('id, email, nickname, avatar_url, role, credits, membership_level, status, created_at')
+      .select('id, email, nickname, avatar_url, role, credits, membership_level, status, created_at, reply_language')
       .eq('id', ctx.profileId)
       .single();
 
@@ -43,6 +45,9 @@ export const userRouter = router({
       ...userProfile,
       nickname: displayName,
       full_name: displayName,
+      // CHAT-LANGUAGE: the AI reply language in effect, and whether the user (or a sign-up entry) ever set one.
+      reply_language: effectiveReplyLocale(userProfile.reply_language),
+      reply_language_set: userProfile.reply_language !== null && userProfile.reply_language !== undefined,
       auth_provider: ctx.authProvider,
       email_verified: ctx.isEmailVerified,
     };
@@ -70,6 +75,32 @@ export const userRouter = router({
       }
 
       return data;
+    }),
+
+  /** CHAT-LANGUAGE (Owner 2026-10-24, A): the language every AI reply is written in; applies to new replies. */
+  setReplyLanguage: protectedProcedure
+    .input(z.object({ language: replyLocale }))
+    .mutation(async ({ ctx, input }) => {
+      if (!ctx.hasSupabaseAdminPrivileges) throw new TRPCError({ code: 'SERVICE_UNAVAILABLE', message: 'REPLY_LANGUAGE_UNAVAILABLE' });
+      try {
+        return { language: await setReplyLanguage(ctx.supabaseAdmin, ctx.profileId, input.language) };
+      } catch (error) {
+        logger.error('auth', 'reply_language_save_failed', {});
+        throw createSafeInternalError(error, '语言设置保存失败，请稍后重试');
+      }
+    }),
+
+  /** The sign-up entry's language (the Traditional Chinese pages): set only while the user never chose one. */
+  applyEntryReplyLanguage: protectedProcedure
+    .input(z.object({ language: entryLocale }))
+    .mutation(async ({ ctx, input }) => {
+      if (!ctx.hasSupabaseAdminPrivileges) throw new TRPCError({ code: 'SERVICE_UNAVAILABLE', message: 'REPLY_LANGUAGE_UNAVAILABLE' });
+      try {
+        return { language: await applyEntryReplyLanguage(ctx.supabaseAdmin, ctx.profileId, input.language) };
+      } catch (error) {
+        logger.error('auth', 'reply_language_save_failed', {});
+        throw createSafeInternalError(error, '语言设置保存失败，请稍后重试');
+      }
     }),
 
   /**
