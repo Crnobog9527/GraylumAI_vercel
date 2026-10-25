@@ -13,8 +13,10 @@ import {runFusionReview} from './fusion-review.mjs';
 import {runFusionBackground} from './fusion-background.mjs';
 import {runFusionFee} from './fusion-fee.mjs';
 import {runReportFee} from './report-fee.mjs';
-const development=process.argv.slice(2).join(' ')==='--local-only --development';
-if ((!development && process.argv.slice(2).join(' ') !== '--local-only') || process.env.CI) throw new Error('Require --local-only');
+const mode=process.argv.slice(2).join(' ');
+const development=mode==='--local-only --development';
+// --ci is for the CI runner (CI set, images already pulled by the workflow); --local-only never runs inside CI.
+if (mode==='--ci' ? !process.env.CI : (!development && mode !== '--local-only') || process.env.CI) throw new Error('Require --local-only outside CI, or --ci inside CI');
 const root=resolve(import.meta.dirname,'../../../..');
 const read=path=>readFileSync(resolve(root,path),'utf8');
 const run=(cmd,args,input)=>spawnSync(cmd,args,{input,encoding:'utf8',cwd:root,
