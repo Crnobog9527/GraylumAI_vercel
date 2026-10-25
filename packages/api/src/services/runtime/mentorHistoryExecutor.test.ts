@@ -63,6 +63,14 @@ it.each(['answer','twice','malformed','notOffered','denied','revoked','transient
  const result=await runtimeExecutor({database,actor:async()=>id,callGate:vi.fn(async()=>({ok:true as const})),
   budget:createRuntimeBudget(),adapter:{dispatch:vi.fn()} as never}).execute(id);
  const reads=database.rpc.mock.calls.filter(([name])=>name==='runtime_mentor_history');
+ if(outcome==='malformed'){
+  // ARCH-FIX C1: nothing is read; the model is told, its reply completes the paid turn.
+  expect(result.state).toBe('completed');
+  expect(reads).toHaveLength(0);
+  expect(database.rpc.mock.calls.filter(([name])=>name==='runtime_tool')).toHaveLength(0);
+  expect(requests[1]).toContain('INVALID_ARGUMENTS');
+  return;
+ }
  if(outcome!=='answer'){
   // Permanent refusals cancel the turn; a transient database failure stays retryable.
   expect(result.state).toBe(outcome==='transient'?'pending':'cancelled');

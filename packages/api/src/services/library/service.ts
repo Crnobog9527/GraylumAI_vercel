@@ -90,14 +90,13 @@ export function libraryService(client: SupabaseClient, actorId: string, storage:
       await read(documentId); // Do not return a newly minted link after a concurrent deletion/erasure.
       return { url, expiresIn: 60 };
     },
-    async list(afterId?: string, cursor?: LibraryCursor) {
-      // Authorize before cleanup so an old session cannot trigger scoped work.
-      const result = cursor
-        ? await libraryRpc<LibraryList>(client, 'library_list_page', { a: actorId,
+    // Reading never cleans up (ARCH-FIX A1): the library-cleanup cron (every 5 minutes), begin and
+    // remove do. Reads are limited per user by the protectedProcedure middleware.
+    list(afterId?: string, cursor?: LibraryCursor) {
+      return cursor
+        ? libraryRpc<LibraryList>(client, 'library_list_page', { a: actorId,
           after_id: cursor.id, after_created_at: cursor.createdAt })
-        : await libraryRpc<LibraryList>(client, 'library_list', { a: actorId, after_id: afterId ?? null });
-      await sweep();
-      return result;
+        : libraryRpc<LibraryList>(client, 'library_list', { a: actorId, after_id: afterId ?? null });
     },
     /** Own ready text documents with readable text whose file name contains `query` literally (the database escapes it). */
     search(query: string, cursor?: LibraryCursor) {

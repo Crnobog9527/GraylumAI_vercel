@@ -67,6 +67,17 @@ it.each(['answer','summary','repeat','oversized','denied','large','revoked','mal
   budget,adapter:{dispatch:vi.fn()} as never};
  const first=await runtimeExecutor(options).execute(id);
  const count=['answer','summary','repeat'].includes(outcome)?2:1;
+ if(outcome==='malformed'){
+  // ARCH-FIX C1: unparsable arguments read nothing; the model is told and its reply completes the paid turn, also on replay.
+  expect(first.state).toBe('completed');
+  expect(requests[1]).toContain('valid JSON');
+  expect(JSON.stringify(result)).toContain('Grounded answer');
+  live=false;
+  expect(await runtimeExecutor({...options,budget:createRuntimeBudget()}).execute(id)).toEqual(first);
+  expect(billing.dispatchOnce).toHaveBeenCalledTimes(2);
+  expect(database.rpc.mock.calls.filter(([name])=>name==='runtime_tool')).toHaveLength(0);
+  return;
+ }
  if(outcome!=='answer'&&outcome!=='summary'){
   expect(first.state).toBe(outcome==='transient'?'pending':'cancelled');
   expect(history).toEqual([]);

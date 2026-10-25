@@ -361,3 +361,14 @@ describe('#1005 P2: research-side dispatch sits right before the supplier send',
     expect(f.billing.record).toHaveBeenCalledWith('call-1', expect.objectContaining({ toolOutcome: 'failed_free', cost: '0' }));
   });
 });
+
+describe('supplier request timeout (ARCH-FIX C1)', () => {
+  it('sends with the timeout read just before the request, so it follows the round time left', async () => {
+    const f = fixture();
+    const timeoutMs = vi.fn(() => 12_345);
+    await runSubcall({ ...f.context, timeoutMs }, request);
+    expect(timeoutMs).toHaveBeenCalledOnce();
+    expect(f.vendors.parallel).toHaveBeenCalledWith('research', { apiKey: 'test-key', now: f.context.now, timeoutMs: 12_345 }, 'fast');
+    expect(timeoutMs.mock.invocationCallOrder[0]).toBeGreaterThan(f.evidence.dispatch.mock.invocationCallOrder[0]!);
+  });
+});

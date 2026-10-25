@@ -100,6 +100,6 @@ export async function runCases({admin,service,connect}) {
  await switchTo('waffo');
  cases.push('pending-payment-blocks-cross-provider-charge','waffo-old-order-fulfills-after-switchback','stripe-new-wallet-and-recurring-card-restored');
  cases.push(...await advancedCases({admin,service,connect,actor,create,bind,pay,current,switchTo,plan,gold,first}));
- cases.push(...await disputeCases({admin,service,actor,create,bind,pay}));
+ cases.push(...await disputeCases({admin,service,connect,actor,create,bind,pay}));
  return cases;
 }
