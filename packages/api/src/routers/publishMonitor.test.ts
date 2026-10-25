@@ -244,7 +244,7 @@ describe('publish-monitor add a brand account (0347)', () => {
       await expect(caller(rpc, true).addAccount(input)).rejects.toMatchObject({ code: 'INTERNAL_SERVER_ERROR' });
       expect(error).toHaveBeenCalledTimes(1);
       expect(error).toHaveBeenCalledWith('api', 'publish_monitor_internal_error', { code: 'PUBLISH_MONITOR_UNAVAILABLE',
-        errorName: expect.any(String), errorCode: null });
+        errorName: expect.any(String), errorCode: 'PUBLISH_MONITOR_UNAVAILABLE' });
       expect(JSON.stringify(error.mock.calls)).not.toContain('secret detail');
       error.mockClear();
       // A refusal the user can act on is not a server failure and is not logged.
