@@ -1,7 +1,8 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { POSITIONING_FALLBACK_INSTRUCTIONS } from '../runtime/positioningFallback';
-import { FREE_CHAT_BASE_INSTRUCTIONS } from '../runtime/primaryInstructions';
+import { FREE_CHAT_BASE_INSTRUCTIONS, REPLY_LANGUAGE_INSTRUCTIONS } from '../runtime/primaryInstructions';
 import { replySettingInstructions } from '../runtime/replyLanguage';
 const REPLY_RULE = replySettingInstructions('zh-Hans');
 import { runtimeScopeInput } from '../runtime/context';
@@ -31,6 +32,20 @@ describe('compare snapshot (FUSION-COMPARE §3.2)', () => {
       // A retry after the user changed the setting must still match the request (and group) frozen by the first attempt.
       expect(snapshotHash(parts({ replyLocale: locale }))).toBe(snapshotHash(parts()));
     }
+  });
+  it('keeps the identity of compares recorded before the setting existed (the pre-setting formula, byte for byte)', () => {
+    // The formula as it was before CHAT-LANGUAGE: the free-chat (or Skill) instruction plus the v1 reply-language rule.
+    const sha = (text: string) => createHash('sha256').update(text).digest('hex');
+    const before = (p: CompareParts) => {
+      const request = compareRequest({ ...p, positioningFallback: false });
+      return sha(JSON.stringify({ instructions: (p.skill ? p.skill.instructions : FREE_CHAT_BASE_INSTRUCTIONS) + REPLY_LANGUAGE_INSTRUCTIONS,
+        history: request.history, input: request.input,
+        skill: p.skill && { moduleId: p.skill.moduleId, revisionId: p.skill.revisionId, resources: p.skill.resources },
+        workspace: p.workspace.map(({ sourceVersionId, body }) => [sourceVersionId, sha(body)]),
+        references: p.references.map(({ documentId, version, hash }) => [documentId, version, hash]) }));
+    };
+    for (const p of [parts(), parts({ skill, replyLocale: 'en' }), parts({ history: [{ role: 'user', text: '早' }], replyLocale: 'zh-Hant',
+      workspace: [{ sourceVersionId: 'v1', kind: 'positioning', body: '定位' }] })]) expect(snapshotHash(p)).toBe(before(p));
   });
   it('the user message is byte-identical to an ordinary turn without sources or documents', () => {
     expect(compareInput(parts())).toBe('哪个开头更好？');

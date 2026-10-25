@@ -1,9 +1,9 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { createHash } from 'node:crypto';
 import { POSITIONING_FALLBACK_INSTRUCTIONS } from '../runtime/positioningFallback';
-import { FREE_CHAT_BASE_INSTRUCTIONS } from '../runtime/primaryInstructions';
+import { FREE_CHAT_BASE_INSTRUCTIONS, REPLY_LANGUAGE_INSTRUCTIONS } from '../runtime/primaryInstructions';
 import { replySettingInstructions } from '../runtime/replyLanguage';
-import { DEFAULT_REPLY_LOCALE, type ReplyLocale } from '../../shared/replyLanguage';
+import type { ReplyLocale } from '../../shared/replyLanguage';
 import { runtimeScopeInput } from '../runtime/context';
 import { FUSION_INPUT_CAP, type FusionRequest } from './request';
 
@@ -72,9 +72,12 @@ const sha = (text: string) => createHash('sha256').update(text).digest('hex');
 /** Everything a column is sent apart from the model-specific wire fields. Excludes the positioning fallback flag, which is
  * only known after the paid judgement; the flag is stored with the verdict and rebuilt deterministically. Excludes the reply
  * language too: it is read from the profile on every attempt, so a retry after the user changed it must still find the group
- * that was frozen (with the language of the first attempt); before a group exists the compare starts in the language read now. */
+ * that was frozen (with the language of the first attempt); before a group exists the compare starts in the language read now.
+ * The hashed instructions keep the reply-language rule compares had before the setting existed (reply-language-v1), so a
+ * compare started before this change still matches its recorded identity when it is retried after it. */
 export function snapshotHash(parts: CompareParts): string {
-  const request = compareRequest({ ...parts, positioningFallback: false, replyLocale: DEFAULT_REPLY_LOCALE });
+  const request = { ...compareRequest({ ...parts, positioningFallback: false }),
+    instructions: (parts.skill ? parts.skill.instructions : FREE_CHAT_BASE_INSTRUCTIONS) + REPLY_LANGUAGE_INSTRUCTIONS };
   return sha(JSON.stringify({ instructions: request.instructions, history: request.history, input: request.input,
     skill: parts.skill && { moduleId: parts.skill.moduleId, revisionId: parts.skill.revisionId, resources: parts.skill.resources },
     workspace: parts.workspace.map(({ sourceVersionId, body }) => [sourceVersionId, sha(body)]),
