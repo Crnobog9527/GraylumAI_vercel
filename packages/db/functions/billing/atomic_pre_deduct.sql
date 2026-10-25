@@ -112,13 +112,7 @@ BEGIN
       CASE
         WHEN g.status = 'granted'
          AND g.accounting_state = 'trusted'
-         AND EXISTS (
-           SELECT 1
-           FROM user_subscriptions AS terminated_us
-           WHERE (terminated_us.id = g.subscription_id OR (g.subscription_id IS NULL AND terminated_us.stripe_subscription_id = g.stripe_subscription_id))
-             AND terminated_us.user_id = p_user_id
-             AND terminated_us.credit_release_terminated_at IS NOT NULL
-         )
+         AND public.credit_grant_quarantined(g) -- ARCH-FIX E1
         THEN GREATEST(g.credits_granted - g.consumed_amount, 0)
         ELSE 0
       END
