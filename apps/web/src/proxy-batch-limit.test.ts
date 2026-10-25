@@ -25,6 +25,16 @@ describe('tRPC batch size (ARCH-FIX A1)', () => {
     expect(trpcCallCount('/api/upload', q('batch=1'))).toBe(0);
   });
 
+  it('counts encoded separators the way tRPC decodes them', async () => {
+    const q = new URLSearchParams('batch=1');
+    expect(trpcCallCount('/api/trpc/a%2Cb%2cc', q)).toBe(3);
+    expect(trpcCallCount('/api/trpc/a%E0%A4%A', q)).toBe(Infinity);
+    const encoded = Array.from({ length: TRPC_MAX_BATCH_CALLS + 1 }, () => 'settings.getSystemSettings').join('%2C');
+    const response = await proxy(new NextRequest(`https://auth-staging.graylum.com/api/trpc/${encoded}?batch=1`));
+    expect(response.status).toBe(400);
+    expect(checkRateLimit).not.toHaveBeenCalled();
+  });
+
   it.each(['GET', 'POST'])('%s: a full batch passes on to the IP limit', async method => {
     const response = await proxy(batch(TRPC_MAX_BATCH_CALLS, method));
     expect(response.status).not.toBe(400);
