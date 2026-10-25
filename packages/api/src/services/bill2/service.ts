@@ -112,7 +112,7 @@ export function authoritativeBilling(deps: { budget?:RuntimeBudget; admin: Billi
     if (result.error && name==='bill2_claim' && statementTimedOut(result.error)
       && (deps.budget?.remainingPersistence()??10_000)>=CLAIM_RESEND_MIN_MS) result=await send();
     if (result.error) {
-      if (name === 'bill2_claim' || name === 'bill2_dispatch' || name === 'fusion_group_claim') throw claimFailure(result.error);
+      if (name === 'bill2_claim' || name === 'bill2_dispatch' || name === 'fusion_group_claim') throw claimFailure(result.error, name);
       // Before 0261 the database refuses a non-402 pending refusal; dispatch then records the plain observation.
       if (name === 'bill2_record' && (result.error as { message?: unknown }).message === 'BILL2_REJECTION_PROOF_DENIED')
         throw new Error('BILL2_REJECTION_PROOF_DENIED');
