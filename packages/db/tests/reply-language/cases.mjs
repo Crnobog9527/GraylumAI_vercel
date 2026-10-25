@@ -48,11 +48,13 @@ export async function runCases({db,report}) {
  assert.equal(await value(owner),'zh-Hans');
  report.checks.push('service_role writes only reply_language, only zh-Hans/zh-Hant/en, and cannot change other columns with it');
 
- // Entry language (applyEntryReplyLanguage): set only while empty, never over a choice.
- const once=async id=>(await as('service_role',null,
-  'UPDATE profiles SET reply_language=$2 WHERE id=$1 AND reply_language IS NULL RETURNING id',[id,'zh-Hant'])).rowCount;
- assert.equal(await once(owner),0);assert.equal(await value(owner),'zh-Hans');
- assert.equal(await once(other),1);assert.equal(await value(other),'zh-Hant');
- assert.equal(await once(other),0);
- report.checks.push('entry language applies only while empty and never overrides a choice');
+ // Entry language (applyEntryReplyLanguage, Owner 2026-10-25): the public page's language overwrites any earlier choice, through
+ // the same service-role write of this one column, for the targeted row only.
+ const take=async(id,locale)=>(await as('service_role',null,
+  'UPDATE profiles SET reply_language=$2 WHERE id=$1 RETURNING reply_language',[id,locale])).rows;
+ assert.equal(await value(owner),'zh-Hans');
+ assert.deepEqual(await take(owner,'en'),[{reply_language:'en'}]);
+ assert.deepEqual(await take(owner,'zh-Hant'),[{reply_language:'zh-Hant'}]);
+ assert.equal(await value(other),null,'the other row keeps its value');
+ report.checks.push('entry language overwrites an earlier choice of the targeted row only');
 }

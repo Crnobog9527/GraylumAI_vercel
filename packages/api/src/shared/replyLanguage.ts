@@ -17,10 +17,8 @@ export function effectiveReplyLocale(stored: unknown): ReplyLocale {
   return parsed.success ? parsed.data : DEFAULT_REPLY_LOCALE;
 }
 
-/** The `lang` hint a sign-up link carries (the Traditional Chinese pages send zh-Hant); anything else is no hint. */
-export type EntryLocale = Exclude<ReplyLocale, typeof DEFAULT_REPLY_LOCALE>;
-export const entryLocale = replyLocale.exclude(['zh-Hans']);
-export function entryLocaleHint(value: string | null | undefined): EntryLocale | null {
-  const parsed = entryLocale.safeParse(value);
+/** The `lang` a public page's login or sign-up link carries (the page's language, Owner 2026-10-25); anything else is none. */
+export function entryLocaleHint(value: string | null | undefined): ReplyLocale | null {
+  const parsed = replyLocale.safeParse(value);
   return parsed.success ? parsed.data : null;
 }
