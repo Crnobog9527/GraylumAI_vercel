@@ -38,11 +38,11 @@ describe('the reply-language rule', () => {
       expect(withPrimaryAddenda('base',{replyLanguage:value})).toBe('base');
     expect(()=>runtimeContext.shape.replyLanguage.parse('reply-language-v2-fr')).toThrow();
   });
-  it('no stored value (or an unknown one) means Simplified Chinese; only a non-default entry hint counts', () => {
+  it('no stored value (or an unknown one) means Simplified Chinese; any of the three languages is an entry hint', () => {
     expect([null,undefined,'',"fr",'zh-hant'].map(effectiveReplyLocale)).toEqual(Array(5).fill('zh-Hans'));
     expect(effectiveReplyLocale('en')).toBe('en');
     expect([entryLocaleHint('zh-Hant'),entryLocaleHint('en'),entryLocaleHint('zh-Hans'),entryLocaleHint('x'),entryLocaleHint(null)])
-      .toEqual(['zh-Hant','en',null,null,null]);
+      .toEqual(['zh-Hant','en','zh-Hans',null,null]);
   });
 });
 

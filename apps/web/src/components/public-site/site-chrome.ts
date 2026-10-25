@@ -10,9 +10,11 @@ import type { SiteLocale } from '@/lib/seo/site';
 // every host serves them.
 import { SIGNUP_CTA_HREF, SIGNUP_CTA_HREF_ZH_TW } from '@/lib/seo/content/shared';
 
-/** The header's sign-up link: Traditional Chinese pages say where the visitor came from (CHAT-LANGUAGE). */
+/** The header's sign-up and login links carry the page's language (CHAT-LANGUAGE, Owner 2026-10-25). */
 export const SIGNUP_HREFS: Record<SiteLocale, string> = { 'zh-Hans': SIGNUP_CTA_HREF, 'zh-TW': SIGNUP_CTA_HREF_ZH_TW };
-export const LOGIN_HREF = '/login';
+export const LOGIN_HREFS: Record<SiteLocale, string> = { 'zh-Hans': '/login?lang=zh-Hans', 'zh-TW': '/login?lang=zh-Hant' };
+/** The Simplified pages' login link (the landing samples use it directly). */
+export const LOGIN_HREF = LOGIN_HREFS['zh-Hans'];
 
 // Since the /app move (E1, SEO_GEO_SPEC section 15) "/" is the public home page on every host, so visible
 // links to the Simplified home use it directly, like canonical, hreflang, sitemap and JSON-LD.

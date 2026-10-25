@@ -34,7 +34,7 @@ export default async function ContactPage() {
         eyebrow="联系我们"
         title="需要进一步沟通时，直接找到正确入口"
         description="如果你在评估产品、准备团队使用，或者使用过程中遇到具体问题，这里提供一个更直接的联系入口。"
-        primaryAction={{ label: '开始体验', href: '/login?action=signup' }}
+        primaryAction={{ label: '开始体验', href: '/login?action=signup&lang=zh-Hans' }}
         secondaryAction={{ label: '查看常见问题', href: '/faq' }}
       />
 

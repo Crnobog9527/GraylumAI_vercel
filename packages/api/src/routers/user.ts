@@ -6,7 +6,7 @@ import { logger } from '../lib/logger';
 import { createSafeInternalError, createSafeServiceUnavailableError } from '../lib/publicError';
 import { countsAsCreditSpend } from '../services/creditLedger';
 import { applyEntryReplyLanguage, setReplyLanguage } from '../services/replyLanguageSetting';
-import { effectiveReplyLocale, entryLocale, replyLocale } from '../shared/replyLanguage';
+import { effectiveReplyLocale, replyLocale } from '../shared/replyLanguage';
 
 export const userRouter = router({
   getEntitlements: protectedProcedure.input(z.void()).query(async ({ ctx }) => {
@@ -90,13 +90,13 @@ export const userRouter = router({
       }
     }),
 
-  /** The sign-up entry's language (the Traditional Chinese pages): set only while the user never chose one. */
+  /** The language of the public page the user signed in from: always taken, even over an earlier choice (Owner 2026-10-25). */
   applyEntryReplyLanguage: protectedProcedure
-    .input(z.object({ language: entryLocale }))
+    .input(z.object({ language: replyLocale }))
     .mutation(async ({ ctx, input }) => {
       if (!ctx.hasSupabaseAdminPrivileges) throw new TRPCError({ code: 'SERVICE_UNAVAILABLE', message: 'REPLY_LANGUAGE_UNAVAILABLE' });
       try {
-        return { language: await applyEntryReplyLanguage(ctx.supabaseAdmin, ctx.profileId, input.language) };
+        return await applyEntryReplyLanguage(ctx.supabaseAdmin, ctx.profileId, input.language);
       } catch (error) {
         logger.error('auth', 'reply_language_save_failed', {});
         throw createSafeInternalError(error, '语言设置保存失败，请稍后重试');

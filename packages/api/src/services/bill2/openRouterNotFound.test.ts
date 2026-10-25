@@ -36,3 +36,7 @@ it.each([{total_cost:0},{total_cost:0.003},{total_cost:'invalid'},{usage:{}},{ou
  const obs={...observation({data:{id:'gen-synthetic',model:identity.model,...patch}}),httpStatus:200};
  expect(openRouterNotFound(obs,identity,'gen-synthetic')).toBeNull();
 });
+it('ARCH-FIX G1: accepts the single-copy observation shape', () => {
+  const { rawBodyBase64: dropped, ...single } = observation(); void dropped;
+  expect(openRouterNotFound(single, identity)).toMatchObject({ evidenceKind: 'provider_rejection_lookup', lookupOutcome: 'not_found' });
+});

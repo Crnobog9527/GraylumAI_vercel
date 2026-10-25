@@ -2,6 +2,7 @@ import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
 import { NextResponse, type NextRequest } from 'next/server';
 import { checkRateLimit } from '@/lib/rateLimit';
+import { TRPC_MAX_BATCH_CALLS, trpcCallCount } from '@/lib/trpcBatchLimit';
 import { isEmailVerified, sanitizeRedirectTarget } from '@/lib/auth';
 import { buildVerifyEmailPath, routeCallbackError } from '@/lib/authFlow';
 import { logServerError } from '@/lib/server-log';
@@ -13,6 +14,15 @@ const SENTRY_TUNNEL_PATH = '/monitoring';
 
 // Public site content: open to everyone and still served while maintenance mode is on, like the public
 // host was before the single-host move (E1). Login entry pages are public too but not in this list.
+// CHAT-LANGUAGE (Owner 2026-10-25): a public page's login link carries the page's language as `lang`. A signed-in visitor
+// never sees the login page, so the redirect passes it on as `entry_lang` for the app to apply (use-entry-reply-language).
+const ENTRY_LANGUAGES = new Set(['zh-Hans', 'zh-Hant', 'en']);
+function withEntryLanguage(target: URL, request: NextRequest): URL {
+  const lang = request.nextUrl.searchParams.get('lang');
+  if (lang && ENTRY_LANGUAGES.has(lang)) target.searchParams.set('entry_lang', lang);
+  return target;
+}
+
 const PUBLIC_SITE_PATHS = [
   '/maintenance',
   '/landing',
@@ -51,6 +61,7 @@ const PUBLIC_PRICING_ENTRY_PATHS = [
 // 需要速率限制的 API 路径
 const RATE_LIMITED_PATHS = [
   '/api/trpc',
+  '/api/upload', // Ticket attachment uploads (ARCH-FIX A1).
 ];
 
 export function normalizeHostname(hostname: string): string {
@@ -111,6 +122,13 @@ function createLoginRedirect(request: NextRequest): NextResponse {
 // 判断是否需要速率限制
 function needsRateLimit(pathname: string): boolean {
   return RATE_LIMITED_PATHS.some(path => pathname.startsWith(path));
+}
+
+// A bearer token or a Supabase session cookie (sb-<ref>-auth-token, possibly chunked). Not verified here:
+// a forged one only moves the caller to the wider per-IP guard, and the API still checks the login.
+function carriesLogin(request: NextRequest): boolean {
+  return /^Bearer \S/.test(request.headers.get('authorization') ?? '')
+    || request.cookies.getAll().some(({ name }) => /^sb-.+-auth-token(\.\d+)?$/.test(name));
 }
 
 function isMaintenanceBypassPath(pathname: string): boolean {
@@ -255,8 +273,11 @@ export async function proxy(request: NextRequest) {
   // ========================================
   // 速率限制检查 (API 路径)
   // ========================================
+  if (trpcCallCount(pathname, request.nextUrl.searchParams) > TRPC_MAX_BATCH_CALLS) {
+    return NextResponse.json({ error: 'Bad Request', message: `一次最多 ${TRPC_MAX_BATCH_CALLS} 个请求` }, { status: 400 });
+  }
   if (needsRateLimit(pathname)) {
-    const result = await checkRateLimit(getClientIP(request), 'ip');
+    const result = await checkRateLimit(getClientIP(request), carriesLogin(request) ? 'ip_session' : 'ip');
     if (result.reason === 'unavailable') return createRateLimitUnavailableResponse();
     if (!result.success) {
       const retryAfter = result.retryAfter ?? 60;
@@ -361,9 +382,9 @@ export async function proxy(request: NextRequest) {
       if (!userIsVerified) {
         const verifyUrl = new URL('/verify-email', request.url);
         verifyUrl.searchParams.set('redirect', requestedRedirect);
-        return NextResponse.redirect(verifyUrl);
+        return NextResponse.redirect(withEntryLanguage(verifyUrl, request));
       }
-      return NextResponse.redirect(new URL(requestedRedirect, request.url));
+      return NextResponse.redirect(withEntryLanguage(new URL(requestedRedirect, request.url), request));
     }
     return supabaseResponse;
   }

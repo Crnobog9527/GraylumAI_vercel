@@ -15,13 +15,15 @@ export type RailArea = 'chat' | 'library' | 'topics' | 'marketplace' | 'search' 
 type Click = (event: SyntheticEvent<HTMLElement>) => void;
 
 /** Top bar: logo, "首页 / 对话 / 个人中心", and the phone menu button. */
-export function GlobalHeader({ area, onOpenNav }: { area: RailArea; onOpenNav?: () => void }) {
+/** `end` sits on the right of the bar (the signed-in frame puts the language switch there). */
+export function GlobalHeader({ area, onOpenNav, end }: { area: RailArea; onOpenNav?: () => void; end?: ReactNode }) {
   return <header className={styles.global}>
     <Link href="/app" className={styles.brand}><img src="/graylum-logo.png" alt="" />Graylum</Link>
     <button type="button" className={styles.mobileGlobalMenu} aria-label="打开导航" onClick={onOpenNav}><Grid2X2 size={17}/></button>
     <nav aria-label="全局导航"><Link href="/app">首页</Link>
       <Link href="/app/positioning" aria-current={area==='chat'||area==='topics'||area==='start'?'page':undefined}>对话</Link>
       <Link href="/app/profile">个人中心</Link></nav>
+    {end&&<div className={styles.globalEnd}>{end}</div>}
   </header>;
 }
 

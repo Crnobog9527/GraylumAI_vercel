@@ -434,7 +434,9 @@ it.runIf(process.env.V3_LOCAL_STAGING_SCHEMA==='true').each(['header','timeout',
   }
   const receipt=(await db.query("select payload from bill2_receipts where call_id=$1 and payload ? 'transport'",[call.id])).rows[0].payload;
   expect(receipt).toMatchObject({cost:null,final:false});
-  if(mode!=='response-mismatch')expect(receipt.transport).toMatchObject({rawBody:' '.repeat(165),complete:false,transportIssue:mode==='timeout'?'body_timeout':'body_interrupted'});
+  // ARCH-FIX G1: a small text body is stored once, as the receipt's rawBody; the transport keeps status and hash.
+  if(mode!=='response-mismatch'){expect(receipt.rawBody).toBe(' '.repeat(165));expect(receipt.transport).not.toHaveProperty('rawBody');
+   expect(receipt.transport).toMatchObject({complete:false,transportIssue:mode==='timeout'?'body_timeout':'body_interrupted'});}
   const history=(await db.query('select revision,item from runtime_session_history where session_id=$1 order by revision',[f.s.sessionId])).rows;
   expect(await host().execute(e.executionId)).toEqual({state:'pending'});expect(posts).toBe(1);expect(lookups).toBe(0);
   await db.query('update runtime_test_windows set enabled=false where id=$1',[windowId]);

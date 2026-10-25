@@ -31,6 +31,17 @@ describe('proxy login requirement on every host', () => {
     }
   });
 
+  it('passes a public page language on when a signed-in visitor is sent away from login (CHAT-LANGUAGE)', async () => {
+    getUser.mockResolvedValue({ data: { user: { email: 'a@example.com', email_confirmed_at: '2026-09-30T00:00:00Z' } } });
+    expect(await get('https://auth-staging.graylum.com/login?action=signup&lang=zh-Hant&redirect=%2Fapp%2Fpositioning')).toEqual({
+      status: 307, location: 'https://auth-staging.graylum.com/app/positioning?entry_lang=zh-Hant' });
+    expect((await get('https://auth-staging.graylum.com/login?lang=fr&redirect=%2Fapp%2Fprofile')).location)
+      .toBe('https://auth-staging.graylum.com/app/profile');
+    getUser.mockResolvedValue({ data: { user: { email: 'a@example.com', email_confirmed_at: null } } });
+    const unverified = new URL((await get('https://auth-staging.graylum.com/login?lang=en&redirect=%2Fapp%2Fprofile')).location!);
+    expect([unverified.pathname, unverified.searchParams.get('entry_lang')]).toEqual(['/verify-email', 'en']);
+  });
+
   it('sends a verified user away from login on the staging domain', async () => {
     getUser.mockResolvedValue({ data: { user: { email: 'a@example.com', email_confirmed_at: '2026-09-30T00:00:00Z' } } });
     expect(await get('https://auth-staging.graylum.com/login?redirect=%2Fapp%2Fprofile')).toEqual({

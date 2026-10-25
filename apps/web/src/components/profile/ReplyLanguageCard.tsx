@@ -1,25 +1,17 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 'use client';
 
-import { useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { REPLY_LOCALE_LABELS, REPLY_LOCALES, type ReplyLocale } from '@repo/api/src/shared/replyLanguage';
 import { Button } from '@/components/ui/button';
-import { trpc } from '@/trpc/client';
+import { useSetReplyLanguage } from '@/hooks/use-set-reply-language';
 
 /**
  * CHAT-LANGUAGE (Owner 2026-10-24, A): the language every AI reply is written in. The interface itself stays in
  * Simplified Chinese for now (interface translation is a later task), which the card says next to the choice.
  */
 export function ReplyLanguageCard({ language }: { language: ReplyLocale }) {
-  const utils = trpc.useUtils();
-  const [failed, setFailed] = useState(false);
-  const save = trpc.user.setReplyLanguage.useMutation({
-    onMutate: () => setFailed(false),
-    onSuccess: () => utils.user.getUserProfile.invalidate(),
-    onError: () => setFailed(true),
-  });
-  const shown = save.isPending && save.variables ? save.variables.language : language;
+  const { shown, choose, saving, failed } = useSetReplyLanguage(language);
   return (
     <div className="mt-6 rounded-2xl p-6" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)' }}>
       <p id="reply-language-label" className="font-medium" style={{ color: 'var(--text-primary)' }}>语言</p>
@@ -35,13 +27,13 @@ export function ReplyLanguageCard({ language }: { language: ReplyLocale }) {
             aria-checked={shown === locale}
             size="sm"
             variant={shown === locale ? 'default' : 'outline'}
-            disabled={save.isPending}
-            onClick={() => { if (locale !== language) save.mutate({ language: locale }); }}
+            disabled={saving}
+            onClick={() => choose(locale)}
           >
             {REPLY_LOCALE_LABELS[locale]}
           </Button>
         ))}
-        {save.isPending && <Loader2 aria-label="正在保存" className="h-4 w-4 animate-spin self-center" />}
+        {saving && <Loader2 aria-label="正在保存" className="h-4 w-4 animate-spin self-center" />}
       </div>
       {failed && (
         <p role="alert" className="mt-3 text-sm" style={{ color: 'var(--color-error)' }}>
