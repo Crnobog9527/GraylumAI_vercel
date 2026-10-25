@@ -10,7 +10,8 @@ import {
 } from "./capture-state";
 
 type Step = { id: string; title: string };
-export type ConfirmationState = "none" | "valid" | "malformed";
+/** "running": this tab is sending the retained confirmation right now; "valid": one is retained but not being sent (a reload). */
+export type ConfirmationState = "none" | "running" | "valid" | "malformed";
 export type ResolveAction = "accept" | "ignore" | "dismiss";
 
 export type CaptureChecklistProps = {
@@ -141,7 +142,8 @@ function StepFields({ props, step }: { props: CaptureChecklistProps; step: Step 
         上次的确认请求无法读取，确认结果未知。原始记录已在本机保留。重试会先读取服务器状态，再允许你重新核对这一步，不会当作已确认通过。
       </ChatInlineNotice>}
       {props.editable && <footer className={styles.stepFooter}>
-        {confirmation === "valid" ? <>
+        {confirmation === "running" ? <p role="status">正在确认这一步…</p>
+          : confirmation === "valid" ? <>
           <p role="status">上次的确认还没完成。继续会复用原请求，不会重复执行或重复扣费。</p>
           <Button disabled={props.locked} onClick={() => props.onReview(step.id)}>继续完成确认</Button>
         </> : props.valid[step.id] ? <p role="status">这一步已确认。修改任何一项都会让它回到草稿，需要重新确认。</p>

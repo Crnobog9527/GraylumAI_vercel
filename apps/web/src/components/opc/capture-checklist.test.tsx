@@ -83,6 +83,15 @@ describe("CaptureChecklist", () => {
   it("explains that adopting on a confirmed step sends it back to draft", () => {
     expect(render(props({ valid: { s1: true, s2: false, s3: false } }))).toContain("采用后这一步会回到草稿");
   });
+  // Codex validation of #1357 (2026-10-25): the envelope is kept for the whole confirmation, so the footer must not call a
+  // confirmation still being sent "unfinished" and offer to continue it.
+  it("shows a confirmation being sent as in progress, without the continue button", () => {
+    const p = props({ confirmation: () => "running" });
+    expect(render(p)).toContain("正在确认这一步");
+    expect(render(p)).not.toContain("上次的确认还没完成");
+    expect(button(p, "继续完成确认")).toHaveLength(0);
+    expect(button(p, "确认这一步")).toHaveLength(0);
+  });
   it("lets a retained confirmation continue and a broken one be recovered", () => {
     const p = props({ confirmation: () => "valid" });
     expect(render(p)).toContain("上次的确认还没完成");
