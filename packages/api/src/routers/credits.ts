@@ -163,7 +163,12 @@ export const creditsRouter = router({
       // 处理分页
       const hasNextPage = transactions && transactions.length > limit;
       const rawItems = hasNextPage ? transactions.slice(0, limit) : transactions ?? [];
-      const items = rawItems.map((transaction: any) => normalizeCreditTransactionRow(transaction));
+      // 只给用户看实际扣费时，隐藏的预留/释放行不在列表里，而账本的 balance_after 是含预留的真实余额：
+      // 并发的几笔扣费各自带出“其余还没结算的冻结”，列出来的余额和起始余额、连续扣费都对不上，所以这个视图不带余额。
+      const items = rawItems.map((transaction: any) => {
+        const row = normalizeCreditTransactionRow(transaction);
+        return actualOnly ? { ...row, balance_after: null } : row;
+      });
       const nextCursor = hasNextPage && items.length > 0
         ? items[items.length - 1].created_at
         : undefined;

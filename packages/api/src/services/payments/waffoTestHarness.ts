@@ -7,12 +7,15 @@ type Row = Record<string, unknown>;
 const field = (row: Row, column: string) => column.includes('->>')
   ? (row[column.split('->>')[0]!] as Row | null)?.[column.split('->>')[1]!] : row[column];
 
-/** Minimal in-memory PostgREST stand-in: select/eq/in/is/lt/order/limit/maybeSingle and awaiting a list. */
+/** Minimal in-memory PostgREST stand-in: select/update/eq/in/is/lt/order/limit/maybeSingle and awaiting a list.
+ * An awaited update patches the filtered fixture rows in place. */
 export function fakeDb(tables: Record<string, Row[]>, rpc: (fn: string, args: Row) => unknown) {
   const from = (table: string) => {
     let rows = [...(tables[table] ?? [])];
+    let patch: Row | null = null;
     const query = {
       select: () => query,
+      update: (values: Row) => { patch = values; return query; },
       eq: (column: string, value: unknown) => { rows = rows.filter(row => field(row, column) === value); return query; },
       in: (column: string, values: unknown[]) => { rows = rows.filter(row => values.includes(field(row, column))); return query; },
       is: (column: string, value: null) => { rows = rows.filter(row => (field(row, column) ?? null) === value); return query; },
@@ -23,8 +26,10 @@ export function fakeDb(tables: Record<string, Row[]>, rpc: (fn: string, args: Ro
         return query;
       },
       maybeSingle: async () => ({ data: rows[0] ?? null, error: null }),
-      then: (resolve: (value: unknown) => unknown, reject?: (error: unknown) => unknown) =>
-        Promise.resolve({ data: rows, error: null }).then(resolve, reject),
+      then: (resolve: (value: unknown) => unknown, reject?: (error: unknown) => unknown) => {
+        if (patch) for (const row of rows) Object.assign(row, patch);
+        return Promise.resolve({ data: patch ? null : rows, error: null }).then(resolve, reject);
+      },
     };
     return query;
   };

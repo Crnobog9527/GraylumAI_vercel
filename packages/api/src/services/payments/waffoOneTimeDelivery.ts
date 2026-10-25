@@ -6,6 +6,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { walletMembershipTerm } from './methodMembershipTerm';
+import { chargebackCash } from './waffoChargebacks';
 import type { WaffoChargeback } from './waffoTestOperationsClient';
 import type { PaymentFacts } from './waffoPayments';
 
@@ -65,14 +66,11 @@ export async function deliverWaffoOneTime(db: Db, provider: Scope, facts: Paymen
   }
   let disputeNeedsReview = false;
   for (const dispute of chargebacks) {
-    let amount = /^[1-9][0-9]{0,8}$/.test(dispute.amount?.amount ?? '') ? Number(dispute.amount!.amount) : null;
-    const currency = /^[A-Z]{3}$/.test(dispute.amount?.currency ?? '') ? dispute.amount!.currency!.toLowerCase() : null;
-    // Unknown, inconsistent or cross-currency amounts never become a made-up full-payment loss.
-    if (currency === facts.currency && amount !== null && amount > facts.amountCents) amount = null;
-    disputeNeedsReview ||= amount === null || currency === null || currency !== facts.currency;
+    const cash = chargebackCash(dispute, facts.currency, facts.amountCents);
+    disputeNeedsReview ||= cash.unknown;
     const frozen = await db.rpc('pay_failover_dispute_observed', { p_order: order.id, p_merchant: provider.merchant,
-      p_mode: provider.mode, p_payment: facts.paymentId, p_dispute: dispute.id, p_amount: amount,
-      p_currency: currency, p_observed_at: dispute.createdAt });
+      p_mode: provider.mode, p_payment: facts.paymentId, p_dispute: dispute.id, p_amount: cash.amount,
+      p_currency: cash.currency, p_observed_at: dispute.createdAt });
     if (frozen.error) throw new Error('PAY_WAFFO_DISPUTE_UNAVAILABLE');
   }
   if (chargebacks.length) return { state: 'review' as const,

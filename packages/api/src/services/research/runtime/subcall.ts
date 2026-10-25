@@ -61,6 +61,8 @@ export interface SubcallContext {
   metadata?: { toolName: string; args: Record<string, unknown>; call?: ResearchCallDisplay };
   beforeSend?: () => Promise<boolean>;
   onSupplierDispatch?: () => void;
+  /** The supplier request's timeout, read just before it is sent (ARCH-FIX C1: the round's time left); absent, 60s. */
+  timeoutMs?: () => number;
 }
 
 /** Why nothing (or nothing usable) came back, as the tool envelope reports it. */
@@ -100,8 +102,9 @@ function microUnits(usd: string): number {
 
 const OPERATION_STATE = { ok: 'succeeded', partial: 'succeeded', failed: 'failed', not_sent: 'failed', unknown: 'unknown' } as const;
 
-async function send(request: SupplierRequest, apiKey: string, vendors: VendorCalls, now?: () => Date): Promise<ResearchCallResult> {
-  const deps = { apiKey, ...(now ? { now } : {}) };
+async function send(request: SupplierRequest, apiKey: string, vendors: VendorCalls, now?: () => Date,
+  timeoutMs?: number): Promise<ResearchCallResult> {
+  const deps = { apiKey, ...(now ? { now } : {}), ...(timeoutMs !== undefined ? { timeoutMs } : {}) };
   if (request.vendor === 'tikhub') return vendors.tikhub(request.call, deps);
   if (request.vendor === 'parallel') return vendors.parallel(request.query, deps, request.mode);
   return vendors.firecrawl(request.url, deps);
@@ -179,7 +182,7 @@ export async function runSubcall(context: SubcallContext, request: SupplierReque
     result = { ...unknownResult(request, request.vendor, context.now), outcome: 'not_sent',
       reason: unsentReason, supplierMayCharge: false, usage: { unit: policy.toolPricing.unit, units: '0' } };
   } else {
-    try { result = await send(request, apiKey, context.vendors ?? REAL_VENDORS, context.now); }
+    try { result = await send(request, apiKey, context.vendors ?? REAL_VENDORS, context.now, context.timeoutMs?.()); }
     catch { result = unknownResult(request, request.vendor, context.now); }
   }
 

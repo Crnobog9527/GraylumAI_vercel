@@ -4,12 +4,12 @@
 // every expiry silently switched the tools off. The daily billing job now re-reads each TikHub route's official
 // endpoint_cost (TikHub's get_endpoint_info) and saves it through the existing price writer; Parallel and Firecrawl have
 // no price API, so they are only reported before they expire. On staging the test window's frozen tool policies carry
-// each price entry's hash, so they are recomputed with the same code as admission (toolCallPolicy).
+// each price entry's hash; the database realigns them with the saved prices (research_test_window_sync_prices).
 import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { z } from 'zod';
 import { logger } from '../../lib/logger';
-import { toolCallPolicy, type ToolCallPolicy } from '../bill2/toolBilling';
-import { readProviderPrices, resolveProviderPrice, saveProviderPrices, type ProviderPriceEntry, type ProviderPrices } from '../billingProviderPrices';
+import { readProviderPrices, saveProviderPrices, type ProviderPriceEntry } from '../billingProviderPrices';
 import { TIKHUB_BASE } from './vendors/tikhub';
 
 const DAY_MS = 86_400_000;
@@ -67,26 +67,19 @@ async function officialPrice(route: string, key: string, fetchImpl: typeof fetch
   }
 }
 
-/** Staging: the window's TikHub policies recomputed from the new prices, in place; other policies untouched. */
-function windowPolicies(policies: Array<Record<string, unknown>>, prices: ProviderPrices, multiplier: string, refreshed: Set<string>,
-  now: Date): Array<ToolCallPolicy | Record<string, unknown>> {
-  return policies.map(policy => {
-    const model = typeof policy.model === 'string' ? policy.model : '';
-    if (policy.provider !== 'tikhub' || !model.startsWith('tikhub:') || !refreshed.has(model.slice('tikhub:'.length))) return policy;
-    const pricing = policy.toolPricing as { maxUnitsPerCall?: unknown } | undefined;
-    return toolCallPolicy({ vendor: 'tikhub', account: String(policy.account), route: model.slice('tikhub:'.length),
-      purposes: policy.purposes as string[], maxUnitsPerCall: String(pricing?.maxUnitsPerCall),
-      price: resolveProviderPrice(prices, { provider: 'tikhub', route: model.slice('tikhub:'.length) }, multiplier, now) });
-  });
-}
+const windowSync = z.object({ status: z.enum(['updated', 'unchanged', 'not_found', 'invalid']), synced: z.number().int(),
+  skipped: z.array(z.object({ route: z.string(), reason: z.string() })) });
 
-async function refreshWindow(db: SupabaseClient, windowId: string, prices: ProviderPrices, refreshed: Set<string>, now: Date) {
-  const { data, error } = await db.from('runtime_test_windows').select('call_policies,multiplier').eq('id', windowId).maybeSingle();
-  if (error || !data || !Array.isArray(data.call_policies)) return 'failed' as const;
-  const next = windowPolicies(data.call_policies as Array<Record<string, unknown>>, prices, String(data.multiplier), refreshed, now);
-  if (JSON.stringify(next) === JSON.stringify(data.call_policies)) return 'unchanged' as const;
-  const update = await db.from('runtime_test_windows').update({ call_policies: next }).eq('id', windowId);
-  return update.error ? 'failed' as const : 'updated' as const;
+/**
+ * Staging: the database realigns the window's TikHub policies with the stored prices (research_test_window_sync_prices,
+ * the only write path to runtime_test_windows: price, expiry and entry hash come from the price table, not from here).
+ * A route it could not price is left as it is and counts as a failure, so the daily job alerts before it expires.
+ */
+async function refreshWindow(db: SupabaseClient, windowId: string) {
+  const { data, error } = await db.rpc('research_test_window_sync_prices', { p_window: windowId });
+  const sync = windowSync.safeParse(data);
+  if (error || !sync.success || sync.data.status === 'not_found' || sync.data.status === 'invalid') return { window: 'failed' as const };
+  return { window: sync.data.skipped.length ? 'failed' as const : sync.data.status, skipped: sync.data.skipped };
 }
 
 export async function refreshResearchPrices(db: SupabaseClient, deps: PriceRefreshDeps): Promise<PriceRefreshResult> {
@@ -131,8 +124,9 @@ export async function refreshResearchPrices(db: SupabaseClient, deps: PriceRefre
       result.failed.push({ route: '*', code: error instanceof Error && 'code' in error ? String(error.code) : 'SAVE_FAILED' });
     }
   }
+  let windowSkipped: Array<{ route: string; reason: string }> = [];
   if (deps.windowId && result.refreshed.length > 0) {
-    try { result.window = await refreshWindow(db, deps.windowId, prices, new Set(result.refreshed), now); }
+    try { const synced = await refreshWindow(db, deps.windowId); result.window = synced.window; windowSkipped = synced.skipped ?? []; }
     catch { result.window = 'failed'; }
   }
   for (const entry of prices.entries) {
@@ -143,6 +137,7 @@ export async function refreshResearchPrices(db: SupabaseClient, deps: PriceRefre
   result.success = result.failed.length === 0 && result.expiring.length === 0 && result.window !== 'failed';
   // Audit: what was read and saved (official evidence hashes stay in the entries themselves); no key, no body.
   logger[result.success ? 'info' : 'error']('billing', 'research_price_refresh', { refreshed: result.refreshed.length,
-    changed: result.changed, failed: result.failed, expiring: result.expiring, window: result.window });
+    changed: result.changed, failed: result.failed, expiring: result.expiring, window: result.window,
+    ...(windowSkipped.length ? { windowSkipped } : {}) });
   return result;
 }

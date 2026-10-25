@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   voice: vi.fn(),
   reportFees: vi.fn(),
   researchPrices: vi.fn(),
+  receiptRetention: vi.fn(),
 }));
 
 vi.mock('@repo/api/src/services/payments/waffoReconciliation', () => ({ reconcileWaffoPayments: mocks.waffo }));
@@ -38,6 +39,7 @@ vi.mock('@repo/api/src/services/voice/recovery', () => ({ recoverVoiceGeneration
 vi.mock('@repo/api/src/services/research/priceRefresh', () => ({ refreshResearchPrices: mocks.researchPrices }));
 vi.mock('@repo/api/src/services/research/runtime/secrets', () => ({ platformSecretReader: () => async () => 'key' }));
 vi.mock('@repo/api/src/services/bill2/stuckCalls', () => ({ findStuckPaygCalls: mocks.stuckCalls }));
+vi.mock('@repo/api/src/services/bill2/receiptRetention', () => ({ scrubExpiredReceiptOutput: mocks.receiptRetention }));
 vi.mock('@repo/api/src/services/fusion/background', () => ({ kickStalledReviews: mocks.fusionKick }));
 vi.mock('@repo/api/src/services/report/fees', () => ({ settleDueReportFees: mocks.reportFees }));
 vi.mock('@repo/api/src/services/payments/waffoCardCheckout', () => ({ closeExpiredWaffoCheckouts: mocks.closeExpired }));
@@ -118,6 +120,24 @@ describe('/api/cron/billing-reconcile', () => {
     mocks.voice.mockResolvedValue({ success: true, settled: 0, scrubbed: 0, waiting: 0, failed: 0 });
     mocks.stuckCalls.mockResolvedValue({ success: true, calls: [], total: 0, truncated: false });
     mocks.researchPrices.mockResolvedValue({ success: true, refreshed: [], changed: [], failed: [], expiring: [], window: 'skipped' });
+    mocks.receiptRetention.mockResolvedValue({ success: true, scrubbed: 0, batches: 1, complete: true });
+  });
+
+  // ARCH-FIX G2: the existing daily job also clears raw output from receipts older than 30 days.
+  it('runs the receipt raw-output retention step and fails the job when it fails', async () => {
+    const ok = await GET(new Request('https://graylum.test/api/cron/billing-reconcile'));
+    expect(ok.status).toBe(200);
+    expect(mocks.receiptRetention).toHaveBeenCalledWith({ client: 'service-role' });
+    expect(await ok.json()).toMatchObject({ receiptRetention: { scrubbed: 0, complete: true } });
+    // A backlog left for the next day is not a failure.
+    mocks.receiptRetention.mockResolvedValue({ success: true, scrubbed: 4000, batches: 20, complete: false });
+    expect((await GET(new Request('https://graylum.test/api/cron/billing-reconcile'))).status).toBe(200);
+    mocks.receiptRetention.mockResolvedValue({ success: false, scrubbed: 0, batches: 0, complete: false });
+    expect((await GET(new Request('https://graylum.test/api/cron/billing-reconcile'))).status).toBe(500);
+    expect(mocks.cronJob).toHaveBeenCalledWith('billing-reconcile', 'failed', expect.any(Number),
+      expect.stringContaining('Receipt raw output retention failed'), expect.anything());
+    mocks.receiptRetention.mockRejectedValue(new Error('unexpected'));
+    expect((await GET(new Request('https://graylum.test/api/cron/billing-reconcile'))).status).toBe(500);
   });
 
   it('refreshes research prices daily and fails the job while a price cannot be refreshed or is about to expire', async () => {
@@ -293,6 +313,9 @@ describe('/api/cron/billing-reconcile', () => {
     expect(response.status).toBe(500);
     expect(await response.json()).toMatchObject({ waffo: { closedExpired: 2, findings: [{ kind: 'paid_not_delivered' }] } });
     expect(mocks.closeExpired).toHaveBeenCalledWith({ client: 'service-role' }, 'fixture', undefined, 'test');
+    // Waffo chargebacks alert through the same once-per-dispute channel as Stripe disputes.
+    expect(mocks.waffo).toHaveBeenCalledWith({ client: 'service-role' }, { merchant: 'fixture' },
+      expect.objectContaining({ recover: true, disputeAlert: expect.any(Function) }));
     expect(mocks.cronJob).toHaveBeenCalledWith('billing-reconcile', 'failed', expect.any(Number),
       expect.stringContaining('Waffo payments need manual review: 1'), expect.any(Object));
     mocks.waffo.mockRejectedValue(new Error('PAY_WAFFO_PROVIDER_UNAVAILABLE'));

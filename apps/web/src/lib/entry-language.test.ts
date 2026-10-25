@@ -1,6 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { clearEntryLanguage, ENTRY_LANGUAGE_TTL_MS, entryLanguageNotice, pendingEntryLanguage, rememberEntryLanguage } from './entry-language';
+import { clearEntryLanguage, ENTRY_CHANGE_WINDOW_MS, ENTRY_LANGUAGE_TTL_MS, entryLanguageNotice, pendingEntryLanguage, rememberEntryLanguage } from './entry-language';
 import { SIGNUP_CTA_HREF, SIGNUP_CTA_HREF_ZH_TW } from './seo/content/shared';
 
 function stubStorage() {
@@ -54,9 +54,27 @@ describe('public page entry language (CHAT-LANGUAGE, Owner 2026-10-25)', () => {
   });
 
   it('says which language AI replies now use, and what it replaced', () => {
-    expect(entryLanguageNotice({ language: 'zh-Hant', previous: 'zh-Hans' })).toEqual({ title: 'AI 回复语言：繁體中文',
+    stubStorage();
+    expect(entryLanguageNotice({ language: 'zh-Hant', previous: 'zh-Hans' }, 1000)).toEqual({ title: 'AI 回复语言：繁體中文',
       description: '已按你进入的页面，从简体中文改为繁體中文。可在右上角「语言」修改。' });
-    expect(entryLanguageNotice({ language: 'en', previous: 'en' })).toEqual({ title: 'AI 回复语言：English',
+    expect(entryLanguageNotice({ language: 'en', previous: 'en' }, 2000)).toEqual({ title: 'AI 回复语言：English',
       description: '按你进入的页面设置。可在右上角「语言」修改。' });
+  });
+
+  it('a repeat that finds nothing to change still names the change just made (entry from the Traditional site, 10-25)', () => {
+    stubStorage();
+    // The first application happens in the page that is about to be replaced; the page that stays applies it again.
+    entryLanguageNotice({ language: 'zh-Hant', previous: 'zh-Hans' }, 1000);
+    expect(entryLanguageNotice({ language: 'zh-Hant', previous: 'zh-Hant' }, 3000).description)
+      .toBe('已按你进入的页面，从简体中文改为繁體中文。可在右上角「语言」修改。');
+    // Only for the same language, and only shortly after.
+    expect(entryLanguageNotice({ language: 'en', previous: 'en' }, 3000).description).toBe('按你进入的页面设置。可在右上角「语言」修改。');
+    expect(entryLanguageNotice({ language: 'zh-Hant', previous: 'zh-Hant' }, 1000 + ENTRY_CHANGE_WINDOW_MS).description)
+      .toBe('按你进入的页面设置。可在右上角「语言」修改。');
+  });
+
+  it('describes the application alone when storage is blocked', () => {
+    vi.stubGlobal('window', { get localStorage(): Storage { throw new Error('blocked'); } });
+    expect(entryLanguageNotice({ language: 'zh-Hant', previous: 'zh-Hant' }).description).toBe('按你进入的页面设置。可在右上角「语言」修改。');
   });
 });
