@@ -5,6 +5,7 @@ vi.mock('../services/membershipEntitlements', () => ({ readMembershipEntitlement
 vi.mock('../services/publishMonitor/postForMe/config', async importOriginal => ({
   ...(await importOriginal<object>()), takeUploadSlots: mocks.uploads }));
 vi.mock('../services/redisRateLimiter', () => ({ checkRateLimitOrThrow: mocks.limit }));
+import { logger } from '../lib/logger';
 import { publishMonitorRouter } from './publishMonitor';
 
 const actor = '00000000-0000-4000-8000-0000000f0001';
@@ -232,6 +233,25 @@ describe('publish-monitor add a brand account (0347)', () => {
     await expect(caller(refuse('PUBLISH_MONITOR_BUSINESS_NOT_FOUND'), true).addAccount(input))
       .rejects.toMatchObject({ code: 'NOT_FOUND', message: 'PUBLISH_MONITOR_BUSINESS_NOT_FOUND' });
     await expect(caller(refuse('boom'), true).addAccount(input)).rejects.toMatchObject({ message: 'PUBLISH_MONITOR_UNAVAILABLE' });
+  });
+
+  it('a server-side failure leaves one log line with only the fixed code and the error class, never the message', async () => {
+    mocks.limit.mockResolvedValue({ success: true });
+    mocks.entitlements.mockResolvedValue({ ownDataWindowDays: 30 });
+    const error = vi.spyOn(logger, 'error').mockImplementation(() => undefined);
+    try {
+      const rpc = vi.fn().mockResolvedValue({ data: null, error: { message: 'secret detail 12345' } });
+      await expect(caller(rpc, true).addAccount(input)).rejects.toMatchObject({ code: 'INTERNAL_SERVER_ERROR' });
+      expect(error).toHaveBeenCalledTimes(1);
+      expect(error).toHaveBeenCalledWith('api', 'publish_monitor_internal_error', { code: 'PUBLISH_MONITOR_UNAVAILABLE',
+        errorName: expect.any(String), errorCode: null });
+      expect(JSON.stringify(error.mock.calls)).not.toContain('secret detail');
+      error.mockClear();
+      // A refusal the user can act on is not a server failure and is not logged.
+      await expect(caller(vi.fn().mockResolvedValue({ data: null, error: { message: 'PUBLISH_MONITOR_BUSINESS_NOT_READY' } }),
+        true).addAccount(input)).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
+      expect(error).not.toHaveBeenCalled();
+    } finally { error.mockRestore(); }
   });
 });
 
