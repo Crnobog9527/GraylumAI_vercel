@@ -24,8 +24,11 @@ export async function runtimeReadVerifiedCases({db,report,setup}) {
     await db.query('BEGIN');
     try{
       await db.query("SET LOCAL track_functions='all'");
+      // Not-yet-flushed counts of earlier transactions stay in this view, so count the difference.
+      const calls=async()=>Number((await db.query("SELECT calls FROM pg_stat_xact_user_functions WHERE funcname='runtime_direct_billing_allowed'")).rows[0]?.calls??0);
+      const before=await calls();
       const value=(await db.query(sql.text,sql.args)).rows[0].v;
-      const checks=Number((await db.query("SELECT calls FROM pg_stat_xact_user_functions WHERE funcname='runtime_direct_billing_allowed'")).rows[0]?.calls??0);
+      const checks=await calls()-before;
       const xid=(await db.query('SELECT txid_current_if_assigned() x')).rows[0].x;
       return {value,checks,xid};
     }finally{await db.query('ROLLBACK');}
@@ -33,7 +36,7 @@ export async function runtimeReadVerifiedCases({db,report,setup}) {
   const response=(f,actor=f.actor)=>({text:'SELECT public.runtime_response($1,$2,1,$3) v',args:[actor,f.execution,'b'.repeat(64)]});
   const items=(f,actor=f.actor)=>({text:"SELECT public.runtime_session_items($1,$2,$3,'read') v",args:[actor,f.session,f.execution]});
   const expire=f=>db.query("UPDATE bill2_runs SET runtime_dispatch_deadline=clock_timestamp()-interval '1 second' WHERE id=$1",[f.run]);
-  const append=(f,batch=0)=>rpc(db,'runtime_session_items',f.actor,f.session,f.execution,'append',[{role:'assistant',content:'synthetic'}],null,batch);
+  const append=(f,batch=0)=>rpc(db,'runtime_session_items',f.actor,f.session,f.execution,'append',JSON.stringify([{role:'assistant',content:'synthetic'}]),null,batch);
 
   // Allowed: same answers as the full path, zero lineage checks, no transaction id; the full path is back once the window ends.
   const f=await setup();await ancestors(f,6);
@@ -80,9 +83,11 @@ export async function runtimeReadVerifiedCases({db,report,setup}) {
   await db.query("UPDATE runtime_executions SET unavailable_reason='source_revoked' WHERE id=$1",[turn]);
   const left=await measured(items(h));
   assert.deepEqual([left.value,left.checks],[[],0]);
+  await assert.rejects(append(h),/RUNTIME_HISTORY_UNAVAILABLE/);
+  await assert.rejects(rpc(db,'bill2_claim',h.actor,h.run,1,{...h.claimPayload,runtimeEpoch:1}),/RUNTIME_HISTORY_UNAVAILABLE/);
   await db.query("UPDATE runtime_executions SET unavailable_reason='source_revoked' WHERE id=$1",[h.execution]);
   await assert.rejects(measured(items(h)),/RUNTIME_HISTORY_UNAVAILABLE/);
-  report.checks.push('history turn unavailable after admit is left out of the fast read; unavailable execution is refused');
+  report.checks.push('history turn made unavailable mid-reply: left out of the fast read, next append and claim refused; unavailable execution refused');
 
   // A deeper permission change mid-reply: reads in the window keep serving (Owner boundary), every write is refused,
   // and the reads refuse too once the window ends.
@@ -119,12 +124,14 @@ export async function runtimeReadVerifiedCases({db,report,setup}) {
   }
   report.checks.push('expired window, not the active execution, closed run: each reads through the full check (allowed and refused)');
 
-  // An ancestor's conversation deleted while this reply runs: the fast read keeps serving, the next write is refused.
+  // An ancestor's conversation deleted while this reply runs: the deletion also covers this reply, which holds a copy
+  // of that history, so its reads and every next write are refused at once.
   const a=await setup(),[gone]=await ancestors(a,2);
   assert.equal((await rpc(db,'content_erasure_mark_session',a.actor,gone.session)).status,'deleted');
-  assert.equal((await measured(response(a))).checks,0);
+  await assert.rejects(measured(response(a)),/CONTENT_ERASED/);
+  await assert.rejects(measured(items(a)),/CONTENT_ERASED/);
   await assert.rejects(append(a),/CONTENT_ERASED|RUNTIME_HISTORY_UNAVAILABLE/);
   await assert.rejects(rpc(db,'runtime_execution',a.actor,a.execution,'read',null),/CONTENT_ERASED|RUNTIME_CONTEXT_REVOKED/);
   await assert.rejects(rpc(db,'bill2_claim',a.actor,a.run,1,{...a.claimPayload,runtimeEpoch:1}),/CONTENT_ERASED|RUNTIME_HISTORY_UNAVAILABLE/);
-  report.checks.push('ancestor conversation deleted mid-reply: next append, execution step and claim are refused');
+  report.checks.push('ancestor conversation deleted mid-reply: both reads, next append, execution step and claim are refused at once');
 }
