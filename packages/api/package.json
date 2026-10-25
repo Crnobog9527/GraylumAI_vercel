@@ -26,6 +26,7 @@
     "./src/services/publishMonitor/secrets": "./src/services/publishMonitor/secrets.ts",
     "./src/services/publishMonitor/manualImport": "./src/services/publishMonitor/manualImport.ts",
     "./src/services/scheduledJobRuns": "./src/services/scheduledJobRuns.ts",
+    "./src/services/ticketAttachmentCleanup": "./src/services/ticketAttachmentCleanup.ts",
     "./src/services/ticketAutoClose": "./src/services/ticketAutoClose.ts",
     "./src/services/providerUtils": "./src/services/providerUtils.ts",
     "./src/services/diagnostics": "./src/services/diagnostics.ts",
