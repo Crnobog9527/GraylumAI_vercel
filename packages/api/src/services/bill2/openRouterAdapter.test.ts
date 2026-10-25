@@ -63,7 +63,7 @@ it('preserves bounded bytes on an oversized error response',async()=>{
  const transport=vi.fn(async()=>new Response('x'.repeat(65537),{status:500}));
  const adapter=openRouterAdapter({credential:async()=> 'LOCAL_SYNTHETIC_KEY',transport});
  const observation=await adapter.dispatch({input:body},identity);
- expect(Buffer.from(observation.rawBodyBase64,'base64')).toHaveLength(65536);
+ expect(observation.rawBody).toHaveLength(65536);expect(observation).not.toHaveProperty('rawBodyBase64');
  expect(observation).toMatchObject({complete:false,transportIssue:'body_limit'});
  expect(adapter.evidence(observation,identity,'response')).toMatchObject({cost:null,final:false});
  expect(transport).toHaveBeenCalledTimes(1);
@@ -138,7 +138,7 @@ it.each(['','a'.repeat(257),'gen-first, gen-second','gen unsafe'])('does not ret
 it('preserves the lookup identity even when an error response exceeds its unchanged byte cap',async()=>{
  const adapter=openRouterAdapter({credential:async()=> 'SYNTHETIC',transport:async()=>new Response('x'.repeat(65537),{status:500,headers:{'X-Generation-Id':'gen-limit'}})});
  const observation=await adapter.dispatch({input:body},identity);
- expect(Buffer.from(observation.rawBodyBase64,'base64')).toHaveLength(65536);
+ expect(observation.rawBody).toHaveLength(65536);expect(observation).not.toHaveProperty('rawBodyBase64');
  expect(adapter.evidence(observation,identity,'response')).toMatchObject({providerId:'gen-limit',cost:null,final:false,evidenceKind:'transport_observation'});
 });
 

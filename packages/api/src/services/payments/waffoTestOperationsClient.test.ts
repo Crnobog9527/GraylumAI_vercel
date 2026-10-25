@@ -172,6 +172,23 @@ describe('Pancake test operation transport', () => {
     expect(await client.readChargebacks('PAY_fixture1')).toEqual([row]);
     await expect(client.readChargebacks('PAY_fixture1')).rejects.toThrow('OPERATION_SCOPE');
   });
+  it('lists the whole store\'s chargebacks page by page, in this store and mode only', async () => {
+    const row = { id: 'CBK_real', paymentId: 'PAY_fixture1', storeId: 'STO_fixture', orderId: null, status: 'open', testMode: true,
+      amount: { amount: '6900', currency: 'USD' }, createdAt: '2026-10-21T00:00:00.000Z', expiryDateTime: '2026-10-31T00:00:00.000Z' };
+    const full = Array.from({ length: 100 }, (_, i) => ({ ...row, id: `CBK_${i}` }));
+    const request = vi.fn().mockResolvedValueOnce(Response.json({ data: { chargebacks: full } }))
+      .mockResolvedValueOnce(Response.json({ data: { chargebacks: [{ ...row, paymentId: null }] } }))
+      .mockResolvedValueOnce(Response.json({ data: { chargebacks: [{ ...row, testMode: false }] } }));
+    const client = createWaffoTestOperationsClient(config, request);
+    const rows = await client.listChargebacks();
+    expect(rows).toHaveLength(101);
+    expect(rows.at(-1)).toMatchObject({ paymentId: null, expiryDateTime: '2026-10-31T00:00:00.000Z' });
+    const body = JSON.parse(request.mock.calls[1]![1].body);
+    expect(body.query).toContain('offset: 100');
+    expect(body.query).not.toContain('paymentId: {');
+    expect(body.variables).toEqual({ store: 'STO_fixture', test: true });
+    await expect(client.listChargebacks()).rejects.toThrow('OPERATION_SCOPE');
+  });
   it('does not load a provider binding until explicitly enabled in test configuration', () => {
     vi.stubEnv('WAFFO_TEST_OPERATIONS_ENABLED', 'false');
     expect(getWaffoTestOperationsClient).toThrow('TEST_CONFIG_UNAVAILABLE');

@@ -14,18 +14,38 @@ export const ADD_PLATFORMS = ['x', 'youtube', 'tiktok', 'instagram', 'facebook',
   'bluesky', 'xiaohongshu', 'douyin'] as const;
 
 /** Positioning profiles an account can hang on: live (not archived) and with a confirmed positioning (server rule too). */
-export function eligibleProfiles(list: unknown): Array<{ businessId: string; name: string }> {
+export function eligibleProfiles(list: unknown): Array<{ businessId: string; name: string; createdAt: string }> {
   if (!Array.isArray(list)) return [];
   return list.flatMap(entry => {
-    const b = entry as { businessId?: unknown; name?: unknown; isArchived?: unknown; currentSourceVersionId?: unknown };
+    const b = entry as { businessId?: unknown; name?: unknown; isArchived?: unknown; currentSourceVersionId?: unknown;
+      createdAt?: unknown };
     return typeof b.businessId === 'string' && b.isArchived !== true && typeof b.currentSourceVersionId === 'string'
-      ? [{ businessId: b.businessId, name: typeof b.name === 'string' && b.name ? b.name : '未命名定位档案' }] : [];
+      ? [{ businessId: b.businessId, name: typeof b.name === 'string' && b.name ? b.name : '未命名定位档案',
+        createdAt: typeof b.createdAt === 'string' ? b.createdAt : '' }] : [];
   });
+}
+
+/**
+ * Several profiles can carry the same name (every one started without a name is "未命名业务"), and an account name can live
+ * in only one of them, so the picker tells them apart by creation date, and by a short code when the dates match too.
+ */
+export function profileLabels(profiles: Array<{ businessId: string; name: string; createdAt: string }>): Map<string, string> {
+  const day = (iso: string) => (iso ? iso.slice(0, 10) : '');
+  const same = (a: typeof profiles[number], b: typeof profiles[number]) => a.name === b.name;
+  return new Map(profiles.map(profile => {
+    const twins = profiles.filter(other => same(profile, other));
+    if (twins.length === 1) return [profile.businessId, profile.name] as const;
+    const date = day(profile.createdAt);
+    const dateTwins = twins.filter(other => day(other.createdAt) === date);
+    const code = dateTwins.length > 1 ? ` #${profile.businessId.slice(0, 4)}` : '';
+    return [profile.businessId, `${profile.name}（创建于 ${date || '未知'}${code}）`] as const;
+  }));
 }
 
 export function AddAccountForm({ onAdded }: { onAdded: (projectId: string) => void }) {
   const profiles = trpc.opc.businesses.useQuery(undefined, { retry: false, refetchOnWindowFocus: false });
   const brands = eligibleProfiles(profiles.data);
+  const labels = profileLabels(brands);
   const [businessId, setBusinessId] = useState('');
   const [platform, setPlatform] = useState<string>(''), [account, setAccount] = useState('');
   const add = trpc.publishMonitor.addAccount.useMutation();
@@ -44,7 +64,7 @@ export function AddAccountForm({ onAdded }: { onAdded: (projectId: string) => vo
         <select className="w-full rounded-md border px-2 py-1.5" style={{ borderColor: 'var(--border-primary)' }}
           value={businessId} onChange={event => setBusinessId(event.target.value)} aria-label="定位档案">
           <option value="">选择定位档案</option>
-          {brands.map(brand => <option key={brand.businessId} value={brand.businessId}>{brand.name}</option>)}
+          {brands.map(brand => <option key={brand.businessId} value={brand.businessId}>{labels.get(brand.businessId)}</option>)}
         </select>
       )}
       <select className="w-full rounded-md border px-2 py-1.5" style={{ borderColor: 'var(--border-primary)' }}

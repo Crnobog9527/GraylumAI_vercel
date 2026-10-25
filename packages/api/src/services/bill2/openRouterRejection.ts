@@ -2,7 +2,7 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { parseExactJson } from './decimal';
-import { decodeOpenRouterStreamObservation, validGenerationId } from './openRouterEvidence';
+import { openRouterObservationBytes, openRouterReceiptTransport, validGenerationId } from './openRouterEvidence';
 import { unknownEvidence, type CallIdentity, type TransportObservation } from './fixtureAdapter';
 
 const rejection = z.object({user_id:z.string().nullable().optional(),error:z.object({code:z.literal(402),message:z.string(),metadata:z.object({
@@ -27,10 +27,8 @@ export function openRouterRejection(observation:TransportObservation, identity:C
     (observation.generationId!==undefined&&!validGenerationId(observation.generationId))||
     !/^[a-f0-9]{64}$/.test(requestHash))return null;
   try {
-    const bytes=observation.rawBodyEncoding==='gzip-base64'?decodeOpenRouterStreamObservation(observation)
-      :Buffer.from(observation.rawBodyBase64,'base64');
-    if(bytes.length>65536||bytes.toString('base64')!==observation.rawBodyBase64&&
-      observation.rawBodyEncoding!=='gzip-base64')return null;
+    const bytes=openRouterObservationBytes(observation);
+    if(bytes.length>65536)return null;
     const raw=new TextDecoder('utf-8',{fatal:true}).decode(bytes);
     if(observation.rawBodyEncoding!=='gzip-base64'&&raw!==observation.rawBody)return null;
     // Reject duplicate keys before Zod sees JSON.parse's last-key-wins object.
@@ -41,6 +39,6 @@ export function openRouterRejection(observation:TransportObservation, identity:C
     return {...unknownEvidence(identity),source:'response',sourceHash,rawBody:raw,
       providerId:observation.generationId??null,
       evidenceKind:observation.generationId?'provider_rejection_pending' as const:'provider_rejection' as const,
-      requestHash,transport:observation};
+      requestHash,transport:openRouterReceiptTransport(observation)};
   } catch { return null; }
 }

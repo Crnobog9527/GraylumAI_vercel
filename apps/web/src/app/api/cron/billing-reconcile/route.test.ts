@@ -313,6 +313,9 @@ describe('/api/cron/billing-reconcile', () => {
     expect(response.status).toBe(500);
     expect(await response.json()).toMatchObject({ waffo: { closedExpired: 2, findings: [{ kind: 'paid_not_delivered' }] } });
     expect(mocks.closeExpired).toHaveBeenCalledWith({ client: 'service-role' }, 'fixture', undefined, 'test');
+    // Waffo chargebacks alert through the same once-per-dispute channel as Stripe disputes.
+    expect(mocks.waffo).toHaveBeenCalledWith({ client: 'service-role' }, { merchant: 'fixture' },
+      expect.objectContaining({ recover: true, disputeAlert: expect.any(Function) }));
     expect(mocks.cronJob).toHaveBeenCalledWith('billing-reconcile', 'failed', expect.any(Number),
       expect.stringContaining('Waffo payments need manual review: 1'), expect.any(Object));
     mocks.waffo.mockRejectedValue(new Error('PAY_WAFFO_PROVIDER_UNAVAILABLE'));
