@@ -3,15 +3,15 @@
     "package": "post-and-article",
     "path": "EVALS.md",
     "mediaType": "text/markdown",
-    "bytes": 2239,
-    "sha256": "35988c68805c2bb065828928959cafe183f0e607a1b24d479a00678c29670a45"
+    "bytes": 2302,
+    "sha256": "aa7885694f8676c0e4e642a384f111f9014bc8a1ee4ccd5b24e35cd47783f6c3"
   },
   {
     "package": "post-and-article",
     "path": "SKILL.md",
     "mediaType": "text/markdown",
-    "bytes": 10738,
-    "sha256": "2b9193a760777b1e44e67140bdd4dba7950fb551f40cde19fd21b3ce36ccf172"
+    "bytes": 11226,
+    "sha256": "313158c310272e174cdef2e48aa41c3bf69af081a7eea87a2ab75c32e1febde7"
   },
   {
     "package": "post-and-article",
@@ -24,15 +24,15 @@
     "package": "short-video-script",
     "path": "EVALS.md",
     "mediaType": "text/markdown",
-    "bytes": 3268,
-    "sha256": "ea16ee66b4a1f1007e52644615bb055e21f5b2da2c8bf052dab3c4ee536e1b09"
+    "bytes": 3409,
+    "sha256": "3fe0ef46abf4e8fc5655b3036a1ba77ebab8672cfa2e4e772e06afd841b27207"
   },
   {
     "package": "short-video-script",
     "path": "SKILL.md",
     "mediaType": "text/markdown",
-    "bytes": 14001,
-    "sha256": "78a7bc68ecfe7cd44617d717645a1e11a0f84b47d0e7e77b0b2320c660da0194"
+    "bytes": 14546,
+    "sha256": "fffa2d67d0278465d0ea42a6cdef5b271a3d59f04c8d4b368af98a15aa7bf989"
   },
   {
     "package": "short-video-script",
