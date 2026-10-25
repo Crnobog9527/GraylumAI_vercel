@@ -1,13 +1,13 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
-// DB-100 line W (0399): the recovery and reconciliation jobs read only the open rounds. With 40000 settled
+// DB-100 line W (0388): the recovery and reconciliation jobs read only the open rounds. With 40000 settled
 // rounds plus 160 open ones in every state the jobs look at, runtime_stale_charged_rounds,
 // runtime_pending_financial_batch and runtime_interrupted_recovery must return exactly what they returned
-// before 0399 (indexes dropped, 0379 interrupted definition) and read clearly fewer pages.
+// before 0388 (indexes dropped, 0379 interrupted definition) and read clearly fewer pages.
 // Run: node packages/db/tests/db100-recovery/run-local.mjs --local-only
 import assert from 'node:assert/strict';
 import {localDb,read} from '../runtime-view-perf/local-db.mjs';
 const database=await localDb(),db=database.client;
-const migration=read('packages/db/migrations/0399_db100_recovery_index_scans.sql');
+const migration=read('packages/db/migrations/0388_db100_recovery_index_scans.sql');
 const legacy=read('packages/db/migrations/0379_runtime_never_begun_recovery.sql');
 const indexes=['bill2_runs_recovery_open','runtime_executions_open_created','runtime_sessions_active_execution'];
 const calls={
@@ -29,7 +29,7 @@ try{
  }
  const run=async()=>Object.fromEntries(await Promise.all(Object.keys(calls).map(async name=>[name,await measure(name)])));
  const dropIndexes=()=>db.query(indexes.map(name=>`DROP INDEX IF EXISTS public.${name}`).join(';')+';ANALYZE');
- // Before 0399: no new indexes, the 0379 interrupted definition. Measured one function at a time.
+ // Before 0388: no new indexes, the 0379 interrupted definition. Measured one function at a time.
  await db.query(legacy);await dropIndexes();
  const before={};for(const name of Object.keys(calls))before[name]=await measure(name);
  await db.query(migration);await db.query('ANALYZE');
@@ -73,6 +73,6 @@ try{
  }
  // The migration is repeatable.
  await db.query(migration);
- report.checks.push('0399 applies twice');
+ report.checks.push('0388 applies twice');
 }catch(error){report.failed=String(error?.stack||error).slice(0,3000);process.exitCode=1;}
 finally{console.log(JSON.stringify(report,null,1));await database.close();}
