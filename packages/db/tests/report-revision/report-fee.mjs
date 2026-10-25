@@ -7,6 +7,7 @@ import {rpc,closeAccount} from '../erasure-b2a/cases.mjs';
 import {erase} from '../content-erasure/cases.mjs';
 import {createFixture} from '../payg/fixture.mjs';
 import {seed} from './cases.mjs';
+import {terminatedGrant} from '../payg/quarantine.mjs';
 
 const PRICE = 500;
 const spec = {version:1,sections:['One','Two'],maxCharacters:12000};
@@ -133,6 +134,14 @@ export async function runReportFee({db,Client,connectionString,report}) {
     [cheaper.id,JSON.stringify({limits:{costUsd:'0.1'},rules:{creditsPerUsd:'1000',multiplier:'1'}})]);
   assert.equal(await wallet(db,poor.actor),PRICE+99-300,'a repeated hold holds once');
   report.checks.push('report price: refused (nothing held) below price + the call hold; administrator price used; repeated hold holds once');
+
+  // ARCH-FIX E1 (0390): a terminated Waffo grant (no stripe_subscription_id) is not spendable for the price check.
+  const quarantined = await seed(db);
+  await setBalance(db,quarantined.actor,PRICE+100);
+  await terminatedGrant(db,quarantined.actor,{kind:'waffo',credits:200});
+  await assert.rejects(execution(db,quarantined),/REPORT_CREDITS/);
+  assert.equal(await wallet(db,quarantined.actor),PRICE+100,'nothing held when the remainder is quarantined');
+  report.checks.push('report price: a terminated Waffo grant remainder is excluded from the price check (E1)');
 
   // A second admission for a round whose report is charged, or still going, is refused under the admission lock
   // (two tabs with different request ids), and nothing is held; one whose report ended without a complete report is not.

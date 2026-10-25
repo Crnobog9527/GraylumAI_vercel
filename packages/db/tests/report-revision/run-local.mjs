@@ -33,7 +33,9 @@ const snapshot=()=>JSON.parse(ok(sql(objectSql)));
 // 0319 patches 0294's settlement, so it is re-applied after it (a bare 0294 replay would put the old settlement back).
 const migrations=['packages/db/migrations/0223_report_revision_sync.sql','packages/db/migrations/0294_fusion_fixed_price.sql','packages/db/migrations/0295_report_fixed_price.sql',
   'packages/db/migrations/0319_fusion_provider_refusal_verdict.sql',
-  'packages/db/migrations/0334_runtime_interrupted_recovery.sql'];
+  'packages/db/migrations/0334_runtime_interrupted_recovery.sql',
+  // 0390 patches 0294's review check and 0295's report hold (ARCH-FIX E1 shared quarantine check).
+  'packages/db/migrations/0390_credit_grant_quarantine.sql'];
 const report={development,build:null,checks:[],failed:null};
 let client;
 try {
