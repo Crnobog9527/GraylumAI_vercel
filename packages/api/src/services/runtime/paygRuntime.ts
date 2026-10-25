@@ -34,6 +34,21 @@ export type PaygWait = {
   resumeClosed?: true;
 };
 export type PaygPosition = { cursor: number; epoch: number; remainingCalls: number };
+/** A call's saved provider response, as runtime_response returns it. */
+export type SavedResponse = { callId: string; state: string; rawBody: string | null; retryable?: boolean } | null;
+
+/**
+ * DB-PERF: which sequences a live PAYG owner can skip looking up. Beyond the calls that existed when it began
+ * (remainingCalls counts every bill2 call of the run) and not a tool slot this invocation claimed, no response can be
+ * saved: this owner's own main calls only move forward. Replay, recovery and v1 runs always look up.
+ */
+export function unsavedResponseSequence(isPayg: boolean,
+  execution: { live: boolean; remainingCalls?: number; billing: { limits: { maxCalls: number } } },
+  research: { claimedSubcall?(sequence: number): boolean } | null) {
+  const existing = isPayg && execution.live && typeof execution.remainingCalls === 'number'
+    ? execution.billing.limits.maxCalls - execution.remainingCalls : undefined;
+  return (sequence: number) => existing !== undefined && sequence > existing && !research?.claimedSubcall?.(sequence);
+}
 
 /** Uses final provider bytes, after normalization and cache markers. No client quote is accepted. */
 export function runtimePaygCall(request: string, phase: string,

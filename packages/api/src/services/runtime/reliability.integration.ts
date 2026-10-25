@@ -191,6 +191,9 @@ it.each(['normal', 'committed-lost-response', 'not-committed', 'readback-fails']
 ('RUNTIME: reliability finalize normal/ambiguous transaction %s', async mode => {
   const f = await fixture();
   try {
+    // DB-PERF: a receipt recorded by the live owner settles inside bill2_record, so the executor's finalizeRun now runs
+    // only when replaying a saved response. Save and settle both calls, stop before completion, then replay them.
+    await f.interrupted(); const token = await f.pause();
     let finalized = 0, failed = false;
     const database = { rpc: async (name: string, args: Record<string, unknown>) => {
       if (name === 'bill2_finalize') {
@@ -204,10 +207,10 @@ it.each(['normal', 'committed-lost-response', 'not-committed', 'readback-fails']
       if (failed && mode === 'readback-fails' && name === 'bill2_read') return { data: null, error: { code: '57014' } };
       return f.admin.rpc(name, args);
     } };
-    const result = await runtimeExecutor({ ...f.options, database }).execute(f.admitted.executionId);
+    const result = await runtimeExecutor({ ...f.options, database }).execute(token.executionId, undefined, token);
     if (mode === 'readback-fails') {
       expect(result).toMatchObject({ state: 'pending' }); expect(finalized).toBe(1);
-      expect(await f.snapshot()).toMatchObject({ calls: 1, spends: 1, credits: 97, ledger: 97, reserved: 0, closed: false });
+      expect(await f.snapshot()).toMatchObject({ calls: 2, spends: 2, credits: 94, ledger: 94, reserved: 0, closed: false });
     } else {
       expect(result).toMatchObject({ state: 'completed', body: 'Saved primary answer', summary: 'Saved organizer summary' });
       expect(await f.snapshot()).toMatchObject({ calls: 2, spends: 2, credits: 94, ledger: 94, reserved: 0, execution_state: 'completed' });
@@ -217,6 +220,7 @@ it.each(['normal', 'committed-lost-response', 'not-committed', 'readback-fails']
       await Promise.all([billing.finalizeRun(f.admitted.runId), billing.finalizeRun(f.admitted.runId)]);
       expect(await f.snapshot()).toEqual(before);
     }
+    expect(f.requests).toHaveLength(2);
   } finally { await f.close(); }
 }, 30000);
 
@@ -308,11 +312,12 @@ it.each(['primary', 'organizer', 'terminal'] as const)
 ('RUNTIME: reliability exhausted invalid %s receipt crosses the real Runner and compensates once', async invalid => {
   const f = await fixture(invalid);
   try {
-    const used = invalid === 'organizer' ? 2 : 1; let finalizers = 0;
-    // Persist the supplier response/cost, then stop before the SDK's response validation.
+    const used = invalid === 'organizer' ? 2 : 1; let readBack = false;
+    // Persist the supplier response/cost, then stop before the SDK's response validation: the read-back of the saved
+    // response fails (DB-PERF: the live owner no longer runs finalizeRun after its own settled receipt).
     // A fresh process must classify that invalid saved reply through the real Runner wrapper.
-    const database = { rpc: (name: string, args: Record<string, unknown>) => name === 'bill2_finalize' && ++finalizers === used
-      ? Promise.resolve({ data: null, error: { code: '42501' } }) : f.admin.rpc(name, args) };
+    const database = { rpc: (name: string, args: Record<string, unknown>) => name === 'runtime_response' && args.p_sequence === used
+      && !readBack && (readBack = true) ? Promise.resolve({ data: null, error: { code: '42501' } }) : f.admin.rpc(name, args) };
     expect(await runtimeExecutor({ ...f.options, database }).execute(f.admitted.executionId)).toMatchObject({ state: 'pending' });
     expect(await f.snapshot()).toMatchObject({ calls: used, credits: 100 - 3 * used, reserved: 0, closed: false });
     const token = await f.pause();

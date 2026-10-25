@@ -3,6 +3,7 @@
 // reads and validates it; the concurrency-checked write path and admin page are RT-2b. Missing or
 // invalid configuration means every research call stays off.
 import { z } from 'zod';
+import { rowFor, type ConfigurationRows } from '../../runtime/settingsRows';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { parallelRoute } from './parallel';
 import { FIRECRAWL_ROUTE } from './firecrawl';
@@ -217,13 +218,14 @@ export interface ResearchToolsState {
  * Reads the stored config; absent, unreadable or invalid → everything off (fail closed). An invalid
  * stored value still reports its revision so an admin can overwrite it with a valid one.
  */
-export async function readResearchToolsConfig(db: SupabaseClient): Promise<ResearchToolsState> {
+/** DB-PERF PR-3: `configuration` is a new admission's settings rows (runtime/settingsRows.ts); absent, it is read now. */
+export async function readResearchToolsConfig(db: SupabaseClient, configuration?: Promise<ConfigurationRows>): Promise<ResearchToolsState> {
   const off = (source: ResearchToolsState['source'], revision = 0): ResearchToolsState =>
     ({ config: DISABLED_RESEARCH_TOOLS, source, revision, updatedBy: null, updatedAt: null });
   try {
     // Value and PostgreSQL's revision text come from one request, so they describe one snapshot.
-    const { data, error } = await db.from('system_settings').select('value,revision:value->>revision')
-      .eq('key', RESEARCH_TOOLS_KEY).maybeSingle();
+    const { data, error } = configuration ? withRevision(rowFor(await configuration, RESEARCH_TOOLS_KEY))
+      : await db.from('system_settings').select('value,revision:value->>revision').eq('key', RESEARCH_TOOLS_KEY).maybeSingle();
     if (error) return off('invalid');
     if (!data) return off('default');
     const raw = typeof data.value === 'string' ? JSON.parse(data.value) : data.value;
@@ -234,6 +236,16 @@ export async function readResearchToolsConfig(db: SupabaseClient): Promise<Resea
   } catch {
     return off('invalid');
   }
+}
+
+/** The row as `select('value,revision:value->>revision')` returns it: PostgreSQL's `->>` gives a string member as is,
+ * any other member as its JSON text, and null for a missing member or a value that is not an object. */
+function withRevision(read: { data: { value: unknown } | null; error: unknown }) {
+  if (read.error || !read.data) return { data: null, error: read.error };
+  const value = read.data.value;
+  const member = value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>).revision : undefined;
+  const revision = member === undefined || member === null ? null : typeof member === 'string' ? member : JSON.stringify(member);
+  return { data: { value, revision }, error: null };
 }
 
 export type RouteSelection =
