@@ -76,6 +76,9 @@ export function researchRuntimeTools(ctx: ResearchToolContext, names: readonly R
   let remaining: number | undefined;
   let calls = 0;
   const freeChat = options.freeChat;
+  // A turn frozen before the limits were declared also runs with its earlier checks (characters counted, not UTF-16
+  // units), so a replay gets the tool results it got online and its later requests keep their hashes.
+  const runArgs = options.declaredLimits ?? true ? researchToolArgs : undeclaredResearchToolArgs as unknown as typeof researchToolArgs;
   const make = (name: ResearchToolName): RuntimeTool => ({
     name, description: researchToolDescription(name, Boolean(freeChat)), parameters: researchToolParameters(name, fastSearchOnly(ctx.config),
       options.declaredLimits ?? true),
@@ -85,7 +88,7 @@ export function researchRuntimeTools(ctx: ResearchToolContext, names: readonly R
       const raw = withoutNulls(offered) as Record<string, unknown>;
       // Replayed calls of a resumed answer run through here again, so this count is rebuilt in order.
       if (freeChat && ++calls > FREE_CHAT_RESEARCH_CALLS) return toolEnvelope({ status: 'budget_exhausted', reason: 'REPLY_CALL_LIMIT' });
-      const parsed = researchToolArgs[name].safeParse(raw);
+      const parsed = runArgs[name].safeParse(raw);
       if (!parsed.success) return toolEnvelope({ status: 'not_confirmed', reason: 'INVALID_ARGUMENTS' });
       if (!ctx.config.enabled) return toolEnvelope({ status: 'unavailable', reason: 'RESEARCH_DISABLED' });
       remaining ??= Math.max(0, ctx.config.limits.maxSubcallsPerRound - (await options.usedSubcalls?.() ?? 0));
@@ -99,30 +102,30 @@ export function researchRuntimeTools(ctx: ResearchToolContext, names: readonly R
       const budget = { left: name === 'social_search' || name === 'social_account' ? remaining : allowance.allowed, used: 0 };
       try {
         if (name === 'propose_keywords') {
-          const args = researchToolArgs.propose_keywords.parse(raw);
+          const args = runArgs.propose_keywords.parse(raw);
           const options = args.keywords.map((text, i) => ({ id: `k${i}`, text }));
           const card = await ctx.store.createCard(stableResearchId(ctx.executionId, callId), { kind: 'keywords', options });
           ctx.emit({ type: 'research_card', card: { ...card, kind: 'keywords', options } });
           return toolEnvelope({ status: 'ok', items: [{ fields: { cardId: card.cardId }, missing: [] }] });
         }
         if (name === 'propose_more_candidates') {
-          return moreCandidates(ctx, researchToolArgs.propose_more_candidates.parse(raw).discoveryId, callId);
+          return moreCandidates(ctx, runArgs.propose_more_candidates.parse(raw).discoveryId, callId);
         }
-        if (name === 'benchmark_discover') return await discover(ctx, researchToolArgs.benchmark_discover.parse(raw), budget);
-        if (name === 'benchmark_fetch') return await benchmarkFetch(ctx, researchToolArgs.benchmark_fetch.parse(raw), budget);
-        if (name === 'social_search') return await socialSearch(ctx, researchToolArgs.social_search.parse(raw), budget, callId, raw);
+        if (name === 'benchmark_discover') return await discover(ctx, runArgs.benchmark_discover.parse(raw), budget);
+        if (name === 'benchmark_fetch') return await benchmarkFetch(ctx, runArgs.benchmark_fetch.parse(raw), budget);
+        if (name === 'social_search') return await socialSearch(ctx, runArgs.social_search.parse(raw), budget, callId, raw);
         if (name === 'social_account') {
           if (!freeChat) return toolEnvelope({ status: 'not_confirmed', reason: 'ACCOUNT_NOT_CONFIRMED' });
-          return await socialAccount(ctx, researchToolArgs.social_account.parse(raw), budget, callId, raw, freeChat.accounts);
+          return await socialAccount(ctx, runArgs.social_account.parse(raw), budget, callId, raw, freeChat.accounts);
         }
         let request: SupplierRequest;
         if (name === 'web_search') {
-          const args = researchToolArgs.web_search.parse(raw);
+          const args = runArgs.web_search.parse(raw);
           const route = selectRoute(ctx.config, 'web', args.mode === 'pro' ? 'web_search_pro' : 'web_search');
           if (!route.ok) return toolEnvelope({ status: 'unavailable', reason: route.reason });
           request = { vendor: 'parallel', route: route.route, query: args.query, mode: parallelModeFor(args.mode) };
         } else {
-          const args = researchToolArgs.web_fetch.parse(raw);
+          const args = runArgs.web_fetch.parse(raw);
           const route = selectRoute(ctx.config, 'web', 'web_fetch');
           if (!route.ok) return toolEnvelope({ status: 'unavailable', reason: route.reason });
           request = { vendor: 'firecrawl', route: route.route, url: args.url };

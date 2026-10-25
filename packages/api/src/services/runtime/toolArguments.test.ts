@@ -89,6 +89,20 @@ describe('research tool parameters declare their limits', () => {
     expect(frozenResearchTurn.parse(base).toolLimits).toBeUndefined();
     expect(frozenResearchTurn.parse({ ...base, toolLimits: RESEARCH_TOOL_LIMITS }).toolLimits).toBe(RESEARCH_TOOL_LIMITS);
   });
+  // Codex review on #1357: a replayed turn must get the tool results it got online, so it runs with its earlier checks;
+  // zod 4 counts characters (code points) in `.max()` too, so both forms agree on every keyword.
+  it('both forms count characters, not UTF-16 units: 40 emoji run, 41 are answered as invalid', async () => {
+    for (const declaredLimits of [false, true]) for (const [count, runs] of [[40, true], [41, false]] as const) {
+      const createCard = vi.fn(async () => ({ cardId: 'card-1' }));
+      const ctx = { config: { enabled: true, routes: [], limits: { maxSubcallsPerRound: 1, discoverSubcalls: 1 } },
+        executionId: '44444444-4444-4444-8444-444444444444', store: { createCard }, emit: vi.fn() } as unknown as ResearchToolContext;
+      const [tool] = researchRuntimeTools(ctx, ['propose_keywords'], { declaredLimits });
+      const keywords = { keywords: ['hardanger', 'drawn thread', '🧵'.repeat(count)] };
+      const { requests } = await run([tool!], [call('propose_keywords', keywords), reply({ content: 'done' })]);
+      expect(createCard).toHaveBeenCalledTimes(runs ? 1 : 0);
+      expect(lastToolResult(requests[1]!)).toContain(runs ? 'card-1' : 'INVALID_ARGUMENTS');
+    }
+  });
   it('an optional argument the model sends as null runs as not given', async () => {
     const createCard = vi.fn();
     const ctx = { config: { enabled: false, routes: [], limits: { maxSubcallsPerRound: 1, discoverSubcalls: 1 } },
