@@ -11,7 +11,6 @@ import {freezePromptCache,freezeHostPromptCache,PROMPT_CACHE_OVERHEAD_BYTES} fro
 import {STEP_SUMMARY_INPUT} from '../../shared/opcStepSummary';
 import {hostTurnContextSchema,freezeHistorySelection,type HostTurnContext} from './hostTurn';
 import {currentInputBytes} from './historySelection';
-import {requestsHistoricalComparison} from './context';
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {admissionActor,capReviewAdmission,type WeeklyReview} from '../publishMonitor/reviewAdmission';
@@ -25,7 +24,7 @@ import { throwIfContentBindingRefused } from '../opc/contentBindingError';
 import {StagingAccessError,stagingRpcFailure} from './stagingErrors';
 import {readOpenRouterKey} from '../models/openRouterKey';
 import {type FrozenPaygRun, type FrozenRun} from '../bill2/service';
-import { selectRuntimeHistory, fixtureInputCapacity, runtimeScopeInput } from './context';
+import { selectRuntimeHistory, fixtureInputCapacity, runtimeScopeInput, requestsHistoricalComparison } from './context';
 import { activateCandidateWithSource, discoverRuntimeCandidates, fittingCandidates, matchingInput, MATCH_INSTRUCTIONS } from './matching';
 import { FREE_CHAT_BASE_INSTRUCTIONS, readReplySetting, workspaceStrategyReserve, withPrimaryAddenda, workspaceFrozen } from './primaryInstructions';
 import { admitVoice } from './voiceAdmission';
@@ -48,12 +47,13 @@ import {FREE_CHAT_REQUEST_FORMAT,PLAIN_TEXT_STREAM,plainTextStreamAllowed} from 
 import {admissionDeadline,admittedOutputLimit,timedAdmission} from './admissionLimits';
 import {freezeAdmissionPayg} from './admissionPayg';
 import {readPaygPolicies,realContract,runtimeGateEnvironment} from './realHost';
-import {runAutomaticFinancialRecovery} from './automaticRecovery';import {admitWithRepair,keepsCause} from './admissionRepair';
+import {runAutomaticFinancialRecovery} from './automaticRecovery';
+import {admitWithRepair,keptCause} from './admissionRepair';
 import {readPositioningGate,judgePositioning,windowBoundKey,refusePositioning,POSITIONING_REFUSAL_CAP,
  type PositioningGatePolicy} from './positioningGate';
 import {POSITIONING_FALLBACK,POSITIONING_FALLBACK_INSTRUCTIONS} from './positioningFallback';
-import {LIBRARY_RETRIEVAL_CALLS,admitLibraryReferences,admitLibraryRetrieval,candidateToolBytes,libraryReferenceInput} from './libraryAdmission';
-import {libraryReserveBytes,readSourceSlots,sourceReadFlags,throwLibraryRefusal} from './libraryAdmission';
+import {LIBRARY_RETRIEVAL_CALLS,admitLibraryReferences,admitLibraryRetrieval,candidateToolBytes,libraryReferenceInput,
+ libraryReserveBytes,readSourceSlots,sourceReadFlags,throwLibraryRefusal} from './libraryAdmission';
 import {admitContentSource,isSqlStagingRefusal,type ContentSourceKind} from './contentSource';
 import {fitsCapacity} from './researchAdmission';
 import {admitSkillCatalog,freeChatCatalogTurn,skillCatalogSlots} from './skillCatalogAdmission';
@@ -135,7 +135,7 @@ export function runtimeAdmissionService(user:SupabaseClient,admin:SupabaseClient
     ['OPC_CAPTURE_PENDING','RUNTIME_SKILL_MODEL_DENIED'].includes(r.error.message)))throw new Error(r.error.message);
    if(name==='runtime_admit'&&r.error.message==='OPC_ANSWER_SOURCE_DENIED')throw new Error('OPC_ANSWER_SOURCE_DENIED');
    // Preserve SQL business/permission refusals; classify only operational failures.
-   if(['P0001','PT400','42501'].includes(r.error.code))throw new Error('RUNTIME_ADMISSION_DENIED',{cause:policy.reportGeneration||keepsCause(name,r.error.message)?r.error:undefined});
+   if(['P0001','PT400','42501'].includes(r.error.code))throw new Error('RUNTIME_ADMISSION_DENIED',{cause:keptCause(name,r.error,policy.reportGeneration)});
    stagingRpcFailure(r.error);
   }
   return r.data;

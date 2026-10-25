@@ -13,6 +13,9 @@ export function sessionBusy(error: unknown): boolean {
 }
 /** runtime_admit's refusals whose SQL error admission keeps as the cause. */
 export const keepsCause = (name: string, message: unknown) => name === 'runtime_admit' && message === SESSION_BUSY;
+/** The cause admission attaches to RUNTIME_ADMISSION_DENIED: the SQL error for a report (as before) or a session-busy refusal. */
+export const keptCause = (name: string, error: { message?: unknown }, report: unknown) =>
+  report || keepsCause(name, error.message) ? error : undefined;
 
 /**
  * Line D2 (architecture audit 2026-10-25): when the session is still held by an earlier round, run the actor-scoped,
