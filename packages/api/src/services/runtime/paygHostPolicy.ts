@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { z } from 'zod';
+import { rowFor, type ConfigurationRows } from './settingsRows';
 import { isDeepStrictEqual } from 'node:util';
 import { reasoningPolicy, frozenReasoningFields, type ReasoningPolicy } from './reasoningPolicy';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -150,9 +151,12 @@ export type Requirement = { modelId: string; phase: z.infer<typeof phase>; outpu
 export async function readPaygHostPolicies(admin: SupabaseClient, window: StagingPolicy,
   policies: FrozenRun['callPolicy'], requirements: Requirement[], env: Record<string, string | undefined> = process.env,
   deadline: string = window.expiresAt,
+  /** DB-PERF PR-3: this admission's settings rows (settingsRows.ts); absent, the setting is read now. */
+  configuration?: Promise<ConfigurationRows>,
 ) {
   if (stagingRuntimeWindow(env) !== window.id) throw new StagingAccessError('RUNTIME_STAGING_TARGET_DENIED');
-  const { data, error } = await admin.from('system_settings').select('value').eq('key', PAYG_HOST_SETTING).maybeSingle();
+  const { data, error } = configuration ? rowFor(await configuration, PAYG_HOST_SETTING)
+    : await admin.from('system_settings').select('value').eq('key', PAYG_HOST_SETTING).maybeSingle();
   if (error) throw new StagingAccessError('RUNTIME_PAYG_CONFIG_UNAVAILABLE');
   if (!data || data.value === null) return undefined;
   let value:unknown=data.value;

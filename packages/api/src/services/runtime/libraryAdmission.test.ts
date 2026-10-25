@@ -34,12 +34,14 @@ function harness(options:{enabled?:unknown;settingError?:boolean;admitError?:str
  });
  const from=(table:string)=>{
   const query={select:()=>query,eq:()=>query,
-   in:async()=>({data:[],error:null}),
-   maybeSingle:async()=>{
-    expect(table).toBe('system_settings');settingReads++;
+   // DB-PERF PR-3: admission reads all its settings, the library switch included, in one query.
+   in:async(_column:string,keys:string[])=>{
+    if(table!=='system_settings'||!keys.includes(LIBRARY_AGENT_READ_KEY))return {data:[],error:null};
+    settingReads++;
     if(options.settingError)return {data:null,error:{code:'57014',message:'timeout'}};
-    return {data:'enabled' in options?{key:LIBRARY_AGENT_READ_KEY,value:options.enabled}:null,error:null};
+    return {data:'enabled' in options?[{key:LIBRARY_AGENT_READ_KEY,value:options.enabled}]:[],error:null};
    },
+   maybeSingle:async()=>{throw new Error('the library switch is read with the admission settings');},
    single:async()=>({data:{id:modelId,model_id:'fixture',provider:'fixture',is_active:'true',max_tokens:1000,
     input_limit:options.inputLimit??32000},error:null})};
   return query;
@@ -61,7 +63,8 @@ it('an old client without references and one sending [] freeze the same payload,
  expect(old.frozen()).not.toHaveProperty('libraryReferences');
  expect(old.frozen()?.instructions).not.toContain('doc-1');
  expect(old.frozen()?.tools).toEqual(['read_source']);expect(old.frozen()?.maxToolCalls).toBe(2);
- expect(old.settingReads()+empty.settingReads()).toBe(0);
+ // No read of its own: the switch is part of the one admission settings query each request makes anyway.
+ expect(old.settingReads()+empty.settingReads()).toBe(2);
 });
 
 it('references freeze deduplicated in order with read_source and every remaining turn as read slots',async()=>{

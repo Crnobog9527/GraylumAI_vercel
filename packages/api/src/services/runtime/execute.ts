@@ -11,7 +11,7 @@ import {visibleText,nativeMetadata,prepareNativePrimary,nativeFrameProjection,
 import {paygOwnerDatabase} from './paygOwner';
 import {executorRpc,historyGuard,terminalReplyGuard,recoverExecutorFinancial,observeContext,interruptForCapacity,
  preflightCodes,platformFailureReason,hash,progressEmitter,diagnosticCode,failBeforeDispatch,cancelWithCode,type RuntimeExecutorOptions} from './executorRpc';
-import {fitNativeRequestOutput,runtimePaygCall, type ResumeInput, type PaygWait} from './paygRuntime';
+import {fitNativeRequestOutput,runtimePaygCall,unsavedResponseSequence as unsaved,type ResumeInput,type PaygWait,type SavedResponse} from './paygRuntime';
 import {recordPaygWait,stopCheckOrNull,waitsOnClaimFailure} from './paygWaitRecord';
 import {beginPaygExecution, type RuntimeExecution} from './paygResume';
 import {runtimeContext} from './runtimeContext';
@@ -145,7 +145,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
       waitPoint={epoch:execution.epoch!,sequence,requestHash,phase,state,gatePassed};
       throw new Error(state==='waiting_credits'?'RUNTIME_WAITING_CREDITS':'RUNTIME_WAITING_RESUME');
      };
-     let {sequence,existing}=await responseAfterResearch(seq=>ownerRpc<{callId:string;state:string;rawBody:string|null;retryable?:boolean}|null>(
+     let {sequence,existing}=await responseAfterResearch(seq=>unsaved(isPayg,execution,research)(seq)?Promise.resolve(null):ownerRpc<SavedResponse>(
       'runtime_response',{...args,p_sequence:seq,p_request_hash:requestHash}),++callSequence,research,execution.billing.limits.maxCalls).catch(error=>{
       responseConflict=error instanceof Error&&error.message==='RUNTIME_RESPONSE_CONFLICT';throw error;
      });
@@ -154,7 +154,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
       sequence=++callSequence;
       existing=await ownerRpc('runtime_response',{...args,p_sequence:sequence,p_request_hash:requestHash});
      }
-     let raw=existing?.rawBody;
+     let raw=existing?.rawBody,settledHere=false; // DB-PERF: a v2 receipt recorded here settled inside bill2_record
      if(!raw){
       // Recovery is replay-only, even when a later step had not yet been sent.
       if(!execution.live||existing?.state==='dispatched'||existing?.state==='unknown'||existing?.state==='responded')throw responsePending(existing,sequence,requestHash);
@@ -208,13 +208,13 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
         break;
        }
       }
-      if(dispatch.providerRejected){providerRejected=true;throw new Error('RUNTIME_PROVIDER_REJECTED');}
+      if(dispatch.providerRejected){providerRejected=true;throw new Error('RUNTIME_PROVIDER_REJECTED');}settledHere=!dispatch.pendingReceipt;
       existing=await ownerRpc<typeof existing>('runtime_response',{...args,p_sequence:sequence,p_request_hash:requestHash});
       raw=existing?.rawBody;
      gatePassed=false;
      }
      if(!raw)throw responsePending(existing,sequence,requestHash);
-     if(isPayg)await billing.finalizeRun(execution.runId);
+     if(isPayg&&!settledHere)await billing.finalizeRun(execution.runId); // replays and the pending-receipt path
      const decoded=JSON.parse(raw);
      return selectedPolicy.protocol==='openrouter-chat-v1' ? {usage:{sdkResponse:decoded}} : decoded;
     }catch(error){

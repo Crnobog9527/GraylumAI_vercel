@@ -1,5 +1,6 @@
 /* Copyright (c) 2026 Grayscale Luminary LLC. All rights reserved. */
 import { createHash } from 'node:crypto';
+import { rowsFor, type ConfigurationRows } from './runtime/settingsRows';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { TRPCError } from '@trpc/server';
 import { BILLING_CONSTANTS } from '../types/billing';
@@ -129,11 +130,11 @@ export function describeBillingUnitSettings(settings: Readonly<Record<string, un
   };
 }
 
-export async function readBillingUnitSettings(db: SupabaseClient): Promise<BillingUnitSettings> {
-  const { data, error } = await db
-    .from('system_settings')
-    .select('key, value')
-    .in('key', [BILLING_UNIT_SETTING_KEYS.creditsPerUsd, BILLING_UNIT_SETTING_KEYS.multiplier]);
+/** DB-PERF PR-3: `configuration` is a new admission's settings rows (runtime/settingsRows.ts); absent, they are read now. */
+export async function readBillingUnitSettings(db: SupabaseClient, configuration?: Promise<ConfigurationRows>): Promise<BillingUnitSettings> {
+  const keys = [BILLING_UNIT_SETTING_KEYS.creditsPerUsd, BILLING_UNIT_SETTING_KEYS.multiplier];
+  const { data, error } = configuration ? rowsFor(await configuration, keys)
+    : await db.from('system_settings').select('key, value').in('key', keys);
   if (error || !Array.isArray(data)) throw new BillingUnitConfigError('BILLING_UNIT_SETTINGS_UNAVAILABLE');
   return billingUnitSettingsFromRows(data as SettingRow[]);
 }
@@ -208,15 +209,19 @@ export async function readMultiplierSnapshot(
   db: SupabaseClient,
   modelIds: readonly string[],
   resolveProviders?: (defaultMultiplier: string) => Readonly<Record<string, ResolvedMultiplier>>,
+  /** DB-PERF PR-3: a new admission's settings rows, and model rows it already read with `price_multiplier`. */
+  prefetched: { configuration?: Promise<ConfigurationRows>; models?: ReadonlyArray<Record<string, unknown>> } = {},
 ): Promise<MultiplierSnapshot> {
   const ids = [...new Set(modelIds)];
   if (ids.length > MAX_SNAPSHOT_MODELS || (ids.length === 0 && !resolveProviders)) {
     throw new BillingUnitConfigError('BILLING_UNIT_SNAPSHOT_INVALID');
   }
-  const settings = await readBillingUnitSettings(db);
+  const settings = await readBillingUnitSettings(db, prefetched.configuration);
   const models: Record<string, ResolvedMultiplier> = {};
   if (ids.length > 0) {
-    const { data, error } = await db.from('ai_models').select('id, price_multiplier').in('id', ids);
+    const known = prefetched.models?.filter(row => ids.includes(row.id as string) && Object.hasOwn(row, 'price_multiplier'));
+    const { data, error } = known && ids.every(id => known.some(row => row.id === id)) ? { data: known, error: null }
+      : await db.from('ai_models').select('id, price_multiplier').in('id', ids);
     if (error || !Array.isArray(data)) throw new BillingUnitConfigError('BILLING_UNIT_MODEL_UNAVAILABLE');
     const rows = data as Array<Record<string, unknown>>;
     for (const id of ids) {

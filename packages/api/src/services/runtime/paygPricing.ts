@@ -13,8 +13,10 @@ type PaygPolicy = PricingQuote & { payg?: PaygTemplate };
 /** The old window supplies ceilings, not nominal prices. Freeze from the same checked snapshot. */
 export async function freezeStagingPaygPricing<T extends PaygPolicy>(
   admin: SupabaseClient, policies: readonly T[], deps: PricingDeps = {},
+  /** DB-PERF PR-3: model rows the admission already read (pricingAdmission.readPricingStates). */
+  prefetched: readonly Record<string, unknown>[] = [],
 ): Promise<Array<T & { payg: PaygStablePolicy }>> {
-  const states = await admitPricingSnapshots(admin, policies, deps);
+  const states = await admitPricingSnapshots(admin, policies, deps, prefetched);
   return policies.map(policy => {
     if (!policy.payg) throw new Error('BILL2_PAYG_QUOTE_INVALID');
     const { row, snapshot } = states.get(policy.modelId)!;

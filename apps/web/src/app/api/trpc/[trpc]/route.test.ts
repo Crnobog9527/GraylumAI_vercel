@@ -60,3 +60,29 @@ it('starts a fresh secret scope for each HTTP request and retains it for respons
  await expect(POST(req())).rejects.toMatchObject({code:'PLATFORM_SECRET_NOT_CONFIGURED'});
  expect(rpc).toHaveBeenCalledTimes(3);
 });
+
+it('DB-PERF PR-5a: reads the maintenance switch at most once per two seconds; a change is honoured after that', async () => {
+ let now=10_000_000_000_000;vi.spyOn(Date,'now').mockImplementation(()=>now);
+ vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY','SYNTHETIC');
+ const role={from:()=>({select:()=>({eq:()=>({maybeSingle:async()=>({data:{role:'user'},error:null})})})})};
+ mocks.auth.mockReturnValue({auth:{getUser:async()=>({data:{user:{id:'synthetic'}}})},...role});
+ let maintenance=false;const reads=vi.fn(async()=>({data:{value:maintenance},error:null}));
+ mocks.admin.mockReturnValue({from:()=>({select:()=>({eq:()=>({maybeSingle:reads})})})});
+ mocks.handle.mockImplementation(async()=>new Response('handled'));
+ const req=()=>({url:'http://localhost/api/trpc/runtime.executeStream',nextUrl:{pathname:'/api/trpc/runtime.executeStream'},
+  headers:new Headers(),cookies:{getAll:()=>[]}} as unknown as NextRequest);
+ expect(await(await POST(req())).text()).toBe('handled');
+ maintenance=true;now+=1_500;
+ expect(await(await POST(req())).text()).toBe('handled'); // within two seconds: the switch is not read again
+ expect(reads).toHaveBeenCalledTimes(1);
+ now+=600;
+ expect((await POST(req())).status).toBe(503); // after two seconds: maintenance refuses the call
+ expect(reads).toHaveBeenCalledTimes(2);
+ // A failed read fails as before (open outside production) and is retried after one second, not two.
+ reads.mockImplementationOnce(async()=>({data:null,error:{code:'57014'}} as never));
+ now+=2_100;
+ expect(await(await POST(req())).text()).toBe('handled');
+ now+=1_100;
+ expect((await POST(req())).status).toBe(503);
+ expect(reads).toHaveBeenCalledTimes(4);
+});

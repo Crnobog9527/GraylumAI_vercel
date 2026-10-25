@@ -3,7 +3,7 @@ import { PURPOSE_OUTPUT_CAP } from '../bill2/responseCapacity';
 import { StagingAccessError } from './stagingErrors';
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type {ConfigurationRows} from './admissionConfiguration';
+import type {ConfigurationRows} from './settingsRows';
 export const PURPOSE_BUDGET_KEY = 'runtime_purpose_budgets';
 // Derived from full frozen payload measurements, including duplicated input,
 // attached organization and JSON escaping. See MENTOR-BUDGET.md.

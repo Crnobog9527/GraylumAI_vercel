@@ -45,7 +45,8 @@ it.each(['answer','summary','repeat','oversized','denied','large','revoked','mal
     failures[outcome]}};
    if(args.p_action==='complete')saved=Object.fromEntries(Object.entries(args.p_result as object).reverse());
    data={result:saved};
-  }else if(name==='read_skill_package')data=args.p_path===null?descriptor:args.p_path===''?true:Buffer.from(content).toString('base64');
+  }else if(name==='read_skill_package')data=Array.isArray(args.p_paths)?{files:Object.fromEntries(args.p_paths.map((path:string)=>[path,Buffer.from(content).toString('base64')]))}
+   :args.p_path===null?descriptor:args.p_path===''?true:Buffer.from(content).toString('base64');
   else if(name==='runtime_cancel')data={state:'cancelled'};
   else if(name==='runtime_execution'&&args.p_action==='complete'){result=args.p_result;data={state:'completed'};}
   return {data,error:null};
