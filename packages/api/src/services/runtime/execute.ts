@@ -11,7 +11,7 @@ import {visibleText,nativeMetadata,prepareNativePrimary,nativeFrameProjection,
 import {paygOwnerDatabase} from './paygOwner';
 import {executorRpc,historyGuard,terminalReplyGuard,recoverExecutorFinancial,observeContext,interruptForCapacity,
  preflightCodes,platformFailureReason,hash,progressEmitter,diagnosticCode,failBeforeDispatch,cancelWithCode,type RuntimeExecutorOptions} from './executorRpc';
-import {fitNativeRequestOutput,runtimePaygCall, type ResumeInput, type PaygWait} from './paygRuntime';
+import {fitNativeRequestOutput,runtimePaygCall,unsavedResponseSequence as unsaved,type ResumeInput,type PaygWait,type SavedResponse} from './paygRuntime';
 import {recordPaygWait,stopCheckOrNull,waitsOnClaimFailure} from './paygWaitRecord';
 import {beginPaygExecution, type RuntimeExecution} from './paygResume';
 import {runtimeContext} from './runtimeContext';
@@ -145,7 +145,7 @@ export function runtimeExecutor(options:RuntimeExecutorOptions){
       waitPoint={epoch:execution.epoch!,sequence,requestHash,phase,state,gatePassed};
       throw new Error(state==='waiting_credits'?'RUNTIME_WAITING_CREDITS':'RUNTIME_WAITING_RESUME');
      };
-     let {sequence,existing}=await responseAfterResearch(seq=>ownerRpc<{callId:string;state:string;rawBody:string|null;retryable?:boolean}|null>(
+     let {sequence,existing}=await responseAfterResearch(seq=>unsaved(isPayg,execution,research)(seq)?Promise.resolve(null):ownerRpc<SavedResponse>(
       'runtime_response',{...args,p_sequence:seq,p_request_hash:requestHash}),++callSequence,research,execution.billing.limits.maxCalls).catch(error=>{
       responseConflict=error instanceof Error&&error.message==='RUNTIME_RESPONSE_CONFLICT';throw error;
      });
