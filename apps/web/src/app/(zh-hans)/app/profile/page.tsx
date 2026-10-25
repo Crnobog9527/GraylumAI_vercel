@@ -31,7 +31,6 @@ import { AccountErasureCard } from '@/components/profile/AccountErasureCard';
 import { DataUseConsentCard } from '@/components/profile/DataUseConsentCard';
 import { FounderProfileCard } from '@/components/founder/FounderProfileCard';
 import { CookieSettingsCard } from '@/components/analytics/CookieSettingsCard';
-import { ReplyLanguageCard } from '@/components/profile/ReplyLanguageCard';
 import { DATA_USE_CONSENT_VISIBLE } from '@/components/profile/dataUseConsentVisibility';
 import TicketsPanel from '@/components/profile/TicketsPanel';
 import { trpc } from '@/trpc/client';
@@ -239,7 +238,6 @@ function ProfilePageContent() {
             {userProfile && activeTab === 'profile' && (
               <>
                 <UserProfileHeader user={effectiveUser} onUserUpdate={handleUserUpdate} />
-                <ReplyLanguageCard language={userProfile.reply_language} />
                 <FounderProfileCard />
                 <CreditsAndSubscriptionCards
                   user={effectiveUser}
