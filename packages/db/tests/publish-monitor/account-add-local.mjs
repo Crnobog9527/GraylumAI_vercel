@@ -69,6 +69,19 @@ try {
   assert.equal(otherPlatform.created, true, 'the same name on another platform is a different account');
   report.checks.push('a name held by another of the caller\'s businesses is refused on that platform only');
 
+  // The Codex acceptance step 5: the same add repeated (after a reload, in the same profile, with another account in between)
+  // returns the existing account and never an error; only the other, same-named profile of the user is refused.
+  await add(u.a, u.business, 'youtube', 'qa-youtube-test');
+  for (let i = 0; i < 3; i++) {
+    const again = await add(u.a, u.business, 'x', 'My_Handle');
+    assert.deepEqual([again.created, again.accountProjectId, again.businessId], [false, x.accountProjectId, u.business]);
+  }
+  await c.query('UPDATE opc_businesses SET name=(SELECT name FROM opc_businesses WHERE id=$1) WHERE id=$2', [u.business, second.business]);
+  await code(add(u.a, second.business, 'x', 'my_handle'), '23505');
+  assert.equal((await accounts(u.a)).filter(r => r.platform === 'x' && r.account_key === 'my_handle').length, 1);
+  report.checks.push('a repeated add in the same profile (any number of times, in between other adds) returns the existing account, '
+    + 'and the same-named other profile is the only refusal');
+
   const stranger = await member();
   await code(add(stranger.a, u.business, 'threads', 'abc'), '42501');
   await code(add(u.a, randomUUID(), 'threads', 'abc'), '42501');

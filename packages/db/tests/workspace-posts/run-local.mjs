@@ -7,6 +7,7 @@ import {deletionCases} from './deletion.mjs';
 import {descendantCases} from './descendants.mjs';
 import {pendingReceiptCases} from './pending-receipts.mjs';
 import {propagateScopeCases} from './propagate-scope.mjs';
+import {checkMemoCases} from './check-memo.mjs';
 import {runCases} from '../workspace-benchmarks/cases.mjs';
 const db=await localDb(),c=db.client,report={build:db.build,checks:[]};
 const one=async(sql,args=[])=>(await c.query(sql,args)).rows[0]?.v;
@@ -66,6 +67,7 @@ try{
  await pendingReceiptCases({c,report});
  await descendantCases({c,report});
  await propagateScopeCases({c,report});
+ await checkMemoCases({c,report});
  await c.query(migration);await c.query(migration);
  assert.equal((await index(a,s,'my_posts:90')).windowDays,90);
  report.checks.push('idempotent apply; no tables or data are dropped; rollback is flag off and code revert');
