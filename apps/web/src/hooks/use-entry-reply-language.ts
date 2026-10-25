@@ -18,8 +18,16 @@ export function useEntryReplyLanguage() {
   const utils = trpc.useUtils();
   const pathname = usePathname();
   useEffect(() => {
-    // Public pages open the login page with lang=<their language>; without it the visitor did not come from one.
-    if (pathname === '/login') rememberEntryLanguage(new URLSearchParams(window.location.search).get('lang'));
+    // Public pages open the login page with lang=<their language>; a signed-in visitor is sent straight on with entry_lang.
+    const params = new URLSearchParams(window.location.search);
+    if (pathname === '/login') rememberEntryLanguage(params.get('lang'));
+    if (params.has('entry_lang')) {
+      rememberEntryLanguage(params.get('entry_lang'));
+      params.delete('entry_lang');
+      const rest = params.toString();
+      // State null, like the profile tabs: Next syncs its search params only for a replace it did not make itself.
+      window.history.replaceState(null, '', window.location.pathname + (rest ? `?${rest}` : '') + window.location.hash);
+    }
     const language = pendingEntryLanguage();
     if (!language || applying) return;
     let live = true, mine = false;

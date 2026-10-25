@@ -26,15 +26,12 @@ describe('public page entry language (CHAT-LANGUAGE, Owner 2026-10-25)', () => {
     expect(pendingEntryLanguage(7000)).toBeNull();
   });
 
-  it('opening the login page without a language (not from a public page) forgets an earlier one', () => {
+  it('an address without a language changes nothing: verification returns to the plain login page mid-way', () => {
     const items = stubStorage();
     rememberEntryLanguage('zh-Hant', 1000);
-    for (const value of [null, '', 'fr']) {
-      rememberEntryLanguage('zh-Hant', 1000);
-      rememberEntryLanguage(value, 2000);
-      expect(items.size).toBe(0);
-      expect(pendingEntryLanguage(3000)).toBeNull();
-    }
+    for (const value of [null, '', 'fr']) rememberEntryLanguage(value, 2000);
+    expect(items.size).toBe(1);
+    expect(pendingEntryLanguage(3000)).toBe('zh-Hant');
   });
 
   it('lapses after two hours, so an abandoned visit never changes a later sign-in', () => {

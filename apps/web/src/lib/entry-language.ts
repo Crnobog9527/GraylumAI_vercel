@@ -3,10 +3,11 @@
 import { entryLocaleHint, REPLY_LOCALE_LABELS, type ReplyLocale } from '@repo/api/src/shared/replyLanguage';
 
 /**
- * CHAT-LANGUAGE (Owner 2026-10-25): a public page's login and sign-up links carry the page's language (`lang`). The login
- * page keeps it here; once the user is signed in the app applies it (over any earlier choice) and clears it. Opening the
- * login page without `lang` (not from a public page) clears it, and it lapses after two hours, so an abandoned visit never
- * changes a later sign-in. Only the language code and a time are stored; storage may be unavailable, which drops the hint.
+ * CHAT-LANGUAGE (Owner 2026-10-25): a public page's login and sign-up links carry the page's language (`lang` on the login
+ * page, `entry_lang` after the server sends a signed-in visitor straight on). It is kept here; once the user is signed in the
+ * app applies it (over any earlier choice) and clears it. It lapses after two hours, so an abandoned visit never changes a
+ * later sign-in; an address without it changes nothing (e-mail verification returns to the plain login page mid-way).
+ * Only the language code and a time are stored; storage may be unavailable, which drops the hint.
  */
 const KEY = 'graylum.entry-language';
 export const ENTRY_LANGUAGE_TTL_MS = 2 * 60 * 60 * 1000;
@@ -15,13 +16,11 @@ function storage(): Storage | null {
   try { return window.localStorage; } catch { return null; }
 }
 
-/** On the login page: keep the link's language, or forget any earlier one when the link carried none. */
+/** Keep the language a public page passed on; anything else (none, unknown) leaves an earlier one as it was. */
 export function rememberEntryLanguage(value: string | null, now = Date.now()): void {
   const hint = entryLocaleHint(value);
-  try {
-    if (hint) storage()?.setItem(KEY, JSON.stringify({ language: hint, at: now }));
-    else storage()?.removeItem(KEY);
-  } catch { /* storage full or blocked */ }
+  if (!hint) return;
+  try { storage()?.setItem(KEY, JSON.stringify({ language: hint, at: now })); } catch { /* storage full or blocked */ }
 }
 
 export function pendingEntryLanguage(now = Date.now()): ReplyLocale | null {
