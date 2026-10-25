@@ -387,14 +387,10 @@ jobs:
       - name: Integration — PAYG runtime waiting, resume and metering review
         run: node packages/db/tests/payg/run-runtime.mjs --ci
 
-      - name: Integration — Report and Fusion fixed-price billing
-        run: node packages/db/tests/report-revision/run-local.mjs --ci
-
-      - name: Integration — PAY-STRIPE-MP upgrade overlap and retained credits
-        run: node packages/db/tests/stripe-upgrade-overlap/run-local.mjs --ci
-
-      - name: Integration — PAYWALL profile archive and slot release
-        run: node packages/db/tests/paywall-profile-archive/run-local.mjs --ci
+      # MAINT-P1: every database suite that starts its own container (packages/db/tests/<dir>/*-local.mjs)
+      # runs here unless packages/db/tests/local-suites-excluded.json lists it (that list only shrinks).
+      - name: Integration — Database behaviour suites (run-local)
+        run: node packages/db/tests/run-local-suites.mjs --ci
 
       - name: Integration — Runtime recovery and streaming
         run: node packages/db/tests/v3/run-workbench.mjs --runtime-only --with-staging-schema --without-app --schema-from-files
